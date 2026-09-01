@@ -1,0 +1,8 @@
+*.mat
+*.csv
+*.xlsx
+results/*
+*.log
+.DS_Store
+__pycache__/
+*.pyc
