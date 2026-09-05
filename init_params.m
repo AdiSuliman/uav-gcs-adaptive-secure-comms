@@ -38,6 +38,7 @@ params.active_threat = 'jamming';   % 'none' | 'jamming' (more threats added inc
 params.jsr_db        = 10;          % [dB] Jamming-to-Signal Ratio (barrage jammer power)
 params.burst_duty    = 0.3;         % [A4] Noise Burst: fraction of time jammer is ON (0-1)
 params.burst_period  = 100;         % [A4] Noise Burst: on/off cycle length (symbols)
+params.path_loss_db  = 10;          % [A4] Path Loss: attenuation (dB) applied to Tx signal
 %% ========== NOISE & SWEEP ==========
 params.EbNo_dB    = 0:2:10;            % [ACTIVE] Eb/N0 sweep range (dB)
 params.num_frames = 1000;             % [ACTIVE] frames accumulated per Eb/N0 point

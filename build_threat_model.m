@@ -2,8 +2,8 @@ function build_threat_model()
 %% BUILD_THREAT_MODEL - Phase A4: Rician + AWGN + Threat Injection (signal-level, Approach A)
 % Tx -> QPSK_Mod -> Rician -> [THREAT] -> AWGN -> QPSK_Demod -> BER
 % Threats injected as real interference waveforms added to the IQ signal (Approach A).
-% First threat: Barrage Jamming (additive wideband noise) after channel, before receiver noise.
 % params.active_threat selects the threat; 'none' reproduces the A3 baseline.
+%   Threats implemented so far: jamming (barrage), noise_burst, path_loss.
 
 modelName = 'UAV_GCS_Threat_Link';
 
@@ -59,10 +59,12 @@ chart.Script = sprintf([ ...
     'end\n'], k_linear, p.fd_max, p.symbol_rate);
 
 %% ---- Inject Threat code (Stateflow API) ----
-% Approach A: additive interference waveform. Barrage jamming = wideband complex Gaussian noise.
+% Approach A: signal-level injection. Each threat is a separate case.
 chart_th = sf_root.find('-isa','Stateflow.EMChart','Path',[modelName '/Threat']);
 switch lower(p.active_threat)
+
     case 'jamming'
+        % Barrage jamming: continuous additive wideband complex Gaussian noise.
         jammerPower = 10^(p.jsr_db / 10);   % relative to unit-power QPSK signal
         chart_th.Script = sprintf([ ...
             'function y = fcn(u)\n' ...
@@ -71,10 +73,10 @@ switch lower(p.active_threat)
             'n = sqrt(jammerPower/2) * (randn(size(u)) + 1i*randn(size(u)));\n' ...
             'y = u + n;\n' ...
             'end\n'], jammerPower);
+
     case 'noise_burst'
-        % Bursty jamming: same additive noise as barrage, but gated ON/OFF in time.
-        % Counter tracks symbol index; jammer active only in the first burst_duty
-        % fraction of each burst_period cycle. Produces clustered (bursty) errors.
+        % Bursty jamming: same additive noise as barrage, gated ON/OFF in time.
+        % Active only in first burst_duty fraction of each burst_period cycle.
         jammerPower = 10^(p.jsr_db / 10);
         onSymbols   = round(p.burst_duty * p.burst_period);
         chart_th.Script = sprintf([ ...
@@ -94,6 +96,19 @@ switch lower(p.active_threat)
             '    k = k + 1;\n' ...
             'end\n' ...
             'end\n'], jammerPower, p.burst_period, onSymbols);
+
+    case 'path_loss'
+        % Path Loss: constant attenuation of the signal (weaker Tx power reaching Rx).
+        % No additive noise — just lower signal amplitude, so SNR drops.
+        % dB attenuation -> linear amplitude factor (divide by 20 for amplitude).
+        pathLossLinear = 10^(-p.path_loss_db / 20);
+        chart_th.Script = sprintf([ ...
+            'function y = fcn(u)\n' ...
+            '%%#codegen\n' ...
+            'pathLossLinear = %.6f;\n' ...
+            'y = u * pathLossLinear;\n' ...
+            'end\n'], pathLossLinear);
+
     otherwise   % 'none' -> passthrough (reproduces A3 baseline)
         chart_th.Script = sprintf([ ...
             'function y = fcn(u)\n' ...
