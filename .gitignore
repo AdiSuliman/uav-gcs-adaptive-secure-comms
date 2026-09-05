@@ -2,7 +2,14 @@
 *.csv
 *.xlsx
 results/*
+data/*
 *.log
 .DS_Store
 __pycache__/
 *.pyc
+*.slx.autosave
+slprj/
+*.cgxe
+*.mexw64
+*.asv
+build_link_model.asv
