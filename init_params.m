@@ -39,6 +39,9 @@ params.jsr_db        = 10;          % [dB] Jamming-to-Signal Ratio (barrage jamm
 params.burst_duty    = 0.3;         % [A4] Noise Burst: fraction of time jammer is ON (0-1)
 params.burst_period  = 100;         % [A4] Noise Burst: on/off cycle length (symbols)
 params.path_loss_db  = 10;          % [A4] Path Loss: attenuation (dB) applied to Tx signal
+params.fault_duty     = 0.15;       % [A4] Antenna Fault: fraction of time fault is active (0-1)
+params.fault_period   = 200;        % [A4] Antenna Fault: fault on/off cycle length (symbols)
+params.fault_atten_db = 30;         % [A4] Antenna Fault: severe attenuation during fault (dB)
 %% ========== NOISE & SWEEP ==========
 params.EbNo_dB    = 0:2:10;            % [ACTIVE] Eb/N0 sweep range (dB)
 params.num_frames = 1000;             % [ACTIVE] frames accumulated per Eb/N0 point
