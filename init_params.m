@@ -43,6 +43,7 @@ params.fault_duty     = 0.15;       % [A4] Antenna Fault: fraction of time fault
 params.fault_period   = 200;        % [A4] Antenna Fault: fault on/off cycle length (symbols)
 params.fault_atten_db = 30;         % [A4] Antenna Fault: severe attenuation during fault (dB)
 params.spoof_sir_db   = 0;          % [A4] Spoofing: Spoof-to-Signal Ratio (dB), 0 = equal power
+params.reactive_threshold = 0.5;    % [A4] Reactive Jamming: signal-energy threshold to trigger jammer
 %% ========== NOISE & SWEEP ==========
 params.EbNo_dB    = 0:2:10;            % [ACTIVE] Eb/N0 sweep range (dB)
 params.num_frames = 1000;             % [ACTIVE] frames accumulated per Eb/N0 point
