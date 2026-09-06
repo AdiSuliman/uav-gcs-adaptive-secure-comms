@@ -42,6 +42,7 @@ params.path_loss_db  = 10;          % [A4] Path Loss: attenuation (dB) applied t
 params.fault_duty     = 0.15;       % [A4] Antenna Fault: fraction of time fault is active (0-1)
 params.fault_period   = 200;        % [A4] Antenna Fault: fault on/off cycle length (symbols)
 params.fault_atten_db = 30;         % [A4] Antenna Fault: severe attenuation during fault (dB)
+params.spoof_sir_db   = 0;          % [A4] Spoofing: Spoof-to-Signal Ratio (dB), 0 = equal power
 %% ========== NOISE & SWEEP ==========
 params.EbNo_dB    = 0:2:10;            % [ACTIVE] Eb/N0 sweep range (dB)
 params.num_frames = 1000;             % [ACTIVE] frames accumulated per Eb/N0 point
