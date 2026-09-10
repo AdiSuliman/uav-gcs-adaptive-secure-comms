@@ -13,3 +13,6 @@ slprj/
 *.mexw64
 *.asv
 build_link_model.asv
+data/
+*.mexw64
+slprj/
