@@ -58,3 +58,15 @@ Each decision feeds the interim report and final book. Update on every new decis
 
 ---
 *Last updated: 2026-09-05 — after A3 baseline complete, entering A4.*
+## D11 — System Objects engine (replaced commfilt2 blocks)
+**Decision:** Replaced Simulink `commfilt2` RRC blocks with System Objects
+(`comm.RaisedCosineTransmitFilter`/`ReceiveFilter` + `pskmod`/`pskdemod`)
+wrapped in MATLAB Function blocks (same pattern as Rician injection).
+**Reason:** `commfilt2` blocks injected hidden algorithmic frame-buffer delay
+(measured 30-bit delay vs 20-bit theoretical) and a decimation-timing ISI floor
+that locked BER at ~0.17 regardless of SNR. Verified via Python + MATLAB System
+Objects: identical RRC math gives BER exactly on `berawgn` theory (delay=20 bits).
+**Architecture:** Split Digital Twin — [Tx: mod+RRC] -> [channels: Rician, AWGN
+graphical] -> [Rx: RRC+demod]. Preserves visual Simulink twin for the report
+while giving deterministic mathematical control under the hood.
+**Validated:** AWGN sweep 0-10 dB, all points on theory curve (delay=20 stable).

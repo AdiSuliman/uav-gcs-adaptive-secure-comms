@@ -1,11 +1,10 @@
 function build_link_model()
-%% BUILD_LINK_MODEL - Programmatically builds the clean UAV-GCS link
-% Phase A1-A2: Tx -> AWGN Channel -> Rx -> BER (ideal sync, AWGN only)
-% This model serves as the checkpoint for Phase A2 (AWGN validation).
-% Phase A3 will extend to Rician + synchronization blocks.
-% Driven by init_params.m. Saves a reusable .slx model.
-% AWGN uses SNR mode; sweep converts Eb/No -> SNR:
-% SNR_dB = EbNo_dB + 10*log10(bits_per_symbol)   [1 sample/symbol]
+%% BUILD_LINK_MODEL - Phase A1 (System Objects engine): Clean AWGN link + pulse shaping
+% Split Digital Twin: [Tx: mod+RRC] -> [AWGN graphical] -> [Rx: RRC+demod]
+% System Objects wrapped in MATLAB Function blocks (same pattern as Rician).
+% Deterministic delay = filter_span symbols = span*bits_per_symbol bits.
+% Validation target: BER matches berawgn() after offline delay alignment.
+
 modelName = 'UAV_GCS_Base_Link';
 
 if ~exist('params.mat', 'file')
@@ -13,6 +12,7 @@ if ~exist('params.mat', 'file')
 end
 S = load('params.mat');
 p = S.params;
+sps = p.sps;
 
 if bdIsLoaded(modelName)
     close_system(modelName, 0);
@@ -20,58 +20,93 @@ end
 new_system(modelName);
 open_system(modelName);
 
-fprintf('Building model "%s"...\n', modelName);
+fprintf('Building model "%s" (System Objects engine, sps=%d)...\n', modelName, sps);
 
-%% ---- Add blocks (exact R2026a library paths) ----
+%% ---- Add blocks ----
 add_block('commrandsrc3/Bernoulli Binary Generator', ...
     [modelName '/BitSource'], 'Position', [30 100 90 140]);
-add_block('commdigbbndpm3/QPSK Modulator Baseband', ...
-    [modelName '/QPSK_Mod'], 'Position', [150 100 210 140]);
+add_block('simulink/User-Defined Functions/MATLAB Function', ...
+    [modelName '/Tx'], 'Position', [150 95 250 145]);
 add_block('commchan3/AWGN Channel', ...
-    [modelName '/AWGN'], 'Position', [270 100 330 140]);
-add_block('commdigbbndpm3/QPSK Demodulator Baseband', ...
-    [modelName '/QPSK_Demod'], 'Position', [390 100 450 140]);
-add_block('commsink2/Error Rate Calculation', ...
-    [modelName '/ErrRate'], 'Position', [510 130 590 180]);
-add_block('simulink/Sinks/To Workspace', ...
-    [modelName '/Tx_IQ'], 'Position', [270 30 330 60]);
-add_block('simulink/Sinks/To Workspace', ...
-    [modelName '/Rx_IQ'], 'Position', [390 30 450 60]);
-add_block('simulink/Sinks/To Workspace', ...
-    [modelName '/BER_out'], 'Position', [660 140 740 170]);
+    [modelName '/AWGN'], 'Position', [310 100 380 140]);
+add_block('simulink/User-Defined Functions/MATLAB Function', ...
+    [modelName '/Rx'], 'Position', [440 95 540 145]);
 
-%% ---- Configure blocks (driven by params) ----
+% Bit-stream logging (offline BER via delay-scan)
+add_block('simulink/Sinks/To Workspace', ...
+    [modelName '/tx_sink'], 'Position', [150 30 230 60]);
+add_block('simulink/Sinks/To Workspace', ...
+    [modelName '/rx_sink'], 'Position', [600 100 680 130]);
+
+% IQ probes (for spectrogram in A6)
+add_block('simulink/Sinks/To Workspace', ...
+    [modelName '/Tx_IQ'], 'Position', [310 30 390 60]);
+add_block('simulink/Sinks/To Workspace', ...
+    [modelName '/Rx_IQ'], 'Position', [440 180 520 210]);
+
+%% ---- Inject Tx code (mod + RRC transmit) ----
+sf_root = sfroot;
+chart_tx = sf_root.find('-isa','Stateflow.EMChart','Path',[modelName '/Tx']);
+chart_tx.Script = sprintf([ ...
+    'function y = fcn(bits)\n' ...
+    '%%#codegen\n' ...
+    'persistent txf\n' ...
+    'if isempty(txf)\n' ...
+    '    txf = comm.RaisedCosineTransmitFilter(...\n' ...
+    '        ''RolloffFactor'', %.6f, ...\n' ...
+    '        ''FilterSpanInSymbols'', %d, ...\n' ...
+    '        ''OutputSamplesPerSymbol'', %d);\n' ...
+    'end\n' ...
+    'sym = pskmod(bits, 4, pi/4, ''gray'', ''InputType'', ''bit'');\n' ...
+    'y = txf(sym);\n' ...
+    'end\n'], p.rolloff, p.filter_span, sps);
+
+%% ---- Inject Rx code (RRC receive + demod) ----
+chart_rx = sf_root.find('-isa','Stateflow.EMChart','Path',[modelName '/Rx']);
+chart_rx.Script = sprintf([ ...
+    'function bits = fcn(u)\n' ...
+    '%%#codegen\n' ...
+    'persistent rxf\n' ...
+    'if isempty(rxf)\n' ...
+    '    rxf = comm.RaisedCosineReceiveFilter(...\n' ...
+    '        ''RolloffFactor'', %.6f, ...\n' ...
+    '        ''FilterSpanInSymbols'', %d, ...\n' ...
+    '        ''InputSamplesPerSymbol'', %d, ...\n' ...
+    '        ''DecimationFactor'', %d);\n' ...
+    'end\n' ...
+    'sym = rxf(u);\n' ...
+    'bits = pskdemod(sym, 4, pi/4, ''gray'', ''OutputType'', ''bit'');\n' ...
+    'end\n'], p.rolloff, p.filter_span, sps, sps);
+
+%% ---- Configure blocks ----
 Tsym = 1 / p.symbol_rate;
-
 set_param([modelName '/BitSource'], ...
     'ProbabilityOfZero', '0.5', ...
     'SampleTime', num2str(Tsym / p.bits_per_symbol), ...
     'SamplesPerFrame', num2str(p.frame_length));
 
-set_param([modelName '/QPSK_Mod'],   'InType',  'Bit');
-set_param([modelName '/QPSK_Demod'], 'OutType', 'Bit');
+% AWGN: Eb/No mode handles oversampling internally (BitsPerSymbol + samples)
+snr0 = p.EbNo_dB(1) + 10*log10(p.bits_per_symbol) - 10*log10(sps);
+set_param([modelName '/AWGN'], ...
+    'SNR', num2str(snr0), ...
+    'SignalPower', num2str(1/sps));
 
-% AWGN: default SNR mode; write only the SNR value
-snr0 = p.EbNo_dB(1) + 10*log10(p.bits_per_symbol);  % 1 sample/symbol: no sps term
-set_param([modelName '/AWGN'], 'SNR', num2str(snr0));
-
-% Error Rate: switch to Port output so BER becomes a signal (not workspace)
-set_param([modelName '/ErrRate'], 'PMode', 'Port');
-
-for b = {'Tx_IQ','Rx_IQ','BER_out'}
-    set_param([modelName '/' b{1}], 'SaveFormat', 'Array', ...
-        'VariableName', b{1});
-end
+% Workspace sinks — Array format for clean extraction
+set_param([modelName '/tx_sink'], 'VariableName', 'tx_bits_out', 'SaveFormat', 'Array');
+set_param([modelName '/rx_sink'], 'VariableName', 'rx_bits_out', 'SaveFormat', 'Array');
+set_param([modelName '/Tx_IQ'], 'VariableName', 'Tx_IQ', 'SaveFormat', 'Array');
+set_param([modelName '/Rx_IQ'], 'VariableName', 'Rx_IQ', 'SaveFormat', 'Array');
 
 %% ---- Wire it up ----
-add_line(modelName, 'BitSource/1', 'QPSK_Mod/1',  'autorouting','on');
-add_line(modelName, 'QPSK_Mod/1',  'AWGN/1',      'autorouting','on');
-add_line(modelName, 'AWGN/1',      'QPSK_Demod/1','autorouting','on');
-add_line(modelName, 'BitSource/1', 'ErrRate/1',   'autorouting','on');
-add_line(modelName, 'QPSK_Demod/1','ErrRate/2',   'autorouting','on');
-add_line(modelName, 'QPSK_Mod/1',  'Tx_IQ/1',     'autorouting','on');
-add_line(modelName, 'AWGN/1',      'Rx_IQ/1',     'autorouting','on');
-add_line(modelName, 'ErrRate/1',   'BER_out/1',   'autorouting','on');
+add_line(modelName, 'BitSource/1', 'Tx/1',   'autorouting','on');
+add_line(modelName, 'Tx/1',       'AWGN/1',  'autorouting','on');
+add_line(modelName, 'AWGN/1',     'Rx/1',    'autorouting','on');
+
+% Logging taps
+add_line(modelName, 'BitSource/1', 'tx_sink/1', 'autorouting','on');
+add_line(modelName, 'Rx/1',        'rx_sink/1', 'autorouting','on');
+add_line(modelName, 'Tx/1',        'Tx_IQ/1',   'autorouting','on');
+add_line(modelName, 'AWGN/1',      'Rx_IQ/1',   'autorouting','on');
 
 %% ---- Solver settings ----
 set_param(modelName, 'SolverType', 'Fixed-step', ...
@@ -82,5 +117,6 @@ set_param(modelName, 'SolverType', 'Fixed-step', ...
 if ~exist('models', 'dir'); mkdir('models'); end
 save_system(modelName, ['models/' modelName '.slx']);
 fprintf('Model saved to models/%s.slx\n', modelName);
-fprintf('Done. Model is built and wired.\n');
+fprintf('Done. Clean link (System Objects engine, sps=%d, rolloff=%.2f, span=%d).\n', ...
+    sps, p.rolloff, p.filter_span);
 end
