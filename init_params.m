@@ -12,13 +12,16 @@ params.target_channel = 'Rician';    % scope target
 params.mod_type            = 'QPSK';   % [ACTIVE] modulation scheme
 params.mod_order           = 4;        % [ACTIVE] QPSK -> 4
 params.symbol_rate         = 1e6;      % [ACTIVE] 1 Msym/s
-params.samples_per_symbol  = 4;        % [FUTURE] oversampling (A3+, spectral features)
+params.samples_per_symbol  = 4;        % [ACTIVE] oversampling (A3+, spectral features)
 params.sps                 = params.samples_per_symbol;
 %% ========== FRAME STRUCTURE ==========
 params.bits_per_frame = 1000;          % [ACTIVE] information bits per frame
 params.crc_bits       = 32;            % [FUTURE] CRC for Packet Loss Rate metric (A6)
 params.frame_length   = params.bits_per_frame + params.crc_bits;  % total bits/frame
 %% ========== CHANNEL MODEL ==========
+% [A4-hybrid] Pulse shaping (RRC) — enables spectrogram for CNN
+params.rolloff      = 0.25;            % [ACTIVE] RRC roll-off factor
+params.filter_span  = 10;              % [ACTIVE] RRC filter span (symbols)
 params.rician_k      = 10;             % [ACTIVE] K-factor (dB), strong LoS
 params.carrier_freq  = 2.4e9;          % [ACTIVE] 2.4 GHz ISM
 params.nominal_range = 100;            % [FUTURE] nominal link range (m)

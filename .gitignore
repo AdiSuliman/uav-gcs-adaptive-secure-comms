@@ -16,3 +16,4 @@ build_link_model.asv
 data/
 *.mexw64
 slprj/
+*.slx.autosave
