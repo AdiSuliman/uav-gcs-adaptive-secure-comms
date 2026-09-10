@@ -4,7 +4,7 @@
 % resizes to img_size x img_size, and saves an image tensor + labels + scalar
 % features ready for CNN/LSTM training. Global norm keeps none vs path_loss distinct.
 
-clear; close all; clc;
+close all; clc;
 
 if ~exist('data/dataset.mat','file')
     error('data/dataset.mat not found. Run run_dataset_sweep.m first.');

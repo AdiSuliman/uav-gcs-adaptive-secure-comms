@@ -3,8 +3,7 @@
 % other scripts load.
 % Author: Adi Suliman, Bar Dvir Hassan
 % Created: 2026-09-01
-clear all; close all; clc;
-%% ========== PROJECT PHASE ==========
+close all; clc;%% ========== PROJECT PHASE ==========
 params.phase        = 'A4';          % current phase
 params.active_channel = 'Rician';    % [ACTIVE] channel used now
 params.target_channel = 'Rician';    % scope target
