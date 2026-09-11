@@ -2,11 +2,11 @@
 % UAV-GCS Adaptive Secure Communications System
 % Orchestrates Phase A (Link+Threats+Dataset) -> B (Detection) -> C (Recovery) -> D (Report)
 % Author: Adi Suliman, Bar Dvir Hassan
-% Last Updated: 2026-09-06 (System Objects engine, multi-JSR dataset)
+% Last Updated: 2026-09-11 (Phase B: temporal features + hybrid detector)
 %
 % Toggle the RUN flags below (true/false). They execute in the order listed.
-% Light stages (A0-A4) are fast; heavy stages (A5-A6) take minutes — leave them
-% false unless you want to regenerate the dataset.
+% Light stages (A0-A4) are fast; heavy stages (A5-A6, B2) take minutes — leave
+% them false unless you want to regenerate.
 
 clear; close all; clc;
 
@@ -16,6 +16,11 @@ RUN.validate_A           = true;    % A1-A3: build + validate AWGN & Rician (fas
 RUN.check_A4             = true;    % A4 : build threat model + sanity BER (fast)
 RUN.build_dataset        = false;   % A5 : run_dataset_sweep      (HEAVY ~5 min)
 RUN.extract_spectrograms = false;   % A6 : extract_spectrograms   (HEAVY ~2 min)
+
+RUN.temporal_features    = false;   % B2.5: extract_temporal_features (ONE-TIME, fast)
+RUN.prepare_data         = false;   % B1  : prepare_data          (fast)
+RUN.train_detector       = false;   % B2  : train_detector        (HEAVY ~5 min GPU)
+RUN.eval_detector        = true;   % B3  : eval_detector         (fast)
 
 fprintf('\n');
 fprintf('========================================================\n');
@@ -85,9 +90,48 @@ fprintf('\n');
 
 %% ========== PHASE B: DETECTION (OFFLINE) ==========
 fprintf('> PHASE B: Detection Network (CNN + scalar hybrid)\n\n');
-fprintf('  [B1] Load + normalize + split (80/10/10)...       [PENDING]\n');
-fprintf('  [B2] Train hybrid CNN/LSTM -> softmax(7)...        [PENDING]\n');
-fprintf('  [B3] Confusion, macro-F1, accuracy-vs-SNR, ROC...  [PENDING]\n\n');
+
+if RUN.temporal_features
+    fprintf('  [B2.5] Extracting temporal features (var_rssi_10, dber_dt, burst_ratio)...\n');
+    extract_temporal_features;
+end
+
+if RUN.prepare_data
+    fprintf('  [B1] Preparing data (stratified split 80/10/10)...\n');
+    prepare_data;
+end
+
+if RUN.train_detector
+    fprintf('  [B2] Training hybrid CNN+scalar detector...\n');
+    train_detector;
+end
+
+if RUN.eval_detector
+    fprintf('  [B3] Evaluating on test set (confusion, F1, accuracy-vs-SNR)...\n');
+    eval_detector;
+end
+
+% Phase B status (always reported)
+fprintf('  [B] Pipeline status:\n');
+if exist('data/splits.mat','file')
+    d = dir('data/splits.mat');
+    fprintf('      splits.mat            : READY (%s, %.0f MB)\n', d.date, d.bytes/1e6);
+else
+    fprintf('      splits.mat            : [PENDING] -> prepare_data\n');
+end
+if exist('data/trained_detector.mat','file')
+    d = dir('data/trained_detector.mat');
+    fprintf('      trained_detector.mat  : READY (%s, %.0f MB)\n', d.date, d.bytes/1e6);
+else
+    fprintf('      trained_detector.mat  : [PENDING] -> train_detector\n');
+end
+if exist('results/confusion_matrix.png','file')
+    fprintf('      B3 evaluation results : READY -> results/confusion_matrix.png\n');
+else
+    fprintf('      B3 evaluation results : [PENDING] -> eval_detector\n');
+end
+
+fprintf('\n');
 
 %% ========== PHASE C: CLOSED-LOOP RECOVERY (ONLINE) ==========
 fprintf('> PHASE C: Closed-Loop Adaptive Recovery (Threat Response)\n\n');
@@ -105,6 +149,6 @@ fprintf('  [D2] Defense presentation (pptx)...                [PENDING]\n\n');
 
 %% ========== CHECKPOINT ==========
 fprintf('========================================================\n');
-fprintf(' CHECKPOINT - Phase A complete (dataset ready) | next: Phase B\n');
+fprintf(' CHECKPOINT - Phase A+B complete | next: Phase C (closed-loop recovery)\n');
 fprintf(' Outputs in results/, data/ | models in models/ | code on GitHub\n');
 fprintf('========================================================\n\n');
