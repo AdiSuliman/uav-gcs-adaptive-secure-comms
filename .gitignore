@@ -18,3 +18,5 @@ data/
 slprj/
 *.slx.autosave
 *.asv
+*.mat
+*.asv
