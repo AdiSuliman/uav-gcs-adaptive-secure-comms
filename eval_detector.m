@@ -1,6 +1,5 @@
 %% B3 — EVALUATE HYBRID DETECTOR (Test Set)
-clear; clc; close all;
-fprintf('=== B3: Test Evaluation ===\n\n');
+close all; clc;fprintf('=== B3: Test Evaluation ===\n\n');
 
 %% 1. Load data and model
 fprintf('Loading test data and trained model...\n');

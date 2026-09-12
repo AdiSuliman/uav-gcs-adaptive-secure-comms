@@ -2,11 +2,11 @@
 % UAV-GCS Adaptive Secure Communications System
 % Orchestrates Phase A (Link+Threats+Dataset) -> B (Detection) -> C (Recovery) -> D (Report)
 % Author: Adi Suliman, Bar Dvir Hassan
-% Last Updated: 2026-09-11 (Phase B: temporal features + hybrid detector)
+% Last Updated: 2026-09-12 (Phase C2/C3: DQN + closed-loop flags added)
 %
 % Toggle the RUN flags below (true/false). They execute in the order listed.
-% Light stages (A0-A4) are fast; heavy stages (A5-A6, B2) take minutes — leave
-% them false unless you want to regenerate.
+% Light stages (A0-A4) are fast; heavy stages (A5-A6, B2, C2, C3) take minutes —
+% leave them false unless you want to regenerate.
 
 clear; close all; clc;
 
@@ -20,7 +20,10 @@ RUN.extract_spectrograms = false;   % A6 : extract_spectrograms   (HEAVY ~2 min)
 RUN.temporal_features    = false;   % B2.5: extract_temporal_features (ONE-TIME, fast)
 RUN.prepare_data         = false;   % B1  : prepare_data          (fast)
 RUN.train_detector       = false;   % B2  : train_detector        (HEAVY ~5 min GPU)
-RUN.eval_detector        = true;   % B3  : eval_detector         (fast)
+RUN.eval_detector        = true;    % B3  : eval_detector         (fast)
+
+RUN.train_dqn            = false;   % C2  : train_dqn             (HEAVY ~3 min GPU) >> ONE-TIME
+RUN.run_closed_loop      = false;   % C3  : run_closed_loop_with_detector (HEAVY ~5 min)
 
 fprintf('\n');
 fprintf('========================================================\n');
@@ -135,9 +138,38 @@ fprintf('\n');
 
 %% ========== PHASE C: CLOSED-LOOP RECOVERY (ONLINE) ==========
 fprintf('> PHASE C: Closed-Loop Adaptive Recovery (Threat Response)\n\n');
-fprintf('  [C1] Rule-based countermeasure policy...           [PENDING]\n');
-fprintf('  [C2] DQN agent (state=metrics, reward=BER recovery)[PENDING]\n');
-fprintf('  [C3] Adaptive Link Recovery (detect+decide+act)... [PENDING]\n');
+fprintf('  [C1] Rule-based countermeasure policy...           READY (rule_based_policy.m)\n');
+
+if RUN.train_dqn
+    fprintf('  [C2] Training DQN agent (synthetic environment)...\n');
+    train_dqn;
+end
+
+if RUN.run_closed_loop
+    fprintf('  [C3] Running closed-loop with CNN detector + DQN (REAL TEST)...\n');
+    run_closed_loop_with_detector;
+end
+
+% Phase C status (always reported)
+fprintf('  [C] Pipeline status:\n');
+if exist('data/trained_dqn.mat','file')
+    d = dir('data/trained_dqn.mat');
+    fprintf('      trained_dqn.mat       : READY (%s, %.0f MB)\n', d.date, d.bytes/1e6);
+else
+    fprintf('      trained_dqn.mat       : [PENDING] -> train_dqn\n');
+end
+if exist('results/dqn_training_curves.png','file')
+    fprintf('      C2 training curves    : READY -> results/dqn_training_curves.png\n');
+else
+    fprintf('      C2 training curves    : [PENDING] -> train_dqn\n');
+end
+if exist('results/closed_loop_results.png','file')
+    fprintf('      C3 closed-loop results: READY -> results/closed_loop_results.png\n');
+else
+    fprintf('      C3 closed-loop results: [PENDING] -> run_closed_loop\n');
+end
+
+fprintf('\n');
 fprintf('  [C4] Closed-loop sim (threat -> recover)...         [PENDING]\n');
 fprintf('  [C5] Interactive dashboard (2D)...                 [PENDING]\n');
 fprintf('  [C6] Regime map (GREEN/YELLOW/RED)...              [PENDING]\n\n');
@@ -149,6 +181,6 @@ fprintf('  [D2] Defense presentation (pptx)...                [PENDING]\n\n');
 
 %% ========== CHECKPOINT ==========
 fprintf('========================================================\n');
-fprintf(' CHECKPOINT - Phase A+B complete | next: Phase C (closed-loop recovery)\n');
+fprintf(' CHECKPOINT - Phase A+B complete, C1+C2 complete | next: C3 (closed-loop w/ detector)\n');
 fprintf(' Outputs in results/, data/ | models in models/ | code on GitHub\n');
 fprintf('========================================================\n\n');
