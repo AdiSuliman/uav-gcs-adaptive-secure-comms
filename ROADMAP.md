@@ -1,3 +1,18 @@
+# UAV-GCS Adaptive Secure Communications — PROJECT ROADMAP
+
+⚠️ **This is the ORIGINAL PROJECT PLAN from September 2026.**
+
+**Current Progress:** See [PROJECT_LOG.md](PROJECT_LOG.md) for live status.
+
+**Quick Summary:**
+- ✅ Phase A: Complete (Sep 5)
+- ✅ Phase B: Complete (Sep 13)  
+- ✅ Phase C: Complete (Sep 13)
+- ⏳ Phase EXP: Analysis pending
+- ❌ Phase D: Not started
+
+---
+
 # UAV-GCS Adaptive Secure Communications System — Project Roadmap
 
 **Project:** AI-driven adaptive communication security for UAV-to-ground station links in electronic warfare environments.  
