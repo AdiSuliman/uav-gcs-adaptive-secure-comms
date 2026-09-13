@@ -11,9 +11,19 @@ out = sim(model);
 
 % Extract IQ samples for spectrogram computation
 try
-    iq_rx = double(out.get('Rx_IQ'));
-    if iscolumn(iq_rx)
-        iq_rx = iq_rx.';
+    iq_rx = double(squeeze(out.get('Rx_IQ')));
+    if isvector(iq_rx)
+        iq_rx = iq_rx(:).';
+    end
+    if size(iq_rx, 2) > 1 && size(iq_rx, 1) > 1
+        % FIX (Sep 13): Rx_IQ can come back as a genuine multi-column matrix
+        % (multiple frames) for some threats. The old iscolumn-only check
+        % missed this case, leaving iq_rx as an MxK matrix -- any caller
+        % doing mean(abs(iq_rx).^2) then got a 1xK row vector instead of a
+        % scalar (broke train_dqn.m's state vertcat). Same fix already used
+        % by quick_ber_with_iq_fixed() in run_closed_loop_with_detector.m:
+        % keep only the first frame/column.
+        iq_rx = iq_rx(:, 1).';
     end
 catch
     warning('Rx_IQ not found in model output — returning empty IQ');

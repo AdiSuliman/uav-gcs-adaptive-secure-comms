@@ -41,8 +41,9 @@ threats = {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_lo
 strength_field = containers.Map( ...
     {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','antenna_fault','spoofing','benign_interference'}, ...
     {'jsr_db','jsr_db','jsr_db','jsr_db','path_loss_db','fault_atten_db','spoof_sir_db','benign_int_db'});
-action_mitigation_db = struct('no_action',0,'channel_switch',15,'rate_reduce',8, ...
-    'freq_diversity',8,'spatial_diversity',12);
+% UPDATED (post-EXP analysis, Sep 13): see train_dqn.m header for rationale.
+action_mitigation_db = struct('no_action',0,'channel_switch',25,'rate_reduce',15, ...
+    'freq_diversity',25,'spatial_diversity',25);
 action_names = dqn_agent_trained.action_names;
 threat_encode_map = containers.Map( ...
     {'jamming','reactive_jamming','sweeping_jammer','spoofing','path_loss','noise_burst','antenna_fault','benign_interference'}, {0,1,2,3,4,5,6,7});
@@ -155,6 +156,9 @@ for t = 1:numel(threats)
     %% --- Apply chosen countermeasure, measure recovery ---
     mitigation_db = action_mitigation_db.(action_name);
     p.(field) = baseline.(field) - mitigation_db;
+    if any(strcmp(field, {'path_loss_db','fault_atten_db'}))
+        p.(field) = max(p.(field), 0);   % physical floor: loss/attenuation can't go negative
+    end
     params = p; save('params.mat', 'params');
     build_threat_model;
     ber_after = quick_ber('UAV_GCS_Threat_Link');

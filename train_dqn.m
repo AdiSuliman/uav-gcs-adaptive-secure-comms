@@ -27,8 +27,14 @@ threat_list = {'jamming', 'reactive_jamming', 'sweeping_jammer', 'noise_burst', 
 threat_encode = [0 1 2 3 4 5 6 7];  % matches dqn_agent.m stateSpec [0,7]
 
 action_names = agent.action_names;   % {'no_action','channel_switch','rate_reduce','freq_diversity','spatial_diversity'}
-action_mitigation_db = struct('no_action',0,'channel_switch',15,'rate_reduce',8, ...
-    'freq_diversity',8,'spatial_diversity',12);
+% UPDATED (post-EXP analysis, Sep 13): magnitudes raised to match the best
+% legitimate mitigation validated by explore_countermeasures.m + 
+% analyze_exploration_results.m (field_reduction ceiling 25dB / awgn_margin_boost
+% ceiling 15dB). Old values (15/8/8/12) were far below what the link can
+% actually tolerate -- this was the root cause of antenna_fault's 4.7% recovery
+% and the weak recovery numbers across most threats in the original C3 diagnostic.
+action_mitigation_db = struct('no_action',0,'channel_switch',25,'rate_reduce',15, ...
+    'freq_diversity',25,'spatial_diversity',25);
 strength_field = containers.Map( ...
     {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','antenna_fault','spoofing','benign_interference'}, ...
     {'jsr_db', 'jsr_db',           'jsr_db',          'jsr_db',   'path_loss_db','fault_atten_db','spoof_sir_db','benign_int_db'});
@@ -63,6 +69,9 @@ for ti = 1:num_threats
         mitigation_db = action_mitigation_db.(action);
         p2 = p;
         p2.(field) = baseline.(field) - mitigation_db;
+        if any(strcmp(field, {'path_loss_db','fault_atten_db'}))
+            p2.(field) = max(p2.(field), 0);   % physical floor: loss/attenuation can't go negative
+        end
         params = p2; save('params.mat', 'params');
         build_threat_model;
         ber_after = quick_ber('UAV_GCS_Threat_Link');
@@ -73,6 +82,29 @@ for ti = 1:num_threats
         fprintf('%s=%.0f%% ', action, recov);
     end
     fprintf('\n');
+
+    % --- Reward shaping: false-alarm penalty for benign_interference ---
+    % benign_interference is NOT a real attack (D9, docs/DECISIONS.md): the
+    % correct response is no_action. Pure BER-recovery reward doesn't capture
+    % this -- any action that reduces benign_int_db "recovers" some BER, so
+    % the raw reward table (see printed values above) makes no_action look
+    % WORSE than acting, teaching the agent to overreact to non-threats.
+    % Fix: apply a fixed penalty to every non-no_action reward for this threat,
+    % modeling the real-world cost of an unnecessary countermeasure (bandwidth,
+    % latency, resource use) that a pure BER metric ignores. Magnitude (40pp)
+    % is a design choice, not empirically measured -- large enough to make
+    % no_action's near-0% reward clearly dominant over acting's ~25-28%.
+    if strcmp(threat, 'benign_interference')
+        false_alarm_penalty = 40;
+        no_action_idx = find(strcmp(action_names, 'no_action'));
+        for ai = 1:5
+            if ai ~= no_action_idx
+                reward_table(ti, ai) = reward_table(ti, ai) - false_alarm_penalty;
+            end
+        end
+        fprintf('  %-20s [reward-shaped: -%.0fpp false-alarm penalty on all actions except no_action]\n', ...
+            threat, false_alarm_penalty);
+    end
 end
 
 % Restore baseline
@@ -106,17 +138,38 @@ training_loss = [];
 avg_rewards_per_episode = [];
 episode_rewards = [];
 
-fprintf('Training on %d episodes (%d threats x %d episodes each)\n\n', ...
-    total_episodes, num_threats, num_episodes);
+% OVERSAMPLING (proposal risk #3 mitigation, adapted from dataset class-balance
+% to DQN reward-balance): benign_interference's reward-shaped values (~-1 to
+% -17) live on a completely different scale from the other 7 threats' large
+% positive rewards (~20-90). In a single shared regression network, this
+% caused benign_interference's gradient signal to be drowned out -- confirmed
+% by the trained Q-values ranking it incorrectly despite a clean, correctly-
+% shaped reward table. Fix: give it proportionally more training repetitions
+% so its gradient contribution isn't overwhelmed by the larger-magnitude
+% threats. Factor of 3x is a starting point, not derived from theory --
+% increase further if benign_interference's Q-values still don't rank
+% no_action highest after this run.
+oversample_factor = containers.Map(threat_list, {1, 1, 1, 1, 1, 1, 1, 3});
+threat_schedule = [];
+for ti = 1:num_threats
+    threat_schedule = [threat_schedule, repmat(ti, 1, num_episodes * oversample_factor(threat_list{ti}))]; %#ok<AGROW>
+end
+threat_schedule = threat_schedule(randperm(numel(threat_schedule)));  % shuffle training order
+total_episodes = numel(threat_schedule);
 
+fprintf('Training on %d episodes (%d threats, benign_interference oversampled %dx)\n\n', ...
+    total_episodes, num_threats, oversample_factor('benign_interference'));
+
+prev_threat = '';
 for ep = 1:total_episodes
-    threat_idx = mod(ep - 1, num_threats) + 1;
+    threat_idx = threat_schedule(ep);
     threat = threat_list{threat_idx};
     threat_enc = threat_encode(threat_idx);
     field = strength_field(threat);
 
-    if mod(ep, num_episodes) == 1
+    if ~strcmp(threat, prev_threat)
         fprintf('  Threat: %s\n', threat);
+        prev_threat = threat;
     end
 
     % --- Fresh baseline BER this episode (real per-episode noise realization) ---
@@ -126,9 +179,26 @@ for ep = 1:total_episodes
     p.active_threat = threat;
     params = p; save('params.mat', 'params');
     build_threat_model;
-    ber_baseline = quick_ber('UAV_GCS_Threat_Link');
+    [ber_baseline, iq_rx] = quick_ber_with_iq('UAV_GCS_Threat_Link');
+    ber_baseline = double(ber_baseline);   % ensure scalar
 
-    state = [threat_enc; ber_baseline; -50; 5; 0.1];
+    % FIX (post-EXP analysis, Sep 13): state used to be built with fixed
+    % placeholders [-50, 5, 0.1] for RSSI/SNR/PLR on every single episode,
+    % regardless of threat -- so the network never saw these dimensions vary
+    % and learned nothing from them. But run_closed_loop_diagnostic.m (C3)
+    % feeds REAL measured RSSI/SNR/PLR at inference, a distribution the
+    % network never trained on. This mismatch was silently scrambling the
+    % learned action ranking. Fix: compute real RSSI/SNR/PLR here, exactly as
+    % C3 does, so train-time and inference-time states match.
+    if ~isempty(iq_rx)
+        rssi = 10*log10(mean(abs(iq_rx).^2) + eps);
+    else
+        rssi = -50;   % fallback if IQ extraction fails for this model
+    end
+    snr_val = p.EbNo_dB(1);              % same worst-case point C3 evaluates at
+    plr = double(ber_baseline > 0.1);    % same threshold convention as C3
+
+    state = [threat_enc; ber_baseline; rssi; snr_val; plr];
 
     % --- Agent selects action (epsilon-greedy) ---
     action = selectAction(agent, state, true);
@@ -138,6 +208,10 @@ for ep = 1:total_episodes
     ber_after = ber_baseline * (1 - recovery_frac);
     reward = reward_table(threat_idx, action);   % use real recovery% directly as reward
 
+    % next_state placeholders intentionally left as-is: done=1 below zeroes
+    % out Q_max_next's contribution to the Bellman target (single-step/bandit
+    % setting), so next_state never actually influences training -- only
+    % `state` above (used for action selection + the loss) needed fixing.
     next_state = [threat_enc; ber_after; -50; 5; 0.05];
     done = 1;
 

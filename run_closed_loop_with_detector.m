@@ -53,9 +53,10 @@ strength_field = containers.Map( ...
 
 % action_effectiveness per action index (1=no_action..5=spatial_diversity)
 % same convention used in C2 training — countermeasure strength as dB reduction
+% UPDATED (post-EXP analysis, Sep 13): see train_dqn.m header for rationale.
 action_mitigation_db = struct( ...
-    'no_action', 0, 'channel_switch', 15, 'rate_reduce', 8, ...
-    'freq_diversity', 8, 'spatial_diversity', 12);
+    'no_action', 0, 'channel_switch', 25, 'rate_reduce', 15, ...
+    'freq_diversity', 25, 'spatial_diversity', 25);
 action_names = dqn_agent_trained.action_names;
 
 baseline = struct();
@@ -140,6 +141,9 @@ for t = 1:n_threats
     %% --- Step 5: Apply countermeasure — reduce THIS threat's real strength field ---
     mitigation_db = action_mitigation_db.(action_name);
     p.(field) = baseline.(field) - mitigation_db;
+    if any(strcmp(field, {'path_loss_db','fault_atten_db'}))
+        p.(field) = max(p.(field), 0);   % physical floor: loss/attenuation can't go negative
+    end
     params = p;
     save('params.mat', 'params');
     build_threat_model;
