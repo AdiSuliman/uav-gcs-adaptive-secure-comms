@@ -32,6 +32,16 @@
 ## Phase C: Recovery & Closed-Loop ✅ COMPLETE
 
 ### C1: Rule-Based Policy ✅
+```
+jamming → channel_switch (15dB)
+reactive_jamming → channel_switch_fast (10dB)
+spoofing → freq_diversity (8dB)
+path_loss → rate_reduce (6dB)
+noise_burst → rate_reduce (9dB)
+antenna_fault → spatial_diversity (12dB)
+sweeping_jammer → channel_switch (15dB)
+benign_interference → no_action
+```
 
 ### C2: DQN Agent (v2) ✅
 - **Reward Table:** Real Simulink-measured (40 combos)

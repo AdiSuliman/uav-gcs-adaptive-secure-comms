@@ -20,20 +20,24 @@ An AI-driven closed-loop system for detecting and adapting to link-layer threats
 ---
 
 ## Repository Structure
-├── main.m # Master orchestrator (flags for A, B, C phases)
-├── init_params.m # System & threat parameters (K=10dB, 160Hz Doppler)
-├── models/ # Simulink Digital Twin
-│ ├── UAV_GCS_Base_Link.slx # A1-A2: clean AWGN channel
-│ ├── UAV_GCS_Rician_Link.slx # A3: fading + Doppler
-│ └── UAV_GCS_Threat_Link.slx # A4-A6: threats + recovery
+
+```
+├── main.m                        # Master orchestrator (flags for A, B, C phases)
+├── init_params.m                 # System & threat parameters (K=10dB, 160Hz Doppler)
+├── models/                       # Simulink Digital Twin
+│   ├── UAV_GCS_Base_Link.slx     # A1-A2: clean AWGN channel
+│   ├── UAV_GCS_Rician_Link.slx   # A3: fading + Doppler
+│   └── UAV_GCS_Threat_Link.slx   # A4-A6: threats + recovery
 ├── docs/
-│ └── DECISIONS.md # Architecture Decision Record (D1-D11)
-├── README.md # This file
-├── ROADMAP.md # Project timeline (original plan)
+│   └── DECISIONS.md              # Architecture Decision Record (D1-D11)
+├── README.md                     # This file
+├── ROADMAP.md                    # Project timeline (original plan)
 └── [Phase scripts]
-├── A: build_.m, extract_.m, run_sweep.m
-├── B: prepare_data.m, train_detector.m, eval_detector.m
-└── C: train_dqn.m, rule_based_policy.m, run_closed_loop.m
+    ├── A: build_*.m, extract_*.m, run_*_sweep.m
+    ├── B: prepare_data.m, train_detector.m, eval_detector.m
+    └── C: train_dqn.m, rule_based_policy.m, run_closed_loop_*.m, explore_countermeasures.m
+```
+
 **Note:** `data/`, `results/`, `logs/` are `.gitignore`'d (too large / regenerable).
 
 ---
