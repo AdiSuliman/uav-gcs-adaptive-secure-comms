@@ -1,12 +1,14 @@
 %% RUN_DATASET_SWEEP - Phase A5 (FULL): Multi-JSR labeled dataset generation
-% Runs all 6 threats x 5 intensity levels x Eb/No sweep + balanced 'none' class.
+% Runs all 8 threats x 5 intensity levels x Eb/No sweep + balanced 'none' class.
 % Per frame collects: IQ (spectrogram), BER/SNR/RSSI/PLR (features), label, level.
 %
 % Intensity levels per threat (validated ranges — impact threshold to pre-saturation):
-%   jamming/noise_burst/reactive : JSR   = 0,4,8,12,16 dB
-%   path_loss                    : atten = 4,8,12,16,20 dB
-%   spoofing                     : SIR   = -4,-1,2,5,8 dB
-%   antenna_fault                : duty  = 0.1,0.2,0.3,0.4,0.5 (atten fixed 30 dB)
+%   jamming/noise_burst/reactive        : JSR   = 0,4,8,12,16 dB
+%   path_loss                           : atten = 4,8,12,16,20 dB
+%   spoofing                            : SIR   = -4,-1,2,5,8 dB
+%   antenna_fault                       : duty  = 0.1,0.2,0.3,0.4,0.5 (atten fixed 30 dB)
+%   benign_interference [A-ext]         : power = -10,-8,-6,-4,-2 dB (weak, non-malicious)
+%   sweeping_jammer     [A-ext]         : JSR   = 0,4,8,12,16 dB (dwell fixed via sweep_duty)
 %
 % CLASS BALANCE: 'none' generates (n_levels x frames_per_config) frames per SNR,
 % matching the total frames of any single threat -> prevents class imbalance.
@@ -27,16 +29,18 @@ delay_bits        = 20;           % validated RRC group delay
 modelName         = 'UAV_GCS_Threat_Link';
 
 % Threat -> parameter name + intensity levels
-threat_cfg(1) = struct('name','jamming',          'param','jsr_db',       'levels',[0 4 8 12 16]);
-threat_cfg(2) = struct('name','noise_burst',      'param','jsr_db',       'levels',[0 4 8 12 16]);
-threat_cfg(3) = struct('name','reactive_jamming', 'param','jsr_db',       'levels',[0 4 8 12 16]);
-threat_cfg(4) = struct('name','path_loss',        'param','path_loss_db', 'levels',[4 8 12 16 20]);
-threat_cfg(5) = struct('name','spoofing',         'param','spoof_sir_db', 'levels',[-4 -1 2 5 8]);
-threat_cfg(6) = struct('name','antenna_fault',    'param','fault_duty',   'levels',[0.1 0.2 0.3 0.4 0.5]);
+threat_cfg(1) = struct('name','jamming',             'param','jsr_db',        'levels',[0 4 8 12 16]);
+threat_cfg(2) = struct('name','noise_burst',         'param','jsr_db',        'levels',[0 4 8 12 16]);
+threat_cfg(3) = struct('name','reactive_jamming',    'param','jsr_db',        'levels',[0 4 8 12 16]);
+threat_cfg(4) = struct('name','path_loss',           'param','path_loss_db',  'levels',[4 8 12 16 20]);
+threat_cfg(5) = struct('name','spoofing',            'param','spoof_sir_db',  'levels',[-4 -1 2 5 8]);
+threat_cfg(6) = struct('name','antenna_fault',       'param','fault_duty',    'levels',[0.1 0.2 0.3 0.4 0.5]);
+threat_cfg(7) = struct('name','benign_interference', 'param','benign_int_db', 'levels',[-10 -8 -6 -4 -2]);
+threat_cfg(8) = struct('name','sweeping_jammer',     'param','jsr_db',        'levels',[0 4 8 12 16]);
 
 n_levels = 5;   % all threats have 5 levels
 
-% Class index map: 1=none, 2..7 = threats (in threat_cfg order)
+% Class index map: 1=none, 2..9 = threats (in threat_cfg order)
 class_names = ['none', {threat_cfg.name}];
 
 frame_dur = p.frame_duration;
@@ -46,10 +50,10 @@ StopTime_none = n_levels * frames_per_config * frame_dur;   % balanced none (5x)
 % Storage
 iq_all={}; label_all=[]; level_all=[]; snr_all=[]; ber_all=[]; rssi_all=[]; plr_all=[];
 
-fprintf('\n=== A5 FULL Dataset Generation (Multi-JSR) ===\n');
+fprintf('\n=== A5 FULL Dataset Generation (Multi-JSR, 8 threats) ===\n');
 fprintf('Threats: %d x %d levels x %d SNR | +balanced none | %d frames/config\n', ...
     numel(threat_cfg), n_levels, numel(EbNo_list), frames_per_config);
-fprintf('%-18s %6s %6s %10s %10s\n', 'Threat','Level','SNRs','meanBER','meanRSSI');
+fprintf('%-22s %6s %6s %10s %10s\n', 'Threat','Level','SNRs','meanBER','meanRSSI');
 
 t_start = tic;
 
@@ -84,7 +88,7 @@ for tt = 1:numel(threat_cfg)
             end
             ber_accum=[ber_accum berf]; rssi_accum=[rssi_accum rssif];
         end
-        fprintf('%-18s %6g %6d %10.3e %10.2f\n', cfg.name, level_val, ...
+        fprintf('%-22s %6g %6d %10.3e %10.2f\n', cfg.name, level_val, ...
             numel(EbNo_list), mean(ber_accum,'omitnan'), mean(rssi_accum));
     end
 end
@@ -107,7 +111,7 @@ for s = 1:numel(EbNo_list)
     end
     ber_accum=[ber_accum berf]; rssi_accum=[rssi_accum rssif];
 end
-fprintf('%-18s %6s %6d %10.3e %10.2f\n', 'none', '-', numel(EbNo_list), ...
+fprintf('%-22s %6s %6d %10.3e %10.2f\n', 'none', '-', numel(EbNo_list), ...
     mean(ber_accum,'omitnan'), mean(rssi_accum));
 
 % Restore original params
@@ -118,19 +122,19 @@ dataset.iq=iq_all; dataset.label=label_all(:); dataset.level=level_all(:);
 dataset.class_names=class_names; dataset.snr=snr_all(:);
 dataset.ber=ber_all(:); dataset.rssi=rssi_all(:); dataset.plr=plr_all(:);
 dataset.meta.frames_per_config=frames_per_config; dataset.meta.EbNo_list=EbNo_list;
-dataset.meta.delay_bits=delay_bits; dataset.meta.mode='multi_JSR';
+dataset.meta.delay_bits=delay_bits; dataset.meta.mode='multi_JSR_8threats';
 dataset.meta.threat_cfg=threat_cfg; dataset.meta.created=datestr(now);
 
 if ~exist('data','dir'); mkdir('data'); end
 save('data/dataset.mat','dataset','-v7.3');
 
 %% ---- Summary + balance check ----
-fprintf('\n=== Dataset Summary (Multi-JSR) ===\n');
+fprintf('\n=== Dataset Summary (Multi-JSR, 8 threats) ===\n');
 fprintf('Total frames : %d\n', numel(label_all));
 fprintf('Elapsed      : %.1f s\n', toc(t_start));
 fprintf('\nFrames per class (balance check):\n');
 for c = 1:numel(class_names)
-    fprintf('  %-18s %d\n', class_names{c}, sum(label_all==c));
+    fprintf('  %-22s %d\n', class_names{c}, sum(label_all==c));
 end
 fprintf('\nSaved to data/dataset.mat. Next: run extract_spectrograms.\n');
 

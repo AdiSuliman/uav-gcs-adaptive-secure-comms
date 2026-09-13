@@ -13,7 +13,7 @@ function agent = dqn_agent()
 
     %% 1. Define state and action specs
     % State: 5-dim vector [threat_encoded, BER, RSSI, SNR, PLR]
-    %   threat_encoded: 0-5 (6 threats: jamming, reactive, spoofing, path_loss, burst, fault)
+    %   threat_encoded: 0-7 (8 threats: jamming, reactive, sweeping, spoofing, path_loss, burst, fault, benign)
     %   BER, RSSI, SNR, PLR: continuous observations
     numStates = 5;
     
@@ -26,7 +26,7 @@ function agent = dqn_agent()
     numActions = 5;
     action_names = {'no_action', 'channel_switch', 'rate_reduce', 'freq_diversity', 'spatial_diversity'};
     
-    stateSpec = rlNumericSpec([numStates 1], 'Lower', [0 0 0 0 0]', 'Upper', [5 1 0 20 1]');
+    stateSpec = rlNumericSpec([numStates 1], 'Lower', [0 0 0 0 0]', 'Upper', [7 1 0 20 1]');
     stateSpec.Name = 'threat_state';
     stateSpec.Description = 'threat_encoded, BER, RSSI, SNR, PLR';
     
@@ -34,7 +34,7 @@ function agent = dqn_agent()
     actionSpec.Name = 'countermeasure_action';
     
     fprintf('State spec: %d-dim\n', numStates);
-    fprintf('  threat_class: [0,5] (6 threats)\n');
+    fprintf('  threat_class: [0,7] (8 threats)\n');
     fprintf('  BER: [0,1]\n');
     fprintf('  RSSI: [0,0] (placeholder)\n');
     fprintf('  SNR: [0,20] dB\n');

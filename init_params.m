@@ -46,6 +46,20 @@ params.fault_period   = 200;        % [A4] Antenna Fault: fault on/off cycle len
 params.fault_atten_db = 30;         % [A4] Antenna Fault: severe attenuation during fault (dB)
 params.spoof_sir_db   = 0;          % [A4] Spoofing: Spoof-to-Signal Ratio (dB), 0 = equal power
 params.reactive_threshold = 0.5;    % [A4] Reactive Jamming: signal-energy threshold to trigger jammer
+
+% [A-ext] Benign Interference: weak NON-MALICIOUS in-band noise (e.g. neighboring
+% WiFi/ISM device). Deliberately much weaker than active jamming (-10 to -2 dB vs
+% jamming's 0-16 dB) so it never overlaps the attack power range -- exists to give
+% the CNN a "looks-like-something but isn't an attack" class for FAR measurement.
+params.benign_int_db  = -6;         % [A-ext] Benign Interference power (dB), weak/non-malicious
+
+% [A-ext] Sweeping Jammer: like jamming, but only dwells on our channel a fraction
+% of the time (spends the rest sweeping other channels). Severity axis is still
+% jsr_db (consistent with jamming/noise_burst/reactive_jamming), duty/period are
+% fixed structural constants (same pattern as burst_duty/burst_period for noise_burst).
+params.sweep_duty    = 0.15;        % [A-ext] Sweeping Jammer: fraction of time dwelling on our channel
+params.sweep_period  = 300;         % [A-ext] Sweeping Jammer: full sweep cycle length (symbols, longer than noise_burst's 100)
+
 %% ========== NOISE & SWEEP ==========
 params.EbNo_dB    = 0:2:10;            % [ACTIVE] Eb/N0 sweep range (dB)
 params.num_frames = 1000;             % [ACTIVE] frames accumulated per Eb/N0 point
