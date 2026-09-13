@@ -1,21 +1,25 @@
-# Data and results (too large / recomputable)
+# Build artifacts
+*.mexw64
+*.asv
+slprj/
+*.cgxe
+
+# Data (generate on demand)
+data/
 *.mat
 *.csv
 *.xlsx
-data/
-results/
-logs/
 
-# Simulink build artifacts
-slprj/
-*.slx.autosave
-*.cgxe
-*.mexw64
+# Results (regenerate from code)
+results/
+
+# Logs (optional to store, but no .mat)
+logs/
+*.log
 
 # Python
 __pycache__/
 *.pyc
 
-# MATLAB
-*.asv
+# OS
 .DS_Store
