@@ -1,24 +1,21 @@
+# Data and results (too large / recomputable)
 *.mat
 *.csv
 *.xlsx
-results/*
-data/*
-*.log
-.DS_Store
-__pycache__/
-*.pyc
-*.slx.autosave
+data/
+results/
+logs/
+
+# Simulink build artifacts
 slprj/
+*.slx.autosave
 *.cgxe
 *.mexw64
+
+# Python
+__pycache__/
+*.pyc
+
+# MATLAB
 *.asv
-build_link_model.asv
-data/
-*.mexw64
-slprj/
-*.slx.autosave
-*.asv
-*.mat
-*.asv
-*.mat
-*.asv
+.DS_Store
