@@ -1,7 +1,7 @@
 # UAV-GCS Adaptive Secure Communications System
 
 **Course:** 50076 (HIT) Capstone | **Semester:** 2026-27 A  
-**Students:** Adi Suliman (עדי), Bar Dvir Hassan  
+**Students:** Adi Suliman, Bar Dvir Hassan  
 **Supervisor:** Golan Ein-Tzvi  
 **Language:** MATLAB R2026a + Simulink
 
@@ -13,9 +13,9 @@ An AI-driven closed-loop system for detecting and adapting to link-layer threats
 
 **Key Contributions:**
 - Real-time threat detection (CNN + temporal features, 90.9% accuracy, ~7-10ms latency)
-- Reinforcement learning policy (DQN trained on true Simulink reward, not approximated), with reward shaping so the agent correctly withholds action on non-hostile interference (benign_interference → no_action)
+- Reinforcement learning policy (DQN trained on true Simulink reward, not approximated), with reward shaping so the agent correctly withholds action on non-hostile interference (benign_interference → no_action, none → no_action)
 - Adaptive recovery (channel switching, rate reduction, diversity), with magnitudes empirically validated against a dedicated countermeasure-exploration sweep (EXP phase)
-- Diagnostic suite: decision traces, timing breakdown, rule-based vs learned-policy comparison
+- Diagnostic suite: decision traces, timing breakdown, rule-based vs learned-policy comparison, reward-table variance verification, latency root-cause isolation
 
 ---
 
@@ -29,7 +29,8 @@ An AI-driven closed-loop system for detecting and adapting to link-layer threats
 │   ├── UAV_GCS_Rician_Link.slx   # A3: fading + Doppler
 │   └── UAV_GCS_Threat_Link.slx   # A4-A6: threats + recovery
 ├── docs/
-│   └── DECISIONS.md              # Architecture Decision Record (D1-D11)
+│   └── DECISIONS.md              # Architecture Decision Record (D1-D12)
+├── diagnostics/                  # Ad-hoc investigation scripts, kept for reproducibility
 ├── README.md                     # This file
 ├── PROJECT_LOG.md                # Living execution log — status, fix history, open issues
 ├── ROADMAP.md                    # Project timeline (original plan)
@@ -54,37 +55,42 @@ An AI-driven closed-loop system for detecting and adapting to link-layer threats
 - Phase A (link + dataset): 10–60 min
 - Phase B (detector train): 5–15 min
 - Phase C1 (rule-based): < 1 min
-- Phase C2 (DQN train): ~10-15 min (550 episodes, includes 3x oversampling of benign_interference)
+- Phase C2 (DQN train): ~10-15 min (450+ episodes; benign_interference, none, and antenna_fault oversampled 3x each)
 - Phase C3 (closed-loop diagnostic): 2–5 min
 - Phase EXP (deep countermeasure exploration): ~75 min, run rarely
 
 ---
 
-## Latest Results (Sep 13, 2026)
+## Latest Results (2026-09-14)
 
 **Phase B3 (9-class CNN):**
 - Accuracy: 90.90% | Macro-F1: 90.94%
-- Mean latency: CNN 7.3 ms + DQN 4.2 ms = **~11.5 ms total**
+- Mean latency: CNN 9.3 ms + DQN 4.6 ms = ~14.0 ms | **Median latency: CNN 7.3 ms + DQN 3.1 ms = ~10.3 ms** (median added 09-14; more representative of typical per-decision latency — see Known Issues for why mean runs higher)
 - Best classes: noise_burst, antenna_fault, sweeping_jammer (100%)
-- Weak classes: jamming (67.3%), spoofing (76.2%)
+- Weak classes: jamming (67.3%), spoofing (76.2%, still open — see Known Issues)
 
-**Phase C3 (Closed-Loop, post-fix):**
-- Mean recovery: **40.8%** (honest figure — no threat gets credited for unnecessary action)
-- Best: jamming 68.8% | Worst: antenna_fault 19.4%
-- benign_interference correctly resolves to `no_action` (DQN agrees with rule-based policy)
-- DQN-Rule agreement: 1/8 — remaining disagreements are cosmetic (see Design Notes below)
+**Phase C3 (Closed-Loop, post-fix, verified stable across 2 independent re-runs):**
+- Mean recovery: **36.9-38.1%**
+- Best: jamming 67.7% | Worst: sweeping_jammer 25.2%
+- antenna_fault: 19-20% recovery, DQN agrees with rule-based policy (spatial_diversity)
+- benign_interference and none both correctly resolve to `no_action`
+- DQN-Rule agreement: 5/9 (55.6%) — remaining disagreements are cosmetic (see Design Notes below)
 
 **Phase EXP (countermeasure exploration):**
-- Validated that stronger mitigation magnitudes (up to 25dB) recover far more BER than the original conservative defaults — this directly drove the C2/C3 magnitude fix below
-- antenna_fault's poor recovery was **not** a physical limit — it was an underpowered mitigation setting
+- Validated that stronger mitigation magnitudes (up to 25dB) recover far more BER than the original conservative defaults — this directly drove the C2 magnitude fix
+- antenna_fault's poor recovery was **not** a physical limit — it was an underpowered mitigation setting (later, a separate learned-ranking bug was also found and fixed — see PROJECT_LOG.md)
 
-**Resolved this session:**
-- antenna_fault recovery: 5.4% → 19.4% (magnitude fix)
+**Resolved 2026-09-13:**
+- antenna_fault recovery: 5.4% → 20.2% (magnitude fix)
 - benign_interference reward gap: fixed via reward shaping + train/inference state-mismatch fix + 3x oversampling
+- reactive_jamming CNN misdetection: was a single-sample false alarm, not systematic (88.9% recall on full test set)
+
+**Resolved 2026-09-14:**
+- antenna_fault Q-value bleed (encoding adjacency to benign_interference's penalized code) + ranking inversion (insufficient training episodes) — both fixed via threat_encode reassignment and 3x oversampling; DQN-Rule agreement 22.2% → 55.6%, confirmed stable across 2 independent re-runs
+- noise_burst latency outlier — confirmed as a test-harness artifact (spike tied to sequential loop position, approx. every 4th predict() call — reproduced moving to a different threat when loop order changed), not threat-specific and not representative of real deployed latency; median latency reporting added
 
 **Still open (see PROJECT_LOG.md for full detail):**
-- noise_burst latency outlier (varies 42-75ms across runs vs 5-12ms for other threats — reproducibility under investigation)
-- reactive_jamming CNN misdetection (71.2% confidence → classified as spoofing)
+- Spoofing 3-way confusion (53.0% recall) — genuine feature-space overlap with jamming/reactive_jamming/benign_interference, documented as a known limitation (docs/DECISIONS.md D12)
 
 ---
 
@@ -93,7 +99,7 @@ An AI-driven closed-loop system for detecting and adapting to link-layer threats
 ### Digital Twin (Simulink)
 - **Transmitter:** QPSK + RRC pulse shaping (sps=4)
 - **Channel:** Rician (K=10dB, fd=160Hz) + AWGN
-- **Threats (8):** jamming, reactive jamming, spoofing, noise burst, path loss, antenna fault, sweeping jammer, benign interference
+- **Classes (9):** jamming, reactive jamming, spoofing, noise burst, path loss, antenna fault, sweeping jammer, benign interference, none (clean channel)
 - **Metrics:** BER, RSSI, SNR, PLR
 
 ### Detection (CNN Hybrid)
@@ -102,10 +108,11 @@ An AI-driven closed-loop system for detecting and adapting to link-layer threats
 - **Performance:** 90.90% accuracy, ~7ms inference
 
 ### Decision (DQN)
-- **State:** [threat_class, BER, RSSI, SNR, PLR] (5-dim) — real measured values at both train and inference time (train/inference mismatch fixed Sep 13)
+- **State:** [threat_class, BER, RSSI, SNR, PLR] (5-dim) — real measured values at both train and inference time (train/inference mismatch fixed 09-13)
+- **Threat encoding:** explicit 9-value assignment (not naive 0-8 ordinal) — antenna_fault deliberately placed at maximum encoding distance from the penalized benign_interference/none classes to prevent Q-value bleed between adjacent codes (fixed 09-14, see PROJECT_LOG.md)
 - **Actions:** {no_action, channel_switch, rate_reduce, freq_diversity, spatial_diversity}
-- **Reward:** Real Simulink BER improvement, with a false-alarm penalty shaping term for benign_interference (D9: non-hostile interference should not trigger a countermeasure)
-- **Training:** 550 episodes (benign_interference oversampled 3x to counter reward-scale imbalance — see PROJECT_LOG.md), ε-decay
+- **Reward:** Real Simulink BER improvement, with a false-alarm penalty shaping term for benign_interference and none (D9: non-hostile/no-threat conditions should not trigger a countermeasure)
+- **Training:** benign_interference, none, and antenna_fault oversampled 3x (see PROJECT_LOG.md for why each needed it), ε-decay
 
 ### Recovery — mitigation magnitudes (validated via EXP phase)
 - **channel_switch / freq_diversity:** 25 dB reduction (frequency-avoidance-type mitigation)
@@ -113,7 +120,7 @@ An AI-driven closed-loop system for detecting and adapting to link-layer threats
 - **spatial_diversity:** 25 dB reduction (antenna-diversity/backup-path-type mitigation)
 - A physical floor prevents `path_loss_db`/`fault_atten_db` from going negative (unphysical signal amplification) under strong mitigation
 
-**Design note:** in the current implementation, all four non-zero actions apply the same operation (subtract their assigned dB value from the threat's own severity field) — they differ only in assigned magnitude, not mechanism. Most residual "DQN vs rule-based disagreement" is therefore cosmetic (the two choices are functionally equivalent), except where it actually changes behavior — e.g. benign_interference, where the correct choice (no_action) is now reliably learned.
+**Design note:** in the current implementation, the four non-zero actions apply the same operation (subtract their assigned dB value from the threat's own severity field) — they differ only in assigned magnitude, not mechanism. Most residual DQN-vs-rule-based disagreement is therefore cosmetic (the two choices are functionally near-equivalent). This is separate from the antenna_fault Q-value bug found and fixed on 09-14, which was a genuine learned-ranking error, not a labeling mismatch.
 
 ---
 
@@ -124,24 +131,26 @@ See `docs/DECISIONS.md` for full Architecture Decision Record:
 - **D2:** All-in MATLAB/Simulink (RF modeling + RL Toolbox)
 - **D3:** Small UAV, 2.4 GHz ISM, short-range LoS
 - **D8:** Signal-level threat injection (not metric-level)
-- **D9:** Non-hostile faults (antenna_fault, path_loss, benign_interference) deliberately included so the system learns to distinguish real attacks from benign/faulty conditions
+- **D9:** Non-hostile faults (antenna_fault, path_loss, benign_interference, none) deliberately included so the system learns to distinguish real attacks from benign/faulty/clean conditions
 - **D11:** System Objects engine (replaced commfilt2 ISI floor)
+- **D12:** Spoofing 3-way confusion documented as a known limitation, not retrained (see PROJECT_LOG.md)
 
-See `PROJECT_LOG.md` for the full fix history (3 DQN training iterations, root-cause analysis, and EXP-phase findings behind each design decision above).
+See `PROJECT_LOG.md` for the full fix history (5 DQN training iterations, root-cause analysis, and EXP-phase findings behind each design decision above).
 
 ---
 
 ## Known Issues & Future Work
 
 **Open issues (see PROJECT_LOG.md for details):**
-- Noise burst latency outlier (magnitude inconsistent across runs — needs isolated repeated-trial verification)
-- Reactive jamming CNN misdetection: 71.2% confidence confusion with spoofing (unaffected by any DQN-side fix; likely spectral overlap or insufficient training samples)
+- Spoofing 3-way confusion with jamming/reactive_jamming/benign_interference (53.0% recall) — genuine feature-space overlap, documented as a known limitation rather than retrained
 
 **Future work:**
 - Sim-to-real validation (SDR testbed)
 - Multi-threat scenarios
 - Online reinforcement learning
 - FPGA/GPU acceleration
+- Dashboard (proposal deliverable, not yet started)
+- Survivability-boundary mapping (proposal deliverable, not yet started)
 
 ---
 
@@ -165,5 +174,5 @@ Key sources from the project proposal (IEEE format):
 
 ---
 
-**Last Updated:** 2026-09-13  
-**Status:** Phase A+B+C+EXP complete | 2 of 4 known issues open | Phase D preparation
+**Last Updated:** 2026-09-14  
+**Status:** Phase A+B+C+EXP complete | 1 of 5 known issues open | Phase D preparation

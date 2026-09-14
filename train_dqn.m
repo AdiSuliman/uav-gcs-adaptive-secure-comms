@@ -19,12 +19,39 @@ agent = dqn_agent();
 
 %% 2. Setup
 num_episodes = 50;      % episodes per threat family
-num_threats = 8;
+num_threats = 9;        % UPDATED: added 'none' (see rationale below)
 total_episodes = num_episodes * num_threats;
 
+% UPDATED (Sep 13): 'none' (clean channel) added as its own trained class.
+% It was previously absent from this list entirely -- meaning the DQN never
+% saw it during training and defaulted to treating it like any other
+% (aggressive-action-favoring) threat when the CNN correctly identified a
+% clean channel. Confirmed via diagnose_none_class.m: DQN picked
+% channel_switch over no_action by a huge, consistent margin (Q=40.2 vs 1.78
+% across 5 trials) on a genuinely clean link -- a real false-alarm risk,
+% directly relevant to the proposal's FAR (false alarm rate) KPI.
 threat_list = {'jamming', 'reactive_jamming', 'sweeping_jammer', 'noise_burst', ...
-               'path_loss', 'spoofing', 'antenna_fault', 'benign_interference'};
-threat_encode = [0 1 2 3 4 5 6 7];  % matches dqn_agent.m stateSpec [0,7]
+               'path_loss', 'spoofing', 'antenna_fault', 'benign_interference', 'none'};
+% REASSIGNED (Sep 13, antenna_fault Q-value bleed investigation): scalar
+% ordinal encoding implicitly signals "closeness" between adjacent codes.
+% antenna_fault previously sat at code 6, directly next to benign_interference
+% (7) -- which carries a hard -40pp false-alarm penalty AND 3x oversampling.
+% diagnose_antenna_fault_reward.m confirmed the reward table itself is
+% clean/stable (std<2%) with channel_switch=+20.5% recovery, yet trained
+% Q-values showed channel_switch=-14.51 -- values on the SAME scale as
+% benign_interference's penalty, not antenna_fault's own reward table.
+% Fix: reassign codes so antenna_fault sits at the midpoint (max distance
+% from both penalized classes), while benign_interference/none keep the
+% array endpoints (0 and 8) since they're intentionally "special".
+% ALSO FIXES a separate bug: this array must match threat_encode_map in
+% run_closed_loop_diagnostic.m / run_closed_loop_with_detector.m exactly --
+% those files previously had noise_burst/spoofing swapped relative to this
+% list's index order, meaning C3 fed the wrong encoding to the trained
+% network for those two threats. All three files are now kept in sync by
+% using the SAME threat_list order and the SAME explicit code assignment
+% below (order: jamming, reactive_jamming, sweeping_jammer, noise_burst,
+% path_loss, spoofing, antenna_fault, benign_interference, none).
+threat_encode = [1 2 3 5 6 7 4 8 0];  % matches dqn_agent.m stateSpec [0,8]
 
 action_names = agent.action_names;   % {'no_action','channel_switch','rate_reduce','freq_diversity','spatial_diversity'}
 % UPDATED (post-EXP analysis, Sep 13): magnitudes raised to match the best
@@ -35,9 +62,14 @@ action_names = agent.action_names;   % {'no_action','channel_switch','rate_reduc
 % and the weak recovery numbers across most threats in the original C3 diagnostic.
 action_mitigation_db = struct('no_action',0,'channel_switch',25,'rate_reduce',15, ...
     'freq_diversity',25,'spatial_diversity',25);
+% 'none' mapped to 'jsr_db' as a technical placeholder only: build_threat_model.m's
+% 'none' branch is a pure passthrough (reproduces the clean A3 Rician baseline)
+% and does not read jsr_db at all, so any mitigation "applied" to it is a no-op
+% on the actual simulated signal -- the reward-shaping penalty below (not the
+% BER effect) is what teaches the agent to leave a clean channel alone.
 strength_field = containers.Map( ...
-    {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','antenna_fault','spoofing','benign_interference'}, ...
-    {'jsr_db', 'jsr_db',           'jsr_db',          'jsr_db',   'path_loss_db','fault_atten_db','spoof_sir_db','benign_int_db'});
+    {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','antenna_fault','spoofing','benign_interference','none'}, ...
+    {'jsr_db', 'jsr_db',           'jsr_db',          'jsr_db',   'path_loss_db','fault_atten_db','spoof_sir_db','benign_int_db','jsr_db'});
 
 init_params;
 p0 = load('params.mat').params;
@@ -45,7 +77,7 @@ baseline = struct('jsr_db',p0.jsr_db,'path_loss_db',p0.path_loss_db, ...
     'fault_atten_db',p0.fault_atten_db,'spoof_sir_db',p0.spoof_sir_db, ...
     'benign_int_db',p0.benign_int_db);
 
-%% 3. Pre-compute REAL threat x action reward table (8 threats x 5 actions = 40 combos)
+%% 3. Pre-compute REAL threat x action reward table (9 threats x 5 actions = 45 combos)
 fprintf('Building real threat-specific reward table (40 combos, real Simulink runs)...\n\n');
 reward_table = zeros(num_threats, 5);   % recovery_pct
 ber_after_table = zeros(num_threats, 5);
@@ -83,18 +115,24 @@ for ti = 1:num_threats
     end
     fprintf('\n');
 
-    % --- Reward shaping: false-alarm penalty for benign_interference ---
-    % benign_interference is NOT a real attack (D9, docs/DECISIONS.md): the
-    % correct response is no_action. Pure BER-recovery reward doesn't capture
-    % this -- any action that reduces benign_int_db "recovers" some BER, so
-    % the raw reward table (see printed values above) makes no_action look
-    % WORSE than acting, teaching the agent to overreact to non-threats.
-    % Fix: apply a fixed penalty to every non-no_action reward for this threat,
-    % modeling the real-world cost of an unnecessary countermeasure (bandwidth,
-    % latency, resource use) that a pure BER metric ignores. Magnitude (40pp)
-    % is a design choice, not empirically measured -- large enough to make
-    % no_action's near-0% reward clearly dominant over acting's ~25-28%.
-    if strcmp(threat, 'benign_interference')
+    % --- Reward shaping: false-alarm penalty for non-hostile scenarios ---
+    % benign_interference and 'none' (clean channel) are NOT real attacks
+    % (D9, docs/DECISIONS.md): the correct response for both is no_action.
+    % Pure BER-recovery reward doesn't capture this:
+    %  - benign_interference: any action that reduces benign_int_db
+    %    "recovers" some BER, so raw reward makes no_action look WORSE.
+    %  - 'none': no field it maps to is actually read by build_threat_model's
+    %    passthrough branch, so every action gets ~0% recovery here --
+    %    meaning WITHOUT shaping, no_action and every other action look
+    %    EQUALLY good, which is not enough signal for the network to learn
+    %    the FAR-relevant behavior of actively preferring no_action.
+    % Fix (both cases): apply a fixed penalty to every non-no_action reward,
+    % modeling the real-world cost of an unnecessary countermeasure
+    % (bandwidth, latency, resource use, plus the operational cost the
+    % proposal names explicitly for FAR: "false alarm triggers an
+    % unnecessary channel switch that disrupts the link"). Magnitude (40pp)
+    % is a design choice, not empirically measured.
+    if any(strcmp(threat, {'benign_interference', 'none'}))
         false_alarm_penalty = 40;
         no_action_idx = find(strcmp(action_names, 'no_action'));
         for ai = 1:5
@@ -138,18 +176,16 @@ training_loss = [];
 avg_rewards_per_episode = [];
 episode_rewards = [];
 
-% OVERSAMPLING (proposal risk #3 mitigation, adapted from dataset class-balance
-% to DQN reward-balance): benign_interference's reward-shaped values (~-1 to
-% -17) live on a completely different scale from the other 7 threats' large
-% positive rewards (~20-90). In a single shared regression network, this
-% caused benign_interference's gradient signal to be drowned out -- confirmed
-% by the trained Q-values ranking it incorrectly despite a clean, correctly-
-% shaped reward table. Fix: give it proportionally more training repetitions
-% so its gradient contribution isn't overwhelmed by the larger-magnitude
-% threats. Factor of 3x is a starting point, not derived from theory --
-% increase further if benign_interference's Q-values still don't rank
-% no_action highest after this run.
-oversample_factor = containers.Map(threat_list, {1, 1, 1, 1, 1, 1, 1, 3});
+% UPDATED (Sep 14, antenna_fault ranking-inversion investigation): the
+% encode-distance fix (threat_encode reassignment) resolved the Q-value
+% bleed from benign_interference, but exposed a second issue: antenna_fault
+% has a much smaller reward gap between actions (8%-23%, ~15pp) than most
+% other threats (many 40-70pp+), and with only 50 non-oversampled episodes
+% the shared regression network learned an INVERTED ranking (rate_reduce
+% Q=22.55 highest, when reward table says freq_diversity=23% is truly best;
+% achieved only 0.7% recovery in C3). Applying the same oversampling fix
+% already proven for benign_interference/none.
+oversample_factor = containers.Map(threat_list, {1, 1, 1, 1, 1, 1, 3, 3, 3});
 threat_schedule = [];
 for ti = 1:num_threats
     threat_schedule = [threat_schedule, repmat(ti, 1, num_episodes * oversample_factor(threat_list{ti}))]; %#ok<AGROW>
@@ -157,7 +193,7 @@ end
 threat_schedule = threat_schedule(randperm(numel(threat_schedule)));  % shuffle training order
 total_episodes = numel(threat_schedule);
 
-fprintf('Training on %d episodes (%d threats, benign_interference oversampled %dx)\n\n', ...
+fprintf('Training on %d episodes (%d threats, benign_interference+none oversampled %dx)\n\n', ...
     total_episodes, num_threats, oversample_factor('benign_interference'));
 
 prev_threat = '';
@@ -188,7 +224,9 @@ for ep = 1:total_episodes
     % and learned nothing from them. But run_closed_loop_diagnostic.m (C3)
     % feeds REAL measured RSSI/SNR/PLR at inference, a distribution the
     % network never trained on. This mismatch was silently scrambling the
-    % learned action ranking. Fix: compute real RSSI/SNR/PLR here, exactly as
+    % learned action ranking (seen clearest in benign_interference, where the
+    % reward-shaped table clearly favors no_action but the trained Q-values
+    % ranked it 4th of 5). Fix: compute real RSSI/SNR/PLR here, exactly as
     % C3 does, so train-time and inference-time states match.
     if ~isempty(iq_rx)
         rssi = 10*log10(mean(abs(iq_rx).^2) + eps);

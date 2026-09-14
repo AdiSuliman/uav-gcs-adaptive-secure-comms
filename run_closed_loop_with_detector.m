@@ -64,10 +64,17 @@ baseline.jsr_db = p.jsr_db; baseline.path_loss_db = p.path_loss_db;
 baseline.fault_atten_db = p.fault_atten_db; baseline.spoof_sir_db = p.spoof_sir_db;
 baseline.benign_int_db = p.benign_int_db;
 
-% Matches dqn_agent.m stateSpec [0,7] and train_dqn.m threat_encode
+% Matches dqn_agent.m stateSpec [0,8] and train_dqn.m threat_encode
+% FIXED (Sep 13, antenna_fault Q-value bleed investigation): this map
+% previously had noise_burst/spoofing swapped relative to train_dqn.m's
+% threat_list index order -- meaning the trained network was queried with
+% the wrong encoding for those two threats. Also reassigns antenna_fault
+% away from being adjacent to benign_interference's penalized code (see
+% train_dqn.m header for full rationale). Now keys/values match
+% train_dqn.m's threat_encode and run_closed_loop_diagnostic.m exactly.
 threat_encode_map = containers.Map( ...
-    {'jamming','reactive_jamming','sweeping_jammer','spoofing','path_loss','noise_burst','antenna_fault','benign_interference'}, ...
-    {0,1,2,3,4,5,6,7});
+    {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','spoofing','antenna_fault','benign_interference','none'}, ...
+    {1,2,3,5,6,7,4,8,0});
 
 results = struct('threat',{},'true_class',{},'cnn_pred',{},'cnn_conf',{}, ...
     'action',{},'ber_before',{},'ber_after',{},'recovery_pct',{},'correct_detection',{});

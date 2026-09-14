@@ -11,10 +11,9 @@
 %   - End-to-end decision latency: CNN + DQN combined (excludes Simulink
 %     build/sim time, which is NOT part of a real system's reaction time)
 %
-% NOTE: tests all 8 threats the CNN was trained on after the Phase B retrain
+% NOTE: tests all 9 threats the CNN was trained on after the Phase B retrain
 % (jamming, reactive_jamming, sweeping_jammer, noise_burst, path_loss,
-% spoofing, antenna_fault, benign_interference). Updated from the original
-% 6-threat version once B2 was retrained on the 9-class dataset (8 threats + none).
+% spoofing, antenna_fault, benign_interference, none).
 %
 % Output: results/closed_loop_diagnostic_report.txt (full per-threat breakdown)
 %         results/closed_loop_diagnostic_timing.png  (latency bar chart)
@@ -37,16 +36,30 @@ p0 = load('params.mat').params;
 fs = p0.symbol_rate * p0.sps;
 delay_bits = 20;
 
-threats = {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','spoofing','antenna_fault','benign_interference'};
+% UPDATED (Sep 13): 'none' added -- was previously absent, causing every
+% correct 'none' CNN prediction to feed threat_enc=-1 (out-of-distribution)
+% to the DQN, which confirmed-picked aggressive actions on a clean channel
+% (diagnose_none_class.m). 'none' now has its own trained reward-shaped
+% class (see train_dqn.m) so it needs its own encoding here too.
+threats = {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','spoofing','antenna_fault','benign_interference','none'};
 strength_field = containers.Map( ...
-    {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','antenna_fault','spoofing','benign_interference'}, ...
-    {'jsr_db','jsr_db','jsr_db','jsr_db','path_loss_db','fault_atten_db','spoof_sir_db','benign_int_db'});
+    {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','antenna_fault','spoofing','benign_interference','none'}, ...
+    {'jsr_db','jsr_db','jsr_db','jsr_db','path_loss_db','fault_atten_db','spoof_sir_db','benign_int_db','jsr_db'});
 % UPDATED (post-EXP analysis, Sep 13): see train_dqn.m header for rationale.
 action_mitigation_db = struct('no_action',0,'channel_switch',25,'rate_reduce',15, ...
     'freq_diversity',25,'spatial_diversity',25);
 action_names = dqn_agent_trained.action_names;
+% FIXED (Sep 13-14, antenna_fault Q-value bleed investigation): this map
+% previously had noise_burst/spoofing swapped relative to train_dqn.m's
+% threat_list index order -- meaning the trained network was queried with
+% the wrong encoding for those two threats during this diagnostic. Also
+% reassigns antenna_fault away from being adjacent to benign_interference's
+% penalized code (see train_dqn.m header for the full rationale). Now
+% keys/values match train_dqn.m's threat_encode and
+% run_closed_loop_with_detector.m exactly.
 threat_encode_map = containers.Map( ...
-    {'jamming','reactive_jamming','sweeping_jammer','spoofing','path_loss','noise_burst','antenna_fault','benign_interference'}, {0,1,2,3,4,5,6,7});
+    {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','spoofing','antenna_fault','benign_interference','none'}, ...
+    {1,2,3,5,6,7,4,8,0});
 
 baseline = struct('jsr_db',p0.jsr_db,'path_loss_db',p0.path_loss_db, ...
     'fault_atten_db',p0.fault_atten_db,'spoof_sir_db',p0.spoof_sir_db, ...
@@ -211,6 +224,15 @@ report{end+1} = '=== SUMMARY ===';
 report{end+1} = sprintf('Mean CNN latency: %.2f ms | Mean DQN latency: %.2f ms | Mean total: %.2f ms', ...
     mean([results.cnn_latency_ms]), mean([results.dqn_latency_ms]), ...
     mean([results.cnn_latency_ms]+[results.dqn_latency_ms]));
+% ADDED (Sep 14): median alongside mean. Confirmed via
+% diagnose_latency_position_test.m that noise_burst's prior latency outlier
+% (~27-48ms CNN, ~12-29ms DQN) is a periodic ~4th-sequential-call test-harness
+% artifact (GPU housekeeping), not threat-specific -- median is robust to
+% this kind of positional outlier and better represents true per-decision
+% latency than mean.
+report{end+1} = sprintf('Median CNN latency: %.2f ms | Median DQN latency: %.2f ms | Median total: %.2f ms', ...
+    median([results.cnn_latency_ms]), median([results.dqn_latency_ms]), ...
+    median([results.cnn_latency_ms]+[results.dqn_latency_ms]));
 report{end+1} = sprintf('DQN-vs-Rule agreement: %d/%d (%.1f%%)', ...
     sum([results.agrees_with_rule]), numel(results), 100*mean([results.agrees_with_rule]));
 report{end+1} = sprintf('Mean recovery: %.1f%%', mean([results.recovery_pct]));
