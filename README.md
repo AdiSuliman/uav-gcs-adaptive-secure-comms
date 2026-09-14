@@ -56,25 +56,25 @@ An AI-driven closed-loop system for detecting and adapting to link-layer threats
 - Phase B (detector train): 5–15 min
 - Phase C1 (rule-based): < 1 min
 - Phase C2 (DQN train): ~10-15 min (450+ episodes; benign_interference, none, and antenna_fault oversampled 3x each)
-- Phase C3 (closed-loop diagnostic): 2–5 min
+- Phase C3 (closed-loop, both scripts): 4–8 min total
 - Phase EXP (deep countermeasure exploration): ~75 min, run rarely
 
 ---
 
-## Latest Results (2026-09-14)
+## Latest Results (2026-09-15)
 
 **Phase B3 (9-class CNN):**
 - Accuracy: 90.90% | Macro-F1: 90.94%
-- Mean latency: CNN 9.3 ms + DQN 4.6 ms = ~14.0 ms | **Median latency: CNN 7.3 ms + DQN 3.1 ms = ~10.3 ms** (median added 09-14; more representative of typical per-decision latency — see Known Issues for why mean runs higher)
+- Mean latency: CNN 9.3 ms + DQN 4.6 ms | **Median latency: CNN 4.4-7.3 ms + DQN 3.0 ms** (median added 09-14; more representative of typical per-decision latency — see Known Issues for why mean runs higher)
 - Best classes: noise_burst, antenna_fault, sweeping_jammer (100%)
 - Weak classes: jamming (67.3%), spoofing (76.2%, still open — see Known Issues)
 
-**Phase C3 (Closed-Loop, post-fix, verified stable across 2 independent re-runs):**
-- Mean recovery: **36.9-38.1%**
-- Best: jamming 67.7% | Worst: sweeping_jammer 25.2%
-- antenna_fault: 19-20% recovery, DQN agrees with rule-based policy (spatial_diversity)
+**Phase C3 (Closed-Loop) — fully verified, both scripts:**
+- `run_closed_loop_diagnostic.m` (ground-truth-conditioned): mean recovery 36.6-38.1%, DQN-Rule agreement 5/9 (55.6%), stable across 3 independent runs
+- `run_closed_loop_with_detector.m` (CNN-prediction-conditioned, real detector uncertainty): detection accuracy 75.0% (6/8), average recovery 41.6% — run for the first time post-fix on 09-15, zero errors
+- Best: jamming ~68% | Worst: sweeping_jammer ~25%
+- antenna_fault: 17-20% recovery, DQN agrees with rule-based policy (spatial_diversity), consistent across both scripts
 - benign_interference and none both correctly resolve to `no_action`
-- DQN-Rule agreement: 5/9 (55.6%) — remaining disagreements are cosmetic (see Design Notes below)
 
 **Phase EXP (countermeasure exploration):**
 - Validated that stronger mitigation magnitudes (up to 25dB) recover far more BER than the original conservative defaults — this directly drove the C2 magnitude fix
@@ -85,12 +85,13 @@ An AI-driven closed-loop system for detecting and adapting to link-layer threats
 - benign_interference reward gap: fixed via reward shaping + train/inference state-mismatch fix + 3x oversampling
 - reactive_jamming CNN misdetection: was a single-sample false alarm, not systematic (88.9% recall on full test set)
 
-**Resolved 2026-09-14:**
-- antenna_fault Q-value bleed (encoding adjacency to benign_interference's penalized code) + ranking inversion (insufficient training episodes) — both fixed via threat_encode reassignment and 3x oversampling; DQN-Rule agreement 22.2% → 55.6%, confirmed stable across 2 independent re-runs
-- noise_burst latency outlier — confirmed as a test-harness artifact (spike tied to sequential loop position, approx. every 4th predict() call — reproduced moving to a different threat when loop order changed), not threat-specific and not representative of real deployed latency; median latency reporting added
+**Resolved 2026-09-14/15:**
+- antenna_fault Q-value bleed (encoding adjacency to benign_interference's penalized code) + ranking inversion (insufficient training episodes) — both fixed via threat_encode reassignment and 3x oversampling; DQN-Rule agreement 22.2% → 55.6%
+- noise_burst latency outlier — confirmed as a test-harness artifact (spike tied to sequential loop position, approx. every 4th predict() call), not threat-specific; median latency reporting added
+- `run_closed_loop_with_detector.m` verified end-to-end for the first time post-fix — Phase C3 is now fully complete
 
 **Still open (see PROJECT_LOG.md for full detail):**
-- Spoofing 3-way confusion (53.0% recall) — genuine feature-space overlap with jamming/reactive_jamming/benign_interference, documented as a known limitation (docs/DECISIONS.md D12)
+- Spoofing 3-way confusion (53.0% recall) — genuine feature-space overlap with jamming/reactive_jamming/benign_interference, documented as a known limitation (docs/DECISIONS.md D12), reconfirmed live in the 09-15 closed-loop run
 
 ---
 
@@ -151,6 +152,7 @@ See `PROJECT_LOG.md` for the full fix history (5 DQN training iterations, root-c
 - FPGA/GPU acceleration
 - Dashboard (proposal deliverable, not yet started)
 - Survivability-boundary mapping (proposal deliverable, not yet started)
+- FAR (false alarm rate) explicit measurement (named proposal KPI, not yet started)
 
 ---
 
@@ -174,5 +176,5 @@ Key sources from the project proposal (IEEE format):
 
 ---
 
-**Last Updated:** 2026-09-14  
+**Last Updated:** 2026-09-15  
 **Status:** Phase A+B+C+EXP complete | 1 of 5 known issues open | Phase D preparation

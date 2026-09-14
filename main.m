@@ -2,8 +2,8 @@
 % UAV-GCS Adaptive Secure Communications System
 % Orchestrates Phase A (Link+Threats+Dataset) -> B (Detection) -> C (Recovery) -> D (Report)
 % Author: Adi Suliman, Bar Dvir Hassan
-% Last Updated: 2026-09-13 (8-threat expansion, real DQN reward, full diary logging)
-%פ שרצ
+% Last Updated: 2026-09-14 (9-threat/class pipeline, antenna_fault + latency fixes, full diary logging)
+%
 % Toggle the RUN flags below (true/false). They execute in the order listed.
 % Light stages are fast; heavy stages (A5-A6, B2, C2, explore_countermeasures)
 % take minutes to over an hour -- leave them false unless regenerating.
@@ -31,7 +31,7 @@ fprintf('(This file will contain EVERYTHING printed below, even across clc calls
 RUN.init                        = false;    % A0 : regenerate params.mat
 RUN.validate_A                  = false;    % A1-A3: build + validate AWGN & Rician (fast)
 RUN.check_A4                    = false;    % A4 : build threat model + sanity BER (fast)
-RUN.build_dataset               = false;   % A5 : run_dataset_sweep (8 threats)     (HEAVY ~8 min) >> ONE-TIME
+RUN.build_dataset               = false;   % A5 : run_dataset_sweep (9 threats, incl. none)  (HEAVY ~8 min) >> ONE-TIME
 RUN.extract_spectrograms        = false;   % A6 : extract_spectrograms              (HEAVY ~3 min) >> ONE-TIME
 
 RUN.temporal_features           = false;   % B2.5: extract_temporal_features        (fast) >> ONE-TIME
@@ -39,9 +39,9 @@ RUN.prepare_data                = false;   % B1  : prepare_data                 
 RUN.train_detector              = false;   % B2  : train_detector (9-class CNN)     (HEAVY ~7 min GPU) >> ONE-TIME
 RUN.eval_detector               = false;    % B3  : eval_detector                    (fast, safe to leave true)
 
-RUN.train_dqn                   = false;   % C2  : train_dqn (real reward table)    (HEAVY ~5 min) >> ONE-TIME
-RUN.run_closed_loop             = false;   % C3  : run_closed_loop_with_detector    (HEAVY ~4 min, 8 threats)
-RUN.run_closed_loop_diagnostic  = true;   % C3d : full diagnostics + timing         (HEAVY ~4 min, 8 threats)
+RUN.train_dqn                   = false;   % C2  : train_dqn (real reward table, 9 threats)  (HEAVY ~5 min) >> ONE-TIME
+RUN.run_closed_loop             = true;    % C3  : run_closed_loop_with_detector    (HEAVY ~4 min, 9 threats) -- verify post-fix, not yet run
+RUN.run_closed_loop_diagnostic  = true;    % C3d : full diagnostics + timing         (HEAVY ~4 min, 9 threats)
 
 RUN.explore_countermeasures     = false;   % EXP : deep countermeasure sweep         (VERY HEAVY ~75 min) >> RUN RARELY
 RUN.analyze_exploration_results = false;   % EXP-analysis: post-hoc diagnosis        (fast, needs EXP output first)
@@ -81,7 +81,7 @@ if RUN.check_A4
 end
 
 if RUN.build_dataset
-    fprintf('  [A5] Generating multi-JSR dataset, 8 threats (HEAVY ~8 min)...\n');
+    fprintf('  [A5] Generating multi-JSR dataset, 9 threats/classes incl. none (HEAVY ~8 min)...\n');
     run_dataset_sweep;
 end
 
@@ -146,11 +146,11 @@ end
 fprintf('\n');
 
 %% ========== PHASE C: CLOSED-LOOP RECOVERY (ONLINE) ==========
-fprintf('> PHASE C: Closed-Loop Adaptive Recovery (8 threats)\n\n');
+fprintf('> PHASE C: Closed-Loop Adaptive Recovery (9 threats/classes)\n\n');
 fprintf('  [C1] Rule-based countermeasure policy...           READY (rule_based_policy.m)\n');
 
 if RUN.train_dqn
-    fprintf('  [C2] Training DQN agent (real threat-specific reward table)...\n');
+    fprintf('  [C2] Training DQN agent (real threat-specific reward table, 9 classes)...\n');
     train_dqn;
 end
 if RUN.run_closed_loop
@@ -214,7 +214,7 @@ fprintf('  [D2] Defense presentation (pptx)...                [PENDING]\n\n');
 
 %% ========== CHECKPOINT ==========
 fprintf('========================================================\n');
-fprintf(' CHECKPOINT - Phase A+B+C1+C2+C3 complete (8 threats) | EXP available on demand\n');
+fprintf(' CHECKPOINT - Phase A+B+C1+C2+C3 complete (9 threats/classes) | EXP available on demand\n');
 fprintf(' Outputs in results/, data/ | models in models/ | code on GitHub\n');
 fprintf(' Full run log saved to: %s\n', log_filename);
 fprintf('========================================================\n\n');
