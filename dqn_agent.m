@@ -26,7 +26,14 @@ function agent = dqn_agent()
     numActions = 5;
     action_names = {'no_action', 'channel_switch', 'rate_reduce', 'freq_diversity', 'spatial_diversity'};
     
-    stateSpec = rlNumericSpec([numStates 1], 'Lower', [0 0 0 0 0]', 'Upper', [7 1 0 20 1]');
+    % UPDATED (Sep 13): threat_class range extended 7->8 to include 'none'
+    % (clean channel) as its own class -- previously 'none' predictions fell
+    % through to threat_enc=-1, an out-of-distribution state the network was
+    % never trained on, which caused it to pick aggressive actions
+    % (channel_switch etc.) on a perfectly clean link -- a real false-alarm
+    % bug, confirmed via diagnose_none_class.m (Q(channel_switch)=40.2 vs
+    % Q(no_action)=1.78, consistent across 5 repeated trials).
+    stateSpec = rlNumericSpec([numStates 1], 'Lower', [0 0 0 0 0]', 'Upper', [8 1 0 20 1]');
     stateSpec.Name = 'threat_state';
     stateSpec.Description = 'threat_encoded, BER, RSSI, SNR, PLR';
     
@@ -34,7 +41,7 @@ function agent = dqn_agent()
     actionSpec.Name = 'countermeasure_action';
     
     fprintf('State spec: %d-dim\n', numStates);
-    fprintf('  threat_class: [0,7] (8 threats)\n');
+    fprintf('  threat_class: [0,8] (9 threats, incl. none)\n');
     fprintf('  BER: [0,1]\n');
     fprintf('  RSSI: [0,0] (placeholder)\n');
     fprintf('  SNR: [0,20] dB\n');

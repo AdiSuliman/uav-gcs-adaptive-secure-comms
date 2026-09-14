@@ -28,18 +28,18 @@ fprintf('=== Logging full run to: %s ===\n', log_filename);
 fprintf('(This file will contain EVERYTHING printed below, even across clc calls.)\n\n');
 
 %% ========== EXECUTION FLAGS (in execution order) ==========
-RUN.init                        = true;    % A0 : regenerate params.mat
-RUN.validate_A                  = true;    % A1-A3: build + validate AWGN & Rician (fast)
-RUN.check_A4                    = true;    % A4 : build threat model + sanity BER (fast)
+RUN.init                        = false;    % A0 : regenerate params.mat
+RUN.validate_A                  = false;    % A1-A3: build + validate AWGN & Rician (fast)
+RUN.check_A4                    = false;    % A4 : build threat model + sanity BER (fast)
 RUN.build_dataset               = false;   % A5 : run_dataset_sweep (8 threats)     (HEAVY ~8 min) >> ONE-TIME
 RUN.extract_spectrograms        = false;   % A6 : extract_spectrograms              (HEAVY ~3 min) >> ONE-TIME
 
 RUN.temporal_features           = false;   % B2.5: extract_temporal_features        (fast) >> ONE-TIME
 RUN.prepare_data                = false;   % B1  : prepare_data                     (fast) >> ONE-TIME
 RUN.train_detector              = false;   % B2  : train_detector (9-class CNN)     (HEAVY ~7 min GPU) >> ONE-TIME
-RUN.eval_detector                = true;    % B3  : eval_detector                    (fast, safe to leave true)
+RUN.eval_detector               = false;    % B3  : eval_detector                    (fast, safe to leave true)
 
-RUN.train_dqn                   = true;   % C2  : train_dqn (real reward table)    (HEAVY ~5 min) >> ONE-TIME
+RUN.train_dqn                   = false;   % C2  : train_dqn (real reward table)    (HEAVY ~5 min) >> ONE-TIME
 RUN.run_closed_loop             = false;   % C3  : run_closed_loop_with_detector    (HEAVY ~4 min, 8 threats)
 RUN.run_closed_loop_diagnostic  = true;   % C3d : full diagnostics + timing         (HEAVY ~4 min, 8 threats)
 
