@@ -12,8 +12,8 @@
 An AI-driven closed-loop system for detecting and adapting to link-layer threats (jamming, spoofing, noise, faults) on small-UAV-to-GCS RF links. **Digital Twin approach:** Simulink-based link model self-generates labeled datasets; CNN detector identifies threats in real time; DQN agent decides recovery actions; closed-loop validates BER improvement.
 
 **Key Contributions:**
-- Real-time threat detection (CNN + scalar/temporal features, **98.05% accuracy**, ~3-8ms latency)
-- Reinforcement learning policy (DQN trained on true Simulink reward, one-hot state encoding), with reward shaping so the agent correctly withholds action on non-hostile interference (benign_interference → no_action, none → no_action)
+- Real-time threat detection (CNN + scalar/temporal features, **96.99% accuracy**, ~2.7ms decision latency)
+- Reinforcement learning policy (DQN trained on true Simulink reward, one-hot state encoding), with reward shaping so the agent correctly withholds action on non-hostile interference (benign_interference → no_action, none → no_action) — verified **0% false-alarm rate** across 180 non-hostile trials
 - Adaptive recovery (channel switching, rate reduction, diversity), with magnitudes empirically validated against a dedicated countermeasure-exploration sweep (EXP phase, 2550 scenarios)
 - Survivability boundary mapping (proposal deliverable #7): separate Threat-Neutralization and Link-Survivability maps, with gap analysis distinguishing genuine attack removal from SNR-margin tradeoffs
 - Diagnostic suite: decision traces, timing breakdown, rule-based vs learned-policy comparison, FAR measurement, KPI aggregation
@@ -31,7 +31,7 @@ An AI-driven closed-loop system for detecting and adapting to link-layer threats
 │   ├── UAV_GCS_Rician_Link.slx   # A3: fading + Doppler
 │   └── UAV_GCS_Threat_Link.slx   # A4-A6: threats + recovery
 ├── docs/
-│   └── DECISIONS.md              # Architecture Decision Record (D1-D17)
+│   └── DECISIONS.md              # Architecture Decision Record (D1-D21)
 ├── diagnostics/                  # Ad-hoc investigation scripts, kept for reproducibility
 ├── README.md                     # This file
 ├── PROJECT_LOG.md                # Living execution log — status, fix history, open issues
@@ -67,34 +67,48 @@ An AI-driven closed-loop system for detecting and adapting to link-layer threats
 
 ---
 
-## Latest Results (2026-09-19)
+## Latest Results (2026-09-19, post full re-run after D18)
+
+All numbers below are from the pipeline re-run after the Rx_IQ tap-point fix
+(D18) — spectrograms and RSSI now reflect the real swept AWGN noise, so these
+are the physically-correct results, not the earlier artificially-flat ones.
 
 ### Phase B3 — CNN Detector (9-class)
-- **Accuracy: 98.05%** (up from 90.90% after the spoofing root-cause fix below)
-- Per-SNR range: 97.6%–98.9% (stable, no SNR-dependent collapse)
-- All 9 classes well-separated; spoofing (the former weak class) now recalls 98.7-99.7% across two independent retrains
-
-### Root-Cause Fix: Spoofing Detection (2026-09-18)
-**Problem:** `build_threat_model.m` injected spoofing as i.i.d. per-sample random noise — not a coherent modulated carrier — making it spectrally indistinguishable from jamming/reactive_jamming/benign_interference. This was the actual cause of spoofing's historical instability (53-79% recall across runs), not a detector-architecture limitation.
-**Fix:** Spoofing now generates a real bit stream, QPSK-modulates it, and RRC-shapes it — identical processing to the legitimate Tx path.
-**Result:** Spoofing recall 53-79% → 98.7% / 99.7% (two independent retrains, different seeds). Overall CNN accuracy 91.81% → 98.05%.
-**Consequence:** The CNN-LSTM comparison architecture (Phase B-exp), originally explored to close this exact gap, is no longer motivated — see D13.
-
-### DQN State Encoding: Ordinal → One-Hot (2026-09-18)
-**Problem:** DQN state used a scalar ordinal threat code (0-8) fed directly into the network. Neural networks interpret scalar input as continuous, causing Q-value interpolation ("bleed") between adjacent, unrelated threat codes.
-**Fix:** One-hot encoding (9-dim) + 4 continuous link metrics = 13-dim state, built by the single shared function `build_dqn_state.m` (used identically by training and both closed-loop scripts — encoding cannot drift).
-**Validation gate:** `train_dqn.m` refuses to save an agent that fails either: Gate A (benign_interference/none must choose no_action) or Gate B (every real threat must NOT choose no_action).
-
-### Closed-Loop Sliding-Window Fix (2026-09-18)
-**Problem:** `run_closed_loop_diagnostic.m` fed the CNN neutral placeholder values (0,0,1) for the 3 temporal features, since a single-shot run has no history — but the CNN was trained on real sliding-window features. Closed-loop detection accuracy was only 79.6% vs 98.05% on the held-out test set, with reactive_jamming→jamming and none→path_loss failing 100% of the time.
-**Fix:** Each Simulink run's ~20 returned frames are now used to build real sliding-window temporal features (matching `extract_spectrograms.m`'s training-time logic exactly), with NaN-guards mirroring `prepare_data.m`.
-**Result: Closed-loop detection accuracy 100% (54/54)** — all 9 classes, all 6 SNR points.
+- **Overall accuracy: 96.99%** (macro-F1 96.98%)
+- Per-SNR: 94.1% @ 0dB → 98.0% @ 2dB → 96.3% @ 4dB → 98.2% @ 6dB → 97.8% @ 8dB → 97.6% @ 10dB — now shows genuine SNR-dependent degradation at the low edge (as physically expected, post-D18), not the earlier artificially-flat curve
+- Weakest class: reactive_jamming (88.0% recall, confuses with jamming — the distinction is temporal); all others ≥95%. spoofing 100%, noise_burst 100%, sweeping_jammer 100%
 
 ### Phase C3 (Closed-Loop) — current numbers
 - Detection accuracy in closed loop: **100%** (54/54, all 9 threats × 6 SNR points)
-- Mean BER recovery (real threats): **74.9%**
-- Median latency: **~3.3ms** (CNN + DQN combined)
-- benign_interference and none both correctly resolve to `no_action`
+- Mean BER recovery (real threats): **74.6%**
+- Mean/median decision latency: **2.67 / 2.54 ms** (CNN + DQN inference)
+- benign_interference and none: DQN chose **no_action in all 12 cases** (2 classes × 6 SNR) — recovery correctly reported as N/A (no countermeasure applied, nothing to recover)
+
+### FAR (False Alarm Rate) — proposal KPI, section ה
+- **0.0%** across 180 trials (none + benign_interference, swept over SNR = 0/4/10 dB, N=30 each), upper 95% CI bound 3.3% via Rule-of-Three
+- none CNN detection accuracy 98.9%, benign_interference 100% — no false alarm at any SNR, including the 0 dB worst case
+
+### Prior root-cause fixes (2026-09-18, still in effect — see DECISIONS.md D12/D14/D16)
+- **Spoofing (D12):** was injected as incoherent per-sample noise (indistinguishable from jamming). Now coherent QPSK, RRC-shaped like the real Tx. Recall 53-79% → ~100%.
+- **DQN state (D14):** scalar-ordinal threat code caused Q-value bleed between adjacent codes. Replaced with 13-dim one-hot via the shared `build_dqn_state.m`.
+- **Closed-loop sliding window (D16):** CNN was fed placeholder temporal features in the closed loop while trained on real ones. Now builds real sliding-window features from each run's ~20 frames.
+
+### Phase EXP + Survivability Boundary Mapping (proposal deliverable #7)
+Ran `explore_countermeasures.m` (2550 scenarios, 85.8 min) then `map_survivability_boundary.m`. EXP is BER-only (uses `quick_ber`, not the Rx_IQ spectrogram path), so it was **not** affected by D18 and did not need re-running. Two separate maps:
+
+- **Map A — Threat Neutralization** (mechanisms: `atten_reduction`, `field_reduction` only — genuine attack removal): **84.6% recoverable**, 12.4% marginal, 3.0% non-recoverable (234 states mapped)
+- **Map B — Link Survivability** (all mechanisms, including `awgn_margin_boost`): **87.9% recoverable**, 9.6% marginal, 2.5% non-recoverable (240 states mapped)
+
+**Why two maps:** `awgn_margin_boost` raises effective SNR rather than neutralizing the threat — it can make the link outperform the nominal clean-channel floor without the attack being weakened at all. A single map conflates "the link survived" with "the threat was removed." Map A is the literal reading of proposal deliverable #7; Map B shows the ceiling of everything the system can do, including SNR-margin tradeoffs.
+
+**Gap analysis:** 1 cell (path_loss, level=8, SNR=10dB) where the link survives via Map B but not Map A — the proposal's goodput-tradeoff regime made concrete: survival without neutralization.
+
+**Known coverage gap (not a bug):** path_loss at its lowest severity level (level=4) has no Map A data point — the smallest tested `field_reduction` magnitude (5dB) already exceeds that attack's severity (4dB), so every candidate mitigation at that level would imply unphysical signal amplification and is correctly excluded by the legitimacy filter.
+
+### KPI #3 — Decision Latency (DQN vs Rule-Based), redefined
+**Original problem:** the metric was defined as "recovery cycles to convergence," but both policies are single-shot, deterministic dB reductions — there is no multi-cycle dynamic to measure. Redefined to decision **latency**: Rule-based (hardcoded lookup) is faster than DQN (neural network inference) by roughly three orders of magnitude — expected and unremarkable on its own, but worth stating precisely rather than reporting a meaningless "cycles" number.
+
+**Design clarification for the report:** the DQN-vs-rule "agreement" comparison (Phase C3 diagnostic, ~52%) compares only the *chosen action name* between the two policies. `rule_based_policy.m`'s own per-threat mitigation magnitudes are not applied anywhere in the closed-loop pipeline — both policies' physical effect is computed via the shared `action_mitigation_db` (25/15/25/25 dB per action). This should be stated explicitly wherever "agreement" is reported, to avoid implying two independently-implemented countermeasure systems are being compared.
 
 ### Phase EXP + Survivability Boundary Mapping (proposal deliverable #7, 2026-09-19)
 Ran `explore_countermeasures.m` (2550 scenarios, 85.8 min) then `map_survivability_boundary.m`, producing **two separate maps**:
@@ -129,7 +143,7 @@ Ran `explore_countermeasures.m` (2550 scenarios, 85.8 min) then `map_survivabili
 ### Detection (CNN Hybrid)
 - **Input:** [128×128×1] spectrogram + [7-dim] scalar/temporal features (SNR, BER, RSSI, PLR, var_rssi_10, dber_dt, burst_ratio)
 - **Architecture:** CNN (64→128 filters, GAP) + FC (32→16) → merged FC → softmax(9)
-- **Performance:** 98.05% accuracy, 3-8ms inference
+- **Performance:** 96.99% accuracy, ~1.8ms CNN inference (2.67ms combined with DQN)
 
 ### Decision (DQN)
 - **State:** one-hot(9 threat classes) + [BER, RSSI, SNR, PLR] = **13-dim**, built exclusively via `build_dqn_state.m` (train and inference share the same function — encoding cannot drift)
@@ -161,6 +175,10 @@ See `docs/DECISIONS.md` for the full Architecture Decision Record:
 - **D15:** KPI #3 redefinition — recovery cycles → decision latency
 - **D16:** Closed-loop sliding-window feature fix
 - **D17:** Survivability boundary — two-map methodology (neutralization vs. survivability)
+- **D18:** Rx_IQ tap point fixed (post-AWGN, not pre-AWGN) — full pipeline re-run completed, numbers above are post-fix
+- **D19:** rule_based_policy.m's per-threat mitigation_db documented as unused (comparison is decision-policy only)
+- **D20:** Shared `extract_closed_loop_frames.m` — the sliding-window frame extraction (D16) was still missing from `diagnose_far_measurement.m`; extracted to one shared function so it can't drift again. Fixed a FAR-measurement bug (missing AWGN `set_param` per trial) that had inflated FAR to ~72%; real FAR is 0%.
+- **D21:** Closed-loop diagnostic reports recovery as N/A when the DQN chose no_action (non-hostile/no-threat cases), instead of a meaningless BER ratio on an untouched channel. GPU warm-up strengthened so latency is steady from the first measured run.
 
 See `PROJECT_LOG.md` for the full fix history and session-by-session detail behind each decision above.
 
@@ -169,10 +187,11 @@ See `PROJECT_LOG.md` for the full fix history and session-by-session detail behi
 ## Known Issues & Future Work
 
 **Open items:**
-- KPI Dashboard (proposal deliverable #1, final product) — in progress
+- KPI Dashboard (proposal deliverable #1, final product) — script drafted (`build_kpi_dashboard.m`), not yet finalized
 - Interim/final report writeup (Phase D) — not started
 - `src/` directory — present locally, not tracked in git; contents not yet audited
 - `extract_temporal_features.m` — orphaned (not called anywhere in the pipeline; folded into `extract_spectrograms.m`); candidate for removal
+- reactive_jamming 88% recall (below the 90% per-class line, though macro-F1 is 96.98%) — confuses with continuous jamming; the distinction is temporal. Candidate for targeted improvement or documentation as a known limitation.
 
 **Future work:**
 - Sim-to-real validation (SDR testbed)
@@ -208,5 +227,5 @@ Key sources from the project proposal (IEEE format):
 
 ---
 
-**Last Updated:** 2026-09-19
-**Status:** Phase A+B+C+EXP complete, survivability mapping complete | Phase D (dashboard + writeup) in progress
+**Last Updated:** 2026-09-19 (post D18 full re-run + D20/D21 fixes)
+**Status:** Phase A+B+C+EXP complete and re-verified, survivability mapping complete, all 5 proposal KPIs met | Phase D (dashboard + writeup) in progress

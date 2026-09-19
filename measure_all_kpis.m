@@ -1,18 +1,28 @@
 %% MEASURE_ALL_KPIS.m — aggregates all 5 proposal KPIs (section ה) into one report.
 % Strategy per KPI: check for an existing, fresh result file on disk first;
 % if missing, CALL the specific script that generates it (never reimplement
-% that logic here). 
+% that logic here).
 %
-% "Fresh" = the source .mat/.txt file's timestamp is newer than the relevant
-% code file's timestamp AND newer than MAX_STALE_DAYS -- avoids silently
-% reporting stale numbers from before a bug fix.
+% "Fresh" = the source file's timestamp is newer than MAX_STALE_DAYS --
+% avoids silently reporting stale numbers from before a bug fix.
+%
+% FIX (2026-09-19): (a) MAX_STALE_DAYS was 3 -- inconsistent with
+% measure_kpi3_recovery_time.m's 0.5 (12h), and stale enough to let
+% pre-fix results count as "fresh". Now 0.5 everywhere. (b) KPI#2 and
+% KPI#5 previously regex-parsed closed_loop_diagnostic_report.txt with
+% patterns tuned to an older report layout ("--- Threat: X ---", "Mean
+% recovery: X%") that no longer match the current sliding-window-sweep
+% format ("--- X @ SNR=Y dB ---", one block per threat-SNR pair). This
+% silently produced empty/"NOT MET" results. Both KPIs now read the
+% results struct directly from closed_loop_diagnostic_results.mat,
+% which is immune to any future report-text reformatting.
 %
 % Output: results/kpi_summary.txt
 
 close all; clc;
 fprintf('=== KPI AGGREGATION: proposal section ה, all 5 KPIs ===\n\n');
 
-MAX_STALE_DAYS = 3;   % re-run source script if existing result is older than this
+MAX_STALE_DAYS = 0.5;   % 12 hours -- re-run source script if existing result is older than this
 
 report = {};
 report{end+1} = '=== PROPOSAL KPI SUMMARY (section ה) ===';
@@ -52,40 +62,42 @@ end
 report{end+1} = 'Full confusion matrix: see results/confusion_matrix.png';
 report{end+1} = '';
 
-%% ---------- KPI #2: Recovery vs baseline ----------
+%% ---------- KPI #2: Recovery vs baseline (reads the .mat struct, not the .txt report) ----------
 fprintf('--- KPI #2: Recovery vs baseline ---\n');
-diag_report_path = 'results/closed_loop_diagnostic_report.txt';
-need_rerun = ~exist(diag_report_path, 'file');
+diag_mat_path = 'results/closed_loop_diagnostic_results.mat';
+need_rerun = ~exist(diag_mat_path, 'file');
 if ~need_rerun
-    d = dir(diag_report_path);
+    d = dir(diag_mat_path);
     need_rerun = (now - datenum(d.date)) > MAX_STALE_DAYS;
 end
 if need_rerun
-    fprintf('  No fresh results/closed_loop_diagnostic_report.txt found -- running run_closed_loop_diagnostic...\n');
-    run_closed_loop_diagnostic;   % script
+    fprintf('  No fresh %s found -- running run_closed_loop_diagnostic...\n', diag_mat_path);
+    run_closed_loop_diagnostic;
 end
 
-txt = fileread(diag_report_path);
-% Parse per-threat recovery% and the SUMMARY block
-threat_blocks = regexp(txt, '--- Threat: (\w+) ---.*?recovery=([\d.-]+)%', 'tokens');
-mean_recovery_match = regexp(txt, 'Mean recovery: ([\d.-]+)%', 'tokens', 'once');
-agreement_match = regexp(txt, 'DQN-vs-Rule agreement: (\d+/\d+) \(([\d.]+)%\)', 'tokens', 'once');
+DL = load(diag_mat_path, 'results');
+cl_results = DL.results;
+cl_threats = unique({cl_results.threat}, 'stable');
 
-report{end+1} = sprintf('--- KPI #2: Link Quality Recovery vs Healthy Baseline ---');
-report{end+1} = sprintf('Source: %s', diag_report_path);
-for i = 1:numel(threat_blocks)
-    report{end+1} = sprintf('  %-20s recovery=%s%%', threat_blocks{i}{1}, threat_blocks{i}{2});
+report{end+1} = '--- KPI #2: Link Quality Recovery vs Healthy Baseline ---';
+report{end+1} = sprintf('Source: %s', diag_mat_path);
+recov_by_threat = zeros(1, numel(cl_threats));
+for i = 1:numel(cl_threats)
+    mask = strcmp({cl_results.threat}, cl_threats{i});
+    recov_by_threat(i) = mean([cl_results(mask).recovery_pct]);
+    report{end+1} = sprintf('  %-20s recovery=%.1f%% (mean over SNR sweep)', cl_threats{i}, recov_by_threat(i));
 end
-if ~isempty(mean_recovery_match)
-    report{end+1} = sprintf('  Mean recovery: %s%%', mean_recovery_match{1});
-end
-report{end+1} = 'NOTE: this is per-threat single-point recovery, not a full survivability-boundary';
-report{end+1} = 'map (proposal deliverable #7) -- that is a separate, larger analysis, not yet started.';
+real_mask_names = ~ismember(cl_threats, {'benign_interference','none'});
+report{end+1} = sprintf('  Mean recovery (all threats, all SNR): %.1f%%', mean([cl_results.recovery_pct]));
+report{end+1} = sprintf('  Mean recovery (real threats only):    %.1f%%', mean(recov_by_threat(real_mask_names)));
+report{end+1} = 'NOTE: this is per-threat SNR-swept recovery, not the full survivability-boundary';
+report{end+1} = 'map (proposal deliverable #7) -- that is results/survivability_boundary_mapA.txt';
+report{end+1} = 'and mapB.txt (map_survivability_boundary.m), a separate, larger analysis.';
 report{end+1} = '';
 
-%% ---------- KPI #3: DQN vs Rule-Based (recovery TIME) ----------
+%% ---------- KPI #3: DQN vs Rule-Based (decision latency) ----------
 fprintf('--- KPI #3: DQN vs Rule-Based ---\n');
-report{end+1} = '--- KPI #3: DQN vs Rule-Based (recovery TIME in decision-cycles/frames) ---';
+report{end+1} = '--- KPI #3: DQN vs Rule-Based (decision latency) ---';
 kpi3_path = 'results/kpi3_measurement.txt';
 need_rerun = ~exist(kpi3_path, 'file');
 if ~need_rerun
@@ -99,26 +111,17 @@ end
 kpi3_txt = fileread(kpi3_path);
 report{end+1} = sprintf('Source: %s', kpi3_path);
 report{end+1} = strtrim(kpi3_txt); % Insert the text generated by the KPI3 script
-if ~isempty(agreement_match)
-    report{end+1} = '';
-    report{end+1} = sprintf('(Also measured: DQN-vs-Rule action agreement = %s (%s%%) from diagnostic run)', ...
-        agreement_match{1}, agreement_match{2});
-end
 report{end+1} = '';
 
-%% ---------- KPI #5: Single End-to-End Baseline ----------
+%% ---------- KPI #5: Single End-to-End Baseline (reads the .mat struct) ----------
 fprintf('--- KPI #5: End-to-end baseline ---\n');
 report{end+1} = '--- KPI #5: Single End-to-End Baseline (detect->decide->recover, >=1 recoverable threat) ---';
-if ~isempty(threat_blocks)
-    best_recov = -inf; best_threat = '';
-    for i = 1:numel(threat_blocks)
-        v = str2double(threat_blocks{i}{2});
-        if v > best_recov, best_recov = v; best_threat = threat_blocks{i}{1}; end
-    end
-    report{end+1} = sprintf('MET: %s recovers %.1f%% end-to-end (CNN detect -> DQN decide -> apply -> re-measure).', ...
-        best_threat, best_recov);
+if ~isempty(recov_by_threat)
+    [best_recov, best_i] = max(recov_by_threat);
+    report{end+1} = sprintf('MET: %s recovers %.1f%% end-to-end, averaged over the SNR sweep (CNN detect -> DQN decide -> apply -> re-measure).', ...
+        cl_threats{best_i}, best_recov);
 else
-    report{end+1} = 'NOT MET -- no recovery data parsed, check diagnostic report format.';
+    report{end+1} = 'NOT MET -- no recovery data found in closed_loop_diagnostic_results.mat.';
 end
 report{end+1} = '';
 

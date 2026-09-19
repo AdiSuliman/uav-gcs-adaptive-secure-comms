@@ -60,16 +60,26 @@ results = struct('threat',{},'snr_db',{},'cnn_top_class',{},'cnn_conf',{},'cnn_p
     'rule_based_action',{},'agrees_with_rule',{},'cnn_correct',{}, ...
     'ber_before',{},'ber_after',{},'recovery_pct',{},'n_frames',{},'temporal_feats',{});
 
-%% WARM-UP: first predict() call includes one-time GPU JIT compilation cost
-% (~700ms). Run one dummy inference so it doesn't skew the first measurement.
-fprintf('Warming up CNN and DQN networks (one-time GPU JIT cost, excluded from results)...\n');
-dummy_spec = dlarray(single(zeros(img_size,img_size,1,1)), 'SSCB');
-dummy_feat = dlarray(single(zeros(1,7))', 'CB');
-if canUseGPU, dummy_spec = gpuArray(dummy_spec); dummy_feat = gpuArray(dummy_feat); end
-predict(cnn_net, dummy_spec, dummy_feat);
-dummy_state = dlarray(single(zeros(dqn_agent_trained.numStates,1)), 'CB');
-if canUseGPU, dummy_state = gpuArray(dummy_state); end
-predict(dqn_agent_trained.qNetwork, dummy_state);
+%% WARM-UP: the first predict() calls trigger one-time GPU JIT + cuDNN kernel
+% autotuning (the actual convolution kernels are selected lazily on the first
+% real-sized input, not on a single dummy pass). A single warm-up leaves the
+% first few real measurements inflated (observed: whole SNR=0 block at 4-29ms
+% vs ~2ms steady-state, with the worst single spike landing arbitrarily on
+% whichever class ran 4th). Several warm-up iterations force autotuning to
+% finish before timing starts, so latencies are steady from the first real run.
+fprintf('Warming up CNN and DQN networks (GPU JIT + cuDNN autotune, excluded from results)...\n');
+dummy_spec = dlarray(single(rand(img_size,img_size,1,1)), 'SSCB');
+dummy_feat = dlarray(single(rand(1,7))', 'CB');
+dummy_state = dlarray(single(rand(dqn_agent_trained.numStates,1)), 'CB');
+if canUseGPU
+    dummy_spec = gpuArray(dummy_spec); dummy_feat = gpuArray(dummy_feat);
+    dummy_state = gpuArray(dummy_state);
+end
+for warm = 1:10
+    predict(cnn_net, dummy_spec, dummy_feat);
+    predict(dqn_agent_trained.qNetwork, dummy_state);
+end
+if canUseGPU, wait(gpuDevice); end   % block until all warm-up kernels finish
 fprintf('Warm-up complete.\n\n');
 
 total_runs = numel(threats) * numel(SNR_points);
@@ -103,7 +113,7 @@ for s = 1:numel(SNR_points)
 
         %% --- Simulate: extract ALL frames, not just the first ---
         out = sim(modelName);
-        [iq_frames, ber_f, rssi_f, plr_f, nf] = extract_all_frames(out, p, delay_bits);
+        [iq_frames, ber_f, rssi_f, plr_f, nf] = extract_closed_loop_frames(out, p, delay_bits);
 
         % Decide on the last frame that has a valid BER. The final frame of a
         % run is often NaN by construction (see header).
@@ -172,26 +182,41 @@ for s = 1:numel(SNR_points)
                  (strcmp(action_name,'channel_switch') && strcmp(rule_action,'channel_switch_fast'));
 
         %% --- Apply chosen countermeasure, measure recovery ---
-        mitigation_db = action_mitigation_db.(action_name);
-        p.(field) = baseline.(field) - mitigation_db;
-        if any(strcmp(field, {'path_loss_db','fault_atten_db'}))
-            p.(field) = max(p.(field), 0);   % physical floor
+        % When the DQN chose no_action (correct for non-hostile/no-threat
+        % cases), there is no countermeasure to measure: BER "before" vs
+        % "after" would just be two independent noise draws of the same
+        % untouched channel, and dividing their tiny difference produces a
+        % meaningless large ratio (e.g. -28.9% at high SNR where BER ~1e-3).
+        % Report recovery as NaN in that case -- "no action taken, nothing to
+        % recover" -- which is the correct reading, not a failure.
+        if strcmp(action_name, 'no_action')
+            ber_before_mean = mean(ber_f, 'omitnan');
+            ber_after       = ber_before_mean;   % nothing applied
+            recovery_pct    = NaN;
+            fprintf('    DQN: %-18s (%.2f ms) | Rule: %-18s | Recovery: N/A (no action)\n\n', ...
+                action_name, dqn_latency_ms, rule_action);
+        else
+            mitigation_db = action_mitigation_db.(action_name);
+            p.(field) = baseline.(field) - mitigation_db;
+            if any(strcmp(field, {'path_loss_db','fault_atten_db'}))
+                p.(field) = max(p.(field), 0);   % physical floor
+            end
+            params = p; save('params.mat', 'params');
+            build_threat_model;
+            set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), ...
+                'SignalPower', num2str(1/p.sps));
+
+            % Before/after both averaged over all valid frames of their runs,
+            % so the comparison is like-for-like.
+            out2 = sim(modelName);
+            [~, ber_f2, ~, ~, ~] = extract_closed_loop_frames(out2, p, delay_bits);
+            ber_after       = mean(ber_f2, 'omitnan');
+            ber_before_mean = mean(ber_f,  'omitnan');
+            recovery_pct = 100*(ber_before_mean-ber_after)/max(ber_before_mean,eps);
+
+            fprintf('    DQN: %-18s (%.2f ms) | Rule: %-18s | Recovery: %.1f%%\n\n', ...
+                action_name, dqn_latency_ms, rule_action, recovery_pct);
         end
-        params = p; save('params.mat', 'params');
-        build_threat_model;
-        set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), ...
-            'SignalPower', num2str(1/p.sps));
-
-        % Before/after both averaged over all valid frames of their runs, so
-        % the comparison is like-for-like.
-        out2 = sim(modelName);
-        [~, ber_f2, ~, ~, ~] = extract_all_frames(out2, p, delay_bits);
-        ber_after       = mean(ber_f2, 'omitnan');
-        ber_before_mean = mean(ber_f,  'omitnan');
-        recovery_pct = 100*(ber_before_mean-ber_after)/max(ber_before_mean,eps);
-
-        fprintf('    DQN: %-18s (%.2f ms) | Rule: %-18s | Recovery: %.1f%%\n\n', ...
-            action_name, dqn_latency_ms, rule_action, recovery_pct);
 
         results(end+1) = struct('threat',threat,'snr_db',ebno, ...
             'cnn_top_class',cnn_pred_class,'cnn_conf',conf,'cnn_probs',probs_vec, ...
@@ -241,12 +266,23 @@ for t = 1:numel(threats)
     mask_t = strcmp({results.threat}, threats{t});
     for s = 1:numel(SNR_points)
         mask = mask_t & ([results.snr_db] == SNR_points(s));
-        line = [line sprintf('%9.1f%%', results(mask).recovery_pct)];
+        rp = results(mask).recovery_pct;
+        if isnan(rp)
+            line = [line sprintf('%10s', 'N/A')];
+        else
+            line = [line sprintf('%9.1f%%', rp)];
+        end
     end
-    line = [line sprintf('%9.1f%%', mean([results(mask_t).recovery_pct]))];
+    mean_rp = mean([results(mask_t).recovery_pct], 'omitnan');
+    if isnan(mean_rp)
+        line = [line sprintf('%10s', 'N/A')];
+    else
+        line = [line sprintf('%9.1f%%', mean_rp)];
+    end
     report{end+1} = line;
 end
 report{end+1} = '';
+report{end+1} = 'N/A = DQN chose no_action (no countermeasure applied, nothing to recover).';
 
 %% --- Section 2: CNN detection accuracy per SNR ---
 report{end+1} = '--- Section 2: CNN Detection Accuracy in Closed Loop, per SNR ---';
@@ -296,8 +332,13 @@ for i = 1:numel(results)
     end
     report{end+1} = sprintf('  DQN: %s (%.2f ms) | Q: %s', r.dqn_action, r.dqn_latency_ms, qstr);
     report{end+1} = sprintf('  Rule: %s | agrees=%d', r.rule_based_action, r.agrees_with_rule);
-    report{end+1} = sprintf('  BER before=%.3e after=%.3e recovery=%.1f%%', ...
-        r.ber_before, r.ber_after, r.recovery_pct);
+    if isnan(r.recovery_pct)
+        report{end+1} = sprintf('  BER before=%.3e after=%.3e recovery=N/A (no action)', ...
+            r.ber_before, r.ber_after);
+    else
+        report{end+1} = sprintf('  BER before=%.3e after=%.3e recovery=%.1f%%', ...
+            r.ber_before, r.ber_after, r.recovery_pct);
+    end
 end
 report{end+1} = '';
 
@@ -313,13 +354,13 @@ report{end+1} = sprintf('CNN closed-loop detection accuracy: %d/%d (%.1f%%)', ..
     sum([results.cnn_correct]), numel(results), 100*mean([results.cnn_correct]));
 report{end+1} = sprintf('DQN-vs-Rule agreement: %d/%d (%.1f%%)', ...
     sum([results.agrees_with_rule]), numel(results), 100*mean([results.agrees_with_rule]));
-report{end+1} = sprintf('Mean recovery (all threats, all SNR): %.1f%%', mean([results.recovery_pct]));
+report{end+1} = sprintf('Mean recovery (all threats, all SNR): %.1f%%', mean([results.recovery_pct], 'omitnan'));
 
 % Mean over real threats only. benign_interference and none have nothing to
-% recover -- including them drags the mean down and misrepresents performance
-% on actual attacks.
+% recover (DQN correctly chose no_action -> recovery is N/A/NaN for them),
+% so they are excluded both by the real_mask and by omitnan.
 real_mask = ~ismember({results.threat}, {'benign_interference','none'});
-report{end+1} = sprintf('Mean recovery (real threats only): %.1f%%', mean([results(real_mask).recovery_pct]));
+report{end+1} = sprintf('Mean recovery (real threats only): %.1f%%', mean([results(real_mask).recovery_pct], 'omitnan'));
 
 fid = fopen('results/closed_loop_diagnostic_report.txt','w');
 for i=1:numel(report), fprintf(fid,'%s\n',report{i}); end
@@ -371,31 +412,5 @@ fprintf('\n=== Diagnostic Complete ===\n');
 % Mirrors local_extract() in run_dataset_sweep.m so the features computed
 % here match those the detector was trained on, including its NaN convention
 % for the final short frame.
-function [iq_frames, ber, rssi, plr, nf] = extract_all_frames(out, p, delay_bits)
-    txb = double(squeeze(out.get('tx_bits_out')));
-    rxb = double(squeeze(out.get('rx_bits_out')));
-    iq  = squeeze(out.get('Rx_IQ'));
-    if isvector(txb), txb=txb(:); end
-    if isvector(rxb), rxb=rxb(:); end
-    if isvector(iq),  iq=iq(:);   end
-
-    nf  = size(iq,2);
-    bpf = p.frame_length;
-    tx_all = txb(:); rx_all = rxb(:);
-    Lmax = min(numel(tx_all),numel(rx_all)) - delay_bits;
-    tx_al = tx_all(1:Lmax);
-    rx_al = rx_all(delay_bits+1:delay_bits+Lmax);
-
-    iq_frames = cell(1,nf); ber=zeros(1,nf); rssi=zeros(1,nf); plr=zeros(1,nf);
-    for f = 1:nf
-        iq_frames{f} = iq(:,f);
-        i0=(f-1)*bpf+1; i1=f*bpf;
-        if i1 <= numel(tx_al)
-            ber(f) = mean(tx_al(i0:i1) ~= rx_al(i0:i1));
-        else
-            ber(f) = NaN;
-        end
-        rssi(f) = 10*log10(mean(abs(iq(:,f)).^2)+eps);
-        plr(f)  = double(ber(f) > 0.1);
-    end
-end
+% (extract_closed_loop_frames.m -- shared with diagnose_far_measurement.m as
+% of D20, was a local function here only, see that file's header for why)

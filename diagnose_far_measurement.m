@@ -1,23 +1,32 @@
-%% DIAGNOSE_FAR_MEASUREMENT.m — measures False Alarm Rate (FAR), proposal KPI (section ה)
+%% DIAGNOSE_FAR_MEASUREMENT.m — False Alarm Rate (FAR) characterization, proposal KPI (section ה)
 % FAR = fraction of non-hostile cases (none, benign_interference) where the
 % closed-loop system (CNN detection -> DQN decision) triggers ANY countermeasure
-% other than no_action. The proposal names this explicitly as a KPI: false
-% alarms have a real operational cost (an unnecessary channel switch disrupts
-% a healthy link), so this must be measured directly.
+% other than no_action. False alarms have a real operational cost (an
+% unnecessary channel switch disrupts a healthy link), so the proposal names
+% this explicitly as a KPI.
 %
-% Runs N_REPEATS independent trials per class (fresh Simulink/Rician draw each
-% time), through the FULL closed loop (CNN prediction feeds the DQN, exactly as
-% deployed -- not the ground-truth-conditioned path used in
-% run_closed_loop_diagnostic.m). Also reports CNN detection accuracy on
-% none/benign_interference specifically: a false alarm can originate from
-% either a CNN misdetection or the DQN's own decision on a correct detection.
+% CHARACTERIZATION MODE (2026-09-19, D20): swept across several SNR points
+% instead of only the worst case. A single-SNR measurement at 0 dB showed
+% none->path_loss confusion at ~70%, but a single (threat,SNR) run in
+% run_closed_loop_diagnostic.m had shown 100% -- because that diagnostic uses
+% N=1 per cell, while this uses N_REPEATS independent draws. Sweeping SNR here
+% tells us whether the confusion is a low-SNR edge effect (none and weak
+% path_loss both look like "weak structureless signal + strong AWGN" at 0 dB)
+% or a model weakness across the whole envelope -- which decides whether the
+% fix is documentation, retraining, or an operational hysteresis/dwell-time.
+%
+% Uses the same real sliding-window feature pipeline as
+% run_closed_loop_diagnostic.m (extract_closed_loop_frames.m, D20) -- NOT the
+% pre-D16 neutral placeholder.
 %
 % Output: results/far_measurement.txt, results/far_measurement.mat
 
 close all; clc;
-fprintf('=== FAR MEASUREMENT: false alarm rate on non-hostile classes ===\n\n');
+fprintf('=== FAR CHARACTERIZATION: false alarm rate vs SNR on non-hostile classes ===\n\n');
 
-N_REPEATS = 50;   % independent trials per class; raise if CI is too wide
+N_REPEATS = 30;                 % independent trials per (class, SNR)
+SNR_TEST_POINTS = [0 4 10];     % low edge, mid, high edge
+temporal_window = 10;           % must match extract_spectrograms.m
 
 %% 1. Load trained models
 D = load('data/trained_detector.mat', 'net', 'classes');
@@ -31,6 +40,7 @@ img_size = 128; win = 128; novlp = 113; nfft = 128; db_lo = -40; db_hi = 20;
 
 init_params;
 p0 = load('params.mat').params;
+modelName = 'UAV_GCS_Threat_Link';
 fs = p0.symbol_rate * p0.sps;
 delay_bits = 20;
 
@@ -41,7 +51,8 @@ baseline = struct('jsr_db',p0.jsr_db,'path_loss_db',p0.path_loss_db, ...
     'benign_int_db',p0.benign_int_db);
 
 classes_to_test = {'none', 'benign_interference'};
-strength_field = containers.Map({'none','benign_interference'}, {'jsr_db','benign_int_db'});
+
+fprintf('Sweeping SNR = %s dB, %d trials per (class, SNR)\n\n', mat2str(SNR_TEST_POINTS), N_REPEATS);
 
 fprintf('Warming up CNN and DQN networks...\n');
 dummy_spec = dlarray(single(zeros(img_size,img_size,1,1)), 'SSCB');
@@ -53,122 +64,141 @@ if canUseGPU, dummy_state = gpuArray(dummy_state); end
 predict(dqn_agent_trained.qNetwork, dummy_state);
 fprintf('Warm-up complete.\n\n');
 
-results = struct('class',{},'trial',{},'cnn_pred',{},'cnn_correct',{}, ...
+results = struct('class',{},'snr',{},'trial',{},'cnn_pred',{},'cnn_correct',{}, ...
     'dqn_action',{},'false_alarm',{});
 
-for c = 1:numel(classes_to_test)
-    threat = classes_to_test{c};
-    field = strength_field(threat);
-    fprintf('--- Class: %s (%d trials) ---\n', threat, N_REPEATS);
+for si = 1:numel(SNR_TEST_POINTS)
+    ebno = SNR_TEST_POINTS(si);
+    snr_dB = ebno + 10*log10(p0.bits_per_symbol) - 10*log10(p0.sps);
 
-    for r = 1:N_REPEATS
-        p = p0; p.jsr_db=baseline.jsr_db; p.path_loss_db=baseline.path_loss_db;
-        p.fault_atten_db=baseline.fault_atten_db; p.spoof_sir_db=baseline.spoof_sir_db;
-        p.benign_int_db=baseline.benign_int_db;
-        p.active_threat = threat;
-        params = p; save('params.mat', 'params');
-        build_threat_model;
+    for c = 1:numel(classes_to_test)
+        threat = classes_to_test{c};
+        fprintf('--- SNR=%g dB | Class: %s (%d trials) ---\n', ebno, threat, N_REPEATS);
 
-        out = sim('UAV_GCS_Threat_Link');
-        tx = double(squeeze(out.get('tx_bits_out'))); tx = tx(:);
-        rx = double(squeeze(out.get('rx_bits_out'))); rx = rx(:);
-        L = min(numel(tx)-delay_bits, numel(rx)-delay_bits);
-        ber = mean(tx(1:L) ~= rx(delay_bits+1:delay_bits+L));
-        iq_rx = double(squeeze(out.get('Rx_IQ')));
-        if size(iq_rx,2) > 1, iq_rx = iq_rx(:,1); end
-        rssi = 10*log10(mean(abs(iq_rx).^2) + eps);
-        snr_val = p.EbNo_dB(1);
-        plr = double(ber > 0.1);
+        for r = 1:N_REPEATS
+            p = p0; p.jsr_db=baseline.jsr_db; p.path_loss_db=baseline.path_loss_db;
+            p.fault_atten_db=baseline.fault_atten_db; p.spoof_sir_db=baseline.spoof_sir_db;
+            p.benign_int_db=baseline.benign_int_db;
+            p.active_threat = threat;
+            params = p; save('params.mat', 'params');
+            build_threat_model;
+            set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), ...
+                'SignalPower', num2str(1/p.sps));
 
-        Sxx = spectrogram(iq_rx, hann(win), novlp, nfft, fs, 'centered');
-        Pw = 20*log10(abs(Sxx)+eps); Pw = (Pw-db_lo)/(db_hi-db_lo); Pw = min(max(Pw,0),1);
-        spec_img = imresize(Pw, [img_size img_size]);
-        raw_feats = [snr_val, ber, rssi, plr, 0, 0, 1];
-        norm_feats = (raw_feats - feat_mean) ./ feat_std;
-        X_spec = dlarray(single(spec_img), 'SSCB');
-        X_feat = dlarray(single(norm_feats)', 'CB');
-        if canUseGPU, X_spec = gpuArray(X_spec); X_feat = gpuArray(X_feat); end
+            out = sim(modelName);
+            [iq_frames, ber_f, rssi_f, plr_f, nf] = extract_closed_loop_frames(out, p, delay_bits);
 
-        pred_prob = predict(cnn_net, X_spec, X_feat);
-        [~, pred_idx] = max(extractdata(pred_prob));
-        cnn_pred_class = char(cnn_classes(pred_idx));
-        cnn_correct = strcmp(cnn_pred_class, threat);
+            i_last = find(~isnan(ber_f), 1, 'last');
+            if isempty(i_last), i_last = nf; end
 
-        % DQN decides based on the CNN's prediction, exactly as deployed --
-        % NOT on ground truth. A false alarm can come from either a CNN
-        % misdetection OR the DQN's own policy on a correctly-detected
-        % non-hostile class.
-        dqn_state = build_dqn_state(cnn_pred_class, ber, rssi, snr_val, plr);
-        state_dl = dlarray(single(dqn_state), 'CB');
-        if canUseGPU, state_dl = gpuArray(state_dl); end
-        qvals = predict(dqn_agent_trained.qNetwork, state_dl);
-        [~, action_idx] = max(extractdata(qvals));
-        action_name = action_names{action_idx};
+            w0 = max(1, i_last - temporal_window + 1);
+            var_rssi_10 = var(rssi_f(w0:i_last), 0);
+            burst_ratio = mean(plr_f(w0:i_last), 'omitnan');
+            if i_last > 1 && ~isnan(ber_f(i_last)) && ~isnan(ber_f(i_last-1))
+                dber_dt = (ber_f(i_last) - ber_f(i_last-1)) / p.frame_duration;
+            else
+                dber_dt = 0;
+            end
 
-        is_false_alarm = ~strcmp(action_name, 'no_action');
+            iq_rx = iq_frames{i_last};
+            ber   = ber_f(i_last);
+            rssi  = rssi_f(i_last);
+            plr   = plr_f(i_last);
 
-        results(end+1) = struct('class', threat, 'trial', r, ...
-            'cnn_pred', cnn_pred_class, 'cnn_correct', cnn_correct, ...
-            'dqn_action', action_name, 'false_alarm', is_false_alarm); %#ok<SAGROW>
+            Sxx = spectrogram(iq_rx, hann(win), novlp, nfft, fs, 'centered');
+            Pw = 20*log10(abs(Sxx)+eps); Pw = (Pw-db_lo)/(db_hi-db_lo); Pw = min(max(Pw,0),1);
+            spec_img = imresize(Pw, [img_size img_size]);
+            raw_feats = [ebno, ber, rssi, plr, var_rssi_10, dber_dt, burst_ratio];
+            raw_feats(isnan(raw_feats)) = 0;
+            norm_feats = (raw_feats - feat_mean) ./ feat_std;
+            X_spec = dlarray(single(spec_img), 'SSCB');
+            X_feat = dlarray(single(norm_feats)', 'CB');
+            if canUseGPU, X_spec = gpuArray(X_spec); X_feat = gpuArray(X_feat); end
 
-        if mod(r, 10) == 0
-            fprintf('  trial %2d/%d: CNN=%-18s (%s) DQN=%-16s %s\n', r, N_REPEATS, ...
-                cnn_pred_class, string(cnn_correct), action_name, ...
-                string(~is_false_alarm) + " (no false alarm)");
+            pred_prob = predict(cnn_net, X_spec, X_feat);
+            [~, pred_idx] = max(extractdata(pred_prob));
+            cnn_pred_class = char(cnn_classes(pred_idx));
+            cnn_correct = strcmp(cnn_pred_class, threat);
+
+            dqn_state = build_dqn_state(cnn_pred_class, ber, rssi, ebno, plr);
+            state_dl = dlarray(single(dqn_state), 'CB');
+            if canUseGPU, state_dl = gpuArray(state_dl); end
+            qvals = predict(dqn_agent_trained.qNetwork, state_dl);
+            [~, action_idx] = max(extractdata(qvals));
+            action_name = action_names{action_idx};
+
+            is_false_alarm = ~strcmp(action_name, 'no_action');
+
+            results(end+1) = struct('class', threat, 'snr', ebno, 'trial', r, ...
+                'cnn_pred', cnn_pred_class, 'cnn_correct', cnn_correct, ...
+                'dqn_action', action_name, 'false_alarm', is_false_alarm); %#ok<SAGROW>
         end
+        n_fa_this = sum([results(strcmp({results.class},threat) & [results.snr]==ebno).false_alarm]);
+        fprintf('  -> %d/%d false alarms\n\n', n_fa_this, N_REPEATS);
     end
-    fprintf('\n');
 end
 
 params = p0; save('params.mat', 'params');
 
-%% Summary
+%% Summary — per (class, SNR), then per class, then overall
 report = {};
-report{end+1} = '=== FAR MEASUREMENT REPORT ===';
+report{end+1} = '=== FAR CHARACTERIZATION REPORT ===';
 report{end+1} = sprintf('Generated: %s', datestr(now));
-report{end+1} = sprintf('N_REPEATS per class: %d', N_REPEATS);
+report{end+1} = sprintf('N_REPEATS per (class,SNR): %d | SNR points: %s dB', N_REPEATS, mat2str(SNR_TEST_POINTS));
+report{end+1} = '';
+
+report{end+1} = '--- FAR vs SNR, per class ---';
+report{end+1} = sprintf('%-22s %8s %14s %16s', 'Class', 'SNR', 'FAR', 'CNN acc');
+for c = 1:numel(classes_to_test)
+    threat = classes_to_test{c};
+    for si = 1:numel(SNR_TEST_POINTS)
+        ebno = SNR_TEST_POINTS(si);
+        mask = strcmp({results.class}, threat) & [results.snr]==ebno;
+        n = sum(mask);
+        n_fa = sum([results(mask).false_alarm]);
+        n_ok = sum([results(mask).cnn_correct]);
+        report{end+1} = sprintf('%-22s %6g dB %11.1f%% %14.1f%%', threat, ebno, 100*n_fa/n, 100*n_ok/n);
+    end
+    report{end+1} = '';
+end
+
+report{end+1} = '--- Dominant misclassification (where false alarms come from) ---';
+for c = 1:numel(classes_to_test)
+    threat = classes_to_test{c};
+    mask = strcmp({results.class}, threat) & ~[results.cnn_correct];
+    if any(mask)
+        wrong = {results(mask).cnn_pred};
+        u = unique(wrong);
+        counts = cellfun(@(x) sum(strcmp(wrong,x)), u);
+        [~, ord] = sort(counts, 'descend');
+        parts = arrayfun(@(k) sprintf('%s x%d', u{ord(k)}, counts(ord(k))), 1:numel(u), 'uni', 0);
+        report{end+1} = sprintf('  %s misdetected as: %s', threat, strjoin(parts, ', '));
+    else
+        report{end+1} = sprintf('  %s: no misdetections', threat);
+    end
+end
 report{end+1} = '';
 
 for c = 1:numel(classes_to_test)
     threat = classes_to_test{c};
     mask = strcmp({results.class}, threat);
-    n = sum(mask);
-    n_fa = sum([results(mask).false_alarm]);
-    n_cnn_correct = sum([results(mask).cnn_correct]);
-    far_pct = 100 * n_fa / n;
-
-    % Confidence interval. With zero observed false alarms the normal (Wald)
-    % approximation collapses to 0%-0%, which is not a real bound -- use the
-    % Rule of Three (upper bound 3/n at 95% confidence) instead.
+    n = sum(mask); n_fa = sum([results(mask).false_alarm]); n_ok = sum([results(mask).cnn_correct]);
+    far_pct = 100*n_fa/n;
     if n_fa == 0
-        ci_lo = 0; ci_hi = 100 * 3 / n;
-        ci_note = ' [Rule of Three: 0 events observed]';
+        ci_lo = 0; ci_hi = 100*3/n; ci_note = ' [Rule of Three: 0 events]';
     else
         se = sqrt((far_pct/100)*(1-far_pct/100)/n);
-        ci_lo = max(0, far_pct - 100*1.96*se);
-        ci_hi = min(100, far_pct + 100*1.96*se);
-        ci_note = '';
+        ci_lo = max(0,far_pct-100*1.96*se); ci_hi = min(100,far_pct+100*1.96*se); ci_note = '';
     end
-
-    report{end+1} = sprintf('--- %s (n=%d) ---', threat, n);
-    report{end+1} = sprintf('  CNN detection accuracy: %d/%d (%.1f%%)', n_cnn_correct, n, 100*n_cnn_correct/n);
-    report{end+1} = sprintf('  False alarms: %d/%d', n_fa, n);
+    report{end+1} = sprintf('--- %s (all SNR pooled, n=%d) ---', threat, n);
+    report{end+1} = sprintf('  CNN detection accuracy: %d/%d (%.1f%%)', n_ok, n, 100*n_ok/n);
     report{end+1} = sprintf('  FAR: %.1f%% (approx 95%% CI: %.1f%%-%.1f%%)%s', far_pct, ci_lo, ci_hi, ci_note);
-    if n_fa > 0
-        fa_actions = {results(mask & [results.false_alarm]).dqn_action};
-        report{end+1} = sprintf('  False-alarm actions triggered: %s', strjoin(unique(fa_actions), ', '));
-    end
     report{end+1} = '';
 end
 
-n_all = numel(results);
-n_fa_all = sum([results.false_alarm]);
-far_all = 100*n_fa_all/n_all;
-report{end+1} = '=== OVERALL ===';
-report{end+1} = sprintf('Combined FAR (none + benign_interference): %d/%d (%.1f%%)', n_fa_all, n_all, far_all);
-if n_fa_all == 0
-    report{end+1} = sprintf('  95%% CI upper bound (Rule of Three): %.1f%%', 100*3/n_all);
-end
+n_all = numel(results); n_fa_all = sum([results.false_alarm]);
+report{end+1} = '=== OVERALL (all classes, all SNR pooled) ===';
+report{end+1} = sprintf('Combined FAR: %d/%d (%.1f%%)', n_fa_all, n_all, 100*n_fa_all/n_all);
 
 if ~exist('results', 'dir'), mkdir('results'); end
 fid = fopen('results/far_measurement.txt', 'w');
@@ -178,4 +208,4 @@ for i = 1:numel(report), fprintf('%s\n', report{i}); end
 
 save('results/far_measurement.mat', 'results');
 fprintf('\nSaved results/far_measurement.txt and results/far_measurement.mat\n');
-fprintf('\n=== FAR Measurement Complete ===\n');
+fprintf('\n=== FAR Characterization Complete ===\n');

@@ -1,8 +1,10 @@
-%% B2 — TRAIN HYBRID DETECTOR: CNN (spectrogram) + FC (scalars) → softmax(7)
-% Two-branch architecture (scalar branch now handles 7 features after B2.5):
+%% B2 — TRAIN HYBRID DETECTOR: CNN (spectrogram) + FC (scalars) → softmax(nClasses)
+% Two-branch architecture (scalar branch handles 7 features: snr, ber, rssi,
+% plr, var_rssi_10, dber_dt, burst_ratio):
 %   Branch 1 (CNN):  [128×128×1] → Conv→BN→ReLU→Pool ×3 → GAP → Flatten → 128-d
 %   Branch 2 (FC):   [nFeat] → FC(32)→ReLU → FC(16)→ReLU → 16-d
-%   Merge:           cat(128+16=144) → FC(64)→ReLU→Dropout → FC(7)→softmax
+%   Merge:           cat(128+16=144) → FC(64)→ReLU→Dropout → FC(nClasses)→softmax
+% nClasses is read from splits.mat (currently 9) -- not hardcoded.
 %
 % Input:  data/splits.mat
 % Output: data/trained_detector.mat (net, info, classes)

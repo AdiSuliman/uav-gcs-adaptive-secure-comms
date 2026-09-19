@@ -38,39 +38,40 @@ fprintf('=== Logging full run to: %s ===\n', log_filename);
 fprintf('(This file will contain EVERYTHING printed below, even across clc calls.)\n\n');
 
 %% ========== EXECUTION FLAGS (in execution order) ==========
-RUN.init                        = false;   % A0 : regenerate params.mat
-RUN.validate_A                  = false;   % A1-A3: build + validate AWGN & Rician (fast)
-RUN.check_A4                    = false;   % A4 : build threat model + sanity BER (fast)
-RUN.build_dataset               = false;   % A5 : done (27246 frames, spoofing-fixed, verified 2x)
-RUN.extract_spectrograms        = false;   % A6 : done
+% 2026-09-19: full re-run required after the Rx_IQ tap-point fix (D18) --
+% spectrograms/RSSI were computed pre-AWGN before this fix, so everything
+% downstream of A6 needs regenerating. EXP/survivability are BER-only
+% (quick_ber, no Rx_IQ) and are NOT affected -- left false, no rerun needed.
+RUN.init                        = false;   % A0 : params.mat unchanged, no rerun needed
+RUN.validate_A                  = false;   % A1-A3: unchanged, no rerun needed
+RUN.check_A4                    = true;    % A4 : quick sanity check of the FIXED threat model (fast)
+RUN.build_dataset               = true;    % A5 : REQUIRED -- Rx_IQ now post-AWGN (~30-40 min)
+RUN.extract_spectrograms        = true;    % A6 : REQUIRED -- spectrograms from the new dataset (~5 min)
 
 % --- Phase A-exp: sequence windowing for CNN-LSTM ---
 RUN.build_sequence_index        = false;   % A5-seq : STALE (predates spoofing fix), LSTM not pursued
 RUN.extract_spectrograms_seq    = false;   % A6-seq : STALE — same reason
 
 RUN.temporal_features           = false;   % B2.5: DEPRECATED — folded into extract_spectrograms.m (A6)
-RUN.prepare_data                = false;   % B1  : done
-RUN.train_detector              = false;   % B2  : done (98.05% test acc, verified 2x independently)
-RUN.eval_detector               = false;   % B3  : done
+RUN.prepare_data                = true;    % B1  : REQUIRED -- re-split on new spectrograms (~1 min)
+RUN.train_detector              = true;    % B2  : REQUIRED -- retrain CNN on real noisy signal (~10 min)
+RUN.eval_detector                = true;    % B3  : REQUIRED -- true accuracy-vs-SNR curve (~1 min)
 
 % --- Phase B-exp: CNN-LSTM detector — NOT PURSUED FURTHER ---
-% The spoofing weakness CNN-LSTM was meant to address was root-caused and
-% fixed at the threat-injection level instead. CNN alone now exceeds LSTM's
-% best result by a wide margin with far fewer parameters.
 RUN.prepare_data_seq            = false;
 RUN.train_detector_lstm         = false;
 RUN.eval_detector_lstm          = false;
 
-RUN.train_dqn                   = false;   % C2  : done (one-hot state, validation gate passed)
-RUN.run_closed_loop             = false;   % C3  : done (against the one-hot DQN)
-RUN.run_closed_loop_diagnostic  = true;   % C3d : done (against the one-hot DQN)
+RUN.train_dqn                   = true;    % C2  : REQUIRED -- RSSI in reward table now real (~10-15 min)
+RUN.run_closed_loop             = true;    % C3  : REQUIRED -- Rx_IQ-based spectrogram/RSSI (~2-3 min)
+RUN.run_closed_loop_diagnostic  = true;    % C3d : REQUIRED -- full SNR sweep, sliding window (~15-20 min)
 
-RUN.explore_countermeasures     = false;   % EXP : deep countermeasure sweep (VERY HEAVY ~75 min)
-RUN.analyze_exploration_results = false;   % EXP-analysis: post-hoc diagnosis (fast)
+RUN.explore_countermeasures     = false;   % EXP : NOT AFFECTED (quick_ber only, no Rx_IQ) -- no rerun needed
+RUN.analyze_exploration_results = false;   % EXP-analysis: unaffected, existing results/exploration_diagnosis.txt still valid
 
 % --- Phase KPI: proposal section-ה measurement ---
-RUN.measure_far                 = false;    % KPI4 : FAR on non-hostile classes (fast)
-RUN.measure_all_kpis            = false;    % KPI  : aggregate all 5 into results/kpi_summary.txt (fast)
+RUN.measure_far                 = true;    % KPI4 : REQUIRED -- diagnose_far_measurement.m uses Rx_IQ (~5 min)
+RUN.measure_all_kpis            = true;    % KPI  : REQUIRED -- regenerate results/kpi_summary.txt with real numbers (fast, now fixed to read .mat directly)
 
 fprintf('========================================================\n');
 fprintf('  UAV-GCS ADAPTIVE SECURE COMMS - MASTER PIPELINE\n');
@@ -335,8 +336,9 @@ fprintf('  [D2] Defense presentation (pptx)...                [PENDING]\n\n');
 
 %% ========== CHECKPOINT ==========
 fprintf('========================================================\n');
-fprintf(' CHECKPOINT - CNN 98.05%% (spoofing threat model fixed at physical root cause, verified 2x)\n');
-fprintf(' DQN one-hot state encoding, validation gate passed | C3 rerun against the new agent\n');
+fprintf(' CHECKPOINT - Post Rx_IQ fix (D18) full re-run: A5->A6->B1->B2->B3->C2->C3->C3d->KPI4->KPI\n');
+fprintf(' Spectrograms/RSSI now reflect real swept AWGN noise (previously pre-AWGN, see DECISIONS.md D18)\n');
+fprintf(' EXP/survivability unaffected (BER-only) -- not rerun here, still valid\n');
 fprintf(' Outputs in results/, data/ | models in models/ | code on GitHub\n');
 fprintf(' Full run log saved to: %s\n', log_filename);
 fprintf('========================================================\n\n');

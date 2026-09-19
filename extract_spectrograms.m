@@ -100,7 +100,7 @@ spec.class_names = ds.class_names;
 spec.img_size   = img_size;
 spec.meta       = ds.meta;
 spec.meta.temporal_window = temporal_window;
-spec.meta.temporal_note   = 'var_rssi_10/dber_dt/burst_ratio reconstructed 2026-09 (run-aware causal window=10); verify B2/B3 accuracy still matches historical ~90-91%';
+spec.meta.temporal_note   = 'var_rssi_10/dber_dt/burst_ratio computed with a run-aware causal window=10 (see header). Rx_IQ tap point fixed 2026-09-19 (D18) to sit after AWGN -- spectrograms now reflect the configured SNR sweep point, not just Rician+threat.';
 
 if ~exist('data','dir'); mkdir('data'); end
 save('data/spectrograms.mat','spec','-v7.3');

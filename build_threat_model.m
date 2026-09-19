@@ -68,7 +68,12 @@ add_block('simulink/Sinks/To Workspace', ...
 add_block('simulink/Sinks/To Workspace', ...
     [modelName '/rx_sink'], 'Position', [870 100 950 130]);
 
-% IQ probes (for spectrogram in A6) — tap the threat output (post-attack signal)
+% IQ probes (for spectrogram in A6) — tap AFTER AWGN (matches build_link_model.m
+% and build_rician_model.m: "received" IQ means post-channel-noise, so the
+% spectrogram/RSSI actually reflect the configured SNR sweep point). FIXED
+% 2026-09-19: previously tapped Threat/1 (pre-AWGN), which meant spectrograms
+% and RSSI never varied with SNR at all -- only ground-truth BER did. See
+% docs/DECISIONS.md D18.
 add_block('simulink/Sinks/To Workspace', ...
     [modelName '/Tx_IQ'], 'Position', [300 30 380 60]);
 add_block('simulink/Sinks/To Workspace', ...
@@ -330,7 +335,7 @@ add_line(modelName, 'AWGN/1',     'Rx/1',      'autorouting','on');
 add_line(modelName, 'BitSource/1', 'tx_sink/1', 'autorouting','on');
 add_line(modelName, 'Rx/1',        'rx_sink/1', 'autorouting','on');
 add_line(modelName, 'Tx/1',        'Tx_IQ/1',   'autorouting','on');
-add_line(modelName, 'Threat/1',    'Rx_IQ/1',   'autorouting','on');
+add_line(modelName, 'AWGN/1',      'Rx_IQ/1',   'autorouting','on');
 
 %% ---- Solver settings ----
 set_param(modelName, 'SolverType', 'Fixed-step', ...

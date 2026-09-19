@@ -1,5 +1,17 @@
 function [action, mitigation_db] = rule_based_policy(threat_class)
 %% C1 — RULE-BASED COUNTERMEASURE POLICY (updated: 8 threats)
+%
+% NOTE (2026-09-19, D19): mitigation_db here is per-threat (15/10/15/8/6/9/12
+% dB) but is NOT applied anywhere downstream -- both call sites
+% (run_closed_loop_diagnostic.m, measure_kpi3_recovery_time.m) use only the
+% returned `action` name. The physical mitigation effect for BOTH the DQN
+% and the rule-based policy is computed via the shared action_mitigation_db
+% (25/15/25/25 dB per action, see run_closed_loop_diagnostic.m /
+% run_closed_loop_with_detector.m / train_dqn.m). This function's
+% mitigation_db is kept for readability/documentation of what a real
+% per-threat-tuned rule policy WOULD use, but "DQN-vs-rule agreement" is a
+% decision-policy comparison only, not two independently-realized
+% countermeasure systems. State this precisely in the report.
 threat_class = char(threat_class);
 
 switch threat_class
