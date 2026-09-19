@@ -3,16 +3,14 @@
 % closed-loop system (CNN detection -> DQN decision) triggers ANY countermeasure
 % other than no_action. The proposal names this explicitly as a KPI: false
 % alarms have a real operational cost (an unnecessary channel switch disrupts
-% a healthy link), so this must be measured directly, not assumed from the
-% 1-2 samples seen in prior diagnostic runs.
+% a healthy link), so this must be measured directly.
 %
 % Runs N_REPEATS independent trials per class (fresh Simulink/Rician draw each
-% time, exactly like C3), through the FULL closed loop (CNN prediction feeds
-% the DQN, exactly as deployed -- not the ground-truth-conditioned path used
-% in run_closed_loop_diagnostic.m). This also incidentally reports CNN
-% detection accuracy on none/benign_interference specifically, useful context
-% for interpreting the FAR number (a false alarm can originate from either a
-% CNN misdetection or the DQN's own decision on a correct detection).
+% time), through the FULL closed loop (CNN prediction feeds the DQN, exactly as
+% deployed -- not the ground-truth-conditioned path used in
+% run_closed_loop_diagnostic.m). Also reports CNN detection accuracy on
+% none/benign_interference specifically: a false alarm can originate from
+% either a CNN misdetection or the DQN's own decision on a correct detection.
 %
 % Output: results/far_measurement.txt, results/far_measurement.mat
 
@@ -21,7 +19,7 @@ fprintf('=== FAR MEASUREMENT: false alarm rate on non-hostile classes ===\n\n');
 
 N_REPEATS = 50;   % independent trials per class; raise if CI is too wide
 
-%% 1. Load trained models (same as run_closed_loop_diagnostic.m)
+%% 1. Load trained models
 D = load('data/trained_detector.mat', 'net', 'classes');
 cnn_net = D.net; cnn_classes = D.classes;
 Q = load('data/trained_dqn.mat', 'agent');
@@ -36,11 +34,6 @@ p0 = load('params.mat').params;
 fs = p0.symbol_rate * p0.sps;
 delay_bits = 20;
 
-% Same threat_encode_map as train_dqn.m / run_closed_loop_diagnostic.m /
-% run_closed_loop_with_detector.m -- MUST stay in sync with those three.
-threat_encode_map = containers.Map( ...
-    {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','spoofing','antenna_fault','benign_interference','none'}, ...
-    {1,2,3,5,6,7,4,8,0});
 action_names = dqn_agent_trained.action_names;
 
 baseline = struct('jsr_db',p0.jsr_db,'path_loss_db',p0.path_loss_db, ...
@@ -55,7 +48,7 @@ dummy_spec = dlarray(single(zeros(img_size,img_size,1,1)), 'SSCB');
 dummy_feat = dlarray(single(zeros(1,7))', 'CB');
 if canUseGPU, dummy_spec = gpuArray(dummy_spec); dummy_feat = gpuArray(dummy_feat); end
 predict(cnn_net, dummy_spec, dummy_feat);
-dummy_state = dlarray(single(zeros(5,1)), 'CB');
+dummy_state = dlarray(single(zeros(dqn_agent_trained.numStates,1)), 'CB');
 if canUseGPU, dummy_state = gpuArray(dummy_state); end
 predict(dqn_agent_trained.qNetwork, dummy_state);
 fprintf('Warm-up complete.\n\n');
@@ -105,12 +98,7 @@ for c = 1:numel(classes_to_test)
         % NOT on ground truth. A false alarm can come from either a CNN
         % misdetection OR the DQN's own policy on a correctly-detected
         % non-hostile class.
-        if isKey(threat_encode_map, cnn_pred_class)
-            threat_enc = threat_encode_map(cnn_pred_class);
-        else
-            threat_enc = -1;
-        end
-        dqn_state = [threat_enc; ber; rssi; snr_val; plr];
+        dqn_state = build_dqn_state(cnn_pred_class, ber, rssi, snr_val, plr);
         state_dl = dlarray(single(dqn_state), 'CB');
         if canUseGPU, state_dl = gpuArray(state_dl); end
         qvals = predict(dqn_agent_trained.qNetwork, state_dl);
@@ -148,13 +136,24 @@ for c = 1:numel(classes_to_test)
     n_fa = sum([results(mask).false_alarm]);
     n_cnn_correct = sum([results(mask).cnn_correct]);
     far_pct = 100 * n_fa / n;
-    % 95% CI via normal approximation (Wald) -- fine for n=50, report with caveat
-    se = sqrt((far_pct/100)*(1-far_pct/100)/n);
-    ci_lo = max(0, far_pct - 196*se); ci_hi = min(100, far_pct + 196*se);
+
+    % Confidence interval. With zero observed false alarms the normal (Wald)
+    % approximation collapses to 0%-0%, which is not a real bound -- use the
+    % Rule of Three (upper bound 3/n at 95% confidence) instead.
+    if n_fa == 0
+        ci_lo = 0; ci_hi = 100 * 3 / n;
+        ci_note = ' [Rule of Three: 0 events observed]';
+    else
+        se = sqrt((far_pct/100)*(1-far_pct/100)/n);
+        ci_lo = max(0, far_pct - 100*1.96*se);
+        ci_hi = min(100, far_pct + 100*1.96*se);
+        ci_note = '';
+    end
+
     report{end+1} = sprintf('--- %s (n=%d) ---', threat, n);
     report{end+1} = sprintf('  CNN detection accuracy: %d/%d (%.1f%%)', n_cnn_correct, n, 100*n_cnn_correct/n);
     report{end+1} = sprintf('  False alarms: %d/%d', n_fa, n);
-    report{end+1} = sprintf('  FAR: %.1f%% (approx 95%% CI: %.1f%%-%.1f%%)', far_pct, ci_lo, ci_hi);
+    report{end+1} = sprintf('  FAR: %.1f%% (approx 95%% CI: %.1f%%-%.1f%%)%s', far_pct, ci_lo, ci_hi, ci_note);
     if n_fa > 0
         fa_actions = {results(mask & [results.false_alarm]).dqn_action};
         report{end+1} = sprintf('  False-alarm actions triggered: %s', strjoin(unique(fa_actions), ', '));
@@ -167,6 +166,9 @@ n_fa_all = sum([results.false_alarm]);
 far_all = 100*n_fa_all/n_all;
 report{end+1} = '=== OVERALL ===';
 report{end+1} = sprintf('Combined FAR (none + benign_interference): %d/%d (%.1f%%)', n_fa_all, n_all, far_all);
+if n_fa_all == 0
+    report{end+1} = sprintf('  95%% CI upper bound (Rule of Three): %.1f%%', 100*3/n_all);
+end
 
 if ~exist('results', 'dir'), mkdir('results'); end
 fid = fopen('results/far_measurement.txt', 'w');

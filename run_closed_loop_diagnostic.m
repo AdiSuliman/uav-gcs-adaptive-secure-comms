@@ -1,25 +1,28 @@
-%% RUN_CLOSED_LOOP_DIAGNOSTIC — C3 extended: full decision diagnostics + timing
-% Standalone extension of run_closed_loop_with_detector.m (does NOT modify or
-% overwrite it). Same pipeline, but records everything needed to explain HOW
-% and HOW FAST the system decided what to do:
-%   - CNN: full 7-class probability vector (not just top-1), confidence,
-%     inference latency (ms)
-%   - DQN: full Q-value vector over all 5 actions (not just the chosen one),
-%     inference latency (ms)
-%   - Rule-based comparison: what rule_based_policy.m would have chosen for
-%     the SAME (ground-truth) threat -- shows DQN-vs-rule agreement directly
-%   - End-to-end decision latency: CNN + DQN combined (excludes Simulink
-%     build/sim time, which is NOT part of a real system's reaction time)
+%% RUN_CLOSED_LOOP_DIAGNOSTIC — C3 extended: sliding-window decision, SNR sweep
+% End-to-end closed loop with full decision diagnostics, repeated at every
+% SNR point in params.EbNo_dB.
 %
-% NOTE: tests all 9 threats the CNN was trained on after the Phase B retrain
-% (jamming, reactive_jamming, sweeping_jammer, noise_burst, path_loss,
-% spoofing, antenna_fault, benign_interference, none).
+% SLIDING WINDOW: each Simulink run returns ~20 frames. Per-frame BER/RSSI/PLR
+% are computed across all of them, and the three temporal features
+% (var_rssi_10, dber_dt, burst_ratio) are derived over a real causal window
+% exactly as extract_spectrograms.m does, so the detector sees the same kind
+% of input it was trained on. This is also what the proposal specifies:
+% detection from a sliding window of link metrics.
 %
-% Output: results/closed_loop_diagnostic_report.txt (full per-threat breakdown)
-%         results/closed_loop_diagnostic_timing.png  (latency bar chart)
+% NaN HANDLING: run_dataset_sweep.m marks a frame's BER as NaN when the
+% delay-shifted bit stream runs short (the last frame of a run). prepare_data.m
+% zeroes those out before training, so the detector never saw NaN. The same
+% guards are applied here -- an unguarded NaN propagates through the network
+% and makes the softmax output undefined, which silently destroys whole
+% classes rather than degrading them.
+%
+% Output: results/closed_loop_diagnostic_report.txt
+%         results/closed_loop_diagnostic_timing.png
+%         results/closed_loop_recovery_vs_snr.png
+%         results/closed_loop_diagnostic_results.mat
 
 close all; clc;
-fprintf('=== C3-Diagnostic: Full Decision Trace + Timing ===\n\n');
+fprintf('=== C3-Diagnostic: Sliding-Window Decision + Timing (SNR sweep) ===\n\n');
 
 %% 1. Load trained models
 D = load('data/trained_detector.mat', 'net', 'classes');
@@ -35,223 +38,364 @@ init_params;
 p0 = load('params.mat').params;
 fs = p0.symbol_rate * p0.sps;
 delay_bits = 20;
+modelName = 'UAV_GCS_Threat_Link';
 
-% UPDATED (Sep 13): 'none' added -- was previously absent, causing every
-% correct 'none' CNN prediction to feed threat_enc=-1 (out-of-distribution)
-% to the DQN, which confirmed-picked aggressive actions on a clean channel
-% (diagnose_none_class.m). 'none' now has its own trained reward-shaped
-% class (see train_dqn.m) so it needs its own encoding here too.
+temporal_window = 10;      % must match extract_spectrograms.m
+SNR_points = p0.EbNo_dB;   % full sweep, 0:2:10
+
 threats = {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','spoofing','antenna_fault','benign_interference','none'};
 strength_field = containers.Map( ...
     {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','antenna_fault','spoofing','benign_interference','none'}, ...
     {'jsr_db','jsr_db','jsr_db','jsr_db','path_loss_db','fault_atten_db','spoof_sir_db','benign_int_db','jsr_db'});
-% UPDATED (post-EXP analysis, Sep 13): see train_dqn.m header for rationale.
 action_mitigation_db = struct('no_action',0,'channel_switch',25,'rate_reduce',15, ...
     'freq_diversity',25,'spatial_diversity',25);
 action_names = dqn_agent_trained.action_names;
-% FIXED (Sep 13-14, antenna_fault Q-value bleed investigation): this map
-% previously had noise_burst/spoofing swapped relative to train_dqn.m's
-% threat_list index order -- meaning the trained network was queried with
-% the wrong encoding for those two threats during this diagnostic. Also
-% reassigns antenna_fault away from being adjacent to benign_interference's
-% penalized code (see train_dqn.m header for the full rationale). Now
-% keys/values match train_dqn.m's threat_encode and
-% run_closed_loop_with_detector.m exactly.
-threat_encode_map = containers.Map( ...
-    {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','spoofing','antenna_fault','benign_interference','none'}, ...
-    {1,2,3,5,6,7,4,8,0});
 
 baseline = struct('jsr_db',p0.jsr_db,'path_loss_db',p0.path_loss_db, ...
     'fault_atten_db',p0.fault_atten_db,'spoof_sir_db',p0.spoof_sir_db, ...
     'benign_int_db',p0.benign_int_db);
 
-results = struct('threat',{},'cnn_top_class',{},'cnn_conf',{},'cnn_probs',{}, ...
+results = struct('threat',{},'snr_db',{},'cnn_top_class',{},'cnn_conf',{},'cnn_probs',{}, ...
     'cnn_latency_ms',{},'dqn_action',{},'dqn_qvalues',{},'dqn_latency_ms',{}, ...
-    'rule_based_action',{},'agrees_with_rule',{},'ber_before',{},'ber_after',{}, ...
-    'recovery_pct',{});
+    'rule_based_action',{},'agrees_with_rule',{},'cnn_correct',{}, ...
+    'ber_before',{},'ber_after',{},'recovery_pct',{},'n_frames',{},'temporal_feats',{});
 
 %% WARM-UP: first predict() call includes one-time GPU JIT compilation cost
-% (~700ms). Run one dummy inference here so it doesn't skew the FIRST real
-% threat's measured latency -- this is a deployment reality (the model is
-% loaded and warmed up once at startup, not per-decision), so excluding it
-% gives the representative per-decision latency.
+% (~700ms). Run one dummy inference so it doesn't skew the first measurement.
 fprintf('Warming up CNN and DQN networks (one-time GPU JIT cost, excluded from results)...\n');
 dummy_spec = dlarray(single(zeros(img_size,img_size,1,1)), 'SSCB');
 dummy_feat = dlarray(single(zeros(1,7))', 'CB');
 if canUseGPU, dummy_spec = gpuArray(dummy_spec); dummy_feat = gpuArray(dummy_feat); end
 predict(cnn_net, dummy_spec, dummy_feat);
-dummy_state = dlarray(single(zeros(5,1)), 'CB');
+dummy_state = dlarray(single(zeros(dqn_agent_trained.numStates,1)), 'CB');
 if canUseGPU, dummy_state = gpuArray(dummy_state); end
 predict(dqn_agent_trained.qNetwork, dummy_state);
 fprintf('Warm-up complete.\n\n');
 
-fprintf('Running diagnostic closed-loop on %d known threats...\n\n', numel(threats));
+total_runs = numel(threats) * numel(SNR_points);
+fprintf('Running closed loop: %d threats x %d SNR points = %d runs\n', ...
+    numel(threats), numel(SNR_points), total_runs);
+fprintf('Temporal window: %d frames\n\n', temporal_window);
 
-for t = 1:numel(threats)
-    threat = threats{t};
-    field = strength_field(threat);
-    fprintf('[%d/%d] Threat: %s\n', t, numel(threats), threat);
+t_start = tic;
+run_count = 0;
 
-    p = p0; p.jsr_db=baseline.jsr_db; p.path_loss_db=baseline.path_loss_db;
-    p.fault_atten_db=baseline.fault_atten_db; p.spoof_sir_db=baseline.spoof_sir_db;
-    p.benign_int_db=baseline.benign_int_db;
-    p.active_threat = threat;
-    params = p; save('params.mat', 'params');
-    build_threat_model;
+for s = 1:numel(SNR_points)
+    ebno = SNR_points(s);
+    snr_dB = ebno + 10*log10(p0.bits_per_symbol) - 10*log10(p0.sps);
 
-    %% --- Simulate: get real BER + IQ ---
-    out = sim('UAV_GCS_Threat_Link');
-    tx = double(squeeze(out.get('tx_bits_out'))); tx = tx(:);
-    rx = double(squeeze(out.get('rx_bits_out'))); rx = rx(:);
-    L = min(numel(tx)-delay_bits, numel(rx)-delay_bits);
-    ber_before = mean(tx(1:L) ~= rx(delay_bits+1:delay_bits+L));
-    iq_rx = double(squeeze(out.get('Rx_IQ')));
-    if size(iq_rx,2) > 1, iq_rx = iq_rx(:,1); end
-    rssi = 10*log10(mean(abs(iq_rx).^2) + eps);
-    snr_val = p.EbNo_dB(1);
-    plr = double(ber_before > 0.1);
+    fprintf('========== SNR = %g dB ==========\n', ebno);
 
-    %% --- CNN diagnosis (TIMED) ---
-    Sxx = spectrogram(iq_rx, hann(win), novlp, nfft, fs, 'centered');
-    Pw = 20*log10(abs(Sxx)+eps); Pw = (Pw-db_lo)/(db_hi-db_lo); Pw = min(max(Pw,0),1);
-    spec_img = imresize(Pw, [img_size img_size]);
-    raw_feats = [snr_val, ber_before, rssi, plr, 0, 0, 1];
-    norm_feats = (raw_feats - feat_mean) ./ feat_std;
-    X_spec = dlarray(single(spec_img), 'SSCB');
-    X_feat = dlarray(single(norm_feats)', 'CB');
-    if canUseGPU, X_spec = gpuArray(X_spec); X_feat = gpuArray(X_feat); end
+    for t = 1:numel(threats)
+        threat = threats{t};
+        field = strength_field(threat);
+        run_count = run_count + 1;
+        fprintf('[%d/%d] SNR=%g dB | Threat: %s\n', run_count, total_runs, ebno, threat);
 
-    t1 = tic;
-    pred_prob = predict(cnn_net, X_spec, X_feat);
-    cnn_latency_ms = toc(t1) * 1000;
+        p = p0; p.jsr_db=baseline.jsr_db; p.path_loss_db=baseline.path_loss_db;
+        p.fault_atten_db=baseline.fault_atten_db; p.spoof_sir_db=baseline.spoof_sir_db;
+        p.benign_int_db=baseline.benign_int_db;
+        p.active_threat = threat;
+        params = p; save('params.mat', 'params');
+        build_threat_model;
+        set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), ...
+            'SignalPower', num2str(1/p.sps));
 
-    probs_vec = extractdata(pred_prob);
-    [conf, pred_idx] = max(probs_vec);
-    cnn_pred_class = char(cnn_classes(pred_idx));
+        %% --- Simulate: extract ALL frames, not just the first ---
+        out = sim(modelName);
+        [iq_frames, ber_f, rssi_f, plr_f, nf] = extract_all_frames(out, p, delay_bits);
 
-    fprintf('    CNN: %-18s (conf=%.1f%%, %.2f ms)\n', cnn_pred_class, 100*conf, cnn_latency_ms);
-    fprintf('    CNN full distribution: ');
-    for c = 1:numel(cnn_classes)
-        fprintf('%s=%.0f%% ', char(cnn_classes(c)), 100*probs_vec(c));
+        % Decide on the last frame that has a valid BER. The final frame of a
+        % run is often NaN by construction (see header).
+        i_last = find(~isnan(ber_f), 1, 'last');
+        if isempty(i_last), i_last = nf; end
+
+        % Temporal features over a causal window ending at that frame,
+        % computed as extract_spectrograms.m does, with NaN guards.
+        w0 = max(1, i_last - temporal_window + 1);
+        var_rssi_10 = var(rssi_f(w0:i_last), 0);
+        burst_ratio = mean(plr_f(w0:i_last), 'omitnan');
+        if i_last > 1 && ~isnan(ber_f(i_last)) && ~isnan(ber_f(i_last-1))
+            dber_dt = (ber_f(i_last) - ber_f(i_last-1)) / p.frame_duration;
+        else
+            dber_dt = 0;
+        end
+
+        iq_rx      = iq_frames{i_last};
+        ber_before = ber_f(i_last);
+        rssi       = rssi_f(i_last);
+        plr        = plr_f(i_last);
+        snr_val    = ebno;
+
+        %% --- CNN diagnosis (TIMED) ---
+        Sxx = spectrogram(iq_rx, hann(win), novlp, nfft, fs, 'centered');
+        Pw = 20*log10(abs(Sxx)+eps); Pw = (Pw-db_lo)/(db_hi-db_lo); Pw = min(max(Pw,0),1);
+        spec_img = imresize(Pw, [img_size img_size]);
+
+        raw_feats = [snr_val, ber_before, rssi, plr, var_rssi_10, dber_dt, burst_ratio];
+        raw_feats(isnan(raw_feats)) = 0;   % matches prepare_data.m
+        norm_feats = (raw_feats - feat_mean) ./ feat_std;
+        X_spec = dlarray(single(spec_img), 'SSCB');
+        X_feat = dlarray(single(norm_feats)', 'CB');
+        if canUseGPU, X_spec = gpuArray(X_spec); X_feat = gpuArray(X_feat); end
+
+        t1 = tic;
+        pred_prob = predict(cnn_net, X_spec, X_feat);
+        cnn_latency_ms = toc(t1) * 1000;
+
+        probs_vec = extractdata(pred_prob);
+        [conf, pred_idx] = max(probs_vec);
+        cnn_pred_class = char(cnn_classes(pred_idx));
+        cnn_correct = strcmp(cnn_pred_class, threat);
+
+        fprintf('    Window: %d/%d frames | var_rssi=%.4f dber_dt=%.1f burst=%.3f\n', ...
+            i_last, nf, var_rssi_10, dber_dt, burst_ratio);
+        fprintf('    CNN: %-18s (conf=%.1f%%, %.2f ms) correct=%d\n', ...
+            cnn_pred_class, 100*conf, cnn_latency_ms, cnn_correct);
+
+        %% --- DQN decision (TIMED) ---
+        dqn_state = build_dqn_state(cnn_pred_class, raw_feats(2), rssi, snr_val, plr);
+        state_dl = dlarray(single(dqn_state), 'CB');
+        if canUseGPU, state_dl = gpuArray(state_dl); end
+
+        t2 = tic;
+        qvals = predict(dqn_agent_trained.qNetwork, state_dl);
+        dqn_latency_ms = toc(t2) * 1000;
+
+        qvals_vec = extractdata(qvals);
+        [~, action_idx] = max(qvals_vec);
+        action_name = action_names{action_idx};
+
+        %% --- Rule-based comparison (same ground-truth threat) ---
+        [rule_action, ~] = rule_based_policy(threat);
+        agrees = strcmp(action_name, rule_action) || ...
+                 (strcmp(action_name,'channel_switch') && strcmp(rule_action,'channel_switch_fast'));
+
+        %% --- Apply chosen countermeasure, measure recovery ---
+        mitigation_db = action_mitigation_db.(action_name);
+        p.(field) = baseline.(field) - mitigation_db;
+        if any(strcmp(field, {'path_loss_db','fault_atten_db'}))
+            p.(field) = max(p.(field), 0);   % physical floor
+        end
+        params = p; save('params.mat', 'params');
+        build_threat_model;
+        set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), ...
+            'SignalPower', num2str(1/p.sps));
+
+        % Before/after both averaged over all valid frames of their runs, so
+        % the comparison is like-for-like.
+        out2 = sim(modelName);
+        [~, ber_f2, ~, ~, ~] = extract_all_frames(out2, p, delay_bits);
+        ber_after       = mean(ber_f2, 'omitnan');
+        ber_before_mean = mean(ber_f,  'omitnan');
+        recovery_pct = 100*(ber_before_mean-ber_after)/max(ber_before_mean,eps);
+
+        fprintf('    DQN: %-18s (%.2f ms) | Rule: %-18s | Recovery: %.1f%%\n\n', ...
+            action_name, dqn_latency_ms, rule_action, recovery_pct);
+
+        results(end+1) = struct('threat',threat,'snr_db',ebno, ...
+            'cnn_top_class',cnn_pred_class,'cnn_conf',conf,'cnn_probs',probs_vec, ...
+            'cnn_latency_ms',cnn_latency_ms,'dqn_action',action_name, ...
+            'dqn_qvalues',qvals_vec,'dqn_latency_ms',dqn_latency_ms, ...
+            'rule_based_action',rule_action,'agrees_with_rule',agrees, ...
+            'cnn_correct',cnn_correct,'ber_before',ber_before_mean,'ber_after',ber_after, ...
+            'recovery_pct',recovery_pct,'n_frames',nf, ...
+            'temporal_feats',[var_rssi_10 dber_dt burst_ratio]); %#ok<SAGROW>
     end
-    fprintf('\n');
-
-    %% --- DQN decision (TIMED) ---
-    if isKey(threat_encode_map, cnn_pred_class)
-        threat_enc = threat_encode_map(cnn_pred_class);
-    else
-        threat_enc = -1;
-    end
-    dqn_state = [threat_enc; ber_before; rssi; snr_val; plr];
-    state_dl = dlarray(single(dqn_state), 'CB');
-    if canUseGPU, state_dl = gpuArray(state_dl); end
-
-    t2 = tic;
-    qvals = predict(dqn_agent_trained.qNetwork, state_dl);
-    dqn_latency_ms = toc(t2) * 1000;
-
-    qvals_vec = extractdata(qvals);
-    [~, action_idx] = max(qvals_vec);
-    action_name = action_names{action_idx};
-
-    fprintf('    DQN: %-18s (%.2f ms) | Q-values: ', action_name, dqn_latency_ms);
-    for a = 1:numel(action_names)
-        fprintf('%s=%.2f ', action_names{a}, qvals_vec(a));
-    end
-    fprintf('\n');
-
-    %% --- Rule-based comparison (same ground-truth threat) ---
-    [rule_action, ~] = rule_based_policy(threat);
-    agrees = strcmp(action_name, rule_action) || ...
-             (strcmp(action_name,'channel_switch') && strcmp(rule_action,'channel_switch_fast'));
-    fprintf('    Rule-based would choose: %-18s | DQN agrees: %s\n', rule_action, string(agrees));
-
-    %% --- Apply chosen countermeasure, measure recovery ---
-    mitigation_db = action_mitigation_db.(action_name);
-    p.(field) = baseline.(field) - mitigation_db;
-    if any(strcmp(field, {'path_loss_db','fault_atten_db'}))
-        p.(field) = max(p.(field), 0);   % physical floor: loss/attenuation can't go negative
-    end
-    params = p; save('params.mat', 'params');
-    build_threat_model;
-    ber_after = quick_ber('UAV_GCS_Threat_Link');
-    recovery_pct = 100*(ber_before-ber_after)/max(ber_before,eps);
-
-    fprintf('    Recovery: %.1f%% | Total decision latency: %.2f ms\n\n', ...
-        recovery_pct, cnn_latency_ms + dqn_latency_ms);
-
-    results(end+1) = struct('threat',threat,'cnn_top_class',cnn_pred_class, ...
-        'cnn_conf',conf,'cnn_probs',probs_vec,'cnn_latency_ms',cnn_latency_ms, ...
-        'dqn_action',action_name,'dqn_qvalues',qvals_vec,'dqn_latency_ms',dqn_latency_ms, ...
-        'rule_based_action',rule_action,'agrees_with_rule',agrees, ...
-        'ber_before',ber_before,'ber_after',ber_after,'recovery_pct',recovery_pct);
 end
 
 params = p0; save('params.mat', 'params');
+fprintf('Sweep complete. Total time: %.1f minutes\n\n', toc(t_start)/60);
+
+%% ========== Save raw results ==========
+if ~exist('results', 'dir'), mkdir('results'); end
+save('results/closed_loop_diagnostic_results.mat', 'results', 'SNR_points', 'threats');
 
 %% ========== Full report ==========
 report = {};
-report{end+1} = '=== C3-DIAGNOSTIC FULL REPORT ===';
+report{end+1} = '=== C3-DIAGNOSTIC FULL REPORT (SLIDING WINDOW, SNR SWEEP) ===';
 report{end+1} = sprintf('Generated: %s', datestr(now));
+report{end+1} = sprintf('Threats: %d | SNR points: %s dB | Total runs: %d | Temporal window: %d frames', ...
+    numel(threats), mat2str(SNR_points), numel(results), temporal_window);
 report{end+1} = '';
-report{end+1} = 'NOTE: latencies are CNN-inference + DQN-inference only (ms) -- this is';
-report{end+1} = 'the actual "reaction time" of the decision system, excluding Simulink';
-report{end+1} = 'build/sim time (which is a simulation artifact, not a real deployed cost).';
+report{end+1} = 'Temporal features are computed from a real causal window over the frames of';
+report{end+1} = 'each run, matching how the detector was trained. NaN BER values (last frame';
+report{end+1} = 'of a run, by construction) are guarded exactly as prepare_data.m does.';
+report{end+1} = 'BER before/after are both averaged over all valid frames of their runs.';
+report{end+1} = '';
+report{end+1} = 'NOTE: latencies are CNN-inference + DQN-inference only (ms) -- the actual';
+report{end+1} = 'reaction time of the decision system, excluding Simulink build/sim time.';
 report{end+1} = '';
 
+%% --- Section 1: recovery matrix, threat x SNR ---
+report{end+1} = '--- Section 1: Recovery % per Threat per SNR ---';
+hdr = sprintf('%-22s', 'Threat');
+for s = 1:numel(SNR_points)
+    hdr = [hdr sprintf('%10s', sprintf('%gdB', SNR_points(s)))];
+end
+hdr = [hdr sprintf('%10s', 'mean')];
+report{end+1} = hdr;
+
+for t = 1:numel(threats)
+    line = sprintf('%-22s', threats{t});
+    mask_t = strcmp({results.threat}, threats{t});
+    for s = 1:numel(SNR_points)
+        mask = mask_t & ([results.snr_db] == SNR_points(s));
+        line = [line sprintf('%9.1f%%', results(mask).recovery_pct)];
+    end
+    line = [line sprintf('%9.1f%%', mean([results(mask_t).recovery_pct]))];
+    report{end+1} = line;
+end
+report{end+1} = '';
+
+%% --- Section 2: CNN detection accuracy per SNR ---
+report{end+1} = '--- Section 2: CNN Detection Accuracy in Closed Loop, per SNR ---';
+report{end+1} = sprintf('%-10s %12s', 'SNR (dB)', 'Correct');
+for s = 1:numel(SNR_points)
+    mask = [results.snr_db] == SNR_points(s);
+    n_ok = sum([results(mask).cnn_correct]);
+    n = sum(mask);
+    report{end+1} = sprintf('%-10g %7d/%-4d (%.1f%%)', SNR_points(s), n_ok, n, 100*n_ok/n);
+end
+report{end+1} = '';
+
+%% --- Section 2b: per-class detection, all SNR ---
+report{end+1} = '--- Section 2b: CNN Detection per Threat Class (all SNR) ---';
+report{end+1} = sprintf('%-22s %12s', 'Threat', 'Correct');
+for t = 1:numel(threats)
+    mask_t = strcmp({results.threat}, threats{t});
+    n_ok = sum([results(mask_t).cnn_correct]);
+    n = sum(mask_t);
+    report{end+1} = sprintf('%-22s %7d/%-4d (%.1f%%)', threats{t}, n_ok, n, 100*n_ok/n);
+end
+report{end+1} = '';
+
+%% --- Section 3: DQN-vs-Rule agreement per SNR ---
+report{end+1} = '--- Section 3: DQN-vs-Rule Agreement, per SNR ---';
+report{end+1} = sprintf('%-10s %12s', 'SNR (dB)', 'Agree');
+for s = 1:numel(SNR_points)
+    mask = [results.snr_db] == SNR_points(s);
+    n_ag = sum([results(mask).agrees_with_rule]);
+    n = sum(mask);
+    report{end+1} = sprintf('%-10g %7d/%-4d (%.1f%%)', SNR_points(s), n_ag, n, 100*n_ag/n);
+end
+report{end+1} = '';
+
+%% --- Section 4: per-run detail ---
+report{end+1} = '--- Section 4: Per-Run Detail ---';
 for i = 1:numel(results)
     r = results(i);
-    report{end+1} = sprintf('--- Threat: %s ---', r.threat);
-    report{end+1} = sprintf('  CNN diagnosis: %s (confidence %.1f%%, %.2f ms)', r.cnn_top_class, 100*r.cnn_conf, r.cnn_latency_ms);
-    probstr = '';
-    for c = 1:numel(cnn_classes)
-        probstr = [probstr sprintf('%s=%.0f%% ', char(cnn_classes(c)), 100*r.cnn_probs(c))];
-    end
-    report{end+1} = sprintf('  CNN full distribution: %s', probstr);
-    report{end+1} = sprintf('  DQN decision: %s (%.2f ms)', r.dqn_action, r.dqn_latency_ms);
+    report{end+1} = sprintf('--- %s @ SNR=%g dB ---', r.threat, r.snr_db);
+    report{end+1} = sprintf('  Window: %d frames | var_rssi=%.4f dber_dt=%.1f burst=%.3f', ...
+        r.n_frames, r.temporal_feats(1), r.temporal_feats(2), r.temporal_feats(3));
+    report{end+1} = sprintf('  CNN: %s (conf %.1f%%, %.2f ms, correct=%d)', ...
+        r.cnn_top_class, 100*r.cnn_conf, r.cnn_latency_ms, r.cnn_correct);
     qstr = '';
     for a = 1:numel(action_names)
         qstr = [qstr sprintf('%s=%.2f ', action_names{a}, r.dqn_qvalues(a))];
     end
-    report{end+1} = sprintf('  DQN Q-values: %s', qstr);
-    report{end+1} = sprintf('  Rule-based would choose: %s | DQN agrees: %d', r.rule_based_action, r.agrees_with_rule);
-    report{end+1} = sprintf('  BER before=%.3e after=%.3e recovery=%.1f%%', r.ber_before, r.ber_after, r.recovery_pct);
-    report{end+1} = sprintf('  Total decision latency: %.2f ms', r.cnn_latency_ms + r.dqn_latency_ms);
-    report{end+1} = '';
+    report{end+1} = sprintf('  DQN: %s (%.2f ms) | Q: %s', r.dqn_action, r.dqn_latency_ms, qstr);
+    report{end+1} = sprintf('  Rule: %s | agrees=%d', r.rule_based_action, r.agrees_with_rule);
+    report{end+1} = sprintf('  BER before=%.3e after=%.3e recovery=%.1f%%', ...
+        r.ber_before, r.ber_after, r.recovery_pct);
 end
+report{end+1} = '';
 
-report{end+1} = '=== SUMMARY ===';
+%% --- Section 5: summary ---
+report{end+1} = '=== SUMMARY (all SNR points) ===';
 report{end+1} = sprintf('Mean CNN latency: %.2f ms | Mean DQN latency: %.2f ms | Mean total: %.2f ms', ...
     mean([results.cnn_latency_ms]), mean([results.dqn_latency_ms]), ...
     mean([results.cnn_latency_ms]+[results.dqn_latency_ms]));
-% ADDED (Sep 14): median alongside mean. Confirmed via
-% diagnose_latency_position_test.m that noise_burst's prior latency outlier
-% (~27-48ms CNN, ~12-29ms DQN) is a periodic ~4th-sequential-call test-harness
-% artifact (GPU housekeeping), not threat-specific -- median is robust to
-% this kind of positional outlier and better represents true per-decision
-% latency than mean.
 report{end+1} = sprintf('Median CNN latency: %.2f ms | Median DQN latency: %.2f ms | Median total: %.2f ms', ...
     median([results.cnn_latency_ms]), median([results.dqn_latency_ms]), ...
     median([results.cnn_latency_ms]+[results.dqn_latency_ms]));
+report{end+1} = sprintf('CNN closed-loop detection accuracy: %d/%d (%.1f%%)', ...
+    sum([results.cnn_correct]), numel(results), 100*mean([results.cnn_correct]));
 report{end+1} = sprintf('DQN-vs-Rule agreement: %d/%d (%.1f%%)', ...
     sum([results.agrees_with_rule]), numel(results), 100*mean([results.agrees_with_rule]));
-report{end+1} = sprintf('Mean recovery: %.1f%%', mean([results.recovery_pct]));
+report{end+1} = sprintf('Mean recovery (all threats, all SNR): %.1f%%', mean([results.recovery_pct]));
 
-if ~exist('results', 'dir'), mkdir('results'); end
+% Mean over real threats only. benign_interference and none have nothing to
+% recover -- including them drags the mean down and misrepresents performance
+% on actual attacks.
+real_mask = ~ismember({results.threat}, {'benign_interference','none'});
+report{end+1} = sprintf('Mean recovery (real threats only): %.1f%%', mean([results(real_mask).recovery_pct]));
+
 fid = fopen('results/closed_loop_diagnostic_report.txt','w');
 for i=1:numel(report), fprintf(fid,'%s\n',report{i}); end
 fclose(fid);
 for i=1:numel(report), fprintf('%s\n',report{i}); end
 fprintf('\nSaved results/closed_loop_diagnostic_report.txt\n');
 
-%% Timing plot
-fig = figure('Position',[100 100 800 400],'Color','w');
-bar_data = [[results.cnn_latency_ms]', [results.dqn_latency_ms]'];
-b = bar(bar_data,'stacked');
-set(gca,'XTickLabel',{results.threat},'XTickLabelRotation',25);
-ylabel('Latency (ms)'); title('Decision Latency: CNN + DQN Inference Time');
+%% ========== Plot 1: recovery vs SNR, per threat ==========
+fig1 = figure('Position',[100 100 1000 550],'Color','w');
+hold on;
+for t = 1:numel(threats)
+    mask_t = strcmp({results.threat}, threats{t});
+    rec = zeros(1, numel(SNR_points));
+    for s = 1:numel(SNR_points)
+        mask = mask_t & ([results.snr_db] == SNR_points(s));
+        rec(s) = results(mask).recovery_pct;
+    end
+    plot(SNR_points, rec, '-o', 'LineWidth', 1.5, 'DisplayName', strrep(threats{t},'_','\_'));
+end
+hold off;
+xlabel('E_b/N_0 (dB)'); ylabel('BER Recovery (%)');
+title('Closed-Loop Recovery vs SNR (sliding-window detection)');
+legend('Location','eastoutside'); grid on;
+xticks(SNR_points);
+saveas(fig1,'results/closed_loop_recovery_vs_snr.png');
+close(fig1);
+fprintf('Saved results/closed_loop_recovery_vs_snr.png\n');
+
+%% ========== Plot 2: latency ==========
+fig2 = figure('Position',[100 100 900 450],'Color','w');
+mean_cnn = zeros(1,numel(threats)); mean_dqn = zeros(1,numel(threats));
+for t = 1:numel(threats)
+    mask_t = strcmp({results.threat}, threats{t});
+    mean_cnn(t) = mean([results(mask_t).cnn_latency_ms]);
+    mean_dqn(t) = mean([results(mask_t).dqn_latency_ms]);
+end
+b = bar([mean_cnn(:), mean_dqn(:)],'stacked');
+set(gca,'XTickLabel',threats,'XTickLabelRotation',25);
+ylabel('Mean Latency (ms)');
+title('Decision Latency: CNN + DQN Inference Time (averaged over SNR)');
 legend('CNN inference','DQN inference','Location','northeast'); grid on;
-saveas(fig,'results/closed_loop_diagnostic_timing.png');
-close(fig);
+saveas(fig2,'results/closed_loop_diagnostic_timing.png');
+close(fig2);
 fprintf('Saved results/closed_loop_diagnostic_timing.png\n');
+
 fprintf('\n=== Diagnostic Complete ===\n');
+
+%% ===== Helper: extract per-frame IQ, BER, RSSI, PLR from one sim output =====
+% Mirrors local_extract() in run_dataset_sweep.m so the features computed
+% here match those the detector was trained on, including its NaN convention
+% for the final short frame.
+function [iq_frames, ber, rssi, plr, nf] = extract_all_frames(out, p, delay_bits)
+    txb = double(squeeze(out.get('tx_bits_out')));
+    rxb = double(squeeze(out.get('rx_bits_out')));
+    iq  = squeeze(out.get('Rx_IQ'));
+    if isvector(txb), txb=txb(:); end
+    if isvector(rxb), rxb=rxb(:); end
+    if isvector(iq),  iq=iq(:);   end
+
+    nf  = size(iq,2);
+    bpf = p.frame_length;
+    tx_all = txb(:); rx_all = rxb(:);
+    Lmax = min(numel(tx_all),numel(rx_all)) - delay_bits;
+    tx_al = tx_all(1:Lmax);
+    rx_al = rx_all(delay_bits+1:delay_bits+Lmax);
+
+    iq_frames = cell(1,nf); ber=zeros(1,nf); rssi=zeros(1,nf); plr=zeros(1,nf);
+    for f = 1:nf
+        iq_frames{f} = iq(:,f);
+        i0=(f-1)*bpf+1; i1=f*bpf;
+        if i1 <= numel(tx_al)
+            ber(f) = mean(tx_al(i0:i1) ~= rx_al(i0:i1));
+        else
+            ber(f) = NaN;
+        end
+        rssi(f) = 10*log10(mean(abs(iq(:,f)).^2)+eps);
+        plr(f)  = double(ber(f) > 0.1);
+    end
+end

@@ -24,7 +24,7 @@ p0 = p;   % backup to restore threat params after each config
 
 %% ---- Dataset configuration ----
 EbNo_list         = p.EbNo_dB;    % 0:2:10 dB
-frames_per_config = 50;           % frames per (threat, level, SNR)
+frames_per_config = 100;           % frames per (threat, level, SNR)
 delay_bits        = 20;           % validated RRC group delay
 modelName         = 'UAV_GCS_Threat_Link';
 

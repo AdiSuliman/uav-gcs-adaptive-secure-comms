@@ -3,14 +3,12 @@
 % (uncertain prediction) -> DQN agent decides action -> countermeasure applied
 % -> BER re-measured -> agent's real-world performance evaluated.
 %
-% Unlike C2 (synthetic, perfect-knowledge training), this uses the ACTUAL
-% trained CNN detector (92.13% accuracy, sometimes wrong) and ACTUAL BER
-% measurements from Simulink — not simulated approximations.
+% Uses the ACTUAL trained CNN detector (sometimes wrong) and ACTUAL BER
+% measurements from Simulink -- not simulated approximations.
 %
 % Input:  data/trained_detector.mat (CNN from B2)
 %         data/trained_dqn.mat      (DQN agent from C2)
 % Output: results/closed_loop_results.png
-%         console: per-threat detection + action + recovery summary
 
 close all; clc;
 fprintf('=== C3: Closed-Loop with Real Detector + DQN ===\n\n');
@@ -24,7 +22,6 @@ cnn_classes = D.classes;
 Q = load('data/trained_dqn.mat', 'agent');
 dqn_agent_trained = Q.agent;
 
-% Load normalization stats from B1 (needed to normalize live features for CNN)
 S = load('data/splits.mat', 'splits');
 feat_mean = S.splits.norm.feat_mean;
 feat_std  = S.splits.norm.feat_std;
@@ -46,14 +43,10 @@ threats = {'jamming', 'reactive_jamming', 'sweeping_jammer', 'noise_burst', ...
            'path_loss', 'spoofing', 'antenna_fault', 'benign_interference'};
 n_threats = numel(threats);
 
-% Strength field per threat (verified against init_params/build_threat_model)
 strength_field = containers.Map( ...
     {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','antenna_fault','spoofing','benign_interference'}, ...
     {'jsr_db', 'jsr_db',           'jsr_db',          'jsr_db',   'path_loss_db','fault_atten_db','spoof_sir_db','benign_int_db'});
 
-% action_effectiveness per action index (1=no_action..5=spatial_diversity)
-% same convention used in C2 training — countermeasure strength as dB reduction
-% UPDATED (post-EXP analysis, Sep 13): see train_dqn.m header for rationale.
 action_mitigation_db = struct( ...
     'no_action', 0, 'channel_switch', 25, 'rate_reduce', 15, ...
     'freq_diversity', 25, 'spatial_diversity', 25);
@@ -63,18 +56,6 @@ baseline = struct();
 baseline.jsr_db = p.jsr_db; baseline.path_loss_db = p.path_loss_db;
 baseline.fault_atten_db = p.fault_atten_db; baseline.spoof_sir_db = p.spoof_sir_db;
 baseline.benign_int_db = p.benign_int_db;
-
-% Matches dqn_agent.m stateSpec [0,8] and train_dqn.m threat_encode
-% FIXED (Sep 13, antenna_fault Q-value bleed investigation): this map
-% previously had noise_burst/spoofing swapped relative to train_dqn.m's
-% threat_list index order -- meaning the trained network was queried with
-% the wrong encoding for those two threats. Also reassigns antenna_fault
-% away from being adjacent to benign_interference's penalized code (see
-% train_dqn.m header for full rationale). Now keys/values match
-% train_dqn.m's threat_encode and run_closed_loop_diagnostic.m exactly.
-threat_encode_map = containers.Map( ...
-    {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','spoofing','antenna_fault','benign_interference','none'}, ...
-    {1,2,3,5,6,7,4,8,0});
 
 results = struct('threat',{},'true_class',{},'cnn_pred',{},'cnn_conf',{}, ...
     'action',{},'ber_before',{},'ber_after',{},'recovery_pct',{},'correct_detection',{});
@@ -98,7 +79,7 @@ for t = 1:n_threats
     %% --- Step 1: Run Simulink, get REAL BER + IQ (before countermeasure) ---
     [ber_before, iq_rx] = quick_ber_with_iq_fixed('UAV_GCS_Threat_Link', delay_bits);
     rssi = 10*log10(mean(abs(iq_rx).^2) + eps);
-    snr_val = p.EbNo_dB(1);   % baseline SNR point used in this test
+    snr_val = p.EbNo_dB(1);
     plr = double(ber_before > 0.1);
 
     fprintf('    BER (before): %.3e | RSSI: %.1f dB\n', ber_before, rssi);
@@ -111,8 +92,8 @@ for t = 1:n_threats
     spec_img = imresize(Pw, [img_size img_size]);
 
     %% --- Step 3: CNN detector prediction (may be WRONG — real uncertainty) ---
-    % Build 7-feature vector matching training format: snr,ber,rssi,plr,var_rssi_10,dber_dt,burst_ratio
-    % (temporal features unavailable in single-shot test -> use neutral defaults)
+    % 7-feature vector matching training format: snr,ber,rssi,plr,var_rssi_10,dber_dt,burst_ratio
+    % (temporal features unavailable in single-shot test -> neutral defaults)
     raw_feats = [snr_val, ber_before, rssi, plr, 0, 0, 1];
     norm_feats = (raw_feats - feat_mean) ./ feat_std;
 
@@ -135,12 +116,7 @@ for t = 1:n_threats
         cnn_pred_class, 100*conf, threat, verdict_str);
 
     %% --- Step 4: DQN agent decides action based on CNN's (possibly wrong) prediction ---
-    if isKey(threat_encode_map, cnn_pred_class)
-        threat_enc = threat_encode_map(cnn_pred_class);
-    else
-        threat_enc = -1;  % 'none' or unrecognized
-    end
-    dqn_state = [threat_enc; ber_before; rssi; snr_val; plr];
+    dqn_state = build_dqn_state(cnn_pred_class, ber_before, rssi, snr_val, plr);
     action_idx = dqn_select_action(dqn_agent_trained, dqn_state);
     action_name = action_names{action_idx};
     fprintf('    DQN action:   %-18s (based on detected class)\n', action_name);

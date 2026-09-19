@@ -1,8 +1,8 @@
 %% MAIN - Master Execution & Status Pipeline
 % UAV-GCS Adaptive Secure Communications System
-% Orchestrates Phase A (Link+Threats+Dataset) -> B (Detection) -> C (Recovery) -> D (Report)
+% Orchestrates Phase A (Link+Threats+Dataset) -> B (Detection) -> B-exp (CNN-LSTM)
+% -> C (Recovery) -> EXP (Exploration) -> KPI (Measurement) -> D (Report)
 % Author: Adi Suliman, Bar Dvir Hassan
-% Last Updated: 2026-09-14 (9-threat/class pipeline, antenna_fault + latency fixes, full diary logging)
 %
 % Toggle the RUN flags below (true/false). They execute in the order listed.
 % Light stages are fast; heavy stages (A5-A6, B2, C2, explore_countermeasures)
@@ -11,13 +11,23 @@
 % COMMAND WINDOW LOGGING: every called script starts with close all/clc, which
 % would normally wipe out everything printed by earlier stages. This is solved
 % with MATLAB's `diary` command: it logs EVERYTHING printed to the Command
-% Window into a text file, completely independent of clc (clc only clears what
-% is VISIBLE on screen -- it never touches the diary log). So even though the
-% screen itself still gets cleared between stages, the log file accumulates
-% the full, uninterrupted transcript of the entire run. Open logs/run_*.txt
-% after running to get the complete output, instead of relying on scrollback.
+% Window into a text file, independent of clc. Open logs/run_*.txt after
+% running to get the complete output.
+%
+% BATCH MODE: set BATCH_MODE_DISABLED = true to run normally with GUI windows.
+% Leave it false and launch from a Windows Command Prompt with:
+%   matlab -batch "main" -nojvm -nosplash
+% to run headless in the background while you work in other applications.
 
 clear; close all; clc;
+
+%% ========== BATCH MODE CONTROL ==========
+BATCH_MODE_DISABLED = false;   % true = run with GUI windows (normal mode)
+%% =========================================
+
+if ~BATCH_MODE_DISABLED && ~usejava('desktop')
+    fprintf('Running in batch mode (no GUI). All output will be logged.\n');
+end
 
 %% ========== LOGGING SETUP (diary — survives all internal clc calls) ==========
 if ~exist('logs', 'dir'), mkdir('logs'); end
@@ -28,27 +38,43 @@ fprintf('=== Logging full run to: %s ===\n', log_filename);
 fprintf('(This file will contain EVERYTHING printed below, even across clc calls.)\n\n');
 
 %% ========== EXECUTION FLAGS (in execution order) ==========
-RUN.init                        = false;    % A0 : regenerate params.mat
-RUN.validate_A                  = false;    % A1-A3: build + validate AWGN & Rician (fast)
-RUN.check_A4                    = false;    % A4 : build threat model + sanity BER (fast)
-RUN.build_dataset               = false;   % A5 : run_dataset_sweep (9 threats, incl. none)  (HEAVY ~8 min) >> ONE-TIME
-RUN.extract_spectrograms        = false;   % A6 : extract_spectrograms              (HEAVY ~3 min) >> ONE-TIME
+RUN.init                        = false;   % A0 : regenerate params.mat
+RUN.validate_A                  = false;   % A1-A3: build + validate AWGN & Rician (fast)
+RUN.check_A4                    = false;   % A4 : build threat model + sanity BER (fast)
+RUN.build_dataset               = false;   % A5 : done (27246 frames, spoofing-fixed, verified 2x)
+RUN.extract_spectrograms        = false;   % A6 : done
 
-RUN.temporal_features           = false;   % B2.5: extract_temporal_features        (fast) >> ONE-TIME
-RUN.prepare_data                = false;   % B1  : prepare_data                     (fast) >> ONE-TIME
-RUN.train_detector              = false;   % B2  : train_detector (9-class CNN)     (HEAVY ~7 min GPU) >> ONE-TIME
-RUN.eval_detector               = false;    % B3  : eval_detector                    (fast, safe to leave true)
+% --- Phase A-exp: sequence windowing for CNN-LSTM ---
+RUN.build_sequence_index        = false;   % A5-seq : STALE (predates spoofing fix), LSTM not pursued
+RUN.extract_spectrograms_seq    = false;   % A6-seq : STALE — same reason
 
-RUN.train_dqn                   = false;   % C2  : train_dqn (real reward table, 9 threats)  (HEAVY ~5 min) >> ONE-TIME
-RUN.run_closed_loop             = true;    % C3  : run_closed_loop_with_detector    (HEAVY ~4 min, 9 threats) -- verify post-fix, not yet run
-RUN.run_closed_loop_diagnostic  = true;    % C3d : full diagnostics + timing         (HEAVY ~4 min, 9 threats)
+RUN.temporal_features           = false;   % B2.5: DEPRECATED — folded into extract_spectrograms.m (A6)
+RUN.prepare_data                = false;   % B1  : done
+RUN.train_detector              = false;   % B2  : done (98.05% test acc, verified 2x independently)
+RUN.eval_detector               = false;   % B3  : done
 
-RUN.explore_countermeasures     = false;   % EXP : deep countermeasure sweep         (VERY HEAVY ~75 min) >> RUN RARELY
-RUN.analyze_exploration_results = false;   % EXP-analysis: post-hoc diagnosis        (fast, needs EXP output first)
+% --- Phase B-exp: CNN-LSTM detector — NOT PURSUED FURTHER ---
+% The spoofing weakness CNN-LSTM was meant to address was root-caused and
+% fixed at the threat-injection level instead. CNN alone now exceeds LSTM's
+% best result by a wide margin with far fewer parameters.
+RUN.prepare_data_seq            = false;
+RUN.train_detector_lstm         = false;
+RUN.eval_detector_lstm          = false;
+
+RUN.train_dqn                   = false;   % C2  : done (one-hot state, validation gate passed)
+RUN.run_closed_loop             = false;   % C3  : done (against the one-hot DQN)
+RUN.run_closed_loop_diagnostic  = true;   % C3d : done (against the one-hot DQN)
+
+RUN.explore_countermeasures     = false;   % EXP : deep countermeasure sweep (VERY HEAVY ~75 min)
+RUN.analyze_exploration_results = false;   % EXP-analysis: post-hoc diagnosis (fast)
+
+% --- Phase KPI: proposal section-ה measurement ---
+RUN.measure_far                 = false;    % KPI4 : FAR on non-hostile classes (fast)
+RUN.measure_all_kpis            = false;    % KPI  : aggregate all 5 into results/kpi_summary.txt (fast)
 
 fprintf('========================================================\n');
 fprintf('  UAV-GCS ADAPTIVE SECURE COMMS - MASTER PIPELINE\n');
-fprintf('  A: Link+Threats+Data | B: Detection | C: Recovery | EXP: Deep Exploration\n');
+fprintf('  A: Link+Threats+Data | B: Detection | C: Recovery | EXP: Exploration | KPI: Measurement\n');
 fprintf('========================================================\n\n');
 
 %% ========== PHASE A: LINK + THREATS + DATASET ==========
@@ -81,12 +107,12 @@ if RUN.check_A4
 end
 
 if RUN.build_dataset
-    fprintf('  [A5] Generating multi-JSR dataset, 9 threats/classes incl. none (HEAVY ~8 min)...\n');
+    fprintf('  [A5] Generating multi-JSR dataset, 9 threats/classes incl. none (HEAVY, frames_per_config=100)...\n');
     run_dataset_sweep;
 end
 
 if RUN.extract_spectrograms
-    fprintf('  [A6] Extracting spectrograms (HEAVY ~3 min)...\n');
+    fprintf('  [A6] Extracting spectrograms + 7 features (HEAVY)...\n');
     extract_spectrograms;
 end
 
@@ -105,12 +131,38 @@ else
 end
 fprintf('\n');
 
-%% ========== PHASE B: DETECTION (OFFLINE) ==========
+%% ========== PHASE A-exp: SEQUENCE WINDOWING (for CNN-LSTM) ==========
+fprintf('> PHASE A-exp: Sequence Windowing (CNN-LSTM data prep) -- NOT PURSUED FURTHER\n\n');
+
+if RUN.build_sequence_index
+    fprintf('  [A5-seq] Building sequence index from dataset.mat (with run_id)...\n');
+    build_sequence_index;
+end
+if RUN.extract_spectrograms_seq
+    fprintf('  [A6-seq] Assembling sequence spectrogram tensors...\n');
+    extract_spectrograms_seq;
+end
+
+fprintf('  [A-exp] Sequence pipeline status (STALE -- predates spoofing fix, not regenerated):\n');
+if exist('data/dataset_seq_index.mat','file')
+    d = dir('data/dataset_seq_index.mat');
+    fprintf('         sequence index    : READY (%s, %.0f MB)\n', d.date, d.bytes/1e6);
+else
+    fprintf('         sequence index    : [PENDING] -> build_sequence_index\n');
+end
+if exist('data/spectrograms_seq.mat','file')
+    d = dir('data/spectrograms_seq.mat');
+    fprintf('         spectrograms_seq  : READY (%s, %.0f MB)\n', d.date, d.bytes/1e6);
+else
+    fprintf('         spectrograms_seq  : [PENDING] -> extract_spectrograms_seq\n');
+end
+fprintf('\n');
+
+%% ========== PHASE B: DETECTION (OFFLINE, CNN baseline) ==========
 fprintf('> PHASE B: Detection Network (CNN + scalar hybrid, 9 classes)\n\n');
 
 if RUN.temporal_features
-    fprintf('  [B2.5] Extracting temporal features...\n');
-    extract_temporal_features;
+    fprintf('  [B2.5] DEPRECATED flag — no script called (folded into A6 extract_spectrograms.m)\n');
 end
 if RUN.prepare_data
     fprintf('  [B1] Preparing data (stratified split 80/10/10)...\n');
@@ -145,12 +197,48 @@ else
 end
 fprintf('\n');
 
+%% ========== PHASE B-exp: CNN-LSTM DETECTOR (comparison architecture) ==========
+fprintf('> PHASE B-exp: CNN-LSTM Detector -- NOT PURSUED FURTHER\n\n');
+
+if RUN.prepare_data_seq
+    fprintf('  [B1-seq] Preparing sequence splits...\n');
+    prepare_data_seq;
+end
+if RUN.train_detector_lstm
+    fprintf('  [B2-seq] Training CNN-LSTM detector...\n');
+    train_detector_lstm;
+end
+if RUN.eval_detector_lstm
+    fprintf('  [B3-seq] Evaluating CNN-LSTM on test set...\n');
+    eval_detector_lstm;
+end
+
+fprintf('  [B-exp] Pipeline status (STALE, kept for the architecture-comparison record only):\n');
+if exist('data/splits_seq.mat','file')
+    d = dir('data/splits_seq.mat');
+    fprintf('      splits_seq.mat            : READY (%s, %.0f MB)\n', d.date, d.bytes/1e6);
+else
+    fprintf('      splits_seq.mat            : [PENDING] -> prepare_data_seq\n');
+end
+if exist('data/trained_detector_lstm.mat','file')
+    d = dir('data/trained_detector_lstm.mat');
+    fprintf('      trained_detector_lstm.mat : READY (%s, %.0f MB)\n', d.date, d.bytes/1e6);
+else
+    fprintf('      trained_detector_lstm.mat : [PENDING] -> train_detector_lstm\n');
+end
+if exist('results/eval_detector_lstm_metrics.mat','file')
+    fprintf('      B3-seq evaluation results : READY -> results/confusion_matrix_lstm.png\n');
+else
+    fprintf('      B3-seq evaluation results : [PENDING] -> eval_detector_lstm\n');
+end
+fprintf('\n');
+
 %% ========== PHASE C: CLOSED-LOOP RECOVERY (ONLINE) ==========
 fprintf('> PHASE C: Closed-Loop Adaptive Recovery (9 threats/classes)\n\n');
 fprintf('  [C1] Rule-based countermeasure policy...           READY (rule_based_policy.m)\n');
 
 if RUN.train_dqn
-    fprintf('  [C2] Training DQN agent (real threat-specific reward table, 9 classes)...\n');
+    fprintf('  [C2] Training DQN agent (one-hot state, real threat-specific reward table)...\n');
     train_dqn;
 end
 if RUN.run_closed_loop
@@ -207,6 +295,39 @@ else
 end
 fprintf('\n');
 
+%% ========== PHASE KPI: PROPOSAL MEASUREMENT (section ה) ==========
+fprintf('> PHASE KPI: Proposal KPI Measurement\n\n');
+
+if RUN.measure_far
+    fprintf('  [KPI4] Measuring FAR on non-hostile classes...\n');
+    diagnose_far_measurement;
+end
+if RUN.measure_all_kpis
+    fprintf('  [KPI] Aggregating all 5 proposal KPIs...\n');
+    measure_all_kpis;
+end
+
+fprintf('  [KPI] Pipeline status:\n');
+if exist('results/far_measurement.txt','file')
+    d = dir('results/far_measurement.txt');
+    fprintf('      far_measurement.txt        : READY (%s)\n', d.date);
+else
+    fprintf('      far_measurement.txt        : [PENDING] -> diagnose_far_measurement\n');
+end
+if exist('results/kpi3_measurement.txt','file')
+    d = dir('results/kpi3_measurement.txt');
+    fprintf('      kpi3_measurement.txt       : READY (%s)\n', d.date);
+else
+    fprintf('      kpi3_measurement.txt       : [PENDING] -> measure_kpi3_recovery_time\n');
+end
+if exist('results/kpi_summary.txt','file')
+    d = dir('results/kpi_summary.txt');
+    fprintf('      kpi_summary.txt            : READY (%s)\n', d.date);
+else
+    fprintf('      kpi_summary.txt            : [PENDING] -> measure_all_kpis\n');
+end
+fprintf('\n');
+
 %% ========== PHASE D: DOCUMENTATION ==========
 fprintf('> PHASE D: Documentation & Defense\n\n');
 fprintf('  [D1] Project report (docx)...                      [PENDING]\n');
@@ -214,7 +335,8 @@ fprintf('  [D2] Defense presentation (pptx)...                [PENDING]\n\n');
 
 %% ========== CHECKPOINT ==========
 fprintf('========================================================\n');
-fprintf(' CHECKPOINT - Phase A+B+C1+C2+C3 complete (9 threats/classes) | EXP available on demand\n');
+fprintf(' CHECKPOINT - CNN 98.05%% (spoofing threat model fixed at physical root cause, verified 2x)\n');
+fprintf(' DQN one-hot state encoding, validation gate passed | C3 rerun against the new agent\n');
 fprintf(' Outputs in results/, data/ | models in models/ | code on GitHub\n');
 fprintf(' Full run log saved to: %s\n', log_filename);
 fprintf('========================================================\n\n');

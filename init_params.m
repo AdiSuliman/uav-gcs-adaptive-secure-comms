@@ -63,6 +63,15 @@ params.sweep_period  = 300;         % [A-ext] Sweeping Jammer: full sweep cycle 
 %% ========== NOISE & SWEEP ==========
 params.EbNo_dB    = 0:2:10;            % [ACTIVE] Eb/N0 sweep range (dB)
 params.num_frames = 1000;             % [ACTIVE] frames accumulated per Eb/N0 point
+
+%% ========== SEQUENCE WINDOWING (CNN-LSTM, Phase B-exp) ==========
+% Used by build_sequence_index.m / extract_spectrograms_seq.m / train_detector_lstm.m
+% to group consecutive same-class frames (from data/dataset.mat) into windows
+% for the LSTM temporal branch. Does NOT affect the existing CNN-only pipeline.
+params.seq_len    = 8;    % [LSTM] frames per sequence window (5-10 per plan)
+params.seq_stride = 4;    % [LSTM] step between window starts (4 = 50% overlap;
+                           %        set = seq_len for non-overlapping windows)
+
 %% ========== FLAGS ==========
 params.plot_enable = true;
 params.verbose     = true;
@@ -89,6 +98,7 @@ if params.verbose
     fprintf('Active Threat:    %s (JSR=%.0f dB)\n', params.active_threat, params.jsr_db);
     fprintf('Eb/N0 Range:      %.0f to %.0f dB\n', min(params.EbNo_dB), max(params.EbNo_dB));
     fprintf('Frames per SNR:   %d\n', params.num_frames);
+    fprintf('Sequence window:  len=%d, stride=%d (LSTM)\n', params.seq_len, params.seq_stride);
     fprintf('=============================================\n\n');
 end
 %% ========== SAVE PARAMETERS ==========

@@ -1,72 +1,28 @@
-%% C2 — TRAIN DQN: Offline training with REAL threat-specific reward table
-% FIX (v2): the original synthetic reward (action_effectiveness = [0,0.4,0.3,0.35,0.4],
-% identical for every threat) made the agent learn a single "generalist" action
-% regardless of threat -- confirmed by C3-diagnostic showing only 12.5% agreement
-% with rule-based policy. This version pre-computes a REAL 8-threat x 5-action
-% reward table via actual Simulink runs (using the SAME action_mitigation_db
-% and per-threat strength fields as run_closed_loop_with_detector.m), so the
-% agent now learns genuinely threat-differentiated Q-values.
-%
-% Output: trained_dqn.mat (agent after training)
-%         results/dqn_training_curves.png (loss + avg_reward)
-%         results/dqn_reward_table.png (heatmap of the real threat x action table)
-
+%% C2 — TRAIN DQN AGENT
+% Trains the DQN on a real, threat-specific reward table (measured via
+% actual Simulink runs, not synthetic). Includes reward shaping for
+% benign_interference/none (fixed false-alarm penalty) and a post-training
+% validation gate that blocks saving an agent that violates that shaping,
+% or that fails to react on a real threat.
 close all; clc;
-fprintf('=== C2: Train DQN Agent (v2 — real threat-specific reward) ===\n\n');
+fprintf('=== C2: Train DQN Agent ===\n\n');
+
+rng(42, 'twister');   % reproducibility
 
 %% 1. Initialize agent
 agent = dqn_agent();
 
-%% 2. Setup
-num_episodes = 50;      % episodes per threat family
-num_threats = 9;        % UPDATED: added 'none' (see rationale below)
-total_episodes = num_episodes * num_threats;
+%% 2. Setup: threats, actions
+num_episodes = 50;
+num_threats = 9;
 
-% UPDATED (Sep 13): 'none' (clean channel) added as its own trained class.
-% It was previously absent from this list entirely -- meaning the DQN never
-% saw it during training and defaulted to treating it like any other
-% (aggressive-action-favoring) threat when the CNN correctly identified a
-% clean channel. Confirmed via diagnose_none_class.m: DQN picked
-% channel_switch over no_action by a huge, consistent margin (Q=40.2 vs 1.78
-% across 5 trials) on a genuinely clean link -- a real false-alarm risk,
-% directly relevant to the proposal's FAR (false alarm rate) KPI.
+% Order must match the threat_list inside build_dqn_state.m
 threat_list = {'jamming', 'reactive_jamming', 'sweeping_jammer', 'noise_burst', ...
                'path_loss', 'spoofing', 'antenna_fault', 'benign_interference', 'none'};
-% REASSIGNED (Sep 13, antenna_fault Q-value bleed investigation): scalar
-% ordinal encoding implicitly signals "closeness" between adjacent codes.
-% antenna_fault previously sat at code 6, directly next to benign_interference
-% (7) -- which carries a hard -40pp false-alarm penalty AND 3x oversampling.
-% diagnose_antenna_fault_reward.m confirmed the reward table itself is
-% clean/stable (std<2%) with channel_switch=+20.5% recovery, yet trained
-% Q-values showed channel_switch=-14.51 -- values on the SAME scale as
-% benign_interference's penalty, not antenna_fault's own reward table.
-% Fix: reassign codes so antenna_fault sits at the midpoint (max distance
-% from both penalized classes), while benign_interference/none keep the
-% array endpoints (0 and 8) since they're intentionally "special".
-% ALSO FIXES a separate bug: this array must match threat_encode_map in
-% run_closed_loop_diagnostic.m / run_closed_loop_with_detector.m exactly --
-% those files previously had noise_burst/spoofing swapped relative to this
-% list's index order, meaning C3 fed the wrong encoding to the trained
-% network for those two threats. All three files are now kept in sync by
-% using the SAME threat_list order and the SAME explicit code assignment
-% below (order: jamming, reactive_jamming, sweeping_jammer, noise_burst,
-% path_loss, spoofing, antenna_fault, benign_interference, none).
-threat_encode = [1 2 3 5 6 7 4 8 0];  % matches dqn_agent.m stateSpec [0,8]
 
-action_names = agent.action_names;   % {'no_action','channel_switch','rate_reduce','freq_diversity','spatial_diversity'}
-% UPDATED (post-EXP analysis, Sep 13): magnitudes raised to match the best
-% legitimate mitigation validated by explore_countermeasures.m + 
-% analyze_exploration_results.m (field_reduction ceiling 25dB / awgn_margin_boost
-% ceiling 15dB). Old values (15/8/8/12) were far below what the link can
-% actually tolerate -- this was the root cause of antenna_fault's 4.7% recovery
-% and the weak recovery numbers across most threats in the original C3 diagnostic.
+action_names = agent.action_names;
 action_mitigation_db = struct('no_action',0,'channel_switch',25,'rate_reduce',15, ...
     'freq_diversity',25,'spatial_diversity',25);
-% 'none' mapped to 'jsr_db' as a technical placeholder only: build_threat_model.m's
-% 'none' branch is a pure passthrough (reproduces the clean A3 Rician baseline)
-% and does not read jsr_db at all, so any mitigation "applied" to it is a no-op
-% on the actual simulated signal -- the reward-shaping penalty below (not the
-% BER effect) is what teaches the agent to leave a clean channel alone.
 strength_field = containers.Map( ...
     {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','antenna_fault','spoofing','benign_interference','none'}, ...
     {'jsr_db', 'jsr_db',           'jsr_db',          'jsr_db',   'path_loss_db','fault_atten_db','spoof_sir_db','benign_int_db','jsr_db'});
@@ -77,23 +33,35 @@ baseline = struct('jsr_db',p0.jsr_db,'path_loss_db',p0.path_loss_db, ...
     'fault_atten_db',p0.fault_atten_db,'spoof_sir_db',p0.spoof_sir_db, ...
     'benign_int_db',p0.benign_int_db);
 
-%% 3. Pre-compute REAL threat x action reward table (9 threats x 5 actions = 45 combos)
-fprintf('Building real threat-specific reward table (40 combos, real Simulink runs)...\n\n');
-reward_table = zeros(num_threats, 5);   % recovery_pct
+%% 3. Build reward table (real Simulink runs, 9 threats x 5 actions)
+% Also records each threat's baseline BER/RSSI, reused later by the
+% validation gate so it checks the agent on real, in-distribution states.
+fprintf('Building reward table...\n\n');
+reward_table = zeros(num_threats, 5);
 ber_after_table = zeros(num_threats, 5);
+base_ber = zeros(num_threats, 1);
+base_rssi = zeros(num_threats, 1);
 
 for ti = 1:num_threats
     threat = threat_list{ti};
     field = strength_field(threat);
 
-    % Baseline (no countermeasure)
     p = p0; p.jsr_db=baseline.jsr_db; p.path_loss_db=baseline.path_loss_db;
     p.fault_atten_db=baseline.fault_atten_db; p.spoof_sir_db=baseline.spoof_sir_db;
     p.benign_int_db=baseline.benign_int_db;
     p.active_threat = threat;
     params = p; save('params.mat', 'params');
     build_threat_model;
-    ber_before = quick_ber('UAV_GCS_Threat_Link');
+
+    [ber_before, iq_before] = quick_ber_with_iq('UAV_GCS_Threat_Link');
+    ber_before = double(ber_before);
+    if ~isempty(iq_before)
+        rssi_before = 10*log10(mean(abs(iq_before).^2) + eps);
+    else
+        rssi_before = -50;
+    end
+    base_ber(ti) = ber_before;
+    base_rssi(ti) = rssi_before;
 
     fprintf('  %-20s baseline BER=%.3e | ', threat, ber_before);
     for ai = 1:5
@@ -102,7 +70,7 @@ for ti = 1:num_threats
         p2 = p;
         p2.(field) = baseline.(field) - mitigation_db;
         if any(strcmp(field, {'path_loss_db','fault_atten_db'}))
-            p2.(field) = max(p2.(field), 0);   % physical floor: loss/attenuation can't go negative
+            p2.(field) = max(p2.(field), 0);
         end
         params = p2; save('params.mat', 'params');
         build_threat_model;
@@ -115,46 +83,31 @@ for ti = 1:num_threats
     end
     fprintf('\n');
 
-    % --- Reward shaping: false-alarm penalty for non-hostile scenarios ---
-    % benign_interference and 'none' (clean channel) are NOT real attacks
-    % (D9, docs/DECISIONS.md): the correct response for both is no_action.
-    % Pure BER-recovery reward doesn't capture this:
-    %  - benign_interference: any action that reduces benign_int_db
-    %    "recovers" some BER, so raw reward makes no_action look WORSE.
-    %  - 'none': no field it maps to is actually read by build_threat_model's
-    %    passthrough branch, so every action gets ~0% recovery here --
-    %    meaning WITHOUT shaping, no_action and every other action look
-    %    EQUALLY good, which is not enough signal for the network to learn
-    %    the FAR-relevant behavior of actively preferring no_action.
-    % Fix (both cases): apply a fixed penalty to every non-no_action reward,
-    % modeling the real-world cost of an unnecessary countermeasure
-    % (bandwidth, latency, resource use, plus the operational cost the
-    % proposal names explicitly for FAR: "false alarm triggers an
-    % unnecessary channel switch that disrupts the link"). Magnitude (40pp)
-    % is a design choice, not empirically measured.
+    % Non-hostile classes: reward is fixed, not derived from raw BER
+    % recovery. The magnitude of BER improvement is meaningless here --
+    % any reaction is a false alarm regardless of how much it happened to
+    % reduce BER.
     if any(strcmp(threat, {'benign_interference', 'none'}))
-        false_alarm_penalty = 40;
         no_action_idx = find(strcmp(action_names, 'no_action'));
         for ai = 1:5
-            if ai ~= no_action_idx
-                reward_table(ti, ai) = reward_table(ti, ai) - false_alarm_penalty;
+            if ai == no_action_idx
+                reward_table(ti, ai) = 0;
+            else
+                reward_table(ti, ai) = -40;
             end
         end
-        fprintf('  %-20s [reward-shaped: -%.0fpp false-alarm penalty on all actions except no_action]\n', ...
-            threat, false_alarm_penalty);
+        fprintf('  %-20s [reward fixed: no_action=0, all other actions=-40]\n', threat);
     end
 end
 
-% Restore baseline
 params = p0; save('params.mat', 'params');
 
-fprintf('\nReward table built. Best action per threat (for sanity check):\n');
+fprintf('\nReward table built. Best action per threat:\n');
 for ti = 1:num_threats
     [best_r, best_a] = max(reward_table(ti,:));
     fprintf('  %-20s -> %s (%.0f%% recovery)\n', threat_list{ti}, action_names{best_a}, best_r);
 end
 
-% Save + plot the reward table as a heatmap (useful diagnostic for the report)
 fig0 = figure('Position',[100 100 700 500],'Color','w');
 imagesc(reward_table); colorbar;
 set(gca, 'XTick', 1:5, 'XTickLabel', action_names, 'XTickLabelRotation', 25, ...
@@ -171,36 +124,25 @@ saveas(fig0, 'results/dqn_reward_table.png');
 close(fig0);
 fprintf('\nSaved results/dqn_reward_table.png\n\n');
 
-%% 4. Training loop — now draws reward from the REAL table (threat-differentiated)
+%% 4. Training loop
 training_loss = [];
 avg_rewards_per_episode = [];
 episode_rewards = [];
 
-% UPDATED (Sep 14, antenna_fault ranking-inversion investigation): the
-% encode-distance fix (threat_encode reassignment) resolved the Q-value
-% bleed from benign_interference, but exposed a second issue: antenna_fault
-% has a much smaller reward gap between actions (8%-23%, ~15pp) than most
-% other threats (many 40-70pp+), and with only 50 non-oversampled episodes
-% the shared regression network learned an INVERTED ranking (rate_reduce
-% Q=22.55 highest, when reward table says freq_diversity=23% is truly best;
-% achieved only 0.7% recovery in C3). Applying the same oversampling fix
-% already proven for benign_interference/none.
 oversample_factor = containers.Map(threat_list, {1, 1, 1, 1, 1, 1, 3, 3, 3});
 threat_schedule = [];
 for ti = 1:num_threats
     threat_schedule = [threat_schedule, repmat(ti, 1, num_episodes * oversample_factor(threat_list{ti}))]; %#ok<AGROW>
 end
-threat_schedule = threat_schedule(randperm(numel(threat_schedule)));  % shuffle training order
+threat_schedule = threat_schedule(randperm(numel(threat_schedule)));
 total_episodes = numel(threat_schedule);
 
-fprintf('Training on %d episodes (%d threats, benign_interference+none oversampled %dx)\n\n', ...
-    total_episodes, num_threats, oversample_factor('benign_interference'));
+fprintf('Training on %d episodes\n\n', total_episodes);
 
 prev_threat = '';
 for ep = 1:total_episodes
     threat_idx = threat_schedule(ep);
     threat = threat_list{threat_idx};
-    threat_enc = threat_encode(threat_idx);
     field = strength_field(threat);
 
     if ~strcmp(threat, prev_threat)
@@ -208,7 +150,6 @@ for ep = 1:total_episodes
         prev_threat = threat;
     end
 
-    % --- Fresh baseline BER this episode (real per-episode noise realization) ---
     p = p0; p.jsr_db=baseline.jsr_db; p.path_loss_db=baseline.path_loss_db;
     p.fault_atten_db=baseline.fault_atten_db; p.spoof_sir_db=baseline.spoof_sir_db;
     p.benign_int_db=baseline.benign_int_db;
@@ -216,44 +157,26 @@ for ep = 1:total_episodes
     params = p; save('params.mat', 'params');
     build_threat_model;
     [ber_baseline, iq_rx] = quick_ber_with_iq('UAV_GCS_Threat_Link');
-    ber_baseline = double(ber_baseline);   % ensure scalar
+    ber_baseline = double(ber_baseline);
 
-    % FIX (post-EXP analysis, Sep 13): state used to be built with fixed
-    % placeholders [-50, 5, 0.1] for RSSI/SNR/PLR on every single episode,
-    % regardless of threat -- so the network never saw these dimensions vary
-    % and learned nothing from them. But run_closed_loop_diagnostic.m (C3)
-    % feeds REAL measured RSSI/SNR/PLR at inference, a distribution the
-    % network never trained on. This mismatch was silently scrambling the
-    % learned action ranking (seen clearest in benign_interference, where the
-    % reward-shaped table clearly favors no_action but the trained Q-values
-    % ranked it 4th of 5). Fix: compute real RSSI/SNR/PLR here, exactly as
-    % C3 does, so train-time and inference-time states match.
     if ~isempty(iq_rx)
         rssi = 10*log10(mean(abs(iq_rx).^2) + eps);
     else
-        rssi = -50;   % fallback if IQ extraction fails for this model
+        rssi = -50;
     end
-    snr_val = p.EbNo_dB(1);              % same worst-case point C3 evaluates at
-    plr = double(ber_baseline > 0.1);    % same threshold convention as C3
+    snr_val = p.EbNo_dB(1);
+    plr = double(ber_baseline > 0.1);
 
-    state = [threat_enc; ber_baseline; rssi; snr_val; plr];
-
-    % --- Agent selects action (epsilon-greedy) ---
+    state = build_dqn_state(threat, ber_baseline, rssi, snr_val, plr);
     action = selectAction(agent, state, true);
 
-    % --- REAL, threat-specific effectiveness (from pre-computed table) ---
     recovery_frac = reward_table(threat_idx, action) / 100;
     ber_after = ber_baseline * (1 - recovery_frac);
-    reward = reward_table(threat_idx, action);   % use real recovery% directly as reward
+    reward = reward_table(threat_idx, action);
 
-    % next_state placeholders intentionally left as-is: done=1 below zeroes
-    % out Q_max_next's contribution to the Bellman target (single-step/bandit
-    % setting), so next_state never actually influences training -- only
-    % `state` above (used for action selection + the loss) needed fixing.
-    next_state = [threat_enc; ber_after; -50; 5; 0.05];
+    next_state = build_dqn_state(threat, ber_after, -50, 5, 0.05);
     done = 1;
 
-    % --- Store + train (unchanged from v1) ---
     agent.replay_buffer.states = [agent.replay_buffer.states; state'];
     agent.replay_buffer.actions = [agent.replay_buffer.actions; action];
     agent.replay_buffer.rewards = [agent.replay_buffer.rewards; reward];
@@ -293,10 +216,63 @@ end
 
 params = p0; save('params.mat', 'params');
 
-fprintf('\nTraining complete. Saving agent...\n');
+%% 5. Post-training validation gate
+% Gate A: benign_interference/none must pick no_action (false-alarm check).
+% Gate B: every REAL threat must NOT pick no_action (missed-detection check).
+% Both use each threat's real baseline BER/RSSI (recorded in Section 3) and
+% real training-time SNR, so the check is in-distribution. Refuses to save
+% if either gate fails.
+fprintf('\nRunning post-training validation gate...\n');
+gate_pass = true;
+
+fprintf('  Gate A: non-hostile classes must choose no_action\n');
+gate_a_classes = {'benign_interference', 'none'};
+for gi = 1:numel(gate_a_classes)
+    threat = gate_a_classes{gi};
+    ti = find(strcmp(threat_list, threat));
+    check_state = build_dqn_state(threat, base_ber(ti), base_rssi(ti), p0.EbNo_dB(1), double(base_ber(ti) > 0.1));
+    state_dl = dlarray(single(check_state), 'CB');
+    qvals = extractdata(predict(agent.qNetwork, state_dl));
+    [~, chosen] = max(qvals);
+    chosen_action = action_names{chosen};
+    fprintf('    %-20s -> %-16s (no_action Q=%.2f, chosen Q=%.2f)\n', ...
+        threat, chosen_action, qvals(1), qvals(chosen));
+    if ~strcmp(chosen_action, 'no_action')
+        gate_pass = false;
+    end
+end
+
+fprintf('  Gate B: real threats must NOT choose no_action\n');
+gate_b_classes = setdiff(threat_list, gate_a_classes, 'stable');
+for gi = 1:numel(gate_b_classes)
+    threat = gate_b_classes{gi};
+    ti = find(strcmp(threat_list, threat));
+    check_state = build_dqn_state(threat, base_ber(ti), base_rssi(ti), p0.EbNo_dB(1), double(base_ber(ti) > 0.1));
+    state_dl = dlarray(single(check_state), 'CB');
+    qvals = extractdata(predict(agent.qNetwork, state_dl));
+    [~, chosen] = max(qvals);
+    chosen_action = action_names{chosen};
+    fprintf('    %-20s -> %-16s (no_action Q=%.2f, chosen Q=%.2f)\n', ...
+        threat, chosen_action, qvals(1), qvals(chosen));
+    if strcmp(chosen_action, 'no_action')
+        gate_pass = false;
+    end
+end
+
+if ~gate_pass
+    error(['Validation gate FAILED -- see per-class breakdown above. Either a ' ...
+           'non-hostile class chose an action other than no_action (false ' ...
+           'alarm), or a real threat chose no_action (missed detection). ' ...
+           'NOT saving trained_dqn.mat -- rerun this script (try a ' ...
+           'different rng seed if it fails repeatedly).']);
+end
+fprintf('Validation gate PASSED.\n\n');
+
+%% 6. Save
+fprintf('Training complete. Saving agent...\n');
 save('data/trained_dqn.mat', 'agent', 'reward_table', 'threat_list', 'action_names', '-v7.3');
 
-%% 5. Plot training curves
+%% 7. Plot training curves
 fig = figure('Position', [100 100 900 400], 'Color', 'w');
 subplot(1, 2, 1);
 if ~isempty(training_loss)
@@ -307,16 +283,16 @@ subplot(1, 2, 2);
 if ~isempty(avg_rewards_per_episode)
     plot(1:numel(avg_rewards_per_episode), avg_rewards_per_episode, 'g-', 'LineWidth', 1.5);
     xlabel('Episode (x10)'); ylabel('Avg Reward (% BER improvement, real)');
-    title('DQN Average Episode Reward (real, threat-specific)'); grid on;
+    title('DQN Average Episode Reward'); grid on;
 end
-sgtitle('C2: DQN Training Curves (v2 — real reward)');
+sgtitle('C2: DQN Training Curves');
 saveas(fig, 'results/dqn_training_curves.png');
 fprintf('Saved results/dqn_training_curves.png\n');
 close(fig);
 
-fprintf('\n=== C2 Complete (v2: threat-differentiated reward) ===\n');
+fprintf('\n=== C2 Complete ===\n');
 
-%% Helper: Q-loss function
+%% Helper functions
 function [loss, gradients, state] = qLoss(qNet, S, A, target)
     [Q_pred, state] = forward(qNet, S);
     batch_size = size(A, 1);
