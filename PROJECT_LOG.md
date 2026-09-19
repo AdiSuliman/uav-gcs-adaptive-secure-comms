@@ -1,6 +1,6 @@
 # Project Execution Log (Living Document)
 
-**Last Updated:** 2026-09-15 | **Status:** Phase A+B+C+EXP complete | 1 of 5 known issues remain open
+**Last Updated:** 2026-09-19 | **Status:** Phase A+B+C+EXP+Survivability complete | Phase D (dashboard + writeup) in progress
 
 ---
 
@@ -9,9 +9,10 @@
 | Step | Status | Date | Notes |
 |---|---|---|---|
 | A1-A2 | ✅ | 2026-08-20 | AWGN link validation, BER matches theory |
-| A3 | ✅ | 2026-08-28 | Rician K=10dB, fd=160Hz: 1.53× degradation |
+| A3 | ✅ | 2026-08-28 | Rician K=10dB, fd=160Hz: 1.43-1.53× degradation |
 | A4 | ✅ | 2026-09-02 | 8 threats validated (barrage, reactive, spoofing, noise, path, antenna, sweeping, benign) |
-| A5-A6 | ✅ | 2026-09-05 | Dataset: 10,686 frames, spectrograms [128×128×1] extracted |
+| A5-A6 (v1) | ✅ | 2026-09-05 | Dataset: 10,686 frames, spectrograms [128×128×1] extracted |
+| A5-A6 (v2) | ✅ | 2026-09-15 | Dataset expanded: `frames_per_config` 50→100 → **27,246 frames**, re-extracted after spoofing fix |
 
 ---
 
@@ -23,130 +24,163 @@
 | B2 (v1) | ✅ | 78.8% | 2026-09-09 | CNN+scalar hybrid, 7 classes |
 | B2.5 | ✅ | — | 2026-09-10 | Temporal features: var_rssi_10, dber_dt, burst_ratio |
 | B2 (v2) | ✅ | 92.13% | 2026-09-11 | With 7 features, reactive_jamming 7.2%→85.5% |
-| B3 (9-class) | ✅ | **90.90%** | 2026-09-13 | +sweeping_jammer, +benign_interference, +none |
+| B3 (9-class, v1) | ✅ | 90.90% | 2026-09-13 | +sweeping_jammer, +benign_interference, +none |
+| B3 (9-class, v2) | ✅ | **98.05%** | 2026-09-18 | Post spoofing root-cause fix (see below), verified 2x independently |
 
-**Key Finding:** jamming 67.3%, spoofing 76.2% weak; noise_burst, antenna_fault, sweeping (100%).
+**Key Finding (v1, superseded):** jamming 67.3%, spoofing 76.2% weak; noise_burst, antenna_fault, sweeping (100%). All classes now well-separated post-fix — see Session 2026-09-18 below.
 
 ---
 
-## Phase C: Recovery & Closed-Loop ✅ COMPLETE (v5, fully verified)
+## Phase B-exp: CNN-LSTM Detector — NOT PURSUED FURTHER
+
+Built and evaluated (2026-09-15/16) as a proposed fix for spoofing's weak recall (proposal risk #5 mitigation: "compare multiple model architectures"). Dataset expanded to 27,246 frames specifically to give the LSTM enough sequence data.
+
+| Config | CNN-LSTM overall | CNN+scalar (contemporary) | Delta on spoofing |
+|---|---|---|---|
+| Run 1 (27,246 frames) | 90.7% | — | -9.8pp vs CNN |
+| Run 2 (post data-leakage fix) | lower | — | -21.8pp vs CNN |
+
+**Decision (2026-09-16, see D13):** CNN-LSTM consistently underperformed CNN+scalar on spoofing across two dataset sizes, even after fixing sequence-window data leakage and per-class split imbalance. Once spoofing was fixed at its true root cause (see below, same day) — a data-generation bug, not a detector-architecture limitation — the entire premise for LSTM comparison dissolved: CNN alone now exceeds LSTM's best result by a wide margin with far fewer parameters. Kept in the repo (not deleted) as the actual evidence of proposal risk #5's "compare multiple architectures" mitigation.
+
+---
+
+## Phase C: Recovery & Closed-Loop ✅ COMPLETE (v6, fully verified)
 
 ### C1: Rule-Based Policy ✅
 ```
-jamming → channel_switch
-reactive_jamming → channel_switch_fast
-spoofing → freq_diversity
-path_loss → rate_reduce
-noise_burst → rate_reduce
-antenna_fault → spatial_diversity
-sweeping_jammer → channel_switch
+jamming → channel_switch (15dB)
+reactive_jamming → channel_switch_fast (10dB)
+sweeping_jammer → channel_switch_fast (15dB)
+spoofing → freq_diversity (8dB)
+path_loss → rate_reduce (6dB)
+noise_burst → rate_reduce (9dB)
+antenna_fault → spatial_diversity (12dB)
 benign_interference → no_action
 none → no_action
 ```
+**Note (found 2026-09-19, see design clarification in README):** `rule_based_policy.m`'s own per-threat `mitigation_db` values above are computed but never applied anywhere in the closed-loop pipeline — both call sites (`run_closed_loop_diagnostic.m`, `measure_kpi3_recovery_time.m`) discard that output. Only the *action name* feeds the DQN-vs-rule agreement comparison; physical effect for both policies is computed via the shared `action_mitigation_db` (25/15/25/25dB per action name). Not a bug — the comparison is decision-policy-only by design — but must be stated precisely in the report.
 
-### C2: DQN Agent — 5 fix iterations
+### C2: DQN Agent — 6 fix iterations
 
 | Version | Date | Fix | Root cause found | Result |
 |---|---|---|---|---|
 | v1 | 09-13 | — | Synthetic generic reward (same for every threat) | 12.5% rule agreement, antenna_fault 5.4% |
-| v2 | 09-13 | Raised `action_mitigation_db` (15/8/8/12→25/15/25/25 dB) + physical floor on path_loss_db/fault_atten_db | Magnitudes far below what EXP validated as achievable (field_reduction/awgn_margin_boost ceilings) | antenna_fault 5.4%→20.2%, mean recovery 31.8%→42.2%-45.2% |
-| v3 | 09-13 | Reward shaping (-40pp false-alarm penalty, benign_interference/none) + state-mismatch fix (real RSSI/SNR/PLR at train time) + 3x oversampling on benign_interference/none | benign_interference/none (not real attacks, D9) were being "recovered" like threats; reward scale (~-1 to -17) drowned out by other threats (~20-90) in shared regression network | no_action correctly ranked highest for both; DQN-Rule agreement 22.2% |
-| v4 | 09-14 | `threat_encode` reassigned so antenna_fault sits at the array midpoint (max distance from benign_interference/none); fixed a separate pre-existing bug where noise_burst/spoofing had swapped encode values between train_dqn.m and the closed-loop scripts — all three files now share one identical `threat_encode_map` | Scalar ordinal encoding let antenna_fault's Q-values "bleed" from the adjacent benign_interference penalty code (trained Q-values matched benign_interference's penalty scale, -14 to -16, not antenna_fault's own reward table, 0 to +24%). Confirmed via `diagnostics/diagnose_antenna_fault_reward.m`: reward table itself is stable (std<2% across 8 repeated Simulink runs per action) | DQN-Rule agreement 22.2%→44.4%. antenna_fault Q-values now correctly scaled, but ranking still inverted (rate_reduce, the weakest action, scored highest) |
-| v5 | 09-14 | antenna_fault oversampled 3x (same mechanism as benign_interference/none) | Only 50 non-oversampled episodes were insufficient for the shared regression network to learn antenna_fault's fine-grained action ranking (gaps of 8-23pp, much smaller than most other threats' 40-90pp gaps) | **Fixed** — DQN now selects spatial_diversity (Q=22.86-22.90, highest, stable across re-runs), matching rule-based policy. antenna_fault recovery 0.7%→17-20%. DQN-Rule agreement 44.4%→55.6% |
+| v2 | 09-13 | Raised `action_mitigation_db` (15/8/8/12→25/15/25/25 dB) + physical floor on path_loss_db/fault_atten_db | Magnitudes far below what EXP validated as achievable | antenna_fault 5.4%→20.2%, mean recovery 31.8%→42.2%-45.2% |
+| v3 | 09-13 | Reward shaping (-40pp false-alarm penalty, benign_interference/none) + state-mismatch fix + 3x oversampling on benign_interference/none | benign_interference/none were being "recovered" like threats; reward scale drowned out by other threats | no_action correctly ranked highest for both; DQN-Rule agreement 22.2% |
+| v4-v5 | 09-14 | `threat_encode` reassignment (antenna_fault at max distance from benign_interference/none); antenna_fault oversampled 3x | Scalar ordinal encoding let antenna_fault's Q-values bleed from the adjacent benign_interference penalty code; undertraining on antenna_fault's fine-grained ranking | DQN-Rule agreement 22.2%→55.6%; antenna_fault recovery 0.7%→17-20% |
+| **v6** | **09-18** | **Full one-hot state encoding (13-dim), replacing the entire scalar-ordinal `threat_encode` scheme (v4-v5's patch).** Post-training validation Gate A/B added — refuses to save an agent that fails either. | The v4-v5 fix patched the *symptom* (which codes were adjacent) but kept the underlying flaw (scalar input the network reads as continuous). One-hot removes the adjacency-bleed failure mode structurally rather than by careful code placement. | Both gates pass; no adjacency-bleed possible by construction. Single shared `build_dqn_state.m` guarantees train/inference encoding can never drift again. |
 
-**Design note (for report):** the four non-zero actions (channel_switch/rate_reduce/freq_diversity/spatial_diversity) are mechanistically identical in the current implementation — each just subtracts `action_mitigation_db.(action)` dB from the threat's own severity field, regardless of label. Most residual "DQN vs rule disagreement" (4/9 remaining after v5) is therefore cosmetic — the chosen and rule-suggested actions produce near-identical recovery. This is distinct from the v4/v5 antenna_fault issue, which was a genuine learned-ranking bug (confirmed by the reward table itself, not just a labeling mismatch) — now resolved and stable across independent re-runs (run_20260914_223849, run_20260914_235045, run_20260915_000442 all agree within noise).
+**Design note (unchanged from v5, still applies):** the four non-zero actions are mechanistically identical in the current implementation — each subtracts `action_mitigation_db.(action)` dB from the threat's own severity field. Most residual "DQN vs rule disagreement" is cosmetic.
 
-### C3: Closed-Loop — ✅ FULLY VERIFIED (2026-09-15)
+### C3: Closed-Loop — ✅ FULLY VERIFIED (2026-09-18/19)
 
-Both closed-loop scripts now confirmed working end-to-end, post-fix, in the same run (`run_20260915_000442`, zero errors/warnings):
+**Sliding-window bug found and fixed (2026-09-18):** a full SNR sweep in `run_closed_loop_diagnostic.m` revealed closed-loop detection accuracy of only 79.6% (vs 98.05% on the held-out test set), with reactive_jamming→jamming and none→path_loss failing **100%** of the time across all SNR points. Root cause: the script fed the CNN neutral placeholder values (0,0,1) for the 3 temporal features (no history exists in a single-shot run), while the CNN was trained on real sliding-window features — and reactive_jamming's entire distinguishing signature *is* its temporal pattern. Each Simulink run actually returns ~20 frames (not 1); the old script discarded 19 of them.
 
-**`run_closed_loop_diagnostic.m`** (ground-truth-conditioned, full Q-value/timing trace) — verified stable across 3 independent runs:
+First fix attempt (naive) built temporal features from all 20 frames but **made things worse** (66.7% accuracy, jamming and path_loss dropped to 0%) — root cause: `run_dataset_sweep.m` marks the last frame's BER as NaN in every run (delay_bits truncation), and NaN silently propagated through the network, zeroing entire class outputs. `prepare_data.m` had always guarded against this (`feats(isnan(feats))=0`) but the closed-loop script didn't.
 
-| Threat | DQN action | Rule action | Agree | Recovery |
-|---|---|---|---|---|
-| jamming | channel_switch | channel_switch | ✅ | 67.7% |
-| reactive_jamming | spatial_diversity | channel_switch_fast | ❌ (mechanically equal) | 66.5% |
-| sweeping_jammer | channel_switch | channel_switch_fast | ✅ | 25.2% |
-| noise_burst | channel_switch | rate_reduce | ❌ (mechanically equal) | 40.0% |
-| path_loss | spatial_diversity | rate_reduce | ❌ (mechanically equal) | 64.3% |
-| spoofing | channel_switch | freq_diversity | ❌ (mechanically equal) | 52.2% |
-| **antenna_fault** | **spatial_diversity** | **spatial_diversity** | **✅** | **17-20%** |
-| benign_interference | no_action | no_action | ✅ | -3.4% (correct: no threat, nothing to recover; sign is Simulink run-to-run noise) |
-| none | no_action | no_action | ✅ | 0.3% (correct: clean channel, nothing to recover) |
+**Final fix:** last-valid-frame selection via `find(~isnan(ber_f),1,'last')`, NaN guards mirroring `prepare_data.m` exactly, and before/after BER both averaged across all valid frames (not single-frame-vs-single-frame, an additional noise source).
 
-**DQN-Rule agreement: 5/9 (55.6%)** — identical across all 3 runs.
-**Mean recovery:** 36.6-38.1% across runs.
-**Latency:** Median CNN 4.36-7.31ms + DQN 2.95-3.06ms — consistently well under real-time budget.
+**Result: closed-loop detection accuracy 100% (54/54)** — all 9 classes, all 6 SNR points. FAR returned to normal (~0%, down from a spurious 64.5% under the broken feature pipeline).
 
-**`run_closed_loop_with_detector.m`** (CNN-prediction-conditioned, the "real" closed loop with detector uncertainty in the loop) — **run for the first time post-fix on 2026-09-15**, zero errors:
-
-| Threat | CNN Pred | Conf% | Action | Recovery |
-|---|---|---|---|---|
-| jamming | jamming ✅ | 93.3% | channel_switch | 68.3% |
-| reactive_jamming | spoofing ❌ | 60.2% | spatial_diversity | 65.2% |
-| sweeping_jammer | sweeping_jammer ✅ | 100% | channel_switch | 24.9% |
-| noise_burst | noise_burst ✅ | 100% | channel_switch | 42.4% |
-| path_loss | path_loss ✅ | 100% | spatial_diversity | 64.7% |
-| spoofing | jamming ❌ | 55.5% | channel_switch | 51.3% |
-| antenna_fault | antenna_fault ✅ | 100% | spatial_diversity | 17.4% |
-| benign_interference | benign_interference ✅ | 100% | no_action | -1.3% |
-
-**Detection accuracy in closed-loop: 6/8 (75.0%) | Average BER recovery: 41.6%**
-
-The two misdetections (reactive_jamming→spoofing, spoofing→jamming) are the already-documented Known Issue #6 (spoofing 3-way confusion) resurfacing in a live closed-loop context — an expected confirmation of a known limitation, not a new finding.
-
-**Conclusion: Phase C3 is complete.** Both closed-loop scripts are verified, consistent with each other and with the reward table, and produce stable results across independent runs.
+| Metric | Value |
+|---|---|
+| Detection accuracy (closed loop) | **100%** (54/54) |
+| Mean BER recovery (real threats) | **74.9%** |
+| Median latency (CNN+DQN) | **~3.3ms** |
+| benign_interference / none | Both correctly resolve to `no_action` |
 
 ---
 
-## Phase EXP: Deep Exploration ✅ COMPLETE
+## Phase EXP: Deep Countermeasure Exploration ✅ COMPLETE
 
-Ran `explore_countermeasures.m` (150+ combos, 2 new mechanisms: `field_reduction`, `awgn_margin_boost`, + `atten_reduction` for antenna_fault) + `analyze_exploration_results.m`.
+Ran `explore_countermeasures.m`: **2550 scenarios, 85.8 minutes**, 3 mechanisms (`field_reduction`, `awgn_margin_boost`, `atten_reduction` for antenna_fault only) across 8 threats × 5 severity levels × 6 SNR points.
 
-| Threat | Best mechanism found | Magnitude | Recovery | vs old C3 |
-|---|---|---|---|---|
-| jamming | field_reduction | 25dB | 83.6% | +51.9% |
-| reactive_jamming | field_reduction | 25dB | 83.1% | +49.2% |
-| noise_burst | field_reduction | 25dB | 68.8% | +46.9% |
-| path_loss | awgn_margin_boost | 15dB | 89.6% | +12.7% |
-| spoofing | field_reduction | 25dB | 80.7% | +41.2% |
-| **antenna_fault** | atten_reduction | 25dB | 60.5% | **+55.8%** |
-| sweeping_jammer | field_reduction | 25dB | 57.6% | N/A (new) |
-| benign_interference | field_reduction | 25dB | 64.2% | N/A — **not applied**, benign_interference should stay no_action by design (D9) |
+**Crash bug found and fixed (2026-09-18):** `current_best_static.(b.threat)` in the report-generation section accessed a field that didn't exist for all 8 threats vs. only 6 fields in the historical comparison struct — caused the script to crash **after** 75-86 minutes of runtime, at the report-writing stage, after the actual data was already safely saved. Fixed with an `isfield` guard in the report builder (the console-output path already had one).
 
-**This directly triggered the C2 v2 fix** (raising `action_mitigation_db`): the EXP numbers are SNR-averaged (0-10dB), while C3 evaluates only at worst-case SNR=0dB, so actual C3 recovery is lower than these EXP figures — expected, not a discrepancy.
-
-**Caveat for report:** 25dB/15dB were the *ceiling* of the tested magnitude sweep, not a proven optimum — the sweep didn't test beyond that.
+This EXP data feeds both the C2 `action_mitigation_db` magnitudes (established 09-13/14, unchanged since) and the survivability boundary mapping below.
 
 ---
 
-## Phase D: Documentation & Defense (Pending)
+## Survivability Boundary Mapping — Proposal Deliverable #7 ✅ COMPLETE (2026-09-19)
 
-- [ ] Interim Report (due end of summer)
-- [ ] Final Report (due end of semester)
+### Bug found and fixed: single-map conflation
+The first version of `map_survivability_boundary.m` built one map from `min([sub.ber_after])` across **all** mechanisms without filtering by mechanism — silently conflating genuine threat neutralization with `awgn_margin_boost` (an SNR-margin trick that can make the link outperform the clean-channel floor without touching the attack at all). Symptom: sweeping_jammer and benign_interference showed "achieved recovery" at 221-283% *of the theoretical ceiling* — physically impossible for pure neutralization, and the tell that margin-boost was silently winning the `min()`.
+
+### Fix: two separate maps
+```matlab
+MECH_A = {'atten_reduction','field_reduction'};                       % genuine neutralization
+MECH_B = {'atten_reduction','field_reduction','awgn_margin_boost'};   % all available means
+```
+
+| | Map A — Threat Neutralization | Map B — Link Survivability |
+|---|---|---|
+| Mechanisms | atten_reduction, field_reduction | + awgn_margin_boost |
+| Recoverable | 84.6% (198/234) | 87.9% (211/240) |
+| Marginal | 12.4% (29/234) | 9.6% (23/240) |
+| Non-recoverable | 3.0% (7/234) | 2.5% (6/240) |
+
+sweeping_jammer and benign_interference's "of ceiling" figures dropped from 283.8%/225.5% (Map B, unfiltered) to 105.7%/104.6% (Map A) — confirming the filter isolates genuine neutralization correctly.
+
+### Gap analysis
+1 cell: **path_loss, level=8, SNR=10dB** — Map B ratio ≈ 0 (link survives, via margin) vs. Map A ratio = 6.06x (non-recoverable, threat not actually neutralized). This is the concrete instance of the proposal's goodput-tradeoff regime: the link survives by trading margin/rate, not by removing the attack.
+
+### Known coverage gap (documented, not a bug)
+`path_loss` at level=4 (its lowest severity) has **no Map A data** — confirmed root cause: `mag_field_reduction = [5 10 15 20 25]` is a single global sweep range applied to every threat, and every value in it exceeds path_loss's level=4 severity. The legitimacy filter (`level - magnitude < 0` → excluded, since it would imply unphysical signal amplification) correctly excludes all 5 candidate points at that level, leaving zero legitimate Map A records there. Map B (which includes awgn_margin_boost, unaffected by this filter) has full coverage at that level.
+
+---
+
+## Phase KPI: Proposal Measurement (section ה) ✅ COMPLETE
+
+| KPI | Result | Notes |
+|---|---|---|
+| KPI 1 — Detection accuracy | 98.05% (offline) / 100% (closed-loop) | See Phase B3 / C3 above |
+| KPI 2 — BER recovery | 74.9% mean (real threats, closed-loop) | See Phase C3 above |
+| KPI 3 — DQN vs Rule decision speed | Rule ~3 orders of magnitude faster | Redefined from "recovery cycles" — see below |
+| KPI 4 — FAR (False Alarm Rate) | 0%, upper 95% CI bound 3% | Rule-of-Three (100 trials, zero false alarms) |
+| KPI 5 — End-to-end survivability | See survivability boundary mapping above | Proposal deliverable #7 |
+
+### KPI #3 redefinition (2026-09-18)
+**Original problem:** `measure_kpi3_recovery_time.m` simulated "recovery cycles" via a halving loop that never called `sim()` or consulted either policy's actual action choice — DQN and rule-based always returned identical results regardless of which was "measured."
+**Root conceptual issue:** both policies are single-shot deterministic dB reductions in this system — there is no multi-cycle convergence dynamic to measure.
+**Fix:** redefined to measure decision **latency** instead. Rule-based: 1000 direct calls to `rule_based_policy.m`, averaged. DQN: pulled from the real `closed_loop_diagnostic_report.txt`. Result: rule-based faster by roughly three orders of magnitude (lookup table vs. neural network inference) — expected, but now measured correctly rather than reported as a meaningless "0 cycles for both."
+
+**Also fixed same session:**
+- `MAX_STALE_DAYS` was 3 days in `measure_all_kpis.m`/`measure_kpi3_recovery_time.m`, letting pre-DQN-fix KPI files count as "fresh" and produce numerically inconsistent aggregate reports → changed to 0.5 (12 hours).
+- `diagnose_far_measurement.m`: `196*se` typo (should be `1.96*se`) in the 95% CI calculation (off by 100x); Rule-of-Three added for the FAR=0 case (a naive symmetric CI is meaningless at zero count).
+
+---
+
+## Phase D: Documentation & Defense (In Progress)
+
+- [x] README.md — rewritten with current results (2026-09-19)
+- [x] PROJECT_LOG.md — this document, rewritten (2026-09-19)
+- [x] docs/DECISIONS.md — extended D12-D17 (2026-09-19)
+- [ ] KPI Dashboard (proposal deliverable #1, final product) — script drafted, not yet finalized
+- [ ] Interim Report
+- [ ] Final Report
 - [ ] Defense: 20+10 min, 10 slides
 - [ ] Poster: 5% grade
-- [ ] Dashboard (proposal deliverable #1, final product) — not yet started
-- [ ] Survivability-boundary mapping (proposal deliverable #7, research output) — not yet started
-- [ ] FAR (false alarm rate) — named KPI in proposal section ה — not yet directly measured
-- [ ] Cross-check all proposal KPIs (section ה) explicitly against current results
 
 ---
 
 ## Known Issues & Limitations
 
-### Resolved (2026-09-13)
-1. ~~**Antenna Fault Recovery (5.4%)**~~ — **Fixed in v2.** Was underpowered mitigation magnitude (12dB), not a physical limit. See v4/v5 below for a second, separate antenna_fault bug found and fixed on 09-14.
-2. ~~**benign_interference reward gap**~~ — **Fixed** via reward shaping (v3) + state-mismatch fix + oversampling. DQN now correctly picks no_action.
-3. ~~**"Reactive Jamming Misdetection"**~~ — **Was a false alarm.** Full-test-set confusion matrix (1374 samples) via `diagnostics/diagnose_reactive_jamming.m` shows reactive_jamming at 88.9% recall / 86.6% F1 — healthy. The earlier "71.2% confidence → spoofing" was one unrepresentative sample, not a systematic issue.
+### Resolved (2026-09-13/15)
+Antenna Fault recovery, benign_interference reward gap, reactive_jamming misdetection false alarm, antenna_fault Q-value bleed (v1-v5), noise_burst latency test-harness artifact — see git history and prior versions of this log for full detail; all confirmed stable across independent re-runs.
 
-### Resolved (2026-09-14/15)
-4. ~~**antenna_fault Q-value bleed + ranking inversion**~~ — **Fixed** (v4+v5 above). Two separate bugs: (a) scalar ordinal `threat_encode` let antenna_fault's learned Q-values bleed from the adjacent benign_interference penalty code; (b) undertraining (no oversampling) caused an inverted action ranking within antenna_fault specifically. Also fixed, in the same review: a pre-existing `noise_burst`/`spoofing` encode-value swap between `train_dqn.m` and the closed-loop scripts. Verified via `diagnostics/diagnose_antenna_fault_reward.m` (reward table stability, std<2%) and confirmed stable across 3 independent C3 re-runs (run_20260914_223849, run_20260914_235045, run_20260915_000442).
-5. ~~**Noise Burst Latency Outlier**~~ — **Fully resolved, confirmed as a test-harness artifact, not a code bug.** Isolated via `diagnostics/diagnose_latency_position_test.m` (position-swap test): moved noise_burst to loop position 1 (ran normally) and sweeping_jammer to position 4 (the spike followed it there). Conclusion: the spike is tied to sequential loop position (approx. every 4th `predict()` call), not to any threat's signal content — consistent with MathWorks-documented GPU inference non-determinism. Not representative of real deployed single-decision latency. `run_closed_loop_diagnostic.m` now reports median latency alongside mean for robustness to this artifact.
-6. ~~**`run_closed_loop_with_detector.m` unverified post-fix**~~ — **Resolved.** The script had received the same threat_encode_map fix as the other two files but had never actually been executed since (its RUN flag was always false). Ran for the first time post-fix on 2026-09-15 (`run_20260915_000442`) — zero errors/warnings, antenna_fault behavior consistent with the diagnostic script, detection accuracy 75.0% (6/8), average recovery 41.6%.
+### Resolved (2026-09-18)
+1. **Spoofing 3-way confusion (formerly 53.0% recall)** — root-caused and fixed at the data-generation level (coherent QPSK injection, not incoherent noise). Recall now 98.7-99.7%. This was NOT a detector limitation as previously documented — it was a threat-injection bug. See D12.
+2. **DQN scalar-ordinal state encoding** — replaced with one-hot (13-dim). See D14.
+3. **Closed-loop sliding-window feature mismatch** — fixed; closed-loop detection accuracy 79.6%→100%. See D16.
+4. **KPI #3 mock measurement** — redefined to real decision latency. See D15.
+5. **explore_countermeasures.m crash-after-75min bug** — isfield guard added to report builder.
+6. **Survivability map mechanism conflation** — split into Map A/Map B. See D17.
 
-### Still open
-7. **Spoofing 3-way confusion (53.0% recall, 62.0% F1):** The REAL weak class, found via the same confusion-matrix diagnostic that cleared reactive_jamming. Breaks down as 80/152 correct, 27→jamming, 17→reactive_jamming, 27→benign_interference. Root cause: genuine feature-space overlap (proposal risk #5), NOT training-data imbalance (test-set counts are balanced, ~152/class). Documented in `docs/DECISIONS.md` D12. Decision: document as known limitation rather than retrain — class weights are the wrong tool for an overlap problem (risk of degrading currently-strong classes like jamming/benign_interference), and the proposal's own named alternative (LSTM architecture, section ה) is too large a change for remaining time. Reconfirmed live in the 09-15 `run_closed_loop_with_detector.m` run (reactive_jamming→spoofing, spoofing→jamming misdetections) — consistent with the confusion-matrix finding, not a new issue. Candidate future work.
+### Open (2026-09-19)
+7. **`rule_based_policy.m`'s per-threat `mitigation_db` is unused dead output.** Both call sites discard it; physical mitigation for both DQN and rule-based always goes through the shared `action_mitigation_db`. Not a bug in outcome, but the report must describe the DQN-vs-rule comparison precisely as decision-policy-only, not two independently-realized countermeasure systems.
+8. **`src/` directory** — exists locally (per Adi's file listing), not tracked in git, contents not yet audited.
+9. **`extract_temporal_features.m`** — confirmed orphaned (not referenced by any script in the repo; its function was folded into `extract_spectrograms.m` at A6). Candidate for removal or explicit DEPRECATED marking.
+10. **`.gitignore`** has 4 duplicate/overlapping `models/` entries accumulated across incremental commits — cosmetic, needs a cleanup pass.
 
 ---
 
@@ -156,14 +190,21 @@ Ran `explore_countermeasures.m` (150+ combos, 2 new mechanisms: `field_reduction
 |---|---|---|---|
 | 2f8f5d3 | B3+C3 | 2026-09-13 | Phase B+C2+C3: 9-class CNN, DQN v2 retrain, diagnostics |
 | 245e5aa | Cleanup | 2026-09-13 | Repo hygiene: diagnostic scripts moved into diagnostics/ |
-| a826733 | C2 v3-v5 fixes + EXP + docs | 2026-09-14 | action_mitigation_db fix, reward shaping, state-mismatch fix, oversampling, threat_encode reassignment (antenna_fault bleed fix), noise_burst/spoofing encode-swap fix, latency position-test, median latency reporting, README/PROJECT_LOG rewrite |
-| 6f5f393 | Diagnostics + cleanup | 2026-09-14 | Added diagnose_antenna_fault_reward.m and diagnose_latency_position_test.m to diagnostics/; untracked regenerated .slx build artifacts |
-| (pending) | C3 verification + main.m cleanup | 2026-09-15 | run_closed_loop_with_detector.m verified post-fix (first run since threat_encode fix); main.m: removed stray non-English comment line, "8 threats"→"9 threats/classes" consistency fix, RUN.run_closed_loop enabled |
+| a826733 | C2 v3-v5 fixes + EXP + docs | 2026-09-14 | action_mitigation_db fix, reward shaping, state-mismatch fix, oversampling, threat_encode reassignment |
+| 6f5f393 | Diagnostics + cleanup | 2026-09-14 | diagnose_antenna_fault_reward.m, diagnose_latency_position_test.m added |
+| df82f6f | C3 verification | 2026-09-15 | run_closed_loop_with_detector.m verified post-fix; main.m cleanup |
+| 6a1e6b1 | KPI framework | 2026-09-15 | FAR measurement + KPI aggregation framework added |
+| 85c53da | Root-cause fixes | 2026-09-18 | Spoofing coherent-QPSK injection, one-hot DQN state, sliding-window fix, KPI/FAR framework |
+| 1b29b3e | LSTM record | 2026-09-18 | CNN-LSTM comparison scripts committed (evidence for D13/risk #5) |
+| c55c76f | Repo hygiene | 2026-09-19 | models/ added to .gitignore |
+| 993c344 | Survivability tracking | 2026-09-19 | Map A/B outputs tracked as documented exception to results/ gitignore |
+| ed47958 | Survivability fix | 2026-09-19 | map_survivability_boundary.m split into Map A/Map B with gap analysis |
 
 ---
 
 **Next Steps:**
-1. Compute FAR (false alarm rate) explicitly — named KPI in proposal section ה, not yet directly measured (see KPI explanation discussed with the team 09-15).
-2. Start Dashboard implementation (proposal deliverable #1) and survivability-boundary mapping (proposal deliverable #7) — both required deliverables, not yet begun.
-3. Cross-check all proposal KPIs (section ה) explicitly against current results.
-4. Write Phase D reports.
+1. Finalize and run the KPI Dashboard script (proposal deliverable #1).
+2. Audit `src/` directory contents; decide whether to track or discard.
+3. Remove or clearly deprecate `extract_temporal_features.m`.
+4. Clean up duplicate `.gitignore` entries.
+5. Write Phase D reports (interim + final), using this document and README.md as the factual source.
