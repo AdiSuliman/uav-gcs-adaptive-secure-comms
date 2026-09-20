@@ -81,15 +81,21 @@ cl_threats = unique({cl_results.threat}, 'stable');
 
 report{end+1} = '--- KPI #2: Link Quality Recovery vs Healthy Baseline ---';
 report{end+1} = sprintf('Source: %s', diag_mat_path);
-recov_by_threat = zeros(1, numel(cl_threats));
+recov_by_threat = nan(1, numel(cl_threats));
 for i = 1:numel(cl_threats)
     mask = strcmp({cl_results.threat}, cl_threats{i});
-    recov_by_threat(i) = mean([cl_results(mask).recovery_pct]);
-    report{end+1} = sprintf('  %-20s recovery=%.1f%% (mean over SNR sweep)', cl_threats{i}, recov_by_threat(i));
+    recov_by_threat(i) = mean([cl_results(mask).recovery_pct], 'omitnan');
+    if isnan(recov_by_threat(i))
+        % Every SNR point for this class chose no_action (non-hostile) -- there
+        % is no countermeasure effect to average. Report N/A, not NaN.
+        report{end+1} = sprintf('  %-20s recovery=N/A (DQN chose no_action at all SNR -- nothing to recover)', cl_threats{i});
+    else
+        report{end+1} = sprintf('  %-20s recovery=%.1f%% (mean over SNR sweep)', cl_threats{i}, recov_by_threat(i));
+    end
 end
 real_mask_names = ~ismember(cl_threats, {'benign_interference','none'});
-report{end+1} = sprintf('  Mean recovery (all threats, all SNR): %.1f%%', mean([cl_results.recovery_pct]));
-report{end+1} = sprintf('  Mean recovery (real threats only):    %.1f%%', mean(recov_by_threat(real_mask_names)));
+report{end+1} = sprintf('  Mean recovery (all threats, all SNR): %.1f%%', mean([cl_results.recovery_pct], 'omitnan'));
+report{end+1} = sprintf('  Mean recovery (real threats only):    %.1f%%', mean(recov_by_threat(real_mask_names), 'omitnan'));
 report{end+1} = 'NOTE: this is per-threat SNR-swept recovery, not the full survivability-boundary';
 report{end+1} = 'map (proposal deliverable #7) -- that is results/survivability_boundary_mapA.txt';
 report{end+1} = 'and mapB.txt (map_survivability_boundary.m), a separate, larger analysis.';

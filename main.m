@@ -1,28 +1,42 @@
 %% MAIN - Master Execution & Status Pipeline
 % UAV-GCS Adaptive Secure Communications System
-% Orchestrates Phase A (Link+Threats+Dataset) -> B (Detection) -> B-exp (CNN-LSTM)
-% -> C (Recovery) -> EXP (Exploration) -> KPI (Measurement) -> D (Report)
+% Orchestrates the full project end to end:
+%   A     Link + Threats + Dataset
+%   B     Detection (CNN + scalar hybrid)
+%   C     Closed-loop adaptive recovery (DQN)
+%   EXP   Deep countermeasure exploration
+%   SURV  Survivability boundary mapping (deliverable #7)
+%   KPI   Proposal KPI measurement (section 5 / ה)
+%   DASH  Results dashboard (deliverable #1)
 % Author: Adi Suliman, Bar Dvir Hassan
 %
-% Toggle the RUN flags below (true/false). They execute in the order listed.
-% Light stages are fast; heavy stages (A5-A6, B2, C2, explore_countermeasures)
-% take minutes to over an hour -- leave them false unless regenerating.
+% HOW TO USE
+% Every stage below is a RUN.<flag>. Set a flag true to run that stage.
+% They execute top to bottom in dependency order, so to run the whole project
+% from scratch, set the flags in the "FULL CLEAN RUN" preset to true.
+% All flags default to FALSE (everything is already generated) -- turn on only
+% what you need to regenerate.
 %
-% COMMAND WINDOW LOGGING: every called script starts with close all/clc, which
-% would normally wipe out everything printed by earlier stages. This is solved
-% with MATLAB's `diary` command: it logs EVERYTHING printed to the Command
-% Window into a text file, independent of clc. Open logs/run_*.txt after
-% running to get the complete output.
+% Runtimes (RTX 4070): A5 ~30-40min, A6 ~5min, B2 ~10min, C2 ~10-15min,
+% C3-diag ~15-20min, EXP ~75-86min (VERY HEAVY), everything else < 5min.
 %
-% BATCH MODE: set BATCH_MODE_DISABLED = true to run normally with GUI windows.
-% Leave it false and launch from a Windows Command Prompt with:
-%   matlab -batch "main" -nojvm -nosplash
-% to run headless in the background while you work in other applications.
+% DEPENDENCIES (what must exist before a stage can run):
+%   A6 needs A5 | B1 needs A6 | B2 needs B1 | B3 needs B2
+%   C2 needs B2 | C3 needs C2 | C3-diag needs C2
+%   SURV needs EXP | KPI needs B3+C3-diag+FAR | DASH needs B3+C3-diag+FAR+SURV
+%
+% LOGGING: `diary` captures everything printed below into logs/run_*.txt,
+% surviving the close all/clc that each called script starts with.
+%
+% BATCH MODE: leave BATCH_MODE_DISABLED = false and launch headless from a
+% Windows Command Prompt to keep working while it runs:
+%   matlab -batch "main" -nosplash
+% (drop -nojvm if a stage needs Java/Stateflow; it stays headless either way)
 
 clear; close all; clc;
 
 %% ========== BATCH MODE CONTROL ==========
-BATCH_MODE_DISABLED = false;   % true = run with GUI windows (normal mode)
+BATCH_MODE_DISABLED = false;   % true = force GUI windows; false = allow headless
 %% =========================================
 
 if ~BATCH_MODE_DISABLED && ~usejava('desktop')
@@ -37,45 +51,59 @@ diary on;
 fprintf('=== Logging full run to: %s ===\n', log_filename);
 fprintf('(This file will contain EVERYTHING printed below, even across clc calls.)\n\n');
 
-%% ========== EXECUTION FLAGS (in execution order) ==========
-% 2026-09-19: full re-run required after the Rx_IQ tap-point fix (D18) --
-% spectrograms/RSSI were computed pre-AWGN before this fix, so everything
-% downstream of A6 needs regenerating. EXP/survivability are BER-only
-% (quick_ber, no Rx_IQ) and are NOT affected -- left false, no rerun needed.
-RUN.init                        = false;   % A0 : params.mat unchanged, no rerun needed
-RUN.validate_A                  = false;   % A1-A3: unchanged, no rerun needed
-RUN.check_A4                    = true;    % A4 : quick sanity check of the FIXED threat model (fast)
-RUN.build_dataset               = true;    % A5 : REQUIRED -- Rx_IQ now post-AWGN (~30-40 min)
-RUN.extract_spectrograms        = true;    % A6 : REQUIRED -- spectrograms from the new dataset (~5 min)
+%% ================================================================
+%  EXECUTION FLAGS  (all default false — turn on what you need)
+%  ================================================================
+%  QUICK PRESETS — copy the block you want over the flags below:
+%
+%  FULL CLEAN RUN (everything from scratch, ~3 hours incl. EXP):
+%    all A/B/C/EXP/SURV/KPI/DASH flags = true
+%
+%  RESULTS-ONLY REFRESH (models already trained, ~25 min):
+%    run_closed_loop_diagnostic, measure_far, measure_kpi3,
+%    measure_all_kpis, build_dashboard = true; rest = false
+%
+%  DASHBOARD-ONLY (all results exist, < 1 min):
+%    build_dashboard = true; rest = false
+%% ================================================================
 
-% --- Phase A-exp: sequence windowing for CNN-LSTM ---
-RUN.build_sequence_index        = false;   % A5-seq : STALE (predates spoofing fix), LSTM not pursued
-RUN.extract_spectrograms_seq    = false;   % A6-seq : STALE — same reason
+% ---- Phase A: link + threats + dataset ----
+RUN.init                        = true;   % A0  : regenerate params.mat
+RUN.validate_A                  = true;   % A1-A3: build+validate AWGN & Rician links (fast)
+RUN.check_A4                    = true;   % A4  : build threat model + sanity BER (fast)
+RUN.build_dataset               = true;   % A5  : full dataset sweep (HEAVY ~30-40min)
+RUN.extract_spectrograms        = true;   % A6  : spectrograms + 7 features (~5min)
 
-RUN.temporal_features           = false;   % B2.5: DEPRECATED — folded into extract_spectrograms.m (A6)
-RUN.prepare_data                = true;    % B1  : REQUIRED -- re-split on new spectrograms (~1 min)
-RUN.train_detector              = true;    % B2  : REQUIRED -- retrain CNN on real noisy signal (~10 min)
-RUN.eval_detector                = true;    % B3  : REQUIRED -- true accuracy-vs-SNR curve (~1 min)
 
-% --- Phase B-exp: CNN-LSTM detector — NOT PURSUED FURTHER ---
-RUN.prepare_data_seq            = false;
-RUN.train_detector_lstm         = false;
-RUN.eval_detector_lstm          = false;
+% ---- Phase B: detection (CNN baseline) ----
+RUN.prepare_data                = true;   % B1  : stratified 80/10/10 split (~1min)
+RUN.train_detector              = true;   % B2  : train CNN+scalar hybrid (~10min)
+RUN.eval_detector               = true;   % B3  : test eval + confusion/accuracy-vs-SNR (~1min)
 
-RUN.train_dqn                   = true;    % C2  : REQUIRED -- RSSI in reward table now real (~10-15 min)
-RUN.run_closed_loop             = true;    % C3  : REQUIRED -- Rx_IQ-based spectrogram/RSSI (~2-3 min)
-RUN.run_closed_loop_diagnostic  = true;    % C3d : REQUIRED -- full SNR sweep, sliding window (~15-20 min)
 
-RUN.explore_countermeasures     = false;   % EXP : NOT AFFECTED (quick_ber only, no Rx_IQ) -- no rerun needed
-RUN.analyze_exploration_results = false;   % EXP-analysis: unaffected, existing results/exploration_diagnosis.txt still valid
+% ---- Phase C: closed-loop recovery ----
+RUN.train_dqn                   = true;   % C2  : train DQN (one-hot state) (~10-15min)
+RUN.run_closed_loop             = true;   % C3  : closed loop, CNN+DQN (~2-3min)
+RUN.run_closed_loop_diagnostic  = true;   % C3d : full SNR sweep + timing + Q-values (~15-20min)
 
-% --- Phase KPI: proposal section-ה measurement ---
-RUN.measure_far                 = true;    % KPI4 : REQUIRED -- diagnose_far_measurement.m uses Rx_IQ (~5 min)
-RUN.measure_all_kpis            = true;    % KPI  : REQUIRED -- regenerate results/kpi_summary.txt with real numbers (fast, now fixed to read .mat directly)
+% ---- Phase EXP: deep countermeasure exploration ----
+RUN.explore_countermeasures     = true;   % EXP : full sweep (VERY HEAVY ~75-86min)
+RUN.analyze_exploration_results = true;   % EXP-analysis: legitimacy filter + diagnosis (fast)
+
+% ---- Phase SURV: survivability boundary mapping (deliverable #7) ----
+RUN.map_survivability           = true;   % SURV: Map A + Map B + gap analysis (~5min, needs EXP data)
+
+% ---- Phase KPI: proposal measurement (section 5 / ה) ----
+RUN.measure_far                 = true;   % KPI4 : FAR on non-hostile classes, SNR-swept (~5min)
+RUN.measure_kpi3                 = true;   % KPI3 : DQN vs rule decision latency (fast, needs C3-diag)
+RUN.measure_all_kpis            = true;   % KPI  : aggregate all 5 into kpi_summary.txt (fast)
+
+% ---- Phase DASH: results dashboard (deliverable #1) ----
+RUN.build_dashboard             = true;   % DASH : 7-panel summary PNG (fast, needs B3+C3d+FAR+SURV)
 
 fprintf('========================================================\n');
 fprintf('  UAV-GCS ADAPTIVE SECURE COMMS - MASTER PIPELINE\n');
-fprintf('  A: Link+Threats+Data | B: Detection | C: Recovery | EXP: Exploration | KPI: Measurement\n');
+fprintf('  A:Link+Data  B:Detect  C:Recover  EXP:Explore  SURV:Map  KPI:Measure  DASH:Summary\n');
 fprintf('========================================================\n\n');
 
 %% ========== PHASE A: LINK + THREATS + DATASET ==========
@@ -118,53 +146,13 @@ if RUN.extract_spectrograms
 end
 
 fprintf('  [A5-A6] Dataset status:\n');
-if exist('data/dataset.mat','file')
-    d = dir('data/dataset.mat');
-    fprintf('         raw dataset  : READY (%s, %.0f MB)\n', d.date, d.bytes/1e6);
-else
-    fprintf('         raw dataset  : [PENDING] -> run_dataset_sweep\n');
-end
-if exist('data/spectrograms.mat','file')
-    d = dir('data/spectrograms.mat');
-    fprintf('         spectrograms : READY (%s, %.0f MB)\n', d.date, d.bytes/1e6);
-else
-    fprintf('         spectrograms : [PENDING] -> extract_spectrograms\n');
-end
-fprintf('\n');
-
-%% ========== PHASE A-exp: SEQUENCE WINDOWING (for CNN-LSTM) ==========
-fprintf('> PHASE A-exp: Sequence Windowing (CNN-LSTM data prep) -- NOT PURSUED FURTHER\n\n');
-
-if RUN.build_sequence_index
-    fprintf('  [A5-seq] Building sequence index from dataset.mat (with run_id)...\n');
-    build_sequence_index;
-end
-if RUN.extract_spectrograms_seq
-    fprintf('  [A6-seq] Assembling sequence spectrogram tensors...\n');
-    extract_spectrograms_seq;
-end
-
-fprintf('  [A-exp] Sequence pipeline status (STALE -- predates spoofing fix, not regenerated):\n');
-if exist('data/dataset_seq_index.mat','file')
-    d = dir('data/dataset_seq_index.mat');
-    fprintf('         sequence index    : READY (%s, %.0f MB)\n', d.date, d.bytes/1e6);
-else
-    fprintf('         sequence index    : [PENDING] -> build_sequence_index\n');
-end
-if exist('data/spectrograms_seq.mat','file')
-    d = dir('data/spectrograms_seq.mat');
-    fprintf('         spectrograms_seq  : READY (%s, %.0f MB)\n', d.date, d.bytes/1e6);
-else
-    fprintf('         spectrograms_seq  : [PENDING] -> extract_spectrograms_seq\n');
-end
+report_file('data/dataset.mat',      '         raw dataset  ', 'run_dataset_sweep');
+report_file('data/spectrograms.mat', '         spectrograms ', 'extract_spectrograms');
 fprintf('\n');
 
 %% ========== PHASE B: DETECTION (OFFLINE, CNN baseline) ==========
 fprintf('> PHASE B: Detection Network (CNN + scalar hybrid, 9 classes)\n\n');
 
-if RUN.temporal_features
-    fprintf('  [B2.5] DEPRECATED flag — no script called (folded into A6 extract_spectrograms.m)\n');
-end
 if RUN.prepare_data
     fprintf('  [B1] Preparing data (stratified split 80/10/10)...\n');
     prepare_data;
@@ -179,59 +167,9 @@ if RUN.eval_detector
 end
 
 fprintf('  [B] Pipeline status:\n');
-if exist('data/splits.mat','file')
-    d = dir('data/splits.mat');
-    fprintf('      splits.mat            : READY (%s, %.0f MB)\n', d.date, d.bytes/1e6);
-else
-    fprintf('      splits.mat            : [PENDING] -> prepare_data\n');
-end
-if exist('data/trained_detector.mat','file')
-    d = dir('data/trained_detector.mat');
-    fprintf('      trained_detector.mat  : READY (%s, %.0f MB)\n', d.date, d.bytes/1e6);
-else
-    fprintf('      trained_detector.mat  : [PENDING] -> train_detector\n');
-end
-if exist('results/confusion_matrix.png','file')
-    fprintf('      B3 evaluation results : READY -> results/confusion_matrix.png\n');
-else
-    fprintf('      B3 evaluation results : [PENDING] -> eval_detector\n');
-end
-fprintf('\n');
-
-%% ========== PHASE B-exp: CNN-LSTM DETECTOR (comparison architecture) ==========
-fprintf('> PHASE B-exp: CNN-LSTM Detector -- NOT PURSUED FURTHER\n\n');
-
-if RUN.prepare_data_seq
-    fprintf('  [B1-seq] Preparing sequence splits...\n');
-    prepare_data_seq;
-end
-if RUN.train_detector_lstm
-    fprintf('  [B2-seq] Training CNN-LSTM detector...\n');
-    train_detector_lstm;
-end
-if RUN.eval_detector_lstm
-    fprintf('  [B3-seq] Evaluating CNN-LSTM on test set...\n');
-    eval_detector_lstm;
-end
-
-fprintf('  [B-exp] Pipeline status (STALE, kept for the architecture-comparison record only):\n');
-if exist('data/splits_seq.mat','file')
-    d = dir('data/splits_seq.mat');
-    fprintf('      splits_seq.mat            : READY (%s, %.0f MB)\n', d.date, d.bytes/1e6);
-else
-    fprintf('      splits_seq.mat            : [PENDING] -> prepare_data_seq\n');
-end
-if exist('data/trained_detector_lstm.mat','file')
-    d = dir('data/trained_detector_lstm.mat');
-    fprintf('      trained_detector_lstm.mat : READY (%s, %.0f MB)\n', d.date, d.bytes/1e6);
-else
-    fprintf('      trained_detector_lstm.mat : [PENDING] -> train_detector_lstm\n');
-end
-if exist('results/eval_detector_lstm_metrics.mat','file')
-    fprintf('      B3-seq evaluation results : READY -> results/confusion_matrix_lstm.png\n');
-else
-    fprintf('      B3-seq evaluation results : [PENDING] -> eval_detector_lstm\n');
-end
+report_file('data/splits.mat',            '      splits.mat           ', 'prepare_data');
+report_file('data/trained_detector.mat',  '      trained_detector.mat ', 'train_detector');
+report_file('results/confusion_matrix.png','      B3 eval results      ', 'eval_detector');
 fprintf('\n');
 
 %% ========== PHASE C: CLOSED-LOOP RECOVERY (ONLINE) ==========
@@ -252,29 +190,16 @@ if RUN.run_closed_loop_diagnostic
 end
 
 fprintf('  [C] Pipeline status:\n');
-if exist('data/trained_dqn.mat','file')
-    d = dir('data/trained_dqn.mat');
-    fprintf('      trained_dqn.mat            : READY (%s, %.0f MB)\n', d.date, d.bytes/1e6);
-else
-    fprintf('      trained_dqn.mat            : [PENDING] -> train_dqn\n');
-end
-if exist('results/closed_loop_results.png','file')
-    fprintf('      C3 closed-loop results     : READY -> results/closed_loop_results.png\n');
-else
-    fprintf('      C3 closed-loop results     : [PENDING] -> run_closed_loop\n');
-end
-if exist('results/closed_loop_diagnostic_report.txt','file')
-    fprintf('      C3-diag full report        : READY -> results/closed_loop_diagnostic_report.txt\n');
-else
-    fprintf('      C3-diag full report        : [PENDING] -> run_closed_loop_diagnostic\n');
-end
+report_file('data/trained_dqn.mat',                     '      trained_dqn.mat        ', 'train_dqn');
+report_file('results/closed_loop_results.png',          '      C3 closed-loop results ', 'run_closed_loop');
+report_file('results/closed_loop_diagnostic_report.txt','      C3-diag full report    ', 'run_closed_loop_diagnostic');
 fprintf('\n');
 
 %% ========== PHASE EXP: DEEP COUNTERMEASURE EXPLORATION ==========
 fprintf('> PHASE EXP: Deep Countermeasure Exploration (research extension)\n\n');
 
 if RUN.explore_countermeasures
-    fprintf('  [EXP] Running full countermeasure sweep (VERY HEAVY, ~75 min)...\n');
+    fprintf('  [EXP] Running full countermeasure sweep (VERY HEAVY, ~75-86 min)...\n');
     explore_countermeasures;
 end
 if RUN.analyze_exploration_results
@@ -283,25 +208,34 @@ if RUN.analyze_exploration_results
 end
 
 fprintf('  [EXP] Pipeline status:\n');
-if exist('data/countermeasure_exploration.mat','file')
-    d = dir('data/countermeasure_exploration.mat');
-    fprintf('      countermeasure_exploration.mat : READY (%s, %.0f MB)\n', d.date, d.bytes/1e6);
-else
-    fprintf('      countermeasure_exploration.mat : [PENDING] -> explore_countermeasures\n');
-end
-if exist('results/exploration_diagnosis.txt','file')
-    fprintf('      exploration_diagnosis.txt      : READY -> results/exploration_diagnosis.txt\n');
-else
-    fprintf('      exploration_diagnosis.txt      : [PENDING] -> analyze_exploration_results\n');
-end
+report_file('data/countermeasure_exploration.mat', '      countermeasure_exploration.mat ', 'explore_countermeasures');
+report_file('results/exploration_diagnosis.txt',   '      exploration_diagnosis.txt      ', 'analyze_exploration_results');
 fprintf('\n');
 
-%% ========== PHASE KPI: PROPOSAL MEASUREMENT (section ה) ==========
+%% ========== PHASE SURV: SURVIVABILITY BOUNDARY MAP (deliverable #7) ==========
+fprintf('> PHASE SURV: Survivability Boundary Mapping (proposal deliverable #7)\n\n');
+
+if RUN.map_survivability
+    fprintf('  [SURV] Mapping Map A (neutralization) + Map B (survivability) + gap analysis...\n');
+    map_survivability_boundary;
+end
+
+fprintf('  [SURV] Pipeline status:\n');
+report_file('data/survivability_boundary.mat',        '      survivability_boundary.mat     ', 'map_survivability_boundary');
+report_file('results/survivability_boundary_mapA.txt','      Map A (neutralization)         ', 'map_survivability_boundary');
+report_file('results/survivability_boundary_mapB.txt','      Map B (link survivability)     ', 'map_survivability_boundary');
+fprintf('\n');
+
+%% ========== PHASE KPI: PROPOSAL MEASUREMENT (section 5 / ה) ==========
 fprintf('> PHASE KPI: Proposal KPI Measurement\n\n');
 
 if RUN.measure_far
-    fprintf('  [KPI4] Measuring FAR on non-hostile classes...\n');
+    fprintf('  [KPI4] Measuring FAR on non-hostile classes (SNR-swept)...\n');
     diagnose_far_measurement;
+end
+if RUN.measure_kpi3
+    fprintf('  [KPI3] Measuring DQN vs rule-based decision latency...\n');
+    measure_kpi3_recovery_time;
 end
 if RUN.measure_all_kpis
     fprintf('  [KPI] Aggregating all 5 proposal KPIs...\n');
@@ -309,39 +243,53 @@ if RUN.measure_all_kpis
 end
 
 fprintf('  [KPI] Pipeline status:\n');
-if exist('results/far_measurement.txt','file')
-    d = dir('results/far_measurement.txt');
-    fprintf('      far_measurement.txt        : READY (%s)\n', d.date);
-else
-    fprintf('      far_measurement.txt        : [PENDING] -> diagnose_far_measurement\n');
+report_file('results/far_measurement.txt',  '      far_measurement.txt   ', 'diagnose_far_measurement');
+report_file('results/kpi3_measurement.txt', '      kpi3_measurement.txt  ', 'measure_kpi3_recovery_time');
+report_file('results/kpi_summary.txt',      '      kpi_summary.txt       ', 'measure_all_kpis');
+fprintf('\n');
+
+%% ========== PHASE DASH: RESULTS DASHBOARD (deliverable #1) ==========
+fprintf('> PHASE DASH: Results Dashboard (proposal deliverable #1)\n\n');
+
+if RUN.build_dashboard
+    fprintf('  [DASH] Building 7-panel results dashboard...\n');
+    build_kpi_dashboard;
 end
-if exist('results/kpi3_measurement.txt','file')
-    d = dir('results/kpi3_measurement.txt');
-    fprintf('      kpi3_measurement.txt       : READY (%s)\n', d.date);
-else
-    fprintf('      kpi3_measurement.txt       : [PENDING] -> measure_kpi3_recovery_time\n');
-end
-if exist('results/kpi_summary.txt','file')
-    d = dir('results/kpi_summary.txt');
-    fprintf('      kpi_summary.txt            : READY (%s)\n', d.date);
-else
-    fprintf('      kpi_summary.txt            : [PENDING] -> measure_all_kpis\n');
-end
+
+fprintf('  [DASH] Pipeline status:\n');
+report_file('results/kpi_dashboard.png', '      kpi_dashboard.png ', 'build_kpi_dashboard');
 fprintf('\n');
 
 %% ========== PHASE D: DOCUMENTATION ==========
 fprintf('> PHASE D: Documentation & Defense\n\n');
-fprintf('  [D1] Project report (docx)...                      [PENDING]\n');
-fprintf('  [D2] Defense presentation (pptx)...                [PENDING]\n\n');
+fprintf('  [D1] README.md / PROJECT_LOG.md / docs/DECISIONS.md  READY (maintained by hand)\n');
+fprintf('  [D2] Interim/final report (docx)...                  [PENDING]\n');
+fprintf('  [D3] Defense presentation (pptx)...                  [PENDING]\n\n');
 
 %% ========== CHECKPOINT ==========
 fprintf('========================================================\n');
-fprintf(' CHECKPOINT - Post Rx_IQ fix (D18) full re-run: A5->A6->B1->B2->B3->C2->C3->C3d->KPI4->KPI\n');
-fprintf(' Spectrograms/RSSI now reflect real swept AWGN noise (previously pre-AWGN, see DECISIONS.md D18)\n');
-fprintf(' EXP/survivability unaffected (BER-only) -- not rerun here, still valid\n');
+fprintf(' CHECKPOINT - full pipeline available from main.m\n');
+fprintf(' Current verified results: CNN 96.99%% | closed-loop 100%% | recovery 74.6%% | FAR 0%% | latency 2.67ms\n');
+fprintf(' Survivability Map A 84.6%% / Map B 87.9%% recoverable (deliverable #7)\n');
 fprintf(' Outputs in results/, data/ | models in models/ | code on GitHub\n');
 fprintf(' Full run log saved to: %s\n', log_filename);
 fprintf('========================================================\n\n');
 
 diary off;
 fprintf('Diary closed. Open %s for the complete unclipped run transcript.\n', log_filename);
+
+
+%% ========== local helper ==========
+function report_file(path, label, producer)
+    % Prints "label : READY (date, size)" or "label : [PENDING] -> producer"
+    if exist(path, 'file')
+        d = dir(path);
+        if d.bytes >= 1e6
+            fprintf('%s: READY (%s, %.0f MB)\n', label, d.date, d.bytes/1e6);
+        else
+            fprintf('%s: READY (%s)\n', label, d.date);
+        end
+    else
+        fprintf('%s: [PENDING] -> %s\n', label, producer);
+    end
+end

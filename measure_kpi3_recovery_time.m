@@ -75,7 +75,7 @@ for i = 1:n
     mask = strcmp({res.threat}, threats{i});
     sub  = res(mask);
     dqn_latency_ms(i) = mean([sub.dqn_latency_ms]);
-    recovery_pct(i)   = mean([sub.recovery_pct]);
+    recovery_pct(i)   = mean([sub.recovery_pct], 'omitnan');
     agrees_frac(i)    = mean([sub.agrees_with_rule]);
     rule_action{i}    = sub(1).rule_based_action;   % rule policy doesn't depend on SNR
 end
@@ -108,8 +108,13 @@ report{end+1} = '(each threat has one data point per SNR point in the diagnostic
 report{end+1} = '';
 report{end+1} = sprintf('%-22s %14s %14s %10s %10s', 'Threat', 'DQN (ms)', 'Rule (ms)', 'Agree%', 'Recov%');
 for i = 1:n
-    report{end+1} = sprintf('%-22s %14.3f %14.5f %9.0f%% %9.1f%%', ...
-        threats{i}, dqn_latency_ms(i), rule_latency_ms(i), 100*agrees_frac(i), recovery_pct(i));
+    if isnan(recovery_pct(i))
+        report{end+1} = sprintf('%-22s %14.3f %14.5f %9.0f%% %10s', ...
+            threats{i}, dqn_latency_ms(i), rule_latency_ms(i), 100*agrees_frac(i), 'N/A');
+    else
+        report{end+1} = sprintf('%-22s %14.3f %14.5f %9.0f%% %9.1f%%', ...
+            threats{i}, dqn_latency_ms(i), rule_latency_ms(i), 100*agrees_frac(i), recovery_pct(i));
+    end
 end
 report{end+1} = '';
 report{end+1} = sprintf('Mean DQN latency:  %.3f ms', mean(dqn_latency_ms));

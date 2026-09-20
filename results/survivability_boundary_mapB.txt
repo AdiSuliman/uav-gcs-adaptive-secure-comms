@@ -1,5 +1,5 @@
 === SURVIVABILITY BOUNDARY MAP — MAP B — LINK SURVIVABILITY ===
-Generated: 19-Sep-2026 08:39:35
+Generated: 20-Sep-2026 01:30:45
 Mechanisms included: atten_reduction, field_reduction, awgn_margin_boost
 
 A state is classified by how close the best achievable post-countermeasure
@@ -9,23 +9,23 @@ BER comes to the clean-channel BER at the same SNR:
   NON-RECOVERABLE  : worse than 5x clean channel
 
 Clean-channel reference BER per SNR:
-  SNR= 0 dB : 1.2108e-01
-  SNR= 2 dB : 7.9282e-02
-  SNR= 4 dB : 4.1950e-02
-  SNR= 6 dB : 2.2376e-02
-  SNR= 8 dB : 9.3695e-03
-  SNR=10 dB : 2.5994e-03
+  SNR= 0 dB : 1.1969e-01
+  SNR= 2 dB : 7.7662e-02
+  SNR= 4 dB : 4.3259e-02
+  SNR= 6 dB : 2.2347e-02
+  SNR= 8 dB : 8.8458e-03
+  SNR=10 dB : 2.5509e-03
 
 --- Recovery ceiling (mid severity, lowest SNR) ---
 Threat                   BER attack    ceiling %   achieved %   of ceiling
-jamming                   3.669e-01        67.0%        66.5%        99.2%
-noise_burst               2.011e-01        39.8%        44.2%       110.9%
-reactive_jamming          3.452e-01        64.9%        64.0%        98.6%
-path_loss                 3.727e-01        67.5%        84.2%       124.6%
-spoofing                  3.388e-01        64.3%        65.0%       101.1%
-antenna_fault             2.227e-01        45.6%        44.4%        97.2%
-sweeping_jammer           1.574e-01        23.1%        65.5%       283.8%
-benign_interference       1.652e-01        26.7%        60.2%       225.5%
+jamming                   3.721e-01        67.8%        65.8%        97.0%
+noise_burst               2.010e-01        40.4%        44.1%       109.0%
+reactive_jamming          3.423e-01        65.0%        63.8%        98.1%
+path_loss                 3.762e-01        68.2%        84.6%       124.0%
+spoofing                  3.419e-01        65.0%        64.8%        99.7%
+antenna_fault             2.303e-01        48.0%        45.3%        94.2%
+sweeping_jammer           1.630e-01        26.6%        65.3%       245.4%
+benign_interference       1.616e-01        25.9%        59.3%       228.7%
 
 --- Boundary map, per threat (rows = severity level, cols = SNR) ---
 Legend: R = recoverable | M = marginal | X = non-recoverable | . = no data
@@ -53,9 +53,9 @@ reactive_jamming:
   0                R       R       R       R       R       R
   4                R       R       R       R       R       R
   8                R       R       R       R       R       M
-  12               R       R       R       R       R       M
+  12               R       R       R       R       M       M
   16               R       R       R       M       M       X
-  -> recoverable 25/30 (83%) | marginal 4 | non-recoverable 1
+  -> recoverable 24/30 (80%) | marginal 5 | non-recoverable 1
 
 path_loss:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
@@ -79,19 +79,19 @@ antenna_fault:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
   0.1              R       R       R       R       R       M
   0.2              R       R       R       R       R       M
-  0.3              R       R       R       M       M       M
+  0.3              R       R       R       R       M       M
   0.4              R       R       M       M       M       X
   0.5              R       R       M       M       M       X
-  -> recoverable 17/30 (57%) | marginal 11 | non-recoverable 2
+  -> recoverable 18/30 (60%) | marginal 10 | non-recoverable 2
 
 sweeping_jammer:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
   0                R       R       R       R       R       R
   4                R       R       R       R       R       R
   8                R       R       R       R       R       R
-  12               R       R       R       R       R       R
+  12               R       R       R       R       R       M
   16               R       R       R       R       R       M
-  -> recoverable 29/30 (97%) | marginal 1 | non-recoverable 0
+  -> recoverable 28/30 (93%) | marginal 2 | non-recoverable 0
 
 benign_interference:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
@@ -104,6 +104,6 @@ benign_interference:
 
 === OVERALL ===
 Total states mapped: 240
-  Recoverable     : 211 (87.9%)
-  Marginal        : 23 (9.6%)
+  Recoverable     : 210 (87.5%)
+  Marginal        : 24 (10.0%)
   Non-recoverable : 6 (2.5%)
