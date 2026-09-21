@@ -1,0 +1,388 @@
+=== C3-DIAGNOSTIC FULL REPORT (SLIDING WINDOW, SNR SWEEP) ===
+Generated: 19-Sep-2026 22:09:03
+Threats: 9 | SNR points: [0 2 4 6 8 10] dB | Total runs: 54 | Temporal window: 10 frames
+
+Temporal features are computed from a real causal window over the frames of
+each run, matching how the detector was trained. NaN BER values (last frame
+of a run, by construction) are guarded exactly as prepare_data.m does.
+BER before/after are both averaged over all valid frames of their runs.
+
+NOTE: latencies are CNN-inference + DQN-inference only (ms) -- the actual
+reaction time of the decision system, excluding Simulink build/sim time.
+
+--- Section 1: Recovery % per Threat per SNR ---
+Threat                       0dB       2dB       4dB       6dB       8dB      10dB      mean
+jamming                    66.0%     77.9%     86.1%     91.4%     95.2%     97.3%     85.6%
+reactive_jamming           65.5%     77.5%     86.5%     92.3%     95.9%     98.3%     86.0%
+sweeping_jammer            25.3%     34.3%     49.9%     66.9%     86.8%     93.1%     59.4%
+noise_burst                38.6%     52.6%     67.4%     81.7%     91.0%     96.1%     71.2%
+path_loss                  64.5%     75.2%     84.7%     89.2%     94.9%     97.4%     84.3%
+spoofing                   54.9%     71.2%     84.6%     92.3%     96.7%     99.0%     83.1%
+antenna_fault              16.9%     28.5%     41.7%     61.1%     77.8%     89.2%     52.5%
+benign_interference          N/A       N/A       N/A       N/A       N/A       N/A       N/A
+none                         N/A       N/A       N/A       N/A       N/A       N/A       N/A
+
+N/A = DQN chose no_action (no countermeasure applied, nothing to recover).
+--- Section 2: CNN Detection Accuracy in Closed Loop, per SNR ---
+SNR (dB)        Correct
+0                9/9    (100.0%)
+2                9/9    (100.0%)
+4                9/9    (100.0%)
+6                9/9    (100.0%)
+8                9/9    (100.0%)
+10               9/9    (100.0%)
+
+--- Section 2b: CNN Detection per Threat Class (all SNR) ---
+Threat                      Correct
+jamming                      6/6    (100.0%)
+reactive_jamming             6/6    (100.0%)
+sweeping_jammer              6/6    (100.0%)
+noise_burst                  6/6    (100.0%)
+path_loss                    6/6    (100.0%)
+spoofing                     6/6    (100.0%)
+antenna_fault                6/6    (100.0%)
+benign_interference          6/6    (100.0%)
+none                         6/6    (100.0%)
+
+--- Section 3: DQN-vs-Rule Agreement, per SNR ---
+SNR (dB)          Agree
+0                3/9    (33.3%)
+2                5/9    (55.6%)
+4                5/9    (55.6%)
+6                5/9    (55.6%)
+8                5/9    (55.6%)
+10               5/9    (55.6%)
+
+--- Section 4: Per-Run Detail ---
+--- jamming @ SNR=0 dB ---
+  Window: 20 frames | var_rssi=0.0097 dber_dt=35.7 burst=1.000
+  CNN: jamming (conf 91.3%, 2.28 ms, correct=1)
+  DQN: freq_diversity (1.32 ms) | Q: no_action=-4.22 channel_switch=66.69 rate_reduce=58.04 freq_diversity=66.92 spatial_diversity=66.38 
+  Rule: channel_switch | agrees=0
+  BER before=3.916e-01 after=1.333e-01 recovery=66.0%
+--- reactive_jamming @ SNR=0 dB ---
+  Window: 20 frames | var_rssi=0.2598 dber_dt=46.9 burst=1.000
+  CNN: reactive_jamming (conf 100.0%, 2.11 ms, correct=1)
+  DQN: freq_diversity (1.21 ms) | Q: no_action=-4.90 channel_switch=81.51 rate_reduce=70.31 freq_diversity=81.85 spatial_diversity=80.38 
+  Rule: channel_switch_fast | agrees=0
+  BER before=3.745e-01 after=1.292e-01 recovery=65.5%
+--- sweeping_jammer @ SNR=0 dB ---
+  Window: 20 frames | var_rssi=0.7002 dber_dt=48.8 burst=0.700
+  CNN: sweeping_jammer (conf 100.0%, 2.19 ms, correct=1)
+  DQN: channel_switch (1.43 ms) | Q: no_action=-2.23 channel_switch=27.96 rate_reduce=23.82 freq_diversity=27.91 spatial_diversity=27.51 
+  Rule: channel_switch_fast | agrees=1
+  BER before=1.681e-01 after=1.256e-01 recovery=25.3%
+--- noise_burst @ SNR=0 dB ---
+  Window: 20 frames | var_rssi=0.0681 dber_dt=-9.4 burst=1.000
+  CNN: noise_burst (conf 100.0%, 2.20 ms, correct=1)
+  DQN: channel_switch (1.28 ms) | Q: no_action=-3.28 channel_switch=38.76 rate_reduce=33.14 freq_diversity=38.00 spatial_diversity=37.14 
+  Rule: rate_reduce | agrees=0
+  BER before=2.116e-01 after=1.298e-01 recovery=38.6%
+--- path_loss @ SNR=0 dB ---
+  Window: 20 frames | var_rssi=0.0121 dber_dt=48.8 burst=1.000
+  CNN: path_loss (conf 94.6%, 1.80 ms, correct=1)
+  DQN: spatial_diversity (1.45 ms) | Q: no_action=0.03 channel_switch=56.39 rate_reduce=33.78 freq_diversity=62.45 spatial_diversity=63.66 
+  Rule: rate_reduce | agrees=0
+  BER before=3.516e-01 after=1.249e-01 recovery=64.5%
+--- spoofing @ SNR=0 dB ---
+  Window: 20 frames | var_rssi=0.1963 dber_dt=-28.2 burst=1.000
+  CNN: spoofing (conf 99.3%, 1.55 ms, correct=1)
+  DQN: channel_switch (0.74 ms) | Q: no_action=-2.55 channel_switch=53.07 rate_reduce=41.85 freq_diversity=51.19 spatial_diversity=50.76 
+  Rule: freq_diversity | agrees=0
+  BER before=2.893e-01 after=1.305e-01 recovery=54.9%
+--- antenna_fault @ SNR=0 dB ---
+  Window: 20 frames | var_rssi=0.2128 dber_dt=-26.3 burst=0.800
+  CNN: antenna_fault (conf 35.8%, 1.64 ms, correct=1)
+  DQN: channel_switch (0.94 ms) | Q: no_action=-0.88 channel_switch=17.00 rate_reduce=9.04 freq_diversity=16.76 spatial_diversity=15.94 
+  Rule: spatial_diversity | agrees=0
+  BER before=1.720e-01 after=1.429e-01 recovery=16.9%
+--- benign_interference @ SNR=0 dB ---
+  Window: 20 frames | var_rssi=0.1243 dber_dt=37.6 burst=0.500
+  CNN: benign_interference (conf 99.8%, 1.67 ms, correct=1)
+  DQN: no_action (0.93 ms) | Q: no_action=-0.35 channel_switch=-24.59 rate_reduce=-22.50 freq_diversity=-24.57 spatial_diversity=-24.96 
+  Rule: no_action | agrees=1
+  BER before=1.645e-01 after=1.645e-01 recovery=N/A (no action)
+--- none @ SNR=0 dB ---
+  Window: 20 frames | var_rssi=0.3657 dber_dt=-11.3 burst=0.400
+  CNN: none (conf 80.9%, 1.70 ms, correct=1)
+  DQN: no_action (0.76 ms) | Q: no_action=-0.18 channel_switch=-22.48 rate_reduce=-20.69 freq_diversity=-22.27 spatial_diversity=-22.85 
+  Rule: no_action | agrees=1
+  BER before=1.288e-01 after=1.288e-01 recovery=N/A (no action)
+--- jamming @ SNR=2 dB ---
+  Window: 20 frames | var_rssi=0.0097 dber_dt=20.7 burst=1.000
+  CNN: jamming (conf 88.0%, 1.59 ms, correct=1)
+  DQN: channel_switch (0.93 ms) | Q: no_action=-4.69 channel_switch=68.94 rate_reduce=59.68 freq_diversity=68.53 spatial_diversity=68.23 
+  Rule: channel_switch | agrees=1
+  BER before=3.928e-01 after=8.670e-02 recovery=77.9%
+--- reactive_jamming @ SNR=2 dB ---
+  Window: 20 frames | var_rssi=0.2582 dber_dt=-11.3 burst=1.000
+  CNN: reactive_jamming (conf 100.0%, 1.67 ms, correct=1)
+  DQN: channel_switch (0.75 ms) | Q: no_action=-5.39 channel_switch=84.28 rate_reduce=72.44 freq_diversity=84.06 spatial_diversity=82.92 
+  Rule: channel_switch_fast | agrees=1
+  BER before=3.720e-01 after=8.379e-02 recovery=77.5%
+--- sweeping_jammer @ SNR=2 dB ---
+  Window: 20 frames | var_rssi=0.9551 dber_dt=48.8 burst=0.400
+  CNN: sweeping_jammer (conf 100.0%, 1.60 ms, correct=1)
+  DQN: channel_switch (0.73 ms) | Q: no_action=-1.95 channel_switch=19.59 rate_reduce=16.86 freq_diversity=19.37 spatial_diversity=19.33 
+  Rule: channel_switch_fast | agrees=1
+  BER before=1.277e-01 after=8.389e-02 recovery=34.3%
+--- noise_burst @ SNR=2 dB ---
+  Window: 20 frames | var_rssi=0.0675 dber_dt=30.0 burst=1.000
+  CNN: noise_burst (conf 100.0%, 1.61 ms, correct=1)
+  DQN: channel_switch (0.77 ms) | Q: no_action=-3.78 channel_switch=39.91 rate_reduce=33.85 freq_diversity=38.51 spatial_diversity=38.09 
+  Rule: rate_reduce | agrees=0
+  BER before=1.766e-01 after=8.374e-02 recovery=52.6%
+--- path_loss @ SNR=2 dB ---
+  Window: 20 frames | var_rssi=0.0296 dber_dt=-13.1 burst=1.000
+  CNN: path_loss (conf 99.5%, 1.82 ms, correct=1)
+  DQN: spatial_diversity (0.96 ms) | Q: no_action=0.07 channel_switch=55.79 rate_reduce=28.85 freq_diversity=62.80 spatial_diversity=64.22 
+  Rule: rate_reduce | agrees=0
+  BER before=3.146e-01 after=7.798e-02 recovery=75.2%
+--- spoofing @ SNR=2 dB ---
+  Window: 20 frames | var_rssi=0.1932 dber_dt=-5.6 burst=1.000
+  CNN: spoofing (conf 100.0%, 1.89 ms, correct=1)
+  DQN: channel_switch (0.89 ms) | Q: no_action=-2.81 channel_switch=52.56 rate_reduce=38.95 freq_diversity=50.06 spatial_diversity=49.65 
+  Rule: freq_diversity | agrees=0
+  BER before=2.916e-01 after=8.395e-02 recovery=71.2%
+--- antenna_fault @ SNR=2 dB ---
+  Window: 20 frames | var_rssi=0.3685 dber_dt=-24.4 burst=0.500
+  CNN: antenna_fault (conf 72.9%, 1.58 ms, correct=1)
+  DQN: freq_diversity (0.91 ms) | Q: no_action=-1.10 channel_switch=18.66 rate_reduce=7.81 freq_diversity=18.72 spatial_diversity=17.84 
+  Rule: spatial_diversity | agrees=0
+  BER before=1.386e-01 after=9.904e-02 recovery=28.5%
+--- benign_interference @ SNR=2 dB ---
+  Window: 20 frames | var_rssi=0.1818 dber_dt=13.1 burst=0.400
+  CNN: benign_interference (conf 99.9%, 1.62 ms, correct=1)
+  DQN: no_action (0.77 ms) | Q: no_action=-0.39 channel_switch=-30.54 rate_reduce=-28.79 freq_diversity=-30.65 spatial_diversity=-31.16 
+  Rule: no_action | agrees=1
+  BER before=1.409e-01 after=1.409e-01 recovery=N/A (no action)
+--- none @ SNR=2 dB ---
+  Window: 20 frames | var_rssi=0.3979 dber_dt=33.8 burst=0.100
+  CNN: none (conf 98.5%, 2.42 ms, correct=1)
+  DQN: no_action (1.30 ms) | Q: no_action=-0.28 channel_switch=-31.57 rate_reduce=-30.00 freq_diversity=-31.65 spatial_diversity=-32.21 
+  Rule: no_action | agrees=1
+  BER before=8.068e-02 after=8.068e-02 recovery=N/A (no action)
+--- jamming @ SNR=4 dB ---
+  Window: 20 frames | var_rssi=0.0103 dber_dt=-15.0 burst=1.000
+  CNN: jamming (conf 90.6%, 1.94 ms, correct=1)
+  DQN: channel_switch (0.75 ms) | Q: no_action=-5.28 channel_switch=72.22 rate_reduce=62.14 freq_diversity=71.06 spatial_diversity=70.98 
+  Rule: channel_switch | agrees=1
+  BER before=3.901e-01 after=5.431e-02 recovery=86.1%
+--- reactive_jamming @ SNR=4 dB ---
+  Window: 20 frames | var_rssi=0.3062 dber_dt=-41.3 burst=1.000
+  CNN: reactive_jamming (conf 100.0%, 1.63 ms, correct=1)
+  DQN: channel_switch (0.77 ms) | Q: no_action=-6.09 channel_switch=85.20 rate_reduce=72.78 freq_diversity=84.08 spatial_diversity=83.16 
+  Rule: channel_switch_fast | agrees=1
+  BER before=3.758e-01 after=5.064e-02 recovery=86.5%
+--- sweeping_jammer @ SNR=4 dB ---
+  Window: 20 frames | var_rssi=1.1185 dber_dt=39.4 burst=0.100
+  CNN: sweeping_jammer (conf 100.0%, 2.02 ms, correct=1)
+  DQN: channel_switch (0.83 ms) | Q: no_action=-2.58 channel_switch=23.20 rate_reduce=19.87 freq_diversity=22.51 spatial_diversity=22.58 
+  Rule: channel_switch_fast | agrees=1
+  BER before=9.782e-02 after=4.896e-02 recovery=49.9%
+--- noise_burst @ SNR=4 dB ---
+  Window: 20 frames | var_rssi=0.0808 dber_dt=1.9 burst=0.900
+  CNN: noise_burst (conf 100.0%, 2.10 ms, correct=1)
+  DQN: channel_switch (0.83 ms) | Q: no_action=-4.30 channel_switch=39.76 rate_reduce=33.37 freq_diversity=37.75 spatial_diversity=37.82 
+  Rule: rate_reduce | agrees=0
+  BER before=1.528e-01 after=4.978e-02 recovery=67.4%
+--- path_loss @ SNR=4 dB ---
+  Window: 20 frames | var_rssi=0.0310 dber_dt=30.0 burst=1.000
+  CNN: path_loss (conf 99.5%, 1.65 ms, correct=1)
+  DQN: spatial_diversity (0.91 ms) | Q: no_action=0.12 channel_switch=58.18 rate_reduce=26.67 freq_diversity=66.39 spatial_diversity=67.83 
+  Rule: rate_reduce | agrees=0
+  BER before=2.760e-01 after=4.218e-02 recovery=84.7%
+--- spoofing @ SNR=4 dB ---
+  Window: 20 frames | var_rssi=0.3017 dber_dt=18.8 burst=1.000
+  CNN: spoofing (conf 100.0%, 1.67 ms, correct=1)
+  DQN: channel_switch (0.90 ms) | Q: no_action=-3.20 channel_switch=48.74 rate_reduce=34.17 freq_diversity=45.61 spatial_diversity=45.07 
+  Rule: freq_diversity | agrees=0
+  BER before=2.988e-01 after=4.615e-02 recovery=84.6%
+--- antenna_fault @ SNR=4 dB ---
+  Window: 20 frames | var_rssi=0.6262 dber_dt=-56.3 burst=0.500
+  CNN: antenna_fault (conf 95.9%, 2.05 ms, correct=1)
+  DQN: channel_switch (1.22 ms) | Q: no_action=-1.49 channel_switch=19.16 rate_reduce=6.61 freq_diversity=19.12 spatial_diversity=18.05 
+  Rule: spatial_diversity | agrees=0
+  BER before=1.110e-01 after=6.467e-02 recovery=41.7%
+--- benign_interference @ SNR=4 dB ---
+  Window: 20 frames | var_rssi=0.3028 dber_dt=20.7 burst=0.300
+  CNN: benign_interference (conf 99.9%, 2.40 ms, correct=1)
+  DQN: no_action (0.93 ms) | Q: no_action=-0.60 channel_switch=-28.63 rate_reduce=-28.09 freq_diversity=-29.01 spatial_diversity=-29.33 
+  Rule: no_action | agrees=1
+  BER before=1.128e-01 after=1.128e-01 recovery=N/A (no action)
+--- none @ SNR=4 dB ---
+  Window: 20 frames | var_rssi=0.6084 dber_dt=13.1 burst=0.000
+  CNN: none (conf 99.4%, 1.62 ms, correct=1)
+  DQN: no_action (0.96 ms) | Q: no_action=-0.79 channel_switch=-30.22 rate_reduce=-30.08 freq_diversity=-30.88 spatial_diversity=-31.28 
+  Rule: no_action | agrees=1
+  BER before=4.498e-02 after=4.498e-02 recovery=N/A (no action)
+--- jamming @ SNR=6 dB ---
+  Window: 20 frames | var_rssi=0.0114 dber_dt=-56.3 burst=1.000
+  CNN: jamming (conf 88.3%, 1.69 ms, correct=1)
+  DQN: channel_switch (0.88 ms) | Q: no_action=-6.22 channel_switch=73.29 rate_reduce=62.54 freq_diversity=71.12 spatial_diversity=71.29 
+  Rule: channel_switch | agrees=1
+  BER before=3.958e-01 after=3.412e-02 recovery=91.4%
+--- reactive_jamming @ SNR=6 dB ---
+  Window: 20 frames | var_rssi=0.2889 dber_dt=46.9 burst=1.000
+  CNN: reactive_jamming (conf 100.0%, 1.63 ms, correct=1)
+  DQN: channel_switch (0.74 ms) | Q: no_action=-7.00 channel_switch=85.60 rate_reduce=72.49 freq_diversity=83.29 spatial_diversity=82.59 
+  Rule: channel_switch_fast | agrees=1
+  BER before=3.678e-01 after=2.825e-02 recovery=92.3%
+--- sweeping_jammer @ SNR=6 dB ---
+  Window: 20 frames | var_rssi=1.1828 dber_dt=35.7 burst=0.100
+  CNN: sweeping_jammer (conf 100.0%, 1.91 ms, correct=1)
+  DQN: channel_switch (0.92 ms) | Q: no_action=-3.22 channel_switch=26.54 rate_reduce=22.35 freq_diversity=25.49 spatial_diversity=25.34 
+  Rule: channel_switch_fast | agrees=1
+  BER before=8.022e-02 after=2.657e-02 recovery=66.9%
+--- noise_burst @ SNR=6 dB ---
+  Window: 20 frames | var_rssi=0.0801 dber_dt=-1.9 burst=0.900
+  CNN: noise_burst (conf 100.0%, 1.68 ms, correct=1)
+  DQN: channel_switch (0.85 ms) | Q: no_action=-5.02 channel_switch=41.74 rate_reduce=34.89 freq_diversity=39.25 spatial_diversity=39.16 
+  Rule: rate_reduce | agrees=0
+  BER before=1.394e-01 after=2.550e-02 recovery=81.7%
+--- path_loss @ SNR=6 dB ---
+  Window: 20 frames | var_rssi=0.0431 dber_dt=-45.1 burst=1.000
+  CNN: path_loss (conf 99.8%, 1.55 ms, correct=1)
+  DQN: spatial_diversity (0.79 ms) | Q: no_action=0.03 channel_switch=60.03 rate_reduce=24.35 freq_diversity=69.36 spatial_diversity=70.87 
+  Rule: rate_reduce | agrees=0
+  BER before=2.183e-01 after=2.366e-02 recovery=89.2%
+--- spoofing @ SNR=6 dB ---
+  Window: 20 frames | var_rssi=0.3072 dber_dt=37.6 burst=1.000
+  CNN: spoofing (conf 100.0%, 1.55 ms, correct=1)
+  DQN: channel_switch (0.69 ms) | Q: no_action=-3.59 channel_switch=46.50 rate_reduce=31.10 freq_diversity=43.02 spatial_diversity=42.18 
+  Rule: freq_diversity | agrees=0
+  BER before=3.060e-01 after=2.351e-02 recovery=92.3%
+--- antenna_fault @ SNR=6 dB ---
+  Window: 20 frames | var_rssi=0.8637 dber_dt=-24.4 burst=0.000
+  CNN: antenna_fault (conf 74.4%, 1.76 ms, correct=1)
+  DQN: channel_switch (0.87 ms) | Q: no_action=-1.86 channel_switch=19.63 rate_reduce=5.36 freq_diversity=19.45 spatial_diversity=18.26 
+  Rule: spatial_diversity | agrees=0
+  BER before=8.680e-02 after=3.376e-02 recovery=61.1%
+--- benign_interference @ SNR=6 dB ---
+  Window: 20 frames | var_rssi=0.3243 dber_dt=31.9 burst=0.300
+  CNN: benign_interference (conf 99.8%, 1.60 ms, correct=1)
+  DQN: no_action (0.72 ms) | Q: no_action=-0.98 channel_switch=-24.02 rate_reduce=-25.54 freq_diversity=-24.73 spatial_diversity=-24.98 
+  Rule: no_action | agrees=1
+  BER before=9.598e-02 after=9.598e-02 recovery=N/A (no action)
+--- none @ SNR=6 dB ---
+  Window: 20 frames | var_rssi=1.0299 dber_dt=-1.9 burst=0.000
+  CNN: none (conf 99.5%, 1.61 ms, correct=1)
+  DQN: no_action (0.78 ms) | Q: no_action=-1.28 channel_switch=-26.45 rate_reduce=-28.29 freq_diversity=-27.42 spatial_diversity=-27.85 
+  Rule: no_action | agrees=1
+  BER before=2.499e-02 after=2.499e-02 recovery=N/A (no action)
+--- jamming @ SNR=8 dB ---
+  Window: 20 frames | var_rssi=0.0097 dber_dt=-46.9 burst=1.000
+  CNN: jamming (conf 89.1%, 1.57 ms, correct=1)
+  DQN: channel_switch (0.86 ms) | Q: no_action=-6.96 channel_switch=75.02 rate_reduce=63.60 freq_diversity=72.21 spatial_diversity=72.83 
+  Rule: channel_switch | agrees=1
+  BER before=3.869e-01 after=1.861e-02 recovery=95.2%
+--- reactive_jamming @ SNR=8 dB ---
+  Window: 20 frames | var_rssi=0.2736 dber_dt=-35.7 burst=1.000
+  CNN: reactive_jamming (conf 100.0%, 1.72 ms, correct=1)
+  DQN: channel_switch (0.83 ms) | Q: no_action=-7.65 channel_switch=85.89 rate_reduce=72.34 freq_diversity=82.94 spatial_diversity=82.81 
+  Rule: channel_switch_fast | agrees=1
+  BER before=3.716e-01 after=1.530e-02 recovery=95.9%
+--- sweeping_jammer @ SNR=8 dB ---
+  Window: 20 frames | var_rssi=1.1802 dber_dt=65.7 burst=0.000
+  CNN: sweeping_jammer (conf 100.0%, 1.58 ms, correct=1)
+  DQN: channel_switch (0.71 ms) | Q: no_action=-3.74 channel_switch=27.58 rate_reduce=22.67 freq_diversity=26.23 spatial_diversity=25.78 
+  Rule: channel_switch_fast | agrees=1
+  BER before=6.875e-02 after=9.078e-03 recovery=86.8%
+--- noise_burst @ SNR=8 dB ---
+  Window: 20 frames | var_rssi=0.0818 dber_dt=18.8 burst=1.000
+  CNN: noise_burst (conf 100.0%, 1.56 ms, correct=1)
+  DQN: channel_switch (0.75 ms) | Q: no_action=-5.73 channel_switch=42.59 rate_reduce=35.21 freq_diversity=39.63 spatial_diversity=39.34 
+  Rule: rate_reduce | agrees=0
+  BER before=1.311e-01 after=1.183e-02 recovery=91.0%
+--- path_loss @ SNR=8 dB ---
+  Window: 20 frames | var_rssi=0.1775 dber_dt=-41.3 burst=0.700
+  CNN: path_loss (conf 99.9%, 1.89 ms, correct=1)
+  DQN: spatial_diversity (0.99 ms) | Q: no_action=0.18 channel_switch=63.25 rate_reduce=24.56 freq_diversity=73.54 spatial_diversity=75.16 
+  Rule: rate_reduce | agrees=0
+  BER before=1.724e-01 after=8.874e-03 recovery=94.9%
+--- spoofing @ SNR=8 dB ---
+  Window: 20 frames | var_rssi=0.4444 dber_dt=13.1 burst=1.000
+  CNN: spoofing (conf 100.0%, 1.57 ms, correct=1)
+  DQN: channel_switch (0.73 ms) | Q: no_action=-4.15 channel_switch=45.59 rate_reduce=29.96 freq_diversity=41.61 spatial_diversity=40.49 
+  Rule: freq_diversity | agrees=0
+  BER before=3.097e-01 after=1.025e-02 recovery=96.7%
+--- antenna_fault @ SNR=8 dB ---
+  Window: 20 frames | var_rssi=1.1798 dber_dt=-54.5 burst=0.000
+  CNN: antenna_fault (conf 66.2%, 2.50 ms, correct=1)
+  DQN: channel_switch (1.12 ms) | Q: no_action=-2.32 channel_switch=20.04 rate_reduce=4.73 freq_diversity=19.38 spatial_diversity=17.92 
+  Rule: spatial_diversity | agrees=0
+  BER before=7.752e-02 after=1.724e-02 recovery=77.8%
+--- benign_interference @ SNR=8 dB ---
+  Window: 20 frames | var_rssi=0.4134 dber_dt=5.6 burst=0.200
+  CNN: benign_interference (conf 99.9%, 1.61 ms, correct=1)
+  DQN: no_action (0.75 ms) | Q: no_action=-1.57 channel_switch=-20.33 rate_reduce=-23.44 freq_diversity=-21.46 spatial_diversity=-21.86 
+  Rule: no_action | agrees=1
+  BER before=8.491e-02 after=8.491e-02 recovery=N/A (no action)
+--- none @ SNR=8 dB ---
+  Window: 20 frames | var_rssi=1.3454 dber_dt=0.0 burst=0.000
+  CNN: none (conf 99.2%, 1.58 ms, correct=1)
+  DQN: no_action (0.78 ms) | Q: no_action=-1.86 channel_switch=-21.95 rate_reduce=-25.76 freq_diversity=-23.45 spatial_diversity=-23.93 
+  Rule: no_action | agrees=1
+  BER before=8.721e-03 after=8.721e-03 recovery=N/A (no action)
+--- jamming @ SNR=10 dB ---
+  Window: 20 frames | var_rssi=0.0134 dber_dt=50.7 burst=1.000
+  CNN: jamming (conf 91.2%, 1.57 ms, correct=1)
+  DQN: channel_switch (0.83 ms) | Q: no_action=-7.58 channel_switch=78.09 rate_reduce=65.78 freq_diversity=74.77 spatial_diversity=75.63 
+  Rule: channel_switch | agrees=1
+  BER before=3.898e-01 after=1.056e-02 recovery=97.3%
+--- reactive_jamming @ SNR=10 dB ---
+  Window: 20 frames | var_rssi=0.2980 dber_dt=22.5 burst=1.000
+  CNN: reactive_jamming (conf 100.0%, 1.65 ms, correct=1)
+  DQN: channel_switch (0.93 ms) | Q: no_action=-8.33 channel_switch=87.31 rate_reduce=73.24 freq_diversity=83.79 spatial_diversity=83.89 
+  Rule: channel_switch_fast | agrees=1
+  BER before=3.697e-01 after=6.426e-03 recovery=98.3%
+--- sweeping_jammer @ SNR=10 dB ---
+  Window: 20 frames | var_rssi=1.2484 dber_dt=35.7 burst=0.000
+  CNN: sweeping_jammer (conf 100.0%, 1.62 ms, correct=1)
+  DQN: channel_switch (0.86 ms) | Q: no_action=-4.29 channel_switch=29.99 rate_reduce=24.13 freq_diversity=28.40 spatial_diversity=27.74 
+  Rule: channel_switch_fast | agrees=1
+  BER before=6.227e-02 after=4.284e-03 recovery=93.1%
+--- noise_burst @ SNR=10 dB ---
+  Window: 20 frames | var_rssi=0.0896 dber_dt=24.4 burst=0.900
+  CNN: noise_burst (conf 100.0%, 1.62 ms, correct=1)
+  DQN: channel_switch (0.80 ms) | Q: no_action=-6.40 channel_switch=44.51 rate_reduce=36.38 freq_diversity=41.23 spatial_diversity=40.67 
+  Rule: rate_reduce | agrees=0
+  BER before=1.226e-01 after=4.743e-03 recovery=96.1%
+--- path_loss @ SNR=10 dB ---
+  Window: 20 frames | var_rssi=0.2753 dber_dt=-22.5 burst=0.500
+  CNN: path_loss (conf 99.9%, 1.57 ms, correct=1)
+  DQN: spatial_diversity (0.73 ms) | Q: no_action=-0.04 channel_switch=64.15 rate_reduce=22.53 freq_diversity=75.03 spatial_diversity=76.66 
+  Rule: rate_reduce | agrees=0
+  BER before=1.261e-01 after=3.315e-03 recovery=97.4%
+--- spoofing @ SNR=10 dB ---
+  Window: 20 frames | var_rssi=0.4477 dber_dt=-20.7 burst=0.700
+  CNN: spoofing (conf 100.0%, 1.64 ms, correct=1)
+  DQN: channel_switch (0.79 ms) | Q: no_action=-3.84 channel_switch=43.46 rate_reduce=28.37 freq_diversity=39.80 spatial_diversity=38.82 
+  Rule: freq_diversity | agrees=0
+  BER before=3.126e-01 after=3.162e-03 recovery=99.0%
+--- antenna_fault @ SNR=10 dB ---
+  Window: 20 frames | var_rssi=1.5691 dber_dt=-41.3 burst=0.000
+  CNN: antenna_fault (conf 93.6%, 1.63 ms, correct=1)
+  DQN: channel_switch (0.76 ms) | Q: no_action=-2.84 channel_switch=20.41 rate_reduce=4.51 freq_diversity=18.88 spatial_diversity=17.16 
+  Rule: spatial_diversity | agrees=0
+  BER before=6.865e-02 after=7.446e-03 recovery=89.2%
+--- benign_interference @ SNR=10 dB ---
+  Window: 20 frames | var_rssi=0.4382 dber_dt=9.4 burst=0.200
+  CNN: benign_interference (conf 99.9%, 2.21 ms, correct=1)
+  DQN: no_action (0.96 ms) | Q: no_action=-2.06 channel_switch=-17.23 rate_reduce=-22.10 freq_diversity=-18.72 spatial_diversity=-19.23 
+  Rule: no_action | agrees=1
+  BER before=8.165e-02 after=8.165e-02 recovery=N/A (no action)
+--- none @ SNR=10 dB ---
+  Window: 20 frames | var_rssi=1.5581 dber_dt=0.0 burst=0.000
+  CNN: none (conf 96.5%, 1.82 ms, correct=1)
+  DQN: no_action (0.83 ms) | Q: no_action=-2.41 channel_switch=-18.69 rate_reduce=-24.15 freq_diversity=-20.59 spatial_diversity=-21.29 
+  Rule: no_action | agrees=1
+  BER before=2.652e-03 after=2.652e-03 recovery=N/A (no action)
+
+=== SUMMARY (all SNR points) ===
+Mean CNN latency: 1.78 ms | Mean DQN latency: 0.90 ms | Mean total: 2.67 ms
+Median CNN latency: 1.65 ms | Median DQN latency: 0.84 ms | Median total: 2.54 ms
+CNN closed-loop detection accuracy: 54/54 (100.0%)
+DQN-vs-Rule agreement: 28/54 (51.9%)
+Mean recovery (all threats, all SNR): 74.6%
+Mean recovery (real threats only): 74.6%

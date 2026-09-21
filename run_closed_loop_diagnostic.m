@@ -63,11 +63,24 @@ results = struct('threat',{},'snr_db',{},'cnn_top_class',{},'cnn_conf',{},'cnn_p
 %% WARM-UP: the first predict() calls trigger one-time GPU JIT + cuDNN kernel
 % autotuning (the actual convolution kernels are selected lazily on the first
 % real-sized input, not on a single dummy pass). A single warm-up leaves the
-% first few real measurements inflated (observed: whole SNR=0 block at 4-29ms
-% vs ~2ms steady-state, with the worst single spike landing arbitrarily on
-% whichever class ran 4th). Several warm-up iterations force autotuning to
-% finish before timing starts, so latencies are steady from the first real run.
-fprintf('Warming up CNN and DQN networks (GPU JIT + cuDNN autotune, excluded from results)...\n');
+% first few real measurements inflated. Several warm-up iterations force
+% autotuning to finish before timing starts, so latencies are steady from the
+% first real run.
+%
+% FIX (2026-09-21): warm-up previously covered only the CNN/DQN networks, not
+% MATLAB's spectrogram() function itself -- its first call in a session pays a
+% one-time JIT/internal-cache cost (observed: one run at ~71ms vs ~6-20ms
+% steady-state, skewing the mean well above the median). A real deployed
+% system would warm up its whole processing chain once at startup, not on the
+% first live decision -- so the fix belongs here, in the warm-up block, not as
+% an explained-away outlier in the results. A dummy IQ vector matching a real
+% frame's length (516 symbols x sps=4 = 2064 samples) is run through
+% spectrogram() with the exact same parameters used in the timed loop below.
+fprintf('Warming up CNN, DQN, and spectrogram() (GPU JIT + cuDNN autotune + MATLAB JIT, excluded from results)...\n');
+dummy_iq_frame = complex(randn(2064,1), randn(2064,1));
+for warm = 1:3
+    Sxx_warm = spectrogram(dummy_iq_frame, hann(win), novlp, nfft, fs, 'centered'); %#ok<NASGU>
+end
 dummy_spec = dlarray(single(rand(img_size,img_size,1,1)), 'SSCB');
 dummy_feat = dlarray(single(rand(1,7))', 'CB');
 dummy_state = dlarray(single(rand(dqn_agent_trained.numStates,1)), 'CB');
@@ -137,7 +150,15 @@ for s = 1:numel(SNR_points)
         plr        = plr_f(i_last);
         snr_val    = ebno;
 
-        %% --- CNN diagnosis (TIMED) ---
+        %% --- CNN diagnosis (TIMED — preprocessing + inference) ---
+        % FIX (2026-09-20): t1 was previously placed after spectrogram/
+        % normalize/imresize, so "cnn_latency_ms" silently measured only the
+        % predict() forward pass, not the full CNN-path cost the comment
+        % above always claimed to time. Moved tic to the true start of this
+        % block, so the reported latency now reflects everything a real
+        % deployed system would need to do per decision: STFT, dB conversion,
+        % normalization, resize, tensor prep, AND the network forward pass.
+        t1 = tic;
         Sxx = spectrogram(iq_rx, hann(win), novlp, nfft, fs, 'centered');
         Pw = 20*log10(abs(Sxx)+eps); Pw = (Pw-db_lo)/(db_hi-db_lo); Pw = min(max(Pw,0),1);
         spec_img = imresize(Pw, [img_size img_size]);
@@ -149,7 +170,6 @@ for s = 1:numel(SNR_points)
         X_feat = dlarray(single(norm_feats)', 'CB');
         if canUseGPU, X_spec = gpuArray(X_spec); X_feat = gpuArray(X_feat); end
 
-        t1 = tic;
         pred_prob = predict(cnn_net, X_spec, X_feat);
         cnn_latency_ms = toc(t1) * 1000;
 
@@ -248,8 +268,12 @@ report{end+1} = 'each run, matching how the detector was trained. NaN BER values
 report{end+1} = 'of a run, by construction) are guarded exactly as prepare_data.m does.';
 report{end+1} = 'BER before/after are both averaged over all valid frames of their runs.';
 report{end+1} = '';
-report{end+1} = 'NOTE: latencies are CNN-inference + DQN-inference only (ms) -- the actual';
-report{end+1} = 'reaction time of the decision system, excluding Simulink build/sim time.';
+report{end+1} = 'NOTE: "CNN latency" now includes full preprocessing (spectrogram/STFT,';
+report{end+1} = 'dB conversion, normalization, resize, tensor prep) + the network forward';
+report{end+1} = 'pass -- fixed 2026-09-20, previously measured inference only. "DQN latency"';
+report{end+1} = 'is inference only (state vector is already numeric, no preprocessing cost).';
+report{end+1} = 'Both exclude Simulink build/sim time and any PHY-layer synchronization';
+report{end+1} = '(out of scope, see D7) -- this is decision-system reaction time only.';
 report{end+1} = '';
 
 %% --- Section 1: recovery matrix, threat x SNR ---

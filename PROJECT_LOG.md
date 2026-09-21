@@ -1,16 +1,16 @@
 # Project Execution Log (Living Document)
 
-**Last Updated:** 2026-09-19 (Session 9, complete) | **Status:** Rx_IQ tap-point bug found and fixed (D18); full pipeline re-run (A5→C3) COMPLETED; FAR re-measured correctly (D20); no_action recovery reporting fixed (D21). All 5 proposal KPIs met with post-fix numbers. See "Session 2026-09-19" at the bottom for the full detail.
+**Last Updated:** 2026-09-21 (Session 10, complete) | **Status:** Interim report drafted end-to-end (7 chapters + Limitations & Assumptions section) through multiple rounds of external critique-and-verification; two genuine latency-measurement bugs found and fixed (D22, D23); interactive demo (`demo_gui.m`, D24) built and iterated to a working state. See "Session 2026-09-21" at the bottom for the full detail.
 
-## Current headline numbers (post-D18 re-run)
+## Current headline numbers (post-D22/D23 latency fixes)
 | Metric | Value |
 |---|---|
-| CNN accuracy (offline test) | 96.99% (macro-F1 96.98%) |
+| CNN accuracy (offline test) | 96.73% (macro-F1 96.73%) |
 | CNN accuracy (closed loop) | 100% (54/54) |
 | Mean BER recovery (real threats) | 74.6% |
-| Decision latency (mean / median) | 2.67 / 2.54 ms |
-| FAR (non-hostile, 180 trials over SNR) | 0.0% (95% CI upper 3.3%) |
-| Survivability Map A / Map B recoverable | 84.6% / 87.9% |
+| Decision latency (mean / median) | 6.09 / 5.67 ms (now includes full preprocessing, not inference-only) |
+| FAR (non-hostile, 180 trials over SNR) | 0.0% (95% CI upper 3.3% per-class n=90, 1.7% combined n=180) |
+| Survivability Map A / Map B recoverable | 83.8% / 87.5% |
 
 ---
 
@@ -259,3 +259,192 @@ The full pipeline was re-run against the corrected model (A4 sanity → A5 datas
 3. `git rm extract_temporal_features.m` (pending confirmation).
 4. Decide on reactive_jamming: targeted improvement vs. document as known limitation.
 5. Write Phase D reports (interim + final), using this document and README.md as the factual source.
+
+## Session 2026-09-21 (Session 10) — Interim report drafted; latency bugs found; demo GUI built
+
+Three major threads this session: writing the interim report end-to-end, a
+long cycle of external critique against the actual code and document (most
+of it via a second AI reviewer Adi consulted in parallel), and building the
+interactive demo GUI. Full detail below; headline outcome: two real system
+bugs were found and fixed (D22, D23), one real math error was corrected
+(FAR confidence-bound population size), and a working `demo_gui.m` (D24)
+now exists after two rounds of MATLAB-specific bug fixes.
+
+### Report: built from scratch, then hardened through repeated critique
+The interim report (Word `.docx`) was assembled programmatically (title page,
+TOC, bilingual abstract, 7 chapters with 17 rendered-as-images equations,
+11+ figures, several tables, bibliography). Two build-tooling bugs were
+found and fixed along the way, both worth remembering for any future
+document-generation work in this style:
+- A large fraction of body paragraphs across every chapter were silently
+  missing from the actual `.docx` — the JS source called `para(...)` /
+  `paraB(...)` / `bullet(...)` directly instead of `C.push(para(...))`, so
+  the constructed Paragraph objects were built but never added to the
+  document tree. Only headings, tables, and figures (which were correctly
+  wrapped) survived. Fixed by grep-auditing every source file for bare
+  calls and wrapping them; the fix nearly doubled the paragraph count.
+- A second bug, `<align>` elements leaking into the raw OOXML from a
+  parenthesization mistake in the abstract's paragraph calls, was crashing
+  the document converter used to visually verify pages. Fixed, and
+  `validate.py` (schema-level docx validation) was adopted as a
+  non-negotiable check before ever presenting a build as final again —
+  "looks right in a screenshot" is not the same as "the paragraph is
+  actually in the file," a lesson from the first bug above.
+
+The report then went through roughly seven rounds of external critique
+(Adi relayed detailed technical review from a second AI he consulted
+alongside this one). Each round was independently verified against the
+actual code and the actual current document text — not accepted at face
+value — because several rounds contained claims that turned out to be
+either factually wrong about the code, or based on a stale/earlier version
+of the document that had already been fixed. Roughly half of the critique
+points across all rounds were real and fixed; the other half were checked
+and explicitly rejected, with the verification shown. Genuine findings
+that changed the report or the code:
+- **BER-as-oracle:** the `ber` feature (and, on closer audit, `PLR`,
+  `dber_dt`, and `burst_ratio`, which are all derived from it) requires
+  simulator ground-truth (`tx_bits_out` vs `rx_bits_out`) unavailable to a
+  real receiver. Documented as an explicit Limitations & Assumptions
+  section (new report section 3.7) with a stated real-world substitution
+  path (EVM / CRC frame-error-rate / FEC correction counts).
+- **Decision latency didn't include preprocessing** — see D22 below.
+- **Mitigation is a flat dB subtraction, not a dynamic RF simulation**, and
+  `spatial_diversity` specifically doesn't model a real multi-antenna
+  chain — both stated explicitly in section 3.7 rather than left implicit.
+- **DQN-vs-rule "fairness"** — both policies share the same physical
+  mitigation table; framed in the report as a deliberate methodological
+  choice (isolating decision-quality from execution-strength), not an
+  apology.
+- **FAR confidence-bound math error (found by the reviewer, real):** the
+  report cited "180 trials... upper bound 3.3%" in the same sentence —
+  but 3.3% (3/90) is the Rule-of-Three bound for each class individually
+  (n=90), while the correct bound across all 180 combined trials is 1.7%
+  (3/180). Fixed throughout the report and in this log's headline table
+  to state both numbers with their population sizes explicit.
+- **Reward equation division-by-zero:** the report's protection note
+  ("the denominator is guarded by ε") was originally only prose next to
+  the equation; the equation image itself was regenerated with
+  `max(BER_before, ε)` baked into the rendered math, matching the actual
+  code (`train_dqn.m` line 79: `max(ber_before,eps)`).
+- **Writing tone ("developer diary syndrome"):** sections describing bug
+  fixes (the RRC/ISI delay fix, the closed-loop sliding-window fix, the
+  warm-up fix) originally narrated the debugging process — initial
+  suspicion, first attempt, what that attempt broke, second attempt. Per
+  Adi's explicit direction, these were rewritten to describe the final
+  architecture and the problem it solves, not the path taken to find it —
+  human and readable, not a post-mortem.
+- Several smaller fixes: a "Table 0" numbering typo (should be Table 1,
+  two occurrences), one overly dense paragraph split into three plus a
+  bullet list for a feature explanation, and an explicit statistical
+  caveat on the FAR sample size (180 trials demonstrates the principle;
+  Monte Carlo at tens-of-thousands of frames would be needed for
+  industrial-grade resolution).
+
+Rejected critique points, each verified false against the actual document
+before being dismissed (not just asserted): a claimed "delay-scan runs
+inside the closed loop" (grep-confirmed `quick_ber()` is never called from
+`run_closed_loop_diagnostic.m`); a claimed "raw LaTeX pasted as text
+instead of rendered equations" (grep-confirmed zero LaTeX-syntax
+occurrences in the document XML — all 18 equations are rendered math
+images); a claimed duplicate explanation under a figure caption (grep-
+confirmed the explanation appears exactly once); a claimed figure-number
+desynchronization (the report has no manual "see Figure N" cross-
+references anywhere — captions are auto-numbered and never referenced
+elsewhere in prose, so this class of bug isn't structurally possible here).
+Two rounds also re-raised issues that had already been fixed in the
+previous round (the diary-tone language, the apologetic fairness framing)
+— both confirmed already absent before being (correctly) not re-touched.
+
+The report also gained real-world grounding this session: an expanded
+Chapter A (background/motivation with cited real incidents — a 1994 sarin-
+gas drone attempt, a planned 2013 attack, a real attack on California's
+power grid — and a related-work summary table), and substantially deeper
+Chapters B and C (full paragraphs explaining engineering reasoning, not
+terse bullet-equivalents), per Adi's direct request for more depth and a
+more human writing style throughout. Six labeled image placeholders were
+added at points where a real photo/diagram would strengthen the document
+(QPSK constellation, LOS/multipath, example spectrograms, the RL agent-
+environment loop, a MATLAB/Simulink screenshot, a sliding-window diagram)
+— Claude cannot fetch external images into the build sandbox, so
+public-domain source suggestions (U.S. DoD / Wikimedia, an RQ-11 Raven
+launch photo) were given for Adi to source and supply directly.
+
+### D22 — Decision latency now includes preprocessing, not inference-only
+`run_closed_loop_diagnostic.m`'s `tic` was moved to the true start of the
+per-decision block (before `spectrogram()`, dB conversion, normalization,
+and resize), not immediately before `predict()`. The block's own comment
+had always said "TIMED" for the whole sequence — the `tic` placement just
+hadn't matched that intent. See DECISIONS.md D22 for full detail.
+
+### D23 — spectrogram() warm-up; mean/median latency converged
+The very first measurement after the D22 fix showed a large mean-median
+gap (mean 18.88ms, median 8.42ms) — traced to MATLAB's `spectrogram()`
+paying a one-time JIT/cache cost on its first call in the session,
+landing on whichever threat ran first in the sweep. Fixed by extending
+the existing CNN/DQN warm-up to also call `spectrogram()` on dummy IQ
+data several times before timing starts (same pattern as the existing
+network warm-up, applied to the one function that hadn't had it). Adi
+re-ran and confirmed convergence: mean 6.09ms / median 5.67ms, a 0.42ms
+gap (was 10.46ms) — the fix is verified working, not just theorized.
+
+### D24 — demo_gui.m built (operator-console live demo)
+Built in two passes. First pass (basic dropdown + slider + Run + live
+spectrogram/results text) hit a MATLAB "Attempt to add 'params' to a
+static workspace" error — caused by a nested function (`runOnce` defined
+inside `demo_gui`) forcing the containing function's workspace to become
+static, which then rejects the script-style variable injection that
+`init_params.m` (used identically everywhere else in this codebase)
+relies on. Fixed by moving the `init_params` call to a plain sibling
+function.
+
+Adi then asked for a substantially higher-quality interface: multi-select
+threat list (run several in sequence), an operator-console dark theme, a
+GCS↔UAV link-status indicator, live IQ-constellation before/after (not
+just the spectrogram), gauges, a persistent exportable run-history table,
+and session video recording. Rebuilt with **zero nested functions**
+anywhere in the file — `demo_gui` stores all shared state (models,
+parameters, UI handles, run history, the video writer) in `fig.UserData`;
+every callback is a plain top-level sibling function reached via
+`ancestor(source,'figure').UserData`. This pattern is now the documented
+standard for any future MATLAB GUI work in this codebase (see D24 in
+DECISIONS.md).
+
+This rebuilt version hit two further MATLAB API mistakes on first run,
+both fixed: `uipanel` has no `FontColor` property (title-text color is
+`ForegroundColor` — fixed in two panels), and `'\u25CF'`/`'\u25B6'`-style
+Unicode escapes are not interpreted inside MATLAB single-quoted strings
+(that's a JavaScript/Python convention) — replaced with `char(9679)` /
+`char(9654)` in three places. As of this session's end, Adi has the
+corrected file and is running it; further live-use feedback pending.
+
+### Housekeeping decision (not a bug fix)
+Adi asked whether the project's `.m` filenames should be renamed for
+clarity (e.g. shorter or less "robotic"). Recommended against: the current
+verb_noun convention (`build_X`, `train_X`, `eval_X`, `run_X`,
+`measure_X`, `diagnose_X`) is exactly the self-documenting pattern
+expected of professional engineering code, already explicitly credited as
+a strength in the report (section 3.1's MLOps discussion); a rename would
+touch `main.m`, every cross-referencing script, the report's ~40+ code-
+identifier mentions, and git history, for no real readability gain. The
+README's existing per-file comments already solve the "what does this do
+at a glance" problem that a rename would otherwise be solving. Not done.
+
+### Open items going into the next session
+- **Dynamic/Chasing Jammer scenario** — planned (added to the report's
+  Chapter 7 and Gantt table as the priority future-work item) but not yet
+  designed or built. This is the natural next system-engineering task: an
+  adversary that reacts to the DQN's countermeasures, needed to let the
+  learned policy demonstrate a real decision-quality advantage over the
+  static rule-based baseline (currently the DQN's only advantage is
+  theoretical — see the KPI #3 discussion in this session's report work).
+- `demo_gui.m` — built, fixed twice, currently being live-tested by Adi;
+  watch for further MATLAB runtime errors or UI feedback on the next run.
+- Interim report — content-complete pending: (a) Adi sourcing the 6 real
+  images for the labeled placeholders, (b) filling in the still-blank
+  administrative fields on the title page (submission date), (c) a final
+  read-through pass now that the tone/depth work is done.
+- `git`: as of this session's end, `README.md`, `docs/DECISIONS.md`, and
+  `PROJECT_LOG.md` were updated locally (this entry) but not yet committed
+  — see the git command given alongside this update. `demo_gui.m` and the
+  latency-fixed `run_closed_loop_diagnostic.m` are not yet in git either;
+  both need `git add` before the next commit.
