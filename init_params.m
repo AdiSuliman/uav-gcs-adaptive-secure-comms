@@ -27,11 +27,17 @@ params.nominal_range = 100;            % [FUTURE] nominal link range (m)
 
 % [A3] UAV platform velocity & derived Doppler
 % Platform: small tactical ISR UAV — DoD Group 1 (Skylark/Raven class)
-% Operational speed envelope: 18-22 m/s (65-79 km/h), documented for the report.
-% Nominal speed drives the channel Doppler in simulation.
-params.v_min     = 18;      % [m/s] envelope lower bound (65 km/h) — documentation
-params.v_max     = 22;      % [m/s] envelope upper bound (79 km/h) — documentation
-params.v_nominal = 20;      % [m/s] nominal cruise (72 km/h) — drives simulation Doppler
+% Operational speed envelope: 50-120 km/h (13.9-33.3 m/s) -> Doppler 111-267 Hz @ 2.4 GHz.
+% Speed is a CONTINUOUS parameter (any real value inside the envelope, not only
+% whole km/h). The dataset generator draws a random real-valued speed per block
+% of frames; the GUI accepts decimals. fd_max = v * fc / c.
+% v_nominal (20 m/s = 72 km/h -> fd = 160 Hz) is the default cruise speed used by
+% every script that does not sweep speed (DQN reward table, EXP, survivability map).
+params.speed_kmh_min = 50;                       % [km/h] envelope lower bound
+params.speed_kmh_max = 120;                      % [km/h] envelope upper bound
+params.v_min     = params.speed_kmh_min/3.6;     % [m/s]  13.89
+params.v_max     = params.speed_kmh_max/3.6;     % [m/s]  33.33
+params.v_nominal = 20;      % [m/s] nominal cruise (72 km/h) — default simulation Doppler
 params.c_light   = 3e8;     % [m/s] speed of light
 params.fd_max    = params.v_nominal * params.carrier_freq / params.c_light;  % [Hz] ~160 @ 20 m/s
 
@@ -91,8 +97,10 @@ if params.verbose
     fprintf('Channel:          Rician (K=%.1f dB)\n', params.rician_k);
     fprintf('Carrier Freq:     %.1f GHz\n', params.carrier_freq/1e9);
     fprintf('Range:            %d m [FUTURE]\n', params.nominal_range);
-    fprintf('UAV Velocity:     %.0f m/s (%.0f km/h) nominal | envelope %.0f-%.0f m/s\n', ...
-            params.v_nominal, params.v_nominal*3.6, params.v_min, params.v_max);
+    fprintf('UAV Velocity:     %.1f m/s (%.1f km/h) nominal | envelope %.1f-%.1f km/h (%.1f-%.1f m/s)\n', ...
+            params.v_nominal, params.v_nominal*3.6, params.speed_kmh_min, params.speed_kmh_max, params.v_min, params.v_max);
+    fprintf('Doppler envelope: %.0f-%.0f Hz (nominal fd_max %.0f Hz)\n', ...
+            params.v_min*params.carrier_freq/params.c_light, params.v_max*params.carrier_freq/params.c_light, params.fd_max);
     fprintf('Max Doppler fd:   %.1f Hz  (normalized %.2e)\n', ...
             params.fd_max, params.fd_max/params.symbol_rate);
     fprintf('Active Threat:    %s (JSR=%.0f dB)\n', params.active_threat, params.jsr_db);

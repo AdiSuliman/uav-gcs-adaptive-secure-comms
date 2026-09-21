@@ -29,3 +29,7 @@ models/
 models/
 models/
 results_backup*/
+
+*.mexw64
+params.mat
+GUI_Results/

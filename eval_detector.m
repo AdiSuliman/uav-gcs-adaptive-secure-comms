@@ -101,5 +101,24 @@ metrics = struct( ...
     'per_class_f1_pct', 100*f1_scores, ...
     'conf_mat', conf_mat, ...
     'snr_breakdown', snr_breakdown);
+%% 7. Accuracy vs UAV speed (only when the dataset was generated with speed diversity)
+if isfield(sp.test, 'speed') && ~isempty(sp.test.speed)
+    spd_test  = sp.test.speed(:);
+    spd_edges = linspace(min(spd_test), max(spd_test), 8);      % 7 equal-width speed bins
+    spd_edges(end) = spd_edges(end) + eps;
+    spd_bin   = discretize(spd_test, spd_edges);
+    speed_breakdown = struct('speed_lo_kmh', {}, 'speed_hi_kmh', {}, 'accuracy_pct', {}, 'n', {});
+    fprintf('\nAccuracy vs UAV speed:\n');
+    for b = 1:numel(spd_edges)-1
+        idx = (spd_bin == b);
+        if ~any(idx), continue; end
+        a = 100*sum(Y_test(idx) == Y_pred(idx)) / sum(idx);
+        speed_breakdown(end+1) = struct('speed_lo_kmh', spd_edges(b), 'speed_hi_kmh', spd_edges(b+1), ...
+            'accuracy_pct', a, 'n', sum(idx)); %#ok<AGROW>
+        fprintf('  %6.1f-%6.1f km/h: %.1f%%  (n=%d)\n', spd_edges(b), spd_edges(b+1), a, sum(idx));
+    end
+    metrics.speed_breakdown = speed_breakdown;
+end
+
 save('results/eval_detector_metrics.mat', 'metrics');
 fprintf('Saved results/eval_detector_metrics.mat (for KPI aggregation)\n');

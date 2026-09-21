@@ -1,16 +1,19 @@
 # Project Execution Log (Living Document)
 
-**Last Updated:** 2026-09-21 (Session 10, complete) | **Status:** Interim report drafted end-to-end (7 chapters + Limitations & Assumptions section) through multiple rounds of external critique-and-verification; two genuine latency-measurement bugs found and fixed (D22, D23); interactive demo (`demo_gui.m`, D24) built and iterated to a working state. See "Session 2026-09-21" at the bottom for the full detail.
+**Last Updated:** 2026-09-22 (Session 11, complete) | **Status:** UAV speed envelope widened to a continuous 50–120 km/h (D25) and the whole pipeline re-run end-to-end on speed-diverse data (all 19 RUN flags, 4 h 04 min, no errors); operator console rebuilt as a proposal-complete 4-tab app (D26). All 5 KPIs still met. See "Session 2026-09-21/22 (Session 11)" at the bottom for the full detail and the report-sync checklist.
 
-## Current headline numbers (post-D22/D23 latency fixes)
-| Metric | Value |
-|---|---|
-| CNN accuracy (offline test) | 96.73% (macro-F1 96.73%) |
-| CNN accuracy (closed loop) | 100% (54/54) |
-| Mean BER recovery (real threats) | 74.6% |
-| Decision latency (mean / median) | 6.09 / 5.67 ms (now includes full preprocessing, not inference-only) |
-| FAR (non-hostile, 180 trials over SNR) | 0.0% (95% CI upper 3.3% per-class n=90, 1.7% combined n=180) |
-| Survivability Map A / Map B recoverable | 83.8% / 87.5% |
+## Current headline numbers (2026-09-21 full re-run, speed-diverse data, D25)
+| Metric | Latest | Previous (single-speed, D22/D23 baseline) |
+|---|---|---|
+| CNN accuracy (offline test, 2,727 samples) | **96.41%** (macro-F1 96.39%) | 96.73% (96.73%) |
+| Offline accuracy vs UAV speed (7 bins) | 92.7% (50–60 km/h) … 98.2%; rest within 2.6 pts | not measured |
+| CNN accuracy (closed loop, 9 threats × 6 SNR) | **98.1%** (53/54) | 100% (54/54) |
+| Closed-loop detection over 50–120 km/h (8 speeds) | **98.1%** (212/216), FAR 0/48 | not measured |
+| Mean BER recovery (real threats) | **76.3%** per-run mean (75.9% mean of per-threat means); 72.4% in the speed sweep | 74.6% |
+| Decision latency (mean / median, CNN+DQN) | **10.21 / 10.05 ms** (CNN 8.88 + DQN 1.33) — re-measurement pending | 6.09 / 5.67 ms |
+| FAR (non-hostile, 180 trials over SNR) | 0.0% (95% CI upper 3.3% per-class n=90, 1.7% combined n=180) | 0.0% (same bound) |
+| DQN-vs-rule action agreement | 53.7% (29/54) | ~44% |
+| Survivability Map A / Map B recoverable | **85.5% / 88.3%** | 83.8% / 87.5% |
 
 ---
 
@@ -23,6 +26,7 @@
 | A4 | ✅ | 2026-09-02 | 8 threats validated (barrage, reactive, spoofing, noise, path, antenna, sweeping, benign) |
 | A5-A6 (v1) | ✅ | 2026-09-05 | Dataset: 10,686 frames, spectrograms [128×128×1] extracted |
 | A5-A6 (v2) | ✅ | 2026-09-15 | Dataset expanded: `frames_per_config` 50→100 → **27,246 frames**, re-extracted after spoofing fix |
+| A5-A6 (v3) | ✅ | 2026-09-21 | **Speed-diverse dataset (D25):** 27,270 frames, every 100-frame block at its own continuous random speed in 50–120 km/h (270 model builds, ~102 min); per-frame speed stored |
 
 ---
 
@@ -36,6 +40,8 @@
 | B2 (v2) | ✅ | 92.13% | 2026-09-11 | With 7 features, reactive_jamming 7.2%→85.5% |
 | B3 (9-class, v1) | ✅ | 90.90% | 2026-09-13 | +sweeping_jammer, +benign_interference, +none |
 | B3 (9-class, v2) | ✅ | **98.05%** | 2026-09-18 | Post spoofing root-cause fix (see below), verified 2x independently |
+| B3 (v3, post-D18) | ✅ | 96.73% | 2026-09-19 | Rx_IQ tap point fixed (D18); genuine SNR-dependent degradation at the low edge |
+| B3 (v4, speed-diverse) | ✅ | **96.41%** | 2026-09-21 | Trained/tested on 50–120 km/h data (D25); macro-F1 96.39%; reactive_jamming recall 87.1% |
 
 **Key Finding (v1, superseded):** jamming 67.3%, spoofing 76.2% weak; noise_burst, antenna_fault, sweeping (100%). All classes now well-separated post-fix — see Session 2026-09-18 below.
 
@@ -99,6 +105,26 @@ First fix attempt (naive) built temporal features from all 20 frames but **made 
 | Median latency (CNN+DQN) | **~3.3ms** |
 | benign_interference / none | Both correctly resolve to `no_action` |
 
+### C3 re-run on speed-diverse data (2026-09-21)
+
+Closed-loop diagnostic (9 threats × 6 Eb/N0 = 54 runs, sliding window of 20 frames): **53/54 detected (98.1%)**, mean recovery **76.3%**, latency mean 10.21 / median 10.05 ms, DQN-vs-rule agreement 29/54 (53.7%). The single detection miss was antenna_fault @ 0 dB → sweeping_jammer at 31.2% confidence, after which the DQN chose `no_action`.
+
+| Threat | Closed-loop detection | DQN action | Rule action | Mean recovery | Recovery @ 0 dB → 10 dB |
+|---|---|---|---|---|---|
+| jamming | 6/6 | channel_switch | channel_switch | 85.8% | 66.9 → 97.3 |
+| reactive_jamming | 6/6 | channel_switch | channel_switch(_fast) | 85.7% | 65.3 → 98.0 |
+| sweeping_jammer | 6/6 | channel_switch (5), freq_diversity (1) | channel_switch(_fast) | 60.4% | 24.5 → 93.1 |
+| noise_burst | 6/6 | channel_switch | rate_reduce | 71.6% | 39.3 → 96.1 |
+| path_loss | 6/6 | spatial_diversity | rate_reduce | 83.9% | 64.1 → 98.2 |
+| spoofing | 6/6 | channel_switch | freq_diversity | 83.5% | 57.0 → 99.0 |
+| antenna_fault | 5/6 | channel_switch (5), no_action (1) | spatial_diversity | 60.6% (5 runs) | n/a → 90.5 |
+| benign_interference | 6/6 | no_action | no_action | N/A | — |
+| none | 6/6 | no_action | no_action | N/A | — |
+
+Reading the recovery column: sweeping_jammer and noise_burst start from a low BER, so their recovery percentage is bounded by a low physical ceiling (EXP: 99.6% and 94.2% of ceiling at mid severity, 0 dB). The genuine decision-quality gaps are path_loss (~80% of ceiling) and antenna_fault (~64%).
+
+**Speed sweep (`eval_speed_robustness.m`, ~13 min):** 8 speeds × 3 Eb/N0 × 9 threats. Detection 96.3 / 100 / 96.3 / 96.3 / 96.3 / 100 / 100 / 100% at 50.0 / 57.3 / 66.8 / 72.0 / 84.6 / 97.2 / 108.9 / 120.0 km/h (212/216 overall); all four misses are antenna_fault (1 of 3 SNR points each); FAR 0/48; mean recovery 70.3 / 69.2 / 73.5 / 71.9 / 72.7 / 73.5 / 73.6 / 74.2% (72.4% overall). One miss moves a speed point by 3.7%, so the dips are not evidence of a speed dependence.
+
 ---
 
 ## Phase EXP: Deep Countermeasure Exploration ✅ COMPLETE
@@ -108,6 +134,8 @@ Ran `explore_countermeasures.m`: **2550 scenarios, 85.8 minutes**, 3 mechanisms 
 **Crash bug found and fixed (2026-09-18):** `current_best_static.(b.threat)` in the report-generation section accessed a field that didn't exist for all 8 threats vs. only 6 fields in the historical comparison struct — caused the script to crash **after** 75-86 minutes of runtime, at the report-writing stage, after the actual data was already safely saved. Fixed with an `isfield` guard in the report builder (the console-output path already had one).
 
 This EXP data feeds both the C2 `action_mitigation_db` magnitudes (established 09-13/14, unchanged since) and the survivability boundary mapping below.
+
+**Re-run 2026-09-21 (inside the full `main.m` pass):** 2,790 simulations, 77.8 min, no crash (the `isfield` guard held). EXP runs at the nominal 72 km/h condition and is BER-only, so it does not depend on the speed-diverse dataset.
 
 ---
 
@@ -137,17 +165,21 @@ sweeping_jammer and benign_interference's "of ceiling" figures dropped from 283.
 ### Known coverage gap (documented, not a bug)
 `path_loss` at level=4 (its lowest severity) has **no Map A data** — confirmed root cause: `mag_field_reduction = [5 10 15 20 25]` is a single global sweep range applied to every threat, and every value in it exceeds path_loss's level=4 severity. The legitimacy filter (`level - magnitude < 0` → excluded, since it would imply unphysical signal amplification) correctly excludes all 5 candidate points at that level, leaving zero legitimate Map A records there. Map B (which includes awgn_margin_boost, unaffected by this filter) has full coverage at that level.
 
+### Re-run 2026-09-21
+
+Map A (neutralization): **85.5% recoverable** / 11.5% marginal / 3.0% non-recoverable (200 / 27 / 7 of 234 states). Map B (survivability): **88.3%** / 9.2% / 2.5% (212 / 22 / 6 of 240). One gap cell, unchanged: path_loss level 8 @ 10 dB (Map A ratio 5.64× clean, Map B recoverable). Per-threat Map A recoverable, previous → latest: jamming 80→80%, noise_burst 90→90%, reactive_jamming 80→83%, path_loss 67→75% (of 24 mapped states), spoofing 97→97%, antenna_fault 60→60%, sweeping_jammer 93→97%, benign_interference 100→100%. The small shifts are simulation randomness (EXP and SURV are speed-independent); they also resolve the earlier doc/code mismatch (83.8/87.5 in README/PROJECT_LOG vs 84.6/87.9 in the interim report; gap ratio 6.06× vs 5.61×) — the repo docs now carry the latest values.
+
 ---
 
 ## Phase KPI: Proposal Measurement (section ה) ✅ COMPLETE
 
 | KPI | Result | Notes |
 |---|---|---|
-| KPI 1 — Detection accuracy | 98.05% (offline) / 100% (closed-loop) | See Phase B3 / C3 above |
-| KPI 2 — BER recovery | 74.9% mean (real threats, closed-loop) | See Phase C3 above |
-| KPI 3 — DQN vs Rule decision speed | Rule ~3 orders of magnitude faster | Redefined from "recovery cycles" — see below |
-| KPI 4 — FAR (False Alarm Rate) | 0%, upper 95% CI bound 3% | Rule-of-Three (100 trials, zero false alarms) |
-| KPI 5 — End-to-end survivability | See survivability boundary mapping above | Proposal deliverable #7 |
+| KPI 1 — Detection accuracy | 96.41% (offline, macro-F1 96.39%) / 98.1% (closed-loop) | 2026-09-21 re-run; target macro-F1 ≥ 90% |
+| KPI 2 — BER recovery | 76.3% mean (real threats, closed-loop; 75.9% as mean of per-threat means) | See Phase C3 above |
+| KPI 3 — DQN vs Rule decision speed | Rule ~4,700× faster (0.00028 ms vs DQN 1.33 ms); full decision 10.21 ms mean | Redefined from "recovery cycles" — see below |
+| KPI 4 — FAR (False Alarm Rate) | 0.0% (0/180), upper 95% CI bound 3.3% per class | Rule-of-Three, n=90 per class |
+| KPI 5 — End-to-end survivability | MET — jamming recovers 85.7% end-to-end; Map A / B 85.5% / 88.3% | Proposal deliverable #7 |
 
 ### KPI #3 redefinition (2026-09-18)
 **Original problem:** `measure_kpi3_recovery_time.m` simulated "recovery cycles" via a halving loop that never called `sim()` or consulted either policy's actual action choice — DQN and rule-based always returned identical results regardless of which was "measured."
@@ -165,8 +197,8 @@ sweeping_jammer and benign_interference's "of ceiling" figures dropped from 283.
 - [x] README.md — rewritten with current results (2026-09-19)
 - [x] PROJECT_LOG.md — this document, rewritten (2026-09-19)
 - [x] docs/DECISIONS.md — extended D12-D17 (2026-09-19)
-- [ ] KPI Dashboard (proposal deliverable #1, final product) — script drafted, not yet finalized
-- [ ] Interim Report
+- [x] KPI Dashboard (proposal deliverable #1) — built and generated in the 2026-09-21 full run (`results/kpi_dashboard.png`)
+- [~] Interim Report — drafted; results chapters need syncing to the 2026-09-21 re-run (checklist in Session 11)
 - [ ] Final Report
 - [ ] Defense: 20+10 min, 10 slides
 - [ ] Poster: 5% grade
@@ -192,6 +224,13 @@ Antenna Fault recovery, benign_interference reward gap, reactive_jamming misdete
 9. **`extract_temporal_features.m`** — confirmed orphaned (not referenced by any script in the repo; its function was folded into `extract_spectrograms.m` at A6). Candidate for removal or explicit DEPRECATED marking.
 10. **`.gitignore`** has 4 duplicate/overlapping `models/` entries accumulated across incremental commits — cosmetic, needs a cleanup pass.
 
+### Open (2026-09-22)
+11. **Decision latency 10.21 ms (full run) vs 6.09 ms (D23 measurement)** with unchanged architectures — likely machine/GPU state at the end of a 4-hour session; unverified. Re-measure `run_closed_loop_diagnostic` alone in a fresh MATLAB session and cite that number.
+12. **reactive_jamming recall 87.1%** (was 91.0%) and **antenna_fault** (92.8% recall, 5/6 closed-loop, 60.6% recovery) are the weak spots; the possible link between speed diversity and the reactive-vs-jamming temporal features is an untested hypothesis. Decide: targeted improvement vs. documented limitation.
+13. **Interim report numbers are stale** relative to the 2026-09-21 re-run (checklist in Session 11).
+14. **`main.m` CHECKPOINT footer is a hard-coded string** with pre-re-run numbers (CNN 96.99%, closed-loop 100%, recovery 74.6%, latency 2.67 ms, Map A/B 84.6/87.9); the authoritative values are `results/kpi_summary.txt` and `results/kpi_dashboard.png`.
+15. **`demo_gui.m` v3 not yet validated in MATLAB beyond first launches** — syntax-parsed and helper-tested outside MATLAB only; a slow-startup report (2026-09-22) was mitigated with a norm-stats cache and a fresh-session launch recommendation.
+
 ---
 
 ## Git Snapshots
@@ -211,6 +250,7 @@ Antenna Fault recovery, benign_interference reward gap, reactive_jamming misdete
 | ed47958 | Survivability fix | 2026-09-19 | map_survivability_boundary.m split into Map A/Map B with gap analysis |
 | (pending) | D18 + KPI fixes | 2026-09-19 | Rx_IQ post-AWGN; KPI scripts read .mat; visualize_spectrograms 9-class; .gitignore cleanup; main.m re-run flags; README/PROJECT_LOG/DECISIONS updated |
 | (pending) | D20 + D21 | 2026-09-19 | extract_closed_loop_frames.m (shared); FAR script rewritten (SNR set_param + sliding window + SNR sweep); no_action → N/A recovery; GPU warm-up strengthened |
+| (pending) | D25 + D26 | 2026-09-21/22 | init_params.m (speed envelope), run_dataset_sweep.m (speed-diverse), extract_spectrograms.m, prepare_data.m, eval_detector.m (accuracy vs speed), NEW eval_speed_robustness.m, main.m (flag + preset), demo_gui.m v3; README/PROJECT_LOG/DECISIONS updated |
 
 ---
 
@@ -448,3 +488,49 @@ at a glance" problem that a rename would otherwise be solving. Not done.
   — see the git command given alongside this update. `demo_gui.m` and the
   latency-fixed `run_closed_loop_diagnostic.m` are not yet in git either;
   both need `git add` before the next commit.
+
+---
+
+## Session 2026-09-21/22 (Session 11) — Speed envelope 50–120 km/h, full re-run, operator console v3
+
+### Review findings that started the session
+A full project review flagged five things: the GUI latency number was contaminated by drawing and pauses inside the timed block (so it did not match the diagnostic's figure); the GUI speed field was set but never used (Doppler was computed once at load); the docs disagreed with each other on Map A/B percentages; the GUI did not cover the proposal (no DQN-vs-rule comparison, no survivability map, no BER/RSSI timeline, no UNKNOWN-threat handling, no KPI dashboard); and a few diagram/logging bugs. The latency and speed-usage problems and the missing proposal coverage are fixed by D26 (with D25 supplying the speed-diverse data); the Map A/B mismatch by this documentation update, which carries the re-run values.
+
+### D25 — Speed envelope 50–120 km/h, speed-diverse dataset
+Adi asked for a continuous, non-integer speed envelope of 50–120 km/h (fd ≈ 2.22 Hz per km/h at 2.4 GHz: 111 Hz at 50, 160 Hz at the 72 km/h nominal, 267 Hz at 120). Files changed: `init_params.m` (`speed_kmh_min/max`; nominal stays 20 m/s so existing scripts are unaffected), `run_dataset_sweep.m` (each block at its own random speed, Latin-square over 6 bins, `none` split into 5 sub-blocks per SNR, per-frame `speed_kmh`, `rng(2026)`), `extract_spectrograms.m` (a speed change now starts a new run, preventing temporal-feature leakage; `spec.speed_kmh`), `prepare_data.m` (`splits.*.speed`, analysis-only), `eval_detector.m` (accuracy vs speed, 7 bins), NEW `eval_speed_robustness.m` (closed-loop sweep of 8 speeds × 3 SNR × 9 threats with real mitigation re-simulation), `main.m` (`RUN.eval_speed_robustness` and a retrain preset). Cost: Doppler is baked into the Simulink model at build time, so the sweep needs 270 builds instead of one per (threat, level).
+
+### Full pipeline re-run (all flags on)
+Adi ran `main.m` with every flag true (19:54 → 23:58, 4 h 04 min, log `logs/run_20260921_195428.txt`). No errors, phases executed in the intended order (dataset 21:36 → spectrograms 21:39 → splits 21:41 → detector 21:48 → DQN 22:16 → closed loop 22:17–22:20 → speed sweep 22:33 → EXP 23:51 → SURV 23:52 → KPI/dashboard 23:58). Before the run, all scripts were checked for workspace clobbering (none uses `clear`; downstream scripts re-initialize the shared variable names) and for producer-before-consumer file order.
+
+| Metric | Before | After |
+|---|---|---|
+| Offline accuracy / macro-F1 | 96.73 / 96.73% | 96.41 / 96.39% |
+| Accuracy @ 0 dB / 2 dB | 93.4 / 97.1% | 91.4 / 95.6% |
+| Accuracy @ 8 dB / 10 dB | 97.8 / 97.6% | 98.5 / 98.7% |
+| Closed-loop detection | 100% (54/54) | 98.1% (53/54) |
+| Mean recovery | 74.6% | 76.3% |
+| FAR | 0% | 0% |
+| Decision latency (mean) | 6.09 ms | 10.21 ms |
+| DQN-vs-rule agreement | ~44% | 53.7% |
+| Map A / Map B | 83.8 / 87.5% | 85.5 / 88.3% |
+
+Per-class offline recall (precision): none 97.0 (93.3), jamming 98.7 (90.1), noise_burst 100 (98.7), reactive_jamming 87.1 (98.5), path_loss 94.7 (97.3), spoofing 98.7 (100), antenna_fault 92.8 (98.3), benign_interference 100 (95.6), sweeping_jammer 98.7 (97.1). Previously documented: reactive_jamming 91.0, spoofing 100, noise_burst 100, sweeping_jammer 99.7, all others ≥ 93. Offline accuracy by speed bin: 92.7 / 96.9 / 96.2 / 95.6 / 98.2 / 97.1 / 98.0% from 50–60 to 110–120 km/h.
+
+Verdict: essentially the same performance as the single-speed system, now demonstrated across the whole 50–120 km/h envelope (which was previously untested). Detection is 0.3 points lower offline and 1.9 points lower in closed loop (one antenna_fault miss); recovery is 1.7 points higher; latency is worse and unresolved (open item 11). Map/EXP differences are simulation noise since those phases are speed-independent. The DQN was retrained inside the run (validation gate passed); its training does not depend on speed.
+
+### D26 — demo_gui.m v3 (proposal-complete operator console)
+Rebuilt as a four-tab app (Live Operations, KPI & Results, Survivability Map, Session Log). Design points: latency timed strictly around the CNN path + DQN forward pass; recovery = mean BER over all valid frames before and after; a real second simulation for the rule-based choice when it differs from the DQN's; UNKNOWN-threat threshold slider (all-zero one-hot state, rule defaults to `no_action`); verdict from the survivability-map thresholds (≤ 2× clean BER recoverable, ≤ 5× marginal); speed applied to `p.v/p.fd_max` before each `build_threat_model`; `params.mat` restored by `onCleanup`; threat-specific link diagrams; still no nested functions (D24). Verification limits: Octave syntax parse of all changed files, plus execution of the dataset sweep and speed-robustness scripts against stubbed Simulink/toolbox functions and unit tests of the GUI's pure helper functions; the GUI itself has not been executed by the author in MATLAB.
+
+### GUI slow-start report (2026-09-22)
+Adi reported the GUI as stuck/slow right after the full run. Two causes identified: (1) launching in the same MATLAB session that just ran `main.m` (multi-GB leftover workspace, possibly GPU memory), fixed by launching from a fresh session; (2) `demo_gui` loaded the whole >1 GB `splits.mat` only to read two normalization vectors — replaced with a cache file `data/gui_norm_stats.mat` (regenerated when `splits.mat` is newer) and added startup timing prints. Per-run cost also includes up to three Simulink model builds (baseline, DQN countermeasure, rule countermeasure); unticking the rule comparison saves one.
+
+### Interim-report sync checklist (numbers to update)
+Offline accuracy 96.7% → 96.4% and macro-F1 → 96.4%; accuracy at 0 dB 93.4% → 91.4%; reactive_jamming recall 91% → 87.1%; closed-loop detection 100% (54/54) → 98.1% (53/54); mean recovery 74.6% → 76.3%; decision latency ~5.7 ms → 10.2 ms (or the re-measured value); DQN-vs-rule agreement ~44% → 53.7%; reactive_jamming end-to-end recovery 86.1% → 85.7%; Map A / Map B 84.6 / 87.9% (report) → 85.5 / 88.3%; dataset size 27,246 → 27,270 frames; EXP run size/time; add the 50–120 km/h envelope (amends D4, Doppler 111–267 Hz) and the speed-robustness results to the methodology and results chapters; update the GUI description to v3. FAR figures are unchanged.
+
+### Open items going into the next session
+- Re-measure decision latency in a fresh MATLAB session (open item 11), then update README, this log and the report with one number.
+- Decide on reactive_jamming and antenna_fault (open item 12); consider demonstrating the UNKNOWN-threat threshold on the antenna_fault @ 0 dB case in the GUI.
+- Sync the interim report (checklist above); replace the hard-coded CHECKPOINT footer in `main.m` (open item 14).
+- Live-test `demo_gui.m` v3 in MATLAB and send back any runtime error text or layout feedback.
+- `git`: `README.md`, `docs/DECISIONS.md`, `PROJECT_LOG.md` and the changed scripts (`init_params.m`, `run_dataset_sweep.m`, `extract_spectrograms.m`, `prepare_data.m`, `eval_detector.m`, `eval_speed_robustness.m`, `main.m`, `demo_gui.m`) are updated locally and not yet committed.
+- Dynamic/Chasing Jammer scenario remains the priority future-work item (unchanged).

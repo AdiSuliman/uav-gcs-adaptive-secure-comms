@@ -63,6 +63,12 @@ fprintf('(This file will contain EVERYTHING printed below, even across clc calls
 %    run_closed_loop_diagnostic, measure_far, measure_kpi3,
 %    measure_all_kpis, build_dashboard = true; rest = false
 %
+%  SPEED-DIVERSE RETRAIN (after switching to the 50-120 km/h envelope):
+%    init, build_dataset, extract_spectrograms, prepare_data, train_detector,
+%    eval_detector, run_closed_loop_diagnostic, eval_speed_robustness,
+%    measure_far, measure_kpi3, measure_all_kpis, build_dashboard = true;
+%    everything else (train_dqn, EXP, SURV, validate/check A) = false
+%
 %  DASHBOARD-ONLY (all results exist, < 1 min):
 %    build_dashboard = true; rest = false
 %% ================================================================
@@ -70,7 +76,7 @@ fprintf('(This file will contain EVERYTHING printed below, even across clc calls
 % ---- Phase A: link + threats + dataset ----
 RUN.init                        = true;   % A0  : regenerate params.mat
 RUN.validate_A                  = true;   % A1-A3: build+validate AWGN & Rician links (fast)
-RUN.check_A4                    = true;   % A4  : build threat model + sanity BER (fast)
+RUN.check_A4                    = true;   % A4  : bבכuild threat model + sanity BER (fast)
 RUN.build_dataset               = true;   % A5  : full dataset sweep (HEAVY ~30-40min)
 RUN.extract_spectrograms        = true;   % A6  : spectrograms + 7 features (~5min)
 
@@ -82,9 +88,10 @@ RUN.eval_detector               = true;   % B3  : test eval + confusion/accuracy
 
 
 % ---- Phase C: closed-loop recovery ----
-RUN.train_dqn                   = true;   % C2  : train DQN (one-hot state) (~10-15min)
-RUN.run_closed_loop             = true;   % C3  : closed loop, CNN+DQN (~2-3min)
+RUN.train_dqn                   = true;   % C2  : train DQN (one-hot state) (~10-15min)בי ינ
+
 RUN.run_closed_loop_diagnostic  = true;   % C3d : full SNR sweep + timing + Q-values (~15-20min)
+RUN.eval_speed_robustness       = true;   % C3s : detection/decision/recovery vs UAV speed 50-120 km/h (~30-60min)
 
 % ---- Phase EXP: deep countermeasure exploration ----
 RUN.explore_countermeasures     = true;   % EXP : full sweep (VERY HEAVY ~75-86min)
@@ -189,10 +196,16 @@ if RUN.run_closed_loop_diagnostic
     run_closed_loop_diagnostic;
 end
 
+if RUN.eval_speed_robustness
+    fprintf('  [C3-speed] Closed-loop robustness vs UAV speed (Doppler sweep, 50-120 km/h)...\n');
+    eval_speed_robustness;
+end
+
 fprintf('  [C] Pipeline status:\n');
 report_file('data/trained_dqn.mat',                     '      trained_dqn.mat        ', 'train_dqn');
 report_file('results/closed_loop_results.png',          '      C3 closed-loop results ', 'run_closed_loop');
 report_file('results/closed_loop_diagnostic_report.txt','      C3-diag full report    ', 'run_closed_loop_diagnostic');
+report_file('results/speed_robustness.txt',             '      C3-speed robustness    ', 'eval_speed_robustness');
 fprintf('\n');
 
 %% ========== PHASE EXP: DEEP COUNTERMEASURE EXPLORATION ==========

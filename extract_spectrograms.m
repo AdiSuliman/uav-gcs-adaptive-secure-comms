@@ -52,6 +52,8 @@ snr   = ds.snr(:);
 ber   = ds.ber(:);
 rssi  = ds.rssi(:);
 plr   = ds.plr(:);   % already 0/1 "burst" indicator (ber>0.1) from run_dataset_sweep
+has_speed = isfield(ds,'speed_kmh');
+if has_speed, speed = ds.speed_kmh(:); else, speed = nan(N,1); end
 
 % Contiguous run detection — identical logic to build_sequence_index.m,
 % so temporal features here are consistent with how sequences are windowed
@@ -59,7 +61,8 @@ same_as_prev = false(N,1);
 for i = 2:N
     same_as_prev(i) = isequaln(label(i),label(i-1)) && ...
                        isequaln(level(i),level(i-1)) && ...
-                       isequaln(snr(i),  snr(i-1));
+                       isequaln(snr(i),  snr(i-1)) && ...
+                       isequaln(speed(i),speed(i-1));   % a new speed block = a new run
 end
 run_id = cumsum(~same_as_prev);
 
@@ -97,6 +100,7 @@ spec.Y          = Y;
 spec.feats      = feats;
 spec.feat_names = feat_names;
 spec.class_names = ds.class_names;
+if has_speed, spec.speed_kmh = speed; end     % per-frame UAV speed (km/h), for accuracy-vs-speed analysis
 spec.img_size   = img_size;
 spec.meta       = ds.meta;
 spec.meta.temporal_window = temporal_window;

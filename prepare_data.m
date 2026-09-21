@@ -91,6 +91,15 @@ splits.test.X      = X(:,:,:,idx_test);
 splits.test.Y      = Y(idx_test);
 splits.test.feats  = feats_norm(idx_test, :);
 
+% Per-frame UAV speed (km/h) travels with every split (analysis only -- NOT a
+% network input): lets eval_detector report accuracy vs speed.
+if isfield(S.spec, 'speed_kmh')
+    spd_all = S.spec.speed_kmh(:);
+    splits.train.speed = spd_all(idx_train);
+    splits.val.speed   = spd_all(idx_val);
+    splits.test.speed  = spd_all(idx_test);
+end
+
 splits.norm.feat_mean = feat_mean;
 splits.norm.feat_std  = feat_std;
 splits.norm.feat_names = feat_names;
