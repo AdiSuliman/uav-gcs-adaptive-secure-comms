@@ -148,11 +148,32 @@ end
 params = p0; save('params.mat','params');
 fprintf('\nSweep complete in %.1f min.\n\n', toc(t_start)/60);
 
+%% ---------- KPI #2 against the no-attack link (clean = none run at same speed and Eb/N0) ----------
+nonhostile = ismember({results.threat}, {'none','benign_interference'});
+RATIO_OK = 2;
+for i = 1:numel(results)
+    m = strcmp({results.threat}, 'none') & [results.speed_kmh] == results(i).speed_kmh & ...
+        [results.snr_db] == results(i).snr_db;
+    bc = NaN; if any(m), bc = mean([results(m).ber_before]); end
+    results(i).ber_clean    = bc;
+    results(i).rec_vs_clean = NaN;
+    results(i).ratio_clean  = results(i).ber_after / bc;
+    results(i).missed       = false;
+    if nonhostile(i), continue; end
+    if strcmp(results(i).dqn_action, 'no_action')
+        results(i).missed = true;
+        results(i).rec_vs_clean = 0;
+    else
+        [results(i).rec_vs_clean, results(i).ratio_clean] = recovery_vs_clean( ...
+            results(i).ber_before, results(i).ber_after, bc);
+    end
+end
+active = ~nonhostile & ~[results.missed];
+
 %% ---------- Save + report ----------
 if ~exist('results','dir'), mkdir('results'); end
 save('results/speed_robustness.mat','results','SPEEDS_KMH','SNR_LIST','threats');
 
-nonhostile = ismember({results.threat}, {'none','benign_interference'});
 report = {};
 report{end+1} = '=== SPEED ROBUSTNESS (closed loop, Doppler sweep) ===';
 report{end+1} = sprintf('Generated: %s', datestr(now));
@@ -160,18 +181,19 @@ report{end+1} = sprintf('Speeds [km/h]: %s | Eb/N0 points: %s dB | 9 threats/cla
     mat2str(SPEEDS_KMH), mat2str(SNR_LIST));
 report{end+1} = 'fd = v * fc / c  (fc = 2.4 GHz)';
 report{end+1} = '';
-report{end+1} = sprintf('%-10s %-10s %-14s %-14s %-16s', 'km/h','fd (Hz)','Detection','False alarms','Mean recovery');
+report{end+1} = sprintf('%-10s %-10s %-14s %-14s %-16s %-16s', 'km/h','fd (Hz)','Detection','False alarms', ...
+    'Rec vs clean', 'Restored (<=2x)');
 acc_v = nan(1,numel(SPEEDS_KMH)); rec_v = nan(1,numel(SPEEDS_KMH));
 for vi = 1:numel(SPEEDS_KMH)
     m = [results.speed_kmh] == SPEEDS_KMH(vi);
     acc_v(vi) = 100*mean([results(m).correct]);
     mn = m & nonhostile;
     fa = sum(~strcmp({results(mn).dqn_action},'no_action'));
-    mr = m & ~nonhostile;
-    rec_v(vi) = mean([results(mr).recovery_pct],'omitnan');
-    report{end+1} = sprintf('%-10.1f %-10.1f %6.1f%% (%d/%d) %5d/%-8d %10.1f%%', SPEEDS_KMH(vi), ...
+    mr = m & active;
+    rec_v(vi) = mean([results(mr).rec_vs_clean],'omitnan');
+    report{end+1} = sprintf('%-10.1f %-10.1f %6.1f%% (%d/%d) %5d/%-8d %10.1f%% %8d/%-6d', SPEEDS_KMH(vi), ...
         (SPEEDS_KMH(vi)/3.6)*p0.carrier_freq/p0.c_light, acc_v(vi), sum([results(m).correct]), sum(m), ...
-        fa, sum(mn), rec_v(vi)); %#ok<AGROW>
+        fa, sum(mn), rec_v(vi), sum([results(mr).ratio_clean] <= RATIO_OK), sum(mr)); %#ok<AGROW>
 end
 report{end+1} = '';
 report{end+1} = '--- Detection accuracy per threat x speed (%) ---';
@@ -191,7 +213,10 @@ report{end+1} = sprintf('OVERALL detection accuracy: %.1f%% (%d/%d)', 100*mean([
     sum([results.correct]), numel(results));
 report{end+1} = sprintf('OVERALL false-alarm rate (non-hostile classes): %.1f%%', ...
     100*mean(~strcmp({results(nonhostile).dqn_action},'no_action')));
-report{end+1} = sprintf('OVERALL mean recovery (real threats): %.1f%%', ...
+report{end+1} = sprintf('OVERALL KPI #2 recovery vs clean link (real threats): %.1f%% | restored %d/%d | missed %d', ...
+    mean([results(active).rec_vs_clean],'omitnan'), sum([results(active).ratio_clean] <= RATIO_OK), ...
+    sum(active), sum([results.missed]));
+report{end+1} = sprintf('OVERALL recovery vs BER-before (previous metric): %.1f%%', ...
     mean([results(~nonhostile).recovery_pct],'omitnan'));
 
 fid = fopen('results/speed_robustness.txt','w');
@@ -206,8 +231,8 @@ xlabel('UAV speed (km/h)'); ylabel('Closed-loop detection accuracy (%)');
 title('Detection vs UAV speed'); ylim([max(0,floor(min(acc_v)/10)*10) 100]);
 subplot(1,2,2);
 plot(SPEEDS_KMH, rec_v, '-s','LineWidth',2,'MarkerFaceColor',[0.85 0.4 0.1],'Color',[0.85 0.4 0.1]); grid on;
-xlabel('UAV speed (km/h)'); ylabel('Mean BER recovery (%)');
-title('Recovery vs UAV speed (real threats)');
+xlabel('UAV speed (km/h)'); ylabel('Recovery vs clean link (%)');
+title('KPI #2 vs UAV speed (real threats)'); ylim([0 100]);
 saveas(fig,'results/speed_robustness.png'); close(fig);
 fprintf('\nSaved results/speed_robustness.{mat,txt,png}\n');
 

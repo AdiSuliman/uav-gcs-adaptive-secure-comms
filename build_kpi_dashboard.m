@@ -95,18 +95,27 @@ if have_cl
     snr_pts = unique([cl.snr_db]);
     hold(ax3,'on');
     real_threats = threats(~ismember(threats,{'none','benign_interference'}));
+    useClean = isfield(cl, 'rec_vs_clean');   % D27 metric; older result files fall back
     for t = 1:numel(real_threats)
         rec = nan(1,numel(snr_pts));
         for s = 1:numel(snr_pts)
             m = strcmp({cl.threat},real_threats{t}) & [cl.snr_db]==snr_pts(s);
-            if any(m), rec(s) = cl(m).recovery_pct; end
+            if any(m)
+                if useClean, rec(s) = cl(m).rec_vs_clean; else, rec(s) = cl(m).recovery_pct; end
+            end
         end
         plot(ax3, snr_pts, rec, '-o','LineWidth',1.3,'MarkerSize',4, ...
             'DisplayName', strrep(real_threats{t},'_','\_'));
     end
     hold(ax3,'off'); grid(ax3,'on');
-    xlabel(ax3,'E_bN_0 (dB)'); ylabel(ax3,'BER Recovery (%)');
-    title(ax3,'Recovery vs SNR (real threats)','FontSize',10);
+    xlabel(ax3,'E_bN_0 (dB)');
+    if useClean
+        ylabel(ax3,'Recovery vs clean link (%)'); ylim(ax3,[0 100]);
+        title(ax3,'KPI #2: Recovery vs SNR (vs no-attack link)','FontSize',10);
+    else
+        ylabel(ax3,'BER Recovery (%)');
+        title(ax3,'Recovery vs SNR (real threats)','FontSize',10);
+    end
     legend(ax3,'Location','southeast','FontSize',6);
     xticks(ax3,snr_pts);
 else
@@ -171,8 +180,16 @@ if have_metrics
 end
 if have_cl
     real_m = ~ismember({cl.threat},{'none','benign_interference'});
-    mr = mean([cl(real_m).recovery_pct],'omitnan');
-    lines{end+1} = sprintf('KPI2  Recovery:    %.1f%%  \\color[rgb]{0.2,0.65,0.25}PASS', mr);
+    if isfield(cl, 'rec_vs_clean')
+        act_m = real_m & ~[cl.missed];
+        mr = mean([cl(act_m).rec_vs_clean],'omitnan');
+        r2 = [cl(act_m).ratio_clean];
+        lines{end+1} = sprintf('KPI2  Recovery:    %.1f%% vs clean (%d/%d restored)  \\color[rgb]{0.2,0.65,0.25}PASS', ...
+            mr, sum(r2 <= 2), numel(r2));
+    else
+        mr = mean([cl(real_m).recovery_pct],'omitnan');
+        lines{end+1} = sprintf('KPI2  Recovery:    %.1f%%  \\color[rgb]{0.2,0.65,0.25}PASS', mr);
+    end
     lines{end+1} = sprintf('KPI3  Latency:     %.2f ms \\color[rgb]{0.2,0.65,0.25}PASS', ...
         mean([cl.cnn_latency_ms]+[cl.dqn_latency_ms]));
 end

@@ -35,18 +35,20 @@ function demo_gui
 close all; clc;
 
 %% ---------- Load trained models and simulation parameters once ----------
+tBoot = tic;
 fprintf('Loading trained models and parameters...\n');
 D = load('data/trained_detector.mat', 'net', 'classes');
 Q = load('data/trained_dqn.mat', 'agent');
-S = load('data/splits.mat', 'splits');
+[featMean, featStd] = loadNormStats();
 p0 = loadInitialParams();
+fprintf('  models + parameters loaded (%.1f s)\n', toc(tBoot));
 
 env = struct();
 env.cnn_net    = D.net;
 env.class_list = cellstr(D.classes(:));
 env.dqn_agent  = Q.agent;
-env.feat_mean  = S.splits.norm.feat_mean;
-env.feat_std   = S.splits.norm.feat_std;
+env.feat_mean  = featMean;
+env.feat_std   = featStd;
 env.p0         = p0;
 env.modelName  = 'UAV_GCS_Threat_Link';
 env.fs         = p0.symbol_rate * p0.sps;
@@ -76,7 +78,7 @@ env.ber_floor = 0.5 / p0.frame_length;      % "zero errors in a frame" plotting 
 
 fprintf('Warming up CNN, DQN, and spectrogram()...\n');
 warmUp(env);
-fprintf('System ready.\n\n');
+fprintf('  warm-up done (%.1f s total)\n', toc(tBoot));
 
 %% ---------- Look & feel ----------
 c = struct();
@@ -127,6 +129,7 @@ ui = mergeStructs(ui, buildSurvTab(tabSurv, env, c));
 ui = mergeStructs(ui, buildLogTab(tabLog, c));
 ui.linkLamp = lamp; ui.linkTxt = lampTxt; ui.tabGroup = tg;
 
+fprintf('  UI built (%.1f s total)\n', toc(tBoot));
 fig.UserData = struct('env', env, 'ui', ui, 'colors', c);
 setappdata(fig, 'history', {});
 setappdata(fig, 'videoWriter', []);
@@ -155,6 +158,7 @@ setProgress(fig, 0);
 loadKpiTab(fig);
 updateSurvMap(fig);
 updateSessionSummary(fig);
+fprintf('System ready (%.1f s total).\n\n', toc(tBoot));
 appLog(fig, 'SYSTEM INITIALIZED AND STANDBY.');
 if isempty(env.surv)
     appLog(fig, 'NOTE: data/survivability_boundary.mat not found - survivability verdicts disabled.');
@@ -470,6 +474,22 @@ function s = mergeStructs(a, b)
     for k = 1:numel(f), s.(f{k}) = b.(f{k}); end
 end
 
+function [mu, sd] = loadNormStats()
+    % splits.mat is >1 GB; only two small vectors are needed. They are cached
+    % in a tiny file and re-extracted only when splits.mat is newer.
+    src = 'data/splits.mat'; cache = 'data/gui_norm_stats.mat';
+    fresh = isfile(cache) && dir(cache).datenum >= dir(src).datenum;
+    if ~fresh
+        fprintf('  one-time extraction of normalisation stats from splits.mat (slow, next launches skip this)...\n');
+        S = load(src, 'splits');
+        feat_mean = S.splits.norm.feat_mean; feat_std = S.splits.norm.feat_std; %#ok<NASGU>
+        save(cache, 'feat_mean', 'feat_std');
+        clear S;
+    end
+    N = load(cache, 'feat_mean', 'feat_std');
+    mu = N.feat_mean; sd = N.feat_std;
+end
+
 function p = loadInitialParams()
     % init_params.m is a SCRIPT that injects "params" into its caller's workspace.
     % It is called from this plain function (a file with no nested functions), so
@@ -667,7 +687,7 @@ function runSequence(btn, ~)
 
     if ui.recordChk.Value
         vname = sprintf('GUI_Results/demo_session_%s.mp4', stamp);
-        vw = VideoWriter(vname, 'MPEG-4'); vw.FrameRate = 10; open(vw);
+        vw = VideoWriter(vname, 'MPEG-4'); vw.FrameRate = 1; open(vw);  % ~4 captures/run now (one per state), so 1 fps keeps playback slideshow-paced rather than a blur
         setappdata(fig, 'videoWriter', vw);
         appLog(fig, ['Recording video to ' vname]);
     end
@@ -872,7 +892,11 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
 
     ber_dqn  = ber_before_mean; if ~isempty(Rd), ber_dqn  = Rd.ber_mean; end
     ber_rule = ber_before_mean; if ~isempty(Rr), ber_rule = Rr.ber_mean; end
-    recOf = @(b) 100 * (ber_before_mean - b) / max(ber_before_mean, eps);
+    if isfinite(refBer)
+        recOf = @(b) recovery_vs_clean(ber_before_mean, b, refBer);   % KPI #2: vs the clean link
+    else
+        recOf = @(b) 100 * (ber_before_mean - b) / max(ber_before_mean, eps);
+    end
     if dqnNone && (ruleNone || ~doRule), rec_dqn = NaN; else, rec_dqn = recOf(ber_dqn); end
     if ~doRule || (dqnNone && ruleNone), rec_rule = NaN; else, rec_rule = recOf(ber_rule); end
 
@@ -921,7 +945,8 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
         'cnn_correct', correct, 'unknown', is_unknown, ...
         'dqn_action', action_name, 'rule_action', rule_action, 'agree', agree, ...
         'ber_before', ber_before_mean, 'ber_after_dqn', ber_dqn, 'ber_after_rule', ber_rule, ...
-        'rec_dqn', rec_dqn, 'rec_rule', rec_rule, 'verdict', verdict, 'verdict_status', vstat, ...
+        'ber_clean_ref', refBer, 'rec_dqn', rec_dqn, 'rec_rule', rec_rule, ...
+        'verdict', verdict, 'verdict_status', vstat, ...
         'cnn_latency_ms', cnn_ms, 'dqn_latency_ms', dqn_ms, 'decision_latency_ms', total_ms);
     H{end+1} = entry; setappdata(fig, 'history', H);
     ui.histTbl.Data = [ui.histTbl.Data; { n, niceName(threat), sprintf('%g dB', ebno), ...
@@ -1230,6 +1255,9 @@ function drawLinkDiagram(fig, state, scen, det, info)
         otherwise,         setLinkHeader(fig, 'STANDBY', c.mut);
     end
     drawnow;
+    if ismember(state, {'scenario','detected','mitigating','resolved'})
+        recordFrame(fig);  % one capture per real state transition, not per timer tick
+    end
 end
 
 function setLinkHeader(fig, txt, col)
@@ -1396,9 +1424,13 @@ function recordFrame(fig)
 end
 
 function smartPause(fig, secs, tSeq)
+    % Video frame capture no longer happens here — getframe(fig) on a
+    % uifigure is expensive per call regardless of frequency (it round-trips
+    % through the CEF-based renderer), so it is captured once per real state
+    % transition inside drawLinkDiagram instead. This loop only drives the
+    % on-screen timer.
     n = max(1, round(secs * 10));
     for k = 1:n
-        recordFrame(fig);
         updateTimer(fig, tSeq);
         pause(0.1);
     end

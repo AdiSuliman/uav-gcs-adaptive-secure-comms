@@ -70,32 +70,47 @@ if ~need_rerun
     d = dir(diag_mat_path);
     need_rerun = (now - datenum(d.date)) > MAX_STALE_DAYS;
 end
+if ~need_rerun
+    probe = load(diag_mat_path, 'results');
+    need_rerun = ~isfield(probe.results, 'rec_vs_clean');   % saved before the D27 metric existed
+end
 if need_rerun
-    fprintf('  No fresh %s found -- running run_closed_loop_diagnostic...\n', diag_mat_path);
-    run_closed_loop_diagnostic;
+    fprintf('  No fresh %s (with the D27 clean-link metric) found -- running run_closed_loop_diagnostic...\n', diag_mat_path);
+    run_isolated('run_closed_loop_diagnostic');
 end
 
 DL = load(diag_mat_path, 'results');
 cl_results = DL.results;
 cl_threats = unique({cl_results.threat}, 'stable');
 
-report{end+1} = '--- KPI #2: Link Quality Recovery vs Healthy Baseline ---';
+report{end+1} = '--- KPI #2: Link Quality Recovery vs Healthy (No-Attack) Baseline ---';
 report{end+1} = sprintf('Source: %s', diag_mat_path);
+report{end+1} = 'Definition (proposal, D27): rec = 100*(BER_before - BER_after)/(BER_before - BER_clean), capped at 100;';
+report{end+1} = 'link state = BER_after/BER_clean (<= 2 restored, <= 5 marginal). Clean = none run at the same Eb/N0.';
+real_mask   = ~ismember({cl_results.threat}, {'benign_interference','none'});
+active_mask = real_mask & ~[cl_results.missed];
 recov_by_threat = nan(1, numel(cl_threats));
+recov_old_by_threat = nan(1, numel(cl_threats));
 for i = 1:numel(cl_threats)
     mask = strcmp({cl_results.threat}, cl_threats{i});
-    recov_by_threat(i) = mean([cl_results(mask).recovery_pct], 'omitnan');
-    if isnan(recov_by_threat(i))
-        % Every SNR point for this class chose no_action (non-hostile) -- there
-        % is no countermeasure effect to average. Report N/A, not NaN.
-        report{end+1} = sprintf('  %-20s recovery=N/A (DQN chose no_action at all SNR -- nothing to recover)', cl_threats{i});
-    else
-        report{end+1} = sprintf('  %-20s recovery=%.1f%% (mean over SNR sweep)', cl_threats{i}, recov_by_threat(i));
+    if ismember(cl_threats{i}, {'benign_interference','none'})
+        report{end+1} = sprintf('  %-20s recovery=N/A (non-hostile -- no countermeasure expected)', cl_threats{i});
+        continue;
     end
+    m = mask & active_mask;
+    recov_by_threat(i)     = mean([cl_results(m).rec_vs_clean], 'omitnan');
+    recov_old_by_threat(i) = mean([cl_results(m).recovery_pct], 'omitnan');
+    r = [cl_results(m).ratio_clean];
+    report{end+1} = sprintf('  %-20s recovery=%.1f%% | %.2fx clean (mean) | restored %d/%d | missed %d | vs-before %.1f%%', ...
+        cl_threats{i}, recov_by_threat(i), mean(r, 'omitnan'), sum(r <= 2), numel(r), ...
+        sum(mask & [cl_results.missed]), recov_old_by_threat(i));
 end
-real_mask_names = ~ismember(cl_threats, {'benign_interference','none'});
-report{end+1} = sprintf('  Mean recovery (all threats, all SNR): %.1f%%', mean([cl_results.recovery_pct], 'omitnan'));
-report{end+1} = sprintf('  Mean recovery (real threats only):    %.1f%%', mean(recov_by_threat(real_mask_names), 'omitnan'));
+r_all = [cl_results(active_mask).ratio_clean];
+report{end+1} = sprintf('  KPI #2 (real threats, per-run mean):   %.1f%%', mean([cl_results(active_mask).rec_vs_clean], 'omitnan'));
+report{end+1} = sprintf('  KPI #2 (real threats, per-threat mean): %.1f%%', mean(recov_by_threat, 'omitnan'));
+report{end+1} = sprintf('  Link restored (<= 2x clean): %d/%d | marginal: %d | not restored: %d | missed detections: %d', ...
+    sum(r_all <= 2), numel(r_all), sum(r_all > 2 & r_all <= 5), sum(r_all > 5), sum([cl_results(real_mask).missed]));
+report{end+1} = sprintf('  Previous metric (vs BER-before), same runs: %.1f%%', mean([cl_results(active_mask).recovery_pct], 'omitnan'));
 report{end+1} = 'NOTE: this is per-threat SNR-swept recovery, not the full survivability-boundary';
 report{end+1} = 'map (proposal deliverable #7) -- that is results/survivability_boundary_mapA.txt';
 report{end+1} = 'and mapB.txt (map_survivability_boundary.m), a separate, larger analysis.';
@@ -112,7 +127,7 @@ if ~need_rerun
 end
 if need_rerun
     fprintf('  No fresh results/kpi3_measurement.txt found -- running measure_kpi3_recovery_time...\n');
-    measure_kpi3_recovery_time;
+    run_isolated('measure_kpi3_recovery_time');
 end
 kpi3_txt = fileread(kpi3_path);
 report{end+1} = sprintf('Source: %s', kpi3_path);
@@ -124,7 +139,7 @@ fprintf('--- KPI #5: End-to-end baseline ---\n');
 report{end+1} = '--- KPI #5: Single End-to-End Baseline (detect->decide->recover, >=1 recoverable threat) ---';
 if ~isempty(recov_by_threat)
     [best_recov, best_i] = max(recov_by_threat);
-    report{end+1} = sprintf('MET: %s recovers %.1f%% end-to-end, averaged over the SNR sweep (CNN detect -> DQN decide -> apply -> re-measure).', ...
+    report{end+1} = sprintf('MET: %s recovers %.1f%% of the attack-induced BER end-to-end (vs clean link), averaged over the SNR sweep (CNN detect -> DQN decide -> apply -> re-measure).', ...
         cl_threats{best_i}, best_recov);
 else
     report{end+1} = 'NOT MET -- no recovery data found in closed_loop_diagnostic_results.mat.';
@@ -141,7 +156,7 @@ if ~need_rerun
 end
 if need_rerun
     fprintf('  No fresh results/far_measurement.txt found -- running diagnose_far_measurement...\n');
-    diagnose_far_measurement;
+    run_isolated('diagnose_far_measurement');
 end
 far_txt = fileread(far_path);
 overall_far_match = regexp(far_txt, 'Combined FAR.*?\(([\d.]+)%\)', 'tokens', 'once');
@@ -164,3 +179,10 @@ fclose(fid);
 for i = 1:numel(report), fprintf('%s\n', report{i}); end
 fprintf('\nSaved results/kpi_summary.txt\n');
 fprintf('\n=== KPI Aggregation Complete ===\n');
+
+%% ===== Local function =====
+function run_isolated(script_name)
+% Runs a source script in this function's own workspace, so its variables
+% (e.g. its own 'report') cannot overwrite the KPI report being assembled here.
+run(script_name);
+end

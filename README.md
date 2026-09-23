@@ -36,7 +36,7 @@ An AI-driven closed-loop system for detecting and adapting to link-layer threats
 │   ├── UAV_GCS_Rician_Link.slx   # A3: fading + Doppler
 │   └── UAV_GCS_Threat_Link.slx   # A4-A6: threats + recovery
 ├── docs/
-│   └── DECISIONS.md              # Architecture Decision Record (D1-D26)
+│   └── DECISIONS.md              # Architecture Decision Record (D1-D27)
 ├── diagnostics/                  # Ad-hoc investigation scripts, kept for reproducibility
 ├── README.md                     # This file
 ├── PROJECT_LOG.md                # Living execution log — status, fix history, open issues
@@ -97,24 +97,25 @@ All numbers below come from one clean run of `main.m` with every RUN flag on (st
 
 ### Phase C3 (Closed-Loop) — 9 threats × 6 Eb/N0
 - Detection accuracy in closed loop: **98.1%** (53/54) (100%, 54/54). The single miss: antenna_fault @ 0 dB, classified as sweeping_jammer with only 31.2% CNN confidence; the DQN then chose `no_action`. This is exactly the case the UNKNOWN-threat threshold in the GUI is meant to catch.
-- Mean BER recovery (real threats): **76.3%** over all runs, 75.9% as a mean of per-threat means (74.6%). State which definition is used when citing.
+- **KPI #2 — recovery against the no-attack link (proposal definition, D27): 95.6%** per-run mean (95.3% mean of per-threat means). After the countermeasure the link is back within 2× the clean BER in **37/41** runs, marginal (2–5×) in 4, never worse; plus one missed detection (antenna_fault @ 0 dB). Clean reference = the `none` run at the same Eb/N0; it matches the EXP clean BER within 2–15% at every point.
+- Previous metric, recovery relative to BER-before: 76.3% over the same runs (74.6% before the re-run). It is kept for comparison only: it penalises threats that start from a low BER, which is why sweeping_jammer and noise_burst looked weak (60–72%) although they return to the clean link.
 - Decision latency (CNN preprocessing + inference + DQN): **mean 10.21 ms / median 10.05 ms** (CNN 8.88 + DQN 1.33 ms) — earlier measurement 6.09 / 5.67 ms. The architectures are unchanged; the likely cause is machine/GPU state at the end of a 4-hour session. A re-measurement in a fresh MATLAB session is pending (see Known Issues).
 - DQN-vs-rule action agreement: 29/54 = **53.7%** (~44%) — see the design clarification below.
 - benign_interference and none: `no_action` in all 12 cases; recovery reported as N/A.
 
-| Threat | Offline recall | Closed-loop detection | DQN action | Mean recovery | Map A recoverable |
-|---|---|---|---|---|---|
-| jamming | 98.7% | 6/6 | channel_switch | 85.8% | 80% |
-| reactive_jamming | 87.1% | 6/6 | channel_switch | 85.7% (was 86.1%) | 83% |
-| sweeping_jammer | 98.7% | 6/6 | channel_switch (5), freq_diversity (1) | 60.4% | 97% |
-| noise_burst | 100% | 6/6 | channel_switch | 71.6% | 90% |
-| path_loss | 94.7% | 6/6 | spatial_diversity | 83.9% | 75% |
-| spoofing | 98.7% | 6/6 | channel_switch | 83.5% | 97% |
-| antenna_fault | 92.8% | 5/6 | channel_switch (5), no_action (1) | 60.6% | 60% |
-| benign_interference | 100% | 6/6 | no_action | N/A | 100% |
-| none | 97.0% | 6/6 | no_action | N/A | — |
+| Threat | Offline recall | Closed-loop detection | DQN action | Recovery vs clean (D27) | BER after / clean | Recovery vs before | Map A recoverable |
+|---|---|---|---|---|---|---|---|
+| jamming | 98.7% | 6/6 | channel_switch | 97.1% | 1.78× (4 restored, 2 marginal) | 85.8% | 80% |
+| reactive_jamming | 87.1% | 6/6 | channel_switch | 97.8% | 1.48× (5 / 1) | 85.7% | 83% |
+| sweeping_jammer | 98.7% | 6/6 | channel_switch (5), freq_diversity (1) | 95.4% | 1.14× (6 / 0) | 60.4% | 97% |
+| noise_burst | 100% | 6/6 | channel_switch | 96.9% | 1.23× (6 / 0) | 71.6% | 90% |
+| path_loss | 94.7% | 6/6 | spatial_diversity | 99.1% | 0.97× (6 / 0) | 83.9% | 75% |
+| spoofing | 98.7% | 6/6 | channel_switch | 99.0% | 1.07× (6 / 0) | 83.5% | 97% |
+| antenna_fault | 92.8% | 5/6 | channel_switch (5), no_action (1) | 81.9% (5 runs + 1 miss) | 1.67× (4 / 1) | 60.6% | 60% |
+| benign_interference | 100% | 6/6 | no_action | N/A | — | N/A | 100% |
+| none | 97.0% | 6/6 | no_action | N/A | — (reference) | N/A | — |
 
-Recovery rises with Eb/N0 for every threat (jamming: 66.9% @ 0 dB → 97.3% @ 10 dB). The low recovery figures for sweeping_jammer and noise_burst are mostly a low-starting-BER effect: EXP shows they already achieve 99.6% and 94.2% of their physical recovery ceiling (mid severity, 0 dB). The real decision-quality gaps are path_loss (~80% of ceiling) and antenna_fault (~64%).
+Measured against the clean link, every real threat except antenna_fault recovers ≥ 95%, so the earlier "weak" sweeping_jammer and noise_burst figures were an artefact of the BER-before metric (EXP had already shown them at 99.6% / 94.2% of their physical ceiling). antenna_fault is the genuine weak spot: lowest recovery (81.9%), the only marginal outcomes besides jamming at high Eb/N0, and the only missed detection. The high recovery is measured within the modelled countermeasure strength (fixed `action_mitigation_db`, see Architecture → Recovery); it does not by itself validate the magnitude of a real countermeasure.
 
 ### Phase C3-speed — Robustness vs UAV speed (D25)
 Closed-loop sweep over 8 speeds (50 → 120 km/h, fd = 111 → 267 Hz), 9 threats × 3 Eb/N0 each:
@@ -123,9 +124,11 @@ Closed-loop sweep over 8 speeds (50 → 120 km/h, fd = 111 → 267 Hz), 9 threat
 |---|---|---|---|---|---|---|---|---|
 | fd (Hz) | 111 | 127 | 148 | 160 | 188 | 216 | 242 | 267 |
 | Detection | 96.3% | 100% | 96.3% | 96.3% | 96.3% | 100% | 100% | 100% |
-| Mean recovery | 70.3% | 69.2% | 73.5% | 71.9% | 72.7% | 73.5% | 73.6% | 74.2% |
+| Recovery vs clean (D27) | 95.6% | 94.7% | 96.9% | 94.7% | 95.2% | 95.7% | 95.8% | 96.1% |
+| Restored (≤ 2× clean) | 16/20 | 18/21 | 17/20 | 18/21 | 17/21 | 17/21 | 18/21 | 17/21 |
+| Recovery vs before (previous) | 70.3% | 69.2% | 73.5% | 71.9% | 72.7% | 73.5% | 73.6% | 74.2% |
 
-Overall detection 98.1% (212/216), false-alarm rate 0% (0/48), mean recovery 72.4%. All four misses are antenna_fault (1 of 3 SNR points at four speeds); every other threat is detected at 100% at every speed. With 27 runs per speed a single miss moves a point by 3.7%, so the dips are not evidence of a speed dependence. Consistent with D4, fading is deeply quasi-static across the whole envelope (normalized Doppler ≤ 2.7e-4 at 1 Msym/s), so mild speed sensitivity is expected.
+Overall detection 98.1% (212/216), false-alarm rate 0% (0/48), recovery vs clean 95.6% (72.4% with the previous metric), flat across speed. All four misses are antenna_fault (1 of 3 SNR points at four speeds); every other threat is detected at 100% at every speed. With 27 runs per speed a single miss moves a point by 3.7%, so the dips are not evidence of a speed dependence. Consistent with D4, fading is deeply quasi-static across the whole envelope (normalized Doppler ≤ 2.7e-4 at 1 Msym/s), so mild speed sensitivity is expected.
 
 ### FAR (False Alarm Rate) — proposal KPI, section ה
 - **0.0%** — 0/180 trials (none + benign_interference, SNR = 0/4/10 dB, N=30 each)
@@ -134,7 +137,7 @@ Overall detection 98.1% (212/216), false-alarm rate 0% (0/48), mean recovery 72.
 - 180 trials demonstrate the principle and give a statistically valid bound, but are not industrial-grade significance; a Monte Carlo run at tens of thousands of frames per condition is noted as future work
 
 ### KPI status (dashboard)
-KPI1 detection 96.4% ✓ · KPI2 recovery 76.3% ✓ · KPI3 decision latency 10.21 ms (DQN 1.33 ms vs rule 0.00028 ms) ✓ · KPI4 FAR 0.0% ✓ · KPI5 end-to-end MET (jamming 85.7% recovered end-to-end) ✓
+KPI1 detection 96.4% ✓ · KPI2 recovery 95.6% vs the no-attack link, 37/41 restored ≤ 2× clean ✓ · KPI3 decision latency 10.21 ms (DQN 1.33 ms vs rule 0.00028 ms) ✓ · KPI4 FAR 0.0% ✓ · KPI5 end-to-end MET (every real threat recovers end-to-end; best path_loss 99.1% vs clean) ✓
 
 ### KPI #3 — Decision Latency (DQN vs Rule-Based), redefined
 **Original problem:** the metric was defined as "recovery cycles to convergence," but both policies are single-shot, deterministic dB reductions — there is no multi-cycle dynamic to measure. Redefined to decision **latency**.
@@ -246,6 +249,7 @@ See `docs/DECISIONS.md` for the full Architecture Decision Record:
 - **D23:** `spectrogram()` warm-up added — eliminated a one-time JIT skew between mean and median latency
 - **D24:** `demo_gui.m` built — interactive operator-console demo; no-nested-functions architecture pattern documented for future MATLAB GUI work
 - **D25:** UAV speed envelope widened to a continuous 50–120 km/h (Doppler 111–267 Hz); speed-diverse dataset, accuracy-vs-speed evaluation and `eval_speed_robustness.m`. Amends D4
+- **D27:** KPI #2 measured against the no-attack (clean) link, as the proposal defines it (`recovery_vs_clean.m`); clean reference = the `none` run at the same Eb/N0; previous BER-before metric kept alongside
 - **D26:** `demo_gui.m` v3 — proposal-complete operator console (4 tabs, DQN-vs-rule comparison, UNKNOWN-threat handling, survivability verdicts, speed-driven Doppler); norm-stats cache for fast startup
 
 See `PROJECT_LOG.md` for the full fix history and session-by-session detail behind each decision above.
@@ -301,5 +305,5 @@ Key sources from the project proposal (IEEE format):
 
 ---
 
-**Last Updated:** 2026-09-22 (D25–D26: speed envelope 50–120 km/h, speed-diverse full re-run, demo_gui v3)
+**Last Updated:** 2026-09-23 (D27: KPI #2 against the no-attack link; D25–D26: speed envelope 50–120 km/h, demo_gui v3)
 **Status:** Phase A+B+C+EXP complete and re-run on the speed-diverse dataset, survivability mapping complete, all 5 proposal KPIs met, speed-robustness evaluation complete, interim report drafted (results chapters pending sync to the latest run), operator console v3 delivered and under live testing | Phase D (final report + defense prep) in progress

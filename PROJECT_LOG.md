@@ -1,6 +1,6 @@
 # Project Execution Log (Living Document)
 
-**Last Updated:** 2026-09-22 (Session 11, complete) | **Status:** UAV speed envelope widened to a continuous 50–120 km/h (D25) and the whole pipeline re-run end-to-end on speed-diverse data (all 19 RUN flags, 4 h 04 min, no errors); operator console rebuilt as a proposal-complete 4-tab app (D26). All 5 KPIs still met. See "Session 2026-09-21/22 (Session 11)" at the bottom for the full detail and the report-sync checklist.
+**Last Updated:** 2026-09-23 (Session 12) | **Status:** KPI #2 now measured against the no-attack link as the proposal defines it (D27): 95.6%, 37/41 runs restored within 2× clean. Work proceeds item by item through the agreed improvement plan (Session 12). Speed-diverse full re-run (D25) and demo_gui v3 (D26) from Session 11 unchanged.
 
 ## Current headline numbers (2026-09-21 full re-run, speed-diverse data, D25)
 | Metric | Latest | Previous (single-speed, D22/D23 baseline) |
@@ -9,7 +9,8 @@
 | Offline accuracy vs UAV speed (7 bins) | 92.7% (50–60 km/h) … 98.2%; rest within 2.6 pts | not measured |
 | CNN accuracy (closed loop, 9 threats × 6 SNR) | **98.1%** (53/54) | 100% (54/54) |
 | Closed-loop detection over 50–120 km/h (8 speeds) | **98.1%** (212/216), FAR 0/48 | not measured |
-| Mean BER recovery (real threats) | **76.3%** per-run mean (75.9% mean of per-threat means); 72.4% in the speed sweep | 74.6% |
+| KPI #2 recovery vs no-attack link (D27) | **95.6%** per-run (95.3% per-threat); 37/41 restored ≤ 2× clean, 4 marginal, 1 missed; speed sweep 95.6% | not measured this way |
+| Recovery vs BER-before (previous metric) | 76.3% per-run (75.9% per-threat); 72.4% in the speed sweep | 74.6% |
 | Decision latency (mean / median, CNN+DQN) | **10.21 / 10.05 ms** (CNN 8.88 + DQN 1.33) — re-measurement pending | 6.09 / 5.67 ms |
 | FAR (non-hostile, 180 trials over SNR) | 0.0% (95% CI upper 3.3% per-class n=90, 1.7% combined n=180) | 0.0% (same bound) |
 | DQN-vs-rule action agreement | 53.7% (29/54) | ~44% |
@@ -227,7 +228,7 @@ Antenna Fault recovery, benign_interference reward gap, reactive_jamming misdete
 ### Open (2026-09-22)
 11. **Decision latency 10.21 ms (full run) vs 6.09 ms (D23 measurement)** with unchanged architectures — likely machine/GPU state at the end of a 4-hour session; unverified. Re-measure `run_closed_loop_diagnostic` alone in a fresh MATLAB session and cite that number.
 12. **reactive_jamming recall 87.1%** (was 91.0%) and **antenna_fault** (92.8% recall, 5/6 closed-loop, 60.6% recovery) are the weak spots; the possible link between speed diversity and the reactive-vs-jamming temporal features is an untested hypothesis. Decide: targeted improvement vs. documented limitation.
-13. **Interim report numbers are stale** relative to the 2026-09-21 re-run (checklist in Session 11).
+13. **Interim report numbers are stale** relative to the 2026-09-21 re-run (checklist in Session 11) and to D27 (KPI #2 is now 95.6% vs the clean link; show both metrics with their definitions).
 14. **`main.m` CHECKPOINT footer is a hard-coded string** with pre-re-run numbers (CNN 96.99%, closed-loop 100%, recovery 74.6%, latency 2.67 ms, Map A/B 84.6/87.9); the authoritative values are `results/kpi_summary.txt` and `results/kpi_dashboard.png`.
 15. **`demo_gui.m` v3 not yet validated in MATLAB beyond first launches** — syntax-parsed and helper-tested outside MATLAB only; a slow-startup report (2026-09-22) was mitigated with a norm-stats cache and a fresh-session launch recommendation.
 
@@ -250,7 +251,8 @@ Antenna Fault recovery, benign_interference reward gap, reactive_jamming misdete
 | ed47958 | Survivability fix | 2026-09-19 | map_survivability_boundary.m split into Map A/Map B with gap analysis |
 | (pending) | D18 + KPI fixes | 2026-09-19 | Rx_IQ post-AWGN; KPI scripts read .mat; visualize_spectrograms 9-class; .gitignore cleanup; main.m re-run flags; README/PROJECT_LOG/DECISIONS updated |
 | (pending) | D20 + D21 | 2026-09-19 | extract_closed_loop_frames.m (shared); FAR script rewritten (SNR set_param + sliding window + SNR sweep); no_action → N/A recovery; GPU warm-up strengthened |
-| (pending) | D25 + D26 | 2026-09-21/22 | init_params.m (speed envelope), run_dataset_sweep.m (speed-diverse), extract_spectrograms.m, prepare_data.m, eval_detector.m (accuracy vs speed), NEW eval_speed_robustness.m, main.m (flag + preset), demo_gui.m v3; README/PROJECT_LOG/DECISIONS updated |
+| (pending) | D27 | 2026-09-23 | NEW recovery_vs_clean.m, NEW recompute_recovery_vs_clean.m; run_closed_loop_diagnostic.m, eval_speed_robustness.m, measure_all_kpis.m, build_kpi_dashboard.m, demo_gui.m (recovery vs clean; demo_gui also: video frames captured once per state transition); README/PROJECT_LOG/DECISIONS |
+| c3fbdac | D25 + D26 | 2026-09-21/22 | init_params.m (speed envelope), run_dataset_sweep.m (speed-diverse), extract_spectrograms.m, prepare_data.m, eval_detector.m (accuracy vs speed), NEW eval_speed_robustness.m, main.m (flag + preset), demo_gui.m v3; README/PROJECT_LOG/DECISIONS updated |
 
 ---
 
@@ -534,3 +536,23 @@ Offline accuracy 96.7% → 96.4% and macro-F1 → 96.4%; accuracy at 0 dB 93.4% 
 - Live-test `demo_gui.m` v3 in MATLAB and send back any runtime error text or layout feedback.
 - `git`: `README.md`, `docs/DECISIONS.md`, `PROJECT_LOG.md` and the changed scripts (`init_params.m`, `run_dataset_sweep.m`, `extract_spectrograms.m`, `prepare_data.m`, `eval_detector.m`, `eval_speed_robustness.m`, `main.m`, `demo_gui.m`) are updated locally and not yet committed.
 - Dynamic/Chasing Jammer scenario remains the priority future-work item (unchanged).
+
+---
+
+## Session 2026-09-22/23 (Session 12) — GUI speed investigation, proposal review, improvement plan, D27
+
+### GUI slowness with video recording
+A 15-run and a 54-run GUI session (logs `demo_session_20260922_002756.log`, `_204029.log`) were slow: ~123 s per run on average, of which the measured decision is ~10–25 ms and each Simulink run ~3 s. The per-stage gaps (27 / 44 / 46 s mean) are UI rendering, not computation. `getframe` on a uifigure is expensive per call, so video capture was moved out of the 10 Hz pause loop to one capture per real state transition (21 → 4 captures per run, `VideoWriter` at 1 fps); this roughly halved the time per run but did not remove the gap. Still open: check `opengl('info')` for software rendering, test a session without video, and the planned handle-update rewrite (improvement #10). For demos, record with an external screen recorder (Win+G / OBS). CSV export was never missing — it is on the SESSION LOG tab.
+
+### External review document
+A third-party review text was assessed claim by claim. Correct: the LSTM files exist in the repo root and the GUI/dashboard/map scripts exist. Not correct for this code: adding EVM/phase features with `InputSize = 9` (spoofing was already fixed at its root, D12; the CNN input is a spectrogram plus 7 scalar features), "LSTM overfitting" as the reason it was dropped (D13 records measured results), and `main.m` running the LSTM (its flags are off). Moving the LSTM files to an `experiments/` folder is optional and cosmetic.
+
+### Proposal review and agreed plan
+The approved proposal is the binding specification: everything it states is implemented as stated; open questions are raised only where the code and the proposal genuinely differ. A line-by-line review against the proposal, verified against the code, found: KPI #2 measured against BER-before instead of the no-attack link (fixed here, D27); KPI #3 "recovery time in decision cycles/frames" replaced by decision speed; unknown-threat detection (deliverable 4, risk 13) without a quantitative evaluation; KPIs not reported "above a defined SNR threshold"; no decision hysteresis/dwell (risk 8); benign_interference leaving the link at ~27–31× the clean BER at 10 dB with `no_action`. The identical 25 dB effect of three actions was already documented (D19, README design note) — a known modelling simplification, not a new finding. The jammer-bandwidth threat-model change was initially ranked first but is not required by the proposal (it cites narrow vs barrage jamming as an example) and was downgraded. Agreed order: (1) KPI #2 vs clean → (2) countermeasure model → (3) DQN reward, benign policy and FAR definition, retrain → (4) episodic closed loop with dwell and recovery time (KPI #3) → (5) unknown-threat evaluation and combined threats → (6) detector quality (reactive_jamming, unseen-SNR test) → (7) KPI reporting (SNR threshold, PLR/goodput, latency protocol) → (8) Monte Carlo and seeds → (9) GUI performance and content → (10) docs and report.
+
+### D27 — KPI #2 against the no-attack link
+`recompute_recovery_vs_clean.m` re-scored the saved 2026-09-21 results without simulation. Clean references agree (closed-loop `none` runs vs EXP, within 2–15%). Closed loop: 95.6% per-run / 95.3% per-threat (76.3% / 75.9% previous metric); 37/41 restored, 4 marginal (jamming 2, reactive_jamming 1, antenna_fault 1), 0 not restored, 1 missed detection (antenna_fault @ 0 dB, 1.4× clean). Per threat: jamming 97.1, reactive_jamming 97.8, sweeping_jammer 95.4, noise_burst 96.9, path_loss 99.1, spoofing 99.0, antenna_fault 81.9%. Speed sweep: 94.7–96.9% at every speed, 95.6% overall (72.4% previous). The metric is now computed natively by the diagnostic, the speed sweep, the KPI report, the dashboard and the GUI. Not yet executed inside the full pipeline — the next `run_closed_loop_diagnostic` run will produce these numbers directly.
+
+### Next
+Improvement (2): physics-based countermeasure model in one shared function, replacing the duplicated `action_mitigation_db` table in 7 scripts; then (3) DQN retrain.
+

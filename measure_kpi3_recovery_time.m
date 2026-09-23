@@ -75,7 +75,11 @@ for i = 1:n
     mask = strcmp({res.threat}, threats{i});
     sub  = res(mask);
     dqn_latency_ms(i) = mean([sub.dqn_latency_ms]);
-    recovery_pct(i)   = mean([sub.recovery_pct], 'omitnan');
+    if isfield(sub, 'rec_vs_clean')
+        recovery_pct(i) = mean([sub(~[sub.missed]).rec_vs_clean], 'omitnan');   % KPI #2 definition (D27)
+    else
+        recovery_pct(i) = mean([sub.recovery_pct], 'omitnan');
+    end
     agrees_frac(i)    = mean([sub.agrees_with_rule]);
     rule_action{i}    = sub(1).rule_based_action;   % rule policy doesn't depend on SNR
 end
@@ -106,7 +110,7 @@ report{end+1} = '';
 report{end+1} = 'DQN latency/recovery/agreement are averaged across the full SNR sweep';
 report{end+1} = '(each threat has one data point per SNR point in the diagnostic run).';
 report{end+1} = '';
-report{end+1} = sprintf('%-22s %14s %14s %10s %10s', 'Threat', 'DQN (ms)', 'Rule (ms)', 'Agree%', 'Recov%');
+report{end+1} = sprintf('%-22s %14s %14s %10s %10s', 'Threat', 'DQN (ms)', 'Rule (ms)', 'Agree%', 'Recov% (vs clean)');
 for i = 1:n
     if isnan(recovery_pct(i))
         report{end+1} = sprintf('%-22s %14.3f %14.5f %9.0f%% %10s', ...
@@ -135,7 +139,7 @@ report{end+1} = 'few ms of real neural-network inference. This is the genuine sp
 report{end+1} = 'of using a learned policy over a static one in this system -- DQN''s value is';
 report{end+1} = 'not faster convergence (both converge in 1 step) but rather the potential to';
 report{end+1} = 'learn better-than-rule-based action choices from data (measured separately as';
-report{end+1} = 'recovery%% and agreement rate above).';
+report{end+1} = 'recovery % and agreement rate above).';
 
 if ~exist('results', 'dir'), mkdir('results'); end
 fid = fopen('results/kpi3_measurement.txt', 'w');

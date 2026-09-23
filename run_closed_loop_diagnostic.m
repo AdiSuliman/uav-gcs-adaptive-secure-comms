@@ -252,9 +252,35 @@ end
 params = p0; save('params.mat', 'params');
 fprintf('Sweep complete. Total time: %.1f minutes\n\n', toc(t_start)/60);
 
+%% ========== KPI #2: recovery against the no-attack link ==========
+% Clean reference = the 'none' run at the same Eb/N0 in this sweep (D27).
+% A real threat left at no_action counts as a miss: rec 0%, ratio before/clean.
+clean_ber = nan(size(SNR_points));
+for s = 1:numel(SNR_points)
+    m = strcmp({results.threat}, 'none') & [results.snr_db] == SNR_points(s);
+    if any(m), clean_ber(s) = mean([results(m).ber_before]); end
+end
+for i = 1:numel(results)
+    s = find(SNR_points == results(i).snr_db, 1);
+    results(i).ber_clean    = clean_ber(s);
+    results(i).rec_vs_clean = NaN;
+    results(i).ratio_clean  = results(i).ber_after / clean_ber(s);
+    results(i).missed       = false;
+    if ismember(results(i).threat, {'benign_interference','none'}), continue; end
+    if strcmp(results(i).dqn_action, 'no_action')
+        results(i).missed = true;
+        results(i).rec_vs_clean = 0;
+    else
+        [results(i).rec_vs_clean, results(i).ratio_clean] = recovery_vs_clean( ...
+            results(i).ber_before, results(i).ber_after, clean_ber(s));
+    end
+end
+RATIO_OK = 2; RATIO_MARG = 5;   % same thresholds as the survivability maps
+
 %% ========== Save raw results ==========
 if ~exist('results', 'dir'), mkdir('results'); end
-save('results/closed_loop_diagnostic_results.mat', 'results', 'SNR_points', 'threats');
+save('results/closed_loop_diagnostic_results.mat', 'results', 'SNR_points', 'threats', ...
+    'clean_ber', 'RATIO_OK', 'RATIO_MARG');
 
 %% ========== Full report ==========
 report = {};
@@ -276,8 +302,34 @@ report{end+1} = 'Both exclude Simulink build/sim time and any PHY-layer synchron
 report{end+1} = '(out of scope, see D7) -- this is decision-system reaction time only.';
 report{end+1} = '';
 
+%% --- Section 0: KPI #2 against the clean link ---
+report{end+1} = '--- Section 0: KPI #2 - Recovery vs the No-Attack Link, per Threat per SNR ---';
+report{end+1} = 'rec = 100*(BER_before - BER_after)/(BER_before - BER_clean), capped at 100;';
+report{end+1} = sprintf('ratio = BER_after/BER_clean (<= %g restored, <= %g marginal). Clean = none run at the same Eb/N0.', RATIO_OK, RATIO_MARG);
+hdr = sprintf('%-22s', 'Threat');
+for s = 1:numel(SNR_points)
+    hdr = [hdr sprintf('%16s', sprintf('%gdB', SNR_points(s)))]; %#ok<AGROW>
+end
+report{end+1} = [hdr sprintf('%10s', 'mean')];
+for t = 1:numel(threats)
+    if ismember(threats{t}, {'benign_interference','none'}), continue; end
+    line = sprintf('%-22s', threats{t});
+    mask_t = strcmp({results.threat}, threats{t});
+    for s = 1:numel(SNR_points)
+        r = results(mask_t & [results.snr_db] == SNR_points(s));
+        if r.missed
+            line = [line sprintf('%16s', sprintf('MISS %.1fx', r.ratio_clean))]; %#ok<AGROW>
+        else
+            line = [line sprintf('%16s', sprintf('%.1f%% %.2fx', r.rec_vs_clean, r.ratio_clean))]; %#ok<AGROW>
+        end
+    end
+    report{end+1} = [line sprintf('%9.1f%%', mean([results(mask_t & ~[results.missed]).rec_vs_clean], 'omitnan'))]; %#ok<SAGROW>
+end
+report{end+1} = sprintf('Clean BER by Eb/N0: %s', mat2str(clean_ber, 3));
+report{end+1} = '';
+
 %% --- Section 1: recovery matrix, threat x SNR ---
-report{end+1} = '--- Section 1: Recovery % per Threat per SNR ---';
+report{end+1} = '--- Section 1: Recovery % vs BER-before (previous metric, kept for comparison) ---';
 hdr = sprintf('%-22s', 'Threat');
 for s = 1:numel(SNR_points)
     hdr = [hdr sprintf('%10s', sprintf('%gdB', SNR_points(s)))];
@@ -360,8 +412,8 @@ for i = 1:numel(results)
         report{end+1} = sprintf('  BER before=%.3e after=%.3e recovery=N/A (no action)', ...
             r.ber_before, r.ber_after);
     else
-        report{end+1} = sprintf('  BER before=%.3e after=%.3e recovery=%.1f%%', ...
-            r.ber_before, r.ber_after, r.recovery_pct);
+        report{end+1} = sprintf('  BER before=%.3e after=%.3e clean=%.3e | vs-clean %.1f%% (%.2fx clean) | vs-before %.1f%%', ...
+            r.ber_before, r.ber_after, r.ber_clean, r.rec_vs_clean, r.ratio_clean, r.recovery_pct);
     end
 end
 report{end+1} = '';
@@ -386,6 +438,19 @@ report{end+1} = sprintf('Mean recovery (all threats, all SNR): %.1f%%', mean([re
 real_mask = ~ismember({results.threat}, {'benign_interference','none'});
 report{end+1} = sprintf('Mean recovery (real threats only): %.1f%%', mean([results(real_mask).recovery_pct], 'omitnan'));
 
+act_mask = real_mask & ~[results.missed];
+per_t = nan(1, numel(threats));
+for t = 1:numel(threats)
+    m = act_mask & strcmp({results.threat}, threats{t});
+    if any(m), per_t(t) = mean([results(m).rec_vs_clean], 'omitnan'); end
+end
+rat = [results(act_mask).ratio_clean];
+report{end+1} = sprintf('KPI #2 recovery vs clean link (real threats, per-run mean): %.1f%% | mean of per-threat means: %.1f%%', ...
+    mean([results(act_mask).rec_vs_clean], 'omitnan'), mean(per_t, 'omitnan'));
+report{end+1} = sprintf('KPI #2 link state after countermeasure: %d/%d restored (<= %gx clean), %d marginal, %d not restored | missed detections: %d', ...
+    sum(rat <= RATIO_OK), numel(rat), RATIO_OK, sum(rat > RATIO_OK & rat <= RATIO_MARG), sum(rat > RATIO_MARG), ...
+    sum([results(real_mask).missed]));
+
 fid = fopen('results/closed_loop_diagnostic_report.txt','w');
 for i=1:numel(report), fprintf(fid,'%s\n',report{i}); end
 fclose(fid);
@@ -397,16 +462,17 @@ fig1 = figure('Position',[100 100 1000 550],'Color','w');
 hold on;
 for t = 1:numel(threats)
     mask_t = strcmp({results.threat}, threats{t});
-    rec = zeros(1, numel(SNR_points));
+    if ismember(threats{t}, {'benign_interference','none'}), continue; end
+    rec = nan(1, numel(SNR_points));
     for s = 1:numel(SNR_points)
         mask = mask_t & ([results.snr_db] == SNR_points(s));
-        rec(s) = results(mask).recovery_pct;
+        rec(s) = results(mask).rec_vs_clean;
     end
     plot(SNR_points, rec, '-o', 'LineWidth', 1.5, 'DisplayName', strrep(threats{t},'_','\_'));
 end
 hold off;
-xlabel('E_b/N_0 (dB)'); ylabel('BER Recovery (%)');
-title('Closed-Loop Recovery vs SNR (sliding-window detection)');
+xlabel('E_b/N_0 (dB)'); ylabel('Recovery vs clean link (%)');
+title('KPI #2: Closed-Loop Recovery vs the No-Attack Link');
 legend('Location','eastoutside'); grid on;
 xticks(SNR_points);
 saveas(fig1,'results/closed_loop_recovery_vs_snr.png');
