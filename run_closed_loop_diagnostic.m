@@ -44,11 +44,6 @@ temporal_window = 10;      % must match extract_spectrograms.m
 SNR_points = p0.EbNo_dB;   % full sweep, 0:2:10
 
 threats = {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','spoofing','antenna_fault','benign_interference','none'};
-strength_field = containers.Map( ...
-    {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','antenna_fault','spoofing','benign_interference','none'}, ...
-    {'jsr_db','jsr_db','jsr_db','jsr_db','path_loss_db','fault_atten_db','spoof_sir_db','benign_int_db','jsr_db'});
-action_mitigation_db = struct('no_action',0,'channel_switch',25,'rate_reduce',15, ...
-    'freq_diversity',25,'spatial_diversity',25);
 action_names = dqn_agent_trained.action_names;
 
 baseline = struct('jsr_db',p0.jsr_db,'path_loss_db',p0.path_loss_db, ...
@@ -111,7 +106,6 @@ for s = 1:numel(SNR_points)
 
     for t = 1:numel(threats)
         threat = threats{t};
-        field = strength_field(threat);
         run_count = run_count + 1;
         fprintf('[%d/%d] SNR=%g dB | Threat: %s\n', run_count, total_runs, ebno, threat);
 
@@ -216,15 +210,12 @@ for s = 1:numel(SNR_points)
             fprintf('    DQN: %-18s (%.2f ms) | Rule: %-18s | Recovery: N/A (no action)\n\n', ...
                 action_name, dqn_latency_ms, rule_action);
         else
-            mitigation_db = action_mitigation_db.(action_name);
-            p.(field) = baseline.(field) - mitigation_db;
-            if any(strcmp(field, {'path_loss_db','fault_atten_db'}))
-                p.(field) = max(p.(field), 0);   % physical floor
-            end
-            params = p; save('params.mat', 'params');
+            % Physics of the chosen action on the TRUE threat (D28)
+            [p_cm, g_db] = apply_countermeasure(p, threat, action_name);
+            params = p_cm; save('params.mat', 'params');
             build_threat_model;
-            set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), ...
-                'SignalPower', num2str(1/p.sps));
+            set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), ...
+                'SignalPower', num2str(1/p_cm.sps));
 
             % Before/after both averaged over all valid frames of their runs,
             % so the comparison is like-for-like.

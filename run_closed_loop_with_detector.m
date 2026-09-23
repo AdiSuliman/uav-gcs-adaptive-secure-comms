@@ -43,13 +43,6 @@ threats = {'jamming', 'reactive_jamming', 'sweeping_jammer', 'noise_burst', ...
            'path_loss', 'spoofing', 'antenna_fault', 'benign_interference'};
 n_threats = numel(threats);
 
-strength_field = containers.Map( ...
-    {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','antenna_fault','spoofing','benign_interference'}, ...
-    {'jsr_db', 'jsr_db',           'jsr_db',          'jsr_db',   'path_loss_db','fault_atten_db','spoof_sir_db','benign_int_db'});
-
-action_mitigation_db = struct( ...
-    'no_action', 0, 'channel_switch', 25, 'rate_reduce', 15, ...
-    'freq_diversity', 25, 'spatial_diversity', 25);
 action_names = dqn_agent_trained.action_names;
 
 baseline = struct();
@@ -64,7 +57,6 @@ fprintf('\nRunning closed-loop test per threat...\n\n');
 
 for t = 1:n_threats
     threat = threats{t};
-    field  = strength_field(threat);
     fprintf('[%d/%d] Threat: %-18s\n', t, n_threats, threat);
 
     % Reset all threat fields to baseline (isolate this threat)
@@ -121,15 +113,14 @@ for t = 1:n_threats
     action_name = action_names{action_idx};
     fprintf('    DQN action:   %-18s (based on detected class)\n', action_name);
 
-    %% --- Step 5: Apply countermeasure — reduce THIS threat's real strength field ---
-    mitigation_db = action_mitigation_db.(action_name);
-    p.(field) = baseline.(field) - mitigation_db;
-    if any(strcmp(field, {'path_loss_db','fault_atten_db'}))
-        p.(field) = max(p.(field), 0);   % physical floor: loss/attenuation can't go negative
-    end
-    params = p;
+    %% --- Step 5: Apply countermeasure — physics of the action on the TRUE threat (D28) ---
+    [p_cm, g_db] = apply_countermeasure(p, threat, action_name);
+    params = p_cm;
     save('params.mat', 'params');
     build_threat_model;
+    set_param('UAV_GCS_Threat_Link/AWGN', 'SNR', ...
+        num2str(p_cm.EbNo_dB(1) + 10*log10(p_cm.bits_per_symbol) - 10*log10(p_cm.sps) + g_db), ...
+        'SignalPower', num2str(1/p_cm.sps));
     [ber_after, ~] = quick_ber_with_iq_fixed('UAV_GCS_Threat_Link', delay_bits);
 
     recovery_pct = 100 * (ber_before - ber_after) / max(ber_before, eps);

@@ -7,9 +7,8 @@
 % because nothing in the loop actually depended on the policy at all.
 %
 % Root cause of why "cycles" was the wrong framing to begin with: in this
-% system, every countermeasure action applies a FIXED, ONE-SHOT dB mitigation
-% (action_mitigation_db, see rule_based_policy.m / run_closed_loop_*.m) to the
-% threat's severity field. Both DQN and Rule-Based are deterministic policies
+% system, every countermeasure action is applied ONCE to the link model
+% (apply_countermeasure.m, D28). Both DQN and Rule-Based are deterministic policies
 % -- given a fixed state, each picks exactly one action and converges
 % immediately. There is no real iterative "cycles to converge" dynamic in
 % this architecture to measure.
@@ -127,12 +126,9 @@ report{end+1} = sprintf('Speed ratio: Rule-Based is ~%.0fx faster than DQN (look
     mean(dqn_latency_ms) / mean(rule_latency_ms));
 report{end+1} = sprintf('DQN-vs-Rule agreement (overall, all threats x SNR): %.1f%%', 100*mean(agrees_frac));
 report{end+1} = '';
-report{end+1} = 'CAVEAT: agreement compares only the chosen ACTION NAME between policies.';
-report{end+1} = 'rule_based_policy.m''s own per-threat mitigation_db values are computed but';
-report{end+1} = 'never applied to any BER calculation -- both policies'' physical mitigation';
-report{end+1} = 'effect goes through the same action_mitigation_db (25/15/25/25 dB). This is';
-report{end+1} = 'a decision-policy comparison, not two independently-realized countermeasure';
-report{end+1} = 'systems (see docs/DECISIONS.md).';
+report{end+1} = 'NOTE: both policies act through the same physical countermeasure model';
+report{end+1} = '(apply_countermeasure.m, D28), so agreement and recovery compare decision';
+report{end+1} = 'quality only. Disagreement is no longer cosmetic: actions differ in effect.';
 report{end+1} = '';
 report{end+1} = 'Interpretation: Rule-Based is effectively instant (a dB lookup); DQN costs a';
 report{end+1} = 'few ms of real neural-network inference. This is the genuine speed trade-off';

@@ -66,6 +66,11 @@ params.benign_int_db  = -6;         % [A-ext] Benign Interference power (dB), we
 params.sweep_duty    = 0.15;        % [A-ext] Sweeping Jammer: fraction of time dwelling on our channel
 params.sweep_period  = 300;         % [A-ext] Sweeping Jammer: full sweep cycle length (symbols, longer than noise_burst's 100)
 
+% [D28] Countermeasure physics (apply_countermeasure.m)
+params.cm_acr_db      = 30;         % [dB] rejection of an interferer left on another channel
+params.cm_rate_factor = 4;          % rate_reduce: data rate / 4 -> +6 dB processing gain, goodput x0.25
+params.cm_n_rx        = 2;          % spatial_diversity: receive antennas combined by MRC (+3 dB)
+
 %% ========== NOISE & SWEEP ==========
 params.EbNo_dB    = 0:2:10;            % [ACTIVE] Eb/N0 sweep range (dB)
 params.num_frames = 1000;             % [ACTIVE] frames accumulated per Eb/N0 point

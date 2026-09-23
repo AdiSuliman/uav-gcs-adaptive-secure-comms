@@ -63,11 +63,6 @@ if isfield(p0, 'speed_kmh_min')
 else
     env.speed_range = [50 120];
 end
-env.strength_field = containers.Map( ...
-    {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','antenna_fault','spoofing','benign_interference','none'}, ...
-    {'jsr_db','jsr_db','jsr_db','jsr_db','path_loss_db','fault_atten_db','spoof_sir_db','benign_int_db','jsr_db'});
-env.action_mitigation_db = struct('no_action',0,'channel_switch',25,'rate_reduce',15, ...
-    'freq_diversity',25,'spatial_diversity',25);
 env.action_names = env.dqn_agent.action_names;
 env.baseline = struct('jsr_db',p0.jsr_db,'path_loss_db',p0.path_loss_db, ...
     'fault_atten_db',p0.fault_atten_db,'spoof_sir_db',p0.spoof_sir_db, ...
@@ -743,7 +738,6 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     fd_hz   = (v_kmh/3.6) * env.p0.carrier_freq / env.p0.c_light;
     info0   = struct('v_kmh', v_kmh, 'fd', fd_hz);
 
-    field = env.strength_field(threat);
     p = env.p0;
     p.jsr_db = env.baseline.jsr_db; p.path_loss_db = env.baseline.path_loss_db;
     p.fault_atten_db = env.baseline.fault_atten_db; p.spoof_sir_db = env.baseline.spoof_sir_db;
@@ -875,7 +869,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     ruleNone = strcmp(rule_action, 'no_action');
     if ~dqnNone
         appLog(fig, sprintf('Applying DQN countermeasure (%s) and re-simulating the link...', niceName(action_name)));
-        Rd = applyMitigation(env, p, field, action_name, snr_dB);
+        Rd = applyMitigation(env, p, threat, action_name, snr_dB);
         updateTimer(fig, tSeq); checkAbort(fig);
     else
         appLog(fig, 'DQN chose NO ACTION - monitoring the link.');
@@ -885,7 +879,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
             Rr = Rd;
         else
             appLog(fig, sprintf('Re-simulating with the rule-based choice (%s) for comparison...', niceName(rule_action)));
-            Rr = applyMitigation(env, p, field, rule_action, snr_dB);
+            Rr = applyMitigation(env, p, threat, rule_action, snr_dB);
             updateTimer(fig, tSeq); checkAbort(fig);
         end
     end
@@ -914,10 +908,8 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     end
     drawOutcome(fig, vals, names, cols);
 
-    goodput = 'GOODPUT: no throughput penalty modeled for this action';
-    if strcmp(action_name, 'rate_reduce') || (doRule && strcmp(rule_action, 'rate_reduce'))
-        goodput = 'GOODPUT: REDUCED - rate reduction trades throughput for margin';
-    end
+    [~, ~, cmD] = apply_countermeasure(p, threat, action_name);
+    goodput = sprintf('COST (DQN): goodput x%.2f | spectrum x%d | %s', cmD.goodput_factor, cmD.bw_factor, cmD.effect);
     lines = {outLine('BER before', ber_before_mean, NaN), outLine('BER DQN   ', ber_dqn, rec_dqn)};
     if doRule, lines{end+1} = outLine('BER RULE  ', ber_rule, rec_rule); else, lines{end+1} = '(rule comparison off)'; end
     lines{end+1} = goodput;
@@ -967,15 +959,13 @@ function s = outLine(lbl, ber, rec)
     else,          s = sprintf('%s: %.2e   (%.1f%% recovered)', lbl, ber, rec); end
 end
 
-function R = applyMitigation(env, p, field, action_name, snr_dB)
-    % Real second simulation of the link with the countermeasure applied
-    % (flat dB reduction of the threat's severity field, same table as training).
-    mdb = env.action_mitigation_db.(action_name);
-    p2 = p; p2.(field) = p.(field) - mdb;
-    if any(strcmp(field, {'path_loss_db','fault_atten_db'})), p2.(field) = max(p2.(field), 0); end
+function R = applyMitigation(env, p, threat, action_name, snr_dB) %#ok<INUSL>
+    % Real second simulation of the link with the countermeasure applied to the
+    % TRUE threat (same physics as training and evaluation, apply_countermeasure.m).
+    [p2, g_db] = apply_countermeasure(p, threat, action_name);
     params = p2; save('params.mat', 'params'); %#ok<NASGU>
     build_threat_model;
-    set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/p2.sps));
+    set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p2.sps));
     out2 = sim(env.modelName);
     [iqf, berf, rssif, ~, nf2] = extract_closed_loop_frames(out2, p2, env.delay_bits);
     i2 = find(~isnan(berf), 1, 'last'); if isempty(i2), i2 = nf2; end

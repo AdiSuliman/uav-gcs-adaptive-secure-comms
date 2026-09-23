@@ -11,7 +11,7 @@
 | Closed-loop detection over 50–120 km/h (8 speeds) | **98.1%** (212/216), FAR 0/48 | not measured |
 | KPI #2 recovery vs no-attack link (D27) | **95.6%** per-run (95.3% per-threat); 37/41 restored ≤ 2× clean, 4 marginal, 1 missed; speed sweep 95.6% | not measured this way |
 | Recovery vs BER-before (previous metric) | 76.3% per-run (75.9% per-threat); 72.4% in the speed sweep | 74.6% |
-| Decision latency (mean / median, CNN+DQN) | **10.21 / 10.05 ms** (CNN 8.88 + DQN 1.33) — re-measurement pending | 6.09 / 5.67 ms |
+| Decision latency (mean / median, CNN+DQN) | **10.21 / 10.05 ms** (CNN 8.88 + DQN 1.33); reproduced 2026-09-23: 10.63 / 9.99 ms | 6.09 / 5.67 ms (previous build) |
 | FAR (non-hostile, 180 trials over SNR) | 0.0% (95% CI upper 3.3% per-class n=90, 1.7% combined n=180) | 0.0% (same bound) |
 | DQN-vs-rule action agreement | 53.7% (29/54) | ~44% |
 | Survivability Map A / Map B recoverable | **85.5% / 88.3%** | 83.8% / 87.5% |
@@ -226,7 +226,7 @@ Antenna Fault recovery, benign_interference reward gap, reactive_jamming misdete
 10. **`.gitignore`** has 4 duplicate/overlapping `models/` entries accumulated across incremental commits — cosmetic, needs a cleanup pass.
 
 ### Open (2026-09-22)
-11. **Decision latency 10.21 ms (full run) vs 6.09 ms (D23 measurement)** with unchanged architectures — likely machine/GPU state at the end of a 4-hour session; unverified. Re-measure `run_closed_loop_diagnostic` alone in a fresh MATLAB session and cite that number.
+11. ~~Decision latency 10.21 ms vs 6.09 ms~~ — **resolved 2026-09-23:** an independent diagnostic run gives 10.63 / 9.99 ms (mean / median), matching the full run. Cite ~10 ms (median); the 6.09 ms D23 figure belongs to the previous build.
 12. **reactive_jamming recall 87.1%** (was 91.0%) and **antenna_fault** (92.8% recall, 5/6 closed-loop, 60.6% recovery) are the weak spots; the possible link between speed diversity and the reactive-vs-jamming temporal features is an untested hypothesis. Decide: targeted improvement vs. documented limitation.
 13. **Interim report numbers are stale** relative to the 2026-09-21 re-run (checklist in Session 11) and to D27 (KPI #2 is now 95.6% vs the clean link; show both metrics with their definitions).
 14. **`main.m` CHECKPOINT footer is a hard-coded string** with pre-re-run numbers (CNN 96.99%, closed-loop 100%, recovery 74.6%, latency 2.67 ms, Map A/B 84.6/87.9); the authoritative values are `results/kpi_summary.txt` and `results/kpi_dashboard.png`.
@@ -530,7 +530,7 @@ Adi reported the GUI as stuck/slow right after the full run. Two causes identifi
 Offline accuracy 96.7% → 96.4% and macro-F1 → 96.4%; accuracy at 0 dB 93.4% → 91.4%; reactive_jamming recall 91% → 87.1%; closed-loop detection 100% (54/54) → 98.1% (53/54); mean recovery 74.6% → 76.3%; decision latency ~5.7 ms → 10.2 ms (or the re-measured value); DQN-vs-rule agreement ~44% → 53.7%; reactive_jamming end-to-end recovery 86.1% → 85.7%; Map A / Map B 84.6 / 87.9% (report) → 85.5 / 88.3%; dataset size 27,246 → 27,270 frames; EXP run size/time; add the 50–120 km/h envelope (amends D4, Doppler 111–267 Hz) and the speed-robustness results to the methodology and results chapters; update the GUI description to v3. FAR figures are unchanged.
 
 ### Open items going into the next session
-- Re-measure decision latency in a fresh MATLAB session (open item 11), then update README, this log and the report with one number.
+- ~~Re-measure decision latency~~ — done 2026-09-23 (open item 11 resolved, ~10 ms).
 - Decide on reactive_jamming and antenna_fault (open item 12); consider demonstrating the UNKNOWN-threat threshold on the antenna_fault @ 0 dB case in the GUI.
 - Sync the interim report (checklist above); replace the hard-coded CHECKPOINT footer in `main.m` (open item 14).
 - Live-test `demo_gui.m` v3 in MATLAB and send back any runtime error text or layout feedback.
@@ -553,6 +553,15 @@ The approved proposal is the binding specification: everything it states is impl
 ### D27 — KPI #2 against the no-attack link
 `recompute_recovery_vs_clean.m` re-scored the saved 2026-09-21 results without simulation. Clean references agree (closed-loop `none` runs vs EXP, within 2–15%). Closed loop: 95.6% per-run / 95.3% per-threat (76.3% / 75.9% previous metric); 37/41 restored, 4 marginal (jamming 2, reactive_jamming 1, antenna_fault 1), 0 not restored, 1 missed detection (antenna_fault @ 0 dB, 1.4× clean). Per threat: jamming 97.1, reactive_jamming 97.8, sweeping_jammer 95.4, noise_burst 96.9, path_loss 99.1, spoofing 99.0, antenna_fault 81.9%. Speed sweep: 94.7–96.9% at every speed, 95.6% overall (72.4% previous). The metric is now computed natively by the diagnostic, the speed sweep, the KPI report, the dashboard and the GUI. Not yet executed inside the full pipeline — the next `run_closed_loop_diagnostic` run will produce these numbers directly.
 
+### D27 native verification (2026-09-23)
+`run_closed_loop_diagnostic` with the integrated metric (new random draw, same models): KPI #2 96.2% per-run / 95.8% per-threat; 37/41 restored, 4 marginal, 0 not restored, 1 missed (antenna_fault @ 0 dB, 1.5× clean); consistent with the post-hoc 95.6% / 95.3%. Per threat: jamming 97.6, reactive_jamming 97.7, sweeping_jammer 96.9, noise_burst 96.6, path_loss 99.7, spoofing 99.4, antenna_fault 83.1%. All four marginal outcomes are at 10 dB (jamming 4.31×, antenna_fault 2.94×, reactive_jamming 2.75×, noise_burst 2.27×): the fixed-size countermeasure leaves a residual that dominates when the clean BER is lowest (2.45e-3) — an input to improvement (2). Detection 53/54, agreement 53.7%, latency 10.63 / 9.99 ms (mean / median) — this closes open item 11.
+
+### Bug fixed: KPI report overwritten by auto-run source scripts
+`measure_all_kpis.m` is a script and re-runs a stale source script (`run_closed_loop_diagnostic`, `measure_kpi3_recovery_time`, `diagnose_far_measurement`) in the same workspace. Each of those starts with `report = {}`, so the KPI sections assembled before the call were wiped: on 2026-09-23 `kpi_summary.txt` contained only the FAR report and KPI #4, because the FAR result was older than 12 h. Fixed by calling them through a local `run_isolated()` function, which gives each its own workspace. The 2026-09-21 full run was not affected (`main.m` ran every source script before `measure_all_kpis`, so none was re-run inside it).
+
+### D28 — physics-based countermeasure model (improvement 2, code complete)
+`apply_countermeasure.m` replaces the duplicated `action_mitigation_db` table in `train_dqn.m`, `run_closed_loop_diagnostic.m`, `run_closed_loop_with_detector.m`, `eval_speed_robustness.m` and `demo_gui.m` (the GUI now also shows each action's goodput/spectrum cost and effect). `rule_based_policy.m` aligned to the same physics (sweeping → freq_diversity, spoofing → channel_switch). New `eval_countermeasure_matrix.m`: threat × action × Eb/N0 {0, 4, 10} through the real link, 45 model builds. Constants `cm_acr_db` = 30, `cm_rate_factor` = 4, `cm_n_rx` = 2 in `init_params.m`. Real-link matrix (2026-09-23): physics verified; non-recoverable regimes found — noise_burst at 10 dB (29× clean with the best action), path_loss marginal at 4 dB (2.6×) and not restorable at 10 dB (7.0×), sweeping_jammer marginal at 10 dB (4.4×); in-channel threats and antenna_fault restored at every Eb/N0. Rule-based choice within 10% of the best BER in 18/21 real-threat cells. `rate_reduce` is the lowest-BER action in 9/21 cells if its goodput cost is ignored.
+
 ### Next
-Improvement (2): physics-based countermeasure model in one shared function, replacing the duplicated `action_mitigation_db` table in 7 scripts; then (3) DQN retrain.
+Improvement (3): DQN reward with action costs, benign policy and FAR definition, retrain, and a full re-run of C3, speed sweep and the survivability map on the D28 model.
 

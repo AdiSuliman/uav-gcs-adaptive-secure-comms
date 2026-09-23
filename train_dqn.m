@@ -21,11 +21,6 @@ threat_list = {'jamming', 'reactive_jamming', 'sweeping_jammer', 'noise_burst', 
                'path_loss', 'spoofing', 'antenna_fault', 'benign_interference', 'none'};
 
 action_names = agent.action_names;
-action_mitigation_db = struct('no_action',0,'channel_switch',25,'rate_reduce',15, ...
-    'freq_diversity',25,'spatial_diversity',25);
-strength_field = containers.Map( ...
-    {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','antenna_fault','spoofing','benign_interference','none'}, ...
-    {'jsr_db', 'jsr_db',           'jsr_db',          'jsr_db',   'path_loss_db','fault_atten_db','spoof_sir_db','benign_int_db','jsr_db'});
 
 init_params;
 p0 = load('params.mat').params;
@@ -44,7 +39,6 @@ base_rssi = zeros(num_threats, 1);
 
 for ti = 1:num_threats
     threat = threat_list{ti};
-    field = strength_field(threat);
 
     p = p0; p.jsr_db=baseline.jsr_db; p.path_loss_db=baseline.path_loss_db;
     p.fault_atten_db=baseline.fault_atten_db; p.spoof_sir_db=baseline.spoof_sir_db;
@@ -66,14 +60,12 @@ for ti = 1:num_threats
     fprintf('  %-20s baseline BER=%.3e | ', threat, ber_before);
     for ai = 1:5
         action = action_names{ai};
-        mitigation_db = action_mitigation_db.(action);
-        p2 = p;
-        p2.(field) = baseline.(field) - mitigation_db;
-        if any(strcmp(field, {'path_loss_db','fault_atten_db'}))
-            p2.(field) = max(p2.(field), 0);
-        end
+        [p2, g_db] = apply_countermeasure(p, threat, action);   % D28
         params = p2; save('params.mat', 'params');
         build_threat_model;
+        set_param('UAV_GCS_Threat_Link/AWGN', 'SNR', ...
+            num2str(p2.EbNo_dB(1) + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps) + g_db), ...
+            'SignalPower', num2str(1/p2.sps));
         ber_after = quick_ber('UAV_GCS_Threat_Link');
 
         recov = 100*(ber_before-ber_after)/max(ber_before,eps);
@@ -143,7 +135,6 @@ prev_threat = '';
 for ep = 1:total_episodes
     threat_idx = threat_schedule(ep);
     threat = threat_list{threat_idx};
-    field = strength_field(threat);
 
     if ~strcmp(threat, prev_threat)
         fprintf('  Threat: %s\n', threat);

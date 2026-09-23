@@ -36,7 +36,7 @@ An AI-driven closed-loop system for detecting and adapting to link-layer threats
 │   ├── UAV_GCS_Rician_Link.slx   # A3: fading + Doppler
 │   └── UAV_GCS_Threat_Link.slx   # A4-A6: threats + recovery
 ├── docs/
-│   └── DECISIONS.md              # Architecture Decision Record (D1-D27)
+│   └── DECISIONS.md              # Architecture Decision Record (D1-D28)
 ├── diagnostics/                  # Ad-hoc investigation scripts, kept for reproducibility
 ├── README.md                     # This file
 ├── PROJECT_LOG.md                # Living execution log — status, fix history, open issues
@@ -98,8 +98,9 @@ All numbers below come from one clean run of `main.m` with every RUN flag on (st
 ### Phase C3 (Closed-Loop) — 9 threats × 6 Eb/N0
 - Detection accuracy in closed loop: **98.1%** (53/54) (100%, 54/54). The single miss: antenna_fault @ 0 dB, classified as sweeping_jammer with only 31.2% CNN confidence; the DQN then chose `no_action`. This is exactly the case the UNKNOWN-threat threshold in the GUI is meant to catch.
 - **KPI #2 — recovery against the no-attack link (proposal definition, D27): 95.6%** per-run mean (95.3% mean of per-threat means). After the countermeasure the link is back within 2× the clean BER in **37/41** runs, marginal (2–5×) in 4, never worse; plus one missed detection (antenna_fault @ 0 dB). Clean reference = the `none` run at the same Eb/N0; it matches the EXP clean BER within 2–15% at every point.
+- Reproduced natively by `run_closed_loop_diagnostic` on 2026-09-23 (new random draw, same models): **96.2%** per-run / 95.8% per-threat, again 37/41 restored, 4 marginal, 1 missed (antenna_fault @ 0 dB). All four marginal outcomes are at Eb/N0 = 10 dB (jamming 4.3×, antenna_fault 2.9×, reactive_jamming 2.8×, noise_burst 2.3× clean): a fixed-size countermeasure leaves a residual interference that matters most when the clean BER is lowest.
 - Previous metric, recovery relative to BER-before: 76.3% over the same runs (74.6% before the re-run). It is kept for comparison only: it penalises threats that start from a low BER, which is why sweeping_jammer and noise_burst looked weak (60–72%) although they return to the clean link.
-- Decision latency (CNN preprocessing + inference + DQN): **mean 10.21 ms / median 10.05 ms** (CNN 8.88 + DQN 1.33 ms) — earlier measurement 6.09 / 5.67 ms. The architectures are unchanged; the likely cause is machine/GPU state at the end of a 4-hour session. A re-measurement in a fresh MATLAB session is pending (see Known Issues).
+- Decision latency (CNN preprocessing + inference + DQN): **mean 10.21 ms / median 10.05 ms** (CNN 8.88 + DQN 1.33 ms), reproduced in a separate diagnostic run on 2026-09-23 (mean 10.63 / median 9.99 ms). The current system's decision latency is therefore ~10 ms; the earlier 6.09 / 5.67 ms (D23) was measured on the previous single-speed build and is superseded.
 - DQN-vs-rule action agreement: 29/54 = **53.7%** (~44%) — see the design clarification below.
 - benign_interference and none: `no_action` in all 12 cases; recovery reported as N/A.
 
@@ -144,7 +145,7 @@ KPI1 detection 96.4% ✓ · KPI2 recovery 95.6% vs the no-attack link, 37/41 res
 
 Rule-based (hardcoded lookup table) is faster than DQN (neural network inference) by roughly three-to-four orders of magnitude (measured ~4,700×: 0.00028 ms vs 1.33 ms) — expected given the structural difference (constant-time lookup vs. a full forward pass), not a flaw in either policy. In the current static-mitigation environment (every action is a one-shot dB reduction, the threat does not adapt in response), this speed advantage isn't offset by any decision-quality advantage for the DQN — which is exactly why a **Dynamic/Chasing Jammer** scenario (an adversary that reacts to the system's countermeasures) is the priority future-work item: it's the scenario that should let a learned policy actually outperform a static one, closing this open question with a real result instead of a theoretical claim. See `## Known Issues & Future Work`.
 
-**Design clarification for the report:** the DQN-vs-rule "agreement" comparison (Phase C3 diagnostic, 53.7% in the latest run, ~44% before) compares only the *chosen action name* between the two policies. `rule_based_policy.m`'s own per-threat mitigation magnitudes are not applied anywhere in the closed-loop pipeline — both policies' physical effect is computed via the shared `action_mitigation_db` (25/15/25/25 dB per action). This is a deliberate methodological choice, not an oversight: unifying the action space isolates *decision quality* from *execution strength*, so any measured difference in outcomes is attributable to the algorithm, not to one policy being handed a more powerful lever than the other. State this explicitly wherever "agreement" is reported.
+**Design clarification for the report:** the DQN-vs-rule "agreement" comparison (Phase C3 diagnostic, 53.7% in the latest run, ~44% before) compares only the *chosen action name* between the two policies. `rule_based_policy.m`'s own per-threat mitigation magnitudes are not applied anywhere in the closed-loop pipeline — both policies' physical effect is computed through the same `apply_countermeasure.m` (D28; before D28, a shared `action_mitigation_db` of 25/15/25/25 dB). This is a deliberate methodological choice, not an oversight: unifying the action space isolates *decision quality* from *execution strength*, so any measured difference in outcomes is attributable to the algorithm, not to one policy being handed a more powerful lever than the other. State this explicitly wherever "agreement" is reported.
 
 ### Phase EXP + Survivability Boundary Mapping (proposal deliverable #7)
 Ran `explore_countermeasures.m` (re-run in the 2026-09-21 full pass: 2,790 simulations, 77.8 min) then `map_survivability_boundary.m`. EXP is BER-only (uses `quick_ber`, not the Rx_IQ spectrogram path) and runs at the nominal 72 km/h condition, so it was not affected by D18 or by the speed-diverse dataset (D25); the small shifts versus the previous numbers (83.8% / 87.5%) are simulation randomness, not a speed effect. Two separate maps:
@@ -180,12 +181,17 @@ Ran `explore_countermeasures.m` (re-run in the 2026-09-21 full pass: 2,790 simul
 - **Reward:** `100*(BER_before-BER_after)/max(BER_before,eps)` for real threats; fixed false-alarm penalty (no_action=0, all else=-40) for benign_interference and none (D9: non-hostile/no-threat conditions should not trigger a countermeasure)
 - **Training:** single-shot bandit formulation (done=1 every episode — no multi-step bootstrapping); benign_interference, none, and antenna_fault oversampled 3x; post-training validation gate (Gate A/B) blocks saving a non-compliant agent
 
-### Recovery — mitigation magnitudes (validated via EXP phase)
-- **channel_switch / freq_diversity / spatial_diversity:** 25 dB reduction
-- **rate_reduce:** 15 dB reduction
-- A physical floor prevents `path_loss_db`/`fault_atten_db` from going negative (unphysical signal amplification) under strong mitigation
+### Recovery — physics-based countermeasure model (D28, `apply_countermeasure.m`)
+One shared function applies the chosen action to the **true** threat for training, evaluation and the GUI. Threats are grouped by how they occupy the spectrum: in-channel (jamming, reactive_jamming, spoofing, benign_interference), swept (sweeping_jammer), broadband (noise_burst) and signal-side (path_loss, antenna_fault).
 
-**Design note:** the four non-zero actions are mechanistically identical in the current implementation — each subtracts its assigned `action_mitigation_db` from the threat's own severity field, regardless of the action's label. Three of the four actions share the same 25dB value. Most residual DQN-vs-rule-based "disagreement" is therefore cosmetic (the two labels are functionally near-equivalent in effect) — see the KPI #3 design clarification above.
+| Action | Physics | Effective against | No effect on | Cost |
+|---|---|---|---|---|
+| `channel_switch` | move to a channel the interferer does not occupy; interference falls by the adjacent-channel rejection (`cm_acr_db` = 30 dB) | in-channel threats | swept, broadband, signal-side | — |
+| `freq_diversity` | same data on two channels, best branch selected | in-channel threats (−30 dB); swept jammer must hit both channels at once (duty → duty²) | broadband, signal-side | 2× spectrum |
+| `spatial_diversity` | second receive antenna, MRC (`cm_n_rx` = 2) | +3 dB against noise and spatially uncorrelated interference; antenna_fault: healthy antenna replaces the faulty one | — | — |
+| `rate_reduce` | data rate ÷ `cm_rate_factor` (4) | +6 dB processing gain against noise and noise-like interference | no gain against the coherent spoofer | goodput × 0.25 |
+
+The previous model subtracted a fixed 25/15/25/25 dB from each threat's severity field regardless of the action's physics, so three actions were interchangeable and, for example, a channel switch "repaired" path loss. Its results (all tables above, dated 2026-09-21/23) remain as the pre-D28 reference until the DQN is retrained on the new model. `eval_countermeasure_matrix.m` measures every threat × action × Eb/N0 through the real link (`results/countermeasure_matrix.*`). First result: in-channel threats and antenna_fault are restorable at every Eb/N0; broadband noise_burst (29× clean at 10 dB) and strong path_loss (7.0× at 10 dB) are not restorable by any single action — the recoverable / non-recoverable contrast of proposal deliverable 7.
 
 ---
 
@@ -249,6 +255,7 @@ See `docs/DECISIONS.md` for the full Architecture Decision Record:
 - **D23:** `spectrogram()` warm-up added — eliminated a one-time JIT skew between mean and median latency
 - **D24:** `demo_gui.m` built — interactive operator-console demo; no-nested-functions architecture pattern documented for future MATLAB GUI work
 - **D25:** UAV speed envelope widened to a continuous 50–120 km/h (Doppler 111–267 Hz); speed-diverse dataset, accuracy-vs-speed evaluation and `eval_speed_robustness.m`. Amends D4
+- **D28:** physics-based countermeasure model in one shared function (`apply_countermeasure.m`); actions now differ in effect (e.g. channel switch cannot repair path loss); rule-based baseline aligned to the same physics; `eval_countermeasure_matrix.m`
 - **D27:** KPI #2 measured against the no-attack (clean) link, as the proposal defines it (`recovery_vs_clean.m`); clean reference = the `none` run at the same Eb/N0; previous BER-before metric kept alongside
 - **D26:** `demo_gui.m` v3 — proposal-complete operator console (4 tabs, DQN-vs-rule comparison, UNKNOWN-threat handling, survivability verdicts, speed-driven Doppler); norm-stats cache for fast startup
 
@@ -264,7 +271,7 @@ See `PROJECT_LOG.md` for the full fix history and session-by-session detail behi
 - `demo_gui.m` v3 (D26) — rebuilt and delivered; verified only by a syntax parse and helper-function tests outside MATLAB, so live-use feedback and small layout fixes are still expected. A slow-startup report on 2026-09-22 was addressed (norm-stats cache; launch from a fresh session)
 - **reactive_jamming 87.1% recall** (was 91.0%; macro-F1 96.39%) — 33 of 304 test samples are labeled jamming. The distinction is temporal, and the extra Doppler variation may blur the temporal features (untested hypothesis). Below the 90% per-class line in absolute terms but above the proposal's 90% macro-F1 target; its closed-loop recovery is unaffected (85.7%) because jamming receives the same countermeasure. Candidate for targeted improvement or documentation as a known limitation.
 - **antenna_fault** — weakest class overall: 92.8% recall, 5/6 closed-loop detection (the miss at 0 dB has 31% confidence and ends in `no_action`), 60.6% recovery and 64% of its recovery ceiling.
-- **Decision latency** — 10.21 ms mean in the 2026-09-21 full run vs 6.09 ms in the earlier D23 measurement, with unchanged architectures. Re-measure `run_closed_loop_diagnostic` alone in a fresh MATLAB session and cite that value; if it stays near 10 ms, check whether the GPU is in use.
+- **Decision latency** — resolved: two independent measurements agree at ~10 ms (median 10.05 and 9.99 ms). The D23 figure (6.09 ms) belongs to the previous build and is no longer cited.
 - **Detector-only speed diversity** — the DQN state has no Doppler input and EXP/SURV run at the nominal 72 km/h; only detection and closed-loop robustness are speed-swept.
 - `main.m` prints a hard-coded CHECKPOINT line at the end (old numbers); the authoritative numbers are in `results/kpi_summary.txt` and `results/kpi_dashboard.png`.
 

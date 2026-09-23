@@ -47,11 +47,6 @@ env.temporal_window = 10; env.delay_bits = 20;
 modelName = 'UAV_GCS_Threat_Link';
 threats = {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss', ...
            'spoofing','antenna_fault','benign_interference','none'};
-strength_field = containers.Map( ...
-    {'jamming','reactive_jamming','sweeping_jammer','noise_burst','path_loss','antenna_fault','spoofing','benign_interference','none'}, ...
-    {'jsr_db','jsr_db','jsr_db','jsr_db','path_loss_db','fault_atten_db','spoof_sir_db','benign_int_db','jsr_db'});
-action_mitigation_db = struct('no_action',0,'channel_switch',25,'rate_reduce',15, ...
-    'freq_diversity',25,'spatial_diversity',25);
 action_names = agent.action_names;
 baseline = struct('jsr_db',p0.jsr_db,'path_loss_db',p0.path_loss_db, ...
     'fault_atten_db',p0.fault_atten_db,'spoof_sir_db',p0.spoof_sir_db, ...
@@ -78,7 +73,7 @@ for vi = 1:numel(SPEEDS_KMH)
     fprintf('========== Speed %.1f km/h (fd = %.1f Hz) ==========\n', v_kmh, fd_hz);
 
     for t = 1:numel(threats)
-        threat = threats{t}; field = strength_field(threat);
+        threat = threats{t};
         count = count + 1;
 
         p = p0; p.jsr_db=baseline.jsr_db; p.path_loss_db=baseline.path_loss_db;
@@ -113,14 +108,12 @@ for vi = 1:numel(SPEEDS_KMH)
             acts = acts(~strcmp(acts,'no_action'));
             for ai = 1:numel(acts)
                 act = acts{ai};
-                p2 = p;
-                p2.(field) = p.(field) - action_mitigation_db.(act);
-                if any(strcmp(field, {'path_loss_db','fault_atten_db'})), p2.(field) = max(p2.(field), 0); end
+                [p2, g_db] = apply_countermeasure(p, threat, act);   % D28
                 params = p2; save('params.mat','params');
                 evalc('build_threat_model');
                 for s = find(strcmp({grp.action}, act))
                     snr_dB = grp(s).snr_db + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
-                    set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/p.sps));
+                    set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p.sps));
                     out2 = sim(modelName);
                     [~, ber_f2, ~, ~, ~] = extract_closed_loop_frames(out2, p2, env.delay_bits);
                     ber_after(s) = mean(ber_f2, 'omitnan');
