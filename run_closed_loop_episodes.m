@@ -140,10 +140,7 @@ end
 if ~exist('results', 'dir'), mkdir('results'); end
 save('results/closed_loop_episodes.mat', 'E', 'clean', 'degraded', 'threats', 'actions', 'EBNO_LIST', ...
     'N_PRE', 'N_POST', 'DWELL', 'HOLD', 'RATIO_OK', 'MA_LEN', 'STAY', 'cfg_keys');
-report_closed_loop_episodes;
-
-%% 6. Figure
-plot_closed_loop_episodes;
+report_closed_loop_episodes(true);   % report + example-episode figure
 
 
 %% ===== Local functions =====

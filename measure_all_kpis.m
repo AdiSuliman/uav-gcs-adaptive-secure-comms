@@ -173,6 +173,30 @@ report{end+1} = '';
 
 %% ---------- Write summary ----------
 if ~exist('results', 'dir'), mkdir('results'); end
+%% ---------- Unknown-threat detection and combined threats (deliverable 4, risk 13; D32) ----------
+report{end+1} = '';
+report{end+1} = '--- Unknown-threat detection (deliverable 4) and combined threats (risk 13) ---';
+if isfile('results/ood_detection.mat')
+    O = load('results/ood_detection.mat', 'R', 'RETAIN');
+    report{end+1} = sprintf('Leave-one-threat-out: mean AUROC MSP %.3f, energy %.3f; unknown frames flagged %.0f%% (MSP) at %.0f%% known kept; false flags %.1f%%', ...
+        mean([O.R.auroc_msp]), mean([O.R.auroc_energy]), 100*mean([O.R.flag_msp]), 100*O.RETAIN, 100*mean([O.R.fp_msp]));
+    report{end+1} = 'Per held-out threat: results/ood_detection.txt';
+else
+    report{end+1} = 'Leave-one-threat-out: not run (eval_ood_detection.m)';
+end
+if isfile('results/combined_threats.mat')
+    C = load('results/combined_threats.mat', 'Dec', 'modes', 'ratio', 'links', 'EBNO_LIST');
+    mc = ~strcmp({C.Dec.link}, 'none');
+    for md = 1:numel(C.modes)
+        rt = arrayfun(@(d) d.ratio(md), C.Dec(mc));
+        report{end+1} = sprintf('Combined threats, %-22s link restored in %d/%d decisions (median %.2fx clean)', ...
+            [C.modes{md} ':'], sum(rt <= 2), numel(rt), median(rt));
+    end
+    report{end+1} = 'Details: results/combined_threats.txt';
+else
+    report{end+1} = 'Combined threats: not run (eval_combined_threats.m)';
+end
+
 fid = fopen('results/kpi_summary.txt', 'w');
 for i = 1:numel(report), fprintf(fid, '%s\n', report{i}); end
 fclose(fid);

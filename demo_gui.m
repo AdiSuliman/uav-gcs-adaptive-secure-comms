@@ -146,6 +146,10 @@ ui.survThreatDD.ValueChangedFcn  = @survChanged;
 fig.CloseRequestFcn              = @closeApp;
 
 speedChanged(ui.speedSpin, []);
+if isfile('data/ood_thresholds.mat')                  % D32: threshold that keeps 95% of known frames
+    Tood = load('data/ood_thresholds.mat', 'T');
+    ui.thrSlider.Value = round(100 * Tood.T.msp);
+end
 thrChanged(ui.thrSlider, []);
 resetRunViews(fig);
 drawLinkDiagram(fig, 'idle', '', '', struct());
@@ -570,12 +574,12 @@ end
 
 function thrChanging(src, evt)
     fig = ancestor(src, 'figure'); ui = fig.UserData.ui;
-    ui.thrLbl.Text = sprintf('UNKNOWN threat if CNN confidence < %.0f %%  (raise to test)', evt.Value);
+    ui.thrLbl.Text = sprintf('UNKNOWN if confidence < %.0f %% and link degraded', evt.Value);
 end
 
 function thrChanged(src, ~)
     fig = ancestor(src, 'figure'); ui = fig.UserData.ui;
-    ui.thrLbl.Text = sprintf('UNKNOWN threat if CNN confidence < %.0f %%  (raise to test)', src.Value);
+    ui.thrLbl.Text = sprintf('UNKNOWN if confidence < %.0f %% and link degraded', src.Value);
 end
 
 function abortSequence(btn, ~)
@@ -814,6 +818,9 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     [conf, idx] = max(probs);
     top_class = env.class_list{idx};
     is_unknown = (100 * conf) < thr_pct;
+    if is_unknown && isfinite(refBer)                % D33: low confidence alone on a healthy link is not an unknown threat
+        is_unknown = raw_feats(2) > 2 * refBer;
+    end
     if is_unknown, cnn_class = 'unknown'; else, cnn_class = top_class; end
 
     dqn_state = build_dqn_state(cnn_class, raw_feats(2), raw_feats(3), ebno, raw_feats(4));

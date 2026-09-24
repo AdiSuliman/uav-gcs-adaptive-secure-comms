@@ -1,0 +1,19 @@
+=== UNKNOWN-THREAT DETECTION: LEAVE-ONE-THREAT-OUT (proposal deliverable 4, risk 13; D32) ===
+Generated: 24-Sep-2026 11:01:01 | detector retrained without each threat (30 epochs), test split
+Threshold: keeps 95% of known validation frames. AUROC 0.5 = no separation, 1.0 = perfect.
+flagged = share of unknown-threat frames scored below the threshold; false flag = share of known test frames below it.
+same action = share of unknown frames whose mistaken class still maps to the countermeasure of the true threat (rule table).
+
+held-out threat          n AUROC MSP  AUROC En   flag MSP    flag En false MSP  false En    known  mistaken for                  same same|kept
+jamming                304     0.159     0.208         0%         0%      4.7%      5.2%    97.9%  reactive_jamming     100%    100%      100%
+noise_burst            302     0.034     0.029         0%         0%      5.0%      4.6%    95.2%  sweeping_jammer      100%      0%        0%
+reactive_jamming       303     0.183     0.158         1%         0%      4.8%      6.3%    98.3%  jamming               93%     93%       93%
+path_loss              303     0.727     0.548        17%         3%      5.5%      5.0%    96.8%  antenna_fault         84%      0%        0%
+spoofing               304     0.639     0.912        23%        56%      5.0%      5.7%    96.0%  antenna_fault         82%      0%        0%
+antenna_fault          304     0.791     0.854        23%        39%      4.5%      5.1%    96.7%  spoofing              42%      0%        0%
+benign_interference    303     0.901     0.968        47%        77%      5.6%      5.6%    96.1%  none                  37%     37%       47%
+sweeping_jammer        301     0.688     0.493        17%        10%      4.6%      5.0%    95.2%  noise_burst           62%      0%        0%
+
+Mean AUROC: MSP 0.515 | energy 0.521. Mean flagged: MSP 16% | energy 23%. Mean false flags: MSP 5.0% | energy 5.3%.
+Unknown frames that are neither flagged nor mapped to the right action (harmful misses), MSP: 57% on average.
+Production detector thresholds (all 9 classes known): MSP 0.729, energy 5.36 (data/ood_thresholds.mat).

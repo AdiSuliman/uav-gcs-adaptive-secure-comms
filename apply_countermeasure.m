@@ -4,7 +4,8 @@ function [p, snr_gain_db, cm] = apply_countermeasure(p, threat, action)
 %   [p, snr_gain_db, cm] = apply_countermeasure(p, threat, action)
 %
 %   p           params with the threat already configured (any severity)
-%   threat      TRUE threat on the link (physics), not the detected class
+%   threat      TRUE threat on the link (physics), not the detected class;
+%               a combined threat 'a+b' applies the action to each component (D32)
 %   action      no_action | channel_switch | rate_reduce | freq_diversity |
 %               spatial_diversity   (channel_switch_fast is treated as channel_switch)
 %
@@ -33,6 +34,11 @@ function [p, snr_gain_db, cm] = apply_countermeasure(p, threat, action)
 %     rate_reduce        rate / cm_rate_factor: +10*log10(factor) dB processing gain
 %                        against noise and noise-like interference; no gain against
 %                        a coherent spoofer; goodput / factor
+
+if contains(threat, '+')
+    [p, snr_gain_db, cm] = apply_combined(p, threat, action);
+    return;
+end
 
 acr_db = getf(p, 'cm_acr_db', 30);
 rate_f = getf(p, 'cm_rate_factor', 4);
@@ -97,6 +103,29 @@ end
 
 if isfield(p, 'path_loss_db'),   p.path_loss_db   = max(p.path_loss_db, 0); end
 if isfield(p, 'fault_atten_db'), p.fault_atten_db = max(p.fault_atten_db, 0); end
+end
+
+function [p, snr_gain_db, cm] = apply_combined(p, threat, action)
+% Combined threat 'a+b' (D32): the action acts on each component. The Eb/N0 gain is
+% one property of the action, so it is applied once (the smallest component gain);
+% with an antenna fault, spatial diversity only replaces the faulty antenna.
+parts = strsplit(threat, '+');
+fields = cellfun(@interference_field, parts, 'UniformOutput', false);
+fields = fields(~cellfun(@isempty, fields));
+if numel(unique(fields)) < numel(fields)
+    error('apply_countermeasure: components of ''%s'' share a severity field', threat);
+end
+if any(strcmp(action, 'spatial_diversity')) && any(strcmp(parts, 'antenna_fault'))
+    parts = {'antenna_fault'};
+end
+gains = zeros(1, numel(parts)); eff = cell(1, numel(parts));
+for i = 1:numel(parts)
+    [p, gains(i), cmi] = apply_countermeasure(p, parts{i}, action);
+    eff{i} = sprintf('%s: %s', parts{i}, cmi.effect);
+end
+snr_gain_db = min(gains);
+cm = cmi;
+cm.effect = strjoin(eff, '; ');
 end
 
 function f = interference_field(threat)

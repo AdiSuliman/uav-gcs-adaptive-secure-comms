@@ -1,0 +1,66 @@
+=== COMBINED THREATS AND THE UNKNOWN-THREAT PATH (proposal risk 13; D32) ===
+Generated: 24-Sep-2026 11:19:47 | 2 runs per cell | components at nominal severity | thresholds MSP 0.729, energy 5.36
+Link state = BER / clean (<= 2 restored). Decisions scored with the simulated BER of the chosen action.
+
+--- 1. Detection: what the detector calls each combined threat ---
+link                          Eb/N0 frames  classes (share)                               mean MSP unknown MSP  unknown En
+jamming+path_loss               0 dB     38  jamming 100%                                      0.95          0%          0%
+jamming+path_loss               4 dB     38  jamming 100%                                      0.98          0%          0%
+jamming+path_loss              10 dB     38  jamming 100%                                      0.94          0%          0%
+noise_burst+antenna_fault       0 dB     38  noise_burst 100%                                  1.00          0%          0%
+noise_burst+antenna_fault       4 dB     38  noise_burst 100%                                  1.00          0%          0%
+noise_burst+antenna_fault      10 dB     38  noise_burst 100%                                  1.00          0%          0%
+sweeping_jammer+path_loss       0 dB     38  sweeping_jammer 97%, noise_burst 3%               0.99          0%          0%
+sweeping_jammer+path_loss       4 dB     38  sweeping_jammer 100%                              0.99          0%          0%
+sweeping_jammer+path_loss      10 dB     38  sweeping_jammer 79%, antenna_fault 21%            0.92         16%          0%
+spoofing+noise_burst            0 dB     38  noise_burst 100%                                  1.00          0%          0%
+spoofing+noise_burst            4 dB     38  noise_burst 100%                                  1.00          0%          0%
+spoofing+noise_burst           10 dB     38  noise_burst 100%                                  1.00          0%          0%
+none                            0 dB     38  none 95%, benign_interference 3%, path_loss 3%      0.72         55%         87%
+none                            4 dB     38  none 100%                                         0.98          0%          0%
+none                           10 dB     38  none 97%, path_loss 3%                            0.91         16%          0%
+
+--- 2. What each action achieves (BER / clean; * = best) ---
+link                          Eb/N0          no_action     channel_switch        rate_reduce     freq_diversity  spatial_diversity
+jamming+path_loss               0 dB              3.82x              2.90x              3.53x             2.84x*              3.70x
+jamming+path_loss               4 dB             10.47x              6.22x              9.66x             6.19x*             10.12x
+jamming+path_loss              10 dB            196.81x             61.58x            182.77x            60.01x*            191.09x
+noise_burst+antenna_fault       0 dB              1.83x              1.85x             1.12x*              1.83x              1.73x
+noise_burst+antenna_fault       4 dB              3.86x              3.79x             2.81x*              3.83x              3.44x
+noise_burst+antenna_fault      10 dB             59.43x             60.20x            50.87x*             60.02x             52.25x
+sweeping_jammer+path_loss       0 dB              2.98x              2.98x             2.07x*              2.87x              2.59x
+sweeping_jammer+path_loss       4 dB              6.84x              6.85x             3.83x*              6.26x              5.33x
+sweeping_jammer+path_loss      10 dB             75.52x             75.12x            36.82x*             56.04x             52.18x
+spoofing+noise_burst            0 dB              2.62x             1.72x*              2.56x              1.73x              1.98x
+spoofing+noise_burst            4 dB              7.35x             3.42x*              7.21x              3.47x              5.15x
+spoofing+noise_burst           10 dB            142.57x            52.13x*            134.42x             52.46x             93.24x
+
+--- 3. Decisions on the combined threats: most frequent action (share) and resulting link ---
+link                          Eb/N0 | DQN (class)                        | DQN (unknown gating)               | Rule (class)                       | Rule (unknown gating)             
+jamming+path_loss               0 dB | channel_switch 100% -> 2.90x       | channel_switch 100% -> 2.90x       | channel_switch 100% -> 2.90x       | channel_switch 100% -> 2.90x      
+jamming+path_loss               4 dB | channel_switch 100% -> 6.22x       | channel_switch 100% -> 6.22x       | channel_switch 100% -> 6.22x       | channel_switch 100% -> 6.22x      
+jamming+path_loss              10 dB | channel_switch 100% -> 61.58x      | channel_switch 100% -> 61.58x      | channel_switch 100% -> 61.58x      | channel_switch 100% -> 61.58x     
+noise_burst+antenna_fault       0 dB | spatial_diversity 100% -> 1.73x    | spatial_diversity 100% -> 1.73x    | rate_reduce 100% -> 1.12x          | rate_reduce 100% -> 1.12x         
+noise_burst+antenna_fault       4 dB | spatial_diversity 100% -> 3.44x    | spatial_diversity 100% -> 3.44x    | rate_reduce 100% -> 2.81x          | rate_reduce 100% -> 2.81x         
+noise_burst+antenna_fault      10 dB | spatial_diversity 100% -> 52.25x   | spatial_diversity 100% -> 52.25x   | rate_reduce 100% -> 50.87x         | rate_reduce 100% -> 50.87x        
+sweeping_jammer+path_loss       0 dB | spatial_diversity 100% -> 2.59x    | spatial_diversity 100% -> 2.59x    | freq_diversity 97% -> 2.87x        | freq_diversity 97% -> 2.87x       
+sweeping_jammer+path_loss       4 dB | freq_diversity 100% -> 6.26x       | freq_diversity 100% -> 6.26x       | freq_diversity 100% -> 6.26x       | freq_diversity 100% -> 6.26x      
+sweeping_jammer+path_loss      10 dB | freq_diversity 100% -> 56.04x      | freq_diversity 100% -> 56.04x      | freq_diversity 79% -> 56.04x       | freq_diversity 84% -> 56.04x      
+spoofing+noise_burst            0 dB | spatial_diversity 100% -> 1.98x    | spatial_diversity 100% -> 1.98x    | rate_reduce 100% -> 2.56x          | rate_reduce 100% -> 2.56x         
+spoofing+noise_burst            4 dB | spatial_diversity 100% -> 5.15x    | spatial_diversity 100% -> 5.15x    | rate_reduce 100% -> 7.21x          | rate_reduce 100% -> 7.21x         
+spoofing+noise_burst           10 dB | channel_switch 68% -> 52.13x       | channel_switch 68% -> 52.13x       | rate_reduce 100% -> 134.42x        | rate_reduce 100% -> 134.42x       
+
+--- 4. Summary over all combined-threat frames ---
+policy                        link restored median BER/clean  no_action on attack
+DQN (class)                       76/456               5.69               0/456  
+DQN (unknown gating)              76/456               5.69               0/456  
+Rule (class)                      38/456               6.24               0/456  
+Rule (unknown gating)             38/456               6.24               0/456  
+best single action                76/456               3.63
+
+--- 5. Control: clean link (false unknowns and false actions) ---
+Clean frames: 114 | flagged unknown: 23.7% (MSP), 28.9% (energy)
+  DQN (class)              acted on the clean link in 2/114 frames
+  DQN (unknown gating)     acted on the clean link in 5/114 frames
+  Rule (class)             acted on the clean link in 10/114 frames
+  Rule (unknown gating)    acted on the clean link in 9/114 frames

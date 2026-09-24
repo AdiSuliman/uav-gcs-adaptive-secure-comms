@@ -69,6 +69,54 @@ for ti = 1:num_threats
 end
 params = p0; save('params.mat', 'params');
 
+%% 2b. Countermeasure efficacy matrix (results/countermeasure_matrix.*, D28)
+% BER after each action relative to the clean link, per threat and Eb/N0, from the
+% measurements above (ground-truth threat, nominal severity).
+clean_m = squeeze(ber_tab(strcmp(threat_list, 'none'), na, :))';
+ratio_m = ber_tab ./ reshape(clean_m, 1, 1, nS);
+rep = {};
+rep{end+1} = '=== COUNTERMEASURE EFFICACY MATRIX (D28, nominal severity, ground-truth threat) ===';
+rep{end+1} = sprintf('Generated: %s by train_dqn.m | acr %g dB | rate / %g | %d Rx antennas', datestr(now), ...
+    p0.cm_acr_db, p0.cm_rate_factor, p0.cm_n_rx);
+rep{end+1} = 'Cell = BER_after / BER_clean (<= 2 restored, <= 5 marginal). * = best action, R = rule-based choice.';
+rep{end+1} = sprintf('Costs: goodput x%s | spectrum x%s  (order: %s)', mat2str(gp, 2), mat2str(bw), strjoin(action_names, ', '));
+for s = 1:nS
+    rep{end+1} = ''; %#ok<SAGROW>
+    rep{end+1} = sprintf('--- Eb/N0 = %g dB (clean BER %.3e) ---', SNR_LIST(s), clean_m(s)); %#ok<SAGROW>
+    hdr = sprintf('%-20s', 'threat');
+    for ai = 1:nA, hdr = [hdr sprintf('%19s', action_names{ai})]; end %#ok<AGROW>
+    rep{end+1} = hdr; %#ok<SAGROW>
+    for ti = 1:num_threats
+        [~, best] = min(ber_tab(ti, :, s));
+        rule = rule_based_policy(threat_list{ti});
+        line = sprintf('%-20s', threat_list{ti});
+        for ai = 1:nA
+            tag = '';
+            if ai == best, tag = [tag '*']; end %#ok<AGROW>
+            if strcmp(action_names{ai}, rule), tag = [tag 'R']; end %#ok<AGROW>
+            line = [line sprintf('%19s', sprintf('%.2fx%s', ratio_m(ti, ai, s), tag))]; %#ok<AGROW>
+        end
+        rep{end+1} = line; %#ok<SAGROW>
+    end
+end
+if ~exist('results', 'dir'), mkdir('results'); end
+fid = fopen('results/countermeasure_matrix.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
+fig_m = figure('Position', [60 60 1400 700], 'Color', 'w');
+for s = 1:nS
+    subplot(2, ceil(nS/2), s);
+    imagesc(log10(ratio_m(:, :, s)), [0 log10(50)]); colormap(gca, flipud(hot));
+    set(gca, 'XTick', 1:nA, 'XTickLabel', strrep(action_names, '_', '\_'), 'XTickLabelRotation', 30, ...
+        'YTick', 1:num_threats, 'YTickLabel', strrep(threat_list, '_', '\_'), 'FontSize', 7);
+    for ti = 1:num_threats
+        for ai = 1:nA
+            text(ai, ti, sprintf('%.1f', ratio_m(ti, ai, s)), 'HorizontalAlignment', 'center', 'FontSize', 7);
+        end
+    end
+    title(sprintf('BER / clean, E_b/N_0 = %g dB', SNR_LIST(s)));
+end
+saveas(fig_m, 'results/countermeasure_matrix.png'); close(fig_m);
+fprintf('Saved results/countermeasure_matrix.{txt,png}\n\n');
+
 %% 3. Reward table
 clean = squeeze(ber_tab(strcmp(threat_list, 'none'), na, :));
 reward_table = zeros(num_threats, nA, nS);

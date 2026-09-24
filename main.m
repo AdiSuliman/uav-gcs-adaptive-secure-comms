@@ -74,6 +74,8 @@ fprintf('(This file will contain EVERYTHING printed below, even across clc calls
 %% ================================================================
 
 % ---- Phase A: link + threats + dataset ----
+addpath(fullfile(fileparts(mfilename('fullpath')), 'legacy'));   % LSTM study, EXP study, C3 MVP (D33)
+
 RUN.init                        = true;   % A0  : regenerate params.mat
 RUN.validate_A                  = true;   % A1-A3: build+validate AWGN & Rician links (fast)
 RUN.check_A4                    = true;   % A4  : build threat model + sanity BER (fast)
@@ -89,10 +91,12 @@ RUN.eval_detector               = true;   % B3  : test eval + confusion/accuracy
 
 % ---- Phase C: closed-loop recovery ----
 RUN.train_dqn                   = true;   % C2  : train DQN, reward over threat x action x Eb/N0 (~7min, D29)
-RUN.run_closed_loop             = true;   % C3  : closed loop, CNN+DQN (~2-3min)
+RUN.run_closed_loop             = false;  % C3  : legacy MVP loop (legacy/), superseded by C3d and C3e
 RUN.run_closed_loop_diagnostic  = true;   % C3d : full SNR sweep + timing + Q-values (~15-20min)
 RUN.eval_speed_robustness       = true;   % C3s : detection/decision/recovery vs UAV speed 50-120 km/h (~30-60min)
 RUN.run_closed_loop_episodes    = true;   % C3e : episodic loop, dwell/hysteresis, recovery time in cycles (~25min, D31)
+RUN.eval_combined_threats       = true;   % C3m : combined threats + unknown gating, detection and decisions (~10min, D32)
+RUN.eval_ood_detection          = false;  % OOD : leave-one-threat-out, retrains the detector 8 times (~60min, D32)
 
 % ---- Phase EXP: deep countermeasure exploration ----
 RUN.explore_countermeasures     = false;  % EXP : pre-D28 mechanism study (~78min); not needed by SURV since D30
@@ -204,6 +208,14 @@ end
 if RUN.run_closed_loop_episodes
     fprintf('  [C3-episodes] Episodic closed loop: recovery time in cycles, dwell/hysteresis...\n');
     run_closed_loop_episodes;
+end
+if RUN.eval_combined_threats
+    fprintf('  [C3-combined] Combined threats and the unknown-threat path...\n');
+    eval_combined_threats;
+end
+if RUN.eval_ood_detection
+    fprintf('  [OOD] Leave-one-threat-out unknown-threat detection (retrains the detector per threat)...\n');
+    eval_ood_detection;
 end
 
 fprintf('  [C] Pipeline status:\n');

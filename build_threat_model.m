@@ -112,6 +112,10 @@ chart_ric.Script = sprintf([ ...
 
 %% ---- Inject Threat code (Approach A, sps-adapted) ----
 chart_th = sf_root.find('-isa','Stateflow.EMChart','Path',[modelName '/Threat']);
+if contains(p.active_threat, '+')
+    % Combined threat (D32), e.g. 'jamming+path_loss': components applied in sequence
+    chart_th.Script = combined_threat_script(p, sps);
+else
 switch lower(p.active_threat)
 
     case 'jamming'
@@ -287,6 +291,7 @@ switch lower(p.active_threat)
             'y = u;\n' ...
             'end\n']);
 end
+end
 
 %% ---- Inject Rx code (RRC receive + demod) ----
 chart_rx = sf_root.find('-isa','Stateflow.EMChart','Path',[modelName '/Rx']);
@@ -348,4 +353,64 @@ save_system(modelName, ['models/' modelName '.slx']);
 fprintf('Model saved to models/%s.slx\n', modelName);
 fprintf('Done. Threat model (System Objects engine, threat=%s, JSR=%.1f dB, K=%.1f dB, fd=%.1f Hz, sps=%d).\n', ...
     p.active_threat, p.jsr_db, p.rician_k, p.fd_max, sps);
+end
+
+function script = combined_threat_script(p, sps)
+%COMBINED_THREAT_SCRIPT  MATLAB Function body for a combined threat 'a+b[+c]' (D32).
+%   Signal-side components (path_loss, antenna_fault) act first, so they attenuate
+%   only our signal; additive components follow. Each component uses the same
+%   model and parameters as its single-threat case, with its own persistent state.
+parts = strsplit(lower(p.active_threat), '+');
+order = [parts(ismember(parts, {'path_loss','antenna_fault'})), parts(~ismember(parts, {'path_loss','antenna_fault'}))];
+pers = {}; body = {};
+for i = 1:numel(order)
+    c = order{i};
+    switch c
+        case 'path_loss'
+            body{end+1} = sprintf('y = y * %.6f;\n', 10^(-p.path_loss_db/20)); %#ok<AGROW>
+        case 'antenna_fault'
+            ps = p.fault_period * sps; on = round(p.fault_duty * ps);
+            pers{end+1} = 'k_af'; %#ok<AGROW>
+            body{end+1} = sprintf(['for i = 1:numel(y)\n    if mod(k_af, %d) < %d\n        y(i) = y(i) * %.6f;\n    end\n' ...
+                '    k_af = k_af + 1;\nend\n'], ps, on, 10^(-p.fault_atten_db/20)); %#ok<AGROW>
+        case 'jamming'
+            body{end+1} = sprintf('y = y + sqrt(%.6f/2) * (randn(size(y)) + 1i*randn(size(y)));\n', 10^(p.jsr_db/10)); %#ok<AGROW>
+        case 'benign_interference'
+            body{end+1} = sprintf('y = y + sqrt(%.6f/2) * (randn(size(y)) + 1i*randn(size(y)));\n', 10^(p.benign_int_db/10)); %#ok<AGROW>
+        case 'noise_burst'
+            ps = p.burst_period * sps; on = round(p.burst_duty * ps);
+            pers{end+1} = 'k_nb'; %#ok<AGROW>
+            body{end+1} = sprintf(['for i = 1:numel(y)\n    if mod(k_nb, %d) < %d\n' ...
+                '        y(i) = y(i) + sqrt(%.6f/2) * (randn + 1i*randn);\n    end\n    k_nb = k_nb + 1;\nend\n'], ...
+                ps, on, 10^(p.jsr_db/10)); %#ok<AGROW>
+        case 'sweeping_jammer'
+            ps = p.sweep_period * sps; on = round(p.sweep_duty * ps);
+            pers{end+1} = 'k_sw'; %#ok<AGROW>
+            body{end+1} = sprintf(['for i = 1:numel(y)\n    if mod(k_sw, %d) < %d\n' ...
+                '        y(i) = y(i) + sqrt(%.6f/2) * (randn + 1i*randn);\n    end\n    k_sw = k_sw + 1;\nend\n'], ...
+                ps, on, 10^(p.jsr_db/10)); %#ok<AGROW>
+        case 'reactive_jamming'
+            body{end+1} = sprintf(['for i = 1:numel(y)\n    if abs(y(i))^2 > %.6f\n' ...
+                '        y(i) = y(i) + sqrt(%.6f/2) * (randn + 1i*randn);\n    end\nend\n'], ...
+                p.reactive_threshold / sps, 10^(p.jsr_db/10)); %#ok<AGROW>
+        case 'spoofing'
+            pers{end+1} = 'spoof_txf'; %#ok<AGROW>
+            body{end+1} = sprintf(['if isempty(spoof_txf)\n    spoof_txf = comm.RaisedCosineTransmitFilter(''RolloffFactor'', %.6f, ' ...
+                '''FilterSpanInSymbols'', %d, ''OutputSamplesPerSymbol'', %d);\nend\n' ...
+                'nSym = floor(numel(y) / %d);\nspoofSym = pskmod(randi([0 1], nSym*2, 1), 4, pi/4, ''gray'', ''InputType'', ''bit'');\n' ...
+                'spoofSig = spoof_txf(spoofSym);\ny = y + %.6f * spoofSig(1:numel(y));\n'], ...
+                p.rolloff, p.filter_span, sps, sps, 10^(p.spoof_sir_db/20)); %#ok<AGROW>
+        otherwise
+            error('combined_threat_script: unsupported component ''%s''', c);
+    end
+end
+head = 'function y = fcn(u)\n%%#codegen\n';
+for i = 1:numel(pers)
+    if strcmp(pers{i}, 'spoof_txf')
+        head = [head 'persistent spoof_txf\n']; %#ok<AGROW>
+    else
+        head = [head sprintf('persistent %s\nif isempty(%s); %s = 0; end\n', pers{i}, pers{i}, pers{i})]; %#ok<AGROW>
+    end
+end
+script = [sprintf(head) 'y = u;' newline strjoin(body, '') 'end' newline];
 end
