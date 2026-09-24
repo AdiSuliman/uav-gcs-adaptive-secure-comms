@@ -9,8 +9,11 @@ if isempty(snr)
         L = load('data/survivability_boundary.mat', 'SNR_points', 'ber_clean');
         snr = L.SNR_points; ber = L.ber_clean;
     elseif isfile('data/trained_dqn.mat')
-        L = load('data/trained_dqn.mat', 'SNR_LIST', 'clean');
-        if isfield(L, 'clean'), snr = L.SNR_LIST; ber = L.clean; end
+        w = whos('-file', 'data/trained_dqn.mat');
+        if all(ismember({'SNR_LIST', 'clean'}, {w.name}))
+            L = load('data/trained_dqn.mat', 'SNR_LIST', 'clean');
+            snr = L.SNR_LIST; ber = L.clean;
+        end
     end
 end
 if isempty(snr)

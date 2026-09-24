@@ -92,6 +92,7 @@ RUN.train_dqn                   = true;   % C2  : train DQN, reward over threat 
 RUN.run_closed_loop             = true;   % C3  : closed loop, CNN+DQN (~2-3min)
 RUN.run_closed_loop_diagnostic  = true;   % C3d : full SNR sweep + timing + Q-values (~15-20min)
 RUN.eval_speed_robustness       = true;   % C3s : detection/decision/recovery vs UAV speed 50-120 km/h (~30-60min)
+RUN.run_closed_loop_episodes    = true;   % C3e : episodic loop, dwell/hysteresis, recovery time in cycles (~25min, D31)
 
 % ---- Phase EXP: deep countermeasure exploration ----
 RUN.explore_countermeasures     = false;  % EXP : pre-D28 mechanism study (~78min); not needed by SURV since D30
@@ -199,6 +200,10 @@ end
 if RUN.eval_speed_robustness
     fprintf('  [C3-speed] Closed-loop robustness vs UAV speed (Doppler sweep, 50-120 km/h)...\n');
     eval_speed_robustness;
+end
+if RUN.run_closed_loop_episodes
+    fprintf('  [C3-episodes] Episodic closed loop: recovery time in cycles, dwell/hysteresis...\n');
+    run_closed_loop_episodes;
 end
 
 fprintf('  [C] Pipeline status:\n');

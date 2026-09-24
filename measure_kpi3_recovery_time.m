@@ -105,9 +105,9 @@ report = {};
 report{end+1} = '=== KPI #3: Decision Speed (DQN vs Rule-Based) ===';
 report{end+1} = sprintf('Generated: %s', datestr(now));
 report{end+1} = '';
-report{end+1} = 'Decision latency of both policies, and the link quality each achieves on the';
-report{end+1} = 'same closed-loop runs (one decision per run). Recovery time in decision cycles';
-report{end+1} = 'requires the episodic closed loop (improvement 4).';
+report{end+1} = 'Decision latency of both policies, the link quality each achieves on the same';
+report{end+1} = 'closed-loop runs, and (section 5) recovery time in decision cycles from the';
+report{end+1} = 'episodic closed loop with dwell/hysteresis.';
 report{end+1} = '';
 report{end+1} = 'DQN latency/recovery/agreement are averaged across the full SNR sweep';
 report{end+1} = '(each threat has one data point per SNR point in the diagnostic run).';
@@ -128,14 +128,35 @@ report{end+1} = 'NOTE: both policies act through the same physical countermeasur
 report{end+1} = '(apply_countermeasure.m, D28), so agreement and recovery compare decision';
 report{end+1} = 'quality only. Disagreement is no longer cosmetic: actions differ in effect.';
 report{end+1} = '';
-report{end+1} = 'Interpretation: Rule-Based is effectively instant (a dB lookup); DQN costs a';
-report{end+1} = 'few ms of real neural-network inference. This is the genuine speed trade-off';
-report{end+1} = 'of using a learned policy over a static one in this system -- DQN''s value is';
-report{end+1} = 'not faster convergence (both converge in 1 step) but rather the potential to';
-report{end+1} = 'learn better-than-rule-based action choices from data (measured separately as';
-report{end+1} = 'recovery % and agreement rate above).';
+report{end+1} = 'Interpretation: the rule is effectively instant (a lookup); the DQN costs about a';
+report{end+1} = 'millisecond of inference, small next to the ~10 ms detection path. Both are far';
+report{end+1} = 'faster than the dwell of a few frames, so recovery time is set by detection and';
+report{end+1} = 'hysteresis rather than by the policy''s compute time (section 5).';
 
 if ~exist('results', 'dir'), mkdir('results'); end
+%% 5. Recovery time in decision cycles (episodic closed loop, D31)
+report{end+1} = '';
+report{end+1} = '--- Recovery time in decision cycles (run_closed_loop_episodes.m, D31) ---';
+if isfile('results/closed_loop_episodes.mat')
+    EP = load('results/closed_loop_episodes.mat', 'E', 'threats', 'degraded', 'EBNO_LIST', 'cfg_keys', 'DWELL', 'HOLD');
+    if ~isfield(EP.E, 'status')
+        report_closed_loop_episodes;
+        EP = load('results/closed_loop_episodes.mat', 'E', 'threats', 'degraded', 'EBNO_LIST', 'cfg_keys', 'DWELL', 'HOLD');
+    end
+    report{end+1} = sprintf('Threat onset mid-stream; dwell %d cycles, hold %d cycles; medians in cycles after onset.', EP.DWELL, EP.HOLD);
+    report{end+1} = 'T_recover over episodes the threat actually degraded and no countermeasure was active at onset.';
+    report{end+1} = sprintf('%-24s %7s %9s %11s %9s %8s %8s', 'configuration', 'T_act', 'T_recover', 'recovered', 'pre-cfg', 'switches', 'goodput');
+    for c = 1:numel(EP.cfg_keys)
+        m  = [EP.E.needs] & strcmp({EP.E.cfg}, EP.cfg_keys{c});
+        mt = m & ismember({EP.E.status}, {'recovered', 'not recovered'});
+        report{end+1} = sprintf('%-24s %7s %9s %6d/%-4d %9d %8.2f %8.2f', EP.cfg_keys{c}, ...
+            pct_med([EP.E(m).T_act]), pct_med([EP.E(mt).T_rec]), sum(strcmp({EP.E(m).status}, 'recovered')), sum(mt), ...
+            sum([EP.E(m).preconf]), mean([EP.E(m).switches]), mean([EP.E(m).goodput])); %#ok<SAGROW>
+    end
+else
+    report{end+1} = 'Not available -- run run_closed_loop_episodes.m.';
+end
+
 fid = fopen('results/kpi3_measurement.txt', 'w');
 for i = 1:numel(report), fprintf(fid, '%s\n', report{i}); end
 fclose(fid);
@@ -146,4 +167,9 @@ fprintf('\n=== KPI #3 Complete ===\n');
 %% Local function
 function s = pct_or_na(x)
 if isnan(x), s = 'N/A'; else, s = sprintf('%.1f%%', x); end
+end
+
+function s = pct_med(x)
+x = x(~isnan(x));
+if isempty(x), s = '-'; else, s = sprintf('%.0f', median(x)); end
 end
