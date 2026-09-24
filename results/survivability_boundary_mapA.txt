@@ -1,109 +1,94 @@
-=== SURVIVABILITY BOUNDARY MAP — MAP A — THREAT NEUTRALIZATION ===
-Generated: 21-Sep-2026 23:51:56
-Mechanisms included: atten_reduction, field_reduction
+=== SURVIVABILITY BOUNDARY MAP — MAP A — WITHOUT GOODPUT LOSS ===
+Generated: 23-Sep-2026 20:35:15
+Actions included: channel_switch, freq_diversity, spatial_diversity (apply_countermeasure.m, D28)
 
-A state is classified by how close the best achievable post-countermeasure
-BER comes to the clean-channel BER at the same SNR:
-  RECOVERABLE      : within 2x of clean channel
-  MARGINAL         : within 5x of clean channel
-  NON-RECOVERABLE  : worse than 5x clean channel
+A state is classified by the best post-countermeasure BER relative to the clean link:
+  RECOVERABLE (R) : within 2x | MARGINAL (M) : within 5x | NON-RECOVERABLE (X) : worse
+Second letter = action achieving it: C channel_switch, F freq_diversity, S spatial_diversity, R rate_reduce.
 
-Clean-channel reference BER per SNR:
-  SNR= 0 dB : 1.2036e-01
-  SNR= 2 dB : 7.7439e-02
-  SNR= 4 dB : 4.3831e-02
-  SNR= 6 dB : 2.1309e-02
-  SNR= 8 dB : 8.6809e-03
-  SNR=10 dB : 2.5121e-03
+Clean-link reference BER per Eb/N0:
+   0 dB : 1.2385e-01
+   2 dB : 8.0171e-02
+   4 dB : 4.6399e-02
+   6 dB : 2.2838e-02
+   8 dB : 1.0118e-02
+  10 dB : 2.7540e-03
 
---- Recovery ceiling (mid severity, lowest SNR) ---
-Threat                   BER attack    ceiling %   achieved %   of ceiling
-jamming                   3.663e-01        67.1%        65.9%        98.1%
-noise_burst               2.002e-01        39.9%        37.6%        94.2%
-reactive_jamming          3.475e-01        65.4%        64.6%        98.8%
-path_loss                 3.772e-01        68.1%        54.3%        79.8%
-spoofing                  3.418e-01        64.8%        65.4%       100.9%
-antenna_fault             2.247e-01        46.4%        29.7%        64.0%
-sweeping_jammer           1.595e-01        24.5%        24.4%        99.6%
-benign_interference       1.599e-01        24.7%        24.7%       100.0%
-
---- Boundary map, per threat (rows = severity level, cols = SNR) ---
-Legend: R = recoverable | M = marginal | X = non-recoverable | . = no data
-
+--- Boundary map, per threat (rows = severity level, cols = Eb/N0) ---
 jamming:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  0                R       R       R       R       R       R
-  4                R       R       R       R       R       R
-  8                R       R       R       R       R       M
-  12               R       R       R       R       M       X
-  16               R       R       R       M       X       X
-  -> recoverable 24/30 (80%) | marginal 3 | non-recoverable 3
+  0               RC      RF      RC      RC      RC      RC
+  4               RC      RF      RF      RF      RF      RC
+  8               RC      RF      RC      RF      RF      RC
+  12              RC      RF      RF      RC      RF      MF
+  16              RF      RF      RF      RC      RF      MF
+  -> recoverable 28/30 (93%) | marginal 2 | non-recoverable 0
 
 noise_burst:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  0                R       R       R       R       R       R
-  4                R       R       R       R       R       R
-  8                R       R       R       R       R       R
-  12               R       R       R       R       R       M
-  16               R       R       R       R       M       M
-  -> recoverable 27/30 (90%) | marginal 3 | non-recoverable 0
+  0               RS      RS      RS      RS      MS      XS
+  4               RS      RS      RS      MS      XS      XS
+  8               RS      RS      MS      MS      XS      XS
+  12              RS      RS      MS      XS      XS      XS
+  16              RS      RS      MS      XS      XS      XS
+  -> recoverable 13/30 (43%) | marginal 6 | non-recoverable 11
 
 reactive_jamming:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  0                R       R       R       R       R       R
-  4                R       R       R       R       R       R
-  8                R       R       R       R       R       R
-  12               R       R       R       R       M       M
-  16               R       R       R       M       M       X
-  -> recoverable 25/30 (83%) | marginal 4 | non-recoverable 1
+  0               RC      RC      RC      RC      RC      RC
+  4               RF      RC      RF      RF      RF      RF
+  8               RC      RC      RC      RF      RC      RF
+  12              RC      RC      RF      RC      RC      RC
+  16              RF      RF      RF      RC      RF      MF
+  -> recoverable 29/30 (97%) | marginal 1 | non-recoverable 0
 
 path_loss:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  4                .       .       .       .       .       .
-  8                R       R       M       M       M       X
-  12               R       R       R       R       M       M
-  16               R       R       R       R       R       R
-  20               R       R       R       R       R       R
-  -> recoverable 18/24 (75%) | marginal 5 | non-recoverable 1
+  4               RS      RS      RS      RS      RS      RS
+  8               MS      MS      MS      MS      XS      XS
+  12              MS      MS      XS      XS      XS      XS
+  16              MS      MS      XS      XS      XS      XS
+  20              MS      XS      XS      XS      XS      XS
+  -> recoverable 6/30 (20%) | marginal 9 | non-recoverable 15
 
 spoofing:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  -4               R       R       R       R       R       R
-  -1               R       R       R       R       R       R
-  2                R       R       R       R       R       R
-  5                R       R       R       R       R       R
-  8                R       R       R       R       R       M
-  -> recoverable 29/30 (97%) | marginal 1 | non-recoverable 0
+  -4              RS      RF      RC      RF      RC      RF
+  -1              RC      RC      RC      RC      RF      RF
+  2               RC      RC      RC      RF      RC      RF
+  5               RC      RF      RF      RC      RF      RF
+  8               RF      RC      RF      RC      RF      RF
+  -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
 
 antenna_fault:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  0.1              R       R       R       R       R       R
-  0.2              R       R       R       R       M       M
-  0.3              R       R       R       M       M       M
-  0.4              R       R       R       M       M       X
-  0.5              R       R       M       M       M       X
-  -> recoverable 18/30 (60%) | marginal 10 | non-recoverable 2
+  0.1             RS      RS      RS      RS      RS      RS
+  0.2             RS      RS      RS      RS      RS      RS
+  0.3             RS      RS      RS      RS      RS      RS
+  0.4             RS      RS      RS      RS      RS      RS
+  0.5             RS      RS      RS      RS      RS      RS
+  -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
 
 sweeping_jammer:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  0                R       R       R       R       R       R
-  4                R       R       R       R       R       R
-  8                R       R       R       R       R       R
-  12               R       R       R       R       R       R
-  16               R       R       R       R       R       M
-  -> recoverable 29/30 (97%) | marginal 1 | non-recoverable 0
+  0               RS      RS      RS      RS      RF      MF
+  4               RS      RS      RS      RF      RF      MF
+  8               RS      RS      RF      RF      MF      MF
+  12              RS      RS      RF      RF      RF      XF
+  16              RS      RF      RF      RF      MF      XF
+  -> recoverable 23/30 (77%) | marginal 5 | non-recoverable 2
 
 benign_interference:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  -10              R       R       R       R       R       R
-  -8               R       R       R       R       R       R
-  -6               R       R       R       R       R       R
-  -4               R       R       R       R       R       R
-  -2               R       R       R       R       R       R
+  -10             RS      RS      RS      RS      RF      RC
+  -8              RS      RS      RS      RC      RC      RF
+  -6              RS      RS      RC      RF      RC      RF
+  -4              RS      RC      RF      RF      RF      RF
+  -2              RC      RC      RF      RF      RF      RC
   -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
 
 === OVERALL ===
-Total states mapped: 234
-  Recoverable     : 200 (85.5%)
-  Marginal        : 27 (11.5%)
-  Non-recoverable : 7 (3.0%)
+Total states mapped: 240
+  Recoverable     : 189 (78.8%)
+  Marginal        : 23 (9.6%)
+  Non-recoverable : 28 (11.7%)

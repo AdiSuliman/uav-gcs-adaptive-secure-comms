@@ -1,304 +1,270 @@
 %% C2 — TRAIN DQN AGENT
-% Trains the DQN on a real, threat-specific reward table (measured via
-% actual Simulink runs, not synthetic). Includes reward shaping for
-% benign_interference/none (fixed false-alarm penalty) and a post-training
-% validation gate that blocks saving an agent that violates that shaping,
-% or that fails to react on a real threat.
+% Reward table measured through the real Simulink link for every threat x
+% action x Eb/N0 (D29), with each action applied by apply_countermeasure.m (D28).
+% Reward = link state against the clean link (D27) minus the action's cost;
+% acting on a healthy non-hostile link is a false alarm. Episodes sample
+% (threat, Eb/N0) cells and real per-frame link states, so no simulation runs
+% inside the training loop. A validation gate checks every cell before saving.
 close all; clc;
 fprintf('=== C2: Train DQN Agent ===\n\n');
 
-rng(42, 'twister');   % reproducibility
+rng(42, 'twister');
 
-%% 1. Initialize agent
+%% 1. Agent, threats, actions
 agent = dqn_agent();
-
-%% 2. Setup: threats, actions
-num_episodes = 50;
-num_threats = 9;
+action_names = agent.action_names;
+na = find(strcmp(action_names, 'no_action'), 1);
+nA = numel(action_names);
 
 % Order must match the threat_list inside build_dqn_state.m
 threat_list = {'jamming', 'reactive_jamming', 'sweeping_jammer', 'noise_burst', ...
                'path_loss', 'spoofing', 'antenna_fault', 'benign_interference', 'none'};
-
-action_names = agent.action_names;
+num_threats = numel(threat_list);
+hostile = ~ismember(threat_list, {'benign_interference', 'none'});
 
 init_params;
 p0 = load('params.mat').params;
-baseline = struct('jsr_db',p0.jsr_db,'path_loss_db',p0.path_loss_db, ...
-    'fault_atten_db',p0.fault_atten_db,'spoof_sir_db',p0.spoof_sir_db, ...
-    'benign_int_db',p0.benign_int_db);
+modelName  = 'UAV_GCS_Threat_Link';
+delay_bits = 20;
+SNR_LIST = p0.EbNo_dB;
+nS = numel(SNR_LIST);
 
-%% 3. Build reward table (real Simulink runs, 9 threats x 5 actions)
-% Also records each threat's baseline BER/RSSI, reused later by the
-% validation gate so it checks the agent on real, in-distribution states.
-fprintf('Building reward table...\n\n');
-reward_table = zeros(num_threats, 5);
-ber_after_table = zeros(num_threats, 5);
-base_ber = zeros(num_threats, 1);
-base_rssi = zeros(num_threats, 1);
+% Reward design (D29)
+RW = struct( ...
+    'RATIO_OK',   2, ...     % link degraded if BER > 2x clean (survivability-map threshold)
+    'R_TOL',      1.15, ...  % BER within 15% of clean counts as fully restored (draw-to-draw spread, D27)
+    'L_GP',       0.30, ...  % cost per unit of goodput lost (rate/4 -> 22.5 points)
+    'L_BW',       0.05, ...  % cost per extra channel occupied (2x spectrum -> 5 points)
+    'FA_PENALTY', 40);       % any action on a healthy non-hostile link
 
+%% 2. Measure BER for every threat x action x Eb/N0
+fprintf('Measuring the link for %d threats x %d actions x %d Eb/N0 points...\n\n', num_threats, nA, nS);
+ber_tab = nan(num_threats, nA, nS);
+frames  = cell(num_threats, nS);         % per-frame [BER, RSSI, PLR] of the unmitigated run (training states)
+gp = ones(1, nA); bw = ones(1, nA);
+t0 = tic;
 for ti = 1:num_threats
     threat = threat_list{ti};
-
-    p = p0; p.jsr_db=baseline.jsr_db; p.path_loss_db=baseline.path_loss_db;
-    p.fault_atten_db=baseline.fault_atten_db; p.spoof_sir_db=baseline.spoof_sir_db;
-    p.benign_int_db=baseline.benign_int_db;
-    p.active_threat = threat;
-    params = p; save('params.mat', 'params');
-    build_threat_model;
-
-    [ber_before, iq_before] = quick_ber_with_iq('UAV_GCS_Threat_Link');
-    ber_before = double(ber_before);
-    if ~isempty(iq_before)
-        rssi_before = 10*log10(mean(abs(iq_before).^2) + eps);
-    else
-        rssi_before = -50;
-    end
-    base_ber(ti) = ber_before;
-    base_rssi(ti) = rssi_before;
-
-    fprintf('  %-20s baseline BER=%.3e | ', threat, ber_before);
-    for ai = 1:5
-        action = action_names{ai};
-        [p2, g_db] = apply_countermeasure(p, threat, action);   % D28
+    p = p0; p.active_threat = threat;
+    for ai = 1:nA
+        [p2, g_db, cm] = apply_countermeasure(p, threat, action_names{ai});
+        gp(ai) = cm.goodput_factor; bw(ai) = cm.bw_factor;
         params = p2; save('params.mat', 'params');
-        build_threat_model;
-        set_param('UAV_GCS_Threat_Link/AWGN', 'SNR', ...
-            num2str(p2.EbNo_dB(1) + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps) + g_db), ...
-            'SignalPower', num2str(1/p2.sps));
-        ber_after = quick_ber('UAV_GCS_Threat_Link');
-
-        recov = 100*(ber_before-ber_after)/max(ber_before,eps);
-        reward_table(ti, ai) = recov;
-        ber_after_table(ti, ai) = ber_after;
-        fprintf('%s=%.0f%% ', action, recov);
-    end
-    fprintf('\n');
-
-    % Non-hostile classes: reward is fixed, not derived from raw BER
-    % recovery. The magnitude of BER improvement is meaningless here --
-    % any reaction is a false alarm regardless of how much it happened to
-    % reduce BER.
-    if any(strcmp(threat, {'benign_interference', 'none'}))
-        no_action_idx = find(strcmp(action_names, 'no_action'));
-        for ai = 1:5
-            if ai == no_action_idx
-                reward_table(ti, ai) = 0;
-            else
-                reward_table(ti, ai) = -40;
+        evalc('build_threat_model');
+        for s = 1:nS
+            snr_dB = SNR_LIST(s) + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps);
+            set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p2.sps));
+            out = sim(modelName);
+            [~, ber_f, rssi_f, plr_f] = extract_closed_loop_frames(out, p2, delay_bits);
+            ber_tab(ti, ai, s) = mean(ber_f, 'omitnan');
+            if ai == na
+                b = ber_f(:); r = rssi_f(:); q = plr_f(:);
+                v = ~isnan(b);
+                r(isnan(r)) = 0; q(isnan(q)) = 0;
+                frames{ti, s} = [b(v) r(v) q(v)];
             end
         end
-        fprintf('  %-20s [reward fixed: no_action=0, all other actions=-40]\n', threat);
     end
+    fprintf('  [%d/%d] %-20s measured (%.1f min)\n', ti, num_threats, threat, toc(t0)/60);
 end
-
 params = p0; save('params.mat', 'params');
 
-fprintf('\nReward table built. Best action per threat:\n');
+%% 3. Reward table
+clean = squeeze(ber_tab(strcmp(threat_list, 'none'), na, :));
+reward_table = zeros(num_threats, nA, nS);
+must_act = false(num_threats, nS);
 for ti = 1:num_threats
-    [best_r, best_a] = max(reward_table(ti,:));
-    fprintf('  %-20s -> %s (%.0f%% recovery)\n', threat_list{ti}, action_names{best_a}, best_r);
-end
-
-fig0 = figure('Position',[100 100 700 500],'Color','w');
-imagesc(reward_table); colorbar;
-set(gca, 'XTick', 1:5, 'XTickLabel', action_names, 'XTickLabelRotation', 25, ...
-    'YTick', 1:num_threats, 'YTickLabel', threat_list);
-title('Real Reward Table: Recovery % per (Threat, Action)');
-xlabel('Action'); ylabel('Threat');
-for ti = 1:num_threats
-    for ai = 1:5
-        text(ai, ti, sprintf('%.0f', reward_table(ti,ai)), 'HorizontalAlignment','center', 'Color','w');
+    for s = 1:nS
+        rb = ber_tab(ti, na, s) / clean(s);
+        must_act(ti, s) = hostile(ti) || rb > RW.RATIO_OK;
+        for ai = 1:nA
+            reward_table(ti, ai, s) = reward_of(ber_tab(ti, na, s), ber_tab(ti, ai, s), clean(s), ...
+                gp(ai), bw(ai), ai == na, must_act(ti, s), RW);
+        end
     end
 end
+
+fprintf('\nBest action per (threat, Eb/N0) by reward:\n');
+snr_hdr = arrayfun(@(x) sprintf('%gdB', x), SNR_LIST, 'UniformOutput', false);
+fprintf('%-20s', 'threat'); fprintf('%18s', snr_hdr{:}); fprintf('\n');
+for ti = 1:num_threats
+    fprintf('%-20s', threat_list{ti});
+    for s = 1:nS
+        [rbest, abest] = max(reward_table(ti, :, s));
+        fprintf('%18s', sprintf('%s %.0f', short_name(action_names{abest}), rbest));
+    end
+    fprintf('\n');
+end
+
 if ~exist('results', 'dir'), mkdir('results'); end
-saveas(fig0, 'results/dqn_reward_table.png');
-close(fig0);
+fig0 = figure('Position', [60 60 1400 700], 'Color', 'w');
+for s = 1:nS
+    subplot(2, ceil(nS/2), s);
+    imagesc(reward_table(:, :, s), [-RW.FA_PENALTY 100]); colormap(parula);
+    set(gca, 'XTick', 1:nA, 'XTickLabel', strrep(action_names, '_', '\_'), 'XTickLabelRotation', 30, ...
+        'YTick', 1:num_threats, 'YTickLabel', strrep(threat_list, '_', '\_'), 'FontSize', 7);
+    for ti = 1:num_threats
+        for ai = 1:nA
+            text(ai, ti, sprintf('%.0f', reward_table(ti, ai, s)), 'HorizontalAlignment', 'center', 'FontSize', 7);
+        end
+    end
+    title(sprintf('Reward, E_b/N_0 = %g dB', SNR_LIST(s)));
+end
+saveas(fig0, 'results/dqn_reward_table.png'); close(fig0);
 fprintf('\nSaved results/dqn_reward_table.png\n\n');
 
-%% 4. Training loop
+%% 4. Training: episodes sample (threat, Eb/N0) cells and real per-frame states
+N_EPISODES = 4000;
+P_UNKNOWN  = 0.10;                      % share of episodes with the class hidden (proposal risk 13)
+w = ones(1, num_threats);
+w(ismember(threat_list, {'antenna_fault', 'benign_interference', 'none'})) = 2;
+cw = cumsum(w) / sum(w);
+
+nState = agent.numStates;
+buf_S = zeros(N_EPISODES, nState); buf_A = zeros(N_EPISODES, 1); buf_R = zeros(N_EPISODES, 1);
 training_loss = [];
+avgG = []; avgSqG = [];
+episode_rewards = zeros(1, N_EPISODES);
 avg_rewards_per_episode = [];
-episode_rewards = [];
 
-oversample_factor = containers.Map(threat_list, {1, 1, 1, 1, 1, 1, 3, 3, 3});
-threat_schedule = [];
-for ti = 1:num_threats
-    threat_schedule = [threat_schedule, repmat(ti, 1, num_episodes * oversample_factor(threat_list{ti}))]; %#ok<AGROW>
-end
-threat_schedule = threat_schedule(randperm(numel(threat_schedule)));
-total_episodes = numel(threat_schedule);
+fprintf('Training on %d episodes...\n', N_EPISODES);
+for ep = 1:N_EPISODES
+    ti = find(rand < cw, 1);
+    s  = randi(nS);
+    fr = frames{ti, s};
+    k  = randi(size(fr, 1));
+    cls = threat_list{ti};
+    if rand < P_UNKNOWN, cls = 'unknown'; end
 
-fprintf('Training on %d episodes\n\n', total_episodes);
-
-prev_threat = '';
-for ep = 1:total_episodes
-    threat_idx = threat_schedule(ep);
-    threat = threat_list{threat_idx};
-
-    if ~strcmp(threat, prev_threat)
-        fprintf('  Threat: %s\n', threat);
-        prev_threat = threat;
-    end
-
-    p = p0; p.jsr_db=baseline.jsr_db; p.path_loss_db=baseline.path_loss_db;
-    p.fault_atten_db=baseline.fault_atten_db; p.spoof_sir_db=baseline.spoof_sir_db;
-    p.benign_int_db=baseline.benign_int_db;
-    p.active_threat = threat;
-    params = p; save('params.mat', 'params');
-    build_threat_model;
-    [ber_baseline, iq_rx] = quick_ber_with_iq('UAV_GCS_Threat_Link');
-    ber_baseline = double(ber_baseline);
-
-    if ~isempty(iq_rx)
-        rssi = 10*log10(mean(abs(iq_rx).^2) + eps);
-    else
-        rssi = -50;
-    end
-    snr_val = p.EbNo_dB(1);
-    plr = double(ber_baseline > 0.1);
-
-    state = build_dqn_state(threat, ber_baseline, rssi, snr_val, plr);
+    state  = build_dqn_state(cls, fr(k, 1), fr(k, 2), SNR_LIST(s), fr(k, 3));
     action = selectAction(agent, state, true);
+    reward = reward_table(ti, action, s);
 
-    recovery_frac = reward_table(threat_idx, action) / 100;
-    ber_after = ber_baseline * (1 - recovery_frac);
-    reward = reward_table(threat_idx, action);
-
-    next_state = build_dqn_state(threat, ber_after, -50, 5, 0.05);
-    done = 1;
-
-    agent.replay_buffer.states = [agent.replay_buffer.states; state'];
-    agent.replay_buffer.actions = [agent.replay_buffer.actions; action];
-    agent.replay_buffer.rewards = [agent.replay_buffer.rewards; reward];
-    agent.replay_buffer.next_states = [agent.replay_buffer.next_states; next_state'];
-    agent.replay_buffer.dones = [agent.replay_buffer.dones; done];
-
+    buf_S(ep, :) = state'; buf_A(ep) = action; buf_R(ep) = reward;
     episode_rewards(ep) = reward;
 
-    if size(agent.replay_buffer.states, 1) >= agent.batch_size
-        batch_idx = randperm(size(agent.replay_buffer.states, 1), agent.batch_size);
-
-        S = single(agent.replay_buffer.states(batch_idx, :)');
-        A = agent.replay_buffer.actions(batch_idx);
-        R = single(agent.replay_buffer.rewards(batch_idx)');
-        S_next = single(agent.replay_buffer.next_states(batch_idx, :)');
-        Done = single(agent.replay_buffer.dones(batch_idx)');
-
-        Q_next = predict(agent.qNetwork, dlarray(S_next, 'CB'));
-        Q_max_next = max(extractdata(Q_next), [], 1);
-        target = R + agent.gamma * Q_max_next .* (1 - Done);
-
-        [loss, grads, ~] = dlfeval(@qLoss, agent.qNetwork, dlarray(S, 'CB'), A, target);
-        agent.qNetwork = adamupdate(agent.qNetwork, grads, [], [], 1, agent.learning_rate);
-
-        training_loss(end+1) = double(extractdata(loss));
+    if ep >= agent.batch_size
+        idx = randperm(ep, agent.batch_size);
+        S = single(buf_S(idx, :)');
+        A = buf_A(idx);
+        target = single(buf_R(idx)');         % one-shot episodes: target = reward
+        [loss, grads] = dlfeval(@qLoss, agent.qNetwork, dlarray(S, 'CB'), A, target);
+        [agent.qNetwork, avgG, avgSqG] = adamupdate(agent.qNetwork, grads, avgG, avgSqG, ...
+            ep - agent.batch_size + 1, agent.learning_rate);
+        training_loss(end+1) = double(extractdata(loss)); %#ok<SAGROW>
     end
 
     agent.epsilon = max(agent.epsilon_min, agent.epsilon * agent.epsilon_decay);
 
-    if mod(ep, 10) == 0
-        avg_reward = mean(episode_rewards(max(1, ep-9):ep));
-        avg_rewards_per_episode(end+1) = avg_reward;
-        fprintf('    Episode %3d/%d: reward=%.1f%%, epsilon=%.3f\n', ...
-            ep, total_episodes, avg_reward, agent.epsilon);
+    if mod(ep, 200) == 0
+        avg_rewards_per_episode(end+1) = mean(episode_rewards(ep-199:ep)); %#ok<SAGROW>
+        fprintf('  Episode %4d/%d: avg reward %.1f, epsilon %.3f\n', ep, N_EPISODES, ...
+            avg_rewards_per_episode(end), agent.epsilon);
     end
 end
 
-params = p0; save('params.mat', 'params');
-
-%% 5. Post-training validation gate
-% Gate A: benign_interference/none must pick no_action (false-alarm check).
-% Gate B: every REAL threat must NOT pick no_action (missed-detection check).
-% Both use each threat's real baseline BER/RSSI (recorded in Section 3) and
-% real training-time SNR, so the check is in-distribution. Refuses to save
-% if either gate fails.
-fprintf('\nRunning post-training validation gate...\n');
+%% 5. Validation gate over every (threat, Eb/N0) cell
+% Hard failures: acting on 'none' or on benign interference that leaves the
+% link near clean (<= 1.5x); choosing no_action where acting is worth >= 30
+% reward points. Cells near the 2x boundary are reported by regret only.
+fprintf('\nValidation gate (median frame state per cell):\n');
+chosen_tab = cell(num_threats, nS);
+regret = zeros(num_threats, nS);
 gate_pass = true;
-
-fprintf('  Gate A: non-hostile classes must choose no_action\n');
-gate_a_classes = {'benign_interference', 'none'};
-for gi = 1:numel(gate_a_classes)
-    threat = gate_a_classes{gi};
-    ti = find(strcmp(threat_list, threat));
-    check_state = build_dqn_state(threat, base_ber(ti), base_rssi(ti), p0.EbNo_dB(1), double(base_ber(ti) > 0.1));
-    state_dl = dlarray(single(check_state), 'CB');
-    qvals = extractdata(predict(agent.qNetwork, state_dl));
-    [~, chosen] = max(qvals);
-    chosen_action = action_names{chosen};
-    fprintf('    %-20s -> %-16s (no_action Q=%.2f, chosen Q=%.2f)\n', ...
-        threat, chosen_action, qvals(1), qvals(chosen));
-    if ~strcmp(chosen_action, 'no_action')
-        gate_pass = false;
+fails = {};
+for ti = 1:num_threats
+    for s = 1:nS
+        fr = frames{ti, s};
+        st = build_dqn_state(threat_list{ti}, median(fr(:, 1)), median(fr(:, 2)), SNR_LIST(s), mean(fr(:, 3)));
+        qv = extractdata(predict(agent.qNetwork, dlarray(single(st), 'CB')));
+        [~, a] = max(qv);
+        R = squeeze(reward_table(ti, :, s));
+        chosen_tab{ti, s} = action_names{a};
+        regret(ti, s) = max(R) - R(a);
+        rb = ber_tab(ti, na, s) / clean(s);
+        isFA   = a ~= na && (strcmp(threat_list{ti}, 'none') || ...
+                 (strcmp(threat_list{ti}, 'benign_interference') && rb <= 1.5));
+        isMiss = a == na && must_act(ti, s) && max(R) >= 30;
+        if isFA || isMiss
+            gate_pass = false;
+            fails{end+1} = sprintf('%s @ %g dB -> %s (%s)', threat_list{ti}, SNR_LIST(s), ...
+                action_names{a}, ternary(isFA, 'false alarm', 'missed action')); %#ok<SAGROW>
+        end
     end
 end
-
-fprintf('  Gate B: real threats must NOT choose no_action\n');
-gate_b_classes = setdiff(threat_list, gate_a_classes, 'stable');
-for gi = 1:numel(gate_b_classes)
-    threat = gate_b_classes{gi};
-    ti = find(strcmp(threat_list, threat));
-    check_state = build_dqn_state(threat, base_ber(ti), base_rssi(ti), p0.EbNo_dB(1), double(base_ber(ti) > 0.1));
-    state_dl = dlarray(single(check_state), 'CB');
-    qvals = extractdata(predict(agent.qNetwork, state_dl));
-    [~, chosen] = max(qvals);
-    chosen_action = action_names{chosen};
-    fprintf('    %-20s -> %-16s (no_action Q=%.2f, chosen Q=%.2f)\n', ...
-        threat, chosen_action, qvals(1), qvals(chosen));
-    if strcmp(chosen_action, 'no_action')
-        gate_pass = false;
+fprintf('%-20s', 'threat'); fprintf('%22s', snr_hdr{:}); fprintf('\n');
+for ti = 1:num_threats
+    fprintf('%-20s', threat_list{ti});
+    for s = 1:nS
+        fprintf('%22s', sprintf('%s (regret %.0f)', short_name(chosen_tab{ti, s}), regret(ti, s)));
     end
+    fprintf('\n');
 end
+fprintf('Mean regret %.1f | cells with regret > 15: %d/%d\n', mean(regret(:)), sum(regret(:) > 15), numel(regret));
 
 if ~gate_pass
-    error(['Validation gate FAILED -- see per-class breakdown above. Either a ' ...
-           'non-hostile class chose an action other than no_action (false ' ...
-           'alarm), or a real threat chose no_action (missed detection). ' ...
-           'NOT saving trained_dqn.mat -- rerun this script (try a ' ...
-           'different rng seed if it fails repeatedly).']);
+    fprintf('Gate failures:\n'); fprintf('  %s\n', fails{:});
+    error('Validation gate FAILED -- NOT saving trained_dqn.mat. Rerun (another rng seed) if it repeats.');
 end
 fprintf('Validation gate PASSED.\n\n');
 
 %% 6. Save
-fprintf('Training complete. Saving agent...\n');
-save('data/trained_dqn.mat', 'agent', 'reward_table', 'threat_list', 'action_names', '-v7.3');
+save('data/trained_dqn.mat', 'agent', 'reward_table', 'ber_tab', 'clean', 'SNR_LIST', ...
+    'threat_list', 'action_names', 'RW', 'gp', 'bw', 'regret', 'chosen_tab', '-v7.3');
+fprintf('Saved data/trained_dqn.mat\n');
 
-%% 7. Plot training curves
+%% 7. Training curves
 fig = figure('Position', [100 100 900 400], 'Color', 'w');
 subplot(1, 2, 1);
-if ~isempty(training_loss)
-    plot(training_loss, 'b-', 'LineWidth', 1.5);
-    xlabel('Training Step'); ylabel('Q-Loss'); title('DQN Training Loss'); grid on;
-end
+plot(training_loss, 'b-'); xlabel('Update'); ylabel('Q-loss'); title('DQN training loss'); grid on;
 subplot(1, 2, 2);
-if ~isempty(avg_rewards_per_episode)
-    plot(1:numel(avg_rewards_per_episode), avg_rewards_per_episode, 'g-', 'LineWidth', 1.5);
-    xlabel('Episode (x10)'); ylabel('Avg Reward (% BER improvement, real)');
-    title('DQN Average Episode Reward'); grid on;
-end
+plot((1:numel(avg_rewards_per_episode)) * 200, avg_rewards_per_episode, 'g-', 'LineWidth', 1.5);
+xlabel('Episode'); ylabel('Average reward (200 episodes)'); title('DQN average reward'); grid on;
 sgtitle('C2: DQN Training Curves');
-saveas(fig, 'results/dqn_training_curves.png');
-fprintf('Saved results/dqn_training_curves.png\n');
-close(fig);
+saveas(fig, 'results/dqn_training_curves.png'); close(fig);
+fprintf('Saved results/dqn_training_curves.png\n\n=== C2 Complete ===\n');
 
-fprintf('\n=== C2 Complete ===\n');
+%% Local functions
+function r = reward_of(bb, ba, bc, gpf, bwf, isNoAction, mustAct, RW)
+% Reward of one action in one (threat, Eb/N0) cell.
+if ~mustAct                               % healthy non-hostile link: acting is an unnecessary switch
+    r = 0;
+    if ~isNoAction, r = -RW.FA_PENALTY; end
+    return;
+end
+if isNoAction
+    r = 0;
+    return;
+end
+if ba / bc <= RW.R_TOL
+    score = 100;
+else
+    score = recovery_vs_clean(bb, ba, bc);
+    if isnan(score), score = 0; end
+end
+r = score - 100 * (RW.L_GP * (1 - gpf) + RW.L_BW * (bwf - 1));
+end
 
-%% Helper functions
-function [loss, gradients, state] = qLoss(qNet, S, A, target)
-    [Q_pred, state] = forward(qNet, S);
-    batch_size = size(A, 1);
-    idx = sub2ind([size(Q_pred, 1), batch_size], A(:)', 1:batch_size);
-    Q_selected = Q_pred(idx);
-    loss = mean((Q_selected - target).^2, 'all');
-    gradients = dlgradient(loss, qNet.Learnables);
+function [loss, gradients] = qLoss(qNet, S, A, target)
+Q_pred = forward(qNet, S);
+idx = sub2ind(size(Q_pred), A(:)', 1:numel(A));
+loss = mean((Q_pred(idx) - target).^2, 'all');
+gradients = dlgradient(loss, qNet.Learnables);
 end
 
 function y = selectAction(agent, state, training)
-    if training && rand() < agent.epsilon
-        y = randi(5);
-    else
-        state_dl = dlarray(single(state), 'CB');
-        qvals = predict(agent.qNetwork, state_dl);
-        [~, y] = max(extractdata(qvals), [], 1);
-    end
+if training && rand() < agent.epsilon
+    y = randi(numel(agent.action_names));
+else
+    qvals = predict(agent.qNetwork, dlarray(single(state), 'CB'));
+    [~, y] = max(extractdata(qvals), [], 1);
+end
+end
+
+function s = short_name(a)
+s = strrep(strrep(strrep(a, 'channel_', 'ch_'), '_diversity', '_div'), 'no_action', 'none');
+end
+
+function out = ternary(c, a, b)
+if c, out = a; else, out = b; end
 end

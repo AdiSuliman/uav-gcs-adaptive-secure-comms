@@ -162,6 +162,11 @@ for i = 1:numel(results)
     end
 end
 active = ~nonhostile & ~[results.missed];
+% False alarm (D29): action on a non-hostile link that is NOT degraded (BER <= 2x clean)
+acted     = ~strcmp({results.dqn_action}, 'no_action');
+degraded  = [results.ber_before] > RATIO_OK * [results.ber_clean];
+false_al  = nonhostile & acted & ~degraded;
+justified = nonhostile & acted & degraded;
 
 %% ---------- Save + report ----------
 if ~exist('results','dir'), mkdir('results'); end
@@ -174,6 +179,7 @@ report{end+1} = sprintf('Speeds [km/h]: %s | Eb/N0 points: %s dB | 9 threats/cla
     mat2str(SPEEDS_KMH), mat2str(SNR_LIST));
 report{end+1} = 'fd = v * fc / c  (fc = 2.4 GHz)';
 report{end+1} = '';
+report{end+1} = sprintf('False alarm = action on a non-hostile link with BER <= %gx clean (D29).', RATIO_OK);
 report{end+1} = sprintf('%-10s %-10s %-14s %-14s %-16s %-16s', 'km/h','fd (Hz)','Detection','False alarms', ...
     'Rec vs clean', 'Restored (<=2x)');
 acc_v = nan(1,numel(SPEEDS_KMH)); rec_v = nan(1,numel(SPEEDS_KMH));
@@ -181,7 +187,7 @@ for vi = 1:numel(SPEEDS_KMH)
     m = [results.speed_kmh] == SPEEDS_KMH(vi);
     acc_v(vi) = 100*mean([results(m).correct]);
     mn = m & nonhostile;
-    fa = sum(~strcmp({results(mn).dqn_action},'no_action'));
+    fa = sum(false_al(mn));
     mr = m & active;
     rec_v(vi) = mean([results(mr).rec_vs_clean],'omitnan');
     report{end+1} = sprintf('%-10.1f %-10.1f %6.1f%% (%d/%d) %5d/%-8d %10.1f%% %8d/%-6d', SPEEDS_KMH(vi), ...
@@ -204,8 +210,8 @@ end
 report{end+1} = '';
 report{end+1} = sprintf('OVERALL detection accuracy: %.1f%% (%d/%d)', 100*mean([results.correct]), ...
     sum([results.correct]), numel(results));
-report{end+1} = sprintf('OVERALL false-alarm rate (non-hostile classes): %.1f%%', ...
-    100*mean(~strcmp({results(nonhostile).dqn_action},'no_action')));
+report{end+1} = sprintf('OVERALL false alarms: %d/%d non-hostile runs (%d on a healthy link) | justified actions on degraded links: %d', ...
+    sum(false_al), sum(nonhostile), sum(nonhostile & ~degraded), sum(justified));
 report{end+1} = sprintf('OVERALL KPI #2 recovery vs clean link (real threats): %.1f%% | restored %d/%d | missed %d', ...
     mean([results(active).rec_vs_clean],'omitnan'), sum([results(active).ratio_clean] <= RATIO_OK), ...
     sum(active), sum([results.missed]));

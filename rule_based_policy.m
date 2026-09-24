@@ -1,10 +1,15 @@
-function [action, reason] = rule_based_policy(threat_class)
-%RULE_BASED_POLICY  Fixed expert mapping from detected threat class to recovery action.
-%   Baseline policy for the DQN comparison (proposal: rule-based first, DQN second).
-%   Each choice is the action that addresses the threat's physics as modeled in
-%   apply_countermeasure.m (D28); both policies act through that same function,
-%   so the comparison measures decision quality, not execution strength.
+function [action, reason] = rule_based_policy(threat_class, ber, ebno)
+%RULE_BASED_POLICY  Fixed expert policy: detected threat class -> recovery action.
+%   Baseline for the DQN comparison (proposal: rule-based first, DQN second).
+%   Each class maps to the action that addresses its physics as modeled in
+%   apply_countermeasure.m (D28); both policies act through that same function.
+%
+%   With the link measurements (ber = observed BER, ebno = Eb/N0 in dB) the rule
+%   also reacts to functional degradation, as the proposal requires of both the
+%   agent and the rules (mitigation 13): a non-hostile or unknown class on a link
+%   degraded beyond 2x the clean BER gets a generic action instead of no_action.
 threat_class = char(threat_class);
+RATIO_OK = 2;
 
 switch threat_class
     case 'jamming'
@@ -24,6 +29,17 @@ switch threat_class
     case {'benign_interference', 'none'}
         action = 'no_action';         reason = 'not an attack: acting would be a false alarm';
     otherwise
-        action = 'no_action';         reason = 'unknown class: no reliable mapping';
+        action = 'no_action';         reason = 'unknown class: no class-specific mapping';
+end
+
+if nargin >= 3 && strcmp(action, 'no_action')
+    bc = clean_ber_ref(ebno);
+    if isfinite(bc) && ber > RATIO_OK * bc
+        if strcmp(threat_class, 'benign_interference')
+            action = 'channel_switch'; reason = 'interference degrades the link: leave the channel';
+        else
+            action = 'freq_diversity'; reason = 'link degraded without a known cause: generic diversity';
+        end
+    end
 end
 end

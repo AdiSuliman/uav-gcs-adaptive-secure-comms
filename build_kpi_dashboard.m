@@ -221,15 +221,15 @@ if have_surv && isfield(Sv,'grid_data_A') && isfield(Sv,'grid_data_B')
     stA = []; for k=1:numel(Sv.grid_data_A), stA=[stA; Sv.grid_data_A(k).status(:)]; end
     stB = []; for k=1:numel(Sv.grid_data_B), stB=[stB; Sv.grid_data_B(k).status(:)]; end
     stA = stA(stA>0); stB = stB(stB>0);
-    sv_lines{end+1} = 'Map A — Threat Neutralization (real attack removal):';
+    sv_lines{end+1} = 'Map A — without goodput loss (C/F/S actions):';
     sv_lines{end+1} = sprintf('   \\color[rgb]{0.2,0.65,0.25}Recoverable %.1f%%   \\color[rgb]{0.95,0.75,0.15}Marginal %.1f%%   \\color[rgb]{0.8,0.2,0.2}Non-rec %.1f%%', ...
         100*mean(stA==1), 100*mean(stA==2), 100*mean(stA==3));
     sv_lines{end+1} = '';
-    sv_lines{end+1} = 'Map B — Link Survivability (all mechanisms):';
+    sv_lines{end+1} = 'Map B — any action (incl. rate reduction):';
     sv_lines{end+1} = sprintf('   \\color[rgb]{0.2,0.65,0.25}Recoverable %.1f%%   \\color[rgb]{0.95,0.75,0.15}Marginal %.1f%%   \\color[rgb]{0.8,0.2,0.2}Non-rec %.1f%%', ...
         100*mean(stB==1), 100*mean(stB==2), 100*mean(stB==3));
     sv_lines{end+1} = '';
-    sv_lines{end+1} = '\itMap B > Map A gap = survival via SNR-margin, not neutralization';
+    sv_lines{end+1} = '\itMap B > Map A gap = survival bought with goodput (rate reduction)';
 else
     sv_lines{end+1} = 'data/survivability\_boundary.mat missing or single-map format';
     sv_lines{end+1} = '(run map\_survivability\_boundary.m to regenerate)';

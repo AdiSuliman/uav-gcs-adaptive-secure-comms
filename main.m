@@ -76,7 +76,7 @@ fprintf('(This file will contain EVERYTHING printed below, even across clc calls
 % ---- Phase A: link + threats + dataset ----
 RUN.init                        = true;   % A0  : regenerate params.mat
 RUN.validate_A                  = true;   % A1-A3: build+validate AWGN & Rician links (fast)
-RUN.check_A4                    = true;   % A4  : bבכuild threat model + sanity BER (fast)
+RUN.check_A4                    = true;   % A4  : build threat model + sanity BER (fast)
 RUN.build_dataset               = true;   % A5  : full dataset sweep (HEAVY ~30-40min)
 RUN.extract_spectrograms        = true;   % A6  : spectrograms + 7 features (~5min)
 
@@ -88,17 +88,17 @@ RUN.eval_detector               = true;   % B3  : test eval + confusion/accuracy
 
 
 % ---- Phase C: closed-loop recovery ----
-RUN.train_dqn                   = true;   % C2  : train DQN (one-hot state) (~10-15min)בי ינ
-
+RUN.train_dqn                   = true;   % C2  : train DQN, reward over threat x action x Eb/N0 (~7min, D29)
+RUN.run_closed_loop             = true;   % C3  : closed loop, CNN+DQN (~2-3min)
 RUN.run_closed_loop_diagnostic  = true;   % C3d : full SNR sweep + timing + Q-values (~15-20min)
 RUN.eval_speed_robustness       = true;   % C3s : detection/decision/recovery vs UAV speed 50-120 km/h (~30-60min)
 
 % ---- Phase EXP: deep countermeasure exploration ----
-RUN.explore_countermeasures     = true;   % EXP : full sweep (VERY HEAVY ~75-86min)
-RUN.analyze_exploration_results = true;   % EXP-analysis: legitimacy filter + diagnosis (fast)
+RUN.explore_countermeasures     = false;  % EXP : pre-D28 mechanism study (~78min); not needed by SURV since D30
+RUN.analyze_exploration_results = false;  % EXP-analysis: legitimacy filter + diagnosis (fast)
 
 % ---- Phase SURV: survivability boundary mapping (deliverable #7) ----
-RUN.map_survivability           = true;   % SURV: Map A + Map B + gap analysis (~5min, needs EXP data)
+RUN.map_survivability           = true;   % SURV: action-based Map A/B + gap analysis (~70-80min, D30)
 
 % ---- Phase KPI: proposal measurement (section 5 / ה) ----
 RUN.measure_far                 = true;   % KPI4 : FAR on non-hostile classes, SNR-swept (~5min)
@@ -235,8 +235,8 @@ end
 
 fprintf('  [SURV] Pipeline status:\n');
 report_file('data/survivability_boundary.mat',        '      survivability_boundary.mat     ', 'map_survivability_boundary');
-report_file('results/survivability_boundary_mapA.txt','      Map A (neutralization)         ', 'map_survivability_boundary');
-report_file('results/survivability_boundary_mapB.txt','      Map B (link survivability)     ', 'map_survivability_boundary');
+report_file('results/survivability_boundary_mapA.txt','      Map A (no goodput loss)        ', 'map_survivability_boundary');
+report_file('results/survivability_boundary_mapB.txt','      Map B (any action)             ', 'map_survivability_boundary');
 fprintf('\n');
 
 %% ========== PHASE KPI: PROPOSAL MEASUREMENT (section 5 / ה) ==========

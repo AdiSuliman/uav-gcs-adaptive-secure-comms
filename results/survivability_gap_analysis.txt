@@ -1,10 +1,15 @@
 === SURVIVABILITY GAP ANALYSIS ===
-Cells where the link survives (Map B: recoverable/marginal) but the
-threat itself is not neutralized (Map A: non-recoverable). This is the
-regime where survival comes from trading link margin/rate, not from
-removing the attack.
+Cells where the link survives with rate reduction (Map B: recoverable/marginal)
+but not with any goodput-free action (Map A: non-recoverable): survival bought
+with throughput -- the goodput trade-off named in the proposal.
 
-path_loss: 1 gap cell(s)
-  level=8, SNR=10dB: Map A ratio=5.64x (non-rec) | Map B ratio=0.00x
+noise_burst: 2 gap cell(s)
+  level=12, Eb/N0=6dB: Map A 5.35x (spatial_diversity) | Map B 4.59x (rate_reduce)
+  level=4, Eb/N0=8dB: Map A 6.83x (spatial_diversity) | Map B 4.63x (rate_reduce)
+path_loss: 4 gap cell(s)
+  level=20, Eb/N0=2dB: Map A 5.19x (spatial_diversity) | Map B 4.69x (rate_reduce)
+  level=12, Eb/N0=4dB: Map A 5.49x (spatial_diversity) | Map B 3.64x (rate_reduce)
+  level=8, Eb/N0=8dB: Map A 6.15x (spatial_diversity) | Map B 2.24x (rate_reduce)
+  level=8, Eb/N0=10dB: Map A 11.85x (spatial_diversity) | Map B 3.22x (rate_reduce)
 
-Total gap cells: 1
+Total gap cells: 6

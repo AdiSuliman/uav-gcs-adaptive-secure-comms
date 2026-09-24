@@ -53,7 +53,8 @@ baseline = struct('jsr_db',p0.jsr_db,'path_loss_db',p0.path_loss_db, ...
 results = struct('threat',{},'snr_db',{},'cnn_top_class',{},'cnn_conf',{},'cnn_probs',{}, ...
     'cnn_latency_ms',{},'dqn_action',{},'dqn_qvalues',{},'dqn_latency_ms',{}, ...
     'rule_based_action',{},'agrees_with_rule',{},'cnn_correct',{}, ...
-    'ber_before',{},'ber_after',{},'recovery_pct',{},'n_frames',{},'temporal_feats',{});
+    'ber_before',{},'ber_after',{},'recovery_pct',{},'n_frames',{}, ...
+    'ber_after_rule',{},'gp_dqn',{},'gp_rule',{},'temporal_feats',{});
 
 %% WARM-UP: the first predict() calls trigger one-time GPU JIT + cuDNN kernel
 % autotuning (the actual convolution kernels are selected lazily on the first
@@ -190,8 +191,8 @@ for s = 1:numel(SNR_points)
         [~, action_idx] = max(qvals_vec);
         action_name = action_names{action_idx};
 
-        %% --- Rule-based comparison (same ground-truth threat) ---
-        [rule_action, ~] = rule_based_policy(threat);
+        %% --- Rule-based decision on the same input as the DQN (detected class + link) ---
+        rule_action = rule_based_policy(cnn_pred_class, raw_feats(2), ebno);
         agrees = strcmp(action_name, rule_action) || ...
                  (strcmp(action_name,'channel_switch') && strcmp(rule_action,'channel_switch_fast'));
 
@@ -229,6 +230,23 @@ for s = 1:numel(SNR_points)
                 action_name, dqn_latency_ms, rule_action, recovery_pct);
         end
 
+        %% --- Rule-based outcome on the same link (proposal KPI #3: compare link quality) ---
+        if strcmp(rule_action, action_name)
+            ber_after_rule = ber_after;
+        elseif strcmp(rule_action, 'no_action')
+            ber_after_rule = ber_before_mean;
+        else
+            [p_r, g_r] = apply_countermeasure(p, threat, rule_action);
+            params = p_r; save('params.mat', 'params');
+            build_threat_model;
+            set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB + g_r), 'SignalPower', num2str(1/p_r.sps));
+            out3 = sim(modelName);
+            [~, ber_f3] = extract_closed_loop_frames(out3, p, delay_bits);
+            ber_after_rule = mean(ber_f3, 'omitnan');
+        end
+        [~, ~, cmD] = apply_countermeasure(p, threat, action_name);
+        [~, ~, cmR] = apply_countermeasure(p, threat, rule_action);
+
         results(end+1) = struct('threat',threat,'snr_db',ebno, ...
             'cnn_top_class',cnn_pred_class,'cnn_conf',conf,'cnn_probs',probs_vec, ...
             'cnn_latency_ms',cnn_latency_ms,'dqn_action',action_name, ...
@@ -236,6 +254,7 @@ for s = 1:numel(SNR_points)
             'rule_based_action',rule_action,'agrees_with_rule',agrees, ...
             'cnn_correct',cnn_correct,'ber_before',ber_before_mean,'ber_after',ber_after, ...
             'recovery_pct',recovery_pct,'n_frames',nf, ...
+            'ber_after_rule',ber_after_rule,'gp_dqn',cmD.goodput_factor,'gp_rule',cmR.goodput_factor, ...
             'temporal_feats',[var_rssi_10 dber_dt burst_ratio]); %#ok<SAGROW>
     end
 end
@@ -257,7 +276,15 @@ for i = 1:numel(results)
     results(i).rec_vs_clean = NaN;
     results(i).ratio_clean  = results(i).ber_after / clean_ber(s);
     results(i).missed       = false;
+    results(i).rec_rule     = NaN;
+    results(i).ratio_rule   = results(i).ber_after_rule / clean_ber(s);
     if ismember(results(i).threat, {'benign_interference','none'}), continue; end
+    if strcmp(results(i).rule_based_action, 'no_action')
+        results(i).rec_rule = 0;
+    else
+        [results(i).rec_rule, results(i).ratio_rule] = recovery_vs_clean( ...
+            results(i).ber_before, results(i).ber_after_rule, clean_ber(s));
+    end
     if strcmp(results(i).dqn_action, 'no_action')
         results(i).missed = true;
         results(i).rec_vs_clean = 0;
@@ -441,6 +468,25 @@ report{end+1} = sprintf('KPI #2 recovery vs clean link (real threats, per-run me
 report{end+1} = sprintf('KPI #2 link state after countermeasure: %d/%d restored (<= %gx clean), %d marginal, %d not restored | missed detections: %d', ...
     sum(rat <= RATIO_OK), numel(rat), RATIO_OK, sum(rat > RATIO_OK & rat <= RATIO_MARG), sum(rat > RATIO_MARG), ...
     sum([results(real_mask).missed]));
+
+%% --- DQN vs rule-based: link quality on the same runs (proposal KPI #3) ---
+report{end+1} = '';
+report{end+1} = '--- DQN vs Rule-Based: link quality achieved on the same runs (proposal KPI #3) ---';
+report{end+1} = 'Both decide from the same detector output and link measurements; both act through apply_countermeasure.m.';
+report{end+1} = sprintf('%-20s %11s %11s %9s   %11s %11s %9s', 'threat', 'DQN rec', 'DQN ratio', 'DQN gp', 'Rule rec', 'Rule ratio', 'Rule gp');
+for t = 1:numel(threats)
+    if ismember(threats{t}, {'benign_interference','none'}), continue; end
+    m = strcmp({results.threat}, threats{t});
+    report{end+1} = sprintf('%-20s %10.1f%% %10.2fx %9.2f   %10.1f%% %10.2fx %9.2f', threats{t}, ...
+        mean([results(m).rec_vs_clean], 'omitnan'), mean([results(m).ratio_clean], 'omitnan'), mean([results(m).gp_dqn]), ...
+        mean([results(m).rec_rule], 'omitnan'), mean([results(m).ratio_rule], 'omitnan'), mean([results(m).gp_rule])); %#ok<SAGROW>
+end
+rd = [results(real_mask).ratio_clean]; rr = [results(real_mask).ratio_rule];
+report{end+1} = sprintf('Real threats: DQN rec %.1f%%, restored %d/%d, mean goodput %.2f | Rule rec %.1f%%, restored %d/%d, mean goodput %.2f', ...
+    mean([results(real_mask).rec_vs_clean], 'omitnan'), sum(rd <= RATIO_OK), numel(rd), mean([results(real_mask).gp_dqn]), ...
+    mean([results(real_mask).rec_rule], 'omitnan'), sum(rr <= RATIO_OK), numel(rr), mean([results(real_mask).gp_rule]));
+report{end+1} = sprintf('Per run: DQN better link %d | rule better %d | within 10%% %d', ...
+    sum(rd < 0.9*rr), sum(rr < 0.9*rd), sum(abs(rd - rr) <= 0.1*max(rd, rr)));
 
 fid = fopen('results/closed_loop_diagnostic_report.txt','w');
 for i=1:numel(report), fprintf(fid,'%s\n',report{i}); end

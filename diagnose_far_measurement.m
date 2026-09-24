@@ -1,9 +1,11 @@
 %% DIAGNOSE_FAR_MEASUREMENT.m — False Alarm Rate (FAR) characterization, proposal KPI (section ה)
-% FAR = fraction of non-hostile cases (none, benign_interference) where the
-% closed-loop system (CNN detection -> DQN decision) triggers ANY countermeasure
-% other than no_action. False alarms have a real operational cost (an
-% unnecessary channel switch disrupts a healthy link), so the proposal names
-% this explicitly as a KPI.
+% The proposal defines a false alarm as an unnecessary countermeasure (an
+% unnecessary channel switch disrupts the link). FAR = fraction of non-hostile
+% trials (none, benign_interference) in which the system acts although the
+% link is NOT degraded (BER <= 2x the clean link at that Eb/N0, D29). An action
+% on benign interference that degrades the link beyond 2x is a justified
+% response, not a false alarm (proposal risk 13: respond to link degradation);
+% those are reported separately, together with the old "any action" rate.
 %
 % CHARACTERIZATION MODE (2026-09-19, D20): swept across several SNR points
 % instead of only the worst case. A single-SNR measurement at 0 dB showed
@@ -64,8 +66,9 @@ if canUseGPU, dummy_state = gpuArray(dummy_state); end
 predict(dqn_agent_trained.qNetwork, dummy_state);
 fprintf('Warm-up complete.\n\n');
 
+RATIO_OK = 2;
 results = struct('class',{},'snr',{},'trial',{},'cnn_pred',{},'cnn_correct',{}, ...
-    'dqn_action',{},'false_alarm',{});
+    'dqn_action',{},'acted',{},'ber_mean',{},'false_alarm',{});
 
 for si = 1:numel(SNR_TEST_POINTS)
     ebno = SNR_TEST_POINTS(si);
@@ -127,18 +130,30 @@ for si = 1:numel(SNR_TEST_POINTS)
             [~, action_idx] = max(extractdata(qvals));
             action_name = action_names{action_idx};
 
-            is_false_alarm = ~strcmp(action_name, 'no_action');
-
             results(end+1) = struct('class', threat, 'snr', ebno, 'trial', r, ...
                 'cnn_pred', cnn_pred_class, 'cnn_correct', cnn_correct, ...
-                'dqn_action', action_name, 'false_alarm', is_false_alarm); %#ok<SAGROW>
+                'dqn_action', action_name, 'acted', ~strcmp(action_name, 'no_action'), ...
+                'ber_mean', mean(ber_f, 'omitnan'), 'false_alarm', false); %#ok<SAGROW>
         end
-        n_fa_this = sum([results(strcmp({results.class},threat) & [results.snr]==ebno).false_alarm]);
-        fprintf('  -> %d/%d false alarms\n\n', n_fa_this, N_REPEATS);
+        n_act_this = sum([results(strcmp({results.class},threat) & [results.snr]==ebno).acted]);
+        fprintf('  -> acted in %d/%d trials\n\n', n_act_this, N_REPEATS);
     end
 end
 
 params = p0; save('params.mat', 'params');
+
+%% Classify each trial against the clean link (mean BER of the 'none' trials at that Eb/N0)
+clean_far = nan(size(SNR_TEST_POINTS));
+for si = 1:numel(SNR_TEST_POINTS)
+    m = strcmp({results.class}, 'none') & [results.snr] == SNR_TEST_POINTS(si);
+    clean_far(si) = mean([results(m).ber_mean]);
+end
+degraded = false(1, numel(results));
+for i = 1:numel(results)
+    si = find(SNR_TEST_POINTS == results(i).snr, 1);
+    degraded(i) = results(i).ber_mean / clean_far(si) > RATIO_OK;
+    results(i).false_alarm = results(i).acted && ~degraded(i);
+end
 
 %% Summary — per (class, SNR), then per class, then overall
 report = {};
@@ -147,8 +162,9 @@ report{end+1} = sprintf('Generated: %s', datestr(now));
 report{end+1} = sprintf('N_REPEATS per (class,SNR): %d | SNR points: %s dB', N_REPEATS, mat2str(SNR_TEST_POINTS));
 report{end+1} = '';
 
+report{end+1} = sprintf('False alarm = action while BER <= %gx clean (D29). "Justified" = action on a link degraded beyond that.', RATIO_OK);
 report{end+1} = '--- FAR vs SNR, per class ---';
-report{end+1} = sprintf('%-22s %8s %14s %16s', 'Class', 'SNR', 'FAR', 'CNN acc');
+report{end+1} = sprintf('%-22s %8s %10s %12s %12s %12s', 'Class', 'SNR', 'FAR', 'Degraded', 'Justified', 'CNN acc');
 for c = 1:numel(classes_to_test)
     threat = classes_to_test{c};
     for si = 1:numel(SNR_TEST_POINTS)
@@ -157,7 +173,11 @@ for c = 1:numel(classes_to_test)
         n = sum(mask);
         n_fa = sum([results(mask).false_alarm]);
         n_ok = sum([results(mask).cnn_correct]);
-        report{end+1} = sprintf('%-22s %6g dB %11.1f%% %14.1f%%', threat, ebno, 100*n_fa/n, 100*n_ok/n);
+        n_deg = sum(degraded(mask));
+        n_jus = sum([results(mask).acted] & degraded(mask));
+        if n_deg > 0, jus = sprintf('%d/%d', n_jus, n_deg); else, jus = '-'; end
+        report{end+1} = sprintf('%-22s %6g dB %9.1f%% %9d/%-3d %12s %10.1f%%', threat, ebno, 100*n_fa/n, ...
+            n_deg, n, jus, 100*n_ok/n);
     end
     report{end+1} = '';
 end
@@ -197,8 +217,12 @@ for c = 1:numel(classes_to_test)
 end
 
 n_all = numel(results); n_fa_all = sum([results.false_alarm]);
+n_healthy = sum(~degraded);
 report{end+1} = '=== OVERALL (all classes, all SNR pooled) ===';
-report{end+1} = sprintf('Combined FAR: %d/%d (%.1f%%)', n_fa_all, n_all, 100*n_fa_all/n_all);
+report{end+1} = sprintf('Combined FAR: %d/%d (%.1f%%) | over healthy-link trials only: %d/%d', ...
+    n_fa_all, n_all, 100*n_fa_all/n_all, n_fa_all, n_healthy);
+report{end+1} = sprintf('Any-action rate (pre-D29 definition): %d/%d (%.1f%%)', ...
+    sum([results.acted]), n_all, 100*mean([results.acted]));
 
 if ~exist('results', 'dir'), mkdir('results'); end
 fid = fopen('results/far_measurement.txt', 'w');

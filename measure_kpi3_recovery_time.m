@@ -67,6 +67,7 @@ n = numel(threats);
 
 dqn_latency_ms = zeros(1, n);
 recovery_pct   = zeros(1, n);
+rule_rec_pct   = nan(1, n);
 agrees_frac    = zeros(1, n);
 rule_action    = cell(1, n);
 
@@ -79,8 +80,11 @@ for i = 1:n
     else
         recovery_pct(i) = mean([sub.recovery_pct], 'omitnan');
     end
+    if isfield(sub, 'rec_rule')
+        rule_rec_pct(i) = mean([sub.rec_rule], 'omitnan');                          % rule outcome, same runs
+    end
     agrees_frac(i)    = mean([sub.agrees_with_rule]);
-    rule_action{i}    = sub(1).rule_based_action;   % rule policy doesn't depend on SNR
+    rule_action{i}    = sub(1).rule_based_action;
 end
 
 fprintf('Loaded %d threats (SNR-averaged) from %s\n\n', n, mat_path);
@@ -101,23 +105,17 @@ report = {};
 report{end+1} = '=== KPI #3: Decision Speed (DQN vs Rule-Based) ===';
 report{end+1} = sprintf('Generated: %s', datestr(now));
 report{end+1} = '';
-report{end+1} = 'NOTE: "recovery cycles" is not a meaningful metric for this architecture --';
-report{end+1} = 'every action applies a fixed one-shot dB mitigation and both policies are';
-report{end+1} = 'deterministic, so both converge in exactly 1 decision regardless of policy.';
-report{end+1} = 'The metric that actually differs is DECISION LATENCY (real, timed below).';
+report{end+1} = 'Decision latency of both policies, and the link quality each achieves on the';
+report{end+1} = 'same closed-loop runs (one decision per run). Recovery time in decision cycles';
+report{end+1} = 'requires the episodic closed loop (improvement 4).';
 report{end+1} = '';
 report{end+1} = 'DQN latency/recovery/agreement are averaged across the full SNR sweep';
 report{end+1} = '(each threat has one data point per SNR point in the diagnostic run).';
 report{end+1} = '';
-report{end+1} = sprintf('%-22s %14s %14s %10s %10s', 'Threat', 'DQN (ms)', 'Rule (ms)', 'Agree%', 'Recov% (vs clean)');
+report{end+1} = sprintf('%-22s %12s %12s %8s %14s %14s', 'Threat', 'DQN (ms)', 'Rule (ms)', 'Agree%', 'DQN rec (clean)', 'Rule rec (clean)');
 for i = 1:n
-    if isnan(recovery_pct(i))
-        report{end+1} = sprintf('%-22s %14.3f %14.5f %9.0f%% %10s', ...
-            threats{i}, dqn_latency_ms(i), rule_latency_ms(i), 100*agrees_frac(i), 'N/A');
-    else
-        report{end+1} = sprintf('%-22s %14.3f %14.5f %9.0f%% %9.1f%%', ...
-            threats{i}, dqn_latency_ms(i), rule_latency_ms(i), 100*agrees_frac(i), recovery_pct(i));
-    end
+    report{end+1} = sprintf('%-22s %12.3f %12.5f %7.0f%% %14s %14s', threats{i}, dqn_latency_ms(i), ...
+        rule_latency_ms(i), 100*agrees_frac(i), pct_or_na(recovery_pct(i)), pct_or_na(rule_rec_pct(i))); %#ok<SAGROW>
 end
 report{end+1} = '';
 report{end+1} = sprintf('Mean DQN latency:  %.3f ms', mean(dqn_latency_ms));
@@ -144,3 +142,8 @@ fclose(fid);
 for i = 1:numel(report), fprintf('%s\n', report{i}); end
 fprintf('\nSaved results/kpi3_measurement.txt\n');
 fprintf('\n=== KPI #3 Complete ===\n');
+
+%% Local function
+function s = pct_or_na(x)
+if isnan(x), s = 'N/A'; else, s = sprintf('%.1f%%', x); end
+end

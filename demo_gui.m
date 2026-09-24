@@ -380,7 +380,7 @@ function ui = buildSurvTab(tab, env, c)
     gl = uigridlayout(pl, [8 1]); gl.RowHeight = {20, 28, 20, 28, 22, 22, 22, '1x'};
     gl.Padding = [10 6 10 10]; gl.RowSpacing = 4; gl.BackgroundColor = c.panelBg;
     place(mkLabel(gl, 'Map', c, 'FontColor', c.mut), 1, 1);
-    survMapDD = uidropdown(gl, 'Items', {'Map A - threat neutralization','Map B - link survivability'}, ...
+    survMapDD = uidropdown(gl, 'Items', {'Map A - without goodput loss','Map B - any action (incl. rate reduction)'}, ...
         'ItemsData', {'A','B'}, 'Value', 'A', 'BackgroundColor', c.termBg, 'FontColor', c.txt, 'FontName', c.font);
     place(survMapDD, 2, 1);
     place(mkLabel(gl, 'Threat', c, 'FontColor', c.mut), 3, 1);
@@ -827,10 +827,9 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     total_ms = cnn_ms + dqn_ms;
 
     if is_unknown
-        rule_action = 'no_action';          % the rule table has no entry for an unknown threat
+        rule_action = rule_based_policy('unknown', raw_feats(2), ebno);   % generic action only if the link is degraded
     else
-        [ra, ~] = rule_based_policy(cnn_class);
-        rule_action = strrep(ra, 'channel_switch_fast', 'channel_switch');
+        rule_action = rule_based_policy(cnn_class, raw_feats(2), ebno);
     end
     ridx = find(strcmp(env.action_names, rule_action), 1); if isempty(ridx), ridx = 0; end
 
@@ -1708,7 +1707,7 @@ function updateSurvMap(fig)
     end
     hold(ax, 'off');
     xlabel(ax, 'Eb/N0 (dB)', 'Color', c.mut); ylabel(ax, 'Severity level (low -> high)', 'Color', c.mut);
-    if strcmp(mapKey, 'A'), mt = 'Map A - threat neutralization'; else, mt = 'Map B - link survivability'; end
+    if strcmp(mapKey, 'A'), mt = 'Map A - without goodput loss'; else, mt = 'Map B - any action (incl. rate reduction)'; end
     setTitle(ax, [mt ' : ' niceName(tname)], c);
 
     % ---- summary text ----
