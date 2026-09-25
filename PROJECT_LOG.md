@@ -625,5 +625,26 @@ Runtime: the D36 preset (train_dqn + all DQN consumers) took 52 min; the 5-repea
 ### D37 — step 9: continuous episode view, shared decision cycle, GUI build speed (code complete)
 New `episode_cycle.m` (one decision cycle, used by `run_closed_loop_episodes.m` and the GUI). `demo_gui.m`: CONTINUOUS EPISODE tab (streamed episode, DQN and rule on identical frames, T_detect/T_act/T_recover, CSV trace), `scenarioParams` helper, models built without the editor window, rate-limited timer redraw. `build_threat_model.m`: optional `quiet_build` with fallback. Pending: MATLAB check — GUI episode tab, and `run_closed_loop_episodes` must reproduce the D36 numbers (DQN 66/91, rule 68/90 with hysteresis).
 
+### D37 check (2026-09-25)
+GUI episode tab runs (jamming 4 dB: T_act 3, T_recover 8 for both policies); PNG export added; NONE on the mitigated link shown in amber. `run_closed_loop_episodes` through `episode_cycle.m`: DQN 68/93, rule 66/87 recovered with hysteresis (D36 run: 66/91, 68/90). Not identical because the frame pools are rebuilt from fresh Simulink runs on every execution; within the D36 confidence intervals.
+
+### D38 — step 10: full run from scratch (2026-09-25)
+One consistent run of every stage (stopped once at SURV on a `threat_cfg` workspace clash between scripts, fixed, resumed). Dataset build 10 min instead of ~100 thanks to `quiet_build`.
+- KPI #1: accuracy 96.33% [95.60, 97.03], macro-F1 96.31%, ≥ 90% from 0 dB; action-equivalent 98.13%; unseen Eb/N0 96.2% vs 96.3%; reactive_jamming recall 82.8% (errors are jamming, same action).
+- KPI #2: DQN 86.4% [86.2, 86.6] = rule 86.4% (difference 0.0 [−0.1, 0.2]); BER restored 157/210; PLR restored 150/210; goodput kept DQN 78.3% vs rule 75.9%. Weak cells: noise_burst (51.1%, 11/30) and path_loss (69.0%, 5/30).
+- KPI #3: T_act 3, T_recover median 8 cycles for both; recovered DQN 69/93 = 74% [64, 82], rule 70/92 = 76% [66, 84]; decision latency 14.6 ms mean (CNN 13.4 + DQN 1.2).
+- KPI #4: 0/120 healthy-link trials, 95% upper limit 3.1% → MET. KPI #5 MET.
+- DQN seeds 5/5 pass, mean regret 0.1; survivability Map A 78.3%, Map B 80.8%; speed sweep detection 97.7%, KPI #2 86.2%, 0 false alarms; LOTO AUROC 0.52; combined threats 38/456 for both policies.
+- Dashboard FAR now on healthy-link trials (it showed the all-trials 2.1% upper limit).
+
+### D39 — action set v2 (code complete)
+`apply_countermeasure.m`: power_control, fec_interleave, two-action pairs. `extract_closed_loop_frames.m`: FEC emulation with erasure decoding on the measured error pattern. `dqn_agent.m`: 16 actions. `train_dqn.m`: power cost in the reward. `rule_based_policy.m`: noise_burst → fec_interleave. `map_survivability_boundary.m`: action set from the agent, Map A = no goodput loss. GUI and dashboard handle any number of actions. Pending: MATLAB run (preset "D39" in `main.m`).
+
+First run (2026-09-25): reward table shows the new actions help (path_loss best spatial+power 77–88, noise_burst best spatial+FEC 85), but `train_dqn` failed the gate on all 5 seeds — near-tied actions such as X vs X + FEC (regret 15). Fix: input z-score, 128-64 network, 12,000 episodes, batch 64, cosine learning-rate decay (D39). Gate unchanged.
+
+Second run (2026-09-25, stopped during SURV): gate PASS on 5/5 seeds, mean regret 0.1. Closed loop DQN KPI #2 98.1% [97.9, 98.3], 206/210 restored, PLR 179/210, goodput kept 97%; noise_burst 99.9%, path_loss 93.4%; combined threats 161/456 (D38: 38/456); episodes 89/93 recovered, T_act 3, T_rec 8. The rule with noise_burst → fec_interleave fell to 72.0% (noise_burst −44.9%: FEC alone below ~6 dB is past the code threshold), so the rule is reverted to its D38 form and the loop stages are re-run.
+
+Final D39 run (2026-09-26, agent from the second run, rule as D38): KPI #2 DQN 98.1% [97.9, 98.3] vs rule 86.4% (paired +11.7 [11.4, 12.1]); 206/210 restored, PLR 179/210, goodput kept 97.4% vs 75.9%; episodes 83/89 vs 65/90 recovered, T_act 3 / T_rec 8; latency 4.98 ms; FAR 0/120 (upper 3.1%); speed sweep 97.9%, 0/48 false alarms; Map A 86.7% / Map B 93.3%; combined threats DQN 93/456, rule 38/456 (DQN 161/456 in the second run with identical decisions: cells near the 2× threshold). Dashboard labels updated for the new action set.
+
 ### Next
-Step 10: documentation sync (README results section, report figures), full `main.m` run with the light figure theme.
+Run the D39 preset, compare with D38 (noise_burst, path_loss, combined threats), commit.

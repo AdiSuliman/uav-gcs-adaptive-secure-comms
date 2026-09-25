@@ -7,8 +7,8 @@
 % inside the training loop. Training is repeated over CFG.dqn_seeds seeds
 % (default 5); every seed passes through the validation gate and the best
 % gate-passing seed is saved, with the seed spread in results/dqn_seed_stability.txt.
-% Every action's reward is measured per cell, so each sample trains all five
-% Q-values (full-action targets); the gate also rejects regret > 10 where
+% Every action's reward is measured per cell, so each sample trains all
+% the Q-values (full-action targets); the gate also rejects regret > 10 where
 % action is needed.
 close all; clc;
 fprintf('=== C2: Train DQN Agent ===\n\n');
@@ -40,20 +40,21 @@ RW = struct( ...
     'R_TOL',      1.15, ...  % BER within 15% of clean counts as fully restored (draw-to-draw spread, D27)
     'L_GP',       0.30, ...  % cost per unit of goodput lost (rate/4 -> 22.5 points)
     'L_BW',       0.05, ...  % cost per extra channel occupied (2x spectrum -> 5 points)
+    'L_PW',       0.10, ...  % cost of +6 dB transmit power (energy, detectability -> 10 points, D39)
     'FA_PENALTY', 40);       % any action on a healthy non-hostile link
 
 %% 2. Measure BER for every threat x action x Eb/N0
 fprintf('Measuring the link for %d threats x %d actions x %d Eb/N0 points...\n\n', num_threats, nA, nS);
 ber_tab = nan(num_threats, nA, nS);
 frames  = cell(num_threats, nS);         % per-frame [BER, RSSI, PLR] of the unmitigated run (training states)
-gp = ones(1, nA); bw = ones(1, nA);
+gp = ones(1, nA); bw = ones(1, nA); pw = ones(1, nA);
 t0 = tic;
 for ti = 1:num_threats
     threat = threat_list{ti};
     p = p0; p.active_threat = threat;
     for ai = 1:nA
         [p2, g_db, cm] = apply_countermeasure(p, threat, action_names{ai});
-        gp(ai) = cm.goodput_factor; bw(ai) = cm.bw_factor;
+        gp(ai) = cm.goodput_factor; bw(ai) = cm.bw_factor; pw(ai) = cm.power_factor;
         params = p2; save('params.mat', 'params');
         evalc('build_threat_model');
         for s = 1:nS
@@ -84,7 +85,7 @@ rep{end+1} = '=== COUNTERMEASURE EFFICACY MATRIX (D28, nominal severity, ground-
 rep{end+1} = sprintf('Generated: %s by train_dqn.m | acr %g dB | rate / %g | %d Rx antennas', datestr(now), ...
     p0.cm_acr_db, p0.cm_rate_factor, p0.cm_n_rx);
 rep{end+1} = 'Cell = BER_after / BER_clean (<= 2 restored, <= 5 marginal). * = best action, R = rule-based choice.';
-rep{end+1} = sprintf('Costs: goodput x%s | spectrum x%s  (order: %s)', mat2str(gp, 2), mat2str(bw), strjoin(action_names, ', '));
+rep{end+1} = sprintf('Costs: goodput x%s | spectrum x%s | power x%s  (order: %s)', mat2str(gp, 2), mat2str(bw), mat2str(pw, 2), strjoin(action_names, ', '));
 for s = 1:nS
     rep{end+1} = ''; %#ok<SAGROW>
     rep{end+1} = sprintf('--- Eb/N0 = %g dB (clean BER %.3e) ---', SNR_LIST(s), clean_m(s)); %#ok<SAGROW>
@@ -132,7 +133,7 @@ for ti = 1:num_threats
         must_act(ti, s) = hostile(ti) || rb > RW.RATIO_OK;
         for ai = 1:nA
             reward_table(ti, ai, s) = reward_of(ber_tab(ti, na, s), ber_tab(ti, ai, s), clean(s), ...
-                gp(ai), bw(ai), ai == na, must_act(ti, s), RW);
+                gp(ai), bw(ai), pw(ai), ai == na, must_act(ti, s), RW);
         end
     end
 end
@@ -175,18 +176,33 @@ fprintf('\nSaved results/dqn_reward_table.png\n\n');
 N_SEEDS = 5;
 if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'dqn_seeds'), N_SEEDS = CFG.dqn_seeds; end
 SEEDS = 42 + (0:N_SEEDS-1);
-N_EPISODES = 4000;
+N_EPISODES = 12000;
 P_UNKNOWN  = 0.10;                      % share of episodes with the class hidden (proposal risk 13)
 w = ones(1, num_threats);
 w(ismember(threat_list, {'antenna_fault', 'benign_interference', 'none'})) = 2;
 cw = cumsum(w) / sum(w);
+
+% Input z-score statistics over every frame state the agent can see; the
+% one-hot entries are left as they are (D39).
+S_all = [];
+for ti = 1:num_threats
+    for s = 1:nS
+        fr = frames{ti, s};
+        for k = 1:size(fr, 1)
+            S_all(:, end+1) = build_dqn_state(threat_list{ti}, fr(k, 1), fr(k, 2), SNR_LIST(s), fr(k, 3)); %#ok<SAGROW>
+        end
+    end
+end
+nOH = numel(threat_list);
+norm_in = struct('mu', [zeros(nOH, 1); mean(S_all(nOH+1:end, :), 2)], ...
+                 'sd', [ones(nOH, 1);  max(std(S_all(nOH+1:end, :), 0, 2), 1e-3)]);
 
 runs = struct('seed', {}, 'agent', {}, 'loss', {}, 'avg_reward', {}, 'chosen', {}, 'regret', {}, ...
     'gate_pass', {}, 'fails', {});
 for k = 1:N_SEEDS
     fprintf('--- Seed %d (%d/%d): training on %d episodes ---\n', SEEDS(k), k, N_SEEDS, N_EPISODES);
     rng(SEEDS(k), 'twister');
-    [ag, loss_k, avgr_k] = train_agent(dqn_agent(), frames, reward_table, threat_list, SNR_LIST, ...
+    [ag, loss_k, avgr_k] = train_agent(dqn_agent(norm_in), frames, reward_table, threat_list, SNR_LIST, ...
         N_EPISODES, P_UNKNOWN, cw);
     [ch_k, rg_k, fails_k] = gate_agent(ag, frames, reward_table, ber_tab, clean, must_act, ...
         threat_list, SNR_LIST, action_names, na);
@@ -273,7 +289,7 @@ fprintf('Mean regret %.1f | cells with regret > 10: %d/%d\nValidation gate PASSE
 
 %% 6. Save
 save('data/trained_dqn.mat', 'agent', 'reward_table', 'ber_tab', 'clean', 'SNR_LIST', ...
-    'threat_list', 'action_names', 'RW', 'gp', 'bw', 'regret', 'chosen_tab', 'seed_summary', '-v7.3');
+    'threat_list', 'action_names', 'RW', 'gp', 'bw', 'pw', 'regret', 'chosen_tab', 'seed_summary', '-v7.3');
 fprintf('Saved data/trained_dqn.mat\n');
 
 %% 7. Training curves
@@ -290,9 +306,11 @@ fprintf('Saved results/dqn_training_curves.png\n\n=== C2 Complete ===\n');
 %% Local functions
 function [agent, training_loss, avg_rewards_per_episode] = train_agent(agent, frames, reward_table, threat_list, SNR_LIST, N_EPISODES, P_UNKNOWN, cw)
 % Episodes sample a (threat, Eb/N0) cell and a real frame state. The reward of
-% every action in that cell is measured, so each sample trains all five
-% Q-values toward their table rewards (full-action targets, D36); the
+% every action in that cell is measured, so each sample trains all
+% the Q-values toward their table rewards (full-action targets, D36); the
 % epsilon-greedy choice is kept only to log the reward the policy collects.
+% The learning rate is constant for the first half and decays by cosine to a
+% tenth of it at the end, so near-tied actions (e.g. X vs X + FEC) settle (D39).
 nS = numel(SNR_LIST);
 nA = size(reward_table, 2);
 nState = agent.numStates;
@@ -320,8 +338,10 @@ for ep = 1:N_EPISODES
         S = single(buf_S(idx, :)');
         T = single(buf_T(idx, :)');
         [loss, grads] = dlfeval(@qLoss, agent.qNetwork, dlarray(S, 'CB'), T);
+        frac = max(0, (ep - N_EPISODES/2) / (N_EPISODES/2));
+        lr = agent.learning_rate * (0.1 + 0.9 * 0.5 * (1 + cos(pi * frac)));
         [agent.qNetwork, avgG, avgSqG] = adamupdate(agent.qNetwork, grads, avgG, avgSqG, ...
-            ep - agent.batch_size + 1, agent.learning_rate);
+            ep - agent.batch_size + 1, lr);
         training_loss(end+1) = double(extractdata(loss)); %#ok<AGROW>
     end
     agent.epsilon = max(agent.epsilon_min, agent.epsilon * agent.epsilon_decay);
@@ -365,7 +385,7 @@ for ti = 1:nT
 end
 end
 
-function r = reward_of(bb, ba, bc, gpf, bwf, isNoAction, mustAct, RW)
+function r = reward_of(bb, ba, bc, gpf, bwf, pwf, isNoAction, mustAct, RW)
 % Reward of one action in one (threat, Eb/N0) cell.
 if ~mustAct                               % healthy non-hostile link: acting is an unnecessary switch
     r = 0;
@@ -382,7 +402,7 @@ else
     score = recovery_vs_clean(bb, ba, bc);
     if isnan(score), score = 0; end
 end
-r = score - 100 * (RW.L_GP * (1 - gpf) + RW.L_BW * (bwf - 1));
+r = score - 100 * (RW.L_GP * (1 - gpf) + RW.L_BW * (bwf - 1) + RW.L_PW * log10(pwf) / log10(4));
 end
 
 function [loss, gradients] = qLoss(qNet, S, T)
@@ -402,6 +422,7 @@ end
 
 function s = short_name(a)
 s = strrep(strrep(strrep(a, 'channel_', 'ch_'), '_diversity', '_div'), 'no_action', 'none');
+s = strrep(strrep(strrep(s, 'power_control', 'pwr'), 'fec_interleave', 'fec'), 'rate_reduce', 'rate');
 end
 
 function out = ternary(c, a, b)

@@ -1,66 +1,66 @@
 === COMBINED THREATS AND THE UNKNOWN-THREAT PATH (proposal risk 13; D32) ===
-Generated: 25-Sep-2026 14:01:28 | 2 runs per cell | components at nominal severity | thresholds MSP 0.729, energy 5.36
+Generated: 25-Sep-2026 22:58:47 | 2 runs per cell | components at nominal severity | thresholds MSP 0.759, energy 5.42
 Link state = BER / clean (<= 2 restored). Decisions scored with the simulated BER of the chosen action.
 
 --- 1. Detection: what the detector calls each combined threat ---
 link                          Eb/N0 frames  classes (share)                               mean MSP unknown MSP  unknown En
-jamming+path_loss               0 dB     38  jamming 100%                                      0.94          0%          0%
-jamming+path_loss               4 dB     38  jamming 100%                                      0.98          0%          0%
-jamming+path_loss              10 dB     38  jamming 100%                                      0.94          0%          0%
+jamming+path_loss               0 dB     38  jamming 100%                                      0.90          0%          0%
+jamming+path_loss               4 dB     38  jamming 100%                                      0.97          0%          0%
+jamming+path_loss              10 dB     38  jamming 100%                                      0.95          0%          0%
 noise_burst+antenna_fault       0 dB     38  noise_burst 100%                                  1.00          0%          0%
 noise_burst+antenna_fault       4 dB     38  noise_burst 100%                                  1.00          0%          0%
 noise_burst+antenna_fault      10 dB     38  noise_burst 100%                                  1.00          0%          0%
-sweeping_jammer+path_loss       0 dB     38  sweeping_jammer 97%, noise_burst 3%               0.97          5%          0%
-sweeping_jammer+path_loss       4 dB     38  sweeping_jammer 100%                              0.99          0%          0%
-sweeping_jammer+path_loss      10 dB     38  sweeping_jammer 76%, antenna_fault 24%            0.91         18%          0%
+sweeping_jammer+path_loss       0 dB     38  sweeping_jammer 95%, antenna_fault 5%             0.93         13%          0%
+sweeping_jammer+path_loss       4 dB     38  sweeping_jammer 84%, antenna_fault 16%            0.96          8%          0%
+sweeping_jammer+path_loss      10 dB     38  sweeping_jammer 55%, antenna_fault 45%            0.92          8%          0%
 spoofing+noise_burst            0 dB     38  noise_burst 100%                                  1.00          0%          0%
 spoofing+noise_burst            4 dB     38  noise_burst 100%                                  1.00          0%          0%
 spoofing+noise_burst           10 dB     38  noise_burst 100%                                  1.00          0%          0%
-none                            0 dB     38  none 92%, benign_interference 8%                  0.66         68%         87%
-none                            4 dB     38  none 100%                                         0.96          0%          3%
-none                           10 dB     38  none 92%, path_loss 8%                            0.90         16%          0%
+none                            0 dB     38  none 92%, path_loss 8%                            0.72         63%         84%
+none                            4 dB     38  none 100%                                         0.97          0%          0%
+none                           10 dB     38  none 92%, path_loss 8%                            0.89         21%          0%
 
 --- 2. What each action achieves (BER / clean; * = best) ---
-link                          Eb/N0          no_action     channel_switch        rate_reduce     freq_diversity  spatial_diversity
-jamming+path_loss               0 dB              3.75x              2.86x              3.50x             2.84x*              3.70x
-jamming+path_loss               4 dB             10.00x              6.04x              9.39x             5.96x*              9.87x
-jamming+path_loss              10 dB            178.74x            54.38x*            165.64x             55.72x            173.80x
-noise_burst+antenna_fault       0 dB              1.83x              1.83x             1.10x*              1.80x              1.69x
-noise_burst+antenna_fault       4 dB              3.70x              3.66x             2.64x*              3.71x              3.33x
-noise_burst+antenna_fault      10 dB             54.70x             53.69x            47.09x*             53.89x             48.68x
-sweeping_jammer+path_loss       0 dB              2.97x              2.99x             2.09x*              2.86x              2.56x
-sweeping_jammer+path_loss       4 dB              6.45x              6.59x             3.77x*              6.02x              5.17x
-sweeping_jammer+path_loss      10 dB             68.39x             68.46x            32.76x*             51.59x             47.37x
-spoofing+noise_burst            0 dB              2.59x             1.67x*              2.55x              1.67x              1.99x
-spoofing+noise_burst            4 dB              7.06x             3.31x*              6.90x              3.35x              5.04x
-spoofing+noise_burst           10 dB            130.45x             48.21x            122.55x            47.49x*             84.86x
+link                          Eb/N0          no_action     channel_switch        rate_reduce     freq_diversity  spatial_diversity      power_control     fec_interleavechannel_switch+rate_reducechannel_switch+power_controlchannel_switch+fec_interleavefreq_diversity+rate_reducefreq_diversity+power_controlfreq_diversity+fec_interleavespatial_diversity+rate_reducespatial_diversity+power_controlspatial_diversity+fec_interleave
+jamming+path_loss               0 dB              3.76x              2.88x              3.51x              2.85x              3.70x              3.50x              4.03x             1.82x*              1.85x              4.08x              1.83x              1.83x              4.12x              3.25x              3.33x              4.07x
+jamming+path_loss               4 dB             10.43x              6.23x              9.82x              6.19x             10.28x              9.78x             11.31x              2.91x              2.89x             11.06x             2.87x*              2.95x             10.97x              9.07x              9.03x             11.08x
+jamming+path_loss              10 dB            182.26x             56.88x            168.80x             56.60x            177.60x            168.59x            194.86x             11.97x             12.26x            129.52x             12.00x            11.88x*            118.12x            158.11x            159.95x            197.44x
+noise_burst+antenna_fault       0 dB              1.84x              1.82x              1.12x              1.82x              1.71x              1.10x              3.63x              1.12x              1.12x              3.75x              1.13x              1.12x              3.62x             0.87x*              0.89x              3.77x
+noise_burst+antenna_fault       4 dB              3.85x              3.80x              2.73x              3.81x              3.53x              2.74x              4.47x              2.79x              2.76x              4.26x              2.74x              2.80x              4.80x             2.12x*              2.16x              4.55x
+noise_burst+antenna_fault      10 dB             54.67x             55.87x             46.24x             54.35x             49.30x             47.62x              1.96x             47.15x             47.30x             1.74x*             47.50x             46.64x              2.44x             35.10x             36.33x              3.08x
+sweeping_jammer+path_loss       0 dB              2.97x              3.02x              2.06x              2.85x              2.59x              2.12x              4.01x              2.10x              2.09x              4.09x              1.84x              1.87x              4.03x              1.53x             1.50x*              4.05x
+sweeping_jammer+path_loss       4 dB              6.94x              6.81x              3.81x              6.16x              5.43x              3.87x             11.14x              3.88x              3.89x             11.22x              2.95x              2.99x             11.08x             2.56x*              2.57x             10.90x
+sweeping_jammer+path_loss      10 dB             71.35x             70.37x             33.95x             52.25x             48.27x             33.81x            136.44x             34.30x             34.14x            134.90x             13.49x            13.07x*             91.28x             26.30x             26.11x             25.18x
+spoofing+noise_burst            0 dB              2.60x              1.69x              2.55x              1.68x              1.98x              1.36x              4.01x              0.86x              0.88x              3.72x              0.85x              0.88x              3.70x              1.59x             0.81x*              3.95x
+spoofing+noise_burst            4 dB              7.42x              3.51x              7.15x              3.49x              5.16x              3.29x             11.25x              2.07x              2.08x              4.73x              2.08x              2.07x              4.32x              4.35x             1.98x*             10.91x
+spoofing+noise_burst           10 dB            131.49x             49.57x            125.36x             48.61x             85.27x             51.82x            194.52x             34.98x             34.77x              2.86x             34.05x             34.59x             2.74x*             74.57x             28.37x            192.96x
 
 --- 3. Decisions on the combined threats: most frequent action (share) and resulting link ---
 link                          Eb/N0 | DQN (class)                        | DQN (unknown gating)               | Rule (class)                       | Rule (unknown gating)             
-jamming+path_loss               0 dB | channel_switch 100% -> 2.86x       | channel_switch 100% -> 2.86x       | channel_switch 100% -> 2.86x       | channel_switch 100% -> 2.86x      
-jamming+path_loss               4 dB | channel_switch 100% -> 6.04x       | channel_switch 100% -> 6.04x       | channel_switch 100% -> 6.04x       | channel_switch 100% -> 6.04x      
-jamming+path_loss              10 dB | channel_switch 100% -> 54.38x      | channel_switch 100% -> 54.38x      | channel_switch 100% -> 54.38x      | channel_switch 100% -> 54.38x     
-noise_burst+antenna_fault       0 dB | rate_reduce 100% -> 1.10x          | rate_reduce 100% -> 1.10x          | rate_reduce 100% -> 1.10x          | rate_reduce 100% -> 1.10x         
-noise_burst+antenna_fault       4 dB | rate_reduce 100% -> 2.64x          | rate_reduce 100% -> 2.64x          | rate_reduce 100% -> 2.64x          | rate_reduce 100% -> 2.64x         
-noise_burst+antenna_fault      10 dB | spatial_diversity 100% -> 48.68x   | spatial_diversity 100% -> 48.68x   | rate_reduce 100% -> 47.09x         | rate_reduce 100% -> 47.09x        
-sweeping_jammer+path_loss       0 dB | spatial_diversity 97% -> 2.56x     | spatial_diversity 95% -> 2.56x     | freq_diversity 97% -> 2.86x        | freq_diversity 100% -> 2.86x      
-sweeping_jammer+path_loss       4 dB | freq_diversity 100% -> 6.02x       | freq_diversity 100% -> 6.02x       | freq_diversity 100% -> 6.02x       | freq_diversity 100% -> 6.02x      
-sweeping_jammer+path_loss      10 dB | freq_diversity 76% -> 51.59x       | freq_diversity 84% -> 51.59x       | freq_diversity 76% -> 51.59x       | freq_diversity 84% -> 51.59x      
-spoofing+noise_burst            0 dB | rate_reduce 100% -> 2.55x          | rate_reduce 100% -> 2.55x          | rate_reduce 100% -> 2.55x          | rate_reduce 100% -> 2.55x         
-spoofing+noise_burst            4 dB | rate_reduce 100% -> 6.90x          | rate_reduce 100% -> 6.90x          | rate_reduce 100% -> 6.90x          | rate_reduce 100% -> 6.90x         
-spoofing+noise_burst           10 dB | spatial_diversity 100% -> 84.86x   | spatial_diversity 100% -> 84.86x   | rate_reduce 100% -> 122.55x        | rate_reduce 100% -> 122.55x       
+jamming+path_loss               0 dB | channel_switch 100% -> 2.88x       | channel_switch 100% -> 2.88x       | channel_switch 100% -> 2.88x       | channel_switch 100% -> 2.88x      
+jamming+path_loss               4 dB | channel_switch 100% -> 6.23x       | channel_switch 100% -> 6.23x       | channel_switch 100% -> 6.23x       | channel_switch 100% -> 6.23x      
+jamming+path_loss              10 dB | channel_switch 100% -> 56.88x      | channel_switch 100% -> 56.88x      | channel_switch 100% -> 56.88x      | channel_switch 100% -> 56.88x     
+noise_burst+antenna_fault       0 dB | spatial_diversity+power_control 100% -> 0.89x | spatial_diversity+power_control 100% -> 0.89x | rate_reduce 100% -> 1.12x          | rate_reduce 100% -> 1.12x         
+noise_burst+antenna_fault       4 dB | spatial_diversity+fec_interleave 100% -> 4.55x | spatial_diversity+fec_interleave 100% -> 4.55x | rate_reduce 100% -> 2.73x          | rate_reduce 100% -> 2.73x         
+noise_burst+antenna_fault      10 dB | spatial_diversity+fec_interleave 100% -> 3.08x | spatial_diversity+fec_interleave 100% -> 3.08x | rate_reduce 100% -> 46.24x         | rate_reduce 100% -> 46.24x        
+sweeping_jammer+path_loss       0 dB | freq_diversity 74% -> 2.85x        | freq_diversity 74% -> 2.85x        | freq_diversity 95% -> 2.85x        | freq_diversity 100% -> 2.85x      
+sweeping_jammer+path_loss       4 dB | freq_diversity+fec_interleave 84% -> 11.08x | freq_diversity+fec_interleave 79% -> 11.08x | freq_diversity 84% -> 6.16x        | freq_diversity 87% -> 6.16x       
+sweeping_jammer+path_loss      10 dB | channel_switch+fec_interleave 79% -> 134.90x | channel_switch+fec_interleave 71% -> 134.90x | freq_diversity 55% -> 52.25x       | freq_diversity 63% -> 52.25x      
+spoofing+noise_burst            0 dB | spatial_diversity+power_control 100% -> 0.81x | spatial_diversity+power_control 100% -> 0.81x | rate_reduce 100% -> 2.55x          | rate_reduce 100% -> 2.55x         
+spoofing+noise_burst            4 dB | spatial_diversity+fec_interleave 58% -> 10.91x | spatial_diversity+fec_interleave 58% -> 10.91x | rate_reduce 100% -> 7.15x          | rate_reduce 100% -> 7.15x         
+spoofing+noise_burst           10 dB | channel_switch+fec_interleave 76% -> 2.86x | channel_switch+fec_interleave 76% -> 2.86x | rate_reduce 100% -> 125.36x        | rate_reduce 100% -> 125.36x       
 
 --- 4. Summary over all combined-threat frames ---
 policy                        link restored median BER/clean  no_action on attack
-DQN (class)                       38/456               6.03               0/456  
-DQN (unknown gating)              38/456               6.03               0/456  
-Rule (class)                      38/456               6.03               0/456  
-Rule (unknown gating)             38/456               6.03               0/456  
-best single action                76/456               3.54
+DQN (class)                       93/456               3.08               0/456  
+DQN (unknown gating)              96/456               3.08               0/456  
+Rule (class)                      38/456               6.20               0/456  
+Rule (unknown gating)             38/456               6.20               0/456  
+best single action               228/456               2.05
 
 --- 5. Control: clean link (false unknowns and false actions) ---
-Clean frames: 114 | flagged unknown: 28.1% (MSP), 29.8% (energy)
-  DQN (class)              acted on the clean link in 3/114 frames
+Clean frames: 114 | flagged unknown: 28.1% (MSP), 28.1% (energy)
+  DQN (class)              acted on the clean link in 6/114 frames
   DQN (unknown gating)     acted on the clean link in 4/114 frames
-  Rule (class)             acted on the clean link in 12/114 frames
-  Rule (unknown gating)    acted on the clean link in 12/114 frames
+  Rule (class)             acted on the clean link in 10/114 frames
+  Rule (unknown gating)    acted on the clean link in 9/114 frames

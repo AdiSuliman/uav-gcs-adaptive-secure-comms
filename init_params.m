@@ -70,6 +70,8 @@ params.sweep_period  = 300;         % [A-ext] Sweeping Jammer: full sweep cycle 
 params.cm_acr_db      = 30;         % [dB] rejection of an interferer left on another channel
 params.cm_rate_factor = 4;          % rate_reduce: data rate / 4 -> +6 dB processing gain, goodput x0.25
 params.cm_n_rx        = 2;          % spatial_diversity: receive antennas combined by MRC (+3 dB)
+params.cm_power_db    = 6;          % power_control: transmit power +6 dB (x4 power), D39
+params.cm_fec_rate    = 1/2;        % fec_interleave: code rate, K = 7, generators [171 133] octal, D39
 
 %% ========== NOISE & SWEEP ==========
 params.EbNo_dB    = 0:2:10;            % [ACTIVE] Eb/N0 sweep range (dB)
@@ -86,6 +88,7 @@ params.seq_stride = 4;    % [LSTM] step between window starts (4 = 50% overlap;
 %% ========== FLAGS ==========
 params.plot_enable = true;
 params.verbose     = true;
+params.quiet_build = true;     % build Simulink models without opening the editor window (D37/D38)
 %% ========== DERIVED PARAMETERS ==========
 params.bits_per_symbol   = log2(params.mod_order);
 params.symbols_per_frame = params.frame_length / params.bits_per_symbol;

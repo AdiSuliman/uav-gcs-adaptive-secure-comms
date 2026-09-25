@@ -7,11 +7,13 @@
 %   maps to an all-zero one-hot, so the agent falls back on the functional
 %   link metrics (BER/RSSI/SNR/PLR) rather than on a threat label it was
 %   never trained on.
-% Actions: {no_action, channel_switch, rate_reduce, freq_diversity, spatial_diversity}
+% Actions: no_action, 6 single countermeasures and 9 two-action pairs (D39)
 % Reward: BER improvement when action applied
-% Architecture: state -> 64 -> 32 -> Q(s,a)
+% Architecture: state -> z-score -> 128 -> 64 -> Q(s,a)
 
-function agent = dqn_agent()
+function agent = dqn_agent(norm)
+%   norm (optional): fields mu, sd -- per-input z-score statistics of the
+%   training states. Without it the input layer passes the state unchanged.
     fprintf('=== C2: Initializing DQN Agent ===\n\n');
 
     %% 1. State and action specs
@@ -19,8 +21,19 @@ function agent = dqn_agent()
     numContinuous    = 4;                                  % BER, RSSI, SNR, PLR
     numStates        = numThreatClasses + numContinuous;   % 13
 
-    numActions = 5;
-    action_names = {'no_action', 'channel_switch', 'rate_reduce', 'freq_diversity', 'spatial_diversity'};
+    % Single actions, then pairs of one avoidance/diversity action with one
+    % robustness action (D39): {channel_switch, freq_diversity, spatial_diversity}
+    % x {rate_reduce, power_control, fec_interleave}.
+    singles = {'no_action', 'channel_switch', 'rate_reduce', 'freq_diversity', 'spatial_diversity', ...
+               'power_control', 'fec_interleave'};
+    avoid  = {'channel_switch', 'freq_diversity', 'spatial_diversity'};
+    robust = {'rate_reduce', 'power_control', 'fec_interleave'};
+    pairs = {};
+    for i = 1:numel(avoid)
+        for j = 1:numel(robust), pairs{end+1} = [avoid{i} '+' robust{j}]; end %#ok<AGROW>
+    end
+    action_names = [singles, pairs];
+    numActions = numel(action_names);
 
     % One-hot entries are [0,1]; continuous entries keep their physical
     % ranges. RSSI is in dBm and negative, so its bounds are explicit rather
@@ -32,7 +45,7 @@ function agent = dqn_agent()
     stateSpec.Name = 'threat_state';
     stateSpec.Description = 'onehot(9 threat classes), BER, RSSI, SNR, PLR';
 
-    actionSpec = rlFiniteSetSpec({1, 2, 3, 4, 5});
+    actionSpec = rlFiniteSetSpec(num2cell(1:numActions));
     actionSpec.Name = 'countermeasure_action';
 
     fprintf('State spec: %d-dim\n', numStates);
@@ -47,11 +60,18 @@ function agent = dqn_agent()
     end
 
     %% 2. Q-network
+    % The continuous inputs sit on very different scales (log10 BER about -5..0,
+    % RSSI in dBm, Eb/N0 0..20 dB), so the input layer z-scores them with the
+    % training-state statistics passed in by train_dqn (D39).
+    if nargin < 1 || isempty(norm)
+        norm = struct('mu', zeros(numStates, 1), 'sd', ones(numStates, 1));
+    end
     qNetwork = [
-        featureInputLayer(numStates, 'Name', 'state_input')
-        fullyConnectedLayer(64, 'Name', 'fc1')
+        featureInputLayer(numStates, 'Name', 'state_input', 'Normalization', 'zscore', ...
+            'Mean', norm.mu(:)', 'StandardDeviation', norm.sd(:)')
+        fullyConnectedLayer(128, 'Name', 'fc1')
         reluLayer('Name', 'relu1')
-        fullyConnectedLayer(32, 'Name', 'fc2')
+        fullyConnectedLayer(64, 'Name', 'fc2')
         reluLayer('Name', 'relu2')
         fullyConnectedLayer(numActions, 'Name', 'qvalues')
     ];
@@ -59,8 +79,8 @@ function agent = dqn_agent()
     qNet = dlnetwork(qNetwork);
     fprintf('\nQ-Network architecture:\n');
     fprintf('  Input: %d-dim state\n', numStates);
-    fprintf('  Hidden1: 64 neurons + ReLU\n');
-    fprintf('  Hidden2: 32 neurons + ReLU\n');
+    fprintf('  Hidden1: 128 neurons + ReLU\n');
+    fprintf('  Hidden2: 64 neurons + ReLU\n');
     fprintf('  Output: %d Q-values (one per action)\n', numActions);
     fprintf('  Total params: %d\n', sum(cellfun(@numel, {qNet.Learnables.Value{:}})));
 
@@ -72,6 +92,7 @@ function agent = dqn_agent()
     agent.action_names = action_names;
     agent.numThreatClasses = numThreatClasses;
     agent.numStates = numStates;
+    agent.norm = norm;
 
     % Hyperparameters
     agent.learning_rate = 1e-3;
@@ -80,7 +101,7 @@ function agent = dqn_agent()
     agent.epsilon_min = 0.01;
     agent.epsilon_decay = 0.995;
     agent.replay_buffer_size = 10000;
-    agent.batch_size = 32;
+    agent.batch_size = 64;
     agent.target_update_freq = 5;
 
     agent.replay_buffer = struct('states', [], 'actions', [], 'rewards', [], 'next_states', [], 'dones', []);

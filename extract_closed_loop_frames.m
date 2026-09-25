@@ -25,6 +25,9 @@ function [iq_frames, ber, rssi, plr, nf] = extract_closed_loop_frames(out, p, de
 %                  frame of a run, by construction; guard before use)
 %   rssi(f)      - 10*log10(mean power)) for frame f, in dB
 %   plr(f)       - 1 if ber(f) > 0.1, else 0 (NaN propagates from ber)
+%
+% With p.fec (fec_interleave, D39) BER and PLR are those of the decoded
+% information bits (local function fec_frames).
 %   nf           - number of frames in this run (Rx_IQ returns ~20 per
 %                  sim() call, not 1 -- see D16)
 
@@ -42,6 +45,16 @@ Lmax = min(numel(tx_all),numel(rx_all)) - delay_bits;
 tx_al = tx_all(1:Lmax);
 rx_al = rx_all(delay_bits+1:delay_bits+Lmax);
 
+if isfield(p, 'fec') && p.fec
+    [ber, plr] = fec_frames(tx_al, rx_al, iq, p, delay_bits, nf);
+    iq_frames = cell(1,nf); rssi = zeros(1,nf);
+    for f = 1:nf
+        iq_frames{f} = iq(:,f);
+        rssi(f) = 10*log10(mean(abs(iq(:,f)).^2)+eps);
+    end
+    return;
+end
+
 iq_frames = cell(1,nf); ber=zeros(1,nf); rssi=zeros(1,nf); plr=zeros(1,nf);
 for f = 1:nf
     iq_frames{f} = iq(:,f);
@@ -53,5 +66,52 @@ for f = 1:nf
     end
     rssi(f) = 10*log10(mean(abs(iq(:,f)).^2)+eps);
     plr(f)  = double(ber(f) > 0.1);
+end
+end
+
+function [ber, plr] = fec_frames(tx_al, rx_al, iq, p, delay_bits, nf)
+% fec_interleave (D39): the channel bit errors of this run are applied to a
+% rate-1/2 convolutionally coded, randomly interleaved stream. Symbols whose
+% received energy is more than 6 dB above the run's median are erased (a burst
+% is visible at the receiver), the rest are hard decisions; the Viterbi decoder
+% works on +1/-1/0 values. Per-frame BER is counted on the information bits
+% (half a frame each), so a frame carries half the data of an uncoded frame.
+e = double(tx_al(:) ~= rx_al(:));
+L = numel(e);
+
+sps = p.sps;
+x = iq(:);
+nsym = floor(numel(x) / sps);
+Es = mean(reshape(abs(x(1:nsym*sps)).^2, sps, nsym), 1);
+hot = movmax(double(Es > 4 * median(Es)), [3 3]) > 0;   % tolerate filter delay and alignment
+d = round(delay_bits / 4);                           % Tx filter delay in symbols
+sym = floor((0:L-1)' / 2) + 1 + d;
+er = false(L, 1);
+in = sym <= nsym;
+er(in) = hot(sym(in));
+
+trellis = poly2trellis(7, [171 133]);
+K = floor(L / 2) - 6;
+ber = nan(1, nf); plr = nan(1, nf);
+if K < 64, return; end
+rs = RandStream('mt19937ar', 'Seed', 11);
+u = randi(rs, [0 1], K, 1);
+c = convenc([u; zeros(6, 1)], trellis);
+Lc = numel(c);
+perm = randperm(rs, Lc)';
+r = xor(c(perm), e(1:Lc));
+soft = (1 - 2*double(r)) .* ~er(1:Lc);
+softc = zeros(Lc, 1);
+softc(perm) = soft;
+dec = vitdec(softc, trellis, 35, 'term', 'unquant');
+err = double(dec(1:K) ~= u);
+
+kf = p.frame_length / 2;                             % information bits per frame
+for f = 1:nf
+    i0 = (f-1)*kf + 1; i1 = f*kf;
+    if i1 <= K
+        ber(f) = mean(err(i0:i1));
+        plr(f) = double(ber(f) > 0.1);
+    end
 end
 end

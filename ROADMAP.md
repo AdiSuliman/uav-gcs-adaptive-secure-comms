@@ -1,176 +1,64 @@
-# UAV-GCS Adaptive Secure Communications — PROJECT ROADMAP
+# UAV-GCS Adaptive Secure Communications — Roadmap
 
-⚠️ **This is the ORIGINAL PROJECT PLAN from September 2026.**
+**Project:** AI-driven adaptive communication security for UAV-to-ground station links in electronic warfare environments.
+**Platform:** MATLAB R2026a + Simulink
+**Supervisor:** Golan Ein-Tzvi
+**Live status and history:** [PROJECT_LOG.md](PROJECT_LOG.md) · **Design decisions:** [docs/DECISIONS.md](docs/DECISIONS.md) · **Results:** [README.md](README.md)
 
-**Current Progress:** See [PROJECT_LOG.md](PROJECT_LOG.md) for live status.
-
-**Quick Summary:**
-- ✅ Phase A: Complete (Sep 5)
-- ✅ Phase B: Complete (Sep 13)  
-- ✅ Phase C: Complete (Sep 13)
-- ⏳ Phase EXP: Analysis pending
-- ❌ Phase D: Not started
+Last updated: 2026-09-25
 
 ---
 
-# UAV-GCS Adaptive Secure Communications System — Project Roadmap
+## Status by phase
 
-**Project:** AI-driven adaptive communication security for UAV-to-ground station links in electronic warfare environments.  
-**Platform:** MATLAB R2026a + Simulink  
-**Supervisor:** Golan Ein-Tzvi  
-**Deliverable Deadline:** End of semester (A')
-
----
-
-## Phase A: Link Model & Dataset Generation
-
-### Phase A1-A2: AWGN Validation [COMPLETE] ✅
-**Objective:** Build and validate the clean link engine against QPSK theory.
-
-- [x] Build programmable link model (Tx → AWGN → Rx → BER calculation)
-- [x] Implement Eb/No sweep (0–10 dB)
-- [x] Compare measured BER to berawgn theoretical curve
-- [x] Verify engine accuracy (< 5% deviation across sweep)
-- [x] Code documentation (active/future component flags)
-- [x] Git commit & GitHub push
-
-**Key Result:** Engine verified — ready for Rician + synchronization.
-
----
-
-### Phase A3: Rician Channel + Synchronization [TODO] ⏳
-**Objective:** Add realistic channel model and symbol timing recovery.
-
-- [ ] Add Rician fading channel (K=10 dB, Rayleigh envelope)
-- [ ] Implement symbol timing synchronizer block
-- [ ] Implement phase/frequency recovery
-- [ ] Validate new BER curve against Rician theory
-- [ ] Document synchronization latency impact
-- [ ] Git commit
-
-**Estimated Duration:** 1 week  
-**Dependency:** A1-A2 complete
+| Phase | Content | Status | Decisions |
+|---|---|---|---|
+| A1–A2 | QPSK link with RRC, AWGN validation against theory | ✅ Done | D5, D6, D11 |
+| A3 | Rician fading K = 10 dB, Doppler for a 50–120 km/h UAV | ✅ Done | D4, D25 |
+| A4 | Threat injection: jamming, reactive, sweeping, noise burst, path loss, coherent spoofing, antenna fault, benign interference; combined threats | ✅ Done | D8–D10, D12, D32 |
+| A5–A6 | Speed-diverse dataset (27,270 frames), spectrograms + 7 link features | ✅ Done | D25 |
+| B | Hybrid CNN detector (9 classes), KPI #1 as worded, bootstrap CIs, unseen Eb/N0 | ✅ Done | D16, D34, D35 |
+| B-unknown | Unknown-threat scores (leave-one-threat-out), gating on a degraded link | ✅ Done | D32, D33 |
+| C1 | Rule-based policy, degradation-aware | ✅ Done | D30 |
+| C2 | DQN: measured reward table, 5 seeds, full-action targets, validation gate | ✅ Done | D29, D35, D36 |
+| C3 | Closed loop over Eb/N0 with Monte Carlo CIs; PLR and goodput; speed sweep | ✅ Done | D27, D28, D35 |
+| C3-episodes | Recovery time in decision cycles, dwell/hysteresis | ✅ Done | D31, D37 |
+| SURV | Survivability boundary maps A/B (deliverable #7) | ✅ Done | D30 |
+| KPI + DASH | All five proposal KPIs with CIs; results dashboard (deliverable #1) | ✅ Done | D35 |
+| GUI | Operator console: live runs, continuous episode, KPIs, maps, session log | ✅ Done | D24, D26, D37 |
+| Full run | One consistent end-to-end `main.m` run from scratch | ✅ Done 2026-09-25 | D38 |
+| Action set v2 | FEC + interleaving, power control, two-action combinations | ✅ Done 2026-09-26 | D39 |
+| D1 | Interim report | ⏳ Drafted, numbers to sync from the full run | — |
+| D2 | Final report | ⏳ Next | — |
+| D3 | Defense (20 + 10 min, English, ~10 slides) | ⏳ | — |
+| D4 | Poster | ⏳ | — |
 
 ---
 
-### Phase A4: Threat Injection Module [TODO] ⏳
-**Objective:** Add five threat classes to the link model (modular, scalable).
+## Remaining work
 
-Threat Classes:
-- Jamming (narrowband, wideband)
-- Spoofing (frequency/timing offset)
-- Noise Burst (transient interference)
-- Antenna Fault (simulated path loss spike)
-- Path Loss (distance-dependent attenuation)
-
-- [ ] Build threat injection subsystem (Simulink)
-- [ ] Parametrize each threat class
-- [ ] Generate self-labeled dataset (threat class ground truth)
-- [ ] Validate that clean link recovers under no threat
-- [ ] Git commit
-
-**Estimated Duration:** 1 week  
-**Dependency:** A3 complete
+1. **Interim report:** update its numbers from the full run.
+2. **Final report:** detection, decision (DQN vs rule), closed loop, survivability map, limitations and sim-to-real gap.
+3. **Defense and poster:** slides and poster from the same figures and numbers.
 
 ---
 
-### Phase A5-A6: Dataset & Detection [TODO] ⏳
-**Objective:** Generate balanced dataset and train CNN/LSTM detector.
+## Deviations from the original plan
 
-- [ ] Run dataset generation (1000+ frames per threat, per SNR point)
-- [ ] Balance classes (oversample rare threats)
-- [ ] Train CNN/LSTM on [RSSI, BER, PLR, SNR] over sliding window
-- [ ] Measure accuracy, macro-F1, confusion matrix vs SNR
-- [ ] Validate anomaly detection (OoD handling)
-- [ ] Git commit
-
-**Estimated Duration:** 2 weeks  
-**Dependency:** A4 complete
+| Original plan | What was done | Why |
+|---|---|---|
+| Symbol timing / phase recovery blocks in A3 | Not modelled; ideal synchronization | Out of scope of the decision-system study (D7); listed as a sim-to-real gap |
+| CNN/LSTM on link metrics | Hybrid CNN on spectrogram + 7 link features; CNN-LSTM tested and kept in `legacy/` for the record | The LSTM gave no gain for its cost (D13) |
+| 5 threat classes | 8 threats + none, plus combined threats | Proposal risk 13 and a more realistic EW set |
+| Actions: channel switch, bit rate, diversity | 16 actions through one physical model: the four originals, power control, FEC + interleaving and 9 two-action pairs | Single source of truth (D28); noise_burst and path_loss needed responses outside the original set (D39, proposal addendum) |
+| Rule vs DQN by convergence and reward | Link quality, packet loss, goodput and recovery time, with 95% CIs | KPIs as worded in the proposal (D27, D31, D35) |
 
 ---
 
-## Phase B: Detection & Decision Layer (Offline)
+## Risk mitigation (proposal section IX)
 
-### Phase B1-B2: Rule-Based Baseline + DQN [TODO] ⏳
-**Objective:** Implement decision logic (rule-based MVP + deep Q-learning agent).
-
-- [ ] Rule-based policy (if-then thresholds on detector output)
-- [ ] DQN agent with state = detector features, action = link recovery action
-- [ ] Compare rule-based vs DQN: convergence, reward, false-positive rate
-- [ ] Generate regime map (recoverable vs non-recoverable regions)
-- [ ] Git commit
-
-**Estimated Duration:** 2 weeks  
-**Dependency:** A5-A6 complete
-
----
-
-## Phase C: Closed-Loop System & Dashboard (Online)
-
-### Phase C1-C2: Closed-Loop Integration [TODO] ⏳
-**Objective:** Integrate detection + decision in real-time loop with dashboard.
-
-- [ ] Build closed-loop Simulink model (detect → decide → recover → measure)
-- [ ] Implement adaptive actions (channel switch, bit rate, diversity)
-- [ ] Create real-time dashboard (RSSI, BER, PLR, SNR, action log)
-- [ ] Test survivability: BER improvement under each threat
-- [ ] End-to-end validation
-- [ ] Git commit
-
-**Estimated Duration:** 1 week  
-**Dependency:** B1-B2 complete
-
----
-
-## Phase D: Reports, Defense, Poster
-
-### Phase D1: Interim Report [TODO - Due: End of Summer]
-- [ ] Write sections: intro, system architecture, A1-A3 results, methodology
-- [ ] Include BER validation plots, Rician channel performance
-- [ ] Document risk mitigation (sycnhronization, dataset balance)
-
-### Phase D2: Final Report [TODO - Due: End of Semester]
-- [ ] Complete sections: D, E (detection), F (decision + DQN), G (closed-loop)
-- [ ] Include regime map (research contribution)
-- [ ] Comparison: rule-based vs DQN performance
-- [ ] Discussion: sim-to-real gap, future work
-
-### Phase D3: Defense [TODO - 20+10 min, English, 10 slides]
-- [ ] Prepare slides: motivation, architecture, key results, lessons learned
-- [ ] Practice Q&A: synchronization, spoofing realism, DQN convergence
-
-### Phase D4: Poster [TODO - 5% grade]
-- [ ] Summarize project visually
-
----
-
-## Key Milestones & Timeline
-
-| Phase | Status | Start | End | Notes |
-|---|---|---|---|---|
-| A1-A2 (AWGN) | ✅ Complete | Sept 1 | Sept 8 | Engine verified |
-| A3 (Rician+Sync) | ⏳ In Progress | Sept 9 | Sept 15 | Sync is critical |
-| A4 (Threats) | 🔄 Queued | Sept 16 | Sept 22 | Modular injection |
-| A5-A6 (Dataset+Det) | 🔄 Queued | Sept 23 | Oct 7 | Heavy training |
-| B (Decision) | 🔄 Queued | Oct 8 | Oct 22 | Rule + DQN |
-| C (Closed-Loop) | 🔄 Queued | Oct 23 | Oct 29 | Integration |
-| D (Reports) | 🔄 Queued | Oct 30 | Nov 30 | Interim + Final |
-
----
-
-## Risk Mitigation
-
-See proposal document (Section IX) for detailed risk analysis. Key mitigations:
-- **DQN convergence:** Use rule-based MVP as fallback
-- **Dataset imbalance:** Class weights + oversampling
-- **Synchronization latency:** Document impact, plan for A3
-- **Sim-to-real gap:** Design for modular threat injection (enables custom validation)
-
----
-
-## Notes
-
-- All code in GitHub (per requirement §31)
-- Memory-efficient dataset generation (chunks + v7.3 HDF5)
-- Every phase produces Git commits with clear messages
-- Active/future component flags in params.m clarify what's working now vs what's coming
+- **DQN convergence:** rule-based baseline in every comparison; validation gate and 5 training seeds (D35, D36).
+- **Dataset imbalance:** balanced `none` class, stratified split.
+- **Oscillation (risk 8):** dwell/hold hysteresis, measured with and without (D31).
+- **Unknown / combined threats (risk 13):** reaction to link degradation, unknown gating (D32, D33).
+- **Sim-to-real gap:** modular threat injection and a documented list of modelling assumptions (README).

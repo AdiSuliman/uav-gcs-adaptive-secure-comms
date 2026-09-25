@@ -524,7 +524,7 @@ if strcmp(action, 'no_action')
 end
 [p_cm, g_db] = apply_countermeasure(p, threat, action);
 out = sim_seeded(p_cm, modelName, snr_dB + g_db, seed);
-[~, ber_f] = extract_closed_loop_frames(out, p, delay_bits);
+[~, ber_f] = extract_closed_loop_frames(out, p_cm, delay_bits);
 [ber_after, plr_after] = link_means(ber_f);
 end
 

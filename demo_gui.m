@@ -592,7 +592,7 @@ function p = loadInitialParams()
 end
 
 function sev = buildSeverityTable()
-    % Same severity axes as run_dataset_sweep.m (dataset) / explore_countermeasures.m.
+    % Same severity axes as run_dataset_sweep.m (dataset) and map_survivability_boundary.m.
     sev = struct();
     sev.jamming             = struct('param','jsr_db',        'levels',[0 4 8 12 16]);
     sev.reactive_jamming    = struct('param','jsr_db',        'levels',[0 4 8 12 16]);
@@ -1180,21 +1180,21 @@ end
 
 function drawQ(fig, qv, aidx, ridx)
     data = fig.UserData; ax = data.ui.qAx; c = data.colors;
+    n = numel(qv);
     cla(ax); hold(ax, 'on');
-    b = bar(ax, 1:5, qv, 'FaceColor', 'flat');
-    cd = repmat([0.36 0.40 0.48], 5, 1); cd(aidx, :) = c.accent; b.CData = cd;
+    b = bar(ax, 1:n, qv, 'FaceColor', 'flat');
+    cd = repmat([0.36 0.40 0.48], n, 1); cd(aidx, :) = c.accent; b.CData = cd;
     span = max(qv) - min(qv) + 1;
-    for k = 1:5
-        text(ax, k, qv(k), sprintf('%.1f', qv(k)), 'Color', c.txt, 'FontSize', 9, ...
-            'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', 'FontName', c.font);
-    end
+    text(ax, aidx, qv(aidx), sprintf('%.1f', qv(aidx)), 'Color', c.txt, 'FontSize', 9, ...
+        'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', 'FontName', c.font);
     if ridx > 0
         plot(ax, ridx, qv(ridx) + 0.12 * span, 'v', 'MarkerSize', 11, 'MarkerFaceColor', c.purp, ...
             'MarkerEdgeColor', 'w');
     end
     hold(ax, 'off');
-    ax.XTick = 1:5; ax.XTickLabel = {'NONE','CH-SWITCH','RATE-RED','FREQ-DIV','SPATIAL'};
-    ax.XLim = [0.4 5.6]; ax.YLim = [min(0, min(qv) - 0.15*span), max(qv) + 0.32*span];
+    ax.XTick = 1:n; ax.XTickLabel = cellfun(@actionLabel, data.env.action_names, 'UniformOutput', false);
+    ax.XTickLabelRotation = 45; ax.FontSize = 7;
+    ax.XLim = [0.4 n + 0.6]; ax.YLim = [min(0, min(qv) - 0.15*span), max(qv) + 0.32*span];
     grid(ax, 'on');
     setTitle(ax, 'DQN Q-values  (blue = DQN choice, purple v = rule choice)', c);
 end
@@ -1463,6 +1463,13 @@ function drawThreat(ax, scen, xm, ym, xg, yg, xu, yu, c)
 end
 
 function drawCountermeasure(ax, action, xg, yg, xu, yu, c)
+    if contains(action, '+')                               % two actions (D39): draw both, label both
+        parts = strsplit(action, '+');
+        drawCountermeasure(ax, parts{1}, xg, yg, xu, yu, c);
+        text(ax, (xg + xu)/2, yg + 1.00, ['+ ' actionLabel(parts{2})], 'Color', c.green, 'FontSize', 9, ...
+            'FontWeight', 'bold', 'HorizontalAlignment', 'center', 'FontName', c.font);
+        return;
+    end
     switch action
         case 'channel_switch'
             plot(ax, [xg xu], [yg + 0.40, yu + 0.40], '-', 'Color', c.green, 'LineWidth', 2.5);
@@ -1482,10 +1489,25 @@ function drawCountermeasure(ax, action, xg, yg, xu, yu, c)
             plot(ax, [xg, xu + 0.6], [yg + 0.58, yu + 0.30], '-', 'Color', c.green, 'LineWidth', 2);
             text(ax, (xg + xu)/2, yg + 0.80, 'ANT 1 + ANT 2  (spatial diversity)', 'Color', c.green, ...
                 'FontSize', 9, 'HorizontalAlignment', 'center', 'FontName', c.font);
+        case 'power_control'
+            plot(ax, [xg xu], [yg + 0.40, yu + 0.40], '-', 'Color', c.green, 'LineWidth', 4.5);
+            text(ax, (xg + xu)/2, yg + 0.66, 'TX POWER +6 dB', 'Color', c.green, 'FontSize', 9, ...
+                'HorizontalAlignment', 'center', 'FontName', c.font);
+        case 'fec_interleave'
+            plot(ax, [xg xu], [yg + 0.40, yu + 0.40], '-.', 'Color', c.green, 'LineWidth', 2.5);
+            text(ax, (xg + xu)/2, yg + 0.62, 'FEC + INTERLEAVING  (goodput / 2)', 'Color', c.green, ...
+                'FontSize', 9, 'HorizontalAlignment', 'center', 'FontName', c.font);
         otherwise
             text(ax, (xg + xu)/2, yg + 0.55, 'NO ACTION - MONITORING', 'Color', c.mut, 'FontSize', 9, ...
                 'HorizontalAlignment', 'center', 'FontName', c.font);
     end
+end
+
+function s = actionLabel(a)
+    names = containers.Map({'no_action','channel_switch','rate_reduce','freq_diversity','spatial_diversity', ...
+        'power_control','fec_interleave'}, {'NONE','CH-SW','RATE','FREQ-DIV','SPATIAL','PWR+6dB','FEC'});
+    parts = strsplit(a, '+');
+    s = strjoin(cellfun(@(x) names(x), parts, 'UniformOutput', false), '+');
 end
 
 %% =====================================================================
@@ -2073,18 +2095,18 @@ end
 function ok = plotActions(ax, cl, c)
     ok = ~isempty(cl); if ~ok, return; end
     threats = unique({cl.threat}, 'stable');
-    acts = {'no_action','channel_switch','rate_reduce','freq_diversity','spatial_diversity'};
+    acts = unique({cl.dqn_action}, 'stable');
     counts = zeros(numel(threats), numel(acts));
     for t = 1:numel(threats)
         m = strcmp({cl.threat}, threats{t});
         for a = 1:numel(acts), counts(t, a) = sum(strcmp({cl(m).dqn_action}, acts{a})); end
     end
     bb = bar(ax, counts, 'stacked');
-    pal = [0.45 0.48 0.55; c.accent; c.amber; c.green; c.purp];
+    pal = [0.45 0.48 0.55; c.accent; c.amber; c.green; c.purp; c.cyan; c.red; hsv(9)];
     for a = 1:numel(acts), bb(a).FaceColor = pal(a, :); end
     ax.XTick = 1:numel(threats); ax.XTickLabel = strrep(threats, '_', ' '); ax.XTickLabelRotation = 40;
     ax.FontSize = 8; grid(ax, 'on'); ylabel(ax, 'runs', 'Color', c.mut);
-    legend(ax, strrep(acts, '_', ' '), 'TextColor', c.txt, 'Color', c.panelBg, 'EdgeColor', c.mut, ...
+    legend(ax, cellfun(@actionLabel, acts, 'UniformOutput', false), 'TextColor', c.txt, 'Color', c.panelBg, 'EdgeColor', c.mut, ...
         'FontSize', 7, 'Location', 'eastoutside');
     setTitle(ax, 'DQN countermeasure per threat', c);
 end

@@ -5,8 +5,9 @@
 % is simulated with every action; a cell is classified by the best achievable
 % BER relative to the clean link at the same Eb/N0.
 %
-%   Map A (without goodput loss) — channel_switch, freq_diversity, spatial_diversity
-%   Map B (any action)           — Map A actions + rate_reduce (goodput / 4)
+%   Map A (without goodput loss) — channel_switch, freq_diversity, spatial_diversity,
+%                                  power_control and their pairs
+%   Map B (any action)           — every action of the agent, incl. rate_reduce and fec_interleave
 %
 % Gap cells (Map B recoverable/marginal, Map A non-recoverable) are the regime
 % where the link survives only by trading throughput — the goodput trade-off
@@ -26,12 +27,17 @@ RATIO_RECOVERABLE  = 2;
 RATIO_MARGINAL     = 5;
 delay_bits = 20;
 
-MECH_A = {'channel_switch','freq_diversity','spatial_diversity'};   % no goodput loss
-MECH_B = [MECH_A, {'rate_reduce'}];                                 % any action
-ACTIONS = [{'no_action'}, MECH_B];
-ACT_CODE = containers.Map({'channel_switch','freq_diversity','spatial_diversity','rate_reduce'}, {'C','F','S','R'});
+% Action set of the agent (dqn_agent.m, D39); Map A keeps the actions without
+% goodput loss, Map B takes every action
+evalc('agent0 = dqn_agent();');
+ACTIONS = agent0.action_names;
+p_ref = load_params_quiet();
+MECH_B = ACTIONS(~strcmp(ACTIONS, 'no_action'));
+MECH_A = MECH_B(cellfun(@(a) no_goodput_loss(p_ref, a), MECH_B));
+ACT_CODE = containers.Map(MECH_B, cellfun(@act_code, MECH_B, 'UniformOutput', false));
 
 % Severity levels per threat -- identical to run_dataset_sweep.m (A5) and the GUI
+clear threat_cfg                                  % scripts share the base workspace
 threat_cfg(1) = struct('name','jamming',             'level_field','jsr_db',        'levels',[0 4 8 12 16]);
 threat_cfg(2) = struct('name','noise_burst',         'level_field','jsr_db',        'levels',[0 4 8 12 16]);
 threat_cfg(3) = struct('name','reactive_jamming',    'level_field','jsr_db',        'levels',[0 4 8 12 16]);
@@ -107,7 +113,7 @@ report_A = build_report(grid_data_A, ber_clean, SNR_points, RATIO_RECOVERABLE, R
     'MAP A — WITHOUT GOODPUT LOSS', MECH_A, ACT_CODE);
 write_report(report_A, 'results/survivability_boundary_mapA.txt');
 report_B = build_report(grid_data_B, ber_clean, SNR_points, RATIO_RECOVERABLE, RATIO_MARGINAL, ...
-    'MAP B — ANY ACTION (incl. rate reduction)', MECH_B, ACT_CODE);
+    'MAP B — ANY ACTION (incl. rate reduction and FEC)', MECH_B, ACT_CODE);
 write_report(report_B, 'results/survivability_boundary_mapB.txt');
 fprintf('\n--- MAP A (without goodput loss) ---\n');  fprintf('%s\n', report_A{:});
 fprintf('\n--- MAP B (any action) ---\n');             fprintf('%s\n', report_B{:});
@@ -115,7 +121,7 @@ fprintf('\n--- MAP B (any action) ---\n');             fprintf('%s\n', report_B{
 %% ========== 5. Gap analysis ==========
 gap_report = {};
 gap_report{end+1} = '=== SURVIVABILITY GAP ANALYSIS ===';
-gap_report{end+1} = 'Cells where the link survives with rate reduction (Map B: recoverable/marginal)';
+gap_report{end+1} = 'Cells where the link survives only with a goodput cost (Map B: recoverable/marginal)';
 gap_report{end+1} = 'but not with any goodput-free action (Map A: non-recoverable): survival bought';
 gap_report{end+1} = 'with throughput -- the goodput trade-off named in the proposal.';
 gap_report{end+1} = '';
@@ -146,16 +152,33 @@ save('data/survivability_boundary.mat','grid_data_A','grid_data_B','ber_clean', 
 
 %% ========== 6. Figures ==========
 draw_map(grid_data_A, SNR_points, RATIO_RECOVERABLE, RATIO_MARGINAL, ...
-    'Map A: without goodput loss (channel\_switch, freq\_diversity, spatial\_diversity)', ...
+    'Map A: without goodput loss (C, F, S, power control and their pairs)', ...
     'results/survivability_map_neutralization.png');
 draw_map(grid_data_B, SNR_points, RATIO_RECOVERABLE, RATIO_MARGINAL, ...
-    'Map B: any action (incl. rate\_reduce, goodput / 4)', ...
+    'Map B: any action (incl. rate reduction and FEC)', ...
     'results/survivability_map_link.png');
 fprintf('\nSaved results/survivability_boundary_mapA.txt, mapB.txt, gap_analysis.txt, two PNG maps\n');
 fprintf('Saved data/survivability_boundary.mat (%.1f min)\n\n=== Survivability Mapping Complete ===\n', toc(t0)/60);
 
 
 %% ========== LOCAL FUNCTIONS ==========
+
+function tf = no_goodput_loss(p, a)
+    [~, ~, cm] = apply_countermeasure(p, 'none', a);
+    tf = cm.goodput_factor == 1;
+end
+
+function c = act_code(a)
+    parts = strsplit(a, '+');
+    m = containers.Map({'channel_switch','freq_diversity','spatial_diversity','rate_reduce','power_control','fec_interleave'}, ...
+        {'C','F','S','R','P','E'});
+    c = strjoin(cellfun(@(x) m(x), parts, 'UniformOutput', false), '');
+end
+
+function p = load_params_quiet()
+    evalc('init_params');
+    p = load('params.mat').params;
+end
 
 function snr = ebno2snr(ebno, p)
     snr = ebno + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
@@ -198,12 +221,12 @@ function report = build_report(grid_data, ber_clean, SNR_points, RATIO_RECOVERAB
     report = {};
     report{end+1} = sprintf('=== SURVIVABILITY BOUNDARY MAP — %s ===', title_str);
     report{end+1} = sprintf('Generated: %s', datestr(now));
-    report{end+1} = sprintf('Actions included: %s (apply_countermeasure.m, D28)', strjoin(act_set, ', '));
+    report{end+1} = sprintf('Actions included: %s (apply_countermeasure.m, D28/D39)', strjoin(act_set, ', '));
     report{end+1} = '';
     report{end+1} = 'A state is classified by the best post-countermeasure BER relative to the clean link:';
     report{end+1} = sprintf('  RECOVERABLE (R) : within %gx | MARGINAL (M) : within %gx | NON-RECOVERABLE (X) : worse', ...
         RATIO_RECOVERABLE, RATIO_MARGINAL);
-    report{end+1} = 'Second letter = action achieving it: C channel_switch, F freq_diversity, S spatial_diversity, R rate_reduce.';
+    report{end+1} = 'Letters after the status = action achieving it: C channel_switch, F freq_diversity, S spatial_diversity, R rate_reduce, P power_control, E fec_interleave (two letters = pair).';
     report{end+1} = '';
     report{end+1} = 'Clean-link reference BER per Eb/N0:';
     for s = 1:nS

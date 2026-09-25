@@ -146,7 +146,7 @@ end
 ax5 = nexttile(tl, 5);
 if have_cl
     threats = unique({cl.threat},'stable');
-    action_set = {'no_action','channel_switch','rate_reduce','freq_diversity','spatial_diversity'};
+    action_set = unique({cl.dqn_action},'stable');
     counts = zeros(numel(threats), numel(action_set));
     for t=1:numel(threats)
         m = strcmp({cl.threat},threats{t});
@@ -156,7 +156,7 @@ if have_cl
         end
     end
     b = bar(ax5, counts, 'stacked');
-    amap = [0.6 0.6 0.6; col_blue; col_amb; col_grn; col_org];
+    amap = [0.6 0.6 0.6; col_blue; col_amb; col_grn; col_org; hsv(12)];
     for a=1:numel(action_set), b(a).FaceColor = amap(a,:); end
     set(ax5,'XTick',1:numel(threats),'XTickLabel',shorten_names(threats), ...
         'XTickLabelRotation',45,'FontSize',7);
@@ -189,7 +189,13 @@ if have_cl
         mean([cl.cnn_latency_ms]+[cl.dqn_latency_ms]));
 end
 if have_far
-    n_fa = sum([far.false_alarm]); n_all = numel(far);
+    snrs = unique([far.snr]); healthy = false(1, numel(far));     % same denominator as measure_all_kpis (D35)
+    for si = 1:numel(snrs)
+        ms = [far.snr] == snrs(si);
+        cb = mean([far(ms & strcmp({far.class}, 'none')).ber_mean]);
+        healthy(ms) = [far(ms).ber_mean] / cb <= 2;
+    end
+    n_fa = sum([far(healthy).false_alarm]); n_all = sum(healthy);
     [pf, ~, hf] = stats_ci('wilson', n_fa, n_all);
     verdict = '\color[rgb]{0.2,0.65,0.25}PASS'; if 100*hf > 5, verdict = '\color[rgb]{0.8,0.2,0.2}CHECK'; end
     lines{end+1} = sprintf('KPI4  FAR:         %.1f%% (95%% upper %.1f%%)  %s', 100*pf, 100*hf, verdict);
@@ -216,15 +222,15 @@ if have_surv && isfield(Sv,'grid_data_A') && isfield(Sv,'grid_data_B')
     stA = []; for k=1:numel(Sv.grid_data_A), stA=[stA; Sv.grid_data_A(k).status(:)]; end
     stB = []; for k=1:numel(Sv.grid_data_B), stB=[stB; Sv.grid_data_B(k).status(:)]; end
     stA = stA(stA>0); stB = stB(stB>0);
-    sv_lines{end+1} = 'Map A — without goodput loss (C/F/S actions):';
+    sv_lines{end+1} = 'Map A — without goodput loss (C/F/S, power, pairs):';
     sv_lines{end+1} = sprintf('   \\color[rgb]{0.2,0.65,0.25}Recoverable %.1f%%   \\color[rgb]{0.95,0.75,0.15}Marginal %.1f%%   \\color[rgb]{0.8,0.2,0.2}Non-rec %.1f%%', ...
         100*mean(stA==1), 100*mean(stA==2), 100*mean(stA==3));
     sv_lines{end+1} = '';
-    sv_lines{end+1} = 'Map B — any action (incl. rate reduction):';
+    sv_lines{end+1} = 'Map B — any action (incl. rate reduction, FEC):';
     sv_lines{end+1} = sprintf('   \\color[rgb]{0.2,0.65,0.25}Recoverable %.1f%%   \\color[rgb]{0.95,0.75,0.15}Marginal %.1f%%   \\color[rgb]{0.8,0.2,0.2}Non-rec %.1f%%', ...
         100*mean(stB==1), 100*mean(stB==2), 100*mean(stB==3));
     sv_lines{end+1} = '';
-    sv_lines{end+1} = '\itMap B > Map A gap = survival bought with goodput (rate reduction)';
+    sv_lines{end+1} = '\itMap B > Map A gap = survival bought with goodput (rate reduction, FEC)';
 else
     sv_lines{end+1} = 'data/survivability\_boundary.mat missing or single-map format';
     sv_lines{end+1} = '(run map\_survivability\_boundary.m to regenerate)';

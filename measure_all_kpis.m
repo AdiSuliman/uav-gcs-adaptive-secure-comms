@@ -145,7 +145,24 @@ end
 report{end+1} = sprintf('  Link restored (<= 2x clean): %d/%d = %.1f%% [%.1f, %.1f] | marginal: %d | not restored: %d | missed detections: %d', ...
     sum(r_all <= 2), nR, 100*pw, 100*lw, 100*hw, sum(r_all > 2 & r_all <= 5), sum(r_all > 5), sum([cl_results(real_mask).missed]));
 report{end+1} = sprintf('  KPI #2 (real threats, per-threat mean): %.1f%%', mean(recov_by_threat, 'omitnan'));
-report{end+1} = 'Survivability boundary (deliverable #7): results/survivability_boundary_mapA.txt / mapB.txt.';
+for mapName = {'A', 'B'}
+    mf = sprintf('results/survivability_boundary_map%s.txt', mapName{1});
+    if isfile(mf)
+        tk = regexp(fileread(mf), 'Recoverable\s*:\s*(\d+) \(([\d.]+)%\).*?Marginal\s*:\s*(\d+) \(([\d.]+)%\).*?Non-recoverable\s*:\s*(\d+) \(([\d.]+)%\)', 'tokens', 'once');
+        if ~isempty(tk)
+            report{end+1} = sprintf('Survivability map %s (deliverable #7): recoverable %s%% | marginal %s%% | non-recoverable %s%%  (%s)', ...
+                mapName{1}, tk{2}, tk{4}, tk{6}, mf); %#ok<SAGROW>
+        end
+    end
+end
+if isfile('results/speed_robustness.txt')
+    st = fileread('results/speed_robustness.txt');
+    l1 = regexp(st, 'OVERALL detection accuracy:[^\n]*', 'match', 'once');
+    l2 = regexp(st, 'OVERALL KPI #2 recovery[^\n]*', 'match', 'once');
+    l3 = regexp(st, 'OVERALL false alarms:[^\n]*', 'match', 'once');
+    report{end+1} = 'UAV speed 50-120 km/h (results/speed_robustness.txt):';
+    report{end+1} = ['  ' l1]; report{end+1} = ['  ' l2]; report{end+1} = ['  ' l3];
+end
 report{end+1} = '';
 
 %% ---------- KPI #3: DQN vs Rule-Based (decision latency) ----------

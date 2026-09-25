@@ -21,6 +21,7 @@ delay_bits = 20;
 temporal_window = 10;           % as extract_spectrograms.m
 rng(4242, 'twister');
 
+clear threat_cfg                                  % scripts share the base workspace
 threat_cfg(1) = struct('name','jamming',             'param','jsr_db',        'levels',[0 4 8 12 16]);
 threat_cfg(2) = struct('name','noise_burst',         'param','jsr_db',        'levels',[0 4 8 12 16]);
 threat_cfg(3) = struct('name','reactive_jamming',    'param','jsr_db',        'levels',[0 4 8 12 16]);

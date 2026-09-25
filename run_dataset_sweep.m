@@ -46,6 +46,7 @@ n_spd_bins = numel(EbNo_list);           % one bin per SNR point (6) -> Latin-sq
 rng(2026, 'twister');                    % reproducible speed draws
 
 % Threat -> parameter name + intensity levels
+clear threat_cfg                                  % scripts share the base workspace
 threat_cfg(1) = struct('name','jamming',             'param','jsr_db',        'levels',[0 4 8 12 16]);
 threat_cfg(2) = struct('name','noise_burst',         'param','jsr_db',        'levels',[0 4 8 12 16]);
 threat_cfg(3) = struct('name','reactive_jamming',    'param','jsr_db',        'levels',[0 4 8 12 16]);

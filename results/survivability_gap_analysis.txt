@@ -1,15 +1,15 @@
 === SURVIVABILITY GAP ANALYSIS ===
-Cells where the link survives with rate reduction (Map B: recoverable/marginal)
+Cells where the link survives only with a goodput cost (Map B: recoverable/marginal)
 but not with any goodput-free action (Map A: non-recoverable): survival bought
 with throughput -- the goodput trade-off named in the proposal.
 
-noise_burst: 2 gap cell(s)
-  level=12, Eb/N0=6dB: Map A 5.35x (spatial_diversity) | Map B 4.59x (rate_reduce)
-  level=4, Eb/N0=8dB: Map A 6.83x (spatial_diversity) | Map B 4.63x (rate_reduce)
-path_loss: 4 gap cell(s)
-  level=20, Eb/N0=2dB: Map A 5.19x (spatial_diversity) | Map B 4.69x (rate_reduce)
-  level=12, Eb/N0=4dB: Map A 5.49x (spatial_diversity) | Map B 3.64x (rate_reduce)
-  level=8, Eb/N0=8dB: Map A 6.15x (spatial_diversity) | Map B 2.24x (rate_reduce)
-  level=8, Eb/N0=10dB: Map A 11.85x (spatial_diversity) | Map B 3.22x (rate_reduce)
+noise_burst: 7 gap cell(s)
+  level=8, Eb/N0=8dB: Map A 5.76x (spatial_diversity+power_control) | Map B 0.51x (spatial_diversity+fec_interleave)
+  level=12, Eb/N0=8dB: Map A 9.27x (spatial_diversity+power_control) | Map B 0.43x (spatial_diversity+fec_interleave)
+  level=16, Eb/N0=8dB: Map A 11.70x (spatial_diversity+power_control) | Map B 0.29x (spatial_diversity+fec_interleave)
+  level=4, Eb/N0=10dB: Map A 8.87x (spatial_diversity+power_control) | Map B 0.75x (spatial_diversity+fec_interleave)
+  level=8, Eb/N0=10dB: Map A 19.34x (spatial_diversity+power_control) | Map B 0.98x (spatial_diversity+fec_interleave)
+  level=12, Eb/N0=10dB: Map A 30.47x (spatial_diversity+power_control) | Map B 0.83x (spatial_diversity+fec_interleave)
+  level=16, Eb/N0=10dB: Map A 40.11x (spatial_diversity+power_control) | Map B 0.83x (spatial_diversity+fec_interleave)
 
-Total gap cells: 6
+Total gap cells: 7
