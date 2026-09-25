@@ -1,5 +1,5 @@
 === EPISODIC CLOSED LOOP: RECOVERY TIME IN DECISION CYCLES (proposal KPI #3, D31) ===
-Generated: 24-Sep-2026 09:58:09
+Generated: 24-Sep-2026 11:16:46
 20 clean cycles, threat onset, 60 cycles after onset | 1 cycle = 1 frame (0.516 ms of signal)
 Hysteresis: commit after 3 consecutive proposals, no switch within 10 cycles of the previous one
 Outcome per episode: recovered (5-cycle BER average back to <= 2x clean for 10 cycles, T_recover from onset) | not recovered | not degraded (never above 2x clean) | pre-configured (countermeasure already active at onset).

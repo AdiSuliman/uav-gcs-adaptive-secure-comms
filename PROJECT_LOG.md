@@ -592,6 +592,12 @@ New: `eval_ood_detection.m` (leave-one-threat-out, 8 retrainings), `eval_combine
 ### D32 results and D33 (2026-09-24)
 Leave-one-threat-out: mean AUROC 0.515 (MSP) / 0.521 (energy); distinct threats separate (benign, antenna_fault, spoofing with energy), sibling threats are absorbed with high confidence (jamming, reactive_jamming, noise_burst AUROC < 0.2). Combined threats: always named as their dominant component (MSP ≥ 0.92), never flagged; never frozen (0 no_action on attacks); best single action restores 2 of 12 cells (DQN reached both, rule one). Confidence-only gating made the DQN act on the clean link at 0 dB (28/114) — fixed in D33 (gating also requires a degraded link). D33 consolidation: 7 files merged/removed, 8 moved to `legacy/`, root 50 → 35.
 
+### D33 verification (2026-09-24)
+Merged detection path reproduces the previous combined-threat numbers; with D33 gating the DQN acts on the clean link in 5/114 frames (28/114 with confidence-only gating, 2/114 without gating). Root 35 files, `legacy/` 8.
+
+### D34 — detector quality by measurement (improvement 6, code complete)
+New `eval_unseen_snr.m` (Eb/N0 1,3,5,7,9 dB vs the training grid, same generator and run). `eval_detector.m`: macro-F1 per Eb/N0, KPI #1 threshold, action-equivalent accuracy; `measure_all_kpis.m` reports them. reactive_jamming and transition windows documented rather than retrained (see D34). Pending: MATLAB run.
+
 ### Next
-Re-run `eval_combined_threats` (~10 min) to confirm the D33 gating and the merged detection path; commit D32–D33 (with `git mv` / `git rm`). Then improvement (6): detector quality (reactive_jamming, unseen Eb/N0, transition windows).
+Run `eval_detector`, `eval_unseen_snr` (~25 min), `measure_all_kpis`; commit D34. Then improvement (7): remaining KPI reporting (PLR, FAR above the threshold).
 

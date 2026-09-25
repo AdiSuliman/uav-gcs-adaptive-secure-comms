@@ -36,14 +36,14 @@ An AI-driven closed-loop system for detecting and adapting to link-layer threats
 │   ├── UAV_GCS_Rician_Link.slx   # A3: fading + Doppler
 │   └── UAV_GCS_Threat_Link.slx   # A4-A6: threats + recovery
 ├── docs/
-│   └── DECISIONS.md              # Architecture Decision Record (D1-D33)
+│   └── DECISIONS.md              # Architecture Decision Record (D1-D34)
 ├── diagnostics/                  # Ad-hoc investigation scripts, kept for reproducibility
 ├── README.md                     # This file
 ├── PROJECT_LOG.md                # Living execution log — status, fix history, open issues
 ├── ROADMAP.md                    # Project timeline (original plan)
-├── [Phase scripts — root holds only the active pipeline, 35 files]
+├── [Phase scripts — root holds only the active pipeline, 36 files]
 │   ├── A: init_params.m, build_link_model.m, build_rician_model.m, build_threat_model.m, run_awgn_sweep.m, run_dataset_sweep.m, extract_spectrograms.m, visualize_spectrograms.m, extract_closed_loop_frames.m, quick_ber.m
-│   ├── B: prepare_data.m, train_detector.m, eval_detector.m
+│   ├── B: prepare_data.m, train_detector.m, eval_detector.m, eval_unseen_snr.m
 │   ├── C: dqn_agent.m, build_dqn_state.m, train_dqn.m (also writes the countermeasure matrix), rule_based_policy.m, apply_countermeasure.m, recovery_vs_clean.m
 │   ├── C-eval: run_closed_loop_diagnostic.m, eval_speed_robustness.m, run_closed_loop_episodes.m + report_closed_loop_episodes.m, eval_combined_threats.m
 │   ├── Detection helpers: detect_frame.m, cnn_scores.m (probabilities, logits, MSP, energy), ood_thresholds.m, eval_ood_detection.m
@@ -272,6 +272,7 @@ See `docs/DECISIONS.md` for the full Architecture Decision Record:
 - **D23:** `spectrogram()` warm-up added — eliminated a one-time JIT skew between mean and median latency
 - **D24:** `demo_gui.m` built — interactive operator-console demo; no-nested-functions architecture pattern documented for future MATLAB GUI work
 - **D25:** UAV speed envelope widened to a continuous 50–120 km/h (Doppler 111–267 Hz); speed-diverse dataset, accuracy-vs-speed evaluation and `eval_speed_robustness.m`. Amends D4
+- **D34:** detector generalization to Eb/N0 never seen in training (1,3,5,7,9 dB); KPI #1 as worded (macro-F1 per Eb/N0 and threshold); action-equivalent accuracy; reactive_jamming and onset windows documented, not retrained
 - **D33:** unknown gating only on a degraded link (confidence alone caused false actions on the clean link at 0 dB); file consolidation — 7 files merged or removed, 8 moved to `legacy/`
 - **D32:** unknown-threat detection — leave-one-threat-out retraining with MSP and energy scores, calibrated unknown threshold — and combined threats (jamming+path_loss, noise_burst+antenna_fault, sweeping_jammer+path_loss, spoofing+noise_burst) with class-based vs unknown-gated decisions
 - **D31:** episodic closed loop — threat onset mid-stream, per-frame detection and decision, dwell/hysteresis; recovery time in decision cycles for DQN and rule-based (KPI #3 as written)

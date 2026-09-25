@@ -87,6 +87,7 @@ RUN.extract_spectrograms        = true;   % A6  : spectrograms + 7 features (~5m
 RUN.prepare_data                = true;   % B1  : stratified 80/10/10 split (~1min)
 RUN.train_detector              = true;   % B2  : train CNN+scalar hybrid (~10min)
 RUN.eval_detector               = true;   % B3  : test eval + confusion/accuracy-vs-SNR (~1min)
+RUN.eval_unseen_snr             = true;   % B4  : detector at Eb/N0 never seen in training, 1,3,5,7,9 dB (~25min, D34)
 
 
 % ---- Phase C: closed-loop recovery ----
@@ -176,6 +177,10 @@ end
 if RUN.eval_detector
     fprintf('  [B3] Evaluating on test set...\n');
     eval_detector;
+end
+if RUN.eval_unseen_snr
+    fprintf('  [B4] Detector generalization to unseen Eb/N0...\n');
+    eval_unseen_snr;
 end
 
 fprintf('  [B] Pipeline status:\n');

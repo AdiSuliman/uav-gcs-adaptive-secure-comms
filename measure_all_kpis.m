@@ -39,18 +39,33 @@ if ~need_rerun
 end
 if need_rerun
     fprintf('  No fresh results/eval_detector_metrics.mat found -- running eval_detector...\n');
-    eval_detector;   % script; also regenerates confusion_matrix.png / accuracy_vs_snr.png
+    run_isolated('eval_detector');   % also regenerates confusion_matrix.png / accuracy_vs_snr.png
 end
 M = load(metrics_path, 'metrics'); m1 = M.metrics;
+if ~isfield(m1, 'kpi1_threshold_db')                 % metrics saved before D34
+    run_isolated('eval_detector');
+    M = load(metrics_path, 'metrics'); m1 = M.metrics;
+end
 
 report{end+1} = '--- KPI #1: Detection Accuracy (target: macro-F1 >= 90% above SNR threshold) ---';
 report{end+1} = sprintf('Source: results/eval_detector_metrics.mat (generated %s)', m1.generated);
 report{end+1} = sprintf('Overall accuracy: %.2f%% | Macro-F1: %.2f%% -> %s', ...
     m1.overall_accuracy_pct, m1.macro_f1_pct, ...
     string(m1.macro_f1_pct >= 90) + " (target: >=90%)");
-report{end+1} = 'Accuracy vs SNR:';
+report{end+1} = sprintf('KPI #1 as worded: macro-F1 >= 90%% from Eb/N0 = %g dB up; macro-F1 above that threshold %.2f%%', ...
+    m1.kpi1_threshold_db, m1.macro_f1_above_threshold_pct);
+report{end+1} = 'Accuracy and macro-F1 vs Eb/N0 (degradation curve):';
 for i = 1:numel(m1.snr_breakdown)
-    report{end+1} = sprintf('  SNR=%2d dB: %.1f%%', m1.snr_breakdown(i).snr_db, m1.snr_breakdown(i).accuracy_pct);
+    report{end+1} = sprintf('  SNR=%2d dB: accuracy %.1f%% | macro-F1 %.1f%%', m1.snr_breakdown(i).snr_db, ...
+        m1.snr_breakdown(i).accuracy_pct, m1.snr_breakdown(i).macro_f1_pct);
+end
+report{end+1} = sprintf('Action-equivalent accuracy (confusion between classes with the same countermeasure counted as correct): %.2f%%', ...
+    m1.action_equiv_accuracy_pct);
+if isfile('results/unseen_snr.mat')
+    U = load('results/unseen_snr.mat', 'summary');
+    report{end+1} = sprintf(['Generalization to Eb/N0 never seen in training (1,3,5,7,9 dB): accuracy %.1f%% vs %.1f%% on the ' ...
+        'training grid in the same run; largest gap to the interpolated curve %.1f points'], ...
+        U.summary.acc_unseen, U.summary.acc_seen, U.summary.max_gap);
 end
 report{end+1} = 'Per-class recall/F1 (weakest classes flagged):';
 for i = 1:numel(m1.classes)
