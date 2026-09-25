@@ -33,3 +33,7 @@ results_backup*/
 *.mexw64
 params.mat
 GUI_Results/
+
+# delivery archives (kept locally, not in the repo)
+*.zip
+ZIP files/

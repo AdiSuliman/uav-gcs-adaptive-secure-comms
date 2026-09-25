@@ -43,7 +43,10 @@ if bdIsLoaded(modelName)
     close_system(modelName, 0);
 end
 new_system(modelName);
-open_system(modelName);
+quiet_build = isfield(p, 'quiet_build') && p.quiet_build;   % GUI: build without opening the editor window
+if ~quiet_build
+    open_system(modelName);
+end
 
 fprintf('Building model "%s" (System Objects engine, threat: %s)...\n', ...
     modelName, p.active_threat);
@@ -82,6 +85,10 @@ add_block('simulink/Sinks/To Workspace', ...
 %% ---- Inject Tx code (mod + RRC transmit) ----
 sf_root = sfroot;
 chart_tx = sf_root.find('-isa','Stateflow.EMChart','Path',[modelName '/Tx']);
+if isempty(chart_tx)                       % chart objects not reachable on a loaded-only model
+    open_system(modelName);
+    chart_tx = sf_root.find('-isa','Stateflow.EMChart','Path',[modelName '/Tx']);
+end
 chart_tx.Script = sprintf([ ...
     'function y = fcn(bits)\n' ...
     '%%#codegen\n' ...

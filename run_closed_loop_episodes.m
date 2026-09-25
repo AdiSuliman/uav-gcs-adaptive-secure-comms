@@ -10,7 +10,8 @@
 % the link a frame is drawn from follows the configuration currently applied,
 % so detection after a countermeasure sees the mitigated link. Detection runs
 % the trained CNN on each frame (detect_frame.m) with the causal temporal
-% features over the episode's own history.
+% features over the episode's own history; one cycle is episode_cycle.m,
+% shared with the continuous-episode view of demo_gui.m.
 %
 % Measured per episode (cycles counted from threat onset):
 %   T_detect  first cycle with the correct class
@@ -146,54 +147,38 @@ report_closed_loop_episodes(true);   % report + example-episode figure
 %% ===== Local functions =====
 function R = run_episode(t, s, ebno, threats, actions, na, pools, agent, D, feat_mean, feat_std, fs, ...
     policy, hy, N_PRE, N_POST, tw, frame_dur, gp_act)
-% One episode: clean cycles, onset, policy loop with dwell/hysteresis.
+% One episode: clean cycles, onset, then one decision cycle per frame
+% (episode_cycle.m). The frame of each cycle is drawn from the pool of the
+% configuration currently applied.
 it_none = strcmp(threats, 'none');
 N = N_PRE + N_POST;
-ber = nan(1, N); rssi = nan(1, N); plr = nan(1, N);
-cfg = na; last_switch = -inf; cand = 0; cand_n = 0;
+ctx = struct('ebno', ebno, 'policy', policy, 'dwell', hy.dwell, 'hold', hy.hold, ...
+    'net', D.net, 'classes', {D.classes}, 'feat_mean', feat_mean, 'feat_std', feat_std, 'fs', fs, ...
+    'agent', agent, 'actions', {actions}, 'na', na, 'tw', tw, 'frame_dur', frame_dur);
 R.T_detect = NaN; R.T_act = NaN; R.switches_pre = 0; R.switches_post = 0;
 R.switch_at = []; R.committed = {}; gp = zeros(1, N_POST);
+Ep = [];
+cfg = na;
 for k = 1:N
     if k <= N_PRE, src_t = find(it_none); else, src_t = t; end
     F = pools{src_t, cfg, s};
     j = randi(numel(F.ber));
-    iq = double(F.iq{j}); ber(k) = F.ber(j); rssi(k) = F.rssi(j); plr(k) = F.plr(j);
-
-    w0 = max(1, k - tw + 1);
-    var_rssi = var(rssi(w0:k), 0);
-    burst = mean(plr(w0:k), 'omitnan');
-    if k > 1, dber = (ber(k) - ber(k-1)) / frame_dur; else, dber = 0; end
-    raw = [ebno, ber(k), rssi(k), plr(k), var_rssi, dber, burst];
-    cls = detect_frame(D.net, D.classes, iq, raw, feat_mean, feat_std, fs);
-    if k > N_PRE && isnan(R.T_detect) && strcmp(cls, threats{t}), R.T_detect = k - N_PRE; end
-
-    if strcmp(policy, 'dqn')
-        st = build_dqn_state(cls, ber(k), rssi(k), ebno, plr(k));
-        qv = extractdata(predict(agent.qNetwork, dlarray(single(st), 'CB')));
-        [~, prop] = max(gather(qv));
-    else
-        prop = find(strcmp(actions, rule_based_policy(cls, ber(k), ebno)), 1);
-    end
-
-    % Dwell / hysteresis: no_action or the current configuration keeps things as they are
-    if prop == na || prop == cfg
-        cand = 0; cand_n = 0;
-    else
-        if prop == cand, cand_n = cand_n + 1; else, cand = prop; cand_n = 1; end
-        if cand_n >= hy.dwell && (k - last_switch) >= hy.hold
-            cfg = prop; last_switch = k; cand = 0; cand_n = 0;
-            R.switch_at(end+1) = k; R.committed{end+1} = actions{cfg};
-            if k <= N_PRE
-                R.switches_pre = R.switches_pre + 1;
-            else
-                R.switches_post = R.switches_post + 1;
-                if isnan(R.T_act), R.T_act = k - N_PRE; end
-            end
+    fr = struct('iq', double(F.iq{j}), 'ber', F.ber(j), 'rssi', F.rssi(j), 'plr', F.plr(j));
+    [Ep, info] = episode_cycle(Ep, k, fr, ctx);
+    cfg = Ep.cfg;
+    if k > N_PRE && isnan(R.T_detect) && strcmp(info.cls, threats{t}), R.T_detect = k - N_PRE; end
+    if info.switched
+        R.switch_at(end+1) = k; R.committed{end+1} = actions{cfg};
+        if k <= N_PRE
+            R.switches_pre = R.switches_pre + 1;
+        else
+            R.switches_post = R.switches_post + 1;
+            if isnan(R.T_act), R.T_act = k - N_PRE; end
         end
     end
     if k > N_PRE, gp(k - N_PRE) = gp_act(cfg); end
 end
-R.ber = ber;
+R.ber = Ep.ber;
 R.goodput_post = mean(gp);
 end
 

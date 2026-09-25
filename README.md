@@ -29,23 +29,23 @@ An AI-driven closed-loop system for detecting and adapting to link-layer threats
 ├── main.m                        # Master orchestrator (RUN flags across phases A-DASH; adds legacy/ to the path)
 ├── init_params.m                 # System & threat parameters (K=10dB; UAV envelope 50–120 km/h → Doppler 111–267 Hz, nominal 72 km/h = 160 Hz; D25)
 ├── build_dqn_state.m             # Single source of truth: 13-dim one-hot DQN state
-├── demo_gui.m                    # Interactive operator console, 4 tabs (D24 architecture, D26 v3)
+├── demo_gui.m                    # Interactive operator console, 5 tabs incl. continuous episode (D24, D26, D37)
 ├── build_kpi_dashboard.m         # 7-panel results dashboard (proposal deliverable #1)
 ├── models/                       # Simulink Digital Twin (gitignored — regenerated on build)
 │   ├── UAV_GCS_Base_Link.slx     # A1-A2: clean AWGN channel
 │   ├── UAV_GCS_Rician_Link.slx   # A3: fading + Doppler
 │   └── UAV_GCS_Threat_Link.slx   # A4-A6: threats + recovery
 ├── docs/
-│   └── DECISIONS.md              # Architecture Decision Record (D1-D36)
+│   └── DECISIONS.md              # Architecture Decision Record (D1-D37)
 ├── diagnostics/                  # Ad-hoc investigation scripts, kept for reproducibility
 ├── README.md                     # This file
 ├── PROJECT_LOG.md                # Living execution log — status, fix history, open issues
 ├── ROADMAP.md                    # Project timeline (original plan)
-├── [Phase scripts — root holds only the active pipeline, 37 files]
+├── [Phase scripts — root holds only the active pipeline, 38 files]
 │   ├── A: init_params.m, build_link_model.m, build_rician_model.m, build_threat_model.m, run_awgn_sweep.m, run_dataset_sweep.m, extract_spectrograms.m, visualize_spectrograms.m, extract_closed_loop_frames.m, quick_ber.m
 │   ├── B: prepare_data.m, train_detector.m, eval_detector.m, eval_unseen_snr.m
 │   ├── C: dqn_agent.m, build_dqn_state.m, train_dqn.m (also writes the countermeasure matrix), rule_based_policy.m, apply_countermeasure.m, recovery_vs_clean.m
-│   ├── C-eval: run_closed_loop_diagnostic.m, eval_speed_robustness.m, run_closed_loop_episodes.m + report_closed_loop_episodes.m, eval_combined_threats.m
+│   ├── C-eval: run_closed_loop_diagnostic.m, eval_speed_robustness.m, run_closed_loop_episodes.m + report_closed_loop_episodes.m + episode_cycle.m (one decision cycle, shared with the GUI), eval_combined_threats.m
 │   ├── Detection helpers: detect_frame.m, cnn_scores.m (probabilities, logits, MSP, energy), ood_thresholds.m, eval_ood_detection.m
 │   ├── SURV: map_survivability_boundary.m
 │   ├── KPI: measure_all_kpis.m, measure_kpi3_recovery_time.m, diagnose_far_measurement.m, build_kpi_dashboard.m, stats_ci.m (t / Wilson 95% intervals)
@@ -68,8 +68,8 @@ An AI-driven closed-loop system for detecting and adapting to link-layer threats
 - Phase A (link + dataset): dataset generation ~102 min in the latest run (speed-diverse sweep: 270 Simulink model builds; the Doppler is baked into each build), spectrogram extraction ~3 min
 - Phase B (detector train): 5–15 min
 - Phase C1 (rule-based): < 1 min
-- Phase C2 (DQN train): ~7 min for one seed (2026-09-23); ~15 min with 5 seeds (D35, estimate)
-- Phase C3-diag: ~15–20 min per repeat; ~80–100 min with 5 Monte Carlo repeats (D35, estimate)
+- Phase C2 (DQN train): ~8 min with 5 seeds (2026-09-25; the reward-table measurement dominates)
+- Phase C3-diag: ~17 min with 5 Monte Carlo repeats (2026-09-25)
 - Phase C3-speed (`eval_speed_robustness.m`): ~13 min (measured; 8 speeds × 3 SNR × 9 threats)
 - Phase EXP (deep countermeasure exploration): ~78 min (measured 77.8), run rarely
 - Phase KPI (FAR + aggregation): ~5 min
@@ -128,7 +128,7 @@ Both policies decide from the same detector output and link measurements and act
 - **Detector:** 1,000-resample bootstrap CI for accuracy, macro-F1 and macro-F1 above the threshold (`eval_detector.m`). The eight leave-one-threat-out retrainings (D32) already show the spread across trainings (known-class accuracy 95.2–98.3%).
 - **DQN seeds:** 5 trainings on the same reward table; each passes the validation gate; the saved agent is the lowest-mean-regret seed; per-seed regret and the cells where seeds disagree are in `results/dqn_seed_stability.txt`.
 - **Episodes (KPI #3):** recovered share and mean T_recover per configuration with 95% intervals in `kpi_summary.txt`.
-- **D35 results:** KPI #2 DQN 80.9% [79.9, 82.0] vs rule 85.0% [82.4, 87.5]; BER restored 152/210, PLR restored 134/210; goodput kept DQN 77.7% vs rule 74.7% vs 20.4% without action; FAR 0/120, 95% upper limit 3.1% (MET); detector accuracy 96.41% [95.67, 97.07]; latency 10.3 ms mean. The DQN − rule gap (−4.0 [−5.7, −2.4]) came from path_loss, where every seed under-learned rate_reduce; fixed in D36 (full-action targets), re-run pending.
+- **Results (D35 reporting, D36 agent, 2026-09-25):** KPI #2 DQN 86.0% [85.7, 86.2] vs rule 85.0% [82.4, 87.5], difference +1.0 [−1.6, 3.6] (not significant); BER restored 157/210 for both; PLR restored DQN 150/210 vs rule 142/210; goodput kept DQN 78.4% vs rule 74.7% vs 20.4% without action; FAR 0/120, 95% upper limit 3.1% (MET); detector accuracy 96.41% [95.67, 97.07]; episodes recovered DQN 73% [63, 81] vs rule 76% [66, 83], no false switches for the DQN on healthy links (rule 3/20); latency 11.1 ms mean. The first D35 run showed DQN − rule −4.0 [−5.7, −2.4]: every seed had under-learned rate_reduce for path_loss. D36 trains all five Q-values per sample from the measured reward table, which fixed it.
 
 ### Phase C3-speed — Robustness vs UAV speed (2026-09-24)
 | Speed (km/h) | 50.0 | 57.3 | 66.8 | 72.0 | 84.6 | 97.2 | 108.9 | 120.0 |
@@ -237,9 +237,10 @@ None of these are hidden — they're the explicit content of the report's Limita
 
 ## Interactive Demo (`demo_gui.m`, v3)
 
-Operator-console style MATLAB `uifigure` app for live, in-person demonstration, rebuilt (D26) to cover every proposal deliverable. Four tabs:
+Operator-console style MATLAB `uifigure` app for live, in-person demonstration, rebuilt (D26) to cover every proposal deliverable. Five tabs:
 
 - **LIVE OPERATIONS** — a test matrix (threat × Eb/N0, per-row and per-cell selection) runs as a queue. Controls: **UAV speed** (50–120 km/h, continuous; the Doppler is applied to the Simulink channel of every run), **threat severity** (nominal or levels 1–5 using the dataset's severity axes), an **UNKNOWN-threat confidence threshold** slider, a rule-based comparison toggle and optional session-video capture. Per run it shows: a threat-specific GCS↔UAV link diagram, spectrogram and IQ constellation before/after, a **BER / RSSI timeline** with the countermeasure boundary and the clean-channel reference, CNN confidence and decision-latency gauges with class probabilities, **DQN Q-values with the rule-based choice marked**, a BER bar chart (no action / DQN / rule), the goodput trade-off flag for `rate_reduce`, and a verdict classified with the survivability-map thresholds (recoverable ≤ 2× clean BER, marginal ≤ 5×).
+- **CONTINUOUS EPISODE** (D37) — one link streamed cycle by cycle: clean cycles, threat onset, then detection → policy → dwell/hysteresis on every received frame. Settings: threat, Eb/N0, severity, UAV speed, policy (DQN, rule-based, or both on identical frame draws), clean/after-onset cycles, hysteresis on/off with dwell and hold, playback speed, seed. Live plots: BER per cycle with its 5-cycle mean, the clean and 2× clean lines and the switch moments; detected class per cycle against the true class; proposed action and committed configuration. At the end: T_detect, T_act, T_recover, switches before/after onset, final BER vs clean, goodput and the committed actions, with the same rules as `run_closed_loop_episodes.m`; the cycle-by-cycle trace is saved as CSV in `GUI_Results/`. Frames come from real Simulink runs of the scenario under all five configurations (10 runs, about a minute on the first run of a scenario, cached afterwards); one cycle is `episode_cycle.m`, the same code the episodic evaluation uses.
 - **KPI & RESULTS** — six KPI cards, confusion matrix, accuracy and recovery vs Eb/N0, decision latency, action distribution and robustness vs UAV speed, read from `results/`.
 - **SURVIVABILITY MAP** — Map A / Map B per threat (severity × Eb/N0 grid, ratio to clean BER, gap-cell analysis) with the last live run marked.
 - **SESSION LOG** — full run history table, export to CSV + `.mat` in `GUI_Results/`, per-sequence event log.
@@ -248,7 +249,7 @@ Every run calls the real pipeline end-to-end (no mocked or precomputed results):
 
 **Architecture note for anyone extending this file:** it deliberately contains **no nested functions** — MATLAB makes a function's workspace "static" whenever it contains a nested function, which then rejects the script-style variable injection used by `init_params.m` and `build_threat_model.m` throughout this codebase. Static state (models, parameters, UI handles, colours) lives in `fig.UserData`; state that changes while a sequence runs (history, video writer, log file, abort flag, last run) lives in appdata so a callback can never overwrite it with a stale copy. `params.mat` is restored after every run through an `onCleanup` guard. See D24 and D26 in `DECISIONS.md`.
 
-**Performance note:** `splits.mat` is >1 GB but the GUI needs only two normalization vectors; the first launch extracts them into `data/gui_norm_stats.mat` (one-time, slow) and later launches skip the big load. Run the GUI from a fresh MATLAB session after `main.m`.
+**Performance note:** `splits.mat` is >1 GB but the GUI needs only two normalization vectors; the first launch extracts them into `data/gui_norm_stats.mat` (one-time, slow) and later launches skip the big load. Run the GUI from a fresh MATLAB session after `main.m`. Since D37 the GUI builds the Simulink model without opening its editor window (`params.quiet_build`; `build_threat_model.m` falls back to opening it if the chart objects are not reachable), and the run timer redraws at a limited rate.
 
 ---
 
@@ -299,7 +300,7 @@ See `PROJECT_LOG.md` for the full fix history and session-by-session detail behi
 ## Known Issues & Future Work
 
 **Open items:**
-- **Improvement plan in progress (Session 12):** steps 7–8 (PLR/goodput KPI reporting, FAR bound above the SNR threshold, Monte Carlo CIs, DQN seeds) are code-complete (D35), MATLAB run pending; next: GUI performance and a continuous episode view (step 9), documentation sync and a full `main.m` run (step 10).
+- **Improvement plan in progress (Session 12):** steps 7–8 done (D35–D36, run 2026-09-25); step 9 (continuous episode view, GUI build speed; D37) code-complete, MATLAB check pending; next: documentation sync and a full `main.m` run (step 10).
 - **Dynamic/Chasing Jammer scenario** (priority) — an adversary that reacts to the system's countermeasures, needed to let the DQN demonstrate a real decision-quality advantage over the static rule-based policy (see KPI #3 discussion above). Planned, not yet built.
 - A small number of report figure placeholders need real source images (suggestions provided, final selection pending)
 - `demo_gui.m` v3 (D26) — rebuilt and delivered; verified only by a syntax parse and helper-function tests outside MATLAB, so live-use feedback and small layout fixes are still expected. A slow-startup report on 2026-09-22 was addressed (norm-stats cache; launch from a fresh session)
@@ -314,7 +315,7 @@ See `PROJECT_LOG.md` for the full fix history and session-by-session detail behi
 - Combined countermeasures for combined attacks (one action per decision today)
 - Online reinforcement learning
 - FPGA/GPU acceleration
-- **DQN weak cell:** path_loss at 10 dB (spatial_diversity chosen, 27.8× clean, where rate_reduce gives ~4–7×); passed the gate with regret 11. Since D35 the DQN is trained over 5 seeds and `results/dqn_seed_stability.txt` shows whether this cell is a seed effect or a property of the reward.
+- **DQN weak cells:** resolved in D36 (full-action targets); the selected agent has zero regret in all 54 cells.
 - Transition-cost-aware reward shaping (Liu et al.'s λδ term), not currently implemented
 - FAR estimation at tens of thousands of frames per condition (the current 95% upper limits are 2–6%, set by the number of trials)
 

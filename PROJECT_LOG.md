@@ -612,5 +612,18 @@ Clean PLR at 0–2 dB is 0.68 / 0.47 (clean BER 0.125 / 0.081 is near the 0.1 lo
 ### D36 — full-action DQN targets, stricter gate (code complete)
 `train_dqn.m`: each sample trains all five Q-values toward the measured table rewards; gate fails regret > 10 where action is needed; seed failures listed. `stats_ci.m`: optional clipping to the metric's range, applied in the diagnostic, KPI summary, dashboard and GUI. `main.m`: D36 preset. Pending: MATLAB run (~3 h).
 
+### D36 results (2026-09-25, full preset in 52 min)
+Expectations held. DQN seeds: all 5 pass the gate, mean regret 0.1 [0.0, 0.2], 52/54 cells unanimous (the two others are 5-point near-ties); selected seed 42 has regret 0 in every cell and matches the reward-optimal action everywhere (rate_reduce for path_loss at all Eb/N0 and for noise_burst at 0–4 dB, spatial_diversity for noise_burst at 6–10 dB).
+- KPI #2: DQN 86.0% [85.7, 86.2] vs rule 85.0% [82.4, 87.5]; DQN − rule +1.0 [−1.6, 3.6] (not significant). BER restored 157/210 each; PLR restored DQN 150/210 (71.4%) vs rule 67.6%; goodput kept DQN 78.4% [75.7, 81.1] vs rule 74.7% [73.1, 76.4]; goodput factor 0.84 vs 0.79. path_loss 36.4% → 69.0% (= rule).
+- Per threat: the DQN is better on sweeping_jammer (87.4 vs 82.4%) and antenna_fault (99.0 vs 89.0%, the 0 dB misdetection handled by spatial_diversity); the rule is better on noise_burst at 6–10 dB (56.1 vs 48.0% overall), where the reward prefers spatial_diversity over paying 75% goodput for rate_reduce — the designed trade-off, now applied consistently.
+- Episodes (hysteresis): recovered DQN 66/91 = 73% [63, 81], rule 68/90 = 76% [66, 83]; T_act 3, T_recover median 8 cycles for both; false switches on healthy links DQN 0/20, rule 3/20; goodput 0.89 vs 0.85.
+- Speed sweep: KPI #2 85.6–87.6% across 50–120 km/h; detection 207/216 (antenna_fault at 0 dB misdetected at every speed; one none at 50 km/h); 1 false alarm in 32 healthy-link runs (the misdetected none at 50 km/h); 6 misses (antenna_fault at 0 dB, a 1.4× clean link that the rule also leaves alone).
+- Combined threats: DQN and rule now choose the same actions (38/456 restored each). The previous DQN's 76/456 came from choosing spatial_diversity on noise_burst mixes, which the reward table does not prefer for a single noise_burst — not a learned advantage.
+- FAR 0/120 healthy-link trials, upper limit 3.1% (MET). Latency 11.1 ms mean, 10.9 median, 13.3 p95.
+Runtime: the D36 preset (train_dqn + all DQN consumers) took 52 min; the 5-repeat diagnostic 17 min.
+
+### D37 — step 9: continuous episode view, shared decision cycle, GUI build speed (code complete)
+New `episode_cycle.m` (one decision cycle, used by `run_closed_loop_episodes.m` and the GUI). `demo_gui.m`: CONTINUOUS EPISODE tab (streamed episode, DQN and rule on identical frames, T_detect/T_act/T_recover, CSV trace), `scenarioParams` helper, models built without the editor window, rate-limited timer redraw. `build_threat_model.m`: optional `quiet_build` with fallback. Pending: MATLAB check — GUI episode tab, and `run_closed_loop_episodes` must reproduce the D36 numbers (DQN 66/91, rule 68/90 with hysteresis).
+
 ### Next
-Run the D36 preset, check the expectations in D36, commit D35+D36. Then step 9 (GUI performance, continuous episode view) and step 10 (documentation sync, full `main.m` run with the light figure theme).
+Step 10: documentation sync (README results section, report figures), full `main.m` run with the light figure theme.

@@ -17,8 +17,8 @@
 % All flags default to FALSE (everything is already generated) -- turn on only
 % what you need to regenerate.
 %
-% Runtimes (RTX 4070): A5 ~30-40min, A6 ~5min, B2 ~10min, C2 ~15min (5 seeds),
-% C3-diag ~80-100min (5 Monte Carlo repeats), C3-speed ~30-60min, C3-episodes ~25min,
+% Runtimes (RTX 4070): A5 ~30-40min, A6 ~5min, B2 ~10min, C2 ~8min (5 seeds),
+% C3-diag ~17min (5 Monte Carlo repeats), C3-speed ~10min, C3-episodes ~10min,
 % SURV ~70-80min, EXP ~75-86min (VERY HEAVY), everything else < 10min.
 %
 % DEPENDENCIES (what must exist before a stage can run):
@@ -70,16 +70,19 @@ fprintf('(This file will contain EVERYTHING printed below, even across clc calls
 %    measure_far, measure_kpi3, measure_all_kpis, build_dashboard = true;
 %    everything else (train_dqn, EXP, SURV, validate/check A) = false
 %
-%  STEPS 7+8 (KPI reporting with PLR/goodput + Monte Carlo CIs, D35; ~3-3.5 hours):
+%  STEPS 7+8 (KPI reporting with PLR/goodput + Monte Carlo CIs, D35; ~1 hour):
 %    eval_detector, train_dqn, run_closed_loop_diagnostic, eval_speed_robustness,
 %    run_closed_loop_episodes, eval_combined_threats, measure_far, measure_kpi3,
 %    measure_all_kpis, build_dashboard = true; rest = false
 %    (train_dqn saves a new agent, so every stage that uses the DQN is rerun)
 %
-%  D36 DQN RETRAIN (full-action targets; ~3 hours):
+%  D36 DQN RETRAIN (full-action targets; ~52 min measured):
 %    train_dqn, run_closed_loop_diagnostic, eval_speed_robustness,
 %    run_closed_loop_episodes, eval_combined_threats, measure_far, measure_kpi3,
 %    measure_all_kpis, build_dashboard = true; rest = false
+%
+%  D37 CHECK (episodes through the shared episode_cycle.m; must reproduce D36, ~10 min):
+%    run_closed_loop_episodes = true; rest = false
 %
 %  DASHBOARD-ONLY (all results exist, < 1 min):
 %    build_dashboard = true; rest = false
@@ -107,12 +110,12 @@ RUN.eval_unseen_snr             = false;   % B4  : detector at Eb/N0 never seen 
 
 
 % ---- Phase C: closed-loop recovery ----
-RUN.train_dqn                   = true;    % C2  : train DQN over CFG.dqn_seeds seeds, full-action targets, keep the best (~15min, D29/D35/D36)
+RUN.train_dqn                   = false;   % C2  : train DQN over CFG.dqn_seeds seeds, full-action targets, keep the best (~8min, D29/D35/D36)
 RUN.run_closed_loop             = false;  % C3  : legacy MVP loop (legacy/), superseded by C3d and C3e
-RUN.run_closed_loop_diagnostic  = true;    % C3d : Eb/N0 sweep x CFG.mc_repeats, BER/PLR/goodput + 95% CIs (~80-100min, D35)
-RUN.eval_speed_robustness       = true;    % C3s : detection/decision/recovery vs UAV speed 50-120 km/h (~30-60min)
+RUN.run_closed_loop_diagnostic  = false;   % C3d : Eb/N0 sweep x CFG.mc_repeats, BER/PLR/goodput + 95% CIs (~17min, D35)
+RUN.eval_speed_robustness       = false;   % C3s : detection/decision/recovery vs UAV speed 50-120 km/h (~30-60min)
 RUN.run_closed_loop_episodes    = true;    % C3e : episodic loop, dwell/hysteresis, recovery time in cycles (~25min, D31)
-RUN.eval_combined_threats       = true;    % C3m : combined threats + unknown gating, detection and decisions (~10min, D32)
+RUN.eval_combined_threats       = false;   % C3m : combined threats + unknown gating, detection and decisions (~10min, D32)
 RUN.eval_ood_detection          = false;  % OOD : leave-one-threat-out, retrains the detector 8 times (~60min, D32)
 
 % ---- Phase EXP: deep countermeasure exploration ----
@@ -123,12 +126,12 @@ RUN.analyze_exploration_results = false;  % EXP-analysis: legitimacy filter + di
 RUN.map_survivability           = false;   % SURV: action-based Map A/B + gap analysis (~70-80min, D30)
 
 % ---- Phase KPI: proposal measurement (section 5 / ה) ----
-RUN.measure_far                 = true;    % KPI4 : FAR on non-hostile classes, SNR-swept (~5min)
-RUN.measure_kpi3                = true;    % KPI3 : DQN vs rule decision latency (fast, needs C3-diag)
-RUN.measure_all_kpis            = true;    % KPI  : aggregate all 5 with CIs + FAR bound into kpi_summary.txt (fast)
+RUN.measure_far                 = false;   % KPI4 : FAR on non-hostile classes, SNR-swept (~5min)
+RUN.measure_kpi3                = false;   % KPI3 : DQN vs rule decision latency (fast, needs C3-diag)
+RUN.measure_all_kpis            = false;   % KPI  : aggregate all 5 with CIs + FAR bound into kpi_summary.txt (fast)
 
 % ---- Phase DASH: results dashboard (deliverable #1) ----
-RUN.build_dashboard             = true;    % DASH : 7-panel summary PNG (fast, needs B3+C3d+FAR+SURV)
+RUN.build_dashboard             = false;   % DASH : 7-panel summary PNG (fast, needs B3+C3d+FAR+SURV)
 
 fprintf('========================================================\n');
 fprintf('  UAV-GCS ADAPTIVE SECURE COMMS - MASTER PIPELINE\n');
