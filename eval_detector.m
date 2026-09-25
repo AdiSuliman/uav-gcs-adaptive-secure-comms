@@ -121,7 +121,24 @@ fprintf(' %g dB %.1f%% |', [unique_snrs(:)'; f1_vs_snr(:)']);
 fprintf('\nKPI #1 threshold: macro-F1 >= 90%% from %g dB up; macro-F1 above it %.2f%%\n', thr_db, f1_above);
 fprintf('Action-equivalent accuracy: %.2f%% (class accuracy %.2f%%)\n', 100*mean(act_ok), 100*mean(Y_test == Y_pred));
 
-%% 6. Save numeric results for downstream KPI aggregation (does not affect anything above)
+%% 5c. 95% bootstrap confidence intervals (D35)
+% Resamples the test set with replacement; a local stream keeps the global
+% generator untouched.
+N_BOOT = 1000;
+bs = RandStream('mt19937ar', 'Seed', 7);
+nT = numel(Y_test);
+boot = nan(N_BOOT, 3);
+for b = 1:N_BOOT
+    ix = randi(bs, nT, nT, 1);
+    yt = Y_test(ix); yp = Y_pred(ix); ab = above(ix);
+    boot(b, :) = 100 * [mean(yt == yp), macro_f1_of(yt, yp, classes), macro_f1_of(yt(ab), yp(ab), classes)];
+end
+ci = prctile_cols(boot, [2.5 97.5]);
+ci95 = struct('n_boot', N_BOOT, 'accuracy', ci(:, 1)', 'macro_f1', ci(:, 2)', 'macro_f1_above', ci(:, 3)');
+fprintf('95%% bootstrap CI: accuracy [%.2f, %.2f] | macro-F1 [%.2f, %.2f] | macro-F1 above threshold [%.2f, %.2f]\n', ...
+    ci95.accuracy, ci95.macro_f1, ci95.macro_f1_above);
+
+%% 6. Save numeric results for downstream KPI aggregation
 snr_breakdown = struct('snr_db', num2cell(unique_snrs), 'accuracy_pct', num2cell(100*acc_vs_snr), ...
     'macro_f1_pct', num2cell(f1_vs_snr));
 metrics = struct( ...
@@ -134,7 +151,8 @@ metrics = struct( ...
     'conf_mat', conf_mat, ...
     'snr_breakdown', snr_breakdown, ...
     'kpi1_threshold_db', thr_db, 'macro_f1_above_threshold_pct', f1_above, ...
-    'action_equiv_accuracy_pct', 100*mean(act_ok), 'action_equiv_per_class_pct', act_acc_class);
+    'action_equiv_accuracy_pct', 100*mean(act_ok), 'action_equiv_per_class_pct', act_acc_class, ...
+    'ci95', ci95);
 %% 7. Accuracy vs UAV speed (only when the dataset was generated with speed diversity)
 if isfield(sp.test, 'speed') && ~isempty(sp.test.speed)
     spd_test  = sp.test.speed(:);
@@ -157,7 +175,14 @@ end
 save('results/eval_detector_metrics.mat', 'metrics');
 fprintf('Saved results/eval_detector_metrics.mat (for KPI aggregation)\n');
 
-%% Local function
+%% Local functions
+function q = prctile_cols(X, pcts)
+% Percentiles of each column (nearest rank), no toolbox needed.
+X = sort(X, 1);
+n = size(X, 1);
+q = X(min(n, max(1, round(pcts(:) / 100 * n))), :);
+end
+
 function f = macro_f1_of(yt, yp, classes)
 cm = confusionmat(yt, yp, 'Order', classes);
 pr = diag(cm) ./ sum(cm, 1)';

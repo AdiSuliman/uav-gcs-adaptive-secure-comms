@@ -1,4 +1,4 @@
-%% EVAL_UNSEEN_SNR.m — detector generalization to Eb/N0 never seen in training (D34)
+,%% EVAL_UNSEEN_SNR.m — detector generalization to Eb/N0 never seen in training (D34)
 % Proposal mitigation 4: "test generalization on SNR values not included in
 % training". The dataset uses Eb/N0 = 0:2:10 dB; this script generates fresh
 % frames with the dataset's own recipe (every threat at all 5 severity levels,

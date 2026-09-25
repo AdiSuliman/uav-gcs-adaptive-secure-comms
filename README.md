@@ -36,19 +36,19 @@ An AI-driven closed-loop system for detecting and adapting to link-layer threats
 │   ├── UAV_GCS_Rician_Link.slx   # A3: fading + Doppler
 │   └── UAV_GCS_Threat_Link.slx   # A4-A6: threats + recovery
 ├── docs/
-│   └── DECISIONS.md              # Architecture Decision Record (D1-D34)
+│   └── DECISIONS.md              # Architecture Decision Record (D1-D36)
 ├── diagnostics/                  # Ad-hoc investigation scripts, kept for reproducibility
 ├── README.md                     # This file
 ├── PROJECT_LOG.md                # Living execution log — status, fix history, open issues
 ├── ROADMAP.md                    # Project timeline (original plan)
-├── [Phase scripts — root holds only the active pipeline, 36 files]
+├── [Phase scripts — root holds only the active pipeline, 37 files]
 │   ├── A: init_params.m, build_link_model.m, build_rician_model.m, build_threat_model.m, run_awgn_sweep.m, run_dataset_sweep.m, extract_spectrograms.m, visualize_spectrograms.m, extract_closed_loop_frames.m, quick_ber.m
 │   ├── B: prepare_data.m, train_detector.m, eval_detector.m, eval_unseen_snr.m
 │   ├── C: dqn_agent.m, build_dqn_state.m, train_dqn.m (also writes the countermeasure matrix), rule_based_policy.m, apply_countermeasure.m, recovery_vs_clean.m
 │   ├── C-eval: run_closed_loop_diagnostic.m, eval_speed_robustness.m, run_closed_loop_episodes.m + report_closed_loop_episodes.m, eval_combined_threats.m
 │   ├── Detection helpers: detect_frame.m, cnn_scores.m (probabilities, logits, MSP, energy), ood_thresholds.m, eval_ood_detection.m
 │   ├── SURV: map_survivability_boundary.m
-│   ├── KPI: measure_all_kpis.m, measure_kpi3_recovery_time.m, diagnose_far_measurement.m, build_kpi_dashboard.m
+│   ├── KPI: measure_all_kpis.m, measure_kpi3_recovery_time.m, diagnose_far_measurement.m, build_kpi_dashboard.m, stats_ci.m (t / Wilson 95% intervals)
 │   └── GUI: demo_gui.m
 └── legacy/                       # Kept for the record, not in the active pipeline (D33): CNN-LSTM study (D13, 5 files), pre-D28 EXP mechanism study (2 files), C3 MVP loop
 ```
@@ -60,7 +60,7 @@ An AI-driven closed-loop system for detecting and adapting to link-layer threats
 ## Quick Start
 
 1. **Setup:** MATLAB R2026a with Communications, DSP System, Deep Learning, RL toolboxes
-2. **Run the full pipeline:** `main.m` — toggle RUN flags to control which phases execute (see in-file presets: full clean run / results-only refresh / dashboard-only)
+2. **Run the full pipeline:** `main.m` — toggle RUN flags to control which phases execute (see in-file presets: full clean run / results-only refresh / steps 7+8 / dashboard-only). `CFG.mc_repeats` and `CFG.dqn_seeds` at the top set the Monte Carlo repeats of the closed loop and the number of DQN training seeds (both 5)
 3. **Live demo:** `demo_gui.m` — pick threat × Eb/N0 cells in the test matrix, set UAV speed (50–120 km/h, continuous) and severity, press Run; see `## Interactive Demo` below. Launch it from a **fresh MATLAB session** (or after `clear all; close all force; bdclose all`) — right after a full `main.m` run the leftover multi-GB workspace makes the UI sluggish
 4. **Explore:** `logs/run_*.txt` accumulates full console output (via `diary`)
 
@@ -68,8 +68,8 @@ An AI-driven closed-loop system for detecting and adapting to link-layer threats
 - Phase A (link + dataset): dataset generation ~102 min in the latest run (speed-diverse sweep: 270 Simulink model builds; the Doppler is baked into each build), spectrogram extraction ~3 min
 - Phase B (detector train): 5–15 min
 - Phase C1 (rule-based): < 1 min
-- Phase C2 (DQN train): ~27 min (measured 2026-09-21)
-- Phase C3 (closed-loop, both scripts): 4–8 min total
+- Phase C2 (DQN train): ~7 min for one seed (2026-09-23); ~15 min with 5 seeds (D35, estimate)
+- Phase C3-diag: ~15–20 min per repeat; ~80–100 min with 5 Monte Carlo repeats (D35, estimate)
 - Phase C3-speed (`eval_speed_robustness.m`): ~13 min (measured; 8 speeds × 3 SNR × 9 threats)
 - Phase EXP (deep countermeasure exploration): ~78 min (measured 77.8), run rarely
 - Phase KPI (FAR + aggregation): ~5 min
@@ -119,6 +119,16 @@ Both policies decide from the same detector output and link measurements and act
 - **DQN vs rule (link-quality half of KPI #3):** rule 84.4% recovery, 31/42 restored, mean goodput 0.79; DQN 82.8%, 30/42, mean goodput 0.91. Per run: rule better link in 7, DQN in 2, within 10% in 33. This is the trade-off the reward encodes (rate reduction costs 22.5 of 100 points): the DQN gives up some link quality on noise_burst to keep throughput. It also shows the DQN's one weak cell — path_loss at 10 dB, where it chose spatial_diversity (27.8× clean) instead of rate_reduce (gate regret 11).
 - **Detection error:** antenna_fault at 0 dB was misdetected as sweeping_jammer (46% confidence). The rule applied the sweeping action (freq_diversity, no effect on an antenna fault); the DQN chose spatial_diversity and restored the link (1.01× clean). Its Q-values for spatial and rate_reduce were nearly tied (41.9 vs 41.7), and spatial is also its policy for a sweeping jammer at 0 dB, so this is a single, fortunate case rather than an established robustness advantage.
 - Detection 53/54 (98.1%); agreement 34/54 (63.0%); decision latency mean 12.1 / median 11.4 ms (CNN 10.9 + DQN 1.3 ms).
+
+### Steps 7–8 — KPI reporting and Monte Carlo confidence intervals (D35, 2026-09-25)
+- **Closed loop, Monte Carlo:** `run_closed_loop_diagnostic.m` repeats every (threat, Eb/N0) cell `CFG.mc_repeats` = 5 times with different seeds (AWGN and bit source seeded per run; before/after sims of one run share a seed). Headline numbers are means over repeats with a Student-t 95% CI over the per-repeat values; pooled proportions carry a Wilson 95% CI. The DQN − rule recovery difference is paired per repeat, so its interval says whether the gap is real.
+- **Packet loss (KPI #2 as worded):** a frame is lost when its BER > 0.1 (the detector's own PLR feature, no FEC). Reported: PLR before/after per cell, PLR restored (after ≤ clean + 0.05), PLR recovery vs clean.
+- **Goodput as a trade-off:** goodput kept = goodput factor of the action × (1 − PLR after) / (1 − PLR clean), for DQN, rule and no action; `results/closed_loop_plr_goodput.png` plots recovery against goodput per threat.
+- **KPI #4 as worded:** FAR per Eb/N0 and pooled above the KPI #1 threshold, over healthy-link trials, with Wilson intervals; bound: FAR ≤ 5% with the 95% upper limit below 5%.
+- **Detector:** 1,000-resample bootstrap CI for accuracy, macro-F1 and macro-F1 above the threshold (`eval_detector.m`). The eight leave-one-threat-out retrainings (D32) already show the spread across trainings (known-class accuracy 95.2–98.3%).
+- **DQN seeds:** 5 trainings on the same reward table; each passes the validation gate; the saved agent is the lowest-mean-regret seed; per-seed regret and the cells where seeds disagree are in `results/dqn_seed_stability.txt`.
+- **Episodes (KPI #3):** recovered share and mean T_recover per configuration with 95% intervals in `kpi_summary.txt`.
+- **D35 results:** KPI #2 DQN 80.9% [79.9, 82.0] vs rule 85.0% [82.4, 87.5]; BER restored 152/210, PLR restored 134/210; goodput kept DQN 77.7% vs rule 74.7% vs 20.4% without action; FAR 0/120, 95% upper limit 3.1% (MET); detector accuracy 96.41% [95.67, 97.07]; latency 10.3 ms mean. The DQN − rule gap (−4.0 [−5.7, −2.4]) came from path_loss, where every seed under-learned rate_reduce; fixed in D36 (full-action targets), re-run pending.
 
 ### Phase C3-speed — Robustness vs UAV speed (2026-09-24)
 | Speed (km/h) | 50.0 | 57.3 | 66.8 | 72.0 | 84.6 | 97.2 | 108.9 | 120.0 |
@@ -289,7 +299,7 @@ See `PROJECT_LOG.md` for the full fix history and session-by-session detail behi
 ## Known Issues & Future Work
 
 **Open items:**
-- **Improvement plan in progress (Session 12):**  KPIs above an SNR threshold, Monte Carlo confidence intervals, GUI performance.
+- **Improvement plan in progress (Session 12):** steps 7–8 (PLR/goodput KPI reporting, FAR bound above the SNR threshold, Monte Carlo CIs, DQN seeds) are code-complete (D35), MATLAB run pending; next: GUI performance and a continuous episode view (step 9), documentation sync and a full `main.m` run (step 10).
 - **Dynamic/Chasing Jammer scenario** (priority) — an adversary that reacts to the system's countermeasures, needed to let the DQN demonstrate a real decision-quality advantage over the static rule-based policy (see KPI #3 discussion above). Planned, not yet built.
 - A small number of report figure placeholders need real source images (suggestions provided, final selection pending)
 - `demo_gui.m` v3 (D26) — rebuilt and delivered; verified only by a syntax parse and helper-function tests outside MATLAB, so live-use feedback and small layout fixes are still expected. A slow-startup report on 2026-09-22 was addressed (norm-stats cache; launch from a fresh session)
@@ -297,16 +307,16 @@ See `PROJECT_LOG.md` for the full fix history and session-by-session detail behi
 - **antenna_fault** — weakest detection class (92.8% recall; the 0 dB closed-loop run is often misdetected at low confidence); recovery itself is 99% once the correct action is taken.
 - **Decision latency** — ~10–11 ms median across three independent runs (10.05, 9.99, 11.44 ms). The D23 figure (6.09 ms) belongs to the previous build.
 - **Speed diversity** — the DQN state has no Doppler input and its reward table and the survivability map are built at the nominal 72 km/h; detection and the closed loop are speed-swept (flat).
-- `main.m` prints a hard-coded CHECKPOINT line at the end (old numbers); the authoritative numbers are in `results/kpi_summary.txt` and `results/kpi_dashboard.png`.
+- The authoritative numbers are in `results/kpi_summary.txt` and `results/kpi_dashboard.png`; `main.m` points there at the end instead of printing fixed numbers.
 
 **Future work:**
 - Sim-to-real validation (SDR testbed) — see Modeling Assumptions above for the specific gaps this would need to close (BER estimation via EVM/CRC, real synthesizer switching time, PHY synchronization)
 - Combined countermeasures for combined attacks (one action per decision today)
 - Online reinforcement learning
 - FPGA/GPU acceleration
-- **DQN weak cell:** path_loss at 10 dB (spatial_diversity chosen, 27.8× clean, where rate_reduce gives ~4–7×); passed the gate with regret 11. Candidate for more training or a finer reward.
+- **DQN weak cell:** path_loss at 10 dB (spatial_diversity chosen, 27.8× clean, where rate_reduce gives ~4–7×); passed the gate with regret 11. Since D35 the DQN is trained over 5 seeds and `results/dqn_seed_stability.txt` shows whether this cell is a seed effect or a property of the reward.
 - Transition-cost-aware reward shaping (Liu et al.'s λδ term), not currently implemented
-- Monte Carlo FAR estimation at tens-of-thousands of frames per condition, for industrial-grade statistical resolution
+- FAR estimation at tens of thousands of frames per condition (the current 95% upper limits are 2–6%, set by the number of trials)
 
 ---
 

@@ -17,8 +17,9 @@
 % All flags default to FALSE (everything is already generated) -- turn on only
 % what you need to regenerate.
 %
-% Runtimes (RTX 4070): A5 ~30-40min, A6 ~5min, B2 ~10min, C2 ~10-15min,
-% C3-diag ~15-20min, EXP ~75-86min (VERY HEAVY), everything else < 5min.
+% Runtimes (RTX 4070): A5 ~30-40min, A6 ~5min, B2 ~10min, C2 ~15min (5 seeds),
+% C3-diag ~80-100min (5 Monte Carlo repeats), C3-speed ~30-60min, C3-episodes ~25min,
+% SURV ~70-80min, EXP ~75-86min (VERY HEAVY), everything else < 10min.
 %
 % DEPENDENCIES (what must exist before a stage can run):
 %   A6 needs A5 | B1 needs A6 | B2 needs B1 | B3 needs B2
@@ -56,7 +57,7 @@ fprintf('(This file will contain EVERYTHING printed below, even across clc calls
 %  ================================================================
 %  QUICK PRESETS — copy the block you want over the flags below:
 %
-%  FULL CLEAN RUN (everything from scratch, ~3 hours incl. EXP):
+%  FULL CLEAN RUN (everything from scratch, ~7-8 hours incl. SURV and EXP):
 %    all A/B/C/EXP/SURV/KPI/DASH flags = true
 %
 %  RESULTS-ONLY REFRESH (models already trained, ~25 min):
@@ -69,34 +70,49 @@ fprintf('(This file will contain EVERYTHING printed below, even across clc calls
 %    measure_far, measure_kpi3, measure_all_kpis, build_dashboard = true;
 %    everything else (train_dqn, EXP, SURV, validate/check A) = false
 %
+%  STEPS 7+8 (KPI reporting with PLR/goodput + Monte Carlo CIs, D35; ~3-3.5 hours):
+%    eval_detector, train_dqn, run_closed_loop_diagnostic, eval_speed_robustness,
+%    run_closed_loop_episodes, eval_combined_threats, measure_far, measure_kpi3,
+%    measure_all_kpis, build_dashboard = true; rest = false
+%    (train_dqn saves a new agent, so every stage that uses the DQN is rerun)
+%
+%  D36 DQN RETRAIN (full-action targets; ~3 hours):
+%    train_dqn, run_closed_loop_diagnostic, eval_speed_robustness,
+%    run_closed_loop_episodes, eval_combined_threats, measure_far, measure_kpi3,
+%    measure_all_kpis, build_dashboard = true; rest = false
+%
 %  DASHBOARD-ONLY (all results exist, < 1 min):
 %    build_dashboard = true; rest = false
 %% ================================================================
 
+% ---- Monte Carlo / seeds (D35) ----
+CFG.mc_repeats = 5;    % C3d: independent repeats per (threat, Eb/N0); CIs are over these
+CFG.dqn_seeds  = 5;    % C2 : DQN trainings; the best gate-passing seed is saved
+
 % ---- Phase A: link + threats + dataset ----
 addpath(fullfile(fileparts(mfilename('fullpath')), 'legacy'));   % LSTM study, EXP study, C3 MVP (D33)
 
-RUN.init                        = true;   % A0  : regenerate params.mat
-RUN.validate_A                  = true;   % A1-A3: build+validate AWGN & Rician links (fast)
-RUN.check_A4                    = true;   % A4  : build threat model + sanity BER (fast)
-RUN.build_dataset               = true;   % A5  : full dataset sweep (HEAVY ~30-40min)
-RUN.extract_spectrograms        = true;   % A6  : spectrograms + 7 features (~5min)
+RUN.init                        = false;   % A0  : regenerate params.mat
+RUN.validate_A                  = false;   % A1-A3: build+validate AWGN & Rician links (fast)
+RUN.check_A4                    = false;   % A4  : build threat model + sanity BER (fast)
+RUN.build_dataset               = false;   % A5  : full dataset sweep (HEAVY ~30-40min)
+RUN.extract_spectrograms        = false;   % A6  : spectrograms + 7 features (~5min)
 
 
 % ---- Phase B: detection (CNN baseline) ----
-RUN.prepare_data                = true;   % B1  : stratified 80/10/10 split (~1min)
-RUN.train_detector              = true;   % B2  : train CNN+scalar hybrid (~10min)
-RUN.eval_detector               = true;   % B3  : test eval + confusion/accuracy-vs-SNR (~1min)
-RUN.eval_unseen_snr             = true;   % B4  : detector at Eb/N0 never seen in training, 1,3,5,7,9 dB (~25min, D34)
+RUN.prepare_data                = false;   % B1  : stratified 80/10/10 split (~1min)
+RUN.train_detector              = false;   % B2  : train CNN+scalar hybrid (~10min)
+RUN.eval_detector               = false;   % B3  : test eval + confusion/accuracy-vs-SNR + bootstrap CIs (~2min, D35)
+RUN.eval_unseen_snr             = false;   % B4  : detector at Eb/N0 never seen in training, 1,3,5,7,9 dB (~25min, D34)
 
 
 % ---- Phase C: closed-loop recovery ----
-RUN.train_dqn                   = true;   % C2  : train DQN, reward over threat x action x Eb/N0 (~7min, D29)
+RUN.train_dqn                   = true;    % C2  : train DQN over CFG.dqn_seeds seeds, full-action targets, keep the best (~15min, D29/D35/D36)
 RUN.run_closed_loop             = false;  % C3  : legacy MVP loop (legacy/), superseded by C3d and C3e
-RUN.run_closed_loop_diagnostic  = true;   % C3d : full SNR sweep + timing + Q-values (~15-20min)
-RUN.eval_speed_robustness       = true;   % C3s : detection/decision/recovery vs UAV speed 50-120 km/h (~30-60min)
-RUN.run_closed_loop_episodes    = true;   % C3e : episodic loop, dwell/hysteresis, recovery time in cycles (~25min, D31)
-RUN.eval_combined_threats       = true;   % C3m : combined threats + unknown gating, detection and decisions (~10min, D32)
+RUN.run_closed_loop_diagnostic  = true;    % C3d : Eb/N0 sweep x CFG.mc_repeats, BER/PLR/goodput + 95% CIs (~80-100min, D35)
+RUN.eval_speed_robustness       = true;    % C3s : detection/decision/recovery vs UAV speed 50-120 km/h (~30-60min)
+RUN.run_closed_loop_episodes    = true;    % C3e : episodic loop, dwell/hysteresis, recovery time in cycles (~25min, D31)
+RUN.eval_combined_threats       = true;    % C3m : combined threats + unknown gating, detection and decisions (~10min, D32)
 RUN.eval_ood_detection          = false;  % OOD : leave-one-threat-out, retrains the detector 8 times (~60min, D32)
 
 % ---- Phase EXP: deep countermeasure exploration ----
@@ -104,15 +120,15 @@ RUN.explore_countermeasures     = false;  % EXP : pre-D28 mechanism study (~78mi
 RUN.analyze_exploration_results = false;  % EXP-analysis: legitimacy filter + diagnosis (fast)
 
 % ---- Phase SURV: survivability boundary mapping (deliverable #7) ----
-RUN.map_survivability           = true;   % SURV: action-based Map A/B + gap analysis (~70-80min, D30)
+RUN.map_survivability           = false;   % SURV: action-based Map A/B + gap analysis (~70-80min, D30)
 
 % ---- Phase KPI: proposal measurement (section 5 / ה) ----
-RUN.measure_far                 = true;   % KPI4 : FAR on non-hostile classes, SNR-swept (~5min)
-RUN.measure_kpi3                 = true;   % KPI3 : DQN vs rule decision latency (fast, needs C3-diag)
-RUN.measure_all_kpis            = true;   % KPI  : aggregate all 5 into kpi_summary.txt (fast)
+RUN.measure_far                 = true;    % KPI4 : FAR on non-hostile classes, SNR-swept (~5min)
+RUN.measure_kpi3                = true;    % KPI3 : DQN vs rule decision latency (fast, needs C3-diag)
+RUN.measure_all_kpis            = true;    % KPI  : aggregate all 5 with CIs + FAR bound into kpi_summary.txt (fast)
 
 % ---- Phase DASH: results dashboard (deliverable #1) ----
-RUN.build_dashboard             = true;   % DASH : 7-panel summary PNG (fast, needs B3+C3d+FAR+SURV)
+RUN.build_dashboard             = true;    % DASH : 7-panel summary PNG (fast, needs B3+C3d+FAR+SURV)
 
 fprintf('========================================================\n');
 fprintf('  UAV-GCS ADAPTIVE SECURE COMMS - MASTER PIPELINE\n');
@@ -226,6 +242,7 @@ end
 fprintf('  [C] Pipeline status:\n');
 report_file('data/trained_dqn.mat',                     '      trained_dqn.mat        ', 'train_dqn');
 report_file('results/closed_loop_results.png',          '      C3 closed-loop results ', 'run_closed_loop');
+report_file('results/dqn_seed_stability.txt',          '      C2 seed stability      ', 'train_dqn');
 report_file('results/closed_loop_diagnostic_report.txt','      C3-diag full report    ', 'run_closed_loop_diagnostic');
 report_file('results/speed_robustness.txt',             '      C3-speed robustness    ', 'eval_speed_robustness');
 fprintf('\n');
@@ -304,8 +321,8 @@ fprintf('  [D3] Defense presentation (pptx)...                  [PENDING]\n\n');
 %% ========== CHECKPOINT ==========
 fprintf('========================================================\n');
 fprintf(' CHECKPOINT - full pipeline available from main.m\n');
-fprintf(' Current verified results: CNN 96.99%% | closed-loop 100%% | recovery 74.6%% | FAR 0%% | latency 2.67ms\n');
-fprintf(' Survivability Map A 84.6%% / Map B 87.9%% recoverable (deliverable #7)\n');
+fprintf(' Headline numbers with 95%% CIs: results/kpi_summary.txt (D35)\n');
+fprintf(' Survivability maps: results/survivability_boundary_mapA.txt / mapB.txt (deliverable #7)\n');
 fprintf(' Outputs in results/, data/ | models in models/ | code on GitHub\n');
 fprintf(' Full run log saved to: %s\n', log_filename);
 fprintf('========================================================\n\n');

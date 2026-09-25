@@ -598,6 +598,19 @@ Merged detection path reproduces the previous combined-threat numbers; with D33 
 ### D34 — detector quality by measurement (improvement 6, code complete)
 New `eval_unseen_snr.m` (Eb/N0 1,3,5,7,9 dB vs the training grid, same generator and run). `eval_detector.m`: macro-F1 per Eb/N0, KPI #1 threshold, action-equivalent accuracy; `measure_all_kpis.m` reports them. reactive_jamming and transition windows documented rather than retrained (see D34). Pending: MATLAB run.
 
-### Next
-Run `eval_detector`, `eval_unseen_snr` (~25 min), `measure_all_kpis`; commit D34. Then improvement (7): remaining KPI reporting (PLR, FAR above the threshold).
+### D34 results (2026-09-25)
+KPI #1 threshold 0 dB (macro-F1 91.3% at 0 dB, ≥ 90% at every Eb/N0); macro-F1 above it 96.39%; action-equivalent accuracy 97.84%. Unseen Eb/N0 (1,3,5,7,9 dB) 97.3% vs 96.6% on the training grid in the same run. Committed.
 
+### D35 — steps 7+8: KPI reporting as worded, Monte Carlo CIs, DQN seeds (code complete)
+`run_closed_loop_diagnostic.m` rewritten: 5 seeded repeats per (threat, Eb/N0), PLR before/after/rule, goodput kept, t and Wilson 95% intervals, paired DQN − rule difference, seed-effect warning, new figure `closed_loop_plr_goodput.png`. `train_dqn.m`: 5 seeds, gate per seed, best-regret selection, `results/dqn_seed_stability.txt`. `eval_detector.m`: bootstrap CIs. `measure_all_kpis.m`: CIs, PLR, goodput, FAR per Eb/N0 and pooled above the KPI #1 threshold against a 5% bound, episode intervals, seed summary. Dashboard and GUI KPI tab moved to the D27 metric with means over repeats. New `stats_ci.m`. `main.m`: `CFG` block and the steps 7+8 preset (~3–3.5 h).
+Predictions before the run: KPI #2 DQN ≈ 80–85% with an interval of a few points; rule ≈ 83–86%; DQN − rule interval contains 0 or is slightly negative; goodput kept higher for the DQN; PLR restored for jamming/reactive/spoofing/antenna_fault at every Eb/N0, not for noise_burst and path_loss at high Eb/N0; FAR 0 events and a pooled upper limit ≈ 3% (MET); detector bootstrap interval about ±0.7 points; most cells identical across DQN seeds, disagreement concentrated at path_loss/noise_burst near the 2× boundary.
+
+### D35 results (2026-09-25)
+Seeds worked (per-repeat values differ; no warning). KPI #2 DQN 80.9% [79.9, 82.0], rule 85.0% [82.4, 87.5], DQN − rule −4.0 [−5.7, −2.4] (rule better, significant). BER restored 152/210 (72.4% [66.0, 78.0]); PLR restored 134/210; goodput kept DQN 77.7% vs rule 74.7% vs no action 20.4%. Detection in the loop 267/270. Latency 10.29 ms mean, 9.80 median, 12.58 p95. FAR 0/120 healthy-link trials, 95% upper limit 3.1% → MET. Detector bootstrap: accuracy [95.67, 97.07]. Episodes: DQN 61/90 = 68% [58, 77], rule 72/94 = 77% [67, 84]. DQN seeds: 4/5 passed the gate (seed 42 left noise_burst at 0 dB untouched, regret 78); mean regret 3.4 [2.0, 4.9]; 32/54 cells unanimous. Predictions held except DQN − rule (predicted to contain 0). Cause: path_loss (DQN 36.4% vs rule 69.0%) — all seeds chose spatial_diversity where the reward prefers rate_reduce → D36.
+Clean PLR at 0–2 dB is 0.68 / 0.47 (clean BER 0.125 / 0.081 is near the 0.1 loss threshold), so PLR restoration at 0–2 dB is judged against a lossy reference.
+
+### D36 — full-action DQN targets, stricter gate (code complete)
+`train_dqn.m`: each sample trains all five Q-values toward the measured table rewards; gate fails regret > 10 where action is needed; seed failures listed. `stats_ci.m`: optional clipping to the metric's range, applied in the diagnostic, KPI summary, dashboard and GUI. `main.m`: D36 preset. Pending: MATLAB run (~3 h).
+
+### Next
+Run the D36 preset, check the expectations in D36, commit D35+D36. Then step 9 (GUI performance, continuous episode view) and step 10 (documentation sync, full `main.m` run with the light figure theme).

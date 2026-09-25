@@ -95,27 +95,25 @@ if have_cl
     snr_pts = unique([cl.snr_db]);
     hold(ax3,'on');
     real_threats = threats(~ismember(threats,{'none','benign_interference'}));
-    useClean = isfield(cl, 'rec_vs_clean');   % D27 metric; older result files fall back
     for t = 1:numel(real_threats)
-        rec = nan(1,numel(snr_pts));
+        mu = nan(1,numel(snr_pts)); lo = mu; hi = mu;
         for s = 1:numel(snr_pts)
             m = strcmp({cl.threat},real_threats{t}) & [cl.snr_db]==snr_pts(s);
-            if any(m)
-                if useClean, rec(s) = cl(m).rec_vs_clean; else, rec(s) = cl(m).recovery_pct; end
-            end
+            [mu(s), lo(s), hi(s)] = stats_ci('t', [cl(m).rec_vs_clean], [-Inf 100]);
         end
-        plot(ax3, snr_pts, rec, '-o','LineWidth',1.3,'MarkerSize',4, ...
-            'DisplayName', strrep(real_threats{t},'_','\_'));
+        if any(~isnan(lo))
+            lo(isnan(lo)) = mu(isnan(lo)); hi(isnan(hi)) = mu(isnan(hi));
+            errorbar(ax3, snr_pts, mu, mu-lo, hi-mu, '-o','LineWidth',1.2,'MarkerSize',4,'CapSize',3, ...
+                'DisplayName', strrep(real_threats{t},'_','\_'));
+        else
+            plot(ax3, snr_pts, mu, '-o','LineWidth',1.3,'MarkerSize',4, ...
+                'DisplayName', strrep(real_threats{t},'_','\_'));
+        end
     end
     hold(ax3,'off'); grid(ax3,'on');
     xlabel(ax3,'E_bN_0 (dB)');
-    if useClean
-        ylabel(ax3,'Recovery vs clean link (%)'); ylim(ax3,[0 100]);
-        title(ax3,'KPI #2: Recovery vs SNR (vs no-attack link)','FontSize',10);
-    else
-        ylabel(ax3,'BER Recovery (%)');
-        title(ax3,'Recovery vs SNR (real threats)','FontSize',10);
-    end
+    ylabel(ax3,'Recovery vs clean link (%)'); ylim(ax3,[-10 105]);
+    title(ax3,sprintf('KPI #2: recovery vs no-attack link (%d repeats, 95%% CI)', numel(unique([cl.mc]))),'FontSize',10);
     legend(ax3,'Location','southeast','FontSize',6);
     xticks(ax3,snr_pts);
 else
@@ -180,24 +178,21 @@ if have_metrics
 end
 if have_cl
     real_m = ~ismember({cl.threat},{'none','benign_interference'});
-    if isfield(cl, 'rec_vs_clean')
-        act_m = real_m & ~[cl.missed];
-        mr = mean([cl(act_m).rec_vs_clean],'omitnan');
-        r2 = [cl(act_m).ratio_clean];
-        lines{end+1} = sprintf('KPI2  Recovery:    %.1f%% vs clean (%d/%d restored)  \\color[rgb]{0.2,0.65,0.25}PASS', ...
-            mr, sum(r2 <= 2), numel(r2));
-    else
-        mr = mean([cl(real_m).recovery_pct],'omitnan');
-        lines{end+1} = sprintf('KPI2  Recovery:    %.1f%%  \\color[rgb]{0.2,0.65,0.25}PASS', mr);
-    end
+    [mr, mlo, mhi] = stats_ci('t', arrayfun(@(k) mean([cl(real_m & [cl.mc]==k).rec_vs_clean],'omitnan'), unique([cl.mc])), [0 100]);
+    r2 = [cl(real_m).ratio_clean];
+    if isnan(mlo), ci_s = ''; else, ci_s = sprintf(' [%.0f-%.0f]', mlo, mhi); end
+    lines{end+1} = sprintf('KPI2  Recovery:    %.1f%%%s, %d/%d restored  \\color[rgb]{0.2,0.65,0.25}PASS', ...
+        mr, ci_s, sum(r2 <= 2), numel(r2));
+    lines{end+1} = sprintf('      PLR restored %d/%d | goodput kept %.0f%%', ...
+        sum([cl(real_m).plr_ok]), sum(real_m), 100*mean([cl(real_m).gp_kept]));
     lines{end+1} = sprintf('KPI3  Latency:     %.2f ms \\color[rgb]{0.2,0.65,0.25}PASS', ...
         mean([cl.cnn_latency_ms]+[cl.dqn_latency_ms]));
 end
 if have_far
     n_fa = sum([far.false_alarm]); n_all = numel(far);
-    far_pct = 100*n_fa/n_all;
-    verdict = '\color[rgb]{0.2,0.65,0.25}PASS'; if far_pct>5, verdict='\color[rgb]{0.8,0.2,0.2}CHECK'; end
-    lines{end+1} = sprintf('KPI4  FAR:         %.1f%%  %s', far_pct, verdict);
+    [pf, ~, hf] = stats_ci('wilson', n_fa, n_all);
+    verdict = '\color[rgb]{0.2,0.65,0.25}PASS'; if 100*hf > 5, verdict = '\color[rgb]{0.8,0.2,0.2}CHECK'; end
+    lines{end+1} = sprintf('KPI4  FAR:         %.1f%% (95%% upper %.1f%%)  %s', 100*pf, 100*hf, verdict);
 end
 if have_cl
     lines{end+1} = 'KPI5  End-to-end:  \color[rgb]{0.2,0.65,0.25}MET';

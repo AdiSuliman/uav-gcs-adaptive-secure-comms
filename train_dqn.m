@@ -4,7 +4,12 @@
 % Reward = link state against the clean link (D27) minus the action's cost;
 % acting on a healthy non-hostile link is a false alarm. Episodes sample
 % (threat, Eb/N0) cells and real per-frame link states, so no simulation runs
-% inside the training loop. A validation gate checks every cell before saving.
+% inside the training loop. Training is repeated over CFG.dqn_seeds seeds
+% (default 5); every seed passes through the validation gate and the best
+% gate-passing seed is saved, with the seed spread in results/dqn_seed_stability.txt.
+% Every action's reward is measured per cell, so each sample trains all five
+% Q-values (full-action targets); the gate also rejects regret > 10 where
+% action is needed.
 close all; clc;
 fprintf('=== C2: Train DQN Agent ===\n\n');
 
@@ -161,21 +166,141 @@ end
 saveas(fig0, 'results/dqn_reward_table.png'); close(fig0);
 fprintf('\nSaved results/dqn_reward_table.png\n\n');
 
-%% 4. Training: episodes sample (threat, Eb/N0) cells and real per-frame states
+%% 4. Training over several seeds (D35)
+% The same reward table and frame states are used for every seed; only the
+% network initialization, episode sampling and minibatch sampling change. Every seed
+% is validated; the saved agent is the gate-passing seed with the lowest mean
+% regret (ties: lowest maximum regret). Seed spread and per-cell agreement are
+% reported as the training-stability result.
+N_SEEDS = 5;
+if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'dqn_seeds'), N_SEEDS = CFG.dqn_seeds; end
+SEEDS = 42 + (0:N_SEEDS-1);
 N_EPISODES = 4000;
 P_UNKNOWN  = 0.10;                      % share of episodes with the class hidden (proposal risk 13)
 w = ones(1, num_threats);
 w(ismember(threat_list, {'antenna_fault', 'benign_interference', 'none'})) = 2;
 cw = cumsum(w) / sum(w);
 
+runs = struct('seed', {}, 'agent', {}, 'loss', {}, 'avg_reward', {}, 'chosen', {}, 'regret', {}, ...
+    'gate_pass', {}, 'fails', {});
+for k = 1:N_SEEDS
+    fprintf('--- Seed %d (%d/%d): training on %d episodes ---\n', SEEDS(k), k, N_SEEDS, N_EPISODES);
+    rng(SEEDS(k), 'twister');
+    [ag, loss_k, avgr_k] = train_agent(dqn_agent(), frames, reward_table, threat_list, SNR_LIST, ...
+        N_EPISODES, P_UNKNOWN, cw);
+    [ch_k, rg_k, fails_k] = gate_agent(ag, frames, reward_table, ber_tab, clean, must_act, ...
+        threat_list, SNR_LIST, action_names, na);
+    runs(end+1) = struct('seed', SEEDS(k), 'agent', ag, 'loss', loss_k, 'avg_reward', avgr_k, ...
+        'chosen', {ch_k}, 'regret', rg_k, 'gate_pass', isempty(fails_k), 'fails', {fails_k}); %#ok<SAGROW>
+    fprintf('    mean regret %.1f | max %.0f | cells > 10: %d | gate %s\n', mean(rg_k(:)), max(rg_k(:)), ...
+        sum(rg_k(:) > 10), ternary(isempty(fails_k), 'PASS', sprintf('FAIL (%d cells)', numel(fails_k))));
+end
+
+%% 5. Seed selection and stability
+mean_regret = arrayfun(@(r) mean(r.regret(:)), runs);
+max_regret  = arrayfun(@(r) max(r.regret(:)), runs);
+gate_ok = [runs.gate_pass];
+if ~any(gate_ok)
+    for k = 1:N_SEEDS
+        fprintf('Seed %d gate failures:\n', runs(k).seed); fprintf('  %s\n', runs(k).fails{:});
+    end
+    error('Validation gate FAILED for every seed -- NOT saving trained_dqn.mat.');
+end
+score = mean_regret + 1e-3 * max_regret;
+score(~gate_ok) = inf;
+[~, best] = min(score);
+agent = runs(best).agent;
+chosen_tab = runs(best).chosen;
+regret = runs(best).regret;
+training_loss = runs(best).loss;
+avg_rewards_per_episode = runs(best).avg_reward;
+
+unanimous = true(num_threats, nS);
+for ti = 1:num_threats
+    for s = 1:nS
+        acts = arrayfun(@(r) r.chosen{ti, s}, runs, 'UniformOutput', false);
+        unanimous(ti, s) = all(strcmp(acts, acts{1}));
+    end
+end
+seed_summary = struct('seeds', SEEDS, 'mean_regret', mean_regret, 'max_regret', max_regret, ...
+    'gate_pass', gate_ok, 'selected', best, 'selected_seed', SEEDS(best), ...
+    'cells_unanimous', sum(unanimous(:)), 'cells_total', numel(unanimous), 'unanimous', unanimous, ...
+    'chosen_per_seed', {arrayfun(@(r) r.chosen, runs, 'UniformOutput', false)}, ...
+    'regret_per_seed', {arrayfun(@(r) r.regret, runs, 'UniformOutput', false)});
+
+rep = {};
+rep{end+1} = '=== DQN TRAINING SEEDS (D35) ===';
+rep{end+1} = sprintf('Generated: %s | %d seeds x %d episodes, same reward table', datestr(now), N_SEEDS, N_EPISODES);
+rep{end+1} = sprintf('%-6s %12s %11s %14s %6s', 'seed', 'mean regret', 'max regret', 'cells > 10', 'gate');
+for k = 1:N_SEEDS
+    rg = runs(k).regret;
+    rep{end+1} = sprintf('%-6d %12.1f %11.0f %9d/%-4d %6s', runs(k).seed, mean_regret(k), max_regret(k), ...
+        sum(rg(:) > 10), numel(rg), ternary(gate_ok(k), 'PASS', 'FAIL')); %#ok<SAGROW>
+end
+for k = find(~gate_ok)
+    rep{end+1} = sprintf('Seed %d gate failures: %s', runs(k).seed, strjoin(runs(k).fails, '; ')); %#ok<SAGROW>
+end
+rep{end+1} = sprintf('Mean regret across seeds: %s (mean [95%% CI]) | selected seed %d', ...
+    stats_ci('fmt', mean_regret, [0 Inf]), SEEDS(best));
+rep{end+1} = sprintf('Cells where every seed picks the same action: %d/%d', sum(unanimous(:)), numel(unanimous));
+rep{end+1} = 'Cells where the seeds disagree (action per seed, regret per seed):';
+for ti = 1:num_threats
+    for s = 1:nS
+        if unanimous(ti, s), continue; end
+        acts = arrayfun(@(r) short_name(r.chosen{ti, s}), runs, 'UniformOutput', false);
+        rgs  = arrayfun(@(r) r.regret(ti, s), runs);
+        rep{end+1} = sprintf('  %-20s %4g dB: %s | regret %s', threat_list{ti}, SNR_LIST(s), ...
+            strjoin(acts, ', '), mat2str(round(rgs))); %#ok<SAGROW>
+    end
+end
+fid = fopen('results/dqn_seed_stability.txt', 'w');
+fprintf(fid, '%s\n', rep{:});
+fclose(fid);
+fprintf('\n%s\n', rep{:});
+fprintf('Saved results/dqn_seed_stability.txt\n');
+
+fprintf('\nSelected agent (seed %d), per cell:\n', SEEDS(best));
+fprintf('%-20s', 'threat'); fprintf('%22s', snr_hdr{:}); fprintf('\n');
+for ti = 1:num_threats
+    fprintf('%-20s', threat_list{ti});
+    for s = 1:nS
+        fprintf('%22s', sprintf('%s (regret %.0f)', short_name(chosen_tab{ti, s}), regret(ti, s)));
+    end
+    fprintf('\n');
+end
+fprintf('Mean regret %.1f | cells with regret > 10: %d/%d\nValidation gate PASSED.\n\n', ...
+    mean(regret(:)), sum(regret(:) > 10), numel(regret));
+
+%% 6. Save
+save('data/trained_dqn.mat', 'agent', 'reward_table', 'ber_tab', 'clean', 'SNR_LIST', ...
+    'threat_list', 'action_names', 'RW', 'gp', 'bw', 'regret', 'chosen_tab', 'seed_summary', '-v7.3');
+fprintf('Saved data/trained_dqn.mat\n');
+
+%% 7. Training curves
+fig = figure('Position', [100 100 900 400], 'Color', 'w');
+subplot(1, 2, 1);
+plot(training_loss, 'b-'); xlabel('Update'); ylabel('Q-loss'); title('DQN training loss'); grid on;
+subplot(1, 2, 2);
+plot((1:numel(avg_rewards_per_episode)) * 1000, avg_rewards_per_episode, 'g-o', 'LineWidth', 1.5);
+xlabel('Episode'); ylabel('Average reward (1000 episodes)'); title('DQN average reward'); grid on;
+sgtitle(sprintf('C2: DQN training curves (selected seed %d)', SEEDS(best)));
+saveas(fig, 'results/dqn_training_curves.png'); close(fig);
+fprintf('Saved results/dqn_training_curves.png\n\n=== C2 Complete ===\n');
+
+%% Local functions
+function [agent, training_loss, avg_rewards_per_episode] = train_agent(agent, frames, reward_table, threat_list, SNR_LIST, N_EPISODES, P_UNKNOWN, cw)
+% Episodes sample a (threat, Eb/N0) cell and a real frame state. The reward of
+% every action in that cell is measured, so each sample trains all five
+% Q-values toward their table rewards (full-action targets, D36); the
+% epsilon-greedy choice is kept only to log the reward the policy collects.
+nS = numel(SNR_LIST);
+nA = size(reward_table, 2);
 nState = agent.numStates;
-buf_S = zeros(N_EPISODES, nState); buf_A = zeros(N_EPISODES, 1); buf_R = zeros(N_EPISODES, 1);
+buf_S = zeros(N_EPISODES, nState); buf_T = zeros(N_EPISODES, nA);
 training_loss = [];
 avgG = []; avgSqG = [];
 episode_rewards = zeros(1, N_EPISODES);
 avg_rewards_per_episode = [];
-
-fprintf('Training on %d episodes...\n', N_EPISODES);
 for ep = 1:N_EPISODES
     ti = find(rand < cw, 1);
     s  = randi(nS);
@@ -186,41 +311,39 @@ for ep = 1:N_EPISODES
 
     state  = build_dqn_state(cls, fr(k, 1), fr(k, 2), SNR_LIST(s), fr(k, 3));
     action = selectAction(agent, state, true);
-    reward = reward_table(ti, action, s);
-
-    buf_S(ep, :) = state'; buf_A(ep) = action; buf_R(ep) = reward;
-    episode_rewards(ep) = reward;
+    buf_S(ep, :) = state';
+    buf_T(ep, :) = squeeze(reward_table(ti, :, s));
+    episode_rewards(ep) = reward_table(ti, action, s);
 
     if ep >= agent.batch_size
         idx = randperm(ep, agent.batch_size);
         S = single(buf_S(idx, :)');
-        A = buf_A(idx);
-        target = single(buf_R(idx)');         % one-shot episodes: target = reward
-        [loss, grads] = dlfeval(@qLoss, agent.qNetwork, dlarray(S, 'CB'), A, target);
+        T = single(buf_T(idx, :)');
+        [loss, grads] = dlfeval(@qLoss, agent.qNetwork, dlarray(S, 'CB'), T);
         [agent.qNetwork, avgG, avgSqG] = adamupdate(agent.qNetwork, grads, avgG, avgSqG, ...
             ep - agent.batch_size + 1, agent.learning_rate);
-        training_loss(end+1) = double(extractdata(loss)); %#ok<SAGROW>
+        training_loss(end+1) = double(extractdata(loss)); %#ok<AGROW>
     end
-
     agent.epsilon = max(agent.epsilon_min, agent.epsilon * agent.epsilon_decay);
-
-    if mod(ep, 200) == 0
-        avg_rewards_per_episode(end+1) = mean(episode_rewards(ep-199:ep)); %#ok<SAGROW>
-        fprintf('  Episode %4d/%d: avg reward %.1f, epsilon %.3f\n', ep, N_EPISODES, ...
+    if mod(ep, 1000) == 0
+        avg_rewards_per_episode(end+1) = mean(episode_rewards(ep-999:ep)); %#ok<AGROW>
+        fprintf('    episode %4d/%d: avg reward %.1f, epsilon %.3f\n', ep, N_EPISODES, ...
             avg_rewards_per_episode(end), agent.epsilon);
     end
 end
+end
 
-%% 5. Validation gate over every (threat, Eb/N0) cell
-% Hard failures: acting on 'none' or on benign interference that leaves the
-% link near clean (<= 1.5x); choosing no_action where acting is worth >= 30
-% reward points. Cells near the 2x boundary are reported by regret only.
-fprintf('\nValidation gate (median frame state per cell):\n');
-chosen_tab = cell(num_threats, nS);
-regret = zeros(num_threats, nS);
-gate_pass = true;
+function [chosen_tab, regret, fails] = gate_agent(agent, frames, reward_table, ber_tab, clean, must_act, threat_list, SNR_LIST, action_names, na)
+% Validation on the median frame state of every (threat, Eb/N0) cell. Hard
+% failures: acting on 'none' or on benign interference that leaves the link
+% near clean (<= 1.5x); no_action where acting is worth >= 30 reward points;
+% regret above REGRET_MAX in a cell that needs action (D36).
+REGRET_MAX = 10;
+nT = numel(threat_list); nS = numel(SNR_LIST);
+chosen_tab = cell(nT, nS);
+regret = zeros(nT, nS);
 fails = {};
-for ti = 1:num_threats
+for ti = 1:nT
     for s = 1:nS
         fr = frames{ti, s};
         st = build_dqn_state(threat_list{ti}, median(fr(:, 1)), median(fr(:, 2)), SNR_LIST(s), mean(fr(:, 3)));
@@ -233,46 +356,15 @@ for ti = 1:num_threats
         isFA   = a ~= na && (strcmp(threat_list{ti}, 'none') || ...
                  (strcmp(threat_list{ti}, 'benign_interference') && rb <= 1.5));
         isMiss = a == na && must_act(ti, s) && max(R) >= 30;
-        if isFA || isMiss
-            gate_pass = false;
-            fails{end+1} = sprintf('%s @ %g dB -> %s (%s)', threat_list{ti}, SNR_LIST(s), ...
-                action_names{a}, ternary(isFA, 'false alarm', 'missed action')); %#ok<SAGROW>
+        isWeak = must_act(ti, s) && regret(ti, s) > REGRET_MAX;
+        if isFA || isMiss || isWeak
+            if isFA, why = 'false alarm'; elseif isMiss, why = 'missed action'; else, why = sprintf('regret %.0f', regret(ti, s)); end
+            fails{end+1} = sprintf('%s @ %g dB -> %s (%s)', threat_list{ti}, SNR_LIST(s), action_names{a}, why); %#ok<AGROW>
         end
     end
 end
-fprintf('%-20s', 'threat'); fprintf('%22s', snr_hdr{:}); fprintf('\n');
-for ti = 1:num_threats
-    fprintf('%-20s', threat_list{ti});
-    for s = 1:nS
-        fprintf('%22s', sprintf('%s (regret %.0f)', short_name(chosen_tab{ti, s}), regret(ti, s)));
-    end
-    fprintf('\n');
 end
-fprintf('Mean regret %.1f | cells with regret > 15: %d/%d\n', mean(regret(:)), sum(regret(:) > 15), numel(regret));
 
-if ~gate_pass
-    fprintf('Gate failures:\n'); fprintf('  %s\n', fails{:});
-    error('Validation gate FAILED -- NOT saving trained_dqn.mat. Rerun (another rng seed) if it repeats.');
-end
-fprintf('Validation gate PASSED.\n\n');
-
-%% 6. Save
-save('data/trained_dqn.mat', 'agent', 'reward_table', 'ber_tab', 'clean', 'SNR_LIST', ...
-    'threat_list', 'action_names', 'RW', 'gp', 'bw', 'regret', 'chosen_tab', '-v7.3');
-fprintf('Saved data/trained_dqn.mat\n');
-
-%% 7. Training curves
-fig = figure('Position', [100 100 900 400], 'Color', 'w');
-subplot(1, 2, 1);
-plot(training_loss, 'b-'); xlabel('Update'); ylabel('Q-loss'); title('DQN training loss'); grid on;
-subplot(1, 2, 2);
-plot((1:numel(avg_rewards_per_episode)) * 200, avg_rewards_per_episode, 'g-', 'LineWidth', 1.5);
-xlabel('Episode'); ylabel('Average reward (200 episodes)'); title('DQN average reward'); grid on;
-sgtitle('C2: DQN Training Curves');
-saveas(fig, 'results/dqn_training_curves.png'); close(fig);
-fprintf('Saved results/dqn_training_curves.png\n\n=== C2 Complete ===\n');
-
-%% Local functions
 function r = reward_of(bb, ba, bc, gpf, bwf, isNoAction, mustAct, RW)
 % Reward of one action in one (threat, Eb/N0) cell.
 if ~mustAct                               % healthy non-hostile link: acting is an unnecessary switch
@@ -293,10 +385,9 @@ end
 r = score - 100 * (RW.L_GP * (1 - gpf) + RW.L_BW * (bwf - 1));
 end
 
-function [loss, gradients] = qLoss(qNet, S, A, target)
-Q_pred = forward(qNet, S);
-idx = sub2ind(size(Q_pred), A(:)', 1:numel(A));
-loss = mean((Q_pred(idx) - target).^2, 'all');
+function [loss, gradients] = qLoss(qNet, S, T)
+Q = forward(qNet, S);
+loss = mean((Q - T).^2, 'all');
 gradients = dlgradient(loss, qNet.Learnables);
 end
 

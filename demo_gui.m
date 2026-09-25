@@ -1479,28 +1479,41 @@ function loadKpiTab(fig)
     % ---- KPI cards ----
     if ~isempty(metrics)
         col = c.amber; if metrics.macro_f1_pct >= 90, col = c.green; end
-        setCard(ui, 1, sprintf('%.1f%%', metrics.overall_accuracy_pct), ...
-            sprintf('macro-F1 %.1f%%  |  target >= 90%%', metrics.macro_f1_pct), col);
+        sub = sprintf('macro-F1 %.1f%%  |  target >= 90%%', metrics.macro_f1_pct);
+        if isfield(metrics, 'ci95')
+            sub = sprintf('macro-F1 %.1f%% [%.1f-%.1f]  |  target >= 90%%', metrics.macro_f1_pct, metrics.ci95.macro_f1);
+        end
+        setCard(ui, 1, sprintf('%.1f%%', metrics.overall_accuracy_pct), sub, col);
     end
     if ~isempty(cl)
         isReal = ~ismember({cl.threat}, {'none','benign_interference'});
-        setCard(ui, 2, sprintf('%.1f%%', mean([cl(isReal).recovery_pct], 'omitnan')), ...
-            'mean BER recovery, real threats (closed loop)', c.accent);
+        recF = recField(cl);
+        if isfield(cl, 'mc')
+            [mr, lo, hi] = stats_ci('t', arrayfun(@(k) mean([cl(isReal & [cl.mc] == k).(recF)], 'omitnan'), unique([cl.mc])), [0 100]);
+        else
+            mr = mean([cl(isReal).(recF)], 'omitnan'); lo = NaN; hi = NaN;
+        end
+        sub = 'recovery vs the no-attack link, real threats';
+        if ~isnan(lo), sub = sprintf('95%% CI %.0f-%.0f%% over %d repeats', lo, hi, numel(unique([cl.mc]))); end
+        if isfield(cl, 'plr_ok')
+            sub = sprintf('%s | PLR restored %d/%d', sub, sum([cl(isReal).plr_ok]), sum(isReal));
+        end
+        setCard(ui, 2, sprintf('%.1f%%', mr), sub, c.accent);
         lat = [cl.cnn_latency_ms] + [cl.dqn_latency_ms];
         setCard(ui, 3, sprintf('%.1f ms', mean(lat)), ...
             sprintf('median %.1f ms | DQN-vs-rule agreement %.0f%%', median(lat), 100*mean([cl.agrees_with_rule])), c.accent);
         tn = unique({cl(isReal).threat}, 'stable'); nOK = 0;
         for k = 1:numel(tn)
-            if mean([cl(strcmp({cl.threat}, tn{k})).recovery_pct], 'omitnan') >= 50, nOK = nOK + 1; end
+            if mean([cl(strcmp({cl.threat}, tn{k})).(recF)], 'omitnan') >= 50, nOK = nOK + 1; end
         end
         col = c.red; v = 'NOT MET'; if nOK >= 1, col = c.green; v = 'MET'; end
         setCard(ui, 5, v, sprintf('%d / %d real threat classes recovered >= 50%%', nOK, numel(tn)), col);
     end
     if ~isempty(far)
-        nfa = sum([far.false_alarm]); nall = numel(far); pct = 100 * nfa / nall;
-        col = c.green; if pct > 5, col = c.red; end
-        sub = sprintf('%d / %d trials', nfa, nall);
-        if nfa == 0, sub = sprintf('0 / %d trials | 95%% upper bound %.1f%% (rule of three)', nall, 300 / nall); end
+        nfa = sum([far.false_alarm]); nall = numel(far);
+        [pf, ~, hf] = stats_ci('wilson', nfa, nall); pct = 100 * pf;
+        col = c.green; if 100 * hf > 5, col = c.amber; end
+        sub = sprintf('%d / %d trials | 95%% upper %.1f%% (bound 5%%)', nfa, nall, 100 * hf);
         setCard(ui, 4, sprintf('%.1f%%', pct), sub, col);
     end
     if ~isempty(sp)
@@ -1579,22 +1592,28 @@ function ok = plotAccSnr(ax, metrics, c)
     setTitle(ax, sprintf('Detection accuracy vs Eb/N0  (overall %.1f%%, red = 90%% target)', metrics.overall_accuracy_pct), c);
 end
 
+function f = recField(r)
+    % KPI #2 metric (D27) when the result file has it, older files fall back.
+    if isfield(r, 'rec_vs_clean'), f = 'rec_vs_clean'; else, f = 'recovery_pct'; end
+end
+
 function ok = plotRecSnr(ax, cl, c)
     ok = ~isempty(cl); if ~ok, return; end
     threats = unique({cl.threat}, 'stable'); snr = unique([cl.snr_db]);
     realT = threats(~ismember(threats, {'none','benign_interference'}));
     hold(ax, 'on'); h = gobjects(0); nm = {};
+    recF = recField(cl);
     for t = 1:numel(realT)
         rec = nan(1, numel(snr));
         for s = 1:numel(snr)
             m = strcmp({cl.threat}, realT{t}) & [cl.snr_db] == snr(s);
-            if any(m), rec(s) = cl(find(m, 1)).recovery_pct; end
+            if any(m), rec(s) = mean([cl(m).(recF)], 'omitnan'); end
         end
         h(end+1) = plot(ax, snr, rec, '-o', 'LineWidth', 1.5, 'MarkerSize', 4); %#ok<AGROW>
         nm{end+1} = strrep(realT{t}, '_', ' '); %#ok<AGROW>
     end
     hold(ax, 'off'); ax.XTick = snr; grid(ax, 'on');
-    xlabel(ax, 'Eb/N0 (dB)', 'Color', c.mut); ylabel(ax, 'BER recovery (%)', 'Color', c.mut);
+    xlabel(ax, 'Eb/N0 (dB)', 'Color', c.mut); ylabel(ax, 'Recovery vs clean (%)', 'Color', c.mut);
     legend(ax, h, nm, 'Location', 'southeast', 'TextColor', c.txt, 'Color', c.panelBg, 'EdgeColor', c.mut, 'FontSize', 8);
     setTitle(ax, 'Recovery vs Eb/N0 (real threats)', c);
 end
@@ -1643,7 +1662,7 @@ function ok = plotSpeed(ax, sp, metrics, c)
         for k = 1:numel(vs)
             m = [sp.speed_kmh] == vs(k);
             acc(k) = 100 * mean([sp(m).correct]);
-            rec(k) = mean([sp(m & isReal).recovery_pct], 'omitnan');
+            rec(k) = mean([sp(m & isReal).(recField(sp))], 'omitnan');
         end
         h(end+1) = plot(ax, vs, acc, '-o', 'LineWidth', 2, 'Color', c.accent, 'MarkerFaceColor', c.accent); %#ok<AGROW>
         nm{end+1} = 'closed-loop detection (%)'; %#ok<AGROW>
