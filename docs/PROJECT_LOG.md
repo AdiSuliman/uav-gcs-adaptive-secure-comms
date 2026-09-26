@@ -671,3 +671,24 @@ Random interferer directions per seed (`interferer_aoa.m`, 'AoA' Constant block 
 
 ### D45 results (2026-09-26)
 `validate_phy` 5/5 within 0.3 dB, seeds PASS. Dataset with random interferer directions: 27,000 frames / 1,350 sub-runs; detector accuracy 96.28% [94.91, 97.44], macro-F1 96.28%, ≥ 91% from 0 dB. Pools 87.8 min (17 configurations, 6/4 geometries per cell). DQN: 3 seeds within 0.001 on validation (0.856–0.857), gate PASS, false-alarm episodes 2.1% (rule 31.6%). Test pools, pooled: DQN 0.761 vs rule + escalation 0.659 (+0.102 [0.094, 0.110]), table +0.021, best fixed +0.033; clean link 0 false switches. The γ = 0 ablation is higher than γ = 0.9 on validation (0.869) and test (+0.020 pooled): with the link monitor in the state the decision is close to myopic. On the unseen combined threats the DQN switches 9.6 times per episode and trails the best fixed configuration (−0.075). Always-on adaptive combining restores 0% with the interferer within 20° of the GCS and 89% beyond 45°.
+
+### D46 — decision layer v3 and phase 4 (code complete)
+Discount-factor grid with validation selection, four training combinations (pools extended, not rebuilt), unknown and 768-episode clean sets with Clopper–Pearson FAR, breakdowns per Eb/N0, geometry and speed, `measure_latency.m`, KPI aggregation and dashboard rewritten on the new result files, GUI and `episode_cycle.m` on `policy_decide.m`, survivability map on shared seeds with two geometries, one-shot scripts moved to `legacy/`. Pending: MATLAB run (B4, OOD, C1p, C2, C2e, SURV, LAT, KPI, DASH).
+
+### D46 results (2026-09-26)
+One `main.m` pass, 3 h: B4, C1p (13 scenarios reused, 4 training combinations simulated in 26 min), C2 (3 γ × 3 seeds), C2e, OOD, SURV (105 min), LAT, KPI, DASH. No warning or error.
+- **Detector:** unseen Eb/N0 1–9 dB 97.7% vs 97.5% on the training grid (largest gap 1.4 points).
+- **Unknown threats (LOTO):** Mahalanobis mean AUROC 0.887 (0.807–0.973 per threat); MSP 0.687, energy 0.596, isolation forest 0.601, fused 0.855. At the 95% threshold 42% of unknown frames still pass as known.
+- **Training:** validation return γ = 0 0.839, γ = 0.5 0.839, γ = 0.9 0.830; seeds within 0.003. Selected γ = 0, seed 43; gate PASS. False-alarm episodes on validation 5.4% (γ = 0, 0.5), 12–13% for two γ = 0.9 seeds.
+- **Test pools, threat sets pooled:** DQN return 0.744 vs rule + escalation 0.614 (+0.130 [0.121, 0.139]), table 0.707 (+0.037), best fixed 0.707 (+0.038), oracle 0.848. Restored cycles 66.2%, recovered episodes 71.3%, median T_rec 2 cycles.
+- **Per set (return, DQN / rule+esc / table / fixed / oracle):** single 0.838 / 0.729 / 0.819 / 0.773 / 0.923; follower 0.858 / 0.825 / 0.777 / 0.794 / 0.964; combined 0.509 / 0.266 / 0.482 / 0.535 / 0.638; unknown 0.817 / 0.649 / 0.751 / 0.763 / 0.922; clean 0.980 / 0.959 / 0.960 / 0.872 / 0.978. Training combinations moved the DQN on unseen combinations from 0.460 to 0.509 and from 9.6 to 7.4 switches per episode; it still trails the best fixed configuration there (−0.025).
+- **Restoration (single):** DQN 85.6% of cycles after onset, 89.3% on recoverable episodes (oracle 100%); per threat 62% (noise_burst) to 94% (antenna_fault); unknown set 85.5% with the class withheld (rule 51.7%).
+- **Geometry:** always-on MMSE restores 0% / 35% / 89% with the interferer 0–20° / 20–45° / 45–90° from the GCS direction; DQN 72.6% / 87.2% / 89.4%.
+- **Speed:** DQN 81.2–88.5% across 50–120 km/h (spread 7.3 points).
+- **False alarms (clean, 768 episodes):** DQN 37 episodes (4.8%), one-sided 95% bound 6.29% → KPI 6 NOT MET against 5%; per cycle 0.16%. Rule and table 205 (26.7%). The count is the same for every γ: it is set by the 2-cycle alarm confirmation, not by the policy.
+- **Latency (RTX 4070 SUPER):** median 10.9 ms, p95 48.9 ms per cycle; CNN 3.9 ms and Mahalanobis 3.4 ms are two separate forward passes of the same network and carry the p95 tail (38 / 37 ms).
+- **Survivability (420 states):** Map A 86.2% recoverable, Map B 93.6%. Every loss is at the aligned geometry (10°) or in path loss: noise_burst @ 10° 30% → 47% with rate/FEC, sweeping_jammer @ 10° 50% → 100% with FEC, path_loss 27% → 63% with rate + power; all 45° maps 100%.
+- **KPIs:** 7 of 8 MET; KPI 6 (FAR) NOT MET.
+
+### D47 — documentation layout (2026-09-26)
+`PROJECT_LOG.md` and `ROADMAP.md` moved to `docs/` next to `DECISIONS.md`; `README.md` stays in the root. Splitting the code into folders is left for the end of the project.

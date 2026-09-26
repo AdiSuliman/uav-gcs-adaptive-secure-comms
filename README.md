@@ -1,380 +1,223 @@
 # UAV-GCS Adaptive Secure Communications System
 
-**Course:** 50076 (HIT) Capstone | **Semester:** 2026-27 A
+**Course:** 50076 (HIT) capstone | **Semester:** 2026-27 A
 **Students:** Adi Suliman, Bar Dvir Hassan
 **Supervisor:** Golan Ein-Tzvi
-**Language:** MATLAB R2026a + Simulink
+**Platform:** MATLAB R2026a + Simulink (Communications, DSP System, Deep Learning toolboxes)
 
 ---
 
 ## Overview
 
-An AI-driven closed-loop system for detecting and adapting to link-layer threats (jamming, spoofing, noise, faults) on small-UAV-to-GCS RF links. **Digital Twin approach:** Simulink-based link model self-generates labeled datasets; CNN detector identifies threats in real time; DQN agent decides recovery actions; closed-loop validates BER improvement.
+A closed-loop simulation of the command uplink from a ground control station (GCS) to a small UAV under electronic-warfare threats. A Simulink link model, validated against theory, generates its own labeled data; a CNN on the spectrogram plus link measurements detects the threat and flags threats it has never seen; a decision layer (expert rule, a class table and a Double DQN with a safety shield) chooses a countermeasure; and every policy is compared on measured frames of the real link that were never used in training.
 
-**Key Contributions:**
-- Real-time threat detection (CNN + scalar/temporal features, **96.41% accuracy** on a speed-diverse dataset covering a continuous **50–120 km/h** UAV envelope, ~11 ms median decision latency including full signal preprocessing)
-- Reinforcement-learning policy (DQN) trained on a reward table measured through the real link over every threat × action × Eb/N0, pricing each action's goodput and spectrum cost and penalizing only unnecessary actions — **0 false alarms** on healthy links, justified action on degraded ones (D29)
-- Adaptive recovery (channel switching, rate reduction, frequency / spatial diversity) modeled by the physics of each action on each threat group — in-channel, swept, broadband, signal-side (`apply_countermeasure.m`, D28)
-- Survivability boundary mapping (proposal deliverable #7) on the system's real action set: where each attack is recoverable, marginal or not, which action achieves it, and where survival requires giving up goodput (D30)
-- Diagnostic suite: decision traces, timing breakdown, rule-based vs learned-policy comparison, FAR measurement, KPI aggregation
-- Interactive operator console (`demo_gui.m`, v3): four tabs — live operations (threat × Eb/N0 × UAV speed × severity matrix, DQN vs rule-based side by side, BER/RSSI timeline before/after the countermeasure, UNKNOWN-threat handling), KPI & results, survivability map, session log
-- Speed-robustness evaluation (`eval_speed_robustness.m`): closed-loop detection, decision and recovery over 8 UAV speeds (50–120 km/h) — 98.6% detection, 0 false alarms, recovery vs clean flat at 82.5–84.7%
-- Interim report (Word, 7 chapters + limitations/assumptions section) drafted; see `## Report` below
+- **Link:** GCS → UAV, QPSK, 1 Msym/s, RRC (roll-off 0.25, span 10, 4 samples/symbol), 1032-bit frames, 2.4 GHz, Rician K = 10 dB with sum-of-sinusoids Doppler fading for a UAV at 50–120 km/h (111–267 Hz). One GCS antenna, two omni antennas on the UAV (λ/2, receive correlation 0.3).
+- **Receiver:** data-aided channel estimation (leave-one-out), MRC combining; adaptive MMSE combining as the spatial countermeasure (nulls an interferer arriving from another direction).
+- **Threats (8 + clean link):** jamming, reactive jamming, sweeping jammer, noise burst, spoofing, benign interference, path loss, antenna fault; five severity levels each. Every interferer reaches the array from its own direction, drawn per seeded run (flight geometry).
+- **Countermeasures (17 configurations):** no action, channel switch, rate reduction, frequency diversity, spatial diversity (MMSE), power control, FEC with interleaving, nine avoidance × robustness pairs, and rate reduction + power control.
 
 ---
 
-## Repository Structure
+## Repository structure
 
 ```
-├── main.m                        # Master orchestrator (RUN flags across phases A-DASH)
-├── init_params.m                 # System & threat parameters (K=10dB; UAV envelope 50–120 km/h → Doppler 111–267 Hz, nominal 72 km/h = 160 Hz; D25)
-├── build_dqn_state.m             # Single source of truth: 13-dim one-hot DQN state
-├── demo_gui.m                    # Interactive operator console, 5 tabs incl. continuous episode (D24, D26, D37)
-├── build_kpi_dashboard.m         # 7-panel results dashboard (proposal deliverable #1)
-├── models/                       # Simulink Digital Twin (gitignored — regenerated on build)
-│   ├── UAV_GCS_Base_Link.slx     # A1-A2: clean AWGN channel
-│   ├── UAV_GCS_Rician_Link.slx   # A3: fading + Doppler
-│   └── UAV_GCS_Threat_Link.slx   # A4-A6: threats + recovery
+├── main.m                   # pipeline entry point: RUN flags, phases A to DASH, logs to logs/
+├── demo_gui.m               # operator console: live loop, continuous episode, KPIs, survivability map
+├── *.m                      # pipeline code, by stage:
+│                            #   link       init_params, build_threat_model, link_seed, interferer_aoa, validate_phy,
+│                            #              apply_countermeasure, extract_closed_loop_frames
+│                            #   dataset    run_dataset_sweep, extract_spectrograms, prepare_data, spec_image, link_features
+│                            #   detection  train_detector, train_hybrid_net, eval_detector, eval_unseen_snr, cnn_scores,
+│                            #              ood_scores, ood_thresholds, fit_ood_model, eval_ood_detection
+│                            #   decision   build_policy_pools, link_env, policy_*, rule_based_policy, dqn_agent,
+│                            #              train_dqn, rollout_policy, evaluate_policies, episode_cycle
+│                            #   evaluation map_survivability_boundary, measure_latency, measure_all_kpis,
+│                            #              build_kpi_dashboard, stats_ci
 ├── docs/
-│   └── DECISIONS.md              # Architecture Decision Record (D1-D37)
-├── diagnostics/                  # Ad-hoc investigation scripts, kept for reproducibility
-├── README.md                     # This file
-├── PROJECT_LOG.md                # Living execution log — status, fix history, open issues
-├── ROADMAP.md                    # Project timeline (original plan)
-├── [Phase scripts — root holds only the active pipeline, 38 files]
-│   ├── A: init_params.m, build_link_model.m, build_rician_model.m, build_threat_model.m, run_awgn_sweep.m, run_dataset_sweep.m, extract_spectrograms.m, visualize_spectrograms.m, extract_closed_loop_frames.m, quick_ber.m
-│   ├── B: prepare_data.m, train_detector.m, eval_detector.m, eval_unseen_snr.m
-│   ├── C: dqn_agent.m, build_dqn_state.m, train_dqn.m (also writes the countermeasure matrix), rule_based_policy.m, apply_countermeasure.m, recovery_vs_clean.m
-│   ├── C-eval: run_closed_loop_diagnostic.m, eval_speed_robustness.m, run_closed_loop_episodes.m + report_closed_loop_episodes.m + episode_cycle.m (one decision cycle, shared with the GUI), eval_combined_threats.m
-│   ├── Detection helpers: detect_frame.m, cnn_scores.m (probabilities, logits, MSP, energy), ood_thresholds.m, eval_ood_detection.m
-│   ├── SURV: map_survivability_boundary.m
-│   ├── KPI: measure_all_kpis.m, measure_kpi3_recovery_time.m, diagnose_far_measurement.m, build_kpi_dashboard.m, stats_ci.m (t / Wilson 95% intervals)
-│   └── GUI: demo_gui.m
-└── legacy/                       # CNN-LSTM study kept for the record (D13, 5 files), not in the pipeline; the pre-D28 EXP study and the C3 MVP loop were removed in D38 (in git history)
+│   ├── DECISIONS.md         # decision record D1–D47 (why every design choice was made)
+│   ├── PROJECT_LOG.md       # execution log: runs, results, fixes
+│   └── ROADMAP.md           # plan and status by phase
+├── diagnostics/             # one-off investigation scripts
+├── legacy/                  # replaced code kept for the record
+└── data/  results/  models/  logs/     # generated by the pipeline, not in git
 ```
 
-**Note:** `data/`, `results/`, `logs/`, `models/` are `.gitignore`'d (too large / regenerable). Exception: `results/survivability_*` (Map A/B outputs, proposal deliverable #7) are tracked explicitly — they are a primary research output, not a regenerable byproduct.
+The code stays in the root while the project changes; it moves into folders by stage at the end of the project (D47).
+
+**legacy/** holds code that newer decisions replaced: the CNN-LSTM detector study (D13) and the one-shot decision scripts of D39 (closed-loop diagnostic, speed sweep, FAR, combined threats, episodes, KPI3, `build_dqn_state.m`), replaced in D44–D46 by `evaluate_policies.m`, `measure_latency.m` and the `policy_*` files.
 
 ---
 
-## Quick Start
+## Quick start
 
-1. **Setup:** MATLAB R2026a with Communications, DSP System, Deep Learning, RL toolboxes
-2. **Run the full pipeline:** `main.m` — toggle RUN flags to control which phases execute (see in-file presets: full clean run / results-only refresh / steps 7+8 / dashboard-only). `CFG.mc_repeats` and `CFG.dqn_seeds` at the top set the Monte Carlo repeats of the closed loop and the number of DQN training seeds (both 5)
-3. **Live demo:** `demo_gui.m` — pick threat × Eb/N0 cells in the test matrix, set UAV speed (50–120 km/h, continuous) and severity, press Run; see `## Interactive Demo` below. Launch it from a **fresh MATLAB session** (or after `clear all; close all force; bdclose all`) — right after a full `main.m` run the leftover multi-GB workspace makes the UI sluggish
-4. **Explore:** `logs/run_*.txt` accumulates full console output (via `diary`)
+1. MATLAB R2026a with Simulink, Communications, DSP System and Deep Learning toolboxes (Statistics for the isolation forest).
+2. In the project folder (cmd or Git Bash): `matlab -batch "main"`. The flags at the top of `main.m` choose the stages; presets for a full run, a decision-layer rerun and a results-only refresh are in the file.
+3. Operator console: open MATLAB in the project folder and run `demo_gui` (after `main` has produced `data/` and `results/`), from a fresh session.
+4. Every run writes its full console output to `logs/run_*.txt`.
 
-**Phases & runtimes:**
-- Phase A (link + dataset): dataset generation ~102 min in the latest run (speed-diverse sweep: 270 Simulink model builds; the Doppler is baked into each build), spectrogram extraction ~3 min
-- Phase B (detector train): 5–15 min
-- Phase C1 (rule-based): < 1 min
-- Phase C2 (DQN train): ~8 min with 5 seeds (2026-09-25; the reward-table measurement dominates)
-- Phase C3-diag: ~17 min with 5 Monte Carlo repeats (2026-09-25)
-- Phase C3-speed (`eval_speed_robustness.m`): ~13 min (measured; 8 speeds × 3 SNR × 9 threats)
-- Phase KPI (FAR + aggregation): ~5 min
-- Full `main.m` with every flag on: ~4 h 04 min (2026-09-21)
-- Survivability mapping: ~80 min (every threat × level × Eb/N0 × action through the real link)
-- Dashboard: < 1 min (needs B3+C3-diag+FAR+SURV already run)
-
----
-
-## Latest Results — action set v2 (D39–D40, full run 2026-09-26)
-
-16 actions: no_action, channel_switch, rate_reduce, freq_diversity, spatial_diversity, power_control (+6 dB), fec_interleave (rate-1/2 K=7, interleaved, erasure decoding) and 9 two-action pairs. Detector unchanged from D38. The rule baseline is the D38 rule (FEC alone at low Eb/N0 is past the code threshold and makes the link worse). One `main.m` run: DQN training → closed loop → speed sweep → episodes → combined threats → survivability maps → KPIs → dashboard.
-
-| KPI | Result | D38 (5 actions) |
+| Stage | What it does | Time (RTX 4070) |
 |---|---|---|
-| #1 detection | 96.33% [95.60, 97.03], macro-F1 96.31% | same |
-| #2 BER recovery vs clean (DQN) | **98.7% [98.6, 98.8]**, 205/210 restored, 0 missed | 86.4%, 157/210 |
-| #2 packet loss restored | 181/210 (86.2%) | 150/210 |
-| #2 goodput kept vs no attack | DQN 95.5% · rule 75.9% · no action 20.4% | 78.3% / 75.9% |
-| DQN − rule recovery (paired) | **+12.3 [12.0, 12.7]** points (rule 86.4%) | 0.0 |
-| #3 episodes (hysteresis) | DQN 84/88 recovered (95% [89, 98]) vs rule 66/90 (73% [63, 81]); T_act 3, T_rec 8 cycles | 74% vs 76% |
-| #3 decision latency | 8.10 ms mean (DQN 0.89 ms) | 14.6 ms |
-| #4 FAR | 0/120 healthy-link trials, 95% upper 3.1% | same |
-| #5 end-to-end | MET | MET |
-| DQN seeds | 4/5 pass the gate (seed 44: one cell, regret 15), selected seed 45, mean regret 0.1 | 5/5 |
-| Speed 50–120 km/h | detection 99.5%, KPI #2 98.5% (166/167 restored), 0/48 false alarms | 86.2% |
-| Survivability Map A / B | **86.7% / 93.3%** recoverable | 78.3% / 80.8% |
-| Combined threats, restored decisions (D40, 5 seeded repeats) | DQN 302/1140 = 26.5% [24.0, 29.1]; rule 95/1140 = 8.3% [6.9, 10.1]; best single action 570/1140 | 38/456 both |
-
-Per threat (DQN): jamming 99.2%, reactive 99.4%, **sweeping 100.0%** (rule 82.4%), **noise_burst 99.7%** (spatial+power at low Eb/N0, spatial+FEC above; rule 56.1%), **path_loss 93.6%** (spatial+power; rule 69.0%), spoofing 99.7%, antenna_fault 99.3%. Map B: every threat 100% recoverable except path_loss (47%, severe attenuation at high Eb/N0); Map A adds noise_burst 57% and sweeping 90% — 7 noise_burst cells survive only through FEC.
-
-Combined threats remain the limit: the detector names the dominant component, and the agent, trained on single threats, reaches the best available action in about half the cases it could (26.5% vs 50% for the best single action; pairs help most on spoofing+noise_burst and noise_burst+antenna_fault). The loop never freezes (0/1140 no_action on an attack).
-
-## Earlier results (dataset and detector: 2026-09-21 full re-run; decision, closed loop and maps: 2026-09-23/24 on the D28–D30 model)
-
-Dataset and detector numbers come from the 2026-09-21 full `main.m` run on the 50–120 km/h speed-diverse dataset (D25). Everything downstream of the detector was re-run on 2026-09-23/24 after the physics-based countermeasure model (D28), the new DQN reward (D29) and the action-based survivability map (D30); those supersede the earlier closed-loop and map figures.
-
-### Phase A — Dataset (D25)
-- **27,270 frames** (8 threats × 5 severity levels × 6 Eb/N0 × 100 frames, plus a balanced `none` class). Every 100-frame block is simulated at its own **continuous, non-integer UAV speed** in 50–120 km/h (min 50.0, mean 85.2, max 119.9), assigned through a Latin-square over 6 speed bins so speed is correlated with neither SNR nor class. Split 21,816 / 2,727 / 2,727.
-- Speed is stored per frame for analysis; it is **not** a network input.
-
-### Phase B3 — CNN Detector (9-class)
-- **Overall accuracy: 96.41%** (96.73%), **macro-F1 96.39%** (96.73%); best validation accuracy 97.1% at epoch 29
-- Per-SNR: 91.4% @ 0 dB → 95.6% @ 2 → 96.7% @ 4 → 97.6% @ 6 → 98.5% @ 8 → 98.7% @ 10 dB (was 93.4 → 97.1 → 96.5 → 98.0 → 97.8 → 97.6). Lower at the 0–2 dB edge, higher at 8–10 dB, and now monotonic.
-- Accuracy vs UAV speed (7 equal bins, n≈315–480 each): 92.7% (50–60 km/h), 96.9, 96.2, 95.6, 98.2, 97.1, 98.0% (110–120 km/h). The lowest-speed bin is the weakest; the rest stay within about 2.6 points of each other.
-- Per-class recall (precision): none 97.0 (93.3) · jamming 98.7 (90.1) · noise_burst 100 (98.7) · **reactive_jamming 87.1 (98.5)** · path_loss 94.7 (97.3) · spoofing 98.7 (100) · antenna_fault 92.8 (98.3) · benign_interference 100 (95.6) · sweeping_jammer 98.7 (97.1)
-- Main confusions: reactive_jamming → jamming 33/304 (plus 6 → benign), path_loss → none 12, antenna_fault → none 9 and → sweeping_jammer 9, none → path_loss 5
-
-### Phase C2 — DQN (D29)
-- Reward table measured through the real link for 9 threats × 5 actions × 6 Eb/N0 (270 simulations); reward = link state vs clean − goodput/spectrum cost; −40 for acting on a healthy non-hostile link. 4,000 table-based episodes with real per-frame states, 10% with the class hidden. Training ~7 min.
-- Validation gate passed on all 54 (threat, Eb/N0) cells: mean regret 1.5 reward points, maximum 11, none above 15.
-- Learned policy: channel_switch for jamming / reactive_jamming / spoofing, spatial_diversity for antenna_fault, rate_reduce for path_loss (0–8 dB), freq_diversity for sweeping_jammer (≥ 4 dB), action on benign interference only where it degrades the link (≥ 4 dB), never on `none`.
-
-### Countermeasure efficacy (D28, `results/countermeasure_matrix.*`)
-Every threat × action at nominal severity, Eb/N0 = 0 / 4 / 10 dB, ground-truth threat. Best achievable link: jamming, reactive_jamming, spoofing and antenna_fault restored at every Eb/N0; sweeping_jammer restored at 0–4 dB, marginal at 10 dB (4.4×); noise_burst restored at 0–4 dB, **not restorable at 10 dB (29×)**; path_loss restored at 0 dB, marginal at 4 dB, **not restorable at 10 dB (7.0×)**.
-
-### Phase C3 (Closed-Loop) — 9 threats × 6 Eb/N0, DQN and rule-based on the same runs (2026-09-24)
-Both policies decide from the same detector output and link measurements and act through `apply_countermeasure.m`; the rule's action is simulated whenever it differs from the DQN's.
-
-| Threat | DQN action (typical) | DQN recovery vs clean | DQN BER/clean | Rule recovery | Rule BER/clean | Rule goodput |
-|---|---|---|---|---|---|---|
-| jamming | channel_switch | 99.4% | 1.27× | 99.4% | 1.27× | 1.00 |
-| reactive_jamming | channel_switch | 99.4% | 1.17× | 99.4% | 1.17× | 1.00 |
-| sweeping_jammer | spatial / freq_diversity | 86.6% | 2.11× | 83.0% | 2.15× | 1.00 |
-| noise_burst | spatial_diversity | 32.2% | 11.1× | 55.2% | 9.46× | 0.25 |
-| path_loss | rate_reduce (spatial at 10 dB) | 63.5% | 7.10× | 69.7% | 3.93× | 0.25 |
-| spoofing | freq_diversity / channel_switch | 99.5% | 1.04× | 99.9% | 1.02× | 1.00 |
-| antenna_fault | spatial_diversity | 99.1% | 1.07× | 84.2% | 1.14× | 1.00 |
-
-- **KPI #2 (DQN): 82.8%** recovery vs the no-attack link; 30/42 runs restored (≤ 2× clean), 8 marginal, 4 not restored, 0 missed detections. The shortfall is physical: noise_burst and path_loss at high Eb/N0 are not restorable by any single action (see the survivability map).
-- **DQN vs rule (link-quality half of KPI #3):** rule 84.4% recovery, 31/42 restored, mean goodput 0.79; DQN 82.8%, 30/42, mean goodput 0.91. Per run: rule better link in 7, DQN in 2, within 10% in 33. This is the trade-off the reward encodes (rate reduction costs 22.5 of 100 points): the DQN gives up some link quality on noise_burst to keep throughput. It also shows the DQN's one weak cell — path_loss at 10 dB, where it chose spatial_diversity (27.8× clean) instead of rate_reduce (gate regret 11).
-- **Detection error:** antenna_fault at 0 dB was misdetected as sweeping_jammer (46% confidence). The rule applied the sweeping action (freq_diversity, no effect on an antenna fault); the DQN chose spatial_diversity and restored the link (1.01× clean). Its Q-values for spatial and rate_reduce were nearly tied (41.9 vs 41.7), and spatial is also its policy for a sweeping jammer at 0 dB, so this is a single, fortunate case rather than an established robustness advantage.
-- Detection 53/54 (98.1%); agreement 34/54 (63.0%); decision latency mean 12.1 / median 11.4 ms (CNN 10.9 + DQN 1.3 ms).
-
-### Steps 7–8 — KPI reporting and Monte Carlo confidence intervals (D35, 2026-09-25)
-- **Closed loop, Monte Carlo:** `run_closed_loop_diagnostic.m` repeats every (threat, Eb/N0) cell `CFG.mc_repeats` = 5 times with different seeds (AWGN and bit source seeded per run; before/after sims of one run share a seed). Headline numbers are means over repeats with a Student-t 95% CI over the per-repeat values; pooled proportions carry a Wilson 95% CI. The DQN − rule recovery difference is paired per repeat, so its interval says whether the gap is real.
-- **Packet loss (KPI #2 as worded):** a frame is lost when its BER > 0.1 (the detector's own PLR feature, no FEC). Reported: PLR before/after per cell, PLR restored (after ≤ clean + 0.05), PLR recovery vs clean.
-- **Goodput as a trade-off:** goodput kept = goodput factor of the action × (1 − PLR after) / (1 − PLR clean), for DQN, rule and no action; `results/closed_loop_plr_goodput.png` plots recovery against goodput per threat.
-- **KPI #4 as worded:** FAR per Eb/N0 and pooled above the KPI #1 threshold, over healthy-link trials, with Wilson intervals; bound: FAR ≤ 5% with the 95% upper limit below 5%.
-- **Detector:** 1,000-resample bootstrap CI for accuracy, macro-F1 and macro-F1 above the threshold (`eval_detector.m`). The eight leave-one-threat-out retrainings (D32) already show the spread across trainings (known-class accuracy 95.2–98.3%).
-- **DQN seeds:** 5 trainings on the same reward table; each passes the validation gate; the saved agent is the lowest-mean-regret seed; per-seed regret and the cells where seeds disagree are in `results/dqn_seed_stability.txt`.
-- **Episodes (KPI #3):** recovered share and mean T_recover per configuration with 95% intervals in `kpi_summary.txt`.
-- **Full run from scratch (D38, 2026-09-25):** KPI #1 96.33% [95.60, 97.03]; KPI #2 DQN 86.4% [86.2, 86.6] = rule 86.4% (difference 0.0 [−0.1, 0.2]), BER restored 157/210, PLR restored 150/210, goodput kept DQN 78.3% vs rule 75.9%; KPI #3 T_act 3 / T_recover 8 cycles, recovered 74% vs 76%; KPI #4 FAR 0/120 (95% upper 3.1%); survivability Map A 78.3% / Map B 80.8%. Weak cells: noise_burst (51%) and path_loss (69%) — addressed next by extending the action set (D39).
-
-### Phase C3-speed — Robustness vs UAV speed (2026-09-24)
-| Speed (km/h) | 50.0 | 57.3 | 66.8 | 72.0 | 84.6 | 97.2 | 108.9 | 120.0 |
-|---|---|---|---|---|---|---|---|---|
-| fd (Hz) | 111 | 127 | 148 | 160 | 188 | 216 | 242 | 267 |
-| Detection | 100% | 100% | 96.3% | 96.3% | 100% | 96.3% | 100% | 100% |
-| Recovery vs clean | 83.2% | 83.0% | 83.6% | 82.9% | 82.5% | 84.0% | 84.7% | 83.3% |
-| Restored (≤ 2× clean) | 16/21 | 15/21 | 16/21 | 16/21 | 16/21 | 15/20 | 16/21 | 16/21 |
-
-Detection 98.6% (213/216; all three misses antenna_fault); **false alarms 0/48** (32 runs on a healthy link); 16 justified actions on degraded benign links; KPI #2 83.4%, flat across speed (82.5–84.7%).
-
-### Phase C3-episodes — recovery time in decision cycles (KPI #3, D31)
-Threat onset mid-stream, one decision per received frame, dwell 3 / hold 10 cycles; 9 threats × {0, 4, 10} dB × 5 episodes × {DQN, rule} × {with, without hysteresis}; frames from real Simulink runs of every (threat, action, Eb/N0).
-
-| Configuration | T_act (median) | T_recover (median) | Recovered (degraded episodes) | Switches / episode | False switch on healthy link | Goodput |
-|---|---|---|---|---|---|---|
-| DQN, hysteresis | 3 cycles | 8 cycles | 61/87 (70%) | 1.5 | 1/20 | 0.92 |
-| Rule, hysteresis | 3 cycles | 8 cycles | 68/91 (75%) | 1.5 | 1/20 | 0.85 |
-| DQN, no hysteresis | 1 | 7 | 18/43 (42%) | 18.5 | 14/20 | 0.80 |
-| Rule, no hysteresis | 1 | 6 | 16/32 (50%) | 7.4 | 14/20 | 0.91 |
-
-- At the measured ~11 ms per decision, 3 cycles ≈ 35 ms to act and 8 cycles ≈ 90 ms to recover.
-- Hysteresis (proposal mitigation 8) is essential, above all for the DQN: without it, it switches 18.5 times per episode and in 47/115 episodes a false countermeasure was already active when the threat began.
-- Non-recovered cells (sweeping_jammer 10 dB, noise_burst 4–10 dB, path_loss 4–10 dB) match the survivability map at nominal severity.
-- Exact-class detection at onset is late (noise_burst ~10 cycles = temporal window; jamming 0–4 dB never exact) because training excluded windows spanning a threat's start; the early labels still map to the right countermeasure, so action and recovery are on time.
-
-### Unknown and combined threats (deliverable 4, risk 13; D32–D33)
-- **Leave-one-threat-out** (detector retrained without each threat): mean AUROC MSP 0.515, energy 0.521 — no better than chance on average. Distinct threats separate well (benign 0.90 / 0.97, antenna_fault 0.79 / 0.85, spoofing 0.64 / 0.91); a threat with a close sibling is classified *more* confidently than the known classes (jamming 0.16, reactive_jamming 0.18, noise_burst 0.03). Softmax-based unknown detection therefore does not work for near-duplicate threats — a known limitation of these scores. Operationally, jamming ↔ reactive_jamming map to the same countermeasure (93–100%), while noise_burst → sweeping_jammer and antenna_fault → spoofing lead to an ineffective action.
-- **Combined threats** (jamming+path_loss, noise_burst+antenna_fault, sweeping_jammer+path_loss, spoofing+noise_burst): the detector names the dominant component with high confidence (MSP 0.92–1.00) and never flags them as unknown. The loop never freezes (0/456 no_action on an attack). One action cannot repair two impairments: the best single action restores only 2 of 12 (combination, Eb/N0) cells; the DQN reached both, the rule one (per cell, frames within a cell agree).
-- **Gating fix (D33):** with confidence alone, 68% of clean-link frames at 0 dB fell below the threshold and the DQN acted on the clean link in 28/114 frames (4/114 without gating). Unknown gating now also requires a degraded link (BER > 2× clean), in the GUI and in the evaluation.
-- What protects the system against an unknown threat is the response to link degradation (mitigation 13) and sibling mapping — not the unknown score. Feature-space scores (e.g. Mahalanobis distance) are the candidate improvement.
-
-### FAR (False Alarm Rate) — proposal KPI, section ה (D29 definition)
-- A false alarm is an action while the link is not degraded (BER ≤ 2× the clean trials at that Eb/N0) — the proposal's "unnecessary channel switch".
-- **0/120** healthy-link trials (none at 0/4/10 dB, benign at 0 dB; 30 each). Upper 95% bound (Rule of Three) 3.3% per class (n = 90).
-- Benign interference at 4 and 10 dB degraded the link in 60/60 trials; the system acted in all of them (justified). Old "any action" rate: 60/180 (33.3%).
-- none was misdetected as benign 3/90 times at 0 dB; no action followed, because the link was healthy.
-
-### KPI status (dashboard)
-KPI1 detection 96.4% ✓ · KPI2 82.8% recovery vs the no-attack link (30/42 restored; non-restorable regimes mapped) ✓ · KPI3 DQN vs rule: act in 3 cycles, recover in 8 (~90 ms), 70% vs 75% of degraded episodes recovered, goodput 0.92 vs 0.85; decision latency ~11 ms ✓ · KPI4 FAR 0/120 ✓ · KPI5 end-to-end MET (jamming 99.5%) ✓
-
-### Survivability Boundary Map (proposal deliverable #7, D30)
-Every threat × 5 severity levels × 6 Eb/N0 × every action through the real link (1,200 simulations, 78 min). Map A = actions without goodput loss; Map B = any action including rate reduction.
-
-| Threat | Map A recoverable | Map B recoverable |
-|---|---|---|
-| spoofing, antenna_fault, benign_interference | 100% | 100% |
-| reactive_jamming | 97% | 97% |
-| jamming | 93% | 93% |
-| sweeping_jammer | 77% | 77% |
-| noise_burst | 43% | 50% |
-| path_loss | 20% | 30% |
-| **All 240 states** | **78.8%** (9.6% marginal, 11.7% non-recoverable) | **80.8%** (10.0% / 9.2%) |
-
-The narrow-versus-broadband contrast the proposal cites appears directly: in-channel interferers are recoverable at every severity by leaving or diversifying the channel; broadband noise_burst is non-recoverable from 6–10 dB even at its lowest severity; strong path loss is non-recoverable because no single action repairs the link budget. 6 gap cells (noise_burst 2, path_loss 4) survive only through rate reduction — the goodput trade-off. The pre-D28 maps built from abstract mechanisms (85.5 / 88.3%) are superseded.
+| A4v `validate_phy` | BER vs theory: AWGN, Rician, MRC 2 and 3 antennas, correlated branches; MMSE under jamming; seeds | ~12 min |
+| A5–A6 | 27,000 frames from 1,350 seeded sub-runs; spectrograms and link features | ~16 min |
+| B1–B3 | split by sub-run, detector training, test evaluation with bootstrap intervals | ~6 min |
+| B4, OOD | detector at unseen Eb/N0; leave-one-threat-out unknown-threat study | ~25 + 60 min |
+| C1p | frame pools: every scenario × configuration × Eb/N0 × geometry through the real link | ~90 min (extensions: new scenarios only) |
+| C2, C2e | DQN training (3 discount factors × 3 seeds); every policy on the test pools | ~45 + 5 min |
+| SURV | survivability map: threat × severity × Eb/N0 × geometry × every action | ~90 min |
+| LAT, KPI, DASH | latency per decision cycle, proposal KPIs, dashboard | ~3 min |
 
 ---
 
-## Architecture
+## Method
 
-### Digital Twin (Simulink)
-- **Transmitter:** QPSK + RRC pulse shaping (sps=4)
-- **Channel:** Rician (K=10dB) + AWGN; Doppler fd = v·fc/c follows the UAV speed — 111–267 Hz over the 50–120 km/h envelope, 160 Hz at the 72 km/h nominal (D25)
-- **Classes (9):** jamming, reactive jamming, sweeping jammer, noise burst, path loss, spoofing, antenna fault, benign interference, none (clean channel)
-- **Metrics:** BER, RSSI, SNR, PLR — see `## Modeling Assumptions` for which of these are physically measurable at a real receiver and which are simulation ground-truth
+### Link validation (D41)
+`validate_phy.m` compares the simulated BER with closed-form results (Proakis; Simon & Alouini MGF for correlated Rician branches): pass when the gap is within 0.3 dB or two standard errors over 20 channel realizations. It also checks MMSE against MRC under a 10 dB jammer and that equal seeds reproduce the same run. `main.m` stops if the validation fails.
 
-### Detection (CNN Hybrid)
-- **Input:** [128×128×1] spectrogram + [7-dim] scalar/temporal features (SNR, BER, RSSI, PLR, var_rssi_10, dber_dt, burst_ratio)
-- **Architecture:** CNN (32→64→128 filters, BN+ReLU+Pool, GAP) + FC (32→16) → merged 144-d → FC(64)+Dropout(0.3) → softmax(9)
-- **Performance:** 96.41% accuracy (macro-F1 96.39%) across 50–120 km/h; ~10 ms mean decision latency in the latest measurement (CNN preprocessing + inference 8.9 ms, DQN 1.3 ms; 6.1 ms in the earlier D23 measurement)
-- **Training data:** speed-diverse — every 100-frame block at its own continuous random speed in 50–120 km/h (D25); speed is analysis metadata, not a network input
+### Dataset (D42, D45)
+8 threats × 5 severity levels × 6 Eb/N0 (0–10 dB) × 5 seeded sub-runs × 20 frames, plus the clean link: 27,000 frames. Each sub-run has its own seed (fading, interferer direction, waveform, noise, bits) and its own UAV speed. The split into train / validation / test (60/20/20) is by sub-run, so no channel realization or feature window appears in two parts.
 
-### Decision (DQN)
-- **State:** one-hot(9 threat classes) + [log10 BER, RSSI, Eb/N0, PLR] = **13-dim**, built exclusively via `build_dqn_state.m` (training and inference share it); an unknown class gives an all-zero one-hot
-- **Actions (D39):** no_action, six single countermeasures (channel_switch, rate_reduce, freq_diversity, spatial_diversity, power_control, fec_interleave) and nine pairs of one avoidance/diversity action with one robustness action — 16 in total, applied through `apply_countermeasure.m`
-- **Reward (D29, D39):** link score vs the clean link (100 when BER ≤ 1.15× clean, otherwise recovery vs clean) minus cost (0.30 per unit of goodput lost, 0.05 per extra channel, 10 points for +6 dB transmit power); −40 for any action on a non-hostile link that is not degraded
-- **Training:** one-shot decisions; reward table measured over every threat × action × Eb/N0; 4,000 episodes sampling real per-frame states, 10% with the class hidden (proposal risk 13); per-cell validation gate
-- **Rule-based baseline:** physics-consistent class → action mapping; with the link measurements it also acts on a degraded link whose class maps to no action (proposal mitigation 13)
+### Detection (D42, D43)
+- Input: 128×128 spectrogram of the antenna-1 frame and 9 link features (SINR, BER, RSSI, PLR, RSSI variance, BER slope, burst ratio, envelope correlation, interference over thermal).
+- Network: CNN (32-64-128 filters, global pooling) and a feature branch, merged into a 64-unit embedding, softmax over 9 classes; cosine learning rate, L2, SpecAugment.
+- Unknown threats: Mahalanobis distance of the embedding to the class means (threshold keeping 95% of known validation frames) and an isolation forest on the link features; evaluated by retraining without each threat in turn.
 
-### Recovery — physics-based countermeasure model (D28, `apply_countermeasure.m`)
-One shared function applies the chosen action to the **true** threat for training, evaluation and the GUI. Threats are grouped by how they occupy the spectrum: in-channel (jamming, reactive_jamming, spoofing, benign_interference), swept (sweeping_jammer), broadband (noise_burst) and signal-side (path_loss, antenna_fault).
+### Decision layer (D44–D46)
+- **Frame pools** (`build_policy_pools.m`): every scenario × configuration × Eb/N0 through the real link with the detector applied; 6 train and 4 test sub-runs (flight geometries) per cell. All configurations of a sub-run share its seed, so an episode keeps one geometry when it changes configuration.
+- **Episodes** (`link_env.m`): 30 decision cycles (one frame each), clean link until an onset at cycle 3–10; a follower jammer re-acquires the channel 2–5 cycles after every hop.
+- **Reward:** link quality from the configuration's BER in the episode's geometry (100 at ≤ 1.15× the clean link, 0 at the unmitigated BER; clean reference floored at 1e-4), minus goodput, spectrum, power and processing costs, 5 points per change, 20 for a change on a healthy link.
+- **Link monitor and shield** (`policy_monitor.m`, `policy_mask.m`): 5-frame BER, degradation, class; an alarm (threat class, unknown or degradation) is confirmed after 2 consecutive cycles, and only then may a policy start a new configuration (Alshiekh et al., shielded RL). The state never contains the episode clock.
+- **Policies** (`policy_decide.m`, one function for training, evaluation and the GUI): expert rule, class → configuration table tuned on the train pools, Double DQN (experience replay, target network, Huber loss, gradient clipping, best checkpoint), each with optional escalation; the discount factor is chosen on validation among 0, 0.5 and 0.9.
+- **Training data:** single threats, the clean link and four training combinations; the four test combinations are never seen in training.
+- **Evaluation** (`evaluate_policies.m`): test pools only; sets single, follower, combined, unknown (detector output withheld) and clean; baselines random, always-on MMSE, best fixed configuration, rule, table and a one-step oracle; paired differences with 95% intervals; breakdowns per threat, Eb/N0, interferer direction and UAV speed.
 
-| Action | Physics | Effective against | No effect on | Cost |
-|---|---|---|---|---|
-| `channel_switch` | move to a channel the interferer does not occupy; interference falls by the adjacent-channel rejection (`cm_acr_db` = 30 dB) | in-channel threats | swept, broadband, signal-side | — |
-| `freq_diversity` | same data on two channels, best branch selected | in-channel threats (−30 dB); swept jammer must hit both channels at once (duty → duty²) | broadband, signal-side | 2× spectrum |
-| `spatial_diversity` | second receive antenna, MRC (`cm_n_rx` = 2) | +3 dB against noise and spatially uncorrelated interference; antenna_fault: healthy antenna replaces the faulty one | — | — |
-| `rate_reduce` | data rate ÷ `cm_rate_factor` (4) | +6 dB processing gain against noise and noise-like interference | no gain against the coherent spoofer | goodput × 0.25 |
-| `power_control` (D39) | transmit power + `cm_power_db` (6 dB) | +6 dB against noise and every additive interferer, including the spoofer | — (attenuation threats keep their loss, the signal is simply stronger) | power × 4 (10 reward points) |
-| `fec_interleave` (D39) | rate-1/2 convolutional code (K = 7, [171 133]), random interleaver over the run, Viterbi decoding with erasures on symbols whose energy is > 6 dB above the run median | burst errors (noise_burst, sweeping_jammer); coding gain against moderate uniform errors | high uniform BER (strong barrage jamming) | goodput × 0.5 |
-| pair `a+b` (D39) | both actions at once: Eb/N0 gains add, costs multiply | combined threats; single threats where one action is not enough | — | product of both costs |
-
-FEC is applied to the measured channel error pattern of each run (`extract_closed_loop_frames.m`): the same channel symbols carry a coded, interleaved stream, the error positions of the real link are applied to it, and BER/PLR are counted on the decoded information bits. Erasures come from the received energy, not from the known burst schedule.
-
-The previous model subtracted a fixed 25/15/25/25 dB from each threat's severity field regardless of the action's physics, so three actions were interchangeable and, for example, a channel switch "repaired" path loss. All closed-loop and map results above were re-run on this model (2026-09-23/24). `eval_countermeasure_matrix.m` measures every threat × action × Eb/N0 through the real link (`results/countermeasure_matrix.*`). First result: in-channel threats and antenna_fault are restorable at every Eb/N0; broadband noise_burst (29× clean at 10 dB) and strong path_loss (7.0× at 10 dB) are not restorable by any single action — the recoverable / non-recoverable contrast of proposal deliverable 7.
+### Survivability boundary (D30, D46)
+Every threat × severity × Eb/N0 through every configuration on one seeded run shared by all actions: recoverable (≤ 2× clean BER), marginal (≤ 5×) or not, and which action achieves it. Map A uses only actions without goodput loss, Map B any action. Directional threats are mapped with the interferer 45° and 10° from the GCS direction.
 
 ---
 
-## Modeling Assumptions & Limitations
+## Proposal KPIs (section 5)
 
-Documented in full in the interim report (section 3.7) and worth summarizing here for anyone extending the codebase:
+| # | KPI | Target | Source |
+|---|---|---|---|
+| 1 | Detection vs SNR | macro-F1 ≥ 90% above a threshold | `eval_detector.m` |
+| 2 | Unknown threats | mean AUROC ≥ 0.8, leave-one-threat-out | `eval_ood_detection.m` |
+| 3 | Physical validation | BER within 0.3 dB of theory | `validate_phy.m` |
+| 4 | Restoration | ≥ 80% of cycles at ≤ 2× clean BER on recoverable attacks; boundary mapped | `evaluate_policies.m`, `map_survivability_boundary.m` |
+| 5 | DQN vs baselines | better than the rule (paired 95% interval), with follower jammer and unseen combinations | `evaluate_policies.m` |
+| 6 | False alarms | one-sided 95% bound ≤ 5% over ≥ 600 clean-link episodes | `evaluate_policies.m` |
+| 7 | Real time and speed | latency median / p95; restored spread ≤ 10 points over 50–120 km/h | `measure_latency.m`, `evaluate_policies.m` |
+| 8 | Minimum | closed loop restoring at least one recoverable threat | `evaluate_policies.m` |
 
-- **BER is simulation ground-truth ("oracle"), not a physically-measurable feature.** It's computed by comparing `tx_bits_out` to `rx_bits_out` — information a real deployed receiver does not have (it never knows what the transmitter actually sent). A real system would substitute an indirect estimator: EVM, CRC-based frame error rate, or FEC correction counts. This affects not just the `ber` feature but three others derived from it: **PLR** (`ber > 0.1` threshold), **dber_dt**, and **burst_ratio** — i.e. 4 of the 7 detector features are oracle-derived; only RSSI, var_rssi_10, and SNR (configured but realistically estimable from pilots) are directly physical.
-- **Countermeasure application is a flat dB subtraction**, not a dynamic RF simulation — no channel re-synthesis, synthesizer lock time, or handoff blind-time is modeled. `spatial_diversity` specifically does not model a real multi-antenna (MIMO/SIMO) RF chain; it represents, abstractly, the effect of switching to a working backup antenna or MRC combining.
-- **Transition/switching cost is not in the reward function** — every action's full dB benefit applies instantly and for free in the model. A `λδ`-style transition-cost term (Liu et al. [6]) is documented future work.
-- **No PHY-layer timing/carrier synchronization is modeled** (D7) — the project's scope is link-layer AI detection and decision, not a Costas/Gardner-loop receiver. This is also why "spoofing" here means a coherent counterfeit waveform causing interference/detection-confusion, not synchronization hijacking — there's no sync loop in the model to hijack.
-
-None of these are hidden — they're the explicit content of the report's Limitations & Assumptions section, framed as disclosed modeling choices appropriate to a proof-of-concept simulation, with a stated path to a more physically-complete model for each one.
-
----
-
-## Interactive Demo (`demo_gui.m`, v3)
-
-Operator-console style MATLAB `uifigure` app for live, in-person demonstration, rebuilt (D26) to cover every proposal deliverable. Five tabs:
-
-- **LIVE OPERATIONS** — a test matrix (threat × Eb/N0, per-row and per-cell selection) runs as a queue. Controls: **UAV speed** (50–120 km/h, continuous; the Doppler is applied to the Simulink channel of every run), **threat severity** (nominal or levels 1–5 using the dataset's severity axes), an **UNKNOWN-threat confidence threshold** slider, a rule-based comparison toggle and optional session-video capture. Per run it shows: a threat-specific GCS↔UAV link diagram, spectrogram and IQ constellation before/after, a **BER / RSSI timeline** with the countermeasure boundary and the clean-channel reference, CNN confidence and decision-latency gauges with class probabilities, **DQN Q-values with the rule-based choice marked**, a BER bar chart (no action / DQN / rule), the goodput trade-off flag for `rate_reduce`, and a verdict classified with the survivability-map thresholds (recoverable ≤ 2× clean BER, marginal ≤ 5×).
-- **CONTINUOUS EPISODE** (D37) — one link streamed cycle by cycle: clean cycles, threat onset, then detection → policy → dwell/hysteresis on every received frame. Settings: threat, Eb/N0, severity, UAV speed, policy (DQN, rule-based, or both on identical frame draws), clean/after-onset cycles, hysteresis on/off with dwell and hold, playback speed, seed. Live plots: BER per cycle with its 5-cycle mean, the clean and 2× clean lines and the switch moments; detected class per cycle against the true class; proposed action and committed configuration. At the end: T_detect, T_act, T_recover, switches before/after onset, final BER vs clean, goodput and the committed actions, with the same rules as `run_closed_loop_episodes.m`; the cycle-by-cycle trace is saved as CSV in `GUI_Results/`, and EXPORT SCREEN saves the whole console as PNG next to it. Frames come from real Simulink runs of the scenario under all five configurations (10 runs, about a minute on the first run of a scenario, cached afterwards); one cycle is `episode_cycle.m`, the same code the episodic evaluation uses.
-- **KPI & RESULTS** — six KPI cards, confusion matrix, accuracy and recovery vs Eb/N0, decision latency, action distribution and robustness vs UAV speed, read from `results/`.
-- **SURVIVABILITY MAP** — Map A / Map B per threat (severity × Eb/N0 grid, ratio to clean BER, gap-cell analysis) with the last live run marked.
-- **SESSION LOG** — full run history table, export to CSV + `.mat` in `GUI_Results/`, per-sequence event log.
-
-Every run calls the real pipeline end-to-end (no mocked or precomputed results): `build_threat_model.m` → `sim()` → `extract_closed_loop_frames.m` → trained CNN → trained DQN → a real second `sim()` per distinct chosen action (DQN, and rule-based if different) to measure the actual post-mitigation BER. Decision latency is timed strictly around the CNN path plus the DQN forward pass (no drawing or pauses inside `tic/toc`), so it is the same quantity the diagnostic reports.
-
-**Architecture note for anyone extending this file:** it deliberately contains **no nested functions** — MATLAB makes a function's workspace "static" whenever it contains a nested function, which then rejects the script-style variable injection used by `init_params.m` and `build_threat_model.m` throughout this codebase. Static state (models, parameters, UI handles, colours) lives in `fig.UserData`; state that changes while a sequence runs (history, video writer, log file, abort flag, last run) lives in appdata so a callback can never overwrite it with a stale copy. `params.mat` is restored after every run through an `onCleanup` guard. See D24 and D26 in `DECISIONS.md`.
-
-**Performance note:** `splits.mat` is >1 GB but the GUI needs only two normalization vectors; the first launch extracts them into `data/gui_norm_stats.mat` (one-time, slow) and later launches skip the big load. Run the GUI from a fresh MATLAB session after `main.m`. Since D37 the GUI builds the Simulink model without opening its editor window (`params.quiet_build`; `build_threat_model.m` falls back to opening it if the chart objects are not reachable), and the run timer redraws at a limited rate.
+`measure_all_kpis.m` writes the status of each (MET / NOT MET / STALE / MISSING) to `results/kpi_summary.txt`; `build_kpi_dashboard.m` draws `results/kpi_dashboard.png`.
 
 ---
 
-## Report
+## Results (D46 run, 2026-09-26)
 
-An interim report (Word .docx, 7 chapters — intro, theoretical background with full math, implementation, results, dashboard, risks, future work — plus a dedicated Limitations & Assumptions section) has been drafted covering the material in this README in full academic depth, including the modeling-assumptions disclosures above. It is maintained outside this git repository (a submission deliverable, not project source). **Its results chapters predate the 2026-09-21 full re-run and need syncing** — the list of figures to update is in `PROJECT_LOG.md` (Session 11). A small number of figure placeholders remain, each labeled in the document with a description of what real photo/diagram would fit there (e.g. a tactical UAV photo, a QPSK constellation diagram) — public-domain source suggestions (U.S. DoD / Wikimedia) were provided; final image selection is pending.
+All numbers on data never used for training: the detector on the test split (by sub-run), the decision layer on the test pools (flight geometries with unseen seeds). Intervals are 95%.
 
----
+| # | KPI | Result | Status |
+|---|---|---|---|
+| 1 | Detection vs SNR | accuracy 96.28%, macro-F1 96.28% [94.88, 97.37]; ≥ 91.1% from 0 dB; unseen Eb/N0 97.7% vs 97.5% | MET |
+| 2 | Unknown threats | Mahalanobis mean AUROC 0.887 (0.807–0.973 per threat); softmax confidence 0.687 | MET |
+| 3 | BER vs theory | 5/5 within 0.3 dB (+0.05, −0.21, +0.05, +0.13, +0.17 dB); seeds reproducible | MET |
+| 4 | Restoration | 89.3% of cycles ≤ 2× clean on recoverable attacks (single threats, all: 85.6%); survivability Map A 86.2%, Map B 93.6% | MET |
+| 5 | DQN vs baselines | return +0.130 [0.121, 0.139] vs rule + escalation, +0.037 vs tuned table, +0.038 vs best fixed | MET |
+| 6 | False alarms | 37/768 clean episodes (4.8%), one-sided bound 6.29%; per cycle 0.16%; rule 26.7% | NOT MET (bound 5%) |
+| 7 | Real time + speed | 10.9 ms median, 48.9 ms p95 per decision cycle; restored 81.2–88.5% across 50–120 km/h | MET |
+| 8 | End-to-end loop | all 8 single threats restored on ≥ 50% of cycles | MET |
 
-## Design Highlights
+**Decision layer, mean return per cycle on the test pools** (1 = restored at no cost):
 
-See `docs/DECISIONS.md` for the full Architecture Decision Record:
-- **D1:** Model-based simulation (no SDR hardware)
-- **D2:** All-in MATLAB/Simulink (RF modeling + RL Toolbox)
-- **D3:** Small UAV, 2.4 GHz ISM, short-range LoS
-- **D7:** No PHY-layer carrier/timing synchronization modeled (link-layer AI focus) — see Modeling Assumptions above
-- **D8:** Signal-level threat injection (not metric-level)
-- **D9:** Non-hostile faults (antenna_fault, path_loss, benign_interference, none) deliberately included so the system learns to distinguish real attacks from benign/faulty/clean conditions
-- **D11:** System Objects engine (replaced commfilt2 ISI floor)
-- **D12:** Spoofing root-cause fix (coherent QPSK injection) — historical instability was a data-generation bug, not a detector limitation
-- **D13:** CNN-LSTM comparison architecture — built, evaluated, not pursued further (production stays CNN+scalar hybrid); excluded from `main.m`
-- **D14:** DQN state encoding — ordinal → one-hot (13-dim)
-- **D15:** KPI #3 redefinition — recovery cycles → decision latency
-- **D16:** Closed-loop sliding-window feature fix
-- **D17:** Survivability boundary — two-map methodology (neutralization vs. survivability)
-- **D18:** Rx_IQ tap point fixed (post-AWGN, not pre-AWGN) — full pipeline re-run completed, numbers above are post-fix
-- **D19:** rule_based_policy.m's per-threat mitigation_db documented as unused (comparison is decision-policy only)
-- **D20:** Shared `extract_closed_loop_frames.m` — fixed a FAR-measurement bug (missing AWGN `set_param` per trial) that had inflated FAR to ~72%; real FAR is 0%
-- **D21:** Closed-loop diagnostic reports recovery as N/A when the DQN chose no_action; GPU warm-up strengthened
-- **D22:** Decision-latency measurement widened to include full preprocessing, not just inference
-- **D23:** `spectrogram()` warm-up added — eliminated a one-time JIT skew between mean and median latency
-- **D24:** `demo_gui.m` built — interactive operator-console demo; no-nested-functions architecture pattern documented for future MATLAB GUI work
-- **D25:** UAV speed envelope widened to a continuous 50–120 km/h (Doppler 111–267 Hz); speed-diverse dataset, accuracy-vs-speed evaluation and `eval_speed_robustness.m`. Amends D4
-- **D34:** detector generalization to Eb/N0 never seen in training (1,3,5,7,9 dB); KPI #1 as worded (macro-F1 per Eb/N0 and threshold); action-equivalent accuracy; reactive_jamming and onset windows documented, not retrained
-- **D33:** unknown gating only on a degraded link (confidence alone caused false actions on the clean link at 0 dB); file consolidation — 7 files merged or removed, 8 moved to `legacy/`
-- **D32:** unknown-threat detection — leave-one-threat-out retraining with MSP and energy scores, calibrated unknown threshold — and combined threats (jamming+path_loss, noise_burst+antenna_fault, sweeping_jammer+path_loss, spoofing+noise_burst) with class-based vs unknown-gated decisions
-- **D31:** episodic closed loop — threat onset mid-stream, per-frame detection and decision, dwell/hysteresis; recovery time in decision cycles for DQN and rule-based (KPI #3 as written)
-- **D30:** survivability map rebuilt on the real action set (Map A without goodput loss, Map B any action, best action per cell); rule baseline reacts to link degradation (proposal mitigation 13)
-- **D29:** DQN reward = link state vs clean − goodput/spectrum cost, trained over the full Eb/N0 range with real per-frame states (10% class-hidden episodes); FAR counts only unnecessary actions (link not degraded)
-- **D28:** physics-based countermeasure model in one shared function (`apply_countermeasure.m`); actions now differ in effect (e.g. channel switch cannot repair path loss); rule-based baseline aligned to the same physics; `eval_countermeasure_matrix.m`
-- **D27:** KPI #2 measured against the no-attack (clean) link, as the proposal defines it (`recovery_vs_clean.m`); clean reference = the `none` run at the same Eb/N0; previous BER-before metric kept alongside
-- **D26:** `demo_gui.m` v3 — proposal-complete operator console (4 tabs, DQN-vs-rule comparison, UNKNOWN-threat handling, survivability verdicts, speed-driven Doppler); norm-stats cache for fast startup
+| Set | DQN | rule + esc. | table | best fixed | oracle |
+|---|---|---|---|---|---|
+| single threats | 0.838 | 0.729 | 0.819 | 0.773 | 0.923 |
+| follower jammer | 0.858 | 0.825 | 0.777 | 0.794 | 0.964 |
+| unseen combinations | 0.509 | 0.266 | 0.482 | 0.535 | 0.638 |
+| unknown (class withheld) | 0.817 | 0.649 | 0.751 | 0.763 | 0.922 |
+| clean link | 0.980 | 0.959 | 0.960 | 0.872 | 0.978 |
 
-See `PROJECT_LOG.md` for the full fix history and session-by-session detail behind each decision above.
+**Findings:**
+- The discount factor chosen on validation is γ = 0 (0.839 vs 0.830 for γ = 0.9): with the link monitor in the state the best action depends on the current cycle, and the gain over the rule and the table comes from learning the mapping from measurements to configuration, not from long-horizon planning.
+- Geometry decides whether spatial nulling works: always-on MMSE restores 0% of cycles with the interferer within 20° of the GCS direction and 89% beyond 45°; the DQN keeps 73% in the aligned case by choosing avoidance and power instead.
+- Without the class (unknown set) the DQN still restores 85.5% of cycles, the rule 51.7%: the response to link degradation protects against threats the detector does not know.
+- Unseen combinations remain the limit: even the oracle restores only 30.7% of cycles, and the DQN trails the best fixed configuration there.
+- Every non-recoverable survivability state is at the aligned geometry (10°) or in path loss; at 45° all maps are 100% recoverable. Rate reduction, FEC and rate + power recover part of them at a goodput cost (Map A → Map B).
+
+Full tables: `results/kpi_summary.txt`, `results/policy_evaluation.txt`, `results/dqn_training.txt`, `results/ood_detection.txt`, `results/survivability_boundary_map{A,B}.txt`, `results/latency.txt`; figures: `results/kpi_dashboard.png`, `results/policy_breakdown.png`. Earlier runs are in `docs/PROJECT_LOG.md`.
 
 ---
 
-## Known Issues & Future Work
+## Operator console (`demo_gui.m`)
 
-**Open items:**
-- **Improvement plan in progress (Session 12):** steps 7–8 done (D35–D36, run 2026-09-25); step 9 (continuous episode view, GUI build speed; D37) code-complete, MATLAB check pending; next: documentation sync and a full `main.m` run (step 10).
-- **Dynamic/Chasing Jammer scenario** (priority) — an adversary that reacts to the system's countermeasures, needed to let the DQN demonstrate a real decision-quality advantage over the static rule-based policy (see KPI #3 discussion above). Planned, not yet built.
-- A small number of report figure placeholders need real source images (suggestions provided, final selection pending)
-- `demo_gui.m` v3 (D26) — rebuilt and delivered; verified only by a syntax parse and helper-function tests outside MATLAB, so live-use feedback and small layout fixes are still expected. A slow-startup report on 2026-09-22 was addressed (norm-stats cache; launch from a fresh session)
-- **reactive_jamming 87.1% recall** (was 91.0%; macro-F1 96.39%) — 33 of 304 test samples are labeled jamming. The distinction is temporal, and the extra Doppler variation may blur the temporal features (untested hypothesis). Below the 90% per-class line in absolute terms but above the proposal's 90% macro-F1 target; its closed-loop recovery is unaffected (85.7%) because jamming receives the same countermeasure. Candidate for targeted improvement or documentation as a known limitation.
-- **antenna_fault** — weakest detection class (92.8% recall; the 0 dB closed-loop run is often misdetected at low confidence); recovery itself is 99% once the correct action is taken.
-- **Decision latency** — ~10–11 ms median across three independent runs (10.05, 9.99, 11.44 ms). The D23 figure (6.09 ms) belongs to the previous build.
-- **Speed diversity** — the DQN state has no Doppler input and its reward table and the survivability map are built at the nominal 72 km/h; detection and the closed loop are speed-swept (flat).
-- The authoritative numbers are in `results/kpi_summary.txt` and `results/kpi_dashboard.png`; `main.m` points there at the end instead of printing fixed numbers.
+- **Live operations:** a queue of threat × Eb/N0 cells at a chosen UAV speed and severity. Each run is a real Simulink run; every frame passes through the detector, the Mahalanobis unknown-threat score (slider: retention level) and `policy_decide.m`; the configuration at the end of the run is simulated again to measure the result. Shows spectrogram, constellation, BER/RSSI timeline, class probabilities, DQN Q-values with the rule's choice, BER before / DQN / rule and a verdict on the survivability thresholds.
+- **Continuous episode:** one link cycle by cycle, clean cycles then a threat onset, DQN and rule on identical frames; every configuration is simulated on the same seeds. T_detect, T_act, T_recover, switches, goodput; CSV and screenshot export.
+- **KPI & results:** KPI cards and plots from `results/`.
+- **Survivability map:** Map A / B per threat and geometry, with the last live run marked.
+- **Session log:** run history, export to CSV / MAT.
 
-**Future work:**
-- Sim-to-real validation (SDR testbed) — see Modeling Assumptions above for the specific gaps this would need to close (BER estimation via EVM/CRC, real synthesizer switching time, PHY synchronization)
-- Combined countermeasures for combined attacks (one action per decision today)
-- Online reinforcement learning
-- FPGA/GPU acceleration
-- **DQN weak cells:** resolved in D36 (full-action targets); the selected agent has zero regret in all 54 cells.
-- Transition-cost-aware reward shaping (Liu et al.'s λδ term), not currently implemented
-- FAR estimation at tens of thousands of frames per condition (the current 95% upper limits are 2–6%, set by the number of trials)
+The file has no nested functions (D24): static state lives in `fig.UserData`, changing state in appdata; `params.mat` is restored after every run.
+
+---
+
+## Modeling assumptions and limitations
+
+- **BER is simulation truth.** It compares transmitted and received bits, which a real receiver cannot do; PLR, BER slope and burst ratio derive from it. A deployed system would use EVM, CRC frame errors or decoder statistics.
+- **Ideal pilots.** Channel estimation uses the known transmitted symbols without pilot overhead: the receiver performance is an upper bound for a practical one.
+- **Countermeasures are modeled, not built:** channel switch through adjacent-channel rejection (30 dB), rate reduction and power control as Eb/N0 gains, FEC applied to the measured error pattern of each run, MMSE combining in the receiver model. Switching time and signalling to the GCS are not modeled.
+- **No carrier or timing synchronization** (D7); spoofing is a coherent counterfeit waveform, not a synchronization attack.
+- **Decisions on measured frames.** The decision layer is trained and evaluated on frames measured through the real link (pools), not with Simulink inside the learning loop; one decision cycle is one frame.
+- **Airframe shadowing** of the UAV antennas is not modeled; two antennas reduce its effect.
+- **Simulation only.** Validation on hardware (SDR testbed) is future work.
+
+---
+
+## Decision record
+
+`docs/DECISIONS.md` records every decision with its reason and consequences. The current system rests on:
+- **D41** multi-antenna UAV receiver (MRC / MMSE), validation against theory, seeding of every random source
+- **D42–D43** detector v2: seeded sub-runs split by run, receiver-side features, interference over thermal, Mahalanobis and isolation-forest unknown-threat scores
+- **D44** sequential decision layer on measured frame pools: Double DQN, follower jammer, escalation, baselines
+- **D45** random interferer geometry, per-geometry episodes, reward floor, confirmation shield, table baseline
+- **D46** discount-factor selection, training combinations, one decision interface in the GUI, latency, KPI aggregation, survivability map on shared seeds with two geometries
+- **D47** documentation in `docs/`; code split into folders at the end of the project
+
+---
+
+## Known issues and future work
+
+- False alarms on the clean link: 4.8% of 30-cycle episodes, bound 6.29% against 5%. They come from the 2-cycle alarm confirmation (the same count for every γ).
+- Latency tail: p95 48.9 ms, from two separate GPU forward passes per frame (classification and Mahalanobis embedding).
+- Combined threats that were never seen in training remain the hardest case: two interferers exceed what two antennas can null, and several combinations cannot be restored by any configuration.
+- Hardware validation (SDR), BER estimation without ground truth, switching time and GCS signalling.
+- Online learning and a larger antenna array.
+- The interim report (Word, outside the repository) needs its results chapters synced to the D46 run.
 
 ---
 
 ## References
 
-Key sources from the project proposal (IEEE format):
-- H. Yuan et al., "Joint relay and channel selection against mobile and smart
-  jammer: A deep reinforcement learning approach," IET Communications, vol. 15,
-  2021.
-- X. Liu, Y. Xu, L. Jia, Q. Wu, A. Anpalagan, "Anti-Jamming Communications
-  Using Spectrum Waterfall: A Deep Reinforcement Learning Approach," IEEE
-  Communications Letters, vol. 22, no. 5, pp. 998-1001, 2018.
-- F. Tlili et al., "Advancing UAV security with artificial intelligence: A
-  comprehensive survey of techniques and future directions," Internet of
-  Things, vol. 27, 2024.
-- Z. Yu et al., "Cybersecurity of Unmanned Aerial Vehicles: A Survey," IEEE
-  Aerospace and Electronic Systems Magazine, vol. 39, pp. 182-215, 2024.
-- S. Nanayakkara et al., "Smart Drone Neutralization: AI Driven RF Jamming
-  and Modulation Detection with Software Defined Radio," Drones and
-  Autonomous Vehicles, 2025 — latency-aware model comparison, verified
-  against the primary source (Table 5): Faster R-CNN 99%@2349ms, CenterNet
-  96%@1366ms, SSD ResNet50 48%@1286ms, EfficientDet 58%@233ms. This
-  system's ~10 ms mean decision latency (latest measurement; 5.7 ms median earlier) at 96.41% accuracy compares favorably
-  against all four on both axes.
-- Mnih et al. (2015), "Human-level control through deep reinforcement
-  learning," Nature — base DQN architecture.
-- Rician channel models & Doppler effects (standard comms textbooks).
+Numbered as in the project proposal (IEEE):
+1. F. Tlili, S. Ayed, L. Chaari Fourati, "Advancing UAV security with artificial intelligence," Internet of Things, 2024.
+2. Z. Yu et al., "Cybersecurity of unmanned aerial vehicles: A survey," IEEE AES Magazine, 2024.
+3. D. Alsadie, "Cybersecurity and artificial intelligence in unmanned aerial vehicles," IET Information Security, 2025.
+4. S. Nanayakkara et al., "Smart drone neutralization: AI driven RF jamming and modulation detection with SDR," Drones and Autonomous Vehicles, 2025.
+5. H. Yuan et al., "Joint relay and channel selection against mobile and smart jammer: A deep RL approach," IET Communications, 2021.
+6. X. Liu et al., "Anti-jamming communications using spectrum waterfall: A deep RL approach," IEEE Communications Letters, 2018.
+7. V. Mnih et al., "Human-level control through deep reinforcement learning," Nature, 2015.
+8. J. Yang et al., "Agent-based anti-jamming techniques for UAV communications in adversarial environments: A survey," arXiv:2508.11687, 2025.
+9. J. G. Proakis, M. Salehi, Digital Communications, 5th ed., 2008.
+10. D. G. Brennan, "Linear diversity combining techniques," Proc. IRE, 1959.
+11. D. Papathanasiou et al., "Secure communication protocols and AI-based anomaly detection in UAV-GCS," Applied Sciences, 2026.
+12. M. K. Simon, M.-S. Alouini, Digital Communication over Fading Channels, 2nd ed., 2005.
+13. K. Lee et al., "A simple unified framework for detecting out-of-distribution samples and adversarial attacks," NeurIPS, 2018.
+14. F. T. Liu, K. M. Ting, Z.-H. Zhou, "Isolation forest," ICDM, 2008.
+15. H. van Hasselt, A. Guez, D. Silver, "Deep reinforcement learning with double Q-learning," AAAI, 2016.
+16. H. L. Van Trees, Optimum Array Processing, 2002.
+17. U. Tariq et al., "Systematic review of machine and deep learning models for UAV cyber threat defense," Discover Artificial Intelligence, 2026.
+
+Shielded reinforcement learning: M. Alshiekh et al., "Safe reinforcement learning via shielding," AAAI, 2018.
 
 ---
 
-**Last Updated:** 2026-09-24 (D27–D31: episodic closed loop and recovery time; KPI #2 vs clean link, physics-based countermeasures, DQN reward with costs, action-based survivability map)
-**Status:** Phase A+B+C complete and re-run on the speed-diverse dataset, survivability mapping complete, all 5 proposal KPIs met, speed-robustness evaluation complete, interim report drafted (results chapters pending sync to the latest run), operator console v3 delivered and under live testing | Phase D (final report + defense prep) in progress
+**Last updated:** 2026-09-26 (D46 results, D47). **Status:** phases A–C, survivability map and KPIs complete (7/8 met); open: false-alarm bound, latency tail, GUI check, reports and defense.
