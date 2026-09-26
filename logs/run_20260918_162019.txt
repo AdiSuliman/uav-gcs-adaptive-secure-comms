@@ -1,0 +1,965 @@
+=== Logging full run to: logs/run_20260918_162019.txt ===
+(This file will contain EVERYTHING printed below, even across clc calls.)
+
+========================================================
+  UAV-GCS ADAPTIVE SECURE COMMS - MASTER PIPELINE
+  A: Link+Threats+Data | B: Detection | C: Recovery | EXP: Exploration | KPI: Measurement
+========================================================
+
+> PHASE A: Link Model + Threat Injection + Dataset
+
+  [A5-A6] Dataset status:
+         raw dataset  : READY (16-Sep-2026 19:27:56, 950 MB)
+         spectrograms : READY (16-Sep-2026 19:31:02, 1106 MB)
+
+> PHASE A-exp: Sequence Windowing (CNN-LSTM data prep) -- NOT PURSUED FURTHER
+
+  [A-exp] Sequence pipeline status (STALE -- predates spoofing fix, not regenerated):
+         sequence index    : READY (15-Sep-2026 21:50:26, 0 MB)
+         spectrograms_seq  : READY (15-Sep-2026 21:52:59, 2113 MB)
+
+> PHASE B: Detection Network (CNN + scalar hybrid, 9 classes)
+
+  [B] Pipeline status:
+      splits.mat            : READY (16-Sep-2026 19:32:49, 1107 MB)
+      trained_detector.mat  : READY (16-Sep-2026 19:39:07, 1 MB)
+      B3 evaluation results : [PENDING] -> eval_detector
+
+> PHASE B-exp: CNN-LSTM Detector -- NOT PURSUED FURTHER
+
+  [B-exp] Pipeline status (STALE, kept for the architecture-comparison record only):
+      splits_seq.mat            : READY (15-Sep-2026 22:36:06, 2113 MB)
+      trained_detector_lstm.mat : READY (15-Sep-2026 22:43:28, 1 MB)
+      B3-seq evaluation results : READY -> results/confusion_matrix_lstm.png
+
+> PHASE C: Closed-Loop Adaptive Recovery (9 threats/classes)
+
+  [C1] Rule-based countermeasure policy...           READY (rule_based_policy.m)
+  [C3-diag] Running full diagnostic closed-loop (timing, Q-values, rule comparison)...
+=== C3-Diagnostic: Full Decision Trace + Timing (SNR sweep) ===
+
+
+========== UAV-GCS LINK PARAMETERS ==========
+Phase:            A4  (channel: Rician)
+Modulation:       QPSK
+Symbol Rate:      1.00e+06 sym/s
+Bits/Frame:       1000 (+ 32 CRC [FUTURE])
+Symbols/Frame:    516
+Channel:          Rician (K=10.0 dB)
+Carrier Freq:     2.4 GHz
+Range:            100 m [FUTURE]
+UAV Velocity:     20 m/s (72 km/h) nominal | envelope 18-22 m/s
+Max Doppler fd:   160.0 Hz  (normalized 1.60e-04)
+Active Threat:    jamming (JSR=10 dB)
+Eb/N0 Range:      0 to 10 dB
+Frames per SNR:   1000
+Sequence window:  len=8, stride=4 (LSTM)
+=============================================
+
+Parameters saved to params.mat
+Warming up CNN and DQN networks (one-time GPU JIT cost, excluded from results)...
+Warm-up complete.
+
+Running diagnostic closed-loop: 9 threats x 6 SNR points = 54 runs
+
+========== SNR = 0 dB ==========
+[1/54] SNR=0 dB | Threat: jamming
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=jamming, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: jamming            (conf=93.9%, 7.31 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=jamming, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: freq_diversity     (4.78 ms) | Rule: channel_switch     | Recovery: 67.2%
+
+[2/54] SNR=0 dB | Threat: reactive_jamming
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: reactive_jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=reactive_jamming, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: jamming            (conf=94.9%, 4.15 ms) false
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: reactive_jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=reactive_jamming, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: freq_diversity     (2.09 ms) | Rule: channel_switch_fast | Recovery: 66.3%
+
+[3/54] SNR=0 dB | Threat: sweeping_jammer
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: sweeping_jammer)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=sweeping_jammer, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: sweeping_jammer    (conf=100.0%, 9.36 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: sweeping_jammer)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=sweeping_jammer, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (2.95 ms) | Rule: channel_switch_fast | Recovery: 25.6%
+
+[4/54] SNR=0 dB | Threat: noise_burst
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: noise_burst)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=noise_burst, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: noise_burst        (conf=100.0%, 62.51 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: noise_burst)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=noise_burst, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: freq_diversity     (12.59 ms) | Rule: rate_reduce        | Recovery: 41.0%
+
+[5/54] SNR=0 dB | Threat: path_loss
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: path_loss)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=path_loss, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: path_loss          (conf=100.0%, 3.80 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: path_loss)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=path_loss, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (2.63 ms) | Rule: rate_reduce        | Recovery: 64.8%
+
+[6/54] SNR=0 dB | Threat: spoofing
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: spoofing)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=spoofing, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: spoofing           (conf=100.0%, 3.16 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: spoofing)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=spoofing, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (1.40 ms) | Rule: freq_diversity     | Recovery: 57.4%
+
+[7/54] SNR=0 dB | Threat: antenna_fault
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: antenna_fault)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=antenna_fault, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: antenna_fault      (conf=100.0%, 4.43 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: antenna_fault)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=antenna_fault, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (1.98 ms) | Rule: spatial_diversity  | Recovery: 21.8%
+
+[8/54] SNR=0 dB | Threat: benign_interference
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: benign_interference (conf=100.0%, 3.47 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: no_action          (1.48 ms) | Rule: no_action          | Recovery: -0.8%
+
+[9/54] SNR=0 dB | Threat: none
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: none               (conf=89.8%, 6.12 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: no_action          (2.77 ms) | Rule: no_action          | Recovery: 1.1%
+
+========== SNR = 2 dB ==========
+[10/54] SNR=2 dB | Threat: jamming
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=jamming, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: jamming            (conf=95.8%, 1.61 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=jamming, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: freq_diversity     (0.80 ms) | Rule: channel_switch     | Recovery: 78.5%
+
+[11/54] SNR=2 dB | Threat: reactive_jamming
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: reactive_jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=reactive_jamming, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: jamming            (conf=96.8%, 2.10 ms) false
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: reactive_jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=reactive_jamming, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: freq_diversity     (1.21 ms) | Rule: channel_switch_fast | Recovery: 77.8%
+
+[12/54] SNR=2 dB | Threat: sweeping_jammer
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: sweeping_jammer)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=sweeping_jammer, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: sweeping_jammer    (conf=100.0%, 1.63 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: sweeping_jammer)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=sweeping_jammer, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.83 ms) | Rule: channel_switch_fast | Recovery: 39.3%
+
+[13/54] SNR=2 dB | Threat: noise_burst
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: noise_burst)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=noise_burst, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: noise_burst        (conf=100.0%, 1.73 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: noise_burst)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=noise_burst, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: freq_diversity     (0.96 ms) | Rule: rate_reduce        | Recovery: 54.9%
+
+[14/54] SNR=2 dB | Threat: path_loss
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: path_loss)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=path_loss, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: path_loss          (conf=100.0%, 1.67 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: path_loss)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=path_loss, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.84 ms) | Rule: rate_reduce        | Recovery: 74.3%
+
+[15/54] SNR=2 dB | Threat: spoofing
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: spoofing)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=spoofing, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: spoofing           (conf=100.0%, 1.58 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: spoofing)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=spoofing, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.74 ms) | Rule: freq_diversity     | Recovery: 71.9%
+
+[16/54] SNR=2 dB | Threat: antenna_fault
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: antenna_fault)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=antenna_fault, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: antenna_fault      (conf=100.0%, 2.02 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: antenna_fault)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=antenna_fault, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (1.09 ms) | Rule: spatial_diversity  | Recovery: 31.5%
+
+[17/54] SNR=2 dB | Threat: benign_interference
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: benign_interference (conf=100.0%, 2.01 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: no_action          (0.79 ms) | Rule: no_action          | Recovery: -1.3%
+
+[18/54] SNR=2 dB | Threat: none
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: path_loss          (conf=74.5%, 1.61 ms) false
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.83 ms) | Rule: no_action          | Recovery: 3.1%
+
+========== SNR = 4 dB ==========
+[19/54] SNR=4 dB | Threat: jamming
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=jamming, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: jamming            (conf=95.9%, 1.61 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=jamming, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: freq_diversity     (0.76 ms) | Rule: channel_switch     | Recovery: 86.2%
+
+[20/54] SNR=4 dB | Threat: reactive_jamming
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: reactive_jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=reactive_jamming, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: jamming            (conf=97.5%, 1.61 ms) false
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: reactive_jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=reactive_jamming, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: spatial_diversity  (0.85 ms) | Rule: channel_switch_fast | Recovery: 86.4%
+
+[21/54] SNR=4 dB | Threat: sweeping_jammer
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: sweeping_jammer)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=sweeping_jammer, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: sweeping_jammer    (conf=100.0%, 1.82 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: sweeping_jammer)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=sweeping_jammer, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: freq_diversity     (1.24 ms) | Rule: channel_switch_fast | Recovery: 52.0%
+
+[22/54] SNR=4 dB | Threat: noise_burst
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: noise_burst)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=noise_burst, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: noise_burst        (conf=100.0%, 1.66 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: noise_burst)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=noise_burst, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: spatial_diversity  (0.87 ms) | Rule: rate_reduce        | Recovery: 69.3%
+
+[23/54] SNR=4 dB | Threat: path_loss
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: path_loss)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=path_loss, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: path_loss          (conf=100.0%, 1.58 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: path_loss)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=path_loss, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.72 ms) | Rule: rate_reduce        | Recovery: 83.5%
+
+[24/54] SNR=4 dB | Threat: spoofing
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: spoofing)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=spoofing, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: spoofing           (conf=100.0%, 1.59 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: spoofing)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=spoofing, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.78 ms) | Rule: freq_diversity     | Recovery: 85.1%
+
+[25/54] SNR=4 dB | Threat: antenna_fault
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: antenna_fault)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=antenna_fault, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: antenna_fault      (conf=100.0%, 1.71 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: antenna_fault)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=antenna_fault, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.86 ms) | Rule: spatial_diversity  | Recovery: 47.4%
+
+[26/54] SNR=4 dB | Threat: benign_interference
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: benign_interference (conf=99.9%, 1.65 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: no_action          (1.36 ms) | Rule: no_action          | Recovery: 2.4%
+
+[27/54] SNR=4 dB | Threat: none
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: path_loss          (conf=94.6%, 1.80 ms) false
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.77 ms) | Rule: no_action          | Recovery: 1.3%
+
+========== SNR = 6 dB ==========
+[28/54] SNR=6 dB | Threat: jamming
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=jamming, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: jamming            (conf=96.5%, 1.58 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=jamming, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: spatial_diversity  (0.74 ms) | Rule: channel_switch     | Recovery: 91.7%
+
+[29/54] SNR=6 dB | Threat: reactive_jamming
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: reactive_jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=reactive_jamming, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: jamming            (conf=97.0%, 1.60 ms) false
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: reactive_jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=reactive_jamming, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: spatial_diversity  (0.83 ms) | Rule: channel_switch_fast | Recovery: 92.3%
+
+[30/54] SNR=6 dB | Threat: sweeping_jammer
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: sweeping_jammer)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=sweeping_jammer, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: sweeping_jammer    (conf=100.0%, 1.66 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: sweeping_jammer)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=sweeping_jammer, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.83 ms) | Rule: channel_switch_fast | Recovery: 69.8%
+
+[31/54] SNR=6 dB | Threat: noise_burst
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: noise_burst)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=noise_burst, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: noise_burst        (conf=100.0%, 1.57 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: noise_burst)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=noise_burst, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: spatial_diversity  (0.79 ms) | Rule: rate_reduce        | Recovery: 83.0%
+
+[32/54] SNR=6 dB | Threat: path_loss
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: path_loss)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=path_loss, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: path_loss          (conf=100.0%, 1.68 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: path_loss)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=path_loss, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.76 ms) | Rule: rate_reduce        | Recovery: 89.7%
+
+[33/54] SNR=6 dB | Threat: spoofing
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: spoofing)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=spoofing, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: spoofing           (conf=100.0%, 1.59 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: spoofing)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=spoofing, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.77 ms) | Rule: freq_diversity     | Recovery: 92.4%
+
+[34/54] SNR=6 dB | Threat: antenna_fault
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: antenna_fault)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=antenna_fault, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: antenna_fault      (conf=100.0%, 1.68 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: antenna_fault)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=antenna_fault, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.89 ms) | Rule: spatial_diversity  | Recovery: 61.5%
+
+[35/54] SNR=6 dB | Threat: benign_interference
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: benign_interference (conf=98.3%, 1.57 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: no_action          (0.76 ms) | Rule: no_action          | Recovery: -2.6%
+
+[36/54] SNR=6 dB | Threat: none
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: path_loss          (conf=98.8%, 1.75 ms) false
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.89 ms) | Rule: no_action          | Recovery: -2.1%
+
+========== SNR = 8 dB ==========
+[37/54] SNR=8 dB | Threat: jamming
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=jamming, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: jamming            (conf=96.5%, 1.63 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=jamming, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: spatial_diversity  (0.88 ms) | Rule: channel_switch     | Recovery: 95.3%
+
+[38/54] SNR=8 dB | Threat: reactive_jamming
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: reactive_jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=reactive_jamming, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: jamming            (conf=96.0%, 1.76 ms) false
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: reactive_jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=reactive_jamming, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: spatial_diversity  (0.94 ms) | Rule: channel_switch_fast | Recovery: 96.0%
+
+[39/54] SNR=8 dB | Threat: sweeping_jammer
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: sweeping_jammer)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=sweeping_jammer, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: sweeping_jammer    (conf=100.0%, 1.69 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: sweeping_jammer)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=sweeping_jammer, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.84 ms) | Rule: channel_switch_fast | Recovery: 85.0%
+
+[40/54] SNR=8 dB | Threat: noise_burst
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: noise_burst)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=noise_burst, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: noise_burst        (conf=100.0%, 1.64 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: noise_burst)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=noise_burst, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: freq_diversity     (0.86 ms) | Rule: rate_reduce        | Recovery: 91.6%
+
+[41/54] SNR=8 dB | Threat: path_loss
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: path_loss)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=path_loss, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: path_loss          (conf=100.0%, 1.56 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: path_loss)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=path_loss, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.78 ms) | Rule: rate_reduce        | Recovery: 95.1%
+
+[42/54] SNR=8 dB | Threat: spoofing
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: spoofing)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=spoofing, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: spoofing           (conf=100.0%, 1.59 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: spoofing)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=spoofing, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.73 ms) | Rule: freq_diversity     | Recovery: 96.8%
+
+[43/54] SNR=8 dB | Threat: antenna_fault
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: antenna_fault)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=antenna_fault, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: antenna_fault      (conf=100.0%, 1.66 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: antenna_fault)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=antenna_fault, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.84 ms) | Rule: spatial_diversity  | Recovery: 77.6%
+
+[44/54] SNR=8 dB | Threat: benign_interference
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: benign_interference (conf=97.1%, 1.82 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: no_action          (0.97 ms) | Rule: no_action          | Recovery: -1.6%
+
+[45/54] SNR=8 dB | Threat: none
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: path_loss          (conf=99.4%, 1.54 ms) false
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.76 ms) | Rule: no_action          | Recovery: -14.5%
+
+========== SNR = 10 dB ==========
+[46/54] SNR=10 dB | Threat: jamming
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=jamming, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: jamming            (conf=95.8%, 1.54 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=jamming, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: spatial_diversity  (0.78 ms) | Rule: channel_switch     | Recovery: 97.7%
+
+[47/54] SNR=10 dB | Threat: reactive_jamming
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: reactive_jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=reactive_jamming, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: jamming            (conf=95.7%, 1.62 ms) false
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: reactive_jamming)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=reactive_jamming, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.85 ms) | Rule: channel_switch_fast | Recovery: 98.1%
+
+[48/54] SNR=10 dB | Threat: sweeping_jammer
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: sweeping_jammer)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=sweeping_jammer, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: sweeping_jammer    (conf=100.0%, 1.64 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: sweeping_jammer)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=sweeping_jammer, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.85 ms) | Rule: channel_switch_fast | Recovery: 94.4%
+
+[49/54] SNR=10 dB | Threat: noise_burst
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: noise_burst)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=noise_burst, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: noise_burst        (conf=100.0%, 1.74 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: noise_burst)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=noise_burst, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: freq_diversity     (0.95 ms) | Rule: rate_reduce        | Recovery: 96.0%
+
+[50/54] SNR=10 dB | Threat: path_loss
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: path_loss)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=path_loss, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: path_loss          (conf=100.0%, 1.60 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: path_loss)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=path_loss, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.72 ms) | Rule: rate_reduce        | Recovery: 97.8%
+
+[51/54] SNR=10 dB | Threat: spoofing
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: spoofing)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=spoofing, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: spoofing           (conf=100.0%, 1.56 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: spoofing)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=spoofing, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.95 ms) | Rule: freq_diversity     | Recovery: 98.9%
+
+[52/54] SNR=10 dB | Threat: antenna_fault
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: antenna_fault)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=antenna_fault, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: antenna_fault      (conf=100.0%, 2.16 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: antenna_fault)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=antenna_fault, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (1.15 ms) | Rule: spatial_diversity  | Recovery: 90.9%
+
+[53/54] SNR=10 dB | Threat: benign_interference
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: benign_interference (conf=97.2%, 1.82 ms) true
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: no_action          (0.79 ms) | Rule: no_action          | Recovery: -2.1%
+
+[54/54] SNR=10 dB | Threat: none
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    CNN: path_loss          (conf=99.5%, 1.53 ms) false
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=-15.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+    DQN: channel_switch     (0.74 ms) | Rule: no_action          | Recovery: -26.8%
+
+Sweep complete. Total time: 3.6 minutes
+
+=== C3-DIAGNOSTIC FULL REPORT (SNR SWEEP) ===
+Generated: 18-Sep-2026 16:24:01
+Threats: 9 | SNR points: [0 2 4 6 8 10] dB | Total runs: 54
+
+NOTE: latencies are CNN-inference + DQN-inference only (ms) -- this is
+the actual "reaction time" of the decision system, excluding Simulink
+build/sim time (which is a simulation artifact, not a real deployed cost).
+
+--- Section 1: Recovery %% per Threat per SNR ---
+Threat                       0dB       2dB       4dB       6dB       8dB      10dB      mean
+jamming                    67.2%     78.5%     86.2%     91.7%     95.3%     97.7%     86.1%
+reactive_jamming           66.3%     77.8%     86.4%     92.3%     96.0%     98.1%     86.2%
+sweeping_jammer            25.6%     39.3%     52.0%     69.8%     85.0%     94.4%     61.0%
+noise_burst                41.0%     54.9%     69.3%     83.0%     91.6%     96.0%     72.7%
+path_loss                  64.8%     74.3%     83.5%     89.7%     95.1%     97.8%     84.2%
+spoofing                   57.4%     71.9%     85.1%     92.4%     96.8%     98.9%     83.7%
+antenna_fault              21.8%     31.5%     47.4%     61.5%     77.6%     90.9%     55.1%
+benign_interference        -0.8%     -1.3%      2.4%     -2.6%     -1.6%     -2.1%     -1.0%
+none                        1.1%      3.1%      1.3%     -2.1%    -14.5%    -26.8%     -6.3%
+
+--- Section 2: CNN Detection Accuracy in Closed Loop, per SNR ---
+SNR (dB)        Correct
+0                8/9    (88.9%)
+2                7/9    (77.8%)
+4                7/9    (77.8%)
+6                7/9    (77.8%)
+8                7/9    (77.8%)
+10               7/9    (77.8%)
+
+--- Section 3: DQN-vs-Rule Agreement, per SNR ---
+SNR (dB)          Agree
+0                3/9    (33.3%)
+2                2/9    (22.2%)
+4                1/9    (11.1%)
+6                2/9    (22.2%)
+8                2/9    (22.2%)
+10               3/9    (33.3%)
+
+--- Section 4: Per-Run Detail ---
+--- jamming @ SNR=0 dB ---
+  CNN: jamming (conf 93.9%, 7.31 ms, correct=1)
+  DQN: freq_diversity (4.78 ms) | Q: no_action=0.01 channel_switch=67.97 rate_reduce=57.81 freq_diversity=68.81 spatial_diversity=67.78 
+  Rule: channel_switch | agrees=0
+  BER before=3.976e-01 after=1.305e-01 recovery=67.2%
+--- reactive_jamming @ SNR=0 dB ---
+  CNN: jamming (conf 94.9%, 4.15 ms, correct=0)
+  DQN: freq_diversity (2.09 ms) | Q: no_action=0.14 channel_switch=46.75 rate_reduce=39.80 freq_diversity=47.12 spatial_diversity=46.57 
+  Rule: channel_switch_fast | agrees=0
+  BER before=3.765e-01 after=1.270e-01 recovery=66.3%
+--- sweeping_jammer @ SNR=0 dB ---
+  CNN: sweeping_jammer (conf 100.0%, 9.36 ms, correct=1)
+  DQN: channel_switch (2.95 ms) | Q: no_action=0.02 channel_switch=22.83 rate_reduce=19.96 freq_diversity=22.80 spatial_diversity=21.45 
+  Rule: channel_switch_fast | agrees=1
+  BER before=1.650e-01 after=1.227e-01 recovery=25.6%
+--- noise_burst @ SNR=0 dB ---
+  CNN: noise_burst (conf 100.0%, 62.51 ms, correct=1)
+  DQN: freq_diversity (12.59 ms) | Q: no_action=0.17 channel_switch=39.14 rate_reduce=33.89 freq_diversity=39.96 spatial_diversity=39.42 
+  Rule: rate_reduce | agrees=0
+  BER before=2.046e-01 after=1.207e-01 recovery=41.0%
+--- path_loss @ SNR=0 dB ---
+  CNN: path_loss (conf 100.0%, 3.80 ms, correct=1)
+  DQN: channel_switch (2.63 ms) | Q: no_action=-3.71 channel_switch=71.83 rate_reduce=30.15 freq_diversity=63.60 spatial_diversity=69.27 
+  Rule: rate_reduce | agrees=0
+  BER before=3.457e-01 after=1.217e-01 recovery=64.8%
+--- spoofing @ SNR=0 dB ---
+  CNN: spoofing (conf 100.0%, 3.16 ms, correct=1)
+  DQN: channel_switch (1.40 ms) | Q: no_action=-1.99 channel_switch=48.76 rate_reduce=26.99 freq_diversity=36.63 spatial_diversity=38.04 
+  Rule: freq_diversity | agrees=0
+  BER before=2.810e-01 after=1.197e-01 recovery=57.4%
+--- antenna_fault @ SNR=0 dB ---
+  CNN: antenna_fault (conf 100.0%, 4.43 ms, correct=1)
+  DQN: channel_switch (1.98 ms) | Q: no_action=-1.63 channel_switch=25.80 rate_reduce=8.00 freq_diversity=17.76 spatial_diversity=19.08 
+  Rule: spatial_diversity | agrees=0
+  BER before=1.759e-01 after=1.375e-01 recovery=21.8%
+--- benign_interference @ SNR=0 dB ---
+  CNN: benign_interference (conf 100.0%, 3.47 ms, correct=1)
+  DQN: no_action (1.48 ms) | Q: no_action=-0.26 channel_switch=-34.55 rate_reduce=-29.24 freq_diversity=-39.95 spatial_diversity=-40.77 
+  Rule: no_action | agrees=1
+  BER before=1.642e-01 after=1.655e-01 recovery=-0.8%
+--- none @ SNR=0 dB ---
+  CNN: none (conf 89.8%, 6.12 ms, correct=1)
+  DQN: no_action (2.77 ms) | Q: no_action=0.25 channel_switch=-33.99 rate_reduce=-28.01 freq_diversity=-38.16 spatial_diversity=-40.04 
+  Rule: no_action | agrees=1
+  BER before=1.216e-01 after=1.203e-01 recovery=1.1%
+--- jamming @ SNR=2 dB ---
+  CNN: jamming (conf 95.8%, 1.61 ms, correct=1)
+  DQN: freq_diversity (0.80 ms) | Q: no_action=-0.06 channel_switch=69.07 rate_reduce=59.06 freq_diversity=69.90 spatial_diversity=69.05 
+  Rule: channel_switch | agrees=0
+  BER before=3.946e-01 after=8.492e-02 recovery=78.5%
+--- reactive_jamming @ SNR=2 dB ---
+  CNN: jamming (conf 96.8%, 2.10 ms, correct=0)
+  DQN: freq_diversity (1.21 ms) | Q: no_action=0.14 channel_switch=47.06 rate_reduce=40.59 freq_diversity=47.43 spatial_diversity=47.30 
+  Rule: channel_switch_fast | agrees=0
+  BER before=3.780e-01 after=8.404e-02 recovery=77.8%
+--- sweeping_jammer @ SNR=2 dB ---
+  CNN: sweeping_jammer (conf 100.0%, 1.63 ms, correct=1)
+  DQN: channel_switch (0.83 ms) | Q: no_action=0.01 channel_switch=21.52 rate_reduce=19.52 freq_diversity=21.40 spatial_diversity=20.33 
+  Rule: channel_switch_fast | agrees=1
+  BER before=1.255e-01 after=7.614e-02 recovery=39.3%
+--- noise_burst @ SNR=2 dB ---
+  CNN: noise_burst (conf 100.0%, 1.73 ms, correct=1)
+  DQN: freq_diversity (0.96 ms) | Q: no_action=0.25 channel_switch=38.33 rate_reduce=34.03 freq_diversity=39.32 spatial_diversity=39.28 
+  Rule: rate_reduce | agrees=0
+  BER before=1.717e-01 after=7.740e-02 recovery=54.9%
+--- path_loss @ SNR=2 dB ---
+  CNN: path_loss (conf 100.0%, 1.67 ms, correct=1)
+  DQN: channel_switch (0.84 ms) | Q: no_action=-3.64 channel_switch=66.14 rate_reduce=26.75 freq_diversity=57.42 spatial_diversity=62.74 
+  Rule: rate_reduce | agrees=0
+  BER before=3.083e-01 after=7.919e-02 recovery=74.3%
+--- spoofing @ SNR=2 dB ---
+  CNN: spoofing (conf 100.0%, 1.58 ms, correct=1)
+  DQN: channel_switch (0.74 ms) | Q: no_action=-1.69 channel_switch=41.24 rate_reduce=22.51 freq_diversity=29.82 spatial_diversity=30.91 
+  Rule: freq_diversity | agrees=0
+  BER before=2.833e-01 after=7.953e-02 recovery=71.9%
+--- antenna_fault @ SNR=2 dB ---
+  CNN: antenna_fault (conf 100.0%, 2.02 ms, correct=1)
+  DQN: channel_switch (1.09 ms) | Q: no_action=-1.51 channel_switch=20.23 rate_reduce=4.66 freq_diversity=11.86 spatial_diversity=12.99 
+  Rule: spatial_diversity | agrees=0
+  BER before=1.380e-01 after=9.452e-02 recovery=31.5%
+--- benign_interference @ SNR=2 dB ---
+  CNN: benign_interference (conf 100.0%, 2.01 ms, correct=1)
+  DQN: no_action (0.79 ms) | Q: no_action=-0.32 channel_switch=-35.78 rate_reduce=-30.46 freq_diversity=-41.62 spatial_diversity=-42.35 
+  Rule: no_action | agrees=1
+  BER before=1.328e-01 after=1.345e-01 recovery=-1.3%
+--- none @ SNR=2 dB ---
+  CNN: path_loss (conf 74.5%, 1.61 ms, correct=0)
+  DQN: channel_switch (0.83 ms) | Q: no_action=-2.23 channel_switch=45.63 rate_reduce=20.92 freq_diversity=40.52 spatial_diversity=44.04 
+  Rule: no_action | agrees=0
+  BER before=7.532e-02 after=7.299e-02 recovery=3.1%
+--- jamming @ SNR=4 dB ---
+  CNN: jamming (conf 95.9%, 1.61 ms, correct=1)
+  DQN: freq_diversity (0.76 ms) | Q: no_action=-0.09 channel_switch=69.93 rate_reduce=60.34 freq_diversity=70.85 spatial_diversity=70.40 
+  Rule: channel_switch | agrees=0
+  BER before=3.928e-01 after=5.417e-02 recovery=86.2%
+--- reactive_jamming @ SNR=4 dB ---
+  CNN: jamming (conf 97.5%, 1.61 ms, correct=0)
+  DQN: spatial_diversity (0.85 ms) | Q: no_action=0.18 channel_switch=46.81 rate_reduce=41.07 freq_diversity=47.03 spatial_diversity=47.08 
+  Rule: channel_switch_fast | agrees=0
+  BER before=3.710e-01 after=5.044e-02 recovery=86.4%
+--- sweeping_jammer @ SNR=4 dB ---
+  CNN: sweeping_jammer (conf 100.0%, 1.82 ms, correct=1)
+  DQN: freq_diversity (1.24 ms) | Q: no_action=0.19 channel_switch=18.66 rate_reduce=17.27 freq_diversity=18.78 spatial_diversity=18.28 
+  Rule: channel_switch_fast | agrees=0
+  BER before=9.462e-02 after=4.539e-02 recovery=52.0%
+--- noise_burst @ SNR=4 dB ---
+  CNN: noise_burst (conf 100.0%, 1.66 ms, correct=1)
+  DQN: spatial_diversity (0.87 ms) | Q: no_action=0.27 channel_switch=37.06 rate_reduce=33.83 freq_diversity=37.95 spatial_diversity=38.03 
+  Rule: rate_reduce | agrees=0
+  BER before=1.540e-01 after=4.724e-02 recovery=69.3%
+--- path_loss @ SNR=4 dB ---
+  CNN: path_loss (conf 100.0%, 1.58 ms, correct=1)
+  DQN: channel_switch (0.72 ms) | Q: no_action=-3.57 channel_switch=60.49 rate_reduce=23.36 freq_diversity=51.28 spatial_diversity=56.25 
+  Rule: rate_reduce | agrees=0
+  BER before=2.721e-01 after=4.481e-02 recovery=83.5%
+--- spoofing @ SNR=4 dB ---
+  CNN: spoofing (conf 100.0%, 1.59 ms, correct=1)
+  DQN: channel_switch (0.78 ms) | Q: no_action=-1.46 channel_switch=33.82 rate_reduce=18.22 freq_diversity=23.27 spatial_diversity=23.90 
+  Rule: freq_diversity | agrees=0
+  BER before=2.952e-01 after=4.399e-02 recovery=85.1%
+--- antenna_fault @ SNR=4 dB ---
+  CNN: antenna_fault (conf 100.0%, 1.71 ms, correct=1)
+  DQN: channel_switch (0.86 ms) | Q: no_action=-1.37 channel_switch=15.22 rate_reduce=1.60 freq_diversity=6.57 spatial_diversity=7.67 
+  Rule: spatial_diversity | agrees=0
+  BER before=1.075e-01 after=5.655e-02 recovery=47.4%
+--- benign_interference @ SNR=4 dB ---
+  CNN: benign_interference (conf 99.9%, 1.65 ms, correct=1)
+  DQN: no_action (1.36 ms) | Q: no_action=-0.26 channel_switch=-36.80 rate_reduce=-31.49 freq_diversity=-43.06 spatial_diversity=-43.59 
+  Rule: no_action | agrees=1
+  BER before=1.117e-01 after=1.090e-01 recovery=2.4%
+--- none @ SNR=4 dB ---
+  CNN: path_loss (conf 94.6%, 1.80 ms, correct=0)
+  DQN: channel_switch (0.77 ms) | Q: no_action=-2.12 channel_switch=39.38 rate_reduce=17.16 freq_diversity=33.80 spatial_diversity=36.82 
+  Rule: no_action | agrees=0
+  BER before=4.500e-02 after=4.442e-02 recovery=1.3%
+--- jamming @ SNR=6 dB ---
+  CNN: jamming (conf 96.5%, 1.58 ms, correct=1)
+  DQN: spatial_diversity (0.74 ms) | Q: no_action=0.07 channel_switch=70.29 rate_reduce=61.40 freq_diversity=71.45 spatial_diversity=71.50 
+  Rule: channel_switch | agrees=0
+  BER before=3.889e-01 after=3.244e-02 recovery=91.7%
+--- reactive_jamming @ SNR=6 dB ---
+  CNN: jamming (conf 97.0%, 1.60 ms, correct=0)
+  DQN: spatial_diversity (0.83 ms) | Q: no_action=0.19 channel_switch=45.70 rate_reduce=40.88 freq_diversity=45.74 spatial_diversity=45.91 
+  Rule: channel_switch_fast | agrees=0
+  BER before=3.703e-01 after=2.856e-02 recovery=92.3%
+--- sweeping_jammer @ SNR=6 dB ---
+  CNN: sweeping_jammer (conf 100.0%, 1.66 ms, correct=1)
+  DQN: channel_switch (0.83 ms) | Q: no_action=0.13 channel_switch=19.87 rate_reduce=18.68 freq_diversity=19.75 spatial_diversity=19.12 
+  Rule: channel_switch_fast | agrees=1
+  BER before=7.876e-02 after=2.376e-02 recovery=69.8%
+--- noise_burst @ SNR=6 dB ---
+  CNN: noise_burst (conf 100.0%, 1.57 ms, correct=1)
+  DQN: spatial_diversity (0.79 ms) | Q: no_action=0.26 channel_switch=35.64 rate_reduce=33.42 freq_diversity=36.41 spatial_diversity=36.55 
+  Rule: rate_reduce | agrees=0
+  BER before=1.376e-01 after=2.333e-02 recovery=83.0%
+--- path_loss @ SNR=6 dB ---
+  CNN: path_loss (conf 100.0%, 1.68 ms, correct=1)
+  DQN: channel_switch (0.76 ms) | Q: no_action=-3.49 channel_switch=54.49 rate_reduce=19.77 freq_diversity=44.83 spatial_diversity=49.43 
+  Rule: rate_reduce | agrees=0
+  BER before=2.226e-01 after=2.299e-02 recovery=89.7%
+--- spoofing @ SNR=6 dB ---
+  CNN: spoofing (conf 100.0%, 1.59 ms, correct=1)
+  DQN: channel_switch (0.77 ms) | Q: no_action=-1.07 channel_switch=26.68 rate_reduce=14.69 freq_diversity=17.13 spatial_diversity=17.08 
+  Rule: freq_diversity | agrees=0
+  BER before=2.961e-01 after=2.260e-02 recovery=92.4%
+--- antenna_fault @ SNR=6 dB ---
+  CNN: antenna_fault (conf 100.0%, 1.68 ms, correct=1)
+  DQN: channel_switch (0.89 ms) | Q: no_action=-1.62 channel_switch=21.03 rate_reduce=5.09 freq_diversity=14.02 spatial_diversity=15.97 
+  Rule: spatial_diversity | agrees=0
+  BER before=8.501e-02 after=3.274e-02 recovery=61.5%
+--- benign_interference @ SNR=6 dB ---
+  CNN: benign_interference (conf 98.3%, 1.57 ms, correct=1)
+  DQN: no_action (0.76 ms) | Q: no_action=0.15 channel_switch=-31.75 rate_reduce=-27.20 freq_diversity=-36.94 spatial_diversity=-36.93 
+  Rule: no_action | agrees=1
+  BER before=8.923e-02 after=9.156e-02 recovery=-2.6%
+--- none @ SNR=6 dB ---
+  CNN: path_loss (conf 98.8%, 1.75 ms, correct=0)
+  DQN: channel_switch (0.89 ms) | Q: no_action=-1.95 channel_switch=32.89 rate_reduce=13.11 freq_diversity=27.00 spatial_diversity=29.63 
+  Rule: no_action | agrees=0
+  BER before=2.274e-02 after=2.323e-02 recovery=-2.1%
+--- jamming @ SNR=8 dB ---
+  CNN: jamming (conf 96.5%, 1.63 ms, correct=1)
+  DQN: spatial_diversity (0.88 ms) | Q: no_action=0.13 channel_switch=70.29 rate_reduce=61.95 freq_diversity=71.27 spatial_diversity=71.58 
+  Rule: channel_switch | agrees=0
+  BER before=3.857e-01 after=1.794e-02 recovery=95.3%
+--- reactive_jamming @ SNR=8 dB ---
+  CNN: jamming (conf 96.0%, 1.76 ms, correct=0)
+  DQN: spatial_diversity (0.94 ms) | Q: no_action=0.13 channel_switch=46.42 rate_reduce=42.04 freq_diversity=46.39 spatial_diversity=46.54 
+  Rule: channel_switch_fast | agrees=0
+  BER before=3.675e-01 after=1.455e-02 recovery=96.0%
+--- sweeping_jammer @ SNR=8 dB ---
+  CNN: sweeping_jammer (conf 100.0%, 1.69 ms, correct=1)
+  DQN: channel_switch (0.84 ms) | Q: no_action=0.10 channel_switch=20.95 rate_reduce=19.93 freq_diversity=20.57 spatial_diversity=19.79 
+  Rule: channel_switch_fast | agrees=1
+  BER before=6.964e-02 after=1.048e-02 recovery=85.0%
+--- noise_burst @ SNR=8 dB ---
+  CNN: noise_burst (conf 100.0%, 1.64 ms, correct=1)
+  DQN: freq_diversity (0.86 ms) | Q: no_action=0.34 channel_switch=34.92 rate_reduce=33.39 freq_diversity=35.71 spatial_diversity=35.60 
+  Rule: rate_reduce | agrees=0
+  BER before=1.309e-01 after=1.096e-02 recovery=91.6%
+--- path_loss @ SNR=8 dB ---
+  CNN: path_loss (conf 100.0%, 1.56 ms, correct=1)
+  DQN: channel_switch (0.78 ms) | Q: no_action=-3.36 channel_switch=48.88 rate_reduce=16.32 freq_diversity=38.91 spatial_diversity=43.36 
+  Rule: rate_reduce | agrees=0
+  BER before=1.696e-01 after=8.293e-03 recovery=95.1%
+--- spoofing @ SNR=8 dB ---
+  CNN: spoofing (conf 100.0%, 1.59 ms, correct=1)
+  DQN: channel_switch (0.73 ms) | Q: no_action=-0.90 channel_switch=21.96 rate_reduce=12.29 freq_diversity=12.88 spatial_diversity=12.58 
+  Rule: freq_diversity | agrees=0
+  BER before=3.013e-01 after=9.699e-03 recovery=96.8%
+--- antenna_fault @ SNR=8 dB ---
+  CNN: antenna_fault (conf 100.0%, 1.66 ms, correct=1)
+  DQN: channel_switch (0.84 ms) | Q: no_action=-1.46 channel_switch=15.89 rate_reduce=1.96 freq_diversity=8.71 spatial_diversity=10.56 
+  Rule: spatial_diversity | agrees=0
+  BER before=7.483e-02 after=1.673e-02 recovery=77.6%
+--- benign_interference @ SNR=8 dB ---
+  CNN: benign_interference (conf 97.1%, 1.82 ms, correct=1)
+  DQN: no_action (0.97 ms) | Q: no_action=0.33 channel_switch=-30.82 rate_reduce=-26.23 freq_diversity=-35.56 spatial_diversity=-35.94 
+  Rule: no_action | agrees=1
+  BER before=8.385e-02 after=8.516e-02 recovery=-1.6%
+--- none @ SNR=8 dB ---
+  CNN: path_loss (conf 99.4%, 1.54 ms, correct=0)
+  DQN: channel_switch (0.76 ms) | Q: no_action=-1.75 channel_switch=26.56 rate_reduce=9.17 freq_diversity=20.56 spatial_diversity=22.84 
+  Rule: no_action | agrees=0
+  BER before=8.341e-03 after=9.554e-03 recovery=-14.5%
+--- jamming @ SNR=10 dB ---
+  CNN: jamming (conf 95.8%, 1.54 ms, correct=1)
+  DQN: spatial_diversity (0.78 ms) | Q: no_action=0.11 channel_switch=71.20 rate_reduce=63.21 freq_diversity=71.85 spatial_diversity=72.19 
+  Rule: channel_switch | agrees=0
+  BER before=3.886e-01 after=9.069e-03 recovery=97.7%
+--- reactive_jamming @ SNR=10 dB ---
+  CNN: jamming (conf 95.7%, 1.62 ms, correct=0)
+  DQN: channel_switch (0.85 ms) | Q: no_action=0.13 channel_switch=47.06 rate_reduce=43.10 freq_diversity=46.92 spatial_diversity=46.87 
+  Rule: channel_switch_fast | agrees=1
+  BER before=3.646e-01 after=6.838e-03 recovery=98.1%
+--- sweeping_jammer @ SNR=10 dB ---
+  CNN: sweeping_jammer (conf 100.0%, 1.64 ms, correct=1)
+  DQN: channel_switch (0.85 ms) | Q: no_action=0.12 channel_switch=22.51 rate_reduce=21.54 freq_diversity=21.91 spatial_diversity=20.98 
+  Rule: channel_switch_fast | agrees=1
+  BER before=6.445e-02 after=3.637e-03 recovery=94.4%
+--- noise_burst @ SNR=10 dB ---
+  CNN: noise_burst (conf 100.0%, 1.74 ms, correct=1)
+  DQN: freq_diversity (0.95 ms) | Q: no_action=0.37 channel_switch=35.43 rate_reduce=34.18 freq_diversity=36.04 spatial_diversity=35.69 
+  Rule: rate_reduce | agrees=0
+  BER before=1.251e-01 after=5.044e-03 recovery=96.0%
+--- path_loss @ SNR=10 dB ---
+  CNN: path_loss (conf 100.0%, 1.60 ms, correct=1)
+  DQN: channel_switch (0.72 ms) | Q: no_action=-3.20 channel_switch=43.44 rate_reduce=12.95 freq_diversity=33.19 spatial_diversity=37.57 
+  Rule: rate_reduce | agrees=0
+  BER before=1.210e-01 after=2.716e-03 recovery=97.8%
+--- spoofing @ SNR=10 dB ---
+  CNN: spoofing (conf 100.0%, 1.56 ms, correct=1)
+  DQN: channel_switch (0.95 ms) | Q: no_action=-0.87 channel_switch=20.65 rate_reduce=12.35 freq_diversity=11.74 spatial_diversity=11.06 
+  Rule: freq_diversity | agrees=0
+  BER before=3.100e-01 after=3.443e-03 recovery=98.9%
+--- antenna_fault @ SNR=10 dB ---
+  CNN: antenna_fault (conf 100.0%, 2.16 ms, correct=1)
+  DQN: channel_switch (1.15 ms) | Q: no_action=-1.30 channel_switch=10.63 rate_reduce=-1.35 freq_diversity=3.29 spatial_diversity=4.86 
+  Rule: spatial_diversity | agrees=0
+  BER before=6.596e-02 after=6.014e-03 recovery=90.9%
+--- benign_interference @ SNR=10 dB ---
+  CNN: benign_interference (conf 97.2%, 1.82 ms, correct=1)
+  DQN: no_action (0.79 ms) | Q: no_action=0.47 channel_switch=-29.98 rate_reduce=-25.31 freq_diversity=-34.31 spatial_diversity=-35.18 
+  Rule: no_action | agrees=1
+  BER before=7.575e-02 after=7.735e-02 recovery=-2.1%
+--- none @ SNR=10 dB ---
+  CNN: path_loss (conf 99.5%, 1.53 ms, correct=0)
+  DQN: channel_switch (0.74 ms) | Q: no_action=-1.58 channel_switch=20.38 rate_reduce=5.27 freq_diversity=14.17 spatial_diversity=16.18 
+  Rule: no_action | agrees=0
+  BER before=1.988e-03 after=2.522e-03 recovery=-26.8%
+
+=== SUMMARY (all SNR points) ===
+Mean CNN latency: 3.33 ms | Mean DQN latency: 1.33 ms | Mean total: 4.66 ms
+Median CNN latency: 1.66 ms | Median DQN latency: 0.85 ms | Median total: 2.51 ms
+CNN closed-loop detection accuracy: 43/54 (79.6%)
+DQN-vs-Rule agreement: 13/54 (24.1%)
+Mean recovery (all threats, all SNR): 58.0%
+Mean recovery (real threats only): 75.6%
+
+Saved results/closed_loop_diagnostic_report.txt
+Saved results/closed_loop_recovery_vs_snr.png
+Saved results/closed_loop_diagnostic_timing.png
+
+=== Diagnostic Complete ===
+  [C] Pipeline status:
+      trained_dqn.mat            : READY (18-Sep-2026 12:42:09, 0 MB)
+      C3 closed-loop results     : [PENDING] -> run_closed_loop
+      C3-diag full report        : READY -> results/closed_loop_diagnostic_report.txt
+
+> PHASE EXP: Deep Countermeasure Exploration (research extension)
+
+  [EXP] Pipeline status:
+      countermeasure_exploration.mat : READY (18-Sep-2026 14:45:14, 8 MB)
+      exploration_diagnosis.txt      : READY -> results/exploration_diagnosis.txt
+
+> PHASE KPI: Proposal KPI Measurement
+
+  [KPI] Pipeline status:
+      far_measurement.txt        : READY (18-Sep-2026 15:48:29)
+      kpi3_measurement.txt       : READY (18-Sep-2026 15:53:37)
+      kpi_summary.txt            : READY (18-Sep-2026 15:54:08)
+
+> PHASE D: Documentation & Defense
+
+  [D1] Project report (docx)...                      [PENDING]
+  [D2] Defense presentation (pptx)...                [PENDING]
+
+========================================================
+ CHECKPOINT - CNN 98.05% (spoofing threat model fixed at physical root cause, verified 2x)
+ DQN one-hot state encoding, validation gate passed | C3 rerun against the new agent
+ Outputs in results/, data/ | models in models/ | code on GitHub
+ Full run log saved to: logs/run_20260918_162019.txt
+========================================================
+

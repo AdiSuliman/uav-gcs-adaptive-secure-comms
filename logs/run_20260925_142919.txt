@@ -1,0 +1,172 @@
+=== Logging full run to: logs/run_20260925_142919.txt ===
+(This file will contain EVERYTHING printed below, even across clc calls.)
+
+========================================================
+  UAV-GCS ADAPTIVE SECURE COMMS - MASTER PIPELINE
+  A:Link+Data  B:Detect  C:Recover  EXP:Explore  SURV:Map  KPI:Measure  DASH:Summary
+========================================================
+
+> PHASE A: Link Model + Threat Injection + Dataset
+
+  [A5-A6] Dataset status:
+         raw dataset  : READY (21-Sep-2026 21:36:18, 952 MB)
+         spectrograms : READY (21-Sep-2026 21:39:45, 1361 MB)
+
+> PHASE B: Detection Network (CNN + scalar hybrid, 9 classes)
+
+  [B] Pipeline status:
+      splits.mat           : READY (21-Sep-2026 21:41:49, 1361 MB)
+      trained_detector.mat : READY (21-Sep-2026 21:48:16)
+      B3 eval results      : READY (25-Sep-2026 11:14:52)
+
+> PHASE C: Closed-Loop Adaptive Recovery (9 threats/classes)
+
+  [C1] Rule-based countermeasure policy...           READY (rule_based_policy.m)
+  [C3-episodes] Episodic closed loop: recovery time in cycles, dwell/hysteresis...
+=== Episodic closed loop: recovery time in decision cycles (D31) ===
+
+
+========== UAV-GCS LINK PARAMETERS ==========
+Phase:            A4  (channel: Rician)
+Modulation:       QPSK
+Symbol Rate:      1.00e+06 sym/s
+Bits/Frame:       1000 (+ 32 CRC [FUTURE])
+Symbols/Frame:    516
+Channel:          Rician (K=10.0 dB)
+Carrier Freq:     2.4 GHz
+Range:            100 m [FUTURE]
+UAV Velocity:     20.0 m/s (72.0 km/h) nominal | envelope 50.0-120.0 km/h (13.9-33.3 m/s)
+Doppler envelope: 111-267 Hz (nominal fd_max 160 Hz)
+Max Doppler fd:   160.0 Hz  (normalized 1.60e-04)
+Active Threat:    jamming (JSR=10 dB)
+Eb/N0 Range:      0 to 10 dB
+Frames per SNR:   1000
+Sequence window:  len=8, stride=4 (LSTM)
+=============================================
+
+Parameters saved to params.mat
+Building frame pools: 9 threats x 5 actions x 3 Eb/N0 x 2 runs...
+  [1/9] jamming              pooled (0.6 min)
+  [2/9] reactive_jamming     pooled (1.2 min)
+  [3/9] sweeping_jammer      pooled (1.8 min)
+  [4/9] noise_burst          pooled (2.3 min)
+  [5/9] path_loss            pooled (2.9 min)
+  [6/9] spoofing             pooled (3.5 min)
+  [7/9] antenna_fault        pooled (4.1 min)
+  [8/9] benign_interference  pooled (4.7 min)
+  [9/9] none                 pooled (5.3 min)
+
+Running 540 episodes (80 cycles each)...
+  [1/9] jamming              done (0.4 min)
+  [2/9] reactive_jamming     done (0.9 min)
+  [3/9] sweeping_jammer      done (1.3 min)
+  [4/9] noise_burst          done (1.7 min)
+  [5/9] path_loss            done (2.1 min)
+  [6/9] spoofing             done (2.5 min)
+  [7/9] antenna_fault        done (3.0 min)
+  [8/9] benign_interference  done (3.4 min)
+  [9/9] none                 done (3.8 min)
+=== EPISODIC CLOSED LOOP: RECOVERY TIME IN DECISION CYCLES (proposal KPI #3, D31) ===
+Generated: 25-Sep-2026 14:38:23
+20 clean cycles, threat onset, 60 cycles after onset | 1 cycle = 1 frame (0.516 ms of signal)
+Hysteresis: commit after 3 consecutive proposals, no switch within 10 cycles of the previous one
+Outcome per episode: recovered (5-cycle BER average back to <= 2x clean for 10 cycles, T_recover from onset) | not recovered | not degraded (never above 2x clean) | pre-configured (countermeasure already active at onset).
+T_detect = first cycle with the exact class. Medians in cycles after onset; T_recover over recovered episodes only.
+
+--- Per threat and Eb/N0 (with hysteresis): DQN vs rule-based ---
+threat                Eb/N0 |  det  act   rec R/NR/ND   |  det  act   rec R/NR/ND  
+                            | DQN                        | Rule                      
+jamming                 0 dB |    -    3     6 5/0/0     |    -    3     6 5/0/0    
+jamming                 4 dB |    -    3     8 5/0/0     |    -    3     8 5/0/0    
+jamming                10 dB |    -    3    16 5/0/0     |    -    3    23 3/0/0    
+reactive_jamming        0 dB |    1    4     7 5/0/0     |    1    3     6 5/0/0    
+reactive_jamming        4 dB |    1    3     8 5/0/0     |    1    3     8 5/0/0    
+reactive_jamming       10 dB |    1    3     8 5/0/0     |    1    3    18 4/0/0    
+sweeping_jammer         0 dB |    1    4     - 0/0/4     |    1    4     - 0/0/4    
+sweeping_jammer         4 dB |    1    3     7 1/0/4     |    1    5    18 4/0/1    
+sweeping_jammer        10 dB |    1    3     - 0/5/0     |    1    4     - 0/4/0    
+noise_burst             0 dB |   10    4     7 1/0/4     |   10    4     7 1/0/4    
+noise_burst             4 dB |   10    3     - 0/5/0     |   10    4    35 2/3/0    
+noise_burst            10 dB |   10    3     - 0/5/0     |   10    4     - 0/5/0    
+path_loss               0 dB |    1    4    19 5/0/0     |    1    4    19 5/0/0    
+path_loss               4 dB |    1    5     - 0/5/0     |    1    5     - 0/5/0    
+path_loss              10 dB |   10    4     - 0/5/0     |   10    5     - 0/4/0    
+spoofing                0 dB |    1    7    10 4/0/1     |    1    3     4 1/0/4    
+spoofing                4 dB |    1    3     8 5/0/0     |    1    3     8 5/0/0    
+spoofing               10 dB |    1    3     8 5/0/0     |    1    3     8 5/0/0    
+antenna_fault           0 dB |    1    3     - 0/0/5     |    1   11     - 0/0/5    
+antenna_fault           4 dB |    1    3     6 3/0/2     |    1    5     8 4/0/1    
+antenna_fault          10 dB |    1    3     8 5/0/0     |    1    3     8 3/0/0    
+benign_interference     4 dB |    1    3     7 4/0/1     |    1    4     8 5/0/0    
+benign_interference    10 dB |    1    3     8 5/0/0     |    1    3     8 4/0/0    
+R/NR/ND = recovered / not recovered / not degraded (pre-configured episodes are listed in the summary).
+
+--- Summary: episodes that need action (hostile, or benign on a degraded link) ---
+configuration             T_act  T_rec recovered  not recov. not degr.  pre-cfg switches  final/cln  goodput
+dqn | hysteresis              3      8    68/93           25        21        1     1.54       1.11     0.89
+dqn | no hysteresis           1     16    20/47           27        26       42    18.99       1.86     0.88
+rule | hysteresis             3      8    66/87           21        19        9     1.37       1.11     0.85
+rule | no hysteresis          1      6    12/22           10        30       63     7.39       1.38     0.91
+Wall-clock: at ~11 ms decision latency a real-time loop decides every ~22 frames; a median of N cycles is ~N x 11 ms.
+
+--- False alarms: switches on a healthy link ---
+configuration            healthy-link episodes   with >= 1 false switch   pre-onset switches
+dqn | hysteresis                           20                        1                    1
+dqn | no hysteresis                        20                       11                   51
+rule | hysteresis                          20                        2                   10
+rule | no hysteresis                       20                       14                  111
+
+--- Hysteresis effect (proposal risk 8: oscillation) ---
+  dqn | hysteresis         switches after onset 1.54 | episodes with > 1 switch 40/115 | pre-configured at onset 1
+  dqn | no hysteresis      switches after onset 18.99 | episodes with > 1 switch 81/115 | pre-configured at onset 42
+  rule | hysteresis        switches after onset 1.37 | episodes with > 1 switch 47/115 | pre-configured at onset 9
+  rule | no hysteresis     switches after onset 7.39 | episodes with > 1 switch 82/115 | pre-configured at onset 63
+
+Saved results/closed_loop_episodes.txt (outcome fields added to results/closed_loop_episodes.mat)
+Saved results/closed_loop_episodes.png
+  [C] Pipeline status:
+      trained_dqn.mat        : READY (25-Sep-2026 13:23:05)
+      C3 closed-loop results : READY (21-Sep-2026 22:17:03)
+      C2 seed stability      : READY (25-Sep-2026 13:23:05)
+      C3-diag full report    : READY (25-Sep-2026 13:39:51)
+      C3-speed robustness    : READY (25-Sep-2026 13:49:33)
+
+> PHASE EXP: Deep Countermeasure Exploration (research extension)
+
+  [EXP] Pipeline status:
+      countermeasure_exploration.mat : READY (21-Sep-2026 23:51:06, 8 MB)
+      exploration_diagnosis.txt      : READY (21-Sep-2026 23:51:23)
+
+> PHASE SURV: Survivability Boundary Mapping (proposal deliverable #7)
+
+  [SURV] Pipeline status:
+      survivability_boundary.mat     : READY (23-Sep-2026 20:35:15)
+      Map A (no goodput loss)        : READY (23-Sep-2026 20:35:15)
+      Map B (any action)             : READY (23-Sep-2026 20:35:15)
+
+> PHASE KPI: Proposal KPI Measurement
+
+  [KPI] Pipeline status:
+      far_measurement.txt   : READY (25-Sep-2026 14:07:35)
+      kpi3_measurement.txt  : READY (25-Sep-2026 14:07:35)
+      kpi_summary.txt       : READY (25-Sep-2026 14:07:35)
+
+> PHASE DASH: Results Dashboard (proposal deliverable #1)
+
+  [DASH] Pipeline status:
+      kpi_dashboard.png : READY (25-Sep-2026 14:07:42)
+
+> PHASE D: Documentation & Defense
+
+  [D1] README.md / PROJECT_LOG.md / docs/DECISIONS.md  READY (maintained by hand)
+  [D2] Interim/final report (docx)...                  [PENDING]
+  [D3] Defense presentation (pptx)...                  [PENDING]
+
+========================================================
+ CHECKPOINT - full pipeline available from main.m
+ Headline numbers with 95% CIs: results/kpi_summary.txt (D35)
+ Survivability maps: results/survivability_boundary_mapA.txt / mapB.txt (deliverable #7)
+ Outputs in results/, data/ | models in models/ | code on GitHub
+ Full run log saved to: logs/run_20260925_142919.txt
+========================================================
+

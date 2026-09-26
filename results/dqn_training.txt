@@ -1,0 +1,12 @@
+=== SEQUENTIAL DQN TRAINING (D44, D45) ===
+Generated: 26-Sep-2026 17:56:38 | Double DQN + shield, replay 150000, target every 500 updates, gamma 0.90, lr 5e-04 -> 5e-05, 12000 episodes x 30 cycles, 3 seeds
+Validation: 1280 episodes (train pools, fresh draws), single threats + clean link
+policy                    return   restored   goodput   false sw/ep   FA episodes  switches/ep
+DQN seed 42                0.856      87.6%     0.892         0.214          2.1%         2.00   (checkpoint 7680)
+DQN seed 43                0.857      87.5%     0.882         0.254          2.1%         2.25   (checkpoint 9216)
+DQN seed 44                0.857      86.7%     0.889         0.195          2.1%         2.27   (checkpoint 10752)
+DQN gamma=0 (bandit)       0.869      89.2%     0.884         0.109          2.1%         1.53
+table (train pools)        0.831      83.2%     0.875         0.404         31.6%         2.49
+rule + escalation          0.757      72.2%     0.828         0.293         31.6%         2.57
+Seed return spread: 0.856 to 0.857 (std 0.000)
+Selected seed 43. Gate (return >= rule+escalation, false-alarm episodes <= 31.6% = max(5%, rule): 2.1%): PASS

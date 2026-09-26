@@ -1,0 +1,721 @@
+=== Logging full run to: logs/run_20260926_154710.txt ===
+(This file will contain EVERYTHING printed below, even across clc calls.)
+
+========================================================
+  UAV-GCS ADAPTIVE SECURE COMMS - MASTER PIPELINE
+  A:Link+Data  B:Detect  C:Recover  SURV:Map  KPI:Measure  DASH:Summary
+========================================================
+
+> PHASE A: Link Model + Threat Injection + Dataset
+
+  [A0] init_params...
+
+========== UAV-GCS LINK PARAMETERS ==========
+Phase:            A4  (channel: Rician)
+Modulation:       QPSK
+Symbol Rate:      1.00e+06 sym/s
+Bits/Frame:       1000 (+ 32 CRC [FUTURE])
+Symbols/Frame:    516
+Channel:          Rician (K=10.0 dB), GCS -> UAV uplink
+UAV antennas:     2 (spacing 0.50 wl, rho 0.30), Rx MRC
+Interferer AoA:   random per sub-run, -90 to 90 deg
+Carrier Freq:     2.4 GHz
+Range:            100 m [FUTURE]
+UAV Velocity:     20.0 m/s (72.0 km/h) nominal | envelope 50.0-120.0 km/h (13.9-33.3 m/s)
+Doppler envelope: 111-267 Hz (nominal fd_max 160 Hz)
+Max Doppler fd:   160.0 Hz  (normalized 1.60e-04)
+Active Threat:    jamming (JSR=10 dB)
+Eb/N0 Range:      0 to 10 dB
+Frames per SNR:   1000
+Sequence window:  len=8, stride=4 (LSTM)
+=============================================
+
+Parameters saved to params.mat
+  [A4v] Validating the multi-antenna link against theory...
+    build + compile 14.8 s
+V1 AWGN, 1 ant             gap +0.05 dB | BER 8.00e-02 3.85e-02 1.30e-02 2.46e-03 1.96e-04 6.99e-06  | 1.2 min
+    build + compile 1.3 s
+V2 Rician, 1 ant           gap -0.21 dB | BER 9.20e-02 5.06e-02 2.26e-02 7.93e-03 2.16e-03 4.76e-04  | 2.2 min
+    build + compile 1.8 s
+V3 Rician, MRC 2 ant       gap +0.05 dB | BER 2.96e-02 1.00e-02 2.34e-03 3.58e-04 3.55e-05 9.99e-07  | 3.7 min
+    build + compile 1.7 s
+V4 Rician, MRC 3 ant       gap +0.13 dB | BER 1.05e-02 2.28e-03 2.86e-04 1.80e-05 5.00e-07 0.00e+00  | 5.6 min
+    build + compile 1.2 s
+V5 default, MRC 2 ant      gap +0.17 dB | BER 3.30e-02 1.21e-02 3.25e-03 6.12e-04 8.94e-05 6.99e-06  | 7.1 min
+    build + compile 4.1 s
+V6a jam 10 dB, MRC         gap   NaN dB | BER 2.95e-01 2.91e-01 2.88e-01 2.86e-01 2.85e-01 2.84e-01  | 9.5 min
+    build + compile 0.7 s
+V6b jam 10 dB, MMSE        gap   NaN dB | BER 6.33e-02 3.12e-02 1.27e-02 4.17e-03 1.16e-03 2.79e-04  | 11.9 min
+    build + compile 0.8 s
+    build + compile 0.7 s
+    build + compile 0.7 s
+
+=== PHY VALIDATION (D41): multi-antenna UAV receiver vs theory ===
+
+Generated: 26-Sep-2026 15:59:10 | 1.0 s per point, 20 channel realizations, fd 1000 Hz | CSI block 64 sym (MRC), window 32 sym (MMSE)
+
+Eb/N0 per branch [dB]: [0 2 4 6 8 10]
+
+
+
+V1 AWGN, 1 ant             BER   8.00e-02 3.85e-02 1.30e-02 2.46e-03 1.96e-04 6.99e-06
+
+                           err     160209    77021    25982     4917      392       14
+
+                           th.   7.86e-02 3.75e-02 1.25e-02 2.39e-03 1.91e-04 3.87e-06
+
+                           gap +0.05 dB (standard error 0.01 dB) -> PASS  (bit delay found: 20)
+
+V2 Rician, 1 ant           BER   9.20e-02 5.06e-02 2.26e-02 7.93e-03 2.16e-03 4.76e-04
+
+                           err     184250   101341    45274    15877     4319      953
+
+                           th.   9.26e-02 5.15e-02 2.37e-02 8.80e-03 2.67e-03 7.01e-04
+
+                           gap -0.21 dB (standard error 0.06 dB) -> PASS  (bit delay found: 20)
+
+V3 Rician, MRC 2 ant       BER   2.96e-02 1.00e-02 2.34e-03 3.58e-04 3.55e-05 9.99e-07
+
+                           err      59328    20068     4677      716       71        2
+
+                           th.   2.89e-02 9.80e-03 2.26e-03 3.35e-04 3.23e-05 2.26e-06
+
+                           gap +0.05 dB (standard error 0.04 dB) -> PASS  (bit delay found: 20)
+
+V4 Rician, MRC 3 ant       BER   1.05e-02 2.28e-03 2.86e-04 1.80e-05 5.00e-07 0.00e+00
+
+                           err      20953     4564      573       36        1        0
+
+                           th.   9.85e-03 2.05e-03 2.40e-04 1.43e-05 4.43e-07 8.34e-09
+
+                           gap +0.13 dB (standard error 0.06 dB) -> PASS  (bit delay found: 20)
+
+V5 default, MRC 2 ant      BER   3.30e-02 1.21e-02 3.25e-03 6.12e-04 8.94e-05 6.99e-06
+
+                           err      66038    24194     6506     1226      179       14
+
+                           th.   3.08e-02 1.11e-02 2.90e-03 5.34e-04 7.33e-05 8.50e-06
+
+                           gap +0.17 dB (standard error 0.04 dB) -> PASS  (bit delay found: 20)
+
+V6a jam 10 dB, MRC         BER   2.95e-01 2.91e-01 2.88e-01 2.86e-01 2.85e-01 2.84e-01
+
+                           err     591231   582238   576041   571860   569506   567982
+
+V6b jam 10 dB, MMSE        BER   6.33e-02 3.12e-02 1.27e-02 4.17e-03 1.16e-03 2.79e-04
+
+                           err     126798    62388    25369     8337     2316      559
+
+
+
+V6 MMSE vs MRC under jamming (JSR 10 dB, interferer at 40 deg): BER ratio [dB]    6.7   9.7  13.6  18.4  23.9  30.1
+
+V6 MMSE under jamming vs jammer-free MRC (V5): BER ratio     1.92    2.58    3.90    6.80   12.94   39.93
+
+V7 seeds: same seed identical PASS, different seed differs PASS (BER [0.001743 0.001743 0.004766])
+
+Overall: theory gaps V1-V5 5/5 within 0.3 dB, seeds PASS | 12.0 min
+
+Pass rule: |gap| <= 0.3 dB or within 2 standard errors (spread over 20 channel realizations).
+  [A5] Generating multi-JSR dataset, 9 threats/classes incl. none (HEAVY, frames_per_config=100)...
+
+=== A5 dataset: 8 threats x 5 levels x 6 Eb/N0 x 5 sub-runs x 20 frames (+ none) ===
+class                   level    meanBER   meanSINR   envcorr
+jamming                     0  7.731e-02       -7.5    -0.014
+jamming                     4  1.597e-01      -10.3    -0.015
+jamming                     8  2.500e-01      -14.1    -0.015
+jamming                    12  3.234e-01      -18.3    -0.015
+jamming                    16  4.120e-01      -22.0    -0.015
+noise_burst                 0  2.838e-02       -3.1    -0.010
+noise_burst                 4  5.116e-02       -5.9    -0.010
+noise_burst                 8  8.563e-02       -9.3    -0.008
+noise_burst                12  1.060e-01      -13.0    -0.008
+noise_burst                16  1.371e-01      -16.8    -0.009
+reactive_jamming            0  4.957e-02       -5.9     0.211
+reactive_jamming            4  8.006e-02       -9.3     0.238
+reactive_jamming            8  2.137e-01      -12.9     0.255
+reactive_jamming           12  2.920e-01      -16.5     0.256
+reactive_jamming           16  3.899e-01      -20.9     0.264
+path_loss                   4  3.880e-02       -2.4    -0.014
+path_loss                   8  1.045e-01       -6.6    -0.014
+path_loss                  12  1.979e-01      -10.5    -0.017
+path_loss                  16  2.926e-01      -14.6    -0.014
+path_loss                  20  3.669e-01      -18.2    -0.014
+spoofing                   -4  3.891e-02       -0.6    -0.022
+spoofing                   -1  7.337e-02       -2.1    -0.027
+spoofing                    2  1.131e-01       -3.9    -0.030
+spoofing                    5  2.172e-01       -6.3    -0.036
+spoofing                    8  2.940e-01       -8.5    -0.039
+antenna_fault             0.1  1.226e-02        0.1    -0.006
+antenna_fault             0.2  1.615e-02       -1.6    -0.005
+antenna_fault             0.3  1.727e-02       -2.8    -0.005
+antenna_fault             0.4  2.217e-02       -4.5    -0.007
+antenna_fault             0.5  2.074e-02       -5.8    -0.006
+benign_interference       -10  1.293e-02       -0.5    -0.016
+benign_interference        -8  1.749e-02       -1.6    -0.014
+benign_interference        -6  2.391e-02       -3.0    -0.015
+benign_interference        -4  2.880e-02       -4.1    -0.014
+benign_interference        -2  4.955e-02       -5.2    -0.014
+sweeping_jammer             0  1.937e-02       -1.7    -0.010
+sweeping_jammer             4  2.632e-02       -4.2    -0.008
+sweeping_jammer             8  3.674e-02       -6.6    -0.007
+sweeping_jammer            12  5.501e-02       -9.9    -0.007
+sweeping_jammer            16  7.147e-02      -14.0    -0.006
+none                      NaN  7.770e-03        1.6    -0.015
+
+=== Dataset summary ===
+Frames: 27000 | sub-runs: 1350 | speed 50.1-120.0 km/h | 12.3 min
+  none                   3000
+  jamming                3000
+  noise_burst            3000
+  reactive_jamming       3000
+  path_loss              3000
+  spoofing               3000
+  antenna_fault          3000
+  benign_interference    3000
+  sweeping_jammer        3000
+Saved data/dataset.mat. Next: extract_spectrograms.
+  [A6] Extracting spectrograms + 7 features (HEAVY)...
+Loading dataset...
+Extracting 27000 spectrograms...
+  2000/27000
+  4000/27000
+  6000/27000
+  8000/27000
+  10000/27000
+  12000/27000
+  14000/27000
+  16000/27000
+  18000/27000
+  20000/27000
+  22000/27000
+  24000/27000
+  26000/27000
+Computing link features (window 10, per sub-run)...
+
+Saved data/spectrograms.mat: X [128 128 1 27000], 9 classes, feats [27000 x 9] (sinr, ber, rssi, plr, var_rssi, dber_dt, burst_ratio, env_corr, iot)
+Envelope correlation per class (mean): none -0.015  jamming -0.015  noise_burst -0.009  reactive_jamming 0.245  path_loss -0.014  spoofing -0.031  antenna_fault -0.006  benign_interference -0.015  sweeping_jammer -0.008  
+Interference over thermal per class (mean dB): none 0.01  jamming 15.85  noise_burst 11.23  reactive_jamming 14.67  path_loss 0.00  spoofing 5.86  antenna_fault 1.24  benign_interference 4.47  sweeping_jammer 8.82  
+  [A5-A6] Dataset status:
+         raw dataset  : READY (26-Sep-2026 16:11:32, 943 MB)
+         spectrograms : READY (26-Sep-2026 16:14:49, 1509 MB)
+
+> PHASE B: Detection Network (CNN + scalar hybrid, 9 classes)
+
+  [B1] Preparing data (stratified split 80/10/10)...
+=== B1: Prepare Data (split by sub-run) ===
+
+Split: train 16200 | val 5400 | test 5400 frames; sub-runs 810 / 270 / 270
+Sub-runs shared between train and test: 0
+
+  class                 train   val  test
+  none                   1800   600   600
+  jamming                1800   600   600
+  noise_burst            1800   600   600
+  reactive_jamming       1800   600   600
+  path_loss              1800   600   600
+  spoofing               1800   600   600
+  antenna_fault          1800   600   600
+  benign_interference    1800   600   600
+  sweeping_jammer        1800   600   600
+
+  feature z-score (train): sinr -7.06/7.17  ber 0.107/0.13  rssi 0.425/6.2  plr 0.346/0.476  var_rssi 1.35/3.97  dber_dt -0.34/48.4  burst_ratio 0.347/0.438  env_corr 0.0146/0.0899  iot 6.91/7.25  
+Saved data/splits.mat
+=== B1 Complete ===
+  [B2] Training hybrid CNN+scalar detector (9 classes)...
+=== B2: Train Hybrid Detector ===
+
+train 16200 | val 5400 | test 5400 | classes 9 | features 9 (sinr, ber, rssi, plr, var_rssi, dber_dt, burst_ratio, env_corr, iot)
+  epoch  1/30 | loss 1.0625 | val acc 0.8176 *
+  epoch  2/30 | loss 0.5498 | val acc 0.8533 *
+  epoch  3/30 | loss 0.4171 | val acc 0.8928 *
+  epoch  4/30 | loss 0.3488 | val acc 0.6826
+  epoch  5/30 | loss 0.3115 | val acc 0.9263 *
+  epoch  6/30 | loss 0.2883 | val acc 0.9061
+  epoch  7/30 | loss 0.2631 | val acc 0.7381
+  epoch  8/30 | loss 0.2459 | val acc 0.9296 *
+  epoch  9/30 | loss 0.2284 | val acc 0.8646
+  epoch 10/30 | loss 0.2182 | val acc 0.7207
+  epoch 11/30 | loss 0.2128 | val acc 0.8919
+  epoch 12/30 | loss 0.2007 | val acc 0.9548 *
+  epoch 13/30 | loss 0.2069 | val acc 0.9376
+  epoch 14/30 | loss 0.1878 | val acc 0.9537
+  epoch 15/30 | loss 0.1709 | val acc 0.9459
+  epoch 16/30 | loss 0.1782 | val acc 0.9450
+  epoch 17/30 | loss 0.1741 | val acc 0.9587 *
+  epoch 18/30 | loss 0.1589 | val acc 0.9515
+  epoch 19/30 | loss 0.1666 | val acc 0.9559
+  epoch 20/30 | loss 0.1564 | val acc 0.9557
+  epoch 21/30 | loss 0.1510 | val acc 0.9615 *
+  epoch 22/30 | loss 0.1555 | val acc 0.9683 *
+  epoch 23/30 | loss 0.1475 | val acc 0.9678
+  epoch 24/30 | loss 0.1415 | val acc 0.9683
+  epoch 25/30 | loss 0.1400 | val acc 0.9689 *
+  epoch 26/30 | loss 0.1358 | val acc 0.9650
+  epoch 27/30 | loss 0.1411 | val acc 0.9685
+  epoch 28/30 | loss 0.1362 | val acc 0.9678
+  epoch 29/30 | loss 0.1365 | val acc 0.9678
+  epoch 30/30 | loss 0.1374 | val acc 0.9693 *
+
+Best validation accuracy 0.9693 at epoch 30
+Fitting unknown-threat models (Mahalanobis, isolation forest)...
+Saved data/trained_detector.mat
+=== B2 Complete ===
+  [B3] Evaluating on test set...
+=== B3: Test Evaluation ===
+
+Loading test data and trained model...
+Running inference on 5400 test samples...
+
+Calculating metrics...
+
+--- Test Set Metrics ---
+Overall Accuracy: 96.28%
+Macro-F1 Score:   96.28%
+
+Class               none: Acc =  96.7%, F1 =  95.0%
+Class            jamming: Acc =  90.8%, F1 =  92.7%
+Class        noise_burst: Acc =  98.0%, F1 =  99.0%
+Class   reactive_jamming: Acc =  99.7%, F1 =  99.7%
+Class          path_loss: Acc =  96.3%, F1 =  95.9%
+Class           spoofing: Acc =  99.2%, F1 =  98.8%
+Class      antenna_fault: Acc =  96.8%, F1 =  96.5%
+Class benign_interference: Acc =  91.2%, F1 =  90.6%
+Class    sweeping_jammer: Acc =  97.8%, F1 =  98.2%
+
+SNR breakdown:
+  SNR= 0 dB: 91.1%
+  SNR= 2 dB: 96.7%
+  SNR= 4 dB: 98.1%
+  SNR= 6 dB: 97.3%
+  SNR= 8 dB: 97.7%
+  SNR=10 dB: 96.8%
+
+Evaluation complete. Saved confusion_matrix.png and accuracy_vs_snr.png to results/.
+
+Macro-F1 per Eb/N0: 0 dB 91.1% | 2 dB 96.6% | 4 dB 98.1% | 6 dB 97.3% | 8 dB 97.7% | 10 dB 96.8% |
+KPI #1 threshold: macro-F1 >= 90% from 0 dB up; macro-F1 above it 96.28%
+Action-equivalent accuracy: 96.52% (class accuracy 96.28%)
+95% bootstrap CI: accuracy [94.91, 97.44] | macro-F1 [94.88, 97.37] | macro-F1 above threshold [94.88, 97.37]
+
+Accuracy vs UAV speed:
+    50.1-  60.1 km/h: 96.6%  (n=800)
+    60.1-  70.1 km/h: 96.0%  (n=720)
+    70.1-  80.1 km/h: 98.4%  (n=640)
+    80.1-  90.0 km/h: 95.6%  (n=980)
+    90.0- 100.0 km/h: 95.0%  (n=760)
+   100.0- 110.0 km/h: 95.6%  (n=860)
+   110.0- 120.0 km/h: 97.5%  (n=640)
+Saved results/eval_detector_metrics.mat (for KPI aggregation)
+  [B] Pipeline status:
+      splits.mat           : READY (26-Sep-2026 16:15:38, 1509 MB)
+      trained_detector.mat : READY (26-Sep-2026 16:19:07, 24 MB)
+      B3 eval results      : READY (26-Sep-2026 16:19:19)
+
+> PHASE C: Closed-Loop Adaptive Recovery (9 threats/classes)
+
+  [C1] Rule-based countermeasure policy...           READY (rule_based_policy.m)
+  [C1p] Measuring the decision-layer frame pools...
+=== Decision-layer frame pools (D44) ===
+
+  [ 1/13] none                       17 configurations x 6 Eb/N0 (6.8 min)
+  [ 2/13] jamming                    17 configurations x 6 Eb/N0 (15.1 min)
+  [ 3/13] noise_burst                17 configurations x 6 Eb/N0 (23.3 min)
+  [ 4/13] reactive_jamming           17 configurations x 6 Eb/N0 (31.7 min)
+  [ 5/13] path_loss                  17 configurations x 6 Eb/N0 (38.5 min)
+  [ 6/13] spoofing                   17 configurations x 6 Eb/N0 (47.3 min)
+  [ 7/13] antenna_fault              17 configurations x 6 Eb/N0 (54.3 min)
+  [ 8/13] benign_interference        17 configurations x 6 Eb/N0 (62.7 min)
+  [ 9/13] sweeping_jammer            17 configurations x 6 Eb/N0 (71.2 min)
+  [10/13] jamming+path_loss          17 configurations x 6 Eb/N0 (75.0 min)
+  [11/13] noise_burst+antenna_fault  17 configurations x 6 Eb/N0 (78.6 min)
+  [12/13] sweeping_jammer+path_loss  17 configurations x 6 Eb/N0 (82.3 min)
+  [13/13] spoofing+noise_burst       17 configurations x 6 Eb/N0 (87.8 min)
+
+Clean-link BER per Eb/N0: 3.62e-02 1.07e-02 4.93e-03 5.09e-04 8.07e-06 0.00e+00 
+Unmitigated BER / clean (train split, singles):
+  jamming                     7.9    28.0    61.2   494.9 38678.0     Inf
+  noise_burst                 2.6    10.6    17.0   210.0 10581.0     Inf
+  reactive_jamming            7.9    22.8    53.3   543.7 26870.0     Inf
+  path_loss                   7.5    22.4    31.9   247.7  6919.0     Inf
+  spoofing                    4.6     6.1    18.8   239.2  3596.0     Inf
+  antenna_fault               1.4     2.3     2.2     8.3   152.0     Inf
+  benign_interference         1.1     3.2     3.5    45.4  1373.0     Inf
+  sweeping_jammer             2.1     5.8    10.3    74.0  4348.0     Inf
+Saved data/policy_pools.mat (87.8 min)
+  [C2] Training the sequential DQN (Double DQN, replay, target network)...
+=== C2: Train sequential DQN (D44, D45) ===
+
+Rule + escalation on validation: return 0.757, restored 72.2%, false-alarm episodes 31.6%
+Table on validation:             return 0.831, restored 83.2%
+
+--- Seed 42 (1/3) ---
+    episode   512/12032 | eps 0.94 | lr 4.6e-04 | greedy return 0.822 | updates 588
+    episode  1024/12032 | eps 0.87 | lr 4.2e-04 | greedy return 0.822 | updates 1548
+    episode  1536/12032 | eps 0.81 | lr 3.8e-04 | greedy return 0.823 | updates 2508
+    episode  2048/12032 | eps 0.74 | lr 3.4e-04 | greedy return 0.843 | updates 3468
+    episode  2560/12032 | eps 0.67 | lr 3.1e-04 | greedy return 0.832 | updates 4428
+    episode  3072/12032 | eps 0.60 | lr 2.8e-04 | greedy return 0.831 | updates 5388
+    episode  3584/12032 | eps 0.54 | lr 2.5e-04 | greedy return 0.844 | updates 6348
+    episode  4096/12032 | eps 0.47 | lr 2.3e-04 | greedy return 0.832 | updates 7308
+    episode  4608/12032 | eps 0.40 | lr 2.1e-04 | greedy return 0.831 | updates 8268
+    episode  5120/12032 | eps 0.33 | lr 1.9e-04 | greedy return 0.839 | updates 9228
+    episode  5632/12032 | eps 0.27 | lr 1.7e-04 | greedy return 0.845 | updates 10188
+    episode  6144/12032 | eps 0.20 | lr 1.6e-04 | greedy return 0.849 | updates 11148
+    episode  6656/12032 | eps 0.13 | lr 1.4e-04 | greedy return 0.846 | updates 12108
+    episode  7168/12032 | eps 0.07 | lr 1.3e-04 | greedy return 0.849 | updates 13068
+    episode  7680/12032 | eps 0.05 | lr 1.2e-04 | greedy return 0.851 | updates 14028
+    episode  8192/12032 | eps 0.05 | lr 1.0e-04 | greedy return 0.850 | updates 14988
+    episode  8704/12032 | eps 0.05 | lr 9.5e-05 | greedy return 0.850 | updates 15948
+    episode  9216/12032 | eps 0.05 | lr 8.6e-05 | greedy return 0.849 | updates 16908
+    episode  9728/12032 | eps 0.05 | lr 7.8e-05 | greedy return 0.848 | updates 17868
+    episode 10240/12032 | eps 0.05 | lr 7.1e-05 | greedy return 0.850 | updates 18828
+    episode 10752/12032 | eps 0.05 | lr 6.4e-05 | greedy return 0.850 | updates 19788
+    episode 11264/12032 | eps 0.05 | lr 5.8e-05 | greedy return 0.846 | updates 20748
+    episode 11776/12032 | eps 0.05 | lr 5.3e-05 | greedy return 0.847 | updates 21708
+    episode 12032/12032 | eps 0.05 | lr 5.0e-05 | greedy return 0.847 | updates 22188
+    checkpoint at episode 7680 | validation: return 0.856 | restored 87.6% | goodput 0.892 | false-alarm episodes 2.1%
+--- Seed 43 (2/3) ---
+    episode   512/12032 | eps 0.94 | lr 4.6e-04 | greedy return 0.791 | updates 588
+    episode  1024/12032 | eps 0.87 | lr 4.2e-04 | greedy return 0.819 | updates 1548
+    episode  1536/12032 | eps 0.81 | lr 3.8e-04 | greedy return 0.803 | updates 2508
+    episode  2048/12032 | eps 0.74 | lr 3.4e-04 | greedy return 0.814 | updates 3468
+    episode  2560/12032 | eps 0.67 | lr 3.1e-04 | greedy return 0.820 | updates 4428
+    episode  3072/12032 | eps 0.60 | lr 2.8e-04 | greedy return 0.831 | updates 5388
+    episode  3584/12032 | eps 0.54 | lr 2.5e-04 | greedy return 0.833 | updates 6348
+    episode  4096/12032 | eps 0.47 | lr 2.3e-04 | greedy return 0.837 | updates 7308
+    episode  4608/12032 | eps 0.40 | lr 2.1e-04 | greedy return 0.834 | updates 8268
+    episode  5120/12032 | eps 0.33 | lr 1.9e-04 | greedy return 0.825 | updates 9228
+    episode  5632/12032 | eps 0.27 | lr 1.7e-04 | greedy return 0.833 | updates 10188
+    episode  6144/12032 | eps 0.20 | lr 1.6e-04 | greedy return 0.841 | updates 11148
+    episode  6656/12032 | eps 0.13 | lr 1.4e-04 | greedy return 0.835 | updates 12108
+    episode  7168/12032 | eps 0.07 | lr 1.3e-04 | greedy return 0.834 | updates 13068
+    episode  7680/12032 | eps 0.05 | lr 1.2e-04 | greedy return 0.842 | updates 14028
+    episode  8192/12032 | eps 0.05 | lr 1.0e-04 | greedy return 0.844 | updates 14988
+    episode  8704/12032 | eps 0.05 | lr 9.5e-05 | greedy return 0.845 | updates 15948
+    episode  9216/12032 | eps 0.05 | lr 8.6e-05 | greedy return 0.848 | updates 16908
+    episode  9728/12032 | eps 0.05 | lr 7.8e-05 | greedy return 0.845 | updates 17868
+    episode 10240/12032 | eps 0.05 | lr 7.1e-05 | greedy return 0.844 | updates 18828
+    episode 10752/12032 | eps 0.05 | lr 6.4e-05 | greedy return 0.836 | updates 19788
+    episode 11264/12032 | eps 0.05 | lr 5.8e-05 | greedy return 0.841 | updates 20748
+    episode 11776/12032 | eps 0.05 | lr 5.3e-05 | greedy return 0.839 | updates 21708
+    episode 12032/12032 | eps 0.05 | lr 5.0e-05 | greedy return 0.845 | updates 22188
+    checkpoint at episode 9216 | validation: return 0.857 | restored 87.5% | goodput 0.882 | false-alarm episodes 2.1%
+--- Seed 44 (3/3) ---
+    episode   512/12032 | eps 0.94 | lr 4.6e-04 | greedy return 0.768 | updates 588
+    episode  1024/12032 | eps 0.87 | lr 4.2e-04 | greedy return 0.795 | updates 1548
+    episode  1536/12032 | eps 0.81 | lr 3.8e-04 | greedy return 0.806 | updates 2508
+    episode  2048/12032 | eps 0.74 | lr 3.4e-04 | greedy return 0.815 | updates 3468
+    episode  2560/12032 | eps 0.67 | lr 3.1e-04 | greedy return 0.820 | updates 4428
+    episode  3072/12032 | eps 0.60 | lr 2.8e-04 | greedy return 0.815 | updates 5388
+    episode  3584/12032 | eps 0.54 | lr 2.5e-04 | greedy return 0.830 | updates 6348
+    episode  4096/12032 | eps 0.47 | lr 2.3e-04 | greedy return 0.830 | updates 7308
+    episode  4608/12032 | eps 0.40 | lr 2.1e-04 | greedy return 0.823 | updates 8268
+    episode  5120/12032 | eps 0.33 | lr 1.9e-04 | greedy return 0.834 | updates 9228
+    episode  5632/12032 | eps 0.27 | lr 1.7e-04 | greedy return 0.824 | updates 10188
+    episode  6144/12032 | eps 0.20 | lr 1.6e-04 | greedy return 0.847 | updates 11148
+    episode  6656/12032 | eps 0.13 | lr 1.4e-04 | greedy return 0.841 | updates 12108
+    episode  7168/12032 | eps 0.07 | lr 1.3e-04 | greedy return 0.842 | updates 13068
+    episode  7680/12032 | eps 0.05 | lr 1.2e-04 | greedy return 0.846 | updates 14028
+    episode  8192/12032 | eps 0.05 | lr 1.0e-04 | greedy return 0.846 | updates 14988
+    episode  8704/12032 | eps 0.05 | lr 9.5e-05 | greedy return 0.845 | updates 15948
+    episode  9216/12032 | eps 0.05 | lr 8.6e-05 | greedy return 0.845 | updates 16908
+    episode  9728/12032 | eps 0.05 | lr 7.8e-05 | greedy return 0.847 | updates 17868
+    episode 10240/12032 | eps 0.05 | lr 7.1e-05 | greedy return 0.844 | updates 18828
+    episode 10752/12032 | eps 0.05 | lr 6.4e-05 | greedy return 0.849 | updates 19788
+    episode 11264/12032 | eps 0.05 | lr 5.8e-05 | greedy return 0.846 | updates 20748
+    episode 11776/12032 | eps 0.05 | lr 5.3e-05 | greedy return 0.846 | updates 21708
+    episode 12032/12032 | eps 0.05 | lr 5.0e-05 | greedy return 0.848 | updates 22188
+    checkpoint at episode 10752 | validation: return 0.857 | restored 86.7% | goodput 0.889 | false-alarm episodes 2.1%
+
+--- Contextual-bandit ablation (gamma = 0) ---
+    episode   512/12032 | eps 0.94 | lr 4.6e-04 | greedy return 0.823 | updates 588
+    episode  1024/12032 | eps 0.87 | lr 4.2e-04 | greedy return 0.840 | updates 1548
+    episode  1536/12032 | eps 0.81 | lr 3.8e-04 | greedy return 0.833 | updates 2508
+    episode  2048/12032 | eps 0.74 | lr 3.4e-04 | greedy return 0.839 | updates 3468
+    episode  2560/12032 | eps 0.67 | lr 3.1e-04 | greedy return 0.835 | updates 4428
+    episode  3072/12032 | eps 0.60 | lr 2.8e-04 | greedy return 0.842 | updates 5388
+    episode  3584/12032 | eps 0.54 | lr 2.5e-04 | greedy return 0.837 | updates 6348
+    episode  4096/12032 | eps 0.47 | lr 2.3e-04 | greedy return 0.841 | updates 7308
+    episode  4608/12032 | eps 0.40 | lr 2.1e-04 | greedy return 0.848 | updates 8268
+    episode  5120/12032 | eps 0.33 | lr 1.9e-04 | greedy return 0.852 | updates 9228
+    episode  5632/12032 | eps 0.27 | lr 1.7e-04 | greedy return 0.851 | updates 10188
+    episode  6144/12032 | eps 0.20 | lr 1.6e-04 | greedy return 0.857 | updates 11148
+    episode  6656/12032 | eps 0.13 | lr 1.4e-04 | greedy return 0.862 | updates 12108
+    episode  7168/12032 | eps 0.07 | lr 1.3e-04 | greedy return 0.855 | updates 13068
+    episode  7680/12032 | eps 0.05 | lr 1.2e-04 | greedy return 0.860 | updates 14028
+    episode  8192/12032 | eps 0.05 | lr 1.0e-04 | greedy return 0.858 | updates 14988
+    episode  8704/12032 | eps 0.05 | lr 9.5e-05 | greedy return 0.859 | updates 15948
+    episode  9216/12032 | eps 0.05 | lr 8.6e-05 | greedy return 0.857 | updates 16908
+    episode  9728/12032 | eps 0.05 | lr 7.8e-05 | greedy return 0.860 | updates 17868
+    episode 10240/12032 | eps 0.05 | lr 7.1e-05 | greedy return 0.862 | updates 18828
+    episode 10752/12032 | eps 0.05 | lr 6.4e-05 | greedy return 0.862 | updates 19788
+    episode 11264/12032 | eps 0.05 | lr 5.8e-05 | greedy return 0.864 | updates 20748
+    episode 11776/12032 | eps 0.05 | lr 5.3e-05 | greedy return 0.866 | updates 21708
+    episode 12032/12032 | eps 0.05 | lr 5.0e-05 | greedy return 0.865 | updates 22188
+
+=== SEQUENTIAL DQN TRAINING (D44, D45) ===
+
+Generated: 26-Sep-2026 17:56:38 | Double DQN + shield, replay 150000, target every 500 updates, gamma 0.90, lr 5e-04 -> 5e-05, 12000 episodes x 30 cycles, 3 seeds
+
+Validation: 1280 episodes (train pools, fresh draws), single threats + clean link
+
+policy                    return   restored   goodput   false sw/ep   FA episodes  switches/ep
+
+DQN seed 42                0.856      87.6%     0.892         0.214          2.1%         2.00   (checkpoint 7680)
+
+DQN seed 43                0.857      87.5%     0.882         0.254          2.1%         2.25   (checkpoint 9216)
+
+DQN seed 44                0.857      86.7%     0.889         0.195          2.1%         2.27   (checkpoint 10752)
+
+DQN gamma=0 (bandit)       0.869      89.2%     0.884         0.109          2.1%         1.53
+
+table (train pools)        0.831      83.2%     0.875         0.404         31.6%         2.49
+
+rule + escalation          0.757      72.2%     0.828         0.293         31.6%         2.57
+
+Seed return spread: 0.856 to 0.857 (std 0.000)
+
+Selected seed 43. Gate (return >= rule+escalation, false-alarm episodes <= 31.6% = max(5%, rule): 2.1%): PASS
+Saved data/trained_dqn.mat
+=== C2 Complete ===
+  [C2e] Evaluating every policy on the test pools...
+=== Decision-layer evaluation on the test pools (D44, D45) ===
+
+Best fixed configuration (train pools): spatial_diversity+power_control
+Class table (train pools): none->no_action, jamming->channel_switch, noise_burst->spatial_diversity+power_control, reactive_jamming->channel_switch, path_loss->rate_reduce+power_control, spoofing->channel_switch, antenna_fault->power_control, benign_interference->channel_switch, sweeping_jammer->fec_interleave | unknown -> spatial_diversity+power_control
+
+  set single     576 episodes x 10 policies (0.0 min)
+  set follower   320 episodes x 10 policies (0.0 min)
+  set combined   384 episodes x 10 policies (0.1 min)
+  set clean      192 episodes x 10 policies (0.1 min)
+
+=== DECISION-LAYER EVALUATION, TEST POOLS (D44, D45) ===
+
+Generated: 26-Sep-2026 17:56:45 | 30-cycle episodes, onset at cycle 3-10 | test sub-runs (geometries) never used in training | interferer AoA random per sub-run
+
+return = mean reward per cycle (1 = restored at no cost); restored / goodput / recovery after onset;
+
+recovered = restored for 5 consecutive cycles; false sw = switches on a healthy link, whole episode.
+
+
+
+--- single (576 episodes) ---
+
+policy                                           return             restored %   goodput  recovered  T_rec  switches  false sw
+
+random                             0.508 [0.493, 0.522]      59.3 [56.7, 62.0]     0.573      58.7%      2     28.27     8.047
+
+always adaptive combining          0.654 [0.628, 0.679]      45.3 [41.2, 49.4]     0.840      45.3%      0      1.00     1.000
+
+fixed: spatial_diversity+power_control   0.773 [0.758, 0.788]      75.2 [71.6, 78.7]     0.968      75.2%      0      1.00     1.000
+
+rule                               0.707 [0.685, 0.728]      65.5 [62.2, 68.7]     0.787      69.8%      2      1.86     0.193
+
+rule + escalation                  0.729 [0.711, 0.747]      67.6 [64.9, 70.4]     0.817      67.0%      2      3.04     0.214
+
+table (train pools)                0.819 [0.808, 0.830]      80.5 [78.4, 82.7]     0.841      84.7%      2      2.31     0.260
+
+DQN gamma=0 (bandit)               0.847 [0.838, 0.857]      86.0 [84.0, 87.9]     0.863      93.4%      2      1.63     0.134
+
+DQN                                0.835 [0.825, 0.846]      83.5 [81.4, 85.6]     0.874      91.8%      2      2.26     0.203
+
+DQN + escalation                   0.832 [0.820, 0.843]      82.8 [80.7, 84.9]     0.873      91.1%      2      3.03     0.212
+
+oracle (one-step)                  0.923 [0.914, 0.933]      95.8 [94.2, 97.5]     0.908      95.8%      0      0.88     0.000
+
+Paired return difference: DQN - rule+esc +0.107 [+0.095, +0.119] | DQN - table +0.017 [+0.010, +0.023] | DQN - fixed best +0.063 [+0.049, +0.076] | DQN - bandit -0.012 [-0.016, -0.007]
+
+
+
+--- follower (320 episodes) ---
+
+policy                                           return             restored %   goodput  recovered  T_rec  switches  false sw
+
+random                             0.573 [0.561, 0.585]      69.2 [67.5, 71.0]     0.546      75.0%      5     28.20     5.569
+
+always adaptive combining          0.700 [0.670, 0.729]      44.4 [38.9, 49.8]     0.807      44.4%      0      1.00     1.000
+
+fixed: spatial_diversity+power_control   0.794 [0.773, 0.814]      84.1 [80.0, 88.1]     0.965      84.1%      0      1.00     1.000
+
+rule                               0.837 [0.828, 0.847]      81.1 [78.8, 83.4]     0.884      90.9%      5      3.26     0.091
+
+rule + escalation                  0.825 [0.814, 0.835]      78.7 [76.4, 81.1]     0.876      89.7%      5      3.58     0.091
+
+table (train pools)                0.777 [0.766, 0.787]      73.8 [71.6, 76.0]     0.855      80.3%      5      6.05     0.113
+
+DQN gamma=0 (bandit)               0.868 [0.861, 0.874]      86.5 [84.8, 88.2]     0.927      93.8%      2      3.28     0.037
+
+DQN                                0.857 [0.849, 0.865]      83.5 [81.4, 85.7]     0.909      87.5%      2      3.16     0.031
+
+DQN + escalation                   0.858 [0.851, 0.866]      83.8 [81.7, 85.9]     0.911      90.6%      2      3.29     0.031
+
+oracle (one-step)                  0.964 [0.961, 0.967]   100.0 [100.0, 100.0]     1.002     100.0%      0      7.28     0.000
+
+Paired return difference: DQN - rule+esc +0.032 [+0.023, +0.041] | DQN - table +0.080 [+0.069, +0.091] | DQN - fixed best +0.063 [+0.041, +0.085] | DQN - bandit -0.011 [-0.016, -0.005]
+
+
+
+--- combined (384 episodes) ---
+
+policy                                           return             restored %   goodput  recovered  T_rec  switches  false sw
+
+random                             0.205 [0.191, 0.220]        8.3 [6.6, 10.0]     0.389       3.6%      8     28.26     5.247
+
+always adaptive combining          0.353 [0.334, 0.372]         1.6 [0.3, 2.8]     0.457       1.6%      0      1.00     1.000
+
+fixed: spatial_diversity+power_control   0.535 [0.511, 0.558]      24.5 [20.2, 28.8]     0.892      24.5%      0      1.00     1.000
+
+rule                               0.212 [0.196, 0.228]         1.5 [0.4, 2.7]     0.228       1.8%      2      3.16     0.049
+
+rule + escalation                  0.266 [0.250, 0.282]         4.8 [3.6, 6.0]     0.317       1.6%      2      4.98     0.049
+
+table (train pools)                0.482 [0.458, 0.506]      21.7 [17.8, 25.6]     0.729      24.0%      2      2.39     0.049
+
+DQN gamma=0 (bandit)               0.509 [0.485, 0.532]      21.4 [17.5, 25.3]     0.734      23.7%      2      7.13     0.013
+
+DQN                                0.460 [0.434, 0.486]      21.3 [17.4, 25.1]     0.664      23.2%      2      9.64     0.000
+
+DQN + escalation                   0.435 [0.410, 0.460]      20.2 [16.6, 23.8]     0.621      22.9%      6     12.54     0.000
+
+oracle (one-step)                  0.638 [0.620, 0.657]      30.7 [26.1, 35.4]     0.825      30.7%      0      1.00     0.000
+
+Paired return difference: DQN - rule+esc +0.194 [+0.176, +0.212] | DQN - table -0.022 [-0.030, -0.014] | DQN - fixed best -0.075 [-0.085, -0.065] | DQN - bandit -0.049 [-0.058, -0.040]
+
+
+
+--- clean (192 episodes) ---
+
+policy                                           return             restored %   goodput  recovered  T_rec  switches  false sw
+
+random                             0.614 [0.610, 0.617]   100.0 [100.0, 100.0]     0.665     100.0%      0     28.15    28.146
+
+always adaptive combining          0.959 [0.954, 0.965]   100.0 [100.0, 100.0]     1.005     100.0%      0      1.00     1.000
+
+fixed: spatial_diversity+power_control   0.872 [0.872, 0.872]   100.0 [100.0, 100.0]     1.007     100.0%      0      1.00     1.000
+
+rule                               0.957 [0.946, 0.969]   100.0 [100.0, 100.0]     0.965     100.0%      0      0.34     0.344
+
+rule + escalation                  0.957 [0.946, 0.969]   100.0 [100.0, 100.0]     0.965     100.0%      0      0.34     0.344
+
+table (train pools)                0.958 [0.949, 0.968]   100.0 [100.0, 100.0]     0.985     100.0%      0      0.43     0.432
+
+DQN gamma=0 (bandit)               0.981 [0.975, 0.988]   100.0 [100.0, 100.0]     1.003     100.0%      0      0.04     0.042
+
+DQN                                0.980 [0.972, 0.987]   100.0 [100.0, 100.0]     1.003     100.0%      0      0.00     0.000
+
+DQN + escalation                   0.980 [0.972, 0.987]   100.0 [100.0, 100.0]     1.003     100.0%      0      0.00     0.000
+
+oracle (one-step)                  0.980 [0.972, 0.987]   100.0 [100.0, 100.0]     1.003     100.0%      0      0.00     0.000
+
+Paired return difference: DQN - rule+esc +0.022 [+0.015, +0.030] | DQN - table +0.022 [+0.016, +0.027] | DQN - fixed best +0.108 [+0.100, +0.115] | DQN - bandit -0.002 [-0.003, -0.000]
+
+
+
+--- all sets pooled (1472 episodes: single 576, follower 320, combined 384, clean 192) ---
+
+policy                                           return             restored %   goodput  recovered  T_rec  switches  false sw
+
+random                             0.457 [0.446, 0.468]      53.5 [51.6, 55.4]     0.531      53.3%      0     28.24     9.399
+
+always adaptive combining          0.625 [0.609, 0.641]      40.8 [38.3, 43.3]     0.754      40.8%      0      1.00     1.000
+
+fixed: spatial_diversity+power_control   0.728 [0.717, 0.740]      67.1 [64.7, 69.5]     0.953      67.1%      0      1.00     1.000
+
+rule                               0.639 [0.622, 0.655]      56.7 [54.4, 58.9]     0.685      60.6%      2      2.31     0.153
+
+rule + escalation                  0.659 [0.644, 0.674]      57.9 [55.8, 60.0]     0.719      59.2%      2      3.31     0.161
+
+table (train pools)                0.740 [0.728, 0.752]      66.3 [64.3, 68.2]     0.834      69.9%      2      2.90     0.196
+
+DQN gamma=0 (bandit)               0.781 [0.770, 0.792]      71.1 [69.1, 73.1]     0.861      76.2%      2      3.22     0.069
+
+DQN                                0.761 [0.748, 0.773]      69.4 [67.4, 71.5]     0.844      74.0%      2      4.09     0.086
+
+DQN + escalation                   0.753 [0.740, 0.766]      68.9 [66.9, 71.0]     0.832      74.4%      2      5.17     0.090
+
+oracle (one-step)                  0.865 [0.856, 0.874]      80.3 [78.3, 82.3]     0.919      80.3%      0      2.19     0.000
+
+Paired return difference: DQN - rule+esc +0.102 [+0.094, +0.110] | DQN - table +0.021 [+0.016, +0.025] | DQN - fixed best +0.033 [+0.024, +0.041] | DQN - bandit -0.020 [-0.023, -0.017]
+
+
+
+Restored cycles after onset per threat (single + follower + combined sets), %:
+
+scenario                   always MMSE  fixed best    rule+esc       table         DQN     DQN+esc      oracle
+
+jamming                           57.0        84.9        83.6        78.6        86.5        86.7       100.0
+
+noise_burst                       58.3        66.7        30.4        62.3        62.2        61.9        68.1
+
+reactive_jamming                  30.7        67.0        83.9        75.3        89.6        89.8       100.0
+
+path_loss                          0.0         0.0        58.6        59.6        84.1        79.0        98.6
+
+spoofing                          42.7        96.6        77.9        77.8        78.7        79.0       100.0
+
+antenna_fault                     58.3       100.0        62.4        95.4        83.5        83.5       100.0
+
+benign_interference               45.8       100.0        76.7        92.0        91.0        91.0       100.0
+
+sweeping_jammer                   73.6        91.7        53.8        88.0        86.1        86.0       100.0
+
+jamming+path_loss                  0.0         7.3         0.0         4.2         3.7         4.6         9.4
+
+noise_burst+antenna_fault          6.2        54.2        14.8        50.2        49.8        46.8        54.2
+
+sweeping_jammer+path_loss          0.0         3.1         0.4         1.5         1.1         1.1        26.0
+
+spoofing+noise_burst               0.0        33.3         4.1        30.9        30.5        28.2        33.3
+
+
+
+Restored cycles after onset vs interferer direction (single set, directional threats), %:
+
+|AoA| from GCS     always MMSE  fixed best    rule+esc       table         DQN     DQN+esc      oracle
+
+0-20 deg (94)              0.0        31.9        65.5        60.2        71.8        71.8        83.0
+
+20-45 deg (151)           35.1        95.4        67.8        85.4        86.6        86.4        95.4
+
+45-90 deg (187)           88.8       100.0        74.1        89.2        86.8        86.8       100.0
+Saved results/policy_evaluation.{txt,mat,png}
+  [C] Pipeline status:
+      trained_dqn.mat        : READY (26-Sep-2026 17:56:38)
+      C2 seed stability      : READY (26-Sep-2026 01:16:01)
+      C3-diag full report    : READY (26-Sep-2026 01:25:16)
+      C3-speed robustness    : READY (26-Sep-2026 01:32:16)
+
+> PHASE SURV: Survivability Boundary Mapping (proposal deliverable #7)
+
+  [SURV] Pipeline status:
+      survivability_boundary.mat     : READY (26-Sep-2026 03:05:31)
+      Map A (no goodput loss)        : READY (26-Sep-2026 03:05:31)
+      Map B (any action)             : READY (26-Sep-2026 03:05:31)
+
+> PHASE KPI: Proposal KPI Measurement
+
+  [KPI] Pipeline status:
+      far_measurement.txt   : READY (26-Sep-2026 03:08:48)
+      kpi3_measurement.txt  : READY (26-Sep-2026 03:08:48)
+      kpi_summary.txt       : READY (26-Sep-2026 03:08:48)
+
+> PHASE DASH: Results Dashboard (proposal deliverable #1)
+
+  [DASH] Pipeline status:
+      kpi_dashboard.png : READY (26-Sep-2026 03:08:50)
+
+> PHASE D: Documentation & Defense
+
+  [D1] README.md / PROJECT_LOG.md / docs/DECISIONS.md  READY (maintained by hand)
+  [D2] Interim/final report (docx)...                  [PENDING]
+  [D3] Defense presentation (pptx)...                  [PENDING]
+
+========================================================
+ CHECKPOINT - full pipeline available from main.m
+ Headline numbers with 95% CIs: results/kpi_summary.txt (D35)
+ Survivability maps: results/survivability_boundary_mapA.txt / mapB.txt (deliverable #7)
+ Outputs in results/, data/ | models in models/ | code on GitHub
+ Full run log saved to: logs/run_20260926_154710.txt
+========================================================
+

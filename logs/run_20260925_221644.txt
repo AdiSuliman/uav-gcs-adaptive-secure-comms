@@ -1,0 +1,71 @@
+=== Logging full run to: logs/run_20260925_221644.txt ===
+(This file will contain EVERYTHING printed below, even across clc calls.)
+
+========================================================
+  UAV-GCS ADAPTIVE SECURE COMMS - MASTER PIPELINE
+  A:Link+Data  B:Detect  C:Recover  SURV:Map  KPI:Measure  DASH:Summary
+========================================================
+
+> PHASE A: Link Model + Threat Injection + Dataset
+
+  [A5-A6] Dataset status:
+         raw dataset  : READY (25-Sep-2026 15:12:03, 952 MB)
+         spectrograms : READY (25-Sep-2026 15:19:39, 1361 MB)
+
+> PHASE B: Detection Network (CNN + scalar hybrid, 9 classes)
+
+  [B] Pipeline status:
+      splits.mat           : READY (25-Sep-2026 15:23:44, 1361 MB)
+      trained_detector.mat : READY (25-Sep-2026 15:30:50)
+      B3 eval results      : READY (25-Sep-2026 15:32:11)
+
+> PHASE C: Closed-Loop Adaptive Recovery (9 threats/classes)
+
+  [C1] Rule-based countermeasure policy...           READY (rule_based_policy.m)
+  [C] Pipeline status:
+      trained_dqn.mat        : READY (25-Sep-2026 20:10:58)
+      C2 seed stability      : READY (25-Sep-2026 20:10:58)
+      C3-diag full report    : READY (25-Sep-2026 20:22:07)
+      C3-speed robustness    : READY (25-Sep-2026 20:31:28)
+
+> PHASE SURV: Survivability Boundary Mapping (proposal deliverable #7)
+
+  [SURV] Mapping Map A (neutralization) + Map B (survivability) + gap analysis...
+=== Survivability Boundary Mapping (proposal deliverable #7, real action set) ===
+
+
+========== UAV-GCS LINK PARAMETERS ==========
+Phase:            A4  (channel: Rician)
+Modulation:       QPSK
+Symbol Rate:      1.00e+06 sym/s
+Bits/Frame:       1000 (+ 32 CRC [FUTURE])
+Symbols/Frame:    516
+Channel:          Rician (K=10.0 dB)
+Carrier Freq:     2.4 GHz
+Range:            100 m [FUTURE]
+UAV Velocity:     20.0 m/s (72.0 km/h) nominal | envelope 50.0-120.0 km/h (13.9-33.3 m/s)
+Doppler envelope: 111-267 Hz (nominal fd_max 160 Hz)
+Max Doppler fd:   160.0 Hz  (normalized 1.60e-04)
+Active Threat:    jamming (JSR=10 dB)
+Eb/N0 Range:      0 to 10 dB
+Frames per SNR:   1000
+Sequence window:  len=8, stride=4 (LSTM)
+=============================================
+
+Parameters saved to params.mat
+Measuring the clean link (none), 5 repeats per Eb/N0...
+  Eb/N0= 0 dB: clean BER = 1.2359e-01 (std 3.03e-03)
+  Eb/N0= 2 dB: clean BER = 7.9886e-02 (std 2.16e-03)
+  Eb/N0= 4 dB: clean BER = 4.6155e-02 (std 1.95e-03)
+  Eb/N0= 6 dB: clean BER = 2.3052e-02 (std 8.20e-04)
+  Eb/N0= 8 dB: clean BER = 9.7205e-03 (std 5.94e-04)
+  Eb/N0=10 dB: clean BER = 2.6928e-03 (std 1.99e-04)
+
+{Error using <a href="matlab:matlab.lang.internal.introspective.errorDocCallback('map_survivability_boundary', 'C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\map_survivability_boundary.m', 92)" style="font-weight:bold">map_survivability_boundary</a> (<a href="matlab: opentoline('C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\map_survivability_boundary.m',92,0)">line 92</a>)
+Program interruption (Ctrl-C) has been detected.
+
+Error in <a href="matlab:matlab.lang.internal.introspective.errorDocCallback('main', 'C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\main.m', 258)" style="font-weight:bold">main</a> (<a href="matlab: opentoline('C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\main.m',258,0)">line 258</a>)
+    map_survivability_boundary;
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^ - <a href="matlab:interactive_actions_helper.displayMStack([struct('file','C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\map_survivability_boundary.m','line',92,'name','map_survivability_boundary'),struct('file','C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\main.m','line',258,'name','main')]);">Show complete stack trace</a>
+} 
+main

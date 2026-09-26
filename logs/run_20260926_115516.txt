@@ -1,0 +1,122 @@
+=== Logging full run to: logs/run_20260926_115516.txt ===
+(This file will contain EVERYTHING printed below, even across clc calls.)
+
+========================================================
+  UAV-GCS ADAPTIVE SECURE COMMS - MASTER PIPELINE
+  A:Link+Data  B:Detect  C:Recover  SURV:Map  KPI:Measure  DASH:Summary
+========================================================
+
+> PHASE A: Link Model + Threat Injection + Dataset
+
+  [A0] init_params...
+
+========== UAV-GCS LINK PARAMETERS ==========
+Phase:            A4  (channel: Rician)
+Modulation:       QPSK
+Symbol Rate:      1.00e+06 sym/s
+Bits/Frame:       1000 (+ 32 CRC [FUTURE])
+Symbols/Frame:    516
+Channel:          Rician (K=10.0 dB), GCS -> UAV uplink
+UAV antennas:     2 (spacing 0.50 wl, rho 0.30), Rx MRC
+Carrier Freq:     2.4 GHz
+Range:            100 m [FUTURE]
+UAV Velocity:     20.0 m/s (72.0 km/h) nominal | envelope 50.0-120.0 km/h (13.9-33.3 m/s)
+Doppler envelope: 111-267 Hz (nominal fd_max 160 Hz)
+Max Doppler fd:   160.0 Hz  (normalized 1.60e-04)
+Active Threat:    jamming (JSR=10 dB)
+Eb/N0 Range:      0 to 10 dB
+Frames per SNR:   1000
+Sequence window:  len=8, stride=4 (LSTM)
+=============================================
+
+Parameters saved to params.mat
+  [A4v] Validating the multi-antenna link against theory...
+    build + compile 13.4 s
+V1 AWGN, 1 ant             gap -0.04 dB | BER 7.74e-02 3.69e-02 1.22e-02 2.28e-03 1.68e-04 5.96e-06  | 0.7 min
+    build + compile 1.2 s
+V2 Rician, 1 ant           gap -0.57 dB | BER 8.30e-02 4.39e-02 1.87e-02 6.26e-03 1.70e-03 3.87e-04  | 1.2 min
+    build + compile 1.1 s
+V3 Rician, MRC 2 ant       gap +0.08 dB | BER 2.91e-02 1.01e-02 2.46e-03 3.82e-04 3.18e-05 0.00e+00  | 1.8 min
+    build + compile 1.0 s
+V4 Rician, MRC 3 ant       gap +0.03 dB | BER 9.60e-03 2.08e-03 2.67e-04 1.19e-05 0.00e+00 0.00e+00  | 2.7 min
+    build + compile 1.2 s
+V5 default, MRC 2 ant      gap -0.21 dB | BER 2.93e-02 1.00e-02 2.39e-03 3.82e-04 3.18e-05 0.00e+00  | 3.4 min
+    build + compile 0.9 s
+V6a jam 10 dB, MRC         gap   NaN dB | BER 2.70e-01 2.65e-01 2.62e-01 2.61e-01 2.59e-01 2.59e-01  | 4.5 min
+    build + compile 0.7 s
+V6b jam 10 dB, MMSE        gap   NaN dB | BER 5.63e-02 2.74e-02 1.08e-02 3.45e-03 8.73e-04 1.79e-04  | 5.6 min
+    build + compile 0.8 s
+    build + compile 0.7 s
+    build + compile 0.7 s
+
+=== PHY VALIDATION (D41): multi-antenna UAV receiver vs theory ===
+
+Generated: 26-Sep-2026 12:01:00 | 0.5 s per point | fd 160 Hz | CSI block 64 sym (MRC), window 32 sym (MMSE)
+
+Eb/N0 per branch [dB]: [0 2 4 6 8 10]
+
+
+
+V1 AWGN, 1 ant             BER   7.74e-02 3.69e-02 1.22e-02 2.28e-03 1.68e-04 5.96e-06
+
+                           err      77994    37131    12249     2292      169        6
+
+                           th.   7.86e-02 3.75e-02 1.25e-02 2.39e-03 1.91e-04 3.87e-06
+
+                           gap -0.04 dB -> PASS  (bit delay found: 20)
+
+V2 Rician, 1 ant           BER   8.30e-02 4.39e-02 1.87e-02 6.26e-03 1.70e-03 3.87e-04
+
+                           err      83627    44228    18791     6309     1713      390
+
+                           th.   9.26e-02 5.15e-02 2.37e-02 8.80e-03 2.67e-03 7.01e-04
+
+                           gap -0.57 dB -> FAIL  (bit delay found: 20)
+
+V3 Rician, MRC 2 ant       BER   2.91e-02 1.01e-02 2.46e-03 3.82e-04 3.18e-05 0.00e+00
+
+                           err      29293    10177     2474      385       32        0
+
+                           th.   2.89e-02 9.80e-03 2.26e-03 3.35e-04 3.23e-05 2.26e-06
+
+                           gap +0.08 dB -> PASS  (bit delay found: 20)
+
+V4 Rician, MRC 3 ant       BER   9.60e-03 2.08e-03 2.67e-04 1.19e-05 0.00e+00 0.00e+00
+
+                           err       9663     2094      269       12        0        0
+
+                           th.   9.85e-03 2.05e-03 2.40e-04 1.43e-05 4.43e-07 8.34e-09
+
+                           gap +0.03 dB -> PASS  (bit delay found: 20)
+
+V5 default, MRC 2 ant      BER   2.93e-02 1.00e-02 2.39e-03 3.82e-04 3.18e-05 0.00e+00
+
+                           err      29458    10084     2404      385       32        0
+
+                           th.   3.08e-02 1.11e-02 2.90e-03 5.34e-04 7.33e-05 8.50e-06
+
+                           gap -0.21 dB -> PASS  (bit delay found: 20)
+
+V6a jam 10 dB, MRC         BER   2.70e-01 2.65e-01 2.62e-01 2.61e-01 2.59e-01 2.59e-01
+
+                           err     271516   267315   264295   262562   261298   260776
+
+V6b jam 10 dB, MMSE        BER   5.63e-02 2.74e-02 1.08e-02 3.45e-03 8.73e-04 1.79e-04
+
+                           err      56687    27615    10883     3479      879      180
+
+
+
+V6 MMSE vs MRC under jamming (JSR 10 dB, interferer at 40 deg): BER ratio [dB]    6.8   9.9  13.9  18.8  24.7  31.6
+
+V6 MMSE under jamming vs jammer-free MRC (V5): BER ratio     1.92    2.74    4.53    9.04   27.47     Inf
+
+V7 seeds: same seed identical PASS, different seed differs PASS (BER [0.001554 0.001554 0.004371])
+
+Overall: theory gaps V1-V5 4/5 within 0.3 dB, seeds PASS | 5.7 min
+{Error using main (line 187)
+PHY validation failed -- see results/phy_validation.txt. Stopping before the dataset.
+} 
+[Warning: Unable to close the model '<a href="matlab:open_system ('UAV_GCS_Threat_Link')">UAV_GCS_Threat_Link</a>' because it has been changed. To save changes, use
+close_system('<a href="matlab:open_system ('UAV_GCS_Threat_Link')">UAV_GCS_Threat_Link</a>',1). To discard changes, use close_system('<a href="matlab:open_system
+('UAV_GCS_Threat_Link')">UAV_GCS_Threat_Link</a>',0).] 

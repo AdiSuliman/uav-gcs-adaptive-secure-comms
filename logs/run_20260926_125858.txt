@@ -1,0 +1,212 @@
+=== Logging full run to: logs/run_20260926_125858.txt ===
+(This file will contain EVERYTHING printed below, even across clc calls.)
+
+========================================================
+  UAV-GCS ADAPTIVE SECURE COMMS - MASTER PIPELINE
+  A:Link+Data  B:Detect  C:Recover  SURV:Map  KPI:Measure  DASH:Summary
+========================================================
+
+> PHASE A: Link Model + Threat Injection + Dataset
+
+  [A5-A6] Dataset status:
+         raw dataset  : READY (26-Sep-2026 12:51:21, 943 MB)
+         spectrograms : READY (26-Sep-2026 12:54:16, 1509 MB)
+
+> PHASE B: Detection Network (CNN + scalar hybrid, 9 classes)
+
+  [B2] Training hybrid CNN+scalar detector (9 classes)...
+=== B2: Train Hybrid Detector ===
+
+train 16200 | val 5400 | test 5400 | classes 9 | features 8 (sinr, ber, rssi, plr, var_rssi, dber_dt, burst_ratio, env_corr)
+  epoch  1/30 | loss 1.0746 | val acc 0.8139 *
+  epoch  2/30 | loss 0.6060 | val acc 0.8509 *
+  epoch  3/30 | loss 0.5135 | val acc 0.8687 *
+  epoch  4/30 | loss 0.4567 | val acc 0.8517
+  epoch  5/30 | loss 0.4330 | val acc 0.8830 *
+  epoch  6/30 | loss 0.4107 | val acc 0.8494
+  epoch  7/30 | loss 0.3912 | val acc 0.7659
+  epoch  8/30 | loss 0.3760 | val acc 0.8787
+  epoch  9/30 | loss 0.3679 | val acc 0.8663
+  epoch 10/30 | loss 0.3572 | val acc 0.8844 *
+  epoch 11/30 | loss 0.3426 | val acc 0.8972 *
+  epoch 12/30 | loss 0.3367 | val acc 0.8952
+  epoch 13/30 | loss 0.3325 | val acc 0.8970
+  epoch 14/30 | loss 0.3199 | val acc 0.7443
+  epoch 15/30 | loss 0.3117 | val acc 0.8900
+  epoch 16/30 | loss 0.3143 | val acc 0.8898
+  epoch 17/30 | loss 0.3065 | val acc 0.8946
+  epoch 18/30 | loss 0.2921 | val acc 0.8259
+  epoch 19/30 | loss 0.2925 | val acc 0.9039 *
+  epoch 20/30 | loss 0.2866 | val acc 0.8961
+  epoch 21/30 | loss 0.2845 | val acc 0.8946
+  epoch 22/30 | loss 0.2893 | val acc 0.9037
+  epoch 23/30 | loss 0.2782 | val acc 0.8989
+  epoch 24/30 | loss 0.2714 | val acc 0.9013
+  epoch 25/30 | loss 0.2750 | val acc 0.9026
+  epoch 26/30 | loss 0.2646 | val acc 0.9063 *
+  epoch 27/30 | loss 0.2712 | val acc 0.9069 *
+  epoch 28/30 | loss 0.2702 | val acc 0.9052
+  epoch 29/30 | loss 0.2619 | val acc 0.9063
+  epoch 30/30 | loss 0.2648 | val acc 0.9104 *
+
+Best validation accuracy 0.9104 at epoch 30
+Fitting unknown-threat models (Mahalanobis, isolation forest)...
+Saved data/trained_detector.mat
+=== B2 Complete ===
+  [B3] Evaluating on test set...
+=== B3: Test Evaluation ===
+
+Loading test data and trained model...
+Running inference on 5400 test samples...
+
+Calculating metrics...
+
+--- Test Set Metrics ---
+Overall Accuracy: 90.89%
+Macro-F1 Score:   91.06%
+
+Class               none: Acc =  72.0%, F1 =  73.7%
+Class            jamming: Acc =  91.2%, F1 =  93.6%
+Class        noise_burst: Acc =  98.3%, F1 =  99.2%
+Class   reactive_jamming: Acc = 100.0%, F1 = 100.0%
+Class          path_loss: Acc =  96.3%, F1 =  95.5%
+Class           spoofing: Acc =  96.0%, F1 =  97.5%
+Class      antenna_fault: Acc =  93.3%, F1 =  93.7%
+Class benign_interference: Acc =  74.0%, F1 =  68.8%
+Class    sweeping_jammer: Acc =  96.8%, F1 =  97.6%
+
+SNR breakdown:
+  SNR= 0 dB: 81.6%
+  SNR= 2 dB: 89.7%
+  SNR= 4 dB: 93.2%
+  SNR= 6 dB: 95.1%
+  SNR= 8 dB: 93.7%
+  SNR=10 dB: 92.1%
+
+Evaluation complete. Saved confusion_matrix.png and accuracy_vs_snr.png to results/.
+
+Macro-F1 per Eb/N0: 0 dB 79.5% | 2 dB 89.4% | 4 dB 93.3% | 6 dB 95.1% | 8 dB 93.6% | 10 dB 92.0% |
+KPI #1 threshold: macro-F1 >= 90% from 4 dB up; macro-F1 above it 93.52%
+Action-equivalent accuracy: 95.83% (class accuracy 90.89%)
+95% bootstrap CI: accuracy [88.26, 93.22] | macro-F1 [88.69, 93.00] | macro-F1 above threshold [91.20, 95.50]
+
+Accuracy vs UAV speed:
+    50.1-  60.1 km/h: 87.5%  (n=800)
+    60.1-  70.1 km/h: 91.8%  (n=720)
+    70.1-  80.1 km/h: 93.0%  (n=640)
+    80.1-  90.0 km/h: 93.1%  (n=980)
+    90.0- 100.0 km/h: 87.8%  (n=760)
+   100.0- 110.0 km/h: 93.1%  (n=860)
+   110.0- 120.0 km/h: 89.4%  (n=640)
+Saved results/eval_detector_metrics.mat (for KPI aggregation)
+  [B] Pipeline status:
+      splits.mat           : READY (26-Sep-2026 12:55:05, 1509 MB)
+      trained_detector.mat : READY (26-Sep-2026 13:02:34, 24 MB)
+      B3 eval results      : READY (26-Sep-2026 13:02:50)
+
+> PHASE C: Closed-Loop Adaptive Recovery (9 threats/classes)
+
+  [C1] Rule-based countermeasure policy...           READY (rule_based_policy.m)
+  [OOD] Leave-one-threat-out unknown-threat detection (retrains the detector per threat)...
+=== Unknown-threat detection: leave-one-threat-out (D32) ===
+
+Production detector thresholds (95% of known validation frames kept): MSP 0.512 | energy 2.96
+
+[1/8] Held-out threat: jamming
+    AUROC  msp 0.554  energy 0.489  maha 0.965  iforest 0.767  fused 0.960  
+    FPR95  msp 0.99  energy 0.99  maha 0.10  iforest 0.83  fused 0.11  
+    known acc 91.3% (3.1 min)
+
+[2/8] Held-out threat: noise_burst
+    AUROC  msp 0.146  energy 0.057  maha 0.954  iforest 0.560  fused 0.924  
+    FPR95  msp 1.00  energy 1.00  maha 0.17  iforest 0.97  fused 0.18  
+    known acc 89.6% (6.3 min)
+
+[3/8] Held-out threat: reactive_jamming
+    AUROC  msp 0.412  energy 0.411  maha 0.952  iforest 0.897  fused 0.971  
+    FPR95  msp 0.99  energy 0.99  maha 0.22  iforest 0.56  fused 0.20  
+    known acc 89.3% (9.3 min)
+
+[4/8] Held-out threat: path_loss
+    AUROC  msp 0.758  energy 0.757  maha 0.933  iforest 0.754  fused 0.899  
+    FPR95  msp 0.86  energy 0.83  maha 0.24  iforest 0.95  fused 0.32  
+    known acc 90.4% (12.3 min)
+
+[5/8] Held-out threat: spoofing
+    AUROC  msp 0.792  energy 0.889  maha 0.789  iforest 0.691  fused 0.763  
+    FPR95  msp 0.80  energy 0.56  maha 0.49  iforest 0.83  fused 0.54  
+    known acc 89.9% (15.3 min)
+
+[6/8] Held-out threat: antenna_fault
+    AUROC  msp 0.816  energy 0.926  maha 0.737  iforest 0.308  fused 0.569  
+    FPR95  msp 0.76  energy 0.33  maha 0.95  iforest 1.00  fused 0.99  
+    known acc 90.9% (18.2 min)
+
+[7/8] Held-out threat: benign_interference
+    AUROC  msp 0.847  energy 0.892  maha 0.489  iforest 0.250  fused 0.413  
+    FPR95  msp 0.76  energy 0.61  maha 0.88  iforest 1.00  fused 0.93  
+    known acc 96.9% (21.2 min)
+
+[8/8] Held-out threat: sweeping_jammer
+    AUROC  msp 0.540  energy 0.468  maha 0.903  iforest 0.508  fused 0.850  
+    FPR95  msp 0.99  energy 0.98  maha 0.35  iforest 0.97  fused 0.44  
+    known acc 90.1% (24.2 min)
+
+=== UNKNOWN-THREAT DETECTION: LEAVE-ONE-THREAT-OUT (D32, D42) ===
+Generated: 26-Sep-2026 13:27:17 | detector retrained without each threat (30 epochs), test split by sub-run
+AUROC: 0.5 = no separation, 1 = perfect. FPR95: unknown frames accepted as known at the threshold keeping 95% of known validation frames.
+
+held-out threat          n |     msp  energy    maha iforest   fused |     msp  energy    maha iforest   fused |  known  mistaken for          same
+                           |   AUROC                                 |   FPR95                                
+jamming                600 |   0.554   0.489   0.965   0.767   0.960 |    0.99    0.99    0.10    0.83    0.11 |  91.3%  spoofing               55%
+noise_burst            600 |   0.146   0.057   0.954   0.560   0.924 |    1.00    1.00    0.17    0.97    0.18 |  89.6%  sweeping_jammer         0%
+reactive_jamming       600 |   0.412   0.411   0.952   0.897   0.971 |    0.99    0.99    0.22    0.56    0.20 |  89.3%  jamming                71%
+path_loss              600 |   0.758   0.757   0.933   0.754   0.899 |    0.86    0.83    0.24    0.95    0.32 |  90.4%  spoofing                0%
+spoofing               600 |   0.792   0.889   0.789   0.691   0.763 |    0.80    0.56    0.49    0.83    0.54 |  89.9%  path_loss              24%
+antenna_fault          600 |   0.816   0.926   0.737   0.308   0.569 |    0.76    0.33    0.95    1.00    0.99 |  90.9%  sweeping_jammer         0%
+benign_interference    600 |   0.847   0.892   0.489   0.250   0.413 |    0.76    0.61    0.88    1.00    0.93 |  96.9%  none                   66%
+sweeping_jammer        600 |   0.540   0.468   0.903   0.508   0.850 |    0.99    0.98    0.35    0.97    0.44 |  90.1%  noise_burst             0%
+mean                       |   0.608   0.611   0.840   0.592   0.794 |    0.89    0.79    0.43    0.89    0.46
+
+Best score by mean AUROC: maha (0.840). Production MSP / energy thresholds: 0.512 / 2.96.
+
+Saved results/ood_detection.{txt,mat} (24.2 min)
+  [C] Pipeline status:
+      trained_dqn.mat        : READY (26-Sep-2026 01:16:01)
+      C2 seed stability      : READY (26-Sep-2026 01:16:01)
+      C3-diag full report    : READY (26-Sep-2026 01:25:16)
+      C3-speed robustness    : READY (26-Sep-2026 01:32:16)
+
+> PHASE SURV: Survivability Boundary Mapping (proposal deliverable #7)
+
+  [SURV] Pipeline status:
+      survivability_boundary.mat     : READY (26-Sep-2026 03:05:31)
+      Map A (no goodput loss)        : READY (26-Sep-2026 03:05:31)
+      Map B (any action)             : READY (26-Sep-2026 03:05:31)
+
+> PHASE KPI: Proposal KPI Measurement
+
+  [KPI] Pipeline status:
+      far_measurement.txt   : READY (26-Sep-2026 03:08:48)
+      kpi3_measurement.txt  : READY (26-Sep-2026 03:08:48)
+      kpi_summary.txt       : READY (26-Sep-2026 03:08:48)
+
+> PHASE DASH: Results Dashboard (proposal deliverable #1)
+
+  [DASH] Pipeline status:
+      kpi_dashboard.png : READY (26-Sep-2026 03:08:50)
+
+> PHASE D: Documentation & Defense
+
+  [D1] README.md / PROJECT_LOG.md / docs/DECISIONS.md  READY (maintained by hand)
+  [D2] Interim/final report (docx)...                  [PENDING]
+  [D3] Defense presentation (pptx)...                  [PENDING]
+
+========================================================
+ CHECKPOINT - full pipeline available from main.m
+ Headline numbers with 95% CIs: results/kpi_summary.txt (D35)
+ Survivability maps: results/survivability_boundary_mapA.txt / mapB.txt (deliverable #7)
+ Outputs in results/, data/ | models in models/ | code on GitHub
+ Full run log saved to: logs/run_20260926_125858.txt
+========================================================
+

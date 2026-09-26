@@ -1,0 +1,98 @@
+=== Logging full run to: logs/run_20260925_221452.txt ===
+(This file will contain EVERYTHING printed below, even across clc calls.)
+
+========================================================
+  UAV-GCS ADAPTIVE SECURE COMMS - MASTER PIPELINE
+  A:Link+Data  B:Detect  C:Recover  SURV:Map  KPI:Measure  DASH:Summary
+========================================================
+
+> PHASE A: Link Model + Threat Injection + Dataset
+
+  [A5-A6] Dataset status:
+         raw dataset  : READY (25-Sep-2026 15:12:03, 952 MB)
+         spectrograms : READY (25-Sep-2026 15:19:39, 1361 MB)
+
+> PHASE B: Detection Network (CNN + scalar hybrid, 9 classes)
+
+  [B] Pipeline status:
+      splits.mat           : READY (25-Sep-2026 15:23:44, 1361 MB)
+      trained_detector.mat : READY (25-Sep-2026 15:30:50)
+      B3 eval results      : READY (25-Sep-2026 15:32:11)
+
+> PHASE C: Closed-Loop Adaptive Recovery (9 threats/classes)
+
+  [C1] Rule-based countermeasure policy...           READY (rule_based_policy.m)
+  [C2] Training DQN agent (one-hot state, real threat-specific reward table)...
+=== C2: Train DQN Agent ===
+
+=== C2: Initializing DQN Agent ===
+
+State spec: 13-dim
+  threat class: one-hot [9 classes]
+  BER:  [0,1]
+  RSSI: [-100,20] dBm
+  SNR:  [0,20] dB
+  PLR:  [0,1]
+Action spec: 16 discrete actions
+  1: no_action
+  2: channel_switch
+  3: rate_reduce
+  4: freq_diversity
+  5: spatial_diversity
+  6: power_control
+  7: fec_interleave
+  8: channel_switch+rate_reduce
+  9: channel_switch+power_control
+  10: channel_switch+fec_interleave
+  11: freq_diversity+rate_reduce
+  12: freq_diversity+power_control
+  13: freq_diversity+fec_interleave
+  14: spatial_diversity+rate_reduce
+  15: spatial_diversity+power_control
+  16: spatial_diversity+fec_interleave
+
+Q-Network architecture:
+  Input: 13-dim state
+  Hidden1: 128 neurons + ReLU
+  Hidden2: 64 neurons + ReLU
+  Output: 16 Q-values (one per action)
+  Total params: 11088
+
+DQN Hyperparameters:
+  Learning rate: 1e-03
+  Discount (gamma): 0.99
+  Replay buffer size: 10000
+  Batch size: 64
+  Epsilon start: 1.00 -> 0.01 (decay 0.995)
+
+=== DQN Agent Initialized ===
+
+========== UAV-GCS LINK PARAMETERS ==========
+Phase:            A4  (channel: Rician)
+Modulation:       QPSK
+Symbol Rate:      1.00e+06 sym/s
+Bits/Frame:       1000 (+ 32 CRC [FUTURE])
+Symbols/Frame:    516
+Channel:          Rician (K=10.0 dB)
+Carrier Freq:     2.4 GHz
+Range:            100 m [FUTURE]
+UAV Velocity:     20.0 m/s (72.0 km/h) nominal | envelope 50.0-120.0 km/h (13.9-33.3 m/s)
+Doppler envelope: 111-267 Hz (nominal fd_max 160 Hz)
+Max Doppler fd:   160.0 Hz  (normalized 1.60e-04)
+Active Threat:    jamming (JSR=10 dB)
+Eb/N0 Range:      0 to 10 dB
+Frames per SNR:   1000
+Sequence window:  len=8, stride=4 (LSTM)
+=============================================
+
+Parameters saved to params.mat
+Measuring the link for 9 threats x 16 actions x 6 Eb/N0 points...
+
+{Error using <a href="matlab:matlab.lang.internal.introspective.errorDocCallback('train_dqn', 'C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\train_dqn.m', 63)" style="font-weight:bold">train_dqn</a> (<a href="matlab: opentoline('C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\train_dqn.m',63,0)">line 63</a>)
+Program interruption (Ctrl-C) has been detected.
+
+Error in <a href="matlab:matlab.lang.internal.introspective.errorDocCallback('main', 'C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\main.m', 222)" style="font-weight:bold">main</a> (<a href="matlab: opentoline('C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\main.m',222,0)">line 222</a>)
+    train_dqn;
+    ^^^^^^^^^^ - <a href="matlab:interactive_actions_helper.displayMStack([struct('file','C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\train_dqn.m','line',63,'name','train_dqn'),struct('file','C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\main.m','line',222,'name','main')]);">Show complete stack trace</a>
+} 
+main

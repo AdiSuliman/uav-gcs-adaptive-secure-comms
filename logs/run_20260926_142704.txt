@@ -1,0 +1,369 @@
+=== Logging full run to: logs/run_20260926_142704.txt ===
+(This file will contain EVERYTHING printed below, even across clc calls.)
+
+========================================================
+  UAV-GCS ADAPTIVE SECURE COMMS - MASTER PIPELINE
+  A:Link+Data  B:Detect  C:Recover  SURV:Map  KPI:Measure  DASH:Summary
+========================================================
+
+> PHASE A: Link Model + Threat Injection + Dataset
+
+  [A5-A6] Dataset status:
+         raw dataset  : READY (26-Sep-2026 12:51:21, 943 MB)
+         spectrograms : READY (26-Sep-2026 13:34:29, 1509 MB)
+
+> PHASE B: Detection Network (CNN + scalar hybrid, 9 classes)
+
+  [B] Pipeline status:
+      splits.mat           : READY (26-Sep-2026 13:35:17, 1509 MB)
+      trained_detector.mat : READY (26-Sep-2026 13:38:46, 24 MB)
+      B3 eval results      : READY (26-Sep-2026 13:39:00)
+
+> PHASE C: Closed-Loop Adaptive Recovery (9 threats/classes)
+
+  [C1] Rule-based countermeasure policy...           READY (rule_based_policy.m)
+  [C1p] Measuring the decision-layer frame pools...
+=== Decision-layer frame pools (D44) ===
+
+  [ 1/13] none                       16 configurations x 6 Eb/N0 (4.1 min)
+  [ 2/13] jamming                    16 configurations x 6 Eb/N0 (8.4 min)
+  [ 3/13] noise_burst                16 configurations x 6 Eb/N0 (12.6 min)
+  [ 4/13] reactive_jamming           16 configurations x 6 Eb/N0 (17.0 min)
+  [ 5/13] path_loss                  16 configurations x 6 Eb/N0 (20.3 min)
+  [ 6/13] spoofing                   16 configurations x 6 Eb/N0 (25.4 min)
+  [ 7/13] antenna_fault              16 configurations x 6 Eb/N0 (28.8 min)
+  [ 8/13] benign_interference        16 configurations x 6 Eb/N0 (33.0 min)
+  [ 9/13] sweeping_jammer            16 configurations x 6 Eb/N0 (37.2 min)
+  [10/13] jamming+path_loss          16 configurations x 6 Eb/N0 (39.2 min)
+  [11/13] noise_burst+antenna_fault  16 configurations x 6 Eb/N0 (41.1 min)
+  [12/13] sweeping_jammer+path_loss  16 configurations x 6 Eb/N0 (43.1 min)
+  [13/13] spoofing+noise_burst       16 configurations x 6 Eb/N0 (46.5 min)
+
+Clean-link BER per Eb/N0: 3.04e-02 9.66e-03 2.05e-03 4.68e-04 1.61e-05 0.00e+00 
+Unmitigated BER / clean (train split, singles):
+  jamming                    10.5    31.2   137.3   586.9 19141.0     Inf
+  noise_burst                 3.6    10.7    44.4   202.6  5001.0     Inf
+  reactive_jamming            8.7    28.0   135.8   458.0 15812.0     Inf
+  path_loss                   9.1    26.6    77.1   291.2  2969.0     Inf
+  spoofing                    4.9    12.3    31.0   153.3  3245.0     Inf
+  antenna_fault               1.6     3.1     6.0     8.9   142.0     Inf
+  benign_interference         1.5     5.4     7.9    34.4   463.0     Inf
+  sweeping_jammer             2.5     5.8    21.3    92.7  2745.0     Inf
+Saved data/policy_pools.mat (46.6 min)
+  [C2] Training the sequential DQN (Double DQN, replay, target network)...
+=== C2: Train sequential DQN (D44) ===
+
+Rule + escalation on validation: return 0.592, restored 53.1%, false switches/episode 0.261
+
+--- Seed 42 (1/3) ---
+    episode   512/12032 | eps 0.94 | greedy return 0.618 | updates 588
+    episode  1024/12032 | eps 0.87 | greedy return 0.619 | updates 1548
+    episode  1536/12032 | eps 0.81 | greedy return 0.606 | updates 2508
+    episode  2048/12032 | eps 0.74 | greedy return 0.604 | updates 3468
+    episode  2560/12032 | eps 0.67 | greedy return 0.604 | updates 4428
+    episode  3072/12032 | eps 0.60 | greedy return 0.611 | updates 5388
+    episode  3584/12032 | eps 0.54 | greedy return 0.637 | updates 6348
+    episode  4096/12032 | eps 0.47 | greedy return 0.618 | updates 7308
+    episode  4608/12032 | eps 0.40 | greedy return 0.644 | updates 8268
+    episode  5120/12032 | eps 0.33 | greedy return 0.656 | updates 9228
+    episode  5632/12032 | eps 0.27 | greedy return 0.667 | updates 10188
+    episode  6144/12032 | eps 0.20 | greedy return 0.598 | updates 11148
+    episode  6656/12032 | eps 0.13 | greedy return 0.649 | updates 12108
+    episode  7168/12032 | eps 0.07 | greedy return 0.647 | updates 13068
+    episode  7680/12032 | eps 0.05 | greedy return 0.650 | updates 14028
+    episode  8192/12032 | eps 0.05 | greedy return 0.691 | updates 14988
+    episode  8704/12032 | eps 0.05 | greedy return 0.687 | updates 15948
+    episode  9216/12032 | eps 0.05 | greedy return 0.683 | updates 16908
+    episode  9728/12032 | eps 0.05 | greedy return 0.690 | updates 17868
+    episode 10240/12032 | eps 0.05 | greedy return 0.607 | updates 18828
+    episode 10752/12032 | eps 0.05 | greedy return 0.671 | updates 19788
+    episode 11264/12032 | eps 0.05 | greedy return 0.693 | updates 20748
+    episode 11776/12032 | eps 0.05 | greedy return 0.686 | updates 21708
+    episode 12032/12032 | eps 0.05 | greedy return 0.668 | updates 22188
+    validation: return 0.659 | restored 76.2% | goodput 0.888 | false switches/episode 2.837
+--- Seed 43 (2/3) ---
+    episode   512/12032 | eps 0.94 | greedy return 0.600 | updates 588
+    episode  1024/12032 | eps 0.87 | greedy return 0.625 | updates 1548
+    episode  1536/12032 | eps 0.81 | greedy return 0.651 | updates 2508
+    episode  2048/12032 | eps 0.74 | greedy return 0.646 | updates 3468
+    episode  2560/12032 | eps 0.67 | greedy return 0.637 | updates 4428
+    episode  3072/12032 | eps 0.60 | greedy return 0.638 | updates 5388
+    episode  3584/12032 | eps 0.54 | greedy return 0.635 | updates 6348
+    episode  4096/12032 | eps 0.47 | greedy return 0.646 | updates 7308
+    episode  4608/12032 | eps 0.40 | greedy return 0.627 | updates 8268
+    episode  5120/12032 | eps 0.33 | greedy return 0.637 | updates 9228
+    episode  5632/12032 | eps 0.27 | greedy return 0.629 | updates 10188
+    episode  6144/12032 | eps 0.20 | greedy return 0.617 | updates 11148
+    episode  6656/12032 | eps 0.13 | greedy return 0.562 | updates 12108
+    episode  7168/12032 | eps 0.07 | greedy return 0.600 | updates 13068
+    episode  7680/12032 | eps 0.05 | greedy return 0.617 | updates 14028
+    episode  8192/12032 | eps 0.05 | greedy return 0.614 | updates 14988
+    episode  8704/12032 | eps 0.05 | greedy return 0.618 | updates 15948
+    episode  9216/12032 | eps 0.05 | greedy return 0.648 | updates 16908
+    episode  9728/12032 | eps 0.05 | greedy return 0.631 | updates 17868
+    episode 10240/12032 | eps 0.05 | greedy return 0.670 | updates 18828
+    episode 10752/12032 | eps 0.05 | greedy return 0.652 | updates 19788
+    episode 11264/12032 | eps 0.05 | greedy return 0.654 | updates 20748
+    episode 11776/12032 | eps 0.05 | greedy return 0.640 | updates 21708
+    episode 12032/12032 | eps 0.05 | greedy return 0.598 | updates 22188
+    validation: return 0.640 | restored 69.0% | goodput 0.921 | false switches/episode 1.615
+--- Seed 44 (3/3) ---
+    episode   512/12032 | eps 0.94 | greedy return 0.554 | updates 588
+    episode  1024/12032 | eps 0.87 | greedy return 0.599 | updates 1548
+    episode  1536/12032 | eps 0.81 | greedy return 0.593 | updates 2508
+    episode  2048/12032 | eps 0.74 | greedy return 0.575 | updates 3468
+    episode  2560/12032 | eps 0.67 | greedy return 0.621 | updates 4428
+    episode  3072/12032 | eps 0.60 | greedy return 0.529 | updates 5388
+    episode  3584/12032 | eps 0.54 | greedy return 0.529 | updates 6348
+    episode  4096/12032 | eps 0.47 | greedy return 0.599 | updates 7308
+    episode  4608/12032 | eps 0.40 | greedy return 0.588 | updates 8268
+    episode  5120/12032 | eps 0.33 | greedy return 0.581 | updates 9228
+    episode  5632/12032 | eps 0.27 | greedy return 0.631 | updates 10188
+    episode  6144/12032 | eps 0.20 | greedy return 0.642 | updates 11148
+    episode  6656/12032 | eps 0.13 | greedy return 0.655 | updates 12108
+    episode  7168/12032 | eps 0.07 | greedy return 0.645 | updates 13068
+    episode  7680/12032 | eps 0.05 | greedy return 0.632 | updates 14028
+    episode  8192/12032 | eps 0.05 | greedy return 0.628 | updates 14988
+    episode  8704/12032 | eps 0.05 | greedy return 0.640 | updates 15948
+    episode  9216/12032 | eps 0.05 | greedy return 0.625 | updates 16908
+    episode  9728/12032 | eps 0.05 | greedy return 0.625 | updates 17868
+    episode 10240/12032 | eps 0.05 | greedy return 0.622 | updates 18828
+    episode 10752/12032 | eps 0.05 | greedy return 0.628 | updates 19788
+    episode 11264/12032 | eps 0.05 | greedy return 0.665 | updates 20748
+    episode 11776/12032 | eps 0.05 | greedy return 0.658 | updates 21708
+    episode 12032/12032 | eps 0.05 | greedy return 0.665 | updates 22188
+    validation: return 0.677 | restored 76.1% | goodput 0.928 | false switches/episode 1.099
+
+--- Contextual-bandit ablation (gamma = 0) ---
+    episode   512/12032 | eps 0.94 | greedy return 0.642 | updates 588
+    episode  1024/12032 | eps 0.87 | greedy return 0.633 | updates 1548
+    episode  1536/12032 | eps 0.81 | greedy return 0.670 | updates 2508
+    episode  2048/12032 | eps 0.74 | greedy return 0.673 | updates 3468
+    episode  2560/12032 | eps 0.67 | greedy return 0.623 | updates 4428
+    episode  3072/12032 | eps 0.60 | greedy return 0.705 | updates 5388
+    episode  3584/12032 | eps 0.54 | greedy return 0.683 | updates 6348
+    episode  4096/12032 | eps 0.47 | greedy return 0.686 | updates 7308
+    episode  4608/12032 | eps 0.40 | greedy return 0.685 | updates 8268
+    episode  5120/12032 | eps 0.33 | greedy return 0.687 | updates 9228
+    episode  5632/12032 | eps 0.27 | greedy return 0.703 | updates 10188
+    episode  6144/12032 | eps 0.20 | greedy return 0.710 | updates 11148
+    episode  6656/12032 | eps 0.13 | greedy return 0.709 | updates 12108
+    episode  7168/12032 | eps 0.07 | greedy return 0.711 | updates 13068
+    episode  7680/12032 | eps 0.05 | greedy return 0.714 | updates 14028
+    episode  8192/12032 | eps 0.05 | greedy return 0.713 | updates 14988
+    episode  8704/12032 | eps 0.05 | greedy return 0.714 | updates 15948
+    episode  9216/12032 | eps 0.05 | greedy return 0.714 | updates 16908
+    episode  9728/12032 | eps 0.05 | greedy return 0.713 | updates 17868
+    episode 10240/12032 | eps 0.05 | greedy return 0.710 | updates 18828
+    episode 10752/12032 | eps 0.05 | greedy return 0.710 | updates 19788
+    episode 11264/12032 | eps 0.05 | greedy return 0.714 | updates 20748
+    episode 11776/12032 | eps 0.05 | greedy return 0.714 | updates 21708
+    episode 12032/12032 | eps 0.05 | greedy return 0.715 | updates 22188
+
+=== SEQUENTIAL DQN TRAINING (D44) ===
+
+Generated: 26-Sep-2026 15:23:40 | Double DQN, replay 150000, target every 500 updates, gamma 0.90, 12000 episodes x 30 cycles, 3 seeds
+
+Validation: 1280 episodes (train pools, fresh draws), single threats + clean link
+
+policy                    return   restored   goodput   false sw/ep  switches/ep
+
+DQN seed 42                0.659      76.2%     0.888         2.837         8.30
+
+DQN seed 43                0.640      69.0%     0.921         1.615         5.63
+
+DQN seed 44                0.677      76.1%     0.928         1.099         5.79
+
+DQN gamma=0 (bandit)       0.705      73.6%     0.916         0.088         2.91
+
+rule + escalation          0.592      53.1%     0.828         0.261         2.50
+
+Selected seed 44. Gate (return >= rule+escalation, false switches on <= 5% of clean episodes: 52.1%): FAIL
+[Warning: DQN validation gate FAILED -- see results/dqn_training.txt] 
+[> In train_dqn (line 102)
+In main (line 244)] 
+Saved data/trained_dqn.mat
+=== C2 Complete ===
+  [C2e] Evaluating every policy on the test pools...
+=== Decision-layer evaluation on the test pools (D44) ===
+
+Best fixed configuration (train pools): spatial_diversity+power_control
+
+  set single     384 episodes x 8 policies (0.0 min)
+  set follower   320 episodes x 8 policies (0.0 min)
+  set combined   384 episodes x 8 policies (0.1 min)
+  set clean      192 episodes x 8 policies (0.1 min)
+
+=== DECISION-LAYER EVALUATION, TEST POOLS (D44) ===
+
+Generated: 26-Sep-2026 15:23:53 | 30-cycle episodes, onset at cycle 3-10 | test sub-runs never used in training
+
+return = mean reward per cycle (1 = restored at no cost); restored / goodput / recovery after onset;
+
+recovered = restored for 5 consecutive cycles; false sw = switches on a healthy link, whole episode.
+
+
+
+--- single (384 episodes) ---
+
+policy                                         return             restored %   goodput  recovered     T_rec   switches   false sw
+
+random                           0.393 [0.360, 0.426]      55.5 [52.3, 58.7]     0.599      57.0%         3      28.09      6.031
+
+fixed: spatial_diversity+power_control   0.652 [0.614, 0.690]      85.4 [81.9, 89.0]     0.978      85.4%         0       1.00      1.000
+
+rule                             0.538 [0.501, 0.575]      47.8 [43.3, 52.3]     0.788      54.2%         2       1.68      0.083
+
+rule + escalation                0.562 [0.527, 0.598]      51.7 [47.6, 55.8]     0.821      53.9%         2       2.90      0.081
+
+DQN gamma=0 (bandit)             0.683 [0.647, 0.719]      72.4 [68.5, 76.3]     0.896      77.1%         1       2.70      0.164
+
+DQN                              0.656 [0.616, 0.696]      76.8 [73.1, 80.5]     0.910      82.0%         1       6.30      0.992
+
+DQN + escalation                 0.658 [0.618, 0.698]      76.0 [72.3, 79.7]     0.908      80.5%         1       7.29      1.010
+
+oracle                           0.734 [0.697, 0.771]      72.9 [68.5, 77.4]     0.929      72.9%         0       0.79      0.000
+
+Paired return difference DQN - rule+escalation: +0.093 [+0.075, +0.111] | DQN+escalation - rule+escalation: +0.096 [+0.078, +0.113]
+
+
+
+--- follower (320 episodes) ---
+
+policy                                         return             restored %   goodput  recovered     T_rec   switches   false sw
+
+random                           0.462 [0.429, 0.496]      69.2 [67.7, 70.8]     0.581      75.6%         5      28.14      5.075
+
+fixed: spatial_diversity+power_control   0.706 [0.666, 0.746]      94.4 [91.8, 96.9]     1.000      94.4%         0       1.00      1.000
+
+rule                             0.685 [0.649, 0.720]      75.1 [72.0, 78.2]     0.905      84.1%         5       3.15      0.031
+
+rule + escalation                0.676 [0.641, 0.711]      73.2 [70.1, 76.3]     0.901      82.2%         5       3.27      0.031
+
+DQN gamma=0 (bandit)             0.684 [0.649, 0.719]      72.3 [69.4, 75.2]     0.869      71.6%         1       6.56      0.044
+
+DQN                              0.698 [0.658, 0.738]      83.9 [81.1, 86.7]     0.942      90.6%         1       5.97      0.894
+
+DQN + escalation                 0.697 [0.657, 0.737]      81.9 [79.1, 84.8]     0.933      88.1%         1       7.62      0.897
+
+oracle                           0.792 [0.754, 0.830]      84.1 [80.0, 88.1]     0.895      84.1%         0       7.43      0.000
+
+Paired return difference DQN - rule+escalation: +0.022 [+0.013, +0.032] | DQN+escalation - rule+escalation: +0.021 [+0.012, +0.030]
+
+
+
+--- combined (384 episodes) ---
+
+policy                                         return             restored %   goodput  recovered     T_rec   switches   false sw
+
+random                           0.135 [0.115, 0.154]         6.6 [5.1, 8.0]     0.435       2.6%         4      28.08      5.258
+
+fixed: spatial_diversity+power_control   0.428 [0.397, 0.460]      20.8 [16.8, 24.9]     0.931      20.8%         0       1.00      1.000
+
+rule                             0.160 [0.142, 0.179]         3.8 [2.0, 5.7]     0.258       4.2%         2       2.91      0.026
+
+rule + escalation                0.209 [0.191, 0.228]         5.1 [3.7, 6.5]     0.348       4.4%        10       4.62      0.026
+
+DQN gamma=0 (bandit)             0.420 [0.389, 0.450]      20.1 [16.1, 24.0]     0.755      20.8%         1       6.25      0.049
+
+DQN                              0.417 [0.385, 0.449]      19.9 [16.0, 23.8]     0.841      20.8%         1       5.90      0.883
+
+DQN + escalation                 0.391 [0.361, 0.421]      17.6 [14.1, 21.0]     0.793      20.8%         6      10.36      0.880
+
+oracle                           0.497 [0.469, 0.525]      20.8 [16.8, 24.9]     0.821      20.8%         0       0.83      0.000
+
+Paired return difference DQN - rule+escalation: +0.207 [+0.190, +0.224] | DQN+escalation - rule+escalation: +0.181 [+0.166, +0.196]
+
+
+
+--- clean (192 episodes) ---
+
+policy                                         return             restored %   goodput  recovered     T_rec   switches   false sw
+
+random                           0.462 [0.409, 0.516]   100.0 [100.0, 100.0]     0.684     100.0%         0      28.02     28.021
+
+fixed: spatial_diversity+power_control   0.705 [0.652, 0.759]   100.0 [100.0, 100.0]     1.000     100.0%         0       1.00      1.000
+
+rule                             0.815 [0.758, 0.872]   100.0 [100.0, 100.0]     0.946     100.0%         0       0.24      0.245
+
+rule + escalation                0.815 [0.758, 0.872]   100.0 [100.0, 100.0]     0.946     100.0%         0       0.24      0.245
+
+DQN gamma=0 (bandit)             0.823 [0.769, 0.876]   100.0 [100.0, 100.0]     0.998     100.0%         0       0.27      0.271
+
+DQN                              0.798 [0.738, 0.859]   100.0 [100.0, 100.0]     0.976     100.0%         0       2.67      2.672
+
+DQN + escalation                 0.798 [0.738, 0.859]   100.0 [100.0, 100.0]     0.976     100.0%         0       2.67      2.672
+
+oracle                           0.833 [0.780, 0.887]   100.0 [100.0, 100.0]     0.996     100.0%         0       0.00      0.000
+
+Paired return difference DQN - rule+escalation: -0.017 [-0.023, -0.010] | DQN+escalation - rule+escalation: -0.017 [-0.023, -0.010]
+
+
+
+Restored cycles after onset per threat (single + follower sets), %:
+
+scenario                     rule   rule+esc        DQN    DQN+esc     oracle
+
+jamming                      74.1      72.1      85.3      83.2      83.9
+
+noise_burst                  15.1      27.6      89.2      86.5      83.3
+
+reactive_jamming             85.2      83.0      92.1      90.1      83.9
+
+path_loss                     0.0       0.0       0.0       0.0       0.0
+
+spoofing                     69.5      69.2      77.1      76.7      83.8
+
+antenna_fault                33.3      34.8      89.1      89.7      83.3
+
+benign_interference          66.6      67.7      80.0      79.8      83.3
+
+sweeping_jammer              30.7      48.8      95.3      92.7      83.3
+
+jamming+path_loss             0.0       0.0       0.0       0.0       0.0
+
+noise_burst+antenna_fault       15.3      16.0      47.5      42.4      50.0
+
+sweeping_jammer+path_loss        0.0       0.0       0.0       0.0       0.0
+
+spoofing+noise_burst          0.0       4.4      32.0      27.9      33.3
+Saved results/policy_evaluation.{txt,mat,png}
+  [C] Pipeline status:
+      trained_dqn.mat        : READY (26-Sep-2026 15:23:40)
+      C2 seed stability      : READY (26-Sep-2026 01:16:01)
+      C3-diag full report    : READY (26-Sep-2026 01:25:16)
+      C3-speed robustness    : READY (26-Sep-2026 01:32:16)
+
+> PHASE SURV: Survivability Boundary Mapping (proposal deliverable #7)
+
+  [SURV] Pipeline status:
+      survivability_boundary.mat     : READY (26-Sep-2026 03:05:31)
+      Map A (no goodput loss)        : READY (26-Sep-2026 03:05:31)
+      Map B (any action)             : READY (26-Sep-2026 03:05:31)
+
+> PHASE KPI: Proposal KPI Measurement
+
+  [KPI] Pipeline status:
+      far_measurement.txt   : READY (26-Sep-2026 03:08:48)
+      kpi3_measurement.txt  : READY (26-Sep-2026 03:08:48)
+      kpi_summary.txt       : READY (26-Sep-2026 03:08:48)
+
+> PHASE DASH: Results Dashboard (proposal deliverable #1)
+
+  [DASH] Pipeline status:
+      kpi_dashboard.png : READY (26-Sep-2026 03:08:50)
+
+> PHASE D: Documentation & Defense
+
+  [D1] README.md / PROJECT_LOG.md / docs/DECISIONS.md  READY (maintained by hand)
+  [D2] Interim/final report (docx)...                  [PENDING]
+  [D3] Defense presentation (pptx)...                  [PENDING]
+
+========================================================
+ CHECKPOINT - full pipeline available from main.m
+ Headline numbers with 95% CIs: results/kpi_summary.txt (D35)
+ Survivability maps: results/survivability_boundary_mapA.txt / mapB.txt (deliverable #7)
+ Outputs in results/, data/ | models in models/ | code on GitHub
+ Full run log saved to: logs/run_20260926_142704.txt
+========================================================
+

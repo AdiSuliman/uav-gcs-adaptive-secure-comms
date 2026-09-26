@@ -1,0 +1,1140 @@
+=== Logging full run to: logs/run_20260925_172653.txt ===
+(This file will contain EVERYTHING printed below, even across clc calls.)
+
+========================================================
+  UAV-GCS ADAPTIVE SECURE COMMS - MASTER PIPELINE
+  A:Link+Data  B:Detect  C:Recover  SURV:Map  KPI:Measure  DASH:Summary
+========================================================
+
+> PHASE A: Link Model + Threat Injection + Dataset
+
+  [A5-A6] Dataset status:
+         raw dataset  : READY (25-Sep-2026 15:12:03, 952 MB)
+         spectrograms : READY (25-Sep-2026 15:19:39, 1361 MB)
+
+> PHASE B: Detection Network (CNN + scalar hybrid, 9 classes)
+
+  [B] Pipeline status:
+      splits.mat           : READY (25-Sep-2026 15:23:44, 1361 MB)
+      trained_detector.mat : READY (25-Sep-2026 15:30:50)
+      B3 eval results      : READY (25-Sep-2026 15:32:11)
+
+> PHASE C: Closed-Loop Adaptive Recovery (9 threats/classes)
+
+  [C1] Rule-based countermeasure policy...           READY (rule_based_policy.m)
+  [C] Pipeline status:
+      trained_dqn.mat        : READY (25-Sep-2026 15:49:47)
+      C2 seed stability      : READY (25-Sep-2026 15:49:47)
+      C3-diag full report    : READY (25-Sep-2026 16:03:50)
+      C3-speed robustness    : READY (25-Sep-2026 16:13:58)
+
+> PHASE SURV: Survivability Boundary Mapping (proposal deliverable #7)
+
+  [SURV] Mapping Map A (neutralization) + Map B (survivability) + gap analysis...
+=== Survivability Boundary Mapping (proposal deliverable #7, real action set) ===
+
+
+========== UAV-GCS LINK PARAMETERS ==========
+Phase:            A4  (channel: Rician)
+Modulation:       QPSK
+Symbol Rate:      1.00e+06 sym/s
+Bits/Frame:       1000 (+ 32 CRC [FUTURE])
+Symbols/Frame:    516
+Channel:          Rician (K=10.0 dB)
+Carrier Freq:     2.4 GHz
+Range:            100 m [FUTURE]
+UAV Velocity:     20.0 m/s (72.0 km/h) nominal | envelope 50.0-120.0 km/h (13.9-33.3 m/s)
+Doppler envelope: 111-267 Hz (nominal fd_max 160 Hz)
+Max Doppler fd:   160.0 Hz  (normalized 1.60e-04)
+Active Threat:    jamming (JSR=10 dB)
+Eb/N0 Range:      0 to 10 dB
+Frames per SNR:   1000
+Sequence window:  len=8, stride=4 (LSTM)
+=============================================
+
+Parameters saved to params.mat
+Measuring the clean link (none), 5 repeats per Eb/N0...
+  Eb/N0= 0 dB: clean BER = 1.2309e-01 (std 1.71e-03)
+  Eb/N0= 2 dB: clean BER = 8.0722e-02 (std 9.04e-04)
+  Eb/N0= 4 dB: clean BER = 4.6348e-02 (std 6.53e-04)
+  Eb/N0= 6 dB: clean BER = 2.3113e-02 (std 1.22e-03)
+  Eb/N0= 8 dB: clean BER = 9.3737e-03 (std 8.03e-04)
+  Eb/N0=10 dB: clean BER = 3.0498e-03 (std 2.66e-04)
+
+  [1/8] jamming              mapped (3.4 min)
+  [2/8] noise_burst          mapped (6.3 min)
+  [3/8] reactive_jamming     mapped (9.2 min)
+  [4/8] path_loss            mapped (12.1 min)
+  [5/8] spoofing             mapped (15.0 min)
+  [6/8] antenna_fault        mapped (17.9 min)
+  [7/8] sweeping_jammer      mapped (20.8 min)
+  [8/8] benign_interference  mapped (23.7 min)
+
+Classifying (ratio to clean link): recoverable <= 2x, marginal <= 5x
+
+
+--- MAP A (without goodput loss) ---
+=== SURVIVABILITY BOUNDARY MAP — MAP A — WITHOUT GOODPUT LOSS ===
+Generated: 25-Sep-2026 17:50:36
+Actions included: channel_switch, freq_diversity, spatial_diversity (apply_countermeasure.m, D28)
+
+A state is classified by the best post-countermeasure BER relative to the clean link:
+  RECOVERABLE (R) : within 2x | MARGINAL (M) : within 5x | NON-RECOVERABLE (X) : worse
+Second letter = action achieving it: C channel_switch, F freq_diversity, S spatial_diversity, R rate_reduce.
+
+Clean-link reference BER per Eb/N0:
+   0 dB : 1.2309e-01
+   2 dB : 8.0722e-02
+   4 dB : 4.6348e-02
+   6 dB : 2.3113e-02
+   8 dB : 9.3737e-03
+  10 dB : 3.0498e-03
+
+--- Boundary map, per threat (rows = severity level, cols = Eb/N0) ---
+jamming:
+  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
+  0               RC      RC      RC      RF      RF      RC
+  4               RC      RC      RC      RC      RF      RF
+  8               RC      RF      RF      RC      RF      RC
+  12              RF      RF      RF      RF      RC      MF
+  16              RC      RF      RF      RF      MF      MC
+  -> recoverable 27/30 (90%) | marginal 3 | non-recoverable 0
+
+noise_burst:
+  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
+  0               RS      RS      RS      RS      MS      XS
+  4               RS      RS      RS      MS      XS      XS
+  8               RS      RS      MS      MS      XS      XS
+  12              RS      RS      MS      XS      XS      XS
+  16              RS      RS      MS      XS      XS      XS
+  -> recoverable 13/30 (43%) | marginal 6 | non-recoverable 11
+
+reactive_jamming:
+  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
+  0               RF      RC      RC      RF      RF      RF
+  4               RF      RF      RC      RC      RF      RF
+  8               RC      RC      RC      RF      RC      RF
+  12              RF      RF      RF      RC      RC      RC
+  16              RC      RF      RC      RC      RC      MF
+  -> recoverable 29/30 (97%) | marginal 1 | non-recoverable 0
+
+path_loss:
+  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
+  4               RS      RS      RS      RS      RS      RS
+  8               MS      MS      MS      MS      XS      XS
+  12              MS      MS      XS      XS      XS      XS
+  16              MS      MS      XS      XS      XS      XS
+  20              MS      XS      XS      XS      XS      XS
+  -> recoverable 6/30 (20%) | marginal 9 | non-recoverable 15
+
+spoofing:
+  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
+  -4              RS      RC      RF      RC      RC      RC
+  -1              RF      RF      RF      RC      RF      RC
+  2               RF      RC      RC      RC      RC      RF
+  5               RF      RF      RF      RF      RF      RC
+  8               RF      RF      RF      RF      RF      RC
+  -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
+
+antenna_fault:
+  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
+  0.1             RS      RS      RS      RS      RS      RS
+  0.2             RS      RS      RS      RS      RS      RS
+  0.3             RS      RS      RS      RS      RS      RS
+  0.4             RS      RS      RS      RS      RS      RS
+  0.5             RS      RS      RS      RS      RS      RS
+  -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
+
+sweeping_jammer:
+  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
+  0               RS      RS      RS      RS      RF      MF
+  4               RS      RS      RS      RF      RF      MF
+  8               RS      RS      RF      RF      RF      MF
+  12              RS      RS      RF      RF      MF      XF
+  16              RS      RF      RF      RF      MF      XF
+  -> recoverable 23/30 (77%) | marginal 5 | non-recoverable 2
+
+benign_interference:
+  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
+  -10             RS      RS      RS      RS      RC      RC
+  -8              RS      RS      RS      RF      RC      RC
+  -6              RS      RS      RF      RC      RF      RC
+  -4              RS      RF      RF      RC      RC      RF
+  -2              RF      RC      RF      RC      RC      RC
+  -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
+
+=== OVERALL ===
+Total states mapped: 240
+  Recoverable     : 188 (78.3%)
+  Marginal        : 24 (10.0%)
+  Non-recoverable : 28 (11.7%)
+
+--- MAP B (any action) ---
+=== SURVIVABILITY BOUNDARY MAP — MAP B — ANY ACTION (incl. rate reduction) ===
+Generated: 25-Sep-2026 17:50:36
+Actions included: channel_switch, freq_diversity, spatial_diversity, rate_reduce (apply_countermeasure.m, D28)
+
+A state is classified by the best post-countermeasure BER relative to the clean link:
+  RECOVERABLE (R) : within 2x | MARGINAL (M) : within 5x | NON-RECOVERABLE (X) : worse
+Second letter = action achieving it: C channel_switch, F freq_diversity, S spatial_diversity, R rate_reduce.
+
+Clean-link reference BER per Eb/N0:
+   0 dB : 1.2309e-01
+   2 dB : 8.0722e-02
+   4 dB : 4.6348e-02
+   6 dB : 2.3113e-02
+   8 dB : 9.3737e-03
+  10 dB : 3.0498e-03
+
+--- Boundary map, per threat (rows = severity level, cols = Eb/N0) ---
+jamming:
+  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
+  0               RR      RC      RC      RF      RF      RC
+  4               RC      RC      RC      RC      RF      RF
+  8               RC      RF      RF      RC      RF      RC
+  12              RF      RF      RF      RF      RC      MF
+  16              RC      RF      RF      RF      MF      MC
+  -> recoverable 27/30 (90%) | marginal 3 | non-recoverable 0
+
+noise_burst:
+  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
+  0               RR      RR      RR      RR      MR      XR
+  4               RR      RR      RR      RR      MR      XR
+  8               RR      RR      RR      MR      XR      XR
+  12              RR      RR      MR      MR      XR      XR
+  16              RR      RR      MR      XR      XR      XR
+  -> recoverable 15/30 (50%) | marginal 6 | non-recoverable 9
+
+reactive_jamming:
+  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
+  0               RR      RR      RC      RF      RF      RF
+  4               RF      RF      RC      RC      RF      RF
+  8               RC      RC      RC      RF      RC      RF
+  12              RF      RF      RF      RC      RC      RC
+  16              RC      RF      RC      RC      RC      MF
+  -> recoverable 29/30 (97%) | marginal 1 | non-recoverable 0
+
+path_loss:
+  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
+  4               RR      RR      RR      RR      RR      RR
+  8               RR      RR      RR      RR      MR      MR
+  12              MR      MR      MR      XR      XR      XR
+  16              MR      MR      XR      XR      XR      XR
+  20              MR      MR      XR      XR      XR      XR
+  -> recoverable 10/30 (33%) | marginal 9 | non-recoverable 11
+
+spoofing:
+  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
+  -4              RS      RC      RF      RC      RC      RC
+  -1              RF      RF      RF      RC      RF      RC
+  2               RF      RC      RC      RC      RC      RF
+  5               RF      RF      RF      RF      RF      RC
+  8               RF      RF      RF      RF      RF      RC
+  -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
+
+antenna_fault:
+  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
+  0.1             RR      RR      RS      RS      RS      RS
+  0.2             RR      RS      RS      RS      RS      RS
+  0.3             RS      RS      RS      RS      RS      RS
+  0.4             RS      RS      RS      RS      RS      RS
+  0.5             RS      RS      RS      RS      RS      RS
+  -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
+
+sweeping_jammer:
+  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
+  0               RR      RR      RR      RR      RR      MF
+  4               RR      RR      RR      RR      RF      MF
+  8               RR      RR      RR      RF      RF      MF
+  12              RR      RR      RR      RF      MF      XF
+  16              RR      RR      RF      RF      MF      XF
+  -> recoverable 23/30 (77%) | marginal 5 | non-recoverable 2
+
+benign_interference:
+  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
+  -10             RR      RR      RR      RR      RR      RR
+  -8              RR      RR      RR      RR      RR      RC
+  -6              RR      RR      RR      RR      RF      RC
+  -4              RR      RR      RR      RC      RC      RF
+  -2              RR      RR      RF      RC      RC      RC
+  -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
+
+=== OVERALL ===
+Total states mapped: 240
+  Recoverable     : 194 (80.8%)
+  Marginal        : 24 (10.0%)
+  Non-recoverable : 22 (9.2%)
+
+--- GAP ANALYSIS ---
+=== SURVIVABILITY GAP ANALYSIS ===
+Cells where the link survives with rate reduction (Map B: recoverable/marginal)
+but not with any goodput-free action (Map A: non-recoverable): survival bought
+with throughput -- the goodput trade-off named in the proposal.
+
+noise_burst: 2 gap cell(s)
+  level=12, Eb/N0=6dB: Map A 5.20x (spatial_diversity) | Map B 4.42x (rate_reduce)
+  level=4, Eb/N0=8dB: Map A 7.48x (spatial_diversity) | Map B 4.94x (rate_reduce)
+path_loss: 4 gap cell(s)
+  level=20, Eb/N0=2dB: Map A 5.14x (spatial_diversity) | Map B 4.73x (rate_reduce)
+  level=12, Eb/N0=4dB: Map A 5.25x (spatial_diversity) | Map B 3.83x (rate_reduce)
+  level=8, Eb/N0=8dB: Map A 6.76x (spatial_diversity) | Map B 2.49x (rate_reduce)
+  level=8, Eb/N0=10dB: Map A 10.94x (spatial_diversity) | Map B 3.39x (rate_reduce)
+
+Total gap cells: 6
+
+Saved results/survivability_boundary_mapA.txt, mapB.txt, gap_analysis.txt, two PNG maps
+Saved data/survivability_boundary.mat (23.8 min)
+
+=== Survivability Mapping Complete ===
+  [SURV] Pipeline status:
+      survivability_boundary.mat     : READY (25-Sep-2026 17:50:36)
+      Map A (no goodput loss)        : READY (25-Sep-2026 17:50:36)
+      Map B (any action)             : READY (25-Sep-2026 17:50:36)
+
+> PHASE KPI: Proposal KPI Measurement
+
+  [KPI4] Measuring FAR on non-hostile classes (SNR-swept)...
+=== FAR CHARACTERIZATION: false alarm rate vs SNR on non-hostile classes ===
+
+
+========== UAV-GCS LINK PARAMETERS ==========
+Phase:            A4  (channel: Rician)
+Modulation:       QPSK
+Symbol Rate:      1.00e+06 sym/s
+Bits/Frame:       1000 (+ 32 CRC [FUTURE])
+Symbols/Frame:    516
+Channel:          Rician (K=10.0 dB)
+Carrier Freq:     2.4 GHz
+Range:            100 m [FUTURE]
+UAV Velocity:     20.0 m/s (72.0 km/h) nominal | envelope 50.0-120.0 km/h (13.9-33.3 m/s)
+Doppler envelope: 111-267 Hz (nominal fd_max 160 Hz)
+Max Doppler fd:   160.0 Hz  (normalized 1.60e-04)
+Active Threat:    jamming (JSR=10 dB)
+Eb/N0 Range:      0 to 10 dB
+Frames per SNR:   1000
+Sequence window:  len=8, stride=4 (LSTM)
+=============================================
+
+Parameters saved to params.mat
+Sweeping SNR = [0 4 10] dB, 30 trials per (class, SNR)
+
+Warming up CNN and DQN networks...
+Warm-up complete.
+
+--- SNR=0 dB | Class: none (30 trials) ---
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+  -> acted in 0/30 trials
+
+--- SNR=0 dB | Class: benign_interference (30 trials) ---
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+  -> acted in 0/30 trials
+
+--- SNR=4 dB | Class: none (30 trials) ---
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+  -> acted in 0/30 trials
+
+--- SNR=4 dB | Class: benign_interference (30 trials) ---
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+  -> acted in 30/30 trials
+
+--- SNR=10 dB | Class: none (30 trials) ---
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: none)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=none, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+  -> acted in 0/30 trials
+
+--- SNR=10 dB | Class: benign_interference (30 trials) ---
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+Building model "UAV_GCS_Threat_Link" (System Objects engine, threat: benign_interference)...
+Model saved to models/UAV_GCS_Threat_Link.slx
+Done. Threat model (System Objects engine, threat=benign_interference, JSR=10.0 dB, K=10.0 dB, fd=160.0 Hz, sps=4).
+  -> acted in 30/30 trials
+
+=== FAR CHARACTERIZATION REPORT ===
+Generated: 25-Sep-2026 17:57:05
+N_REPEATS per (class,SNR): 30 | SNR points: [0 4 10] dB
+
+False alarm = action while BER <= 2x clean (D29). "Justified" = action on a link degraded beyond that.
+--- FAR vs SNR, per class ---
+Class                       SNR        FAR     Degraded    Justified      CNN acc
+none                        0 dB       0.0%         0/30             -      100.0%
+none                        4 dB       0.0%         0/30             -      100.0%
+none                       10 dB       0.0%         0/30             -      100.0%
+
+benign_interference         0 dB       0.0%         0/30             -      100.0%
+benign_interference         4 dB       0.0%        30/30         30/30      100.0%
+benign_interference        10 dB       0.0%        30/30         30/30      100.0%
+
+--- Dominant misclassification (where false alarms come from) ---
+  none: no misdetections
+  benign_interference: no misdetections
+
+--- none (all SNR pooled, n=90) ---
+  CNN detection accuracy: 90/90 (100.0%)
+  FAR: 0.0% (approx 95% CI: 0.0%-3.3%) [Rule of Three: 0 events]
+
+--- benign_interference (all SNR pooled, n=90) ---
+  CNN detection accuracy: 90/90 (100.0%)
+  FAR: 0.0% (approx 95% CI: 0.0%-3.3%) [Rule of Three: 0 events]
+
+=== OVERALL (all classes, all SNR pooled) ===
+Combined FAR: 0/180 (0.0%) | over healthy-link trials only: 0/120
+Any-action rate (pre-D29 definition): 60/180 (33.3%)
+
+Saved results/far_measurement.txt and results/far_measurement.mat
+
+=== FAR Characterization Complete ===
+  [KPI3] Measuring DQN vs rule-based decision latency...
+=== KPI #3: Decision Speed (DQN vs Rule-Based) ===
+
+Loaded 9 threats (SNR-averaged) from results/closed_loop_diagnostic_results.mat
+
+=== KPI #3: Decision Speed (DQN vs Rule-Based) ===
+Generated: 25-Sep-2026 17:57:05
+
+Decision latency of both policies, the link quality each achieves on the same
+closed-loop runs, and (section 5) recovery time in decision cycles from the
+episodic closed loop with dwell/hysteresis.
+
+DQN latency/recovery/agreement are averaged across the full SNR sweep
+(each threat has one data point per SNR point in the diagnostic run).
+
+Threat                     DQN (ms)    Rule (ms)   Agree% DQN rec (clean) Rule rec (clean)
+jamming                       1.178      0.00013     100%          99.2%          99.2%
+reactive_jamming              1.214      0.00014     100%          99.4%          99.4%
+sweeping_jammer               1.443      0.00016      67%          87.4%          82.4%
+noise_burst                   1.103      0.00024      67%          51.1%          56.1%
+path_loss                     1.185      0.00021     100%          69.0%          69.0%
+spoofing                      1.143      0.00019      57%          99.7%          99.7%
+antenna_fault                 1.220      0.00026     100%          99.0%          99.0%
+benign_interference           1.186      0.00030      33%            N/A            N/A
+none                          1.283      0.00031     100%            N/A            N/A
+
+Mean DQN latency:  1.217 ms
+Mean Rule latency: 0.00022 ms
+Speed ratio: Rule-Based is ~5656x faster than DQN (lookup table vs neural net inference)
+DQN-vs-Rule agreement (overall, all threats x SNR): 80.4%
+
+NOTE: both policies act through the same physical countermeasure model
+(apply_countermeasure.m, D28), so agreement and recovery compare decision
+quality only. Disagreement is no longer cosmetic: actions differ in effect.
+
+Interpretation: the rule is effectively instant (a lookup); the DQN costs about a
+millisecond of inference, small next to the ~10 ms detection path. Both are far
+faster than the dwell of a few frames, so recovery time is set by detection and
+hysteresis rather than by the policy's compute time (section 5).
+
+--- Recovery time in decision cycles (run_closed_loop_episodes.m, D31) ---
+Threat onset mid-stream; dwell 3 cycles, hold 10 cycles; medians in cycles after onset.
+T_recover over episodes the threat actually degraded and no countermeasure was active at onset.
+configuration              T_act T_recover   recovered   pre-cfg switches  goodput
+dqn | hysteresis               3         8     69/93           0     1.57     0.88
+dqn | no hysteresis            1        14     20/46          41    18.98     0.86
+rule | hysteresis              3         8     70/92           2     1.52     0.85
+rule | no hysteresis           1         6     21/34          48    10.57     0.90
+
+Saved results/kpi3_measurement.txt
+
+=== KPI #3 Complete ===
+  [KPI] Aggregating all 5 proposal KPIs...
+=== KPI AGGREGATION: proposal section ה, all 5 KPIs ===
+
+--- KPI #1: Detection accuracy ---
+--- KPI #2: Recovery vs baseline ---
+--- KPI #3: DQN vs Rule-Based ---
+--- KPI #5: End-to-end baseline ---
+--- KPI #4: False Alarm Rate ---
+=== PROPOSAL KPI SUMMARY (section ה) ===
+Generated: 25-Sep-2026 17:57:05
+
+--- KPI #1: Detection Accuracy (target: macro-F1 >= 90% above SNR threshold) ---
+Source: results/eval_detector_metrics.mat (generated 25-Sep-2026 15:32:21)
+Overall accuracy: 96.33% | Macro-F1: 96.31% -> true (target: >=90%)
+KPI #1 as worded: macro-F1 >= 90% from Eb/N0 = 0 dB up; macro-F1 above that threshold 96.31%
+Accuracy and macro-F1 vs Eb/N0 (degradation curve):
+  SNR= 0 dB: accuracy 91.4% | macro-F1 91.2%
+  SNR= 2 dB: accuracy 96.7% | macro-F1 96.6%
+  SNR= 4 dB: accuracy 96.9% | macro-F1 96.9%
+  SNR= 6 dB: accuracy 98.0% | macro-F1 98.0%
+  SNR= 8 dB: accuracy 97.8% | macro-F1 97.8%
+  SNR=10 dB: accuracy 97.1% | macro-F1 97.1%
+Action-equivalent accuracy (confusion between classes with the same countermeasure counted as correct): 98.13%
+95% bootstrap CI (1000 resamples of the test set): accuracy [95.60, 97.03] | macro-F1 [95.58, 97.00] | macro-F1 above threshold [95.58, 97.00]
+Generalization to Eb/N0 never seen in training (1,3,5,7,9 dB): accuracy 96.2% vs 96.3% on the training grid in the same run; largest gap to the interpolated curve 0.4 points
+Per-class recall/F1 (weakest classes flagged):
+  none                 recall=97.7% F1=94.7%
+  jamming              recall=99.0% F1=92.6%
+  noise_burst          recall=100.0% F1=100.0%
+  reactive_jamming     recall=82.8% F1=90.1%  <-- below 90%
+  path_loss            recall=95.4% F1=96.2%
+  spoofing             recall=100.0% F1=99.7%
+  antenna_fault        recall=94.4% F1=96.1%
+  benign_interference  recall=99.7% F1=98.4%
+  sweeping_jammer      recall=98.0% F1=99.0%
+Full confusion matrix: see results/confusion_matrix.png
+
+--- KPI #2: Link Quality Recovery vs Healthy (No-Attack) Baseline ---
+Source: results/closed_loop_diagnostic_results.mat
+Definition (proposal, D27): rec = 100*(BER_before - BER_after)/(BER_before - BER_clean), capped at 100;
+link state = BER_after/BER_clean (<= 2 restored, <= 5 marginal). Clean = none run at the same Eb/N0.
+Packet loss (D35): frame lost when BER > 0.1; restored when PLR_after <= PLR_clean + 0.05.
+Monte Carlo: 5 repeats; mean [95% CI] over the per-repeat values.
+  jamming              recovery=99.2% | 1.20x clean (mean) | restored 30/30 | missed 0 | PLR 1.00 -> 0.19, restored 26/30 | goodput kept 100%
+  reactive_jamming     recovery=99.4% | 1.16x clean (mean) | restored 30/30 | missed 0 | PLR 1.00 -> 0.20, restored 25/30 | goodput kept 99%
+  sweeping_jammer      recovery=87.4% | 1.90x clean (mean) | restored 21/30 | missed 0 | PLR 0.38 -> 0.16, restored 26/30 | goodput kept 108%
+  noise_burst          recovery=51.1% | 10.08x clean (mean) | restored 11/30 | missed 0 | PLR 0.98 -> 0.55, restored 5/30 | goodput kept 23%
+  path_loss            recovery=69.0% | 3.97x clean (mean) | restored 5/30 | missed 0 | PLR 0.92 -> 0.50, restored 10/30 | goodput kept 13%
+  spoofing             recovery=99.7% | 1.02x clean (mean) | restored 30/30 | missed 0 | PLR 0.98 -> 0.18, restored 30/30 | goodput kept 102%
+  antenna_fault        recovery=99.0% | 1.04x clean (mean) | restored 30/30 | missed 0 | PLR 0.46 -> 0.18, restored 28/30 | goodput kept 102%
+  benign_interference  recovery=N/A (non-hostile -- no countermeasure expected)
+  none                 recovery=N/A (non-hostile -- no countermeasure expected)
+  KPI #2 BER recovery (real threats):  DQN 86.4 [86.2, 86.6] | rule 86.4 [86.0, 86.7] | DQN-rule 0.0 [-0.1, 0.2]
+  BER restored (% of runs):            DQN 74.8 [73.1, 76.4] | rule 74.8 [73.1, 76.4]
+  PLR restored (% of runs):            DQN 71.4 [64.5, 78.4] | rule 69.0 [63.1, 75.0]
+  PLR recovery vs clean (%):           DQN 85.3 [83.8, 86.9] | rule 86.2 [84.0, 88.5]
+  Goodput kept vs no-attack (%):       DQN 78.3 [75.6, 81.0] | rule 75.9 [73.5, 78.3] | no action 20.4 [19.9, 20.9]
+  Link restored (<= 2x clean): 157/210 = 74.8% [68.5, 80.2] | marginal: 34 | not restored: 19 | missed detections: 0
+  KPI #2 (real threats, per-threat mean): 86.4%
+Survivability map A (deliverable #7): recoverable 78.3% | marginal 10.0% | non-recoverable 11.7%  (results/survivability_boundary_mapA.txt)
+Survivability map B (deliverable #7): recoverable 80.8% | marginal 10.0% | non-recoverable 9.2%  (results/survivability_boundary_mapB.txt)
+UAV speed 50-120 km/h (results/speed_robustness.txt):
+  OVERALL detection accuracy: 97.7% (211/216)
+  OVERALL KPI #2 recovery vs clean link (real threats): 86.2% | restored 128/166 | missed 2
+  OVERALL false alarms: 0/48 non-hostile runs (32 on a healthy link) | justified actions on degraded links: 16
+
+--- KPI #3: DQN vs Rule-Based (decision latency, recovery time, link quality) ---
+Source: results/kpi3_measurement.txt
+=== KPI #3: Decision Speed (DQN vs Rule-Based) ===
+Generated: 25-Sep-2026 17:57:05
+
+Decision latency of both policies, the link quality each achieves on the same
+closed-loop runs, and (section 5) recovery time in decision cycles from the
+episodic closed loop with dwell/hysteresis.
+
+DQN latency/recovery/agreement are averaged across the full SNR sweep
+(each threat has one data point per SNR point in the diagnostic run).
+
+Threat                     DQN (ms)    Rule (ms)   Agree% DQN rec (clean) Rule rec (clean)
+jamming                       1.178      0.00013     100%          99.2%          99.2%
+reactive_jamming              1.214      0.00014     100%          99.4%          99.4%
+sweeping_jammer               1.443      0.00016      67%          87.4%          82.4%
+noise_burst                   1.103      0.00024      67%          51.1%          56.1%
+path_loss                     1.185      0.00021     100%          69.0%          69.0%
+spoofing                      1.143      0.00019      57%          99.7%          99.7%
+antenna_fault                 1.220      0.00026     100%          99.0%          99.0%
+benign_interference           1.186      0.00030      33%            N/A            N/A
+none                          1.283      0.00031     100%            N/A            N/A
+
+Mean DQN latency:  1.217 ms
+Mean Rule latency: 0.00022 ms
+Speed ratio: Rule-Based is ~5656x faster than DQN (lookup table vs neural net inference)
+DQN-vs-Rule agreement (overall, all threats x SNR): 80.4%
+
+NOTE: both policies act through the same physical countermeasure model
+(apply_countermeasure.m, D28), so agreement and recovery compare decision
+quality only. Disagreement is no longer cosmetic: actions differ in effect.
+
+Interpretation: the rule is effectively instant (a lookup); the DQN costs about a
+millisecond of inference, small next to the ~10 ms detection path. Both are far
+faster than the dwell of a few frames, so recovery time is set by detection and
+hysteresis rather than by the policy's compute time (section 5).
+
+--- Recovery time in decision cycles (run_closed_loop_episodes.m, D31) ---
+Threat onset mid-stream; dwell 3 cycles, hold 10 cycles; medians in cycles after onset.
+T_recover over episodes the threat actually degraded and no countermeasure was active at onset.
+configuration              T_act T_recover   recovered   pre-cfg switches  goodput
+dqn | hysteresis               3         8     69/93           0     1.57     0.88
+dqn | no hysteresis            1        14     20/46          41    18.98     0.86
+rule | hysteresis              3         8     70/92           2     1.52     0.85
+rule | no hysteresis           1         6     21/34          48    10.57     0.90
+Episodic loop (D31), episodes that need action, with 95% CIs:
+  dqn | hysteresis           recovered 69/93 = 74% [64, 82] | T_recover mean 12.2 [9.8, 14.5] cycles | goodput 0.88
+  dqn | no hysteresis        recovered 20/46 = 43% [30, 58] | T_recover mean 17.9 [12.1, 23.7] cycles | goodput 0.86
+  rule | hysteresis          recovered 70/92 = 76% [66, 84] | T_recover mean 12.7 [10.4, 15.1] cycles | goodput 0.85
+  rule | no hysteresis       recovered 21/34 = 62% [45, 76] | T_recover mean 11.5 [6.2, 16.7] cycles | goodput 0.90
+DQN training seeds (D35): 5 trained, 5 passed the gate; mean regret across seeds 0.1 [0.1, 0.2]; selected seed 42 (mean regret 0.1); cells with the same action in every seed 52/54
+
+--- KPI #5: Single End-to-End Baseline (detect->decide->recover, >=1 recoverable threat) ---
+MET: spoofing recovers 99.7% of the attack-induced BER end-to-end (vs clean link), averaged over the SNR sweep (CNN detect -> DQN decide -> apply -> re-measure).
+
+--- KPI #4: False Alarm Rate (FAR), non-hostile classes ---
+Source: results/far_measurement.txt
+Definition (D29): an action on a non-hostile link whose BER <= 2x clean. Denominator: healthy-link trials. Bound (D35): FAR <= 5% with the 95% upper limit below it, for Eb/N0 >= the KPI #1 threshold (0 dB).
+  Eb/N0    0 dB: FAR 0/60 = 0.0% [0.0, 6.0]
+  Eb/N0    4 dB: FAR 0/30 = 0.0% [0.0, 11.4]
+  Eb/N0   10 dB: FAR 0/30 = 0.0% [0.0, 11.4]
+  Above threshold (pooled): FAR 0/120 = 0.0%, 95% upper limit 3.1% (Wilson; Rule of Three 2.5%) -> MET
+Full per-class breakdown: see results/far_measurement.txt
+
+
+--- Unknown-threat detection (deliverable 4) and combined threats (risk 13) ---
+Leave-one-threat-out: mean AUROC MSP 0.524, energy 0.516; unknown frames flagged 16% (MSP) at 95% known kept; false flags 4.8%
+Per held-out threat: results/ood_detection.txt
+Combined threats, DQN (class):           link restored in 38/456 decisions (median 5.94x clean)
+Combined threats, DQN (unknown gating):  link restored in 38/456 decisions (median 5.94x clean)
+Combined threats, Rule (class):          link restored in 38/456 decisions (median 5.94x clean)
+Combined threats, Rule (unknown gating): link restored in 38/456 decisions (median 5.94x clean)
+Details: results/combined_threats.txt
+
+Saved results/kpi_summary.txt
+
+=== KPI Aggregation Complete ===
+  [KPI] Pipeline status:
+      far_measurement.txt   : READY (25-Sep-2026 17:57:05)
+      kpi3_measurement.txt  : READY (25-Sep-2026 17:57:05)
+      kpi_summary.txt       : READY (25-Sep-2026 17:57:05)
+
+> PHASE DASH: Results Dashboard (proposal deliverable #1)
+
+  [DASH] Building 7-panel results dashboard...
+=== Building KPI Dashboard (proposal deliverable #1) ===
+
+Saved results/kpi_dashboard.png
+
+=== Dashboard Complete ===
+  [DASH] Pipeline status:
+      kpi_dashboard.png : READY (25-Sep-2026 17:57:09)
+
+> PHASE D: Documentation & Defense
+
+  [D1] README.md / PROJECT_LOG.md / docs/DECISIONS.md  READY (maintained by hand)
+  [D2] Interim/final report (docx)...                  [PENDING]
+  [D3] Defense presentation (pptx)...                  [PENDING]
+
+========================================================
+ CHECKPOINT - full pipeline available from main.m
+ Headline numbers with 95% CIs: results/kpi_summary.txt (D35)
+ Survivability maps: results/survivability_boundary_mapA.txt / mapB.txt (deliverable #7)
+ Outputs in results/, data/ | models in models/ | code on GitHub
+ Full run log saved to: logs/run_20260925_172653.txt
+========================================================
+

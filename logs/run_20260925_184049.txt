@@ -1,0 +1,391 @@
+=== Logging full run to: logs/run_20260925_184049.txt ===
+(This file will contain EVERYTHING printed below, even across clc calls.)
+
+========================================================
+  UAV-GCS ADAPTIVE SECURE COMMS - MASTER PIPELINE
+  A:Link+Data  B:Detect  C:Recover  SURV:Map  KPI:Measure  DASH:Summary
+========================================================
+
+> PHASE A: Link Model + Threat Injection + Dataset
+
+  [A5-A6] Dataset status:
+         raw dataset  : READY (25-Sep-2026 15:12:03, 952 MB)
+         spectrograms : READY (25-Sep-2026 15:19:39, 1361 MB)
+
+> PHASE B: Detection Network (CNN + scalar hybrid, 9 classes)
+
+  [B] Pipeline status:
+      splits.mat           : READY (25-Sep-2026 15:23:44, 1361 MB)
+      trained_detector.mat : READY (25-Sep-2026 15:30:50)
+      B3 eval results      : READY (25-Sep-2026 15:32:11)
+
+> PHASE C: Closed-Loop Adaptive Recovery (9 threats/classes)
+
+  [C1] Rule-based countermeasure policy...           READY (rule_based_policy.m)
+  [C2] Training DQN agent (one-hot state, real threat-specific reward table)...
+=== C2: Train DQN Agent ===
+
+=== C2: Initializing DQN Agent ===
+
+State spec: 13-dim
+  threat class: one-hot [9 classes]
+  BER:  [0,1]
+  RSSI: [-100,20] dBm
+  SNR:  [0,20] dB
+  PLR:  [0,1]
+Action spec: 16 discrete actions
+  1: no_action
+  2: channel_switch
+  3: rate_reduce
+  4: freq_diversity
+  5: spatial_diversity
+  6: power_control
+  7: fec_interleave
+  8: channel_switch+rate_reduce
+  9: channel_switch+power_control
+  10: channel_switch+fec_interleave
+  11: freq_diversity+rate_reduce
+  12: freq_diversity+power_control
+  13: freq_diversity+fec_interleave
+  14: spatial_diversity+rate_reduce
+  15: spatial_diversity+power_control
+  16: spatial_diversity+fec_interleave
+
+Q-Network architecture:
+  Input: 13-dim state
+  Hidden1: 64 neurons + ReLU
+  Hidden2: 32 neurons + ReLU
+  Output: 16 Q-values (one per action)
+  Total params: 3504
+
+DQN Hyperparameters:
+  Learning rate: 1e-03
+  Discount (gamma): 0.99
+  Replay buffer size: 10000
+  Batch size: 32
+  Epsilon start: 1.00 -> 0.01 (decay 0.995)
+
+=== DQN Agent Initialized ===
+
+========== UAV-GCS LINK PARAMETERS ==========
+Phase:            A4  (channel: Rician)
+Modulation:       QPSK
+Symbol Rate:      1.00e+06 sym/s
+Bits/Frame:       1000 (+ 32 CRC [FUTURE])
+Symbols/Frame:    516
+Channel:          Rician (K=10.0 dB)
+Carrier Freq:     2.4 GHz
+Range:            100 m [FUTURE]
+UAV Velocity:     20.0 m/s (72.0 km/h) nominal | envelope 50.0-120.0 km/h (13.9-33.3 m/s)
+Doppler envelope: 111-267 Hz (nominal fd_max 160 Hz)
+Max Doppler fd:   160.0 Hz  (normalized 1.60e-04)
+Active Threat:    jamming (JSR=10 dB)
+Eb/N0 Range:      0 to 10 dB
+Frames per SNR:   1000
+Sequence window:  len=8, stride=4 (LSTM)
+=============================================
+
+Parameters saved to params.mat
+Measuring the link for 9 threats x 16 actions x 6 Eb/N0 points...
+
+  [1/9] jamming              measured (2.0 min)
+  [2/9] reactive_jamming     measured (3.9 min)
+  [3/9] sweeping_jammer      measured (5.8 min)
+  [4/9] noise_burst          measured (7.7 min)
+  [5/9] path_loss            measured (9.6 min)
+  [6/9] spoofing             measured (12.5 min)
+  [7/9] antenna_fault        measured (14.4 min)
+  [8/9] benign_interference  measured (16.4 min)
+  [9/9] none                 measured (18.3 min)
+Saved results/countermeasure_matrix.{txt,png}
+
+
+Best action per (threat, Eb/N0) by reward:
+threat                             0dB               2dB               4dB               6dB               8dB              10dB
+jamming                  ch_switch 100     ch_switch 100     ch_switch 100     ch_switch 100      ch_switch 99      ch_switch 99
+reactive_jamming         ch_switch 100     ch_switch 100     ch_switch 100     ch_switch 100     ch_switch 100     ch_switch 100
+sweeping_jammer        spatial_div 100   spatial_div 100            pwr 90   freq_div+pwr 85   freq_div+pwr 85            fec 85
+noise_burst                     pwr 90spatial_div+pwr 90spatial_div+fec 85spatial_div+fec 85spatial_div+fec 85spatial_div+fec 85
+path_loss           spatial_div+pwr 77spatial_div+pwr 80spatial_div+pwr 83spatial_div+pwr 86spatial_div+pwr 86spatial_div+pwr 88
+spoofing                 ch_switch 100     ch_switch 100     ch_switch 100     ch_switch 100     ch_switch 100     ch_switch 100
+antenna_fault          spatial_div 100   spatial_div 100   spatial_div 100   spatial_div 100   spatial_div 100    spatial_div 99
+benign_interference             none 0            none 0     ch_switch 100     ch_switch 100     ch_switch 100     ch_switch 100
+none                            none 0            none 0            none 0            none 0            none 0            none 0
+
+Saved results/dqn_reward_table.png
+
+--- Seed 42 (1/5): training on 4000 episodes ---
+=== C2: Initializing DQN Agent ===
+
+State spec: 13-dim
+  threat class: one-hot [9 classes]
+  BER:  [0,1]
+  RSSI: [-100,20] dBm
+  SNR:  [0,20] dB
+  PLR:  [0,1]
+Action spec: 16 discrete actions
+  1: no_action
+  2: channel_switch
+  3: rate_reduce
+  4: freq_diversity
+  5: spatial_diversity
+  6: power_control
+  7: fec_interleave
+  8: channel_switch+rate_reduce
+  9: channel_switch+power_control
+  10: channel_switch+fec_interleave
+  11: freq_diversity+rate_reduce
+  12: freq_diversity+power_control
+  13: freq_diversity+fec_interleave
+  14: spatial_diversity+rate_reduce
+  15: spatial_diversity+power_control
+  16: spatial_diversity+fec_interleave
+
+Q-Network architecture:
+  Input: 13-dim state
+  Hidden1: 64 neurons + ReLU
+  Hidden2: 32 neurons + ReLU
+  Output: 16 Q-values (one per action)
+  Total params: 3504
+
+DQN Hyperparameters:
+  Learning rate: 1e-03
+  Discount (gamma): 0.99
+  Replay buffer size: 10000
+  Batch size: 32
+  Epsilon start: 1.00 -> 0.01 (decay 0.995)
+
+=== DQN Agent Initialized ===
+    episode 1000/4000: avg reward 49.2, epsilon 0.010
+    episode 2000/4000: avg reward 65.2, epsilon 0.010
+    episode 3000/4000: avg reward 67.4, epsilon 0.010
+    episode 4000/4000: avg reward 71.0, epsilon 0.010
+    mean regret 2.9 | max 28 | cells > 10: 7 | gate FAIL (7 cells)
+--- Seed 43 (2/5): training on 4000 episodes ---
+=== C2: Initializing DQN Agent ===
+
+State spec: 13-dim
+  threat class: one-hot [9 classes]
+  BER:  [0,1]
+  RSSI: [-100,20] dBm
+  SNR:  [0,20] dB
+  PLR:  [0,1]
+Action spec: 16 discrete actions
+  1: no_action
+  2: channel_switch
+  3: rate_reduce
+  4: freq_diversity
+  5: spatial_diversity
+  6: power_control
+  7: fec_interleave
+  8: channel_switch+rate_reduce
+  9: channel_switch+power_control
+  10: channel_switch+fec_interleave
+  11: freq_diversity+rate_reduce
+  12: freq_diversity+power_control
+  13: freq_diversity+fec_interleave
+  14: spatial_diversity+rate_reduce
+  15: spatial_diversity+power_control
+  16: spatial_diversity+fec_interleave
+
+Q-Network architecture:
+  Input: 13-dim state
+  Hidden1: 64 neurons + ReLU
+  Hidden2: 32 neurons + ReLU
+  Output: 16 Q-values (one per action)
+  Total params: 3504
+
+DQN Hyperparameters:
+  Learning rate: 1e-03
+  Discount (gamma): 0.99
+  Replay buffer size: 10000
+  Batch size: 32
+  Epsilon start: 1.00 -> 0.01 (decay 0.995)
+
+=== DQN Agent Initialized ===
+    episode 1000/4000: avg reward 51.8, epsilon 0.010
+    episode 2000/4000: avg reward 65.8, epsilon 0.010
+    episode 3000/4000: avg reward 69.4, epsilon 0.010
+    episode 4000/4000: avg reward 69.6, epsilon 0.010
+    mean regret 3.3 | max 17 | cells > 10: 6 | gate FAIL (6 cells)
+--- Seed 44 (3/5): training on 4000 episodes ---
+=== C2: Initializing DQN Agent ===
+
+State spec: 13-dim
+  threat class: one-hot [9 classes]
+  BER:  [0,1]
+  RSSI: [-100,20] dBm
+  SNR:  [0,20] dB
+  PLR:  [0,1]
+Action spec: 16 discrete actions
+  1: no_action
+  2: channel_switch
+  3: rate_reduce
+  4: freq_diversity
+  5: spatial_diversity
+  6: power_control
+  7: fec_interleave
+  8: channel_switch+rate_reduce
+  9: channel_switch+power_control
+  10: channel_switch+fec_interleave
+  11: freq_diversity+rate_reduce
+  12: freq_diversity+power_control
+  13: freq_diversity+fec_interleave
+  14: spatial_diversity+rate_reduce
+  15: spatial_diversity+power_control
+  16: spatial_diversity+fec_interleave
+
+Q-Network architecture:
+  Input: 13-dim state
+  Hidden1: 64 neurons + ReLU
+  Hidden2: 32 neurons + ReLU
+  Output: 16 Q-values (one per action)
+  Total params: 3504
+
+DQN Hyperparameters:
+  Learning rate: 1e-03
+  Discount (gamma): 0.99
+  Replay buffer size: 10000
+  Batch size: 32
+  Epsilon start: 1.00 -> 0.01 (decay 0.995)
+
+=== DQN Agent Initialized ===
+    episode 1000/4000: avg reward 49.0, epsilon 0.010
+    episode 2000/4000: avg reward 65.2, epsilon 0.010
+    episode 3000/4000: avg reward 66.4, epsilon 0.010
+    episode 4000/4000: avg reward 68.2, epsilon 0.010
+    mean regret 2.2 | max 17 | cells > 10: 2 | gate FAIL (2 cells)
+--- Seed 45 (4/5): training on 4000 episodes ---
+=== C2: Initializing DQN Agent ===
+
+State spec: 13-dim
+  threat class: one-hot [9 classes]
+  BER:  [0,1]
+  RSSI: [-100,20] dBm
+  SNR:  [0,20] dB
+  PLR:  [0,1]
+Action spec: 16 discrete actions
+  1: no_action
+  2: channel_switch
+  3: rate_reduce
+  4: freq_diversity
+  5: spatial_diversity
+  6: power_control
+  7: fec_interleave
+  8: channel_switch+rate_reduce
+  9: channel_switch+power_control
+  10: channel_switch+fec_interleave
+  11: freq_diversity+rate_reduce
+  12: freq_diversity+power_control
+  13: freq_diversity+fec_interleave
+  14: spatial_diversity+rate_reduce
+  15: spatial_diversity+power_control
+  16: spatial_diversity+fec_interleave
+
+Q-Network architecture:
+  Input: 13-dim state
+  Hidden1: 64 neurons + ReLU
+  Hidden2: 32 neurons + ReLU
+  Output: 16 Q-values (one per action)
+  Total params: 3504
+
+DQN Hyperparameters:
+  Learning rate: 1e-03
+  Discount (gamma): 0.99
+  Replay buffer size: 10000
+  Batch size: 32
+  Epsilon start: 1.00 -> 0.01 (decay 0.995)
+
+=== DQN Agent Initialized ===
+    episode 1000/4000: avg reward 50.9, epsilon 0.010
+    episode 2000/4000: avg reward 64.1, epsilon 0.010
+    episode 3000/4000: avg reward 67.0, epsilon 0.010
+    episode 4000/4000: avg reward 69.8, epsilon 0.010
+    mean regret 3.3 | max 29 | cells > 10: 7 | gate FAIL (7 cells)
+--- Seed 46 (5/5): training on 4000 episodes ---
+=== C2: Initializing DQN Agent ===
+
+State spec: 13-dim
+  threat class: one-hot [9 classes]
+  BER:  [0,1]
+  RSSI: [-100,20] dBm
+  SNR:  [0,20] dB
+  PLR:  [0,1]
+Action spec: 16 discrete actions
+  1: no_action
+  2: channel_switch
+  3: rate_reduce
+  4: freq_diversity
+  5: spatial_diversity
+  6: power_control
+  7: fec_interleave
+  8: channel_switch+rate_reduce
+  9: channel_switch+power_control
+  10: channel_switch+fec_interleave
+  11: freq_diversity+rate_reduce
+  12: freq_diversity+power_control
+  13: freq_diversity+fec_interleave
+  14: spatial_diversity+rate_reduce
+  15: spatial_diversity+power_control
+  16: spatial_diversity+fec_interleave
+
+Q-Network architecture:
+  Input: 13-dim state
+  Hidden1: 64 neurons + ReLU
+  Hidden2: 32 neurons + ReLU
+  Output: 16 Q-values (one per action)
+  Total params: 3504
+
+DQN Hyperparameters:
+  Learning rate: 1e-03
+  Discount (gamma): 0.99
+  Replay buffer size: 10000
+  Batch size: 32
+  Epsilon start: 1.00 -> 0.01 (decay 0.995)
+
+=== DQN Agent Initialized ===
+    episode 1000/4000: avg reward 52.4, epsilon 0.010
+    episode 2000/4000: avg reward 66.0, epsilon 0.010
+    episode 3000/4000: avg reward 66.8, epsilon 0.010
+    episode 4000/4000: avg reward 67.7, epsilon 0.010
+    mean regret 3.4 | max 20 | cells > 10: 5 | gate FAIL (5 cells)
+Seed 42 gate failures:
+  sweeping_jammer @ 4 dB -> freq_diversity+fec_interleave (regret 10)
+  noise_burst @ 4 dB -> spatial_diversity+rate_reduce (regret 28)
+  noise_burst @ 8 dB -> fec_interleave (regret 17)
+  antenna_fault @ 6 dB -> spatial_diversity+fec_interleave (regret 15)
+  antenna_fault @ 8 dB -> spatial_diversity+fec_interleave (regret 15)
+  antenna_fault @ 10 dB -> spatial_diversity+fec_interleave (regret 14)
+  benign_interference @ 10 dB -> channel_switch+fec_interleave (regret 15)
+Seed 43 gate failures:
+  sweeping_jammer @ 2 dB -> spatial_diversity+fec_interleave (regret 15)
+  noise_burst @ 8 dB -> fec_interleave (regret 17)
+  antenna_fault @ 6 dB -> spatial_diversity+fec_interleave (regret 15)
+  antenna_fault @ 8 dB -> spatial_diversity+fec_interleave (regret 15)
+  antenna_fault @ 10 dB -> spatial_diversity+fec_interleave (regret 14)
+  benign_interference @ 10 dB -> channel_switch+fec_interleave (regret 15)
+Seed 44 gate failures:
+  noise_burst @ 8 dB -> fec_interleave (regret 17)
+  benign_interference @ 10 dB -> channel_switch+fec_interleave (regret 15)
+Seed 45 gate failures:
+  sweeping_jammer @ 4 dB -> freq_diversity+fec_interleave (regret 10)
+  noise_burst @ 2 dB -> rate_reduce (regret 29)
+  noise_burst @ 8 dB -> fec_interleave (regret 17)
+  antenna_fault @ 6 dB -> spatial_diversity+fec_interleave (regret 15)
+  antenna_fault @ 8 dB -> spatial_diversity+fec_interleave (regret 15)
+  antenna_fault @ 10 dB -> spatial_diversity+fec_interleave (regret 14)
+  benign_interference @ 10 dB -> channel_switch+fec_interleave (regret 15)
+Seed 46 gate failures:
+  sweeping_jammer @ 4 dB -> freq_diversity+fec_interleave (regret 10)
+  noise_burst @ 8 dB -> fec_interleave (regret 17)
+  antenna_fault @ 8 dB -> spatial_diversity+fec_interleave (regret 15)
+  antenna_fault @ 10 dB -> spatial_diversity+fec_interleave (regret 14)
+  benign_interference @ 10 dB -> freq_diversity+fec_interleave (regret 20)
+{Error using <a href="matlab:matlab.lang.internal.introspective.errorDocCallback('train_dqn', 'C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\train_dqn.m', 208)" style="font-weight:bold">train_dqn</a> (<a href="matlab: opentoline('C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\train_dqn.m',208,0)">line 208</a>)
+Validation gate FAILED for every seed -- NOT saving trained_dqn.mat.
+
+Error in <a href="matlab:matlab.lang.internal.introspective.errorDocCallback('main', 'C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\main.m', 222)" style="font-weight:bold">main</a> (<a href="matlab: opentoline('C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\main.m',222,0)">line 222</a>)
+    train_dqn;
+    ^^^^^^^^^
+} 
+main
