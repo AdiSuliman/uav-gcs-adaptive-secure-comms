@@ -1,0 +1,19 @@
+=== DQN TRAINING SEEDS (D35) ===
+Generated: 26-Sep-2026 01:16:01 | 5 seeds x 12000 episodes, same reward table
+seed    mean regret  max regret     cells > 10   gate
+42              0.1           5         0/54     PASS
+43              0.4          10         0/54     PASS
+44              0.4          15         1/54     FAIL
+45              0.1           5         0/54     PASS
+46              0.3          10         0/54     PASS
+Seed 44 gate failures: sweeping_jammer @ 2 dB -> spatial_diversity+fec_interleave (regret 15)
+Mean regret across seeds: 0.3 [0.1, 0.4] (mean [95% CI]) | selected seed 45
+Cells where every seed picks the same action: 47/54
+Cells where the seeds disagree (action per seed, regret per seed):
+  sweeping_jammer         2 dB: spatial_div, spatial_div+pwr, spatial_div+fec, spatial_div, spatial_div+pwr | regret [0 10 15 0 10]
+  sweeping_jammer         4 dB: freq_div+pwr, freq_div+pwr, freq_div+pwr, freq_div+pwr, fec | regret [5 5 5 5 5]
+  sweeping_jammer         8 dB: fec, fec, fec, spatial_div+fec, spatial_div+fec | regret [0 0 0 0 0]
+  sweeping_jammer        10 dB: fec, fec, fec, spatial_div+fec, ch_switch+fec | regret [0 0 0 0 0]
+  noise_burst             8 dB: spatial_div+fec, ch_switch+fec, spatial_div+fec, spatial_div+fec, spatial_div+fec | regret [0 4 0 0 0]
+  noise_burst            10 dB: ch_switch+fec, spatial_div+fec, spatial_div+fec, spatial_div+fec, spatial_div+fec | regret [1 0 0 0 0]
+  benign_interference     4 dB: ch_switch, spatial_div, ch_switch, ch_switch, ch_switch | regret [0 0 0 0 0]

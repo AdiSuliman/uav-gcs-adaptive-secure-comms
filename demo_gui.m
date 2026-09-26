@@ -112,7 +112,7 @@ hdr.Layout.Row = 1;
 hg = uigridlayout(hdr, [1 4]);
 hg.ColumnWidth = {'1x', 470, 30, 270}; hg.Padding = [14 4 14 4]; hg.BackgroundColor = c.panelBg;
 place(mkLabel(hg, 'UAV-GCS ADAPTIVE SECURE COMMUNICATIONS', c, 'FontSize', 17, 'FontWeight', 'bold'), 1, 1);
-place(mkLabel(hg, 'CNN 9-class detector | DQN 5-action | Rician K=10 dB @ 2.4 GHz', c, ...
+place(mkLabel(hg, 'CNN 9-class detector | DQN 16-action | Rician K=10 dB @ 2.4 GHz', c, ...
     'FontColor', c.mut, 'FontSize', 11, 'HorizontalAlignment', 'right'), 1, 2);
 lamp = place(mkLabel(hg, char(9679), c, 'FontSize', 22, 'FontColor', c.mut, 'HorizontalAlignment', 'center'), 1, 3);
 lampTxt = place(mkLabel(hg, 'LINK: STANDBY', c, 'FontSize', 14, 'FontWeight', 'bold', 'FontColor', c.mut), 1, 4);
@@ -478,7 +478,7 @@ function ui = buildSurvTab(tab, env, c)
     gl = uigridlayout(pl, [8 1]); gl.RowHeight = {20, 28, 20, 28, 22, 22, 22, '1x'};
     gl.Padding = [10 6 10 10]; gl.RowSpacing = 4; gl.BackgroundColor = c.panelBg;
     place(mkLabel(gl, 'Map', c, 'FontColor', c.mut), 1, 1);
-    survMapDD = uidropdown(gl, 'Items', {'Map A - without goodput loss','Map B - any action (incl. rate reduction)'}, ...
+    survMapDD = uidropdown(gl, 'Items', {'Map A - without goodput loss','Map B - any action (incl. rate reduction, FEC)'}, ...
         'ItemsData', {'A','B'}, 'Value', 'A', 'BackgroundColor', c.termBg, 'FontColor', c.txt, 'FontName', c.font);
     place(survMapDD, 2, 1);
     place(mkLabel(gl, 'Threat', c, 'FontColor', c.mut), 3, 1);
@@ -1742,7 +1742,7 @@ end
 
 function [Pn, Pt] = epPools(fig, p, threat, ebno, sevLevel, v_kmh)
     % Frames of the scenario's link under every configuration: the clean link
-    % (before onset) and the attacked link, each through all five actions, from
+    % (before onset) and the attacked link, each through every action, from
     % real Simulink runs with apply_countermeasure.m. Cached per scenario.
     M = getappdata(fig, 'epPools');
     keyN = sprintf('none|%g|%.1f', ebno, v_kmh);
@@ -2192,7 +2192,7 @@ function updateSurvMap(fig)
     end
     hold(ax, 'off');
     xlabel(ax, 'Eb/N0 (dB)', 'Color', c.mut); ylabel(ax, 'Severity level (low -> high)', 'Color', c.mut);
-    if strcmp(mapKey, 'A'), mt = 'Map A - without goodput loss'; else, mt = 'Map B - any action (incl. rate reduction)'; end
+    if strcmp(mapKey, 'A'), mt = 'Map A - without goodput loss'; else, mt = 'Map B - any action (incl. rate reduction, FEC)'; end
     setTitle(ax, [mt ' : ' niceName(tname)], c);
 
     % ---- summary text ----

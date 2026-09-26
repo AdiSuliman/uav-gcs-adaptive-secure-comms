@@ -1,0 +1,32 @@
+=== SPEED ROBUSTNESS (closed loop, Doppler sweep) ===
+Generated: 26-Sep-2026 01:32:16
+Speeds [km/h]: [50 57.3 66.8 72 84.6 97.2 108.9 120] | Eb/N0 points: [0 4 10] dB | 9 threats/classes
+fd = v * fc / c  (fc = 2.4 GHz)
+
+False alarm = action on a non-hostile link with BER <= 2x clean (D29).
+km/h       fd (Hz)    Detection      False alarms   Rec vs clean     Restored (<=2x) 
+50.0       111.1       100.0% (27/27)     0/6              97.7%       21/21    
+57.3       127.3       100.0% (27/27)     0/6              98.1%       21/21    
+66.8       148.4       100.0% (27/27)     0/6              98.3%       20/21    
+72.0       160.0       100.0% (27/27)     0/6              98.3%       21/21    
+84.6       188.0       100.0% (27/27)     0/6              99.0%       21/21    
+97.2       216.0        96.3% (26/27)     0/6              98.9%       20/20    
+108.9      242.0       100.0% (27/27)     0/6              98.7%       21/21    
+120.0      266.7       100.0% (27/27)     0/6              98.7%       21/21    
+
+--- Detection accuracy per threat x speed (%) ---
+Threat                    50.0    57.3    66.8    72.0    84.6    97.2   108.9   120.0
+jamming                    100     100     100     100     100     100     100     100
+reactive_jamming           100     100     100     100     100     100     100     100
+sweeping_jammer            100     100     100     100     100     100     100     100
+noise_burst                100     100     100     100     100     100     100     100
+path_loss                  100     100     100     100     100     100     100     100
+spoofing                   100     100     100     100     100     100     100     100
+antenna_fault              100     100     100     100     100      67     100     100
+benign_interference        100     100     100     100     100     100     100     100
+none                       100     100     100     100     100     100     100     100
+
+OVERALL detection accuracy: 99.5% (215/216)
+OVERALL false alarms: 0/48 non-hostile runs (32 on a healthy link) | justified actions on degraded links: 16
+OVERALL KPI #2 recovery vs clean link (real threats): 98.5% | restored 166/167 | missed 1
+OVERALL recovery vs BER-before (previous metric): 77.8%

@@ -1,0 +1,43 @@
+=== KPI #3: Decision Speed (DQN vs Rule-Based) ===
+Generated: 26-Sep-2026 03:08:48
+
+Decision latency of both policies, the link quality each achieves on the same
+closed-loop runs, and (section 5) recovery time in decision cycles from the
+episodic closed loop with dwell/hysteresis.
+
+DQN latency/recovery/agreement are averaged across the full SNR sweep
+(each threat has one data point per SNR point in the diagnostic run).
+
+Threat                     DQN (ms)    Rule (ms)   Agree% DQN rec (clean) Rule rec (clean)
+jamming                       0.869      0.00012     100%          99.2%          99.2%
+reactive_jamming              0.840      0.00008     100%          99.4%          99.4%
+sweeping_jammer               0.980      0.00010       0%         100.0%          82.4%
+noise_burst                   0.840      0.00013       0%          99.7%          56.1%
+path_loss                     0.861      0.00012       0%          93.6%          69.0%
+spoofing                      0.860      0.00010     100%          99.7%          99.7%
+antenna_fault                 0.889      0.00015      83%          99.3%          99.0%
+benign_interference           1.052      0.00016      50%            N/A            N/A
+none                          0.840      0.00016     100%            N/A            N/A
+
+Mean DQN latency:  0.892 ms
+Mean Rule latency: 0.00012 ms
+Speed ratio: Rule-Based is ~7151x faster than DQN (lookup table vs neural net inference)
+DQN-vs-Rule agreement (overall, all threats x SNR): 59.3%
+
+NOTE: both policies act through the same physical countermeasure model
+(apply_countermeasure.m, D28), so agreement and recovery compare decision
+quality only. Disagreement is no longer cosmetic: actions differ in effect.
+
+Interpretation: the rule is effectively instant (a lookup); the DQN costs about a
+millisecond of inference, small next to the ~10 ms detection path. Both are far
+faster than the dwell of a few frames, so recovery time is set by detection and
+hysteresis rather than by the policy's compute time (section 5).
+
+--- Recovery time in decision cycles (run_closed_loop_episodes.m, D31) ---
+Threat onset mid-stream; dwell 3 cycles, hold 10 cycles; medians in cycles after onset.
+T_recover over episodes the threat actually degraded and no countermeasure was active at onset.
+configuration              T_act T_recover   recovered   pre-cfg switches  goodput
+dqn | hysteresis               3         8     84/88           0     1.44     0.91
+dqn | no hysteresis            1         9     25/37          46    10.23     0.82
+rule | hysteresis              3         8     66/90           1     1.49     0.85
+rule | no hysteresis           1         6     20/34          54     9.19     0.89

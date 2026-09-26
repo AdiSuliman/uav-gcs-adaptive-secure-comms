@@ -1,0 +1,38 @@
+=== KPI #2 re-scored against the no-attack (clean) link ===
+Old metric: 100*(before-after)/before   New metric: 100*(before-after)/(before-clean), capped at 100
+Link verdict thresholds: ratio after/clean <= 2 recoverable, <= 5 marginal
+
+--- Clean-link BER reference (closed-loop none runs vs EXP) ---
+  Eb/N0    0 dB : none-run 1.210e-01 | EXP 1.204e-01
+  Eb/N0    2 dB : none-run 7.584e-02 | EXP 7.744e-02
+  Eb/N0    4 dB : none-run 4.503e-02 | EXP 4.383e-02
+  Eb/N0    6 dB : none-run 2.453e-02 | EXP 2.131e-02
+  Eb/N0    8 dB : none-run 9.231e-03 | EXP 8.681e-03
+  Eb/N0   10 dB : none-run 2.754e-03 | EXP 2.512e-03
+
+--- Closed loop, 9 threats x 6 Eb/N0 (runs with an active countermeasure) ---
+  threat                  n       old       new ratio(mean)    rec   marg   fail
+  jamming                 6     85.7%     97.1%       1.78x      4      2      0
+  reactive_jamming        6     85.7%     97.8%       1.48x      5      1      0
+  sweeping_jammer         6     60.5%     95.4%       1.14x      6      0      0
+  noise_burst             6     71.5%     96.9%       1.23x      6      0      0
+  path_loss               6     83.9%     99.1%       0.97x      6      0      0
+  spoofing                6     83.5%     99.0%       1.07x      6      0      0
+  antenna_fault           5     60.6%     81.9%       1.67x      4      1      0
+  KPI #2 per-run mean      : old 76.3% -> new 95.6%
+  KPI #2 mean of per-threat: old 75.9% -> new 95.3%
+  Link restored (ratio <= 2): 37/41 runs
+  Missed (no_action on a real threat): antenna_fault @ 0 dB, BER 1.4x clean
+
+--- Speed robustness (runs with an active countermeasure) ---
+      km/h       old       new       restored
+      50.0     70.3%     95.6%       16/20   
+      57.3     69.2%     94.7%       18/21   
+      66.8     73.5%     96.9%       17/20   
+      72.0     71.9%     94.7%       18/21   
+      84.6     72.7%     95.2%       17/21   
+      97.2     73.5%     95.7%       17/21   
+     108.9     73.6%     95.8%       18/21   
+     120.0     74.2%     96.1%       17/21   
+  Overall: old 72.4% -> new 95.6%
+

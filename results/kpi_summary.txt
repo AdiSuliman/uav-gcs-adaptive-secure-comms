@@ -1,0 +1,131 @@
+=== PROPOSAL KPI SUMMARY (section ה) ===
+Generated: 26-Sep-2026 03:08:48
+
+--- KPI #1: Detection Accuracy (target: macro-F1 >= 90% above SNR threshold) ---
+Source: results/eval_detector_metrics.mat (generated 25-Sep-2026 15:32:21)
+Overall accuracy: 96.33% | Macro-F1: 96.31% -> true (target: >=90%)
+KPI #1 as worded: macro-F1 >= 90% from Eb/N0 = 0 dB up; macro-F1 above that threshold 96.31%
+Accuracy and macro-F1 vs Eb/N0 (degradation curve):
+  SNR= 0 dB: accuracy 91.4% | macro-F1 91.2%
+  SNR= 2 dB: accuracy 96.7% | macro-F1 96.6%
+  SNR= 4 dB: accuracy 96.9% | macro-F1 96.9%
+  SNR= 6 dB: accuracy 98.0% | macro-F1 98.0%
+  SNR= 8 dB: accuracy 97.8% | macro-F1 97.8%
+  SNR=10 dB: accuracy 97.1% | macro-F1 97.1%
+Action-equivalent accuracy (confusion between classes with the same countermeasure counted as correct): 98.13%
+95% bootstrap CI (1000 resamples of the test set): accuracy [95.60, 97.03] | macro-F1 [95.58, 97.00] | macro-F1 above threshold [95.58, 97.00]
+Generalization to Eb/N0 never seen in training (1,3,5,7,9 dB): accuracy 96.2% vs 96.3% on the training grid in the same run; largest gap to the interpolated curve 0.4 points
+Per-class recall/F1 (weakest classes flagged):
+  none                 recall=97.7% F1=94.7%
+  jamming              recall=99.0% F1=92.6%
+  noise_burst          recall=100.0% F1=100.0%
+  reactive_jamming     recall=82.8% F1=90.1%  <-- below 90%
+  path_loss            recall=95.4% F1=96.2%
+  spoofing             recall=100.0% F1=99.7%
+  antenna_fault        recall=94.4% F1=96.1%
+  benign_interference  recall=99.7% F1=98.4%
+  sweeping_jammer      recall=98.0% F1=99.0%
+Full confusion matrix: see results/confusion_matrix.png
+
+--- KPI #2: Link Quality Recovery vs Healthy (No-Attack) Baseline ---
+Source: results/closed_loop_diagnostic_results.mat
+Definition (proposal, D27): rec = 100*(BER_before - BER_after)/(BER_before - BER_clean), capped at 100;
+link state = BER_after/BER_clean (<= 2 restored, <= 5 marginal). Clean = none run at the same Eb/N0.
+Packet loss (D35): frame lost when BER > 0.1; restored when PLR_after <= PLR_clean + 0.05.
+Monte Carlo: 5 repeats; mean [95% CI] over the per-repeat values.
+  jamming              recovery=99.2% | 1.20x clean (mean) | restored 30/30 | missed 0 | PLR 1.00 -> 0.19, restored 26/30 | goodput kept 100%
+  reactive_jamming     recovery=99.4% | 1.16x clean (mean) | restored 30/30 | missed 0 | PLR 1.00 -> 0.20, restored 25/30 | goodput kept 99%
+  sweeping_jammer      recovery=100.0% | 0.24x clean (mean) | restored 30/30 | missed 0 | PLR 0.38 -> 0.10, restored 29/30 | goodput kept 88%
+  noise_burst          recovery=99.7% | 0.79x clean (mean) | restored 29/30 | missed 0 | PLR 0.98 -> 0.08, restored 26/30 | goodput kept 95%
+  path_loss            recovery=93.6% | 1.52x clean (mean) | restored 26/30 | missed 0 | PLR 0.92 -> 0.25, restored 17/30 | goodput kept 90%
+  spoofing             recovery=99.7% | 1.02x clean (mean) | restored 30/30 | missed 0 | PLR 0.98 -> 0.18, restored 30/30 | goodput kept 102%
+  antenna_fault        recovery=99.3% | 0.88x clean (mean) | restored 30/30 | missed 0 | PLR 0.46 -> 0.18, restored 28/30 | goodput kept 94%
+  benign_interference  recovery=N/A (non-hostile -- no countermeasure expected)
+  none                 recovery=N/A (non-hostile -- no countermeasure expected)
+  KPI #2 BER recovery (real threats):  DQN 98.7 [98.6, 98.8] | rule 86.4 [86.0, 86.7] | DQN-rule 12.3 [12.0, 12.7]
+  BER restored (% of runs):            DQN 97.6 [95.5, 99.7] | rule 74.8 [73.1, 76.4]
+  PLR restored (% of runs):            DQN 86.2 [80.5, 91.9] | rule 69.0 [63.1, 75.0]
+  PLR recovery vs clean (%):           DQN 97.0 [95.4, 98.7] | rule 86.2 [84.0, 88.5]
+  Goodput kept vs no-attack (%):       DQN 95.5 [91.1, 99.8] | rule 75.9 [73.5, 78.3] | no action 20.4 [19.9, 20.9]
+  Link restored (<= 2x clean): 205/210 = 97.6% [94.5, 99.0] | marginal: 5 | not restored: 0 | missed detections: 0
+  KPI #2 (real threats, per-threat mean): 98.7%
+Survivability map A (deliverable #7): recoverable 86.7% | marginal 7.1% | non-recoverable 6.2%  (results/survivability_boundary_mapA.txt)
+Survivability map B (deliverable #7): recoverable 93.3% | marginal 3.3% | non-recoverable 3.3%  (results/survivability_boundary_mapB.txt)
+UAV speed 50-120 km/h (results/speed_robustness.txt):
+  OVERALL detection accuracy: 99.5% (215/216)
+  OVERALL KPI #2 recovery vs clean link (real threats): 98.5% | restored 166/167 | missed 1
+  OVERALL false alarms: 0/48 non-hostile runs (32 on a healthy link) | justified actions on degraded links: 16
+
+--- KPI #3: DQN vs Rule-Based (decision latency, recovery time, link quality) ---
+Source: results/kpi3_measurement.txt
+=== KPI #3: Decision Speed (DQN vs Rule-Based) ===
+Generated: 26-Sep-2026 03:08:48
+
+Decision latency of both policies, the link quality each achieves on the same
+closed-loop runs, and (section 5) recovery time in decision cycles from the
+episodic closed loop with dwell/hysteresis.
+
+DQN latency/recovery/agreement are averaged across the full SNR sweep
+(each threat has one data point per SNR point in the diagnostic run).
+
+Threat                     DQN (ms)    Rule (ms)   Agree% DQN rec (clean) Rule rec (clean)
+jamming                       0.869      0.00012     100%          99.2%          99.2%
+reactive_jamming              0.840      0.00008     100%          99.4%          99.4%
+sweeping_jammer               0.980      0.00010       0%         100.0%          82.4%
+noise_burst                   0.840      0.00013       0%          99.7%          56.1%
+path_loss                     0.861      0.00012       0%          93.6%          69.0%
+spoofing                      0.860      0.00010     100%          99.7%          99.7%
+antenna_fault                 0.889      0.00015      83%          99.3%          99.0%
+benign_interference           1.052      0.00016      50%            N/A            N/A
+none                          0.840      0.00016     100%            N/A            N/A
+
+Mean DQN latency:  0.892 ms
+Mean Rule latency: 0.00012 ms
+Speed ratio: Rule-Based is ~7151x faster than DQN (lookup table vs neural net inference)
+DQN-vs-Rule agreement (overall, all threats x SNR): 59.3%
+
+NOTE: both policies act through the same physical countermeasure model
+(apply_countermeasure.m, D28), so agreement and recovery compare decision
+quality only. Disagreement is no longer cosmetic: actions differ in effect.
+
+Interpretation: the rule is effectively instant (a lookup); the DQN costs about a
+millisecond of inference, small next to the ~10 ms detection path. Both are far
+faster than the dwell of a few frames, so recovery time is set by detection and
+hysteresis rather than by the policy's compute time (section 5).
+
+--- Recovery time in decision cycles (run_closed_loop_episodes.m, D31) ---
+Threat onset mid-stream; dwell 3 cycles, hold 10 cycles; medians in cycles after onset.
+T_recover over episodes the threat actually degraded and no countermeasure was active at onset.
+configuration              T_act T_recover   recovered   pre-cfg switches  goodput
+dqn | hysteresis               3         8     84/88           0     1.44     0.91
+dqn | no hysteresis            1         9     25/37          46    10.23     0.82
+rule | hysteresis              3         8     66/90           1     1.49     0.85
+rule | no hysteresis           1         6     20/34          54     9.19     0.89
+Episodic loop (D31), episodes that need action, with 95% CIs:
+  dqn | hysteresis           recovered 84/88 = 95% [89, 98] | T_recover mean 14.1 [11.8, 16.5] cycles | goodput 0.91
+  dqn | no hysteresis        recovered 25/37 = 68% [51, 80] | T_recover mean 14.0 [9.2, 18.9] cycles | goodput 0.82
+  rule | hysteresis          recovered 66/90 = 73% [63, 81] | T_recover mean 11.9 [9.7, 14.1] cycles | goodput 0.85
+  rule | no hysteresis       recovered 20/34 = 59% [42, 74] | T_recover mean 9.9 [5.9, 14.0] cycles | goodput 0.89
+DQN training seeds (D35): 5 trained, 4 passed the gate; mean regret across seeds 0.3 [0.1, 0.4]; selected seed 45 (mean regret 0.1); cells with the same action in every seed 47/54
+
+--- KPI #5: Single End-to-End Baseline (detect->decide->recover, >=1 recoverable threat) ---
+MET: sweeping_jammer recovers 100.0% of the attack-induced BER end-to-end (vs clean link), averaged over the SNR sweep (CNN detect -> DQN decide -> apply -> re-measure).
+
+--- KPI #4: False Alarm Rate (FAR), non-hostile classes ---
+Source: results/far_measurement.txt
+Definition (D29): an action on a non-hostile link whose BER <= 2x clean. Denominator: healthy-link trials. Bound (D35): FAR <= 5% with the 95% upper limit below it, for Eb/N0 >= the KPI #1 threshold (0 dB).
+  Eb/N0    0 dB: FAR 0/60 = 0.0% [0.0, 6.0]
+  Eb/N0    4 dB: FAR 0/30 = 0.0% [0.0, 11.4]
+  Eb/N0   10 dB: FAR 0/30 = 0.0% [0.0, 11.4]
+  Above threshold (pooled): FAR 0/120 = 0.0%, 95% upper limit 3.1% (Wilson; Rule of Three 2.5%) -> MET
+Full per-class breakdown: see results/far_measurement.txt
+
+
+--- Unknown-threat detection (deliverable 4) and combined threats (risk 13) ---
+Leave-one-threat-out: mean AUROC MSP 0.516, energy 0.532; unknown frames flagged 16% (MSP) at 95% known kept; false flags 5.2%
+Per held-out threat: results/ood_detection.txt
+Combined threats, DQN (class):           link restored in 302/1140 decisions (median 2.87x clean) | per repeat 26.5 [18.1, 34.9]%
+Combined threats, DQN (unknown gating):  link restored in 301/1140 decisions (median 2.87x clean) | per repeat 26.4 [17.9, 34.9]%
+Combined threats, Rule (class):          link restored in 95/1140 decisions (median 5.87x clean) | per repeat 8.3 [8.3, 8.3]%
+Combined threats, Rule (unknown gating): link restored in 95/1140 decisions (median 5.87x clean) | per repeat 8.3 [8.3, 8.3]%
+Details: results/combined_threats.txt

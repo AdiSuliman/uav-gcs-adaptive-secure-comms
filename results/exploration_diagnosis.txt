@@ -1,0 +1,76 @@
+=== DIAGNOSTIC: Best Legitimate Treatment, Per Threat, Per Severity Level ===
+Generated: 21-Sep-2026 23:51:23 (post-hoc analysis, no re-simulation)
+
+Threat             Level    Best Mechanism        Magnitude      Recovery%
+
+jamming            0        field_reduction            25.0          79.9%
+jamming            4        field_reduction            25.0          84.2%
+jamming            8        field_reduction            25.0          86.2%
+jamming            12       field_reduction            25.0          85.5%
+jamming            16       field_reduction            25.0          81.6%
+
+noise_burst        0        field_reduction            25.0          61.6%
+noise_burst        4        field_reduction            25.0          68.1%
+noise_burst        8        field_reduction            25.0          71.3%
+noise_burst        12       field_reduction            25.0          72.4%
+noise_burst        16       field_reduction            25.0          70.8%
+
+reactive_jamming   0        field_reduction            20.0          76.6%
+reactive_jamming   4        field_reduction            25.0          82.6%
+reactive_jamming   8        field_reduction            25.0          85.7%
+reactive_jamming   12       field_reduction            25.0          86.6%
+reactive_jamming   16       field_reduction            25.0          84.4%
+
+path_loss          4        awgn_margin_boost          15.0          99.9%
+path_loss          8        awgn_margin_boost          15.0          98.7%
+path_loss          12       awgn_margin_boost          15.0          94.7%
+path_loss          16       field_reduction            15.0          85.1%
+path_loss          20       field_reduction            20.0          89.4%
+
+spoofing           -4       field_reduction            25.0          73.7%
+spoofing           -1       field_reduction            25.0          82.2%
+spoofing           2        field_reduction            25.0          87.1%
+spoofing           5        field_reduction            25.0          89.4%
+spoofing           8        field_reduction            25.0          89.6%
+
+antenna_fault      0.1      awgn_margin_boost          15.0          56.0%
+antenna_fault      0.2      atten_reduction            25.0          58.6%
+antenna_fault      0.3      atten_reduction            25.0          62.6%
+antenna_fault      0.4      atten_reduction            25.0          65.4%
+antenna_fault      0.5      atten_reduction            25.0          67.8%
+
+sweeping_jammer    0        field_reduction            25.0          50.6%
+sweeping_jammer    4        field_reduction            25.0          56.4%
+sweeping_jammer    8        field_reduction            25.0          60.2%
+sweeping_jammer    12       field_reduction            25.0          61.9%
+sweeping_jammer    16       field_reduction            25.0          60.0%
+
+benign_interference -10      awgn_margin_boost          15.0          70.7%
+benign_interference -8       field_reduction            25.0          58.7%
+benign_interference -6       field_reduction            20.0          63.8%
+benign_interference -4       field_reduction            25.0          70.8%
+benign_interference -2       field_reduction            25.0          76.3%
+
+=== CORRECTED Overall Best Per Threat (legitimate mechanisms only) ===
+Threat             Best Mechanism        Magnitude Avg Recovery%
+jamming            field_reduction            25.0        83.5%
+noise_burst        field_reduction            25.0        68.9%
+reactive_jamming   field_reduction            25.0        83.1%
+path_loss          awgn_margin_boost          15.0        89.6%
+spoofing           field_reduction            25.0        84.4%
+antenna_fault      atten_reduction            25.0        60.6%
+sweeping_jammer    field_reduction            25.0        57.8%
+benign_interference field_reduction            25.0        64.2%
+
+=== CORRECTED Improvement vs Current C1/C3 Static Mitigation ===
+Threat                Current(C3)     Best Found Improvement
+jamming                     31.7%          83.5%     +51.8%
+noise_burst                 21.9%          68.9%     +47.0%
+reactive_jamming            33.9%          83.1%     +49.2%
+path_loss                   76.9%          89.6%     +12.7%
+spoofing                    39.5%          84.4%     +44.9%
+antenna_fault                4.7%          60.6%     +55.9%
+sweeping_jammer        N/A (new)          57.8%        N/A
+benign_interference     N/A (new)          64.2%        N/A
+
+=== END OF DIAGNOSIS ===
