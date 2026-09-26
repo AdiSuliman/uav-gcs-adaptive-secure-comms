@@ -70,11 +70,11 @@ for t = 1:nT
         for s = 1:nS
             snr_dB = EBNO_LIST(s) + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps);
             set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p2.sps));
-            F = struct('iq', {{}}, 'ber', [], 'rssi', [], 'plr', [], 'sinr', [], 'env_corr', []);
+            F = struct('iq', {{}}, 'ber', [], 'rssi', [], 'plr', [], 'sinr', [], 'env_corr', [], 'iot', []);
             for r = 1:N_POOL_RUNS
                 link_seed(modelName, randi(2^31 - 1000));       % independent pool runs (D42)
                 out = sim(modelName);
-                [iq_f, ber_f, rssi_f, plr_f, ~, sinr_f, ec_f] = extract_closed_loop_frames(out, p2, delay_bits);
+                [iq_f, ber_f, rssi_f, plr_f, ~, sinr_f, ec_f, iot_f] = extract_closed_loop_frames(out, p2, delay_bits);
                 b = ber_f(:)'; rs = rssi_f(:)'; q = plr_f(:)'; sn = sinr_f(:)'; ec = ec_f(:)';
                 v = find(~isnan(b));
                 F.iq   = [F.iq, reshape(cellfun(@single, iq_f(v), 'UniformOutput', false), 1, [])];
@@ -83,6 +83,7 @@ for t = 1:nT
                 F.plr  = [F.plr, q(v)];
                 F.sinr = [F.sinr, sn(v)];
                 F.env_corr = [F.env_corr, ec(v)];
+                io = iot_f(:)'; F.iot = [F.iot, io(v)];
             end
             pools{t, a, s} = F;
         end
@@ -167,7 +168,7 @@ for k = 1:N
     F = pools{src_t, cfg, s};
     j = randi(numel(F.ber));
     fr = struct('iq', double(F.iq{j}), 'ber', F.ber(j), 'rssi', F.rssi(j), 'plr', F.plr(j), ...
-        'sinr', F.sinr(j), 'env_corr', F.env_corr(j));
+        'sinr', F.sinr(j), 'env_corr', F.env_corr(j), 'iot', F.iot(j));
     [Ep, info] = episode_cycle(Ep, k, fr, ctx);
     cfg = Ep.cfg;
     if k > N_PRE && isnan(R.T_detect) && strcmp(info.cls, threats{t}), R.T_detect = k - N_PRE; end

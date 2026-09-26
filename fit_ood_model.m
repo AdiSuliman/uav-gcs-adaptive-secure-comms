@@ -3,7 +3,7 @@ function M = fit_ood_model(net, tr, classes)
 %   Mahalanobis: class means and one shared (tied) covariance of the 64-d
 %   embedding 'relu_merge' on the training split, shrunk by 10% toward a scaled
 %   identity (Lee et al., NeurIPS 2018). Isolation forest (Liu, Ting & Zhou,
-%   ICDM 2008) on the 8 normalized link features of the training split.
+%   ICDM 2008) on the normalized link features of the training split.
 %   The scores are computed by ood_scores.m.
 Z = embed(net, tr.X, tr.feats');
 y = double(tr.Y(:));

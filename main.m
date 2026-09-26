@@ -118,11 +118,11 @@ RUN.validate_A                  = false;   % A1-A3: build+validate AWGN & Rician
 RUN.check_A4                    = false;   % A4  : build threat model + sanity BER (fast)
 RUN.validate_phy                = false;    % A4v : link vs theory, MRC/MMSE, seeds; stops main on FAIL (D41)
 RUN.build_dataset               = false;    % A5  : seeded sub-run dataset (~30min, D42)
-RUN.extract_spectrograms        = false;    % A6  : spectrograms + 8 link features (~5min, D42)
+RUN.extract_spectrograms        = true;    % A6  : spectrograms + 9 link features (~5min, D42-D43)
 
 
 % ---- Phase B: detection (CNN baseline) ----
-RUN.prepare_data                = false;    % B1  : split by sub-run 60/20/20 (~1min, D42)
+RUN.prepare_data                = true;    % B1  : split by sub-run 60/20/20 (~1min, D42)
 RUN.train_detector              = true;    % B2  : train CNN+scalar hybrid (~10min)
 RUN.eval_detector               = true;    % B3  : test eval + confusion/accuracy-vs-SNR + bootstrap CIs (~2min, D35)
 RUN.eval_unseen_snr             = false;   % B4  : detector at Eb/N0 never seen in training, 1,3,5,7,9 dB (~25min, D34)

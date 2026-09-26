@@ -121,7 +121,7 @@ for mc = 1:N_MC
 
             %% --- Attacked link ---
             out = sim_seeded(p, modelName, snr_dB, seed);
-            [iq_frames, ber_f, rssi_f, plr_f, nf, sinr_f, ec_f] = extract_closed_loop_frames(out, p, delay_bits);
+            [iq_frames, ber_f, rssi_f, plr_f, nf, sinr_f, ec_f, iot_f] = extract_closed_loop_frames(out, p, delay_bits);
             [ber_before, plr_before] = link_means(ber_f);
             if isnan(n_seeded), n_seeded = seed_blocks(modelName, seed); end
 
@@ -133,7 +133,7 @@ for mc = 1:N_MC
             t1 = tic;
             spec_img = spec_image(iq_rx, fs);
             raw_feats = link_features(struct('sinr', sinr_f, 'ber', ber_f, 'rssi', rssi_f, 'plr', plr_f, ...
-                'env_corr', ec_f), i_last, temporal_window, p.frame_duration);
+                'env_corr', ec_f, 'iot', iot_f), i_last, temporal_window, p.frame_duration);
             norm_feats = (raw_feats - feat_mean) ./ feat_std;
             X_spec = dlarray(single(spec_img), 'SSCB');
             X_feat = dlarray(single(norm_feats)', 'CB');

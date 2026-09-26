@@ -66,11 +66,11 @@ for mc = 1:N_MC
                 set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p2.sps));
                 seed_blocks(modelName, SEED_BASE + 10000*mc + 100*s);
                 out = sim(modelName);
-                [iq_f, ber_f, rssi_f, plr_f, ~, sinr_f, ec_f] = extract_closed_loop_frames(out, p2, delay_bits);
+                [iq_f, ber_f, rssi_f, plr_f, ~, sinr_f, ec_f, iot_f] = extract_closed_loop_frames(out, p2, delay_bits);
                 ber_mc(l, a, s, mc) = mean(ber_f(:), 'omitnan');
                 if strcmp(actions{a}, 'no_action')
                     F{l, s, mc} = struct('iq', {iq_f}, 'ber', ber_f(:)', 'rssi', rssi_f(:)', 'plr', plr_f(:)', ...
-                        'sinr', sinr_f(:)', 'env_corr', ec_f(:)');
+                        'sinr', sinr_f(:)', 'env_corr', ec_f(:)', 'iot', iot_f(:)');
                 end
             end
         end

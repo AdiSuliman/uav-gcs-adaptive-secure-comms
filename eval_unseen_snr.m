@@ -59,8 +59,8 @@ for t = 1:numel(threat_cfg)
             set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/p.sps));
             link_seed(modelName, randi(2^31 - 1000), p.fd_max);
             out = sim(modelName, 'StopTime', stop_time);
-            [iq_f, ber_f, rssi_f, plr_f, ~, sinr_f, ec_f] = extract_closed_loop_frames(out, p, delay_bits);
-            M = struct('sinr', sinr_f, 'ber', ber_f, 'rssi', rssi_f, 'plr', plr_f, 'env_corr', ec_f);
+            [iq_f, ber_f, rssi_f, plr_f, ~, sinr_f, ec_f, iot_f] = extract_closed_loop_frames(out, p, delay_bits);
+            M = struct('sinr', sinr_f, 'ber', ber_f, 'rssi', rssi_f, 'plr', plr_f, 'env_corr', ec_f, 'iot', iot_f);
             for k = 1:numel(ber_f)
                 if isnan(ber_f(k)), continue; end
                 raw = link_features(M, k, temporal_window, p0.frame_duration);

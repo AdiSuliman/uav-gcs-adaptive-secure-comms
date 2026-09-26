@@ -1,4 +1,4 @@
-function [iq_frames, ber, rssi, plr, nf, sinr, env_corr] = extract_closed_loop_frames(out, p, delay_bits)
+function [iq_frames, ber, rssi, plr, nf, sinr, env_corr, iot] = extract_closed_loop_frames(out, p, delay_bits)
 %EXTRACT_CLOSED_LOOP_FRAMES Single source of truth for pulling all frames
 % (not just the first) out of a single sim() call's output, with per-frame
 % BER/RSSI/PLR -- the building block for real sliding-window temporal
@@ -32,6 +32,8 @@ function [iq_frames, ber, rssi, plr, nf, sinr, env_corr] = extract_closed_loop_f
 %                  envelope (residual after a 32-sample block LS fit): ~0 for
 %                  interference independent of our transmission, > 0 when the
 %                  interference is triggered by it (reactive jamming, D42)
+%   iot(f)       - interference over thermal [dB] (iot_db.m); the thermal floor is
+%                  the AWGN setting of the run, read from the model (D43)
 %
 % With p.fec (fec_interleave, D39) BER and PLR are those of the decoded
 % information bits (local function fec_frames).
@@ -50,6 +52,7 @@ if isvector(iq),  iq=iq(:);   end
 nf  = size(iq,2);
 bpf = p.frame_length;
 [sinr, env_corr] = residual_metrics(txi, iq, nf);
+iot = iot_of(out, p, iq, sinr, nf);
 tx_all = txb(:); rx_all = rxb(:);
 Lmax = min(numel(tx_all),numel(rx_all)) - delay_bits;
 tx_al = tx_all(1:Lmax);
@@ -145,5 +148,18 @@ for f = 1:min(nf, size(tx, 2))
     a = abs(E(:)).^2; b = abs(X(:)).^2;
     c = corrcoef(a, b);
     ec(f) = c(1, 2);
+end
+end
+
+function iot = iot_of(out, p, iq, sinr, nf)
+iot = nan(1, nf);
+try
+    mdl = out.SimulationMetadata.ModelInfo.ModelName;
+    snr_s = str2double(get_param([mdl '/AWGN'], 'SNR'));
+catch
+    return;
+end
+for f = 1:nf
+    iot(f) = iot_db(10*log10(mean(abs(iq(:, f)).^2) + eps), sinr(f), snr_s, p.sps);
 end
 end

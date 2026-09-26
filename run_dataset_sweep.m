@@ -48,7 +48,7 @@ class_names = ['none', {threat_cfg.name}];
 stop_time   = num2str(F_SUB * p0.frame_duration);
 
 D = struct('iq', {{}}, 'label', [], 'level', [], 'snr', [], 'ber', [], 'rssi', [], 'plr', [], ...
-    'sinr', [], 'env_corr', [], 'speed', [], 'run', [], 'fold', []);
+    'sinr', [], 'env_corr', [], 'iot', [], 'speed', [], 'run', [], 'fold', []);
 run_id = 0;
 t0 = tic;
 fprintf('\n=== A5 dataset: %d threats x %d levels x %d Eb/N0 x %d sub-runs x %d frames (+ none) ===\n', ...
@@ -91,7 +91,7 @@ dataset = struct();
 dataset.iq = D.iq; dataset.label = D.label(:); dataset.level = D.level(:);
 dataset.class_names = class_names; dataset.snr = D.snr(:);
 dataset.ber = D.ber(:); dataset.rssi = D.rssi(:); dataset.plr = D.plr(:);
-dataset.sinr = D.sinr(:); dataset.env_corr = D.env_corr(:);
+dataset.sinr = D.sinr(:); dataset.env_corr = D.env_corr(:); dataset.iot = D.iot(:);
 dataset.speed_kmh = D.speed(:); dataset.run = D.run(:); dataset.fold = D.fold(:);
 dataset.meta = struct('N_SUB', N_SUB, 'F_SUB', F_SUB, 'EbNo_list', EbNo_list, 'delay_bits', delay_bits, ...
     'mode', 'seeded_subruns_D42', 'n_rx', p0.n_rx, 'speed_range_kmh', [p0.speed_kmh_min p0.speed_kmh_max], ...
@@ -122,13 +122,13 @@ link_seed(modelName, randi(2^31 - 1000), fd);
 snr_dB = ebno + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
 set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/p.sps));
 out = sim(modelName, 'StopTime', stop_time);
-[iqf, ber, rssi, plr, nf, sinr, ec] = extract_closed_loop_frames(out, p, delay_bits);
+[iqf, ber, rssi, plr, nf, sinr, ec, io] = extract_closed_loop_frames(out, p, delay_bits);
 for f = 1:nf
     if isnan(ber(f)), continue; end
     D.iq{end+1} = iqf{f};
     D.label(end+1) = label; D.level(end+1) = level; D.snr(end+1) = ebno;
     D.ber(end+1) = ber(f); D.rssi(end+1) = rssi(f); D.plr(end+1) = plr(f);
-    D.sinr(end+1) = sinr(f); D.env_corr(end+1) = ec(f);
+    D.sinr(end+1) = sinr(f); D.env_corr(end+1) = ec(f); D.iot(end+1) = io(f);
     D.speed(end+1) = v_kmh; D.run(end+1) = run_id; D.fold(end+1) = fold;
 end
 end

@@ -237,12 +237,12 @@ fprintf('\nSaved results/speed_robustness.{mat,txt,png}\n');
 
 %% ===== Local function: detection on the last valid frame of one sim run =====
 function [cls, conf, ber_mean, raw_feats] = local_detect(out, p, ebno, env)
-    [iq_frames, ber_f, rssi_f, plr_f, nf, sinr_f, ec_f] = extract_closed_loop_frames(out, p, env.delay_bits);
+    [iq_frames, ber_f, rssi_f, plr_f, nf, sinr_f, ec_f, iot_f] = extract_closed_loop_frames(out, p, env.delay_bits);
     i_last = find(~isnan(ber_f), 1, 'last');
     if isempty(i_last), i_last = nf; end
     spec_img = spec_image(iq_frames{i_last}, env.fs);
     raw_feats = link_features(struct('sinr', sinr_f, 'ber', ber_f, 'rssi', rssi_f, 'plr', plr_f, ...
-        'env_corr', ec_f), i_last, env.temporal_window, p.frame_duration);
+        'env_corr', ec_f, 'iot', iot_f), i_last, env.temporal_window, p.frame_duration);
     norm_feats = (raw_feats - env.feat_mean) ./ env.feat_std;
     X_spec = dlarray(single(spec_img), 'SSCB');
     X_feat = dlarray(single(norm_feats)', 'CB');

@@ -1,4 +1,4 @@
-%% B2 - TRAIN HYBRID DETECTOR: CNN (spectrogram) + FC (8 link features) -> softmax (D42)
+%% B2 - TRAIN HYBRID DETECTOR: CNN (spectrogram) + FC (9 link features) -> softmax (D42)
 % Training in train_hybrid_net.m (shared with eval_ood_detection.m). After
 % training, the feature-space unknown-threat models (Mahalanobis on the embedding,
 % isolation forest on the link features) are fitted on the training split.
@@ -33,7 +33,7 @@ xlabel('Epoch'); ylabel('Cross-entropy'); title('Training loss');
 subplot(1, 2, 2); plot(100*info.valAcc, 'r-', 'LineWidth', 1.5); hold on; grid on;
 xline(info.bestEpoch, '--k', sprintf('best (ep %d)', info.bestEpoch));
 xlabel('Epoch'); ylabel('Accuracy (%)'); title(sprintf('Validation accuracy (best %.1f%%)', 100*info.bestValAcc));
-sgtitle('B2: Hybrid detector (8 link features, SpecAugment, cosine LR)');
+sgtitle('B2: Hybrid detector (9 link features, SpecAugment, cosine LR)');
 if ~exist('results', 'dir'), mkdir('results'); end
 saveas(fig, 'results/training_curves.png'); close(fig);
 fprintf('=== B2 Complete ===\n');

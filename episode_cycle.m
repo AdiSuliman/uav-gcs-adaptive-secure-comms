@@ -5,7 +5,7 @@ function [E, info] = episode_cycle(E, k, fr, ctx)
 %
 %   E    episode state; pass [] on the first cycle
 %   k    cycle index (1-based)
-%   fr   received frame: fields iq, ber, rssi, plr, sinr, env_corr
+%   fr   received frame: fields iq, ber, rssi, plr, sinr, env_corr, iot
 %   ctx  fields: ebno, policy ('dqn' | 'rule'), dwell, hold, net, classes,
 %        feat_mean, feat_std, fs, agent, actions, na, tw (temporal window),
 %        frame_dur
@@ -21,9 +21,9 @@ function [E, info] = episode_cycle(E, k, fr, ctx)
 
 if isempty(E)
     E = struct('cfg', ctx.na, 'last_switch', -inf, 'cand', 0, 'cand_n', 0, ...
-        'ber', [], 'rssi', [], 'plr', [], 'sinr', [], 'env_corr', []);
+        'ber', [], 'rssi', [], 'plr', [], 'sinr', [], 'env_corr', [], 'iot', []);
 end
-E.ber(k) = fr.ber; E.rssi(k) = fr.rssi; E.plr(k) = fr.plr; E.sinr(k) = fr.sinr; E.env_corr(k) = fr.env_corr;
+E.ber(k) = fr.ber; E.rssi(k) = fr.rssi; E.plr(k) = fr.plr; E.sinr(k) = fr.sinr; E.env_corr(k) = fr.env_corr; E.iot(k) = fr.iot;
 
 %% Detection
 raw = link_features(E, k, ctx.tw, ctx.frame_dur);

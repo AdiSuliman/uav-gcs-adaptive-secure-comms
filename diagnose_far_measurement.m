@@ -89,7 +89,7 @@ for si = 1:numel(SNR_TEST_POINTS)
                 'SignalPower', num2str(1/p.sps));
 
             out = sim(modelName);
-            [iq_frames, ber_f, rssi_f, plr_f, nf, sinr_f, ec_f] = extract_closed_loop_frames(out, p, delay_bits);
+            [iq_frames, ber_f, rssi_f, plr_f, nf, sinr_f, ec_f, iot_f] = extract_closed_loop_frames(out, p, delay_bits);
 
             i_last = find(~isnan(ber_f), 1, 'last');
             if isempty(i_last), i_last = nf; end
@@ -100,7 +100,7 @@ for si = 1:numel(SNR_TEST_POINTS)
 
             spec_img = spec_image(iq_rx, fs);
             raw_feats = link_features(struct('sinr', sinr_f, 'ber', ber_f, 'rssi', rssi_f, 'plr', plr_f, ...
-                'env_corr', ec_f), i_last, temporal_window, p.frame_duration);
+                'env_corr', ec_f, 'iot', iot_f), i_last, temporal_window, p.frame_duration);
             norm_feats = (raw_feats - feat_mean) ./ feat_std;
             X_spec = dlarray(single(spec_img), 'SSCB');
             X_feat = dlarray(single(norm_feats)', 'CB');

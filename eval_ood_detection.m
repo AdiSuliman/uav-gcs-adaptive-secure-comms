@@ -8,7 +8,7 @@
 %   MSP     maximum softmax probability (Hendrycks & Gimpel, ICLR 2017)
 %   energy  logsumexp of the logits (Liu et al., NeurIPS 2020)
 %   Maha    Mahalanobis distance on the 64-d embedding (Lee et al., NeurIPS 2018)
-%   iforest isolation forest on the 8 link features (Liu, Ting & Zhou, ICDM 2008)
+%   iforest isolation forest on the 9 link features (Liu, Ting & Zhou, ICDM 2008)
 %   fused   min of the validation-standardized Maha and IF scores
 % Reported per held-out class: AUROC and FPR@95%TPR (share of unknown frames
 % accepted as known at the threshold that keeps 95% of known validation frames).

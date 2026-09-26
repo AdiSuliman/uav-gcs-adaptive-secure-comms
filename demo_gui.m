@@ -861,10 +861,10 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     out = sim(env.modelName);
     updateTimer(fig, tSeq); checkAbort(fig);
 
-    [iq_frames, ber_f, rssi_f, plr_f, nf, sinr_f, ec_f] = extract_closed_loop_frames(out, p, env.delay_bits);
+    [iq_frames, ber_f, rssi_f, plr_f, nf, sinr_f, ec_f, iot_f] = extract_closed_loop_frames(out, p, env.delay_bits);
     i_last = find(~isnan(ber_f), 1, 'last'); if isempty(i_last), i_last = nf; end
     raw_feats = link_features(struct('sinr', sinr_f, 'ber', ber_f, 'rssi', rssi_f, 'plr', plr_f, ...
-        'env_corr', ec_f), i_last, env.temporal_window, p.frame_duration);
+        'env_corr', ec_f, 'iot', iot_f), i_last, env.temporal_window, p.frame_duration);
     burst_ratio = raw_feats(7);
     iq_before = iq_frames{i_last};
     ber_before_mean = mean(ber_f, 'omitnan');
@@ -1667,7 +1667,7 @@ function runEpisode(btn, ~)
             if onset, F = Pt{cfg}; else, F = Pn{cfg}; end
             j = randi(rs{i}, numel(F.ber));
             fr = struct('iq', double(F.iq{j}), 'ber', F.ber(j), 'rssi', F.rssi(j), 'plr', F.plr(j), ...
-                'sinr', F.sinr(j), 'env_corr', F.env_corr(j));
+                'sinr', F.sinr(j), 'env_corr', F.env_corr(j), 'iot', F.iot(j));
             [Ep{i}, info] = episode_cycle(Ep{i}, k, fr, ctx{i});
             T.ber(i, k) = fr.ber; T.det(i, k) = cls_idx(info.cls); T.ok(i, k) = T.det(i, k) == truthIdx(k);
             T.conf(i, k) = info.conf; T.prop(i, k) = info.prop; T.cfg(i, k) = info.cfg; T.sw(i, k) = info.switched;
@@ -1763,11 +1763,11 @@ function P = epBuildPool(fig, p, threat, ebno)
         evalc('build_threat_model');
         snr_dB = ebno + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps);
         set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p2.sps));
-        F = struct('iq', {{}}, 'ber', [], 'rssi', [], 'plr', [], 'sinr', [], 'env_corr', []);
+        F = struct('iq', {{}}, 'ber', [], 'rssi', [], 'plr', [], 'sinr', [], 'env_corr', [], 'iot', []);
         for r = 1:2
             link_seed(env.modelName, randi(2^31 - 1000));
             out = sim(env.modelName);
-            [iq_f, ber_f, rssi_f, plr_f, ~, sinr_f, ec_f] = extract_closed_loop_frames(out, p2, env.delay_bits);
+            [iq_f, ber_f, rssi_f, plr_f, ~, sinr_f, ec_f, iot_f] = extract_closed_loop_frames(out, p2, env.delay_bits);
             v = find(~isnan(ber_f));
             F.iq   = [F.iq, reshape(cellfun(@single, iq_f(v), 'UniformOutput', false), 1, [])];
             F.ber  = [F.ber, ber_f(v)];
@@ -1775,6 +1775,7 @@ function P = epBuildPool(fig, p, threat, ebno)
             F.plr  = [F.plr, plr_f(v)];
             F.sinr = [F.sinr, sinr_f(v)];
             F.env_corr = [F.env_corr, ec_f(v)];
+            F.iot = [F.iot, iot_f(v)];
         end
         P{a} = F;
     end

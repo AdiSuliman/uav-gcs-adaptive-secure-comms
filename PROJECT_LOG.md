@@ -659,3 +659,6 @@ Run the D39 preset, compare with D38 (noise_burst, path_loss, combined threats),
 
 ### D42 — detector v2 (code complete)
 Sum-of-sinusoids fading with seed/Doppler as Constant-block inputs (`link_seed.m`); dataset from seeded sub-runs, split by sub-run; shared `link_features.m` (SINR estimate, envelope correlation) and `spec_image.m` ([−40, 40] dB) in every consumer; `train_hybrid_net.m` (cosine LR, L2, SpecAugment); Mahalanobis + isolation-forest unknown-threat scoring (`fit_ood_model.m`, `ood_scores.m`, `eval_ood_detection.m`). Pending: MATLAB run (validate_phy, A5, A6, B1–B3, OOD).
+
+### D42–D43 results (2026-09-26)
+`validate_phy` 5/5 within 0.3 dB (fd 1 kHz, 20 realizations), seeds PASS. Dataset 27,000 frames / 1,350 seeded sub-runs, 0 shared between train and test. Detector v2 with IoT: accuracy 96.24% [94.78, 97.46], macro-F1 96.26%, ≥ 90% from 0 dB, reactive_jamming 100%. Unknown threats: Mahalanobis mean AUROC 0.901 (was 0.52 with MSP). Next: phase 3 (DQN).

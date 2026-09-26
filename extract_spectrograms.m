@@ -26,12 +26,14 @@ for i = 1:N
 end
 
 fprintf('Computing link features (window %d, per sub-run)...\n', tw);
-feats = zeros(N, 8);
+feats = zeros(N, 9);
+snr_s = ds.snr(:) + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);     % AWGN setting of each frame
+iot = iot_db(ds.rssi(:), ds.sinr(:), snr_s, p.sps);
 runs = unique(ds.run, 'stable');
 for r = 1:numel(runs)
     idx = find(ds.run == runs(r));
     M = struct('sinr', ds.sinr(idx), 'ber', ds.ber(idx), 'rssi', ds.rssi(idx), ...
-        'plr', ds.plr(idx), 'env_corr', ds.env_corr(idx));
+        'plr', ds.plr(idx), 'env_corr', ds.env_corr(idx), 'iot', iot(idx));
     for k = 1:numel(idx)
         [feats(idx(k), :), feat_names] = link_features(M, k, tw, p.frame_duration);
     end
@@ -51,11 +53,15 @@ spec.meta = ds.meta;
 spec.meta.temporal_window = tw;
 save('data/spectrograms.mat', 'spec', '-v7.3');
 
-fprintf('\nSaved data/spectrograms.mat: X [128 128 1 %d], %d classes, feats [%d x 8] (%s)\n', ...
+fprintf('\nSaved data/spectrograms.mat: X [128 128 1 %d], %d classes, feats [%d x 9] (%s)\n', ...
     N, numel(ds.class_names), N, strjoin(feat_names, ', '));
 fprintf('Envelope correlation per class (mean): ');
 for c = 1:numel(ds.class_names)
     fprintf('%s %.3f  ', ds.class_names{c}, mean(feats(ds.label == c, 8)));
+end
+fprintf('\nInterference over thermal per class (mean dB): ');
+for c = 1:numel(ds.class_names)
+    fprintf('%s %.2f  ', ds.class_names{c}, mean(feats(ds.label == c, 9)));
 end
 fprintf('\n');
 clear X spec ds L   % large arrays; main.m runs the stages in one workspace
