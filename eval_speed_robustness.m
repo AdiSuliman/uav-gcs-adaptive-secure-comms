@@ -41,7 +41,7 @@ env.net = D.net; env.classes = D.classes;
 env.feat_mean = S.splits.norm.feat_mean; env.feat_std = S.splits.norm.feat_std;
 env.fs = p0.symbol_rate * p0.sps;
 env.win = 128; env.novlp = 113; env.nfft = 128;
-env.db_lo = -40; env.db_hi = 20; env.img_size = 128;
+env.db_lo = -40; env.db_hi = 40; env.img_size = 128;
 env.temporal_window = 10; env.delay_bits = 20;
 
 modelName = 'UAV_GCS_Threat_Link';
@@ -59,7 +59,7 @@ results = struct('speed_kmh',{},'fd_hz',{},'threat',{},'snr_db',{},'cnn_class',{
 dummy_iq = complex(randn(2064,1), randn(2064,1));
 for w = 1:3, Sxx_w = spectrogram(dummy_iq, hann(env.win), env.novlp, env.nfft, env.fs, 'centered'); end %#ok<NASGU>
 dspec = dlarray(single(rand(env.img_size,env.img_size,1,1)), 'SSCB');
-dfeat = dlarray(single(rand(1,7))', 'CB');
+dfeat = dlarray(single(rand(1,numel(env.feat_mean)))', 'CB');
 if canUseGPU, dspec = gpuArray(dspec); dfeat = gpuArray(dfeat); end
 for w = 1:5, predict(env.net, dspec, dfeat); end
 
@@ -237,23 +237,12 @@ fprintf('\nSaved results/speed_robustness.{mat,txt,png}\n');
 
 %% ===== Local function: detection on the last valid frame of one sim run =====
 function [cls, conf, ber_mean, raw_feats] = local_detect(out, p, ebno, env)
-    [iq_frames, ber_f, rssi_f, plr_f, nf] = extract_closed_loop_frames(out, p, env.delay_bits);
+    [iq_frames, ber_f, rssi_f, plr_f, nf, sinr_f, ec_f] = extract_closed_loop_frames(out, p, env.delay_bits);
     i_last = find(~isnan(ber_f), 1, 'last');
     if isempty(i_last), i_last = nf; end
-    w0 = max(1, i_last - env.temporal_window + 1);
-    var_rssi_10 = var(rssi_f(w0:i_last), 0);
-    burst_ratio = mean(plr_f(w0:i_last), 'omitnan');
-    if i_last > 1 && ~isnan(ber_f(i_last)) && ~isnan(ber_f(i_last-1))
-        dber_dt = (ber_f(i_last) - ber_f(i_last-1)) / p.frame_duration;
-    else
-        dber_dt = 0;
-    end
-    Sxx = spectrogram(iq_frames{i_last}, hann(env.win), env.novlp, env.nfft, env.fs, 'centered');
-    Pw = 20*log10(abs(Sxx)+eps); Pw = (Pw-env.db_lo)/(env.db_hi-env.db_lo); Pw = min(max(Pw,0),1);
-    spec_img = imresize(Pw, [env.img_size env.img_size]);
-
-    raw_feats = [ebno, ber_f(i_last), rssi_f(i_last), plr_f(i_last), var_rssi_10, dber_dt, burst_ratio];
-    raw_feats(isnan(raw_feats)) = 0;
+    spec_img = spec_image(iq_frames{i_last}, env.fs);
+    raw_feats = link_features(struct('sinr', sinr_f, 'ber', ber_f, 'rssi', rssi_f, 'plr', plr_f, ...
+        'env_corr', ec_f), i_last, env.temporal_window, p.frame_duration);
     norm_feats = (raw_feats - env.feat_mean) ./ env.feat_std;
     X_spec = dlarray(single(spec_img), 'SSCB');
     X_feat = dlarray(single(norm_feats)', 'CB');

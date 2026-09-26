@@ -66,10 +66,11 @@ for mc = 1:N_MC
                 set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p2.sps));
                 seed_blocks(modelName, SEED_BASE + 10000*mc + 100*s);
                 out = sim(modelName);
-                [iq_f, ber_f, rssi_f, plr_f] = extract_closed_loop_frames(out, p2, delay_bits);
+                [iq_f, ber_f, rssi_f, plr_f, ~, sinr_f, ec_f] = extract_closed_loop_frames(out, p2, delay_bits);
                 ber_mc(l, a, s, mc) = mean(ber_f(:), 'omitnan');
                 if strcmp(actions{a}, 'no_action')
-                    F{l, s, mc} = struct('iq', {iq_f}, 'ber', ber_f(:)', 'rssi', rssi_f(:)', 'plr', plr_f(:)');
+                    F{l, s, mc} = struct('iq', {iq_f}, 'ber', ber_f(:)', 'rssi', rssi_f(:)', 'plr', plr_f(:)', ...
+                        'sinr', sinr_f(:)', 'env_corr', ec_f(:)');
                 end
             end
         end
@@ -94,11 +95,7 @@ for mc = 1:N_MC
             cl = clean_mc(s, mc);
             for k = 1:numel(R.ber)
                 if isnan(R.ber(k)), continue; end
-                w0 = max(1, k - temporal_window + 1);
-                var_rssi = var(R.rssi(w0:k), 0);
-                burst = mean(R.plr(w0:k), 'omitnan');
-                if k > 1 && ~isnan(R.ber(k-1)), dber = (R.ber(k) - R.ber(k-1)) / p0.frame_duration; else, dber = 0; end
-                raw = [ebno, R.ber(k), R.rssi(k), R.plr(k), var_rssi, dber, burst];
+                raw = link_features(R, k, temporal_window, p0.frame_duration);
                 [cls, ~, ~, msp, en] = detect_frame(D.net, D.classes, R.iq{k}, raw, feat_mean, feat_std, fs);
                 unk = msp < T.msp;
                 % Unknown gating (D33): low confidence AND a degraded link (BER > 2x clean)
@@ -209,25 +206,8 @@ fprintf('\nSaved results/combined_threats.{txt,mat} (%.1f min)\n', toc(t0)/60);
 
 %% ===== Local functions =====
 function seed_blocks(modelName, seed)
-% Seeds the AWGN channel and the bit source (same matching as the diagnostic).
-blks = {[modelName '/AWGN'], [modelName '/BitSource']};
-for b = 1:numel(blks)
-    try
-        dp = fieldnames(get_param(blks{b}, 'DialogParameters'));
-        for j = 1:numel(dp)
-            if strcmpi(dp{j}, 'RandomStream')
-                try, set_param(blks{b}, dp{j}, 'mt19937ar with seed'); catch, end
-            end
-            if strcmpi(dp{j}, 'SeedSource')
-                try, set_param(blks{b}, dp{j}, 'Parameter'); catch, end
-            end
-        end
-        for j = 1:numel(dp)
-            if strcmpi(dp{j}, 'seed'), set_param(blks{b}, dp{j}, num2str(seed + b)); end
-        end
-    catch
-    end
-end
+% Seeds channel, interferer channels, threat waveforms, AWGN and bit source (D42).
+link_seed(modelName, seed);
 end
 
 function a = dqn_act(agent, cls, ber, rssi, ebno, plr)

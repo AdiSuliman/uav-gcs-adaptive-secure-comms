@@ -267,9 +267,11 @@ report{end+1} = '';
 report{end+1} = '';
 report{end+1} = '--- Unknown-threat detection (deliverable 4) and combined threats (risk 13) ---';
 if isfile('results/ood_detection.mat')
-    O = load('results/ood_detection.mat', 'R', 'RETAIN');
-    report{end+1} = sprintf('Leave-one-threat-out: mean AUROC MSP %.3f, energy %.3f; unknown frames flagged %.0f%% (MSP) at %.0f%% known kept; false flags %.1f%%', ...
-        mean([O.R.auroc_msp]), mean([O.R.auroc_energy]), 100*mean([O.R.flag_msp]), 100*O.RETAIN, 100*mean([O.R.fp_msp]));
+    O = load('results/ood_detection.mat', 'R', 'RETAIN', 'SC');
+    A = mean(vertcat(O.R.auroc), 1); F = mean(vertcat(O.R.fpr95), 1);
+    txt = strjoin(cellfun(@(n, a, f) sprintf('%s %.3f / %.2f', n, a, f), O.SC, num2cell(A), num2cell(F), ...
+        'UniformOutput', false), ' | ');
+    report{end+1} = sprintf('Leave-one-threat-out, mean AUROC / FPR at %.0f%% known kept: %s', 100*O.RETAIN, txt);
     report{end+1} = 'Per held-out threat: results/ood_detection.txt';
 else
     report{end+1} = 'Leave-one-threat-out: not run (eval_ood_detection.m)';

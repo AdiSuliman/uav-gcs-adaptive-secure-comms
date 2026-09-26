@@ -38,7 +38,7 @@ dqn_agent_trained = Q.agent;
 S = load('data/splits.mat', 'splits');
 feat_mean = S.splits.norm.feat_mean; feat_std = S.splits.norm.feat_std;
 
-img_size = 128; win = 128; novlp = 113; nfft = 128; db_lo = -40; db_hi = 20;
+img_size = 128; win = 128; novlp = 113; nfft = 128; db_lo = -40; db_hi = 40;
 
 init_params;
 p0 = load('params.mat').params;
@@ -58,7 +58,7 @@ fprintf('Sweeping SNR = %s dB, %d trials per (class, SNR)\n\n', mat2str(SNR_TEST
 
 fprintf('Warming up CNN and DQN networks...\n');
 dummy_spec = dlarray(single(zeros(img_size,img_size,1,1)), 'SSCB');
-dummy_feat = dlarray(single(zeros(1,7))', 'CB');
+dummy_feat = dlarray(single(zeros(1,numel(feat_mean)))', 'CB');
 if canUseGPU, dummy_spec = gpuArray(dummy_spec); dummy_feat = gpuArray(dummy_feat); end
 predict(cnn_net, dummy_spec, dummy_feat);
 dummy_state = dlarray(single(zeros(dqn_agent_trained.numStates,1)), 'CB');
@@ -89,30 +89,18 @@ for si = 1:numel(SNR_TEST_POINTS)
                 'SignalPower', num2str(1/p.sps));
 
             out = sim(modelName);
-            [iq_frames, ber_f, rssi_f, plr_f, nf] = extract_closed_loop_frames(out, p, delay_bits);
+            [iq_frames, ber_f, rssi_f, plr_f, nf, sinr_f, ec_f] = extract_closed_loop_frames(out, p, delay_bits);
 
             i_last = find(~isnan(ber_f), 1, 'last');
             if isempty(i_last), i_last = nf; end
-
-            w0 = max(1, i_last - temporal_window + 1);
-            var_rssi_10 = var(rssi_f(w0:i_last), 0);
-            burst_ratio = mean(plr_f(w0:i_last), 'omitnan');
-            if i_last > 1 && ~isnan(ber_f(i_last)) && ~isnan(ber_f(i_last-1))
-                dber_dt = (ber_f(i_last) - ber_f(i_last-1)) / p.frame_duration;
-            else
-                dber_dt = 0;
-            end
-
             iq_rx = iq_frames{i_last};
             ber   = ber_f(i_last);
             rssi  = rssi_f(i_last);
             plr   = plr_f(i_last);
 
-            Sxx = spectrogram(iq_rx, hann(win), novlp, nfft, fs, 'centered');
-            Pw = 20*log10(abs(Sxx)+eps); Pw = (Pw-db_lo)/(db_hi-db_lo); Pw = min(max(Pw,0),1);
-            spec_img = imresize(Pw, [img_size img_size]);
-            raw_feats = [ebno, ber, rssi, plr, var_rssi_10, dber_dt, burst_ratio];
-            raw_feats(isnan(raw_feats)) = 0;
+            spec_img = spec_image(iq_rx, fs);
+            raw_feats = link_features(struct('sinr', sinr_f, 'ber', ber_f, 'rssi', rssi_f, 'plr', plr_f, ...
+                'env_corr', ec_f), i_last, temporal_window, p.frame_duration);
             norm_feats = (raw_feats - feat_mean) ./ feat_std;
             X_spec = dlarray(single(spec_img), 'SSCB');
             X_feat = dlarray(single(norm_feats)', 'CB');

@@ -57,13 +57,13 @@ for t = 1:numel(threat_cfg)
             ebno = EBNO_ALL(s);
             snr_dB = ebno + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
             set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/p.sps));
+            link_seed(modelName, randi(2^31 - 1000), p.fd_max);
             out = sim(modelName, 'StopTime', stop_time);
-            [iq_f, ber_f, rssi_f, plr_f] = extract_closed_loop_frames(out, p, delay_bits);
+            [iq_f, ber_f, rssi_f, plr_f, ~, sinr_f, ec_f] = extract_closed_loop_frames(out, p, delay_bits);
+            M = struct('sinr', sinr_f, 'ber', ber_f, 'rssi', rssi_f, 'plr', plr_f, 'env_corr', ec_f);
             for k = 1:numel(ber_f)
                 if isnan(ber_f(k)), continue; end
-                w0 = max(1, k - temporal_window + 1);
-                if k > 1 && ~isnan(ber_f(k-1)), dber = (ber_f(k) - ber_f(k-1)) / p0.frame_duration; else, dber = 0; end
-                raw = [ebno, ber_f(k), rssi_f(k), plr_f(k), var(rssi_f(w0:k), 0), dber, mean(plr_f(w0:k), 'omitnan')];
+                raw = link_features(M, k, temporal_window, p0.frame_duration);
                 truth{end+1} = cfg.name; %#ok<SAGROW>
                 pred{end+1} = detect_frame(D.net, D.classes, iq_f{k}, raw, N.mu, N.sd, fs); %#ok<SAGROW>
                 ebno_of(end+1) = ebno; %#ok<SAGROW>

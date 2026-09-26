@@ -1,115 +1,61 @@
-%% EXTRACT_SPECTROGRAMS - Phase A6: Convert IQ frames to CNN-ready spectrogram images
-% Loads data/dataset.mat, computes a magnitude spectrogram per IQ frame,
-% converts to dB, normalizes on a FIXED GLOBAL scale (preserves power differences),
-% resizes to img_size x img_size, and computes 7 scalar/temporal features
-% (snr, ber, rssi, plr, var_rssi_10, dber_dt, burst_ratio) ready for CNN/LSTM training.
-%
-% Temporal features (var_rssi_10, dber_dt, burst_ratio) are computed with a
-% CAUSAL, RUN-AWARE rolling window: only frames from the SAME contiguous
-% (label,level,snr) run as the current frame are used, so no information
-% leaks across threat/level/SNR boundaries. First frame(s) of each run fall
-% back to whatever history is available within that run (no cross-run bleed).
+%% EXTRACT_SPECTROGRAMS - Phase A6: detector inputs from data/dataset.mat (D42)
+% Image: spec_image.m (fixed [-40, 40] dB scale). Scalar features: link_features.m
+% (8 features), temporal ones over a causal window of 10 frames inside each
+% sub-run. The same two functions are used by every closed-loop script and the
+% GUI, so training and deployment see identical inputs.
 
 close all; clc;
-
-if ~exist('data/dataset.mat','file')
+if ~exist('data/dataset.mat', 'file')
     error('data/dataset.mat not found. Run run_dataset_sweep.m first.');
 end
 fprintf('Loading dataset...\n');
 L = load('data/dataset.mat'); ds = L.dataset;
 S = load('params.mat'); p = S.params;
 fs = p.symbol_rate * p.sps;
-
-% --- Spectrogram + image config ---
-img_size = 128;           % CNN input size (square) — quality vs speed balance
-win      = 128;           % Hann window
-novlp    = 113;           % overlap -> ~128 time frames
-nfft     = 128;
-db_lo    = -40;           % fixed global dB floor (preserves power differences)
-db_hi    =  20;           % fixed global dB ceiling
-temporal_window = 10;      % [B2.5] causal window size for var_rssi_10 / burst_ratio
+tw = 10;                                  % temporal window [frames]
+if ~isfield(ds, 'run')
+    error('dataset.mat predates D42 (no sub-run ids). Run run_dataset_sweep.m first.');
+end
 
 N = numel(ds.iq);
-X = zeros(img_size, img_size, 1, N, 'single');   % image tensor
-fprintf('Extracting %d spectrograms (%dx%d)...\n', N, img_size, img_size);
-
+X = zeros(128, 128, 1, N, 'single');
+fprintf('Extracting %d spectrograms...\n', N);
 for i = 1:N
-    iq  = ds.iq{i};
-    Sxx = spectrogram(iq, hann(win), novlp, nfft, fs, 'centered');
-    P   = 20*log10(abs(Sxx) + eps);          % dB
-    P   = (P - db_lo) / (db_hi - db_lo);     % global normalize
-    P   = min(max(P, 0), 1);                 % clip [0,1]
-    X(:,:,1,i) = imresize(P, [img_size img_size]);
-    if mod(i,300)==0, fprintf('  %d/%d\n', i, N); end
+    X(:, :, 1, i) = spec_image(ds.iq{i}, fs);
+    if mod(i, 2000) == 0, fprintf('  %d/%d\n', i, N); end
 end
 
-%% ---- [B2.5] Temporal features: run-aware causal windows ----
-fprintf('Computing temporal features (window=%d, run-aware)...\n', temporal_window);
-
-label = ds.label(:);
-level = ds.level(:);
-snr   = ds.snr(:);
-ber   = ds.ber(:);
-rssi  = ds.rssi(:);
-plr   = ds.plr(:);   % already 0/1 "burst" indicator (ber>0.1) from run_dataset_sweep
-has_speed = isfield(ds,'speed_kmh');
-if has_speed, speed = ds.speed_kmh(:); else, speed = nan(N,1); end
-
-% Contiguous run detection — identical logic to build_sequence_index.m,
-% so temporal features here are consistent with how sequences are windowed
-same_as_prev = false(N,1);
-for i = 2:N
-    same_as_prev(i) = isequaln(label(i),label(i-1)) && ...
-                       isequaln(level(i),level(i-1)) && ...
-                       isequaln(snr(i),  snr(i-1)) && ...
-                       isequaln(speed(i),speed(i-1));   % a new speed block = a new run
-end
-run_id = cumsum(~same_as_prev);
-
-var_rssi_10 = zeros(N,1);
-dber_dt     = zeros(N,1);
-burst_ratio = zeros(N,1);
-
-run_start_idx = 1;
-for i = 1:N
-    if i > 1 && run_id(i) ~= run_id(i-1)
-        run_start_idx = i;   % new run begins here
-    end
-    w0 = max(run_start_idx, i - temporal_window + 1);   % causal window, run-clipped
-
-    var_rssi_10(i) = var(rssi(w0:i), 0);                % 0 if window has 1 frame
-    burst_ratio(i) = mean(plr(w0:i));
-
-    if i == run_start_idx
-        dber_dt(i) = 0;                                  % no prior frame in this run
-    else
-        dber_dt(i) = (ber(i) - ber(i-1)) / p.frame_duration;
+fprintf('Computing link features (window %d, per sub-run)...\n', tw);
+feats = zeros(N, 8);
+runs = unique(ds.run, 'stable');
+for r = 1:numel(runs)
+    idx = find(ds.run == runs(r));
+    M = struct('sinr', ds.sinr(idx), 'ber', ds.ber(idx), 'rssi', ds.rssi(idx), ...
+        'plr', ds.plr(idx), 'env_corr', ds.env_corr(idx));
+    for k = 1:numel(idx)
+        [feats(idx(k), :), feat_names] = link_features(M, k, tw, p.frame_duration);
     end
 end
 
-% Labels as categorical (CNN-ready)
-Y = categorical(ds.label, 1:numel(ds.class_names), ds.class_names);
-
-% Scalar features (for the hybrid branch) — 7 columns
-feats = [ds.snr(:), ds.ber(:), ds.rssi(:), ds.plr(:), var_rssi_10, dber_dt, burst_ratio];
-feat_names = {'snr','ber','rssi','plr','var_rssi_10','dber_dt','burst_ratio'};
-
-% Package
-spec.X          = X;
-spec.Y          = Y;
-spec.feats      = feats;
+spec = struct();
+spec.X = X;
+spec.Y = categorical(ds.label, 1:numel(ds.class_names), ds.class_names);
+spec.feats = feats;
 spec.feat_names = feat_names;
 spec.class_names = ds.class_names;
-if has_speed, spec.speed_kmh = speed; end     % per-frame UAV speed (km/h), for accuracy-vs-speed analysis
-spec.img_size   = img_size;
-spec.meta       = ds.meta;
-spec.meta.temporal_window = temporal_window;
-spec.meta.temporal_note   = 'var_rssi_10/dber_dt/burst_ratio computed with a run-aware causal window=10 (see header). Rx_IQ tap point fixed 2026-09-19 (D18) to sit after AWGN -- spectrograms now reflect the configured SNR sweep point, not just Rician+threat.';
+spec.ebno = ds.snr(:);                    % configured Eb/N0, analysis only (not an input)
+spec.speed_kmh = ds.speed_kmh(:);
+spec.run = ds.run(:); spec.fold = ds.fold(:); spec.level = ds.level(:);
+spec.img_size = 128;
+spec.meta = ds.meta;
+spec.meta.temporal_window = tw;
+save('data/spectrograms.mat', 'spec', '-v7.3');
 
-if ~exist('data','dir'); mkdir('data'); end
-save('data/spectrograms.mat','spec','-v7.3');
-
-fprintf('\nDone. Saved data/spectrograms.mat\n');
-fprintf('  X    : [%d %d 1 %d] single\n', img_size, img_size, N);
-fprintf('  Y    : %d labels, %d classes\n', N, numel(ds.class_names));
-fprintf('  feats: [%d x %d] (%s)\n', N, numel(feat_names), strjoin(feat_names,', '));
+fprintf('\nSaved data/spectrograms.mat: X [128 128 1 %d], %d classes, feats [%d x 8] (%s)\n', ...
+    N, numel(ds.class_names), N, strjoin(feat_names, ', '));
+fprintf('Envelope correlation per class (mean): ');
+for c = 1:numel(ds.class_names)
+    fprintf('%s %.3f  ', ds.class_names{c}, mean(feats(ds.label == c, 8)));
+end
+fprintf('\n');
+clear X spec ds L   % large arrays; main.m runs the stages in one workspace

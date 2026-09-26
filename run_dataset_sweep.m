@@ -1,52 +1,40 @@
-%% RUN_DATASET_SWEEP - Phase A5 (FULL): Multi-JSR labeled dataset generation
-% Runs all 8 threats x 5 intensity levels x Eb/No sweep + balanced 'none' class.
-% Per frame collects: IQ (spectrogram), BER/SNR/RSSI/PLR (features), label, level.
+%% RUN_DATASET_SWEEP - Phase A5: labeled dataset from independent seeded sub-runs (D42)
+% 8 threats x 5 severity levels x 6 Eb/N0 points + 'none', on the multi-antenna
+% link of D41. Every (threat, level, Eb/N0) cell is simulated as N_SUB independent
+% sub-runs: own seed (fading, interferer channels, threat waveform, noise, bits)
+% and own UAV speed drawn uniformly in 50-120 km/h. The sub-run is the unit of the
+% train/val/test split (prepare_data.m), so no two splits share a channel
+% realization or a temporal-feature window.
 %
-% Intensity levels per threat (validated ranges — impact threshold to pre-saturation):
-%   jamming/noise_burst/reactive        : JSR   = 0,4,8,12,16 dB
-%   path_loss                           : atten = 4,8,12,16,20 dB
-%   spoofing                            : SIR   = -4,-1,2,5,8 dB
-%   antenna_fault                       : duty  = 0.1,0.2,0.3,0.4,0.5 (atten fixed 30 dB)
-%   benign_interference [A-ext]         : power = -10,-8,-6,-4,-2 dB (weak, non-malicious)
-%   sweeping_jammer     [A-ext]         : JSR   = 0,4,8,12,16 dB (dwell fixed via sweep_duty)
+% Severity levels (impact threshold to pre-saturation):
+%   jamming / noise_burst / reactive / sweeping : JSR   0,4,8,12,16 dB
+%   path_loss                                    : atten 4,8,12,16,20 dB
+%   spoofing                                     : SIR   -4,-1,2,5,8 dB
+%   antenna_fault                                : duty  0.1..0.5 (30 dB)
+%   benign_interference                          : power -10..-2 dB
+% 'none' gets n_levels x N_SUB sub-runs per Eb/N0 (class balance).
 %
-% CLASS BALANCE: 'none' generates (n_levels x frames_per_config) frames per SNR,
-% matching the total frames of any single threat -> prevents class imbalance.
-%
-% SPEED (DOPPLER) DIVERSITY: every (threat, level, SNR) block of frames_per_config
-% frames is simulated at its OWN UAV speed, a continuous (non-integer) random value
-% inside [speed_kmh_min, speed_kmh_max] (50-120 km/h). Channel Doppler follows as
-% fd = v*fc/c. Speed bins are assigned Latin-square style so each (threat, SNR)
-% cell sees several different speed bins across its severity levels, and speed is
-% NOT correlated with SNR or class. Dataset size and class balance are unchanged;
-% the per-frame speed is stored in dataset.speed_kmh for analysis.
+% Per frame: antenna-1 IQ, label, level, configured Eb/N0, BER, RSSI, PLR,
+% SINR estimate, envelope correlation, speed, run id, fold (1..N_SUB).
+% Frames whose BER is incomplete (last frame of a sub-run) are dropped.
 
 close all; clc;
-
+warning('off', 'Simulink:cgxe:LeakedJITEngine');
 if ~exist('params.mat', 'file')
     error('params.mat not found. Run init_params.m first.');
 end
 S = load('params.mat');
-p = S.params;
-p0 = p;   % backup to restore threat params after each config
+p0 = S.params; p0.quiet_build = true;
 
-%% ---- Dataset configuration ----
-EbNo_list         = p.EbNo_dB;    % 0:2:10 dB
-frames_per_config = 100;           % frames per (threat, level, SNR)
-delay_bits        = 20;           % validated RRC group delay
-modelName         = 'UAV_GCS_Threat_Link';
+%% ---- Configuration ----
+EbNo_list  = p0.EbNo_dB;          % 0:2:10 dB
+N_SUB      = 5;                   % independent sub-runs per cell (split unit)
+F_SUB      = 20;                  % frames per sub-run
+delay_bits = 20;
+modelName  = 'UAV_GCS_Threat_Link';
+rng(2026, 'twister');             % seeds and speeds of every sub-run
 
-% ---- Speed (Doppler) diversity ----
-if ~isfield(p,'speed_kmh_min') || ~isfield(p,'speed_kmh_max')
-    error('params.mat has no speed envelope. Re-run init_params.m (updated version) first.');
-end
-spd_lo_kmh = p.speed_kmh_min;            % 50 km/h
-spd_hi_kmh = p.speed_kmh_max;            % 120 km/h
-n_spd_bins = numel(EbNo_list);           % one bin per SNR point (6) -> Latin-square coverage
-rng(2026, 'twister');                    % reproducible speed draws
-
-% Threat -> parameter name + intensity levels
-clear threat_cfg                                  % scripts share the base workspace
+clear threat_cfg
 threat_cfg(1) = struct('name','jamming',             'param','jsr_db',        'levels',[0 4 8 12 16]);
 threat_cfg(2) = struct('name','noise_burst',         'param','jsr_db',        'levels',[0 4 8 12 16]);
 threat_cfg(3) = struct('name','reactive_jamming',    'param','jsr_db',        'levels',[0 4 8 12 16]);
@@ -55,165 +43,97 @@ threat_cfg(5) = struct('name','spoofing',            'param','spoof_sir_db',  'l
 threat_cfg(6) = struct('name','antenna_fault',       'param','fault_duty',    'levels',[0.1 0.2 0.3 0.4 0.5]);
 threat_cfg(7) = struct('name','benign_interference', 'param','benign_int_db', 'levels',[-10 -8 -6 -4 -2]);
 threat_cfg(8) = struct('name','sweeping_jammer',     'param','jsr_db',        'levels',[0 4 8 12 16]);
-
-n_levels = 5;   % all threats have 5 levels
-
-% Class index map: 1=none, 2..9 = threats (in threat_cfg order)
+n_levels    = 5;
 class_names = ['none', {threat_cfg.name}];
+stop_time   = num2str(F_SUB * p0.frame_duration);
 
-frame_dur = p.frame_duration;
-StopTime_cfg  = frames_per_config * frame_dur;              % one threat config
-StopTime_none = n_levels * frames_per_config * frame_dur;   % balanced none (5x)
+D = struct('iq', {{}}, 'label', [], 'level', [], 'snr', [], 'ber', [], 'rssi', [], 'plr', [], ...
+    'sinr', [], 'env_corr', [], 'speed', [], 'run', [], 'fold', []);
+run_id = 0;
+t0 = tic;
+fprintf('\n=== A5 dataset: %d threats x %d levels x %d Eb/N0 x %d sub-runs x %d frames (+ none) ===\n', ...
+    numel(threat_cfg), n_levels, numel(EbNo_list), N_SUB, F_SUB);
+fprintf('%-22s %6s %10s %10s %9s\n', 'class', 'level', 'meanBER', 'meanSINR', 'envcorr');
 
-% Storage
-iq_all={}; label_all=[]; level_all=[]; snr_all=[]; ber_all=[]; rssi_all=[]; plr_all=[];
-speed_all=[];   % UAV speed [km/h] of every frame
-
-fprintf('\n=== A5 FULL Dataset Generation (Multi-JSR, 8 threats) ===\n');
-fprintf('Threats: %d x %d levels x %d SNR | +balanced none | %d frames/config (each block at its own speed)\n', ...
-    numel(threat_cfg), n_levels, numel(EbNo_list), frames_per_config);
-fprintf('Speed envelope: %.0f-%.0f km/h (fd = %.0f-%.0f Hz), continuous, %d speed bins\n', ...
-    spd_lo_kmh, spd_hi_kmh, spd_lo_kmh/3.6*p.carrier_freq/p.c_light, ...
-    spd_hi_kmh/3.6*p.carrier_freq/p.c_light, n_spd_bins);
-fprintf('%-22s %6s %6s %10s %10s   %s\n', 'Threat','Level','SNRs','meanBER','meanRSSI','speeds [km/h] per SNR');
-
-t_start = tic;
-
-
-%% ---- Threat loop: threat x level x SNR (each block at its own speed) ----
+%% ---- Threat classes ----
 for tt = 1:numel(threat_cfg)
     cfg = threat_cfg(tt);
-    cls_idx = tt + 1;   % class index (1 is none)
-
-    for lv = 1:numel(cfg.levels)
-        level_val = cfg.levels(lv);
-        ber_accum = []; rssi_accum = []; spd_used = zeros(1, numel(EbNo_list));
-
+    for lv = 1:n_levels
+        p = p0; p.active_threat = cfg.name; p.(cfg.param) = cfg.levels(lv); p.seed = [];
+        build(p, modelName);
+        i_start = numel(D.label) + 1;
         for s = 1:numel(EbNo_list)
-            % Latin-square speed bin: distinct across levels for a fixed SNR and
-            % distinct across SNRs for a fixed level.
-            bin_idx = mod((s-1) + (lv-1) + 2*(tt-1), n_spd_bins) + 1;
-
-            p = p0;
-            p.active_threat = cfg.name;
-            p.(cfg.param)   = level_val;
-            [p, v_kmh] = local_set_speed(p, bin_idx, n_spd_bins, spd_lo_kmh, spd_hi_kmh);
-            spd_used(s) = v_kmh;
-            params = p; save('params.mat','params');
-            evalc('build_threat_model');     % Doppler is baked in at build time
-
-            snr_dB = EbNo_list(s) + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
-            set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), ...
-                'SignalPower', num2str(1/p.sps));
-            out = sim(modelName, 'StopTime', num2str(StopTime_cfg));
-
-            [iqf,berf,rssif,plrf,nf] = local_extract(out, p, delay_bits);
-            for f = 1:nf
-                iq_all{end+1}=iqf{f}; label_all(end+1)=cls_idx; level_all(end+1)=level_val;
-                snr_all(end+1)=EbNo_list(s); ber_all(end+1)=berf(f);
-                rssi_all(end+1)=rssif(f); plr_all(end+1)=plrf(f);
-                speed_all(end+1)=v_kmh;
+            for sub = 1:N_SUB
+                run_id = run_id + 1;
+                D = add_subrun(D, p, modelName, EbNo_list(s), stop_time, delay_bits, ...
+                    tt + 1, cfg.levels(lv), run_id, sub);
             end
-            ber_accum=[ber_accum berf]; rssi_accum=[rssi_accum rssif];
         end
-        fprintf('%-22s %6g %6d %10.3e %10.2f   %s\n', cfg.name, level_val, ...
-            numel(EbNo_list), mean(ber_accum,'omitnan'), mean(rssi_accum), ...
-            sprintf('%.1f ', spd_used));
+        report_row(cfg.name, cfg.levels(lv), D, i_start);
     end
 end
 
-%% ---- None class (balanced: n_levels x frames_per_config per SNR, split into
-%%      n_levels sub-blocks so 'none' also sees many different speeds per SNR) ----
-ber_accum=[]; rssi_accum=[];
-for k = 1:n_levels
-    for s = 1:numel(EbNo_list)
-        bin_idx = mod((s-1) + (k-1) + 2*numel(threat_cfg), n_spd_bins) + 1;
-
-        p = p0; p.active_threat = 'none';
-        [p, v_kmh] = local_set_speed(p, bin_idx, n_spd_bins, spd_lo_kmh, spd_hi_kmh);
-        params = p; save('params.mat','params');
-        evalc('build_threat_model');
-
-        snr_dB = EbNo_list(s) + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
-        set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), ...
-            'SignalPower', num2str(1/p.sps));
-        out = sim(modelName, 'StopTime', num2str(StopTime_cfg));
-        [iqf,berf,rssif,plrf,nf] = local_extract(out, p, delay_bits);
-        for f = 1:nf
-            iq_all{end+1}=iqf{f}; label_all(end+1)=1; level_all(end+1)=NaN;
-            snr_all(end+1)=EbNo_list(s); ber_all(end+1)=berf(f);
-            rssi_all(end+1)=rssif(f); plr_all(end+1)=plrf(f);
-            speed_all(end+1)=v_kmh;
-        end
-        ber_accum=[ber_accum berf]; rssi_accum=[rssi_accum rssif];
+%% ---- None class (n_levels x N_SUB sub-runs per Eb/N0) ----
+p = p0; p.active_threat = 'none'; p.seed = [];
+build(p, modelName);
+i_start = numel(D.label) + 1;
+for s = 1:numel(EbNo_list)
+    for k = 1:n_levels * N_SUB
+        run_id = run_id + 1;
+        D = add_subrun(D, p, modelName, EbNo_list(s), stop_time, delay_bits, 1, NaN, run_id, mod(k-1, N_SUB) + 1);
     end
 end
-fprintf('%-22s %6s %6d %10.3e %10.2f\n', 'none', '-', numel(EbNo_list), ...
-    mean(ber_accum,'omitnan'), mean(rssi_accum));
-
-% Restore original params
-params = p0; save('params.mat','params');
+report_row('none', NaN, D, i_start);
+params = S.params; save('params.mat', 'params');
 
 %% ---- Package ----
-dataset.iq=iq_all; dataset.label=label_all(:); dataset.level=level_all(:);
-dataset.class_names=class_names; dataset.snr=snr_all(:);
-dataset.ber=ber_all(:); dataset.rssi=rssi_all(:); dataset.plr=plr_all(:);
-dataset.speed_kmh=speed_all(:);
-dataset.meta.frames_per_config=frames_per_config; dataset.meta.EbNo_list=EbNo_list;
-dataset.meta.delay_bits=delay_bits; dataset.meta.mode='multi_JSR_8threats_speed';
-dataset.meta.speed_range_kmh=[spd_lo_kmh spd_hi_kmh]; dataset.meta.n_speed_bins=n_spd_bins;
-dataset.meta.threat_cfg=threat_cfg; dataset.meta.created=datestr(now);
+dataset = struct();
+dataset.iq = D.iq; dataset.label = D.label(:); dataset.level = D.level(:);
+dataset.class_names = class_names; dataset.snr = D.snr(:);
+dataset.ber = D.ber(:); dataset.rssi = D.rssi(:); dataset.plr = D.plr(:);
+dataset.sinr = D.sinr(:); dataset.env_corr = D.env_corr(:);
+dataset.speed_kmh = D.speed(:); dataset.run = D.run(:); dataset.fold = D.fold(:);
+dataset.meta = struct('N_SUB', N_SUB, 'F_SUB', F_SUB, 'EbNo_list', EbNo_list, 'delay_bits', delay_bits, ...
+    'mode', 'seeded_subruns_D42', 'n_rx', p0.n_rx, 'speed_range_kmh', [p0.speed_kmh_min p0.speed_kmh_max], ...
+    'threat_cfg', threat_cfg, 'created', datestr(now));
+if ~exist('data', 'dir'); mkdir('data'); end
+save('data/dataset.mat', 'dataset', '-v7.3');
 
-if ~exist('data','dir'); mkdir('data'); end
-save('data/dataset.mat','dataset','-v7.3');
-
-%% ---- Summary + balance check ----
-fprintf('\n=== Dataset Summary (Multi-JSR, 8 threats) ===\n');
-fprintf('Total frames : %d\n', numel(label_all));
-fprintf('Speed [km/h] : min %.1f | mean %.1f | max %.1f (continuous, non-integer)\n', ...
-    min(speed_all), mean(speed_all), max(speed_all));
-fprintf('Elapsed      : %.1f s\n', toc(t_start));
-fprintf('\nFrames per class (balance check):\n');
+fprintf('\n=== Dataset summary ===\n');
+fprintf('Frames: %d | sub-runs: %d | speed %.1f-%.1f km/h | %.1f min\n', numel(D.label), run_id, ...
+    min(D.speed), max(D.speed), toc(t0)/60);
 for c = 1:numel(class_names)
-    fprintf('  %-22s %d\n', class_names{c}, sum(label_all==c));
+    fprintf('  %-22s %d\n', class_names{c}, sum(D.label == c));
 end
-fprintf('\nSaved to data/dataset.mat. Next: run extract_spectrograms.\n');
+fprintf('Saved data/dataset.mat. Next: extract_spectrograms.\n');
+clear D dataset   % large arrays; main.m runs the stages in one workspace
 
-%% ===== Local function: set UAV speed (continuous) and derived Doppler =====
-function [p, v_kmh] = local_set_speed(p, bin_idx, n_bins, lo_kmh, hi_kmh)
-    w = (hi_kmh - lo_kmh) / n_bins;
-    v_kmh = lo_kmh + ((bin_idx-1) + rand()) * w;      % real-valued, inside the bin
-    p.v_kmh  = v_kmh;
-    p.v      = v_kmh / 3.6;                            % [m/s]
-    p.fd_max = p.v * p.carrier_freq / p.c_light;       % [Hz] read by build_threat_model
+%% ===================== Local functions =====================
+function build(p, modelName)
+params = p; save('params.mat', 'params'); %#ok<NASGU>
+evalc('build_threat_model');
 end
 
-%% ===== Local function: extract frames from one sim output =====
-function [iq_frames, ber, rssi, plr, nf] = local_extract(out, p, delay_bits)
-    txb = double(squeeze(out.get('tx_bits_out')));
-    rxb = double(squeeze(out.get('rx_bits_out')));
-    iq  = squeeze(out.get('Rx_IQ'));
-    if isvector(txb), txb=txb(:); end
-    if isvector(rxb), rxb=rxb(:); end
-    if isvector(iq),  iq=iq(:);   end
+function D = add_subrun(D, p, modelName, ebno, stop_time, delay_bits, label, level, run_id, fold)
+% One seeded sub-run at its own random UAV speed; appends its complete frames.
+v_kmh = p.speed_kmh_min + rand() * (p.speed_kmh_max - p.speed_kmh_min);
+fd = v_kmh / 3.6 * p.carrier_freq / p.c_light;
+link_seed(modelName, randi(2^31 - 1000), fd);
+snr_dB = ebno + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
+set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/p.sps));
+out = sim(modelName, 'StopTime', stop_time);
+[iqf, ber, rssi, plr, nf, sinr, ec] = extract_closed_loop_frames(out, p, delay_bits);
+for f = 1:nf
+    if isnan(ber(f)), continue; end
+    D.iq{end+1} = iqf{f};
+    D.label(end+1) = label; D.level(end+1) = level; D.snr(end+1) = ebno;
+    D.ber(end+1) = ber(f); D.rssi(end+1) = rssi(f); D.plr(end+1) = plr(f);
+    D.sinr(end+1) = sinr(f); D.env_corr(end+1) = ec(f);
+    D.speed(end+1) = v_kmh; D.run(end+1) = run_id; D.fold(end+1) = fold;
+end
+end
 
-    nf  = size(iq,2);
-    bpf = p.frame_length;
-    tx_all = txb(:); rx_all = rxb(:);
-    Lmax = min(numel(tx_all),numel(rx_all)) - delay_bits;
-    tx_al = tx_all(1:Lmax);
-    rx_al = rx_all(delay_bits+1:delay_bits+Lmax);
-
-    iq_frames = cell(1,nf); ber=zeros(1,nf); rssi=zeros(1,nf); plr=zeros(1,nf);
-    for f = 1:nf
-        iq_frames{f} = iq(:,f);
-        i0=(f-1)*bpf+1; i1=f*bpf;
-        if i1 <= numel(tx_al)
-            ber(f) = mean(tx_al(i0:i1) ~= rx_al(i0:i1));
-        else
-            ber(f) = NaN;
-        end
-        rssi(f) = 10*log10(mean(abs(iq(:,f)).^2)+eps);
-        plr(f)  = double(ber(f) > 0.1);
-    end
+function report_row(name, level, D, i0)
+i = i0:numel(D.label);
+fprintf('%-22s %6g %10.3e %10.1f %9.3f\n', name, level, mean(D.ber(i)), mean(D.sinr(i)), mean(D.env_corr(i)));
 end

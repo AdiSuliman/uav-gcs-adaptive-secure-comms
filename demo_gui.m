@@ -60,7 +60,7 @@ env.modelName  = 'UAV_GCS_Threat_Link';
 env.fs         = p0.symbol_rate * p0.sps;
 env.delay_bits = 20;
 env.img_size = 128; env.win = 128; env.novlp = 113; env.nfft = 128;
-env.db_lo = -40; env.db_hi = 20; env.temporal_window = 10;
+env.db_lo = -40; env.db_hi = 40; env.temporal_window = 10;
 env.threats = {'jamming','reactive_jamming','sweeping_jammer','noise_burst', ...
     'path_loss','spoofing','antenna_fault','benign_interference','none'};
 env.snr_levels = p0.EbNo_dB(:)';
@@ -626,7 +626,7 @@ function warmUp(env)
         Sxx_dummy = spectrogram(dummy_iq, hann(env.win), env.novlp, env.nfft, env.fs, 'centered'); %#ok<NASGU>
     end
     dspec = dlarray(single(rand(env.img_size,env.img_size,1,1)), 'SSCB');
-    dfeat = dlarray(single(rand(1,7))', 'CB');
+    dfeat = dlarray(single(rand(1,numel(env.feat_mean)))', 'CB');
     dstate = dlarray(single(rand(env.dqn_agent.numStates,1)), 'CB');
     if canUseGPU, dspec = gpuArray(dspec); dfeat = gpuArray(dfeat); dstate = gpuArray(dstate); end
     for w = 1:10
@@ -861,16 +861,11 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     out = sim(env.modelName);
     updateTimer(fig, tSeq); checkAbort(fig);
 
-    [iq_frames, ber_f, rssi_f, plr_f, nf] = extract_closed_loop_frames(out, p, env.delay_bits);
+    [iq_frames, ber_f, rssi_f, plr_f, nf, sinr_f, ec_f] = extract_closed_loop_frames(out, p, env.delay_bits);
     i_last = find(~isnan(ber_f), 1, 'last'); if isempty(i_last), i_last = nf; end
-    w0 = max(1, i_last - env.temporal_window + 1);
-    var_rssi_10 = var(rssi_f(w0:i_last), 0);
-    burst_ratio = mean(plr_f(w0:i_last), 'omitnan');
-    if i_last > 1 && ~isnan(ber_f(i_last)) && ~isnan(ber_f(i_last-1))
-        dber_dt = (ber_f(i_last) - ber_f(i_last-1)) / p.frame_duration;
-    else
-        dber_dt = 0;
-    end
+    raw_feats = link_features(struct('sinr', sinr_f, 'ber', ber_f, 'rssi', rssi_f, 'plr', plr_f, ...
+        'env_corr', ec_f), i_last, env.temporal_window, p.frame_duration);
+    burst_ratio = raw_feats(7);
     iq_before = iq_frames{i_last};
     ber_before_mean = mean(ber_f, 'omitnan');
     appLog(fig, sprintf('Channel: BER %.2e (mean of %d frames) | RSSI %.2f dB | burst ratio %.2f', ...
@@ -889,10 +884,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     t1 = tic;
     [Sxx, Fq, Tq] = spectrogram(iq_before, hann(env.win), env.novlp, env.nfft, env.fs, 'centered');
     Pw_db = 20*log10(abs(Sxx) + eps);
-    Pw_n = min(max((Pw_db - env.db_lo) / (env.db_hi - env.db_lo), 0), 1);
-    spec_img = imresize(Pw_n, [env.img_size env.img_size]);
-    raw_feats = [ebno, ber_f(i_last), rssi_f(i_last), plr_f(i_last), var_rssi_10, dber_dt, burst_ratio];
-    raw_feats(isnan(raw_feats)) = 0;
+    spec_img = spec_image(iq_before, env.fs);
     norm_feats = (raw_feats - env.feat_mean) ./ env.feat_std;
     X_spec = dlarray(single(spec_img), 'SSCB'); X_feat = dlarray(single(norm_feats)', 'CB');
     if canUseGPU, X_spec = gpuArray(X_spec); X_feat = gpuArray(X_feat); end
@@ -1674,7 +1666,8 @@ function runEpisode(btn, ~)
             if isempty(Ep{i}), cfg = na; else, cfg = Ep{i}.cfg; end
             if onset, F = Pt{cfg}; else, F = Pn{cfg}; end
             j = randi(rs{i}, numel(F.ber));
-            fr = struct('iq', double(F.iq{j}), 'ber', F.ber(j), 'rssi', F.rssi(j), 'plr', F.plr(j));
+            fr = struct('iq', double(F.iq{j}), 'ber', F.ber(j), 'rssi', F.rssi(j), 'plr', F.plr(j), ...
+                'sinr', F.sinr(j), 'env_corr', F.env_corr(j));
             [Ep{i}, info] = episode_cycle(Ep{i}, k, fr, ctx{i});
             T.ber(i, k) = fr.ber; T.det(i, k) = cls_idx(info.cls); T.ok(i, k) = T.det(i, k) == truthIdx(k);
             T.conf(i, k) = info.conf; T.prop(i, k) = info.prop; T.cfg(i, k) = info.cfg; T.sw(i, k) = info.switched;
@@ -1770,15 +1763,18 @@ function P = epBuildPool(fig, p, threat, ebno)
         evalc('build_threat_model');
         snr_dB = ebno + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps);
         set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p2.sps));
-        F = struct('iq', {{}}, 'ber', [], 'rssi', [], 'plr', []);
+        F = struct('iq', {{}}, 'ber', [], 'rssi', [], 'plr', [], 'sinr', [], 'env_corr', []);
         for r = 1:2
+            link_seed(env.modelName, randi(2^31 - 1000));
             out = sim(env.modelName);
-            [iq_f, ber_f, rssi_f, plr_f] = extract_closed_loop_frames(out, p2, env.delay_bits);
+            [iq_f, ber_f, rssi_f, plr_f, ~, sinr_f, ec_f] = extract_closed_loop_frames(out, p2, env.delay_bits);
             v = find(~isnan(ber_f));
             F.iq   = [F.iq, reshape(cellfun(@single, iq_f(v), 'UniformOutput', false), 1, [])];
             F.ber  = [F.ber, ber_f(v)];
             F.rssi = [F.rssi, rssi_f(v)];
             F.plr  = [F.plr, plr_f(v)];
+            F.sinr = [F.sinr, sinr_f(v)];
+            F.env_corr = [F.env_corr, ec_f(v)];
         end
         P{a} = F;
     end

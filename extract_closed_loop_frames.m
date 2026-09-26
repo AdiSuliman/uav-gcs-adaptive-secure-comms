@@ -1,4 +1,4 @@
-function [iq_frames, ber, rssi, plr, nf] = extract_closed_loop_frames(out, p, delay_bits)
+function [iq_frames, ber, rssi, plr, nf, sinr, env_corr] = extract_closed_loop_frames(out, p, delay_bits)
 %EXTRACT_CLOSED_LOOP_FRAMES Single source of truth for pulling all frames
 % (not just the first) out of a single sim() call's output, with per-frame
 % BER/RSSI/PLR -- the building block for real sliding-window temporal
@@ -25,6 +25,13 @@ function [iq_frames, ber, rssi, plr, nf] = extract_closed_loop_frames(out, p, de
 %                  frame of a run, by construction; guard before use)
 %   rssi(f)      - 10*log10(mean power)) for frame f, in dB
 %   plr(f)       - 1 if ber(f) > 0.1, else 0 (NaN propagates from ber)
+%   sinr(f)      - data-aided SINR estimate on antenna 1 [dB]: LS fit of the
+%                  transmitted waveform to the received one, signal power over
+%                  residual power (a receiver-side estimate, not the configured Eb/N0)
+%   env_corr(f)  - correlation between the residual power and our own signal
+%                  envelope (residual after a 32-sample block LS fit): ~0 for
+%                  interference independent of our transmission, > 0 when the
+%                  interference is triggered by it (reactive jamming, D42)
 %
 % With p.fec (fec_interleave, D39) BER and PLR are those of the decoded
 % information bits (local function fec_frames).
@@ -34,12 +41,15 @@ function [iq_frames, ber, rssi, plr, nf] = extract_closed_loop_frames(out, p, de
 txb = double(squeeze(out.get('tx_bits_out')));
 rxb = double(squeeze(out.get('rx_bits_out')));
 iq  = squeeze(out.get('Rx_IQ'));
+txi = squeeze(out.get('Tx_IQ'));
+if isvector(txi), txi=txi(:); end
 if isvector(txb), txb=txb(:); end
 if isvector(rxb), rxb=rxb(:); end
 if isvector(iq),  iq=iq(:);   end
 
 nf  = size(iq,2);
 bpf = p.frame_length;
+[sinr, env_corr] = residual_metrics(txi, iq, nf);
 tx_all = txb(:); rx_all = rxb(:);
 Lmax = min(numel(tx_all),numel(rx_all)) - delay_bits;
 tx_al = tx_all(1:Lmax);
@@ -113,5 +123,27 @@ for f = 1:nf
         ber(f) = mean(err(i0:i1));
         plr(f) = double(ber(f) > 0.1);
     end
+end
+end
+
+function [sinr, ec] = residual_metrics(tx, rx, nf)
+% Per frame: whole-frame LS gain for the SINR estimate; 32-sample block LS gains
+% (absorb fading and gain steps) for the residual used in the envelope correlation.
+B = 32;
+sinr = nan(1, nf); ec = nan(1, nf);
+for f = 1:min(nf, size(tx, 2))
+    x = tx(:, f); r = rx(:, f);
+    px = real(x' * x);
+    if px <= 0, continue; end
+    h = (x' * r) / px;
+    e = r - h * x;
+    sinr(f) = 10*log10(abs(h)^2 * px / max(real(e' * e), eps));
+    n = floor(numel(x) / B) * B;
+    X = reshape(x(1:n), B, []); R = reshape(r(1:n), B, []);
+    hb = sum(conj(X) .* R, 1) ./ max(sum(abs(X).^2, 1), eps);
+    E = R - X .* hb;
+    a = abs(E(:)).^2; b = abs(X(:)).^2;
+    c = corrcoef(a, b);
+    ec(f) = c(1, 2);
 end
 end

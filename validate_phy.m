@@ -1,4 +1,4 @@
-function validate_phy()
+function ok = validate_phy()
 %% VALIDATE_PHY - Link physics against theory, multi-antenna UAV receiver (D41)
 % Runs the threat model (UAV_GCS_Threat_Link) and compares the measured BER with
 % closed-form results:
@@ -6,7 +6,7 @@ function validate_phy()
 %   V2  Rician K = 10 dB, 1 antenna          vs MGF integral (Simon & Alouini)
 %   V3  Rician K = 10 dB, MRC 2 antennas     vs MGF integral, independent branches
 %   V4  Rician K = 10 dB, MRC 3 antennas     vs MGF integral, independent branches
-%   V5  default link (2 antennas, rho = 0.3) against V3 theory (correlation penalty)
+%   V5  default link (2 antennas, rho = 0.3) vs MGF integral, correlated branches
 %   V6  jamming JSR 10 dB: MRC vs MMSE vs jammer-free MRC (spatial nulling)
 %   V7  seeds: same seed -> identical run, different seed -> different run
 % Gap = Eb/N0 shift between measured and theoretical BER, points with >= 100 errors.
@@ -24,9 +24,12 @@ p0.quiet_build = true;
 p0.active_threat = 'none';
 
 CFG.EbNo      = 0:2:10;      % [dB] per branch
-CFG.sim_time  = 0.5;         % [s] per Eb/N0 point (1e6 bits)
+CFG.sim_time  = 1.0;         % [s] per Eb/N0 point (2e6 bits), split over CFG.n_real channel realizations
+CFG.n_real    = 20;          % independent seeds per Eb/N0 point
+CFG.fd_val    = 1000;        % [Hz] Doppler for the theory checks: ~2400 independent fades per point
+                             % (BER theory does not depend on fd while fd*CSI window << 1: 1000 Hz x 64 us = 0.064)
 CFG.min_err   = 100;         % errors needed for a point to enter the gap metric
-CFG.gap_ok    = 0.3;         % [dB] pass threshold
+CFG.gap_ok    = 0.3;         % [dB] pass threshold (or within 2 standard errors of the fading Monte Carlo)
 modelName     = 'UAV_GCS_Threat_Link';
 delay_bits    = 20;
 t0 = tic;
@@ -42,7 +45,7 @@ cases = {
   'V6b jam 10 dB, MMSE',        2,   10,  0.3, 'jamming', 'mmse',   0
 };
 nC = size(cases, 1); nS = numel(CFG.EbNo);
-BER = nan(nC, nS); NERR = zeros(nC, nS); TH = nan(nC, nS); GAP = nan(nC, 1);
+BER = nan(nC, nS); NERR = zeros(nC, nS); TH = nan(nC, nS); GAP = nan(nC, 1); GSE = nan(nC, 1);
 DLY = nan(nC, 1);
 
 for c = 1:nC
@@ -50,11 +53,11 @@ for c = 1:nC
     p.n_rx = cases{c,2}; p.rician_k = cases{c,3}; p.int_rician_k = 10;
     p.rx_corr = cases{c,4}; p.active_threat = cases{c,5}; p.rx_combiner = cases{c,6};
     p.jsr_db = 10; p.seed = 1000 + c;
-    [BER(c,:), NERR(c,:), DLY(c)] = run_curve(p, modelName, CFG, delay_bits);
+    [BER(c,:), NERR(c,:), DLY(c), BR] = run_curve(p, modelName, CFG, delay_bits);
     L = cases{c,7};
     if L > 0
-        TH(c,:) = ber_theory(CFG.EbNo, p.rician_k, L);
-        GAP(c) = ebno_gap(CFG.EbNo, BER(c,:), NERR(c,:), TH(c,:), CFG.min_err);
+        TH(c,:) = ber_theory(CFG.EbNo, p.rician_k, L, p.rx_corr);
+        [GAP(c), GSE(c)] = ebno_gap(CFG.EbNo, BER(c,:), NERR(c,:), TH(c,:), CFG.min_err, BR);
     end
     fprintf('%-26s gap %+5.2f dB | BER %s | %.1f min\n', cases{c,1}, GAP(c), ...
         sprintf('%.2e ', BER(c,:)), toc(t0)/60);
@@ -72,12 +75,12 @@ seed_same = bs(1) == bs(2);
 seed_diff = bs(1) ~= bs(3);
 
 %% Report
-g_ok = abs(GAP(1:5)) <= CFG.gap_ok;
+g_ok = abs(GAP(1:5)) <= max(CFG.gap_ok, 2 * GSE(1:5));
 jam_gain = 10*log10(BER(6,:) ./ BER(7,:));
 rep = {};
 rep{end+1} = '=== PHY VALIDATION (D41): multi-antenna UAV receiver vs theory ===';
-rep{end+1} = sprintf('Generated: %s | %.1f s per point | fd %.0f Hz | CSI block %d sym (MRC), window %d sym (MMSE)', ...
-    datestr(now), CFG.sim_time, p0.fd_max, p0.csi_block, p0.mmse_window);
+rep{end+1} = sprintf('Generated: %s | %.1f s per point, %d channel realizations, fd %.0f Hz | CSI block %d sym (MRC), window %d sym (MMSE)', ...
+    datestr(now), CFG.sim_time, CFG.n_real, CFG.fd_val, p0.csi_block, p0.mmse_window);
 rep{end+1} = sprintf('Eb/N0 per branch [dB]: %s', mat2str(CFG.EbNo));
 rep{end+1} = '';
 for c = 1:nC
@@ -87,8 +90,8 @@ for c = 1:nC
         rep{end+1} = sprintf('%-26s th.  %s', '', sprintf('%9.2e', TH(c,:))); %#ok<SAGROW>
     end
     if c <= 5
-        rep{end+1} = sprintf('%-26s gap %+.2f dB -> %s  (bit delay found: %d)', '', GAP(c), ...
-            passfail(abs(GAP(c)) <= CFG.gap_ok), DLY(c)); %#ok<SAGROW>
+        rep{end+1} = sprintf('%-26s gap %+.2f dB (standard error %.2f dB) -> %s  (bit delay found: %d)', '', ...
+            GAP(c), GSE(c), passfail(g_ok(c)), DLY(c)); %#ok<SAGROW>
     end
 end
 rep{end+1} = '';
@@ -100,6 +103,7 @@ rep{end+1} = sprintf('V7 seeds: same seed identical %s, different seed differs %
     passfail(seed_same), passfail(seed_diff), mat2str(bs, 4));
 rep{end+1} = sprintf('Overall: theory gaps V1-V5 %d/5 within %.1f dB, seeds %s | %.1f min', ...
     sum(g_ok), CFG.gap_ok, passfail(seed_same && seed_diff), toc(t0)/60);
+rep{end+1} = sprintf('Pass rule: |gap| <= %.1f dB or within 2 standard errors (spread over %d channel realizations).', CFG.gap_ok, CFG.n_real);
 if ~exist('results', 'dir'); mkdir('results'); end
 fid = fopen('results/phy_validation.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('\n%s\n', rep{:});
@@ -130,59 +134,101 @@ legend('Location', 'southwest', 'FontSize', 8);
 exportgraphics(f, 'results/phy_validation.png', 'Resolution', 150);
 
 params = S.params; save('params.mat', 'params');
+if bdIsLoaded(modelName), close_system(modelName, 0); end
+ok = all(g_ok) && seed_same && seed_diff;
 end
 
 %% ===================== Local functions =====================
-function [ber, nerr, dly] = run_curve(p, modelName, CFG, delay_bits)
+function [ber, nerr, dly, BR] = run_curve(p, modelName, CFG, delay_bits)
 params = p; save('params.mat', 'params'); %#ok<NASGU>
-evalc('build_threat_model');
-nS = numel(CFG.EbNo); ber = nan(1, nS); nerr = zeros(1, nS); dly = NaN;
+tb = tic; evalc('build_threat_model');
+set_param(modelName, 'SimulationCommand', 'update');
+fprintf('    build + compile %.1f s\n', toc(tb));
+nS = numel(CFG.EbNo); ber = nan(1, nS); nerr = zeros(1, nS); dly = NaN; BR = [];
 for s = 1:nS
     snr_dB = CFG.EbNo(s) + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
     set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/p.sps));
-    out = sim(modelName, 'StopTime', num2str(CFG.sim_time));
-    tx = double(squeeze(out.get('tx_bits_out'))); tx = tx(:);
-    rx = double(squeeze(out.get('rx_bits_out'))); rx = rx(:);
-    if s == 1
-        b = inf(1, 61);
-        for d = 0:60
-            L = min(numel(tx), numel(rx) - d);
-            b(d+1) = mean(tx(1:min(L, 20000)) ~= rx(d+1:d+min(L, 20000)));
+    nr = 1; if isfield(CFG, 'n_real'), nr = CFG.n_real; end
+    fdv = p.fd_max; if isfield(CFG, 'fd_val'), fdv = CFG.fd_val; end
+    e_tot = 0; n_tot = 0; br = zeros(1, nr);
+    for r = 1:nr
+        if nr > 1, link_seed(modelName, p.seed * 100 + r, fdv); end
+        out = sim(modelName, 'StopTime', num2str(CFG.sim_time / nr));
+        tx = double(squeeze(out.get('tx_bits_out'))); tx = tx(:);
+        rx = double(squeeze(out.get('rx_bits_out'))); rx = rx(:);
+        if s == 1 && r == 1
+            b = inf(1, 61);
+            for d = 0:60
+                L = min(numel(tx), numel(rx) - d);
+                b(d+1) = mean(tx(1:min(L, 20000)) ~= rx(d+1:d+min(L, 20000)));
+            end
+            [~, i] = min(b); dly = i - 1;
         end
-        [~, i] = min(b); dly = i - 1;
+        L = min(numel(tx), numel(rx) - delay_bits);
+        er = sum(tx(1:L) ~= rx(delay_bits+1:delay_bits+L));
+        br(r) = er / L;
+        e_tot = e_tot + er;
+        n_tot = n_tot + L;
     end
-    L = min(numel(tx), numel(rx) - delay_bits);
-    e = tx(1:L) ~= rx(delay_bits+1:delay_bits+L);
-    nerr(s) = sum(e); ber(s) = mean(e);
+    nerr(s) = e_tot; ber(s) = e_tot / n_tot;
+    BR(:, s) = br(:);
 end
 end
 
-function pb = ber_theory(ebno_db, k_db, L)
-% QPSK (Gray) = BPSK per bit; L-branch MRC, independent Rician branches, per-branch
-% Eb/N0 (MGF form, Simon & Alouini). K = 60 dB gives the AWGN curve.
+function pb = ber_theory(ebno_db, k_db, L, rho)
+% QPSK (Gray) = BPSK per bit; L-branch MRC over Rician branches with LoS mean mu
+% and diffuse covariance Sig = rho^|i-j| / (K+1), per-branch Eb/N0. MGF of the
+% quadratic form ||h||^2 (Simon & Alouini, ch. 9):
+%   M(s) = exp(s*mu'*(I - s*Sig)^-1*mu) / det(I - s*Sig),  s = -(Eb/N0)/sin^2(theta)
+% rho = 0 reduces to the product of independent Rician MGFs. K = 60 dB gives AWGN.
+if nargin < 4, rho = 0; end
 K = 10^(k_db/10);
+mu = sqrt(K/(K+1)) * ones(L, 1);
+Sig = rho .^ abs((1:L)' - (1:L)) / (K+1);
 pb = zeros(size(ebno_db));
 for i = 1:numel(ebno_db)
-    g = 10^(ebno_db(i)/10);
     if k_db >= 50
         pb(i) = berawgn(ebno_db(i), 'psk', 4, 'nondiff');
         continue;
     end
-    M = @(t) ((1+K)*sin(t).^2 ./ ((1+K)*sin(t).^2 + g)) .* exp(-K*g ./ ((1+K)*sin(t).^2 + g));
-    pb(i) = integral(@(t) M(t).^L, 0, pi/2) / pi;
+    g = 10^(ebno_db(i)/10);
+    pb(i) = integral(@(t) arrayfun(@(tt) mgf(-g / sin(tt)^2, mu, Sig, L), t), 0, pi/2) / pi;
 end
 end
 
-function gap = ebno_gap(ebno, ber, nerr, th, min_err)
-% Mean Eb/N0 shift [dB] at which theory reaches each measured BER (positive = worse).
-v = find(nerr >= min_err & ber > 0);
-if isempty(v), gap = NaN; return; end
-lt = log10(th); d = zeros(1, numel(v));
-for i = 1:numel(v)
-    d(i) = interp1(fliplr(lt), fliplr(ebno), log10(ber(v(i))), 'linear', 'extrap');
-    d(i) = ebno(v(i)) - d(i);
+function m = mgf(s, mu, Sig, L)
+A = eye(L) - s * Sig;
+m = real(exp(s * (mu' * (A \ mu))) / det(A));
 end
-gap = mean(d);
+
+function [gap, se] = ebno_gap(ebno, ber, nerr, th, min_err, BR)
+% Mean Eb/N0 shift [dB] at which theory reaches each measured BER (positive = worse).
+% Standard error by batch means: the realizations are split into 5 batches, the gap
+% is computed per batch on the same Eb/N0 points, SE = std(batch gaps)/sqrt(5).
+% This keeps the correlation between Eb/N0 points (same channels at every point).
+v = find(nerr >= min_err & ber > 0);
+gap = NaN; se = NaN;
+if isempty(v), return; end
+gap = shift(ebno, ber, th, v);
+nb = 5; nr = size(BR, 1);
+if nr >= nb
+    g = zeros(1, nb);
+    for b = 1:nb
+        rows = b:nb:nr;
+        g(b) = shift(ebno, mean(BR(rows, :), 1), th, v);
+    end
+    se = std(g(isfinite(g))) / sqrt(sum(isfinite(g)));
+end
+end
+
+function d = shift(ebno, ber, th, v)
+lt = log10(th); x = zeros(1, numel(v));
+for i = 1:numel(v)
+    j = v(i);
+    if ber(j) <= 0, x(i) = NaN; continue; end
+    x(i) = ebno(j) - interp1(fliplr(lt), fliplr(ebno), log10(ber(j)), 'linear', 'extrap');
+end
+d = mean(x, 'omitnan');
 end
 
 function s = passfail(ok)

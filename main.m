@@ -95,6 +95,12 @@ fprintf('(This file will contain EVERYTHING printed below, even across clc calls
 %    eval_combined_threats, map_survivability, measure_far, measure_kpi3, measure_all_kpis,
 %    build_dashboard = true; rest = false
 %
+%  D42 DETECTOR V2 (new link, dataset, detector, unknown-threat study; ~2.5 hours):
+%    init, validate_phy, build_dataset, extract_spectrograms, prepare_data,
+%    train_detector, eval_detector, eval_ood_detection = true; rest = false
+%    Windows cmd:  cd /d "C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms"
+%                  matlab -batch "main"
+%
 %  DASHBOARD-ONLY (all results exist, < 1 min):
 %    build_dashboard = true; rest = false
 %% ================================================================
@@ -107,39 +113,39 @@ CFG.dqn_seeds  = 5;    % C2 : DQN trainings; the best gate-passing seed is saved
 
 % ---- Phase A: link + threats + dataset ----
 
-RUN.init                        = false;   % A0  : regenerate params.mat
+RUN.init                        = false;    % A0  : regenerate params.mat
 RUN.validate_A                  = false;   % A1-A3: build+validate AWGN & Rician links (fast)
 RUN.check_A4                    = false;   % A4  : build threat model + sanity BER (fast)
-RUN.validate_phy                = false;   % A4v : multi-antenna link vs theory, MRC/MMSE, seeds (~15min, D41)
-RUN.build_dataset               = false;   % A5  : full dataset sweep (HEAVY ~100min)
-RUN.extract_spectrograms        = false;   % A6  : spectrograms + 7 features (~5min)
+RUN.validate_phy                = false;    % A4v : link vs theory, MRC/MMSE, seeds; stops main on FAIL (D41)
+RUN.build_dataset               = false;    % A5  : seeded sub-run dataset (~30min, D42)
+RUN.extract_spectrograms        = false;    % A6  : spectrograms + 8 link features (~5min, D42)
 
 
 % ---- Phase B: detection (CNN baseline) ----
-RUN.prepare_data                = false;   % B1  : stratified 80/10/10 split (~1min)
-RUN.train_detector              = false;   % B2  : train CNN+scalar hybrid (~10min)
-RUN.eval_detector               = false;   % B3  : test eval + confusion/accuracy-vs-SNR + bootstrap CIs (~2min, D35)
+RUN.prepare_data                = false;    % B1  : split by sub-run 60/20/20 (~1min, D42)
+RUN.train_detector              = true;    % B2  : train CNN+scalar hybrid (~10min)
+RUN.eval_detector               = true;    % B3  : test eval + confusion/accuracy-vs-SNR + bootstrap CIs (~2min, D35)
 RUN.eval_unseen_snr             = false;   % B4  : detector at Eb/N0 never seen in training, 1,3,5,7,9 dB (~25min, D34)
 
 
 % ---- Phase C: closed-loop recovery ----
-RUN.train_dqn                   = true;    % C2  : train DQN over CFG.dqn_seeds seeds, full-action targets, keep the best (~25min, D29/D35/D36/D39)
-RUN.run_closed_loop_diagnostic  = true;    % C3d : Eb/N0 sweep x CFG.mc_repeats, BER/PLR/goodput + 95% CIs (~17min, D35)
-RUN.eval_speed_robustness       = true;    % C3s : detection/decision/recovery vs UAV speed 50-120 km/h (~10min)
-RUN.run_closed_loop_episodes    = true;    % C3e : episodic loop, dwell/hysteresis, recovery time in cycles (~10min, D31)
-RUN.eval_combined_threats       = true;    % C3m : combined threats + unknown gating, CFG.mc_repeats seeded repeats (~20min, D32/D40)
-RUN.eval_ood_detection          = false;   % OOD : leave-one-threat-out, retrains the detector 8 times (~60min, D32)
+RUN.train_dqn                   = false;   % C2  : train DQN over CFG.dqn_seeds seeds, full-action targets, keep the best (~25min, D29/D35/D36/D39)
+RUN.run_closed_loop_diagnostic  = false;   % C3d : Eb/N0 sweep x CFG.mc_repeats, BER/PLR/goodput + 95% CIs (~17min, D35)
+RUN.eval_speed_robustness       = false;   % C3s : detection/decision/recovery vs UAV speed 50-120 km/h (~10min)
+RUN.run_closed_loop_episodes    = false;   % C3e : episodic loop, dwell/hysteresis, recovery time in cycles (~10min, D31)
+RUN.eval_combined_threats       = false;   % C3m : combined threats + unknown gating, CFG.mc_repeats seeded repeats (~20min, D32/D40)
+RUN.eval_ood_detection          = true;    % OOD : leave-one-threat-out, retrains the detector 8 times (~60min, D32)
 
 % ---- Phase SURV: survivability boundary mapping (deliverable #7) ----
-RUN.map_survivability           = true;    % SURV: action-based Map A/B + gap analysis (~80min, D30)
+RUN.map_survivability           = false;   % SURV: action-based Map A/B + gap analysis (~80min, D30)
 
 % ---- Phase KPI: proposal measurement (section 5 / ה) ----
-RUN.measure_far                 = true;    % KPI4 : FAR on non-hostile classes, SNR-swept (~5min)
-RUN.measure_kpi3                = true;    % KPI3 : DQN vs rule decision latency (fast, needs C3-diag)
-RUN.measure_all_kpis            = true;    % KPI  : aggregate all 5 with CIs + FAR bound into kpi_summary.txt (fast)
+RUN.measure_far                 = false;   % KPI4 : FAR on non-hostile classes, SNR-swept (~5min)
+RUN.measure_kpi3                = false;   % KPI3 : DQN vs rule decision latency (fast, needs C3-diag)
+RUN.measure_all_kpis            = false;   % KPI  : aggregate all 5 with CIs + FAR bound into kpi_summary.txt (fast)
 
 % ---- Phase DASH: results dashboard (deliverable #1) ----
-RUN.build_dashboard             = true;    % DASH : 7-panel summary PNG (fast, needs B3+C3d+FAR+SURV)
+RUN.build_dashboard             = false;   % DASH : 7-panel summary PNG (fast, needs B3+C3d+FAR+SURV)
 
 fprintf('========================================================\n');
 fprintf('  UAV-GCS ADAPTIVE SECURE COMMS - MASTER PIPELINE\n');
@@ -177,7 +183,9 @@ end
 
 if RUN.validate_phy
     fprintf('  [A4v] Validating the multi-antenna link against theory...\n');
-    validate_phy;
+    if ~validate_phy()
+        error('main:phy', 'PHY validation failed -- see results/phy_validation.txt. Stopping before the dataset.');
+    end
 end
 
 if RUN.build_dataset

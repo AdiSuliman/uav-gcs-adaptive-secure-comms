@@ -10,18 +10,10 @@ Y_test = sp.test.Y;
 load('data/trained_detector.mat', 'net', 'classes');
 
 %% 2. Prepare test data for dlnetwork
-X_test_spec = dlarray(single(sp.test.X), 'SSCB');
-X_test_feat = dlarray(single(sp.test.feats)', 'CB');
-
-if canUseGPU
-    X_test_spec = gpuArray(X_test_spec);
-    X_test_feat = gpuArray(X_test_feat);
-end
-
-%% 3. Inference
+%% 3. Inference (batched: the whole test split does not fit on the GPU)
 fprintf('Running inference on %d test samples...\n', numel(Y_test));
-Y_pred_prob = predict(net, X_test_spec, X_test_feat);
-[~, max_idx] = max(extractdata(Y_pred_prob), [], 1);
+Y_pred_prob = cnn_scores(net, sp.test.X, sp.test.feats');
+[~, max_idx] = max(Y_pred_prob, [], 1);
 
 Y_pred = categorical(classes(max_idx)', classes);
 
@@ -56,11 +48,11 @@ saveas(fig_cm, 'results/confusion_matrix.png');
 %% 5. Accuracy vs SNR (ערכים אמיתיים בדציבל — denormalized)
 % sp.test.feats is z-scored; denormalize column 1 (SNR) back to dB
 % using the same train-set mean/std saved in splits.norm
-norm_mean = sp.norm.feat_mean(1);
-norm_std  = sp.norm.feat_std(1);
-snr_real  = sp.test.feats(:, 1) .* norm_std + norm_mean;  % → dB
-
-snr_vals    = round(snr_real);   % snap to nominal sweep points (0,2,4,6,8,10)
+if isfield(sp.test, 'ebno')
+    snr_vals = sp.test.ebno(:);                          % configured Eb/N0 (D42)
+else
+    snr_vals = round(sp.test.feats(:, 1) .* sp.norm.feat_std(1) + sp.norm.feat_mean(1));
+end
 unique_snrs = unique(snr_vals);
 acc_vs_snr  = zeros(length(unique_snrs), 1);
 
@@ -121,15 +113,18 @@ fprintf(' %g dB %.1f%% |', [unique_snrs(:)'; f1_vs_snr(:)']);
 fprintf('\nKPI #1 threshold: macro-F1 >= 90%% from %g dB up; macro-F1 above it %.2f%%\n', thr_db, f1_above);
 fprintf('Action-equivalent accuracy: %.2f%% (class accuracy %.2f%%)\n', 100*mean(act_ok), 100*mean(Y_test == Y_pred));
 
-%% 5c. 95% bootstrap confidence intervals (D35)
-% Resamples the test set with replacement; a local stream keeps the global
-% generator untouched.
+%% 5c. 95% bootstrap confidence intervals (D35, D42)
+% Resamples whole test sub-runs with replacement (frames of one sub-run are
+% correlated); a local stream keeps the global generator untouched.
 N_BOOT = 1000;
 bs = RandStream('mt19937ar', 'Seed', 7);
 nT = numel(Y_test);
+if isfield(sp.test, 'run'), grp = sp.test.run(:); else, grp = (1:nT)'; end
+[ug, ~, gi] = unique(grp);
+members = accumarray(gi, (1:nT)', [], @(v) {v});
 boot = nan(N_BOOT, 3);
 for b = 1:N_BOOT
-    ix = randi(bs, nT, nT, 1);
+    ix = vertcat(members{randi(bs, numel(ug), numel(ug), 1)});
     yt = Y_test(ix); yp = Y_pred(ix); ab = above(ix);
     boot(b, :) = 100 * [mean(yt == yp), macro_f1_of(yt, yp, classes), macro_f1_of(yt(ab), yp(ab), classes)];
 end
@@ -174,6 +169,7 @@ end
 
 save('results/eval_detector_metrics.mat', 'metrics');
 fprintf('Saved results/eval_detector_metrics.mat (for KPI aggregation)\n');
+clear S sp Y_pred_prob   % large arrays; main.m runs the stages in one workspace
 
 %% Local functions
 function q = prctile_cols(X, pcts)

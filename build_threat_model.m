@@ -8,20 +8,24 @@ function build_threat_model()
 % Eb/N0 is per receive antenna (per branch).
 %
 % Channel   LoS steering vector (direction p.gcs_aoa_deg) + diffuse Rayleigh part
-%           (comm.MIMOChannel, Jakes Doppler fd, receive correlation p.rx_corr),
-%           K = p.rician_k.
+%           (sum of 32 sinusoids per antenna with random Doppler angles and phases,
+%           Jakes spectrum up to fd; receive correlation p.rx_corr), K = p.rician_k.
 % Threat    signal-side threats scale our signal (antenna_fault hits antenna 1 only);
 %           every additive threat is ONE waveform arriving through its own spatial
 %           channel (direction p.int_aoa_deg(c), own diffuse fading).
 % Rx        data-aided estimation per window (transmitted symbols known = ideal
-%           pilots): h = LS channel estimate, Rin = covariance of the residual
-%           r - h*s (interference + noise).
+%           pilots): h = LS channel estimate from the OTHER symbols of the window
+%           (leave-one-out, so a symbol never helps estimate its own channel),
+%           Rin = covariance of the residual r - h*s (interference + noise).
 %           'mrc'  : w = h,          window p.csi_block symbols (baseline)
 %           'mmse' : w = Rin^-1 * h, window p.mmse_window symbols (spatial_diversity
 %                    action: nulls up to n_rx-1 interferers, tracks a faulty branch)
 %           Output 2 = antenna-1 received IQ (sensing tap for the detector).
 % Seeds     p.seed, or drawn from the global stream when empty; channel, interferer
 %           channels, threat waveforms, AWGN and bit source all derive from it.
+%           Seed and Doppler reach the blocks through the Constant blocks 'Seed' and
+%           'Doppler', so link_seed.m changes them without a rebuild and the compiled
+%           block code is reused across seeds and UAV speeds.
 
 modelName = 'UAV_GCS_Threat_Link';
 
@@ -60,6 +64,8 @@ add_block('simulink/User-Defined Functions/MATLAB Function', [modelName '/Channe
 add_block('simulink/User-Defined Functions/MATLAB Function', [modelName '/Threat'],  'Position', [440 90 530 150]);
 add_block('commchan3/AWGN Channel',                          [modelName '/AWGN'],    'Position', [580 95 650 125]);
 add_block('simulink/User-Defined Functions/MATLAB Function', [modelName '/Rx'],      'Position', [710 90 810 150]);
+add_block('simulink/Sources/Constant', [modelName '/Seed'],    'Position', [150 190 220 210]);
+add_block('simulink/Sources/Constant', [modelName '/Doppler'], 'Position', [150 230 220 250]);
 add_block('simulink/Sinks/To Workspace', [modelName '/tx_sink'], 'Position', [150 30 230 60]);
 add_block('simulink/Sinks/To Workspace', [modelName '/rx_sink'], 'Position', [870 90 950 120]);
 add_block('simulink/Sinks/To Workspace', [modelName '/Tx_IQ'],   'Position', [300 30 380 60]);
@@ -71,8 +77,8 @@ if isempty(chart_tx)                       % chart objects not reachable on a lo
     open_system(modelName);
 end
 set_script(sf_root, [modelName '/Tx'],      tx_script(p));
-set_script(sf_root, [modelName '/Channel'], channel_script(p, fs, seed));
-set_script(sf_root, [modelName '/Threat'],  threat_script(p, fs, seed));
+set_script(sf_root, [modelName '/Channel'], channel_script(p, fs));
+set_script(sf_root, [modelName '/Threat'],  threat_script(p, fs));
 set_script(sf_root, [modelName '/Rx'],      rx_script(p));
 
 %% ---- Block parameters ----
@@ -92,6 +98,10 @@ set_param([modelName '/Rx_IQ'],   'VariableName', 'Rx_IQ',       'SaveFormat', '
 %% ---- Wiring ----
 add_line(modelName, 'BitSource/1', 'Tx/1',      'autorouting', 'on');
 add_line(modelName, 'Tx/1',        'Channel/1', 'autorouting', 'on');
+add_line(modelName, 'Seed/1',      'Channel/2', 'autorouting', 'on');
+add_line(modelName, 'Doppler/1',   'Channel/3', 'autorouting', 'on');
+add_line(modelName, 'Seed/1',      'Threat/2',  'autorouting', 'on');
+add_line(modelName, 'Doppler/1',   'Threat/3',  'autorouting', 'on');
 add_line(modelName, 'Channel/1',   'Threat/1',  'autorouting', 'on');
 add_line(modelName, 'Threat/1',    'AWGN/1',    'autorouting', 'on');
 add_line(modelName, 'AWGN/1',      'Rx/1',      'autorouting', 'on');
@@ -102,7 +112,7 @@ add_line(modelName, 'Tx/1',        'Tx_IQ/1',   'autorouting', 'on');
 add_line(modelName, 'Rx/2',        'Rx_IQ/1',   'autorouting', 'on');
 
 set_param(modelName, 'SolverType', 'Fixed-step', 'Solver', 'FixedStepDiscrete', 'StopTime', '0.01');
-seed_blocks(modelName, seed);
+link_seed(modelName, seed, p.fd_max);
 
 %% ---- Save ----
 if ~exist('models', 'dir'); mkdir('models'); end
@@ -126,30 +136,26 @@ s = sprintf([ ...
     'end\n'], p.rolloff, p.filter_span, p.sps);
 end
 
-function s = channel_script(p, fs, seed)
+function s = channel_script(p, fs)
 % Signal channel: LoS steering vector toward the GCS + correlated diffuse fading.
 nr = p.n_rx;
 K  = 10^(p.rician_k/10);
 a  = steering(p, p.gcs_aoa_deg);
-s = sprintf([ ...
-    'function y = fcn(x)\n' ...
-    '%%#codegen\n' ...
-    'persistent ch\n' ...
-    'if isempty(ch)\n' ...
-    '    ch = %s;\n' ...
-    'end\n' ...
-    'Ns = size(x, 1);\n' ...
-    'a = %s;\n' ...
-    '[~, pg] = ch(x);\n' ...
-    'd = reshape(pg, Ns, %d);\n' ...
+s = [sprintf('function y = fcn(x, seed, fd)\n%%%%#codegen\npersistent f0 ph n\n') ...
+    sprintf('if isempty(f0)\n    rng(seed, ''twister'');\nend\n') ...
+    sos_init('f0', 'ph', nr) ...
+    sprintf('if isempty(n)\n    n = 0;\nend\nNs = size(x, 1);\nt = (n + (0:Ns-1).'') / %.1f;\nn = n + Ns;\n', fs) ...
+    sos_gains('D', 'f0', 'ph', p) ...
+    sprintf(['a = %s;\n' ...
     'y = complex(zeros(Ns, %d));\n' ...
     'for k = 1:%d\n' ...
-    '    y(:, k) = x .* (%.10f * a(k) + %.10f * d(:, k));\n' ...
+    '    y(:, k) = x .* (%.10f * a(k) + %.10f * D(:, k));\n' ...
     'end\n' ...
-    'end\n'], mimo_ctor(p, fs, seed), cvec(a), nr, nr, nr, sqrt(K/(K+1)), sqrt(1/(K+1)));
+    'end\n'], cvec(a), nr, nr, sqrt(K/(K+1)), sqrt(1/(K+1)))];
+s = strrep(s, '%%#codegen', '%#codegen');
 end
 
-function s = threat_script(p, fs, seed)
+function s = threat_script(p, fs)
 % Signal-side components first (they act on our signal), then every
 % additive component as one waveform through its own spatial channel.
 nr  = p.n_rx;
@@ -167,7 +173,7 @@ if numel(addc) > numel(p.int_aoa_deg)
 end
 
 pers = {}; init = {}; body = {};
-body{end+1} = sprintf('Ns = size(u, 1);\ny = u;\n');
+body{end+1} = sprintf('Ns = size(u, 1);\ny = u;\nt = (nI + (0:Ns-1).'') / %.1f;\nnI = nI + Ns;\n', fs);
 
 for i = 1:numel(sig)
     switch sig{i}
@@ -215,24 +221,23 @@ for c = 1:numel(addc)
         otherwise
             error('build_threat_model: unsupported threat component ''%s''', comp);
     end
-    ch = sprintf('chI%d', c);
-    pers{end+1} = ch; %#ok<AGROW>
-    init{end+1} = sprintf('%s = %s;', ch, mimo_ctor(p, fs, seed + 100*c)); %#ok<AGROW>
+    fI = sprintf('fI%d', c); pI = sprintf('pI%d', c);
+    pers{end+1} = fI; init{end+1} = sprintf('%s = fd * cos(2*pi*rand(32, %d));', fI, nr); %#ok<AGROW>
+    pers{end+1} = pI; init{end+1} = sprintf('%s = 2*pi*rand(32, %d);', pI, nr); %#ok<AGROW>
     aI = steering(p, p.int_aoa_deg(c));
-    body{end+1} = [w sprintf([ ...
-        '[~, pg] = %s(complex(ones(Ns, 1)));\n' ...
-        'dI = reshape(pg, Ns, %d);\n' ...
+    body{end+1} = [w sos_gains('dI', fI, pI, p) sprintf([ ...
         'aI = %s;\n' ...
         'for k = 1:%d\n' ...
         '    y(:, k) = y(:, k) + w .* (%.10f * aI(k) + %.10f * dI(:, k));\n' ...
-        'end\n'], ch, nr, cvec(aI), nr, sqrt(Ki/(Ki+1)), sqrt(1/(Ki+1)))]; %#ok<AGROW>
+        'end\n'], cvec(aI), nr, sqrt(Ki/(Ki+1)), sqrt(1/(Ki+1)))]; %#ok<AGROW>
 end
 
-head = sprintf('function y = fcn(u)\n%%#codegen\npersistent seeded\n');
+pers = [{'nI'}, pers]; init = [{'nI = 0;'}, init];
+head = sprintf('function y = fcn(u, seed, fd)\n%%#codegen\npersistent seeded\n');
 for i = 1:numel(pers)
     head = [head sprintf('persistent %s\n', pers{i})]; %#ok<AGROW>
 end
-head = [head sprintf('if isempty(seeded)\n    seeded = true;\n    rng(%d, ''twister'');\nend\n', seed + 7)];
+head = [head sprintf('if isempty(seeded)\n    seeded = true;\n    rng(seed + 7, ''twister'');\nend\n')];
 for i = 1:numel(init)
     head = [head sprintf('if isempty(%s)\n    %s\nend\n', pers{i}, init{i})]; %#ok<AGROW>
 end
@@ -277,10 +282,10 @@ s = sprintf([ ...
     '        h = h + r(m, :).'' * conj(sa(m));\n' ...
     '        es = es + abs(sa(m))^2;\n' ...
     '    end\n' ...
+    '    hs = h;\n' ...
     '    h = h / max(es, 1e-12);\n' ...
-    '    if MODE == 1\n' ...
-    '        w = h;\n' ...
-    '    else\n' ...
+    '    Ri = complex(eye(NR));\n' ...
+    '    if MODE == 2\n' ...
     '        R = complex(zeros(NR, NR));\n' ...
     '        for m = i0:i1\n' ...
     '            e = r(m, :).'' - h * sa(m);\n' ...
@@ -288,9 +293,11 @@ s = sprintf([ ...
     '        end\n' ...
     '        R = R / n;\n' ...
     '        R = R + (1e-3 * real(trace(R)) / NR + 1e-12) * eye(NR);\n' ...
-    '        w = R \\ h;\n' ...
+    '        Ri = inv(R);\n' ...
     '    end\n' ...
     '    for m = i0:i1\n' ...
+    '        hm = (hs - r(m, :).'' * conj(sa(m))) / max(es - abs(sa(m))^2, 1e-12);\n' ...
+    '        w = Ri * hm;\n' ...
     '        z(m) = w'' * r(m, :).'';\n' ...
     '    end\n' ...
     'end\n' ...
@@ -305,16 +312,23 @@ w = sprintf(['w = complex(zeros(Ns, 1));\nfor i = 1:Ns\n    if mod(%s, %d) < %d\
     k, period, on, pw, k, k);
 end
 
-function c = mimo_ctor(p, fs, seed)
-% Diffuse (Rayleigh) part of one Tx -> n_rx channel, Jakes Doppler, receive correlation.
+function c = sos_init(fv, pv, nr)
+% Random Doppler frequencies fd*cos(alpha) and phases of 32 sinusoids per antenna.
+c = sprintf(['if isempty(%s)\n    %s = fd * cos(2*pi*rand(32, %d));\nend\n' ...
+    'if isempty(%s)\n    %s = 2*pi*rand(32, %d);\nend\n'], fv, fv, nr, pv, pv, nr);
+end
+
+function c = sos_gains(dv, fv, pv, p)
+% Unit-power Rayleigh gains (Ns x n_rx) from the sinusoids at times t, then the
+% receive correlation (Cholesky factor of rho^|i-j|).
 nr = p.n_rx;
 Rr = p.rx_corr .^ abs((1:nr)' - (1:nr));
-c = sprintf(['comm.MIMOChannel(''SampleRate'', %g, ''PathDelays'', 0, ''AveragePathGains'', 0, ' ...
-    '''NormalizePathGains'', true, ''FadingDistribution'', ''Rayleigh'', ''MaximumDopplerShift'', %.6f, ' ...
-    '''SpatialCorrelationSpecification'', ''Separate Tx Rx'', ''TransmitCorrelationMatrix'', 1, ' ...
-    '''ReceiveCorrelationMatrix'', %s, ''NormalizeChannelOutputs'', false, ' ...
-    '''RandomStream'', ''mt19937ar with seed'', ''Seed'', %d, ''PathGainsOutputPort'', true)'], ...
-    fs, p.fd_max, mat2str(Rr, 10), seed);
+C  = chol(Rr);
+c = sprintf(['%s = complex(zeros(Ns, %d));\n' ...
+    'for k = 1:%d\n' ...
+    '    %s(:, k) = exp(1j * (2*pi*t*%s(:, k).'' + repmat(%s(:, k).'', Ns, 1))) * ones(32, 1) / sqrt(32);\n' ...
+    'end\n' ...
+    '%s = %s * %s;\n'], dv, nr, nr, dv, fv, pv, dv, dv, mat2str(C, 12));
 end
 
 function a = steering(p, aoa_deg)
@@ -344,29 +358,5 @@ d = struct('n_rx', 2, 'ant_spacing_wl', 0.5, 'rx_corr', 0.3, 'gcs_aoa_deg', 0, .
 f = fieldnames(d);
 for i = 1:numel(f)
     if ~isfield(p, f{i}), p.(f{i}) = d.(f{i}); end
-end
-end
-
-function seed_blocks(modelName, seed)
-% Seeds the AWGN channel (one stream for all antennas) and the bit source.
-blks = {[modelName '/AWGN'], [modelName '/BitSource']};
-for b = 1:numel(blks)
-    try
-        dp = fieldnames(get_param(blks{b}, 'DialogParameters'));
-        for j = 1:numel(dp)
-            if strcmpi(dp{j}, 'RandomStream')
-                try, set_param(blks{b}, dp{j}, 'mt19937ar with seed'); catch, end
-            end
-            if strcmpi(dp{j}, 'SeedSource')
-                try, set_param(blks{b}, dp{j}, 'Parameter'); catch, end
-            end
-        end
-        for j = 1:numel(dp)
-            if strcmpi(dp{j}, 'seed')
-                set_param(blks{b}, dp{j}, num2str(seed + b));
-            end
-        end
-    catch
-    end
 end
 end

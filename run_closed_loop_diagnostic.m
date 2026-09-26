@@ -49,7 +49,7 @@ dqn_agent_trained = Q.agent;
 S = load('data/splits.mat', 'splits');
 feat_mean = S.splits.norm.feat_mean; feat_std = S.splits.norm.feat_std;
 
-img_size = 128; win = 128; novlp = 113; nfft = 128; db_lo = -40; db_hi = 20;
+img_size = 128; win = 128; novlp = 113; nfft = 128; db_lo = -40; db_hi = 40;
 
 init_params;
 p0 = load('params.mat').params;
@@ -81,7 +81,7 @@ for warm = 1:3
     Sxx_warm = spectrogram(dummy_iq_frame, hann(win), novlp, nfft, fs, 'centered'); %#ok<NASGU>
 end
 dummy_spec  = dlarray(single(rand(img_size,img_size,1,1)), 'SSCB');
-dummy_feat  = dlarray(single(rand(1,7))', 'CB');
+dummy_feat  = dlarray(single(rand(1,numel(feat_mean)))', 'CB');
 dummy_state = dlarray(single(rand(dqn_agent_trained.numStates,1)), 'CB');
 if canUseGPU
     dummy_spec = gpuArray(dummy_spec); dummy_feat = gpuArray(dummy_feat);
@@ -121,29 +121,19 @@ for mc = 1:N_MC
 
             %% --- Attacked link ---
             out = sim_seeded(p, modelName, snr_dB, seed);
-            [iq_frames, ber_f, rssi_f, plr_f, nf] = extract_closed_loop_frames(out, p, delay_bits);
+            [iq_frames, ber_f, rssi_f, plr_f, nf, sinr_f, ec_f] = extract_closed_loop_frames(out, p, delay_bits);
             [ber_before, plr_before] = link_means(ber_f);
             if isnan(n_seeded), n_seeded = seed_blocks(modelName, seed); end
 
             i_last = find(~isnan(ber_f), 1, 'last');
             if isempty(i_last), i_last = nf; end
-            w0 = max(1, i_last - temporal_window + 1);
-            var_rssi_10 = var(rssi_f(w0:i_last), 0);
-            burst_ratio = mean(plr_f(w0:i_last), 'omitnan');
-            if i_last > 1 && ~isnan(ber_f(i_last)) && ~isnan(ber_f(i_last-1))
-                dber_dt = (ber_f(i_last) - ber_f(i_last-1)) / p.frame_duration;
-            else
-                dber_dt = 0;
-            end
             iq_rx = iq_frames{i_last};
 
             %% --- CNN diagnosis (timed: STFT, normalization, resize, forward pass) ---
             t1 = tic;
-            Sxx = spectrogram(iq_rx, hann(win), novlp, nfft, fs, 'centered');
-            Pw = 20*log10(abs(Sxx)+eps); Pw = (Pw-db_lo)/(db_hi-db_lo); Pw = min(max(Pw,0),1);
-            spec_img = imresize(Pw, [img_size img_size]);
-            raw_feats = [ebno, ber_f(i_last), rssi_f(i_last), plr_f(i_last), var_rssi_10, dber_dt, burst_ratio];
-            raw_feats(isnan(raw_feats)) = 0;     % matches prepare_data.m
+            spec_img = spec_image(iq_rx, fs);
+            raw_feats = link_features(struct('sinr', sinr_f, 'ber', ber_f, 'rssi', rssi_f, 'plr', plr_f, ...
+                'env_corr', ec_f), i_last, temporal_window, p.frame_duration);
             norm_feats = (raw_feats - feat_mean) ./ feat_std;
             X_spec = dlarray(single(spec_img), 'SSCB');
             X_feat = dlarray(single(norm_feats)', 'CB');
@@ -201,7 +191,7 @@ for mc = 1:N_MC
                 'cnn_correct',cnn_correct,'ber_before',ber_before,'ber_after',ber_after, ...
                 'recovery_pct',recovery_pct,'n_frames',nf, ...
                 'ber_after_rule',ber_after_rule,'gp_dqn',cmD.goodput_factor,'gp_rule',cmR.goodput_factor, ...
-                'temporal_feats',[var_rssi_10 dber_dt burst_ratio], ...
+                'temporal_feats',raw_feats(5:7), ...
                 'plr_before',plr_before,'plr_after',plr_after,'plr_after_rule',plr_after_rule); %#ok<SAGROW>
         end
     end
@@ -493,30 +483,9 @@ out = sim(modelName);
 end
 
 function n = seed_blocks(modelName, seed)
-% Seeds the AWGN channel and the bit source. Parameter names differ between
-% releases, so they are matched case-insensitively among the dialog parameters.
-blks = {[modelName '/AWGN'], [modelName '/BitSource']};
-n = 0;
-for b = 1:numel(blks)
-    try
-        dp = fieldnames(get_param(blks{b}, 'DialogParameters'));
-        for j = 1:numel(dp)
-            if strcmpi(dp{j}, 'RandomStream')
-                try, set_param(blks{b}, dp{j}, 'mt19937ar with seed'); catch, end
-            end
-            if strcmpi(dp{j}, 'SeedSource')
-                try, set_param(blks{b}, dp{j}, 'Parameter'); catch, end
-            end
-        end
-        for j = 1:numel(dp)
-            if strcmpi(dp{j}, 'seed')
-                set_param(blks{b}, dp{j}, num2str(seed + b));
-                n = n + 1;
-            end
-        end
-    catch
-    end
-end
+% Seeds channel, interferer channels, threat waveforms, AWGN and bit source (D42).
+link_seed(modelName, seed);
+n = 3;
 end
 
 function [ber_after, plr_after] = outcome(p, threat, action, modelName, snr_dB, seed, delay_bits, ber_before, plr_before)

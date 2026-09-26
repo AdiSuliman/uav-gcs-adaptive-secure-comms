@@ -5,7 +5,7 @@ function [E, info] = episode_cycle(E, k, fr, ctx)
 %
 %   E    episode state; pass [] on the first cycle
 %   k    cycle index (1-based)
-%   fr   received frame: fields iq, ber, rssi, plr
+%   fr   received frame: fields iq, ber, rssi, plr, sinr, env_corr
 %   ctx  fields: ebno, policy ('dqn' | 'rule'), dwell, hold, net, classes,
 %        feat_mean, feat_std, fs, agent, actions, na, tw (temporal window),
 %        frame_dur
@@ -21,16 +21,12 @@ function [E, info] = episode_cycle(E, k, fr, ctx)
 
 if isempty(E)
     E = struct('cfg', ctx.na, 'last_switch', -inf, 'cand', 0, 'cand_n', 0, ...
-        'ber', [], 'rssi', [], 'plr', []);
+        'ber', [], 'rssi', [], 'plr', [], 'sinr', [], 'env_corr', []);
 end
-E.ber(k) = fr.ber; E.rssi(k) = fr.rssi; E.plr(k) = fr.plr;
+E.ber(k) = fr.ber; E.rssi(k) = fr.rssi; E.plr(k) = fr.plr; E.sinr(k) = fr.sinr; E.env_corr(k) = fr.env_corr;
 
 %% Detection
-w0 = max(1, k - ctx.tw + 1);
-var_rssi = var(E.rssi(w0:k), 0);
-burst = mean(E.plr(w0:k), 'omitnan');
-if k > 1, dber = (E.ber(k) - E.ber(k-1)) / ctx.frame_dur; else, dber = 0; end
-raw = [ctx.ebno, fr.ber, fr.rssi, fr.plr, var_rssi, dber, burst];
+raw = link_features(E, k, ctx.tw, ctx.frame_dur);
 [cls, conf] = detect_frame(ctx.net, ctx.classes, fr.iq, raw, ctx.feat_mean, ctx.feat_std, ctx.fs);
 
 %% Policy
