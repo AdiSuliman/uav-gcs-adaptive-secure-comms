@@ -662,3 +662,12 @@ Sum-of-sinusoids fading with seed/Doppler as Constant-block inputs (`link_seed.m
 
 ### D42–D43 results (2026-09-26)
 `validate_phy` 5/5 within 0.3 dB (fd 1 kHz, 20 realizations), seeds PASS. Dataset 27,000 frames / 1,350 seeded sub-runs, 0 shared between train and test. Detector v2 with IoT: accuracy 96.24% [94.78, 97.46], macro-F1 96.26%, ≥ 90% from 0 dB, reactive_jamming 100%. Unknown threats: Mahalanobis mean AUROC 0.901 (was 0.52 with MSP). Next: phase 3 (DQN).
+
+### D44 results (2026-09-26)
+Pools 46.6 min, training 3 seeds + bandit, evaluation on the test pools. DQN − rule + escalation: +0.093 single, +0.022 follower, +0.207 combined, −0.017 clean. Gate FAIL: false switches on 52.1% of clean validation episodes. Review found a zero reward reference at 10 dB (oracle capped at 5/6), the episode clock in the state (switching before onset), a fixed interferer direction (always-on MMSE + power as strong as the DQN, follower irrelevant) and sub-run changes inside episodes. Fixed in D45.
+
+### D45 — decision layer v2 (code complete)
+Random interferer directions per seed (`interferer_aoa.m`, 'AoA' Constant block via `link_seed.m`), pools with 6/4 geometries per cell and per-geometry episodes, reward floor 1e-4, action rate_reduce + power_control, shared link monitor and shield (`policy_monitor.m`, `policy_mask.m`), learning-rate decay, gradient clipping, best checkpoint per seed, table baseline (`policy_table.m`), always-on MMSE baseline, AoA breakdown. Pending: MATLAB run of A0, A4v, A5–A6, B1–B3, C1p, C2, C2e.
+
+### D45 results (2026-09-26)
+`validate_phy` 5/5 within 0.3 dB, seeds PASS. Dataset with random interferer directions: 27,000 frames / 1,350 sub-runs; detector accuracy 96.28% [94.91, 97.44], macro-F1 96.28%, ≥ 91% from 0 dB. Pools 87.8 min (17 configurations, 6/4 geometries per cell). DQN: 3 seeds within 0.001 on validation (0.856–0.857), gate PASS, false-alarm episodes 2.1% (rule 31.6%). Test pools, pooled: DQN 0.761 vs rule + escalation 0.659 (+0.102 [0.094, 0.110]), table +0.021, best fixed +0.033; clean link 0 false switches. The γ = 0 ablation is higher than γ = 0.9 on validation (0.869) and test (+0.020 pooled): with the link monitor in the state the decision is close to myopic. On the unseen combined threats the DQN switches 9.6 times per episode and trails the best fixed configuration (−0.075). Always-on adaptive combining restores 0% with the interferer within 20° of the GCS and 89% beyond 45°.

@@ -1,428 +1,271 @@
-%% C2 — TRAIN DQN AGENT
-% Reward table measured through the real Simulink link for every threat x
-% action x Eb/N0 (D29), with each action applied by apply_countermeasure.m (D28).
-% Reward = link state against the clean link (D27) minus the action's cost;
-% acting on a healthy non-hostile link is a false alarm. Episodes sample
-% (threat, Eb/N0) cells and real per-frame link states, so no simulation runs
-% inside the training loop. Training is repeated over CFG.dqn_seeds seeds
-% (default 5); every seed passes through the validation gate and the best
-% gate-passing seed is saved, with the seed spread in results/dqn_seed_stability.txt.
-% Every action's reward is measured per cell, so each sample trains all
-% the Q-values (full-action targets); the gate also rejects regret > 10 where
-% action is needed.
+%% C2 - TRAIN DQN: sequential decision layer on measured frame pools (D44, D45)
+% Double DQN (van Hasselt et al., AAAI 2016) with experience replay and a target
+% network (Mnih et al., Nature 2015 [7]) on link_env.m: 30-cycle episodes inside
+% one seeded flight geometry, the threat starts at a random cycle, a follower
+% jammer re-acquires the channel after each hop (Liu et al. [6], Yuan et al. [5]),
+% and the agent sees what the detector sees (class probabilities, unknown flag),
+% the link features, its own configuration, the time since its last change and
+% the confirmed alarm (policy_state.m). The shield of policy_mask.m applies in
+% training exactly as in deployment: without a confirmed alarm the agent can only
+% keep its configuration or release it, and the Double DQN target maximizes over
+% the configurations allowed in the next state.
+% Training uses the train split of data/policy_pools.mat and single threats
+% only; combined threats and the test split are kept for evaluate_policies.m.
+%
+% Seeds: CFG.dqn_seeds (default 3). Each seed keeps the checkpoint with the best
+% greedy return on its own evaluation episodes (train pools), then all seeds are
+% compared on 1280 validation episodes (train pools, fresh draws) with the rule
+% and table baselines. Selected: the best validation return among the seeds with
+% no more false-alarm episodes than max(5%, rule + escalation). A myopic variant
+% (gamma = 0, same network, data and shield) is the contextual-bandit ablation.
+%
+% Output: data/trained_dqn.mat, results/dqn_training.txt, results/dqn_training_curves.png
+
 close all; clc;
-fprintf('=== C2: Train DQN Agent ===\n\n');
+fprintf('=== C2: Train sequential DQN (D44, D45) ===\n\n');
+L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
+K = link_env('tables', PP);
+nA = numel(PP.actions);
+[nS, cont] = policy_state_size(nA);
 
-rng(42, 'twister');
+%% 1. Hyperparameters
+H = struct('gamma', 0.9, 'NE', 64, 'T', 30, 'episodes', 12000, 'buffer', 150000, 'warmup', 6000, ...
+    'batch', 128, 'updates', 4, 'lr', 5e-4, 'lr_end', 5e-5, 'clip', 10, 'target_every', 500, ...
+    'eps_end', 0.05, 'eps_frac', 0.6, 'huber', 1, 'p_unknown', 0.10, 'p_follow', 0.5, 'n_eval', 4);
+N_SEEDS = 3;
+if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'dqn_seeds'), N_SEEDS = CFG.dqn_seeds; end
+SEEDS = 42 + (0:N_SEEDS-1);
+N_VAL = 20;                              % validation batches of H.NE episodes
 
-%% 1. Agent, threats, actions
-agent = dqn_agent();
-action_names = agent.action_names;
-na = find(strcmp(action_names, 'no_action'), 1);
-nA = numel(action_names);
+%% 2. State normalization from random-policy rollouts
+rs = RandStream('mt19937ar', 'Seed', 7);
+S_all = [];
+for b = 1:20
+    spec = make_spec(H, PP, K, rs);
+    [E, obs] = link_env('reset', PP, K, spec, 1, rs);
+    mem = policy_monitor('init', H.NE, nA);
+    for t = 1:H.T
+        [mem, M] = policy_monitor('update', mem, obs, PP);
+        S_all = [S_all, policy_state(obs, E.cfg, mem.since, M.ber_avg, M.confirmed, PP)]; %#ok<AGROW>
+        a = randi(rs, nA, 1, H.NE);
+        ch = a ~= E.cfg; mem.since(ch) = 0; mem.since(~ch) = mem.since(~ch) + 1;
+        [E, ~, obs] = link_env('step', E, PP, K, a);
+    end
+end
+norm_in = struct('mu', zeros(nS, 1), 'sd', ones(nS, 1));
+norm_in.mu(cont) = mean(S_all(cont, :), 2);
+norm_in.sd(cont) = max(std(S_all(cont, :), 0, 2), 1e-3);
 
-% Order must match the threat_list inside build_dqn_state.m
-threat_list = {'jamming', 'reactive_jamming', 'sweeping_jammer', 'noise_burst', ...
-               'path_loss', 'spoofing', 'antenna_fault', 'benign_interference', 'none'};
-num_threats = numel(threat_list);
-hostile = ~ismember(threat_list, {'benign_interference', 'none'});
+%% 3. Validation episodes and baselines (same for every seed)
+val_spec = cell(1, N_VAL);
+rv = RandStream('mt19937ar', 'Seed', 99);
+for b = 1:N_VAL, val_spec{b} = make_spec(H, PP, K, rv); end
+healthy_ep = arrayfun(@(b) val_spec{b}.scn == 1, 1:N_VAL, 'UniformOutput', false);
+hv = [healthy_ep{:}];
+tab = policy_table(PP, K);
+Rrule = eval_batches('rule_esc', PP, K, val_spec, [], struct(), 5000);
+Rtab = eval_batches('table', PP, K, val_spec, [], tab, 5000);
+fa_rule = mean(Rrule.false_sw(hv) > 0);
+fa_limit = max(0.05, fa_rule);
+fprintf('Rule + escalation on validation: return %.3f, restored %.1f%%, false-alarm episodes %.1f%%\n', ...
+    mean(Rrule.ret), 100*mean(Rrule.restored_post), 100*fa_rule);
+fprintf('Table on validation:             return %.3f, restored %.1f%%\n\n', mean(Rtab.ret), 100*mean(Rtab.restored_post));
 
-init_params;
-p0 = load('params.mat').params;
-modelName  = 'UAV_GCS_Threat_Link';
-delay_bits = 20;
-SNR_LIST = p0.EbNo_dB;
-nS = numel(SNR_LIST);
+%% 4. Training
+runs = struct('seed', {}, 'agent', {}, 'curve', {}, 'loss', {}, 'best_ep', {}, 'val', {}, 'fa', {});
+for k = 1:N_SEEDS
+    fprintf('--- Seed %d (%d/%d) ---\n', SEEDS(k), k, N_SEEDS);
+    [ag, curve, lossc, best_ep] = train_one(H, PP, K, norm_in, SEEDS(k), nS);
+    V = eval_batches('dqn', PP, K, val_spec, ag, struct(), 5000);
+    fa = mean(V.false_sw(hv) > 0);
+    fprintf('    checkpoint at episode %d | validation: return %.3f | restored %.1f%% | goodput %.3f | false-alarm episodes %.1f%%\n', ...
+        best_ep, mean(V.ret), 100*mean(V.restored_post), mean(V.gput_post), 100*fa);
+    runs(end+1) = struct('seed', SEEDS(k), 'agent', ag, 'curve', curve, 'loss', lossc, 'best_ep', best_ep, ...
+        'val', V, 'fa', fa); %#ok<SAGROW>
+end
+vret = arrayfun(@(r) mean(r.val.ret), runs);
+ok_fa = [runs.fa] <= fa_limit;
+cand = find(ok_fa); if isempty(cand), cand = 1:N_SEEDS; end
+[~, j] = max(vret(cand)); best = cand(j);
+agent = runs(best).agent;
+fprintf('\n--- Contextual-bandit ablation (gamma = 0) ---\n');
+Hb = H; Hb.gamma = 0;
+agent_bandit = train_one(Hb, PP, K, norm_in, SEEDS(1), nS);
+Vb = eval_batches('dqn', PP, K, val_spec, agent_bandit, struct(), 5000);
 
-% Reward design (D29)
-RW = struct( ...
-    'RATIO_OK',   2, ...     % link degraded if BER > 2x clean (survivability-map threshold)
-    'R_TOL',      1.15, ...  % BER within 15% of clean counts as fully restored (draw-to-draw spread, D27)
-    'L_GP',       0.30, ...  % cost per unit of goodput lost (rate/4 -> 22.5 points)
-    'L_BW',       0.05, ...  % cost per extra channel occupied (2x spectrum -> 5 points)
-    'L_PW',       0.10, ...  % cost of +6 dB transmit power (energy, detectability -> 10 points, D39)
-    'FA_PENALTY', 40);       % any action on a healthy non-hostile link
+%% 5. Gate and report
+Vd = runs(best).val;
+gate = mean(Vd.ret) >= mean(Rrule.ret) && runs(best).fa <= fa_limit;
+rep = {};
+rep{end+1} = '=== SEQUENTIAL DQN TRAINING (D44, D45) ===';
+rep{end+1} = sprintf(['Generated: %s | Double DQN + shield, replay %d, target every %d updates, gamma %.2f, ' ...
+    'lr %.0e -> %.0e, %d episodes x %d cycles, %d seeds'], datestr(now), H.buffer, H.target_every, H.gamma, ...
+    H.lr, H.lr_end, H.episodes, H.T, N_SEEDS);
+rep{end+1} = sprintf('Validation: %d episodes (train pools, fresh draws), single threats + clean link', N_VAL * H.NE);
+rep{end+1} = sprintf('%-22s %9s %10s %9s %13s %13s %12s', 'policy', 'return', 'restored', 'goodput', ...
+    'false sw/ep', 'FA episodes', 'switches/ep');
+line = @(n, R) sprintf('%-22s %9.3f %9.1f%% %9.3f %13.3f %12.1f%% %12.2f', n, mean(R.ret), 100*mean(R.restored_post), ...
+    mean(R.gput_post), mean(R.false_sw), 100*mean(R.false_sw(hv) > 0), mean(R.switches));
+for k = 1:N_SEEDS
+    rep{end+1} = [line(sprintf('DQN seed %d', runs(k).seed), runs(k).val) ...
+        sprintf('   (checkpoint %d)', runs(k).best_ep)]; %#ok<SAGROW>
+end
+rep{end+1} = line('DQN gamma=0 (bandit)', Vb);
+rep{end+1} = line('table (train pools)', Rtab);
+rep{end+1} = line('rule + escalation', Rrule);
+rep{end+1} = sprintf('Seed return spread: %.3f to %.3f (std %.3f)', min(vret), max(vret), std(vret));
+rep{end+1} = sprintf(['Selected seed %d. Gate (return >= rule+escalation, false-alarm episodes <= %.1f%% = ' ...
+    'max(5%%, rule): %.1f%%): %s'], runs(best).seed, 100*fa_limit, 100*runs(best).fa, ternary(gate, 'PASS', 'FAIL'));
+if ~exist('results', 'dir'), mkdir('results'); end
+fid = fopen('results/dqn_training.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
+fprintf('\n%s\n', rep{:});
+if ~gate, warning('train_dqn:gate', 'DQN validation gate FAILED -- see results/dqn_training.txt'); end
 
-%% 2. Measure BER for every threat x action x Eb/N0
-fprintf('Measuring the link for %d threats x %d actions x %d Eb/N0 points...\n\n', num_threats, nA, nS);
-ber_tab = nan(num_threats, nA, nS);
-frames  = cell(num_threats, nS);         % per-frame [BER, RSSI, PLR] of the unmitigated run (training states)
-gp = ones(1, nA); bw = ones(1, nA); pw = ones(1, nA);
-t0 = tic;
-for ti = 1:num_threats
-    threat = threat_list{ti};
-    p = p0; p.active_threat = threat;
-    for ai = 1:nA
-        [p2, g_db, cm] = apply_countermeasure(p, threat, action_names{ai});
-        gp(ai) = cm.goodput_factor; bw(ai) = cm.bw_factor; pw(ai) = cm.power_factor;
-        params = p2; save('params.mat', 'params');
-        evalc('build_threat_model');
-        for s = 1:nS
-            snr_dB = SNR_LIST(s) + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps);
-            set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p2.sps));
-            out = sim(modelName);
-            [~, ber_f, rssi_f, plr_f] = extract_closed_loop_frames(out, p2, delay_bits);
-            ber_tab(ti, ai, s) = mean(ber_f, 'omitnan');
-            if ai == na
-                b = ber_f(:); r = rssi_f(:); q = plr_f(:);
-                v = ~isnan(b);
-                r(isnan(r)) = 0; q(isnan(q)) = 0;
-                frames{ti, s} = [b(v) r(v) q(v)];
+seed_summary = struct('seeds', SEEDS, 'val_return', vret, 'fa', [runs.fa], 'fa_limit', fa_limit, ...
+    'best_ep', [runs.best_ep], 'selected_seed', runs(best).seed, 'gate_pass', gate);
+action_names = PP.actions;
+save('data/trained_dqn.mat', 'agent', 'agent_bandit', 'H', 'norm_in', 'seed_summary', 'action_names', 'tab', '-v7.3');
+fprintf('Saved data/trained_dqn.mat\n');
+
+fig = figure('Position', [100 100 1000 380], 'Color', 'w');
+subplot(1, 2, 1); hold on; grid on;
+for k = 1:N_SEEDS, plot(runs(k).curve(:, 1), runs(k).curve(:, 2), 'LineWidth', 1.2); end
+for k = 1:N_SEEDS
+    c = runs(k).curve; [~, m] = max(c(:, 2));
+    plot(c(m, 1), c(m, 2), 'ko', 'MarkerSize', 6, 'HandleVisibility', 'off');
+end
+yline(mean(Rrule.ret), 'k--', 'rule + escalation (validation)');
+xlabel('Episode'); ylabel(sprintf('Mean reward per cycle (greedy, %d episodes)', H.n_eval * H.NE));
+title('Learning curves (o = kept checkpoint)');
+legend(arrayfun(@(r) sprintf('seed %d', r.seed), runs, 'UniformOutput', false), 'Location', 'southeast');
+subplot(1, 2, 2); plot(movmean(runs(best).loss, 200)); grid on;
+xlabel('Update'); ylabel('Huber loss (moving mean 200)'); title(sprintf('Q-loss, seed %d', runs(best).seed));
+saveas(fig, 'results/dqn_training_curves.png'); close(fig);
+fprintf('=== C2 Complete ===\n');
+
+%% ===================== Local functions =====================
+function spec = make_spec(H, PP, K, rs)
+% Training / validation episodes: single threats and the clean link.
+nSing = numel(PP.singles);
+w = ones(1, nSing); w(1) = 2; w(strcmp(PP.singles, 'benign_interference')) = 1.5;
+cw = cumsum(w) / sum(w);
+NE = H.NE;
+scn = arrayfun(@(u) find(u <= cw, 1), rand(rs, 1, NE));
+spec = struct('scn', scn, 's', randi(rs, numel(PP.ebno), 1, NE), 'onset', randi(rs, [3 10], 1, NE), ...
+    'follow', K.followable(scn) & rand(rs, 1, NE) < H.p_follow, 'fdelay', randi(rs, [2 5], 1, NE), ...
+    'unk', scn > 1 & rand(rs, 1, NE) < H.p_unknown, 'T', H.T);
+end
+
+function R = eval_batches(kind, PP, K, specs, agent, opt, seed0)
+R = [];
+for b = 1:numel(specs)
+    Rb = rollout_policy(kind, PP, K, specs{b}, 1, agent, opt, seed0 + b);
+    Rb = rmfield(Rb, 'cfg_trace');
+    if isempty(R), R = Rb; else, R = structfun_cat(R, Rb); end
+end
+end
+
+function R = structfun_cat(R, Rb)
+f = fieldnames(R);
+for i = 1:numel(f), R.(f{i}) = [R.(f{i}), Rb.(f{i})]; end
+end
+
+function [agent, curve, loss_hist, best_ep] = train_one(H, PP, K, norm_in, seed, nS)
+rng(seed, 'twister');
+rs = RandStream('mt19937ar', 'Seed', seed);
+agent = dqn_agent(norm_in);
+net = agent.qNetwork; tgt = net;
+nA = numel(PP.actions); na = K.na; nB = H.buffer; NE = H.NE;
+B.S = zeros(nS, nB, 'single'); B.S2 = zeros(nS, nB, 'single'); B.M2 = false(nA, nB);
+B.A = zeros(1, nB); B.R = zeros(1, nB, 'single'); B.D = zeros(1, nB, 'single');
+nb = 0; ptr = 0; nupd = 0;
+avgG = []; avgSq = [];
+n_iter = ceil(H.episodes / NE);
+loss_hist = zeros(1, n_iter * H.T * H.updates);
+curve = [];
+eval_spec = arrayfun(@(k) make_spec(H, PP, K, RandStream('mt19937ar', 'Seed', seed + 500 + k)), 1:H.n_eval, ...
+    'UniformOutput', false);
+best = -inf; best_net = net; best_ep = 0;
+for it = 1:n_iter
+    epsg = max(H.eps_end, 1 - (1 - H.eps_end) * (it - 1) / (H.eps_frac * n_iter));
+    lr = H.lr * (H.lr_end / H.lr) ^ ((it - 1) / max(n_iter - 1, 1));
+    spec = make_spec(H, PP, K, rs);
+    [E, obs] = link_env('reset', PP, K, spec, 1, rs);
+    mem = policy_monitor('init', NE, nA);
+    [mem, M] = policy_monitor('update', mem, obs, PP);
+    s = policy_state(obs, E.cfg, mem.since, M.ber_avg, M.confirmed, PP);
+    mk = policy_mask(E.cfg, M.confirmed, nA, na);
+    for t = 1:H.T
+        q = extractdata(predict(net, dlarray(single(s), 'CB')));
+        q(~mk) = -inf;
+        [~, a] = max(q, [], 1);
+        ex = rand(rs, 1, NE) < epsg;
+        if any(ex)
+            [~, ar] = max(rand(rs, nA, NE) .* mk, [], 1);          % uniform over the allowed set
+            a(ex) = ar(ex);
+        end
+        prev = E.cfg;
+        [E, r, obs] = link_env('step', E, PP, K, a);
+        ch = a ~= prev; mem.since(ch) = 0; mem.since(~ch) = mem.since(~ch) + 1;
+        [mem, M] = policy_monitor('update', mem, obs, PP);
+        s2 = policy_state(obs, E.cfg, mem.since, M.ber_avg, M.confirmed, PP);
+        mk2 = policy_mask(E.cfg, M.confirmed, nA, na);
+        done = t == H.T;
+        idx = mod(ptr + (0:NE-1), nB) + 1;
+        B.S(:, idx) = s; B.S2(:, idx) = s2; B.M2(:, idx) = mk2;
+        B.A(idx) = a; B.R(idx) = r; B.D(idx) = done;
+        ptr = mod(ptr + NE, nB); nb = min(nb + NE, nB);
+        s = s2; mk = mk2;
+        if nb >= H.warmup
+            for u = 1:H.updates
+                j = randi(rs, nb, 1, H.batch);
+                S2 = dlarray(B.S2(:, j), 'CB');
+                Qo = extractdata(predict(net, S2)); Qo(~B.M2(:, j)) = -inf;
+                [~, an] = max(Qo, [], 1);                                   % Double DQN: online net picks
+                Qt = extractdata(predict(tgt, S2));                          % target net evaluates
+                y = B.R(j) + H.gamma * (1 - B.D(j)) .* Qt(sub2ind([nA H.batch], an, 1:H.batch));
+                [L, g] = dlfeval(@dqn_loss, net, dlarray(B.S(:, j), 'CB'), B.A(j), single(y), H.huber, nA);
+                g = clip_gradients(g, H.clip);
+                nupd = nupd + 1;
+                [net, avgG, avgSq] = adamupdate(net, g, avgG, avgSq, nupd, lr);
+                loss_hist(nupd) = double(extractdata(L));
+                if mod(nupd, H.target_every) == 0, tgt = net; end
             end
         end
     end
-    fprintf('  [%d/%d] %-20s measured (%.1f min)\n', ti, num_threats, threat, toc(t0)/60);
-end
-params = p0; save('params.mat', 'params');
-
-%% 2b. Countermeasure efficacy matrix (results/countermeasure_matrix.*, D28)
-% BER after each action relative to the clean link, per threat and Eb/N0, from the
-% measurements above (ground-truth threat, nominal severity).
-clean_m = squeeze(ber_tab(strcmp(threat_list, 'none'), na, :))';
-ratio_m = ber_tab ./ reshape(clean_m, 1, 1, nS);
-rep = {};
-rep{end+1} = '=== COUNTERMEASURE EFFICACY MATRIX (D28, nominal severity, ground-truth threat) ===';
-rep{end+1} = sprintf('Generated: %s by train_dqn.m | acr %g dB | rate / %g | %d UAV antennas', datestr(now), ...
-    p0.cm_acr_db, p0.cm_rate_factor, p0.n_rx);
-rep{end+1} = 'Cell = BER_after / BER_clean (<= 2 restored, <= 5 marginal). * = best action, R = rule-based choice.';
-rep{end+1} = sprintf('Costs: goodput x%s | spectrum x%s | power x%s  (order: %s)', mat2str(gp, 2), mat2str(bw), mat2str(pw, 2), strjoin(action_names, ', '));
-for s = 1:nS
-    rep{end+1} = ''; %#ok<SAGROW>
-    rep{end+1} = sprintf('--- Eb/N0 = %g dB (clean BER %.3e) ---', SNR_LIST(s), clean_m(s)); %#ok<SAGROW>
-    hdr = sprintf('%-20s', 'threat');
-    for ai = 1:nA, hdr = [hdr sprintf('%19s', action_names{ai})]; end %#ok<AGROW>
-    rep{end+1} = hdr; %#ok<SAGROW>
-    for ti = 1:num_threats
-        [~, best] = min(ber_tab(ti, :, s));
-        rule = rule_based_policy(threat_list{ti});
-        line = sprintf('%-20s', threat_list{ti});
-        for ai = 1:nA
-            tag = '';
-            if ai == best, tag = [tag '*']; end %#ok<AGROW>
-            if strcmp(action_names{ai}, rule), tag = [tag 'R']; end %#ok<AGROW>
-            line = [line sprintf('%19s', sprintf('%.2fx%s', ratio_m(ti, ai, s), tag))]; %#ok<AGROW>
+    if mod(it, max(1, round(n_iter / 25))) == 0 || it == n_iter
+        ag = agent; ag.qNetwork = net;
+        ret = 0;
+        for b = 1:H.n_eval
+            Re = rollout_policy('dqn', PP, K, eval_spec{b}, 1, ag, struct(), seed + 700 + b);
+            ret = ret + mean(Re.ret) / H.n_eval;
         end
-        rep{end+1} = line; %#ok<SAGROW>
+        curve(end+1, :) = [it * NE, ret]; %#ok<AGROW>
+        if ret > best && nb >= H.warmup, best = ret; best_net = net; best_ep = it * NE; end
+        fprintf('    episode %5d/%d | eps %.2f | lr %.1e | greedy return %.3f | updates %d\n', it * NE, ...
+            n_iter * NE, epsg, lr, ret, nupd);
     end
 end
-if ~exist('results', 'dir'), mkdir('results'); end
-fid = fopen('results/countermeasure_matrix.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
-fig_m = figure('Position', [60 60 1400 700], 'Color', 'w');
-for s = 1:nS
-    subplot(2, ceil(nS/2), s);
-    imagesc(log10(ratio_m(:, :, s)), [0 log10(50)]); colormap(gca, flipud(hot));
-    set(gca, 'XTick', 1:nA, 'XTickLabel', strrep(action_names, '_', '\_'), 'XTickLabelRotation', 30, ...
-        'YTick', 1:num_threats, 'YTickLabel', strrep(threat_list, '_', '\_'), 'FontSize', 7);
-    for ti = 1:num_threats
-        for ai = 1:nA
-            text(ai, ti, sprintf('%.1f', ratio_m(ti, ai, s)), 'HorizontalAlignment', 'center', 'FontSize', 7);
-        end
-    end
-    title(sprintf('BER / clean, E_b/N_0 = %g dB', SNR_LIST(s)));
-end
-saveas(fig_m, 'results/countermeasure_matrix.png'); close(fig_m);
-fprintf('Saved results/countermeasure_matrix.{txt,png}\n\n');
-
-%% 3. Reward table
-clean = squeeze(ber_tab(strcmp(threat_list, 'none'), na, :));
-reward_table = zeros(num_threats, nA, nS);
-must_act = false(num_threats, nS);
-for ti = 1:num_threats
-    for s = 1:nS
-        rb = ber_tab(ti, na, s) / clean(s);
-        must_act(ti, s) = hostile(ti) || rb > RW.RATIO_OK;
-        for ai = 1:nA
-            reward_table(ti, ai, s) = reward_of(ber_tab(ti, na, s), ber_tab(ti, ai, s), clean(s), ...
-                gp(ai), bw(ai), pw(ai), ai == na, must_act(ti, s), RW);
-        end
-    end
+loss_hist = loss_hist(1:nupd);
+agent.qNetwork = best_net;
 end
 
-fprintf('\nBest action per (threat, Eb/N0) by reward:\n');
-snr_hdr = arrayfun(@(x) sprintf('%gdB', x), SNR_LIST, 'UniformOutput', false);
-fprintf('%-20s', 'threat'); fprintf('%18s', snr_hdr{:}); fprintf('\n');
-for ti = 1:num_threats
-    fprintf('%-20s', threat_list{ti});
-    for s = 1:nS
-        [rbest, abest] = max(reward_table(ti, :, s));
-        fprintf('%18s', sprintf('%s %.0f', short_name(action_names{abest}), rbest));
-    end
-    fprintf('\n');
+function [L, g] = dqn_loss(net, S, A, y, delta, nA)
+% Huber loss between Q(s, a) of the taken actions and the Double DQN targets y.
+Q = forward(net, S);
+n = numel(A);
+M = zeros(nA, n, 'single'); M(sub2ind([nA n], A, 1:n)) = 1;
+q = sum(Q .* M, 1);
+e = stripdims(q) - y;
+ae = abs(e);
+L = mean(min(ae, delta) .* (ae - 0.5 * min(ae, delta)));
+g = dlgradient(L, net.Learnables);
 end
 
-if ~exist('results', 'dir'), mkdir('results'); end
-fig0 = figure('Position', [60 60 1400 700], 'Color', 'w');
-for s = 1:nS
-    subplot(2, ceil(nS/2), s);
-    imagesc(reward_table(:, :, s), [-RW.FA_PENALTY 100]); colormap(parula);
-    set(gca, 'XTick', 1:nA, 'XTickLabel', strrep(action_names, '_', '\_'), 'XTickLabelRotation', 30, ...
-        'YTick', 1:num_threats, 'YTickLabel', strrep(threat_list, '_', '\_'), 'FontSize', 7);
-    for ti = 1:num_threats
-        for ai = 1:nA
-            text(ai, ti, sprintf('%.0f', reward_table(ti, ai, s)), 'HorizontalAlignment', 'center', 'FontSize', 7);
-        end
-    end
-    title(sprintf('Reward, E_b/N_0 = %g dB', SNR_LIST(s)));
-end
-saveas(fig0, 'results/dqn_reward_table.png'); close(fig0);
-fprintf('\nSaved results/dqn_reward_table.png\n\n');
-
-%% 4. Training over several seeds (D35)
-% The same reward table and frame states are used for every seed; only the
-% network initialization, episode sampling and minibatch sampling change. Every seed
-% is validated; the saved agent is the gate-passing seed with the lowest mean
-% regret (ties: lowest maximum regret). Seed spread and per-cell agreement are
-% reported as the training-stability result.
-N_SEEDS = 5;
-if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'dqn_seeds'), N_SEEDS = CFG.dqn_seeds; end
-SEEDS = 42 + (0:N_SEEDS-1);
-N_EPISODES = 12000;
-P_UNKNOWN  = 0.10;                      % share of episodes with the class hidden (proposal risk 13)
-w = ones(1, num_threats);
-w(ismember(threat_list, {'antenna_fault', 'benign_interference', 'none'})) = 2;
-cw = cumsum(w) / sum(w);
-
-% Input z-score statistics over every frame state the agent can see; the
-% one-hot entries are left as they are (D39).
-S_all = [];
-for ti = 1:num_threats
-    for s = 1:nS
-        fr = frames{ti, s};
-        for k = 1:size(fr, 1)
-            S_all(:, end+1) = build_dqn_state(threat_list{ti}, fr(k, 1), fr(k, 2), SNR_LIST(s), fr(k, 3)); %#ok<SAGROW>
-        end
-    end
-end
-nOH = numel(threat_list);
-norm_in = struct('mu', [zeros(nOH, 1); mean(S_all(nOH+1:end, :), 2)], ...
-                 'sd', [ones(nOH, 1);  max(std(S_all(nOH+1:end, :), 0, 2), 1e-3)]);
-
-runs = struct('seed', {}, 'agent', {}, 'loss', {}, 'avg_reward', {}, 'chosen', {}, 'regret', {}, ...
-    'gate_pass', {}, 'fails', {});
-for k = 1:N_SEEDS
-    fprintf('--- Seed %d (%d/%d): training on %d episodes ---\n', SEEDS(k), k, N_SEEDS, N_EPISODES);
-    rng(SEEDS(k), 'twister');
-    [ag, loss_k, avgr_k] = train_agent(dqn_agent(norm_in), frames, reward_table, threat_list, SNR_LIST, ...
-        N_EPISODES, P_UNKNOWN, cw);
-    [ch_k, rg_k, fails_k] = gate_agent(ag, frames, reward_table, ber_tab, clean, must_act, ...
-        threat_list, SNR_LIST, action_names, na);
-    runs(end+1) = struct('seed', SEEDS(k), 'agent', ag, 'loss', loss_k, 'avg_reward', avgr_k, ...
-        'chosen', {ch_k}, 'regret', rg_k, 'gate_pass', isempty(fails_k), 'fails', {fails_k}); %#ok<SAGROW>
-    fprintf('    mean regret %.1f | max %.0f | cells > 10: %d | gate %s\n', mean(rg_k(:)), max(rg_k(:)), ...
-        sum(rg_k(:) > 10), ternary(isempty(fails_k), 'PASS', sprintf('FAIL (%d cells)', numel(fails_k))));
-end
-
-%% 5. Seed selection and stability
-mean_regret = arrayfun(@(r) mean(r.regret(:)), runs);
-max_regret  = arrayfun(@(r) max(r.regret(:)), runs);
-gate_ok = [runs.gate_pass];
-if ~any(gate_ok)
-    for k = 1:N_SEEDS
-        fprintf('Seed %d gate failures:\n', runs(k).seed); fprintf('  %s\n', runs(k).fails{:});
-    end
-    error('Validation gate FAILED for every seed -- NOT saving trained_dqn.mat.');
-end
-score = mean_regret + 1e-3 * max_regret;
-score(~gate_ok) = inf;
-[~, best] = min(score);
-agent = runs(best).agent;
-chosen_tab = runs(best).chosen;
-regret = runs(best).regret;
-training_loss = runs(best).loss;
-avg_rewards_per_episode = runs(best).avg_reward;
-
-unanimous = true(num_threats, nS);
-for ti = 1:num_threats
-    for s = 1:nS
-        acts = arrayfun(@(r) r.chosen{ti, s}, runs, 'UniformOutput', false);
-        unanimous(ti, s) = all(strcmp(acts, acts{1}));
-    end
-end
-seed_summary = struct('seeds', SEEDS, 'mean_regret', mean_regret, 'max_regret', max_regret, ...
-    'gate_pass', gate_ok, 'selected', best, 'selected_seed', SEEDS(best), ...
-    'cells_unanimous', sum(unanimous(:)), 'cells_total', numel(unanimous), 'unanimous', unanimous, ...
-    'chosen_per_seed', {arrayfun(@(r) r.chosen, runs, 'UniformOutput', false)}, ...
-    'regret_per_seed', {arrayfun(@(r) r.regret, runs, 'UniformOutput', false)});
-
-rep = {};
-rep{end+1} = '=== DQN TRAINING SEEDS (D35) ===';
-rep{end+1} = sprintf('Generated: %s | %d seeds x %d episodes, same reward table', datestr(now), N_SEEDS, N_EPISODES);
-rep{end+1} = sprintf('%-6s %12s %11s %14s %6s', 'seed', 'mean regret', 'max regret', 'cells > 10', 'gate');
-for k = 1:N_SEEDS
-    rg = runs(k).regret;
-    rep{end+1} = sprintf('%-6d %12.1f %11.0f %9d/%-4d %6s', runs(k).seed, mean_regret(k), max_regret(k), ...
-        sum(rg(:) > 10), numel(rg), ternary(gate_ok(k), 'PASS', 'FAIL')); %#ok<SAGROW>
-end
-for k = find(~gate_ok)
-    rep{end+1} = sprintf('Seed %d gate failures: %s', runs(k).seed, strjoin(runs(k).fails, '; ')); %#ok<SAGROW>
-end
-rep{end+1} = sprintf('Mean regret across seeds: %s (mean [95%% CI]) | selected seed %d', ...
-    stats_ci('fmt', mean_regret, [0 Inf]), SEEDS(best));
-rep{end+1} = sprintf('Cells where every seed picks the same action: %d/%d', sum(unanimous(:)), numel(unanimous));
-rep{end+1} = 'Cells where the seeds disagree (action per seed, regret per seed):';
-for ti = 1:num_threats
-    for s = 1:nS
-        if unanimous(ti, s), continue; end
-        acts = arrayfun(@(r) short_name(r.chosen{ti, s}), runs, 'UniformOutput', false);
-        rgs  = arrayfun(@(r) r.regret(ti, s), runs);
-        rep{end+1} = sprintf('  %-20s %4g dB: %s | regret %s', threat_list{ti}, SNR_LIST(s), ...
-            strjoin(acts, ', '), mat2str(round(rgs))); %#ok<SAGROW>
-    end
-end
-fid = fopen('results/dqn_seed_stability.txt', 'w');
-fprintf(fid, '%s\n', rep{:});
-fclose(fid);
-fprintf('\n%s\n', rep{:});
-fprintf('Saved results/dqn_seed_stability.txt\n');
-
-fprintf('\nSelected agent (seed %d), per cell:\n', SEEDS(best));
-fprintf('%-20s', 'threat'); fprintf('%22s', snr_hdr{:}); fprintf('\n');
-for ti = 1:num_threats
-    fprintf('%-20s', threat_list{ti});
-    for s = 1:nS
-        fprintf('%22s', sprintf('%s (regret %.0f)', short_name(chosen_tab{ti, s}), regret(ti, s)));
-    end
-    fprintf('\n');
-end
-fprintf('Mean regret %.1f | cells with regret > 10: %d/%d\nValidation gate PASSED.\n\n', ...
-    mean(regret(:)), sum(regret(:) > 10), numel(regret));
-
-%% 6. Save
-save('data/trained_dqn.mat', 'agent', 'reward_table', 'ber_tab', 'clean', 'SNR_LIST', ...
-    'threat_list', 'action_names', 'RW', 'gp', 'bw', 'pw', 'regret', 'chosen_tab', 'seed_summary', '-v7.3');
-fprintf('Saved data/trained_dqn.mat\n');
-
-%% 7. Training curves
-fig = figure('Position', [100 100 900 400], 'Color', 'w');
-subplot(1, 2, 1);
-plot(training_loss, 'b-'); xlabel('Update'); ylabel('Q-loss'); title('DQN training loss'); grid on;
-subplot(1, 2, 2);
-plot((1:numel(avg_rewards_per_episode)) * 1000, avg_rewards_per_episode, 'g-o', 'LineWidth', 1.5);
-xlabel('Episode'); ylabel('Average reward (1000 episodes)'); title('DQN average reward'); grid on;
-sgtitle(sprintf('C2: DQN training curves (selected seed %d)', SEEDS(best)));
-saveas(fig, 'results/dqn_training_curves.png'); close(fig);
-fprintf('Saved results/dqn_training_curves.png\n\n=== C2 Complete ===\n');
-
-%% Local functions
-function [agent, training_loss, avg_rewards_per_episode] = train_agent(agent, frames, reward_table, threat_list, SNR_LIST, N_EPISODES, P_UNKNOWN, cw)
-% Episodes sample a (threat, Eb/N0) cell and a real frame state. The reward of
-% every action in that cell is measured, so each sample trains all
-% the Q-values toward their table rewards (full-action targets, D36); the
-% epsilon-greedy choice is kept only to log the reward the policy collects.
-% The learning rate is constant for the first half and decays by cosine to a
-% tenth of it at the end, so near-tied actions (e.g. X vs X + FEC) settle (D39).
-nS = numel(SNR_LIST);
-nA = size(reward_table, 2);
-nState = agent.numStates;
-buf_S = zeros(N_EPISODES, nState); buf_T = zeros(N_EPISODES, nA);
-training_loss = [];
-avgG = []; avgSqG = [];
-episode_rewards = zeros(1, N_EPISODES);
-avg_rewards_per_episode = [];
-for ep = 1:N_EPISODES
-    ti = find(rand < cw, 1);
-    s  = randi(nS);
-    fr = frames{ti, s};
-    k  = randi(size(fr, 1));
-    cls = threat_list{ti};
-    if rand < P_UNKNOWN, cls = 'unknown'; end
-
-    state  = build_dqn_state(cls, fr(k, 1), fr(k, 2), SNR_LIST(s), fr(k, 3));
-    action = selectAction(agent, state, true);
-    buf_S(ep, :) = state';
-    buf_T(ep, :) = squeeze(reward_table(ti, :, s));
-    episode_rewards(ep) = reward_table(ti, action, s);
-
-    if ep >= agent.batch_size
-        idx = randperm(ep, agent.batch_size);
-        S = single(buf_S(idx, :)');
-        T = single(buf_T(idx, :)');
-        [loss, grads] = dlfeval(@qLoss, agent.qNetwork, dlarray(S, 'CB'), T);
-        frac = max(0, (ep - N_EPISODES/2) / (N_EPISODES/2));
-        lr = agent.learning_rate * (0.1 + 0.9 * 0.5 * (1 + cos(pi * frac)));
-        [agent.qNetwork, avgG, avgSqG] = adamupdate(agent.qNetwork, grads, avgG, avgSqG, ...
-            ep - agent.batch_size + 1, lr);
-        training_loss(end+1) = double(extractdata(loss)); %#ok<AGROW>
-    end
-    agent.epsilon = max(agent.epsilon_min, agent.epsilon * agent.epsilon_decay);
-    if mod(ep, 1000) == 0
-        avg_rewards_per_episode(end+1) = mean(episode_rewards(ep-999:ep)); %#ok<AGROW>
-        fprintf('    episode %4d/%d: avg reward %.1f, epsilon %.3f\n', ep, N_EPISODES, ...
-            avg_rewards_per_episode(end), agent.epsilon);
-    end
-end
-end
-
-function [chosen_tab, regret, fails] = gate_agent(agent, frames, reward_table, ber_tab, clean, must_act, threat_list, SNR_LIST, action_names, na)
-% Validation on the median frame state of every (threat, Eb/N0) cell. Hard
-% failures: acting on 'none' or on benign interference that leaves the link
-% near clean (<= 1.5x); no_action where acting is worth >= 30 reward points;
-% regret above REGRET_MAX in a cell that needs action (D36).
-REGRET_MAX = 10;
-nT = numel(threat_list); nS = numel(SNR_LIST);
-chosen_tab = cell(nT, nS);
-regret = zeros(nT, nS);
-fails = {};
-for ti = 1:nT
-    for s = 1:nS
-        fr = frames{ti, s};
-        st = build_dqn_state(threat_list{ti}, median(fr(:, 1)), median(fr(:, 2)), SNR_LIST(s), mean(fr(:, 3)));
-        qv = extractdata(predict(agent.qNetwork, dlarray(single(st), 'CB')));
-        [~, a] = max(qv);
-        R = squeeze(reward_table(ti, :, s));
-        chosen_tab{ti, s} = action_names{a};
-        regret(ti, s) = max(R) - R(a);
-        rb = ber_tab(ti, na, s) / clean(s);
-        isFA   = a ~= na && (strcmp(threat_list{ti}, 'none') || ...
-                 (strcmp(threat_list{ti}, 'benign_interference') && rb <= 1.5));
-        isMiss = a == na && must_act(ti, s) && max(R) >= 30;
-        isWeak = must_act(ti, s) && regret(ti, s) > REGRET_MAX;
-        if isFA || isMiss || isWeak
-            if isFA, why = 'false alarm'; elseif isMiss, why = 'missed action'; else, why = sprintf('regret %.0f', regret(ti, s)); end
-            fails{end+1} = sprintf('%s @ %g dB -> %s (%s)', threat_list{ti}, SNR_LIST(s), action_names{a}, why); %#ok<AGROW>
-        end
-    end
-end
-end
-
-function r = reward_of(bb, ba, bc, gpf, bwf, pwf, isNoAction, mustAct, RW)
-% Reward of one action in one (threat, Eb/N0) cell.
-if ~mustAct                               % healthy non-hostile link: acting is an unnecessary switch
-    r = 0;
-    if ~isNoAction, r = -RW.FA_PENALTY; end
-    return;
-end
-if isNoAction
-    r = 0;
-    return;
-end
-if ba / bc <= RW.R_TOL
-    score = 100;
-else
-    score = recovery_vs_clean(bb, ba, bc);
-    if isnan(score), score = 0; end
-end
-r = score - 100 * (RW.L_GP * (1 - gpf) + RW.L_BW * (bwf - 1) + RW.L_PW * log10(pwf) / log10(4));
-end
-
-function [loss, gradients] = qLoss(qNet, S, T)
-Q = forward(qNet, S);
-loss = mean((Q - T).^2, 'all');
-gradients = dlgradient(loss, qNet.Learnables);
-end
-
-function y = selectAction(agent, state, training)
-if training && rand() < agent.epsilon
-    y = randi(numel(agent.action_names));
-else
-    qvals = predict(agent.qNetwork, dlarray(single(state), 'CB'));
-    [~, y] = max(extractdata(qvals), [], 1);
-end
-end
-
-function s = short_name(a)
-s = strrep(strrep(strrep(a, 'channel_', 'ch_'), '_diversity', '_div'), 'no_action', 'none');
-s = strrep(strrep(strrep(s, 'power_control', 'pwr'), 'fec_interleave', 'fec'), 'rate_reduce', 'rate');
+function g = clip_gradients(g, c)
+% Global-norm gradient clipping.
+n = sqrt(sum(cellfun(@(x) sum(extractdata(x).^2, 'all'), g.Value)));
+if n > c, g = dlupdate(@(x) x * (c / n), g); end
 end
 
 function out = ternary(c, a, b)

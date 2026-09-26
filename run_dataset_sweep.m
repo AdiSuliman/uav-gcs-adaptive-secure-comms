@@ -1,8 +1,8 @@
-%% RUN_DATASET_SWEEP - Phase A5: labeled dataset from independent seeded sub-runs (D42)
+%% RUN_DATASET_SWEEP - Phase A5: labeled dataset from independent seeded sub-runs (D42, D45)
 % 8 threats x 5 severity levels x 6 Eb/N0 points + 'none', on the multi-antenna
 % link of D41. Every (threat, level, Eb/N0) cell is simulated as N_SUB independent
-% sub-runs: own seed (fading, interferer channels, threat waveform, noise, bits)
-% and own UAV speed drawn uniformly in 50-120 km/h. The sub-run is the unit of the
+% sub-runs: own seed (fading, interferer channels and directions, threat waveform,
+% noise, bits) and own UAV speed drawn uniformly in 50-120 km/h (D45). The sub-run is the unit of the
 % train/val/test split (prepare_data.m), so no two splits share a channel
 % realization or a temporal-feature window.
 %

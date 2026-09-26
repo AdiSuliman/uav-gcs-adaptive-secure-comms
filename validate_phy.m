@@ -21,6 +21,7 @@ if ~isfield(p0, 'n_rx')
     error('params.mat predates D41. Run init_params.m first.');
 end
 p0.quiet_build = true;
+p0.int_aoa_random = false;             % V6 nulling test at the fixed direction p0.int_aoa_deg(1)
 p0.active_threat = 'none';
 
 CFG.EbNo      = 0:2:10;      % [dB] per branch

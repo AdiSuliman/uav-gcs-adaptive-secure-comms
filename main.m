@@ -109,15 +109,15 @@ warning('off', 'Simulink:cgxe:LeakedJITEngine');   % internal Simulink notice on
 
 % ---- Monte Carlo / seeds (D35) ----
 CFG.mc_repeats = 5;    % C3d: independent repeats per (threat, Eb/N0); CIs are over these
-CFG.dqn_seeds  = 5;    % C2 : DQN trainings; the best gate-passing seed is saved
+CFG.dqn_seeds  = 3;    % C2 : DQN trainings; best validation return among seeds within the false-alarm limit
 
 % ---- Phase A: link + threats + dataset ----
 
-RUN.init                        = false;    % A0  : regenerate params.mat
+RUN.init                        = true;    % A0  : regenerate params.mat
 RUN.validate_A                  = false;   % A1-A3: build+validate AWGN & Rician links (fast)
 RUN.check_A4                    = false;   % A4  : build threat model + sanity BER (fast)
-RUN.validate_phy                = false;    % A4v : link vs theory, MRC/MMSE, seeds; stops main on FAIL (D41)
-RUN.build_dataset               = false;    % A5  : seeded sub-run dataset (~30min, D42)
+RUN.validate_phy                = true;    % A4v : link vs theory, MRC/MMSE, seeds; stops main on FAIL (D41)
+RUN.build_dataset               = true;    % A5  : seeded sub-run dataset (~30min, D42)
 RUN.extract_spectrograms        = true;    % A6  : spectrograms + 9 link features (~5min, D42-D43)
 
 
@@ -129,12 +129,14 @@ RUN.eval_unseen_snr             = false;   % B4  : detector at Eb/N0 never seen 
 
 
 % ---- Phase C: closed-loop recovery ----
-RUN.train_dqn                   = false;   % C2  : train DQN over CFG.dqn_seeds seeds, full-action targets, keep the best (~25min, D29/D35/D36/D39)
+RUN.build_policy_pools          = true;    % C1p : frame pools for the decision layer, every scenario x configuration x Eb/N0 x geometry (~90min, D44-D45)
+RUN.train_dqn                   = true;    % C2  : sequential Double DQN + shield on the pools, CFG.dqn_seeds seeds + bandit ablation (~20min, D44-D45)
+RUN.evaluate_policies           = true;    % C2e : all policies on the test pools: single, follower, combined, clean (~2min, D44-D45)
 RUN.run_closed_loop_diagnostic  = false;   % C3d : Eb/N0 sweep x CFG.mc_repeats, BER/PLR/goodput + 95% CIs (~17min, D35)
 RUN.eval_speed_robustness       = false;   % C3s : detection/decision/recovery vs UAV speed 50-120 km/h (~10min)
 RUN.run_closed_loop_episodes    = false;   % C3e : episodic loop, dwell/hysteresis, recovery time in cycles (~10min, D31)
 RUN.eval_combined_threats       = false;   % C3m : combined threats + unknown gating, CFG.mc_repeats seeded repeats (~20min, D32/D40)
-RUN.eval_ood_detection          = true;    % OOD : leave-one-threat-out, retrains the detector 8 times (~60min, D32)
+RUN.eval_ood_detection          = false;    % OOD : leave-one-threat-out, retrains the detector 8 times (~60min, D32)
 
 % ---- Phase SURV: survivability boundary mapping (deliverable #7) ----
 RUN.map_survivability           = false;   % SURV: action-based Map A/B + gap analysis (~80min, D30)
@@ -233,9 +235,17 @@ fprintf('\n');
 fprintf('> PHASE C: Closed-Loop Adaptive Recovery (9 threats/classes)\n\n');
 fprintf('  [C1] Rule-based countermeasure policy...           READY (rule_based_policy.m)\n');
 
+if RUN.build_policy_pools
+    fprintf('  [C1p] Measuring the decision-layer frame pools...\n');
+    build_policy_pools;
+end
 if RUN.train_dqn
-    fprintf('  [C2] Training DQN agent (one-hot state, real threat-specific reward table)...\n');
+    fprintf('  [C2] Training the sequential DQN (Double DQN, replay, target network)...\n');
     train_dqn;
+end
+if RUN.evaluate_policies
+    fprintf('  [C2e] Evaluating every policy on the test pools...\n');
+    evaluate_policies;
 end
 if RUN.run_closed_loop_diagnostic
     fprintf('  [C3-diag] Running full diagnostic closed-loop (timing, Q-values, rule comparison)...\n');

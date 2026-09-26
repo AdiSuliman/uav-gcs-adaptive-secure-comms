@@ -12,7 +12,9 @@ function build_threat_model()
 %           Jakes spectrum up to fd; receive correlation p.rx_corr), K = p.rician_k.
 % Threat    signal-side threats scale our signal (antenna_fault hits antenna 1 only);
 %           every additive threat is ONE waveform arriving through its own spatial
-%           channel (direction p.int_aoa_deg(c), own diffuse fading).
+%           channel (own diffuse fading). Interferer directions come from the
+%           Constant block 'AoA': p.int_aoa_deg, or, with p.int_aoa_random, drawn
+%           per seed from p.int_aoa_range_deg by link_seed.m (interferer_aoa.m).
 % Rx        data-aided estimation per window (transmitted symbols known = ideal
 %           pilots): h = LS channel estimate from the OTHER symbols of the window
 %           (leave-one-out, so a symbol never helps estimate its own channel),
@@ -66,6 +68,7 @@ add_block('commchan3/AWGN Channel',                          [modelName '/AWGN']
 add_block('simulink/User-Defined Functions/MATLAB Function', [modelName '/Rx'],      'Position', [710 90 810 150]);
 add_block('simulink/Sources/Constant', [modelName '/Seed'],    'Position', [150 190 220 210]);
 add_block('simulink/Sources/Constant', [modelName '/Doppler'], 'Position', [150 230 220 250]);
+add_block('simulink/Sources/Constant', [modelName '/AoA'],     'Position', [150 270 220 290]);
 add_block('simulink/Sinks/To Workspace', [modelName '/tx_sink'], 'Position', [150 30 230 60]);
 add_block('simulink/Sinks/To Workspace', [modelName '/rx_sink'], 'Position', [870 90 950 120]);
 add_block('simulink/Sinks/To Workspace', [modelName '/Tx_IQ'],   'Position', [300 30 380 60]);
@@ -102,6 +105,7 @@ add_line(modelName, 'Seed/1',      'Channel/2', 'autorouting', 'on');
 add_line(modelName, 'Doppler/1',   'Channel/3', 'autorouting', 'on');
 add_line(modelName, 'Seed/1',      'Threat/2',  'autorouting', 'on');
 add_line(modelName, 'Doppler/1',   'Threat/3',  'autorouting', 'on');
+add_line(modelName, 'AoA/1',       'Threat/4',  'autorouting', 'on');
 add_line(modelName, 'Channel/1',   'Threat/1',  'autorouting', 'on');
 add_line(modelName, 'Threat/1',    'AWGN/1',    'autorouting', 'on');
 add_line(modelName, 'AWGN/1',      'Rx/1',      'autorouting', 'on');
@@ -112,14 +116,18 @@ add_line(modelName, 'Tx/1',        'Tx_IQ/1',   'autorouting', 'on');
 add_line(modelName, 'Rx/2',        'Rx_IQ/1',   'autorouting', 'on');
 
 set_param(modelName, 'SolverType', 'Fixed-step', 'Solver', 'FixedStepDiscrete', 'StopTime', '0.01');
+set_param([modelName '/AoA'], 'Value', mat2str(p.int_aoa_deg(:)', 8));
+set_param([modelName '/AoA'], 'UserDataPersistent', 'on', 'UserData', struct('aoa_random', logical(p.int_aoa_random), ...
+    'aoa_range', p.int_aoa_range_deg, 'aoa_fixed', p.int_aoa_deg(:)'));
 link_seed(modelName, seed, p.fd_max);
 
 %% ---- Save ----
 if ~exist('models', 'dir'); mkdir('models'); end
 save_system(modelName, ['models/' modelName '.slx']);
 fprintf('Model saved to models/%s.slx\n', modelName);
-fprintf('Done. threat=%s, JSR=%.1f dB, K=%.1f dB, fd=%.1f Hz, n_rx=%d, rho=%.2f, Rx=%s.\n', ...
-    p.active_threat, p.jsr_db, p.rician_k, p.fd_max, nr, p.rx_corr, p.rx_combiner);
+fprintf('Done. threat=%s, JSR=%.1f dB, K=%.1f dB, fd=%.1f Hz, n_rx=%d, rho=%.2f, Rx=%s, AoA %s.\n', ...
+    p.active_threat, p.jsr_db, p.rician_k, p.fd_max, nr, p.rx_corr, p.rx_combiner, ...
+    ternary(p.int_aoa_random, 'random per seed', 'fixed'));
 end
 
 %% ===================== Block scripts =====================
@@ -224,16 +232,15 @@ for c = 1:numel(addc)
     fI = sprintf('fI%d', c); pI = sprintf('pI%d', c);
     pers{end+1} = fI; init{end+1} = sprintf('%s = fd * cos(2*pi*rand(32, %d));', fI, nr); %#ok<AGROW>
     pers{end+1} = pI; init{end+1} = sprintf('%s = 2*pi*rand(32, %d);', pI, nr); %#ok<AGROW>
-    aI = steering(p, p.int_aoa_deg(c));
     body{end+1} = [w sos_gains('dI', fI, pI, p) sprintf([ ...
-        'aI = %s;\n' ...
+        'aI = exp(-1j * %.12f * (0:%d).'' * sind(aoa(%d)));\n' ...
         'for k = 1:%d\n' ...
         '    y(:, k) = y(:, k) + w .* (%.10f * aI(k) + %.10f * dI(:, k));\n' ...
-        'end\n'], cvec(aI), nr, sqrt(Ki/(Ki+1)), sqrt(1/(Ki+1)))]; %#ok<AGROW>
+        'end\n'], 2*pi*p.ant_spacing_wl, nr-1, c, nr, sqrt(Ki/(Ki+1)), sqrt(1/(Ki+1)))]; %#ok<AGROW>
 end
 
 pers = [{'nI'}, pers]; init = [{'nI = 0;'}, init];
-head = sprintf('function y = fcn(u, seed, fd)\n%%#codegen\npersistent seeded\n');
+head = sprintf('function y = fcn(u, seed, fd, aoa)\n%%#codegen\npersistent seeded\n');
 for i = 1:numel(pers)
     head = [head sprintf('persistent %s\n', pers{i})]; %#ok<AGROW>
 end
@@ -354,9 +361,13 @@ function p = antenna_defaults(p)
 % Defaults for params.mat files written before D41.
 d = struct('n_rx', 2, 'ant_spacing_wl', 0.5, 'rx_corr', 0.3, 'gcs_aoa_deg', 0, ...
     'int_aoa_deg', [40 -55 70], 'int_rician_k', p.rician_k, 'rx_combiner', 'mrc', ...
-    'csi_block', 64, 'mmse_window', 32, 'seed', []);
+    'csi_block', 64, 'mmse_window', 32, 'seed', [], 'int_aoa_random', false, 'int_aoa_range_deg', [-90 90]);
 f = fieldnames(d);
 for i = 1:numel(f)
     if ~isfield(p, f{i}), p.(f{i}) = d.(f{i}); end
 end
+end
+
+function out = ternary(c, a, b)
+if c, out = a; else, out = b; end
 end

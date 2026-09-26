@@ -80,7 +80,9 @@ params.n_rx           = 2;            % UAV receive antennas (3 supported)
 params.ant_spacing_wl = 0.5;          % element spacing [wavelengths] (6.25 cm @ 2.4 GHz)
 params.rx_corr        = 0.3;          % diffuse-fading correlation between adjacent antennas
 params.gcs_aoa_deg    = 0;            % GCS direction from array broadside [deg]
-params.int_aoa_deg    = [40 -55 70];  % direction of interferer 1..3 (components of a threat) [deg]
+params.int_aoa_deg    = [40 -55 70];  % fixed direction of interferer 1..3 (components of a threat) [deg]
+params.int_aoa_random = true;         % interferer directions drawn per seeded sub-run (D45, interferer_aoa.m)
+params.int_aoa_range_deg = [-90 90];  % range of the random directions (broadside angle) [deg]
 params.int_rician_k   = params.rician_k;  % K-factor of the interferer -> UAV channels (dB)
 params.rx_combiner    = 'mrc';        % 'mrc' baseline | 'mmse' (spatial_diversity action)
 params.csi_block      = 64;           % [symbols] channel-estimation window (MRC)
@@ -119,6 +121,9 @@ if params.verbose
     fprintf('Channel:          Rician (K=%.1f dB), GCS -> UAV uplink\n', params.rician_k);
     fprintf('UAV antennas:     %d (spacing %.2f wl, rho %.2f), Rx %s\n', params.n_rx, ...
             params.ant_spacing_wl, params.rx_corr, upper(params.rx_combiner));
+    if params.int_aoa_random
+        fprintf('Interferer AoA:   random per sub-run, %d to %d deg\n', params.int_aoa_range_deg);
+    end
     fprintf('Carrier Freq:     %.1f GHz\n', params.carrier_freq/1e9);
     fprintf('Range:            %d m [FUTURE]\n', params.nominal_range);
     fprintf('UAV Velocity:     %.1f m/s (%.1f km/h) nominal | envelope %.1f-%.1f km/h (%.1f-%.1f m/s)\n', ...
