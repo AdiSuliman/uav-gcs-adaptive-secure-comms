@@ -1,5 +1,5 @@
 === EPISODIC CLOSED LOOP: RECOVERY TIME IN DECISION CYCLES (proposal KPI #3, D31) ===
-Generated: 25-Sep-2026 22:50:42
+Generated: 26-Sep-2026 01:49:59
 20 clean cycles, threat onset, 60 cycles after onset | 1 cycle = 1 frame (0.516 ms of signal)
 Hysteresis: commit after 3 consecutive proposals, no switch within 10 cycles of the previous one
 Outcome per episode: recovered (5-cycle BER average back to <= 2x clean for 10 cycles, T_recover from onset) | not recovered | not degraded (never above 2x clean) | pre-configured (countermeasure already active at onset).
@@ -8,48 +8,48 @@ T_detect = first cycle with the exact class. Medians in cycles after onset; T_re
 --- Per threat and Eb/N0 (with hysteresis): DQN vs rule-based ---
 threat                Eb/N0 |  det  act   rec R/NR/ND   |  det  act   rec R/NR/ND  
                             | DQN                        | Rule                      
-jamming                 0 dB |    -    3     6 5/0/0     |    -    3     6 5/0/0    
+jamming                 0 dB |    -    3     6 5/0/0     |    -    3     6 4/0/1    
 jamming                 4 dB |    -    3     8 5/0/0     |    -    3     8 5/0/0    
-jamming                10 dB |    -    3     8 3/2/0     |    -    3    16 2/1/0    
+jamming                10 dB |    -    3    16 5/0/0     |    -    3    12 4/0/0    
 reactive_jamming        0 dB |    1    3     6 5/0/0     |    1    3     6 5/0/0    
 reactive_jamming        4 dB |    1    3     8 5/0/0     |    1    3     8 5/0/0    
-reactive_jamming       10 dB |    1    3    10 5/0/0     |    1    3    10 5/0/0    
+reactive_jamming       10 dB |    1    3     8 5/0/0     |    1    3     8 5/0/0    
 sweeping_jammer         0 dB |    1    5     - 0/0/5     |    1    4     - 0/0/5    
-sweeping_jammer         4 dB |    1    5     7 3/0/2     |    1    5    17 5/0/0    
-sweeping_jammer        10 dB |    1    4    20 5/0/0     |    1    4     - 0/5/0    
-noise_burst             0 dB |   14    4     - 0/0/5     |   10    4     - 0/0/5    
-noise_burst             4 dB |   10    7    18 5/0/0     |   10    4    49 1/4/0    
-noise_burst            10 dB |   10    3    30 2/3/0     |   10    3     - 0/5/0    
-path_loss               0 dB |    1    5    19 5/0/0     |    1    5    21 5/0/0    
-path_loss               4 dB |    1    4    20 5/0/0     |    1    4     - 0/5/0    
-path_loss              10 dB |   10    4    26 4/1/0     |   10    4     - 0/5/0    
-spoofing                0 dB |    1    3     5 1/0/4     |    1    3     5 1/0/4    
+sweeping_jammer         4 dB |    1    5    28 2/0/3     |    1    5    16 5/0/0    
+sweeping_jammer        10 dB |    1   10    15 5/0/0     |    1    4     - 0/5/0    
+noise_burst             0 dB |   14    4     - 0/0/5     |   10    4     9 1/0/4    
+noise_burst             4 dB |   13    4    17 5/0/0     |   10    4    49 1/4/0    
+noise_burst            10 dB |   10    3    16 5/0/0     |   10    3     - 0/5/0    
+path_loss               0 dB |    1    6    18 5/0/0     |    1    4    20 5/0/0    
+path_loss               4 dB |    1    5    22 4/1/0     |    1    5     - 0/5/0    
+path_loss              10 dB |    9    5    48 2/3/0     |    9    5     - 0/5/0    
+spoofing                0 dB |    1    3     - 0/0/5     |    1    3     - 0/0/5    
 spoofing                4 dB |    1    3     8 5/0/0     |    1    3     8 5/0/0    
 spoofing               10 dB |    1    3     8 5/0/0     |    1    3     8 5/0/0    
-antenna_fault           0 dB |    2    6     - 0/0/5     |    2    6     - 0/0/5    
-antenna_fault           4 dB |    1    3     9 1/0/4     |    1    3     9 1/0/4    
+antenna_fault           0 dB |    2    7     - 0/0/5     |    2    7     - 0/0/5    
+antenna_fault           4 dB |    1    3     8 2/0/3     |    1    3     7 1/0/4    
 antenna_fault          10 dB |    1    3     8 5/0/0     |    1    3     8 5/0/0    
-benign_interference     4 dB |    1    3     8 4/0/1     |    1    4     7 5/0/0    
+benign_interference     4 dB |    1    3     8 4/0/1     |    1    4     8 5/0/0    
 benign_interference    10 dB |    1    5    10 5/0/0     |    1    3     8 5/0/0    
 R/NR/ND = recovered / not recovered / not degraded (pre-configured episodes are listed in the summary).
 
 --- Summary: episodes that need action (hostile, or benign on a degraded link) ---
 configuration             T_act  T_rec recovered  not recov. not degr.  pre-cfg switches  final/cln  goodput
-dqn | hysteresis              3      8    83/89            6        26        0     1.55       1.11     0.94
-dqn | no hysteresis           1     12    30/38            8        39       38    11.21       1.01     0.86
-rule | hysteresis             3      8    65/90           25        23        2     1.45       1.20     0.85
-rule | no hysteresis          1      6    17/32           15        36       47     9.29       1.41     0.90
+dqn | hysteresis              3      8    84/88            4        27        0     1.44       1.06     0.91
+dqn | no hysteresis           1      9    25/37           12        32       46    10.23       0.84     0.82
+rule | hysteresis             3      8    66/90           24        24        1     1.49       1.19     0.85
+rule | no hysteresis          1      6    20/34           14        27       54     9.19       1.43     0.89
 Wall-clock: at ~11 ms decision latency a real-time loop decides every ~22 frames; a median of N cycles is ~N x 11 ms.
 
 --- False alarms: switches on a healthy link ---
 configuration            healthy-link episodes   with >= 1 false switch   pre-onset switches
-dqn | hysteresis                           20                        1                    0
-dqn | no hysteresis                        20                        8                   44
-rule | hysteresis                          20                        5                    4
-rule | no hysteresis                       20                        8                   90
+dqn | hysteresis                           20                        2                    0
+dqn | no hysteresis                        20                       13                   53
+rule | hysteresis                          20                        3                    1
+rule | no hysteresis                       20                       15                   89
 
 --- Hysteresis effect (proposal risk 8: oscillation) ---
-  dqn | hysteresis         switches after onset 1.55 | episodes with > 1 switch 40/115 | pre-configured at onset 0
-  dqn | no hysteresis      switches after onset 11.21 | episodes with > 1 switch 83/115 | pre-configured at onset 38
-  rule | hysteresis        switches after onset 1.45 | episodes with > 1 switch 52/115 | pre-configured at onset 2
-  rule | no hysteresis     switches after onset 9.29 | episodes with > 1 switch 93/115 | pre-configured at onset 47
+  dqn | hysteresis         switches after onset 1.44 | episodes with > 1 switch 33/115 | pre-configured at onset 0
+  dqn | no hysteresis      switches after onset 10.23 | episodes with > 1 switch 87/115 | pre-configured at onset 46
+  rule | hysteresis        switches after onset 1.49 | episodes with > 1 switch 53/115 | pre-configured at onset 1
+  rule | no hysteresis     switches after onset 9.19 | episodes with > 1 switch 91/115 | pre-configured at onset 54

@@ -15,7 +15,10 @@
 %     beyond 2x clean -> class 'unknown': DQN with an all-zero one-hot, rule
 %     reacting to link degradation only; D33).
 % Every action is also simulated on every combined threat, so each decision is
-% scored by the link it actually produces (BER / clean).
+% scored by the link it actually produces (BER / clean) in the same repeat.
+% Monte Carlo: CFG.mc_repeats seeded repeats (default 5); within a repeat every
+% action and the clean link share the seed (common random numbers). Restored
+% shares are reported as mean [95% t-interval] over repeats and pooled (Wilson).
 %
 % Output: results/combined_threats.{txt,mat}
 
@@ -25,7 +28,9 @@ fprintf('=== Combined threats and the unknown-threat path (D32) ===\n\n');
 %% 1. Configuration, models, parameters
 COMBOS = {'jamming+path_loss', 'noise_burst+antenna_fault', 'sweeping_jammer+path_loss', 'spoofing+noise_burst'};
 EBNO_LIST = [0 4 10];
-N_RUNS = 2;
+N_MC = 5;
+if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'mc_repeats'), N_MC = CFG.mc_repeats; end
+SEED_BASE = 50000;
 RATIO_OK = 2;
 temporal_window = 10; delay_bits = 20;
 
@@ -44,49 +49,50 @@ links = [COMBOS, {'none'}];
 nL = numel(links); nS = numel(EBNO_LIST);
 modes = {'DQN (class)', 'DQN (unknown gating)', 'Rule (class)', 'Rule (unknown gating)'};
 
-%% 2. Simulate every link x action x Eb/N0; keep the unmitigated frames for detection
-ber_tab = nan(nL, nA, nS);
-F = cell(nL, nS);                         % unmitigated runs: per-run frame sequences
+%% 2. Simulate every link x action x Eb/N0 x repeat; keep the unmitigated frames for detection
+ber_mc = nan(nL, nA, nS, N_MC);
+F = cell(nL, nS, N_MC);                   % unmitigated frame sequences per repeat
 t0 = tic;
-for l = 1:nL
-    p = p0; p.active_threat = links{l};
-    for a = 1:nA
-        [p2, g_db] = apply_countermeasure(p, links{l}, actions{a});
-        params = p2; save('params.mat', 'params');
-        evalc('build_threat_model');
-        for s = 1:nS
-            snr_dB = EBNO_LIST(s) + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps);
-            set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p2.sps));
-            b_all = [];
-            runs = {};
-            for r = 1:N_RUNS
+for mc = 1:N_MC
+    for l = 1:nL
+        p = p0; p.active_threat = links{l};
+        for a = 1:nA
+            [p2, g_db] = apply_countermeasure(p, links{l}, actions{a});
+            params = p2; save('params.mat', 'params');
+            rng(SEED_BASE + 10000*mc, 'twister');
+            evalc('build_threat_model');
+            for s = 1:nS
+                snr_dB = EBNO_LIST(s) + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps);
+                set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p2.sps));
+                seed_blocks(modelName, SEED_BASE + 10000*mc + 100*s);
                 out = sim(modelName);
                 [iq_f, ber_f, rssi_f, plr_f] = extract_closed_loop_frames(out, p2, delay_bits);
-                b_all = [b_all; ber_f(:)]; %#ok<AGROW>
+                ber_mc(l, a, s, mc) = mean(ber_f(:), 'omitnan');
                 if strcmp(actions{a}, 'no_action')
-                    runs{end+1} = struct('iq', {iq_f}, 'ber', ber_f(:)', 'rssi', rssi_f(:)', 'plr', plr_f(:)'); %#ok<SAGROW>
+                    F{l, s, mc} = struct('iq', {iq_f}, 'ber', ber_f(:)', 'rssi', rssi_f(:)', 'plr', plr_f(:)');
                 end
             end
-            ber_tab(l, a, s) = mean(b_all, 'omitnan');
-            if strcmp(actions{a}, 'no_action'), F{l, s} = runs; end
         end
     end
-    fprintf('  [%d/%d] %-28s simulated (%.1f min)\n', l, nL, links{l}, toc(t0)/60);
+    fprintf('  repeat %d/%d simulated (%.1f min)\n', mc, N_MC, toc(t0)/60);
 end
 params = p0; save('params.mat', 'params');
 na = find(strcmp(actions, 'no_action'), 1);
-clean = squeeze(ber_tab(strcmp(links, 'none'), na, :))';
+clean_mc = squeeze(ber_mc(strcmp(links, 'none'), na, :, :));            % nS x N_MC
+ratio_mc = ber_mc ./ reshape(clean_mc, 1, 1, nS, N_MC);
+ber_tab = mean(ber_mc, 4);
+clean = mean(clean_mc, 2)';
 ratio = ber_tab ./ reshape(clean, 1, 1, nS);
 
 %% 3. Detection and the four decision modes on every unmitigated frame
-Dec = struct('link', {}, 'ebno', {}, 'cls', {}, 'msp', {}, 'energy', {}, 'unknown', {}, 'act', {}, 'ratio', {});
-for l = 1:nL
-    for s = 1:nS
-        ebno = EBNO_LIST(s);
-        for r = 1:numel(F{l, s})
-            R = F{l, s}{r};
-            nf = numel(R.ber);
-            for k = 1:nf
+Dec = struct('mc', {}, 'link', {}, 'ebno', {}, 'cls', {}, 'msp', {}, 'energy', {}, 'unknown', {}, 'act', {}, 'ratio', {});
+for mc = 1:N_MC
+    for l = 1:nL
+        for s = 1:nS
+            ebno = EBNO_LIST(s);
+            R = F{l, s, mc};
+            cl = clean_mc(s, mc);
+            for k = 1:numel(R.ber)
                 if isnan(R.ber(k)), continue; end
                 w0 = max(1, k - temporal_window + 1);
                 var_rssi = var(R.rssi(w0:k), 0);
@@ -96,13 +102,13 @@ for l = 1:nL
                 [cls, ~, ~, msp, en] = detect_frame(D.net, D.classes, R.iq{k}, raw, feat_mean, feat_std, fs);
                 unk = msp < T.msp;
                 % Unknown gating (D33): low confidence AND a degraded link (BER > 2x clean)
-                cls_g = cls; if unk && R.ber(k) > RATIO_OK * clean(s), cls_g = 'unknown'; end
+                cls_g = cls; if unk && R.ber(k) > RATIO_OK * cl, cls_g = 'unknown'; end
                 acts = {dqn_act(agent, cls, R.ber(k), R.rssi(k), ebno, R.plr(k)), ...
                         dqn_act(agent, cls_g, R.ber(k), R.rssi(k), ebno, R.plr(k)), ...
                         rule_based_policy(cls, R.ber(k), ebno), ...
                         rule_based_policy(cls_g, R.ber(k), ebno)};
-                rt = cellfun(@(x) ratio(l, strcmp(actions, x), s), acts);
-                Dec(end+1) = struct('link', links{l}, 'ebno', ebno, 'cls', cls, 'msp', msp, 'energy', en, ...
+                rt = cellfun(@(x) ratio_mc(l, strcmp(actions, x), s, mc), acts);
+                Dec(end+1) = struct('mc', mc, 'link', links{l}, 'ebno', ebno, 'cls', cls, 'msp', msp, 'energy', en, ...
                     'unknown', unk, 'act', {acts}, 'ratio', rt); %#ok<SAGROW>
             end
         end
@@ -112,8 +118,8 @@ end
 %% 4. Report
 rep = {};
 rep{end+1} = '=== COMBINED THREATS AND THE UNKNOWN-THREAT PATH (proposal risk 13; D32) ===';
-rep{end+1} = sprintf('Generated: %s | %d runs per cell | components at nominal severity | thresholds MSP %.3f, energy %.2f', ...
-    datestr(now), N_RUNS, T.msp, T.energy);
+rep{end+1} = sprintf('Generated: %s | %d seeded repeats per cell | components at nominal severity | thresholds MSP %.3f, energy %.2f', ...
+    datestr(now), N_MC, T.msp, T.energy);
 rep{end+1} = sprintf('Link state = BER / clean (<= %g restored). Decisions scored with the simulated BER of the chosen action.', RATIO_OK);
 rep{end+1} = '';
 
@@ -129,7 +135,7 @@ for l = 1:nL
 end
 rep{end+1} = '';
 
-rep{end+1} = '--- 2. What each action achieves (BER / clean; * = best) ---';
+rep{end+1} = '--- 2. What each action achieves (mean BER over repeats / clean; * = best) ---';
 hdr = sprintf('%-28s %6s', 'link', 'Eb/N0');
 for a = 1:nA, hdr = [hdr sprintf('%19s', actions{a})]; end %#ok<AGROW>
 rep{end+1} = hdr;
@@ -165,16 +171,23 @@ end
 rep{end+1} = '';
 
 rep{end+1} = '--- 4. Summary over all combined-threat frames ---';
-rep{end+1} = sprintf('%-24s %18s %16s %20s', 'policy', 'link restored', 'median BER/clean', 'no_action on attack');
-mc = ~strcmp({Dec.link}, 'none');
-rt_best = arrayfun(@(d) min(ratio(strcmp(links, d.link), :, EBNO_LIST == d.ebno)), Dec(mc));
+rep{end+1} = sprintf('%-24s %14s %22s %24s %16s %20s', 'policy', 'link restored', 'pooled % [Wilson]', ...
+    'per repeat % [t 95% CI]', 'median BER/clean', 'no_action on attack');
+atk = ~strcmp({Dec.link}, 'none');
+mcv = [Dec(atk).mc];
+rt_best = arrayfun(@(d) min(ratio_mc(strcmp(links, d.link), :, EBNO_LIST == d.ebno, d.mc)), Dec(atk));
+restored_mc = zeros(numel(modes), N_MC);
 for md = 1:numel(modes)
-    rt = arrayfun(@(d) d.ratio(md), Dec(mc));
-    noact = cellfun(@(c) strcmp(c{md}, 'no_action'), {Dec(mc).act});
-    rep{end+1} = sprintf('%-24s %11d/%-5d %16.2f %15d/%-5d', modes{md}, sum(rt <= RATIO_OK), numel(rt), ...
+    rt = arrayfun(@(d) d.ratio(md), Dec(atk));
+    ok = rt <= RATIO_OK;
+    for mc = 1:N_MC, restored_mc(md, mc) = 100 * mean(ok(mcv == mc)); end
+    [pw, lw, hw] = stats_ci('wilson', sum(ok), numel(ok));
+    noact = cellfun(@(c) strcmp(c{md}, 'no_action'), {Dec(atk).act});
+    rep{end+1} = sprintf('%-24s %8d/%-5d %22s %24s %16.2f %15d/%-5d', modes{md}, sum(ok), numel(ok), ...
+        sprintf('%.1f [%.1f, %.1f]', 100*pw, 100*lw, 100*hw), stats_ci('fmt', restored_mc(md, :), [0 100]), ...
         median(rt), sum(noact), numel(rt)); %#ok<SAGROW>
 end
-rep{end+1} = sprintf('%-24s %11d/%-5d %16.2f', 'best single action', sum(rt_best <= RATIO_OK), numel(rt_best), median(rt_best));
+rep{end+1} = sprintf('%-24s %8d/%-5d', 'best single action', sum(rt_best <= RATIO_OK), numel(rt_best));
 rep{end+1} = '';
 
 rep{end+1} = '--- 5. Control: clean link (false unknowns and false actions) ---';
@@ -189,11 +202,31 @@ end
 if ~exist('results', 'dir'), mkdir('results'); end
 fid = fopen('results/combined_threats.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('\n%s\n', rep{:});
-save('results/combined_threats.mat', 'Dec', 'ber_tab', 'ratio', 'clean', 'links', 'actions', 'EBNO_LIST', 'T', 'modes');
+save('results/combined_threats.mat', 'Dec', 'ber_tab', 'ratio', 'clean', 'ber_mc', 'ratio_mc', 'clean_mc', ...
+    'restored_mc', 'N_MC', 'links', 'actions', 'EBNO_LIST', 'T', 'modes');
 fprintf('\nSaved results/combined_threats.{txt,mat} (%.1f min)\n', toc(t0)/60);
 
 
 %% ===== Local functions =====
+function seed_blocks(modelName, seed)
+% Seeds the AWGN channel and the bit source (same matching as the diagnostic).
+blks = {[modelName '/AWGN'], [modelName '/BitSource']};
+for b = 1:numel(blks)
+    try
+        dp = fieldnames(get_param(blks{b}, 'DialogParameters'));
+        for j = 1:numel(dp)
+            if strcmpi(dp{j}, 'RandomStream')
+                try, set_param(blks{b}, dp{j}, 'mt19937ar with seed'); catch, end
+            end
+        end
+        for j = 1:numel(dp)
+            if strcmpi(dp{j}, 'seed'), set_param(blks{b}, dp{j}, num2str(seed + b)); end
+        end
+    catch
+    end
+end
+end
+
 function a = dqn_act(agent, cls, ber, rssi, ebno, plr)
 st = build_dqn_state(cls, ber, rssi, ebno, plr);
 q = gather(extractdata(predict(agent.qNetwork, dlarray(single(st), 'CB'))));

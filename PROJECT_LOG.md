@@ -646,5 +646,10 @@ Second run (2026-09-25, stopped during SURV): gate PASS on 5/5 seeds, mean regre
 
 Final D39 run (2026-09-26, agent from the second run, rule as D38): KPI #2 DQN 98.1% [97.9, 98.3] vs rule 86.4% (paired +11.7 [11.4, 12.1]); 206/210 restored, PLR 179/210, goodput kept 97.4% vs 75.9%; episodes 83/89 vs 65/90 recovered, T_act 3 / T_rec 8; latency 4.98 ms; FAR 0/120 (upper 3.1%); speed sweep 97.9%, 0/48 false alarms; Map A 86.7% / Map B 93.3%; combined threats DQN 93/456, rule 38/456 (DQN 161/456 in the second run with identical decisions: cells near the 2× threshold). Dashboard labels updated for the new action set.
 
+### D40 — combined threats with seeded repeats (code complete)
+`eval_combined_threats.m`: `CFG.mc_repeats` seeded repeats with common random numbers, restored share with Wilson and per-repeat t-intervals; `measure_all_kpis.m` reports the interval.
+
+Full run 2026-09-26 (all D39 preset stages, new agent): seeds 4/5 pass (seed 44: sweeping_jammer 2 dB, regret 15), selected 45; KPI #2 DQN 98.7% [98.6, 98.8] vs rule 86.4%, paired +12.3 [12.0, 12.7]; 205/210 restored, PLR 181/210, goodput 95.5%; episodes 84/88 vs 66/90, T_act 3 / T_rec 8; latency 8.10 ms; FAR 0/120; speed 98.5%, 0/48 false alarms; Map A 86.7% / B 93.3%; combined threats DQN 26.5% [24.0, 29.1] (per repeat 26.5 [18.1, 34.9]) vs rule 8.3%, best single action 50%. Reference run for the reports.
+
 ### Next
 Run the D39 preset, compare with D38 (noise_burst, path_loss, combined threats), commit.

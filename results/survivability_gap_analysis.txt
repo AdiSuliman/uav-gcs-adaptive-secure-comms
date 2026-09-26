@@ -4,12 +4,12 @@ but not with any goodput-free action (Map A: non-recoverable): survival bought
 with throughput -- the goodput trade-off named in the proposal.
 
 noise_burst: 7 gap cell(s)
-  level=8, Eb/N0=8dB: Map A 5.76x (spatial_diversity+power_control) | Map B 0.51x (spatial_diversity+fec_interleave)
-  level=12, Eb/N0=8dB: Map A 9.27x (spatial_diversity+power_control) | Map B 0.43x (spatial_diversity+fec_interleave)
-  level=16, Eb/N0=8dB: Map A 11.70x (spatial_diversity+power_control) | Map B 0.29x (spatial_diversity+fec_interleave)
-  level=4, Eb/N0=10dB: Map A 8.87x (spatial_diversity+power_control) | Map B 0.75x (spatial_diversity+fec_interleave)
-  level=8, Eb/N0=10dB: Map A 19.34x (spatial_diversity+power_control) | Map B 0.98x (spatial_diversity+fec_interleave)
-  level=12, Eb/N0=10dB: Map A 30.47x (spatial_diversity+power_control) | Map B 0.83x (spatial_diversity+fec_interleave)
-  level=16, Eb/N0=10dB: Map A 40.11x (spatial_diversity+power_control) | Map B 0.83x (spatial_diversity+fec_interleave)
+  level=8, Eb/N0=8dB: Map A 5.74x (spatial_diversity+power_control) | Map B 0.33x (spatial_diversity+fec_interleave)
+  level=12, Eb/N0=8dB: Map A 9.27x (spatial_diversity+power_control) | Map B 0.51x (spatial_diversity+fec_interleave)
+  level=16, Eb/N0=8dB: Map A 11.95x (spatial_diversity+power_control) | Map B 0.47x (spatial_diversity+fec_interleave)
+  level=4, Eb/N0=10dB: Map A 8.82x (spatial_diversity+power_control) | Map B 0.75x (spatial_diversity+fec_interleave)
+  level=8, Eb/N0=10dB: Map A 18.86x (spatial_diversity+power_control) | Map B 0.82x (spatial_diversity+fec_interleave)
+  level=12, Eb/N0=10dB: Map A 31.53x (spatial_diversity+power_control) | Map B 0.86x (spatial_diversity+fec_interleave)
+  level=16, Eb/N0=10dB: Map A 39.31x (spatial_diversity+power_control) | Map B 0.86x (spatial_diversity+fec_interleave)
 
 Total gap cells: 7

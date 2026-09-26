@@ -124,8 +124,8 @@ RUN.train_dqn                   = true;    % C2  : train DQN over CFG.dqn_seeds 
 RUN.run_closed_loop_diagnostic  = true;    % C3d : Eb/N0 sweep x CFG.mc_repeats, BER/PLR/goodput + 95% CIs (~17min, D35)
 RUN.eval_speed_robustness       = true;    % C3s : detection/decision/recovery vs UAV speed 50-120 km/h (~10min)
 RUN.run_closed_loop_episodes    = true;    % C3e : episodic loop, dwell/hysteresis, recovery time in cycles (~10min, D31)
-RUN.eval_combined_threats       = true;    % C3m : combined threats + unknown gating, detection and decisions (~3min, D32)
-RUN.eval_ood_detection          = true;   % OOD : leave-one-threat-out, retrains the detector 8 times (~60min, D32)
+RUN.eval_combined_threats       = true;    % C3m : combined threats + unknown gating, CFG.mc_repeats seeded repeats (~20min, D32/D40)
+RUN.eval_ood_detection          = false;   % OOD : leave-one-threat-out, retrains the detector 8 times (~60min, D32)
 
 % ---- Phase SURV: survivability boundary mapping (deliverable #7) ----
 RUN.map_survivability           = true;    % SURV: action-based Map A/B + gap analysis (~80min, D30)

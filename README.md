@@ -78,27 +78,29 @@ An AI-driven closed-loop system for detecting and adapting to link-layer threats
 
 ---
 
-## Latest Results — action set v2 (D39, run 2026-09-25/26)
+## Latest Results — action set v2 (D39–D40, full run 2026-09-26)
 
-16 actions: no_action, channel_switch, rate_reduce, freq_diversity, spatial_diversity, power_control (+6 dB), fec_interleave (rate-1/2 K=7, interleaved, erasure decoding) and 9 two-action pairs. Detector unchanged from D38. The rule baseline is the D38 rule (FEC alone at low Eb/N0 is past the code threshold and makes the link worse).
+16 actions: no_action, channel_switch, rate_reduce, freq_diversity, spatial_diversity, power_control (+6 dB), fec_interleave (rate-1/2 K=7, interleaved, erasure decoding) and 9 two-action pairs. Detector unchanged from D38. The rule baseline is the D38 rule (FEC alone at low Eb/N0 is past the code threshold and makes the link worse). One `main.m` run: DQN training → closed loop → speed sweep → episodes → combined threats → survivability maps → KPIs → dashboard.
 
 | KPI | Result | D38 (5 actions) |
 |---|---|---|
 | #1 detection | 96.33% [95.60, 97.03], macro-F1 96.31% | same |
-| #2 BER recovery vs clean (DQN) | **98.1% [97.9, 98.3]**, 206/210 restored, 0 missed | 86.4%, 157/210 |
-| #2 packet loss restored | 179/210 (85.2%) | 150/210 |
-| #2 goodput kept vs no attack | DQN 97.4% · rule 75.9% · no action 20.4% | 78.3% / 75.9% |
-| DQN − rule recovery (paired) | **+11.7 [11.4, 12.1]** points (rule 86.4%) | 0.0 |
-| #3 episodes (hysteresis) | DQN 83/89 recovered (93%) vs rule 65/90 (72%); T_act 3, T_rec 8 cycles | 74% vs 76% |
-| #3 decision latency | 4.98 ms mean (CNN 4.1 + DQN 0.85) | 14.6 ms |
+| #2 BER recovery vs clean (DQN) | **98.7% [98.6, 98.8]**, 205/210 restored, 0 missed | 86.4%, 157/210 |
+| #2 packet loss restored | 181/210 (86.2%) | 150/210 |
+| #2 goodput kept vs no attack | DQN 95.5% · rule 75.9% · no action 20.4% | 78.3% / 75.9% |
+| DQN − rule recovery (paired) | **+12.3 [12.0, 12.7]** points (rule 86.4%) | 0.0 |
+| #3 episodes (hysteresis) | DQN 84/88 recovered (95% [89, 98]) vs rule 66/90 (73% [63, 81]); T_act 3, T_rec 8 cycles | 74% vs 76% |
+| #3 decision latency | 8.10 ms mean (DQN 0.89 ms) | 14.6 ms |
 | #4 FAR | 0/120 healthy-link trials, 95% upper 3.1% | same |
 | #5 end-to-end | MET | MET |
-| DQN seeds | 5/5 pass the gate, mean regret 0.1 | 5/5 |
-| Speed 50–120 km/h | detection 98.6%, KPI #2 97.9%, 0/48 false alarms | 86.2% |
+| DQN seeds | 4/5 pass the gate (seed 44: one cell, regret 15), selected seed 45, mean regret 0.1 | 5/5 |
+| Speed 50–120 km/h | detection 99.5%, KPI #2 98.5% (166/167 restored), 0/48 false alarms | 86.2% |
 | Survivability Map A / B | **86.7% / 93.3%** recoverable | 78.3% / 80.8% |
-| Combined threats (DQN / rule) | 93/456 / 38/456 decisions restore the link | 38 / 38 |
+| Combined threats, restored decisions (D40, 5 seeded repeats) | DQN 302/1140 = 26.5% [24.0, 29.1]; rule 95/1140 = 8.3% [6.9, 10.1]; best single action 570/1140 | 38/456 both |
 
-Per threat (DQN): jamming 99.2%, reactive 99.4%, sweeping 96.3% (rule 82.4%), **noise_burst 99.9%** (spatial+power at 0–2 dB, spatial+FEC above; rule 56.1%), **path_loss 93.4%** (spatial+power; rule 69.0%), spoofing 99.7%, antenna_fault 99.0%. Map B: every threat 100% recoverable except path_loss (47%, severe attenuation at high Eb/N0); Map A adds noise_burst 57% and sweeping 90% — 7 noise_burst cells survive only through FEC. Combined threats vary between runs (93 and 161 of 456 on the same agent) because several cells sit near the 2× threshold; decisions were identical in both runs.
+Per threat (DQN): jamming 99.2%, reactive 99.4%, **sweeping 100.0%** (rule 82.4%), **noise_burst 99.7%** (spatial+power at low Eb/N0, spatial+FEC above; rule 56.1%), **path_loss 93.6%** (spatial+power; rule 69.0%), spoofing 99.7%, antenna_fault 99.3%. Map B: every threat 100% recoverable except path_loss (47%, severe attenuation at high Eb/N0); Map A adds noise_burst 57% and sweeping 90% — 7 noise_burst cells survive only through FEC.
+
+Combined threats remain the limit: the detector names the dominant component, and the agent, trained on single threats, reaches the best available action in about half the cases it could (26.5% vs 50% for the best single action; pairs help most on spoofing+noise_burst and noise_burst+antenna_fault). The loop never freezes (0/1140 no_action on an attack).
 
 ## Earlier results (dataset and detector: 2026-09-21 full re-run; decision, closed loop and maps: 2026-09-23/24 on the D28–D30 model)
 

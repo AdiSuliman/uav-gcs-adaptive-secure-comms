@@ -1,5 +1,5 @@
 === SURVIVABILITY BOUNDARY MAP — MAP B — ANY ACTION (incl. rate reduction and FEC) ===
-Generated: 26-Sep-2026 00:37:51
+Generated: 26-Sep-2026 03:05:31
 Actions included: channel_switch, rate_reduce, freq_diversity, spatial_diversity, power_control, fec_interleave, channel_switch+rate_reduce, channel_switch+power_control, channel_switch+fec_interleave, freq_diversity+rate_reduce, freq_diversity+power_control, freq_diversity+fec_interleave, spatial_diversity+rate_reduce, spatial_diversity+power_control, spatial_diversity+fec_interleave (apply_countermeasure.m, D28/D39)
 
 A state is classified by the best post-countermeasure BER relative to the clean link:
@@ -7,84 +7,84 @@ A state is classified by the best post-countermeasure BER relative to the clean 
 Letters after the status = action achieving it: C channel_switch, F freq_diversity, S spatial_diversity, R rate_reduce, P power_control, E fec_interleave (two letters = pair).
 
 Clean-link reference BER per Eb/N0:
-   0 dB : 1.2513e-01
-   2 dB : 8.0069e-02
-   4 dB : 4.5910e-02
-   6 dB : 2.3715e-02
-   8 dB : 9.1595e-03
-  10 dB : 2.7132e-03
+   0 dB : 1.2457e-01
+   2 dB : 7.9763e-02
+   4 dB : 4.6338e-02
+   6 dB : 2.3286e-02
+   8 dB : 9.2513e-03
+  10 dB : 2.7336e-03
 
 --- Boundary map, per threat (rows = severity level, cols = Eb/N0) ---
 jamming:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  0              RFR     RCR     RCE     RCE     RCE     RCR
-  4              RCR     RCR     RCE     RCE     RCE     RCR
-  8              RFP     RCP     RCE     RCE     RCE     RCR
-  12             RFR     RFP     RCE     RCE     RCE     RCR
-  16             RFP     RCP     RFP     RCE     RCE     RCE
+  0              RFR     RCR     RFE     RCE     RCR     RCR
+  4              RFP     RFR     RFE     RCE     RCR     RCR
+  8              RCP     RFR     RCE     RCE     RCE     RCR
+  12             RFP     RCR     RCP     RFE     RCE     RCR
+  16             RCP     RFP     RFE     RFE     RCE     RCE
   -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
 
 noise_burst:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  0              RSR     RSR     RSR     RSE     RSE     RSE
-  4              RSR     RSR     RSR     RSE     RSE     RSE
-  8              RSR     RSR     RSE     RSE     RSE     RSE
+  0              RSP     RSR     RSP     RSE     RSE     RSE
+  4              RSR     RSR     RSP     RSE     RSE     RSE
+  8              RSR     RSP     RSE     RSE     RSE     RSE
   12             RSR     RSR     RSE     RSE     RSE     RSE
-  16             RSR     RSR     RSE     RSE     RSE     RSE
+  16             RSP     RSR     RSE     RSE     RSE     RSE
   -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
 
 reactive_jamming:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  0              RFR     RCP     RCE     RCE     RCR     RCR
-  4              RCP     RCR     RFE     RCE     RCP     RCR
-  8              RCR     RCR     RCE     RCE     RCR     RCR
-  12             RFR     RFR     RCE     RCE     RCR     RCR
-  16             RFR     RFP     RFE     RCE     RCE     RCR
+  0              RCR     RCR     RCE     RCE     RCR     RCR
+  4              RFR     RFR     RFE     RCE     RCR     RCR
+  8              RCP     RCP     RFE     RCE     RCE     RCR
+  12             RFR     RFR     RFE     RCE     RCE     RCR
+  16             RFR     RFR     RFE     RFE     RCE     RCR
   -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
 
 path_loss:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  4              RSP     RSR     RSP     RSE     RSE      RE
-  8              RSR     RSP     RSP     RSP     RSR     RSE
-  12             RSP     RSP     MSP     MSP     MSR     XSP
-  16             MSP     MSR     MSP     XSP     XSR     XSP
-  20             MSR     MSR     XSR     XSP     XSP     XSR
+  4              RSP     RSP     RSP     RSE     RSE      RE
+  8              RSP     RSR     RSR     RSP     RSE     RSE
+  12             RSR     RSR     MSR     MSR     MSP     XSR
+  16             MSP     MSP     MSP     XSP     XSR     XSR
+  20             MSR     MSP     XSR     XSR     XSP     XSP
   -> recoverable 14/30 (47%) | marginal 8 | non-recoverable 8
 
 spoofing:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  -4             RSP     RCP     RFE     RCE     RCP     RCR
-  -1             RCP     RFR     RCE     RCE     RCR     RCR
-  2              RFP     RCP     RCE     RCE     RCP     RCR
-  5              RCP     RCP     RCE     RCE     RCE     RCR
-  8              RCP     RFP     RCE     RCE     RCP     RCR
+  -4             RSP     RCR     RCE     RCE     RCE     RCR
+  -1             RFP     RCR     RCE     RCE     RCE     RCR
+  2              RCP     RCP     RFE     RCE     RCP     RCR
+  5              RCP     RCP     RFE     RCE     RCE     RCP
+  8              RFP     RCP     RCE     RCE     RCP     RCR
   -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
 
 antenna_fault:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  0.1            RSP     RSP     RSE     RSE     RSE     RSR
-  0.2            RSR     RSP     RSE     RSE     RSE     RSR
-  0.3            RSR     RSP     RSE     RSE     RSR     RSR
-  0.4            RSP     RSP     RSE     RSE     RSR     RSR
-  0.5            RSP     RSP     RSE     RSE     RSE     RSR
+  0.1            RSP     RSR     RSP     RSE     RSR     RSR
+  0.2            RSP     RSR     RSE     RSE     RSE     RSP
+  0.3            RSP     RSR     RSE     RSE     RSP     RSR
+  0.4            RSP     RSR     RSE     RSE     RSE     RSR
+  0.5            RSR     RSR     RSE     RSE     RSE     RSR
   -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
 
 sweeping_jammer:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  0              RSR     RSE     RFE     RFE     RCE      RE
-  4              RSP     RSE     RSE     RFE     RCE      RE
-  8              RFR     RSE     RSE     RSE      RE      RE
-  12             RFR     RSE     RSE     RFE      RE      RE
+  0              RSP     RSE     RSE     RFE      RE      RE
+  4              RSP     RSE     RSE     RFE      RE      RE
+  8              RFP     RSE     RSE      RE      RE      RE
+  12             RFP     RSE     RSE     RFE      RE      RE
   16             RFP     RSE     RSE     RFE      RE      RE
   -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
 
 benign_interference:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  -10            RSP     RSP     RSE     RCE     RCE      RE
-  -8             RSR     RSE     RCE     RCE     RCR     RCR
-  -6             RSP     RSR     RFE     RCE     RCR     RCR
+  -10            RSP     RSE     RSE     RCE     RCE     RCR
+  -8             RSP     RSE     RSE     RCE     RCR     RCR
+  -6             RSR     RSR     RCE     RCE     RCE     RCR
   -4             RSR     RFP     RFE     RCE     RCE     RCR
-  -2             RFR     RFP     RFE     RCE     RCR     RCR
+  -2             RCR     RCR     RCE     RCE     RCR     RCR
   -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
 
 === OVERALL ===

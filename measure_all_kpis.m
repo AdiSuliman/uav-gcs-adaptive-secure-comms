@@ -275,12 +275,14 @@ else
     report{end+1} = 'Leave-one-threat-out: not run (eval_ood_detection.m)';
 end
 if isfile('results/combined_threats.mat')
-    C = load('results/combined_threats.mat', 'Dec', 'modes', 'ratio', 'links', 'EBNO_LIST');
+    C = load('results/combined_threats.mat');
     mcl = ~strcmp({C.Dec.link}, 'none');
     for md = 1:numel(C.modes)
         rt = arrayfun(@(d) d.ratio(md), C.Dec(mcl));
-        report{end+1} = sprintf('Combined threats, %-22s link restored in %d/%d decisions (median %.2fx clean)', ...
-            [C.modes{md} ':'], sum(rt <= 2), numel(rt), median(rt));
+        ci = '';
+        if isfield(C, 'restored_mc'), ci = sprintf(' | per repeat %s%%', stats_ci('fmt', C.restored_mc(md, :), [0 100])); end
+        report{end+1} = sprintf('Combined threats, %-22s link restored in %d/%d decisions (median %.2fx clean)%s', ...
+            [C.modes{md} ':'], sum(rt <= 2), numel(rt), median(rt), ci);
     end
     report{end+1} = 'Details: results/combined_threats.txt';
 else

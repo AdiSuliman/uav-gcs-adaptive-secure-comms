@@ -1,5 +1,5 @@
 === SURVIVABILITY BOUNDARY MAP — MAP A — WITHOUT GOODPUT LOSS ===
-Generated: 26-Sep-2026 00:37:51
+Generated: 26-Sep-2026 03:05:31
 Actions included: channel_switch, freq_diversity, spatial_diversity, power_control, channel_switch+power_control, freq_diversity+power_control, spatial_diversity+power_control (apply_countermeasure.m, D28/D39)
 
 A state is classified by the best post-countermeasure BER relative to the clean link:
@@ -7,21 +7,21 @@ A state is classified by the best post-countermeasure BER relative to the clean 
 Letters after the status = action achieving it: C channel_switch, F freq_diversity, S spatial_diversity, R rate_reduce, P power_control, E fec_interleave (two letters = pair).
 
 Clean-link reference BER per Eb/N0:
-   0 dB : 1.2513e-01
-   2 dB : 8.0069e-02
-   4 dB : 4.5910e-02
-   6 dB : 2.3715e-02
-   8 dB : 9.1595e-03
-  10 dB : 2.7132e-03
+   0 dB : 1.2457e-01
+   2 dB : 7.9763e-02
+   4 dB : 4.6338e-02
+   6 dB : 2.3286e-02
+   8 dB : 9.2513e-03
+  10 dB : 2.7336e-03
 
 --- Boundary map, per threat (rows = severity level, cols = Eb/N0) ---
 jamming:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  0              RFP     RFP     RFP     RCP     RCP     RCP
-  4              RFP     RFP     RCP     RCP     RCP     RCP
-  8              RFP     RCP     RFP     RCP     RCP     RCP
-  12             RCP     RFP     RFP     RFP     RCP     RFP
-  16             RFP     RCP     RFP     RCP     RCP     RFP
+  0              RFP     RFP     RFP     RCP     RFP     RCP
+  4              RFP     RCP     RFP     RCP     RCP     RCP
+  8              RCP     RCP     RCP     RCP     RCP     RCP
+  12             RFP     RCP     RCP     RFP     RFP     RCP
+  16             RCP     RFP     RCP     RFP     RFP     RCP
   -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
 
 noise_burst:
@@ -35,11 +35,11 @@ noise_burst:
 
 reactive_jamming:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  0              RCP     RCP     RCP     RCP     RCP     RCP
-  4              RCP     RCP     RFP     RCP     RCP     RCP
-  8              RFP     RCP     RCP     RCP     RCP     RFP
-  12             RCP     RFP     RFP     RFP     RFP     RCP
-  16             RFP     RFP     RCP     RCP     RCP     RFP
+  0              RFP     RCP     RCP     RCP     RCP     RCP
+  4              RFP     RFP     RFP     RFP     RCP     RCP
+  8              RCP     RCP     RFP     RCP     RFP     RCP
+  12             RCP     RCP     RCP     RCP     RCP     RCP
+  16             RCP     RFP     RCP     RCP     RFP     RCP
   -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
 
 path_loss:
@@ -53,11 +53,11 @@ path_loss:
 
 spoofing:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  -4             RSP     RCP     RFP     RCP     RCP     RCP
-  -1             RCP     RFP     RFP     RFP     RCP     RCP
-  2              RFP     RCP     RCP     RCP     RCP     RCP
-  5              RCP     RCP     RFP     RFP     RFP     RCP
-  8              RCP     RFP     RCP     RCP     RCP     RCP
+  -4             RSP     RCP     RCP     RFP     RFP     RCP
+  -1             RFP     RFP     RFP     RCP     RFP     RCP
+  2              RCP     RCP     RCP     RFP     RCP     RCP
+  5              RCP     RCP     RCP     RFP     RCP     RCP
+  8              RFP     RCP     RFP     RCP     RCP     RCP
   -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
 
 antenna_fault:
@@ -71,7 +71,7 @@ antenna_fault:
 
 sweeping_jammer:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  0              RSP     RSP     RSP     RFP     RFP     RFP
+  0              RSP     RSP     RFP     RFP     RFP     RFP
   4              RSP     RFP     RFP     RFP     RFP     RFP
   8              RFP     RFP     RFP     RFP     RFP     MFP
   12             RFP     RFP     RFP     RFP     RFP     MFP
@@ -80,11 +80,11 @@ sweeping_jammer:
 
 benign_interference:
   level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  -10            RSP     RSP     RSP     RSP     RFP     RCP
-  -8             RSP     RSP     RSP     RSP     RCP     RCP
-  -6             RSP     RSP     RCP     RFP     RFP     RCP
-  -4             RSP     RFP     RCP     RCP     RCP     RCP
-  -2             RFP     RFP     RCP     RCP     RCP     RFP
+  -10            RSP     RSP     RSP     RSP     RSP     RCP
+  -8             RSP     RSP     RSP     RFP     RCP     RCP
+  -6             RSP     RSP     RFP     RFP     RCP     RCP
+  -4             RSP     RFP     RFP     RCP     RCP     RCP
+  -2             RCP     RCP     RFP     RCP     RCP     RCP
   -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
 
 === OVERALL ===
