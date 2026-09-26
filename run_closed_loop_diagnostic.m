@@ -504,6 +504,9 @@ for b = 1:numel(blks)
             if strcmpi(dp{j}, 'RandomStream')
                 try, set_param(blks{b}, dp{j}, 'mt19937ar with seed'); catch, end
             end
+            if strcmpi(dp{j}, 'SeedSource')
+                try, set_param(blks{b}, dp{j}, 'Parameter'); catch, end
+            end
         end
         for j = 1:numel(dp)
             if strcmpi(dp{j}, 'seed')

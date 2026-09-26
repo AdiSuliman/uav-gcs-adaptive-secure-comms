@@ -99,6 +99,8 @@ fprintf('(This file will contain EVERYTHING printed below, even across clc calls
 %    build_dashboard = true; rest = false
 %% ================================================================
 
+warning('off', 'Simulink:cgxe:LeakedJITEngine');   % internal Simulink notice on repeated sim() of MATLAB Function blocks
+
 % ---- Monte Carlo / seeds (D35) ----
 CFG.mc_repeats = 5;    % C3d: independent repeats per (threat, Eb/N0); CIs are over these
 CFG.dqn_seeds  = 5;    % C2 : DQN trainings; the best gate-passing seed is saved
@@ -108,6 +110,7 @@ CFG.dqn_seeds  = 5;    % C2 : DQN trainings; the best gate-passing seed is saved
 RUN.init                        = false;   % A0  : regenerate params.mat
 RUN.validate_A                  = false;   % A1-A3: build+validate AWGN & Rician links (fast)
 RUN.check_A4                    = false;   % A4  : build threat model + sanity BER (fast)
+RUN.validate_phy                = false;   % A4v : multi-antenna link vs theory, MRC/MMSE, seeds (~15min, D41)
 RUN.build_dataset               = false;   % A5  : full dataset sweep (HEAVY ~100min)
 RUN.extract_spectrograms        = false;   % A6  : spectrograms + 7 features (~5min)
 
@@ -170,6 +173,11 @@ if RUN.check_A4
     build_threat_model;
     berA4 = quick_ber('UAV_GCS_Threat_Link');
     fprintf('       A4 Threat: BER=%.3e under %s (JSR=%.0fdB)\n', berA4, p.active_threat, p.jsr_db);
+end
+
+if RUN.validate_phy
+    fprintf('  [A4v] Validating the multi-antenna link against theory...\n');
+    validate_phy;
 end
 
 if RUN.build_dataset

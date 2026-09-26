@@ -82,8 +82,8 @@ clean_m = squeeze(ber_tab(strcmp(threat_list, 'none'), na, :))';
 ratio_m = ber_tab ./ reshape(clean_m, 1, 1, nS);
 rep = {};
 rep{end+1} = '=== COUNTERMEASURE EFFICACY MATRIX (D28, nominal severity, ground-truth threat) ===';
-rep{end+1} = sprintf('Generated: %s by train_dqn.m | acr %g dB | rate / %g | %d Rx antennas', datestr(now), ...
-    p0.cm_acr_db, p0.cm_rate_factor, p0.cm_n_rx);
+rep{end+1} = sprintf('Generated: %s by train_dqn.m | acr %g dB | rate / %g | %d UAV antennas', datestr(now), ...
+    p0.cm_acr_db, p0.cm_rate_factor, p0.n_rx);
 rep{end+1} = 'Cell = BER_after / BER_clean (<= 2 restored, <= 5 marginal). * = best action, R = rule-based choice.';
 rep{end+1} = sprintf('Costs: goodput x%s | spectrum x%s | power x%s  (order: %s)', mat2str(gp, 2), mat2str(bw), mat2str(pw, 2), strjoin(action_names, ', '));
 for s = 1:nS

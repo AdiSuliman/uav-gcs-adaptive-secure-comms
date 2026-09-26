@@ -23,7 +23,7 @@ function [p, snr_gain_db, cm] = apply_countermeasure(p, threat, action)
 %     broadband   noise_burst (covers all channels while ON)
 %     signal-side path_loss, antenna_fault (attenuate our own signal)
 %
-%   Actions (constants in init_params: cm_acr_db, cm_rate_factor, cm_n_rx):
+%   Actions (constants in init_params: cm_acr_db, cm_rate_factor, n_rx):
 %     channel_switch     move to a channel the interferer does not occupy:
 %                        in-channel interference drops by the adjacent-channel
 %                        rejection; no effect on swept, broadband or signal-side threats
@@ -31,9 +31,11 @@ function [p, snr_gain_db, cm] = apply_countermeasure(p, threat, action)
 %                        in-channel interference drops by the rejection; a swept
 %                        jammer must hit both channels at once (duty -> duty^2);
 %                        no effect on broadband or signal-side threats; 2x spectrum
-%     spatial_diversity  second receive antenna, MRC: +10*log10(n_rx) dB against
-%                        noise and spatially uncorrelated interference; with an
-%                        antenna fault the healthy antenna replaces the faulty one
+%     spatial_diversity  the UAV receiver switches from MRC to adaptive MMSE combining
+%                        over its n_rx antennas (D41): sample-covariance weights null
+%                        up to n_rx-1 interferers arriving from other directions and
+%                        track a faulty branch; the effect is in the link model
+%                        (p.rx_combiner), no Eb/N0 offset
 %     rate_reduce        rate / cm_rate_factor: +10*log10(factor) dB processing gain
 %                        against noise and noise-like interference; no gain against
 %                        a coherent spoofer; goodput / factor
@@ -57,7 +59,6 @@ end
 
 acr_db = getf(p, 'cm_acr_db', 30);
 rate_f = getf(p, 'cm_rate_factor', 4);
-n_rx   = getf(p, 'cm_n_rx', 2);
 pwr_db = getf(p, 'cm_power_db', 6);
 
 snr_gain_db = 0;
@@ -92,17 +93,8 @@ switch action
         end
 
     case 'spatial_diversity'
-        g = 10*log10(n_rx);
-        if strcmp(threat, 'antenna_fault')
-            p.fault_atten_db = 0;
-            cm.effect = 'faulty antenna replaced by the healthy one';
-        else
-            snr_gain_db = g;
-            if ~isempty(field) && ~strcmp(threat, 'path_loss')
-                p.(field) = p.(field) - g;
-            end
-            cm.effect = sprintf('MRC gain +%.1f dB', g);
-        end
+        p.rx_combiner = 'mmse';
+        cm.effect = sprintf('adaptive MMSE combining over %d antennas', getf(p, 'n_rx', 2));
 
     case 'rate_reduce'
         g = 10*log10(rate_f);
@@ -154,16 +146,12 @@ end
 
 function [p, snr_gain_db, cm] = apply_combined(p, threat, action)
 % Combined threat 'a+b' (D32): the action acts on each component. The Eb/N0 gain is
-% one property of the action, so it is applied once (the smallest component gain);
-% with an antenna fault, spatial diversity only replaces the faulty antenna.
+% one property of the action, so it is applied once (the smallest component gain).
 parts = strsplit(threat, '+');
 fields = cellfun(@interference_field, parts, 'UniformOutput', false);
 fields = fields(~cellfun(@isempty, fields));
 if numel(unique(fields)) < numel(fields)
     error('apply_countermeasure: components of ''%s'' share a severity field', threat);
-end
-if any(strcmp(action, 'spatial_diversity')) && any(strcmp(parts, 'antenna_fault'))
-    parts = {'antenna_fault'};
 end
 gains = zeros(1, numel(parts)); eff = cell(1, numel(parts));
 for i = 1:numel(parts)

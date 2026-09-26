@@ -653,3 +653,6 @@ Full run 2026-09-26 (all D39 preset stages, new agent): seeds 4/5 pass (seed 44:
 
 ### Next
 Run the D39 preset, compare with D38 (noise_burst, path_loss, combined threats), commit.
+
+### D41 — multi-antenna UAV receiver (code complete)
+`build_threat_model.m` rewritten: GCS → UAV uplink, 2 UAV antennas (3 supported), per-antenna Rician channel with steering vectors, interferers through their own spatial channels, data-aided coherent MRC baseline and MMSE (spatial_diversity), seeds on every random source. `apply_countermeasure.m`: spatial_diversity sets `rx_combiner = 'mmse'`. `init_params.m`: antenna section. New `validate_phy.m` (flag `RUN.validate_phy` in `main.m`). `validate_phy` (2026-09-26): theory gaps 5/5 within 0.3 dB (−0.17 to +0.04 dB); MMSE under 10 dB jamming 6.8–30 dB BER improvement over MRC. Seed check failed: bit source `SeedSource = Auto`; fixed in all seeding helpers, `diag_seeds.m` now identical on every signal. JIT notice `Simulink:cgxe:LeakedJITEngine` silenced. Datasets and models predate D41.

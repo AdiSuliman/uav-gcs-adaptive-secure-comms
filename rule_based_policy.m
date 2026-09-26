@@ -26,7 +26,7 @@ switch threat_class
     case 'noise_burst'
         action = 'rate_reduce';       reason = 'broadband bursts: processing gain';
     case 'antenna_fault'
-        action = 'spatial_diversity'; reason = 'switch to the healthy antenna';
+        action = 'spatial_diversity'; reason = 'adaptive combining drops the faulty branch';
     case {'benign_interference', 'none'}
         action = 'no_action';         reason = 'not an attack: acting would be a false alarm';
     otherwise

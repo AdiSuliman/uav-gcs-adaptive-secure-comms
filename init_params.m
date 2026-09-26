@@ -69,9 +69,23 @@ params.sweep_period  = 300;         % [A-ext] Sweeping Jammer: full sweep cycle 
 % [D28] Countermeasure physics (apply_countermeasure.m)
 params.cm_acr_db      = 30;         % [dB] rejection of an interferer left on another channel
 params.cm_rate_factor = 4;          % rate_reduce: data rate / 4 -> +6 dB processing gain, goodput x0.25
-params.cm_n_rx        = 2;          % spatial_diversity: receive antennas combined by MRC (+3 dB)
 params.cm_power_db    = 6;          % power_control: transmit power +6 dB (x4 power), D39
 params.cm_fec_rate    = 1/2;        % fec_interleave: code rate, K = 7, generators [171 133] octal, D39
+
+%% ========== ANTENNAS & RECEIVER (D41) ==========
+% Modeled link: GCS -> UAV command uplink; the receiver (and the detector) is on the UAV.
+% GCS: one antenna, its gain is part of Eb/N0. Eb/N0 is per UAV antenna (per branch).
+% UAV: n_rx omni dipoles under the fuselage (V-mount, 2x2-class datalink radio), ULA model.
+params.n_rx           = 2;            % UAV receive antennas (3 supported)
+params.ant_spacing_wl = 0.5;          % element spacing [wavelengths] (6.25 cm @ 2.4 GHz)
+params.rx_corr        = 0.3;          % diffuse-fading correlation between adjacent antennas
+params.gcs_aoa_deg    = 0;            % GCS direction from array broadside [deg]
+params.int_aoa_deg    = [40 -55 70];  % direction of interferer 1..3 (components of a threat) [deg]
+params.int_rician_k   = params.rician_k;  % K-factor of the interferer -> UAV channels (dB)
+params.rx_combiner    = 'mrc';        % 'mrc' baseline | 'mmse' (spatial_diversity action)
+params.csi_block      = 64;           % [symbols] channel-estimation window (MRC)
+params.mmse_window    = 32;           % [symbols] channel + interference-covariance window (MMSE)
+params.seed           = [];           % [] = drawn from the global stream at every model build
 
 %% ========== NOISE & SWEEP ==========
 params.EbNo_dB    = 0:2:10;            % [ACTIVE] Eb/N0 sweep range (dB)
@@ -102,7 +116,9 @@ if params.verbose
     fprintf('Symbol Rate:      %.2e sym/s\n', params.symbol_rate);
     fprintf('Bits/Frame:       %d (+ %d CRC [FUTURE])\n', params.bits_per_frame, params.crc_bits);
     fprintf('Symbols/Frame:    %d\n', params.symbols_per_frame);
-    fprintf('Channel:          Rician (K=%.1f dB)\n', params.rician_k);
+    fprintf('Channel:          Rician (K=%.1f dB), GCS -> UAV uplink\n', params.rician_k);
+    fprintf('UAV antennas:     %d (spacing %.2f wl, rho %.2f), Rx %s\n', params.n_rx, ...
+            params.ant_spacing_wl, params.rx_corr, upper(params.rx_combiner));
     fprintf('Carrier Freq:     %.1f GHz\n', params.carrier_freq/1e9);
     fprintf('Range:            %d m [FUTURE]\n', params.nominal_range);
     fprintf('UAV Velocity:     %.1f m/s (%.1f km/h) nominal | envelope %.1f-%.1f km/h (%.1f-%.1f m/s)\n', ...
