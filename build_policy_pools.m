@@ -1,10 +1,12 @@
-%% BUILD_POLICY_POOLS - Measured frame pools for the decision layer (D44, D45)
+%% BUILD_POLICY_POOLS - Measured frame pools for the decision layer (D44-D46)
 % Every scenario x configuration x Eb/N0 through the real link, with the
 % detector already applied, so the decision-layer environment (link_env.m) never
 % runs Simulink inside the learning loop.
 %
-% Scenarios: 8 single threats + none (train and test splits) and 4 combined
-% threats (test split only: never seen in training). Configurations: the 17
+% Scenarios: 8 single threats + none (train and test splits), 4 combined
+% threats for the test split only, and 4 OTHER combined threats for the train
+% split only (D46): the agent learns combinations, and is tested on
+% combinations it never saw. Configurations: the 17
 % actions of policy_actions.m, applied by apply_countermeasure.m. Eb/N0 0:2:10 dB,
 % nominal severity.
 %
@@ -15,19 +17,24 @@
 % test sub-runs use different seeds. Per frame: detector class probabilities,
 % Mahalanobis score, the 9 link features (link_features.m, temporal ones inside
 % the sub-run), BER, PLR and the interferer directions of the sub-run.
+% Seeds and speeds: pool_seed.m. An existing pools file made with the same
+% detector, configurations, Eb/N0 grid and sub-runs is extended: only the
+% scenarios it does not hold yet are simulated (identical seeds).
 %
 % Output: data/policy_pools.mat
 
 close all; clc;
 warning('off', 'Simulink:cgxe:LeakedJITEngine');
-fprintf('=== Decision-layer frame pools (D44) ===\n\n');
+fprintf('=== Decision-layer frame pools (D44-D46) ===\n\n');
 
 %% 1. Configuration
 SINGLES = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', ...
            'antenna_fault', 'benign_interference', 'sweeping_jammer'};
 COMBOS  = {'jamming+path_loss', 'noise_burst+antenna_fault', 'sweeping_jammer+path_loss', 'spoofing+noise_burst'};
+TRAIN_COMBOS = {'reactive_jamming+path_loss', 'jamming+antenna_fault', 'spoofing+sweeping_jammer', ...
+                'benign_interference+noise_burst'};
 EBNO    = 0:2:10;
-N_TRAIN = 6;                  % sub-runs (geometries) per (scenario, Eb/N0) in the train split (singles only)
+N_TRAIN = 6;                  % sub-runs (geometries) per (scenario, Eb/N0) in the train split
 N_TEST  = 4;                  % sub-runs per (scenario, Eb/N0) in the test split
 F_SUB   = 20;                 % frames per sub-run
 tw = 10; delay_bits = 20;
@@ -41,9 +48,12 @@ N = load('data/splits.mat', 'splits');
 mu = N.splits.norm.feat_mean; sd = N.splits.norm.feat_std;
 T = ood_thresholds(0.95);
 ACTIONS = policy_actions();
-scen = [SINGLES, COMBOS];
+scen = [SINGLES, COMBOS, TRAIN_COMBOS];
 nSc = numel(scen); nA = numel(ACTIONS); nS = numel(EBNO);
 stop_time = num2str(F_SUB * p0.frame_duration);
+runs = {100 + (1:N_TRAIN), 200 + (1:N_TEST)};
+vrange = [p0.speed_kmh_min p0.speed_kmh_max];
+nsub_of = @(sc) [N_TRAIN * ~ismember(scen{sc}, COMBOS), N_TEST * ~ismember(scen{sc}, TRAIN_COMBOS)];
 
 gp = ones(1, nA); bw = ones(1, nA); pw = ones(1, nA);
 for a = 1:nA
@@ -52,10 +62,28 @@ for a = 1:nA
 end
 
 pools = cell(nSc, nS, nA, 2);            % {scenario, Eb/N0, action, split 1=train 2=test}
+done = false(1, nSc);
+f_pools = 'data/policy_pools.mat';
+if isfile(f_pools) && dir(f_pools).datenum > dir('data/trained_detector.mat').datenum
+    L = load(f_pools, 'PP'); old = L.PP; clear L
+    nOld = numel(old.scen);
+    same = isequal(old.actions, ACTIONS) && isequal(old.ebno, EBNO) && isfield(old, 'runs') && ...
+        isequal(old.runs, runs) && old.F_SUB == F_SUB && nOld <= nSc && isequal(old.scen, scen(1:nOld)) && ...
+        isfield(old, 'aoa_random') && old.aoa_random == p0.int_aoa_random;
+    if same
+        pools(1:nOld, :, :, :) = old.pools;
+        done(1:nOld) = true;
+        fprintf('Reusing %d scenarios of %s (same detector, configurations and seeds)\n\n', nOld, f_pools);
+    else
+        fprintf('%s has other configurations, Eb/N0 grid or sub-runs: full rebuild\n\n', f_pools);
+    end
+    clear old
+elseif isfile(f_pools)
+    fprintf('%s is older than the detector: full rebuild\n\n', f_pools);
+end
 t0 = tic;
-for sc = 1:nSc
-    isCombo = sc > numel(SINGLES);
-    nsub = [N_TRAIN * ~isCombo, N_TEST];
+for sc = find(~done)
+    nsub = nsub_of(sc);
     for a = 1:nA
         p = p0; p.active_threat = scen{sc};
         [p2, g_db] = apply_countermeasure(p, scen{sc}, ACTIONS{a});
@@ -68,10 +96,8 @@ for sc = 1:nSc
             for sp = 1:2
                 P = empty_pool();
                 for r = 1:nsub(sp)
-                    seed = 800000 + 20000*sc + 1000*s + 100*sp + r;         % same for every action
-                    rs = RandStream('mt19937ar', 'Seed', seed);                   % UAV speed of the sub-run
-                    fd = (p0.speed_kmh_min + rand(rs) * (p0.speed_kmh_max - p0.speed_kmh_min)) / 3.6 ...
-                        * p0.carrier_freq / p0.c_light;
+                    [seed, v_kmh] = pool_seed(sc, s, sp, r, vrange);             % same for every action
+                    fd = v_kmh / 3.6 * p0.carrier_freq / p0.c_light;
                     link_seed(modelName, seed, fd);
                     if p0.int_aoa_random
                         aoa = interferer_aoa(seed, p0.int_aoa_range_deg, numel(p0.int_aoa_deg));
@@ -104,10 +130,11 @@ end
 na = find(strcmp(ACTIONS, 'no_action'));
 clean = squeeze(mber(1, :, na, 1));                  % none / no_action, train split
 
-PP = struct('scen', {scen}, 'singles', {SINGLES}, 'combos', {COMBOS}, 'ebno', EBNO, 'actions', {ACTIONS}, ...
+PP = struct('scen', {scen}, 'singles', {SINGLES}, 'combos', {COMBOS}, 'train_combos', {TRAIN_COMBOS}, ...
+    'ebno', EBNO, 'actions', {ACTIONS}, 'speed_range', vrange, ...
     'gp', gp, 'bw', bw, 'pw', pw, 'pools', {pools}, 'mber', mber, 'mplr', mplr, 'clean', clean, ...
     'classes', {cellstr(string(D.classes(:)'))}, 'maha_thr', T.maha, 'F_SUB', F_SUB, ...
-    'runs', {{100 + (1:N_TRAIN), 200 + (1:N_TEST)}}, 'aoa_random', p0.int_aoa_random, ...
+    'runs', {runs}, 'aoa_random', p0.int_aoa_random, ...
     'sps', p0.sps, 'bps', p0.bits_per_symbol, 'created', datestr(now));
 clean_ref = struct('ebno', EBNO, 'ber', clean);
 save('data/policy_pools.mat', 'PP', 'clean_ref', '-v7.3');

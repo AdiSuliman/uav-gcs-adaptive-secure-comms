@@ -2,8 +2,12 @@
 % Maps, per threat, where an attack is recoverable versus non-recoverable over
 % attack severity level and Eb/N0, using the system's REAL action set applied
 % through apply_countermeasure.m (D28, D30). Every (threat, level, Eb/N0) cell
-% is simulated with every action; a cell is classified by the best achievable
-% BER relative to the clean link at the same Eb/N0.
+% is simulated with every action on one seeded run of RUN_FRAMES frames shared
+% by all actions (common random numbers); a cell is classified by the best achievable BER
+% relative to the clean link at the same Eb/N0 (floor 1e-4, D45). Directional
+% threats are mapped for two flight geometries (D46): interferer 45 deg from
+% the GCS direction (separable by the two-antenna array) and 10 deg (aligned);
+% path_loss and antenna_fault do not depend on the geometry.
 %
 %   Map A (without goodput loss) — channel_switch, freq_diversity, spatial_diversity,
 %                                  power_control and their pairs
@@ -22,15 +26,17 @@ close all; clc;
 fprintf('=== Survivability Boundary Mapping (proposal deliverable #7, real action set) ===\n\n');
 
 %% ========== CONFIG ==========
-N_BASELINE_REPEATS = 5;
+N_BASELINE_REPEATS = 5;       % seeded clean-link runs per Eb/N0
+RUN_FRAMES         = 57;      % frames per (threat, geometry, level, Eb/N0) run, one seed shared by every action
 RATIO_RECOVERABLE  = 2;
 RATIO_MARGINAL     = 5;
+BER_FLOOR          = 1e-4;    % clean reference floor, as the decision layer (D45)
+GEOM_AOA           = [45 10]; % interferer direction from the GCS direction [deg]: separated, aligned
 delay_bits = 20;
 
-% Action set of the agent (dqn_agent.m, D39); Map A keeps the actions without
-% goodput loss, Map B takes every action
-evalc('agent0 = dqn_agent();');
-ACTIONS = agent0.action_names;
+% Action set of the decision layer; Map A keeps the actions without goodput
+% loss, Map B takes every action
+ACTIONS = policy_actions();
 p_ref = load_params_quiet();
 MECH_B = ACTIONS(~strcmp(ACTIONS, 'no_action'));
 MECH_A = MECH_B(cellfun(@(a) no_goodput_loss(p_ref, a), MECH_B));
@@ -47,15 +53,27 @@ threat_cfg(6) = struct('name','antenna_fault',       'level_field','fault_duty',
 threat_cfg(7) = struct('name','sweeping_jammer',     'level_field','jsr_db',        'levels',[0 4 8 12 16]);
 threat_cfg(8) = struct('name','benign_interference', 'level_field','benign_int_db', 'levels',[-10 -8 -6 -4 -2]);
 
+% Map entries: directional threats once per geometry, signal-side threats once
+clear maps
+for t = 1:numel(threat_cfg)
+    if ismember(threat_cfg(t).name, {'path_loss', 'antenna_fault'}), geo = NaN; else, geo = GEOM_AOA; end
+    for g = geo
+        e = threat_cfg(t); e.aoa = g; e.base = e.name;
+        if ~isnan(g), e.name = sprintf('%s @ %g deg', e.base, g); end
+        if exist('maps', 'var'), maps(end+1) = e; else, maps = e; end %#ok<AGROW>
+    end
+end
+
 init_params;
 p0 = load('params.mat').params;
+p0.int_aoa_random = false; p0.quiet_build = true;
 modelName  = 'UAV_GCS_Threat_Link';
 SNR_points = p0.EbNo_dB;
 nS = numel(SNR_points);
 t0 = tic;
 
 %% ========== 1. Clean-link baseline per Eb/N0 ==========
-fprintf('Measuring the clean link (none), %d repeats per Eb/N0...\n', N_BASELINE_REPEATS);
+fprintf('Measuring the clean link (none), %d seeded runs per Eb/N0...\n', N_BASELINE_REPEATS);
 ber_clean = zeros(1, nS);
 p = p0; p.active_threat = 'none';
 params = p; save('params.mat','params');
@@ -64,6 +82,7 @@ for s = 1:nS
     set_param([modelName '/AWGN'], 'SNR', num2str(ebno2snr(SNR_points(s), p0)), 'SignalPower', num2str(1/p0.sps));
     reps = zeros(1, N_BASELINE_REPEATS);
     for r = 1:N_BASELINE_REPEATS
+        link_seed(modelName, 700000 + r, p0.fd_max);
         out = sim(modelName);
         [~, ber_f] = extract_closed_loop_frames(out, p, delay_bits);
         reps(r) = mean(ber_f, 'omitnan');
@@ -71,48 +90,51 @@ for s = 1:nS
     ber_clean(s) = mean(reps);
     fprintf('  Eb/N0=%2g dB: clean BER = %.4e (std %.2e)\n', SNR_points(s), ber_clean(s), std(reps));
 end
+ber_ref = max(ber_clean, BER_FLOOR);
 fprintf('\n');
 
-%% ========== 2. Every threat x level x action x Eb/N0 ==========
-nT = numel(threat_cfg); nAct = numel(ACTIONS);
-ber_all = cell(1, nT);                 % {t}(level, action, snr)
+%% ========== 2. Every entry x level x action x Eb/N0 (common seeds across actions) ==========
+nT = numel(maps); nAct = numel(ACTIONS);
+ber_all = cell(1, nT);                 % {entry}(level, action, snr)
 for t = 1:nT
-    cfg = threat_cfg(t);
+    cfg = maps(t);
     nL = numel(cfg.levels);
     B = nan(nL, nAct, nS);
     for li = 1:nL
-        p = p0; p.active_threat = cfg.name; p.(cfg.level_field) = cfg.levels(li);
+        p = p0; p.active_threat = cfg.base; p.(cfg.level_field) = cfg.levels(li);
+        if ~isnan(cfg.aoa), p.int_aoa_deg(1) = p.gcs_aoa_deg + cfg.aoa; end
         for a = 1:nAct
-            [p2, g_db] = apply_countermeasure(p, cfg.name, ACTIONS{a});
+            [p2, g_db] = apply_countermeasure(p, cfg.base, ACTIONS{a});
             params = p2; save('params.mat','params');
             evalc('build_threat_model');
             for s = 1:nS
                 set_param([modelName '/AWGN'], 'SNR', num2str(ebno2snr(SNR_points(s), p2) + g_db), ...
                     'SignalPower', num2str(1/p2.sps));
-                out = sim(modelName);
+                link_seed(modelName, 900000 + 1000*t + 10*li, p2.fd_max);
+                out = sim(modelName, 'StopTime', num2str(RUN_FRAMES * p2.frame_duration));
                 [~, ber_f] = extract_closed_loop_frames(out, p2, delay_bits);
                 B(li, a, s) = mean(ber_f, 'omitnan');
             end
         end
     end
     ber_all{t} = B;
-    fprintf('  [%d/%d] %-20s mapped (%.1f min)\n', t, nT, cfg.name, toc(t0)/60);
+    fprintf('  [%2d/%d] %-26s mapped (%.1f min)\n', t, nT, cfg.name, toc(t0)/60);
 end
-params = p0; save('params.mat','params');
+params = load_params_quiet(); save('params.mat','params');
 fprintf('\n');
 
 %% ========== 3. Build both maps ==========
 fprintf('Classifying (ratio to clean link): recoverable <= %gx, marginal <= %gx\n\n', ...
     RATIO_RECOVERABLE, RATIO_MARGINAL);
-grid_data_A = build_map(ber_all, threat_cfg, ACTIONS, MECH_A, ber_clean, RATIO_RECOVERABLE, RATIO_MARGINAL);
-grid_data_B = build_map(ber_all, threat_cfg, ACTIONS, MECH_B, ber_clean, RATIO_RECOVERABLE, RATIO_MARGINAL);
+grid_data_A = build_map(ber_all, maps, ACTIONS, MECH_A, ber_ref, RATIO_RECOVERABLE, RATIO_MARGINAL);
+grid_data_B = build_map(ber_all, maps, ACTIONS, MECH_B, ber_ref, RATIO_RECOVERABLE, RATIO_MARGINAL);
 
 %% ========== 4. Reports ==========
 if ~exist('results','dir'), mkdir('results'); end
-report_A = build_report(grid_data_A, ber_clean, SNR_points, RATIO_RECOVERABLE, RATIO_MARGINAL, ...
+report_A = build_report(grid_data_A, ber_ref, SNR_points, RATIO_RECOVERABLE, RATIO_MARGINAL, ...
     'MAP A — WITHOUT GOODPUT LOSS', MECH_A, ACT_CODE);
 write_report(report_A, 'results/survivability_boundary_mapA.txt');
-report_B = build_report(grid_data_B, ber_clean, SNR_points, RATIO_RECOVERABLE, RATIO_MARGINAL, ...
+report_B = build_report(grid_data_B, ber_ref, SNR_points, RATIO_RECOVERABLE, RATIO_MARGINAL, ...
     'MAP B — ANY ACTION (incl. rate reduction and FEC)', MECH_B, ACT_CODE);
 write_report(report_B, 'results/survivability_boundary_mapB.txt');
 fprintf('\n--- MAP A (without goodput loss) ---\n');  fprintf('%s\n', report_A{:});
@@ -147,8 +169,9 @@ write_report(gap_report, 'results/survivability_gap_analysis.txt');
 fprintf('\n--- GAP ANALYSIS ---\n'); fprintf('%s\n', gap_report{:});
 
 if ~exist('data','dir'), mkdir('data'); end
-save('data/survivability_boundary.mat','grid_data_A','grid_data_B','ber_clean', ...
-    'SNR_points','RATIO_RECOVERABLE','RATIO_MARGINAL','MECH_A','MECH_B','ber_all','threat_cfg','ACTIONS');
+save('data/survivability_boundary.mat','grid_data_A','grid_data_B','ber_clean','ber_ref','BER_FLOOR', ...
+    'SNR_points','RATIO_RECOVERABLE','RATIO_MARGINAL','MECH_A','MECH_B','ber_all','threat_cfg','maps', ...
+    'GEOM_AOA','RUN_FRAMES','ACTIONS');
 
 %% ========== 6. Figures ==========
 draw_map(grid_data_A, SNR_points, RATIO_RECOVERABLE, RATIO_MARGINAL, ...
@@ -187,7 +210,7 @@ end
 function grid_data = build_map(ber_all, threat_cfg, ACTIONS, act_set, ber_clean, RATIO_RECOVERABLE, RATIO_MARGINAL)
     nS = numel(ber_clean);
     cols = find(ismember(ACTIONS, act_set));
-    grid_data = struct('threat',{},'levels',{},'ber_best',{},'ratio',{}, ...
+    grid_data = struct('threat',{},'base',{},'aoa',{},'levels',{},'ber_best',{},'ratio',{}, ...
         'status',{},'ber_attacked',{},'best_action',{});
     for t = 1:numel(threat_cfg)
         B = ber_all{t};
@@ -201,14 +224,15 @@ function grid_data = build_map(ber_all, threat_cfg, ACTIONS, act_set, ber_clean,
             for s = 1:nS
                 [ber_best(li,s), k] = min(B(li, cols, s));
                 best_action{li,s} = ACTIONS{cols(k)};
-                ratio(li,s) = ber_best(li,s) / max(ber_clean(s), eps);
+                ratio(li,s) = ber_best(li,s) / ber_clean(s);
                 if ratio(li,s) <= RATIO_RECOVERABLE,  status(li,s) = 1;
                 elseif ratio(li,s) <= RATIO_MARGINAL, status(li,s) = 2;
                 else,                                 status(li,s) = 3;
                 end
             end
         end
-        grid_data(end+1) = struct('threat',threat_cfg(t).name,'levels',levels, ...
+        grid_data(end+1) = struct('threat',threat_cfg(t).name,'base',threat_cfg(t).base,'aoa',threat_cfg(t).aoa, ...
+            'levels',levels, ...
             'ber_best',ber_best,'ratio',ratio,'status',status, ...
             'ber_attacked',ber_attacked,'best_action',{best_action}); %#ok<AGROW>
     end
@@ -228,7 +252,7 @@ function report = build_report(grid_data, ber_clean, SNR_points, RATIO_RECOVERAB
         RATIO_RECOVERABLE, RATIO_MARGINAL);
     report{end+1} = 'Letters after the status = action achieving it: C channel_switch, F freq_diversity, S spatial_diversity, R rate_reduce, P power_control, E fec_interleave (two letters = pair).';
     report{end+1} = '';
-    report{end+1} = 'Clean-link reference BER per Eb/N0:';
+    report{end+1} = 'Clean-link reference BER per Eb/N0 (measured, floor 1e-4 = resolution of a cell):';
     for s = 1:nS
         report{end+1} = sprintf('  %2g dB : %.4e', SNR_points(s), ber_clean(s)); %#ok<AGROW>
     end
@@ -276,7 +300,7 @@ end
 function draw_map(grid_data, SNR_points, RATIO_RECOVERABLE, RATIO_MARGINAL, sup_title, out_path)
     nT = numel(grid_data);
     nS = numel(SNR_points);
-    fig = figure('Position',[50 50 1400 750],'Color','w');
+    fig = figure('Position',[30 30 1900 780],'Color','w');
     cmap = [0.20 0.65 0.25;
             0.95 0.75 0.15;
             0.80 0.20 0.20];

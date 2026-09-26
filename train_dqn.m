@@ -1,4 +1,4 @@
-%% C2 - TRAIN DQN: sequential decision layer on measured frame pools (D44, D45)
+%% C2 - TRAIN DQN: sequential decision layer on measured frame pools (D44-D46)
 % Double DQN (van Hasselt et al., AAAI 2016) with experience replay and a target
 % network (Mnih et al., Nature 2015 [7]) on link_env.m: 30-cycle episodes inside
 % one seeded flight geometry, the threat starts at a random cycle, a follower
@@ -9,20 +9,23 @@
 % training exactly as in deployment: without a confirmed alarm the agent can only
 % keep its configuration or release it, and the Double DQN target maximizes over
 % the configurations allowed in the next state.
-% Training uses the train split of data/policy_pools.mat and single threats
-% only; combined threats and the test split are kept for evaluate_policies.m.
+% Training uses the train split of data/policy_pools.mat: single threats, the
+% clean link and the training combinations (D46); the test combinations and the
+% test split are kept for evaluate_policies.m.
 %
-% Seeds: CFG.dqn_seeds (default 3). Each seed keeps the checkpoint with the best
-% greedy return on its own evaluation episodes (train pools), then all seeds are
-% compared on 1280 validation episodes (train pools, fresh draws) with the rule
-% and table baselines. Selected: the best validation return among the seeds with
-% no more false-alarm episodes than max(5%, rule + escalation). A myopic variant
-% (gamma = 0, same network, data and shield) is the contextual-bandit ablation.
+% Discount factor and seeds: CFG.dqn_gammas (default [0 0.5 0.9]) x CFG.dqn_seeds
+% (default 3). Each run keeps the checkpoint with the best greedy return on its
+% own evaluation episodes (train pools); all runs are compared on 1280
+% validation episodes (train pools, fresh draws) with the rule and table
+% baselines. Selected (gamma and seed): the best validation return among the
+% runs with no more false-alarm episodes than max(5%, rule + escalation). The
+% best run of every gamma is kept as an ablation (gamma = 0 is the contextual
+% bandit).
 %
 % Output: data/trained_dqn.mat, results/dqn_training.txt, results/dqn_training_curves.png
 
 close all; clc;
-fprintf('=== C2: Train sequential DQN (D44, D45) ===\n\n');
+fprintf('=== C2: Train DQN (D44-D46) ===\n\n');
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
 K = link_env('tables', PP);
 nA = numel(PP.actions);
@@ -32,8 +35,9 @@ nA = numel(PP.actions);
 H = struct('gamma', 0.9, 'NE', 64, 'T', 30, 'episodes', 12000, 'buffer', 150000, 'warmup', 6000, ...
     'batch', 128, 'updates', 4, 'lr', 5e-4, 'lr_end', 5e-5, 'clip', 10, 'target_every', 500, ...
     'eps_end', 0.05, 'eps_frac', 0.6, 'huber', 1, 'p_unknown', 0.10, 'p_follow', 0.5, 'n_eval', 4);
-N_SEEDS = 3;
+N_SEEDS = 3; GAMMAS = [0 0.5 0.9];
 if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'dqn_seeds'), N_SEEDS = CFG.dqn_seeds; end
+if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'dqn_gammas'), GAMMAS = CFG.dqn_gammas; end
 SEEDS = 42 + (0:N_SEEDS-1);
 N_VAL = 20;                              % validation batches of H.NE episodes
 
@@ -60,97 +64,128 @@ norm_in.sd(cont) = max(std(S_all(cont, :), 0, 2), 1e-3);
 val_spec = cell(1, N_VAL);
 rv = RandStream('mt19937ar', 'Seed', 99);
 for b = 1:N_VAL, val_spec{b} = make_spec(H, PP, K, rv); end
-healthy_ep = arrayfun(@(b) val_spec{b}.scn == 1, 1:N_VAL, 'UniformOutput', false);
+healthy_ep = arrayfun(@(b) val_spec{b}.scn == 1, 1:N_VAL, 'UniformOutput', false);   % clean-link episodes
 hv = [healthy_ep{:}];
 tab = policy_table(PP, K);
 Rrule = eval_batches('rule_esc', PP, K, val_spec, [], struct(), 5000);
 Rtab = eval_batches('table', PP, K, val_spec, [], tab, 5000);
-fa_rule = mean(Rrule.false_sw(hv) > 0);
+fa_rule = mean(Rrule.switches(hv) > 0);            % on the clean link every change is a false alarm
 fa_limit = max(0.05, fa_rule);
 fprintf('Rule + escalation on validation: return %.3f, restored %.1f%%, false-alarm episodes %.1f%%\n', ...
     mean(Rrule.ret), 100*mean(Rrule.restored_post), 100*fa_rule);
 fprintf('Table on validation:             return %.3f, restored %.1f%%\n\n', mean(Rtab.ret), 100*mean(Rtab.restored_post));
 
-%% 4. Training
-runs = struct('seed', {}, 'agent', {}, 'curve', {}, 'loss', {}, 'best_ep', {}, 'val', {}, 'fa', {});
-for k = 1:N_SEEDS
-    fprintf('--- Seed %d (%d/%d) ---\n', SEEDS(k), k, N_SEEDS);
-    [ag, curve, lossc, best_ep] = train_one(H, PP, K, norm_in, SEEDS(k), nS);
-    V = eval_batches('dqn', PP, K, val_spec, ag, struct(), 5000);
-    fa = mean(V.false_sw(hv) > 0);
-    fprintf('    checkpoint at episode %d | validation: return %.3f | restored %.1f%% | goodput %.3f | false-alarm episodes %.1f%%\n', ...
-        best_ep, mean(V.ret), 100*mean(V.restored_post), mean(V.gput_post), 100*fa);
-    runs(end+1) = struct('seed', SEEDS(k), 'agent', ag, 'curve', curve, 'loss', lossc, 'best_ep', best_ep, ...
-        'val', V, 'fa', fa); %#ok<SAGROW>
+%% 4. Training: discount factor x seeds
+runs = struct('gamma', {}, 'seed', {}, 'agent', {}, 'curve', {}, 'loss', {}, 'best_ep', {}, 'val', {}, 'fa', {});
+for g = GAMMAS
+    for k = 1:N_SEEDS
+        fprintf('--- gamma %.2f, seed %d ---\n', g, SEEDS(k));
+        Hg = H; Hg.gamma = g;
+        [ag, curve, lossc, best_ep] = train_one(Hg, PP, K, norm_in, SEEDS(k), nS);
+        V = eval_batches('dqn', PP, K, val_spec, ag, struct(), 5000);
+        fa = mean(V.switches(hv) > 0);
+        fprintf('    checkpoint at episode %d | validation: return %.3f | restored %.1f%% | goodput %.3f | false-alarm episodes %.1f%%\n', ...
+            best_ep, mean(V.ret), 100*mean(V.restored_post), mean(V.gput_post), 100*fa);
+        runs(end+1) = struct('gamma', g, 'seed', SEEDS(k), 'agent', ag, 'curve', curve, 'loss', lossc, ...
+            'best_ep', best_ep, 'val', V, 'fa', fa); %#ok<SAGROW>
+    end
 end
 vret = arrayfun(@(r) mean(r.val.ret), runs);
 ok_fa = [runs.fa] <= fa_limit;
-cand = find(ok_fa); if isempty(cand), cand = 1:N_SEEDS; end
+cand = find(ok_fa); if isempty(cand), cand = 1:numel(runs); end
 [~, j] = max(vret(cand)); best = cand(j);
 agent = runs(best).agent;
-fprintf('\n--- Contextual-bandit ablation (gamma = 0) ---\n');
-Hb = H; Hb.gamma = 0;
-agent_bandit = train_one(Hb, PP, K, norm_in, SEEDS(1), nS);
-Vb = eval_batches('dqn', PP, K, val_spec, agent_bandit, struct(), 5000);
+gamma_sel = runs(best).gamma;
+agents = cell(1, numel(GAMMAS));                     % best seed per discount factor (ablation)
+for gi = 1:numel(GAMMAS)
+    m = find([runs.gamma] == GAMMAS(gi));
+    mk = m(ok_fa(m)); if isempty(mk), mk = m; end
+    [~, jj] = max(vret(mk));
+    agents{gi} = runs(mk(jj)).agent;
+end
+agents{find(GAMMAS == gamma_sel, 1)} = agent;
+agent_bandit = [];
+if any(GAMMAS == 0), agent_bandit = agents{GAMMAS == 0}; end
 
 %% 5. Gate and report
 Vd = runs(best).val;
 gate = mean(Vd.ret) >= mean(Rrule.ret) && runs(best).fa <= fa_limit;
 rep = {};
-rep{end+1} = '=== SEQUENTIAL DQN TRAINING (D44, D45) ===';
-rep{end+1} = sprintf(['Generated: %s | Double DQN + shield, replay %d, target every %d updates, gamma %.2f, ' ...
-    'lr %.0e -> %.0e, %d episodes x %d cycles, %d seeds'], datestr(now), H.buffer, H.target_every, H.gamma, ...
-    H.lr, H.lr_end, H.episodes, H.T, N_SEEDS);
-rep{end+1} = sprintf('Validation: %d episodes (train pools, fresh draws), single threats + clean link', N_VAL * H.NE);
-rep{end+1} = sprintf('%-22s %9s %10s %9s %13s %13s %12s', 'policy', 'return', 'restored', 'goodput', ...
+rep{end+1} = '=== DQN TRAINING (D44-D46) ===';
+rep{end+1} = sprintf(['Generated: %s | Double DQN + shield, replay %d, target every %d updates, ' ...
+    'lr %.0e -> %.0e, %d episodes x %d cycles, gamma %s x %d seeds'], datestr(now), H.buffer, H.target_every, ...
+    H.lr, H.lr_end, H.episodes, H.T, mat2str(GAMMAS), N_SEEDS);
+rep{end+1} = sprintf('Validation: %d episodes (train pools, fresh draws): single threats, training combinations, clean link', ...
+    N_VAL * H.NE);
+rep{end+1} = sprintf('%-24s %9s %10s %9s %13s %13s %12s', 'policy', 'return', 'restored', 'goodput', ...
     'false sw/ep', 'FA episodes', 'switches/ep');
-line = @(n, R) sprintf('%-22s %9.3f %9.1f%% %9.3f %13.3f %12.1f%% %12.2f', n, mean(R.ret), 100*mean(R.restored_post), ...
-    mean(R.gput_post), mean(R.false_sw), 100*mean(R.false_sw(hv) > 0), mean(R.switches));
-for k = 1:N_SEEDS
-    rep{end+1} = [line(sprintf('DQN seed %d', runs(k).seed), runs(k).val) ...
+line = @(n, R) sprintf('%-24s %9.3f %9.1f%% %9.3f %13.3f %12.1f%% %12.2f', n, mean(R.ret), 100*mean(R.restored_post), ...
+    mean(R.gput_post), mean(R.false_sw), 100*mean(R.switches(hv) > 0), mean(R.switches));
+for k = 1:numel(runs)
+    rep{end+1} = [line(sprintf('DQN g=%.2f seed %d', runs(k).gamma, runs(k).seed), runs(k).val) ...
         sprintf('   (checkpoint %d)', runs(k).best_ep)]; %#ok<SAGROW>
 end
-rep{end+1} = line('DQN gamma=0 (bandit)', Vb);
 rep{end+1} = line('table (train pools)', Rtab);
 rep{end+1} = line('rule + escalation', Rrule);
-rep{end+1} = sprintf('Seed return spread: %.3f to %.3f (std %.3f)', min(vret), max(vret), std(vret));
-rep{end+1} = sprintf(['Selected seed %d. Gate (return >= rule+escalation, false-alarm episodes <= %.1f%% = ' ...
-    'max(5%%, rule): %.1f%%): %s'], runs(best).seed, 100*fa_limit, 100*runs(best).fa, ternary(gate, 'PASS', 'FAIL'));
+rep{end+1} = '';
+rep{end+1} = 'Validation return per discount factor (mean over seeds, 95% t over seeds):';
+for gi = 1:numel(GAMMAS)
+    v = vret([runs.gamma] == GAMMAS(gi));
+    [m, lo, hi] = stats_ci('t', v);
+    rep{end+1} = sprintf('  gamma %.2f: %.4f [%.4f, %.4f]  (seeds %s)', GAMMAS(gi), m, lo, hi, mat2str(v, 4)); %#ok<SAGROW>
+end
+rep{end+1} = sprintf(['Selected: gamma %.2f, seed %d (best validation return among runs with false-alarm ' ...
+    'episodes <= %.1f%% = max(5%%, rule)). Gate (return >= rule+escalation): %s'], gamma_sel, runs(best).seed, ...
+    100*fa_limit, ternary(gate, 'PASS', 'FAIL'));
 if ~exist('results', 'dir'), mkdir('results'); end
 fid = fopen('results/dqn_training.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('\n%s\n', rep{:});
 if ~gate, warning('train_dqn:gate', 'DQN validation gate FAILED -- see results/dqn_training.txt'); end
 
-seed_summary = struct('seeds', SEEDS, 'val_return', vret, 'fa', [runs.fa], 'fa_limit', fa_limit, ...
-    'best_ep', [runs.best_ep], 'selected_seed', runs(best).seed, 'gate_pass', gate);
+seed_summary = struct('gammas', [runs.gamma], 'seeds', [runs.seed], 'val_return', vret, 'fa', [runs.fa], ...
+    'fa_limit', fa_limit, 'best_ep', [runs.best_ep], 'selected_gamma', gamma_sel, ...
+    'selected_seed', runs(best).seed, 'gate_pass', gate, 'rule_return', mean(Rrule.ret), 'table_return', mean(Rtab.ret));
+H.gamma = gamma_sel;
 action_names = PP.actions;
-save('data/trained_dqn.mat', 'agent', 'agent_bandit', 'H', 'norm_in', 'seed_summary', 'action_names', 'tab', '-v7.3');
+gammas = GAMMAS;
+save('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'agent_bandit', 'H', 'norm_in', 'seed_summary', ...
+    'action_names', 'tab', '-v7.3');
 fprintf('Saved data/trained_dqn.mat\n');
 
 fig = figure('Position', [100 100 1000 380], 'Color', 'w');
 subplot(1, 2, 1); hold on; grid on;
-for k = 1:N_SEEDS, plot(runs(k).curve(:, 1), runs(k).curve(:, 2), 'LineWidth', 1.2); end
-for k = 1:N_SEEDS
-    c = runs(k).curve; [~, m] = max(c(:, 2));
-    plot(c(m, 1), c(m, 2), 'ko', 'MarkerSize', 6, 'HandleVisibility', 'off');
+cols = lines(numel(GAMMAS)); hl = gobjects(1, numel(GAMMAS));
+for k = 1:numel(runs)
+    gi = find(GAMMAS == runs(k).gamma);
+    c = runs(k).curve;
+    hl(gi) = plot(c(:, 1), c(:, 2), 'Color', cols(gi, :), 'LineWidth', 1.1);
+    [~, m] = max(c(:, 2));
+    plot(c(m, 1), c(m, 2), 'o', 'Color', cols(gi, :), 'MarkerSize', 5, 'HandleVisibility', 'off');
 end
 yline(mean(Rrule.ret), 'k--', 'rule + escalation (validation)');
 xlabel('Episode'); ylabel(sprintf('Mean reward per cycle (greedy, %d episodes)', H.n_eval * H.NE));
 title('Learning curves (o = kept checkpoint)');
-legend(arrayfun(@(r) sprintf('seed %d', r.seed), runs, 'UniformOutput', false), 'Location', 'southeast');
+legend(hl, arrayfun(@(g) sprintf('\\gamma = %.2f', g), GAMMAS, 'UniformOutput', false), 'Location', 'southeast');
 subplot(1, 2, 2); plot(movmean(runs(best).loss, 200)); grid on;
-xlabel('Update'); ylabel('Huber loss (moving mean 200)'); title(sprintf('Q-loss, seed %d', runs(best).seed));
+xlabel('Update'); ylabel('Huber loss (moving mean 200)');
+title(sprintf('Q-loss, selected run (\\gamma %.2f, seed %d)', gamma_sel, runs(best).seed));
 saveas(fig, 'results/dqn_training_curves.png'); close(fig);
 fprintf('=== C2 Complete ===\n');
 
 %% ===================== Local functions =====================
 function spec = make_spec(H, PP, K, rs)
-% Training / validation episodes: single threats and the clean link.
+% Training / validation episodes: single threats, the clean link and the
+% training combinations.
 nSing = numel(PP.singles);
+idx = 1:nSing;
 w = ones(1, nSing); w(1) = 2; w(strcmp(PP.singles, 'benign_interference')) = 1.5;
+if isfield(PP, 'train_combos')
+    ic = find(ismember(PP.scen, PP.train_combos));
+    idx = [idx, ic]; w = [w, 0.75 * ones(1, numel(ic))];
+end
 cw = cumsum(w) / sum(w);
 NE = H.NE;
-scn = arrayfun(@(u) find(u <= cw, 1), rand(rs, 1, NE));
+scn = idx(arrayfun(@(u) find(u <= cw, 1), rand(rs, 1, NE)));
 spec = struct('scn', scn, 's', randi(rs, numel(PP.ebno), 1, NE), 'onset', randi(rs, [3 10], 1, NE), ...
     'follow', K.followable(scn) & rand(rs, 1, NE) < H.p_follow, 'fdelay', randi(rs, [2 5], 1, NE), ...
     'unk', scn > 1 & rand(rs, 1, NE) < H.p_unknown, 'T', H.T);

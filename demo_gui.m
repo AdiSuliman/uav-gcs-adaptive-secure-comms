@@ -1,33 +1,39 @@
 function demo_gui
-%DEMO_GUI - UAV-GCS Adaptive Secure Comms: operator console (v3, proposal-complete).
+%DEMO_GUI - UAV-GCS Adaptive Secure Comms: operator console (v4, D46).
 %
 % One application, five tabs:
-%   LIVE OPERATIONS  - run the REAL closed loop (Simulink -> CNN -> DQN -> real
-%                      mitigation sim) for any threat x Eb/N0 x UAV speed x severity.
+%   LIVE OPERATIONS  - run the REAL closed loop (Simulink -> CNN -> decision layer
+%                      -> real mitigation sim) for any threat x Eb/N0 x UAV speed x
+%                      severity. Every frame of the run passes through the detector,
+%                      the Mahalanobis unknown-threat score and policy_decide.m (link
+%                      monitor, 2-cycle alarm confirmation, shield), exactly as in the
+%                      evaluation; the configuration at the end of the run is applied.
 %                      Shows detection (with UNKNOWN-threat handling), the DQN
 %                      decision side by side with the rule-based policy, the BER /
 %                      RSSI timeline before and after the countermeasure, the
 %                      outcome vs the clean channel (survivability regime) and the
 %                      goodput trade-off.
-%   KPI & RESULTS    - the five proposal KPIs, confusion matrix, accuracy vs SNR,
-%                      recovery vs SNR, latency, action distribution and robustness
-%                      vs UAV speed, read from the saved result files.
+%   KPI & RESULTS    - the proposal KPIs, confusion matrix, accuracy vs SNR,
+%                      restoration vs SNR, latency, configuration per threat and
+%                      robustness vs UAV speed, read from the saved result files
+%                      (evaluate_policies, measure_latency, measure_all_kpis).
 %   SURVIVABILITY MAP- proposal deliverable #7 (Map A / Map B, per threat) with the
 %                      last live run marked on the grid.
 %   CONTINUOUS EPISODE - one link streamed cycle by cycle: clean cycles, threat
-%                      onset, then detection -> policy -> dwell/hysteresis every
-%                      cycle (episode_cycle.m, the same code as
-%                      run_closed_loop_episodes.m). DQN and rule-based can run on
-%                      identical frame draws; T_detect / T_act / T_recover live.
+%                      onset, then detection -> policy_decide.m every cycle
+%                      (episode_cycle.m). Every configuration is simulated on the
+%                      same seeds, so a change keeps the flight geometry. DQN and
+%                      rule-based run on identical frames; T_detect / T_act /
+%                      T_recover live.
 %   SESSION LOG      - every run of the session, exportable to CSV / MAT.
 %
 % Speed: any real value 50-120 km/h. Channel Doppler follows fd = v*fc/c and is
 % applied to the Simulink channel of EVERY run (2.4 GHz -> ~2.22 Hz per km/h).
 %
-% Decision latency = CNN path (spectrogram + normalise + resize + forward pass)
-% + DQN forward pass, timed with tic/toc around exactly that computation. GUI
-% drawing and the demo pauses are NOT inside the timed block, so the number is
-% the same quantity reported by run_closed_loop_diagnostic.m.
+% Decision latency = detection path of one frame (CNN forward pass and
+% Mahalanobis score) + one policy_decide.m cycle, timed with tic/toc around
+% exactly that computation; GUI drawing is outside. measure_latency.m gives the
+% full per-component statistics.
 %
 % ARCHITECTURE: no nested functions anywhere in this file (see D24). Static state
 % (models, parameters, UI handles, colours) lives in fig.UserData; state that
@@ -42,7 +48,7 @@ close all; clc;
 %% ---------- Load trained models and simulation parameters once ----------
 tBoot = tic;
 fprintf('Loading trained models and parameters...\n');
-D = load('data/trained_detector.mat', 'net', 'classes');
+D = load('data/trained_detector.mat', 'net', 'classes', 'ood');
 Q = load('data/trained_dqn.mat', 'agent');
 [featMean, featStd] = loadNormStats();
 p0 = loadInitialParams();
@@ -70,6 +76,12 @@ else
     env.speed_range = [50 120];
 end
 env.action_names = env.dqn_agent.action_names;
+env.na = find(strcmp(env.action_names, 'no_action'), 1);
+env.ood = D.ood;
+Tood = ood_thresholds(0.95);                   % D44: Mahalanobis unknown-threat threshold (95% of known kept)
+env.maha_val = Tood.maha_val;
+env.PP = struct('actions', {env.action_names}, 'classes', {env.class_list(:)'}, 'sps', p0.sps, ...
+    'bps', p0.bits_per_symbol, 'maha_thr', Tood.maha);
 env.baseline = struct('jsr_db',p0.jsr_db,'path_loss_db',p0.path_loss_db, ...
     'fault_atten_db',p0.fault_atten_db,'spoof_sir_db',p0.spoof_sir_db, ...
     'benign_int_db',p0.benign_int_db);
@@ -112,7 +124,8 @@ hdr.Layout.Row = 1;
 hg = uigridlayout(hdr, [1 4]);
 hg.ColumnWidth = {'1x', 470, 30, 270}; hg.Padding = [14 4 14 4]; hg.BackgroundColor = c.panelBg;
 place(mkLabel(hg, 'UAV-GCS ADAPTIVE SECURE COMMUNICATIONS', c, 'FontSize', 17, 'FontWeight', 'bold'), 1, 1);
-place(mkLabel(hg, 'CNN 9-class detector | DQN 16-action | Rician K=10 dB @ 2.4 GHz', c, ...
+place(mkLabel(hg, sprintf('CNN 9-class detector | DQN %d configurations | Rician K=10 dB @ 2.4 GHz', ...
+    numel(env.action_names)), c, ...
     'FontColor', c.mut, 'FontSize', 11, 'HorizontalAlignment', 'right'), 1, 2);
 lamp = place(mkLabel(hg, char(9679), c, 'FontSize', 22, 'FontColor', c.mut, 'HorizontalAlignment', 'center'), 1, 3);
 lampTxt = place(mkLabel(hg, 'LINK: STANDBY', c, 'FontSize', 14, 'FontWeight', 'bold', 'FontColor', c.mut), 1, 4);
@@ -160,10 +173,7 @@ ui.epExportBtn.ButtonPushedFcn   = @exportEpisode;
 fig.CloseRequestFcn              = @closeApp;
 
 speedChanged(ui.speedSpin, []);
-if isfile('data/ood_thresholds.mat')                  % D32: threshold that keeps 95% of known frames
-    Tood = load('data/ood_thresholds.mat', 'T');
-    ui.thrSlider.Value = round(100 * Tood.T.msp);
-end
+ui.thrSlider.Value = 95;                              % production threshold: 95% of known frames kept
 thrChanged(ui.thrSlider, []);
 resetRunViews(fig);
 drawLinkDiagram(fig, 'idle', '', '', struct());
@@ -230,7 +240,7 @@ function ui = buildLiveTab(tab, env, c)
     place(sevDD, 3, 2);
 
     thrLbl = place(mkLabel(g2, '', c, 'FontSize', 11), 4, [1 2]);
-    thrSlider = uislider(g2, 'Limits', [0 100], 'Value', 50, 'MajorTicks', 0:25:100, ...
+    thrSlider = uislider(g2, 'Limits', [80 99], 'Value', 95, 'MajorTicks', [80 85 90 95 99], ...
         'MinorTicks', [], 'FontColor', c.mut);
     place(thrSlider, 5, [1 2]);
 
@@ -386,12 +396,10 @@ function ui = buildEpisodeTab(tab, env, c)
     epPostSpin = place(uispinner(gl, 'Limits', [20 300], 'Step', 10, 'Value', 60, 'BackgroundColor', c.termBg, ...
         'FontColor', c.txt, 'FontName', c.font), 8, 2);
 
-    epHystChk = place(uicheckbox(gl, 'Text', 'Hysteresis (dwell / hold, cycles)', 'Value', true, ...
+    epHystChk = place(uicheckbox(gl, 'Text', 'Escalation when the link stays degraded', 'Value', false, ...
         'FontColor', c.txt, 'FontName', c.font), 9, [1 2]);
-    epDwellSpin = place(uispinner(gl, 'Limits', [1 10], 'Value', 3, 'BackgroundColor', c.termBg, ...
-        'FontColor', c.txt, 'FontName', c.font, 'ValueDisplayFormat', 'dwell %d'), 10, 1);
-    epHoldSpin  = place(uispinner(gl, 'Limits', [0 40], 'Value', 10, 'BackgroundColor', c.termBg, ...
-        'FontColor', c.txt, 'FontName', c.font, 'ValueDisplayFormat', 'hold %d'), 10, 2);
+    epDwellSpin = place(mkLabel(gl, 'alarm confirmed after 2 cycles', c, 'FontColor', c.mut, 'FontSize', 10), 10, 1);
+    epHoldSpin  = place(mkLabel(gl, 'rule: dwell 2, hold 3', c, 'FontColor', c.mut, 'FontSize', 10), 10, 2);
 
     place(mkLabel(gl, 'Playback', c, 'FontColor', c.mut), 11, 1);
     epPaceDD = place(uidropdown(gl, 'Items', {'fastest', '50 ms / cycle', '150 ms / cycle', '400 ms / cycle'}, ...
@@ -435,8 +443,8 @@ function ui = buildKpiTab(tab, c)
 
     top = uigridlayout(g, [1 7]); top.Layout.Row = 1; top.ColumnWidth = {'1x','1x','1x','1x','1x','1x',110};
     top.Padding = [0 0 0 0]; top.ColumnSpacing = 8; top.BackgroundColor = c.bg;
-    titles = {'DETECTION  (KPI #1)','BER RECOVERY  (KPI #2)','DECISION LATENCY  (KPI #3)', ...
-              'FALSE ALARMS  (KPI #4)','END-TO-END  (KPI #5)','SPEED ROBUSTNESS'};
+    titles = {'DETECTION  (KPI 1)','RESTORATION  (KPI 4)','DECISION LATENCY  (KPI 7)', ...
+              'FALSE ALARMS  (KPI 6)','DQN vs RULE  (KPI 5)','SPEED ROBUSTNESS  (KPI 7)'};
     kpiVal = gobjects(1, 6); kpiSub = gobjects(1, 6);
     for k = 1:6
         card = uipanel(top, 'BackgroundColor', c.panelBg, 'BorderType', 'line');
@@ -668,12 +676,12 @@ end
 
 function thrChanging(src, evt)
     fig = ancestor(src, 'figure'); ui = fig.UserData.ui;
-    ui.thrLbl.Text = sprintf('UNKNOWN if confidence < %.0f %% and link degraded', evt.Value);
+    ui.thrLbl.Text = sprintf('UNKNOWN if Mahalanobis score below the level keeping %.1f %% of known frames', evt.Value);
 end
 
 function thrChanged(src, ~)
     fig = ancestor(src, 'figure'); ui = fig.UserData.ui;
-    ui.thrLbl.Text = sprintf('UNKNOWN if confidence < %.0f %% and link degraded', src.Value);
+    ui.thrLbl.Text = sprintf('UNKNOWN if Mahalanobis score below the level keeping %.1f %% of known frames', src.Value);
 end
 
 function abortSequence(btn, ~)
@@ -845,7 +853,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     refBer = NaN;                                                  % clean-channel BER at this Eb/N0
     if ~isempty(env.surv)
         kref = find(env.surv.SNR_points == ebno, 1);
-        if ~isempty(kref), refBer = env.surv.ber_clean(kref); end
+        if ~isempty(kref), refBer = survRef(env.surv, kref); end
     end
 
     resetRunViews(fig);
@@ -880,42 +888,46 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     drawTimeline(fig, tl);
     smartPause(fig, 0.5, tSeq); checkAbort(fig);
 
-    %% ---- 2. TIMED decision block: CNN path + DQN (no GUI work inside) ----
-    t1 = tic;
+    %% ---- 2. decision layer over the frames of the run (policy_decide.m, as evaluated) ----
     [Sxx, Fq, Tq] = spectrogram(iq_before, hann(env.win), env.novlp, env.nfft, env.fs, 'centered');
     Pw_db = 20*log10(abs(Sxx) + eps);
-    spec_img = spec_image(iq_before, env.fs);
-    norm_feats = (raw_feats - env.feat_mean) ./ env.feat_std;
-    X_spec = dlarray(single(spec_img), 'SSCB'); X_feat = dlarray(single(norm_feats)', 'CB');
-    if canUseGPU, X_spec = gpuArray(X_spec); X_feat = gpuArray(X_feat); end
-    pred = predict(env.cnn_net, X_spec, X_feat);
-    cnn_ms = toc(t1) * 1000;
-
-    probs = gather(extractdata(pred)); probs = probs(:);
-    [conf, idx] = max(probs);
-    top_class = env.class_list{idx};
-    is_unknown = (100 * conf) < thr_pct;
-    if is_unknown && isfinite(refBer)                % D33: low confidence alone on a healthy link is not an unknown threat
-        is_unknown = raw_feats(2) > 2 * refBer;
+    Mrun = struct('sinr', sinr_f, 'ber', ber_f, 'rssi', rssi_f, 'plr', plr_f, 'env_corr', ec_f, 'iot', iot_f);
+    vf = reshape(find(~isnan(ber_f)), 1, []); nv = numel(vf);
+    if nv == 0, error('demoGui:noFrames', 'no complete frame in the run'); end
+    X = zeros(env.img_size, env.img_size, 1, nv, 'single'); Fr = zeros(nv, numel(env.feat_mean));
+    for i = 1:nv
+        X(:, :, 1, i) = spec_image(iq_frames{vf(i)}, env.fs);
+        Fr(i, :) = link_features(Mrun, vf(i), env.temporal_window, p.frame_duration);
     end
-    if is_unknown, cnn_class = 'unknown'; else, cnn_class = top_class; end
-
-    dqn_state = build_dqn_state(cnn_class, raw_feats(2), raw_feats(3), ebno, raw_feats(4));
-    sdl = dlarray(single(dqn_state), 'CB'); if canUseGPU, sdl = gpuArray(sdl); end
-    t2 = tic;
-    qraw = predict(env.dqn_agent.qNetwork, sdl);
-    dqn_ms = toc(t2) * 1000;
-    qv = gather(extractdata(qraw)); qv = qv(:);
-    [~, aidx] = max(qv);
-    action_name = env.action_names{aidx};
+    Fn = ((Fr - env.feat_mean) ./ env.feat_std)';
+    probsAll = cnn_scores(env.cnn_net, X, Fn);
+    mahaAll = ood_scores(env.cnn_net, env.ood, X, Fn);
+    PPr = env.PP; PPr.maha_thr = mahaThreshold(env, thr_pct);
+    cfgD = env.na; cfgR = env.na; memD = []; memR = []; dqn_ms = NaN;
+    for i = 1:nv
+        obs = struct('probs', probsAll(:, i)', 'unknown', mahaAll(i) < PPr.maha_thr, 'feat', Fr(i, :), ...
+            'ber', ber_f(vf(i)));
+        t2 = tic;
+        [cfgD, memD, dD] = policy_decide('dqn', obs, cfgD, memD, PPr, env.dqn_agent);
+        dqn_ms = toc(t2) * 1000;
+        [cfgR, memR] = policy_decide('rule', obs, cfgR, memR, PPr, []);
+    end
+    t1 = tic;                                                   % one detection cycle as deployed
+    Xl = X(:, :, 1, nv);
+    cnn_scores(env.cnn_net, Xl, Fn(:, nv)); ood_scores(env.cnn_net, env.ood, Xl, Fn(:, nv));
+    if canUseGPU, wait(gpuDevice); end
+    cnn_ms = toc(t1) * 1000;
     total_ms = cnn_ms + dqn_ms;
 
-    if is_unknown
-        rule_action = rule_based_policy('unknown', raw_feats(2), ebno);   % generic action only if the link is degraded
-    else
-        rule_action = rule_based_policy(cnn_class, raw_feats(2), ebno);
-    end
-    ridx = find(strcmp(env.action_names, rule_action), 1); if isempty(ridx), ridx = 0; end
+    probs = probsAll(:, nv);
+    [conf, idx] = max(probs);
+    top_class = env.class_list{idx};
+    is_unknown = mahaAll(nv) < PPr.maha_thr;
+    if is_unknown, cnn_class = 'unknown'; else, cnn_class = top_class; end
+    qv = dD.q(:); qv(~isfinite(qv)) = NaN;
+    aidx = cfgD; action_name = env.action_names{aidx};
+    ridx = cfgR; rule_action = env.action_names{ridx};
+    appLog(fig, sprintf('Decision layer over the %d frames of the run (alarm confirmed after 2 cycles, shield, hysteresis)', nv));
 
     %% ---- 3. show detection + decision ----
     correct = strcmp(cnn_class, threat);
@@ -1074,6 +1086,17 @@ function R = applyMitigation(env, p, threat, action_name, snr_dB) %#ok<INUSL>
     R = struct('iq', iqf{i2}, 'ber_f', berf, 'rssi_f', rssif, 'ber_mean', mean(berf, 'omitnan'));
 end
 
+function r = survRef(surv, k)
+    % Clean-link reference of the survivability map (floored since D46).
+    if isfield(surv, 'ber_ref'), r = surv.ber_ref(k); else, r = max(surv.ber_clean(k), 1e-4); end
+end
+
+function t = mahaThreshold(env, retain_pct)
+    % Mahalanobis threshold keeping retain_pct % of the known validation frames.
+    v = env.maha_val;
+    t = v(max(1, ceil((1 - retain_pct / 100) * numel(v))));
+end
+
 function [txt, col, status] = verdictFor(env, c, ebno, ber_final, action_name)
     % Classify the FINAL link state with the same criteria as the survivability
     % map (proposal deliverable #7): BER relative to the clean channel.
@@ -1081,7 +1104,7 @@ function [txt, col, status] = verdictFor(env, c, ebno, ber_final, action_name)
     if isempty(env.surv), return; end
     k = find(env.surv.SNR_points == ebno, 1);
     if isempty(k), return; end
-    ratio = ber_final / max(env.surv.ber_clean(k), eps);
+    ratio = ber_final / survRef(env.surv, k);
     if ratio <= env.surv.RATIO_RECOVERABLE, status = 1;
     elseif ratio <= env.surv.RATIO_MARGINAL, status = 2;
     else, status = 3; end
@@ -1571,10 +1594,8 @@ end
 %% =====================================================================
 %% ========================  CONTINUOUS EPISODE  ========================
 %% =====================================================================
-function epHystChanged(src, ~)
-    fig = ancestor(src, 'figure'); ui = fig.UserData.ui;
-    en = 'off'; if src.Value, en = 'on'; end
-    ui.epDwellSpin.Enable = en; ui.epHoldSpin.Enable = en;
+function epHystChanged(~, ~)
+    % Escalation is read when the next episode starts.
 end
 
 function stopEpisode(btn, ~)
@@ -1615,14 +1636,14 @@ function runEpisode(btn, ~)
     threat = ui.epThreatDD.Value; ebno = ui.epSnrDD.Value; sevLevel = ui.epSevDD.Value;
     v_kmh = ui.epSpeedSpin.Value; mode = ui.epPolicyDD.Value;
     N_PRE = ui.epPreSpin.Value; N_POST = ui.epPostSpin.Value; N = N_PRE + N_POST;
-    if ui.epHystChk.Value, nDwell = ui.epDwellSpin.Value; nHold = ui.epHoldSpin.Value; else, nDwell = 1; nHold = 0; end
+    esc = ui.epHystChk.Value;
     pace = ui.epPaceDD.Value;
     seed = ui.epSeedFld.Value; if seed == 0, seed = randi(2^31 - 1); end
     if strcmp(mode, 'both'), policies = {'dqn', 'rule'}; else, policies = {mode}; end
     nP = numel(policies);
     [p, sevTxt] = scenarioParams(env, threat, sevLevel, v_kmh);
-    appLog(fig, sprintf('EPISODE: %s @ %g dB | %s | %.1f km/h | %s | dwell %d hold %d | seed %d', ...
-        niceName(threat), ebno, sevTxt, v_kmh, strjoin(upper(policies), ' + '), nDwell, nHold, seed));
+    appLog(fig, sprintf('EPISODE: %s @ %g dB | %s | %.1f km/h | %s | escalation %s | seed %d', ...
+        niceName(threat), ebno, sevTxt, v_kmh, strjoin(upper(policies), ' + '), ternaryStr(esc, 'on', 'off'), seed));
 
     %% ---- frame pools (real Simulink runs, cached per scenario) ----
     try
@@ -1642,15 +1663,15 @@ function runEpisode(btn, ~)
     end
 
     %% ---- episode state, one per policy, identical frame draws ----
-    base = struct('ebno', ebno, 'dwell', nDwell, 'hold', nHold, 'net', env.cnn_net, ...
-        'classes', {env.classes}, 'feat_mean', env.feat_mean, 'feat_std', env.feat_std, ...
-        'fs', env.fs, 'agent', env.dqn_agent, 'actions', {env.action_names}, 'na', na, ...
+    base = struct('net', env.cnn_net, 'ood', env.ood, 'feat_mean', env.feat_mean, 'feat_std', env.feat_std, ...
+        'fs', env.fs, 'agent', env.dqn_agent, 'PP', env.PP, 'na', na, ...
         'tw', env.temporal_window, 'frame_dur', env.p0.frame_duration);
-    ctx = cell(1, nP); Ep = cell(1, nP); rs = cell(1, nP);
+    ctx = cell(1, nP); Ep = cell(1, nP);
     for i = 1:nP
-        ctx{i} = base; ctx{i}.policy = policies{i};
-        rs{i} = RandStream('mt19937ar', 'Seed', seed);
+        ctx{i} = base; ctx{i}.policy = [policies{i} ternaryStr(esc, '_esc', '')];
     end
+    rsE = RandStream('mt19937ar', 'Seed', seed);               % same sub-run and frame positions for every policy
+    rr = randi(rsE, 2); k0 = randi(rsE, 20) - 1;
     T = struct('ber', nan(nP, N), 'det', nan(nP, N), 'ok', false(nP, N), 'mit', false(nP, N), 'conf', nan(nP, N), ...
         'prop', nan(nP, N), 'cfg', nan(nP, N), 'sw', false(nP, N));
     cls_idx = @(cl) find(strcmp(env.class_list, cl), 1);
@@ -1665,7 +1686,7 @@ function runEpisode(btn, ~)
         for i = 1:nP
             if isempty(Ep{i}), cfg = na; else, cfg = Ep{i}.cfg; end
             if onset, F = Pt{cfg}; else, F = Pn{cfg}; end
-            j = randi(rs{i}, numel(F.ber));
+            rows = find(F.run == rr); j = rows(mod(k0 + k, numel(rows)) + 1);
             fr = struct('iq', double(F.iq{j}), 'ber', F.ber(j), 'rssi', F.rssi(j), 'plr', F.plr(j), ...
                 'sinr', F.sinr(j), 'env_corr', F.env_corr(j), 'iot', F.iot(j));
             [Ep{i}, info] = episode_cycle(Ep{i}, k, fr, ctx{i});
@@ -1688,7 +1709,8 @@ function runEpisode(btn, ~)
 
     %% ---- summary ----
     lines = {sprintf('%s @ %g dB, %s, %.1f km/h | seed %d | %d/%d cycles (%.1f s)', niceName(threat), ebno, ...
-        sevTxt, v_kmh, seed, kDone, N, toc(tLoop)), sprintf('clean BER %.2e | dwell %d, hold %d', bc, nDwell, nHold)};
+        sevTxt, v_kmh, seed, kDone, N, toc(tLoop)), sprintf('clean BER %.2e | alarm confirmed after 2 cycles, rule dwell 2 / hold 3, escalation %s', ...
+        bc, ternaryStr(esc, 'on', 'off'))};
     rows = {};
     for i = 1:nP
         S = epSummary(T, i, N_PRE, kDone, bc, truthIdx, gp_act, env.action_names);
@@ -1741,16 +1763,19 @@ function [Pn, Pt] = epPools(fig, p, threat, ebno, sevLevel, v_kmh)
     keyN = sprintf('none|%g|%.1f', ebno, v_kmh);
     keyT = sprintf('%s|%g|%.1f|%d', threat, ebno, v_kmh, sevLevel);
     pn = p; pn.active_threat = 'none';
-    if ~isKey(M, keyN), M(keyN) = epBuildPool(fig, pn, 'none', ebno); end
+    seedBase = 500000 + round(100 * ebno) * 1000 + round(10 * v_kmh);   % clean and attacked pools share fading
+    if ~isKey(M, keyN), M(keyN) = epBuildPool(fig, pn, 'none', ebno, seedBase); end
     if strcmp(threat, 'none')
         M(keyT) = M(keyN);
     elseif ~isKey(M, keyT)
-        M(keyT) = epBuildPool(fig, p, threat, ebno);
+        M(keyT) = epBuildPool(fig, p, threat, ebno, seedBase);
     end
     Pn = M(keyN); Pt = M(keyT);
 end
 
-function P = epBuildPool(fig, p, threat, ebno)
+function P = epBuildPool(fig, p, threat, ebno, seedBase)
+    % Every configuration runs on the same two seeds (same fading, geometry and
+    % threat waveform), so a change of configuration keeps the flight geometry.
     env = fig.UserData.env;
     nA = numel(env.action_names);
     P = cell(1, nA);
@@ -1763,9 +1788,9 @@ function P = epBuildPool(fig, p, threat, ebno)
         evalc('build_threat_model');
         snr_dB = ebno + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps);
         set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p2.sps));
-        F = struct('iq', {{}}, 'ber', [], 'rssi', [], 'plr', [], 'sinr', [], 'env_corr', [], 'iot', []);
+        F = struct('iq', {{}}, 'ber', [], 'rssi', [], 'plr', [], 'sinr', [], 'env_corr', [], 'iot', [], 'run', []);
         for r = 1:2
-            link_seed(env.modelName, randi(2^31 - 1000));
+            link_seed(env.modelName, seedBase + r, p2.fd_max);
             out = sim(env.modelName);
             [iq_f, ber_f, rssi_f, plr_f, ~, sinr_f, ec_f, iot_f] = extract_closed_loop_frames(out, p2, env.delay_bits);
             v = find(~isnan(ber_f));
@@ -1776,6 +1801,7 @@ function P = epBuildPool(fig, p, threat, ebno)
             F.sinr = [F.sinr, sinr_f(v)];
             F.env_corr = [F.env_corr, ec_f(v)];
             F.iot = [F.iot, iot_f(v)];
+            F.run = [F.run, r * ones(1, numel(v))];
         end
         P{a} = F;
     end
@@ -1866,8 +1892,7 @@ function setY(h, k, v)
 end
 
 function S = epSummary(T, i, N_PRE, kDone, bc, truthIdx, gp_act, actions)
-    % Same outcome rules as run_closed_loop_episodes.m / report_closed_loop_episodes.m:
-    % recovered when the causal 5-cycle BER mean stays <= 2x clean for 10 cycles.
+    % Recovered when the causal 5-cycle BER mean stays <= 2x clean for 10 cycles.
     ber = T.ber(i, 1:kDone);
     post = N_PRE+1:kDone;
     S.T_detect = NaN; S.T_act = NaN; S.T_recover = NaN;
@@ -1910,84 +1935,72 @@ end
 %% ===========================  KPI TAB LOADER  =========================
 %% =====================================================================
 function loadKpiTab(fig)
+    % KPI tab from the result files of the pipeline (D46): detector metrics,
+    % decision-layer evaluation on the test pools, latency, KPI summary.
     data = fig.UserData; ui = data.ui; c = data.colors;
     R = 'results/';
-    metrics = []; cl = []; far = []; sp = [];
+    metrics = []; P = []; Lt = []; Kp = [];
     try
         if isfile([R 'eval_detector_metrics.mat'])
             M = load([R 'eval_detector_metrics.mat'], 'metrics'); metrics = M.metrics;
         end
-        if isfile([R 'closed_loop_diagnostic_results.mat'])
-            C = load([R 'closed_loop_diagnostic_results.mat'], 'results'); cl = C.results;
-        end
-        if isfile([R 'far_measurement.mat'])
-            F = load([R 'far_measurement.mat'], 'results'); far = F.results;
-        end
-        if isfile([R 'speed_robustness.mat'])
-            Sp = load([R 'speed_robustness.mat'], 'results'); sp = Sp.results;
-        end
+        if isfile([R 'policy_evaluation.mat']), P = load([R 'policy_evaluation.mat']); end
+        if isfile([R 'latency.mat']), L = load([R 'latency.mat'], 'LAT'); Lt = L.LAT; end
+        if isfile([R 'kpi_summary.mat']), K = load([R 'kpi_summary.mat'], 'KPI'); Kp = K.KPI; end
     catch ME
         appLog(fig, ['KPI load problem: ' ME.message]);
     end
 
     for k = 1:6, setCard(ui, k, 'N/A', 'result file missing', c.mut); end
-
-    % ---- KPI cards ----
     if ~isempty(metrics)
         col = c.amber; if metrics.macro_f1_pct >= 90, col = c.green; end
-        sub = sprintf('macro-F1 %.1f%%  |  target >= 90%%', metrics.macro_f1_pct);
-        if isfield(metrics, 'ci95')
-            sub = sprintf('macro-F1 %.1f%% [%.1f-%.1f]  |  target >= 90%%', metrics.macro_f1_pct, metrics.ci95.macro_f1);
-        end
+        sub = sprintf('macro-F1 %.1f%% [%.1f-%.1f]  |  target >= 90%%', metrics.macro_f1_pct, metrics.ci95.macro_f1);
         setCard(ui, 1, sprintf('%.1f%%', metrics.overall_accuracy_pct), sub, col);
     end
-    if ~isempty(cl)
-        isReal = ~ismember({cl.threat}, {'none','benign_interference'});
-        recF = recField(cl);
-        if isfield(cl, 'mc')
-            [mr, lo, hi] = stats_ci('t', arrayfun(@(k) mean([cl(isReal & [cl.mc] == k).(recF)], 'omitnan'), unique([cl.mc])), [0 100]);
-        else
-            mr = mean([cl(isReal).(recF)], 'omitnan'); lo = NaN; hi = NaN;
-        end
-        sub = 'recovery vs the no-attack link, real threats';
-        if ~isnan(lo), sub = sprintf('95%% CI %.0f-%.0f%% over %d repeats', lo, hi, numel(unique([cl.mc]))); end
-        if isfield(cl, 'plr_ok')
-            sub = sprintf('%s | PLR restored %d/%d', sub, sum([cl(isReal).plr_ok]), sum(isReal));
-        end
-        setCard(ui, 2, sprintf('%.1f%%', mr), sub, c.accent);
-        lat = [cl.cnn_latency_ms] + [cl.dqn_latency_ms];
-        setCard(ui, 3, sprintf('%.1f ms', mean(lat)), ...
-            sprintf('median %.1f ms | DQN-vs-rule agreement %.0f%%', median(lat), 100*mean([cl.agrees_with_rule])), c.accent);
-        tn = unique({cl(isReal).threat}, 'stable'); nOK = 0;
-        for k = 1:numel(tn)
-            if mean([cl(strcmp({cl.threat}, tn{k})).(recF)], 'omitnan') >= 50, nOK = nOK + 1; end
-        end
-        col = c.red; v = 'NOT MET'; if nOK >= 1, col = c.green; v = 'MET'; end
-        setCard(ui, 5, v, sprintf('%d / %d real threat classes recovered >= 50%%', nOK, numel(tn)), col);
+    if ~isempty(P)
+        cp = @(p) find(strcmp(P.POL, p));
+        S1 = P.RES(1, :); iD = P.iDQN;
+        rd = 100 * mean(S1{iD}.restored_post);
+        setCard(ui, 2, sprintf('%.1f%%', rd), sprintf('restored cycles, single threats | rule+esc %.1f%%, table %.1f%%', ...
+            100 * mean(S1{cp('rule_esc')}.restored_post), 100 * mean(S1{cp('table')}.restored_post)), c.accent);
+        fa = P.KP.far(strcmp({P.KP.far.policy}, P.LBL{iD}));
+        col = c.green; if fa.upper > 0.05, col = c.amber; end
+        setCard(ui, 4, sprintf('%.2f%%', 100 * fa.p), sprintf('%d / %d clean episodes | 95%% upper %.2f%% (bound 5%%)', ...
+            fa.k, fa.n, 100 * fa.upper), col);
+        A = poolSets(P.RES(P.iThreat, :));
+        [dm, dlo, dhi] = stats_ci('t', A{iD}.ret - A{cp('rule_esc')}.ret);
+        col = c.red; if dlo > 0, col = c.green; end
+        setCard(ui, 5, sprintf('%+.3f', dm), sprintf('return vs rule + escalation [%+.3f, %+.3f], threat sets', dlo, dhi), col);
+        pv = P.KP.per_speed(:, strcmp(P.KP.show, P.POL{iD}));
+        col = c.amber; if max(pv) - min(pv) <= 10, col = c.green; end
+        setCard(ui, 6, sprintf('%.1f%%', min(pv)), sprintf('worst speed band, restored (best %.1f%%) over %.0f-%.0f km/h', ...
+            max(pv), P.KP.speed_bins(1), P.KP.speed_bins(end)), col);
     end
-    if ~isempty(far)
-        nfa = sum([far.false_alarm]); nall = numel(far);
-        [pf, ~, hf] = stats_ci('wilson', nfa, nall); pct = 100 * pf;
-        col = c.green; if 100 * hf > 5, col = c.amber; end
-        sub = sprintf('%d / %d trials | 95%% upper %.1f%% (bound 5%%)', nfa, nall, 100 * hf);
-        setCard(ui, 4, sprintf('%.1f%%', pct), sub, col);
+    if ~isempty(Lt)
+        setCard(ui, 3, sprintf('%.1f ms', Lt.total_dqn_median_ms), sprintf('median per cycle | p95 %.1f ms | %s', ...
+            Lt.total_dqn_p95_ms, Lt.device), c.accent);
     end
-    if ~isempty(sp)
-        vs = unique([sp.speed_kmh]); accv = zeros(size(vs));
-        for k = 1:numel(vs), accv(k) = 100 * mean([sp([sp.speed_kmh] == vs(k)).correct]); end
-        col = c.amber; if min(accv) >= 90, col = c.green; end
-        setCard(ui, 6, sprintf('%.1f%%', min(accv)), ...
-            sprintf('worst-speed detection over %.0f-%.0f km/h', min(vs), max(vs)), col);
+    if ~isempty(Kp)
+        appLog(fig, sprintf('KPI summary: %s', strjoin(arrayfun(@(q) sprintf('%d %s', q.id, q.status), Kp, ...
+            'UniformOutput', false), ' | ')));
     end
 
-    % ---- plots (each guarded, one failure never kills the tab) ----
     guardedPlot(@() plotConfusion(ui.kCm, metrics, c), ui.kCm, 'Confusion matrix', 'eval_detector_metrics.mat', c);
     guardedPlot(@() plotAccSnr(ui.kAcc, metrics, c), ui.kAcc, 'Accuracy vs Eb/N0', 'eval_detector_metrics.mat', c);
-    guardedPlot(@() plotRecSnr(ui.kRec, cl, c), ui.kRec, 'Recovery vs Eb/N0', 'closed_loop_diagnostic_results.mat', c);
-    guardedPlot(@() plotLatency(ui.kLat, cl, c), ui.kLat, 'Decision latency', 'closed_loop_diagnostic_results.mat', c);
-    guardedPlot(@() plotActions(ui.kAct, cl, c), ui.kAct, 'Action per threat', 'closed_loop_diagnostic_results.mat', c);
-    guardedPlot(@() plotSpeed(ui.kSpd, sp, metrics, c), ui.kSpd, 'Robustness vs UAV speed', ...
-        'speed_robustness.mat (run eval_speed_robustness)', c);
+    guardedPlot(@() plotRecSnr(ui.kRec, P, c), ui.kRec, 'Restoration vs Eb/N0', 'policy_evaluation.mat', c);
+    guardedPlot(@() plotLatency(ui.kLat, Lt, c), ui.kLat, 'Decision latency', 'latency.mat', c);
+    guardedPlot(@() plotActions(ui.kAct, P, c), ui.kAct, 'DQN configuration per threat', 'policy_evaluation.mat', c);
+    guardedPlot(@() plotSpeed(ui.kSpd, P, metrics, c), ui.kSpd, 'Robustness vs UAV speed', 'policy_evaluation.mat', c);
+end
+
+function A = poolSets(RR)
+    A = RR(1, :);
+    for si = 2:size(RR, 1)
+        for pk = 1:size(RR, 2)
+            fn = fieldnames(A{pk});
+            for i = 1:numel(fn), A{pk}.(fn{i}) = [A{pk}.(fn{i}), RR{si, pk}.(fn{i})]; end
+        end
+    end
 end
 
 function setCard(ui, k, val, sub, col)
@@ -2048,87 +2061,60 @@ function ok = plotAccSnr(ax, metrics, c)
     setTitle(ax, sprintf('Detection accuracy vs Eb/N0  (overall %.1f%%, red = 90%% target)', metrics.overall_accuracy_pct), c);
 end
 
-function f = recField(r)
-    % KPI #2 metric (D27) when the result file has it, older files fall back.
-    if isfield(r, 'rec_vs_clean'), f = 'rec_vs_clean'; else, f = 'recovery_pct'; end
+function ok = plotRecSnr(ax, P, c)
+    ok = ~isempty(P); if ~ok, return; end
+    hold(ax, 'on');
+    h = plot(ax, P.KP.ebno, P.KP.per_ebno, '-o', 'LineWidth', 1.5, 'MarkerSize', 4);
+    hold(ax, 'off'); ax.XTick = P.KP.ebno; ax.YLim = [0 105]; grid(ax, 'on');
+    xlabel(ax, 'Eb/N0 (dB)', 'Color', c.mut); ylabel(ax, 'restored cycles after onset (%)', 'Color', c.mut);
+    legend(ax, h, P.KP.show_lbl, 'Location', 'southeast', 'TextColor', c.txt, 'Color', c.panelBg, ...
+        'EdgeColor', c.mut, 'FontSize', 7);
+    setTitle(ax, 'Restoration vs Eb/N0 (single threats, test pools)', c);
 end
 
-function ok = plotRecSnr(ax, cl, c)
-    ok = ~isempty(cl); if ~ok, return; end
-    threats = unique({cl.threat}, 'stable'); snr = unique([cl.snr_db]);
-    realT = threats(~ismember(threats, {'none','benign_interference'}));
-    hold(ax, 'on'); h = gobjects(0); nm = {};
-    recF = recField(cl);
-    for t = 1:numel(realT)
-        rec = nan(1, numel(snr));
-        for s = 1:numel(snr)
-            m = strcmp({cl.threat}, realT{t}) & [cl.snr_db] == snr(s);
-            if any(m), rec(s) = mean([cl(m).(recF)], 'omitnan'); end
-        end
-        h(end+1) = plot(ax, snr, rec, '-o', 'LineWidth', 1.5, 'MarkerSize', 4); %#ok<AGROW>
-        nm{end+1} = strrep(realT{t}, '_', ' '); %#ok<AGROW>
-    end
-    hold(ax, 'off'); ax.XTick = snr; grid(ax, 'on');
-    xlabel(ax, 'Eb/N0 (dB)', 'Color', c.mut); ylabel(ax, 'Recovery vs clean (%)', 'Color', c.mut);
-    legend(ax, h, nm, 'Location', 'southeast', 'TextColor', c.txt, 'Color', c.panelBg, 'EdgeColor', c.mut, 'FontSize', 8);
-    setTitle(ax, 'Recovery vs Eb/N0 (real threats)', c);
-end
-
-function ok = plotLatency(ax, cl, c)
-    ok = ~isempty(cl); if ~ok, return; end
-    threats = unique({cl.threat}, 'stable');
-    a = zeros(1, numel(threats)); b = a;
-    for t = 1:numel(threats)
-        m = strcmp({cl.threat}, threats{t});
-        a(t) = mean([cl(m).cnn_latency_ms]); b(t) = mean([cl(m).dqn_latency_ms]);
-    end
-    bb = bar(ax, [a; b]', 'stacked'); bb(1).FaceColor = c.accent; bb(2).FaceColor = c.amber;
-    ax.XTick = 1:numel(threats); ax.XTickLabel = strrep(threats, '_', ' '); ax.XTickLabelRotation = 40;
+function ok = plotLatency(ax, Lt, c)
+    ok = ~isempty(Lt); if ~ok, return; end
+    b = bar(ax, [Lt.median_ms; Lt.p95_ms]'); b(1).FaceColor = c.accent; b(2).FaceColor = c.amber;
+    ax.XTick = 1:numel(Lt.names); ax.XTickLabel = Lt.names; ax.XTickLabelRotation = 30;
     ax.FontSize = 8; grid(ax, 'on'); ylabel(ax, 'ms', 'Color', c.mut);
-    legend(ax, {'CNN path','DQN'}, 'TextColor', c.txt, 'Color', c.panelBg, 'EdgeColor', c.mut, 'FontSize', 8);
-    setTitle(ax, sprintf('Decision latency (mean %.2f ms)', mean(a + b)), c);
+    legend(ax, {'median', 'p95'}, 'TextColor', c.txt, 'Color', c.panelBg, 'EdgeColor', c.mut, 'FontSize', 8);
+    setTitle(ax, sprintf('Latency per cycle: %.2f ms median, %.2f ms p95', Lt.total_dqn_median_ms, ...
+        Lt.total_dqn_p95_ms), c);
 end
 
-function ok = plotActions(ax, cl, c)
-    ok = ~isempty(cl); if ~ok, return; end
-    threats = unique({cl.threat}, 'stable');
-    acts = unique({cl.dqn_action}, 'stable');
-    counts = zeros(numel(threats), numel(acts));
-    for t = 1:numel(threats)
-        m = strcmp({cl.threat}, threats{t});
-        for a = 1:numel(acts), counts(t, a) = sum(strcmp({cl(m).dqn_action}, acts{a})); end
+function ok = plotActions(ax, P, c)
+    ok = ~isempty(P); if ~ok, return; end
+    Rd = P.RES{1, P.iDQN}; env = ancestor(ax, 'figure').UserData.env;
+    scn = unique(Rd.scn); acts = unique(Rd.cfg_final);
+    counts = zeros(numel(scn), numel(acts));
+    for t = 1:numel(scn)
+        for a = 1:numel(acts), counts(t, a) = mean(Rd.cfg_final(Rd.scn == scn(t)) == acts(a)); end
     end
-    bb = bar(ax, counts, 'stacked');
-    pal = [0.45 0.48 0.55; c.accent; c.amber; c.green; c.purp; c.cyan; c.red; hsv(9)];
+    bb = bar(ax, 100 * counts, 'stacked');
+    pal = lines(numel(acts));
     for a = 1:numel(acts), bb(a).FaceColor = pal(a, :); end
-    ax.XTick = 1:numel(threats); ax.XTickLabel = strrep(threats, '_', ' '); ax.XTickLabelRotation = 40;
-    ax.FontSize = 8; grid(ax, 'on'); ylabel(ax, 'runs', 'Color', c.mut);
-    legend(ax, cellfun(@actionLabel, acts, 'UniformOutput', false), 'TextColor', c.txt, 'Color', c.panelBg, 'EdgeColor', c.mut, ...
-        'FontSize', 7, 'Location', 'eastoutside');
-    setTitle(ax, 'DQN countermeasure per threat', c);
+    ax.XTick = 1:numel(scn); ax.XTickLabel = arrayfun(@(k) strrep(P.KP.per_threat_scn{k}, '_', ' '), ...
+        1:numel(scn), 'UniformOutput', false);
+    ax.XTickLabelRotation = 40; ax.FontSize = 8; grid(ax, 'on'); ylabel(ax, '% of episodes', 'Color', c.mut);
+    legend(ax, cellfun(@actionLabel, env.action_names(acts), 'UniformOutput', false), 'TextColor', c.txt, ...
+        'Color', c.panelBg, 'EdgeColor', c.mut, 'FontSize', 7, 'Location', 'eastoutside');
+    setTitle(ax, 'DQN configuration at episode end, per threat', c);
 end
 
-function ok = plotSpeed(ax, sp, metrics, c)
+function ok = plotSpeed(ax, P, metrics, c)
     haveOff = ~isempty(metrics) && isfield(metrics, 'speed_breakdown') && ~isempty(metrics.speed_breakdown);
-    ok = ~isempty(sp) || haveOff; if ~ok, return; end
+    ok = ~isempty(P) || haveOff; if ~ok, return; end
     hold(ax, 'on'); h = gobjects(0); nm = {};
-    if ~isempty(sp)
-        vs = unique([sp.speed_kmh]); acc = zeros(size(vs)); rec = nan(size(vs));
-        isReal = ~ismember({sp.threat}, {'none','benign_interference'});
-        for k = 1:numel(vs)
-            m = [sp.speed_kmh] == vs(k);
-            acc(k) = 100 * mean([sp(m).correct]);
-            rec(k) = mean([sp(m & isReal).(recField(sp))], 'omitnan');
-        end
-        h(end+1) = plot(ax, vs, acc, '-o', 'LineWidth', 2, 'Color', c.accent, 'MarkerFaceColor', c.accent); %#ok<AGROW>
-        nm{end+1} = 'closed-loop detection (%)'; %#ok<AGROW>
-        h(end+1) = plot(ax, vs, rec, '-s', 'LineWidth', 1.8, 'Color', c.amber, 'MarkerFaceColor', c.amber); %#ok<AGROW>
-        nm{end+1} = 'mean BER recovery (%)'; %#ok<AGROW>
+    if ~isempty(P)
+        b = P.KP.speed_bins; mid = (b(1:end-1) + b(2:end)) / 2;
+        pv = P.KP.per_speed(:, strcmp(P.KP.show, P.POL{P.iDQN}));
+        h(end+1) = plot(ax, mid, pv, '-s', 'LineWidth', 1.8, 'Color', c.amber, 'MarkerFaceColor', c.amber);
+        nm{end+1} = 'DQN restored cycles (%)';
     end
     if haveOff
         sb = metrics.speed_breakdown; mid = ([sb.speed_lo_kmh] + [sb.speed_hi_kmh]) / 2;
-        h(end+1) = plot(ax, mid, [sb.accuracy_pct], '--^', 'LineWidth', 1.6, 'Color', c.green, 'MarkerFaceColor', c.green); %#ok<AGROW>
-        nm{end+1} = 'offline test accuracy (%)'; %#ok<AGROW>
+        h(end+1) = plot(ax, mid, [sb.accuracy_pct], '--^', 'LineWidth', 1.6, 'Color', c.green, 'MarkerFaceColor', c.green);
+        nm{end+1} = 'detector test accuracy (%)';
     end
     hold(ax, 'off'); grid(ax, 'on'); ax.YLim = [0 105];
     xlabel(ax, 'UAV speed (km/h)', 'Color', c.mut); ylabel(ax, '%', 'Color', c.mut);
@@ -2179,7 +2165,8 @@ function updateSurvMap(fig)
         end
     end
     lr = getappdata(fig, 'lastRun');
-    if ~isempty(lr) && strcmp(lr.threat, tname) && lr.level >= 1 && lr.level <= nL
+    if isfield(g, 'base'), gname = g.base; else, gname = tname; end
+    if ~isempty(lr) && strcmp(lr.threat, gname) && lr.level >= 1 && lr.level <= nL
         j = find(snrPts == lr.snr, 1);
         if ~isempty(j)
             plot(ax, j, lr.level, 'p', 'MarkerSize', 22, 'MarkerFaceColor', 'w', 'MarkerEdgeColor', 'k', 'LineWidth', 1.2);

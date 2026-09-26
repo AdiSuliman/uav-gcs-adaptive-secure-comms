@@ -10,8 +10,9 @@ function R = rollout_policy(kind, PP, K, spec, split, agent, opt, seed)
 %   R      per episode: ret (mean reward per cycle), q_post, restored_post,
 %          gput_post (normalized goodput after onset), switches, false_sw,
 %          t_rec (cycles from onset until restored for 5 consecutive cycles),
-%          esc (escalations), aoa (NE x 3, interferer directions of the
-%          episode's sub-run); cfg_trace (T x NE)
+%          esc (escalations), aoa (3 x NE, interferer directions of the
+%          episode's sub-run), cfg_final (configuration at the end), r
+%          (sub-run index); cfg_trace (T x NE)
 if nargin < 7 || isempty(opt), opt = struct(); end
 rs = RandStream('mt19937ar', 'Seed', seed);
 opt.rs = RandStream('mt19937ar', 'Seed', seed + 1);
@@ -50,6 +51,8 @@ for i = 1:NE
     end
 end
 R.aoa = E.aoa';
+R.cfg_final = E.cfg;
+R.r = E.r;
 R.cfg_trace = tr.cfg;
 end
 

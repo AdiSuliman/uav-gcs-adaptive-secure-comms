@@ -1,37 +1,31 @@
 %% MAIN - Master Execution & Status Pipeline
 % UAV-GCS Adaptive Secure Communications System
 % Orchestrates the full project end to end:
-%   A     Link + Threats + Dataset
-%   B     Detection (CNN + scalar hybrid)
-%   C     Closed-loop adaptive recovery (DQN)
-%   SURV  Survivability boundary mapping (deliverable #7)
-%   KPI   Proposal KPI measurement (section 5 / ה)
-%   DASH  Results dashboard (deliverable #1)
+%   A     Link + threats + dataset
+%   B     Detection (CNN + link features, unknown-threat scores)
+%   C     Decision layer (frame pools, DQN, evaluation of every policy)
+%   SURV  Survivability boundary mapping (deliverable 8)
+%   KPI   Latency and proposal KPIs (section 5)
+%   DASH  Results dashboard (deliverable 1)
 % Author: Adi Suliman, Bar Dvir Hassan
 %
 % HOW TO USE
 % Every stage below is a RUN.<flag>. Set a flag true to run that stage.
-% They execute top to bottom in dependency order, so to run the whole project
-% from scratch, set the flags in the "FULL CLEAN RUN" preset to true.
-% All flags default to FALSE (everything is already generated) -- turn on only
-% what you need to regenerate.
+% They execute top to bottom in dependency order. Launch headless from cmd or
+% Git Bash in the project folder:  matlab -batch "main"
 %
-% Runtimes (RTX 4070): A5 ~100min, A6 ~5min, B2 ~10min, C2 ~25min (5 seeds),
-% C3-diag ~17min (5 Monte Carlo repeats), C3-speed ~10min, C3-episodes ~10min,
-% SURV ~80min, everything else < 10min.
+% Runtimes (RTX 4070): A4v ~12 min, A5 ~12 min, A6 ~4 min, B2 ~4 min,
+% B4 ~25 min, OOD ~60 min, C1p ~90 min from scratch (extensions only simulate
+% the new scenarios, ~30 min), C2 ~45 min (3 gammas x 3 seeds), C2e ~5 min,
+% SURV ~90 min, LAT ~2 min, KPI and DASH < 1 min.
 %
 % DEPENDENCIES (what must exist before a stage can run):
-%   A6 needs A5 | B1 needs A6 | B2 needs B1 | B3 needs B2
-%   C2 needs B2 | C3 needs C2 | C3-diag needs C2
-%   SURV needs A0 | KPI needs B3+C3-diag+FAR | DASH needs B3+C3-diag+FAR+SURV
+%   A5 needs A0 | A6 needs A5 | B1 needs A6 | B2 needs B1 | B3, B4, OOD need B2
+%   C1p needs B2 | C2 needs C1p | C2e needs C2 | LAT needs C2
+%   SURV needs A0 | KPI reads B3, B4, OOD, A4v, C2e, LAT, SURV | DASH needs KPI
 %
 % LOGGING: `diary` captures everything printed below into logs/run_*.txt,
 % surviving the close all/clc that each called script starts with.
-%
-% BATCH MODE: leave BATCH_MODE_DISABLED = false and launch headless from a
-% Windows Command Prompt to keep working while it runs:
-%   matlab -batch "main" -nosplash
-% (drop -nojvm if a stage needs Java/Stateflow; it stays headless either way)
 
 clear; close all; clc;
 
@@ -61,93 +55,61 @@ fprintf('(This file will contain EVERYTHING printed below, even across clc calls
 %% ================================================================
 %  EXECUTION FLAGS  (all default false — turn on what you need)
 %  ================================================================
-%  QUICK PRESETS — copy the block you want over the flags below:
+%  QUICK PRESETS - copy the block you want over the flags below:
 %
-%  FULL CLEAN RUN (everything from scratch, ~5.5-6 hours; D38):
-%    all flags = true
+%  FULL CLEAN RUN (everything from scratch, ~5.5 hours):
+%    every flag below = true except validate_A and check_A4
 %
-%  RESULTS-ONLY REFRESH (models already trained, ~25 min):
-%    run_closed_loop_diagnostic, measure_far, measure_kpi3,
-%    measure_all_kpis, build_dashboard = true; rest = false
-%
-%  SPEED-DIVERSE RETRAIN (after switching to the 50-120 km/h envelope):
-%    init, build_dataset, extract_spectrograms, prepare_data, train_detector,
-%    eval_detector, run_closed_loop_diagnostic, eval_speed_robustness,
-%    measure_far, measure_kpi3, measure_all_kpis, build_dashboard = true;
-%    everything else (train_dqn, SURV, validate/check A) = false
-%
-%  STEPS 7+8 (KPI reporting with PLR/goodput + Monte Carlo CIs, D35; ~1 hour):
-%    eval_detector, train_dqn, run_closed_loop_diagnostic, eval_speed_robustness,
-%    run_closed_loop_episodes, eval_combined_threats, measure_far, measure_kpi3,
-%    measure_all_kpis, build_dashboard = true; rest = false
-%    (train_dqn saves a new agent, so every stage that uses the DQN is rerun)
-%
-%  D36 DQN RETRAIN (full-action targets; ~52 min measured):
-%    train_dqn, run_closed_loop_diagnostic, eval_speed_robustness,
-%    run_closed_loop_episodes, eval_combined_threats, measure_far, measure_kpi3,
-%    measure_all_kpis, build_dashboard = true; rest = false
-%
-%  D37 CHECK (episodes through the shared episode_cycle.m; must reproduce D36, ~10 min):
-%    run_closed_loop_episodes = true; rest = false
-%
-%  D39 ACTION SET V2 (retrain DQN + every consumer + SURV; ~3 hours):
-%    train_dqn, run_closed_loop_diagnostic, eval_speed_robustness, run_closed_loop_episodes,
-%    eval_combined_threats, map_survivability, measure_far, measure_kpi3, measure_all_kpis,
+%  DECISION LAYER + RESULTS (detector unchanged, ~3.5 hours):
+%    eval_unseen_snr, eval_ood_detection, build_policy_pools, train_dqn,
+%    evaluate_policies, map_survivability, measure_latency, measure_all_kpis,
 %    build_dashboard = true; rest = false
 %
-%  D42 DETECTOR V2 (new link, dataset, detector, unknown-threat study; ~2.5 hours):
-%    init, validate_phy, build_dataset, extract_spectrograms, prepare_data,
-%    train_detector, eval_detector, eval_ood_detection = true; rest = false
-%    Windows cmd:  cd /d "C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms"
-%                  matlab -batch "main"
+%  RESULTS ONLY (models and pools exist, ~10 min):
+%    evaluate_policies, measure_latency, measure_all_kpis, build_dashboard = true
 %
-%  DASHBOARD-ONLY (all results exist, < 1 min):
-%    build_dashboard = true; rest = false
+%  DASHBOARD ONLY (< 1 min):
+%    measure_all_kpis, build_dashboard = true; rest = false
 %% ================================================================
 
 warning('off', 'Simulink:cgxe:LeakedJITEngine');   % internal Simulink notice on repeated sim() of MATLAB Function blocks
 
-% ---- Monte Carlo / seeds (D35) ----
-CFG.mc_repeats = 5;    % C3d: independent repeats per (threat, Eb/N0); CIs are over these
-CFG.dqn_seeds  = 3;    % C2 : DQN trainings; best validation return among seeds within the false-alarm limit
+% ---- Decision-layer training (D46) ----
+CFG.dqn_seeds  = 3;          % C2: training seeds per discount factor
+CFG.dqn_gammas = [0 0.5 0.9];  % C2: discount factors; gamma and seed selected on validation (D46)
 
 % ---- Phase A: link + threats + dataset ----
 
-RUN.init                        = true;    % A0  : regenerate params.mat
+RUN.init                        = false;    % A0  : regenerate params.mat
 RUN.validate_A                  = false;   % A1-A3: build+validate AWGN & Rician links (fast)
 RUN.check_A4                    = false;   % A4  : build threat model + sanity BER (fast)
-RUN.validate_phy                = true;    % A4v : link vs theory, MRC/MMSE, seeds; stops main on FAIL (D41)
-RUN.build_dataset               = true;    % A5  : seeded sub-run dataset (~30min, D42)
-RUN.extract_spectrograms        = true;    % A6  : spectrograms + 9 link features (~5min, D42-D43)
+RUN.validate_phy                = false;    % A4v : link vs theory, MRC/MMSE, seeds; stops main on FAIL (D41)
+RUN.build_dataset               = false;    % A5  : seeded sub-run dataset (~12min, D42, D45)
+RUN.extract_spectrograms        = false;    % A6  : spectrograms + 9 link features (~5min, D42-D43)
 
 
 % ---- Phase B: detection (CNN baseline) ----
-RUN.prepare_data                = true;    % B1  : split by sub-run 60/20/20 (~1min, D42)
-RUN.train_detector              = true;    % B2  : train CNN+scalar hybrid (~10min)
-RUN.eval_detector               = true;    % B3  : test eval + confusion/accuracy-vs-SNR + bootstrap CIs (~2min, D35)
-RUN.eval_unseen_snr             = false;   % B4  : detector at Eb/N0 never seen in training, 1,3,5,7,9 dB (~25min, D34)
+RUN.prepare_data                = false;    % B1  : split by sub-run 60/20/20 (~1min, D42)
+RUN.train_detector              = false;    % B2  : train CNN+scalar hybrid (~4min); a new detector invalidates the pools
+RUN.eval_detector               = false;    % B3  : test eval + confusion/accuracy-vs-SNR + bootstrap CIs (~2min, D35)
+RUN.eval_unseen_snr             = true;   % B4  : detector at Eb/N0 never seen in training, 1,3,5,7,9 dB (~25min, D34)
 
 
-% ---- Phase C: closed-loop recovery ----
-RUN.build_policy_pools          = true;    % C1p : frame pools for the decision layer, every scenario x configuration x Eb/N0 x geometry (~90min, D44-D45)
-RUN.train_dqn                   = true;    % C2  : sequential Double DQN + shield on the pools, CFG.dqn_seeds seeds + bandit ablation (~20min, D44-D45)
-RUN.evaluate_policies           = true;    % C2e : all policies on the test pools: single, follower, combined, clean (~2min, D44-D45)
-RUN.run_closed_loop_diagnostic  = false;   % C3d : Eb/N0 sweep x CFG.mc_repeats, BER/PLR/goodput + 95% CIs (~17min, D35)
-RUN.eval_speed_robustness       = false;   % C3s : detection/decision/recovery vs UAV speed 50-120 km/h (~10min)
-RUN.run_closed_loop_episodes    = false;   % C3e : episodic loop, dwell/hysteresis, recovery time in cycles (~10min, D31)
-RUN.eval_combined_threats       = false;   % C3m : combined threats + unknown gating, CFG.mc_repeats seeded repeats (~20min, D32/D40)
-RUN.eval_ood_detection          = false;    % OOD : leave-one-threat-out, retrains the detector 8 times (~60min, D32)
+% ---- Phase C: decision layer ----
+RUN.build_policy_pools          = true;    % C1p : frame pools, every scenario x configuration x Eb/N0 x geometry (D44-D46)
+RUN.train_dqn                   = true;    % C2  : Double DQN + shield, CFG.dqn_gammas x CFG.dqn_seeds, selection on validation (D44-D46)
+RUN.evaluate_policies           = true;    % C2e : every policy on the test pools: single, follower, combined, unknown, clean (D44-D46)
+RUN.eval_ood_detection          = true;    % OOD : leave-one-threat-out unknown-threat detection, retrains the detector 8 times (D32, D42)
 
-% ---- Phase SURV: survivability boundary mapping (deliverable #7) ----
-RUN.map_survivability           = false;   % SURV: action-based Map A/B + gap analysis (~80min, D30)
+% ---- Phase SURV: survivability boundary mapping (deliverable 8) ----
+RUN.map_survivability           = true;    % SURV: Map A/B per threat, severity, Eb/N0 and geometry (D30, D46)
 
-% ---- Phase KPI: proposal measurement (section 5 / ה) ----
-RUN.measure_far                 = false;   % KPI4 : FAR on non-hostile classes, SNR-swept (~5min)
-RUN.measure_kpi3                = false;   % KPI3 : DQN vs rule decision latency (fast, needs C3-diag)
-RUN.measure_all_kpis            = false;   % KPI  : aggregate all 5 with CIs + FAR bound into kpi_summary.txt (fast)
+% ---- Phase KPI: latency and proposal KPIs (section 5) ----
+RUN.measure_latency             = true;    % LAT : decision latency per cycle, median / p95 (D46)
+RUN.measure_all_kpis            = true;    % KPI : the 8 proposal KPIs from the result files (D46)
 
-% ---- Phase DASH: results dashboard (deliverable #1) ----
-RUN.build_dashboard             = false;   % DASH : 7-panel summary PNG (fast, needs B3+C3d+FAR+SURV)
+% ---- Phase DASH: results dashboard (deliverable 1) ----
+RUN.build_dashboard             = true;    % DASH: 8-panel summary PNG (D46)
 
 fprintf('========================================================\n');
 fprintf('  UAV-GCS ADAPTIVE SECURE COMMS - MASTER PIPELINE\n');
@@ -231,8 +193,8 @@ report_file('data/trained_detector.mat',  '      trained_detector.mat ', 'train_
 report_file('results/confusion_matrix.png','      B3 eval results      ', 'eval_detector');
 fprintf('\n');
 
-%% ========== PHASE C: CLOSED-LOOP RECOVERY (ONLINE) ==========
-fprintf('> PHASE C: Closed-Loop Adaptive Recovery (9 threats/classes)\n\n');
+%% ========== PHASE C: DECISION LAYER ==========
+fprintf('> PHASE C: Decision layer (frame pools, DQN, evaluation)\n\n');
 fprintf('  [C1] Rule-based countermeasure policy...           READY (rule_based_policy.m)\n');
 
 if RUN.build_policy_pools
@@ -240,47 +202,32 @@ if RUN.build_policy_pools
     build_policy_pools;
 end
 if RUN.train_dqn
-    fprintf('  [C2] Training the sequential DQN (Double DQN, replay, target network)...\n');
+    fprintf('  [C2] Training the DQN (Double DQN, replay, target network, shield)...\n');
     train_dqn;
 end
 if RUN.evaluate_policies
     fprintf('  [C2e] Evaluating every policy on the test pools...\n');
     evaluate_policies;
 end
-if RUN.run_closed_loop_diagnostic
-    fprintf('  [C3-diag] Running full diagnostic closed-loop (timing, Q-values, rule comparison)...\n');
-    run_closed_loop_diagnostic;
-end
-
-if RUN.eval_speed_robustness
-    fprintf('  [C3-speed] Closed-loop robustness vs UAV speed (Doppler sweep, 50-120 km/h)...\n');
-    eval_speed_robustness;
-end
-if RUN.run_closed_loop_episodes
-    fprintf('  [C3-episodes] Episodic closed loop: recovery time in cycles, dwell/hysteresis...\n');
-    run_closed_loop_episodes;
-end
-if RUN.eval_combined_threats
-    fprintf('  [C3-combined] Combined threats and the unknown-threat path...\n');
-    eval_combined_threats;
-end
 if RUN.eval_ood_detection
     fprintf('  [OOD] Leave-one-threat-out unknown-threat detection (retrains the detector per threat)...\n');
     eval_ood_detection;
+    clear S sp tr va te_id te_ood net                  % spectrogram splits held by the script
 end
 
 fprintf('  [C] Pipeline status:\n');
-report_file('data/trained_dqn.mat',                     '      trained_dqn.mat        ', 'train_dqn');
-report_file('results/dqn_seed_stability.txt',          '      C2 seed stability      ', 'train_dqn');
-report_file('results/closed_loop_diagnostic_report.txt','      C3-diag full report    ', 'run_closed_loop_diagnostic');
-report_file('results/speed_robustness.txt',             '      C3-speed robustness    ', 'eval_speed_robustness');
+report_file('data/policy_pools.mat',          '      policy_pools.mat       ', 'build_policy_pools');
+report_file('data/trained_dqn.mat',           '      trained_dqn.mat        ', 'train_dqn');
+report_file('results/dqn_training.txt',       '      C2 training report     ', 'train_dqn');
+report_file('results/policy_evaluation.txt',  '      C2e evaluation report  ', 'evaluate_policies');
+report_file('results/ood_detection.txt',      '      OOD report             ', 'eval_ood_detection');
 fprintf('\n');
 
-%% ========== PHASE SURV: SURVIVABILITY BOUNDARY MAP (deliverable #7) ==========
-fprintf('> PHASE SURV: Survivability Boundary Mapping (proposal deliverable #7)\n\n');
+%% ========== PHASE SURV: SURVIVABILITY BOUNDARY MAP (deliverable 8) ==========
+fprintf('> PHASE SURV: Survivability Boundary Mapping (proposal deliverable 8)\n\n');
 
 if RUN.map_survivability
-    fprintf('  [SURV] Mapping Map A (neutralization) + Map B (survivability) + gap analysis...\n');
+    fprintf('  [SURV] Map A (no goodput loss) + Map B (any action), two geometries + gap analysis...\n');
     map_survivability_boundary;
 end
 
@@ -290,33 +237,28 @@ report_file('results/survivability_boundary_mapA.txt','      Map A (no goodput l
 report_file('results/survivability_boundary_mapB.txt','      Map B (any action)             ', 'map_survivability_boundary');
 fprintf('\n');
 
-%% ========== PHASE KPI: PROPOSAL MEASUREMENT (section 5 / ה) ==========
-fprintf('> PHASE KPI: Proposal KPI Measurement\n\n');
+%% ========== PHASE KPI: LATENCY AND PROPOSAL KPIs (section 5) ==========
+fprintf('> PHASE KPI: Latency and proposal KPIs\n\n');
 
-if RUN.measure_far
-    fprintf('  [KPI4] Measuring FAR on non-hostile classes (SNR-swept)...\n');
-    diagnose_far_measurement;
-end
-if RUN.measure_kpi3
-    fprintf('  [KPI3] Measuring DQN vs rule-based decision latency...\n');
-    measure_kpi3_recovery_time;
+if RUN.measure_latency
+    fprintf('  [LAT] Decision latency per cycle...\n');
+    measure_latency;
 end
 if RUN.measure_all_kpis
-    fprintf('  [KPI] Aggregating all 5 proposal KPIs...\n');
+    fprintf('  [KPI] Proposal KPIs from the result files...\n');
     measure_all_kpis;
 end
 
 fprintf('  [KPI] Pipeline status:\n');
-report_file('results/far_measurement.txt',  '      far_measurement.txt   ', 'diagnose_far_measurement');
-report_file('results/kpi3_measurement.txt', '      kpi3_measurement.txt  ', 'measure_kpi3_recovery_time');
-report_file('results/kpi_summary.txt',      '      kpi_summary.txt       ', 'measure_all_kpis');
+report_file('results/latency.txt',     '      latency.txt           ', 'measure_latency');
+report_file('results/kpi_summary.txt', '      kpi_summary.txt       ', 'measure_all_kpis');
 fprintf('\n');
 
-%% ========== PHASE DASH: RESULTS DASHBOARD (deliverable #1) ==========
-fprintf('> PHASE DASH: Results Dashboard (proposal deliverable #1)\n\n');
+%% ========== PHASE DASH: RESULTS DASHBOARD (deliverable 1) ==========
+fprintf('> PHASE DASH: Results Dashboard (proposal deliverable 1)\n\n');
 
 if RUN.build_dashboard
-    fprintf('  [DASH] Building 7-panel results dashboard...\n');
+    fprintf('  [DASH] Building the results dashboard...\n');
     build_kpi_dashboard;
 end
 
@@ -333,8 +275,8 @@ fprintf('  [D3] Defense presentation (pptx)...                  [PENDING]\n\n');
 %% ========== CHECKPOINT ==========
 fprintf('========================================================\n');
 fprintf(' CHECKPOINT - full pipeline available from main.m\n');
-fprintf(' Headline numbers with 95%% CIs: results/kpi_summary.txt (D35)\n');
-fprintf(' Survivability maps: results/survivability_boundary_mapA.txt / mapB.txt (deliverable #7)\n');
+fprintf(' KPIs: results/kpi_summary.txt | decision layer: results/policy_evaluation.txt\n');
+fprintf(' Survivability maps: results/survivability_boundary_mapA.txt / mapB.txt (deliverable 8)\n');
 fprintf(' Outputs in results/, data/ | models in models/ | code on GitHub\n');
 fprintf(' Full run log saved to: %s\n', log_filename);
 fprintf('========================================================\n\n');

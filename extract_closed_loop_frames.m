@@ -1,17 +1,7 @@
 function [iq_frames, ber, rssi, plr, nf, sinr, env_corr, iot] = extract_closed_loop_frames(out, p, delay_bits)
-%EXTRACT_CLOSED_LOOP_FRAMES Single source of truth for pulling all frames
-% (not just the first) out of a single sim() call's output, with per-frame
-% BER/RSSI/PLR -- the building block for real sliding-window temporal
-% features (var_rssi_10, dber_dt, burst_ratio) in any closed-loop-style
-% script (single sim() call, CNN decides on the last valid frame).
-%
-% HISTORY: originally a local function inside run_closed_loop_diagnostic.m
-% (D16 fix, 2026-09-18). Extracted to a shared file 2026-09-19 (D20) after
-% diagnose_far_measurement.m was found still using the pre-D16 neutral
-% placeholder (0,0,1) for temporal features -- the same failure mode D16
-% fixed (none/reactive_jamming misclassification), just never propagated to
-% a second script. A duplicated local copy is exactly how that happened:
-% single source of truth prevents a third recurrence.
+%EXTRACT_CLOSED_LOOP_FRAMES  Every frame of one sim() run with its BER, RSSI,
+% PLR, SINR, envelope correlation and IoT: the single source for the per-frame
+% measurements and the temporal features of link_features.m.
 %
 % Inputs:
 %   out         - Simulink SimulationOutput from sim(modelName)
