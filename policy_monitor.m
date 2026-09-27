@@ -12,7 +12,8 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   degradation only; the class still chooses the response (D49).
 %   PP.alarm_mode 'class_drop': as 'class', but the class path_loss counts only
 %   when the signal-over-thermal estimate has dropped by at least PP.drop_db
-%   (default 4 dB) from the episode's reference (D50). Attenuation is a change of
+%   from the episode's reference (D50; threshold chosen on the train pools by
+%   choose_drop_threshold.m, D52; 4 dB without it). Attenuation is a change of
 %   the link, not a level: a clean link at low Eb/N0 receives the same signal as
 %   an attenuated link at a higher Eb/N0, and only the history tells them apart.
 %   Drop: reference = median Eb/N0 estimate of the last 10 cycles without an

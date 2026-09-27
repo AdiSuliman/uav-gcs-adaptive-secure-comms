@@ -114,38 +114,38 @@ Every threat × severity × Eb/N0 through every configuration on one seeded run 
 
 ---
 
-## Results (D51 run, 2026-09-27)
+## Results (D52 run, 2026-09-27)
 
-All numbers on data never used for training: the detector on the test split (by sub-run), the decision layer on the test pools (flight geometries with unseen seeds), the false alarms on 600 further clean-link geometries. Intervals are 95%. Decision layer as selected on validation (D50): alarm 'class', training false-switch penalty 80, γ = 0.5.
+All numbers on data never used for training: the detector on the test split (by sub-run), the decision layer on the test pools (flight geometries with unseen seeds), the false alarms on 600 further clean-link geometries. Intervals are 95%. Decision layer as selected on validation (D52): alarm 'class_drop' (path_loss counts after an Eb/N0 drop ≥ 6.5 dB, threshold chosen on the train pools), training false-switch penalty 80, γ = 0.5; the alarm was selected on 600 independent clean validation geometries and the test set was measured once.
 
 | # | KPI | Result | Status |
 |---|---|---|---|
 | 1 | Detection vs SNR | accuracy 96.28%, macro-F1 96.28% [94.88, 97.37]; ≥ 91.1% from 0 dB; unseen Eb/N0 97.7% vs 97.5% | MET |
 | 2 | Unknown threats | Mahalanobis mean AUROC 0.887 (0.807–0.973 per threat); softmax confidence 0.687 | MET |
 | 3 | BER vs theory | 5/5 within 0.3 dB (+0.05, −0.21, +0.05, +0.13, +0.17 dB); seeds reproducible | MET |
-| 4 | Restoration | 87.5% of cycles ≤ 2× clean BER on recoverable attacks (single threats, all: 83.9%); packet loss back on 95.1%; survivability Map A 86.2%, Map B 93.6% | MET |
-| 5 | DQN vs baselines | return +0.108 [0.099, 0.117] vs rule + escalation, +0.031 [0.026, 0.036] vs tuned table, +0.015 [0.005, 0.025] vs best fixed | MET |
-| 6 | False alarms | 23 of 600 independent clean geometries (3.8%), one-sided bound 5.39%; per cycle 0.19%; rule + escalation 36.3% | NOT MET (bound 5%) |
-| 7 | Real time + speed | 4.43 ms median, 19.4 ms p95 per decision cycle (desktop CPU); restored 79.1–88.0% across 50–120 km/h | MET |
+| 4 | Restoration | 86.6% of cycles ≤ 2× clean BER on recoverable attacks (single threats, all: 83.0%); packet loss back on 93.7%; survivability Map A 86.2%, Map B 93.6% | MET |
+| 5 | DQN vs baselines | return +0.110 [0.101, 0.120] vs rule + escalation, +0.036 [0.031, 0.042] vs tuned table, +0.018 [0.009, 0.028] vs best fixed | MET |
+| 6 | False alarms | 9 of 600 independent clean geometries (1.5%), one-sided bound 2.60%; per cycle 0.07%; rule + escalation 25.3% | MET |
+| 7 | Real time + speed | 5.3 ms median, 24.3 ms p95 per decision cycle (desktop CPU); restored 78.4–86.5% across 50–120 km/h | MET |
 | 8 | End-to-end loop | all 8 single threats restored on ≥ 50% of cycles | MET |
 
 **Decision layer, mean return per cycle** (1 = restored at no cost):
 
 | Set | DQN | rule + esc. | table | best fixed | oracle |
 |---|---|---|---|---|---|
-| single threats | 0.827 | 0.729 | 0.810 | 0.773 | 0.923 |
-| follower jammer | 0.849 | 0.825 | 0.769 | 0.794 | 0.964 |
-| unseen combinations | 0.457 | 0.266 | 0.445 | 0.535 | 0.638 |
-| unknown (class withheld) | 0.740 | 0.649 | 0.689 | 0.763 | 0.922 |
-| clean link, test pools | 0.980 | 0.959 | 0.956 | 0.872 | 0.978 |
-| clean link, 600 new geometries | 0.964 | 0.932 | – | – | 0.983 |
+| single threats | 0.821 | 0.726 | 0.803 | 0.773 | 0.923 |
+| follower jammer | 0.851 | 0.830 | 0.773 | 0.794 | 0.964 |
+| unseen combinations | 0.477 | 0.268 | 0.446 | 0.535 | 0.638 |
+| unknown (class withheld) | 0.742 | 0.652 | 0.690 | 0.763 | 0.922 |
+| clean link, test pools | 0.978 | 0.972 | 0.968 | 0.872 | 0.978 |
+| clean link, 600 new geometries | 0.963 | 0.953 | – | – | 0.983 |
 
 **Findings:**
-- The discount factor matters little: on the test pools γ = 0, 0.5 and 0.9 are within 0.007 of each other (pooled return). The gain over the rule and the table comes from learning the mapping from measurements to configuration, not from long-horizon planning.
-- Geometry decides whether spatial nulling works: always-on MMSE restores 0% of cycles with the interferer within 20° of the GCS direction and 89% beyond 45°; the DQN keeps 72% in the aligned case by choosing avoidance and power instead.
-- Without the class (unknown set) the DQN restores 69.5% of cycles, rule + escalation 51.7%, the best fixed configuration 74.5%. Since D48 an unknown-threat flag starts a countermeasure only together with link degradation (the Mahalanobis threshold flags 5% of known frames by construction); the response then waits for the link to degrade. The unknown-set return was 0.817 in D46, before this change, and is 0.740 now.
-- Unseen combinations remain the limit: even the oracle restores only 30.7% of cycles, and the DQN trails the best fixed configuration there (−0.078).
-- False alarms: over 600 independent clean geometries the DQN changes configuration in 3.8% of episodes (two-sided interval 2.4–5.7%), against 36.3% for the rule. 19 of the 23 are at ≤ 4 dB. At the first change the detector reads path loss (18 episodes, after a real fade of about 4 dB), antenna fault (4, a deep fade of about 8 dB) or spoofing (1): the clean link fades by as much as these threats change it. They cost return (0.964 vs 0.983 for the oracle), not goodput (1.002 vs 1.003). The 4-geometry clean set of the test pools (37/768, all from one geometry) was not a sound basis for the bound (D51).
+- The discount factor matters little: in D50 γ = 0, 0.5 and 0.9 were within 0.007 of each other on the test pools (pooled return). The gain over the rule and the table comes from learning the mapping from measurements to configuration, not from long-horizon planning.
+- Geometry decides whether spatial nulling works: always-on MMSE restores 0% of cycles with the interferer within 20° of the GCS direction and 89% beyond 45°; the DQN keeps 74% in the aligned case by choosing avoidance and power instead.
+- Without the class (unknown set) the DQN restores 68.5% of cycles, rule + escalation 51.6%, the best fixed configuration 74.5%. Since D48 an unknown-threat flag starts a countermeasure only together with link degradation (the Mahalanobis threshold flags 5% of known frames by construction); the response then waits for the link to degrade. The unknown-set return was 0.817 in D46, before this change, and is 0.742 now.
+- Unseen combinations remain the limit: even the oracle restores only 30.7% of cycles, and the DQN trails the best fixed configuration there (−0.058).
+- False alarms: the detector reads about 4.5% of clean frames as a threat at every UAV speed, almost all path loss at Eb/N0 ≤ 4 dB, because a deep fade of the clean link looks like attenuation in one frame (D51, D52 diagnostics). What separates them is the drop of the Eb/N0 estimate from the link's own reference: on the train pools real path loss drops 6.8–14.4 dB (5th–95th percentile) and the misleading fades at most 6.4 dB. With the path_loss alarm gated at 6.5 dB, the DQN changes configuration in 1.5% of 600 independent clean episodes (D51, without the gate: 3.8%), against 25.3% for the rule; the remaining cases are antenna_fault reads on deep single-branch fades (6 of 9). The gate costs path-loss restoration (83.7% → 78.7% of cycles) and nothing else. The 4-geometry clean set of the test pools (37/768 in D51, all from one geometry) was not a sound basis for the bound.
 - Every non-recoverable survivability state is at the aligned geometry (10°) or in path loss; at 45° all maps are 100% recoverable. Rate reduction, FEC and rate + power recover part of them at a goodput cost (Map A → Map B).
 
 Full tables: `results/kpi_summary.txt`, `results/policy_evaluation.txt`, `results/dqn_training.txt`, `results/ood_detection.txt`, `results/survivability_boundary_map{A,B}.txt`, `results/latency.txt`; figures: `results/kpi_dashboard.png`, `results/policy_breakdown.png`. Earlier runs are in `docs/PROJECT_LOG.md`.
@@ -186,13 +186,14 @@ The file has no nested functions (D24): static state lives in `fig.UserData`, ch
 - **D46** discount-factor selection, training combinations, one decision interface in the GUI, latency, KPI aggregation, survivability map on shared seeds with two geometries
 - **D47** documentation in `docs/`; code split into folders at the end of the project
 - **D48–D50** false alarms: alarm definition, M-of-N confirmation, training false-switch penalty and Eb/N0 drop, chosen on validation; one forward pass for the detector
-- **D51** decision layer frozen; KPI 6 on 600 independent clean geometries
+- **D51** KPI 6 on 600 independent clean geometries
+- **D52** path_loss alarm threshold chosen from the train pools; alarm selected on an independent clean validation set
 
 ---
 
 ## Known issues and future work
 
-- False alarms on the clean link: 3.8% of 30-cycle episodes over 600 independent geometries, one-sided bound 5.39% against 5%. The remaining cases follow deep fades of the clean link that the detector reads as path loss or an antenna fault (D50, D51).
+- False alarms on the clean link: 1.5% of 30-cycle episodes over 600 independent geometries (bound 2.60%), mostly antenna_fault reads on deep single-branch fades; a decision cycle of one frame (0.5 ms) makes this about 1.4 configuration changes per second of clean flight, and the pools record only 20 frames per geometry. An attenuation present from the first frame of a link, or a gradual one, passes under the drop gate (D50, D52).
 - Latency measured on a desktop CPU (p95 19.4 ms), not on UAV hardware.
 - Combined threats that were never seen in training remain the hardest case: two interferers exceed what two antennas can null, and several combinations cannot be restored by any configuration.
 - Hardware validation (SDR), BER estimation without ground truth, switching time and GCS signalling.
@@ -219,4 +220,4 @@ Numbered as in the project proposal (IEEE):
 
 ---
 
-**Last updated:** 2026-09-27 (D51 results). **Status:** phases A–C, survivability map and KPIs complete (7/8 met); decision layer frozen; open: KPI 6 target with the supervisor, GUI check, reports and defense.
+**Last updated:** 2026-09-27 (D52 results). **Status:** phases A–C, survivability map and KPIs complete (8/8 met); decision layer frozen; open: GUI check, reports and defense.

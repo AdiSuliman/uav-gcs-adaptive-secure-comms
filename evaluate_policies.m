@@ -31,9 +31,10 @@
 close all; clc;
 fprintf('=== Decision-layer evaluation on the test pools (D44-D51) ===\n\n');
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
-Q = load('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'H', 'seed_summary', 'confirm', 'alarm_mode');
+Q = load('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'H', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db');
 if isfield(Q, 'confirm'), PP.confirm = Q.confirm; else, PP.confirm = [2 2]; end   % same monitor for every policy
 if isfield(Q, 'alarm_mode'), PP.alarm_mode = Q.alarm_mode; else, PP.alarm_mode = 'class'; end
+if isfield(Q, 'drop_db') && ~isempty(Q.drop_db), PP.drop_db = Q.drop_db; end
 K = link_env('tables', PP);
 tab = policy_table(PP, K);
 T = Q.H.T; NE = 64;
@@ -115,9 +116,11 @@ rep{end+1} = 'return = mean reward per cycle (1 = restored at no cost); restored
 rep{end+1} = ['recovered = restored for 5 consecutive cycles; PLR ok = cycles with packet loss <= clean + 0.05; ' ...
     'false sw = switches on a healthy link, whole episode.'];
 fpen = 20; if isfield(Q.seed_summary, 'selected_fa_pen'), fpen = Q.seed_summary.selected_fa_pen; end
+atxt = PP.alarm_mode;
+if strcmp(PP.alarm_mode, 'class_drop') && isfield(PP, 'drop_db'), atxt = sprintf('%s (path_loss after a drop >= %.1f dB)', atxt, PP.drop_db); end
 rep{end+1} = sprintf(['Selected DQN: gamma %.2f, training false-switch penalty %d; alarm ''%s'', confirmation ' ...
     '%d-of-%d for every monitored policy (validation, train pools). Training combinations: %s'], ...
-    Q.seed_summary.selected_gamma, fpen, PP.alarm_mode, PP.confirm, strjoin(PP.train_combos, ', '));
+    Q.seed_summary.selected_gamma, fpen, atxt, PP.confirm, strjoin(PP.train_combos, ', '));
 for si = 1:numel(sets)
     rep{end+1} = ''; %#ok<SAGROW>
     rep{end+1} = sprintf('--- %s (%d episodes) ---', sets(si).name, numel(RES{si, 1}.ret)); %#ok<SAGROW>

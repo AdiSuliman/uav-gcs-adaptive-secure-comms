@@ -21,12 +21,12 @@ Last updated: 2026-09-27
 | B-unknown | Mahalanobis and isolation-forest scores, leave-one-threat-out | ✅ Done, AUROC 0.887 | D42, D46 |
 | C1p | Frame pools: every scenario × configuration × Eb/N0 × geometry | ✅ Done | D44–D46 |
 | C1c | Clean link on 100 new geometries per Eb/N0 under every configuration (KPI 6) | ✅ Done | D51 |
-| C2 | Double DQN with shield; alarm, false-switch penalty, γ and seed chosen on validation | ✅ Frozen at D50 (class, penalty 80, γ = 0.5) | D44–D51 |
+| C2 | Double DQN with shield; alarm, false-switch penalty, γ and seed chosen on validation | ✅ Frozen at D52 (class_drop 6.5 dB, penalty 80, γ = 0.5) | D44–D52 |
 | C2e | Every policy on the test pools: single, follower, combined, unknown, clean; false alarms on 600 independent clean geometries | ✅ Done | D44–D46, D51 |
 | SURV | Survivability maps A/B, two geometries (deliverable 8) | ✅ Done, 86% / 94% | D30, D46 |
-| LAT + KPI + DASH | Latency per cycle, eight proposal KPIs, dashboard (deliverable 1) | ✅ Done, 7/8 met (D51) | D46, D48, D51 |
+| LAT + KPI + DASH | Latency per cycle, eight proposal KPIs, dashboard (deliverable 1) | ✅ Done, 8/8 met (D52) | D46, D48, D51, D52 |
 | GUI | Operator console on the current decision layer | ⏳ Code migrated, live check pending | D24, D26, D46 |
-| Fixes | Latency tail; false-alarm bound (KPI 6) | ✅ latency p95 48.9 → 19.4 ms / KPI 6: 3.8% over 600 independent geometries, bound 5.39% (target with the supervisor) | D48–D51 |
+| Fixes | Latency tail; false-alarm bound (KPI 6) | ✅ latency p95 48.9 → 19.4 ms / ✅ KPI 6: 1.5% over 600 independent geometries, bound 2.60% (D52) | D48–D51 |
 | Layout | Code into folders by stage | ⏳ End of project | D47 |
 | D1 | Interim report | ⏳ Drafted, results to sync with the final run | — |
 | D2 | Final report | ⏳ | — |
@@ -37,7 +37,7 @@ Last updated: 2026-09-27
 
 ## Remaining work
 
-1. **False alarms (KPI 6):** measured on 600 independent clean geometries (D51): 23 episodes (3.8%), one-sided bound 5.39% against 5%; rule + escalation 36.3%. Decision layer frozen. The target goes to the supervisor with these numbers; a larger sample only if requested, fixed in advance and reported next to this one.
+1. **Decision layer closed (D52):** KPI 6 met (9/600, bound 2.60%) with the path_loss drop threshold chosen from the train pools (6.5 dB) and the alarm selected on an independent clean validation set. Remaining false alarms are antenna_fault reads on deep single-branch fades; documented as a limitation.
 2. **Operator console:** live check of the migrated live tab and continuous episode. 'class' was selected, so the live tab needs no clean lead-in.
 3. **Reports and defense:** interim report numbers, final report, slides and poster from the same figures.
 4. **Repository:** code into folders by stage, final README.

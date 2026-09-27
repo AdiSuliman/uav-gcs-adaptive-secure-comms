@@ -1,28 +1,35 @@
-%% BUILD_CLEAN_TEST_POOLS - Clean-link test pools over many geometries (D51)
+%% BUILD_CLEAN_TEST_POOLS - Clean-link pools over many independent geometries (D51, D52)
 % The false-alarm KPI needs independent trials. The test split of
 % build_policy_pools.m holds 4 geometries per Eb/N0, so its 768 clean episodes
 % come from only 24 channels and one unfavorable geometry decides the result.
-% This script measures the clean link ('none') on CFG.clean_test_geoms new
-% geometries per Eb/N0 (default 100, seeds never used before), under every
-% configuration (common random numbers, as in build_policy_pools.m), with the
-% same detector, frames per geometry and features. evaluate_policies.m runs one
-% clean episode per geometry on these pools: 600 independent episodes at the
-% default size, and the Clopper-Pearson bound of KPI 6 is computed over them.
+% This script measures the clean link ('none') on 100 new geometries per Eb/N0
+% (seeds never used before), under every configuration (common random numbers,
+% as in build_policy_pools.m), with the same detector, frames per geometry and
+% features. Two sets, chosen by CLEAN_SET (set by main.m, default 'test'):
+%   'test'  seed block 3, CFG.clean_test_geoms -> data/clean_test_pools.mat:
+%           evaluate_policies.m runs one clean episode per geometry (600
+%           independent episodes) and KPI 6 is computed over them (D51)
+%   'val'   seed block 4, CFG.clean_val_geoms  -> data/clean_val_pools.mat:
+%           train_dqn.m selects the alarm on it, so the test set is used once (D52)
 %
-% Output: data/clean_test_pools.mat (struct CT)
+% Output: data/clean_test_pools.mat or data/clean_val_pools.mat (struct CT)
 
 close all; clc;
 warning('off', 'Simulink:cgxe:LeakedJITEngine');
-fprintf('=== Clean-link test pools over many geometries (D51) ===\n\n');
+fprintf('=== Clean-link pools over many geometries (D51, D52) ===\n\n');
 
 %% 1. Configuration
+if ~exist('CLEAN_SET', 'var'), CLEAN_SET = 'test'; end
+switch CLEAN_SET
+    case 'test', SP = 3; f_out = 'data/clean_test_pools.mat'; cfg_field = 'clean_test_geoms';
+    case 'val',  SP = 4; f_out = 'data/clean_val_pools.mat';  cfg_field = 'clean_val_geoms';
+    otherwise, error('build_clean_test_pools: CLEAN_SET must be ''test'' or ''val''');
+end
 N_GEOM = 100;                                 % geometries per Eb/N0
-if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'clean_test_geoms'), N_GEOM = CFG.clean_test_geoms; end
+if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, cfg_field), N_GEOM = CFG.(cfg_field); end
 if N_GEOM > 100, error('build_clean_test_pools: at most 100 geometries per Eb/N0 (seed block of pool_seed.m)'); end
-SP = 3;                                       % seed block of this set (1 train, 2 test pools)
 tw = 10; delay_bits = 20;
 modelName = 'UAV_GCS_Threat_Link';
-f_out = 'data/clean_test_pools.mat';
 
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
 EBNO = PP.ebno; ACTIONS = PP.actions; F_SUB = PP.F_SUB; vrange = PP.speed_range; clear PP
@@ -33,7 +40,7 @@ if isfile(f_out) && dir(f_out).datenum > dir('data/trained_detector.mat').datenu
     C = load(f_out, 'CT');
     if isequal(C.CT.runs, runs) && isequal(C.CT.ebno, EBNO) && isequal(C.CT.actions, ACTIONS)
         fprintf('%s is up to date (%d geometries per Eb/N0), nothing to do\n', f_out, N_GEOM);
-        return
+        clear CLEAN_SET; return
     end
 end
 
@@ -72,9 +79,10 @@ params = S0.params; save('params.mat', 'params');
 if bdIsLoaded(modelName), close_system(modelName, 0); end
 
 CT = struct('pools', {pools}, 'runs', runs, 'ebno', EBNO, 'actions', {ACTIONS}, 'n_geom', N_GEOM, ...
-    'created', datestr(now));
+    'set', CLEAN_SET, 'created', datestr(now));
 save(f_out, 'CT', '-v7.3');
 fprintf('Saved %s (%.1f min)\n', f_out, toc(t0)/60);
+clear CLEAN_SET
 
 %% ===================== Local functions =====================
 function P = empty_pool()

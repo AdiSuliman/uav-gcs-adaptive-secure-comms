@@ -17,11 +17,11 @@
 % Runtimes (RTX 4070): A4v ~12 min, A5 ~12 min, A6 ~4 min, B2 ~4 min,
 % B4 ~25 min, OOD ~60 min, C1p ~90 min from scratch (extensions only simulate
 % the new scenarios, ~30 min), C2 ~80 min (2 alarms x 2 penalties x 3 gammas x 3 seeds), C2e ~5 min,
-% SURV ~90 min, LAT ~2 min, KPI and DASH < 1 min, C1c ~65 min.
+% SURV ~90 min, LAT ~2 min, KPI and DASH < 1 min, C1c ~65 min per clean set, C1d < 1 min.
 %
 % DEPENDENCIES (what must exist before a stage can run):
 %   A5 needs A0 | A6 needs A5 | B1 needs A6 | B2 needs B1 | B3, B4, OOD need B2
-%   C1p needs B2 | C1c needs C1p | C2 needs C1p | C2e needs C2 (and C1c for KPI 6) | LAT needs C2
+%   C1p needs B2 | C1c, C1d need C1p | C2 needs C1p (C1c val set and C1d for D52) | C2e needs C2 (and C1c for KPI 6) | LAT needs C2
 %   SURV needs A0 | KPI reads B3, B4, OOD, A4v, C2e, LAT, SURV | DASH needs KPI
 %
 % LOGGING: `diary` captures everything printed below into logs/run_*.txt,
@@ -76,12 +76,13 @@ warning('off', 'Simulink:cgxe:LeakedJITEngine');   % internal Simulink notice on
 
 % ---- Decision-layer training (D46, D48-D50) ----
 CFG.dqn_seeds       = 3;                 % C2: training seeds per setting
-CFG.dqn_gammas      = [0 0.5 0.9];       % C2: discount factors, chosen on validation
+CFG.dqn_gammas      = [0.5];             % C2: discount factors, chosen on validation (0.5 selected in D50)
 CFG.confirm_grid    = [2 2];             % C2: alarm confirmation m-of-n (D48: no effect on DQN false alarms)
-CFG.alarm_modes     = {'class', 'class_drop'};  % C2: path_loss alarm with / without an Eb/N0 drop (D50)
-CFG.fa_penalty_grid = [20 80];           % C2: false-switch penalty of the training reward (D49)
+CFG.alarm_modes     = {'class', 'class_drop'};  % C2: path_loss alarm with / without an Eb/N0 drop (D50, D52)
+CFG.fa_penalty_grid = [80];              % C2: false-switch penalty of the training reward (D49; 80 selected in D50)
 CFG.fa_val          = 0.02;              % C2: false-alarm episodes allowed on clean validation (D48)
 CFG.clean_test_geoms = 100;              % C1c: new clean test geometries per Eb/N0, one episode each (D51)
+CFG.clean_val_geoms  = 100;              % C1c: independent clean validation geometries per Eb/N0, alarm selection (D52)
 
 % ---- Phase A: link + threats + dataset ----
 
@@ -102,8 +103,9 @@ RUN.eval_unseen_snr             = false;   % B4  : detector at Eb/N0 never seen 
 
 % ---- Phase C: decision layer ----
 RUN.build_policy_pools          = false;    % C1p : frame pools, every scenario x configuration x Eb/N0 x geometry (D44-D46)
-RUN.build_clean_test_pools      = true;    % C1c : clean link on CFG.clean_test_geoms new geometries, for KPI 6 (~65 min, D51)
-RUN.train_dqn                   = false;   % C2  : Double DQN + shield, CFG.dqn_gammas x CFG.dqn_seeds, selection on validation (D44-D46)
+RUN.build_clean_test_pools      = true;    % C1c : clean link on new geometries: validation set (~65 min, D52) and test set for KPI 6 (skips when up to date, D51)
+RUN.choose_drop_threshold       = true;    % C1d : path_loss alarm threshold from the train pools (< 1 min, D52)
+RUN.train_dqn                   = true;    % C2  : Double DQN + shield, alarm x gamma x seeds, selection on validation (D44-D52, ~15 min at the D52 grid)
 RUN.evaluate_policies           = true;    % C2e : every policy on the test pools: single, follower, combined, unknown, clean (D44-D46)
 RUN.eval_ood_detection          = false;    % OOD : leave-one-threat-out unknown-threat detection, retrains the detector 8 times (D32, D42)
 
@@ -111,7 +113,7 @@ RUN.eval_ood_detection          = false;    % OOD : leave-one-threat-out unknown
 RUN.map_survivability           = false;    % SURV: Map A/B per threat, severity, Eb/N0 and geometry (D30, D46)
 
 % ---- Phase KPI: latency and proposal KPIs (section 5) ----
-RUN.measure_latency             = false;   % LAT : decision latency per cycle, median / p95 (D46)
+RUN.measure_latency             = true;    % LAT : decision latency per cycle, median / p95 (D46)
 RUN.measure_all_kpis            = true;    % KPI : the 8 proposal KPIs from the result files (D46)
 
 % ---- Phase DASH: results dashboard (deliverable 1) ----
@@ -208,8 +210,13 @@ if RUN.build_policy_pools
     build_policy_pools;
 end
 if RUN.build_clean_test_pools
-    fprintf('  [C1c] Measuring the clean link on new test geometries (KPI 6)...\n');
-    build_clean_test_pools;
+    fprintf('  [C1c] Measuring the clean link on new geometries: validation set (D52), test set (KPI 6, D51)...\n');
+    CLEAN_SET = 'val';  build_clean_test_pools;
+    CLEAN_SET = 'test'; build_clean_test_pools;
+end
+if RUN.choose_drop_threshold
+    fprintf('  [C1d] Choosing the Eb/N0-drop threshold of the path_loss alarm (train pools)...\n');
+    choose_drop_threshold;
 end
 if RUN.train_dqn
     fprintf('  [C2] Training the DQN (Double DQN, replay, target network, shield)...\n');
@@ -227,7 +234,9 @@ end
 
 fprintf('  [C] Pipeline status:\n');
 report_file('data/policy_pools.mat',          '      policy_pools.mat       ', 'build_policy_pools');
+report_file('data/clean_val_pools.mat',       '      clean_val_pools.mat    ', 'build_clean_test_pools');
 report_file('data/clean_test_pools.mat',      '      clean_test_pools.mat   ', 'build_clean_test_pools');
+report_file('results/drop_threshold.txt',     '      drop threshold (C1d)   ', 'choose_drop_threshold');
 report_file('data/trained_dqn.mat',           '      trained_dqn.mat        ', 'train_dqn');
 report_file('results/dqn_training.txt',       '      C2 training report     ', 'train_dqn');
 report_file('results/policy_evaluation.txt',  '      C2e evaluation report  ', 'evaluate_policies');

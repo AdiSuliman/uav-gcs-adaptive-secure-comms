@@ -49,7 +49,7 @@ close all; clc;
 tBoot = tic;
 fprintf('Loading trained models and parameters...\n');
 D = load('data/trained_detector.mat', 'net', 'classes', 'ood');
-Q = load('data/trained_dqn.mat', 'agent', 'confirm', 'alarm_mode');
+Q = load('data/trained_dqn.mat', 'agent', 'confirm', 'alarm_mode', 'drop_db');
 [featMean, featStd] = loadNormStats();
 p0 = loadInitialParams();
 fprintf('  models + parameters loaded (%.1f s)\n', toc(tBoot));
@@ -84,6 +84,7 @@ env.PP = struct('actions', {env.action_names}, 'classes', {env.class_list(:)'}, 
     'bps', p0.bits_per_symbol, 'maha_thr', Tood.maha);
 if isfield(Q, 'confirm'), env.PP.confirm = Q.confirm; end
 if isfield(Q, 'alarm_mode'), env.PP.alarm_mode = Q.alarm_mode; end
+if isfield(Q, 'drop_db') && ~isempty(Q.drop_db), env.PP.drop_db = Q.drop_db; end
 env.baseline = struct('jsr_db',p0.jsr_db,'path_loss_db',p0.path_loss_db, ...
     'fault_atten_db',p0.fault_atten_db,'spoof_sir_db',p0.spoof_sir_db, ...
     'benign_int_db',p0.benign_int_db);

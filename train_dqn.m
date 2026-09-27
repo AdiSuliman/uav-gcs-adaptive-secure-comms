@@ -1,4 +1,4 @@
-%% C2 - TRAIN DQN: sequential decision layer on measured frame pools (D44-D50)
+%% C2 - TRAIN DQN: sequential decision layer on measured frame pools (D44-D52)
 % Double DQN (van Hasselt et al., AAAI 2016) with experience replay and a target
 % network (Mnih et al., Nature 2015) on link_env.m: 30-cycle episodes inside
 % one seeded flight geometry, the threat starts at a random cycle, a follower
@@ -15,25 +15,35 @@
 %
 % Grid: alarm definition (CFG.alarm_modes, policy_monitor.m: 'class' = hostile
 % class or degradation; 'class_drop' = the same, with path_loss counted only
-% after a drop of the Eb/N0 estimate from the episode's reference) x alarm
-% confirmation (CFG.confirm_grid, m-of-n rows) x false-switch
-% penalty of the TRAINING reward (CFG.fa_penalty_grid, points per change on a
-% healthy link; link_env default 20) x CFG.dqn_gammas x CFG.dqn_seeds. The
-% penalty only shapes training: every run is validated and every policy is
-% evaluated with the standard reward, so returns stay comparable. Each run keeps
-% the checkpoint with the best greedy return on its own evaluation episodes
-% (train pools); all runs are compared on 1280 validation episodes and on 512
-% clean-link validation episodes (train pools, fresh draws). Selected run: the
-% best validation return among the runs whose clean-link false-alarm episodes
-% stay <= CFG.fa_val (default 2%: margin for the one-sided 95% bound <= 5% of
-% KPI 6 on the test set); if none qualifies, the fewest false alarms, then the
-% best return. The rule and the table run with the same alarm. The best
-% run of every gamma at the selected alarm and penalty is kept as an ablation.
+% after a drop of the Eb/N0 estimate from the episode's reference of at least
+% the threshold of data/drop_threshold.mat, chosen on the train pools by
+% choose_drop_threshold.m, D52) x alarm confirmation (CFG.confirm_grid, m-of-n
+% rows) x false-switch penalty of the TRAINING reward (CFG.fa_penalty_grid,
+% points per change on a healthy link; link_env default 20) x CFG.dqn_gammas x
+% CFG.dqn_seeds. The penalty only shapes training: every run is validated and
+% every policy is evaluated with the standard reward, so returns stay
+% comparable. Each run keeps the checkpoint with the best greedy return on its
+% own evaluation episodes (train pools); all runs are compared on 1280
+% validation episodes and on 512 clean-link validation episodes (train pools,
+% fresh draws), and, when data/clean_val_pools.mat exists, on one clean episode
+% per independent validation geometry (600 at the default size, D52).
+% Selection (D52, when 'class' and another alarm are in the grid): the baseline
+% is the best-return run with alarm 'class'; another alarm replaces it only if
+% its best-return run has fewer false alarms on the independent clean set
+% (Fisher exact test, p < 0.05) and a validation return within 0.01 of the
+% baseline. Without the independent set, the selection of D48: the best
+% validation return among the runs whose clean-link false-alarm episodes stay
+% <= CFG.fa_val; if none qualifies, the fewest false alarms, then the best
+% return. Gate: return >= rule + escalation and, with the independent set, a
+% one-sided 95% bound of its false alarms <= 5% (KPI 6 as worded); otherwise
+% false alarms <= CFG.fa_val. The rule and the table run with the same alarm.
+% The best run of every gamma at the selected alarm and penalty is kept as an
+% ablation.
 %
 % Output: data/trained_dqn.mat, results/dqn_training.txt, results/dqn_training_curves.png
 
 close all; clc;
-fprintf('=== C2: Train DQN (D44-D50) ===\n\n');
+fprintf('=== C2: Train DQN (D44-D52) ===\n\n');
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
 K = link_env('tables', PP);
 nA = numel(PP.actions);
@@ -55,6 +65,11 @@ if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'alarm_modes'), ALARMS =
 SEEDS = 42 + (0:N_SEEDS-1);
 N_VAL = 20;                              % validation batches of H.NE episodes
 N_CLEAN = 8;                             % clean-link validation batches (false alarms)
+DROP_DB = [];                            % path_loss alarm threshold of 'class_drop' (D52)
+if isfile('data/drop_threshold.mat'), D = load('data/drop_threshold.mat', 'drop_db'); DROP_DB = D.drop_db; clear D; end
+if ~isempty(DROP_DB), PP.drop_db = DROP_DB; end
+CV = [];                                 % independent clean validation geometries (D52)
+if isfile('data/clean_val_pools.mat'), C = load('data/clean_val_pools.mat', 'CT'); CV = C.CT; clear C; end
 
 %% 2. State normalization from random-policy rollouts
 rs = RandStream('mt19937ar', 'Seed', 7);
@@ -89,8 +104,9 @@ tab = policy_table(PP, K);
 
 %% 4. Training: alarm x confirmation x false-switch penalty x discount factor x seeds
 runs = struct('alarm', {}, 'confirm', {}, 'fa_pen', {}, 'gamma', {}, 'seed', {}, 'agent', {}, 'curve', {}, ...
-    'loss', {}, 'best_ep', {}, 'val', {}, 'fa', {});
-base = struct('alarm', {}, 'confirm', {}, 'rule_ret', {}, 'rule_fa', {}, 'tab_ret', {}, 'tab_fa', {});
+    'loss', {}, 'best_ep', {}, 'val', {}, 'fa', {}, 'fa_w', {}, 'n_w', {});
+base = struct('alarm', {}, 'confirm', {}, 'rule_ret', {}, 'rule_fa', {}, 'tab_ret', {}, 'tab_fa', {}, ...
+    'rule_fa_w', {}, 'tab_fa_w', {});
 for ai = 1:numel(ALARMS)
     for ci = 1:size(CONFIRMS, 1)
         PPc = PP; PPc.confirm = CONFIRMS(ci, :); PPc.alarm_mode = ALARMS{ai};
@@ -98,8 +114,11 @@ for ai = 1:numel(ALARMS)
         Rt = eval_batches('table', PPc, K, val_spec, [], tab, 5000);
         Cr = eval_batches('rule_esc', PPc, K, clean_spec, [], struct(), 7000);
         Ct = eval_batches('table', PPc, K, clean_spec, [], tab, 7000);
+        [rw, ~] = eval_clean_wide('rule_esc', PPc, K, CV, [], struct(), H);
+        [tw, ~] = eval_clean_wide('table', PPc, K, CV, [], tab, H);
         base(end+1) = struct('alarm', ALARMS{ai}, 'confirm', CONFIRMS(ci, :), 'rule_ret', mean(Rr.ret), ...
-            'rule_fa', mean(Cr.switches > 0), 'tab_ret', mean(Rt.ret), 'tab_fa', mean(Ct.switches > 0)); %#ok<SAGROW>
+            'rule_fa', mean(Cr.switches > 0), 'tab_ret', mean(Rt.ret), 'tab_fa', mean(Ct.switches > 0), ...
+            'rule_fa_w', rw, 'tab_fa_w', tw); %#ok<SAGROW>
         fprintf('=== Alarm ''%s'', confirmation %d of %d: rule+esc return %.3f, FA %.1f%% | table return %.3f, FA %.1f%%\n', ...
             ALARMS{ai}, CONFIRMS(ci, :), base(end).rule_ret, 100*base(end).rule_fa, base(end).tab_ret, 100*base(end).tab_fa);
         for fp = FA_PEN
@@ -113,12 +132,13 @@ for ai = 1:numel(ALARMS)
                     V = eval_batches('dqn', PPc, K, val_spec, ag, struct(), 5000);
                     C = eval_batches('dqn', PPc, K, clean_spec, ag, struct(), 7000);
                     fa = mean(C.switches > 0);             % on the clean link every change is a false alarm
+                    [fa_w, n_w] = eval_clean_wide('dqn', PPc, K, CV, ag, struct(), H);
                     fprintf(['    checkpoint %d | validation: return %.3f | restored %.1f%% | goodput %.3f | ' ...
-                        'false-alarm episodes %.1f%%\n'], best_ep, mean(V.ret), 100*mean(V.restored_post), ...
-                        mean(V.gput_post), 100*fa);
+                        'false-alarm episodes %.1f%% (independent geometries %s)\n'], best_ep, mean(V.ret), ...
+                        100*mean(V.restored_post), mean(V.gput_post), 100*fa, fa_txt(fa_w, n_w));
                     runs(end+1) = struct('alarm', ALARMS{ai}, 'confirm', CONFIRMS(ci, :), 'fa_pen', fp, 'gamma', g, ...
                         'seed', SEEDS(k), 'agent', ag, 'curve', curve, 'loss', lossc, 'best_ep', best_ep, 'val', V, ...
-                        'fa', fa); %#ok<SAGROW>
+                        'fa', fa, 'fa_w', fa_w, 'n_w', n_w); %#ok<SAGROW>
                 end
             end
         end
@@ -126,7 +146,28 @@ for ai = 1:numel(ALARMS)
 end
 vret = arrayfun(@(r) mean(r.val.ret), runs);
 ok_fa = [runs.fa] <= FA_VAL;
-if any(ok_fa)
+is_base = strcmp({runs.alarm}, 'class');
+if ~isempty(CV) && any(is_base) && ~all(is_base)
+    % D52: 'class' is the baseline; another alarm replaces it only with significantly fewer
+    % false alarms on the independent clean geometries and a return within 0.01.
+    ib = find(is_base); [~, j] = max(vret(ib)); best = ib(j);
+    kb = round(runs(best).fa_w * runs(best).n_w);
+    sel_rule = sprintf('baseline ''class'' (best validation return); no other alarm had fewer false alarms on %d independent clean geometries (Fisher p < 0.05) with a return within 0.01', runs(best).n_w);
+    others = setdiff(unique({runs.alarm}), {'class'});
+    cand = []; cand_fa = [];
+    for oi = 1:numel(others)
+        io = find(strcmp({runs.alarm}, others{oi})); [~, j] = max(vret(io)); io = io(j);
+        ko = round(runs(io).fa_w * runs(io).n_w);
+        [~, pf] = fishertest([ko, runs(io).n_w - ko; kb, runs(best).n_w - kb]);
+        fprintf('D52 selection: %s %d/%d vs class %d/%d false-alarm episodes (p = %.3f), return %.3f vs %.3f\n', ...
+            others{oi}, ko, runs(io).n_w, kb, runs(best).n_w, pf, vret(io), vret(best));
+        if ko < kb && pf < 0.05 && vret(io) >= vret(best) - 0.01, cand(end+1) = io; cand_fa(end+1) = ko; end %#ok<SAGROW>
+    end
+    if ~isempty(cand)
+        [~, j] = min(cand_fa); best = cand(j);
+        sel_rule = sprintf('''%s'': fewer false alarms than ''class'' on %d independent clean geometries (Fisher p < 0.05) with a validation return within 0.01', runs(best).alarm, runs(best).n_w);
+    end
+elseif any(ok_fa)
     cand = find(ok_fa); [~, j] = max(vret(cand)); best = cand(j);
     sel_rule = sprintf('best validation return among runs with false-alarm episodes <= %.0f%%', 100*FA_VAL);
 else
@@ -150,9 +191,15 @@ if any(GAMMAS == 0), agent_bandit = agents{GAMMAS == 0}; end
 
 %% 5. Gate and report
 bsel = base(strcmp({base.alarm}, alarm_sel) & ismember(vertcat(base.confirm), confirm_sel, 'rows')');
-gate = vret(best) >= bsel.rule_ret && runs(best).fa <= FA_VAL;
+if ~isnan(runs(best).fa_w)
+    gate = vret(best) >= bsel.rule_ret && cp_upper(round(runs(best).fa_w * runs(best).n_w), runs(best).n_w) <= 0.05;
+    gate_txt = sprintf('one-sided 95%% bound of the false alarms on the %d independent clean geometries <= 5%%', runs(best).n_w);
+else
+    gate = vret(best) >= bsel.rule_ret && runs(best).fa <= FA_VAL;
+    gate_txt = sprintf('FA <= %.0f%%', 100*FA_VAL);
+end
 rep = {};
-rep{end+1} = '=== DQN TRAINING (D44-D50) ===';
+rep{end+1} = '=== DQN TRAINING (D44-D52) ===';
 rep{end+1} = sprintf(['Generated: %s | Double DQN + shield, replay %d, target every %d updates, lr %.0e -> %.0e, ' ...
     '%d episodes x %d cycles | alarm %s x confirmation %s x false-switch penalty %s x gamma %s x %d seeds'], ...
     datestr(now), H.buffer, H.target_every, H.lr, H.lr_end, H.episodes, H.T, strjoin(ALARMS, '/'), ...
@@ -162,23 +209,31 @@ rep{end+1} = sprintf(['False-switch penalty: training reward only (points per ch
     'validation and test use the standard reward (penalty %d).'], K.FA);
 rep{end+1} = sprintf(['Validation (train pools, fresh draws): return on %d episodes (single threats, training ' ...
     'combinations, clean link); false alarms on %d clean-link episodes (any change)'], N_VAL * H.NE, N_CLEAN * H.NE);
-rep{end+1} = sprintf('%-44s %9s %10s %9s %13s %12s', 'run', 'return', 'restored', 'goodput', 'FA episodes', 'switches/ep');
+if ~isempty(CV)
+    rep{end+1} = sprintf(['FA indep.: false-alarm episodes on %d independent clean validation geometries ' ...
+        '(data/clean_val_pools.mat, one episode per geometry, D52)'], numel(PP.ebno) * CV.n_geom);
+end
+if ~isempty(DROP_DB), rep{end+1} = sprintf('''class_drop'': path_loss alarm after an Eb/N0 drop >= %.1f dB (data/drop_threshold.mat)', DROP_DB); end
+rep{end+1} = sprintf('%-44s %9s %10s %9s %13s %14s %12s', 'run', 'return', 'restored', 'goodput', 'FA episodes', ...
+    'FA indep.', 'switches/ep');
 for k = 1:numel(runs)
     R = runs(k).val;
-    rep{end+1} = sprintf('%-44s %9.3f %9.1f%% %9.3f %12.1f%% %12.2f   (checkpoint %d)', ...
+    rep{end+1} = sprintf('%-44s %9.3f %9.1f%% %9.3f %12.1f%% %14s %12.2f   (checkpoint %d)', ...
         sprintf('%s %d-of-%d pen %d g=%.2f seed %d', runs(k).alarm, runs(k).confirm, runs(k).fa_pen, runs(k).gamma, ...
         runs(k).seed), mean(R.ret), ...
-        100*mean(R.restored_post), mean(R.gput_post), 100*runs(k).fa, mean(R.switches), runs(k).best_ep); %#ok<SAGROW>
+        100*mean(R.restored_post), mean(R.gput_post), 100*runs(k).fa, fa_txt(runs(k).fa_w, runs(k).n_w), ...
+        mean(R.switches), runs(k).best_ep); %#ok<SAGROW>
 end
 rep{end+1} = '';
 rep{end+1} = 'Per alarm and confirmation (DQN: mean over runs):';
-rep{end+1} = sprintf('%-20s %12s %12s %12s %12s %12s %12s', 'alarm / confirm', 'DQN return', 'DQN FA', ...
-    'rule return', 'rule FA', 'table return', 'table FA');
+rep{end+1} = sprintf('%-20s %12s %12s %12s %12s %12s %12s %12s %12s', 'alarm / confirm', 'DQN return', 'DQN FA', ...
+    'rule return', 'rule FA', 'table return', 'table FA', 'rule indep.', 'table indep.');
 for ci = 1:numel(base)
     m = strcmp({runs.alarm}, base(ci).alarm) & ismember(vertcat(runs.confirm), base(ci).confirm, 'rows')';
-    rep{end+1} = sprintf('%-20s %12.3f %11.1f%% %12.3f %11.1f%% %12.3f %11.1f%%', ...
+    rep{end+1} = sprintf('%-20s %12.3f %11.1f%% %12.3f %11.1f%% %12.3f %11.1f%% %12s %12s', ...
         sprintf('%s %d-of-%d', base(ci).alarm, base(ci).confirm), mean(vret(m)), 100*mean([runs(m).fa]), ...
-        base(ci).rule_ret, 100*base(ci).rule_fa, base(ci).tab_ret, 100*base(ci).tab_fa); %#ok<SAGROW>
+        base(ci).rule_ret, 100*base(ci).rule_fa, base(ci).tab_ret, 100*base(ci).tab_fa, ...
+        pct_txt(base(ci).rule_fa_w), pct_txt(base(ci).tab_fa_w)); %#ok<SAGROW>
 end
 rep{end+1} = '';
 rep{end+1} = 'Per alarm, false-switch penalty and gamma (DQN: mean over seeds):';
@@ -193,8 +248,8 @@ for ai = 1:numel(ALARMS)
     end
 end
 rep{end+1} = sprintf(['Selected: alarm ''%s'', confirmation %d-of-%d, false-switch penalty %d, gamma %.2f, seed %d ' ...
-    '(%s). Gate (return >= rule+escalation with the same alarm, FA <= %.0f%%): %s'], alarm_sel, confirm_sel, ...
-    fa_pen_sel, gamma_sel, runs(best).seed, sel_rule, 100*FA_VAL, ternary(gate, 'PASS', 'FAIL'));
+    '(%s). Gate (return >= rule+escalation with the same alarm, %s): %s'], alarm_sel, confirm_sel, ...
+    fa_pen_sel, gamma_sel, runs(best).seed, sel_rule, gate_txt, ternary(gate, 'PASS', 'FAIL'));
 if ~exist('results', 'dir'), mkdir('results'); end
 fid = fopen('results/dqn_training.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('\n%s\n', rep{:});
@@ -202,7 +257,8 @@ if ~gate, warning('train_dqn:gate', 'DQN validation gate FAILED -- see results/d
 
 seed_summary = struct('alarms', {{runs.alarm}}, 'confirms', vertcat(runs.confirm), 'fa_pens', [runs.fa_pen], ...
     'gammas', [runs.gamma], ...
-    'seeds', [runs.seed], 'val_return', vret, 'fa', [runs.fa], 'fa_limit', FA_VAL, 'best_ep', [runs.best_ep], ...
+    'seeds', [runs.seed], 'val_return', vret, 'fa', [runs.fa], 'fa_indep', [runs.fa_w], 'n_indep', [runs.n_w], ...
+    'fa_limit', FA_VAL, 'best_ep', [runs.best_ep], ...
     'selected_alarm', alarm_sel, 'selected_confirm', confirm_sel, 'selected_fa_pen', fa_pen_sel, 'selected_gamma', gamma_sel, ...
     'selected_seed', runs(best).seed, 'selection_rule', sel_rule, ...
     'gate_pass', gate, 'rule_return', bsel.rule_ret, 'table_return', bsel.tab_ret);
@@ -211,8 +267,9 @@ action_names = PP.actions;
 gammas = GAMMAS;
 confirm = confirm_sel;
 alarm_mode = alarm_sel;
-save('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'confirm', 'alarm_mode', 'agent_bandit', 'H', 'norm_in', ...
-    'seed_summary', 'action_names', 'tab', '-v7.3');
+drop_db = DROP_DB;
+save('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'confirm', 'alarm_mode', 'drop_db', 'agent_bandit', 'H', ...
+    'norm_in', 'seed_summary', 'action_names', 'tab', '-v7.3');
 fprintf('Saved data/trained_dqn.mat\n');
 
 fig = figure('Position', [100 100 1000 380], 'Color', 'w');
@@ -313,6 +370,44 @@ end
 function R = structfun_cat(R, Rb)
 f = fieldnames(R);
 for i = 1:numel(f), R.(f{i}) = [R.(f{i}), Rb.(f{i})]; end
+end
+
+function [fa, n] = eval_clean_wide(kind, PP, K, CT, agent, opt, H)
+% False-alarm episodes on the independent clean geometries of CT: one clean
+% episode per geometry and Eb/N0, as in evaluate_policies.m (D51, D52).
+fa = NaN; n = 0;
+if isempty(CT), return; end
+nS = numel(PP.ebno); nA = numel(PP.actions); NE = H.NE;
+PPw = PP;
+PPw.pools(:, :, :, 2) = {[]};
+PPw.pools(1, :, :, 2) = reshape(CT.pools(1, :, :), [1 nS nA]);
+PPw.runs = {PP.runs{1}, CT.runs};
+Kw = link_env('tables', PPw);
+[ss, rr] = ndgrid(1:nS, 1:CT.n_geom); ss = ss(:)'; rr = rr(:)';
+n = numel(ss); nb = ceil(n / NE); pad = nb * NE - n;
+ss = [ss, ss(1:pad)]; rr = [rr, rr(1:pad)];
+sw = [];
+for b = 1:nb
+    i = (b-1)*NE + (1:NE);
+    spec = struct('scn', ones(1, NE), 's', ss(i), 'onset', 3 * ones(1, NE), 'follow', false(1, NE), ...
+        'fdelay', 2 * ones(1, NE), 'unk', false(1, NE), 'T', H.T, 'r', rr(i));
+    Rb = rollout_policy(kind, PPw, Kw, spec, 2, agent, opt, 41000 + b);
+    sw = [sw, Rb.switches]; %#ok<AGROW>
+end
+fa = mean(sw(1:n) > 0);
+end
+
+function u = cp_upper(k, n)
+% One-sided 95% Clopper-Pearson upper bound of a binomial proportion.
+if k >= n, u = 1; else, u = betaincinv(0.95, k + 1, n - k); end
+end
+
+function t = fa_txt(fa, n)
+if isnan(fa), t = '-'; else, t = sprintf('%d/%d', round(fa * n), n); end
+end
+
+function t = pct_txt(fa)
+if isnan(fa), t = '-'; else, t = sprintf('%.1f%%', 100 * fa); end
 end
 
 function [agent, curve, loss_hist, best_ep] = train_one(H, PP, K, norm_in, seed, nS)
