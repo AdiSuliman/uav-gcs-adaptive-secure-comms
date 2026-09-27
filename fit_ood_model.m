@@ -1,9 +1,11 @@
 function M = fit_ood_model(net, tr, classes)
 %FIT_OOD_MODEL  Feature-space models for unknown-threat scoring (D42).
-%   Mahalanobis: class means and one shared (tied) covariance of the 64-d
-%   embedding 'relu_merge' on the training split, shrunk by 10% toward a scaled
-%   identity (Lee et al., NeurIPS 2018). Isolation forest (Liu, Ting & Zhou,
-%   ICDM 2008) on the normalized link features of the training split.
+%   Mahalanobis (Lee et al., NeurIPS 2018): class means and one shared (tied)
+%   covariance of the 64-d embedding 'relu_merge' on the training split, final
+%   layer only (no input preprocessing or feature ensemble). The covariance is
+%   shrunk by 10% toward a scaled identity for a stable inverse (our choice,
+%   not part of Lee et al.). Isolation forest (Liu, Ting & Zhou, ICDM 2008) on
+%   the 9 normalized link features of the training split.
 %   The scores are computed by ood_scores.m.
 Z = embed(net, tr.X, tr.feats');
 y = double(tr.Y(:));

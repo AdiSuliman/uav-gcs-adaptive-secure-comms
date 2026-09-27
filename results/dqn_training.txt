@@ -1,12 +1,69 @@
-=== SEQUENTIAL DQN TRAINING (D44, D45) ===
-Generated: 26-Sep-2026 17:56:38 | Double DQN + shield, replay 150000, target every 500 updates, gamma 0.90, lr 5e-04 -> 5e-05, 12000 episodes x 30 cycles, 3 seeds
-Validation: 1280 episodes (train pools, fresh draws), single threats + clean link
-policy                    return   restored   goodput   false sw/ep   FA episodes  switches/ep
-DQN seed 42                0.856      87.6%     0.892         0.214          2.1%         2.00   (checkpoint 7680)
-DQN seed 43                0.857      87.5%     0.882         0.254          2.1%         2.25   (checkpoint 9216)
-DQN seed 44                0.857      86.7%     0.889         0.195          2.1%         2.27   (checkpoint 10752)
-DQN gamma=0 (bandit)       0.869      89.2%     0.884         0.109          2.1%         1.53
-table (train pools)        0.831      83.2%     0.875         0.404         31.6%         2.49
-rule + escalation          0.757      72.2%     0.828         0.293         31.6%         2.57
-Seed return spread: 0.856 to 0.857 (std 0.000)
-Selected seed 43. Gate (return >= rule+escalation, false-alarm episodes <= 31.6% = max(5%, rule): 2.1%): PASS
+=== DQN TRAINING (D44-D50) ===
+Generated: 27-Sep-2026 11:06:25 | Double DQN + shield, replay 150000, target every 500 updates, lr 5e-04 -> 5e-05, 12000 episodes x 30 cycles | alarm class/class_drop x confirmation 2-of-2 x false-switch penalty [20 80] x gamma [0 0.5 0.9] x 3 seeds
+False-switch penalty: training reward only (points per change on a healthy link); validation and test use the standard reward (penalty 20).
+Validation (train pools, fresh draws): return on 1280 episodes (single threats, training combinations, clean link); false alarms on 512 clean-link episodes (any change)
+run                                             return   restored   goodput   FA episodes  switches/ep
+class 2-of-2 pen 20 g=0.00 seed 42               0.818      82.8%     0.823          7.8%         1.81   (checkpoint 11776)
+class 2-of-2 pen 20 g=0.00 seed 43               0.815      83.5%     0.799          5.1%         1.72   (checkpoint 10752)
+class 2-of-2 pen 20 g=0.00 seed 44               0.818      82.3%     0.828          5.5%         1.95   (checkpoint 11264)
+class 2-of-2 pen 20 g=0.50 seed 42               0.814      82.4%     0.838         10.4%         2.29   (checkpoint 8192)
+class 2-of-2 pen 20 g=0.50 seed 43               0.817      83.1%     0.838         15.2%         1.97   (checkpoint 9216)
+class 2-of-2 pen 20 g=0.50 seed 44               0.818      83.3%     0.833          8.0%         1.97   (checkpoint 11776)
+class 2-of-2 pen 20 g=0.90 seed 42               0.809      81.8%     0.841         17.8%         2.26   (checkpoint 8192)
+class 2-of-2 pen 20 g=0.90 seed 43               0.810      82.0%     0.856         11.5%         1.98   (checkpoint 11264)
+class 2-of-2 pen 20 g=0.90 seed 44               0.807      79.5%     0.842         22.7%         2.73   (checkpoint 9728)
+class 2-of-2 pen 80 g=0.00 seed 42               0.812      81.9%     0.819          2.3%         1.62   (checkpoint 11776)
+class 2-of-2 pen 80 g=0.00 seed 43               0.812      81.2%     0.807          2.1%         1.65   (checkpoint 12032)
+class 2-of-2 pen 80 g=0.00 seed 44               0.814      82.5%     0.822          5.1%         1.69   (checkpoint 12032)
+class 2-of-2 pen 80 g=0.50 seed 42               0.816      82.1%     0.835          5.1%         1.94   (checkpoint 12032)
+class 2-of-2 pen 80 g=0.50 seed 43               0.815      81.3%     0.847          5.1%         1.69   (checkpoint 11264)
+class 2-of-2 pen 80 g=0.50 seed 44               0.817      82.4%     0.830          2.1%         1.72   (checkpoint 12032)
+class 2-of-2 pen 80 g=0.90 seed 42               0.808      79.7%     0.845          5.1%         2.32   (checkpoint 11776)
+class 2-of-2 pen 80 g=0.90 seed 43               0.811      81.0%     0.850          5.1%         1.88   (checkpoint 10752)
+class 2-of-2 pen 80 g=0.90 seed 44               0.804      78.8%     0.830          4.5%         2.82   (checkpoint 11776)
+class_drop 2-of-2 pen 20 g=0.00 seed 42          0.813      82.7%     0.820          7.6%         1.76   (checkpoint 11264)
+class_drop 2-of-2 pen 20 g=0.00 seed 43          0.814      83.2%     0.803          2.3%         1.61   (checkpoint 12032)
+class_drop 2-of-2 pen 20 g=0.00 seed 44          0.815      82.5%     0.824          2.3%         1.74   (checkpoint 11776)
+class_drop 2-of-2 pen 20 g=0.50 seed 42          0.812      81.7%     0.836          7.4%         1.87   (checkpoint 11264)
+class_drop 2-of-2 pen 20 g=0.50 seed 43          0.812      82.5%     0.829          4.7%         1.83   (checkpoint 11264)
+class_drop 2-of-2 pen 20 g=0.50 seed 44          0.813      80.3%     0.846         12.7%         1.66   (checkpoint 11264)
+class_drop 2-of-2 pen 20 g=0.90 seed 42          0.801      78.2%     0.862         11.1%         2.79   (checkpoint 10240)
+class_drop 2-of-2 pen 20 g=0.90 seed 43          0.805      79.3%     0.848         12.7%         1.81   (checkpoint 9216)
+class_drop 2-of-2 pen 20 g=0.90 seed 44          0.806      78.4%     0.850         25.0%         3.01   (checkpoint 12032)
+class_drop 2-of-2 pen 80 g=0.00 seed 42          0.809      80.9%     0.811          2.1%         1.64   (checkpoint 11776)
+class_drop 2-of-2 pen 80 g=0.00 seed 43          0.807      79.8%     0.817          2.3%         1.61   (checkpoint 11776)
+class_drop 2-of-2 pen 80 g=0.00 seed 44          0.812      80.8%     0.822          2.3%         1.53   (checkpoint 12032)
+class_drop 2-of-2 pen 80 g=0.50 seed 42          0.811      81.9%     0.836          2.1%         1.69   (checkpoint 11264)
+class_drop 2-of-2 pen 80 g=0.50 seed 43          0.812      83.2%     0.818          2.3%         1.48   (checkpoint 10752)
+class_drop 2-of-2 pen 80 g=0.50 seed 44          0.811      81.5%     0.824          2.1%         1.68   (checkpoint 12032)
+class_drop 2-of-2 pen 80 g=0.90 seed 42          0.805      79.1%     0.844          2.1%         2.18   (checkpoint 11264)
+class_drop 2-of-2 pen 80 g=0.90 seed 43          0.807      79.5%     0.861          2.1%         1.79   (checkpoint 12032)
+class_drop 2-of-2 pen 80 g=0.90 seed 44          0.799      78.2%     0.809          2.1%         2.57   (checkpoint 12032)
+
+Per alarm and confirmation (DQN: mean over runs):
+alarm / confirm        DQN return       DQN FA  rule return      rule FA table return     table FA
+class 2-of-2                0.813         7.8%        0.710        42.2%        0.764        42.2%
+class_drop 2-of-2           0.809         5.9%        0.711        31.1%        0.764        31.1%
+
+Per alarm, false-switch penalty and gamma (DQN: mean over seeds):
+alarm      penalty       gamma       return     restored  FA episodes
+class      20             0.00        0.817        82.9%         6.1%
+class      20             0.50        0.817        82.9%        11.2%
+class      20             0.90        0.809        81.1%        17.3%
+class      80             0.00        0.813        81.8%         3.2%
+class      80             0.50        0.816        81.9%         4.1%
+class      80             0.90        0.808        79.8%         4.9%
+class_drop 20             0.00        0.814        82.8%         4.1%
+class_drop 20             0.50        0.812        81.5%         8.3%
+class_drop 20             0.90        0.804        78.6%        16.3%
+class_drop 80             0.00        0.809        80.5%         2.3%
+class_drop 80             0.50        0.811        82.2%         2.2%
+class_drop 80             0.90        0.804        79.0%         2.1%
+Selected: alarm 'class', confirmation 2-of-2, false-switch penalty 80, gamma 0.50, seed 44 (no run with false-alarm episodes <= 2%: fewest false alarms, then best return). Gate (return >= rule+escalation with the same alarm, FA <= 2%): FAIL
+
+Reward-weight sensitivity (validation; every cost term scaled, DQN retrained per scale, seed 44):
+scale     return DQN/rule/table restored DQN/rule/table   DQN - rule / - table   DQN gput   DQN FA
+x 1.0         0.817/0.710/0.764        82.4/62.9/74.6%        +0.107 / +0.053      0.830     2.1%
+x 0.5         0.855/0.743/0.820        84.9/62.9/76.0%        +0.112 / +0.035      0.795     5.1%
+x 2.0         0.750/0.642/0.695        73.6/62.9/61.9%        +0.108 / +0.055      0.868     2.1%
+DQN ahead of rule + escalation and table at every scale: YES

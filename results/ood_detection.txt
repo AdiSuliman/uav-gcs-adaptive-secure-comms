@@ -1,17 +1,17 @@
 === UNKNOWN-THREAT DETECTION: LEAVE-ONE-THREAT-OUT (D32, D42) ===
-Generated: 26-Sep-2026 14:05:45 | detector retrained without each threat (30 epochs), test split by sub-run
+Generated: 26-Sep-2026 20:24:45 | detector retrained without each threat (30 epochs), test split by sub-run
 AUROC: 0.5 = no separation, 1 = perfect. FPR95: unknown frames accepted as known at the threshold keeping 95% of known validation frames.
 
 held-out threat          n |     msp  energy    maha iforest   fused |     msp  energy    maha iforest   fused |  known  mistaken for          same
                            |   AUROC                                 |   FPR95                                
-jamming                600 |   0.589   0.515   0.976   0.786   0.967 |    0.90    1.00    0.08    0.81    0.10 |  97.6%  reactive_jamming       65%
-noise_burst            600 |   0.237   0.101   0.955   0.589   0.929 |    0.99    0.99    0.16    0.96    0.17 |  96.3%  sweeping_jammer         0%
-reactive_jamming       600 |   0.412   0.283   0.827   0.904   0.912 |    0.93    1.00    0.59    0.47    0.51 |  96.1%  jamming                85%
-path_loss              600 |   0.836   0.768   0.922   0.795   0.887 |    0.71    0.86    0.25    0.70    0.30 |  96.9%  spoofing                0%
-spoofing               600 |   0.863   0.842   0.890   0.689   0.845 |    0.69    0.71    0.43    0.85    0.45 |  96.6%  benign_interference    43%
-antenna_fault          600 |   0.927   0.972   0.857   0.292   0.764 |    0.45    0.14    0.55    1.00    0.68 |  96.8%  sweeping_jammer         0%
-benign_interference    600 |   0.849   0.769   0.849   0.274   0.742 |    0.60    0.82    0.71    1.00    0.77 |  97.8%  jamming                 2%
-sweeping_jammer        600 |   0.597   0.536   0.928   0.523   0.871 |    0.92    0.98    0.40    0.94    0.46 |  96.3%  noise_burst             0%
-mean                       |   0.664   0.598   0.901   0.606   0.865 |    0.77    0.81    0.40    0.84    0.43
+jamming                600 |   0.667   0.512   0.973   0.799   0.967 |    0.84    1.00    0.08    0.80    0.09 |  97.9%  benign_interference    63%
+noise_burst            600 |   0.301   0.101   0.948   0.560   0.922 |    0.99    0.99    0.16    0.99    0.17 |  96.2%  sweeping_jammer         0%
+reactive_jamming       600 |   0.504   0.338   0.880   0.901   0.943 |    0.91    0.99    0.45    0.52    0.38 |  95.9%  jamming                76%
+path_loss              600 |   0.751   0.722   0.868   0.787   0.847 |    0.78    0.91    0.57    0.91    0.59 |  96.9%  spoofing                0%
+spoofing               600 |   0.878   0.818   0.857   0.652   0.822 |    0.67    0.78    0.49    0.88    0.52 |  96.2%  benign_interference    26%
+antenna_fault          600 |   0.917   0.953   0.827   0.297   0.731 |    0.51    0.29    0.65    1.00    0.78 |  96.8%  sweeping_jammer         0%
+benign_interference    600 |   0.829   0.785   0.807   0.308   0.719 |    0.67    0.79    0.61    1.00    0.66 |  98.1%  spoofing                3%
+sweeping_jammer        600 |   0.647   0.543   0.937   0.504   0.891 |    0.91    0.96    0.33    0.95    0.39 |  96.2%  noise_burst             0%
+mean                       |   0.687   0.596   0.887   0.601   0.855 |    0.79    0.84    0.42    0.88    0.45
 
-Best score by mean AUROC: maha (0.901). Production MSP / energy thresholds: 0.702 / 3.83.
+Best score by mean AUROC: maha (0.887). Production MSP / energy thresholds: 0.724 / 4.00.

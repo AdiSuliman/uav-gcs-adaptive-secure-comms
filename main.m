@@ -16,12 +16,12 @@
 %
 % Runtimes (RTX 4070): A4v ~12 min, A5 ~12 min, A6 ~4 min, B2 ~4 min,
 % B4 ~25 min, OOD ~60 min, C1p ~90 min from scratch (extensions only simulate
-% the new scenarios, ~30 min), C2 ~45 min (3 gammas x 3 seeds), C2e ~5 min,
-% SURV ~90 min, LAT ~2 min, KPI and DASH < 1 min.
+% the new scenarios, ~30 min), C2 ~80 min (2 alarms x 2 penalties x 3 gammas x 3 seeds), C2e ~5 min,
+% SURV ~90 min, LAT ~2 min, KPI and DASH < 1 min, C1c ~65 min.
 %
 % DEPENDENCIES (what must exist before a stage can run):
 %   A5 needs A0 | A6 needs A5 | B1 needs A6 | B2 needs B1 | B3, B4, OOD need B2
-%   C1p needs B2 | C2 needs C1p | C2e needs C2 | LAT needs C2
+%   C1p needs B2 | C1c needs C1p | C2 needs C1p | C2e needs C2 (and C1c for KPI 6) | LAT needs C2
 %   SURV needs A0 | KPI reads B3, B4, OOD, A4v, C2e, LAT, SURV | DASH needs KPI
 %
 % LOGGING: `diary` captures everything printed below into logs/run_*.txt,
@@ -74,9 +74,14 @@ fprintf('(This file will contain EVERYTHING printed below, even across clc calls
 
 warning('off', 'Simulink:cgxe:LeakedJITEngine');   % internal Simulink notice on repeated sim() of MATLAB Function blocks
 
-% ---- Decision-layer training (D46) ----
-CFG.dqn_seeds  = 3;          % C2: training seeds per discount factor
-CFG.dqn_gammas = [0 0.5 0.9];  % C2: discount factors; gamma and seed selected on validation (D46)
+% ---- Decision-layer training (D46, D48-D50) ----
+CFG.dqn_seeds       = 3;                 % C2: training seeds per setting
+CFG.dqn_gammas      = [0 0.5 0.9];       % C2: discount factors, chosen on validation
+CFG.confirm_grid    = [2 2];             % C2: alarm confirmation m-of-n (D48: no effect on DQN false alarms)
+CFG.alarm_modes     = {'class', 'class_drop'};  % C2: path_loss alarm with / without an Eb/N0 drop (D50)
+CFG.fa_penalty_grid = [20 80];           % C2: false-switch penalty of the training reward (D49)
+CFG.fa_val          = 0.02;              % C2: false-alarm episodes allowed on clean validation (D48)
+CFG.clean_test_geoms = 100;              % C1c: new clean test geometries per Eb/N0, one episode each (D51)
 
 % ---- Phase A: link + threats + dataset ----
 
@@ -92,20 +97,21 @@ RUN.extract_spectrograms        = false;    % A6  : spectrograms + 9 link featur
 RUN.prepare_data                = false;    % B1  : split by sub-run 60/20/20 (~1min, D42)
 RUN.train_detector              = false;    % B2  : train CNN+scalar hybrid (~4min); a new detector invalidates the pools
 RUN.eval_detector               = false;    % B3  : test eval + confusion/accuracy-vs-SNR + bootstrap CIs (~2min, D35)
-RUN.eval_unseen_snr             = true;   % B4  : detector at Eb/N0 never seen in training, 1,3,5,7,9 dB (~25min, D34)
+RUN.eval_unseen_snr             = false;   % B4  : detector at Eb/N0 never seen in training, 1,3,5,7,9 dB (~25min, D34)
 
 
 % ---- Phase C: decision layer ----
-RUN.build_policy_pools          = true;    % C1p : frame pools, every scenario x configuration x Eb/N0 x geometry (D44-D46)
-RUN.train_dqn                   = true;    % C2  : Double DQN + shield, CFG.dqn_gammas x CFG.dqn_seeds, selection on validation (D44-D46)
+RUN.build_policy_pools          = false;    % C1p : frame pools, every scenario x configuration x Eb/N0 x geometry (D44-D46)
+RUN.build_clean_test_pools      = true;    % C1c : clean link on CFG.clean_test_geoms new geometries, for KPI 6 (~65 min, D51)
+RUN.train_dqn                   = false;   % C2  : Double DQN + shield, CFG.dqn_gammas x CFG.dqn_seeds, selection on validation (D44-D46)
 RUN.evaluate_policies           = true;    % C2e : every policy on the test pools: single, follower, combined, unknown, clean (D44-D46)
-RUN.eval_ood_detection          = true;    % OOD : leave-one-threat-out unknown-threat detection, retrains the detector 8 times (D32, D42)
+RUN.eval_ood_detection          = false;    % OOD : leave-one-threat-out unknown-threat detection, retrains the detector 8 times (D32, D42)
 
 % ---- Phase SURV: survivability boundary mapping (deliverable 8) ----
-RUN.map_survivability           = true;    % SURV: Map A/B per threat, severity, Eb/N0 and geometry (D30, D46)
+RUN.map_survivability           = false;    % SURV: Map A/B per threat, severity, Eb/N0 and geometry (D30, D46)
 
 % ---- Phase KPI: latency and proposal KPIs (section 5) ----
-RUN.measure_latency             = true;    % LAT : decision latency per cycle, median / p95 (D46)
+RUN.measure_latency             = false;   % LAT : decision latency per cycle, median / p95 (D46)
 RUN.measure_all_kpis            = true;    % KPI : the 8 proposal KPIs from the result files (D46)
 
 % ---- Phase DASH: results dashboard (deliverable 1) ----
@@ -201,6 +207,10 @@ if RUN.build_policy_pools
     fprintf('  [C1p] Measuring the decision-layer frame pools...\n');
     build_policy_pools;
 end
+if RUN.build_clean_test_pools
+    fprintf('  [C1c] Measuring the clean link on new test geometries (KPI 6)...\n');
+    build_clean_test_pools;
+end
 if RUN.train_dqn
     fprintf('  [C2] Training the DQN (Double DQN, replay, target network, shield)...\n');
     train_dqn;
@@ -217,6 +227,7 @@ end
 
 fprintf('  [C] Pipeline status:\n');
 report_file('data/policy_pools.mat',          '      policy_pools.mat       ', 'build_policy_pools');
+report_file('data/clean_test_pools.mat',      '      clean_test_pools.mat   ', 'build_clean_test_pools');
 report_file('data/trained_dqn.mat',           '      trained_dqn.mat        ', 'train_dqn');
 report_file('results/dqn_training.txt',       '      C2 training report     ', 'train_dqn');
 report_file('results/policy_evaluation.txt',  '      C2e evaluation report  ', 'evaluate_policies');
@@ -268,7 +279,7 @@ fprintf('\n');
 
 %% ========== PHASE D: DOCUMENTATION ==========
 fprintf('> PHASE D: Documentation & Defense\n\n');
-fprintf('  [D1] README.md / PROJECT_LOG.md / docs/DECISIONS.md  READY (maintained by hand)\n');
+fprintf('  [D1] README.md, docs/DECISIONS.md, docs/PROJECT_LOG.md, docs/ROADMAP.md  READY (maintained by hand)\n');
 fprintf('  [D2] Interim/final report (docx)...                  [PENDING]\n');
 fprintf('  [D3] Defense presentation (pptx)...                  [PENDING]\n\n');
 

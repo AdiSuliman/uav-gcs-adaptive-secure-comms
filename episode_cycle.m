@@ -1,8 +1,8 @@
 function [E, info] = episode_cycle(E, k, fr, ctx)
 %EPISODE_CYCLE  One decision cycle of a live episode (demo_gui.m) (D46).
 %   Detector, unknown-threat score and the decision layer exactly as in the
-%   evaluation: link_features.m over the episode's own history, cnn_scores.m,
-%   ood_scores.m (Mahalanobis below ctx.PP.maha_thr = unknown), then
+%   evaluation: link_features.m over the episode's own history, detect_scores.m
+%   (class probabilities and Mahalanobis score, below ctx.PP.maha_thr = unknown), then
 %   policy_decide.m with its shared link monitor, confirmation, shield and
 %   hysteresis.
 %
@@ -26,8 +26,7 @@ E.ber(k) = fr.ber; E.rssi(k) = fr.rssi; E.plr(k) = fr.plr; E.sinr(k) = fr.sinr; 
 raw = link_features(E, k, ctx.tw, ctx.frame_dur);
 X = reshape(single(spec_image(fr.iq, ctx.fs)), 128, 128, 1, 1);
 Xf = ((raw - ctx.feat_mean) ./ ctx.feat_std)';
-probs = cnn_scores(ctx.net, X, Xf);
-maha = ood_scores(ctx.net, ctx.ood, X, Xf);
+[probs, maha] = detect_scores(ctx.net, ctx.ood, X, Xf);
 [conf, ic] = max(probs);
 
 %% Decision

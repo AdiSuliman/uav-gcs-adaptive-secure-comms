@@ -1,4 +1,4 @@
-%% EVALUATE_POLICIES - Decision-layer comparison on the test pools (D44-D46)
+%% EVALUATE_POLICIES - Decision-layer comparison on the test pools (D44-D51)
 % Every policy runs the same episodes with the same frame draws (common random
 % numbers) on the TEST split of data/policy_pools.mat: sub-runs (flight
 % geometries) with seeds never used in training. Episode sets:
@@ -9,9 +9,11 @@
 %             on 4 other combinations)
 %   unknown   single threats with the detector output withheld after onset
 %             (unknown-threat path: the policy sees only the link measurements)
-%   clean     no threat; every change is a false alarm (KPI: FAR, one-sided 95%
-%             Clopper-Pearson bound over >= 600 episodes above the Eb/N0 threshold)
-% Policies: random; always-on adaptive combining (fixed spatial_diversity); the
+%   clean     no threat; every change is a false alarm. KPI 6 (one-sided 95%
+%             Clopper-Pearson bound, >= 600 episodes) is computed on
+%             data/clean_test_pools.mat, one episode per new geometry (D51);
+%             the 4-geometry clean set of the test pools is kept for comparison
+% Policies: random; always-on MMSE (fixed spatial_diversity); the
 % best fixed configuration (chosen on the train pools); expert rule, with and
 % without escalation; class -> configuration table tuned on the train pools;
 % the DQN of every discount factor trained (the selected one also with
@@ -19,15 +21,19 @@
 % Metrics per episode (after onset unless noted): mean reward per cycle,
 % restored cycles (BER <= 2x clean), normalized goodput, cycles to recover
 % (restored for 5 consecutive cycles), switches, false switches (whole episode).
-% Breakdowns: per threat, per Eb/N0, per interferer direction, per UAV speed.
+% Breakdowns: per threat, per Eb/N0, per interferer direction, per UAV speed;
+% false alarms of the selected DQN and of rule + escalation by Eb/N0 and by the
+% detector class and link state at the first change of the episode.
 % Intervals: 95% t over episodes; differences are paired per episode.
 %
 % Output: results/policy_evaluation.{txt,mat,png}, results/policy_breakdown.png
 
 close all; clc;
-fprintf('=== Decision-layer evaluation on the test pools (D44-D46) ===\n\n');
+fprintf('=== Decision-layer evaluation on the test pools (D44-D51) ===\n\n');
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
-Q = load('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'H', 'seed_summary');
+Q = load('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'H', 'seed_summary', 'confirm', 'alarm_mode');
+if isfield(Q, 'confirm'), PP.confirm = Q.confirm; else, PP.confirm = [2 2]; end   % same monitor for every policy
+if isfield(Q, 'alarm_mode'), PP.alarm_mode = Q.alarm_mode; else, PP.alarm_mode = 'class'; end
 K = link_env('tables', PP);
 tab = policy_table(PP, K);
 T = Q.H.T; NE = 64;
@@ -74,7 +80,7 @@ nG = numel(Q.gammas);
 sel = find(Q.gammas == Q.seed_summary.selected_gamma, 1);
 POL = [{'random', 'fixed_mmse', 'fixed', 'rule', 'rule_esc', 'table'}, ...
        arrayfun(@(g) sprintf('dqn_g%d', g), 1:nG, 'UniformOutput', false), {'dqn_esc', 'oracle'}];
-LBL = [{'random', 'always adaptive combining', ['fixed: ' PP.actions{fixed_best}], 'rule', 'rule + escalation', ...
+LBL = [{'random', 'always-on MMSE', ['fixed: ' PP.actions{fixed_best}], 'rule', 'rule + escalation', ...
         'table (train pools)'}, ...
        arrayfun(@(g) sprintf('DQN gamma=%.2f%s', Q.gammas(g), ternary(g == sel, ' (selected)', '')), 1:nG, ...
        'UniformOutput', false), {'DQN (selected) + escalation', 'oracle (one-step)'}];
@@ -85,14 +91,7 @@ RES = cell(numel(sets), numel(POL));
 t0 = tic;
 for si = 1:numel(sets)
     for pk = 1:numel(POL)
-        kind = POL{pk}; ag = Q.agent; opt = struct();
-        switch kind
-            case 'fixed',      opt.fixed = fixed_best;
-            case 'fixed_mmse', kind = 'fixed'; opt.fixed = fixed_mmse;
-            case 'table',      opt = tab;
-            case 'dqn_esc',    ag = Q.agents{sel};
-        end
-        if startsWith(kind, 'dqn_g'), ag = Q.agents{sscanf(kind, 'dqn_g%d')}; kind = 'dqn'; end
+        [kind, ag, opt] = policy_setup(POL{pk}, Q, sel, fixed_best, fixed_mmse, tab);
         R = [];
         for b = 1:numel(sets(si).spec)
             Rb = rollout_policy(kind, PP, K, sets(si).spec{b}, 2, ag, opt, 30000 + 100*si + b);
@@ -109,13 +108,16 @@ end
 
 %% 4. Report
 rep = {};
-rep{end+1} = '=== DECISION-LAYER EVALUATION, TEST POOLS (D44-D46) ===';
+rep{end+1} = '=== DECISION-LAYER EVALUATION, TEST POOLS (D44-D51) ===';
 rep{end+1} = sprintf(['Generated: %s | %d-cycle episodes, onset at cycle 3-10 | test sub-runs (geometries) never ' ...
     'used in training | interferer AoA %s'], datestr(now), T, ternary(PP.aoa_random, 'random per sub-run', 'fixed'));
 rep{end+1} = 'return = mean reward per cycle (1 = restored at no cost); restored / goodput / recovery after onset;';
-rep{end+1} = 'recovered = restored for 5 consecutive cycles; false sw = switches on a healthy link, whole episode.';
-rep{end+1} = sprintf('Selected DQN: gamma %.2f (validation, train pools). Training combinations: %s', ...
-    Q.seed_summary.selected_gamma, strjoin(PP.train_combos, ', '));
+rep{end+1} = ['recovered = restored for 5 consecutive cycles; PLR ok = cycles with packet loss <= clean + 0.05; ' ...
+    'false sw = switches on a healthy link, whole episode.'];
+fpen = 20; if isfield(Q.seed_summary, 'selected_fa_pen'), fpen = Q.seed_summary.selected_fa_pen; end
+rep{end+1} = sprintf(['Selected DQN: gamma %.2f, training false-switch penalty %d; alarm ''%s'', confirmation ' ...
+    '%d-of-%d for every monitored policy (validation, train pools). Training combinations: %s'], ...
+    Q.seed_summary.selected_gamma, fpen, PP.alarm_mode, PP.confirm, strjoin(PP.train_combos, ', '));
 for si = 1:numel(sets)
     rep{end+1} = ''; %#ok<SAGROW>
     rep{end+1} = sprintf('--- %s (%d episodes) ---', sets(si).name, numel(RES{si, 1}.ret)); %#ok<SAGROW>
@@ -193,20 +195,60 @@ for bi = 1:numel(bins_v) - 1
         sprintf('%12.1f', PV(bi, :))); %#ok<SAGROW>
 end
 
-% False alarms on the clean link
+% False alarms on the clean link: test pools (4 geometries per Eb/N0)
 iC = find(strcmp({sets.name}, 'clean'));
+cls_list = [PP.classes, {'unknown'}];
 Rc = RES{iC, 1}; above = PP.ebno(Rc.s) >= ebno_thr;
 rep{end+1} = '';
-rep{end+1} = sprintf(['False alarms on the clean link, Eb/N0 >= %g dB (%d episodes x %d cycles): episodes with ' ...
-    '>= 1 change, one-sided 95%% Clopper-Pearson upper bound; per-cycle rate'], ebno_thr, sum(above), T);
-FAR = struct('policy', {}, 'k', {}, 'n', {}, 'p', {}, 'upper', {}, 'per_cycle', {});
-for pk = 1:numel(POL)
-    if strcmp(POL{pk}, 'oracle') || strcmp(POL{pk}, 'random'), continue; end
-    R = RES{iC, pk}; kf = sum(R.switches(above) > 0); n = sum(above);
-    FAR(end+1) = struct('policy', LBL{pk}, 'k', kf, 'n', n, 'p', kf / n, 'upper', cp_upper(kf, n), ...
-        'per_cycle', sum(R.switches(above)) / (n * T)); %#ok<SAGROW>
-    rep{end+1} = sprintf('  %-32s %4d / %4d = %6.2f%%   upper %6.2f%%   per cycle %.4f%%', LBL{pk}, kf, n, ...
-        100 * kf / n, 100 * FAR(end).upper, 100 * FAR(end).per_cycle); %#ok<SAGROW>
+rep{end+1} = sprintf(['False alarms on the clean link, test pools (%d geometries per Eb/N0), Eb/N0 >= %g dB ' ...
+    '(%d episodes x %d cycles): episodes with >= 1 change, one-sided 95%% Clopper-Pearson upper bound; ' ...
+    'per-cycle rate'], K.nR(2), ebno_thr, sum(above), T);
+[FAR, FD, lines] = far_report(RES(iC, :), POL, LBL, above, T, iDQN, PP.ebno, cls_list);
+rep = [rep, lines];
+
+% False alarms on the clean link over many geometries: one episode per geometry (KPI 6, D51)
+FAR4 = FAR; FD4 = FD; n_geom = 0; RW = {};
+if isfile('data/clean_test_pools.mat')
+    C = load('data/clean_test_pools.mat', 'CT'); CT = C.CT; clear C
+    n_geom = CT.n_geom;
+    PPw = PP;
+    PPw.pools(:, :, :, 2) = {[]};
+    PPw.pools(1, :, :, 2) = reshape(CT.pools(1, :, :), [1 nS nA]);
+    PPw.runs = {PP.runs{1}, CT.runs};
+    Kw = link_env('tables', PPw);
+    [ss, rr] = ndgrid(1:nS, 1:n_geom); ss = ss(:)'; rr = rr(:)';
+    n = numel(ss); nb = ceil(n / NE); pad = nb * NE - n;
+    ss = [ss, ss(1:pad)]; rr = [rr, rr(1:pad)];
+    RW = cell(1, numel(POL));
+    for pk = 1:numel(POL)
+        [kind, ag, opt] = policy_setup(POL{pk}, Q, sel, fixed_best, fixed_mmse, tab);
+        R = [];
+        for b = 1:nb
+            i = (b-1)*NE + (1:NE);
+            spec = struct('scn', ones(1, NE), 's', ss(i), 'onset', 3 * ones(1, NE), 'follow', false(1, NE), ...
+                'fdelay', 2 * ones(1, NE), 'unk', false(1, NE), 'T', T, 'r', rr(i));
+            Rb = rollout_policy(kind, PPw, Kw, spec, 2, ag, opt, 40000 + b);
+            Rb.scn = spec.scn; Rb.s = spec.s;
+            Rb = rmfield(Rb, 'cfg_trace');
+            if isempty(R), R = Rb; else, R = cat_struct(R, Rb); end
+        end
+        f = fieldnames(R);
+        for j = 1:numel(f), R.(f{j}) = R.(f{j})(:, 1:n); end        % drop the padding
+        RW{pk} = R;
+    end
+    aboveW = PP.ebno(RW{1}.s) >= ebno_thr;
+    rep{end+1} = '';
+    rep{end+1} = sprintf(['False alarms on the clean link, %d new geometries per Eb/N0 (data/clean_test_pools.mat), ' ...
+        'one episode per geometry, Eb/N0 >= %g dB (%d independent episodes x %d cycles) -> KPI 6'], n_geom, ...
+        ebno_thr, sum(aboveW), T);
+    [FAR, FD, lines] = far_report(RW, POL, LBL, aboveW, T, iDQN, PP.ebno, cls_list);
+    rep = [rep, lines];
+    rw = {'return', 'goodput'; 'ret', 'gput_post'};
+    for j = 1:size(rw, 2)
+        rep{end+1} = sprintf('  mean %s on these episodes: %s', rw{1, j}, strjoin(cellfun(@(p) sprintf('%s %.3f', ...
+            LBL{col(p)}, mean(RW{col(p)}.(rw{2, j}))), {POL{iDQN}, 'rule_esc', 'oracle'}, 'UniformOutput', false), ...
+            ' | ')); %#ok<SAGROW>
+    end
 end
 
 % Final configuration of the selected DQN per threat (single set)
@@ -226,8 +268,11 @@ fprintf('\n%s\n', rep{:});
 set_names = {sets.name};
 KP = struct('per_threat', PT, 'per_threat_scn', {PP.scen(test_scn)}, 'per_ebno', PE, 'ebno', PP.ebno, ...
     'per_aoa', PA, 'aoa_bins', bins_aoa, 'per_speed', PV, 'speed_bins', bins_v, 'show', {show}, 'show_lbl', {hdr}, ...
-    'far', FAR, 'ebno_thr', ebno_thr, 'selected_gamma', Q.seed_summary.selected_gamma);
-save('results/policy_evaluation.mat', 'RES', 'POL', 'LBL', 'set_names', 'fixed_best', 'tab', 'iDQN', 'KP', 'iThreat');
+    'far', FAR, 'far_diag', FD, 'far_4geo', FAR4, 'far_diag_4geo', FD4, 'far_geoms', n_geom, ...
+    'cls_list', {cls_list}, 'ebno_thr', ebno_thr, 'selected_gamma', Q.seed_summary.selected_gamma, 'confirm', PP.confirm, ...
+    'alarm_mode', PP.alarm_mode);
+save('results/policy_evaluation.mat', 'RES', 'RW', 'POL', 'LBL', 'set_names', 'fixed_best', 'tab', 'iDQN', 'KP', ...
+    'iThreat');
 
 %% 5. Figures
 key = {'random', 'fixed', 'rule_esc', 'table', POL{iDQN}, 'oracle'};
@@ -242,9 +287,9 @@ for m = 1:3
     bar(Y); grid on; set(gca, 'XTickLabel', set_names(1:4));
     title(ttl{m});
 end
-lg = legend(kl, 'Orientation', 'horizontal', 'NumColumns', 6, 'FontSize', 8);
+lg = legend(kl, 'Orientation', 'horizontal', 'NumColumns', 6, 'FontSize', 8, 'Interpreter', 'none');
 lg.Position = [0.15 0.01 0.7 0.05];
-sgtitle('Decision layer on the test pools (D44-D46)');
+sgtitle('Decision layer on the test pools (D44-D51)');
 saveas(fig, 'results/policy_evaluation.png'); close(fig);
 
 fig = figure('Position', [60 60 1500 420], 'Color', 'w');
@@ -259,12 +304,54 @@ if ~isempty(PA)
 end
 subplot(1, 3, 3); plot((bins_v(1:end-1) + bins_v(2:end)) / 2, PV, '-s', 'LineWidth', 1.3); grid on; ylim([0 105]);
 xlabel('UAV speed [km/h]'); title('Single threats vs UAV speed');
-legend(hdr, 'Location', 'southoutside', 'NumColumns', 4, 'FontSize', 8);
+legend(hdr, 'Location', 'southoutside', 'NumColumns', 4, 'FontSize', 8, 'Interpreter', 'none');
 sgtitle('Restoration breakdown, test pools');
 saveas(fig, 'results/policy_breakdown.png'); close(fig);
 fprintf('Saved results/policy_evaluation.{txt,mat,png}, results/policy_breakdown.png\n');
 
 %% ===================== Local functions =====================
+function [kind, ag, opt] = policy_setup(name, Q, sel, fixed_best, fixed_mmse, tab)
+% Policy kind, agent and options of one evaluated policy.
+kind = name; ag = Q.agent; opt = struct();
+switch name
+    case 'fixed',      opt.fixed = fixed_best;
+    case 'fixed_mmse', kind = 'fixed'; opt.fixed = fixed_mmse;
+    case 'table',      opt = tab;
+    case 'dqn_esc',    ag = Q.agents{sel};
+end
+if startsWith(name, 'dqn_g'), ag = Q.agents{sscanf(name, 'dqn_g%d')}; kind = 'dqn'; end
+end
+
+function [FAR, FD, lines] = far_report(RR, POL, LBL, above, T, iDQN, ebno, cls_list)
+% False-alarm counts per policy (episodes with >= 1 change, Clopper-Pearson
+% bound, per-cycle rate), and for the selected DQN and rule + escalation the
+% false-alarm episodes per Eb/N0 and the trigger at the first change.
+lines = {};
+FAR = struct('policy', {}, 'k', {}, 'n', {}, 'p', {}, 'upper', {}, 'per_cycle', {});
+for pk = 1:numel(POL)
+    if any(strcmp(POL{pk}, {'oracle', 'random'})), continue; end
+    R = RR{pk}; kf = sum(R.switches(above) > 0); n = sum(above);
+    FAR(end+1) = struct('policy', LBL{pk}, 'k', kf, 'n', n, 'p', kf / n, 'upper', cp_upper(kf, n), ...
+        'per_cycle', sum(R.switches(above)) / (n * T)); %#ok<AGROW>
+    lines{end+1} = sprintf('  %-40s %4d / %4d = %6.2f%%   upper %6.2f%%   per cycle %.4f%%', LBL{pk}, kf, n, ...
+        100 * kf / n, 100 * FAR(end).upper, 100 * FAR(end).per_cycle); %#ok<AGROW>
+end
+nS = numel(ebno);
+FD = struct('policy', {}, 'by_ebno', {}, 'n_ebno', {}, 'cls', {}, 'deg', {}, 'drop', {});
+for pk = [iDQN, find(strcmp(POL, 'rule_esc'))]
+    R = RR{pk}; fe = above & R.switches > 0;
+    byE = arrayfun(@(s) sum(fe & R.s == s), 1:nS); nE = arrayfun(@(s) sum(above & R.s == s), 1:nS);
+    lines{end+1} = sprintf('  %s, false-alarm episodes per Eb/N0: %s', LBL{pk}, strjoin(arrayfun(@(s) ...
+        sprintf('%g dB %d/%d', ebno(s), byE(s), nE(s)), 1:nS, 'UniformOutput', false), ' | ')); %#ok<AGROW>
+    c = R.fc_cls(fe); d = R.fc_deg(fe); dr = R.fc_drop(fe); u = unique(c(c > 0));
+    txt = strjoin(arrayfun(@(k) sprintf('%s %d (degraded %d, median Eb/N0 drop %.1f dB)', cls_list{k}, ...
+        sum(c == k), sum(c == k & d), median(dr(c == k), 'omitnan')), u, 'UniformOutput', false), ', ');
+    if isempty(txt), txt = '-'; end
+    lines{end+1} = sprintf('    detector class at the first change: %s', txt); %#ok<AGROW>
+    FD(end+1) = struct('policy', LBL{pk}, 'by_ebno', byE, 'n_ebno', nE, 'cls', c, 'deg', d, 'drop', dr); %#ok<AGROW>
+end
+end
+
 function specs = cells_to_specs(scns, reps, follow, unk, NE, T, nS, rs)
 % Every (scenario, Eb/N0) cell `reps` times, packed into batches of NE episodes.
 [sc, s] = ndgrid(scns, 1:nS);
@@ -290,13 +377,13 @@ if k >= n, u = 1; else, u = betaincinv(0.95, k + 1, n - k); end
 end
 
 function lines = policy_table_lines(RR, LBL)
-lines = {sprintf('%-34s %22s %22s %9s %10s %6s %9s %9s', 'policy', 'return', 'restored %', 'goodput', ...
-    'recovered', 'T_rec', 'switches', 'false sw')};
+lines = {sprintf('%-40s %22s %22s %8s %9s %10s %6s %9s %9s', 'policy', 'return', 'restored %', 'PLR ok', ...
+    'goodput', 'recovered', 'T_rec', 'switches', 'false sw')};
 for pk = 1:numel(RR)
     R = RR{pk};
     rec = ~isnan(R.t_rec);
-    lines{end+1} = sprintf('%-34s %22s %22s %9.3f %9.1f%% %6s %9.2f %9.3f', LBL{pk}, ci(R.ret, '%.3f'), ...
-        ci(100*R.restored_post, '%.1f'), mean(R.gput_post), 100*mean(rec), med(R.t_rec(rec)), ...
+    lines{end+1} = sprintf('%-40s %22s %22s %7.1f%% %9.3f %9.1f%% %6s %9.2f %9.3f', LBL{pk}, ci(R.ret, '%.3f'), ...
+        ci(100*R.restored_post, '%.1f'), 100*mean(R.plr_ok_post), mean(R.gput_post), 100*mean(rec), med(R.t_rec(rec)), ...
         mean(R.switches), mean(R.false_sw)); %#ok<AGROW>
 end
 end

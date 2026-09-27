@@ -1,4 +1,4 @@
-%% MEASURE_ALL_KPIS - The proposal KPIs (section 5) from the result files (D46)
+%% MEASURE_ALL_KPIS - The proposal KPIs (section 5) from the result files (D46, D49, D51)
 % Reads the outputs of the pipeline, never re-runs them: a missing or stale
 % source is reported as such. A source older than its inputs (detector,
 % decision layer) is flagged STALE.
@@ -11,15 +11,19 @@
 %   KPI 5  DQN vs rule, table, fixed and oracle: recovery time, restored
 %          cycles, goodput, follower jammer and unseen combinations (evaluate_policies)
 %   KPI 6  false alarms on a healthy link above the Eb/N0 threshold: one-sided
-%          95% Clopper-Pearson bound over >= 600 episodes, target <= 5% (evaluate_policies)
-%   KPI 7  real time: decision latency median / p95 (measure_latency) and
+%          95% Clopper-Pearson bound over >= 600 episodes, target <= 5%; one
+%          episode per clean geometry when data/clean_test_pools.mat exists (D51)
+%          (evaluate_policies)
+%   KPI 7  real time: decision latency median / p95 (measure_latency), with the
+%          latency classes of Oli & Mahalal (IEEE Access 2025) for detection
+%          systems (low < 10 ms, medium 10-100 ms, high > 100 ms), and
 %          robustness over 50-120 km/h (evaluate_policies, eval_detector)
 %   KPI 8  minimum: a closed loop restoring at least one recoverable threat
 %
 % Output: results/kpi_summary.txt, results/kpi_summary.mat (KPI struct array)
 
 close all; clc;
-fprintf('=== KPI summary (proposal section 5, D46) ===\n\n');
+fprintf('=== KPI summary (proposal section 5, D46, D49, D51) ===\n\n');
 F = struct('det', 'results/eval_detector_metrics.mat', 'unseen', 'results/unseen_snr.mat', ...
     'ood', 'results/ood_detection.mat', 'phy', 'results/phy_validation.txt', ...
     'pol', 'results/policy_evaluation.mat', 'lat', 'results/latency.mat', ...
@@ -87,6 +91,8 @@ if isfile(F.pol)
     val4 = 100 * mean(sing{iD}.restored_post(rec_ep));
     det = {sprintf('single threats, test pools: DQN restored %.1f%% of cycles after onset on %d recoverable episodes (oracle %.1f%%)', ...
         val4, sum(rec_ep), 100 * mean(sing{iO}.restored_post(rec_ep))), ...
+        sprintf('packet loss back to <= clean + 0.05 on the same episodes: DQN %.1f%% of cycles (oracle %.1f%%)', ...
+        100 * mean(sing{iD}.plr_ok_post(rec_ep)), 100 * mean(sing{iO}.plr_ok_post(rec_ep))), ...
         sprintf('all single-threat episodes: DQN %.1f%%, rule + escalation %.1f%%, table %.1f%%, oracle %.1f%%', ...
         100 * mean(sing{iD}.restored_post), 100 * mean(sing{col('rule_esc')}.restored_post), ...
         100 * mean(sing{col('table')}.restored_post), 100 * mean(sing{iO}.restored_post))};
@@ -121,6 +127,20 @@ if isfile(F.pol)
         100 * far.upper), '<= 5% (one-sided 95%), >= 600 episodes', status(far.upper <= 0.05 && far.n >= 600, stale), ...
         {sprintf('Eb/N0 >= %g dB, 30 cycles per episode; per-cycle rate %.4f%% | rule + escalation %d/%d, upper %.2f%%', ...
         P.KP.ebno_thr, 100 * far.per_cycle, fr.k, fr.n, 100 * fr.upper)});
+    if isfield(P.KP, 'far_geoms') && P.KP.far_geoms > 0
+        f4 = P.KP.far_4geo(strcmp({P.KP.far_4geo.policy}, P.LBL{iD}));
+        KPI(end).detail{end+1} = sprintf(['measured on %d new clean geometries per Eb/N0, one episode per ' ...
+            'geometry (independent trials); test pools with 4 geometries per Eb/N0: %d/%d, upper %.2f%%'], ...
+            P.KP.far_geoms, f4.k, f4.n, 100 * f4.upper);
+    end
+    if isfield(P.KP, 'far_diag') && ~isempty(P.KP.far_diag)
+        fd = P.KP.far_diag(1); u = unique(fd.cls(fd.cls > 0));
+        KPI(end).detail{end+1} = sprintf('DQN false-alarm episodes per Eb/N0: %s | class at the first change: %s', ...
+            strjoin(arrayfun(@(s) sprintf('%g dB %d/%d', P.KP.ebno(s), fd.by_ebno(s), fd.n_ebno(s)), ...
+            1:numel(fd.by_ebno), 'UniformOutput', false), ', '), ...
+            strjoin([arrayfun(@(k) sprintf('%s %d (degraded %d)', P.KP.cls_list{k}, sum(fd.cls == k), ...
+            sum(fd.cls == k & fd.deg)), u, 'UniformOutput', false), repmat({'-'}, 1, isempty(u))], ', '));
+    end
 
     det = {};
     if isfile(F.lat)
@@ -130,6 +150,9 @@ if isfile(F.pol)
         det{end+1} = sprintf('components (median ms): %s', strjoin(cellfun(@(n, v) sprintf('%s %.2f', n, v), Lt.names, ...
             num2cell(Lt.median_ms), 'UniformOutput', false), ', '));
         latv = sprintf('median %.2f ms, p95 %.2f ms', Lt.total_dqn_median_ms, Lt.total_dqn_p95_ms);
+        det{end+1} = sprintf(['latency class (Oli & Mahalal 2025, detection systems: low < 10 ms, medium 10-100 ms): ' ...
+            'median %s, p95 %s; measured on a desktop computer, not on UAV hardware'], ...
+            lat_class(Lt.total_dqn_median_ms), lat_class(Lt.total_dqn_p95_ms));
     else
         latv = 'latency not measured'; det{end+1} = ['missing ' F.lat];
     end
@@ -138,8 +161,10 @@ if isfile(F.pol)
         strjoin(arrayfun(@(b) sprintf('%.0f-%.0f', P.KP.speed_bins(b), P.KP.speed_bins(b+1)), ...
         1:numel(P.KP.speed_bins) - 1, 'UniformOutput', false), ', '), strjoin(compose('%.1f', pv'), ', '));
     if exist('m', 'var') && isfield(m, 'speed_breakdown')
-        det{end+1} = sprintf('detector accuracy per speed band: %s %%', strjoin(compose('%.1f', ...
-            [m.speed_breakdown.accuracy_pct]), ', '));
+        sb = m.speed_breakdown;
+        det{end+1} = sprintf('detector accuracy per speed band (%s km/h): %s %%', ...
+            strjoin(arrayfun(@(x) sprintf('%.0f-%.0f', x.speed_lo_kmh, x.speed_hi_kmh), sb, 'UniformOutput', false), ', '), ...
+            strjoin(compose('%.1f', [sb.accuracy_pct]), ', '));
     end
     KPI(end+1) = kpi(7, 'Real time + speed', latv, 'reported; restored spread <= 10 points over 50-120 km/h', ...
         status(max(pv) - min(pv) <= 10, stale), det);
@@ -152,8 +177,11 @@ if isfile(F.pol)
         P.KP.per_threat_scn, num2cell(pt'), 'UniformOutput', false), ', '))});
     if isfile(F.dqn)
         Dq = load(F.dqn, 'seed_summary'); ss = Dq.seed_summary;
-        KPI(5).detail{end+1} = sprintf('selected gamma %.2f, seed %d, validation gate %s', ss.selected_gamma, ...
-            ss.selected_seed, ternary(ss.gate_pass, 'PASS', 'FAIL'));
+        cf = [2 2]; if isfield(ss, 'selected_confirm'), cf = ss.selected_confirm; end
+        fp = 20; if isfield(ss, 'selected_fa_pen'), fp = ss.selected_fa_pen; end
+        KPI(5).detail{end+1} = sprintf(['selected gamma %.2f, training false-switch penalty %d, alarm confirmation ' ...
+            '%d-of-%d, seed %d, validation gate %s'], ss.selected_gamma, fp, cf, ss.selected_seed, ...
+            ternary(ss.gate_pass, 'PASS', 'FAIL'));
     end
 else
     for k = 4:8, KPI(end+1) = missing(k, sprintf('KPI %d', k), F.pol); end %#ok<SAGROW>
@@ -221,4 +249,9 @@ end
 
 function out = ternary(c, a, b)
 if c, out = a; else, out = b; end
+end
+
+function s = lat_class(ms)
+% Latency class of a detection system (Oli & Mahalal, IEEE Access 2025, Table 8).
+if ms < 10, s = 'low (< 10 ms)'; elseif ms <= 100, s = 'medium (10-100 ms)'; else, s = 'high (> 100 ms)'; end
 end

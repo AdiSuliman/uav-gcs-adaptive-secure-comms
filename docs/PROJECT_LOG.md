@@ -692,3 +692,56 @@ One `main.m` pass, 3 h: B4, C1p (13 scenarios reused, 4 training combinations si
 
 ### D47 — documentation layout (2026-09-26)
 `PROJECT_LOG.md` and `ROADMAP.md` moved to `docs/` next to `DECISIONS.md`; `README.md` stays in the root. Splitting the code into folders is left for the end of the project.
+
+### D48 — false alarms and latency (code complete)
+Alarm only on a hostile class or degradation; M-of-N confirmation chosen on validation (4 candidates × 3 seeds, ≤ 2% false-alarm episodes on 512 clean validation episodes); the same confirmation for rule and table; one forward pass for probabilities and Mahalanobis score (`detect_scores.m`), latency timed on GPU and CPU. Proposal check added packet-loss restoration (≤ clean + 0.05) to every report and a reward-weight sensitivity study (costs × 0.5 and × 2, DQN retrained) to C2. Pending: MATLAB run (C2, C2e, LAT, KPI, DASH).
+
+
+### D48 results (2026-09-26)
+One pass, 37 min: C2 (4 confirmations × 3 seeds, γ = 0) with the sensitivity study, C2e, LAT, KPI, DASH. No error.
+- **Confirmation:** DQN false-alarm episodes on validation 5.1% for every confirmation and seed (one seed at 2-of-3: 14.5%); returns 0.817 / 0.819 / 0.798 / 0.800 (2-of-2 / 2-of-3 / 3-of-3 / 3-of-4). Rule + escalation 42.2% → 27.5% with 3-of-3. No run met the 2% limit; the fallback took 2-of-2, seed 42; gate FAIL on the false-alarm condition only.
+- **Reward sensitivity (costs ×0.5 / ×1 / ×2):** DQN ahead of rule + escalation (+0.114 / +0.107 / +0.110) and table (+0.038 / +0.052 / +0.057) at every scale; DQN false alarms 20.1% / 5.1% / 2.1%, restored 84.9% / 83.3% / 74.1%.
+- **Test pools, pooled:** DQN 0.719 vs rule + escalation 0.614 (+0.105 [0.096, 0.114]), table +0.029, best fixed +0.012; restored 66.4%, recovered 72.7%. Single 0.825, follower 0.864, combined 0.439 (best fixed 0.535, −0.096), unknown 0.746, clean 0.980. Packet loss back to ≤ clean + 0.05 on 94.6% of the cycles of recoverable episodes.
+- **False alarms (clean, 768):** DQN 37 (4.82%), bound 6.29% → KPI 6 NOT MET, unchanged; rule 205 (26.7%).
+- **Latency:** one forward pass; the CPU is faster than the GPU for a single frame (detector median 2.8 vs 5.5 ms). Cycle median 5.62 ms, p95 24.3 ms (D46: 10.9 / 48.9).
+- **KPIs:** 7 of 8 MET; KPI 6 NOT MET.
+- **Conclusion:** the confirmation length is not what drives the DQN's false alarms (see D49).
+
+### Proposal sources (2026-09-26)
+Every source of the proposal was checked against its full text; sources that could not be read in full, or that did not shape a decision, were removed. Final list (12): Oli & Mahalal 2025, Papathanasiou et al. 2026, Tariq et al. 2026, Liu et al. 2018, Simon & Alouini, Lee et al. 2018, Liu, Ting & Zhou 2008, Mnih et al. 2015, van Hasselt et al. 2016, Richards, Alshiekh et al. 2018, Clopper & Pearson 1934.
+
+### D49 — false alarms, second attempt (code complete)
+Alarm definition ('class' / 'degraded') and training false-switch penalty (20 / 40 / 80) as hyperparameters, γ reopened (0 / 0.5 / 0.9), 3 seeds; evaluation with the standard reward; false-alarm diagnostics per Eb/N0 and trigger; KPI 7 latency class. Pending: MATLAB run (C2, C2e, LAT, KPI, DASH).
+
+### D49 results (2026-09-27)
+One pass, 2 h: C2 (2 alarms × 3 penalties × 3 γ × 3 seeds, 54 runs) with the sensitivity study, C2e, LAT, KPI, DASH. No error.
+- **Alarm 'degraded':** validation return 0.737 vs 0.812 ('class'), restored 68% vs 83%; path loss never counts as degradation (the reference is the clean BER at the receiver's own, attenuated, Eb/N0). Rejected.
+- **False-switch penalty (class, γ = 0):** validation false alarms 5.1% / 5.1% / 4.1% at 20 / 40 / 80, return 0.817 / 0.815 / 0.812. No run of 'class' met 2%; fallback: 'class', penalty 80, γ = 0, seed 43 (2.1%); gate FAIL.
+- **γ:** validation 0.817 / 0.816 / 0.806 (γ = 0 / 0.5 / 0.9, penalty 20); on the test pools γ = 0.9 pooled 0.728 vs 0.719 (γ = 0), follower 0.874 vs 0.849, clean 0 false alarms, but 5–17% false alarms on validation.
+- **Test pools, pooled:** DQN 0.719 vs rule + escalation +0.105 [0.096, 0.114], table +0.028, best fixed +0.012; combined −0.082 vs best fixed.
+- **False alarms:** DQN 37/768 (bound 6.29%), all at 2 dB, all path_loss, none degraded. Rule + escalation 205: 136 'none' with a degraded link (0, 2 and 10 dB), 69 path_loss.
+- **Latency:** median 4.37 ms, p95 20.09 ms (CPU detector 2.1 ms).
+- **KPIs:** 7 of 8 MET; KPI 6 NOT MET.
+- **Sensitivity (seed 43, penalty 80):** DQN ahead of rule + escalation and table at ×0.5 / ×1 / ×2.
+
+### D50 — attenuation as a change of the link (code complete)
+Eb/N0 drop from the episode's reference in `policy_monitor.m`, new state input, alarm 'class_drop' (path_loss only after a ≥ 4 dB drop); grid 2 alarms × 2 penalties × 3 γ × 3 seeds; drop at the first change in the diagnostics. Pending: MATLAB run (C2, C2e, LAT, KPI, DASH).
+
+### D50 results (2026-09-27)
+One pass: C2 (2 alarms × 2 penalties × 3 γ × 3 seeds, 36 runs) with the sensitivity study, C2e, LAT, KPI, DASH. No error.
+- **Validation:** every good run has a floor of 2.1–2.3% false-alarm episodes (11–12 of 512 clean validation episodes); 'class_drop' reaches it at every γ with penalty 80, 'class' only for some seeds. No run met 2%; the fallback took the best return among the fewest false alarms: 'class', penalty 80, γ = 0.5, seed 44 (0.817); gate FAIL.
+- **Test pools, pooled:** DQN 0.722 vs rule + escalation +0.108 [0.099, 0.117], table +0.031, best fixed +0.015; γ = 0 / 0.5 / 0.9 within 0.007. Restored 87.5% of cycles on recoverable single-threat episodes; packet loss back on 95.1%.
+- **False alarms:** DQN 37/768 (bound 6.29%), all at 2 dB, path_loss, not degraded, median Eb/N0 drop 4.2 dB: a real fade of the clean signal in one geometry. γ = 0.9 8/768. Rule + escalation 205 (136 'none' with a degraded link at 0, 2 and 10 dB; 69 path_loss, median drop 4.1 dB).
+- **Latency:** median 4.43 ms, p95 19.41 ms.
+- **KPIs:** 7 of 8 MET; KPI 6 NOT MET.
+
+### D51 — decision layer frozen; KPI 6 on independent geometries (code complete)
+`build_clean_test_pools.m`: clean link on 100 new geometries per Eb/N0 under all configurations; `evaluate_policies.m`: one episode per geometry (600 independent episodes) for KPI 6, the 4-geometry set kept for comparison. Pending: MATLAB run (C1c, C2e, KPI, DASH).
+
+### D51 results (2026-09-27)
+One pass, 64 min: C1c (17 configurations × 6 Eb/N0 × 100 geometries, 63 min), C2e, KPI, DASH. No error. Decision layer and test pools unchanged, so every other number repeats D50.
+- **False alarms, 600 independent clean geometries (KPI 6):** DQN 23/600 episodes (3.83%, two-sided 95% interval 2.4–5.7%), one-sided bound 5.39% → NOT MET against 5% (the bound needs ≤ 20 of 600); per cycle 0.19%. Per Eb/N0 (0–10 dB): 8 / 3 / 8 / 3 / 1 / 0, 19 of 23 at ≤ 4 dB. Class at the first change: path_loss 18 (not degraded, median Eb/N0 drop 4.2 dB), antenna_fault 4 (median drop 7.7 dB), spoofing 1 (degraded). Rule + escalation 218/600 (36.3%, bound 39.7%). On these episodes return DQN 0.964 / rule + escalation 0.932 / oracle 0.983, goodput 1.002 / 0.944 / 1.003.
+- **Against the 4-geometry set:** there 37/768, all from one geometry at 2 dB; here 3/100 at 2 dB and false alarms at every Eb/N0 up to 8 dB. γ = 0.9 had 8/768 there and 27/600 here, γ = 0 30/600: the small set also ranked the discount factors wrongly (the selection used validation only).
+- **Review of the unknown set:** 0.817 in D46, 0.746 in D48, 0.740 now (restored 85.5% → 69.5%). The D48 change that acts on this set is the alarm definition: an 'unknown' class raises the alarm only with degradation (D33). The false-alarm count on the test pools did not change with it (37/768 before and after). The layer stays frozen; the trade-off is reported.
+- **Follow-up in the code (C2e, KPI, DASH rerun, ~2 min):** legends of the evaluation figures drawn without TeX (underscores in configuration names), 'always-on MMSE' in every table, detector accuracy per speed band with its band edges.
+- **Next:** the KPI 6 target goes to the supervisor with these numbers. A larger clean sample is not run now: choosing the sample size after a result near the limit is optional stopping; if the supervisor asks for one, it is a new sample of size fixed in advance, reported next to this one.

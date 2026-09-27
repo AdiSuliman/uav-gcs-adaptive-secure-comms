@@ -3,7 +3,8 @@ function agent = dqn_agent(norm, hidden)
 %   State (policy_state.m): detector class probabilities (9), unknown-threat
 %   flag, log10 BER, SINR, IoT, PLR, degradation vs clean at the estimated
 %   Eb/N0, current configuration (one-hot), cycles since the last change,
-%   confirmed alarm. Output: one Q-value per configuration (policy_actions.m).
+%   confirmed alarm, drop of the Eb/N0 estimate from the episode's reference.
+%   Output: one Q-value per configuration (policy_actions.m).
 %   norm: fields mu, sd (z-score of the state, from rollouts); hidden: layer sizes.
 if nargin < 2, hidden = [256 128]; end
 names = policy_actions();

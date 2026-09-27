@@ -7,7 +7,8 @@ function varargout = link_env(cmd, varargin)
 %   [E, obs] = link_env('reset', PP, K, spec, split, rs)
 %   [E, r, obs, info] = link_env('step', E, PP, K, a)
 %
-%   spec: scn, s (Eb/N0 index), onset, follow, fdelay, unk (1 x NE each), T
+%   spec: scn, s (Eb/N0 index), onset, follow, fdelay, unk (1 x NE each), T;
+%         optional r (1 x NE): sub-run of each episode, drawn at random if absent
 %   split: 1 = train pools, 2 = test pools; rs: RandStream for frame draws
 %
 %   One episode = one seeded sub-run of the pools (one flight geometry: fading,
@@ -31,7 +32,8 @@ function varargout = link_env(cmd, varargin)
 %            0.10/(+6 dB), adaptive combining 2 points (processing, pilots)
 %     switch 5 points per configuration change or channel hop
 %     false  20 points for a change on a healthy link
-%   restored: m <= 2x clean; healthy: unmitigated m <= 2x clean.
+%   restored: m <= 2x clean; restored_plr: packet loss <= clean + 0.05 (D35);
+%   healthy: unmitigated m <= 2x clean.
 %   obs: probs (NE x 9), unknown (maha below threshold, or masked), feat (NE x 9
 %   raw link features), ber (NE x 1)
 switch cmd
@@ -62,7 +64,8 @@ K.runs = PP.runs;                                   % sub-run ids per split
 K.nR = cellfun(@numel, PP.runs);
 nSc = numel(PP.scen); nS = numel(PP.ebno); nRm = max(K.nR);
 K.q = nan(nSc, nS, nA, 2, nRm); K.gput = nan(nSc, nS, nA, 2, nRm);
-K.restored = false(nSc, nS, nA, 2, nRm); K.healthy = false(nSc, nS, 2, nRm);
+K.restored = false(nSc, nS, nA, 2, nRm); K.restored_plr = false(nSc, nS, nA, 2, nRm);
+K.healthy = false(nSc, nS, 2, nRm);
 pc = zeros(1, nS);                                  % clean-link PLR per Eb/N0
 for s = 1:nS, pc(s) = mean(PP.pools{1, s, na, 1}.plr); end
 for sp = 1:2
@@ -83,6 +86,7 @@ for sp = 1:2
                     K.q(sc, s, a, sp, r) = 100 * min(1, max(0, 1 - log(max(m, 1e-9) / bt) / log(bw / bt)));
                     K.gput(sc, s, a, sp, r) = PP.gp(a) * (1 - pl) / max(1 - pc(s), 1e-3);
                     K.restored(sc, s, a, sp, r) = m <= 2 * bc;
+                    K.restored_plr(sc, s, a, sp, r) = pl <= pc(s) + 0.05;
                 end
             end
         end
@@ -100,7 +104,9 @@ E.t = zeros(1, NE);
 E.cfg = K.na * ones(1, NE);
 E.last_switch = -inf(1, NE);
 E.hop_t = -inf(1, NE);
-E.r = randi(rs, K.nR(split), 1, NE);                 % sub-run (geometry) of the episode
+if ~isfield(spec, 'r') || isempty(spec.r)
+    E.r = randi(rs, K.nR(split), 1, NE);             % sub-run (geometry) of the episode
+end
 E.k0 = randi(rs, PP.F_SUB, 1, NE) - 1;               % starting frame inside the sub-run
 E.aoa = nan(NE, 3);
 for i = 1:NE
@@ -129,7 +135,8 @@ idx = sub2ind(size(K.q), sc_eff, E.s, cfg_eff, sp, E.r);
 healthy = K.healthy(sub2ind(size(K.healthy), sc_eff, E.s, sp, E.r));
 q = K.q(idx);
 r = (q - K.cost(a) - K.SW * (changed | hop) - K.FA * (changed & healthy)) / 100;
-info = struct('q', q, 'restored', K.restored(idx), 'gput', K.gput(idx), 'changed', changed | hop, ...
+info = struct('q', q, 'restored', K.restored(idx), 'restored_plr', K.restored_plr(idx), 'gput', K.gput(idx), ...
+    'changed', changed | hop, ...
     'false_switch', changed & healthy, 'healthy', healthy, 'sc_eff', sc_eff, 'cfg_eff', cfg_eff, ...
     'post', E.t >= E.onset);
 end

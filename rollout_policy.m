@@ -8,18 +8,24 @@ function R = rollout_policy(kind, PP, K, spec, split, agent, opt, seed)
 %   seed   frame-draw seed: the same seed gives every policy the same draws
 %          wherever their configurations coincide
 %   R      per episode: ret (mean reward per cycle), q_post, restored_post,
+%          plr_ok_post (cycles with packet loss <= clean + 0.05),
 %          gput_post (normalized goodput after onset), switches, false_sw,
 %          t_rec (cycles from onset until restored for 5 consecutive cycles),
 %          esc (escalations), aoa (3 x NE, interferer directions of the
 %          episode's sub-run), cfg_final (configuration at the end), r
-%          (sub-run index); cfg_trace (T x NE)
+%          (sub-run index); cfg_trace (T x NE); at the first change of the
+%          episode: fc_t (cycle, 0 = none), fc_cls (detected class, index into
+%          PP.classes, numel + 1 = unknown), fc_deg (link degraded), fc_drop
+%          (drop of the Eb/N0 estimate from the episode's reference, dB)
 if nargin < 7 || isempty(opt), opt = struct(); end
 rs = RandStream('mt19937ar', 'Seed', seed);
 opt.rs = RandStream('mt19937ar', 'Seed', seed + 1);
 [E, obs] = link_env('reset', PP, K, spec, split, rs);
 NE = E.NE; T = spec.T;
 mem = [];
-tr = struct('r', zeros(T, NE), 'q', zeros(T, NE), 'rest', false(T, NE), 'gput', zeros(T, NE), ...
+cls_list = [cellstr(string(PP.classes(:)')), {'unknown'}];
+fc = struct('t', zeros(1, NE), 'cls', zeros(1, NE), 'deg', false(1, NE), 'drop', nan(1, NE));
+tr = struct('r', zeros(T, NE), 'q', zeros(T, NE), 'rest', false(T, NE), 'rplr', false(T, NE), 'gput', zeros(T, NE), ...
     'ch', false(T, NE), 'fs', false(T, NE), 'post', false(T, NE), 'esc', false(T, NE), 'cfg', zeros(T, NE));
 for t = 1:T
     if strcmp(kind, 'oracle')
@@ -29,13 +35,22 @@ for t = 1:T
         tr.esc(t, :) = dinf.escalated;
     end
     [E, r, obs, info] = link_env('step', E, PP, K, a);
+    nw = info.changed & fc.t == 0;
+    if any(nw) && ~strcmp(kind, 'oracle')
+        fc.t(nw) = t;
+        fc.cls(nw) = cellfun(@(c) find(strcmp(cls_list, c), 1), dinf.cls(nw));
+        fc.deg(nw) = dinf.degraded(nw);
+        fc.drop(nw) = dinf.drop(nw);
+    end
     tr.r(t, :) = r; tr.q(t, :) = info.q; tr.rest(t, :) = info.restored; tr.gput(t, :) = info.gput;
+    tr.rplr(t, :) = info.restored_plr;
     tr.ch(t, :) = info.changed; tr.fs(t, :) = info.false_switch; tr.post(t, :) = info.post; tr.cfg(t, :) = E.cfg;
 end
 R.ret = mean(tr.r, 1);
 post = tr.post;
 R.q_post = sum(tr.q .* post, 1) ./ max(sum(post, 1), 1);
 R.restored_post = sum(tr.rest .* post, 1) ./ max(sum(post, 1), 1);
+R.plr_ok_post = sum(tr.rplr .* post, 1) ./ max(sum(post, 1), 1);
 R.gput_post = sum(tr.gput .* post, 1) ./ max(sum(post, 1), 1);
 R.switches = sum(tr.ch, 1);
 R.false_sw = sum(tr.fs, 1);
@@ -54,6 +69,7 @@ R.aoa = E.aoa';
 R.cfg_final = E.cfg;
 R.r = E.r;
 R.cfg_trace = tr.cfg;
+R.fc_t = fc.t; R.fc_cls = fc.cls; R.fc_deg = fc.deg; R.fc_drop = fc.drop;
 end
 
 function a = oracle_action(E, K)

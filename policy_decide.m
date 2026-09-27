@@ -1,5 +1,5 @@
 function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
-%POLICY_DECIDE  One decision cycle of every decision-layer policy (D44, D45),
+%POLICY_DECIDE  One decision cycle of every decision-layer policy (D44-D48),
 %   vectorized over episodes. Used by training, evaluation and deployment.
 %
 %   kind   'dqn' | 'dqn_esc' | 'rule' | 'rule_esc' | 'table' | 'table_esc' |
@@ -17,8 +17,9 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %   table     detected class -> the configuration with the best mean reward for
 %             that threat on the train pools (evaluate_policies.m); a 'none' or
 %             'unknown' class on a degraded link takes table_unknown
-%   rule and table commit a proposal after DWELL = 2 consecutive cycles and not
-%   within HOLD = 3 cycles of the last change
+%   rule and table commit a proposal after DWELL = 2 consecutive cycles, not
+%   within HOLD = 3 cycles of the last change, and only on a confirmed alarm
+%   (the same confirmation as the DQN shield, D48)
 %   dqn       argmax of the Q-network over the configurations allowed by the
 %             shield (policy_mask.m); switching costs are part of its reward
 %   *_esc     escalation: if the link stays degraded for ESC = 3 cycles in the
@@ -27,7 +28,7 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %             rule and table: fixed ladder)
 %   random, fixed: reference policies, no monitor gating
 %
-%   info: q (Q-values, dqn kinds), cls, degraded, confirmed, escalated, ber_avg
+%   info: q (Q-values, dqn kinds), cls, degraded, confirmed, escalated, ber_avg, drop
 if nargin < 7, opt = struct(); end
 NE = numel(cfg); A = PP.actions; nA = numel(A);
 na = find(strcmp(A, 'no_action'));
@@ -38,7 +39,7 @@ base = erase(kind, '_esc');
 q = [];
 switch base
     case 'dqn'
-        st = policy_state(obs, cfg, mem.since, M.ber_avg, M.confirmed, PP);
+        st = policy_state(obs, cfg, mem.since, M.ber_avg, M.confirmed, PP, M.drop);
         q = double(gather(extractdata(predict(agent.qNetwork, dlarray(single(st), 'CB')))));
         q(~policy_mask(cfg, M.confirmed, nA, na)) = -inf;
         [~, a] = max(q, [], 1);
@@ -54,7 +55,7 @@ switch base
                 mem.cand(i) = 0; mem.cand_n(i) = 0;
             else
                 if p == mem.cand(i), mem.cand_n(i) = mem.cand_n(i) + 1; else, mem.cand(i) = p; mem.cand_n(i) = 1; end
-                if mem.cand_n(i) >= DWELL && mem.since(i) >= HOLD
+                if mem.cand_n(i) >= DWELL && mem.since(i) >= HOLD && M.confirmed(i)
                     a(i) = p; mem.cand(i) = 0; mem.cand_n(i) = 0;
                 end
             end
@@ -90,7 +91,7 @@ end
 ch = a ~= cfg;
 mem.since(ch) = 0; mem.since(~ch) = mem.since(~ch) + 1;
 info = struct('q', q, 'cls', {M.cls}, 'degraded', M.degraded, 'confirmed', M.confirmed, ...
-    'escalated', escalated, 'ber_avg', M.ber_avg');
+    'escalated', escalated, 'ber_avg', M.ber_avg', 'drop', M.drop);
 end
 
 function p = table_action(cls, degraded, PP, opt, na)

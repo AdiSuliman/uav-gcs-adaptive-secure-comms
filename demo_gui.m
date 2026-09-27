@@ -6,7 +6,7 @@ function demo_gui
 %                      -> real mitigation sim) for any threat x Eb/N0 x UAV speed x
 %                      severity. Every frame of the run passes through the detector,
 %                      the Mahalanobis unknown-threat score and policy_decide.m (link
-%                      monitor, 2-cycle alarm confirmation, shield), exactly as in the
+%                      monitor, alarm confirmation, shield), exactly as in the
 %                      evaluation; the configuration at the end of the run is applied.
 %                      Shows detection (with UNKNOWN-threat handling), the DQN
 %                      decision side by side with the rule-based policy, the BER /
@@ -49,7 +49,7 @@ close all; clc;
 tBoot = tic;
 fprintf('Loading trained models and parameters...\n');
 D = load('data/trained_detector.mat', 'net', 'classes', 'ood');
-Q = load('data/trained_dqn.mat', 'agent');
+Q = load('data/trained_dqn.mat', 'agent', 'confirm', 'alarm_mode');
 [featMean, featStd] = loadNormStats();
 p0 = loadInitialParams();
 fprintf('  models + parameters loaded (%.1f s)\n', toc(tBoot));
@@ -82,6 +82,8 @@ Tood = ood_thresholds(0.95);                   % D44: Mahalanobis unknown-threat
 env.maha_val = Tood.maha_val;
 env.PP = struct('actions', {env.action_names}, 'classes', {env.class_list(:)'}, 'sps', p0.sps, ...
     'bps', p0.bits_per_symbol, 'maha_thr', Tood.maha);
+if isfield(Q, 'confirm'), env.PP.confirm = Q.confirm; end
+if isfield(Q, 'alarm_mode'), env.PP.alarm_mode = Q.alarm_mode; end
 env.baseline = struct('jsr_db',p0.jsr_db,'path_loss_db',p0.path_loss_db, ...
     'fault_atten_db',p0.fault_atten_db,'spoof_sir_db',p0.spoof_sir_db, ...
     'benign_int_db',p0.benign_int_db);
@@ -398,7 +400,8 @@ function ui = buildEpisodeTab(tab, env, c)
 
     epHystChk = place(uicheckbox(gl, 'Text', 'Escalation when the link stays degraded', 'Value', false, ...
         'FontColor', c.txt, 'FontName', c.font), 9, [1 2]);
-    epDwellSpin = place(mkLabel(gl, 'alarm confirmed after 2 cycles', c, 'FontColor', c.mut, 'FontSize', 10), 10, 1);
+    epDwellSpin = place(mkLabel(gl, sprintf('alarm confirmation %d-of-%d', confirmOf(env)), c, 'FontColor', c.mut, ...
+        'FontSize', 10), 10, 1);
     epHoldSpin  = place(mkLabel(gl, 'rule: dwell 2, hold 3', c, 'FontColor', c.mut, 'FontSize', 10), 10, 2);
 
     place(mkLabel(gl, 'Playback', c, 'FontColor', c.mut), 11, 1);
@@ -900,8 +903,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
         Fr(i, :) = link_features(Mrun, vf(i), env.temporal_window, p.frame_duration);
     end
     Fn = ((Fr - env.feat_mean) ./ env.feat_std)';
-    probsAll = cnn_scores(env.cnn_net, X, Fn);
-    mahaAll = ood_scores(env.cnn_net, env.ood, X, Fn);
+    [probsAll, mahaAll] = detect_scores(env.cnn_net, env.ood, X, Fn);
     PPr = env.PP; PPr.maha_thr = mahaThreshold(env, thr_pct);
     cfgD = env.na; cfgR = env.na; memD = []; memR = []; dqn_ms = NaN;
     for i = 1:nv
@@ -914,7 +916,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     end
     t1 = tic;                                                   % one detection cycle as deployed
     Xl = X(:, :, 1, nv);
-    cnn_scores(env.cnn_net, Xl, Fn(:, nv)); ood_scores(env.cnn_net, env.ood, Xl, Fn(:, nv));
+    detect_scores(env.cnn_net, env.ood, Xl, Fn(:, nv));
     if canUseGPU, wait(gpuDevice); end
     cnn_ms = toc(t1) * 1000;
     total_ms = cnn_ms + dqn_ms;
@@ -927,7 +929,8 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     qv = dD.q(:); qv(~isfinite(qv)) = NaN;
     aidx = cfgD; action_name = env.action_names{aidx};
     ridx = cfgR; rule_action = env.action_names{ridx};
-    appLog(fig, sprintf('Decision layer over the %d frames of the run (alarm confirmed after 2 cycles, shield, hysteresis)', nv));
+    appLog(fig, sprintf('Decision layer over the %d frames of the run (alarm confirmation %d-of-%d, shield, hysteresis)', ...
+        nv, confirmOf(env)));
 
     %% ---- 3. show detection + decision ----
     correct = strcmp(cnn_class, threat);
@@ -1084,6 +1087,11 @@ function R = applyMitigation(env, p, threat, action_name, snr_dB) %#ok<INUSL>
     [iqf, berf, rssif, ~, nf2] = extract_closed_loop_frames(out2, p2, env.delay_bits);
     i2 = find(~isnan(berf), 1, 'last'); if isempty(i2), i2 = nf2; end
     R = struct('iq', iqf{i2}, 'ber_f', berf, 'rssi_f', rssif, 'ber_mean', mean(berf, 'omitnan'));
+end
+
+function cf = confirmOf(env)
+    % Alarm confirmation m-of-n of the decision layer (policy_monitor.m).
+    cf = [2 2]; if isfield(env.PP, 'confirm'), cf = env.PP.confirm; end
 end
 
 function r = survRef(surv, k)
@@ -1709,8 +1717,8 @@ function runEpisode(btn, ~)
 
     %% ---- summary ----
     lines = {sprintf('%s @ %g dB, %s, %.1f km/h | seed %d | %d/%d cycles (%.1f s)', niceName(threat), ebno, ...
-        sevTxt, v_kmh, seed, kDone, N, toc(tLoop)), sprintf('clean BER %.2e | alarm confirmed after 2 cycles, rule dwell 2 / hold 3, escalation %s', ...
-        bc, ternaryStr(esc, 'on', 'off'))};
+        sevTxt, v_kmh, seed, kDone, N, toc(tLoop)), sprintf('clean BER %.2e | alarm confirmation %d-of-%d, rule dwell 2 / hold 3, escalation %s', ...
+        bc, confirmOf(env), ternaryStr(esc, 'on', 'off'))};
     rows = {};
     for i = 1:nP
         S = epSummary(T, i, N_PRE, kDone, bc, truthIdx, gp_act, env.action_names);
