@@ -25,7 +25,7 @@ Last updated: 2026-09-27
 | C2e | Every policy on the test pools: single, follower, combined, unknown, clean; false alarms on 600 independent clean geometries | ✅ Done | D44–D46, D51 |
 | SURV | Survivability maps A/B, two geometries (deliverable 8) | ✅ Done, 86% / 94% | D30, D46 |
 | LAT + KPI + DASH | Latency per cycle, eight proposal KPIs, dashboard (deliverable 1) | ✅ Done, 8/8 met (D52) | D46, D48, D51, D52 |
-| GUI | Operator console on the current decision layer | ⏳ Code migrated, live check pending | D24, D26, D46 |
+| GUI | Operator console on the current decision layer | ⏳ Live tab checked (D53 lead-in, D54 hover help); episode check pending | D24, D26, D46, D53, D54 |
 | Fixes | Latency tail; false-alarm bound (KPI 6) | ✅ latency p95 48.9 → 19.4 ms / ✅ KPI 6: 1.5% over 600 independent geometries, bound 2.60% (D52) | D48–D51 |
 | Layout | Code into folders by stage | ⏳ End of project | D47 |
 | D1 | Interim report | ⏳ Drafted, results to sync with the final run | — |
@@ -38,7 +38,7 @@ Last updated: 2026-09-27
 ## Remaining work
 
 1. **Decision layer closed (D52):** KPI 6 met (9/600, bound 2.60%) with the path_loss drop threshold chosen from the train pools (6.5 dB) and the alarm selected on an independent clean validation set. Remaining false alarms are antenna_fault reads on deep single-branch fades; documented as a limitation.
-2. **Operator console:** live check of the migrated live tab and continuous episode. 'class' was selected, so the live tab needs no clean lead-in.
+2. **Operator console:** live tab checked and re-checked 2026-09-27; the D53 clean lead-in fixed the unmitigated path_loss, and D54 added hover help on every setting and leaner video capture. Continuous-episode check pending.
 3. **Reports and defense:** interim report numbers, final report, slides and poster from the same figures.
 4. **Repository:** code into folders by stage, final README.
 
