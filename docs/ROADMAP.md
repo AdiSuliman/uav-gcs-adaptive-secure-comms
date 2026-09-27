@@ -25,7 +25,7 @@ Last updated: 2026-09-27
 | C2e | Every policy on the test pools: single, follower, combined, unknown, clean; false alarms on 600 independent clean geometries | ✅ Done | D44–D46, D51 |
 | SURV | Survivability maps A/B, two geometries (deliverable 8) | ✅ Done, 86% / 94% | D30, D46 |
 | LAT + KPI + DASH | Latency per cycle, eight proposal KPIs, dashboard (deliverable 1) | ✅ Done, 8/8 met (D52) | D46, D48, D51, D52 |
-| GUI | Operator console on the current decision layer | ⏳ Live tab checked (D53 lead-in, D54 hover help); episode check pending | D24, D26, D46, D53, D54 |
+| GUI | Operator console on the current decision layer; 3D episode view | ⏳ Live tab checked (D53 lead-in, D54 hover help); episode tab and 3D view check pending | D24, D26, D46, D53, D54, D56 |
 | Fixes | Latency tail; false-alarm bound (KPI 6) | ✅ latency p95 48.9 → 19.4 ms / ✅ KPI 6: 1.5% over 600 independent geometries, bound 2.60% (D52) | D48–D51 |
 | Layout | Code into folders by stage | ⏳ End of project | D47 |
 | D1 | Interim report | ⏳ Drafted, results to sync with the final run | — |

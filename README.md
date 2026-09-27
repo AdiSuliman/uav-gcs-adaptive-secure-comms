@@ -23,6 +23,7 @@ A closed-loop simulation of the command uplink from a ground control station (GC
 ```
 ├── main.m                   # pipeline entry point: RUN flags, phases A to DASH, logs to logs/
 ├── demo_gui.m               # operator console: live loop, continuous episode, KPIs, survivability map
+├── viz3d.m                  # 3D replay of a recorded episode: geometry, link, receive pattern
 ├── *.m                      # pipeline code, by stage:
 │                            #   link       init_params, build_threat_model, link_seed, interferer_aoa, validate_phy,
 │                            #              apply_countermeasure, extract_closed_loop_frames
@@ -159,6 +160,7 @@ Full tables: `results/kpi_summary.txt`, `results/policy_evaluation.txt`, `result
 - **KPI & results:** KPI cards and plots from `results/`.
 - **Survivability map:** Map A / B per threat and geometry, with the last live run marked.
 - **Session log:** run history, export to CSV / MAT.
+- **3D view** (`viz3d.m`, button 3D VIEW after an episode, or `viz3d` for the newest record): GCS, UAV with its two antennas, the interferer in the direction of the episode's geometry, the link coloured by the BER of each cycle, and the receive pattern of the array (MRC toward the GCS, MMSE with its null toward the interferer); playback per cycle, policy switch, camera presets, MP4 recording. Not to scale: directions only.
 
 The file has no nested functions (D24): static state lives in `fig.UserData`, changing state in appdata; `params.mat` is restored after every run.
 
@@ -188,6 +190,7 @@ The file has no nested functions (D24): static state lives in `fig.UserData`, ch
 - **D48–D50** false alarms: alarm definition, M-of-N confirmation, training false-switch penalty and Eb/N0 drop, chosen on validation; one forward pass for the detector
 - **D51** KPI 6 on 600 independent clean geometries
 - **D52** path_loss alarm threshold chosen from the train pools; alarm selected on an independent clean validation set
+- **D53–D56** operator console: clean lead-in, hover help, operator language, 3D episode view
 
 ---
 

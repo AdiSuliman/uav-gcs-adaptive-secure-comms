@@ -173,6 +173,7 @@ ui.epRunBtn.ButtonPushedFcn      = @runEpisode;
 ui.epStopBtn.ButtonPushedFcn     = @stopEpisode;
 ui.epHystChk.ValueChangedFcn     = @epHystChanged;
 ui.epExportBtn.ButtonPushedFcn   = @exportEpisode;
+ui.ep3dBtn.ButtonPushedFcn       = @openEpisode3d;
 fig.CloseRequestFcn              = @closeApp;
 
 speedChanged(ui.speedSpin, []);
@@ -520,7 +521,12 @@ function ui = buildEpisodeTab(tab, env, c)
     epStopBtn = place(uibutton(gl, 'Text', 'STOP', 'FontSize', 14, 'FontWeight', 'bold', ...
         'BackgroundColor', c.red, 'FontColor', 'white', 'Enable', 'off', 'FontName', c.font), 13, [3 4]);
     epExportBtn = place(uibutton(gl, 'Text', 'EXPORT SCREEN (PNG)', 'FontWeight', 'bold', 'FontName', c.font, ...
-        'BackgroundColor', c.accent, 'FontColor', [0.03 0.06 0.12], 'Enable', 'off'), 14, [1 4]);
+        'BackgroundColor', c.accent, 'FontColor', [0.03 0.06 0.12], 'Enable', 'off'), 14, [1 2]);
+    ep3dBtn = place(uibutton(gl, 'Text', '3D VIEW', 'FontWeight', 'bold', 'FontName', c.font, ...
+        'BackgroundColor', c.cyan, 'FontColor', [0.03 0.06 0.12], 'Enable', 'off', ...
+        'Tooltip', {'Opens the last episode in the 3D view (viz3d.m): the UAV, the GCS, the', ...
+        'interferer in its real direction, the link and the receive pattern of the', ...
+        'two UAV antennas, cycle by cycle.'}), 14, [3 4]);
     epStatus = place(uitextarea(gl, 'Value', {'Frame pools are built per scenario on the first run', ...
         '(10 Simulink runs, about a minute) and reused afterwards.'}, 'Editable', 'off', ...
         'FontName', c.mono, 'FontSize', 10, 'BackgroundColor', c.termBg, 'FontColor', c.txt, ...
@@ -539,7 +545,7 @@ function ui = buildEpisodeTab(tab, env, c)
     ui = struct('epThreatDD',epThreatDD,'epSnrDD',epSnrDD,'epSevDD',epSevDD,'epSpeedSpin',epSpeedSpin, ...
         'epPolicyDD',epPolicyDD,'epPreSpin',epPreSpin,'epPostSpin',epPostSpin,'epHystChk',epHystChk, ...
         'epDwellSpin',epDwellSpin,'epHoldSpin',epHoldSpin,'epPaceDD',epPaceDD,'epSeedFld',epSeedFld, ...
-        'epRunBtn',epRunBtn,'epStopBtn',epStopBtn,'epExportBtn',epExportBtn,'epStatus',epStatus, ...
+        'epRunBtn',epRunBtn,'epStopBtn',epStopBtn,'epExportBtn',epExportBtn,'ep3dBtn',ep3dBtn,'epStatus',epStatus, ...
         'epBerAx',epBerAx,'epDetAx',epDetAx,'epActAx',epActAx,'epCycleLbl',epCycleLbl);
 end
 
@@ -1885,7 +1891,7 @@ function runEpisode(btn, ~)
     rsE = RandStream('mt19937ar', 'Seed', seed);               % same sub-run and frame positions for every policy
     rr = randi(rsE, 2); k0 = randi(rsE, 20) - 1;
     T = struct('ber', nan(nP, N), 'det', nan(nP, N), 'ok', false(nP, N), 'mit', false(nP, N), 'conf', nan(nP, N), ...
-        'prop', nan(nP, N), 'cfg', nan(nP, N), 'sw', false(nP, N));
+        'prop', nan(nP, N), 'cfg', nan(nP, N), 'sw', false(nP, N), 'unk', false(nP, N), 'q', nan(nP, N, nA));
     cls_idx = @(cl) find(strcmp(env.class_list, cl), 1);
     truthIdx = [repmat(cls_idx('none'), 1, N_PRE), repmat(cls_idx(threat), 1, N_POST)];
     H = epInitPlots(fig, N_PRE, N_POST, bc, truthIdx, policies);
@@ -1904,6 +1910,8 @@ function runEpisode(btn, ~)
             [Ep{i}, info] = episode_cycle(Ep{i}, k, fr, ctx{i});
             T.ber(i, k) = fr.ber; T.det(i, k) = cls_idx(info.cls); T.ok(i, k) = T.det(i, k) == truthIdx(k);
             T.conf(i, k) = info.conf; T.prop(i, k) = info.prop; T.cfg(i, k) = info.cfg; T.sw(i, k) = info.switched;
+            T.unk(i, k) = info.unknown;
+            if numel(info.qv) == nA, T.q(i, k, :) = info.qv; end
             T.mit(i, k) = ~T.ok(i, k) && onset && info.cfg ~= na && strcmp(info.cls, 'none');   % countermeasure active, link looks clean
         end
         kDone = k;
@@ -1950,6 +1958,56 @@ function runEpisode(btn, ~)
         appLog(fig, ['Episode trace saved to ' fn]);
         setappdata(fig, 'epLastFile', fn);
         ui.epExportBtn.Enable = 'on';
+        ep3d = episodeRecord(env, p, T, kDone, threat, ebno, sevLevel, sevTxt, v_kmh, seed, rr, ...
+            N_PRE, policies, truthIdx, bc, gp_act, esc);
+        fm = strrep(fn, '.csv', '.mat');
+        save(fm, 'ep3d');
+        setappdata(fig, 'epLastMat', fm);
+        ui.ep3dBtn.Enable = 'on';
+        appLog(fig, ['Episode record for the 3D view saved to ' fm]);
+    end
+end
+
+function ep3d = episodeRecord(env, p, T, kDone, threat, ebno, sevLevel, sevTxt, v_kmh, seed, rr, ...
+        N_PRE, policies, truthIdx, bc, gp_act, esc)
+    % Everything viz3d.m needs to replay the episode: the trace of every policy and
+    % the flight geometry of the sub-run it used (seed -> interferer directions).
+    seedGeom = 500000 + round(100 * ebno) * 1000 + round(10 * v_kmh) + rr;   % as in epPools / epBuildPool
+    aoaFixed = fieldOr(p, 'int_aoa_deg', [40 -55 70]);
+    if fieldOr(p, 'int_aoa_random', false)
+        aoa = interferer_aoa(seedGeom, fieldOr(p, 'int_aoa_range_deg', [-90 90]), numel(aoaFixed));
+    else
+        aoa = aoaFixed(:)';
+    end
+    f = {'ber', 'det', 'conf', 'prop', 'cfg', 'sw', 'unk'};
+    for j = 1:numel(f), T.(f{j}) = T.(f{j})(:, 1:kDone); end
+    T.q = T.q(:, 1:kDone, :);
+    sev = struct('jsr_db', p.jsr_db, 'path_loss_db', p.path_loss_db, 'spoof_sir_db', p.spoof_sir_db, ...
+        'benign_int_db', p.benign_int_db, 'fault_duty', p.fault_duty);
+    ep3d = struct('version', 1, 'created', datestr(now), 'threat', threat, 'ebno', ebno, ...
+        'sev_level', sevLevel, 'sev_txt', sevTxt, 'sev', sev, 'v_kmh', v_kmh, 'fd_hz', p.fd_max, ...
+        'seed', seed, 'seed_geom', seedGeom, 'int_aoa_deg', aoa, 'gcs_aoa_deg', fieldOr(p, 'gcs_aoa_deg', 0), ...
+        'n_rx', fieldOr(p, 'n_rx', 2), 'ant_spacing_wl', fieldOr(p, 'ant_spacing_wl', 0.5), 'fc_hz', p.carrier_freq, ...
+        'frame_s', p.frame_duration, 'n_pre', N_PRE, 'n', kDone, 'policies', {policies}, 'escalation', esc, ...
+        'classes', {env.class_list(:)'}, 'actions', {env.action_names(:)'}, 'truth', truthIdx(1:kDone), ...
+        'ber_clean', bc, 'goodput', gp_act, 'T', T);
+end
+
+function v = fieldOr(s, name, v)
+    if isfield(s, name) && ~isempty(s.(name)), v = s.(name); end
+end
+
+function openEpisode3d(btn, ~)
+    fig = ancestor(btn, 'figure');
+    fm = getappdata(fig, 'epLastMat');
+    if isempty(fm) || ~exist(fm, 'file')
+        appLog(fig, '3D view: no episode record yet. Run an episode first.');
+        return;
+    end
+    try
+        viz3d(fm);
+    catch ME
+        appLog(fig, ['3D view failed: ' ME.message]);
     end
 end
 
