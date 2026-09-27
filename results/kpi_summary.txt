@@ -1,5 +1,5 @@
 === PROPOSAL KPI SUMMARY (section 5) ===
-Generated: 27-Sep-2026 15:11:44
+Generated: 27-Sep-2026 16:42:03
 
 KPI 1  Detection vs SNR             [MET]    macro-F1 96.28% from 0 dB   (target: >= 90% above a threshold)
         accuracy 96.28%, macro-F1 96.28% [94.88, 97.37] (bootstrap over sub-runs)

@@ -1,5 +1,5 @@
 === DECISION-LAYER EVALUATION, TEST POOLS (D44-D51) ===
-Generated: 27-Sep-2026 15:11:08 | 30-cycle episodes, onset at cycle 3-10 | test sub-runs (geometries) never used in training | interferer AoA random per sub-run
+Generated: 27-Sep-2026 16:41:58 | 30-cycle episodes, onset at cycle 3-10 | test sub-runs (geometries) never used in training | interferer AoA random per sub-run
 return = mean reward per cycle (1 = restored at no cost); restored / goodput / recovery after onset;
 recovered = restored for 5 consecutive cycles; PLR ok = cycles with packet loss <= clean + 0.05; false sw = switches on a healthy link, whole episode.
 Selected DQN: gamma 0.50, training false-switch penalty 80; alarm 'class_drop (path_loss after a drop >= 6.5 dB)', confirmation 2-of-2 for every monitored policy (validation, train pools). Training combinations: reactive_jamming+path_loss, jamming+antenna_fault, spoofing+sweeping_jammer, benign_interference+noise_burst

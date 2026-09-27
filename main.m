@@ -97,15 +97,15 @@ RUN.extract_spectrograms        = false;    % A6  : spectrograms + 9 link featur
 % ---- Phase B: detection (CNN baseline) ----
 RUN.prepare_data                = false;    % B1  : split by sub-run 60/20/20 (~1min, D42)
 RUN.train_detector              = false;    % B2  : train CNN+scalar hybrid (~4min); a new detector invalidates the pools
-RUN.eval_detector               = false;    % B3  : test eval + confusion/accuracy-vs-SNR + bootstrap CIs (~2min, D35)
+RUN.eval_detector               = true;    % B3  : test eval + confusion/accuracy-vs-SNR + bootstrap CIs (~2min, D35)
 RUN.eval_unseen_snr             = false;   % B4  : detector at Eb/N0 never seen in training, 1,3,5,7,9 dB (~25min, D34)
 
 
 % ---- Phase C: decision layer ----
 RUN.build_policy_pools          = false;    % C1p : frame pools, every scenario x configuration x Eb/N0 x geometry (D44-D46)
-RUN.build_clean_test_pools      = true;    % C1c : clean link on new geometries: validation set (~65 min, D52) and test set for KPI 6 (skips when up to date, D51)
-RUN.choose_drop_threshold       = true;    % C1d : path_loss alarm threshold from the train pools (< 1 min, D52)
-RUN.train_dqn                   = true;    % C2  : Double DQN + shield, alarm x gamma x seeds, selection on validation (D44-D52, ~15 min at the D52 grid)
+RUN.build_clean_test_pools      = false;    % C1c : clean link on new geometries: validation set (~65 min, D52) and test set for KPI 6 (skips when up to date, D51)
+RUN.choose_drop_threshold       = false;    % C1d : path_loss alarm threshold from the train pools (< 1 min, D52)
+RUN.train_dqn                   = false;    % C2  : Double DQN + shield, alarm x gamma x seeds, selection on validation (D44-D52, ~15 min at the D52 grid)
 RUN.evaluate_policies           = true;    % C2e : every policy on the test pools: single, follower, combined, unknown, clean (D44-D46)
 RUN.eval_ood_detection          = false;    % OOD : leave-one-threat-out unknown-threat detection, retrains the detector 8 times (D32, D42)
 
@@ -113,7 +113,7 @@ RUN.eval_ood_detection          = false;    % OOD : leave-one-threat-out unknown
 RUN.map_survivability           = false;    % SURV: Map A/B per threat, severity, Eb/N0 and geometry (D30, D46)
 
 % ---- Phase KPI: latency and proposal KPIs (section 5) ----
-RUN.measure_latency             = true;    % LAT : decision latency per cycle, median / p95 (D46)
+RUN.measure_latency             = false;    % LAT : decision latency per cycle, median / p95 (D46)
 RUN.measure_all_kpis            = true;    % KPI : the 8 proposal KPIs from the result files (D46)
 
 % ---- Phase DASH: results dashboard (deliverable 1) ----
