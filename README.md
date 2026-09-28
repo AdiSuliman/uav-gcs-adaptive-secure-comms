@@ -23,7 +23,7 @@ A closed-loop simulation of the command uplink from a ground control station (GC
 ```
 ├── main.m                   # pipeline entry point: RUN flags, phases A to DASH, logs to logs/
 ├── demo_gui.m               # operator console: live loop, continuous episode, KPIs, survivability map
-├── viz3d.m                  # 3D replay of a recorded episode: geometry, link, receive pattern
+├── viz3d/                   # 3D view in Unreal Engine (D57, D58): live console, MP4 render, replay
 ├── *.m                      # pipeline code, by stage:
 │                            #   link       init_params, build_threat_model, link_seed, interferer_aoa, validate_phy,
 │                            #              apply_countermeasure, extract_closed_loop_frames
@@ -36,7 +36,7 @@ A closed-loop simulation of the command uplink from a ground control station (GC
 │                            #   evaluation map_survivability_boundary, measure_latency, measure_all_kpis,
 │                            #              build_kpi_dashboard, stats_ci
 ├── docs/
-│   ├── DECISIONS.md         # decision record D1–D51 (why every design choice was made)
+│   ├── DECISIONS.md         # decision record D1–D58 (why every design choice was made)
 │   ├── PROJECT_LOG.md       # execution log: runs, results, fixes
 │   └── ROADMAP.md           # plan and status by phase
 ├── diagnostics/             # one-off investigation scripts
@@ -55,7 +55,8 @@ The code stays in the root while the project changes; it moves into folders by s
 1. MATLAB R2026a with Simulink, Communications, DSP System and Deep Learning toolboxes (Statistics for the isolation forest).
 2. In the project folder (cmd or Git Bash): `matlab -batch "main"`. The flags at the top of `main.m` choose the stages; presets for a full run, a decision-layer rerun and a results-only refresh are in the file.
 3. Operator console: open MATLAB in the project folder and run `demo_gui` (after `main` has produced `data/` and `results/`), from a fresh session.
-4. Every run writes its full console output to `logs/run_*.txt`.
+4. 3D view (needs Simulink 3D Animation and UAV Toolbox): `addpath('viz3d'); v3d_live` for the live console, `addpath('viz3d'); v3d_videos` for the defense videos (see *3D view* below).
+5. Every run writes its full console output to `logs/run_*.txt`.
 
 | Stage | What it does | Time (RTX 4070) |
 |---|---|---|
@@ -160,9 +161,35 @@ Full tables: `results/kpi_summary.txt`, `results/policy_evaluation.txt`, `result
 - **KPI & results:** KPI cards and plots from `results/`.
 - **Survivability map:** Map A / B per threat and geometry, with the last live run marked.
 - **Session log:** run history, export to CSV / MAT.
-- **3D view** (`viz3d.m`, button 3D VIEW after an episode, or `viz3d` for the newest record): GCS, UAV with its two antennas, the interferer in the direction of the episode's geometry, the link coloured by the BER of each cycle, and the receive pattern of the array (MRC toward the GCS, MMSE with its null toward the interferer); playback per cycle, policy switch, camera presets, MP4 recording. Not to scale: directions only.
+- **3D VIEW** (continuous episode tab): replays the last episode in the Unreal 3D view (`v3d_live('replay', file)`).
 
 The file has no nested functions (D24): static state lives in `fig.UserData`, changing state in appdata; `params.mat` is restored after every run.
+
+---
+
+## 3D view (`viz3d/`, D57–D58)
+
+An Unreal Engine view of the closed loop, driven from MATLAB (Simulink 3D Animation). Two identical arenas side by side: the DQN agent (left) and a comparison policy (right), on the same flight geometry and the same measured frames.
+
+| Entry point | What it does |
+|---|---|
+| `v3d_live` | Live operations console. Inject any of the 12 test threats (8 single, 4 combined) at any time, a jammer that follows channel hops, or a threat whose class is hidden (unknown threat); pick Eb/N0 and test geometry; compare with rules + escalation, no response, or **your own responses** (operator vs AI); play the defense scenarios; auto director or fixed cameras; save a picture, save the session, render it to MP4. Keys: Space pause, I inject, O off, N new, 1–8 camera. The Unreal window is a free camera. |
+| `v3d_videos` | Renders the defense scenarios to `results/viz3d_videos/<id>.mp4` and a `showreel.mp4` (about 4 min per scenario). |
+| `v3d_live('replay', file)` | Plays a console episode (`GUI_Results/episode_*.mat`, full Simulink link, any severity and speed) or a saved session. |
+
+**What is shown.** The black fixed-wing UAV orbits the GCS with its two antennas along the fuselage, so the GCS stays at broadside (0°) as in the link model. Each interferer is a vehicle on the ground placed at the exact broadside angle of the geometry's seed; it moves with the UAV so the angle holds. The command link is a beam coloured by the BER of the configuration in use against the clean link (green ≤ 2×, amber ≤ 5×, red above), with packets on it; the receive pattern of the array is drawn as an antenna plot through the array axis (radius in dB, red at a null), so the MMSE null visibly points at the interferer. Every response shows as what it changes: channel hop on the channel bar above the GCS, a second carrier, a thicker beam for power, slower packets for a lower rate, cube packets for FEC. The data panels show the link-quality timeline of both policies, the phases (detected, confirmed, responding, restored), the detector's class probabilities, the agent's Q-values with the shield, the interferer direction against the GCS direction, and a scoreboard.
+
+**What is not.** Positions and distances are illustrative (the model has directions, not range); one decision cycle is one received frame (0.516 ms), so playback is slowed; live sessions and scenarios use the measured test pools at nominal severity. The countryside is procedural scenery.
+
+**Defense scenarios** (`v3d_scenarios.m`): jammer far from the GCS direction, jammer almost in line with the GCS, follower jammer, unknown threat, spoofer + noise bursts, path loss, antenna fault. The geometry is chosen by a rule fixed in advance: the test geometry whose first interferer direction is nearest the target angle; the outcome is whatever the policies do.
+
+| File | Role |
+|---|---|
+| `v3d_engine.m` | episode engine: `link_env` + `policy_decide` on the test pools, two sides, live threat control, events and scores |
+| `v3d_scene.m`, `v3d_environment.m`, `v3d_geometry.m` | Unreal actors of one arena, the countryside, and the geometry (placement, rotations, array pattern) |
+| `v3d_player.m`, `v3d_hud.m`, `v3d_render.m` | two arenas and the auto director; the composited frame; MP4 output |
+| `v3d_live.m`, `v3d_replay.m`, `v3d_scenarios.m`, `v3d_videos.m` | console, console-episode replay, scenarios, batch render |
+| `sim3d_probe.m` | calibration of the sim3d API (axes, sizes, rotations, cameras, models, scenes) |
 
 ---
 
@@ -191,6 +218,7 @@ The file has no nested functions (D24): static state lives in `fig.UserData`, ch
 - **D51** KPI 6 on 600 independent clean geometries
 - **D52** path_loss alarm threshold chosen from the train pools; alarm selected on an independent clean validation set
 - **D53–D56** operator console: clean lead-in, hover help, operator language, 3D episode view
+- **D57–D58** 3D view in Unreal Engine: live console with threat control and operator vs AI, defense videos, console-episode replay
 
 ---
 

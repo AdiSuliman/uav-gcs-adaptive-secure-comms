@@ -775,3 +775,6 @@ Every number the live tab shows now says what it means for the flight: a plain "
 
 ### D57 — 3D view in Unreal (started)
 Smoke test passed (Unreal window with EmptyGrass on the user's machine). Design agreed with the user (see D57). `viz3d/sim3d_probe.m` added: class introspection, calibration scene with axis, size and rotation tests, candidate UAV and jammer models, pattern and beam materials, camera captures per pose, scene sweep. Pending: run in MATLAB.
+
+### D58 — 3D view built (code complete, tested on the reference PC)
+Calibration (`sim3d_probe.m`): axes x forward / y right / z up in metres, shape sizes are extents, pitch > 0 nose up, yaw > 0 toward +y, roll > 0 right wing down; UAV classes z up, aircraft classes z down; EmptyGrass ground only for x > 0; the FixedWing UAV mesh is under 1 m (scaled x8). Look iterations with camera captures read back by Claude: pattern as antenna plot, thin rings, glow sheath, procedural countryside, black UAV. Live console tested headless (buttons driven from a script, `exportapp` screenshots): inject, operator vs AI, scenario, cameras, replay of a console episode (80 cycles); no errors. Profiling: `insertText` font lookups were 60% of a render; one font for dynamic text and change-only actor updates fixed it. Defense videos rendered with `v3d_videos` (results/viz3d_videos, not in git).

@@ -18,7 +18,7 @@ if ~isfolder(OUT), mkdir(OUT); end
 PROBE_SCENES = true;
 
 fid = fopen(fullfile(OUT, 'probe.txt'), 'w');
-logf(fid, '=== sim3d probe, %s, MATLAB %s ===\n\n', datestr(now), version);
+logf(fid, '=== sim3d probe, %s, MATLAB %s ===\n\n', string(datetime('now')), version);
 
 %% 1. Classes and enumerations
 CLASSES = {'sim3d.World', 'sim3d.Actor', 'sim3d.uav.UAV', 'sim3d.uav.FixedWing', 'sim3d.uav.FixedWingUAV', ...
@@ -35,11 +35,9 @@ ENUMS = {'sim3d.environment.Scenes', 'sim3d.scene.internal.SceneType', 'sim3d.au
 logf(fid, '--- Part 1: classes ---\n');
 for i = 1:numel(CLASSES), describeClass(fid, CLASSES{i}); end
 logf(fid, '\n--- Part 1: enumerations ---\n');
-sceneNames = {};
 for i = 1:numel(ENUMS)
     m = enumMembers(ENUMS{i});
     logf(fid, '%s: %s\n', ENUMS{i}, strjoin(m, ', '));
-    if strcmp(ENUMS{i}, 'sim3d.environment.Scenes'), sceneNames = m; end
 end
 
 %% 2. Calibration scene
@@ -102,36 +100,28 @@ catch err
     logf(fid, 'MeshTest FAILED: %s\n', err.message);
 end
 
-% Candidate UAV models (aircraft row at x = 30, 8 m up) and jammer vehicles
-% (ground row at x = 45). Each is constructed with only a name; its public
-% properties and values go to the log.
-AIR = {'sim3d.uav.FixedWing', 'sim3d.uav.FixedWingUAV', 'sim3d.aerospace.SkyHogg', ...
-    'sim3d.vehicle.air.FixedWingAircraft', 'sim3d.uav.Quadrotor'};
-GND = {'sim3d.auto.PassengerVehicle', 'sim3d.vehicle.ground.PassengerVehicle'};
-labels = strings(0, 1); lpos = zeros(0, 3);
-for i = 1:numel(AIR)
-    p = [30, -24 + 12 * (i - 1), 8];
-    if modelActor(fid, world, AIR{i}, sprintf('Air%d', i), p)
-        labels(end + 1, 1) = string(regexprep(AIR{i}, '^sim3d\.', '')); lpos(end + 1, :) = p + [0 0 4]; %#ok<SAGROW>
-    end
-end
-for i = 1:numel(GND)
-    p = [45, -12 + 24 * (i - 1), 0];
-    if modelActor(fid, world, GND{i}, sprintf('Gnd%d', i), p)
-        labels(end + 1, 1) = string(regexprep(GND{i}, '^sim3d\.', '')); lpos(end + 1, :) = p + [0 0 5]; %#ok<SAGROW>
-    end
-end
+% Candidate UAV and jammer models. FixedWingUAV and QuadrotorUAV take
+% positional (name, type); the vehicle classes take name-value pairs and one
+% transform row per part (row 1 = body). A model is added only when its mesh
+% path resolves: Unreal aborts on an empty one.
+FW = {'FixedWing', 'Fixed wing', 'Fixed Wing', 'fixedwing', 'FixedWingUAV', 'Default'};
+QR = {'Quadrotor', 'QuadRotor', 'quadrotor', 'Hexarotor', 'Default'};
+fwType = firstMesh(fid, 'sim3d.uav.FixedWingUAV', @(t) sim3d.uav.FixedWingUAV('FWprobe', t), FW);
+qrType = firstMesh(fid, 'sim3d.uav.QuadrotorUAV', @(t) sim3d.uav.QuadrotorUAV('QRprobe', t), QR);
 
-% A glTF model from the Aerospace Toolbox, loaded into a plain actor
-glb = fullfile(matlabroot, 'toolbox', 'aero', 'spacecraft', 'visual3Dmodels', 'GeneralAviation.glb');
-try
-    ga = sim3d.Actor(ActorName='GlbTest', Translation=[45 24 3]);
-    load(ga, glb);
-    add(world, ga);
-    labels(end + 1, 1) = "GeneralAviation.glb"; lpos(end + 1, :) = [45 24 9];
-    logf(fid, 'GlbTest: load(actor, GeneralAviation.glb) OK\n');
-catch err
-    logf(fid, 'GlbTest FAILED: %s\n', err.message);
+labels = strings(0, 1); lpos = zeros(0, 3);
+MODELS = {
+    'FixedWingUAV',     [30 -12 8], @() sim3d.uav.FixedWingUAV('UAVfw', fwType),                       ~isempty(fwType)
+    'QuadrotorUAV',     [30  12 8], @() sim3d.uav.QuadrotorUAV('UAVqr', qrType),                       ~isempty(qrType)
+    'SkyHoggAircraft',  [30 -30 8], @() sim3d.vehicle.air.SkyHoggAircraft('ActorName', 'Sky'),          true
+    'FixedWingAircraft',[30  30 8], @() sim3d.vehicle.air.FixedWingAircraft('ActorName', 'FWA'),        true
+    'BoxTruck',         [45 -12 0], @() sim3d.vehicle.ground.PassengerVehicle('ActorName', 'Truck', 'VehicleType', 'BoxTruck'), true
+    'SmallPickupTruck', [45  12 0], @() sim3d.vehicle.ground.PassengerVehicle('ActorName', 'Pickup', 'VehicleType', 'SmallPickupTruck'), true};
+for i = 1:size(MODELS, 1)
+    if ~MODELS{i, 4}, logf(fid, '\n%s skipped: no valid type found\n', MODELS{i, 1}); continue; end
+    if placeModel(fid, world, MODELS{i, 1}, MODELS{i, 3}, MODELS{i, 2})
+        labels(end + 1, 1) = string(MODELS{i, 1}); lpos(end + 1, :) = MODELS{i, 2} + [0 0 5]; %#ok<SAGROW>
+    end
 end
 if ~isempty(labels)
     tryAdd(fid, world, 'model labels', @() sim3d.graphics.Text(ActorName='ModelLabels', ...
@@ -164,14 +154,13 @@ world.UserData = struct('cam', cam, 'P', P, 'H', 10, 'WARM', 40, 'HOLD_END', 160
 nStep = world.UserData.WARM + numel(P) * world.UserData.H + world.UserData.HOLD_END;
 logf(fid, 'Running %d steps of %.2f s\n', nStep, DT);
 run(world, DT, nStep * DT);
-logf(fid, 'Calibration run finished\n');
+finishRun(fid, world, nStep * DT);
 close(world); delete(world); clear world
 
 %% 3. Scenes
 if PROBE_SCENES
     logf(fid, '\n--- Part 3: scenes ---\n');
-    cand = unique([sceneNames(:)', {'EmptyGrass', 'OpenSurface', 'BlankScene', 'EmptyScene', 'Airport', ...
-        'SuburbanScene', 'USCityBlock', 'RollingVineyard', 'LargeParkingLot', 'OpenPitMine'}], 'stable');
+    cand = {'EmptyGrass', 'OpenSurface', 'BlankScene', 'Airport'};
     PS = struct('name', {'level', 'pitch_pos', 'pitch_neg'}, 'T', {[-30 0 25], [-30 0 25], [-30 0 25]}, ...
         'R', {[0 0 0], [0 0.4 0], [0 -0.4 0]});
     for i = 1:numel(cand)
@@ -185,6 +174,7 @@ if PROBE_SCENES
             w.UserData = struct('cam', c2, 'P', PS, 'H', 10, 'WARM', 60, 'HOLD_END', 0, 'k', 0, ...
                 'out', OUT, 'prefix', ['scene_' cand{i}], 'fid', fid, 'vp', [], 'said', true);
             run(w, DT, (60 + numel(PS) * 10 + 2) * DT);
+            finishRun(fid, w, (60 + numel(PS) * 10 + 2) * DT);
             close(w); delete(w);
             logf(fid, 'Scene %-18s OK\n', cand{i});
         catch err
@@ -198,36 +188,55 @@ logf(fid, '\nDone. Images in %s\n', OUT);
 fclose(fid);
 
 %% ===================== Callbacks =====================
-function probeOutput(world)
+function probeOutput(world, varargin)
 U = world.UserData;
-U.k = U.k + 1;
-if U.k == 2 && ~isempty(U.vp)
-    try setView(world, U.vp); catch err, logf(U.fid, 'setView FAILED: %s\n', err.message); end
-end
-i = poseIndex(U);
-if i >= 1 && i <= numel(U.P)
-    U.cam.Translation = U.P(i).T;
-    U.cam.Rotation = U.P(i).R;
-elseif i > numel(U.P) && ~U.said
-    fprintf('\n>>> Poses captured. Take a screenshot of the Unreal window now (viewpoint ProbeView).\n\n');
-    U.said = true;
+try
+    U.k = U.k + 1;
+    if U.k == 2 && ~isempty(U.vp)
+        try setView(world, U.vp); catch err, logf(U.fid, 'setView FAILED: %s\n', err.message); end
+    end
+    i = poseIndex(U);
+    if i >= 1 && i <= numel(U.P)
+        U.cam.Translation = U.P(i).T;
+        U.cam.Rotation = U.P(i).R;
+    elseif i > numel(U.P) && ~U.said
+        fprintf('\n>>> Poses captured. Take a screenshot of the Unreal window now (viewpoint ProbeView).\n\n');
+        U.said = true;
+    end
+catch err
+    logf(U.fid, '  Output callback FAILED at step %d: %s\n', U.k, err.message);
 end
 world.UserData = U;
 end
 
-function probeUpdate(world)
+function probeUpdate(world, varargin)
 U = world.UserData;
-i = poseIndex(U);
-if i >= 1 && i <= numel(U.P) && mod(U.k - U.WARM, U.H) == U.H - 1
-    try
+try
+    i = poseIndex(U);
+    if i >= 1 && i <= numel(U.P) && mod(U.k - U.WARM, U.H) == U.H - 1
         img = read(U.cam);
         f = fullfile(U.out, sprintf('%s_%02d_%s.png', U.prefix, i, U.P(i).name));
         imwrite(img, f);
         logf(U.fid, '  saved %s (%s %s)\n', f, class(img), mat2str(size(img)));
-    catch err
-        logf(U.fid, '  camera read FAILED at pose %d: %s\n', i, err.message);
     end
+catch err
+    logf(U.fid, '  Update callback FAILED at step %d: %s\n', U.k, err.message);
 end
+end
+
+function finishRun(fid, world, stopTime)
+% run() returns before the simulation ends: wait for it, then report how far it got.
+t0 = tic;
+try
+    wait(world);
+catch err
+    logf(fid, '  wait FAILED: %s\n', err.message);
+end
+while world.SimulationTime < stopTime - 0.1 && toc(t0) < 120
+    pause(0.2);
+end
+logf(fid, '  run finished: %d callback steps, SimulationTime %.2f s, %.1f s wall\n', ...
+    world.UserData.k, world.SimulationTime, toc(t0));
 end
 
 function i = poseIndex(U)
@@ -326,17 +335,49 @@ catch err
 end
 end
 
-function ok = modelActor(fid, world, cn, name, T)
+function t = firstMesh(fid, cn, make, cands)
+% First candidate type whose object resolves a mesh path.
+t = '';
+logf(fid, '\n%s mesh types:\n', cn);
+for i = 1:numel(cands)
+    try
+        mp = meshPath(make(cands{i}));
+        logf(fid, '  %-14s -> "%s"\n', cands{i}, mp);
+        if strlength(mp) > 0 && isempty(t), t = cands{i}; end
+    catch err
+        logf(fid, '  %-14s FAILED: %s\n', cands{i}, err.message);
+    end
+end
+end
+
+function mp = meshPath(obj)
+mp = "";
+try
+    if isprop(obj, 'Config') && isstruct(obj.Config) && isfield(obj.Config, 'MeshPath')
+        mp = strjoin(string(obj.Config.MeshPath), ' | ');
+    end
+catch
+end
+if strlength(mp) == 0 && isprop(obj, 'CustomMeshPath'), mp = string(obj.CustomMeshPath); end
+end
+
+function ok = placeModel(fid, world, name, make, T)
 ok = false;
 try
-    obj = feval(cn, 'ActorName', name);
-    logf(fid, '\n%s constructed as %s; properties:\n', cn, name);
+    obj = make();
+    mp = meshPath(obj);
+    logf(fid, '\n%s: mesh "%s"; properties:\n', name, mp);
     describeInstance(fid, obj);
-    obj.Translation = T;
+    T0 = obj.Translation;
+    logf(fid, '  default Translation (%d rows):\n', size(T0, 1));
+    for r = 1:min(size(T0, 1), 8), logf(fid, '    %s\n', mat2str(T0(r, :), 4)); end
+    if strlength(mp) == 0, logf(fid, '  NOT added: empty mesh path\n'); return; end
+    T0(1, :) = T;
+    obj.Translation = T0;
     add(world, obj);
     ok = true;
-    logf(fid, '  added at %s\n', mat2str(T));
+    logf(fid, '  added, body at %s\n', mat2str(T));
 catch err
-    logf(fid, '\n%s FAILED: %s\n', cn, err.message);
+    logf(fid, '\n%s FAILED: %s\n', name, err.message);
 end
 end
