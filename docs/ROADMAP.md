@@ -5,7 +5,7 @@
 **Supervisor:** Golan Ein-Tzvi
 **History:** [PROJECT_LOG.md](PROJECT_LOG.md) · **Design decisions:** [DECISIONS.md](DECISIONS.md) · **Results:** [README.md](../README.md)
 
-Last updated: 2026-09-27
+Last updated: 2026-09-29
 
 ---
 
@@ -28,7 +28,8 @@ Last updated: 2026-09-27
 | GUI | Operator console on the current decision layer | ⏳ Live tab checked (D53 lead-in, D54 hover help); episode tab check pending | D24, D26, D46, D53, D54, D56 |
 | 3D | Unreal 3D view: live console (threat control, operator vs AI), defense videos, console-episode replay | ✅ Built and tested (D58); Cesium terrain optional | D57, D58 |
 | Fixes | Latency tail; false-alarm bound (KPI 6) | ✅ latency p95 48.9 → 19.4 ms / ✅ KPI 6: 1.5% over 600 independent geometries, bound 2.60% (D52) | D48–D51 |
-| Layout | Code into folders by stage | ⏳ End of project | D47 |
+| v4 | Receiver-side measurements, 36 combined configurations, combined threats in training, three severities, per-antenna feature, unknown-threat score selection, new-threat learning, 20 ms decision period | ⏳ Code complete and unit-tested; full run from A0 next | D59–D61 |
+| Layout | Code into `code/` by stage | ✅ Done | D47, D61 |
 | D1 | Interim report | ⏳ Drafted, results to sync with the final run | — |
 | D2 | Final report | ⏳ | — |
 | D3 | Defense (20 + 10 min, English) | ⏳ | — |
@@ -38,10 +39,11 @@ Last updated: 2026-09-27
 
 ## Remaining work
 
-1. **Decision layer closed (D52):** KPI 6 met (9/600, bound 2.60%) with the path_loss drop threshold chosen from the train pools (6.5 dB) and the alarm selected on an independent clean validation set. Remaining false alarms are antenna_fault reads on deep single-branch fades; documented as a limitation.
-2. **Operator console:** live tab checked and re-checked 2026-09-27; the D53 clean lead-in fixed the unmitigated path_loss, and D54 added hover help on every setting and leaner video capture. Continuous-episode check pending.
-3. **Reports and defense:** interim report numbers, final report, slides and poster from the same figures.
-4. **Repository:** code into folders by stage, final README.
+1. **v4 full run** from A0 (about 16 h): dataset with the per-antenna feature, detector, unknown-threat study, pools, DQN, combinations never trained on, survivability with 2 / 3 antennas, latency on an idle machine, KPIs.
+2. **KPIs:** check every target on the v4 run; any tuning on train / validation only.
+3. **Operator console and 3D view** brought to the v4 interfaces, then checked live.
+4. **Code comments:** a pass over every file (short explanation, no history).
+5. **Reports and defense:** interim report numbers, final report, slides and poster from the same figures.
 
 ---
 

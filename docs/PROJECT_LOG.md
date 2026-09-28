@@ -778,3 +778,20 @@ Smoke test passed (Unreal window with EmptyGrass on the user's machine). Design 
 
 ### D58 — 3D view built (code complete, tested on the reference PC)
 Calibration (`sim3d_probe.m`): axes x forward / y right / z up in metres, shape sizes are extents, pitch > 0 nose up, yaw > 0 toward +y, roll > 0 right wing down; UAV classes z up, aircraft classes z down; EmptyGrass ground only for x > 0; the FixedWing UAV mesh is under 1 m (scaled x8). Look iterations with camera captures read back by Claude: pattern as antenna plot, thin rings, glow sheath, procedural countryside, black UAV. Live console tested headless (buttons driven from a script, `exportapp` screenshots): inject, operator vs AI, scenario, cameras, replay of a console episode (80 cycles); no errors. Profiling: `insertText` font lookups were 60% of a render; one font for dynamic text and change-only actor updates fixed it. Defense videos rendered with `v3d_videos` (results/viz3d_videos, not in git).
+
+### D59 — v4 first runs (2026-09-28)
+Stages A0–B4 (dataset 43,200 frames, 13 link features), OOD, C1p (4 combinations for training, 4 others for test only), C1c, C2 reduced (one run: 'class_drop', penalty 80, γ 0.5, seed 42), C2e, KPI.
+- **Detection (test split):** accuracy 96.58%, macro-F1 96.59% [95.77, 97.28], lowest class 93.59%, ≥ 93.5% from 0 dB; unseen Eb/N0 97.80% vs 97.17% seen.
+- **Unknown threats (leave-one-threat-out):** mean AUROC ensemble 0.803, last layer 0.863, MSP 0.648, energy 0.675, isolation forest 0.594 → D60.
+- **Decision layer (reduced run, test pools):** single threats recovered 87.5–100% per threat and severity; combined set 59.2% of recoverable episodes; sweeping_jammer+path_loss (test only) 5.2% against an oracle 97.9%; KPI 4 9 of 12 threats. False alarms on 600 independent clean geometries: DQN 27/600 (4.5%, bound 6.15%), rule + escalation 244/600. No run met the false-alarm bound → D61.
+- **Disk:** the drive fell to under 80 GB free: killed parallel workers had left 238 GB of Simulation Data Inspector files (.dmr) in the temp folder. Deleted by the user; `disk_guard.m` added (D61).
+
+### D60 — unknown-threat diagnostic (2026-09-28)
+`diagnostics/diag_ood_scores.m` on the D59 folds: last layer 0.867, ensemble 0.802; input pre-processing chosen eps = 0 in every fold and costs 85.6 ms per frame; nested selection picks the last layer in every fold (0.867); averaging the score over 5 frames 0.883. Reactive jamming is the weak threat (0.64–0.70).
+
+### D61 — experiments and code (2026-09-28/29)
+- **Per-antenna probe** (`bg_branch_probe`): on the clean link the antenna-1 SNR estimate errs by −3.7 to +3.6 dB (1st–99th percentile); the gain ratio between branches does not separate the misreads (median −0.1 dB clean, +0.3 dB antenna fault) and was dropped. The per-antenna dip (median minus minimum of the per-block gain) separates them: unit test, clean < 6 dB, antenna fault median > 10 dB.
+- **New-threat learning** (Lee et al., Algorithm 2, 8 folds): known accuracy softmax 96.9%, generative 96.0%; with K = 20 / 100 / all validation frames of the new threat its recall is 58.8 / 87.9 / 88.6%, known accuracy after 95.1 / 94.8 / 94.8%. Reactive jamming is the hardest (62.2% at K = 100).
+- **Code:** unknown-threat candidates and nested selection inside `eval_ood_detection.m`; Algorithm 2 in the same stage; all 8 combinations in training; C2g; monitor grid 2/2, 3/3; 20 ms decision period; DQN evaluated as matrix products; `disk_guard.m`; code moved into `code/` with `startup.m`; survivability levels to 28 dB.
+- **Checks (2026-09-29):** `params.mat` and the threat model rebuilt from the code (sinks Rx_Z, Rx_H, Rx_R present); unit tests 9/9 pass.
+- **Next:** smoke run of the whole chain, then the full run from A0 (about 16 h).

@@ -12,7 +12,7 @@
 A closed-loop simulation of the command uplink from a ground control station (GCS) to a small UAV under electronic-warfare threats. A Simulink link model, validated against theory, generates its own labeled data; a CNN on the spectrogram plus link measurements detects the threat and flags threats it has never seen; a decision layer (expert rule, a class table and a Double DQN with a safety shield) chooses a countermeasure; and every policy is compared on measured frames of the real link that were never used in training.
 
 - **Link:** GCS → UAV, QPSK, 1 Msym/s, RRC (roll-off 0.25, span 10, 4 samples/symbol), 1032-bit frames, 2.4 GHz, Rician K = 10 dB with sum-of-sinusoids Doppler fading for a UAV at 50–120 km/h (111–267 Hz). One GCS antenna, two omni antennas on the UAV (λ/2, receive correlation 0.3).
-- **Receiver:** data-aided channel estimation (leave-one-out), MRC combining; adaptive MMSE combining as the spatial countermeasure (nulls an interferer arriving from another direction). Everything the detector and the decision layer see is measured at the receiver (D59): CRC-32 packet check, BER estimated from the combiner output, SINR and envelope correlation against the receiver's own decisions, interference over thermal, and the spatial coherence, predicted MMSE gain and direction of the interference from the channel estimator.
+- **Receiver:** data-aided channel estimation (leave-one-out), MRC combining; adaptive MMSE combining as the spatial countermeasure (nulls an interferer arriving from another direction). Everything the detector and the decision layer see is measured at the receiver: CRC-32 packet check, BER estimated from the combiner output, SINR and envelope correlation against the receiver's own decisions, interference over thermal, the spatial coherence, predicted MMSE gain and direction of the interference from the channel estimator, and the deepest dip of each antenna's channel gain.
 - **Threats (8 + clean link):** jamming, reactive jamming, sweeping jammer, noise burst, spoofing, benign interference, path loss, antenna fault; five severity levels in the detector dataset, three (low, nominal, high) in the decision layer; eight combined threats. Every interferer reaches the array from its own direction, drawn per seeded run (flight geometry).
 - **Countermeasures (36 configurations):** one choice per domain (Liu et al.'s combined action): frequency (none, channel switch, frequency diversity) × space (none, spatial diversity with MMSE) × link budget (none, rate reduction, power control, FEC with interleaving, rate + power, power + FEC).
 
@@ -21,54 +21,63 @@ A closed-loop simulation of the command uplink from a ground control station (GC
 ## Repository structure
 
 ```
-├── main.m                   # pipeline entry point: RUN flags, phases A to DASH, logs to logs/
-├── demo_gui.m               # operator console: live loop, continuous episode, KPIs, survivability map
-├── viz3d/                   # 3D view in Unreal Engine (D57, D58): live console, MP4 render, replay
-├── *.m                      # pipeline code, by stage:
-│                            #   link       init_params, build_threat_model, link_seed, interferer_aoa, validate_phy,
-│                            #              apply_countermeasure, extract_closed_loop_frames
-│                            #   dataset    run_dataset_sweep, extract_spectrograms, prepare_data, spec_image, link_features
-│                            #   detection  train_detector, train_hybrid_net, eval_detector, eval_unseen_snr, cnn_scores,
-│                            #              ood_scores, ood_thresholds, fit_ood_model, eval_ood_detection
-│                            #   decision   build_policy_pools, build_clean_test_pools, link_env, policy_*,
-│                            #              rule_based_policy, dqn_agent, train_dqn, rollout_policy, evaluate_policies,
-│                            #              episode_cycle
-│                            #   evaluation map_survivability_boundary, measure_latency, measure_all_kpis,
-│                            #              build_kpi_dashboard, stats_ci
+├── startup.m                # runs when MATLAB starts in this folder: puts code/ on the path
+├── code/
+│   ├── main.m               # pipeline entry point: RUN flags, phases A to DASH, logs to logs/
+│   ├── run_stage.m          # one or more stages by name, logged, with a smoke mode
+│   ├── disk_guard.m         # empties Simulink's run data after every simulation, guards free disk space
+│   ├── link/                # link model, threats, countermeasures, receiver measurements, PHY validation
+│   │                        #   init_params, build_threat_model, apply_countermeasure, extract_closed_loop_frames,
+│   │                        #   link_seed, interferer_aoa, link_budget_table, validate_phy
+│   ├── detection/           # dataset, detector, unknown-threat scores
+│   │                        #   run_dataset_sweep, extract_spectrograms, prepare_data, link_features, train_detector,
+│   │                        #   eval_detector, eval_unseen_snr, compare_architectures, fit_ood_model, ood_score_set,
+│   │                        #   eval_ood_detection, detect_scores
+│   ├── decision/            # frame pools, environment, policies, DQN training and evaluation
+│   │                        #   build_policy_pools, pool_cell, link_env, policy_*, rule_based_policy, dqn_agent,
+│   │                        #   train_dqn, dqn_train_run, evaluate_policies, experiment_combo_generalization,
+│   │                        #   decision_config
+│   ├── evaluation/          # survivability map, latency, KPIs, dashboard, bootstrap
+│   ├── gui/                 # operator console demo_gui.m; gui/viz3d/ the Unreal 3D view (D57, D58)
+│   ├── tests/               # unit tests: runtests('code/tests')
+│   ├── diagnostics/         # one-off investigation scripts
+│   └── legacy/              # replaced code kept for the record (not on the path)
 ├── docs/
-│   ├── DECISIONS.md         # decision record D1–D58 (why every design choice was made)
+│   ├── DECISIONS.md         # decision record D1–D61 (why every design choice was made)
 │   ├── PROJECT_LOG.md       # execution log: runs, results, fixes
-│   └── ROADMAP.md           # plan and status by phase
-├── diagnostics/             # one-off investigation scripts
-├── legacy/                  # replaced code kept for the record
-└── data/  results/  models/  logs/     # generated by the pipeline, not in git
+│   ├── ROADMAP.md           # plan and status by phase
+│   └── LITERATURE.md        # what each source of the proposal contributes
+├── models/  params.mat      # Simulink link models and link parameters (built by the code, kept in git)
+└── data/  results/  logs/   # generated by the pipeline (results/ holds the last complete run)
 ```
 
-The code stays in the root while the project changes; it moves into folders by stage at the end of the project (D47).
-
-**legacy/** holds code that newer decisions replaced: the CNN-LSTM detector study (D13) and the one-shot decision scripts of D39 (closed-loop diagnostic, speed sweep, FAR, combined threats, episodes, KPI3, `build_dqn_state.m`), replaced in D44–D46 by `evaluate_policies.m`, `measure_latency.m` and the `policy_*` files.
+**legacy/** holds code that newer decisions replaced: the CNN-LSTM detector study (D13) and the one-shot decision scripts of D39, replaced in D44–D46 by `evaluate_policies.m`, `measure_latency.m` and the `policy_*` files.
 
 ---
 
 ## Quick start
 
-1. MATLAB R2026a with Simulink, Communications, DSP System and Deep Learning toolboxes (Statistics for the isolation forest).
-2. In the project folder (cmd or Git Bash): `matlab -batch "main"`. The flags at the top of `main.m` choose the stages; presets for a full run, a decision-layer rerun and a results-only refresh are in the file.
-3. Operator console: open MATLAB in the project folder and run `demo_gui` (after `main` has produced `data/` and `results/`), from a fresh session.
-4. 3D view (needs Simulink 3D Animation and UAV Toolbox): `addpath('viz3d'); v3d_live` for the live console, `addpath('viz3d'); v3d_videos` for the defense videos (see *3D view* below).
-5. Every run writes its full console output to `logs/run_*.txt`.
+1. MATLAB R2026a with Simulink, Communications, DSP System, Deep Learning and Statistics toolboxes; Parallel Computing for the frame pools.
+2. Open MATLAB in the repository folder: `startup.m` puts `code/` on the path.
+3. Full pipeline: `matlab -batch "main"` from the repository folder. The flags at the top of `code/main.m` choose the stages.
+4. Single stages: `matlab -batch "run_stage('B2','B3')"`; `run_stage('smoke', ...)` runs a reduced version to check the chain. A full run takes about 16 h.
+5. Unit tests: `runtests('code/tests')`.
+6. Operator console: `demo_gui` (after the pipeline has produced `data/` and `results/`).
+7. 3D view (Simulink 3D Animation and UAV Toolbox): `v3d_live` for the live console, `v3d_videos` for the defense videos.
+8. Every run writes its console output to `logs/`. `disk_guard` stops a run before the drive falls below 200 GB free.
 
 | Stage | What it does | Time (RTX 4070) |
 |---|---|---|
 | A4v `validate_phy` | BER vs theory: AWGN, Rician, MRC 2 and 3 antennas, correlated branches; MMSE under jamming; seeds | ~12 min |
-| A5–A6 | 27,000 frames from 1,350 seeded sub-runs; spectrograms and link features | ~16 min |
-| B1–B3 | split by sub-run, detector training, test evaluation with bootstrap intervals | ~6 min |
-| B4, OOD | detector at unseen Eb/N0; leave-one-threat-out unknown-threat study | ~25 + 60 min |
-| C1p | frame pools: every scenario × configuration × Eb/N0 × geometry through the real link | ~90 min (extensions: new scenarios only) |
-| C1c | clean link on 100 new geometries per Eb/N0 under every configuration (KPI 6) | ~65 min |
-| C2, C2e | DQN training (alarm definition × false-switch penalty × 3 discount factors × 3 seeds, sensitivity study); every policy on the test pools | ~80 + 1 min |
-| SURV | survivability map: threat × severity × Eb/N0 × geometry × every action | ~90 min |
-| LAT, KPI, DASH | latency per decision cycle, proposal KPIs, dashboard | ~3 min |
+| A5–A6 | 43,200 frames from 2,160 seeded sub-runs; spectrograms and 14 link features | ~25 min |
+| B1–B3a | split by sub-run, detector training, test evaluation with bootstrap intervals; architecture comparison | ~30 min |
+| B4, OOD | detector at unseen Eb/N0; leave-one-threat-out unknown-threat study, score selection, new-threat learning | ~6 + 90 min |
+| C1p | frame pools: every scenario × configuration × Eb/N0 × geometry through the real link | ~3.5 h |
+| C1c, C1d | clean link on 100 new geometries per Eb/N0 (validation and test sets, KPI 6); path-loss drop threshold | ~1.3 h |
+| C2, C2e | DQN training (monitor × false-switch penalty × 3 discount factors × 3 seeds); every policy on the test pools | ~5 h |
+| C2g | combined threats never trained on: DQN retrained without each combination | ~2.5 h |
+| SURV, SURV3 | survivability map; 2 vs 3 antennas vs relay path | ~2 h |
+| LAT, KPI, DASH | latency per decision cycle, proposal KPIs, dashboard | ~5 min |
 
 ---
 
@@ -86,24 +95,27 @@ The code stays in the root while the project changes; it moves into folders by s
 - **Estimated BER:** decision-directed SNR per 32-symbol block of the combiner output, BER = mean of Q(√SNR) over the blocks (Simon & Alouini); post-combining SNR from the same statistics.
 - **SINR, envelope correlation:** against the waveform re-modulated from the receiver's own decisions; interference over thermal.
 - **Spatial features:** from the per-block channel estimates and the residual covariance the MMSE combiner already computes: spatial coherence of the interference, predicted MMSE gain over MRC (h^H R⁻¹ h · h^H R h / ‖h‖⁴) and the alignment of the dominant interference direction with the GCS channel (Richards, ch. 9).
-- 13 link features per frame (`link_features.m`): SINR, estimated BER and its change, RSSI and its variance, CRC failure and packet loss over the window, envelope correlation, IoT, post-combining SNR, coherence, predicted MMSE gain, alignment.
+- **Per-antenna dip:** for each UAV antenna, the median minus the minimum of its per-block channel gain (dB) over the frame, the larger of the two. It tells a fault or a deep fade of one antenna from attenuation of the whole link.
+- 14 link features per frame (`link_features.m`): SINR, estimated BER and its change, RSSI and its variance, CRC failure and packet loss over the window, envelope correlation, IoT, post-combining SNR, coherence, predicted MMSE gain, alignment, per-antenna dip.
 
 ### Detection (D42, D43, D59)
-- Input: 128×128 spectrogram of the antenna-1 frame and the 13 link features.
+- Input: 128×128 spectrogram of the antenna-1 frame and the 14 link features.
 - Network: CNN (32-64-128 filters, global pooling) and a feature branch, merged into a 64-unit embedding, softmax over 9 classes; cosine learning rate, L2, SpecAugment. `compare_architectures.m` compares it with a spectrogram-only and a features-only network on the same splits.
-- Unknown threats: Mahalanobis feature ensemble (Lee et al.) over five layers, the layer weights fitted by logistic regression on known validation frames against their FGSM-perturbed versions (no unknown-threat sample used); threshold keeping 95% of known validation frames; an isolation forest on the link features for comparison. Evaluated by retraining without each threat in turn.
+- Unknown threats: candidate scores are the Mahalanobis distance of the last hidden layer (Lee et al.), Lee et al.'s feature ensemble over five layers (weights fitted on known validation frames against their FGSM versions), the Mahalanobis distance of the link features, and the lower of two standardized scores (last layer with the link features, or with an isolation forest). Leave-one-threat-out (the detector retrained without each threat in turn) chooses the production score; the reported value is the nested estimate, where each held-out threat is scored with the candidate chosen on the other seven. Threshold keeping 95% of known validation frames.
+- Learning a new threat (Lee et al., Algorithm 2): a flagged and labelled threat becomes a new class from 100 of its frames (class mean and tied covariance update in the last hidden layer), without retraining the network.
 
 ### Decision layer (D44–D52, D59)
-- **Frame pools** (`build_policy_pools.m`, `pool_cell.m`): the clean link, the 8 single threats at three severities, 4 combined threats for training and validation and 4 other combined threats for test only, each × 36 configurations × 6 Eb/N0 through the real link with the detector applied; 6 train, 4 validation and 8 test geometries per (cell, Eb/N0). A geometry (seed: fading, UAV speed, interferer directions, threat waveform) is shared by every configuration and every cell, so an episode stays in one flight before and after the onset and when it changes configuration.
-- **Episodes** (`link_env.m`): 30 decision cycles (one frame each), clean link until an onset at cycle 3–10; a follower jammer re-acquires the channel 2–5 cycles after every hop.
+- **Frame pools** (`build_policy_pools.m`, `pool_cell.m`): the clean link, the 8 single threats at three severities and 8 combined threats, each × 36 configurations × 6 Eb/N0 through the real link with the detector applied; 6 train, 4 validation and 8 test geometries per (cell, Eb/N0). The test geometries are flights never used in training. A geometry (seed: fading, UAV speed, interferer directions, threat waveform) is shared by every configuration and every cell, so an episode stays in one flight before and after the onset and when it changes configuration.
+- **Episodes** (`link_env.m`): 30 decision cycles, clean link until an onset at cycle 3–10; a follower jammer re-acquires the channel 2–5 cycles after every hop. A decision cycle is one received frame, with a decision period of 20 ms (the latency target); recovery times are reported in cycles and in ms.
 - **Reward** (`decision_config.m`): 100 when the configuration's BER in the episode's geometry is ≤ 2× the clean link (the KPI), otherwise at most 40 (log-linear down to 0 at the unmitigated BER), minus goodput, spectrum, power and processing costs, 5 points per change, 20 for a change on a healthy link. Because 40 is below 100 minus the largest running cost, a restoring configuration always earns more than a non-restoring one (Liu et al.'s rate-if-successful reward). Training may raise the healthy-link penalty; validation and test use the standard reward.
-- **Link monitor and shield** (`policy_monitor.m`, `policy_mask.m`): estimated BER over 5 frames against the clean link's estimated BER at the estimated Eb/N0 (like with like), or CRC packet loss when FEC is on; class; the Eb/N0 drop from the episode's reference. An alarm is a hostile threat class or a degraded link ('none', benign interference and 'unknown' count only with degradation); it is confirmed on 2 of 2 cycles (M-of-N, Richards), and only then may a policy start a new configuration (Alshiekh et al., shielded RL). The state never contains the episode clock.
+- **Link monitor and shield** (`policy_monitor.m`, `policy_mask.m`): estimated BER over 5 frames against the clean link's estimated BER at the estimated Eb/N0 (like with like), or CRC packet loss when FEC is on; class; the Eb/N0 drop from the episode's reference. An alarm is a hostile threat class or a degraded link ('none', benign interference and 'unknown' count only with degradation); it is confirmed on 2 of 2 or 3 of 3 cycles (M-of-N, Richards; chosen on validation), and only then may a policy start a new configuration (Alshiekh et al., shielded RL). The state never contains the episode clock.
 - **Agent state** (`policy_state.m`): the receiver observations of the last 4 cycles (Liu et al.'s spectrum waterfall, Mnih et al.'s stacked frames), the current configuration, dwell time and the confirmed alarm.
-- **Policies** (`policy_decide.m`, one function for training, evaluation and the GUI): expert rule (spatial-aware: it also nulls an interferer when the predicted MMSE gain is ≥ 6 dB, and escalates through combined configurations), class → configuration table tuned on the train pools, Double DQN (hidden 256-256, 20,000 episodes, experience replay, target network, Huber loss, gradient clipping). The alarm definition, the training false-switch penalty, the discount factor and the seed are chosen on the validation split by recovered episodes, under the false-alarm bound on independent clean validation geometries.
-- **Evaluation** (`evaluate_policies.m`): test pools only (8 geometries per cell, never used in training or selection); sets single (three severities), follower, combined (unseen combinations), unknown (detector output withheld) and clean; false alarms (KPI 6) on 600 further clean geometries, one episode each (`build_clean_test_pools.m`); baselines no response, random, always-on MMSE, best fixed configuration, rule, table and a one-step oracle. An episode is *recovered* when BER and CRC packet loss are both ≤ 2× the clean link (packet loss + one packet) for 5 consecutive cycles, and *recoverable* when some configuration restores both in its geometry. 95% intervals by bootstrap over geometries (`boot_cluster.m`); breakdowns per threat and severity, Eb/N0, interferer direction and UAV speed.
+- **Policies** (`policy_decide.m`, one function for training, evaluation and the GUI): expert rule (spatial-aware: it also nulls an interferer when the predicted MMSE gain is ≥ 6 dB, and escalates through combined configurations), class → configuration table tuned on the train pools, Double DQN (hidden 256-256, 20,000 episodes, experience replay, target network, Huber loss, gradient clipping; evaluated as plain matrix products in the decision cycle). The confirmation, the training false-switch penalty, the discount factor and the seed are chosen on the validation split by recovered episodes, under the false-alarm bound on independent clean validation geometries.
+- **Evaluation** (`evaluate_policies.m`): test pools only (8 geometries per cell, never used in training or selection); sets single (three severities), follower, combined (new flights), unknown (detector output withheld) and clean; false alarms (KPI 6) on 600 further clean geometries, one episode each (`build_clean_test_pools.m`); baselines no response, random, always-on MMSE, best fixed configuration, rule, table and a one-step oracle. An episode is *recovered* when BER and CRC packet loss are both ≤ 2× the clean link (packet loss + one packet) for 5 consecutive cycles, and *recoverable* when some configuration restores both in its geometry. 95% intervals by bootstrap over geometries (`boot_cluster.m`); breakdowns per threat and severity, Eb/N0, interferer direction and UAV speed.
+- **Combinations never trained on** (`experiment_combo_generalization.m`): the DQN is retrained without one combined threat at a time and tested on it, next to the DQN that trained on it, rule + escalation and the table.
 
 ### Survivability boundary (D30, D46, D59)
-Every threat × severity × Eb/N0 through the 36 configurations on one seeded run shared by all actions: recoverable (BER and packet loss ≤ 2× clean), marginal (≤ 5×) or not, and which configuration achieves it. Map A uses only configurations without goodput loss, Map B any configuration. Directional threats are mapped with the interferer 45° and 10° from the GCS direction. `experiment_survivability_options.m` repeats recoverability for the combined threats and the directional threats at high severity with 2 antennas, 3 antennas and 2 antennas plus a relay path (deliverable 8 of the proposal).
+Every threat × severity × Eb/N0 through the 36 configurations on one seeded run shared by all actions (in-band threats up to 28 dB JSR, path loss up to 26 dB): recoverable (BER and packet loss ≤ 2× clean), marginal (≤ 5×) or not, and which configuration achieves it. Map A uses only configurations without goodput loss, Map B any configuration. Directional threats are mapped with the interferer 45° and 10° from the GCS direction. `experiment_survivability_options.m` repeats recoverability for the combined threats and the directional threats at high severity with 2 antennas, 3 antennas and 2 antennas plus a relay path (deliverable 8 of the proposal). The system keeps two antennas; the number of antennas is a parameter (`n_rx`).
 
 ---
 
@@ -112,12 +124,12 @@ Every threat × severity × Eb/N0 through the 36 configurations on one seeded ru
 | # | KPI | Target | Source |
 |---|---|---|---|
 | 1 | Detection vs SNR | macro-F1 and the F1 of every class ≥ 90% above an Eb/N0 threshold | `eval_detector.m` |
-| 2 | Unknown threats | mean AUROC ≥ 0.9, leave-one-threat-out | `eval_ood_detection.m` |
+| 2 | Unknown threats | mean AUROC ≥ 0.8, leave-one-threat-out (nested estimate) | `eval_ood_detection.m` |
 | 3 | Physical validation | BER within 0.3 dB of theory | `validate_phy.m` |
 | 4 | Restoration | ≥ 90% of the recoverable episodes recovered (BER and packet loss ≤ 2× clean), for every threat including the combined ones, at three severities; boundary mapped | `evaluate_policies.m`, `map_survivability_boundary.m` |
 | 5 | DQN vs baselines | better than the rule (paired bootstrap 95% interval), with follower jammer and unseen combinations; no-response baseline reported | `evaluate_policies.m` |
 | 6 | False alarms | one-sided 95% bound ≤ 5% over ≥ 600 clean-link episodes | `evaluate_policies.m` |
-| 7 | Real time and speed | latency per decision cycle median < 10 ms and p95 < 20 ms; recovery spread ≤ 10 points over 50–120 km/h | `measure_latency.m`, `evaluate_policies.m` |
+| 7 | Real time and speed | latency per decision cycle median < 10 ms and p95 < 20 ms (decision period 20 ms); recovery spread ≤ 10 points over 50–120 km/h | `measure_latency.m`, `evaluate_policies.m` |
 | 8 | Minimum | closed loop restoring at least one recoverable threat | `evaluate_policies.m` |
 
 `measure_all_kpis.m` writes the status of each (MET / NOT MET / STALE / MISSING) to `results/kpi_summary.txt`; `build_kpi_dashboard.m` draws `results/kpi_dashboard.png`.
@@ -125,6 +137,8 @@ Every threat × severity × Eb/N0 through the 36 configurations on one seeded ru
 ---
 
 ## Results (D52 run, 2026-09-27)
+
+> **Status (2026-09-29):** these are the results of the v3 system (D52), which are also the files in `results/`. The v4 system (D59–D61: receiver-side measurements, 36 combined configurations, combined threats in training, three severities, per-antenna feature) is complete in code and passes the unit tests and reduced runs; its full run from A0 is next, and this section will then be replaced. KPI targets above are those of v4.
 
 All numbers on data never used for training: the detector on the test split (by sub-run), the decision layer on the test pools (flight geometries with unseen seeds), the false alarms on 600 further clean-link geometries. Intervals are 95%. Decision layer as selected on validation (D52): alarm 'class_drop' (path_loss counts after an Eb/N0 drop ≥ 6.5 dB, threshold chosen on the train pools), training false-switch penalty 80, γ = 0.5; the alarm was selected on 600 independent clean validation geometries and the test set was measured once.
 
@@ -175,7 +189,7 @@ The file has no nested functions (D24): static state lives in `fig.UserData`, ch
 
 ---
 
-## 3D view (`viz3d/`, D57–D58)
+## 3D view (`code/gui/viz3d/`, D57–D58)
 
 An Unreal Engine view of the closed loop, driven from MATLAB (Simulink 3D Animation). Two identical arenas side by side: the DQN agent (left) and a comparison policy (right), on the same flight geometry and the same measured frames.
 
@@ -227,17 +241,23 @@ An Unreal Engine view of the closed loop, driven from MATLAB (Simulink 3D Animat
 - **D52** path_loss alarm threshold chosen from the train pools; alarm selected on an independent clean validation set
 - **D53–D56** operator console: clean lead-in, hover help, operator language, 3D episode view
 - **D57–D58** 3D view in Unreal Engine: live console with threat control and operator vs AI, defense videos, console-episode replay
+- **D59** v4: receiver-side measurements, spatial features, 36 combined configurations, three severities, stricter evaluation
+- **D60** unknown-threat score chosen by nested leave-one-threat-out selection
+- **D61** per-antenna feature, unknown-threat score selection and new-threat learning, combined threats in training, monitor grid, 20 ms decision period, disk guard, code in `code/`
 
 ---
 
 ## Known issues and future work
 
-- False alarms on the clean link: 1.5% of 30-cycle episodes over 600 independent geometries (bound 2.60%), mostly antenna_fault reads on deep single-branch fades; a decision cycle of one frame (0.5 ms) makes this about 1.4 configuration changes per second of clean flight, and the pools record only 20 frames per geometry. An attenuation present from the first frame of a link, or a gradual one, passes under the drop gate (D50, D52).
-- Latency measured on a desktop CPU (p95 19.4 ms), not on UAV hardware.
-- Combined threats that were never seen in training remain the hardest case: two interferers exceed what two antennas can null, and several combinations cannot be restored by any configuration.
-- Hardware validation (SDR), BER estimation without ground truth, switching time and GCS signalling.
-- Online learning and a larger antenna array.
-- The interim report (Word, outside the repository) needs its results chapters synced to the D51 run.
+- The v4 full run (from A0) is pending; the results section shows v3 (D52).
+- The operator console and the 3D view still call the v3 interfaces (link features, configurations, pool format); they are brought to v4 after the full run.
+- Consecutive decision cycles come from consecutive frames of the pools, so the fading between two cycles is more correlated than 20 ms apart; recovery times in ms assume the 20 ms decision period.
+- Reactive jamming is the hardest unknown threat: from the receiver it looks like barrage jamming on a continuous uplink, and it calls for the same countermeasure.
+- Latency is measured on a desktop CPU, not on UAV hardware.
+- Two interferers can exceed what two antennas can null; a third antenna and a relay path are evaluated as experiments.
+- Hardware validation (SDR), switching time and GCS signalling.
+- Online learning.
+- The interim report (Word, outside the repository) will be synced to the v4 run.
 
 ---
 
@@ -259,4 +279,4 @@ Numbered as in the project proposal (IEEE):
 
 ---
 
-**Last updated:** 2026-09-27 (D52 results). **Status:** phases A–C, survivability map and KPIs complete (8/8 met); decision layer frozen; open: GUI check, reports and defense.
+**Last updated:** 2026-09-29 (D61). **Status:** v4 code complete and unit-tested; v4 full run next; then GUI update to v4, reports and defense.

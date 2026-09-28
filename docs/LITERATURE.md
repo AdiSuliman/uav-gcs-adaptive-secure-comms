@@ -1,4 +1,4 @@
-# Literature check (2026-09-28)
+# Literature check (2026-09-28, updated 2026-09-29)
 
 Every source of the three proposal documents was read again before the v4 changes: the lecturer's
 original proposal (seven recommended papers), the approved proposal form (six references) and the
@@ -53,6 +53,15 @@ design choice it supports. Short quotes are under 15 words.
 | Multi-layer Mahalanobis, weights without OOD samples | [6] |
 | Evaluation over severities, geometries and concurrent threats; robustness curves | [2]; proposal KPIs |
 | Bootstrap over independent runs | proposal mitigation 5 |
+| Unknown-threat score chosen among Mahalanobis candidates by leave-one-threat-out, nested estimate | [6]; [3] (zero-day claims need the class absent from training) |
+| New threat learned as a class without retraining (mean and tied-covariance update) | [6], Algorithm 2 |
+| Isolation forest: 100 trees, subsample min(8192, N), trained on known data only | [7] |
+| Alarm confirmed on m of n cycles, m-of-n chosen on validation | [10] Ch. 6 |
+| Shield: a new configuration only after a confirmed alarm | [11] (preemptive shield) |
+| Per-antenna channel dip as a feature | [10] Ch. 9 (per-element channel estimates of the array) |
+| Survivability map up to 28 dB JSR | [4] (30 dBm jammer against a 0 dBm signal) |
+
+Ranges: the link's 2.4 GHz band, 50–120 km/h and Eb/N0 0–10 dB (about 15.7 to 5 km by the link budget, `link_budget_table.m`) are within those of the sources (Nanayakkara et al.: 2.4 GHz drone links and an SNR range of −10 to 20 dB in the literature; [4]: jamming up to 30 dB above the signal); the surveys [1]–[3] give no numeric ranges. No range needed widening.
 
 Dropped for lack of a basis in these sources: CUSUM change detection, finer power and rate levels,
 a recurrent (GRU) Q-network.
