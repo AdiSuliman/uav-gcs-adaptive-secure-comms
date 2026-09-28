@@ -37,3 +37,6 @@ GUI_Results/
 # delivery archives (kept locally, not in the repo)
 *.zip
 ZIP files/
+
+# old data and results backups (kept locally)
+archive/

@@ -1,0 +1,2476 @@
+function demo_gui
+%DEMO_GUI - UAV-GCS Adaptive Secure Comms: operator console (v4, D46).
+%
+% One application, five tabs:
+%   LIVE OPERATIONS  - run the REAL closed loop (Simulink -> CNN -> decision layer
+%                      -> real mitigation sim) for any threat x Eb/N0 x UAV speed x
+%                      severity. Every frame of the run passes through the detector,
+%                      the Mahalanobis unknown-threat score and policy_decide.m (link
+%                      monitor, alarm confirmation, shield), exactly as in the
+%                      evaluation; the configuration at the end of the run is applied.
+%                      Shows detection (with UNKNOWN-threat handling), the DQN
+%                      decision side by side with the rule-based policy, the BER /
+%                      RSSI timeline before and after the countermeasure, the
+%                      outcome vs the clean channel (survivability regime) and the
+%                      goodput trade-off.
+%   KPI & RESULTS    - the proposal KPIs, confusion matrix, accuracy vs SNR,
+%                      restoration vs SNR, latency, configuration per threat and
+%                      robustness vs UAV speed, read from the saved result files
+%                      (evaluate_policies, measure_latency, measure_all_kpis).
+%   SURVIVABILITY MAP- proposal deliverable #7 (Map A / Map B, per threat) with the
+%                      last live run marked on the grid.
+%   CONTINUOUS EPISODE - one link streamed cycle by cycle: clean cycles, threat
+%                      onset, then detection -> policy_decide.m every cycle
+%                      (episode_cycle.m). Every configuration is simulated on the
+%                      same seeds, so a change keeps the flight geometry. DQN and
+%                      rule-based run on identical frames; T_detect / T_act /
+%                      T_recover live.
+%   SESSION LOG      - every run of the session, exportable to CSV / MAT.
+%
+% Speed: any real value 50-120 km/h. Channel Doppler follows fd = v*fc/c and is
+% applied to the Simulink channel of EVERY run (2.4 GHz -> ~2.22 Hz per km/h).
+%
+% Decision latency = detection path of one frame (CNN forward pass and
+% Mahalanobis score) + one policy_decide.m cycle, timed with tic/toc around
+% exactly that computation; GUI drawing is outside. measure_latency.m gives the
+% full per-component statistics.
+%
+% ARCHITECTURE: no nested functions anywhere in this file (see D24). Static state
+% (models, parameters, UI handles, colours) lives in fig.UserData; state that
+% changes while a sequence runs (history, video writer, log file, abort flag,
+% last run) lives in appdata so a callback can never overwrite it with a stale
+% copy of UserData.
+%
+% Usage: run demo_gui from the project root (same folder as main.m).
+
+close all; clc;
+
+%% ---------- Load trained models and simulation parameters once ----------
+tBoot = tic;
+fprintf('Loading trained models and parameters...\n');
+D = load('data/trained_detector.mat', 'net', 'classes', 'ood');
+Q = load('data/trained_dqn.mat', 'agent', 'confirm', 'alarm_mode', 'drop_db');
+[featMean, featStd] = loadNormStats();
+p0 = loadInitialParams();
+fprintf('  models + parameters loaded (%.1f s)\n', toc(tBoot));
+
+env = struct();
+env.cnn_net    = D.net;
+env.class_list = cellstr(D.classes(:));
+env.classes    = D.classes;
+env.dqn_agent  = Q.agent;
+env.feat_mean  = featMean;
+env.feat_std   = featStd;
+env.p0         = p0;
+env.modelName  = 'UAV_GCS_Threat_Link';
+env.fs         = p0.symbol_rate * p0.sps;
+env.delay_bits = 20;
+env.img_size = 128; env.win = 128; env.novlp = 113; env.nfft = 128;
+env.db_lo = -40; env.db_hi = 40; env.temporal_window = 10;
+env.threats = {'jamming','reactive_jamming','sweeping_jammer','noise_burst', ...
+    'path_loss','spoofing','antenna_fault','benign_interference','none'};
+env.snr_levels = p0.EbNo_dB(:)';
+if isfield(p0, 'speed_kmh_min')
+    env.speed_range = [p0.speed_kmh_min p0.speed_kmh_max];
+else
+    env.speed_range = [50 120];
+end
+env.action_names = env.dqn_agent.action_names;
+env.na = find(strcmp(env.action_names, 'no_action'), 1);
+env.ood = D.ood;
+Tood = ood_thresholds(0.95);                   % D44: Mahalanobis unknown-threat threshold (95% of known kept)
+env.maha_val = Tood.maha_val;
+env.PP = struct('actions', {env.action_names}, 'classes', {env.class_list(:)'}, 'sps', p0.sps, ...
+    'bps', p0.bits_per_symbol, 'maha_thr', Tood.maha);
+if isfield(Q, 'confirm'), env.PP.confirm = Q.confirm; end
+if isfield(Q, 'alarm_mode'), env.PP.alarm_mode = Q.alarm_mode; end
+if isfield(Q, 'drop_db') && ~isempty(Q.drop_db), env.PP.drop_db = Q.drop_db; end
+env.baseline = struct('jsr_db',p0.jsr_db,'path_loss_db',p0.path_loss_db, ...
+    'fault_atten_db',p0.fault_atten_db,'spoof_sir_db',p0.spoof_sir_db, ...
+    'benign_int_db',p0.benign_int_db);
+env.sev = buildSeverityTable();
+env.surv = loadSurvReference();
+env.ber_floor = 0.5 / p0.frame_length;      % "zero errors in a frame" plotting floor
+
+fprintf('Warming up CNN, DQN, and spectrogram()...\n');
+warmUp(env);
+fprintf('  warm-up done (%.1f s total)\n', toc(tBoot));
+
+%% ---------- Look & feel ----------
+c = struct();
+c.bg      = [0.055 0.066 0.090];
+c.panelBg = [0.105 0.120 0.160];
+c.axBg    = [0.072 0.086 0.120];
+c.termBg  = [0.030 0.040 0.055];
+c.txt     = [0.90 0.92 0.96];
+c.mut     = [0.62 0.66 0.74];
+c.accent  = [0.30 0.62 0.98];
+c.green   = [0.22 0.80 0.48];
+c.amber   = [0.97 0.72 0.22];
+c.red     = [0.93 0.32 0.32];
+c.purp    = [0.68 0.44 0.95];
+c.cyan    = [0.30 0.80 0.85];
+c.term    = [0.45 0.95 0.55];
+c.font    = 'Segoe UI';
+c.mono    = 'Consolas';
+
+fig = uifigure('Name', 'UAV-GCS Adaptive Secure Communications - Operator Console', ...
+    'Position', [20 20 1680 940], 'Color', c.bg);
+
+root = uigridlayout(fig, [2 1]);
+root.RowHeight = {54, '1x'}; root.Padding = [8 8 8 8]; root.RowSpacing = 6;
+root.BackgroundColor = c.bg;
+
+%% ---------- Header ----------
+hdr = uipanel(root, 'BackgroundColor', c.panelBg, 'BorderType', 'none');
+hdr.Layout.Row = 1;
+hg = uigridlayout(hdr, [1 4]);
+hg.ColumnWidth = {'1x', 470, 30, 270}; hg.Padding = [14 4 14 4]; hg.BackgroundColor = c.panelBg;
+place(mkLabel(hg, 'UAV-GCS ADAPTIVE SECURE COMMUNICATIONS', c, 'FontSize', 17, 'FontWeight', 'bold'), 1, 1);
+place(mkLabel(hg, sprintf('CNN 9-class detector | DQN %d configurations | Rician K=10 dB @ 2.4 GHz', ...
+    numel(env.action_names)), c, ...
+    'FontColor', c.mut, 'FontSize', 11, 'HorizontalAlignment', 'right'), 1, 2);
+lamp = place(mkLabel(hg, char(9679), c, 'FontSize', 22, 'FontColor', c.mut, 'HorizontalAlignment', 'center'), 1, 3);
+lampTxt = place(mkLabel(hg, 'LINK: STANDBY', c, 'FontSize', 14, 'FontWeight', 'bold', 'FontColor', c.mut), 1, 4);
+
+%% ---------- Tabs ----------
+tg = uitabgroup(root); tg.Layout.Row = 2;
+tabLive = uitab(tg, 'Title', '  LIVE OPERATIONS  ',   'BackgroundColor', c.bg);
+tabEp   = uitab(tg, 'Title', '  CONTINUOUS EPISODE  ', 'BackgroundColor', c.bg);
+tabKpi  = uitab(tg, 'Title', '  KPI & RESULTS  ',     'BackgroundColor', c.bg);
+tabSurv = uitab(tg, 'Title', '  SURVIVABILITY MAP  ', 'BackgroundColor', c.bg);
+tabLog  = uitab(tg, 'Title', '  SESSION LOG  ',       'BackgroundColor', c.bg);
+
+ui = buildLiveTab(tabLive, env, c);
+ui = mergeStructs(ui, buildEpisodeTab(tabEp, env, c));
+ui = mergeStructs(ui, buildKpiTab(tabKpi, c));
+ui = mergeStructs(ui, buildSurvTab(tabSurv, env, c));
+ui = mergeStructs(ui, buildLogTab(tabLog, c));
+ui.linkLamp = lamp; ui.linkTxt = lampTxt; ui.tabGroup = tg;
+
+fprintf('  UI built (%.1f s total)\n', toc(tBoot));
+fig.UserData = struct('env', env, 'ui', ui, 'colors', c);
+setappdata(fig, 'history', {});
+setappdata(fig, 'videoWriter', []);
+setappdata(fig, 'logFid', -1);
+setappdata(fig, 'abortFlag', false);
+setappdata(fig, 'lastRun', []);
+setappdata(fig, 'epPools', containers.Map());
+setappdata(fig, 'epAbort', false);
+
+ui.matrixTbl.CellEditCallback    = @matrixEditCallback;
+ui.speedSpin.ValueChangedFcn     = @speedChanged;
+ui.thrSlider.ValueChangingFcn    = @thrChanging;
+ui.thrSlider.ValueChangedFcn     = @thrChanged;
+ui.runBtn.ButtonPushedFcn        = @runSequence;
+ui.abortBtn.ButtonPushedFcn      = @abortSequence;
+ui.exportBtn.ButtonPushedFcn     = @exportHistory;
+ui.clearBtn.ButtonPushedFcn      = @clearHistory;
+ui.kpiRefreshBtn.ButtonPushedFcn = @refreshKpi;
+ui.survMapDD.ValueChangedFcn     = @survChanged;
+ui.survThreatDD.ValueChangedFcn  = @survChanged;
+ui.epRunBtn.ButtonPushedFcn      = @runEpisode;
+ui.epStopBtn.ButtonPushedFcn     = @stopEpisode;
+ui.epHystChk.ValueChangedFcn     = @epHystChanged;
+ui.epExportBtn.ButtonPushedFcn   = @exportEpisode;
+ui.ep3dBtn.ButtonPushedFcn       = @openEpisode3d;
+fig.CloseRequestFcn              = @closeApp;
+
+speedChanged(ui.speedSpin, []);
+ui.thrSlider.Value = 95;                              % production threshold: 95% of known frames kept
+thrChanged(ui.thrSlider, []);
+resetRunViews(fig);
+drawLinkDiagram(fig, 'idle', '', '', struct());
+setProgress(fig, 0);
+loadKpiTab(fig);
+updateSurvMap(fig);
+updateSessionSummary(fig);
+fprintf('System ready (%.1f s total).\n\n', toc(tBoot));
+appLog(fig, 'SYSTEM INITIALIZED AND STANDBY.');
+if isempty(env.surv)
+    appLog(fig, 'NOTE: data/survivability_boundary.mat not found - survivability verdicts disabled.');
+end
+
+end
+
+%% =====================================================================
+%% =========================  BUILD: LIVE TAB  ==========================
+%% =====================================================================
+function ui = buildLiveTab(tab, env, c)
+    g = uigridlayout(tab, [1 3]);
+    g.ColumnWidth = {392, '1x', 452}; g.Padding = [4 4 4 4]; g.ColumnSpacing = 8;
+    g.BackgroundColor = c.bg;
+
+    %% ---------------- LEFT COLUMN ----------------
+    gl = uigridlayout(g, [6 1]); gl.Layout.Column = 1;
+    gl.RowHeight = {262, 236, 44, 46, 78, '1x'}; gl.Padding = [0 0 0 0];
+    gl.RowSpacing = 6; gl.BackgroundColor = c.bg;
+
+    % ---- 1. Test matrix ----
+    p1 = mkPanel(gl, '1 - TEST MATRIX  (threat x Eb/N0 dB)', c); p1.Layout.Row = 1;
+    g1 = uigridlayout(p1, [1 1]); g1.Padding = [6 4 6 6]; g1.BackgroundColor = c.panelBg;
+    nS = numel(env.snr_levels);
+    cnames   = [{'ALL','Threat'}, arrayfun(@(x) sprintf('%g', x), env.snr_levels, 'UniformOutput', false)];
+    cformats = [{'logical','char'}, repmat({'logical'}, 1, nS)];
+    cedit    = [true false true(1, nS)];
+    tdata = cell(numel(env.threats), 2 + nS);
+    tdata(:,1) = {false};
+    tdata(:,2) = cellfun(@(x) upper(strrep(x,'_',' ')), env.threats(:), 'UniformOutput', false);
+    tdata(:,3:end) = {false};
+    k4 = find(env.snr_levels == 4, 1); if isempty(k4), k4 = 1; end
+    tdata{1, 2 + k4} = true;                      % default: jamming @ 4 dB
+    matrixTbl = uitable(g1, 'Data', tdata, 'ColumnName', cnames, 'ColumnFormat', cformats, ...
+        'Tooltip', {'Your test plan: tick which attacks to run, and at which link quality.', ...
+        'Eb/N0 = how strong the link is to begin with: 0 dB = weak, far, noisy;', ...
+        '10 dB = strong and close. The same attack that is harmless at 10 dB', ...
+        'can take the link down at 0-2 dB. One live simulation per ticked cell.'}, ...
+        'ColumnEditable', cedit, 'ColumnWidth', [{36, 124}, repmat({30}, 1, nS)], 'RowName', [], ...
+        'FontSize', 10, 'FontName', c.font, 'BackgroundColor', [c.termBg; c.axBg], ...
+        'ForegroundColor', c.txt);
+
+    % ---- 2. Flight & threat settings ----
+    p2 = mkPanel(gl, '2 - FLIGHT & THREAT SETTINGS', c); p2.Layout.Row = 2;
+    g2 = uigridlayout(p2, [7 3]);
+    g2.RowHeight = {26, 18, 26, 20, 34, 24, 24}; g2.ColumnWidth = {150, '1x', 16};
+    g2.Padding = [8 6 8 6]; g2.RowSpacing = 4; g2.BackgroundColor = c.panelBg;
+
+    place(mkLabel(g2, 'UAV speed (km/h)', c), 1, 1);
+    speedSpin = uispinner(g2, 'Limits', env.speed_range, 'Step', 0.5, 'Value', 72, ...
+        'ValueDisplayFormat', '%.1f', 'RoundFractionalValues', 'off', ...
+        'BackgroundColor', c.termBg, 'FontColor', c.txt, 'FontName', c.font, 'FontSize', 12);
+    place(speedSpin, 1, 2);
+    speedInfo = place(mkLabel(g2, '', c, 'FontColor', c.cyan, 'FontSize', 10, 'FontName', c.mono), 2, [1 2]);
+
+    place(mkLabel(g2, 'Threat severity', c), 3, 1);
+    sevDD = uidropdown(g2, 'Items', {'Nominal (baseline)','Level 1 (lowest)','Level 2','Level 3','Level 4','Level 5 (highest)'}, ...
+        'ItemsData', [0 1 2 3 4 5], 'Value', 0, 'BackgroundColor', c.termBg, 'FontColor', c.txt, ...
+        'FontName', c.font);
+    place(sevDD, 3, 2);
+
+    thrLbl = place(mkLabel(g2, '', c, 'FontSize', 11), 4, [1 2]);
+    thrSlider = uislider(g2, 'Limits', [80 99], 'Value', 95, 'MajorTicks', [80 85 90 95 99], ...
+        'MinorTicks', [], 'FontColor', c.mut);
+    place(thrSlider, 5, [1 2]);
+
+    ruleChk = uicheckbox(g2, 'Text', 'Compare with rule-based policy (extra real sim)', ...
+        'Value', true, 'FontColor', c.txt, 'FontName', c.font);
+    place(ruleChk, 6, [1 2]);
+    recordChk = uicheckbox(g2, 'Text', 'Capture session video (.mp4)', 'Value', false, ...
+        'FontColor', c.red, 'FontWeight', 'bold', 'FontName', c.font);
+    place(recordChk, 7, [1 2]);
+
+    % ---- hover help: '?' per setting, same text on the control itself (D54) ----
+    tipSpeed = {'How fast the UAV flies. The radio effect: the received signal strength', ...
+        'wobbles as the UAV moves, and speed sets how fast it wobbles.', ...
+        'SLOWER flight = long, deep dips in signal - harder, a natural dip can', ...
+        'look like an attack. FASTER flight = short, frequent dips that average', ...
+        'out. Attack power and link budget do not change with speed.'};
+    tipSev = {'How strong the attack is. NOMINAL = exactly what the system was', ...
+        'trained against. L1-L2 = weaker than trained (easy). L4-L5 = stronger', ...
+        'than trained (hard: more corrupted commands, slower recovery, and some', ...
+        'cells become impossible for ANY response - see the survivability map).', ...
+        'What it scales per threat: jammer power, depth of the range loss,', ...
+        'fake-signal power, how long the antenna is dead, neighbor power.'};
+    tipThr = {'How suspicious the system is of signals it does not recognize.', ...
+        'LEFT (80) = very suspicious: reacts earlier to never-seen attacks, but', ...
+        'also mistrusts normal frames - UNKNOWN appears more often.', ...
+        'RIGHT (99) = almost never says UNKNOWN, trusts its known classes only.', ...
+        '95 is the tested production setting: the oddest 5% of frames are', ...
+        'flagged, and a flag alone never fires a response - only flag + a', ...
+        'link that actually degrades.'};
+    tipRule = {'Fly the same attack with the fixed-rules autopilot next to the AI:', ...
+        'when they pick different responses, one extra real simulation runs so', ...
+        'you see BOTH outcomes side by side. Costs a few seconds per run.'};
+    tipRec = {'Saves a snapshot video (3 pictures per run) as MP4. Each snapshot', ...
+        'freezes the app for ~1-2 s, so runs get noticeably slower. For a', ...
+        'smooth video, leave this OFF and record the screen with Windows', ...
+        '(Win+Alt+R) - that costs nothing.'};
+    speedSpin.Tooltip = tipSpeed; helpMark(g2, 1, 3, tipSpeed, c);
+    sevDD.Tooltip = tipSev;       helpMark(g2, 3, 3, tipSev, c);
+    thrSlider.Tooltip = tipThr;   helpMark(g2, 4, 3, tipThr, c);
+    ruleChk.Tooltip = tipRule;    helpMark(g2, 6, 3, tipRule, c);
+    recordChk.Tooltip = tipRec;   helpMark(g2, 7, 3, tipRec, c);
+
+    % ---- Run / abort ----
+    gb = uigridlayout(gl, [1 2]); gb.Layout.Row = 3; gb.ColumnWidth = {'1x', 110};
+    gb.Padding = [0 0 0 0]; gb.ColumnSpacing = 6; gb.BackgroundColor = c.bg;
+    runBtn = uibutton(gb, 'Text', 'RUN SEQUENCE', 'FontSize', 15, 'FontWeight', 'bold', ...
+        'BackgroundColor', c.green, 'FontColor', [0.03 0.10 0.06], 'FontName', c.font);
+    place(runBtn, 1, 1);
+    abortBtn = uibutton(gb, 'Text', 'ABORT', 'FontSize', 14, 'FontWeight', 'bold', ...
+        'BackgroundColor', c.red, 'FontColor', 'white', 'Enable', 'off', 'FontName', c.font);
+    place(abortBtn, 1, 2);
+
+    % ---- Progress + timer ----
+    p4 = uipanel(gl, 'BackgroundColor', c.panelBg, 'BorderType', 'none'); p4.Layout.Row = 4;
+    g4 = uigridlayout(p4, [2 2]); g4.RowHeight = {20, '1x'}; g4.ColumnWidth = {'1x', 130};
+    g4.Padding = [8 4 8 6]; g4.RowSpacing = 2; g4.BackgroundColor = c.panelBg;
+    progLbl = place(mkLabel(g4, 'PROGRESS  0 / 0', c, 'FontSize', 11, 'FontWeight', 'bold', 'FontColor', c.accent), 1, 1);
+    timeLbl = place(mkLabel(g4, '00:00.00', c, 'FontSize', 15, 'FontWeight', 'bold', 'FontColor', c.accent, ...
+        'FontName', c.mono, 'HorizontalAlignment', 'right'), 1, 2);
+    progAx = place(uiaxes(g4), 2, [1 2]);
+    styleAx(progAx, c); progAx.Color = c.termBg;
+    progAx.XTick = []; progAx.YTick = []; progAx.XColor = 'none'; progAx.YColor = 'none';
+    progAx.XLim = [0 1]; progAx.YLim = [0 1];
+
+    % ---- Queue ----
+    p5 = mkPanel(gl, 'UPCOMING QUEUE', c); p5.Layout.Row = 5;
+    g5 = uigridlayout(p5, [1 1]); g5.Padding = [6 2 6 6]; g5.BackgroundColor = c.panelBg;
+    queueList = uilistbox(g5, 'Items', {'(empty)'}, 'FontSize', 10, 'FontName', c.mono, ...
+        'BackgroundColor', c.termBg, 'FontColor', c.mut, ...
+        'Tooltip', {'Runs waiting their turn; the top one runs next. ABORT stops after', 'the current run.'});
+
+    % ---- Terminal ----
+    p6 = mkPanel(gl, 'EVENT TERMINAL', c); p6.Layout.Row = 6;
+    g6 = uigridlayout(p6, [1 1]); g6.Padding = [6 2 6 6]; g6.BackgroundColor = c.panelBg;
+    termArea = uitextarea(g6, 'Value', {''}, 'Editable', 'off', 'FontName', c.mono, 'FontSize', 10, ...
+        'BackgroundColor', c.termBg, 'FontColor', c.term, ...
+        'Tooltip', {'Everything that happened, in order, with timestamps. The same text', 'is saved to a log file per session.'});
+
+    %% ---------------- CENTER COLUMN ----------------
+    gc = uigridlayout(g, [4 1]); gc.Layout.Column = 2;
+    gc.RowHeight = {168, 58, 252, '1x'}; gc.Padding = [0 0 0 0]; gc.RowSpacing = 6;
+    gc.BackgroundColor = c.bg;
+
+    pLink = mkPanel(gc, 'UAV <-> GCS LINK', c); pLink.Layout.Row = 1;
+    gLink = uigridlayout(pLink, [1 1]); gLink.Padding = [4 2 4 4]; gLink.BackgroundColor = c.panelBg;
+    linkAx = uiaxes(gLink); styleAx(linkAx, c); linkAx.Color = c.panelBg;
+    linkAx.XTick = []; linkAx.YTick = []; linkAx.XColor = 'none'; linkAx.YColor = 'none';
+    linkAx.XLim = [0 16]; linkAx.YLim = [0 3];
+
+    verdictLbl = uilabel(gc, 'Text', 'AWAITING SEQUENCE', 'FontSize', 13, 'FontWeight', 'bold', ...
+        'FontName', c.font, 'FontColor', c.mut, 'BackgroundColor', c.panelBg, ...
+        'HorizontalAlignment', 'center', 'VerticalAlignment', 'center');
+    verdictLbl.Layout.Row = 2;
+    verdictLbl.Tooltip = {'The referee''s call for the run, judged exactly like the survivability', ...
+        'map (final errors vs a clean link), plus the bottom line for the flight.'};
+
+    pSig = mkPanel(gc, 'RECEIVED SIGNAL', c); pSig.Layout.Row = 3;
+    gSig = uigridlayout(pSig, [1 2]); gSig.Padding = [6 2 6 6]; gSig.ColumnSpacing = 8;
+    gSig.BackgroundColor = c.panelBg;
+    specAx = place(uiaxes(gSig), 1, 1); styleAx(specAx, c);
+    iqAx   = place(uiaxes(gSig), 1, 2); styleAx(iqAx, c);
+
+    pTl = mkPanel(gc, 'LINK METRICS TIMELINE  (before / after countermeasure)', c); pTl.Layout.Row = 4;
+    gTl = uigridlayout(pTl, [2 1]); gTl.Padding = [6 2 6 6]; gTl.RowSpacing = 6;
+    gTl.BackgroundColor = c.panelBg;
+    berAx  = place(uiaxes(gTl), 1, 1); styleAx(berAx, c);
+    rssiAx = place(uiaxes(gTl), 2, 1); styleAx(rssiAx, c);
+
+    %% ---------------- RIGHT COLUMN ----------------
+    gr = uigridlayout(g, [3 1]); gr.Layout.Column = 3;
+    gr.RowHeight = {320, 250, '1x'}; gr.Padding = [0 0 0 0]; gr.RowSpacing = 6;
+    gr.BackgroundColor = c.bg;
+
+    % ---- Detection ----
+    pDet = mkPanel(gr, '3 - DETECTION  (CNN, sliding window)', c); pDet.Layout.Row = 1;
+    gDet = uigridlayout(pDet, [4 2]); gDet.RowHeight = {18, 92, 34, '1x'};
+    gDet.Padding = [8 4 8 6]; gDet.RowSpacing = 3; gDet.BackgroundColor = c.panelBg;
+    tipConfG = {'The detector''s confidence in what it just saw. In the green (90+):', ...
+        'trust it. Below 60: treat it as a guess - the UNKNOWN flag and the', ...
+        'link monitor then protect the decision.'};
+    tipLatG = {'Time from "frame received" to "response chosen" on this computer.', ...
+        'Under 10 ms counts as real time for detection systems; one link frame', ...
+        'lasts 0.5 ms. The first run of a session is slower (warm-up).'};
+    place(mkLabel(gDet, 'HOW SURE IS THE DETECTOR (%)  [?]', c, 'FontSize', 10, 'FontColor', c.mut, 'HorizontalAlignment', 'center', 'Tooltip', tipConfG), 1, 1);
+    place(mkLabel(gDet, 'REACTION TIME (ms)  [?]', c, 'FontSize', 10, 'FontColor', c.mut, 'HorizontalAlignment', 'center', 'Tooltip', tipLatG), 1, 2);
+    confGauge = place(uigauge(gDet, 'semicircular', 'Limits', [0 100], 'FontColor', c.txt, 'BackgroundColor', c.panelBg), 2, 1);
+    confGauge.ScaleColors = {[0.93 0.32 0.32], [0.97 0.72 0.22], [0.22 0.80 0.48]};
+    confGauge.ScaleColorLimits = [0 60; 60 90; 90 100];
+    latGauge = place(uigauge(gDet, 'semicircular', 'Limits', [0 30], 'FontColor', c.txt, 'BackgroundColor', c.panelBg), 2, 2);
+    latGauge.ScaleColors = {[0.22 0.80 0.48], [0.97 0.72 0.22], [0.93 0.32 0.32]};
+    latGauge.ScaleColorLimits = [0 8; 8 15; 15 30];
+    confGauge.Tooltip = tipConfG; latGauge.Tooltip = tipLatG;
+    detLbl = place(mkLabel(gDet, '-', c, 'FontSize', 15, 'FontWeight', 'bold', 'HorizontalAlignment', 'center'), 3, [1 2]);
+    probAx = place(uiaxes(gDet), 4, [1 2]); styleAx(probAx, c);
+
+    % ---- Decision ----
+    pDec = mkPanel(gr, '4 - DECISION  (DQN vs rule-based)', c); pDec.Layout.Row = 2;
+    gDec = uigridlayout(pDec, [2 1]); gDec.RowHeight = {'1x', 50};
+    gDec.Padding = [8 4 8 6]; gDec.RowSpacing = 3; gDec.BackgroundColor = c.panelBg;
+    qAx = place(uiaxes(gDec), 1, 1); styleAx(qAx, c);
+    decLbl = place(mkLabel(gDec, {'-'}, c, 'FontSize', 12, 'FontName', c.mono, 'VerticalAlignment', 'top'), 2, 1);
+
+    % ---- Outcome ----
+    pOut = mkPanel(gr, '5 - OUTCOME  (mean BER over all valid frames)', c); pOut.Layout.Row = 3;
+    gOut = uigridlayout(pOut, [2 1]); gOut.RowHeight = {'1x', 84};
+    gOut.Padding = [8 4 8 6]; gOut.RowSpacing = 3; gOut.BackgroundColor = c.panelBg;
+    outAx = place(uiaxes(gOut), 1, 1); styleAx(outAx, c);
+    outLbl = place(mkLabel(gOut, {'-'}, c, 'FontSize', 10, 'FontName', c.mono, 'VerticalAlignment', 'top', ...
+        'Tooltip', {'Errors before vs after each policy, how much of the damage was', ...
+        'undone, and what the response costs while active (data rate, spectrum).'}), 2, 1);
+
+    ui = struct('matrixTbl',matrixTbl,'speedSpin',speedSpin,'speedInfo',speedInfo,'sevDD',sevDD, ...
+        'thrLbl',thrLbl,'thrSlider',thrSlider,'ruleChk',ruleChk,'recordChk',recordChk, ...
+        'runBtn',runBtn,'abortBtn',abortBtn,'progLbl',progLbl,'timeLbl',timeLbl,'progAx',progAx, ...
+        'queueList',queueList,'termArea',termArea,'linkAx',linkAx,'verdictLbl',verdictLbl, ...
+        'specAx',specAx,'iqAx',iqAx,'berAx',berAx,'rssiAx',rssiAx,'confGauge',confGauge, ...
+        'latGauge',latGauge,'detLbl',detLbl,'probAx',probAx,'qAx',qAx,'decLbl',decLbl, ...
+        'outAx',outAx,'outLbl',outLbl);
+end
+
+%% =====================================================================
+%% =====================  BUILD: CONTINUOUS EPISODE TAB  ================
+%% =====================================================================
+function ui = buildEpisodeTab(tab, env, c)
+    g = uigridlayout(tab, [1 2]); g.ColumnWidth = {340, '1x'}; g.Padding = [4 4 4 4];
+    g.ColumnSpacing = 8; g.BackgroundColor = c.bg;
+
+    pl = mkPanel(g, 'EPISODE SETTINGS', c); pl.Layout.Column = 1;
+    gl = uigridlayout(pl, [15 4]);
+    gl.RowHeight = {18, 26, 18, 26, 18, 26, 18, 26, 24, 26, 26, 26, 40, 30, '1x'};
+    gl.ColumnWidth = {'1x', 14, '1x', 14}; gl.Padding = [10 6 10 10]; gl.RowSpacing = 4; gl.BackgroundColor = c.panelBg;
+
+    % ---- hover help (D55): one '?' per setting, same text on the control ----
+    tipThreat = {'Which attack hits the link mid-flight; until the onset the link is', ...
+        'clean. Pick NONE for a fully clean flight - then ANY response you see', ...
+        'fire is a false alarm, which is exactly what that setting demonstrates.'};
+    tipEbno = {'How strong the link is before the attack. 0-2 dB = far, weak link:', ...
+        'errors exist even with no attack, and natural signal dips can be', ...
+        'mistaken for one. 8-10 dB = strong link: any trouble you see is the', ...
+        'attack itself. Same attack, very different difficulty.'};
+    tipSevE = {'How strong the attack is. NOMINAL = exactly what the system was', ...
+        'trained against; L1-L2 weaker (easy); L4-L5 stronger than trained', ...
+        '(more corrupted commands, slower recovery, some cells impossible for', ...
+        'any response - see the survivability map).'};
+    tipSpeedE = {'How fast the UAV flies. Slower = long, deep dips in signal strength', ...
+        '(harder, a dip can look like an attack); faster = short, frequent dips', ...
+        'that average out. Attack power and link budget are unchanged.'};
+    tipPolicy = {'Who flies the response. BOTH = the AI and the fixed rules face the', ...
+        'exact same signal, frame by frame - a fair head-to-head. A single', ...
+        'policy is cleaner for a focused demonstration.'};
+    tipPre = {'How long the link flies healthy before the attack. This is what the', ...
+        'system learns as "normal" - including the signal level it later uses', ...
+        'to tell a real range loss from a natural dip. Fewer cycles = weaker', ...
+        'reference and more false alarms possible; more = longer wait.'};
+    tipPost = {'How long the flight continues under attack. Longer = the full story:', ...
+        'detection, the switch, recovery, and whether it stays stable.', ...
+        'T_detect / T_act / T_recover are measured over these cycles.'};
+    tipHyst = {'Plan B: if the chosen response has not healed the link within 3', ...
+        'cycles, try the next-best response not used yet in this incident.', ...
+        'Rescues wrong first picks, at the price of extra switching.'};
+    tipConf = {'Trigger discipline: the attack must be seen on 2 cycles in a row', ...
+        'before ANY response may fire. One noisy frame never causes a switch -', ...
+        'this is why reactions take at least ~1 ms and false alarms are rare.'};
+    tipDwell = {'The rules-autopilot''s own patience: it commits a new response only', ...
+        'after proposing it 2 cycles in a row, and never within 3 cycles of', ...
+        'its last change - so it does not flap between responses.'};
+    tipPace = {'Screen speed only. Decisions and all measured times are unaffected.', ...
+        '"fastest" for getting results; 150-400 ms per cycle for an audience.'};
+    tipSeed = {'The dice of the episode. 0 = new random conditions every run. A fixed', ...
+        'number = the EXACT same flight again (same dips, same frames) - repeat', ...
+        'an interesting case, or show the system is deterministic.'};
+
+    ddArgs = {'BackgroundColor', c.termBg, 'FontColor', c.txt, 'FontName', c.font};
+    place(mkLabel(gl, 'Threat', c, 'FontColor', c.mut), 1, 1);
+    place(mkLabel(gl, 'Eb/N0 (dB)', c, 'FontColor', c.mut), 1, 3);
+    epThreatDD = place(uidropdown(gl, 'Items', cellfun(@niceName, env.threats, 'UniformOutput', false), ...
+        'ItemsData', env.threats, 'Value', 'jamming', 'Tooltip', tipThreat, ddArgs{:}), 2, 1);
+    helpMark(gl, 2, 2, tipThreat, c);
+    k4 = find(env.snr_levels == 4, 1); if isempty(k4), k4 = 1; end
+    epSnrDD = place(uidropdown(gl, 'Items', arrayfun(@(x) sprintf('%g', x), env.snr_levels, 'UniformOutput', false), ...
+        'ItemsData', env.snr_levels, 'Value', env.snr_levels(k4), 'Tooltip', tipEbno, ddArgs{:}), 2, 3);
+    helpMark(gl, 2, 4, tipEbno, c);
+
+    place(mkLabel(gl, 'Threat severity', c, 'FontColor', c.mut), 3, 1);
+    place(mkLabel(gl, 'UAV speed (km/h)', c, 'FontColor', c.mut), 3, 3);
+    epSevDD = place(uidropdown(gl, 'Items', {'Nominal','Level 1','Level 2','Level 3','Level 4','Level 5'}, ...
+        'ItemsData', [0 1 2 3 4 5], 'Value', 0, 'Tooltip', tipSevE, ddArgs{:}), 4, 1);
+    helpMark(gl, 4, 2, tipSevE, c);
+    epSpeedSpin = place(uispinner(gl, 'Limits', env.speed_range, 'Step', 0.5, 'Value', 72, ...
+        'ValueDisplayFormat', '%.1f', 'RoundFractionalValues', 'off', 'Tooltip', tipSpeedE, ...
+        'BackgroundColor', c.termBg, 'FontColor', c.txt, 'FontName', c.font), 4, 3);
+    helpMark(gl, 4, 4, tipSpeedE, c);
+
+    place(mkLabel(gl, 'Policy', c, 'FontColor', c.mut), 5, [1 4]);
+    epPolicyDD = place(uidropdown(gl, 'Items', {'DQN and rule-based (same frames)', 'DQN only', 'Rule-based only'}, ...
+        'ItemsData', {'both', 'dqn', 'rule'}, 'Value', 'both', 'Tooltip', tipPolicy, ddArgs{:}), 6, [1 3]);
+    helpMark(gl, 6, 4, tipPolicy, c);
+
+    place(mkLabel(gl, 'Clean cycles', c, 'FontColor', c.mut), 7, 1);
+    place(mkLabel(gl, 'Cycles after onset', c, 'FontColor', c.mut), 7, 3);
+    epPreSpin  = place(uispinner(gl, 'Limits', [5 100], 'Step', 5, 'Value', 20, 'Tooltip', tipPre, ...
+        'BackgroundColor', c.termBg, 'FontColor', c.txt, 'FontName', c.font), 8, 1);
+    helpMark(gl, 8, 2, tipPre, c);
+    epPostSpin = place(uispinner(gl, 'Limits', [20 300], 'Step', 10, 'Value', 60, 'Tooltip', tipPost, ...
+        'BackgroundColor', c.termBg, 'FontColor', c.txt, 'FontName', c.font), 8, 3);
+    helpMark(gl, 8, 4, tipPost, c);
+
+    epHystChk = place(uicheckbox(gl, 'Text', 'Escalation when the link stays degraded', 'Value', false, ...
+        'Tooltip', tipHyst, 'FontColor', c.txt, 'FontName', c.font), 9, [1 3]);
+    helpMark(gl, 9, 4, tipHyst, c);
+    epDwellSpin = place(mkLabel(gl, sprintf('alarm confirmation %d-of-%d', confirmOf(env)), c, 'FontColor', c.mut, ...
+        'FontSize', 10, 'Tooltip', tipConf), 10, 1);
+    helpMark(gl, 10, 2, tipConf, c);
+    epHoldSpin  = place(mkLabel(gl, 'rule: dwell 2, hold 3', c, 'FontColor', c.mut, 'FontSize', 10, ...
+        'Tooltip', tipDwell), 10, 3);
+    helpMark(gl, 10, 4, tipDwell, c);
+
+    place(mkLabel(gl, 'Playback', c, 'FontColor', c.mut), 11, 1);
+    epPaceDD = place(uidropdown(gl, 'Items', {'fastest', '50 ms / cycle', '150 ms / cycle', '400 ms / cycle'}, ...
+        'ItemsData', [0 0.05 0.15 0.4], 'Value', 0.05, 'Tooltip', tipPace, ddArgs{:}), 11, 3);
+    helpMark(gl, 11, 4, tipPace, c);
+    place(mkLabel(gl, 'New frame draw each run', c, 'FontColor', c.mut, 'FontSize', 10), 12, 1);
+    epSeedFld = place(uieditfield(gl, 'numeric', 'Value', 0, 'Limits', [0 Inf], 'RoundFractionalValues', 'on', ...
+        'ValueDisplayFormat', 'seed %d  (0 = new)', 'Tooltip', tipSeed, ...
+        'BackgroundColor', c.termBg, 'FontColor', c.txt), 12, 3);
+    helpMark(gl, 12, 4, tipSeed, c);
+
+    epRunBtn = place(uibutton(gl, 'Text', 'RUN EPISODE', 'FontSize', 14, 'FontWeight', 'bold', ...
+        'BackgroundColor', c.green, 'FontColor', [0.03 0.10 0.06], 'FontName', c.font), 13, [1 2]);
+    epStopBtn = place(uibutton(gl, 'Text', 'STOP', 'FontSize', 14, 'FontWeight', 'bold', ...
+        'BackgroundColor', c.red, 'FontColor', 'white', 'Enable', 'off', 'FontName', c.font), 13, [3 4]);
+    epExportBtn = place(uibutton(gl, 'Text', 'EXPORT SCREEN (PNG)', 'FontWeight', 'bold', 'FontName', c.font, ...
+        'BackgroundColor', c.accent, 'FontColor', [0.03 0.06 0.12], 'Enable', 'off'), 14, [1 2]);
+    ep3dBtn = place(uibutton(gl, 'Text', '3D VIEW', 'FontWeight', 'bold', 'FontName', c.font, ...
+        'BackgroundColor', c.cyan, 'FontColor', [0.03 0.06 0.12], 'Enable', 'off', ...
+        'Tooltip', {'Replays the last episode in the Unreal 3D view (viz3d/v3d_live.m): the UAV,', ...
+        'the GCS, the interferer in its real direction, the link and the receive pattern', ...
+        'of the two UAV antennas, DQN and rules side by side, cycle by cycle.'}), 14, [3 4]);
+    epStatus = place(uitextarea(gl, 'Value', {'Frame pools are built per scenario on the first run', ...
+        '(10 Simulink runs, about a minute) and reused afterwards.'}, 'Editable', 'off', ...
+        'FontName', c.mono, 'FontSize', 10, 'BackgroundColor', c.termBg, 'FontColor', c.txt, ...
+        'Tooltip', {'First run of a scenario does about a minute of real simulations to', ...
+        'build its frames; every run after that reuses them and starts fast.'}), 15, [1 4]);
+
+    pr = mkPanel(g, 'CONTINUOUS EPISODE  (one cycle = one received frame; decision every cycle)', c);
+    pr.Layout.Column = 2;
+    gr = uigridlayout(pr, [4 1]); gr.RowHeight = {'1.3x', '1x', '1x', 24};
+    gr.Padding = [8 4 8 6]; gr.RowSpacing = 6; gr.BackgroundColor = c.panelBg;
+    epBerAx = place(uiaxes(gr), 1, 1); styleAx(epBerAx, c);
+    epDetAx = place(uiaxes(gr), 2, 1); styleAx(epDetAx, c);
+    epActAx = place(uiaxes(gr), 3, 1); styleAx(epActAx, c);
+    epCycleLbl = place(mkLabel(gr, 'Idle.', c, 'FontName', c.mono, 'FontSize', 11), 4, 1);
+
+    ui = struct('epThreatDD',epThreatDD,'epSnrDD',epSnrDD,'epSevDD',epSevDD,'epSpeedSpin',epSpeedSpin, ...
+        'epPolicyDD',epPolicyDD,'epPreSpin',epPreSpin,'epPostSpin',epPostSpin,'epHystChk',epHystChk, ...
+        'epDwellSpin',epDwellSpin,'epHoldSpin',epHoldSpin,'epPaceDD',epPaceDD,'epSeedFld',epSeedFld, ...
+        'epRunBtn',epRunBtn,'epStopBtn',epStopBtn,'epExportBtn',epExportBtn,'ep3dBtn',ep3dBtn,'epStatus',epStatus, ...
+        'epBerAx',epBerAx,'epDetAx',epDetAx,'epActAx',epActAx,'epCycleLbl',epCycleLbl);
+end
+
+%% =====================================================================
+%% =========================  BUILD: KPI TAB  ===========================
+%% =====================================================================
+function ui = buildKpiTab(tab, c)
+    g = uigridlayout(tab, [3 1]); g.RowHeight = {112, '1x', '1x'}; g.Padding = [4 4 4 4];
+    g.RowSpacing = 8; g.BackgroundColor = c.bg;
+
+    top = uigridlayout(g, [1 7]); top.Layout.Row = 1; top.ColumnWidth = {'1x','1x','1x','1x','1x','1x',110};
+    top.Padding = [0 0 0 0]; top.ColumnSpacing = 8; top.BackgroundColor = c.bg;
+    titles = {'DETECTION  (KPI 1)','RESTORATION  (KPI 4)','DECISION LATENCY  (KPI 7)', ...
+              'FALSE ALARMS  (KPI 6)','DQN vs RULE  (KPI 5)','SPEED ROBUSTNESS  (KPI 7)'};
+    tips = { ...
+        {'Of all test frames, how often the detector named the exact attack.', 'Target: at least 90% above the SNR threshold.'}, ...
+        {'On attacks that CAN be fixed, the share of cycles the link was back', 'to near-clean error rates after the response. Target: 80%.'}, ...
+        {'Median reaction time per decision on this computer. Under 10 ms =', 'real time by the bar used for detection systems.'}, ...
+        {'How often a response fired on a perfectly healthy link, over 600', 'independent clean flights. Target: statistical bound under 5%.'}, ...
+        {'How much better the AI flies the link than the fixed rules, in mean', 'reward per cycle (paired comparison, 95% interval above zero).'}, ...
+        {'Does performance hold from 50 to 120 km/h. Target: the restored-', 'cycles spread across speeds stays under 10 points.'}};
+    kpiVal = gobjects(1, 6); kpiSub = gobjects(1, 6);
+    for k = 1:6
+        card = uipanel(top, 'BackgroundColor', c.panelBg, 'BorderType', 'line');
+        card.Layout.Row = 1; card.Layout.Column = k;
+        cg = uigridlayout(card, [3 1]); cg.RowHeight = {20, '1x', 30}; cg.Padding = [8 4 8 4];
+        cg.RowSpacing = 0; cg.BackgroundColor = c.panelBg;
+        place(mkLabel(cg, [titles{k} '  [?]'], c, 'FontSize', 10, 'FontWeight', 'bold', 'FontColor', c.mut, ...
+            'HorizontalAlignment', 'center', 'Tooltip', tips{k}), 1, 1);
+        kpiVal(k) = place(mkLabel(cg, 'N/A', c, 'FontSize', 26, 'FontWeight', 'bold', 'HorizontalAlignment', 'center', ...
+            'Tooltip', tips{k}), 2, 1);
+        kpiSub(k) = place(mkLabel(cg, '', c, 'FontSize', 9, 'FontColor', c.mut, 'HorizontalAlignment', 'center', 'WordWrap', 'on'), 3, 1);
+    end
+    kpiRefreshBtn = uibutton(top, 'Text', 'REFRESH', 'FontWeight', 'bold', 'FontName', c.font, ...
+        'BackgroundColor', c.accent, 'FontColor', [0.03 0.06 0.12]);
+    place(kpiRefreshBtn, 1, 7);
+    kpiRefreshBtn.Tooltip = {'Reloads the official numbers from the last full pipeline run on disk.', ...
+        'Live-tab runs are demos - they never change these results.'};
+
+    mid = uigridlayout(g, [1 3]); mid.Layout.Row = 2; mid.Padding = [0 0 0 0]; mid.ColumnSpacing = 8;
+    mid.BackgroundColor = c.bg;
+    kCm  = place(uiaxes(mid), 1, 1); styleAx(kCm, c);
+    kAcc = place(uiaxes(mid), 1, 2); styleAx(kAcc, c);
+    kRec = place(uiaxes(mid), 1, 3); styleAx(kRec, c);
+
+    bot = uigridlayout(g, [1 3]); bot.Layout.Row = 3; bot.Padding = [0 0 0 0]; bot.ColumnSpacing = 8;
+    bot.BackgroundColor = c.bg;
+    kLat = place(uiaxes(bot), 1, 1); styleAx(kLat, c);
+    kAct = place(uiaxes(bot), 1, 2); styleAx(kAct, c);
+    kSpd = place(uiaxes(bot), 1, 3); styleAx(kSpd, c);
+
+    ui = struct('kpiVal',kpiVal,'kpiSub',kpiSub,'kpiRefreshBtn',kpiRefreshBtn, ...
+        'kCm',kCm,'kAcc',kAcc,'kRec',kRec,'kLat',kLat,'kAct',kAct,'kSpd',kSpd);
+end
+
+%% =====================================================================
+%% ====================  BUILD: SURVIVABILITY TAB  ======================
+%% =====================================================================
+function ui = buildSurvTab(tab, env, c)
+    g = uigridlayout(tab, [1 2]); g.ColumnWidth = {330, '1x'}; g.Padding = [4 4 4 4];
+    g.ColumnSpacing = 8; g.BackgroundColor = c.bg;
+
+    pl = mkPanel(g, 'MAP CONTROLS', c); pl.Layout.Column = 1;
+    gl = uigridlayout(pl, [8 1]); gl.RowHeight = {20, 28, 20, 28, 22, 22, 22, '1x'};
+    gl.Padding = [10 6 10 10]; gl.RowSpacing = 4; gl.BackgroundColor = c.panelBg;
+    tipMapDD = {'Map A: only responses that keep the full data rate. Map B: any', ...
+        'response, including slowing the link down to survive. B is greener -', ...
+        'survival paid for with throughput.'};
+    tipMapThr = {'Which attack the map shows. Rows = attack strength (L1-L5), columns', ...
+        '= link quality (Eb/N0). Each cell: can SOME response bring the link', ...
+        'back there? Your last live run is marked on the grid.'};
+    place(mkLabel(gl, 'Map  [?]', c, 'FontColor', c.mut, 'Tooltip', tipMapDD), 1, 1);
+    survMapDD = uidropdown(gl, 'Items', {'Map A - without goodput loss','Map B - any action (incl. rate reduction, FEC)'}, ...
+        'ItemsData', {'A','B'}, 'Value', 'A', 'Tooltip', tipMapDD, ...
+        'BackgroundColor', c.termBg, 'FontColor', c.txt, 'FontName', c.font);
+    place(survMapDD, 2, 1);
+    place(mkLabel(gl, 'Threat  [?]', c, 'FontColor', c.mut, 'Tooltip', tipMapThr), 3, 1);
+    if ~isempty(env.surv)
+        tnames = {env.surv.grid_data_A.threat};
+    else
+        tnames = {'(no data)'};
+    end
+    survThreatDD = uidropdown(gl, 'Items', tnames, 'Tooltip', tipMapThr, 'BackgroundColor', c.termBg, 'FontColor', c.txt, 'FontName', c.font);
+    place(survThreatDD, 4, 1);
+    place(mkLabel(gl, [char(9632) '  RECOVERABLE  (BER <= 2x clean)'], c, 'FontColor', c.green, 'FontSize', 11), 5, 1);
+    place(mkLabel(gl, [char(9632) '  MARGINAL  (<= 5x clean)'], c, 'FontColor', c.amber, 'FontSize', 11), 6, 1);
+    place(mkLabel(gl, [char(9632) '  NON-RECOVERABLE  (> 5x clean)'], c, 'FontColor', c.red, 'FontSize', 11), 7, 1);
+    survSummary = uitextarea(gl, 'Value', {''}, 'Editable', 'off', 'FontName', c.mono, 'FontSize', 10, ...
+        'BackgroundColor', c.termBg, 'FontColor', c.txt);
+    place(survSummary, 8, 1);
+
+    pr = mkPanel(g, 'SURVIVABILITY BOUNDARY  (rows = severity level, columns = Eb/N0 dB, number = BER / clean BER)', c);
+    pr.Layout.Column = 2;
+    gr = uigridlayout(pr, [1 1]); gr.Padding = [8 4 8 8]; gr.BackgroundColor = c.panelBg;
+    survAx = uiaxes(gr); styleAx(survAx, c);
+
+    ui = struct('survMapDD',survMapDD,'survThreatDD',survThreatDD,'survSummary',survSummary,'survAx',survAx);
+end
+
+%% =====================================================================
+%% =======================  BUILD: LOG TAB  =============================
+%% =====================================================================
+function ui = buildLogTab(tab, c)
+    g = uigridlayout(tab, [2 1]); g.RowHeight = {'1x', 64}; g.Padding = [4 4 4 4]; g.RowSpacing = 8;
+    g.BackgroundColor = c.bg;
+    hdrNames = {'#','Threat','Eb/N0','Speed','Severity','Detected','Conf','DQN action','Rule action', ...
+                'Rec DQN','Rec Rule','Verdict','Lat (ms)'};
+    histTbl = uitable(g, 'Data', cell(0, numel(hdrNames)), 'ColumnName', hdrNames, ...
+        'ColumnWidth', {40, 150, 60, 80, 130, 150, 60, 130, 130, 70, 70, 210, 70}, 'RowName', [], ...
+        'FontSize', 11, 'FontName', c.font, 'BackgroundColor', [c.termBg; c.axBg], 'ForegroundColor', c.txt);
+    histTbl.Layout.Row = 1;
+    histTbl.Tooltip = {'One row per finished run: what attacked, what was detected, what each', ...
+        'policy did and how much of the damage it undid. EXPORT saves CSV + MAT.'};
+
+    bg = uigridlayout(g, [1 3]); bg.Layout.Row = 2; bg.ColumnWidth = {'1x', 230, 150};
+    bg.Padding = [0 0 0 0]; bg.ColumnSpacing = 8; bg.BackgroundColor = c.panelBg;
+    sessionLbl = place(mkLabel(bg, {'No runs yet.'}, c, 'FontSize', 12, 'FontName', c.mono), 1, 1);
+    exportBtn = uibutton(bg, 'Text', 'EXPORT HISTORY (CSV + MAT)', 'FontWeight', 'bold', 'FontName', c.font, ...
+        'BackgroundColor', c.accent, 'FontColor', [0.03 0.06 0.12]);
+    place(exportBtn, 1, 2);
+    clearBtn = uibutton(bg, 'Text', 'CLEAR HISTORY', 'FontWeight', 'bold', 'FontName', c.font, ...
+        'BackgroundColor', [0.30 0.34 0.42], 'FontColor', 'white');
+    place(clearBtn, 1, 3);
+
+    ui = struct('histTbl',histTbl,'sessionLbl',sessionLbl,'exportBtn',exportBtn,'clearBtn',clearBtn);
+end
+
+%% =====================================================================
+%% ==========================  SMALL BUILDERS  ==========================
+%% =====================================================================
+function comp = place(comp, row, col)
+    comp.Layout.Row = row; comp.Layout.Column = col;
+end
+
+function pnl = mkPanel(parent, ttl, c)
+    pnl = uipanel(parent, 'Title', ttl, 'BackgroundColor', c.panelBg, 'ForegroundColor', c.accent, ...
+        'FontWeight', 'bold', 'FontSize', 11, 'FontName', c.font, 'BorderType', 'line');
+end
+
+function h = helpMark(g, row, col, tip, c)
+    % Small '?' whose hover tooltip explains the setting next to it (D54).
+    h = uilabel(g, 'Text', '?', 'FontWeight', 'bold', 'FontSize', 11, 'FontColor', c.cyan, ...
+        'HorizontalAlignment', 'center', 'Tooltip', tip);
+    h.Layout.Row = row; h.Layout.Column = col;
+end
+
+function lbl = mkLabel(parent, txt, c, varargin)
+    lbl = uilabel(parent, 'Text', txt, 'FontColor', c.txt, 'FontName', c.font, 'FontSize', 11);
+    for k = 1:2:numel(varargin)
+        lbl.(varargin{k}) = varargin{k+1};
+    end
+end
+
+function styleAx(ax, c)
+    ax.Color = c.axBg; ax.XColor = c.mut; ax.YColor = c.mut;
+    ax.GridColor = [0.55 0.60 0.70]; ax.GridAlpha = 0.25;
+    ax.FontName = c.font; ax.FontSize = 10; ax.Box = 'off';
+    try, ax.BackgroundColor = c.panelBg; catch, end %#ok<CTCH>
+    try, ax.Toolbar.Visible = 'off'; catch, end %#ok<CTCH>
+    try, disableDefaultInteractivity(ax); catch, end %#ok<CTCH>
+end
+
+function setTitle(ax, ttl, c)
+    title(ax, ttl, 'Color', c.txt, 'FontSize', 11, 'FontWeight', 'bold', 'FontName', c.font);
+end
+
+function s = mergeStructs(a, b)
+    s = a; f = fieldnames(b);
+    for k = 1:numel(f), s.(f{k}) = b.(f{k}); end
+end
+
+function [mu, sd] = loadNormStats()
+    % splits.mat is >1 GB; only two small vectors are needed. They are cached
+    % in a tiny file and re-extracted only when splits.mat is newer.
+    src = 'data/splits.mat'; cache = 'data/gui_norm_stats.mat';
+    fresh = isfile(cache) && dir(cache).datenum >= dir(src).datenum;
+    if ~fresh
+        fprintf('  one-time extraction of normalisation stats from splits.mat (slow, next launches skip this)...\n');
+        S = load(src, 'splits');
+        feat_mean = S.splits.norm.feat_mean; feat_std = S.splits.norm.feat_std; %#ok<NASGU>
+        save(cache, 'feat_mean', 'feat_std');
+        clear S;
+    end
+    N = load(cache, 'feat_mean', 'feat_std');
+    mu = N.feat_mean; sd = N.feat_std;
+end
+
+function p = loadInitialParams()
+    % init_params.m is a SCRIPT that injects "params" into its caller's workspace.
+    % It is called from this plain function (a file with no nested functions), so
+    % the workspace stays dynamic and the injection works exactly as elsewhere.
+    init_params;
+    p = load('params.mat').params;
+end
+
+function sev = buildSeverityTable()
+    % Same severity axes as run_dataset_sweep.m (dataset) and map_survivability_boundary.m.
+    sev = struct();
+    sev.jamming             = struct('param','jsr_db',        'levels',[0 4 8 12 16]);
+    sev.reactive_jamming    = struct('param','jsr_db',        'levels',[0 4 8 12 16]);
+    sev.sweeping_jammer     = struct('param','jsr_db',        'levels',[0 4 8 12 16]);
+    sev.noise_burst         = struct('param','jsr_db',        'levels',[0 4 8 12 16]);
+    sev.path_loss           = struct('param','path_loss_db',  'levels',[4 8 12 16 20]);
+    sev.spoofing            = struct('param','spoof_sir_db',  'levels',[-4 -1 2 5 8]);
+    sev.antenna_fault       = struct('param','fault_duty',    'levels',[0.1 0.2 0.3 0.4 0.5]);
+    sev.benign_interference = struct('param','benign_int_db', 'levels',[-10 -8 -6 -4 -2]);
+    sev.none                = struct('param','',              'levels',[]);
+end
+
+function surv = loadSurvReference()
+    surv = [];
+    f = 'data/survivability_boundary.mat';
+    if isfile(f)
+        try
+            L = load(f);
+            if isfield(L,'grid_data_A') && isfield(L,'grid_data_B') && isfield(L,'ber_clean')
+                surv = L;
+            end
+        catch
+            surv = [];
+        end
+    end
+end
+
+function warmUp(env)
+    dummy_iq = complex(randn(2064,1), randn(2064,1));
+    for w = 1:3
+        Sxx_dummy = spectrogram(dummy_iq, hann(env.win), env.novlp, env.nfft, env.fs, 'centered'); %#ok<NASGU>
+    end
+    dspec = dlarray(single(rand(env.img_size,env.img_size,1,1)), 'SSCB');
+    dfeat = dlarray(single(rand(1,numel(env.feat_mean)))', 'CB');
+    dstate = dlarray(single(rand(env.dqn_agent.numStates,1)), 'CB');
+    if canUseGPU, dspec = gpuArray(dspec); dfeat = gpuArray(dfeat); dstate = gpuArray(dstate); end
+    for w = 1:10
+        predict(env.cnn_net, dspec, dfeat);
+        predict(env.dqn_agent.qNetwork, dstate);
+    end
+    if canUseGPU, wait(gpuDevice); end
+end
+
+function restoreParams(p0)
+    params = p0; %#ok<NASGU>
+    save('params.mat', 'params');
+end
+
+function s = niceName(x)
+    s = upper(strrep(x, '_', ' '));
+end
+
+%% =====================================================================
+%% ===========================  CALLBACKS  ==============================
+%% =====================================================================
+function matrixEditCallback(src, event)
+    r = event.Indices(1); col = event.Indices(2);
+    d = src.Data;
+    if col == 1
+        for k = 3:size(d, 2), d{r, k} = event.NewData; end
+    elseif col >= 3
+        d{r, 1} = all(cell2mat(d(r, 3:end)));      % keep ALL in sync with the row
+    end
+    src.Data = d;
+end
+
+function speedChanged(src, ~)
+    fig = ancestor(src, 'figure'); env = fig.UserData.env; ui = fig.UserData.ui;
+    v = src.Value;
+    fd = (v/3.6) * env.p0.carrier_freq / env.p0.c_light;
+    ui.speedInfo.Text = sprintf('= %.2f m/s   |   max Doppler fd = %.1f Hz', v/3.6, fd);
+end
+
+function thrChanging(src, evt)
+    fig = ancestor(src, 'figure'); ui = fig.UserData.ui;
+    ui.thrLbl.Text = sprintf('Unknown-threat threshold: keep %.0f%% of known frames', evt.Value);
+end
+
+function thrChanged(src, ~)
+    fig = ancestor(src, 'figure'); ui = fig.UserData.ui;
+    ui.thrLbl.Text = sprintf('Unknown-threat threshold: keep %.0f%% of known frames', src.Value);
+end
+
+function abortSequence(btn, ~)
+    fig = ancestor(btn, 'figure');
+    setappdata(fig, 'abortFlag', true);
+    btn.Text = 'ABORTING...'; btn.Enable = 'off';
+    appLog(fig, 'ABORT SIGNAL SENT - waiting for the current stage to finish...');
+end
+
+function refreshKpi(btn, ~)
+    fig = ancestor(btn, 'figure');
+    loadKpiTab(fig);
+    updateSurvMap(fig);
+    appLog(fig, 'KPI / survivability results reloaded from disk.');
+end
+
+function survChanged(src, ~)
+    fig = ancestor(src, 'figure');
+    updateSurvMap(fig);
+end
+
+function closeApp(fig, ~)
+    try
+        vw = getappdata(fig, 'videoWriter');
+        if ~isempty(vw), close(vw); end
+        fid = getappdata(fig, 'logFid');
+        if ~isempty(fid) && fid > 0, fclose(fid); end
+    catch
+    end
+    delete(fig);
+end
+
+function checkAbort(fig)
+    if getappdata(fig, 'abortFlag')
+        error('demoGui:aborted', 'Sequence aborted by operator.');
+    end
+end
+
+function clearHistory(btn, ~)
+    fig = ancestor(btn, 'figure'); ui = fig.UserData.ui;
+    setappdata(fig, 'history', {});
+    ui.histTbl.Data = cell(0, size(ui.histTbl.Data, 2));
+    updateSessionSummary(fig);
+    appLog(fig, 'Session history cleared.');
+end
+
+function exportHistory(btn, ~)
+    fig = ancestor(btn, 'figure');
+    H = getappdata(fig, 'history');
+    if isempty(H)
+        appLog(fig, 'Export failed: no run history available.');
+        return;
+    end
+    if ~exist('GUI_Results', 'dir'), mkdir('GUI_Results'); end
+    baseName = sprintf('GUI_Results/demo_history_%s', datestr(now, 'yyyymmdd_HHMMSS'));
+    T = struct2table([H{:}]);
+    writetable(T, [baseName '.csv']);
+    history = H; %#ok<NASGU>
+    save([baseName '.mat'], 'history');
+    appLog(fig, sprintf('Exported %d runs to %s (.csv / .mat). The event log is saved per sequence in GUI_Results/demo_session_*.log', ...
+        numel(H), baseName));
+end
+
+%% =====================================================================
+%% =========================  RUN A SEQUENCE  ===========================
+%% =====================================================================
+function runSequence(btn, ~)
+    fig = ancestor(btn, 'figure');
+    env = fig.UserData.env; ui = fig.UserData.ui; c = fig.UserData.colors;
+
+    % ---- read the test matrix into an ordered run queue ----
+    tbl = ui.matrixTbl.Data;
+    queue = {};
+    for r = 1:size(tbl, 1)
+        for k = 1:numel(env.snr_levels)
+            if tbl{r, 2 + k}
+                queue(end+1, :) = {env.threats{r}, env.snr_levels(k)}; %#ok<AGROW>
+            end
+        end
+    end
+    nRuns = size(queue, 1);
+    if nRuns == 0
+        appLog(fig, 'ERROR: the test matrix is empty - tick at least one box.');
+        return;
+    end
+    sevLevel = ui.sevDD.Value;
+    sevName = ui.sevDD.Items{sevLevel + 1};
+
+    ui.runBtn.Enable = 'off'; ui.abortBtn.Enable = 'on'; ui.abortBtn.Text = 'ABORT';
+    ui.epRunBtn.Enable = 'off';
+    setappdata(fig, 'abortFlag', false);
+    qItems = cell(1, nRuns);
+    for q = 1:nRuns
+        qItems{q} = sprintf('%2d. %-20s @ %g dB', q, niceName(queue{q,1}), queue{q,2});
+    end
+    ui.queueList.Items = qItems; ui.queueList.FontColor = c.txt;
+
+    if ~exist('GUI_Results', 'dir'), mkdir('GUI_Results'); end
+    stamp = datestr(now, 'yyyymmdd_HHMMSS');
+    setappdata(fig, 'logFid', fopen(sprintf('GUI_Results/demo_session_%s.log', stamp), 'w'));
+
+    appLog(fig, '--- NEW SEQUENCE ---');
+    appLog(fig, sprintf('%d run(s) queued | speed %.1f km/h | severity: %s', nRuns, ui.speedSpin.Value, sevName));
+    setProgress(fig, 0); ui.progLbl.Text = sprintf('PROGRESS  0 / %d', nRuns);
+
+    if ui.recordChk.Value
+        vname = sprintf('GUI_Results/demo_session_%s.mp4', stamp);
+        vw = VideoWriter(vname, 'MPEG-4'); vw.FrameRate = 1; open(vw);  % ~3 captures/run (one per state), so 1 fps keeps playback slideshow-paced rather than a blur
+        setappdata(fig, 'videoWriter', vw);
+        appLog(fig, ['Recording video to ' vname]);
+    end
+
+    tSeq = tic;
+    for i = 1:nRuns
+        if getappdata(fig, 'abortFlag')
+            appLog(fig, 'SEQUENCE ABORTED BY OPERATOR.'); break;
+        end
+        appLog(fig, sprintf('RUN %d/%d: %s @ %g dB', i, nRuns, niceName(queue{i,1}), queue{i,2}));
+        try
+            runOneRun(fig, queue{i,1}, queue{i,2}, sevLevel, tSeq);
+        catch ME
+            if strcmp(ME.identifier, 'demoGui:aborted')
+                appLog(fig, 'SEQUENCE ABORTED BY OPERATOR.');
+            else
+                appLog(fig, ['ERROR: ' ME.message]);
+            end
+            break;
+        end
+        if i < nRuns, ui.queueList.Items = qItems(i+1:end); else, ui.queueList.Items = {'(empty)'}; end
+        setProgress(fig, i / nRuns);
+        ui.progLbl.Text = sprintf('PROGRESS  %d / %d', i, nRuns);
+    end
+
+    vw = getappdata(fig, 'videoWriter');
+    if ~isempty(vw)
+        close(vw); setappdata(fig, 'videoWriter', []);
+        appLog(fig, 'Video recording saved.');
+    end
+    appLog(fig, 'SEQUENCE FINISHED - back to standby.');
+    fid = getappdata(fig, 'logFid');
+    if ~isempty(fid) && fid > 0, fclose(fid); end
+    setappdata(fig, 'logFid', -1);
+    setappdata(fig, 'abortFlag', false);
+
+    ui.queueList.Items = {'(empty)'}; ui.queueList.FontColor = c.mut;
+    ui.runBtn.Enable = 'on'; ui.abortBtn.Enable = 'off'; ui.abortBtn.Text = 'ABORT';
+    ui.epRunBtn.Enable = 'on';
+    setLinkHeader(fig, 'STANDBY', c.mut);
+end
+
+%% =====================================================================
+%% ============================  ONE RUN  ===============================
+%% =====================================================================
+function runOneRun(fig, threat, ebno, sevLevel, tSeq)
+    data = fig.UserData; env = data.env; ui = data.ui; c = data.colors;
+    guard = onCleanup(@() restoreParams(env.p0)); %#ok<NASGU>   % params.mat is ALWAYS restored
+
+    %% ---- settings for this run ----
+    v_kmh   = ui.speedSpin.Value;
+    thr_pct = ui.thrSlider.Value;
+    doRule  = ui.ruleChk.Value;
+    fd_hz   = (v_kmh/3.6) * env.p0.carrier_freq / env.p0.c_light;
+    info0   = struct('v_kmh', v_kmh, 'fd', fd_hz);
+
+    [p, sevTxt] = scenarioParams(env, threat, sevLevel, v_kmh);
+    snr_dB = ebno + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
+    truth_idx = find(strcmp(env.class_list, threat), 1);
+
+    refBer = NaN;                                                  % clean-channel BER at this Eb/N0
+    if ~isempty(env.surv)
+        kref = find(env.surv.SNR_points == ebno, 1);
+        if ~isempty(kref), refBer = survRef(env.surv, kref); end
+    end
+
+    resetRunViews(fig);
+    drawLinkDiagram(fig, 'scenario', threat, '', info0);
+    appLog(fig, sprintf('Scenario: %s | severity %s | %.1f km/h (fd %.0f Hz) | Eb/N0 %g dB', ...
+        niceName(threat), sevTxt, v_kmh, fd_hz, ebno));
+
+    %% ---- 1a. clean lead-in of the same link (monitor reference, D53) ----
+    % The monitor's Eb/N0 reference and the path_loss drop gate (D50, D52) need
+    % cycles of the healthy link; evaluation episodes start clean, so the live
+    % run does too.
+    leadF = []; leadB = []; probsL = []; mahaL = [];
+    if ~strcmp(threat, 'none')
+        appLog(fig, 'Simulating a clean lead-in of the same link (monitor reference)...');
+        pl = p; pl.active_threat = 'none';
+        params = pl; save('params.mat', 'params'); %#ok<NASGU>
+        build_threat_model;
+        set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/pl.sps));
+        outL = sim(env.modelName);
+        [iqL, berL, rssiL, plrL, ~, sinrL, ecL, iotL] = extract_closed_loop_frames(outL, pl, env.delay_bits);
+        ML = struct('sinr', sinrL, 'ber', berL, 'rssi', rssiL, 'plr', plrL, 'env_corr', ecL, 'iot', iotL);
+        vl = reshape(find(~isnan(berL)), 1, []);
+        XL = zeros(env.img_size, env.img_size, 1, numel(vl), 'single'); leadF = zeros(numel(vl), numel(env.feat_mean));
+        for i = 1:numel(vl)
+            XL(:, :, 1, i) = spec_image(iqL{vl(i)}, env.fs);
+            leadF(i, :) = link_features(ML, vl(i), env.temporal_window, pl.frame_duration);
+        end
+        leadB = berL(vl);
+        FnL = ((leadF - env.feat_mean) ./ env.feat_std)';
+        [probsL, mahaL] = detect_scores(env.cnn_net, env.ood, XL, FnL);
+        clear XL FnL outL iqL
+        updateTimer(fig, tSeq); checkAbort(fig);
+    end
+
+    %% ---- 1. real Simulink run of the attacked link ----
+    appLog(fig, 'Building Simulink threat model and simulating the link...');
+    params = p; save('params.mat', 'params'); %#ok<NASGU>
+    build_threat_model;
+    set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/p.sps));
+    out = sim(env.modelName);
+    updateTimer(fig, tSeq); checkAbort(fig);
+
+    [iq_frames, ber_f, rssi_f, plr_f, nf, sinr_f, ec_f, iot_f] = extract_closed_loop_frames(out, p, env.delay_bits);
+    i_last = find(~isnan(ber_f), 1, 'last'); if isempty(i_last), i_last = nf; end
+    raw_feats = link_features(struct('sinr', sinr_f, 'ber', ber_f, 'rssi', rssi_f, 'plr', plr_f, ...
+        'env_corr', ec_f, 'iot', iot_f), i_last, env.temporal_window, p.frame_duration);
+    burst_ratio = raw_feats(7);
+    iq_before = iq_frames{i_last};
+    ber_before_mean = mean(ber_f, 'omitnan');
+    appLog(fig, sprintf('Channel: BER %.2e (mean of %d frames) | RSSI %.2f dB | burst ratio %.2f | %s', ...
+        ber_before_mean, nf, rssi_f(i_last), burst_ratio, bitsTxt(ber_before_mean)));
+
+    % Pre-mitigation views (drawn BEFORE the timed decision block)
+    nPts = min(400, numel(iq_before));
+    Lq = max(0.6, min(6, 1.15 * max(abs([real(iq_before(1:nPts)); imag(iq_before(1:nPts))]))));
+    drawIQ(fig, iq_before, c.red, 'Received symbols - before  (4 tight clusters = clean signal)', Lq);
+    tl = struct('ber_b', ber_f, 'rssi_b', rssi_f, 'ber_d', [], 'rssi_d', [], ...
+        'ber_r', [], 'rssi_r', [], 'ref', refBer);
+    drawTimeline(fig, tl);
+    smartPause(fig, 0.5, tSeq); checkAbort(fig);
+
+    %% ---- 2. decision layer over the frames of the run (policy_decide.m, as evaluated) ----
+    [Sxx, Fq, Tq] = spectrogram(iq_before, hann(env.win), env.novlp, env.nfft, env.fs, 'centered');
+    Pw_db = 20*log10(abs(Sxx) + eps);
+    Mrun = struct('sinr', sinr_f, 'ber', ber_f, 'rssi', rssi_f, 'plr', plr_f, 'env_corr', ec_f, 'iot', iot_f);
+    vf = reshape(find(~isnan(ber_f)), 1, []); nv = numel(vf);
+    if nv == 0, error('demoGui:noFrames', 'no complete frame in the run'); end
+    X = zeros(env.img_size, env.img_size, 1, nv, 'single'); Fr = zeros(nv, numel(env.feat_mean));
+    for i = 1:nv
+        X(:, :, 1, i) = spec_image(iq_frames{vf(i)}, env.fs);
+        Fr(i, :) = link_features(Mrun, vf(i), env.temporal_window, p.frame_duration);
+    end
+    Fn = ((Fr - env.feat_mean) ./ env.feat_std)';
+    [probsAll, mahaAll] = detect_scores(env.cnn_net, env.ood, X, Fn);
+    PPr = env.PP; PPr.maha_thr = mahaThreshold(env, thr_pct);
+    cfgD = env.na; cfgR = env.na; memD = []; memR = []; dqn_ms = NaN;
+    for i = 1:size(leadF, 1)                                    % clean lead-in: reference only
+        obs = struct('probs', probsL(:, i)', 'unknown', mahaL(i) < PPr.maha_thr, 'feat', leadF(i, :), ...
+            'ber', leadB(i));
+        [cfgD, memD] = policy_decide('dqn', obs, cfgD, memD, PPr, env.dqn_agent);
+        [cfgR, memR] = policy_decide('rule', obs, cfgR, memR, PPr, []);
+    end
+    if cfgD ~= env.na
+        appLog(fig, 'False alarm during the clean lead-in: the DQN changed configuration before the threat.');
+    elseif cfgR ~= env.na
+        appLog(fig, 'Rule-policy false alarm during the clean lead-in (the DQN held no_action).');
+    end
+    for i = 1:nv
+        obs = struct('probs', probsAll(:, i)', 'unknown', mahaAll(i) < PPr.maha_thr, 'feat', Fr(i, :), ...
+            'ber', ber_f(vf(i)));
+        t2 = tic;
+        [cfgD, memD, dD] = policy_decide('dqn', obs, cfgD, memD, PPr, env.dqn_agent);
+        dqn_ms = toc(t2) * 1000;
+        [cfgR, memR] = policy_decide('rule', obs, cfgR, memR, PPr, []);
+    end
+    t1 = tic;                                                   % one detection cycle as deployed
+    Xl = X(:, :, 1, nv);
+    detect_scores(env.cnn_net, env.ood, Xl, Fn(:, nv));
+    if canUseGPU, wait(gpuDevice); end
+    cnn_ms = toc(t1) * 1000;
+    total_ms = cnn_ms + dqn_ms;
+
+    probs = probsAll(:, nv);
+    [conf, idx] = max(probs);
+    top_class = env.class_list{idx};
+    is_unknown = mahaAll(nv) < PPr.maha_thr;
+    if is_unknown, cnn_class = 'unknown'; else, cnn_class = top_class; end
+    qv = dD.q(:); qv(~isfinite(qv)) = NaN;
+    aidx = cfgD; action_name = env.action_names{aidx};
+    ridx = cfgR; rule_action = env.action_names{ridx};
+    if isempty(leadF)
+        appLog(fig, sprintf('Decision layer over the %d frames of the run (alarm confirmation %d-of-%d, shield, hysteresis)', ...
+            nv, confirmOf(env)));
+    else
+        appLog(fig, sprintf(['Decision layer: %d clean lead-in frames set the link reference, then the %d frames ' ...
+            'of the run (alarm confirmation %d-of-%d, shield, hysteresis)'], size(leadF, 1), nv, confirmOf(env)));
+    end
+
+    %% ---- 3. show detection + decision ----
+    correct = strcmp(cnn_class, threat);
+    drawSpec(fig, Pw_db, Fq, Tq, sprintf('Spectrogram - %s @ %g dB', niceName(threat), ebno));
+    drawProbs(fig, probs, env.class_list, idx, truth_idx, is_unknown);
+    ui.confGauge.Value = min(100, 100 * conf);
+    ui.latGauge.Value = min(30, total_ms);
+    if is_unknown
+        ui.detLbl.Text = sprintf('UNKNOWN THREAT  (best guess %s, %.0f%%)', niceName(top_class), 100*conf);
+        ui.detLbl.FontColor = c.amber;
+    elseif correct
+        ui.detLbl.Text = sprintf('%s   (%.1f%%)  -  CORRECT', niceName(cnn_class), 100*conf);
+        ui.detLbl.FontColor = c.green;
+    else
+        ui.detLbl.Text = sprintf('%s   (%.1f%%)  -  TRUE: %s', niceName(cnn_class), 100*conf, niceName(threat));
+        ui.detLbl.FontColor = c.red;
+    end
+    appLog(fig, sprintf('CNN: %s (%.1f%%) | decision latency %.2f ms (CNN %.2f + DQN %.2f)', ...
+        niceName(cnn_class), 100*conf, total_ms, cnn_ms, dqn_ms));
+    drawLinkDiagram(fig, 'detected', threat, cnn_class, ...
+        struct('v_kmh', v_kmh, 'fd', fd_hz, 'conf', conf, 'correct', correct, 'unknown', is_unknown));
+    drawQ(fig, qv, aidx, ridx);
+    agree = strcmp(action_name, rule_action);
+    if agree, agTxt = 'AGREE'; else, agTxt = 'DIFFER'; end
+    ui.decLbl.Text = {sprintf('DQN  -> %s', niceName(action_name)), ...
+                      sprintf('RULE -> %s   [%s]', niceName(rule_action), agTxt)};
+    appLog(fig, sprintf('DQN: %s | RULE: %s (%s)', niceName(action_name), niceName(rule_action), agTxt));
+    smartPause(fig, 0.7, tSeq); checkAbort(fig);
+
+    %% ---- 4. real mitigation simulations (DQN choice, and rule choice if different) ----
+    drawLinkDiagram(fig, 'mitigating', threat, action_name, struct('v_kmh', v_kmh, 'fd', fd_hz));
+    Rd = []; Rr = [];
+    dqnNone = strcmp(action_name, 'no_action');
+    ruleNone = strcmp(rule_action, 'no_action');
+    if ~dqnNone
+        appLog(fig, sprintf('Applying DQN countermeasure (%s) and re-simulating the link...', niceName(action_name)));
+        Rd = applyMitigation(env, p, threat, action_name, snr_dB);
+        updateTimer(fig, tSeq); checkAbort(fig);
+    else
+        appLog(fig, 'DQN chose NO ACTION - monitoring the link.');
+    end
+    if doRule && ~ruleNone
+        if strcmp(rule_action, action_name)
+            Rr = Rd;
+        else
+            appLog(fig, sprintf('Re-simulating with the rule-based choice (%s) for comparison...', niceName(rule_action)));
+            Rr = applyMitigation(env, p, threat, rule_action, snr_dB);
+            updateTimer(fig, tSeq); checkAbort(fig);
+        end
+    end
+
+    ber_dqn  = ber_before_mean; if ~isempty(Rd), ber_dqn  = Rd.ber_mean; end
+    ber_rule = ber_before_mean; if ~isempty(Rr), ber_rule = Rr.ber_mean; end
+    if isfinite(refBer)
+        recOf = @(b) recovery_vs_clean(ber_before_mean, b, refBer);   % KPI #2: vs the clean link
+    else
+        recOf = @(b) 100 * (ber_before_mean - b) / max(ber_before_mean, eps);
+    end
+    if dqnNone && (ruleNone || ~doRule), rec_dqn = NaN; else, rec_dqn = recOf(ber_dqn); end
+    if ~doRule || (dqnNone && ruleNone), rec_rule = NaN; else, rec_rule = recOf(ber_rule); end
+
+    %% ---- 5. outcome views ----
+    if ~isempty(Rd), iq_after = Rd.iq; else, iq_after = iq_before; end
+    drawIQ(fig, iq_after, c.green, 'Received symbols - after the response', Lq);
+    if ~isempty(Rd), tl.ber_d = Rd.ber_f; tl.rssi_d = Rd.rssi_f; end
+    if ~isempty(Rr) && ~strcmp(rule_action, action_name), tl.ber_r = Rr.ber_f; tl.rssi_r = Rr.rssi_f; end
+    drawTimeline(fig, tl);
+
+    [verdict, vcol, vstat] = verdictFor(env, c, ebno, ber_dqn, action_name);
+    names = {'NO ACTION', 'DQN'}; vals = [ber_before_mean, ber_dqn]; cols = [c.red; c.green];
+    if doRule
+        names{end+1} = 'RULE'; vals(end+1) = ber_rule; cols = [cols; c.purp]; %#ok<AGROW>
+    end
+    drawOutcome(fig, vals, names, cols);
+
+    [~, ~, cmD] = apply_countermeasure(p, threat, action_name);
+    goodput = sprintf('COST of the response: data rate x%.2f | spectrum x%d | %s', cmD.goodput_factor, cmD.bw_factor, cmD.effect);
+    lines = {outLine('Errors before', ber_before_mean, NaN), outLine('After DQN    ', ber_dqn, rec_dqn)};
+    if doRule, lines{end+1} = outLine('After rule   ', ber_rule, rec_rule); else, lines{end+1} = '(rule comparison off)'; end
+    lines{end+1} = goodput;
+    ui.outLbl.Text = lines;
+    ui.verdictLbl.Text = {verdict, flightLine(vstat, dqnNone, threat)}; ui.verdictLbl.FontColor = vcol;
+    threatRemains = (vstat == 3) && ~ismember(threat, {'none','benign_interference'});
+    drawLinkDiagram(fig, 'resolved', threat, action_name, struct('v_kmh', v_kmh, 'fd', fd_hz, ...
+        'verdict', verdict, 'color', vcol, 'threatRemains', threatRemains));
+    if isnan(rec_dqn)
+        appLog(fig, sprintf('Outcome: no countermeasure applied - %s', verdict));
+        appLog(fig, flightLine(vstat, dqnNone, threat));
+    else
+        appLog(fig, sprintf('Outcome: BER %.2e -> %.2e (%.1f%% recovered) - %s', ber_before_mean, ber_dqn, rec_dqn, verdict));
+        appLog(fig, flightLine(vstat, dqnNone, threat));
+    end
+    smartPause(fig, 0.9, tSeq);
+
+    %% ---- 6. log the run ----
+    if is_unknown, detShown = ['UNKNOWN (' top_class ')']; else, detShown = cnn_class; end
+    if correct, ok = 'PASS'; elseif is_unknown, ok = 'UNKNOWN'; else, ok = 'FAIL'; end
+    if doRule, ruleShown = rule_action; else, ruleShown = '-'; end
+    H = getappdata(fig, 'history');
+    n = numel(H) + 1;
+    entry = struct('run', n, 'timestamp', datestr(now), 'threat', threat, 'snr_dB', ebno, ...
+        'speed_kmh', v_kmh, 'fd_hz', fd_hz, 'severity', sevTxt, ...
+        'cnn_detected', cnn_class, 'cnn_top_guess', top_class, 'cnn_confidence', conf, ...
+        'cnn_correct', correct, 'unknown', is_unknown, ...
+        'dqn_action', action_name, 'rule_action', rule_action, 'agree', agree, ...
+        'ber_before', ber_before_mean, 'ber_after_dqn', ber_dqn, 'ber_after_rule', ber_rule, ...
+        'ber_clean_ref', refBer, 'rec_dqn', rec_dqn, 'rec_rule', rec_rule, ...
+        'verdict', verdict, 'verdict_status', vstat, ...
+        'cnn_latency_ms', cnn_ms, 'dqn_latency_ms', dqn_ms, 'decision_latency_ms', total_ms);
+    H{end+1} = entry; setappdata(fig, 'history', H);
+    ui.histTbl.Data = [ui.histTbl.Data; { n, niceName(threat), sprintf('%g dB', ebno), ...
+        sprintf('%.1f', v_kmh), sevTxt, [niceName(detShown) ' [' ok ']'], sprintf('%.0f%%', 100*conf), ...
+        niceName(action_name), niceName(ruleShown), pctStr(rec_dqn), pctStr(rec_rule), verdict, ...
+        sprintf('%.1f', total_ms) }];
+    setappdata(fig, 'lastRun', struct('threat', threat, 'level', sevLevel, 'snr', ebno, 'status', vstat));
+    updateSessionSummary(fig);
+    updateSurvMap(fig);
+end
+
+function [p, sevTxt, fd_hz] = scenarioParams(env, threat, sevLevel, v_kmh)
+    % Link parameters of one scenario: nominal threat parameters, optional
+    % severity level (same axes as the dataset), UAV speed -> channel Doppler.
+    fd_hz = (v_kmh/3.6) * env.p0.carrier_freq / env.p0.c_light;
+    p = env.p0;
+    p.jsr_db = env.baseline.jsr_db; p.path_loss_db = env.baseline.path_loss_db;
+    p.fault_atten_db = env.baseline.fault_atten_db; p.spoof_sir_db = env.baseline.spoof_sir_db;
+    p.benign_int_db = env.baseline.benign_int_db;
+    p.active_threat = threat;
+    sevTxt = 'nominal';
+    sv = env.sev.(threat);
+    if sevLevel > 0 && ~isempty(sv.param)
+        p.(sv.param) = sv.levels(sevLevel);
+        sevTxt = sprintf('L%d (%s=%g)', sevLevel, sv.param, sv.levels(sevLevel));
+    end
+    p.v_kmh = v_kmh; p.v = v_kmh/3.6; p.fd_max = fd_hz;
+    p.quiet_build = true;                      % build the Simulink model without opening its window
+end
+
+function s = pctStr(x)
+    if isnan(x), s = 'N/A'; else, s = sprintf('%.1f%%', x); end
+end
+
+function s = outLine(lbl, ber, rec)
+    if isnan(rec), s = sprintf('%s: %.2e', lbl, ber);
+    else,          s = sprintf('%s: %.2e   (%.1f%% recovered)', lbl, ber, rec); end
+end
+
+function R = applyMitigation(env, p, threat, action_name, snr_dB) %#ok<INUSL>
+    % Real second simulation of the link with the countermeasure applied to the
+    % TRUE threat (same physics as training and evaluation, apply_countermeasure.m).
+    [p2, g_db] = apply_countermeasure(p, threat, action_name);
+    params = p2; save('params.mat', 'params'); %#ok<NASGU>
+    build_threat_model;
+    set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p2.sps));
+    out2 = sim(env.modelName);
+    [iqf, berf, rssif, ~, nf2] = extract_closed_loop_frames(out2, p2, env.delay_bits);
+    i2 = find(~isnan(berf), 1, 'last'); if isempty(i2), i2 = nf2; end
+    R = struct('iq', iqf{i2}, 'ber_f', berf, 'rssi_f', rssif, 'ber_mean', mean(berf, 'omitnan'));
+end
+
+function cf = confirmOf(env)
+    % Alarm confirmation m-of-n of the decision layer (policy_monitor.m).
+    cf = [2 2]; if isfield(env.PP, 'confirm'), cf = env.PP.confirm; end
+end
+
+function r = survRef(surv, k)
+    % Clean-link reference of the survivability map (floored since D46).
+    if isfield(surv, 'ber_ref'), r = surv.ber_ref(k); else, r = max(surv.ber_clean(k), 1e-4); end
+end
+
+function t = mahaThreshold(env, retain_pct)
+    % Mahalanobis threshold keeping retain_pct % of the known validation frames.
+    v = env.maha_val;
+    t = v(max(1, ceil((1 - retain_pct / 100) * numel(v))));
+end
+
+function [txt, col, status] = verdictFor(env, c, ebno, ber_final, action_name)
+    % Classify the FINAL link state with the same criteria as the survivability
+    % map (proposal deliverable #7): BER relative to the clean channel.
+    status = 0; txt = 'VERDICT N/A (no survivability reference - run map_survivability_boundary)'; col = c.mut;
+    if isempty(env.surv), return; end
+    k = find(env.surv.SNR_points == ebno, 1);
+    if isempty(k), return; end
+    ratio = ber_final / survRef(env.surv, k);
+    if ratio <= env.surv.RATIO_RECOVERABLE, status = 1;
+    elseif ratio <= env.surv.RATIO_MARGINAL, status = 2;
+    else, status = 3; end
+    noAct = strcmp(action_name, 'no_action');
+    switch status
+        case 1
+            col = c.green;
+            if noAct, txt = sprintf('LINK NOMINAL - no action needed  (BER = %.1fx clean)', ratio);
+            else,     txt = sprintf('RECOVERABLE - link restored  (BER = %.1fx clean)', ratio); end
+        case 2
+            col = c.amber;
+            if noAct, txt = sprintf('DEGRADED - no action taken  (BER = %.1fx clean)', ratio);
+            else,     txt = sprintf('MARGINAL - partially restored  (BER = %.1fx clean)', ratio); end
+        otherwise
+            col = c.red;
+            if noAct, txt = sprintf('UNMITIGATED - link degraded  (BER = %.1fx clean)', ratio);
+            else,     txt = sprintf('NON-RECOVERABLE - countermeasure insufficient  (BER = %.1fx clean)', ratio); end
+    end
+end
+
+%% =====================================================================
+%% ============================  VIEW HELPERS  ==========================
+%% =====================================================================
+function resetRunViews(fig)
+    data = fig.UserData; ui = data.ui; c = data.colors;
+    axs = {ui.specAx, ui.iqAx, ui.berAx, ui.rssiAx, ui.probAx, ui.qAx, ui.outAx};
+    for k = 1:numel(axs)
+        legend(axs{k}, 'off'); cla(axs{k});
+    end
+    setTitle(ui.specAx, 'Spectrogram', c); setTitle(ui.iqAx, 'IQ constellation', c);
+    ui.confGauge.Value = 0; ui.latGauge.Value = 0;
+    ui.detLbl.Text = '-'; ui.detLbl.FontColor = c.txt;
+    ui.decLbl.Text = {'-'}; ui.outLbl.Text = {'-'};
+    ui.verdictLbl.Text = 'RUNNING...'; ui.verdictLbl.FontColor = c.accent;
+end
+
+function setProgress(fig, frac)
+    data = fig.UserData; ax = data.ui.progAx; c = data.colors;
+    cla(ax);
+    if frac > 0
+        patch(ax, [0 frac frac 0], [0 0 1 1], c.green, 'EdgeColor', 'none');
+    end
+    ax.XLim = [0 1]; ax.YLim = [0 1];
+end
+
+function drawSpec(fig, Pw_db, Fq, Tq, ttl)
+    data = fig.UserData; ax = data.ui.specAx; c = data.colors;
+    cla(ax);
+    imagesc(ax, Tq * 1e3, Fq / 1e6, Pw_db);
+    ax.YDir = 'normal'; ax.CLim = [data.env.db_lo data.env.db_hi];
+    colormap(ax, 'turbo');
+    xlabel(ax, 'Time (ms)', 'Color', c.mut); ylabel(ax, 'Frequency (MHz)', 'Color', c.mut);
+    axis(ax, 'tight');
+    setTitle(ax, ttl, c);
+end
+
+function drawIQ(fig, iq, colr, ttl, L)
+    data = fig.UserData; ax = data.ui.iqAx; c = data.colors;
+    cla(ax);
+    s = iq(1:min(400, numel(iq)));
+    scatter(ax, real(s), imag(s), 14, colr, 'filled', 'MarkerFaceAlpha', 0.55);
+    ax.XLim = [-L L]; ax.YLim = [-L L]; grid(ax, 'on');
+    xlabel(ax, 'In-phase', 'Color', c.mut); ylabel(ax, 'Quadrature', 'Color', c.mut);
+    setTitle(ax, ttl, c);
+end
+
+function txt = flightLine(status, noAct, threat)
+    % One plain sentence for the operator: what this outcome means for the flight.
+    benign = ismember(threat, {'none', 'benign_interference'});
+    switch status
+        case 1
+            if noAct && benign, txt = 'Bottom line: link healthy - flight continues, nothing was spent.';
+            elseif noAct,       txt = 'Bottom line: the link rode it out - flight continues, no response needed.';
+            else,               txt = 'Bottom line: commands reach the UAV again - flight continues.'; end
+        case 2
+            txt = 'Bottom line: commands still get through with less margin - fly conservatively.';
+        case 3
+            if noAct, txt = 'Bottom line: the UAV may miss commands and no response was applied - operator decision needed.';
+            else,     txt = 'Bottom line: the UAV may miss commands even after the response - shorten range or return home.'; end
+        otherwise
+            txt = '';
+    end
+end
+
+function t = bitsTxt(ber)
+    % Plain meaning of a BER for the operator.
+    if ber <= 0, t = 'no command-bit errors measured';
+    elseif ber >= 0.01, t = sprintf('~%.0f%% of command bits corrupted', 100 * ber);
+    elseif ber >= 1e-4, t = sprintf('~%.2f%% of command bits corrupted', 100 * ber);
+    else, t = 'almost no command-bit errors'; end
+end
+
+function drawProbs(fig, probs, classes, idx, truth_idx, isUnknown)
+    data = fig.UserData; ax = data.ui.probAx; c = data.colors;
+    cla(ax); n = numel(probs);
+    b = barh(ax, 1:n, 100 * probs, 'FaceColor', 'flat');
+    cd = repmat([0.36 0.40 0.48], n, 1);
+    if isUnknown, cd(idx, :) = c.amber; else, cd(idx, :) = c.accent; end
+    b.CData = cd;
+    ax.YDir = 'reverse'; ax.YTick = 1:n;
+    ax.YTickLabel = cellfun(@(x) strrep(x, '_', ' '), classes(:)', 'UniformOutput', false);
+    ax.TickLabelInterpreter = 'none'; ax.FontSize = 9;
+    ax.XLim = [0 135]; ax.XTick = [0 25 50 75 100];
+    for k = 1:n
+        isTruth = ~isempty(truth_idx) && k == truth_idx;
+        if probs(k) >= 0.005 || isTruth
+            lab = sprintf('%.1f%%', 100 * probs(k));
+            if isTruth, lab = [lab '  <- truth']; end %#ok<AGROW>
+            text(ax, 100 * probs(k) + 2, k, lab, 'Color', c.txt, 'FontSize', 8, 'FontName', c.font);
+        end
+    end
+    setTitle(ax, 'What the detector sees: probability per threat (%)', c);
+end
+
+function drawQ(fig, qv, aidx, ridx)
+    data = fig.UserData; ax = data.ui.qAx; c = data.colors;
+    n = numel(qv);
+    cla(ax); hold(ax, 'on');
+    b = bar(ax, 1:n, qv, 'FaceColor', 'flat');
+    cd = repmat([0.36 0.40 0.48], n, 1); cd(aidx, :) = c.accent; b.CData = cd;
+    span = max(qv) - min(qv) + 1;
+    text(ax, aidx, qv(aidx), sprintf('%.1f', qv(aidx)), 'Color', c.txt, 'FontSize', 9, ...
+        'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', 'FontName', c.font);
+    if ridx > 0
+        plot(ax, ridx, qv(ridx) + 0.12 * span, 'v', 'MarkerSize', 11, 'MarkerFaceColor', c.purp, ...
+            'MarkerEdgeColor', 'w');
+    end
+    hold(ax, 'off');
+    ax.XTick = 1:n; ax.XTickLabel = cellfun(@actionLabel, data.env.action_names, 'UniformOutput', false);
+    ax.XTickLabelRotation = 45; ax.FontSize = 7;
+    ax.XLim = [0.4 n + 0.6]; ax.YLim = [min(0, min(qv) - 0.15*span), max(qv) + 0.32*span];
+    grid(ax, 'on');
+    setTitle(ax, 'Action scores: expected value of each response  (blue = chosen, purple v = rule)', c);
+end
+
+function drawOutcome(fig, vals, names, cols)
+    data = fig.UserData; ax = data.ui.outAx; c = data.colors; fl = data.env.ber_floor;
+    cla(ax); hold(ax, 'on');
+    n = numel(vals); vp = max(vals, fl);
+    b = bar(ax, 1:n, vp, 'FaceColor', 'flat'); b.CData = cols;
+    for k = 1:n
+        text(ax, k, vp(k), sprintf('%.2e', vals(k)), 'Color', c.txt, 'FontSize', 9, ...
+            'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', 'FontName', c.font);
+    end
+    hold(ax, 'off');
+    ax.YScale = 'log'; ax.XTick = 1:n; ax.XTickLabel = names; ax.XLim = [0.4 n + 0.6];
+    ax.YLim = [fl * 0.6, 3]; grid(ax, 'on');
+    setTitle(ax, 'Command-bit errors, before vs after  (log scale, lower = better)', c);
+end
+
+function drawTimeline(fig, tl)
+    data = fig.UserData; ui = data.ui; c = data.colors; env = data.env;
+    fl = env.ber_floor;
+    ms_per_frame = env.p0.frame_duration * 1e3;
+
+    % ---------- BER ----------
+    ax = ui.berAx; legend(ax, 'off'); cla(ax); hold(ax, 'on');
+    nb = numel(tl.ber_b); h = gobjects(0); nm = {};
+    h(end+1) = plot(ax, 1:nb, floorBer(tl.ber_b, fl), '-o', 'Color', c.red, 'LineWidth', 1.8, ...
+        'MarkerSize', 4, 'MarkerFaceColor', c.red); nm{end+1} = 'Before (no action)'; %#ok<AGROW>
+    xmax = nb;
+    if ~isempty(tl.ber_d)
+        xa = nb + (1:numel(tl.ber_d));
+        h(end+1) = plot(ax, xa, floorBer(tl.ber_d, fl), '-o', 'Color', c.green, 'LineWidth', 1.8, ...
+            'MarkerSize', 4, 'MarkerFaceColor', c.green); nm{end+1} = 'After - DQN'; %#ok<AGROW>
+        xmax = max(xmax, xa(end));
+    end
+    if ~isempty(tl.ber_r)
+        xr = nb + (1:numel(tl.ber_r));
+        h(end+1) = plot(ax, xr, floorBer(tl.ber_r, fl), '--s', 'Color', c.purp, 'LineWidth', 1.5, ...
+            'MarkerSize', 4, 'MarkerFaceColor', c.purp); nm{end+1} = 'After - RULE'; %#ok<AGROW>
+        xmax = max(xmax, xr(end));
+    end
+    if xmax > nb
+        xline(ax, nb + 0.5, '--', 'Color', c.amber, 'LineWidth', 1.2);
+    end
+    if ~isnan(tl.ref) && tl.ref > 0
+        rv = max(tl.ref, fl);
+        h(end+1) = plot(ax, [0.5, max(xmax, 2) + 0.5], [rv rv], ':', 'Color', c.cyan, 'LineWidth', 1.4); %#ok<AGROW>
+        nm{end+1} = 'Clean channel'; %#ok<AGROW>
+    end
+    hold(ax, 'off');
+    ax.YScale = 'log'; ax.YLim = [fl * 0.6, 1]; ax.XLim = [0.5 max(xmax, 2) + 0.5]; grid(ax, 'on');
+    xlabel(ax, sprintf('Frame index (1 frame = %.2f ms)', ms_per_frame), 'Color', c.mut);
+    ylabel(ax, 'BER', 'Color', c.mut);
+    legend(ax, h, nm, 'Location', 'northeast', 'TextColor', c.txt, 'Color', c.panelBg, ...
+        'EdgeColor', c.mut, 'FontSize', 9);
+    setTitle(ax, 'Bit errors per frame  (amber line = response applied; a drop after it = the response works)', c);
+
+    % ---------- RSSI ----------
+    ax = ui.rssiAx; legend(ax, 'off'); cla(ax); hold(ax, 'on');
+    plot(ax, 1:nb, tl.rssi_b, '-o', 'Color', c.red, 'LineWidth', 1.6, 'MarkerSize', 3, 'MarkerFaceColor', c.red);
+    if ~isempty(tl.rssi_d)
+        plot(ax, nb + (1:numel(tl.rssi_d)), tl.rssi_d, '-o', 'Color', c.green, 'LineWidth', 1.6, ...
+            'MarkerSize', 3, 'MarkerFaceColor', c.green);
+    end
+    if ~isempty(tl.rssi_r)
+        plot(ax, nb + (1:numel(tl.rssi_r)), tl.rssi_r, '--s', 'Color', c.purp, 'LineWidth', 1.4, 'MarkerSize', 3);
+    end
+    if xmax > nb, xline(ax, nb + 0.5, '--', 'Color', c.amber, 'LineWidth', 1.2); end
+    hold(ax, 'off');
+    ax.XLim = [0.5 max(xmax, 2) + 0.5]; grid(ax, 'on');
+    xlabel(ax, 'Frame index', 'Color', c.mut); ylabel(ax, 'RSSI (dB)', 'Color', c.mut);
+    setTitle(ax, 'Received signal strength per frame (dB)', c);
+end
+
+function v = floorBer(v, fl)
+    v(v < fl) = fl;          % NaN stays NaN (gap in the plot)
+end
+
+%% ---------------------- link diagram ----------------------
+function drawLinkDiagram(fig, state, scen, det, info)
+    data = fig.UserData; c = data.colors; ax = data.ui.linkAx;
+    cla(ax); hold(ax, 'on'); ax.XLim = [0 16]; ax.YLim = [0 3];
+    hostile = ~ismember(scen, {'none','benign_interference',''});
+    xg = 1.6; yg = 1.95; xu = 13.0; yu = 1.55;
+    if strcmp(scen, 'path_loss') && ~strcmp(state, 'idle'), xu = 14.4; end
+
+    % ----- state -> colours / message -----
+    hdrState = 'idle';
+    switch state
+        case 'idle'
+            lc = c.mut; ls = ':'; msg = 'STANDBY - AWAITING COMMAND'; mc = c.mut;
+        case 'scenario'
+            if hostile
+                lc = c.red; ls = '--'; hdrState = 'attack';
+            elseif strcmp(scen, 'benign_interference')
+                lc = c.accent; ls = '-'; hdrState = 'benign';
+            else
+                lc = c.green; ls = '-'; hdrState = 'nominal';
+            end
+            mc = lc; msg = ['SCENARIO INJECTED (ground truth): ' niceName(scen)];
+        case 'detected'
+            lc = c.amber; ls = '--'; hdrState = 'attack';
+            if strcmp(scen, 'benign_interference')
+                lc = c.accent; ls = '-'; hdrState = 'benign';
+            elseif strcmp(scen, 'none')
+                lc = c.green; ls = '-'; hdrState = 'nominal';
+            end
+            if isfield(info, 'unknown') && info.unknown
+                mc = c.amber; msg = sprintf('CNN: UNKNOWN THREAT  (%.0f%%)', 100*info.conf);
+            elseif isfield(info, 'correct') && info.correct
+                mc = c.green; msg = sprintf('CNN DETECTED: %s  (%.1f%%)', niceName(det), 100*info.conf);
+            else
+                mc = c.red; msg = sprintf('CNN DETECTED: %s  (%.1f%%) - MISMATCH', niceName(det), 100*info.conf);
+            end
+        case 'mitigating'
+            lc = c.amber; ls = '--'; hdrState = 'recovering'; mc = c.amber;
+            msg = ['DRL COUNTERMEASURE: ' niceName(det)];
+        case 'resolved'
+            lc = info.color; ls = '-'; mc = info.color; msg = info.verdict;
+            hdrState = 'resolved';
+        otherwise
+            lc = c.mut; ls = ':'; msg = ''; mc = c.mut;
+    end
+
+    % ----- endpoints -----
+    drawGCS(ax, xg, c);
+    faulty = strcmp(scen, 'antenna_fault') && any(strcmp(state, {'scenario','detected','mitigating'}));
+    drawUAV(ax, xu, yu, c, faulty);
+
+    % ----- main link -----
+    plot(ax, [xg xu], [yg yu], ls, 'Color', lc, 'LineWidth', 3);
+    xm = (xg + xu) / 2; ym = (yg + yu) / 2;
+
+    % ----- threat overlay -----
+    showThreat = any(strcmp(state, {'scenario','detected','mitigating'})) || ...
+        (strcmp(state, 'resolved') && isfield(info, 'threatRemains') && info.threatRemains);
+    if showThreat, drawThreat(ax, scen, xm, ym, xg, yg, xu, yu, c); end
+
+    % ----- countermeasure overlay -----
+    if strcmp(state, 'mitigating'), drawCountermeasure(ax, det, xg, yg, xu, yu, c); end
+
+    text(ax, 8, 2.72, msg, 'Color', mc, 'FontWeight', 'bold', 'FontSize', 13, ...
+        'HorizontalAlignment', 'center', 'FontName', c.font, 'Interpreter', 'none');
+    if isfield(info, 'v_kmh')
+        text(ax, 15.85, 0.18, sprintf('v = %.1f km/h  |  fd = %.0f Hz', info.v_kmh, info.fd), ...
+            'Color', c.cyan, 'FontSize', 10, 'HorizontalAlignment', 'right', 'FontName', c.mono);
+    end
+    hold(ax, 'off');
+
+    % ----- header lamp -----
+    switch hdrState
+        case 'attack',     setLinkHeader(fig, 'UNDER ATTACK', c.red);
+        case 'benign',     setLinkHeader(fig, 'BENIGN INTERFERENCE', c.accent);
+        case 'nominal',    setLinkHeader(fig, 'NOMINAL', c.green);
+        case 'recovering', setLinkHeader(fig, 'RECOVERING', c.amber);
+        case 'resolved',   setLinkHeader(fig, 'RESULT READY', info.color);
+        otherwise,         setLinkHeader(fig, 'STANDBY', c.mut);
+    end
+    drawnow;
+    if ismember(state, {'scenario','detected','resolved'})
+        recordFrame(fig);  % one capture per real state, not per timer tick ('mitigating' dropped, D54)
+    end
+end
+
+function setLinkHeader(fig, txt, col)
+    ui = fig.UserData.ui;
+    ui.linkLamp.FontColor = col; ui.linkTxt.FontColor = col; ui.linkTxt.Text = ['LINK: ' txt];
+end
+
+function drawGCS(ax, x, c)
+    patch(ax, [x-0.9 x+0.9 x+0.7 x-0.7], [0.35 0.35 0.80 0.80], [0.20 0.26 0.34], ...
+        'EdgeColor', c.accent, 'LineWidth', 1.5);
+    plot(ax, [x x], [0.80 1.90], 'Color', [0.72 0.75 0.80], 'LineWidth', 3);
+    scatter(ax, x, 1.95, 90, c.accent, 'filled', 'MarkerEdgeColor', 'w');
+    text(ax, x, 0.14, 'GCS', 'Color', c.txt, 'FontWeight', 'bold', 'FontSize', 11, ...
+        'HorizontalAlignment', 'center', 'FontName', c.font);
+end
+
+function drawUAV(ax, x, y, c, faulty)
+    body = [0.30 0.35 0.42];
+    patch(ax, [x-0.65 x+0.65 x+0.45 x-0.45], [y-0.14 y-0.14 y+0.14 y+0.14], body, ...
+        'EdgeColor', c.accent, 'LineWidth', 1.5);
+    plot(ax, [x-0.45 x-1.05], [y+0.10 y+0.32], 'Color', [0.65 0.68 0.75], 'LineWidth', 2.2);
+    plot(ax, [x+0.45 x+1.05], [y+0.10 y+0.32], 'Color', [0.65 0.68 0.75], 'LineWidth', 2.2);
+    t = linspace(-0.45, 0.45, 24); rr = 0.05 * sqrt(max(0, 1 - (t/0.45).^2));
+    for s = [-1.05 1.05]
+        patch(ax, x + s + t, y + 0.36 + rr, [0.80 0.88 0.90], 'EdgeColor', 'none');
+        patch(ax, x + s + t, y + 0.36 - rr, [0.80 0.88 0.90], 'EdgeColor', 'none');
+    end
+    plot(ax, [x x], [y+0.14 y+0.50], 'Color', [0.72 0.75 0.80], 'LineWidth', 2);     % antenna
+    if faulty
+        plot(ax, [x-0.15 x+0.12 x-0.10 x+0.15], [y+0.50 y+0.62 y+0.74 y+0.88], 'Color', c.amber, 'LineWidth', 2);
+        scatter(ax, x + 0.28, y + 0.85, 160, c.amber, '*');
+    else
+        scatter(ax, x, y + 0.52, 55, c.accent, 'filled', 'MarkerEdgeColor', 'w');
+    end
+    text(ax, x, y - 0.42, 'UAV', 'Color', c.txt, 'FontWeight', 'bold', 'FontSize', 11, ...
+        'HorizontalAlignment', 'center', 'FontName', c.font);
+end
+
+function drawJammerIcon(ax, x, y, col, label, c)
+    patch(ax, [x-0.35 x+0.35 x], [y-0.22 y-0.22 y+0.28], col, 'EdgeColor', 'w', 'LineWidth', 1);
+    text(ax, x, y - 0.40, label, 'Color', col, 'FontWeight', 'bold', 'FontSize', 9, ...
+        'HorizontalAlignment', 'center', 'FontName', c.font);
+end
+
+function drawWaves(ax, x, y, col)
+    th = linspace(pi/2 - 0.85, pi/2 + 0.85, 24);
+    for r = [0.55 0.95 1.35]
+        plot(ax, x + r*cos(th), y + 0.25 + r*sin(th), 'Color', col, 'LineWidth', 1.6);
+    end
+end
+
+function drawThreat(ax, scen, xm, ym, xg, yg, xu, yu, c)
+    jy = 0.50;
+    switch scen
+        case 'jamming'
+            drawJammerIcon(ax, xm, jy, c.red, 'BARRAGE JAMMER', c); drawWaves(ax, xm, jy, c.red);
+        case 'noise_burst'
+            drawJammerIcon(ax, xm, jy, c.red, 'BURST JAMMER', c); drawWaves(ax, xm, jy, c.red);
+            for k = 1:6
+                xx = xm - 2.0 + 0.7 * k;
+                plot(ax, [xx xx], [ym - 0.18, ym + 0.18 + 0.12 * mod(k, 2)], 'Color', c.red, 'LineWidth', 2.2);
+            end
+        case 'reactive_jamming'
+            drawJammerIcon(ax, xm, jy, c.red, 'REACTIVE JAMMER', c); drawWaves(ax, xm, jy, c.red);
+            plot(ax, [xm + 0.5, xm + 2.2], [jy + 0.9, ym - 0.08], ':', 'Color', c.amber, 'LineWidth', 1.6);
+            text(ax, xm + 2.3, ym - 0.22, 'senses Tx', 'Color', c.amber, 'FontSize', 8, 'FontName', c.font);
+        case 'sweeping_jammer'
+            drawJammerIcon(ax, xm, jy, c.red, 'SWEEPING JAMMER', c); drawWaves(ax, xm, jy, c.red);
+            plot(ax, xm + [-2.2 -1.5 -1.5 -0.8 -0.8 -0.1], jy + [0.2 0.8 0.2 0.8 0.2 0.8], 'Color', c.red, 'LineWidth', 1.6);
+        case 'spoofing'
+            fx = xm + 1.6;
+            patch(ax, [fx-0.7 fx+0.7 fx+0.5 fx-0.5], [0.25 0.25 0.62 0.62], [0.30 0.20 0.40], ...
+                'EdgeColor', c.purp, 'LineWidth', 1.5);
+            plot(ax, [fx fx], [0.62 1.10], 'Color', c.purp, 'LineWidth', 2.5);
+            scatter(ax, fx, 1.14, 70, c.purp, 'filled', 'MarkerEdgeColor', 'w');
+            plot(ax, [fx xu], [1.14, yu + 0.05], '--', 'Color', c.purp, 'LineWidth', 2.5);
+            text(ax, fx, 0.08, 'FAKE GCS', 'Color', c.purp, 'FontWeight', 'bold', 'FontSize', 9, ...
+                'HorizontalAlignment', 'center', 'FontName', c.font);
+        case 'path_loss'
+            for k = 1:5
+                a = 0.15 + 0.17 * (k - 1);
+                plot(ax, xg + (xu - xg) * [a, a + 0.12], yg + (yu - yg) * [a, a + 0.12] - 0.22, ...
+                    'Color', c.amber, 'LineWidth', max(0.8, 3.2 - 0.6 * k));
+            end
+            text(ax, xm, ym - 0.5, 'RANGE / ATTENUATION', 'Color', c.amber, 'FontSize', 9, ...
+                'HorizontalAlignment', 'center', 'FontName', c.font);
+        case 'antenna_fault'
+            text(ax, xu - 2.1, yu + 0.85, 'ANTENNA FAULT', 'Color', c.amber, 'FontWeight', 'bold', ...
+                'FontSize', 9, 'HorizontalAlignment', 'center', 'FontName', c.font);
+        case 'benign_interference'
+            patch(ax, [xm-0.3 xm+0.3 xm+0.3 xm-0.3], [jy-0.2 jy-0.2 jy+0.2 jy+0.2], c.accent, ...
+                'EdgeColor', 'w', 'LineWidth', 1);
+            th = linspace(pi/2 - 0.7, pi/2 + 0.7, 18);
+            for r = [0.4 0.7]
+                plot(ax, xm + r*cos(th), jy + 0.25 + r*sin(th), ':', 'Color', c.accent, 'LineWidth', 1.3);
+            end
+            text(ax, xm, jy - 0.42, 'ISM DEVICE (BENIGN)', 'Color', c.accent, 'FontSize', 9, ...
+                'HorizontalAlignment', 'center', 'FontName', c.font);
+        otherwise
+            text(ax, xm, ym - 0.5, 'CLEAN CHANNEL', 'Color', c.green, 'FontSize', 9, ...
+                'HorizontalAlignment', 'center', 'FontName', c.font);
+    end
+end
+
+function drawCountermeasure(ax, action, xg, yg, xu, yu, c)
+    if contains(action, '+')                               % two actions (D39): draw both, label both
+        parts = strsplit(action, '+');
+        drawCountermeasure(ax, parts{1}, xg, yg, xu, yu, c);
+        text(ax, (xg + xu)/2, yg + 1.00, ['+ ' actionLabel(parts{2})], 'Color', c.green, 'FontSize', 9, ...
+            'FontWeight', 'bold', 'HorizontalAlignment', 'center', 'FontName', c.font);
+        return;
+    end
+    switch action
+        case 'channel_switch'
+            plot(ax, [xg xu], [yg + 0.40, yu + 0.40], '-', 'Color', c.green, 'LineWidth', 2.5);
+            text(ax, (xg + xu)/2, yg + 0.62, 'NEW CHANNEL', 'Color', c.green, 'FontSize', 9, ...
+                'HorizontalAlignment', 'center', 'FontName', c.font);
+        case 'rate_reduce'
+            plot(ax, [xg xu], [yg + 0.40, yu + 0.40], ':', 'Color', c.green, 'LineWidth', 2.5);
+            text(ax, (xg + xu)/2, yg + 0.62, 'LOWER RATE  (goodput reduced)', 'Color', c.green, ...
+                'FontSize', 9, 'HorizontalAlignment', 'center', 'FontName', c.font);
+        case 'freq_diversity'
+            plot(ax, [xg xu], [yg + 0.32, yu + 0.32], '-', 'Color', c.green, 'LineWidth', 2);
+            plot(ax, [xg xu], [yg + 0.52, yu + 0.52], '-', 'Color', c.green, 'LineWidth', 2);
+            text(ax, (xg + xu)/2, yg + 0.74, 'F1 + F2  (frequency diversity)', 'Color', c.green, ...
+                'FontSize', 9, 'HorizontalAlignment', 'center', 'FontName', c.font);
+        case 'spatial_diversity'
+            plot(ax, [xg, xu - 0.6], [yg + 0.38, yu + 0.30], '-', 'Color', c.green, 'LineWidth', 2);
+            plot(ax, [xg, xu + 0.6], [yg + 0.58, yu + 0.30], '-', 'Color', c.green, 'LineWidth', 2);
+            text(ax, (xg + xu)/2, yg + 0.80, 'ANT 1 + ANT 2  (spatial diversity)', 'Color', c.green, ...
+                'FontSize', 9, 'HorizontalAlignment', 'center', 'FontName', c.font);
+        case 'power_control'
+            plot(ax, [xg xu], [yg + 0.40, yu + 0.40], '-', 'Color', c.green, 'LineWidth', 4.5);
+            text(ax, (xg + xu)/2, yg + 0.66, 'TX POWER +6 dB', 'Color', c.green, 'FontSize', 9, ...
+                'HorizontalAlignment', 'center', 'FontName', c.font);
+        case 'fec_interleave'
+            plot(ax, [xg xu], [yg + 0.40, yu + 0.40], '-.', 'Color', c.green, 'LineWidth', 2.5);
+            text(ax, (xg + xu)/2, yg + 0.62, 'FEC + INTERLEAVING  (goodput / 2)', 'Color', c.green, ...
+                'FontSize', 9, 'HorizontalAlignment', 'center', 'FontName', c.font);
+        otherwise
+            text(ax, (xg + xu)/2, yg + 0.55, 'NO ACTION - MONITORING', 'Color', c.mut, 'FontSize', 9, ...
+                'HorizontalAlignment', 'center', 'FontName', c.font);
+    end
+end
+
+function s = actionLabel(a)
+    names = containers.Map({'no_action','channel_switch','rate_reduce','freq_diversity','spatial_diversity', ...
+        'power_control','fec_interleave'}, {'NONE','CH-SW','RATE','FREQ-DIV','SPATIAL','PWR+6dB','FEC'});
+    parts = strsplit(a, '+');
+    s = strjoin(cellfun(@(x) names(x), parts, 'UniformOutput', false), '+');
+end
+
+%% =====================================================================
+%% ==========================  LOG / TIMER  =============================
+%% =====================================================================
+function appLog(fig, msg)
+    data = fig.UserData; ta = data.ui.termArea;
+    line = sprintf('[%s] %s', datestr(now, 'HH:MM:SS'), msg);
+    v = ta.Value;
+    if ischar(v), v = {v}; end
+    if numel(v) == 1 && isempty(v{1}), v = {}; end
+    v = [v(:); {line}];
+    if numel(v) > 200, v = v(end-199:end); end
+    ta.Value = v;
+    scroll(ta, 'bottom');
+    fid = getappdata(fig, 'logFid');
+    if ~isempty(fid) && fid > 0, fprintf(fid, '%s\n', line); end
+    drawnow;
+end
+
+function updateTimer(fig, tSeq)
+    ui = fig.UserData.ui;
+    elap = toc(tSeq);
+    ui.timeLbl.Text = sprintf('%02d:%05.2f', floor(elap / 60), mod(elap, 60));
+    drawnow limitrate;
+end
+
+function recordFrame(fig)
+    vw = getappdata(fig, 'videoWriter');
+    if ~isempty(vw)
+        try
+            writeVideo(vw, getframe(fig));
+        catch
+        end
+    end
+end
+
+function smartPause(fig, secs, tSeq)
+    % Video frame capture no longer happens here — getframe(fig) on a
+    % uifigure is expensive per call regardless of frequency (it round-trips
+    % through the CEF-based renderer), so it is captured once per real state
+    % transition inside drawLinkDiagram instead. This loop only drives the
+    % on-screen timer.
+    n = max(1, round(secs * 10));
+    for k = 1:n
+        updateTimer(fig, tSeq);
+        pause(0.1);
+    end
+end
+
+function updateSessionSummary(fig)
+    ui = fig.UserData.ui;
+    H = getappdata(fig, 'history');
+    if isempty(H), ui.sessionLbl.Text = {'No runs yet.'}; return; end
+    n = numel(H);
+    corr = cellfun(@(h) h.cnn_correct, H); unk = cellfun(@(h) h.unknown, H);
+    recD = cellfun(@(h) h.rec_dqn, H);     recR = cellfun(@(h) h.rec_rule, H);
+    lat  = cellfun(@(h) h.decision_latency_ms, H);
+    both = ~isnan(recD) & ~isnan(recR);
+    better = sum(recD(both) > recR(both) + 1); worse = sum(recD(both) < recR(both) - 1);
+    same = sum(both) - better - worse;
+    ui.sessionLbl.Text = { ...
+        sprintf('RUNS %d | detection %d/%d (%.1f%%) | unknown %d | mean latency %.2f ms', ...
+            n, sum(corr), n, 100*mean(corr), sum(unk), mean(lat)), ...
+        sprintf('mean recovery: DQN %.1f%% | RULE %.1f%% | DQN better/equal/worse than RULE: %d / %d / %d', ...
+            mean(recD, 'omitnan'), mean(recR, 'omitnan'), better, same, worse)};
+end
+
+%% =====================================================================
+%% ========================  CONTINUOUS EPISODE  ========================
+%% =====================================================================
+function epHystChanged(~, ~)
+    % Escalation is read when the next episode starts.
+end
+
+function stopEpisode(btn, ~)
+    fig = ancestor(btn, 'figure');
+    setappdata(fig, 'epAbort', true);
+    btn.Enable = 'off';
+end
+
+function epFinish(fig)
+    if ~isvalid(fig), return; end
+    ui = fig.UserData.ui;
+    ui.epRunBtn.Enable = 'on'; ui.epStopBtn.Enable = 'off';
+    ui.runBtn.Enable = 'on';
+    setappdata(fig, 'epAbort', false);
+    restoreParams(fig.UserData.env.p0);
+end
+
+function epSay(fig, lines)
+    ui = fig.UserData.ui;
+    if ischar(lines), lines = {lines}; end
+    ui.epStatus.Value = lines;
+    drawnow;
+end
+
+function runEpisode(btn, ~)
+    fig = ancestor(btn, 'figure');
+    env = fig.UserData.env; ui = fig.UserData.ui; c = fig.UserData.colors;
+    if strcmp(ui.runBtn.Enable, 'off')
+        appLog(fig, 'Episode not started: a live sequence is running.');
+        return;
+    end
+    ui.epRunBtn.Enable = 'off'; ui.epStopBtn.Enable = 'on'; ui.runBtn.Enable = 'off';
+    ui.epExportBtn.Enable = 'off';
+    setappdata(fig, 'epAbort', false);
+    guard = onCleanup(@() epFinish(fig)); %#ok<NASGU>
+
+    %% ---- settings ----
+    threat = ui.epThreatDD.Value; ebno = ui.epSnrDD.Value; sevLevel = ui.epSevDD.Value;
+    v_kmh = ui.epSpeedSpin.Value; mode = ui.epPolicyDD.Value;
+    N_PRE = ui.epPreSpin.Value; N_POST = ui.epPostSpin.Value; N = N_PRE + N_POST;
+    esc = ui.epHystChk.Value;
+    pace = ui.epPaceDD.Value;
+    seed = ui.epSeedFld.Value; if seed == 0, seed = randi(2^31 - 1); end
+    if strcmp(mode, 'both'), policies = {'dqn', 'rule'}; else, policies = {mode}; end
+    nP = numel(policies);
+    [p, sevTxt] = scenarioParams(env, threat, sevLevel, v_kmh);
+    appLog(fig, sprintf('EPISODE: %s @ %g dB | %s | %.1f km/h | %s | escalation %s | seed %d', ...
+        niceName(threat), ebno, sevTxt, v_kmh, strjoin(upper(policies), ' + '), ternaryStr(esc, 'on', 'off'), seed));
+
+    %% ---- frame pools (real Simulink runs, cached per scenario) ----
+    try
+        [Pn, Pt] = epPools(fig, p, threat, ebno, sevLevel, v_kmh);
+    catch ME
+        if strcmp(ME.identifier, 'demoGui:aborted'), appLog(fig, 'Episode stopped while building frame pools.');
+        else, appLog(fig, ['EPISODE ERROR: ' ME.message]); end
+        return;
+    end
+    na = find(strcmp(env.action_names, 'no_action'), 1);
+    nA = numel(env.action_names);
+    bc = mean(Pn{na}.ber);
+    gp_act = ones(1, nA);
+    for a = 1:nA
+        [~, ~, cm] = apply_countermeasure(env.p0, 'none', env.action_names{a});
+        gp_act(a) = cm.goodput_factor;
+    end
+
+    %% ---- episode state, one per policy, identical frame draws ----
+    base = struct('net', env.cnn_net, 'ood', env.ood, 'feat_mean', env.feat_mean, 'feat_std', env.feat_std, ...
+        'fs', env.fs, 'agent', env.dqn_agent, 'PP', env.PP, 'na', na, ...
+        'tw', env.temporal_window, 'frame_dur', env.p0.frame_duration);
+    ctx = cell(1, nP); Ep = cell(1, nP);
+    for i = 1:nP
+        ctx{i} = base; ctx{i}.policy = [policies{i} ternaryStr(esc, '_esc', '')];
+    end
+    rsE = RandStream('mt19937ar', 'Seed', seed);               % same sub-run and frame positions for every policy
+    rr = randi(rsE, 2); k0 = randi(rsE, 20) - 1;
+    T = struct('ber', nan(nP, N), 'det', nan(nP, N), 'ok', false(nP, N), 'mit', false(nP, N), 'conf', nan(nP, N), ...
+        'prop', nan(nP, N), 'cfg', nan(nP, N), 'sw', false(nP, N), 'unk', false(nP, N), 'q', nan(nP, N, nA));
+    cls_idx = @(cl) find(strcmp(env.class_list, cl), 1);
+    truthIdx = [repmat(cls_idx('none'), 1, N_PRE), repmat(cls_idx(threat), 1, N_POST)];
+    H = epInitPlots(fig, N_PRE, N_POST, bc, truthIdx, policies);
+
+    %% ---- stream ----
+    tLoop = tic; kDone = 0;
+    for k = 1:N
+        if getappdata(fig, 'epAbort'), appLog(fig, 'Episode stopped by operator.'); break; end
+        onset = k > N_PRE;
+        for i = 1:nP
+            if isempty(Ep{i}), cfg = na; else, cfg = Ep{i}.cfg; end
+            if onset, F = Pt{cfg}; else, F = Pn{cfg}; end
+            rows = find(F.run == rr); j = rows(mod(k0 + k, numel(rows)) + 1);
+            fr = struct('iq', double(F.iq{j}), 'ber', F.ber(j), 'rssi', F.rssi(j), 'plr', F.plr(j), ...
+                'sinr', F.sinr(j), 'env_corr', F.env_corr(j), 'iot', F.iot(j));
+            [Ep{i}, info] = episode_cycle(Ep{i}, k, fr, ctx{i});
+            T.ber(i, k) = fr.ber; T.det(i, k) = cls_idx(info.cls); T.ok(i, k) = T.det(i, k) == truthIdx(k);
+            T.conf(i, k) = info.conf; T.prop(i, k) = info.prop; T.cfg(i, k) = info.cfg; T.sw(i, k) = info.switched;
+            T.unk(i, k) = info.unknown;
+            if numel(info.qv) == nA, T.q(i, k, :) = info.qv; end
+            T.mit(i, k) = ~T.ok(i, k) && onset && info.cfg ~= na && strcmp(info.cls, 'none');   % countermeasure active, link looks clean
+        end
+        kDone = k;
+        epUpdatePlots(H, T, k, env.ber_floor);
+        msg = sprintf('cycle %3d/%d  %s', k, N, ternaryStr(onset, sprintf('(onset + %d)', k - N_PRE), '(clean)'));
+        for i = 1:nP
+            msg = sprintf('%s  |  %s: %s -> %s', msg, upper(policies{i}), niceName(env.class_list{T.det(i, k)}), ...
+                niceName(env.action_names{T.cfg(i, k)}));
+        end
+        ui.epCycleLbl.Text = msg;
+        drawnow limitrate;
+        if pace > 0, pause(pace); end
+    end
+    drawnow;
+
+    %% ---- summary ----
+    lines = {sprintf('%s @ %g dB, %s, %.1f km/h | seed %d | %d/%d cycles (%.1f s)', niceName(threat), ebno, ...
+        sevTxt, v_kmh, seed, kDone, N, toc(tLoop)), sprintf('clean BER %.2e | alarm confirmation %d-of-%d, rule dwell 2 / hold 3, escalation %s', ...
+        bc, confirmOf(env), ternaryStr(esc, 'on', 'off'))};
+    rows = {};
+    for i = 1:nP
+        S = epSummary(T, i, N_PRE, kDone, bc, truthIdx, gp_act, env.action_names);
+        lines{end+1} = sprintf('%s: T_detect %s | T_act %s | T_recover %s (%s)', upper(policies{i}), ...
+            cycTxt(S.T_detect), cycTxt(S.T_act), cycTxt(S.T_recover), S.status); %#ok<AGROW>
+        lines{end+1} = sprintf('   switches %d before onset, %d after | final BER %.2fx clean | goodput %.2f', ...
+            S.sw_pre, S.sw_post, S.final_ratio, S.goodput); %#ok<AGROW>
+        lines{end+1} = ['   committed: ' S.committed]; %#ok<AGROW>
+        appLog(fig, sprintf('EPISODE %s: T_detect %s, T_act %s, T_recover %s (%s), switches %d/%d, final %.2fx clean, goodput %.2f', ...
+            upper(policies{i}), cycTxt(S.T_detect), cycTxt(S.T_act), cycTxt(S.T_recover), S.status, ...
+            S.sw_pre, S.sw_post, S.final_ratio, S.goodput));
+        for k = 1:kDone
+            rows(end+1, :) = {k, k - N_PRE, policies{i}, env.class_list{truthIdx(k)}, env.class_list{T.det(i, k)}, ...
+                T.conf(i, k), env.action_names{T.prop(i, k)}, env.action_names{T.cfg(i, k)}, T.sw(i, k), T.ber(i, k)}; %#ok<AGROW>
+        end
+    end
+    lines{end+1} = 'T_* in cycles after onset; recovered = 5-cycle BER mean <= 2x clean for 10 cycles.';
+    epSay(fig, lines);
+
+    if ~isempty(rows)
+        if ~exist('GUI_Results', 'dir'), mkdir('GUI_Results'); end
+        fn = sprintf('GUI_Results/episode_%s_%gdB_%s.csv', threat, ebno, datestr(now, 'yyyymmdd_HHMMSS'));
+        writetable(cell2table(rows, 'VariableNames', {'cycle', 'cycle_from_onset', 'policy', 'true_class', ...
+            'detected', 'confidence', 'proposed', 'configuration', 'switched', 'ber'}), fn);
+        appLog(fig, ['Episode trace saved to ' fn]);
+        setappdata(fig, 'epLastFile', fn);
+        ui.epExportBtn.Enable = 'on';
+        ep3d = episodeRecord(env, p, T, kDone, threat, ebno, sevLevel, sevTxt, v_kmh, seed, rr, ...
+            N_PRE, policies, truthIdx, bc, gp_act, esc);
+        fm = strrep(fn, '.csv', '.mat');
+        save(fm, 'ep3d');
+        setappdata(fig, 'epLastMat', fm);
+        ui.ep3dBtn.Enable = 'on';
+        appLog(fig, ['Episode record for the 3D view saved to ' fm]);
+    end
+end
+
+function ep3d = episodeRecord(env, p, T, kDone, threat, ebno, sevLevel, sevTxt, v_kmh, seed, rr, ...
+        N_PRE, policies, truthIdx, bc, gp_act, esc)
+    % Everything the 3D view (viz3d/v3d_replay.m) needs to replay the episode: the trace of every policy and
+    % the flight geometry of the sub-run it used (seed -> interferer directions).
+    seedGeom = 500000 + round(100 * ebno) * 1000 + round(10 * v_kmh) + rr;   % as in epPools / epBuildPool
+    aoaFixed = fieldOr(p, 'int_aoa_deg', [40 -55 70]);
+    if fieldOr(p, 'int_aoa_random', false)
+        aoa = interferer_aoa(seedGeom, fieldOr(p, 'int_aoa_range_deg', [-90 90]), numel(aoaFixed));
+    else
+        aoa = aoaFixed(:)';
+    end
+    f = {'ber', 'det', 'conf', 'prop', 'cfg', 'sw', 'unk'};
+    for j = 1:numel(f), T.(f{j}) = T.(f{j})(:, 1:kDone); end
+    T.q = T.q(:, 1:kDone, :);
+    sev = struct('jsr_db', p.jsr_db, 'path_loss_db', p.path_loss_db, 'spoof_sir_db', p.spoof_sir_db, ...
+        'benign_int_db', p.benign_int_db, 'fault_duty', p.fault_duty);
+    ep3d = struct('version', 1, 'created', datestr(now), 'threat', threat, 'ebno', ebno, ...
+        'sev_level', sevLevel, 'sev_txt', sevTxt, 'sev', sev, 'v_kmh', v_kmh, 'fd_hz', p.fd_max, ...
+        'seed', seed, 'seed_geom', seedGeom, 'int_aoa_deg', aoa, 'gcs_aoa_deg', fieldOr(p, 'gcs_aoa_deg', 0), ...
+        'n_rx', fieldOr(p, 'n_rx', 2), 'ant_spacing_wl', fieldOr(p, 'ant_spacing_wl', 0.5), 'fc_hz', p.carrier_freq, ...
+        'frame_s', p.frame_duration, 'n_pre', N_PRE, 'n', kDone, 'policies', {policies}, 'escalation', esc, ...
+        'classes', {env.class_list(:)'}, 'actions', {env.action_names(:)'}, 'truth', truthIdx(1:kDone), ...
+        'ber_clean', bc, 'goodput', gp_act, 'T', T);
+end
+
+function v = fieldOr(s, name, v)
+    if isfield(s, name) && ~isempty(s.(name)), v = s.(name); end
+end
+
+function openEpisode3d(btn, ~)
+    fig = ancestor(btn, 'figure');
+    fm = getappdata(fig, 'epLastMat');
+    if isempty(fm) || ~exist(fm, 'file')
+        appLog(fig, '3D view: no episode record yet. Run an episode first.');
+        return;
+    end
+    try
+        v3d_live('replay', fm);
+    catch ME
+        appLog(fig, ['3D view failed: ' ME.message]);
+    end
+end
+
+function exportEpisode(btn, ~)
+    % Saves the whole console as shown (settings, summary and plots), next to the episode CSV.
+    fig = ancestor(btn, 'figure');
+    fn = getappdata(fig, 'epLastFile');
+    if isempty(fn), fn = sprintf('GUI_Results/episode_%s.csv', datestr(now, 'yyyymmdd_HHMMSS')); end
+    png = strrep(fn, '.csv', '.png');
+    try
+        exportapp(fig, png);
+        appLog(fig, ['Episode screen saved to ' png]);
+    catch ME
+        appLog(fig, ['Export failed: ' ME.message]);
+    end
+end
+
+function [Pn, Pt] = epPools(fig, p, threat, ebno, sevLevel, v_kmh)
+    % Frames of the scenario's link under every configuration: the clean link
+    % (before onset) and the attacked link, each through every action, from
+    % real Simulink runs with apply_countermeasure.m. Cached per scenario.
+    M = getappdata(fig, 'epPools');
+    keyN = sprintf('none|%g|%.1f', ebno, v_kmh);
+    keyT = sprintf('%s|%g|%.1f|%d', threat, ebno, v_kmh, sevLevel);
+    pn = p; pn.active_threat = 'none';
+    seedBase = 500000 + round(100 * ebno) * 1000 + round(10 * v_kmh);   % clean and attacked pools share fading
+    if ~isKey(M, keyN), M(keyN) = epBuildPool(fig, pn, 'none', ebno, seedBase); end
+    if strcmp(threat, 'none')
+        M(keyT) = M(keyN);
+    elseif ~isKey(M, keyT)
+        M(keyT) = epBuildPool(fig, p, threat, ebno, seedBase);
+    end
+    Pn = M(keyN); Pt = M(keyT);
+end
+
+function P = epBuildPool(fig, p, threat, ebno, seedBase)
+    % Every configuration runs on the same two seeds (same fading, geometry and
+    % threat waveform), so a change of configuration keeps the flight geometry.
+    env = fig.UserData.env;
+    nA = numel(env.action_names);
+    P = cell(1, nA);
+    for a = 1:nA
+        if getappdata(fig, 'epAbort'), error('demoGui:aborted', 'stopped'); end
+        epSay(fig, sprintf('Building frame pool: %s, action %d/%d (%s)...', niceName(threat), a, nA, ...
+            niceName(env.action_names{a})));
+        [p2, g_db] = apply_countermeasure(p, threat, env.action_names{a});
+        params = p2; save('params.mat', 'params'); %#ok<NASGU>
+        evalc('build_threat_model');
+        snr_dB = ebno + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps);
+        set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p2.sps));
+        F = struct('iq', {{}}, 'ber', [], 'rssi', [], 'plr', [], 'sinr', [], 'env_corr', [], 'iot', [], 'run', []);
+        for r = 1:2
+            link_seed(env.modelName, seedBase + r, p2.fd_max);
+            out = sim(env.modelName);
+            [iq_f, ber_f, rssi_f, plr_f, ~, sinr_f, ec_f, iot_f] = extract_closed_loop_frames(out, p2, env.delay_bits);
+            v = find(~isnan(ber_f));
+            F.iq   = [F.iq, reshape(cellfun(@single, iq_f(v), 'UniformOutput', false), 1, [])];
+            F.ber  = [F.ber, ber_f(v)];
+            F.rssi = [F.rssi, rssi_f(v)];
+            F.plr  = [F.plr, plr_f(v)];
+            F.sinr = [F.sinr, sinr_f(v)];
+            F.env_corr = [F.env_corr, ec_f(v)];
+            F.iot = [F.iot, iot_f(v)];
+            F.run = [F.run, r * ones(1, numel(v))];
+        end
+        P{a} = F;
+    end
+    restoreParams(env.p0);
+end
+
+function H = epInitPlots(fig, N_PRE, N_POST, bc, truthIdx, policies)
+    data = fig.UserData; ui = data.ui; c = data.colors; env = data.env;
+    N = N_PRE + N_POST; fl = env.ber_floor; nP = numel(policies);
+    pc = {c.accent, c.purp}; mk = {'o', 's'}; off = [-0.15 0.15]; if nP == 1, off = 0; end
+    nanN = nan(1, N);
+
+    ax = ui.epBerAx; legend(ax, 'off'); cla(ax); hold(ax, 'on');
+    patch(ax, [0.5 N_PRE+0.5 N_PRE+0.5 0.5], [fl*0.6 fl*0.6 1 1], c.cyan, 'FaceAlpha', 0.05, 'EdgeColor', 'none', ...
+        'HandleVisibility', 'off');
+    hh = gobjects(0); nm = {};
+    hh(end+1) = plot(ax, [0.5 N+0.5], max(bc, fl) * [1 1], ':', 'Color', c.cyan, 'LineWidth', 1.4); nm{end+1} = 'clean link';
+    hh(end+1) = plot(ax, [0.5 N+0.5], max(2*bc, fl) * [1 1], '--', 'Color', c.green, 'LineWidth', 1.1); nm{end+1} = '2x clean (recovered)';
+    xline(ax, N_PRE + 0.5, '-', 'threat onset', 'Color', c.amber, 'LineWidth', 1.5, 'LabelVerticalAlignment', 'bottom', ...
+        'FontSize', 9, 'HandleVisibility', 'off');
+    H.ber = gobjects(1, nP); H.ma = gobjects(1, nP); H.swB = gobjects(1, nP);
+    for i = 1:nP
+        H.ber(i) = plot(ax, 1:N, nanN, '-', 'Color', 0.45*pc{i} + 0.55*c.axBg, 'LineWidth', 0.8, 'HandleVisibility', 'off');
+        H.ma(i)  = plot(ax, 1:N, nanN, '-', 'Color', pc{i}, 'LineWidth', 2.2);
+        H.swB(i) = plot(ax, 1:N, nanN, 'v', 'MarkerSize', 9, 'MarkerFaceColor', pc{i}, 'MarkerEdgeColor', 'w', ...
+            'HandleVisibility', 'off');
+        hh(end+1) = H.ma(i); nm{end+1} = [upper(policies{i}) ' (5-cycle mean; v = switch)']; %#ok<AGROW>
+    end
+    hold(ax, 'off');
+    ax.YScale = 'log'; ax.YLim = [fl*0.6 1]; ax.XLim = [0.5 N+0.5]; grid(ax, 'on');
+    ylabel(ax, 'BER', 'Color', c.mut);
+    legend(ax, hh, nm, 'Location', 'northwest', 'TextColor', c.txt, 'Color', c.panelBg, 'EdgeColor', c.mut, 'FontSize', 9);
+    setTitle(ax, 'Link BER per cycle', c);
+
+    ax = ui.epDetAx; legend(ax, 'off'); cla(ax); hold(ax, 'on');
+    stairs(ax, (1:N+1) - 0.5, [truthIdx truthIdx(end)], '-', 'Color', c.mut, 'LineWidth', 3);
+    H.detOk = gobjects(1, nP); H.detBad = gobjects(1, nP); H.detMit = gobjects(1, nP);
+    for i = 1:nP
+        H.detOk(i)  = plot(ax, 1:N, nanN, mk{i}, 'MarkerSize', 4, 'MarkerFaceColor', c.green, 'MarkerEdgeColor', pc{i});
+        H.detBad(i) = plot(ax, 1:N, nanN, mk{i}, 'MarkerSize', 5, 'MarkerFaceColor', c.red, 'MarkerEdgeColor', pc{i});
+        H.detMit(i) = plot(ax, 1:N, nanN, mk{i}, 'MarkerSize', 4, 'MarkerFaceColor', c.amber, 'MarkerEdgeColor', pc{i});
+    end
+    xline(ax, N_PRE + 0.5, '-', 'Color', c.amber, 'LineWidth', 1.5);
+    hold(ax, 'off');
+    nC = numel(env.class_list);
+    ax.YDir = 'reverse'; ax.YTick = 1:nC; ax.YTickLabel = cellfun(@niceName, env.class_list, 'UniformOutput', false);
+    ax.YLim = [0.4 nC+0.6]; ax.XLim = [0.5 N+0.5]; ax.FontSize = 8; grid(ax, 'on');
+    setTitle(ax, 'Detected class per cycle  (grey = true class, green = correct, amber = NONE on the mitigated link, red = wrong)', c);
+
+    ax = ui.epActAx; legend(ax, 'off'); cla(ax); hold(ax, 'on');
+    H.prop = gobjects(1, nP); H.cfg = gobjects(1, nP);
+    hh = gobjects(0); nm = {};
+    for i = 1:nP
+        H.prop(i) = plot(ax, 1:N, nanN, '.', 'Color', pc{i}, 'MarkerSize', 7, 'HandleVisibility', 'off');
+        H.cfg(i)  = stairs(ax, 1:N, nanN, '-', 'Color', pc{i}, 'LineWidth', 2.4);
+        hh(end+1) = H.cfg(i); nm{end+1} = [upper(policies{i}) ' configuration (dots = proposed)']; %#ok<AGROW>
+    end
+    xline(ax, N_PRE + 0.5, '-', 'Color', c.amber, 'LineWidth', 1.5);
+    hold(ax, 'off');
+    nA = numel(env.action_names);
+    ax.YDir = 'reverse'; ax.YTick = 1:nA; ax.YTickLabel = cellfun(@niceName, env.action_names, 'UniformOutput', false);
+    ax.YLim = [0.4 nA+0.6]; ax.XLim = [0.5 N+0.5]; ax.FontSize = 8; grid(ax, 'on');
+    xlabel(ax, sprintf('Decision cycle (1 cycle = 1 frame = %.3f ms of signal)', env.p0.frame_duration * 1e3), 'Color', c.mut);
+    legend(ax, hh, nm, 'Location', 'southeast', 'TextColor', c.txt, 'Color', c.panelBg, 'EdgeColor', c.mut, 'FontSize', 9);
+    setTitle(ax, 'Policy: proposed action and committed configuration', c);
+
+    H.off = off; H.fl = fl;
+end
+
+function epUpdatePlots(H, T, k, fl)
+    % Only the new sample of cycle k is written into each preallocated line.
+    for i = 1:numel(H.ber)
+        b = max(T.ber(i, max(1, k-4):k), fl);
+        setY(H.ber(i), k, b(end));
+        setY(H.ma(i), k, mean(b));
+        if T.sw(i, k), setY(H.swB(i), k, mean(b)); end
+        y = T.det(i, k) + H.off(i);
+        if T.ok(i, k), setY(H.detOk(i), k, y);
+        elseif T.mit(i, k), setY(H.detMit(i), k, y);
+        else, setY(H.detBad(i), k, y); end
+        setY(H.prop(i), k, T.prop(i, k) + H.off(i));
+        setY(H.cfg(i), k, T.cfg(i, k) + H.off(i));
+    end
+end
+
+function setY(h, k, v)
+    y = h.YData; y(k) = v; h.YData = y;
+end
+
+function S = epSummary(T, i, N_PRE, kDone, bc, truthIdx, gp_act, actions)
+    % Recovered when the causal 5-cycle BER mean stays <= 2x clean for 10 cycles.
+    ber = T.ber(i, 1:kDone);
+    post = N_PRE+1:kDone;
+    S.T_detect = NaN; S.T_act = NaN; S.T_recover = NaN;
+    kd = find(T.det(i, post) == truthIdx(post), 1); if ~isempty(kd), S.T_detect = kd; end
+    sw = find(T.sw(i, 1:kDone));
+    S.sw_pre = sum(sw <= N_PRE); S.sw_post = sum(sw > N_PRE);
+    ka = sw(sw > N_PRE); if ~isempty(ka), S.T_act = ka(1) - N_PRE; end
+    ma = movmean(ber, [4 0]); ok = ma <= 2 * bc;
+    for k = N_PRE+1 : kDone-9
+        if all(ok(k:k+9)), S.T_recover = k - N_PRE; break; end
+    end
+    if S.sw_pre > 0
+        S.status = 'countermeasure already active at onset';
+    elseif ~any(ma(post) > 2 * bc)
+        S.status = 'link never degraded';
+    elseif isnan(S.T_recover)
+        S.status = 'not recovered';
+    else
+        S.status = 'recovered';
+    end
+    S.final_ratio = mean(ber(max(N_PRE+1, kDone-19):kDone), 'omitnan') / bc;
+    if isempty(post), S.goodput = NaN; else, S.goodput = mean(gp_act(T.cfg(i, post))); end
+    if isempty(sw)
+        S.committed = 'none';
+    else
+        S.committed = strjoin(arrayfun(@(k) sprintf('%s @ %+d', actions{T.cfg(i, k)}, k - N_PRE), sw, ...
+            'UniformOutput', false), ', ');
+    end
+end
+
+function s = cycTxt(x)
+    if isnan(x), s = '-'; else, s = sprintf('%d', x); end
+end
+
+function s = ternaryStr(cond, a, b)
+    if cond, s = a; else, s = b; end
+end
+
+%% =====================================================================
+%% ===========================  KPI TAB LOADER  =========================
+%% =====================================================================
+function loadKpiTab(fig)
+    % KPI tab from the result files of the pipeline (D46): detector metrics,
+    % decision-layer evaluation on the test pools, latency, KPI summary.
+    data = fig.UserData; ui = data.ui; c = data.colors;
+    R = 'results/';
+    metrics = []; P = []; Lt = []; Kp = [];
+    try
+        if isfile([R 'eval_detector_metrics.mat'])
+            M = load([R 'eval_detector_metrics.mat'], 'metrics'); metrics = M.metrics;
+        end
+        if isfile([R 'policy_evaluation.mat']), P = load([R 'policy_evaluation.mat']); end
+        if isfile([R 'latency.mat']), L = load([R 'latency.mat'], 'LAT'); Lt = L.LAT; end
+        if isfile([R 'kpi_summary.mat']), K = load([R 'kpi_summary.mat'], 'KPI'); Kp = K.KPI; end
+    catch ME
+        appLog(fig, ['KPI load problem: ' ME.message]);
+    end
+
+    for k = 1:6, setCard(ui, k, 'N/A', 'result file missing', c.mut); end
+    if ~isempty(metrics)
+        col = c.amber; if metrics.macro_f1_pct >= 90, col = c.green; end
+        sub = sprintf('macro-F1 %.1f%% [%.1f-%.1f]  |  target >= 90%%', metrics.macro_f1_pct, metrics.ci95.macro_f1);
+        setCard(ui, 1, sprintf('%.1f%%', metrics.overall_accuracy_pct), sub, col);
+    end
+    if ~isempty(P)
+        cp = @(p) find(strcmp(P.POL, p));
+        S1 = P.RES(1, :); iD = P.iDQN;
+        rd = 100 * mean(S1{iD}.restored_post);
+        setCard(ui, 2, sprintf('%.1f%%', rd), sprintf('restored cycles, single threats | rule+esc %.1f%%, table %.1f%%', ...
+            100 * mean(S1{cp('rule_esc')}.restored_post), 100 * mean(S1{cp('table')}.restored_post)), c.accent);
+        fa = P.KP.far(strcmp({P.KP.far.policy}, P.LBL{iD}));
+        col = c.green; if fa.upper > 0.05, col = c.amber; end
+        setCard(ui, 4, sprintf('%.2f%%', 100 * fa.p), sprintf('%d / %d clean episodes | 95%% upper %.2f%% (bound 5%%)', ...
+            fa.k, fa.n, 100 * fa.upper), col);
+        A = poolSets(P.RES(P.iThreat, :));
+        [dm, dlo, dhi] = stats_ci('t', A{iD}.ret - A{cp('rule_esc')}.ret);
+        col = c.red; if dlo > 0, col = c.green; end
+        setCard(ui, 5, sprintf('%+.3f', dm), sprintf('return vs rule + escalation [%+.3f, %+.3f], threat sets', dlo, dhi), col);
+        pv = P.KP.per_speed(:, strcmp(P.KP.show, P.POL{iD}));
+        col = c.amber; if max(pv) - min(pv) <= 10, col = c.green; end
+        setCard(ui, 6, sprintf('%.1f%%', min(pv)), sprintf('worst speed band, restored (best %.1f%%) over %.0f-%.0f km/h', ...
+            max(pv), P.KP.speed_bins(1), P.KP.speed_bins(end)), col);
+    end
+    if ~isempty(Lt)
+        setCard(ui, 3, sprintf('%.1f ms', Lt.total_dqn_median_ms), sprintf('median per cycle | p95 %.1f ms | %s', ...
+            Lt.total_dqn_p95_ms, Lt.device), c.accent);
+    end
+    if ~isempty(Kp)
+        appLog(fig, sprintf('KPI summary: %s', strjoin(arrayfun(@(q) sprintf('%d %s', q.id, q.status), Kp, ...
+            'UniformOutput', false), ' | ')));
+    end
+
+    guardedPlot(@() plotConfusion(ui.kCm, metrics, c), ui.kCm, 'Confusion matrix', 'eval_detector_metrics.mat', c);
+    guardedPlot(@() plotAccSnr(ui.kAcc, metrics, c), ui.kAcc, 'Accuracy vs Eb/N0', 'eval_detector_metrics.mat', c);
+    guardedPlot(@() plotRecSnr(ui.kRec, P, c), ui.kRec, 'Restoration vs Eb/N0', 'policy_evaluation.mat', c);
+    guardedPlot(@() plotLatency(ui.kLat, Lt, c), ui.kLat, 'Decision latency', 'latency.mat', c);
+    guardedPlot(@() plotActions(ui.kAct, P, c), ui.kAct, 'DQN configuration per threat', 'policy_evaluation.mat', c);
+    guardedPlot(@() plotSpeed(ui.kSpd, P, metrics, c), ui.kSpd, 'Robustness vs UAV speed', 'policy_evaluation.mat', c);
+end
+
+function A = poolSets(RR)
+    A = RR(1, :);
+    for si = 2:size(RR, 1)
+        for pk = 1:size(RR, 2)
+            fn = fieldnames(A{pk});
+            for i = 1:numel(fn), A{pk}.(fn{i}) = [A{pk}.(fn{i}), RR{si, pk}.(fn{i})]; end
+        end
+    end
+end
+
+function setCard(ui, k, val, sub, col)
+    ui.kpiVal(k).Text = val; ui.kpiVal(k).FontColor = col; ui.kpiSub(k).Text = sub;
+end
+
+function guardedPlot(fn, ax, ttl, srcName, c)
+    legend(ax, 'off'); cla(ax);
+    ax.XTickMode = 'auto'; ax.YTickMode = 'auto'; ax.XLimMode = 'auto'; ax.YLimMode = 'auto';
+    ax.XTickLabelMode = 'auto'; ax.YTickLabelMode = 'auto';
+    try
+        ok = fn();
+        if ~ok, placeholderAx(ax, ttl, [srcName ' missing'], c); end
+    catch ME
+        placeholderAx(ax, ttl, ['could not draw: ' ME.message], c);
+    end
+end
+
+function placeholderAx(ax, ttl, msg, c)
+    legend(ax, 'off'); cla(ax);
+    ax.XTick = []; ax.YTick = []; ax.XLim = [0 1]; ax.YLim = [0 1];
+    text(ax, 0.5, 0.5, msg, 'Color', c.mut, 'HorizontalAlignment', 'center', 'FontSize', 11, ...
+        'FontName', c.font, 'Interpreter', 'none');
+    setTitle(ax, ttl, c);
+end
+
+function ok = plotConfusion(ax, metrics, c)
+    ok = ~isempty(metrics) && isfield(metrics, 'conf_mat');
+    if ~ok, return; end
+    cm = metrics.conf_mat; cmn = cm ./ max(sum(cm, 2), 1); n = size(cm, 1);
+    imagesc(ax, cmn, [0 1]);
+    colormap(ax, [linspace(0.10, 0.30, 64)', linspace(0.12, 0.75, 64)', linspace(0.17, 1.00, 64)']);
+    nm = cellfun(@(x) strrep(x, '_', ' '), metrics.classes(:)', 'UniformOutput', false);
+    ax.XTick = 1:n; ax.XTickLabel = nm; ax.XTickLabelRotation = 45;
+    ax.YTick = 1:n; ax.YTickLabel = nm; ax.FontSize = 8; ax.YDir = 'reverse';
+    for i = 1:n
+        for j = 1:n
+            if cm(i, j) > 0
+                text(ax, j, i, sprintf('%d', cm(i, j)), 'HorizontalAlignment', 'center', ...
+                    'FontSize', 7, 'Color', 'w');
+            end
+        end
+    end
+    xlabel(ax, 'Predicted', 'Color', c.mut); ylabel(ax, 'True', 'Color', c.mut);
+    setTitle(ax, 'Confusion matrix (test set)', c);
+end
+
+function ok = plotAccSnr(ax, metrics, c)
+    ok = ~isempty(metrics) && isfield(metrics, 'snr_breakdown');
+    if ~ok, return; end
+    sb = metrics.snr_breakdown; snr = [sb.snr_db]; acc = [sb.accuracy_pct];
+    hold(ax, 'on');
+    plot(ax, snr, acc, '-o', 'LineWidth', 2, 'Color', c.accent, 'MarkerFaceColor', c.accent);
+    yline(ax, 90, '--', 'Color', c.red, 'LineWidth', 1.2);
+    hold(ax, 'off');
+    ax.XTick = snr; ax.YLim = [max(0, floor(min(acc)/5)*5 - 5) 100]; grid(ax, 'on');
+    xlabel(ax, 'Eb/N0 (dB)', 'Color', c.mut); ylabel(ax, 'Accuracy (%)', 'Color', c.mut);
+    setTitle(ax, sprintf('Detection accuracy vs Eb/N0  (overall %.1f%%, red = 90%% target)', metrics.overall_accuracy_pct), c);
+end
+
+function ok = plotRecSnr(ax, P, c)
+    ok = ~isempty(P); if ~ok, return; end
+    hold(ax, 'on');
+    h = plot(ax, P.KP.ebno, P.KP.per_ebno, '-o', 'LineWidth', 1.5, 'MarkerSize', 4);
+    hold(ax, 'off'); ax.XTick = P.KP.ebno; ax.YLim = [0 105]; grid(ax, 'on');
+    xlabel(ax, 'Eb/N0 (dB)', 'Color', c.mut); ylabel(ax, 'restored cycles after onset (%)', 'Color', c.mut);
+    legend(ax, h, P.KP.show_lbl, 'Location', 'southeast', 'TextColor', c.txt, 'Color', c.panelBg, ...
+        'EdgeColor', c.mut, 'FontSize', 7);
+    setTitle(ax, 'Restoration vs Eb/N0 (single threats, test pools)', c);
+end
+
+function ok = plotLatency(ax, Lt, c)
+    ok = ~isempty(Lt); if ~ok, return; end
+    b = bar(ax, [Lt.median_ms; Lt.p95_ms]'); b(1).FaceColor = c.accent; b(2).FaceColor = c.amber;
+    ax.XTick = 1:numel(Lt.names); ax.XTickLabel = Lt.names; ax.XTickLabelRotation = 30;
+    ax.FontSize = 8; grid(ax, 'on'); ylabel(ax, 'ms', 'Color', c.mut);
+    legend(ax, {'median', 'p95'}, 'TextColor', c.txt, 'Color', c.panelBg, 'EdgeColor', c.mut, 'FontSize', 8);
+    setTitle(ax, sprintf('Latency per cycle: %.2f ms median, %.2f ms p95', Lt.total_dqn_median_ms, ...
+        Lt.total_dqn_p95_ms), c);
+end
+
+function ok = plotActions(ax, P, c)
+    ok = ~isempty(P); if ~ok, return; end
+    Rd = P.RES{1, P.iDQN}; env = ancestor(ax, 'figure').UserData.env;
+    scn = unique(Rd.scn); acts = unique(Rd.cfg_final);
+    counts = zeros(numel(scn), numel(acts));
+    for t = 1:numel(scn)
+        for a = 1:numel(acts), counts(t, a) = mean(Rd.cfg_final(Rd.scn == scn(t)) == acts(a)); end
+    end
+    bb = bar(ax, 100 * counts, 'stacked');
+    pal = lines(numel(acts));
+    for a = 1:numel(acts), bb(a).FaceColor = pal(a, :); end
+    ax.XTick = 1:numel(scn); ax.XTickLabel = arrayfun(@(k) strrep(P.KP.per_threat_scn{k}, '_', ' '), ...
+        1:numel(scn), 'UniformOutput', false);
+    ax.XTickLabelRotation = 40; ax.FontSize = 8; grid(ax, 'on'); ylabel(ax, '% of episodes', 'Color', c.mut);
+    legend(ax, cellfun(@actionLabel, env.action_names(acts), 'UniformOutput', false), 'TextColor', c.txt, ...
+        'Color', c.panelBg, 'EdgeColor', c.mut, 'FontSize', 7, 'Location', 'eastoutside');
+    setTitle(ax, 'DQN configuration at episode end, per threat', c);
+end
+
+function ok = plotSpeed(ax, P, metrics, c)
+    haveOff = ~isempty(metrics) && isfield(metrics, 'speed_breakdown') && ~isempty(metrics.speed_breakdown);
+    ok = ~isempty(P) || haveOff; if ~ok, return; end
+    hold(ax, 'on'); h = gobjects(0); nm = {};
+    if ~isempty(P)
+        b = P.KP.speed_bins; mid = (b(1:end-1) + b(2:end)) / 2;
+        pv = P.KP.per_speed(:, strcmp(P.KP.show, P.POL{P.iDQN}));
+        h(end+1) = plot(ax, mid, pv, '-s', 'LineWidth', 1.8, 'Color', c.amber, 'MarkerFaceColor', c.amber);
+        nm{end+1} = 'DQN restored cycles (%)';
+    end
+    if haveOff
+        sb = metrics.speed_breakdown; mid = ([sb.speed_lo_kmh] + [sb.speed_hi_kmh]) / 2;
+        h(end+1) = plot(ax, mid, [sb.accuracy_pct], '--^', 'LineWidth', 1.6, 'Color', c.green, 'MarkerFaceColor', c.green);
+        nm{end+1} = 'detector test accuracy (%)';
+    end
+    hold(ax, 'off'); grid(ax, 'on'); ax.YLim = [0 105];
+    xlabel(ax, 'UAV speed (km/h)', 'Color', c.mut); ylabel(ax, '%', 'Color', c.mut);
+    legend(ax, h, nm, 'Location', 'southeast', 'TextColor', c.txt, 'Color', c.panelBg, 'EdgeColor', c.mut, 'FontSize', 8);
+    setTitle(ax, 'Robustness vs UAV speed (Doppler)', c);
+end
+
+%% =====================================================================
+%% ======================  SURVIVABILITY TAB LOADER  ====================
+%% =====================================================================
+function updateSurvMap(fig)
+    data = fig.UserData; env = data.env; ui = data.ui; c = data.colors;
+    ax = ui.survAx; legend(ax, 'off'); cla(ax);
+    if isempty(env.surv)
+        placeholderAx(ax, 'Survivability map', 'data/survivability_boundary.mat missing - run map_survivability_boundary', c);
+        ui.survSummary.Value = {'No survivability data.'};
+        return;
+    end
+    ax.XTickMode = 'auto'; ax.YTickMode = 'auto';
+    mapKey = ui.survMapDD.Value;
+    gd = env.surv.(['grid_data_' mapKey]);
+    tname = ui.survThreatDD.Value;
+    gi = find(strcmp({gd.threat}, tname), 1);
+    if isempty(gi), return; end
+    g = gd(gi); snrPts = env.surv.SNR_points;
+    nL = numel(g.levels); nS = numel(snrPts);
+
+    pal = [0.10 0.12 0.16; c.green; c.amber; c.red];      % row 1 = no data, rows 2..4 = R / M / X
+    img = zeros(nL, nS, 3);
+    for i = 1:nL
+        for j = 1:nS
+            img(i, j, :) = pal(g.status(i, j) + 1, :);
+        end
+    end
+    image(ax, img);
+    ax.YDir = 'reverse'; ax.XLim = [0.5 nS + 0.5]; ax.YLim = [0.5 nL + 0.5];
+    ax.XTick = 1:nS; ax.XTickLabel = compose('%g', snrPts);
+    ax.YTick = 1:nL; ax.YTickLabel = compose('%g', g.levels);
+    hold(ax, 'on');
+    for i = 1:nL
+        for j = 1:nS
+            if ~isnan(g.ratio(i, j))
+                text(ax, j, i, sprintf('%.1f', g.ratio(i, j)), 'HorizontalAlignment', 'center', ...
+                    'Color', [0.05 0.05 0.08], 'FontWeight', 'bold', 'FontSize', 11, 'FontName', c.font);
+            else
+                text(ax, j, i, '-', 'HorizontalAlignment', 'center', 'Color', c.mut, 'FontSize', 11);
+            end
+        end
+    end
+    lr = getappdata(fig, 'lastRun');
+    if isfield(g, 'base'), gname = g.base; else, gname = tname; end
+    if ~isempty(lr) && strcmp(lr.threat, gname) && lr.level >= 1 && lr.level <= nL
+        j = find(snrPts == lr.snr, 1);
+        if ~isempty(j)
+            plot(ax, j, lr.level, 'p', 'MarkerSize', 22, 'MarkerFaceColor', 'w', 'MarkerEdgeColor', 'k', 'LineWidth', 1.2);
+            text(ax, j, lr.level + 0.36, 'last live run', 'Color', 'w', 'FontSize', 9, ...
+                'HorizontalAlignment', 'center', 'FontName', c.font);
+        end
+    end
+    hold(ax, 'off');
+    xlabel(ax, 'Eb/N0 (dB)', 'Color', c.mut); ylabel(ax, 'Severity level (low -> high)', 'Color', c.mut);
+    if strcmp(mapKey, 'A'), mt = 'Map A - without goodput loss'; else, mt = 'Map B - any action (incl. rate reduction, FEC)'; end
+    setTitle(ax, [mt ' : ' niceName(tname)], c);
+
+    % ---- summary text ----
+    stAll = [];
+    for k = 1:numel(gd), stAll = [stAll; gd(k).status(:)]; end %#ok<AGROW>
+    stAll = stAll(stAll > 0); st = g.status(g.status > 0);
+    L = {sprintf('%s (all threats)', mt), ...
+         sprintf('  states mapped : %d', numel(stAll)), ...
+         sprintf('  recoverable   : %.1f%%', 100*mean(stAll == 1)), ...
+         sprintf('  marginal      : %.1f%%', 100*mean(stAll == 2)), ...
+         sprintf('  non-recover.  : %.1f%%', 100*mean(stAll == 3)), '', ...
+         sprintf('%s only:', niceName(tname)), ...
+         sprintf('  recoverable %d | marginal %d | non-rec. %d', sum(st == 1), sum(st == 2), sum(st == 3)), ''};
+    gapLines = {};
+    for k = 1:numel(env.surv.grid_data_A)
+        a = env.surv.grid_data_A(k).status; b = env.surv.grid_data_B(k).status;
+        [ri, ci] = find(a == 3 & (b == 1 | b == 2));
+        for m = 1:numel(ri)
+            gapLines{end+1} = sprintf('  %s: level %g @ %g dB', env.surv.grid_data_A(k).threat, ... %#ok<AGROW>
+                env.surv.grid_data_A(k).levels(ri(m)), snrPts(ci(m)));
+        end
+    end
+    L{end+1} = 'Gap cells (survive via margin/rate,';
+    L{end+1} = 'threat NOT neutralized):';
+    if isempty(gapLines), L{end+1} = '  none'; else, L = [L gapLines]; end
+    ui.survSummary.Value = L(:);
+end

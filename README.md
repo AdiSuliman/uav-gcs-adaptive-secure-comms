@@ -12,9 +12,9 @@
 A closed-loop simulation of the command uplink from a ground control station (GCS) to a small UAV under electronic-warfare threats. A Simulink link model, validated against theory, generates its own labeled data; a CNN on the spectrogram plus link measurements detects the threat and flags threats it has never seen; a decision layer (expert rule, a class table and a Double DQN with a safety shield) chooses a countermeasure; and every policy is compared on measured frames of the real link that were never used in training.
 
 - **Link:** GCS → UAV, QPSK, 1 Msym/s, RRC (roll-off 0.25, span 10, 4 samples/symbol), 1032-bit frames, 2.4 GHz, Rician K = 10 dB with sum-of-sinusoids Doppler fading for a UAV at 50–120 km/h (111–267 Hz). One GCS antenna, two omni antennas on the UAV (λ/2, receive correlation 0.3).
-- **Receiver:** data-aided channel estimation (leave-one-out), MRC combining; adaptive MMSE combining as the spatial countermeasure (nulls an interferer arriving from another direction).
-- **Threats (8 + clean link):** jamming, reactive jamming, sweeping jammer, noise burst, spoofing, benign interference, path loss, antenna fault; five severity levels each. Every interferer reaches the array from its own direction, drawn per seeded run (flight geometry).
-- **Countermeasures (17 configurations):** no action, channel switch, rate reduction, frequency diversity, spatial diversity (MMSE), power control, FEC with interleaving, nine avoidance × robustness pairs, and rate reduction + power control.
+- **Receiver:** data-aided channel estimation (leave-one-out), MRC combining; adaptive MMSE combining as the spatial countermeasure (nulls an interferer arriving from another direction). Everything the detector and the decision layer see is measured at the receiver (D59): CRC-32 packet check, BER estimated from the combiner output, SINR and envelope correlation against the receiver's own decisions, interference over thermal, and the spatial coherence, predicted MMSE gain and direction of the interference from the channel estimator.
+- **Threats (8 + clean link):** jamming, reactive jamming, sweeping jammer, noise burst, spoofing, benign interference, path loss, antenna fault; five severity levels in the detector dataset, three (low, nominal, high) in the decision layer; eight combined threats. Every interferer reaches the array from its own direction, drawn per seeded run (flight geometry).
+- **Countermeasures (36 configurations):** one choice per domain (Liu et al.'s combined action): frequency (none, channel switch, frequency diversity) × space (none, spatial diversity with MMSE) × link budget (none, rate reduction, power control, FEC with interleaving, rate + power, power + FEC).
 
 ---
 
@@ -77,25 +77,33 @@ The code stays in the root while the project changes; it moves into folders by s
 ### Link validation (D41)
 `validate_phy.m` compares the simulated BER with closed-form results (Simon & Alouini: AWGN, and the MGF method for Rician and correlated branches): pass when the gap is within 0.3 dB or two standard errors over 20 channel realizations. It also checks MMSE against MRC under a 10 dB jammer and that equal seeds reproduce the same run. `main.m` stops if the validation fails.
 
-### Dataset (D42, D45)
-8 threats × 5 severity levels × 6 Eb/N0 (0–10 dB) × 5 seeded sub-runs × 20 frames, plus the clean link: 27,000 frames. Each sub-run has its own seed (fading, interferer direction, waveform, noise, bits) and its own UAV speed. The split into train / validation / test (60/20/20) is by sub-run, so no channel realization or feature window appears in two parts.
+### Dataset (D42, D45, D59)
+8 threats × 5 severity levels × 6 Eb/N0 (0–10 dB) × 8 seeded sub-runs × 20 frames, plus the clean link: 43,200 frames. Each sub-run has its own seed (fading, interferer direction, waveform, noise, bits) and its own UAV speed. The split into train / validation / test (5 / 1 / 2 sub-runs per cell) is by sub-run, so no channel realization or feature window appears in two parts.
 
-### Detection (D42, D43)
-- Input: 128×128 spectrogram of the antenna-1 frame and 9 link features (SINR, BER, RSSI, PLR, RSSI variance, BER slope, burst ratio, envelope correlation, interference over thermal).
-- Network: CNN (32-64-128 filters, global pooling) and a feature branch, merged into a 64-unit embedding, softmax over 9 classes; cosine learning rate, L2, SpecAugment.
-- Unknown threats: Mahalanobis distance of the embedding to the class means (threshold keeping 95% of known validation frames) and an isolation forest on the link features; evaluated by retraining without each threat in turn.
+### Receiver measurements (D59)
+`extract_closed_loop_frames.m` derives every observation from what the receiver has; the true BER is kept for the KPIs and the training reward only.
+- **Packet loss:** each frame carries 1000 payload bits and a CRC-32 (IEEE polynomial); the frame's actual error pattern is applied to the CRC-protected codeword and the CRC is checked (with FEC, on the decoded bits).
+- **Estimated BER:** decision-directed SNR per 32-symbol block of the combiner output, BER = mean of Q(√SNR) over the blocks (Simon & Alouini); post-combining SNR from the same statistics.
+- **SINR, envelope correlation:** against the waveform re-modulated from the receiver's own decisions; interference over thermal.
+- **Spatial features:** from the per-block channel estimates and the residual covariance the MMSE combiner already computes: spatial coherence of the interference, predicted MMSE gain over MRC (h^H R⁻¹ h · h^H R h / ‖h‖⁴) and the alignment of the dominant interference direction with the GCS channel (Richards, ch. 9).
+- 13 link features per frame (`link_features.m`): SINR, estimated BER and its change, RSSI and its variance, CRC failure and packet loss over the window, envelope correlation, IoT, post-combining SNR, coherence, predicted MMSE gain, alignment.
 
-### Decision layer (D44–D51)
-- **Frame pools** (`build_policy_pools.m`): every scenario × configuration × Eb/N0 through the real link with the detector applied; 6 train and 4 test sub-runs (flight geometries) per cell. All configurations of a sub-run share its seed, so an episode keeps one geometry when it changes configuration.
+### Detection (D42, D43, D59)
+- Input: 128×128 spectrogram of the antenna-1 frame and the 13 link features.
+- Network: CNN (32-64-128 filters, global pooling) and a feature branch, merged into a 64-unit embedding, softmax over 9 classes; cosine learning rate, L2, SpecAugment. `compare_architectures.m` compares it with a spectrogram-only and a features-only network on the same splits.
+- Unknown threats: Mahalanobis feature ensemble (Lee et al.) over five layers, the layer weights fitted by logistic regression on known validation frames against their FGSM-perturbed versions (no unknown-threat sample used); threshold keeping 95% of known validation frames; an isolation forest on the link features for comparison. Evaluated by retraining without each threat in turn.
+
+### Decision layer (D44–D52, D59)
+- **Frame pools** (`build_policy_pools.m`, `pool_cell.m`): the clean link, the 8 single threats at three severities, 4 combined threats for training and validation and 4 other combined threats for test only, each × 36 configurations × 6 Eb/N0 through the real link with the detector applied; 6 train, 4 validation and 8 test geometries per (cell, Eb/N0). A geometry (seed: fading, UAV speed, interferer directions, threat waveform) is shared by every configuration and every cell, so an episode stays in one flight before and after the onset and when it changes configuration.
 - **Episodes** (`link_env.m`): 30 decision cycles (one frame each), clean link until an onset at cycle 3–10; a follower jammer re-acquires the channel 2–5 cycles after every hop.
-- **Reward:** link quality from the configuration's BER in the episode's geometry (100 at ≤ 1.15× the clean link, 0 at the unmitigated BER; clean reference floored at 1e-4), minus goodput, spectrum, power and processing costs, 5 points per change, 20 for a change on a healthy link. Training raises the healthy-link penalty (80 selected); validation and test use the standard reward.
-- **Link monitor and shield** (`policy_monitor.m`, `policy_mask.m`): 5-frame BER, degradation against the clean BER at the estimated Eb/N0, class, and the Eb/N0 drop from the episode's reference. An alarm is a hostile threat class or a degraded link ('none', benign interference and 'unknown' count only with degradation); it is confirmed on 2 of 2 cycles (M-of-N, Richards), and only then may a policy start a new configuration (Alshiekh et al., shielded RL). The state never contains the episode clock.
-- **Policies** (`policy_decide.m`, one function for training, evaluation and the GUI): expert rule, class → configuration table tuned on the train pools, Double DQN (experience replay, target network, Huber loss, gradient clipping, best checkpoint), each with optional escalation. The alarm definition, the training false-switch penalty, the discount factor (0, 0.5, 0.9) and the seed are chosen on validation (D48–D50); the layer is frozen since D50.
-- **Training data:** single threats, the clean link and four training combinations; the four test combinations are never seen in training.
-- **Evaluation** (`evaluate_policies.m`): test pools only; sets single, follower, combined, unknown (detector output withheld) and clean; false alarms (KPI 6) on 600 further clean geometries, one episode each (`build_clean_test_pools.m`, D51); baselines random, always-on MMSE, best fixed configuration, rule, table and a one-step oracle; paired differences with 95% intervals; breakdowns per threat, Eb/N0, interferer direction and UAV speed.
+- **Reward** (`decision_config.m`): 100 when the configuration's BER in the episode's geometry is ≤ 2× the clean link (the KPI), otherwise at most 40 (log-linear down to 0 at the unmitigated BER), minus goodput, spectrum, power and processing costs, 5 points per change, 20 for a change on a healthy link. Because 40 is below 100 minus the largest running cost, a restoring configuration always earns more than a non-restoring one (Liu et al.'s rate-if-successful reward). Training may raise the healthy-link penalty; validation and test use the standard reward.
+- **Link monitor and shield** (`policy_monitor.m`, `policy_mask.m`): estimated BER over 5 frames against the clean link's estimated BER at the estimated Eb/N0 (like with like), or CRC packet loss when FEC is on; class; the Eb/N0 drop from the episode's reference. An alarm is a hostile threat class or a degraded link ('none', benign interference and 'unknown' count only with degradation); it is confirmed on 2 of 2 cycles (M-of-N, Richards), and only then may a policy start a new configuration (Alshiekh et al., shielded RL). The state never contains the episode clock.
+- **Agent state** (`policy_state.m`): the receiver observations of the last 4 cycles (Liu et al.'s spectrum waterfall, Mnih et al.'s stacked frames), the current configuration, dwell time and the confirmed alarm.
+- **Policies** (`policy_decide.m`, one function for training, evaluation and the GUI): expert rule (spatial-aware: it also nulls an interferer when the predicted MMSE gain is ≥ 6 dB, and escalates through combined configurations), class → configuration table tuned on the train pools, Double DQN (hidden 256-256, 20,000 episodes, experience replay, target network, Huber loss, gradient clipping). The alarm definition, the training false-switch penalty, the discount factor and the seed are chosen on the validation split by recovered episodes, under the false-alarm bound on independent clean validation geometries.
+- **Evaluation** (`evaluate_policies.m`): test pools only (8 geometries per cell, never used in training or selection); sets single (three severities), follower, combined (unseen combinations), unknown (detector output withheld) and clean; false alarms (KPI 6) on 600 further clean geometries, one episode each (`build_clean_test_pools.m`); baselines no response, random, always-on MMSE, best fixed configuration, rule, table and a one-step oracle. An episode is *recovered* when BER and CRC packet loss are both ≤ 2× the clean link (packet loss + one packet) for 5 consecutive cycles, and *recoverable* when some configuration restores both in its geometry. 95% intervals by bootstrap over geometries (`boot_cluster.m`); breakdowns per threat and severity, Eb/N0, interferer direction and UAV speed.
 
-### Survivability boundary (D30, D46)
-Every threat × severity × Eb/N0 through every configuration on one seeded run shared by all actions: recoverable (≤ 2× clean BER), marginal (≤ 5×) or not, and which action achieves it. Map A uses only actions without goodput loss, Map B any action. Directional threats are mapped with the interferer 45° and 10° from the GCS direction.
+### Survivability boundary (D30, D46, D59)
+Every threat × severity × Eb/N0 through the 36 configurations on one seeded run shared by all actions: recoverable (BER and packet loss ≤ 2× clean), marginal (≤ 5×) or not, and which configuration achieves it. Map A uses only configurations without goodput loss, Map B any configuration. Directional threats are mapped with the interferer 45° and 10° from the GCS direction. `experiment_survivability_options.m` repeats recoverability for the combined threats and the directional threats at high severity with 2 antennas, 3 antennas and 2 antennas plus a relay path (deliverable 8 of the proposal).
 
 ---
 
@@ -103,13 +111,13 @@ Every threat × severity × Eb/N0 through every configuration on one seeded run 
 
 | # | KPI | Target | Source |
 |---|---|---|---|
-| 1 | Detection vs SNR | macro-F1 ≥ 90% above a threshold | `eval_detector.m` |
-| 2 | Unknown threats | mean AUROC ≥ 0.8, leave-one-threat-out | `eval_ood_detection.m` |
+| 1 | Detection vs SNR | macro-F1 and the F1 of every class ≥ 90% above an Eb/N0 threshold | `eval_detector.m` |
+| 2 | Unknown threats | mean AUROC ≥ 0.9, leave-one-threat-out | `eval_ood_detection.m` |
 | 3 | Physical validation | BER within 0.3 dB of theory | `validate_phy.m` |
-| 4 | Restoration | ≥ 80% of cycles at ≤ 2× clean BER on recoverable attacks; boundary mapped | `evaluate_policies.m`, `map_survivability_boundary.m` |
-| 5 | DQN vs baselines | better than the rule (paired 95% interval), with follower jammer and unseen combinations | `evaluate_policies.m` |
+| 4 | Restoration | ≥ 90% of the recoverable episodes recovered (BER and packet loss ≤ 2× clean), for every threat including the combined ones, at three severities; boundary mapped | `evaluate_policies.m`, `map_survivability_boundary.m` |
+| 5 | DQN vs baselines | better than the rule (paired bootstrap 95% interval), with follower jammer and unseen combinations; no-response baseline reported | `evaluate_policies.m` |
 | 6 | False alarms | one-sided 95% bound ≤ 5% over ≥ 600 clean-link episodes | `evaluate_policies.m` |
-| 7 | Real time and speed | latency median / p95; restored spread ≤ 10 points over 50–120 km/h | `measure_latency.m`, `evaluate_policies.m` |
+| 7 | Real time and speed | latency per decision cycle median < 10 ms and p95 < 20 ms; recovery spread ≤ 10 points over 50–120 km/h | `measure_latency.m`, `evaluate_policies.m` |
 | 8 | Minimum | closed loop restoring at least one recoverable threat | `evaluate_policies.m` |
 
 `measure_all_kpis.m` writes the status of each (MET / NOT MET / STALE / MISSING) to `results/kpi_summary.txt`; `build_kpi_dashboard.m` draws `results/kpi_dashboard.png`.
@@ -195,8 +203,8 @@ An Unreal Engine view of the closed loop, driven from MATLAB (Simulink 3D Animat
 
 ## Modeling assumptions and limitations
 
-- **BER is simulation truth.** It compares transmitted and received bits, which a real receiver cannot do; PLR, BER slope and burst ratio derive from it. A deployed system would use EVM, CRC frame errors or decoder statistics.
-- **Ideal pilots.** Channel estimation uses the known transmitted symbols without pilot overhead: the receiver performance is an upper bound for a practical one.
+- **True BER only for scoring.** The detector, the monitor and the agent see receiver measurements (CRC check, estimated BER, decision-directed SINR, channel-estimator statistics, D59); the true BER, counted against the transmitted bits, is used only for the KPIs and the training reward.
+- **Ideal pilots.** Channel estimation, and the spatial features derived from it, use the known transmitted symbols without pilot overhead (proposal risk 8): the receiver performance is an upper bound for a practical one.
 - **Countermeasures are modeled, not built:** channel switch through adjacent-channel rejection (30 dB), rate reduction and power control as Eb/N0 gains, FEC applied to the measured error pattern of each run, MMSE combining in the receiver model. Switching time and signalling to the GCS are not modeled.
 - **No carrier or timing synchronization** (D7); spoofing is a coherent counterfeit waveform, not a synchronization attack.
 - **Decisions on measured frames.** The decision layer is trained and evaluated on frames measured through the real link (pools), not with Simulink inside the learning loop; one decision cycle is one frame.
