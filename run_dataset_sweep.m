@@ -14,9 +14,10 @@
 %   benign_interference                          : power -10..-2 dB
 % 'none' gets n_levels x N_SUB sub-runs per Eb/N0 (class balance).
 %
-% Per frame: antenna-1 IQ, label, level, configured Eb/N0, BER, RSSI, PLR,
-% SINR estimate, envelope correlation, speed, run id, fold (1..N_SUB).
-% Frames whose BER is incomplete (last frame of a sub-run) are dropped.
+% Per frame: antenna-1 IQ, label, level, configured Eb/N0, the receiver
+% measurements of extract_closed_loop_frames.m (D59), the true BER and frame
+% error (analysis only), speed, run id, fold (1..N_SUB). Frames whose BER is
+% incomplete (last frame of a sub-run) are dropped.
 
 close all; clc;
 warning('off', 'Simulink:cgxe:LeakedJITEngine');
@@ -28,7 +29,7 @@ p0 = S.params; p0.quiet_build = true;
 
 %% ---- Configuration ----
 EbNo_list  = p0.EbNo_dB;          % 0:2:10 dB
-N_SUB      = 5;                   % independent sub-runs per cell (split unit)
+N_SUB      = 8;                   % independent sub-runs per cell (split unit; D59: 5 -> 8)
 F_SUB      = 20;                  % frames per sub-run
 delay_bits = 20;
 modelName  = 'UAV_GCS_Threat_Link';
@@ -47,13 +48,14 @@ n_levels    = 5;
 class_names = ['none', {threat_cfg.name}];
 stop_time   = num2str(F_SUB * p0.frame_duration);
 
-D = struct('iq', {{}}, 'label', [], 'level', [], 'snr', [], 'ber', [], 'rssi', [], 'plr', [], ...
-    'sinr', [], 'env_corr', [], 'iot', [], 'speed', [], 'run', [], 'fold', []);
+MEAS = {'rssi', 'crc_fail', 'ber_est', 'snr_post', 'sinr', 'env_corr', 'iot', 'coh', 'mmse_gain', 'align'};
+D = struct('iq', {{}}, 'label', [], 'level', [], 'snr', [], 'ber', [], 'fer', [], 'speed', [], 'run', [], 'fold', []);
+for i = 1:numel(MEAS), D.(MEAS{i}) = []; end
 run_id = 0;
 t0 = tic;
 fprintf('\n=== A5 dataset: %d threats x %d levels x %d Eb/N0 x %d sub-runs x %d frames (+ none) ===\n', ...
     numel(threat_cfg), n_levels, numel(EbNo_list), N_SUB, F_SUB);
-fprintf('%-22s %6s %10s %10s %9s\n', 'class', 'level', 'meanBER', 'meanSINR', 'envcorr');
+fprintf('%-22s %6s %10s %10s %9s %7s %7s\n', 'class', 'level', 'meanBER', 'meanSINR', 'envcorr', 'coh', 'Gmmse');
 
 %% ---- Threat classes ----
 for tt = 1:numel(threat_cfg)
@@ -66,7 +68,7 @@ for tt = 1:numel(threat_cfg)
             for sub = 1:N_SUB
                 run_id = run_id + 1;
                 D = add_subrun(D, p, modelName, EbNo_list(s), stop_time, delay_bits, ...
-                    tt + 1, cfg.levels(lv), run_id, sub);
+                    tt + 1, cfg.levels(lv), run_id, sub, MEAS);
             end
         end
         report_row(cfg.name, cfg.levels(lv), D, i_start);
@@ -80,7 +82,7 @@ i_start = numel(D.label) + 1;
 for s = 1:numel(EbNo_list)
     for k = 1:n_levels * N_SUB
         run_id = run_id + 1;
-        D = add_subrun(D, p, modelName, EbNo_list(s), stop_time, delay_bits, 1, NaN, run_id, mod(k-1, N_SUB) + 1);
+        D = add_subrun(D, p, modelName, EbNo_list(s), stop_time, delay_bits, 1, NaN, run_id, mod(k-1, N_SUB) + 1, MEAS);
     end
 end
 report_row('none', NaN, D, i_start);
@@ -90,11 +92,12 @@ params = S.params; save('params.mat', 'params');
 dataset = struct();
 dataset.iq = D.iq; dataset.label = D.label(:); dataset.level = D.level(:);
 dataset.class_names = class_names; dataset.snr = D.snr(:);
-dataset.ber = D.ber(:); dataset.rssi = D.rssi(:); dataset.plr = D.plr(:);
-dataset.sinr = D.sinr(:); dataset.env_corr = D.env_corr(:); dataset.iot = D.iot(:);
+dataset.ber = D.ber(:); dataset.fer = D.fer(:);
+dataset.meas = struct();
+for i = 1:numel(MEAS), dataset.meas.(MEAS{i}) = D.(MEAS{i})(:); end
 dataset.speed_kmh = D.speed(:); dataset.run = D.run(:); dataset.fold = D.fold(:);
 dataset.meta = struct('N_SUB', N_SUB, 'F_SUB', F_SUB, 'EbNo_list', EbNo_list, 'delay_bits', delay_bits, ...
-    'mode', 'seeded_subruns_D42', 'n_rx', p0.n_rx, 'speed_range_kmh', [p0.speed_kmh_min p0.speed_kmh_max], ...
+    'mode', 'seeded_subruns_D59', 'n_rx', p0.n_rx, 'speed_range_kmh', [p0.speed_kmh_min p0.speed_kmh_max], ...
     'threat_cfg', threat_cfg, 'created', datestr(now));
 if ~exist('data', 'dir'); mkdir('data'); end
 save('data/dataset.mat', 'dataset', '-v7.3');
@@ -114,26 +117,26 @@ params = p; save('params.mat', 'params'); %#ok<NASGU>
 evalc('build_threat_model');
 end
 
-function D = add_subrun(D, p, modelName, ebno, stop_time, delay_bits, label, level, run_id, fold)
+function D = add_subrun(D, p, modelName, ebno, stop_time, delay_bits, label, level, run_id, fold, MEAS)
 % One seeded sub-run at its own random UAV speed; appends its complete frames.
 v_kmh = p.speed_kmh_min + rand() * (p.speed_kmh_max - p.speed_kmh_min);
 fd = v_kmh / 3.6 * p.carrier_freq / p.c_light;
 link_seed(modelName, randi(2^31 - 1000), fd);
 snr_dB = ebno + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
 set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/p.sps));
-out = sim(modelName, 'StopTime', stop_time);
-[iqf, ber, rssi, plr, nf, sinr, ec, io] = extract_closed_loop_frames(out, p, delay_bits);
-for f = 1:nf
-    if isnan(ber(f)), continue; end
-    D.iq{end+1} = iqf{f};
-    D.label(end+1) = label; D.level(end+1) = level; D.snr(end+1) = ebno;
-    D.ber(end+1) = ber(f); D.rssi(end+1) = rssi(f); D.plr(end+1) = plr(f);
-    D.sinr(end+1) = sinr(f); D.env_corr(end+1) = ec(f); D.iot(end+1) = io(f);
-    D.speed(end+1) = v_kmh; D.run(end+1) = run_id; D.fold(end+1) = fold;
-end
+F = extract_closed_loop_frames(sim(modelName, 'StopTime', stop_time), p, delay_bits);
+v = find(~isnan(F.ber));
+n = numel(v);
+D.iq = [D.iq, F.iq(v)];
+D.label = [D.label, label * ones(1, n)]; D.level = [D.level, level * ones(1, n)];
+D.snr = [D.snr, ebno * ones(1, n)]; D.speed = [D.speed, v_kmh * ones(1, n)];
+D.run = [D.run, run_id * ones(1, n)]; D.fold = [D.fold, fold * ones(1, n)];
+D.ber = [D.ber, F.ber(v)]; D.fer = [D.fer, F.fer(v)];
+for i = 1:numel(MEAS), D.(MEAS{i}) = [D.(MEAS{i}), F.(MEAS{i})(v)]; end
 end
 
 function report_row(name, level, D, i0)
 i = i0:numel(D.label);
-fprintf('%-22s %6g %10.3e %10.1f %9.3f\n', name, level, mean(D.ber(i)), mean(D.sinr(i)), mean(D.env_corr(i)));
+fprintf('%-22s %6g %10.3e %10.1f %9.3f %7.2f %7.1f\n', name, level, mean(D.ber(i)), mean(D.sinr(i)), ...
+    mean(D.env_corr(i), 'omitnan'), mean(D.coh(i)), mean(D.mmse_gain(i)));
 end

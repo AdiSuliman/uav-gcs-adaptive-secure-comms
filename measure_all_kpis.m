@@ -1,43 +1,46 @@
-%% MEASURE_ALL_KPIS - The proposal KPIs (section 5) from the result files (D46, D49, D51)
-% Reads the outputs of the pipeline, never re-runs them: a missing or stale
-% source is reported as such. A source older than its inputs (detector,
-% decision layer) is flagged STALE.
-%   KPI 1  detection: macro-F1 >= 90% above an Eb/N0 threshold (eval_detector)
-%   KPI 2  unknown threats: leave-one-threat-out AUROC >= 0.8, FPR at 95% kept
-%          (eval_ood_detection, Mahalanobis score)
+%% MEASURE_ALL_KPIS - The proposal KPIs from the result files (D46, D49, D51, D59)
+% Reads the outputs of the pipeline, never re-runs them: a missing source is
+% reported as such, and a source older than its inputs (detector, decision layer)
+% is flagged STALE. Targets as worded in the updated proposal:
+%   KPI 1  detection: macro-F1 and every class F1 >= 90% above an Eb/N0 threshold
+%          (eval_detector), unseen Eb/N0 (eval_unseen_snr)
+%   KPI 2  unknown threats: leave-one-threat-out mean AUROC >= 0.9, FPR at 95%
+%          of known frames kept (eval_ood_detection, Mahalanobis feature ensemble)
 %   KPI 3  physical validation: BER vs theory within 0.3 dB (validate_phy)
-%   KPI 4  restoration: BER <= 2x clean on recoverable attacks, and the
-%          survivability boundary (evaluate_policies, map_survivability_boundary)
-%   KPI 5  DQN vs rule, table, fixed and oracle: recovery time, restored
-%          cycles, goodput, follower jammer and unseen combinations (evaluate_policies)
+%   KPI 4  restoration: BER and packet loss back to <= 2x clean on >= 90% of the
+%          recoverable episodes of EVERY threat, combined threats included, over
+%          three severities; survivability boundary (evaluate_policies,
+%          map_survivability_boundary)
+%   KPI 5  DQN vs no response, rule, random, fixed and oracle: recovery, recovery
+%          time, restored cycles, goodput, follower and unseen combinations;
+%          paired 95% bootstrap interval of the recovery difference vs rule > 0
 %   KPI 6  false alarms on a healthy link above the Eb/N0 threshold: one-sided
-%          95% Clopper-Pearson bound over >= 600 episodes, target <= 5%; one
-%          episode per clean geometry when data/clean_test_pools.mat exists (D51)
-%          (evaluate_policies)
-%   KPI 7  real time: decision latency median / p95 (measure_latency), with the
-%          latency classes of Oli & Mahalal (IEEE Access 2025) for detection
-%          systems (low < 10 ms, medium 10-100 ms, high > 100 ms), and
-%          robustness over 50-120 km/h (evaluate_policies, eval_detector)
+%          95% Clopper-Pearson bound over >= 600 independent episodes <= 5%
+%   KPI 7  real time: decision latency median < 10 ms (Oli & Mahalal, low class)
+%          and p95 < 20 ms; robustness over 50-120 km/h (recovery spread <= 10 points)
 %   KPI 8  minimum: a closed loop restoring at least one recoverable threat
 %
 % Output: results/kpi_summary.txt, results/kpi_summary.mat (KPI struct array)
 
 close all; clc;
-fprintf('=== KPI summary (proposal section 5, D46, D49, D51) ===\n\n');
+fprintf('=== KPI summary (updated proposal, D59) ===\n\n');
 F = struct('det', 'results/eval_detector_metrics.mat', 'unseen', 'results/unseen_snr.mat', ...
     'ood', 'results/ood_detection.mat', 'phy', 'results/phy_validation.txt', ...
     'pol', 'results/policy_evaluation.mat', 'lat', 'results/latency.mat', ...
-    'surv', 'data/survivability_boundary.mat', 'dqn', 'data/trained_dqn.mat');
+    'surv', 'data/survivability_boundary.mat', 'dqn', 'data/trained_dqn.mat', 'arch', 'results/architecture_comparison.txt', ...
+    'ant3', 'results/survivability_options.txt');
 t_det = file_time('data/trained_detector.mat'); t_dqn = file_time(F.dqn);
 KPI = struct('id', {}, 'name', {}, 'value', {}, 'target', {}, 'status', {}, 'detail', {});
-rep = {'=== PROPOSAL KPI SUMMARY (section 5) ===', sprintf('Generated: %s', datestr(now)), ''};
+rep = {'=== PROPOSAL KPI SUMMARY (updated proposal) ===', sprintf('Generated: %s | %s', datestr(now), git_stamp()), ''};
 
 %% KPI 1 - detection
 if isfile(F.det)
     M = load(F.det, 'metrics'); m = M.metrics;
-    val = m.macro_f1_above_threshold_pct;
+    val = m.macro_f1_above_threshold_pct; cl = m.class_f1_above_threshold_pct;
     det = {sprintf('accuracy %.2f%%, macro-F1 %.2f%% [%.2f, %.2f] (bootstrap over sub-runs)', ...
         m.overall_accuracy_pct, m.macro_f1_pct, m.ci95.macro_f1), ...
+        sprintf('class F1 above the threshold: %s', strjoin(cellfun(@(c, v) sprintf('%s %.1f%%', c, v), m.classes(:)', ...
+        num2cell(cl(:)'), 'UniformOutput', false), ', ')), ...
         sprintf('macro-F1 per Eb/N0: %s', strjoin(arrayfun(@(b) sprintf('%g dB %.1f%%', b.snr_db, b.macro_f1_pct), ...
         m.snr_breakdown, 'UniformOutput', false), ' | '))};
     if isfile(F.unseen)
@@ -45,8 +48,10 @@ if isfile(F.det)
         det{end+1} = sprintf('unseen Eb/N0 (1,3,5,7,9 dB): accuracy %.2f%% vs %.2f%% seen, largest gap %.2f points', ...
             U.summary.acc_unseen, U.summary.acc_seen, U.summary.max_gap);
     end
-    KPI(end+1) = kpi(1, 'Detection vs SNR', sprintf('macro-F1 %.2f%% from %g dB', val, m.kpi1_threshold_db), ...
-        '>= 90% above a threshold', status(val >= 90, file_time(F.det) < t_det), det);
+    if isfile(F.arch), det{end+1} = 'architecture comparison: results/architecture_comparison.txt'; end
+    KPI(end+1) = kpi(1, 'Detection vs SNR', sprintf('macro-F1 %.2f%%, lowest class %.2f%%, from %g dB', val, min(cl), ...
+        m.kpi1_threshold_db), 'macro-F1 and every class >= 90% above a threshold', ...
+        status(isfinite(m.kpi1_threshold_db) && val >= 90 && all(cl >= 90), file_time(F.det) < t_det), det);
 else
     KPI(end+1) = missing(1, 'Detection vs SNR', F.det);
 end
@@ -57,12 +62,12 @@ if isfile(F.ood)
     j = find(strcmp(O.SC, 'maha'));
     A = vertcat(O.R.auroc); FP = vertcat(O.R.fpr95);
     val = mean(A(:, j));
-    det = {sprintf('Mahalanobis AUROC per held-out threat: %s', strjoin(arrayfun(@(i) sprintf('%s %.3f', ...
+    det = {sprintf('Mahalanobis feature ensemble, AUROC per held-out threat: %s', strjoin(arrayfun(@(i) sprintf('%s %.3f', ...
         O.R(i).held_out, A(i, j)), 1:numel(O.R), 'UniformOutput', false), ', ')), ...
-        sprintf('mean FPR at %.0f%% known kept: %.2f | other scores (mean AUROC): %s', 100*O.RETAIN, mean(FP(:, j)), ...
+        sprintf('mean FPR at %.0f%% known kept: %.2f | every score (mean AUROC): %s', 100*O.RETAIN, mean(FP(:, j)), ...
         strjoin(cellfun(@(n, a) sprintf('%s %.3f', n, a), O.SC, num2cell(mean(A, 1)), 'UniformOutput', false), ', '))};
-    KPI(end+1) = kpi(2, 'Unknown threats (LOTO)', sprintf('mean AUROC %.3f', val), '>= 0.8', ...
-        status(val >= 0.8, file_time(F.ood) < t_det), det);
+    KPI(end+1) = kpi(2, 'Unknown threats (LOTO)', sprintf('mean AUROC %.3f', val), '>= 0.9', ...
+        status(val >= 0.9, file_time(F.ood) < t_det), det);
 else
     KPI(end+1) = missing(2, 'Unknown threats (LOTO)', F.ood);
 end
@@ -86,61 +91,52 @@ if isfile(F.pol)
     stale = file_time(F.pol) < t_dqn;
     col = @(p) find(strcmp(P.POL, p));
     iD = P.iDQN; iO = col('oracle');
-    sing = P.RES(1, :);
-    rec_ep = sing{iO}.restored_post >= 0.5;               % recoverable: the one-step oracle restores it
-    val4 = 100 * mean(sing{iD}.restored_post(rec_ep));
-    det = {sprintf('single threats, test pools: DQN restored %.1f%% of cycles after onset on %d recoverable episodes (oracle %.1f%%)', ...
-        val4, sum(rec_ep), 100 * mean(sing{iO}.restored_post(rec_ep))), ...
-        sprintf('packet loss back to <= clean + 0.05 on the same episodes: DQN %.1f%% of cycles (oracle %.1f%%)', ...
-        100 * mean(sing{iD}.plr_ok_post(rec_ep)), 100 * mean(sing{iO}.plr_ok_post(rec_ep))), ...
-        sprintf('all single-threat episodes: DQN %.1f%%, rule + escalation %.1f%%, table %.1f%%, oracle %.1f%%', ...
-        100 * mean(sing{iD}.restored_post), 100 * mean(sing{col('rule_esc')}.restored_post), ...
-        100 * mean(sing{col('table')}.restored_post), 100 * mean(sing{iO}.restored_post))};
+    ALL = P.ALL;
+    pt = P.KP.per_threat(:, strcmp(P.KP.show, P.POL{iD}));
+    [lo4, ilo] = min(pt);
+    m4 = ALL{iD}.recoverable & ALL{iD}.threat;
+    [r4, r4l, r4h] = boot_cluster(double(ALL{iD}.recovered(m4)), ones(1, sum(m4)), ALL{iD}.geom(m4), 2000, 3);
+    det = {sprintf('recovered among recoverable, per threat (DQN): %s', strjoin(cellfun(@(n, v) sprintf('%s %.1f%%', n, v), ...
+        P.KP.threats, num2cell(pt'), 'UniformOutput', false), ', ')), ...
+        sprintf('all threat episodes pooled: DQN %.1f%% [%.1f, %.1f] of %d recoverable episodes; recoverable share %s', ...
+        100*r4, 100*r4l, 100*r4h, sum(m4), strjoin(cellfun(@(n, v) sprintf('%s %.0f%%', n, 100*v), P.KP.threats, ...
+        num2cell(P.KP.recoverable_share'), 'UniformOutput', false), ', ')), ...
+        sprintf('per severity low / nominal / high, lowest threat: %s', strjoin(arrayfun(@(v) sprintf('%.1f%%', ...
+        min(P.KP.per_threat_sev(1:end-numel(P.KP.threats(contains(P.KP.threats, '+'))), v, strcmp(P.KP.show, P.POL{iD})))), ...
+        1:3, 'UniformOutput', false), ' / '))};
     if isfile(F.surv)
         S = load(F.surv, 'grid_data_A', 'grid_data_B');
         det{end+1} = sprintf('survivability map (threat x severity x Eb/N0 x geometry): %s', surv_txt(S));
     end
-    KPI(end+1) = kpi(4, 'Restoration (<= 2x clean)', sprintf('%.1f%% of cycles on recoverable attacks', val4), ...
-        '>= 80% of cycles at <= 2x clean BER', status(val4 >= 80, stale), det);
+    if isfile(F.ant3), det{end+1} = 'survivability options (3 antennas, relay path): results/survivability_options.txt'; end
+    KPI(end+1) = kpi(4, 'Restoration (<= 2x clean)', sprintf('lowest threat %s %.1f%%, %d of %d threats >= 90%%', ...
+        P.KP.threats{ilo}, lo4, sum(pt >= 90), numel(pt)), '>= 90% of recoverable episodes, every threat', ...
+        status(all(pt >= 90), stale), det);
 
-    Rall = pool_sets(P.RES(P.iThreat, :));
-    d = @(k) ci_txt(Rall{iD}.ret - Rall{k}.ret);
-    rec = ~isnan(Rall{iD}.t_rec);
-    det = {sprintf('threat sets pooled, paired return difference DQN minus: rule + escalation %s | table %s | best fixed %s', ...
-        d(col('rule_esc')), d(col('table')), d(col('fixed'))), ...
-        sprintf('recovered episodes %.1f%%, median T_rec %s cycles | restored %.1f%% | goodput %.3f | oracle return %.3f', ...
-        100 * mean(rec), num_txt(median(Rall{iD}.t_rec(rec))), 100 * mean(Rall{iD}.restored_post), ...
-        mean(Rall{iD}.gput_post), mean(Rall{iO}.ret))};
-    for si = 2:numel(P.set_names)
-        R = P.RES(si, :);
-        det{end+1} = sprintf('%-9s DQN %.3f | rule+esc %.3f | table %.3f | fixed %.3f | oracle %.3f (mean return)', ...
-            P.set_names{si}, mean(R{iD}.ret), mean(R{col('rule_esc')}.ret), mean(R{col('table')}.ret), ...
-            mean(R{col('fixed')}.ret), mean(R{iO}.ret)); %#ok<SAGROW>
+    k_r = col('rule_esc');
+    [dr, drl, drh] = boot_cluster(double(ALL{iD}.recovered(m4)) - double(ALL{k_r}.recovered(m4)), ones(1, sum(m4)), ...
+        ALL{iD}.geom(m4), 2000, 4);
+    rec = ~isnan(ALL{iD}.t_rec);
+    det = {sprintf('recovered among recoverable, threat sets pooled: %s', strjoin(cellfun(@(p) sprintf('%s %.1f%%', ...
+        P.LBL{col(p)}, 100 * mean(ALL{col(p)}.recovered(m4))), {'none', 'random', 'fixed', 'rule_esc', 'table', P.POL{iD}, 'oracle'}, ...
+        'UniformOutput', false), ' | ')), ...
+        sprintf('DQN: median T_rec %s cycles | cycles restored %.1f%% | goodput %.3f', num_txt(median(ALL{iD}.t_rec(rec))), ...
+        100 * mean(ALL{iD}.ok_post), mean(ALL{iD}.gput_post, 'omitnan'))};
+    for si = 2:3
+        R = P.RES(si, :); mm = R{iD}.recoverable & R{iD}.threat;
+        det{end+1} = sprintf('%-9s recovered: DQN %.1f%% | rule+esc %.1f%% | table %.1f%% | fixed %.1f%% | oracle %.1f%%', ...
+            P.set_names{si}, 100*mean(R{iD}.recovered(mm)), 100*mean(R{k_r}.recovered(mm)), 100*mean(R{col('table')}.recovered(mm)), ...
+            100*mean(R{col('fixed')}.recovered(mm)), 100*mean(R{iO}.recovered(mm))); %#ok<SAGROW>
     end
-    dr = Rall{iD}.ret - Rall{col('rule_esc')}.ret; [~, lo] = stats_ci('t', dr);
-    KPI(end+1) = kpi(5, 'DQN vs baselines', sprintf('+%.3f return vs rule + escalation', mean(dr)), ...
-        'better than rule (paired 95% CI > 0)', status(lo > 0, stale), det);
+    KPI(end+1) = kpi(5, 'DQN vs baselines', sprintf('%+.1f points recovery vs rule + escalation [%+.1f, %+.1f]', ...
+        100*dr, 100*drl, 100*drh), 'better than rule (paired 95% bootstrap > 0)', status(drl > 0, stale), det);
 
     far = P.KP.far(strcmp({P.KP.far.policy}, P.LBL{iD}));
     fr = P.KP.far(strcmp({P.KP.far.policy}, 'rule + escalation'));
     KPI(end+1) = kpi(6, 'False alarms (clean link)', sprintf('%d/%d episodes, upper bound %.2f%%', far.k, far.n, ...
         100 * far.upper), '<= 5% (one-sided 95%), >= 600 episodes', status(far.upper <= 0.05 && far.n >= 600, stale), ...
-        {sprintf('Eb/N0 >= %g dB, 30 cycles per episode; per-cycle rate %.4f%% | rule + escalation %d/%d, upper %.2f%%', ...
+        {sprintf('Eb/N0 >= %g dB, one episode per independent geometry; per-cycle rate %.4f%% | rule + escalation %d/%d, upper %.2f%%', ...
         P.KP.ebno_thr, 100 * far.per_cycle, fr.k, fr.n, 100 * fr.upper)});
-    if isfield(P.KP, 'far_geoms') && P.KP.far_geoms > 0
-        f4 = P.KP.far_4geo(strcmp({P.KP.far_4geo.policy}, P.LBL{iD}));
-        KPI(end).detail{end+1} = sprintf(['measured on %d new clean geometries per Eb/N0, one episode per ' ...
-            'geometry (independent trials); test pools with 4 geometries per Eb/N0: %d/%d, upper %.2f%%'], ...
-            P.KP.far_geoms, f4.k, f4.n, 100 * f4.upper);
-    end
-    if isfield(P.KP, 'far_diag') && ~isempty(P.KP.far_diag)
-        fd = P.KP.far_diag(1); u = unique(fd.cls(fd.cls > 0));
-        KPI(end).detail{end+1} = sprintf('DQN false-alarm episodes per Eb/N0: %s | class at the first change: %s', ...
-            strjoin(arrayfun(@(s) sprintf('%g dB %d/%d', P.KP.ebno(s), fd.by_ebno(s), fd.n_ebno(s)), ...
-            1:numel(fd.by_ebno), 'UniformOutput', false), ', '), ...
-            strjoin([arrayfun(@(k) sprintf('%s %d (degraded %d)', P.KP.cls_list{k}, sum(fd.cls == k), ...
-            sum(fd.cls == k & fd.deg)), u, 'UniformOutput', false), repmat({'-'}, 1, isempty(u))], ', '));
-    end
 
     det = {};
     if isfile(F.lat)
@@ -149,39 +145,28 @@ if isfile(F.pol)
             Lt.device, Lt.total_dqn_median_ms, Lt.total_dqn_p95_ms, Lt.total_rule_median_ms, Lt.total_rule_p95_ms);
         det{end+1} = sprintf('components (median ms): %s', strjoin(cellfun(@(n, v) sprintf('%s %.2f', n, v), Lt.names, ...
             num2cell(Lt.median_ms), 'UniformOutput', false), ', '));
-        latv = sprintf('median %.2f ms, p95 %.2f ms', Lt.total_dqn_median_ms, Lt.total_dqn_p95_ms);
         det{end+1} = sprintf(['latency class (Oli & Mahalal 2025, detection systems: low < 10 ms, medium 10-100 ms): ' ...
             'median %s, p95 %s; measured on a desktop computer, not on UAV hardware'], ...
             lat_class(Lt.total_dqn_median_ms), lat_class(Lt.total_dqn_p95_ms));
+        lat_ok = Lt.total_dqn_median_ms < 10 && Lt.total_dqn_p95_ms < 20;
+        latv = sprintf('median %.2f ms, p95 %.2f ms', Lt.total_dqn_median_ms, Lt.total_dqn_p95_ms);
     else
-        latv = 'latency not measured'; det{end+1} = ['missing ' F.lat];
+        lat_ok = false; latv = 'latency not measured'; det{end+1} = ['missing ' F.lat];
     end
     pv = P.KP.per_speed(:, strcmp(P.KP.show, P.POL{iD}));
-    det{end+1} = sprintf('DQN restored cycles per speed band (%s km/h): %s %%', ...
+    det{end+1} = sprintf('DQN recovered per speed band (%s km/h): %s %%', ...
         strjoin(arrayfun(@(b) sprintf('%.0f-%.0f', P.KP.speed_bins(b), P.KP.speed_bins(b+1)), ...
         1:numel(P.KP.speed_bins) - 1, 'UniformOutput', false), ', '), strjoin(compose('%.1f', pv'), ', '));
-    if exist('m', 'var') && isfield(m, 'speed_breakdown')
-        sb = m.speed_breakdown;
-        det{end+1} = sprintf('detector accuracy per speed band (%s km/h): %s %%', ...
-            strjoin(arrayfun(@(x) sprintf('%.0f-%.0f', x.speed_lo_kmh, x.speed_hi_kmh), sb, 'UniformOutput', false), ', '), ...
-            strjoin(compose('%.1f', [sb.accuracy_pct]), ', '));
-    end
-    KPI(end+1) = kpi(7, 'Real time + speed', latv, 'reported; restored spread <= 10 points over 50-120 km/h', ...
-        status(max(pv) - min(pv) <= 10, stale), det);
+    KPI(end+1) = kpi(7, 'Real time + speed', latv, 'median < 10 ms, p95 < 20 ms; spread <= 10 points over 50-120 km/h', ...
+        status(lat_ok && max(pv) - min(pv) <= 10, stale), det);
 
-    pt = P.KP.per_threat(:, strcmp(P.KP.show, P.POL{iD}));
-    n_ok = sum(pt(~contains(P.KP.per_threat_scn, '+')) >= 50);
-    KPI(end+1) = kpi(8, 'End-to-end closed loop', sprintf('%d single threats restored >= 50%% of cycles', n_ok), ...
-        '>= 1 recoverable threat', status(n_ok >= 1, stale), ...
-        {sprintf('restored per threat (DQN): %s', strjoin(cellfun(@(n, v) sprintf('%s %.0f%%', n, v), ...
-        P.KP.per_threat_scn, num2cell(pt'), 'UniformOutput', false), ', '))});
+    n_ok = sum(pt >= 50);
+    KPI(end+1) = kpi(8, 'End-to-end closed loop', sprintf('%d threats recovered on >= 50%% of recoverable episodes', n_ok), ...
+        '>= 1 recoverable threat', status(n_ok >= 1, stale), {});
     if isfile(F.dqn)
         Dq = load(F.dqn, 'seed_summary'); ss = Dq.seed_summary;
-        cf = [2 2]; if isfield(ss, 'selected_confirm'), cf = ss.selected_confirm; end
-        fp = 20; if isfield(ss, 'selected_fa_pen'), fp = ss.selected_fa_pen; end
-        KPI(5).detail{end+1} = sprintf(['selected gamma %.2f, training false-switch penalty %d, alarm confirmation ' ...
-            '%d-of-%d, seed %d, validation gate %s'], ss.selected_gamma, fp, cf, ss.selected_seed, ...
-            ternary(ss.gate_pass, 'PASS', 'FAIL'));
+        KPI(5).detail{end+1} = sprintf('selected: alarm %s, gamma %.2f, training false-switch penalty %d, seed %d, validation gate %s', ...
+            ss.selected_alarm, ss.selected_gamma, ss.selected_fa_pen, ss.selected_seed, ternary(ss.gate_pass, 'PASS', 'FAIL'));
     end
 else
     for k = 4:8, KPI(end+1) = missing(k, sprintf('KPI %d', k), F.pol); end %#ok<SAGROW>
@@ -216,21 +201,6 @@ function t = file_time(f)
 if isfile(f), t = dir(f).datenum; else, t = -inf; end
 end
 
-function R = pool_sets(RR)
-R = RR(1, :);
-for si = 2:size(RR, 1)
-    for pk = 1:size(RR, 2)
-        f = fieldnames(R{pk});
-        for i = 1:numel(f), R{pk}.(f{i}) = [R{pk}.(f{i}), RR{si, pk}.(f{i})]; end
-    end
-end
-end
-
-function s = ci_txt(x)
-[m, lo, hi] = stats_ci('t', x);
-s = sprintf('%+.3f [%+.3f, %+.3f]', m, lo, hi);
-end
-
 function s = num_txt(x)
 if isnan(x), s = '-'; else, s = sprintf('%.0f', x); end
 end
@@ -254,4 +224,13 @@ end
 function s = lat_class(ms)
 % Latency class of a detection system (Oli & Mahalal, IEEE Access 2025, Table 8).
 if ms < 10, s = 'low (< 10 ms)'; elseif ms <= 100, s = 'medium (10-100 ms)'; else, s = 'high (> 100 ms)'; end
+end
+
+function s = git_stamp()
+% Commit of the code that produced the report (D59).
+[st, h] = system('git rev-parse --short HEAD');
+[~, d] = system('git status --porcelain --untracked-files=no');
+if st ~= 0, s = 'commit unknown'; return; end
+s = ['commit ' strtrim(h)];
+if ~isempty(strtrim(d)), s = [s ' + local changes']; end
 end

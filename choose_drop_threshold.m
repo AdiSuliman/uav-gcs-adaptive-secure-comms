@@ -1,10 +1,10 @@
-%% CHOOSE_DROP_THRESHOLD - Eb/N0-drop threshold of the path_loss alarm from the train pools (D52)
+%% CHOOSE_DROP_THRESHOLD - Eb/N0-drop threshold of the path_loss alarm from the train pools (D52, D59)
 % A clean link in a deep Rician fade and an attenuated link look alike in one
 % frame; the drop of the Eb/N0 estimate from the episode's reference tells them
 % apart (D50). D50 set the threshold at 4 dB by assumption, which is the size
 % of the fades that mislead the detector, so it filtered nothing. Here the
 % threshold is chosen from data, on the TRAIN split only: the drop of every
-% path_loss frame (modeled attenuation 10 dB) against the drop of every clean
+% path_loss frame (every severity, 6 / 10 / 14 dB) against the drop of every clean
 % frame the detector reads as path_loss, both measured the way
 % policy_monitor.m measures them (3-frame median against the reference of the
 % clean link of the same geometry). The threshold is the midpoint between the
@@ -18,7 +18,8 @@ clc;
 fprintf('=== Eb/N0-drop threshold of the path_loss alarm (D52) ===\n\n');
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
 na = find(strcmp(PP.actions, 'no_action'));
-iPL = find(strcmp(PP.scen, 'path_loss'));
+iPL = find(strcmp(PP.scen, 'path_loss'));                  % the three severities
+icl = find(strcmp(PP.scen, 'none'), 1);
 kPL = find(strcmp(PP.classes, 'path_loss'));
 nS = numel(PP.ebno);
 TR = 1;                                                    % train split only
@@ -27,18 +28,24 @@ THR = 2:0.5:10;
 %% 1. Drops per frame, clean link and path loss, every train geometry
 d_pl = []; e_pl = []; d_mis = []; e_mis = []; d_cl = []; e_cl = [];
 for s = 1:nS
-    C = PP.pools{1, s, na, TR}; A = PP.pools{iPL, s, na, TR};
+    C = PP.pools{icl, s, na, TR};
     for r = 1:numel(PP.runs{TR})
         run = PP.runs{TR}(r);
-        ic = find(C.run == run); ia = find(A.run == run);
-        if isempty(ic) || isempty(ia), continue; end
-        ec = ebno_est(C.feat(ic, :), PP); ea = ebno_est(A.feat(ia, :), PP);
+        ic = find(C.run == run);
+        if isempty(ic), continue; end
+        ec = ebno_est(C.feat(ic, :), PP);
         ref = median(ec);                                  % reference: the clean link of this geometry
-        dc = ref - med3(ec); da = ref - med3(ea);
+        dc = ref - med3(ec);
         [~, kc] = max(C.probs(ic, :), [], 2);
         d_cl = [d_cl; dc]; e_cl = [e_cl; repmat(s, numel(dc), 1)]; %#ok<AGROW>
         d_mis = [d_mis; dc(kc == kPL)]; e_mis = [e_mis; repmat(s, sum(kc == kPL), 1)]; %#ok<AGROW>
-        d_pl = [d_pl; da]; e_pl = [e_pl; repmat(s, numel(da), 1)]; %#ok<AGROW>
+        for v = iPL                                        % same geometry under attenuation (same seeds)
+            A = PP.pools{v, s, na, TR};
+            ia = find(A.run == run);
+            if isempty(ia), continue; end
+            da = ref - med3(ebno_est(A.feat(ia, :), PP));
+            d_pl = [d_pl; da]; e_pl = [e_pl; repmat(s, numel(da), 1)]; %#ok<AGROW>
+        end
     end
 end
 
@@ -58,7 +65,7 @@ else
 end
 
 %% 3. Report
-rep = {'=== EB/N0-DROP THRESHOLD OF THE PATH_LOSS ALARM (D52) ===', ...
+rep = {'=== EB/N0-DROP THRESHOLD OF THE PATH_LOSS ALARM (D52, D59) ===', ...
     sprintf('Generated: %s | train pools, no_action, %d geometries per Eb/N0 | drop = clean reference - 3-frame median', ...
     datestr(now), numel(PP.runs{TR})), ''};
 rep{end+1} = sprintf('Frames: path_loss %d | clean %d, of which read as path_loss %d (%.2f%%)', numel(d_pl), ...
@@ -89,7 +96,8 @@ fprintf('\nSaved data/drop_threshold.mat, results/drop_threshold.txt\n');
 %% ===================== Local functions =====================
 function e = ebno_est(F, PP)
 % Eb/N0 estimate of policy_monitor.m: SINR + interference over thermal.
-e = F(:, 1) + F(:, 9) + 10*log10(PP.sps) - 10*log10(PP.bps);
+F = double(F);
+e = F(:, feature_index('sinr')) + F(:, feature_index('iot')) + 10*log10(PP.sps) - 10*log10(PP.bps);
 end
 
 function m = med3(e)

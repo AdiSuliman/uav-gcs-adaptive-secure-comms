@@ -1,8 +1,8 @@
-%% EXTRACT_SPECTROGRAMS - Phase A6: detector inputs from data/dataset.mat (D42)
+%% EXTRACT_SPECTROGRAMS - Phase A6: detector inputs from data/dataset.mat (D42, D59)
 % Image: spec_image.m (fixed [-40, 40] dB scale). Scalar features: link_features.m
-% (8 features), temporal ones over a causal window of 10 frames inside each
-% sub-run. The same two functions are used by every closed-loop script and the
-% GUI, so training and deployment see identical inputs.
+% (13 receiver measurements), temporal ones over a causal window of 10 frames
+% inside each sub-run. The same two functions are used by every closed-loop
+% script and the GUI, so training and deployment see identical inputs.
 
 close all; clc;
 if ~exist('data/dataset.mat', 'file')
@@ -13,8 +13,8 @@ L = load('data/dataset.mat'); ds = L.dataset;
 S = load('params.mat'); p = S.params;
 fs = p.symbol_rate * p.sps;
 tw = 10;                                  % temporal window [frames]
-if ~isfield(ds, 'run')
-    error('dataset.mat predates D42 (no sub-run ids). Run run_dataset_sweep.m first.');
+if ~isfield(ds, 'meas')
+    error('dataset.mat predates D59 (no receiver measurements). Run run_dataset_sweep.m first.');
 end
 
 N = numel(ds.iq);
@@ -26,16 +26,16 @@ for i = 1:N
 end
 
 fprintf('Computing link features (window %d, per sub-run)...\n', tw);
-feats = zeros(N, 9);
-snr_s = ds.snr(:) + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);     % AWGN setting of each frame
-iot = iot_db(ds.rssi(:), ds.sinr(:), snr_s, p.sps);
+feat_names = link_features('names');
+feats = zeros(N, numel(feat_names));
+mf = fieldnames(ds.meas);
 runs = unique(ds.run, 'stable');
 for r = 1:numel(runs)
     idx = find(ds.run == runs(r));
-    M = struct('sinr', ds.sinr(idx), 'ber', ds.ber(idx), 'rssi', ds.rssi(idx), ...
-        'plr', ds.plr(idx), 'env_corr', ds.env_corr(idx), 'iot', iot(idx));
+    M = struct();
+    for i = 1:numel(mf), M.(mf{i}) = ds.meas.(mf{i})(idx); end
     for k = 1:numel(idx)
-        [feats(idx(k), :), feat_names] = link_features(M, k, tw, p.frame_duration);
+        feats(idx(k), :) = link_features(M, k, tw, p.frame_duration);
     end
 end
 
@@ -53,15 +53,10 @@ spec.meta = ds.meta;
 spec.meta.temporal_window = tw;
 save('data/spectrograms.mat', 'spec', '-v7.3');
 
-fprintf('\nSaved data/spectrograms.mat: X [128 128 1 %d], %d classes, feats [%d x 9] (%s)\n', ...
-    N, numel(ds.class_names), N, strjoin(feat_names, ', '));
-fprintf('Envelope correlation per class (mean): ');
+fprintf('\nSaved data/spectrograms.mat: X [128 128 1 %d], %d classes, feats [%d x %d] (%s)\n', ...
+    N, numel(ds.class_names), N, numel(feat_names), strjoin(feat_names, ', '));
+fprintf('%-22s', 'mean per class'); fprintf('%10s', feat_names{:}); fprintf('\n');
 for c = 1:numel(ds.class_names)
-    fprintf('%s %.3f  ', ds.class_names{c}, mean(feats(ds.label == c, 8)));
+    fprintf('%-22s', ds.class_names{c}); fprintf('%10.3f', mean(feats(ds.label == c, :), 1)); fprintf('\n');
 end
-fprintf('\nInterference over thermal per class (mean dB): ');
-for c = 1:numel(ds.class_names)
-    fprintf('%s %.2f  ', ds.class_names{c}, mean(feats(ds.label == c, 9)));
-end
-fprintf('\n');
 clear X spec ds L   % large arrays; main.m runs the stages in one workspace

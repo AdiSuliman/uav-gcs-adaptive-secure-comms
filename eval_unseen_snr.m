@@ -32,11 +32,10 @@ threat_cfg(7) = struct('name','benign_interference', 'param','benign_int_db', 'l
 threat_cfg(8) = struct('name','sweeping_jammer',     'param','jsr_db',        'levels',[0 4 8 12 16]);
 threat_cfg(9) = struct('name','none',                'param','',              'levels',1:5);   % 5 sub-blocks: balanced
 
-D = load('data/trained_detector.mat', 'net', 'classes');
+D = load('data/trained_detector.mat', 'net', 'classes', 'ood');
 classes = cellstr(string(D.classes(:)'));
 N = load_norm();
-init_params;
-p0 = load('params.mat').params;
+p0 = load('params.mat').params; p0.quiet_build = true;
 modelName = 'UAV_GCS_Threat_Link';
 fs = p0.symbol_rate * p0.sps;
 stop_time = num2str(N_FRAMES * p0.frame_duration);
@@ -50,29 +49,29 @@ for t = 1:numel(threat_cfg)
         p = p0; p.active_threat = cfg.name;
         if ~isempty(cfg.param), p.(cfg.param) = cfg.levels(lv); end
         v_kmh = p0.speed_kmh_min + rand() * (p0.speed_kmh_max - p0.speed_kmh_min);
-        p.v_kmh = v_kmh; p.v = v_kmh / 3.6; p.fd_max = p.v * p0.carrier_freq / p0.c_light;
-        params = p; save('params.mat', 'params');
-        evalc('build_threat_model');
+        fd = v_kmh / 3.6 * p0.carrier_freq / p0.c_light;
+        evalc('build_threat_model(p)');
         for s = 1:numel(EBNO_ALL)
             ebno = EBNO_ALL(s);
             snr_dB = ebno + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
             set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/p.sps));
-            link_seed(modelName, randi(2^31 - 1000), p.fd_max);
-            out = sim(modelName, 'StopTime', stop_time);
-            [iq_f, ber_f, rssi_f, plr_f, ~, sinr_f, ec_f, iot_f] = extract_closed_loop_frames(out, p, delay_bits);
-            M = struct('sinr', sinr_f, 'ber', ber_f, 'rssi', rssi_f, 'plr', plr_f, 'env_corr', ec_f, 'iot', iot_f);
-            for k = 1:numel(ber_f)
-                if isnan(ber_f(k)), continue; end
-                raw = link_features(M, k, temporal_window, p0.frame_duration);
-                truth{end+1} = cfg.name; %#ok<SAGROW>
-                pred{end+1} = detect_frame(D.net, D.classes, iq_f{k}, raw, N.mu, N.sd, fs); %#ok<SAGROW>
-                ebno_of(end+1) = ebno; %#ok<SAGROW>
+            link_seed(modelName, randi(2^31 - 1000), fd);
+            F = extract_closed_loop_frames(sim(modelName, 'StopTime', stop_time), p, delay_bits);
+            v = find(~isnan(F.ber));
+            X = zeros(128, 128, 1, numel(v), 'single'); R = zeros(numel(v), numel(N.mu));
+            for i = 1:numel(v)
+                X(:, :, 1, i) = spec_image(F.iq{v(i)}, fs);
+                R(i, :) = link_features(F, v(i), temporal_window);
             end
+            [pr, ~] = detect_scores(D.net, D.ood, X, ((R - N.mu) ./ N.sd)');
+            [~, k] = max(pr, [], 1);
+            truth = [truth, repmat({cfg.name}, 1, numel(v))]; %#ok<AGROW>
+            pred = [pred, classes(k)]; %#ok<AGROW>
+            ebno_of = [ebno_of, ebno * ones(1, numel(v))]; %#ok<AGROW>
         end
     end
     fprintf('  [%d/%d] %-20s done (%.1f min)\n', t, numel(threat_cfg), cfg.name, toc(t0)/60);
 end
-params = p0; save('params.mat', 'params');
 
 %% 3. Metrics per Eb/N0
 act_of = containers.Map(classes, cellfun(@(c) rule_based_policy(c), classes, 'UniformOutput', false));

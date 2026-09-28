@@ -1,4 +1,4 @@
-%% BUILD_KPI_DASHBOARD - Results dashboard (proposal deliverable 1) (D46)
+%% BUILD_KPI_DASHBOARD - Results dashboard (proposal deliverable 1) (D46, D59)
 % One figure for the report and the defense, drawn from the result files of
 % the pipeline (no numbers typed in). A missing input shows a placeholder.
 %
@@ -6,9 +6,9 @@
 %   1. Confusion matrix (detection)
 %   2. Macro-F1 vs Eb/N0 (detection, KPI 1)
 %   3. Unknown-threat AUROC per held-out threat (KPI 2)
-%   4. Mean reward per cycle per episode set, key policies (KPI 5)
-%   5. Restored cycles vs Eb/N0, single threats (KPI 4)
-%   6. Restored cycles vs interferer direction (geometry)
+%   4. Recovered episodes per threat, DQN / rule + escalation / oracle (KPI 4)
+%   5. Recovered episodes vs Eb/N0, single threats, key policies (KPI 5)
+%   6. Recovered episodes vs interferer direction (geometry)
 %   7. Survivability map summary per threat and geometry (deliverable 8)
 %   8. KPI status (results/kpi_summary.mat)
 %
@@ -57,7 +57,7 @@ end
 ax = nexttile(tl);
 if ~isempty(O)
     j = strcmp(O.SC, 'maha'); A = vertcat(O.R.auroc);
-    bar(ax, A(:, j)); hold(ax, 'on'); yline(ax, 0.8, 'r--', '0.8'); grid(ax, 'on'); ylim(ax, [0.4 1]);
+    bar(ax, A(:, j)); hold(ax, 'on'); yline(ax, 0.9, 'r--', '0.9'); grid(ax, 'on'); ylim(ax, [0.4 1]);
     set(ax, 'XTickLabel', strrep({O.R.held_out}, '_', ' '), 'FontSize', 7); xtickangle(ax, 40);
     ylabel(ax, 'AUROC'); title(ax, sprintf('KPI 2: unknown threats (LOTO), mean %.3f', mean(A(:, j))));
 else
@@ -67,26 +67,25 @@ end
 % 4-6. Decision layer
 if ~isempty(P)
     col = @(p) find(strcmp(P.POL, p));
-    key = {'random', 'fixed', 'rule_esc', 'table', P.POL{P.iDQN}, 'oracle'};
-    kl = {'random', 'best fixed', 'rule + esc.', 'table', 'DQN', 'oracle'};
     ax = nexttile(tl);
-    Y = zeros(numel(P.set_names), numel(key));
-    for si = 1:numel(P.set_names), Y(si, :) = cellfun(@(p) mean(P.RES{si, col(p)}.ret), key); end
-    bar(ax, Y); grid(ax, 'on'); set(ax, 'XTickLabel', P.set_names);
-    legend(ax, kl, 'Location', 'southoutside', 'NumColumns', 3, 'FontSize', 7);
-    ylabel(ax, 'mean reward per cycle'); title(ax, 'KPI 5: policies on the test pools');
+    sh = P.KP.show; cD = strcmp(sh, P.POL{P.iDQN}); cR = strcmp(sh, 'rule_esc'); cO = strcmp(sh, 'oracle');
+    barh(ax, P.KP.per_threat(:, [find(cD) find(cR) find(cO)])); hold(ax, 'on'); xline(ax, 90, 'r--', '90%');
+    set(ax, 'YTick', 1:numel(P.KP.threats), 'YTickLabel', strrep(P.KP.threats, '_', ' '), 'FontSize', 7, 'YDir', 'reverse');
+    xlim(ax, [0 105]); grid(ax, 'on'); xlabel(ax, 'recovered among recoverable [%]');
+    legend(ax, {'DQN', 'rule + esc.', 'oracle'}, 'Location', 'southoutside', 'NumColumns', 3, 'FontSize', 7);
+    title(ax, 'KPI 4: recovery per threat (test pools)');
 
     ax = nexttile(tl);
     plot(ax, P.KP.ebno, P.KP.per_ebno, '-o', 'LineWidth', 1.3); grid(ax, 'on'); ylim(ax, [0 105]);
     legend(ax, P.KP.show_lbl, 'Location', 'southeast', 'FontSize', 7);
-    xlabel(ax, 'E_b/N_0 [dB]'); ylabel(ax, 'restored cycles after onset [%]'); title(ax, 'KPI 4: single threats');
+    xlabel(ax, 'E_b/N_0 [dB]'); ylabel(ax, 'recovered among recoverable [%]'); title(ax, 'KPI 5: single threats vs E_b/N_0');
 
     ax = nexttile(tl);
     if ~isempty(P.KP.per_aoa)
         bar(ax, P.KP.per_aoa); grid(ax, 'on'); ylim(ax, [0 105]);
         b = P.KP.aoa_bins;
         set(ax, 'XTickLabel', arrayfun(@(i) sprintf('%d-%d', b(i), b(i+1)), 1:numel(b) - 1, 'UniformOutput', false));
-        xlabel(ax, '|interferer - GCS direction| [deg]'); ylabel(ax, 'restored [%]');
+        xlabel(ax, '|interferer - GCS direction| [deg]'); ylabel(ax, 'recovered [%]');
         title(ax, 'Directional threats vs geometry');
     else
         placeholder(ax, 'Geometry', 'evaluate_policies (random AoA)');
@@ -105,7 +104,7 @@ if ~isempty(Sv)
     set(ax, 'YTick', 1:n, 'YTickLabel', strrep({g.threat}, '_', ' '), 'FontSize', 7, 'YDir', 'reverse');
     xlim(ax, [0 100]); xlabel(ax, '% of (severity, E_b/N_0) states');
     legend(ax, {'recoverable', 'marginal', 'non-recoverable'}, 'Location', 'southoutside', 'NumColumns', 3, 'FontSize', 7);
-    title(ax, 'Survivability boundary (any action)');
+    title(ax, 'Survivability boundary (any configuration)');
 else
     placeholder(ax, 'Survivability map', 'map_survivability_boundary');
 end
@@ -114,7 +113,7 @@ end
 ax = nexttile(tl); axis(ax, 'off');
 if ~isempty(Kp)
     y = 0.97;
-    text(ax, 0, y, 'KPI status (proposal section 5)', 'FontWeight', 'bold', 'FontSize', 10);
+    text(ax, 0, y, 'KPI status (updated proposal)', 'FontWeight', 'bold', 'FontSize', 10);
     for k = 1:numel(Kp.KPI)
         q = Kp.KPI(k); y = y - 0.115;
         switch q.status

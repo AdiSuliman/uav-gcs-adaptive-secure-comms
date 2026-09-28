@@ -1,22 +1,29 @@
-function [raw, names] = link_features(M, k, tw, frame_dur)
-%LINK_FEATURES  Scalar detector features of frame k, one definition for training,
-%   evaluation, the closed loop and the GUI (D42).
-%   M          per-frame history of one run or episode, vector fields:
-%              sinr, ber, rssi, plr, env_corr, iot (as returned by extract_closed_loop_frames)
-%   k          current frame index in M
-%   tw         temporal window [frames], causal, clipped to the start of M
-%   frame_dur  frame duration [s]
-%   raw        1 x 9: [sinr, ber, rssi, plr, var_rssi, dber_dt, burst_ratio, env_corr, iot]
-%              missing values (e.g. BER of an incomplete frame) are set to 0
-names = {'sinr', 'ber', 'rssi', 'plr', 'var_rssi', 'dber_dt', 'burst_ratio', 'env_corr', 'iot'};
+function [raw, names] = link_features(M, k, tw, ~)
+%LINK_FEATURES  Scalar detector features of frame k: one definition for training,
+%   evaluation, the closed loop and the GUI (D42, D59).
+%   M    per-frame receiver measurements of one run or episode
+%        (extract_closed_loop_frames.m): sinr, ber_est, snr_post, rssi, crc_fail,
+%        env_corr, iot, coh, mmse_gain, align
+%   k    current frame index in M
+%   tw   temporal window [frames], causal, clipped to the start of M
+%   raw  1 x 13 in the order of names; missing values are set to 0
+%   names = link_features('names') returns the feature names only.
+%
+%   sinr       antenna-1 SINR [dB]            log_ber    log10 of the estimated BER
+%   rssi       antenna-1 power [dB]            crc_fail   CRC check of this frame failed
+%   var_rssi   RSSI variance over the window   dlog_ber   change of log_ber from the last frame
+%   plr        packet loss rate over the window (CRC failures)
+%   env_corr   residual vs own envelope        iot        interference over thermal [dB]
+%   snr_post   post-combining SNR [dB]         coh        spatial coherence of the interference
+%   mmse_gain  predicted MMSE gain [dB]        align      interference vs GCS direction
+names = {'sinr', 'log_ber', 'rssi', 'crc_fail', 'var_rssi', 'dlog_ber', 'plr', 'env_corr', 'iot', ...
+         'snr_post', 'coh', 'mmse_gain', 'align'};
+if ischar(M) && strcmp(M, 'names'), raw = names; return; end
 w0 = max(1, k - tw + 1);
-var_rssi = var(M.rssi(w0:k), 0);
-burst    = mean(M.plr(w0:k), 'omitnan');
-if k > 1 && ~isnan(M.ber(k)) && ~isnan(M.ber(k-1))
-    dber = (M.ber(k) - M.ber(k-1)) / frame_dur;
-else
-    dber = 0;
-end
-raw = [M.sinr(k), M.ber(k), M.rssi(k), M.plr(k), var_rssi, dber, burst, M.env_corr(k), M.iot(k)];
+lb = @(i) log10(max(M.ber_est(i), 1e-6));
+if k > 1, dlb = lb(k) - lb(k-1); else, dlb = 0; end
+raw = [M.sinr(k), lb(k), M.rssi(k), M.crc_fail(k), var(M.rssi(w0:k), 0), dlb, ...
+       mean(M.crc_fail(w0:k), 'omitnan'), M.env_corr(k), M.iot(k), M.snr_post(k), M.coh(k), ...
+       M.mmse_gain(k), M.align(k)];
 raw(~isfinite(raw)) = 0;
 end

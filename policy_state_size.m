@@ -1,6 +1,12 @@
-function [nS, cont] = policy_state_size(nA)
-%POLICY_STATE_SIZE  Length of the policy_state.m vector for nA configurations,
-%   and the rows that are z-scored (continuous link measurements and dwell).
-nS = 18 + nA;
-cont = [11:15, 16 + nA, 18 + nA];
+function [nS, cont] = policy_state_size(nA, nC)
+%POLICY_STATE_SIZE  Length of the policy_state.m vector for nA configurations and
+%   nC detector classes (default 9), and the rows that are z-scored (everything but
+%   the class probabilities, the flags and the configuration one-hot).
+if nargin < 2, nC = 9; end
+C = decision_config();
+nObs = nC + 11;                                   % policy_monitor.m observation vector
+nS = nObs * C.hist + nA + 2;
+contObs = [nC + (2:11)];                          % estimated BER .. Eb/N0 drop (not probs, not the unknown flag)
+cont = reshape((contObs(:) + (0:C.hist-1) * nObs), 1, []);
+cont = [cont, nObs * C.hist + nA + 1];            % dwell
 end

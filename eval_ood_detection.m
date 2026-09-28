@@ -1,4 +1,4 @@
-%% EVAL_OOD_DETECTION.m - unknown-threat detection, leave-one-threat-out (D32, D42)
+%% EVAL_OOD_DETECTION.m - unknown-threat detection, leave-one-threat-out (D32, D42, D59)
 % Proposal deliverable (detection of an anomaly / unknown threat) and risk 13.
 % For each threat class k the detector is retrained from scratch without k
 % (train_hybrid_net.m, same schedule as production), the link features are
@@ -7,9 +7,13 @@
 % (higher = more like the known classes):
 %   MSP     maximum softmax probability (Hendrycks & Gimpel, ICLR 2017)
 %   energy  logsumexp of the logits (Liu et al., NeurIPS 2020)
-%   Maha    Mahalanobis distance on the 64-d embedding (Lee et al., NeurIPS 2018)
-%   iforest isolation forest on the 9 link features (Liu, Ting & Zhou, ICDM 2008)
+%   maha    Mahalanobis feature ensemble over five layers, weights from the fold's
+%           known validation frames vs their FGSM versions (Lee et al., NeurIPS
+%           2018; fit_ood_model.m) -- the production score
+%   maha_last  the last layer alone (the D42 score, for comparison)
+%   iforest isolation forest on the link features (Liu, Ting & Zhou, ICDM 2008)
 %   fused   min of the validation-standardized Maha and IF scores
+% The held-out threat is never used to fit or weight any score.
 % Reported per held-out class: AUROC and FPR@95%TPR (share of unknown frames
 % accepted as known at the threshold that keeps 95% of known validation frames).
 % Output: results/ood_detection.{txt,mat}
@@ -30,7 +34,7 @@ T_prod = ood_thresholds(RETAIN);
 fprintf('Production detector thresholds (%.0f%% of known validation frames kept): MSP %.3f | energy %.2f\n\n', ...
     100*RETAIN, T_prod.msp, T_prod.energy);
 
-SC = {'msp', 'energy', 'maha', 'iforest', 'fused'};
+SC = {'msp', 'energy', 'maha', 'maha_last', 'iforest', 'fused'};
 R = struct('held_out', {}, 'n_ood', {}, 'auroc', {}, 'fpr95', {}, 'id_acc', {}, 'mapped_to', {}, 'same_action', {});
 
 %% 2. One retraining per held-out class
@@ -42,7 +46,7 @@ for h = 1:numel(held_out)
     [tr, va, te_id, te_ood] = loto_split(sp, known, k);
 
     net = train_hybrid_net(tr, va, known, struct('verbose', false));
-    M = fit_ood_model(net, tr, known);
+    M = fit_ood_model(net, tr, known, va);
 
     Sv = all_scores(net, M, va);
     Si = all_scores(net, M, te_id);
@@ -72,14 +76,14 @@ end
 %% 3. Report
 A = vertcat(R.auroc); F = vertcat(R.fpr95);
 rep = {};
-rep{end+1} = '=== UNKNOWN-THREAT DETECTION: LEAVE-ONE-THREAT-OUT (D32, D42) ===';
+rep{end+1} = '=== UNKNOWN-THREAT DETECTION: LEAVE-ONE-THREAT-OUT (D32, D42, D59) ===';
 rep{end+1} = sprintf('Generated: %s | detector retrained without each threat (%d epochs), test split by sub-run', datestr(now), N_EPOCHS);
 rep{end+1} = sprintf('AUROC: 0.5 = no separation, 1 = perfect. FPR95: unknown frames accepted as known at the threshold keeping %.0f%% of known validation frames.', 100*RETAIN);
 rep{end+1} = '';
 hdr = sprintf('%-20s %5s |', 'held-out threat', 'n');
 hdr = [hdr sprintf(' %7s', SC{:}) ' |' sprintf(' %7s', SC{:}) sprintf(' | %6s  %-20s %5s', 'known', 'mistaken for', 'same')];
 rep{end+1} = sprintf('%s', hdr);
-rep{end+1} = sprintf('%-20s %5s |%s |%s', '', '', sprintf(' %7s', 'AUROC', '', '', '', ''), sprintf(' %7s', 'FPR95', '', '', '', ''));
+rep{end+1} = sprintf('%-20s %5s |%s |%s', '', '', sprintf(' %7s', 'AUROC', '', '', '', '', ''), sprintf(' %7s', 'FPR95', '', '', '', '', ''));
 for i = 1:numel(R)
     r = R(i);
     rep{end+1} = sprintf('%-20s %5d |%s |%s | %5.1f%%  %-20s %4.0f%%', r.held_out, r.n_ood, ...
@@ -121,7 +125,7 @@ end
 
 function S = all_scores(net, M, P)
 [S.probs, ~, S.msp, S.energy] = cnn_scores(net, P.X, P.feats');
-[S.maha, S.iforest] = ood_scores(net, M, P.X, P.feats');
+[S.maha, S.iforest, S.maha_last] = ood_scores(net, M, P.X, P.feats');
 end
 
 function [Sv, Si, So] = fuse(Sv, Si, So)

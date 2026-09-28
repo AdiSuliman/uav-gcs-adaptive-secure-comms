@@ -1,7 +1,7 @@
-%% MEASURE_LATENCY - Decision latency per cycle (KPI: real time) (D46, D48)
+%% MEASURE_LATENCY - Decision latency per cycle (KPI: real time) (D46, D48, D59)
 % One decision cycle as deployed: spectrogram image of the received frame,
-% link features, detector (class probabilities and Mahalanobis score from one
-% forward pass, detect_scores.m), link monitor + policy (policy_decide.m,
+% link features, detector (class probabilities and the Mahalanobis feature
+% ensemble from one forward pass, detect_scores.m), link monitor + policy (policy_decide.m,
 % selected DQN and rule). The detector is timed on the GPU and on the CPU; the
 % cycle total uses the device with the lower 95th percentile. Real frames of
 % the threat link (none, jamming, noise_burst, spoofing at 4 dB), after a
@@ -37,18 +37,14 @@ gpu = canUseGPU;
 F = {};
 for t = 1:numel(THREATS)
     p = p0; p.active_threat = THREATS{t}; p.seed = 4242 + t;
-    params = p; save('params.mat', 'params');
-    evalc('build_threat_model');
+    evalc('build_threat_model(p)');
     set_param([modelName '/AWGN'], 'SNR', num2str(EBNO + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), ...
         'SignalPower', num2str(1/p.sps));
-    out = sim(modelName, 'StopTime', num2str(20 * p.frame_duration));
-    [iqf, ber, rssi, plr, ~, sinr, ec, iot] = extract_closed_loop_frames(out, p, delay_bits);
-    M = struct('sinr', sinr, 'ber', ber, 'rssi', rssi, 'plr', plr, 'env_corr', ec, 'iot', iot);
-    for k = reshape(find(~isnan(ber)), 1, [])
-        F{end+1} = struct('iq', iqf{k}, 'M', M, 'k', k, 'ber', ber(k)); %#ok<SAGROW>
+    M = extract_closed_loop_frames(sim(modelName, 'StopTime', num2str(20 * p.frame_duration)), p, delay_bits);
+    for k = reshape(find(~isnan(M.ber)), 1, [])
+        F{end+1} = struct('iq', M.iq{k}, 'M', M, 'k', k); %#ok<SAGROW>
     end
 end
-params = S0.params; save('params.mat', 'params');
 if bdIsLoaded(modelName), close_system(modelName, 0); end
 nF = numel(F);
 fprintf('%d frames from %d threat runs at %g dB\n', nF, numel(THREATS), EBNO);
@@ -62,12 +58,12 @@ for rep = 0:N_REP
     for f = 1:nF
         x = F{f};
         t0 = tic; img = spec_image(x.iq, fs); t_spec = toc(t0);
-        t0 = tic; raw = link_features(x.M, x.k, tw, p0.frame_duration); t_feat = toc(t0);
+        t0 = tic; raw = link_features(x.M, x.k, tw); t_feat = toc(t0);
         X = reshape(single(img), 128, 128, 1, 1); Fn = ((raw - mu) ./ sd)';
         t_gpu = NaN;
         if gpu, t0 = tic; [probs, maha] = detect_scores(D.net, D.ood, X, Fn, 'gpu'); sync(gpu); t_gpu = toc(t0); end
         t0 = tic; [probs, maha] = detect_scores(D.net, D.ood, X, Fn, 'cpu'); t_cpu = toc(t0);
-        obs = struct('probs', probs(:)', 'unknown', maha < PPm.maha_thr, 'feat', raw, 'ber', x.ber);
+        obs = struct('probs', probs(:)', 'unknown', maha < PPm.maha_thr, 'feat', raw);
         t0 = tic; [cfgD, memD] = policy_decide('dqn', obs, cfgD, memD, PPm, Q.agent); sync(gpu); t_dqn = toc(t0);
         t0 = tic; [cfgR, memR] = policy_decide('rule', obs, cfgR, memR, PPm, []); t_rule = toc(t0);
         if rep > 0                                   % pass 0 = warm-up
@@ -90,7 +86,7 @@ LAT = struct('names', {names}, 'median_ms', median(tm), 'p95_ms', p95(tm), ...
     'devices', device_name(gpu), ...
     'generated', datestr(now));
 rep = {};
-rep{end+1} = '=== DECISION LATENCY PER CYCLE (D46, D48) ===';
+rep{end+1} = '=== DECISION LATENCY PER CYCLE (D46, D48, D59) ===';
 rep{end+1} = sprintf('Generated: %s | %d timed cycles (%d frames x %d passes, after 1 warm-up pass) | %s', ...
     LAT.generated, n, nF, N_REP, LAT.device);
 rep{end+1} = sprintf('%-16s %10s %10s', 'component', 'median ms', 'p95 ms');

@@ -93,9 +93,18 @@ for i = 1:numel(unique_snrs)
     idx = (snr_vals == unique_snrs(i));
     f1_vs_snr(i) = 100 * macro_f1_of(Y_test(idx), Y_pred(idx), classes);
 end
+% Threshold (updated proposal, D59): the lowest Eb/N0 from which macro-F1 stays
+% >= 90% at every higher point AND every class reaches F1 >= 90% over the frames
+% at or above it.
 ok = f1_vs_snr >= 90;
 k_thr = find(~ok, 1, 'last');
-if isempty(k_thr), thr_db = unique_snrs(1); elseif k_thr < numel(ok), thr_db = unique_snrs(k_thr + 1); else, thr_db = NaN; end
+if isempty(k_thr), k0 = 1; elseif k_thr < numel(ok), k0 = k_thr + 1; else, k0 = numel(unique_snrs) + 1; end
+thr_db = NaN; f1_class_above = nan(numel(classes), 1);
+for k = k0:numel(unique_snrs)
+    ab = snr_vals >= unique_snrs(k);
+    fc = 100 * class_f1_of(Y_test(ab), Y_pred(ab), classes);
+    if all(fc >= 90), thr_db = unique_snrs(k); f1_class_above = fc; break; end
+end
 above = snr_vals >= thr_db;
 f1_above = 100 * macro_f1_of(Y_test(above), Y_pred(above), classes);
 
@@ -110,7 +119,8 @@ for c = 1:numel(cls_names)
 end
 fprintf('\nMacro-F1 per Eb/N0:');
 fprintf(' %g dB %.1f%% |', [unique_snrs(:)'; f1_vs_snr(:)']);
-fprintf('\nKPI #1 threshold: macro-F1 >= 90%% from %g dB up; macro-F1 above it %.2f%%\n', thr_db, f1_above);
+fprintf('\nKPI #1 threshold: macro-F1 and every class F1 >= 90%% from %g dB up; macro-F1 above it %.2f%%, lowest class %.2f%%\n', ...
+    thr_db, f1_above, min(f1_class_above));
 fprintf('Action-equivalent accuracy: %.2f%% (class accuracy %.2f%%)\n', 100*mean(act_ok), 100*mean(Y_test == Y_pred));
 
 %% 5c. 95% bootstrap confidence intervals (D35, D42)
@@ -146,6 +156,7 @@ metrics = struct( ...
     'conf_mat', conf_mat, ...
     'snr_breakdown', snr_breakdown, ...
     'kpi1_threshold_db', thr_db, 'macro_f1_above_threshold_pct', f1_above, ...
+    'class_f1_above_threshold_pct', f1_class_above, ...
     'action_equiv_accuracy_pct', 100*mean(act_ok), 'action_equiv_per_class_pct', act_acc_class, ...
     'ci95', ci95);
 %% 7. Accuracy vs UAV speed (only when the dataset was generated with speed diversity)
@@ -177,6 +188,14 @@ function q = prctile_cols(X, pcts)
 X = sort(X, 1);
 n = size(X, 1);
 q = X(min(n, max(1, round(pcts(:) / 100 * n))), :);
+end
+
+function f1 = class_f1_of(yt, yp, classes)
+cm = confusionmat(yt, yp, 'Order', classes);
+pr = diag(cm) ./ sum(cm, 1)';
+rc = diag(cm) ./ sum(cm, 2);
+f1 = 2 * pr .* rc ./ (pr + rc);
+f1(isnan(f1)) = 0;
 end
 
 function f = macro_f1_of(yt, yp, classes)

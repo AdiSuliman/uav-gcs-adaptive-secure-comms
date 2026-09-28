@@ -1,5 +1,8 @@
-function build_threat_model()
+function build_threat_model(p)
 %% BUILD_THREAT_MODEL - GCS -> UAV link with a multi-antenna UAV receiver (D41)
+% build_threat_model      params from params.mat, model saved to models/
+% build_threat_model(p)   params struct p, model built in memory only (parallel
+%                         workers of build_policy_pools.m, D59)
 % [Tx: QPSK+RRC] -> [Channel: Rician per UAV antenna] -> [Threat] -> [AWGN per antenna]
 %   -> [Rx: RRC per antenna, coherent combining, QPSK demod]
 %
@@ -22,7 +25,12 @@ function build_threat_model()
 %           'mrc'  : w = h,          window p.csi_block symbols (baseline)
 %           'mmse' : w = Rin^-1 * h, window p.mmse_window symbols (spatial_diversity
 %                    action: nulls up to n_rx-1 interferers, tracks a faulty branch)
-%           Output 2 = antenna-1 received IQ (sensing tap for the detector).
+%           Output 2 = antenna-1 received IQ (sensing tap for the detector),
+%           output 3 = combiner output (soft symbols), outputs 4-5 = the channel
+%           estimator's per-32-symbol channel estimates and the frame's
+%           interference + noise covariance (the quantities MMSE combining needs).
+%           The receiver measurements of extract_closed_loop_frames.m use only
+%           outputs 1-5 (D59).
 % Seeds     p.seed, or drawn from the global stream when empty; channel, interferer
 %           channels, threat waveforms, AWGN and bit source all derive from it.
 %           Seed and Doppler reach the blocks through the Constant blocks 'Seed' and
@@ -31,11 +39,14 @@ function build_threat_model()
 
 modelName = 'UAV_GCS_Threat_Link';
 
-if ~exist('params.mat', 'file')
-    error('params.mat not found. Run init_params.m first.');
+save_model = nargin < 1;
+if save_model
+    if ~exist('params.mat', 'file')
+        error('params.mat not found. Run init_params.m first.');
+    end
+    S = load('params.mat');
+    p = S.params;
 end
-S = load('params.mat');
-p = S.params;
 p = antenna_defaults(p);
 sps = p.sps;
 fs  = p.symbol_rate * sps;
@@ -73,6 +84,9 @@ add_block('simulink/Sinks/To Workspace', [modelName '/tx_sink'], 'Position', [15
 add_block('simulink/Sinks/To Workspace', [modelName '/rx_sink'], 'Position', [870 90 950 120]);
 add_block('simulink/Sinks/To Workspace', [modelName '/Tx_IQ'],   'Position', [300 30 380 60]);
 add_block('simulink/Sinks/To Workspace', [modelName '/Rx_IQ'],   'Position', [870 150 950 180]);
+add_block('simulink/Sinks/To Workspace', [modelName '/Rx_Z'],    'Position', [870 210 950 240]);
+add_block('simulink/Sinks/To Workspace', [modelName '/Rx_H'],    'Position', [870 270 950 300]);
+add_block('simulink/Sinks/To Workspace', [modelName '/Rx_R'],    'Position', [870 330 950 360]);
 
 sf_root = sfroot;
 chart_tx = sf_root.find('-isa', 'Stateflow.EMChart', 'Path', [modelName '/Tx']);
@@ -97,6 +111,9 @@ set_param([modelName '/tx_sink'], 'VariableName', 'tx_bits_out', 'SaveFormat', '
 set_param([modelName '/rx_sink'], 'VariableName', 'rx_bits_out', 'SaveFormat', 'Array');
 set_param([modelName '/Tx_IQ'],   'VariableName', 'Tx_IQ',       'SaveFormat', 'Array');
 set_param([modelName '/Rx_IQ'],   'VariableName', 'Rx_IQ',       'SaveFormat', 'Array');
+set_param([modelName '/Rx_Z'],    'VariableName', 'Rx_Z',        'SaveFormat', 'Array');
+set_param([modelName '/Rx_H'],    'VariableName', 'Rx_H',        'SaveFormat', 'Array');
+set_param([modelName '/Rx_R'],    'VariableName', 'Rx_R',        'SaveFormat', 'Array');
 
 %% ---- Wiring ----
 add_line(modelName, 'BitSource/1', 'Tx/1',      'autorouting', 'on');
@@ -114,6 +131,9 @@ add_line(modelName, 'BitSource/1', 'tx_sink/1', 'autorouting', 'on');
 add_line(modelName, 'Rx/1',        'rx_sink/1', 'autorouting', 'on');
 add_line(modelName, 'Tx/1',        'Tx_IQ/1',   'autorouting', 'on');
 add_line(modelName, 'Rx/2',        'Rx_IQ/1',   'autorouting', 'on');
+add_line(modelName, 'Rx/3',        'Rx_Z/1',    'autorouting', 'on');
+add_line(modelName, 'Rx/4',        'Rx_H/1',    'autorouting', 'on');
+add_line(modelName, 'Rx/5',        'Rx_R/1',    'autorouting', 'on');
 
 set_param(modelName, 'SolverType', 'Fixed-step', 'Solver', 'FixedStepDiscrete', 'StopTime', '0.01');
 set_param([modelName '/AoA'], 'Value', mat2str(p.int_aoa_deg(:)', 8));
@@ -122,9 +142,11 @@ set_param([modelName '/AoA'], 'UserDataPersistent', 'on', 'UserData', struct('ao
 link_seed(modelName, seed, p.fd_max);
 
 %% ---- Save ----
-if ~exist('models', 'dir'); mkdir('models'); end
-save_system(modelName, ['models/' modelName '.slx']);
-fprintf('Model saved to models/%s.slx\n', modelName);
+if save_model
+    if ~exist('models', 'dir'); mkdir('models'); end
+    save_system(modelName, ['models/' modelName '.slx']);
+    fprintf('Model saved to models/%s.slx\n', modelName);
+end
 fprintf('Done. threat=%s, JSR=%.1f dB, K=%.1f dB, fd=%.1f Hz, n_rx=%d, rho=%.2f, Rx=%s, AoA %s.\n', ...
     p.active_threat, p.jsr_db, p.rician_k, p.fd_max, nr, p.rx_corr, p.rx_combiner, ...
     ternary(p.int_aoa_random, 'random per seed', 'fixed'));
@@ -253,7 +275,8 @@ end
 
 function s = rx_script(p)
 % Per-antenna matched filter; per window: LS channel estimate from the known symbols,
-% residual covariance, MRC or MMSE weights; QPSK demod.
+% residual covariance, MRC or MMSE weights; QPSK demod. The channel estimator's
+% per-32-symbol estimates and the frame's residual covariance are outputs 4-5.
 nr = p.n_rx;
 Dt = p.filter_span;                       % Tx + Rx filter delay [symbols]
 switch lower(p.rx_combiner)
@@ -262,7 +285,7 @@ switch lower(p.rx_combiner)
     otherwise, error('build_threat_model: unknown rx_combiner ''%s''', p.rx_combiner);
 end
 s = sprintf([ ...
-    'function [bits, iq1] = fcn(u, txbits)\n' ...
+    'function [bits, iq1, z, Hq, Rq] = fcn(u, txbits)\n' ...
     '%%#codegen\n' ...
     'persistent rxf sbuf\n' ...
     'NR = %d; SPS = %d; Dt = %d; B = %d; MODE = %d;\n' ...
@@ -309,6 +332,24 @@ s = sprintf([ ...
     '    end\n' ...
     'end\n' ...
     'bits = pskdemod(z, 4, pi/4, ''gray'', ''OutputType'', ''bit'');\n' ...
+    'NBo = floor(Nsym / 32);\n' ...
+    'Hq = complex(zeros(NR, NBo));\n' ...
+    'Rq = complex(zeros(NR, NR));\n' ...
+    'for bo = 1:NBo\n' ...
+    '    k0 = (bo-1)*32;\n' ...
+    '    hb = complex(zeros(NR, 1)); eb = 0;\n' ...
+    '    for m = k0+1:k0+32\n' ...
+    '        hb = hb + r(m, :).'' * conj(sa(m));\n' ...
+    '        eb = eb + abs(sa(m))^2;\n' ...
+    '    end\n' ...
+    '    hb = hb / max(eb, 1e-12);\n' ...
+    '    Hq(:, bo) = hb;\n' ...
+    '    for m = k0+1:k0+32\n' ...
+    '        e = r(m, :).'' - hb * sa(m);\n' ...
+    '        Rq = Rq + e * e'';\n' ...
+    '    end\n' ...
+    'end\n' ...
+    'Rq = Rq / (NBo * 32);\n' ...
     'end\n'], nr, p.sps, Dt, B, mode, p.rolloff, p.filter_span);
 end
 

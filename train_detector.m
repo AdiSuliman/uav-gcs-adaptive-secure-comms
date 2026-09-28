@@ -20,8 +20,9 @@ rng(42, 'twister');
 [net, info] = train_hybrid_net(sp.train, sp.val, classes);
 fprintf('\nBest validation accuracy %.4f at epoch %d\n', info.bestValAcc, info.bestEpoch);
 
-fprintf('Fitting unknown-threat models (Mahalanobis, isolation forest)...\n');
-ood = fit_ood_model(net, sp.train, classes);
+fprintf('Fitting unknown-threat models (Mahalanobis feature ensemble, isolation forest)...\n');
+ood = fit_ood_model(net, sp.train, classes, sp.val);
+fprintf('Ensemble weights (bias, %s): %s\n', strjoin(ood.layers, ', '), mat2str(ood.w, 3));
 
 if ~exist('data', 'dir'), mkdir('data'); end
 save('data/trained_detector.mat', 'net', 'info', 'classes', 'ood', '-v7.3');
