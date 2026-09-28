@@ -1,4 +1,4 @@
-%% EVALUATE_POLICIES - Decision-layer comparison on the test pools (D44-D51, D59)
+%% EVALUATE_POLICIES - Decision-layer comparison on the test pools
 % Every policy runs the same episodes with the same frame draws (common random
 % numbers) on the TEST split of data/policy_pools.mat: geometries never used in
 % training or validation. Each episode is one geometry; every test geometry of
@@ -6,12 +6,16 @@
 %   single    8 threats x 3 severities (low, nominal, high) x 6 Eb/N0, static jammer
 %   follower  jamming / reactive_jamming / spoofing that re-acquire the channel
 %             2-5 cycles after every hop, 3 severities
-%   combined  the 4 test combinations (never seen in training)
+%   combined  the 8 combined threats on test flights
 %   unknown   single threats with the detector output withheld after onset
 %             (unknown-threat path: the policy sees only the link measurements)
 %   clean     no threat; every change is a false alarm. KPI 6 (one-sided 95%
 %             Clopper-Pearson bound, >= 600 episodes) is computed on
-%             data/clean_test_pools.mat, one episode per new geometry (D51)
+%             data/clean_test_pools.mat, one episode per new geometry
+%   comb      jamming / reactive_jamming on every channel we can use (Liu et
+%             al.'s comb jammer): the jammer is on the new channel at the hop
+%             itself, so only space and link budget can help. Reported apart,
+%             not part of the KPI 4 pool; never trained on as such
 % Policies: no response (the link that does not react), random, always-on MMSE,
 % the best fixed configuration (train pools), expert rule with and without
 % escalation, class -> configuration table (train pools), the DQN of every
@@ -59,6 +63,8 @@ sets(end+1) = struct('name', 'follower', 'spec', {episodes(foll, nS, nG, REPS, t
 sets(end+1) = struct('name', 'combined', 'spec', {episodes(combo_cells, nS, nG, REPS, false, false, NE, T, rs)});
 sets(end+1) = struct('name', 'unknown',  'spec', {episodes(single_cells, nS, nG, 1, false, true, NE, T, rs)});
 sets(end+1) = struct('name', 'clean',    'spec', {episodes(clean_cell, nS, nG, 8, false, false, NE, T, rs)});
+jam = foll(ismember(PP.scen(foll), {'jamming', 'reactive_jamming'}));
+sets(end+1) = struct('name', 'comb',     'spec', {episodes(jam, nS, nG, 1, true, false, NE, T, rs, [0 0])});
 iThreat = 1:3;                                         % sets pooled as "threat sets"
 
 %% 2. Best fixed configuration, chosen on the train pools
@@ -318,8 +324,10 @@ saveas(fig, 'results/policy_breakdown.png'); close(fig);
 fprintf('Saved results/policy_evaluation.{txt,mat,png}, results/policy_breakdown.png\n');
 
 %% ===================== Local functions =====================
-function specs = episodes(cells, nS, nG, reps, follow, unk, NE, T, rs)
+function specs = episodes(cells, nS, nG, reps, follow, unk, NE, T, rs, fdelay)
 % Every (cell, Eb/N0, test geometry) `reps` times, packed into batches of NE.
+% fdelay: range of cycles a follower needs to re-acquire the channel (default [2 5]).
+if nargin < 10, fdelay = [2 5]; end
 [c, s, r] = ndgrid(cells, 1:nS, 1:nG);
 c = repmat(c(:)', 1, reps); s = repmat(s(:)', 1, reps); r = repmat(r(:)', 1, reps);
 n = numel(c); nb = ceil(n / NE); pad = nb * NE - n;
@@ -328,7 +336,7 @@ specs = cell(1, nb);
 for b = 1:nb
     i = (b-1)*NE + (1:NE);
     specs{b} = struct('scn', c(i), 's', s(i), 'r', r(i), 'onset', randi(rs, [3 10], 1, NE), ...
-        'follow', repmat(follow, 1, NE), 'fdelay', randi(rs, [2 5], 1, NE), 'unk', repmat(unk, 1, NE), 'T', T);
+        'follow', repmat(follow, 1, NE), 'fdelay', randi(rs, fdelay, 1, NE), 'unk', repmat(unk, 1, NE), 'T', T);
 end
 specs{end}.n_valid = NE - pad;
 end
