@@ -195,7 +195,7 @@ An Unreal Engine view of the closed loop, driven from MATLAB (Simulink 3D Animat
 
 | Entry point | What it does |
 |---|---|
-| `v3d_live` | Live operations console. Inject any of the 12 test threats (8 single, 4 combined) at any time, a jammer that follows channel hops, or a threat whose class is hidden (unknown threat); pick Eb/N0 and test geometry; compare with rules + escalation, no response, or **your own responses** (operator vs AI); play the defense scenarios; auto director or fixed cameras; save a picture, save the session, render it to MP4. Keys: Space pause, I inject, O off, N new, 1–8 camera. The Unreal window is a free camera. |
+| `v3d_live` | Live operations console. Inject any of the 16 test threats (8 single, 8 combined, nominal severity) at any time, a jammer that follows channel hops, or a threat whose class is hidden (unknown threat); pick Eb/N0 and test geometry; compare with rules + escalation, no response, or **your own responses** (operator vs AI); play the defense scenarios; auto director or fixed cameras; save a picture, save the session, render it to MP4. Keys: Space pause, I inject, O off, N new, 1–8 camera. The Unreal window is a free camera. |
 | `v3d_videos` | Renders the defense scenarios to `results/viz3d_videos/<id>.mp4` and a `showreel.mp4` (about 4 min per scenario). |
 | `v3d_live('replay', file)` | Plays a console episode (`GUI_Results/episode_*.mat`, full Simulink link, any severity and speed) or a saved session. |
 
@@ -250,7 +250,7 @@ An Unreal Engine view of the closed loop, driven from MATLAB (Simulink 3D Animat
 ## Known issues and future work
 
 - The v4 full run (from A0) is pending; the results section shows v3 (D52).
-- The operator console and the 3D view still call the v3 interfaces (link features, configurations, pool format); they are brought to v4 after the full run.
+- The operator console and the 3D view are ported to the v4 interfaces (frame measurements, 36 configurations, test split, nominal-severity cells); their live check follows the full run.
 - Consecutive decision cycles come from consecutive frames of the pools, so the fading between two cycles is more correlated than 20 ms apart; recovery times in ms assume the 20 ms decision period.
 - Reactive jamming is the hardest unknown threat: from the receiver it looks like barrage jamming on a continuous uplink, and it calls for the same countermeasure.
 - Latency is measured on a desktop CPU, not on UAV hardware.

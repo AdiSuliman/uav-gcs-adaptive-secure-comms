@@ -47,9 +47,10 @@ M.PP = PP;
 M.K = link_env('tables', PP);
 M.agent = Q.agents{find(Q.gammas == Q.seed_summary.selected_gamma, 1)};
 M.na = M.K.na;
-M.split = 2;
-M.nR = numel(PP.runs{2});
-M.avail = find(cellfun(@(p) ~isempty(p) && ~isempty(p.ber), PP.pools(:, 1, M.na, 2)))';
+M.split = 3;                                       % test split: flights never used in training
+M.nR = numel(PP.runs{M.split});
+M.avail = find(PP.sev(:)' == 2 & ...                % nominal severity: one cell per threat, the clean link first
+    cellfun(@(p) ~isempty(p) && ~isempty(p.ber), PP.pools(:, 1, M.na, M.split))');
 S = load(fullfile(root, 'params.mat')); p = S.params;
 M.sev = struct('jsr_db', p.jsr_db, 'spoof_sir_db', p.spoof_sir_db, 'benign_db', p.benign_int_db, ...
     'path_loss_db', p.path_loss_db, 'fault_duty', p.fault_duty);
@@ -80,7 +81,7 @@ G.events0 = {};
 end
 
 function G = inject(G, M, scn, follow, unk)
-if ischar(scn) || isstring(scn), scn = find(strcmp(M.PP.scen, scn), 1); end
+if ischar(scn) || isstring(scn), scn = M.avail(find(strcmp(M.PP.scen(M.avail), scn), 1)); end
 G.E.scn(:) = scn; G.E.onset(:) = G.E.t(1) + 1;
 G.E.follow(:) = follow; G.E.unk(:) = unk; G.E.fdelay(:) = 3;
 G.E.hop_t(:) = -inf;
@@ -272,9 +273,11 @@ for j = 1:numel(emit)
 end
 end
 
-function v = poolSpeed(M, scn, s, r)
+function v = poolSpeed(M, scn, s, r) %#ok<INUSL>
+% UAV speed of test geometry r: every cell flies the same geometries; the run id
+% is 100 x seed block + r (build_policy_pools.m).
 try
-    [~, v] = pool_seed(scn, s, M.split, r, M.PP.speed_range);
+    [~, v] = pool_seed(1, s, floor(M.PP.runs{M.split}(r) / 100), r, M.PP.speed_range);
 catch
     v = NaN;
 end

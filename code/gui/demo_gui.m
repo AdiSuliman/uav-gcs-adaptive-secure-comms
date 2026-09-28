@@ -1014,19 +1014,18 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
         params = pl; save('params.mat', 'params'); %#ok<NASGU>
         build_threat_model;
         set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/pl.sps));
-        outL = sim(env.modelName);
-        [iqL, berL, rssiL, plrL, ~, sinrL, ecL, iotL] = extract_closed_loop_frames(outL, pl, env.delay_bits);
-        ML = struct('sinr', sinrL, 'ber', berL, 'rssi', rssiL, 'plr', plrL, 'env_corr', ecL, 'iot', iotL);
-        vl = reshape(find(~isnan(berL)), 1, []);
+        FL = extract_closed_loop_frames(sim(env.modelName), pl, env.delay_bits);
+        disk_guard;
+        vl = reshape(find(~isnan(FL.ber)), 1, []);
         XL = zeros(env.img_size, env.img_size, 1, numel(vl), 'single'); leadF = zeros(numel(vl), numel(env.feat_mean));
         for i = 1:numel(vl)
-            XL(:, :, 1, i) = spec_image(iqL{vl(i)}, env.fs);
-            leadF(i, :) = link_features(ML, vl(i), env.temporal_window, pl.frame_duration);
+            XL(:, :, 1, i) = spec_image(FL.iq{vl(i)}, env.fs);
+            leadF(i, :) = link_features(FL, vl(i), env.temporal_window);
         end
-        leadB = berL(vl);
+        leadB = FL.ber(vl);
         FnL = ((leadF - env.feat_mean) ./ env.feat_std)';
         [probsL, mahaL] = detect_scores(env.cnn_net, env.ood, XL, FnL);
-        clear XL FnL outL iqL
+        clear XL FnL FL
         updateTimer(fig, tSeq); checkAbort(fig);
     end
 
@@ -1038,15 +1037,16 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     out = sim(env.modelName);
     updateTimer(fig, tSeq); checkAbort(fig);
 
-    [iq_frames, ber_f, rssi_f, plr_f, nf, sinr_f, ec_f, iot_f] = extract_closed_loop_frames(out, p, env.delay_bits);
+    F = extract_closed_loop_frames(out, p, env.delay_bits);
+    disk_guard;
+    iq_frames = F.iq; ber_f = F.ber; rssi_f = F.rssi; nf = F.nf;
     i_last = find(~isnan(ber_f), 1, 'last'); if isempty(i_last), i_last = nf; end
-    raw_feats = link_features(struct('sinr', sinr_f, 'ber', ber_f, 'rssi', rssi_f, 'plr', plr_f, ...
-        'env_corr', ec_f, 'iot', iot_f), i_last, env.temporal_window, p.frame_duration);
-    burst_ratio = raw_feats(7);
+    raw_feats = link_features(F, i_last, env.temporal_window);
+    plr_win = raw_feats(feature_index('plr'));
     iq_before = iq_frames{i_last};
     ber_before_mean = mean(ber_f, 'omitnan');
-    appLog(fig, sprintf('Channel: BER %.2e (mean of %d frames) | RSSI %.2f dB | burst ratio %.2f | %s', ...
-        ber_before_mean, nf, rssi_f(i_last), burst_ratio, bitsTxt(ber_before_mean)));
+    appLog(fig, sprintf('Channel: BER %.2e (mean of %d frames) | RSSI %.2f dB | packets lost (CRC) %.0f%% | %s', ...
+        ber_before_mean, nf, rssi_f(i_last), 100 * plr_win, bitsTxt(ber_before_mean)));
 
     % Pre-mitigation views (drawn BEFORE the timed decision block)
     nPts = min(400, numel(iq_before));
@@ -1060,13 +1060,12 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     %% ---- 2. decision layer over the frames of the run (policy_decide.m, as evaluated) ----
     [Sxx, Fq, Tq] = spectrogram(iq_before, hann(env.win), env.novlp, env.nfft, env.fs, 'centered');
     Pw_db = 20*log10(abs(Sxx) + eps);
-    Mrun = struct('sinr', sinr_f, 'ber', ber_f, 'rssi', rssi_f, 'plr', plr_f, 'env_corr', ec_f, 'iot', iot_f);
     vf = reshape(find(~isnan(ber_f)), 1, []); nv = numel(vf);
     if nv == 0, error('demoGui:noFrames', 'no complete frame in the run'); end
     X = zeros(env.img_size, env.img_size, 1, nv, 'single'); Fr = zeros(nv, numel(env.feat_mean));
     for i = 1:nv
         X(:, :, 1, i) = spec_image(iq_frames{vf(i)}, env.fs);
-        Fr(i, :) = link_features(Mrun, vf(i), env.temporal_window, p.frame_duration);
+        Fr(i, :) = link_features(F, vf(i), env.temporal_window);
     end
     Fn = ((Fr - env.feat_mean) ./ env.feat_std)';
     [probsAll, mahaAll] = detect_scores(env.cnn_net, env.ood, X, Fn);
@@ -1267,10 +1266,10 @@ function R = applyMitigation(env, p, threat, action_name, snr_dB) %#ok<INUSL>
     params = p2; save('params.mat', 'params'); %#ok<NASGU>
     build_threat_model;
     set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p2.sps));
-    out2 = sim(env.modelName);
-    [iqf, berf, rssif, ~, nf2] = extract_closed_loop_frames(out2, p2, env.delay_bits);
-    i2 = find(~isnan(berf), 1, 'last'); if isempty(i2), i2 = nf2; end
-    R = struct('iq', iqf{i2}, 'ber_f', berf, 'rssi_f', rssif, 'ber_mean', mean(berf, 'omitnan'));
+    F2 = extract_closed_loop_frames(sim(env.modelName), p2, env.delay_bits);
+    disk_guard;
+    i2 = find(~isnan(F2.ber), 1, 'last'); if isempty(i2), i2 = F2.nf; end
+    R = struct('iq', F2.iq{i2}, 'ber_f', F2.ber, 'rssi_f', F2.rssi, 'ber_mean', mean(F2.ber, 'omitnan'));
 end
 
 function cf = confirmOf(env)
@@ -1905,8 +1904,7 @@ function runEpisode(btn, ~)
             if isempty(Ep{i}), cfg = na; else, cfg = Ep{i}.cfg; end
             if onset, F = Pt{cfg}; else, F = Pn{cfg}; end
             rows = find(F.run == rr); j = rows(mod(k0 + k, numel(rows)) + 1);
-            fr = struct('iq', double(F.iq{j}), 'ber', F.ber(j), 'rssi', F.rssi(j), 'plr', F.plr(j), ...
-                'sinr', F.sinr(j), 'env_corr', F.env_corr(j), 'iot', F.iot(j));
+            fr = struct('iq', double(F.iq{j}), 'ber', F.ber(j), 'feat', F.feat(j, :));
             [Ep{i}, info] = episode_cycle(Ep{i}, k, fr, ctx{i});
             T.ber(i, k) = fr.ber; T.det(i, k) = cls_idx(info.cls); T.ok(i, k) = T.det(i, k) == truthIdx(k);
             T.conf(i, k) = info.conf; T.prop(i, k) = info.prop; T.cfg(i, k) = info.cfg; T.sw(i, k) = info.switched;
@@ -2058,20 +2056,16 @@ function P = epBuildPool(fig, p, threat, ebno, seedBase)
         evalc('build_threat_model');
         snr_dB = ebno + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps);
         set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p2.sps));
-        F = struct('iq', {{}}, 'ber', [], 'rssi', [], 'plr', [], 'sinr', [], 'env_corr', [], 'iot', [], 'run', []);
+        F = struct('iq', {{}}, 'ber', [], 'feat', [], 'run', []);    % link features per frame within its run, as the pools
         for r = 1:2
             link_seed(env.modelName, seedBase + r, p2.fd_max);
-            out = sim(env.modelName);
-            [iq_f, ber_f, rssi_f, plr_f, ~, sinr_f, ec_f, iot_f] = extract_closed_loop_frames(out, p2, env.delay_bits);
-            v = find(~isnan(ber_f));
-            F.iq   = [F.iq, reshape(cellfun(@single, iq_f(v), 'UniformOutput', false), 1, [])];
-            F.ber  = [F.ber, ber_f(v)];
-            F.rssi = [F.rssi, rssi_f(v)];
-            F.plr  = [F.plr, plr_f(v)];
-            F.sinr = [F.sinr, sinr_f(v)];
-            F.env_corr = [F.env_corr, ec_f(v)];
-            F.iot = [F.iot, iot_f(v)];
-            F.run = [F.run, r * ones(1, numel(v))];
+            Fr = extract_closed_loop_frames(sim(env.modelName), p2, env.delay_bits);
+            disk_guard;
+            v = find(~isnan(Fr.ber));
+            F.iq   = [F.iq, reshape(cellfun(@single, Fr.iq(v), 'UniformOutput', false), 1, [])];
+            F.ber  = [F.ber, Fr.ber(v)];
+            F.feat = [F.feat; cell2mat(arrayfun(@(i) link_features(Fr, i, env.temporal_window), v(:), 'UniformOutput', false))];
+            F.run  = [F.run, r * ones(1, numel(v))];
         end
         P{a} = F;
     end

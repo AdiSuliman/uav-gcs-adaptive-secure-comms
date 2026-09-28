@@ -19,7 +19,7 @@ defs = {
     };
 SC = struct([]);
 for i = 1:size(defs, 1)
-    scn = find(strcmp(M.PP.scen, defs{i, 3}), 1);
+    scn = M.avail(find(strcmp(M.PP.scen(M.avail), defs{i, 3}), 1));
     s = find(M.PP.ebno == defs{i, 4}, 1);
     r = 1; th = NaN;
     if ~isnan(defs{i, 5})

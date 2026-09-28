@@ -128,7 +128,7 @@ function N = load_norm()
 cache = 'data/gui_norm_stats.mat';
 if ~isfile(cache) || (isfile('data/splits.mat') && dir(cache).datenum < dir('data/splits.mat').datenum)
     S = load('data/splits.mat', 'splits');
-    feat_mean = S.splits.norm.feat_mean; feat_std = S.splits.norm.feat_std; %#ok<NASGU>
+    feat_mean = S.splits.norm.feat_mean; feat_std = S.splits.norm.feat_std;
     save(cache, 'feat_mean', 'feat_std');
 end
 L = load(cache, 'feat_mean', 'feat_std');
