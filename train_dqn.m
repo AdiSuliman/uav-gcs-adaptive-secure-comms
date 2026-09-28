@@ -303,7 +303,7 @@ if isempty(CT), return; end
 nS = numel(PP.ebno); NE = H.NE; ic = Kw.clean;
 [ss, rr] = ndgrid(1:nS, 1:CT.n_geom); ss = ss(:)'; rr = rr(:)';
 n = numel(ss); nb = ceil(n / NE); pad = nb * NE - n;
-ss = [ss, ss(1:pad)]; rr = [rr, rr(1:pad)];
+k_ = mod(0:n + pad - 1, n) + 1; ss = ss(k_); rr = rr(k_);                     % cyclic padding of the last batch
 sw = [];
 for b = 1:nb
     i = (b-1)*NE + (1:NE);

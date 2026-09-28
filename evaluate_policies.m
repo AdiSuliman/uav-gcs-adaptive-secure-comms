@@ -227,7 +227,7 @@ if isfile('data/clean_test_pools.mat')
     Kw = link_env('tables', PPw);
     [ss, rr] = ndgrid(1:nS, 1:n_geom); ss = ss(:)'; rr = rr(:)';
     n = numel(ss); nb = ceil(n / NE); pad = nb * NE - n;
-    ss = [ss, ss(1:pad)]; rr = [rr, rr(1:pad)];
+    k_ = mod(0:n + pad - 1, n) + 1; ss = ss(k_); rr = rr(k_);                 % cyclic padding of the last batch
     specs = cell(1, nb);
     for b = 1:nb
         i = (b-1)*NE + (1:NE);
@@ -321,7 +321,7 @@ function specs = episodes(cells, nS, nG, reps, follow, unk, NE, T, rs)
 [c, s, r] = ndgrid(cells, 1:nS, 1:nG);
 c = repmat(c(:)', 1, reps); s = repmat(s(:)', 1, reps); r = repmat(r(:)', 1, reps);
 n = numel(c); nb = ceil(n / NE); pad = nb * NE - n;
-c = [c, c(1:pad)]; s = [s, s(1:pad)]; r = [r, r(1:pad)];
+k_ = mod(0:n + pad - 1, n) + 1; c = c(k_); s = s(k_); r = r(k_);             % cyclic padding of the last batch
 specs = cell(1, nb);
 for b = 1:nb
     i = (b-1)*NE + (1:NE);

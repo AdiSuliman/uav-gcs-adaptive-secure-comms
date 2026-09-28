@@ -18,7 +18,7 @@
 % Output: results/kpi_dashboard.png
 
 close all; clc;
-fprintf('=== KPI dashboard (D46) ===\n\n');
+fprintf('=== KPI dashboard (D46, D59) ===\n\n');
 ld = @(f, varargin) load_if(f, varargin{:});
 Md = ld('results/eval_detector_metrics.mat', 'metrics');
 O  = ld('results/ood_detection.mat', 'R', 'SC');

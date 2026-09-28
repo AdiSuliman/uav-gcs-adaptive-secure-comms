@@ -36,7 +36,9 @@ C.w_mmse     = 2;           % adaptive combining (processing, pilots)
 C.w_switch   = 5;           % per configuration change or channel hop
 C.w_false    = 20;          % per change on a healthy link
 C.q_restored = 100;         % link restored (<= 2x clean)
-C.q_partial  = 60;          % best quality below restoration (log-linear to 0 at 10x the threshold or the unmitigated BER)
+C.q_partial  = 40;          % best quality below restoration (log-linear to 0 at 10x the threshold or the unmitigated BER);
+                            % below 100 minus the largest running cost (39.5), so a restoring configuration
+                            % always earns more than a non-restoring one in the same geometry
 
 % Threat severities of the frame pools (low, nominal, high); nominal = init_params
 C.sev_names = {'low', 'nominal', 'high'};

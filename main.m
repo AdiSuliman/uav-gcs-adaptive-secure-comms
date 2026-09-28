@@ -14,15 +14,17 @@
 % They execute top to bottom in dependency order. Launch headless from cmd or
 % Git Bash in the project folder:  matlab -batch "main"
 %
-% Runtimes (RTX 4070): A4v ~12 min, A5 ~12 min, A6 ~4 min, B2 ~4 min,
-% B4 ~25 min, OOD ~60 min, C1p ~90 min from scratch (extensions only simulate
-% the new scenarios, ~30 min), C2 ~80 min (2 alarms x 2 penalties x 3 gammas x 3 seeds), C2e ~5 min,
-% SURV ~90 min, LAT ~2 min, KPI and DASH < 1 min, C1c ~65 min per clean set, C1d < 1 min.
+% Runtimes (Ryzen 7 7700, RTX 4070 SUPER, 6 parallel workers; D59): A5 ~17 min, A6 ~7 min,
+% B1 ~1 min, B2 ~8 min, B3a ~16 min, B4 ~25 min, OOD ~70 min, C1p ~3-4 h, C1c ~40 min,
+% C2 ~3 h, C2e ~1 h, SURV ~1.5 h, SURV3 ~1 h, LAT ~2 min, KPI and DASH < 1 min.
+% The same stages run headless and logged with run_stage.m, e.g.
+%   matlab -batch "run_stage('C1p','C1c','C1d','C2','C2e')"
+% and on a reduced problem with run_stage('smoke', ...).
 %
 % DEPENDENCIES (what must exist before a stage can run):
-%   A5 needs A0 | A6 needs A5 | B1 needs A6 | B2 needs B1 | B3, B4, OOD need B2
-%   C1p needs B2 | C1c, C1d need C1p | C2 needs C1p (C1c val set and C1d for D52) | C2e needs C2 (and C1c for KPI 6) | LAT needs C2
-%   SURV needs A0 | KPI reads B3, B4, OOD, A4v, C2e, LAT, SURV | DASH needs KPI
+%   A5 needs A0 | A6 needs A5 | B1 needs A6 | B2 needs B1 | B3, B3a, B4, OOD need B2
+%   C1p needs B2 | C1c, C1d need C1p | C2 needs C1p, C1c (validation set), C1d | C2e needs C2 (and C1c for KPI 6)
+%   LAT needs C2 | SURV, SURV3 need A0 | KPI reads B3, B4, OOD, A4v, C2e, LAT, SURV | DASH needs KPI
 %
 % LOGGING: `diary` captures everything printed below into logs/run_*.txt,
 % surviving the close all/clc that each called script starts with.
@@ -74,15 +76,11 @@ fprintf('(This file will contain EVERYTHING printed below, even across clc calls
 
 warning('off', 'Simulink:cgxe:LeakedJITEngine');   % internal Simulink notice on repeated sim() of MATLAB Function blocks
 
-% ---- Decision-layer training (D46, D48-D50) ----
+% ---- Decision-layer training (D46, D48-D52, D59); defaults of train_dqn.m when absent ----
 CFG.dqn_seeds       = 3;                 % C2: training seeds per setting
-CFG.dqn_gammas      = [0.5];             % C2: discount factors, chosen on validation (0.5 selected in D50)
-CFG.confirm_grid    = [2 2];             % C2: alarm confirmation m-of-n (D48: no effect on DQN false alarms)
+CFG.dqn_gammas      = [0.5 0.9];         % C2: discount factors, chosen on validation
 CFG.alarm_modes     = {'class', 'class_drop'};  % C2: path_loss alarm with / without an Eb/N0 drop (D50, D52)
-CFG.fa_penalty_grid = [80];              % C2: false-switch penalty of the training reward (D49; 80 selected in D50)
-CFG.fa_val          = 0.02;              % C2: false-alarm episodes allowed on clean validation (D48)
-CFG.clean_test_geoms = 100;              % C1c: new clean test geometries per Eb/N0, one episode each (D51)
-CFG.clean_val_geoms  = 100;              % C1c: independent clean validation geometries per Eb/N0, alarm selection (D52)
+CFG.fa_penalty_grid = [20 80];           % C2: false-switch penalty of the training reward (D49)
 
 % ---- Phase A: link + threats + dataset ----
 
@@ -98,6 +96,7 @@ RUN.extract_spectrograms        = false;    % A6  : spectrograms + 9 link featur
 RUN.prepare_data                = false;    % B1  : split by sub-run 60/20/20 (~1min, D42)
 RUN.train_detector              = false;    % B2  : train CNN+scalar hybrid (~4min); a new detector invalidates the pools
 RUN.eval_detector               = true;    % B3  : test eval + confusion/accuracy-vs-SNR + bootstrap CIs (~2min, D35)
+RUN.compare_architectures       = false;   % B3a : hybrid vs spectrogram-only vs features-only (~16 min, D59)
 RUN.eval_unseen_snr             = false;   % B4  : detector at Eb/N0 never seen in training, 1,3,5,7,9 dB (~25min, D34)
 
 
@@ -110,7 +109,8 @@ RUN.evaluate_policies           = true;    % C2e : every policy on the test pool
 RUN.eval_ood_detection          = false;    % OOD : leave-one-threat-out unknown-threat detection, retrains the detector 8 times (D32, D42)
 
 % ---- Phase SURV: survivability boundary mapping (deliverable 8) ----
-RUN.map_survivability           = false;    % SURV: Map A/B per threat, severity, Eb/N0 and geometry (D30, D46)
+RUN.map_survivability           = false;    % SURV: Map A/B per threat, severity, Eb/N0 and geometry (D30, D46, D59)
+RUN.survivability_options       = false;    % SURV3: 2 vs 3 antennas vs relay path (D59)
 
 % ---- Phase KPI: latency and proposal KPIs (section 5) ----
 RUN.measure_latency             = false;    % LAT : decision latency per cycle, median / p95 (D46)
@@ -190,6 +190,10 @@ if RUN.eval_detector
     fprintf('  [B3] Evaluating on test set...\n');
     eval_detector;
 end
+if RUN.compare_architectures
+    fprintf('  [B3a] Detector architectures on the same splits...\n');
+    compare_architectures;
+end
 if RUN.eval_unseen_snr
     fprintf('  [B4] Detector generalization to unseen Eb/N0...\n');
     eval_unseen_snr;
@@ -249,6 +253,10 @@ fprintf('> PHASE SURV: Survivability Boundary Mapping (proposal deliverable 8)\n
 if RUN.map_survivability
     fprintf('  [SURV] Map A (no goodput loss) + Map B (any action), two geometries + gap analysis...\n');
     map_survivability_boundary;
+end
+if RUN.survivability_options
+    fprintf('  [SURV3] Survivability with 3 antennas and with a relay path...\n');
+    experiment_survivability_options;
 end
 
 fprintf('  [SURV] Pipeline status:\n');
