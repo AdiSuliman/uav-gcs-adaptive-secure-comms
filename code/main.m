@@ -22,7 +22,7 @@
 % and on a reduced problem with run_stage('smoke', ...).
 %
 % DEPENDENCIES (what must exist before a stage can run):
-%   A5 needs A0 | A6 needs A5 | B1 needs A6 | B2 needs B1 | B3, B3a, B4, OOD need B2
+%   A5 needs A0 | A6 needs A5 | B1 needs A6 | B2 needs B1 | B3, B3a, B4, OOD need B2 | B4s needs OOD
 %   C1p needs OOD (it selects the production unknown-threat score, D60) | C1c, C1d need C1p | C2 needs C1p, C1c (validation set), C1d | C2e needs C2 (and C1c for KPI 6)
 %   LAT needs C2 | SURV, SURV3 need A0 | KPI reads B3, B4, OOD, A4v, C2e, LAT, SURV | DASH needs KPI
 %
@@ -101,6 +101,7 @@ RUN.eval_detector               = false;    % B3  : test eval + confusion/accura
 RUN.compare_architectures       = false;    % B3a : hybrid vs spectrogram-only vs features-only (~16 min, D59)
 RUN.eval_unseen_snr             = false;    % B4  : detector at Eb/N0 never seen in training, 1,3,5,7,9 dB (~25 min, D34)
 RUN.eval_ood_detection          = false;    % OOD : leave-one-threat-out, retrains the detector 8 times; selects the production unknown-threat score (~70 min, D32, D60)
+RUN.eval_unseen_severity        = false;    % B4s : detector at severities never seen in training, between and above the levels (~10 min)
 
 
 % ---- Phase C: decision layer ----
@@ -205,6 +206,10 @@ if RUN.eval_ood_detection
     fprintf('  [OOD] Leave-one-threat-out unknown-threat detection; selects the production score (D60)...\n');
     eval_ood_detection;
     clear S sp tr va te_id te_ood net                  % spectrogram splits held by the script
+end
+if RUN.eval_unseen_severity
+    fprintf('  [B4s] Detector at unseen threat severities...\n');
+    eval_unseen_severity;
 end
 
 fprintf('  [B] Pipeline status:\n');

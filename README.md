@@ -60,7 +60,7 @@ A closed-loop simulation of the command uplink from a ground control station (GC
 1. MATLAB R2026a with Simulink, Communications, DSP System, Deep Learning and Statistics toolboxes; Parallel Computing for the frame pools.
 2. Open MATLAB in the repository folder: `startup.m` puts `code/` on the path.
 3. Full pipeline: `matlab -batch "main"` from the repository folder. The flags at the top of `code/main.m` choose the stages.
-4. Single stages: `matlab -batch "run_stage('B2','B3')"`; `run_stage('smoke', ...)` runs a reduced version to check the chain. A full run takes about 16 h.
+4. Single stages: `matlab -batch "run_stage('B2','B3')"`; `run_stage('smoke', ...)` runs a reduced version to check the chain. A full run takes about 20 h.
 5. Unit tests: `runtests('code/tests')`.
 6. Operator console: `demo_gui` (after the pipeline has produced `data/` and `results/`).
 7. 3D view (Simulink 3D Animation and UAV Toolbox): `v3d_live` for the live console, `v3d_videos` for the defense videos.
@@ -71,10 +71,10 @@ A closed-loop simulation of the command uplink from a ground control station (GC
 | A4v `validate_phy` | BER vs theory: AWGN, Rician, MRC 2 and 3 antennas, correlated branches; MMSE under jamming; seeds | ~12 min |
 | A5–A6 | 43,200 frames from 2,160 seeded sub-runs; spectrograms and 14 link features | ~25 min |
 | B1–B3a | split by sub-run, detector training, test evaluation with bootstrap intervals; architecture comparison | ~30 min |
-| B4, OOD | detector at unseen Eb/N0; leave-one-threat-out unknown-threat study, score selection, new-threat learning | ~6 + 90 min |
+| B4, OOD, B4s | detector at unseen Eb/N0; leave-one-threat-out unknown-threat study, score selection, new-threat learning; detector at unseen severities | ~6 + 90 + 10 min |
 | C1p | frame pools: every scenario × configuration × Eb/N0 × geometry through the real link | ~3.5 h |
 | C1c, C1d | clean link on 100 new geometries per Eb/N0 (validation and test sets, KPI 6); path-loss drop threshold | ~1.3 h |
-| C2, C2e | DQN training (monitor × false-switch penalty × 3 discount factors × 3 seeds); every policy on the test pools | ~5 h |
+| C2, C2e | DQN training (2 monitors × 2 false-switch penalties × 2 discount factors × 3 seeds, and 2 reward-weight retrains); every policy on the test pools | ~7 h |
 | C2g | combined threats never trained on: DQN retrained without each combination | ~2.5 h |
 | SURV, SURV3 | survivability map; 2 vs 3 antennas vs relay path | ~2 h |
 | LAT, KPI, DASH | latency per decision cycle, proposal KPIs, dashboard | ~5 min |
