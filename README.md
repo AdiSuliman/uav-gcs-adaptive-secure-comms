@@ -100,7 +100,7 @@ A closed-loop simulation of the command uplink from a ground control station (GC
 
 ### Detection (D42, D43, D59)
 - Input: 128×128 spectrogram of the antenna-1 frame and the 14 link features.
-- Network: CNN (32-64-128 filters, global pooling) and a feature branch, merged into a 64-unit embedding, softmax over 9 classes; cosine learning rate, L2, SpecAugment. `compare_architectures.m` compares it with a spectrogram-only and a features-only network on the same splits.
+- Network: CNN (32-64-128 filters, global pooling) and a feature branch, merged into a 64-unit embedding, softmax over 9 classes; cosine learning rate, L2, time/frequency masking of the spectrogram. `compare_architectures.m` compares it with a spectrogram-only network, a features-only network, a random forest and a kernel SVM on the same splits.
 - Unknown threats: candidate scores are the Mahalanobis distance of the last hidden layer (Lee et al.), Lee et al.'s feature ensemble over five layers (weights fitted on known validation frames against their FGSM versions), the Mahalanobis distance of the link features, and the lower of two standardized scores (last layer with the link features, or with an isolation forest). Leave-one-threat-out (the detector retrained without each threat in turn) chooses the production score; the reported value is the nested estimate, where each held-out threat is scored with the candidate chosen on the other seven. Threshold keeping 95% of known validation frames.
 - Learning a new threat (Lee et al., Algorithm 2): a flagged and labelled threat becomes a new class from 100 of its frames (class mean and tied covariance update in the last hidden layer), without retraining the network.
 
