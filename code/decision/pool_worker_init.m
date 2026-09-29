@@ -8,8 +8,8 @@ if ~isfolder(d), mkdir(d); end
 addpath(fullfile(repo, 'code'));
 setup_paths;
 cd(d);
-disk_guard('init');
 Simulink.fileGenControl('set', 'CacheFolder', d, 'CodeGenFolder', d, 'createDir', true);
 warning('off', 'Simulink:cgxe:LeakedJITEngine');
 load_system('simulink');
+disk_guard('init');
 end

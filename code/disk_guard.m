@@ -12,6 +12,7 @@ function disk_guard(varargin)
 MIN_FREE_GB = 200;
 MAX_DMR_GB  = 2;
 if nargin && strcmp(varargin{1}, 'init')
+    load_system('simulink');                                % the SDI calls need Simulink loaded (parallel workers)
     Simulink.sdi.setAutoArchiveMode(false);
     Simulink.sdi.setArchiveRunLimit(0);
 end

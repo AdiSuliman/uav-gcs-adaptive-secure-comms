@@ -795,3 +795,14 @@ Stages A0–B4 (dataset 43,200 frames, 13 link features), OOD, C1p (4 combinatio
 - **Code:** unknown-threat candidates and nested selection inside `eval_ood_detection.m`; Algorithm 2 in the same stage; all 8 combinations in training; C2g; monitor grid 2/2, 3/3; 20 ms decision period; DQN evaluated as matrix products; `disk_guard.m`; code moved into `code/` with `startup.m`; survivability levels to 28 dB.
 - **Checks (2026-09-29):** `params.mat` and the threat model rebuilt from the code (sinks Rx_Z, Rx_H, Rx_R present); unit tests 9/9 pass.
 - **Next:** smoke run of the whole chain, then the full run from A0 (about 16 h).
+
+### v4 final run, phases A and B (2026-09-29)
+One pass from A0 to OOD, 2 h 26 min, no error; then B4s (10 min).
+- **A4v:** 5/5 theory gaps within 0.3 dB (AWGN +0.05, Rician −0.21, ...), seeds reproducible.
+- **A5–A6:** 43,200 frames, 2,160 seeded sub-runs, 14 link features (with `branch_dip`).
+- **B2–B3 (test split, 10,800 frames):** accuracy 97.02%, macro-F1 97.02% [96.24, 97.60]; every class F1 ≥ 93.85% from 0 dB (jamming lowest; none 94.7%, antenna_fault 99.0%); macro-F1 per Eb/N0 95.1–97.9%; action-equivalent accuracy 97.56%.
+- **B3a:** hybrid 97.11% macro-F1, spectrogram only 74.54%, link features only 85.31% (same splits, schedule, seed).
+- **B4:** unseen Eb/N0 (1, 3, 5, 7, 9 dB) 97.9% vs 97.7% on the training grid; largest gap to the interpolated curve 1.3 points.
+- **OOD (leave-one-threat-out, 55 min):** mean AUROC MSP 0.661, energy 0.656, isolation forest 0.685, last layer 0.871, Lee ensemble 0.782, link-feature Mahalanobis 0.696, last layer or link features 0.898, last layer or isolation forest 0.881. Production score: last layer or link features (FPR95 0.40; averaged over 5 frames 0.920). **Nested estimate (KPI 2): 0.859** (per threat 0.888 0.912 0.641 0.884 0.843 0.882 0.900 0.923): with reactive jamming held out, the choice made on the other seven is the last layer alone, which scores 0.641 on it; with the link features it would be 0.950 (env_corr separates it).
+- **New-threat learning (Algorithm 2, 100 frames):** recall of the new threat 84.9% on average (reactive jamming 47.0%, read as jamming: same countermeasure), known-class accuracy 96.6% → 95.5%.
+- **B4s (unseen severities):** between the training levels 99.0% correct, 99.6% same countermeasure; above the range (22/28 dB JSR, path loss 26 dB) 95.5% correct, 100% same countermeasure, 68.7% flagged unknown (they are outside the training distribution; the flag adds to the class, it does not replace it). Decision by the rule fixed before the run: the training levels stay.
