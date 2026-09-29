@@ -1,45 +1,46 @@
-=== PROPOSAL KPI SUMMARY (section 5) ===
-Generated: 27-Sep-2026 16:42:03
+=== PROPOSAL KPI SUMMARY (updated proposal) ===
+Generated: 29-Sep-2026 15:06:26 | commit bd59efa + local changes
 
-KPI 1  Detection vs SNR             [MET]    macro-F1 96.28% from 0 dB   (target: >= 90% above a threshold)
-        accuracy 96.28%, macro-F1 96.28% [94.88, 97.37] (bootstrap over sub-runs)
-        macro-F1 per Eb/N0: 0 dB 91.1% | 2 dB 96.6% | 4 dB 98.1% | 6 dB 97.3% | 8 dB 97.7% | 10 dB 96.8%
-        unseen Eb/N0 (1,3,5,7,9 dB): accuracy 97.69% vs 97.46% seen, largest gap 1.44 points
+KPI 1  Detection vs SNR             [MET]    macro-F1 97.02%, lowest class 93.85%, from 0 dB   (target: macro-F1 and every class >= 90% above a threshold)
+        accuracy 97.02%, macro-F1 97.02% [96.24, 97.60] (bootstrap over sub-runs)
+        class F1 above the threshold: none 94.7%, jamming 93.9%, noise_burst 99.9%, reactive_jamming 97.7%, path_loss 94.9%, spoofing 99.1%, antenna_fault 99.0%, benign_interference 94.4%, sweeping_jammer 99.6%
+        macro-F1 per Eb/N0: 0 dB 95.1% | 2 dB 96.1% | 4 dB 97.6% | 6 dB 97.9% | 8 dB 97.5% | 10 dB 97.9%
+        unseen Eb/N0 (1,3,5,7,9 dB): accuracy 97.93% vs 97.69% seen, largest gap 1.33 points
+        architecture comparison: results/architecture_comparison.txt
 
-KPI 2  Unknown threats (LOTO)       [MET]    mean AUROC 0.887   (target: >= 0.8)
-        Mahalanobis AUROC per held-out threat: jamming 0.973, noise_burst 0.948, reactive_jamming 0.880, path_loss 0.868, spoofing 0.857, antenna_fault 0.827, benign_interference 0.807, sweeping_jammer 0.937
-        mean FPR at 95% known kept: 0.42 | other scores (mean AUROC): msp 0.687, energy 0.596, maha 0.887, iforest 0.601, fused 0.855
+KPI 2  Unknown threats (LOTO)       [MET]    mean AUROC 0.859 (nested)   (target: >= 0.8)
+        production score last_or_raw (selected by leave-one-threat-out, D60): mean AUROC 0.898, FPR at 95% known kept 0.40
+        nested estimate per held-out threat: jamming 0.888 (last_or_raw), noise_burst 0.912 (last_or_raw), reactive_jamming 0.641 (last), path_loss 0.884 (last_or_raw), spoofing 0.843 (last_or_raw), antenna_fault 0.882 (last_or_raw), benign_interference 0.900 (last_or_raw), sweeping_jammer 0.923 (last_or_raw)
+        every score (mean AUROC): msp 0.661, energy 0.656, iforest 0.685, last 0.871, ensemble 0.782, raw 0.696, last_or_raw 0.898, last_or_if 0.881
+        production score averaged over 2 / 5 frames of a run: 0.907 / 0.920
 
 KPI 3  BER vs theory                [MET]    5/5 within 0.3 dB (gaps +0.05, -0.21, +0.05, +0.13, +0.17 dB)   (target: <= 0.3 dB)
         seeded reproducibility: PASS
 
-KPI 4  Restoration (<= 2x clean)    [MET]    86.6% of cycles on recoverable attacks   (target: >= 80% of cycles at <= 2x clean BER)
-        single threats, test pools: DQN restored 86.6% of cycles after onset on 552 recoverable episodes (oracle 100.0%)
-        packet loss back to <= clean + 0.05 on the same episodes: DQN 93.7% of cycles (oracle 99.1%)
-        all single-threat episodes: DQN 83.0%, rule + escalation 65.6%, table 77.1%, oracle 95.8%
-        survivability map (threat x severity x Eb/N0 x geometry): Map A recoverable 86% / marginal 3% / non-recoverable 10% | Map B recoverable 94% / marginal 1% / non-recoverable 5%
+KPI 4  Restoration (<= 2x clean)    [NOT MET] lowest threat antenna_fault 87.2%, 12 of 16 threats >= 90%   (target: >= 90% of recoverable episodes, every threat)
+        recovered among recoverable, per threat (DQN): jamming 88.0%, noise_burst 96.0%, reactive_jamming 87.8%, path_loss 89.7%, spoofing 95.5%, antenna_fault 87.2%, benign_interference 94.4%, sweeping_jammer 100.0%, jamming+path_loss 93.8%, noise_burst+antenna_fault 93.5%, sweeping_jammer+path_loss 95.8%, spoofing+noise_burst 97.8%, reactive_jamming+path_loss 93.8%, jamming+antenna_fault 96.9%, spoofing+sweeping_jammer 100.0%, benign_interference+noise_burst 100.0%
+        all threat episodes pooled: DQN 92.7% [91.0, 94.3] of 3844 recoverable episodes; recoverable share jamming 100%, noise_burst 96%, reactive_jamming 100%, path_loss 88%, spoofing 100%, antenna_fault 100%, benign_interference 100%, sweeping_jammer 100%, jamming+path_loss 100%, noise_burst+antenna_fault 65%, sweeping_jammer+path_loss 100%, spoofing+noise_burst 96%, reactive_jamming+path_loss 100%, jamming+antenna_fault 100%, spoofing+sweeping_jammer 100%, benign_interference+noise_burst 94%
+        per severity low / nominal / high, lowest threat: 86.5% / 86.5% / 83.3%
+        survivability map (threat x severity x Eb/N0 x geometry): Map A recoverable 82% / marginal 5% / non-recoverable 12% | Map B recoverable 93% / marginal 1% / non-recoverable 5%
+        survivability options (3 antennas, relay path): results/survivability_options.txt
+        combined threats never trained on (leave-one-combination-out, D61): DQN 82.2% of the recoverable episodes (trained on them: 95.8%, rule + escalation 38.2%)
 
-KPI 5  DQN vs baselines             [MET]    +0.110 return vs rule + escalation   (target: better than rule (paired 95% CI > 0))
-        threat sets pooled, paired return difference DQN minus: rule + escalation +0.110 [+0.101, +0.120] | table +0.036 [+0.031, +0.042] | best fixed +0.018 [+0.009, +0.028]
-        recovered episodes 71.2%, median T_rec 2 cycles | restored 64.8% | goodput 0.790 | oracle return 0.848
-        follower  DQN 0.851 | rule+esc 0.830 | table 0.773 | fixed 0.794 | oracle 0.964 (mean return)
-        combined  DQN 0.477 | rule+esc 0.268 | table 0.446 | fixed 0.535 | oracle 0.638 (mean return)
-        unknown   DQN 0.742 | rule+esc 0.652 | table 0.690 | fixed 0.763 | oracle 0.922 (mean return)
-        clean     DQN 0.978 | rule+esc 0.972 | table 0.968 | fixed 0.872 | oracle 0.978 (mean return)
-        selected gamma 0.50, training false-switch penalty 80, alarm confirmation 2-of-2, seed 42, validation gate FAIL
+KPI 5  DQN vs baselines             [MET]    +13.6 points recovery vs rule + escalation [+11.7, +15.3]   (target: better than rule (paired 95% bootstrap > 0))
+        recovered among recoverable, threat sets pooled: no response 6.8% | random 73.2% | fixed: channel_switch+spatial_diversity+power_control 82.3% | rule + escalation 79.2% | table (train pools) 79.3% | DQN gamma=0.50 (selected) 92.7% | oracle (one-step) 95.6%
+        DQN: median T_rec 2 cycles (40 ms at the 20 ms decision period) | cycles restored 83.3% | goodput 1.371
+        follower  recovered: DQN 82.6% | rule+esc 94.9% | table 80.7% | fixed 86.9% | oracle 96.1%
+        combined  recovered: DQN 96.5% | rule+esc 38.4% | table 39.8% | fixed 52.8% | oracle 94.8%
+        comb      recovered: DQN 55.2% | rule+esc 85.1% | table 14.9% | fixed 78.5% | oracle 94.4%
+        selected: alarm class_drop 2/2, gamma 0.50, training false-switch penalty 80, seed 43, validation gate PASS
 
-KPI 6  False alarms (clean link)    [MET]    9/600 episodes, upper bound 2.60%   (target: <= 5% (one-sided 95%), >= 600 episodes)
-        Eb/N0 >= 0 dB, 30 cycles per episode; per-cycle rate 0.0722% | rule + escalation 152/600, upper 28.42%
-        measured on 100 new clean geometries per Eb/N0, one episode per geometry (independent trials); test pools with 4 geometries per Eb/N0: 0/768, upper 0.39%
-        DQN false-alarm episodes per Eb/N0: 0 dB 5/100, 2 dB 2/100, 4 dB 1/100, 6 dB 1/100, 8 dB 0/100, 10 dB 0/100 | class at the first change: path_loss 2 (degraded 0), spoofing 1 (degraded 1), antenna_fault 6 (degraded 0)
+KPI 6  False alarms (clean link)    [MET]    15/600 episodes, upper bound 3.82%   (target: <= 5% (one-sided 95%), >= 600 episodes)
+        Eb/N0 >= 0 dB, one episode per independent geometry; per-cycle rate 0.1222% | rule + escalation 225/600, upper 40.88%
 
-KPI 7  Real time + speed            [MET]    median 5.30 ms, p95 24.32 ms   (target: reported; restored spread <= 10 points over 50-120 km/h)
-        decision latency per cycle (CPU): median 5.30 ms, p95 24.32 ms (DQN chain); rule chain 4.30 / 23.12 ms
-        components (median ms): spectrogram 1.40, features 0.04, detector GPU 5.11, detector CPU 2.64, DQN policy 1.15, rule policy 0.17
-        latency class (Oli & Mahalal 2025, detection systems: low < 10 ms, medium 10-100 ms): median low (< 10 ms), p95 medium (10-100 ms); measured on a desktop computer, not on UAV hardware
-        DQN restored cycles per speed band (50-68, 68-85, 85-102, 102-120 km/h): 78.4, 80.7, 86.5, 85.5 %
-        detector accuracy per speed band (50-60, 60-70, 70-80, 80-90, 90-100, 100-110, 110-120 km/h): 96.6, 96.0, 98.4, 95.6, 95.0, 95.6, 97.5 %
+KPI 7  Real time + speed            [MET]    median 2.96 ms, p95 4.23 ms   (target: median < 10 ms, p95 < 20 ms; spread <= 10 points over 50-120 km/h)
+        decision latency per cycle (GPU NVIDIA GeForce RTX 4070 SUPER): median 2.96 ms, p95 4.23 ms (DQN chain); rule chain 2.86 / 4.06 ms
+        components (median ms): spectrogram 1.06, features 0.03, detector GPU 1.50, detector CPU 2.16, DQN policy 0.36, rule policy 0.26
+        latency class (Oli & Mahalal 2025, detection systems: low < 10 ms, medium 10-100 ms): median low (< 10 ms), p95 low (< 10 ms); measured on a desktop computer, not on UAV hardware
+        DQN recovered per speed band (50-68, 68-85, 85-102, 102-120 km/h): 96.9, 96.1, 93.3, 96.4 %
 
-KPI 8  End-to-end closed loop       [MET]    8 single threats restored >= 50% of cycles   (target: >= 1 recoverable threat)
-        restored per threat (DQN): jamming 87%, noise_burst 62%, reactive_jamming 89%, path_loss 79%, spoofing 80%, antenna_fault 89%, benign_interference 80%, sweeping_jammer 92%, jamming+path_loss 7%, noise_burst+antenna_fault 50%, sweeping_jammer+path_loss 1%, spoofing+noise_burst 30%
+KPI 8  End-to-end closed loop       [MET]    16 threats recovered on >= 50% of recoverable episodes   (target: >= 1 recoverable threat)
 
