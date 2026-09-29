@@ -78,7 +78,7 @@ end
 end
 
 function [Xa, Fa] = fgsm(net, X, F, Y, ei, ef)
-% Fast gradient sign method (Goodfellow et al.) on both inputs of the detector,
+% Fast gradient sign method (FGSM, as in Lee et al.) on both inputs of the detector,
 % in batches; the image stays in [0, 1].
 useGPU = canUseGPU;
 nC = numel(categories(Y));

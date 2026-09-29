@@ -2,7 +2,7 @@ function ok = validate_phy()
 %% VALIDATE_PHY - Link physics against theory, multi-antenna UAV receiver (D41)
 % Runs the threat model (UAV_GCS_Threat_Link) and compares the measured BER with
 % closed-form results:
-%   V1  AWGN (K = 60 dB, 1 antenna)          vs berawgn (Proakis)
+%   V1  AWGN (K = 60 dB, 1 antenna)          vs berawgn (closed-form QPSK in AWGN)
 %   V2  Rician K = 10 dB, 1 antenna          vs MGF integral (Alouini & Goldsmith, 1999)
 %   V3  Rician K = 10 dB, MRC 2 antennas     vs MGF integral, independent branches
 %   V4  Rician K = 10 dB, MRC 3 antennas     vs MGF integral, independent branches

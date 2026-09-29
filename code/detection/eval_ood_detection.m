@@ -5,8 +5,7 @@
 % re-normalized on the known classes only, and the unknown-threat models are
 % refitted (fit_ood_model.m). Class k then plays the unknown threat. Scores
 % (higher = more like the known classes):
-%   msp, energy   maximum softmax probability (Hendrycks & Gimpel, ICLR 2017),
-%                 logsumexp of the logits (Liu et al., NeurIPS 2020): baselines
+%   msp, energy   maximum softmax probability and logsumexp of the logits: baselines
 %   iforest       isolation forest on the link features alone (Liu, Ting & Zhou)
 %   candidates of the production score (ood_score_set.m): last, ensemble, raw,
 %                 last_or_raw, last_or_if

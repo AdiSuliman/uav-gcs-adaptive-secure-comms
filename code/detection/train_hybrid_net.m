@@ -11,7 +11,7 @@ function [net, info] = train_hybrid_net(tr, va, classes, opts)
 %   scoring) -> dropout 0.3 -> FC nClasses ('fc_out') -> softmax.
 %   Training: Adam, cosine learning-rate decay to lr/20, L2 weight decay,
 %   time/frequency masking of the spectrogram (one band of each, 50% of the
-%   samples; Park et al., SpecAugment, 2019); best epoch by validation accuracy.
+%   samples); best epoch by validation accuracy.
 
 if nargin < 4, opts = struct(); end
 o = struct('epochs', 30, 'batch', 64, 'lr', 1e-3, 'l2', 1e-4, 'augment', true, 'verbose', true);

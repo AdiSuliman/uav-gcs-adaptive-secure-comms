@@ -3,8 +3,8 @@ function [probs, logits, msp, energy] = cnn_scores(net, X_spec, X_feat)
 %   X_spec: 128x128x1xN spectrogram images, X_feat: nFeat x N normalized features.
 %   logits  pre-softmax outputs of layer 'fc_out' (train_detector.m)
 %   probs   softmax(logits), identical to the network's own softmax output
-%   msp     maximum softmax probability (Hendrycks & Gimpel, ICLR 2017)
-%   energy  logsumexp of the logits (Liu et al., NeurIPS 2020)
+%   msp     maximum softmax probability
+%   energy  logsumexp of the logits
 %   For msp and energy, higher means more like the known classes.
 persistent useGPU
 if isempty(useGPU), useGPU = canUseGPU; end

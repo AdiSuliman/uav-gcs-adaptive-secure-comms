@@ -1,4 +1,4 @@
-%% DIAG_SPEED - Detection errors and clean-link false alarms vs UAV speed (D52 diagnostic)
+%% DIAG_SPEED - Detection errors and clean-link false alarms vs UAV speed
 % Tests the fade-duration hypothesis: a Rician fade lasts longer at low speed
 % (average 4 dB fade ~4.7 frames at 50 km/h, ~1.9 frames at 120 km/h), so if
 % short decisions mistake fades for attenuation, errors should grow as speed

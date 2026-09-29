@@ -1,8 +1,7 @@
-%% DIAG_OOD_SCORES - Which unknown-threat score, leave-one-threat-out (D60 diagnostic)
-% The v4 feature ensemble of Lee et al. (five layers, logistic weights fitted on
-% known validation frames vs their FGSM versions) scored below the last layer
-% alone in the D59 leave-one-threat-out run. This script tests, on the same
-% folds, the parts of Lee et al.'s method and the choices around it:
+%% DIAG_OOD_SCORES - Which unknown-threat score, leave-one-threat-out
+% Tests, on the leave-one-threat-out folds, the parts of Lee et al.'s method (a
+% feature ensemble over five layers with logistic weights fitted on known
+% validation frames vs their FGSM versions) and the choices around it:
 %   1. every layer alone, the ensemble and the last layer
 %   2. input pre-processing (x - eps * sign of the gradient of the layer's
 %      Mahalanobis distance, per layer), eps from Lee et al.'s list chosen on

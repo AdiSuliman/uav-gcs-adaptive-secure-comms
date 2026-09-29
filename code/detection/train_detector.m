@@ -36,7 +36,7 @@ xlabel('Epoch'); ylabel('Cross-entropy'); title('Training loss');
 subplot(1, 2, 2); plot(100*info.valAcc, 'r-', 'LineWidth', 1.5); hold on; grid on;
 xline(info.bestEpoch, '--k', sprintf('best (ep %d)', info.bestEpoch));
 xlabel('Epoch'); ylabel('Accuracy (%)'); title(sprintf('Validation accuracy (best %.1f%%)', 100*info.bestValAcc));
-sgtitle(sprintf('B2: Hybrid detector (%d link features, SpecAugment, cosine LR)', size(sp.train.feats, 2)));
+sgtitle(sprintf('B2: Hybrid detector (%d link features, time/frequency masking, cosine LR)', size(sp.train.feats, 2)));
 if ~exist('results', 'dir'), mkdir('results'); end
 saveas(fig, 'results/training_curves.png'); close(fig);
 fprintf('=== B2 Complete ===\n');

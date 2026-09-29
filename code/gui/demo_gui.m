@@ -1,5 +1,5 @@
 function demo_gui
-%DEMO_GUI - UAV-GCS Adaptive Secure Comms: operator console (v4, D46).
+%DEMO_GUI - UAV-GCS Adaptive Secure Comms: operator console.
 %
 % One application, five tabs:
 %   LIVE OPERATIONS  - run the REAL closed loop (Simulink -> CNN -> decision layer
@@ -1286,7 +1286,7 @@ function cf = confirmOf(env)
 end
 
 function r = survRef(surv, k)
-    % Clean-link reference of the survivability map (floored since D46).
+    % Clean-link reference of the survivability map, floored at the smallest BER the runs resolve.
     if isfield(surv, 'ber_ref'), r = surv.ber_ref(k); else, r = max(surv.ber_clean(k), 1e-4); end
 end
 
@@ -1797,11 +1797,8 @@ function recordFrame(fig)
 end
 
 function smartPause(fig, secs, tSeq)
-    % Video frame capture no longer happens here — getframe(fig) on a
-    % uifigure is expensive per call regardless of frequency (it round-trips
-    % through the CEF-based renderer), so it is captured once per real state
-    % transition inside drawLinkDiagram instead. This loop only drives the
-    % on-screen timer.
+    % Drives the on-screen timer only. Video frames are captured once per state
+    % change in drawLinkDiagram, because getframe on a uifigure is expensive.
     n = max(1, round(secs * 10));
     for k = 1:n
         updateTimer(fig, tSeq);
