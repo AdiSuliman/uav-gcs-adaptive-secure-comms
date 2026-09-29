@@ -1,0 +1,40 @@
+=== CLEAN-LINK FALSE ALARMS AND CONFIRMATION, VALIDATION SPLIT (class_drop, drop 3.0 dB) ===
+
+Part 1a. Monitor only, 600 clean validation episodes (30 cycles each):
+  raw alarm in 7.7% of the cycles: path_loss class 0.7%, other hostile class 0.1%, degradation alone 6.9%
+  rule       episodes confirmed | first confirmed alarm raised by: path_loss class / other class / degradation alone
+  3/3     27.3% (164 of 600) |  15 /   2 / 147
+  4/4     13.5% ( 81 of 600) |  11 /   1 /  69
+  5/5      4.3% ( 26 of 600) |   9 /   1 /  16
+  Eb/N0 drop in the path_loss-class alarm cycles: median 4.3 dB, 90th percentile 7.5 dB
+
+Part 1b. Monitor only, 768 threat episodes of the validation split (no follower):
+  threat                                   3/3: confirmed, median delay | 4/4: confirmed, median delay | 5/5: confirmed, median delay
+  all threats                               98.7%, 3.0 cycles          |  97.7%, 4.0 cycles          |  96.4%, 5.0 cycles
+  jamming                                  100.0%, 3.0 cycles          | 100.0%, 4.0 cycles          | 100.0%, 5.0 cycles
+  noise_burst                              100.0%, 3.0 cycles          | 100.0%, 4.0 cycles          | 100.0%, 5.0 cycles
+  reactive_jamming                         100.0%, 3.0 cycles          | 100.0%, 4.0 cycles          | 100.0%, 5.0 cycles
+  path_loss                                 95.8%, 4.0 cycles          |  91.7%, 5.0 cycles          |  88.9%, 6.0 cycles
+  spoofing                                 100.0%, 3.0 cycles          | 100.0%, 4.0 cycles          | 100.0%, 5.0 cycles
+  antenna_fault                            100.0%, 3.0 cycles          |  98.6%, 4.0 cycles          |  98.6%, 5.0 cycles
+  benign_interference                       90.3%, 4.0 cycles          |  84.7%, 6.0 cycles          |  75.0%, 6.5 cycles
+  sweeping_jammer                          100.0%, 3.0 cycles          | 100.0%, 4.0 cycles          | 100.0%, 5.0 cycles
+  jamming+path_loss                        100.0%, 3.0 cycles          | 100.0%, 4.0 cycles          | 100.0%, 5.0 cycles
+  noise_burst+antenna_fault                100.0%, 3.0 cycles          | 100.0%, 4.0 cycles          | 100.0%, 5.0 cycles
+  sweeping_jammer+path_loss                100.0%, 3.0 cycles          | 100.0%, 4.0 cycles          |  95.8%, 5.0 cycles
+  spoofing+noise_burst                     100.0%, 3.0 cycles          | 100.0%, 4.0 cycles          | 100.0%, 5.0 cycles
+  reactive_jamming+path_loss               100.0%, 4.0 cycles          | 100.0%, 5.0 cycles          | 100.0%, 6.0 cycles
+  jamming+antenna_fault                    100.0%, 3.0 cycles          | 100.0%, 4.0 cycles          | 100.0%, 5.0 cycles
+  spoofing+sweeping_jammer                 100.0%, 3.0 cycles          | 100.0%, 4.0 cycles          | 100.0%, 5.0 cycles
+  benign_interference+noise_burst          100.0%, 3.0 cycles          | 100.0%, 4.0 cycles          | 100.0%, 5.0 cycles
+
+Part 2. DQN + escalation, agents as trained; validation episodes of train_dqn.m, 600 clean geometries:
+  agent                              rule  recovered                 weakest threat       FA | first false switch: path_loss class / other class / degradation alone
+  data/trained_dqn_D64.mat           3/3       94.4%              path_loss  87.9%   15/600 |  12 /   0 /   3
+  data/trained_dqn_D64.mat           4/4       93.3%              path_loss  87.1%    8/600 |   6 /   1 /   1
+  data/trained_dqn_D64.mat           5/5       92.4%              path_loss  84.7%    4/600 |   3 /   1 /   0
+  archive/v4_D66_not_adopted/trained_dqn_D66.mat 3/3       97.3%              path_loss  91.1%   28/600 |  19 /   1 /   8
+  archive/v4_D66_not_adopted/trained_dqn_D66.mat 4/4       96.0%              path_loss  87.9%   11/600 |   8 /   0 /   3
+  archive/v4_D66_not_adopted/trained_dqn_D66.mat 5/5       95.0%              path_loss  84.7%    6/600 |   4 /   1 /   1
+
+False-alarm bound (one-sided 95%, <= 5%): at most 20 of 600.
