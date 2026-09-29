@@ -77,7 +77,7 @@ runs = arrayfun(@(sp) 100 * BLOCK(sp) + (1:NGEO(sp)), 1:3, 'UniformOutput', fals
 old = [];
 if isfile('data/policy_pools.mat')
     Lo = load('data/policy_pools.mat', 'PP');
-    if isequal(Lo.PP.runs(1:2), runs(1:2)) && ~isequal(Lo.PP.runs{3}, runs{3}) && isequal(Lo.PP.scen, scen) ...
+    if isequal(Lo.PP.runs(1:2), runs(1:2)) && ~isequal(Lo.PP.runs{3}, runs{3}) && isequal(Lo.PP.scen, {cells.threat}) ...
             && isequal(Lo.PP.ebno, EBNO) && isequal(Lo.PP.actions, ACTIONS) && isequaln(Lo.PP.level, [cells.level])
         old = Lo.PP.pools(:, :, :, 1:2);
         [cells.splits] = deal(3);
