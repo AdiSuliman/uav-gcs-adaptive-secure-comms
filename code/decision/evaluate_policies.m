@@ -263,9 +263,11 @@ end
 rep{end+1} = '';
 rep{end+1} = 'Configuration at the end of the episode, selected DQN (single set): most frequent two per threat';
 Rd = RES{1, iDQN};
+top_cfg = struct('threat', {}, 'action', {}, 'share', {});      % most frequent final configuration (threat_gallery.m)
 for ti = 1:numel(PP.singles) - 1
     cf = Rd.cfg_final(strcmp(PP.scen(Rd.scn), threats{ti}));
     [u, ~, j] = unique(cf); cnt = accumarray(j(:), 1); [cnt, o] = sort(cnt, 'descend'); u = u(o);
+    top_cfg(end+1) = struct('threat', threats{ti}, 'action', PP.actions{u(1)}, 'share', cnt(1) / numel(cf)); %#ok<SAGROW>
     txt = strjoin(arrayfun(@(i) sprintf('%s %.0f%%', PP.actions{u(i)}, 100 * cnt(i) / numel(cf)), ...
         1:min(2, numel(u)), 'UniformOutput', false), ', ');
     rep{end+1} = sprintf('  %-22s %s', threats{ti}, txt); %#ok<SAGROW>
@@ -280,7 +282,7 @@ KP = struct('per_threat', PT, 'per_threat_sev', PTsev, 'threats', {threats}, 're
     'far_diag_testpools', FD_t, 'far_geoms', n_geom, 'cls_list', {cls_list}, 'ebno_thr', ebno_thr, ...
     'selected_gamma', Q.seed_summary.selected_gamma, 'confirm', PP.confirm, 'alarm_mode', PP.alarm_mode);
 save('results/policy_evaluation.mat', 'RES', 'RW', 'POL', 'LBL', 'set_names', 'fixed_best', 'tab', 'iDQN', 'KP', ...
-    'iThreat', 'ALL');
+    'iThreat', 'ALL', 'top_cfg');
 
 %% 5. Figures
 key = {'none', 'fixed', 'rule_esc', 'table', POL{iDQN}, 'oracle'};
