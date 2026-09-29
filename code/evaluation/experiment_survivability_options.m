@@ -3,7 +3,7 @@
 % item 2), which null one interferer, and only when it arrives from another
 % direction than the GCS (D45, D46). Two extensions named in the proposal
 % literature are tested on the recoverability question, without changing the system:
-%   3 antennas     an N-element array nulls up to N-1 interferers (Richards, ch. 9)
+%   3 antennas     an N-element array nulls up to N-1 interferers (Shebert et al.)
 %   relay path     the command reaches the UAV over a secondary path (Papathanasiou
 %                  et al.: secondary communication paths, backup link; the lecturer's
 %                  proposal: an alternate route), modeled as the desired signal

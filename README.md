@@ -84,7 +84,7 @@ A closed-loop simulation of the command uplink from a ground control station (GC
 ## Method
 
 ### Link validation (D41)
-`validate_phy.m` compares the simulated BER with closed-form results (Simon & Alouini: AWGN, and the MGF method for Rician and correlated branches): pass when the gap is within 0.3 dB or two standard errors over 20 channel realizations. It also checks MMSE against MRC under a 10 dB jammer and that equal seeds reproduce the same run. `main.m` stops if the validation fails.
+`validate_phy.m` compares the simulated BER with closed-form results (AWGN; the MGF method of Alouini & Goldsmith for Rician branches; the MGF of the non-central quadratic form of Ramírez-Espinosa et al. for correlated branches): pass when the gap is within 0.3 dB or two standard errors over 20 channel realizations. It also checks MMSE against MRC under a 10 dB jammer and that equal seeds reproduce the same run. `main.m` stops if the validation fails.
 
 ### Dataset (D42, D45, D59)
 8 threats × 5 severity levels × 6 Eb/N0 (0–10 dB) × 8 seeded sub-runs × 20 frames, plus the clean link: 43,200 frames. Each sub-run has its own seed (fading, interferer direction, waveform, noise, bits) and its own UAV speed. The split into train / validation / test (5 / 1 / 2 sub-runs per cell) is by sub-run, so no channel realization or feature window appears in two parts.
@@ -92,9 +92,9 @@ A closed-loop simulation of the command uplink from a ground control station (GC
 ### Receiver measurements (D59)
 `extract_closed_loop_frames.m` derives every observation from what the receiver has; the true BER is kept for the KPIs and the training reward only.
 - **Packet loss:** each frame carries 1000 payload bits and a CRC-32 (IEEE polynomial); the frame's actual error pattern is applied to the CRC-protected codeword and the CRC is checked (with FEC, on the decoded bits).
-- **Estimated BER:** decision-directed SNR per 32-symbol block of the combiner output, BER = mean of Q(√SNR) over the blocks (Simon & Alouini); post-combining SNR from the same statistics.
+- **Estimated BER:** decision-directed SNR per 32-symbol block of the combiner output, BER = mean of Q(√SNR) over the blocks (Alouini & Goldsmith, eq. 15); post-combining SNR from the same statistics.
 - **SINR, envelope correlation:** against the waveform re-modulated from the receiver's own decisions; interference over thermal.
-- **Spatial features:** from the per-block channel estimates and the residual covariance the MMSE combiner already computes: spatial coherence of the interference, predicted MMSE gain over MRC (h^H R⁻¹ h · h^H R h / ‖h‖⁴) and the alignment of the dominant interference direction with the GCS channel (Richards, ch. 9).
+- **Spatial features:** from the per-block channel estimates and the residual covariance the MMSE combiner already computes: spatial coherence of the interference, predicted MMSE gain over MRC (h^H R⁻¹ h · h^H R h / ‖h‖⁴) and the alignment of the dominant interference direction with the GCS channel (Shebert et al.: MMSE weights from the steering vector, separation harder at close angles).
 - **Per-antenna dip:** for each UAV antenna, the median minus the minimum of its per-block channel gain (dB) over the frame, the larger of the two. It tells a fault or a deep fade of one antenna from attenuation of the whole link.
 - 14 link features per frame (`link_features.m`): SINR, estimated BER and its change, RSSI and its variance, CRC failure and packet loss over the window, envelope correlation, IoT, post-combining SNR, coherence, predicted MMSE gain, alignment, per-antenna dip.
 
@@ -106,11 +106,12 @@ A closed-loop simulation of the command uplink from a ground control station (GC
 
 ### Decision layer (D44–D52, D59)
 - **Frame pools** (`build_policy_pools.m`, `pool_cell.m`): the clean link, the 8 single threats at three severities and 8 combined threats, each × 36 configurations × 6 Eb/N0 through the real link with the detector applied; 6 train, 4 validation and 8 test geometries per (cell, Eb/N0). The test geometries are flights never used in training. A geometry (seed: fading, UAV speed, interferer directions, threat waveform) is shared by every configuration and every cell, so an episode stays in one flight before and after the onset and when it changes configuration.
-- **Episodes** (`link_env.m`): 30 decision cycles, clean link until an onset at cycle 3–10; a follower jammer re-acquires the channel 2–5 cycles after every hop. A decision cycle is one received frame, with a decision period of 20 ms (the latency target); recovery times are reported in cycles and in ms.
+- **Episodes** (`link_env.m`): 30 decision cycles, clean link until an onset at cycle 3–10; a follower jammer re-acquires the channel 0–5 cycles after every hop in training and validation (0 = Liu et al.'s comb jammer); the test keeps its follower set at 2–5 cycles and reports the comb set apart. A decision cycle is one received frame, with a decision period of 20 ms (the latency target); recovery times are reported in cycles and in ms.
 - **Reward** (`decision_config.m`): 100 when the configuration's BER in the episode's geometry is ≤ 2× the clean link (the KPI), otherwise at most 40 (log-linear down to 0 at the unmitigated BER), minus goodput, spectrum, power and processing costs, 5 points per change, 20 for a change on a healthy link. Because 40 is below 100 minus the largest running cost, a restoring configuration always earns more than a non-restoring one (Liu et al.'s rate-if-successful reward). Training may raise the healthy-link penalty; validation and test use the standard reward.
-- **Link monitor and shield** (`policy_monitor.m`, `policy_mask.m`): estimated BER over 5 frames against the clean link's estimated BER at the estimated Eb/N0 (like with like), or CRC packet loss when FEC is on; class; the Eb/N0 drop from the episode's reference. An alarm is a hostile threat class or a degraded link ('none', benign interference and 'unknown' count only with degradation); it is confirmed on 2 of 2 or 3 of 3 cycles (M-of-N, Richards; chosen on validation), and only then may a policy start a new configuration (Alshiekh et al., shielded RL). The state never contains the episode clock.
+- **Link monitor and shield** (`policy_monitor.m`, `policy_mask.m`): estimated BER over 5 frames against the clean link's estimated BER at the estimated Eb/N0 (like with like), or CRC packet loss when FEC is on; class; the Eb/N0 drop from the episode's reference. An alarm is a hostile threat class or a degraded link ('none', benign interference and 'unknown' count only with degradation); it is confirmed on 3 of 3 cycles (three consecutive detections, Barajas et al.; chosen on validation, D64), and only then may a policy start a new configuration (Alshiekh et al., shielded RL); within 3 cycles of a change only the current configuration is allowed (hold, D63). The state never contains the episode clock.
 - **Agent state** (`policy_state.m`): the receiver observations of the last 4 cycles (Liu et al.'s spectrum waterfall, Mnih et al.'s stacked frames), the current configuration, dwell time and the confirmed alarm.
 - **Policies** (`policy_decide.m`, one function for training, evaluation and the GUI): expert rule (spatial-aware: it also nulls an interferer when the predicted MMSE gain is ≥ 6 dB, and escalates through combined configurations), class → configuration table tuned on the train pools, Double DQN (hidden 256-256, 20,000 episodes, experience replay, target network, Huber loss, gradient clipping; evaluated as plain matrix products in the decision cycle). The confirmation, the training false-switch penalty, the discount factor and the seed are chosen on the validation split by recovered episodes, under the false-alarm bound on independent clean validation geometries.
+- **Escalation** (D44, D64): when the policy keeps a configuration it applied while the link stays degraded for 3 cycles, or keeps no_action while the alarm stays confirmed for 3 cycles, the next configuration not yet tried in the incident is applied (the DQN's next-highest Q). The deployed policy is the DQN with escalation.
 - **Evaluation** (`evaluate_policies.m`): test pools only (8 geometries per cell, never used in training or selection); sets single (three severities), follower, combined (new flights), unknown (detector output withheld), clean, and comb (jamming on every channel we can use, Liu et al.'s comb jammer, reported apart); false alarms (KPI 6) on 600 further clean geometries, one episode each (`build_clean_test_pools.m`); baselines no response, random, always-on MMSE, best fixed configuration, rule, table and a one-step oracle. An episode is *recovered* when BER and CRC packet loss are both ≤ 2× the clean link (packet loss + one packet) for 5 consecutive cycles, and *recoverable* when some configuration restores both in its geometry. 95% intervals by bootstrap over geometries (`boot_cluster.m`); breakdowns per threat and severity, Eb/N0, interferer direction and UAV speed.
 - **Combinations never trained on** (`experiment_combo_generalization.m`): the DQN is retrained without one combined threat at a time and tested on it, next to the DQN that trained on it, rule + escalation and the table.
 
@@ -136,43 +137,45 @@ Every threat × severity × Eb/N0 through the 36 configurations on one seeded ru
 
 ---
 
-## Results (D52 run, 2026-09-27)
+## Results (v4, final test reading, 2026-09-29)
 
-> **Status (2026-09-29):** these are the results of the v3 system (D52), which are also the files in `results/`. The v4 system (D59–D61: receiver-side measurements, 36 combined configurations, combined threats in training, three severities, per-antenna feature) is complete in code and passes the unit tests and reduced runs; its full run from A0 is next, and this section will then be replaced. KPI targets above are those of v4.
-
-All numbers on data never used for training: the detector on the test split (by sub-run), the decision layer on the test pools (flight geometries with unseen seeds), the false alarms on 600 further clean-link geometries. Intervals are 95%. Decision layer as selected on validation (D52): alarm 'class_drop' (path_loss counts after an Eb/N0 drop ≥ 6.5 dB, threshold chosen on the train pools), training false-switch penalty 80, γ = 0.5; the alarm was selected on 600 independent clean validation geometries and the test set was measured once.
+All numbers on data never used for training or selection: the detector on the test split (by sub-run), the decision layer on the third set of test flights (seed block 6, read once, D64) and the false alarms on 600 further clean geometries (block 7). Intervals are 95% bootstrap over flight geometries. Deployed decision layer: Double DQN (γ 0.5, 3-of-3 alarm confirmation, path-loss alarm after a 3 dB Eb/N0 drop, training false-switch penalty 80) with escalation (D64).
 
 | # | KPI | Result | Status |
 |---|---|---|---|
-| 1 | Detection vs SNR | accuracy 96.28%, macro-F1 96.28% [94.88, 97.37]; ≥ 91.1% from 0 dB; unseen Eb/N0 97.7% vs 97.5% | MET |
-| 2 | Unknown threats | Mahalanobis mean AUROC 0.887 (0.807–0.973 per threat); softmax confidence 0.687 | MET |
+| 1 | Detection vs SNR | macro-F1 97.02% [96.24, 97.60]; every class ≥ 93.85% from 0 dB; unseen Eb/N0 97.93% vs 97.69% | MET |
+| 2 | Unknown threats | mean AUROC 0.859 (nested leave-one-threat-out); reactive jamming 0.641 is the hardest | MET |
 | 3 | BER vs theory | 5/5 within 0.3 dB (+0.05, −0.21, +0.05, +0.13, +0.17 dB); seeds reproducible | MET |
-| 4 | Restoration | 86.6% of cycles ≤ 2× clean BER on recoverable attacks (single threats, all: 83.0%); packet loss back on 93.7%; survivability Map A 86.2%, Map B 93.6% | MET |
-| 5 | DQN vs baselines | return +0.110 [0.101, 0.120] vs rule + escalation, +0.036 [0.031, 0.042] vs tuned table, +0.018 [0.009, 0.028] vs best fixed | MET |
-| 6 | False alarms | 9 of 600 independent clean geometries (1.5%), one-sided bound 2.60%; per cycle 0.07%; rule + escalation 25.3% | MET |
-| 7 | Real time + speed | 5.3 ms median, 24.3 ms p95 per decision cycle (desktop CPU); restored 78.4–86.5% across 50–120 km/h | MET |
-| 8 | End-to-end loop | all 8 single threats restored on ≥ 50% of cycles | MET |
+| 4 | Restoration | 14 of 16 threats ≥ 90% of the recoverable episodes; benign interference 86.5%, noise burst + antenna fault 85.0% (60 recoverable episodes); pooled 94.2% [90.9, 96.7] | NOT MET |
+| 5 | DQN + escalation vs baselines | +16.5 points recovered vs rule + escalation [+14.6, +18.3] | MET |
+| 6 | False alarms | 19 of 600 independent clean geometries, one-sided bound 4.61%; rule + escalation 159/600 | MET |
+| 7 | Real time + speed | latency median 2.70 ms, p95 3.16 ms per decision cycle (desktop, GPU detector); recovery per speed band 96.8 / 98.2 / 87.6 / 97.4% (spread 10.6 points > 10) | NOT MET |
+| 8 | End-to-end loop | all 16 threats recovered on ≥ 50% of their recoverable episodes | MET |
 
-**Decision layer, mean return per cycle** (1 = restored at no cost):
+**Recovered among recoverable episodes, per episode set** (test flights):
 
-| Set | DQN | rule + esc. | table | best fixed | oracle |
+| Set | DQN + esc. | rule + esc. | table | best fixed | oracle |
 |---|---|---|---|---|---|
-| single threats | 0.821 | 0.726 | 0.803 | 0.773 | 0.923 |
-| follower jammer | 0.851 | 0.830 | 0.773 | 0.794 | 0.964 |
-| unseen combinations | 0.477 | 0.268 | 0.446 | 0.535 | 0.638 |
-| unknown (class withheld) | 0.742 | 0.652 | 0.690 | 0.763 | 0.922 |
-| clean link, test pools | 0.978 | 0.972 | 0.968 | 0.872 | 0.978 |
-| clean link, 600 new geometries | 0.963 | 0.953 | – | – | 0.983 |
+| single threats, 3 severities | 93.7 | 84.8 | 91.5 | 90.5 | 96.7 |
+| follower jammer (2–5 cycles) | 93.4 | 89.4 | 77.0 | 86.1 | 97.9 |
+| combined threats (new flights) | 96.4 | 41.7 | 42.3 | 55.6 | 95.0 |
+| comb (immediate follower), reported apart | 92.0 | 84.0 | 11.1 | 77.8 | 98.3 |
+| unknown (detector output withheld) | 81.0 | 82.9 | 82.7 | 90.5 | 96.7 |
+| threat sets pooled | **94.2** | 77.7 | 78.9 | 82.9 | 96.7 |
+
+Per threat (KPI 4): jamming 94.6, noise burst 93.8, reactive jamming 93.2, path loss 91.1, spoofing 94.1, antenna fault 99.0, benign interference 86.5, sweeping jammer 95.5; combined: jamming + path loss 99.0, noise burst + antenna fault 85.0, sweeping jammer + path loss 93.8, spoofing + noise burst 94.7, reactive jamming + path loss 100, jamming + antenna fault 97.9, spoofing + sweeping jammer 96.9, benign interference + noise burst 100 (%). Detector baselines on the same test split: hybrid network 97.0% macro-F1, link-feature MLP 85.7%, random forest 85.2%, spectrogram-only CNN 74.8%, kernel SVM 69.6%.
 
 **Findings:**
-- The discount factor matters little: in D50 γ = 0, 0.5 and 0.9 were within 0.007 of each other on the test pools (pooled return). The gain over the rule and the table comes from learning the mapping from measurements to configuration, not from long-horizon planning.
-- Geometry decides whether spatial nulling works: always-on MMSE restores 0% of cycles with the interferer within 20° of the GCS direction and 89% beyond 45°; the DQN keeps 74% in the aligned case by choosing avoidance and power instead.
-- Without the class (unknown set) the DQN restores 68.5% of cycles, rule + escalation 51.6%, the best fixed configuration 74.5%. Since D48 an unknown-threat flag starts a countermeasure only together with link degradation (the Mahalanobis threshold flags 5% of known frames by construction); the response then waits for the link to degrade. The unknown-set return was 0.817 in D46, before this change, and is 0.742 now.
-- Unseen combinations remain the limit: even the oracle restores only 30.7% of cycles, and the DQN trails the best fixed configuration there (−0.058).
-- False alarms: the detector reads about 4.5% of clean frames as a threat at every UAV speed, almost all path loss at Eb/N0 ≤ 4 dB, because a deep fade of the clean link looks like attenuation in one frame (D51, D52 diagnostics). What separates them is the drop of the Eb/N0 estimate from the link's own reference: on the train pools real path loss drops 6.8–14.4 dB (5th–95th percentile) and the misleading fades at most 6.4 dB. With the path_loss alarm gated at 6.5 dB, the DQN changes configuration in 1.5% of 600 independent clean episodes (D51, without the gate: 3.8%), against 25.3% for the rule; the remaining cases are antenna_fault reads on deep single-branch fades (6 of 9). The gate costs path-loss restoration (83.7% → 78.7% of cycles) and nothing else. The 4-geometry clean set of the test pools (37/768 in D51, all from one geometry) was not a sound basis for the bound.
-- Every non-recoverable survivability state is at the aligned geometry (10°) or in path loss; at 45° all maps are 100% recoverable. Rate reduction, FEC and rate + power recover part of them at a goodput cost (Map A → Map B).
+- The learned policy's advantage is largest where the rule's class mapping breaks: combined threats (96.4% vs 41.7%) and the immediate follower (92.0% vs 84.0%). On single static threats the tuned table is close (91.5% vs 93.7%).
+- Escalation matters: DQN alone 92.6% pooled, with escalation 94.2%; out of no_action it fires on a confirmed alarm held for 3 cycles, which fixed antenna fault (87.2% → 99.0% between the second and third readings).
+- The remaining misses share one mechanism, measured on validation: the monitor judges degradation from the estimated BER of 5 frames, which cannot resolve a 2× BER excess near the clean link's error rate. Benign interference raises an alarm only through degradation, and with 3-of-3 confirmation three degraded cycles in a row are rare (validation: 96.5% with 2-of-2, 91.0% with 3-of-3). Four fixes were tested on validation and not adopted (D64, D65), the last because degradation confirmed on 2 of 2 raised the clean-link false alarms above the bound (21–33 of 600).
+- Combinations never trained on: 79.5% vs 94.6% for the same combinations trained on; sweeping jammer + path loss falls to 10.4% (D61 experiment).
+- The 85–102 km/h band (18 flights) is lower for every policy except the oracle (rule + escalation 76.9%, table 87.4%), while 102–120 km/h is 97.4%: a property of those flights rather than of speed; not yet explained.
+- Survivability: Map A 82% recoverable, Map B 93% (threat × severity × Eb/N0 × geometry).
 
-Full tables: `results/kpi_summary.txt`, `results/policy_evaluation.txt`, `results/dqn_training.txt`, `results/ood_detection.txt`, `results/survivability_boundary_map{A,B}.txt`, `results/latency.txt`; figures: `results/kpi_dashboard.png`, `results/policy_breakdown.png`. Earlier runs are in `docs/PROJECT_LOG.md`.
+**Test readings:** the decision layer was read on test flights three times: the first v4 agent (first reading; KPI 4 14/16), the D63 agent (second; KPI 4 12/16), both on the same flights, and the D64 agent on new flights (third, above). Each change after a reading was decided on validation and recorded in `docs/DECISIONS.md` before the next reading; the earlier readings are kept in `archive/`.
+
+Full tables: `results/kpi_summary.txt`, `results/policy_evaluation.txt`, `results/dqn_training.txt`, `results/combo_generalization.txt`, `results/architecture_comparison.txt`, `results/latency.txt`; figures: `results/kpi_dashboard.png`, `results/policy_breakdown.png`, `results/threat_gallery/`.
 
 ---
 
@@ -263,20 +266,24 @@ An Unreal Engine view of the closed loop, driven from MATLAB (Simulink 3D Animat
 
 ## References
 
-Numbered as in the project proposal (IEEE):
+Numbered as in the updated project proposal (v2, IEEE):
 1. A. Oli and E. Mahalal, "UAV security: Attacks, defenses, and open challenges," IEEE Access, vol. 13, pp. 215606–215635, 2025. https://doi.org/10.1109/ACCESS.2025.3647023
 2. D. Papathanasiou et al., "Secure communication protocols and AI-based anomaly detection in UAV-GCS," Applied Sciences, vol. 16, no. 7, 3339, 2026. https://www.mdpi.com/2076-3417/16/7/3339
 3. U. Tariq, T. A. Ahanger, M. Ihsan, "Systematic review of machine and deep learning models for unmanned aerial vehicles cyber threat defense," Discover Artificial Intelligence, vol. 6, 216, 2026. https://link.springer.com/article/10.1007/s44163-026-00960-7
 4. X. Liu et al., "Anti-jamming communications using spectrum waterfall: A deep reinforcement learning approach," IEEE Communications Letters, vol. 22, no. 5, pp. 998–1001, 2018. https://arxiv.org/abs/1710.04830
-5. M. K. Simon, M.-S. Alouini, Digital Communication over Fading Channels, 2nd ed., Wiley, 2005.
+5. M.-S. Alouini and A. J. Goldsmith, "A unified approach for calculating error rates of linearly modulated signals over generalized fading channels," IEEE Trans. Commun., vol. 47, no. 9, pp. 1324–1334, 1999.
 6. K. Lee, K. Lee, H. Lee, J. Shin, "A simple unified framework for detecting out-of-distribution samples and adversarial attacks," NeurIPS, 2018. https://arxiv.org/abs/1807.03888
-7. F. T. Liu, K. M. Ting, Z.-H. Zhou, "Isolation forest," ICDM, 2008. https://cs.nju.edu.cn/zhouzh/zhouzh.files/publication/icdm08b.pdf
-8. V. Mnih et al., "Human-level control through deep reinforcement learning," Nature, vol. 518, pp. 529–533, 2015. https://storage.googleapis.com/deepmind-media/dqn/DQNNaturePaper.pdf
+7. F. T. Liu, K. M. Ting, Z.-H. Zhou, "Isolation forest," ICDM, 2008.
+8. V. Mnih et al., "Human-level control through deep reinforcement learning," Nature, vol. 518, pp. 529–533, 2015.
 9. H. van Hasselt, A. Guez, D. Silver, "Deep reinforcement learning with double Q-learning," AAAI, 2016. https://arxiv.org/abs/1509.06461
-10. M. A. Richards, Fundamentals of Radar Signal Processing, 2nd ed., McGraw-Hill, 2014.
+10. L. Barajas, C. Jeardoe, J. Kim, E. Hammad, "Resilient control loops in autonomous vehicles under adversarial jamming via spectral perception and network-layer failover," IEEE WF-PST, 2026. https://arxiv.org/abs/2609.05739
 11. M. Alshiekh et al., "Safe reinforcement learning via shielding," AAAI, 2018. https://arxiv.org/abs/1708.08611
-12. C. J. Clopper, E. S. Pearson, "The use of confidence or fiducial limits illustrated in the case of the binomial," Biometrika, vol. 26, no. 4, pp. 404–413, 1934.
+12. M. Thulin, "The cost of using exact confidence intervals for a binomial proportion," Electron. J. Statist., vol. 8, no. 1, pp. 817–840, 2014.
+13. B. Dixit et al., "Design and performance evaluation of secure RF and WiFi-based communication in drone swarms via testbed implementation," arXiv:2606.27028, 2026.
+14. W. Xu, W. Trappe, Y. Zhang, T. Wood, "The feasibility of launching and detecting jamming attacks in wireless networks," ACM MobiHoc, pp. 46–57, 2005.
+15. S. R. Shebert, B. H. Kirk, R. M. Buehrer, "Open set wireless signal classification: Augmenting deep learning with expert feature classifiers," arXiv:2302.03749, 2023.
+16. P. Ramírez-Espinosa et al., "A new approach to the statistical analysis of non-central complex Gaussian quadratic forms with applications," IEEE Trans. Veh. Technol., vol. 68, no. 7, pp. 6734–6746, 2019.
 
 ---
 
-**Last updated:** 2026-09-29 (D61). **Status:** v4 code complete and unit-tested; v4 full run next; then GUI update to v4, reports and defense.
+**Last updated:** 2026-09-29 (D65). **Status:** v4 full run and three test readings done; final results above. Next: code comment pass, interim report, final report and defense.

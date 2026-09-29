@@ -27,7 +27,7 @@ names = unique(thr, 'stable');
 POL = {'dqn', 'rule_esc'};
 rep = {sprintf(['=== CONFIGURATION CHANGES ON THE VALIDATION SPLIT (%s: alarm ''%s'' %d/%d, drop %.1f dB) ===\n' ...
     'quick = change within %d cycles of the previous one; ping-pong = A -> B -> A with B held <= %d cycles'], ...
-    AGENT_FILE, Q.alarm_mode, Q.confirm(1:2), Q.drop_db, C.hold, C.hold)};
+    AGENT_FILE, Q.alarm_mode, Q.confirm, Q.drop_db, C.hold, C.hold)};
 
 for p = 1:numel(POL)
     sw = []; qk = []; pg = []; rec = []; ok = [];

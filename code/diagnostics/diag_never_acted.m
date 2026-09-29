@@ -18,7 +18,7 @@ PP.confirm = Q.confirm; PP.alarm_mode = Q.alarm_mode; PP.drop_db = Q.drop_db;
 K = link_env('tables', PP);
 VAL = 2; REPS = 2; H = Q.H;
 rep = {sprintf('=== NEVER-ACTED EPISODES OF THE SELECTED DQN, VALIDATION (%s %d/%d, drop %.1f dB) ===', ...
-    Q.alarm_mode, Q.confirm(1:2), Q.drop_db)};
+    Q.alarm_mode, Q.confirm, Q.drop_db)};
 for th = {'path_loss', 'antenna_fault'}
     cells = find(strcmp(PP.scen, th{1}));
     specs = static_specs(cells, PP, K, H, VAL, REPS, RandStream('mt19937ar', 'Seed', 100));

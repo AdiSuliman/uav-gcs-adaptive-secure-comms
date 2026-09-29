@@ -36,7 +36,7 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %     coh       spatial coherence of interference + noise between the antennas
 %               (0 = thermal noise, 1 = one directional source)
 %     mmse_gain predicted SINR gain of MMSE over MRC combining [dB] from the
-%               interference covariance and the channel estimate (Richards, ch. 9)
+%               interference covariance and the channel estimate (Shebert et al.)
 %     align     alignment of the dominant interference direction with the GCS
 %               channel (0 = orthogonal, 1 = same direction: no spatial null)
 %     branch_dip deepest drop of one antenna's channel gain inside the frame [dB]:
