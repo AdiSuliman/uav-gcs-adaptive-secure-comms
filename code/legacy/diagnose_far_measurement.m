@@ -1,4 +1,4 @@
-%% DIAGNOSE_FAR_MEASUREMENT.m — False Alarm Rate (FAR) characterization, proposal KPI (section ה)
+%% DIAGNOSE_FAR_MEASUREMENT.m — False Alarm Rate (FAR) characterization, proposal KPI (section 5)
 % The proposal defines a false alarm as an unnecessary countermeasure (an
 % unnecessary channel switch disrupts the link). FAR = fraction of non-hostile
 % trials (none, benign_interference) in which the system acts although the
