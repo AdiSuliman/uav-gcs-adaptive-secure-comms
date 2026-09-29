@@ -1,202 +1,193 @@
 === DECISION-LAYER EVALUATION, TEST POOLS (D44-D51, D59) ===
-Generated: 29-Sep-2026 19:45:36 | 30-cycle episodes, onset at cycle 3-10 | 8 test geometries per (cell, Eb/N0), never used in training or validation | interferer AoA random per geometry
+Generated: 30-Sep-2026 01:15:41 | 30-cycle episodes, onset at cycle 3-10 | 8 test geometries per (cell, Eb/N0), never used in training or validation | interferer AoA random per geometry
 Decision period 20 ms (decision_config.m): a recovery time of n cycles is n x 20 ms.
 recovered = BER and packet loss <= 2x clean for 5 consecutive cycles, among RECOVERABLE episodes (some configuration restores both in that geometry); restored / ok = cycles after onset with BER / BER and packet loss restored; false sw = changes on a healthy link, whole episode.
-Selected DQN: gamma 0.50, training false-switch penalty 80; alarm 'class_drop', confirmation 3-of-3 for every monitored policy. Combined threats (8) in training and test, new flights in test (D61). Intervals: 95% bootstrap over geometries.
+Selected DQN: gamma 0.50, training false-switch penalty 160; alarm 'class_drop', confirmation 3-of-3 for every monitored policy. Combined threats (8) in training and test, new flights in test (D61). Intervals: 95% bootstrap over geometries.
 
---- single (2304 episodes, 2248 recoverable) ---
+--- single (2304 episodes, 2258 recoverable) ---
 policy                                 recovered % (recoverable)                 return restored       ok   goodput  T_rec  switches  false sw   PLR ok
-no response                                    13.5 [9.3, 18.1]   0.346 [0.302, 0.393]    14.2%    13.2%     0.126      0      0.00     0.000    52.4%
-random                                        80.6 [77.9, 82.9]   0.524 [0.511, 0.535]    75.6%    75.0%     0.975      0     29.17     8.312    86.5%
-always-on MMSE                                47.8 [37.6, 57.6]   0.628 [0.557, 0.694]    49.0%    46.6%     0.518      0      1.00     0.917    73.9%
-fixed: channel_switch+spatial_diversity+power_control        90.5 [88.5, 92.2]   0.797 [0.782, 0.811]    88.5%    88.3%     2.357      0      1.00     0.917    93.8%
-rule                                          80.4 [75.7, 84.4]   0.705 [0.664, 0.742]    68.9%    67.4%     0.985      3      1.66     0.164    80.7%
-rule + escalation                             84.8 [80.7, 88.1]   0.721 [0.682, 0.755]    71.5%    70.2%     1.086      3      2.05     0.189    82.7%
-table (train pools)                           91.5 [89.0, 93.5]   0.771 [0.742, 0.796]    79.4%    78.9%     1.377      3      1.67     0.205    88.0%
-DQN gamma=0.50 (selected)                     91.5 [87.2, 94.8]   0.769 [0.733, 0.801]    78.9%    78.0%     1.028      3      1.40     0.109    89.6%
-DQN gamma=0.90                                92.4 [87.9, 95.7]   0.781 [0.744, 0.812]    79.1%    78.1%     0.972      3      1.33     0.123    89.0%
-DQN + escalation (deployed)                   93.7 [90.0, 96.5]   0.768 [0.734, 0.798]    80.3%    79.5%     1.103      3      1.85     0.203    89.6%
-oracle (one-step)                             96.7 [94.6, 98.5]   0.943 [0.931, 0.952]    97.8%    94.4%     0.955      0      0.91     0.000    95.6%
-Paired, selected DQN minus  no response: recovered +80.2 [+75.7, +84.6] points, return +0.422 [+0.390, +0.454] | rule + escalation: recovered +8.9 [+7.2, +10.7] points, return +0.048 [+0.036, +0.059] | table (train pools): recovered +2.2 [+0.4, +3.9] points, return -0.002 [-0.012, +0.007] | fixed: channel_switch+spatial_diversity+power_control: recovered +3.2 [-0.1, +6.4] points, return -0.029 [-0.059, -0.004]
+no response                                     9.6 [6.1, 13.5]   0.319 [0.278, 0.361]    10.3%     9.4%     0.116      0      0.00     0.000    51.8%
+random                                        80.7 [78.6, 82.7]   0.533 [0.522, 0.543]    75.7%    75.1%     0.988      0     29.17     7.351    86.6%
+always-on MMSE                                43.8 [33.7, 54.1]   0.619 [0.553, 0.684]    44.9%    42.9%     0.474      0      1.00     0.917    70.2%
+fixed: channel_switch+spatial_diversity+power_control        92.5 [91.2, 93.5]   0.813 [0.805, 0.818]    90.9%    90.6%     2.410      0      1.00     0.917    95.1%
+rule                                          80.4 [77.0, 83.8]   0.701 [0.668, 0.734]    68.3%    66.3%     0.976      3      1.67     0.128    80.5%
+rule + escalation                             86.8 [84.1, 89.2]   0.723 [0.693, 0.753]    72.2%    70.4%     1.137      3      2.06     0.145    83.1%
+table (train pools)                           92.4 [90.7, 94.0]   0.774 [0.750, 0.796]    80.0%    78.8%     1.398      3      1.69     0.161    88.2%
+DQN gamma=0.50 (selected)                     93.2 [91.1, 95.0]   0.739 [0.714, 0.762]    80.2%    79.1%     1.085      3      1.29     0.046    90.2%
+DQN + escalation (deployed)                   96.2 [94.7, 97.6]   0.740 [0.716, 0.761]    82.4%    81.3%     1.203      3      1.70     0.122    90.4%
+oracle (one-step)                             94.8 [91.6, 97.4]   0.943 [0.934, 0.952]    98.0%    92.9%     0.896      0      0.95     0.000    94.1%
+Paired, selected DQN minus  no response: recovered +86.7 [+83.0, +89.7] points, return +0.421 [+0.391, +0.448] | rule + escalation: recovered +9.4 [+7.4, +11.5] points, return +0.017 [+0.005, +0.028] | table (train pools): recovered +3.9 [+2.7, +5.0] points, return -0.034 [-0.041, -0.027] | fixed: channel_switch+spatial_diversity+power_control: recovered +3.8 [+2.2, +5.3] points, return -0.073 [-0.096, -0.053]
 
 --- follower (864 episodes, 864 recoverable) ---
 policy                                 recovered % (recoverable)                 return restored       ok   goodput  T_rec  switches  false sw   PLR ok
-no response                                      5.1 [2.3, 8.3]   0.250 [0.216, 0.289]     5.3%     5.1%     0.056      0      0.00     0.000    50.9%
-random                                        92.7 [89.1, 95.6]   0.588 [0.571, 0.603]    83.1%    82.7%     1.124      1     29.12     5.986    91.2%
-always-on MMSE                                45.4 [31.9, 58.8]   0.628 [0.533, 0.717]    46.5%    45.4%     0.562      0      1.00     0.917    76.6%
-fixed: channel_switch+spatial_diversity+power_control        86.1 [78.4, 92.7]   0.835 [0.818, 0.849]    95.6%    95.4%     2.706      0      6.85     0.917    97.8%
-rule                                          85.8 [79.7, 90.7]   0.780 [0.748, 0.806]    79.3%    79.0%     1.495      3      3.90     0.104    89.7%
-rule + escalation                             89.4 [84.1, 93.6]   0.773 [0.742, 0.799]    79.6%    79.2%     1.546      3      3.76     0.112    89.9%
-table (train pools)                           77.0 [68.8, 84.0]   0.761 [0.731, 0.787]    77.3%    76.9%     1.498      5      6.30     0.104    89.0%
-DQN gamma=0.50 (selected)                     92.2 [87.7, 95.8]   0.794 [0.759, 0.823]    81.5%    81.4%     1.150      3      2.72     0.074    90.4%
-DQN gamma=0.90                                86.0 [79.2, 91.8]   0.804 [0.762, 0.841]    79.1%    78.5%     0.873      3      3.02     0.069    88.5%
-DQN + escalation (deployed)                   93.4 [88.7, 96.9]   0.792 [0.757, 0.821]    81.7%    81.5%     1.101      3      2.76     0.091    90.5%
-oracle (one-step)                             97.9 [96.1, 99.3]   0.971 [0.963, 0.977]   100.0%    97.7%     0.875      0      6.68     0.000    97.7%
-Paired, selected DQN minus  no response: recovered +88.3 [+83.6, +92.7] points, return +0.542 [+0.510, +0.570] | rule + escalation: recovered +4.1 [-0.1, +8.4] points, return +0.019 [+0.007, +0.029] | table (train pools): recovered +16.4 [+9.3, +24.3] points, return +0.031 [+0.018, +0.042] | fixed: channel_switch+spatial_diversity+power_control: recovered +7.3 [-0.1, +15.3] points, return -0.043 [-0.077, -0.014]
+no response                                      1.9 [0.0, 4.6]   0.226 [0.197, 0.258]     2.1%     1.9%     0.047      0      0.00     0.000    50.5%
+random                                        96.2 [94.9, 97.5]   0.600 [0.589, 0.611]    84.1%    83.4%     1.141      1     29.12     5.223    91.4%
+always-on MMSE                                41.0 [28.0, 54.6]   0.622 [0.542, 0.704]    42.4%    41.0%     0.493      0      1.00     0.917    72.2%
+fixed: channel_switch+spatial_diversity+power_control        96.6 [93.1, 99.2]   0.856 [0.848, 0.862]    98.8%    98.8%     2.754      0      6.85     0.917    99.5%
+rule                                          85.6 [81.0, 89.7]   0.773 [0.746, 0.796]    78.8%    77.5%     1.488      3      3.75     0.060    88.8%
+rule + escalation                             91.9 [87.6, 95.3]   0.779 [0.756, 0.799]    81.1%    80.2%     1.642      3      3.68     0.060    90.7%
+table (train pools)                           88.7 [83.4, 93.1]   0.771 [0.750, 0.789]    79.5%    78.6%     1.656      6      6.30     0.060    89.6%
+DQN gamma=0.50 (selected)                     94.7 [92.5, 96.5]   0.758 [0.737, 0.776]    84.6%    84.0%     1.406      3      2.95     0.021    92.2%
+DQN + escalation (deployed)                   95.0 [92.6, 97.2]   0.755 [0.735, 0.773]    84.7%    83.7%     1.389      3      3.15     0.022    91.7%
+oracle (one-step)                             93.8 [88.0, 98.4]   0.969 [0.961, 0.975]   100.0%    93.7%     0.795      0      6.90     0.000    93.7%
+Paired, selected DQN minus  no response: recovered +93.2 [+89.7, +96.1] points, return +0.530 [+0.506, +0.550] | rule + escalation: recovered +3.1 [-0.2, +6.7] points, return -0.024 [-0.033, -0.015] | table (train pools): recovered +6.4 [+1.5, +11.5] points, return -0.016 [-0.023, -0.007] | fixed: channel_switch+spatial_diversity+power_control: recovered -1.6 [-5.6, +2.3] points, return -0.101 [-0.123, -0.081]
 
---- combined (768 episodes, 726 recoverable) ---
+--- combined (768 episodes, 734 recoverable) ---
 policy                                 recovered % (recoverable)                 return restored       ok   goodput  T_rec  switches  false sw   PLR ok
-no response                                      0.3 [0.0, 0.8]   0.207 [0.184, 0.232]     0.3%     0.3%     0.000      0      0.00     0.000    50.0%
-random                                        31.7 [27.4, 36.1]   0.309 [0.286, 0.332]    40.7%    39.8%     0.453      4     29.23     4.857    68.6%
-always-on MMSE                                  9.1 [4.2, 14.6]   0.313 [0.272, 0.355]     8.6%     8.6%     0.094      0      1.00     0.917    50.8%
-fixed: channel_switch+spatial_diversity+power_control        55.6 [51.8, 58.9]   0.594 [0.566, 0.620]    54.7%    52.6%     1.339      0      1.00     0.917    74.5%
-rule                                          34.2 [27.5, 40.7]   0.386 [0.344, 0.429]    28.3%    27.0%     0.353      4      2.95     0.022    57.7%
-rule + escalation                             41.7 [36.9, 46.5]   0.428 [0.392, 0.465]    34.2%    32.4%     0.519      5      3.90     0.026    62.0%
-table (train pools)                           42.3 [37.5, 47.1]   0.444 [0.409, 0.478]    36.8%    35.3%     0.605      3      2.60     0.022    64.6%
-DQN gamma=0.50 (selected)                     96.3 [94.2, 98.1]   0.687 [0.667, 0.708]    77.9%    76.8%     0.993      3      1.74     0.004    85.7%
-DQN gamma=0.90                                94.6 [92.5, 96.5]   0.684 [0.664, 0.703]    76.0%    74.2%     1.001      3      2.06     0.005    85.1%
-DQN + escalation (deployed)                   96.4 [94.6, 98.0]   0.671 [0.649, 0.691]    76.9%    76.0%     0.886      3      2.77     0.005    85.6%
-oracle (one-step)                             95.0 [91.7, 97.8]   0.849 [0.836, 0.863]    95.1%    89.8%     0.830      0      1.07     0.000    90.1%
-Paired, selected DQN minus  no response: recovered +96.1 [+94.2, +97.8] points, return +0.464 [+0.447, +0.478] | rule + escalation: recovered +54.7 [+49.9, +59.6] points, return +0.242 [+0.220, +0.266] | table (train pools): recovered +54.1 [+49.2, +59.1] points, return +0.227 [+0.204, +0.251] | fixed: channel_switch+spatial_diversity+power_control: recovered +40.8 [+37.1, +44.7] points, return +0.076 [+0.052, +0.099]
+no response                                      0.3 [0.0, 0.8]   0.206 [0.183, 0.229]     0.3%     0.3%     0.000      0      0.00     0.000    50.0%
+random                                        30.8 [26.1, 35.6]   0.311 [0.288, 0.333]    40.8%    40.1%     0.466      5     29.23     4.866    68.5%
+always-on MMSE                                   5.4 [1.9, 9.8]   0.303 [0.272, 0.339]     5.2%     5.2%     0.092      0      1.00     0.917    51.0%
+fixed: channel_switch+spatial_diversity+power_control        57.2 [54.2, 59.8]   0.605 [0.583, 0.629]    56.2%    54.7%     1.263      0      1.00     0.917    76.0%
+rule                                          32.7 [26.4, 38.7]   0.380 [0.340, 0.422]    26.9%    26.1%     0.357      4      2.98     0.039    56.9%
+rule + escalation                             42.9 [38.9, 47.3]   0.425 [0.391, 0.460]    33.3%    32.5%     0.497      7      4.02     0.039    62.3%
+table (train pools)                           41.6 [37.6, 45.4]   0.445 [0.415, 0.475]    36.8%    35.3%     0.617      3      2.61     0.044    66.0%
+DQN gamma=0.50 (selected)                     98.2 [97.0, 99.3]   0.669 [0.650, 0.687]    80.5%    79.7%     1.068      3      1.85     0.004    88.2%
+DQN + escalation (deployed)                   97.1 [95.4, 98.6]   0.664 [0.644, 0.682]    80.0%    78.8%     1.021      3      2.66     0.007    87.6%
+oracle (one-step)                             94.8 [91.6, 97.8]   0.856 [0.844, 0.868]    96.6%    90.6%     0.926      0      1.08     0.000    90.6%
+Paired, selected DQN minus  no response: recovered +96.9 [+95.1, +98.6] points, return +0.458 [+0.442, +0.473] | rule + escalation: recovered +54.2 [+50.3, +58.1] points, return +0.239 [+0.217, +0.260] | table (train pools): recovered +55.6 [+51.6, +59.6] points, return +0.219 [+0.199, +0.238] | fixed: channel_switch+spatial_diversity+power_control: recovered +39.9 [+37.0, +43.2] points, return +0.058 [+0.037, +0.078]
 
---- unknown (1152 episodes, 1124 recoverable) ---
+--- unknown (1152 episodes, 1129 recoverable) ---
 policy                                 recovered % (recoverable)                 return restored       ok   goodput  T_rec  switches  false sw   PLR ok
-no response                                    13.5 [9.3, 18.1]   0.347 [0.302, 0.394]    14.2%    13.2%     0.126      0      0.00     0.000    52.4%
-random                                        80.6 [77.9, 83.2]   0.524 [0.511, 0.535]    75.4%    74.9%     0.965      0     29.13     8.296    86.7%
-always-on MMSE                                47.8 [37.6, 57.6]   0.628 [0.559, 0.695]    49.0%    46.6%     0.518      0      1.00     0.917    73.9%
-fixed: channel_switch+spatial_diversity+power_control        90.5 [88.5, 92.2]   0.797 [0.781, 0.810]    88.5%    88.3%     2.357      0      1.00     0.917    93.8%
-rule                                          77.6 [74.3, 80.5]   0.666 [0.634, 0.697]    65.3%    63.8%     1.450      3      0.93     0.118    79.9%
-rule + escalation                             82.9 [81.2, 84.6]   0.684 [0.656, 0.709]    67.9%    66.9%     1.559      3      1.98     0.201    82.6%
-table (train pools)                           82.7 [80.7, 84.7]   0.704 [0.678, 0.728]    69.8%    69.0%     1.709      3      0.81     0.118    83.9%
-DQN gamma=0.50 (selected)                     81.0 [77.5, 83.8]   0.704 [0.671, 0.734]    67.8%    66.6%     1.178      3      1.21     0.081    82.8%
-DQN gamma=0.90                                78.8 [74.5, 82.1]   0.708 [0.672, 0.740]    66.4%    64.9%     0.995      3      1.08     0.100    81.0%
-DQN + escalation (deployed)                   81.0 [77.3, 83.9]   0.699 [0.665, 0.729]    67.6%    66.6%     1.129      3      1.60     0.113    82.7%
-oracle (one-step)                             96.7 [94.6, 98.5]   0.943 [0.931, 0.952]    97.8%    94.4%     0.955      0      0.91     0.000    95.6%
-Paired, selected DQN minus  no response: recovered +67.5 [+63.0, +72.0] points, return +0.352 [+0.321, +0.382] | rule + escalation: recovered -1.9 [-4.5, +0.4] points, return +0.015 [+0.003, +0.026] | table (train pools): recovered -1.7 [-4.4, +0.8] points, return -0.005 [-0.017, +0.005] | fixed: channel_switch+spatial_diversity+power_control: recovered -9.4 [-13.2, -6.1] points, return -0.098 [-0.127, -0.073]
+no response                                     9.6 [6.1, 13.5]   0.320 [0.278, 0.362]    10.3%     9.4%     0.116      0      0.00     0.000    51.8%
+random                                        80.7 [78.3, 82.9]   0.532 [0.522, 0.540]    75.5%    74.9%     0.977      0     29.13     7.388    86.8%
+always-on MMSE                                43.8 [33.7, 54.1]   0.618 [0.553, 0.683]    44.9%    42.9%     0.474      0      1.00     0.917    70.2%
+fixed: channel_switch+spatial_diversity+power_control        92.5 [91.2, 93.5]   0.812 [0.804, 0.818]    90.9%    90.6%     2.410      0      1.00     0.917    95.1%
+rule                                          81.3 [78.7, 83.6]   0.684 [0.661, 0.708]    67.8%    66.8%     1.558      3      0.90     0.088    82.5%
+rule + escalation                             84.3 [82.6, 85.9]   0.698 [0.678, 0.719]    70.0%    69.1%     1.668      3      1.87     0.141    83.9%
+table (train pools)                           85.7 [84.0, 87.1]   0.717 [0.698, 0.736]    71.9%    71.1%     1.800      3      0.81     0.088    85.1%
+DQN gamma=0.50 (selected)                     81.4 [79.0, 83.6]   0.664 [0.638, 0.688]    67.6%    66.4%     1.013      3      1.12     0.047    83.6%
+DQN + escalation (deployed)                   83.5 [81.9, 85.1]   0.663 [0.638, 0.686]    68.5%    67.5%     1.039      3      1.45     0.062    84.0%
+oracle (one-step)                             94.8 [91.6, 97.4]   0.943 [0.934, 0.952]    98.0%    92.9%     0.896      0      0.95     0.000    94.1%
+Paired, selected DQN minus  no response: recovered +74.0 [+70.0, +77.4] points, return +0.343 [+0.316, +0.368] | rule + escalation: recovered -0.8 [-2.5, +0.9] points, return -0.035 [-0.047, -0.023] | table (train pools): recovered -2.1 [-3.7, -0.6] points, return -0.054 [-0.065, -0.042] | fixed: channel_switch+spatial_diversity+power_control: recovered -8.9 [-11.0, -6.8] points, return -0.149 [-0.174, -0.128]
 
 --- clean (384 episodes, 0 recoverable) ---
 policy                                 recovered % (recoverable)                 return restored       ok   goodput  T_rec  switches  false sw   PLR ok
-no response                                      NaN [NaN, NaN]   0.942 [0.879, 0.987]    91.7%    91.7%     0.879      0      0.00     0.000    95.8%
-random                                           NaN [NaN, NaN]   0.563 [0.555, 0.574]    98.9%    98.9%     1.367      0     29.21    26.773    99.2%
-always-on MMSE                                   NaN [NaN, NaN]   0.941 [0.892, 0.972]    95.8%    95.8%     0.909      0      1.00     0.917    95.8%
-fixed: channel_switch+spatial_diversity+power_control           NaN [NaN, NaN]   0.873 [0.872, 0.873]   100.0%   100.0%     2.928      0      1.00     0.917   100.0%
-rule                                             NaN [NaN, NaN]   0.930 [0.876, 0.972]    94.6%    94.6%     1.318      0      0.31     0.268    95.8%
-rule + escalation                                NaN [NaN, NaN]   0.930 [0.876, 0.972]    94.6%    94.6%     1.318      0      0.31     0.268    95.8%
-table (train pools)                              NaN [NaN, NaN]   0.935 [0.880, 0.975]    94.6%    94.6%     1.333      0      0.31     0.266    95.8%
-DQN gamma=0.50 (selected)                        NaN [NaN, NaN]   0.938 [0.876, 0.986]    91.7%    91.7%     0.877      0      0.04     0.042    95.8%
-DQN gamma=0.90                                   NaN [NaN, NaN]   0.937 [0.875, 0.984]    91.7%    91.7%     0.913      0      0.10     0.099    95.8%
-DQN + escalation (deployed)                      NaN [NaN, NaN]   0.938 [0.876, 0.986]    91.7%    91.7%     0.877      0      0.04     0.042    95.8%
-oracle (one-step)                                NaN [NaN, NaN]   0.995 [0.988, 1.000]   100.0%   100.0%     0.905      0      0.08     0.000   100.0%
+no response                                      NaN [NaN, NaN]   0.941 [0.879, 0.987]    91.7%    89.6%     0.842      0      0.00     0.000    95.8%
+random                                           NaN [NaN, NaN]   0.563 [0.556, 0.573]    98.9%    98.5%     1.358      0     29.21    26.758    99.3%
+always-on MMSE                                   NaN [NaN, NaN]   0.942 [0.894, 0.972]    95.8%    93.8%     0.851      0      1.00     0.917    95.8%
+fixed: channel_switch+spatial_diversity+power_control           NaN [NaN, NaN]   0.873 [0.872, 0.873]   100.0%   100.0%     2.913      0      1.00     0.917   100.0%
+rule                                             NaN [NaN, NaN]   0.945 [0.907, 0.975]    97.6%    95.5%     1.193      0      0.30     0.188    97.4%
+rule + escalation                                NaN [NaN, NaN]   0.945 [0.907, 0.975]    97.6%    95.5%     1.193      0      0.31     0.201    97.4%
+table (train pools)                              NaN [NaN, NaN]   0.949 [0.912, 0.978]    97.6%    95.5%     1.202      0      0.30     0.188    97.4%
+DQN gamma=0.50 (selected)                        NaN [NaN, NaN]   0.947 [0.897, 0.989]    94.4%    92.3%     0.823      0      0.09     0.034    97.4%
+DQN + escalation (deployed)                      NaN [NaN, NaN]   0.947 [0.897, 0.989]    94.4%    92.3%     0.823      0      0.09     0.034    97.4%
+oracle (one-step)                                NaN [NaN, NaN]   0.995 [0.988, 1.000]   100.0%    97.9%     0.863      0      0.08     0.000    97.9%
 
 --- comb (288 episodes, 288 recoverable) ---
 policy                                 recovered % (recoverable)                 return restored       ok   goodput  T_rec  switches  false sw   PLR ok
-no response                                      1.0 [0.0, 2.8]   0.210 [0.184, 0.237]     1.0%     1.0%     0.002      0      0.00     0.000    50.0%
-random                                        62.5 [52.8, 71.5]   0.448 [0.416, 0.477]    63.1%    62.6%     0.815      3     29.36     5.073    81.1%
-always-on MMSE                                45.5 [31.9, 59.4]   0.624 [0.529, 0.713]    45.8%    45.5%     0.553      0      1.00     0.917    76.4%
-fixed: channel_switch+spatial_diversity+power_control        77.8 [66.0, 88.2]   0.700 [0.621, 0.768]    79.2%    77.8%     1.929      0     24.56     0.917    90.3%
-rule                                          65.3 [53.8, 75.7]   0.579 [0.511, 0.638]    51.7%    50.6%     0.957      3     12.24     0.038    80.8%
-rule + escalation                             84.0 [76.4, 90.3]   0.643 [0.590, 0.690]    63.6%    62.5%     1.459      7     10.67     0.059    83.4%
-table (train pools)                            11.1 [6.6, 16.0]   0.223 [0.195, 0.250]     8.1%     8.0%     0.175      7     21.36     0.038    54.2%
-DQN gamma=0.50 (selected)                     93.1 [88.2, 97.2]   0.755 [0.719, 0.787]    77.9%    77.6%     1.057      3      5.89     0.021    88.3%
-DQN gamma=0.90                                89.6 [82.3, 95.1]   0.751 [0.706, 0.792]    74.2%    74.0%     0.886      3      7.49     0.017    86.3%
-DQN + escalation (deployed)                   92.0 [86.1, 96.5]   0.748 [0.709, 0.781]    77.3%    76.9%     1.030      3      5.67     0.024    87.5%
-oracle (one-step)                             98.3 [96.2, 99.7]   0.962 [0.953, 0.969]   100.0%    98.3%     0.864      0      1.07     0.000    98.3%
-Paired, selected DQN minus  no response: recovered +91.0 [+85.8, +95.5] points, return +0.538 [+0.509, +0.566] | rule + escalation: recovered +8.0 [+0.7, +15.6] points, return +0.104 [+0.062, +0.147] | table (train pools): recovered +80.9 [+73.6, +87.5] points, return +0.525 [+0.489, +0.559] | fixed: channel_switch+spatial_diversity+power_control: recovered +14.2 [+3.5, +26.0] points, return +0.048 [-0.024, +0.123]
+no response                                      0.7 [0.0, 2.1]   0.201 [0.178, 0.224]     0.7%     0.7%     0.003      0      0.00     0.000    50.0%
+random                                        66.7 [59.7, 72.9]   0.469 [0.450, 0.489]    65.8%    65.5%     0.866      4     29.36     4.903    82.9%
+always-on MMSE                                39.9 [27.1, 53.5]   0.618 [0.538, 0.697]    41.0%    39.9%     0.493      0      1.00     0.917    71.5%
+fixed: channel_switch+spatial_diversity+power_control        94.1 [87.8, 98.6]   0.800 [0.763, 0.828]    94.1%    94.1%     2.300      0     24.56     0.917    97.9%
+rule                                          72.6 [63.5, 81.2]   0.619 [0.571, 0.663]    55.8%    55.6%     0.958      4     11.67     0.056    83.9%
+rule + escalation                             90.6 [85.4, 94.8]   0.686 [0.651, 0.718]    69.5%    69.3%     1.553      7     12.23     0.069    87.2%
+table (train pools)                           18.1 [12.2, 25.0]   0.252 [0.219, 0.286]    13.4%    13.4%     0.267      5     21.57     0.056    58.9%
+DQN gamma=0.50 (selected)                    99.0 [97.6, 100.0]   0.716 [0.697, 0.734]    82.7%    82.7%     1.471      3      7.12     0.017    91.7%
+DQN + escalation (deployed)                   97.6 [95.5, 99.3]   0.710 [0.691, 0.727]    82.2%    81.4%     1.422      3      7.97     0.017    90.3%
+oracle (one-step)                             93.8 [87.8, 98.6]   0.960 [0.952, 0.967]   100.0%    93.8%     0.792      0      1.08     0.000    93.8%
+Paired, selected DQN minus  no response: recovered +96.9 [+94.1, +99.0] points, return +0.509 [+0.489, +0.528] | rule + escalation: recovered +6.9 [+2.4, +11.8] points, return +0.023 [-0.004, +0.058] | table (train pools): recovered +79.5 [+73.3, +85.1] points, return +0.457 [+0.422, +0.493] | fixed: channel_switch+spatial_diversity+power_control: recovered +3.5 [-1.7, +9.0] points, return -0.090 [-0.124, -0.047]
 
 --- threat sets pooled (single + follower + combined, 3936 episodes) ---
 policy                                 recovered % (recoverable)                 return restored       ok   goodput  T_rec  switches  false sw   PLR ok
-no response                                     9.1 [6.1, 12.4]   0.298 [0.260, 0.338]     9.6%     8.9%     0.086      0      0.00     0.000    51.6%
-random                                        74.0 [71.4, 76.4]   0.496 [0.482, 0.509]    70.4%    69.9%     0.906      0     29.17     7.127    84.0%
-always-on MMSE                                39.9 [30.4, 49.2]   0.566 [0.500, 0.629]    40.5%    38.9%     0.445      0      1.00     0.917    70.0%
-fixed: channel_switch+spatial_diversity+power_control        82.9 [79.7, 85.7]   0.766 [0.749, 0.780]    83.4%    82.9%     2.235      0      2.28     0.917    90.9%
-rule                                          72.9 [68.6, 76.6]   0.659 [0.623, 0.694]    63.2%    62.1%     0.974      3      2.40     0.123    78.2%
-rule + escalation                             77.7 [74.1, 80.6]   0.675 [0.641, 0.707]    66.0%    64.8%     1.076      3      2.79     0.140    80.3%
-table (train pools)                           78.9 [75.6, 81.8]   0.705 [0.677, 0.730]    70.7%    69.9%     1.253      3      2.87     0.147    83.7%
-DQN gamma=0.50 (selected)                     92.6 [89.0, 95.3]   0.759 [0.727, 0.787]    79.3%    78.5%     1.048      3      1.75     0.081    89.0%
-DQN gamma=0.90                                91.4 [87.4, 94.7]   0.767 [0.734, 0.796]    78.5%    77.4%     0.956      3      1.84     0.088    88.2%
-DQN + escalation (deployed)                   94.2 [90.9, 96.7]   0.754 [0.724, 0.781]    79.9%    79.3%     1.060      3      2.23     0.140    89.0%
-oracle (one-step)                             96.7 [94.8, 98.2]   0.931 [0.921, 0.939]    97.8%    94.2%     0.913      0      2.21     0.000    95.0%
-Paired, selected DQN minus  no response: recovered +85.0 [+81.6, +88.6] points, return +0.457 [+0.429, +0.482] | rule + escalation: recovered +16.5 [+14.7, +18.4] points, return +0.079 [+0.069, +0.090] | table (train pools): recovered +15.2 [+12.7, +18.0] points, return +0.050 [+0.041, +0.058] | fixed: channel_switch+spatial_diversity+power_control: recovered +11.3 [+7.5, +14.9] points, return -0.011 [-0.039, +0.011]
+no response                                      6.1 [3.7, 9.0]   0.277 [0.243, 0.312]     6.6%     5.9%     0.078      0      0.00     0.000    51.2%
+random                                        74.7 [72.9, 76.6]   0.504 [0.492, 0.515]    70.7%    70.1%     0.919      1     29.17     6.399    84.2%
+always-on MMSE                                35.8 [26.7, 45.1]   0.558 [0.498, 0.617]    36.6%    35.1%     0.404      0      1.00     0.917    66.9%
+fixed: channel_switch+spatial_diversity+power_control        86.7 [85.2, 87.9]   0.782 [0.774, 0.789]    85.9%    85.4%     2.262      0      2.28     0.917    92.4%
+rule                                          72.5 [69.4, 75.6]   0.654 [0.622, 0.685]    62.5%    60.9%     0.968      3      2.38     0.096    77.7%
+rule + escalation                             79.6 [77.5, 81.6]   0.677 [0.650, 0.705]    66.6%    65.2%     1.123      3      2.80     0.106    80.7%
+table (train pools)                           81.9 [80.2, 83.5]   0.709 [0.687, 0.730]    71.5%    70.3%     1.302      3      2.88     0.116    84.2%
+DQN gamma=0.50 (selected)                     94.5 [92.9, 95.9]   0.730 [0.707, 0.750]    81.2%    80.3%     1.152      3      1.76     0.032    90.3%
+DQN + escalation (deployed)                   96.1 [94.6, 97.5]   0.728 [0.707, 0.748]    82.5%    81.4%     1.208      3      2.21     0.078    90.1%
+oracle (one-step)                             94.6 [91.1, 97.5]   0.932 [0.923, 0.939]    98.2%    92.6%     0.880      0      2.28     0.000    93.3%
+Paired, selected DQN minus  no response: recovered +90.1 [+87.3, +92.3] points, return +0.452 [+0.427, +0.474] | rule + escalation: recovered +16.5 [+14.7, +18.3] points, return +0.051 [+0.041, +0.061] | table (train pools): recovered +14.3 [+12.8, +15.8] points, return +0.019 [+0.013, +0.026] | fixed: channel_switch+spatial_diversity+power_control: recovered +9.4 [+7.7, +11.2] points, return -0.053 [-0.074, -0.035]
 
 Recovered episodes among the recoverable, per threat (single + follower + combined sets), %:
 threat                         episodes recoverable   no resp. fixed best   rule+esc      table        DQN    DQN+esc     oracle
-jamming                             576      100.0%        0.7       91.3       92.7       84.5       94.3       94.6       98.3
-noise_burst                         288       95.1%        5.8       87.6       89.1       87.6       94.2       93.8       95.6
-reactive_jamming                    576      100.0%        1.4       91.3       95.0       87.7       92.4       93.2       98.6
-path_loss                           288       85.4%        0.0       40.7       50.0       55.7       90.2       91.1       99.2
-spoofing                            576      100.0%       13.2       96.5       91.8       88.9       93.2       94.1       98.3
-antenna_fault                       288      100.0%       41.0      100.0       71.5      100.0       84.7       99.0       87.5
-benign_interference                 288      100.0%       31.9      100.0       93.1       93.1       84.4       86.5       98.6
-sweeping_jammer                     288      100.0%       11.8       88.2       78.8       99.3       95.5       95.5       96.5
-jamming+path_loss                    96      100.0%        0.0        2.1        2.1        2.1       99.0       99.0       93.8
-noise_burst+antenna_fault            96       62.5%        0.0       70.0       70.0       70.0       81.7       85.0       93.3
-sweeping_jammer+path_loss            96      100.0%        0.0        0.0        5.2        0.0       94.8       93.8       93.8
-spoofing+noise_burst                 96       97.9%        0.0       89.4       52.1       87.2       95.7       94.7       97.9
-reactive_jamming+path_loss           96      100.0%        0.0        8.3       25.0       35.4      100.0      100.0       97.9
-jamming+antenna_fault                96      100.0%        0.0      100.0       45.8       19.8       96.9       97.9       85.4
-spoofing+sweeping_jammer             96      100.0%        2.1       91.7       70.8       45.8       97.9       96.9      100.0
-benign_interference+noise_burst       96       95.8%        0.0       91.3       75.0       91.3       98.9      100.0       97.8
+jamming                             576      100.0%        0.7       97.7       93.9       89.1       96.7       96.4       93.1
+noise_burst                         288       98.6%        2.1       97.2       93.7       97.2       98.9       97.2       97.2
+reactive_jamming                    576      100.0%        0.7       97.7       95.5       93.6       96.2       96.7       95.1
+path_loss                           288       85.4%        0.0       37.4       49.2       55.7       95.1       94.7       97.6
+spoofing                            576      100.0%        4.2       99.5       95.8       95.7       96.4       95.8       94.4
+antenna_fault                       288      100.0%       33.3      100.0       72.2      100.0       77.4       98.3       89.6
+benign_interference                 288      100.0%       27.1      100.0       93.8       93.8       81.6       87.2       93.1
+sweeping_jammer                     288      100.0%        6.9       97.2       85.4       96.5       98.3       99.7       97.2
+jamming+path_loss                    96      100.0%        0.0        2.1        2.1        2.1      100.0      100.0       95.8
+noise_burst+antenna_fault            96       64.6%        0.0       83.9       75.8       83.9       91.9       88.7      100.0
+sweeping_jammer+path_loss            96      100.0%        0.0        0.0        4.2        0.0       97.9       96.9       97.9
+spoofing+noise_burst                 96      100.0%        0.0       91.7       60.4       89.6       96.9       95.8       93.8
+reactive_jamming+path_loss           96      100.0%        0.0        2.1       19.8       31.2       97.9       97.9       97.9
+jamming+antenna_fault                96      100.0%        0.0      100.0       52.1       14.6      100.0      100.0       93.8
+spoofing+sweeping_jammer             96      100.0%        2.1       95.8       74.0       34.4      100.0      100.0       91.7
+benign_interference+noise_burst       96      100.0%        0.0       91.7       66.7       91.7       99.0       94.8       89.6
 
 Deployed policy (DQN + escalation) per threat and severity (low / nominal / high), recovered among recoverable, %:
-  jamming                        90.6    97.9    95.3
-  noise_burst                    95.8    96.7    88.6
-  reactive_jamming               92.2    93.8    93.8
-  path_loss                      87.5   100.0    81.5
-  spoofing                       94.3    93.8    94.3
-  antenna_fault                  97.9    99.0   100.0
-  benign_interference            86.5    83.3    89.6
-  sweeping_jammer                93.8    95.8    96.9
-KPI 4 (deployed policy >= 90% of the recoverable episodes of every threat): 14 of 16 threats | lowest noise_burst+antenna_fault 85.0%
+  jamming                        95.3    94.8    99.0
+  noise_burst                    96.9    98.9    95.7
+  reactive_jamming               97.4    97.4    95.3
+  path_loss                      96.9    99.0    83.3
+  spoofing                       95.8    96.9    94.8
+  antenna_fault                  96.9    99.0    99.0
+  benign_interference            79.2    88.5    93.8
+  sweeping_jammer               100.0   100.0    99.0
+KPI 4 (deployed policy >= 90% of the recoverable episodes of every threat): 14 of 16 threats | lowest benign_interference 87.2%
 
 Recovered among recoverable per Eb/N0 (single set), %:
 Eb/N0 [dB]     no resp. fixed best   rule+esc      table        DQN    DQN+esc     oracle
-0                  37.7       91.6       96.6       98.4       98.4       99.0      100.0
-2                   8.7       92.4       81.2       90.5       83.2       90.2      100.0
-4                  19.8       89.8       88.5       92.8       93.6       96.8      100.0
-6                   2.7       91.4       76.5       87.6       85.9       87.0       97.8
-8                   3.7       89.4       80.2       88.6       92.1       92.6       89.4
-10                  8.0       88.3       85.4       91.2       95.5       96.5       93.1
+0                  28.4       92.6       95.5       96.1       96.8       98.4      100.0
+2                   8.7       95.7       87.0       95.9       87.2       97.8      100.0
+4                  12.1       92.6       94.2       96.1       94.2       99.7      100.0
+6                   1.6       92.0       79.4       88.2       89.8       92.2       98.4
+8                   1.1       92.6       80.1       87.8       94.1       92.6       79.3
+10                  5.3       89.5       84.5       90.3       96.6       96.6       91.1
 
 Recovered among recoverable vs interferer direction (single set, directional threats), %:
 |AoA| from GCS       no resp. fixed best   rule+esc      table        DQN    DQN+esc     oracle
-0-20 deg (386)            3.1       84.5       87.8       91.2       95.3       95.6       97.4
-20-45 deg (464)           7.8       98.3       90.5       94.4       88.4       89.0       97.8
-45-90 deg (864)          16.0      100.0       94.7       97.6       94.1       94.4       98.1
-  recoverable share per direction bin: 0-20 deg 97.5% | 20-45 deg 99.1% | 45-90 deg 100.0%
+0-20 deg (176)            5.7       95.5       92.0       97.7       96.6       97.2       94.3
+20-45 deg (720)           3.9       98.9       94.9       95.4       96.2       96.7       92.8
+45-90 deg (828)           9.9      100.0       94.9       96.9       94.7       95.4       97.6
+  recoverable share per direction bin: 0-20 deg 97.8% | 20-45 deg 100.0% | 45-90 deg 100.0%
 
 Recovered among recoverable vs UAV speed (single set), %:
 speed [km/h]         no resp. fixed best   rule+esc      table        DQN    DQN+esc     oracle
-50-68 (616)              12.0       91.6       89.0       94.0       95.1       96.8       95.8
-68-85 (330)              26.7       88.5       91.5       94.5       97.3       98.2       98.8
-85-102 (834)              7.0       90.2       76.9       87.4       84.3       87.6       97.1
-102-120 (468)            17.9       91.0       88.7       93.6       95.5       97.4       95.7
+50-68 (612)              11.1       91.2       87.3       93.5       93.5       96.4       94.1
+68-85 (330)              10.3       93.3       90.3       91.2       92.1       97.6      100.0
+85-102 (840)              7.6       93.1       84.5       91.8       91.4       95.0       93.1
+102-120 (476)            10.5       92.4       87.8       92.9       96.6       97.3       95.0
 
 False alarms on the clean link, test pools (8 geometries per Eb/N0), Eb/N0 >= 0 dB (384 episodes x 30 cycles): episodes with >= 1 change, one-sided 95% Clopper-Pearson upper bound; per-cycle rate
   no response                                 0 /  384 =   0.00%   upper   0.78%   per cycle 0.0000%
   always-on MMSE                            384 /  384 = 100.00%   upper 100.00%   per cycle 3.3333%
   fixed: channel_switch+spatial_diversity+power_control  384 /  384 = 100.00%   upper 100.00%   per cycle 3.3333%
-  rule                                      112 /  384 =  29.17%   upper  33.22%   per cycle 1.0330%
-  rule + escalation                         112 /  384 =  29.17%   upper  33.22%   per cycle 1.0330%
-  table (train pools)                       112 /  384 =  29.17%   upper  33.22%   per cycle 1.0243%
-  DQN gamma=0.50 (selected)                  16 /  384 =   4.17%   upper   6.26%   per cycle 0.1389%
-  DQN gamma=0.90                             32 /  384 =   8.33%   upper  11.03%   per cycle 0.3299%
-  DQN + escalation (deployed)                16 /  384 =   4.17%   upper   6.26%   per cycle 0.1389%
-  DQN + escalation (deployed), false-alarm episodes per Eb/N0: 0 dB 0/64 | 2 dB 0/64 | 4 dB 8/64 | 6 dB 0/64 | 8 dB 0/64 | 10 dB 8/64
-    detector class at the first change: path_loss 16 (degraded 0, median Eb/N0 drop 5.8 dB)
-  rule + escalation, false-alarm episodes per Eb/N0: 0 dB 24/64 | 2 dB 24/64 | 4 dB 40/64 | 6 dB 16/64 | 8 dB 0/64 | 10 dB 8/64
-    detector class at the first change: none 89 (degraded 89, median Eb/N0 drop -3.5 dB), path_loss 16 (degraded 0, median Eb/N0 drop 5.8 dB), unknown 7 (degraded 7, median Eb/N0 drop -3.3 dB)
+  rule                                      104 /  384 =  27.08%   upper  31.07%   per cycle 0.9983%
+  rule + escalation                         104 /  384 =  27.08%   upper  31.07%   per cycle 1.0417%
+  table (train pools)                       104 /  384 =  27.08%   upper  31.07%   per cycle 1.0156%
+  DQN gamma=0.50 (selected)                  29 /  384 =   7.55%   upper  10.15%   per cycle 0.3038%
+  DQN + escalation (deployed)                29 /  384 =   7.55%   upper  10.15%   per cycle 0.3038%
+  DQN + escalation (deployed), false-alarm episodes per Eb/N0: 0 dB 5/64 | 2 dB 0/64 | 4 dB 0/64 | 6 dB 8/64 | 8 dB 8/64 | 10 dB 8/64
+    detector class at the first change: path_loss 29 (degraded 0, median Eb/N0 drop 4.3 dB)
+  rule + escalation, false-alarm episodes per Eb/N0: 0 dB 24/64 | 2 dB 16/64 | 4 dB 16/64 | 6 dB 32/64 | 8 dB 8/64 | 10 dB 8/64
+    detector class at the first change: none 76 (degraded 76, median Eb/N0 drop -3.0 dB), path_loss 28 (degraded 0, median Eb/N0 drop 4.3 dB)
 
 False alarms on the clean link, 100 new geometries per Eb/N0 (data/clean_test_pools.mat), one episode per geometry, Eb/N0 >= 0 dB (600 independent episodes x 30 cycles) -> KPI 6
   no response                                 0 /  600 =   0.00%   upper   0.50%   per cycle 0.0000%
   always-on MMSE                            600 /  600 = 100.00%   upper 100.00%   per cycle 3.3333%
   fixed: channel_switch+spatial_diversity+power_control  600 /  600 = 100.00%   upper 100.00%   per cycle 3.3333%
-  rule                                      159 /  600 =  26.50%   upper  29.63%   per cycle 0.9500%
-  rule + escalation                         159 /  600 =  26.50%   upper  29.63%   per cycle 0.9611%
-  table (train pools)                       159 /  600 =  26.50%   upper  29.63%   per cycle 0.9556%
-  DQN gamma=0.50 (selected)                  19 /  600 =   3.17%   upper   4.61%   per cycle 0.1722%
-  DQN gamma=0.90                             40 /  600 =   6.67%   upper   8.59%   per cycle 0.2611%
-  DQN + escalation (deployed)                19 /  600 =   3.17%   upper   4.61%   per cycle 0.1722%
-  DQN + escalation (deployed), false-alarm episodes per Eb/N0: 0 dB 4/100 | 2 dB 6/100 | 4 dB 2/100 | 6 dB 1/100 | 8 dB 2/100 | 10 dB 4/100
-    detector class at the first change: none 1 (degraded 1, median Eb/N0 drop 3.7 dB), path_loss 15 (degraded 0, median Eb/N0 drop 5.8 dB), antenna_fault 1 (degraded 0, median Eb/N0 drop 3.9 dB), unknown 2 (degraded 2, median Eb/N0 drop -3.1 dB)
-  rule + escalation, false-alarm episodes per Eb/N0: 0 dB 38/100 | 2 dB 34/100 | 4 dB 37/100 | 6 dB 30/100 | 8 dB 14/100 | 10 dB 6/100
-    detector class at the first change: none 136 (degraded 136, median Eb/N0 drop -2.8 dB), path_loss 15 (degraded 0, median Eb/N0 drop 5.5 dB), unknown 8 (degraded 8, median Eb/N0 drop -3.8 dB)
+  rule                                      161 /  600 =  26.83%   upper  29.97%   per cycle 0.9333%
+  rule + escalation                         161 /  600 =  26.83%   upper  29.97%   per cycle 0.9333%
+  table (train pools)                       161 /  600 =  26.83%   upper  29.97%   per cycle 0.9333%
+  DQN gamma=0.50 (selected)                  12 /  600 =   2.00%   upper   3.22%   per cycle 0.0944%
+  DQN + escalation (deployed)                13 /  600 =   2.17%   upper   3.42%   per cycle 0.1167%
+  DQN + escalation (deployed), false-alarm episodes per Eb/N0: 0 dB 0/100 | 2 dB 3/100 | 4 dB 2/100 | 6 dB 4/100 | 8 dB 2/100 | 10 dB 2/100
+    detector class at the first change: none 1 (degraded 1, median Eb/N0 drop -3.4 dB), path_loss 11 (degraded 1, median Eb/N0 drop 5.8 dB), unknown 1 (degraded 1, median Eb/N0 drop -3.9 dB)
+  rule + escalation, false-alarm episodes per Eb/N0: 0 dB 30/100 | 2 dB 37/100 | 4 dB 45/100 | 6 dB 39/100 | 8 dB 8/100 | 10 dB 2/100
+    detector class at the first change: none 149 (degraded 149, median Eb/N0 drop -3.2 dB), path_loss 9 (degraded 1, median Eb/N0 drop 5.8 dB), unknown 3 (degraded 3, median Eb/N0 drop -3.9 dB)
 
 Configuration at the end of the episode, deployed policy (single set): most frequent two per threat
-  jamming                freq_diversity+spatial_diversity 22%, channel_switch+spatial_diversity 15%
-  noise_burst            channel_switch+spatial_diversity+power_control 32%, freq_diversity+spatial_diversity 12%
-  reactive_jamming       freq_diversity+spatial_diversity 33%, freq_diversity 24%
-  path_loss              channel_switch+spatial_diversity+power_control+fec_interleave 25%, channel_switch+rate_reduce+power_control 13%
-  spoofing               freq_diversity+spatial_diversity 49%, freq_diversity 12%
-  antenna_fault          freq_diversity+power_control 17%, channel_switch+power_control 17%
-  benign_interference    channel_switch 38%, no_action 31%
-  sweeping_jammer        freq_diversity+spatial_diversity 24%, channel_switch+spatial_diversity 8%
+  jamming                freq_diversity+power_control+fec_interleave 14%, freq_diversity+power_control 12%
+  noise_burst            channel_switch+spatial_diversity+power_control 33%, channel_switch+spatial_diversity+rate_reduce+power_control 17%
+  reactive_jamming       channel_switch+spatial_diversity 20%, freq_diversity+power_control 13%
+  path_loss              freq_diversity+rate_reduce+power_control 32%, freq_diversity+spatial_diversity+rate_reduce+power_control 17%
+  spoofing               freq_diversity+spatial_diversity 19%, freq_diversity 16%
+  antenna_fault          freq_diversity+spatial_diversity+fec_interleave 25%, spatial_diversity+power_control 15%
+  benign_interference    no_action 25%, channel_switch 23%
+  sweeping_jammer        channel_switch+power_control+fec_interleave 30%, freq_diversity+fec_interleave 10%

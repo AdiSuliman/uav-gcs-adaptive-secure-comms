@@ -137,43 +137,43 @@ Every threat × severity × Eb/N0 through the 36 configurations on one seeded ru
 
 ---
 
-## Results (v4, final test reading, 2026-09-29)
+## Results (v4, final test reading, 2026-09-30)
 
-All numbers on data never used for training or selection: the detector on the test split (by sub-run), the decision layer on the third set of test flights (seed block 6, read once, D64) and the false alarms on 600 further clean geometries (block 7). Intervals are 95% bootstrap over flight geometries. Deployed decision layer: Double DQN (γ 0.5, 3-of-3 alarm confirmation, path-loss alarm after a 3 dB Eb/N0 drop, training false-switch penalty 80) with escalation (D64).
+All numbers on data never used for training or selection: the detector on the test split (by sub-run), the decision layer on the fourth set of test flights (seed block 8, read once, D67) and the false alarms on 600 further clean geometries (block 9). Intervals are 95% bootstrap over flight geometries. Deployed decision layer: Double DQN (γ 0.5, 3-of-3 alarm confirmation, path-loss alarm after a 3 dB Eb/N0 drop; training reward with running costs ×0.5 and false-switch penalty 160) with escalation (D64, D67).
 
 | # | KPI | Result | Status |
 |---|---|---|---|
 | 1 | Detection vs SNR | macro-F1 97.02% [96.24, 97.60]; every class ≥ 93.85% from 0 dB; unseen Eb/N0 97.93% vs 97.69% | MET |
 | 2 | Unknown threats | mean AUROC 0.859 (nested leave-one-threat-out); reactive jamming 0.641 is the hardest | MET |
 | 3 | BER vs theory | 5/5 within 0.3 dB (+0.05, −0.21, +0.05, +0.13, +0.17 dB); seeds reproducible | MET |
-| 4 | Restoration | 14 of 16 threats ≥ 90% of the recoverable episodes; benign interference 86.5%, noise burst + antenna fault 85.0% (60 recoverable episodes); pooled 94.2% [90.9, 96.7] | NOT MET |
-| 5 | DQN + escalation vs baselines | +16.5 points recovered vs rule + escalation [+14.6, +18.3] | MET |
-| 6 | False alarms | 19 of 600 independent clean geometries, one-sided bound 4.61%; rule + escalation 159/600 | MET |
-| 7 | Real time + speed | latency median 2.70 ms, p95 3.16 ms per decision cycle (desktop, GPU detector); recovery per speed band 96.8 / 98.2 / 87.6 / 97.4% (spread 10.6 points > 10) | NOT MET |
+| 4 | Restoration | 14 of 16 threats ≥ 90% of the recoverable episodes; benign interference 87.2%, noise burst + antenna fault 88.7% (62 recoverable episodes); pooled 96.1% [94.8, 97.5] | NOT MET |
+| 5 | DQN + escalation vs baselines | +16.5 points recovered vs rule + escalation [+14.8, +18.4] | MET |
+| 6 | False alarms | 13 of 600 independent clean geometries, one-sided bound 3.42%; rule + escalation 161/600 | MET |
+| 7 | Real time + speed | latency median 2.91 ms, p95 3.97 ms per decision cycle (desktop, GPU detector); recovery per speed band 96.4 / 97.6 / 95.0 / 97.3% (spread 2.6 points) | MET |
 | 8 | End-to-end loop | all 16 threats recovered on ≥ 50% of their recoverable episodes | MET |
 
 **Recovered among recoverable episodes, per episode set** (test flights):
 
 | Set | DQN + esc. | rule + esc. | table | best fixed | oracle |
 |---|---|---|---|---|---|
-| single threats, 3 severities | 93.7 | 84.8 | 91.5 | 90.5 | 96.7 |
-| follower jammer (2–5 cycles) | 93.4 | 89.4 | 77.0 | 86.1 | 97.9 |
-| combined threats (new flights) | 96.4 | 41.7 | 42.3 | 55.6 | 95.0 |
-| comb (immediate follower), reported apart | 92.0 | 84.0 | 11.1 | 77.8 | 98.3 |
-| unknown (detector output withheld) | 81.0 | 82.9 | 82.7 | 90.5 | 96.7 |
-| threat sets pooled | **94.2** | 77.7 | 78.9 | 82.9 | 96.7 |
+| single threats, 3 severities | 96.2 | 86.8 | 92.4 | 92.5 | 94.8 |
+| follower jammer (2–5 cycles) | 95.0 | 91.9 | 88.7 | 96.6 | 93.8 |
+| combined threats (new flights) | 97.1 | 42.9 | 41.6 | 57.2 | 94.8 |
+| comb (immediate follower), reported apart | 97.6 | 90.6 | 18.1 | 94.1 | 93.8 |
+| unknown (detector output withheld) | 83.5 | 84.3 | 85.7 | 92.5 | 94.8 |
+| threat sets pooled | **96.1** | 79.6 | 81.9 | 86.7 | 94.6 |
 
-Per threat (KPI 4): jamming 94.6, noise burst 93.8, reactive jamming 93.2, path loss 91.1, spoofing 94.1, antenna fault 99.0, benign interference 86.5, sweeping jammer 95.5; combined: jamming + path loss 99.0, noise burst + antenna fault 85.0, sweeping jammer + path loss 93.8, spoofing + noise burst 94.7, reactive jamming + path loss 100, jamming + antenna fault 97.9, spoofing + sweeping jammer 96.9, benign interference + noise burst 100 (%). Detector baselines on the same test split: hybrid network 97.0% macro-F1, link-feature MLP 85.7%, random forest 85.2%, spectrogram-only CNN 74.8%, kernel SVM 69.6%.
+Per threat (KPI 4): jamming 96.4, noise burst 97.2, reactive jamming 96.7, path loss 94.7, spoofing 95.8, antenna fault 98.3, benign interference 87.2, sweeping jammer 99.7; combined: jamming + path loss 100, noise burst + antenna fault 88.7, sweeping jammer + path loss 96.9, spoofing + noise burst 95.8, reactive jamming + path loss 97.9, jamming + antenna fault 100, spoofing + sweeping jammer 100, benign interference + noise burst 94.8 (%). Detector baselines on the same test split: hybrid network 97.0% macro-F1, link-feature MLP 85.7%, random forest 85.2%, spectrogram-only CNN 74.8%, kernel SVM 69.6%.
 
 **Findings:**
-- The learned policy's advantage is largest where the rule's class mapping breaks: combined threats (96.4% vs 41.7%) and the immediate follower (92.0% vs 84.0%). On single static threats the tuned table is close (91.5% vs 93.7%).
-- Escalation matters: DQN alone 92.6% pooled, with escalation 94.2%; out of no_action it fires on a confirmed alarm held for 3 cycles, which fixed antenna fault (87.2% → 99.0% between the second and third readings).
-- The remaining misses share one mechanism, measured on validation: the monitor judges degradation from the estimated BER of 5 frames, which cannot resolve a 2× BER excess near the clean link's error rate. Benign interference raises an alarm only through degradation, and with 3-of-3 confirmation three degraded cycles in a row are rare (validation: 96.5% with 2-of-2, 91.0% with 3-of-3). Four fixes were tested on validation and not adopted (D64, D65), the last because degradation confirmed on 2 of 2 raised the clean-link false alarms above the bound (21–33 of 600).
-- Combinations never trained on: 79.5% vs 94.6% for the same combinations trained on; sweeping jammer + path loss falls to 10.4% (D61 experiment).
-- The 85–102 km/h band (18 flights) is lower for every policy except the oracle (rule + escalation 76.9%, table 87.4%), while 102–120 km/h is 97.4%: a property of those flights rather than of speed; not yet explained.
+- The learned policy's advantage is largest where the rule's class mapping breaks: combined threats (97.1% vs 42.9%) and the immediate follower (97.6% vs 90.6%). On single static threats the tuned table is close (92.4% vs 96.2%).
+- Escalation matters: DQN alone 94.5% pooled, with escalation 96.1%; out of no_action it fires on a confirmed alarm held for 3 cycles, which fixed antenna fault (87.2% → 99.0% between the second and third readings).
+- The remaining misses share one mechanism, measured on validation: the monitor judges degradation from the estimated BER of 5 frames, which cannot resolve a 2× BER excess near the clean link's error rate. Benign interference raises an alarm only through degradation, and with 3-of-3 confirmation three degraded cycles in a row are rare (validation: 96.5% with 2-of-2, 91.0% with 3-of-3). Four fixes were tested on validation and not adopted (D64, D65), the last because degradation confirmed on 2 of 2 raised the clean-link false alarms above the bound (21–33 of 600). Lower running costs in the training reward with a higher false-switch penalty (D67) raised both (benign 86.5 → 87.2%, noise burst + antenna fault 85.0 → 88.7% between the third and fourth readings), not to 90%.
+- Combinations never trained on: 84.4% vs 97.6% for the same combinations trained on; sweeping jammer + path loss falls to 25.0% (D61 experiment).
+- Recovery per speed band is 95.0–97.6% (spread 2.6 points). In the third reading the 85–102 km/h band was 87.6%, from five flights of that set on which benign interference failed; the new flights of the fourth reading do not show it.
 - Survivability: Map A 82% recoverable, Map B 93% (threat × severity × Eb/N0 × geometry).
 
-**Test readings:** the decision layer was read on test flights three times: the first v4 agent (first reading; KPI 4 14/16), the D63 agent (second; KPI 4 12/16), both on the same flights, and the D64 agent on new flights (third, above). Each change after a reading was decided on validation and recorded in `docs/DECISIONS.md` before the next reading; the earlier readings are kept in `archive/`.
+**Test readings:** the decision layer was read on test flights four times: the first v4 agent (first reading; KPI 4 14/16), the D63 agent (second; KPI 4 12/16), both on the same flights, the D64 agent on new flights (third; KPI 4 14/16, KPI 7 not met) and the D67 agent on new flights (fourth, above; adopted as a documented exception to its adoption rule, D67). Each change after a reading was decided on validation and recorded in `docs/DECISIONS.md` before the next reading; the earlier readings are kept in `archive/`.
 
 Full tables: `results/kpi_summary.txt`, `results/policy_evaluation.txt`, `results/dqn_training.txt`, `results/combo_generalization.txt`, `results/architecture_comparison.txt`, `results/latency.txt`; figures: `results/kpi_dashboard.png`, `results/policy_breakdown.png`, `results/threat_gallery/`.
 
@@ -252,10 +252,10 @@ An Unreal Engine view of the closed loop, driven from MATLAB (Simulink 3D Animat
 
 ## Known issues and future work
 
-- **Benign interference (86.5%) and the 85-102 km/h band (KPI 7).** The low band comes from five flights on which the oracle recovers 100%; benign interference is their most frequent failure. After a channel switch the measured interference over thermal is the same in restored and non-restored cycles (about 0 dB, within ±0.15 dB, validation): the residual degradation, a BER just above 2× a small clean BER, is not observable by the receiver within the decision time. Tested on validation and not adopted: a pre-incident degradation reference, escalation while a threat class is still detected, a 20-frame degradation window, degradation confirmed on 2 of 2 (D65, false alarms above the bound), and the expert rule for benign incidents (+2 episodes).
-- **Noise burst + antenna fault (85.0%)**: 60 recoverable episodes (±9 points); few configurations restore it and the policy tries several before one does.
-- **Monitor resolution**: a 5-frame BER estimate cannot resolve a 2× excess near the clean link's error rate; path loss at high severity (81.5%) and the unknown set (81.0%, degradation-only alarms under 3-of-3 confirmation) share this limit.
-- **Combinations never trained on**: 79.5% vs 94.6% trained; sweeping jammer + path loss 10.4%. Composing a response across domains without examples is future work.
+- **Benign interference (87.2%).** The failures are concentrated at low severity (79.2%). After a channel switch the measured interference over thermal is the same in restored and non-restored cycles (about 0 dB, within ±0.15 dB, validation): the residual degradation, a BER just above 2× a small clean BER, is not observable by the receiver within the decision time. Tested on validation and not adopted: a pre-incident degradation reference, escalation while a threat class is still detected, a 20-frame degradation window, degradation confirmed on 2 of 2 (D65, false alarms above the bound), and the expert rule for benign incidents (+2 episodes).
+- **Noise burst + antenna fault (88.7%)**: 62 recoverable episodes (±8 points); few configurations restore it and the policy tries several before one does.
+- **Monitor resolution**: a 5-frame BER estimate cannot resolve a 2× excess near the clean link's error rate; path loss at high severity (83.3%) and the unknown set (83.5%, degradation-only alarms under 3-of-3 confirmation) share this limit.
+- **Combinations never trained on**: 84.4% vs 97.6% trained; sweeping jammer + path loss 25.0%. Composing a response across domains without examples is future work.
 - Consecutive decision cycles come from consecutive frames of the pools, so the fading between two cycles is more correlated than 20 ms apart; recovery times in ms assume the 20 ms decision period.
 - Reactive jamming is the hardest unknown threat (AUROC 0.641): from the receiver it looks like barrage jamming on a continuous uplink.
 - Latency is measured on a desktop with a GPU detector, not on UAV hardware.
@@ -286,4 +286,4 @@ Numbered as in the updated project proposal (v2, IEEE):
 
 ---
 
-**Last updated:** 2026-09-29 (D65). **Status:** v4 full run and three test readings done; final results above. Next: code comment pass, interim report, final report and defense.
+**Last updated:** 2026-09-30 (D67). **Status:** v4 full run and four test readings done; the fourth is final (above). Next: code comment pass, interim report, final report and defense.
