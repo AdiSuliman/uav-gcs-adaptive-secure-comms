@@ -27,7 +27,7 @@ for it = 1:n_iter
     mem = policy_monitor('init', NE, nA);
     [mem, M] = policy_monitor('update', mem, obs, PP, E.cfg);
     s = policy_state(mem, E.cfg, M.confirmed, nA);
-    mk = policy_mask(E.cfg, M.confirmed, nA, na);
+    mk = policy_mask(E.cfg, M.confirmed, mem.since, nA, na);
     for t = 1:H.T
         q = extractdata(predict(net, dlarray(single(s), 'CB')));
         q(~mk) = -inf;
@@ -42,7 +42,7 @@ for it = 1:n_iter
         ch = a ~= prev; mem.since(ch) = 0; mem.since(~ch) = mem.since(~ch) + 1;
         [mem, M] = policy_monitor('update', mem, obs, PP, E.cfg);
         s2 = policy_state(mem, E.cfg, M.confirmed, nA);
-        mk2 = policy_mask(E.cfg, M.confirmed, nA, na);
+        mk2 = policy_mask(E.cfg, M.confirmed, mem.since, nA, na);
         done = t == H.T;
         idx = mod(ptr + (0:NE-1), nB) + 1;
         B.S(:, idx) = s; B.S2(:, idx) = s2; B.M2(:, idx) = mk2;

@@ -82,7 +82,7 @@ disk_guard('init');                                % Simulink temporary data and
 CFG.dqn_seeds       = 3;                 % C2: training seeds per setting
 CFG.dqn_gammas      = [0.5 0.9];         % C2: discount factors, chosen on validation
 CFG.monitors        = {'class_drop 2/2', 'class_drop 3/3'};  % C2: alarm definition and m/n confirmation, chosen on validation
-CFG.drop_steps      = [0 1 2];           % C2: path_loss alarm threshold, the train-pool value and 1, 2 dB below it
+CFG.drop_steps      = [1 2];             % C2: path_loss alarm threshold, 1 and 2 dB below the train-pool value
 CFG.fa_penalty_grid = 80;                % C2: false-switch penalty of the training reward
 
 % ---- Phase A: link + threats + dataset ----
@@ -112,6 +112,7 @@ RUN.choose_drop_threshold       = false;    % C1d : path_loss alarm threshold fr
 RUN.train_dqn                   = false;    % C2  : Double DQN + shield, alarm x penalty x gamma x seeds, selection on validation (~3 h, D44-D52, D59)
 RUN.evaluate_policies           = false;    % C2e : every policy on the test pools: single, follower, combined, unknown, clean (~1 h, D44-D46, D59)
 RUN.combo_generalization        = false;    % C2g : combined threats never trained on, leave-one-combination-out (~50 min, D61)
+RUN.threat_gallery              = false;    % GAL : one figure per threat for the report, with the DQN's most frequent response (~5 min)
 
 % ---- Phase SURV: survivability boundary mapping (deliverable 8) ----
 RUN.map_survivability           = false;    % SURV: Map A/B per threat, severity, Eb/N0 and geometry (~1.5 h, D30, D46, D59)
@@ -249,6 +250,10 @@ if RUN.combo_generalization
     fprintf('  [C2g] Combined threats never trained on (leave-one-combination-out)...\n');
     experiment_combo_generalization;
 end
+if RUN.threat_gallery
+    fprintf('  [GAL] Threat gallery figures...\n');
+    threat_gallery;
+end
 
 fprintf('  [C] Pipeline status:\n');
 report_file('data/policy_pools.mat',          '      policy_pools.mat       ', 'build_policy_pools');
@@ -259,6 +264,7 @@ report_file('data/trained_dqn.mat',           '      trained_dqn.mat        ', '
 report_file('results/dqn_training.txt',       '      C2 training report     ', 'train_dqn');
 report_file('results/policy_evaluation.txt',  '      C2e evaluation report  ', 'evaluate_policies');
 report_file('results/combo_generalization.txt','      C2g unseen combinations', 'experiment_combo_generalization');
+report_file('results/threat_gallery/overview.png','      GAL threat gallery     ', 'threat_gallery');
 fprintf('\n');
 
 %% ========== PHASE SURV: SURVIVABILITY BOUNDARY MAP (deliverable 8) ==========

@@ -63,10 +63,15 @@ end
 end
 
 function test_shield(tc)
-m = policy_mask([3 5], [false true], 36, 1);
+m = policy_mask([3 5], [false true], [10 10], 36, 1);
 verifyEqual(tc, size(m), [36 2]);
 verifyEqual(tc, find(m(:, 1))', [1 3]);            % no confirmed alarm: keep or release only
 verifyTrue(tc, all(m(:, 2)));                        % confirmed alarm: everything allowed
+C = decision_config();
+m = policy_mask([3 5 7], [true true false], [C.hold - 1, C.hold, 0], 36, 1);
+verifyEqual(tc, find(m(:, 1))', 3);                 % within the hold: keep only, even with an alarm
+verifyTrue(tc, all(m(:, 2)));                        % hold over
+verifyEqual(tc, find(m(:, 3))', 7);
 end
 
 %% ---------- statistics ----------

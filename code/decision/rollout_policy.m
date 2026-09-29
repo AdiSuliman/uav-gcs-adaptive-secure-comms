@@ -88,14 +88,16 @@ tn = E.t + 1;
 for i = 1:E.NE
     sc = E.scn(i); if tn(i) < E.onset(i), sc = K.clean; end
     healthy = K.healthy(sc, E.s(i), E.split, E.r(i));
-    fl = E.follow(i) && K.followable(E.scn(i)) && K.hasCh(E.cfg(i));
+    fj = E.follow(i) && K.followable(E.scn(i)) && tn(i) >= E.onset(i);                % follower jammer active
+    fl = fj && K.hasCh(E.cfg(i));
     comp_now  = fl && (E.t(i) - E.hop_t(i)) >= E.fdelay(i) && E.t(i) >= E.onset(i);   % decides a hop
-    comp_next = fl && (tn(i) - E.hop_t(i)) >= E.fdelay(i) && tn(i) >= E.onset(i);     % state of the next frame
+    comp_next = fl && (tn(i) - E.hop_t(i)) >= E.fdelay(i);                            % state of the next frame
     best = -inf;
     for c = 1:nA
         hop = K.hasCh(c) && (~K.hasCh(E.cfg(i)) || comp_now);
         ceff = c;
-        if K.hasCh(c) && ~hop && comp_next, ceff = K.strip(c); end
+        % a hop escapes for fdelay frames (none when the jammer follows at once, fdelay 0)
+        if K.hasCh(c) && fj && ((hop && E.fdelay(i) <= 0) || (~hop && comp_next)), ceff = K.strip(c); end
         chg = c ~= E.cfg(i) || hop;
         v = K.q(sc, E.s(i), ceff, E.split, E.r(i)) - K.cost(c) - K.SW * chg - K.FA * (c ~= E.cfg(i) && healthy);
         if v > best, best = v; a(i) = c; end

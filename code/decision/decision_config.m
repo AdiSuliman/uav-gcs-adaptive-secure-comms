@@ -21,7 +21,8 @@ C.drop_db    = 4;           % Eb/N0-estimate drop that confirms path_loss (repla
 % and in ms at this period.
 C.period_ms = 20;
 
-% Rule and table policies (policy_decide.m, rule_based_policy.m)
+% Rule and table policies (policy_decide.m, rule_based_policy.m); the hold binds
+% the DQN too, through the shield (policy_mask.m)
 C.dwell = 2;                % consecutive cycles a proposal must persist
 C.hold  = 3;                % cycles after a change before the next one
 C.esc   = 3;                % degraded cycles in one configuration before escalation

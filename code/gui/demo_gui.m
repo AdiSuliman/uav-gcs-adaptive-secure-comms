@@ -1090,11 +1090,18 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
         dqn_ms = toc(t2) * 1000;
         [cfgR, memR] = policy_decide('rule', obs, cfgR, memR, PPr, []);
     end
-    t1 = tic;                                                   % one detection cycle as deployed
+    % One detection cycle as deployed (one frame): a warm-up call at batch size 1,
+    % then the median of 5 timed calls (the first call of a new size is not a cycle).
     Xl = X(:, :, 1, nv);
     detect_scores(env.cnn_net, env.ood, Xl, Fn(:, nv));
-    if canUseGPU, wait(gpuDevice); end
-    cnn_ms = toc(t1) * 1000;
+    tt = zeros(1, 5);
+    for k = 1:5
+        t1 = tic;
+        detect_scores(env.cnn_net, env.ood, Xl, Fn(:, nv));
+        if canUseGPU, wait(gpuDevice); end
+        tt(k) = toc(t1) * 1000;
+    end
+    cnn_ms = median(tt);
     total_ms = cnn_ms + dqn_ms;
 
     probs = probsAll(:, nv);
@@ -1411,24 +1418,35 @@ function drawProbs(fig, probs, classes, idx, truth_idx, isUnknown)
 end
 
 function drawQ(fig, qv, aidx, ridx)
+    % The best responses the shield allows this cycle, highest on top; masked
+    % configurations (NaN) are left out. The rule's choice is added when allowed.
     data = fig.UserData; ax = data.ui.qAx; c = data.colors;
-    n = numel(qv);
+    TOP = 8;
+    ok = find(isfinite(qv(:)))';
+    [~, o] = sort(qv(ok), 'descend');
+    show = ok(o(1:min(TOP, end)));
+    if ridx > 0 && isfinite(qv(ridx)) && ~ismember(ridx, show), show(end+1) = ridx; end
+    show = fliplr(show); n = numel(show); v = qv(show); v = v(:)';
     cla(ax); hold(ax, 'on');
-    b = bar(ax, 1:n, qv, 'FaceColor', 'flat');
-    cd = repmat([0.36 0.40 0.48], n, 1); cd(aidx, :) = c.accent; b.CData = cd;
-    span = max(qv) - min(qv) + 1;
-    text(ax, aidx, qv(aidx), sprintf('%.1f', qv(aidx)), 'Color', c.txt, 'FontSize', 9, ...
-        'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', 'FontName', c.font);
-    if ridx > 0
-        plot(ax, ridx, qv(ridx) + 0.12 * span, 'v', 'MarkerSize', 11, 'MarkerFaceColor', c.purp, ...
-            'MarkerEdgeColor', 'w');
+    b = barh(ax, 1:n, v, 'FaceColor', 'flat');
+    cd = repmat([0.36 0.40 0.48], n, 1); cd(show == aidx, :) = repmat(c.accent, nnz(show == aidx), 1); b.CData = cd;
+    span = max(v) - min(v) + 1;
+    lo = min(0, min(v) - 0.1 * span);
+    for k = 1:n
+        text(ax, v(k), k, sprintf(' %.1f', v(k)), 'Color', c.txt, 'FontSize', 8, 'FontName', c.font, ...
+            'VerticalAlignment', 'middle');
+    end
+    kr = find(show == ridx, 1);
+    if ~isempty(kr)
+        plot(ax, lo + 0.03 * span, kr, '>', 'MarkerSize', 9, 'MarkerFaceColor', c.purp, 'MarkerEdgeColor', 'w');
     end
     hold(ax, 'off');
-    ax.XTick = 1:n; ax.XTickLabel = cellfun(@actionLabel, data.env.action_names, 'UniformOutput', false);
-    ax.XTickLabelRotation = 45; ax.FontSize = 7;
-    ax.XLim = [0.4 n + 0.6]; ax.YLim = [min(0, min(qv) - 0.15*span), max(qv) + 0.32*span];
+    names = cellfun(@actionLabel, data.env.action_names, 'UniformOutput', false);
+    ax.YTick = 1:n; ax.YTickLabel = names(show); ax.FontSize = 8;
+    ax.YLim = [0.4 n + 0.6]; ax.XLim = [lo, max(v) + 0.25 * span];
     grid(ax, 'on');
-    setTitle(ax, 'Action scores: expected value of each response  (blue = chosen, purple v = rule)', c);
+    setTitle(ax, sprintf('Action scores: best %d of %d allowed  (blue = DQN, purple > = rule)', ...
+        min(TOP, numel(ok)), numel(ok)), c);
 end
 
 function drawOutcome(fig, vals, names, cols)

@@ -7,17 +7,17 @@
 % receiver measures over the last cycles (policy_state.m): detector class
 % probabilities, unknown flag, estimated BER, packet loss, SINR, IoT, spatial
 % measurements, its own configuration, the time since its last change and the
-% confirmed alarm. The shield of policy_mask.m applies in training exactly as in
-% deployment, and the Double DQN target maximizes over the configurations allowed
-% in the next state.
+% confirmed alarm. The shield of policy_mask.m (confirmed alarm, hold after a
+% change) applies in training exactly as in deployment, and the Double DQN target
+% maximizes over the configurations allowed in the next state.
 % Data: the TRAIN split of data/policy_pools.mat for learning; the VALIDATION split
 % (geometries never used in training) for checkpoints and selection; the test
 % split is kept for evaluate_policies.m.
 %
 % Grid: monitor (alarm definition and m-of-n confirmation, CFG.monitors,
 % policy_monitor.m; Richards, binary integration) x Eb/N0-drop threshold of the
-% path_loss alarm (the threshold of choose_drop_threshold.m and DROP_STEPS dB
-% below it) x false-switch penalty of the TRAINING reward (CFG.fa_penalty_grid) x
+% path_loss alarm (DROP_STEPS dB below the threshold of choose_drop_threshold.m)
+% x false-switch penalty of the TRAINING reward (CFG.fa_penalty_grid) x
 % CFG.dqn_gammas x CFG.dqn_seeds. Every run keeps the checkpoint with the best
 % recovery on its own validation episodes. All runs are then compared on every
 % (threat cell, Eb/N0, geometry) of the validation split: recovered episodes among
@@ -50,7 +50,7 @@ H = struct('gamma', 0.9, 'NE', 64, 'T', 30, 'episodes', 20000, 'buffer', 200000,
     'hidden', [256 256]);
 N_SEEDS = 3; GAMMAS = [0.5 0.9]; FA_PEN = 80;
 ALARMS = {'class_drop 2/2', 'class_drop 3/3'};  % monitors: alarm definition, m/n confirmation
-DROP_STEPS = [0 1 2];                    % path_loss alarm: the train-pool threshold and 1, 2 dB below it
+DROP_STEPS = [1 2];                      % path_loss alarm: 1 and 2 dB below the train-pool threshold
 SENS_SCALES = [0.5 2];                   % reward-weight sensitivity: cost terms x scale
 if exist('CFG', 'var') && isstruct(CFG)
     if isfield(CFG, 'dqn_seeds'), N_SEEDS = CFG.dqn_seeds; end
@@ -63,7 +63,7 @@ end
 VAL_REPS = 2;                            % validation: every (cell, Eb/N0, geometry) of the split, twice
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
     N_SEEDS = 1; GAMMAS = 0.5; FA_PEN = 80; ALARMS = {'class_drop 2/2'}; SENS_SCALES = 2; VAL_REPS = 1;
-    DROP_STEPS = [0 1]; H.episodes = 1280; H.buffer = 20000; H.warmup = 2000; H.n_eval = 1;
+    DROP_STEPS = 1; H.episodes = 1280; H.buffer = 20000; H.warmup = 2000; H.n_eval = 1;
 end
 SEEDS = 42 + (0:N_SEEDS-1);
 FA_BOUND = 0.05;                         % one-sided 95% bound of the clean-link false alarms (KPI 6)
@@ -340,17 +340,22 @@ end
 
 function [PPw, Kw] = clean_world(PP, CT)
 % The pools with the validation split replaced by the independent clean geometries.
+% Only the pools and their tables are cached: the monitor settings (alarm,
+% confirmation, drop threshold) always come from the PP of this call.
 persistent key cache
 k = sprintf('%s|%s', CT.created, PP.created);
-if isequal(key, k), PPw = cache.PPw; Kw = cache.Kw; return; end
-nS = numel(PP.ebno); nA = numel(PP.actions);
-PPw = PP;
-PPw.pools(:, :, :, 2) = {[]};
-ic = find(strcmp(PP.scen, 'none'), 1);
-PPw.pools(ic, :, :, 2) = reshape(CT.pools(1, :, :), [1 nS nA]);
-PPw.runs{2} = CT.runs;
-Kw = link_env('tables', PPw);
-key = k; cache = struct('PPw', PPw, 'Kw', Kw);
+if ~isequal(key, k)
+    nS = numel(PP.ebno); nA = numel(PP.actions);
+    pools = PP.pools;
+    pools(:, :, :, 2) = {[]};
+    ic = find(strcmp(PP.scen, 'none'), 1);
+    pools(ic, :, :, 2) = reshape(CT.pools(1, :, :), [1 nS nA]);
+    runs = PP.runs; runs{2} = CT.runs;
+    PPt = PP; PPt.pools = pools; PPt.runs = runs;
+    key = k; cache = struct('pools', {pools}, 'runs', {runs}, 'Kw', link_env('tables', PPt));
+end
+PPw = PP; PPw.pools = cache.pools; PPw.runs = cache.runs;
+Kw = cache.Kw;
 end
 
 function u = cp_upper(k, n)

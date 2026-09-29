@@ -46,7 +46,7 @@ switch base
         else
             q = double(gather(extractdata(predict(agent.qNetwork, dlarray(single(st), 'CB')))));
         end
-        q(~policy_mask(cfg, M.confirmed, nA, na)) = -inf;
+        q(~policy_mask(cfg, M.confirmed, mem.since, nA, na)) = -inf;
         [~, a] = max(q, [], 1);
     case {'rule', 'table'}
         a = cfg;

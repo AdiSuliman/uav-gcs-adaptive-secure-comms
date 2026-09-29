@@ -1,0 +1,44 @@
+=== CONFIGURATION CHANGES ON THE VALIDATION SPLIT (archive/v4_first_test_20260929/trained_dqn.mat: alarm 'class_drop' 2/2, drop 5.0 dB) ===
+quick = change within 3 cycles of the previous one; ping-pong = A -> B -> A with B held <= 3 cycles
+
+--- dqn ---
+threat                                             n   changes    quick  ping-pong  recovered
+all                                             1584      4.17    58.9%      20.8%      91.8%
+none                                              48      0.12    66.7%       0.0%      91.7%
+jamming                                          144      4.75    58.2%      13.2%      87.5%
+noise_burst                                      144      5.31    67.4%      38.2%      97.8%
+reactive_jamming                                 144      4.75    50.6%      16.0%      88.2%
+path_loss                                        144      2.16    54.3%      11.8%      75.0%
+spoofing                                         144      4.15    47.3%      11.8%      89.6%
+antenna_fault                                    144      2.18    36.3%       9.0%      97.2%
+benign_interference                              144      2.24    61.5%       9.0%      91.7%
+sweeping_jammer                                  144      4.38    67.3%      20.8%      98.6%
+jamming+path_loss                                 48      4.88    49.1%      33.3%      95.8%
+noise_burst+antenna_fault                         48      9.75    76.7%      72.9%      96.9%
+sweeping_jammer+path_loss                         48      4.04    63.9%      22.9%      95.8%
+spoofing+noise_burst                              48      6.79    55.8%      47.9%      95.8%
+reactive_jamming+path_loss                        48      3.58    40.7%      18.8%      91.7%
+jamming+antenna_fault                             48      6.62    63.2%      27.1%      95.8%
+spoofing+sweeping_jammer                          48      6.90    65.3%      33.3%      85.4%
+benign_interference+noise_burst                   48      5.08    68.4%      39.6%     100.0%
+
+--- rule_esc ---
+threat                                             n   changes    quick  ping-pong  recovered
+all                                             1584      2.84     0.0%       0.0%      71.7%
+none                                              48      0.35     0.0%       0.0%      95.8%
+jamming                                          144      3.03     0.0%       0.0%      91.7%
+noise_burst                                      144      3.26     0.0%       0.0%      89.7%
+reactive_jamming                                 144      2.83     0.0%       0.0%      95.1%
+path_loss                                        144      1.85     0.0%       0.0%      29.0%
+spoofing                                         144      2.54     0.0%       0.0%      93.8%
+antenna_fault                                    144      1.65     0.0%       0.0%      68.1%
+benign_interference                              144      1.37     0.0%       0.0%      93.8%
+sweeping_jammer                                  144      3.13     0.0%       0.0%      81.9%
+jamming+path_loss                                 48      4.83     0.0%       0.0%       2.1%
+noise_burst+antenna_fault                         48      5.38     0.0%       0.0%      78.1%
+sweeping_jammer+path_loss                         48      1.92     0.0%       0.0%       4.2%
+spoofing+noise_burst                              48      5.75     0.0%       0.0%      45.8%
+reactive_jamming+path_loss                        48      2.21     0.0%       0.0%      12.5%
+jamming+antenna_fault                             48      5.50     0.0%       0.0%      50.0%
+spoofing+sweeping_jammer                          48      3.83     0.0%       0.0%      66.7%
+benign_interference+noise_burst                   48      4.81     0.0%       0.0%      68.8%
