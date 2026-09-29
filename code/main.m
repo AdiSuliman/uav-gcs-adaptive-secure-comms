@@ -83,9 +83,9 @@ CFG.dqn_seeds       = 3;                 % C2: training seeds per setting
 CFG.dqn_gammas      = 0.5;               % C2: discount factor (D64 selection)
 CFG.monitors        = {'class_drop 3/3'};  % C2: alarm definition and m/n confirmation (D64 selection)
 CFG.drop_steps      = 2;                 % C2: path_loss alarm threshold, 2 dB below the train-pool value (D64 selection)
-CFG.fa_penalty_grid = [40 80];           % C2: training reward variants (D66): false-switch penalty,
+CFG.fa_penalty_grid = [120 160];         % C2: training reward variants (D67): false-switch penalty,
 CFG.cost_scale_grid = [0.5 0.5];         %     running costs x scale,
-CFG.switch_scale_grid = [0.5 1];         %     switching cost x scale
+CFG.switch_scale_grid = [1 1];           %     switching cost x scale
 
 % ---- Phase A: link + threats + dataset ----
 

@@ -53,9 +53,9 @@ H = struct('gamma', 0.9, 'NE', 64, 'T', 30, 'episodes', 20000, 'buffer', 200000,
 N_SEEDS = 3; GAMMAS = 0.5;
 ALARMS = {'class_drop 3/3'};             % monitor: alarm definition, m/n confirmation (D64 selection)
 DROP_STEPS = 2;                          % path_loss alarm: 2 dB below the train-pool threshold (D64 selection)
-% Training reward variants (D66), one entry each: false-switch penalty, scale of the
+% Training reward variants (D67), one entry each: false-switch penalty, scale of the
 % running costs (goodput, spectrum, power, combining) and of the switching cost
-FA_PEN = [40 80]; COST_SCALE = [0.5 0.5]; SW_SCALE = [0.5 1];
+FA_PEN = [120 160]; COST_SCALE = [0.5 0.5]; SW_SCALE = [1 1];
 SENS_SCALES = [0.5 2];                   % reward-weight sensitivity: cost terms x scale
 if exist('CFG', 'var') && isstruct(CFG)
     if isfield(CFG, 'dqn_seeds'), N_SEEDS = CFG.dqn_seeds; end
