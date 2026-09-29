@@ -21,14 +21,14 @@ Last updated: 2026-09-29
 | B-unknown | Mahalanobis and isolation-forest scores, leave-one-threat-out | ✅ Done, AUROC 0.887 | D42, D46 |
 | C1p | Frame pools: every scenario × configuration × Eb/N0 × geometry | ✅ Done | D44–D46 |
 | C1c | Clean link on 100 new geometries per Eb/N0 under every configuration (KPI 6) | ✅ Done | D51 |
-| C2 | Double DQN with shield; alarm, false-switch penalty, γ and seed chosen on validation | ✅ Frozen at D52 (class_drop 6.5 dB, penalty 80, γ = 0.5) | D44–D52 |
-| C2e | Every policy on the test pools: single, follower, combined, unknown, clean; false alarms on 600 independent clean geometries | ✅ Done | D44–D46, D51 |
+| C2 | Double DQN with shield; monitor, drop threshold, γ and seed chosen on validation; deployed with escalation | ⏳ D64 retrain running (followers of 0–5 cycles, runs scored as deployed); adoption rule fixed before the run | D44–D52, D59–D64 |
+| C2e | Every policy on the test pools: single, follower, combined, unknown, clean, comb; false alarms on 600 independent clean geometries | ✅ Two readings (D62, D63 agents); ⏳ one reading of new test flights (D64) | D44–D46, D51, D64 |
 | SURV | Survivability maps A/B, two geometries (deliverable 8) | ✅ Done, 86% / 94% | D30, D46 |
-| LAT + KPI + DASH | Latency per cycle, eight proposal KPIs, dashboard (deliverable 1) | ✅ Done, 8/8 met (D52) | D46, D48, D51, D52 |
+| LAT + KPI + DASH | Latency per cycle, eight proposal KPIs, dashboard (deliverable 1) | Second reading 7/8 met (KPI 4: 12 of 16 threats); ⏳ final after D64, latency on an idle machine | D46, D48, D51, D52, D64 |
 | GUI | Operator console on the current decision layer | ⏳ Live tab checked (D53 lead-in, D54 hover help); episode tab check pending | D24, D26, D46, D53, D54, D56 |
 | 3D | Unreal 3D view: live console (threat control, operator vs AI), defense videos, console-episode replay | ✅ Built and tested (D58); Cesium terrain optional | D57, D58 |
 | Fixes | Latency tail; false-alarm bound (KPI 6) | ✅ latency p95 48.9 → 19.4 ms / ✅ KPI 6: 1.5% over 600 independent geometries, bound 2.60% (D52) | D48–D51 |
-| v4 | Receiver-side measurements, 36 combined configurations, combined threats in training, three severities, per-antenna feature, unknown-threat score selection, new-threat learning, 20 ms decision period | ⏳ Code complete and unit-tested; full run from A0 next | D59–D61 |
+| v4 | Receiver-side measurements, 36 combined configurations, combined threats in training, three severities, per-antenna feature, unknown-threat score selection, new-threat learning, 20 ms decision period | ✅ Full run A0–C2g done; hold in the shield (D63); escalation out of no_action (D64) | D59–D64 |
 | Layout | Code into `code/` by stage | ✅ Done | D47, D61 |
 | D1 | Interim report | ⏳ Drafted, results to sync with the final run | — |
 | D2 | Final report | ⏳ | — |
@@ -39,11 +39,11 @@ Last updated: 2026-09-29
 
 ## Remaining work
 
-1. **v4 full run** from A0 (about 16 h): dataset with the per-antenna feature, detector, unknown-threat study, pools, DQN, combinations never trained on, survivability with 2 / 3 antennas, latency on an idle machine, KPIs.
-2. **KPIs:** check every target on the v4 run; any tuning on train / validation only.
-3. **Operator console and 3D view** brought to the v4 interfaces, then checked live.
+1. **D64 round:** new test flights and clean test set, retrain, adoption check on validation, then one reading of the new test set (C2e, C2g, GAL, LAT on an idle machine, KPI, DASH).
+2. **Detector baselines:** random forest and kernel SVM on the link features next to the hybrid network (B3a).
+3. **Operator console and 3D view:** live check on the deployed policy (DQN + escalation).
 4. **Code comments:** a pass over every file (short explanation, no history).
-5. **Reports and defense:** interim report numbers, final report, slides and poster from the same figures.
+5. **Reports and defense:** proposal sources, interim report numbers, final report, slides and poster from the same figures.
 
 ---
 
@@ -55,8 +55,8 @@ Last updated: 2026-09-29
 | CNN/LSTM on link metrics | CNN on the spectrogram + 9 link features; CNN-LSTM kept in `legacy/` | The LSTM gave no gain for its cost (D13) |
 | 5 threat classes | 8 threats + none, plus combined threats | Proposal risk 13 and a more realistic EW set |
 | Single-antenna link | Two UAV antennas, MRC baseline, MMSE as the spatial countermeasure | Spatial diversity as a real receiver function (D41) |
-| Actions: channel switch, bit rate, diversity | 17 configurations: the originals, power control, FEC + interleaving and two-action pairs | Threats that no single original action repairs (D39, D45) |
-| DQN on a reward table | Sequential environment on measured frames, shield, γ chosen on validation | One-shot decisions could not show recovery over time or a follower jammer (D44–D46) |
+| Actions: channel switch, bit rate, diversity | 36 configurations, one choice per domain (frequency, space, link budget): the originals, power control, FEC + interleaving | Threats that no single original action repairs (D39, D45, D59) |
+| DQN on a reward table | Sequential environment on measured frames, shield with hold, γ chosen on validation, escalation as a fallback | One-shot decisions could not show recovery over time or a follower jammer (D44–D46, D63, D64) |
 | Rule vs DQN by convergence and reward | Return, restored cycles, goodput, recovery time, false alarms, with 95% intervals and paired differences | KPIs as worded in the proposal |
 
 ---
