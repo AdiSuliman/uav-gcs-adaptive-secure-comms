@@ -62,7 +62,8 @@ for t = 1:numel(THREATS)
     yline(ax, max(2 * mean(clean.ber, 'omitnan'), fl), '--k', '2x clean');
     set(ax, 'YScale', 'log'); ylim(ax, [fl * 0.8 1]); xlim(ax, [1 NF]);
     xlabel(ax, sprintf('Frame (%.2f ms each)', 1000 * p0.frame_duration)); ylabel(ax, 'BER');
-    legend(ax, {'clean link', 'no response', strrep(act, '_', ' ')}, 'Location', 'southoutside', 'Orientation', 'horizontal');
+    legend(ax, {'clean link', 'no response', strrep(strrep(act, '_', ' '), '+', ' + ')}, 'Location', 'southoutside', ...
+        'NumColumns', 2);                                        % long configurations wrap instead of being cut
     title(ax, sprintf('(c) Response: %s', src));
     title(tl, sprintf('%s, nominal severity, E_b/N_0 %d dB, %d km/h', strrep(th, '_', ' '), EBNO, V_KMH));
     exportgraphics(fig, fullfile(OUT, [th '.png']), 'Resolution', 200); close(fig);

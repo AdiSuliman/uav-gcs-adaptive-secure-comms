@@ -38,7 +38,7 @@ COMBOS  = {'jamming+path_loss', 'noise_burst+antenna_fault', 'sweeping_jammer+pa
            'benign_interference+noise_burst'};
 EBNO   = 0:2:10;
 NGEO   = [6 4 8];                % geometries per (cell, Eb/N0): train, validation, test
-BLOCK  = [1 5 6];                % pool_seed.m block of each split (pool_seed.m lists every block)
+BLOCK  = [1 5 8];                % pool_seed.m block of each split (pool_seed.m lists every block)
 SPLITS = {'train', 'val', 'test'};
 N_WORKERS = 6;
 opt = struct('F_SUB', 20, 'tw', 10, 'delay_bits', 20);
