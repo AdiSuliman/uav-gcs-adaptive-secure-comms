@@ -21,8 +21,8 @@ Last updated: 2026-09-29
 | B-unknown | Mahalanobis and isolation-forest scores, leave-one-threat-out | ✅ Done, AUROC 0.887 | D42, D46 |
 | C1p | Frame pools: every scenario × configuration × Eb/N0 × geometry | ✅ Done | D44–D46 |
 | C1c | Clean link on 100 new geometries per Eb/N0 under every configuration (KPI 6) | ✅ Done | D51 |
-| C2 | Double DQN with shield; monitor, drop threshold, γ and seed chosen on validation; deployed with escalation | ✅ D64 agent (3/3, 3 dB, γ 0.5); D65 not adopted; ⏳ D66 (lower cost weights in the training reward) running, adoption rule fixed before the run | D44–D52, D59–D66 |
-| C2e | Every policy on the test pools: single, follower, combined, unknown, clean, comb; false alarms on 600 independent clean geometries | ✅ Three readings; the third (new flights, D64 agent) is the current final; a fourth only if D66 is adopted | D44–D46, D51, D64–D66 |
+| C2 | Double DQN with shield; monitor, drop threshold, γ and seed chosen on validation; deployed with escalation | ✅ D67 agent (3/3, 3 dB, γ 0.5, running costs ×0.5, false-switch penalty 160), adopted as a documented exception; D65, D66 not adopted | D44–D52, D59–D67 |
+| C2e | Every policy on the test pools: single, follower, combined, unknown, clean, comb; false alarms on 600 independent clean geometries | ⏳ Fourth reading (new flights, blocks 8 and 9, D67 agent) running; it is the final result | D44–D46, D51, D64–D67 |
 | SURV | Survivability maps A/B, two geometries (deliverable 8) | ✅ Done, 86% / 94% | D30, D46 |
 | LAT + KPI + DASH | Latency per cycle, eight proposal KPIs, dashboard (deliverable 1) | Third reading 6/8 met: KPI 4 14/16 (benign interference 86.5%, noise burst + antenna fault 85.0%), KPI 7 speed spread 10.6 points; latency 2.70 / 3.16 ms | D46, D48, D51, D52, D64–D66 |
 | GUI | Operator console on the current decision layer | ⏳ Live tab checked (D53 lead-in, D54 hover help); episode tab check pending | D24, D26, D46, D53, D54, D56 |
@@ -39,8 +39,8 @@ Last updated: 2026-09-29
 
 ## Remaining work
 
-1. **D66 round:** training reward with lower cost weights; adoption check on validation; if adopted, new test flights (blocks 8, 9) and a fourth reading, then only the numbers that change are updated.
-2. **Operator console and 3D view:** live check on the final deployed policy, after the D66 decision; the threat gallery with the final agent.
+1. **Fourth reading (D67 agent):** new test flights (blocks 8, 9), C2e, C2g, GAL, LAT, KPI, DASH; then only the numbers that change are updated.
+2. **Operator console and 3D view:** live check on the final deployed policy (D67); the threat gallery with the final agent.
 3. **Code comments:** a pass over every file (short explanation, no history); files the running chain uses wait until it ends.
 4. **Interim report:** final numbers, proposal v2 sources, literature review by the lecturer's five topics (after the final results).
 5. **Proposal v2:** ready for the user's review (16 references, all read).
