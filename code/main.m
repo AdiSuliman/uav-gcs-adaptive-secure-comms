@@ -80,10 +80,12 @@ disk_guard('init');                                % Simulink temporary data and
 
 % ---- Decision-layer training (D46, D48-D52, D59); defaults of train_dqn.m when absent ----
 CFG.dqn_seeds       = 3;                 % C2: training seeds per setting
-CFG.dqn_gammas      = [0.5 0.9];         % C2: discount factors, chosen on validation
-CFG.monitors        = {'class_drop 2/2', 'class_drop 3/3'};  % C2: alarm definition and m/n confirmation, chosen on validation
-CFG.drop_steps      = [1 2];             % C2: path_loss alarm threshold, 1 and 2 dB below the train-pool value
-CFG.fa_penalty_grid = 80;                % C2: false-switch penalty of the training reward
+CFG.dqn_gammas      = 0.5;               % C2: discount factor (D64 selection)
+CFG.monitors        = {'class_drop 3/3'};  % C2: alarm definition and m/n confirmation (D64 selection)
+CFG.drop_steps      = 2;                 % C2: path_loss alarm threshold, 2 dB below the train-pool value (D64 selection)
+CFG.fa_penalty_grid = [40 80];           % C2: training reward variants (D66): false-switch penalty,
+CFG.cost_scale_grid = [0.5 0.5];         %     running costs x scale,
+CFG.switch_scale_grid = [0.5 1];         %     switching cost x scale
 
 % ---- Phase A: link + threats + dataset ----
 

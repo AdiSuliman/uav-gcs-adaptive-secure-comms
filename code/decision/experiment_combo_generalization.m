@@ -38,6 +38,9 @@ for ci = 1:numel(combos)
     PPx.pools(c, :, :, 1:2) = {[]};
     Kx = link_env('tables', PPx);
     Kt = Kx; Kt.FA = Q.seed_summary.selected_fa_pen;
+    if isfield(Q.seed_summary, 'selected_cost_scale')          % training reward variant (D66)
+        Kt.cost = Q.seed_summary.selected_cost_scale * Kx.cost; Kt.SW = Q.seed_summary.selected_sw_scale * Kx.SW;
+    end
     ag = dqn_train_run(H, PPx, Kt, Kx, Q.norm_in, seed, nS, 1, 2);
     specs = test_episodes(c, numel(PP.ebno), K.nR(TEST), REPS, NE, H.T, RandStream('mt19937ar', 'Seed', 300 + ci));
     Ro = dqn_eval_batches('dqn_esc', PP, K, specs, ag, struct(), 7000, TEST);

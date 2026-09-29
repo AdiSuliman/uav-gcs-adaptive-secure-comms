@@ -50,21 +50,26 @@ H = struct('gamma', 0.9, 'NE', 64, 'T', 30, 'episodes', 20000, 'buffer', 200000,
     'batch', 128, 'updates', 4, 'lr', 5e-4, 'lr_end', 5e-5, 'clip', 10, 'target_every', 500, ...
     'eps_end', 0.05, 'eps_frac', 0.6, 'huber', 1, 'p_unknown', 0.10, 'p_follow', 0.5, 'n_eval', 4, ...
     'hidden', [256 256]);
-N_SEEDS = 3; GAMMAS = [0.5 0.9]; FA_PEN = 80;
-ALARMS = {'class_drop 2/2', 'class_drop 3/3'};  % monitors: alarm definition, m/n confirmation
-DROP_STEPS = [1 2];                      % path_loss alarm: 1 and 2 dB below the train-pool threshold
+N_SEEDS = 3; GAMMAS = 0.5;
+ALARMS = {'class_drop 3/3'};             % monitor: alarm definition, m/n confirmation (D64 selection)
+DROP_STEPS = 2;                          % path_loss alarm: 2 dB below the train-pool threshold (D64 selection)
+% Training reward variants (D66), one entry each: false-switch penalty, scale of the
+% running costs (goodput, spectrum, power, combining) and of the switching cost
+FA_PEN = [40 80]; COST_SCALE = [0.5 0.5]; SW_SCALE = [0.5 1];
 SENS_SCALES = [0.5 2];                   % reward-weight sensitivity: cost terms x scale
 if exist('CFG', 'var') && isstruct(CFG)
     if isfield(CFG, 'dqn_seeds'), N_SEEDS = CFG.dqn_seeds; end
     if isfield(CFG, 'dqn_gammas'), GAMMAS = CFG.dqn_gammas; end
     if isfield(CFG, 'fa_penalty_grid'), FA_PEN = CFG.fa_penalty_grid; end
+    if isfield(CFG, 'cost_scale_grid'), COST_SCALE = CFG.cost_scale_grid; end
+    if isfield(CFG, 'switch_scale_grid'), SW_SCALE = CFG.switch_scale_grid; end
     if isfield(CFG, 'monitors'), ALARMS = CFG.monitors; end
     if isfield(CFG, 'dqn_episodes'), H.episodes = CFG.dqn_episodes; end
     if isfield(CFG, 'drop_steps'), DROP_STEPS = CFG.drop_steps; end
 end
 VAL_REPS = 2;                            % validation: every (cell, Eb/N0, geometry) of the split, twice
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
-    N_SEEDS = 1; GAMMAS = 0.5; FA_PEN = 80; ALARMS = {'class_drop 2/2'}; SENS_SCALES = 2; VAL_REPS = 1;
+    N_SEEDS = 1; GAMMAS = 0.5; FA_PEN = 80; COST_SCALE = 1; SW_SCALE = 1; ALARMS = {'class_drop 2/2'}; SENS_SCALES = 2; VAL_REPS = 1;
     DROP_STEPS = 1; H.episodes = 1280; H.buffer = 20000; H.warmup = 2000; H.n_eval = 1;
 end
 SEEDS = 42 + (0:N_SEEDS-1);
@@ -103,7 +108,7 @@ if isempty(DROPS), DROPS = NaN; end
 tab = policy_table(PP, K);
 
 %% 4. Training: monitor x drop threshold x false-switch penalty x discount factor x seeds
-runs = struct('alarm', {}, 'drop', {}, 'fa_pen', {}, 'gamma', {}, 'seed', {}, 'agent', {}, 'curve', {}, 'loss', {}, ...
+runs = struct('alarm', {}, 'drop', {}, 'fa_pen', {}, 'cost_scale', {}, 'sw_scale', {}, 'gamma', {}, 'seed', {}, 'agent', {}, 'curve', {}, 'loss', {}, ...
     'best_ep', {}, 'val', {}, 'rec', {}, 'kmin', {}, 'kmin_thr', {}, 'fa_w', {}, 'n_w', {});
 base = struct('alarm', {}, 'drop', {}, 'rule_rec', {}, 'rule_ret', {}, 'rule_fa_w', {}, 'tab_rec', {}, 'tab_ret', {}, 'tab_fa_w', {});
 for ai = 1:numel(ALARMS)
@@ -118,12 +123,13 @@ for ai = 1:numel(ALARMS)
             'rule_fa_w', rw, 'tab_rec', dqn_recovered(Rt), 'tab_ret', mean(Rt.ret), 'tab_fa_w', tw); %#ok<SAGROW>
         fprintf('=== Monitor ''%s'', drop %.1f dB: rule+esc recovered %.1f%%, return %.3f, FA %s | table recovered %.1f%%, return %.3f\n', ...
             ALARMS{ai}, dd, 100*base(end).rule_rec, base(end).rule_ret, pct_txt(rw), 100*base(end).tab_rec, base(end).tab_ret);
-        for fp = FA_PEN
-            Kt = K; Kt.FA = fp;                        % training reward only
+        for fi = 1:numel(FA_PEN)
+            fp = FA_PEN(fi); cs = COST_SCALE(fi); ss = SW_SCALE(fi);
+            Kt = K; Kt.FA = fp; Kt.cost = cs * K.cost; Kt.SW = ss * K.SW;   % training reward only
             for g = GAMMAS
                 for k = 1:N_SEEDS
-                    fprintf('--- monitor ''%s'', drop %.1f dB, false-switch penalty %d, gamma %.2f, seed %d ---\n', ...
-                        ALARMS{ai}, dd, fp, g, SEEDS(k));
+                    fprintf(['--- monitor ''%s'', drop %.1f dB, false-switch penalty %d, costs x%.1f, switch x%.1f, ' ...
+                        'gamma %.2f, seed %d ---\n'], ALARMS{ai}, dd, fp, cs, ss, g, SEEDS(k));
                     Hg = H; Hg.gamma = g;
                     [ag, curve, lossc, best_ep] = dqn_train_run(Hg, PPc, Kt, K, norm_in, SEEDS(k), nS, SPLIT_TRAIN, SPLIT_VAL);
                     V = dqn_eval_batches('dqn_esc', PPc, K, val_spec, ag, struct(), 5000, SPLIT_VAL);
@@ -132,7 +138,8 @@ for ai = 1:numel(ALARMS)
                     fprintf(['    checkpoint %d | validation: recovered %.1f%% | weakest threat %s %.1f%% | restored %.1f%% | ' ...
                         'return %.3f | FA %s\n'], best_ep, 100*dqn_recovered(V), kthr, 100*kmin, 100*mean(V.restored_post), ...
                         mean(V.ret), fa_txt(fa_w, n_w));
-                    runs(end+1) = struct('alarm', ALARMS{ai}, 'drop', dd, 'fa_pen', fp, 'gamma', g, 'seed', SEEDS(k), ...
+                    runs(end+1) = struct('alarm', ALARMS{ai}, 'drop', dd, 'fa_pen', fp, 'cost_scale', cs, 'sw_scale', ss, ...
+                        'gamma', g, 'seed', SEEDS(k), ...
                         'agent', ag, 'curve', curve, 'loss', lossc, 'best_ep', best_ep, 'val', V, 'rec', dqn_recovered(V), ...
                         'kmin', kmin, 'kmin_thr', kthr, 'fa_w', fa_w, 'n_w', n_w); %#ok<SAGROW>
                 end
@@ -155,7 +162,9 @@ top = top(vrec(top) >= max(vrec(top)) - 0.005);
 [~, j] = max(vret(top)); best = top(j);
 agent = runs(best).agent;
 gamma_sel = runs(best).gamma; fa_pen_sel = runs(best).fa_pen; alarm_sel = runs(best).alarm; drop_sel = runs(best).drop;
-same = @(r) r.fa_pen == fa_pen_sel & strcmp(r.alarm, alarm_sel) & isequaln(r.drop, drop_sel);
+cs_sel = runs(best).cost_scale; ss_sel = runs(best).sw_scale;
+same = @(r) r.fa_pen == fa_pen_sel & r.cost_scale == cs_sel & r.sw_scale == ss_sel & strcmp(r.alarm, alarm_sel) ...
+    & isequaln(r.drop, drop_sel);
 agents = cell(1, numel(GAMMAS));                     % best run per discount factor at the chosen monitor, drop and penalty
 for gi = 1:numel(GAMMAS)
     m = find([runs.gamma] == GAMMAS(gi) & arrayfun(same, runs));
@@ -174,7 +183,7 @@ rep{end+1} = sprintf(['Generated: %s | Double DQN + shield, state history %d cyc
     '%d updates, lr %.0e -> %.0e, %d episodes x %d cycles | monitor %s x drop %s dB x penalty %s x gamma %s x %d seeds'], ...
     datestr(now), CD.hist, mat2str(H.hidden), H.buffer, H.target_every, H.lr, H.lr_end, H.episodes, H.T, ...
     strjoin(ALARMS, '/'), mat2str(DROPS), mat2str(FA_PEN), mat2str(GAMMAS), N_SEEDS);
-rep{end+1} = 'False-switch penalty: training reward only; validation and test use the standard reward.';
+rep{end+1} = 'False-switch penalty and cost scales: training reward only; validation and test use the standard reward.';
 rep{end+1} = sprintf(['Runs scored as deployed: the DQN with escalation (D64). Follower jammers re-acquire the channel ' ...
     '%d-%d cycles after a hop (training and validation).'], CD.fdelay(1), CD.fdelay(2));
 rep{end+1} = sprintf(['Validation: %d episodes, every (threat cell, Eb/N0, geometry) of the VALIDATION split (geometries ' ...
@@ -190,8 +199,9 @@ rep{end+1} = sprintf('%-46s %10s %28s %10s %9s %14s %12s', 'run', 'recovered', '
     'FA indep.', 'switches/ep');
 for k = 1:numel(runs)
     R = runs(k).val;
-    rep{end+1} = sprintf('%-46s %9.1f%% %28s %9.1f%% %9.3f %14s %12.2f   (checkpoint %d)', ...
-        sprintf('%s drop %.1f pen %d g=%.2f seed %d', runs(k).alarm, runs(k).drop, runs(k).fa_pen, runs(k).gamma, runs(k).seed), ...
+    rep{end+1} = sprintf('%-56s %9.1f%% %28s %9.1f%% %9.3f %14s %12.2f   (checkpoint %d)', ...
+        sprintf('%s drop %.1f pen %d costs x%.1f sw x%.1f g=%.2f seed %d', runs(k).alarm, runs(k).drop, runs(k).fa_pen, ...
+        runs(k).cost_scale, runs(k).sw_scale, runs(k).gamma, runs(k).seed), ...
         100*runs(k).rec, sprintf('%s %.1f%%', runs(k).kmin_thr, 100*runs(k).kmin), 100*mean(R.restored_post), mean(R.ret), ...
         fa_txt(runs(k).fa_w, runs(k).n_w), mean(R.switches), runs(k).best_ep); %#ok<SAGROW>
 end
@@ -202,21 +212,22 @@ for ai = 1:numel(base)
         'recovered %.1f%%, return %.3f, FA %s'], base(ai).alarm, base(ai).drop, 100*base(ai).rule_rec, base(ai).rule_ret, ...
         pct_txt(base(ai).rule_fa_w), 100*base(ai).tab_rec, base(ai).tab_ret, pct_txt(base(ai).tab_fa_w)); %#ok<SAGROW>
 end
-rep{end+1} = sprintf(['Selected: monitor ''%s'', drop %.1f dB, false-switch penalty %d, gamma %.2f, seed %d (%s). Gate ' ...
-    '(recovery >= rule + escalation with the same monitor, false-alarm bound <= %.0f%%): %s'], alarm_sel, drop_sel, ...
-    fa_pen_sel, gamma_sel, runs(best).seed, sel_rule, 100*FA_BOUND, ternary(gate, 'PASS', 'FAIL'));
+rep{end+1} = sprintf(['Selected: monitor ''%s'', drop %.1f dB, false-switch penalty %d, running costs x%.1f, switching ' ...
+    'x%.1f, gamma %.2f, seed %d (%s). Gate (recovery >= rule + escalation with the same monitor, false-alarm bound ' ...
+    '<= %.0f%%): %s'], alarm_sel, drop_sel, fa_pen_sel, cs_sel, ss_sel, gamma_sel, runs(best).seed, sel_rule, ...
+    100*FA_BOUND, ternary(gate, 'PASS', 'FAIL'));
 if ~exist('results', 'dir'), mkdir('results'); end
 fid = fopen('results/dqn_training.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('\n%s\n', rep{:});
 if ~gate, warning('train_dqn:gate', 'DQN validation gate FAILED -- see results/dqn_training.txt'); end
 
-seed_summary = struct('alarms', {{runs.alarm}}, 'drops', [runs.drop], 'fa_pens', [runs.fa_pen], 'gammas', [runs.gamma], ...
+seed_summary = struct('alarms', {{runs.alarm}}, 'drops', [runs.drop], 'fa_pens', [runs.fa_pen], 'cost_scales', [runs.cost_scale], 'sw_scales', [runs.sw_scale], 'gammas', [runs.gamma], ...
     'seeds', [runs.seed], 'val_recovered', vrec, 'val_weakest', vmin, 'val_weakest_threat', {{runs.kmin_thr}}, ...
     'val_return', vret, 'fa_indep', [runs.fa_w], 'n_indep', [runs.n_w], ...
-    'best_ep', [runs.best_ep], 'selected_alarm', alarm_sel, 'selected_drop', drop_sel, 'selected_fa_pen', fa_pen_sel, ...
+    'best_ep', [runs.best_ep], 'selected_alarm', alarm_sel, 'selected_drop', drop_sel, 'selected_fa_pen', fa_pen_sel, 'selected_cost_scale', cs_sel, 'selected_sw_scale', ss_sel, ...
     'selected_gamma', gamma_sel, 'selected_seed', runs(best).seed, 'selection_rule', sel_rule, 'gate_pass', gate, ...
     'rule_recovered', bsel.rule_rec, 'rule_return', bsel.rule_ret, 'table_return', bsel.tab_ret);
-H.gamma = gamma_sel; H.fa_pen = fa_pen_sel;
+H.gamma = gamma_sel; H.fa_pen = fa_pen_sel; H.cost_scale = cs_sel; H.sw_scale = ss_sel;
 action_names = PP.actions;
 gammas = GAMMAS;
 [alarm_mode, confirm] = monitor(alarm_sel);
@@ -262,7 +273,7 @@ for f = [1, SENS_SCALES]
     else
         fprintf('--- reward sensitivity: costs x %.1f ---\n', f);
         Hs = H; Hs.gamma = gamma_sel;
-        Kft = Kf; Kft.FA = f * fa_pen_sel;
+        Kft = Kf; Kft.FA = f * fa_pen_sel; Kft.cost = f * cs_sel * K.cost; Kft.SW = f * ss_sel * K.SW;
         ag = dqn_train_run(Hs, PPc, Kft, Kf, norm_in, runs(best).seed, nS, SPLIT_TRAIN, SPLIT_VAL);
     end
     Vd = dqn_eval_batches('dqn_esc', PPc, Kf, val_spec, ag, struct(), 5000, SPLIT_VAL);
