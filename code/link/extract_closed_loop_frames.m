@@ -24,7 +24,7 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %               linear, so the check depends only on the error pattern)
 %     ber_est   BER estimated from the combiner output: decision-directed SNR per
 %               32-symbol block, BER = mean of Q(sqrt(SNR)) over the blocks (QPSK,
-%               Simon & Alouini), so bursts are averaged as conditional BERs
+%               Alouini & Goldsmith 1999, eq. (15)), so bursts are averaged as conditional BERs
 %     snr_post  post-combining SNR estimate [dB]
 %     sinr      antenna-1 SINR [dB]: LS fit of the waveform re-modulated from the
 %               receiver's own decisions to the received samples

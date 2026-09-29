@@ -3,10 +3,11 @@ function ok = validate_phy()
 % Runs the threat model (UAV_GCS_Threat_Link) and compares the measured BER with
 % closed-form results:
 %   V1  AWGN (K = 60 dB, 1 antenna)          vs berawgn (Proakis)
-%   V2  Rician K = 10 dB, 1 antenna          vs MGF integral (Simon & Alouini)
+%   V2  Rician K = 10 dB, 1 antenna          vs MGF integral (Alouini & Goldsmith, 1999)
 %   V3  Rician K = 10 dB, MRC 2 antennas     vs MGF integral, independent branches
 %   V4  Rician K = 10 dB, MRC 3 antennas     vs MGF integral, independent branches
 %   V5  default link (2 antennas, rho = 0.3) vs MGF integral, correlated branches
+%       (non-central quadratic form, Ramirez-Espinosa et al., 2018)
 %   V6  jamming JSR 10 dB: MRC vs MMSE vs jammer-free MRC (spatial nulling)
 %   V7  seeds: same seed -> identical run, different seed -> different run
 % Gap = Eb/N0 shift between measured and theoretical BER, points with >= 100 errors.
@@ -179,8 +180,10 @@ end
 
 function pb = ber_theory(ebno_db, k_db, L, rho)
 % QPSK (Gray) = BPSK per bit; L-branch MRC over Rician branches with LoS mean mu
-% and diffuse covariance Sig = rho^|i-j| / (K+1), per-branch Eb/N0. MGF of the
-% quadratic form ||h||^2 (Simon & Alouini, ch. 9):
+% and diffuse covariance Sig = rho^|i-j| / (K+1), per-branch Eb/N0. Average BER as
+% the Craig-form integral of the MGF of the combined SNR (Alouini & Goldsmith, 1999,
+% eqs. (20), (37)); MGF of the non-central quadratic form ||h||^2 (Ramirez-Espinosa
+% et al., 2018, eq. (11) and Sec. V):
 %   M(s) = exp(s*mu'*(I - s*Sig)^-1*mu) / det(I - s*Sig),  s = -(Eb/N0)/sin^2(theta)
 % rho = 0 reduces to the product of independent Rician MGFs. K = 60 dB gives AWGN.
 if nargin < 4, rho = 0; end

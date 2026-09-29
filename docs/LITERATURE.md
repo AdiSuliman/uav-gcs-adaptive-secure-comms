@@ -2,7 +2,8 @@
 
 Every source of the three proposal documents was read again before the v4 changes: the lecturer's
 original proposal (seven recommended papers), the approved proposal form (six references) and the
-updated proposal (twelve references). For each source: what it contributes to this project and which
+updated proposal (sixteen references in its v2 of 2026-09-29, where two unread books and an unread 1934
+paper were replaced by read papers). For each source: what it contributes to this project and which
 design choice it supports. Short quotes are under 15 words.
 
 ## Sources of the updated proposal
@@ -13,14 +14,18 @@ design choice it supports. Short quotes are under 15 words.
 | 2 | Papathanasiou et al., Appl. Sci. 2026 | full text | IDS "without the ability to prevent or mitigate them in real time"; "the loop between IDS and protocol control should be closed"; availability (RF interference) is the least studied category (27% of 37 studies) and only 2 studies go beyond detection (hopping, secondary paths, error-correcting codes); spectrogram + CNN for RF interference (Li et al. via [2]); isolation forest / one-class models for anomalies; digital twins recommended; "report robustness curves, not single-point scores"; scenario suites with concurrent attacks. |
 | 3 | Tariq et al., Discover AI 2026 | full text | Multimodal jamming detector: MLP on telemetry + CNN on spectrogram images (99%) = our hybrid network; RL policies "outperform static rule-based strategies"; learned actions "constrained by rule checks and a safety shield and a deterministic fallback"; beamforming / interference nulling for link availability; zero-day claims need the class absent from training (leave-one-family-out); macro-F1 under class skew; real-time claims need measured wall-clock latency; post-attack recovery and multi-threat testing are gaps. |
 | 4 | Liu et al., IEEE Commun. Lett. 2018 | full text | State = spectrum waterfall, i.e. the last M observations ("sufficiently use history spectrum information"); reward = bit rate when SINR exceeds the demodulation threshold, 0 otherwise, minus an action-change cost (0.2 R); action = a combination of frequency, power, coding and spread-spectrum decisions; jammers: sweep, comb, random, intelligent (jams the channel the user occupies most). Experience replay, epsilon-greedy. |
-| 5 | Simon & Alouini, 2005 (book) | chapters used | BER of QPSK in AWGN and Rician fading, MRC with correlated branches (MGF method): link validation; conditional BER Q(sqrt(2 gamma)) maps an SNR estimate to a BER estimate. |
+| 5 | Alouini & Goldsmith, IEEE Trans. Commun. 47(9), 1999 | full text (11 pp.) | Conditional BER Q(sqrt(2 g gamma)), g = 1 for BPSK and Gray QPSK per bit (eq. 15): maps an SNR estimate to a BER estimate. Craig form Q(x) = (1/pi) int_0^{pi/2} exp(-x^2/(2 sin^2 phi)) dphi (eq. 17), so the average BER is one finite integral of the MGF of the SNR (eqs. 20-21); Rice MGF (eq. 28); MRC over independent branches = product of the branch MGFs (eqs. 37-38). Independent branches only (footnote 2). Basis of the PHY validation V1-V4. |
 | 6 | Lee et al., NeurIPS 2018 | full text | Mahalanobis score with class means and tied covariance; feature ensemble over several layers (average-pooled features), weights by logistic regression on a validation set; when no OOD samples exist, validate with in-distribution vs FGSM adversarial samples ("tuned only using in-distribution" data). |
-| 7 | Liu, Ting & Zhou, ICDM 2008 | known method | Isolation forest on the link features. |
-| 8 | Mnih et al., Nature 2015 | known method | DQN, experience replay, target network, state stacked from the last 4 frames. |
-| 9 | van Hasselt et al., AAAI 2016 | known method | Double DQN target. |
-| 10 | Richards, 2014 (book) | chapters used | Ch. 6 binary (M-of-N) integration; Ch. 9 beamforming and STAP: optimum weights from the interference covariance, an N-element array nulls up to N-1 interferers, SINR loss when the interferer approaches the look direction. |
-| 11 | Alshiekh et al., AAAI 2018 | known method | Shield that restricts the agent's actions. |
-| 12 | Clopper & Pearson, 1934 | known method | Exact one-sided binomial bound for the false-alarm rate. |
+| 7 | Liu, Ting & Zhou, ICDM 2008 | full text | Isolation forest on the link features: an ensemble of random isolation trees on subsamples, anomaly score from the average path length. |
+| 8 | Mnih et al., Nature 2015 | full text | DQN, experience replay, target network, state stacked from the last 4 frames. |
+| 9 | van Hasselt et al., AAAI 2016 | full text | Double DQN target: the online network chooses the action, the target network evaluates it. |
+| 10 | Barajas et al., IEEE WF-PST 2026 | full text (7 pp.) | A jamming event is declared only after three consecutive positive classifications, against transient spectral fluctuations: our m-of-n confirmation. Details in the v4-search table below. |
+| 11 | Alshiekh et al., AAAI 2018 | full text | Shield that restricts the agent's actions (preemptive shield); the water-tank example keeps a setting for at least 3 steps (our hold, D63). |
+| 12 | Thulin, Electron. J. Statist. 8(1), 2014 | full text (arXiv version) | Exact one-sided Clopper-Pearson bound for a binomial proportion, the (1 - alpha) quantile of Beta(X+1, n-X) (eq. 5): `betaincinv(0.95, k+1, n-k)` in the code; its cost is a slightly longer bound than approximate intervals. |
+| 13 | Dixit et al., arXiv 2606.27028, 2026 | full text | Packet delivery counted on frames that pass the checksum at the receiver: our CRC-based packet loss (see the lecturer's table below). |
+| 14 | Xu et al., MobiHoc 2005 | full text (12 pp.) | Signal strength as a consistency check for a low packet delivery ratio (see "Added for the interim report"). |
+| 15 | Shebert et al., arXiv 2302.03749, 2023 | full text (15 pp.) | Array model r = a(theta) x + n, MMSE weights w = R^-1 a(theta), up to Mr - 1 co-frequency signals, close angular spacing makes separation harder: our spatial features and the 3-antenna experiment (see the v4-search table). |
+| 16 | Ramirez-Espinosa et al., IEEE Trans. Veh. Technol. 68(7), 2019 | full text (arXiv version, 30 pp.) | MGF of a non-central Hermitian quadratic form, M(s) = prod exp(lambda_i mu_i s/(1 - lambda_i s))/(1 - lambda_i s) (eq. 11, after Turin), equal to exp(s mu'(I - s Sig)^-1 mu)/det(I - s Sig) for A = I; MRC over correlated Rician branches with mean sqrt(K/(K+1)) and covariance R/(K+1), exponential correlation rho^abs(i-j) (Sec. V): exactly the model of the PHY validation V5. The paper's own contribution (a confluent approximation of the PDF and CDF) is not needed for the BER. |
 
 ## Lecturer's recommended papers not in the list
 
@@ -48,13 +53,13 @@ design choice it supports. Short quotes are under 15 words.
 | Y. Mekdad et al., "Exploring jamming and hijacking attacks for micro aerial drones," arXiv:2403.03858, 2024 | full text (6 pp.) | Real attacks on a 2.4 GHz drone command link (Crazyflie, 2481 MHz): constant Gaussian jamming with a HackRF One (about 410 USD) makes the GCS lose the link; the drone crashes in autonomous mode and holds the last command in manual mode; hijacking with 70 USD of radios (CW tone, then an unauthenticated link). y(t) = x(t) + j(t). Defenses: IDS on board or at the GCS, channel hopping, DSSS, MIMO, a safe mode; "no unified solution" against all jamming classes. Supports the threat model (cheap SDR jamming of the command uplink) and the need for several countermeasures. |
 | ITU-R Recommendation P.838-3, "Specific attenuation model for rain for use in prediction methods," 2005 | full text (8 pp.) | Specific attenuation gamma_R = k R^alpha (dB/km) from the rain rate R (mm/h), k and alpha from curve fits over 1-1000 GHz (eqs. 2-3), combined for polarization and elevation (eqs. 4-5). Table 5 at 2.5 GHz: kH 0.0001321, alphaH 1.1209, kV 0.0001464, alphaV 1.0085, so 100 mm/h gives 0.023 dB/km (H), about 0.2 dB over 10 km. Weather is not a threat at our 2.4 GHz band; this answers why it is not modelled. |
 
-Also downloaded and screened (abstract, introduction, conclusion) but not used: Yu et al. 2025 (avionics EW: ADS-B, TCAS), Lourenco and Grilo 2025 (null steering in swarms, covered by Richards), Panitsas et al. 2025 (JamShield), the 2023 CNN-complexity study, Yu et al. 2020 (withdrawn by the author), Nagib et al. 2022 (safe DRL for RAN slicing), Ceviz et al. 2023 (FANET routing), Zhong et al. 2025 (radar jamming open set), Zhang et al. 2025 (DRQN under limited CSI). Files in the project's `מקורות` folder, outside the repository.
+Also downloaded and screened (abstract, introduction, conclusion) but not used: Yu et al. 2025 (avionics EW: ADS-B, TCAS), Lourenco and Grilo 2025 (null steering in swarms, covered by Shebert et al.), Panitsas et al. 2025 (JamShield), the 2023 CNN-complexity study, Yu et al. 2020 (withdrawn by the author), Nagib et al. 2022 (safe DRL for RAN slicing), Ceviz et al. 2023 (FANET routing), Zhong et al. 2025 (radar jamming open set), Zhang et al. 2025 (DRQN under limited CSI). Files in the project's `מקורות` folder, outside the repository.
 
 ## Approved-form references not in the updated list
 
 | Paper | Access | Relevance |
 |---|---|---|
-| Yuan et al., IET Commun. 2021 | full text (open) | Double DQN against a mobile, smart (tracking) jammer; state from local observations and history (LSTM for relay, spectrum waterfall for channel); packet success rate and normalized throughput as metrics; anti-jamming toolbox: power control, frequency hopping, beamforming. Supports the follower jammer, Double DQN and history in the state; overlaps with [4]. |
+| Yuan et al., IET Commun. 15, 2237-2251, 2021 | full text (15 pp.) | Double DQN against a mobile, smart jammer that tracks the user's channel once within its sensing range and switches comb pattern when the user escapes it; state from local observations and history (LSTM for relay, spectrum waterfall for channel), justified as making the process Markov; reward = ACK minus a switching overhead (lambda = 0.2), gamma 0.95; 81 joint actions; packet success rate 0.93-0.96 and normalized throughput 0.74-0.81 against 0.5 for a single-network DDQN; anti-jamming toolbox: power control, frequency hopping, beamforming. Supports the follower jammer, Double DQN, history in the state and a switching cost; overlaps with [4]. Note: the paper states the role of gamma inverted (gamma -> 1 is far-sighted, not myopic). |
 | Yu et al., IEEE AESM 2024 | paywall | Not readable in full. |
 | Alsadie, IET Inf. Secur. 2025 | full text | Broad survey; RL for self-adaptive security at high computational cost. No design input. |
 
@@ -65,7 +70,7 @@ Also downloaded and screened (abstract, introduction, conclusion) but not used: 
 | Packet loss from a CRC check of every frame | [2] (protocol meta-signals for the IDS), swarm testbed (checksum-verified delivery), standard link practice |
 | BER as the receiver's estimate (post-combining SNR estimate mapped through the QPSK formula) | [5]; proposal item 5 ("SINR estimated at the receiver") |
 | Decision-directed SINR and envelope correlation (no transmitted waveform at the receiver) | [5]; proposal risk 8 keeps only the channel-estimation assumption |
-| Spatial features of the two antennas (interference correlation, angle to the GCS channel, predicted MMSE gain) | [10] Ch. 9; [1] AoA verification; [3] interference nulling |
+| Spatial features of the two antennas (interference correlation, angle to the GCS channel, predicted MMSE gain) | [15] (MMSE weights, close angular spacing); [1] AoA verification; [3] interference nulling |
 | History of the last cycles in the agent's state | [4], [8], Yuan et al. |
 | Reward = link restored (<= 2x clean) minus costs | [4] reward (rate when SINR above threshold, minus action-change cost); proposal mitigation 2 |
 | Combined configurations: one choice per domain (frequency, space, link budget) | [4] ("combination decisions of frequency, power, coding"); proposal item 7 |
@@ -75,9 +80,9 @@ Also downloaded and screened (abstract, introduction, conclusion) but not used: 
 | Unknown-threat score chosen among Mahalanobis candidates by leave-one-threat-out, nested estimate | [6]; [3] (zero-day claims need the class absent from training) |
 | New threat learned as a class without retraining (mean and tied-covariance update) | [6], Algorithm 2 |
 | Isolation forest: 100 trees, subsample min(8192, N), trained on known data only | [7] |
-| Alarm confirmed on m of n cycles, m-of-n chosen on validation | [10] Ch. 6 |
+| Alarm confirmed on m of n cycles, m-of-n chosen on validation | [10] (three consecutive detections) |
 | Shield: a new configuration only after a confirmed alarm | [11] (preemptive shield) |
-| Per-antenna channel dip as a feature | [10] Ch. 9 (per-element channel estimates of the array) |
+| Per-antenna channel dip as a feature | [15] (per-element array model: an antenna fault is a loss on one element) |
 | Survivability map up to 28 dB JSR | [4] (30 dBm jammer against a 0 dBm signal) |
 
 Ranges: the link's 2.4 GHz band, 50–120 km/h and Eb/N0 0–10 dB (about 15.7 to 5 km by the link budget, `link_budget_table.m`) are within those of the sources (Nanayakkara et al.: 2.4 GHz drone links and an SNR range of −10 to 20 dB in the literature; [4]: jamming up to 30 dB above the signal); the surveys [1]–[3] give no numeric ranges. No range needed widening.
