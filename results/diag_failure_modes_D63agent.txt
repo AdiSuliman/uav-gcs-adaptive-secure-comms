@@ -1,0 +1,45 @@
+=== FAILURE MODES ON THE VALIDATION SPLIT (archive/v4_second_test_20260929/trained_dqn.mat: class_drop 2/2, drop 4.0 dB) ===
+recovered among recoverable episodes, %; DQN failures by mechanism, % of the failed episodes
+threat                                   mode           n     DQN  DQN+esc  rule+esc |  never releas  channel  other
+all                                      static      1492   95.1%    95.8%     73.6% |    37%     1%       0%    62%
+jamming                                  static       144   94.4%    94.4%     96.5% |     0%     0%       0%   100%
+noise_burst                              static       136   96.3%    93.4%     87.5% |     0%     0%       0%   100%
+reactive_jamming                         static       144   96.5%    96.5%     98.6% |     0%     0%       0%   100%
+path_loss                                static       124   90.3%    89.5%     46.8% |    67%     0%       0%    33%
+spoofing                                 static       144   96.5%    96.5%     98.6% |     0%     0%       0%   100%
+antenna_fault                            static       144   89.6%   100.0%     68.8% |   100%     0%       0%     0%
+benign_interference                      static       144   96.5%    96.5%     96.5% |    40%     0%       0%    60%
+sweeping_jammer                          static       144   99.3%    99.3%     83.3% |     0%     0%       0%   100%
+jamming+path_loss                        static        48   95.8%    95.8%      0.0% |     0%    50%       0%    50%
+noise_burst+antenna_fault                static        32   93.8%    93.8%     71.9% |     0%     0%       0%   100%
+sweeping_jammer+path_loss                static        48   89.6%    89.6%      4.2% |     0%     0%       0%   100%
+spoofing+noise_burst                     static        48   95.8%    95.8%     43.8% |     0%     0%       0%   100%
+reactive_jamming+path_loss               static        48   95.8%    95.8%     16.7% |   100%     0%       0%     0%
+jamming+antenna_fault                    static        48  100.0%   100.0%     50.0% |     0%     0%       0%     0%
+spoofing+sweeping_jammer                 static        48  100.0%   100.0%     66.7% |     0%     0%       0%     0%
+benign_interference+noise_burst          static        48   91.7%    91.7%     62.5% |     0%     0%       0%   100%
+
+all                                      follower     672   81.8%    87.2%     73.1% |     1%     1%      93%     5%
+jamming                                  follower     144   70.1%    82.6%     89.6% |     0%     0%      98%     2%
+reactive_jamming                         follower     144   77.1%    83.3%     91.0% |     0%     0%      97%     3%
+spoofing                                 follower     144   91.7%    91.7%     96.5% |     0%     0%      92%     8%
+jamming+path_loss                        follower      48   87.5%    87.5%      2.1% |     0%     0%      67%    33%
+spoofing+noise_burst                     follower      48   70.8%    85.4%     45.8% |     0%     0%     100%     0%
+reactive_jamming+path_loss               follower      48   93.8%    93.8%     20.8% |    33%    33%       0%    33%
+jamming+antenna_fault                    follower      48   85.4%    87.5%     54.2% |     0%     0%     100%     0%
+spoofing+sweeping_jammer                 follower      48   91.7%    93.8%     68.8% |     0%     0%     100%     0%
+
+all                                      immediate    672   63.7%    85.0%     64.9% |     1%     0%      95%     4%
+jamming                                  immediate    144   52.8%    84.7%     77.8% |     0%     0%      99%     1%
+reactive_jamming                         immediate    144   47.2%    79.9%     87.5% |     0%     0%      97%     3%
+spoofing                                 immediate    144   73.6%    92.4%     77.8% |     0%     0%      92%     8%
+jamming+path_loss                        immediate     48   81.2%    89.6%      4.2% |     0%     0%     100%     0%
+spoofing+noise_burst                     immediate     48   56.2%    58.3%     41.7% |     0%     0%      95%     5%
+reactive_jamming+path_loss               immediate     48   95.8%    95.8%     16.7% |   100%     0%       0%     0%
+jamming+antenna_fault                    immediate     48   45.8%    77.1%     58.3% |     0%     0%      96%     4%
+spoofing+sweeping_jammer                 immediate     48   91.7%    97.9%     58.3% |     0%     0%      75%    25%
+
+DQN episodes with a release to no_action while the threat was on (recoverable episodes):
+  static     released in  0.4% of the episodes; recovered  83.3% of those vs  95.2% without a release
+  follower   released in  0.3% of the episodes; recovered  50.0% of those vs  81.9% without a release
+  immediate  released in  0.3% of the episodes; recovered 100.0% of those vs  63.6% without a release
