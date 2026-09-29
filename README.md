@@ -252,15 +252,15 @@ An Unreal Engine view of the closed loop, driven from MATLAB (Simulink 3D Animat
 
 ## Known issues and future work
 
-- The v4 full run (from A0) is pending; the results section shows v3 (D52).
-- The operator console and the 3D view are ported to the v4 interfaces (frame measurements, 36 configurations, test split, nominal-severity cells); their live check follows the full run.
+- **Benign interference (86.5%) and the 85-102 km/h band (KPI 7).** The low band comes from five flights on which the oracle recovers 100%; benign interference is their most frequent failure. After a channel switch the measured interference over thermal is the same in restored and non-restored cycles (about 0 dB, within ±0.15 dB, validation): the residual degradation, a BER just above 2× a small clean BER, is not observable by the receiver within the decision time. Tested on validation and not adopted: a pre-incident degradation reference, escalation while a threat class is still detected, a 20-frame degradation window, degradation confirmed on 2 of 2 (D65, false alarms above the bound), and the expert rule for benign incidents (+2 episodes).
+- **Noise burst + antenna fault (85.0%)**: 60 recoverable episodes (±9 points); few configurations restore it and the policy tries several before one does.
+- **Monitor resolution**: a 5-frame BER estimate cannot resolve a 2× excess near the clean link's error rate; path loss at high severity (81.5%) and the unknown set (81.0%, degradation-only alarms under 3-of-3 confirmation) share this limit.
+- **Combinations never trained on**: 79.5% vs 94.6% trained; sweeping jammer + path loss 10.4%. Composing a response across domains without examples is future work.
 - Consecutive decision cycles come from consecutive frames of the pools, so the fading between two cycles is more correlated than 20 ms apart; recovery times in ms assume the 20 ms decision period.
-- Reactive jamming is the hardest unknown threat: from the receiver it looks like barrage jamming on a continuous uplink, and it calls for the same countermeasure.
-- Latency is measured on a desktop CPU, not on UAV hardware.
+- Reactive jamming is the hardest unknown threat (AUROC 0.641): from the receiver it looks like barrage jamming on a continuous uplink.
+- Latency is measured on a desktop with a GPU detector, not on UAV hardware.
 - Two interferers can exceed what two antennas can null; a third antenna and a relay path are evaluated as experiments.
-- Hardware validation (SDR), switching time and GCS signalling.
-- Online learning.
-- The interim report (Word, outside the repository) will be synced to the v4 run.
+- Hardware validation (SDR), switching time and GCS signalling; online learning.
 
 ---
 
