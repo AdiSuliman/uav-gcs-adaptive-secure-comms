@@ -45,7 +45,7 @@ cm.ColumnSummary = 'column-normalized';
 if ~exist('results', 'dir'), mkdir('results'); end
 saveas(fig_cm, 'results/confusion_matrix.png');
 
-%% 5. Accuracy vs SNR (ערכים אמיתיים בדציבל — denormalized)
+%% 5. Accuracy vs SNR (true Eb/N0 values in dB, denormalized)
 % sp.test.feats is z-scored; denormalize column 1 (SNR) back to dB
 % using the same train-set mean/std saved in splits.norm
 if isfield(sp.test, 'ebno')

@@ -172,7 +172,7 @@ Map A (neutralization): **85.5% recoverable** / 11.5% marginal / 3.0% non-recove
 
 ---
 
-## Phase KPI: Proposal Measurement (section ה) ✅ COMPLETE
+## Phase KPI: Proposal Measurement (section 5) ✅ COMPLETE
 
 | KPI | Result | Notes |
 |---|---|---|
