@@ -21,10 +21,10 @@ Last updated: 2026-09-29
 | B-unknown | Mahalanobis and isolation-forest scores, leave-one-threat-out | ✅ Done, AUROC 0.887 | D42, D46 |
 | C1p | Frame pools: every scenario × configuration × Eb/N0 × geometry | ✅ Done | D44–D46 |
 | C1c | Clean link on 100 new geometries per Eb/N0 under every configuration (KPI 6) | ✅ Done | D51 |
-| C2 | Double DQN with shield; monitor, drop threshold, γ and seed chosen on validation; deployed with escalation | ⏳ D64 retrain running (followers of 0–5 cycles, runs scored as deployed); adoption rule fixed before the run | D44–D52, D59–D64 |
-| C2e | Every policy on the test pools: single, follower, combined, unknown, clean, comb; false alarms on 600 independent clean geometries | ✅ Two readings (D62, D63 agents); ⏳ one reading of new test flights (D64) | D44–D46, D51, D64 |
+| C2 | Double DQN with shield; monitor, drop threshold, γ and seed chosen on validation; deployed with escalation | ✅ D64 agent (3/3, 3 dB, γ 0.5); D65 not adopted; ⏳ D66 (lower cost weights in the training reward) running, adoption rule fixed before the run | D44–D52, D59–D66 |
+| C2e | Every policy on the test pools: single, follower, combined, unknown, clean, comb; false alarms on 600 independent clean geometries | ✅ Three readings; the third (new flights, D64 agent) is the current final; a fourth only if D66 is adopted | D44–D46, D51, D64–D66 |
 | SURV | Survivability maps A/B, two geometries (deliverable 8) | ✅ Done, 86% / 94% | D30, D46 |
-| LAT + KPI + DASH | Latency per cycle, eight proposal KPIs, dashboard (deliverable 1) | Second reading 7/8 met (KPI 4: 12 of 16 threats); ⏳ final after D64, latency on an idle machine | D46, D48, D51, D52, D64 |
+| LAT + KPI + DASH | Latency per cycle, eight proposal KPIs, dashboard (deliverable 1) | Third reading 6/8 met: KPI 4 14/16 (benign interference 86.5%, noise burst + antenna fault 85.0%), KPI 7 speed spread 10.6 points; latency 2.70 / 3.16 ms | D46, D48, D51, D52, D64–D66 |
 | GUI | Operator console on the current decision layer | ⏳ Live tab checked (D53 lead-in, D54 hover help); episode tab check pending | D24, D26, D46, D53, D54, D56 |
 | 3D | Unreal 3D view: live console (threat control, operator vs AI), defense videos, console-episode replay | ✅ Built and tested (D58); Cesium terrain optional | D57, D58 |
 | Fixes | Latency tail; false-alarm bound (KPI 6) | ✅ latency p95 48.9 → 19.4 ms / ✅ KPI 6: 1.5% over 600 independent geometries, bound 2.60% (D52) | D48–D51 |
@@ -39,11 +39,13 @@ Last updated: 2026-09-29
 
 ## Remaining work
 
-1. **D64 round:** new test flights and clean test set, retrain, adoption check on validation, then one reading of the new test set (C2e, C2g, GAL, LAT on an idle machine, KPI, DASH).
-2. **Detector baselines:** random forest and kernel SVM on the link features next to the hybrid network (B3a).
-3. **Operator console and 3D view:** live check on the deployed policy (DQN + escalation).
-4. **Code comments:** a pass over every file (short explanation, no history).
-5. **Reports and defense:** proposal sources, interim report numbers, final report, slides and poster from the same figures.
+1. **D66 round:** training reward with lower cost weights; adoption check on validation; if adopted, new test flights (blocks 8, 9) and a fourth reading, then only the numbers that change are updated.
+2. **Operator console and 3D view:** live check on the final deployed policy, after the D66 decision; the threat gallery with the final agent.
+3. **Code comments:** a pass over every file (short explanation, no history); files the running chain uses wait until it ends.
+4. **Interim report:** final numbers, proposal v2 sources, literature review by the lecturer's five topics (after the final results).
+5. **Proposal v2:** ready for the user's review (16 references, all read).
+6. **Final report, slides and poster:** last, when the user asks.
+7. **Housekeeping:** the v3 backups in `archive/` stay until the user approves deleting them.
 
 ---
 
