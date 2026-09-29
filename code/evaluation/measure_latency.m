@@ -72,8 +72,8 @@ for di = 1:numel(devs)
             X = reshape(single(img), 128, 128, 1, 1); Fn = ((raw - mu) ./ sd)';
             t0 = tic; [probs, maha] = detect_scores(D.net, D.ood, X, Fn, dv); sync(ug); t_det = toc(t0);
             obs = struct('probs', probs(:)', 'unknown', maha < PPm.maha_thr, 'feat', raw);
-            t0 = tic; [cfgD, memD] = policy_decide('dqn', obs, cfgD, memD, PPm, Q.agent); t_dqn = toc(t0);
-            t0 = tic; [cfgR, memR] = policy_decide('rule', obs, cfgR, memR, PPm, []); t_rule = toc(t0);
+            t0 = tic; [cfgD, memD] = policy_decide('dqn_esc', obs, cfgD, memD, PPm, Q.agent); t_dqn = toc(t0);
+            t0 = tic; [cfgR, memR] = policy_decide('rule_esc', obs, cfgR, memR, PPm, []); t_rule = toc(t0);
             if rep > 0                               % pass 0 = warm-up
                 n = n + 1;
                 tm(n, :) = 1000 * [t_spec, t_feat, t_det, t_dqn]; tr(n) = 1000 * t_rule;

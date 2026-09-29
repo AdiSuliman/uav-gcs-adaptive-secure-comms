@@ -68,7 +68,7 @@ for it = 1:n_iter
     end
     if mod(it, max(1, round(n_iter / 25))) == 0 || it == n_iter
         ag = agent; ag.qNetwork = net;
-        Re = dqn_eval_batches('dqn', PP, Kval, eval_spec, ag, struct(), seed + 700, split_val);
+        Re = dqn_eval_batches('dqn_esc', PP, Kval, eval_spec, ag, struct(), seed + 700, split_val);
         sc = dqn_recovered(Re) + 1e-3 * mean(Re.ret);
         curve(end+1, :) = [it * NE, dqn_recovered(Re)]; %#ok<AGROW>
         if sc > best && nb >= H.warmup, best = sc; best_net = net; best_ep = it * NE; end

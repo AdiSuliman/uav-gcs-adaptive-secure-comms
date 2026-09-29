@@ -21,6 +21,7 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   one (M-of-N binary integration, PP.confirm, default C.confirm).
 %   The monitor also keeps the last C.hist observation vectors of policy_state.m.
 %   mem.since starts saturated (10): the policies never see the episode clock.
+%   mem.deg_n / mem.conf_n: consecutive degraded / confirmed-alarm cycles.
 %   M: ber_avg, plr (NE x 1), ebno_est, drop (dB), degraded, cls, alarm, confirmed (1 x NE)
 C = decision_config();
 switch cmd
@@ -28,7 +29,8 @@ switch cmd
         NE = varargin{1}; nA = varargin{2};
         mem = struct('ber', nan(NE, C.win), 'crc', nan(NE, C.win), 'tried', false(NE, nA), ...
             'since', 10 * ones(1, NE), 'cand', zeros(1, NE), 'cand_n', zeros(1, NE), 'good', zeros(1, NE), ...
-            'deg_n', zeros(1, NE), 'alarm', false(NE, 8), 'ebno', nan(NE, 3), 'ref', nan(NE, 10), 'hist', []);
+            'deg_n', zeros(1, NE), 'conf_n', zeros(1, NE), 'alarm', false(NE, 8), 'ebno', nan(NE, 3), ...
+            'ref', nan(NE, 10), 'hist', []);
         M = [];
     case 'update'
         [mem, M] = update(C, varargin{:});
@@ -83,6 +85,7 @@ q = ~M.alarm;
 mem.ref(q, :) = [mem.ref(q, 2:end), M.ebno_est(q)];
 mem.alarm = [mem.alarm(:, 2:end), M.alarm(:)];
 M.confirmed = sum(mem.alarm(:, end-cf(2)+1:end), 2)' >= cf(1);
+mem.conf_n(M.confirmed) = mem.conf_n(M.confirmed) + 1; mem.conf_n(~M.confirmed) = 0;
 % Observation of this cycle for the agent's state (policy_state.m), newest first
 o = policy_obs(obs, M, bc);
 if isempty(mem.hist), mem.hist = repmat(o, 1, 1, C.hist); end

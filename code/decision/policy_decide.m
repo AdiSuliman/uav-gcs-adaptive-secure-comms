@@ -22,10 +22,13 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %   confirmation as the DQN shield, D48)
 %   dqn       argmax of the Q-network over the configurations allowed by the
 %             shield (policy_mask.m); switching costs are part of its reward
-%   *_esc     escalation: if the link stays degraded for C.esc cycles in the same
-%             configuration and the base policy keeps it, move to the next
-%             configuration not yet tried in this incident (DQN: next-highest Q;
-%             rule and table: the fixed ladder C.ladder)
+%   *_esc     escalation: move to the next configuration not yet tried in this
+%             incident (DQN: next-highest Q; rule and table: the fixed ladder C.ladder)
+%             when the base policy keeps
+%             - a configuration it applied while the link stays degraded for C.esc cycles
+%             - no_action while the alarm stays confirmed for C.esc cycles: an
+%               intermittent fault can leave the windowed BER estimate near clean
+%               while the threat is on
 %   random, fixed: reference policies, no monitor gating ('fixed' at no_action is
 %   the link that does not respond)
 %
@@ -79,7 +82,8 @@ if endsWith(kind, '_esc')
     ladder = cellfun(@(x) find(strcmp(A, x)), C.ladder);
     for i = 1:NE
         mem.tried(i, cfg(i)) = true;
-        if a(i) == cfg(i) && mem.deg_n(i) >= C.esc && mem.since(i) >= C.esc && ~strcmp(M.cls{i}, 'none')
+        if cfg(i) == na, stuck = mem.conf_n(i) >= C.esc; else, stuck = mem.deg_n(i) >= C.esc; end
+        if a(i) == cfg(i) && stuck && mem.since(i) >= C.esc && ~strcmp(M.cls{i}, 'none')
             if ~isempty(q)
                 qi = q(:, i); qi(mem.tried(i, :)) = -inf; qi(na) = -inf;
                 [qm, b] = max(qi);

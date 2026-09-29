@@ -74,7 +74,7 @@ if ~isempty(P)
     barh(ax, P.KP.per_threat(:, [find(cD) find(cR) find(cO)])); hold(ax, 'on'); xline(ax, 90, 'r--', '90%');
     set(ax, 'YTick', 1:numel(P.KP.threats), 'YTickLabel', strrep(P.KP.threats, '_', ' '), 'FontSize', 7, 'YDir', 'reverse');
     xlim(ax, [0 105]); grid(ax, 'on'); xlabel(ax, 'recovered among recoverable [%]');
-    legend(ax, {'DQN', 'rule + esc.', 'oracle'}, 'Location', 'southoutside', 'NumColumns', 3, 'FontSize', 7);
+    legend(ax, {'DQN + esc.', 'rule + esc.', 'oracle'}, 'Location', 'southoutside', 'NumColumns', 3, 'FontSize', 7);
     title(ax, 'KPI 4: recovery per threat (test pools)');
 
     ax = nexttile(tl);

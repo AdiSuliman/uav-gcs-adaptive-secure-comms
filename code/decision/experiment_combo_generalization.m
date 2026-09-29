@@ -40,8 +40,8 @@ for ci = 1:numel(combos)
     Kt = Kx; Kt.FA = Q.seed_summary.selected_fa_pen;
     ag = dqn_train_run(H, PPx, Kt, Kx, Q.norm_in, seed, nS, 1, 2);
     specs = test_episodes(c, numel(PP.ebno), K.nR(TEST), REPS, NE, H.T, RandStream('mt19937ar', 'Seed', 300 + ci));
-    Ro = dqn_eval_batches('dqn', PP, K, specs, ag, struct(), 7000, TEST);
-    Ri = dqn_eval_batches('dqn', PP, K, specs, Q.agent, struct(), 7000, TEST);
+    Ro = dqn_eval_batches('dqn_esc', PP, K, specs, ag, struct(), 7000, TEST);
+    Ri = dqn_eval_batches('dqn_esc', PP, K, specs, Q.agent, struct(), 7000, TEST);
     Rr = dqn_eval_batches('rule_esc', PP, K, specs, [], struct(), 7000, TEST);
     Rt = dqn_eval_batches('table', PP, K, specs, [], policy_table(PPx, Kx), 7000, TEST);
     [Ro, Ri, Rr, Rt] = deal(mark(Ro, specs, PP), mark(Ri, specs, PP), mark(Rr, specs, PP), mark(Rt, specs, PP));

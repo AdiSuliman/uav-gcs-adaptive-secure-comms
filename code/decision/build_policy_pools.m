@@ -19,7 +19,10 @@
 % score, the link features of link_features.m (receiver measurements only), and
 % the true BER and frame error (reward and evaluation only). Seeds: pool_seed.m.
 % The cells run in parallel (Parallel Computing Toolbox), each worker in its own
-% folder with its own copy of the model.
+% folder with its own copy of the model. When data/policy_pools.mat already holds
+% the same train and validation geometries and only the test block differs (new
+% test flights, D64), only the test split is simulated and the train and
+% validation pools are kept.
 %
 % Output: data/policy_pools.mat (PP, clean_ref)
 
@@ -35,7 +38,7 @@ COMBOS  = {'jamming+path_loss', 'noise_burst+antenna_fault', 'sweeping_jammer+pa
            'benign_interference+noise_burst'};
 EBNO   = 0:2:10;
 NGEO   = [6 4 8];                % geometries per (cell, Eb/N0): train, validation, test
-BLOCK  = [1 5 2];                % pool_seed.m block of each split (3 and 4: clean-link sets)
+BLOCK  = [1 5 6];                % pool_seed.m block of each split (pool_seed.m lists every block)
 SPLITS = {'train', 'val', 'test'};
 N_WORKERS = 6;
 opt = struct('F_SUB', 20, 'tw', 10, 'delay_bits', 20);
@@ -70,6 +73,18 @@ for i = 1:numel(scen)
     end
 end
 nC = numel(cells);
+runs = arrayfun(@(sp) 100 * BLOCK(sp) + (1:NGEO(sp)), 1:3, 'UniformOutput', false);
+old = [];
+if isfile('data/policy_pools.mat')
+    Lo = load('data/policy_pools.mat', 'PP');
+    if isequal(Lo.PP.runs(1:2), runs(1:2)) && ~isequal(Lo.PP.runs{3}, runs{3}) && isequal(Lo.PP.scen, scen) ...
+            && isequal(Lo.PP.ebno, EBNO) && isequal(Lo.PP.actions, ACTIONS) && isequaln(Lo.PP.level, [cells.level])
+        old = Lo.PP.pools(:, :, :, 1:2);
+        [cells.splits] = deal(3);
+        fprintf('Train and validation pools kept; new test flights (block %d) only\n', BLOCK(3));
+    end
+    clear Lo
+end
 
 % Geometries: seeds and speeds per (Eb/N0, split), shared by every cell
 geo = cell(1, nS);
@@ -112,7 +127,8 @@ fprintf('Simulated in %.1f min\n', toc(t0) / 60);
 %% 3. Package
 pools = cell(nC, nS, nA, 3);
 for c = 1:nC, pools(c, :, :, :) = results{c}; end
-clear results
+if ~isempty(old), pools(:, :, :, 1:2) = old; end
+clear results old
 mber = nan(nC, nS, nA, 3); mfer = nan(nC, nS, nA, 3);
 for c = 1:nC
     for s = 1:nS
@@ -141,7 +157,7 @@ PP = struct('scen', {{cells.threat}}, 'sev', [cells.sev], 'level', [cells.level]
     'combos', {COMBOS}, 'ebno', EBNO, 'actions', {ACTIONS}, ...
     'speed_range', vrange, 'gp', gp, 'bw', bw, 'pw', pw, 'pools', {pools}, 'mber', mber, 'mfer', mfer, ...
     'clean', clean_ref.ber, 'clean_fer', clean_ref.fer, 'classes', {det.classes}, 'maha_thr', T.maha, ...
-    'F_SUB', opt.F_SUB, 'runs', {arrayfun(@(sp) 100 * BLOCK(sp) + (1:NGEO(sp)), 1:3, 'UniformOutput', false)}, ...
+    'F_SUB', opt.F_SUB, 'runs', {runs}, ...
     'aoa_random', p0.int_aoa_random, 'sps', p0.sps, 'bps', p0.bits_per_symbol, ...
     'feat_names', {link_features('names')}, 'created', datestr(now));
 save('data/policy_pools.mat', 'PP', 'clean_ref', '-v7.3');

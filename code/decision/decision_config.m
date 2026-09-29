@@ -25,12 +25,17 @@ C.period_ms = 20;
 % the DQN too, through the shield (policy_mask.m)
 C.dwell = 2;                % consecutive cycles a proposal must persist
 C.hold  = 3;                % cycles after a change before the next one
-C.esc   = 3;                % degraded cycles in one configuration before escalation
+C.esc   = 3;                % escalation: degraded cycles in an applied configuration, or confirmed-alarm cycles at no_action
 C.rule_mmse_db = 6;         % predicted MMSE gain from which the rule also nulls the interferer
 C.ladder = {'spatial_diversity+power_control', 'channel_switch+spatial_diversity+power_control', ...
             'freq_diversity+power_control+fec_interleave', 'channel_switch+rate_reduce+power_control', ...
             'spatial_diversity+rate_reduce+power_control', ...
             'freq_diversity+spatial_diversity+power_control+fec_interleave'};   % rule escalation, in order
+
+% Follower jammer (link_env.m): cycles it needs to re-acquire the channel after a
+% hop, drawn per training and validation episode; 0 = on the new channel at the hop
+% itself (Liu et al.'s comb jammer)
+C.fdelay = [0 5];
 
 % Agent state (policy_state.m): the last H cycles of observations (Liu et al.,
 % spectrum waterfall; Mnih et al., stacked frames)

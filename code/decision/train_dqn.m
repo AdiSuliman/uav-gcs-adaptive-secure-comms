@@ -2,8 +2,9 @@
 % Double DQN (van Hasselt et al., AAAI 2016) with experience replay and a target
 % network (Mnih et al., Nature 2015) on link_env.m: 30-cycle episodes inside one
 % seeded flight geometry, the threat (a single threat at any severity, or a combination)
-% starts at a random cycle, a follower jammer re-acquires the channel after each
-% hop (the intelligent jammer of Liu et al., 2018), and the agent sees what the
+% starts at a random cycle, a follower jammer re-acquires the channel 0-5 cycles
+% after each hop (the intelligent jammer of Liu et al., 2018; 0 = their comb
+% jammer, C.fdelay), and the agent sees what the
 % receiver measures over the last cycles (policy_state.m): detector class
 % probabilities, unknown flag, estimated BER, packet loss, SINR, IoT, spatial
 % measurements, its own configuration, the time since its last change and the
@@ -12,7 +13,8 @@
 % maximizes over the configurations allowed in the next state.
 % Data: the TRAIN split of data/policy_pools.mat for learning; the VALIDATION split
 % (geometries never used in training) for checkpoints and selection; the test
-% split is kept for evaluate_policies.m.
+% split is kept for evaluate_policies.m. Checkpoints, runs and the reward
+% sensitivity are scored as deployed: the DQN with escalation (policy_decide.m, D64).
 %
 % Grid: monitor (alarm definition and m-of-n confirmation, CFG.monitors,
 % policy_monitor.m; Richards, binary integration) x Eb/N0-drop threshold of the
@@ -124,9 +126,9 @@ for ai = 1:numel(ALARMS)
                         ALARMS{ai}, dd, fp, g, SEEDS(k));
                     Hg = H; Hg.gamma = g;
                     [ag, curve, lossc, best_ep] = dqn_train_run(Hg, PPc, Kt, K, norm_in, SEEDS(k), nS, SPLIT_TRAIN, SPLIT_VAL);
-                    V = dqn_eval_batches('dqn', PPc, K, val_spec, ag, struct(), 5000, SPLIT_VAL);
+                    V = dqn_eval_batches('dqn_esc', PPc, K, val_spec, ag, struct(), 5000, SPLIT_VAL);
                     [kmin, kthr] = weakest_threat(V, val_thr);
-                    [fa_w, n_w] = eval_clean_wide('dqn', PPc, CV, ag, struct(), H);
+                    [fa_w, n_w] = eval_clean_wide('dqn_esc', PPc, CV, ag, struct(), H);
                     fprintf(['    checkpoint %d | validation: recovered %.1f%% | weakest threat %s %.1f%% | restored %.1f%% | ' ...
                         'return %.3f | FA %s\n'], best_ep, 100*dqn_recovered(V), kthr, 100*kmin, 100*mean(V.restored_post), ...
                         mean(V.ret), fa_txt(fa_w, n_w));
@@ -173,6 +175,8 @@ rep{end+1} = sprintf(['Generated: %s | Double DQN + shield, state history %d cyc
     datestr(now), CD.hist, mat2str(H.hidden), H.buffer, H.target_every, H.lr, H.lr_end, H.episodes, H.T, ...
     strjoin(ALARMS, '/'), mat2str(DROPS), mat2str(FA_PEN), mat2str(GAMMAS), N_SEEDS);
 rep{end+1} = 'False-switch penalty: training reward only; validation and test use the standard reward.';
+rep{end+1} = sprintf(['Runs scored as deployed: the DQN with escalation (D64). Follower jammers re-acquire the channel ' ...
+    '%d-%d cycles after a hop (training and validation).'], CD.fdelay(1), CD.fdelay(2));
 rep{end+1} = sprintf(['Validation: %d episodes, every (threat cell, Eb/N0, geometry) of the VALIDATION split (geometries ' ...
     'never used in training) %d times: single threats at three severities, combined threats, clean link. Recovered = ' ...
     'BER and packet loss <= 2x clean for 5 consecutive cycles, among recoverable threat episodes; weakest threat = ' ...
@@ -261,7 +265,7 @@ for f = [1, SENS_SCALES]
         Kft = Kf; Kft.FA = f * fa_pen_sel;
         ag = dqn_train_run(Hs, PPc, Kft, Kf, norm_in, runs(best).seed, nS, SPLIT_TRAIN, SPLIT_VAL);
     end
-    Vd = dqn_eval_batches('dqn', PPc, Kf, val_spec, ag, struct(), 5000, SPLIT_VAL);
+    Vd = dqn_eval_batches('dqn_esc', PPc, Kf, val_spec, ag, struct(), 5000, SPLIT_VAL);
     Vr = dqn_eval_batches('rule_esc', PPc, Kf, val_spec, [], struct(), 5000, SPLIT_VAL);
     Vt = dqn_eval_batches('table', PPc, Kf, val_spec, [], policy_table(PP, Kf), 5000, SPLIT_VAL);
     sens(end+1) = struct('scale', f, 'dqn_rec', dqn_recovered(Vd), 'rule_rec', dqn_recovered(Vr), 'tab_rec', dqn_recovered(Vt), ...
@@ -285,6 +289,7 @@ fprintf('=== C2 Complete ===\n');
 function specs = full_val_spec(PP, K, H, split, reps, rs)
 % Every (cell, Eb/N0, geometry) of the split `reps` times, in batches of H.NE (the
 % last one shorter): onset, follower jammer and follower delay drawn per episode.
+C = decision_config();
 cells = find(~cellfun(@isempty, PP.pools(:, 1, K.na, split))');
 [c, s, r] = ndgrid(cells, 1:numel(PP.ebno), 1:K.nR(split));
 c = repmat(c(:)', 1, reps); s = repmat(s(:)', 1, reps); r = repmat(r(:)', 1, reps);
@@ -293,7 +298,7 @@ specs = cell(1, nb);
 for b = 1:nb
     i = (b-1)*H.NE + 1:min(b*H.NE, n); m = numel(i);
     specs{b} = struct('scn', c(i), 's', s(i), 'r', r(i), 'onset', randi(rs, [3 10], 1, m), ...
-        'follow', K.followable(c(i)) & rand(rs, 1, m) < H.p_follow, 'fdelay', randi(rs, [2 5], 1, m), ...
+        'follow', K.followable(c(i)) & rand(rs, 1, m) < H.p_follow, 'fdelay', randi(rs, C.fdelay, 1, m), ...
         'unk', false(1, m), 'T', H.T);
 end
 end

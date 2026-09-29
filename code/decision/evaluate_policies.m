@@ -15,11 +15,12 @@
 %   comb      jamming / reactive_jamming on every channel we can use (Liu et
 %             al.'s comb jammer): the jammer is on the new channel at the hop
 %             itself, so only space and link budget can help. Reported apart,
-%             not part of the KPI 4 pool; never trained on as such
+%             not part of the KPI 4 pool; in training as a follower delay of 0
 % Policies: no response (the link that does not react), random, always-on MMSE,
 % the best fixed configuration (train pools), expert rule with and without
 % escalation, class -> configuration table (train pools), the DQN of every
 % discount factor (the selected one also with escalation), one-step oracle.
+% The deployed policy, read by the KPIs, is the selected DQN with escalation (D64).
 % Main metric (proposal KPI 4): RECOVERED episodes -- BER and packet loss back to
 % <= 2x the clean link for 5 consecutive cycles -- among the RECOVERABLE ones
 % (some configuration restores both in that geometry, link_env.m); the rest is
@@ -92,8 +93,9 @@ POL = [{'none', 'random', 'fixed_mmse', 'fixed', 'rule', 'rule_esc', 'table'}, .
 LBL = [{'no response', 'random', 'always-on MMSE', ['fixed: ' PP.actions{fixed_best}], 'rule', 'rule + escalation', ...
         'table (train pools)'}, ...
        arrayfun(@(g) sprintf('DQN gamma=%.2f%s', Q.gammas(g), ternary(g == sel, ' (selected)', '')), 1:nGam, ...
-       'UniformOutput', false), {'DQN (selected) + escalation', 'oracle (one-step)'}];
-iDQN = find(strcmp(POL, sprintf('dqn_g%d', sel)));
+       'UniformOutput', false), {'DQN + escalation (deployed)', 'oracle (one-step)'}];
+iBase = find(strcmp(POL, sprintf('dqn_g%d', sel)));  % selected DQN alone
+iDQN = find(strcmp(POL, 'dqn_esc'));                 % deployed: selected DQN + escalation (D64)
 col = @(p) find(strcmp(POL, p));
 
 RES = cell(numel(sets), numel(POL));
@@ -140,7 +142,7 @@ rep = [rep, policy_table_lines(ALL, LBL)];
 rep{end+1} = paired_line(ALL, POL, LBL, iDQN);
 
 % Per threat and severity (KPI 4: >= 90% of the recoverable episodes of every threat)
-show = {'none', 'fixed', 'rule_esc', 'table', POL{iDQN}, 'dqn_esc', 'oracle'};
+show = {'none', 'fixed', 'rule_esc', 'table', POL{iBase}, 'dqn_esc', 'oracle'};
 hdr = {'no resp.', 'fixed best', 'rule+esc', 'table', 'DQN', 'DQN+esc', 'oracle'};
 rep{end+1} = '';
 rep{end+1} = 'Recovered episodes among the recoverable, per threat (single + follower + combined sets), %:';
@@ -161,13 +163,14 @@ for ti = 1:numel(threats)
     rep{end+1} = sprintf('%-30s %8d %10.1f%%%s', threats{ti}, sum(m), 100 * RECsh(ti), sprintf('%11.1f', PT(ti, :))); %#ok<SAGROW>
 end
 rep{end+1} = '';
-rep{end+1} = 'Selected DQN per threat and severity (low / nominal / high), recovered among recoverable, %:';
+iK = find(strcmp(show, POL{iDQN}));                  % deployed policy's column
+rep{end+1} = 'Deployed policy (DQN + escalation) per threat and severity (low / nominal / high), recovered among recoverable, %:';
 for ti = 1:numel(PP.singles) - 1
-    rep{end+1} = sprintf('  %-26s %s', threats{ti}, sprintf('%8.1f', squeeze(PTsev(ti, :, 5)))); %#ok<SAGROW>
+    rep{end+1} = sprintf('  %-26s %s', threats{ti}, sprintf('%8.1f', squeeze(PTsev(ti, :, iK)))); %#ok<SAGROW>
 end
-kpi4 = PT(:, 5) >= 90;
-rep{end+1} = sprintf('KPI 4 (DQN >= 90%% of the recoverable episodes of every threat): %d of %d threats | lowest %s %.1f%%', ...
-    sum(kpi4), numel(kpi4), threats{find(PT(:, 5) == min(PT(:, 5)), 1)}, min(PT(:, 5)));
+kpi4 = PT(:, iK) >= 90;
+rep{end+1} = sprintf(['KPI 4 (deployed policy >= 90%% of the recoverable episodes of every threat): %d of %d threats | ' ...
+    'lowest %s %.1f%%'], sum(kpi4), numel(kpi4), threats{find(PT(:, iK) == min(PT(:, iK)), 1)}, min(PT(:, iK)));
 
 % Per Eb/N0 (single set)
 rep{end+1} = '';
@@ -259,9 +262,9 @@ if isfile('data/clean_test_pools.mat')
     rep = [rep, lines];
 end
 
-% Final configuration of the selected DQN per threat (single set)
+% Final configuration of the deployed policy per threat (single set)
 rep{end+1} = '';
-rep{end+1} = 'Configuration at the end of the episode, selected DQN (single set): most frequent two per threat';
+rep{end+1} = 'Configuration at the end of the episode, deployed policy (single set): most frequent two per threat';
 Rd = RES{1, iDQN};
 top_cfg = struct('threat', {}, 'action', {}, 'share', {});      % most frequent final configuration (threat_gallery.m)
 for ti = 1:numel(PP.singles) - 1
@@ -427,7 +430,7 @@ end
 end
 
 function s = paired_line(RR, POL, LBL, iDQN)
-% Paired differences of the selected DQN, per episode: recovered (recoverable
+% Paired differences of the deployed policy, per episode: recovered (recoverable
 % episodes) and return, bootstrap over geometries.
 Rd = RR{iDQN}; m = Rd.recoverable & Rd.threat;
 parts = {};

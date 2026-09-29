@@ -4,7 +4,7 @@
 % every configuration (common random numbers, as in build_policy_pools.m), with
 % the same detector, frames per geometry and features (pool_cell.m, in parallel).
 % Two sets, chosen by CLEAN_SET (default 'test'):
-%   'test'  seed block 3 -> data/clean_test_pools.mat: evaluate_policies.m runs
+%   'test'  seed block 7 -> data/clean_test_pools.mat: evaluate_policies.m runs
 %           one clean episode per geometry (600 independent episodes) and KPI 6
 %           is computed over them (D51)
 %   'val'   seed block 4 -> data/clean_val_pools.mat: train_dqn.m checks the false
@@ -19,7 +19,7 @@ fprintf('=== Clean-link pools over many geometries (D51, D52, D59) ===\n\n');
 %% 1. Configuration
 if ~exist('CLEAN_SET', 'var'), CLEAN_SET = 'test'; end
 switch CLEAN_SET
-    case 'test', SP = 3; f_out = 'data/clean_test_pools.mat';
+    case 'test', SP = 7; f_out = 'data/clean_test_pools.mat';
     case 'val',  SP = 4; f_out = 'data/clean_val_pools.mat';
     otherwise, error('build_clean_test_pools: CLEAN_SET must be ''test'' or ''val''');
 end
