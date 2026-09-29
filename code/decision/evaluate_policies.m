@@ -120,9 +120,10 @@ rep{end+1} = ['recovered = BER and packet loss <= 2x clean for 5 consecutive cyc
     '(some configuration restores both in that geometry); restored / ok = cycles after onset with BER / BER and ' ...
     'packet loss restored; false sw = changes on a healthy link, whole episode.'];
 rep{end+1} = sprintf(['Selected DQN: gamma %.2f, training false-switch penalty %d; alarm ''%s'', confirmation ' ...
-    '%d-of-%d for every monitored policy. Combined threats (%d) in training and test, new flights in test (D61). ' ...
+    '%d-of-%d%s for every monitored policy. Combined threats (%d) in training and test, new flights in test (D61). ' ...
     'Intervals: 95%% bootstrap over geometries.'], ...
-    Q.seed_summary.selected_gamma, Q.seed_summary.selected_fa_pen, PP.alarm_mode, PP.confirm, numel(PP.combos));
+    Q.seed_summary.selected_gamma, Q.seed_summary.selected_fa_pen, PP.alarm_mode, PP.confirm(1), PP.confirm(2), ...
+    deg_txt(PP.confirm), numel(PP.combos));
 for si = 1:numel(sets)
     rep{end+1} = ''; %#ok<SAGROW>
     R1 = RES{si, 1};
@@ -459,4 +460,10 @@ end
 
 function out = ternary(c, a, b)
 if c, out = a; else, out = b; end
+end
+
+function t = deg_txt(cf)
+% Degradation-alone confirmation of a four-element monitor (policy_monitor.m, D65).
+t = '';
+if numel(cf) >= 4, t = sprintf(' (degradation alone %d-of-%d)', cf(3), cf(4)); end
 end

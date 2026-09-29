@@ -18,7 +18,10 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   PP.drop_db from the episode's reference (D50, D52). Drop: reference = median
 %   Eb/N0 estimate of the last 10 cycles without an alarm, minus the median of the
 %   last 3 cycles. An alarm is CONFIRMED when at least m of the last n cycles carried
-%   one (M-of-N binary integration, PP.confirm, default C.confirm).
+%   one (M-of-N binary integration, PP.confirm, default C.confirm). A four-element
+%   PP.confirm [m n md nd] also confirms on degradation alone in md of the last nd
+%   cycles (D65): clean-link false alarms come from class misreads, while the
+%   non-hostile classes raise an alarm only through degradation.
 %   The monitor also keeps the last C.hist observation vectors of policy_state.m.
 %   mem.since starts saturated (10): the policies never see the episode clock.
 %   mem.deg_n / mem.conf_n: consecutive degraded / confirmed-alarm cycles.
@@ -29,8 +32,8 @@ switch cmd
         NE = varargin{1}; nA = varargin{2};
         mem = struct('ber', nan(NE, C.win), 'crc', nan(NE, C.win), 'tried', false(NE, nA), ...
             'since', 10 * ones(1, NE), 'cand', zeros(1, NE), 'cand_n', zeros(1, NE), 'good', zeros(1, NE), ...
-            'deg_n', zeros(1, NE), 'conf_n', zeros(1, NE), 'alarm', false(NE, 8), 'ebno', nan(NE, 3), ...
-            'ref', nan(NE, 10), 'hist', []);
+            'deg_n', zeros(1, NE), 'conf_n', zeros(1, NE), 'alarm', false(NE, 8), 'deg', false(NE, 8), ...
+            'ebno', nan(NE, 3), 'ref', nan(NE, 10), 'hist', []);
         M = [];
     case 'update'
         [mem, M] = update(C, varargin{:});
@@ -85,6 +88,8 @@ q = ~M.alarm;
 mem.ref(q, :) = [mem.ref(q, 2:end), M.ebno_est(q)];
 mem.alarm = [mem.alarm(:, 2:end), M.alarm(:)];
 M.confirmed = sum(mem.alarm(:, end-cf(2)+1:end), 2)' >= cf(1);
+mem.deg = [mem.deg(:, 2:end), M.degraded(:)];
+if numel(cf) >= 4, M.confirmed = M.confirmed | sum(mem.deg(:, end-cf(4)+1:end), 2)' >= cf(3); end
 mem.conf_n(M.confirmed) = mem.conf_n(M.confirmed) + 1; mem.conf_n(~M.confirmed) = 0;
 % Observation of this cycle for the agent's state (policy_state.m), newest first
 o = policy_obs(obs, M, bc);

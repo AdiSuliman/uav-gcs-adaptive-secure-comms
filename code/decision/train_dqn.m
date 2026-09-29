@@ -50,9 +50,9 @@ H = struct('gamma', 0.9, 'NE', 64, 'T', 30, 'episodes', 20000, 'buffer', 200000,
     'batch', 128, 'updates', 4, 'lr', 5e-4, 'lr_end', 5e-5, 'clip', 10, 'target_every', 500, ...
     'eps_end', 0.05, 'eps_frac', 0.6, 'huber', 1, 'p_unknown', 0.10, 'p_follow', 0.5, 'n_eval', 4, ...
     'hidden', [256 256]);
-N_SEEDS = 3; GAMMAS = [0.5 0.9]; FA_PEN = 80;
-ALARMS = {'class_drop 2/2', 'class_drop 3/3'};  % monitors: alarm definition, m/n confirmation
-DROP_STEPS = [1 2];                      % path_loss alarm: 1 and 2 dB below the train-pool threshold
+N_SEEDS = 3; GAMMAS = 0.5; FA_PEN = 80;
+ALARMS = {'class_drop 3/3 deg 2/2'};     % monitor: alarm definition, m/n confirmation, degradation alone 2/2 (D65)
+DROP_STEPS = 2;                          % path_loss alarm: 2 dB below the train-pool threshold (D64 selection)
 SENS_SCALES = [0.5 2];                   % reward-weight sensitivity: cost terms x scale
 if exist('CFG', 'var') && isstruct(CFG)
     if isfield(CFG, 'dqn_seeds'), N_SEEDS = CFG.dqn_seeds; end
@@ -385,8 +385,10 @@ if c, out = a; else, out = b; end
 end
 
 function [mode, confirm] = monitor(name)
-% 'class_drop 3/3' -> alarm definition 'class_drop', confirmation on 3 of the last 3 cycles.
+% 'class_drop 3/3' -> alarm definition 'class_drop', confirmation on 3 of the last 3 cycles;
+% 'class_drop 3/3 deg 2/2' also confirms on degradation alone in 2 of the last 2 (D65).
 t = strsplit(name);
 mode = t{1};
 confirm = sscanf(t{2}, '%d/%d')';
+if numel(t) >= 4 && strcmp(t{3}, 'deg'), confirm = [confirm, sscanf(t{4}, '%d/%d')']; end
 end

@@ -1281,8 +1281,9 @@ function R = applyMitigation(env, p, threat, action_name, snr_dB) %#ok<INUSL>
 end
 
 function cf = confirmOf(env)
-    % Alarm confirmation m-of-n of the decision layer (policy_monitor.m).
-    cf = [2 2]; if isfield(env.PP, 'confirm'), cf = env.PP.confirm; end
+    % Alarm confirmation m-of-n of the decision layer (policy_monitor.m); a
+    % degradation-alone confirmation (D65) is not shown in these labels.
+    cf = [2 2]; if isfield(env.PP, 'confirm'), cf = env.PP.confirm(1:2); end
 end
 
 function r = survRef(surv, k)
