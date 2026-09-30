@@ -4,8 +4,9 @@
 % into distances with the free-space (Friis) loss at 2.4 GHz for three stated
 % hardware profiles; the simulated results hold for every profile, only the
 % distance attached to each Eb/N0 changes. Air-ground measurement campaigns used
-% transmit powers of 27-44 dBm and links up to 142 km (Khawaja et al.). A profile's
-% range is capped by the radio horizon (4/3 earth radius) of the UAV altitude.
+% transmit powers of 27-44 dBm (Khawaja et al.). Distances are shown up to the radio
+% horizon (4/3 earth radius) of the UAV altitude and never beyond 50 km, the range of
+% the close-range UAV class (Tlili et al.), the largest class the system is built for.
 % Illustrative only: not an input of any stage.
 % Output: results/link_budget.txt
 
@@ -19,8 +20,9 @@ Rb  = 2e6;    % bit rate [b/s] (QPSK, 1 Msym/s)
 Pj  = 40;     % jammer power [dBm] (10 W)
 Gj  = 3;      % jammer antenna gain [dBi]
 hG  = 10;     % GCS antenna height [m]
-prof = struct('name', {'A small UAV radio', 'B tactical data link', 'C long-range data link'}, ...
-    'Pt', {20, 30, 40}, 'Gt', {6, 12, 20}, 'hU', {300, 1000, 3000});
+DMAX = 50;    % range of the close-range UAV class [km] (Tlili et al.)
+prof = struct('name', {'A small UAV radio', 'B tactical data link'}, ...
+    'Pt', {20, 30}, 'Gt', {6, 12}, 'hU', {300, 1000});
 horizon_km = @(h1, h2) 4.12 * (sqrt(h1) + sqrt(h2));                % 4/3 earth radius, heights in m
 Pr = ebno - 174 + NF + 10*log10(Rb);                                 % received power needed [dBm]
 
@@ -32,12 +34,12 @@ for k = 1:numel(prof)
     P = prof(k);
     d = 10.^((P.Pt + P.Gt + Gr - Lm - Pr - 20*log10(f/1e6) - 32.44) / 20);   % km
     hz = horizon_km(P.hU, hG);
-    cells_km = arrayfun(@(x) km_txt(x, hz), d, 'UniformOutput', false);
+    cells_km = arrayfun(@(x) km_txt(x, min(hz, DMAX)), d, 'UniformOutput', false);
     rep{end+1} = sprintf('%-42s %s', sprintf('%s (%g dBm, %g dBi)', P.name, P.Pt, P.Gt), ...
         sprintf('%11s', cells_km{:})); %#ok<SAGROW>
     rep{end+1} = sprintf('%-42s radio horizon at %g m altitude: %.0f km', '', P.hU, hz); %#ok<SAGROW>
 end
-rep{end+1} = '(* the free-space range exceeds the radio horizon: the horizon is the range)';
+rep{end+1} = sprintf('(* the free-space range exceeds the radio horizon or %g km, the close-range class)', DMAX);
 rep{end+1} = '';
 rep{end+1} = 'In-band interferer (JSR at the UAV) -> jammer distance relative to the UAV-GCS distance, profile A:';
 jsr = C.sev.jamming.levels;

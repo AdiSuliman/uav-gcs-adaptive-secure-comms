@@ -1,9 +1,10 @@
 %% EXPERIMENT_SURVIVABILITY_OPTIONS - What a third antenna or an alternate path adds
-% Research experiment of deliverable 8. The system flies two UAV antennas (proposal
-% item 2), which null one interferer, and only when it arrives from another
-% direction than the GCS. Two extensions named in the proposal
-% literature are tested on the recoverability question, without changing the system:
-%   3 antennas     an N-element array nulls up to N-1 interferers (Shebert et al.)
+% Research experiment of deliverable 8. The system flies three UAV antennas, which
+% null up to two interferers (an N-element array nulls up to N-1, Shebert et al.),
+% and only when they arrive from other directions than the GCS. The system is
+% compared on the recoverability question with a two-antenna receiver (what the
+% third antenna adds) and with an alternate path:
+%   2 antennas     the same array without its middle antenna, one null
 %   relay path     the command reaches the UAV over a secondary path (Papathanasiou
 %                  et al.: secondary communication paths, backup link; the lecturer's
 %                  proposal: an alternate route), modeled as the desired signal
@@ -15,7 +16,7 @@
 % uniform, as in the pools) under every configuration. A geometry is recoverable
 % when some configuration brings BER and packet loss within 2x (+ one packet) of
 % the clean link: the receiver's own clean link for 2 and 3 antennas, and the
-% direct two-antenna link for the relay (the service the relay must give back).
+% direct three-antenna link for the relay (the service the relay must give back).
 %
 % Output: results/survivability_options.txt, data/survivability_options.mat
 
@@ -35,8 +36,8 @@ SINGLES = {'jamming', 'reactive_jamming', 'noise_burst', 'spoofing', 'sweeping_j
 iHigh = C.nominal + 1;                                 % the 'high' level
 cases = [cellfun(@(t) struct('threat', t, 'field', '', 'level', NaN), COMBOS), ...
          cellfun(@(t) struct('threat', t, 'field', C.sev.(t).field, 'level', C.sev.(t).levels(iHigh)), SINGLES)];
-VAR = struct('name', {'2 antennas', '3 antennas', 'relay path'}, 'n_rx', {2, 3, 2}, ...
-    'gcs', {0, 0, RELAY_DEG}, 'loss', {0, 0, RELAY_LOSS_DB}, 'ref', {1, 2, 1});
+VAR = struct('name', {'2 antennas', '3 antennas', 'relay path'}, 'n_rx', {2, 3, 3}, ...
+    'gcs', {0, 0, RELAY_DEG}, 'loss', {0, 0, RELAY_LOSS_DB}, 'ref', {1, 2, 2});
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
     cases = cases([1 end]); N_GEOM = 2; COMBOS = COMBOS(1);
 end
@@ -44,6 +45,7 @@ geo = arrayfun(@(s) struct('seed', arrayfun(@(r) pool_seed(1, s, 13, r), 1:N_GEO
     'speed', arrayfun(@(r) nth2(@pool_seed, 1, s, 13, r, vrange), 1:N_GEOM), 'run', 1300 + (1:N_GEOM)), ...
     1:nS, 'UniformOutput', false);
 
+turn = []; parallel_turn('take'); turn = onCleanup(@() parallel_turn('give'));   % one heavy parallel stage at a time on this computer
 pl = gcp('nocreate');
 if isempty(pl) || pl.NumWorkers ~= N_WORKERS
     delete(pl); pl = parpool('Processes', N_WORKERS);

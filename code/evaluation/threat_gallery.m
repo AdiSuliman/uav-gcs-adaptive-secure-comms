@@ -2,7 +2,7 @@
 % Every threat at its nominal severity (init_params.m) on one seeded flight
 % (Eb/N0 6 dB, 90 km/h, interferers at fixed directions 45, -55, 70 deg), next to
 % the clean link on the same seed:
-%   (a) spectrogram of a received frame on antenna 1: what the detector sees
+%   (a) spectrogram of a received frame on the reference antenna: what the detector sees
 %   (b) combiner output symbols of that frame: clean link vs threat
 %   (c) BER per frame: clean link, the threat with no response, and the threat
 %       under the configuration the selected DQN ends with most often on the test
@@ -21,7 +21,7 @@ OUT = fullfile('results', 'threat_gallery');
 if ~isfolder(OUT), mkdir(OUT); end
 
 p0 = load('params.mat').params;
-p0.quiet_build = true; p0.int_aoa_random = false; p0.int_aoa_deg = [45 -55 70]; p0.k_random = false;
+p0.quiet_build = true; p0.int_aoa_random = false; p0.k_random = false;
 fs = p0.symbol_rate * p0.sps;
 fd = V_KMH / 3.6 * p0.carrier_freq / p0.c_light;
 top = struct('threat', {}, 'action', {}, 'share', {});
@@ -44,7 +44,7 @@ for t = 1:numel(THREATS)
 
     fig = figure('Position', [60 60 1500 420], 'Color', 'w', 'Visible', 'off');
     tl = tiledlayout(fig, 1, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
-    ax = nexttile(tl); spec_axes(ax, base.iq{SHOW}, fs, '(a) Received spectrum, antenna 1');
+    ax = nexttile(tl); spec_axes(ax, base.iq{SHOW}, fs, '(a) Received spectrum, reference antenna');
     ax = nexttile(tl); hold(ax, 'on'); grid(ax, 'on'); axis(ax, 'equal');
     zc = clean.z(:, SHOW); zt = base.z(:, SHOW);
     s = max(rms(zc), eps);

@@ -13,11 +13,11 @@
 %   spoofing             : SIR -4 to 10 dB, step 2
 %   antenna_fault        : duty 0.05-0.6 (30 dB loss while failed)
 %   benign_interference  : -12 to -1.5 dB, step 1.5
-%   airframe_shadowing   : 5-33 dB on antenna 1, step 4 (above 35 dB measured,
+%   airframe_shadowing   : 5-33 dB on one antenna, step 4 (above 35 dB measured,
 %                          Khawaja et al.)
 % 'none' gets n_levels x N_SUB sub-runs per Eb/N0 (class balance).
 %
-% Per frame: antenna-1 IQ, label, level, configured Eb/N0, the receiver
+% Per frame: reference-antenna IQ, label, level, configured Eb/N0, the receiver
 % measurements of extract_closed_loop_frames.m, the true BER and frame
 % error (analysis only), speed, run id, fold (1..N_SUB). Frames whose BER is
 % incomplete (last frame of a sub-run) are dropped.
@@ -48,7 +48,7 @@ n_levels    = numel(threat_cfg(1).levels);
 class_names = ['none', {threat_cfg.name}];
 stop_time   = num2str(F_SUB * p0.frame_duration);
 
-MEAS = {'rssi', 'crc_fail', 'ber_est', 'snr_post', 'sinr', 'env_corr', 'iot', 'coh', 'mmse_gain', 'align', 'branch_dip', 'branch_gap'};
+MEAS = {'rssi', 'crc_fail', 'ber_est', 'snr_post', 'sinr', 'env_corr', 'iot', 'coh', 'mmse_gain', 'align', 'branch_dip', 'branch_gap', 'sinr_gap'};
 D = struct('iq', {{}}, 'label', [], 'level', [], 'snr', [], 'ber', [], 'fer', [], 'speed', [], 'run', [], 'fold', []);
 for i = 1:numel(MEAS), D.(MEAS{i}) = []; end
 run_id = 0;

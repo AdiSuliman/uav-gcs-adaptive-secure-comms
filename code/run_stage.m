@@ -11,7 +11,7 @@ function run_stage(varargin)
 %   C2e evaluate_policies | C2g experiment_combo_generalization | GAL threat_gallery |
 %   SURV map_survivability_boundary | SURV3 experiment_survivability_options |
 %   LAT measure_latency |
-%   KPI measure_all_kpis | DASH build_kpi_dashboard
+%   KPI measure_all_kpis | DASH build_kpi_dashboard | RPT export_report_numbers
 %   run_stage('smoke', ...) runs the listed stages on a reduced problem (few
 %   cells, geometries and episodes) to check the chain in minutes; its outputs
 %   overwrite the normal ones and are not results.
@@ -33,7 +33,7 @@ map = struct('A0', 'init_params', 'A4v', 'validate_phy', 'A5', 'run_dataset_swee
     'C2g', 'experiment_combo_generalization', 'GAL', 'threat_gallery', ...
     'SURV', 'map_survivability_boundary', 'SURV3', 'experiment_survivability_options', 'LAT', 'measure_latency', ...
     'KPI', 'measure_all_kpis', ...
-    'DASH', 'build_kpi_dashboard');
+    'DASH', 'build_kpi_dashboard', 'RPT', 'export_report_numbers');
 for i = 1:numel(varargin)
     st = varargin{i};
     fprintf('\n##### STAGE %s (%s) %s #####\n', st, map.(st), datestr(now));

@@ -1,5 +1,5 @@
 function v = iot_db(rssi_db, sinr_db, snr_sample_db, sps)
-%IOT_DB  Interference over thermal [dB] on antenna 1.
+%IOT_DB  Interference over thermal [dB] on one antenna.
 %   Residual (interference + noise) power = RSSI / (1 + SINR), divided by the
 %   receiver's thermal noise power. The thermal floor is a receiver calibration
 %   constant (kTB x noise figure); in the normalized simulation it is the AWGN

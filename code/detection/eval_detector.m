@@ -83,19 +83,20 @@ for i = 1:numel(unique_snrs)
     idx = (snr_vals == unique_snrs(i));
     f1_vs_snr(i) = 100 * macro_f1_of(Y_test(idx), Y_pred(idx), classes);
 end
-% Threshold (proposal): the lowest Eb/N0 from which macro-F1 stays
-% >= 90% at every higher point AND every class reaches F1 >= 90% over the frames
-% at or above it.
-ok = f1_vs_snr >= 90;
-k_thr = find(~ok, 1, 'last');
-if isempty(k_thr), k0 = 1; elseif k_thr < numel(ok), k0 = k_thr + 1; else, k0 = numel(unique_snrs) + 1; end
-thr_db = NaN; f1_class_above = nan(numel(classes), 1);
-for k = k0:numel(unique_snrs)
-    ab = snr_vals >= unique_snrs(k);
-    fc = 100 * class_f1_of(Y_test(ab), Y_pred(ab), classes);
-    if all(fc >= 90), thr_db = unique_snrs(k); f1_class_above = fc; break; end
+% Threshold (proposal), chosen on the VALIDATION split and then read on the test
+% split: the lowest Eb/N0 from which macro-F1 stays >= 90% at every higher point
+% AND every class reaches F1 >= 90% over the frames at or above it.
+[~, iv] = max(cnn_scores(net, sp.val.X, sp.val.feats'), [], 1);
+Y_val = sp.val.Y(:); Y_val_pred = reshape(categorical(classes(iv)', classes), [], 1);
+if isfield(sp.val, 'ebno')
+    snr_val = sp.val.ebno(:);
+else
+    snr_val = round(sp.val.feats(:, 1) .* sp.norm.feat_std(1) + sp.norm.feat_mean(1));
 end
+thr_db = kpi1_threshold(Y_val, Y_val_pred, snr_val, classes);
 above = snr_vals >= thr_db;
+f1_class_above = nan(numel(classes), 1);
+if any(above), f1_class_above = 100 * class_f1_of(Y_test(above), Y_pred(above), classes); end
 f1_above = 100 * macro_f1_of(Y_test(above), Y_pred(above), classes);
 
 act_of = containers.Map(cls_names, cellfun(@(c) rule_based_policy(c), cls_names, 'UniformOutput', false));
@@ -109,7 +110,7 @@ for c = 1:numel(cls_names)
 end
 fprintf('\nMacro-F1 per Eb/N0:');
 fprintf(' %g dB %.1f%% |', [unique_snrs(:)'; f1_vs_snr(:)']);
-fprintf('\nKPI #1 threshold: macro-F1 and every class F1 >= 90%% from %g dB up; macro-F1 above it %.2f%%, lowest class %.2f%%\n', ...
+fprintf('\nKPI #1 threshold (chosen on validation): %g dB; on the test split above it macro-F1 %.2f%%, lowest class %.2f%%\n', ...
     thr_db, f1_above, min(f1_class_above));
 fprintf('Action-equivalent accuracy: %.2f%% (class accuracy %.2f%%)\n', 100*mean(act_ok), 100*mean(Y_test == Y_pred));
 
@@ -119,7 +120,7 @@ plot(unique_snrs, f1_vs_snr, '-o', 'LineWidth', 2, 'MarkerSize', 7, 'MarkerFaceC
 plot(unique_snrs, 100 * acc_vs_snr, '--s', 'LineWidth', 1.4, 'MarkerSize', 6, 'DisplayName', 'accuracy');
 yline(90, 'k:', 'LineWidth', 1.2, 'DisplayName', 'KPI 1 target (90%)');
 if ~isnan(thr_db)
-    xline(thr_db, 'r-', 'LineWidth', 1.2, 'DisplayName', sprintf('threshold %g dB (every class F1 >= 90%%)', thr_db));
+    xline(thr_db, 'r-', 'LineWidth', 1.2, 'DisplayName', sprintf('threshold %g dB (chosen on validation)', thr_db));
 end
 xlabel('E_b/N_0 per antenna [dB]'); ylabel('Test set [%]'); ylim([0 100]); xticks(unique_snrs);
 title('Hybrid detector on the test set');
@@ -200,6 +201,20 @@ pr = diag(cm) ./ sum(cm, 1)';
 rc = diag(cm) ./ sum(cm, 2);
 f1 = 2 * pr .* rc ./ (pr + rc);
 f1(isnan(f1)) = 0;
+end
+
+function thr = kpi1_threshold(yt, yp, snr, classes)
+% Lowest Eb/N0 from which macro-F1 stays >= 90% at every higher point and every
+% class reaches F1 >= 90% over the frames at or above it (NaN when none).
+u = unique(snr);
+f1 = arrayfun(@(v) 100 * macro_f1_of(yt(snr == v), yp(snr == v), classes), u);
+k_thr = find(f1 < 90, 1, 'last');
+if isempty(k_thr), k0 = 1; else, k0 = k_thr + 1; end
+thr = NaN;
+for k = k0:numel(u)
+    ab = snr >= u(k);
+    if all(100 * class_f1_of(yt(ab), yp(ab), classes) >= 90), thr = u(k); return; end
+end
 end
 
 function f = macro_f1_of(yt, yp, classes)

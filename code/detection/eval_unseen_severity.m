@@ -26,9 +26,11 @@ N_FRAMES = 20;                   % frames per (threat, level, Eb/N0) block
 delay_bits = 20; temporal_window = 10;
 rng(4343, 'twister');
 clear threat_cfg
-ABOVE = struct('jamming', [32 36], 'noise_burst', [32 36], 'reactive_jamming', [32 36], 'sweeping_jammer', [32 36], ...
-    'tone_jamming', [32 36], 'path_loss', [28 31], 'spoofing', 12, 'antenna_fault', 0.7, ...
-    'benign_interference', [], 'airframe_shadowing', [37 41]);
+% Above the training range, up to the most severe value in the sources: 30 dB over our
+% signal (Liu et al.), 35 dB attenuation (airframe shadowing, Khawaja et al.)
+ABOVE = struct('jamming', 30, 'noise_burst', 30, 'reactive_jamming', 30, 'sweeping_jammer', 30, ...
+    'tone_jamming', 30, 'path_loss', [28 31], 'spoofing', 12, 'antenna_fault', 0.7, ...
+    'benign_interference', [], 'airframe_shadowing', 35);
 DL = dataset_levels();
 threat_cfg = struct('name', {}, 'param', {}, 'lv', {});
 for t = 1:numel(DL)

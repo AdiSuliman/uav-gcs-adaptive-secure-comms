@@ -40,3 +40,6 @@ ZIP files/
 
 # old data and results backups (kept locally)
 archive/
+
+# Profile 2 (two antennas): git worktree of branch profile-2-antennas
+profile2_2antennas/

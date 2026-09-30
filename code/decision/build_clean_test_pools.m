@@ -59,6 +59,7 @@ for j = 1:nJ
         geo{j, s} = struct('seed', sd_, 'speed', v_, 'run', runs(r));
     end
 end
+turn = []; parallel_turn('take'); turn = onCleanup(@() parallel_turn('give'));   % one heavy parallel stage at a time on this computer
 pl = gcp('nocreate');
 if isempty(pl) || pl.NumWorkers ~= N_WORKERS
     delete(pl); pl = parpool('Processes', N_WORKERS);

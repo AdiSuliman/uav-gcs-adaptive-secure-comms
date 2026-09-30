@@ -7,7 +7,8 @@ function build_threat_model(p)
 %   -> [Rx: RRC per antenna, coherent combining, QPSK demod]
 %
 % Link: command uplink, single GCS antenna -> p.n_rx omni antennas on the UAV
-% (ULA, spacing p.ant_spacing_wl). The GCS antenna gain is part of Eb/N0.
+% (line array over p.ant_aperture_m, spacing from the number of antennas).
+% The GCS antenna gain is part of Eb/N0.
 % Eb/N0 is per receive antenna (per branch).
 %
 % Channel   LoS steering vector (direction p.gcs_aoa_deg) + diffuse Rayleigh part
@@ -17,7 +18,7 @@ function build_threat_model(p)
 %           [p.rician_k p.int_rician_k], or, with p.k_random, drawn per seed from
 %           p.k_range_db by link_seed.m (channel_k.m).
 % Threat    signal-side threats scale our signal (antenna_fault and
-%           airframe_shadowing hit antenna 1 only); every additive threat is ONE
+%           airframe_shadowing hit one antenna, drawn per seeded run); every additive threat is ONE
 %           waveform arriving through its own spatial channel (own diffuse fading).
 %           Interferer directions come from the Constant block 'AoA': p.int_aoa_deg,
 %           or, with p.int_aoa_random, drawn per seed from p.int_aoa_range_deg by
@@ -29,7 +30,7 @@ function build_threat_model(p)
 %           'mrc'  : w = h,          window p.csi_block symbols (baseline)
 %           'mmse' : w = Rin^-1 * h, window p.mmse_window symbols (spatial_diversity
 %                    action: nulls up to n_rx-1 interferers, tracks a faulty branch)
-%           Output 2 = antenna-1 received IQ (sensing tap for the detector),
+%           Output 2 = received IQ of every antenna (sensing tap for the detector),
 %           output 3 = combiner output (soft symbols), outputs 4-5 = the channel
 %           estimator's per-32-symbol channel estimates and the frame's
 %           interference + noise covariance (the quantities MMSE combining needs).
@@ -216,6 +217,9 @@ if numel(addc) > numel(p.int_aoa_deg)
 end
 
 pers = {}; init = {}; body = {};
+if any(ismember(sig, {'antenna_fault', 'airframe_shadowing'}))
+    pers{end+1} = 'hit_ant'; init{end+1} = sprintf('hit_ant = randi(%d);', nr);   % the antenna the fault or the airframe hits
+end
 body{end+1} = sprintf('Ns = size(u, 1);\ny = u;\nt = (nI + (0:Ns-1).'') / %.1f;\nnI = nI + Ns;\n', fs);
 
 for i = 1:numel(sig)
@@ -226,12 +230,12 @@ for i = 1:numel(sig)
             ps = p.fault_period * sps; on = round(p.fault_duty * ps);
             pers{end+1} = 'k_af'; init{end+1} = 'k_af = 0;'; %#ok<AGROW>
             body{end+1} = sprintf(['for i = 1:Ns\n    if mod(k_af, %d) < %d\n' ...
-                '        y(i, 1) = y(i, 1) * %.8f;\n    end\n' ...
+                '        y(i, hit_ant) = y(i, hit_ant) * %.8f;\n    end\n' ...
                 '    k_af = k_af + 1;\nend\n'], ps, on, 10^(-p.fault_atten_db/20)); %#ok<AGROW>
         case 'airframe_shadowing'
-            % a banking turn hides antenna 1 behind the airframe for the whole run
+            % a banking turn hides one antenna behind the airframe for the whole run
             % (measured depth above 35 dB, lasting seconds; Khawaja et al.)
-            body{end+1} = sprintf('y(:, 1) = y(:, 1) * %.8f;\n', 10^(-p.shadow_db/20)); %#ok<AGROW>
+            body{end+1} = sprintf('y(:, hit_ant) = y(:, hit_ant) * %.8f;\n', 10^(-p.shadow_db/20)); %#ok<AGROW>
     end
 end
 if ~isempty(addc)
@@ -310,7 +314,7 @@ switch lower(p.rx_combiner)
     otherwise, error('build_threat_model: unknown rx_combiner ''%s''', p.rx_combiner);
 end
 s = sprintf([ ...
-    'function [bits, iq1, z, Hq, Rq] = fcn(u, txbits)\n' ...
+    'function [bits, iqa, z, Hq, Rq] = fcn(u, txbits)\n' ...
     '%%#codegen\n' ...
     'persistent rxf sbuf\n' ...
     'NR = %d; SPS = %d; Dt = %d; B = %d; MODE = %d;\n' ...
@@ -321,7 +325,7 @@ s = sprintf([ ...
     'if isempty(sbuf)\n' ...
     '    sbuf = complex(zeros(Dt, 1));\n' ...
     'end\n' ...
-    'iq1 = u(:, 1);\n' ...
+    'iqa = u;\n' ...
     'r = rxf(u);\n' ...
     'Nsym = size(r, 1);\n' ...
     'st = pskmod(txbits, 4, pi/4, ''gray'', ''InputType'', ''bit'');\n' ...
@@ -432,14 +436,15 @@ end
 
 function p = antenna_defaults(p)
 % Defaults for params.mat files without the antenna fields.
-d = struct('n_rx', 2, 'ant_spacing_wl', 0.5, 'rx_corr', 0.3, 'gcs_aoa_deg', 0, ...
-    'int_aoa_deg', [40 -55 70], 'int_rician_k', p.rician_k, 'rx_combiner', 'mrc', ...
+d = struct('n_rx', 3, 'ant_aperture_m', 1.2, 'rx_corr', 0.3, 'gcs_aoa_deg', 0, ...
+    'int_aoa_deg', [42 -52.2 61.3], 'int_rician_k', p.rician_k, 'rx_combiner', 'mrc', ...
     'csi_block', 64, 'mmse_window', 32, 'seed', [], 'int_aoa_random', false, 'int_aoa_range_deg', [-90 90], ...
-    'k_random', false, 'k_range_db', [0 20], 'tone_jsr_db', 16, 'tone_offset_hz', 300e3, 'shadow_db', 20);
+    'k_random', false, 'k_range_db', [-5 20], 'tone_jsr_db', 16, 'tone_offset_hz', 300e3, 'shadow_db', 20);
 f = fieldnames(d);
 for i = 1:numel(f)
     if ~isfield(p, f{i}), p.(f{i}) = d.(f{i}); end
 end
+p.ant_spacing_wl = p.ant_aperture_m / (3e8 / p.carrier_freq) / max(p.n_rx - 1, 1);   % same aperture for 2 or 3 antennas
 end
 
 function out = ternary(c, a, b)

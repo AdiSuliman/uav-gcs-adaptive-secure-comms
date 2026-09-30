@@ -8,7 +8,7 @@ function [action, reason] = rule_based_policy(threat_class, degraded, mmse_gain_
 %                 configuration instead of no_action (proposal mitigation 15)
 %   mmse_gain_db  the receiver's predicted gain of MMSE combining over MRC
 %                 (link_features.m): when the interferer is spatially separable
-%                 (>= C.rule_mmse_db) the rule also nulls it with the two antennas,
+%                 (>= C.rule_mmse_db) the rule also nulls it with the antennas,
 %                 so the rule sees the same spatial information as the agent
 %   With one argument the class mapping alone is returned.
 C = decision_config();

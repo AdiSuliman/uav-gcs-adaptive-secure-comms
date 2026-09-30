@@ -18,8 +18,8 @@
 %   KPI 6  false alarms on a healthy link above the Eb/N0 threshold: one-sided
 %          95% Clopper-Pearson bound over >= 600 independent episodes <= 5%
 %   KPI 7  real time: decision latency median < 10 ms (Oli & Mahalal, low class)
-%          and p95 < 20 ms (also on one CPU core); robustness over 50-120 km/h
-%          (recovery spread <= 10 points), flights outside the envelope reported
+%          and p95 < 20 ms (also on one CPU core); robustness over the speed
+%          envelope (recovery spread <= 10 points), flights at its ends reported
 %   KPI 8  minimum: a closed loop restoring at least one recoverable threat
 %
 % Output: results/kpi_summary.txt, results/kpi_summary.mat (KPI struct array)
@@ -130,9 +130,31 @@ if isfile(F.pol)
             'recoverable episodes (trained on them: %.1f%%, rule + escalation %.1f%%)'], 100 * mean([Cg.res.dqn_out]), ...
             100 * mean([Cg.res.dqn_in]), 100 * mean([Cg.res.rule]));
     end
-    KPI(end+1) = kpi(4, 'Link restoration (<= 2x clean)', sprintf('lowest threat %s %.1f%%, %d of %d threats >= 90%%', ...
-        P.KP.threats{ilo}, lo4, sum(pt >= 90), numel(pt)), '>= 90% of recoverable episodes, every threat', ...
-        status(all(pt >= 90), stale), det);
+    if isfield(P.KP, 'envelope')
+        % inside the operating envelope fixed on validation (D70); the full result stays in the details
+        pe = P.KP.per_threat_env(:)'; he = ~isnan(pe);
+        te = P.KP.threats(he);
+        det = [{sprintf(['operating envelope (validation: >= %d%% of >= %d recoverable episodes): %d of %d ' ...
+            '(threat, level) cells inside; every level: lowest threat %s %.1f%%, %d of %d threats >= 90%%'], ...
+            P.KP.env_rule(1), P.KP.env_rule(2), sum(P.KP.envelope(:)), sum(~isnan(P.KP.envelope_val(:))), ...
+            P.KP.threats{ilo}, lo4, sum(pt >= 90), numel(pt))}, det];
+        if any(he)
+            [loe, ile] = min(pe(he));
+            det = [det(1), {sprintf('inside the envelope, per threat: %s', strjoin(cellfun(@(n, v) sprintf('%s %.1f%%', ...
+                n, v), te, num2cell(pe(he)), 'UniformOutput', false), ', '))}, det(2:end)];
+            val4 = sprintf('inside the operating envelope: lowest threat %s %.1f%%, %d of %d threats >= 90%%', ...
+                te{ile}, loe, sum(pe(he) >= 90), sum(he));
+        else
+            val4 = 'no (threat, level) cell inside the operating envelope';
+        end
+        KPI(end+1) = kpi(4, 'Link restoration (<= 2x clean)', val4, ...
+            '>= 90% of recoverable episodes, every threat, inside the operating envelope', ...
+            status(any(he) && all(pe(he) >= 90), stale), det);
+    else
+        KPI(end+1) = kpi(4, 'Link restoration (<= 2x clean)', sprintf('lowest threat %s %.1f%%, %d of %d threats >= 90%%', ...
+            P.KP.threats{ilo}, lo4, sum(pt >= 90), numel(pt)), '>= 90% of recoverable episodes, every threat', ...
+            status(all(pt >= 90), stale), det);
+    end
 
     k_r = col('rule_esc'); CDk = decision_config();
     [dr, drl, drh] = boot_cluster(double(ALL{iD}.recovered(m4)) - double(ALL{k_r}.recovered(m4)), ones(1, sum(m4)), ...
@@ -185,7 +207,7 @@ if isfile(F.pol)
         1:numel(P.KP.speed_bins) - 1, 'UniformOutput', false), ', '), strjoin(compose('%.1f', pv'), ', '));
     if isfield(P.KP, 'per_speed_out') && ~isempty(P.KP.per_speed_out)
         po = P.KP.per_speed_out(:, strcmp(P.KP.show, P.POL{iD}));
-        det{end+1} = sprintf('outside the envelope (nominal severity): %g-%g km/h %.1f%%, %g-%g km/h %.1f%%', ...
+        det{end+1} = sprintf('ends of the speed envelope (nominal severity): %g-%g km/h %.1f%%, %g-%g km/h %.1f%%', ...
             P.KP.speed_out(1, :), po(1), P.KP.speed_out(2, :), po(2));
     end
     if isfield(P.KP, 'per_delay') && ~isempty(P.KP.per_delay)
@@ -193,7 +215,7 @@ if isfile(F.pol)
         det{end+1} = sprintf('signalling delay of a change: %d cycle %.1f%%, %d cycles %.1f%% (single set)', ...
             CDk.switch_delay, pd(1), 2 * CDk.switch_delay, pd(2));
     end
-    KPI(end+1) = kpi(7, 'Decision time and robustness', latv, 'median < 10 ms, p95 < 20 ms; spread <= 10 points over 50-120 km/h', ...
+    KPI(end+1) = kpi(7, 'Decision time and robustness', latv, 'median < 10 ms, p95 < 20 ms; spread <= 10 points over the speed envelope', ...
         status(lat_ok && max(pv) - min(pv) <= 10, stale), det);
 
     n_ok = sum(pt >= 50);

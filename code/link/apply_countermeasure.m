@@ -22,7 +22,7 @@ function [p, snr_gain_db, cm] = apply_countermeasure(p, threat, action)
 %     swept       sweeping_jammer (visits every channel for a fraction of time)
 %     broadband   noise_burst (covers all channels while ON)
 %     signal-side path_loss, antenna_fault, airframe_shadowing (attenuate our
-%                 own signal, on both antennas or on antenna 1)
+%                 own signal, on both antennas or on one of them)
 %
 %   Actions (constants in init_params: cm_acr_db, cm_rate_factor, n_rx):
 %     channel_switch     move to a channel the interferer does not occupy:

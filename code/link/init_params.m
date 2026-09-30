@@ -21,19 +21,20 @@ params.rolloff      = 0.25;            % RRC roll-off factor
 params.filter_span  = 10;              % RRC filter span (symbols)
 params.rician_k      = 10;             % K-factor (dB) when not drawn per flight (PHY validation)
 params.k_random      = true;           % K-factor of every channel drawn per seeded flight (channel_k.m)
-params.k_range_db    = [0 20];         % measured air-ground K: foliage 2-5, urban -5..10, open L-band ~12, C-band ~28 dB (Khawaja et al.)
+params.k_range_db    = [-5 20];        % measured air-ground K: foliage 2-5, urban -5..10, open L-band ~12, C-band ~28 dB (Khawaja et al.)
 params.carrier_freq  = 2.4e9;          % 2.4 GHz ISM (range for a given Eb/N0: link_budget_table.m)
 
 % UAV platform velocity and Doppler
-% Platform: small tactical ISR UAV — DoD Group 1 (Skylark/Raven class)
-% Operational speed envelope: 50-120 km/h (13.9-33.3 m/s) -> Doppler 111-267 Hz @ 2.4 GHz.
+% Platform: mini UAV (Tlili et al.: 5-25 kg, 0.5-2 m). Speed envelope 29-161 km/h
+% (8-44.7 m/s): from the slowest UAV in the measurements summarized by Khawaja et al.
+% (8 m/s) to their small-UAV limit of 161 km/h -> Doppler 64-358 Hz @ 2.4 GHz.
 % Speed is a CONTINUOUS parameter (any real value inside the envelope, not only
 % whole km/h). The dataset generator draws a random real-valued speed per block
 % of frames; the GUI accepts decimals. fd_max = v * fc / c.
 % v_nominal (20 m/s = 72 km/h -> fd = 160 Hz) is the default cruise speed used by
 % every script that does not draw a speed per seeded run.
-params.speed_kmh_min = 50;                       % [km/h] envelope lower bound
-params.speed_kmh_max = 120;                      % [km/h] envelope upper bound
+params.speed_kmh_min = 29;                       % [km/h] envelope lower bound
+params.speed_kmh_max = 161;                      % [km/h] envelope upper bound
 params.v_min     = params.speed_kmh_min/3.6;     % [m/s]  13.89
 params.v_max     = params.speed_kmh_max/3.6;     % [m/s]  33.33
 params.v_nominal = 20;      % [m/s] nominal cruise (72 km/h) — default simulation Doppler
@@ -54,7 +55,7 @@ params.spoof_sir_db   = 3;          % Spoofing: Spoof-to-Signal Ratio (dB), 0 = 
 params.reactive_threshold = 0.5;    % Reactive Jamming: signal-energy threshold to trigger jammer
 params.tone_jsr_db    = 16;         % Tone (CW) jammer: in-band power over our signal (dB)
 params.tone_offset_hz = 300e3;      % Tone offset from our carrier, uniform in +-this per flight (flat part of the RRC band)
-params.shadow_db      = 20;         % Airframe shadowing: loss on antenna 1 in a banking turn (dB; > 35 measured, Khawaja et al.)
+params.shadow_db      = 20;         % Airframe shadowing: loss on one antenna in a banking turn (dB; > 35 measured, Khawaja et al.)
 
 % Benign Interference: weak NON-MALICIOUS in-band noise (e.g. neighboring
 % WiFi/ISM device), below the attack power range (-12 to -1.5 dB vs jamming's
@@ -77,12 +78,28 @@ params.cm_fec_rate    = 1/2;        % fec_interleave: code rate, K = 7, generato
 %% ========== ANTENNAS & RECEIVER ==========
 % Modeled link: GCS -> UAV command uplink; the receiver (and the detector) is on the UAV.
 % GCS: one antenna, its gain is part of Eb/N0. Eb/N0 is per UAV antenna (per branch).
-% UAV: n_rx omni dipoles under the fuselage (V-mount, 2x2-class datalink radio), ULA model.
-params.n_rx           = 2;            % UAV receive antennas (3 supported)
-params.ant_spacing_wl = 0.5;          % element spacing [wavelengths] (6.25 cm @ 2.4 GHz)
-params.rx_corr        = 0.3;          % diffuse-fading correlation between adjacent antennas
+% UAV: n_rx omni antennas under the airframe (fuselage or wings), spatially separated so that airframe
+% shadowing rarely hides all of them at once (Khawaja et al.: two bottom-mounted
+% antennas about 1.2 m apart; small UAVs measured with three and four antennas).
+% Line array over that 1.2 m aperture; three antennas null up to two interferers.
+params.n_rx           = 3;            % UAV receive antennas (profile 1)
+if isfile('profile.json')             % antenna profile of this checkout (branch profile-2-antennas)
+    prof = jsondecode(fileread('profile.json'));
+    if isfield(prof, 'n_rx'), params.n_rx = prof.n_rx; end
+end
+params.ant_aperture_m = 1.2;          % distance between the outer antennas [m]
+params.ant_spacing_wl = params.ant_aperture_m / (3e8 / params.carrier_freq) / (params.n_rx - 1);   % element spacing [wavelengths]
+params.rx_corr        = 0.3;          % diffuse-fading correlation between adjacent antennas (ground
+                                      % scatterers are seen under similar angles from the UAV, Khawaja et al.)
 params.gcs_aoa_deg    = 0;            % GCS direction from array broadside [deg]
-params.int_aoa_deg    = [40 -55 70];  % fixed direction of interferer 1..3 (components of a threat) [deg]
+% Fixed interferer directions (GUI, gallery, PHY validation) and the survivability
+% geometries (separated, aligned): the same spatial alignment with the GCS on every
+% array (0.25 / 0.2 / 0.93, as 40-45 / 45 / 10 deg on a half-wavelength pair)
+if params.n_rx == 2
+    params.int_aoa_deg = [44.1 -50 60];   params.geom_aoa_deg = [41.4 6.5];
+else
+    params.int_aoa_deg = [42 -52.2 61.3]; params.geom_aoa_deg = [42.2 11.4];
+end
 params.int_aoa_random = true;         % interferer directions drawn per seeded sub-run (interferer_aoa.m)
 params.int_aoa_range_deg = [-90 90];  % range of the random directions (broadside angle) [deg]
 params.int_rician_k   = params.rician_k;  % K-factor of the interferer -> UAV channels (dB)
@@ -119,8 +136,8 @@ if params.verbose
     else
         fprintf('Channel:          Rician (K=%.1f dB), GCS -> UAV uplink\n', params.rician_k);
     end
-    fprintf('UAV antennas:     %d (spacing %.2f wl, rho %.2f), Rx %s\n', params.n_rx, ...
-            params.ant_spacing_wl, params.rx_corr, upper(params.rx_combiner));
+    fprintf('UAV antennas:     %d over %.2f m (spacing %.2f wl, rho %.2f), Rx %s\n', params.n_rx, ...
+            params.ant_aperture_m, params.ant_spacing_wl, params.rx_corr, upper(params.rx_combiner));
     if params.int_aoa_random
         fprintf('Interferer AoA:   random per sub-run, %d to %d deg\n', params.int_aoa_range_deg);
     end

@@ -45,7 +45,8 @@ if ~isempty(Q.drop_db), PP.drop_db = Q.drop_db; end
 K = link_env('tables', PP);
 C = decision_config();
 tab = policy_table(PP, K);
-TEST = 3; SPEED = 4; T = Q.H.T; NE = 64; REPS = 2;
+VAL = 2; TEST = 3; SPEED = 4; T = Q.H.T; NE = 64; REPS = 2;
+ENV_MIN = 90; ENV_N = 10;     % operating envelope: >= ENV_MIN % of >= ENV_N recoverable validation episodes
 if exist('SMOKE', 'var') && SMOKE, REPS = 1; end         % reduced chain check (run_stage smoke)
 nA = numel(PP.actions); nS = numel(PP.ebno); nG = K.nR(TEST);
 single_cells = find(ismember(PP.scen, PP.singles) & ~strcmp(PP.scen, 'none'));
@@ -121,6 +122,19 @@ for si = 1:numel(sets)
         numel(POL), toc(t0)/60);
 end
 
+%% 3b. Operating envelope, fixed on the VALIDATION split before the test is read
+% The deployed policy runs the validation flights of the same threat sets as the
+% test (single, follower, combined). A (threat, severity) is inside the envelope
+% when it restores >= ENV_MIN % of its recoverable episodes there (at least ENV_N).
+foll_cells = single_cells(K.followable(single_cells));
+vsets = {episodes(single_cells, nS, K.nR(VAL), REPS, false, false, NE, T, rs), ...
+         episodes(foll_cells, nS, K.nR(VAL), REPS, true, false, NE, T, rs), ...
+         episodes(combo_cells, nS, K.nR(VAL), REPS, false, false, NE, T, rs)};
+[kind, ag, opt] = policy_setup('dqn_esc', Q, sel, fixed_best, fixed_mmse, tab, K.na);
+RV = run_set(kind, PP, K, vsets{1}, VAL, ag, opt, 70000);
+for vs = 2:3, RV = cat_struct(RV, run_set(kind, PP, K, vsets{vs}, VAL, ag, opt, 70000 + 100*vs)); end
+fprintf('  envelope (validation) %d episodes (%.1f min)\n', numel(RV.ret), toc(t0)/60);
+
 %% 4. Report
 rep = {};
 rep{end+1} = '=== DECISION-LAYER EVALUATION, TEST POOLS ===';
@@ -183,8 +197,36 @@ for ti = 1:numel(threats)
     rep{end+1} = sprintf('  %-34s %s', threats{ti}, sprintf('%8.1f', squeeze(PTsev(ti, :, iK)))); %#ok<SAGROW>
 end
 kpi4 = PT(:, iK) >= 90;
-rep{end+1} = sprintf(['KPI 4 (deployed policy >= 90%% of the recoverable episodes of every threat): %d of %d threats | ' ...
-    'lowest %s %.1f%%'], sum(kpi4), numel(kpi4), threats{find(PT(:, iK) == min(PT(:, iK)), 1)}, min(PT(:, iK)));
+rep{end+1} = sprintf(['KPI 4 over every level (deployed policy >= 90%% of the recoverable episodes of every threat): ' ...
+    '%d of %d threats | lowest %s %.1f%%'], sum(kpi4), numel(kpi4), threats{find(PT(:, iK) == min(PT(:, iK)), 1)}, min(PT(:, iK)));
+
+% Operating envelope (validation) and KPI 4 inside it (test)
+ENV = false(numel(threats), nV); ENVv = nan(numel(threats), nV); PTenv = nan(numel(threats), 1);
+for ti = 1:numel(threats)
+    mvr = strcmp(PP.scen(RV.scn), threats{ti}) & RV.threat & RV.recoverable;
+    for v = 1:nV
+        mv = mvr & PP.sev(RV.scn) == v;
+        if sum(mv) >= ENV_N
+            ENVv(ti, v) = 100 * mean(RV.recovered(mv));
+            ENV(ti, v) = ENVv(ti, v) >= ENV_MIN;
+        end
+    end
+    mt = strcmp(PP.scen(ALL{1}.scn), threats{ti}) & ALL{1}.threat & ALL{1}.recoverable & ...
+        ismember(PP.sev(ALL{1}.scn), find(ENV(ti, :)));
+    if any(mt), PTenv(ti) = 100 * mean(ALL{iDQN}.recovered(mt)); end
+end
+has = any(ENV, 2);
+kpi4_env = PTenv(has) >= 90;
+rep{end+1} = '';
+rep{end+1} = sprintf(['Operating envelope (fixed on validation before the test reading: >= %d%% of >= %d recoverable ' ...
+    'validation episodes), levels %s inside:'], ENV_MIN, ENV_N, strjoin(PP.sev_names, ' / '));
+for ti = 1:numel(threats)
+    rep{end+1} = sprintf('  %-34s %s   test inside: %s', threats{ti}, ...
+        strjoin(arrayfun(@(v) ternary(ENV(ti, v), 'in', ternary(isnan(ENVv(ti, v)), '-', 'out')), 1:nV, ...
+        'UniformOutput', false), ' '), ternary(isnan(PTenv(ti)), 'no level inside', sprintf('%.1f%%', PTenv(ti)))); %#ok<SAGROW>
+end
+rep{end+1} = sprintf(['KPI 4 inside the envelope: %d of %d threats >= 90%% | envelope covers %d of %d (threat, level) ' ...
+    'cells with enough validation episodes'], sum(kpi4_env), numel(kpi4_env), sum(ENV(:)), sum(~isnan(ENVv(:))));
 
 % Per Eb/N0 (single set)
 rep{end+1} = '';
@@ -229,16 +271,17 @@ for bi = 1:numel(bins_v) - 1
         sprintf('%11.1f', PV(bi, :))); %#ok<SAGROW>
 end
 
-% Unseen speeds and signalling-delay sensitivity (reported apart from KPI 4)
+% Edge speeds and signalling-delay sensitivity (reported apart from KPI 4)
 PS = []; PD = [];
 iS = find(strcmp({sets.name}, 'speed'));
 if ~isempty(iS)
     Rs = RES{iS, 1}; ms = Rs.recoverable & Rs.threat;
-    lo = Rs.speed < PP.speed_range(1); hi = Rs.speed > PP.speed_range(2);
+    lo = Rs.speed >= PP.speed_out(1, 1) & Rs.speed <= PP.speed_out(1, 2);
+    hi = Rs.speed >= PP.speed_out(2, 1) & Rs.speed <= PP.speed_out(2, 2);
     PS = [arrayfun(@(c) 100 * mean(RES{iS, col(show{c})}.recovered(ms & lo)), 1:numel(show)); ...
           arrayfun(@(c) 100 * mean(RES{iS, col(show{c})}.recovered(ms & hi)), 1:numel(show))];
     rep{end+1} = '';
-    rep{end+1} = sprintf(['Recovered among recoverable on flights outside the speed envelope (single threats, nominal ' ...
+    rep{end+1} = sprintf(['Recovered among recoverable on dedicated flights at the ends of the speed envelope (single threats, nominal ' ...
         'severity, %d geometries per Eb/N0), %%:'], K.nR(SPEED));
     rep{end+1} = sprintf('%-18s%s', 'speed [km/h]', sprintf('%11s', hdr{:}));
     rep{end+1} = sprintf('%-18s%s', sprintf('%g-%g (%d)', PP.speed_out(1, :), sum(ms & lo)), sprintf('%11.1f', PS(1, :)));
@@ -322,6 +365,7 @@ fid = fopen('results/policy_evaluation.txt', 'w'); fprintf(fid, '%s\n', rep{:});
 fprintf('\n%s\n', rep{:});
 set_names = {sets.name};
 KP = struct('per_threat', PT, 'per_threat_sev', PTsev, 'threats', {threats}, 'recoverable_share', RECsh, ...
+    'envelope', ENV, 'envelope_val', ENVv, 'per_threat_env', PTenv, 'kpi4_env_met', kpi4_env, 'env_rule', [ENV_MIN ENV_N], ...
     'kpi4_met', kpi4, 'per_ebno', PE, 'ebno', PP.ebno, 'per_aoa', PA, 'aoa_bins', bins_aoa, 'per_speed', PV, ...
     'speed_bins', bins_v, 'show', {show}, 'show_lbl', {hdr}, 'far', FAR, 'far_diag', FD, 'far_testpools', FAR_t, ...
     'far_diag_testpools', FD_t, 'far_geoms', n_geom, 'cls_list', {cls_list}, 'ebno_thr', ebno_thr, ...

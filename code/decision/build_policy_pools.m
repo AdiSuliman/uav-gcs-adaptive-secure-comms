@@ -39,10 +39,11 @@ C = decision_config();
 COMBOS  = C.combos;
 S0 = load('params.mat'); p0 = S0.params; p0.quiet_build = true;
 EBNO   = p0.EbNo_dB;
-NGEO   = [6 4 12 8];             % geometries per (cell, Eb/N0): train, validation, test, unseen speeds
+NGEO   = [8 6 12 8];             % geometries per (cell, Eb/N0): train, validation, test, edge speeds
 BLOCK  = [1 5 10 12];            % pool_seed.m block of each split (pool_seed.m lists every block)
 SPLITS = {'train', 'val', 'test', 'speed'};
-VOUT   = [20 50; 120 160];       % speeds of the unseen-speed split [km/h]: half the geometries each
+VOUT   = [29 50; 140 161];       % speeds of the edge-speed split [km/h]: half the geometries each, at the two
+                                 % ends of the envelope (dedicated test flights; the other splits draw over it)
 N_WORKERS = 6;
 opt = struct('F_SUB', 20, 'tw', 10, 'delay_bits', 20);
 C = decision_config();
@@ -63,7 +64,7 @@ nA = numel(ACTIONS); nS = numel(EBNO);
 vrange = [p0.speed_kmh_min p0.speed_kmh_max];
 
 % Cells: (threat, severity index, level of a single threat, splits simulated); the
-% unseen-speed split holds the clean link and the single threats at nominal severity
+% edge-speed split holds the clean link and the single threats at nominal severity
 nSp = numel(SPLITS);
 cells = struct('threat', {}, 'sev', {}, 'level', {}, 'splits', {});
 for i = 1:numel(scen)
@@ -116,6 +117,7 @@ spd = arrayfun(@(sp) cell2mat(arrayfun(@(s) geo{s}(sp).speed, (1:nS)', 'UniformO
     'UniformOutput', false);                    % UAV speed of every geometry, Eb/N0 x geometry per split
 
 %% 2. Simulation, one parallel job per cell
+turn = []; parallel_turn('take'); turn = onCleanup(@() parallel_turn('give'));   % one heavy parallel stage at a time on this computer
 pl = gcp('nocreate');
 if isempty(pl) || pl.NumWorkers ~= N_WORKERS
     delete(pl); pl = parpool('Processes', N_WORKERS);

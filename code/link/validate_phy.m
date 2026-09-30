@@ -6,9 +6,9 @@ function ok = validate_phy()
 %   V2  Rician K = 10 dB, 1 antenna          vs MGF integral (Alouini & Goldsmith, 1999)
 %   V3  Rician K = 10 dB, MRC 2 antennas     vs MGF integral, independent branches
 %   V4  Rician K = 10 dB, MRC 3 antennas     vs MGF integral, independent branches
-%   V5  default link (2 antennas, rho = 0.3) vs MGF integral, correlated branches
-%       (non-central quadratic form, Ramirez-Espinosa et al., 2018)
-%   V6  K = 0 dB and V7 K = 20 dB, 2 correlated antennas: the ends of the K-factor
+%   V5  default link (params n_rx antennas, rho = 0.3) vs MGF integral, correlated
+%       branches (non-central quadratic form, Ramirez-Espinosa et al., 2018)
+%   V6  K = -5 dB and V7 K = 20 dB, the default antennas: the ends of the K-factor
 %       range drawn per flight (channel_k.m)
 %   V8  jamming JSR 10 dB: MRC vs MMSE vs jammer-free MRC (spatial nulling)
 %   V9  seeds: same seed -> identical run, different seed -> different run
@@ -47,16 +47,21 @@ cases = {
   'V2 Rician, 1 ant',           1,   10,  0,   'none',    'mrc',    1
   'V3 Rician, MRC 2 ant',       2,   10,  0,   'none',    'mrc',    2
   'V4 Rician, MRC 3 ant',       3,   10,  0,   'none',    'mrc',    3
-  'V5 default, MRC 2 ant',      2,   10,  0.3, 'none',    'mrc',    2
-  'V6 K = 0 dB, MRC 2 ant',     2,    0,  0.3, 'none',    'mrc',    2
-  'V7 K = 20 dB, MRC 2 ant',    2,   20,  0.3, 'none',    'mrc',    2
-  'V8a jam 10 dB, MRC',         2,   10,  0.3, 'jamming', 'mrc',    0
-  'V8b jam 10 dB, MMSE',        2,   10,  0.3, 'jamming', 'mmse',   0
+  'V5 default, MRC',            0,   10,  0.3, 'none',    'mrc',    0
+  'V6 K = -5 dB, MRC',          0,   -5,  0.3, 'none',    'mrc',    0
+  'V7 K = 20 dB, MRC',          0,   20,  0.3, 'none',    'mrc',    0
+  'V8a jam 10 dB, MRC',         0,   10,  0.3, 'jamming', 'mrc',   -1
+  'V8b jam 10 dB, MMSE',        0,   10,  0.3, 'jamming', 'mmse',  -1
 };
 nC = size(cases, 1); nS = numel(CFG.EbNo);
+% n_rx 0 = the system's antennas (params); theory order = antennas, -1 = no closed form
+dflt = cell2mat(cases(:, 2)) == 0;
+cases(dflt, 2) = {p0.n_rx};
+cases(dflt, 1) = cellfun(@(n) sprintf('%s %d ant', n, p0.n_rx), cases(dflt, 1), 'UniformOutput', false);
+th = cell2mat(cases(:, 7)); th(dflt & th == 0) = p0.n_rx; cases(:, 7) = num2cell(max(th, 0));
 iTh = find(cell2mat(cases(:, 7))' > 0); nTh = numel(iTh);
-iMRCj = find(strcmp(cases(:, 1), 'V8a jam 10 dB, MRC')); iMMSEj = find(strcmp(cases(:, 1), 'V8b jam 10 dB, MMSE'));
-iDef = find(strcmp(cases(:, 1), 'V5 default, MRC 2 ant'));
+iMRCj = find(startsWith(cases(:, 1), 'V8a')); iMMSEj = find(startsWith(cases(:, 1), 'V8b'));
+iDef = find(startsWith(cases(:, 1), 'V5 default'));
 BER = nan(nC, nS); NERR = zeros(nC, nS); TH = nan(nC, nS); GAP = nan(nC, 1); GSE = nan(nC, 1);
 DLY = nan(nC, 1);
 

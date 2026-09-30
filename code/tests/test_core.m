@@ -91,11 +91,13 @@ function test_features(tc)
 n = 12;
 M = struct('sinr', linspace(-5, 5, n), 'ber_est', logspace(-5, -1, n), 'snr_post', 1:n, 'rssi', zeros(1, n), ...
     'crc_fail', mod(1:n, 2), 'env_corr', zeros(1, n), 'iot', ones(1, n), 'coh', 0.5 * ones(1, n), ...
-    'mmse_gain', 3 * ones(1, n), 'align', 0.2 * ones(1, n), 'branch_dip', 2 * ones(1, n), 'branch_gap', 25 * ones(1, n));
+    'mmse_gain', 3 * ones(1, n), 'align', 0.2 * ones(1, n), 'branch_dip', 2 * ones(1, n), 'branch_gap', 25 * ones(1, n), ...
+    'sinr_gap', 7 * ones(1, n));
 [raw, names] = link_features(M, 10, 10);
 verifyEqual(tc, numel(raw), numel(names));
 verifyEqual(tc, raw(feature_index('branch_dip')), 2);
 verifyEqual(tc, raw(feature_index('branch_gap')), 25);
+verifyEqual(tc, raw(feature_index('sinr_gap')), 7);
 verifyEqual(tc, raw(feature_index('log_ber')), log10(M.ber_est(10)), 'AbsTol', 1e-12);
 verifyEqual(tc, raw(feature_index('plr')), mean(M.crc_fail(1:10)), 'AbsTol', 1e-12);
 verifyEqual(tc, feature_index({'sinr', 'iot'}), [1 9]);
@@ -155,10 +157,10 @@ for b = blocks
     S = [S; arrayfun(@(si, ri) pool_seed(1, si, b, ri), s(:), r(:))]; %#ok<AGROW>
 end
 verifyEqual(tc, numel(unique(S)), numel(S));
-k1 = channel_k(12345, [0 20]); k2 = channel_k(12345, [0 20]);
+k1 = channel_k(12345, [-5 20]); k2 = channel_k(12345, [-5 20]);
 verifyEqual(tc, k1, k2);
-K = cell2mat(arrayfun(@(s) channel_k(s, [0 20]), (1:500)', 'UniformOutput', false));
-verifyTrue(tc, all(K(:) >= 0 & K(:) <= 20));
+K = cell2mat(arrayfun(@(s) channel_k(s, [-5 20]), (1:500)', 'UniformOutput', false));
+verifyTrue(tc, all(K(:) >= -5 & K(:) <= 20));
 end
 
 function test_receiver_measurements(tc)
@@ -180,6 +182,7 @@ verifyLessThan(tc, max(abs(txf(pskmod(txb(:), 4, pi/4, 'gray', 'InputType', 'bit
 verifyLessThan(tc, mean(F.coh(v)), 0.2);             % thermal noise only: no spatial coherence
 verifyLessThan(tc, mean(F.ber_est(v)), 1e-3);        % clean link at 12 dB
 verifyLessThan(tc, max(F.branch_dip), 6);            % fading changes little within a frame, first frame included
+sinr_clean = median(F.sinr(v));
 close_system(mdl, 0);
 % a failing antenna drops by tens of dB inside the frame
 p.active_threat = 'antenna_fault';
@@ -197,6 +200,18 @@ link_seed(mdl, 11, 160);
 F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
 verifyGreaterThan(tc, median(F.branch_gap), 12);
 verifyLessThan(tc, median(F.branch_dip), 10);         % no deep drop inside the frame, unlike a fault (> 10 dB)
+verifyGreaterThan(tc, median(F.sinr_gap, 'omitnan'), 10);   % the other antenna, compared with the reference
+verifyLessThan(tc, abs(median(F.sinr, 'omitnan') - sinr_clean), 3);   % the reference is the antenna the airframe does not hide
+[~, hidden] = min(median(F.sinr_ant, 2, 'omitnan'));
+verifyLessThan(tc, mean(F.ref == hidden), 0.1);      % the hidden antenna is not the reference
+% the hidden antenna is drawn per run: different antennas are hit over ten runs
+hit = zeros(1, 10);
+for r = 1:10
+    link_seed(mdl, 10 + r, 160);
+    F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(4 * p.frame_duration)), p, 20);
+    [~, hit(r)] = min(median(F.sinr_ant, 2, 'omitnan'));
+end
+verifyGreaterThanOrEqual(tc, numel(unique(hit)), 2);
 close_system(mdl, 0);
 end
 

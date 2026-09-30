@@ -7,7 +7,7 @@ function varargout = v3d_scene(cmd, varargin)
 %
 %   Frame state V: t [s], alpha (orbit angle), link ('ok' | 'marginal' | 'lost'),
 %   power (beam width, 1 nominal), rate (packet speed, 1 nominal), fec, freqdiv,
-%   fault (antenna 1 not receiving now), pl_db (path loss shown on the link),
+%   fault (one antenna not receiving now), pl_db (path loss shown on the link),
 %   rim (pattern radius per fan angle, 180 x 1), fan_to (point the fan plane
 %   contains), em (1 x 3 struct: kind, on, th; slots are jammer truck, spoofer
 %   pickup, civilian car), chan, chan2, chan_jam, flash (0..1, channel-hop

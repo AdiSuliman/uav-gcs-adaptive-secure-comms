@@ -9,14 +9,19 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %   delay_bits  Tx + Rx filter delay in bits (20)
 %
 % Output F (vectors 1 x nf, one entry per frame):
-%   nf, iq{f}   number of frames; antenna-1 received IQ of frame f
+%   nf, iq{f}   number of frames; received IQ of frame f on the reference antenna
+%   ref         reference antenna of each frame: the antenna with the highest SINR
+%   sinr_ant    SINR of every antenna [dB] (antennas x frames), diagnostics only
 %   Ground truth (evaluation and training reward only, never an input of the
 %   detector or of a policy):
 %     ber       bit error rate (with p.fec: decoded information bits); NaN when the
 %               frame runs past the aligned bit range (the last frame of a run)
 %     fer       1 when the frame has at least one bit error
 %   Receiver measurements (the transmitted bits and waveform are never used):
-%     rssi      antenna-1 received power [dB]
+%   The IQ measurements (rssi, sinr, env_corr, iot) are taken on the reference
+%   antenna, so a fault or airframe shadowing on either antenna does not bias them;
+%   the other antenna is compared with it (sinr_gap, branch_dip, branch_gap).
+%     rssi      received power on the reference antenna [dB]
 %     crc_fail  CRC-32 check of the frame failed: the packet is lost. The frame
 %               carries 1000 information bits + 32 CRC bits (p.crc_bits); the
 %               channel's actual error pattern of the frame is applied to a
@@ -26,8 +31,9 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %               32-symbol block, BER = mean of Q(sqrt(SNR)) over the blocks (QPSK,
 %               Alouini & Goldsmith 1999, eq. (15)), so bursts are averaged as conditional BERs
 %     snr_post  post-combining SNR estimate [dB]
-%     sinr      antenna-1 SINR [dB]: LS fit of the waveform re-modulated from the
-%               receiver's own decisions to the received samples
+%     sinr      SINR on the reference antenna [dB]: LS fit of the waveform
+%               re-modulated from the receiver's own decisions to the received samples
+%     sinr_gap  SINR of the reference antenna minus the lowest SINR of the others [dB]
 %     env_corr  correlation between the residual power and the re-modulated
 %               envelope (32-sample block fit): ~0 for interference independent of
 %               our transmission, > 0 when it is triggered by it (reactive jamming)
@@ -56,13 +62,13 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 
 txb = double(squeeze(out.get('tx_bits_out')));
 rxb = double(squeeze(out.get('rx_bits_out')));
-iq  = squeeze(out.get('Rx_IQ'));
+iqa = out.get('Rx_IQ');                                  % samples x antennas x frames
 zc  = squeeze(out.get('Rx_Z'));
 Hq  = out.get('Rx_H');
 Rq  = out.get('Rx_R');
-if isvector(iq), iq = iq(:); end
+if ismatrix(iqa), iqa = reshape(iqa, size(iqa, 1), 1, []); end
 if isvector(zc), zc = zc(:); end
-nf  = size(iq, 2);
+[ns, na, nf] = size(iqa);
 
 bpf = p.frame_length;
 tx_all = txb(:); rx_all = rxb(:);
@@ -70,12 +76,11 @@ Lmax = min(numel(tx_all), numel(rx_all)) - delay_bits;
 tx_al = tx_all(1:Lmax);
 rx_al = rx_all(delay_bits+1:delay_bits+Lmax);
 
-F = struct('nf', nf, 'iq', {num2cell(iq, 1)});
-F.rssi = 10*log10(mean(abs(iq).^2, 1) + eps);
+F = struct('nf', nf);
 
 % Ground truth and CRC
 if isfield(p, 'fec') && p.fec
-    [F.ber, F.fer, F.crc_fail] = fec_frames(tx_al, rx_al, iq, p, delay_bits, nf);
+    [F.ber, F.fer, F.crc_fail] = fec_frames(tx_al, rx_al, reshape(iqa(:, 1, :), ns, nf), p, delay_bits, nf);
 else
     err = double(tx_al ~= rx_al);
     F.ber = nan(1, nf); F.fer = nan(1, nf); F.crc_fail = nan(1, nf);
@@ -94,9 +99,21 @@ end
 [F.coh, F.mmse_gain, F.align] = spatial_metrics(Hq, Rq, nf);
 F.branch_dip = branch_dip(Hq, nf);
 F.branch_gap = branch_gap(Hq, nf);
-xh = remod_frames(rx_all(delay_bits+1:end), p, size(iq, 1), nf);
-[F.sinr, F.env_corr] = residual_metrics(xh, iq);
-F.iot = iot_of(out, p, F.rssi, F.sinr);
+xh = remod_frames(rx_all(delay_bits+1:end), p, ns, nf);
+rs = nan(na, nf); sn = nan(na, nf); ec = nan(na, nf); io = nan(na, nf);
+for a = 1:na
+    ia = reshape(iqa(:, a, :), ns, nf);
+    rs(a, :) = 10*log10(mean(abs(ia).^2, 1) + eps);
+    [sn(a, :), ec(a, :)] = residual_metrics(xh, ia);
+    io(a, :) = iot_of(out, p, rs(a, :), sn(a, :));
+end
+s0 = sn; s0(isnan(s0)) = -Inf;
+[~, ref] = max(s0, [], 1);                                  % reference antenna per frame
+k = sub2ind([na nf], ref, 1:nf);
+F.ref = ref; F.sinr_ant = sn;
+F.iq = arrayfun(@(f) iqa(:, ref(f), f), 1:nf, 'UniformOutput', false);
+F.rssi = rs(k); F.sinr = sn(k); F.env_corr = ec(k); F.iot = io(k);
+F.sinr_gap = F.sinr - min(sn, [], 1);
 end
 
 %% ===================== CRC =====================
