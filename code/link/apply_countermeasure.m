@@ -17,11 +17,12 @@ function [p, snr_gain_db, cm] = apply_countermeasure(p, threat, action)
 %               .power_factor (transmit-power cost), .effect (text)
 %
 %   Threat groups:
-%     in-channel  jamming, reactive_jamming, spoofing, benign_interference
-%                 (occupy our operating channel only)
+%     in-channel  jamming, reactive_jamming, spoofing, benign_interference,
+%                 tone_jamming (occupy our operating channel only)
 %     swept       sweeping_jammer (visits every channel for a fraction of time)
 %     broadband   noise_burst (covers all channels while ON)
-%     signal-side path_loss, antenna_fault (attenuate our own signal)
+%     signal-side path_loss, antenna_fault, airframe_shadowing (attenuate our
+%                 own signal, on both antennas or on antenna 1)
 %
 %   Actions (constants in init_params: cm_acr_db, cm_rate_factor, n_rx):
 %     channel_switch     move to a channel the interferer does not occupy:
@@ -66,7 +67,7 @@ cm = struct('goodput_factor', 1, 'bw_factor', 1, 'power_factor', 1, 'effect', 'n
 
 if strcmp(action, 'channel_switch_fast'), action = 'channel_switch'; end
 
-inChannel = ismember(threat, {'jamming','reactive_jamming','spoofing','benign_interference'});
+inChannel = ismember(threat, {'jamming','reactive_jamming','spoofing','benign_interference','tone_jamming'});
 field     = interference_field(threat);
 
 switch action
@@ -100,7 +101,7 @@ switch action
         g = 10*log10(rate_f);
         snr_gain_db = g;
         cm.goodput_factor = 1 / rate_f;
-        if ~isempty(field) && ~ismember(threat, {'spoofing','path_loss','antenna_fault'})
+        if ~isempty(field) && ~ismember(threat, {'spoofing','path_loss','antenna_fault','airframe_shadowing'})
             p.(field) = p.(field) - g;
         end
         cm.effect = sprintf('processing gain +%.1f dB, goodput x%.2f', g, 1/rate_f);
@@ -108,7 +109,7 @@ switch action
     case 'power_control'
         snr_gain_db = pwr_db;
         cm.power_factor = 10^(pwr_db/10);
-        if ~isempty(field) && ~ismember(threat, {'path_loss','antenna_fault'})
+        if ~isempty(field) && ~ismember(threat, {'path_loss','antenna_fault','airframe_shadowing'})
             p.(field) = p.(field) - pwr_db;
         end
         cm.effect = sprintf('transmit power +%g dB', pwr_db);
@@ -124,6 +125,7 @@ end
 
 if isfield(p, 'path_loss_db'),   p.path_loss_db   = max(p.path_loss_db, 0); end
 if isfield(p, 'fault_atten_db'), p.fault_atten_db = max(p.fault_atten_db, 0); end
+if isfield(p, 'shadow_db'),      p.shadow_db      = max(p.shadow_db, 0); end
 end
 
 function [p, snr_gain_db, cm] = apply_pair(p, threat, action)
@@ -170,6 +172,8 @@ switch threat
     case 'benign_interference', f = 'benign_int_db';
     case 'path_loss',           f = 'path_loss_db';
     case 'antenna_fault',       f = 'fault_atten_db';
+    case 'tone_jamming',        f = 'tone_jsr_db';
+    case 'airframe_shadowing',  f = 'shadow_db';
     otherwise,                  f = '';
 end
 end

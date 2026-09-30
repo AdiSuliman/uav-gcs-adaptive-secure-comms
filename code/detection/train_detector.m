@@ -17,12 +17,16 @@ fprintf('train %d | val %d | test %d | classes %d | features %d (%s)\n', ...
     size(sp.train.feats, 2), strjoin(sp.norm.feat_names, ', '));
 rng(42, 'twister');
 
-[net, info] = train_hybrid_net(sp.train, sp.val, classes);
+if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
+    [net, info] = train_hybrid_net(sp.train, sp.val, classes, struct('epochs', 2));
+else
+    [net, info] = train_hybrid_net(sp.train, sp.val, classes);
+end
 fprintf('\nBest validation accuracy %.4f at epoch %d\n', info.bestValAcc, info.bestEpoch);
 
 fprintf('Fitting unknown-threat models (Mahalanobis, isolation forest)...\n');
 ood = fit_ood_model(net, sp.train, classes, sp.val);
-fprintf('Production score: Mahalanobis of layer %s (D60); ensemble weights for comparison (bias, %s): %s\n', ...
+fprintf('Production score: Mahalanobis of layer %s; ensemble weights for comparison (bias, %s): %s\n', ...
     ood.layers{end}, strjoin(ood.layers, ', '), mat2str(ood.w, 3));
 
 if ~exist('data', 'dir'), mkdir('data'); end

@@ -10,7 +10,8 @@
 % MARGINAL when the best BER is within 5x, otherwise NON-RECOVERABLE. Directional
 % threats are mapped for two flight geometries: interferer 45 deg from the
 % GCS direction (separable by the two-antenna array) and 10 deg (aligned);
-% path_loss and antenna_fault do not depend on the geometry.
+% path_loss, antenna_fault and airframe_shadowing do not depend on the geometry.
+% The K-factor is fixed at the nominal 10 dB (the pools draw it per flight).
 %
 %   Map A (without goodput loss) — configurations with full goodput
 %   Map B (any configuration)    — every configuration, incl. rate_reduce and fec_interleave
@@ -24,7 +25,7 @@
 %         results/survivability_map_link.png (Map B), data/survivability_boundary.mat
 
 close all; clc;
-fprintf('=== Survivability Boundary Mapping (proposal deliverable 8, real configuration set) ===\n\n');
+fprintf('=== Survivability boundary map (real configuration set) ===\n\n');
 
 %% ========== CONFIG ==========
 N_BASELINE_REPEATS = 5;       % seeded clean-link runs per Eb/N0
@@ -42,26 +43,20 @@ MECH_B = ACTIONS(~strcmp(ACTIONS, 'no_action'));
 MECH_A = MECH_B(cellfun(@(a) no_goodput_loss(p_ref, a), MECH_B));
 ACT_CODE = containers.Map(MECH_B, cellfun(@act_code, MECH_B, 'UniformOutput', false));
 
-% Severity levels per threat: those of run_dataset_sweep.m (A5), plus two stronger levels for the in-band
-% jammers and one for path loss, beyond the trained range, up to the 30 dB jammer of Liu et al. [4]
+% Severity levels per threat: those of the detector dataset (dataset_levels.m), in-band
+% interferers up to 28 dB over our signal (the 30 dB jammer of Liu et al.)
 clear threat_cfg                                  % scripts share the base workspace
-threat_cfg(1) = struct('name','jamming',             'level_field','jsr_db',        'levels',[0 4 8 12 16 22 28]);
-threat_cfg(2) = struct('name','noise_burst',         'level_field','jsr_db',        'levels',[0 4 8 12 16 22 28]);
-threat_cfg(3) = struct('name','reactive_jamming',    'level_field','jsr_db',        'levels',[0 4 8 12 16 22 28]);
-threat_cfg(4) = struct('name','path_loss',           'level_field','path_loss_db',  'levels',[4 8 12 16 20 26]);
-threat_cfg(5) = struct('name','spoofing',            'level_field','spoof_sir_db',  'levels',[-4 -1 2 5 8]);
-threat_cfg(6) = struct('name','antenna_fault',       'level_field','fault_duty',    'levels',[0.1 0.2 0.3 0.4 0.5]);
-threat_cfg(7) = struct('name','sweeping_jammer',     'level_field','jsr_db',        'levels',[0 4 8 12 16 22 28]);
-threat_cfg(8) = struct('name','benign_interference', 'level_field','benign_int_db', 'levels',[-10 -8 -6 -4 -2]);
+DL = dataset_levels();
+threat_cfg = struct('name', {DL.name}, 'level_field', {DL.param}, 'levels', {DL.levels});
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
-    threat_cfg = threat_cfg([1 4]); threat_cfg(1).levels = [4 12]; threat_cfg(2).levels = [8 16];
+    threat_cfg = threat_cfg([1 4]); threat_cfg(1).levels = [4 16]; threat_cfg(2).levels = [7 16];
     RUN_FRAMES = 20; opt.F_SUB = RUN_FRAMES;
 end
 
 % Map entries: directional threats once per geometry, signal-side threats once
 clear maps
 for t = 1:numel(threat_cfg)
-    if ismember(threat_cfg(t).name, {'path_loss', 'antenna_fault'}), geo_a = NaN; else, geo_a = GEOM_AOA; end
+    if ismember(threat_cfg(t).name, {'path_loss', 'antenna_fault', 'airframe_shadowing'}), geo_a = NaN; else, geo_a = GEOM_AOA; end
     for g = geo_a
         e = threat_cfg(t); e.aoa = g; e.base = e.name;
         if ~isnan(g), e.name = sprintf('%s @ %g deg', e.base, g); end
@@ -70,7 +65,7 @@ for t = 1:numel(threat_cfg)
 end
 
 p0 = p_ref;
-p0.int_aoa_random = false; p0.quiet_build = true;
+p0.int_aoa_random = false; p0.k_random = false; p0.quiet_build = true;
 SNR_points = p0.EbNo_dB;
 nS = numel(SNR_points);
 v_nom = p0.v_nominal * 3.6;                       % nominal cruise speed [km/h]

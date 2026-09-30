@@ -1,8 +1,9 @@
 %% EXPERIMENT_COMBO_GENERALIZATION - Combined threats never trained on
-% The agent trains on all eight combined threats and is tested on new flights of
+% The agent trains on every combined threat and is tested on new flights of
 % them (KPI 4). This experiment measures a combination it has never seen.
 % Leave-one-combination-out: for each
-% combined threat the train and validation pools of that combination are removed
+% combined threat the train and validation pools of that combination (every
+% severity) are removed
 % and a DQN is retrained with the selected settings of train_dqn.m (monitor,
 % false-switch penalty, discount factor, seed; dqn_train_run.m); it is then
 % tested on the test flights of the removed combination, next to the selected
@@ -14,7 +15,7 @@
 % Output: results/combo_generalization.{txt,mat}
 
 close all; clc;
-fprintf('=== Combined threats never trained on: leave-one-combination-out (D61) ===\n\n');
+fprintf('=== Combined threats never trained on: leave-one-combination-out ===\n\n');
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
 Q = load('data/trained_dqn.mat', 'agent', 'H', 'norm_in', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db');
 PP.confirm = Q.confirm; PP.alarm_mode = Q.alarm_mode;
@@ -57,7 +58,7 @@ for ci = 1:numel(combos)
         sum(m), 100*res(end).dqn_out, 100*res(end).dqn_in, 100*res(end).rule, 100*res(end).table, toc(t0)/60);
 end
 
-rep = {'=== COMBINED THREATS NEVER TRAINED ON: LEAVE-ONE-COMBINATION-OUT (D61) ==='};
+rep = {'=== COMBINED THREATS NEVER TRAINED ON: LEAVE-ONE-COMBINATION-OUT ==='};
 rep{end+1} = sprintf(['Generated: %s | DQN retrained without the combination (train and validation pools removed), ' ...
     'selected settings: monitor %s %d/%d, penalty %d, gamma %.2f, seed %d | test flights of the combination, %d per Eb/N0'], ...
     datestr(now), PP.alarm_mode, PP.confirm, Q.seed_summary.selected_fa_pen, H.gamma, seed, K.nR(TEST));
@@ -79,16 +80,17 @@ fprintf('\nSaved results/combo_generalization.{txt,mat} (%.1f min)\n', toc(t0)/6
 
 %% ===================== Local functions =====================
 function specs = test_episodes(c, nS, nG, reps, NE, T, rs)
-% Every (Eb/N0, test geometry) of cell c `reps` times, in batches of NE (cyclic
-% padding of the last batch, dropped again by mark()).
-[s, r] = ndgrid(1:nS, 1:nG);
-s = repmat(s(:)', 1, reps); r = repmat(r(:)', 1, reps);
+% Every (cell, Eb/N0, test geometry) of the cells c (the severities of one
+% combination) `reps` times, in batches of NE (cyclic padding of the last batch,
+% dropped again by mark()).
+[cc, s, r] = ndgrid(c(:)', 1:nS, 1:nG);
+cc = repmat(cc(:)', 1, reps); s = repmat(s(:)', 1, reps); r = repmat(r(:)', 1, reps);
 n = numel(s); nb = ceil(n / NE); pad = nb * NE - n;
-k_ = mod(0:n + pad - 1, n) + 1; s = s(k_); r = r(k_);
+k_ = mod(0:n + pad - 1, n) + 1; cc = cc(k_); s = s(k_); r = r(k_);
 specs = cell(1, nb);
 for b = 1:nb
     i = (b-1)*NE + (1:NE);
-    specs{b} = struct('scn', c * ones(1, NE), 's', s(i), 'r', r(i), 'onset', randi(rs, [3 10], 1, NE), ...
+    specs{b} = struct('scn', cc(i), 's', s(i), 'r', r(i), 'onset', randi(rs, [3 10], 1, NE), ...
         'follow', false(1, NE), 'fdelay', 2 * ones(1, NE), 'unk', false(1, NE), 'T', T);
 end
 specs{end}.n_valid = NE - pad;

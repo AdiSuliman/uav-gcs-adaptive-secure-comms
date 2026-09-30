@@ -14,14 +14,14 @@
 
 close all; clc;
 fprintf('=== Threat gallery ===\n');
-THREATS = {'jamming', 'reactive_jamming', 'sweeping_jammer', 'noise_burst', 'spoofing', ...
-    'benign_interference', 'path_loss', 'antenna_fault'};
-EBNO = 6; V_KMH = 90; SEED = 424242; NF = 40; SHOW = 20;   % frames simulated, frame shown
+THREATS = {'jamming', 'reactive_jamming', 'sweeping_jammer', 'noise_burst', 'tone_jamming', 'spoofing', ...
+    'benign_interference', 'path_loss', 'antenna_fault', 'airframe_shadowing'};
+EBNO = 9; V_KMH = 90; SEED = 424242; NF = 40; SHOW = 20;   % frames simulated, frame shown
 OUT = fullfile('results', 'threat_gallery');
 if ~isfolder(OUT), mkdir(OUT); end
 
 p0 = load('params.mat').params;
-p0.quiet_build = true; p0.int_aoa_random = false; p0.int_aoa_deg = [45 -55 70];
+p0.quiet_build = true; p0.int_aoa_random = false; p0.int_aoa_deg = [45 -55 70]; p0.k_random = false;
 fs = p0.symbol_rate * p0.sps;
 fd = V_KMH / 3.6 * p0.carrier_freq / p0.c_light;
 top = struct('threat', {}, 'action', {}, 'share', {});
@@ -31,7 +31,7 @@ end
 
 clean = run_link(p0, 'none', 'no_action', EBNO, SEED, fd, NF);
 ov = figure('Position', [40 40 1500 700], 'Color', 'w', 'Visible', 'off');
-tlo = tiledlayout(ov, 2, 4, 'TileSpacing', 'compact', 'Padding', 'compact');
+tlo = tiledlayout(ov, 2, 5, 'TileSpacing', 'compact', 'Padding', 'compact');
 for t = 1:numel(THREATS)
     th = THREATS{t};
     k = find(strcmp({top.threat}, th), 1);

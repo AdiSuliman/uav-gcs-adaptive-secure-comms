@@ -29,7 +29,7 @@
 % Output: results/ood_detection.{txt,mat}
 
 close all; clc;
-fprintf('=== Unknown-threat detection: leave-one-threat-out (D32, D60) ===\n\n');
+fprintf('=== Unknown-threat detection: leave-one-threat-out ===\n\n');
 
 %% 1. Configuration and data
 RETAIN   = 0.95;
@@ -107,7 +107,7 @@ T_prod = ood_thresholds(RETAIN);
 %% 4. Report
 js = find(strcmp(SC, sel));
 rep = {};
-rep{end+1} = '=== UNKNOWN-THREAT DETECTION: LEAVE-ONE-THREAT-OUT (D32, D42, D59, D60) ===';
+rep{end+1} = '=== UNKNOWN-THREAT DETECTION: LEAVE-ONE-THREAT-OUT ===';
 rep{end+1} = sprintf('Generated: %s | detector retrained without each threat (%d epochs), test split by sub-run', datestr(now), N_EPOCHS);
 rep{end+1} = sprintf('AUROC: 0.5 = no separation, 1 = perfect. FPR95: unknown frames accepted as known at the threshold keeping %.0f%% of known validation frames.', 100*RETAIN);
 rep{end+1} = '';

@@ -46,16 +46,16 @@ SPLIT_TRAIN = 1; SPLIT_VAL = 2;
 CD = decision_config();
 
 %% 1. Hyperparameters
-H = struct('gamma', 0.9, 'NE', 64, 'T', 30, 'episodes', 20000, 'buffer', 200000, 'warmup', 8000, ...
+H = struct('gamma', 0.9, 'NE', 64, 'T', 30, 'episodes', 30000, 'buffer', 200000, 'warmup', 8000, ...
     'batch', 128, 'updates', 4, 'lr', 5e-4, 'lr_end', 5e-5, 'clip', 10, 'target_every', 500, ...
     'eps_end', 0.05, 'eps_frac', 0.6, 'huber', 1, 'p_unknown', 0.10, 'p_follow', 0.5, 'n_eval', 4, ...
     'hidden', [256 256]);
 N_SEEDS = 3; GAMMAS = 0.5;
-ALARMS = {'class_drop 3/3'};             % monitor: alarm definition, m/n confirmation (selected on validation)
+ALARMS = {'class_drop 3/3', 'class_drop 2/2'};   % monitor: alarm definition, m/n confirmation (selected on validation)
 DROP_STEPS = 2;                          % path_loss alarm: 2 dB below the train-pool threshold (selected on validation)
 % Training reward variants, one entry each: false-switch penalty, scale of the
 % running costs (goodput, spectrum, power, combining) and of the switching cost
-FA_PEN = [120 160]; COST_SCALE = [0.5 0.5]; SW_SCALE = [1 1];
+FA_PEN = [80 120 160]; COST_SCALE = [0.5 0.5 0.5]; SW_SCALE = [1 1 1];
 SENS_SCALES = [0.5 2];                   % reward-weight sensitivity: cost terms x scale
 if exist('CFG', 'var') && isstruct(CFG)
     if isfield(CFG, 'dqn_seeds'), N_SEEDS = CFG.dqn_seeds; end
@@ -184,10 +184,10 @@ rep{end+1} = sprintf(['Generated: %s | Double DQN + shield, state history %d cyc
     datestr(now), CD.hist, mat2str(H.hidden), H.buffer, H.target_every, H.lr, H.lr_end, H.episodes, H.T, ...
     strjoin(ALARMS, '/'), mat2str(DROPS), mat2str(FA_PEN), mat2str(GAMMAS), N_SEEDS);
 rep{end+1} = 'False-switch penalty and cost scales: training reward only; validation and test use the standard reward.';
-rep{end+1} = sprintf(['Runs scored as deployed: the DQN with escalation (D64). Follower jammers re-acquire the channel ' ...
+rep{end+1} = sprintf(['Runs scored as deployed: the DQN with escalation. Follower jammers re-acquire the channel ' ...
     '%d-%d cycles after a hop (training and validation).'], CD.fdelay(1), CD.fdelay(2));
 rep{end+1} = sprintf(['Validation: %d episodes, every (threat cell, Eb/N0, geometry) of the VALIDATION split (geometries ' ...
-    'never used in training) %d times: single threats at three severities, combined threats, clean link. Recovered = ' ...
+    'never used in training) %d times: single threats at five severities, combined threats at three, clean link. Recovered = ' ...
     'BER and packet loss <= 2x clean for 5 consecutive cycles, among recoverable threat episodes; weakest threat = ' ...
     'lowest per-threat recovery (severities pooled, KPI 4). FA: false-alarm episodes on %s independent clean ' ...
     'validation geometries (data/clean_val_pools.mat).'], numel(val_thr), VAL_REPS, n_txt(CV, PP));
@@ -238,20 +238,23 @@ save('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'confirm', 'alarm_mode
     'norm_in', 'seed_summary', 'action_names', 'tab', '-v7.3');
 fprintf('Saved data/trained_dqn.mat\n');
 
-fig = figure('Position', [100 100 1000 380], 'Color', 'w');
+fig = figure('Position', [100 100 1000 430], 'Color', 'w');
 subplot(1, 2, 1); hold on; grid on;
 cols = lines(numel(FA_PEN)); hl = gobjects(1, numel(FA_PEN));
-for k = 1:numel(runs)
+same_mon = @(r) strcmp(r.alarm, alarm_sel) & isequaln(r.drop, drop_sel);   % the rule line belongs to this monitor
+for k = find(arrayfun(same_mon, runs))
     ci = find(FA_PEN == runs(k).fa_pen, 1);
     c = runs(k).curve;
     hl(ci) = plot(c(:, 1), 100 * c(:, 2), 'Color', cols(ci, :), 'LineWidth', 1.1);
     [~, m] = max(c(:, 2));
     plot(c(m, 1), 100 * c(m, 2), 'o', 'Color', cols(ci, :), 'MarkerSize', 5, 'HandleVisibility', 'off');
 end
-yline(100 * bsel.rule_rec, 'k--', 'rule + escalation (validation)');
+hr = yline(100 * bsel.rule_rec, 'k--');
 xlabel('Episode'); ylabel('Recovered episodes, validation checkpoints [%]');
-title('Learning curves (o = kept checkpoint)');
-legend(hl, arrayfun(@(p) sprintf('false-switch penalty %d', p), FA_PEN, 'UniformOutput', false), 'Location', 'southeast');
+title({'Learning curves (o = kept checkpoint)', ['monitor ' alarm_sel]}, 'Interpreter', 'none');
+ok = isgraphics(hl);
+legend([hl(ok) hr], [arrayfun(@(p) sprintf('false-switch penalty %d', p), FA_PEN(ok), 'UniformOutput', false), ...
+    {'rule + escalation (validation)'}], 'Location', 'southoutside', 'NumColumns', 2);
 subplot(1, 2, 2); plot(movmean(runs(best).loss, 200)); grid on;
 xlabel('Update'); ylabel('Huber loss (moving mean 200)');
 title(sprintf('Q-loss, selected run (penalty %d, \\gamma %.2f, seed %d)', fa_pen_sel, gamma_sel, runs(best).seed));

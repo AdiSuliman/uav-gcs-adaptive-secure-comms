@@ -55,6 +55,7 @@ ref(isnan(ref)) = e3(isnan(ref));
 M.drop = (ref - e3)';
 bc = max(clean_ber_ref(M.ebno_est, 'ber_est'), C.deg_floor);
 deg = M.ber_avg > C.ratio_ok * bc;
+if isfield(obs, 'cfg_link'), cfg = obs.cfg_link(:)'; end        % the configuration this frame was received with
 coded = contains(PP.actions(cfg), 'fec_interleave');
 if any(coded)
     pc = clean_ber_ref(M.ebno_est(coded), 'plr_fec');
@@ -96,10 +97,11 @@ function o = policy_obs(obs, M, bc)
 % Per-cycle observation (rows) x episodes: class probabilities, unknown flag,
 % log10 estimated BER (window), degradation (log10 of estimate / clean estimate,
 % clipped to [-1, 3]), packet loss (window), SINR, IoT, post-combining SNR,
-% spatial coherence, predicted MMSE gain, alignment, Eb/N0 drop (clipped).
+% spatial coherence, predicted MMSE gain, alignment, antenna gain gap, Eb/N0
+% drop (clipped).
 fi = @(n) obs.feat(:, feature_index(n));
 lb = log10(max(M.ber_avg, 1e-6));
 deg = min(3, max(-1, log10(max(M.ber_avg, 1e-6) ./ bc)));
 o = [obs.probs'; double(obs.unknown(:)'); lb'; deg'; M.plr'; fi('sinr')'; fi('iot')'; fi('snr_post')'; ...
-     fi('coh')'; fi('mmse_gain')'; fi('align')'; min(20, max(-10, M.drop))];
+     fi('coh')'; fi('mmse_gain')'; fi('align')'; fi('branch_gap')'; min(20, max(-10, M.drop))];
 end

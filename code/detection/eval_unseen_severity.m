@@ -1,12 +1,13 @@
 %% EVAL_UNSEEN_SEVERITY - detector at threat severities never seen in training
-% The dataset trains every threat on 5 severity levels. This script generates
+% The dataset trains every threat on 8 severity levels (dataset_levels.m). This script generates
 % fresh frames with the dataset's recipe (random UAV speed per block, every
 % training Eb/N0) at three kinds of level and classifies them with the
 % production detector:
-%   seen     the training levels (reference from the same generator)
-%   between  midpoints of the training levels
-%   above    beyond the strongest training level, up to the survivability map
-%            (in-band threats 22 and 28 dB JSR, path loss 26 dB)
+%   seen     every other training level (reference from the same generator)
+%   between  midpoints between training levels (never trained on), every other one
+%   above    beyond the strongest training level (in-band threats 32 and 36 dB,
+%            path loss 28 and 31 dB, spoofer 12 dB, antenna fault 70%, airframe
+%            shadowing 37 and 41 dB)
 % Per frame: correct class, a class that calls for the same countermeasure
 % (rule_based_policy.m), or flagged unknown (production score below the threshold
 % keeping 95% of known validation frames).
@@ -20,25 +21,28 @@ close all; clc;
 fprintf('=== Detector at unseen threat severities ===\n\n');
 
 %% 1. Levels
-EBNO = 0:2:10;
+EBNO = load('params.mat').params.EbNo_dB;
 N_FRAMES = 20;                   % frames per (threat, level, Eb/N0) block
 delay_bits = 20; temporal_window = 10;
 rng(4343, 'twister');
 clear threat_cfg
-jsr = struct('seen', [0 4 8 12 16], 'between', [2 6 10 14], 'above', [22 28]);
-threat_cfg(1) = struct('name', 'jamming',             'param', 'jsr_db',        'lv', jsr);
-threat_cfg(2) = struct('name', 'noise_burst',         'param', 'jsr_db',        'lv', jsr);
-threat_cfg(3) = struct('name', 'reactive_jamming',    'param', 'jsr_db',        'lv', jsr);
-threat_cfg(4) = struct('name', 'sweeping_jammer',     'param', 'jsr_db',        'lv', jsr);
-threat_cfg(5) = struct('name', 'path_loss',           'param', 'path_loss_db',  'lv', ...
-    struct('seen', [4 8 12 16 20], 'between', [6 10 14 18], 'above', 26));
-threat_cfg(6) = struct('name', 'spoofing',            'param', 'spoof_sir_db',  'lv', ...
-    struct('seen', [-4 -1 2 5 8], 'between', [-2.5 0.5 3.5 6.5], 'above', []));
-threat_cfg(7) = struct('name', 'antenna_fault',       'param', 'fault_duty',    'lv', ...
-    struct('seen', [0.1 0.2 0.3 0.4 0.5], 'between', [0.15 0.25 0.35 0.45], 'above', []));
-threat_cfg(8) = struct('name', 'benign_interference', 'param', 'benign_int_db', 'lv', ...
-    struct('seen', [-10 -8 -6 -4 -2], 'between', [-9 -7 -5 -3], 'above', []));
+ABOVE = struct('jamming', [32 36], 'noise_burst', [32 36], 'reactive_jamming', [32 36], 'sweeping_jammer', [32 36], ...
+    'tone_jamming', [32 36], 'path_loss', [28 31], 'spoofing', 12, 'antenna_fault', 0.7, ...
+    'benign_interference', [], 'airframe_shadowing', [37 41]);
+DL = dataset_levels();
+threat_cfg = struct('name', {}, 'param', {}, 'lv', {});
+for t = 1:numel(DL)
+    L = DL(t).levels;
+    mids = (L(1:end-1) + L(2:end)) / 2;
+    threat_cfg(t) = struct('name', DL(t).name, 'param', DL(t).param, 'lv', ...
+        struct('seen', L(1:2:end), 'between', mids(1:2:end), 'above', ABOVE.(DL(t).name)));
+end
 KINDS = {'seen', 'between', 'above'};
+if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
+    threat_cfg = threat_cfg([1 10]); EBNO = EBNO(3);
+    for t = 1:2, threat_cfg(t).lv = struct('seen', threat_cfg(t).lv.seen(1), 'between', threat_cfg(t).lv.between(1), ...
+            'above', threat_cfg(t).lv.above(1)); end
+end
 
 D = load('data/trained_detector.mat', 'net', 'classes', 'ood');
 classes = cellstr(string(D.classes(:)'));

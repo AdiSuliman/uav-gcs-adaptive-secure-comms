@@ -12,12 +12,16 @@ function build_threat_model(p)
 %
 % Channel   LoS steering vector (direction p.gcs_aoa_deg) + diffuse Rayleigh part
 %           (sum of 32 sinusoids per antenna with random Doppler angles and phases,
-%           Jakes spectrum up to fd; receive correlation p.rx_corr), K = p.rician_k.
-% Threat    signal-side threats scale our signal (antenna_fault hits antenna 1 only);
-%           every additive threat is ONE waveform arriving through its own spatial
-%           channel (own diffuse fading). Interferer directions come from the
-%           Constant block 'AoA': p.int_aoa_deg, or, with p.int_aoa_random, drawn
-%           per seed from p.int_aoa_range_deg by link_seed.m (interferer_aoa.m).
+%           Jakes spectrum up to fd; receive correlation p.rx_corr). K-factors of
+%           our signal and of the interferers come from the Constant block 'Kfac':
+%           [p.rician_k p.int_rician_k], or, with p.k_random, drawn per seed from
+%           p.k_range_db by link_seed.m (channel_k.m).
+% Threat    signal-side threats scale our signal (antenna_fault and
+%           airframe_shadowing hit antenna 1 only); every additive threat is ONE
+%           waveform arriving through its own spatial channel (own diffuse fading).
+%           Interferer directions come from the Constant block 'AoA': p.int_aoa_deg,
+%           or, with p.int_aoa_random, drawn per seed from p.int_aoa_range_deg by
+%           link_seed.m (interferer_aoa.m).
 % Rx        data-aided estimation per window (transmitted symbols known = ideal
 %           pilots): h = LS channel estimate from the OTHER symbols of the window
 %           (leave-one-out, so a symbol never helps estimate its own channel),
@@ -80,6 +84,7 @@ add_block('simulink/User-Defined Functions/MATLAB Function', [modelName '/Rx'], 
 add_block('simulink/Sources/Constant', [modelName '/Seed'],    'Position', [150 190 220 210]);
 add_block('simulink/Sources/Constant', [modelName '/Doppler'], 'Position', [150 230 220 250]);
 add_block('simulink/Sources/Constant', [modelName '/AoA'],     'Position', [150 270 220 290]);
+add_block('simulink/Sources/Constant', [modelName '/Kfac'],    'Position', [150 310 220 330]);
 add_block('simulink/Sinks/To Workspace', [modelName '/tx_sink'], 'Position', [150 30 230 60]);
 add_block('simulink/Sinks/To Workspace', [modelName '/rx_sink'], 'Position', [870 90 950 120]);
 add_block('simulink/Sinks/To Workspace', [modelName '/Tx_IQ'],   'Position', [300 30 380 60]);
@@ -123,6 +128,8 @@ add_line(modelName, 'Doppler/1',   'Channel/3', 'autorouting', 'on');
 add_line(modelName, 'Seed/1',      'Threat/2',  'autorouting', 'on');
 add_line(modelName, 'Doppler/1',   'Threat/3',  'autorouting', 'on');
 add_line(modelName, 'AoA/1',       'Threat/4',  'autorouting', 'on');
+add_line(modelName, 'Kfac/1',      'Channel/4', 'autorouting', 'on');
+add_line(modelName, 'Kfac/1',      'Threat/5',  'autorouting', 'on');
 add_line(modelName, 'Channel/1',   'Threat/1',  'autorouting', 'on');
 add_line(modelName, 'Threat/1',    'AWGN/1',    'autorouting', 'on');
 add_line(modelName, 'AWGN/1',      'Rx/1',      'autorouting', 'on');
@@ -139,6 +146,9 @@ set_param(modelName, 'SolverType', 'Fixed-step', 'Solver', 'FixedStepDiscrete', 
 set_param([modelName '/AoA'], 'Value', mat2str(p.int_aoa_deg(:)', 8));
 set_param([modelName '/AoA'], 'UserDataPersistent', 'on', 'UserData', struct('aoa_random', logical(p.int_aoa_random), ...
     'aoa_range', p.int_aoa_range_deg, 'aoa_fixed', p.int_aoa_deg(:)'));
+set_param([modelName '/Kfac'], 'Value', mat2str([p.rician_k p.int_rician_k], 8));
+set_param([modelName '/Kfac'], 'UserDataPersistent', 'on', 'UserData', struct('k_random', logical(p.k_random), ...
+    'k_range', p.k_range_db));
 link_seed(modelName, seed, p.fd_max);
 
 %% ---- Save ----
@@ -147,8 +157,9 @@ if save_model
     save_system(modelName, ['models/' modelName '.slx']);
     fprintf('Model saved to models/%s.slx\n', modelName);
 end
-fprintf('Done. threat=%s, JSR=%.1f dB, K=%.1f dB, fd=%.1f Hz, n_rx=%d, rho=%.2f, Rx=%s, AoA %s.\n', ...
-    p.active_threat, p.jsr_db, p.rician_k, p.fd_max, nr, p.rx_corr, p.rx_combiner, ...
+fprintf('Done. threat=%s, JSR=%.1f dB, K %s, fd=%.1f Hz, n_rx=%d, rho=%.2f, Rx=%s, AoA %s.\n', ...
+    p.active_threat, p.jsr_db, ternary(p.k_random, sprintf('%g-%g dB per seed', p.k_range_db), ...
+    sprintf('%.1f dB', p.rician_k)), p.fd_max, nr, p.rx_corr, p.rx_combiner, ...
     ternary(p.int_aoa_random, 'random per seed', 'fixed'));
 end
 
@@ -167,21 +178,22 @@ s = sprintf([ ...
 end
 
 function s = channel_script(p, fs)
-% Signal channel: LoS steering vector toward the GCS + correlated diffuse fading.
+% Signal channel: LoS steering vector toward the GCS + correlated diffuse fading;
+% K-factor kdb(1) from the 'Kfac' block.
 nr = p.n_rx;
-K  = 10^(p.rician_k/10);
 a  = steering(p, p.gcs_aoa_deg);
-s = [sprintf('function y = fcn(x, seed, fd)\n%%%%#codegen\npersistent f0 ph n\n') ...
+s = [sprintf('function y = fcn(x, seed, fd, kdb)\n%%%%#codegen\npersistent f0 ph n\n') ...
     sprintf('if isempty(f0)\n    rng(seed, ''twister'');\nend\n') ...
     sos_init('f0', 'ph', nr) ...
     sprintf('if isempty(n)\n    n = 0;\nend\nNs = size(x, 1);\nt = (n + (0:Ns-1).'') / %.1f;\nn = n + Ns;\n', fs) ...
     sos_gains('D', 'f0', 'ph', p) ...
-    sprintf(['a = %s;\n' ...
+    sprintf(['K = 10^(kdb(1)/10);\n' ...
+    'a = %s;\n' ...
     'y = complex(zeros(Ns, %d));\n' ...
     'for k = 1:%d\n' ...
-    '    y(:, k) = x .* (%.10f * a(k) + %.10f * D(:, k));\n' ...
+    '    y(:, k) = x .* (sqrt(K/(K+1)) * a(k) + sqrt(1/(K+1)) * D(:, k));\n' ...
     'end\n' ...
-    'end\n'], cvec(a), nr, nr, sqrt(K/(K+1)), sqrt(1/(K+1)))];
+    'end\n'], cvec(a), nr, nr)];
 s = strrep(s, '%%#codegen', '%#codegen');
 end
 
@@ -196,8 +208,9 @@ if any(strcmp(thr, {'', 'none'}))
 else
     parts = strsplit(thr, '+');
 end
-sig  = parts(ismember(parts, {'path_loss', 'antenna_fault'}));
-addc = parts(~ismember(parts, {'path_loss', 'antenna_fault'}));
+SIGSIDE = {'path_loss', 'antenna_fault', 'airframe_shadowing'};
+sig  = parts(ismember(parts, SIGSIDE));
+addc = parts(~ismember(parts, SIGSIDE));
 if numel(addc) > numel(p.int_aoa_deg)
     error('build_threat_model: %d additive components, only %d interferer directions', numel(addc), numel(p.int_aoa_deg));
 end
@@ -215,18 +228,30 @@ for i = 1:numel(sig)
             body{end+1} = sprintf(['for i = 1:Ns\n    if mod(k_af, %d) < %d\n' ...
                 '        y(i, 1) = y(i, 1) * %.8f;\n    end\n' ...
                 '    k_af = k_af + 1;\nend\n'], ps, on, 10^(-p.fault_atten_db/20)); %#ok<AGROW>
+        case 'airframe_shadowing'
+            % a banking turn hides antenna 1 behind the airframe for the whole run
+            % (measured depth above 35 dB, lasting seconds; Khawaja et al.)
+            body{end+1} = sprintf('y(:, 1) = y(:, 1) * %.8f;\n', 10^(-p.shadow_db/20)); %#ok<AGROW>
     end
 end
 if ~isempty(addc)
     body{end+1} = sprintf('ys = y(:, 1);\n');       % our signal as the reactive jammer senses it
 end
 
-Ki = 10^(p.int_rician_k/10);
+if ~isempty(addc)
+    body{end+1} = sprintf('Ki = 10^(kdb(2)/10);\n');
+end
 for c = 1:numel(addc)
     comp = addc{c};
     switch comp
         case 'jamming'
             w = sprintf('w = sqrt(%.8f/2) * complex(randn(Ns, 1), randn(Ns, 1));\n', 10^(p.jsr_db/10));
+        case 'tone_jamming'
+            % CW tone at a random offset inside the flat part of our band; power
+            % scaled so its in-band power over our signal equals tone_jsr_db
+            pers{end+1} = 'tone_f'; init{end+1} = sprintf('tone_f = %.4f * (2*rand - 1);', p.tone_offset_hz); %#ok<AGROW>
+            pers{end+1} = 'tone_ph'; init{end+1} = 'tone_ph = 2*pi*rand;'; %#ok<AGROW>
+            w = sprintf('w = sqrt(%.8f) * exp(1j * (2*pi*tone_f*t + tone_ph));\n', 10^(p.tone_jsr_db/10) * tone_gain(p));
         case 'benign_interference'
             w = sprintf('w = sqrt(%.8f/2) * complex(randn(Ns, 1), randn(Ns, 1));\n', 10^(p.benign_int_db/10));
         case 'noise_burst'
@@ -257,12 +282,12 @@ for c = 1:numel(addc)
     body{end+1} = [w sos_gains('dI', fI, pI, p) sprintf([ ...
         'aI = exp(-1j * %.12f * (0:%d).'' * sind(aoa(%d)));\n' ...
         'for k = 1:%d\n' ...
-        '    y(:, k) = y(:, k) + w .* (%.10f * aI(k) + %.10f * dI(:, k));\n' ...
-        'end\n'], 2*pi*p.ant_spacing_wl, nr-1, c, nr, sqrt(Ki/(Ki+1)), sqrt(1/(Ki+1)))]; %#ok<AGROW>
+        '    y(:, k) = y(:, k) + w .* (sqrt(Ki/(Ki+1)) * aI(k) + sqrt(1/(Ki+1)) * dI(:, k));\n' ...
+        'end\n'], 2*pi*p.ant_spacing_wl, nr-1, c, nr)]; %#ok<AGROW>
 end
 
 pers = [{'nI'}, pers]; init = [{'nI = 0;'}, init];
-head = sprintf('function y = fcn(u, seed, fd, aoa)\n%%#codegen\npersistent seeded\n');
+head = sprintf('function y = fcn(u, seed, fd, aoa, kdb)\n%%#codegen\npersistent seeded\n');
 for i = 1:numel(pers)
     head = [head sprintf('persistent %s\n', pers{i})]; %#ok<AGROW>
 end
@@ -354,6 +379,13 @@ s = sprintf([ ...
 end
 
 %% ===================== Helpers =====================
+function g = tone_gain(p)
+% Power of a unit-JSR tone: a noise jammer of power JSR per sample puts JSR/sps
+% into our band after the receive filter, a tone inside the passband puts all of
+% its power there, so the tone gets JSR/sps for the same in-band ratio.
+g = 1 / p.sps;
+end
+
 function w = gated_noise(k, period, on, pw)
 w = sprintf(['w = complex(zeros(Ns, 1));\nfor i = 1:Ns\n    if mod(%s, %d) < %d\n' ...
     '        w(i) = sqrt(%.8f/2) * complex(randn, randn);\n    end\n    %s = %s + 1;\nend\n'], ...
@@ -402,7 +434,8 @@ function p = antenna_defaults(p)
 % Defaults for params.mat files without the antenna fields.
 d = struct('n_rx', 2, 'ant_spacing_wl', 0.5, 'rx_corr', 0.3, 'gcs_aoa_deg', 0, ...
     'int_aoa_deg', [40 -55 70], 'int_rician_k', p.rician_k, 'rx_combiner', 'mrc', ...
-    'csi_block', 64, 'mmse_window', 32, 'seed', [], 'int_aoa_random', false, 'int_aoa_range_deg', [-90 90]);
+    'csi_block', 64, 'mmse_window', 32, 'seed', [], 'int_aoa_random', false, 'int_aoa_range_deg', [-90 90], ...
+    'k_random', false, 'k_range_db', [0 20], 'tone_jsr_db', 16, 'tone_offset_hz', 300e3, 'shadow_db', 20);
 f = fieldnames(d);
 for i = 1:numel(f)
     if ~isfield(p, f{i}), p.(f{i}) = d.(f{i}); end

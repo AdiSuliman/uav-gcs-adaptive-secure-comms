@@ -91,10 +91,11 @@ function test_features(tc)
 n = 12;
 M = struct('sinr', linspace(-5, 5, n), 'ber_est', logspace(-5, -1, n), 'snr_post', 1:n, 'rssi', zeros(1, n), ...
     'crc_fail', mod(1:n, 2), 'env_corr', zeros(1, n), 'iot', ones(1, n), 'coh', 0.5 * ones(1, n), ...
-    'mmse_gain', 3 * ones(1, n), 'align', 0.2 * ones(1, n), 'branch_dip', 2 * ones(1, n));
+    'mmse_gain', 3 * ones(1, n), 'align', 0.2 * ones(1, n), 'branch_dip', 2 * ones(1, n), 'branch_gap', 25 * ones(1, n));
 [raw, names] = link_features(M, 10, 10);
 verifyEqual(tc, numel(raw), numel(names));
 verifyEqual(tc, raw(feature_index('branch_dip')), 2);
+verifyEqual(tc, raw(feature_index('branch_gap')), 25);
 verifyEqual(tc, raw(feature_index('log_ber')), log10(M.ber_est(10)), 'AbsTol', 1e-12);
 verifyEqual(tc, raw(feature_index('plr')), mean(M.crc_fail(1:10)), 'AbsTol', 1e-12);
 verifyEqual(tc, feature_index({'sinr', 'iot'}), [1 9]);
@@ -121,11 +122,11 @@ verifyEqual(tc, T.last, S.last);
 end
 
 function test_state_size(tc)
-nA = 36; NE = 3; nC = 9;
+nA = 36; NE = 3; nC = 11;
 mem = policy_monitor('init', NE, nA);
 PP = struct('actions', {policy_actions()}, 'classes', {repmat({'x'}, 1, nC)}, 'sps', 4, 'bps', 2);
 PP.classes = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', 'antenna_fault', ...
-    'benign_interference', 'sweeping_jammer'};
+    'benign_interference', 'sweeping_jammer', 'tone_jamming', 'airframe_shadowing'};
 obs = struct('probs', repmat([1 zeros(1, nC - 1)], NE, 1), 'unknown', false(NE, 1), ...
     'feat', zeros(NE, numel(link_features('names'))));
 obs.feat(:, feature_index('log_ber')) = -5;
@@ -139,14 +140,30 @@ verifyFalse(tc, any(M.alarm));                       % clean class, low BER: no 
 obs.feat(2, feature_index('sinr')) = 7;
 [mem, M] = policy_monitor('update', mem, obs, PP, ones(1, NE));
 st = policy_state(mem, ones(1, NE), M.confirmed, nA);
-nObs = nC + 11; isinr = nC + 5;
+nObs = nC + 12; isinr = nC + 5;
 verifyEqual(tc, st(isinr, :), [0 7 0]);              % newest cycle
 verifyEqual(tc, st(nObs + isinr, :), [0 0 0]);       % previous cycle
 end
 
 %% ---------- receiver measurements on the real link ----------
+function test_seeds_and_k(tc)
+% Pool geometries never share a seed across the blocks in use; K-factors are
+% reproducible per seed and stay inside the range.
+blocks = [1 4 5 10 11 12 13]; S = [];
+for b = blocks
+    [s, r] = ndgrid(1:6, 1:99);
+    S = [S; arrayfun(@(si, ri) pool_seed(1, si, b, ri), s(:), r(:))]; %#ok<AGROW>
+end
+verifyEqual(tc, numel(unique(S)), numel(S));
+k1 = channel_k(12345, [0 20]); k2 = channel_k(12345, [0 20]);
+verifyEqual(tc, k1, k2);
+K = cell2mat(arrayfun(@(s) channel_k(s, [0 20]), (1:500)', 'UniformOutput', false));
+verifyTrue(tc, all(K(:) >= 0 & K(:) <= 20));
+end
+
 function test_receiver_measurements(tc)
 p = base_params(); p.quiet_build = true; p.active_threat = 'none'; p.int_aoa_random = false; p.seed = 11;
+p.k_random = false;
 mdl = 'UAV_GCS_Threat_Link';
 evalc('build_threat_model(p)');
 snr = 12 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
@@ -171,6 +188,15 @@ set_param([mdl '/AWGN'], 'SNR', num2str(snr), 'SignalPower', num2str(1/p.sps));
 link_seed(mdl, 11, 160);
 F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
 verifyGreaterThan(tc, median(F.branch_dip), 10);
+close_system(mdl, 0);
+% an antenna hidden by the airframe stays far below the other over the frame
+p.active_threat = 'airframe_shadowing'; p.shadow_db = 20;
+evalc('build_threat_model(p)');
+set_param([mdl '/AWGN'], 'SNR', num2str(snr), 'SignalPower', num2str(1/p.sps));
+link_seed(mdl, 11, 160);
+F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
+verifyGreaterThan(tc, median(F.branch_gap), 12);
+verifyLessThan(tc, median(F.branch_dip), 10);         % no deep drop inside the frame, unlike a fault (> 10 dB)
 close_system(mdl, 0);
 end
 

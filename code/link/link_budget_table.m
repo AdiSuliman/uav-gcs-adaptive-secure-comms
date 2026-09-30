@@ -1,41 +1,63 @@
-%% LINK_BUDGET_TABLE - What the simulated Eb/N0 and JSR mean in distance
-% The link model is link-level: range enters only through Eb/N0 and the jammer's
-% range through the JSR. This table turns both into distances with the free-space
-% (Friis) path loss at 2.4 GHz and a stated set of typical small-UAV command-link
-% assumptions, so the results can be read as "how far". Illustrative only: the
-% numbers move with every assumption below and are not an input of any stage.
+%% LINK_BUDGET_TABLE - What the simulated Eb/N0 and severities mean physically
+% The link model is link-level: range enters only through Eb/N0, the jammer's range
+% through the JSR, and obstruction through the path loss. This table turns them
+% into distances with the free-space (Friis) loss at 2.4 GHz for three stated
+% hardware profiles; the simulated results hold for every profile, only the
+% distance attached to each Eb/N0 changes. Air-ground measurement campaigns used
+% transmit powers of 27-44 dBm and links up to 142 km (Khawaja et al.). A profile's
+% range is capped by the radio horizon (4/3 earth radius) of the UAV altitude.
+% Illustrative only: not an input of any stage.
 % Output: results/link_budget.txt
 
-f   = 2.4e9;  c = 3e8;
-Pt  = 20;     % GCS transmit power [dBm] (100 mW, typical command radio)
-Gt  = 6;      % GCS antenna gain [dBi] (small directional)
+f   = 2.4e9;
+S   = load('params.mat'); ebno = S.params.EbNo_dB;
+C   = decision_config();
 Gr  = 2;      % UAV antenna gain [dBi] (omni dipole)
 NF  = 5;      % UAV receiver noise figure [dB]
 Lm  = 10;     % fading and implementation margin [dB]
 Rb  = 2e6;    % bit rate [b/s] (QPSK, 1 Msym/s)
 Pj  = 40;     % jammer power [dBm] (10 W)
 Gj  = 3;      % jammer antenna gain [dBi]
-fspl_km = @(d) 20*log10(d) + 20*log10(f/1e6) + 32.44;          % Friis, d in km
-ebno = 0:2:10;
-Pr = ebno - 174 + NF + 10*log10(Rb);                              % received power needed [dBm]
-d_gcs = 10.^((Pt + Gt + Gr - Lm - Pr - 20*log10(f/1e6) - 32.44) / 20);   % km
-jsr = [4 10 16];
-dj_ratio = 10.^(-(jsr - (Pj + Gj - Pt - Gt)) / 20);              % jammer range / UAV-GCS range
+hG  = 10;     % GCS antenna height [m]
+prof = struct('name', {'A small UAV radio', 'B tactical data link', 'C long-range data link'}, ...
+    'Pt', {20, 30, 40}, 'Gt', {6, 12, 20}, 'hU', {300, 1000, 3000});
+horizon_km = @(h1, h2) 4.12 * (sqrt(h1) + sqrt(h2));                % 4/3 earth radius, heights in m
+Pr = ebno - 174 + NF + 10*log10(Rb);                                 % received power needed [dBm]
 
-rep = {'=== LINK BUDGET: Eb/N0 AND JSR AS DISTANCES (illustrative, D59) ===', ...
-    sprintf(['Assumptions: 2.4 GHz free space; GCS %g dBm, %g dBi; UAV %g dBi, NF %g dB; margin %g dB; %g Mb/s; ' ...
-    'jammer %g dBm, %g dBi'], Pt, Gt, Gr, NF, Lm, Rb/1e6, Pj, Gj), '', ...
-    'Eb/N0 per UAV antenna -> UAV-GCS distance:'};
-for i = 1:numel(ebno)
-    rep{end+1} = sprintf('  %2g dB  ->  %5.1f km (received %.0f dBm)', ebno(i), d_gcs(i), Pr(i)); %#ok<SAGROW>
+rep = {'=== LINK BUDGET: Eb/N0 AND SEVERITIES AS DISTANCES (illustrative) ===', ...
+    sprintf(['Common assumptions: 2.4 GHz free space; UAV %g dBi, NF %g dB; margin %g dB; %g Mb/s; ' ...
+    'jammer %g dBm, %g dBi; GCS antenna %g m'], Gr, NF, Lm, Rb/1e6, Pj, Gj, hG), ''};
+rep{end+1} = sprintf('%-42s %s', 'Eb/N0 per UAV antenna', sprintf('%9g dB', ebno));
+for k = 1:numel(prof)
+    P = prof(k);
+    d = 10.^((P.Pt + P.Gt + Gr - Lm - Pr - 20*log10(f/1e6) - 32.44) / 20);   % km
+    hz = horizon_km(P.hU, hG);
+    cells_km = arrayfun(@(x) km_txt(x, hz), d, 'UniformOutput', false);
+    rep{end+1} = sprintf('%-42s %s', sprintf('%s (%g dBm, %g dBi)', P.name, P.Pt, P.Gt), ...
+        sprintf('%11s', cells_km{:})); %#ok<SAGROW>
+    rep{end+1} = sprintf('%-42s radio horizon at %g m altitude: %.0f km', '', P.hU, hz); %#ok<SAGROW>
 end
+rep{end+1} = '(* the free-space range exceeds the radio horizon: the horizon is the range)';
 rep{end+1} = '';
-rep{end+1} = 'JSR at the UAV -> jammer distance relative to the UAV-GCS distance (same UAV antenna):';
+rep{end+1} = 'In-band interferer (JSR at the UAV) -> jammer distance relative to the UAV-GCS distance, profile A:';
+jsr = C.sev.jamming.levels;
+dj = 10.^(-(jsr - (Pj + Gj - prof(1).Pt - prof(1).Gt)) / 20);
 for i = 1:numel(jsr)
-    rep{end+1} = sprintf('  JSR %2g dB  ->  jammer at %.2f x the GCS distance (e.g. %.1f km when the GCS is 10 km away)', ...
-        jsr(i), dj_ratio(i), 10 * dj_ratio(i)); %#ok<SAGROW>
+    rep{end+1} = sprintf('  JSR %2g dB  ->  jammer at %.2f x the GCS distance (%.1f km when the GCS is 10 km away)', ...
+        jsr(i), dj(i), 10 * dj(i)); %#ok<SAGROW>
 end
 rep{end+1} = '';
-rep{end+1} = 'path_loss 6 / 10 / 14 dB = the received signal of a UAV 2.0 / 3.2 / 5.0 times farther, or an obstruction of that loss.';
+pl = C.sev.path_loss.levels;
+rep{end+1} = sprintf('Path loss %s dB = the signal of a UAV %s times farther, or an obstruction of that loss.', ...
+    strjoin(arrayfun(@(x) sprintf('%g', x), pl, 'UniformOutput', false), ' / '), ...
+    strjoin(arrayfun(@(x) sprintf('%.1f', 10^(x/20)), pl, 'UniformOutput', false), ' / '));
+sp = C.sev.spoofing.levels;
+rep{end+1} = sprintf('Spoofer %s dB over our signal = a counterfeit transmitter %s times the GCS power at equal distance.', ...
+    strjoin(arrayfun(@(x) sprintf('%g', x), sp, 'UniformOutput', false), ' / '), ...
+    strjoin(arrayfun(@(x) sprintf('%.2g', 10^(x/10)), sp, 'UniformOutput', false), ' / '));
 fid = fopen('results/link_budget.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('%s\n', rep{:});
+
+function s = km_txt(d, hz)
+if d > hz, s = sprintf('>%.0f*', hz); else, s = sprintf('%.1f', d); end
+end

@@ -49,14 +49,14 @@ M.agent = Q.agents{find(Q.gammas == Q.seed_summary.selected_gamma, 1)};
 M.na = M.K.na;
 M.split = 3;                                       % test split: flights never used in training
 M.nR = numel(PP.runs{M.split});
-M.avail = find(PP.sev(:)' == 2 & ...                % nominal severity: one cell per threat, the clean link first
+M.avail = find(PP.sev(:)' == decision_config().nominal & ...   % nominal severity: one cell per threat, the clean link first
     cellfun(@(p) ~isempty(p) && ~isempty(p.ber), PP.pools(:, 1, M.na, M.split))');
 S = load(fullfile(root, 'params.mat')); p = S.params;
 M.sev = struct('jsr_db', p.jsr_db, 'spoof_sir_db', p.spoof_sir_db, 'benign_db', p.benign_int_db, ...
     'path_loss_db', p.path_loss_db, 'fault_duty', p.fault_duty);
 M.frame_s = p.frame_duration;
-M.emitters = {'jamming', 'reactive_jamming', 'sweeping_jammer', 'noise_burst', 'spoofing', 'benign_interference'};
-M.inChannel = {'jamming', 'reactive_jamming', 'spoofing'};
+M.emitters = {'jamming', 'reactive_jamming', 'sweeping_jammer', 'noise_burst', 'spoofing', 'benign_interference', 'tone_jamming'};
+M.inChannel = {'jamming', 'reactive_jamming', 'spoofing', 'tone_jamming'};
 M.hopSeq = [6 1 8 4 7 2 5 3];
 end
 
@@ -301,6 +301,8 @@ switch c
     case 'path_loss',           s = 'path loss';
     case 'spoofing',            s = 'spoofer';
     case 'antenna_fault',       s = 'antenna fault';
+    case 'tone_jamming',        s = 'tone jammer';
+    case 'airframe_shadowing',  s = 'airframe shadowing';
     case 'benign_interference', s = 'benign interference';
     otherwise,                  s = strrep(c, '_', ' ');
 end

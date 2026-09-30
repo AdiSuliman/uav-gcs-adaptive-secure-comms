@@ -22,7 +22,7 @@ Y_pred = Y_pred(:);
 
 %% 4. Metrics & Confusion Matrix
 fprintf('\nCalculating metrics...\n');
-conf_mat = confusionmat(Y_test, Y_pred);
+[conf_mat, cm_order] = confusionmat(Y_test, Y_pred);
 precision = diag(conf_mat) ./ sum(conf_mat, 1)';
 recall = diag(conf_mat) ./ sum(conf_mat, 2);
 f1_scores = 2 .* (precision .* recall) ./ (precision + recall);
@@ -38,7 +38,8 @@ for i = 1:numel(classes)
 end
 
 fig_cm = figure('Name', 'Confusion Matrix', 'Color', 'w', 'Position', [100 100 700 600]);
-cm = confusionchart(Y_test, Y_pred);
+cm_lbl = strrep(string(cm_order), '_', ' ');                       % no TeX subscripts in the labels
+cm = confusionchart(conf_mat, categorical(cm_lbl, cm_lbl));          % categorical keeps the class order
 cm.Title = 'Hybrid Detector Confusion Matrix (Test Set)';
 cm.RowSummary = 'row-normalized';
 cm.ColumnSummary = 'column-normalized';
@@ -65,22 +66,11 @@ for i = 1:length(unique_snrs)
     end
 end
 
-fig_snr = figure('Name', 'Accuracy vs SNR', 'Color', 'w');
-plot(unique_snrs, acc_vs_snr * 100, '-ob', 'LineWidth', 2, ...
-    'MarkerSize', 8, 'MarkerFaceColor', 'b');
-grid on;
-xlabel('SNR (dB)');
-ylabel('Accuracy (%)');
-title('Detection Accuracy vs. SNR');
-xticks(unique_snrs);
-saveas(fig_snr, 'results/accuracy_vs_snr.png');
-
 fprintf('\nSNR breakdown:\n');
 for i = 1:length(unique_snrs)
     fprintf('  SNR=%2d dB: %.1f%%\n', unique_snrs(i), 100*acc_vs_snr(i));
 end
 
-fprintf('\nEvaluation complete. Saved confusion_matrix.png and accuracy_vs_snr.png to results/.\n');
 
 %% 5b. KPI #1 as worded in the proposal
 % Macro-F1 per Eb/N0, and the threshold: the lowest Eb/N0 from which macro-F1
@@ -122,6 +112,20 @@ fprintf(' %g dB %.1f%% |', [unique_snrs(:)'; f1_vs_snr(:)']);
 fprintf('\nKPI #1 threshold: macro-F1 and every class F1 >= 90%% from %g dB up; macro-F1 above it %.2f%%, lowest class %.2f%%\n', ...
     thr_db, f1_above, min(f1_class_above));
 fprintf('Action-equivalent accuracy: %.2f%% (class accuracy %.2f%%)\n', 100*mean(act_ok), 100*mean(Y_test == Y_pred));
+
+fig_snr = figure('Name', 'Detection vs Eb/N0', 'Color', 'w', 'Position', [100 100 640 420]);
+hold on; grid on;
+plot(unique_snrs, f1_vs_snr, '-o', 'LineWidth', 2, 'MarkerSize', 7, 'MarkerFaceColor', 'auto', 'DisplayName', 'macro-F1');
+plot(unique_snrs, 100 * acc_vs_snr, '--s', 'LineWidth', 1.4, 'MarkerSize', 6, 'DisplayName', 'accuracy');
+yline(90, 'k:', 'LineWidth', 1.2, 'DisplayName', 'KPI 1 target (90%)');
+if ~isnan(thr_db)
+    xline(thr_db, 'r-', 'LineWidth', 1.2, 'DisplayName', sprintf('threshold %g dB (every class F1 >= 90%%)', thr_db));
+end
+xlabel('E_b/N_0 per antenna [dB]'); ylabel('Test set [%]'); ylim([0 100]); xticks(unique_snrs);
+title('Hybrid detector on the test set');
+legend('Location', 'southeast');
+saveas(fig_snr, 'results/accuracy_vs_snr.png');
+fprintf('Saved results/confusion_matrix.png and results/accuracy_vs_snr.png\n');
 
 %% 5c. 95% bootstrap confidence intervals
 % Resamples whole test sub-runs with replacement (frames of one sub-run are

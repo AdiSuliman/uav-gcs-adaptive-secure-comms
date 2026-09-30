@@ -3,10 +3,10 @@
 % numbers) on the TEST split of data/policy_pools.mat: geometries never used in
 % training or validation. Each episode is one geometry; every test geometry of
 % every (cell, Eb/N0) is used, each with two onsets. Episode sets:
-%   single    8 threats x 3 severities (low, nominal, high) x 6 Eb/N0, static jammer
+%   single    10 threats x 5 severities x 6 Eb/N0, static jammer
 %   follower  jamming / reactive_jamming / spoofing that re-acquire the channel
-%             2-5 cycles after every hop, 3 severities
-%   combined  the 8 combined threats on test flights
+%             2-5 cycles after every hop, 5 severities
+%   combined  the 10 combined threats at 3 severities on test flights
 %   unknown   single threats with the detector output withheld after onset
 %             (unknown-threat path: the policy sees only the link measurements)
 %   clean     no threat; every change is a false alarm. KPI 6 (one-sided 95%
@@ -16,6 +16,10 @@
 %             al.'s comb jammer): the jammer is on the new channel at the hop
 %             itself, so only space and link budget can help. Reported apart,
 %             not part of the KPI 4 pool; in training as a follower delay of 0
+%   speed     single threats at nominal severity on flights outside the speed
+%             envelope (20-50 and 120-160 km/h, the fourth pool split), reported apart
+%   delay2    the single set with a configuration change arriving two cycles late
+%             instead of one (sensitivity to the signalling assumption), reported apart
 % Policies: no response (the link that does not react), random, always-on MMSE,
 % the best fixed configuration (train pools), expert rule with and without
 % escalation, class -> configuration table (train pools), the DQN of every
@@ -33,7 +37,7 @@
 % Output: results/policy_evaluation.{txt,mat,png}, results/policy_breakdown.png
 
 close all; clc;
-fprintf('=== Decision-layer evaluation on the test pools (D44-D51, D59) ===\n\n');
+fprintf('=== Decision-layer evaluation on the test pools ===\n\n');
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
 Q = load('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'H', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db');
 PP.confirm = Q.confirm; PP.alarm_mode = Q.alarm_mode;           % same monitor for every policy
@@ -41,7 +45,7 @@ if ~isempty(Q.drop_db), PP.drop_db = Q.drop_db; end
 K = link_env('tables', PP);
 C = decision_config();
 tab = policy_table(PP, K);
-TEST = 3; T = Q.H.T; NE = 64; REPS = 2;
+TEST = 3; SPEED = 4; T = Q.H.T; NE = 64; REPS = 2;
 if exist('SMOKE', 'var') && SMOKE, REPS = 1; end         % reduced chain check (run_stage smoke)
 nA = numel(PP.actions); nS = numel(PP.ebno); nG = K.nR(TEST);
 single_cells = find(ismember(PP.scen, PP.singles) & ~strcmp(PP.scen, 'none'));
@@ -58,14 +62,22 @@ end
 
 %% 1. Episode sets
 foll = single_cells(K.followable(single_cells));
-sets = struct('name', {}, 'spec', {});
-sets(end+1) = struct('name', 'single',   'spec', {episodes(single_cells, nS, nG, REPS, false, false, NE, T, rs)});
-sets(end+1) = struct('name', 'follower', 'spec', {episodes(foll, nS, nG, REPS, true, false, NE, T, rs)});
-sets(end+1) = struct('name', 'combined', 'spec', {episodes(combo_cells, nS, nG, REPS, false, false, NE, T, rs)});
-sets(end+1) = struct('name', 'unknown',  'spec', {episodes(single_cells, nS, nG, 1, false, true, NE, T, rs)});
-sets(end+1) = struct('name', 'clean',    'spec', {episodes(clean_cell, nS, nG, 8, false, false, NE, T, rs)});
+sets = struct('name', {}, 'spec', {}, 'split', {});
+sets(end+1) = struct('name', 'single',   'spec', {episodes(single_cells, nS, nG, REPS, false, false, NE, T, rs)}, 'split', TEST);
+sets(end+1) = struct('name', 'follower', 'spec', {episodes(foll, nS, nG, REPS, true, false, NE, T, rs)}, 'split', TEST);
+sets(end+1) = struct('name', 'combined', 'spec', {episodes(combo_cells, nS, nG, REPS, false, false, NE, T, rs)}, 'split', TEST);
+sets(end+1) = struct('name', 'unknown',  'spec', {episodes(single_cells, nS, nG, 1, false, true, NE, T, rs)}, 'split', TEST);
+sets(end+1) = struct('name', 'clean',    'spec', {episodes(clean_cell, nS, nG, 8, false, false, NE, T, rs)}, 'split', TEST);
 jam = foll(ismember(PP.scen(foll), {'jamming', 'reactive_jamming'}));
-sets(end+1) = struct('name', 'comb',     'spec', {episodes(jam, nS, nG, 1, true, false, NE, T, rs, [0 0])});
+sets(end+1) = struct('name', 'comb',     'spec', {episodes(jam, nS, nG, 1, true, false, NE, T, rs, [0 0])}, 'split', TEST);
+if numel(PP.runs) >= SPEED
+    nom_cells = single_cells(PP.sev(single_cells) == C.nominal);
+    sets(end+1) = struct('name', 'speed', 'spec', {episodes(nom_cells, nS, K.nR(SPEED), REPS, false, false, NE, T, rs)}, ...
+        'split', SPEED);
+end
+d2 = episodes(single_cells, nS, nG, 1, false, false, NE, T, rs);
+for b = 1:numel(d2), d2{b}.delay = 2 * C.switch_delay; end
+sets(end+1) = struct('name', 'delay2', 'spec', {d2}, 'split', TEST);
 iThreat = 1:3;                                         % sets pooled as "threat sets"
 
 %% 2. Best fixed configuration, chosen on the train pools
@@ -103,7 +115,7 @@ t0 = tic;
 for si = 1:numel(sets)
     for pk = 1:numel(POL)
         [kind, ag, opt] = policy_setup(POL{pk}, Q, sel, fixed_best, fixed_mmse, tab, K.na);
-        RES{si, pk} = run_set(kind, PP, K, sets(si).spec, TEST, ag, opt, 30000 + 100*si);
+        RES{si, pk} = run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, 30000 + 100*si);
     end
     fprintf('  set %-9s %5d episodes x %d policies (%.1f min)\n', sets(si).name, numel(RES{si, 1}.ret), ...
         numel(POL), toc(t0)/60);
@@ -111,7 +123,7 @@ end
 
 %% 4. Report
 rep = {};
-rep{end+1} = '=== DECISION-LAYER EVALUATION, TEST POOLS (D44-D51, D59) ===';
+rep{end+1} = '=== DECISION-LAYER EVALUATION, TEST POOLS ===';
 rep{end+1} = sprintf(['Generated: %s | %d-cycle episodes, onset at cycle 3-10 | %d test geometries per (cell, Eb/N0), ' ...
     'never used in training or validation | interferer AoA %s'], datestr(now), T, nG, ...
     ternary(PP.aoa_random, 'random per geometry', 'fixed'));
@@ -120,7 +132,7 @@ rep{end+1} = ['recovered = BER and packet loss <= 2x clean for 5 consecutive cyc
     '(some configuration restores both in that geometry); restored / ok = cycles after onset with BER / BER and ' ...
     'packet loss restored; false sw = changes on a healthy link, whole episode.'];
 rep{end+1} = sprintf(['Selected DQN: gamma %.2f, training false-switch penalty %d; alarm ''%s'', confirmation ' ...
-    '%d-of-%d for every monitored policy. Combined threats (%d) in training and test, new flights in test (D61). ' ...
+    '%d-of-%d for every monitored policy. Combined threats (%d) in training and test, new flights in test. ' ...
     'Intervals: 95%% bootstrap over geometries.'], ...
     Q.seed_summary.selected_gamma, Q.seed_summary.selected_fa_pen, PP.alarm_mode, PP.confirm, numel(PP.combos));
 for si = 1:numel(sets)
@@ -148,14 +160,15 @@ rep{end+1} = '';
 rep{end+1} = 'Recovered episodes among the recoverable, per threat (single + follower + combined sets), %:';
 rep{end+1} = sprintf('%-30s %8s %11s%s', 'threat', 'episodes', 'recoverable', sprintf('%11s', hdr{:}));
 threats = [PP.singles(2:end), PP.combos];
-PT = nan(numel(threats), numel(show)); PTsev = nan(numel(threats), 3, numel(show)); RECsh = nan(numel(threats), 1);
+nV = numel(PP.sev_names);
+PT = nan(numel(threats), numel(show)); PTsev = nan(numel(threats), nV, numel(show)); RECsh = nan(numel(threats), 1);
 for ti = 1:numel(threats)
     m = strcmp(PP.scen(ALL{1}.scn), threats{ti}) & ALL{1}.threat;
     mr = m & ALL{1}.recoverable;
     RECsh(ti) = mean(ALL{1}.recoverable(m));
     for c = 1:numel(show)
         PT(ti, c) = 100 * mean(ALL{col(show{c})}.recovered(mr));
-        for v = 1:3
+        for v = 1:nV
             mv = mr & PP.sev(ALL{1}.scn) == v;
             PTsev(ti, v, c) = 100 * mean(ALL{col(show{c})}.recovered(mv));
         end
@@ -164,9 +177,10 @@ for ti = 1:numel(threats)
 end
 rep{end+1} = '';
 iK = find(strcmp(show, POL{iDQN}));                  % deployed policy's column
-rep{end+1} = 'Deployed policy (DQN + escalation) per threat and severity (low / nominal / high), recovered among recoverable, %:';
-for ti = 1:numel(PP.singles) - 1
-    rep{end+1} = sprintf('  %-26s %s', threats{ti}, sprintf('%8.1f', squeeze(PTsev(ti, :, iK)))); %#ok<SAGROW>
+rep{end+1} = sprintf('Deployed policy (DQN + escalation) per threat and severity (%s), recovered among recoverable, %%:', ...
+    strjoin(PP.sev_names, ' / '));
+for ti = 1:numel(threats)
+    rep{end+1} = sprintf('  %-34s %s', threats{ti}, sprintf('%8.1f', squeeze(PTsev(ti, :, iK)))); %#ok<SAGROW>
 end
 kpi4 = PT(:, iK) >= 90;
 rep{end+1} = sprintf(['KPI 4 (deployed policy >= 90%% of the recoverable episodes of every threat): %d of %d threats | ' ...
@@ -187,7 +201,7 @@ bins_aoa = [0 20 45 90]; PA = [];
 if PP.aoa_random
     rep{end+1} = '';
     rep{end+1} = 'Recovered among recoverable vs interferer direction (single set, directional threats), %:';
-    dirn = ~ismember(PP.scen(R1.scn), {'path_loss', 'antenna_fault'});
+    dirn = ~ismember(PP.scen(R1.scn), {'path_loss', 'antenna_fault', 'airframe_shadowing'});
     rep{end+1} = sprintf('%-18s%s', '|AoA| from GCS', sprintf('%11s', hdr{:}));
     th = abs(R1.aoa(1, :));
     PA = nan(numel(bins_aoa) - 1, numel(show));
@@ -215,6 +229,32 @@ for bi = 1:numel(bins_v) - 1
         sprintf('%11.1f', PV(bi, :))); %#ok<SAGROW>
 end
 
+% Unseen speeds and signalling-delay sensitivity (reported apart from KPI 4)
+PS = []; PD = [];
+iS = find(strcmp({sets.name}, 'speed'));
+if ~isempty(iS)
+    Rs = RES{iS, 1}; ms = Rs.recoverable & Rs.threat;
+    lo = Rs.speed < PP.speed_range(1); hi = Rs.speed > PP.speed_range(2);
+    PS = [arrayfun(@(c) 100 * mean(RES{iS, col(show{c})}.recovered(ms & lo)), 1:numel(show)); ...
+          arrayfun(@(c) 100 * mean(RES{iS, col(show{c})}.recovered(ms & hi)), 1:numel(show))];
+    rep{end+1} = '';
+    rep{end+1} = sprintf(['Recovered among recoverable on flights outside the speed envelope (single threats, nominal ' ...
+        'severity, %d geometries per Eb/N0), %%:'], K.nR(SPEED));
+    rep{end+1} = sprintf('%-18s%s', 'speed [km/h]', sprintf('%11s', hdr{:}));
+    rep{end+1} = sprintf('%-18s%s', sprintf('%g-%g (%d)', PP.speed_out(1, :), sum(ms & lo)), sprintf('%11.1f', PS(1, :)));
+    rep{end+1} = sprintf('%-18s%s', sprintf('%g-%g (%d)', PP.speed_out(2, :), sum(ms & hi)), sprintf('%11.1f', PS(2, :)));
+end
+iD2 = find(strcmp({sets.name}, 'delay2'));
+Rd2 = RES{iD2, 1}; md2 = Rd2.recoverable & Rd2.threat;
+R1b = RES{1, 1}; m1 = R1b.recoverable & R1b.threat;
+PD = [arrayfun(@(c) 100 * mean(RES{1, col(show{c})}.recovered(m1)), 1:numel(show)); ...
+      arrayfun(@(c) 100 * mean(RES{iD2, col(show{c})}.recovered(md2)), 1:numel(show))];
+rep{end+1} = '';
+rep{end+1} = 'Signalling delay of a configuration change (single set), recovered among recoverable, %:';
+rep{end+1} = sprintf('%-18s%s', 'delay [cycles]', sprintf('%11s', hdr{:}));
+rep{end+1} = sprintf('%-18s%s', sprintf('%d (deployed)', C.switch_delay), sprintf('%11.1f', PD(1, :)));
+rep{end+1} = sprintf('%-18s%s', sprintf('%d', 2 * C.switch_delay), sprintf('%11.1f', PD(2, :)));
+
 % False alarms on the clean link: test pools (nG geometries per Eb/N0)
 iC = find(strcmp({sets.name}, 'clean'));
 cls_list = [PP.classes, {'unknown'}];
@@ -235,6 +275,7 @@ if isfile('data/clean_test_pools.mat')
     PPw.pools(:, :, :, TEST) = {[]};
     PPw.pools(clean_cell, :, :, TEST) = reshape(CT.pools(1, :, :), [1 nS nA]);
     PPw.runs{TEST} = CT.runs;
+    PPw.speed{TEST} = CT.speed;
     Kw = link_env('tables', PPw);
     [ss, rr] = ndgrid(1:nS, 1:n_geom); ss = ss(:)'; rr = rr(:)';
     n = numel(ss); nb = ceil(n / NE); pad = nb * NE - n;
@@ -269,6 +310,7 @@ Rd = RES{1, iDQN};
 top_cfg = struct('threat', {}, 'action', {}, 'share', {});      % most frequent final configuration (threat_gallery.m)
 for ti = 1:numel(PP.singles) - 1
     cf = Rd.cfg_final(strcmp(PP.scen(Rd.scn), threats{ti}));
+    if isempty(cf), continue; end
     [u, ~, j] = unique(cf); cnt = accumarray(j(:), 1); [cnt, o] = sort(cnt, 'descend'); u = u(o);
     top_cfg(end+1) = struct('threat', threats{ti}, 'action', PP.actions{u(1)}, 'share', cnt(1) / numel(cf)); %#ok<SAGROW>
     txt = strjoin(arrayfun(@(i) sprintf('%s %.0f%%', PP.actions{u(i)}, 100 * cnt(i) / numel(cf)), ...
@@ -283,7 +325,8 @@ KP = struct('per_threat', PT, 'per_threat_sev', PTsev, 'threats', {threats}, 're
     'kpi4_met', kpi4, 'per_ebno', PE, 'ebno', PP.ebno, 'per_aoa', PA, 'aoa_bins', bins_aoa, 'per_speed', PV, ...
     'speed_bins', bins_v, 'show', {show}, 'show_lbl', {hdr}, 'far', FAR, 'far_diag', FD, 'far_testpools', FAR_t, ...
     'far_diag_testpools', FD_t, 'far_geoms', n_geom, 'cls_list', {cls_list}, 'ebno_thr', ebno_thr, ...
-    'selected_gamma', Q.seed_summary.selected_gamma, 'confirm', PP.confirm, 'alarm_mode', PP.alarm_mode);
+    'selected_gamma', Q.seed_summary.selected_gamma, 'confirm', PP.confirm, 'alarm_mode', PP.alarm_mode, ...
+    'per_speed_out', PS, 'speed_out', PP.speed_out, 'per_delay', PD, 'sev_names', {PP.sev_names});
 save('results/policy_evaluation.mat', 'RES', 'RW', 'POL', 'LBL', 'set_names', 'fixed_best', 'tab', 'iDQN', 'KP', ...
     'iThreat', 'ALL', 'top_cfg');
 
@@ -308,7 +351,7 @@ for m = 1:3
 end
 lg = legend(kl, 'Orientation', 'horizontal', 'NumColumns', 6, 'FontSize', 8, 'Interpreter', 'none');
 lg.Position = [0.15 0.01 0.7 0.05];
-sgtitle('Decision layer on the test pools (D59)');
+sgtitle('Decision layer on the test pools');
 saveas(fig, 'results/policy_evaluation.png'); close(fig);
 
 fig = figure('Position', [60 60 1500 420], 'Color', 'w');
@@ -362,7 +405,7 @@ for b = 1:numel(specs)
     if isempty(R), R = Rb; else, R = cat_struct(R, Rb); end
 end
 R.geom = 1000 * R.s + R.r;                              % flight geometry (bootstrap cluster)
-[~, R.speed] = arrayfun(@(s, r) pool_seed(1, s, 2, r, PP.speed_range), R.s, R.r);
+R.speed = PP.speed{split}(sub2ind(size(PP.speed{split}), R.s, R.r));   % speed the geometry was flown at
 end
 
 function [kind, ag, opt] = policy_setup(name, Q, sel, fixed_best, fixed_mmse, tab, na)

@@ -1,6 +1,6 @@
 %% B1 - PREPARE DATA: split by independent sub-runs, z-score from train
-% Every (class, level, Eb/N0) cell has 8 seeded sub-runs (run_dataset_sweep.m):
-% sub-runs 1-5 -> train, 6 -> validation, 7-8 -> test (62.5/12.5/25). Frames of one
+% Every (class, level, Eb/N0) cell has 6 seeded sub-runs (run_dataset_sweep.m):
+% sub-runs 1-4 -> train, 5 -> validation, 6 -> test (67/17/17). Frames of one
 % sub-run never cross splits, so no fading realization, noise draw or temporal
 % window is shared between training and test. Every cell is present in every split.
 %
@@ -17,9 +17,9 @@ end
 classes = categories(sp0.Y);
 fold = sp0.fold(:);
 ix = struct();
-ix.train = ismember(fold, 1:5);
-ix.val   = fold == 6;
-ix.test  = ismember(fold, 7:8);
+ix.train = ismember(fold, 1:4);
+ix.val   = fold == 5;
+ix.test  = fold == 6;
 
 feat_mean = mean(sp0.feats(ix.train, :), 1);
 feat_std  = std(sp0.feats(ix.train, :), 0, 1);

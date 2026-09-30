@@ -67,8 +67,8 @@ env.fs         = p0.symbol_rate * p0.sps;
 env.delay_bits = 20;
 env.img_size = 128; env.win = 128; env.novlp = 113; env.nfft = 128;
 env.db_lo = -40; env.db_hi = 40; env.temporal_window = 10;
-env.threats = {'jamming','reactive_jamming','sweeping_jammer','noise_burst', ...
-    'path_loss','spoofing','antenna_fault','benign_interference','none'};
+env.threats = {'jamming','reactive_jamming','sweeping_jammer','noise_burst','tone_jamming', ...
+    'path_loss','spoofing','antenna_fault','airframe_shadowing','benign_interference','none'};
 env.snr_levels = p0.EbNo_dB(:)';
 if isfield(p0, 'speed_kmh_min')
     env.speed_range = [p0.speed_kmh_min p0.speed_kmh_max];
@@ -87,7 +87,8 @@ if isfield(Q, 'alarm_mode'), env.PP.alarm_mode = Q.alarm_mode; end
 if isfield(Q, 'drop_db') && ~isempty(Q.drop_db), env.PP.drop_db = Q.drop_db; end
 env.baseline = struct('jsr_db',p0.jsr_db,'path_loss_db',p0.path_loss_db, ...
     'fault_atten_db',p0.fault_atten_db,'spoof_sir_db',p0.spoof_sir_db, ...
-    'benign_int_db',p0.benign_int_db);
+    'benign_int_db',p0.benign_int_db,'tone_jsr_db',p0.tone_jsr_db,'shadow_db',p0.shadow_db, ...
+    'fault_duty',p0.fault_duty);
 env.sev = buildSeverityTable();
 env.surv = loadSurvReference();
 env.ber_floor = 0.5 / p0.frame_length;      % "zero errors in a frame" plotting floor
@@ -242,8 +243,10 @@ function ui = buildLiveTab(tab, env, c)
     speedInfo = place(mkLabel(g2, '', c, 'FontColor', c.cyan, 'FontSize', 10, 'FontName', c.mono), 2, [1 2]);
 
     place(mkLabel(g2, 'Threat severity', c), 3, 1);
-    sevDD = uidropdown(g2, 'Items', {'Nominal (baseline)','Level 1 (lowest)','Level 2','Level 3','Level 4','Level 5 (highest)'}, ...
-        'ItemsData', [0 1 2 3 4 5], 'Value', 0, 'BackgroundColor', c.termBg, 'FontColor', c.txt, ...
+    nLv = numel(env.sev.jamming.levels);
+    sevDD = uidropdown(g2, 'Items', [{'Nominal (baseline)', 'Level 1 (lowest)'}, ...
+        arrayfun(@(k) sprintf('Level %d', k), 2:nLv-1, 'UniformOutput', false), {sprintf('Level %d (highest)', nLv)}], ...
+        'ItemsData', 0:nLv, 'Value', 0, 'BackgroundColor', c.termBg, 'FontColor', c.txt, ...
         'FontName', c.font);
     place(sevDD, 3, 2);
 
@@ -475,8 +478,9 @@ function ui = buildEpisodeTab(tab, env, c)
 
     place(mkLabel(gl, 'Threat severity', c, 'FontColor', c.mut), 3, 1);
     place(mkLabel(gl, 'UAV speed (km/h)', c, 'FontColor', c.mut), 3, 3);
-    epSevDD = place(uidropdown(gl, 'Items', {'Nominal','Level 1','Level 2','Level 3','Level 4','Level 5'}, ...
-        'ItemsData', [0 1 2 3 4 5], 'Value', 0, 'Tooltip', tipSevE, ddArgs{:}), 4, 1);
+    nLv = numel(env.sev.jamming.levels);
+    epSevDD = place(uidropdown(gl, 'Items', [{'Nominal'}, arrayfun(@(k) sprintf('Level %d', k), 1:nLv, 'UniformOutput', false)], ...
+        'ItemsData', 0:nLv, 'Value', 0, 'Tooltip', tipSevE, ddArgs{:}), 4, 1);
     helpMark(gl, 4, 2, tipSevE, c);
     epSpeedSpin = place(uispinner(gl, 'Limits', env.speed_range, 'Step', 0.5, 'Value', 72, ...
         'ValueDisplayFormat', '%.1f', 'RoundFractionalValues', 'off', 'Tooltip', tipSpeedE, ...
@@ -743,17 +747,13 @@ function p = loadInitialParams()
 end
 
 function sev = buildSeverityTable()
-    % Same severity axes as run_dataset_sweep.m (dataset) and map_survivability_boundary.m.
+    % The severity axes of the detector dataset (dataset_levels.m) and of the map.
     sev = struct();
-    sev.jamming             = struct('param','jsr_db',        'levels',[0 4 8 12 16]);
-    sev.reactive_jamming    = struct('param','jsr_db',        'levels',[0 4 8 12 16]);
-    sev.sweeping_jammer     = struct('param','jsr_db',        'levels',[0 4 8 12 16]);
-    sev.noise_burst         = struct('param','jsr_db',        'levels',[0 4 8 12 16]);
-    sev.path_loss           = struct('param','path_loss_db',  'levels',[4 8 12 16 20]);
-    sev.spoofing            = struct('param','spoof_sir_db',  'levels',[-4 -1 2 5 8]);
-    sev.antenna_fault       = struct('param','fault_duty',    'levels',[0.1 0.2 0.3 0.4 0.5]);
-    sev.benign_interference = struct('param','benign_int_db', 'levels',[-10 -8 -6 -4 -2]);
-    sev.none                = struct('param','',              'levels',[]);
+    DL = dataset_levels();
+    for t = 1:numel(DL)
+        sev.(DL(t).name) = struct('param', DL(t).param, 'levels', DL(t).levels);
+    end
+    sev.none = struct('param', '', 'levels', []);
 end
 
 function surv = loadSurvReference()
@@ -1262,7 +1262,8 @@ function [p, sevTxt, fd_hz] = scenarioParams(env, threat, sevLevel, v_kmh)
     p = env.p0;
     p.jsr_db = env.baseline.jsr_db; p.path_loss_db = env.baseline.path_loss_db;
     p.fault_atten_db = env.baseline.fault_atten_db; p.spoof_sir_db = env.baseline.spoof_sir_db;
-    p.benign_int_db = env.baseline.benign_int_db;
+    p.benign_int_db = env.baseline.benign_int_db; p.tone_jsr_db = env.baseline.tone_jsr_db;
+    p.shadow_db = env.baseline.shadow_db; p.fault_duty = env.baseline.fault_duty;
     p.active_threat = threat;
     sevTxt = 'nominal';
     sv = env.sev.(threat);
@@ -1691,6 +1692,8 @@ function drawThreat(ax, scen, xm, ym, xg, yg, xu, yu, c)
             drawJammerIcon(ax, xm, jy, c.red, 'REACTIVE JAMMER', c); drawWaves(ax, xm, jy, c.red);
             plot(ax, [xm + 0.5, xm + 2.2], [jy + 0.9, ym - 0.08], ':', 'Color', c.amber, 'LineWidth', 1.6);
             text(ax, xm + 2.3, ym - 0.22, 'senses Tx', 'Color', c.amber, 'FontSize', 8, 'FontName', c.font);
+        case 'tone_jamming'
+            drawJammerIcon(ax, xm, jy, c.red, 'TONE (CW) JAMMER', c); drawWaves(ax, xm, jy, c.red);
         case 'sweeping_jammer'
             drawJammerIcon(ax, xm, jy, c.red, 'SWEEPING JAMMER', c); drawWaves(ax, xm, jy, c.red);
             plot(ax, xm + [-2.2 -1.5 -1.5 -0.8 -0.8 -0.1], jy + [0.2 0.8 0.2 0.8 0.2 0.8], 'Color', c.red, 'LineWidth', 1.6);
@@ -1713,6 +1716,9 @@ function drawThreat(ax, scen, xm, ym, xg, yg, xu, yu, c)
                 'HorizontalAlignment', 'center', 'FontName', c.font);
         case 'antenna_fault'
             text(ax, xu - 2.1, yu + 0.85, 'ANTENNA FAULT', 'Color', c.amber, 'FontWeight', 'bold', ...
+                'FontSize', 9, 'HorizontalAlignment', 'center', 'FontName', c.font);
+        case 'airframe_shadowing'
+            text(ax, xu - 2.1, yu + 0.85, 'BANKING TURN: ANTENNA 1 SHADOWED', 'Color', c.amber, 'FontWeight', 'bold', ...
                 'FontSize', 9, 'HorizontalAlignment', 'center', 'FontName', c.font);
         case 'benign_interference'
             patch(ax, [xm-0.3 xm+0.3 xm+0.3 xm-0.3], [jy-0.2 jy-0.2 jy+0.2 jy+0.2], c.accent, ...

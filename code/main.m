@@ -81,11 +81,11 @@ disk_guard('init');                                % Simulink temporary data and
 % ---- Decision-layer training; defaults of train_dqn.m when absent ----
 CFG.dqn_seeds       = 3;                 % C2: training seeds per setting
 CFG.dqn_gammas      = 0.5;               % C2: discount factor (selected on validation)
-CFG.monitors        = {'class_drop 3/3'};  % C2: alarm definition and m/n confirmation (selected on validation)
+CFG.monitors        = {'class_drop 3/3', 'class_drop 2/2'};  % C2: alarm definition and m/n confirmation (selected on validation)
 CFG.drop_steps      = 2;                 % C2: path_loss alarm threshold, 2 dB below the train-pool value (selected on validation)
-CFG.fa_penalty_grid = [120 160];         % C2: training reward variants: false-switch penalty,
-CFG.cost_scale_grid = [0.5 0.5];         %     running costs x scale,
-CFG.switch_scale_grid = [1 1];           %     switching cost x scale
+CFG.fa_penalty_grid = [80 120 160];      % C2: training reward variants: false-switch penalty,
+CFG.cost_scale_grid = [0.5 0.5 0.5];     %     running costs x scale,
+CFG.switch_scale_grid = [1 1 1];         %     switching cost x scale
 
 % ---- Phase A: link + threats + dataset ----
 
@@ -93,17 +93,17 @@ RUN.init                        = false;    % A0  : regenerate params.mat
 RUN.validate_A                  = false;   % A1-A3: build+validate AWGN & Rician links (fast)
 RUN.check_A4                    = false;   % A4  : build threat model + sanity BER (fast)
 RUN.validate_phy                = false;    % A4v : link vs theory, MRC/MMSE, seeds; stops main on FAIL
-RUN.build_dataset               = false;    % A5  : seeded sub-run dataset, receiver measurements (~17 min)
-RUN.extract_spectrograms        = false;    % A6  : spectrograms + 13 link features (~7 min)
+RUN.build_dataset               = false;    % A5  : seeded sub-run dataset, 10 threats x 8 levels, receiver measurements (~40 min)
+RUN.extract_spectrograms        = false;    % A6  : spectrograms + 15 link features (~12 min)
 
 
 % ---- Phase B: detection (CNN baseline) ----
-RUN.prepare_data                = false;    % B1  : split by sub-run 5/1/2 (~1 min)
+RUN.prepare_data                = false;    % B1  : split by sub-run 4/1/1 (~2 min)
 RUN.train_detector              = false;    % B2  : train CNN+scalar hybrid, unknown-threat models (~8 min); a new detector invalidates the pools
 RUN.eval_detector               = false;    % B3  : test eval + confusion/accuracy-vs-SNR + bootstrap CIs (~2 min)
 RUN.compare_architectures       = false;    % B3a : hybrid vs spectrogram-only vs features-only (~16 min)
-RUN.eval_unseen_snr             = false;    % B4  : detector at Eb/N0 never seen in training, 1,3,5,7,9 dB (~25 min)
-RUN.eval_ood_detection          = false;    % OOD : leave-one-threat-out, retrains the detector 8 times; selects the production unknown-threat score (~70 min)
+RUN.eval_unseen_snr             = false;    % B4  : detector at Eb/N0 never seen in training, midpoints of the grid (~30 min)
+RUN.eval_ood_detection          = false;    % OOD : leave-one-threat-out, retrains the detector 10 times; selects the production unknown-threat score (~2.5 h)
 RUN.eval_unseen_severity        = false;    % B4s : detector at severities never seen in training, between and above the levels (~10 min)
 
 
@@ -207,7 +207,7 @@ if RUN.eval_unseen_snr
     eval_unseen_snr;
 end
 if RUN.eval_ood_detection
-    fprintf('  [OOD] Leave-one-threat-out unknown-threat detection; selects the production score (D60)...\n');
+    fprintf('  [OOD] Leave-one-threat-out unknown-threat detection; selects the production score...\n');
     eval_ood_detection;
     clear S sp tr va te_id te_ood net                  % spectrogram splits held by the script
 end
@@ -232,7 +232,7 @@ if RUN.build_policy_pools
     build_policy_pools;
 end
 if RUN.build_clean_test_pools
-    fprintf('  [C1c] Measuring the clean link on new geometries: validation set (D52), test set (KPI 6, D51)...\n');
+    fprintf('  [C1c] Measuring the clean link on new geometries: validation set, test set (KPI 6)...\n');
     CLEAN_SET = 'val';  build_clean_test_pools;
     CLEAN_SET = 'test'; build_clean_test_pools;
 end

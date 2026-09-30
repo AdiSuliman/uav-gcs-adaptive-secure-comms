@@ -8,8 +8,12 @@ function ok = validate_phy()
 %   V4  Rician K = 10 dB, MRC 3 antennas     vs MGF integral, independent branches
 %   V5  default link (2 antennas, rho = 0.3) vs MGF integral, correlated branches
 %       (non-central quadratic form, Ramirez-Espinosa et al., 2018)
-%   V6  jamming JSR 10 dB: MRC vs MMSE vs jammer-free MRC (spatial nulling)
-%   V7  seeds: same seed -> identical run, different seed -> different run
+%   V6  K = 0 dB and V7 K = 20 dB, 2 correlated antennas: the ends of the K-factor
+%       range drawn per flight (channel_k.m)
+%   V8  jamming JSR 10 dB: MRC vs MMSE vs jammer-free MRC (spatial nulling)
+%   V9  seeds: same seed -> identical run, different seed -> different run
+%   V10 tone jammer: in-band power after the receive filter equals that of a noise
+%       jammer of the same JSR (tone_jamming uses the same JSR definition)
 % Gap = Eb/N0 shift between measured and theoretical BER, points with >= 100 errors.
 % Outputs: results/phy_validation.txt, results/phy_validation.png
 
@@ -22,7 +26,8 @@ if ~isfield(p0, 'n_rx')
     error('params.mat has no antenna fields. Run init_params.m first.');
 end
 p0.quiet_build = true;
-p0.int_aoa_random = false;             % V6 nulling test at the fixed direction p0.int_aoa_deg(1)
+p0.int_aoa_random = false;             % V8 nulling test at the fixed direction p0.int_aoa_deg(1)
+p0.k_random = false;                   % K-factor of each case fixed
 p0.active_threat = 'none';
 
 CFG.EbNo      = 0:2:10;      % [dB] per branch
@@ -43,10 +48,15 @@ cases = {
   'V3 Rician, MRC 2 ant',       2,   10,  0,   'none',    'mrc',    2
   'V4 Rician, MRC 3 ant',       3,   10,  0,   'none',    'mrc',    3
   'V5 default, MRC 2 ant',      2,   10,  0.3, 'none',    'mrc',    2
-  'V6a jam 10 dB, MRC',         2,   10,  0.3, 'jamming', 'mrc',    0
-  'V6b jam 10 dB, MMSE',        2,   10,  0.3, 'jamming', 'mmse',   0
+  'V6 K = 0 dB, MRC 2 ant',     2,    0,  0.3, 'none',    'mrc',    2
+  'V7 K = 20 dB, MRC 2 ant',    2,   20,  0.3, 'none',    'mrc',    2
+  'V8a jam 10 dB, MRC',         2,   10,  0.3, 'jamming', 'mrc',    0
+  'V8b jam 10 dB, MMSE',        2,   10,  0.3, 'jamming', 'mmse',   0
 };
 nC = size(cases, 1); nS = numel(CFG.EbNo);
+iTh = find(cell2mat(cases(:, 7))' > 0); nTh = numel(iTh);
+iMRCj = find(strcmp(cases(:, 1), 'V8a jam 10 dB, MRC')); iMMSEj = find(strcmp(cases(:, 1), 'V8b jam 10 dB, MMSE'));
+iDef = find(strcmp(cases(:, 1), 'V5 default, MRC 2 ant'));
 BER = nan(nC, nS); NERR = zeros(nC, nS); TH = nan(nC, nS); GAP = nan(nC, 1); GSE = nan(nC, 1);
 DLY = nan(nC, 1);
 
@@ -65,7 +75,7 @@ for c = 1:nC
         sprintf('%.2e ', BER(c,:)), toc(t0)/60);
 end
 
-%% V7 seeds (default link, 4 dB)
+%% V9 seeds (default link, 4 dB)
 p = p0; p.rician_k = 10; p.active_threat = 'none';
 sd = [2001 2001 2002]; bs = nan(1, 3);
 for i = 1:3
@@ -76,11 +86,15 @@ end
 seed_same = bs(1) == bs(2);
 seed_diff = bs(1) ~= bs(3);
 
+%% V10 tone jammer calibration
+[jsr_noise, jsr_tone] = tone_check(p0);
+tone_ok = abs(jsr_tone - jsr_noise) <= 0.5;
+
 %% Report
-g_ok = abs(GAP(1:5)) <= max(CFG.gap_ok, 2 * GSE(1:5));
-jam_gain = 10*log10(BER(6,:) ./ BER(7,:));
+g_ok = abs(GAP(iTh)) <= max(CFG.gap_ok, 2 * GSE(iTh));
+jam_gain = 10*log10(BER(iMRCj,:) ./ BER(iMMSEj,:));
 rep = {};
-rep{end+1} = '=== PHY VALIDATION (D41): multi-antenna UAV receiver vs theory ===';
+rep{end+1} = '=== PHY VALIDATION: multi-antenna UAV receiver vs theory ===';
 rep{end+1} = sprintf('Generated: %s | %.1f s per point, %d channel realizations, fd %.0f Hz | CSI block %d sym (MRC), window %d sym (MMSE)', ...
     datestr(now), CFG.sim_time, CFG.n_real, CFG.fd_val, p0.csi_block, p0.mmse_window);
 rep{end+1} = sprintf('Eb/N0 per branch [dB]: %s', mat2str(CFG.EbNo));
@@ -91,20 +105,22 @@ for c = 1:nC
     if cases{c,7} > 0
         rep{end+1} = sprintf('%-26s th.  %s', '', sprintf('%9.2e', TH(c,:))); %#ok<SAGROW>
     end
-    if c <= 5
+    if cases{c,7} > 0
         rep{end+1} = sprintf('%-26s gap %+.2f dB (standard error %.2f dB) -> %s  (bit delay found: %d)', '', ...
-            GAP(c), GSE(c), passfail(g_ok(c)), DLY(c)); %#ok<SAGROW>
+            GAP(c), GSE(c), passfail(g_ok(iTh == c)), DLY(c)); %#ok<SAGROW>
     end
 end
 rep{end+1} = '';
-rep{end+1} = sprintf('V6 MMSE vs MRC under jamming (JSR 10 dB, interferer at %g deg): BER ratio [dB] %s', ...
+rep{end+1} = sprintf('V8 MMSE vs MRC under jamming (JSR 10 dB, interferer at %g deg): BER ratio [dB] %s', ...
     p0.int_aoa_deg(1), sprintf('%6.1f', jam_gain));
-rep{end+1} = sprintf('V6 MMSE under jamming vs jammer-free MRC (V5): BER ratio %s', ...
-    sprintf('%8.2f', BER(7,:) ./ BER(5,:)));
-rep{end+1} = sprintf('V7 seeds: same seed identical %s, different seed differs %s (BER %s)', ...
+rep{end+1} = sprintf('V8 MMSE under jamming vs jammer-free MRC (V5): BER ratio %s', ...
+    sprintf('%8.2f', BER(iMMSEj,:) ./ BER(iDef,:)));
+rep{end+1} = sprintf('V9 seeds: same seed identical %s, different seed differs %s (BER %s)', ...
     passfail(seed_same), passfail(seed_diff), mat2str(bs, 4));
-rep{end+1} = sprintf('Overall: theory gaps V1-V5 %d/5 within %.1f dB, seeds %s | %.1f min', ...
-    sum(g_ok), CFG.gap_ok, passfail(seed_same && seed_diff), toc(t0)/60);
+rep{end+1} = sprintf('V10 tone jammer: in-band JSR after the receive filter %.2f dB (noise jammer %.2f dB, set %g dB) -> %s', ...
+    jsr_tone, jsr_noise, p0.tone_jsr_db, passfail(tone_ok));
+rep{end+1} = sprintf('Overall: theory gaps %d/%d within %.1f dB, seeds %s, tone %s | %.1f min', ...
+    sum(g_ok), nTh, CFG.gap_ok, passfail(seed_same && seed_diff), passfail(tone_ok), toc(t0)/60);
 rep{end+1} = sprintf('Pass rule: |gap| <= %.1f dB or within 2 standard errors (spread over %d channel realizations).', CFG.gap_ok, CFG.n_real);
 if ~exist('results', 'dir'); mkdir('results'); end
 fid = fopen('results/phy_validation.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
@@ -113,22 +129,21 @@ fprintf('\n%s\n', rep{:});
 %% Figure
 f = figure('Position', [100 100 1150 450], 'Color', 'w');
 subplot(1, 2, 1); hold on; grid on; box on;
-col = lines(5);
-for c = 1:5
+col = lines(nTh);
+for k = 1:nTh
+    c = iTh(k);
     v = NERR(c,:) > 0;
-    semilogy(CFG.EbNo(v), BER(c,v), 'o', 'Color', col(c,:), 'MarkerFaceColor', col(c,:), ...
+    semilogy(CFG.EbNo(v), BER(c,v), 'o', 'Color', col(k,:), 'MarkerFaceColor', col(k,:), ...
         'DisplayName', [cases{c,1} ' (sim)']);
-    if c <= 4
-        semilogy(CFG.EbNo, TH(c,:), '-', 'Color', col(c,:), 'DisplayName', [cases{c,1}(1:2) ' theory']);
-    end
+    semilogy(CFG.EbNo, TH(c,:), '-', 'Color', col(k,:), 'HandleVisibility', 'off');
 end
 set(gca, 'YScale', 'log'); ylim([1e-6 0.2]);
 xlabel('E_b/N_0 per antenna [dB]'); ylabel('BER');
-title('QPSK, coherent MRC vs theory'); legend('Location', 'southwest', 'FontSize', 7);
+title('QPSK, coherent MRC: simulation (markers) vs theory (lines)'); legend('Location', 'southwest', 'FontSize', 7);
 subplot(1, 2, 2); hold on; grid on; box on;
-semilogy(CFG.EbNo, BER(6,:), 'rs-', 'DisplayName', 'jamming 10 dB, MRC');
-semilogy(CFG.EbNo, BER(7,:), 'bo-', 'DisplayName', 'jamming 10 dB, MMSE (spatial action)');
-semilogy(CFG.EbNo, BER(5,:), 'k--', 'DisplayName', 'no jammer, MRC');
+semilogy(CFG.EbNo, BER(iMRCj,:), 'rs-', 'DisplayName', 'jamming 10 dB, MRC');
+semilogy(CFG.EbNo, BER(iMMSEj,:), 'bo-', 'DisplayName', 'jamming 10 dB, MMSE (spatial action)');
+semilogy(CFG.EbNo, BER(iDef,:), 'k--', 'DisplayName', 'no jammer, MRC');
 set(gca, 'YScale', 'log'); ylim([1e-6 1]);
 xlabel('E_b/N_0 per antenna [dB]'); ylabel('BER');
 title(sprintf('Spatial nulling, %d antennas, jammer at %g deg', p0.n_rx, p0.int_aoa_deg(1)));
@@ -137,7 +152,26 @@ exportgraphics(f, 'results/phy_validation.png', 'Resolution', 150);
 
 params = S.params; save('params.mat', 'params');
 if bdIsLoaded(modelName), close_system(modelName, 0); end
-ok = all(g_ok) && seed_same && seed_diff;
+ok = all(g_ok) && seed_same && seed_diff && tone_ok;
+end
+
+function [jn, jt] = tone_check(p)
+% In-band power over our signal after the receive filter [dB], for a noise jammer
+% of power 10^(JSR/10) per sample and for the tone of build_threat_model.m at
+% 60% of its largest offset, both at p.tone_jsr_db.
+rs = RandStream('mt19937ar', 'Seed', 5);
+h = rcosdesign(p.rolloff, p.filter_span, p.sps, 'sqrt');
+fs = p.symbol_rate * p.sps; N = 2^16;
+bits = randi(rs, [0 1], 2 * N / p.sps, 1);
+x = upfirdn(pskmod(bits, 4, pi/4, 'gray', 'InputType', 'bit'), h, p.sps);
+g = 10^(p.tone_jsr_db / 10);
+w = sqrt(g / 2) * complex(randn(rs, N, 1), randn(rs, N, 1));
+t = (0:N-1)' / fs;
+v = sqrt(g / p.sps) * exp(1j * 2*pi * 0.6 * p.tone_offset_hz * t);
+pw = @(y) mean(abs(y(numel(h):end - numel(h))).^2);
+ps = pw(filter(h, 1, x(1:N)));
+jn = 10*log10(pw(filter(h, 1, w)) / ps);
+jt = 10*log10(pw(filter(h, 1, v)) / ps);
 end
 
 %% ===================== Local functions =====================

@@ -6,9 +6,10 @@ function spec = dqn_episode_spec(H, PP, K, rs, split)
 %   re-acquisition delay (C.fdelay) and withheld detector output drawn per episode.
 avail = find(~cellfun(@isempty, PP.pools(:, 1, K.na, split))');
 w = ones(1, numel(avail));
-w(strcmp(PP.scen(avail), 'none')) = 4;              % the clean link as often as a threat at all severities
+nV = numel(PP.sev_names);
+w(strcmp(PP.scen(avail), 'none')) = nV;             % the clean link as often as a threat at all severities
 w(strcmp(PP.scen(avail), 'benign_interference')) = 1.5;
-w(ismember(PP.scen(avail), PP.combos)) = 2;
+w(ismember(PP.scen(avail), PP.combos)) = 1.5;
 cw = cumsum(w) / sum(w);
 NE = H.NE; C = decision_config();
 scn = avail(arrayfun(@(u) find(u <= cw, 1), rand(rs, 1, NE)));

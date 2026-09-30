@@ -1,17 +1,20 @@
 %% RUN_DATASET_SWEEP - Phase A5: labeled dataset from independent seeded sub-runs
-% 8 threats x 5 severity levels x 6 Eb/N0 points + 'none', on the multi-antenna
+% 10 threats x 8 severity levels x 6 Eb/N0 points + 'none', on the multi-antenna
 % link (build_threat_model.m). Every (threat, level, Eb/N0) cell is simulated as N_SUB independent
-% sub-runs: own seed (fading, interferer channels and directions, threat waveform,
-% noise, bits) and own UAV speed drawn uniformly in 50-120 km/h. The sub-run is the unit of the
+% sub-runs: own seed (fading and its K-factors, interferer channels and directions,
+% threat waveform, noise, bits) and own UAV speed drawn uniformly in 50-120 km/h. The sub-run is the unit of the
 % train/val/test split (prepare_data.m), so no two splits share a channel
 % realization or a temporal-feature window.
 %
-% Severity levels (impact threshold to pre-saturation):
-%   jamming / noise_burst / reactive / sweeping : JSR   0,4,8,12,16 dB
-%   path_loss                                    : atten 4,8,12,16,20 dB
-%   spoofing                                     : SIR   -4,-1,2,5,8 dB
-%   antenna_fault                                : duty  0.1..0.5 (30 dB)
-%   benign_interference                          : power -10..-2 dB
+% Severity levels, the full range of the decision layer and of the map:
+%   jamming / noise_burst / reactive / sweeping / tone : JSR 0-28 dB, step 4 (a 30 dB
+%                  jammer over the signal as in Liu et al.)
+%   path_loss            : 4-25 dB, step 3
+%   spoofing             : SIR -4 to 10 dB, step 2
+%   antenna_fault        : duty 0.05-0.6 (30 dB loss while failed)
+%   benign_interference  : -12 to -1.5 dB, step 1.5
+%   airframe_shadowing   : 5-33 dB on antenna 1, step 4 (above 35 dB measured,
+%                          Khawaja et al.)
 % 'none' gets n_levels x N_SUB sub-runs per Eb/N0 (class balance).
 %
 % Per frame: antenna-1 IQ, label, level, configured Eb/N0, the receiver
@@ -28,27 +31,24 @@ S = load('params.mat');
 p0 = S.params; p0.quiet_build = true;
 
 %% ---- Configuration ----
-EbNo_list  = p0.EbNo_dB;          % 0:2:10 dB
-N_SUB      = 8;                   % independent sub-runs per cell (split unit)
+EbNo_list  = p0.EbNo_dB;          % Eb/N0 grid of init_params
+N_SUB      = 6;                   % independent sub-runs per cell (split unit)
 F_SUB      = 20;                  % frames per sub-run
 delay_bits = 20;
 modelName  = 'UAV_GCS_Threat_Link';
 rng(2026, 'twister');             % seeds and speeds of every sub-run
 
 clear threat_cfg
-threat_cfg(1) = struct('name','jamming',             'param','jsr_db',        'levels',[0 4 8 12 16]);
-threat_cfg(2) = struct('name','noise_burst',         'param','jsr_db',        'levels',[0 4 8 12 16]);
-threat_cfg(3) = struct('name','reactive_jamming',    'param','jsr_db',        'levels',[0 4 8 12 16]);
-threat_cfg(4) = struct('name','path_loss',           'param','path_loss_db',  'levels',[4 8 12 16 20]);
-threat_cfg(5) = struct('name','spoofing',            'param','spoof_sir_db',  'levels',[-4 -1 2 5 8]);
-threat_cfg(6) = struct('name','antenna_fault',       'param','fault_duty',    'levels',[0.1 0.2 0.3 0.4 0.5]);
-threat_cfg(7) = struct('name','benign_interference', 'param','benign_int_db', 'levels',[-10 -8 -6 -4 -2]);
-threat_cfg(8) = struct('name','sweeping_jammer',     'param','jsr_db',        'levels',[0 4 8 12 16]);
-n_levels    = 5;
+threat_cfg = dataset_levels();
+if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
+    for t = 1:numel(threat_cfg), threat_cfg(t).levels = threat_cfg(t).levels([1 end]); end
+    EbNo_list = EbNo_list([2 5]);
+end
+n_levels    = numel(threat_cfg(1).levels);
 class_names = ['none', {threat_cfg.name}];
 stop_time   = num2str(F_SUB * p0.frame_duration);
 
-MEAS = {'rssi', 'crc_fail', 'ber_est', 'snr_post', 'sinr', 'env_corr', 'iot', 'coh', 'mmse_gain', 'align', 'branch_dip'};
+MEAS = {'rssi', 'crc_fail', 'ber_est', 'snr_post', 'sinr', 'env_corr', 'iot', 'coh', 'mmse_gain', 'align', 'branch_dip', 'branch_gap'};
 D = struct('iq', {{}}, 'label', [], 'level', [], 'snr', [], 'ber', [], 'fer', [], 'speed', [], 'run', [], 'fold', []);
 for i = 1:numel(MEAS), D.(MEAS{i}) = []; end
 run_id = 0;

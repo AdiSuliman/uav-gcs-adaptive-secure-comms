@@ -9,8 +9,14 @@ function varargout = link_env(cmd, varargin)
 %
 %   spec: scn (threat cell index into PP.scen), s (Eb/N0 index), onset, follow,
 %         fdelay, unk (1 x NE each), T; optional r (1 x NE): geometry of each
-%         episode, drawn at random if absent
-%   split: 1 = train, 2 = validation, 3 = test pools; rs: RandStream for frame draws
+%         episode, drawn at random if absent; optional delay: signalling delay of
+%         a configuration change in cycles (default C.switch_delay)
+%   split: 1 = train, 2 = validation, 3 = test, 4 = unseen-speed pools; rs:
+%         RandStream for frame draws
+%
+%   A configuration chosen in one cycle is requested from the GCS and runs on the
+%   link from the frame after the next delay cycles: E.cfg is the configuration
+%   requested (what the policy knows), E.cfg_link the one the link runs.
 %
 %   One episode = one seeded geometry of the pools (fading, interferer
 %   direction, threat waveform). Every configuration of the same (cell, Eb/N0,
@@ -38,7 +44,8 @@ function varargout = link_env(cmd, varargin)
 %   C.ratio_ok x clean; recoverable: some configuration restores both BER and
 %   packet loss in this geometry.
 %   obs: probs (NE x classes), unknown (score below threshold, or masked), feat
-%   (NE x link features, receiver measurements), ber_true (analysis only)
+%   (NE x link features, receiver measurements), cfg_link (configuration the
+%   frame was received with), ber_true (analysis only)
 switch cmd
     case 'tables', varargout{1} = tables(varargin{:});
     case 'reset',  [varargout{1}, varargout{2}] = reset_env(varargin{:});
@@ -103,7 +110,7 @@ for sp = 1:nSp
     end
 end
 comp = cellfun(@(x) strsplit(x, '+'), PP.scen, 'UniformOutput', false);
-K.followable = cellfun(@(c) any(ismember(c, {'jamming', 'reactive_jamming', 'spoofing'})), comp);
+K.followable = cellfun(@(c) any(ismember(c, {'jamming', 'reactive_jamming', 'spoofing', 'tone_jamming'})), comp);
 end
 
 %% ===================== Reset / step =====================
@@ -112,6 +119,9 @@ NE = numel(spec.scn);
 E = spec; E.NE = NE; E.split = split; E.rs = rs;
 E.t = zeros(1, NE);
 E.cfg = K.na * ones(1, NE);
+E.cfg_link = E.cfg;
+if isfield(spec, 'delay') && ~isempty(spec.delay), E.D = spec.delay; else, E.D = decision_config().switch_delay; end
+E.queue = K.na * ones(E.D, NE);                     % requests on their way to the GCS
 E.last_switch = -inf(1, NE);
 E.hop_t = -inf(1, NE);
 if ~isfield(spec, 'r') || isempty(spec.r)
@@ -132,11 +142,17 @@ end
 function [E, r, obs, info] = step_env(E, PP, K, a)
 a = a(:)';
 prev = E.cfg;
-comp_prev = compromised(E, K, prev);
+comp_prev = compromised(E, K, E.cfg_link);
 hop = K.hasCh(a) & (~K.hasCh(prev) | comp_prev);
 changed = a ~= prev;
-E.hop_t(hop) = E.t(hop) + 1;
+E.hop_t(hop) = E.t(hop) + 1 + E.D;                  % the new channel is in use once the change arrives
 E.cfg = a;
+if E.D > 0
+    E.cfg_link = E.queue(1, :);
+    E.queue = [E.queue(2:end, :); a];
+else
+    E.cfg_link = a;
+end
 E.last_switch(changed | hop) = E.t(changed | hop) + 1;
 E.t = E.t + 1;
 [E, obs, sc_eff, cfg_eff] = draw(E, PP, K);
@@ -145,7 +161,7 @@ idx = sub2ind(size(K.q), sc_eff, E.s, cfg_eff, sp, E.r);
 ih = sub2ind(size(K.healthy), sc_eff, E.s, sp, E.r);
 healthy = K.healthy(ih);
 q = K.q(idx);
-r = (q - K.cost(a) - K.SW * (changed | hop) - K.FA * (changed & healthy)) / 100;
+r = (q - K.cost(E.cfg_link) - K.SW * (changed | hop) - K.FA * (changed & healthy)) / 100;
 info = struct('q', q, 'restored', K.restored(idx), 'restored_plr', K.restored_plr(idx), 'gput', K.gput(idx), ...
     'changed', changed | hop, 'false_switch', changed & healthy, 'healthy', healthy, ...
     'recoverable', K.recoverable(ih), 'sc_eff', sc_eff, 'cfg_eff', cfg_eff, 'post', E.t >= E.onset);
@@ -159,9 +175,9 @@ function [E, obs, sc_eff, cfg_eff] = draw(E, PP, K)
 % Frame of the effective (cell, configuration), same geometry, frame position
 % k0 + t inside the geometry (cyclic).
 sc_eff = E.scn; sc_eff(E.t < E.onset) = K.clean;
-cfg_eff = E.cfg;
-cm = compromised(E, K, E.cfg);
-cfg_eff(cm) = K.strip(E.cfg(cm));
+cfg_eff = E.cfg_link;
+cm = compromised(E, K, E.cfg_link);
+cfg_eff(cm) = K.strip(E.cfg_link(cm));
 nC = numel(PP.classes); nF = numel(PP.feat_names);
 obs.probs = zeros(E.NE, nC); obs.unknown = false(E.NE, 1); obs.feat = zeros(E.NE, nF); obs.ber_true = zeros(E.NE, 1);
 for i = 1:E.NE
@@ -175,4 +191,5 @@ for i = 1:E.NE
 end
 mask = E.unk & E.t >= E.onset;
 obs.probs(mask, :) = 0; obs.unknown(mask) = true;
+obs.cfg_link = E.cfg_link(:);
 end

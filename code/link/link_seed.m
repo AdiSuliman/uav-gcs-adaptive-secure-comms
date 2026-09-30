@@ -5,8 +5,9 @@ function link_seed(modelName, seed, fd)
 %   Channel and threat blocks read 'Seed' and 'Doppler' at the start of each run;
 %   the AWGN block gets seed+1, the bit source seed+2. With random interferer
 %   directions (UserData of the 'AoA' block, set by build_threat_model.m) the
-%   'AoA' block gets the directions of this seed (interferer_aoa.m). No rebuild
-%   is needed.
+%   'AoA' block gets the directions of this seed (interferer_aoa.m), and with
+%   random K-factors the 'Kfac' block gets this seed's K of our signal and of the
+%   interferers (channel_k.m). No rebuild is needed.
 set_param([modelName '/Seed'], 'Value', sprintf('%d', round(seed)));
 if nargin >= 3
     set_param([modelName '/Doppler'], 'Value', sprintf('%.6f', fd));
@@ -16,6 +17,11 @@ if getSimulinkBlockHandle([modelName '/AoA']) ~= -1, ud = get_param([modelName '
 if isstruct(ud) && isfield(ud, 'aoa_random') && ud.aoa_random
     th = interferer_aoa(seed, ud.aoa_range, numel(ud.aoa_fixed));
     set_param([modelName '/AoA'], 'Value', mat2str(th, 8));
+end
+uk = [];
+if getSimulinkBlockHandle([modelName '/Kfac']) ~= -1, uk = get_param([modelName '/Kfac'], 'UserData'); end
+if isstruct(uk) && isfield(uk, 'k_random') && uk.k_random
+    set_param([modelName '/Kfac'], 'Value', mat2str(channel_k(seed, uk.k_range), 8));
 end
 blks = {[modelName '/AWGN'], [modelName '/BitSource']};
 for b = 1:numel(blks)

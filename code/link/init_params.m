@@ -19,7 +19,9 @@ params.frame_length   = params.bits_per_frame + params.crc_bits;  % total bits/f
 % Pulse shaping (RRC)
 params.rolloff      = 0.25;            % RRC roll-off factor
 params.filter_span  = 10;              % RRC filter span (symbols)
-params.rician_k      = 10;             % K-factor (dB), strong LoS
+params.rician_k      = 10;             % K-factor (dB) when not drawn per flight (PHY validation)
+params.k_random      = true;           % K-factor of every channel drawn per seeded flight (channel_k.m)
+params.k_range_db    = [0 20];         % measured air-ground K: foliage 2-5, urban -5..10, open L-band ~12, C-band ~28 dB (Khawaja et al.)
 params.carrier_freq  = 2.4e9;          % 2.4 GHz ISM (range for a given Eb/N0: link_budget_table.m)
 
 % UAV platform velocity and Doppler
@@ -38,22 +40,25 @@ params.v_nominal = 20;      % [m/s] nominal cruise (72 km/h) — default simulat
 params.c_light   = 3e8;     % [m/s] speed of light
 params.fd_max    = params.v_nominal * params.carrier_freq / params.c_light;  % [Hz] ~160 @ 20 m/s
 
-% Threat parameters at nominal severity (severity levels: run_dataset_sweep.m, decision_config.m)
+% Threat parameters at nominal severity, the middle of the decision layer's five
+% levels (dataset levels: run_dataset_sweep.m; decision levels: decision_config.m)
 params.active_threat = 'jamming';   % threat of the next model build: 'none', a threat, or 'a+b'
-params.jsr_db        = 10;          % [dB] Jamming-to-Signal Ratio (barrage jammer power)
+params.jsr_db        = 16;          % [dB] Jamming-to-Signal Ratio (barrage jammer power)
 params.burst_duty    = 0.3;         % Noise Burst: fraction of time jammer is ON (0-1)
 params.burst_period  = 100;         % Noise Burst: on/off cycle length (symbols)
-params.path_loss_db  = 10;          % Path Loss: attenuation (dB) applied to Tx signal
-params.fault_duty     = 0.15;       % Antenna Fault: fraction of time fault is active (0-1)
+params.path_loss_db  = 14;          % Path Loss: attenuation (dB) applied to Tx signal
+params.fault_duty     = 0.3;        % Antenna Fault: fraction of time fault is active (0-1)
 params.fault_period   = 200;        % Antenna Fault: fault on/off cycle length (symbols)
 params.fault_atten_db = 30;         % Antenna Fault: severe attenuation during fault (dB)
-params.spoof_sir_db   = 0;          % Spoofing: Spoof-to-Signal Ratio (dB), 0 = equal power
+params.spoof_sir_db   = 3;          % Spoofing: Spoof-to-Signal Ratio (dB), 0 = equal power
 params.reactive_threshold = 0.5;    % Reactive Jamming: signal-energy threshold to trigger jammer
+params.tone_jsr_db    = 16;         % Tone (CW) jammer: in-band power over our signal (dB)
+params.tone_offset_hz = 300e3;      % Tone offset from our carrier, uniform in +-this per flight (flat part of the RRC band)
+params.shadow_db      = 20;         % Airframe shadowing: loss on antenna 1 in a banking turn (dB; > 35 measured, Khawaja et al.)
 
 % Benign Interference: weak NON-MALICIOUS in-band noise (e.g. neighboring
-% WiFi/ISM device). Deliberately much weaker than active jamming (-10 to -2 dB vs
-% jamming's 0-16 dB) so it never overlaps the attack power range -- exists to give
-% the CNN a "looks-like-something but isn't an attack" class for FAR measurement.
+% WiFi/ISM device), below the attack power range (-12 to -1.5 dB vs jamming's
+% 0-28 dB): a "looks-like-something but isn't an attack" class.
 params.benign_int_db  = -6;         % Benign Interference power (dB), weak/non-malicious
 
 % Sweeping Jammer: like jamming, but only dwells on our channel a fraction
@@ -87,7 +92,7 @@ params.mmse_window    = 32;           % [symbols] channel + interference-covaria
 params.seed           = [];           % [] = drawn from the global stream at every model build
 
 %% ========== EB/N0 GRID ==========
-params.EbNo_dB    = 0:2:10;            % Eb/N0 grid of the dataset and the pools (dB)
+params.EbNo_dB    = 0:3:15;            % Eb/N0 grid of the dataset and the pools (dB): 15.7 to 2.8 km (link_budget_table.m)
 
 %% ========== LEGACY (code in legacy/ only) ==========
 params.num_frames = 1000;    % frames per Eb/N0 point of the AWGN sweep (run_awgn_sweep.m)
@@ -109,7 +114,11 @@ if params.verbose
     fprintf('Symbol Rate:      %.2e sym/s\n', params.symbol_rate);
     fprintf('Bits/Frame:       %d (+ %d CRC)\n', params.bits_per_frame, params.crc_bits);
     fprintf('Symbols/Frame:    %d\n', params.symbols_per_frame);
-    fprintf('Channel:          Rician (K=%.1f dB), GCS -> UAV uplink\n', params.rician_k);
+    if params.k_random
+        fprintf('Channel:          Rician, K drawn per flight in %g-%g dB, GCS -> UAV uplink\n', params.k_range_db);
+    else
+        fprintf('Channel:          Rician (K=%.1f dB), GCS -> UAV uplink\n', params.rician_k);
+    end
     fprintf('UAV antennas:     %d (spacing %.2f wl, rho %.2f), Rx %s\n', params.n_rx, ...
             params.ant_spacing_wl, params.rx_corr, upper(params.rx_combiner));
     if params.int_aoa_random

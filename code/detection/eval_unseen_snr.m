@@ -1,36 +1,34 @@
 %% EVAL_UNSEEN_SNR.m — detector generalization to Eb/N0 never seen in training
 % Proposal mitigation 4: "test generalization on SNR values not included in
-% training". The dataset uses Eb/N0 = 0:2:10 dB; this script generates fresh
-% frames with the dataset's own recipe (every threat at all 5 severity levels,
-% a balanced 'none' class, each block at its own random UAV speed in the
-% 50-120 km/h envelope, run-aware causal temporal features) at the odd values
-% 1,3,5,7,9 dB AND at the training values 0:2:10 dB, and classifies them with the
+% training". The dataset uses Eb/N0 = 0:3:15 dB; this script generates fresh
+% frames with the dataset's own recipe (every threat at every other severity level
+% of dataset_levels.m, a balanced 'none' class, each block at its own random UAV
+% speed in the 50-120 km/h envelope, run-aware causal temporal features) at the
+% midpoints 1.5:3:13.5 dB AND at the training values, and classifies them with the
 % production detector. Seen and unseen points come from the same run, so the
 % comparison isolates the effect of Eb/N0 values the network never saw.
 %
 % Output: results/unseen_snr.{txt,mat,png}
 
 close all; clc;
-fprintf('=== Detector generalization to unseen Eb/N0 (D34) ===\n\n');
+fprintf('=== Detector generalization to unseen Eb/N0 ===\n\n');
 
 %% 1. Configuration
-EBNO_ALL  = 0:1:10;
-EBNO_SEEN = 0:2:10;
+EBNO_SEEN = p0_grid();
+EBNO_ALL  = sort([EBNO_SEEN, EBNO_SEEN(1:end-1) + diff(EBNO_SEEN) / 2]);
 N_FRAMES  = 20;                 % frames per (threat, level, Eb/N0) block
 delay_bits = 20;
 temporal_window = 10;           % as extract_spectrograms.m
 rng(4242, 'twister');
 
 clear threat_cfg                                  % scripts share the base workspace
-threat_cfg(1) = struct('name','jamming',             'param','jsr_db',        'levels',[0 4 8 12 16]);
-threat_cfg(2) = struct('name','noise_burst',         'param','jsr_db',        'levels',[0 4 8 12 16]);
-threat_cfg(3) = struct('name','reactive_jamming',    'param','jsr_db',        'levels',[0 4 8 12 16]);
-threat_cfg(4) = struct('name','path_loss',           'param','path_loss_db',  'levels',[4 8 12 16 20]);
-threat_cfg(5) = struct('name','spoofing',            'param','spoof_sir_db',  'levels',[-4 -1 2 5 8]);
-threat_cfg(6) = struct('name','antenna_fault',       'param','fault_duty',    'levels',[0.1 0.2 0.3 0.4 0.5]);
-threat_cfg(7) = struct('name','benign_interference', 'param','benign_int_db', 'levels',[-10 -8 -6 -4 -2]);
-threat_cfg(8) = struct('name','sweeping_jammer',     'param','jsr_db',        'levels',[0 4 8 12 16]);
-threat_cfg(9) = struct('name','none',                'param','',              'levels',1:5);   % 5 sub-blocks: balanced
+threat_cfg = dataset_levels();
+for t = 1:numel(threat_cfg), threat_cfg(t).levels = threat_cfg(t).levels(1:2:end); end
+threat_cfg(end+1) = struct('name', 'none', 'param', '', 'levels', 1:numel(threat_cfg(1).levels));   % balanced
+if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
+    threat_cfg = threat_cfg([1 9 10 end]); for t = 1:numel(threat_cfg), threat_cfg(t).levels = threat_cfg(t).levels(1); end
+    EBNO_ALL = EBNO_ALL(1:3);
+end
 
 D = load('data/trained_detector.mat', 'net', 'classes', 'ood');
 classes = cellstr(string(D.classes(:)'));
@@ -101,10 +99,10 @@ summary = struct('acc_unseen', 100*mean(strcmp(truth(~ismember(ebno_of, EBNO_SEE
 
 %% 4. Report
 rep = {};
-rep{end+1} = '=== DETECTOR GENERALIZATION TO UNSEEN Eb/N0 (proposal mitigation 4; D34) ===';
-rep{end+1} = sprintf('Generated: %s | %d frames per block, all threats x 5 levels + balanced none, random speed per block', ...
+rep{end+1} = '=== DETECTOR GENERALIZATION TO UNSEEN Eb/N0 (proposal mitigation 4) ===';
+rep{end+1} = sprintf('Generated: %s | %d frames per block, all threats x every other level + balanced none, random speed per block', ...
     datestr(now), N_FRAMES);
-rep{end+1} = 'Training grid: 0,2,4,6,8,10 dB. Unseen: 1,3,5,7,9 dB. Same generator and run for both.';
+rep{end+1} = sprintf('Training grid: %s dB. Unseen: %s dB. Same generator and run for both.', mat2str(EBNO_SEEN), mat2str(setdiff(EBNO_ALL, EBNO_SEEN)));
 rep{end+1} = '';
 rep{end+1} = sprintf('%6s %8s %7s %10s %10s %14s %14s', 'Eb/N0', 'in train', 'frames', 'accuracy', 'macro-F1', 'action-equiv', 'gap to interp');
 ku = 0;
@@ -164,4 +162,9 @@ if ~isfile(cache) || (isfile('data/splits.mat') && dir(cache).datenum < dir('dat
 end
 L = load(cache, 'feat_mean', 'feat_std');
 N = struct('mu', L.feat_mean, 'sd', L.feat_std);
+end
+
+function g = p0_grid()
+S = load('params.mat');
+g = S.params.EbNo_dB;
 end

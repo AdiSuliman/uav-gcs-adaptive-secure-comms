@@ -18,7 +18,7 @@
 % Output: results/kpi_dashboard.png
 
 close all; clc;
-fprintf('=== KPI dashboard (D46, D59) ===\n\n');
+fprintf('=== KPI dashboard ===\n\n');
 ld = @(f, varargin) load_if(f, varargin{:});
 Md = ld('results/eval_detector_metrics.mat', 'metrics');
 O  = ld('results/ood_detection.mat', 'R', 'SC', 'sel', 'NEST');
@@ -115,7 +115,7 @@ end
 ax = nexttile(tl); axis(ax, 'off');
 if ~isempty(Kp)
     y = 0.97;
-    text(ax, 0, y, 'KPI status (updated proposal)', 'FontWeight', 'bold', 'FontSize', 10);
+    text(ax, 0, y, 'KPI status (proposal wording)', 'FontWeight', 'bold', 'FontSize', 10);
     for k = 1:numel(Kp.KPI)
         q = Kp.KPI(k); y = y - 0.115;
         switch q.status

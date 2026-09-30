@@ -44,7 +44,11 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %               estimates, the larger of the antennas. A fading branch
 %               changes little within 0.5 ms (fd <= 267 Hz); a failing antenna
 %               drops by tens of dB (per-branch monitoring of a diversity receiver)
-%   The last four come from the receiver's channel estimator (per-32-symbol
+%     branch_gap gap between the antennas' mean channel gains over the frame [dB]:
+%               fading moves both around the same mean, a shadowed antenna (the
+%               airframe between it and the GCS in a banking turn) stays tens of
+%               dB below the other (Khawaja et al.)
+%   The last five come from the receiver's channel estimator (per-32-symbol
 %   channel estimates and the frame's interference + noise covariance, the
 %   quantities MMSE combining uses; known symbols = ideal pilots, proposal risk 8).
 % With p.fec (fec_interleave) ber, fer and crc_fail are those of the decoded
@@ -89,6 +93,7 @@ end
 [F.ber_est, F.snr_post] = symbol_metrics(zc, p);
 [F.coh, F.mmse_gain, F.align] = spatial_metrics(Hq, Rq, nf);
 F.branch_dip = branch_dip(Hq, nf);
+F.branch_gap = branch_gap(Hq, nf);
 xh = remod_frames(rx_all(delay_bits+1:end), p, size(iq, 1), nf);
 [F.sinr, F.env_corr] = residual_metrics(xh, iq);
 F.iot = iot_of(out, p, F.rssi, F.sinr);
@@ -224,6 +229,16 @@ for f = 1:min(nf, size(Hq, 3))
     g = 20*log10(abs(Hq(:, :, f)) + eps);
     if f == 1, g = g(:, 2:end); end                      % filter transient in the first block of the run
     d(f) = max(median(g, 2) - min(g, [], 2));
+end
+end
+
+function d = branch_gap(Hq, nf)
+% Gap between the largest and smallest mean channel gain of the antennas over the
+% frame [dB] (Hq: antennas x blocks x frames).
+d = nan(1, nf);
+for f = 1:min(nf, size(Hq, 3))
+    g = 10*log10(mean(abs(Hq(:, :, f)).^2, 2) + eps);
+    d(f) = max(g) - min(g);
 end
 end
 

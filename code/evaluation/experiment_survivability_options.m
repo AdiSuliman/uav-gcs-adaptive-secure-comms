@@ -9,7 +9,7 @@
 %                  proposal: an alternate route), modeled as the desired signal
 %                  arriving RELAY_DEG away from the GCS direction with RELAY_LOSS_DB
 %                  of extra path loss; the interferers stay where they are
-% Threats where the extensions can matter: the eight combined threats (nominal
+% Threats where the extensions can matter: the combined threats (nominal
 % severity) and the directional single threats at high severity. Each (threat,
 % Eb/N0) is simulated on N_GEOM random flight geometries (interferer directions
 % uniform, as in the pools) under every configuration. A geometry is recoverable
@@ -20,7 +20,7 @@
 % Output: results/survivability_options.txt, data/survivability_options.mat
 
 close all; clc;
-fprintf('=== Survivability options: 2 antennas, 3 antennas, relay path (D59) ===\n\n');
+fprintf('=== Survivability options: 2 antennas, 3 antennas, relay path ===\n\n');
 N_GEOM = 8; RUN_FRAMES = 20; N_WORKERS = 6; RATIO = 2;
 RELAY_DEG = 60; RELAY_LOSS_DB = 3;
 opt = struct('F_SUB', RUN_FRAMES, 'tw', 10, 'delay_bits', 20);
@@ -30,18 +30,18 @@ p0 = load('params.mat').params; p0.quiet_build = true; p0.int_aoa_random = true;
 EBNO = p0.EbNo_dB; nS = numel(EBNO);
 ACTIONS = policy_actions();
 vrange = [p0.speed_kmh_min p0.speed_kmh_max];
-COMBOS = {'jamming+path_loss', 'noise_burst+antenna_fault', 'sweeping_jammer+path_loss', 'spoofing+noise_burst', ...
-          'reactive_jamming+path_loss', 'jamming+antenna_fault', 'spoofing+sweeping_jammer', 'benign_interference+noise_burst'};
-SINGLES = {'jamming', 'reactive_jamming', 'noise_burst', 'spoofing', 'sweeping_jammer'};
+COMBOS = C.combos;
+SINGLES = {'jamming', 'reactive_jamming', 'noise_burst', 'spoofing', 'sweeping_jammer', 'tone_jamming'};
+iHigh = C.nominal + 1;                                 % the 'high' level
 cases = [cellfun(@(t) struct('threat', t, 'field', '', 'level', NaN), COMBOS), ...
-         cellfun(@(t) struct('threat', t, 'field', C.sev.(t).field, 'level', C.sev.(t).levels(3)), SINGLES)];
+         cellfun(@(t) struct('threat', t, 'field', C.sev.(t).field, 'level', C.sev.(t).levels(iHigh)), SINGLES)];
 VAR = struct('name', {'2 antennas', '3 antennas', 'relay path'}, 'n_rx', {2, 3, 2}, ...
     'gcs', {0, 0, RELAY_DEG}, 'loss', {0, 0, RELAY_LOSS_DB}, 'ref', {1, 2, 1});
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
     cases = cases([1 end]); N_GEOM = 2; COMBOS = COMBOS(1);
 end
-geo = arrayfun(@(s) struct('seed', arrayfun(@(r) pool_seed(1, s, 6, r), 1:N_GEOM), ...
-    'speed', arrayfun(@(r) nth2(@pool_seed, 1, s, 6, r, vrange), 1:N_GEOM), 'run', 600 + (1:N_GEOM)), ...
+geo = arrayfun(@(s) struct('seed', arrayfun(@(r) pool_seed(1, s, 13, r), 1:N_GEOM), ...
+    'speed', arrayfun(@(r) nth2(@pool_seed, 1, s, 13, r, vrange), 1:N_GEOM), 'run', 1300 + (1:N_GEOM)), ...
     1:nS, 'UniformOutput', false);
 
 pl = gcp('nocreate');

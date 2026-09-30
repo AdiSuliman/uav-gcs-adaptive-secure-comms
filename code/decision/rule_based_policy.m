@@ -18,7 +18,7 @@ if nargin < 3 || isempty(mmse_gain_db), mmse_gain_db = 0; end
 sep = mmse_gain_db >= C.rule_mmse_db;
 
 switch threat_class
-    case {'jamming', 'reactive_jamming', 'spoofing'}
+    case {'jamming', 'reactive_jamming', 'spoofing', 'tone_jamming'}
         action = 'channel_switch';    reason = 'interferer tied to our channel: leave it';
         if sep, action = 'channel_switch+spatial_diversity'; reason = [reason ', and null it (separable)']; end
     case 'sweeping_jammer'
@@ -31,6 +31,8 @@ switch threat_class
         action = 'rate_reduce+power_control'; reason = 'weak signal: largest link-budget gain';
     case 'antenna_fault'
         action = 'spatial_diversity'; reason = 'adaptive combining drops the faulty branch';
+    case 'airframe_shadowing'
+        action = 'power_control';     reason = 'one antenna hidden by the airframe: raise the link budget';
     case {'benign_interference', 'none'}
         action = 'no_action';         reason = 'not an attack: acting would be a false alarm';
     otherwise

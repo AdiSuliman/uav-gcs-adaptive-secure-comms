@@ -13,7 +13,7 @@
 % Output: data/drop_threshold.mat (drop_db), results/drop_threshold.txt
 
 clc;
-fprintf('=== Eb/N0-drop threshold of the path_loss alarm (D52) ===\n\n');
+fprintf('=== Eb/N0-drop threshold of the path_loss alarm ===\n\n');
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
 na = find(strcmp(PP.actions, 'no_action'));
 iPL = find(strcmp(PP.scen, 'path_loss'));                  % the three severities
