@@ -1,5 +1,5 @@
 function [m, lo, hi] = stats_ci(kind, a, b)
-%STATS_CI  95% confidence intervals used by the Monte Carlo reporting (D35).
+%STATS_CI  95% confidence intervals used by the Monte Carlo reporting.
 %
 %   [m, lo, hi] = stats_ci('t', x, lim)
 %       Mean of the finite values of x with a Student-t 95% interval.

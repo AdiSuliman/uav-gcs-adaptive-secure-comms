@@ -1,5 +1,5 @@
 function varargout = link_env(cmd, varargin)
-%LINK_ENV  Sequential decision environment on measured frame pools (D44, D45, D59).
+%LINK_ENV  Sequential decision environment on measured frame pools.
 %   Vectorized over NE parallel episodes. One step = one decision cycle = one
 %   received frame of the configuration currently applied.
 %

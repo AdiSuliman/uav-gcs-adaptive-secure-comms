@@ -1,5 +1,5 @@
 function out = v3d_render(R, meta, out, opts)
-%V3D_RENDER  Render an episode of the 3D view to MP4 (D57).
+%V3D_RENDER  Render an episode of the 3D view to MP4.
 %   out = v3d_render(R, meta, out, opts)
 %   R     cycle records (v3d_engine 'script', a recorded live session, or v3d_replay)
 %   meta  title, subtitle, right (label of side 2), frame_s, T, footer (v3d_hud)

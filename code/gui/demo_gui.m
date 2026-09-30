@@ -35,7 +35,7 @@ function demo_gui
 % exactly that computation; GUI drawing is outside. measure_latency.m gives the
 % full per-component statistics.
 %
-% ARCHITECTURE: no nested functions anywhere in this file (see D24). Static state
+% ARCHITECTURE: no nested functions anywhere in this file. Static state
 % (models, parameters, UI handles, colours) lives in fig.UserData; state that
 % changes while a sequence runs (history, video writer, log file, abort flag,
 % last run) lives in appdata so a callback can never overwrite it with a stale
@@ -78,7 +78,7 @@ end
 env.action_names = env.dqn_agent.action_names;
 env.na = find(strcmp(env.action_names, 'no_action'), 1);
 env.ood = D.ood;
-Tood = ood_thresholds(0.95);                   % D44: Mahalanobis unknown-threat threshold (95% of known kept)
+Tood = ood_thresholds(0.95);                   % Mahalanobis unknown-threat threshold (95% of known kept)
 env.maha_val = Tood.maha_val;
 env.PP = struct('actions', {env.action_names}, 'classes', {env.class_list(:)'}, 'sps', p0.sps, ...
     'bps', p0.bits_per_symbol, 'maha_thr', Tood.maha);
@@ -259,7 +259,7 @@ function ui = buildLiveTab(tab, env, c)
         'FontColor', c.red, 'FontWeight', 'bold', 'FontName', c.font);
     place(recordChk, 7, [1 2]);
 
-    % ---- hover help: '?' per setting, same text on the control itself (D54) ----
+    % ---- hover help: '?' per setting, same text on the control itself ----
     tipSpeed = {'How fast the UAV flies. The radio effect: the received signal strength', ...
         'wobbles as the UAV moves, and speed sets how fast it wobbles.', ...
         'SLOWER flight = long, deep dips in signal - harder, a natural dip can', ...
@@ -421,7 +421,7 @@ function ui = buildEpisodeTab(tab, env, c)
     gl.RowHeight = {18, 26, 18, 26, 18, 26, 18, 26, 24, 26, 26, 26, 40, 30, '1x'};
     gl.ColumnWidth = {'1x', 14, '1x', 14}; gl.Padding = [10 6 10 10]; gl.RowSpacing = 4; gl.BackgroundColor = c.panelBg;
 
-    % ---- hover help (D55): one '?' per setting, same text on the control ----
+    % ---- hover help: one '?' per setting, same text on the control ----
     tipThreat = {'Which attack hits the link mid-flight; until the onset the link is', ...
         'clean. Pick NONE for a fully clean flight - then ANY response you see', ...
         'fire is a false alarm, which is exactly what that setting demonstrates.'};
@@ -687,7 +687,7 @@ function pnl = mkPanel(parent, ttl, c)
 end
 
 function h = helpMark(g, row, col, tip, c)
-    % Small '?' whose hover tooltip explains the setting next to it (D54).
+    % Small '?' whose hover tooltip explains the setting next to it.
     h = uilabel(g, 'Text', '?', 'FontWeight', 'bold', 'FontSize', 11, 'FontColor', c.cyan, ...
         'HorizontalAlignment', 'center', 'Tooltip', tip);
     h.Layout.Row = row; h.Layout.Column = col;
@@ -1004,8 +1004,8 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     appLog(fig, sprintf('Scenario: %s | severity %s | %.1f km/h (fd %.0f Hz) | Eb/N0 %g dB', ...
         niceName(threat), sevTxt, v_kmh, fd_hz, ebno));
 
-    %% ---- 1a. clean lead-in of the same link (monitor reference, D53) ----
-    % The monitor's Eb/N0 reference and the path_loss drop gate (D50, D52) need
+    %% ---- 1a. clean lead-in of the same link (monitor reference) ----
+    % The monitor's Eb/N0 reference and the path_loss drop gate need
     % cycles of the healthy link; evaluation episodes start clean, so the live
     % run does too.
     leadF = []; leadB = []; probsL = []; mahaL = [];
@@ -1607,7 +1607,7 @@ function drawLinkDiagram(fig, state, scen, det, info)
     end
     drawnow;
     if ismember(state, {'scenario','detected','resolved'})
-        recordFrame(fig);  % one capture per real state, not per timer tick ('mitigating' dropped, D54)
+        recordFrame(fig);  % one capture per real state, not per timer tick ('mitigating' dropped)
     end
 end
 
@@ -1714,7 +1714,7 @@ function drawThreat(ax, scen, xm, ym, xg, yg, xu, yu, c)
 end
 
 function drawCountermeasure(ax, action, xg, yg, xu, yu, c)
-    if contains(action, '+')                               % two actions (D39): draw both, label both
+    if contains(action, '+')                               % two actions: draw both, label both
         parts = strsplit(action, '+');
         drawCountermeasure(ax, parts{1}, xg, yg, xu, yu, c);
         text(ax, (xg + xu)/2, yg + 1.00, ['+ ' actionLabel(parts{2})], 'Color', c.green, 'FontSize', 9, ...
@@ -2215,7 +2215,7 @@ end
 %% ===========================  KPI TAB LOADER  =========================
 %% =====================================================================
 function loadKpiTab(fig)
-    % KPI tab from the result files of the pipeline (D46): detector metrics,
+    % KPI tab from the result files of the pipeline: detector metrics,
     % decision-layer evaluation on the test pools, latency, KPI summary.
     data = fig.UserData; ui = data.ui; c = data.colors;
     R = 'results/';

@@ -1,4 +1,4 @@
-%% EVAL_OOD_DETECTION.m - unknown-threat detection, leave-one-threat-out (D32, D42, D59, D60)
+%% EVAL_OOD_DETECTION.m - unknown-threat detection, leave-one-threat-out
 % Proposal deliverable (detection of an anomaly / unknown threat) and risk 13.
 % For each threat class k the detector is retrained from scratch without k
 % (train_hybrid_net.m, same schedule as production), the link features are
@@ -14,7 +14,7 @@
 % frames accepted as known at the threshold that keeps 95% of known validation
 % frames); every candidate averaged over the last 2 frames of a run (the alarm
 % confirmation) and 5 frames (the monitor window).
-% Selection (D60): the production score is the candidate with the highest mean
+% Selection: the production score is the candidate with the highest mean
 % AUROC over the held-out threats; it is written to data/trained_detector.mat
 % (ood.score) and the thresholds are recomputed, so this stage runs before the
 % frame pools (C1p). Because the choice uses the same folds, the value to quote is

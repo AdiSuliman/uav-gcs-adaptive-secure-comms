@@ -1,9 +1,9 @@
 function disk_guard(varargin)
-%DISK_GUARD  Keep Simulink's temporary data and the free disk space in bounds (D60).
+%DISK_GUARD  Keep Simulink's temporary data and the free disk space in bounds.
 %   Every sim() records its logged data in the Simulation Data Inspector
 %   repository, a .dmr file in tempdir per MATLAB process; it is deleted when
 %   MATLAB closes, but it grows during a long run and stays behind when a process
-%   is killed (up to ~24 GB per parallel worker was found, D60). The pipeline reads
+%   is killed (up to ~24 GB per parallel worker was found). The pipeline reads
 %   the outputs right after each run, so the repository is not needed.
 %   disk_guard('init')  per process: no automatic archive of old runs
 %   disk_guard          after a run: empty the repository; stop the pipeline when

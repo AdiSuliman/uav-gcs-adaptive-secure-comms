@@ -1,5 +1,5 @@
 function varargout = v3d_scene(cmd, varargin)
-%V3D_SCENE  One arena of the Unreal 3D view and its per-frame update (D57).
+%V3D_SCENE  One arena of the Unreal 3D view and its per-frame update.
 %   H = v3d_scene('build', world, L, prefix)    GCS, UAV, link, receive pattern,
 %       emitters, channel bar, labels and the countryside around L.G
 %   v3d_scene('update', H, L, V)                one frame

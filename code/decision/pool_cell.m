@@ -1,5 +1,5 @@
 function [P, info] = pool_cell(p, threat, actions, ebno, geo, det, opt)
-%POOL_CELL  Measured frames of one threat cell under every configuration (D44, D59):
+%POOL_CELL  Measured frames of one threat cell under every configuration:
 %   the shared worker of build_policy_pools.m and build_clean_test_pools.m.
 %   p        params with the threat and its severity configured (active_threat set)
 %   threat   true threat name (apply_countermeasure.m)

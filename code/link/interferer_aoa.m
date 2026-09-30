@@ -1,5 +1,5 @@
 function th = interferer_aoa(seed, range, n)
-%INTERFERER_AOA  Directions of the interferers of one seeded sub-run [deg] (D45).
+%INTERFERER_AOA  Directions of the interferers of one seeded sub-run [deg].
 %   th = interferer_aoa(seed, range, n): n directions, uniform in range (broadside
 %   angle of the UAV array). A uniform azimuth of the interferer around the UAV
 %   gives the same distribution of sin(theta) as a uniform broadside angle in

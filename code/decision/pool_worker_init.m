@@ -1,5 +1,5 @@
 function pool_worker_init(repo)
-%POOL_WORKER_INIT  Prepare a parallel worker for Simulink runs (D59): its own
+%POOL_WORKER_INIT  Prepare a parallel worker for Simulink runs: its own
 %   working and code-generation folder (no two workers share a model file or
 %   compiled block code), the project's code on the path, the notice of repeated
 %   sim() calls silenced.

@@ -1,5 +1,5 @@
 function agent = dqn_agent(norm, hidden)
-%DQN_AGENT  Q-network of the sequential decision layer (D44, D45, D59).
+%DQN_AGENT  Q-network of the sequential decision layer.
 %   State (policy_state.m): the receiver observations of the last cycles
 %   (class probabilities, unknown flag, estimated BER, degradation, packet loss,
 %   SINR, IoT, post-combining SNR, spatial features, Eb/N0 drop), current

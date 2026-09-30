@@ -1,4 +1,4 @@
-%% BUILD_KPI_DASHBOARD - Results dashboard (proposal deliverable 1) (D46, D59)
+%% BUILD_KPI_DASHBOARD - Results dashboard (proposal deliverable 1)
 % One figure for the report and the defense, drawn from the result files of
 % the pipeline (no numbers typed in). A missing input shows a placeholder.
 %

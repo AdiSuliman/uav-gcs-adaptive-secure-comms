@@ -1,7 +1,7 @@
-%% EXPERIMENT_SURVIVABILITY_OPTIONS - What a third antenna or an alternate path adds (D59)
+%% EXPERIMENT_SURVIVABILITY_OPTIONS - What a third antenna or an alternate path adds
 % Research experiment of deliverable 8. The system flies two UAV antennas (proposal
 % item 2), which null one interferer, and only when it arrives from another
-% direction than the GCS (D45, D46). Two extensions named in the proposal
+% direction than the GCS. Two extensions named in the proposal
 % literature are tested on the recoverability question, without changing the system:
 %   3 antennas     an N-element array nulls up to N-1 interferers (Shebert et al.)
 %   relay path     the command reaches the UAV over a secondary path (Papathanasiou

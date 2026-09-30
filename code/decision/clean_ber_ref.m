@@ -1,6 +1,6 @@
 function b = clean_ber_ref(ebno, kind)
 %CLEAN_BER_REF  Clean-link reference at a given Eb/N0 [dB], log-interpolated from
-%   the none / no_action cells of data/policy_pools.mat (D44, D59). NaN when the
+%   the none / no_action cells of data/policy_pools.mat. NaN when the
 %   pools do not exist yet.
 %   kind  'ber'      true BER (evaluation, default)
 %         'ber_est'  the receiver's BER estimate on the clean link: the monitor

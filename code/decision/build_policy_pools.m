@@ -1,28 +1,25 @@
-%% BUILD_POLICY_POOLS - Measured frame pools for the decision layer (D44-D46, D59, D61)
+%% BUILD_POLICY_POOLS - Measured frame pools for the decision layer
 % Every threat cell x configuration x Eb/N0 x geometry through the real link, with
 % the detector already applied, so the decision-layer environment (link_env.m)
 % never runs Simulink inside the learning loop.
 %
 % Cells: the clean link; the 8 single threats at three severities (low, nominal,
-% high; decision_config.m); 8 combined threats at nominal severity, like the single
-% threats in every split (D61: the agent is tested on new flights of every threat
-% type; generalization to a combination never trained on is measured separately by
-% experiment_combo_generalization.m). Configurations: the 36 of policy_actions.m (one choice per domain),
-% applied by apply_countermeasure.m; configurations with identical physics for a
-% threat are simulated once (pool_cell.m). Eb/N0 0:2:10 dB.
+% high; decision_config.m); 8 combined threats at nominal severity, in every split
+% (a combination never trained on is measured by experiment_combo_generalization.m).
+% Configurations: the 36 of policy_actions.m, applied by apply_countermeasure.m;
+% configurations with identical physics for a threat are simulated once
+% (pool_cell.m). Eb/N0 0:2:10 dB.
 % Splits: train 6, validation 4, test 8 geometries per (cell, Eb/N0). A geometry
 % (seed: fading, UAV speed, interferer directions, threat waveform) is shared by
-% every configuration and by every cell, the clean link included (common random
-% numbers): an episode's frames before and after the onset come from the same
-% flight (D59; until D58 the seed depended on the scenario, so the clean frames
-% before the onset came from another flight), and it is never shared by two splits. Per frame: detector class probabilities, unknown-threat
-% score, the link features of link_features.m (receiver measurements only), and
-% the true BER and frame error (reward and evaluation only). Seeds: pool_seed.m.
-% The cells run in parallel (Parallel Computing Toolbox), each worker in its own
-% folder with its own copy of the model. When data/policy_pools.mat already holds
-% the same train and validation geometries and only the test block differs (new
-% test flights, D64), only the test split is simulated and the train and
-% validation pools are kept.
+% every configuration and every cell, the clean link included (common random
+% numbers), so an episode's frames before and after the onset come from one
+% flight; a geometry is never shared by two splits. Seeds: pool_seed.m.
+% Per frame: detector class probabilities, unknown-threat score, the link
+% features of link_features.m (receiver measurements only), and the true BER and
+% frame error (reward and evaluation only).
+% The cells run in parallel, each worker in its own folder with its own copy of
+% the model. When data/policy_pools.mat holds the same train and validation
+% geometries and only the test block differs, only the test split is simulated.
 %
 % Output: data/policy_pools.mat (PP, clean_ref)
 

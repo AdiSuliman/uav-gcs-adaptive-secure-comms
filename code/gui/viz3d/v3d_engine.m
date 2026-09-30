@@ -1,5 +1,5 @@
 function varargout = v3d_engine(cmd, varargin)
-%V3D_ENGINE  Closed-loop episode engine of the 3D view (D57).
+%V3D_ENGINE  Closed-loop episode engine of the 3D view.
 %   The evaluation's decision layer on the measured TEST pools (link_env.m,
 %   policy_decide.m, the selected DQN agent, the same link monitor and shield),
 %   two policies on the same flight geometry and the same frames, with live

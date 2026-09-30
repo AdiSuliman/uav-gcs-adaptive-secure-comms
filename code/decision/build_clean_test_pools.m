@@ -1,4 +1,4 @@
-%% BUILD_CLEAN_TEST_POOLS - Clean-link pools over many independent geometries (D51, D52, D59)
+%% BUILD_CLEAN_TEST_POOLS - Clean-link pools over many independent geometries
 % The false-alarm KPI needs independent trials. This script measures the clean
 % link ('none') on 100 new geometries per Eb/N0 (seeds never used before), under
 % every configuration (common random numbers, as in build_policy_pools.m), with
@@ -6,9 +6,9 @@
 % Two sets, chosen by CLEAN_SET (default 'test'):
 %   'test'  seed block 9 -> data/clean_test_pools.mat: evaluate_policies.m runs
 %           one clean episode per geometry (600 independent episodes) and KPI 6
-%           is computed over them (D51)
+%           is computed over them
 %   'val'   seed block 4 -> data/clean_val_pools.mat: train_dqn.m checks the false
-%           alarms of every run on it, so the test set is used once (D52)
+%           alarms of every run on it, so the test set is used once
 %
 % Output: data/clean_test_pools.mat or data/clean_val_pools.mat (struct CT)
 

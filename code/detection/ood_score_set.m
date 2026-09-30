@@ -1,5 +1,5 @@
 function S = ood_score_set(M, Z, Xf, need)
-%OOD_SCORE_SET  The candidate unknown-threat scores of fit_ood_model.m (D60);
+%OOD_SCORE_SET  The candidate unknown-threat scores of fit_ood_model.m;
 %   higher = more like the known classes. The production score is S.(M.score).
 %   Z     hidden features, one cell per layer of M.layers (ood_layer_features.m);
 %         cells may be empty when the candidates asked for do not use them

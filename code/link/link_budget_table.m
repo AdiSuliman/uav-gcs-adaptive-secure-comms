@@ -1,4 +1,4 @@
-%% LINK_BUDGET_TABLE - What the simulated Eb/N0 and JSR mean in distance (D59)
+%% LINK_BUDGET_TABLE - What the simulated Eb/N0 and JSR mean in distance
 % The link model is link-level: range enters only through Eb/N0 and the jammer's
 % range through the JSR. This table turns both into distances with the free-space
 % (Friis) path loss at 2.4 GHz and a stated set of typical small-UAV command-link

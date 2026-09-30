@@ -1,5 +1,5 @@
 function tests = test_core
-%TEST_CORE  Unit tests of the core functions (D59). Run from the repository root:
+%TEST_CORE  Unit tests of the core functions. Run from the repository root:
 %   results = runtests('code/tests')
 tests = functiontests(localfunctions);
 end

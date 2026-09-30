@@ -1,5 +1,5 @@
 function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
-%POLICY_DECIDE  One decision cycle of every decision-layer policy (D44-D48, D59),
+%POLICY_DECIDE  One decision cycle of every decision-layer policy,
 %   vectorized over episodes. Used by training, evaluation and deployment.
 %
 %   kind   'dqn' | 'dqn_esc' | 'rule' | 'rule_esc' | 'table' | 'table_esc' |
@@ -19,7 +19,7 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %             'unknown' class on a degraded link takes table_unknown
 %   rule and table commit a proposal after C.dwell consecutive cycles, not within
 %   C.hold cycles of the last change, and only on a confirmed alarm (the same
-%   confirmation as the DQN shield, D48)
+%   confirmation as the DQN shield)
 %   dqn       argmax of the Q-network over the configurations allowed by the
 %             shield (policy_mask.m); switching costs are part of its reward
 %   *_esc     escalation: move to the next configuration not yet tried in this

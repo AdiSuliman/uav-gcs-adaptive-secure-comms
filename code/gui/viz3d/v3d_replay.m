@@ -1,5 +1,5 @@
 function [R, meta] = v3d_replay(src, M)
-%V3D_REPLAY  Cycle records of an episode recorded by the operator console (D56, D57).
+%V3D_REPLAY  Cycle records of an episode recorded by the operator console.
 %   [R, meta] = v3d_replay(file, M)    file: GUI_Results/episode_*.mat (struct ep3d)
 %
 %   The console's continuous episode runs the full Simulink link every cycle, at

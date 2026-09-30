@@ -1,5 +1,5 @@
 function varargout = v3d_geometry(cmd, varargin)
-%V3D_GEOMETRY  Scene geometry of the Unreal 3D view (D57).
+%V3D_GEOMETRY  Scene geometry of the Unreal 3D view.
 %   Not to scale: only the directions seen by the UAV array come from the link
 %   model. Frame (sim3d_probe.m): x forward, y right, z up, metres; rotation
 %   vectors [roll pitch yaw] in radians, pitch > 0 raises the nose (x toward z),

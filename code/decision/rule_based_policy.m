@@ -1,5 +1,5 @@
 function [action, reason] = rule_based_policy(threat_class, degraded, mmse_gain_db)
-%RULE_BASED_POLICY  Fixed expert policy: detected threat class -> configuration (D28, D59).
+%RULE_BASED_POLICY  Fixed expert policy: detected threat class -> configuration.
 %   Baseline for the DQN comparison (proposal: rule-based first, DQN second).
 %   Each class maps to the configuration that addresses its physics as modeled in
 %   apply_countermeasure.m; both policies act through that same function.

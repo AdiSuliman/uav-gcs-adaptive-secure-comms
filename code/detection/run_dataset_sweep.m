@@ -1,8 +1,8 @@
-%% RUN_DATASET_SWEEP - Phase A5: labeled dataset from independent seeded sub-runs (D42, D45)
+%% RUN_DATASET_SWEEP - Phase A5: labeled dataset from independent seeded sub-runs
 % 8 threats x 5 severity levels x 6 Eb/N0 points + 'none', on the multi-antenna
-% link of D41. Every (threat, level, Eb/N0) cell is simulated as N_SUB independent
+% link (build_threat_model.m). Every (threat, level, Eb/N0) cell is simulated as N_SUB independent
 % sub-runs: own seed (fading, interferer channels and directions, threat waveform,
-% noise, bits) and own UAV speed drawn uniformly in 50-120 km/h (D45). The sub-run is the unit of the
+% noise, bits) and own UAV speed drawn uniformly in 50-120 km/h. The sub-run is the unit of the
 % train/val/test split (prepare_data.m), so no two splits share a channel
 % realization or a temporal-feature window.
 %
@@ -15,7 +15,7 @@
 % 'none' gets n_levels x N_SUB sub-runs per Eb/N0 (class balance).
 %
 % Per frame: antenna-1 IQ, label, level, configured Eb/N0, the receiver
-% measurements of extract_closed_loop_frames.m (D59), the true BER and frame
+% measurements of extract_closed_loop_frames.m, the true BER and frame
 % error (analysis only), speed, run id, fold (1..N_SUB). Frames whose BER is
 % incomplete (last frame of a sub-run) are dropped.
 
@@ -29,7 +29,7 @@ p0 = S.params; p0.quiet_build = true;
 
 %% ---- Configuration ----
 EbNo_list  = p0.EbNo_dB;          % 0:2:10 dB
-N_SUB      = 8;                   % independent sub-runs per cell (split unit; D59: 5 -> 8)
+N_SUB      = 8;                   % independent sub-runs per cell (split unit)
 F_SUB      = 20;                  % frames per sub-run
 delay_bits = 20;
 modelName  = 'UAV_GCS_Threat_Link';

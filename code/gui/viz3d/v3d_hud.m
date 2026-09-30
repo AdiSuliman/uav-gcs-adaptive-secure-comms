@@ -1,5 +1,5 @@
 function varargout = v3d_hud(cmd, varargin)
-%V3D_HUD  Composited frame of the 3D view: two camera views and the data panels (D57).
+%V3D_HUD  Composited frame of the 3D view: two camera views and the data panels.
 %   D = v3d_hud('init', meta)            static layer and layout (1920 x 1080)
 %   img = v3d_hud('frame', D, imA, imB, R, k, cam, extra)
 %       R: cycle records so far (v3d_engine), k: records shown, cam: camera

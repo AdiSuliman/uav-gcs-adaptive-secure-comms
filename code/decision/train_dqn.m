@@ -14,7 +14,7 @@
 % Data: the TRAIN split of data/policy_pools.mat for learning; the VALIDATION split
 % (geometries never used in training) for checkpoints and selection; the test
 % split is kept for evaluate_policies.m. Checkpoints, runs and the reward
-% sensitivity are scored as deployed: the DQN with escalation (policy_decide.m, D64).
+% sensitivity are scored as deployed: the DQN with escalation (policy_decide.m).
 %
 % Grid: monitor (alarm definition and m-of-n confirmation, CFG.monitors,
 % policy_monitor.m; Barajas et al.) x Eb/N0-drop threshold of the
@@ -51,9 +51,9 @@ H = struct('gamma', 0.9, 'NE', 64, 'T', 30, 'episodes', 20000, 'buffer', 200000,
     'eps_end', 0.05, 'eps_frac', 0.6, 'huber', 1, 'p_unknown', 0.10, 'p_follow', 0.5, 'n_eval', 4, ...
     'hidden', [256 256]);
 N_SEEDS = 3; GAMMAS = 0.5;
-ALARMS = {'class_drop 3/3'};             % monitor: alarm definition, m/n confirmation (D64 selection)
-DROP_STEPS = 2;                          % path_loss alarm: 2 dB below the train-pool threshold (D64 selection)
-% Training reward variants (D67), one entry each: false-switch penalty, scale of the
+ALARMS = {'class_drop 3/3'};             % monitor: alarm definition, m/n confirmation (selected on validation)
+DROP_STEPS = 2;                          % path_loss alarm: 2 dB below the train-pool threshold (selected on validation)
+% Training reward variants, one entry each: false-switch penalty, scale of the
 % running costs (goodput, spectrum, power, combining) and of the switching cost
 FA_PEN = [120 160]; COST_SCALE = [0.5 0.5]; SW_SCALE = [1 1];
 SENS_SCALES = [0.5 2];                   % reward-weight sensitivity: cost terms x scale
@@ -74,10 +74,10 @@ if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (r
 end
 SEEDS = 42 + (0:N_SEEDS-1);
 FA_BOUND = 0.05;                         % one-sided 95% bound of the clean-link false alarms (KPI 6)
-DROP_DB = [];                            % path_loss alarm threshold of 'class_drop' (D52)
+DROP_DB = [];                            % path_loss alarm threshold of 'class_drop'
 if isfile('data/drop_threshold.mat'), Dd = load('data/drop_threshold.mat', 'drop_db'); DROP_DB = Dd.drop_db; clear Dd; end
 if ~isempty(DROP_DB), PP.drop_db = DROP_DB; end
-CV = [];                                 % independent clean validation geometries (D52)
+CV = [];                                 % independent clean validation geometries
 if isfile('data/clean_val_pools.mat'), Cv = load('data/clean_val_pools.mat', 'CT'); CV = Cv.CT; clear Cv; end
 
 %% 2. State normalization from random-policy rollouts
@@ -232,7 +232,7 @@ action_names = PP.actions;
 gammas = GAMMAS;
 [alarm_mode, confirm] = monitor(alarm_sel);
 drop_db = drop_sel; if isnan(drop_db), drop_db = []; end
-agent = dqn_dense(agent);                          % matrix form for deployment (D60)
+agent = dqn_dense(agent);                          % matrix form for deployment
 for gi = find(~cellfun(@isempty, agents)), agents{gi} = dqn_dense(agents{gi}); end
 save('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'confirm', 'alarm_mode', 'drop_db', 'H', ...
     'norm_in', 'seed_summary', 'action_names', 'tab', '-v7.3');
@@ -335,7 +335,7 @@ end
 
 function [fa, n] = eval_clean_wide(kind, PP, CT, agent, opt, H)
 % False-alarm episodes on the independent clean geometries of CT: one clean
-% episode per geometry and Eb/N0, as in evaluate_policies.m (D51, D52).
+% episode per geometry and Eb/N0, as in evaluate_policies.m.
 fa = NaN; n = 0;
 if isempty(CT), return; end
 [PPw, Kw] = clean_world(PP, CT);

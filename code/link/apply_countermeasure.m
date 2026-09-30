@@ -1,15 +1,15 @@
 function [p, snr_gain_db, cm] = apply_countermeasure(p, threat, action)
-%APPLY_COUNTERMEASURE  Physical effect of a recovery action on the link model (D28).
+%APPLY_COUNTERMEASURE  Physical effect of a recovery action on the link model.
 %
 %   [p, snr_gain_db, cm] = apply_countermeasure(p, threat, action)
 %
 %   p           params with the threat already configured (any severity)
 %   threat      TRUE threat on the link (physics), not the detected class;
-%               a combined threat 'a+b' applies the action to each component (D32)
+%               a combined threat 'a+b' applies the action to each component
 %   action      no_action | channel_switch | rate_reduce | freq_diversity |
 %               spatial_diversity | power_control | fec_interleave
 %               (channel_switch_fast is treated as channel_switch); two actions
-%               joined with '+' are applied together (D39)
+%               joined with '+' are applied together
 %
 %   p           params with the countermeasure applied to the threat model
 %   snr_gain_db Eb/N0 gain to ADD to the AWGN block SNR after rebuilding
@@ -32,7 +32,7 @@ function [p, snr_gain_db, cm] = apply_countermeasure(p, threat, action)
 %                        jammer must hit both channels at once (duty -> duty^2);
 %                        no effect on broadband or signal-side threats; 2x spectrum
 %     spatial_diversity  the UAV receiver switches from MRC to adaptive MMSE combining
-%                        over its n_rx antennas (D41): sample-covariance weights null
+%                        over its n_rx antennas: sample-covariance weights null
 %                        up to n_rx-1 interferers arriving from other directions and
 %                        track a faulty branch; the effect is in the link model
 %                        (p.rx_combiner), no Eb/N0 offset
@@ -41,12 +41,12 @@ function [p, snr_gain_db, cm] = apply_countermeasure(p, threat, action)
 %                        a coherent spoofer; goodput / factor
 %     power_control      transmit power +cm_power_db: the signal rises by that much
 %                        against noise and every additive interferer, including a
-%                        spoofer; attenuation threats keep their loss; x4 power (D39)
+%                        spoofer; attenuation threats keep their loss; x4 power
 %     fec_interleave     rate-1/2 convolutional code (K = 7) with a random interleaver
 %                        over the run and erasure decoding of symbols hit by an energy
 %                        burst; same channel symbols, so no Eb/N0 change here -- the
 %                        decoding is applied to the measured error pattern in
-%                        extract_closed_loop_frames.m (p.fec); goodput x1/2 (D39)
+%                        extract_closed_loop_frames.m (p.fec); goodput x1/2
 
 if contains(action, '+')
     [p, snr_gain_db, cm] = apply_pair(p, threat, action);
@@ -127,7 +127,7 @@ if isfield(p, 'fault_atten_db'), p.fault_atten_db = max(p.fault_atten_db, 0); en
 end
 
 function [p, snr_gain_db, cm] = apply_pair(p, threat, action)
-% Two actions at once (D39): each acts on the link in turn. Eb/N0 gains add,
+% Two actions at once: each acts on the link in turn. Eb/N0 gains add,
 % goodput and power costs multiply, spectrum cost is the larger one.
 acts = strsplit(action, '+');
 snr_gain_db = 0;
@@ -145,7 +145,7 @@ cm.effect = strjoin(eff, ' | ');
 end
 
 function [p, snr_gain_db, cm] = apply_combined(p, threat, action)
-% Combined threat 'a+b' (D32): the action acts on each component. The Eb/N0 gain is
+% Combined threat 'a+b': the action acts on each component. The Eb/N0 gain is
 % one property of the action, so it is applied once (the smallest component gain).
 parts = strsplit(threat, '+');
 fields = cellfun(@interference_field, parts, 'UniformOutput', false);

@@ -13,7 +13,7 @@ params.samples_per_symbol  = 4;        % oversampling (spectrogram of the detect
 params.sps                 = params.samples_per_symbol;
 %% ========== FRAME STRUCTURE ==========
 params.bits_per_frame = 1000;          % payload bits per frame
-params.crc_bits       = 32;            % CRC-32 per frame: packet check at the receiver (D59)
+params.crc_bits       = 32;            % CRC-32 per frame: packet check at the receiver
 params.frame_length   = params.bits_per_frame + params.crc_bits;  % total bits/frame
 %% ========== CHANNEL MODEL ==========
 % Pulse shaping (RRC)
@@ -22,7 +22,7 @@ params.filter_span  = 10;              % RRC filter span (symbols)
 params.rician_k      = 10;             % K-factor (dB), strong LoS
 params.carrier_freq  = 2.4e9;          % 2.4 GHz ISM (range for a given Eb/N0: link_budget_table.m)
 
-% UAV platform velocity and Doppler (D25)
+% UAV platform velocity and Doppler
 % Platform: small tactical ISR UAV — DoD Group 1 (Skylark/Raven class)
 % Operational speed envelope: 50-120 km/h (13.9-33.3 m/s) -> Doppler 111-267 Hz @ 2.4 GHz.
 % Speed is a CONTINUOUS parameter (any real value inside the envelope, not only
@@ -63,13 +63,13 @@ params.benign_int_db  = -6;         % Benign Interference power (dB), weak/non-m
 params.sweep_duty    = 0.15;        % Sweeping Jammer: fraction of time dwelling on our channel
 params.sweep_period  = 300;         % Sweeping Jammer: full sweep cycle length (symbols, longer than noise_burst's 100)
 
-% [D28] Countermeasure physics (apply_countermeasure.m)
+% Countermeasure physics (apply_countermeasure.m)
 params.cm_acr_db      = 30;         % [dB] rejection of an interferer left on another channel
 params.cm_rate_factor = 4;          % rate_reduce: data rate / 4 -> +6 dB processing gain, goodput x0.25
-params.cm_power_db    = 6;          % power_control: transmit power +6 dB (x4 power), D39
-params.cm_fec_rate    = 1/2;        % fec_interleave: code rate, K = 7, generators [171 133] octal, D39
+params.cm_power_db    = 6;          % power_control: transmit power +6 dB (x4 power)
+params.cm_fec_rate    = 1/2;        % fec_interleave: code rate, K = 7, generators [171 133] octal
 
-%% ========== ANTENNAS & RECEIVER (D41) ==========
+%% ========== ANTENNAS & RECEIVER ==========
 % Modeled link: GCS -> UAV command uplink; the receiver (and the detector) is on the UAV.
 % GCS: one antenna, its gain is part of Eb/N0. Eb/N0 is per UAV antenna (per branch).
 % UAV: n_rx omni dipoles under the fuselage (V-mount, 2x2-class datalink radio), ULA model.
@@ -78,7 +78,7 @@ params.ant_spacing_wl = 0.5;          % element spacing [wavelengths] (6.25 cm @
 params.rx_corr        = 0.3;          % diffuse-fading correlation between adjacent antennas
 params.gcs_aoa_deg    = 0;            % GCS direction from array broadside [deg]
 params.int_aoa_deg    = [40 -55 70];  % fixed direction of interferer 1..3 (components of a threat) [deg]
-params.int_aoa_random = true;         % interferer directions drawn per seeded sub-run (D45, interferer_aoa.m)
+params.int_aoa_random = true;         % interferer directions drawn per seeded sub-run (interferer_aoa.m)
 params.int_aoa_range_deg = [-90 90];  % range of the random directions (broadside angle) [deg]
 params.int_rician_k   = params.rician_k;  % K-factor of the interferer -> UAV channels (dB)
 params.rx_combiner    = 'mrc';        % 'mrc' baseline | 'mmse' (spatial_diversity action)
@@ -91,12 +91,12 @@ params.EbNo_dB    = 0:2:10;            % Eb/N0 grid of the dataset and the pools
 
 %% ========== LEGACY (code in legacy/ only) ==========
 params.num_frames = 1000;    % frames per Eb/N0 point of the AWGN sweep (run_awgn_sweep.m)
-params.seq_len    = 8;       % CNN-LSTM study (D13): frames per sequence window
-params.seq_stride = 4;       % CNN-LSTM study (D13): step between window starts
+params.seq_len    = 8;       % CNN-LSTM study: frames per sequence window
+params.seq_stride = 4;       % CNN-LSTM study: step between window starts
 
 %% ========== FLAGS ==========
 params.verbose     = true;
-params.quiet_build = true;     % build Simulink models without opening the editor window (D37/D38)
+params.quiet_build = true;     % build Simulink models without opening the editor window
 %% ========== DERIVED PARAMETERS ==========
 params.bits_per_symbol   = log2(params.mod_order);
 params.symbols_per_frame = params.frame_length / params.bits_per_symbol;

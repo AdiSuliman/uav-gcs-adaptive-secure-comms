@@ -1,5 +1,5 @@
 function agent = dqn_dense(agent)
-%DQN_DENSE  Weights of a trained Q-network as plain matrices (D60), so one
+%DQN_DENSE  Weights of a trained Q-network as plain matrices, so one
 %   decision cycle evaluates the network with a few single-precision matrix
 %   products instead of a dlnetwork call (policy_decide.m): same function, same
 %   precision, about 1 ms less per cycle. Added to the saved agents by

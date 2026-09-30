@@ -1,5 +1,5 @@
 function run_stage(varargin)
-%RUN_STAGE  Run pipeline stages headless with a log file (D59).
+%RUN_STAGE  Run pipeline stages headless with a log file.
 %   run_stage('A0', 'A5', 'A6', 'B1', 'B2', 'B3')  from the repository root (startup.m puts code/ on the path):
 %   matlab -batch "run_stage('A5','A6')". Each stage is the script or function of
 %   main.m; the log goes to logs/stage_<first>_<time>.txt.

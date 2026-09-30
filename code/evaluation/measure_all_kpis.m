@@ -1,4 +1,4 @@
-%% MEASURE_ALL_KPIS - The proposal KPIs from the result files (D46, D49, D51, D59)
+%% MEASURE_ALL_KPIS - The proposal KPIs from the result files
 % Reads the outputs of the pipeline, never re-runs them: a missing source is
 % reported as such, and a source older than its inputs (detector, decision layer)
 % is flagged STALE. Targets as worded in the updated proposal:
@@ -6,7 +6,7 @@
 %          (eval_detector), unseen Eb/N0 (eval_unseen_snr)
 %   KPI 2  unknown threats: leave-one-threat-out mean AUROC >= KPI2_TARGET, FPR at 95%
 %          of known frames kept (eval_ood_detection; the nested estimate of the
-%          selected production score, D60)
+%          selected production score)
 %   KPI 3  physical validation: BER vs theory within 0.3 dB (validate_phy)
 %   KPI 4  restoration: BER and packet loss back to <= 2x clean on >= 90% of the
 %          recoverable episodes of EVERY threat, combined threats included, over
@@ -244,7 +244,7 @@ if ms < 10, s = 'low (< 10 ms)'; elseif ms <= 100, s = 'medium (10-100 ms)'; els
 end
 
 function s = git_stamp()
-% Commit of the code that produced the report (D59).
+% Commit of the code that produced the report.
 [st, h] = system('git rev-parse --short HEAD');
 [~, d] = system('git status --porcelain --untracked-files=no');
 if st ~= 0, s = 'commit unknown'; return; end

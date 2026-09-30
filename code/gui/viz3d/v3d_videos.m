@@ -1,4 +1,4 @@
-%% V3D_VIDEOS - Render the defense scenarios of the 3D view to MP4 (D57)
+%% V3D_VIDEOS - Render the defense scenarios of the 3D view to MP4
 % Run from the repository root (startup.m puts code/ on the path):  v3d_videos
 % Set ONLY to a list of scenario ids to render a subset. About 4 minutes per
 % scenario on the reference PC (RTX 4070).

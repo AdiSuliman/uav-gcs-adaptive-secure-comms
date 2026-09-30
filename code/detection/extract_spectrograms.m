@@ -1,4 +1,4 @@
-%% EXTRACT_SPECTROGRAMS - Phase A6: detector inputs from data/dataset.mat (D42, D59)
+%% EXTRACT_SPECTROGRAMS - Phase A6: detector inputs from data/dataset.mat
 % Image: spec_image.m (fixed [-40, 40] dB scale). Scalar features: link_features.m
 % (14 receiver measurements), temporal ones over a causal window of 10 frames
 % inside each sub-run. The same two functions are used by every closed-loop

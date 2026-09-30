@@ -1,8 +1,8 @@
 function build_threat_model(p)
-%% BUILD_THREAT_MODEL - GCS -> UAV link with a multi-antenna UAV receiver (D41)
+%% BUILD_THREAT_MODEL - GCS -> UAV link with a multi-antenna UAV receiver
 % build_threat_model      params from params.mat, model saved to models/
 % build_threat_model(p)   params struct p, model built in memory only (parallel
-%                         workers of build_policy_pools.m, D59)
+%                         workers of build_policy_pools.m)
 % [Tx: QPSK+RRC] -> [Channel: Rician per UAV antenna] -> [Threat] -> [AWGN per antenna]
 %   -> [Rx: RRC per antenna, coherent combining, QPSK demod]
 %
@@ -30,7 +30,7 @@ function build_threat_model(p)
 %           estimator's per-32-symbol channel estimates and the frame's
 %           interference + noise covariance (the quantities MMSE combining needs).
 %           The receiver measurements of extract_closed_loop_frames.m use only
-%           outputs 1-5 (D59).
+%           outputs 1-5.
 % Seeds     p.seed, or drawn from the global stream when empty; channel, interferer
 %           channels, threat waveforms, AWGN and bit source all derive from it.
 %           Seed and Doppler reach the blocks through the Constant blocks 'Seed' and
@@ -399,7 +399,7 @@ chart.Script = script;
 end
 
 function p = antenna_defaults(p)
-% Defaults for params.mat files written before D41.
+% Defaults for params.mat files without the antenna fields.
 d = struct('n_rx', 2, 'ant_spacing_wl', 0.5, 'rx_corr', 0.3, 'gcs_aoa_deg', 0, ...
     'int_aoa_deg', [40 -55 70], 'int_rician_k', p.rician_k, 'rx_combiner', 'mrc', ...
     'csi_block', 64, 'mmse_window', 32, 'seed', [], 'int_aoa_random', false, 'int_aoa_range_deg', [-90 90]);

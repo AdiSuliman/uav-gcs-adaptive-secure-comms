@@ -1,6 +1,6 @@
 function [net, info] = train_hybrid_net(tr, va, classes, opts)
 %TRAIN_HYBRID_NET  Hybrid detector training, shared by train_detector.m and
-%   eval_ood_detection.m (D42).
+%   eval_ood_detection.m.
 %   tr, va   splits with X [128x128x1xN], feats [N x nFeat] (normalized), Y
 %   classes  class names (categories of Y)
 %   opts     optional: epochs (30), batch (64), lr (1e-3), l2 (1e-4),

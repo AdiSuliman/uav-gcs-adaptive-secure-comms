@@ -1,6 +1,6 @@
 function [raw, names] = link_features(M, k, tw, ~)
 %LINK_FEATURES  Scalar detector features of frame k: one definition for training,
-%   evaluation, the closed loop and the GUI (D42, D59, D60).
+%   evaluation, the closed loop and the GUI.
 %   M    per-frame receiver measurements of one run or episode
 %        (extract_closed_loop_frames.m): sinr, ber_est, snr_post, rssi, crc_fail,
 %        env_corr, iot, coh, mmse_gain, align, branch_dip

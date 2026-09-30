@@ -1,5 +1,5 @@
 function ok = validate_phy()
-%% VALIDATE_PHY - Link physics against theory, multi-antenna UAV receiver (D41)
+%% VALIDATE_PHY - Link physics against theory, multi-antenna UAV receiver
 % Runs the threat model (UAV_GCS_Threat_Link) and compares the measured BER with
 % closed-form results:
 %   V1  AWGN (K = 60 dB, 1 antenna)          vs berawgn (closed-form QPSK in AWGN)
@@ -19,7 +19,7 @@ end
 warning('off', 'Simulink:cgxe:LeakedJITEngine');
 S = load('params.mat'); p0 = S.params;
 if ~isfield(p0, 'n_rx')
-    error('params.mat predates D41. Run init_params.m first.');
+    error('params.mat has no antenna fields. Run init_params.m first.');
 end
 p0.quiet_build = true;
 p0.int_aoa_random = false;             % V6 nulling test at the fixed direction p0.int_aoa_deg(1)

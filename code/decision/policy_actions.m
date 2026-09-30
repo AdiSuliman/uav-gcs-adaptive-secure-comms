@@ -1,5 +1,5 @@
 function names = policy_actions()
-%POLICY_ACTIONS  The configurations of the decision layer (D39, D45, D59).
+%POLICY_ACTIONS  The configurations of the decision layer.
 %   One choice per domain, applied together (the combined action a = (f, p, ...)
 %   of Liu et al., 2018):
 %     frequency     none | channel_switch | freq_diversity

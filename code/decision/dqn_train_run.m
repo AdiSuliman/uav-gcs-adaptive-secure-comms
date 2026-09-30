@@ -1,5 +1,5 @@
 function [agent, curve, loss_hist, best_ep] = dqn_train_run(H, PP, K, Kval, norm_in, seed, nS, split_tr, split_val)
-%DQN_TRAIN_RUN  One Double DQN training run (D44-D46, D59; Mnih et al., van Hasselt
+%DQN_TRAIN_RUN  One Double DQN training run (Mnih et al., van Hasselt
 %   et al.): experience replay, target network, Huber loss, gradient clipping,
 %   epsilon-greedy over the configurations the shield allows (policy_mask.m). K is
 %   the training reward, Kval the standard reward of the validation checkpoints;

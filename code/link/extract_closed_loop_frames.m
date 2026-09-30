@@ -1,6 +1,6 @@
 function F = extract_closed_loop_frames(out, p, delay_bits)
 %EXTRACT_CLOSED_LOOP_FRAMES  Every frame of one sim() run: what the UAV receiver
-% measures, and the ground truth kept for evaluation (D59). Single source for the
+% measures, and the ground truth kept for evaluation. Single source for the
 % per-frame measurements of the dataset, the decision-layer pools and the GUI.
 %
 % Inputs:
@@ -41,13 +41,13 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %               channel (0 = orthogonal, 1 = same direction: no spatial null)
 %     branch_dip deepest drop of one antenna's channel gain inside the frame [dB]:
 %               per antenna, median minus minimum of the 32-symbol channel-gain
-%               estimates, the larger of the antennas (D60). A fading branch
+%               estimates, the larger of the antennas. A fading branch
 %               changes little within 0.5 ms (fd <= 267 Hz); a failing antenna
 %               drops by tens of dB (per-branch monitoring of a diversity receiver)
 %   The last four come from the receiver's channel estimator (per-32-symbol
 %   channel estimates and the frame's interference + noise covariance, the
 %   quantities MMSE combining uses; known symbols = ideal pilots, proposal risk 8).
-% With p.fec (fec_interleave, D39) ber, fer and crc_fail are those of the decoded
+% With p.fec (fec_interleave) ber, fer and crc_fail are those of the decoded
 % information bits (half a frame each, 484 + 32 CRC).
 
 txb = double(squeeze(out.get('tx_bits_out')));
@@ -109,7 +109,7 @@ end
 
 %% ===================== FEC =====================
 function [ber, fer, crcf] = fec_frames(tx_al, rx_al, iq, p, delay_bits, nf)
-% fec_interleave (D39): the channel bit errors of this run are applied to a
+% fec_interleave: the channel bit errors of this run are applied to a
 % rate-1/2 convolutionally coded, randomly interleaved stream. Symbols whose
 % received energy is more than 6 dB above the run's median are erased (a burst
 % is visible at the receiver), the rest are hard decisions; the Viterbi decoder

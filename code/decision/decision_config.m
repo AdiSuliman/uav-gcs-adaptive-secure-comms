@@ -1,5 +1,5 @@
 function C = decision_config()
-%DECISION_CONFIG  Constants of the decision layer in one place (D59): restoration
+%DECISION_CONFIG  Constants of the decision layer in one place: restoration
 %   criterion, monitor, rule timing, agent state, reward weights and the threat
 %   severities of the frame pools. Every decision-layer function reads them here.
 
@@ -12,9 +12,9 @@ C.win        = 5;           % frames of the estimated-BER and packet-loss window
 C.deg_floor  = 1e-4;        % smallest clean reference of the estimated BER
 C.heal       = 5;           % healthy cycles that close an incident (tried list reset)
 C.confirm    = [2 2];       % alarm confirmation m-of-n (consecutive detections, Barajas et al.)
-C.drop_db    = 4;           % Eb/N0-estimate drop that confirms path_loss (replaced by choose_drop_threshold.m)
+C.drop_db    = 4;           % default Eb/N0-estimate drop that confirms path_loss; the deployed value comes from choose_drop_threshold.m
 
-% Decision period (D61): one cycle decides on one received frame; with the decision
+% Decision period: one cycle decides on one received frame; with the decision
 % latency (median < 10 ms, p95 < 20 ms target) a deployed loop decides every 20 ms.
 % The pools hold consecutive frames, so the fading between two cycles is more
 % correlated than 20 ms apart (a stated limitation); times are reported in cycles

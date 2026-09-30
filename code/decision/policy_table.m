@@ -1,5 +1,5 @@
 function tab = policy_table(PP, K)
-%POLICY_TABLE  Class -> configuration lookup tuned on the train pools (D45, D59).
+%POLICY_TABLE  Class -> configuration lookup tuned on the train pools.
 %   The strongest static mapping from the detected class: for each threat, the
 %   configuration with the best mean reward per cycle (quality minus running cost)
 %   over every severity, Eb/N0 and train geometry; 'none' -> no_action; 'unknown'

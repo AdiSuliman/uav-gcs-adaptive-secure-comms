@@ -1,5 +1,5 @@
 function env = v3d_environment(world, L, seed, prefix)
-%V3D_ENVIRONMENT  Countryside around the GCS for the Unreal 3D view (D57).
+%V3D_ENVIRONMENT  Countryside around the GCS for the Unreal 3D view.
 %   env = v3d_environment(world, L, seed, prefix)   prefix makes actor names unique per arena
 %
 %   Purely scenic and procedural (seeded): a patchwork of fields with dirt tracks,

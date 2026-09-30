@@ -1,5 +1,5 @@
 function st = policy_state(mem, cfg, confirmed, nA)
-%POLICY_STATE  Decision-layer state, one column per episode (D44, D45, D50, D59).
+%POLICY_STATE  Decision-layer state, one column per episode.
 %   Single source for training, evaluation and deployment. Size: policy_state_size.
 %   mem        policy memory of policy_monitor.m (after its update this cycle):
 %              mem.hist holds the observation vectors of the last C.hist cycles,

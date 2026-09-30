@@ -14,7 +14,7 @@
 % They execute top to bottom in dependency order. Launch headless from cmd or
 % Git Bash in the project folder:  matlab -batch "main"
 %
-% Runtimes (Ryzen 7 7700, RTX 4070 SUPER, 6 parallel workers; D59): A5 ~17 min, A6 ~7 min,
+% Runtimes (Ryzen 7 7700, RTX 4070 SUPER, 6 parallel workers): A5 ~17 min, A6 ~7 min,
 % B1 ~1 min, B2 ~8 min, B3a ~16 min, B4 ~25 min, OOD ~70 min, C1p ~3-4 h, C1c ~40 min,
 % C2 ~3 h, C2e ~1 h, SURV ~1.5 h, SURV3 ~1 h, LAT ~2 min, KPI and DASH < 1 min.
 % The same stages run headless and logged with run_stage.m, e.g.
@@ -23,7 +23,7 @@
 %
 % DEPENDENCIES (what must exist before a stage can run):
 %   A5 needs A0 | A6 needs A5 | B1 needs A6 | B2 needs B1 | B3, B3a, B4, OOD need B2 | B4s needs OOD
-%   C1p needs OOD (it selects the production unknown-threat score, D60) | C1c, C1d need C1p | C2 needs C1p, C1c (validation set), C1d | C2e needs C2 (and C1c for KPI 6)
+%   C1p needs OOD (it selects the production unknown-threat score) | C1c, C1d need C1p | C2 needs C1p, C1c (validation set), C1d | C2e needs C2 (and C1c for KPI 6)
 %   LAT needs C2 | SURV, SURV3 need A0 | KPI reads B3, B4, OOD, A4v, C2e, LAT, SURV | DASH needs KPI
 %
 % LOGGING: `diary` captures everything printed below into logs/run_*.txt,
@@ -76,14 +76,14 @@ fprintf('(This file will contain EVERYTHING printed below, even across clc calls
 %% ================================================================
 
 warning('off', 'Simulink:cgxe:LeakedJITEngine');   % internal Simulink notice on repeated sim() of MATLAB Function blocks
-disk_guard('init');                                % Simulink temporary data and the 200 GB free-disk floor (D60)
+disk_guard('init');                                % Simulink temporary data and the 200 GB free-disk floor
 
-% ---- Decision-layer training (D46, D48-D52, D59); defaults of train_dqn.m when absent ----
+% ---- Decision-layer training; defaults of train_dqn.m when absent ----
 CFG.dqn_seeds       = 3;                 % C2: training seeds per setting
-CFG.dqn_gammas      = 0.5;               % C2: discount factor (D64 selection)
-CFG.monitors        = {'class_drop 3/3'};  % C2: alarm definition and m/n confirmation (D64 selection)
-CFG.drop_steps      = 2;                 % C2: path_loss alarm threshold, 2 dB below the train-pool value (D64 selection)
-CFG.fa_penalty_grid = [120 160];         % C2: training reward variants (D67): false-switch penalty,
+CFG.dqn_gammas      = 0.5;               % C2: discount factor (selected on validation)
+CFG.monitors        = {'class_drop 3/3'};  % C2: alarm definition and m/n confirmation (selected on validation)
+CFG.drop_steps      = 2;                 % C2: path_loss alarm threshold, 2 dB below the train-pool value (selected on validation)
+CFG.fa_penalty_grid = [120 160];         % C2: training reward variants: false-switch penalty,
 CFG.cost_scale_grid = [0.5 0.5];         %     running costs x scale,
 CFG.switch_scale_grid = [1 1];           %     switching cost x scale
 
@@ -92,40 +92,40 @@ CFG.switch_scale_grid = [1 1];           %     switching cost x scale
 RUN.init                        = false;    % A0  : regenerate params.mat
 RUN.validate_A                  = false;   % A1-A3: build+validate AWGN & Rician links (fast)
 RUN.check_A4                    = false;   % A4  : build threat model + sanity BER (fast)
-RUN.validate_phy                = false;    % A4v : link vs theory, MRC/MMSE, seeds; stops main on FAIL (D41)
-RUN.build_dataset               = false;    % A5  : seeded sub-run dataset, receiver measurements (~17 min, D42, D45, D59)
-RUN.extract_spectrograms        = false;    % A6  : spectrograms + 13 link features (~7 min, D42, D43, D59)
+RUN.validate_phy                = false;    % A4v : link vs theory, MRC/MMSE, seeds; stops main on FAIL
+RUN.build_dataset               = false;    % A5  : seeded sub-run dataset, receiver measurements (~17 min)
+RUN.extract_spectrograms        = false;    % A6  : spectrograms + 13 link features (~7 min)
 
 
 % ---- Phase B: detection (CNN baseline) ----
-RUN.prepare_data                = false;    % B1  : split by sub-run 5/1/2 (~1 min, D42, D59)
+RUN.prepare_data                = false;    % B1  : split by sub-run 5/1/2 (~1 min)
 RUN.train_detector              = false;    % B2  : train CNN+scalar hybrid, unknown-threat models (~8 min); a new detector invalidates the pools
-RUN.eval_detector               = false;    % B3  : test eval + confusion/accuracy-vs-SNR + bootstrap CIs (~2 min, D35)
-RUN.compare_architectures       = false;    % B3a : hybrid vs spectrogram-only vs features-only (~16 min, D59)
-RUN.eval_unseen_snr             = false;    % B4  : detector at Eb/N0 never seen in training, 1,3,5,7,9 dB (~25 min, D34)
-RUN.eval_ood_detection          = false;    % OOD : leave-one-threat-out, retrains the detector 8 times; selects the production unknown-threat score (~70 min, D32, D60)
+RUN.eval_detector               = false;    % B3  : test eval + confusion/accuracy-vs-SNR + bootstrap CIs (~2 min)
+RUN.compare_architectures       = false;    % B3a : hybrid vs spectrogram-only vs features-only (~16 min)
+RUN.eval_unseen_snr             = false;    % B4  : detector at Eb/N0 never seen in training, 1,3,5,7,9 dB (~25 min)
+RUN.eval_ood_detection          = false;    % OOD : leave-one-threat-out, retrains the detector 8 times; selects the production unknown-threat score (~70 min)
 RUN.eval_unseen_severity        = false;    % B4s : detector at severities never seen in training, between and above the levels (~10 min)
 
 
 % ---- Phase C: decision layer ----
-RUN.build_policy_pools          = false;    % C1p : frame pools, every cell x configuration x Eb/N0 x geometry (~3-4 h, D44-D46, D59)
-RUN.build_clean_test_pools      = false;    % C1c : clean link on new geometries: validation set (D52) and test set for KPI 6 (~40 min; skips when up to date, D51)
-RUN.choose_drop_threshold       = false;    % C1d : path_loss alarm threshold from the train pools (< 1 min, D52)
-RUN.train_dqn                   = false;    % C2  : Double DQN + shield, alarm x penalty x gamma x seeds, selection on validation (~3 h, D44-D52, D59)
-RUN.evaluate_policies           = false;    % C2e : every policy on the test pools: single, follower, combined, unknown, clean (~1 h, D44-D46, D59)
-RUN.combo_generalization        = false;    % C2g : combined threats never trained on, leave-one-combination-out (~50 min, D61)
+RUN.build_policy_pools          = false;    % C1p : frame pools, every cell x configuration x Eb/N0 x geometry (~3-4 h)
+RUN.build_clean_test_pools      = false;    % C1c : clean link on new geometries: validation set and test set for KPI 6 (~40 min; skips when up to date)
+RUN.choose_drop_threshold       = false;    % C1d : path_loss alarm threshold from the train pools (< 1 min)
+RUN.train_dqn                   = false;    % C2  : Double DQN + shield, alarm x penalty x gamma x seeds, selection on validation (~3 h)
+RUN.evaluate_policies           = false;    % C2e : every policy on the test pools: single, follower, combined, unknown, clean (~1 h)
+RUN.combo_generalization        = false;    % C2g : combined threats never trained on, leave-one-combination-out (~50 min)
 RUN.threat_gallery              = false;    % GAL : one figure per threat for the report, with the DQN's most frequent response (~5 min)
 
 % ---- Phase SURV: survivability boundary mapping (deliverable 8) ----
-RUN.map_survivability           = false;    % SURV: Map A/B per threat, severity, Eb/N0 and geometry (~1.5 h, D30, D46, D59)
-RUN.survivability_options       = false;    % SURV3: 2 vs 3 antennas vs relay path (~1 h, D59)
+RUN.map_survivability           = false;    % SURV: Map A/B per threat, severity, Eb/N0 and geometry (~1.5 h)
+RUN.survivability_options       = false;    % SURV3: 2 vs 3 antennas vs relay path (~1 h)
 
 % ---- Phase KPI: latency and proposal KPIs (section 5) ----
-RUN.measure_latency             = false;    % LAT : decision latency per cycle, median / p95 (~2 min, D46)
-RUN.measure_all_kpis            = true;    % KPI : the 8 proposal KPIs from the result files (D46)
+RUN.measure_latency             = false;    % LAT : decision latency per cycle, median / p95 (~2 min)
+RUN.measure_all_kpis            = true;    % KPI : the 8 proposal KPIs from the result files
 
 % ---- Phase DASH: results dashboard (deliverable 1) ----
-RUN.build_dashboard             = true;    % DASH: 8-panel summary PNG (D46)
+RUN.build_dashboard             = true;    % DASH: 8-panel summary PNG
 
 fprintf('========================================================\n');
 fprintf('  UAV-GCS ADAPTIVE SECURE COMMS - MASTER PIPELINE\n');

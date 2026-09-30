@@ -1,9 +1,9 @@
 function T = ood_thresholds(retain)
-%OOD_THRESHOLDS  Unknown-threat thresholds for the production detector (D32, D44, D60).
+%OOD_THRESHOLDS  Unknown-threat thresholds for the production detector.
 %   Chosen on the validation split so that a fraction RETAIN (default 0.95) of
 %   known-class frames stays above the threshold: a frame scoring below it is
 %   treated as an unknown threat. MSP and energy from cnn_scores.m, Mahalanobis
-%   from ood_scores.m (the production candidate chosen by eval_ood_detection.m, D60). T.maha_val holds the
+%   from ood_scores.m (the production candidate chosen by eval_ood_detection.m). T.maha_val holds the
 %   sorted validation Mahalanobis scores, so any other retention level is a
 %   quantile of it (demo_gui.m slider). Cached in data/ood_thresholds.mat and
 %   recomputed when the detector is newer.

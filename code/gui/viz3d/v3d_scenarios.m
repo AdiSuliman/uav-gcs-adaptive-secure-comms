@@ -1,5 +1,5 @@
 function SC = v3d_scenarios(M)
-%V3D_SCENARIOS  Scripted defense scenarios of the 3D view (D57).
+%V3D_SCENARIOS  Scripted defense scenarios of the 3D view.
 %   SC = v3d_scenarios(M)     M from v3d_engine('load')
 %
 %   Every scenario runs on the TEST pools. The flight geometry is chosen by a

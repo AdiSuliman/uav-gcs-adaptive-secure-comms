@@ -49,7 +49,7 @@ saveas(fig_cm, 'results/confusion_matrix.png');
 % sp.test.feats is z-scored; denormalize column 1 (SNR) back to dB
 % using the same train-set mean/std saved in splits.norm
 if isfield(sp.test, 'ebno')
-    snr_vals = sp.test.ebno(:);                          % configured Eb/N0 (D42)
+    snr_vals = sp.test.ebno(:);                          % configured Eb/N0
 else
     snr_vals = round(sp.test.feats(:, 1) .* sp.norm.feat_std(1) + sp.norm.feat_mean(1));
 end
@@ -82,7 +82,7 @@ end
 
 fprintf('\nEvaluation complete. Saved confusion_matrix.png and accuracy_vs_snr.png to results/.\n');
 
-%% 5b. KPI #1 as worded in the proposal (D34)
+%% 5b. KPI #1 as worded in the proposal
 % Macro-F1 per Eb/N0, and the threshold: the lowest Eb/N0 from which macro-F1
 % stays >= 90% at every higher point. Action-equivalent accuracy counts a
 % confusion as harmless when both classes map to the same countermeasure in the
@@ -93,7 +93,7 @@ for i = 1:numel(unique_snrs)
     idx = (snr_vals == unique_snrs(i));
     f1_vs_snr(i) = 100 * macro_f1_of(Y_test(idx), Y_pred(idx), classes);
 end
-% Threshold (updated proposal, D59): the lowest Eb/N0 from which macro-F1 stays
+% Threshold (updated proposal): the lowest Eb/N0 from which macro-F1 stays
 % >= 90% at every higher point AND every class reaches F1 >= 90% over the frames
 % at or above it.
 ok = f1_vs_snr >= 90;
@@ -123,7 +123,7 @@ fprintf('\nKPI #1 threshold: macro-F1 and every class F1 >= 90%% from %g dB up; 
     thr_db, f1_above, min(f1_class_above));
 fprintf('Action-equivalent accuracy: %.2f%% (class accuracy %.2f%%)\n', 100*mean(act_ok), 100*mean(Y_test == Y_pred));
 
-%% 5c. 95% bootstrap confidence intervals (D35, D42)
+%% 5c. 95% bootstrap confidence intervals
 % Resamples whole test sub-runs with replacement (frames of one sub-run are
 % correlated); a local stream keeps the global generator untouched.
 N_BOOT = 1000;

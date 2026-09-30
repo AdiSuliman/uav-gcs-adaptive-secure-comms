@@ -1,8 +1,8 @@
 function fig = v3d_live(mode, src)
-%V3D_LIVE  Live 3D operations console (D57).
+%V3D_LIVE  Live 3D operations console.
 %   Run from the repository root (startup.m puts code/ on the path):  v3d_live
 %   v3d_live('replay', file)   plays an episode recorded by the operator console
-%                              (GUI_Results/episode_*.mat, D56) or a saved session
+%                              (GUI_Results/episode_*.mat) or a saved session
 %
 %   The decision layer runs live on the measured TEST pools (v3d_engine.m): the
 %   DQN agent (left) and a comparison policy (right) on the same flight geometry

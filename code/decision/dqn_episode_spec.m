@@ -1,7 +1,7 @@
 function spec = dqn_episode_spec(H, PP, K, rs, split)
-%DQN_EPISODE_SPEC  A batch of H.NE random training or validation episodes (D44-D46, D61).
+%DQN_EPISODE_SPEC  A batch of H.NE random training or validation episodes.
 %   Episodes on the cells present in the split: single threats (every severity),
-%   the clean link and the combined threats (D61); a cell whose pools are emptied
+%   the clean link and the combined threats; a cell whose pools are emptied
 %   (experiment_combo_generalization.m) is left out. Onset, follower jammer, its
 %   re-acquisition delay (C.fdelay) and withheld detector output drawn per episode.
 avail = find(~cellfun(@isempty, PP.pools(:, 1, K.na, split))');

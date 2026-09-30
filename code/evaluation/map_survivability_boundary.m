@@ -1,4 +1,4 @@
-%% MAP_SURVIVABILITY_BOUNDARY — proposal deliverable 8 (primary research output) (D30, D46, D59)
+%% MAP_SURVIVABILITY_BOUNDARY — proposal deliverable 8 (primary research output)
 % Maps, per threat, where an attack is recoverable versus non-recoverable over
 % attack severity level and Eb/N0, using the system's REAL configuration set
 % (policy_actions.m, one choice per domain) applied through apply_countermeasure.m.
@@ -8,7 +8,7 @@
 % is RECOVERABLE when some configuration brings BER within 2x AND packet loss (CRC)
 % within 2x (+ one packet) of the clean link at the same Eb/N0 (proposal KPI 4),
 % MARGINAL when the best BER is within 5x, otherwise NON-RECOVERABLE. Directional
-% threats are mapped for two flight geometries (D46): interferer 45 deg from the
+% threats are mapped for two flight geometries: interferer 45 deg from the
 % GCS direction (separable by the two-antenna array) and 10 deg (aligned);
 % path_loss and antenna_fault do not depend on the geometry.
 %
@@ -31,7 +31,7 @@ N_BASELINE_REPEATS = 5;       % seeded clean-link runs per Eb/N0
 RUN_FRAMES         = 57;      % frames per (threat, geometry, level, Eb/N0) run, one seed shared by every configuration
 RATIO_RECOVERABLE  = 2;
 RATIO_MARGINAL     = 5;
-BER_FLOOR          = 1e-4;    % clean reference floor, as the decision layer (D45)
+BER_FLOOR          = 1e-4;    % clean reference floor, as the decision layer
 GEOM_AOA           = [45 10]; % interferer direction from the GCS direction [deg]: separated, aligned
 N_WORKERS          = 6;
 opt = struct('F_SUB', RUN_FRAMES, 'tw', 10, 'delay_bits', 20);
@@ -43,7 +43,7 @@ MECH_A = MECH_B(cellfun(@(a) no_goodput_loss(p_ref, a), MECH_B));
 ACT_CODE = containers.Map(MECH_B, cellfun(@act_code, MECH_B, 'UniformOutput', false));
 
 % Severity levels per threat: those of run_dataset_sweep.m (A5), plus two stronger levels for the in-band
-% jammers and one for path loss, beyond the trained range, up to the 30 dB jammer of Liu et al. [4] (D61)
+% jammers and one for path loss, beyond the trained range, up to the 30 dB jammer of Liu et al. [4]
 clear threat_cfg                                  % scripts share the base workspace
 threat_cfg(1) = struct('name','jamming',             'level_field','jsr_db',        'levels',[0 4 8 12 16 22 28]);
 threat_cfg(2) = struct('name','noise_burst',         'level_field','jsr_db',        'levels',[0 4 8 12 16 22 28]);

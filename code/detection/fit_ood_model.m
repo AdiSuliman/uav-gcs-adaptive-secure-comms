@@ -1,5 +1,5 @@
 function M = fit_ood_model(net, tr, classes, va)
-%FIT_OOD_MODEL  Unknown-threat models of the detector (D42, D59, D60); the
+%FIT_OOD_MODEL  Unknown-threat models of the detector; the
 %   candidate scores are computed by ood_score_set.m.
 %   Mahalanobis (Lee et al., NeurIPS 2018): for each layer of M.layers
 %   (convolutional outputs average-pooled over time and frequency) and for the
@@ -13,7 +13,7 @@ function M = fit_ood_model(net, tr, classes, va)
 %   (their section 5.4). The standardization of the fused candidates uses the known
 %   validation frames.
 %   M.score, the production candidate, is 'last' until eval_ood_detection.m
-%   selects it by leave-one-threat-out (D60).
+%   selects it by leave-one-threat-out.
 %   va  validation split (X, feats, Y); without it the ensemble weights are equal.
 M.layers = {'relu1', 'relu2', 'relu3', 'relu_feat2', 'relu_merge'};
 M.candidates = {'last', 'ensemble', 'raw', 'last_or_raw', 'last_or_if'};

@@ -1,5 +1,5 @@
 function link_seed(modelName, seed, fd)
-%LINK_SEED  Seed every random source of the threat link and set its Doppler (D41).
+%LINK_SEED  Seed every random source of the threat link and set its Doppler.
 %   link_seed(modelName, seed)      seed only
 %   link_seed(modelName, seed, fd)  seed and maximum Doppler shift [Hz]
 %   Channel and threat blocks read 'Seed' and 'Doppler' at the start of each run;

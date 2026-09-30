@@ -1,7 +1,7 @@
-%% EXPERIMENT_COMBO_GENERALIZATION - Combined threats never trained on (D61)
-% Since D61 the agent trains on all eight combined threats and is tested on new
-% flights of them (KPI 4). This experiment measures what it cannot learn from the
-% pools: a combination it has never seen. Leave-one-combination-out: for each
+%% EXPERIMENT_COMBO_GENERALIZATION - Combined threats never trained on
+% The agent trains on all eight combined threats and is tested on new flights of
+% them (KPI 4). This experiment measures a combination it has never seen.
+% Leave-one-combination-out: for each
 % combined threat the train and validation pools of that combination are removed
 % and a DQN is retrained with the selected settings of train_dqn.m (monitor,
 % false-switch penalty, discount factor, seed; dqn_train_run.m); it is then
@@ -38,7 +38,7 @@ for ci = 1:numel(combos)
     PPx.pools(c, :, :, 1:2) = {[]};
     Kx = link_env('tables', PPx);
     Kt = Kx; Kt.FA = Q.seed_summary.selected_fa_pen;
-    if isfield(Q.seed_summary, 'selected_cost_scale')          % training reward variant (D66)
+    if isfield(Q.seed_summary, 'selected_cost_scale')          % training reward variant
         Kt.cost = Q.seed_summary.selected_cost_scale * Kx.cost; Kt.SW = Q.seed_summary.selected_sw_scale * Kx.SW;
     end
     ag = dqn_train_run(H, PPx, Kt, Kx, Q.norm_in, seed, nS, 1, 2);

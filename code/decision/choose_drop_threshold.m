@@ -1,9 +1,7 @@
-%% CHOOSE_DROP_THRESHOLD - Eb/N0-drop threshold of the path_loss alarm from the train pools (D52, D59)
+%% CHOOSE_DROP_THRESHOLD - Eb/N0-drop threshold of the path_loss alarm from the train pools
 % A clean link in a deep Rician fade and an attenuated link look alike in one
 % frame; the drop of the Eb/N0 estimate from the episode's reference tells them
-% apart (D50). D50 set the threshold at 4 dB by assumption, which is the size
-% of the fades that mislead the detector, so it filtered nothing. Here the
-% threshold is chosen from data, on the TRAIN split only: the drop of every
+% apart. The threshold is chosen from data, on the TRAIN split only: the drop of every
 % path_loss frame (every severity, 6 / 10 / 14 dB) against the drop of every clean
 % frame the detector reads as path_loss, both measured the way
 % policy_monitor.m measures them (3-frame median against the reference of the

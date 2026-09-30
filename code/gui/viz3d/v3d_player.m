@@ -1,5 +1,5 @@
 function varargout = v3d_player(cmd, varargin)
-%V3D_PLAYER  Unreal side of the 3D view (D57): two identical arenas, one per
+%V3D_PLAYER  Unreal side of the 3D view: two identical arenas, one per
 %   policy (A: DQN, B: the comparison), their cameras and the auto director.
 %   S = v3d_player('build', world, M, opts)       opts: sz ([h w] per camera), hfov
 %   [S, cam] = v3d_player('show', S, R, k, t, frac, shot)

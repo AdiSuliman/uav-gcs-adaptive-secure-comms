@@ -1,5 +1,5 @@
 function [mem, M] = policy_monitor(cmd, varargin)
-%POLICY_MONITOR  Link monitor shared by every decision-layer policy (D45, D48-D50, D59).
+%POLICY_MONITOR  Link monitor shared by every decision-layer policy.
 %   mem = policy_monitor('init', NE, nA)
 %   [mem, M] = policy_monitor('update', mem, obs, PP, cfg)
 %
@@ -13,9 +13,9 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   Detected class: 'unknown' when the unknown-threat score is below its threshold.
 %   Alarm, PP.alarm_mode 'class' (default): a hostile threat class, or degradation;
 %   'none', 'benign_interference' (non-hostile, D9) and 'unknown' raise it only
-%   through degradation (D33). 'class_drop': as 'class', but the class path_loss
+%   through degradation. 'class_drop': as 'class', but the class path_loss
 %   counts only when the signal-over-thermal estimate has dropped by at least
-%   PP.drop_db from the episode's reference (D50, D52). Drop: reference = median
+%   PP.drop_db from the episode's reference. Drop: reference = median
 %   Eb/N0 estimate of the last 10 cycles without an alarm, minus the median of the
 %   last 3 cycles. An alarm is CONFIRMED when at least m of the last n cycles carried
 %   one (M-of-N binary integration, PP.confirm, default C.confirm).

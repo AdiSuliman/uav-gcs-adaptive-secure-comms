@@ -1,6 +1,6 @@
-%% B1 - PREPARE DATA: split by independent sub-runs, z-score from train (D42)
+%% B1 - PREPARE DATA: split by independent sub-runs, z-score from train
 % Every (class, level, Eb/N0) cell has 8 seeded sub-runs (run_dataset_sweep.m):
-% sub-runs 1-5 -> train, 6 -> validation, 7-8 -> test (D59; 62.5/12.5/25). Frames of one
+% sub-runs 1-5 -> train, 6 -> validation, 7-8 -> test (62.5/12.5/25). Frames of one
 % sub-run never cross splits, so no fading realization, noise draw or temporal
 % window is shared between training and test. Every cell is present in every split.
 %

@@ -1,4 +1,4 @@
-%% B2 - TRAIN HYBRID DETECTOR: CNN (spectrogram) + FC (13 link features) -> softmax (D42, D59)
+%% B2 - TRAIN HYBRID DETECTOR: CNN (spectrogram) + FC (13 link features) -> softmax
 % Training in train_hybrid_net.m (shared with eval_ood_detection.m). After
 % training, the feature-space unknown-threat models (Mahalanobis on the hidden
 % layers, isolation forest on the link features) are fitted (fit_ood_model.m).

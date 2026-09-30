@@ -1,6 +1,6 @@
 function [probs, maha] = detect_scores(net, M, X_spec, X_feat, device)
 %DETECT_SCORES  Class probabilities and the unknown-threat score from ONE forward
-%   pass of the hybrid detector (D48, D59, D60): the logits 'fc_out' and the hidden
+%   pass of the hybrid detector: the logits 'fc_out' and the hidden
 %   layers the production score needs (ood_score_set.m, candidate M.score) come
 %   from the same predict call. Same values as cnn_scores.m + ood_scores.m.
 %   M       unknown-threat model of data/trained_detector.mat ('ood')

@@ -1,4 +1,4 @@
-%% COMPARE_ARCHITECTURES - Detector architectures on the same splits (D59)
+%% COMPARE_ARCHITECTURES - Detector architectures on the same splits
 % Approved proposal, risk 5 mitigation: "compare several model architectures".
 % Following the multimodal comparison reported by Tariq et al. (telemetry MLP,
 % spectrogram CNN, fused), the production hybrid detector is compared with the

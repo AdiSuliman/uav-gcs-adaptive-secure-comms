@@ -20,7 +20,7 @@
 % the best fixed configuration (train pools), expert rule with and without
 % escalation, class -> configuration table (train pools), the DQN of every
 % discount factor (the selected one also with escalation), one-step oracle.
-% The deployed policy, read by the KPIs, is the selected DQN with escalation (D64).
+% The deployed policy, read by the KPIs, is the selected DQN with escalation.
 % Main metric (proposal KPI 4): RECOVERED episodes -- BER and packet loss back to
 % <= 2x the clean link for 5 consecutive cycles -- among the RECOVERABLE ones
 % (some configuration restores both in that geometry, link_env.m); the rest is
@@ -95,7 +95,7 @@ LBL = [{'no response', 'random', 'always-on MMSE', ['fixed: ' PP.actions{fixed_b
        arrayfun(@(g) sprintf('DQN gamma=%.2f%s', Q.gammas(g), ternary(g == sel, ' (selected)', '')), 1:nGam, ...
        'UniformOutput', false), {'DQN + escalation (deployed)', 'oracle (one-step)'}];
 iBase = find(strcmp(POL, sprintf('dqn_g%d', sel)));  % selected DQN alone
-iDQN = find(strcmp(POL, 'dqn_esc'));                 % deployed: selected DQN + escalation (D64)
+iDQN = find(strcmp(POL, 'dqn_esc'));                 % deployed: selected DQN + escalation
 col = @(p) find(strcmp(POL, p));
 
 RES = cell(numel(sets), numel(POL));
@@ -226,7 +226,7 @@ rep{end+1} = sprintf(['False alarms on the clean link, test pools (%d geometries
 [FAR, FD, lines] = far_report(RES(iC, :), POL, LBL, above, T, iDQN, PP.ebno, cls_list);
 rep = [rep, lines];
 
-% False alarms over many independent geometries: one episode per geometry (KPI 6, D51)
+% False alarms over many independent geometries: one episode per geometry (KPI 6)
 FAR_t = FAR; FD_t = FD; n_geom = 0; RW = {};
 if isfile('data/clean_test_pools.mat')
     Ct = load('data/clean_test_pools.mat', 'CT'); CT = Ct.CT; clear Ct

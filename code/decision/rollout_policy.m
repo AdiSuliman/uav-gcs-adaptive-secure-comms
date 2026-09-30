@@ -1,5 +1,5 @@
 function R = rollout_policy(kind, PP, K, spec, split, agent, opt, seed)
-%ROLLOUT_POLICY  Run one batch of episodes of a decision-layer policy (D44, D45, D59).
+%ROLLOUT_POLICY  Run one batch of episodes of a decision-layer policy.
 %   kind   any policy_decide.m kind, or 'oracle' (knows the true scenario, onset,
 %          follower state and geometry; picks the configuration with the best
 %          reward of the next cycle from the measured geometry means: a one-step

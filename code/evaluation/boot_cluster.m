@@ -1,6 +1,6 @@
 function [m, lo, hi] = boot_cluster(num, den, cl, B, seed)
 %BOOT_CLUSTER  Ratio sum(num) / sum(den) with a 95% percentile bootstrap interval
-%   that resamples whole clusters (D59). The cluster is the flight geometry: the
+%   that resamples whole clusters. The cluster is the flight geometry: the
 %   episodes of one geometry share its fading, speed and interferer directions, so
 %   they are not independent and are resampled together (proposal mitigation 5:
 %   intervals by runs). A mean is the case den = ones; a paired difference is the
