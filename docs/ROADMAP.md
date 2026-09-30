@@ -5,7 +5,7 @@
 **Supervisor:** Golan Ein-Tzvi
 **History:** [PROJECT_LOG.md](PROJECT_LOG.md) · **Design decisions:** [DECISIONS.md](DECISIONS.md) · **Results:** [README.md](../README.md)
 
-Last updated: 2026-09-29
+Last updated: 2026-09-30
 
 ---
 
@@ -15,7 +15,7 @@ Last updated: 2026-09-29
 |---|---|---|---|
 | A1–A3 | QPSK link with RRC, AWGN; Rician fading K = 10 dB, Doppler for a 50–120 km/h UAV | ✅ Done | D5, D6, D11, D25 |
 | A4 | Two-antenna UAV receiver (MRC, MMSE), eight threats + combinations, interferer direction per seeded run | ✅ Done | D8–D12, D32, D41, D45 |
-| A4v | Validation against theory (AWGN, Rician, MRC 2/3 antennas, correlated branches), seeds | ✅ Done, 5/5 within 0.3 dB | D41 |
+| A4v | Validation against theory (AWGN, Rician, MRC 2/3 antennas, correlated branches at K = 0/10/20 dB), MMSE under jamming, seeds, tone calibration | ✅ v5: 7/7 within 0.3 dB, seeds and tone PASS | D41, D68 |
 | A5–A6 | 27,000 frames from 1,350 seeded sub-runs, spectrograms + 9 link features | ✅ Done | D42, D43, D45 |
 | B | CNN + link-feature detector, bootstrap intervals, unseen Eb/N0 | ✅ Done, 96.3% | D42, D43 |
 | B-unknown | Mahalanobis and isolation-forest scores, leave-one-threat-out | ✅ Done, AUROC 0.887 | D42, D46 |
@@ -29,6 +29,7 @@ Last updated: 2026-09-29
 | 3D | Unreal 3D view: live console (threat control, operator vs AI), defense videos, console-episode replay | ✅ Built and tested (D58); Cesium terrain optional | D57, D58 |
 | Fixes | Latency tail; false-alarm bound (KPI 6) | ✅ latency p95 48.9 → 19.4 ms / ✅ KPI 6: 1.5% over 600 independent geometries, bound 2.60% (D52) | D48–D51 |
 | v4 | Receiver-side measurements, 36 combined configurations, combined threats in training, three severities, per-antenna feature, unknown-threat score selection, new-threat learning, 20 ms decision period | ✅ Full run A0–C2g done; hold in the shield (D63); escalation out of no_action (D64) | D59–D64 |
+| v5 | Ten threats (tone jamming, airframe shadowing), K 0–20 dB per flight, Eb/N0 0–15 dB, eight dataset and five decision levels, ten combined threats, one-cycle signalling delay, speeds outside training, single-core latency | ⏳ Code frozen (009f7ea), full run in progress | D68 |
 | Layout | Code into `code/` by stage | ✅ Done | D47, D61 |
 | D1 | Interim report | ⏳ Drafted, results to sync with the final run | — |
 | D2 | Final report | ⏳ | — |
@@ -39,13 +40,14 @@ Last updated: 2026-09-29
 
 ## Remaining work
 
-1. **Fourth reading (D67 agent):** ✅ done and final; README, DECISIONS and the log updated.
-2. **Operator console and 3D view:** live check on the final deployed policy (D67); the threat gallery with the final agent.
-3. **Code comments:** a pass over every file (short explanation, no history); files the running chain uses wait until it ends.
-4. **Interim report:** final numbers, proposal v2 sources, literature review by the lecturer's five topics (after the final results).
-5. **Proposal v2:** ready for the user's review (16 references, all read).
-6. **Final report, slides and poster:** last, when the user asks.
-7. **Housekeeping:** the v3 backups in `archive/` stay until the user approves deleting them.
+1. **v5 full run (D68):** in progress; then the single test reading, README, DECISIONS outcome and the log.
+2. **Fourth reading (D67 agent):** ✅ done; the v4 final state is in `archive/v4_final_D67_20260930/`. Its per-speed breakdown is not reliable (D68).
+3. **Operator console:** screenshots and a live check with the v5 agent; the threat gallery is part of the run. The high-quality 3D view waits until the code, the final proposal and the interim report are done.
+4. **Code comments:** ✅ full pass done (short explanation, no history), except `legacy/`.
+5. **Interim report:** chapters 1–4 and 7 drafted (front matter, theory and literature review, threats, method, status/risks/plan, review-form appendix); results, discussion and abstracts after the v5 reading.
+6. **Proposal:** v3 submitted version with the GUI wording; no 3D mention.
+7. **Final report, slides and poster:** last, when the user asks.
+8. **Housekeeping:** the v3 backups in `archive/` stay until the user approves deleting them.
 
 ---
 
