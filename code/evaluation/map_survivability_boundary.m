@@ -186,6 +186,21 @@ fprintf('Saved data/survivability_boundary.mat (%.1f min)\n\n=== Survivability M
 
 %% ========== LOCAL FUNCTIONS ==========
 
+function s = ratio_txt(r)
+    if r < 0.1, s = '<0.1'; elseif r < 10, s = sprintf('%.1f', r); else, s = sprintf('%.0f', r); end
+end
+
+function s = level_label(base)
+    switch base
+        case 'path_loss',          s = 'Extra path loss (dB)';
+        case 'spoofing',           s = 'Spoofer over signal (dB)';
+        case 'antenna_fault',      s = 'Fault duty cycle';
+        case 'benign_interference', s = 'Interference over signal (dB)';
+        case 'airframe_shadowing', s = 'Shadowing loss (dB)';
+        otherwise,                 s = 'JSR (dB)';
+    end
+end
+
 function tf = no_goodput_loss(p, a)
     [~, ~, cm] = apply_countermeasure(p, 'none', a);
     tf = cm.goodput_factor == 1;
@@ -315,18 +330,20 @@ function draw_map(grid_data, SNR_points, sup_title, out_path)
         colormap(gca, cmap);
         set(gca,'XTick',1:nS,'XTickLabel',compose('%g',SNR_points), ...
                 'YTick',1:numel(g.levels),'YTickLabel',compose('%g',g.levels));
-        xlabel('E_b/N_0 (dB)'); ylabel('Severity level');
-        title(strrep(g.threat,'_','\_'), 'Interpreter','tex');
+        xlabel('E_b/N_0 (dB)'); ylabel(level_label(g.base));
+        title(strrep(g.threat,'_',' '), 'Interpreter','none');
         for li = 1:numel(g.levels)
             for s = 1:nS
                 if ~isnan(g.ratio(li,s))
-                    text(s, li, sprintf('%.1f', g.ratio(li,s)), ...
+                    text(s, li, ratio_txt(g.ratio(li,s)), ...
                         'HorizontalAlignment','center','FontSize',7,'Color','w');
                 end
             end
         end
     end
-    sgtitle(sup_title, 'Interpreter','tex');
+    sgtitle({sup_title, ['Cell: BER of the best configuration / clean-link BER at the same E_b/N_0.  ' ...
+        'Green: recoverable (BER and packet loss <= 2x clean), yellow: marginal (BER <= 5x), red: non-recoverable']}, ...
+        'Interpreter','tex', 'FontSize', 11);
     saveas(fig, out_path);
     close(fig);
 end

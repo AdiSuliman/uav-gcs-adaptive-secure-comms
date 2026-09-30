@@ -1,7 +1,7 @@
 %% MEASURE_ALL_KPIS - The proposal KPIs from the result files
 % Reads the outputs of the pipeline, never re-runs them: a missing source is
 % reported as such, and a source older than its inputs (detector, decision layer)
-% is flagged STALE. Targets as worded in the updated proposal:
+% is flagged STALE. Targets as worded in the proposal:
 %   KPI 1  detection: macro-F1 and every class F1 >= 90% above an Eb/N0 threshold
 %          (eval_detector), unseen Eb/N0 (eval_unseen_snr)
 %   KPI 2  unknown threats: leave-one-threat-out mean AUROC >= KPI2_TARGET, FPR at 95%
@@ -38,7 +38,7 @@ if isfile('data/trained_detector.mat')             % training time (the file is 
     if isfield(Dt, 'trained_at'), t_det = Dt.trained_at; end
 end
 KPI = struct('id', {}, 'name', {}, 'value', {}, 'target', {}, 'status', {}, 'detail', {});
-rep = {'=== PROPOSAL KPI SUMMARY (updated proposal) ===', sprintf('Generated: %s | %s', datestr(now), git_stamp()), ''};
+rep = {'=== PROPOSAL KPI SUMMARY (proposal wording) ===', sprintf('Generated: %s | %s', datestr(now), git_stamp()), ''};
 
 %% KPI 1 - detection
 if isfile(F.det)

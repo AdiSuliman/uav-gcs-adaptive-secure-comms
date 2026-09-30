@@ -83,7 +83,7 @@ for i = 1:numel(unique_snrs)
     idx = (snr_vals == unique_snrs(i));
     f1_vs_snr(i) = 100 * macro_f1_of(Y_test(idx), Y_pred(idx), classes);
 end
-% Threshold (updated proposal): the lowest Eb/N0 from which macro-F1 stays
+% Threshold (proposal): the lowest Eb/N0 from which macro-F1 stays
 % >= 90% at every higher point AND every class reaches F1 >= 90% over the frames
 % at or above it.
 ok = f1_vs_snr >= 90;
