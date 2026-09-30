@@ -784,12 +784,28 @@ function warmUp(env)
         predict(env.cnn_net, dspec, dfeat);
         predict(env.dqn_agent.qNetwork, dstate);
     end
+    % the detection call of a live cycle (network + unknown-threat score), so the
+    % first timed cycle of a session is not a first call
+    Xw = single(rand(env.img_size, env.img_size, 1, 1)); Fw = single(rand(numel(env.feat_mean), 1));
+    for w = 1:5, detect_scores(env.cnn_net, env.ood, Xw, Fw); end
     if canUseGPU, wait(gpuDevice); end
 end
 
 function restoreParams(p0)
-    params = p0; %#ok<NASGU>
-    save('params.mat', 'params');
+    saveParams(p0);
+end
+
+function saveParams(params) %#ok<INUSD>
+    % params.mat for build_threat_model.m; a file just written can be held for a
+    % moment by another process (virus scan), so a failed write is retried
+    for k = 1:10
+        try
+            save('params.mat', 'params'); return;
+        catch ME
+            if k == 10, rethrow(ME); end
+            pause(0.2);
+        end
+    end
 end
 
 function s = niceName(x)
@@ -1012,7 +1028,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     if ~strcmp(threat, 'none')
         appLog(fig, 'Simulating a clean lead-in of the same link (monitor reference)...');
         pl = p; pl.active_threat = 'none';
-        params = pl; save('params.mat', 'params'); %#ok<NASGU>
+        saveParams(pl);
         build_threat_model;
         set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/pl.sps));
         FL = extract_closed_loop_frames(sim(env.modelName), pl, env.delay_bits);
@@ -1032,7 +1048,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
 
     %% ---- 1. real Simulink run of the attacked link ----
     appLog(fig, 'Building Simulink threat model and simulating the link...');
-    params = p; save('params.mat', 'params'); %#ok<NASGU>
+    saveParams(p);
     build_threat_model;
     set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/p.sps));
     out = sim(env.modelName);
@@ -1271,7 +1287,7 @@ function R = applyMitigation(env, p, threat, action_name, snr_dB) %#ok<INUSL>
     % Real second simulation of the link with the countermeasure applied to the
     % TRUE threat (same physics as training and evaluation, apply_countermeasure.m).
     [p2, g_db] = apply_countermeasure(p, threat, action_name);
-    params = p2; save('params.mat', 'params'); %#ok<NASGU>
+    saveParams(p2);
     build_threat_model;
     set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p2.sps));
     F2 = extract_closed_loop_frames(sim(env.modelName), p2, env.delay_bits);
@@ -2068,7 +2084,7 @@ function P = epBuildPool(fig, p, threat, ebno, seedBase)
         epSay(fig, sprintf('Building frame pool: %s, action %d/%d (%s)...', niceName(threat), a, nA, ...
             niceName(env.action_names{a})));
         [p2, g_db] = apply_countermeasure(p, threat, env.action_names{a});
-        params = p2; save('params.mat', 'params'); %#ok<NASGU>
+        saveParams(p2);
         evalc('build_threat_model');
         snr_dB = ebno + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps);
         set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p2.sps));
@@ -2253,7 +2269,7 @@ function loadKpiTab(fig)
         setCard(ui, 5, sprintf('%+.3f', dm), sprintf('return vs rule + escalation [%+.3f, %+.3f], threat sets', dlo, dhi), col);
         pv = P.KP.per_speed(:, strcmp(P.KP.show, P.POL{iD}));
         col = c.amber; if max(pv) - min(pv) <= 10, col = c.green; end
-        setCard(ui, 6, sprintf('%.1f%%', min(pv)), sprintf('worst speed band, restored (best %.1f%%) over %.0f-%.0f km/h', ...
+        setCard(ui, 6, sprintf('%.1f%%', min(pv)), sprintf('worst speed band, recovered (best %.1f%%) over %.0f-%.0f km/h', ...
             max(pv), P.KP.speed_bins(1), P.KP.speed_bins(end)), col);
     end
     if ~isempty(Lt)
@@ -2263,6 +2279,20 @@ function loadKpiTab(fig)
     if ~isempty(Kp)
         appLog(fig, sprintf('KPI summary: %s', strjoin(arrayfun(@(q) sprintf('%d %s', q.id, q.status), Kp, ...
             'UniformOutput', false), ' | ')));
+        % KPI 4 and 5 as measured by measure_all_kpis.m (recovered episodes, per threat)
+        k4 = Kp([Kp.id] == 4); k5 = Kp([Kp.id] == 5);
+        t4 = regexp(k4.value, 'lowest threat (\S+) ([\d.]+)%, (\d+) of (\d+) threats', 'tokens', 'once');
+        if ~isempty(t4)
+            col = c.green; if ~strcmp(k4.status, 'MET'), col = c.amber; end
+            setCard(ui, 2, sprintf('%s / %s', t4{3}, t4{4}), sprintf('threats >= 90%% recovered | lowest %s %s%%', ...
+                strrep(t4{1}, '_', ' '), t4{2}), col);
+        end
+        t5 = regexp(k5.value, '([+-][\d.]+) points.*\[([+-][\d.]+), ([+-][\d.]+)\]', 'tokens', 'once');
+        if ~isempty(t5)
+            col = c.green; if ~strcmp(k5.status, 'MET'), col = c.amber; end
+            setCard(ui, 5, sprintf('%s pts', t5{1}), sprintf('recovered vs rule + escalation [%s, %s], threat sets', ...
+                t5{2}, t5{3}), col);
+        end
     end
 
     guardedPlot(@() plotConfusion(ui.kCm, metrics, c), ui.kCm, 'Confusion matrix', 'eval_detector_metrics.mat', c);
@@ -2363,22 +2393,15 @@ function ok = plotLatency(ax, Lt, c)
 end
 
 function ok = plotActions(ax, P, c)
-    ok = ~isempty(P); if ~ok, return; end
-    Rd = P.RES{1, P.iDQN}; env = ancestor(ax, 'figure').UserData.env;
-    scn = unique(Rd.scn); acts = unique(Rd.cfg_final);
-    counts = zeros(numel(scn), numel(acts));
-    for t = 1:numel(scn)
-        for a = 1:numel(acts), counts(t, a) = mean(Rd.cfg_final(Rd.scn == scn(t)) == acts(a)); end
-    end
-    bb = bar(ax, 100 * counts, 'stacked');
-    pal = lines(numel(acts));
-    for a = 1:numel(acts), bb(a).FaceColor = pal(a, :); end
-    ax.XTick = 1:numel(scn); ax.XTickLabel = arrayfun(@(k) strrep(P.KP.per_threat_scn{k}, '_', ' '), ...
-        1:numel(scn), 'UniformOutput', false);
-    ax.XTickLabelRotation = 40; ax.FontSize = 8; grid(ax, 'on'); ylabel(ax, '% of episodes', 'Color', c.mut);
-    legend(ax, cellfun(@actionLabel, env.action_names(acts), 'UniformOutput', false), 'TextColor', c.txt, ...
-        'Color', c.panelBg, 'EdgeColor', c.mut, 'FontSize', 7, 'Location', 'eastoutside');
-    setTitle(ax, 'DQN configuration at episode end, per threat', c);
+    % Most frequent configuration of the deployed policy at episode end, per single threat
+    ok = ~isempty(P) && isfield(P, 'top_cfg') && ~isempty(P.top_cfg); if ~ok, return; end
+    T = P.top_cfg; n = numel(T);
+    barh(ax, 100 * [T.share], 0.6, 'FaceColor', c.accent, 'EdgeColor', 'none');
+    ax.YTick = 1:n; ax.YDir = 'reverse'; ax.FontSize = 8; ax.XLim = [0 100]; grid(ax, 'on');
+    ax.YTickLabel = arrayfun(@(t) sprintf('%s: %s', strrep(t.threat, '_', ' '), actionLabel(t.action)), T, ...
+        'UniformOutput', false);
+    xlabel(ax, '% of test episodes', 'Color', c.mut);
+    setTitle(ax, 'Most frequent configuration at episode end, per threat', c);
 end
 
 function ok = plotSpeed(ax, P, metrics, c)
@@ -2389,7 +2412,7 @@ function ok = plotSpeed(ax, P, metrics, c)
         b = P.KP.speed_bins; mid = (b(1:end-1) + b(2:end)) / 2;
         pv = P.KP.per_speed(:, strcmp(P.KP.show, P.POL{P.iDQN}));
         h(end+1) = plot(ax, mid, pv, '-s', 'LineWidth', 1.8, 'Color', c.amber, 'MarkerFaceColor', c.amber);
-        nm{end+1} = 'DQN restored cycles (%)';
+        nm{end+1} = 'DQN recovered episodes (%)';
     end
     if haveOff
         sb = metrics.speed_breakdown; mid = ([sb.speed_lo_kmh] + [sb.speed_hi_kmh]) / 2;
