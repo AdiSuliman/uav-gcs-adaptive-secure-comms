@@ -137,7 +137,7 @@ for i = 1:2
     if isempty(d{i}.q), sd.q = []; else, sd.q = d{i}.q(:, 1)'; end
     P = PP.pools{info.sc_eff(i), G.s, info.cfg_eff(i), M.split};
     m = mean(P.ber(P.run == PP.runs{M.split}(G.r)));
-    sd.ber = m; sd.ratio = m / max(PP.clean(G.s), K.ber_floor);
+    sd.ber = m; sd.ratio = m / max(PP.clean(G.s), decision_config().ber_floor);
     sd.restored = info.restored(i);
     if sd.restored, sd.status = 'ok'; elseif sd.ratio <= 5, sd.status = 'marginal'; else, sd.status = 'lost'; end
     sd.reward = rw(i); sd.q_link = info.q(i); sd.gput = info.gput(i);
@@ -247,7 +247,7 @@ end
 
 %% ===================== Helpers =====================
 function o = sliceObs(obs, i)
-o = struct('probs', obs.probs(i, :), 'unknown', obs.unknown(i), 'feat', obs.feat(i, :), 'ber', obs.ber(i));
+o = struct('probs', obs.probs(i, :), 'unknown', obs.unknown(i), 'feat', obs.feat(i, :), 'ber_true', obs.ber_true(i));
 end
 
 function c = compromised(E, K, cfg)

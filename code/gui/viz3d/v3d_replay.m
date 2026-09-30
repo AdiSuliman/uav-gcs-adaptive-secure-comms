@@ -26,7 +26,7 @@ for j = 1:numel(emit)
         otherwise,                  inr(j) = ep.ebno + ep.sev.jsr_db;
     end
 end
-bc = max(ep.ber_clean, M.K.ber_floor);
+bc = max(ep.ber_clean, decision_config().ber_floor);
 G = struct('onsetT', ep.n_pre + 1, 'events0', {{}});
 G.hist = struct('chan', {3, 3}, 'hops', {0, 0}, 'comp', {false, false});
 G.sides = struct('phase', {'clean', 'clean'}, 'okRun', {0, 0}, 'wasOk', {true, true}, 'detT', {0, 0}, ...
