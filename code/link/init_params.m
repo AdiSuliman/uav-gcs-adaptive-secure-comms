@@ -160,6 +160,12 @@ end
 params.int_aoa_random = true;         % interferer directions drawn per seeded sub-run (interferer_aoa.m)
 params.int_aoa_range_deg = [-90 90];  % range of the random directions (broadside angle) [deg]
 params.int_rician_k   = params.rician_k;  % K-factor of the interferer -> UAV channels (dB)
+% Receive chains: gain and phase mismatch between the antennas' chains, fixed per flight
+% (0.1 dB / 1 deg, the example of Bakr; it limits the null of a calibrated, non-adaptive
+% array to about -34 dB). The I/Q imbalance of a transceiver such as the AD9361 (0.2% /
+% 0.2 deg: image about 54 dB down) leaves even a 30 dB jammer's image far below our signal.
+params.chain_amp_db   = 0.1;          % [dB] std of each chain's gain error
+params.chain_phase_deg = 1;           % [deg] std of each chain's phase error
 params.rx_combiner    = 'mrc';        % 'mrc' baseline | 'mmse' (spatial_diversity action)
 params.csi_block      = 64;           % [symbols] channel-estimation window (MRC)
 params.mmse_window    = 32;           % [symbols] channel + interference-covariance window (MMSE)

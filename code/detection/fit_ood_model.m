@@ -14,9 +14,13 @@ function M = fit_ood_model(net, tr, classes, va)
 %   validation frames.
 %   M.score, the production candidate, is 'last' until eval_ood_detection.m
 %   selects it by leave-one-threat-out.
+%   Input pre-processing (Lee et al.): the step of last_pre is chosen on the validation
+%   split the same way, the one that best separates the known frames from their FGSM
+%   versions (AUROC), from a small grid (0 = no pre-processing).
 %   va  validation split (X, feats, Y); without it the ensemble weights are equal.
 M.layers = {'relu1', 'relu2', 'relu3', 'relu_feat2', 'relu_merge'};
-M.candidates = {'last', 'ensemble', 'raw', 'last_or_raw', 'last_or_if'};
+M.candidates = {'last', 'ensemble', 'raw', 'last_or_raw', 'last_or_if', 'last_pre'};
+M.eps_pre = [0 0];
 M.score = 'last';
 M.eps_img = 0.02; M.eps_feat = 0.1;                 % FGSM step: image [0,1] units, z-score units
 M.classes = classes;
@@ -38,6 +42,18 @@ Sp = layer_scores(M, Zv);
 [Xa, Fa] = fgsm(net, va.X, va.feats', va.Y, M.eps_img, M.eps_feat);
 Sn = layer_scores(M, ood_layer_features(net, M.layers, Xa, Fa));
 M.z_mu = mean(Sp, 2)'; M.z_sd = max(std(Sp, 0, 2), eps)';
+EPS_PRE = [0 0.0005 0.001 0.002 0.005];             % image step; the feature step is 5 times it (as M.eps_img / M.eps_feat)
+rs = RandStream('mt19937ar', 'Seed', 3);
+sub = randperm(rs, size(va.X, 4), min(3000, size(va.X, 4)));   % a fixed subset keeps the search cheap
+best = -inf;
+for e = EPS_PRE
+    ep = [e 5 * e];
+    dp = -min_d(pre_features(net, M, va.X(:, :, :, sub), va.feats(sub, :)', ep), M.mu{end}, M.P{end});
+    dn = -min_d(pre_features(net, M, Xa(:, :, :, sub), Fa(:, sub), ep), M.mu{end}, M.P{end});
+    r = tiedrank([dp(:); dn(:)]);
+    a = (sum(r(1:numel(dp))) - numel(dp) * (numel(dp) + 1) / 2) / (numel(dp) * numel(dn));   % AUROC
+    if a > best, best = a; M.eps_pre = ep; end
+end
 A = ([Sp, Sn] - M.z_mu(:)) ./ M.z_sd(:);
 lab = [ones(size(Sp, 2), 1); zeros(size(Sn, 2), 1)];
 b = glmfit(A', lab, 'binomial');
@@ -47,6 +63,14 @@ M.w = b(:)';
 Sv = ood_score_set(M, Zv, va.feats', {'last', 'raw', 'last_or_if'});
 for f = {'last', 'raw', 'iforest'}
     M.zs.(f{1}) = [mean(Sv.(f{1})), max(std(Sv.(f{1})), eps)];
+end
+end
+
+function d = min_d(V, mu, P)
+d = inf(1, size(V, 2));
+for c = 1:size(mu, 2)
+    D = V - mu(:, c);
+    d = min(d, sum(D .* (P * D), 1));
 end
 end
 

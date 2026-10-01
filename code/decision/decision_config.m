@@ -73,9 +73,16 @@ C.sev = struct( ...
     'airframe_shadowing',  struct('field', 'shadow_db',     'levels', [8 12 15.5 20 25]));
 C.nominal   = 3;            % index of the nominal level
 C.combo_sev = [2 3 4];      % levels of each component of a combined threat
+% Triples (one or several jammers at once, Liu et al.; natural, internal and hostile
+% interference together, Yang et al.): three emitters, more than three antennas can
+% null; two emitters with a lost antenna, so the two left can null only one; a jammer
+% in a banking turn at long range; a tone and a spoofer in a turn. Every combination
+% is also measured left out of training (experiment_combo_generalization.m).
 C.combos = {'jamming+path_loss', 'noise_burst+antenna_fault', 'sweeping_jammer+path_loss', 'spoofing+noise_burst', ...
             'reactive_jamming+path_loss', 'jamming+antenna_fault', 'spoofing+sweeping_jammer', ...
-            'benign_interference+noise_burst', 'jamming+airframe_shadowing', 'tone_jamming+path_loss'};
+            'benign_interference+noise_burst', 'jamming+airframe_shadowing', 'tone_jamming+path_loss', ...
+            'jamming+spoofing+benign_interference', 'noise_burst+spoofing+antenna_fault', ...
+            'jamming+airframe_shadowing+path_loss', 'tone_jamming+spoofing+airframe_shadowing'};
 
 % Signalling delay of a configuration change: the GCS must receive and apply the
 % new configuration before the link runs on it, so a change decided in one cycle

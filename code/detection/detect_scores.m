@@ -18,6 +18,8 @@ lay = [];                                           % layers the production scor
 if any(strcmp(M.score, {'last', 'last_or_raw', 'last_or_if'})), lay = nL; end
 if strcmp(M.score, 'ensemble'), lay = 1:nL; end
 probs = zeros(size(M.mu{end}, 2), N); maha = zeros(1, N);
+pre = strcmp(M.score, 'last_pre');                 % input pre-processing: one extra gradient pass
+if pre, lay = []; end
 for i0 = 1:128:N
     idx = i0:min(i0 + 127, N);
     xs = dlarray(single(X_spec(:, :, :, idx)), 'SSCB'); xf = dlarray(single(X_feat(:, idx)), 'CB');
@@ -33,7 +35,11 @@ for i0 = 1:128:N
         if startsWith(dims(out{j + 1}), 'SS'), v = reshape(mean(mean(v, 1), 2), size(v, 3), []); end
         Z{lay(j)} = v;
     end
-    S = ood_score_set(M, Z, double(X_feat(:, idx)), {M.score});
+    if pre
+        S = ood_score_set(M, Z, double(X_feat(:, idx)), {M.score}, pre_features(net, M, X_spec(:, :, :, idx), X_feat(:, idx)));
+    else
+        S = ood_score_set(M, Z, double(X_feat(:, idx)), {M.score});
+    end
     maha(idx) = S.(M.score);
 end
 end

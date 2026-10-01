@@ -1,10 +1,11 @@
-function S = ood_score_set(M, Z, Xf, need)
+function S = ood_score_set(M, Z, Xf, need, Zp)
 %OOD_SCORE_SET  The candidate unknown-threat scores of fit_ood_model.m;
 %   higher = more like the known classes. The production score is S.(M.score).
 %   Z     hidden features, one cell per layer of M.layers (ood_layer_features.m);
 %         cells may be empty when the candidates asked for do not use them
 %   Xf    normalized link features, nFeat x N
 %   need  candidates to compute (default: all)
+%   Zp    last-layer features of the pre-processed inputs (pre_features.m), for last_pre
 %   Candidates:
 %     last         Mahalanobis distance of the last hidden layer (Lee et al.)
 %     ensemble     Lee et al.'s feature ensemble over M.layers (FGSM-fitted weights)
@@ -14,6 +15,8 @@ function S = ood_score_set(M, Z, Xf, need)
 %                  the network's features or the measurements look unfamiliar
 %     last_or_if   the same with the isolation forest on the link features (Liu et
 %                  al.), the pairing named in the proposal
+%     last_pre     'last' on inputs pre-processed toward the closest known class
+%                  (Lee et al.'s input pre-processing; M.eps_pre)
 %   Components are standardized with the known validation frames (M.zs).
 if nargin < 4 || isempty(need), need = M.candidates; end
 N = size(Xf, 2);
@@ -34,6 +37,9 @@ end
 if use('last_or_if')
     [~, a] = isanomaly(M.forest, Xf');
     S.iforest = -a(:)';
+end
+if use('last_pre') && nargin >= 5 && ~isempty(Zp)
+    S.last_pre = -min_dist(Zp, M.mu{end}, M.P{end});
 end
 if use('last_or_raw'), S.last_or_raw = min(z(S.last, 'last'), z(S.raw, 'raw')); end
 if use('last_or_if'), S.last_or_if = min(z(S.last, 'last'), z(S.iforest, 'iforest')); end

@@ -276,6 +276,26 @@ FM = fuse_classes('fit', Z, y, 2, 1e-3);
 verifyGreaterThan(tc, mean(k == y), 0.95);
 end
 
+function test_pre_features(tc)
+% Lee et al.'s input pre-processing moves inputs toward the closest known class: the
+% smallest Mahalanobis distance of the last layer drops for most inputs
+rng(4);
+lg = layerGraph([imageInputLayer([8 8 1], 'Normalization', 'none', 'Name', 'img')
+    convolution2dLayer(3, 2, 'Name', 'conv'); reluLayer('Name', 'relu1')
+    fullyConnectedLayer(4, 'Name', 'fc_img'); concatenationLayer(1, 2, 'Name', 'cat')
+    fullyConnectedLayer(4, 'Name', 'fc_m'); reluLayer('Name', 'relu_merge')
+    fullyConnectedLayer(2, 'Name', 'fc_out')]);
+lg = addLayers(lg, [featureInputLayer(3, 'Name', 'feat'); fullyConnectedLayer(4, 'Name', 'fc_f')]);
+lg = connectLayers(lg, 'fc_f', 'cat/in2');
+net = dlnetwork(lg);
+X = rand(8, 8, 1, 40); F = randn(3, 40);
+M = struct('layers', {{'relu_merge'}}, 'mu', {{rand(4, 2)}}, 'P', {{eye(4)}}, 'eps_pre', [0 0]);
+d = @(Z) min([sum((Z - M.mu{1}(:, 1)).^2, 1); sum((Z - M.mu{1}(:, 2)).^2, 1)], [], 1);
+d0 = d(pre_features(net, M, X, F, [0 0]));
+d1 = d(pre_features(net, M, X, F, [0.01 0.05]));
+verifyGreaterThan(tc, mean(d1 < d0 | d0 == 0), 0.8);
+end
+
 function test_frame_layout(tc)
 % quiet slot first, then training, data and pilots without overlap, a guard at the end
 p = base_params();

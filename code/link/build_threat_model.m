@@ -29,6 +29,8 @@ function build_threat_model(p)
 %           Output 2: share of the frame's samples with the threat on the air
 %           (benign packet traffic, an antenna fault with its contact open; 1 for
 %           every other threat, 0 for none).
+%           Last, every antenna's receive chain: a gain and phase error fixed per flight
+%           (p.chain_amp_db, p.chain_phase_deg).
 %           Interferer directions come from the Constant block 'AoA': p.int_aoa_deg,
 %           or, with p.int_aoa_random, drawn per seed from p.int_aoa_range_deg by
 %           link_seed.m (interferer_aoa.m); they turn with the heading as our LoS does.
@@ -386,6 +388,14 @@ for c = 1:numel(addc)
         'for k = 1:%d\n' ...
         '    y(:, k) = y(:, k) + w .* (sqrt(Ki/(Ki+1)) * aI(k) + sqrt(1/(Ki+1)) * dI(:, k));\n' ...
         'end\n'], 2*pi*p.ant_spacing_wl, nr-1, c, nr)]; %#ok<AGROW>
+end
+if p.chain_amp_db > 0 || p.chain_phase_deg > 0
+    % receive chains: a gain and phase error per antenna, fixed for the flight (everything
+    % the antenna receives passes its chain)
+    pers{end+1} = 'gch'; %#ok<AGROW>
+    init{end+1} = sprintf('gch = 10.^(%.6f * randn(1, %d) / 20) .* exp(1j * %.8f * randn(1, %d));', ...
+        p.chain_amp_db, nr, deg2rad(p.chain_phase_deg), nr); %#ok<AGROW>
+    body{end+1} = sprintf('for k = 1:%d\n    y(:, k) = y(:, k) * gch(k);\nend\n', nr); %#ok<AGROW>
 end
 
 pers = [{'nI'}, pers]; init = [{'nI = 0;'}, init];
@@ -906,6 +916,7 @@ d = struct('n_rx', 3, 'ant_aperture_m', 1.2, 'rx_corr', 0.3, 'gcs_aoa_deg', 0, .
     'yaw_random', false, 'roll_max_deg', 57.9, 'turn_v_floor', 8, 'yaw_rate_max', 28.7, ...
     'quiet_symbols', 0, 'cycle_s', 0, 'benign_occ', [], 'benign_pkt_s', [], 'benign_idle_shape', 1, ...
     'corr_random', false, 'corr_range', [0.3 0.9], 'shadow_k_db', -16, 'fault_atten_db', 31, ...
+    'chain_amp_db', 0, 'chain_phase_deg', 0, ...
     'stf_len', 4, 'stf_rep', 10, 'ltf_len', 16, 'ltf_rep', 2, 'pilot_block', 4, 'pilot_every', 48, ...
     'rx_sync', 'ideal', 'cfo_ppm', 25, 'timing_max_sym', 4, 'rx_dd_iter', 2);
 f = fieldnames(d);
