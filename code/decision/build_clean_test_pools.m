@@ -4,7 +4,7 @@
 % every configuration (common random numbers, as in build_policy_pools.m), with
 % the same detector, frames per geometry and features (pool_cell.m, in parallel).
 % Two sets, chosen by CLEAN_SET (default 'test'):
-%   'test'  seed block 11 -> data/clean_test_pools.mat: evaluate_policies.m runs
+%   'test'  seed block 15 -> data/clean_test_pools.mat: evaluate_policies.m runs
 %           one clean episode per geometry (600 independent episodes) and KPI 6
 %           is computed over them
 %   'val'   seed block 4 -> data/clean_val_pools.mat: train_dqn.m checks the false
@@ -19,7 +19,7 @@ fprintf('=== Clean-link pools over many geometries ===\n\n');
 %% 1. Configuration
 if ~exist('CLEAN_SET', 'var'), CLEAN_SET = 'test'; end
 switch CLEAN_SET
-    case 'test', SP = 11; f_out = 'data/clean_test_pools.mat';
+    case 'test', SP = 15; f_out = 'data/clean_test_pools.mat';
     case 'val',  SP = 4; f_out = 'data/clean_val_pools.mat';
     otherwise, error('build_clean_test_pools: CLEAN_SET must be ''test'' or ''val''');
 end
@@ -59,18 +59,23 @@ for j = 1:nJ
         geo{j, s} = struct('seed', sd_, 'speed', v_, 'run', runs(r));
     end
 end
-turn = []; parallel_turn('take'); turn = onCleanup(@() parallel_turn('give'));   % one heavy parallel stage at a time on this computer
-pl = gcp('nocreate');
-if isempty(pl) || pl.NumWorkers ~= N_WORKERS
-    delete(pl); pl = parpool('Processes', N_WORKERS);
-end
-repo = pwd;
-spmd
-    pool_worker_init(repo);
+NWP = N_WORKERS;
+if exist('SMOKE', 'var') && SMOKE
+    NWP = 0;                                            % reduced chain check: on this process, no parallel turn
+else
+    turn = []; parallel_turn('take'); turn = onCleanup(@() parallel_turn('give'));   % one heavy parallel stage at a time on this computer
+    pl = gcp('nocreate');
+    if isempty(pl) || pl.NumWorkers ~= N_WORKERS
+        delete(pl); pl = parpool('Processes', N_WORKERS);
+    end
+    repo = pwd;
+    spmd
+        pool_worker_init(repo);
+    end
 end
 t0 = tic;
 res = cell(1, nJ);
-parfor j = 1:nJ
+parfor (j = 1:nJ, NWP)
     res{j} = pool_cell(p0, 'none', ACTIONS, EBNO, geo(j, :), det, opt);
     fprintf('  geometries chunk %d/%d done\n', j, nJ);
 end

@@ -11,7 +11,10 @@ function [net, info] = train_hybrid_net(tr, va, classes, opts)
 %   scoring) -> dropout 0.3 -> FC nClasses ('fc_out') -> softmax.
 %   Training: Adam, cosine learning-rate decay to lr/20, L2 weight decay,
 %   time/frequency masking of the spectrogram (one band of each, 50% of the
-%   samples); best epoch by validation accuracy.
+%   samples); cross-entropy weighted by the inverse class frequency of the
+%   training split (benign frames without a packet on the air are clean frames,
+%   so the classes are not equally large); best epoch by validation macro-F1,
+%   the KPI 1 metric.
 
 if nargin < 4, opts = struct(); end
 o = struct('epochs', 30, 'batch', 64, 'lr', 1e-3, 'l2', 1e-4, 'augment', true, 'verbose', true);
@@ -59,6 +62,8 @@ if useGPU, net = dlupdate(@gpuArray, net); end
 Xtr = single(tr.X); Ftr = single(tr.feats)';
 Ttr = single(double(onehotencode(tr.Y(:), 2)'));
 [~, vt] = max(double(onehotencode(va.Y(:), 2)'), [], 1);
+cw = sum(Ttr, 2); cw = single(sum(cw) ./ (nClasses * max(cw, 1)));   % inverse class frequency, mean 1
+cw = dlarray(cw, 'CB'); if useGPU, cw = gpuArray(cw); end
 
 nTrain = size(Xtr, 4);
 nIter = floor(nTrain / o.batch);
@@ -77,18 +82,18 @@ for ep = 1:o.epochs
         if o.augment, xs = spec_mask(xs); end
         xs = dlarray(xs, 'SSCB'); xf = dlarray(Ftr(:, idx), 'CB'); tt = dlarray(Ttr(:, idx), 'CB');
         if useGPU, xs = gpuArray(xs); xf = gpuArray(xf); tt = gpuArray(tt); end
-        [loss, grads, state] = dlfeval(@model_loss, net, xs, xf, tt);
+        [loss, grads, state] = dlfeval(@model_loss, net, xs, xf, tt, cw);
         net.State = state;
         grads = dlupdate(@(g, w) g + o.l2 * w, grads, net.Learnables);
         [net, avgG, avgSq] = adamupdate(net, grads, avgG, avgSq, it, lr);
         lsum = lsum + double(gather(extractdata(loss)));
     end
     [~, vp] = max(cnn_scores(net, va.X, va.feats'), [], 1);   % batched: the whole split does not fit on the GPU
-    acc = mean(vp == vt);
+    acc = macro_f1(vt, vp, nClasses);
     hist.trainLoss(ep) = lsum / nIter; hist.valAcc(ep) = acc;
     if acc > bestAcc, bestAcc = acc; bestNet = net; bestEpoch = ep; end
     if o.verbose
-        fprintf('  epoch %2d/%d | loss %.4f | val acc %.4f%s\n', ep, o.epochs, hist.trainLoss(ep), acc, ...
+        fprintf('  epoch %2d/%d | loss %.4f | val macro-F1 %.4f%s\n', ep, o.epochs, hist.trainLoss(ep), acc, ...
             repmat(' *', 1, bestEpoch == ep));
     end
 end
@@ -97,10 +102,19 @@ info = struct('trainLoss', hist.trainLoss, 'valAcc', hist.valAcc, 'bestEpoch', b
     'bestValAcc', bestAcc, 'numEpochs', o.epochs, 'miniBatchSize', o.batch, 'nFeat', nFeat, 'opts', o);
 end
 
-function [loss, grads, state] = model_loss(net, xs, xf, tt)
+function [loss, grads, state] = model_loss(net, xs, xf, tt, cw)
 [y, state] = forward(net, xs, xf);
-loss = crossentropy(y, tt);
+loss = -sum(cw .* tt .* log(y + 1e-8), 'all') / size(tt, 2);
 grads = dlgradient(loss, net.Learnables);
+end
+
+function m = macro_f1(y, yh, C)
+f = zeros(1, C);
+for c = 1:C
+    tp = sum(yh == c & y == c); fp = sum(yh == c & y ~= c); fn = sum(yh ~= c & y == c);
+    f(c) = 2 * tp / max(2 * tp + fp + fn, 1);
+end
+m = mean(f);
 end
 
 function X = spec_mask(X)

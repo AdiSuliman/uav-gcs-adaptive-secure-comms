@@ -5,7 +5,8 @@
 % window is shared between training and test. Every cell is present in every split.
 %
 % Input:  data/spectrograms.mat
-% Output: data/splits.mat (train/val/test with X, Y, feats, ebno, speed, run, level; norm stats)
+% Output: data/splits.mat (train/val/test with X, Y, feats, ebno, speed, run, level, and
+%         the frame position and per-antenna gains when present; norm stats)
 
 close all; clc;
 fprintf('=== B1: Prepare Data (split by sub-run) ===\n\n');
@@ -32,6 +33,11 @@ for i = 1:3
     m = ix.(names{i});
     splits.(names{i}) = struct('X', sp0.X(:, :, :, m), 'Y', sp0.Y(m), 'feats', feats_norm(m, :), ...
         'ebno', sp0.ebno(m), 'speed', sp0.speed_kmh(m), 'run', sp0.run(m), 'level', sp0.level(m));
+    if isfield(sp0, 'pos')
+        splits.(names{i}).pos = sp0.pos(m); splits.(names{i}).gain_ant = sp0.gain_ant(m, :);
+        splits.(names{i}).feats_raw = sp0.feats(m, :);
+    end
+    if isfield(sp0, 'k_db'), splits.(names{i}).k_db = sp0.k_db(m); splits.(names{i}).aoa = sp0.aoa(m); end
 end
 splits.norm = struct('feat_mean', feat_mean, 'feat_std', feat_std, 'feat_names', {sp0.feat_names});
 splits.classes = classes;

@@ -61,7 +61,7 @@ for t = 1:numel(THREATS)
     semilogy(ax, max(resp.ber, fl), '-', 'Color', [0.47 0.67 0.19], 'LineWidth', 1.8);
     yline(ax, max(2 * mean(clean.ber, 'omitnan'), fl), '--k', '2x clean');
     set(ax, 'YScale', 'log'); ylim(ax, [fl * 0.8 1]); xlim(ax, [1 NF]);
-    xlabel(ax, sprintf('Frame (%.2f ms each)', 1000 * p0.frame_duration)); ylabel(ax, 'BER');
+    xlabel(ax, sprintf('Decision cycle (one %.2f ms frame every %g ms)', 1000 * p0.air_symbols / p0.symbol_rate, 1000 * p0.cycle_s)); ylabel(ax, 'BER');
     legend(ax, {'clean link', 'no response', strrep(strrep(act, '_', ' '), '+', ' + ')}, 'Location', 'southoutside', ...
         'NumColumns', 2);                                        % long configurations wrap instead of being cut
     title(ax, sprintf('(c) Response: %s', src));

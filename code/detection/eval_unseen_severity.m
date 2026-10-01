@@ -5,9 +5,9 @@
 % production detector:
 %   seen     every other training level (reference from the same generator)
 %   between  midpoints between training levels (never trained on), every other one
-%   above    beyond the strongest training level (in-band threats 32 and 36 dB,
-%            path loss 28 and 31 dB, spoofer 12 dB, antenna fault 70%, airframe
-%            shadowing 37 and 41 dB)
+%   above    beyond the strongest training level, where the sources allow it (antenna
+%            fault open 70% of the time); every other threat is trained up to the
+%            sources' most severe value
 % Per frame: correct class, a class that calls for the same countermeasure
 % (rule_based_policy.m), or flagged unknown (production score below the threshold
 % keeping 95% of known validation frames).
@@ -26,11 +26,11 @@ N_FRAMES = 20;                   % frames per (threat, level, Eb/N0) block
 delay_bits = 20; temporal_window = 10;
 rng(4343, 'twister');
 clear threat_cfg
-% Above the training range, up to the most severe value in the sources: 30 dB over our
-% signal (Liu et al.), 35 dB attenuation (airframe shadowing, Khawaja et al.)
-ABOVE = struct('jamming', 30, 'noise_burst', 30, 'reactive_jamming', 30, 'sweeping_jammer', 30, ...
-    'tone_jamming', 30, 'path_loss', [28 31], 'spoofing', 12, 'antenna_fault', 0.7, ...
-    'benign_interference', [], 'airframe_shadowing', 35);
+% Above the training range only where the sources go further than the training levels
+% (in-band threats and airframe shadowing are trained up to 30 and 35 dB)
+ABOVE = struct('jamming', [], 'noise_burst', [], 'reactive_jamming', [], 'sweeping_jammer', [], ...
+    'tone_jamming', [], 'path_loss', [], 'spoofing', [], 'antenna_fault', 0.7, ...
+    'benign_interference', [], 'airframe_shadowing', []);
 DL = dataset_levels();
 threat_cfg = struct('name', {}, 'param', {}, 'lv', {});
 for t = 1:numel(DL)
@@ -41,9 +41,9 @@ for t = 1:numel(DL)
 end
 KINDS = {'seen', 'between', 'above'};
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
-    threat_cfg = threat_cfg([1 10]); EBNO = EBNO(3);
-    for t = 1:2, threat_cfg(t).lv = struct('seen', threat_cfg(t).lv.seen(1), 'between', threat_cfg(t).lv.between(1), ...
-            'above', threat_cfg(t).lv.above(1)); end
+    threat_cfg = threat_cfg([1 6]); EBNO = EBNO(3);
+    for t = 1:2, a = threat_cfg(t).lv.above; threat_cfg(t).lv = struct('seen', threat_cfg(t).lv.seen(1), ...
+            'between', threat_cfg(t).lv.between(1), 'above', a(1:min(1, end))); end
 end
 
 D = load('data/trained_detector.mat', 'net', 'classes', 'ood');

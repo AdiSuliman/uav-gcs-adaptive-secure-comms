@@ -10,7 +10,10 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   configuration the channel BER stays high while the decoder repairs the bursts,
 %   so there the CRC packet loss decides (above C.ratio_ok x the clean coded link,
 %   at least 2 of the C.win packets).
-%   Detected class: 'unknown' when the unknown-threat score is below its threshold.
+%   Detected class: from the temporal fusion of the last PP.fuse_N cycles
+%   (temporal_evidence.m, fuse_classes.m) when PP.fuse is set, otherwise the
+%   frame's own detector output; 'unknown' when the unknown-threat score, averaged
+%   over the last PP.unk_win cycles, is below its threshold.
 %   Alarm, PP.alarm_mode 'class' (default): a hostile threat class, or degradation;
 %   'none', 'benign_interference' (non-hostile, D9) and 'unknown' raise it only
 %   through degradation. 'class_drop': as 'class', but the class path_loss
@@ -19,10 +22,13 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   Eb/N0 estimate of the last 10 cycles without an alarm, minus the median of the
 %   last 3 cycles. An alarm is CONFIRMED when at least m of the last n cycles carried
 %   one (M-of-N binary integration, PP.confirm, default C.confirm).
-%   The monitor also keeps the last C.hist observation vectors of policy_state.m.
+%   The monitor also keeps the last C.hist observation vectors of policy_state.m,
+%   and the window of the temporal fusion (probabilities, antenna gains, quiet-slot
+%   interference, unknown scores).
 %   mem.since starts saturated (10): the policies never see the episode clock.
 %   mem.deg_n / mem.conf_n: consecutive degraded / confirmed-alarm cycles.
-%   M: ber_avg, plr (NE x 1), ebno_est, drop (dB), degraded, cls, alarm, confirmed (1 x NE)
+%   M: ber_avg, plr (NE x 1), ebno_est, drop (dB), degraded, cls, alarm, confirmed (1 x NE),
+%      probs (NE x classes, fused), te (NE x 4, persistence measurements of the window)
 C = decision_config();
 switch cmd
     case 'init'
@@ -30,7 +36,8 @@ switch cmd
         mem = struct('ber', nan(NE, C.win), 'crc', nan(NE, C.win), 'tried', false(NE, nA), ...
             'since', 10 * ones(1, NE), 'cand', zeros(1, NE), 'cand_n', zeros(1, NE), 'good', zeros(1, NE), ...
             'deg_n', zeros(1, NE), 'conf_n', zeros(1, NE), 'alarm', false(NE, 8), 'ebno', nan(NE, 3), ...
-            'ref', nan(NE, 10), 'hist', []);
+            'ref', nan(NE, 10), 'hist', [], 'wp', [], 'wg', [], 'wq', [], 'wu', [], 'wd', [], 'wn', zeros(1, NE), ...
+            'unk_now', false(1, NE));
         M = [];
     case 'update'
         [mem, M] = update(C, varargin{:});
@@ -66,9 +73,11 @@ M.degraded = deg(:)';
 mem.good(~M.degraded) = mem.good(~M.degraded) + 1; mem.good(M.degraded) = 0;
 mem.deg_n(M.degraded) = mem.deg_n(M.degraded) + 1; mem.deg_n(~M.degraded) = 0;
 mem.tried(mem.good >= C.heal, :) = false;
-[~, k] = max(obs.probs, [], 2);
+[mem, pf, te, unk] = fusion(mem, obs, PP);
+M.probs = pf; M.te = te;
+[~, k] = max(pf, [], 2);
 cls = PP.classes(k);
-cls(obs.unknown) = {'unknown'};
+cls(unk) = {'unknown'};
 M.cls = cls(:)';
 mode = 'class'; if isfield(PP, 'alarm_mode'), mode = PP.alarm_mode; end
 hostile = ~ismember(M.cls, {'none', 'benign_interference', 'unknown'});
@@ -88,20 +97,54 @@ mem.alarm = [mem.alarm(:, 2:end), M.alarm(:)];
 M.confirmed = sum(mem.alarm(:, end-cf(2)+1:end), 2)' >= cf(1);
 mem.conf_n(M.confirmed) = mem.conf_n(M.confirmed) + 1; mem.conf_n(~M.confirmed) = 0;
 % Observation of this cycle for the agent's state (policy_state.m), newest first
-o = policy_obs(obs, M, bc);
+o = policy_obs(obs, M, bc, unk);
 if isempty(mem.hist), mem.hist = repmat(o, 1, 1, C.hist); end
 mem.hist = cat(3, o, mem.hist(:, :, 1:end-1));
 end
 
-function o = policy_obs(obs, M, bc)
-% Per-cycle observation (rows) x episodes: class probabilities, unknown flag,
-% log10 estimated BER (window), degradation (log10 of estimate / clean estimate,
-% clipped to [-1, 3]), packet loss (window), SINR, IoT, post-combining SNR,
-% spatial coherence, predicted MMSE gain, alignment, antenna gain gap, Eb/N0
-% drop (clipped).
+function o = policy_obs(obs, M, bc, unk)
+% Per-cycle observation (rows) x episodes: class probabilities (fused over the
+% last cycles), unknown flag, log10 estimated BER (window), degradation (log10 of
+% estimate / clean estimate, clipped to [-1, 3]), packet loss (window), SINR, IoT,
+% post-combining SNR, spatial coherence, predicted MMSE gain, alignment, antenna
+% gain gap, Eb/N0 drop (clipped), quiet-slot interference, reactive ratio, and the
+% persistence measurements of the window (gap of the antennas' local means, share
+% of cycles with the same weakest antenna, share with quiet-slot interference,
+% share with one antenna 20 dB below the next).
 fi = @(n) obs.feat(:, feature_index(n));
 lb = log10(max(M.ber_avg, 1e-6));
 deg = min(3, max(-1, log10(max(M.ber_avg, 1e-6) ./ bc)));
-o = [obs.probs'; double(obs.unknown(:)'); lb'; deg'; M.plr'; fi('sinr')'; fi('iot')'; fi('snr_post')'; ...
-     fi('coh')'; fi('mmse_gain')'; fi('align')'; fi('branch_gap')'; min(20, max(-10, M.drop))];
+o = [M.probs'; double(unk(:)'); lb'; deg'; M.plr'; fi('sinr')'; fi('iot')'; fi('snr_post')'; ...
+     fi('coh')'; fi('mmse_gain')'; fi('align')'; fi('branch_gap')'; min(20, max(-10, M.drop)); ...
+     min(40, max(-5, fi('q_iot')')); min(40, max(-10, fi('q_react')')); M.te'];
+end
+
+function [mem, pf, te, unk] = fusion(mem, obs, PP)
+% Window of the last cycles (oldest first) and the fused class probabilities.
+NE = size(obs.probs, 1);
+N = 1; if isfield(PP, 'fuse_N') && ~isempty(PP.fuse_N), N = PP.fuse_N; end
+Nu = 1; if isfield(PP, 'unk_win') && ~isempty(PP.unk_win), Nu = PP.unk_win; end
+W = max([N, Nu, 1]);
+g = zeros(NE, 1); if isfield(obs, 'gant') && ~isempty(obs.gant), g = obs.gant; end
+mh = nan(NE, 1); if isfield(obs, 'maha') && ~isempty(obs.maha), mh = obs.maha(:); end
+q = obs.feat(:, feature_index('q_iot')); dp = obs.feat(:, feature_index('branch_dip'));
+if isempty(mem.wp)
+    mem.wp = repmat(obs.probs, 1, 1, W); mem.wg = repmat(g, 1, 1, W);
+    mem.wq = repmat(q, 1, W); mem.wu = repmat(mh, 1, W); mem.wd = repmat(dp, 1, W);
+end
+mem.wp = cat(3, mem.wp(:, :, 2:end), obs.probs); mem.wg = cat(3, mem.wg(:, :, 2:end), g);
+mem.wq = [mem.wq(:, 2:end), q]; mem.wu = [mem.wu(:, 2:end), mh]; mem.wd = [mem.wd(:, 2:end), dp];
+mem.wn = min(mem.wn + 1, W);
+pf = obs.probs; te = zeros(NE, 4);
+for n = unique(mem.wn)                                     % episodes with the same filled window length
+    e = find(mem.wn == n);
+    k = W - min(n, N) + 1:W;
+    Z = temporal_evidence(mem.wp(e, :, k), mem.wg(e, :, k), mem.wq(e, k), mem.wd(e, k));
+    te(e, :) = Z(:, end-3:end);
+    if isfield(PP, 'fuse') && ~isempty(PP.fuse), pf(e, :) = fuse_classes('apply', PP.fuse, Z); end
+    ku = W - min(n, Nu) + 1:W;
+    mem.unk_now(e) = mean(mem.wu(e, ku), 2) < PP.maha_thr;
+end
+unk = obs.unknown(:)';
+if Nu > 1 && ~all(isnan(mh)), unk = mem.unk_now(:)' | (obs.unknown(:)' & isinf(mh(:)')); end
 end

@@ -43,9 +43,10 @@ function varargout = link_env(cmd, varargin)
 %   x the clean link's + one packet of the geometry; healthy: unmitigated m <=
 %   C.ratio_ok x clean; recoverable: some configuration restores both BER and
 %   packet loss in this geometry.
-%   obs: probs (NE x classes), unknown (score below threshold, or masked), feat
-%   (NE x link features, receiver measurements), cfg_link (configuration the
-%   frame was received with), ber_true (analysis only)
+%   obs: probs (NE x classes), maha (unknown-threat score), unknown (score below
+%   threshold, or masked), feat (NE x link features, receiver measurements), gant
+%   (NE x antennas, mean channel gain of every antenna), cfg_link (configuration
+%   the frame was received with), ber_true (analysis only)
 switch cmd
     case 'tables', varargout{1} = tables(varargin{:});
     case 'reset',  [varargout{1}, varargout{2}] = reset_env(varargin{:});
@@ -180,16 +181,22 @@ cm = compromised(E, K, E.cfg_link);
 cfg_eff(cm) = K.strip(E.cfg_link(cm));
 nC = numel(PP.classes); nF = numel(PP.feat_names);
 obs.probs = zeros(E.NE, nC); obs.unknown = false(E.NE, 1); obs.feat = zeros(E.NE, nF); obs.ber_true = zeros(E.NE, 1);
+obs.maha = zeros(E.NE, 1); obs.gant = [];
 for i = 1:E.NE
     P = PP.pools{sc_eff(i), E.s(i), cfg_eff(i), E.split};
     rows = find(P.run == PP.runs{E.split}(E.r(i)));
     j = rows(mod(E.k0(i) + E.t(i), numel(rows)) + 1);
     obs.probs(i, :) = P.probs(j, :);
     obs.unknown(i) = P.maha(j) < PP.maha_thr;
+    obs.maha(i) = P.maha(j);
     obs.feat(i, :) = P.feat(j, :);
+    if isfield(P, 'gant') && ~isempty(P.gant)
+        if isempty(obs.gant), obs.gant = zeros(E.NE, size(P.gant, 2)); end
+        obs.gant(i, :) = P.gant(j, :);
+    end
     obs.ber_true(i) = P.ber(j);
 end
 mask = E.unk & E.t >= E.onset;
-obs.probs(mask, :) = 0; obs.unknown(mask) = true;
+obs.probs(mask, :) = 0; obs.unknown(mask) = true; obs.maha(mask) = -Inf;
 obs.cfg_link = E.cfg_link(:);
 end

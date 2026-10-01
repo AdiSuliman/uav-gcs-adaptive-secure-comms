@@ -6,7 +6,8 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 % Inputs:
 %   out         Simulink SimulationOutput of the threat link (build_threat_model.m)
 %   p           params of the run (frame_length, sps, rolloff, filter_span, fec)
-%   delay_bits  Tx + Rx filter delay in bits (20)
+%   delay_bits  Tx + Rx filter delay in bits (20); 0 with a quiet slot longer than
+%               the filter delay (the receiver then outputs each frame's own bits)
 %
 % Output F (vectors 1 x nf, one entry per frame):
 %   nf, iq{f}   number of frames; received IQ of frame f on the reference antenna
@@ -15,7 +16,8 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %   Ground truth (evaluation and training reward only, never an input of the
 %   detector or of a policy):
 %     ber       bit error rate (with p.fec: decoded information bits); NaN when the
-%               frame runs past the aligned bit range (the last frame of a run)
+%               frame runs past the aligned bit range (the last frame of a run
+%               without a quiet slot)
 %     fer       1 when the frame has at least one bit error
 %   Receiver measurements (the transmitted bits and waveform are never used):
 %   The IQ measurements (rssi, sinr, env_corr, iot) are taken on the reference
@@ -57,9 +59,21 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %   The last five come from the receiver's channel estimator (per-32-symbol
 %   channel estimates and the frame's interference + noise covariance, the
 %   quantities MMSE combining uses; known symbols = ideal pilots, proposal risk 8).
+%   Quiet slot (p.quiet_symbols): the end of every frame carries no signal of ours.
+%     q_iot     interference over thermal in the quiet slot [dB], mean of the
+%               antennas: what occupies the channel while we are silent
+%     q_react   residual power while we transmit over the quiet-slot power on the
+%               reference antenna [dB]: ~0 for interference independent of us,
+%               large for a jammer that transmits only while it senses our signal
+%     gain_ant  mean channel gain of every antenna over the frame [dB] (antennas x
+%               frames), for measurements over several decision cycles
+%   Ground truth: act, share of the frame with the threat on the air (packet traffic
+%   of benign interference), analysis and labels only.
 % With p.fec (fec_interleave) ber, fer and crc_fail are those of the decoded
 % information bits (half a frame each, 484 + 32 CRC).
 
+NQ = 0; if isfield(p, 'quiet_symbols'), NQ = p.quiet_symbols; end
+if NQ >= p.filter_span, delay_bits = 0; end              % the receiver aligns each frame's bits
 txb = double(squeeze(out.get('tx_bits_out')));
 rxb = double(squeeze(out.get('rx_bits_out')));
 iqa = out.get('Rx_IQ');                                  % samples x antennas x frames
@@ -80,7 +94,7 @@ F = struct('nf', nf);
 
 % Ground truth and CRC
 if isfield(p, 'fec') && p.fec
-    [F.ber, F.fer, F.crc_fail] = fec_frames(tx_al, rx_al, reshape(iqa(:, 1, :), ns, nf), p, delay_bits, nf);
+    [F.ber, F.fer, F.crc_fail] = fec_frames(tx_al, rx_al, reshape(iqa(:, 1, :), ns, nf), p, nf);
 else
     err = double(tx_al ~= rx_al);
     F.ber = nan(1, nf); F.fer = nan(1, nf); F.crc_fail = nan(1, nf);
@@ -99,13 +113,17 @@ end
 [F.coh, F.mmse_gain, F.align] = spatial_metrics(Hq, Rq, nf);
 F.branch_dip = branch_dip(Hq, nf);
 F.branch_gap = branch_gap(Hq, nf);
+F.gain_ant = gain_ant(Hq, nf);
 xh = remod_frames(rx_all(delay_bits+1:end), p, ns, nf);
-rs = nan(na, nf); sn = nan(na, nf); ec = nan(na, nf); io = nan(na, nf);
+qn = max(NQ - p.filter_span - 2, 0) * p.sps;            % quiet-slot samples free of our filter tails
+dat = (1:ns - qn)';                                      % samples that carry our signal
+rs = nan(na, nf); sn = nan(na, nf); ec = nan(na, nf); io = nan(na, nf); pe = nan(na, nf); pq = nan(na, nf);
 for a = 1:na
     ia = reshape(iqa(:, a, :), ns, nf);
-    rs(a, :) = 10*log10(mean(abs(ia).^2, 1) + eps);
-    [sn(a, :), ec(a, :)] = residual_metrics(xh, ia);
+    rs(a, :) = 10*log10(mean(abs(ia(dat, :)).^2, 1) + eps);
+    [sn(a, :), ec(a, :), pe(a, :)] = residual_metrics(xh(dat, :), ia(dat, :));
     io(a, :) = iot_of(out, p, rs(a, :), sn(a, :));
+    if qn > 0, pq(a, :) = mean(abs(ia(ns - qn + 1:ns, :)).^2, 1); end
 end
 s0 = sn; s0(isnan(s0)) = -Inf;
 [~, ref] = max(s0, [], 1);                                  % reference antenna per frame
@@ -114,6 +132,15 @@ F.ref = ref; F.sinr_ant = sn;
 F.iq = arrayfun(@(f) iqa(:, ref(f), f), 1:nf, 'UniformOutput', false);
 F.rssi = rs(k); F.sinr = sn(k); F.env_corr = ec(k); F.iot = io(k);
 F.sinr_gap = F.sinr - min(sn, [], 1);
+F.act = ones(1, nf);
+try
+    a = squeeze(out.get('Thr_act')); F.act = reshape(a(1:min(nf, numel(a))), 1, []);
+    if numel(F.act) < nf, F.act(end+1:nf) = F.act(end); end
+catch
+end
+nv = thermal_of(out, p);                                 % thermal noise power per sample
+F.q_iot = 10*log10(mean(pq, 1) / nv);
+F.q_react = 10*log10(pe(k) ./ pq(k));
 end
 
 %% ===================== CRC =====================
@@ -130,7 +157,7 @@ fail = double(fail);
 end
 
 %% ===================== FEC =====================
-function [ber, fer, crcf] = fec_frames(tx_al, rx_al, iq, p, delay_bits, nf)
+function [ber, fer, crcf] = fec_frames(tx_al, rx_al, iq, p, nf)
 % fec_interleave: the channel bit errors of this run are applied to a
 % rate-1/2 convolutionally coded, randomly interleaved stream. Symbols whose
 % received energy is more than 6 dB above the run's median are erased (a burst
@@ -145,8 +172,12 @@ x = iq(:);
 nsym = floor(numel(x) / sps);
 Es = mean(reshape(abs(x(1:nsym*sps)).^2, sps, nsym), 1);
 hot = movmax(double(Es > 4 * median(Es)), [3 3]) > 0;   % tolerate filter delay and alignment
-d = round(delay_bits / 4);                           % Tx filter delay in symbols
-sym = floor((0:L-1)' / 2) + 1 + d;
+d = p.filter_span / 2;                               % Tx filter delay in symbols
+NQ = 0; if isfield(p, 'quiet_symbols'), NQ = p.quiet_symbols; end
+nd = p.frame_length / 2;                             % data symbols per frame
+b = (0:L-1)';
+fi = floor(b / p.frame_length);                      % frame of each bit
+sym = fi * (nd + NQ) + floor((b - fi * p.frame_length) / 2) + 1 + d;
 er = false(L, 1);
 in = sym <= nsym;
 er(in) = hot(sym(in));
@@ -269,17 +300,25 @@ nsym = floor(numel(bits) / 2);
 if nsym < 1, return; end
 txf = comm.RaisedCosineTransmitFilter('RolloffFactor', p.rolloff, 'FilterSpanInSymbols', p.filter_span, ...
     'OutputSamplesPerSymbol', p.sps);
-x = txf(pskmod(bits(1:2*nsym), 4, pi/4, 'gray', 'InputType', 'bit'));
+sy = pskmod(bits(1:2*nsym), 4, pi/4, 'gray', 'InputType', 'bit');
+NQ = 0; if isfield(p, 'quiet_symbols'), NQ = p.quiet_symbols; end
+if NQ > 0                                            % the silent slot after every frame's data symbols
+    nd = p.frame_length / 2; nfr = floor(nsym / nd);
+    sy = [reshape(sy(1:nfr*nd), nd, nfr); zeros(NQ, nfr)];
+    sy = sy(:);
+end
+x = txf(sy);
 nc = min(nf, floor(numel(x) / ns));
 X(:, 1:nc) = reshape(x(1:nc*ns), ns, nc);
 end
 
-function [sinr, ec] = residual_metrics(x, r)
-% Per frame: whole-frame LS gain for the SINR; 32-sample block LS gains (absorb
-% fading and gain steps) for the residual used in the envelope correlation.
+function [sinr, ec, pe] = residual_metrics(x, r)
+% Per frame: whole-frame LS gain for the SINR and the residual power pe;
+% 32-sample block LS gains (absorb fading and gain steps) for the residual used in
+% the envelope correlation.
 B = 32;
 nf = size(r, 2);
-sinr = nan(1, nf); ec = nan(1, nf);
+sinr = nan(1, nf); ec = nan(1, nf); pe = nan(1, nf);
 for f = 1:nf
     xf = x(:, f); rf = r(:, f);
     if any(isnan(xf)), continue; end
@@ -288,12 +327,33 @@ for f = 1:nf
     h = (xf' * rf) / px;
     e = rf - h * xf;
     sinr(f) = 10*log10(abs(h)^2 * px / max(real(e' * e), eps));
+    pe(f) = real(e' * e) / numel(e);
     n = floor(numel(xf) / B) * B;
     X = reshape(xf(1:n), B, []); R = reshape(rf(1:n), B, []);
     hb = sum(conj(X) .* R, 1) ./ max(sum(abs(X).^2, 1), eps);
     E = R - X .* hb;
     c = corrcoef(abs(E(:)).^2, abs(X(:)).^2);
     ec(f) = c(1, 2);
+end
+end
+
+function d = gain_ant(Hq, nf)
+% Mean channel gain of every antenna over the frame [dB] (antennas x frames).
+d = nan(size(Hq, 1), nf);
+for f = 1:min(nf, size(Hq, 3))
+    d(:, f) = 10*log10(mean(abs(Hq(:, :, f)).^2, 2) + eps);
+end
+end
+
+function nv = thermal_of(out, p)
+% Thermal noise power per sample: the receiver's calibration constant (the AWGN
+% setting of the run, signal power 1/sps per sample).
+nv = NaN;
+try
+    mdl = out.SimulationMetadata.ModelInfo.ModelName;
+    snr_s = str2double(get_param([mdl '/AWGN'], 'SNR'));
+    nv = (1 / p.sps) / 10^(snr_s / 10);
+catch
 end
 end
 

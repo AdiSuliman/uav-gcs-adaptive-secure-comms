@@ -12,14 +12,14 @@
 % The held-out threat is never used to fit, weight or choose anything inside its
 % fold. Reported per held-out threat: AUROC, and FPR@95%TPR (share of unknown
 % frames accepted as known at the threshold that keeps 95% of known validation
-% frames); every candidate averaged over the last 2 frames of a run (the alarm
-% confirmation) and 5 frames (the monitor window).
-% Selection: the production score is the candidate with the highest mean
-% AUROC over the held-out threats; it is written to data/trained_detector.mat
-% (ood.score) and the thresholds are recomputed, so this stage runs before the
-% frame pools (C1p). Because the choice uses the same folds, the value to quote is
-% the nested estimate: for each held-out threat, the candidate chosen on the
-% OTHER threats, scored on this one.
+% frames); every candidate also averaged over the last 2, 5 and 8 decision cycles
+% of a run (one frame per cycle).
+% Selection: the production score and its window are the (candidate, window) pair
+% with the highest mean AUROC over the held-out threats; they are written to
+% data/trained_detector.mat (ood.score, ood.win) and the thresholds are recomputed,
+% so this stage runs before the frame pools (C1p). Because the choice uses the same
+% folds, the value to quote is the nested estimate: for each held-out threat, the
+% pair chosen on the OTHER threats, scored on this one.
 % Learning the new threat (Lee et al., Algorithm 2): once flagged and labelled, the
 % held-out threat is added as a new class from K of its validation frames (never
 % used in the fold) by its mean and an update of the tied covariance in the last
@@ -34,7 +34,7 @@ fprintf('=== Unknown-threat detection: leave-one-threat-out ===\n\n');
 %% 1. Configuration and data
 RETAIN   = 0.95;
 N_EPOCHS = 30;                         % as train_detector.m
-WIN      = [2 5];                      % frames: alarm confirmation, monitor window (decision_config.m)
+WIN      = [2 5 8];                    % decision cycles of the averaged score
 rng(2026, 'twister');
 
 S = load('data/splits.mat', 'splits');
@@ -90,15 +90,24 @@ end
 
 %% 3. Selection of the production score, nested estimate
 A = vertcat(R.auroc); F = vertcat(R.fpr95);
+AW = cat(3, R.auroc_win);                               % scores x windows x held-out threats
 jc = find(ismember(SC, CAND));
-[~, b] = max(mean(A(:, jc), 1)); sel = SC{jc(b)};
+Mp = zeros(numel(R), numel(jc) * (1 + numel(WIN))); pj = zeros(1, size(Mp, 2)); pw = pj;
+c = 0;
+for j = jc                                              % (candidate, window) pairs; window 1 = the frame alone
+    for w = [1 WIN]
+        c = c + 1; pj(c) = j; pw(c) = w;
+        if w == 1, Mp(:, c) = A(:, j); else, Mp(:, c) = squeeze(AW(j, WIN == w, :)); end
+    end
+end
+[~, b] = max(mean(Mp, 1)); sel = SC{pj(b)}; sel_win = pw(b);
 NEST = struct('auroc', zeros(1, numel(R)), 'pick', {cell(1, numel(R))});
 for i = 1:numel(R)
-    [~, b] = max(mean(A(setdiff(1:numel(R), i), jc), 1));
-    NEST.auroc(i) = A(i, jc(b)); NEST.pick{i} = SC{jc(b)};
+    [~, b2] = max(mean(Mp(setdiff(1:numel(R), i), :), 1));
+    NEST.auroc(i) = Mp(i, b2); NEST.pick{i} = sprintf('%s over %d', SC{pj(b2)}, pw(b2));
 end
 if ~(exist('SMOKE', 'var') && SMOKE)
-    D = load('data/trained_detector.mat', 'ood'); ood = D.ood; ood.score = sel; %#ok<NASGU>
+    D = load('data/trained_detector.mat', 'ood'); ood = D.ood; ood.score = sel; ood.win = sel_win; %#ok<NASGU>
     save('data/trained_detector.mat', 'ood', '-append');
     if isfile('data/ood_thresholds.mat'), delete('data/ood_thresholds.mat'); end
 end
@@ -128,8 +137,9 @@ for w = 1:numel(WIN)
         sprintf(sprintf(' %%%d.3f', w8), mean(squeeze(AW(:, w, :)), 2))); %#ok<SAGROW>
 end
 rep{end+1} = '';
-rep{end+1} = sprintf('Production score (highest mean AUROC among %s): %s, mean AUROC %.3f, FPR95 %.2f.', ...
-    strjoin(CAND, ', '), sel, mean(A(:, js)), mean(F(:, js)));
+rep{end+1} = sprintf(['Production score (highest mean AUROC among %s, each over 1, %s cycles): %s over %d ' ...
+    'cycles, mean AUROC %.3f (single frame %.3f, FPR95 %.2f).'], strjoin(CAND, ', '), strjoin(compose('%d', WIN), ', '), ...
+    sel, sel_win, max(mean(Mp, 1)), mean(A(:, js)), mean(F(:, js)));
 rep{end+1} = sprintf(['Nested estimate (score chosen on the other held-out threats, the value to quote): mean AUROC %.3f; ' ...
     'per threat %s; picks %s.'], mean(NEST.auroc), sprintf('%.3f ', NEST.auroc), strjoin(unique(NEST.pick, 'stable'), ', '));
 rep{end+1} = sprintf('Production thresholds (%.0f%% of known validation frames kept): MSP %.3f | energy %.2f | %s %.3f.', ...
@@ -148,7 +158,7 @@ rep{end+1} = sprintf('%-20s %13.1f%% / %5.1f%% %13.1f%% / %5.1f%%', 'mean', 100*
 if ~exist('results', 'dir'), mkdir('results'); end
 fid = fopen('results/ood_detection.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('%s\n', rep{:});
-save('results/ood_detection.mat', 'R', 'SC', 'CAND', 'sel', 'NEST', 'WIN', 'RETAIN', 'N_EPOCHS', 'T_prod', 'K_NEW');
+save('results/ood_detection.mat', 'R', 'SC', 'CAND', 'sel', 'sel_win', 'NEST', 'WIN', 'RETAIN', 'N_EPOCHS', 'T_prod', 'K_NEW');
 fprintf('\nSaved results/ood_detection.{txt,mat}; production score written to data/trained_detector.mat (%.1f min)\n', toc(t0)/60);
 
 

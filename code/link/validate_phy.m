@@ -33,8 +33,10 @@ p0.active_threat = 'none';
 CFG.EbNo      = 0:2:10;      % [dB] per branch
 CFG.sim_time  = 1.0;         % [s] per Eb/N0 point (2e6 bits), split over CFG.n_real channel realizations
 CFG.n_real    = 20;          % independent seeds per Eb/N0 point
-CFG.fd_val    = 1000;        % [Hz] Doppler for the theory checks: ~2400 independent fades per point
-                             % (BER theory does not depend on fd while fd*CSI window << 1: 1000 Hz x 64 us = 0.064)
+CFG.fd_val    = p0.v_max * p0.carrier_freq / p0.c_light;   % [Hz] the envelope's worst-case Doppler (358 Hz).
+                             % Every frame is one decision cycle of channel time apart (p0.cycle_s), so
+                             % each frame is an independent fade (~1900 per point); the theory assumes the
+                             % channel constant over the 64-symbol estimation window (358 Hz x 64 us = 0.023)
 CFG.min_err   = 100;         % errors needed for a point to enter the gap metric
 CFG.gap_ok    = 0.3;         % [dB] pass threshold (or within 2 standard errors of the fading Monte Carlo)
 modelName     = 'UAV_GCS_Threat_Link';
@@ -206,8 +208,10 @@ for s = 1:nS
             end
             [~, i] = min(b); dly = i - 1;
         end
-        L = min(numel(tx), numel(rx) - delay_bits);
-        er = sum(tx(1:L) ~= rx(delay_bits+1:delay_bits+L));
+        dl = delay_bits;
+        if isfield(p, 'quiet_symbols') && p.quiet_symbols >= p.filter_span, dl = 0; end   % receiver aligns each frame
+        L = min(numel(tx), numel(rx) - dl);
+        er = sum(tx(1:L) ~= rx(dl+1:dl+L));
         br(r) = er / L;
         e_tot = e_tot + er;
         n_tot = n_tot + L;

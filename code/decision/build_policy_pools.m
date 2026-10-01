@@ -40,7 +40,7 @@ COMBOS  = C.combos;
 S0 = load('params.mat'); p0 = S0.params; p0.quiet_build = true;
 EBNO   = p0.EbNo_dB;
 NGEO   = [8 6 12 8];             % geometries per (cell, Eb/N0): train, validation, test, edge speeds
-BLOCK  = [1 5 10 12];            % pool_seed.m block of each split (pool_seed.m lists every block)
+BLOCK  = [1 5 14 16];            % pool_seed.m block of each split (pool_seed.m lists every block)
 SPLITS = {'train', 'val', 'test', 'speed'};
 VOUT   = [29 50; 140 161];       % speeds of the edge-speed split [km/h]: half the geometries each, at the two
                                  % ends of the envelope (dedicated test flights; the other splits draw over it)
@@ -58,6 +58,9 @@ det = struct('net', D.net, 'ood', D.ood, 'classes', {cellstr(string(D.classes(:)
     'mu', N.splits.norm.feat_mean, 'sd', N.splits.norm.feat_std, 'fs', p0.symbol_rate * p0.sps);
 clear N
 T = ood_thresholds(0.95);
+FZ = struct('FM', [], 'N', 1);
+if isfile('data/fusion.mat'), FZ = load('data/fusion.mat', 'FM', 'N'); end   % temporal fusion (select_fusion.m)
+UW = 1; if isfield(D.ood, 'win'), UW = D.ood.win; end                        % unknown-score window (eval_ood_detection.m)
 ACTIONS = policy_actions();
 scen = [SINGLES, COMBOS];
 nA = numel(ACTIONS); nS = numel(EBNO);
@@ -117,19 +120,24 @@ spd = arrayfun(@(sp) cell2mat(arrayfun(@(s) geo{s}(sp).speed, (1:nS)', 'UniformO
     'UniformOutput', false);                    % UAV speed of every geometry, Eb/N0 x geometry per split
 
 %% 2. Simulation, one parallel job per cell
-turn = []; parallel_turn('take'); turn = onCleanup(@() parallel_turn('give'));   % one heavy parallel stage at a time on this computer
-pl = gcp('nocreate');
-if isempty(pl) || pl.NumWorkers ~= N_WORKERS
-    delete(pl); pl = parpool('Processes', N_WORKERS);
-end
-repo = pwd;
-spmd
-    pool_worker_init(repo);
+NWP = N_WORKERS;
+if exist('SMOKE', 'var') && SMOKE
+    NWP = 0;                                            % reduced chain check: on this process, no parallel turn
+else
+    turn = []; parallel_turn('take'); turn = onCleanup(@() parallel_turn('give'));   % one heavy parallel stage at a time on this computer
+    pl = gcp('nocreate');
+    if isempty(pl) || pl.NumWorkers ~= N_WORKERS
+        delete(pl); pl = parpool('Processes', N_WORKERS);
+    end
+    repo = pwd;
+    spmd
+        pool_worker_init(repo);
+    end
 end
 results = cell(1, nC); nuniq = zeros(1, nC);
 t0 = tic;
 fprintf('%d cells x %d configurations x %d Eb/N0 on %d workers\n', nC, nA, nS, N_WORKERS);
-parfor c = 1:nC
+parfor (c = 1:nC, NWP)
     ce = cells(c);
     p = threat_params(p0, ce.threat, ce.sev, C);
     g = cellfun(@(x) x(ce.splits), geo, 'UniformOutput', false);
@@ -175,6 +183,7 @@ PP = struct('scen', {{cells.threat}}, 'sev', [cells.sev], 'level', [cells.level]
     'combos', {COMBOS}, 'ebno', EBNO, 'actions', {ACTIONS}, ...
     'speed_range', vrange, 'speed_out', VOUT, 'speed', {spd}, 'gp', gp, 'bw', bw, 'pw', pw, 'pools', {pools}, 'mber', mber, 'mfer', mfer, ...
     'clean', clean_ref.ber, 'clean_fer', clean_ref.fer, 'classes', {det.classes}, 'maha_thr', T.maha, ...
+    'fuse', FZ.FM, 'fuse_N', FZ.N, 'unk_win', UW, ...
     'F_SUB', opt.F_SUB, 'runs', {runs}, ...
     'aoa_random', p0.int_aoa_random, 'k_random', p0.k_random, 'sps', p0.sps, 'bps', p0.bits_per_symbol, ...
     'feat_names', {link_features('names')}, 'created', datestr(now));

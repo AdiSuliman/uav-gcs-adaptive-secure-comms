@@ -13,6 +13,22 @@ load('data/trained_detector.mat', 'net', 'classes');
 %% 3. Inference (batched: the whole test split does not fit on the GPU)
 fprintf('Running inference on %d test samples...\n', numel(Y_test));
 Y_pred_prob = cnn_scores(net, sp.test.X, sp.test.feats');
+% Temporal fusion (select_fusion.m): the class of every cycle from the last N
+% cycles of its own sub-run, as the system decides; the per-frame reading is kept
+fus = [];
+if isfile('data/fusion.mat') && isfield(sp.test, 'pos')
+    fus = load('data/fusion.mat', 'FM', 'N', 'val_probs_oof');
+    [~, i1] = max(Y_pred_prob, [], 1);
+    yf = categorical(classes(i1)', classes);
+    frame_acc = 100 * mean(yf(:) == sp.test.Y(:));
+    frame_f1 = 100 * macro_f1_of(sp.test.Y(:), yf(:), classes);
+    frame_class_f1 = 100 * class_f1_of(sp.test.Y(:), yf(:), classes);
+    fprintf('Per frame (0.5 ms): accuracy %.2f%%, macro-F1 %.2f%%\n', frame_acc, frame_f1);
+    sp.test.feat_names = sp.norm.feat_names;
+    Z = fuse_classes('windows', sp.test, Y_pred_prob', fus.N);
+    Y_pred_prob = fuse_classes('apply', fus.FM, Z)';
+    fprintf('Decision over the last %d cycles (temporal fusion)\n', fus.N);
+end
 [~, max_idx] = max(Y_pred_prob, [], 1);
 
 Y_pred = categorical(classes(max_idx)', classes);
@@ -86,7 +102,11 @@ end
 % Threshold (proposal), chosen on the VALIDATION split and then read on the test
 % split: the lowest Eb/N0 from which macro-F1 stays >= 90% at every higher point
 % AND every class reaches F1 >= 90% over the frames at or above it.
-[~, iv] = max(cnn_scores(net, sp.val.X, sp.val.feats'), [], 1);
+if isempty(fus)
+    [~, iv] = max(cnn_scores(net, sp.val.X, sp.val.feats'), [], 1);
+else
+    [~, iv] = max(fus.val_probs_oof, [], 2);                % out-of-fold fused predictions on validation
+end
 Y_val = sp.val.Y(:); Y_val_pred = reshape(categorical(classes(iv)', classes), [], 1);
 if isfield(sp.val, 'ebno')
     snr_val = sp.val.ebno(:);
@@ -164,27 +184,49 @@ metrics = struct( ...
     'class_f1_above_threshold_pct', f1_class_above, ...
     'action_equiv_accuracy_pct', 100*mean(act_ok), 'action_equiv_per_class_pct', act_acc_class, ...
     'ci95', ci95);
+if ~isempty(fus)
+    metrics.fusion_cycles = fus.N;
+    metrics.per_frame = struct('accuracy_pct', frame_acc, 'macro_f1_pct', frame_f1, 'class_f1_pct', frame_class_f1);
+end
 %% 7. Accuracy vs UAV speed (only when the dataset was generated with speed diversity)
+% Every band holds about a seventh of the test sub-runs, so its mix of classes and
+% severity levels differs by chance. Beside the raw accuracy, the standardized one
+% weights every (class, level) stratum as in the whole test split, so the bands
+% differ only by speed.
 if isfield(sp.test, 'speed') && ~isempty(sp.test.speed)
     spd_test  = sp.test.speed(:);
     spd_edges = linspace(min(spd_test), max(spd_test), 8);      % 7 equal-width speed bins
     spd_edges(end) = spd_edges(end) + eps;
     spd_bin   = discretize(spd_test, spd_edges);
-    speed_breakdown = struct('speed_lo_kmh', {}, 'speed_hi_kmh', {}, 'accuracy_pct', {}, 'n', {});
-    fprintf('\nAccuracy vs UAV speed:\n');
+    speed_breakdown = struct('speed_lo_kmh', {}, 'speed_hi_kmh', {}, 'accuracy_pct', {}, 'std_accuracy_pct', {}, 'n', {});
+    lv = sp.test.level(:); lv(isnan(lv)) = -1;
+    [~, ~, st] = unique([double(Y_test) lv], 'rows');       % (class, level) strata
+    w = accumarray(st, 1) / numel(st);                        % their share in the whole test split
+    ok = double(Y_test == Y_pred);
+    fprintf('\nAccuracy vs UAV speed (raw | standardized to the test mix of classes and levels):\n');
     for b = 1:numel(spd_edges)-1
         idx = (spd_bin == b);
         if ~any(idx), continue; end
         a = 100*sum(Y_test(idx) == Y_pred(idx)) / sum(idx);
+        acc_s = accumarray(st(idx), ok(idx), size(w), @mean, NaN);
+        has = ~isnan(acc_s);
+        as = 100 * sum(w(has) .* acc_s(has)) / sum(w(has));
         speed_breakdown(end+1) = struct('speed_lo_kmh', spd_edges(b), 'speed_hi_kmh', spd_edges(b+1), ...
-            'accuracy_pct', a, 'n', sum(idx)); %#ok<AGROW>
-        fprintf('  %6.1f-%6.1f km/h: %.1f%%  (n=%d)\n', spd_edges(b), spd_edges(b+1), a, sum(idx));
+            'accuracy_pct', a, 'std_accuracy_pct', as, 'n', sum(idx)); %#ok<AGROW>
+        fprintf('  %6.1f-%6.1f km/h: %.1f%% | %.1f%%  (n=%d)\n', spd_edges(b), spd_edges(b+1), a, as, sum(idx));
     end
     metrics.speed_breakdown = speed_breakdown;
 end
 
 save('results/eval_detector_metrics.mat', 'metrics');
 fprintf('Saved results/eval_detector_metrics.mat (for KPI aggregation)\n');
+% Per-frame outcomes for the breakdown of weak points (analyze_weak_points.m)
+pred = struct('y_true', Y_test, 'y_pred', Y_pred, 'ebno', snr_vals(:), 'level', sp.test.level(:), ...
+    'speed', sp.test.speed(:), 'run', sp.test.run(:));
+for f = {'pos', 'k_db', 'aoa'}
+    if isfield(sp.test, f{1}), pred.(f{1}) = sp.test.(f{1}); end
+end
+save('results/detector_predictions.mat', 'pred');
 clear S sp Y_pred_prob   % large arrays; main.m runs the stages in one workspace
 
 %% Local functions

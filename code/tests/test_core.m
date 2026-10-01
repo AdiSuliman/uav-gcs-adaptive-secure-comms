@@ -126,7 +126,7 @@ end
 function test_state_size(tc)
 nA = 36; NE = 3; nC = 11;
 mem = policy_monitor('init', NE, nA);
-PP = struct('actions', {policy_actions()}, 'classes', {repmat({'x'}, 1, nC)}, 'sps', 4, 'bps', 2);
+PP = struct('actions', {policy_actions()}, 'classes', {repmat({'x'}, 1, nC)}, 'sps', 4, 'bps', 2, 'maha_thr', 0);
 PP.classes = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', 'antenna_fault', ...
     'benign_interference', 'sweeping_jammer', 'tone_jamming', 'airframe_shadowing'};
 obs = struct('probs', repmat([1 zeros(1, nC - 1)], NE, 1), 'unknown', false(NE, 1), ...
@@ -142,7 +142,7 @@ verifyFalse(tc, any(M.alarm));                       % clean class, low BER: no 
 obs.feat(2, feature_index('sinr')) = 7;
 [mem, M] = policy_monitor('update', mem, obs, PP, ones(1, NE));
 st = policy_state(mem, ones(1, NE), M.confirmed, nA);
-nObs = nC + 12; isinr = nC + 5;
+nObs = nC + 18; isinr = nC + 5;
 verifyEqual(tc, st(isinr, :), [0 7 0]);              % newest cycle
 verifyEqual(tc, st(nObs + isinr, :), [0 0 0]);       % previous cycle
 end
@@ -151,7 +151,7 @@ end
 function test_seeds_and_k(tc)
 % Pool geometries never share a seed across the blocks in use; K-factors are
 % reproducible per seed and stay inside the range.
-blocks = [1 4 5 10 11 12 13]; S = [];
+blocks = [1 4 5 13 14 15 16]; S = [];
 for b = blocks
     [s, r] = ndgrid(1:6, 1:99);
     S = [S; arrayfun(@(si, ri) pool_seed(1, si, b, ri), s(:), r(:))]; %#ok<AGROW>
@@ -178,19 +178,27 @@ verifyEqual(tc, F.crc_fail(v), F.fer(v));            % CRC detects every errored
 txb = double(squeeze(out.get('tx_bits_out'))); txi = squeeze(out.get('Tx_IQ'));
 txf = comm.RaisedCosineTransmitFilter('RolloffFactor', p.rolloff, 'FilterSpanInSymbols', p.filter_span, ...
     'OutputSamplesPerSymbol', p.sps);
-verifyLessThan(tc, max(abs(txf(pskmod(txb(:), 4, pi/4, 'gray', 'InputType', 'bit')) - txi(:))), 1e-12);
+sy = reshape(pskmod(txb(:), 4, pi/4, 'gray', 'InputType', 'bit'), p.frame_length / 2, []);
+sy = [sy; zeros(p.quiet_symbols, size(sy, 2))];                 % the quiet slot after every frame
+verifyLessThan(tc, max(abs(txf(sy(:)) - txi(:))), 1e-12);
+verifyEqual(tc, sum(~isnan(F.ber)), F.nf);                     % every frame complete: bits aligned per frame
+verifyLessThan(tc, abs(median(F.q_iot)), 1.5);                 % nothing but thermal noise in the quiet slot
 verifyLessThan(tc, mean(F.coh(v)), 0.2);             % thermal noise only: no spatial coherence
 verifyLessThan(tc, mean(F.ber_est(v)), 1e-3);        % clean link at 12 dB
 verifyLessThan(tc, max(F.branch_dip), 6);            % fading changes little within a frame, first frame included
 sinr_clean = median(F.sinr(v));
 close_system(mdl, 0);
-% a failing antenna drops by tens of dB inside the frame
-p.active_threat = 'antenna_fault';
+% a failing connector opens at the airframe vibration: one antenna drops by tens of
+% dB in some decision cycles (frames one cycle apart) and is back in others
+p.active_threat = 'antenna_fault'; p.fault_duty = 0.3;
 evalc('build_threat_model(p)');
 set_param([mdl '/AWGN'], 'SNR', num2str(snr), 'SignalPower', num2str(1/p.sps));
 link_seed(mdl, 11, 160);
-F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
-verifyGreaterThan(tc, median(F.branch_dip), 10);
+F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(40 * p.frame_duration)), p, 20);
+g = sort(F.gain_ant, 1);
+drop = g(2, :) - g(1, :) >= 20 | F.branch_dip >= 15;       % over the frame, or inside it
+verifyGreaterThan(tc, mean(drop), 0.15);
+verifyLessThan(tc, mean(drop), 0.95);
 close_system(mdl, 0);
 % an antenna hidden by the airframe stays far below the other over the frame
 p.active_threat = 'airframe_shadowing'; p.shadow_db = 20;
@@ -213,6 +221,59 @@ for r = 1:10
 end
 verifyGreaterThanOrEqual(tc, numel(unique(hit)), 2);
 close_system(mdl, 0);
+% quiet slot: a reactive jammer is silent there, a continuous one is not
+p.active_threat = 'reactive_jamming'; p.jsr_db = 16;
+evalc('build_threat_model(p)');
+set_param([mdl '/AWGN'], 'SNR', num2str(snr), 'SignalPower', num2str(1/p.sps));
+link_seed(mdl, 11, 160);
+F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
+verifyLessThan(tc, median(F.q_iot), 2);
+verifyGreaterThan(tc, median(F.q_react), 10);
+close_system(mdl, 0);
+p.active_threat = 'jamming';
+evalc('build_threat_model(p)');
+set_param([mdl '/AWGN'], 'SNR', num2str(snr), 'SignalPower', num2str(1/p.sps));
+link_seed(mdl, 11, 160);
+F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
+verifyGreaterThan(tc, median(F.q_iot), 10);
+verifyLessThan(tc, abs(median(F.q_react)), 3);
+close_system(mdl, 0);
+end
+
+%% ---------- temporal evidence and fusion ----------
+function test_temporal_evidence(tc)
+% Fading: independent per cycle, the weakest antenna changes and the local means
+% agree; a hidden antenna stays 8 dB down in every cycle.
+rng(3);
+n = 12; nr = 3; C = 4;
+fade = 10 * log10(-log(rand(1, nr, n)));                       % Rayleigh power per cycle [dB]
+sh = fade; sh(1, 2, :) = sh(1, 2, :) - 8;
+P = repmat([0.7 0.1 0.1 0.1], 1, 1, n);
+Q = zeros(1, n);
+xf = temporal_evidence(P, fade, Q); xs = temporal_evidence(P, sh, Q);
+verifyEqual(tc, numel(xf), C + 4);
+verifyEqual(tc, xf(1:C), log([0.7 0.1 0.1 0.1]), 'AbsTol', 1e-9);
+verifyGreaterThan(tc, xs(C + 1), xf(C + 1) + 4);              % gap of the local means
+verifyGreaterThan(tc, xs(C + 2), xf(C + 2));                  % the same antenna is the weakest
+xq = temporal_evidence(P, fade, [5 5 5 0 0 0 5 5 5 0 0 0]);
+verifyEqual(tc, xq(C + 3), 0.5, 'AbsTol', 1e-12);             % share of cycles with quiet-slot interference
+op = fade; op(1, 3, 1:3:end) = op(1, 3, 1:3:end) - 30;          % a connector open in every third cycle
+xo = temporal_evidence(P, op, Q);
+verifyGreaterThan(tc, xo(C + 4), 0.2);                        % the drops are counted
+dp = zeros(1, n); dp(2:3:end) = 25;                            % open for part of other cycles: in-frame drops
+xp = temporal_evidence(P, fade, Q, dp);
+verifyEqual(tc, xp(C + 4), mean(dp >= 15), 'AbsTol', 0.1);
+verifyLessThan(tc, xf(C + 4), 0.2);                            % fading alone rarely drops 20 dB below the next
+end
+
+function test_fusion(tc)
+% Two classes told apart only by the persistence gap: the fusion learns it.
+rng(4);
+n = 400; y = [ones(n, 1); 2 * ones(n, 1)];
+Z = [log(0.5) * ones(2 * n, 2), [randn(n, 1); 6 + randn(n, 1)], rand(2 * n, 2)];
+FM = fuse_classes('fit', Z, y, 2, 1e-3);
+[~, k] = fuse_classes('apply', FM, Z);
+verifyGreaterThan(tc, mean(k == y), 0.95);
 end
 
 function p = base_params()

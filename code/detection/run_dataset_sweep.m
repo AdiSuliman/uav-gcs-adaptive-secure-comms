@@ -7,20 +7,21 @@
 % realization or a temporal-feature window.
 %
 % Severity levels, the full range of the decision layer and of the map:
-%   jamming / noise_burst / reactive / sweeping / tone : JSR 0-28 dB, step 4 (a 30 dB
+%   jamming / noise_burst / reactive / sweeping / tone : JSR 0-30 dB (up to a 30 dB
 %                  jammer over the signal as in Liu et al.)
 %   path_loss            : 4-25 dB, step 3
 %   spoofing             : SIR -4 to 10 dB, step 2
 %   antenna_fault        : duty 0.05-0.6 (30 dB loss while failed)
 %   benign_interference  : -12 to -1.5 dB, step 1.5
-%   airframe_shadowing   : 5-33 dB on one antenna, step 4 (above 35 dB measured,
-%                          Khawaja et al.)
+%   airframe_shadowing   : 5-35 dB on one antenna (above 35 dB measured, Khawaja et al.)
 % 'none' gets n_levels x N_SUB sub-runs per Eb/N0 (class balance).
 %
 % Per frame: reference-antenna IQ, label, level, configured Eb/N0, the receiver
 % measurements of extract_closed_loop_frames.m, the true BER and frame
-% error (analysis only), speed, run id, fold (1..N_SUB). Frames whose BER is
-% incomplete (last frame of a sub-run) are dropped.
+% error (analysis only), speed, run id, fold (1..N_SUB), the frame's position in its
+% sub-run and the mean channel gain of every antenna (for measurements over several
+% decision cycles), the sub-run's K-factor of our signal and first interferer
+% direction (analysis only). Frames whose BER is incomplete are dropped.
 
 close all; clc;
 warning('off', 'Simulink:cgxe:LeakedJITEngine');
@@ -36,7 +37,7 @@ N_SUB      = 6;                   % independent sub-runs per cell (split unit)
 F_SUB      = 20;                  % frames per sub-run
 delay_bits = 20;
 modelName  = 'UAV_GCS_Threat_Link';
-rng(2026, 'twister');             % seeds and speeds of every sub-run
+rng(2027, 'twister');             % seeds and speeds of every sub-run
 
 clear threat_cfg
 threat_cfg = dataset_levels();
@@ -48,8 +49,10 @@ n_levels    = numel(threat_cfg(1).levels);
 class_names = ['none', {threat_cfg.name}];
 stop_time   = num2str(F_SUB * p0.frame_duration);
 
-MEAS = {'rssi', 'crc_fail', 'ber_est', 'snr_post', 'sinr', 'env_corr', 'iot', 'coh', 'mmse_gain', 'align', 'branch_dip', 'branch_gap', 'sinr_gap'};
-D = struct('iq', {{}}, 'label', [], 'level', [], 'snr', [], 'ber', [], 'fer', [], 'speed', [], 'run', [], 'fold', []);
+MEAS = {'rssi', 'crc_fail', 'ber_est', 'snr_post', 'sinr', 'env_corr', 'iot', 'coh', 'mmse_gain', 'align', ...
+        'branch_dip', 'branch_gap', 'sinr_gap', 'q_iot', 'q_react'};
+D = struct('iq', {{}}, 'label', [], 'level', [], 'snr', [], 'ber', [], 'fer', [], 'speed', [], 'run', [], 'fold', [], ...
+    'pos', [], 'gain_ant', [], 'k_db', [], 'aoa', []);
 for i = 1:numel(MEAS), D.(MEAS{i}) = []; end
 run_id = 0;
 t0 = tic;
@@ -96,6 +99,7 @@ dataset.ber = D.ber(:); dataset.fer = D.fer(:);
 dataset.meas = struct();
 for i = 1:numel(MEAS), dataset.meas.(MEAS{i}) = D.(MEAS{i})(:); end
 dataset.speed_kmh = D.speed(:); dataset.run = D.run(:); dataset.fold = D.fold(:);
+dataset.pos = D.pos(:); dataset.gain_ant = D.gain_ant'; dataset.k_db = D.k_db(:); dataset.aoa = D.aoa(:);
 dataset.meta = struct('N_SUB', N_SUB, 'F_SUB', F_SUB, 'EbNo_list', EbNo_list, 'delay_bits', delay_bits, ...
     'mode', 'seeded_subruns_D59', 'n_rx', p0.n_rx, 'speed_range_kmh', [p0.speed_kmh_min p0.speed_kmh_max], ...
     'threat_cfg', threat_cfg, 'created', datestr(now));
@@ -121,7 +125,10 @@ function D = add_subrun(D, p, modelName, ebno, stop_time, delay_bits, label, lev
 % One seeded sub-run at its own random UAV speed; appends its complete frames.
 v_kmh = p.speed_kmh_min + rand() * (p.speed_kmh_max - p.speed_kmh_min);
 fd = v_kmh / 3.6 * p.carrier_freq / p.c_light;
-link_seed(modelName, randi(2^31 - 1000), fd);
+seed = randi(2^31 - 1000);
+link_seed(modelName, seed, fd);
+kk = channel_k(seed, p.k_range_db);
+th = interferer_aoa(seed, p.int_aoa_range_deg, numel(p.int_aoa_deg));
 snr_dB = ebno + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
 set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/p.sps));
 F = extract_closed_loop_frames(sim(modelName, 'StopTime', stop_time), p, delay_bits);
@@ -129,9 +136,15 @@ disk_guard;
 v = find(~isnan(F.ber));
 n = numel(v);
 D.iq = [D.iq, F.iq(v)];
-D.label = [D.label, label * ones(1, n)]; D.level = [D.level, level * ones(1, n)];
+lab = label * ones(1, n);
+if strcmp(p.active_threat, 'benign_interference')
+    lab(F.act(v) < 0.1) = 1;                            % no WLAN packet in this frame: a clean frame
+end
+D.label = [D.label, lab]; D.level = [D.level, level * ones(1, n)];
 D.snr = [D.snr, ebno * ones(1, n)]; D.speed = [D.speed, v_kmh * ones(1, n)];
 D.run = [D.run, run_id * ones(1, n)]; D.fold = [D.fold, fold * ones(1, n)];
+D.pos = [D.pos, v]; D.gain_ant = [D.gain_ant, F.gain_ant(:, v)];
+D.k_db = [D.k_db, kk(1) * ones(1, n)]; D.aoa = [D.aoa, th(1) * ones(1, n)];
 D.ber = [D.ber, F.ber(v)]; D.fer = [D.fer, F.fer(v)];
 for i = 1:numel(MEAS), D.(MEAS{i}) = [D.(MEAS{i}), F.(MEAS{i})(v)]; end
 end

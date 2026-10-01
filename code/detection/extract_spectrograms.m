@@ -1,6 +1,6 @@
 %% EXTRACT_SPECTROGRAMS - Phase A6: detector inputs from data/dataset.mat
 % Image: spec_image.m (fixed [-40, 40] dB scale). Scalar features: link_features.m
-% (14 receiver measurements), temporal ones over a causal window of 10 frames
+% (receiver measurements), temporal ones over a causal window of 10 frames
 % inside each sub-run. The same two functions are used by every closed-loop
 % script and the GUI, so training and deployment see identical inputs.
 
@@ -48,6 +48,8 @@ spec.class_names = ds.class_names;
 spec.ebno = ds.snr(:);                    % configured Eb/N0, analysis only (not an input)
 spec.speed_kmh = ds.speed_kmh(:);
 spec.run = ds.run(:); spec.fold = ds.fold(:); spec.level = ds.level(:);
+if isfield(ds, 'pos'), spec.pos = ds.pos(:); spec.gain_ant = ds.gain_ant; end   % temporal evidence
+if isfield(ds, 'k_db'), spec.k_db = ds.k_db(:); spec.aoa = ds.aoa(:); end         % analysis only
 spec.img_size = 128;
 spec.meta = ds.meta;
 spec.meta.temporal_window = tw;

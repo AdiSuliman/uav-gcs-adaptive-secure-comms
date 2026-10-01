@@ -15,6 +15,14 @@ params.sps                 = params.samples_per_symbol;
 params.bits_per_frame = 1000;          % payload bits per frame
 params.crc_bits       = 32;            % CRC-32 per frame: packet check at the receiver
 params.frame_length   = params.bits_per_frame + params.crc_bits;  % total bits/frame
+% Quiet slot: the GCS stays silent for the last symbols of every frame (the gap
+% between command packets). The UAV measures the channel without our signal there:
+% interference alone, as in jammer detection on unused pilots (Pirayesh & Zeng);
+% a reactive jammer, which transmits only while it senses our signal, is silent
+% there (Xu et al.; Sagduyu et al.). The slot is longer than the filter span, so
+% no data symbol straddles two frames.
+params.quiet_symbols  = 32;            % [symbols] silent slot at the end of each frame (5.8% of air time)
+params.cycle_s        = 0.02;          % [s] decision cycle: channel time between consecutive frames
 %% ========== CHANNEL MODEL ==========
 % Pulse shaping (RRC)
 params.rolloff      = 0.25;            % RRC roll-off factor
@@ -48,19 +56,28 @@ params.jsr_db        = 16;          % [dB] Jamming-to-Signal Ratio (barrage jamm
 params.burst_duty    = 0.3;         % Noise Burst: fraction of time jammer is ON (0-1)
 params.burst_period  = 100;         % Noise Burst: on/off cycle length (symbols)
 params.path_loss_db  = 14;          % Path Loss: attenuation (dB) applied to Tx signal
-params.fault_duty     = 0.3;        % Antenna Fault: fraction of time fault is active (0-1)
-params.fault_period   = 200;        % Antenna Fault: fault on/off cycle length (symbols)
-params.fault_atten_db = 30;         % Antenna Fault: severe attenuation during fault (dB)
+params.fault_duty     = 0.3;        % Antenna Fault: fraction of time the contact is open (0-1)
+params.fault_period   = 200;        % Antenna Fault: on/off cycle [symbols] when no vibration band is set
+params.fault_vib_hz   = [86 672];   % Antenna Fault: a connector opens at an airframe vibration frequency, drawn
+                                    % per flight (motor and frame modes of a multirotor, Verbeke & Debruyne)
+params.fault_atten_db = 30;         % Antenna Fault: loss while open [dB]: an open contact couples only through
+                                    % its gap capacitance (0.01-0.03 pF at 2.4 GHz in 50 ohm: 26-36 dB)
 params.spoof_sir_db   = 3;          % Spoofing: Spoof-to-Signal Ratio (dB), 0 = equal power
 params.reactive_threshold = 0.5;    % Reactive Jamming: signal-energy threshold to trigger jammer
 params.tone_jsr_db    = 16;         % Tone (CW) jammer: in-band power over our signal (dB)
 params.tone_offset_hz = 300e3;      % Tone offset from our carrier, uniform in +-this per flight (flat part of the RRC band)
-params.shadow_db      = 20;         % Airframe shadowing: loss on one antenna in a banking turn (dB; > 35 measured, Khawaja et al.)
+params.shadow_db      = 20;         % Airframe shadowing: loss on one antenna in a banking turn (dB; up to 40 measured,
+                                    % events lasting about 30 s, Sun; Khawaja et al.)
 
-% Benign Interference: weak NON-MALICIOUS in-band noise (e.g. neighboring
-% WiFi/ISM device), below the attack power range (-12 to -1.5 dB vs jamming's
-% 0-28 dB): a "looks-like-something but isn't an attack" class.
-params.benign_int_db  = -6;         % Benign Interference power (dB), weak/non-malicious
+% Benign Interference: packet traffic of a WLAN in our channel, not an attack.
+% Frames of 0.27-3.2 ms (Wollenberg et al.), channel occupancy 5-86% (Cheema &
+% Salous; Wollenberg et al.), idle gaps exponential. A WLAN access point below the
+% UAV can arrive stronger than our GCS (EIRP 20 dBm, ETSI EN 300 328, against the
+% link budget of link_budget_table.m; interference grows with altitude, Song et al.),
+% up to the in-band cap of the sources (30 dB).
+params.benign_int_db  = 0;          % Benign Interference power over our signal while a packet is on the air (dB)
+params.benign_occ     = [0.05 0.86];      % channel occupancy, drawn per flight
+params.benign_pkt_s   = [0.268e-3 3.2e-3]; % packet duration, log-uniform [s]
 
 % Sweeping Jammer: like jamming, but only dwells on our channel a fraction
 % of the time (spends the rest sweeping other channels). Severity axis is still
@@ -121,9 +138,10 @@ params.verbose     = true;
 params.quiet_build = true;     % build Simulink models without opening the editor window
 %% ========== DERIVED PARAMETERS ==========
 params.bits_per_symbol   = log2(params.mod_order);
-params.symbols_per_frame = params.frame_length / params.bits_per_symbol;
-params.samples_per_frame = params.symbols_per_frame * params.sps;
-params.frame_duration    = params.symbols_per_frame / params.symbol_rate;
+params.symbols_per_frame = params.frame_length / params.bits_per_symbol;      % data symbols
+params.air_symbols       = params.symbols_per_frame + params.quiet_symbols;   % data + quiet slot
+params.samples_per_frame = params.air_symbols * params.sps;
+params.frame_duration    = params.symbols_per_frame / params.symbol_rate;     % simulation step (bit clock)
 %% ========== DISPLAY ==========
 if params.verbose
     fprintf('\n========== UAV-GCS LINK PARAMETERS ==========\n');

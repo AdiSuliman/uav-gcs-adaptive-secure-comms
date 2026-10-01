@@ -45,20 +45,25 @@ geo = arrayfun(@(s) struct('seed', arrayfun(@(r) pool_seed(1, s, 13, r), 1:N_GEO
     'speed', arrayfun(@(r) nth2(@pool_seed, 1, s, 13, r, vrange), 1:N_GEOM), 'run', 1300 + (1:N_GEOM)), ...
     1:nS, 'UniformOutput', false);
 
-turn = []; parallel_turn('take'); turn = onCleanup(@() parallel_turn('give'));   % one heavy parallel stage at a time on this computer
-pl = gcp('nocreate');
-if isempty(pl) || pl.NumWorkers ~= N_WORKERS
-    delete(pl); pl = parpool('Processes', N_WORKERS);
-end
-repo = pwd;
-spmd
-    pool_worker_init(repo);
+NWP = N_WORKERS;
+if exist('SMOKE', 'var') && SMOKE
+    NWP = 0;                                            % reduced chain check: on this process, no parallel turn
+else
+    turn = []; parallel_turn('take'); turn = onCleanup(@() parallel_turn('give'));   % one heavy parallel stage at a time on this computer
+    pl = gcp('nocreate');
+    if isempty(pl) || pl.NumWorkers ~= N_WORKERS
+        delete(pl); pl = parpool('Processes', N_WORKERS);
+    end
+    repo = pwd;
+    spmd
+        pool_worker_init(repo);
+    end
 end
 t0 = tic;
 
 % Clean references of the two receivers (direct link, same geometries)
 clean = cell(1, 2);
-parfor k = 1:2
+parfor (k = 1:2, NWP)
     p = p0; p.n_rx = VAR(k).n_rx; p.active_threat = 'none';
     P = pool_cell(p, 'none', {'no_action'}, EBNO, geo, [], opt);
     clean{k} = struct('ber', cellfun(@(Q) mean(Q.ber), P(:, 1, 1))', 'fer', cellfun(@(Q) mean(double(Q.fer)), P(:, 1, 1))');
@@ -68,7 +73,7 @@ end
 jobs = [kron((1:numel(cases))', ones(numel(VAR), 1)), repmat((1:numel(VAR))', numel(cases), 1)];
 nJ = size(jobs, 1);
 rec = cell(1, nJ); best = cell(1, nJ);
-parfor j = 1:nJ
+parfor (j = 1:nJ, NWP)
     c = cases(jobs(j, 1)); v = VAR(jobs(j, 2));
     p = p0; p.n_rx = v.n_rx; p.gcs_aoa_deg = v.gcs; p.link_loss_db = v.loss; p.active_threat = c.threat;
     if ~isempty(c.field), p.(c.field) = c.level; end

@@ -71,14 +71,19 @@ nS = numel(SNR_points);
 v_nom = p0.v_nominal * 3.6;                       % nominal cruise speed [km/h]
 t0 = tic;
 
-turn = []; parallel_turn('take'); turn = onCleanup(@() parallel_turn('give'));   % one heavy parallel stage at a time on this computer
-pl = gcp('nocreate');
-if isempty(pl) || pl.NumWorkers ~= N_WORKERS
-    delete(pl); pl = parpool('Processes', N_WORKERS);
-end
-repo = pwd;
-spmd
-    pool_worker_init(repo);
+NWP = N_WORKERS;
+if exist('SMOKE', 'var') && SMOKE
+    NWP = 0;                                            % reduced chain check: on this process, no parallel turn
+else
+    turn = []; parallel_turn('take'); turn = onCleanup(@() parallel_turn('give'));   % one heavy parallel stage at a time on this computer
+    pl = gcp('nocreate');
+    if isempty(pl) || pl.NumWorkers ~= N_WORKERS
+        delete(pl); pl = parpool('Processes', N_WORKERS);
+    end
+    repo = pwd;
+    spmd
+        pool_worker_init(repo);
+    end
 end
 
 %% ========== 1. Clean-link baseline per Eb/N0 ==========
@@ -103,7 +108,7 @@ for t = 1:nT
 end
 nJ = size(jobs, 1);
 resB = cell(1, nJ); resF = cell(1, nJ);
-parfor j = 1:nJ
+parfor (j = 1:nJ, NWP)
     t = jobs(j, 1); li = jobs(j, 2);
     cfg = maps(t);
     p = p0; p.active_threat = cfg.base; p.(cfg.level_field) = cfg.levels(li);

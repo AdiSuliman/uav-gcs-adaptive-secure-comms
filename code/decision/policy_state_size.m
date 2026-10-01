@@ -4,9 +4,9 @@ function [nS, cont] = policy_state_size(nA, nC)
 %   the class probabilities, the flags and the configuration one-hot).
 if nargin < 2, nC = 11; end
 C = decision_config();
-nObs = nC + 12;                                   % policy_monitor.m observation vector
+nObs = nC + 18;                                   % policy_monitor.m observation vector
 nS = nObs * C.hist + nA + 2;
-contObs = [nC + (2:12)];                          % estimated BER .. Eb/N0 drop (not probs, not the unknown flag)
+contObs = [nC + (2:18)];                          % estimated BER .. persistence (not probs, not the unknown flag)
 cont = reshape((contObs(:) + (0:C.hist-1) * nObs), 1, []);
 cont = [cont, nObs * C.hist + nA + 1];            % dwell
 end
