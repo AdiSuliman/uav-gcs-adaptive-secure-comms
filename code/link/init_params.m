@@ -154,6 +154,8 @@ params.gcs_aoa_deg    = 0;            % GCS direction from array broadside [deg]
 % array (0.25 / 0.2 / 0.93, as 40-45 / 45 / 10 deg on a half-wavelength pair)
 if params.n_rx == 2
     params.int_aoa_deg = [44.1 -50 60];   params.geom_aoa_deg = [41.4 6.5];
+elseif params.n_rx == 4
+    params.int_aoa_deg = [42.4 -42.3 62.7]; params.geom_aoa_deg = [42.6 17.5];   % nearest angles with those alignments
 else
     params.int_aoa_deg = [42 -52.2 61.3]; params.geom_aoa_deg = [42.2 11.4];
 end
