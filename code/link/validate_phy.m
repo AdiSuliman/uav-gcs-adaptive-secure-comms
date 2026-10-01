@@ -18,6 +18,9 @@ function ok = validate_phy()
 %   of the closed forms. V11: the real receiver (training, pilots, synchronization,
 %   frequency offset and arrival time on the air) on V1, V5 and V8b, and its Eb/N0 loss
 %   against the ideal receiver.
+%   V12: a specular ground reflection 0.8 of the line of sight with the measured excess
+%   delay (80 ns) against the same ray without delay: the cost of the delay itself (a
+%   flat channel model holds when it is small).
 % Gap = Eb/N0 shift between measured and theoretical BER, points with >= 100 errors.
 % Outputs: results/phy_validation.txt, results/phy_validation.png
 
@@ -103,6 +106,24 @@ for i = 1:numel(iReal)
         sprintf('%.2e ', BERR(i,:)), toc(t0)/60);
 end
 
+%% V12 ground reflection: the measured excess delay against no delay
+% specular ray 0.8 of the line of sight (the strongest measured, Sun et al.), excess delay
+% 80 ns (the largest measured for it; a ground reflection's delay 2 h1 h2 / (d c) is about
+% 10 ns at 2 km); the same ray without delay is the reference, so the shift is the cost
+% of the delay alone. The late components behind the 153 ns RMS spread are weak (more
+% than 25 dB down at 1.3 us, Sun), and the receiver has no equalizer for strong ones.
+p = p0; p.rician_k = 10; p.active_threat = 'none'; p.rx_sync = 'ideal'; p.seed = 3001;
+p.spec_amp = 0.8; p.spec_delay_ns = 0;
+[BREF, ~] = run_curve(p, modelName, CFG, delay_bits);
+DLY12 = 80; BSP = nan(numel(DLY12), nS); SH12 = nan(1, numel(DLY12));
+for i = 1:numel(DLY12)
+    p.spec_delay_ns = DLY12(i);
+    [BSP(i, :), ne] = run_curve(p, modelName, CFG, delay_bits);
+    SH12(i) = real_loss(CFG.EbNo, BSP(i, :), ne, BREF, CFG.min_err);
+    fprintf('V12 specular 0.8, %3d ns  shift %+5.2f dB | %.1f min
+', DLY12(i), SH12(i), toc(t0)/60);
+end
+
 %% V9 seeds (default link, 4 dB)
 p = p0; p.rician_k = 10; p.active_threat = 'none';
 sd = [2001 2001 2002]; bs = nan(1, 3);
@@ -147,6 +168,11 @@ rep{end+1} = sprintf('V9 seeds: same seed identical %s, different seed differs %
     passfail(seed_same), passfail(seed_diff), mat2str(bs, 4));
 rep{end+1} = sprintf('V10 tone jammer: in-band JSR after the receive filter %.2f dB (noise jammer %.2f dB, set %g dB) -> %s', ...
     jsr_tone, jsr_noise, p0.tone_jsr_db, passfail(tone_ok));
+rep{end+1} = sprintf('V12 ground reflection (specular 0.8 of the LoS), no delay BER %s', sprintf('%9.2e', BREF));
+for i = 1:numel(DLY12)
+    rep{end+1} = sprintf('V12 excess delay %3d ns: BER %s | shift vs no delay %+.2f dB', DLY12(i), ...
+        sprintf('%9.2e', BSP(i, :)), SH12(i)); %#ok<AGROW>
+end
 for i = 1:numel(iReal)
     rep{end+1} = sprintf('V11 real receiver, %-22s BER %s | loss vs ideal %+.2f dB', cases{iReal(i),1}, ...
         sprintf('%9.2e', BERR(i,:)), LOSS(i)); %#ok<AGROW>

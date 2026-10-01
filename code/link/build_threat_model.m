@@ -271,11 +271,30 @@ if shd
 else
     sel = sprintf('    Kk = K; gk = 1;\n');
 end
+% specular ground reflection (optional): a copy of our line-of-sight term, p.spec_amp of its
+% amplitude, p.spec_delay_ns later, with a phase drawn per flight; the reflection point lies
+% under the UAV-GCS line, so it arrives at nearly the same broadside angle (Sun et al.)
+if isfield(p, 'spec_amp') && p.spec_amp > 0
+    pers = [pers ' sph'];
+    imp = [imp sprintf('if isempty(sph)\n    sph = 2*pi*rand;\nend\n')];
+    xs = sprintf(['kk2 = [0:ceil(Ns/2)-1, -floor(Ns/2):-1].'';\n' ...
+        'xs = ifft(fft(x) .* exp(-1j*2*pi*kk2*%.6f/Ns)) * (%.8f * exp(1j*sph));\n'], ...
+        p.spec_delay_ns * 1e-9 * fs, p.spec_amp);
+    if real_rx
+        mix = ['    y(:, k) = gk * (x .* r .* (sqrt(Kk/(Kk+1)) * a(k) * los + sqrt(1/(Kk+1)) * D(:, k))' ...
+            ' + xs .* r .* (sqrt(Kk/(Kk+1)) * a(k) * los));\n'];
+    else
+        mix = ['    y(:, k) = gk * (x .* (sqrt(Kk/(Kk+1)) * a(k) + sqrt(1/(Kk+1)) * D(:, k))' ...
+            ' + xs * (sqrt(Kk/(Kk+1)) * a(k)));\n'];
+    end
+else
+    xs = '';
+end
 s = [sprintf('function y = fcn(x, seed, fd, kdb, yaw, rho)\n%%%%#codegen\npersistent f0 ph n%s\n', pers) ...
     sprintf('if isempty(f0)\n    rng(seed, ''twister'');\nend\n') ...
     sos_init('f0', 'ph', nr) imp ...
     sprintf('if isempty(n)\n    n = 0;\nend\nNs = size(x, 1);\nt = (n + (0:Ns-1).'') / %.1f;\nn = n + max(Ns, %d);\n', fs, cyc) ...
-    sos_gains('D', 'f0', 'ph', p) dly ...
+    sos_gains('D', 'f0', 'ph', p) dly xs ...
     sprintf(['K = 10^(kdb(1)/10);\n' ...
     'a = exp(-1j * %.12f * (0:%d).'' * sind(%.8f + yaw * t(1)));\n' ...
     'y = complex(zeros(Ns, %d));\n' ...
@@ -775,9 +794,10 @@ c = {
     '            end'
     '        end'
     '    end'
-    '    % second pass, decision directed: the first-pass decisions act as known symbols;'
-    '    % per window the leave-one-out LS channel and the residual covariance follow an'
-    '    % interferer channel that changes within the frame'
+    '    % second pass, decision directed: the first-pass decisions act as known symbols for'
+    '    % the leave-one-out LS channel of every window; MMSE weighs it with the covariance of'
+    '    % the received samples of the window (MVDR: no decision error enters the covariance,'
+    '    % so a wrong decision cannot pull our own direction into it)'
     '    sh = (sign(real(z)) + 1j * sign(imag(z))) / sqrt(2);'
     '    sh(real(sh) == 0) = sh(real(sh) == 0) + 1 / sqrt(2);'
     '    sh(imag(sh) == 0) = sh(imag(sh) == 0) + 1j / sqrt(2);'
@@ -797,8 +817,8 @@ c = {
     '        if MODE == 2'
     '            R = complex(zeros(NR, NR));'
     '            for m = i0:i1'
-    '                e = y(IDXD(m), :).'' - h * sh(m);'
-    '                R = R + e * e'';'
+    '                v = y(IDXD(m), :).'';'
+    '                R = R + v * v'';'
     '            end'
     '            R = R / n;'
     '            R = R + (1e-3 * real(trace(R)) / NR + 1e-12) * eye(NR);'
@@ -916,7 +936,7 @@ d = struct('n_rx', 3, 'ant_aperture_m', 1.2, 'rx_corr', 0.3, 'gcs_aoa_deg', 0, .
     'yaw_random', false, 'roll_max_deg', 57.9, 'turn_v_floor', 8, 'yaw_rate_max', 28.7, ...
     'quiet_symbols', 0, 'cycle_s', 0, 'benign_occ', [], 'benign_pkt_s', [], 'benign_idle_shape', 1, ...
     'corr_random', false, 'corr_range', [0.3 0.9], 'shadow_k_db', -16, 'fault_atten_db', 31, ...
-    'chain_amp_db', 0, 'chain_phase_deg', 0, ...
+    'chain_amp_db', 0, 'chain_phase_deg', 0, 'spec_amp', 0, 'spec_delay_ns', 0, ...
     'stf_len', 4, 'stf_rep', 10, 'ltf_len', 16, 'ltf_rep', 2, 'pilot_block', 4, 'pilot_every', 48, ...
     'rx_sync', 'ideal', 'cfo_ppm', 25, 'timing_max_sym', 4, 'rx_dd_iter', 2);
 f = fieldnames(d);

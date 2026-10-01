@@ -38,7 +38,7 @@ params.pilot_every    = 48;            % ... after every 48 data symbols
 params.rx_sync        = 'real';
 params.cfo_ppm        = 25;            % [ppm] oscillator tolerance of each radio at 2.4 GHz (IEEE 802.11)
 params.timing_max_sym = 4;             % [symbols] unknown arrival time of a frame (uniform, fractional)
-params.rx_dd_iter     = 2;             % decision-directed estimation passes after the pilot-based one
+params.rx_dd_iter     = 4;             % decision-directed estimation passes after the pilot-based one
 %% ========== CHANNEL MODEL ==========
 % Pulse shaping (RRC)
 params.rolloff      = 0.25;            % RRC roll-off factor
