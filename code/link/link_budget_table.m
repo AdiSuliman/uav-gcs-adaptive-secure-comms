@@ -3,8 +3,11 @@
 % through the JSR, and obstruction through the path loss. This table turns them
 % into distances with the free-space (Friis) loss at 2.4 GHz for three stated
 % hardware profiles; the simulated results hold for every profile, only the
-% distance attached to each Eb/N0 changes. Air-ground measurement campaigns used
-% transmit powers of 27-44 dBm (Khawaja et al.). Distances are shown up to the radio
+% distance attached to each Eb/N0 changes. Profile A keeps the licence-exempt cap at
+% 2.4 GHz: 100 mW e.i.r.p. in Israel (Ministry of Communications), as ETSI EN 300 328,
+% which also caps 10 mW/MHz (about 11 dBm for our 1.25 MHz signal). Profile B is a
+% data link in licensed spectrum; air-ground measurement campaigns used transmit
+% powers of 27-44 dBm (Khawaja et al.). Distances are shown up to the radio
 % horizon (4/3 earth radius) of the UAV altitude and never beyond 50 km, the range of
 % the close-range UAV class (Tlili et al.), the largest class the system is built for.
 % Illustrative only: not an input of any stage.
@@ -21,8 +24,8 @@ Pj  = 40;     % jammer power [dBm] (10 W)
 Gj  = 3;      % jammer antenna gain [dBi]
 hG  = 10;     % GCS antenna height [m]
 DMAX = 50;    % range of the close-range UAV class [km] (Tlili et al.)
-prof = struct('name', {'A small UAV radio', 'B tactical data link'}, ...
-    'Pt', {20, 30}, 'Gt', {6, 12}, 'hU', {300, 1000});
+prof = struct('name', {'A licence-exempt radio', 'B tactical data link'}, ...
+    'Pt', {9, 30}, 'Gt', {2, 12}, 'hU', {300, 1000});              % A: 11 dBm e.i.r.p., the cap
 horizon_km = @(h1, h2) 4.12 * (sqrt(h1) + sqrt(h2));                % 4/3 earth radius, heights in m
 Pr = ebno - 174 + NF + 10*log10(Rb);                                 % received power needed [dBm]
 
