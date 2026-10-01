@@ -42,7 +42,7 @@ EBNO   = p0.EbNo_dB;
 NGEO   = [8 6 12 8];             % geometries per (cell, Eb/N0): train, validation, test, edge speeds
 BLOCK  = [1 5 14 16];            % pool_seed.m block of each split (pool_seed.m lists every block)
 SPLITS = {'train', 'val', 'test', 'speed'};
-VOUT   = [29 50; 140 161];       % speeds of the edge-speed split [km/h]: half the geometries each, at the two
+VOUT   = [0 21; 140 161];        % speeds of the edge-speed split [km/h]: half the geometries each, at the two
                                  % ends of the envelope (dedicated test flights; the other splits draw over it)
 N_WORKERS = 6;
 opt = struct('F_SUB', 20, 'tw', 10, 'delay_bits', 20);

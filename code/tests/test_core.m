@@ -164,7 +164,7 @@ verifyTrue(tc, all(K(:) >= -5 & K(:) <= 20));
 end
 
 function test_receiver_measurements(tc)
-p = base_params(); p.quiet_build = true; p.active_threat = 'none'; p.int_aoa_random = false; p.seed = 11;
+p = base_params(); p.quiet_build = true; p.active_threat = 'none'; p.int_aoa_random = false; p.yaw_random = false; p.seed = 11;
 p.k_random = false;
 mdl = 'UAV_GCS_Threat_Link';
 evalc('build_threat_model(p)');
@@ -178,9 +178,12 @@ verifyEqual(tc, F.crc_fail(v), F.fer(v));            % CRC detects every errored
 txb = double(squeeze(out.get('tx_bits_out'))); txi = squeeze(out.get('Tx_IQ'));
 txf = comm.RaisedCosineTransmitFilter('RolloffFactor', p.rolloff, 'FilterSpanInSymbols', p.filter_span, ...
     'OutputSamplesPerSymbol', p.sps);
-sy = reshape(pskmod(txb(:), 4, pi/4, 'gray', 'InputType', 'bit'), p.frame_length / 2, []);
-sy = [sy; zeros(p.quiet_symbols, size(sy, 2))];                 % the quiet slot after every frame
+L = frame_layout(p);
+sd = reshape(pskmod(txb(:), 4, pi/4, 'gray', 'InputType', 'bit'), L.n_data, []);
+sy = repmat(L.tmpl, 1, size(sd, 2)); sy(L.idx_data, :) = sd;    % quiet slot, training, data and pilots, guard
 verifyLessThan(tc, max(abs(txf(sy(:)) - txi(:))), 1e-12);
+verifyEqual(tc, F.ber(v), zeros(1, sum(v)));                    % the real receiver finds every frame at 12 dB
+verifyLessThan(tc, max(abs(F.cfo_hz)), 2 * p.cfo_ppm * 1e-6 * p.carrier_freq + 1e3);
 verifyEqual(tc, sum(~isnan(F.ber)), F.nf);                     % every frame complete: bits aligned per frame
 verifyLessThan(tc, abs(median(F.q_iot)), 1.5);                 % nothing but thermal noise in the quiet slot
 verifyLessThan(tc, mean(F.coh(v)), 0.2);             % thermal noise only: no spatial coherence
@@ -274,6 +277,31 @@ Z = [log(0.5) * ones(2 * n, 2), [randn(n, 1); 6 + randn(n, 1)], rand(2 * n, 2)];
 FM = fuse_classes('fit', Z, y, 2, 1e-3);
 [~, k] = fuse_classes('apply', FM, Z);
 verifyGreaterThan(tc, mean(k == y), 0.95);
+end
+
+function test_frame_layout(tc)
+% quiet slot first, then training, data and pilots without overlap, a guard at the end
+p = base_params();
+L = frame_layout(p);
+verifyEqual(tc, numel(unique([L.idx_data; L.idx_pil])), L.n_data + L.n_pil);
+verifyGreaterThan(tc, min([L.idx_data; L.idx_pil]), L.NQ + L.n_pre);
+verifyLessThanOrEqual(tc, max([L.idx_data; L.idx_pil]), L.NQ + L.n_sig);
+verifyEqual(tc, L.air, L.NQ + L.n_sig + L.G);
+verifyEqual(tc, nnz(L.tmpl(1:L.NQ)), 0);
+verifyEqual(tc, nnz(L.tmpl(end - L.G + 1:end)), 0);
+verifyEqual(tc, abs(L.tmpl(L.NQ + (1:L.n_pre))), ones(L.n_pre, 1), 'AbsTol', 1e-12);
+verifyEqual(tc, L.n_pil / (L.n_pil + L.n_data), p.pilot_block / (p.pilot_block + p.pilot_every), 'AbsTol', 0.01);
+verifyEqual(tc, p.air_symbols, L.air);
+end
+
+function test_heading_rate(tc)
+% turns stay within the measured bank angle and yaw rate; same seed, same rate
+p = base_params();
+w = arrayfun(@(s) heading_rate(s, 0, p), 1:200);
+verifyLessThanOrEqual(tc, max(abs(w)), p.yaw_rate_max + 1e-9);
+verifyEqual(tc, heading_rate(7, 300, p), heading_rate(7, 300, p));
+v = p.v_max; wf = rad2deg(9.81 * tand(p.roll_max_deg) / v);
+verifyLessThanOrEqual(tc, max(abs(arrayfun(@(s) heading_rate(s, v * p.carrier_freq / p.c_light, p), 1:200))), min(wf, p.yaw_rate_max) + 1e-9);
 end
 
 function p = base_params()

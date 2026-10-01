@@ -27,6 +27,7 @@ if ~isfield(p0, 'n_rx')
 end
 p0.quiet_build = true;
 p0.int_aoa_random = false;             % V8 nulling test at the fixed direction p0.int_aoa_deg(1)
+p0.yaw_random = false;                 % fixed geometry through every run
 p0.k_random = false;                   % K-factor of each case fixed
 p0.active_threat = 'none';
 

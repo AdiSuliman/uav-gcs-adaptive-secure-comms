@@ -15,14 +15,30 @@ params.sps                 = params.samples_per_symbol;
 params.bits_per_frame = 1000;          % payload bits per frame
 params.crc_bits       = 32;            % CRC-32 per frame: packet check at the receiver
 params.frame_length   = params.bits_per_frame + params.crc_bits;  % total bits/frame
-% Quiet slot: the GCS stays silent for the last symbols of every frame (the gap
-% between command packets). The UAV measures the channel without our signal there:
-% interference alone, as in jammer detection on unused pilots (Pirayesh & Zeng);
-% a reactive jammer, which transmits only while it senses our signal, is silent
-% there (Xu et al.; Sagduyu et al.). The slot is longer than the filter span, so
-% no data symbol straddles two frames.
-params.quiet_symbols  = 32;            % [symbols] silent slot at the end of each frame (5.8% of air time)
+% Quiet slot: the GCS is silent right before every frame (the gap between command
+% packets). The UAV measures the channel without our signal there, just before it
+% has to find the frame: interference alone, as in jammer detection on unused pilots
+% (Pirayesh & Zeng); a reactive jammer, which transmits only while it senses our
+% signal, is silent there (Xu et al.; Sagduyu et al.). A guard after the frame
+% (frame_layout.m) keeps the filter tails out of the next quiet slot.
+params.quiet_symbols  = 32;            % [symbols] silent slot before each frame
 params.cycle_s        = 0.02;          % [s] decision cycle: channel time between consecutive frames
+% Training and pilots (frame_layout.m), as the 802.11 frame (Pirayesh & Zeng): ten identical
+% short symbols (frame detection, coarse frequency), two identical long ones (timing, fine
+% frequency, channel), pilots for channel and phase tracking (802.11: 4 per 52 subcarriers).
+params.stf_len        = 4;             % [symbols] short training sequence: frequency offsets within +-125 kHz
+params.stf_rep        = 10;
+params.ltf_len        = 16;            % [symbols] long training sequence
+params.ltf_rep        = 2;
+params.pilot_block    = 4;             % [symbols] pilot block ...
+params.pilot_every    = 48;            % ... after every 48 data symbols
+% Receiver: 'real' finds every frame in time and frequency from its training and estimates
+% the channel from training and pilots; 'ideal' knows the timing, the frequency and every
+% transmitted symbol (the reference of validate_phy.m).
+params.rx_sync        = 'real';
+params.cfo_ppm        = 25;            % [ppm] oscillator tolerance of each radio at 2.4 GHz (IEEE 802.11)
+params.timing_max_sym = 4;             % [symbols] unknown arrival time of a frame (uniform, fractional)
+params.rx_dd_iter     = 2;             % decision-directed estimation passes after the pilot-based one
 %% ========== CHANNEL MODEL ==========
 % Pulse shaping (RRC)
 params.rolloff      = 0.25;            % RRC roll-off factor
@@ -33,21 +49,32 @@ params.k_range_db    = [-5 20];        % measured air-ground K: foliage 2-5, urb
 params.carrier_freq  = 2.4e9;          % 2.4 GHz ISM (range for a given Eb/N0: link_budget_table.m)
 
 % UAV platform velocity and Doppler
-% Platform: mini UAV (Tlili et al.: 5-25 kg, 0.5-2 m). Speed envelope 29-161 km/h
-% (8-44.7 m/s): from the slowest UAV in the measurements summarized by Khawaja et al.
-% (8 m/s) to their small-UAV limit of 161 km/h -> Doppler 64-358 Hz @ 2.4 GHz.
+% Platform: mini UAV (Tlili et al.: 5-25 kg, 0.5-2 m). Speed envelope 0-161 km/h:
+% from a hovering rotorcraft (measured while hovering, Khawaja et al.; the channel
+% then hardly changes, Gomez-Ponce et al.) to the small-UAV limit of 161 km/h quoted
+% by Khawaja et al. -> Doppler 0-358 Hz @ 2.4 GHz.
 % Speed is a CONTINUOUS parameter (any real value inside the envelope, not only
 % whole km/h). The dataset generator draws a random real-valued speed per block
 % of frames; the GUI accepts decimals. fd_max = v * fc / c.
 % v_nominal (20 m/s = 72 km/h -> fd = 160 Hz) is the default cruise speed used by
 % every script that does not draw a speed per seeded run.
-params.speed_kmh_min = 29;                       % [km/h] envelope lower bound
+params.speed_kmh_min = 0;                        % [km/h] envelope lower bound (hover)
 params.speed_kmh_max = 161;                      % [km/h] envelope upper bound
-params.v_min     = params.speed_kmh_min/3.6;     % [m/s]  13.89
-params.v_max     = params.speed_kmh_max/3.6;     % [m/s]  33.33
+params.v_min     = params.speed_kmh_min/3.6;     % [m/s]
+params.v_max     = params.speed_kmh_max/3.6;     % [m/s]
 params.v_nominal = 20;      % [m/s] nominal cruise (72 km/h) — default simulation Doppler
 params.c_light   = 3e8;     % [m/s] speed of light
 params.fd_max    = params.v_nominal * params.carrier_freq / params.c_light;  % [Hz] ~160 @ 20 m/s
+% Manoeuvres: the heading turns during a flight (heading_rate.m), so the directions of
+% the GCS and of every interferer rotate across the antenna array: a coordinated turn
+% at up to the largest bank angle measured on a small UAV (57.9 deg, Gross et al.),
+% turn rate g tan(bank) / v with v not below the slowest measured UAV (8 m/s, Khawaja
+% et al.), and never above the largest measured yaw rate of a small UAV (28.7 deg/s
+% while circling, Allen & Lin).
+params.yaw_random    = true;                     % heading rate drawn per seeded sub-run
+params.roll_max_deg  = 57.9;                     % [deg] largest measured bank angle of a small UAV
+params.turn_v_floor  = 8;                        % [m/s] speed floor of the turn-rate formula
+params.yaw_rate_max  = 28.7;                     % [deg/s] largest measured yaw rate of a small UAV
 
 % Threat parameters at nominal severity, the middle of the decision layer's five
 % levels (dataset levels: run_dataset_sweep.m; decision levels: decision_config.m)
@@ -139,7 +166,8 @@ params.quiet_build = true;     % build Simulink models without opening the edito
 %% ========== DERIVED PARAMETERS ==========
 params.bits_per_symbol   = log2(params.mod_order);
 params.symbols_per_frame = params.frame_length / params.bits_per_symbol;      % data symbols
-params.air_symbols       = params.symbols_per_frame + params.quiet_symbols;   % data + quiet slot
+Lf = frame_layout(params);
+params.air_symbols       = Lf.air;                                            % training + data + pilots + quiet slot
 params.samples_per_frame = params.air_symbols * params.sps;
 params.frame_duration    = params.symbols_per_frame / params.symbol_rate;     % simulation step (bit clock)
 %% ========== DISPLAY ==========

@@ -139,6 +139,8 @@ D.iq = [D.iq, F.iq(v)];
 lab = label * ones(1, n);
 if strcmp(p.active_threat, 'benign_interference')
     lab(F.act(v) < 0.1) = 1;                            % no WLAN packet in this frame: a clean frame
+elseif strcmp(p.active_threat, 'antenna_fault')
+    lab(F.act(v) == 0) = 1;                             % the contact never opened in this frame: a clean frame
 end
 D.label = [D.label, lab]; D.level = [D.level, level * ones(1, n)];
 D.snr = [D.snr, ebno * ones(1, n)]; D.speed = [D.speed, v_kmh * ones(1, n)];

@@ -66,6 +66,7 @@ end
 
 p0 = p_ref;
 p0.int_aoa_random = false; p0.k_random = false; p0.quiet_build = true;
+p0.yaw_random = false;                  % the mapped geometries stay fixed through the run
 SNR_points = p0.EbNo_dB;
 nS = numel(SNR_points);
 v_nom = p0.v_nominal * 3.6;                       % nominal cruise speed [km/h]

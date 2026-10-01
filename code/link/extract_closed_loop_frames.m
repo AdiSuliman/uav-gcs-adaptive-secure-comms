@@ -59,7 +59,7 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %   The last five come from the receiver's channel estimator (per-32-symbol
 %   channel estimates and the frame's interference + noise covariance, the
 %   quantities MMSE combining uses; known symbols = ideal pilots, proposal risk 8).
-%   Quiet slot (p.quiet_symbols): the end of every frame carries no signal of ours.
+%   Quiet slot (p.quiet_symbols): the start of every frame carries no signal of ours.
 %     q_iot     interference over thermal in the quiet slot [dB], mean of the
 %               antennas: what occupies the channel while we are silent
 %     q_react   residual power while we transmit over the quiet-slot power on the
@@ -67,6 +67,12 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %               large for a jammer that transmits only while it senses our signal
 %     gain_ant  mean channel gain of every antenna over the frame [dB] (antennas x
 %               frames), for measurements over several decision cycles
+%   Synchronization (receiver output 6; zeros with an ideal receiver):
+%     sync_d    arrival of the frame found from its training [samples]
+%     cfo_hz    frequency offset found from the training [Hz]
+%     sync_pk   timing peak over the mean of the arrival window (a clean frame stands out)
+%     sync_p2   second timing peak, more than one symbol away, over the first (two
+%               frames with our training on the air: a spoofer)
 %   Ground truth: act, share of the frame with the threat on the air (packet traffic
 %   of benign interference), analysis and labels only.
 % With p.fec (fec_interleave) ber, fer and crc_fail are those of the decoded
@@ -80,6 +86,11 @@ iqa = out.get('Rx_IQ');                                  % samples x antennas x 
 zc  = squeeze(out.get('Rx_Z'));
 Hq  = out.get('Rx_H');
 Rq  = out.get('Rx_R');
+sy  = zeros(5, size(iqa, ndims(iqa)));
+try
+    sy = reshape(out.get('Rx_S'), 5, []);
+catch
+end
 if ismatrix(iqa), iqa = reshape(iqa, size(iqa, 1), 1, []); end
 if isvector(zc), zc = zc(:); end
 [ns, na, nf] = size(iqa);
@@ -91,6 +102,8 @@ tx_al = tx_all(1:Lmax);
 rx_al = rx_all(delay_bits+1:delay_bits+Lmax);
 
 F = struct('nf', nf);
+if size(sy, 2) < nf, sy(:, end+1:nf) = 0; end
+F.sync_d = sy(1, 1:nf); F.cfo_hz = sy(2, 1:nf); F.sync_pk = sy(3, 1:nf); F.sync_p2 = sy(4, 1:nf);
 
 % Ground truth and CRC
 if isfield(p, 'fec') && p.fec
@@ -114,16 +127,16 @@ end
 F.branch_dip = branch_dip(Hq, nf);
 F.branch_gap = branch_gap(Hq, nf);
 F.gain_ant = gain_ant(Hq, nf);
-xh = remod_frames(rx_all(delay_bits+1:end), p, ns, nf);
-qn = max(NQ - p.filter_span - 2, 0) * p.sps;            % quiet-slot samples free of our filter tails
-dat = (1:ns - qn)';                                      % samples that carry our signal
+xh = remod_frames(rx_all(delay_bits+1:end), p, ns, nf, sy(1, 1:nf) + sy(5, 1:nf), sy(2, 1:nf));
+qn = NQ * p.sps;                                         % quiet slot before the frame: free of our pulse tails
+dat = (qn + 1:ns)';                                      % samples that carry our signal
 rs = nan(na, nf); sn = nan(na, nf); ec = nan(na, nf); io = nan(na, nf); pe = nan(na, nf); pq = nan(na, nf);
 for a = 1:na
     ia = reshape(iqa(:, a, :), ns, nf);
     rs(a, :) = 10*log10(mean(abs(ia(dat, :)).^2, 1) + eps);
     [sn(a, :), ec(a, :), pe(a, :)] = residual_metrics(xh(dat, :), ia(dat, :));
     io(a, :) = iot_of(out, p, rs(a, :), sn(a, :));
-    if qn > 0, pq(a, :) = mean(abs(ia(ns - qn + 1:ns, :)).^2, 1); end
+    if qn > 0, pq(a, :) = mean(abs(ia(1:qn, :)).^2, 1); end
 end
 s0 = sn; s0(isnan(s0)) = -Inf;
 [~, ref] = max(s0, [], 1);                                  % reference antenna per frame
@@ -171,13 +184,13 @@ sps = p.sps;
 x = iq(:);
 nsym = floor(numel(x) / sps);
 Es = mean(reshape(abs(x(1:nsym*sps)).^2, sps, nsym), 1);
-hot = movmax(double(Es > 4 * median(Es)), [3 3]) > 0;   % tolerate filter delay and alignment
+tm = 0; if isfield(p, 'timing_max_sym'), tm = ceil(p.timing_max_sym); end
+hot = movmax(double(Es > 4 * median(Es)), [3 3 + tm]) > 0;   % tolerate filter delay and arrival time
 d = p.filter_span / 2;                               % Tx filter delay in symbols
-NQ = 0; if isfield(p, 'quiet_symbols'), NQ = p.quiet_symbols; end
-nd = p.frame_length / 2;                             % data symbols per frame
+Lf = frame_layout(p);
 b = (0:L-1)';
 fi = floor(b / p.frame_length);                      % frame of each bit
-sym = fi * (nd + NQ) + floor((b - fi * p.frame_length) / 2) + 1 + d;
+sym = fi * Lf.air + Lf.idx_data(floor((b - fi * p.frame_length) / 2) + 1) + d;
 er = false(L, 1);
 in = sym <= nsym;
 er(in) = hot(sym(in));
@@ -291,25 +304,33 @@ end
 end
 
 %% ===================== Sample-level estimates =====================
-function X = remod_frames(bits, p, ns, nf)
-% Transmit waveform re-modulated from the receiver's decisions (same QPSK
-% mapping and RRC filter as the transmitter), cut into frames of ns samples;
-% frames whose decisions are incomplete are NaN.
+function X = remod_frames(bits, p, ns, nf, dly, cfo)
+% Transmit waveform rebuilt from the receiver's decisions (frame_layout.m: training,
+% pilots, the decided data symbols, quiet slot; same QPSK mapping and RRC filter as
+% the transmitter), cut into frames of ns samples and moved to the arrival time and
+% frequency offset the receiver found; frames whose decisions are incomplete are NaN.
 X = nan(ns, nf);
-nsym = floor(numel(bits) / 2);
-if nsym < 1, return; end
+L = frame_layout(p);
+nfr = min(nf, floor(numel(bits) / p.frame_length));
+if nfr < 1, return; end
 txf = comm.RaisedCosineTransmitFilter('RolloffFactor', p.rolloff, 'FilterSpanInSymbols', p.filter_span, ...
     'OutputSamplesPerSymbol', p.sps);
-sy = pskmod(bits(1:2*nsym), 4, pi/4, 'gray', 'InputType', 'bit');
-NQ = 0; if isfield(p, 'quiet_symbols'), NQ = p.quiet_symbols; end
-if NQ > 0                                            % the silent slot after every frame's data symbols
-    nd = p.frame_length / 2; nfr = floor(nsym / nd);
-    sy = [reshape(sy(1:nfr*nd), nd, nfr); zeros(NQ, nfr)];
-    sy = sy(:);
-end
-x = txf(sy);
-nc = min(nf, floor(numel(x) / ns));
+S = repmat(L.tmpl, 1, nfr);
+S(L.idx_data, :) = reshape(pskmod(bits(1:nfr*p.frame_length), 4, pi/4, 'gray', 'InputType', 'bit'), L.n_data, nfr);
+x = txf(S(:));
+nc = min(nfr, floor(numel(x) / ns));
 X(:, 1:nc) = reshape(x(1:nc*ns), ns, nc);
+fs = p.symbol_rate * p.sps;
+kk = [0:ceil(ns/2)-1, -floor(ns/2):-1]';
+t = (0:ns-1)' / fs;
+for f = 1:nc
+    if dly(f) ~= 0
+        X(:, f) = ifft(fft(X(:, f)) .* exp(-1j*2*pi*kk*dly(f)/ns));
+    end
+    if cfo(f) ~= 0
+        X(:, f) = X(:, f) .* exp(1j*2*pi*cfo(f)*t);
+    end
+end
 end
 
 function [sinr, ec, pe] = residual_metrics(x, r)
