@@ -67,6 +67,7 @@ end
 p0 = p_ref;
 p0.int_aoa_random = false; p0.k_random = false; p0.quiet_build = true;
 p0.yaw_random = false;                  % the mapped geometries stay fixed through the run
+p0.corr_random = false;
 SNR_points = p0.EbNo_dB;
 nS = numel(SNR_points);
 v_nom = p0.v_nominal * 3.6;                       % nominal cruise speed [km/h]
@@ -201,7 +202,7 @@ function s = level_label(base)
     switch base
         case 'path_loss',          s = 'Extra path loss (dB)';
         case 'spoofing',           s = 'Spoofer over signal (dB)';
-        case 'antenna_fault',      s = 'Fault duty cycle';
+        case 'antenna_fault',      s = 'Open-connector loss (dB)';
         case 'benign_interference', s = 'Interference over signal (dB)';
         case 'airframe_shadowing', s = 'Shadowing loss (dB)';
         otherwise,                 s = 'JSR (dB)';

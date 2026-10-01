@@ -5,9 +5,8 @@
 % production detector:
 %   seen     every other training level (reference from the same generator)
 %   between  midpoints between training levels (never trained on), every other one
-%   above    beyond the strongest training level, where the sources allow it (antenna
-%            fault open 70% of the time); every other threat is trained up to the
-%            sources' most severe value
+%   above    beyond the strongest training level, where the sources allow it; every
+%            threat is trained up to the sources' most severe value, so none is tested above
 % Per frame: correct class, a class that calls for the same countermeasure
 % (rule_based_policy.m), or flagged unknown (production score below the threshold
 % keeping 95% of known validation frames).
@@ -27,9 +26,8 @@ delay_bits = 20; temporal_window = 10;
 rng(4343, 'twister');
 clear threat_cfg
 % Above the training range only where the sources go further than the training levels
-% (in-band threats and airframe shadowing are trained up to 30 and 35 dB)
 ABOVE = struct('jamming', [], 'noise_burst', [], 'reactive_jamming', [], 'sweeping_jammer', [], ...
-    'tone_jamming', [], 'path_loss', [], 'spoofing', [], 'antenna_fault', 0.7, ...
+    'tone_jamming', [], 'path_loss', [], 'spoofing', [], 'antenna_fault', [], ...
     'benign_interference', [], 'airframe_shadowing', []);
 DL = dataset_levels();
 threat_cfg = struct('name', {}, 'param', {}, 'lv', {});

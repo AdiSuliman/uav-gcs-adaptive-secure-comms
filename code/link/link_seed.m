@@ -8,7 +8,8 @@ function link_seed(modelName, seed, fd)
 %   'AoA' block gets the directions of this seed (interferer_aoa.m), and with
 %   random K-factors the 'Kfac' block gets this seed's K of our signal and of the
 %   interferers (channel_k.m), and with random manoeuvres the 'Yaw' block gets this
-%   seed's heading rate for the flight's speed (heading_rate.m). No rebuild is needed.
+%   seed's heading rate for the flight's speed (heading_rate.m); with a random receive
+%   correlation the 'Corr' block gets this seed's (rx_correlation.m). No rebuild is needed.
 set_param([modelName '/Seed'], 'Value', sprintf('%d', round(seed)));
 if nargin >= 3
     set_param([modelName '/Doppler'], 'Value', sprintf('%.6f', fd));
@@ -24,6 +25,11 @@ if getSimulinkBlockHandle([modelName '/Yaw']) ~= -1, uy = get_param([modelName '
 if isstruct(uy) && isfield(uy, 'yaw_random') && uy.yaw_random
     fdv = str2double(get_param([modelName '/Doppler'], 'Value'));
     set_param([modelName '/Yaw'], 'Value', sprintf('%.8f', heading_rate(seed, fdv, uy)));
+end
+uc = [];
+if getSimulinkBlockHandle([modelName '/Corr']) ~= -1, uc = get_param([modelName '/Corr'], 'UserData'); end
+if isstruct(uc) && isfield(uc, 'corr_random') && uc.corr_random
+    set_param([modelName '/Corr'], 'Value', sprintf('%.6f', rx_correlation(seed, uc.corr_range)));
 end
 uk = [];
 if getSimulinkBlockHandle([modelName '/Kfac']) ~= -1, uk = get_param([modelName '/Kfac'], 'UserData'); end

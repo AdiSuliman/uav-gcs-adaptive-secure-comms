@@ -88,7 +88,7 @@ if isfield(Q, 'drop_db') && ~isempty(Q.drop_db), env.PP.drop_db = Q.drop_db; end
 env.baseline = struct('jsr_db',p0.jsr_db,'path_loss_db',p0.path_loss_db, ...
     'fault_atten_db',p0.fault_atten_db,'spoof_sir_db',p0.spoof_sir_db, ...
     'benign_int_db',p0.benign_int_db,'tone_jsr_db',p0.tone_jsr_db,'shadow_db',p0.shadow_db, ...
-    'fault_duty',p0.fault_duty);
+    'fault_atten_db',p0.fault_atten_db);
 env.sev = buildSeverityTable();
 env.surv = loadSurvReference();
 env.ber_floor = 0.5 / p0.frame_length;      % "zero errors in a frame" plotting floor
@@ -1263,7 +1263,7 @@ function [p, sevTxt, fd_hz] = scenarioParams(env, threat, sevLevel, v_kmh)
     p.jsr_db = env.baseline.jsr_db; p.path_loss_db = env.baseline.path_loss_db;
     p.fault_atten_db = env.baseline.fault_atten_db; p.spoof_sir_db = env.baseline.spoof_sir_db;
     p.benign_int_db = env.baseline.benign_int_db; p.tone_jsr_db = env.baseline.tone_jsr_db;
-    p.shadow_db = env.baseline.shadow_db; p.fault_duty = env.baseline.fault_duty;
+    p.shadow_db = env.baseline.shadow_db; p.fault_atten_db = env.baseline.fault_atten_db;
     p.active_threat = threat;
     sevTxt = 'nominal';
     sv = env.sev.(threat);
@@ -2019,7 +2019,7 @@ function ep3d = episodeRecord(env, p, T, kDone, threat, ebno, sevLevel, sevTxt, 
     for j = 1:numel(f), T.(f{j}) = T.(f{j})(:, 1:kDone); end
     T.q = T.q(:, 1:kDone, :);
     sev = struct('jsr_db', p.jsr_db, 'path_loss_db', p.path_loss_db, 'spoof_sir_db', p.spoof_sir_db, ...
-        'benign_int_db', p.benign_int_db, 'fault_duty', p.fault_duty);
+        'benign_int_db', p.benign_int_db, 'fault_atten_db', p.fault_atten_db);
     ep3d = struct('version', 1, 'created', datestr(now), 'threat', threat, 'ebno', ebno, ...
         'sev_level', sevLevel, 'sev_txt', sevTxt, 'sev', sev, 'v_kmh', v_kmh, 'fd_hz', p.fd_max, ...
         'seed', seed, 'seed_geom', seedGeom, 'int_aoa_deg', aoa, 'gcs_aoa_deg', fieldOr(p, 'gcs_aoa_deg', 0), ...

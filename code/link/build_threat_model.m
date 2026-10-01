@@ -121,6 +121,7 @@ add_block('simulink/Sources/Constant', [modelName '/Doppler'], 'Position', [150 
 add_block('simulink/Sources/Constant', [modelName '/AoA'],     'Position', [150 270 220 290]);
 add_block('simulink/Sources/Constant', [modelName '/Kfac'],    'Position', [150 310 220 330]);
 add_block('simulink/Sources/Constant', [modelName '/Yaw'],     'Position', [150 350 220 370]);
+add_block('simulink/Sources/Constant', [modelName '/Corr'],    'Position', [150 390 220 410]);
 add_block('simulink/Sinks/To Workspace', [modelName '/tx_sink'], 'Position', [150 30 230 60]);
 add_block('simulink/Sinks/To Workspace', [modelName '/rx_sink'], 'Position', [870 90 950 120]);
 add_block('simulink/Sinks/To Workspace', [modelName '/Tx_IQ'],   'Position', [300 30 380 60]);
@@ -172,6 +173,8 @@ add_line(modelName, 'Kfac/1',      'Channel/4', 'autorouting', 'on');
 add_line(modelName, 'Kfac/1',      'Threat/5',  'autorouting', 'on');
 add_line(modelName, 'Yaw/1',       'Channel/5', 'autorouting', 'on');
 add_line(modelName, 'Yaw/1',       'Threat/6',  'autorouting', 'on');
+add_line(modelName, 'Corr/1',      'Channel/6', 'autorouting', 'on');
+add_line(modelName, 'Corr/1',      'Threat/7',  'autorouting', 'on');
 add_line(modelName, 'Channel/1',   'Threat/1',  'autorouting', 'on');
 add_line(modelName, 'Threat/1',    'AWGN/1',    'autorouting', 'on');
 add_line(modelName, 'Threat/2',    'Thr_act/1', 'autorouting', 'on');
@@ -194,6 +197,9 @@ set_param([modelName '/Kfac'], 'Value', mat2str([p.rician_k p.int_rician_k], 8))
 set_param([modelName '/Kfac'], 'UserDataPersistent', 'on', 'UserData', struct('k_random', logical(p.k_random), ...
     'k_range', p.k_range_db));
 set_param([modelName '/Yaw'], 'Value', '0');
+set_param([modelName '/Corr'], 'Value', sprintf('%.6f', p.rx_corr));
+set_param([modelName '/Corr'], 'UserDataPersistent', 'on', 'UserData', struct('corr_random', logical(p.corr_random), ...
+    'corr_range', p.corr_range));
 set_param([modelName '/Yaw'], 'UserDataPersistent', 'on', 'UserData', struct('yaw_random', logical(p.yaw_random), ...
     'roll_max_deg', p.roll_max_deg, 'turn_v_floor', p.turn_v_floor, 'yaw_rate_max', p.yaw_rate_max, ...
     'c_light', p.c_light, 'carrier_freq', p.carrier_freq));
@@ -246,12 +252,24 @@ if real_rx
         'x = ifft(fft(x) .* exp(-1j*2*pi*kk*tau/Ns));\n' ...
         'r = exp(1j*2*pi*cfo*t);\n' ...
         'los = exp(1j*2*pi*fd*fl*t);\n'], p.timing_max_sym * p.sps);
-    mix = '    y(:, k) = x .* r .* (sqrt(K/(K+1)) * a(k) * los + sqrt(1/(K+1)) * D(:, k));\n';
+    mix = '    y(:, k) = gk * x .* r .* (sqrt(Kk/(Kk+1)) * a(k) * los + sqrt(1/(Kk+1)) * D(:, k));\n';
 else
     pers = ''; imp = ''; dly = '';
-    mix = '    y(:, k) = x .* (sqrt(K/(K+1)) * a(k) + sqrt(1/(K+1)) * D(:, k));\n';
+    mix = '    y(:, k) = gk * x .* (sqrt(Kk/(Kk+1)) * a(k) + sqrt(1/(Kk+1)) * D(:, k));\n';
 end
-s = [sprintf('function y = fcn(x, seed, fd, kdb, yaw)\n%%%%#codegen\npersistent f0 ph n%s\n', pers) ...
+% airframe shadowing: one antenna, drawn per run, loses p.shadow_db and its line of sight
+% (K-factor p.shadow_k_db, Sun et al.)
+thr = lower(p.active_threat);
+shd = any(strcmp(strsplit(thr, '+'), 'airframe_shadowing'));
+if shd
+    pers = [pers ' hs'];
+    imp = [imp sprintf('if isempty(hs)\n    hs = randi(%d);\nend\n', nr)];
+    sel = sprintf(['    Kk = K; gk = 1;\n    if k == hs\n        Kk = %.10f; gk = %.10f;\n    end\n'], ...
+        10^(p.shadow_k_db/10), 10^(-p.shadow_db/20));
+else
+    sel = sprintf('    Kk = K; gk = 1;\n');
+end
+s = [sprintf('function y = fcn(x, seed, fd, kdb, yaw, rho)\n%%%%#codegen\npersistent f0 ph n%s\n', pers) ...
     sprintf('if isempty(f0)\n    rng(seed, ''twister'');\nend\n') ...
     sos_init('f0', 'ph', nr) imp ...
     sprintf('if isempty(n)\n    n = 0;\nend\nNs = size(x, 1);\nt = (n + (0:Ns-1).'') / %.1f;\nn = n + max(Ns, %d);\n', fs, cyc) ...
@@ -259,7 +277,7 @@ s = [sprintf('function y = fcn(x, seed, fd, kdb, yaw)\n%%%%#codegen\npersistent 
     sprintf(['K = 10^(kdb(1)/10);\n' ...
     'a = exp(-1j * %.12f * (0:%d).'' * sind(%.8f + yaw * t(1)));\n' ...
     'y = complex(zeros(Ns, %d));\n' ...
-    'for k = 1:%d\n' mix ...
+    'for k = 1:%d\n' sel mix ...
     'end\n' ...
     'end\n'], 2*pi*p.ant_spacing_wl, nr-1, p.gcs_aoa_deg, nr, nr)];
 s = strrep(s, '%%#codegen', '%#codegen');
@@ -284,8 +302,8 @@ if numel(addc) > numel(p.int_aoa_deg)
 end
 
 pers = {}; init = {}; body = {};
-if any(ismember(sig, {'antenna_fault', 'airframe_shadowing'}))
-    pers{end+1} = 'hit_ant'; init{end+1} = sprintf('hit_ant = randi(%d);', nr);   % the antenna the fault or the airframe hits
+if any(ismember(sig, {'antenna_fault'}))
+    pers{end+1} = 'hit_ant'; init{end+1} = sprintf('hit_ant = randi(%d);', nr);   % the antenna with the open connector
 end
 body{end+1} = sprintf('Ns = size(u, 1);\ny = u;\nt = (nI + (0:Ns-1).'') / %.1f;\nnI = nI + max(Ns, %d);\nact = %d;\n', ...
     fs, round(p.cycle_s * fs), double(~isempty(parts)));   % interferer channels on the same clock as ours
@@ -295,27 +313,10 @@ for i = 1:numel(sig)
         case 'path_loss'
             body{end+1} = sprintf('y = y * %.8f;\n', 10^(-p.path_loss_db/20)); %#ok<AGROW>
         case 'antenna_fault'
-            if ~isempty(p.fault_vib_hz)
-                % a connector opens during part of every cycle of an airframe vibration
-                pers{end+1} = 'f_vib'; init{end+1} = sprintf('f_vib = %.4f + %.4f * rand;', ...
-                    p.fault_vib_hz(1), diff(p.fault_vib_hz)); %#ok<AGROW>
-                pers{end+1} = 'ph_vib'; init{end+1} = 'ph_vib = rand;'; %#ok<AGROW>
-                body{end+1} = sprintf(['o = mod(t * f_vib + ph_vib, 1) < %.6f;\n' ...
-                    'y(o, hit_ant) = y(o, hit_ant) * %.8f;\n'], p.fault_duty, 10^(-p.fault_atten_db/20)); %#ok<AGROW>
-            else
-                ps = p.fault_period * sps; on = round(p.fault_duty * ps);
-                pers{end+1} = 'k_af'; init{end+1} = 'k_af = 0;'; %#ok<AGROW>
-                body{end+1} = sprintf(['o = false(Ns, 1);\nfor i = 1:Ns\n    if mod(k_af, %d) < %d\n' ...
-                    '        y(i, hit_ant) = y(i, hit_ant) * %.8f;\n        o(i) = true;\n    end\n' ...
-                    '    k_af = k_af + 1;\nend\n'], ps, on, 10^(-p.fault_atten_db/20)); %#ok<AGROW>
-            end
-            if isscalar(parts)
-                body{end+1} = sprintf('act = mean(double(o));\n'); %#ok<AGROW>   % share of the frame with the contact open
-            end
+            % a connector of one antenna, drawn per run, is open for the flight
+            body{end+1} = sprintf('y(:, hit_ant) = y(:, hit_ant) * %.8f;\n', 10^(-p.fault_atten_db/20)); %#ok<AGROW>
         case 'airframe_shadowing'
-            % a banking turn hides one antenna behind the airframe for the whole run
-            % (measured depth above 35 dB, lasting seconds; Khawaja et al.)
-            body{end+1} = sprintf('y(:, hit_ant) = y(:, hit_ant) * %.8f;\n', 10^(-p.shadow_db/20)); %#ok<AGROW>
+            % applied in the channel: the hidden antenna loses its line of sight there
     end
 end
 if ~isempty(addc)
@@ -338,18 +339,20 @@ for c = 1:numel(addc)
             w = sprintf('w = sqrt(%.8f) * exp(1j * (2*pi*tone_f*t + tone_ph));\n', 10^(p.tone_jsr_db/10) * tone_gain(p));
         case 'benign_interference'
             if ~isempty(p.benign_occ)
-                % WLAN packets: log-uniform durations, exponential idle gaps for the
-                % flight's occupancy; the schedule runs on the channel clock
+                % WLAN packets: log-uniform durations; idle gaps gamma-distributed with the
+                % field shape, their mean set by the flight's occupancy (Marsaglia-Tsang
+                % sampler, boosted for a shape below 1); the schedule runs on the channel clock
                 d = p.benign_pkt_s; md = (d(2) - d(1)) / log(d(2) / d(1));
                 pers{end+1} = 'b_occ'; init{end+1} = sprintf('b_occ = %.6f + %.6f * rand;', p.benign_occ(1), diff(p.benign_occ)); %#ok<AGROW>
                 pers{end+1} = 'b_on'; init{end+1} = 'b_on = rand < b_occ;'; %#ok<AGROW>
                 pers{end+1} = 'b_next'; init{end+1} = 'b_next = 0;'; %#ok<AGROW>
                 w = sprintf(['on = false(Ns, 1);\nfor i = 1:Ns\n    while t(i) >= b_next\n' ...
-                    '        if b_on\n            b_on = false; b_next = b_next - %.10f * (1 - b_occ) / b_occ * log(rand);\n' ...
+                    '        if b_on\n            b_on = false;\n' gamma_draw(p.benign_idle_shape, 'gg') ...
+                    '            b_next = b_next + gg * %.10f * (1 - b_occ) / b_occ / %.10f;\n' ...
                     '        else\n            b_on = true; b_next = b_next + exp(%.8f + %.8f * rand);\n        end\n' ...
                     '    end\n    on(i) = b_on;\nend\nact = mean(double(on));\n' ...
                     'w = sqrt(%.8f/2) * complex(randn(Ns, 1), randn(Ns, 1)) .* on;\n'], ...
-                    md, log(d(1)), log(d(2) / d(1)), 10^(p.benign_int_db/10));
+                    md, p.benign_idle_shape, log(d(1)), log(d(2) / d(1)), 10^(p.benign_int_db/10));
             else
                 w = sprintf('w = sqrt(%.8f/2) * complex(randn(Ns, 1), randn(Ns, 1));\n', 10^(p.benign_int_db/10));
             end
@@ -386,7 +389,7 @@ for c = 1:numel(addc)
 end
 
 pers = [{'nI'}, pers]; init = [{'nI = 0;'}, init];
-head = sprintf('function [y, act] = fcn(u, seed, fd, aoa, kdb, yaw)\n%%#codegen\npersistent seeded\n');
+head = sprintf('function [y, act] = fcn(u, seed, fd, aoa, kdb, yaw, rho)\n%%#codegen\npersistent seeded\n');
 for i = 1:numel(pers)
     head = [head sprintf('persistent %s\n', pers{i})]; %#ok<AGROW>
 end
@@ -849,13 +852,25 @@ function c = sos_gains(dv, fv, pv, p)
 % Unit-power Rayleigh gains (Ns x n_rx) from the sinusoids at times t, then the
 % receive correlation (Cholesky factor of rho^|i-j|).
 nr = p.n_rx;
-Rr = p.rx_corr .^ abs((1:nr)' - (1:nr));
-C  = chol(Rr);
+
 c = sprintf(['%s = complex(zeros(Ns, %d));\n' ...
     'for k = 1:%d\n' ...
     '    %s(:, k) = exp(1j * (2*pi*t*%s(:, k).'' + repmat(%s(:, k).'', Ns, 1))) * ones(32, 1) / sqrt(32);\n' ...
     'end\n' ...
-    '%s = %s * %s;\n'], dv, nr, nr, dv, fv, pv, dv, dv, mat2str(C, 12));
+    'Rr = zeros(%d, %d);\nfor i = 1:%d\n    for j = 1:%d\n        Rr(i, j) = rho ^ abs(i - j);\n    end\nend\n' ...
+    '%s = %s * chol(Rr);\n'], dv, nr, nr, dv, fv, pv, nr, nr, nr, nr, dv, dv);
+end
+
+function c = gamma_draw(k, v)
+% Code drawing v ~ Gamma(k, 1): Marsaglia-Tsang for shape k + 1, times U^(1/k) when k < 1.
+a = k + (k < 1);
+d = a - 1/3; cc = 1 / sqrt(9 * d);
+c = sprintf(['            %s = 0;\n            while %s == 0\n                zx = randn; zv = (1 + %.10f * zx)^3;\n' ...
+    '                if zv > 0 && log(rand) < 0.5 * zx^2 + %.10f - %.10f * zv + %.10f * log(zv)\n' ...
+    '                    %s = %.10f * zv;\n                end\n            end\n'], v, v, cc, d, d, d, v, d);
+if k < 1
+    c = [c sprintf('            %s = %s * rand^(%.10f);\n', v, v, 1 / k)];
+end
 end
 
 function a = steering(p, aoa_deg)
@@ -889,7 +904,8 @@ d = struct('n_rx', 3, 'ant_aperture_m', 1.2, 'rx_corr', 0.3, 'gcs_aoa_deg', 0, .
     'csi_block', 64, 'mmse_window', 32, 'seed', [], 'int_aoa_random', false, 'int_aoa_range_deg', [-90 90], ...
     'k_random', false, 'k_range_db', [-5 20], 'tone_jsr_db', 16, 'tone_offset_hz', 300e3, 'shadow_db', 20, ...
     'yaw_random', false, 'roll_max_deg', 57.9, 'turn_v_floor', 8, 'yaw_rate_max', 28.7, ...
-    'quiet_symbols', 0, 'cycle_s', 0, 'fault_vib_hz', [], 'benign_occ', [], 'benign_pkt_s', [], ...
+    'quiet_symbols', 0, 'cycle_s', 0, 'benign_occ', [], 'benign_pkt_s', [], 'benign_idle_shape', 1, ...
+    'corr_random', false, 'corr_range', [0.3 0.9], 'shadow_k_db', -16, 'fault_atten_db', 31, ...
     'stf_len', 4, 'stf_rep', 10, 'ltf_len', 16, 'ltf_rep', 2, 'pilot_block', 4, 'pilot_every', 48, ...
     'rx_sync', 'ideal', 'cfo_ppm', 25, 'timing_max_sym', 4, 'rx_dd_iter', 2);
 f = fieldnames(d);

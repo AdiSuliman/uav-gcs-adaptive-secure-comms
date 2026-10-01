@@ -83,28 +83,37 @@ params.jsr_db        = 16;          % [dB] Jamming-to-Signal Ratio (barrage jamm
 params.burst_duty    = 0.3;         % Noise Burst: fraction of time jammer is ON (0-1)
 params.burst_period  = 100;         % Noise Burst: on/off cycle length (symbols)
 params.path_loss_db  = 14;          % Path Loss: attenuation (dB) applied to Tx signal
-params.fault_duty     = 0.3;        % Antenna Fault: fraction of time the contact is open (0-1)
-params.fault_period   = 200;        % Antenna Fault: on/off cycle [symbols] when no vibration band is set
-params.fault_vib_hz   = [86 672];   % Antenna Fault: a connector opens at an airframe vibration frequency, drawn
-                                    % per flight (motor and frame modes of a multirotor, Verbeke & Debruyne)
-params.fault_atten_db = 30;         % Antenna Fault: loss while open [dB]: an open contact couples only through
-                                    % its gap capacitance (0.01-0.03 pF at 2.4 GHz in 50 ohm: 26-36 dB)
+% Antenna Fault: a connector of one antenna is open for the flight (a broken connector that
+% separates at altitude and stays open, Fedde & Carter, US 4,506,385; opens are the most
+% common connector failure, Ginart et al.). The open contact couples only through its gap
+% capacitance: an estimate of 0.01-0.03 pF at 2.4 GHz in 50 ohm gives 26-36 dB (no
+% measurement of this depth was found).
+params.fault_atten_db = 31;         % Antenna Fault: loss of the open antenna [dB]
+% Spoofing: a counterfeit GCS on the same radio as ours (Mekdad et al.); its power over our
+% signal is set by geometry: 30 dB is a spoofer 31 times closer to the UAV than the GCS
+% (it captures the receiver from a 0.2-3 dB advantage, Whitehouse et al.).
 params.spoof_sir_db   = 3;          % Spoofing: Spoof-to-Signal Ratio (dB), 0 = equal power
 params.reactive_threshold = 0.5;    % Reactive Jamming: signal-energy threshold to trigger jammer
 params.tone_jsr_db    = 16;         % Tone (CW) jammer: in-band power over our signal (dB)
 params.tone_offset_hz = 300e3;      % Tone offset from our carrier, uniform in +-this per flight (flat part of the RRC band)
-params.shadow_db      = 20;         % Airframe shadowing: loss on one antenna in a banking turn (dB; up to 40 measured,
-                                    % events lasting about 30 s, Sun; Khawaja et al.)
+% Airframe shadowing: in a banking turn the airframe hides one antenna for seconds; the
+% median loss of an event is 15.5 +- 4.9 dB (C-band; 10.8 +- 3 dB at L-band), events up
+% to about 25 dB, and the hidden antenna loses its line of sight: its K-factor falls to
+% about -16 dB (Sun et al.). Applied in the channel (build_threat_model.m).
+params.shadow_db      = 15.5;       % Airframe shadowing: median loss of the hidden antenna [dB]
+params.shadow_k_db    = -16;        % Airframe shadowing: K-factor of the hidden antenna [dB]
 
 % Benign Interference: packet traffic of a WLAN in our channel, not an attack.
-% Frames of 0.27-3.2 ms (Wollenberg et al.), channel occupancy 5-86% (Cheema &
-% Salous; Wollenberg et al.), idle gaps exponential. A WLAN access point below the
-% UAV can arrive stronger than our GCS (EIRP 20 dBm, ETSI EN 300 328, against the
-% link budget of link_budget_table.m; interference grows with altitude, Song et al.),
-% up to the in-band cap of the sources (30 dB).
+% Frames of 0.27-3.2 ms and channel occupancy 5-86% (Wollenberg et al.; field duty
+% cycles 4.6-11.5%, Cheema & Salous); idle gaps gamma-distributed with the field shape
+% 0.49 (Cheema & Salous: the best fit, exponential the worst), their mean set by the
+% flight's occupancy. Its level over our signal follows from geometry: an access point
+% at the ETSI EN 300 328 limits (20 dBm e.i.r.p., 10 dBm/MHz) close below the UAV against
+% our GCS kilometres away reaches tens of dB; capped at the in-band cap of 30 dB.
 params.benign_int_db  = 0;          % Benign Interference power over our signal while a packet is on the air (dB)
 params.benign_occ     = [0.05 0.86];      % channel occupancy, drawn per flight
 params.benign_pkt_s   = [0.268e-3 3.2e-3]; % packet duration, log-uniform [s]
+params.benign_idle_shape = 0.49;          % gamma shape of the idle gaps
 
 % Sweeping Jammer: like jamming, but only dwells on our channel a fraction
 % of the time (spends the rest sweeping other channels). Severity axis is still
@@ -133,8 +142,12 @@ if isfile('profile.json')             % antenna profile of this checkout (branch
 end
 params.ant_aperture_m = 1.2;          % distance between the outer antennas [m]
 params.ant_spacing_wl = params.ant_aperture_m / (3e8 / params.carrier_freq) / (params.n_rx - 1);   % element spacing [wavelengths]
-params.rx_corr        = 0.3;          % diffuse-fading correlation between adjacent antennas (ground
-                                      % scatterers are seen under similar angles from the UAV, Khawaja et al.)
+% Diffuse-fading correlation between adjacent antennas: no source gives it for a small UAV
+% (on an aircraft underside the received amplitudes, line of sight included, correlate
+% 0.85-0.99, Sun); drawn per flight over a wide range (rx_correlation.m).
+params.rx_corr        = 0.3;          % fixed value (PHY validation, maps)
+params.corr_random    = true;         % correlation drawn per seeded sub-run
+params.corr_range     = [0.3 0.9];
 params.gcs_aoa_deg    = 0;            % GCS direction from array broadside [deg]
 % Fixed interferer directions (GUI, gallery, PHY validation) and the survivability
 % geometries (separated, aligned): the same spatial alignment with the GCS on every

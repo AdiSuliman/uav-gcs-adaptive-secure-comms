@@ -21,7 +21,7 @@ OUT = fullfile('results', 'threat_gallery');
 if ~isfolder(OUT), mkdir(OUT); end
 
 p0 = load('params.mat').params;
-p0.quiet_build = true; p0.int_aoa_random = false; p0.k_random = false; p0.yaw_random = false;
+p0.quiet_build = true; p0.int_aoa_random = false; p0.k_random = false; p0.yaw_random = false; p0.corr_random = false;
 fs = p0.symbol_rate * p0.sps;
 fd = V_KMH / 3.6 * p0.carrier_freq / p0.c_light;
 top = struct('threat', {}, 'action', {}, 'share', {});

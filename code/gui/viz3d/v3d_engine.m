@@ -53,7 +53,7 @@ M.avail = find(PP.sev(:)' == decision_config().nominal & ...   % nominal severit
     cellfun(@(p) ~isempty(p) && ~isempty(p.ber), PP.pools(:, 1, M.na, M.split))');
 S = load(fullfile(root, 'params.mat')); p = S.params;
 M.sev = struct('jsr_db', p.jsr_db, 'spoof_sir_db', p.spoof_sir_db, 'benign_db', p.benign_int_db, ...
-    'path_loss_db', p.path_loss_db, 'fault_duty', p.fault_duty);
+    'path_loss_db', p.path_loss_db, 'fault_atten_db', p.fault_atten_db);
 M.frame_s = p.frame_duration;
 M.emitters = {'jamming', 'reactive_jamming', 'sweeping_jammer', 'noise_burst', 'spoofing', 'benign_interference', 'tone_jamming'};
 M.inChannel = {'jamming', 'reactive_jamming', 'spoofing', 'tone_jamming'};

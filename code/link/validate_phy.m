@@ -14,6 +14,10 @@ function ok = validate_phy()
 %   V9  seeds: same seed -> identical run, different seed -> different run
 %   V10 tone jammer: in-band power after the receive filter equals that of a noise
 %       jammer of the same JSR (tone_jamming uses the same JSR definition)
+%   V1-V8 run the ideal receiver (known timing, frequency and symbols), the reference
+%   of the closed forms. V11: the real receiver (training, pilots, synchronization,
+%   frequency offset and arrival time on the air) on V1, V5 and V8b, and its Eb/N0 loss
+%   against the ideal receiver.
 % Gap = Eb/N0 shift between measured and theoretical BER, points with >= 100 errors.
 % Outputs: results/phy_validation.txt, results/phy_validation.png
 
@@ -28,6 +32,7 @@ end
 p0.quiet_build = true;
 p0.int_aoa_random = false;             % V8 nulling test at the fixed direction p0.int_aoa_deg(1)
 p0.yaw_random = false;                 % fixed geometry through every run
+p0.corr_random = false;                % each case sets its receive correlation
 p0.k_random = false;                   % K-factor of each case fixed
 p0.active_threat = 'none';
 
@@ -72,7 +77,7 @@ for c = 1:nC
     p = p0;
     p.n_rx = cases{c,2}; p.rician_k = cases{c,3}; p.int_rician_k = 10;
     p.rx_corr = cases{c,4}; p.active_threat = cases{c,5}; p.rx_combiner = cases{c,6};
-    p.jsr_db = 10; p.seed = 1000 + c;
+    p.jsr_db = 10; p.seed = 1000 + c; p.rx_sync = 'ideal';
     [BER(c,:), NERR(c,:), DLY(c), BR] = run_curve(p, modelName, CFG, delay_bits);
     L = cases{c,7};
     if L > 0
@@ -81,6 +86,21 @@ for c = 1:nC
     end
     fprintf('%-26s gap %+5.2f dB | BER %s | %.1f min\n', cases{c,1}, GAP(c), ...
         sprintf('%.2e ', BER(c,:)), toc(t0)/60);
+end
+
+%% V11 real receiver against the ideal one
+iReal = find(startsWith(cases(:, 1), 'V1 ') | startsWith(cases(:, 1), 'V5 default') | startsWith(cases(:, 1), 'V8b'))';
+BERR = nan(numel(iReal), nS); LOSS = nan(numel(iReal), 1);
+for i = 1:numel(iReal)
+    c = iReal(i);
+    p = p0;
+    p.n_rx = cases{c,2}; p.rician_k = cases{c,3}; p.int_rician_k = 10;
+    p.rx_corr = cases{c,4}; p.active_threat = cases{c,5}; p.rx_combiner = cases{c,6};
+    p.jsr_db = 10; p.seed = 1000 + c; p.rx_sync = 'real';
+    [BERR(i,:), ne] = run_curve(p, modelName, CFG, delay_bits);
+    LOSS(i) = real_loss(CFG.EbNo, BERR(i,:), ne, BER(c,:), CFG.min_err);
+    fprintf('V11 real, %-22s loss %+5.2f dB | BER %s | %.1f min\n', cases{c,1}, LOSS(i), ...
+        sprintf('%.2e ', BERR(i,:)), toc(t0)/60);
 end
 
 %% V9 seeds (default link, 4 dB)
@@ -127,6 +147,10 @@ rep{end+1} = sprintf('V9 seeds: same seed identical %s, different seed differs %
     passfail(seed_same), passfail(seed_diff), mat2str(bs, 4));
 rep{end+1} = sprintf('V10 tone jammer: in-band JSR after the receive filter %.2f dB (noise jammer %.2f dB, set %g dB) -> %s', ...
     jsr_tone, jsr_noise, p0.tone_jsr_db, passfail(tone_ok));
+for i = 1:numel(iReal)
+    rep{end+1} = sprintf('V11 real receiver, %-22s BER %s | loss vs ideal %+.2f dB', cases{iReal(i),1}, ...
+        sprintf('%9.2e', BERR(i,:)), LOSS(i)); %#ok<AGROW>
+end
 rep{end+1} = sprintf('Overall: theory gaps %d/%d within %.1f dB, seeds %s, tone %s | %.1f min', ...
     sum(g_ok), nTh, CFG.gap_ok, passfail(seed_same && seed_diff), passfail(tone_ok), toc(t0)/60);
 rep{end+1} = sprintf('Pass rule: |gap| <= %.1f dB or within 2 standard errors (spread over %d channel realizations).', CFG.gap_ok, CFG.n_real);
@@ -268,6 +292,22 @@ if nr >= nb
     end
     se = std(g(isfinite(g))) / sqrt(sum(isfinite(g)));
 end
+end
+
+function d = real_loss(ebno, ber, nerr, ref, min_err)
+% Mean Eb/N0 shift [dB] at which the reference curve reaches each measured BER, over
+% the points with enough errors where the reference has errors too.
+v = find(nerr >= min_err & ber > 0);
+r = ref > 0;
+d = NaN;
+if isempty(v) || sum(r) < 2, return; end
+x = nan(1, numel(v));
+for i = 1:numel(v)
+    j = v(i);
+    if ber(j) > max(ref(r)) || ber(j) < min(ref(r)), continue; end
+    x(i) = ebno(j) - interp1(log10(ref(r)), ebno(r), log10(ber(j)), 'linear');
+end
+d = mean(x, 'omitnan');
 end
 
 function d = shift(ebno, ber, th, v)

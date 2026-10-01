@@ -164,7 +164,7 @@ verifyTrue(tc, all(K(:) >= -5 & K(:) <= 20));
 end
 
 function test_receiver_measurements(tc)
-p = base_params(); p.quiet_build = true; p.active_threat = 'none'; p.int_aoa_random = false; p.yaw_random = false; p.seed = 11;
+p = base_params(); p.quiet_build = true; p.active_threat = 'none'; p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false; p.seed = 11;
 p.k_random = false;
 mdl = 'UAV_GCS_Threat_Link';
 evalc('build_threat_model(p)');
@@ -191,17 +191,14 @@ verifyLessThan(tc, mean(F.ber_est(v)), 1e-3);        % clean link at 12 dB
 verifyLessThan(tc, max(F.branch_dip), 6);            % fading changes little within a frame, first frame included
 sinr_clean = median(F.sinr(v));
 close_system(mdl, 0);
-% a failing connector opens at the airframe vibration: one antenna drops by tens of
-% dB in some decision cycles (frames one cycle apart) and is back in others
-p.active_threat = 'antenna_fault'; p.fault_duty = 0.3;
+% an open connector: one antenna stays tens of dB below the others in every frame
+p.active_threat = 'antenna_fault'; p.fault_atten_db = 31;
 evalc('build_threat_model(p)');
 set_param([mdl '/AWGN'], 'SNR', num2str(snr), 'SignalPower', num2str(1/p.sps));
 link_seed(mdl, 11, 160);
-F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(40 * p.frame_duration)), p, 20);
+F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
 g = sort(F.gain_ant, 1);
-drop = g(2, :) - g(1, :) >= 20 | F.branch_dip >= 15;       % over the frame, or inside it
-verifyGreaterThan(tc, mean(drop), 0.15);
-verifyLessThan(tc, mean(drop), 0.95);
+verifyGreaterThan(tc, mean(g(2, :) - g(1, :) >= 15), 0.9);
 close_system(mdl, 0);
 % an antenna hidden by the airframe stays far below the other over the frame
 p.active_threat = 'airframe_shadowing'; p.shadow_db = 20;
