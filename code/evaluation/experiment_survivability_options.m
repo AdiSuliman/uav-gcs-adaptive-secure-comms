@@ -1,6 +1,6 @@
 %% EXPERIMENT_SURVIVABILITY_OPTIONS - What a third antenna or an alternate path adds
 % Research experiment of deliverable 8. The system flies three UAV antennas, which
-% null up to two interferers (an N-element array nulls up to N-1, Shebert et al.),
+% null up to two interferers (an N-element array nulls up to N-1, Winters, Salz & Gitlin),
 % and only when they arrive from other directions than the GCS. The system is
 % compared on the recoverability question with a two-antenna receiver (what the
 % third antenna adds) and with an alternate path:
