@@ -40,9 +40,10 @@ function [p, snr_gain_db, cm] = apply_countermeasure(p, threat, action)
 %     rate_reduce        rate / cm_rate_factor: +10*log10(factor) dB processing gain
 %                        against noise and noise-like interference; no gain against
 %                        a coherent spoofer; goodput / factor
-%     power_control      transmit power +cm_power_db: the signal rises by that much
+%     power_control      the radio's next power step, cm_power_db, up to the licence-exempt
+%                        e.i.r.p. cap (power_step_db.m): the signal rises by that much
 %                        against noise and every additive interferer, including a
-%                        spoofer; attenuation threats keep their loss; x4 power
+%                        spoofer; attenuation threats keep their loss
 %     fec_interleave     rate-1/2 convolutional code (K = 7) with a random interleaver
 %                        over the run and erasure decoding of symbols hit by an energy
 %                        burst; same channel symbols, so no Eb/N0 change here -- the
@@ -60,7 +61,7 @@ end
 
 acr_db = getf(p, 'cm_acr_db', 30);
 rate_f = getf(p, 'cm_rate_factor', 4);
-pwr_db = getf(p, 'cm_power_db', 6);
+pwr_db = power_step_db(p);
 
 snr_gain_db = 0;
 cm = struct('goodput_factor', 1, 'bw_factor', 1, 'power_factor', 1, 'effect', 'none');

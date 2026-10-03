@@ -37,6 +37,7 @@ p0.int_aoa_random = false;             % V8 nulling test at the fixed direction 
 p0.yaw_random = false;                 % fixed geometry through every run
 p0.corr_random = false;                % each case sets its receive correlation
 p0.k_random = false;                   % K-factor of each case fixed
+p0.gcs_tracked = false;                % the GCS antenna on its axis: Eb/N0 as set
 p0.active_threat = 'none';
 
 CFG.EbNo      = 0:2:10;      % [dB] per branch

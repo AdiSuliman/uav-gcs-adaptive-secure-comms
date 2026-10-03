@@ -5,7 +5,9 @@
 % hardware profiles; the simulated results hold for every profile, only the
 % distance attached to each Eb/N0 changes. Profile A keeps the licence-exempt cap at
 % 2.4 GHz: 100 mW e.i.r.p. in Israel (Ministry of Communications), as ETSI EN 300 328,
-% which also caps 10 mW/MHz (about 11 dBm for our 1.25 MHz signal). Profile B is a
+% which also caps 10 mW/MHz (about 11 dBm for our 1.25 MHz signal). It is the GCS of
+% init_params.m: a -6 dBm radio on the tracked 12 dBi antenna (6 dBm e.i.r.p., up to the
+% cap with the power step), and the same radio on its omni fallback. Profile B is a
 % data link in licensed spectrum; air-ground measurement campaigns used transmit
 % powers of 27-44 dBm (Khawaja et al.). Distances are shown up to the radio
 % horizon (4/3 earth radius) of the UAV altitude and never beyond 50 km, the range of
@@ -24,8 +26,9 @@ Pj  = 40;     % jammer power [dBm] (10 W)
 Gj  = 3;      % jammer antenna gain [dBi]
 hG  = 10;     % GCS antenna height [m]
 DMAX = 50;    % range of the close-range UAV class [km] (Tlili et al.)
-prof = struct('name', {'A licence-exempt radio', 'B tactical data link'}, ...
-    'Pt', {9, 30}, 'Gt', {2, 12}, 'hU', {300, 1000});              % A: 11 dBm e.i.r.p., the cap
+P0  = S.params;
+prof = struct('name', {'A tracked GCS antenna', 'A omni fallback', 'B tactical data link'}, ...
+    'Pt', {P0.gcs_pt_dbm, P0.gcs_pt_dbm, 30}, 'Gt', {P0.gcs_ant_dbi, P0.gcs_omni_dbi, 12}, 'hU', {300, 300, 1000});
 horizon_km = @(h1, h2) 4.12 * (sqrt(h1) + sqrt(h2));                % 4/3 earth radius, heights in m
 Pr = ebno - 174 + NF + 10*log10(Rb);                                 % received power needed [dBm]
 
@@ -43,6 +46,8 @@ for k = 1:numel(prof)
     rep{end+1} = sprintf('%-42s radio horizon at %g m altitude: %.0f km', '', P.hU, hz); %#ok<SAGROW>
 end
 rep{end+1} = sprintf('(* the free-space range exceeds the radio horizon or %g km, the close-range class)', DMAX);
+rep{end+1} = sprintf('Profile A with the power step (power_control): +%.1f dB, to the %.1f dBm cap; every distance x%.2f.', ...
+    power_step_db(P0), P0.gcs_eirp_cap_dbm, 10^(power_step_db(P0) / 20));
 rep{end+1} = '';
 rep{end+1} = 'In-band interferer (JSR at the UAV) -> jammer distance relative to the UAV-GCS distance, profile A:';
 jsr = C.sev.jamming.levels;

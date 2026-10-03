@@ -9,7 +9,8 @@ function link_seed(modelName, seed, fd)
 %   random K-factors the 'Kfac' block gets this seed's K of our signal and of the
 %   interferers (channel_k.m), and with random manoeuvres the 'Yaw' block gets this
 %   seed's heading rate for the flight's speed (heading_rate.m); with a random receive
-%   correlation the 'Corr' block gets this seed's (rx_correlation.m). No rebuild is needed.
+%   correlation the 'Corr' block gets this seed's (rx_correlation.m), and with a tracked
+%   GCS antenna the 'GCS' block gets this seed's pointing loss (gcs_pointing.m). No rebuild is needed.
 set_param([modelName '/Seed'], 'Value', sprintf('%d', round(seed)));
 if nargin >= 3
     set_param([modelName '/Doppler'], 'Value', sprintf('%.6f', fd));
@@ -30,6 +31,11 @@ uc = [];
 if getSimulinkBlockHandle([modelName '/Corr']) ~= -1, uc = get_param([modelName '/Corr'], 'UserData'); end
 if isstruct(uc) && isfield(uc, 'corr_random') && uc.corr_random
     set_param([modelName '/Corr'], 'Value', sprintf('%.6f', rx_correlation(seed, uc.corr_range)));
+end
+ug = [];
+if getSimulinkBlockHandle([modelName '/GCS']) ~= -1, ug = get_param([modelName '/GCS'], 'UserData'); end
+if isstruct(ug) && isfield(ug, 'gcs_tracked') && ug.gcs_tracked
+    set_param([modelName '/GCS'], 'Value', sprintf('%.8f', gcs_pointing(seed, ug)));
 end
 uk = [];
 if getSimulinkBlockHandle([modelName '/Kfac']) ~= -1, uk = get_param([modelName '/Kfac'], 'UserData'); end

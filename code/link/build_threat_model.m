@@ -6,9 +6,10 @@ function build_threat_model(p)
 % [Tx: frame + QPSK + RRC] -> [Channel: Rician per UAV antenna] -> [Threat] -> [AWGN per antenna]
 %   -> [Rx: RRC per antenna, synchronization, channel estimation, combining, QPSK demod]
 %
-% Link: command uplink, single GCS antenna -> p.n_rx omni antennas on the UAV
+% Link: command uplink, tracked directional GCS antenna -> p.n_rx omni antennas on the UAV
 % (line array over p.ant_aperture_m, spacing from the number of antennas).
-% The GCS antenna gain is part of Eb/N0.
+% The GCS antenna gain is part of Eb/N0; the pointing loss of each flight scales our
+% signal through the Constant block 'GCS' (gcs_pointing.m, set by link_seed.m).
 % Eb/N0 is per receive antenna (per branch).
 %
 % Tx        frame_layout.m: quiet slot, short and long training, data with pilot blocks, guard.
@@ -124,6 +125,7 @@ add_block('simulink/Sources/Constant', [modelName '/AoA'],     'Position', [150 
 add_block('simulink/Sources/Constant', [modelName '/Kfac'],    'Position', [150 310 220 330]);
 add_block('simulink/Sources/Constant', [modelName '/Yaw'],     'Position', [150 350 220 370]);
 add_block('simulink/Sources/Constant', [modelName '/Corr'],    'Position', [150 390 220 410]);
+add_block('simulink/Sources/Constant', [modelName '/GCS'],     'Position', [150 430 220 450]);
 add_block('simulink/Sinks/To Workspace', [modelName '/tx_sink'], 'Position', [150 30 230 60]);
 add_block('simulink/Sinks/To Workspace', [modelName '/rx_sink'], 'Position', [870 90 950 120]);
 add_block('simulink/Sinks/To Workspace', [modelName '/Tx_IQ'],   'Position', [300 30 380 60]);
@@ -177,6 +179,7 @@ add_line(modelName, 'Yaw/1',       'Channel/5', 'autorouting', 'on');
 add_line(modelName, 'Yaw/1',       'Threat/6',  'autorouting', 'on');
 add_line(modelName, 'Corr/1',      'Channel/6', 'autorouting', 'on');
 add_line(modelName, 'Corr/1',      'Threat/7',  'autorouting', 'on');
+add_line(modelName, 'GCS/1',       'Channel/7', 'autorouting', 'on');
 add_line(modelName, 'Channel/1',   'Threat/1',  'autorouting', 'on');
 add_line(modelName, 'Threat/1',    'AWGN/1',    'autorouting', 'on');
 add_line(modelName, 'Threat/2',    'Thr_act/1', 'autorouting', 'on');
@@ -205,6 +208,9 @@ set_param([modelName '/Corr'], 'UserDataPersistent', 'on', 'UserData', struct('c
 set_param([modelName '/Yaw'], 'UserDataPersistent', 'on', 'UserData', struct('yaw_random', logical(p.yaw_random), ...
     'roll_max_deg', p.roll_max_deg, 'turn_v_floor', p.turn_v_floor, 'yaw_rate_max', p.yaw_rate_max, ...
     'c_light', p.c_light, 'carrier_freq', p.carrier_freq));
+set_param([modelName '/GCS'], 'Value', '1');
+set_param([modelName '/GCS'], 'UserDataPersistent', 'on', 'UserData', struct('gcs_tracked', logical(p.gcs_tracked), ...
+    'gcs_ant_dbi', p.gcs_ant_dbi, 'gcs_err_deg', p.gcs_err_deg, 'gcs_floor_db', p.gcs_floor_db));
 link_seed(modelName, seed, p.fd_max);
 
 %% ---- Save ----
@@ -238,8 +244,8 @@ s = sprintf([ ...
 end
 
 function s = channel_script(p, fs)
-% Signal channel: LoS steering vector toward the GCS + correlated diffuse fading;
-% K-factor kdb(1) from the 'Kfac' block. With a real receiver: frequency offset of
+% Signal channel: our signal scaled by the flight's GCS pointing loss ('GCS' block), then
+% LoS steering vector toward the GCS + correlated diffuse fading; K-factor kdb(1) from the 'Kfac' block. With a real receiver: frequency offset of
 % the two radios and LoS Doppler shift per flight, unknown arrival time per frame
 % (fractional delay applied in the frequency domain; the frame ends in its guard).
 nr = p.n_rx;
@@ -290,8 +296,8 @@ if isfield(p, 'spec_amp') && p.spec_amp > 0
 else
     xs = '';
 end
-s = [sprintf('function y = fcn(x, seed, fd, kdb, yaw, rho)\n%%%%#codegen\npersistent f0 ph n%s\n', pers) ...
-    sprintf('if isempty(f0)\n    rng(seed, ''twister'');\nend\n') ...
+s = [sprintf('function y = fcn(x, seed, fd, kdb, yaw, rho, gcs)\n%%%%#codegen\npersistent f0 ph n%s\n', pers) ...
+    sprintf('if isempty(f0)\n    rng(seed, ''twister'');\nend\nx = gcs * x;\n') ...
     sos_init('f0', 'ph', nr) imp ...
     sprintf('if isempty(n)\n    n = 0;\nend\nNs = size(x, 1);\nt = (n + (0:Ns-1).'') / %.1f;\nn = n + max(Ns, %d);\n', fs, cyc) ...
     sos_gains('D', 'f0', 'ph', p) dly xs ...
@@ -938,7 +944,8 @@ d = struct('n_rx', 3, 'ant_aperture_m', 1.2, 'rx_corr', 0.3, 'gcs_aoa_deg', 0, .
     'corr_random', false, 'corr_range', [0.3 0.9], 'shadow_k_db', -16, 'fault_atten_db', 31, ...
     'chain_amp_db', 0, 'chain_phase_deg', 0, 'spec_amp', 0, 'spec_delay_ns', 0, ...
     'stf_len', 4, 'stf_rep', 10, 'ltf_len', 16, 'ltf_rep', 2, 'pilot_block', 4, 'pilot_every', 48, ...
-    'rx_sync', 'ideal', 'cfo_ppm', 25, 'timing_max_sym', 4, 'rx_dd_iter', 2);
+    'rx_sync', 'ideal', 'cfo_ppm', 25, 'timing_max_sym', 4, 'rx_dd_iter', 2, ...
+    'gcs_tracked', false, 'gcs_ant_dbi', 12, 'gcs_err_deg', [5.62 1.51], 'gcs_floor_db', 14);
 f = fieldnames(d);
 for i = 1:numel(f)
     if ~isfield(p, f{i}), p.(f{i}) = d.(f{i}); end

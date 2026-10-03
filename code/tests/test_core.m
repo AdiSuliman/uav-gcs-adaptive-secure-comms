@@ -34,7 +34,10 @@ end
 function test_countermeasure_gains(tc)
 p = base_params();
 [~, g] = apply_countermeasure(p, 'path_loss', 'rate_reduce+power_control');
-verifyEqual(tc, g, 10*log10(p.cm_rate_factor) + p.cm_power_db, 'AbsTol', 1e-9);
+verifyEqual(tc, g, 10*log10(p.cm_rate_factor) + power_step_db(p), 'AbsTol', 1e-9);
+% the power step never takes the GCS above the e.i.r.p. cap
+verifyLessThanOrEqual(tc, p.gcs_pt_dbm + p.gcs_ant_dbi + power_step_db(p), p.gcs_eirp_cap_dbm + 1e-9);
+verifyEqual(tc, power_step_db(rmfield(p, 'gcs_ant_dbi')), p.cm_power_db);
 [p2, ~, cm] = apply_countermeasure(p, 'jamming', 'channel_switch+spatial_diversity');
 verifyEqual(tc, p2.jsr_db, p.jsr_db - p.cm_acr_db, 'AbsTol', 1e-9);
 verifyEqual(tc, p2.rx_combiner, 'mmse');
@@ -164,7 +167,7 @@ verifyTrue(tc, all(K(:) >= -5 & K(:) <= 20));
 end
 
 function test_receiver_measurements(tc)
-p = base_params(); p.quiet_build = true; p.active_threat = 'none'; p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false; p.seed = 11;
+p = base_params(); p.quiet_build = true; p.active_threat = 'none'; p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false; p.gcs_tracked = false; p.seed = 11;
 p.k_random = false;
 mdl = 'UAV_GCS_Threat_Link';
 evalc('build_threat_model(p)');
@@ -319,6 +322,19 @@ verifyLessThanOrEqual(tc, max(abs(w)), p.yaw_rate_max + 1e-9);
 verifyEqual(tc, heading_rate(7, 300, p), heading_rate(7, 300, p));
 v = p.v_max; wf = rad2deg(9.81 * tand(p.roll_max_deg) / v);
 verifyLessThanOrEqual(tc, max(abs(arrayfun(@(s) heading_rate(s, v * p.carrier_freq / p.c_light, p), 1:200))), min(wf, p.yaw_rate_max) + 1e-9);
+end
+
+function test_gcs_pointing(tc)
+% same seed, same loss; mean loss as the F.1336 main lobe gives for the measured errors
+p = base_params();
+verifyEqual(tc, gcs_pointing(5, p), gcs_pointing(5, p));
+[g, L] = arrayfun(@(s) gcs_pointing(s, p), 1:4000);
+verifyEqual(tc, g, 10.^(-L / 20), 'AbsTol', 1e-12);
+verifyTrue(tc, all(L >= 0 & L <= p.gcs_floor_db));
+phi3 = sqrt(27000 * 10^(-p.gcs_ant_dbi / 10));
+verifyEqual(tc, mean(L), 12 * sum((p.gcs_err_deg * sqrt(pi / 2)).^2) / phi3^2, 'RelTol', 0.1);
+p.gcs_tracked = false;
+verifyEqual(tc, gcs_pointing(5, p), 1);
 end
 
 function p = base_params()

@@ -125,12 +125,29 @@ params.sweep_period  = 300;         % Sweeping Jammer: full sweep cycle length (
 % Countermeasure physics (apply_countermeasure.m)
 params.cm_acr_db      = 30;         % [dB] rejection of an interferer left on another channel
 params.cm_rate_factor = 4;          % rate_reduce: data rate / 4 -> +6 dB processing gain, goodput x0.25
-params.cm_power_db    = 6;          % power_control: transmit power +6 dB (x4 power)
+params.cm_power_db    = 6;          % power_control: the radio's next step, +6 dB, up to the e.i.r.p. cap (power_step_db.m)
 params.cm_fec_rate    = 1/2;        % fec_interleave: code rate, K = 7, generators [171 133] octal
 
 %% ========== ANTENNAS & RECEIVER ==========
 % Modeled link: GCS -> UAV command uplink; the receiver (and the detector) is on the UAV.
-% GCS: one antenna, its gain is part of Eb/N0. Eb/N0 is per UAV antenna (per branch).
+% Eb/N0 is per UAV antenna (per branch) and includes the GCS antenna gain.
+% GCS: a low-power 2.4 GHz radio (nRF24L01+ steps 0 / -6 / -12 / -18 dBm) at -6 dBm, its 0 dBm
+% step being the power_control action, feeding a 12 dBi directional antenna (the ground
+% antenna of the air-ground measurements of Rodriguez-Pineiro et al.) on a GPS tracker
+% (mean pointing error 5.62 deg azimuth, 1.51 deg elevation, measured with a quadcopter,
+% Nugroho & Dectaviansyah). Licence-exempt cap: 100 mW e.i.r.p. in Israel (Ministry of
+% Communications), as ETSI EN 300 328, which also caps 10 dBm/MHz: 11 dBm for our 1.25 MHz
+% signal, the stricter. Nominal e.i.r.p. 6 dBm, 10 dB above an omni on the same radio;
+% power_control adds only what the cap leaves (power_step_db.m). The pointing loss of
+% each flight (gcs_pointing.m) is applied in the channel. A tracker that lost its target
+% falls back to an omni (Boeing, US 8,503,941): 10 dB less, to the receiver a path loss.
+params.gcs_pt_dbm      = -6;          % [dBm] nominal conducted power of the GCS radio
+params.gcs_ant_dbi     = 12;          % [dBi] tracked directional GCS antenna
+params.gcs_omni_dbi    = 2;           % [dBi] omni fallback antenna
+params.gcs_eirp_cap_dbm = 10 + 10*log10(1.25);   % [dBm] 10 dBm/MHz over our 1.25 MHz signal
+params.gcs_tracked     = true;        % pointing loss drawn per seeded sub-run
+params.gcs_err_deg     = [5.62 1.51]; % [deg] mean pointing error, azimuth / elevation
+params.gcs_floor_db    = 14;          % [dB] edge of the F.1336 main-lobe formula (1.08 phi3)
 % UAV: n_rx omni antennas under the airframe (fuselage or wings), spatially separated so that airframe
 % shadowing rarely hides all of them at once (Khawaja et al.: two bottom-mounted
 % antennas about 1.2 m apart; small UAVs measured with three and four antennas).
@@ -174,7 +191,7 @@ params.mmse_window    = 32;           % [symbols] channel + interference-covaria
 params.seed           = [];           % [] = drawn from the global stream at every model build
 
 %% ========== EB/N0 GRID ==========
-params.EbNo_dB    = 0:3:15;            % Eb/N0 grid of the dataset and the pools (dB): 15.7 to 2.8 km (link_budget_table.m)
+params.EbNo_dB    = 0:3:15;            % Eb/N0 grid of the dataset and the pools (dB): 1.6 to 0.3 km with the licence-exempt GCS (link_budget_table.m)
 
 %% ========== LEGACY (code in legacy/ only) ==========
 params.num_frames = 1000;    % frames per Eb/N0 point of the AWGN sweep (run_awgn_sweep.m)

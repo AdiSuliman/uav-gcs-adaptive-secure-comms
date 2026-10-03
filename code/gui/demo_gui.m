@@ -1764,7 +1764,7 @@ function drawCountermeasure(ax, action, xg, yg, xu, yu, c)
                 'FontSize', 9, 'HorizontalAlignment', 'center', 'FontName', c.font);
         case 'power_control'
             plot(ax, [xg xu], [yg + 0.40, yu + 0.40], '-', 'Color', c.green, 'LineWidth', 4.5);
-            text(ax, (xg + xu)/2, yg + 0.66, 'TX POWER +6 dB', 'Color', c.green, 'FontSize', 9, ...
+            text(ax, (xg + xu)/2, yg + 0.66, 'TX POWER UP (to the e.i.r.p. cap)', 'Color', c.green, 'FontSize', 9, ...
                 'HorizontalAlignment', 'center', 'FontName', c.font);
         case 'fec_interleave'
             plot(ax, [xg xu], [yg + 0.40, yu + 0.40], '-.', 'Color', c.green, 'LineWidth', 2.5);
@@ -1778,7 +1778,7 @@ end
 
 function s = actionLabel(a)
     names = containers.Map({'no_action','channel_switch','rate_reduce','freq_diversity','spatial_diversity', ...
-        'power_control','fec_interleave'}, {'NONE','CH-SW','RATE','FREQ-DIV','SPATIAL','PWR+6dB','FEC'});
+        'power_control','fec_interleave'}, {'NONE','CH-SW','RATE','FREQ-DIV','SPATIAL','PWR-UP','FEC'});
     parts = strsplit(a, '+');
     s = strjoin(cellfun(@(x) names(x), parts, 'UniformOutput', false), '+');
 end
