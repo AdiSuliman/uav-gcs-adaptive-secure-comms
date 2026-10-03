@@ -6,14 +6,17 @@ function [P, info] = pool_cell(p, threat, actions, ebno, geo, det, opt)
 %   actions  configuration names (policy_actions.m)
 %   ebno     Eb/N0 grid [dB]
 %   geo      1 x nS cell, one per Eb/N0: 1 x nSplit struct array, fields seed,
-%            speed (km/h), run (ids), one entry per geometry (sub-run); the same
-%            geometries under every configuration (common random numbers)
+%            speed (km/h), run (ids), and optionally alt (m) and ksig (dB), which
+%            replace the seed's altitude and K of our signal (NaN: the seed's own);
+%            one entry per geometry (sub-run); the same geometries under every
+%            configuration (common random numbers)
 %   det      detector: net, ood, classes, mu, sd (feature normalization), fs; [] = no
 %            detector (link measurements and ground truth only: survivability maps)
 %   opt      F_SUB (frames per sub-run), tw (temporal window), delay_bits
 %   P        {nS, nA, nSplit} pools; per frame: probs (classes x ... stored N x C),
 %            maha, feat (link_features.m), gant (mean channel gain of every antenna),
-%            ber and fer (ground truth), run, aoa
+%            ber and fer (ground truth), run, aoa, act (share of the frame with the
+%            threat on the air)
 %   info     configurations actually simulated (identical physics is simulated once)
 modelName = 'UAV_GCS_Threat_Link';
 nA = numel(actions); nS = numel(ebno); nSp = numel(geo{1});
@@ -44,15 +47,11 @@ for a = 1:nA
             for r = 1:numel(g.seed)
                 seed = g.seed(r);
                 fd = g.speed(r) / 3.6 * p.carrier_freq / p.c_light;
-                link_seed(modelName, seed, fd);
-                if p.int_aoa_random
-                    aoa = interferer_aoa(seed, p.int_aoa_range_deg, numel(p.int_aoa_deg));
-                else
-                    aoa = p.int_aoa_deg(:)';
-                end
+                d = link_seed(modelName, seed, fd, struct('ebno', ebno(s), 'alt_m', geo_value(g, 'alt', r), ...
+                    'k_sig_db', geo_value(g, 'ksig', r)));
                 F = extract_closed_loop_frames(sim(modelName, 'StopTime', stop_time), p2, opt.delay_bits);
                 disk_guard;
-                Q = add_run(Q, F, det, opt.tw, g.run(r), aoa);
+                Q = add_run(Q, F, det, opt.tw, g.run(r), d.aoa);
             end
             P{s, a, sp} = Q;
         end
@@ -68,7 +67,12 @@ end
 function Q = empty_pool(nC, nF)
 Q = struct('probs', zeros(0, nC, 'single'), 'maha', zeros(0, 1, 'single'), 'feat', zeros(0, nF, 'single'), ...
     'gant', zeros(0, 0, 'single'), 'ber', zeros(0, 1), 'fer', zeros(0, 1, 'single'), 'run', zeros(0, 1), ...
-    'aoa', zeros(0, 3, 'single'));
+    'aoa', zeros(0, 3, 'single'), 'act', zeros(0, 1, 'single'));
+end
+
+function v = geo_value(g, f, r)
+% Field f of geometry r, NaN when the geometries do not set it.
+if isfield(g, f), v = g.(f)(r); else, v = NaN; end
 end
 
 function Q = add_run(Q, F, det, tw, run_id, aoa)
@@ -89,4 +93,5 @@ if isfield(F, 'gain_ant'), Q.gant = [Q.gant; single(F.gain_ant(:, v)')]; end
 Q.ber = [Q.ber; F.ber(v)']; Q.fer = [Q.fer; single(F.fer(v)')]; Q.run = [Q.run; repmat(run_id, n, 1)];
 a3 = nan(1, 3); a3(1:min(3, numel(aoa))) = aoa(1:min(3, numel(aoa)));
 Q.aoa = [Q.aoa; repmat(single(a3), n, 1)];
+Q.act = [Q.act; single(F.act(v)')];
 end

@@ -20,7 +20,9 @@ function ok = validate_phy()
 %   against the ideal receiver.
 %   V12: a specular ground reflection 0.8 of the line of sight with the measured excess
 %   delay (80 ns) against the same ray without delay: the cost of the delay itself (a
-%   flat channel model holds when it is small).
+%   flat channel model holds when it is small). V12b, informational (it does not gate):
+%   the same ray 480 ns late, a 234 ns RMS delay spread, the median at 15-105 m of the
+%   second environment of Rodriguez-Pineiro et al.
 % Gap = Eb/N0 shift between measured and theoretical BER, points with >= 100 errors.
 % Outputs: results/phy_validation.txt, results/phy_validation.png
 
@@ -113,10 +115,12 @@ end
 % 10 ns at 2 km); the same ray without delay is the reference, so the shift is the cost
 % of the delay alone. The late components behind the 153 ns RMS spread are weak (more
 % than 25 dB down at 1.3 us, Sun), and the receiver has no equalizer for strong ones.
+% V12b: 480 ns, whose RMS delay spread (0.8 / 1.64 of the delay) is the 234 ns median at
+% 15-105 m of Rodriguez-Pineiro et al.'s second environment.
 p = p0; p.rician_k = 10; p.active_threat = 'none'; p.rx_sync = 'ideal'; p.seed = 3001;
 p.spec_amp = 0.8; p.spec_delay_ns = 0;
 [BREF, ~] = run_curve(p, modelName, CFG, delay_bits);
-DLY12 = 80; BSP = nan(numel(DLY12), nS); SH12 = nan(1, numel(DLY12));
+DLY12 = [80 480]; BSP = nan(numel(DLY12), nS); SH12 = nan(1, numel(DLY12));
 for i = 1:numel(DLY12)
     p.spec_delay_ns = DLY12(i);
     [BSP(i, :), ne] = run_curve(p, modelName, CFG, delay_bits);

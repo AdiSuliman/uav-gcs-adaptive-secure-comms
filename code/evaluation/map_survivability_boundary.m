@@ -11,7 +11,8 @@
 % threats are mapped for two flight geometries: interferer 42.2 deg from the
 % GCS direction (separable by the antenna array) and 11.4 deg (aligned);
 % path_loss, antenna_fault and airframe_shadowing do not depend on the geometry.
-% The K-factor is fixed at the nominal 10 dB (the pools draw it per flight).
+% The K-factor is fixed at the nominal 10 dB and the UAV antenna keeps its horizon gain
+% toward the GCS (the pools draw K and altitude per flight).
 %
 %   Map A (without goodput loss) — configurations with full goodput
 %   Map B (any configuration)    — every configuration, incl. rate_reduce and fec_interleave
@@ -69,6 +70,7 @@ p0.int_aoa_random = false; p0.k_random = false; p0.quiet_build = true;
 p0.yaw_random = false;                  % the mapped geometries stay fixed through the run
 p0.corr_random = false;
 p0.gcs_tracked = false;                 % the GCS antenna on its axis
+p0.alt_random = false;                  % no altitude: the UAV antenna's horizon gain toward the GCS
 SNR_points = p0.EbNo_dB;
 nS = numel(SNR_points);
 v_nom = p0.v_nominal * 3.6;                       % nominal cruise speed [km/h]

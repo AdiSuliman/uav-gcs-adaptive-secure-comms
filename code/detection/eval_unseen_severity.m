@@ -67,7 +67,8 @@ for t = 1:numel(threat_cfg)
                 v_kmh = p0.speed_kmh_min + rand() * (p0.speed_kmh_max - p0.speed_kmh_min);
                 snr_dB = ebno + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
                 set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/p.sps));
-                link_seed(modelName, randi(2^31 - 1000), v_kmh / 3.6 * p0.carrier_freq / p0.c_light);
+                link_seed(modelName, randi(2^31 - 1000), v_kmh / 3.6 * p0.carrier_freq / p0.c_light, ...
+                    struct('ebno', ebno, 'alt_m', NaN, 'k_sig_db', NaN));
                 F = extract_closed_loop_frames(sim(modelName, 'StopTime', stop_time), p, delay_bits);
                 disk_guard;
                 v = find(~isnan(F.ber));

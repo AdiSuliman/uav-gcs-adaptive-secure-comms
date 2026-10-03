@@ -24,7 +24,8 @@
 % frame error (reward and evaluation only).
 % The cells run in parallel, each worker in its own folder with its own copy of
 % the model. When data/policy_pools.mat holds the same train and validation
-% geometries and only the test block differs, only the test split is simulated.
+% geometries of the same link model (MODEL_TAG) and only the test block differs, only
+% the test split is simulated.
 %
 % Output: data/policy_pools.mat (PP, clean_ref)
 
@@ -45,6 +46,7 @@ SPLITS = {'train', 'val', 'test', 'speed'};
 VOUT   = [0 21; 140 161];        % speeds of the edge-speed split [km/h]: half the geometries each, at the two
                                  % ends of the envelope (dedicated test flights; the other splits draw over it)
 N_WORKERS = 6;
+MODEL_TAG = 'v7-D74';            % link model of the pools (seed streams, altitude, in-band cap)
 opt = struct('F_SUB', 20, 'tw', 10, 'delay_bits', 20);
 C = decision_config();
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
@@ -90,7 +92,8 @@ runs = arrayfun(@(sp) 100 * BLOCK(sp) + (1:NGEO(sp)), 1:nSp, 'UniformOutput', fa
 old = [];
 if isfile('data/policy_pools.mat')
     Lo = load('data/policy_pools.mat', 'PP');
-    if numel(Lo.PP.runs) == nSp && isequal(Lo.PP.runs(1:2), runs(1:2)) && ~isequal(Lo.PP.runs{3}, runs{3}) ...
+    if isfield(Lo.PP, 'model_tag') && strcmp(Lo.PP.model_tag, MODEL_TAG) ...
+            && numel(Lo.PP.runs) == nSp && isequal(Lo.PP.runs(1:2), runs(1:2)) && ~isequal(Lo.PP.runs{3}, runs{3}) ...
             && isequal(Lo.PP.scen, {cells.threat}) && isequal(Lo.PP.sev, [cells.sev]) ...
             && isequal(Lo.PP.ebno, EBNO) && isequal(Lo.PP.actions, ACTIONS) && isequaln(Lo.PP.level, [cells.level])
         old = Lo.PP.pools(:, :, :, 1:2);
@@ -184,7 +187,7 @@ PP = struct('scen', {{cells.threat}}, 'sev', [cells.sev], 'level', [cells.level]
     'speed_range', vrange, 'speed_out', VOUT, 'speed', {spd}, 'gp', gp, 'bw', bw, 'pw', pw, 'pools', {pools}, 'mber', mber, 'mfer', mfer, ...
     'clean', clean_ref.ber, 'clean_fer', clean_ref.fer, 'classes', {det.classes}, 'maha_thr', T.maha, ...
     'fuse', FZ.FM, 'fuse_N', FZ.N, 'unk_win', UW, ...
-    'F_SUB', opt.F_SUB, 'runs', {runs}, ...
+    'F_SUB', opt.F_SUB, 'runs', {runs}, 'model_tag', MODEL_TAG, ...
     'aoa_random', p0.int_aoa_random, 'k_random', p0.k_random, 'sps', p0.sps, 'bps', p0.bits_per_symbol, ...
     'feat_names', {link_features('names')}, 'created', datestr(now));
 save('data/policy_pools.mat', 'PP', 'clean_ref', '-v7.3');

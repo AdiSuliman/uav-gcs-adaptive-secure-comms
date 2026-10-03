@@ -49,7 +49,17 @@ function [p, snr_gain_db, cm] = apply_countermeasure(p, threat, action)
 %                        burst; same channel symbols, so no Eb/N0 change here -- the
 %                        decoding is applied to the measured error pattern in
 %                        extract_closed_loop_frames.m (p.fec); goodput x1/2
+%
+%   p.inband_ref keeps the in-band levels before any countermeasure: the in-band cap
+%   acts on them (build_threat_model.m), so a capped emitter keeps one power under every
+%   configuration and an action still lowers it by its own amount.
 
+if ~isfield(p, 'inband_ref')
+    p.inband_ref = struct();
+    for f = {'jsr_db', 'tone_jsr_db', 'spoof_sir_db', 'benign_int_db'}
+        if isfield(p, f{1}), p.inband_ref.(f{1}) = p.(f{1}); end
+    end
+end
 if contains(action, '+')
     [p, snr_gain_db, cm] = apply_pair(p, threat, action);
     return;

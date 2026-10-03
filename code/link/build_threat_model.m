@@ -8,8 +8,9 @@ function build_threat_model(p)
 %
 % Link: command uplink, tracked directional GCS antenna -> p.n_rx omni antennas on the UAV
 % (line array over p.ant_aperture_m, spacing from the number of antennas).
-% The GCS antenna gain is part of Eb/N0; the pointing loss of each flight scales our
-% signal through the Constant block 'GCS' (gcs_pointing.m, set by link_seed.m).
+% The GCS antenna gain is part of Eb/N0; the pointing loss of each flight and the UAV
+% antenna's gain toward the GCS at the flight's altitude scale our signal through the
+% Constant block 'GCS' (flight_draws.m, set by link_seed.m).
 % Eb/N0 is per receive antenna (per branch).
 %
 % Tx        frame_layout.m: quiet slot, short and long training, data with pilot blocks, guard.
@@ -27,6 +28,11 @@ function build_threat_model(p)
 % Threat    signal-side threats scale our signal (antenna_fault and
 %           airframe_shadowing hit one antenna, drawn per seeded run); every additive threat is ONE
 %           waveform arriving through its own spatial channel (own diffuse fading).
+%           In-band cap: every additive component reaches at most p.inband_cap_db
+%           over our received signal (path loss and the 'GCS' block's loss included,
+%           inband_cap_amp.m), taken on its level before any countermeasure
+%           (p.inband_ref, apply_countermeasure.m), so a countermeasure still lowers it
+%           by its own amount.
 %           Output 2: share of the frame's samples with the threat on the air
 %           (benign packet traffic, an antenna fault with its contact open; 1 for
 %           every other threat, 0 for none).
@@ -74,7 +80,8 @@ function build_threat_model(p)
 %           The receiver measurements of extract_closed_loop_frames.m use only
 %           outputs 1-6.
 % Seeds     p.seed, or drawn from the global stream when empty; channel, interferer
-%           channels, threat waveforms, AWGN and bit source all derive from it.
+%           channels, threat waveforms, AWGN and bit source all derive from it, each
+%           from its own stream (link_seed.m, seed_stream.m).
 %           Seed and Doppler reach the blocks through the Constant blocks 'Seed' and
 %           'Doppler', so link_seed.m changes them without a rebuild and the compiled
 %           block code is reused across seeds and UAV speeds.
@@ -180,6 +187,7 @@ add_line(modelName, 'Yaw/1',       'Threat/6',  'autorouting', 'on');
 add_line(modelName, 'Corr/1',      'Channel/6', 'autorouting', 'on');
 add_line(modelName, 'Corr/1',      'Threat/7',  'autorouting', 'on');
 add_line(modelName, 'GCS/1',       'Channel/7', 'autorouting', 'on');
+add_line(modelName, 'GCS/1',       'Threat/8',  'autorouting', 'on');
 add_line(modelName, 'Channel/1',   'Threat/1',  'autorouting', 'on');
 add_line(modelName, 'Threat/1',    'AWGN/1',    'autorouting', 'on');
 add_line(modelName, 'Threat/2',    'Thr_act/1', 'autorouting', 'on');
@@ -196,21 +204,24 @@ add_line(modelName, 'Rx/6',        'Rx_S/1',    'autorouting', 'on');
 
 set_param(modelName, 'SolverType', 'Fixed-step', 'Solver', 'FixedStepDiscrete', 'StopTime', '0.01');
 set_param([modelName '/AoA'], 'Value', mat2str(p.int_aoa_deg(:)', 8));
-set_param([modelName '/AoA'], 'UserDataPersistent', 'on', 'UserData', struct('aoa_random', logical(p.int_aoa_random), ...
-    'aoa_range', p.int_aoa_range_deg, 'aoa_fixed', p.int_aoa_deg(:)'));
+set_param([modelName '/AoA'], 'UserDataPersistent', 'on', 'UserData', struct('int_aoa_random', logical(p.int_aoa_random), ...
+    'int_aoa_range_deg', p.int_aoa_range_deg, 'int_aoa_deg', p.int_aoa_deg(:)'));
 set_param([modelName '/Kfac'], 'Value', mat2str([p.rician_k p.int_rician_k], 8));
 set_param([modelName '/Kfac'], 'UserDataPersistent', 'on', 'UserData', struct('k_random', logical(p.k_random), ...
-    'k_range', p.k_range_db));
+    'k_range_db', p.k_range_db, 'rician_k', p.rician_k, 'int_rician_k', p.int_rician_k));
 set_param([modelName '/Yaw'], 'Value', '0');
 set_param([modelName '/Corr'], 'Value', sprintf('%.6f', p.rx_corr));
 set_param([modelName '/Corr'], 'UserDataPersistent', 'on', 'UserData', struct('corr_random', logical(p.corr_random), ...
-    'corr_range', p.corr_range));
+    'corr_range', p.corr_range, 'rx_corr', p.rx_corr));
 set_param([modelName '/Yaw'], 'UserDataPersistent', 'on', 'UserData', struct('yaw_random', logical(p.yaw_random), ...
     'roll_max_deg', p.roll_max_deg, 'turn_v_floor', p.turn_v_floor, 'yaw_rate_max', p.yaw_rate_max, ...
     'c_light', p.c_light, 'carrier_freq', p.carrier_freq));
 set_param([modelName '/GCS'], 'Value', '1');
 set_param([modelName '/GCS'], 'UserDataPersistent', 'on', 'UserData', struct('gcs_tracked', logical(p.gcs_tracked), ...
-    'gcs_ant_dbi', p.gcs_ant_dbi, 'gcs_err_deg', p.gcs_err_deg, 'gcs_floor_db', p.gcs_floor_db));
+    'gcs_ant_dbi', p.gcs_ant_dbi, 'gcs_err_deg', p.gcs_err_deg, 'gcs_floor_db', p.gcs_floor_db, ...
+    'alt_random', logical(p.alt_random), 'alt_range_m', p.alt_range_m, 'gcs_h_m', p.gcs_h_m, 'uav_null_db', p.uav_null_db, ...
+    'gcs_pt_dbm', p.gcs_pt_dbm, 'carrier_freq', p.carrier_freq, 'lb_uav_dbi', p.lb_uav_dbi, 'lb_nf_db', p.lb_nf_db, ...
+    'lb_margin_db', p.lb_margin_db, 'lb_rate_bps', p.lb_rate_bps));
 link_seed(modelName, seed, p.fd_max);
 
 %% ---- Save ----
@@ -244,7 +255,8 @@ s = sprintf([ ...
 end
 
 function s = channel_script(p, fs)
-% Signal channel: our signal scaled by the flight's GCS pointing loss ('GCS' block), then
+% Signal channel: our signal scaled by the 'GCS' block (the flight's pointing loss and the
+% UAV antenna's gain toward the GCS), then
 % LoS steering vector toward the GCS + correlated diffuse fading; K-factor kdb(1) from the 'Kfac' block. With a real receiver: frequency offset of
 % the two radios and LoS Doppler shift per flight, unknown arrival time per frame
 % (fractional delay applied in the frequency domain; the frame ends in its guard).
@@ -312,7 +324,8 @@ end
 
 function s = threat_script(p, fs)
 % Signal-side components first (they act on our signal), then every
-% additive component as one waveform through its own spatial channel.
+% additive component as one waveform through its own spatial channel, held to the
+% in-band cap over our received signal.
 nr  = p.n_rx;
 sps = p.sps;
 thr = lower(p.active_threat);
@@ -327,6 +340,8 @@ addc = parts(~ismember(parts, SIGSIDE));
 if numel(addc) > numel(p.int_aoa_deg)
     error('build_threat_model: %d additive components, only %d interferer directions', numel(addc), numel(p.int_aoa_deg));
 end
+PL = 0;
+if ismember('path_loss', sig), PL = p.path_loss_db; end
 
 pers = {}; init = {}; body = {};
 if any(ismember(sig, {'antenna_fault'}))
@@ -355,16 +370,19 @@ if ~isempty(addc)
 end
 for c = 1:numel(addc)
     comp = addc{c};
+    lf = 'jsr_db';                                  % level field of the component
     switch comp
         case 'jamming'
             w = sprintf('w = sqrt(%.8f/2) * complex(randn(Ns, 1), randn(Ns, 1));\n', 10^(p.jsr_db/10));
         case 'tone_jamming'
             % CW tone at a random offset inside the flat part of our band; power
             % scaled so its in-band power over our signal equals tone_jsr_db
+            lf = 'tone_jsr_db';
             pers{end+1} = 'tone_f'; init{end+1} = sprintf('tone_f = %.4f * (2*rand - 1);', p.tone_offset_hz); %#ok<AGROW>
             pers{end+1} = 'tone_ph'; init{end+1} = 'tone_ph = 2*pi*rand;'; %#ok<AGROW>
             w = sprintf('w = sqrt(%.8f) * exp(1j * (2*pi*tone_f*t + tone_ph));\n', 10^(p.tone_jsr_db/10) * tone_gain(p));
         case 'benign_interference'
+            lf = 'benign_int_db';
             if ~isempty(p.benign_occ)
                 % WLAN packets: log-uniform durations; idle gaps gamma-distributed with the
                 % field shape, their mean set by the flight's occupancy (Marsaglia-Tsang
@@ -396,6 +414,7 @@ for c = 1:numel(addc)
                 '        w(i) = sqrt(%.8f/2) * complex(randn, randn);\n    end\nend\n'], ...
                 p.reactive_threshold / sps, 10^(p.jsr_db/10));
         case 'spoofing'
+            lf = 'spoof_sir_db';
             pers{end+1} = 'spoof_txf'; %#ok<AGROW>
             init{end+1} = sprintf(['spoof_txf = comm.RaisedCosineTransmitFilter(''RolloffFactor'', %.6f, ' ...
                 '''FilterSpanInSymbols'', %d, ''OutputSamplesPerSymbol'', %d);'], p.rolloff, p.filter_span, sps); %#ok<AGROW>
@@ -404,6 +423,13 @@ for c = 1:numel(addc)
                 'w = %.8f * sp(1:Ns);\n'], sps, 10^(p.spoof_sir_db/20));
         otherwise
             error('build_threat_model: unsupported threat component ''%s''', comp);
+    end
+    if isfinite(p.inband_cap_db)
+        % in-band cap on the level before any countermeasure; the countermeasure's own
+        % reduction (the level field of p) still applies on top
+        L = p.(lf);
+        if isfield(p, 'inband_ref') && isfield(p.inband_ref, lf), L = p.inband_ref.(lf); end
+        w = [w sprintf('w = w * min(1, %.10g * gcs);\n', inband_cap_amp(L, PL, p.inband_cap_db))]; %#ok<AGROW>
     end
     fI = sprintf('fI%d', c); pI = sprintf('pI%d', c);
     pers{end+1} = fI; init{end+1} = sprintf('%s = fd * cos(2*pi*rand(32, %d));', fI, nr); %#ok<AGROW>
@@ -424,7 +450,7 @@ if p.chain_amp_db > 0 || p.chain_phase_deg > 0
 end
 
 pers = [{'nI'}, pers]; init = [{'nI = 0;'}, init];
-head = sprintf('function [y, act] = fcn(u, seed, fd, aoa, kdb, yaw, rho)\n%%#codegen\npersistent seeded\n');
+head = sprintf('function [y, act] = fcn(u, seed, fd, aoa, kdb, yaw, rho, gcs)\n%%#codegen\npersistent seeded\n');
 for i = 1:numel(pers)
     head = [head sprintf('persistent %s\n', pers{i})]; %#ok<AGROW>
 end
@@ -945,7 +971,9 @@ d = struct('n_rx', 3, 'ant_aperture_m', 1.2, 'rx_corr', 0.3, 'gcs_aoa_deg', 0, .
     'chain_amp_db', 0, 'chain_phase_deg', 0, 'spec_amp', 0, 'spec_delay_ns', 0, ...
     'stf_len', 4, 'stf_rep', 10, 'ltf_len', 16, 'ltf_rep', 2, 'pilot_block', 4, 'pilot_every', 48, ...
     'rx_sync', 'ideal', 'cfo_ppm', 25, 'timing_max_sym', 4, 'rx_dd_iter', 2, ...
-    'gcs_tracked', false, 'gcs_ant_dbi', 12, 'gcs_err_deg', [5.62 1.51], 'gcs_floor_db', 14);
+    'gcs_tracked', false, 'gcs_ant_dbi', 12, 'gcs_err_deg', [5.62 1.51], 'gcs_floor_db', 14, 'gcs_pt_dbm', -6, ...
+    'alt_random', false, 'alt_range_m', [15 120], 'gcs_h_m', 10, 'uav_null_db', -30, 'inband_cap_db', 30, ...
+    'lb_uav_dbi', 2, 'lb_nf_db', 5, 'lb_margin_db', 10, 'lb_rate_bps', 2e6);
 f = fieldnames(d);
 for i = 1:numel(f)
     if ~isfield(p, f{i}), p.(f{i}) = d.(f{i}); end

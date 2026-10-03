@@ -121,6 +121,10 @@ params.benign_idle_shape = 0.49;          % gamma shape of the idle gaps
 % fixed structural constants (same pattern as burst_duty/burst_period for noise_burst).
 params.sweep_duty    = 0.15;        % Sweeping Jammer: fraction of time dwelling on our channel
 params.sweep_period  = 300;         % Sweeping Jammer: full sweep cycle length (symbols, longer than noise_burst's 100)
+% In-band cap: no emitter reaches the UAV more than 30 dB over our received signal, the
+% sources' most severe in-band level (Liu et al.), whatever path loss, pointing or
+% elevation loss our signal has (inband_cap_amp.m, applied in build_threat_model.m).
+params.inband_cap_db = 30;          % [dB] largest in-band power of an emitter over our received signal
 
 % Countermeasure physics (apply_countermeasure.m)
 params.cm_acr_db      = 30;         % [dB] rejection of an interferer left on another channel
@@ -190,6 +194,24 @@ params.csi_block      = 64;           % [symbols] channel-estimation window (MRC
 params.mmse_window    = 32;           % [symbols] channel + interference-covariance window (MMSE)
 params.seed           = [];           % [] = drawn from the global stream at every model build
 
+%% ========== ALTITUDE & LINK BUDGET ==========
+% Altitude, drawn per flight: up to the FAA small-UAV ceiling of 122 m, the rule behind the
+% 161 km/h cap (Khawaja et al.; 120 m, Cui et al.), down to 15 m, the lowest height with a
+% full 2.5 GHz channel table (Rodriguez-Pineiro et al.), above the 0-11 m below-roofline
+% band (Cui et al.). It reaches the link only through the UAV dipole's gain toward the GCS
+% (flight_draws.m): K and delay spread show no height trend and the Doppler spread falls
+% with height (Rodriguez-Pineiro et al.).
+params.alt_random   = true;               % altitude drawn per seeded flight (flight_altitude.m)
+params.alt_range_m  = [15 120];           % [m] UAV height above ground
+params.alt_grid_m   = [15 25 35 45 60 75 90 105 120];   % [m] table heights: Rodriguez-Pineiro et al.'s and the ceiling
+params.gcs_h_m      = 10;                 % [m] GCS antenna mast
+params.uav_null_db  = -30;                % [dB] UAV dipole gain directly below a drone (Badi et al.)
+% Distance attached to each Eb/N0 (link_distance_km.m): the GCS above, free space at the carrier
+params.lb_uav_dbi   = 2;                  % [dBi] UAV antenna (omni dipole)
+params.lb_nf_db     = 5;                  % [dB] UAV receiver noise figure
+params.lb_margin_db = 10;                 % [dB] fading and implementation margin
+params.lb_rate_bps  = 2e6;                % [b/s] bit rate (QPSK, 1 Msym/s)
+
 %% ========== EB/N0 GRID ==========
 params.EbNo_dB    = 0:3:15;            % Eb/N0 grid of the dataset and the pools (dB): 1.6 to 0.3 km with the licence-exempt GCS (link_budget_table.m)
 
@@ -226,6 +248,9 @@ if params.verbose
         fprintf('Interferer AoA:   random per sub-run, %d to %d deg\n', params.int_aoa_range_deg);
     end
     fprintf('Carrier Freq:     %.1f GHz\n', params.carrier_freq/1e9);
+    if params.alt_random
+        fprintf('Altitude:         %g-%g m per flight, GCS mast %g m\n', params.alt_range_m, params.gcs_h_m);
+    end
     fprintf('UAV Velocity:     %.1f m/s (%.1f km/h) nominal | envelope %.1f-%.1f km/h (%.1f-%.1f m/s)\n', ...
             params.v_nominal, params.v_nominal*3.6, params.speed_kmh_min, params.speed_kmh_max, params.v_min, params.v_max);
     fprintf('Doppler envelope: %.0f-%.0f Hz (nominal fd_max %.0f Hz)\n', ...

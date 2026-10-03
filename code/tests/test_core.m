@@ -238,10 +238,16 @@ verifyEqual(tc, F.ber(v), zeros(1, sum(v)));                    % the real recei
 verifyLessThan(tc, max(abs(F.cfo_hz)), 2 * p.cfo_ppm * 1e-6 * p.carrier_freq + 1e3);
 verifyEqual(tc, sum(~isnan(F.ber)), F.nf);                     % every frame complete: bits aligned per frame
 verifyLessThan(tc, abs(median(F.q_iot)), 1.5);                 % nothing but thermal noise in the quiet slot
-verifyLessThan(tc, mean(F.coh(v)), 0.2);             % thermal noise only: no spatial coherence
+verifyLessThan(tc, mean(F.coh(v)), 0.45);            % no directional source: below a 4 dB jammer's 0.5
 verifyLessThan(tc, mean(F.ber_est(v)), 1e-3);        % clean link at 12 dB
 verifyLessThan(tc, max(F.branch_dip), 6);            % fading changes little within a frame, first frame included
 sinr_clean = median(F.sinr(v));
+% the flight's draws reach the blocks: first stream seed, and our signal's amplitude with
+% the UAV antenna's gain toward the GCS at 120 m and 0.28 km
+d = link_seed(mdl, 11, 160, struct('ebno', 15, 'alt_m', 120));
+verifyEqual(tc, str2double(get_param([mdl '/Seed'], 'Value')), seed_base(11));
+verifyEqual(tc, d.el_db, uav_dipole_db(asind(110 / (1000 * link_distance_km(15, p)))), 'AbsTol', 1e-12);
+verifyEqual(tc, str2double(get_param([mdl '/GCS'], 'Value')), 10^(d.el_db / 20), 'RelTol', 1e-6);
 close_system(mdl, 0);
 % an open connector: one antenna stays tens of dB below the others in every frame
 p.active_threat = 'antenna_fault'; p.fault_atten_db = 31;
@@ -289,7 +295,90 @@ link_seed(mdl, 11, 160);
 F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
 verifyGreaterThan(tc, median(F.q_iot), 10);
 verifyLessThan(tc, abs(median(F.q_react)), 3);
+verifyGreaterThan(tc, mean(F.coh, 'omitnan'), 0.8);  % one directional source
 close_system(mdl, 0);
+end
+
+%% ---------- altitude, distance and the in-band cap ----------
+function test_altitude(tc)
+% altitude drawn per seed inside the range and reproducible; finite geometry fields
+% replace the seed's altitude and K, and nothing else
+p = base_params();
+h = arrayfun(@(s) flight_altitude(s, p), 1:2000);
+verifyTrue(tc, all(h >= p.alt_range_m(1) & h <= p.alt_range_m(2)));
+verifyGreaterThan(tc, std(h), 0.25 * diff(p.alt_range_m));      % spread over the range (uniform: 0.29)
+verifyEqual(tc, flight_altitude(77, p), flight_altitude(77, p));
+d0 = flight_draws(77, 100, p);
+verifyEqual(tc, d0.alt_m, flight_altitude(77, p));
+verifyEqual(tc, d0.el_db, 0);                                   % no distance: no elevation term
+d1 = flight_draws(77, 100, p, struct('ebno', 9, 'alt_m', 50, 'k_sig_db', 3));
+verifyEqual(tc, [d1.alt_m d1.k_sig], [50 3]);
+verifyEqual(tc, [d1.k_int d1.aoa d1.yaw d1.rho d1.gcs_point_db], [d0.k_int d0.aoa d0.yaw d0.rho d0.gcs_point_db]);
+d2 = flight_draws(77, 100, p, struct('ebno', 9, 'alt_m', NaN, 'k_sig_db', NaN));
+verifyEqual(tc, [d2.alt_m d2.k_sig], [d0.alt_m d0.k_sig]);
+p.alt_random = false;
+d3 = flight_draws(77, 100, p, struct('ebno', 9));
+verifyTrue(tc, isnan(d3.alt_m));
+verifyEqual(tc, d3.el_db, 0);
+end
+
+function test_elevation_gain(tc)
+% distance of an Eb/N0 (profile A, tracked GCS antenna) and the UAV dipole's gain toward
+% the GCS: at most about 1 dB over the altitude range and the Eb/N0 grid
+p = base_params();
+verifyEqual(tc, link_distance_km(0, p), 1.575, 'AbsTol', 0.005);
+verifyEqual(tc, link_distance_km(15, p), 0.280, 'AbsTol', 0.001);
+verifyEqual(tc, uav_dipole_db(0), 0, 'AbsTol', 1e-12);
+verifyEqual(tc, uav_dipole_db(90), -30, 'AbsTol', 1e-9);
+verifyLessThan(tc, diff(uav_dipole_db([30 60])), 0);
+p.gcs_tracked = false;
+[h, e] = ndgrid(p.alt_range_m(1):5:p.alt_range_m(2), p.EbNo_dB);
+G = zeros(size(h)); A = G;
+for i = 1:numel(h)
+    d = flight_draws(1, 100, p, struct('ebno', e(i), 'alt_m', h(i)));
+    G(i) = d.el_db; A(i) = d.gcs_amp;
+end
+verifyGreaterThanOrEqual(tc, min(G(:)), -1.1);
+verifyLessThan(tc, min(G(:)), -1);                               % 120 m at 0.28 km
+verifyEqual(tc, A, 10.^(G / 20), 'AbsTol', 1e-12);
+end
+
+function test_inband_cap(tc)
+% No additive component above the cap over our received signal, whatever its path loss
+% and gain; below the cap the component is untouched; a countermeasure lowers a capped
+% emitter by its own amount.
+verifyEqual(tc, inband_cap_amp(23, 18, 30), 10^(-11/20), 'RelTol', 1e-12);
+[L, PL, G] = ndgrid(-12:2:30, [0 6 14 22], [0 -0.4 -1 -6 -15]);   % level, path loss, gain of our signal [dB]
+s = min(1, inband_cap_amp(L, PL, 30) .* 10.^(G / 20));             % the threat block's scale
+verifyEqual(tc, L + PL - G + 20*log10(s), min(L + PL - G, 30), 'AbsTol', 1e-9);
+verifyEqual(tc, s(L + PL - G <= 30), ones(nnz(L + PL - G <= 30), 1), 'AbsTol', 1e-12);
+p = base_params(); p.jsr_db = 23; p.path_loss_db = 18;
+p2 = apply_countermeasure(p, 'jamming+path_loss', 'power_control');
+verifyEqual(tc, p2.inband_ref.jsr_db, 23);
+verifyEqual(tc, p2.jsr_db, 23 - power_step_db(p), 'AbsTol', 1e-9);
+% in the model: a 30 dB jammer against a 22 dB path loss reaches 30 dB, not 52 dB, over our signal
+p = base_params(); p.quiet_build = true; p.active_threat = 'jamming+path_loss'; p.jsr_db = 30; p.path_loss_db = 22;
+p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false; p.gcs_tracked = false; p.seed = 11;
+mdl = 'UAV_GCS_Threat_Link';
+q = zeros(1, 2);
+for k = 1:2
+    if k == 2, p.inband_cap_db = Inf; end
+    evalc('build_threat_model(p)');
+    set_param([mdl '/AWGN'], 'SNR', num2str(12 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), 'SignalPower', num2str(1/p.sps));
+    link_seed(mdl, 11, 160);
+    F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(4 * p.frame_duration)), p, 20);
+    q(k) = median(F.q_iot);
+    close_system(mdl, 0);
+end
+verifyEqual(tc, q(2) - q(1), 22, 'AbsTol', 1.5);
+end
+
+function test_overhead_drop(tc)
+% largest drop of an overhead pass: D73's value at 300 m without a mast, none at 15 m
+verifyEqual(tc, overhead_drop_db(120, 0.56, 10, -30), 15.6, 'AbsTol', 0.2);
+verifyEqual(tc, overhead_drop_db(300, 0.5, 0, -30), 22.9, 'AbsTol', 0.1);
+verifyLessThan(tc, arrayfun(@(r) overhead_drop_db(15, r, 10, -30), [0.28 0.4 0.56 0.79 1.12 1.58]), 1e-9);
+verifyGreaterThan(tc, overhead_drop_db(120, 0.28, 10, -30), overhead_drop_db(60, 0.28, 10, -30));
 end
 
 %% ---------- temporal evidence and fusion ----------
