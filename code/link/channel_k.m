@@ -6,6 +6,6 @@ function k_db = channel_k(seed, range_db)
 %   and 28 dB (C band) in open line of sight (Khawaja et al.), so the default
 %   range [-5 20] dB spans low-elevation built-up ground and foliage to open terrain.
 if nargin < 2 || isempty(range_db), range_db = [-5 20]; end
-rs = RandStream('mt19937ar', 'Seed', mod(round(seed) + 23, 2^32));
+rs = seed_stream(seed, 'k');
 k_db = range_db(1) + (range_db(2) - range_db(1)) * rand(rs, 1, 2);
 end

@@ -95,7 +95,7 @@ fs  = p.symbol_rate * sps;
 nr  = p.n_rx;
 
 if isempty(p.seed)
-    seed = randi(2^31 - 1000);
+    seed = randi(2^26 - 1);                     % flight seeds stay below 2^26 (seed_base.m)
 else
     seed = p.seed;
 end

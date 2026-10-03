@@ -5,9 +5,13 @@ function w = heading_rate(seed, fd, p)
 %   from the Doppler fd (v = fd c / fc) and not below p.turn_v_floor, capped at the
 %   largest measured yaw rate p.yaw_rate_max.
 %   The directions of the GCS and of every interferer, seen from the UAV's array,
-%   rotate at this rate.
+%   rotate at this rate. At hover (fd = 0) w = 0: no source gives the yaw rate of a
+%   hovering UAV.
+if fd == 0
+    w = 0;
+    return;
+end
 v = max(fd * p.c_light / p.carrier_freq, p.turn_v_floor);
 wmax = min(rad2deg(9.81 * tand(p.roll_max_deg) / v), p.yaw_rate_max);
-rs = RandStream('mt19937ar', 'Seed', mod(round(seed) + 23, 2^32));
-w = wmax * (2 * rand(rs) - 1);
+w = wmax * (2 * rand(seed_stream(seed, 'yaw')) - 1);
 end

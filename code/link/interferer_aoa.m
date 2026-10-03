@@ -6,6 +6,6 @@ function th = interferer_aoa(seed, range, n)
 %   [-90, 90] deg, so the default range covers every flight geometry.
 if nargin < 2 || isempty(range), range = [-90 90]; end
 if nargin < 3, n = 3; end
-rs = RandStream('mt19937ar', 'Seed', mod(round(seed) + 11, 2^32));
+rs = seed_stream(seed, 'aoa');
 th = range(1) + (range(2) - range(1)) * rand(rs, 1, n);
 end

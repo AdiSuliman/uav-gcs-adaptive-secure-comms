@@ -11,7 +11,7 @@ function [seed, v_kmh] = pool_seed(sc, s, sp, r, vrange)
 %       test flights of earlier test readings and are not used again.
 %   r   geometry (at most 99 per block)
 %   The seed is shared by every configuration (common random numbers); the speed
-%   is the first draw of the seed's stream, uniform in vrange [km/h].
+%   comes from the seed's speed stream (seed_stream.m), uniform in vrange [km/h].
 %   Blocks 10 and above take their own seed range, so no two (Eb/N0, block,
 %   geometry) triples share a seed.
 if sp < 10
@@ -20,7 +20,6 @@ else
     seed = 1800000 + 20000*sc + 1000*s + 100*(sp - 10) + r;
 end
 if nargout > 1
-    rs = RandStream('mt19937ar', 'Seed', seed);
-    v_kmh = vrange(1) + rand(rs) * (vrange(2) - vrange(1));
+    v_kmh = vrange(1) + rand(seed_stream(seed, 'speed')) * (vrange(2) - vrange(1));
 end
 end

@@ -3,7 +3,7 @@
 % attack severity level and Eb/N0, using the system's REAL configuration set
 % (policy_actions.m, one choice per domain) applied through apply_countermeasure.m.
 % Every (threat, level, Eb/N0) cell is simulated with every configuration on one
-% seeded run of RUN_FRAMES frames shared by all configurations (common random
+% run of RUN_FRAMES frames with its own seed, shared by all configurations (common random
 % numbers; identical physics simulated once, pool_cell.m, parallel workers). A cell
 % is RECOVERABLE when some configuration brings BER within 2x AND packet loss (CRC)
 % within 2x (+ one packet) of the clean link at the same Eb/N0 (proposal KPI 4),
@@ -116,8 +116,8 @@ parfor (j = 1:nJ, NWP)
     cfg = maps(t);
     p = p0; p.active_threat = cfg.base; p.(cfg.level_field) = cfg.levels(li);
     if ~isnan(cfg.aoa), p.int_aoa_deg(1) = p.gcs_aoa_deg + cfg.aoa; end
-    sd = 900000 + 1000*t + 10*li;
-    g = arrayfun(@(s) struct('seed', sd, 'speed', v_nom, 'run', 1), 1:nS, 'UniformOutput', false);
+    sd = 900000 + 1000*t + 10*li;                         % + s: each Eb/N0 column its own flight (nS < 10)
+    g = arrayfun(@(s) struct('seed', sd + s, 'speed', v_nom, 'run', 1), 1:nS, 'UniformOutput', false);
     P = pool_cell(p, cfg.base, ACTIONS, SNR_points, g, [], opt);
     resB{j} = cellfun(@(Q) mean(Q.ber), P(:, :, 1))';            % configurations x Eb/N0
     resF{j} = cellfun(@(Q) mean(double(Q.fer)), P(:, :, 1))';

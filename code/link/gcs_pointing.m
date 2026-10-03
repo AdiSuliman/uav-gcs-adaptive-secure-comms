@@ -9,7 +9,7 @@ if ~p.gcs_tracked
     g = 1; loss_db = 0;
     return;
 end
-rs = RandStream('mt19937ar', 'Seed', mod(round(seed) + 41, 2^32));
+rs = seed_stream(seed, 'gcs');
 sig = p.gcs_err_deg * sqrt(pi / 2);                  % half-normal scale from its mean
 e = abs(randn(rs, 1, 2)) .* sig;
 phi3 = sqrt(27000 * 10^(-p.gcs_ant_dbi / 10));

@@ -44,7 +44,7 @@ if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (r
     cases = cases([1 end]); N_GEOM = 2; COMBOS = COMBOS(1);
 end
 geo = arrayfun(@(s) struct('seed', arrayfun(@(r) pool_seed(1, s, 13, r), 1:N_GEOM), ...
-    'speed', arrayfun(@(r) nth2(@pool_seed, 1, s, 13, r, vrange), 1:N_GEOM), 'run', 1300 + (1:N_GEOM)), ...
+    'speed', arrayfun(@(r) nth2(@pool_seed, 1, s, 13, r, vrange), 1:N_GEOM), 'run', surv3_run_id(1:N_GEOM)), ...
     1:nS, 'UniformOutput', false);
 
 NWP = N_WORKERS;
@@ -84,7 +84,7 @@ parfor (j = 1:nJ, NWP)
     for s = 1:nS
         bc = max(clean{v.ref}.ber(s), C.ber_floor); fc = clean{v.ref}.fer(s);
         for r = 1:N_GEOM
-            rid = 600 + r; okc = false(1, numel(ACTIONS));
+            rid = surv3_run_id(r); okc = false(1, numel(ACTIONS));
             for a = 1:numel(ACTIONS)
                 Q = P{s, a, 1}; m = Q.run == rid;
                 okc(a) = mean(Q.ber(m)) <= RATIO * bc && mean(double(Q.fer(m))) <= RATIO * fc + 1 / max(sum(m), 1);

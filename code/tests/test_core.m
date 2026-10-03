@@ -166,6 +166,55 @@ K = cell2mat(arrayfun(@(s) channel_k(s, [-5 20]), (1:500)', 'UniformOutput', fal
 verifyTrue(tc, all(K(:) >= -5 & K(:) <= 20));
 end
 
+function test_seed_streams_disjoint(tc)
+% Every purpose of every flight seed draws from its own stream: the purpose offsets
+% are distinct and below 64, and the flight seeds of every family are distinct and
+% below 2^26.
+P = {'channel', 'awgn', 'bits', 'threat', 'aoa', 'k', 'yaw', 'corr', 'gcs', 'alt', 'speed'};
+off = zeros(1, numel(P));
+for i = 1:numel(P)
+    [~, n] = seed_stream(12345, P{i});
+    off(i) = n - seed_base(12345);
+end
+verifyEqual(tc, numel(unique(off)), numel(P));
+verifyTrue(tc, all(off >= 0 & off < 64));
+[s, r, b] = ndgrid(1:6, 1:99, 1:19);                    % every pool block that keeps its own seed range
+S = arrayfun(@(si, ri, bi) pool_seed(1, si, bi, ri), s(:), r(:), b(:));
+[s, b] = ndgrid(1:6, [4 15]);                           % the 100th clean-link geometry
+S = [S; arrayfun(@(si, bi) pool_seed(1, si, bi, 100), s(:), b(:))];
+[t, li, s] = ndgrid(1:20, 1:8, 1:6);                    % survivability map: entries, levels, Eb/N0
+S = [S; 900000 + 1000*t(:) + 10*li(:) + s(:); 700000 + (1:5)'];
+k = (1:99999)';
+S = [S; 3000000 + k; 4000000 + k; 5000000 + k];         % dataset, unseen Eb/N0 and unseen severity runs
+verifyEqual(tc, numel(unique(S)), numel(S));
+verifyLessThan(tc, max(S), 2^26);
+N = seed_base(S) + off;
+verifyEqual(tc, numel(unique(N(:))), numel(N));
+verifyLessThan(tc, max(N(:)), 2^32);
+end
+
+function test_draws_independent(tc)
+% The draws of a flight are independent: our signal's K is uncorrelated with the
+% heading rate and the other draws, and no draw repeats on another seed (the AoA of
+% geometry r+12 is not the K of geometry r).
+p = base_params();
+[r, s, b] = ndgrid(1:99, 1:6, [5 14 16 17]);            % pool geometries, consecutive seeds along r
+[S, v] = arrayfun(@(bi, si, ri) pool_seed(1, si, bi, ri, [0 1]), b(:), s(:), r(:));
+K = cell2mat(arrayfun(@(x) channel_k(x, [0 1]), S, 'UniformOutput', false));
+A = cell2mat(arrayfun(@(x) interferer_aoa(x, [0 1], 3), S, 'UniformOutput', false));
+wmax = min(rad2deg(9.81 * tand(p.roll_max_deg) / p.turn_v_floor), p.yaw_rate_max);
+w = arrayfun(@(x) heading_rate(x, 1, p), S) / wmax;     % 1 Hz: below the speed floor
+rho = arrayfun(@(x) rx_correlation(x, [0 1]), S);
+U = [K, A, (w + 1) / 2, rho, v];                        % the uniform behind every draw
+c = corrcoef(K(:, 1), w);
+verifyLessThan(tc, abs(c(1, 2)), 0.1);
+C = corrcoef(U);
+verifyLessThan(tc, max(abs(C(~eye(size(C))))), 0.1);
+i = find(r(:) <= 87);
+verifyTrue(tc, all(A(i + 12, 1) ~= K(i, 1)));
+verifyGreaterThan(tc, min(diff(sort(U(:)))), 1e-12);
+end
+
 function test_receiver_measurements(tc)
 p = base_params(); p.quiet_build = true; p.active_threat = 'none'; p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false; p.gcs_tracked = false; p.seed = 11;
 p.k_random = false;
@@ -317,11 +366,20 @@ end
 function test_heading_rate(tc)
 % turns stay within the measured bank angle and yaw rate; same seed, same rate
 p = base_params();
-w = arrayfun(@(s) heading_rate(s, 0, p), 1:200);
+w = arrayfun(@(s) heading_rate(s, 1, p), 1:200);
 verifyLessThanOrEqual(tc, max(abs(w)), p.yaw_rate_max + 1e-9);
 verifyEqual(tc, heading_rate(7, 300, p), heading_rate(7, 300, p));
 v = p.v_max; wf = rad2deg(9.81 * tand(p.roll_max_deg) / v);
 verifyLessThanOrEqual(tc, max(abs(arrayfun(@(s) heading_rate(s, v * p.carrier_freq / p.c_light, p), 1:200))), min(wf, p.yaw_rate_max) + 1e-9);
+end
+
+function test_hover_no_yaw(tc)
+% a hovering UAV (no Doppler) does not turn: no source gives a hover yaw rate
+p = base_params();
+verifyEqual(tc, arrayfun(@(s) heading_rate(s, 0, p), 1:200), zeros(1, 200));
+[sd, v] = pool_seed(1, 3, 16, 7, [0 0]);                % a hover flight of the edge-speed pools
+verifyEqual(tc, heading_rate(sd, v / 3.6 * p.carrier_freq / p.c_light, p), 0);
+verifyNotEqual(tc, heading_rate(sd, 1, p), 0);
 end
 
 function test_gcs_pointing(tc)
