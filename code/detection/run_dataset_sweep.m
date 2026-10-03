@@ -2,18 +2,12 @@
 % 10 threats x 8 severity levels x 6 Eb/N0 points + 'none', on the multi-antenna
 % link (build_threat_model.m). Every (threat, level, Eb/N0) cell is simulated as N_SUB independent
 % sub-runs: own seed (fading and its K-factors, interferer channels and directions,
-% threat waveform, noise, bits) and own UAV speed drawn uniformly in 50-120 km/h. The sub-run is the unit of the
+% threat waveform, noise, bits) and own UAV speed drawn uniformly over the envelope (init_params.m). The sub-run is the unit of the
 % train/val/test split (prepare_data.m), so no two splits share a channel
 % realization or a temporal-feature window.
 %
-% Severity levels, the full range of the decision layer and of the map:
-%   jamming / noise_burst / reactive / sweeping / tone : JSR 0-30 dB (up to a 30 dB
-%                  jammer over the signal as in Liu et al.)
-%   path_loss            : 4-25 dB, step 3
-%   spoofing             : SIR -4 to 10 dB, step 2
-%   antenna_fault        : duty 0.05-0.6 (30 dB loss while failed)
-%   benign_interference  : -12 to -1.5 dB, step 1.5
-%   airframe_shadowing   : 5-35 dB on one antenna (above 35 dB measured, Khawaja et al.)
+% Severity levels: dataset_levels.m (8 per threat, spanning the decision layer's levels and
+% the survivability map, up to the sources' most severe values).
 % 'none' gets n_levels x N_SUB sub-runs per Eb/N0 (class balance).
 %
 % Per frame: reference-antenna IQ, label, level, configured Eb/N0, the receiver
@@ -140,7 +134,7 @@ lab = label * ones(1, n);
 if strcmp(p.active_threat, 'benign_interference')
     lab(F.act(v) < 0.1) = 1;                            % no WLAN packet in this frame: a clean frame
 elseif strcmp(p.active_threat, 'antenna_fault')
-    lab(F.act(v) == 0) = 1;                             % the contact never opened in this frame: a clean frame
+    lab(F.act(v) == 0) = 1;                             % a fault model with the contact closed in a frame: a clean frame
 end
 D.label = [D.label, lab]; D.level = [D.level, level * ones(1, n)];
 D.snr = [D.snr, ebno * ones(1, n)]; D.speed = [D.speed, v_kmh * ones(1, n)];
