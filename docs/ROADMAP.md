@@ -57,9 +57,9 @@ Last updated: 2026-10-03
 
 | Original plan | What was done | Why |
 |---|---|---|
-| Symbol timing / phase recovery | Not modeled; ideal synchronization | Out of scope of the decision-system study (D7); a sim-to-real gap |
+| Symbol timing / phase recovery | v7: a real receiver with training, pilots and timing and frequency synchronization; the ideal receiver only as the validation reference | The ideal receiver hid how a real one fails (D7, D73) |
 | CNN/LSTM on link metrics | CNN on the spectrogram + 9 link features; CNN-LSTM kept in `legacy/` | The LSTM gave no gain for its cost (D13) |
-| 5 threat classes | 8 threats + none, plus combined threats | Proposal risk 13 and a more realistic EW set |
+| 5 threat classes | 10 threats + none, ten pairs and four triples | A more realistic EW set within RF scope (D68, D73) |
 | Single-antenna link | Two UAV antennas, MRC baseline, MMSE as the spatial countermeasure | Spatial diversity as a real receiver function (D41) |
 | Actions: channel switch, bit rate, diversity | 36 configurations, one choice per domain (frequency, space, link budget): the originals, power control, FEC + interleaving | Threats that no single original action repairs (D39, D45, D59) |
 | DQN on a reward table | Sequential environment on measured frames, shield with hold, γ chosen on validation, escalation as a fallback | One-shot decisions could not show recovery over time or a follower jammer (D44–D46, D63, D64) |

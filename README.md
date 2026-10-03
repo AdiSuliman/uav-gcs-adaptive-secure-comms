@@ -3,7 +3,8 @@
 **Course:** 50076 (HIT) capstone | **Semester:** 2026-27 A
 **Students:** Adi Suliman, Bar Dvir Hassan
 **Supervisor:** Golan Ein-Tzvi
-**Platform:** MATLAB R2026a + Simulink (Communications, DSP System, Deep Learning toolboxes)
+**Platform:** MATLAB R2026a + Simulink (Communications, DSP System, Signal Processing, Deep Learning, Statistics and Machine Learning, Parallel Computing toolboxes)
+**Status (2026-10-03):** v7 code ready (DECISIONS.md D73); the v6 and v7 full runs are in progress. The overview describes v7; the results sections below are still those of v4/v5 and will be replaced by the v7 results.
 
 ---
 
@@ -11,9 +12,9 @@
 
 A closed-loop simulation of the command uplink from a ground control station (GCS) to a small UAV under electronic-warfare threats. A Simulink link model, validated against theory, generates its own labeled data; a CNN on the spectrogram plus link measurements detects the threat and flags threats it has never seen; a decision layer (expert rule, a class table and a Double DQN with a safety shield) chooses a countermeasure; and every policy is compared on measured frames of the real link that were never used in training.
 
-- **Link:** GCS → UAV, QPSK, 1 Msym/s, RRC (roll-off 0.25, span 10, 4 samples/symbol), 1032-bit frames, 2.4 GHz, Rician K = 10 dB with sum-of-sinusoids Doppler fading for a UAV at 50–120 km/h (111–267 Hz). One GCS antenna, two omni antennas on the UAV (λ/2, receive correlation 0.3).
-- **Receiver:** data-aided channel estimation (leave-one-out), MRC combining; adaptive MMSE combining as the spatial countermeasure (nulls an interferer arriving from another direction). Everything the detector and the decision layer see is measured at the receiver: CRC-32 packet check, BER estimated from the combiner output, SINR and envelope correlation against the receiver's own decisions, interference over thermal, the spatial coherence, predicted MMSE gain and direction of the interference from the channel estimator, and the deepest dip of each antenna's channel gain.
-- **Threats (8 + clean link):** jamming, reactive jamming, sweeping jammer, noise burst, spoofing, benign interference, path loss, antenna fault; five severity levels in the detector dataset, three (low, nominal, high) in the decision layer; eight combined threats. Every interferer reaches the array from its own direction, drawn per seeded run (flight geometry).
+- **Link:** GCS → UAV command uplink, QPSK, 1 Msym/s, RRC (roll-off 0.25, span 10, 4 samples/symbol), 1032-bit frames, 2.4 GHz. Each frame has a quiet slot, short and long training and pilot blocks. Rician K drawn per flight (−5 to 20 dB), sum-of-sinusoids Doppler fading for 0–161 km/h, hover and turns at measured bank angles and yaw rates. The GCS is a low-power radio on a tracked 12 dBi antenna under the 11 dBm licence-exempt e.i.r.p. cap; the UAV has two, three or four spatially separated omni antennas (profiles 2, 1, 3).
+- **Receiver:** a real receiver: timing and frequency synchronization from the training, channel estimation from the training and the pilots, decision-directed passes; MRC combining, adaptive MMSE combining as the spatial countermeasure (nulls an interferer arriving from another direction). The ideal receiver (known timing, frequency and symbols) remains only as the validation reference. Everything the detector and the decision layer see is measured at the receiver: CRC-32 packet check, BER estimated from the combiner output, SINR and envelope correlation against the receiver's own decisions, interference over thermal, the spatial coherence, predicted MMSE gain and direction of the interference from the channel estimator, and the deepest dip of each antenna's channel gain.
+- **Threats (10 + clean link):** jamming, reactive jamming, sweeping jammer, tone jamming, noise burst, spoofing (a counterfeit GCS), benign interference (WLAN traffic), path loss, antenna fault (open connector), airframe shadowing; eight severity levels in the detector dataset, five in the decision layer; ten pairs and four triples of threats. Every interferer reaches the array from its own direction, drawn per seeded run (flight geometry).
 - **Countermeasures (36 configurations):** one choice per domain (Liu et al.'s combined action): frequency (none, channel switch, frequency diversity) × space (none, spatial diversity with MMSE) × link budget (none, rate reduction, power control, FEC with interleaving, rate + power, power + FEC).
 
 ---
@@ -130,7 +131,7 @@ Every threat × severity × Eb/N0 through the 36 configurations on one seeded ru
 | 4 | Restoration | ≥ 90% of the recoverable episodes recovered (BER and packet loss ≤ 2× clean), for every threat including the combined ones, at three severities; boundary mapped | `evaluate_policies.m`, `map_survivability_boundary.m` |
 | 5 | DQN vs baselines | better than the rule (paired bootstrap 95% interval), with follower jammer and unseen combinations; no-response baseline reported | `evaluate_policies.m` |
 | 6 | False alarms | one-sided 95% bound ≤ 5% over ≥ 600 clean-link episodes | `evaluate_policies.m` |
-| 7 | Real time and speed | latency per decision cycle median < 10 ms and p95 < 20 ms (decision period 20 ms); recovery spread ≤ 10 points over 50–120 km/h | `measure_latency.m`, `evaluate_policies.m` |
+| 7 | Real time and speed | latency per decision cycle median < 10 ms and p95 < 20 ms (decision period 20 ms); recovery spread ≤ 10 points over the speed envelope (0–161 km/h) | `measure_latency.m`, `evaluate_policies.m` |
 | 8 | Minimum | closed loop restoring at least one recoverable threat | `evaluate_policies.m` |
 
 `measure_all_kpis.m` writes the status of each (MET / NOT MET / STALE / MISSING) to `results/kpi_summary.txt`; `build_kpi_dashboard.m` draws `results/kpi_dashboard.png`.
@@ -225,7 +226,7 @@ An Unreal Engine view of the closed loop, driven from MATLAB (Simulink 3D Animat
 - **Countermeasures are modeled, not built:** channel switch through adjacent-channel rejection (30 dB), rate reduction and power control as Eb/N0 gains, FEC applied to the measured error pattern of each run, MMSE combining in the receiver model. Switching time and signalling to the GCS are not modeled.
 - **No carrier or timing synchronization** (D7); spoofing is a coherent counterfeit waveform, not a synchronization attack.
 - **Decisions on measured frames.** The decision layer is trained and evaluated on frames measured through the real link (pools), not with Simulink inside the learning loop; one decision cycle is one frame.
-- **Airframe shadowing** of the UAV antennas is not modeled; two antennas reduce its effect.
+- **Airframe shadowing** is modeled as measured events on one antenna (6–25 dB, the hidden antenna loses its line of sight); spatially separated antennas keep the others clear.
 - **Simulation only.** Validation on hardware (SDR testbed) is future work.
 
 ---
@@ -259,7 +260,7 @@ An Unreal Engine view of the closed loop, driven from MATLAB (Simulink 3D Animat
 - Consecutive decision cycles come from consecutive frames of the pools, so the fading between two cycles is more correlated than 20 ms apart; recovery times in ms assume the 20 ms decision period.
 - Reactive jamming is the hardest unknown threat (AUROC 0.641): from the receiver it looks like barrage jamming on a continuous uplink.
 - Latency is measured on a desktop with a GPU detector, not on UAV hardware.
-- Two interferers can exceed what two antennas can null; a third antenna and a relay path are evaluated as experiments.
+- N antennas null up to N−1 interferers; one antenna more or fewer and a relay path are evaluated per profile as experiments.
 - Hardware validation (SDR), switching time and GCS signalling; online learning.
 
 ---
