@@ -6,6 +6,7 @@ slprj/
 
 # Data (generate on demand)
 data/
+profiles/
 *.mat
 *.csv
 *.xlsx

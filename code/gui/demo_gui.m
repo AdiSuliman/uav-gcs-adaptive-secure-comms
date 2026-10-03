@@ -1,5 +1,9 @@
-function demo_gui
+function demo_gui(profile)
 %DEMO_GUI - UAV-GCS Adaptive Secure Comms: operator console.
+%   demo_gui           the trained system of this checkout
+%   demo_gui('rx4')    the trained system of another antenna profile, from its bundle
+%                      profiles/rx<n> (export_gui_bundle.m); the 'UAV antennas' menu in the
+%                      header switches between the bundles found there
 %
 % One application, five tabs:
 %   LIVE OPERATIONS  - run the REAL closed loop (Simulink -> CNN -> decision layer
@@ -44,6 +48,13 @@ function demo_gui
 % Usage: run demo_gui from the project root (same folder as main.m).
 
 close all; clc;
+if nargin >= 1 && ~isempty(profile)
+    pdir = fullfile(project_root(), 'profiles', profile);
+    if ~isfolder(pdir), error('demo_gui:profile', 'no bundle %s (run export_gui_bundle)', pdir); end
+    cd(pdir);                                   % data/, results/ and params.mat of that profile
+else
+    profile = '';
+end
 
 %% ---------- Load trained models and simulation parameters once ----------
 tBoot = tic;
@@ -90,8 +101,7 @@ if isfield(Q, 'alarm_mode'), env.PP.alarm_mode = Q.alarm_mode; end
 if isfield(Q, 'drop_db') && ~isempty(Q.drop_db), env.PP.drop_db = Q.drop_db; end
 env.baseline = struct('jsr_db',p0.jsr_db,'path_loss_db',p0.path_loss_db, ...
     'fault_atten_db',p0.fault_atten_db,'spoof_sir_db',p0.spoof_sir_db, ...
-    'benign_int_db',p0.benign_int_db,'tone_jsr_db',p0.tone_jsr_db,'shadow_db',p0.shadow_db, ...
-    'fault_atten_db',p0.fault_atten_db);
+    'benign_int_db',p0.benign_int_db,'tone_jsr_db',p0.tone_jsr_db,'shadow_db',p0.shadow_db);
 env.sev = buildSeverityTable();
 env.surv = loadSurvReference();
 env.ber_floor = 0.5 / p0.frame_length;      % "zero errors in a frame" plotting floor
@@ -128,14 +138,19 @@ root.BackgroundColor = c.bg;
 %% ---------- Header ----------
 hdr = uipanel(root, 'BackgroundColor', c.panelBg, 'BorderType', 'none');
 hdr.Layout.Row = 1;
-hg = uigridlayout(hdr, [1 4]);
-hg.ColumnWidth = {'1x', 470, 30, 270}; hg.Padding = [14 4 14 4]; hg.BackgroundColor = c.panelBg;
+hg = uigridlayout(hdr, [1 5]);
+hg.ColumnWidth = {'1x', 430, 170, 30, 270}; hg.Padding = [14 4 14 4]; hg.BackgroundColor = c.panelBg;
 place(mkLabel(hg, 'UAV-GCS ADAPTIVE SECURE COMMUNICATIONS', c, 'FontSize', 17, 'FontWeight', 'bold'), 1, 1);
-place(mkLabel(hg, sprintf('CNN 9-class detector | DQN %d configurations | Rician K=10 dB @ 2.4 GHz', ...
-    numel(env.action_names)), c, ...
+place(mkLabel(hg, sprintf('CNN %d-class detector | DQN %d configurations | 2.4 GHz', ...
+    numel(env.class_list), numel(env.action_names)), c, ...
     'FontColor', c.mut, 'FontSize', 11, 'HorizontalAlignment', 'right'), 1, 2);
-lamp = place(mkLabel(hg, char(9679), c, 'FontSize', 22, 'FontColor', c.mut, 'HorizontalAlignment', 'center'), 1, 3);
-lampTxt = place(mkLabel(hg, 'LINK: STANDBY', c, 'FontSize', 14, 'FontWeight', 'bold', 'FontColor', c.mut), 1, 4);
+[pItems, pData] = profileMenu(p0.n_rx, profile);
+pMenu = uidropdown(hg, 'Items', pItems, 'ItemsData', pData, 'Value', profile, 'FontName', c.font, ...
+    'Tooltip', 'UAV antennas: switch to the trained system of another antenna profile', ...
+    'ValueChangedFcn', @(s, ~) switchProfile(s, profile));
+pMenu.Layout.Row = 1; pMenu.Layout.Column = 3;
+lamp = place(mkLabel(hg, char(9679), c, 'FontSize', 22, 'FontColor', c.mut, 'HorizontalAlignment', 'center'), 1, 4);
+lampTxt = place(mkLabel(hg, 'LINK: STANDBY', c, 'FontSize', 14, 'FontWeight', 'bold', 'FontColor', c.mut), 1, 5);
 
 %% ---------- Tabs ----------
 tg = uitabgroup(root); tg.Layout.Row = 2;
@@ -725,11 +740,36 @@ function s = mergeStructs(a, b)
     for k = 1:numel(f), s.(f{k}) = b.(f{k}); end
 end
 
+function [items, data] = profileMenu(nrx, profile)
+    % This checkout's system and every bundle under profiles/ (export_gui_bundle.m).
+    items = {sprintf('%d UAV antennas%s', nrx, ternaryTxt(isempty(profile), ' (this checkout)', ''))}; data = {profile};
+    if ~isempty(profile), items{1} = sprintf('%d UAV antennas', nrx); end
+    b = dir(fullfile(project_root(), 'profiles', 'rx*'));
+    for k = 1:numel(b)
+        if b(k).isdir && ~strcmp(b(k).name, profile)
+            items{end+1} = sprintf('%s UAV antennas', b(k).name(3:end)); data{end+1} = b(k).name; %#ok<AGROW>
+        end
+    end
+    if ~isempty(profile), items{end+1} = 'this checkout'; data{end+1} = ''; end
+end
+
+function s = ternaryTxt(c, a, b)
+    if c, s = a; else, s = b; end
+end
+
+function switchProfile(src, current)
+    % Reopen the console on the selected profile (models, parameters, results).
+    v = src.Value;
+    if strcmp(v, current), return; end
+    close(ancestor(src, 'figure'));                % closeApp: video writer and log closed
+    if isempty(v), cd(project_root()); demo_gui(); else, demo_gui(v); end
+end
+
 function [mu, sd] = loadNormStats()
     % splits.mat is >1 GB; only two small vectors are needed. They are cached
     % in a tiny file and re-extracted only when splits.mat is newer.
     src = 'data/splits.mat'; cache = 'data/gui_norm_stats.mat';
-    fresh = isfile(cache) && dir(cache).datenum >= dir(src).datenum;
+    fresh = isfile(cache) && (~isfile(src) || dir(cache).datenum >= dir(src).datenum);   % a profile bundle has no splits.mat
     if ~fresh
         fprintf('  one-time extraction of normalisation stats from splits.mat (slow, next launches skip this)...\n');
         S = load(src, 'splits');
