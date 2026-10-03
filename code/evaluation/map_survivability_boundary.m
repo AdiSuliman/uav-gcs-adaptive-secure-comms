@@ -1,4 +1,4 @@
-%% MAP_SURVIVABILITY_BOUNDARY — proposal deliverable 8 (primary research output)
+%% MAP_SURVIVABILITY_BOUNDARY — proposal deliverable 7 (primary research output)
 % Maps, per threat, where an attack is recoverable versus non-recoverable over
 % attack severity level and Eb/N0, using the system's REAL configuration set
 % (policy_actions.m, one choice per domain) applied through apply_countermeasure.m.

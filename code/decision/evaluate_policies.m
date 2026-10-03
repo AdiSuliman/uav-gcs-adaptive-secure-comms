@@ -22,9 +22,11 @@
 %             instead of one (sensitivity to the signalling assumption), reported apart
 % Policies: no response (the link that does not react), random, always-on MMSE,
 % the best fixed configuration (train pools), expert rule with and without
-% escalation, class -> configuration table (train pools), the DQN of every
+% escalation, the rule with escalation without the detector (alarm from measured
+% degradation only), class -> configuration table (train pools), the DQN of every
 % discount factor (the selected one also with escalation), one-step oracle.
-% The deployed policy, read by the KPIs, is the selected DQN with escalation.
+% The deployed policy, read by the KPIs, is the selected DQN with escalation when it
+% passed its validation gate (train_dqn.m), otherwise the rule with escalation.
 % Main metric (proposal KPI 4): RECOVERED episodes -- BER and packet loss back to
 % <= 2x the clean link for 5 consecutive cycles -- among the RECOVERABLE ones
 % (some configuration restores both in that geometry, link_env.m); the rest is
@@ -101,14 +103,18 @@ fprintf('Class table (train pools): %s | unknown -> %s\n\n', ...
 %% 3. Policies
 nGam = numel(Q.gammas);
 sel = find(Q.gammas == Q.seed_summary.selected_gamma, 1);
-POL = [{'none', 'random', 'fixed_mmse', 'fixed', 'rule', 'rule_esc', 'table'}, ...
+POL = [{'none', 'random', 'fixed_mmse', 'fixed', 'rule', 'rule_esc', 'blind_esc', 'table'}, ...
        arrayfun(@(g) sprintf('dqn_g%d', g), 1:nGam, 'UniformOutput', false), {'dqn_esc', 'oracle'}];
 LBL = [{'no response', 'random', 'always-on MMSE', ['fixed: ' PP.actions{fixed_best}], 'rule', 'rule + escalation', ...
-        'table (train pools)'}, ...
+        'no detector + escalation', 'table (train pools)'}, ...
        arrayfun(@(g) sprintf('DQN gamma=%.2f%s', Q.gammas(g), ternary(g == sel, ' (selected)', '')), 1:nGam, ...
-       'UniformOutput', false), {'DQN + escalation (deployed)', 'oracle (one-step)'}];
+       'UniformOutput', false), {'DQN + escalation', 'oracle (one-step)'}];
 iBase = find(strcmp(POL, sprintf('dqn_g%d', sel)));  % selected DQN alone
-iDQN = find(strcmp(POL, 'dqn_esc'));                 % deployed: selected DQN + escalation
+iDQN = find(strcmp(POL, 'dqn_esc'));                 % deployed policy: the selected DQN + escalation,
+if isfield(Q.seed_summary, 'gate_pass') && ~Q.seed_summary.gate_pass
+    iDQN = find(strcmp(POL, 'rule_esc'));            % or the rule + escalation when the DQN failed its validation gate
+end
+LBL{iDQN} = [LBL{iDQN} ' (deployed)'];
 col = @(p) find(strcmp(POL, p));
 
 RES = cell(numel(sets), numel(POL));
@@ -130,7 +136,7 @@ foll_cells = single_cells(K.followable(single_cells));
 vsets = {episodes(single_cells, nS, K.nR(VAL), REPS, false, false, NE, T, rs), ...
          episodes(foll_cells, nS, K.nR(VAL), REPS, true, false, NE, T, rs), ...
          episodes(combo_cells, nS, K.nR(VAL), REPS, false, false, NE, T, rs)};
-[kind, ag, opt] = policy_setup('dqn_esc', Q, sel, fixed_best, fixed_mmse, tab, K.na);
+[kind, ag, opt] = policy_setup(POL{iDQN}, Q, sel, fixed_best, fixed_mmse, tab, K.na);
 RV = run_set(kind, PP, K, vsets{1}, VAL, ag, opt, 70000);
 for vs = 2:3, RV = cat_struct(RV, run_set(kind, PP, K, vsets{vs}, VAL, ag, opt, 70000 + 100*vs)); end
 fprintf('  envelope (validation) %d episodes (%.1f min)\n', numel(RV.ret), toc(t0)/60);
@@ -168,8 +174,8 @@ rep = [rep, policy_table_lines(ALL, LBL)];
 rep{end+1} = paired_line(ALL, POL, LBL, iDQN);
 
 % Per threat and severity (KPI 4: >= 90% of the recoverable episodes of every threat)
-show = {'none', 'fixed', 'rule_esc', 'table', POL{iBase}, 'dqn_esc', 'oracle'};
-hdr = {'no resp.', 'fixed best', 'rule+esc', 'table', 'DQN', 'DQN+esc', 'oracle'};
+show = {'none', 'fixed', 'rule_esc', 'blind_esc', 'table', POL{iBase}, 'dqn_esc', 'oracle'};
+hdr = {'no resp.', 'fixed best', 'rule+esc', 'no det.+esc', 'table', 'DQN', 'DQN+esc', 'oracle'};
 rep{end+1} = '';
 rep{end+1} = 'Recovered episodes among the recoverable, per threat (single + follower + combined sets), %:';
 rep{end+1} = sprintf('%-30s %8s %11s%s', 'threat', 'episodes', 'recoverable', sprintf('%11s', hdr{:}));
@@ -191,8 +197,8 @@ for ti = 1:numel(threats)
 end
 rep{end+1} = '';
 iK = find(strcmp(show, POL{iDQN}));                  % deployed policy's column
-rep{end+1} = sprintf('Deployed policy (DQN + escalation) per threat and severity (%s), recovered among recoverable, %%:', ...
-    strjoin(PP.sev_names, ' / '));
+rep{end+1} = sprintf('Deployed policy (%s) per threat and severity (%s), recovered among recoverable, %%:', ...
+    erase(LBL{iDQN}, ' (deployed)'), strjoin(PP.sev_names, ' / '));
 for ti = 1:numel(threats)
     rep{end+1} = sprintf('  %-34s %s', threats{ti}, sprintf('%8.1f', squeeze(PTsev(ti, :, iK)))); %#ok<SAGROW>
 end
@@ -375,7 +381,7 @@ save('results/policy_evaluation.mat', 'RES', 'RW', 'POL', 'LBL', 'set_names', 'f
     'iThreat', 'ALL', 'top_cfg');
 
 %% 5. Figures
-key = {'none', 'fixed', 'rule_esc', 'table', POL{iDQN}, 'oracle'};
+key = unique({'none', 'fixed', 'rule_esc', 'blind_esc', 'table', 'dqn_esc', POL{iDQN}, 'oracle'}, 'stable');
 kl = cellfun(@(p) LBL{col(p)}, key, 'UniformOutput', false);
 fig = figure('Position', [60 60 1500 460], 'Color', 'w');
 metric = {'recovered', 'ok_post', 'gput_post'};
@@ -481,7 +487,7 @@ for pk = 1:numel(POL)
 end
 nS = numel(ebno);
 FD = struct('policy', {}, 'by_ebno', {}, 'n_ebno', {}, 'cls', {}, 'deg', {}, 'drop', {});
-for pk = [iDQN, find(strcmp(POL, 'rule_esc'))]
+for pk = unique([iDQN, find(strcmp(POL, 'rule_esc'))], 'stable')
     R = RR{pk}; fe = above & R.switches > 0;
     byE = arrayfun(@(s) sum(fe & R.s == s), 1:nS); nE = arrayfun(@(s) sum(above & R.s == s), 1:nS);
     lines{end+1} = sprintf('  %s, false-alarm episodes per Eb/N0: %s', LBL{pk}, strjoin(arrayfun(@(s) ...
@@ -521,14 +527,14 @@ function s = paired_line(RR, POL, LBL, iDQN)
 % episodes) and return, bootstrap over geometries.
 Rd = RR{iDQN}; m = Rd.recoverable & Rd.threat;
 parts = {};
-for p = {'none', 'rule_esc', 'table', 'fixed'}
+for p = setdiff({'none', 'rule_esc', 'blind_esc', 'table', 'fixed', 'dqn_esc'}, POL(iDQN), 'stable')
     k = find(strcmp(POL, p{1})); Rk = RR{k};
     [a, lo, hi] = boot_cluster(double(Rd.recovered(m)) - double(Rk.recovered(m)), ones(1, sum(m)), Rd.geom(m), 2000, 9);
     [b, lo2, hi2] = boot_cluster(Rd.ret - Rk.ret, ones(size(Rd.ret)), Rd.geom, 2000, 10);
     parts{end+1} = sprintf('%s: recovered %+.1f [%+.1f, %+.1f] points, return %+.3f [%+.3f, %+.3f]', LBL{k}, ...
         100*a, 100*lo, 100*hi, b, lo2, hi2); %#ok<AGROW>
 end
-s = ['Paired, selected DQN minus  ' strjoin(parts, ' | ')];
+s = ['Paired, ' erase(LBL{iDQN}, ' (deployed)') ' (deployed) minus  ' strjoin(parts, ' | ')];
 end
 
 function R = cat_struct(R, Rb)

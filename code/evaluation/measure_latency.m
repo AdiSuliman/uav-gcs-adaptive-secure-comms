@@ -1,8 +1,8 @@
 %% MEASURE_LATENCY - Decision latency per cycle (KPI 7: real time)
 % One decision cycle as deployed: spectrogram image of the received frame, link
 % features, detector (class probabilities and the unknown-threat score from one
-% forward pass, detect_scores.m), link monitor + policy (policy_decide.m, the
-% selected DQN and the rule). Real frames of the threat link (none, jamming,
+% forward pass, detect_scores.m), link monitor with the temporal fusion and the
+% unknown-score window + policy (policy_decide.m, the selected DQN and the rule). Real frames of the threat link (none, jamming,
 % noise_burst, spoofing at 4 dB).
 % A deployed receiver runs the detector on one device, so each device (GPU when
 % present, CPU) is timed in its own passes, after a warm-up pass; alternating the
@@ -33,8 +33,11 @@ N = load('data/splits.mat', 'splits');
 mu = N.splits.norm.feat_mean; sd = N.splits.norm.feat_std; clear N
 Q = load('data/trained_dqn.mat', 'agent', 'confirm', 'alarm_mode', 'drop_db');
 T = ood_thresholds(0.95);
+FZ = struct('FM', [], 'N', 1);
+if isfile('data/fusion.mat'), FZ = load('data/fusion.mat', 'FM', 'N'); end   % temporal fusion (select_fusion.m), as evaluated
+UW = 1; if isfield(D.ood, 'win'), UW = D.ood.win; end                        % unknown-score window (eval_ood_detection.m)
 PPm = struct('actions', {policy_actions()}, 'classes', {cellstr(string(D.classes(:)'))}, ...
-    'sps', p0.sps, 'bps', p0.bits_per_symbol, 'maha_thr', T.maha);
+    'sps', p0.sps, 'bps', p0.bits_per_symbol, 'maha_thr', T.maha, 'fuse', FZ.FM, 'fuse_N', FZ.N, 'unk_win', UW);
 if isfield(Q, 'confirm'), PPm.confirm = Q.confirm; end
 if isfield(Q, 'alarm_mode'), PPm.alarm_mode = Q.alarm_mode; end
 if isfield(Q, 'drop_db') && ~isempty(Q.drop_db), PPm.drop_db = Q.drop_db; end
@@ -77,7 +80,8 @@ for di = 1:numel(devs)
             t0 = tic; raw = link_features(x.M, x.k, tw); t_feat = toc(t0);
             X = reshape(single(img), 128, 128, 1, 1); Fn = ((raw - mu) ./ sd)';
             t0 = tic; [probs, maha] = detect_scores(D.net, D.ood, X, Fn, ddev); sync(ug); t_det = toc(t0);
-            obs = struct('probs', probs(:)', 'unknown', maha < PPm.maha_thr, 'feat', raw);
+            obs = struct('probs', probs(:)', 'unknown', maha < PPm.maha_thr, 'maha', maha, 'feat', raw, ...
+                'gant', x.M.gain_ant(:, x.k)');
             t0 = tic; [cfgD, memD] = policy_decide('dqn_esc', obs, cfgD, memD, PPm, Q.agent); t_dqn = toc(t0);
             t0 = tic; [cfgR, memR] = policy_decide('rule_esc', obs, cfgR, memR, PPm, []); t_rule = toc(t0);
             if rep > 0                               % pass 0 = warm-up

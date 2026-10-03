@@ -27,7 +27,7 @@ function demo_gui
 %                      T_recover live.
 %   SESSION LOG      - every run of the session, exportable to CSV / MAT.
 %
-% Speed: any real value 50-120 km/h. Channel Doppler follows fd = v*fc/c and is
+% Speed: any real value of the envelope (init_params.m, hover to 161 km/h). Channel Doppler follows fd = v*fc/c and is
 % applied to the Simulink channel of EVERY run (2.4 GHz -> ~2.22 Hz per km/h).
 %
 % Decision latency = detection path of one frame (CNN forward pass and
@@ -80,8 +80,11 @@ env.na = find(strcmp(env.action_names, 'no_action'), 1);
 env.ood = D.ood;
 Tood = ood_thresholds(0.95);                   % Mahalanobis unknown-threat threshold (95% of known kept)
 env.maha_val = Tood.maha_val;
+FZ = struct('FM', [], 'N', 1);
+if isfile('data/fusion.mat'), FZ = load('data/fusion.mat', 'FM', 'N'); end   % temporal fusion (select_fusion.m), as evaluated
+UW = 1; if isfield(D.ood, 'win'), UW = D.ood.win; end                        % unknown-score window (eval_ood_detection.m)
 env.PP = struct('actions', {env.action_names}, 'classes', {env.class_list(:)'}, 'sps', p0.sps, ...
-    'bps', p0.bits_per_symbol, 'maha_thr', Tood.maha);
+    'bps', p0.bits_per_symbol, 'maha_thr', Tood.maha, 'fuse', FZ.FM, 'fuse_N', FZ.N, 'unk_win', UW);
 if isfield(Q, 'confirm'), env.PP.confirm = Q.confirm; end
 if isfield(Q, 'alarm_mode'), env.PP.alarm_mode = Q.alarm_mode; end
 if isfield(Q, 'drop_db') && ~isempty(Q.drop_db), env.PP.drop_db = Q.drop_db; end
@@ -281,7 +284,7 @@ function ui = buildLiveTab(tab, env, c)
         '95 is the tested production setting: the oddest 5% of frames are', ...
         'flagged, and a flag alone never fires a response - only flag + a', ...
         'link that actually degrades.'};
-    tipRule = {'Fly the same attack with the fixed-rules autopilot next to the AI:', ...
+    tipRule = {'Fly the same attack with the fixed rule policy next to the AI:', ...
         'when they pick different responses, one extra real simulation runs so', ...
         'you see BOTH outcomes side by side. Costs a few seconds per run.'};
     tipRec = {'Saves a snapshot video (3 pictures per run) as MP4. Each snapshot', ...
@@ -456,7 +459,7 @@ function ui = buildEpisodeTab(tab, env, c)
     tipConf = {'Trigger discipline: the attack must be seen on 2 cycles in a row', ...
         'before ANY response may fire. One noisy frame never causes a switch -', ...
         'this is why reactions take at least ~1 ms and false alarms are rare.'};
-    tipDwell = {'The rules-autopilot''s own patience: it commits a new response only', ...
+    tipDwell = {'The rule policy''s own patience: it commits a new response only', ...
         'after proposing it 2 cycles in a row, and never within 3 cycles of', ...
         'its last change - so it does not flap between responses.'};
     tipPace = {'Screen speed only. Decisions and all measured times are unaffected.', ...
@@ -571,7 +574,7 @@ function ui = buildKpiTab(tab, c)
         {'Median reaction time per decision on this computer. Under 10 ms =', 'real time by the bar used for detection systems.'}, ...
         {'How often a response fired on a perfectly healthy link, over 600', 'independent clean flights. Target: statistical bound under 5%.'}, ...
         {'How much better the AI flies the link than the fixed rules, in mean', 'reward per cycle (paired comparison, 95% interval above zero).'}, ...
-        {'Does performance hold from 50 to 120 km/h. Target: the restored-', 'cycles spread across speeds stays under 10 points.'}};
+        {'Does performance hold from hover to 161 km/h. Target: the restored-', 'cycles spread across speeds stays under 10 points.'}};
     kpiVal = gobjects(1, 6); kpiSub = gobjects(1, 6);
     for k = 1:6
         card = uipanel(top, 'BackgroundColor', c.panelBg, 'BorderType', 'line');
@@ -1024,7 +1027,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     % The monitor's Eb/N0 reference and the path_loss drop gate need
     % cycles of the healthy link; evaluation episodes start clean, so the live
     % run does too.
-    leadF = []; leadB = []; probsL = []; mahaL = [];
+    leadF = []; leadB = []; probsL = []; mahaL = []; leadG = [];
     if ~strcmp(threat, 'none')
         appLog(fig, 'Simulating a clean lead-in of the same link (monitor reference)...');
         pl = p; pl.active_threat = 'none';
@@ -1039,7 +1042,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
             XL(:, :, 1, i) = spec_image(FL.iq{vl(i)}, env.fs);
             leadF(i, :) = link_features(FL, vl(i), env.temporal_window);
         end
-        leadB = FL.ber(vl);
+        leadB = FL.ber(vl); leadG = FL.gain_ant(:, vl)';
         FnL = ((leadF - env.feat_mean) ./ env.feat_std)';
         [probsL, mahaL] = detect_scores(env.cnn_net, env.ood, XL, FnL);
         clear XL FnL FL
@@ -1089,8 +1092,8 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     PPr = env.PP; PPr.maha_thr = mahaThreshold(env, thr_pct);
     cfgD = env.na; cfgR = env.na; memD = []; memR = []; dqn_ms = NaN;
     for i = 1:size(leadF, 1)                                    % clean lead-in: reference only
-        obs = struct('probs', probsL(:, i)', 'unknown', mahaL(i) < PPr.maha_thr, 'feat', leadF(i, :), ...
-            'ber', leadB(i));
+        obs = struct('probs', probsL(:, i)', 'unknown', mahaL(i) < PPr.maha_thr, 'maha', mahaL(i), 'feat', leadF(i, :), ...
+            'ber', leadB(i), 'gant', leadG(i, :));
         [cfgD, memD] = policy_decide('dqn_esc', obs, cfgD, memD, PPr, env.dqn_agent);
         [cfgR, memR] = policy_decide('rule_esc', obs, cfgR, memR, PPr, []);
     end
@@ -1100,8 +1103,8 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
         appLog(fig, 'Rule-policy false alarm during the clean lead-in (the DQN held no_action).');
     end
     for i = 1:nv
-        obs = struct('probs', probsAll(:, i)', 'unknown', mahaAll(i) < PPr.maha_thr, 'feat', Fr(i, :), ...
-            'ber', ber_f(vf(i)));
+        obs = struct('probs', probsAll(:, i)', 'unknown', mahaAll(i) < PPr.maha_thr, 'maha', mahaAll(i), 'feat', Fr(i, :), ...
+            'ber', ber_f(vf(i)), 'gant', F.gain_ant(:, vf(i))');
         t2 = tic;
         [cfgD, memD, dD] = policy_decide('dqn_esc', obs, cfgD, memD, PPr, env.dqn_agent);
         dqn_ms = toc(t2) * 1000;
@@ -1943,6 +1946,7 @@ function runEpisode(btn, ~)
             if onset, F = Pt{cfg}; else, F = Pn{cfg}; end
             rows = find(F.run == rr); j = rows(mod(k0 + k, numel(rows)) + 1);
             fr = struct('iq', double(F.iq{j}), 'ber', F.ber(j), 'feat', F.feat(j, :));
+            if isfield(F, 'gant') && ~isempty(F.gant), fr.gant = F.gant(j, :); end
             [Ep{i}, info] = episode_cycle(Ep{i}, k, fr, ctx{i});
             T.ber(i, k) = fr.ber; T.det(i, k) = cls_idx(info.cls); T.ok(i, k) = T.det(i, k) == truthIdx(k);
             T.conf(i, k) = info.conf; T.prop(i, k) = info.prop; T.cfg(i, k) = info.cfg; T.sw(i, k) = info.switched;

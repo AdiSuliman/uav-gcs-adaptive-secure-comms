@@ -18,7 +18,7 @@ rep{end+1} = sprintf(['Generated: %s | value = %% of units; [95%% bootstrap over
     'points of the overall result the cell pulls down below the target; weak / strong = interval entirely ' ...
     'below / above the rest.'], datestr(now));
 J = struct();
-SPEED = [29 48 67 86 105 124 143 161];
+SPEED = [0 21 48 67 86 105 124 143 161];   % first band: hover and slow flight (0-21 km/h)
 KB = [-5 0 5 10 15 20];
 
 %% 1. Detector
@@ -52,9 +52,9 @@ end
 
 %% 2. Decision layer (deployed policy, recoverable threat episodes)
 if isfile('results/policy_evaluation.mat') && isfile('data/policy_pools.mat')
-    E = load('results/policy_evaluation.mat', 'RES', 'POL', 'set_names');
+    E = load('results/policy_evaluation.mat', 'RES', 'POL', 'set_names', 'iDQN');
     Lp = load('data/policy_pools.mat', 'PP'); PP = Lp.PP; clear Lp
-    iD = find(strcmp(E.POL, 'dqn_esc'));
+    iD = E.iDQN;                                          % the deployed policy
     y = []; th = {}; sv = {}; eb = []; spd = []; kd = []; st = {}; g = [];
     kr = [-5 20]; if isfield(PP, 'k_range'), kr = PP.k_range; end
     for si = 1:numel(E.set_names)

@@ -1,5 +1,5 @@
 %% EVAL_OOD_DETECTION.m - unknown-threat detection, leave-one-threat-out
-% Proposal deliverable (detection of an anomaly / unknown threat) and risk 13.
+% Proposal deliverable 4 (alert on a threat not seen in training) and the leave-one-threat-out KPI.
 % For each threat class k the detector is retrained from scratch without k
 % (train_hybrid_net.m, same schedule as production), the link features are
 % re-normalized on the known classes only, and the unknown-threat models are

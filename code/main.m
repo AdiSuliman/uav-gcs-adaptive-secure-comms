@@ -4,7 +4,7 @@
 %   A     Link + threats + dataset
 %   B     Detection (CNN + link features, unknown-threat scores)
 %   C     Decision layer (frame pools, DQN, evaluation of every policy)
-%   SURV  Survivability boundary mapping (deliverable 8)
+%   SURV  Survivability boundary mapping (deliverable 7)
 %   KPI   Latency and proposal KPIs (section 5)
 %   DASH  Results dashboard (deliverable 1)
 % Author: Adi Suliman, Bar Dvir Hassan
@@ -116,9 +116,9 @@ RUN.evaluate_policies           = false;    % C2e : every policy on the test poo
 RUN.combo_generalization        = false;    % C2g : combined threats never trained on, leave-one-combination-out (~50 min)
 RUN.threat_gallery              = false;    % GAL : one figure per threat for the report, with the DQN's most frequent response (~5 min)
 
-% ---- Phase SURV: survivability boundary mapping (deliverable 8) ----
+% ---- Phase SURV: survivability boundary mapping (deliverable 7) ----
 RUN.map_survivability           = false;    % SURV: Map A/B per threat, severity, Eb/N0 and geometry (~1.5 h)
-RUN.survivability_options       = false;    % SURV3: 2 vs 3 antennas vs relay path (~1 h)
+RUN.survivability_options       = false;    % SURV3: antenna count vs relay path (~1 h)
 
 % ---- Phase KPI: latency and proposal KPIs (section 5) ----
 RUN.measure_latency             = false;    % LAT : decision latency per cycle, median / p95 (~2 min)
@@ -269,8 +269,8 @@ report_file('results/combo_generalization.txt','      C2g unseen combinations', 
 report_file('results/threat_gallery/overview.png','      GAL threat gallery     ', 'threat_gallery');
 fprintf('\n');
 
-%% ========== PHASE SURV: SURVIVABILITY BOUNDARY MAP (deliverable 8) ==========
-fprintf('> PHASE SURV: Survivability Boundary Mapping (proposal deliverable 8)\n\n');
+%% ========== PHASE SURV: SURVIVABILITY BOUNDARY MAP (deliverable 7) ==========
+fprintf('> PHASE SURV: Survivability Boundary Mapping (proposal deliverable 7)\n\n');
 
 if RUN.map_survivability
     fprintf('  [SURV] Map A (no goodput loss) + Map B (any action), two geometries + gap analysis...\n');
@@ -326,7 +326,7 @@ fprintf('  [D3] Defense presentation (pptx)...                  [PENDING]\n\n');
 fprintf('========================================================\n');
 fprintf(' CHECKPOINT - full pipeline available from main.m\n');
 fprintf(' KPIs: results/kpi_summary.txt | decision layer: results/policy_evaluation.txt\n');
-fprintf(' Survivability maps: results/survivability_boundary_mapA.txt / mapB.txt (deliverable 8)\n');
+fprintf(' Survivability maps: results/survivability_boundary_mapA.txt / mapB.txt (deliverable 7)\n');
 fprintf(' Outputs in results/, data/ | models in models/ | code on GitHub\n');
 fprintf(' Full run log saved to: %s\n', log_filename);
 fprintf('========================================================\n\n');

@@ -1,10 +1,10 @@
-%% EXPERIMENT_SURVIVABILITY_OPTIONS - What a third antenna or an alternate path adds
-% Research experiment of deliverable 8. The system flies three UAV antennas, which
-% null up to two interferers (an N-element array nulls up to N-1, Winters, Salz & Gitlin),
-% and only when they arrive from other directions than the GCS. The system is
-% compared on the recoverability question with a two-antenna receiver (what the
-% third antenna adds) and with an alternate path:
-%   2 antennas     the same array without its middle antenna, one null
+%% EXPERIMENT_SURVIVABILITY_OPTIONS - What one antenna more or an alternate path adds
+% Research experiment of deliverable 7. The system flies p.n_rx UAV antennas (the
+% profile), which null up to n_rx-1 interferers (an N-element array nulls up to N-1,
+% Winters, Salz & Gitlin), and only when they arrive from other directions than the
+% GCS. The system is compared on the recoverability question with one antenna fewer
+% on the same aperture (one more for a two-antenna system) and with an alternate path:
+%   n-1 antennas   the same aperture with one antenna fewer, one null fewer
 %   relay path     the command reaches the UAV over a secondary path (Papathanasiou
 %                  et al.: secondary communication paths, backup link; the lecturer's
 %                  proposal: an alternate route), modeled as the desired signal
@@ -15,13 +15,13 @@
 % Eb/N0) is simulated on N_GEOM random flight geometries (interferer directions
 % uniform, as in the pools) under every configuration. A geometry is recoverable
 % when some configuration brings BER and packet loss within 2x (+ one packet) of
-% the clean link: the receiver's own clean link for 2 and 3 antennas, and the
-% direct three-antenna link for the relay (the service the relay must give back).
+% the clean link: each receiver's own clean link, and the system's direct link for
+% the relay (the service the relay must give back).
 %
 % Output: results/survivability_options.txt, data/survivability_options.mat
 
 close all; clc;
-fprintf('=== Survivability options: 2 antennas, 3 antennas, relay path ===\n\n');
+fprintf('=== Survivability options: antenna count and relay path ===\n\n');
 N_GEOM = 8; RUN_FRAMES = 20; N_WORKERS = 6; RATIO = 2;
 RELAY_DEG = 60; RELAY_LOSS_DB = 3;
 opt = struct('F_SUB', RUN_FRAMES, 'tw', 10, 'delay_bits', 20);
@@ -36,7 +36,9 @@ SINGLES = {'jamming', 'reactive_jamming', 'noise_burst', 'spoofing', 'sweeping_j
 iHigh = C.nominal + 1;                                 % the 'high' level
 cases = [cellfun(@(t) struct('threat', t, 'field', '', 'level', NaN), COMBOS), ...
          cellfun(@(t) struct('threat', t, 'field', C.sev.(t).field, 'level', C.sev.(t).levels(iHigh)), SINGLES)];
-VAR = struct('name', {'2 antennas', '3 antennas', 'relay path'}, 'n_rx', {2, 3, 3}, ...
+nSys = p0.n_rx; nAlt = nSys - 1;
+if nAlt < 2, nAlt = nSys + 1; end                      % a two-antenna system is compared with three
+VAR = struct('name', {sprintf('%d antennas', nAlt), sprintf('%d antennas', nSys), 'relay path'}, 'n_rx', {nAlt, nSys, nSys}, ...
     'gcs', {0, 0, RELAY_DEG}, 'loss', {0, 0, RELAY_LOSS_DB}, 'ref', {1, 2, 2});
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
     cases = cases([1 end]); N_GEOM = 2; COMBOS = COMBOS(1);
@@ -95,7 +97,7 @@ parfor (j = 1:nJ, NWP)
 end
 
 % Report
-rep = {'=== SURVIVABILITY OPTIONS: 2 ANTENNAS, 3 ANTENNAS, RELAY PATH (D59) ===', ...
+rep = {sprintf('=== SURVIVABILITY OPTIONS: %s, %s, RELAY PATH ===', upper(VAR(1).name), upper(VAR(2).name)), ...
     sprintf(['Generated: %s | %d random geometries per (threat, Eb/N0), %d frames each, every configuration | ' ...
     'recoverable = BER and packet loss within %gx of the clean link | relay: signal from %g deg off the GCS ' ...
     'direction, %g dB extra path loss'], datestr(now), N_GEOM, RUN_FRAMES, RATIO, RELAY_DEG, RELAY_LOSS_DB), ''};
@@ -121,8 +123,8 @@ for s = 1:nS
     rep{end+1} = sprintf('  %2g dB  %s', EBNO(s), strjoin(arrayfun(@(k) sprintf('%6.1f', mean(T3(ic, k, s))), ...
         1:numel(VAR), 'UniformOutput', false), ' / ')); %#ok<SAGROW>
 end
-rep{end+1} = sprintf('Clean BER, 2 antennas: %s', sprintf('%.1e ', clean{1}.ber));
-rep{end+1} = sprintf('Clean BER, 3 antennas: %s', sprintf('%.1e ', clean{2}.ber));
+rep{end+1} = sprintf('Clean BER, %s: %s', VAR(1).name, sprintf('%.1e ', clean{1}.ber));
+rep{end+1} = sprintf('Clean BER, %s: %s', VAR(2).name, sprintf('%.1e ', clean{2}.ber));
 fid = fopen('results/survivability_options.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('\n%s\n', rep{:});
 save('data/survivability_options.mat', 'cases', 'VAR', 'EBNO', 'rec', 'best', 'jobs', 'clean', 'T3', 'N_GEOM', ...

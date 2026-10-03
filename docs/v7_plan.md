@@ -24,12 +24,11 @@ Full runs start only after v6 ends. Code + smoke tests now (serial smoke, light 
   polarization tilt loss 20log10(cos roll); monopole elevation pattern (Cui E-plane) incl. overhead pass.
 
 ## Step 4 - GCS antenna (every profile)
-- Types drawn per flight: omni 2 dBi; RC patch / sector 5-6 dBi without tracking (Sun: NASA sectors 120-180 deg);
-  tracked 10-14 dBi (ArduPilot AntennaTracker: pan-tilt from the UAV's telemetry GPS).
-- Pointing loss 12 (err/bw)^2 from tracking lag (update latency: SOURCE NEEDED), GPS error.
-- Failure modes: GNSS jammed (no position -> scan), GNSS spoofed (wrong bearing -> sidelobe), stale telemetry,
-  overhead keyhole. Omni fallback at the GCS (practice: SOURCE NEEDED).
-- EIRP cap check (FCC 15.247 / ETSI EN 300 328: SOURCE NEEDED before stating numbers).
+- Done (D73): low-power radio at -6 dBm on a tracked 12 dBi antenna, 6 dBm e.i.r.p. under the 11 dBm cap
+  (ETSI EN 300 328 density; Israel 100 mW), 10 dB over an omni on the same radio; power_control up to the cap.
+- Tracker errors enter only by their RF effect: the measured pointing error per flight (Nugroho) through the
+  ITU-R F.1336 main lobe, and a lost target as the omni fallback, i.e. path loss. No GNSS attack and no
+  telemetry model (out of scope).
 - Gain applies to our signal only (the jammer is received by the UAV antennas).
 
 ## Step 5 - triples

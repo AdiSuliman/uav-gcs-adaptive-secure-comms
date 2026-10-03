@@ -58,7 +58,7 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %               dB below the other (Khawaja et al.)
 %   The last five come from the receiver's channel estimator (per-32-symbol
 %   channel estimates and the frame's interference + noise covariance, the
-%   quantities MMSE combining uses; known symbols = ideal pilots, proposal risk 8).
+%   quantities MMSE combining uses; from the training, the pilots and the decision-directed passes).
 %   Quiet slot (p.quiet_symbols): the start of every frame carries no signal of ours.
 %     q_iot     interference over thermal in the quiet slot [dB], mean of the
 %               antennas: what occupies the channel while we are silent

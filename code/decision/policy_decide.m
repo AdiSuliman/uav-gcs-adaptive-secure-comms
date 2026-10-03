@@ -3,7 +3,7 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %   vectorized over episodes. Used by training, evaluation and deployment.
 %
 %   kind   'dqn' | 'dqn_esc' | 'rule' | 'rule_esc' | 'table' | 'table_esc' |
-%          'random' | 'fixed'
+%          'blind_esc' | 'random' | 'fixed'
 %   obs    link_env observation of the frame just received (receiver measurements)
 %   cfg    configuration currently applied (1 x NE)
 %   mem    policy memory ([] on the first cycle of an episode)
@@ -29,6 +29,9 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %             - no_action while the alarm stays confirmed for C.esc cycles: an
 %               intermittent fault can leave the windowed BER estimate near clean
 %               while the threat is on
+%   blind_esc the rule with escalation without the detector: every cycle reads as
+%             'unknown', so the alarm comes from measured degradation only (what the
+%             detection adds to an adaptive recovery)
 %   random, fixed: reference policies, no monitor gating ('fixed' at no_action is
 %   the link that does not respond)
 %
@@ -37,6 +40,10 @@ if nargin < 7, opt = struct(); end
 C = decision_config();
 NE = numel(cfg); A = PP.actions; nA = numel(A);
 na = find(strcmp(A, 'no_action'));
+if startsWith(kind, 'blind')
+    obs.probs(:) = 0; obs.unknown(:) = true; obs.maha = -Inf(size(obs.unknown));
+    kind = strrep(kind, 'blind', 'rule');
+end
 if isempty(mem), mem = policy_monitor('init', NE, nA); end
 [mem, M] = policy_monitor('update', mem, obs, PP, cfg);
 base = erase(kind, '_esc');

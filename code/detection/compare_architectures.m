@@ -1,5 +1,5 @@
 %% COMPARE_ARCHITECTURES - Detector architectures on the same splits
-% Approved proposal, risk 5 mitigation: "compare several model architectures".
+% Proposal, mitigation 6: hybrid network against spectrogram only and features only.
 % Following the multimodal comparison reported by Tariq et al. (telemetry MLP,
 % spectrogram CNN, fused), the production hybrid detector is compared with the
 % same network seeing only one input: spectrogram only (link features held at

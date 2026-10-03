@@ -9,7 +9,7 @@
 %   4. Recovered episodes per threat, DQN / rule + escalation / oracle (KPI 4)
 %   5. Recovered episodes vs Eb/N0, single threats, key policies (KPI 5)
 %   6. Recovered episodes vs interferer direction (geometry)
-%   7. Survivability map summary per threat and geometry (deliverable 8)
+%   7. Survivability map summary per threat and geometry (deliverable 7)
 %   8. KPI status (results/kpi_summary.mat)
 %
 % Inputs: results/eval_detector_metrics.mat, results/ood_detection.mat,
@@ -74,7 +74,7 @@ if ~isempty(P)
     barh(ax, P.KP.per_threat(:, [find(cD) find(cR) find(cO)])); hold(ax, 'on'); xline(ax, 90, 'r--', '90%');
     set(ax, 'YTick', 1:numel(P.KP.threats), 'YTickLabel', strrep(P.KP.threats, '_', ' '), 'FontSize', 7, 'YDir', 'reverse');
     xlim(ax, [0 105]); grid(ax, 'on'); xlabel(ax, 'recovered among recoverable [%]');
-    legend(ax, {'DQN + esc.', 'rule + esc.', 'oracle'}, 'Location', 'southoutside', 'NumColumns', 3, 'FontSize', 7);
+    legend(ax, {erase(P.LBL{P.iDQN}, ' (deployed)'), 'rule + esc.', 'oracle'}, 'Location', 'southoutside', 'NumColumns', 3, 'FontSize', 7);
     title(ax, 'KPI 4: recovery per threat (test pools)');
 
     ax = nexttile(tl);
