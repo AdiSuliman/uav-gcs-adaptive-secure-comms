@@ -121,8 +121,7 @@ for i = 1:numel(DLY12)
     p.spec_delay_ns = DLY12(i);
     [BSP(i, :), ne] = run_curve(p, modelName, CFG, delay_bits);
     SH12(i) = real_loss(CFG.EbNo, BSP(i, :), ne, BREF, CFG.min_err);
-    fprintf('V12 specular 0.8, %3d ns  shift %+5.2f dB | %.1f min
-', DLY12(i), SH12(i), toc(t0)/60);
+    fprintf('V12 specular 0.8, %3d ns  shift %+5.2f dB | %.1f min\n', DLY12(i), SH12(i), toc(t0)/60);
 end
 
 %% V9 seeds (default link, 4 dB)
