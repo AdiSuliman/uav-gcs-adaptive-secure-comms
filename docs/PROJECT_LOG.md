@@ -852,3 +852,16 @@ One pass from A0 to OOD, 2 h 26 min, no error; then B4s (10 min).
 - **Proposal:** no numbers on speed or on the number of antennas (KPI 7 and the antenna wording changed; backups kept).
 - **Aborted run:** the v5 run started at 12:56 was stopped during spectrogram extraction to apply D69; its test flights were never read.
 - **Checks:** unit tests 10/10 with three antennas; PHY validation 7/7 within 0.3 dB with three antennas; the parallel-turn lock tested with two sessions.
+
+### v6: evidence over time, a quiet slot, levels to the sources' caps (D71, D72) (2026-10-01)
+- **Why:** the v5 detector reading traced the weak classes to one frame deciding alone, two threat pairs with the same physics while we transmit, and an unknown-threat score that read "stronger than trained" as "new" (D72).
+- **Changes:** one decision cycle per frame on the channel clock; a quiet slot in every frame (q_iot, q_react); temporal fusion of the last N cycles (stage B2F); the unknown-threat score over a window; detector and decision levels up to the sources' most severe values; antenna fault and WLAN traffic as physical processes; the weak-point analysis (stage WEAK). Profile 2 states antenna fault above 60% duty as a limit (D71).
+- **Runs:** profiles 1 and 2 (branches v6-dev, v6-p2) started 2026-10-01 as the ideal-receiver reference for v7.
+
+### v7: real receiver, flight dynamics, source-corrected severities (D73) (2026-10-01/03)
+- **Why:** a review of the whole source library found severity caps and shapes beyond what the sources measured, an ideal receiver that hid how a real one fails, and no hover or turns (D73).
+- **Changes:** frame with a quiet slot before it, short and long training and pilot blocks; a real receiver (synchronization, frequency offset, decision-directed MVDR passes) checked against the ideal one in PHY validation (V11, V12); speed 0-161 km/h with turns at measured bank angles and yaw rates; per-flight antenna correlation and receive-chain mismatch; source-corrected severities (spoofer, shadowing events, open connector, WLAN gaps); four triple threats; profile 3 with four antennas; the overhead pass (stage OHP); the unknown-threat candidate with input pre-processing.
+- **Directional GCS antenna (2026-10-03, user decision):** in every profile. Under the licence-exempt cap (11 dBm e.i.r.p., ETSI density, stricter than Israel's 100 mW) a directional antenna helps as far as the radio is below the cap: the GCS is a low-power radio at -6 dBm on a tracked 12 dBi antenna, 10 dB over an omni on the same radio; pointing loss per flight in the channel; power_control limited to the cap (+5.0 dB; it had exceeded the cap). Check: on a clean link the antenna factor moves the measured SINR by -5.9 / +9.9 dB for -6 / +10 dB; a 10 dB jammer goes from BER 0.46 to 0.10 with the antenna's 10 dB. Tests 16/16.
+- **Power loss 2026-10-02 03:07:** the computer shut down during v6 stage C1p (no partial results); both v6 profiles resumed from C1p on 2026-10-03 22:05 (stages before it are saved in data/).
+- **Latency (KPI 7):** the v6 and v7 run lists had no LAT stage; the launcher now measures latency on the idle machine after each version's runs and repeats KPI, DASH, WEAK and RPT with it.
+- **Runs:** start automatically when v6 ends and the tests pass: profiles 1 and 3 together, profile 2 last.

@@ -5,7 +5,7 @@
 **Supervisor:** Golan Ein-Tzvi
 **History:** [PROJECT_LOG.md](PROJECT_LOG.md) · **Design decisions:** [DECISIONS.md](DECISIONS.md) · **Results:** [README.md](../README.md)
 
-Last updated: 2026-09-30
+Last updated: 2026-10-03
 
 ---
 
@@ -29,7 +29,9 @@ Last updated: 2026-09-30
 | 3D | Unreal 3D view: live console (threat control, operator vs AI), defense videos, console-episode replay | ✅ Built and tested (D58); Cesium terrain optional | D57, D58 |
 | Fixes | Latency tail; false-alarm bound (KPI 6) | ✅ latency p95 48.9 → 19.4 ms / ✅ KPI 6: 1.5% over 600 independent geometries, bound 2.60% (D52) | D48–D51 |
 | v4 | Receiver-side measurements, 36 combined configurations, combined threats in training, three severities, per-antenna feature, unknown-threat score selection, new-threat learning, 20 ms decision period | ✅ Full run A0–C2g done; hold in the shield (D63); escalation out of no_action (D64) | D59–D64 |
-| v5 | Ten threats (tone jamming, airframe shadowing), K 0–20 dB per flight, Eb/N0 0–15 dB, eight dataset and five decision levels, ten combined threats, one-cycle signalling delay, speeds outside training, single-core latency | ⏳ Code frozen (009f7ea), full run in progress | D68 |
+| v5 | Ten threats (tone jamming, airframe shadowing), K 0–20 dB per flight, Eb/N0 0–15 dB, eight dataset and five decision levels, ten combined threats, one-cycle signalling delay, speeds outside training, single-core latency | ✅ Superseded by v6 (detector reading led to D72) | D68–D70 |
+| v6 | Evidence over time, quiet slot, levels to the sources' caps, weak-point analysis | ⏳ Profiles 1 and 2 running (resumed from C1p after the 2.10 power loss) | D71, D72 |
+| v7 | Real receiver with training and pilots, hover and turns, source-corrected severities, triples, profile 3 (four antennas), tracked directional GCS antenna under the e.i.r.p. cap | ⏳ Code ready, tests 16/16; starts automatically when v6 ends | D73 |
 | Layout | Code into `code/` by stage | ✅ Done | D47, D61 |
 | D1 | Interim report | ⏳ Drafted, results to sync with the final run | — |
 | D2 | Final report | ⏳ | — |
@@ -40,12 +42,12 @@ Last updated: 2026-09-30
 
 ## Remaining work
 
-1. **v5 full run (D68):** in progress; then the single test reading, README, DECISIONS outcome and the log.
+1. **v6 and v7 full runs:** v6 (profiles 1, 2) running; v7 (profiles 1, 3, then 2) starts when v6 ends; latency on the idle machine after each; then the single test reading per profile, the weak-point analysis, the v6-vs-v7 comparison, README and the log.
 2. **Fourth reading (D67 agent):** ✅ done; the v4 final state is in `archive/v4_final_D67_20260930/`. Its per-speed breakdown is not reliable (D68).
 3. **Operator console:** screenshots and a live check with the v5 agent; the threat gallery is part of the run. The high-quality 3D view waits until the code, the final proposal and the interim report are done.
 4. **Code comments:** ✅ full pass done (short explanation, no history), except `legacy/`.
 5. **Interim report:** chapters 1–4 and 7 drafted (front matter, theory and literature review, threats, method, status/risks/plan, review-form appendix); results, discussion and abstracts after the v5 reading.
-6. **Proposal:** v3 submitted version with the GUI wording; no 3D mention.
+6. **Proposal:** v4 (final) from a full review of v3 against the v7 code and the sources; no 3D mention.
 7. **Final report, slides and poster:** last, when the user asks.
 8. **Housekeeping:** the v3 backups in `archive/` stay until the user approves deleting them.
 
