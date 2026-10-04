@@ -10,14 +10,16 @@
 % DQN (which trained on it), rule + escalation and the class table built without
 % it. Recovered = BER and packet loss <= 2x clean for 5 consecutive cycles, among
 % the recoverable episodes (as evaluate_policies.m). 95% intervals by bootstrap
-% over geometries.
+% over geometries. The trained agent and the pools come from the same detector
+% (check_det_id.m).
 %
 % Output: results/combo_generalization.{txt,mat}
 
 close all; clc;
 fprintf('=== Combined threats never trained on: leave-one-combination-out ===\n\n');
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
-Q = load('data/trained_dqn.mat', 'agent', 'H', 'norm_in', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db');
+Q = load('data/trained_dqn.mat', 'agent', 'H', 'norm_in', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db', 'det_id');
+check_det_id(PP, Q, 'experiment_combo_generalization');
 PP.confirm = Q.confirm; PP.alarm_mode = Q.alarm_mode;
 if ~isempty(Q.drop_db), PP.drop_db = Q.drop_db; end
 K = link_env('tables', PP);

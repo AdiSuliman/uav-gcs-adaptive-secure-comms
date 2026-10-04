@@ -1,8 +1,8 @@
 function R = rollout_policy(kind, PP, K, spec, split, agent, opt, seed)
 %ROLLOUT_POLICY  Run one batch of episodes of a decision-layer policy.
-%   kind   any policy_decide.m kind, or 'oracle' (knows the true scenario, onset,
-%          follower state and geometry; picks the configuration with the best
-%          reward of the frame on which it reaches the link, from the measured
+%   kind   any policy_decide.m kind, or 'oracle' (oracle_action.m: knows the true
+%          scenario, onset, follower state and geometry; picks the configuration with
+%          the best reward of the frame on which it reaches the link, from the measured
 %          geometry means and link_env.m's hop rule: a one-step oracle, not a bound
 %          on every metric)
 %   spec   episode specification (link_env.m); split 1 train, 2 validation, 3 test,
@@ -19,8 +19,8 @@ function R = rollout_policy(kind, PP, K, spec, split, agent, opt, seed)
 %          t_rec      cycles from onset until that run of 5 starts (NaN if never)
 %          held       recovered, and restored on every cycle from the start of that run
 %                     to the end of the episode, but for one run of at most 1 + D
-%                     cycles in a follower episode (one re-acquisition; D the
-%                     signalling delay)
+%                     cycles in a follower episode of a followable threat without a
+%                     comb jammer (one re-acquisition; D the signalling delay)
 %          lost_rec, n_rec  lost packets and frames from the start of that run to the end
 %          recoverable  some configuration restores this geometry (link_env.m)
 %          switches, false_sw (whole episode), esc (escalations), aoa (3 x NE),
@@ -83,7 +83,8 @@ for i = find(R.recovered)
     k0 = find(post(:, i), 1) + R.t_rec(i);              % first cycle of the recovery run
     e = diff([0; ~ok(k0:T, i); 0]);
     nb = sum(e == 1); len = find(e == -1) - find(e == 1);
-    R.held(i) = nb == 0 || (E.follow(i) && nb == 1 && len <= 1 + E.D);
+    reacq = E.follow(i) && K.followable(E.scn(i)) && ~E.comb(i);   % a follower that re-acquires after a hop
+    R.held(i) = nb == 0 || (reacq && nb == 1 && len <= 1 + E.D);
     R.lost_rec(i) = sum(tr.fer(k0:T, i)); R.n_rec(i) = T - k0 + 1;
 end
 last = arrayfun(@(i) find(post(:, i), 1, 'last'), 1:NE);
@@ -93,34 +94,4 @@ R.cfg_final = E.cfg;
 R.r = E.r;
 R.cfg_trace = tr.cfg;
 R.fc_t = fc.t; R.fc_cls = fc.cls; R.fc_deg = fc.deg; R.fc_drop = fc.drop;
-end
-
-function a = oracle_action(E, K)
-% Best reward of the frame on which the choice reaches the link (after the signalling
-% delay), given the truth (scenario, onset, follower, geometry) and the hop rule of
-% link_env.m: a hop when channel_switch follows a configuration without it, or is kept
-% after a failed frame, and none while one is on its way.
-nA = numel(K.cost);
-a = E.cfg;
-ta = E.t + 1 + E.D;                                    % frame the choice runs on
-pend = any(E.hopq, 1);
-for i = 1:E.NE
-    sc = E.scn(i); if ta(i) < E.onset(i), sc = K.clean; end
-    healthy = K.healthy(sc, E.s(i), E.split, E.r(i));
-    on = K.followable(E.scn(i)) && ta(i) >= E.onset(i);
-    hl = E.hop_live(i);                                % channel in use when the choice arrives
-    k = find(E.hopq(:, i), 1);
-    if ~isempty(k), hl = E.t(i) + k; end               % after the hop on its way
-    best = -inf;
-    for c = 1:nA
-        hop = K.hasCh(c) && (~K.hasCh(E.cfg(i)) || E.crc(i)) && ~pend(i);
-        h = hl; if hop, h = ta(i); end
-        ceff = c;
-        if on && E.follow(i) && K.hasCh(c) && ta(i) - h >= E.fdelay(i), ceff = K.strip(c); end
-        if on && E.comb(i) && K.hasFd(c), ceff = K.strip_fd(c); end
-        chg = c ~= E.cfg(i) || hop;
-        v = K.q(sc, E.s(i), ceff, E.split, E.r(i)) - K.cost(c) - K.SW * chg - K.FA * (c ~= E.cfg(i) && healthy);
-        if v > best, best = v; a(i) = c; end
-    end
-end
 end

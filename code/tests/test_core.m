@@ -141,6 +141,38 @@ end
 spec = struct('scn', 2, 's', 1, 'onset', 1, 'follow', false, 'fdelay', 0, 'unk', false, 'T', 12, 'r', 1, 'delay', 1);
 R = rollout_policy('fixed', PP, K, spec, 1, [], struct('fixed', cs), 3);
 verifyEqual(tc, [R.recovered, R.held, R.lost_rec, R.n_rec], [1 1 0 11]);     % a static jammer: held, no loss
+% the allowance is a follower's re-acquisition: the same run of 1 + D bad cycles under a
+% comb jammer (on every channel from the onset, nothing to re-acquire) is not held
+spec = struct('scn', 2, 's', 1, 'onset', 1, 'follow', true, 'fdelay', 5, 'unk', false, 'T', 9, 'r', 1, 'delay', 1);
+R = rollout_policy('fixed', PP, K, spec, 1, [], struct('fixed', cs), 3);
+spec.comb = true;
+Rc = rollout_policy('fixed', PP, K, spec, 1, [], struct('fixed', cs), 3);
+verifyEqual(tc, [R.recovered, R.held, Rc.recovered, Rc.held], [true true true false]);
+verifyEqual(tc, [Rc.lost_rec, Rc.n_rec], [R.lost_rec, R.n_rec]);
+end
+
+function test_oracle_timing(tc)
+% The one-step oracle scores the frame its choice reaches the link on (t + 1 + D), with
+% the channel in use after a hop on its way (its arrival frame) and link_env.m's re-hop
+% after a failed CRC: its predicted effective configuration is the link's on that frame,
+% where only a hop escapes a follower (re-hops, hops on their way, re-acquisitions) and
+% where frequency diversity escapes it too; there its first change reaches the link on
+% the onset frame and every frame from the onset is restored.
+[PP, K] = toy_world(true);
+[Ph, Kh] = toy_world(true, true);                               % only channel_switch escapes
+on = 9;
+for D = [0 1 2 7]
+    for f = [0 1 2 3 5]
+        spec = struct('scn', 2, 's', 1, 'onset', on, 'follow', true, 'fdelay', f, 'unk', false, 'T', 30, 'r', 1, ...
+            'delay', D);
+        [~, ~, pred, eff] = oracle_run(Ph, Kh, spec);
+        verifyEqual(tc, pred(1:end-D), eff(1+D:end), sprintf('hop only, D %d, fdelay %d', D, f));
+        [ok, a, pred, eff] = oracle_run(PP, K, spec);
+        verifyEqual(tc, pred(1:end-D), eff(1+D:end), sprintf('D %d, fdelay %d', D, f));
+        verifyTrue(tc, all(ok(on:end)), sprintf('restored, D %d, fdelay %d', D, f));
+        verifyEqual(tc, find(a ~= K.na, 1), on - D, sprintf('first change, D %d, fdelay %d', D, f));
+    end
+end
 end
 
 function test_flight_reference(tc)
@@ -219,6 +251,37 @@ m = policy_monitor('change', m, false);
 verifyEqual(tc, [m.since, m.pend], [1 0]);
 end
 
+function test_coded_degraded_after_arrival(tc)
+% With fec_interleave on the link the CRC packet loss decides (above twice the clean
+% coded link's, 0 without the pools, and at least 2 lost packets in the window), from the
+% first frame received with it: one lost packet after the arrival is not degraded,
+% whatever the window held before and however high the channel BER; a second is.
+A = policy_actions();
+cls = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', 'antenna_fault', ...
+    'benign_interference', 'sweeping_jammer', 'tone_jamming', 'airframe_shadowing'};
+PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0);
+na = find(strcmp(A, 'no_action')); cf = find(strcmp(A, 'fec_interleave'));
+obs = struct('probs', double(strcmp(cls, 'none')), 'unknown', false, 'feat', zeros(1, numel(link_features('names'))), ...
+    'cfg_link', na);
+obs.feat(feature_index('log_ber')) = -1; obs.feat(feature_index('crc_fail')) = 1;
+m = policy_monitor('init', 1, numel(A));
+for k = 1:6                                                      % lost packets on the uncoded link
+    [m, M] = policy_monitor('update', m, obs, PP, na);
+    m = policy_monitor('change', m, k == 6);                     % then fec_interleave is requested
+end
+verifyTrue(tc, M.degraded);
+[m, M] = policy_monitor('update', m, obs, PP, cf); m = policy_monitor('change', m, false);
+verifyTrue(tc, m.pend && M.degraded);                            % still on its way: the uncoded frame
+obs.cfg_link = cf;
+deg = false(1, 3);
+for k = 1:3                                                      % lost, received, lost
+    obs.feat(feature_index('crc_fail')) = k ~= 2;
+    [m, M] = policy_monitor('update', m, obs, PP, cf); m = policy_monitor('change', m, false);
+    deg(k) = M.degraded;
+end
+verifyEqual(tc, deg, [false false true]);
+end
+
 function test_policy_own_monitor(tc)
 % A policy's own monitor (the rule fallback of train_dqn.m) replaces the pools' one: the
 % same hostile frames confirm after 2 cycles with 2-of-2 and after 3 with 3-of-3.
@@ -240,7 +303,8 @@ end
 
 function test_choose_deployed(tc)
 % The DQN when it passed its gate; else the rule setting with the best recovery among
-% those within the false-alarm bound; else the lowest bound, committed only within it.
+% those within the false-alarm bound; else the lowest bound, committed only within it. A
+% bound not measured (no clean validation flights) is never met.
 [d, m] = choose_deployed(true, 0.03, [0.90 0.95], [0.04 0.06], 0.05);
 verifyEqual(tc, {d, m}, {'dqn_esc', true});
 [d, m, ir] = choose_deployed(false, 0.03, [0.90 0.95 0.92], [0.04 0.06 0.045], 0.05);
@@ -252,7 +316,11 @@ verifyEqual(tc, {d, m}, {'dqn_esc', false});
 [d, m] = choose_deployed(false, 0.08, [0.90 0.95], [0.07 0.06], 0.05);
 verifyEqual(tc, {d, m}, {'rule_sel', false});
 [d, m] = choose_deployed(false, NaN, [0.90 0.95], [NaN NaN], 0.05);          % no clean validation flights
-verifyEqual(tc, {d, m}, {'rule_sel', true});
+verifyEqual(tc, {d, m}, {'rule_sel', false});
+[d, m] = choose_deployed(true, NaN, [0.90 0.95], [NaN NaN], 0.05);
+verifyEqual(tc, {d, m}, {'dqn_esc', false});
+[d, m, ir] = choose_deployed(false, 0.03, [0.90 0.95], [0.04 NaN], 0.05);       % a measured setting first
+verifyEqual(tc, {d, m, ir}, {'rule_sel', true, 1});
 end
 
 function test_false_change_rate(tc)
@@ -296,6 +364,12 @@ verifyEqual(tc, numel(unique(ids)), 6);
 check_det_id(struct('det_id', id), struct('det_id', id), 'test');
 verifyError(tc, @() check_det_id(struct('det_id', id), struct('det_id', ids{2}), 'test'), 'check_det_id:mismatch');
 verifyError(tc, @() check_det_id(struct('det_id', id), struct(), 'test'), 'check_det_id:mismatch');
+% every stage that reads the agent of data/trained_dqn.mat on the pools checks them
+for f = {'evaluate_policies', 'experiment_unknown_threat', 'experiment_combo_generalization', 'edge_map'}
+    src = fileread(which(f{1}));
+    i0 = strfind(src, 'data/trained_dqn.mat'); i1 = strfind(src, sprintf('check_det_id(PP, Q, ''%s'')', f{1}));
+    verifyTrue(tc, ~isempty(i0) && ~isempty(i1) && i1(1) > i0(1), f{1});
+end
 end
 
 %% ---------- statistics ----------
@@ -312,7 +386,8 @@ end
 
 function test_edge_verdict(tc)
 % The verdict thresholds for one outcome per flight: against 0.90 at 36 and 72
-% flights, all-success below N_MIN, false alarms against 5% at 172 flights. Two
+% flights, all-success below N_MIN, false alarms against 5% at 172 flights (a point), 688
+% (four points of a claim) and 96 (the hover clean flights of a band). Two
 % episodes per flight widen the interval to the hull; a rate with every flight at 100%
 % takes the all-success bound. Packet loss of the clean link at 172 flights of 20
 % frames: no loss and one lost frame commit, the verdict never improves as more frames
@@ -321,8 +396,9 @@ vd = @(k, n) getfield(edge_verdict(double((1:n) <= k), ones(1, n), 1:n, 0.9, 'ge
 verifyEqual(tc, [vd(36, 36), vd(35, 36), vd(28, 36)], [1 0 -1]);
 verifyEqual(tc, [vd(70, 72), vd(69, 72)], [1 0]);
 verifyEqual(tc, vd(35, 35), 0);
-fa = @(a) getfield(edge_verdict(double((1:172) <= a), ones(1, 172), 1:172, 0.05, 'le', true), 'verdict');
-verifyEqual(tc, [fa(2), fa(3), fa(15), fa(16)], [1 0 0 -1]);
+fa = @(a, n) getfield(edge_verdict(double((1:n) <= a), ones(1, n), 1:n, 0.05, 'le', true), 'verdict');
+verifyEqual(tc, [fa(2, 172), fa(3, 172), fa(15, 172), fa(16, 172)], [1 0 0 -1]);
+verifyEqual(tc, [fa(23, 688), fa(24, 688), fa(0, 96), fa(1, 96)], [1 0 1 0]);   % the claim's FA; hover alone
 V1 = edge_verdict(double((1:72) <= 66), ones(1, 72), 1:72, 0.9, 'ge', true);
 V2 = edge_verdict(double(repelem((1:72) <= 66, 2)), ones(1, 144), repelem(1:72, 2), 0.9, 'ge', true);
 verifyEqual(tc, [V2.value, V2.n, V2.k], [V1.value, 72, 66], 'AbsTol', 1e-12);
@@ -398,6 +474,10 @@ verifyEqual(tc, X.v, [1 0 1 1]); verifyEqual(tc, X.lim{2}, 'P'); verifyTrue(tc, 
 Lt = L; Lt.linkt(4) = -1; Lt.fa(3) = 0;
 X = edge_commit(Lt, none);
 verifyEqual(tc, X.v, [1 1 0 -1]); verifyEqual(tc, X.lim(3:4), {'A', 'T'});
+% FA of the claim (pooled over its Eb/N0) decides; the point's own only must not fail
+Lc = L; Lc.fa = [1 1 0 1]; Lc.fa_pt = [0 -1 0 1];
+X = edge_commit(Lc, none);
+verifyEqual(tc, [X.v; X.fa], [1 -1 0 1; 1 -1 0 1]); verifyEqual(tc, X.lim(2:3), {'A', 'A'});
 end
 
 %% ---------- features and state ----------
@@ -514,12 +594,14 @@ verifyLessThan(tc, max(S), 2^26);
 N = seed_base(S) + off;
 verifyEqual(tc, numel(unique(N(:))), numel(N));
 verifyLessThan(tc, max(N(:)), 2^32);
-% Frame-draw seeds of the edge map's rollouts (edge_map.m: base + 1000 x (signalling
-% delay index, at most 4, or base set, at most 99) + batch, below 1000): disjoint
-% ranges, all below the first flight stream
-b = sort(cellfun(@(x) str2double(x{1}), regexp(fileread(which('edge_map')), '(\d{5,6}) \+ 1000 \* ', 'tokens')));
+% Frame-draw seeds of the edge map's rollouts (edge_map.m: one base per set, the same at
+% every signalling delay, + batch below 1000; the base sets 200 000 + 1000 x set, at
+% most 99): disjoint ranges, all below the first flight stream
+src = fileread(which('edge_map'));
+b = sort(cellfun(@(x) str2double(x{1}), regexp(src, 'policy_run_set\([^\n]*opt, (\d{5,6})', 'tokens')));
 verifyEqual(tc, b, [40000 90000 95000 200000]);
-hi = b + 1000 * [5 5 5 100];
+verifyEmpty(tc, regexp(src, 'policy_run_set\([^\n]*\* d\)', 'once'));
+hi = b + 1000 * [1 1 1 100];
 verifyTrue(tc, all(hi(1:end-1) <= b(2:end)));
 verifyLessThan(tc, hi(end), seed_base(700001));
 end
@@ -942,9 +1024,11 @@ out = cell(1, max(k));
 c = out(k);
 end
 
-function [PP, K] = toy_world(crc_fails)
+function [PP, K] = toy_world(crc_fails, hop_only)
 % Frame pools of one flight: the clean link, and a jammer that only channel_switch and
-% freq_diversity escape; crc_fails false lets the jammed frames pass their CRC.
+% freq_diversity escape (hop_only: channel_switch alone); crc_fails false lets the jammed
+% frames pass their CRC.
+if nargin < 2, hop_only = false; end
 A = policy_actions(); nA = numel(A); names = link_features('names');
 PP = struct('actions', {A}, 'scen', {{'none', 'jamming'}}, 'ebno', [10 12], 'runs', {{101}}, 'F_SUB', 20, ...
     'classes', {{'none', 'jamming'}}, 'feat_names', {names}, 'maha_thr', 0, 'clean', [1e-6 1e-6], 'clean_fer', [0 0], ...
@@ -952,7 +1036,7 @@ PP = struct('actions', {A}, 'scen', {{'none', 'jamming'}}, 'ebno', [10 12], 'run
 PP.pools = cell(2, 2, nA, 1);
 for sc = 1:2
     for a = 1:nA
-        good = sc == 1 || contains(A{a}, 'channel_switch') || contains(A{a}, 'freq_diversity');
+        good = sc == 1 || contains(A{a}, 'channel_switch') || (~hop_only && contains(A{a}, 'freq_diversity'));
         F = zeros(20, numel(names)); F(:, feature_index('crc_fail')) = ~good && crc_fails;
         F(:, feature_index('log_ber')) = log10(max(0.1 * ~good, 1e-6));
         PP.pools(sc, :, a, 1) = {struct('ber', repmat(0.1 * ~good, 20, 1), 'fer', repmat(single(~good), 20, 1), ...
@@ -971,5 +1055,18 @@ ok = false(1, T); ch = ok;
 for t = 1:T
     [E, ~, ~, info] = link_env('step', E, PP, K, a);
     ok(t) = info.restored; ch(t) = info.changed;
+end
+end
+
+function [ok, a, pred, eff] = oracle_run(PP, K, spec)
+% An episode driven by the one-step oracle (oracle_action.m): frames restored, its
+% choices, the effective configuration it predicts for the frame each choice reaches
+% the link on, and the link's effective configuration of every frame.
+[E, ~] = link_env('reset', PP, K, spec, 1, RandStream('mt19937ar', 'Seed', 1));
+[ok, a, pred, eff] = deal(zeros(1, spec.T));
+for t = 1:spec.T
+    [a(t), pred(t)] = oracle_action(E, K);
+    [E, ~, ~, info] = link_env('step', E, PP, K, a(t));
+    ok(t) = info.restored && info.restored_plr; eff(t) = info.cfg_eff;
 end
 end

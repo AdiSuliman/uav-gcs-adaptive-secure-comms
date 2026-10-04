@@ -12,7 +12,8 @@
 % Recovered = BER and packet loss <= 2x clean for 5 consecutive cycles, among the
 % recoverable episodes. 95% intervals by bootstrap over flights. Every leave-one-out
 % agent is kept, so the edge map can read it later. Evidence only: no rate is committed
-% for an emitter outside the modelled classes.
+% for an emitter outside the modelled classes. The trained agent and the pools come from
+% the same detector (check_det_id.m), whose identity the kept agents carry.
 %
 % Output: results/unknown_threat_policy.{txt,mat} (res, and every episode: EP),
 % data/unknown_threat_agents.mat (agents_loo, threats, det_id)
@@ -20,7 +21,8 @@
 close all; clc;
 fprintf('=== Link recovery under a threat never trained on: leave-one-threat-out ===\n\n');
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
-Q = load('data/trained_dqn.mat', 'agent', 'H', 'norm_in', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db');
+Q = load('data/trained_dqn.mat', 'agent', 'H', 'norm_in', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db', 'det_id');
+check_det_id(PP, Q, 'experiment_unknown_threat');
 PP.confirm = Q.confirm; PP.alarm_mode = Q.alarm_mode;
 if ~isempty(Q.drop_db), PP.drop_db = Q.drop_db; end
 K = link_env('tables', PP);

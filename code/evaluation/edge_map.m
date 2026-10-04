@@ -37,11 +37,13 @@
 %   LINK   clean link: packet loss at no_action. 802.11's PER < 10% at a 1000-byte
 %          PSDU (Keysight AN Table 7, BER 1.3e-5) on our 129-byte frames         <= 1.4%
 %   COMMITTED, the commitment, per signalling delay: PROT, DET_h, FA, LINK and LINK_T
-%          COMMITTED (DET_h only not NOT COMMITTED below 36 harmed flights), the
-%          deployed policy within the false-alarm bound on validation (F), and no band
-%          of the point NOT COMMITTED (B): speed, altitude, K, alignment of the first
-%          interferer with the GCS (directional threats), receive correlation, bank and
-%          delay spread where PP.cov records them, pooled over the point and the
+%          COMMITTED (DET_h only not NOT COMMITTED below 36 harmed flights; FA that of
+%          the claim, the clean flights of every Eb/N0 from the KPI 1 threshold up (KPI 6)
+%          or from the point up for a point below it, and the point's own FA not NOT
+%          COMMITTED), the deployed policy within the false-alarm bound on validation (F),
+%          and no band of the point NOT COMMITTED (B): speed, altitude, K, alignment of
+%          the first interferer with the GCS (directional threats), receive correlation,
+%          bank and delay spread where PP.cov records them, pooled over the point and the
 %          COMMITTED points above it in the distance walk (edge speeds: verdicts of
 %          their own)
 %   SYSTEM DET, SURV and REC COMMITTED and F (the proposal's relative criterion);
@@ -54,7 +56,9 @@
 % COMMITTED / NOT COMMITTED / UNDETERMINED, at least 36 flights to commit).
 % Tables per (threat, level, Eb/N0 with its distance, link_distance_km.m), per Eb/N0 for
 % the clean link, and per band of each (threat, level) over the Eb/N0 from the KPI 1
-% threshold up (fixed on validation; all six points without one). Edges, every layer
+% threshold up (fixed on validation; all six points without one); a band commits with
+% the claim's FA and its own clean flights' FA not NOT COMMITTED. Per-point verdicts are
+% for moving flights; hover is hover in calm air (a frozen channel). Edges, every layer
 % apart: fixed-sequence walks that stop at the first point not COMMITTED (each "up to"
 % claim keeps a 5% family error): Eb/N0 from 15 dB down (its km, and x0.63 for every
 % position of a flight, link_budget_table.m), levels from the nominal one down and up,
@@ -63,7 +67,8 @@
 % COMMITTED one is flagged (!), and a COMMITTED point outside every walk is reported,
 % not committed. Off-grid check points (build_check_pools.m: between the Eb/N0 points at
 % the nominal level, between the levels at 9 dB, 36 flights each): an "up to" edge that
-% spans a check point NOT COMMITTED stops before it (x).
+% spans a check point NOT COMMITTED stops before it (x); an edge that spans none (levels
+% at another Eb/N0, distance at another level) holds at the grid points it lists only.
 % Overhead pass (overhead_pass.m): the path_loss commitment at the smallest level at or
 % above the drop, COMMITTED when the tracker-lost bound is, NOT COMMITTED when the
 % tracked bound is not; a drop above the top level is not measured. The detector beyond
@@ -96,6 +101,7 @@ TGT = struct('det', 0.90, 'surv', 0.90, 'rec', 0.90, 'prot', 0.90, 'fa', 0.05, '
 DLY = unique([C.switch_delay 2 7], 'stable');   % [cycles] signalling delays, the model's first
 FDL = [0 1 2];                  % [cycles] follower re-acquisition after a hop
 K_READ = -3;                    % [dB] lowest in-flight K near 2.4 GHz (Aoki et al.): second reading of the lowest band
+HOVER = 'hover in calm air (attitude within +-1 deg, Lin 2026; a frozen channel)';   % what the hover flights stand for
 if exist('SMOKE', 'var') && SMOKE, REPS = 1; B = 400; end       % reduced chain check (run_stage smoke)
 nS = numel(PP.ebno); nC = numel(PP.scen); nD = numel(DLY);
 single_cells = find(ismember(PP.scen, PP.singles) & ~strcmp(PP.scen, 'none'));
@@ -228,7 +234,8 @@ for ri = 1:numel(RUN)
     fprintf('  %-9s %-6s D %d %6d episodes x %d policies (%.1f min)\n', bs.name, PP.splits{bs.split}, RUN(ri).D, ...
         numel(RES{ri, RUN(ri).pols(1)}.ret), numel(RUN(ri).pols), toc(t0) / 60);
 end
-% The clean link on the flights of data/clean_test_pools.mat, one episode per flight
+% The clean link on the flights of data/clean_test_pools.mat, one episode per flight, the
+% same onsets and frame draws at every delay
 RW = cell(nD, nP); CT = [];
 if isfile('data/clean_test_pools.mat')
     L = load('data/clean_test_pools.mat', 'CT'); CT = L.CT; clear L
@@ -244,7 +251,7 @@ if isfile('data/clean_test_pools.mat')
         pks = 1:nP; if d > 1, pks = 1; end
         for pk = pks
             [kind, ag, opt] = policy_setup(POL{pk}, Q, sel, [], fixed_mmse, [], K.na);
-            RW{d, pk} = policy_run_set(kind, PPw, Kw, spec, TEST, ag, opt, 40000 + 1000 * d);
+            RW{d, pk} = policy_run_set(kind, PPw, Kw, spec, TEST, ag, opt, 40000);
             VAR = var_add(VAR, 'clean', NaN, DLY(d), pk);
         end
     end
@@ -424,10 +431,11 @@ for i = 1:nT
         if ismember(i, ij), BL.surv_c(i, s) = surv_layer(F, 'surv_c', TGT, B); end
     end
 end
-% The clean link per Eb/N0: FA at every signalling delay, LINK; the clean link in every
-% veto band over the regions of the walks (the point s and the points above it, key s;
-% the point alone, key nS + s)
-CL = struct('link', repmat(VZ, 1, nS), 'fa', repmat(VZ, nD, nS));
+% The clean link per Eb/N0: FA at every signalling delay, LINK; FA of the claim of every
+% point (fac: the clean flights from the KPI 1 threshold up, from the point up below it);
+% the clean link in every veto band over the regions of the walks (the point s and the
+% points above it, key s; the point alone, key nS + s)
+CL = struct('link', repmat(VZ, 1, nS), 'fa', repmat(VZ, nD, nS), 'fac', repmat(VZ, nD, nS));
 CVt = ones(nD, 2 * nS, nB);
 for s = 1:nS
     F = take_rows(CF, CF.s == s);
@@ -437,6 +445,14 @@ for s = 1:nS
         CL.fa(d, s) = edge_verdict(F.fa_k(:, v), F.fa_n(:, v), F.geo, TGT.fa, 'le', true, B);
     end
 end
+e0 = min(PP.ebno, ebno_thr);
+for d = 1:nD
+    v = var_of(VAR, 'clean', NaN, DLY(d), 1);
+    for e = unique(e0)
+        CL.fac(d, e0 == e) = fa_claim(CF, v, e, ebno_thr, TGT, B);
+    end
+end
+FAP = vt(CL.fac); FAP(vt(CL.fa) == -1) = -1;         % FA as the commitment reads it
 for d = 1:nD
     v = var_of(VAR, 'clean', NaN, DLY(d), 1);
     for key = 1:2 * nS
@@ -465,8 +481,8 @@ for d = 1:nD
         v = var_of(VAR, KND{k, 1}, KND{k, 2}, DLY(d), 1);
         if v == 0 || isempty(KND{k, 3}), continue; end
         vr = var_of(VAR, KND{k, 1}, KND{k, 2}, DLY(1), iRnd);
-        X = commit_rows(FTi, KND{k, 3}, v, vr, KND{k, 4}, BL, CL.fa(d, :), CL.link, FAV, TGT, B, BD(iv), dirc, ...
-            reshape(CVt(d, :, iv), 2 * nS, []), DH, nS);
+        X = commit_rows(FTi, KND{k, 3}, v, vr, KND{k, 4}, BL, CL.fac(d, :), CL.fa(d, :), CL.link, FAV, TGT, B, ...
+            BD(iv), dirc, reshape(CVt(d, :, iv), 2 * nS, []), DH, nS);
         CR(end+1) = struct('kind', KND{k, 1}, 'fd', KND{k, 2}, 'D', DLY(d), 'd', d, 'rows', KND{k, 3}, 'X', X); %#ok<SAGROW>
     end
 end
@@ -518,6 +534,8 @@ FRall = false_change_rate(CF.sw_k(CF.eb >= ebno_thr, var_of(VAR, 'clean', NaN, D
 fprintf('Verdicts per point done (%.1f min)\n', toc(t0) / 60);
 
 %% 4b. Off-grid check points (data/check_pools.mat), the deployed policy at every delay
+% (the same onsets and frame draws at every delay); FA of the claim from the grid's clean
+% flights, the check point's own 36 only must not be NOT COMMITTED
 CKV = struct('c', {}, 'threat', {}, 'kind', {}, 'level', {}, 's', {}, 'ebno', {}, 'det', {}, 'deth', {}, 'surv', {}, ...
     'rec', {}, 'prot', {}, 'linkt', {}, 'sys', {}, 'lim', {}, 'commit', {}, 'clim', {});
 CK = [];
@@ -551,12 +569,12 @@ if isfile('data/check_pools.mat')
     for d = 1:nD
         for k = 1:numel(specs), specs{k}.delay = DLY(d); end %#ok<SAGROW>
         for k = 1:numel(spc), spc{k}.delay = DLY(d); end
-        Rk = policy_run_set(kind, CK, Kc, specs, 1, ag, opt, 90000 + 1000 * d);
+        Rk = policy_run_set(kind, CK, Kc, specs, 1, ag, opt, 90000);
         m = Rk.threat; i = KI(sub2ind(size(KI), Rk.scn(m), Rk.s(m), Rk.r(m)));
         acc = @(x) accumarray(i(:), double(x(:)), [nKF 1]);
         KF.ep_n(:, d) = acc(true(1, sum(m))); KF.held_k(:, d) = acc(Rk.held(m)); KF.rec_k(:, d) = acc(Rk.recovered(m));
         KF.lt_k(:, d) = acc(Rk.lost_rec(m)); KF.lt_n(:, d) = acc(Rk.n_rec(m));
-        Rc = policy_run_set(kind, CK, Kc, spc, 1, ag, opt, 95000 + 1000 * d);
+        Rc = policy_run_set(kind, CK, Kc, spc, 1, ag, opt, 95000);
         i = KI(sub2ind(size(KI), Rc.scn, Rc.s, Rc.r));
         KF.fa_k(:, d) = accumarray(i(:), double(Rc.switches(:) > 0), [nKF 1]); KF.fa_n(:, d) = accumarray(i(:), 1, [nKF 1]);
     end
@@ -580,6 +598,12 @@ if isfile('data/check_pools.mat')
     end
     i0 = KI(sub2ind(size(KI), k0 + 0 * KF.s, KF.s, KF.r)); m = i0 > 0;
     KF.cl_k(m) = KF.link_k(i0(m)); KF.cl_n(m) = KF.link_n(i0(m));
+    KFC = zeros(nD, nK); ek = min(CK.ebno, ebno_thr);   % FA of the claim at every check Eb/N0
+    for d = 1:nD
+        for e = unique(ek)
+            V = fa_claim(CF, var_of(VAR, 'clean', NaN, DLY(d), 1), e, ebno_thr, TGT, B); KFC(d, ek == e) = V.verdict;
+        end
+    end
     for c = ck
         for s = CK.cell_ebs{c}
             F = take_rows(KF, KF.c == c & KF.s == s); Fc = take_rows(KF, KF.c == k0 & KF.s == s);
@@ -590,9 +614,8 @@ if isfile('data/check_pools.mat')
             for d = 1:nD
                 P = pol_layers(F, d, 'surv', TGT, B);
                 fa = edge_verdict(Fc.fa_k(:, d), Fc.fa_n(:, d), Fc.geo, TGT.fa, 'le', true, B);
-                fv = 1 - 2 * (fa.verdict == -1);       % 36 clean flights cannot reach the 5% bound: only must not fail
-                E = edge_commit(struct('prot', P.prot.verdict, 'deth', x.deth.verdict, 'deth_n', x.deth.n, 'fa', fv, ...
-                    'link', lk.verdict, 'linkt', P.linkt.verdict, 'fav', FAV), @no_veto);
+                E = edge_commit(struct('prot', P.prot.verdict, 'deth', x.deth.verdict, 'deth_n', x.deth.n, ...
+                    'fa', KFC(d, s), 'fa_pt', fa.verdict, 'link', lk.verdict, 'linkt', P.linkt.verdict, 'fav', FAV), @no_veto);
                 x.commit(d) = E.v; x.clim(d) = E.lim;
                 if d == 1, x.rec = P.rec; x.prot = P.prot; x.linkt = P.linkt; end
             end
@@ -606,6 +629,8 @@ if isfile('data/check_pools.mat')
 end
 
 %% 5. Bands, over the Eb/N0 from the KPI 1 threshold up (deployed policy, deployed delay)
+% A band commits with the claim's FA (every clean flight from the threshold up, KPI 6)
+% and its own clean flights' FA not NOT COMMITTED (96 hover flights commit only at 0)
 BT = struct('det', repmat(VZ, nT, nB), 'surv', repmat(VZ, nT, nB), 'rec', repmat(VZ, nT, nB), 'prot', repmat(VZ, nT, nB), ...
     'sys', zeros(nT, nB), 'lim', {repmat({''}, nT, nB)}, 'commit', zeros(nT, nB), 'clim', {repmat({''}, nT, nB)});
 CB = struct('fa', repmat(VZ, 1, nB), 'link', repmat(VZ, 1, nB));
@@ -629,8 +654,8 @@ for i = 1:nT
         [BT.sys(i, b), BT.lim{i, b}] = all_of([BT.det(i, b).verdict, BT.surv(i, b).verdict, P.rec.verdict, FAV], 'DSRF');
         fa = CB.fa(b).verdict; if strcmp(BD(b).axis, 'align'), fa = 1; end
         lk = CB.link(b).verdict; if strcmp(BD(b).axis, 'align'), lk = 1; end
-        E = edge_commit(struct('prot', P.prot.verdict, 'deth', dh.verdict, 'deth_n', dh.n, 'fa', fa, 'link', lk, ...
-            'linkt', P.linkt.verdict, 'fav', FAV), @no_veto);
+        E = edge_commit(struct('prot', P.prot.verdict, 'deth', dh.verdict, 'deth_n', dh.n, 'fa', CL.fac(1, nS).verdict, ...
+            'fa_pt', fa, 'link', lk, 'linkt', P.linkt.verdict, 'fav', FAV), @no_veto);
         BT.commit(i, b) = E.v; BT.clim(i, b) = E.lim;
     end
 end
@@ -646,8 +671,9 @@ down = nS:-1:1;                                       % Eb/N0 from the top down
 THR = unique(PP.scen(tc), 'stable'); nTh = numel(THR);
 rows_of = cellfun(@(t) sort_by_sev(find(strcmp(PP.scen(tc), t)), PP.sev(tc)), THR, 'UniformOutput', false);
 ckv = @(f) [];                                        % verdicts of the check points of a layer
+ckl = NaN;                                            % Eb/N0 of the level check points
 if ~isempty(CKV)
-    s0 = find(PP.ebno == CK.e_level, 1);
+    ckl = CK.e_level; s0 = find(PP.ebno == ckl, 1);
     kd = {CKV.kind}; th = {CKV.threat}; eb = [CKV.ebno]; mid = CK.sev([CKV.c]);
     ckv = @(f) check_verdicts(CKV, f);
 end
@@ -697,8 +723,8 @@ for f = {'link'}
     W = edge_walk([CL.(f{1})(down).verdict], PP.ebno(down));
     CE.(f{1}) = struct('edge', W.edge, 'first_not', W.first_not, 'nonmono', W.nonmono, 'km', link_distance_km(W.edge, p0));
 end
-for d = 1:nD
-    W = edge_walk([CL.fa(d, down).verdict], PP.ebno(down));
+for d = 1:nD                                          % FA as the commitment reads it
+    W = edge_walk(FAP(d, down), PP.ebno(down));
     CE.fa(d) = struct('edge', W.edge, 'first_not', W.first_not, 'nonmono', W.nonmono, 'km', link_distance_km(W.edge, p0));
 end
 % Follower re-acquisition: from 2 cycles down to 0, per follower row, Eb/N0 and delay
@@ -805,17 +831,18 @@ hdr_e = arrayfun(@(e, d) sprintf('%g dB %.2f km', e, d), PP.ebno, km, 'UniformOu
 rowl = cellfun(@(l, b, w) sprintf('%-40s %-8s', [l repmat('*', 1, w)], b), lbl, basis, num2cell(between), 'UniformOutput', false);
 rep = {'=== EDGE MAP: A VERDICT AT EVERY POINT OF THE ENVELOPE ==='};
 rep{end+1} = sprintf(['Generated: %s | deployed policy %s, false-alarm bound met on validation: %s | flights per ' ...
-    '(cell, Eb/N0): clean link and single threats %d, combined threats %d; edge speeds per Eb/N0: hover %d at every ' ...
-    'level, 161 km/h %d at the nominal level | episodes: %d onsets per flight | signalling delays %s cycles ' ...
-    '(%s ms) | follower re-acquisition %s cycles (%s ms)'], ...
+    '(cell, Eb/N0), moving flights: clean link and single threats %d, combined threats %d; edge speeds per Eb/N0: %s ' ...
+    '%d at every level, 161 km/h %d at the nominal level | episodes: %d onsets per flight | signalling delays %s ' ...
+    'cycles (%s ms) | follower re-acquisition %s cycles (%s ms)'], ...
     datestr(now), NAMES.(dep), ternary(FAV == 1, 'yes', 'NO (no point commits)'), numel(PP.cell_geo{tc(1)}{TEST}) + ...
-    numel(PP.cell_geo{tc(1)}{TEST2}), numel(PP.cell_geo{tc(end)}{TEST}) + numel(PP.cell_geo{tc(end)}{TEST2}), ...
+    numel(PP.cell_geo{tc(1)}{TEST2}), numel(PP.cell_geo{tc(end)}{TEST}) + numel(PP.cell_geo{tc(end)}{TEST2}), HOVER, ...
     nnz(PP.speed{SPEED}(1, :) == 0), nnz(PP.speed{SPEED}(1, :) > 0), REPS, strjoin(compose('%d', DLY), '/'), ...
     strjoin(compose('%d', DLY * C.period_ms), '/'), strjoin(compose('%d', FDL), '/'), strjoin(compose('%d', FDL * C.period_ms), '/'));
 rep{end+1} = sprintf(['Targets: DET, DET_h >= %g%% | SURV >= %g%% | REC, PROT >= %g%% | LINK_T <= max(2x clean, %g%%) | ' ...
     'FA <= %g%% | LINK <= %g%% | COMMITTED: PROT, DET_h, FA, LINK and LINK_T COMMITTED (DET_h only not N below %d ' ...
-    'harmed flights), F, no band N | SYSTEM: DET, SURV and REC COMMITTED and F | SYSTEM+LINK: and LINK'], ...
-    100 * [TGT.det TGT.surv TGT.rec TGT.link TGT.fa TGT.link], N_MIN);
+    'harmed flights; FA of the claim: the clean flights from %g dB up, or from the point up below it, and the ' ...
+    'point''s own not N), F, no band N | SYSTEM: DET, SURV and REC COMMITTED and F | SYSTEM+LINK: and LINK'], ...
+    100 * [TGT.det TGT.surv TGT.rec TGT.link TGT.fa TGT.link], N_MIN, ebno_thr);
 rep{end+1} = ['Restored: BER <= 2x and packet loss <= 2x + one packet of the same flight''s clean link (BER floor 1e-4). ' ...
     'REC and PROT count held recovery: restored for 5 cycles and on every cycle to the end of the 30-cycle episode, but ' ...
     'one follower re-acquisition of 1 + D cycles: held for the rest of a 0.6 s episode (at most 0.54 s after the onset). ' ...
@@ -896,10 +923,13 @@ for k = find(strcmp({CR.kind}, 'follow') & [CR.d] == 1)
 end
 rep{end+1} = '';
 rep{end+1} = sprintf(['--- Clean link per Eb/N0 (test and second test flights, and those of data/clean_test_pools.mat): ' ...
-    'FA = flights with a change (deployed policy, per signalling delay), LINK = packet loss at no_action, %% [95%% ' ...
-    'interval] flights verdict ---']);
+    'FA = flights with a change (deployed policy, per signalling delay), FAc the claim''s (the commitment''s: the ' ...
+    'clean flights from %g dB up, or from the point up below it), LINK = packet loss at no_action, %% [95%% interval] ' ...
+    'flights verdict ---'], ebno_thr);
 for d = 1:nD
     rep{end+1} = sprintf('%-8s %s', sprintf('FA D%d', DLY(d)), strjoin(arrayfun(@(s) pct(CL.fa(d, s)), 1:nS, ...
+        'UniformOutput', false), ' ')); %#ok<SAGROW>
+    rep{end+1} = sprintf('%-8s %s', sprintf('FAc D%d', DLY(d)), strjoin(arrayfun(@(s) pct(CL.fac(d, s)), 1:nS, ...
         'UniformOutput', false), ' ')); %#ok<SAGROW>
 end
 rep{end+1} = sprintf('%-8s %s', 'LINK', strjoin(arrayfun(@(s) cell_txt(CL.link(s), '%5.2f'), 1:nS, 'UniformOutput', false), ' '));
@@ -940,7 +970,8 @@ if ~isempty(CKV)
     rep{end+1} = '';
     rep{end+1} = sprintf(['--- Off-grid check points (data/check_pools.mat, %d flights each): Eb/N0 between the grid points ' ...
         'at the nominal level, levels between the trained ones at %g dB; DET_h, PROT, LINK_T %% [95%% interval] flights ' ...
-        'verdict, COMMITTED per signalling delay (FA there only must not be NOT COMMITTED) ---'], numel(CK.runs{1}), CK.e_level);
+        'verdict, COMMITTED per signalling delay (FA of the claim from the grid''s clean flights; the point''s own only ' ...
+        'must not be NOT COMMITTED) ---'], numel(CK.runs{1}), CK.e_level);
     for q = 1:numel(CKV)
         x = CKV(q);
         rep{end+1} = sprintf('%-22s %7g dB at %4g dB (%.2f km) | %s | %s | %s | %s', x.threat, x.level, x.ebno, ...
@@ -951,7 +982,8 @@ if ~isempty(CKV)
 end
 rep{end+1} = '';
 rep{end+1} = sprintf(['--- Bands of every (threat, level), Eb/N0 >= %g dB, deployed policy at the deployed delay (edge ' ...
-    'speeds: the edge-speed split, hover at every level, 161 km/h at the nominal level): %% flights verdict ---'], ebno_thr);
+    'speeds: the edge-speed split, %s at every level, 161 km/h at the nominal level; COMMITTED with the claim''s FA ' ...
+    'and the band''s own not NOT COMMITTED): %% flights verdict ---'], ebno_thr, HOVER);
 if ~isempty(skipped), rep{end+1} = ['Bands skipped: ' strjoin(skipped, '; ')]; end
 grp = arrayfun(@(a) find(strcmp({BD.axis}, a{1})), unique({BD.axis}, 'stable'), 'UniformOutput', false);
 LB_ = {'det', 'surv', 'rec', 'prot'}; LBN = {'DET', 'SURV', 'REC', 'PROT', 'SYSTEM', 'COMMITTED'};
@@ -1003,8 +1035,10 @@ sm{end+1} = sprintf(['Each COMMITTED point holds per point (one-sided error <= 2
 sm{end+1} = sprintf('Clean link per Eb/N0 (%s): LINK %s', strjoin(compose('%g', PP.ebno), '/'), ...
     strjoin(arrayfun(@(V) sprintf('%s(%d)', vsym(V.verdict), V.n), CL.link, 'UniformOutput', false), ' '));
 for d = 1:nD
-    sm{end+1} = sprintf('  FA D%d %s, committed from 15 dB down to %s', DLY(d), strjoin(arrayfun(@(V) sprintf('%s(%d)', ...
-        vsym(V.verdict), V.n), CL.fa(d, :), 'UniformOutput', false), ' '), edge_txt(CE.fa(d).edge, CE.fa(d).km)); %#ok<SAGROW>
+    sm{end+1} = sprintf('  FA D%d per point %s; of the claim %s; committed from 15 dB down to %s', DLY(d), ...
+        strjoin(arrayfun(@(V) sprintf('%s(%d)', vsym(V.verdict), V.n), CL.fa(d, :), 'UniformOutput', false), ' '), ...
+        strjoin(arrayfun(@(V) sprintf('%s(%d)', vsym(V.verdict), V.n), CL.fac(d, :), 'UniformOutput', false), ' '), ...
+        edge_txt(CE.fa(d).edge, CE.fa(d).km)); %#ok<SAGROW>
 end
 sm{end+1} = sprintf('  LINK committed from 15 dB down to %s', edge_txt(CE.link.edge, CE.link.km));
 sm{end+1} = sprintf('  False changes of the deployed policy on the clean link, Eb/N0 >= %g dB: %s', ebno_thr, rate_txt(FRall));
@@ -1018,7 +1052,8 @@ if ~isempty(AGR)
 end
 sm{end+1} = '';
 sm{end+1} = ['--- Distance: Eb/N0 from 15 dB down to the last COMMITTED point, its km (every position of a flight); ' ...
-    'first NOT COMMITTED; ! COMMITTED beyond NOT COMMITTED; x stopped by a check point NOT COMMITTED ---'];
+    'first NOT COMMITTED; ! COMMITTED beyond NOT COMMITTED; x stopped by a check point NOT COMMITTED; check points lie ' ...
+    'at the nominal level only, every other edge holds at its grid points ---'];
 for i = 1:nT
     x = arrayfun(@(w) sprintf('%s %s%s%s', WK(w).name, edge_txt(ED{w}.edge(i), ED{w}.km(i)), repmat(' x', 1, ED{w}.check_cut(i)), ...
         repmat(' !', 1, ED{w}.nonmono(i))), [wC wF 7 1:6], 'UniformOutput', false);
@@ -1028,7 +1063,8 @@ end
 sm{end+1} = '';
 for w = [wC 7 2 5]
     sm{end+1} = sprintf(['--- Severity, %s: per threat and Eb/N0 the COMMITTED run of levels from the nominal one down ' ...
-        'and up ---'], WK(w).name); %#ok<SAGROW>
+        'and up (check points at %s dB only; at the other Eb/N0 the run holds at its grid levels) ---'], WK(w).name, ...
+        num_txt(ckl, '%g')); %#ok<SAGROW>
     sm{end+1} = sprintf('%-40s %s', '', sprintf('%-22s', hdr_e{:})); %#ok<SAGROW>
     for t = 1:nTh
         x = arrayfun(@(s) [sev_txt(SV{w}.lo(t, s), SV{w}.hi(t, s), SV{w}.nonmono(t, s), THR{t}, C, PP), ...
@@ -1046,8 +1082,8 @@ for q = 1:numel(ifo)
 end
 sm{end+1} = '';
 sm{end+1} = sprintf(['--- Speed, altitude, K over Eb/N0 >= %g dB: COMMITTED, SYSTEM [DET, SURV, REC]; the COMMITTED run ' ...
-    'around %s and %s; hover (every level) and 161 km/h (nominal level); K down from 15-20 dB (and with the lowest band ' ...
-    'from %g dB) ---'], ebno_thr, BD(isp(i0v)).name, BD(ial(2)).name, K_READ);
+    'around %s and %s; %s (every level) and 161 km/h (nominal level); K down from 15-20 dB (and with the lowest band ' ...
+    'from %g dB) ---'], ebno_thr, BD(isp(i0v)).name, BD(ial(2)).name, HOVER, K_READ);
 for i = 1:nT
     q = [RN.commit, RN.sys, RN.det, RN.surv, RN.rec];
     sm{end+1} = sprintf('%s speed %s | hover %s, 161 km/h %s | altitude %s | K from %s (reading %s)', rowl{i}, ...
@@ -1097,9 +1133,11 @@ sm{end+1} = sprintf('False alarms of the clean link, every flight at Eb/N0 >= %g
     strjoin(arrayfun(@(pk) sprintf('%s %d/%d', LBL{pk}, sum(CF.fa_k(mc, var_of(VAR, 'clean', NaN, DLY(1), pk)) > 0), ...
     sum(CF.fa_n(mc, var_of(VAR, 'clean', NaN, DLY(1), pk)) > 0)), find(arrayfun(@(pk) var_of(VAR, 'clean', NaN, DLY(1), pk), ...
     1:nP) > 0), 'UniformOutput', false), ' | '));
-sm{end+1} = ['Each "up to" edge is a fixed-sequence walk at 5% family error; per-point verdicts hold per point; an edge ' ...
-    'that spans an off-grid check point NOT COMMITTED stops before it. The policy is not measured beyond 0-15 dB; no ' ...
-    'level above the top one is simulated (every top level is the source cap).'];
+sm{end+1} = ['Each "up to" edge is a fixed-sequence walk at 5% family error; per-point verdicts hold per point, for ' ...
+    'moving flights; an edge that spans an off-grid check point NOT COMMITTED stops before it, and an edge that spans ' ...
+    'none (levels at another Eb/N0 than the check points'', distance at another level than the nominal) holds at its ' ...
+    'grid points only. Hover is ' HOVER '. The policy is not measured beyond 0-15 dB; no level above the top one is ' ...
+    'simulated (every top level is the source cap).'];
 fid = fopen('results/edge_summary.txt', 'w'); fprintf(fid, '%s\n', sm{:}); fclose(fid);
 fprintf('%s\n', sm{:});
 
@@ -1143,7 +1181,8 @@ EM = struct('ebno', PP.ebno, 'km', km, 'all_pos', LB.all_pos, 'targets', TGT, 'n
     'clean_dist', CE, 'sev', {SV}, 'threats', {THR}, 'follower', FRG, 'inside', INR, 'runs', RN, ...
     'ohp', struct('alt_m', OHP.alt_m, 'ebno', OHP.ebno, 'r0_km', OHP.r0_km, 'verdict', OV, 'level_tracked', OLt, ...
     'level_lost', OLl), 'b4', B4, 'b4s', B4s, 'fa_bound_met', FAV == 1, 'fa_rate', {FR}, 'fa_rate_all', FRall, ...
-    'check', {CKV}, 'predicted_vs_committed', AGR, 'det_id', PP.det_id, 'created', datestr(now));
+    'fa_commit', FAP, 'hover_label', HOVER, 'check', {CKV}, 'predicted_vs_committed', AGR, 'det_id', PP.det_id, ...
+    'created', datestr(now));
 inom = find(ismember(tc, nom));
 cnt_of = @(x, m) [sum(x(m, :) == 1, 'all'), sum(x(m, :) == -1, 'all'), sum(x(m, :) == 0, 'all')];
 EDGE_NUM = struct('ebno', PP.ebno, 'km', km, 'ebno_thr', ebno_thr, 'deployed', NAMES.(dep), 'n_min', N_MIN, ...
@@ -1162,7 +1201,8 @@ EDGE_NUM = struct('ebno', PP.ebno, 'km', km, 'ebno_thr', ebno_thr, 'deployed', N
     'first_not_commit_db', ED{wC(1)}.first_not', 'nominal', {lbl(inom)}, 'hover', RN.commit.edge_v(inom, 1)', ...
     'v161', RN.commit.edge_v(inom, 2)', 'hover_sys', RN.sys.edge_v(inom, 1)', 'v161_sys', RN.sys.edge_v(inom, 2)', ...
     'follower_cells', {lbl(ifo)}, 'follower_fmin', FRG.fmin, 'follower_delays', FDL, ...
-    'fa_verdict', reshape([CL.fa.verdict], nD, nS), 'fa_n', reshape([CL.fa.n], nD, nS), 'link_verdict', [CL.link.verdict], ...
+    'fa_verdict', vt(CL.fa), 'fa_n', reshape([CL.fa.n], nD, nS), 'fa_claim_verdict', vt(CL.fac), ...
+    'fa_claim_n', reshape([CL.fac.n], nD, nS), 'fa_commit', FAP, 'hover_label', HOVER, 'link_verdict', [CL.link.verdict], ...
     'link_n', [CL.link.n], 'fa_edge_db', [CE.fa.edge], 'link_edge_db', CE.link.edge, 'ohp_verdict', OV, 'ohp_alt_m', OHP.alt_m, ...
     'ohp_r0_km', OHP.r0_km, 'b4', B4, 'fa_bound_met', FAV == 1, 'fa_per_hour', FRall.per_hour, ...
     'fa_per_hour_hi', FRall.per_hour_hi, 'fa_mtbf_s', FRall.mtbf_s, 'check_commit', reshape([CKV.commit], nD, []), ...
@@ -1205,6 +1245,13 @@ m = F.harm;
 deth = edge_verdict(F.det_k(m), F.det_n(m), F.geo(m), TGT.det, 'ge', false, B);
 end
 
+function V = fa_claim(CF, v, e, thr, TGT, B)
+% FA of a claim that reaches Eb/N0 e, variant v: the clean flights CF of every Eb/N0
+% from the KPI 1 threshold thr up (KPI 6), from e up when e lies below it.
+F = take_rows(CF, CF.eb >= min(e, thr) - 1e-9);
+V = edge_verdict(F.fa_k(:, v), F.fa_n(:, v), F.geo, TGT.fa, 'le', true, B);
+end
+
 function V = surv_layer(F, sk, TGT, B)
 % Flights some configuration recovers (sk: the recoverability of the set).
 V = edge_verdict(double(F.(sk)), ones(size(F.geo)), F.geo, TGT.surv, 'ge', true, B);
@@ -1221,11 +1268,12 @@ P.tgt = max(2 * sum(F.cl_k, 'omitnan') / max(sum(F.cl_n, 'omitnan'), 1), TGT.lin
 P.linkt = edge_verdict(F.lt_k(:, v), F.lt_n(:, v), F.geo, P.tgt, 'le', false, B);
 end
 
-function X = commit_rows(FTi, rows, v, vr, sk, BL, fa, link, fav, TGT, B, BV, dirc, cv, DH, nS)
+function X = commit_rows(FTi, rows, v, vr, sk, BL, fa, fa_pt, link, fav, TGT, B, BV, dirc, cv, DH, nS)
 % The commitment (edge_commit.m) of the rows (indices into the threat rows) for the
-% variant in column v; vr the random policy's column (0: none). A veto band (BV) is NOT
-% COMMITTED when its PROT, DET_h or LINK_T is, or the clean link's FA or LINK in it (cv:
-% per region key and band). DH caches DET_h per row and region.
+% variant in column v; vr the random policy's column (0: none); fa the claim's FA and
+% fa_pt the point's own at every Eb/N0. A veto band (BV) is NOT COMMITTED when its PROT,
+% DET_h or LINK_T is, or the clean link's FA or LINK in it (cv: per region key and band).
+% DH caches DET_h per row and region.
 nr = numel(rows); VZ = edge_verdict([], [], [], 0.9, 'ge', false);
 X = struct('prot', repmat(VZ, nr, nS), 'linkt', repmat(VZ, nr, nS), 'rec', repmat(VZ, nr, nS), 'tgt', nan(nr, nS), ...
     'h', zeros(nr, nS), 'band', nan(nr, nS), 'bfail', {repmat({''}, nr, nS)}, 'commit', zeros(nr, nS), ...
@@ -1241,7 +1289,7 @@ for q = 1:nr
         end
     end
     L = struct('prot', vt(X.prot(q, :)), 'deth', vt(BL.deth(i, :)), 'deth_n', [BL.deth(i, :).n], 'fa', vt(fa), ...
-        'link', vt(link), 'linkt', vt(X.linkt(q, :)), 'fav', fav);
+        'fa_pt', vt(fa_pt), 'link', vt(link), 'linkt', vt(X.linkt(q, :)), 'fav', fav);
     veto = @(R) band_veto(take_rows(Fi, ismember(Fi.s, R)), v, BV, dirc(i), cv(region_key(R, nS), :), DH, ...
         sprintf('%d %s', i, mat2str(R)), TGT, B);
     E = edge_commit(L, veto);

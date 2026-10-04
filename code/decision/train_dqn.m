@@ -36,9 +36,9 @@
 % with its own monitor and drop threshold from the grid (rule_sel): the best recovery
 % among the settings whose false-alarm bound is <= 5%. When no setting meets the bound
 % either, the policy with the lowest bound is deployed and fa_bound_met is false: the
-% edge map then commits no point. The best run of every gamma at the selected monitor,
-% drop threshold and penalty is kept as an ablation. Reward-weight sensitivity:
-% proposal mitigation 2.
+% edge map then commits no point; the same without clean validation flights (the bound
+% not measured). The best run of every gamma at the selected monitor, drop threshold
+% and penalty is kept as an ablation. Reward-weight sensitivity: proposal mitigation 2.
 %
 % Output: data/trained_dqn.mat (also deployed, rule_sel, fa_bound_met and the pools'
 % det_id and created), results/dqn_training.txt, results/dqn_training_curves.png
@@ -250,7 +250,8 @@ rep{end+1} = sprintf(['Fallback, rule + escalation with its own monitor (the bes
     fa_txt(rule_sel.fa_w, rule_sel.n_w), pct_txt(rule_sel.fa_upper));
 rep{end+1} = sprintf('Deployed: %s | false-alarm bound met on validation: %s%s', ternary(strcmp(deployed, 'dqn_esc'), ...
     'the selected DQN + escalation', 'rule + escalation (fallback)'), ternary(fa_bound_met, 'YES', 'NO'), ...
-    ternary(fa_bound_met, '', ' -- the edge map commits no point'));
+    ternary(fa_bound_met, '', [ternary(isempty(CV), ' (not measured: no clean validation flights)', '') ...
+    ' -- the edge map commits no point']));
 rep{end+1} = sprintf(['False changes on the clean link (validation, Eb/N0 >= %g dB, %d ms per cycle): DQN %s | ' ...
     'rule fallback %s'], EBNO_THR, CD.period_ms, rate_txt(FD), rate_txt(FR));
 if ~exist('results', 'dir'), mkdir('results'); end
