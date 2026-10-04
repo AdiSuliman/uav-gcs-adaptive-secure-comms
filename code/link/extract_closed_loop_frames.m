@@ -17,7 +17,7 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %   detector or of a policy):
 %     ber       bit error rate (with p.fec: decoded information bits); NaN when the
 %               frame runs past the aligned bit range (the last frame of a run
-%               without a quiet slot)
+%               without a quiet slot), and with p.fec for a last frame without its pair
 %     fer       1 when the frame has at least one bit error
 %   Receiver measurements (the transmitted bits and waveform are never used):
 %   The IQ measurements (rssi, sinr, env_corr, iot) are taken on the reference
@@ -27,8 +27,7 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %     crc_fail  CRC-32 check of the frame failed: the packet is lost. The frame
 %               carries 1000 information bits + 32 CRC bits (p.crc_bits); the
 %               channel's actual error pattern of the frame is applied to a
-%               CRC-protected codeword and the codeword is checked (a CRC is
-%               linear, so the check depends only on the error pattern)
+%               CRC-protected codeword and the codeword is checked (crc32_fail.m)
 %     ber_est   BER estimated from the combiner output: decision-directed SNR per
 %               32-symbol block, BER = mean of Q(sqrt(SNR)) over the blocks (QPSK,
 %               Alouini & Goldsmith 1999, eq. (15)), so bursts are averaged as conditional BERs
@@ -74,9 +73,9 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %     sync_p2   second timing peak, more than one symbol away, over the first (two
 %               frames with our training on the air: a spoofer)
 %   Ground truth: act, share of the frame with the threat on the air (packet traffic
-%   of benign interference), analysis and labels only.
-% With p.fec (fec_interleave) ber, fer and crc_fail are those of the decoded
-% information bits (half a frame each, 484 + 32 CRC).
+%   of benign interference, the sweeping jammer on our channel), analysis and labels only.
+% With p.fec (fec_interleave) ber, fer and crc_fail are those of the decoded packet,
+% 1000 + 32 bits over two frames, both frames carrying its result (fec_packets.m).
 
 NQ = 0; if isfield(p, 'quiet_symbols'), NQ = p.quiet_symbols; end
 if NQ >= p.filter_span, delay_bits = 0; end              % the receiver aligns each frame's bits
@@ -107,7 +106,7 @@ F.sync_d = sy(1, 1:nf); F.cfo_hz = sy(2, 1:nf); F.sync_pk = sy(3, 1:nf); F.sync_
 
 % Ground truth and CRC
 if isfield(p, 'fec') && p.fec
-    [F.ber, F.fer, F.crc_fail] = fec_frames(tx_al, rx_al, reshape(iqa(:, 1, :), ns, nf), p, nf);
+    [F.ber, F.fer, F.crc_fail] = fec_packets(tx_al, rx_al, reshape(iqa(:, 1, :), ns, nf), p, nf);
 else
     err = double(tx_al ~= rx_al);
     F.ber = nan(1, nf); F.fer = nan(1, nf); F.crc_fail = nan(1, nf);
@@ -117,7 +116,7 @@ else
         e = err(i0:i1);
         F.ber(f) = mean(e);
         F.fer(f) = double(any(e));
-        F.crc_fail(f) = crc_check(tx_al(i0:i0 + bpf - p.crc_bits - 1), e);
+        F.crc_fail(f) = crc32_fail(tx_al(i0:i0 + bpf - p.crc_bits - 1), e);
     end
 end
 
@@ -154,72 +153,6 @@ end
 nv = thermal_of(out, p);                                 % thermal noise power per sample
 F.q_iot = 10*log10(mean(pq, 1) / nv);
 F.q_react = 10*log10(pe(k) ./ pq(k));
-end
-
-%% ===================== CRC =====================
-function fail = crc_check(payload, e)
-% CRC-32 (IEEE 802.3 polynomial) over the payload; the frame's error pattern e
-% (payload + CRC bits) is applied to the codeword, which is then checked.
-persistent cfg
-if isempty(cfg)
-    cfg = crcConfig('Polynomial', 'z^32 + z^26 + z^23 + z^22 + z^16 + z^12 + z^11 + z^10 + z^8 + z^7 + z^5 + z^4 + z^2 + z + 1');
-end
-cw = crcGenerate(payload(:), cfg);
-[~, fail] = crcDetect(xor(cw, e(:) ~= 0), cfg);
-fail = double(fail);
-end
-
-%% ===================== FEC =====================
-function [ber, fer, crcf] = fec_frames(tx_al, rx_al, iq, p, nf)
-% fec_interleave: the channel bit errors of this run are applied to a
-% rate-1/2 convolutionally coded, randomly interleaved stream. Symbols whose
-% received energy is more than 6 dB above the run's median are erased (a burst
-% is visible at the receiver), the rest are hard decisions; the Viterbi decoder
-% works on +1/-1/0 values. Per frame: the decoded information bits (half a
-% frame), their BER, and the CRC check of the 484 + 32 bits.
-e = double(tx_al(:) ~= rx_al(:));
-L = numel(e);
-
-sps = p.sps;
-x = iq(:);
-nsym = floor(numel(x) / sps);
-Es = mean(reshape(abs(x(1:nsym*sps)).^2, sps, nsym), 1);
-tm = 0; if isfield(p, 'timing_max_sym'), tm = ceil(p.timing_max_sym); end
-hot = movmax(double(Es > 4 * median(Es)), [3 3 + tm]) > 0;   % tolerate filter delay and arrival time
-d = p.filter_span / 2;                               % Tx filter delay in symbols
-Lf = frame_layout(p);
-b = (0:L-1)';
-fi = floor(b / p.frame_length);                      % frame of each bit
-sym = fi * Lf.air + Lf.idx_data(floor((b - fi * p.frame_length) / 2) + 1) + d;
-er = false(L, 1);
-in = sym <= nsym;
-er(in) = hot(sym(in));
-
-trellis = poly2trellis(7, [171 133]);
-K = floor(L / 2) - 6;
-ber = nan(1, nf); fer = nan(1, nf); crcf = nan(1, nf);
-if K < 64, return; end
-rs = RandStream('mt19937ar', 'Seed', 11);
-u = randi(rs, [0 1], K, 1);
-c = convenc([u; zeros(6, 1)], trellis);
-Lc = numel(c);
-perm = randperm(rs, Lc)';
-r = xor(c(perm), e(1:Lc));
-soft = (1 - 2*double(r)) .* ~er(1:Lc);
-softc = zeros(Lc, 1);
-softc(perm) = soft;
-dec = vitdec(softc, trellis, 35, 'term', 'unquant');
-err = double(dec(1:K) ~= u);
-
-kf = p.frame_length / 2;                             % information bits per frame
-for f = 1:nf
-    i0 = (f-1)*kf + 1; i1 = f*kf;
-    if i1 > K, continue; end
-    ef = err(i0:i1);
-    ber(f) = mean(ef);
-    fer(f) = double(any(ef));
-    crcf(f) = crc_check(u(i0:i1 - p.crc_bits), ef);
-end
 end
 
 %% ===================== Symbol-level estimates =====================

@@ -87,7 +87,7 @@ parfor (j = 1:nJ, NWP)
             rid = surv3_run_id(r); okc = false(1, numel(ACTIONS));
             for a = 1:numel(ACTIONS)
                 Q = P{s, a, 1}; m = Q.run == rid;
-                okc(a) = mean(Q.ber(m)) <= RATIO * bc && mean(double(Q.fer(m))) <= RATIO * fc + 1 / max(sum(m), 1);
+                okc(a) = mean(Q.ber(m)) <= RATIO * bc && mean(double(Q.fer(m))) <= RATIO * fc + packet_share(ACTIONS{a}, sum(m));
             end
             R(s, r) = any(okc);
             if any(okc), Bc{s, r} = ACTIONS{find(okc, 1)}; end

@@ -19,8 +19,8 @@
 % first interferer direction and its alignment with the GCS, GCS direction, heading rate,
 % bank, roll, pitch and pitch-wobble amplitude, receive correlation, GCS pointing loss,
 % altitude, the UAV antenna's gain toward the GCS in level flight and at the attitude,
-% and the spread of the airframe loss over the antennas. Frames whose BER is incomplete
-% are dropped.
+% the spread of the airframe loss over the antennas, and the timing of the gated jammers
+% (sweep period and phase, burst phase). Frames whose BER is incomplete are dropped.
 
 close all; clc;
 warning('off', 'Simulink:cgxe:LeakedJITEngine');
@@ -53,7 +53,7 @@ MEAS = {'rssi', 'crc_fail', 'ber_est', 'snr_post', 'sinr', 'env_corr', 'iot', 'c
 D = struct('iq', {{}}, 'label', [], 'level', [], 'snr', [], 'ber', [], 'fer', [], 'speed', [], 'run', [], 'seed', [], 'fold', [], ...
     'pos', [], 'gain_ant', [], 'act', [], 'k_db', [], 'k_int', [], 'aoa', [], 'yaw', [], 'rho', [], 'gcs_db', [], ...
     'alt_m', [], 'el_db', [], 'align', [], 'gcs_aoa', [], 'bank', [], 'roll', [], 'pitch', [], 'wob', [], ...
-    'att_db', [], 'body_spread_db', []);
+    'att_db', [], 'body_spread_db', [], 'jam', []);
 for i = 1:numel(MEAS), D.(MEAS{i}) = []; end
 run_id = 0;
 t0 = tic;
@@ -105,6 +105,7 @@ dataset.k_db = D.k_db(:); dataset.k_int = D.k_int(:); dataset.aoa = D.aoa(:); da
 dataset.rho = D.rho(:); dataset.gcs_db = D.gcs_db(:); dataset.alt_m = D.alt_m(:); dataset.el_db = D.el_db(:);
 dataset.align = D.align(:); dataset.gcs_aoa = D.gcs_aoa(:); dataset.bank = D.bank(:); dataset.roll = D.roll(:);
 dataset.pitch = D.pitch(:); dataset.wob = D.wob(:); dataset.att_db = D.att_db(:); dataset.body_spread_db = D.body_spread_db(:);
+dataset.jam = D.jam';                      % sweep period [s], sweep phase [s], burst phase per frame
 dataset.meta = struct('N_SUB', N_SUB, 'F_SUB', F_SUB, 'EbNo_list', EbNo_list, 'delay_bits', delay_bits, ...
     'mode', 'seeded_subruns_D59', 'n_rx', p0.n_rx, 'speed_range_kmh', [p0.speed_kmh_min p0.speed_kmh_max], ...
     'threat_cfg', threat_cfg, 'created', datestr(now));
@@ -152,6 +153,7 @@ D.alt_m = [D.alt_m, d.alt_m * o]; D.el_db = [D.el_db, d.el_db * o];
 D.align = [D.align, d.align(1) * o]; D.gcs_aoa = [D.gcs_aoa, d.gcs_aoa * o]; D.bank = [D.bank, d.bank * o];
 D.roll = [D.roll, d.roll * o]; D.pitch = [D.pitch, d.pitch * o]; D.wob = [D.wob, d.wobble(1) * o];
 D.att_db = [D.att_db, d.att_db * o]; D.body_spread_db = [D.body_spread_db, (max(d.body_db) - min(d.body_db)) * o];
+D.jam = [D.jam, d.jam(:) * o];
 D.ber = [D.ber, F.ber(v)]; D.fer = [D.fer, F.fer(v)];
 for i = 1:numel(MEAS), D.(MEAS{i}) = [D.(MEAS{i}), F.(MEAS{i})(v)]; end
 end

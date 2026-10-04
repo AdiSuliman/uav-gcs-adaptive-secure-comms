@@ -247,7 +247,8 @@ end
 
 %% ===================== Helpers =====================
 function o = sliceObs(obs, i)
-o = struct('probs', obs.probs(i, :), 'unknown', obs.unknown(i), 'feat', obs.feat(i, :), 'ber_true', obs.ber_true(i));
+o = struct('probs', obs.probs(i, :), 'unknown', obs.unknown(i), 'feat', obs.feat(i, :), 'ber_true', obs.ber_true(i), ...
+    'cfg_link', obs.cfg_link(i), 'pkt', obs.pkt(i));
 end
 
 function c = compromised(E, K, cfg)

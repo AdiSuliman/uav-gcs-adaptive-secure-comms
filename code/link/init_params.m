@@ -97,7 +97,7 @@ params.wobble_arm_m     = 0.4;                   % [m] antenna offset from the c
 params.active_threat = 'jamming';   % threat of the next model build: 'none', a threat, or 'a+b'
 params.jsr_db        = 16;          % [dB] Jamming-to-Signal Ratio (barrage jammer power)
 params.burst_duty    = 0.3;         % Noise Burst: fraction of time jammer is ON (0-1)
-params.burst_period  = 100;         % Noise Burst: on/off cycle length (symbols)
+params.burst_period  = 100;         % Noise Burst: on/off cycle length (symbols); its phase drawn per flight (jam_timing.m)
 params.path_loss_db  = 14;          % Path Loss: attenuation (dB) applied to Tx signal
 % Antenna Fault: a connector of one antenna is open for the flight (a broken connector that
 % separates at altitude and stays open, Fedde & Carter, US 4,506,385; opens are the most
@@ -131,12 +131,16 @@ params.benign_occ     = [0.05 0.86];      % channel occupancy, drawn per flight
 params.benign_pkt_s   = [0.268e-3 3.2e-3]; % packet duration, log-uniform [s]
 params.benign_idle_shape = 0.49;          % gamma shape of the idle gaps
 
-% Sweeping Jammer: like jamming, but only dwells on our channel a fraction
-% of the time (spends the rest sweeping other channels). Severity axis is still
-% jsr_db (consistent with jamming/noise_burst/reactive_jamming), duty/period are
-% fixed structural constants (same pattern as burst_duty/burst_period for noise_burst).
-params.sweep_duty    = 0.15;        % Sweeping Jammer: fraction of time dwelling on our channel
-params.sweep_period  = 300;         % Sweeping Jammer: full sweep cycle length (symbols, longer than noise_burst's 100)
+% Sweeping Jammer (Liu et al.: sweep 1 GHz/s, instantaneous bandwidth 4 MHz, a 20 MHz band):
+% its band covers our 1.25 MHz channel for (4 + 1.25) MHz / 1 GHz/s = 5.25 ms of every
+% sweep (sweep_window_s.m); the sweep period is the swept band over the speed, 20 ms over
+% Liu's 20 MHz to 83.5 ms over the whole 2.4 GHz band (2400-2483.5 MHz, ETSI EN 300 328).
+% Period and phase on the channel clock drawn per flight (jam_timing.m): a frame is
+% jammed whole, in part or not at all. Severity axis jsr_db, as jamming.
+params.sweep_speed_hz_s = 1e9;         % [Hz/s] sweep speed
+params.sweep_bw_hz      = 4e6;         % [Hz] instantaneous bandwidth of the jammer
+params.sweep_period_s   = [20e-3 83.5e-3];   % [s] range of the sweep period
+params.jam_timing_random = true;       % sweep period and phase, burst phase drawn per flight; else the shortest period, phase 0
 % In-band cap: no emitter reaches the UAV more than 30 dB over our received signal, the
 % sources' most severe in-band level (Liu et al.), whatever path loss, pointing or
 % elevation loss our signal has (inband_cap_amp.m, applied in build_threat_model.m).
@@ -144,27 +148,33 @@ params.inband_cap_db = 30;          % [dB] largest in-band power of an emitter o
 
 % Countermeasure physics (apply_countermeasure.m)
 params.cm_acr_db      = 30;         % [dB] rejection of an interferer left on another channel
+params.fdiv_spacing_hz = 25e6;      % [Hz] freq_diversity: second carrier at 802.11's adjacent-channel separation, where it specifies >= 35 dB rejection (IEEE 802.11-2007 18.4.8.3)
 params.cm_rate_factor = 4;          % rate_reduce: data rate / 4 -> +6 dB processing gain, goodput x0.25
-params.cm_power_db    = 6;          % power_control: the radio's next step, +6 dB, up to the e.i.r.p. cap (power_step_db.m)
-params.cm_fec_rate    = 1/2;        % fec_interleave: code rate, K = 7, generators [171 133] octal
+params.cm_fec_rate    = 1/2;        % fec_interleave: code rate, K = 7, generators [171 133] octal; one packet over two frames (fec_packets.m)
 
 %% ========== ANTENNAS & RECEIVER ==========
 % Modeled link: GCS -> UAV command uplink; the receiver (and the detector) is on the UAV.
 % Eb/N0 is per UAV antenna (per branch) and includes the GCS antenna gain.
-% GCS: a low-power 2.4 GHz radio (nRF24L01+ steps 0 / -6 / -12 / -18 dBm) at -6 dBm, its 0 dBm
-% step being the power_control action, feeding a 12 dBi directional antenna (the gain
+% GCS: an AD9361-class transmitter (power control in 0.25 dB steps over 90 dB, up to
+% 7.5 dBm at 2.4 GHz, AD9361 Rev F) at -6 dBm, feeding a 12 dBi directional antenna (the gain
 % class of the fixed sector antenna of Rodriguez-Pineiro et al.) on a GPS tracker
 % (mean pointing error 5.62 deg azimuth, 1.51 deg elevation, measured with a quadcopter,
 % Nugroho & Dectaviansyah). Licence-exempt cap: 100 mW e.i.r.p. in Israel (Ministry of
-% Communications), as ETSI EN 300 328, which also caps 10 dBm/MHz: 11 dBm for our 1.25 MHz
-% signal, the stricter. Nominal e.i.r.p. 6 dBm, 10 dB above an omni on the same radio;
-% power_control adds only what the cap leaves (power_step_db.m). The pointing loss of
+% Communications), as ETSI EN 300 328, which also caps 10 dBm in any 1 MHz (4.3.2.3): our
+% RRC signal puts 95.5% of its power in its central 1 MHz, so 10.2 dBm (eirp_cap_dbm.m),
+% the stricter. Nominal e.i.r.p. 6 dBm, 10 dB above an omni on the same radio;
+% power_control raises it by the largest step under the cap, +4.0 dB to 10.0 dBm, per
+% carrier with freq_diversity (power_step_db.m). One 0.69 ms frame per 20 ms cycle (3.4%
+% duty) meets the standard's limits for non-adaptive equipment. The pointing loss of
 % each flight (gcs_pointing.m) is applied in the channel. A tracker that lost its target
 % falls back to an omni (Boeing, US 8,503,941): 10 dB less, to the receiver a path loss.
 params.gcs_pt_dbm      = -6;          % [dBm] nominal conducted power of the GCS radio
+params.gcs_pmax_dbm    = 7.5;         % [dBm] largest output of the radio at 2.4 GHz
+params.gcs_step_db     = 0.25;        % [dB] power-control step of the radio
 params.gcs_ant_dbi     = 12;          % [dBi] tracked directional GCS antenna
 params.gcs_omni_dbi    = 2;           % [dBi] omni fallback antenna
-params.gcs_eirp_cap_dbm = 10 + 10*log10(1.25);   % [dBm] 10 dBm/MHz over our 1.25 MHz signal
+params.gcs_psd_dbm_mhz = 10;          % [dBm] e.i.r.p. density cap in any 1 MHz
+params.gcs_eirp_cap_dbm = eirp_cap_dbm(params.gcs_psd_dbm_mhz, params.rolloff, params.symbol_rate);   % [dBm]
 params.gcs_tracked     = true;        % pointing loss drawn per seeded sub-run
 params.gcs_err_deg     = [5.62 1.51]; % [deg] mean pointing error, azimuth / elevation
 params.gcs_floor_db    = 14;          % [dB] edge of the F.1336 main-lobe formula (1.08 phi3)

@@ -20,7 +20,7 @@ function [P, info] = pool_cell(p, threat, actions, ebno, geo, det, opt)
 %   info     configurations actually simulated (identical physics is simulated once)
 modelName = 'UAV_GCS_Threat_Link';
 nA = numel(actions); nS = numel(ebno); nSp = numel(geo{1});
-stop_time = num2str(opt.F_SUB * p.frame_duration);
+stop_time = num2str((opt.F_SUB - 1) * p.frame_duration);   % frames at 0 .. the stop time: F_SUB of them, whole FEC packets
 P = cell(nS, nA, nSp);
 keys = {}; first = zeros(1, 0);
 info = struct('n_unique', 0, 'map', zeros(1, nA));

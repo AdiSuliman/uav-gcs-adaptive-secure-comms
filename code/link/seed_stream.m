@@ -4,7 +4,7 @@ function [rs, n] = seed_stream(seed, purpose)
 %   n = seed_base(seed) + the purpose's offset, so every draw of a flight comes from
 %   its own stream and no stream serves two flights or two purposes.
 %   Offsets: channel 0, awgn 1, bits 2, threat 7, aoa 11, k 23, yaw 29, corr 31,
-%   gcsaoa 37, gcs 41, alt 47, speed 53, body 59, wobble 61.
+%   gcsaoa 37, gcs 41, jam 43, alt 47, speed 53, body 59, wobble 61.
 switch purpose
     case 'channel', off = 0;
     case 'awgn',    off = 1;
@@ -16,6 +16,7 @@ switch purpose
     case 'corr',    off = 31;
     case 'gcsaoa',  off = 37;
     case 'gcs',     off = 41;
+    case 'jam',     off = 43;
     case 'alt',     off = 47;
     case 'speed',   off = 53;
     case 'body',    off = 59;

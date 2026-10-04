@@ -72,6 +72,7 @@ p0.corr_random = false;
 p0.gcs_aoa_random = false;              % the GCS at broadside: the mapped directions are relative to it
 p0.gcs_tracked = false;                 % the GCS antenna on its axis
 p0.alt_random = false;                  % no altitude: the UAV antenna's horizon gain toward the GCS
+p0.jam_timing_random = false;           % the shortest sweep at phase 0: the sweeper on our channel in every frame
 SNR_points = p0.EbNo_dB;
 nS = numel(SNR_points);
 v_nom = p0.v_nominal * 3.6;                       % nominal cruise speed [km/h]
@@ -233,10 +234,11 @@ end
 function grid_data = build_map(ber_all, fer_all, threat_cfg, ACTIONS, act_set, ber_clean, fer_clean, nfr, ...
     RATIO_RECOVERABLE, RATIO_MARGINAL)
     % Recoverable: some configuration of act_set with BER <= 2x and packet loss
-    % <= 2x (+ one packet of the run) of the clean link; otherwise the best BER
-    % decides between marginal and non-recoverable.
+    % <= 2x (+ one packet of the run, packet_share.m) of the clean link; otherwise the
+    % best BER decides between marginal and non-recoverable.
     nS = numel(ber_clean);
     cols = find(ismember(ACTIONS, act_set));
+    slack = reshape(packet_share(ACTIONS(cols), nfr), 1, []);
     grid_data = struct('threat',{},'base',{},'aoa',{},'levels',{},'ber_best',{},'ratio',{}, ...
         'status',{},'ber_attacked',{},'best_action',{});
     for t = 1:numel(threat_cfg)
@@ -250,7 +252,7 @@ function grid_data = build_map(ber_all, fer_all, threat_cfg, ACTIONS, act_set, b
         for li = 1:nL
             for s = 1:nS
                 okc = B(li, cols, s) <= RATIO_RECOVERABLE * ber_clean(s) & ...
-                      Fe(li, cols, s) <= RATIO_RECOVERABLE * fer_clean(s) + 1 / nfr;
+                      Fe(li, cols, s) <= RATIO_RECOVERABLE * fer_clean(s) + slack;
                 if any(okc)
                     cand = cols(okc); [ber_best(li,s), k] = min(B(li, cand, s)); kc = cand(k);
                     status(li,s) = 1;

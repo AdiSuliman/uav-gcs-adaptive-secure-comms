@@ -52,7 +52,12 @@ p = base_params();
 verifyEqual(tc, g, 10*log10(p.cm_rate_factor) + power_step_db(p), 'AbsTol', 1e-9);
 % the power step never takes the GCS above the e.i.r.p. cap
 verifyLessThanOrEqual(tc, p.gcs_pt_dbm + p.gcs_ant_dbi + power_step_db(p), p.gcs_eirp_cap_dbm + 1e-9);
-verifyEqual(tc, power_step_db(rmfield(p, 'gcs_ant_dbi')), p.cm_power_db);
+verifyEqual(tc, power_step_db(rmfield(p, 'gcs_ant_dbi')), p.gcs_pmax_dbm - p.gcs_pt_dbm);   % the radio's own limit
+p2 = apply_countermeasure(p, 'sweeping_jammer', 'freq_diversity+power_control');
+verifyTrue(tc, p2.sweep_fdiv);
+verifyEqual(tc, p2.jsr_db, p.jsr_db - power_step_db(p), 'AbsTol', 1e-9);
+p2 = apply_countermeasure(p, 'sweeping_jammer', 'channel_switch');
+verifyFalse(tc, isfield(p2, 'sweep_fdiv'));
 [p2, ~, cm] = apply_countermeasure(p, 'jamming', 'channel_switch+spatial_diversity');
 verifyEqual(tc, p2.jsr_db, p.jsr_db - p.cm_acr_db, 'AbsTol', 1e-9);
 verifyEqual(tc, p2.rx_combiner, 'mmse');
@@ -226,7 +231,7 @@ function test_seed_streams_disjoint(tc)
 % Every purpose of every flight seed draws from its own stream: the purpose offsets
 % are distinct and below 64, and the flight seeds of every family are distinct and
 % below 2^26.
-P = {'channel', 'awgn', 'bits', 'threat', 'aoa', 'k', 'yaw', 'corr', 'gcsaoa', 'gcs', 'alt', 'speed', 'body', 'wobble'};
+P = {'channel', 'awgn', 'bits', 'threat', 'aoa', 'k', 'yaw', 'corr', 'gcsaoa', 'gcs', 'jam', 'alt', 'speed', 'body', 'wobble'};
 off = zeros(1, numel(P));
 for i = 1:numel(P)
     [~, n] = seed_stream(12345, P{i});
@@ -264,7 +269,9 @@ rho = arrayfun(@(x) rx_correlation(x, [0 1]), S);
 G = arrayfun(@(x) gcs_aoa(x, [0 1]), S);
 W = cell2mat(arrayfun(@(x) hover_attitude(x, 0, p), S, 'UniformOutput', false));
 W = (W(:, 1) - p.wobble_roll_deg(1)) / diff(p.wobble_roll_deg);
-U = [K, A, (w + 1) / 2, rho, v, G, W];                  % the uniform behind every draw
+J = cell2mat(arrayfun(@(x) jam_timing(x, [0 1]), S, 'UniformOutput', false));
+J(:, 2) = J(:, 2) ./ J(:, 1);
+U = [K, A, (w + 1) / 2, rho, v, G, W, J];               % the uniform behind every draw
 c = corrcoef(K(:, 1), w);
 verifyLessThan(tc, abs(c(1, 2)), 0.1);
 C = corrcoef(U);
@@ -784,6 +791,177 @@ st = @(c) exp(-1j * 2*pi * p.ant_spacing_wl * (0:n-1)' * c) / sqrt(n);
 Y = run_link(mdl, p, fdx, [10 -60], 0.9, zeros(1, 7), ones(1, n), 20);
 verifyGreaterThan(tc, abs(st(sind(p.int_aoa_deg(1)))' * lead_dir(Y))^2, 0.9);
 close_system(mdl, 0);
+end
+
+function test_power_cap(tc)
+% The licence-exempt density cap of 10 dBm in any 1 MHz (ETSI EN 300 328) on our RRC
+% signal: 95.5% of its power in the central 1 MHz, so 10.20 dBm; the AD9361-class radio
+% steps up by its largest 0.25 dB step under it, +4.0 dB to 10.0 dBm e.i.r.p.; on the omni
+% its 7.5 dBm output binds first. The share also from the transmit filter's own spectrum,
+% and one frame per cycle within the standard's limits for non-adaptive equipment.
+p = base_params();
+[cap, share] = eirp_cap_dbm(10, 0.25, 1e6);
+verifyEqual(tc, share, 0.75 + 2 * (0.25/4 + 0.25/(2*pi)), 'AbsTol', 1e-12);
+verifyEqual(tc, cap, 10.20, 'AbsTol', 0.01);
+verifyEqual(tc, p.gcs_eirp_cap_dbm, cap, 'AbsTol', 1e-12);
+verifyEqual(tc, power_step_db(p), 4.0, 'AbsTol', 1e-12);
+verifyEqual(tc, p.gcs_pt_dbm + p.gcs_ant_dbi + power_step_db(p), 10.0, 'AbsTol', 1e-12);
+N = 2^16; os = 64;
+H = abs(fft(rcosdesign(p.rolloff, 40, os, 'sqrt'), N)).^2;
+f = (0:N-1) / N * os * p.symbol_rate; f = min(f, os * p.symbol_rate - f);
+verifyEqual(tc, sum(H(f <= 0.5e6)) / sum(H), share, 'AbsTol', 2e-3);
+q = p; q.gcs_ant_dbi = p.gcs_omni_dbi;
+verifyEqual(tc, power_step_db(q), p.gcs_pmax_dbm - p.gcs_pt_dbm, 'AbsTol', 1e-12);
+o = rmfield(p, {'gcs_pmax_dbm', 'gcs_step_db'}); o.cm_power_db = 6; o.gcs_eirp_cap_dbm = 10 + 10*log10(1.25);
+verifyEqual(tc, power_step_db(o), 10*log10(1.25) + 4, 'AbsTol', 1e-12);    % without the radio fields: its next step under the cap
+ton = p.air_symbols / p.symbol_rate;
+verifyLessThanOrEqual(tc, ton, 10e-3);                                       % Tx-sequence
+verifyGreaterThanOrEqual(tc, p.cycle_s - ton, max(ton, 3.5e-3));             % Tx-gap
+verifyLessThanOrEqual(tc, 10^((p.gcs_eirp_cap_dbm - 20) / 10) * ton / p.cycle_s, 0.1);   % medium utilisation
+end
+
+function test_jam_timing(tc)
+% Gated jammers per flight, from the flight's own 'jam' stream: the sweep period uniform
+% in 20-83.5 ms, its phase in [0, T), the burst phase in [0, 1); fixed: the shortest period
+% at phase 0. The sweeper covers our channel for (4 + 1.25) MHz / 1 GHz/s = 5.25 ms of
+% each sweep; with frequency diversity on a carrier 25 MHz away never on both at once, on
+% one 2 MHz away from 2 ms on.
+p = base_params();
+W = cell2mat(arrayfun(@(s) jam_timing(s, p.sweep_period_s), (1:4000)', 'UniformOutput', false));
+verifyTrue(tc, all(W(:, 1) >= 20e-3 & W(:, 1) <= 83.5e-3));
+verifyTrue(tc, all(W(:, 2) >= 0 & W(:, 2) < W(:, 1) & W(:, 3) >= 0 & W(:, 3) < 1));
+verifyEqual(tc, mean(W(:, 1)), mean(p.sweep_period_s), 'AbsTol', 1e-3);
+u = rand(seed_stream(17, 'jam'), 1, 3);
+T = 20e-3 + 63.5e-3 * u(1);
+verifyEqual(tc, jam_timing(17, p.sweep_period_s), [T, T * u(2), u(3)], 'AbsTol', 1e-15);
+d = flight_draws(17, 100, p);
+verifyEqual(tc, d.jam, [T, T * u(2), u(3)], 'AbsTol', 1e-15);
+p.jam_timing_random = false;
+d = flight_draws(17, 100, p);
+verifyEqual(tc, d.jam, [20e-3 0 0]);
+verifyEqual(tc, sweep_window_s(p), [0 5.25e-3], 'AbsTol', 1e-15);
+p.sweep_fdiv = true;
+g = sweep_window_s(p);
+verifyGreaterThanOrEqual(tc, g(1), g(2));
+p.fdiv_spacing_hz = 2e6;
+verifyEqual(tc, sweep_window_s(p), [2e-3 5.25e-3], 'AbsTol', 1e-15);
+verifyEqual(tc, threat_active('sweeping_jammer', [0 0.05 0.1 1]), [false false true true]);   % labels as the WLAN's
+end
+
+function test_gated_jammers(tc)
+% In the model, on the channel clock (frames 20 ms apart): the sweeping jammer is on the
+% samples whose time falls in its window of the sweep, with the flight's period and phase
+% of the 'Gate' block, so a frame is hit whole, in part or not at all, and its on-air
+% share is the share of the window; the frames outside are clean. With frequency
+% diversity (25 MHz) it never hits, and with FEC every frame of a run with the pools'
+% stop time (pool_cell.m) carries a whole packet. The noise bursts start at the flight's
+% phase.
+p = base_params(); p.quiet_build = true; p.active_threat = 'sweeping_jammer'; p.jsr_db = 16; p.seed = 11;
+p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false; p.gcs_tracked = false; p.k_random = false;
+p.gcs_aoa_random = false; p.body_random = false; p.wobble_random = false; p.jam_timing_random = false;
+mdl = 'UAV_GCS_Threat_Link'; nfr = 8; gate = [25e-3 0.2e-3 0];
+fs = p.symbol_rate * p.sps; ns = p.air_symbols * p.sps;
+t = (0:ns-1)' / fs + (0:nfr-1) * round(p.cycle_s * fs) / fs;
+for fdiv = [false true]
+    q = p;
+    if fdiv, q = apply_countermeasure(p, 'sweeping_jammer', 'freq_diversity+fec_interleave'); end
+    evalc('build_threat_model(q)');
+    set_param([mdl '/AWGN'], 'SNR', num2str(15 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), 'SignalPower', num2str(1/p.sps));
+    link_seed(mdl, 11, 160);
+    set_param([mdl '/Gate'], 'Value', mat2str(gate));
+    F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str((nfr - 1) * p.frame_duration)), q, 20);   % frames at 0 .. stop
+    g = sweep_window_s(q); ph = mod(t + gate(2), gate(1));
+    a = mean(ph >= g(1) & ph < g(2), 1);
+    verifyEqual(tc, F.nf, nfr);
+    verifyEqual(tc, F.act, a, 'AbsTol', 1e-9);
+    if fdiv
+        verifyEqual(tc, F.act, zeros(1, nfr));
+        verifyEqual(tc, F.ber, zeros(1, nfr));
+    else
+        verifyEqual(tc, [nnz(a == 1), nnz(a == 0), nnz(a > 0 & a < 1)], [2 5 1]);
+        verifyGreaterThan(tc, min(F.ber(a == 1)), 1e-2);
+        verifyLessThan(tc, mean(F.ber(a == 0)), 1e-3);
+    end
+    close_system(mdl, 0);
+end
+p.active_threat = 'noise_burst';
+evalc('build_threat_model(p)');
+set_param([mdl '/AWGN'], 'SNR', num2str(30 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), 'SignalPower', num2str(1/p.sps));
+link_seed(mdl, 11, 160);
+pw = zeros(1, 2);
+for k = 1:2
+    set_param([mdl '/Gate'], 'Value', mat2str([20e-3 0 0.5 * (k - 1)]));
+    out = sim(mdl, 'StopTime', num2str(2 * p.frame_duration));
+    Y = out.get('Rx_IQ');
+    pw(k) = mean(abs(Y(1:100, 1, 1)).^2);       % the first frame's quiet slot: bursts from sample 0 at phase 0, from 200 at 0.5
+end
+verifyGreaterThan(tc, 10*log10(pw(1) / pw(2)), 10);
+close_system(mdl, 0);
+end
+
+function test_fec_packets(tc)
+% FEC: one codeword per 1000 + 32-bit packet over two frames (2064 coded bits, two frames
+% of channel bits). A clean run decodes every frame; both frames carry their packet's
+% result, in steps of 1/1032; a packet's result does not change with another packet's
+% errors; scattered errors are repaired, a burst only when the receiver sees it (erased),
+% a whole jammed frame not; a last frame without its pair is NaN.
+p = base_params(); L = frame_layout(p); bpf = p.frame_length; nf = 20; d = p.filter_span / 2;
+rs = RandStream('mt19937ar', 'Seed', 3);
+tx = randi(rs, [0 1], nf * bpf, 1);
+iq = ones(L.air * p.sps, nf);
+[b, f, c] = fec_packets(tx, tx, iq, p, nf);
+verifyEqual(tc, [b; f; c], zeros(3, nf));
+verifyEqual(tc, [crc32_fail(tx(1:1000), zeros(bpf, 1)), crc32_fail(tx(1:1000), [1; zeros(bpf - 1, 1)])], [0 1]);
+rx = tx;
+i1 = randperm(rs, 2 * bpf, 10); rx(i1) = 1 - rx(i1);                   % packet 1: scattered errors
+rx(2*bpf + (1:bpf)) = randi(rs, [0 1], bpf, 1);                          % frame 3 jammed whole
+[b, f, c] = fec_packets(tx, rx, iq, p, nf);
+verifyEqual(tc, b([1 2 5:nf]), zeros(1, nf - 2));
+verifyGreaterThan(tc, b(3), 0);
+verifyEqual(tc, [f(3) c(3)], [1 1]);
+verifyEqual(tc, [b(4) f(4) c(4)], [b(3) f(3) c(3)]);
+verifyEqual(tc, b(3) * bpf, round(b(3) * bpf), 'AbsTol', 1e-9);
+rx2 = rx; rx2(8*bpf + (1:2*bpf)) = randi(rs, [0 1], 2*bpf, 1);         % packet 5 jammed
+b2 = fec_packets(tx, rx2, iq, p, nf);
+verifyEqual(tc, b2([1:8 11:nf]), b([1:8 11:nf]));
+verifyGreaterThan(tc, b2(9), 0);
+s = 101:250;                                                             % 150 data symbols of frame 7, random bits
+k = 6*bpf + reshape([2*s - 1; 2*s], [], 1);
+rx3 = tx; rx3(k) = randi(rs, [0 1], numel(k), 1);
+iq3 = iq;
+for m = L.idx_data(s)' + d
+    iq3((m-1)*p.sps + 1:m*p.sps, 7) = sqrt(10);                         % 10 dB above the rest: erased
+end
+b3 = fec_packets(tx, rx3, iq, p, nf);
+verifyGreaterThan(tc, b3(7), 0);
+b3 = fec_packets(tx, rx3, iq3, p, nf);
+verifyEqual(tc, b3, zeros(1, nf));
+b4 = fec_packets(tx(1:19*bpf), tx(1:19*bpf), iq(:, 1:19), p, 19);
+verifyEqual(tc, b4(1:18), zeros(1, 18));
+verifyTrue(tc, isnan(b4(19)));
+end
+
+function test_packet_loss_once(tc)
+% A lost packet is one packet: the slack of the packet-loss criterion is two frames with
+% FEC (a packet over two frames) and one frame without; the monitor counts a lost coded
+% packet once, so one lost packet does not degrade a coded link and two do, while an
+% uncoded link counts its frames.
+verifyEqual(tc, packet_share({'no_action', 'power_control+fec_interleave'}, 20), [1 2] / 20);
+verifyEqual(tc, packet_share('fec_interleave', 57), 2 / 56);
+A = policy_actions(); ic = find(strcmp(A, 'fec_interleave')); iu = find(strcmp(A, 'no_action'));
+PP = struct('actions', {A}, 'classes', {{'none', 'jamming'}}, 'sps', 4, 'bps', 2, 'maha_thr', -Inf);
+nF = numel(link_features('names'));
+crc = [0 0 0 0 1 1 0 0; 0 0 0 0 1 1 1 1; 0 0 0 0 1 1 0 0];               % coded, coded, uncoded episode
+mem = policy_monitor('init', 3, numel(A));
+for t = 1:8
+    obs = struct('probs', repmat([1 0], 3, 1), 'unknown', false(3, 1), 'feat', zeros(3, nF), ...
+        'cfg_link', [ic; ic; iu], 'pkt', floor((t - 1) / 2) * ones(3, 1));
+    obs.feat(:, feature_index('crc_fail')) = crc(:, t);
+    obs.feat(:, feature_index('log_ber')) = -6;
+    [mem, M] = policy_monitor('update', mem, obs, PP, [ic ic iu]);
+end
+verifyEqual(tc, M.plr, [1/3; 2/3; 2/5], 'AbsTol', 1e-12);
+verifyEqual(tc, M.degraded, [false true false]);
 end
 
 function [Y, H] = run_link(mdl, p, fd, kfac, rho, att, body, nfr)

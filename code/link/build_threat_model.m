@@ -41,8 +41,12 @@ function build_threat_model(p)
 %           (p.inband_ref, apply_countermeasure.m), so a countermeasure still lowers it
 %           by its own amount.
 %           Output 2: share of the frame's samples with the threat on the air
-%           (benign packet traffic, an antenna fault with its contact open; 1 for
-%           every other threat, 0 for none).
+%           (benign packet traffic, the sweeping jammer on our channel, an antenna
+%           fault with its contact open; 1 for every other threat, 0 for none).
+%           The gated jammers run with the timing of the Constant block 'Gate'
+%           (jam_timing.m): the sweeping jammer is on our channel while
+%           mod(t + p0, T) of the channel clock lies in sweep_window_s.m, and the
+%           noise bursts start at a phase of their period.
 %           Last, every antenna's receive chain: a gain and phase error fixed per flight
 %           (p.chain_amp_db, p.chain_phase_deg).
 %           Interferer directions come from the Constant block 'AoA': p.int_aoa_deg,
@@ -145,6 +149,7 @@ add_block('simulink/Sources/Constant', [modelName '/Corr'],    'Position', [150 
 add_block('simulink/Sources/Constant', [modelName '/GCS'],     'Position', [150 430 220 450]);
 add_block('simulink/Sources/Constant', [modelName '/Att'],     'Position', [150 470 220 490]);
 add_block('simulink/Sources/Constant', [modelName '/Body'],    'Position', [150 510 220 530]);
+add_block('simulink/Sources/Constant', [modelName '/Gate'],    'Position', [150 550 220 570]);
 add_block('simulink/Sinks/To Workspace', [modelName '/tx_sink'], 'Position', [150 30 230 60]);
 add_block('simulink/Sinks/To Workspace', [modelName '/rx_sink'], 'Position', [870 90 950 120]);
 add_block('simulink/Sinks/To Workspace', [modelName '/Tx_IQ'],   'Position', [300 30 380 60]);
@@ -203,6 +208,7 @@ add_line(modelName, 'GCS/1',       'Threat/8',  'autorouting', 'on');
 add_line(modelName, 'Att/1',       'Channel/8', 'autorouting', 'on');
 add_line(modelName, 'Att/1',       'Threat/9',  'autorouting', 'on');
 add_line(modelName, 'Body/1',      'Channel/9', 'autorouting', 'on');
+add_line(modelName, 'Gate/1',      'Threat/10', 'autorouting', 'on');
 add_line(modelName, 'Channel/1',   'Threat/1',  'autorouting', 'on');
 add_line(modelName, 'Threat/1',    'AWGN/1',    'autorouting', 'on');
 add_line(modelName, 'Threat/2',    'Thr_act/1', 'autorouting', 'on');
@@ -245,6 +251,9 @@ set_param([modelName '/Att'], 'UserDataPersistent', 'on', 'UserData', struct('gc
 set_param([modelName '/Body'], 'Value', mat2str(ones(1, nr)));
 set_param([modelName '/Body'], 'UserDataPersistent', 'on', 'UserData', struct('body_random', logical(p.body_random), ...
     'body_loss_db', p.body_loss_db));
+set_param([modelName '/Gate'], 'Value', mat2str([p.sweep_period_s(1) 0 0], 10));
+set_param([modelName '/Gate'], 'UserDataPersistent', 'on', 'UserData', struct('jam_timing_random', ...
+    logical(p.jam_timing_random), 'sweep_period_s', p.sweep_period_s));
 link_seed(modelName, seed, p.fd_max);
 
 %% ---- Save ----
@@ -440,13 +449,17 @@ for c = 1:numel(addc)
                 w = sprintf('w = sqrt(%.8f/2) * complex(randn(Ns, 1), randn(Ns, 1));\n', 10^(p.benign_int_db/10));
             end
         case 'noise_burst'
+            % bursts from the flight's phase of their period ('Gate' block)
             ps = p.burst_period * sps; on = round(p.burst_duty * ps);
-            pers{end+1} = 'k_nb'; init{end+1} = 'k_nb = 0;'; %#ok<AGROW>
+            pers{end+1} = 'k_nb'; init{end+1} = sprintf('k_nb = floor(gate(3) * %d);', ps); %#ok<AGROW>
             w = gated_noise('k_nb', ps, on, 10^(p.jsr_db/10));
         case 'sweeping_jammer'
-            ps = p.sweep_period * sps; on = round(p.sweep_duty * ps);
-            pers{end+1} = 'k_sw'; init{end+1} = 'k_sw = 0;'; %#ok<AGROW>
-            w = gated_noise('k_sw', ps, on, 10^(p.jsr_db/10));
+            % on our channel while the sweep's window covers it, on the channel clock: the
+            % flight's sweep period gate(1) and phase gate(2)
+            g = sweep_window_s(p);
+            w = sprintf(['tsw = mod(t + gate(2), gate(1));\non = tsw >= %.10g & tsw < %.10g;\n' ...
+                'act = mean(double(on));\n' ...
+                'w = sqrt(%.8f/2) * complex(randn(Ns, 1), randn(Ns, 1)) .* on;\n'], g(1), g(2), 10^(p.jsr_db/10));
         case 'reactive_jamming'
             w = sprintf(['w = complex(zeros(Ns, 1));\nfor i = 1:Ns\n    if abs(ys(i))^2 > %.8f\n' ...
                 '        w(i) = sqrt(%.8f/2) * complex(randn, randn);\n    end\nend\n'], ...
@@ -493,7 +506,7 @@ if p.chain_amp_db > 0 || p.chain_phase_deg > 0
 end
 
 pers = [{'nI'}, pers]; init = [{'nI = 0;'}, init];
-head = sprintf('function [y, act] = fcn(u, seed, fd, aoa, kdb, yaw, rho, gcs, att)\n%%#codegen\npersistent seeded\n');
+head = sprintf('function [y, act] = fcn(u, seed, fd, aoa, kdb, yaw, rho, gcs, att, gate)\n%%#codegen\npersistent seeded\n');
 for i = 1:numel(pers)
     head = [head sprintf('persistent %s\n', pers{i})]; %#ok<AGROW>
 end
@@ -1038,7 +1051,9 @@ d = struct('n_rx', 3, 'ant_aperture_m', 1.2, 'rx_corr', 0.3, 'gcs_aoa_deg', 0, .
     'lb_uav_dbi', 2, 'lb_nf_db', 5, 'lb_margin_db', 10, 'lb_rate_bps', 2e6, ...
     'gcs_aoa_random', false, 'gcs_aoa_range_deg', [-90 90], 'body_random', false, 'body_loss_db', [3.03 2.53 0.016 10.96], ...
     'wobble_random', false, 'wobble_v_max', 8, 'wobble_roll_deg', [-17.5 19.3], 'wobble_pitch_deg', [-11.0 14.9], ...
-    'wobble_amp_deg', 10, 'wobble_freq_hz', [5 25], 'wobble_arm_m', 0.4, 'int_los_doppler', true, 'c_light', 3e8);
+    'wobble_amp_deg', 10, 'wobble_freq_hz', [5 25], 'wobble_arm_m', 0.4, 'int_los_doppler', true, 'c_light', 3e8, ...
+    'sweep_speed_hz_s', 1e9, 'sweep_bw_hz', 4e6, 'sweep_period_s', [20e-3 83.5e-3], 'jam_timing_random', false, ...
+    'fdiv_spacing_hz', 25e6, 'sweep_fdiv', false);
 f = fieldnames(d);
 for i = 1:numel(f)
     if ~isfield(p, f{i}), p.(f{i}) = d.(f{i}); end

@@ -32,6 +32,8 @@ function d = flight_draws(seed, fd, p, geo)
 %   d.align           |a_g' a_i|^2 / n^2 of the steering vectors toward the GCS and each
 %                     interferer at the start of the flight
 %   d.gcs_amp         amplitude of our signal, 10^((att_db - gcs_point_db)/20) ('GCS' block)
+%   d.jam             timing of the gated jammers [sweep period s, sweep phase s, burst
+%                     phase] (jam_timing.m; fixed: the shortest period, phases 0) ('Gate' block)
 if nargin < 4 || isempty(geo), geo = struct(); end
 if getf(p, 'k_random', false)
     k = channel_k(seed, p.k_range_db);
@@ -78,6 +80,9 @@ if isfield(p, 'ant_spacing_wl')                 % interferers in the UAV's horiz
     d.align = abs(st(ca)' * st(cosd(d.pitch) * sind(d.aoa))).^2 / n^2;
 end
 d.gcs_amp = 10^((d.att_db - d.gcs_point_db) / 20);
+sp = getf(p, 'sweep_period_s', [20e-3 83.5e-3]);
+d.jam = [sp(1) 0 0];
+if getf(p, 'jam_timing_random', false), d.jam = jam_timing(seed, sp); end
 end
 
 function v = getf(s, name, default)

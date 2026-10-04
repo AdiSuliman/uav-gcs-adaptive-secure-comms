@@ -28,9 +28,10 @@ function [p, snr_gain_db, cm] = apply_countermeasure(p, threat, action)
 %     channel_switch     move to a channel the interferer does not occupy:
 %                        in-channel interference drops by the adjacent-channel
 %                        rejection; no effect on swept, broadband or signal-side threats
-%     freq_diversity     same data on two channels, best branch selected:
-%                        in-channel interference drops by the rejection; a swept
-%                        jammer must hit both channels at once (duty -> duty^2);
+%     freq_diversity     same data on two channels p.fdiv_spacing_hz apart, the better
+%                        branch selected per frame: in-channel interference drops by
+%                        the rejection; a swept jammer loses a frame only while both
+%                        carriers are inside its band at once (sweep_window_s.m);
 %                        no effect on broadband or signal-side threats; 2x spectrum
 %     spatial_diversity  the UAV receiver switches from MRC to adaptive MMSE combining
 %                        over its n_rx antennas: sample-covariance weights null
@@ -40,15 +41,16 @@ function [p, snr_gain_db, cm] = apply_countermeasure(p, threat, action)
 %     rate_reduce        rate / cm_rate_factor: +10*log10(factor) dB processing gain
 %                        against noise and noise-like interference; no gain against
 %                        a coherent spoofer; goodput / factor
-%     power_control      the radio's next power step, cm_power_db, up to the licence-exempt
-%                        e.i.r.p. cap (power_step_db.m): the signal rises by that much
-%                        against noise and every additive interferer, including a
-%                        spoofer; attenuation threats keep their loss
-%     fec_interleave     rate-1/2 convolutional code (K = 7) with a random interleaver
-%                        over the run and erasure decoding of symbols hit by an energy
-%                        burst; same channel symbols, so no Eb/N0 change here -- the
-%                        decoding is applied to the measured error pattern in
-%                        extract_closed_loop_frames.m (p.fec); goodput x1/2
+%     power_control      the GCS radio's largest power step under the licence-exempt
+%                        e.i.r.p. cap, per carrier (power_step_db.m): the signal rises by
+%                        that much against noise and every additive interferer,
+%                        including a spoofer; attenuation threats keep their loss
+%     fec_interleave     one 1000 + 32-bit packet per two frames: rate-1/2
+%                        convolutional code (K = 7), interleaved over the two frames,
+%                        erasure decoding of symbols hit by an energy burst; same
+%                        channel symbols, so no Eb/N0 change here -- the decoding is
+%                        applied to the measured error pattern (fec_packets.m, p.fec);
+%                        goodput x1/2, the packet decoded after its second frame (40 ms)
 %
 %   p.inband_ref keeps the in-band levels before any countermeasure: the in-band cap
 %   acts on them (build_threat_model.m), so a capped emitter keeps one power under every
@@ -98,8 +100,8 @@ switch action
             p.(field) = p.(field) - acr_db;
             cm.effect = sprintf('clean branch selected (-%g dB)', acr_db);
         elseif strcmp(threat, 'sweeping_jammer')
-            p.sweep_duty = p.sweep_duty^2;
-            cm.effect = 'both branches hit only simultaneously (duty^2)';
+            p.sweep_fdiv = true;
+            cm.effect = 'frame lost only while both carriers are in the sweep';
         else
             cm.effect = 'no effect (broadband or signal-side threat)';
         end
