@@ -4,6 +4,7 @@ function varargout = link_env(cmd, varargin)
 %   received frame of the configuration currently applied.
 %
 %   K = link_env('tables', PP)                     reward / restoration tables
+%   K = link_env('tables', PP, 'flight')           the same flight's clean link as the reference
 %   [E, obs] = link_env('reset', PP, K, spec, split, rs)
 %   [E, r, obs, info] = link_env('step', E, PP, K, a)
 %
@@ -44,7 +45,10 @@ function varargout = link_env(cmd, varargin)
 %     q      C.q_restored when m <= C.ratio_ok x clean (the KPI), otherwise up to
 %            C.q_partial, log-linear from the threshold down to 0 at the
 %            unmitigated BER (at least 10x the threshold); clean = max(clean-link
-%            BER, C.ber_floor), the smallest BER the pools resolve
+%            BER, C.ber_floor), the smallest BER the pools resolve: the clean link's
+%            mean over the train split at the same Eb/N0 (training and KPI 4), or with
+%            'flight' the same flight's clean link (the clean cell flies every
+%            geometry; edge_map.m), its packet loss likewise
 %     cost   goodput given up, extra spectrum, transmit power, adaptive combining
 %     switch per configuration change or channel hop
 %     false  per change on a healthy link
@@ -56,7 +60,8 @@ function varargout = link_env(cmd, varargin)
 %   obs: probs (NE x classes), maha (unknown-threat score), unknown (score below
 %   threshold, or masked), feat (NE x link features, receiver measurements), gant
 %   (NE x antennas, mean channel gain of every antenna), cfg_link (configuration
-%   the frame was received with), ber_true (analysis only)
+%   the frame was received with), ber_true and fer_true (the frame's BER and packet
+%   error, analysis only)
 %   info: per episode q, restored, restored_plr, gput, changed (a change or a hop),
 %   false_switch, healthy, recoverable, sc_eff, cfg_eff, post, hop (requested this
 %   cycle), hop_in (a hop reached the link on this frame), compromised
@@ -69,7 +74,8 @@ end
 end
 
 %% ===================== Tables =====================
-function K = tables(PP)
+function K = tables(PP, ref)
+if nargin < 2 || isempty(ref), ref = 'mean'; end
 C = decision_config();
 A = PP.actions; nA = numel(A);
 K.na = find(strcmp(A, 'no_action'));
@@ -85,6 +91,7 @@ end
 K.cost = C.w_goodput * (1 - PP.gp) + C.w_spectrum * (PP.bw - 1) + C.w_power * log10(PP.pw) / log10(4) ...
     + C.w_mmse * cellfun(@(a) contains(a, 'spatial_diversity'), A);
 K.SW = C.w_switch; K.FA = C.w_false;
+K.ref = ref;
 K.runs = PP.runs;                                   % geometry ids per split
 K.nR = cellfun(@numel, PP.runs);
 nSc = numel(PP.scen); nS = numel(PP.ebno); nSp = numel(PP.runs); nRm = max(K.nR);
@@ -92,17 +99,17 @@ K.q = nan(nSc, nS, nA, nSp, nRm); K.gput = nan(nSc, nS, nA, nSp, nRm);
 K.restored = false(nSc, nS, nA, nSp, nRm); K.restored_plr = false(nSc, nS, nA, nSp, nRm);
 K.healthy = false(nSc, nS, nSp, nRm); K.recoverable = false(nSc, nS, nSp, nRm); K.recoverable_comb = K.recoverable;
 stay = ~K.hasCh & ~K.hasFd;                         % configurations a comb jammer leaves as they are
-pc = PP.clean_fer;                                  % clean-link packet loss per Eb/N0 (train split)
 for sp = 1:nSp
+    [BC, PC] = clean_reference(PP, K, sp, ref, C);   % clean BER (floored) and packet loss, Eb/N0 x geometry
     for sc = 1:nSc
         for s = 1:nS
-            bc = max(PP.clean(s), C.ber_floor); bt = C.ratio_ok * bc;
             Pu = PP.pools{sc, s, K.na, sp};
             if isempty(Pu) || isempty(Pu.ber), continue; end
             for r = 1:K.nR(sp)
                 rid = PP.runs{sp}(r);
                 ku = Pu.run == rid;
                 if ~any(ku), continue; end              % a geometry the cell does not fly
+                bt = C.ratio_ok * BC(s, r); pr = PC(s, r);
                 bu = mean(Pu.ber(ku));
                 bw = max(bu, 10 * bt);
                 K.healthy(sc, s, sp, r) = bu <= bt;
@@ -118,8 +125,8 @@ for sp = 1:nSp
                     end
                     K.q(sc, s, a, sp, r) = q;
                     K.restored(sc, s, a, sp, r) = rest;
-                    K.restored_plr(sc, s, a, sp, r) = pl <= C.ratio_ok * pc(s) + 1 / max(sum(k), 1);
-                    if 1 - pc(s) >= 0.1, K.gput(sc, s, a, sp, r) = PP.gp(a) * (1 - pl) / (1 - pc(s)); end
+                    K.restored_plr(sc, s, a, sp, r) = pl <= C.ratio_ok * pr + 1 / max(sum(k), 1);
+                    if 1 - pr >= 0.1, K.gput(sc, s, a, sp, r) = PP.gp(a) * (1 - pl) / (1 - pr); end
                 end
                 ok = K.restored(sc, s, :, sp, r) & K.restored_plr(sc, s, :, sp, r);
                 K.recoverable(sc, s, sp, r) = any(ok);
@@ -130,6 +137,23 @@ for sp = 1:nSp
 end
 comp = cellfun(@(x) strsplit(x, '+'), PP.scen, 'UniformOutput', false);
 K.followable = cellfun(@(c) any(ismember(c, {'jamming', 'reactive_jamming', 'spoofing', 'tone_jamming'})), comp);
+end
+
+function [BC, PC] = clean_reference(PP, K, sp, ref, C)
+% Restoration reference of every (Eb/N0, geometry) of split sp: the clean link's BER,
+% at least C.ber_floor, and its packet loss; 'mean' the train-split mean per Eb/N0,
+% 'flight' the clean cell on the same geometry (the mean where it does not fly it).
+nS = numel(PP.ebno);
+BC = repmat(max(PP.clean(:), C.ber_floor), 1, K.nR(sp)); PC = repmat(PP.clean_fer(:), 1, K.nR(sp));
+if ~strcmp(ref, 'flight'), return; end
+for s = 1:nS
+    P = PP.pools{K.clean, s, K.na, sp};
+    if isempty(P) || isempty(P.ber), continue; end
+    for r = 1:K.nR(sp)
+        k = P.run == PP.runs{sp}(r);
+        if any(k), BC(s, r) = max(mean(P.ber(k)), C.ber_floor); PC(s, r) = mean(double(P.fer(k))); end
+    end
+end
 end
 
 %% ===================== Reset / step =====================
@@ -212,6 +236,7 @@ cm = cm | cf;
 nC = numel(PP.classes); nF = numel(PP.feat_names);
 icrc = feature_index('crc_fail');
 obs.probs = zeros(E.NE, nC); obs.unknown = false(E.NE, 1); obs.feat = zeros(E.NE, nF); obs.ber_true = zeros(E.NE, 1);
+obs.fer_true = zeros(E.NE, 1);
 obs.maha = zeros(E.NE, 1); obs.gant = [];
 for i = 1:E.NE
     P = PP.pools{sc_eff(i), E.s(i), cfg_eff(i), E.split};
@@ -227,6 +252,7 @@ for i = 1:E.NE
         obs.gant(i, :) = P.gant(j, :);
     end
     obs.ber_true(i) = P.ber(j);
+    obs.fer_true(i) = P.fer(j);
 end
 mask = E.unk & E.t >= E.onset;
 obs.probs(mask, :) = 0; obs.unknown(mask) = true; obs.maha(mask) = -Inf;

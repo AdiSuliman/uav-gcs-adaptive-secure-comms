@@ -14,10 +14,13 @@ function V = edge_verdict(num, den, cl, target, sense, binary, B)
 %   Interval, two-sided 95%: percentile bootstrap over flights (boot_cluster.m). A binary
 %   outcome also gets the exact Clopper-Pearson interval of its k successful flights in
 %   n: with one unit per flight the two describe the same share and the exact one is used,
-%   otherwise their hull. A rate (frames) at its extreme has no bootstrap spread: for
-%   'ge' the lower bound is at most the Clopper-Pearson bound of n successful flights in
-%   n, for 'le' the upper bound at least that of no event in all sum(den) units (a
-%   packet loss is a share of frames, not of flights).
+%   otherwise their hull. A rate (frames) takes the hull of the bootstrap and the
+%   Clopper-Pearson interval on its effective sample size: the sum(den) units over the
+%   design effect (the bootstrap variance over that of independent units), between the
+%   n flights (units of a flight fully correlated) and the units. At its extreme a rate
+%   has no spread: for 'ge' at 1 the lower bound is at most the Clopper-Pearson bound of
+%   n successful flights in n, for 'le' at 0 the upper bound at least that of no event
+%   in all sum(den) units (a packet loss is a share of frames, not of flights).
 %   Verdict: COMMITTED (1) when the interval lies on the target's side and n >= N_MIN;
 %   NOT COMMITTED (-1) when it lies entirely on the other side; UNDETERMINED (0)
 %   otherwise. N_MIN = 36, the smallest n whose all-success lower bound reaches 0.90
@@ -29,7 +32,7 @@ V = struct('value', NaN, 'lo', NaN, 'hi', NaN, 'n', 0, 'k', NaN, 'verdict', 0, '
 ok = isfinite(num) & isfinite(den) & den > 0;
 num = num(ok); den = den(ok); cl = cl(ok);
 if isempty(num), return; end
-[V.value, lo, hi] = boot_cluster(num, den, cl, B, 74);
+[V.value, lo, hi, vb] = boot_cluster(num, den, cl, B, 74);
 [~, ~, j] = unique(cl(:));
 Sn = accumarray(j, num(:)); Sd = accumarray(j, den(:));
 n = numel(Sn); V.n = n;
@@ -46,10 +49,15 @@ if binary
     end
 else
     if isnan(lo), lo = 0; hi = 1; end              % a single flight: no spread to resample
-    if ge
+    p = V.value; nu = sum(den);
+    if p > 0 && p < 1 && isfinite(vb)
+        ne = nu / min(max(1, vb / (p * (1 - p) / nu)), nu / n);   % effective sample size
+        [cl_, ch_] = cp_interval(p * ne, ne);
+        lo = min(lo, cl_); hi = max(hi, ch_);
+    elseif ge
         lo = min(lo, cp_interval(n, n));
     else
-        [~, ch_] = cp_interval(0, sum(den)); hi = max(hi, ch_);
+        [~, ch_] = cp_interval(0, nu); hi = max(hi, ch_);
     end
 end
 V.lo = lo; V.hi = hi;

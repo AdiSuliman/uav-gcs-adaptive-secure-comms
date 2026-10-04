@@ -16,9 +16,9 @@ C.drop_db    = 4;           % default Eb/N0-estimate drop that confirms path_los
 
 % Decision period: one cycle decides on one received frame; with the decision
 % latency (median < 10 ms, p95 < 20 ms target) a deployed loop decides every 20 ms.
-% The pools hold consecutive frames, so the fading between two cycles is more
-% correlated than 20 ms apart (a stated limitation); times are reported in cycles
-% and in ms at this period.
+% The frames of the pools are one cycle apart on the channel clock (init_params cycle_s), so the
+% fading between two cycles is that of 20 ms; times are reported in cycles and in ms
+% at this period.
 C.period_ms = 20;
 
 % Rule and table policies (policy_decide.m, rule_based_policy.m); the hold binds
@@ -85,9 +85,10 @@ C.combos = {'jamming+path_loss', 'noise_burst+antenna_fault', 'sweeping_jammer+p
             'jamming+spoofing+benign_interference', 'noise_burst+spoofing+antenna_fault', ...
             'jamming+airframe_shadowing+path_loss', 'tone_jamming+spoofing+airframe_shadowing'};
 
-% Signalling delay of a configuration change: the GCS must receive and apply the
-% new configuration before the link runs on it, so a change decided in one cycle
-% takes effect this many cycles later (an assumption; evaluate_policies.m checks
-% the sensitivity to twice the value)
+% Signalling delay of a configuration change: the request reaches the GCS over the
+% telemetry return link and both ends change before the link runs on it, so a change
+% decided in one cycle takes effect this many cycles later (an assumption; edge_map.m
+% gives a verdict at 1, 2 and 7 cycles, and the receiver alone as the floor without
+% signalling)
 C.switch_delay = 1;
 end

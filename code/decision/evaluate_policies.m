@@ -58,7 +58,7 @@ K = link_env('tables', PP);
 C = decision_config();
 tab = policy_table(PP, K);
 VAL = 2; TEST = 3; SPEED = 4; T = Q.H.T; NE = 64; REPS = 2;
-ENV_MIN = 90; ENV_N = 10;     % operating envelope: >= ENV_MIN % of >= ENV_N recoverable validation episodes
+ENV_MIN = 90; ENV_N = 10;     % envelope predicted on validation: >= ENV_MIN % of >= ENV_N recoverable episodes
 if exist('SMOKE', 'var') && SMOKE, REPS = 1; end         % reduced chain check (run_stage smoke)
 nA = numel(PP.actions); nS = numel(PP.ebno); nG = K.nR(TEST);
 single_cells = find(ismember(PP.scen, PP.singles) & ~strcmp(PP.scen, 'none'));
@@ -141,10 +141,11 @@ for si = 1:numel(sets)
         numel(POL), toc(t0)/60);
 end
 
-%% 3b. Operating envelope, fixed on the VALIDATION split before the test is read
+%% 3b. Envelope predicted on the VALIDATION split, fixed before the test is read
 % The deployed policy runs the validation flights of the same threat sets as the
 % test (single, follower, combined). A (threat, severity) is inside the envelope
-% when it restores >= ENV_MIN % of its recoverable episodes there (at least ENV_N).
+% when it restores >= ENV_MIN % of its recoverable episodes there (at least ENV_N). The
+% commitment is edge_map.m's, on the test flights.
 foll_cells = single_cells(K.followable(single_cells));
 vsets = {policy_episodes(single_cells, nS, 1:K.nR(VAL), REPS, false, false, NE, T, rs), ...
          policy_episodes(foll_cells, nS, 1:K.nR(VAL), REPS, true, false, NE, T, rs), ...
@@ -221,7 +222,7 @@ kpi4 = PT(:, iK) >= 90;
 rep{end+1} = sprintf(['KPI 4 over every level (deployed policy >= 90%% of the recoverable episodes of every threat): ' ...
     '%d of %d threats | lowest %s %.1f%%'], sum(kpi4), numel(kpi4), threats{find(PT(:, iK) == min(PT(:, iK)), 1)}, min(PT(:, iK)));
 
-% Operating envelope (validation) and KPI 4 inside it (test)
+% Envelope predicted on validation and KPI 4 inside it (test)
 ENV = false(numel(threats), nV); ENVv = nan(numel(threats), nV); PTenv = nan(numel(threats), 1);
 for ti = 1:numel(threats)
     mvr = strcmp(PP.scen(RV.scn), threats{ti}) & RV.threat & RV.recoverable;
@@ -239,7 +240,7 @@ end
 has = any(ENV, 2);
 kpi4_env = PTenv(has) >= 90;
 rep{end+1} = '';
-rep{end+1} = sprintf(['Operating envelope (fixed on validation before the test reading: >= %d%% of >= %d recoverable ' ...
+rep{end+1} = sprintf(['Envelope predicted on validation (fixed before the test reading: >= %d%% of >= %d recoverable ' ...
     'validation episodes), levels %s inside:'], ENV_MIN, ENV_N, strjoin(PP.sev_names, ' / '));
 for ti = 1:numel(threats)
     rep{end+1} = sprintf('  %-34s %s   test inside: %s', threats{ti}, ...

@@ -17,6 +17,11 @@ function R = rollout_policy(kind, PP, K, spec, split, agent, opt, seed)
 %          gput_post  normalized goodput (NaN where the clean link loses > 90% of packets)
 %          recovered  both BER and packet loss restored for 5 consecutive cycles
 %          t_rec      cycles from onset until that run of 5 starts (NaN if never)
+%          held       recovered, and restored on every cycle from the start of that run
+%                     to the end of the episode, but for one run of at most 1 + D
+%                     cycles in a follower episode (one re-acquisition; D the
+%                     signalling delay)
+%          lost_rec, n_rec  lost packets and frames from the start of that run to the end
 %          recoverable  some configuration restores this geometry (link_env.m)
 %          switches, false_sw (whole episode), esc (escalations), aoa (3 x NE),
 %          cfg_final, r (geometry index), cfg_trace (T x NE); at the first change:
@@ -31,7 +36,7 @@ cls_list = [cellstr(string(PP.classes(:)')), {'unknown'}];
 fc = struct('t', zeros(1, NE), 'cls', zeros(1, NE), 'deg', false(1, NE), 'drop', nan(1, NE));
 tr = struct('r', zeros(T, NE), 'q', zeros(T, NE), 'rest', false(T, NE), 'rplr', false(T, NE), 'gput', zeros(T, NE), ...
     'ch', false(T, NE), 'fs', false(T, NE), 'post', false(T, NE), 'esc', false(T, NE), 'cfg', zeros(T, NE), ...
-    'recov', false(T, NE));
+    'recov', false(T, NE), 'fer', zeros(T, NE));
 for t = 1:T
     if strcmp(kind, 'oracle')
         a = oracle_action(E, K);
@@ -48,7 +53,7 @@ for t = 1:T
         fc.drop(nw) = dinf.drop(nw);
     end
     tr.r(t, :) = r; tr.q(t, :) = info.q; tr.rest(t, :) = info.restored; tr.gput(t, :) = info.gput;
-    tr.rplr(t, :) = info.restored_plr; tr.recov(t, :) = info.recoverable;
+    tr.rplr(t, :) = info.restored_plr; tr.recov(t, :) = info.recoverable; tr.fer(t, :) = obs.fer_true;
     tr.ch(t, :) = info.changed; tr.fs(t, :) = info.false_switch; tr.post(t, :) = info.post; tr.cfg(t, :) = E.cfg;
 end
 post = tr.post; npost = max(sum(post, 1), 1);
@@ -73,6 +78,14 @@ for i = 1:NE
     end
 end
 R.recovered = ~isnan(R.t_rec);
+R.held = false(1, NE); R.lost_rec = zeros(1, NE); R.n_rec = zeros(1, NE);
+for i = find(R.recovered)
+    k0 = find(post(:, i), 1) + R.t_rec(i);              % first cycle of the recovery run
+    e = diff([0; ~ok(k0:T, i); 0]);
+    nb = sum(e == 1); len = find(e == -1) - find(e == 1);
+    R.held(i) = nb == 0 || (E.follow(i) && nb == 1 && len <= 1 + E.D);
+    R.lost_rec(i) = sum(tr.fer(k0:T, i)); R.n_rec(i) = T - k0 + 1;
+end
 last = arrayfun(@(i) find(post(:, i), 1, 'last'), 1:NE);
 R.recoverable = tr.recov(sub2ind([T NE], last, 1:NE));
 R.aoa = E.aoa';

@@ -222,10 +222,10 @@ An Unreal Engine view of the closed loop, driven from MATLAB (Simulink 3D Animat
 ## Modeling assumptions and limitations
 
 - **True BER only for scoring.** The detector, the monitor and the agent see receiver measurements (CRC check, estimated BER, decision-directed SINR, channel-estimator statistics, D59); the true BER, counted against the transmitted bits, is used only for the KPIs and the training reward.
-- **Ideal pilots.** Channel estimation, and the spatial features derived from it, use the known transmitted symbols without pilot overhead (proposal risk 8): the receiver performance is an upper bound for a practical one.
-- **Countermeasures are modeled, not built:** channel switch through adjacent-channel rejection (30 dB), rate reduction and power control as Eb/N0 gains, FEC applied to the measured error pattern of each run, MMSE combining in the receiver model. Switching time and signalling to the GCS are not modeled.
-- **No carrier or timing synchronization** (D7); spoofing is a coherent counterfeit waveform, not a synchronization attack.
-- **Decisions on measured frames.** The decision layer is trained and evaluated on frames measured through the real link (pools), not with Simulink inside the learning loop; one decision cycle is one frame.
+- **Real receiver.** Timing, frequency and the channel come from each frame's training and pilot blocks (every radio within ±25 ppm), at their overhead; the ideal receiver (known timing, frequency and symbols) is only the validation reference.
+- **Countermeasures are modeled, not built:** channel switch through adjacent-channel rejection (30 dB), rate reduction and power control as Eb/N0 gains (power up to the licence-exempt e.i.r.p. cap), FEC decoded on the received bits, MMSE combining in the receiver. A change requested from the GCS reaches the link one cycle (20 ms) later; the edge map also gives its verdict at 2 and 7 cycles and for the receiver alone, without any request. The return link that carries the request, and its authentication, are assumed, not modeled.
+- **Spoofing** is a counterfeit transmitter on our channel, modulation and pulse shape that does not reproduce our training or frame timing; attacks aware of our protocol (on the training, the pilots or the frame timing) are outside the commitment.
+- **Decisions on measured frames.** The decision layer is trained and evaluated on frames measured through the real link (pools), not with Simulink inside the learning loop; one decision cycle is one frame, the frames 20 ms apart on the channel clock.
 - **Airframe shadowing** is modeled as measured events on one antenna (6–25 dB, the hidden antenna loses its line of sight); spatially separated antennas keep the others clear.
 - **Simulation only.** Validation on hardware (SDR testbed) is future work.
 
@@ -257,11 +257,11 @@ An Unreal Engine view of the closed loop, driven from MATLAB (Simulink 3D Animat
 - **Noise burst + antenna fault (88.7%)**: 62 recoverable episodes (±8 points); few configurations restore it and the policy tries several before one does.
 - **Monitor resolution**: a 5-frame BER estimate cannot resolve a 2× excess near the clean link's error rate; path loss at high severity (83.3%) and the unknown set (83.5%, degradation-only alarms under 3-of-3 confirmation) share this limit.
 - **Combinations never trained on**: 84.4% vs 97.6% trained; sweeping jammer + path loss 25.0%. Composing a response across domains without examples is future work.
-- Consecutive decision cycles come from consecutive frames of the pools, so the fading between two cycles is more correlated than 20 ms apart; recovery times in ms assume the 20 ms decision period.
+- An episode replays one flight's 20 frames (0.4 s of channel at the 20 ms cycle) over its 30 cycles; pointing, shadowing, tracker and altitude are fixed per flight, and changes over seconds are covered across flights by the bands of the edge map.
 - Reactive jamming is the hardest unknown threat (AUROC 0.641): from the receiver it looks like barrage jamming on a continuous uplink.
 - Latency is measured on a desktop with a GPU detector, not on UAV hardware.
 - N antennas null up to N−1 interferers; one antenna more or fewer and a relay path are evaluated per profile as experiments.
-- Hardware validation (SDR), switching time and GCS signalling; online learning.
+- Hardware validation (SDR); the return link that carries the GCS reconfiguration and command authentication; keyed or randomised training against protocol-aware attacks; online learning.
 
 ---
 

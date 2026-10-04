@@ -122,6 +122,44 @@ verifyEqual(tc, size(R.ok_post), [1 2]);
 verifyEqual(tc, find(hold_config(PP0, K0, cs, 3, 1, T)), 2:4);
 end
 
+function test_held_recovery(tc)
+% Held recovery: restored for 5 cycles and on every cycle to the end, but one follower
+% re-acquisition of 1 + D cycles. Holding channel_switch against a follower at fdelay 5
+% holds through one re-acquisition and not through two; the lost packets and frames
+% count from the start of the recovery run.
+[PP, K] = toy_world(true);
+cs = find(strcmp(PP.actions, 'channel_switch'));
+for D = [1 2]
+    for T = [7 + 2 * D, 24]
+        spec = struct('scn', 2, 's', 1, 'onset', 1, 'follow', true, 'fdelay', 5, 'unk', false, 'T', T, 'r', 1, 'delay', D);
+        R = rollout_policy('fixed', PP, K, spec, 1, [], struct('fixed', cs), 3);
+        verifyEqual(tc, [R.recovered, R.held], [true, T < 24], sprintf('D %d, T %d', D, T));
+        ok = hold_config(PP, K, cs, 5, D, T);
+        verifyEqual(tc, [R.lost_rec, R.n_rec], [sum(~ok(D+1:end)), T - D], sprintf('lost, D %d, T %d', D, T));
+    end
+end
+spec = struct('scn', 2, 's', 1, 'onset', 1, 'follow', false, 'fdelay', 0, 'unk', false, 'T', 12, 'r', 1, 'delay', 1);
+R = rollout_policy('fixed', PP, K, spec, 1, [], struct('fixed', cs), 3);
+verifyEqual(tc, [R.recovered, R.held, R.lost_rec, R.n_rec], [1 1 0 11]);     % a static jammer: held, no loss
+end
+
+function test_flight_reference(tc)
+% With 'flight' the restoration reference is the same flight's clean link (its BER
+% floored at C.ber_floor, its packet loss): a flight whose clean link is poor is judged
+% against itself, not against the mean of the train split.
+[PP, K] = toy_world(true);
+na = K.na;
+for a = 1:numel(PP.actions)                                     % flight 101's clean link at 10 dB: BER 2e-2, half the packets
+    PP.pools{1, 1, a, 1}.ber(:) = 0.02; PP.pools{1, 1, a, 1}.fer(:) = 0.5;
+end
+PP.pools{2, 1, na, 1}.ber(:) = 0.03;
+Km = link_env('tables', PP); Kf = link_env('tables', PP, 'flight');
+verifyEqual(tc, {Km.ref, Kf.ref}, {'mean', 'flight'});
+verifyEqual(tc, [Km.restored(2, 1, na, 1, 1), Km.restored_plr(2, 1, na, 1, 1), Km.healthy(2, 1, 1, 1)], false(1, 3));
+verifyEqual(tc, [Kf.restored(2, 1, na, 1, 1), Kf.restored_plr(2, 1, na, 1, 1), Kf.healthy(2, 1, 1, 1)], true(1, 3));
+verifyEqual(tc, Kf.restored(2, 2, :, 1, 1), Km.restored(2, 2, :, 1, 1));   % a clean BER of 0 takes the floor
+end
+
 function test_comb_jammer(tc)
 % A jammer on every channel takes frequency diversity's second carrier too, at its cost;
 % recoverable then means a configuration without channel_switch and freq_diversity.
@@ -301,6 +339,65 @@ verifyTrue(tc, all(diff([L.verdict]) <= 0) && all(diff([L.hi]) >= 0));
 verifyEqual(tc, L(end).verdict, -1);
 E = edge_verdict([], [], [], 0.9, 'ge', false);
 verifyEqual(tc, [E.n, E.verdict], [0 0]);
+% A rate whose flights are all or nothing (fused detection) takes Clopper-Pearson on its
+% effective sample size, the flights: 70 of 72 commits, 69 does not (the bootstrap alone
+% would commit 69); one wrong frame in each of 30 flights is nearly independent frames
+rt = @(k) edge_verdict(20 * double((1:72) <= k), 20 * ones(1, 72), 1:72, 0.9, 'ge', false);
+R70 = rt(70); R69 = rt(69);
+verifyEqual(tc, [R70.verdict, R69.verdict], [1 0]);
+verifyLessThanOrEqual(tc, R69.lo, betaincinv(0.025, 69, 4) + 0.005);
+[~, blo] = boot_cluster(20 * double((1:72) <= 69), 20 * ones(1, 72), 1:72, 4000, 74);
+verifyGreaterThan(tc, blo, 0.9);
+Ri = edge_verdict(20 - double((1:72) <= 30), 20 * ones(1, 72), 1:72, 0.9, 'ge', false);
+verifyEqual(tc, Ri.verdict, 1);
+verifyGreaterThan(tc, Ri.lo, 0.96);
+end
+
+function test_edge_walk(tc)
+% Distance: from the top down to the last COMMITTED point, the first NOT COMMITTED and a
+% COMMITTED point beyond it. Severity: from the nominal level down and up, so a harmless
+% low level that is not COMMITTED stops only the walk down. Follower: from 2 cycles down.
+W = edge_walk([1 1 0 1], [15 12 9 6]);
+verifyEqual(tc, [W.edge, W.first_not, W.nonmono], [12 NaN 0]);
+W = edge_walk([1 -1 1], [15 12 9]);
+verifyEqual(tc, [W.edge, W.first_not, W.nonmono], [15 12 1]);
+W = edge_walk([0 1 1], [15 12 9]);
+verifyTrue(tc, isnan(W.edge));
+W = edge_walk([0 1 1 1 -1], 1:5, 3);
+verifyEqual(tc, [W.lo, W.hi, W.first_lo, W.first_hi, W.nonmono], [2 4 NaN 5 0]);
+W = edge_walk([-1 1 1 1 1], 1:5, 3);
+verifyEqual(tc, [W.lo, W.hi, W.first_lo], [2 5 1]);
+W = edge_walk([1 1 0 1 1], 1:5, 3);
+verifyTrue(tc, isnan(W.lo) && isnan(W.hi));
+W = edge_walk([1 1 -1], [2 1 0]);
+verifyEqual(tc, W.edge, 1);
+end
+
+function test_edge_commit(tc)
+% A point commits on PROT, DET_h, FA, LINK, LINK_T and the bound on validation, and no
+% band NOT COMMITTED; DET_h on fewer than N_MIN harmed flights only must not fail; the
+% bands pool the point and the points above it while they commit from the top, a point
+% outside that run its own flights.
+one = ones(1, 4);
+L = struct('prot', one, 'deth', one, 'deth_n', 72 * one, 'fa', one, 'link', one, 'linkt', one, 'fav', 1);
+none = @(R) deal(1, '');
+X = edge_commit(L, none);
+verifyEqual(tc, X.v, one); verifyTrue(tc, all(cellfun(@isempty, X.lim))); verifyEqual(tc, X.band, one);
+Lh = L; Lh.deth = [0 0 -1 0]; Lh.deth_n = [10 40 10 0];
+X = edge_commit(Lh, none);
+verifyEqual(tc, X.v, [1 0 -1 1]); verifyEqual(tc, X.lim(2:3), {'H', 'H'}); verifyEqual(tc, X.h, [1 0 -1 1]);
+Lf = L; Lf.fav = 0;
+X = edge_commit(Lf, none);
+verifyEqual(tc, X.v, 0 * one); verifyEqual(tc, X.lim{1}, 'F'); verifyTrue(tc, all(isnan(X.band)));
+big = @(R) deal(1 - 2 * (numel(R) >= 3), 'speed');            % a band fails once 3 points pool
+X = edge_commit(L, big);
+verifyEqual(tc, X.v, [-1 -1 1 1]); verifyEqual(tc, X.lim{1}, 'B'); verifyEqual(tc, X.bfail(1:2), {'speed', 'speed'});
+Lp = L; Lp.prot = [1 0 1 1];                                   % point 1 lies outside the run from the top
+X = edge_commit(Lp, big);
+verifyEqual(tc, X.v, [1 0 1 1]); verifyEqual(tc, X.lim{2}, 'P'); verifyTrue(tc, isnan(X.band(2)));
+Lt = L; Lt.linkt(4) = -1; Lt.fa(3) = 0;
+X = edge_commit(Lt, none);
+verifyEqual(tc, X.v, [1 1 0 -1]); verifyEqual(tc, X.lim(3:4), {'A', 'T'});
 end
 
 %% ---------- features and state ----------
@@ -417,6 +514,14 @@ verifyLessThan(tc, max(S), 2^26);
 N = seed_base(S) + off;
 verifyEqual(tc, numel(unique(N(:))), numel(N));
 verifyLessThan(tc, max(N(:)), 2^32);
+% Frame-draw seeds of the edge map's rollouts (edge_map.m: base + 1000 x (signalling
+% delay index, at most 4, or base set, at most 99) + batch, below 1000): disjoint
+% ranges, all below the first flight stream
+b = sort(cellfun(@(x) str2double(x{1}), regexp(fileread(which('edge_map')), '(\d{5,6}) \+ 1000 \* ', 'tokens')));
+verifyEqual(tc, b, [40000 90000 95000 200000]);
+hi = b + 1000 * [5 5 5 100];
+verifyTrue(tc, all(hi(1:end-1) <= b(2:end)));
+verifyLessThan(tc, hi(end), seed_base(700001));
 end
 
 function test_draws_independent(tc)
