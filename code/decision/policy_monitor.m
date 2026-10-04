@@ -10,13 +10,15 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   cycles since the change stay at 0, so the hold and the escalation wait. The first
 %   frame received with the request restarts the BER and CRC windows and the count
 %   of degraded cycles, and the cycles since the change count from there.
-%   Receiver measurements only (link_features.m): the estimated BER and the CRC
-%   packet loss of the last C.win frames. Degradation: the estimated BER above
-%   C.ratio_ok x the clean link's estimated BER at the receiver's own Eb/N0
-%   estimate (clean_ber_ref.m, floor C.deg_floor); with fec_interleave in the
-%   configuration the channel BER stays high while the decoder repairs the bursts,
-%   so there the CRC packet loss decides (above C.ratio_ok x the clean coded link,
-%   at least 2 lost packets in the window).
+%   Receiver measurements only (link_features.m): the estimated BER of the last C.win
+%   frames and the CRC packet loss of the packets they carry (a coded packet spans two
+%   frames, obs.pkt, and counts once, at its second frame, when it is decoded; without
+%   obs.pkt every frame's CRC result counts).
+%   Degradation: the estimated BER above C.ratio_ok x the clean link's estimated BER
+%   at the receiver's own Eb/N0 estimate (clean_ber_ref.m, floor C.deg_floor); with
+%   fec_interleave in the configuration the channel BER stays high while the decoder
+%   repairs the bursts, so there the CRC packet loss decides (above C.ratio_ok x the
+%   clean coded link, at least 2 lost packets in the window).
 %   Detected class: from the temporal fusion of the last PP.fuse_N cycles
 %   (temporal_evidence.m, fuse_classes.m) when PP.fuse is set, otherwise the
 %   frame's own detector output; 'unknown' when the unknown-threat score, averaged
@@ -41,7 +43,7 @@ C = decision_config();
 switch cmd
     case 'init'
         NE = varargin{1}; nA = varargin{2};
-        mem = struct('ber', nan(NE, C.win), 'crc', nan(NE, C.win), 'tried', false(NE, nA), ...
+        mem = struct('ber', nan(NE, C.win), 'crc', nan(NE, C.win), 'pk', nan(NE, C.win), 'tried', false(NE, nA), ...
             'since', 10 * ones(1, NE), 'cand', zeros(1, NE), 'cand_n', zeros(1, NE), 'good', zeros(1, NE), ...
             'deg_n', zeros(1, NE), 'conf_n', zeros(1, NE), 'alarm', false(NE, 8), 'ebno', nan(NE, 3), ...
             'ref', nan(NE, 10), 'hist', [], 'wp', [], 'wg', [], 'wq', [], 'wu', [], 'wd', [], 'wn', zeros(1, NE), ...
@@ -69,9 +71,16 @@ arr = mem.pend & ~wait;                                 % first frame received w
 mem.pend = wait; mem.since(wait) = 0;
 mem.ber = [mem.ber(:, 2:end), 10.^fi('log_ber')];
 mem.crc = [mem.crc(:, 2:end), fi('crc_fail')];
+coded = contains(PP.actions(link), 'fec_interleave');
+pk = nan(size(mem.crc, 1), 1);                                   % a frame is its own packet unless coded
+if isfield(obs, 'pkt') && ~isempty(obs.pkt), pk(coded) = obs.pkt(coded); end
+if ~isfield(mem, 'pk'), mem.pk = nan(size(mem.crc)); end
+mem.crc(~isnan(pk) & (isnan(mem.pk(:, end)) | pk ~= mem.pk(:, end)), end) = NaN;   % first frame: not decoded yet
+mem.pk = [mem.pk(:, 2:end), pk];
 mem.ber(arr, 1:end-1) = NaN; mem.crc(arr, 1:end-1) = NaN; mem.deg_n(arr) = 0;
+[npk, lost] = packets(mem.crc);
 M.ber_avg = mean(mem.ber, 2, 'omitnan');
-M.plr = mean(mem.crc, 2, 'omitnan');
+M.plr = lost ./ npk;
 M.ebno_est = fi('sinr') + fi('iot') + 10*log10(PP.sps) - 10*log10(PP.bps);
 mem.ebno = [mem.ebno(:, 2:end), M.ebno_est(:)];
 e3 = median(mem.ebno, 2, 'omitnan');
@@ -80,11 +89,10 @@ ref(isnan(ref)) = e3(isnan(ref));
 M.drop = (ref - e3)';
 bc = max(clean_ber_ref(M.ebno_est, 'ber_est'), C.deg_floor);
 deg = M.ber_avg > C.ratio_ok * bc;
-coded = contains(PP.actions(link), 'fec_interleave');
 if any(coded)
     pc = clean_ber_ref(M.ebno_est(coded), 'plr_fec');
     pc(isnan(pc)) = 0;
-    deg(coded) = M.plr(coded) > C.ratio_ok * pc & sum(mem.crc(coded, :), 2, 'omitnan') >= 2;
+    deg(coded) = M.plr(coded) > C.ratio_ok * pc & lost(coded) >= 2;
 end
 M.degraded = deg(:)';
 mem.good(~M.degraded) = mem.good(~M.degraded) + 1; mem.good(M.degraded) = 0;
@@ -164,4 +172,12 @@ for n = unique(mem.wn)                                     % episodes with the s
 end
 unk = obs.unknown(:)';
 if Nu > 1 && ~all(isnan(mh)), unk = mem.unk_now(:)' | (obs.unknown(:)' & isinf(mh(:)')); end
+end
+
+function [n, lost] = packets(crc)
+% Packets in the window and the lost ones (NE x 1): every frame with a CRC result, a
+% coded packet's second frame or an uncoded frame.
+k = ~isnan(crc);
+n = sum(k, 2);
+lost = sum(k & crc > 0, 2);
 end

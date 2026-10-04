@@ -85,9 +85,9 @@ end
 spd = cell2mat(arrayfun(@(s) geo{s}.speed, (1:nS)', 'UniformOutput', false));
 z = nan(nS, N_GEO);
 V = struct('seed', z, 'speed', z, 'alt_m', z, 'k_sig', z, 'k_int', z, 'yaw', z, 'rho', z, 'gcs_point_db', z, 'el_db', z, ...
-    'aoa', nan(nS, N_GEO, 3), 'align', nan(nS, N_GEO, 3));
-ag = exp(-1j * 2*pi * p0.ant_spacing_wl * (0:p0.n_rx-1)' * sind(p0.gcs_aoa_deg));
-for s = 1:nS
+    'aoa', nan(nS, N_GEO, 3), 'align', nan(nS, N_GEO, 3), 'gcs_aoa', z, 'el_deg', z, 'bank', z, 'roll', z, 'pitch', z, ...
+    'wob', z, 'att_db', z, 'body_spread_db', z, 'jam', nan(nS, N_GEO, 3), 'ds_ns', z, 'ds_int', nan(nS, N_GEO, 3));
+for s = 1:nS                                            % every per-flight draw, as in PP.cov (build_policy_pools.m)
     g = geo{s};
     for r = 1:N_GEO
         fd = g.speed(r) / 3.6 * p0.carrier_freq / p0.c_light;
@@ -98,7 +98,12 @@ for s = 1:nS
         V.el_db(s, r) = d.el_db;
         ni = min(3, numel(d.aoa));
         V.aoa(s, r, 1:ni) = d.aoa(1:ni);
-        V.align(s, r, 1:ni) = abs(ag' * exp(-1j * 2*pi * p0.ant_spacing_wl * (0:p0.n_rx-1)' * sind(d.aoa(1:ni)))).^2 / p0.n_rx^2;
+        V.align(s, r, 1:ni) = d.align(1:ni);
+        V.gcs_aoa(s, r) = d.gcs_aoa; V.el_deg(s, r) = d.el_deg; V.bank(s, r) = d.bank;
+        V.roll(s, r) = d.roll; V.pitch(s, r) = d.pitch; V.wob(s, r) = d.wobble(1);
+        V.att_db(s, r) = d.att_db; V.body_spread_db(s, r) = max(d.body_db) - min(d.body_db);
+        V.jam(s, r, :) = d.jam;
+        V.ds_ns(s, r) = d.ds_ns(1); V.ds_int(s, r, 1:ni) = d.ds_ns(1 + (1:ni));
     end
 end
 geoc = cell(1, nC);

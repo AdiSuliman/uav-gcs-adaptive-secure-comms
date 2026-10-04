@@ -5,9 +5,10 @@
 % stated hardware profiles; the simulated results hold for every profile, only the
 % distance attached to each Eb/N0 changes. Profile A keeps the licence-exempt cap at
 % 2.4 GHz: 100 mW e.i.r.p. in Israel (Ministry of Communications), as ETSI EN 300 328,
-% which also caps 10 mW/MHz (about 11 dBm for our 1.25 MHz signal). It is the GCS of
-% init_params.m: a -6 dBm radio on the tracked 12 dBi antenna (6 dBm e.i.r.p., up to the
-% cap with the power step), and the same radio on its omni fallback; profile A tracked is
+% which also caps 10 mW in any 1 MHz (10.2 dBm for our RRC signal, 95.5% of it in its
+% central 1 MHz, eirp_cap_dbm.m). It is the GCS of init_params.m: a -6 dBm AD9361-class
+% radio on the tracked 12 dBi antenna (6 dBm e.i.r.p., 10.0 dBm with the power step of
+% +4.0 dB), and the same radio on its omni fallback; profile A tracked is
 % the distance axis of the results. Profile B is a data link in licensed spectrum;
 % air-ground measurement campaigns used transmit powers of 27-44 dBm (Khawaja et al.); it
 % is shown at the 120 m ceiling as an illustration only, never as a commitment.
@@ -57,8 +58,9 @@ for k = 1:numel(prof)
     rep{end+1} = sprintf('%-42s radio horizon at %g m altitude: %.0f km', '', P.hU, hz); %#ok<SAGROW>
 end
 rep{end+1} = sprintf('(* the free-space range exceeds the radio horizon or %g km, the close-range class)', DMAX);
-rep{end+1} = sprintf('Profile A with the power step (power_control): +%.1f dB, to the %.1f dBm cap; every distance x%.2f.', ...
-    power_step_db(P0), P0.gcs_eirp_cap_dbm, 10^(power_step_db(P0) / 20));
+rep{end+1} = sprintf(['Profile A with the power step (power_control): +%.2f dB, %.2f dBm e.i.r.p. under the %.2f dBm cap ' ...
+    '(10 dBm in any 1 MHz); every distance x%.2f.'], power_step_db(P0), P0.gcs_pt_dbm + P0.gcs_ant_dbi + power_step_db(P0), ...
+    P0.gcs_eirp_cap_dbm, 10^(power_step_db(P0) / 20));
 rep{end+1} = 'The distance axis is the nominal power: power_control is one of the policy''s actions.';
 
 % Per altitude: horizon, Fresnel clearance, last two-ray null, ground jammer horizon, ground range

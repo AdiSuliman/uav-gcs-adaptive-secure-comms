@@ -55,10 +55,10 @@ BLOCK  = [1 5 14 16 17];         % pool_seed.m block of each split (pool_seed.m 
 SPLITS = {'train', 'val', 'test', 'speed', 'test2'};
 LHS    = [false false true false true];   % splits laid out as nested Latin hypercubes (pool_geometries.m)
 LHS_SEED = 7100000;              % permutation stream of a design: LHS_SEED + 100 (Eb/N0 index) + split (+ 10: combined threats)
-VOUT   = [0 0; 161 161];         % speeds of the edge-speed split [km/h]: half the geometries each, at the two
-                                 % ends of the envelope (dedicated test flights; the other splits draw over it)
+VOUT   = [0 0; 161 161];         % speeds of the edge-speed split [km/h]: the first NHOVER geometries and the rest, at
+                                 % the two ends of the envelope (dedicated test flights; the other splits draw over it)
 N_WORKERS = 6;
-MODEL_TAG = 'v7-D74';            % link model of the pools (seed streams, altitude, in-band cap)
+MODEL_TAG = 'v7-D75';            % link model of the pools (D74 seed streams, altitude, in-band cap, quiet-slot coherence; D75 link)
 opt = struct('F_SUB', 20, 'tw', 10, 'delay_bits', 20);
 C = decision_config();
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
@@ -180,13 +180,17 @@ spd = arrayfun(@(sp) cell2mat(arrayfun(@(s) geo{s}(sp).speed, (1:nS)', 'UniformO
 
 % Every per-flight draw of every geometry as the link flies it (flight_draws.m, the GCS
 % at the distance of the Eb/N0), Eb/N0 x geometry per split; align: |a_g' a_i|^2 / n^2
-% of the steering vectors toward the GCS and toward each interferer
+% of the steering vectors toward the GCS and toward each interferer; body_spread_db: the
+% spread of the airframe loss over the antennas; jam: sweep period [s], sweep phase [s]
+% and burst phase of the gated jammers; ds_ns, ds_int: RMS delay spread of our signal and
+% of each interferer [ns] (0 on a flat channel)
 cv = cell(1, nSp);
-ag = exp(-1j * 2*pi * p0.ant_spacing_wl * (0:p0.n_rx-1)' * sind(p0.gcs_aoa_deg));
 for sp = 1:nSp
     z = nan(nS, nG(sp));
     V = struct('seed', z, 'speed', z, 'alt_m', z, 'k_sig', z, 'k_int', z, 'yaw', z, 'rho', z, ...
-        'gcs_point_db', z, 'el_db', z, 'aoa', nan(nS, nG(sp), 3), 'align', nan(nS, nG(sp), 3));
+        'gcs_point_db', z, 'el_db', z, 'aoa', nan(nS, nG(sp), 3), 'align', nan(nS, nG(sp), 3), ...
+        'gcs_aoa', z, 'el_deg', z, 'bank', z, 'roll', z, 'pitch', z, 'wob', z, 'att_db', z, 'body_spread_db', z, ...
+        'jam', nan(nS, nG(sp), 3), 'ds_ns', z, 'ds_int', nan(nS, nG(sp), 3));
     for s = 1:nS
         g = geo{s}(sp);
         for r = 1:nG(sp)
@@ -197,23 +201,28 @@ for sp = 1:nSp
             V.k_sig(s, r) = d.k_sig; V.k_int(s, r) = d.k_int; V.yaw(s, r) = d.yaw; V.rho(s, r) = d.rho;
             V.gcs_point_db(s, r) = d.gcs_point_db; V.el_db(s, r) = d.el_db;
             ni = min(3, numel(d.aoa));
-            ai = exp(-1j * 2*pi * p0.ant_spacing_wl * (0:p0.n_rx-1)' * sind(d.aoa(1:ni)));
             V.aoa(s, r, 1:ni) = d.aoa(1:ni);
-            V.align(s, r, 1:ni) = abs(ag' * ai).^2 / p0.n_rx^2;
+            V.align(s, r, 1:ni) = d.align(1:ni);
+            V.gcs_aoa(s, r) = d.gcs_aoa; V.el_deg(s, r) = d.el_deg; V.bank(s, r) = d.bank;
+            V.roll(s, r) = d.roll; V.pitch(s, r) = d.pitch; V.wob(s, r) = d.wobble(1);
+            V.att_db(s, r) = d.att_db; V.body_spread_db(s, r) = max(d.body_db) - min(d.body_db);
+            V.jam(s, r, :) = d.jam;
+            V.ds_ns(s, r) = d.ds_ns(1); V.ds_int(s, r, 1:ni) = d.ds_ns(1 + (1:ni));
         end
     end
     cv{sp} = V;
 end
-fprintf('Geometries per Eb/N0 | speed [km/h] | altitude [m] | K of our signal [dB] | largest |heading rate| [deg/s]:\n');
+fprintf(['Geometries per Eb/N0 | speed [km/h] | altitude [m] | K of our signal [dB] | largest |heading rate| [deg/s] ' ...
+    '| largest bank [deg]:\n']);
 for sp = 1:nSp
     V = cv{sp};
-    fprintf('  %-6s %3d (block %d) | %5.1f-%5.1f | %5.1f-%5.1f | %5.1f-%5.1f | %.1f\n', SPLITS{sp}, nG(sp), BLOCK(sp), ...
+    fprintf('  %-6s %3d (block %d) | %5.1f-%5.1f | %5.1f-%5.1f | %5.1f-%5.1f | %.1f | %.1f\n', SPLITS{sp}, nG(sp), BLOCK(sp), ...
         min(V.speed(:)), max(V.speed(:)), min(V.alt_m(:)), max(V.alt_m(:)), min(V.k_sig(:)), max(V.k_sig(:)), ...
-        max(abs(V.yaw(:))));
+        max(abs(V.yaw(:))), max(V.bank(:)));
 end
 hv = cv{iSpd}.speed == 0;
-fprintf('  hover flights (edge speeds): %d per Eb/N0, largest |heading rate| %.2f deg/s\n', sum(hv(1, :)), ...
-    max(abs(cv{iSpd}.yaw(hv))));
+fprintf('  hover flights (edge speeds): %d per Eb/N0, largest |heading rate| %.2f deg/s, largest |pitch wobble| %.1f deg\n', ...
+    sum(hv(1, :)), max(abs(cv{iSpd}.yaw(hv))), max(abs(cv{iSpd}.wob(hv))));
 
 % Geometries of every cell per Eb/N0: its splits, in each its geometries
 geoc = cell(1, nC);
@@ -281,8 +290,8 @@ ic = find(strcmp({cells.threat}, 'none'));
 cq = pools(ic, :, na, 1);
 clean_ref = struct('ebno', EBNO, 'ber', squeeze(mber(ic, :, na, 1)), 'fer', squeeze(mfer(ic, :, na, 1)), ...
     'ber_est', cellfun(@(Q) mean(10.^double(Q.feat(:, feature_index('log_ber')))), cq), ...
-    'plr', cellfun(@(Q) mean(double(Q.feat(:, feature_index('crc_fail')))), cq), ...
-    'plr_fec', cellfun(@(Q) mean(double(Q.feat(:, feature_index('crc_fail')))), pools(ic, :, nf, 1)));
+    'plr', cellfun(@(Q) mean(double(Q.crc), 'omitnan'), cq), ...
+    'plr_fec', cellfun(@(Q) mean(double(Q.crc), 'omitnan'), pools(ic, :, nf, 1)));
 gp = ones(1, nA); bw = ones(1, nA); pw = ones(1, nA);
 for a = 1:nA
     [~, ~, cm] = apply_countermeasure(p0, 'none', ACTIONS{a});

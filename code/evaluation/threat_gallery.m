@@ -22,6 +22,9 @@ if ~isfolder(OUT), mkdir(OUT); end
 
 p0 = load('params.mat').params;
 p0.quiet_build = true; p0.int_aoa_random = false; p0.k_random = false; p0.yaw_random = false; p0.corr_random = false; p0.gcs_tracked = false;
+p0.gcs_aoa_random = false;
+p0.jam_timing_random = false;           % the shortest sweep at phase 0: the sweeper on our channel in every frame
+p0.tdl_random = false;                  % the median delay spreads (p0.tdl_ds_ns), with the delay line on
 fs = p0.symbol_rate * p0.sps;
 fd = V_KMH / 3.6 * p0.carrier_freq / p0.c_light;
 top = struct('threat', {}, 'action', {}, 'share', {});

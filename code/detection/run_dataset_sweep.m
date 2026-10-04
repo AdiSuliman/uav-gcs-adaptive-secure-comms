@@ -8,7 +8,10 @@
 %
 % Severity levels: dataset_levels.m (8 per threat, spanning the decision layer's levels and
 % the survivability map, up to the sources' most severe values).
-% 'none' gets n_levels x N_SUB sub-runs per Eb/N0 (class balance).
+% 'none' gets n_levels x N_SUB sub-runs per Eb/N0 (class balance). The sweeping jammer is
+% on our channel in a share of its frames only (its sweep period and phase per flight,
+% jam_timing.m): its cells fly N_SUB over that share, so its labelled frames match the
+% other threats'; its other frames are clean frames.
 %
 % Per frame: reference-antenna IQ, label, level, configured Eb/N0, the receiver
 % measurements of extract_closed_loop_frames.m, the true BER and frame
@@ -16,9 +19,12 @@
 % sub-run and the mean channel gain of every antenna (for measurements over several
 % decision cycles), the share of the frame with the threat on the air, and the sub-run's
 % draws (flight_draws.m, analysis only): K-factors of our signal and of the interferers,
-% first interferer direction, heading rate, receive correlation, GCS pointing loss,
-% altitude and the UAV antenna's gain toward the GCS. Frames whose BER is incomplete
-% are dropped.
+% first interferer direction and its alignment with the GCS, GCS direction, heading rate,
+% bank, roll, pitch and pitch-wobble amplitude, receive correlation, GCS pointing loss,
+% altitude, the UAV antenna's gain toward the GCS in level flight and at the attitude,
+% the spread of the airframe loss over the antennas, the timing of the gated jammers
+% (sweep period and phase, burst phase), and the RMS delay spreads of our signal and of the
+% first interferer (0 on a flat channel). Frames whose BER is incomplete are dropped.
 
 close all; clc;
 warning('off', 'Simulink:cgxe:LeakedJITEngine');
@@ -43,19 +49,25 @@ if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (r
     EbNo_list = EbNo_list([2 5]);
 end
 n_levels    = numel(threat_cfg(1).levels);
+n_sub       = N_SUB * ones(1, numel(threat_cfg));
+hit         = sweep_hit_share(p0);
+n_sub(strcmp({threat_cfg.name}, 'sweeping_jammer')) = round(N_SUB / hit);
+if exist('SMOKE', 'var') && SMOKE, n_sub(:) = N_SUB; end
 class_names = ['none', {threat_cfg.name}];
 stop_time   = num2str(F_SUB * p0.frame_duration);
 
 MEAS = {'rssi', 'crc_fail', 'ber_est', 'snr_post', 'sinr', 'env_corr', 'iot', 'coh', 'mmse_gain', 'align', ...
         'branch_dip', 'branch_gap', 'sinr_gap', 'q_iot', 'q_react'};
-D = struct('iq', {{}}, 'label', [], 'level', [], 'snr', [], 'ber', [], 'fer', [], 'speed', [], 'run', [], 'seed', [], 'fold', [], ...
+D = struct('iq', {{}}, 'label', [], 'class_run', [], 'level', [], 'snr', [], 'ber', [], 'fer', [], 'speed', [], 'run', [], 'seed', [], 'fold', [], ...
     'pos', [], 'gain_ant', [], 'act', [], 'k_db', [], 'k_int', [], 'aoa', [], 'yaw', [], 'rho', [], 'gcs_db', [], ...
-    'alt_m', [], 'el_db', []);
+    'alt_m', [], 'el_db', [], 'align', [], 'gcs_aoa', [], 'bank', [], 'roll', [], 'pitch', [], 'wob', [], ...
+    'att_db', [], 'body_spread_db', [], 'jam', [], 'ds_ns', [], 'ds_int', []);
 for i = 1:numel(MEAS), D.(MEAS{i}) = []; end
 run_id = 0;
 t0 = tic;
 fprintf('\n=== A5 dataset: %d threats x %d levels x %d Eb/N0 x %d sub-runs x %d frames (+ none) ===\n', ...
     numel(threat_cfg), n_levels, numel(EbNo_list), N_SUB, F_SUB);
+fprintf('sweeping jammer: on our channel in %.1f%% of the frames, %d sub-runs per cell\n', 100 * hit, max(n_sub));
 fprintf('%-22s %6s %10s %10s %9s %7s %7s\n', 'class', 'level', 'meanBER', 'meanSINR', 'envcorr', 'coh', 'Gmmse');
 
 %% ---- Threat classes ----
@@ -66,10 +78,10 @@ for tt = 1:numel(threat_cfg)
         build(p, modelName);
         i_start = numel(D.label) + 1;
         for s = 1:numel(EbNo_list)
-            for sub = 1:N_SUB
+            for sub = 1:n_sub(tt)
                 run_id = run_id + 1;
                 D = add_subrun(D, p, modelName, EbNo_list(s), stop_time, delay_bits, ...
-                    tt + 1, cfg.levels(lv), run_id, sub, MEAS);
+                    tt + 1, cfg.levels(lv), run_id, mod(sub - 1, N_SUB) + 1, MEAS);
             end
         end
         report_row(cfg.name, cfg.levels(lv), D, i_start);
@@ -100,7 +112,11 @@ dataset.speed_kmh = D.speed(:); dataset.run = D.run(:); dataset.seed = D.seed(:)
 dataset.pos = D.pos(:); dataset.gain_ant = D.gain_ant'; dataset.act = D.act(:);
 dataset.k_db = D.k_db(:); dataset.k_int = D.k_int(:); dataset.aoa = D.aoa(:); dataset.yaw = D.yaw(:);
 dataset.rho = D.rho(:); dataset.gcs_db = D.gcs_db(:); dataset.alt_m = D.alt_m(:); dataset.el_db = D.el_db(:);
-dataset.meta = struct('N_SUB', N_SUB, 'F_SUB', F_SUB, 'EbNo_list', EbNo_list, 'delay_bits', delay_bits, ...
+dataset.align = D.align(:); dataset.gcs_aoa = D.gcs_aoa(:); dataset.bank = D.bank(:); dataset.roll = D.roll(:);
+dataset.pitch = D.pitch(:); dataset.wob = D.wob(:); dataset.att_db = D.att_db(:); dataset.body_spread_db = D.body_spread_db(:);
+dataset.jam = D.jam';                      % sweep period [s], sweep phase [s], burst phase per frame
+dataset.ds_ns = D.ds_ns(:); dataset.ds_int = D.ds_int(:);
+dataset.meta = struct('N_SUB', N_SUB, 'n_sub', n_sub, 'F_SUB', F_SUB, 'EbNo_list', EbNo_list, 'delay_bits', delay_bits, ...
     'mode', 'seeded_subruns_D59', 'n_rx', p0.n_rx, 'speed_range_kmh', [p0.speed_kmh_min p0.speed_kmh_max], ...
     'threat_cfg', threat_cfg, 'created', datestr(now));
 if ~exist('data', 'dir'); mkdir('data'); end
@@ -109,8 +125,9 @@ save('data/dataset.mat', 'dataset', '-v7.3');
 fprintf('\n=== Dataset summary ===\n');
 fprintf('Frames: %d | sub-runs: %d | speed %.1f-%.1f km/h | %.1f min\n', numel(D.label), run_id, ...
     min(D.speed), max(D.speed), toc(t0)/60);
+fprintf('Labelled frames per class (and frames of the class''s own sub-runs):\n');
 for c = 1:numel(class_names)
-    fprintf('  %-22s %d\n', class_names{c}, sum(D.label == c));
+    fprintf('  %-22s %d (%d)\n', class_names{c}, sum(D.label == c), sum(D.class_run == c));
 end
 fprintf('Saved data/dataset.mat. Next: extract_spectrograms.\n');
 clear D dataset   % large arrays; main.m runs the stages in one workspace
@@ -135,8 +152,9 @@ v = find(~isnan(F.ber));
 n = numel(v);
 D.iq = [D.iq, F.iq(v)];
 lab = label * ones(1, n);
-lab(~threat_active(p.active_threat, F.act(v))) = 1;     % a WLAN frame without a packet, a fault with its contact closed: clean
-D.label = [D.label, lab]; D.level = [D.level, level * ones(1, n)];
+lab(~threat_active(p.active_threat, F.act(v))) = 1;     % a WLAN frame without a packet, a frame outside the sweep's
+                                                        % window, a fault with its contact closed: clean
+D.label = [D.label, lab]; D.class_run = [D.class_run, label * ones(1, n)]; D.level = [D.level, level * ones(1, n)];
 D.snr = [D.snr, ebno * ones(1, n)]; D.speed = [D.speed, v_kmh * ones(1, n)];
 D.run = [D.run, run_id * ones(1, n)]; D.seed = [D.seed, seed * ones(1, n)]; D.fold = [D.fold, fold * ones(1, n)];
 D.pos = [D.pos, v]; D.gain_ant = [D.gain_ant, F.gain_ant(:, v)]; D.act = [D.act, F.act(v)];
@@ -144,6 +162,11 @@ o = ones(1, n);
 D.k_db = [D.k_db, d.k_sig * o]; D.k_int = [D.k_int, d.k_int * o]; D.aoa = [D.aoa, d.aoa(1) * o];
 D.yaw = [D.yaw, d.yaw * o]; D.rho = [D.rho, d.rho * o]; D.gcs_db = [D.gcs_db, d.gcs_point_db * o];
 D.alt_m = [D.alt_m, d.alt_m * o]; D.el_db = [D.el_db, d.el_db * o];
+D.align = [D.align, d.align(1) * o]; D.gcs_aoa = [D.gcs_aoa, d.gcs_aoa * o]; D.bank = [D.bank, d.bank * o];
+D.roll = [D.roll, d.roll * o]; D.pitch = [D.pitch, d.pitch * o]; D.wob = [D.wob, d.wobble(1) * o];
+D.att_db = [D.att_db, d.att_db * o]; D.body_spread_db = [D.body_spread_db, (max(d.body_db) - min(d.body_db)) * o];
+D.jam = [D.jam, d.jam(:) * o];
+D.ds_ns = [D.ds_ns, d.ds_ns(1) * o]; D.ds_int = [D.ds_int, d.ds_ns(min(2, end)) * o];
 D.ber = [D.ber, F.ber(v)]; D.fer = [D.fer, F.fer(v)];
 for i = 1:numel(MEAS), D.(MEAS{i}) = [D.(MEAS{i}), F.(MEAS{i})(v)]; end
 end

@@ -1316,6 +1316,8 @@ function [p, sevTxt, fd_hz] = scenarioParams(env, threat, sevLevel, v_kmh)
     end
     p.v_kmh = v_kmh; p.v = v_kmh/3.6; p.fd_max = fd_hz;
     p.quiet_build = true;                      % build the Simulink model without opening its window
+    p.gcs_aoa_random = false;                  % the GCS at broadside, as the 3D view draws it
+    p.jam_timing_random = false;               % the sweeper on our channel in every frame of the run
 end
 
 function s = pctStr(x)
@@ -1985,7 +1987,7 @@ function runEpisode(btn, ~)
             if isempty(Ep{i}), cfg = na; else, cfg = Ep{i}.cfg; end
             if onset, F = Pt{cfg}; else, F = Pn{cfg}; end
             rows = find(F.run == rr); j = rows(mod(k0 + k, numel(rows)) + 1);
-            fr = struct('iq', double(F.iq{j}), 'ber', F.ber(j), 'feat', F.feat(j, :));
+            fr = struct('iq', double(F.iq{j}), 'ber', F.ber(j), 'feat', F.feat(j, :), 'pkt', floor((k0 + k) / 2));
             if isfield(F, 'gant') && ~isempty(F.gant), fr.gant = F.gant(j, :); end
             [Ep{i}, info] = episode_cycle(Ep{i}, k, fr, ctx{i});
             T.ber(i, k) = fr.ber; T.det(i, k) = cls_idx(info.cls); T.ok(i, k) = T.det(i, k) == truthIdx(k);

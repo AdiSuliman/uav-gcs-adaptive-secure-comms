@@ -53,15 +53,18 @@ function varargout = link_env(cmd, varargin)
 %     switch per configuration change or channel hop
 %     false  per change on a healthy link
 %   restored: m <= C.ratio_ok x clean; restored_plr: true packet loss <= C.ratio_ok
-%   x the clean link's + one packet of the geometry; healthy: unmitigated m <=
+%   x the clean link's + one packet of the geometry (two frames with fec_interleave,
+%   packet_share.m; its packet is decoded after the second, one cycle (20 ms) later than
+%   an uncoded packet, a delay not counted in the cycles); healthy: unmitigated m <=
 %   C.ratio_ok x clean; recoverable: some configuration restores both BER and
 %   packet loss in this geometry (under a comb jammer, one without channel_switch
 %   and freq_diversity).
 %   obs: probs (NE x classes), maha (unknown-threat score), unknown (score below
 %   threshold, or masked), feat (NE x link features, receiver measurements), gant
 %   (NE x antennas, mean channel gain of every antenna), cfg_link (configuration
-%   the frame was received with), ber_true and fer_true (the frame's BER and packet
-%   error, analysis only)
+%   the frame was received with), pkt (the frame's coded packet: frames 2k-1 and 2k of
+%   the geometry, the receiver's framing), ber_true and fer_true (the frame's BER and
+%   packet error, analysis only)
 %   info: per episode q, restored, restored_plr, gput, changed (a change or a hop),
 %   false_switch, healthy, recoverable, sc_eff, cfg_eff, post, hop (requested this
 %   cycle), hop_in (a hop reached the link on this frame), compromised
@@ -125,7 +128,7 @@ for sp = 1:nSp
                     end
                     K.q(sc, s, a, sp, r) = q;
                     K.restored(sc, s, a, sp, r) = rest;
-                    K.restored_plr(sc, s, a, sp, r) = pl <= C.ratio_ok * pr + 1 / max(sum(k), 1);
+                    K.restored_plr(sc, s, a, sp, r) = pl <= C.ratio_ok * pr + packet_share(A{a}, sum(k));
                     if 1 - pr >= 0.1, K.gput(sc, s, a, sp, r) = PP.gp(a) * (1 - pl) / (1 - pr); end
                 end
                 ok = K.restored(sc, s, :, sp, r) & K.restored_plr(sc, s, :, sp, r);
@@ -257,4 +260,5 @@ end
 mask = E.unk & E.t >= E.onset;
 obs.probs(mask, :) = 0; obs.unknown(mask) = true; obs.maha(mask) = -Inf;
 obs.cfg_link = E.cfg_link(:);
+obs.pkt = floor((E.k0(:) + E.t(:)) / 2);           % frame position k0 + t: pairs of the geometry's frames
 end
