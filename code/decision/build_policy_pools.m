@@ -46,7 +46,8 @@ COMBOS  = C.combos;
 S0 = load('params.mat'); p0 = S0.params; p0.quiet_build = true;
 EBNO   = p0.EbNo_dB;
 NGEO   = [8 6 12 24 60];         % geometries per (cell, Eb/N0): train, validation, test, edge speeds, second test
-NCOMB  = [0 0 0 0 0];            % own geometries of the combined threats (0: they fly the split's geometries)
+NCOMB  = [0 0 0 0 24];           % own geometries of the combined threats (0: they fly the split's geometries);
+                                 % second test: 12 + 24 = 36 flights per point, the N_MIN of a verdict
 BLOCK  = [1 5 14 16 17];         % pool_seed.m block of each split (pool_seed.m lists every block)
 SPLITS = {'train', 'val', 'test', 'speed', 'test2'};
 LHS    = [false false true false true];   % splits laid out as nested Latin hypercubes (pool_geometries.m)
@@ -59,7 +60,7 @@ opt = struct('F_SUB', 20, 'tw', 10, 'delay_bits', 20);
 C = decision_config();
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
     SINGLES = {'none', 'jamming', 'path_loss', 'airframe_shadowing'}; COMBOS = {'jamming+path_loss', 'tone_jamming+path_loss'};
-    EBNO = [3 12]; NGEO = [2 2 2 2 2];
+    EBNO = [3 12]; NGEO = [2 2 2 2 2]; NCOMB = [0 0 0 0 2];
     BLOCK(3:5) = [18 18 19];                            % blocks of its own: its flights are never test flights
 end
 
@@ -81,7 +82,7 @@ vrange = [p0.speed_kmh_min p0.speed_kmh_max];
 % edge-speed split holds the clean link and the single threats at nominal severity,
 % the second test split the clean link and the single threats
 nSp = numel(SPLITS);
-iSpd = find(strcmp(SPLITS, 'speed')); iTest2 = find(strcmp(SPLITS, 'test2'));
+iSpd = find(strcmp(SPLITS, 'speed'));
 cells = struct('threat', {}, 'sev', {}, 'level', {}, 'splits', {});
 for i = 1:numel(scen)
     t = scen{i};
@@ -89,7 +90,7 @@ for i = 1:numel(scen)
         cells(end+1) = struct('threat', t, 'sev', C.nominal, 'level', NaN, 'splits', 1:nSp); %#ok<SAGROW>
     elseif contains(t, '+')
         for v = C.combo_sev
-            cells(end+1) = struct('threat', t, 'sev', v, 'level', NaN, 'splits', setdiff(1:nSp, [iSpd iTest2])); %#ok<SAGROW>
+            cells(end+1) = struct('threat', t, 'sev', v, 'level', NaN, 'splits', setdiff(1:nSp, iSpd)); %#ok<SAGROW>
         end
     else
         for v = 1:numel(C.sev_names)
