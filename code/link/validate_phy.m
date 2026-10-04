@@ -10,7 +10,9 @@ function ok = validate_phy()
 %       branches (non-central quadratic form, Ramirez-Espinosa et al., 2018)
 %   V6  K = -5 dB and V7 K = 20 dB, the default antennas: the ends of the K-factor
 %       range drawn per flight (channel_k.m)
-%   V8  jamming JSR 10 dB: MRC vs MMSE vs jammer-free MRC (spatial nulling)
+%   V8  jamming JSR 10 dB: MRC vs MMSE vs jammer-free MRC (spatial nulling); V8c/V8d, MMSE
+%       with the jammer at the fixed direction nearest endfire, where its LoS Doppler
+%       fd sin(aoa) is largest, against the same jammer with a frozen LoS (informational)
 %   V9  seeds: same seed -> identical run, different seed -> different run
 %   V10 tone jammer: in-band power after the receive filter equals that of a noise
 %       jammer of the same JSR (tone_jamming uses the same JSR definition)
@@ -40,6 +42,8 @@ p0.yaw_random = false;                 % fixed geometry through every run
 p0.corr_random = false;                % each case sets its receive correlation
 p0.k_random = false;                   % K-factor of each case fixed
 p0.gcs_tracked = false;                % the GCS antenna on its axis: Eb/N0 as set
+p0.gcs_aoa_random = false;             % the GCS at broadside
+p0.body_random = false;                % equal branches, as the closed forms assume
 p0.active_threat = 'none';
 
 CFG.EbNo      = 0:2:10;      % [dB] per branch
@@ -66,6 +70,8 @@ cases = {
   'V7 K = 20 dB, MRC',          0,   20,  0.3, 'none',    'mrc',    0
   'V8a jam 10 dB, MRC',         0,   10,  0.3, 'jamming', 'mrc',   -1
   'V8b jam 10 dB, MMSE',        0,   10,  0.3, 'jamming', 'mmse',  -1
+  'V8c jam endfire, MMSE',      0,   10,  0.3, 'jamming', 'mmse',  -1
+  'V8d jam endfire, no LoS fd', 0,   10,  0.3, 'jamming', 'mmse',  -1
 };
 nC = size(cases, 1); nS = numel(CFG.EbNo);
 % n_rx 0 = the system's antennas (params); theory order = antennas, -1 = no closed form
@@ -75,6 +81,7 @@ cases(dflt, 1) = cellfun(@(n) sprintf('%s %d ant', n, p0.n_rx), cases(dflt, 1), 
 th = cell2mat(cases(:, 7)); th(dflt & th == 0) = p0.n_rx; cases(:, 7) = num2cell(max(th, 0));
 iTh = find(cell2mat(cases(:, 7))' > 0); nTh = numel(iTh);
 iMRCj = find(startsWith(cases(:, 1), 'V8a')); iMMSEj = find(startsWith(cases(:, 1), 'V8b'));
+iEnd = find(startsWith(cases(:, 1), 'V8c')); iFroz = find(startsWith(cases(:, 1), 'V8d'));
 iDef = find(startsWith(cases(:, 1), 'V5 default'));
 BER = nan(nC, nS); NERR = zeros(nC, nS); TH = nan(nC, nS); GAP = nan(nC, 1); GSE = nan(nC, 1);
 DLY = nan(nC, 1);
@@ -84,6 +91,10 @@ for c = 1:nC
     p.n_rx = cases{c,2}; p.rician_k = cases{c,3}; p.int_rician_k = 10;
     p.rx_corr = cases{c,4}; p.active_threat = cases{c,5}; p.rx_combiner = cases{c,6};
     p.jsr_db = 10; p.seed = 1000 + c; p.rx_sync = 'ideal';
+    if ismember(c, [iEnd iFroz])
+        p.int_aoa_deg(1) = p0.int_aoa_deg(end); p.seed = 1000 + iEnd;    % same flights, LoS Doppler on and off
+        p.int_los_doppler = c == iEnd;
+    end
     [BER(c,:), NERR(c,:), DLY(c), BR] = run_curve(p, modelName, CFG, delay_bits);
     L = cases{c,7};
     if L > 0
@@ -168,6 +179,9 @@ rep{end+1} = sprintf('V8 MMSE vs MRC under jamming (JSR 10 dB, interferer at %g 
     p0.int_aoa_deg(1), sprintf('%6.1f', jam_gain));
 rep{end+1} = sprintf('V8 MMSE under jamming vs jammer-free MRC (V5): BER ratio %s', ...
     sprintf('%8.2f', BER(iMMSEj,:) ./ BER(iDef,:)));
+rep{end+1} = sprintf(['V8c MMSE, jammer at %g deg (LoS Doppler %.0f Hz) vs V8d, the same flights with a frozen ' ...
+    'jammer LoS: BER ratio %s'], p0.int_aoa_deg(end), CFG.fd_val * sind(p0.int_aoa_deg(end)), ...
+    sprintf('%8.2f', BER(iEnd,:) ./ BER(iFroz,:)));
 rep{end+1} = sprintf('V9 seeds: same seed identical %s, different seed differs %s (BER %s)', ...
     passfail(seed_same), passfail(seed_diff), mat2str(bs, 4));
 rep{end+1} = sprintf('V10 tone jammer: in-band JSR after the receive filter %.2f dB (noise jammer %.2f dB, set %g dB) -> %s', ...

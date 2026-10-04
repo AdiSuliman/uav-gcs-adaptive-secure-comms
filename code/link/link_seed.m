@@ -12,8 +12,10 @@ function d = link_seed(modelName, seed, fd, geo)
 %   ranges the model was built with: UserData of its Constant blocks, build_threat_model.m)
 %   go to the blocks whose draw is on: interferer directions to 'AoA', K-factors of our
 %   signal and of the interferers to 'Kfac', heading rate to 'Yaw', receive correlation to
-%   'Corr'. 'GCS' gets the amplitude of our signal: the tracker's pointing loss and the UAV
-%   antenna's gain toward the GCS (0 dB without geo.ebno). No rebuild is needed.
+%   'Corr'. 'GCS' gets the amplitude of our signal: the tracker's pointing loss and the gain
+%   of the tilted UAV antenna toward the GCS (its elevation is 0 without geo.ebno). 'Att'
+%   gets the GCS direction and elevation, the roll, the pitch and its wobble; 'Body' our
+%   signal's amplitude on each antenna. No rebuild is needed.
 %   d: the flight's draws (flight_draws.m).
 b0 = seed_base(seed);
 set_param([modelName '/Seed'], 'Value', sprintf('%d', b0));
@@ -40,6 +42,10 @@ end
 if getSimulinkBlockHandle([modelName '/GCS']) ~= -1
     set_param([modelName '/GCS'], 'Value', sprintf('%.8f', d.gcs_amp));
 end
+if getSimulinkBlockHandle([modelName '/Att']) ~= -1
+    set_param([modelName '/Att'], 'Value', mat2str([d.gcs_aoa d.el_deg d.roll d.pitch d.wobble], 10));
+    set_param([modelName '/Body'], 'Value', mat2str(d.body_amp, 10));
+end
 blks = {[modelName '/AWGN'], [modelName '/BitSource']};
 for b = 1:numel(blks)
     dp = fieldnames(get_param(blks{b}, 'DialogParameters'));
@@ -63,7 +69,7 @@ end
 function p = block_params(modelName)
 % Draw switches, ranges and fixed values of the model (UserData of its Constant blocks) in one struct.
 p = struct();
-for b = {'AoA', 'Kfac', 'Yaw', 'Corr', 'GCS'}
+for b = {'AoA', 'Kfac', 'Yaw', 'Corr', 'GCS', 'Att', 'Body'}
     blk = [modelName '/' b{1}];
     if getSimulinkBlockHandle(blk) == -1, continue; end
     u = get_param(blk, 'UserData');

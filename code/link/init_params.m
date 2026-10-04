@@ -75,6 +75,22 @@ params.yaw_random    = true;                     % heading rate drawn per seeded
 params.roll_max_deg  = 57.9;                     % [deg] largest measured bank angle of a small UAV
 params.turn_v_floor  = 8;                        % [m/s] speed floor of the turn-rate formula
 params.yaw_rate_max  = 28.7;                     % [deg/s] largest measured yaw rate of a small UAV
+% The turn banks the UAV by atan(w v / g) (bank_angle.m): its antennas tilt and their
+% polarization turns against the GCS antenna (uav_attitude_db.m), on our signal only.
+% Wind (hover_attitude.m): below the slowest measured flying UAV a multirotor holds its
+% position by tilting (30 s means: roll -17.5..19.3 deg, pitch -11.0..14.9 deg, DJI Air 3S
+% in 0.8-7.6 m/s wind, Polle et al.) and its attitude jitters (within 1 deg in calm air; in
+% wind the LoS sweeps across the airborne antenna's pattern, Lin et al. 2026). The jitter
+% is a pitch wobble below 10 deg at 5-25 Hz with the antennas 0.4 m from the centre of
+% rotation, Banagar & Dhillon's assumed parameters: the channel decorrelates within
+% 6.7-12.3 ms at 2.4 GHz.
+params.wobble_random    = true;                  % attitude in wind drawn per seeded flight
+params.wobble_v_max     = 8;                     % [m/s] below it: hover attitude and wobble
+params.wobble_roll_deg  = [-17.5 19.3];          % [deg] static roll (Polle et al.)
+params.wobble_pitch_deg = [-11.0 14.9];          % [deg] static pitch (Polle et al.)
+params.wobble_amp_deg   = 10;                    % [deg] largest pitch wobble (Banagar & Dhillon)
+params.wobble_freq_hz   = [5 25];                % [Hz] wobble frequency (Banagar & Dhillon)
+params.wobble_arm_m     = 0.4;                   % [m] antenna offset from the centre of rotation (Banagar & Dhillon)
 
 % Threat parameters at nominal severity, the middle of the decision layer's five
 % levels (dataset levels: run_dataset_sweep.m; decision levels: decision_config.m)
@@ -155,7 +171,9 @@ params.gcs_floor_db    = 14;          % [dB] edge of the F.1336 main-lobe formul
 % UAV: n_rx omni antennas under the airframe (fuselage or wings), spatially separated so that airframe
 % shadowing rarely hides all of them at once (Khawaja et al.: two bottom-mounted
 % antennas about 1.2 m apart; small UAVs measured with three and four antennas).
-% Line array over that 1.2 m aperture; three antennas null up to two interferers.
+% Line array over that 1.2 m aperture along the fuselage (D58, the 3D scene; D69 allows
+% the wings too): a roll turns about the array, so a bank tilts the antennas but not the
+% array. Three antennas null up to two interferers.
 params.n_rx           = 3;            % UAV receive antennas (profile 1)
 if isfile('profile.json')             % antenna profile of this checkout (branch profile-2-antennas)
     prof = jsondecode(fileread('profile.json'));
@@ -169,7 +187,14 @@ params.ant_spacing_wl = params.ant_aperture_m / (3e8 / params.carrier_freq) / (p
 params.rx_corr        = 0.3;          % fixed value (PHY validation, maps)
 params.corr_random    = true;         % correlation drawn per seeded sub-run
 params.corr_range     = [0.3 0.9];
-params.gcs_aoa_deg    = 0;            % GCS direction from array broadside [deg]
+params.gcs_aoa_deg    = 0;            % GCS direction from array broadside [deg]; added to the draw
+params.gcs_aoa_random = true;         % GCS direction drawn per flight (gcs_aoa.m); 0 for fixed geometries
+params.gcs_aoa_range_deg = [-90 90];  % range of the random GCS direction (broadside angle) [deg]
+% Airframe: the drone body changes each mounted antenna's azimuth pattern by 0.016-10.96 dB,
+% mean 3.03, SD 2.53 (Badi et al. 2019), drawn per flight and antenna (body_loss.m) on our
+% signal; the flight's mean loss is part of the link budget's margin (lb_margin_db).
+params.body_random    = true;
+params.body_loss_db   = [3.03 2.53 0.016 10.96];   % [dB] mean, SD, min, max
 % Fixed interferer directions (GUI, gallery, PHY validation) and the survivability
 % geometries (separated, aligned): the same spatial alignment with the GCS on every
 % array (0.25 / 0.2 / 0.93, as 40-45 / 45 / 10 deg on a half-wavelength pair)

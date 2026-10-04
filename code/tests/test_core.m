@@ -226,7 +226,7 @@ function test_seed_streams_disjoint(tc)
 % Every purpose of every flight seed draws from its own stream: the purpose offsets
 % are distinct and below 64, and the flight seeds of every family are distinct and
 % below 2^26.
-P = {'channel', 'awgn', 'bits', 'threat', 'aoa', 'k', 'yaw', 'corr', 'gcs', 'alt', 'speed'};
+P = {'channel', 'awgn', 'bits', 'threat', 'aoa', 'k', 'yaw', 'corr', 'gcsaoa', 'gcs', 'alt', 'speed', 'body', 'wobble'};
 off = zeros(1, numel(P));
 for i = 1:numel(P)
     [~, n] = seed_stream(12345, P{i});
@@ -261,7 +261,10 @@ A = cell2mat(arrayfun(@(x) interferer_aoa(x, [0 1], 3), S, 'UniformOutput', fals
 wmax = min(rad2deg(9.81 * tand(p.roll_max_deg) / p.turn_v_floor), p.yaw_rate_max);
 w = arrayfun(@(x) heading_rate(x, 1, p), S) / wmax;     % 1 Hz: below the speed floor
 rho = arrayfun(@(x) rx_correlation(x, [0 1]), S);
-U = [K, A, (w + 1) / 2, rho, v];                        % the uniform behind every draw
+G = arrayfun(@(x) gcs_aoa(x, [0 1]), S);
+W = cell2mat(arrayfun(@(x) hover_attitude(x, 0, p), S, 'UniformOutput', false));
+W = (W(:, 1) - p.wobble_roll_deg(1)) / diff(p.wobble_roll_deg);
+U = [K, A, (w + 1) / 2, rho, v, G, W];                  % the uniform behind every draw
 c = corrcoef(K(:, 1), w);
 verifyLessThan(tc, abs(c(1, 2)), 0.1);
 C = corrcoef(U);
@@ -314,7 +317,7 @@ end
 
 function test_receiver_measurements(tc)
 p = base_params(); p.quiet_build = true; p.active_threat = 'none'; p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false; p.gcs_tracked = false; p.seed = 11;
-p.k_random = false;
+p.k_random = false; p.gcs_aoa_random = false; p.body_random = false;
 mdl = 'UAV_GCS_Threat_Link';
 evalc('build_threat_model(p)');
 snr = 12 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
@@ -429,7 +432,8 @@ verifyEqual(tc, d0.alt_m, flight_altitude(77, p));
 verifyEqual(tc, d0.el_db, 0);                                   % no distance: no elevation term
 d1 = flight_draws(77, 100, p, struct('ebno', 9, 'alt_m', 50, 'k_sig_db', 3));
 verifyEqual(tc, [d1.alt_m d1.k_sig], [50 3]);
-verifyEqual(tc, [d1.k_int d1.aoa d1.yaw d1.rho d1.gcs_point_db], [d0.k_int d0.aoa d0.yaw d0.rho d0.gcs_point_db]);
+verifyEqual(tc, [d1.k_int d1.aoa d1.yaw d1.rho d1.gcs_point_db d1.gcs_aoa d1.bank d1.roll d1.pitch d1.wobble d1.body_db], ...
+    [d0.k_int d0.aoa d0.yaw d0.rho d0.gcs_point_db d0.gcs_aoa d0.bank d0.roll d0.pitch d0.wobble d0.body_db]);
 d2 = flight_draws(77, 100, p, struct('ebno', 9, 'alt_m', NaN, 'k_sig_db', NaN));
 verifyEqual(tc, [d2.alt_m d2.k_sig], [d0.alt_m d0.k_sig]);
 p.alt_random = false;
@@ -449,14 +453,18 @@ verifyEqual(tc, uav_dipole_db(90), -30, 'AbsTol', 1e-9);
 verifyLessThan(tc, diff(uav_dipole_db([30 60])), 0);
 p.gcs_tracked = false;
 [h, e] = ndgrid(p.alt_range_m(1):5:p.alt_range_m(2), p.EbNo_dB);
-G = zeros(size(h)); A = G;
+G = zeros(size(h)); A = G; T = G;
 for i = 1:numel(h)
     d = flight_draws(1, 100, p, struct('ebno', e(i), 'alt_m', h(i)));
-    G(i) = d.el_db; A(i) = d.gcs_amp;
+    G(i) = d.el_db; A(i) = d.gcs_amp; T(i) = d.att_db;
+    verifyEqual(tc, T(i), uav_attitude_db(d.el_deg, d.gcs_aoa, d.roll, d.pitch, p.uav_null_db), 'AbsTol', 1e-12);
 end
 verifyGreaterThanOrEqual(tc, min(G(:)), -1.1);
 verifyLessThan(tc, min(G(:)), -1);                               % 120 m at 0.28 km
-verifyEqual(tc, A, 10.^(G / 20), 'AbsTol', 1e-12);
+verifyEqual(tc, A, 10.^(T / 20), 'AbsTol', 1e-12);               % the gain at the flight's attitude
+p.yaw_random = false;                                            % level flight: the elevation gain alone
+d = flight_draws(1, 100, p, struct('ebno', 15, 'alt_m', 120));
+verifyEqual(tc, d.att_db, d.el_db, 'AbsTol', 1e-12);
 end
 
 function test_inband_cap(tc)
@@ -598,6 +606,211 @@ phi3 = sqrt(27000 * 10^(-p.gcs_ant_dbi / 10));
 verifyEqual(tc, mean(L), 12 * sum((p.gcs_err_deg * sqrt(pi / 2)).^2) / phi3^2, 'RelTol', 0.1);
 p.gcs_tracked = false;
 verifyEqual(tc, gcs_pointing(5, p), 1);
+end
+
+%% ---------- flight geometry: GCS direction, bank, airframe, attitude in wind ----------
+function test_gcs_direction(tc)
+% The GCS direction is drawn per flight over every broadside angle, reproducible, added to
+% p.gcs_aoa_deg (the relay path) and fixed when the draw is off; each interferer's
+% alignment is taken against the GCS's cone angle.
+p = base_params();
+b = arrayfun(@(s) gcs_aoa(s, p.gcs_aoa_range_deg), 1:4000);
+verifyTrue(tc, all(b >= -90 & b <= 90));
+verifyEqual(tc, histcounts(b, -90:45:90) / 4000, 0.25 * ones(1, 4), 'AbsTol', 0.03);
+verifyEqual(tc, gcs_aoa(9, p.gcs_aoa_range_deg), gcs_aoa(9, p.gcs_aoa_range_deg));
+d = flight_draws(9, 100, p, struct('ebno', 9, 'alt_m', 90));
+verifyEqual(tc, d.gcs_aoa, gcs_aoa(9, p.gcs_aoa_range_deg));
+[~, ca] = uav_attitude_db(d.el_deg, d.gcs_aoa, d.roll, d.pitch, p.uav_null_db);
+verifyEqual(tc, ca, cosd(d.el_deg) * sind(d.gcs_aoa), 'AbsTol', 1e-12);     % no pitch above 8 m/s
+st = @(c) exp(-1j * 2*pi * p.ant_spacing_wl * (0:p.n_rx-1)' * c);
+verifyEqual(tc, d.align, abs(st(ca)' * st(sind(d.aoa))).^2 / p.n_rx^2, 'AbsTol', 1e-12);
+p.gcs_aoa_deg = 60;
+verifyEqual(tc, getfield(flight_draws(9, 100, p), 'gcs_aoa'), 60 + d.gcs_aoa, 'AbsTol', 1e-12);
+p.gcs_aoa_random = false;
+verifyEqual(tc, getfield(flight_draws(9, 100, p), 'gcs_aoa'), 60);
+end
+
+function test_bank_angle(tc)
+% Bank of a coordinated turn: the largest measured (57.9 deg) at 161 km/h at the largest
+% rate, 45.6 deg at 72 km/h under the yaw-rate cap, 0 at hover; every flight's roll is its
+% bank to the side of the turn.
+p = base_params();
+fd = @(v) v * p.carrier_freq / p.c_light;
+wmax = min(rad2deg(9.81 * tand(p.roll_max_deg) / p.v_max), p.yaw_rate_max);
+verifyEqual(tc, bank_angle(wmax, fd(p.v_max), p), p.roll_max_deg, 'AbsTol', 1e-9);
+verifyEqual(tc, bank_angle(-p.yaw_rate_max, fd(20), p), 45.6, 'AbsTol', 0.05);
+verifyEqual(tc, bank_angle(p.yaw_rate_max, 0, p), 0);
+for v = [0 20 p.v_max]
+    C = arrayfun(@(s) flight_draws(s, fd(v), p), 1:200, 'UniformOutput', false); D = [C{:}];
+    verifyLessThanOrEqual(tc, max([D.bank]), p.roll_max_deg + 1e-9);
+    if v > 0
+        verifyEqual(tc, [D.roll], sign([D.yaw]) .* [D.bank], 'AbsTol', 1e-12);
+        verifyGreaterThan(tc, mean([D.bank] > 30), 0.3);         % fast flights often bank past 30 deg
+    else
+        verifyEqual(tc, [D.bank], zeros(1, 200));
+    end
+end
+end
+
+function test_attitude_gain(tc)
+% Gain of the tilted UAV antenna toward the GCS: the level pattern without tilt; with the
+% GCS abeam the pattern at the bank (-6.98 dB at 57.9 deg), with the GCS ahead the
+% polarization loss 20 log10(cos(bank)) (Badi et al.); outside the turn at 120 m and
+% 0.28 km 17 dB below level, the inside less; the floor; never above the horizon gain.
+[E, B] = ndgrid(0:5:60, -90:15:90);
+[g, ca] = uav_attitude_db(E, B, 0, 0, -30);
+verifyEqual(tc, g, uav_dipole_db(E), 'AbsTol', 1e-9);
+verifyEqual(tc, ca, cosd(E) .* sind(B), 'AbsTol', 1e-12);
+verifyEqual(tc, uav_attitude_db(0, 0, 57.9, 0, -30), -6.98, 'AbsTol', 0.01);
+verifyEqual(tc, uav_attitude_db(0, 0, -57.9, 0, -30), uav_attitude_db(0, 0, 57.9, 0, -30), 'AbsTol', 1e-12);
+verifyEqual(tc, uav_attitude_db(0, 90, 57.9, 0, -30), 20*log10(cosd(57.9)), 'AbsTol', 1e-9);
+verifyEqual(tc, uav_attitude_db(0, 90, 0, 30, -30), uav_dipole_db(30), 'AbsTol', 1e-9);   % the nose up, the GCS ahead
+h = asind(110 / (1000 * link_distance_km(15, base_params())));
+verifyEqual(tc, uav_attitude_db(h, 0, -57.9, 0, -30) - uav_dipole_db(h), -17.1, 'AbsTol', 0.2);
+verifyGreaterThan(tc, uav_attitude_db(h, 0, 57.9, 0, -30), uav_attitude_db(h, 0, -57.9, 0, -30));
+verifyEqual(tc, uav_attitude_db(0, 0, 90, 0, -30), -30, 'AbsTol', 1e-9);
+rs = RandStream('mt19937ar', 'Seed', 3); u = rand(rs, 1e4, 4);
+g = uav_attitude_db(90 * u(:, 1), 180 * u(:, 2) - 90, 120 * u(:, 3) - 60, 60 * u(:, 4) - 30, -30);
+verifyTrue(tc, all(g <= 1e-9 & g >= -30));
+end
+
+function test_body_loss(tc)
+% Airframe loss per antenna inside Badi et al.'s measured 0.016-10.96 dB; the spread
+% between the strongest and weakest of three antennas from the measured mean and SD
+% (median 3.3 dB, 95th percentile 6.8 dB); only the spread reaches our signal.
+p = base_params();
+B = cell2mat(arrayfun(@(s) body_loss(s, 3, p.body_loss_db), (1:20000)', 'UniformOutput', false));
+verifyTrue(tc, all(B(:) >= p.body_loss_db(3) & B(:) <= p.body_loss_db(4)));
+S = sort(max(B, [], 2) - min(B, [], 2));
+verifyEqual(tc, S(10000), 3.3, 'AbsTol', 0.2);
+verifyEqual(tc, S(19000), 6.8, 'AbsTol', 0.3);
+verifyEqual(tc, body_loss(4, 3, p.body_loss_db), body_loss(4, 3, p.body_loss_db));
+d = flight_draws(4, 100, p);
+verifyEqual(tc, d.body_db, body_loss(4, p.n_rx, p.body_loss_db));
+verifyEqual(tc, -20*log10(d.body_amp), d.body_db - mean(d.body_db), 'AbsTol', 1e-12);
+p.body_random = false;
+verifyEqual(tc, getfield(flight_draws(4, 100, p), 'body_amp'), ones(1, p.n_rx));
+end
+
+function test_hover_wobble(tc)
+% Attitude in wind: none from 8 m/s up; below, the static tilt within Polle et al.'s
+% measured means and the pitch wobble within Banagar & Dhillon's ranges. The wobble's
+% lever-arm phase k aD cos(phi) sin(pitch) (phi = 20 deg, their example) decorrelates the
+% channel (ACF 0.5 at the worst phase) after 6.74 ms at 10 deg and 12.26 ms at 7 deg
+% (+-30%), and never at 5 deg, as they found at 2.4 GHz.
+p = base_params();
+fd = @(v) v * p.carrier_freq / p.c_light;
+verifyEqual(tc, hover_attitude(5, fd(p.wobble_v_max), p), zeros(1, 5));
+verifyEqual(tc, hover_attitude(5, fd(p.v_max), p), zeros(1, 5));
+W = cell2mat(arrayfun(@(s) hover_attitude(s, fd(3), p), (1:4000)', 'UniformOutput', false));
+verifyTrue(tc, all(W(:, 1) >= p.wobble_roll_deg(1) & W(:, 1) <= p.wobble_roll_deg(2)));
+verifyTrue(tc, all(W(:, 2) >= p.wobble_pitch_deg(1) & W(:, 2) <= p.wobble_pitch_deg(2)));
+verifyTrue(tc, all(abs(W(:, 3)) <= p.wobble_amp_deg & W(:, 4) >= p.wobble_freq_hz(1) & W(:, 4) < p.wobble_freq_hz(2)));
+d = flight_draws(5, fd(3), p);
+verifyEqual(tc, [d.roll - sign(d.yaw) * d.bank, d.pitch, d.wobble], hover_attitude(5, fd(3), p), 'AbsTol', 1e-12);
+d = flight_draws(5, fd(p.wobble_v_max), p);
+verifyEqual(tc, [d.pitch d.wobble], zeros(1, 4));
+ka = 2*pi * p.wobble_arm_m * p.carrier_freq / p.c_light;
+tau = (0:0.05:30) * 1e-3;
+tco = zeros(1, 3); m = [10 7 5];
+for i = 1:3
+    R = abs(mean(exp(1j * ka * cosd(20) * sind(W(:, 3) * m(i) / 10 .* sin(2*pi * W(:, 4) * tau))), 1));
+    j = find(R <= 0.5, 1); tco(i) = Inf; if ~isempty(j), tco(i) = tau(j); end
+end
+verifyEqual(tc, tco(1:2), [6.74 12.26] * 1e-3, 'RelTol', 0.3);
+verifyEqual(tc, tco(3), Inf);
+end
+
+function test_channel_geometry(tc)
+% Our signal in the model: the LoS arrives at the GCS's cone angle set at run time, the
+% diffuse part is centred on the GCS direction, the airframe loss scales each antenna,
+% the antenna gain toward the GCS follows the pitch, and at hover the wobble decorrelates
+% the channel between frames 20 ms apart while a calm hover keeps it frozen.
+p = base_params(); p.quiet_build = true; p.active_threat = 'none'; p.rx_sync = 'ideal'; p.seed = 11;
+p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false; p.gcs_tracked = false; p.k_random = false;
+p.gcs_aoa_random = false; p.body_random = false; p.wobble_random = false; p.chain_amp_db = 0; p.chain_phase_deg = 0;
+mdl = 'UAV_GCS_Threat_Link';
+evalc('build_threat_model(p)');
+set_param([mdl '/AWGN'], 'SNR', num2str(60 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), 'SignalPower', num2str(1/p.sps));
+n = p.n_rx; fs = p.symbol_rate * p.sps; fdx = p.v_max * p.carrier_freq / p.c_light;
+st = @(c) exp(-1j * 2*pi * p.ant_spacing_wl * (0:n-1)' * c) / sqrt(n);
+Y = run_link(mdl, p, 160, [60 10], 0.3, [40 30 zeros(1, 5)], ones(1, n), 4);
+v = lead_dir(Y);
+verifyGreaterThan(tc, abs(st(cosd(30) * sind(40))' * v)^2, 0.99);    % the cone angle, not the azimuth
+verifyLessThan(tc, abs(st(sind(40))' * v)^2, 0.5);
+Y = run_link(mdl, p, fdx, [-60 10], 0.9, [40 30 zeros(1, 5)], ones(1, n), 20);
+verifyGreaterThan(tc, abs(st(cosd(30) * sind(40))' * lead_dir(Y))^2, 0.9);
+b = [0 -6 4 -2]; b = b(1:n);
+Y = run_link(mdl, p, 160, [60 10], 0.3, zeros(1, 7), 10.^(b / 20), 4);
+pw = 10*log10(mean(abs(Y).^2, [1 3]));
+verifyEqual(tc, pw - pw(1), b - b(1), 'AbsTol', 0.2);
+% hovering, the GCS ahead at 30 deg below: the pitch wobble moves the antenna gain by
+% the pattern at 30 deg + pitch, frame by frame
+a0 = [90 30 0 0 0 0 0]; aw = [90 30 0 0 10 15 0];
+Y0 = run_link(mdl, p, 0, [60 10], 0.3, a0, ones(1, n), 10);
+Yw = run_link(mdl, p, 0, [60 10], 0.3, aw, ones(1, n), 10);
+[ns, ~, nf] = size(Y0);
+t = (0:ns-1)' / fs + (0:nf-1) * round(p.cycle_s * fs) / fs;
+g = uav_attitude_db(30, 90, 0, 10 * sin(2*pi * 15 * t), p.uav_null_db) - uav_attitude_db(30, 90, 0, 0, p.uav_null_db);
+verifyEqual(tc, 10*log10(squeeze(mean(sum(abs(Yw).^2, 2), 1) ./ mean(sum(abs(Y0).^2, 2), 1)))', ...
+    10*log10(mean(10.^(g / 10), 1)), 'AbsTol', 0.05);
+[~, H0] = run_link(mdl, p, 0, [10 10], 0.3, a0, ones(1, n), 10);
+[~, Hw] = run_link(mdl, p, 0, [10 10], 0.3, aw, ones(1, n), 10);
+verifyGreaterThan(tc, frame_corr(H0), 0.99);
+verifyLessThan(tc, frame_corr(Hw), 0.7);
+close_system(mdl, 0);
+end
+
+function test_interferer_channel(tc)
+% An interferer's LoS carries the Doppler shift of its direction: against the same flight
+% hovering, its phase advances 2 pi fd sin(aoa) per second; its diffuse part is centred on
+% its own direction.
+p = base_params(); p.quiet_build = true; p.active_threat = 'jamming'; p.jsr_db = 30; p.rx_sync = 'ideal'; p.seed = 11;
+p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false; p.gcs_tracked = false; p.k_random = false;
+p.gcs_aoa_random = false; p.body_random = false; p.wobble_random = false; p.chain_amp_db = 0; p.chain_phase_deg = 0;
+mdl = 'UAV_GCS_Threat_Link';
+evalc('build_threat_model(p)');
+set_param([mdl '/AWGN'], 'SNR', num2str(60 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), 'SignalPower', num2str(1/p.sps));
+n = p.n_rx; fs = p.symbol_rate * p.sps; fdx = p.v_max * p.carrier_freq / p.c_light;
+Y1 = run_link(mdl, p, fdx, [10 60], 0.3, zeros(1, 7), ones(1, n), 10);
+Y0 = run_link(mdl, p, 0, [10 60], 0.3, zeros(1, 7), ones(1, n), 10);
+[ns, ~, nf] = size(Y1);
+t = (0:ns-1)' / fs + (0:nf-1) * round(p.cycle_s * fs) / fs;
+z = squeeze(Y1(:, 1, :) .* conj(Y0(:, 1, :)));
+coh = @(f) abs(sum(z .* exp(-1j * 2*pi * f * t), 'all')) / sum(abs(z), 'all');
+verifyGreaterThan(tc, coh(fdx * sind(p.int_aoa_deg(1))), 0.98);
+verifyLessThan(tc, coh(0), 0.5);
+st = @(c) exp(-1j * 2*pi * p.ant_spacing_wl * (0:n-1)' * c) / sqrt(n);
+Y = run_link(mdl, p, fdx, [10 -60], 0.9, zeros(1, 7), ones(1, n), 20);
+verifyGreaterThan(tc, abs(st(sind(p.int_aoa_deg(1)))' * lead_dir(Y))^2, 0.9);
+close_system(mdl, 0);
+end
+
+function [Y, H] = run_link(mdl, p, fd, kfac, rho, att, body, nfr)
+% Received IQ (samples x antennas x frames) and channel estimates of one flight of the
+% built model at seed 11, its blocks then set by hand.
+link_seed(mdl, 11, fd);
+set_param([mdl '/Kfac'], 'Value', mat2str(kfac));
+set_param([mdl '/Corr'], 'Value', num2str(rho));
+set_param([mdl '/Att'], 'Value', mat2str(att));
+set_param([mdl '/Body'], 'Value', mat2str(body, 10));
+out = sim(mdl, 'StopTime', num2str(nfr * p.frame_duration));
+Y = out.get('Rx_IQ'); H = out.get('Rx_H');
+end
+
+function v = lead_dir(Y)
+% Leading eigenvector of the spatial covariance of samples x antennas x frames.
+R = 0;
+for f = 1:size(Y, 3), R = R + Y(:, :, f).' * conj(Y(:, :, f)); end
+[V, D] = eig((R + R') / 2);
+[~, i] = max(real(diag(D)));
+v = V(:, i);
+end
+
+function c = frame_corr(H)
+% Correlation of the first channel estimate of consecutive frames (antennas x blocks x frames).
+h = squeeze(H(:, 1, :));
+c = abs(sum(sum(conj(h(:, 1:end-1)) .* h(:, 2:end)))) / sum(vecnorm(h(:, 1:end-1)) .* vecnorm(h(:, 2:end)));
 end
 
 function p = base_params()

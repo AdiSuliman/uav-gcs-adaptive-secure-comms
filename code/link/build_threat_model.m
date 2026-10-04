@@ -7,17 +7,24 @@ function build_threat_model(p)
 %   -> [Rx: RRC per antenna, synchronization, channel estimation, combining, QPSK demod]
 %
 % Link: command uplink, tracked directional GCS antenna -> p.n_rx omni antennas on the UAV
-% (line array over p.ant_aperture_m, spacing from the number of antennas).
-% The GCS antenna gain is part of Eb/N0; the pointing loss of each flight and the UAV
-% antenna's gain toward the GCS at the flight's altitude scale our signal through the
-% Constant block 'GCS' (flight_draws.m, set by link_seed.m).
+% (line array along the fuselage over p.ant_aperture_m, spacing from the number of antennas).
+% The GCS antenna gain is part of Eb/N0; the pointing loss of each flight and the gain of
+% the tilted UAV antenna toward the GCS at the flight's altitude and attitude scale our
+% signal through the Constant block 'GCS' (flight_draws.m, set by link_seed.m).
 % Eb/N0 is per receive antenna (per branch).
 %
 % Tx        frame_layout.m: quiet slot, short and long training, data with pilot blocks, guard.
-% Channel   LoS steering vector (direction p.gcs_aoa_deg, turning at the heading rate of
-%           the 'Yaw' block, heading_rate.m) + diffuse Rayleigh part
-%           (sum of 32 sinusoids per antenna with random Doppler angles and phases,
-%           Jakes spectrum up to fd; receive correlation p.rx_corr). K-factors of
+% Channel   LoS steering vector toward the GCS + diffuse Rayleigh part (sum of 32 sinusoids
+%           per antenna with random Doppler angles and phases, Jakes spectrum up to fd;
+%           receive correlation p.rx_corr, centred on the GCS direction). The Constant
+%           block 'Att' holds the GCS direction and elevation (cone angle on the array),
+%           the roll and the pitch with its wobble (hover_attitude.m): the pitch tilts the
+%           array and swings the antennas on their lever arm below the centre of rotation
+%           (a phase on every path, Banagar & Dhillon); with the roll it sets the gain of
+%           the tilted antenna toward the GCS on our LoS (uav_attitude_db.m; its
+%           flight-start value is in 'GCS'). The direction turns at the heading rate of
+%           the 'Yaw' block (heading_rate.m). 'Body' scales our signal on each antenna by
+%           the airframe loss (body_loss.m). K-factors of
 %           our signal and of the interferers come from the Constant block 'Kfac':
 %           [p.rician_k p.int_rician_k], or, with p.k_random, drawn per seed from
 %           p.k_range_db by link_seed.m (channel_k.m).
@@ -40,7 +47,10 @@ function build_threat_model(p)
 %           (p.chain_amp_db, p.chain_phase_deg).
 %           Interferer directions come from the Constant block 'AoA': p.int_aoa_deg,
 %           or, with p.int_aoa_random, drawn per seed from p.int_aoa_range_deg by
-%           link_seed.m (interferer_aoa.m); they turn with the heading as our LoS does.
+%           link_seed.m (interferer_aoa.m); they turn with the heading and the pitch
+%           as our LoS does, in the UAV's horizontal plane. Every interferer's LoS has
+%           the Doppler shift of its direction, fd sin(aoa), and its diffuse part is
+%           centred on its own direction.
 % Rx        'real': coarse frequency from the repeats of the short training, timing from
 %           the long training over the arrival window, fine frequency from the two long
 %           repeats; every statistic over all antennas in a whitened domain: whitening
@@ -133,6 +143,8 @@ add_block('simulink/Sources/Constant', [modelName '/Kfac'],    'Position', [150 
 add_block('simulink/Sources/Constant', [modelName '/Yaw'],     'Position', [150 350 220 370]);
 add_block('simulink/Sources/Constant', [modelName '/Corr'],    'Position', [150 390 220 410]);
 add_block('simulink/Sources/Constant', [modelName '/GCS'],     'Position', [150 430 220 450]);
+add_block('simulink/Sources/Constant', [modelName '/Att'],     'Position', [150 470 220 490]);
+add_block('simulink/Sources/Constant', [modelName '/Body'],    'Position', [150 510 220 530]);
 add_block('simulink/Sinks/To Workspace', [modelName '/tx_sink'], 'Position', [150 30 230 60]);
 add_block('simulink/Sinks/To Workspace', [modelName '/rx_sink'], 'Position', [870 90 950 120]);
 add_block('simulink/Sinks/To Workspace', [modelName '/Tx_IQ'],   'Position', [300 30 380 60]);
@@ -188,6 +200,9 @@ add_line(modelName, 'Corr/1',      'Channel/6', 'autorouting', 'on');
 add_line(modelName, 'Corr/1',      'Threat/7',  'autorouting', 'on');
 add_line(modelName, 'GCS/1',       'Channel/7', 'autorouting', 'on');
 add_line(modelName, 'GCS/1',       'Threat/8',  'autorouting', 'on');
+add_line(modelName, 'Att/1',       'Channel/8', 'autorouting', 'on');
+add_line(modelName, 'Att/1',       'Threat/9',  'autorouting', 'on');
+add_line(modelName, 'Body/1',      'Channel/9', 'autorouting', 'on');
 add_line(modelName, 'Channel/1',   'Threat/1',  'autorouting', 'on');
 add_line(modelName, 'Threat/1',    'AWGN/1',    'autorouting', 'on');
 add_line(modelName, 'Threat/2',    'Thr_act/1', 'autorouting', 'on');
@@ -222,6 +237,14 @@ set_param([modelName '/GCS'], 'UserDataPersistent', 'on', 'UserData', struct('gc
     'alt_random', logical(p.alt_random), 'alt_range_m', p.alt_range_m, 'gcs_h_m', p.gcs_h_m, 'uav_null_db', p.uav_null_db, ...
     'gcs_pt_dbm', p.gcs_pt_dbm, 'carrier_freq', p.carrier_freq, 'lb_uav_dbi', p.lb_uav_dbi, 'lb_nf_db', p.lb_nf_db, ...
     'lb_margin_db', p.lb_margin_db, 'lb_rate_bps', p.lb_rate_bps));
+set_param([modelName '/Att'], 'Value', mat2str([p.gcs_aoa_deg zeros(1, 6)], 8));
+set_param([modelName '/Att'], 'UserDataPersistent', 'on', 'UserData', struct('gcs_aoa_random', logical(p.gcs_aoa_random), ...
+    'gcs_aoa_range_deg', p.gcs_aoa_range_deg, 'gcs_aoa_deg', p.gcs_aoa_deg, 'wobble_random', logical(p.wobble_random), ...
+    'wobble_v_max', p.wobble_v_max, 'wobble_roll_deg', p.wobble_roll_deg, 'wobble_pitch_deg', p.wobble_pitch_deg, ...
+    'wobble_amp_deg', p.wobble_amp_deg, 'wobble_freq_hz', p.wobble_freq_hz, 'n_rx', nr, 'ant_spacing_wl', p.ant_spacing_wl));
+set_param([modelName '/Body'], 'Value', mat2str(ones(1, nr)));
+set_param([modelName '/Body'], 'UserDataPersistent', 'on', 'UserData', struct('body_random', logical(p.body_random), ...
+    'body_loss_db', p.body_loss_db));
 link_seed(modelName, seed, p.fd_max);
 
 %% ---- Save ----
@@ -256,10 +279,16 @@ end
 
 function s = channel_script(p, fs)
 % Signal channel: our signal scaled by the 'GCS' block (the flight's pointing loss and the
-% UAV antenna's gain toward the GCS), then
-% LoS steering vector toward the GCS + correlated diffuse fading; K-factor kdb(1) from the 'Kfac' block. With a real receiver: frequency offset of
+% gain of the UAV antenna toward the GCS at the start of the flight), then LoS steering
+% vector toward the GCS + correlated diffuse fading centred on it; K-factor kdb(1) from the
+% 'Kfac' block. The 'Att' block [GCS direction, elevation, roll, pitch, wobble amplitude,
+% frequency, phase] sets the cone angle of the GCS on the array, the antenna gain on the LoS
+% as the attitude changes, and the lever-arm phase of every path; 'Body' our signal's
+% amplitude on each antenna. With a real receiver: frequency offset of
 % the two radios and LoS Doppler shift per flight, unknown arrival time per frame
 % (fractional delay applied in the frequency domain; the frame ends in its guard).
+% Our LoS Doppler fl is drawn apart from the GCS direction: the same arcsine distribution
+% as fd sin of a uniform direction.
 nr = p.n_rx;
 cyc = round(p.cycle_s * fs);          % channel samples from one frame to the next (one decision cycle)
 real_rx = strcmpi(p.rx_sync, 'real');
@@ -272,10 +301,10 @@ if real_rx
         'x = ifft(fft(x) .* exp(-1j*2*pi*kk*tau/Ns));\n' ...
         'r = exp(1j*2*pi*cfo*t);\n' ...
         'los = exp(1j*2*pi*fd*fl*t);\n'], p.timing_max_sym * p.sps);
-    mix = '    y(:, k) = gk * x .* r .* (sqrt(Kk/(Kk+1)) * a(k) * los + sqrt(1/(Kk+1)) * D(:, k));\n';
+    mix = '    y(:, k) = gk * bdy(k) * x .* r .* (sqrt(Kk/(Kk+1)) * a(:, k) .* gl .* los + sqrt(1/(Kk+1)) * D(:, k));\n';
 else
     pers = ''; imp = ''; dly = '';
-    mix = '    y(:, k) = gk * x .* (sqrt(Kk/(Kk+1)) * a(k) + sqrt(1/(Kk+1)) * D(:, k));\n';
+    mix = '    y(:, k) = gk * bdy(k) * x .* (sqrt(Kk/(Kk+1)) * a(:, k) .* gl + sqrt(1/(Kk+1)) * D(:, k));\n';
 end
 % airframe shadowing: one antenna, drawn per run, loses p.shadow_db and its line of sight
 % (K-factor p.shadow_k_db, Sun et al.)
@@ -299,33 +328,42 @@ if isfield(p, 'spec_amp') && p.spec_amp > 0
         'xs = ifft(fft(x) .* exp(-1j*2*pi*kk2*%.6f/Ns)) * (%.8f * exp(1j*sph));\n'], ...
         p.spec_delay_ns * 1e-9 * fs, p.spec_amp);
     if real_rx
-        mix = ['    y(:, k) = gk * (x .* r .* (sqrt(Kk/(Kk+1)) * a(k) * los + sqrt(1/(Kk+1)) * D(:, k))' ...
-            ' + xs .* r .* (sqrt(Kk/(Kk+1)) * a(k) * los));\n'];
+        mix = ['    y(:, k) = gk * bdy(k) * (x .* r .* (sqrt(Kk/(Kk+1)) * a(:, k) .* gl .* los + sqrt(1/(Kk+1)) * D(:, k))' ...
+            ' + xs .* r .* (sqrt(Kk/(Kk+1)) * a(:, k) .* gl .* los));\n'];
     else
-        mix = ['    y(:, k) = gk * (x .* (sqrt(Kk/(Kk+1)) * a(k) + sqrt(1/(Kk+1)) * D(:, k))' ...
-            ' + xs * (sqrt(Kk/(Kk+1)) * a(k)));\n'];
+        mix = ['    y(:, k) = gk * bdy(k) * (x .* (sqrt(Kk/(Kk+1)) * a(:, k) .* gl + sqrt(1/(Kk+1)) * D(:, k))' ...
+            ' + xs .* (sqrt(Kk/(Kk+1)) * a(:, k) .* gl));\n'];
     end
 else
     xs = '';
 end
-s = [sprintf('function y = fcn(x, seed, fd, kdb, yaw, rho, gcs)\n%%%%#codegen\npersistent f0 ph n%s\n', pers) ...
+% the antenna's gain toward the GCS relative to its flight-start value in 'GCS', and the
+% lever-arm phase of the LoS (the sign of the Doppler terms); the array tilts with the
+% pitch (uav_attitude_db.m)
+tilt = sprintf(['[ga, ca, cz] = uav_attitude_db(att(2), att(1) + yaw * t(1), att(3), th, %.6f);\n' ...
+    'gl = 10.^((ga - uav_attitude_db(att(2), att(1), att(3), att(4), %.6f)) / 20) .* exp(1j * %.12f * cz);\n' ...
+    'a = exp(-1j * %.12f * ca * %s);\n' ...
+    'D = D .* a;\n'], p.uav_null_db, p.uav_null_db, lever_k(p), 2*pi*p.ant_spacing_wl, ant_pos(nr));
+s = [sprintf('function y = fcn(x, seed, fd, kdb, yaw, rho, gcs, att, bdy)\n%%%%#codegen\npersistent f0 ph n%s\n', pers) ...
     sprintf('if isempty(f0)\n    rng(seed, ''twister'');\nend\nx = gcs * x;\n') ...
     sos_init('f0', 'ph', nr) imp ...
     sprintf('if isempty(n)\n    n = 0;\nend\nNs = size(x, 1);\nt = (n + (0:Ns-1).'') / %.1f;\nn = n + max(Ns, %d);\n', fs, cyc) ...
-    sos_gains('D', 'f0', 'ph', p) dly xs ...
-    sprintf(['K = 10^(kdb(1)/10);\n' ...
-    'a = exp(-1j * %.12f * (0:%d).'' * sind(%.8f + yaw * t(1)));\n' ...
-    'y = complex(zeros(Ns, %d));\n' ...
+    pitch_code() sos_gains('D', 'f0', 'ph', p) dly xs ...
+    sprintf('K = 10^(kdb(1)/10);\n') tilt ...
+    sprintf(['y = complex(zeros(Ns, %d));\n' ...
     'for k = 1:%d\n' sel mix ...
     'end\n' ...
-    'end\n'], 2*pi*p.ant_spacing_wl, nr-1, p.gcs_aoa_deg, nr, nr)];
+    'end\n'], nr, nr)];
 s = strrep(s, '%%#codegen', '%#codegen');
 end
 
 function s = threat_script(p, fs)
 % Signal-side components first (they act on our signal), then every
 % additive component as one waveform through its own spatial channel, held to the
-% in-band cap over our received signal.
+% in-band cap over our received signal. An emitter stays in the UAV's horizontal plane:
+% its LoS turns with the heading, is seen by the array tilted by the pitch ('Att' block)
+% and has the Doppler shift of its direction, fd sin(aoa); its diffuse part is centred on
+% its own direction; the antennas' lever arm moves the phase of every path.
 nr  = p.n_rx;
 sps = p.sps;
 thr = lower(p.active_threat);
@@ -366,7 +404,7 @@ if ~isempty(addc)
 end
 
 if ~isempty(addc)
-    body{end+1} = sprintf('Ki = 10^(kdb(2)/10);\n');
+    body{end+1} = [sprintf('Ki = 10^(kdb(2)/10);\n') pitch_code()];
 end
 for c = 1:numel(addc)
     comp = addc{c};
@@ -432,13 +470,18 @@ for c = 1:numel(addc)
         w = [w sprintf('w = w * min(1, %.10g * gcs);\n', inband_cap_amp(L, PL, p.inband_cap_db))]; %#ok<AGROW>
     end
     fI = sprintf('fI%d', c); pI = sprintf('pI%d', c);
-    pers{end+1} = fI; init{end+1} = sprintf('%s = fd * cos(2*pi*rand(32, %d));', fI, nr); %#ok<AGROW>
+    pers{end+1} = fI; init{end+1} = sprintf('%s = cos(2*pi*rand(32, %d));', fI, nr); %#ok<AGROW>
     pers{end+1} = pI; init{end+1} = sprintf('%s = 2*pi*rand(32, %d);', pI, nr); %#ok<AGROW>
+    dop = '0 * t';
+    if p.int_los_doppler, dop = sprintf('2*pi*fd*sind(aoa(%d)) * t', c); end
     body{end+1} = [w sos_gains('dI', fI, pI, p) sprintf([ ...
-        'aI = exp(-1j * %.12f * (0:%d).'' * sind(aoa(%d) + yaw * t(1)));\n' ...
+        'sI = sind(aoa(%d) + yaw * t(1));\n' ...
+        'aI = exp(-1j * %.12f * (cosd(th) * sI) * %s);\n' ...
+        'lI = exp(1j * (%s + %.12f * cosd(att(3)) * sI * sind(th)));\n' ...
+        'dI = dI .* aI;\n' ...
         'for k = 1:%d\n' ...
-        '    y(:, k) = y(:, k) + w .* (sqrt(Ki/(Ki+1)) * aI(k) + sqrt(1/(Ki+1)) * dI(:, k));\n' ...
-        'end\n'], 2*pi*p.ant_spacing_wl, nr-1, c, nr)]; %#ok<AGROW>
+        '    y(:, k) = y(:, k) + w .* (sqrt(Ki/(Ki+1)) * aI(:, k) .* lI + sqrt(1/(Ki+1)) * dI(:, k));\n' ...
+        'end\n'], c, 2*pi*p.ant_spacing_wl, ant_pos(nr), dop, lever_k(p), nr)]; %#ok<AGROW>
 end
 if p.chain_amp_db > 0 || p.chain_phase_deg > 0
     % receive chains: a gain and phase error per antenna, fixed for the flight (everything
@@ -450,7 +493,7 @@ if p.chain_amp_db > 0 || p.chain_phase_deg > 0
 end
 
 pers = [{'nI'}, pers]; init = [{'nI = 0;'}, init];
-head = sprintf('function [y, act] = fcn(u, seed, fd, aoa, kdb, yaw, rho, gcs)\n%%#codegen\npersistent seeded\n');
+head = sprintf('function [y, act] = fcn(u, seed, fd, aoa, kdb, yaw, rho, gcs, att)\n%%#codegen\npersistent seeded\n');
 for i = 1:numel(pers)
     head = [head sprintf('persistent %s\n', pers{i})]; %#ok<AGROW>
 end
@@ -905,22 +948,41 @@ w = sprintf(['w = complex(zeros(Ns, 1));\nfor i = 1:Ns\n    if mod(%s, %d) < %d\
 end
 
 function c = sos_init(fv, pv, nr)
-% Random Doppler frequencies fd*cos(alpha) and phases of 32 sinusoids per antenna.
-c = sprintf(['if isempty(%s)\n    %s = fd * cos(2*pi*rand(32, %d));\nend\n' ...
+% Random direction cosines cos(alpha) to the fuselage axis and phases of 32 sinusoids
+% per antenna (Doppler fd*cos(alpha), sos_gains).
+c = sprintf(['if isempty(%s)\n    %s = cos(2*pi*rand(32, %d));\nend\n' ...
     'if isempty(%s)\n    %s = 2*pi*rand(32, %d);\nend\n'], fv, fv, nr, pv, pv, nr);
 end
 
 function c = sos_gains(dv, fv, pv, p)
 % Unit-power Rayleigh gains (Ns x n_rx) from the sinusoids at times t, then the
-% receive correlation (Cholesky factor of rho^|i-j|).
+% receive correlation (Cholesky factor of rho^|i-j|). The pitch th moves the antennas
+% fore and aft on their lever arm: phase k aD cos(alpha) sin(th) on each path
+% (Banagar & Dhillon).
 nr = p.n_rx;
 
 c = sprintf(['%s = complex(zeros(Ns, %d));\n' ...
+    'sw = %.12f * sind(th);\n' ...
     'for k = 1:%d\n' ...
-    '    %s(:, k) = exp(1j * (2*pi*t*%s(:, k).'' + repmat(%s(:, k).'', Ns, 1))) * ones(32, 1) / sqrt(32);\n' ...
+    '    %s(:, k) = exp(1j * (2*pi*t*(fd*%s(:, k).'') + sw*%s(:, k).'' + repmat(%s(:, k).'', Ns, 1))) * ones(32, 1) / sqrt(32);\n' ...
     'end\n' ...
     'Rr = zeros(%d, %d);\nfor i = 1:%d\n    for j = 1:%d\n        Rr(i, j) = rho ^ abs(i - j);\n    end\nend\n' ...
-    '%s = %s * chol(Rr);\n'], dv, nr, nr, dv, fv, pv, nr, nr, nr, nr, dv, dv);
+    '%s = %s * chol(Rr);\n'], dv, nr, lever_k(p), nr, dv, fv, fv, pv, nr, nr, nr, nr, dv, dv);
+end
+
+function c = pitch_code()
+% Pitch over the frame [deg]: static tilt and wobble of the 'Att' block.
+c = sprintf('th = att(4) + att(5) * sin(2*pi*att(6)*t + att(7));\n');
+end
+
+function k = lever_k(p)
+% Phase per unit displacement cosine of antennas p.wobble_arm_m from the centre of rotation [rad].
+k = 2*pi * p.wobble_arm_m * p.carrier_freq / p.c_light;
+end
+
+function s = ant_pos(nr)
+% Antenna positions along the array from its centre [element spacings], a row literal.
+s = mat2str((0:nr-1) - (nr-1)/2);
 end
 
 function c = gamma_draw(k, v)
@@ -973,7 +1035,10 @@ d = struct('n_rx', 3, 'ant_aperture_m', 1.2, 'rx_corr', 0.3, 'gcs_aoa_deg', 0, .
     'rx_sync', 'ideal', 'cfo_ppm', 25, 'timing_max_sym', 4, 'rx_dd_iter', 2, ...
     'gcs_tracked', false, 'gcs_ant_dbi', 12, 'gcs_err_deg', [5.62 1.51], 'gcs_floor_db', 14, 'gcs_pt_dbm', -6, ...
     'alt_random', false, 'alt_range_m', [15 120], 'gcs_h_m', 10, 'uav_null_db', -30, 'inband_cap_db', 30, ...
-    'lb_uav_dbi', 2, 'lb_nf_db', 5, 'lb_margin_db', 10, 'lb_rate_bps', 2e6);
+    'lb_uav_dbi', 2, 'lb_nf_db', 5, 'lb_margin_db', 10, 'lb_rate_bps', 2e6, ...
+    'gcs_aoa_random', false, 'gcs_aoa_range_deg', [-90 90], 'body_random', false, 'body_loss_db', [3.03 2.53 0.016 10.96], ...
+    'wobble_random', false, 'wobble_v_max', 8, 'wobble_roll_deg', [-17.5 19.3], 'wobble_pitch_deg', [-11.0 14.9], ...
+    'wobble_amp_deg', 10, 'wobble_freq_hz', [5 25], 'wobble_arm_m', 0.4, 'int_los_doppler', true, 'c_light', 3e8);
 f = fieldnames(d);
 for i = 1:numel(f)
     if ~isfield(p, f{i}), p.(f{i}) = d.(f{i}); end

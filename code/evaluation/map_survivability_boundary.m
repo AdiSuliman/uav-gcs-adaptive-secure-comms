@@ -69,6 +69,7 @@ p0 = p_ref;
 p0.int_aoa_random = false; p0.k_random = false; p0.quiet_build = true;
 p0.yaw_random = false;                  % the mapped geometries stay fixed through the run
 p0.corr_random = false;
+p0.gcs_aoa_random = false;              % the GCS at broadside: the mapped directions are relative to it
 p0.gcs_tracked = false;                 % the GCS antenna on its axis
 p0.alt_random = false;                  % no altitude: the UAV antenna's horizon gain toward the GCS
 SNR_points = p0.EbNo_dB;

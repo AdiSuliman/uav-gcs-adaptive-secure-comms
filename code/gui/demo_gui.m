@@ -1316,6 +1316,7 @@ function [p, sevTxt, fd_hz] = scenarioParams(env, threat, sevLevel, v_kmh)
     end
     p.v_kmh = v_kmh; p.v = v_kmh/3.6; p.fd_max = fd_hz;
     p.quiet_build = true;                      % build the Simulink model without opening its window
+    p.gcs_aoa_random = false;                  % the GCS at broadside, as the 3D view draws it
 end
 
 function s = pctStr(x)
