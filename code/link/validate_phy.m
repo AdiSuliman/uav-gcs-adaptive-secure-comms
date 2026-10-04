@@ -1,6 +1,7 @@
 function [ok, v12] = validate_phy(only, rows)
 %% VALIDATE_PHY - Link physics against theory, multi-antenna UAV receiver
 %   ok = validate_phy()                 every check
+%   ok = validate_phy('flat')           every check but V12c (V12c alone below)
 %   [ok, v12] = validate_phy('V12c')    V12c alone (results/phy_validation_v12c.txt); rows
 %   [ok, v12] = validate_phy('V12c', rows)  picks cases of its table, v12 its results
 % Runs the threat model (UAV_GCS_Threat_Link) and compares the measured BER with
@@ -67,6 +68,7 @@ CFG.gap_ok    = 0.3;         % [dB] pass threshold (or within 2 standard errors 
 modelName     = 'UAV_GCS_Threat_Link';
 delay_bits    = 20;
 t0 = tic;
+flat_only = nargin >= 1 && strcmpi(only, 'flat');
 if nargin >= 1 && strcmpi(only, 'V12c')
     if nargin < 2, rows = []; end
     v12 = v12c(p0, modelName, delay_bits, rows);
@@ -163,7 +165,11 @@ for i = 1:numel(DLY12)
 end
 
 %% V12c delay line against the flat channel (gate)
-v12 = v12c(p0, modelName, delay_bits, []);
+if flat_only
+    v12 = struct('pass', true, 'rep', {{'V12c: not run here (validate_phy(''V12c''))'}});
+else
+    v12 = v12c(p0, modelName, delay_bits, []);
+end
 v12_ok = v12.pass || tdl_on;
 
 %% V9 seeds (default link, 4 dB)
@@ -224,7 +230,7 @@ for i = 1:numel(iReal)
 end
 rep = [rep, {''}, v12.rep];
 rep{end+1} = sprintf('Overall: theory gaps %d/%d within %.1f dB, seeds %s, tone %s, V12c %s%s | %.1f min', ...
-    sum(g_ok), nTh, CFG.gap_ok, passfail(seed_same && seed_diff), passfail(tone_ok), passfail(v12.pass), ...
+    sum(g_ok), nTh, CFG.gap_ok, passfail(seed_same && seed_diff), passfail(tone_ok), ternary(flat_only, 'not run', passfail(v12.pass)), ...
     ternary(tdl_on && ~v12.pass, ' (the link runs the delay line)', ''), toc(t0)/60);
 rep{end+1} = sprintf('Pass rule: |gap| <= %.1f dB or within 2 standard errors (spread over %d channel realizations).', CFG.gap_ok, CFG.n_real);
 if ~exist('results', 'dir'); mkdir('results'); end
@@ -280,8 +286,8 @@ jt = 10*log10(pw(filter(h, 1, v)) / ps);
 end
 
 function R = v12c(p0, modelName, delay_bits, rows)
-% V12c: the tapped delay line against the flat channel on the same flights, real receiver,
-% at the nominal speed, where a 30 dB jammer's null holds on the flat channel (D73), so
+% V12c: the tapped delay line against the flat channel on the same flights, real receiver
+% (with the line, its taps span the line's delays: rx_taps.m), at the nominal speed, so
 % the shift is the delay spread's alone. RMS delay spreads: Lyu et al.'s 64 ns, the
 % medians of Rodriguez-Pineiro et al. (138, 234, 302 ns; 372 ns, their directional fit at
 % 60-90 m) and 1 us. (i) Clean link, our signal dispersive, MRC: shift <= 0.5 dB.

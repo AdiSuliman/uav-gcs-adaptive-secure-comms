@@ -915,6 +915,56 @@ verifyTrue(tc, all(isfinite(out.get('Rx_IQ')), 'all'));
 close_system(mdl, 0);
 end
 
+function test_rx_taps(tc)
+% The real receiver's taps span the delay line's delays: MRC lags 2 before and the line's
+% 4.5 us window after, the equalizer +-5 symbols, the space-time MMSE +-2 us (twice the
+% 1 us clip) half a symbol apart, its window twice the 27 degrees of freedom; on the flat
+% channel every count is 1, and so is the receiver built for it.
+p = base_params();
+p.tdl = false;
+t = rx_taps(p);
+verifyEqual(tc, [t.lags t.ne t.nt t.window], [0 0 1 1 p.mmse_window]);
+verifyEqual(tc, rx_taps(rmfield(p, 'tdl')), t);
+p.tdl = true;
+t = rx_taps(p);
+verifyEqual(tc, [t.lags t.ne t.nt t.window], [2 5 11 9 64]);
+q = p; q.tdl_max_ns = 2000; q.tdl_clip_ns = 500;
+t = rx_taps(q);
+verifyEqual(tc, [t.lags t.ne t.nt t.window], [2 2 5 5 32]);
+p.quiet_build = true; p.rx_sync = 'real';
+mdl = 'UAV_GCS_Threat_Link';
+C = {false, 'mrc', 'NT = 1;', 'NE = 1;'; false, 'mmse', 'NT = 1;', 'NE = 1;'; ...
+     true, 'mrc', 'NT = 1;', 'NE = 11;'; true, 'mmse', 'NT = 9;', 'NE = 1;'};
+for i = 1:size(C, 1)
+    p.tdl = C{i, 1}; p.rx_combiner = C{i, 2};
+    evalc('build_threat_model(p)');
+    ch = sfroot().find('-isa', 'Stateflow.EMChart', 'Path', [mdl '/Rx']);
+    verifyTrue(tc, contains(ch.Script, C{i, 3}) && contains(ch.Script, C{i, 4}));
+    close_system(mdl, 0);
+end
+end
+
+function test_receiver_delay_spread(tc)
+% The real receiver on the delay line, three flights at 160 Hz: MRC over the antennas and
+% the channel's lags with the linear MMSE equalizer keeps a clean link at K -5 dB and a
+% 1 us RMS delay spread below 1e-3 at 12 dB (2e-5 here; the flat receiver: 7e-2, the flat
+% channel 4e-5); the space-time MMSE answers a 16 dB jammer whose channel spreads 234 ns
+% (8e-3 here, 0.12 with the antennas alone); a 30 dB jammer on the flat channel stays
+% below 0.06 (0.03 here; 0.11 with the quiet slot holding the previous frame's filter
+% memory and the pilot steps weighed by the training's whitening).
+p = base_params(); p.quiet_build = true; p.rx_sync = 'real'; p.int_aoa_random = false; p.yaw_random = false;
+p.corr_random = false; p.gcs_tracked = false; p.k_random = false; p.gcs_aoa_random = false; p.body_random = false;
+p.tdl = true; p.tdl_random = false;
+mdl = 'UAV_GCS_Threat_Link';
+q = p; q.active_threat = 'none'; q.rx_combiner = 'mrc'; q.rician_k = -5; q.tdl_ds_ns = [1000 0];
+verifyLessThan(tc, link_ber(mdl, q, 12, 21:23, 20), 1e-3);
+q = p; q.active_threat = 'jamming'; q.jsr_db = 16; q.rx_combiner = 'mmse'; q.rician_k = 10; q.int_rician_k = 10;
+q.tdl_ds_ns = [0 234];
+verifyLessThan(tc, link_ber(mdl, q, 15, 21:23, 20), 0.03);
+q.tdl = false; q.jsr_db = 30;
+verifyLessThan(tc, link_ber(mdl, q, 15, 21:23, 20), 0.06);
+end
+
 function test_power_cap(tc)
 % The licence-exempt density cap of 10 dBm in any 1 MHz (ETSI EN 300 328) on our RRC
 % signal: 95.5% of its power in the central 1 MHz, so 10.20 dBm; the AD9361-class radio
@@ -1096,6 +1146,23 @@ set_param([mdl '/Att'], 'Value', mat2str(att));
 set_param([mdl '/Body'], 'Value', mat2str(body, 10));
 out = sim(mdl, 'StopTime', num2str(nfr * p.frame_duration));
 Y = out.get('Rx_IQ'); H = out.get('Rx_H');
+end
+
+function b = link_ber(mdl, p, ebno, seeds, nfr)
+% BER of the built model p at Eb/N0 ebno [dB] over the flights seeds, nfr frames each.
+evalc('build_threat_model(p)');
+set_param([mdl '/AWGN'], 'SNR', num2str(ebno + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), ...
+    'SignalPower', num2str(1/p.sps));
+e = 0; n = 0;
+for s = seeds
+    link_seed(mdl, s, 160);
+    out = sim(mdl, 'StopTime', num2str(nfr * p.frame_duration));
+    tx = double(squeeze(out.get('tx_bits_out'))); rx = double(squeeze(out.get('rx_bits_out')));
+    L = min(numel(tx), numel(rx));
+    e = e + sum(tx(1:L) ~= rx(1:L)); n = n + L;
+end
+close_system(mdl, 0);
+b = e / n;
 end
 
 function v = lead_dir(Y)

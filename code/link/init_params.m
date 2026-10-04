@@ -243,7 +243,7 @@ params.chain_amp_db   = 0.1;          % [dB] std of each chain's gain error
 params.chain_phase_deg = 1;           % [deg] std of each chain's phase error
 params.rx_combiner    = 'mrc';        % 'mrc' baseline | 'mmse' (spatial_diversity action)
 params.csi_block      = 64;           % [symbols] channel-estimation window (MRC)
-params.mmse_window    = 32;           % [symbols] channel + interference-covariance window (MMSE)
+params.mmse_window    = 32;           % [symbols] channel + interference-covariance window (MMSE; the delay line's taps: rx_taps.m)
 params.seed           = [];           % [] = drawn from the global stream at every model build
 
 %% ========== ALTITUDE & LINK BUDGET ==========
