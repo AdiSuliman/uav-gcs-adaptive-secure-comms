@@ -108,7 +108,9 @@ function test_edge_verdict(tc)
 % The verdict thresholds for one outcome per flight: against 0.90 at 36 and 72
 % flights, all-success below N_MIN, false alarms against 5% at 172 flights. Two
 % episodes per flight widen the interval to the hull; a rate with every flight at 100%
-% takes the all-success bound, and a packet loss never gets a better bound by losing more.
+% takes the all-success bound. Packet loss of the clean link at 172 flights of 20
+% frames: no loss and one lost frame commit, the verdict never improves as more frames
+% are lost, and 5% loss is NOT COMMITTED.
 vd = @(k, n) getfield(edge_verdict(double((1:n) <= k), ones(1, n), 1:n, 0.9, 'ge', true), 'verdict');
 verifyEqual(tc, [vd(36, 36), vd(35, 36), vd(28, 36)], [1 0 -1]);
 verifyEqual(tc, [vd(70, 72), vd(69, 72)], [1 0]);
@@ -121,11 +123,14 @@ verifyEqual(tc, [V2.value, V2.n, V2.k], [V1.value, 72, 66], 'AbsTol', 1e-12);
 verifyLessThanOrEqual(tc, V2.lo, V1.lo); verifyGreaterThanOrEqual(tc, V2.hi, V1.hi);
 D = edge_verdict(20 * ones(1, 36), 20 * ones(1, 36), 1:36, 0.9, 'ge', false);
 verifyEqual(tc, [D.lo, D.verdict], [0.025^(1/36), 1], 'AbsTol', 1e-9);
-L0 = edge_verdict(zeros(1, 196), 20 * ones(1, 196), 1:196, 0.014, 'le', false);
-L1 = edge_verdict([1, zeros(1, 195)], 20 * ones(1, 196), 1:196, 0.014, 'le', false);
-verifyEqual(tc, L0.hi, 1 - 0.025^(1/196), 'AbsTol', 1e-9);
-verifyGreaterThanOrEqual(tc, L1.hi, L0.hi);
-verifyEqual(tc, [L0.verdict, L1.verdict], [0 0]);
+lk = @(m) edge_verdict(double((1:172) <= m), 20 * ones(1, 172), 1:172, 0.014, 'le', false);
+L0 = lk(0);
+verifyEqual(tc, [L0.lo, L0.hi], [0, 1 - 0.025^(1/3440)], 'AbsTol', 1e-9);
+m = [0 1 2 5 10 20 40 80 120 172];                  % flights with one lost frame, nested
+L = arrayfun(lk, m);
+verifyEqual(tc, [L(1:2).verdict], [1 1]);
+verifyTrue(tc, all(diff([L.verdict]) <= 0) && all(diff([L.hi]) >= 0));
+verifyEqual(tc, L(end).verdict, -1);
 E = edge_verdict([], [], [], 0.9, 'ge', false);
 verifyEqual(tc, [E.n, E.verdict], [0 0]);
 end
@@ -269,7 +274,7 @@ end
 function test_lhs_nested(tc)
 % The test (12) and second test (60) designs of build_policy_pools.m put 2 + 10
 % flights in every sixth of the speed range and 4 + 20 in every third of the altitude
-% range at every Eb/N0, the combined threats' own 24 flights 4 and 8; every axis has
+% range at every Eb/N0, a design of 24 (the smaller second test) 4 and 8; every axis has
 % one flight per stratum, the value inside it is the flight's own draw, and every value
 % lies in its range. The edge-speed split flies exactly hover and 161 km/h.
 p = base_params();
@@ -330,10 +335,17 @@ verifyEqual(tc, F.ber(v), zeros(1, sum(v)));                    % the real recei
 verifyLessThan(tc, max(abs(F.cfo_hz)), 2 * p.cfo_ppm * 1e-6 * p.carrier_freq + 1e3);
 verifyEqual(tc, sum(~isnan(F.ber)), F.nf);                     % every frame complete: bits aligned per frame
 verifyLessThan(tc, abs(median(F.q_iot)), 1.5);                 % nothing but thermal noise in the quiet slot
-verifyLessThan(tc, mean(F.coh(v)), 0.45);            % no directional source: below a 4 dB jammer's 0.5
 verifyLessThan(tc, mean(F.ber_est(v)), 1e-3);        % clean link at 12 dB
 verifyLessThan(tc, max(F.branch_dip), 6);            % fading changes little within a frame, first frame included
 sinr_clean = median(F.sinr(v));
+% spatial coherence of the clean link on five flights, against a weak jammer on the same
+% flights below: only our own signal's residual after the channel estimate is coherent
+CS = 11:15; coh0 = zeros(size(CS)); coh0(1) = mean(F.coh, 'omitnan');
+for k = 2:numel(CS)
+    link_seed(mdl, CS(k), 160);
+    Fk = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
+    coh0(k) = mean(Fk.coh, 'omitnan');
+end
 % the flight's draws reach the blocks: first stream seed, and our signal's amplitude with
 % the UAV antenna's gain toward the GCS at 120 m and 0.28 km
 d = link_seed(mdl, 11, 160, struct('ebno', 15, 'alt_m', 120));
@@ -388,6 +400,18 @@ F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duratio
 verifyGreaterThan(tc, median(F.q_iot), 10);
 verifyLessThan(tc, abs(median(F.q_react)), 3);
 verifyGreaterThan(tc, mean(F.coh, 'omitnan'), 0.8);  % one directional source
+close_system(mdl, 0);
+% a jammer at a low trained level (4 dB) is clearly more coherent than the clean link
+p.jsr_db = 4;
+evalc('build_threat_model(p)');
+set_param([mdl '/AWGN'], 'SNR', num2str(snr), 'SignalPower', num2str(1/p.sps));
+coh4 = zeros(size(CS));
+for k = 1:numel(CS)
+    link_seed(mdl, CS(k), 160);
+    F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
+    coh4(k) = mean(F.coh, 'omitnan');
+end
+verifyGreaterThan(tc, mean(coh4) - mean(coh0), 0.15);
 close_system(mdl, 0);
 end
 

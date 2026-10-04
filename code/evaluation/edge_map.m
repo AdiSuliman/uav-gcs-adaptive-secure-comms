@@ -1,7 +1,7 @@
 %% EDGE_MAP - Where the system is committed: a verdict at every point of the envelope
 % Reads the test pools (data/policy_pools.mat: the test and second test splits give 72
-% flights per (cell, Eb/N0) to the clean link and the single threats and 36 to the
-% combined threats; the edge-speed split flies the nominal level at hover and at 161
+% flights per (cell, Eb/N0) to the clean link and the single threats, the test split 12
+% to the combined threats; the edge-speed split flies the nominal level at hover and at 161
 % km/h), the clean-link pools of data/clean_test_pools.mat and the trained policy. The
 % deployed policy, as evaluate_policies.m picks it (the selected DQN with escalation, or
 % the rule with escalation when the DQN failed its validation gate), no response, the rule
