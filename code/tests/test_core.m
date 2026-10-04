@@ -152,9 +152,10 @@ end
 
 %% ---------- receiver measurements on the real link ----------
 function test_seeds_and_k(tc)
-% Pool geometries never share a seed across the blocks in use; K-factors are
-% reproducible per seed and stay inside the range.
-blocks = [1 4 5 13 14 15 16]; S = [];
+% Pool geometries never share a seed across the blocks in use (the second test 17,
+% the reduced chain check 18 and 19); K-factors are reproducible per seed and stay
+% inside the range.
+blocks = [1 4 5 13 14 15 16 17 18 19]; S = [];
 for b = blocks
     [s, r] = ndgrid(1:6, 1:99);
     S = [S; arrayfun(@(si, ri) pool_seed(1, si, b, ri), s(:), r(:))]; %#ok<AGROW>
@@ -213,6 +214,47 @@ verifyLessThan(tc, max(abs(C(~eye(size(C))))), 0.1);
 i = find(r(:) <= 87);
 verifyTrue(tc, all(A(i + 12, 1) ~= K(i, 1)));
 verifyGreaterThan(tc, min(diff(sort(U(:)))), 1e-12);
+end
+
+function test_lhs_nested(tc)
+% The test (12) and second test (60) designs of build_policy_pools.m put 2 + 10
+% flights in every sixth of the speed range and 4 + 20 in every third of the altitude
+% range at every Eb/N0, the combined threats' own 24 flights 4 and 8; every axis has
+% one flight per stratum, the value inside it is the flight's own draw, and every value
+% lies in its range. The edge-speed split flies exactly hover and 161 km/h.
+p = base_params();
+vr = [p.speed_kmh_min p.speed_kmh_max]; ha = p.alt_range_m; kr = p.k_range_db;
+six = @(g) histcounts(g.speed, linspace(vr(1), vr(2), 7));
+thr = @(g) histcounts(g.alt, linspace(ha(1), ha(2), 4));
+for s = 1:6
+    g1 = pool_geometries(s, 14, 1:12, vr, p, 7100000 + 100*s + 3);
+    g2 = pool_geometries(s, 17, 1:60, vr, p, 7100000 + 100*s + 5);
+    gc = pool_geometries(s, 17, 61:84, vr, p, 7100000 + 100*s + 15);
+    verifyEqual(tc, [six(g1); six(g2); six(gc)], repmat([2; 10; 4], 1, 6));
+    verifyEqual(tc, [thr(g1); thr(g2); thr(gc)], repmat([4; 20; 8], 1, 3));
+    verifyEqual(tc, histcounts(g2.ksig, kr(1):5:kr(2)), 12 * ones(1, 5));    % 5-dB K bands
+    for g = {g1, g2, gc}
+        x = g{1}; n = numel(x.seed);
+        verifyEqual(tc, sort(floor(n * (x.speed - vr(1)) / diff(vr))), 0:n-1);
+        verifyEqual(tc, sort(floor(n * (x.alt - ha(1)) / diff(ha))), 0:n-1);
+        verifyEqual(tc, sort(floor(n * (x.ksig - kr(1)) / diff(kr))), 0:n-1);
+        verifyTrue(tc, all(x.speed > vr(1) & x.speed < vr(2) & x.alt > ha(1) & x.alt < ha(2) ...
+            & x.ksig > kr(1) & x.ksig < kr(2)));
+        u = rand(seed_stream(x.seed(1), 'alt'));
+        k = floor(n * (x.alt(1) - ha(1)) / diff(ha));
+        verifyEqual(tc, x.alt(1), ha(1) + diff(ha) * (k + u) / n, 'AbsTol', 1e-9);
+    end
+end
+verifyEqual(tc, pool_geometries(6, 17, 1:60, vr, p, 7100605), g2);              % reproducible
+q = @(x) floor(numel(x.seed) * (x.alt - ha(1)) / diff(ha));
+verifyNotEqual(tc, q(pool_geometries(1, 14, 1:12, vr, p, 7100103)), q(g1));    % own permutation per Eb/N0
+verifyLessThan(tc, 7100000 + 100*6 + 15, seed_base(700001));                   % below every flight stream
+p.alt_random = false;
+verifyTrue(tc, all(isnan(pool_geometries(1, 17, 1:12, vr, p, 7100105).alt)));
+VOUT = [0 0; 161 161];
+ge = pool_geometries(1, 16, 1:24, VOUT(1 + ((1:24)' > 12), :), p);
+verifyEqual(tc, ge.speed, [zeros(1, 12), 161 * ones(1, 12)]);
+verifyTrue(tc, all(isnan([ge.alt ge.ksig])));
 end
 
 function test_receiver_measurements(tc)

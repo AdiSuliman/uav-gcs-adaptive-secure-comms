@@ -4,9 +4,9 @@
 % training or validation. Each episode is one geometry; every test geometry of
 % every (cell, Eb/N0) is used, each with two onsets. Episode sets:
 %   single    10 threats x 5 severities x 6 Eb/N0, static jammer
-%   follower  jamming / reactive_jamming / spoofing that re-acquire the channel
-%             2-5 cycles after every hop, 5 severities
-%   combined  the 10 combined threats at 3 severities on test flights
+%   follower  jamming / reactive_jamming / spoofing / tone_jamming that re-acquire
+%             the channel 2-5 cycles after every hop, 5 severities
+%   combined  the 14 combined threats at 3 severities on test flights
 %   unknown   single threats with the detector output withheld after onset
 %             (unknown-threat path: the policy sees only the link measurements)
 %   clean     no threat; every change is a false alarm. KPI 6 (one-sided 95%
@@ -16,8 +16,9 @@
 %             al.'s comb jammer): the jammer is on the new channel at the hop
 %             itself, so only space and link budget can help. Reported apart,
 %             not part of the KPI 4 pool; in training as a follower delay of 0
-%   speed     single threats at nominal severity on flights outside the speed
-%             envelope (20-50 and 120-160 km/h, the fourth pool split), reported apart
+%   speed     single threats at nominal severity on dedicated flights at the two ends
+%             of the speed envelope (hover and 161 km/h, the fourth pool split),
+%             reported apart
 %   delay2    the single set with a configuration change arriving two cycles late
 %             instead of one (sensitivity to the signalling assumption), reported apart
 % Policies: no response (the link that does not react), random, always-on MMSE,
@@ -34,7 +35,8 @@
 % to recover, switches and false switches, mean reward.
 % Intervals: 95% percentile bootstrap over flight geometries (boot_cluster.m;
 % episodes of one geometry are resampled together); differences are paired per
-% episode.
+% episode. Episode sets, runs and policies: policy_episodes.m, policy_run_set.m,
+% policy_setup.m.
 %
 % Output: results/policy_evaluation.{txt,mat,png}, results/policy_breakdown.png
 
@@ -66,25 +68,25 @@ end
 %% 1. Episode sets
 foll = single_cells(K.followable(single_cells));
 sets = struct('name', {}, 'spec', {}, 'split', {});
-sets(end+1) = struct('name', 'single',   'spec', {episodes(single_cells, nS, nG, REPS, false, false, NE, T, rs)}, 'split', TEST);
-sets(end+1) = struct('name', 'follower', 'spec', {episodes(foll, nS, nG, REPS, true, false, NE, T, rs)}, 'split', TEST);
-sets(end+1) = struct('name', 'combined', 'spec', {episodes(combo_cells, nS, nG, REPS, false, false, NE, T, rs)}, 'split', TEST);
-sets(end+1) = struct('name', 'unknown',  'spec', {episodes(single_cells, nS, nG, 1, false, true, NE, T, rs)}, 'split', TEST);
-sets(end+1) = struct('name', 'clean',    'spec', {episodes(clean_cell, nS, nG, 8, false, false, NE, T, rs)}, 'split', TEST);
+sets(end+1) = struct('name', 'single',   'spec', {policy_episodes(single_cells, nS, 1:nG, REPS, false, false, NE, T, rs)}, 'split', TEST);
+sets(end+1) = struct('name', 'follower', 'spec', {policy_episodes(foll, nS, 1:nG, REPS, true, false, NE, T, rs)}, 'split', TEST);
+sets(end+1) = struct('name', 'combined', 'spec', {policy_episodes(combo_cells, nS, 1:nG, REPS, false, false, NE, T, rs)}, 'split', TEST);
+sets(end+1) = struct('name', 'unknown',  'spec', {policy_episodes(single_cells, nS, 1:nG, 1, false, true, NE, T, rs)}, 'split', TEST);
+sets(end+1) = struct('name', 'clean',    'spec', {policy_episodes(clean_cell, nS, 1:nG, 8, false, false, NE, T, rs)}, 'split', TEST);
 jam = foll(ismember(PP.scen(foll), {'jamming', 'reactive_jamming'}));
-sets(end+1) = struct('name', 'comb',     'spec', {episodes(jam, nS, nG, 1, true, false, NE, T, rs, [0 0])}, 'split', TEST);
+sets(end+1) = struct('name', 'comb',     'spec', {policy_episodes(jam, nS, 1:nG, 1, true, false, NE, T, rs, [0 0])}, 'split', TEST);
 if numel(PP.runs) >= SPEED
     nom_cells = single_cells(PP.sev(single_cells) == C.nominal);
-    sets(end+1) = struct('name', 'speed', 'spec', {episodes(nom_cells, nS, K.nR(SPEED), REPS, false, false, NE, T, rs)}, ...
+    sets(end+1) = struct('name', 'speed', 'spec', {policy_episodes(nom_cells, nS, 1:K.nR(SPEED), REPS, false, false, NE, T, rs)}, ...
         'split', SPEED);
 end
-d2 = episodes(single_cells, nS, nG, 1, false, false, NE, T, rs);
+d2 = policy_episodes(single_cells, nS, 1:nG, 1, false, false, NE, T, rs);
 for b = 1:numel(d2), d2{b}.delay = 2 * C.switch_delay; end
 sets(end+1) = struct('name', 'delay2', 'spec', {d2}, 'split', TEST);
 iThreat = 1:3;                                         % sets pooled as "threat sets"
 
 %% 2. Best fixed configuration, chosen on the train pools
-vspec = episodes([clean_cell, single_cells], nS, K.nR(1), 1, false, false, NE, T, RandStream('mt19937ar', 'Seed', 11));
+vspec = policy_episodes([clean_cell, single_cells], nS, 1:K.nR(1), 1, false, false, NE, T, RandStream('mt19937ar', 'Seed', 11));
 fr = zeros(1, nA);
 for a = 1:nA
     r = [];
@@ -122,7 +124,7 @@ t0 = tic;
 for si = 1:numel(sets)
     for pk = 1:numel(POL)
         [kind, ag, opt] = policy_setup(POL{pk}, Q, sel, fixed_best, fixed_mmse, tab, K.na);
-        RES{si, pk} = run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, 30000 + 100*si);
+        RES{si, pk} = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, 30000 + 100*si);
     end
     fprintf('  set %-9s %5d episodes x %d policies (%.1f min)\n', sets(si).name, numel(RES{si, 1}.ret), ...
         numel(POL), toc(t0)/60);
@@ -133,12 +135,12 @@ end
 % test (single, follower, combined). A (threat, severity) is inside the envelope
 % when it restores >= ENV_MIN % of its recoverable episodes there (at least ENV_N).
 foll_cells = single_cells(K.followable(single_cells));
-vsets = {episodes(single_cells, nS, K.nR(VAL), REPS, false, false, NE, T, rs), ...
-         episodes(foll_cells, nS, K.nR(VAL), REPS, true, false, NE, T, rs), ...
-         episodes(combo_cells, nS, K.nR(VAL), REPS, false, false, NE, T, rs)};
+vsets = {policy_episodes(single_cells, nS, 1:K.nR(VAL), REPS, false, false, NE, T, rs), ...
+         policy_episodes(foll_cells, nS, 1:K.nR(VAL), REPS, true, false, NE, T, rs), ...
+         policy_episodes(combo_cells, nS, 1:K.nR(VAL), REPS, false, false, NE, T, rs)};
 [kind, ag, opt] = policy_setup(POL{iDQN}, Q, sel, fixed_best, fixed_mmse, tab, K.na);
-RV = run_set(kind, PP, K, vsets{1}, VAL, ag, opt, 70000);
-for vs = 2:3, RV = cat_struct(RV, run_set(kind, PP, K, vsets{vs}, VAL, ag, opt, 70000 + 100*vs)); end
+RV = policy_run_set(kind, PP, K, vsets{1}, VAL, ag, opt, 70000);
+for vs = 2:3, RV = cat_struct(RV, policy_run_set(kind, PP, K, vsets{vs}, VAL, ag, opt, 70000 + 100*vs)); end
 fprintf('  envelope (validation) %d episodes (%.1f min)\n', numel(RV.ret), toc(t0)/60);
 
 %% 4. Report
@@ -290,8 +292,8 @@ if ~isempty(iS)
     rep{end+1} = sprintf(['Recovered among recoverable on dedicated flights at the ends of the speed envelope (single threats, nominal ' ...
         'severity, %d geometries per Eb/N0), %%:'], K.nR(SPEED));
     rep{end+1} = sprintf('%-18s%s', 'speed [km/h]', sprintf('%11s', hdr{:}));
-    rep{end+1} = sprintf('%-18s%s', sprintf('%g-%g (%d)', PP.speed_out(1, :), sum(ms & lo)), sprintf('%11.1f', PS(1, :)));
-    rep{end+1} = sprintf('%-18s%s', sprintf('%g-%g (%d)', PP.speed_out(2, :), sum(ms & hi)), sprintf('%11.1f', PS(2, :)));
+    rep{end+1} = sprintf('%-18s%s', sprintf('%s (%d)', band_txt(PP.speed_out(1, :)), sum(ms & lo)), sprintf('%11.1f', PS(1, :)));
+    rep{end+1} = sprintf('%-18s%s', sprintf('%s (%d)', band_txt(PP.speed_out(2, :)), sum(ms & hi)), sprintf('%11.1f', PS(2, :)));
 end
 iD2 = find(strcmp({sets.name}, 'delay2'));
 Rd2 = RES{iD2, 1}; md2 = Rd2.recoverable & Rd2.threat;
@@ -338,7 +340,7 @@ if isfile('data/clean_test_pools.mat')
     RW = cell(1, numel(POL));
     for pk = 1:numel(POL)
         [kind, ag, opt] = policy_setup(POL{pk}, Q, sel, fixed_best, fixed_mmse, tab, K.na);
-        R = run_set(kind, PPw, Kw, specs, TEST, ag, opt, 40000);
+        R = policy_run_set(kind, PPw, Kw, specs, TEST, ag, opt, 40000);
         f = fieldnames(R);
         for j = 1:numel(f), R.(f{j}) = R.(f{j})(:, 1:n); end        % drop the padding
         RW{pk} = R;
@@ -422,55 +424,6 @@ saveas(fig, 'results/policy_breakdown.png'); close(fig);
 fprintf('Saved results/policy_evaluation.{txt,mat,png}, results/policy_breakdown.png\n');
 
 %% ===================== Local functions =====================
-function specs = episodes(cells, nS, nG, reps, follow, unk, NE, T, rs, fdelay)
-% Every (cell, Eb/N0, test geometry) `reps` times, packed into batches of NE.
-% fdelay: range of cycles a follower needs to re-acquire the channel (default [2 5]).
-if nargin < 10, fdelay = [2 5]; end
-[c, s, r] = ndgrid(cells, 1:nS, 1:nG);
-c = repmat(c(:)', 1, reps); s = repmat(s(:)', 1, reps); r = repmat(r(:)', 1, reps);
-n = numel(c); nb = ceil(n / NE); pad = nb * NE - n;
-k_ = mod(0:n + pad - 1, n) + 1; c = c(k_); s = s(k_); r = r(k_);             % cyclic padding of the last batch
-specs = cell(1, nb);
-for b = 1:nb
-    i = (b-1)*NE + (1:NE);
-    specs{b} = struct('scn', c(i), 's', s(i), 'r', r(i), 'onset', randi(rs, [3 10], 1, NE), ...
-        'follow', repmat(follow, 1, NE), 'fdelay', randi(rs, fdelay, 1, NE), 'unk', repmat(unk, 1, NE), 'T', T);
-end
-specs{end}.n_valid = NE - pad;
-end
-
-function R = run_set(kind, PP, K, specs, split, ag, opt, seed0)
-% All batches of one set; padding of the last batch dropped; geometry id and
-% speed per episode.
-R = [];
-for b = 1:numel(specs)
-    Rb = rollout_policy(kind, PP, K, specs{b}, split, ag, opt, seed0 + b);
-    Rb.scn = specs{b}.scn; Rb.s = specs{b}.s;
-    Rb.threat = ~strcmp(PP.scen(Rb.scn), 'none');
-    Rb = rmfield(Rb, 'cfg_trace');
-    if isfield(specs{b}, 'n_valid')
-        f = fieldnames(Rb);
-        for j = 1:numel(f), Rb.(f{j}) = Rb.(f{j})(:, 1:specs{b}.n_valid); end
-    end
-    if isempty(R), R = Rb; else, R = cat_struct(R, Rb); end
-end
-R.geom = 1000 * R.s + R.r;                              % flight geometry (bootstrap cluster)
-R.speed = PP.speed{split}(sub2ind(size(PP.speed{split}), R.s, R.r));   % speed the geometry was flown at
-end
-
-function [kind, ag, opt] = policy_setup(name, Q, sel, fixed_best, fixed_mmse, tab, na)
-% Policy kind, agent and options of one evaluated policy.
-kind = name; ag = Q.agent; opt = struct();
-switch name
-    case 'none',       kind = 'fixed'; opt.fixed = na;
-    case 'fixed',      opt.fixed = fixed_best;
-    case 'fixed_mmse', kind = 'fixed'; opt.fixed = fixed_mmse;
-    case 'table',      opt = tab;
-    case 'dqn_esc',    ag = Q.agents{sel};
-end
-if startsWith(name, 'dqn_g'), ag = Q.agents{sscanf(name, 'dqn_g%d')}; kind = 'dqn'; end
-end
-
 function [FAR, FD, lines] = far_report(RR, POL, LBL, above, T, iDQN, ebno, cls_list)
 % False-alarm counts per policy (episodes with >= 1 change, Clopper-Pearson
 % bound, per-cycle rate), and for the selected DQN and rule + escalation the
@@ -552,4 +505,9 @@ end
 
 function out = ternary(c, a, b)
 if c, out = a; else, out = b; end
+end
+
+function s = band_txt(b)
+% Speed band [km/h] as text, one value when the band is a single speed.
+if b(1) == b(2), s = sprintf('%g', b(1)); else, s = sprintf('%g-%g', b); end
 end

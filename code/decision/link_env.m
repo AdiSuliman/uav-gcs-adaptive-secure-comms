@@ -9,10 +9,11 @@ function varargout = link_env(cmd, varargin)
 %
 %   spec: scn (threat cell index into PP.scen), s (Eb/N0 index), onset, follow,
 %         fdelay, unk (1 x NE each), T; optional r (1 x NE): geometry of each
-%         episode, drawn at random if absent; optional delay: signalling delay of
-%         a configuration change in cycles (default C.switch_delay)
-%   split: 1 = train, 2 = validation, 3 = test, 4 = unseen-speed pools; rs:
-%         RandStream for frame draws
+%         episode (index into PP.runs{split}, one the cell flies: PP.cell_geo), drawn
+%         at random if absent; optional delay: signalling delay of a configuration
+%         change in cycles (default C.switch_delay)
+%   split: 1 = train, 2 = validation, 3 = test, 4 = edge-speed pools, 5 = second
+%         test; rs: RandStream for frame draws
 %
 %   A configuration chosen in one cycle is requested from the GCS and runs on the
 %   link from the frame after the next delay cycles: E.cfg is the configuration
@@ -87,6 +88,7 @@ for sp = 1:nSp
             for r = 1:K.nR(sp)
                 rid = PP.runs{sp}(r);
                 ku = Pu.run == rid;
+                if ~any(ku), continue; end              % a geometry the cell does not fly
                 bu = mean(Pu.ber(ku));
                 bw = max(bu, 10 * bt);
                 K.healthy(sc, s, sp, r) = bu <= bt;
@@ -134,6 +136,7 @@ for i = 1:NE
     P = PP.pools{E.scn(i), E.s(i), K.na, split};
     if isfield(P, 'aoa') && ~isempty(P.aoa)
         j = find(P.run == PP.runs{split}(E.r(i)), 1);
+        if isempty(j), error('link_env: %s does not fly geometry %d of split %d', PP.scen{E.scn(i)}, E.r(i), split); end
         E.aoa(i, 1:size(P.aoa, 2)) = P.aoa(j, :);
     end
 end

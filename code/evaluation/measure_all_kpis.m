@@ -215,8 +215,8 @@ if isfile(F.pol)
         1:numel(P.KP.speed_bins) - 1, 'UniformOutput', false), ', '), strjoin(compose('%.1f', pv'), ', '));
     if isfield(P.KP, 'per_speed_out') && ~isempty(P.KP.per_speed_out)
         po = P.KP.per_speed_out(:, strcmp(P.KP.show, P.POL{iD}));
-        det{end+1} = sprintf('ends of the speed envelope (nominal severity): %g-%g km/h %.1f%%, %g-%g km/h %.1f%%', ...
-            P.KP.speed_out(1, :), po(1), P.KP.speed_out(2, :), po(2));
+        det{end+1} = sprintf('ends of the speed envelope (nominal severity): %s km/h %.1f%%, %s km/h %.1f%%', ...
+            band_txt(P.KP.speed_out(1, :)), po(1), band_txt(P.KP.speed_out(2, :)), po(2));
     end
     if isfield(P.KP, 'per_delay') && ~isempty(P.KP.per_delay)
         pd = P.KP.per_delay(:, strcmp(P.KP.show, P.POL{iD}));
@@ -285,6 +285,11 @@ end
 
 function out = ternary(c, a, b)
 if c, out = a; else, out = b; end
+end
+
+function s = band_txt(b)
+% Speed band [km/h] as text, one value when the band is a single speed.
+if b(1) == b(2), s = sprintf('%g', b(1)); else, s = sprintf('%g-%g', b); end
 end
 
 function s = lat_class(ms)

@@ -274,10 +274,9 @@ end
 end
 
 function v = poolSpeed(M, scn, s, r) %#ok<INUSL>
-% UAV speed of test geometry r: every cell flies the same geometries; the run id
-% is 100 x seed block + r (build_policy_pools.m).
+% UAV speed test geometry r was flown at (build_policy_pools.m).
 try
-    [~, v] = pool_seed(1, s, floor(M.PP.runs{M.split}(r) / 100), r, M.PP.speed_range);
+    v = M.PP.speed{M.split}(s, r);
 catch
     v = NaN;
 end
