@@ -34,6 +34,11 @@ function d = flight_draws(seed, fd, p, geo)
 %   d.gcs_amp         amplitude of our signal, 10^((att_db - gcs_point_db)/20) ('GCS' block)
 %   d.jam             timing of the gated jammers [sweep period s, sweep phase s, burst
 %                     phase] (jam_timing.m; fixed: the shortest period, phases 0) ('Gate' block)
+%   d.ds_ns           RMS delay spread of our signal and of every interferer that the
+%                     delay line reaches [ns] (delay_spread.m, or p.tdl_ds_ns; tdl_profile.m),
+%                     0 with a flat channel
+%   d.tdl             diffuse tap amplitudes of the delay line, one column per channel: our
+%                     signal, then every interferer ('Tdl' block)
 if nargin < 4 || isempty(geo), geo = struct(); end
 if getf(p, 'k_random', false)
     k = channel_k(seed, p.k_range_db);
@@ -83,6 +88,17 @@ d.gcs_amp = 10^((d.att_db - d.gcs_point_db) / 20);
 sp = getf(p, 'sweep_period_s', [20e-3 83.5e-3]);
 d.jam = [sp(1) 0 0];
 if getf(p, 'jam_timing_random', false), d.jam = jam_timing(seed, sp); end
+ni = numel(d.aoa);
+nt = 1 + getf(p, 'tdl', false) * floor(getf(p, 'tdl_max_ns', 0) / getf(p, 'tdl_step_ns', 1));
+d.ds_ns = zeros(1, 1 + ni); d.tdl = [ones(1, 1 + ni); zeros(nt - 1, 1 + ni)];
+if nt > 1
+    ds = getf(p, 'tdl_ds_ns', 0); ds = [ds(1), ds(end) * ones(1, ni)];
+    if getf(p, 'tdl_random', false), ds = delay_spread(seed, d.alt_m, ni, p); end
+    k = [d.k_sig, d.k_int * ones(1, ni)];
+    for i = 1:1 + ni
+        [d.tdl(:, i), d.ds_ns(i)] = tdl_profile(ds(i), k(i), nt, p.tdl_step_ns);
+    end
+end
 end
 
 function v = getf(s, name, default)

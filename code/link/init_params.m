@@ -47,6 +47,23 @@ params.rician_k      = 10;             % K-factor (dB) when not drawn per flight
 params.k_random      = true;           % K-factor of every channel drawn per seeded flight (channel_k.m)
 params.k_range_db    = [-5 20];        % measured air-ground K: foliage 2-5, airports -5..10 (5.75 GHz, Tu & Shimamoto), open L-band ~12, C-band ~28 dB (Khawaja et al.)
 params.carrier_freq  = 2.4e9;          % 2.4 GHz ISM (range for a given Eb/N0: link_budget_table.m)
+% Delay spread: measured at 2.5 GHz from the ground to a UAV at 15-105 m, median RMS delay
+% spread 120-302 ns, log-normal, 90th percentiles up to 1.6 us (Rodriguez-Pineiro et al.,
+% Table VII); 64-90 ns in rural flight (Lyu et al.). The tapped delay line
+% (build_threat_model.m) puts the diffuse part of our signal and of every interferer on
+% taps 250 ns apart (one sample) up to 4.5 us, the delay range of their measured power
+% delay profile (Fig. 6a), with an exponential profile matched to each channel's spread at
+% its K (tdl_profile.m). The flat channel fails the V12c check (validate_phy.m), so every
+% flight runs the delay line, the spreads drawn per flight.
+params.tdl           = true;           % tapped delay line on every channel (false: flat fading)
+params.tdl_random    = true;           % RMS delay spreads drawn per seeded flight (delay_spread.m)
+params.tdl_ds_ns     = [234 234];      % [ns] fixed spread of our signal and of every interferer (environment II omni median)
+params.tdl_step_ns   = 250;            % [ns] tap spacing
+params.tdl_max_ns    = 4500;           % [ns] last tap
+params.tdl_sig_ds    = [-6.52 0.32; -6.63 0.16];   % our signal, log10 s (mean, variance): env. II directional OLoS below tdl_sig_alt_m, omni above
+params.tdl_sig_alt_m = 25;             % [m]
+params.tdl_int_ds    = [-6.63 0.16];   % every interferer, log10 s: env. II omni
+params.tdl_clip_ns   = 1000;           % [ns] top of their Fig. 7a
 
 % UAV platform velocity and Doppler
 % Platform: mini UAV (Tlili et al.: 5-25 kg, 0.5-2 m). Speed envelope 0-161 km/h:
@@ -234,8 +251,9 @@ params.seed           = [];           % [] = drawn from the global stream at eve
 % 161 km/h cap (Khawaja et al.; 120 m, Cui et al.), down to 15 m, the lowest height with a
 % full 2.5 GHz channel table (Rodriguez-Pineiro et al.), above the 0-11 m below-roofline
 % band (Cui et al.). It reaches the link only through the UAV dipole's gain toward the GCS
-% (flight_draws.m): K and delay spread show no height trend and the Doppler spread falls
-% with height (Rodriguez-Pineiro et al.).
+% (flight_draws.m) and, below 25 m, the obstructed-LoS delay spread of our signal
+% (delay_spread.m): K and the delay spread above it show no height trend and the Doppler
+% spread falls with height (Rodriguez-Pineiro et al.).
 params.alt_random   = true;               % altitude drawn per seeded flight (flight_altitude.m)
 params.alt_range_m  = [15 120];           % [m] UAV height above ground
 params.alt_grid_m   = [15 25 35 45 60 75 90 105 120];   % [m] table heights: Rodriguez-Pineiro et al.'s and the ceiling
@@ -276,6 +294,13 @@ if params.verbose
         fprintf('Channel:          Rician, K drawn per flight in %g-%g dB, GCS -> UAV uplink\n', params.k_range_db);
     else
         fprintf('Channel:          Rician (K=%.1f dB), GCS -> UAV uplink\n', params.rician_k);
+    end
+    if params.tdl && params.tdl_random
+        fprintf('Delay line:       taps %g ns apart to %g ns, RMS delay spread drawn per flight\n', ...
+            params.tdl_step_ns, params.tdl_max_ns);
+    elseif params.tdl
+        fprintf('Delay line:       taps %g ns apart to %g ns, RMS delay spread %g / %g ns\n', ...
+            params.tdl_step_ns, params.tdl_max_ns, params.tdl_ds_ns);
     end
     fprintf('UAV antennas:     %d over %.2f m (spacing %.2f wl, rho %.2f), Rx %s\n', params.n_rx, ...
             params.ant_aperture_m, params.ant_spacing_wl, params.rx_corr, upper(params.rx_combiner));

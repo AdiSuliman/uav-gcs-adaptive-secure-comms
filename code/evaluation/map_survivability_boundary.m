@@ -73,6 +73,7 @@ p0.gcs_aoa_random = false;              % the GCS at broadside: the mapped direc
 p0.gcs_tracked = false;                 % the GCS antenna on its axis
 p0.alt_random = false;                  % no altitude: the UAV antenna's horizon gain toward the GCS
 p0.jam_timing_random = false;           % the shortest sweep at phase 0: the sweeper on our channel in every frame
+p0.tdl_random = false;                  % the median delay spreads (p0.tdl_ds_ns), with the delay line on
 SNR_points = p0.EbNo_dB;
 nS = numel(SNR_points);
 v_nom = p0.v_nominal * 3.6;                       % nominal cruise speed [km/h]

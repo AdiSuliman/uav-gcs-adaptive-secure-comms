@@ -32,6 +32,10 @@ function build_threat_model(p)
 %           (uniform within +-2 p.cfo_ppm of the carrier), Doppler shift of the LoS
 %           path (fd cos of a direction drawn per flight), and an unknown arrival
 %           time of every frame (uniform fractional delay up to p.timing_max_sym).
+%           With p.tdl, a tapped delay line: the diffuse part on taps p.tdl_step_ns apart up
+%           to p.tdl_max_ns, the LoS on tap 0, every tap with its own sinusoids and centred
+%           on its source; the Constant block 'Tdl' holds the diffuse tap amplitudes of our
+%           signal and of every interferer (flight_draws.m, tdl_profile.m).
 % Threat    signal-side threats scale our signal (antenna_fault and
 %           airframe_shadowing hit one antenna, drawn per seeded run); every additive threat is ONE
 %           waveform arriving through its own spatial channel (own diffuse fading).
@@ -54,7 +58,8 @@ function build_threat_model(p)
 %           link_seed.m (interferer_aoa.m); they turn with the heading and the pitch
 %           as our LoS does, in the UAV's horizontal plane. Every interferer's LoS has
 %           the Doppler shift of its direction, fd sin(aoa), and its diffuse part is
-%           centred on its own direction.
+%           centred on its own direction. With p.tdl every interferer has a delay line
+%           as ours, its waveform running from the line's longest delay before the frame.
 % Rx        'real': coarse frequency from the repeats of the short training, timing from
 %           the long training over the arrival window, fine frequency from the two long
 %           repeats; every statistic over all antennas in a whitened domain: whitening
@@ -150,6 +155,7 @@ add_block('simulink/Sources/Constant', [modelName '/GCS'],     'Position', [150 
 add_block('simulink/Sources/Constant', [modelName '/Att'],     'Position', [150 470 220 490]);
 add_block('simulink/Sources/Constant', [modelName '/Body'],    'Position', [150 510 220 530]);
 add_block('simulink/Sources/Constant', [modelName '/Gate'],    'Position', [150 550 220 570]);
+add_block('simulink/Sources/Constant', [modelName '/Tdl'],     'Position', [150 590 220 610]);
 add_block('simulink/Sinks/To Workspace', [modelName '/tx_sink'], 'Position', [150 30 230 60]);
 add_block('simulink/Sinks/To Workspace', [modelName '/rx_sink'], 'Position', [870 90 950 120]);
 add_block('simulink/Sinks/To Workspace', [modelName '/Tx_IQ'],   'Position', [300 30 380 60]);
@@ -209,6 +215,8 @@ add_line(modelName, 'Att/1',       'Channel/8', 'autorouting', 'on');
 add_line(modelName, 'Att/1',       'Threat/9',  'autorouting', 'on');
 add_line(modelName, 'Body/1',      'Channel/9', 'autorouting', 'on');
 add_line(modelName, 'Gate/1',      'Threat/10', 'autorouting', 'on');
+add_line(modelName, 'Tdl/1',       'Channel/10', 'autorouting', 'on');
+add_line(modelName, 'Tdl/1',       'Threat/11', 'autorouting', 'on');
 add_line(modelName, 'Channel/1',   'Threat/1',  'autorouting', 'on');
 add_line(modelName, 'Threat/1',    'AWGN/1',    'autorouting', 'on');
 add_line(modelName, 'Threat/2',    'Thr_act/1', 'autorouting', 'on');
@@ -254,6 +262,12 @@ set_param([modelName '/Body'], 'UserDataPersistent', 'on', 'UserData', struct('b
 set_param([modelName '/Gate'], 'Value', mat2str([p.sweep_period_s(1) 0 0], 10));
 set_param([modelName '/Gate'], 'UserDataPersistent', 'on', 'UserData', struct('jam_timing_random', ...
     logical(p.jam_timing_random), 'sweep_period_s', p.sweep_period_s));
+NT = tdl_taps(p, fs); ni = numel(p.int_aoa_deg);
+set_param([modelName '/Tdl'], 'Value', mat2str([ones(1, 1 + ni); zeros(NT - 1, 1 + ni)]));
+set_param([modelName '/Tdl'], 'UserDataPersistent', 'on', 'UserData', struct('tdl', logical(p.tdl), ...
+    'tdl_random', logical(p.tdl_random), 'tdl_ds_ns', p.tdl_ds_ns, 'tdl_step_ns', p.tdl_step_ns, ...
+    'tdl_max_ns', p.tdl_max_ns, 'tdl_sig_ds', p.tdl_sig_ds, 'tdl_sig_alt_m', p.tdl_sig_alt_m, ...
+    'tdl_int_ds', p.tdl_int_ds, 'tdl_clip_ns', p.tdl_clip_ns));
 link_seed(modelName, seed, p.fd_max);
 
 %% ---- Save ----
@@ -297,7 +311,9 @@ function s = channel_script(p, fs)
 % the two radios and LoS Doppler shift per flight, unknown arrival time per frame
 % (fractional delay applied in the frequency domain; the frame ends in its guard).
 % Our LoS Doppler fl is drawn apart from the GCS direction: the same arcsine distribution
-% as fd sin of a uniform direction.
+% as fd sin of a uniform direction. With the delay line, tap m carries the frame m taps
+% later (our signal is silent before the frame) with the diffuse amplitude of column 1
+% of the 'Tdl' block.
 nr = p.n_rx;
 cyc = round(p.cycle_s * fs);          % channel samples from one frame to the next (one decision cycle)
 real_rx = strcmpi(p.rx_sync, 'real');
@@ -353,12 +369,24 @@ tilt = sprintf(['[ga, ca, cz] = uav_attitude_db(att(2), att(1) + yaw * t(1), att
     'gl = 10.^((ga - uav_attitude_db(att(2), att(1), att(3), att(4), %.6f)) / 20) .* exp(1j * %.12f * cz);\n' ...
     'a = exp(-1j * %.12f * ca * %s);\n' ...
     'D = D .* a;\n'], p.uav_null_db, p.uav_null_db, lever_k(p), 2*pi*p.ant_spacing_wl, ant_pos(nr));
-s = [sprintf('function y = fcn(x, seed, fd, kdb, yaw, rho, gcs, att, bdy)\n%%%%#codegen\npersistent f0 ph n%s\n', pers) ...
+[NT, S] = tdl_taps(p, fs);
+lt = '';
+if NT > 1
+    pers = [pers ' fT pT'];
+    imp = [imp sprintf('if isempty(fT)\n    fT = cos(2*pi*rand(32, %d, %d));\nend\nif isempty(pT)\n    pT = 2*pi*rand(32, %d, %d);\nend\n', ...
+        nr, NT-1, nr, NT-1)];
+    rr = ''; if real_rx, rr = sprintf(' .* r(m*%d+1:Ns)', S); end
+    lt = [tdl_code('Dt', 'fT', 'pT', 'a', 1, p, fs, NT) sprintf(['xd = complex(zeros(Ns, %d));\nfor m = 1:%d\n' ...
+        '    xd(m*%d+1:Ns, m) = x(1:Ns-m*%d)%s;\nend\n'], NT-1, NT-1, S, S, rr)];
+    mix = [strrep(mix, 'sqrt(1/(Kk+1)) * D(:, k)', 'sqrt(1/(Kk+1)) * tdl(1, 1) * D(:, k)') sprintf(['    for m = 1:%d\n' ...
+        '        y(:, k) = y(:, k) + gk * bdy(k) * sqrt(1/(Kk+1)) * tdl(m+1, 1) * xd(:, m) .* Dt(:, k, m);\n    end\n'], NT-1)];
+end
+s = [sprintf('function y = fcn(x, seed, fd, kdb, yaw, rho, gcs, att, bdy, tdl)\n%%%%#codegen\npersistent f0 ph n%s\n', pers) ...
     sprintf('if isempty(f0)\n    rng(seed, ''twister'');\nend\nx = gcs * x;\n') ...
     sos_init('f0', 'ph', nr) imp ...
     sprintf('if isempty(n)\n    n = 0;\nend\nNs = size(x, 1);\nt = (n + (0:Ns-1).'') / %.1f;\nn = n + max(Ns, %d);\n', fs, cyc) ...
     pitch_code() sos_gains('D', 'f0', 'ph', p) dly xs ...
-    sprintf('K = 10^(kdb(1)/10);\n') tilt ...
+    sprintf('K = 10^(kdb(1)/10);\n') tilt lt ...
     sprintf(['y = complex(zeros(Ns, %d));\n' ...
     'for k = 1:%d\n' sel mix ...
     'end\n' ...
@@ -372,7 +400,10 @@ function s = threat_script(p, fs)
 % in-band cap over our received signal. An emitter stays in the UAV's horizontal plane:
 % its LoS turns with the heading, is seen by the array tilted by the pitch ('Att' block)
 % and has the Doppler shift of its direction, fd sin(aoa); its diffuse part is centred on
-% its own direction; the antennas' lever arm moves the phase of every path.
+% its own direction; the antennas' lever arm moves the phase of every path. With the
+% delay line, every waveform runs Nw samples at times tw, from the line's longest delay
+% before the frame, and tap m carries it m taps late with the diffuse amplitude of the
+% interferer's column of the 'Tdl' block.
 nr  = p.n_rx;
 sps = p.sps;
 thr = lower(p.active_threat);
@@ -390,7 +421,7 @@ end
 PL = 0;
 if ismember('path_loss', sig), PL = p.path_loss_db; end
 
-pers = {}; init = {}; body = {};
+pers = {}; init = {}; body = {}; tpers = {}; tinit = {};
 if any(ismember(sig, {'antenna_fault'}))
     pers{end+1} = 'hit_ant'; init{end+1} = sprintf('hit_ant = randi(%d);', nr);   % the antenna with the open connector
 end
@@ -408,8 +439,11 @@ for i = 1:numel(sig)
             % applied in the channel: the hidden antenna loses its line of sight there
     end
 end
-if ~isempty(addc)
-    body{end+1} = sprintf('ys = y(:, 1);\n');       % our signal as the reactive jammer senses it
+[NT, S] = tdl_taps(p, fs); E = (NT - 1) * S;
+if NT > 1 && ~isempty(addc)                         % ys: our signal as the reactive jammer senses it
+    body{end+1} = sprintf('Nw = Ns + %d;\ntw = [t(1) - (%d:-1:1).'' / %.1f; t];\nys = [zeros(%d, 1); y(:, 1)];\n', E, E, fs, E);
+elseif ~isempty(addc)
+    body{end+1} = sprintf('Nw = Ns;\ntw = t;\nys = y(:, 1);\n');
 end
 
 if ~isempty(addc)
@@ -420,14 +454,14 @@ for c = 1:numel(addc)
     lf = 'jsr_db';                                  % level field of the component
     switch comp
         case 'jamming'
-            w = sprintf('w = sqrt(%.8f/2) * complex(randn(Ns, 1), randn(Ns, 1));\n', 10^(p.jsr_db/10));
+            w = sprintf('w = sqrt(%.8f/2) * complex(randn(Nw, 1), randn(Nw, 1));\n', 10^(p.jsr_db/10));
         case 'tone_jamming'
             % CW tone at a random offset inside the flat part of our band; power
             % scaled so its in-band power over our signal equals tone_jsr_db
             lf = 'tone_jsr_db';
             pers{end+1} = 'tone_f'; init{end+1} = sprintf('tone_f = %.4f * (2*rand - 1);', p.tone_offset_hz); %#ok<AGROW>
             pers{end+1} = 'tone_ph'; init{end+1} = 'tone_ph = 2*pi*rand;'; %#ok<AGROW>
-            w = sprintf('w = sqrt(%.8f) * exp(1j * (2*pi*tone_f*t + tone_ph));\n', 10^(p.tone_jsr_db/10) * tone_gain(p));
+            w = sprintf('w = sqrt(%.8f) * exp(1j * (2*pi*tone_f*tw + tone_ph));\n', 10^(p.tone_jsr_db/10) * tone_gain(p));
         case 'benign_interference'
             lf = 'benign_int_db';
             if ~isempty(p.benign_occ)
@@ -438,15 +472,15 @@ for c = 1:numel(addc)
                 pers{end+1} = 'b_occ'; init{end+1} = sprintf('b_occ = %.6f + %.6f * rand;', p.benign_occ(1), diff(p.benign_occ)); %#ok<AGROW>
                 pers{end+1} = 'b_on'; init{end+1} = 'b_on = rand < b_occ;'; %#ok<AGROW>
                 pers{end+1} = 'b_next'; init{end+1} = 'b_next = 0;'; %#ok<AGROW>
-                w = sprintf(['on = false(Ns, 1);\nfor i = 1:Ns\n    while t(i) >= b_next\n' ...
+                w = sprintf(['on = false(Nw, 1);\nfor i = 1:Nw\n    while tw(i) >= b_next\n' ...
                     '        if b_on\n            b_on = false;\n' gamma_draw(p.benign_idle_shape, 'gg') ...
                     '            b_next = b_next + gg * %.10f * (1 - b_occ) / b_occ / %.10f;\n' ...
                     '        else\n            b_on = true; b_next = b_next + exp(%.8f + %.8f * rand);\n        end\n' ...
-                    '    end\n    on(i) = b_on;\nend\nact = mean(double(on));\n' ...
-                    'w = sqrt(%.8f/2) * complex(randn(Ns, 1), randn(Ns, 1)) .* on;\n'], ...
+                    '    end\n    on(i) = b_on;\nend\nact = mean(double(on(Nw-Ns+1:Nw)));\n' ...
+                    'w = sqrt(%.8f/2) * complex(randn(Nw, 1), randn(Nw, 1)) .* on;\n'], ...
                     md, p.benign_idle_shape, log(d(1)), log(d(2) / d(1)), 10^(p.benign_int_db/10));
             else
-                w = sprintf('w = sqrt(%.8f/2) * complex(randn(Ns, 1), randn(Ns, 1));\n', 10^(p.benign_int_db/10));
+                w = sprintf('w = sqrt(%.8f/2) * complex(randn(Nw, 1), randn(Nw, 1));\n', 10^(p.benign_int_db/10));
             end
         case 'noise_burst'
             % bursts from the flight's phase of their period ('Gate' block)
@@ -457,11 +491,11 @@ for c = 1:numel(addc)
             % on our channel while the sweep's window covers it, on the channel clock: the
             % flight's sweep period gate(1) and phase gate(2)
             g = sweep_window_s(p);
-            w = sprintf(['tsw = mod(t + gate(2), gate(1));\non = tsw >= %.10g & tsw < %.10g;\n' ...
-                'act = mean(double(on));\n' ...
-                'w = sqrt(%.8f/2) * complex(randn(Ns, 1), randn(Ns, 1)) .* on;\n'], g(1), g(2), 10^(p.jsr_db/10));
+            w = sprintf(['tsw = mod(tw + gate(2), gate(1));\non = tsw >= %.10g & tsw < %.10g;\n' ...
+                'act = mean(double(on(Nw-Ns+1:Nw)));\n' ...
+                'w = sqrt(%.8f/2) * complex(randn(Nw, 1), randn(Nw, 1)) .* on;\n'], g(1), g(2), 10^(p.jsr_db/10));
         case 'reactive_jamming'
-            w = sprintf(['w = complex(zeros(Ns, 1));\nfor i = 1:Ns\n    if abs(ys(i))^2 > %.8f\n' ...
+            w = sprintf(['w = complex(zeros(Nw, 1));\nfor i = 1:Nw\n    if abs(ys(i))^2 > %.8f\n' ...
                 '        w(i) = sqrt(%.8f/2) * complex(randn, randn);\n    end\nend\n'], ...
                 p.reactive_threshold / sps, 10^(p.jsr_db/10));
         case 'spoofing'
@@ -469,9 +503,9 @@ for c = 1:numel(addc)
             pers{end+1} = 'spoof_txf'; %#ok<AGROW>
             init{end+1} = sprintf(['spoof_txf = comm.RaisedCosineTransmitFilter(''RolloffFactor'', %.6f, ' ...
                 '''FilterSpanInSymbols'', %d, ''OutputSamplesPerSymbol'', %d);'], p.rolloff, p.filter_span, sps); %#ok<AGROW>
-            w = sprintf(['nSym = floor(Ns / %d);\n' ...
+            w = sprintf(['nSym = ceil(Nw / %d);\n' ...
                 'sp = spoof_txf(pskmod(randi([0 1], nSym*2, 1), 4, pi/4, ''gray'', ''InputType'', ''bit''));\n' ...
-                'w = %.8f * sp(1:Ns);\n'], sps, 10^(p.spoof_sir_db/20));
+                'w = %.8f * sp(1:Nw);\n'], sps, 10^(p.spoof_sir_db/20));
         otherwise
             error('build_threat_model: unsupported threat component ''%s''', comp);
     end
@@ -487,14 +521,25 @@ for c = 1:numel(addc)
     pers{end+1} = pI; init{end+1} = sprintf('%s = 2*pi*rand(32, %d);', pI, nr); %#ok<AGROW>
     dop = '0 * t';
     if p.int_los_doppler, dop = sprintf('2*pi*fd*sind(aoa(%d)) * t', c); end
+    mx = sprintf('    y(:, k) = y(:, k) + w .* (sqrt(Ki/(Ki+1)) * aI(:, k) .* lI + sqrt(1/(Ki+1)) * dI(:, k));\n');
+    lt = '';
+    if NT > 1
+        fT = sprintf('fT%d', c); pT = sprintf('pT%d', c);
+        tpers = [tpers {fT pT}]; %#ok<AGROW>
+        tinit = [tinit {sprintf('%s = cos(2*pi*rand(32, %d, %d));', fT, nr, NT-1), ...
+            sprintf('%s = 2*pi*rand(32, %d, %d);', pT, nr, NT-1)}]; %#ok<AGROW>
+        lt = tdl_code('Dt', fT, pT, 'aI', 1 + c, p, fs, NT);
+        mx = [sprintf('    y(:, k) = y(:, k) + w(%d:Nw) .* (sqrt(Ki/(Ki+1)) * aI(:, k) .* lI + sqrt(1/(Ki+1)) * tdl(1, %d) * dI(:, k));\n', ...
+            E + 1, 1 + c) sprintf(['    for m = 1:%d\n' ...
+            '        y(:, k) = y(:, k) + sqrt(1/(Ki+1)) * tdl(m+1, %d) * w(%d-m*%d+(0:Ns-1).'') .* Dt(:, k, m);\n' ...
+            '    end\n'], NT-1, 1 + c, E + 1, S)];
+    end
     body{end+1} = [w sos_gains('dI', fI, pI, p) sprintf([ ...
         'sI = sind(aoa(%d) + yaw * t(1));\n' ...
         'aI = exp(-1j * %.12f * (cosd(th) * sI) * %s);\n' ...
         'lI = exp(1j * (%s + %.12f * cosd(att(3)) * sI * sind(th)));\n' ...
-        'dI = dI .* aI;\n' ...
-        'for k = 1:%d\n' ...
-        '    y(:, k) = y(:, k) + w .* (sqrt(Ki/(Ki+1)) * aI(:, k) .* lI + sqrt(1/(Ki+1)) * dI(:, k));\n' ...
-        'end\n'], c, 2*pi*p.ant_spacing_wl, ant_pos(nr), dop, lever_k(p), nr)]; %#ok<AGROW>
+        'dI = dI .* aI;\n'], c, 2*pi*p.ant_spacing_wl, ant_pos(nr), dop, lever_k(p)) lt ...
+        sprintf('for k = 1:%d\n', nr) mx sprintf('end\n')]; %#ok<AGROW>
 end
 if p.chain_amp_db > 0 || p.chain_phase_deg > 0
     % receive chains: a gain and phase error per antenna, fixed for the flight (everything
@@ -505,8 +550,8 @@ if p.chain_amp_db > 0 || p.chain_phase_deg > 0
     body{end+1} = sprintf('for k = 1:%d\n    y(:, k) = y(:, k) * gch(k);\nend\n', nr); %#ok<AGROW>
 end
 
-pers = [{'nI'}, pers]; init = [{'nI = 0;'}, init];
-head = sprintf('function [y, act] = fcn(u, seed, fd, aoa, kdb, yaw, rho, gcs, att, gate)\n%%#codegen\npersistent seeded\n');
+pers = [{'nI'}, pers, tpers]; init = [{'nI = 0;'}, init, tinit];   % the delay line's sinusoids drawn last
+head = sprintf('function [y, act] = fcn(u, seed, fd, aoa, kdb, yaw, rho, gcs, att, gate, tdl)\n%%#codegen\npersistent seeded\n');
 for i = 1:numel(pers)
     head = [head sprintf('persistent %s\n', pers{i})]; %#ok<AGROW>
 end
@@ -955,7 +1000,7 @@ g = 1 / p.sps;
 end
 
 function w = gated_noise(k, period, on, pw)
-w = sprintf(['w = complex(zeros(Ns, 1));\nfor i = 1:Ns\n    if mod(%s, %d) < %d\n' ...
+w = sprintf(['w = complex(zeros(Nw, 1));\nfor i = 1:Nw\n    if mod(%s, %d) < %d\n' ...
     '        w(i) = sqrt(%.8f/2) * complex(randn, randn);\n    end\n    %s = %s + 1;\nend\n'], ...
     k, period, on, pw, k, k);
 end
@@ -981,6 +1026,44 @@ c = sprintf(['%s = complex(zeros(Ns, %d));\n' ...
     'end\n' ...
     'Rr = zeros(%d, %d);\nfor i = 1:%d\n    for j = 1:%d\n        Rr(i, j) = rho ^ abs(i - j);\n    end\nend\n' ...
     '%s = %s * chol(Rr);\n'], dv, nr, lever_k(p), nr, dv, fv, fv, pv, nr, nr, nr, nr, dv, dv);
+end
+
+function [nt, S] = tdl_taps(p, fs)
+% Taps of the delay line (1: flat channel) and the samples between them; the line must
+% end inside the guard, where the receive filter of the frame's last pulse ends
+% (frame_layout.m).
+nt = 1 + p.tdl * floor(p.tdl_max_ns / p.tdl_step_ns);
+S = round(p.tdl_step_ns * 1e-9 * fs);
+if nt > 1
+    L = frame_layout(p);
+    if abs(S - p.tdl_step_ns * 1e-9 * fs) > 1e-9 || (nt - 1) * S > (L.G - p.filter_span - ceil(p.timing_max_sym)) * p.sps
+        error('build_threat_model: delay line taps must be whole samples and end inside the guard');
+    end
+end
+end
+
+function c = tdl_code(dv, fv, pv, av, col, p, fs, nt)
+% Late taps 1..nt-1 of one source's delay line, dv (Ns x n_rx x nt-1): on every tap and
+% antenna its own 32 sinusoids as sos_gains, evaluated every 64 samples (16 us, in which a
+% sinusoid's phase moves by at most 2 pi 358 Hz 16 us = 0.04 rad) and interpolated, the
+% receive correlation (Rr of sos_gains), then centred on the source by its steering
+% vectors av; a tap without power in column col of 'Tdl' stays 0.
+nr = p.n_rx;
+c = sprintf(['tc = t(1) + (0:64:Ns+63).'' / %.1f;\n' ...
+    'swc = %.12f * sind(att(4) + att(5) * sin(2*pi*att(6)*tc + att(7)));\n' ...
+    'jj = floor((0:Ns-1).'' / 64) + 1;\nww = mod((0:Ns-1).'', 64) / 64;\nRc = chol(Rr);\n' ...
+    '%s = complex(zeros(Ns, %d, %d));\n' ...
+    'for m = 1:%d\n' ...
+    '    if tdl(m+1, %d) == 0\n        continue;\n    end\n' ...
+    '    Dc = complex(zeros(numel(tc), %d));\n' ...
+    '    for k = 1:%d\n' ...
+    '        Dc(:, k) = exp(1j * (2*pi*tc*(fd*%s(:, k, m).'') + swc*%s(:, k, m).'' + repmat(%s(:, k, m).'', numel(tc), 1))) * ones(32, 1) / sqrt(32);\n' ...
+    '    end\n' ...
+    '    Dc = Dc * Rc;\n' ...
+    '    for k = 1:%d\n' ...
+    '        %s(:, k, m) = (Dc(jj, k) .* (1 - ww) + Dc(jj + 1, k) .* ww) .* %s(:, k);\n' ...
+    '    end\n' ...
+    'end\n'], fs, lever_k(p), dv, nr, nt-1, nt-1, col, nr, nr, fv, fv, pv, nr, dv, av);
 end
 
 function c = pitch_code()
@@ -1053,7 +1136,9 @@ d = struct('n_rx', 3, 'ant_aperture_m', 1.2, 'rx_corr', 0.3, 'gcs_aoa_deg', 0, .
     'wobble_random', false, 'wobble_v_max', 8, 'wobble_roll_deg', [-17.5 19.3], 'wobble_pitch_deg', [-11.0 14.9], ...
     'wobble_amp_deg', 10, 'wobble_freq_hz', [5 25], 'wobble_arm_m', 0.4, 'int_los_doppler', true, 'c_light', 3e8, ...
     'sweep_speed_hz_s', 1e9, 'sweep_bw_hz', 4e6, 'sweep_period_s', [20e-3 83.5e-3], 'jam_timing_random', false, ...
-    'fdiv_spacing_hz', 25e6, 'sweep_fdiv', false);
+    'fdiv_spacing_hz', 25e6, 'sweep_fdiv', false, ...
+    'tdl', false, 'tdl_random', false, 'tdl_ds_ns', [0 0], 'tdl_step_ns', 250, 'tdl_max_ns', 4500, ...
+    'tdl_sig_ds', [-6.52 0.32; -6.63 0.16], 'tdl_sig_alt_m', 25, 'tdl_int_ds', [-6.63 0.16], 'tdl_clip_ns', 1000);
 f = fieldnames(d);
 for i = 1:numel(f)
     if ~isfield(p, f{i}), p.(f{i}) = d.(f{i}); end

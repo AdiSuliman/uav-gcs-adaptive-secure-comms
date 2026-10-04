@@ -15,8 +15,8 @@ function d = link_seed(modelName, seed, fd, geo)
 %   'Corr'. 'GCS' gets the amplitude of our signal: the tracker's pointing loss and the gain
 %   of the tilted UAV antenna toward the GCS (its elevation is 0 without geo.ebno). 'Att'
 %   gets the GCS direction and elevation, the roll, the pitch and its wobble; 'Body' our
-%   signal's amplitude on each antenna; 'Gate' the timing of the gated jammers. No rebuild
-%   is needed.
+%   signal's amplitude on each antenna; 'Gate' the timing of the gated jammers; 'Tdl' the
+%   diffuse tap amplitudes of the delay line of every channel. No rebuild is needed.
 %   d: the flight's draws (flight_draws.m).
 b0 = seed_base(seed);
 set_param([modelName '/Seed'], 'Value', sprintf('%d', b0));
@@ -50,6 +50,9 @@ end
 if getSimulinkBlockHandle([modelName '/Gate']) ~= -1
     set_param([modelName '/Gate'], 'Value', mat2str(d.jam, 10));
 end
+if getSimulinkBlockHandle([modelName '/Tdl']) ~= -1
+    set_param([modelName '/Tdl'], 'Value', mat2str(d.tdl, 10));
+end
 blks = {[modelName '/AWGN'], [modelName '/BitSource']};
 for b = 1:numel(blks)
     dp = fieldnames(get_param(blks{b}, 'DialogParameters'));
@@ -73,7 +76,7 @@ end
 function p = block_params(modelName)
 % Draw switches, ranges and fixed values of the model (UserData of its Constant blocks) in one struct.
 p = struct();
-for b = {'AoA', 'Kfac', 'Yaw', 'Corr', 'GCS', 'Att', 'Body', 'Gate'}
+for b = {'AoA', 'Kfac', 'Yaw', 'Corr', 'GCS', 'Att', 'Body', 'Gate', 'Tdl'}
     blk = [modelName '/' b{1}];
     if getSimulinkBlockHandle(blk) == -1, continue; end
     u = get_param(blk, 'UserData');

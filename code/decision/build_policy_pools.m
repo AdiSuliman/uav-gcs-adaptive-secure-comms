@@ -54,7 +54,7 @@ LHS_SEED = 7100000;              % permutation stream of a design: LHS_SEED + 10
 VOUT   = [0 0; 161 161];         % speeds of the edge-speed split [km/h]: half the geometries each, at the two
                                  % ends of the envelope (dedicated test flights; the other splits draw over it)
 N_WORKERS = 6;
-MODEL_TAG = 'v7-gaps';           % link model of the pools (seed streams, altitude, in-band cap, gated jammers, FEC packets)
+MODEL_TAG = 'v7-gaps-tdl';       % link model of the pools (seed streams, altitude, in-band cap, gated jammers, FEC packets, delay line)
 opt = struct('F_SUB', 20, 'tw', 10, 'delay_bits', 20);
 C = decision_config();
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
@@ -174,14 +174,15 @@ spd = arrayfun(@(sp) cell2mat(arrayfun(@(s) geo{s}(sp).speed, (1:nS)', 'UniformO
 % at the distance of the Eb/N0), Eb/N0 x geometry per split; align: |a_g' a_i|^2 / n^2
 % of the steering vectors toward the GCS and toward each interferer; body_spread_db: the
 % spread of the airframe loss over the antennas; jam: sweep period [s], sweep phase [s]
-% and burst phase of the gated jammers
+% and burst phase of the gated jammers; ds_ns, ds_int: RMS delay spread of our signal and
+% of each interferer [ns] (0 on a flat channel)
 cv = cell(1, nSp);
 for sp = 1:nSp
     z = nan(nS, nG(sp));
     V = struct('seed', z, 'speed', z, 'alt_m', z, 'k_sig', z, 'k_int', z, 'yaw', z, 'rho', z, ...
         'gcs_point_db', z, 'el_db', z, 'aoa', nan(nS, nG(sp), 3), 'align', nan(nS, nG(sp), 3), ...
         'gcs_aoa', z, 'el_deg', z, 'bank', z, 'roll', z, 'pitch', z, 'wob', z, 'att_db', z, 'body_spread_db', z, ...
-        'jam', nan(nS, nG(sp), 3));
+        'jam', nan(nS, nG(sp), 3), 'ds_ns', z, 'ds_int', nan(nS, nG(sp), 3));
     for s = 1:nS
         g = geo{s}(sp);
         for r = 1:nG(sp)
@@ -197,6 +198,7 @@ for sp = 1:nSp
             V.roll(s, r) = d.roll; V.pitch(s, r) = d.pitch; V.wob(s, r) = d.wobble(1);
             V.att_db(s, r) = d.att_db; V.body_spread_db(s, r) = max(d.body_db) - min(d.body_db);
             V.jam(s, r, :) = d.jam;
+            V.ds_ns(s, r) = d.ds_ns(1); V.ds_int(s, r, 1:ni) = d.ds_ns(1 + (1:ni));
         end
     end
     cv{sp} = V;

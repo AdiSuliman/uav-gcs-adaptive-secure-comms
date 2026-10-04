@@ -231,7 +231,8 @@ function test_seed_streams_disjoint(tc)
 % Every purpose of every flight seed draws from its own stream: the purpose offsets
 % are distinct and below 64, and the flight seeds of every family are distinct and
 % below 2^26.
-P = {'channel', 'awgn', 'bits', 'threat', 'aoa', 'k', 'yaw', 'corr', 'gcsaoa', 'gcs', 'jam', 'alt', 'speed', 'body', 'wobble'};
+P = {'channel', 'awgn', 'bits', 'threat', 'aoa', 'ds', 'k', 'yaw', 'corr', 'gcsaoa', 'gcs', 'jam', 'alt', 'speed', ...
+    'body', 'wobble'};
 off = zeros(1, numel(P));
 for i = 1:numel(P)
     [~, n] = seed_stream(12345, P{i});
@@ -271,7 +272,10 @@ W = cell2mat(arrayfun(@(x) hover_attitude(x, 0, p), S, 'UniformOutput', false));
 W = (W(:, 1) - p.wobble_roll_deg(1)) / diff(p.wobble_roll_deg);
 J = cell2mat(arrayfun(@(x) jam_timing(x, [0 1]), S, 'UniformOutput', false));
 J(:, 2) = J(:, 2) ./ J(:, 1);
-U = [K, A, (w + 1) / 2, rho, v, G, W, J];               % the uniform behind every draw
+q = p; q.tdl_clip_ns = Inf;                             % no altitude: every channel on the omni fit
+Z = cell2mat(arrayfun(@(x) delay_spread(x, NaN, 3, q), S, 'UniformOutput', false));
+Z = 0.5 * erfc(-(log10(Z * 1e-9) - q.tdl_int_ds(1)) / sqrt(2 * q.tdl_int_ds(2)));
+U = [K, A, (w + 1) / 2, rho, v, G, W, J, Z];            % the uniform behind every draw
 c = corrcoef(K(:, 1), w);
 verifyLessThan(tc, abs(c(1, 2)), 0.1);
 C = corrcoef(U);
@@ -325,6 +329,7 @@ end
 function test_receiver_measurements(tc)
 p = base_params(); p.quiet_build = true; p.active_threat = 'none'; p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false; p.gcs_tracked = false; p.seed = 11;
 p.k_random = false; p.gcs_aoa_random = false; p.body_random = false;
+p.tdl = false;                                       % the measurements on the flat channel (the delay line: test_delay_line)
 mdl = 'UAV_GCS_Threat_Link';
 evalc('build_threat_model(p)');
 snr = 12 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
@@ -790,6 +795,123 @@ verifyLessThan(tc, coh(0), 0.5);
 st = @(c) exp(-1j * 2*pi * p.ant_spacing_wl * (0:n-1)' * c) / sqrt(n);
 Y = run_link(mdl, p, fdx, [10 -60], 0.9, zeros(1, 7), ones(1, n), 20);
 verifyGreaterThan(tc, abs(st(sind(p.int_aoa_deg(1)))' * lead_dir(Y))^2, 0.9);
+close_system(mdl, 0);
+end
+
+function test_tdl_profile(tc)
+% The delay line's diffuse profile: exponential on taps 250 ns apart with unit power, and
+% with the LoS on tap 0 at the K-factor the composite RMS delay spread is the target; a
+% spread the 4.5 us window cannot hold at that K gets the flat profile (767 ns at
+% K 10 dB); no spread puts it all on tap 0.
+tau = (0:18)' * 250;
+for k = [-5 2 10]
+    q = 1 / (10^(k/10) + 1);
+    for ds = [64 138 234 302 372]
+        [a, r] = tdl_profile(ds, k, 19, 250);
+        P = a.^2;
+        verifyEqual(tc, sum(P), 1, 'AbsTol', 1e-12);
+        verifyEqual(tc, P(2:end) ./ P(1:end-1), P(2) / P(1) * ones(18, 1), 'RelTol', 1e-9);
+        w = [1 - q + q * P(1); q * P(2:end)];
+        verifyEqual(tc, [r, sqrt(sum(w .* tau.^2) - sum(w .* tau)^2)], [ds ds], 'RelTol', 1e-6);
+    end
+end
+[a, r] = tdl_profile(1000, 10, 19, 250);
+verifyEqual(tc, a, ones(19, 1) / sqrt(19), 'AbsTol', 1e-12);
+verifyEqual(tc, r, 767.4, 'AbsTol', 0.1);
+verifyEqual(tc, tdl_profile(0, 10, 19, 250), [1; zeros(18, 1)]);
+verifyEqual(tc, tdl_profile(300, 10, 1, 250), 1);
+end
+
+function test_delay_spread(tc)
+% Per-flight RMS delay spreads, log-normal as Rodriguez-Pineiro et al.'s fits: our signal
+% below 25 m on the directional OLoS fit (median 302 ns, sigma 0.566 decades), above it
+% and without an altitude on the omni fit (234 ns, 0.4), every interferer on the omni fit,
+% all clipped at 1 us. flight_draws turns them into the delay line's profiles at the
+% flight's K, and gives a flat channel without the line.
+p = base_params(); p.tdl = true; p.tdl_random = true;
+n = 4000;
+lo = cell2mat(arrayfun(@(s) delay_spread(s, 20, 3, p), (1:n)', 'UniformOutput', false));
+hi = cell2mat(arrayfun(@(s) delay_spread(s, 60, 3, p), (1:n)', 'UniformOutput', false));
+verifyEqual(tc, hi, cell2mat(arrayfun(@(s) delay_spread(s, NaN, 3, p), (1:n)', 'UniformOutput', false)));
+verifyEqual(tc, lo(:, 2:end), hi(:, 2:end));
+q = @(x, f) log10(sort(x(:)) * 1e-9);
+for c = {lo(:, 1), -6.52, 0.32; hi(:, 1), -6.63, 0.16; hi(:, 2:end), -6.63, 0.16}'
+    v = q(c{1}); m = numel(v);
+    verifyEqual(tc, v(round(m / 2)), c{2}, 'AbsTol', 0.03);
+    verifyEqual(tc, (v(round(0.75 * m)) - v(round(0.25 * m))) / (2 * 0.6745), sqrt(c{3}), 'RelTol', 0.08);
+end
+verifyLessThanOrEqual(tc, max([lo(:); hi(:)]), p.tdl_clip_ns);
+verifyEqual(tc, mean(lo(:, 1) == p.tdl_clip_ns), 0.5 * erfc((-6 + 6.52) / sqrt(2 * 0.32)), 'AbsTol', 0.02);
+d = flight_draws(5, 100, p, struct('ebno', 9, 'alt_m', 20, 'k_sig_db', 2));
+ds = delay_spread(5, 20, numel(p.int_aoa_deg), p);
+verifyEqual(tc, size(d.tdl), [19, 1 + numel(p.int_aoa_deg)]);
+verifyEqual(tc, sum(d.tdl.^2, 1), ones(1, size(d.tdl, 2)), 'AbsTol', 1e-12);
+verifyEqual(tc, d.ds_ns(1), ds(1), 'RelTol', 1e-6);
+verifyTrue(tc, all(d.ds_ns(2:end) <= ds(2:end) + 1e-6));
+p.tdl = false;
+d = flight_draws(5, 100, p);
+verifyEqual(tc, [d.tdl; d.ds_ns], [ones(1, 1 + numel(p.int_aoa_deg)); zeros(1, 1 + numel(p.int_aoa_deg))]);
+end
+
+function test_delay_line(tc)
+% In the model with the delay line: our channel's correlation across frequency follows
+% the profile (K 0 dB, 500 ns: the LoS share plus every tap's power at its delay) and the
+% received power stays the flat channel's; an interferer's channel is spread too, so in
+% the quiet slot its spatial covariance gains a second eigenvalue the flat channel lacks,
+% and its waveform runs from before the frame, so the slot's first samples hold its full
+% power; every other waveform runs over the line as well.
+p = base_params(); p.quiet_build = true; p.active_threat = 'none'; p.rx_sync = 'ideal'; p.seed = 11;
+p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false; p.gcs_tracked = false; p.k_random = false;
+p.gcs_aoa_random = false; p.body_random = false; p.wobble_random = false; p.chain_amp_db = 0; p.chain_phase_deg = 0;
+p.tdl = true; p.tdl_random = false; p.tdl_ds_ns = [500 500]; p.rician_k = 0; p.int_rician_k = 0;
+mdl = 'UAV_GCS_Threat_Link';
+evalc('build_threat_model(p)');
+set_param([mdl '/AWGN'], 'SNR', '60', 'SignalPower', num2str(1/p.sps));
+Y = []; X = [];
+for s = 1:10                                            % fd 50 Hz: frames 20 ms apart fade apart
+    d = link_seed(mdl, s, 50);
+    out = sim(mdl, 'StopTime', num2str(30 * p.frame_duration));
+    Y = cat(3, Y, out.get('Rx_IQ')); X = cat(3, X, out.get('Tx_IQ'));
+end
+close_system(mdl, 0);
+fs = p.symbol_rate * p.sps; ns = size(Y, 1);
+f = ((0:ns-1)' - floor(ns/2)) * fs / ns;
+P = d.tdl(:, 1).^2; m = (0:numel(P)-1)';
+for df = [0.25 0.5] * 1e6
+    k = round(df * ns / fs); v = find(abs(f) <= 0.45e6 & abs(f + k * fs / ns) <= 0.45e6);
+    num = 0; den = 0;
+    for fr = 1:size(Y, 3)
+        H = fftshift(fft(Y(:, :, fr)), 1) ./ fftshift(fft(X(:, 1, fr)));
+        num = num + sum(H(v + k, :) .* conj(H(v, :)), 'all'); den = den + sum(abs(H(v, :)).^2, 'all');
+    end
+    verifyEqual(tc, abs(num / den), abs(0.5 + 0.5 * sum(P .* exp(-1j * 2*pi * k * fs / ns * m * 250e-9))), 'AbsTol', 0.06);
+end
+verifyEqual(tc, mean(abs(Y).^2, 'all') / mean(abs(X).^2, 'all'), 1, 'AbsTol', 0.1);
+p.active_threat = 'jamming'; p.jsr_db = 30; p.rician_k = 10;
+e = zeros(1, 2); g = e;
+for t = [false true]
+    p.tdl = t;
+    evalc('build_threat_model(p)');
+    set_param([mdl '/AWGN'], 'SNR', '60', 'SignalPower', num2str(1/p.sps));
+    link_seed(mdl, 11, 0);
+    out = sim(mdl, 'StopTime', num2str(40 * p.frame_duration));
+    Y = out.get('Rx_IQ');
+    R = 0;
+    for fr = 1:size(Y, 3), R = R + Y(1:128, :, fr).' * conj(Y(1:128, :, fr)); end
+    l = sort(real(eig((R + R') / 2)), 'descend');
+    e(1 + t) = l(2) / l(1);
+    g(1 + t) = mean(abs(Y(1:4, :, :)).^2, 'all') / mean(abs(Y(40:120, :, :)).^2, 'all');
+    close_system(mdl, 0);
+end
+verifyLessThan(tc, e(1), 1e-3);
+verifyGreaterThan(tc, e(2), 0.05);
+verifyEqual(tc, g(2), 1, 'AbsTol', 0.15);
+% the other waveforms run over the line too
+p.active_threat = 'reactive_jamming+spoofing+benign_interference'; p.tdl_random = true;
+evalc('build_threat_model(p)');
+link_seed(mdl, 11, 160);
+out = sim(mdl, 'StopTime', num2str(3 * p.frame_duration));
+verifyTrue(tc, all(isfinite(out.get('Rx_IQ')), 'all'));
 close_system(mdl, 0);
 end
 
