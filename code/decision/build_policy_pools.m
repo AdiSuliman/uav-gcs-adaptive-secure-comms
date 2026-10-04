@@ -54,7 +54,7 @@ LHS_SEED = 7100000;              % permutation stream of a design: LHS_SEED + 10
 VOUT   = [0 0; 161 161];         % speeds of the edge-speed split [km/h]: half the geometries each, at the two
                                  % ends of the envelope (dedicated test flights; the other splits draw over it)
 N_WORKERS = 6;
-MODEL_TAG = 'v7-gaps-tdl';       % link model of the pools (seed streams, altitude, in-band cap, gated jammers, FEC packets, delay line)
+MODEL_TAG = 'v7-g4rx';           % link model of the pools (seed streams, altitude, in-band cap, gated jammers, FEC packets, delay line, its receiver, front end)
 opt = struct('F_SUB', 20, 'tw', 10, 'delay_bits', 20);
 C = decision_config();
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)

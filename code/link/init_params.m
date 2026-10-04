@@ -39,6 +39,13 @@ params.rx_sync        = 'real';
 params.cfo_ppm        = 25;            % [ppm] oscillator tolerance of each radio at 2.4 GHz (IEEE 802.11)
 params.timing_max_sym = 4;             % [symbols] unknown arrival time of a frame (uniform, fractional)
 params.rx_dd_iter     = 4;             % decision-directed estimation passes after the pilot-based one
+params.sync_coh_min   = 0.60;          % sync coherence below which the training was not found: sync-failure flag (<= 1% of correctly synchronized dev frames)
+% Receive front end (adc_frontend.m): per antenna an AGC held over the frame and a 12-bit ADC
+% (AD9361 data sheet, Rev. F: 12-bit ADCs, 1 dB gain steps). Resolution under jamming: about
+% one bit per 6.02 dB of jammer (Marti et al. 2024, eq. 19), 8 bits for a 25 dB jammer
+% (Castaneda et al. 2021), up to 6 dB of anti-jam per A/D bit (Knight, Cahn & Nair 2007).
+params.adc_bits       = 12;            % ADC bits per rail (0 or Inf: no front end)
+params.adc_backoff_db = 12;            % [dB] full scale over the rail RMS: the composite's measured 1e-4 rail quantile (11.1-12.1 dB)
 %% ========== CHANNEL MODEL ==========
 % Pulse shaping (RRC)
 params.rolloff      = 0.25;            % RRC roll-off factor

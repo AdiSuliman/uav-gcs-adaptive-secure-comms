@@ -945,23 +945,25 @@ end
 function test_rx_taps(tc)
 % The real receiver's taps span the delay line's delays: MRC lags 2 before and the line's
 % 4.5 us window after, the equalizer +-5 symbols, the space-time MMSE +-2 us (twice the
-% 1 us clip) half a symbol apart, its window twice the 27 degrees of freedom; on the flat
-% channel every count is 1, and so is the receiver built for it.
+% 1 us clip) half a symbol apart, its window twice the 27 degrees of freedom, its
+% snapshots reached by the symbols within 2 + 2 of their own; on the flat channel every
+% count is 1, and so is the receiver built for it. The sync statistic has 5 taps (+-1
+% symbol) and the noise floor 9 in every configuration.
 p = base_params();
 p.tdl = false;
 t = rx_taps(p);
-verifyEqual(tc, [t.lags t.ne t.nt t.window], [0 0 1 1 p.mmse_window]);
+verifyEqual(tc, [t.lags t.ne t.nt t.window t.mh t.ns t.nn], [0 0 1 1 p.mmse_window 0 5 9]);
 verifyEqual(tc, rx_taps(rmfield(p, 'tdl')), t);
 p.tdl = true;
 t = rx_taps(p);
-verifyEqual(tc, [t.lags t.ne t.nt t.window], [2 5 11 9 64]);
+verifyEqual(tc, [t.lags t.ne t.nt t.window t.mh t.ns t.nn], [2 5 11 9 64 4 5 9]);
 q = p; q.tdl_max_ns = 2000; q.tdl_clip_ns = 500;
 t = rx_taps(q);
-verifyEqual(tc, [t.lags t.ne t.nt t.window], [2 2 5 5 32]);
+verifyEqual(tc, [t.lags t.ne t.nt t.window t.mh], [2 2 5 5 32 3]);
 p.quiet_build = true; p.rx_sync = 'real';
 mdl = 'UAV_GCS_Threat_Link';
-C = {false, 'mrc', 'NT = 1;', 'NE = 1;'; false, 'mmse', 'NT = 1;', 'NE = 1;'; ...
-     true, 'mrc', 'NT = 1;', 'NE = 11;'; true, 'mmse', 'NT = 9;', 'NE = 1;'};
+C = {false, 'mrc', 'NT = 1;', 'MH = 0;'; false, 'mmse', 'NT = 1;', 'MH = 0;'; ...
+     true, 'mrc', 'NT = 1;', 'NE = 11;'; true, 'mmse', 'NT = 9;', 'MH = 4;'};
 for i = 1:size(C, 1)
     p.tdl = C{i, 1}; p.rx_combiner = C{i, 2};
     evalc('build_threat_model(p)');
@@ -978,7 +980,8 @@ function test_receiver_delay_spread(tc)
 % channel spreads 234 ns below 0.03 at 15 dB, and one that spreads 64 ns, nearly flat,
 % about as well as the flat receiver on the flat channel at 6 dB (each frame keeps the
 % space-time or the antennas-alone output by its pilots); a 30 dB jammer on the flat
-% channel stays below 0.06.
+% channel stays below 0.06, and one whose channel spreads 234 ns below 0.03 (the
+% space-time sync finds the frame under it: the spatial whitening alone lost 0.36).
 p = base_params(); p.quiet_build = true; p.rx_sync = 'real'; p.int_aoa_random = false; p.yaw_random = false;
 p.corr_random = false; p.gcs_tracked = false; p.k_random = false; p.gcs_aoa_random = false; p.body_random = false;
 p.tdl = true; p.tdl_random = false;
@@ -994,6 +997,59 @@ q.tdl = false;
 verifyLessThan(tc, b64, 1.5 * link_ber(mdl, q, 6, 21:23, 20));
 q.jsr_db = 30;
 verifyLessThan(tc, link_ber(mdl, q, 15, 21:23, 20), 0.06);
+q.tdl = true; q.tdl_ds_ns = [0 234];
+verifyLessThan(tc, link_ber(mdl, q, 15, 21:23, 20), 0.03);
+end
+
+function test_sync_flag(tc)
+% Sync coherence and the sync-failure flag: on a clean link at 6 dB the training is found
+% in every frame (coherence above p.sync_coh_min, no flag); with our signal absent from
+% the air (the 'GCS' amplitude 0) every frame is flagged, on the flat and the delay-line
+% receivers alike.
+p = base_params(); p.quiet_build = true; p.rx_sync = 'real'; p.int_aoa_random = false; p.yaw_random = false;
+p.corr_random = false; p.gcs_tracked = false; p.k_random = false; p.gcs_aoa_random = false; p.body_random = false;
+p.tdl_random = false; p.active_threat = 'none'; p.rician_k = 10;
+mdl = 'UAV_GCS_Threat_Link';
+C = {false, 'mrc', [0 0]; true, 'mmse', [234 0]};
+for i = 1:size(C, 1)
+    p.tdl = C{i, 1}; p.rx_combiner = C{i, 2}; p.tdl_ds_ns = C{i, 3};
+    evalc('build_threat_model(p)');
+    set_param([mdl '/AWGN'], 'SNR', num2str(6 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), 'SignalPower', num2str(1/p.sps));
+    link_seed(mdl, 31, 160);
+    F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
+    verifyGreaterThan(tc, min(F.sync_coh(2:end)), p.sync_coh_min);
+    verifyEqual(tc, F.sync_fail(2:end), zeros(1, F.nf - 1));
+    set_param([mdl '/GCS'], 'Value', '0');
+    F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
+    verifyEqual(tc, F.sync_fail, ones(1, F.nf));
+    close_system(mdl, 0);
+end
+end
+
+function test_adc_frontend(tc)
+% Receive front end: the AGC puts full scale adc_backoff_db to 1 dB more above the rail
+% RMS (1 dB gain steps); a tone within full scale is quantized with the SQNR of a uniform
+% 12-bit quantizer (step^2 / 12 per rail); samples beyond full scale are clipped to the
+% outermost level; 0 bits leave the samples unchanged.
+rs = RandStream('mt19937ar', 'Seed', 3);
+N = 4000; iq = 1:500; is = 501:1000;
+u = 0.01 * exp(1j * 2*pi * 0.0123 * (0:N-1).') * [1 3];
+[y, fs, clip] = adc_frontend(u, 12, 12, iq, is);
+lv = 20*log10(fs ./ sqrt(mean(real(u).^2)));
+verifyGreaterThanOrEqual(tc, lv, 12 - 1e-9);
+verifyLessThan(tc, lv, 13);
+verifyEqual(tc, clip, 0);
+d = fs / 2^11;
+sq = 10*log10(mean(abs(u).^2) ./ mean(abs(y - u).^2));
+verifyEqual(tc, sq, 10*log10(mean(abs(u).^2) ./ (2 * d.^2 / 12)), 'AbsTol', 0.5);
+verifyGreaterThan(tc, sq, 60);
+v = u; v(2000, 1) = 10 * fs(1) * (1 + 1j);                 % far beyond full scale
+[w, ~, clip] = adc_frontend(v, 12, 12, iq, is);
+verifyEqual(tc, real(w(2000, 1)), fs(1) - d(1) / 2, 'AbsTol', 1e-12);
+verifyEqual(tc, clip, 2 / (2 * numel(v)));
+g = complex(randn(rs, N, 2), randn(rs, N, 2));
+verifyEqual(tc, adc_frontend(g, 0, 12, iq, is), g);
+verifyEqual(tc, adc_frontend(g, Inf, 12, iq, is), g);
 end
 
 function test_power_cap(tc)
