@@ -25,16 +25,23 @@
 % (threat cell, Eb/N0, geometry) of the validation split: recovered episodes among
 % the recoverable ones, per threat (severities pooled, as KPI 4) and pooled, and
 % false alarms on the independent clean validation geometries
-% (data/clean_val_pools.mat, one episode per geometry).
+% (data/clean_val_pools.mat, one 30-cycle episode per geometry) at the Eb/N0 of KPI 6:
+% from the KPI 1 threshold up (results/eval_detector_metrics.mat; every Eb/N0 when it
+% has none).
 % Selection: among the runs whose one-sided 95% false-alarm bound is <= 5% (KPI 6
 % as worded), the highest recovery of the weakest threat (KPI 4 as worded); within
 % one point of it, the best pooled recovery, then the return.
 % Gate: pooled recovery >= rule + escalation with the same monitor and the
-% false-alarm bound. The best run of every gamma at the selected monitor, drop
-% threshold and penalty is kept as an ablation. Reward-weight sensitivity:
+% false-alarm bound. When the DQN fails it, the deployed policy is rule + escalation
+% with its own monitor and drop threshold from the grid (rule_sel): the best recovery
+% among the settings whose false-alarm bound is <= 5%. When no setting meets the bound
+% either, the policy with the lowest bound is deployed and fa_bound_met is false: the
+% edge map then commits no point. The best run of every gamma at the selected monitor,
+% drop threshold and penalty is kept as an ablation. Reward-weight sensitivity:
 % proposal mitigation 2.
 %
-% Output: data/trained_dqn.mat, results/dqn_training.txt, results/dqn_training_curves.png
+% Output: data/trained_dqn.mat (also deployed, rule_sel, fa_bound_met and the pools'
+% det_id and created), results/dqn_training.txt, results/dqn_training_curves.png
 
 close all; clc;
 fprintf('=== C2: Train DQN ===\n\n');
@@ -79,6 +86,14 @@ if isfile('data/drop_threshold.mat'), Dd = load('data/drop_threshold.mat', 'drop
 if ~isempty(DROP_DB), PP.drop_db = DROP_DB; end
 CV = [];                                 % independent clean validation geometries
 if isfile('data/clean_val_pools.mat'), Cv = load('data/clean_val_pools.mat', 'CT'); CV = Cv.CT; clear Cv; end
+EBNO_THR = PP.ebno(1);                   % false alarms from the KPI 1 threshold up (KPI 6), fixed on validation
+if isfile('results/eval_detector_metrics.mat')
+    Md = load('results/eval_detector_metrics.mat', 'metrics');
+    if isfield(Md.metrics, 'kpi1_threshold_db') && isfinite(Md.metrics.kpi1_threshold_db)
+        EBNO_THR = Md.metrics.kpi1_threshold_db;
+    end
+    clear Md
+end
 
 %% 2. State normalization from random-policy rollouts
 rs = RandStream('mt19937ar', 'Seed', 7);
@@ -91,7 +106,7 @@ for b = 1:20
         [mem, M] = policy_monitor('update', mem, obs, PP, E.cfg);
         S_all = [S_all, policy_state(mem, E.cfg, M.confirmed, nA)]; %#ok<AGROW>
         a = randi(rs, nA, 1, H.NE);
-        ch = a ~= E.cfg; mem.since(ch) = 0; mem.since(~ch) = mem.since(~ch) + 1;
+        mem = policy_monitor('change', mem, a ~= E.cfg);
         [E, ~, obs] = link_env('step', E, PP, K, a);
     end
 end
@@ -109,18 +124,20 @@ tab = policy_table(PP, K);
 
 %% 4. Training: monitor x drop threshold x false-switch penalty x discount factor x seeds
 runs = struct('alarm', {}, 'drop', {}, 'fa_pen', {}, 'cost_scale', {}, 'sw_scale', {}, 'gamma', {}, 'seed', {}, 'agent', {}, 'curve', {}, 'loss', {}, ...
-    'best_ep', {}, 'val', {}, 'rec', {}, 'kmin', {}, 'kmin_thr', {}, 'fa_w', {}, 'n_w', {});
-base = struct('alarm', {}, 'drop', {}, 'rule_rec', {}, 'rule_ret', {}, 'rule_fa_w', {}, 'tab_rec', {}, 'tab_ret', {}, 'tab_fa_w', {});
+    'best_ep', {}, 'val', {}, 'rec', {}, 'kmin', {}, 'kmin_thr', {}, 'fa_w', {}, 'n_w', {}, 'sw_w', {});
+base = struct('alarm', {}, 'drop', {}, 'rule_rec', {}, 'rule_ret', {}, 'rule_fa_w', {}, 'rule_n_w', {}, 'rule_sw', {}, ...
+    'tab_rec', {}, 'tab_ret', {}, 'tab_fa_w', {});
 for ai = 1:numel(ALARMS)
     for dd = DROPS
         PPc = PP; [PPc.alarm_mode, PPc.confirm] = monitor(ALARMS{ai});
         if ~isnan(dd), PPc.drop_db = dd; end
         Rr = dqn_eval_batches('rule_esc', PPc, K, val_spec, [], struct(), 5000, SPLIT_VAL);
         Rt = dqn_eval_batches('table', PPc, K, val_spec, [], tab, 5000, SPLIT_VAL);
-        [rw, ~] = eval_clean_wide('rule_esc', PPc, CV, [], struct(), H);
-        [tw, ~] = eval_clean_wide('table', PPc, CV, [], tab, H);
+        [rw, rn, rsw] = eval_clean_wide('rule_esc', PPc, CV, [], struct(), H, EBNO_THR);
+        tw = eval_clean_wide('table', PPc, CV, [], tab, H, EBNO_THR);
         base(end+1) = struct('alarm', ALARMS{ai}, 'drop', dd, 'rule_rec', dqn_recovered(Rr), 'rule_ret', mean(Rr.ret), ...
-            'rule_fa_w', rw, 'tab_rec', dqn_recovered(Rt), 'tab_ret', mean(Rt.ret), 'tab_fa_w', tw); %#ok<SAGROW>
+            'rule_fa_w', rw, 'rule_n_w', rn, 'rule_sw', rsw, 'tab_rec', dqn_recovered(Rt), 'tab_ret', mean(Rt.ret), ...
+            'tab_fa_w', tw); %#ok<SAGROW>
         fprintf('=== Monitor ''%s'', drop %.1f dB: rule+esc recovered %.1f%%, return %.3f, FA %s | table recovered %.1f%%, return %.3f\n', ...
             ALARMS{ai}, dd, 100*base(end).rule_rec, base(end).rule_ret, pct_txt(rw), 100*base(end).tab_rec, base(end).tab_ret);
         for fi = 1:numel(FA_PEN)
@@ -134,14 +151,14 @@ for ai = 1:numel(ALARMS)
                     [ag, curve, lossc, best_ep] = dqn_train_run(Hg, PPc, Kt, K, norm_in, SEEDS(k), nS, SPLIT_TRAIN, SPLIT_VAL);
                     V = dqn_eval_batches('dqn_esc', PPc, K, val_spec, ag, struct(), 5000, SPLIT_VAL);
                     [kmin, kthr] = weakest_threat(V, val_thr);
-                    [fa_w, n_w] = eval_clean_wide('dqn_esc', PPc, CV, ag, struct(), H);
+                    [fa_w, n_w, sw_w] = eval_clean_wide('dqn_esc', PPc, CV, ag, struct(), H, EBNO_THR);
                     fprintf(['    checkpoint %d | validation: recovered %.1f%% | weakest threat %s %.1f%% | restored %.1f%% | ' ...
                         'return %.3f | FA %s\n'], best_ep, 100*dqn_recovered(V), kthr, 100*kmin, 100*mean(V.restored_post), ...
                         mean(V.ret), fa_txt(fa_w, n_w));
                     runs(end+1) = struct('alarm', ALARMS{ai}, 'drop', dd, 'fa_pen', fp, 'cost_scale', cs, 'sw_scale', ss, ...
                         'gamma', g, 'seed', SEEDS(k), ...
                         'agent', ag, 'curve', curve, 'loss', lossc, 'best_ep', best_ep, 'val', V, 'rec', dqn_recovered(V), ...
-                        'kmin', kmin, 'kmin_thr', kthr, 'fa_w', fa_w, 'n_w', n_w); %#ok<SAGROW>
+                        'kmin', kmin, 'kmin_thr', kthr, 'fa_w', fa_w, 'n_w', n_w, 'sw_w', sw_w); %#ok<SAGROW>
                 end
             end
         end
@@ -174,9 +191,19 @@ for gi = 1:numel(GAMMAS)
 end
 agents{find(GAMMAS == gamma_sel, 1)} = agent;
 
-%% 5. Gate and report
+%% 5. Gate, deployed policy and report
 bsel = base(strcmp({base.alarm}, alarm_sel) & arrayfun(@(b) isequaln(b.drop, drop_sel), base));
 gate = vrec(best) >= bsel.rule_rec && fa_ok(best);
+fa_up = @(fa, n) cp_upper(round(fa * n), n);         % one-sided 95% bound (NaN without clean geometries)
+rb = arrayfun(@(b) fa_up(b.rule_fa_w, b.rule_n_w), base);
+[deployed, fa_bound_met, ir] = choose_deployed(gate, fa_up(runs(best).fa_w, runs(best).n_w), [base.rule_rec], rb, FA_BOUND);
+rok = any(rb <= FA_BOUND | isnan(rb));
+rule_sel = struct('alarm', base(ir).alarm, 'drop', base(ir).drop, 'rec', base(ir).rule_rec, 'fa_w', base(ir).rule_fa_w, ...
+    'n_w', base(ir).rule_n_w, 'fa_upper', rb(ir), 'alarm_mode', '', 'confirm', [], 'drop_db', DROP_DB);
+[rule_sel.alarm_mode, rule_sel.confirm] = monitor(base(ir).alarm);
+if ~isnan(base(ir).drop), rule_sel.drop_db = base(ir).drop; end
+FD = false_change_rate(runs(best).sw_w, H.T, 1:numel(runs(best).sw_w), CD.period_ms);
+FR = false_change_rate(base(ir).rule_sw, H.T, 1:numel(base(ir).rule_sw), CD.period_ms);
 rep = {};
 rep{end+1} = '=== DQN TRAINING ===';
 rep{end+1} = sprintf(['Generated: %s | Double DQN + shield, state history %d cycles, hidden %s, replay %d, target every ' ...
@@ -190,7 +217,8 @@ rep{end+1} = sprintf(['Validation: %d episodes, every (threat cell, Eb/N0, geome
     'never used in training) %d times: single threats at five severities, combined threats at three, clean link. Recovered = ' ...
     'BER and packet loss <= 2x clean for 5 consecutive cycles, among recoverable threat episodes; weakest threat = ' ...
     'lowest per-threat recovery (severities pooled, KPI 4). FA: false-alarm episodes on %s independent clean ' ...
-    'validation geometries (data/clean_val_pools.mat).'], numel(val_thr), VAL_REPS, n_txt(CV, PP));
+    'validation geometries (data/clean_val_pools.mat, one 30-cycle episode each) at Eb/N0 >= %g dB (KPI 6).'], ...
+    numel(val_thr), VAL_REPS, n_txt(CV, PP, EBNO_THR), EBNO_THR);
 if ~isempty(DROP_DB)
     rep{end+1} = sprintf(['''class_drop'': path_loss alarm after an Eb/N0 drop >= the run''s threshold; train-pool ' ...
         'threshold %.1f dB (data/drop_threshold.mat)'], DROP_DB);
@@ -216,6 +244,15 @@ rep{end+1} = sprintf(['Selected: monitor ''%s'', drop %.1f dB, false-switch pena
     'x%.1f, gamma %.2f, seed %d (%s). Gate (recovery >= rule + escalation with the same monitor, false-alarm bound ' ...
     '<= %.0f%%): %s'], alarm_sel, drop_sel, fa_pen_sel, cs_sel, ss_sel, gamma_sel, runs(best).seed, sel_rule, ...
     100*FA_BOUND, ternary(gate, 'PASS', 'FAIL'));
+rep{end+1} = sprintf(['Fallback, rule + escalation with its own monitor (the best recovery among the settings whose ' ...
+    'false-alarm bound is <= %.0f%%%s): monitor ''%s'', drop %.1f dB, recovered %.1f%%, FA %s, bound %s'], 100*FA_BOUND, ...
+    ternary(rok, '', '; none is: the lowest bound'), rule_sel.alarm, rule_sel.drop, 100*rule_sel.rec, ...
+    fa_txt(rule_sel.fa_w, rule_sel.n_w), pct_txt(rule_sel.fa_upper));
+rep{end+1} = sprintf('Deployed: %s | false-alarm bound met on validation: %s%s', ternary(strcmp(deployed, 'dqn_esc'), ...
+    'the selected DQN + escalation', 'rule + escalation (fallback)'), ternary(fa_bound_met, 'YES', 'NO'), ...
+    ternary(fa_bound_met, '', ' -- the edge map commits no point'));
+rep{end+1} = sprintf(['False changes on the clean link (validation, Eb/N0 >= %g dB, %d ms per cycle): DQN %s | ' ...
+    'rule fallback %s'], EBNO_THR, CD.period_ms, rate_txt(FD), rate_txt(FR));
 if ~exist('results', 'dir'), mkdir('results'); end
 fid = fopen('results/dqn_training.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('\n%s\n', rep{:});
@@ -226,16 +263,19 @@ seed_summary = struct('alarms', {{runs.alarm}}, 'drops', [runs.drop], 'fa_pens',
     'val_return', vret, 'fa_indep', [runs.fa_w], 'n_indep', [runs.n_w], ...
     'best_ep', [runs.best_ep], 'selected_alarm', alarm_sel, 'selected_drop', drop_sel, 'selected_fa_pen', fa_pen_sel, 'selected_cost_scale', cs_sel, 'selected_sw_scale', ss_sel, ...
     'selected_gamma', gamma_sel, 'selected_seed', runs(best).seed, 'selection_rule', sel_rule, 'gate_pass', gate, ...
-    'rule_recovered', bsel.rule_rec, 'rule_return', bsel.rule_ret, 'table_return', bsel.tab_ret);
+    'rule_recovered', bsel.rule_rec, 'rule_return', bsel.rule_ret, 'table_return', bsel.tab_ret, ...
+    'deployed', deployed, 'fa_bound_met', fa_bound_met, 'fa_ebno_thr', EBNO_THR, 'fa_rate_dqn', FD, 'fa_rate_rule', FR);
 H.gamma = gamma_sel; H.fa_pen = fa_pen_sel; H.cost_scale = cs_sel; H.sw_scale = ss_sel;
 action_names = PP.actions;
 gammas = GAMMAS;
 [alarm_mode, confirm] = monitor(alarm_sel);
-drop_db = drop_sel; if isnan(drop_db), drop_db = []; end
+drop_db = drop_sel; if isnan(drop_db), drop_db = DROP_DB; end
 agent = dqn_dense(agent);                          % matrix form for deployment
 for gi = find(~cellfun(@isempty, agents)), agents{gi} = dqn_dense(agents{gi}); end
+det_id = PP.det_id; pools_created = PP.created;    % the pools (and their detector) the agent learned on
 save('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'confirm', 'alarm_mode', 'drop_db', 'H', ...
-    'norm_in', 'seed_summary', 'action_names', 'tab', '-v7.3');
+    'norm_in', 'seed_summary', 'action_names', 'tab', 'deployed', 'rule_sel', 'fa_bound_met', 'det_id', ...
+    'pools_created', '-v7.3');
 fprintf('Saved data/trained_dqn.mat\n');
 
 fig = figure('Position', [100 100 1000 430], 'Color', 'w');
@@ -336,14 +376,15 @@ end
 name = u{j};
 end
 
-function [fa, n] = eval_clean_wide(kind, PP, CT, agent, opt, H)
-% False-alarm episodes on the independent clean geometries of CT: one clean
-% episode per geometry and Eb/N0, as in evaluate_policies.m.
-fa = NaN; n = 0;
+function [fa, n, sw] = eval_clean_wide(kind, PP, CT, agent, opt, H, ebno_thr)
+% False-alarm episodes on the independent clean geometries of CT at the Eb/N0 from
+% ebno_thr up: one 30-cycle clean episode per geometry and Eb/N0, as in
+% evaluate_policies.m; sw: changes in every episode.
+fa = NaN; n = 0; sw = [];
 if isempty(CT), return; end
 [PPw, Kw] = clean_world(PP, CT);
-nS = numel(PP.ebno); NE = H.NE; ic = Kw.clean;
-[ss, rr] = ndgrid(1:nS, 1:CT.n_geom); ss = ss(:)'; rr = rr(:)';
+NE = H.NE; ic = Kw.clean;
+[ss, rr] = ndgrid(find(PP.ebno >= ebno_thr), 1:CT.n_geom); ss = ss(:)'; rr = rr(:)';
 n = numel(ss); nb = ceil(n / NE); pad = nb * NE - n;
 k_ = mod(0:n + pad - 1, n) + 1; ss = ss(k_); rr = rr(k_);                     % cyclic padding of the last batch
 sw = [];
@@ -354,7 +395,8 @@ for b = 1:nb
     Rb = rollout_policy(kind, PPw, Kw, spec, 2, agent, opt, 41000 + b);
     sw = [sw, Rb.switches]; %#ok<AGROW>
 end
-fa = mean(sw(1:n) > 0);
+sw = sw(1:n);
+fa = mean(sw > 0);
 end
 
 function [PPw, Kw] = clean_world(PP, CT)
@@ -390,8 +432,16 @@ function t = pct_txt(fa)
 if isnan(fa), t = '-'; else, t = sprintf('%.1f%%', 100 * fa); end
 end
 
-function t = n_txt(CV, PP)
-if isempty(CV), t = '0'; else, t = sprintf('%d', numel(PP.ebno) * CV.n_geom); end
+function t = n_txt(CV, PP, thr)
+if isempty(CV), t = '0'; else, t = sprintf('%d', sum(PP.ebno >= thr) * CV.n_geom); end
+end
+
+function t = rate_txt(F)
+% False changes per cycle, per hour of flight and the mean time between them, with
+% the 95% bound (false_change_rate.m).
+if isnan(F.rate), t = '-'; return; end
+t = sprintf('%d in %d cycles, %.2g per cycle (<= %.2g), %.0f per hour (<= %.0f), one every %.3g s (>= %.3g s)', ...
+    F.k, F.cycles, F.rate, F.hi, F.per_hour, F.per_hour_hi, F.mtbf_s, F.mtbf_lo_s);
 end
 
 function out = ternary(c, a, b)

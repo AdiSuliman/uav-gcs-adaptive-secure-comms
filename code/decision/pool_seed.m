@@ -2,7 +2,8 @@ function [seed, v_kmh] = pool_seed(sc, s, sp, r, vrange)
 %POOL_SEED  Seed and UAV speed of one decision-layer pool geometry.
 %   sc  geometry family: 1 for every pool (the clean link and every threat cell
 %       fly the same geometries, so an episode's frames before and after the
-%       onset come from one flight)
+%       onset come from one flight); 2 the off-grid check flights
+%       (build_check_pools.m, block 10)
 %   s   Eb/N0 index
 %   sp  seed block: 1 train, 5 validation, 14 test, 16 edge-speed and 17 second test
 %       pools (build_policy_pools.m); 4 clean validation and 15 clean test geometries

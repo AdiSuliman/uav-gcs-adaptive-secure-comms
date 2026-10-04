@@ -33,8 +33,9 @@ C.ladder = {'spatial_diversity+power_control', 'channel_switch+spatial_diversity
             'freq_diversity+spatial_diversity+power_control+fec_interleave'};   % rule escalation, in order
 
 % Follower jammer (link_env.m): cycles it needs to re-acquire the channel after a
-% hop, drawn per training and validation episode; 0 = on the new channel at the hop
-% itself (Liu et al.'s comb jammer)
+% hop, drawn per training and validation episode; 0 = a single-channel follower on
+% the new channel at the hop itself (a jammer on every channel, frequency diversity's
+% second carrier included, is the comb set of evaluate_policies.m and edge_map.m)
 C.fdelay = [0 5];
 
 % Agent state (policy_state.m): the last H cycles of observations (Liu et al.,

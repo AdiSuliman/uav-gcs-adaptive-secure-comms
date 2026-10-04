@@ -9,13 +9,17 @@
 %   combined  the 14 combined threats at 3 severities on test flights
 %   unknown   single threats with the detector output withheld after onset
 %             (unknown-threat path: the policy sees only the link measurements)
-%   clean     no threat; every change is a false alarm. KPI 6 (one-sided 95%
-%             Clopper-Pearson bound, >= 600 episodes) is computed on
-%             data/clean_test_pools.mat, one episode per new geometry
-%   comb      jamming / reactive_jamming on every channel we can use (Liu et
-%             al.'s comb jammer): the jammer is on the new channel at the hop
-%             itself, so only space and link budget can help. Reported apart,
-%             not part of the KPI 4 pool; in training as a follower delay of 0
+%   clean     no threat, one 30-cycle episode per flight; every change is a false
+%             alarm. KPI 6 (one-sided 95% Clopper-Pearson bound, >= 600 episodes) is
+%             computed on data/clean_test_pools.mat, one episode per new geometry,
+%             with the false changes per cycle, per hour of flight and the mean time
+%             between them (false_change_rate.m)
+%   comb      jamming / reactive_jamming on every channel we can use: the jammer is
+%             on the new channel at the hop itself and on frequency diversity's
+%             second carrier, so only space and link budget can help (assumed: no
+%             source jams every channel). Reported apart, not part of the KPI 4
+%             pool; recoverable means some configuration without channel_switch and
+%             freq_diversity restores the link
 %   speed     single threats at nominal severity on dedicated flights at the two ends
 %             of the speed envelope (hover and 161 km/h, the fourth pool split),
 %             reported apart
@@ -26,8 +30,10 @@
 % escalation, the rule with escalation without the detector (alarm from measured
 % degradation only), class -> configuration table (train pools), the DQN of every
 % discount factor (the selected one also with escalation), one-step oracle.
-% The deployed policy, read by the KPIs, is the selected DQN with escalation when it
-% passed its validation gate (train_dqn.m), otherwise the rule with escalation.
+% The deployed policy, read by the KPIs, is the one train_dqn.m chose on validation: the
+% selected DQN with escalation when it passed its gate, otherwise the rule with
+% escalation on its own monitor (rule_sel). The agent must come from these pools'
+% detector (check_det_id.m).
 % Main metric (proposal KPI 4): RECOVERED episodes -- BER and packet loss back to
 % <= 2x the clean link for 5 consecutive cycles -- among the RECOVERABLE ones
 % (some configuration restores both in that geometry, link_env.m); the rest is
@@ -43,8 +49,10 @@
 close all; clc;
 fprintf('=== Decision-layer evaluation on the test pools ===\n\n');
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
-Q = load('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'H', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db');
-PP.confirm = Q.confirm; PP.alarm_mode = Q.alarm_mode;           % same monitor for every policy
+Q = load('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'H', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db', ...
+    'deployed', 'rule_sel', 'det_id');
+check_det_id(PP, Q, 'evaluate_policies');
+PP.confirm = Q.confirm; PP.alarm_mode = Q.alarm_mode;           % same monitor for every policy but the rule fallback
 if ~isempty(Q.drop_db), PP.drop_db = Q.drop_db; end
 K = link_env('tables', PP);
 C = decision_config();
@@ -72,9 +80,11 @@ sets(end+1) = struct('name', 'single',   'spec', {policy_episodes(single_cells, 
 sets(end+1) = struct('name', 'follower', 'spec', {policy_episodes(foll, nS, 1:nG, REPS, true, false, NE, T, rs)}, 'split', TEST);
 sets(end+1) = struct('name', 'combined', 'spec', {policy_episodes(combo_cells, nS, 1:nG, REPS, false, false, NE, T, rs)}, 'split', TEST);
 sets(end+1) = struct('name', 'unknown',  'spec', {policy_episodes(single_cells, nS, 1:nG, 1, false, true, NE, T, rs)}, 'split', TEST);
-sets(end+1) = struct('name', 'clean',    'spec', {policy_episodes(clean_cell, nS, 1:nG, 8, false, false, NE, T, rs)}, 'split', TEST);
+sets(end+1) = struct('name', 'clean',    'spec', {policy_episodes(clean_cell, nS, 1:nG, 1, false, false, NE, T, rs)}, 'split', TEST);
 jam = foll(ismember(PP.scen(foll), {'jamming', 'reactive_jamming'}));
-sets(end+1) = struct('name', 'comb',     'spec', {policy_episodes(jam, nS, 1:nG, 1, true, false, NE, T, rs, [0 0])}, 'split', TEST);
+cm = policy_episodes(jam, nS, 1:nG, 1, true, false, NE, T, rs, [0 0]);
+for b = 1:numel(cm), cm{b}.comb = true(1, NE); end
+sets(end+1) = struct('name', 'comb',     'spec', {cm}, 'split', TEST);
 if numel(PP.runs) >= SPEED
     nom_cells = single_cells(PP.sev(single_cells) == C.nominal);
     sets(end+1) = struct('name', 'speed', 'spec', {policy_episodes(nom_cells, nS, 1:K.nR(SPEED), REPS, false, false, NE, T, rs)}, ...
@@ -111,11 +121,12 @@ LBL = [{'no response', 'random', 'always-on MMSE', ['fixed: ' PP.actions{fixed_b
         'no detector + escalation', 'table (train pools)'}, ...
        arrayfun(@(g) sprintf('DQN gamma=%.2f%s', Q.gammas(g), ternary(g == sel, ' (selected)', '')), 1:nGam, ...
        'UniformOutput', false), {'DQN + escalation', 'oracle (one-step)'}];
-iBase = find(strcmp(POL, sprintf('dqn_g%d', sel)));  % selected DQN alone
-iDQN = find(strcmp(POL, 'dqn_esc'));                 % deployed policy: the selected DQN + escalation,
-if isfield(Q.seed_summary, 'gate_pass') && ~Q.seed_summary.gate_pass
-    iDQN = find(strcmp(POL, 'rule_esc'));            % or the rule + escalation when the DQN failed its validation gate
+if strcmp(Q.deployed, 'rule_sel')                    % the rule fallback on its own monitor
+    POL = [POL(1:end-1), {'rule_sel'}, POL(end)];
+    LBL = [LBL(1:end-1), {sprintf('rule + escalation, own monitor (%s)', Q.rule_sel.alarm)}, LBL(end)];
 end
+iBase = find(strcmp(POL, sprintf('dqn_g%d', sel)));  % selected DQN alone
+iDQN = find(strcmp(POL, Q.deployed));                % deployed policy (train_dqn.m)
 LBL{iDQN} = [LBL{iDQN} ' (deployed)'];
 col = @(p) find(strcmp(POL, p));
 
@@ -154,7 +165,8 @@ rep{end+1} = ['recovered = BER and packet loss <= 2x clean for 5 consecutive cyc
     '(some configuration restores both in that geometry); restored / ok = cycles after onset with BER / BER and ' ...
     'packet loss restored; false sw = changes on a healthy link, whole episode.'];
 rep{end+1} = sprintf(['Selected DQN: gamma %.2f, training false-switch penalty %d; alarm ''%s'', confirmation ' ...
-    '%d-of-%d for every monitored policy. Combined threats (%d) in training and test, new flights in test. ' ...
+    '%d-of-%d for every monitored policy but the rule fallback. Combined threats (%d) in training and test, new ' ...
+    'flights in test. ' ...
     'Intervals: 95%% bootstrap over geometries.'], ...
     Q.seed_summary.selected_gamma, Q.seed_summary.selected_fa_pen, PP.alarm_mode, PP.confirm, numel(PP.combos));
 for si = 1:numel(sets)
@@ -178,6 +190,7 @@ rep{end+1} = paired_line(ALL, POL, LBL, iDQN);
 % Per threat and severity (KPI 4: >= 90% of the recoverable episodes of every threat)
 show = {'none', 'fixed', 'rule_esc', 'blind_esc', 'table', POL{iBase}, 'dqn_esc', 'oracle'};
 hdr = {'no resp.', 'fixed best', 'rule+esc', 'no det.+esc', 'table', 'DQN', 'DQN+esc', 'oracle'};
+if strcmp(POL{iDQN}, 'rule_sel'), show{end+1} = 'rule_sel'; hdr{end+1} = 'rule (own)'; end
 rep{end+1} = '';
 rep{end+1} = 'Recovered episodes among the recoverable, per threat (single + follower + combined sets), %:';
 rep{end+1} = sprintf('%-30s %8s %11s%s', 'threat', 'episodes', 'recoverable', sprintf('%11s', hdr{:}));
@@ -312,9 +325,9 @@ cls_list = [PP.classes, {'unknown'}];
 Rc = RES{iC, 1}; above = PP.ebno(Rc.s) >= ebno_thr;
 rep{end+1} = '';
 rep{end+1} = sprintf(['False alarms on the clean link, test pools (%d geometries per Eb/N0), Eb/N0 >= %g dB ' ...
-    '(%d episodes x %d cycles): episodes with >= 1 change, one-sided 95%% Clopper-Pearson upper bound; per-cycle rate'], ...
-    nG, ebno_thr, sum(above), T);
-[FAR, FD, lines] = far_report(RES(iC, :), POL, LBL, above, T, iDQN, PP.ebno, cls_list);
+    '(%d episodes x %d cycles): episodes with >= 1 change, one-sided 95%% Clopper-Pearson upper bound; false ' ...
+    'changes per cycle and per hour of flight (95%% upper bound), mean time between them'], nG, ebno_thr, sum(above), T);
+[FAR, FD, lines] = far_report(RES(iC, :), POL, LBL, above, T, iDQN, PP.ebno, cls_list, C.period_ms);
 rep = [rep, lines];
 
 % False alarms over many independent geometries: one episode per geometry (KPI 6)
@@ -350,7 +363,7 @@ if isfile('data/clean_test_pools.mat')
     rep{end+1} = sprintf(['False alarms on the clean link, %d new geometries per Eb/N0 (data/clean_test_pools.mat), ' ...
         'one episode per geometry, Eb/N0 >= %g dB (%d independent episodes x %d cycles) -> KPI 6'], n_geom, ...
         ebno_thr, sum(aboveW), T);
-    [FAR, FD, lines] = far_report(RW, POL, LBL, aboveW, T, iDQN, PP.ebno, cls_list);
+    [FAR, FD, lines] = far_report(RW, POL, LBL, aboveW, T, iDQN, PP.ebno, cls_list, C.period_ms);
     rep = [rep, lines];
 end
 
@@ -424,19 +437,22 @@ saveas(fig, 'results/policy_breakdown.png'); close(fig);
 fprintf('Saved results/policy_evaluation.{txt,mat,png}, results/policy_breakdown.png\n');
 
 %% ===================== Local functions =====================
-function [FAR, FD, lines] = far_report(RR, POL, LBL, above, T, iDQN, ebno, cls_list)
+function [FAR, FD, lines] = far_report(RR, POL, LBL, above, T, iDQN, ebno, cls_list, period_ms)
 % False-alarm counts per policy (episodes with >= 1 change, Clopper-Pearson
-% bound, per-cycle rate), and for the selected DQN and rule + escalation the
-% false-alarm episodes per Eb/N0 and the trigger at the first change.
+% bound; false changes per cycle and per hour, false_change_rate.m), and for the
+% deployed policy and rule + escalation the false-alarm episodes per Eb/N0 and the
+% trigger at the first change.
 lines = {};
-FAR = struct('policy', {}, 'k', {}, 'n', {}, 'p', {}, 'upper', {}, 'per_cycle', {});
+FAR = struct('policy', {}, 'k', {}, 'n', {}, 'p', {}, 'upper', {}, 'per_cycle', {}, 'rate', {});
 for pk = 1:numel(POL)
     if any(strcmp(POL{pk}, {'oracle', 'random'})), continue; end
     R = RR{pk}; kf = sum(R.switches(above) > 0); n = sum(above);
+    F = false_change_rate(R.switches(above), T, R.geom(above) + 1e6 * R.split(above), period_ms);
     FAR(end+1) = struct('policy', LBL{pk}, 'k', kf, 'n', n, 'p', kf / n, 'upper', cp_upper(kf, n), ...
-        'per_cycle', sum(R.switches(above)) / (n * T)); %#ok<AGROW>
-    lines{end+1} = sprintf('  %-40s %4d / %4d = %6.2f%%   upper %6.2f%%   per cycle %.4f%%', LBL{pk}, kf, n, ...
-        100 * kf / n, 100 * FAR(end).upper, 100 * FAR(end).per_cycle); %#ok<AGROW>
+        'per_cycle', F.rate, 'rate', F); %#ok<AGROW>
+    lines{end+1} = sprintf(['  %-40s %4d / %4d = %6.2f%%   upper %6.2f%%   per cycle %.4f%% (<= %.4f%%), %.0f per hour ' ...
+        '(<= %.0f), one every %.3g s'], LBL{pk}, kf, n, 100 * kf / n, 100 * FAR(end).upper, 100 * F.rate, 100 * F.hi, ...
+        F.per_hour, F.per_hour_hi, F.mtbf_s); %#ok<AGROW>
 end
 nS = numel(ebno);
 FD = struct('policy', {}, 'by_ebno', {}, 'n_ebno', {}, 'cls', {}, 'deg', {}, 'drop', {});

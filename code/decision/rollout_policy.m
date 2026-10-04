@@ -2,8 +2,9 @@ function R = rollout_policy(kind, PP, K, spec, split, agent, opt, seed)
 %ROLLOUT_POLICY  Run one batch of episodes of a decision-layer policy.
 %   kind   any policy_decide.m kind, or 'oracle' (knows the true scenario, onset,
 %          follower state and geometry; picks the configuration with the best
-%          reward of the next cycle from the measured geometry means: a one-step
-%          oracle, not a bound on every metric)
+%          reward of the frame on which it reaches the link, from the measured
+%          geometry means and link_env.m's hop rule: a one-step oracle, not a bound
+%          on every metric)
 %   spec   episode specification (link_env.m); split 1 train, 2 validation, 3 test,
 %          4 edge speeds, 5 second test
 %   seed   frame-draw seed: the same seed gives every policy the same draws
@@ -82,23 +83,28 @@ R.fc_t = fc.t; R.fc_cls = fc.cls; R.fc_deg = fc.deg; R.fc_drop = fc.drop;
 end
 
 function a = oracle_action(E, K)
-% Best next-cycle reward given the truth (scenario, onset, follower, geometry).
+% Best reward of the frame on which the choice reaches the link (after the signalling
+% delay), given the truth (scenario, onset, follower, geometry) and the hop rule of
+% link_env.m: a hop when channel_switch follows a configuration without it, or is kept
+% after a failed frame, and none while one is on its way.
 nA = numel(K.cost);
 a = E.cfg;
-tn = E.t + 1;
+ta = E.t + 1 + E.D;                                    % frame the choice runs on
+pend = any(E.hopq, 1);
 for i = 1:E.NE
-    sc = E.scn(i); if tn(i) < E.onset(i), sc = K.clean; end
+    sc = E.scn(i); if ta(i) < E.onset(i), sc = K.clean; end
     healthy = K.healthy(sc, E.s(i), E.split, E.r(i));
-    fj = E.follow(i) && K.followable(E.scn(i)) && tn(i) >= E.onset(i);                % follower jammer active
-    fl = fj && K.hasCh(E.cfg(i));
-    comp_now  = fl && (E.t(i) - E.hop_t(i)) >= E.fdelay(i) && E.t(i) >= E.onset(i);   % decides a hop
-    comp_next = fl && (tn(i) - E.hop_t(i)) >= E.fdelay(i);                            % state of the next frame
+    on = K.followable(E.scn(i)) && ta(i) >= E.onset(i);
+    hl = E.hop_live(i);                                % channel in use when the choice arrives
+    k = find(E.hopq(:, i), 1);
+    if ~isempty(k), hl = E.t(i) + k; end               % after the hop on its way
     best = -inf;
     for c = 1:nA
-        hop = K.hasCh(c) && (~K.hasCh(E.cfg(i)) || comp_now);
+        hop = K.hasCh(c) && (~K.hasCh(E.cfg(i)) || E.crc(i)) && ~pend(i);
+        h = hl; if hop, h = ta(i); end
         ceff = c;
-        % a hop escapes for fdelay frames (none when the jammer follows at once, fdelay 0)
-        if K.hasCh(c) && fj && ((hop && E.fdelay(i) <= 0) || (~hop && comp_next)), ceff = K.strip(c); end
+        if on && E.follow(i) && K.hasCh(c) && ta(i) - h >= E.fdelay(i), ceff = K.strip(c); end
+        if on && E.comb(i) && K.hasFd(c), ceff = K.strip_fd(c); end
         chg = c ~= E.cfg(i) || hop;
         v = K.q(sc, E.s(i), ceff, E.split, E.r(i)) - K.cost(c) - K.SW * chg - K.FA * (c ~= E.cfg(i) && healthy);
         if v > best, best = v; a(i) = c; end

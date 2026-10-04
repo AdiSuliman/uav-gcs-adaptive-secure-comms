@@ -2,9 +2,11 @@ function d = flight_draws(seed, fd, p, geo)
 %FLIGHT_DRAWS  Every per-flight draw of one seeded flight, in one place.
 %   d = flight_draws(seed, fd, p)       the draws of the seed
 %   d = flight_draws(seed, fd, p, geo)  geo.ebno [dB] puts the GCS at the distance of that
-%                                       Eb/N0 (link_distance_km.m); geo.alt_m [m] and
-%                                       geo.k_sig_db [dB], when finite, replace the seed's
-%                                       altitude and K of our signal (stratified designs)
+%                                       Eb/N0 (link_distance_km.m); geo.alt_m [m],
+%                                       geo.k_sig_db [dB], geo.aoa1_deg [deg] and geo.rho,
+%                                       when finite, replace the seed's altitude, K of our
+%                                       signal, first interferer direction and receive
+%                                       correlation (stratified designs)
 %   fd is the maximum Doppler shift [Hz], p the params (init_params.m names). Each draw
 %   comes from its own stream of the seed (seed_stream.m); a draw switched off in p keeps
 %   its fixed value.
@@ -31,10 +33,12 @@ if getf(p, 'int_aoa_random', false)
 else
     d.aoa = reshape(getf(p, 'int_aoa_deg', NaN), 1, []);
 end
+if isfinite(getf(geo, 'aoa1_deg', NaN)), d.aoa(1) = geo.aoa1_deg; end
 d.yaw = 0;
 if getf(p, 'yaw_random', false), d.yaw = heading_rate(seed, fd, p); end
 d.rho = getf(p, 'rx_corr', NaN);
 if getf(p, 'corr_random', false), d.rho = rx_correlation(seed, p.corr_range); end
+if isfinite(getf(geo, 'rho', NaN)), d.rho = geo.rho; end
 d.gcs_point_db = 0;
 if getf(p, 'gcs_tracked', false), [~, d.gcs_point_db] = gcs_pointing(seed, p); end
 d.alt_m = getf(geo, 'alt_m', NaN);

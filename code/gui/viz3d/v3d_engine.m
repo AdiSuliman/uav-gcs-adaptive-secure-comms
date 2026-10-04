@@ -84,7 +84,7 @@ function G = inject(G, M, scn, follow, unk)
 if ischar(scn) || isstring(scn), scn = M.avail(find(strcmp(M.PP.scen(M.avail), scn), 1)); end
 G.E.scn(:) = scn; G.E.onset(:) = G.E.t(1) + 1;
 G.E.follow(:) = follow; G.E.unk(:) = unk; G.E.fdelay(:) = 3;
-G.E.hop_t(:) = -inf;
+G.E.hop_live(:) = -inf;
 G.scn = scn; G.onsetT = G.E.t(1) + 1; G.follow = follow; G.unk = unk;
 G.score = repmat(emptyScore(), 1, 2);
 G.sides = struct('phase', {'threat', 'threat'}, 'okRun', {0, 0}, 'wasOk', {true, true}, 'detT', {0, 0}, ...
@@ -113,7 +113,6 @@ for i = 1:2
     o = sliceObs(G.obs, i);
     [a(i), G.mem{i}, d{i}] = policy_decide(kinds{i}, o, E0.cfg(i), G.mem{i}, PP, M.agent, opts{i});
 end
-compPrev = compromised(E0, K, E0.cfg);
 [G.E, rw, obsN, info] = link_env('step', E0, PP, K, a);
 t = G.E.t(1);
 active = t >= G.onsetT;
@@ -142,8 +141,8 @@ for i = 1:2
     if sd.restored, sd.status = 'ok'; elseif sd.ratio <= 5, sd.status = 'marginal'; else, sd.status = 'lost'; end
     sd.reward = rw(i); sd.q_link = info.q(i); sd.gput = info.gput(i);
     sd.false_sw = info.false_switch(i);
-    sd.compromised = info.cfg_eff(i) ~= a(i);
-    [G, sd] = channels(G, M, i, a(i), E0.cfg(i), compPrev(i), sd, rec);
+    sd.compromised = info.compromised(i);
+    [G, sd] = channels(G, M, i, K.hasCh(G.E.cfg_link(i)), info.hop_in(i), sd, rec);
     [G, sd] = phaseAndEvents(G, M, i, sd, active, t);
     side = [side, sd]; %#ok<AGROW>
 end
@@ -152,11 +151,11 @@ rec.events = G.events0; G.events0 = {};
 G.obs = obsN;
 end
 
-function [G, sd] = channels(G, M, i, a, prev, compPrev, sd, rec)
-K = M.K;
-hop = K.hasCh(a) && (~K.hasCh(prev) || compPrev);
+function [G, sd] = channels(G, M, i, onCh, hop, sd, rec)
+% Channel in use (a hop counts when it reaches the link, link_env.m), the second
+% carrier of frequency diversity and the channel a follower jams.
 if hop, G.hist(i).hops = G.hist(i).hops + 1; end
-if K.hasCh(a)
+if onCh
     G.hist(i).chan = M.hopSeq(mod(G.hist(i).hops - 1, numel(M.hopSeq)) + 1);
 else
     G.hist(i).chan = 3;
@@ -227,7 +226,8 @@ sd.score = G.score(i);
 end
 
 function [G, sd] = annotate(G, M, i, sd, rec)
-[G, sd] = channels(G, M, i, sd.cfg, sd.prev, false, sd, rec);
+K = M.K;
+[G, sd] = channels(G, M, i, K.hasCh(sd.cfg), K.hasCh(sd.cfg) && ~K.hasCh(sd.prev), sd, rec);
 [G, sd] = phaseAndEvents(G, M, i, sd, rec.active, rec.t);
 end
 
@@ -248,10 +248,7 @@ end
 %% ===================== Helpers =====================
 function o = sliceObs(obs, i)
 o = struct('probs', obs.probs(i, :), 'unknown', obs.unknown(i), 'feat', obs.feat(i, :), 'ber_true', obs.ber_true(i));
-end
-
-function c = compromised(E, K, cfg)
-c = E.follow & K.followable(E.scn) & K.hasCh(cfg) & (E.t - E.hop_t) >= E.fdelay & E.t >= E.onset;
+if isfield(obs, 'cfg_link'), o.cfg_link = obs.cfg_link(i); end
 end
 
 function [emit, th, inr] = emitterSet(M, scn, s, r, active)

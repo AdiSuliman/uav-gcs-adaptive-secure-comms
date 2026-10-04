@@ -11,13 +11,14 @@
 % configurations with identical physics for a threat are simulated once
 % (pool_cell.m). Eb/N0: the grid of init_params.
 % Splits, geometries per (cell, Eb/N0): train 8, validation 6, test 12; edge speeds
-% 24 for the clean link and the single threats at nominal severity (12 at hover and
-% 12 at 161 km/h, the limit of small UAVs, Khawaja et al.); second test 60 for the
-% clean link and the single threats, 72 per point with the test (each cell's
-% geometries per split: PP.cell_geo). The test and second test geometries are nested
-% Latin hypercubes over speed, altitude and K of our signal (pool_geometries.m):
-% 2 + 10 flights per sixth of the speed range and 4 + 20 per third of the altitude
-% range at every Eb/N0.
+% 24 at hover for the clean link and the single threats at every severity, and 12 at
+% 161 km/h (the limit of small UAVs, Khawaja et al.) for the clean link and the
+% nominal severity; second test 60 for the clean link and the single threats, 72 per
+% point with the test (each cell's geometries per split: PP.cell_geo). The test and
+% second test geometries are nested Latin hypercubes over speed, altitude, K of our
+% signal, the direction of the first interferer and the receive correlation
+% (pool_geometries.m): 2 + 10 flights per sixth of the speed range and 4 + 20 per third
+% of the altitude range at every Eb/N0.
 % A geometry (seed: fading and its K-factors, UAV speed and altitude, interferer
 % directions, threat waveform) is shared by every configuration and every cell that
 % flies it, the clean link included (common random numbers), so an episode's frames
@@ -30,7 +31,8 @@
 % The cells run in parallel, each worker in its own folder with its own copy of
 % the model. When data/policy_pools.mat holds the same train and validation
 % geometries of the same link model (MODEL_TAG) and only the test block differs, only
-% the test, edge-speed and second test splits are simulated.
+% the test, edge-speed and second test splits are simulated. PP.det_id identifies the
+% detector (detector_id.m); pools of another detector are never reused.
 %
 % Output: data/policy_pools.mat (PP, clean_ref)
 
@@ -45,7 +47,8 @@ C = decision_config();
 COMBOS  = C.combos;
 S0 = load('params.mat'); p0 = S0.params; p0.quiet_build = true;
 EBNO   = p0.EbNo_dB;
-NGEO   = [8 6 12 24 60];         % geometries per (cell, Eb/N0): train, validation, test, edge speeds, second test
+NGEO   = [8 6 12 36 60];         % geometries per (cell, Eb/N0): train, validation, test, edge speeds, second test
+NHOVER = 24;                     % edge speeds: the first NHOVER at hover (every severity), the rest at 161 km/h (nominal)
 NCOMB  = [0 0 0 0 24];           % own geometries of the combined threats (0: they fly the split's geometries);
                                  % second test: 12 + 24 = 36 flights per point, the N_MIN of a verdict
 BLOCK  = [1 5 14 16 17];         % pool_seed.m block of each split (pool_seed.m lists every block)
@@ -60,11 +63,11 @@ opt = struct('F_SUB', 20, 'tw', 10, 'delay_bits', 20);
 C = decision_config();
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
     SINGLES = {'none', 'jamming', 'path_loss', 'airframe_shadowing'}; COMBOS = {'jamming+path_loss', 'tone_jamming+path_loss'};
-    EBNO = [3 12]; NGEO = [2 2 2 2 2]; NCOMB = [0 0 0 0 2];
+    EBNO = [3 12]; NGEO = [2 2 2 2 2]; NCOMB = [0 0 0 0 2]; NHOVER = 1;
     BLOCK(3:5) = [18 18 19];                            % blocks of its own: its flights are never test flights
 end
 
-D = load('data/trained_detector.mat', 'net', 'classes', 'ood');
+D = load('data/trained_detector.mat', 'net', 'classes', 'ood', 'trained_at');
 N = load('data/splits.mat', 'splits');
 det = struct('net', D.net, 'ood', D.ood, 'classes', {cellstr(string(D.classes(:)'))}, ...
     'mu', N.splits.norm.feat_mean, 'sd', N.splits.norm.feat_std, 'fs', p0.symbol_rate * p0.sps);
@@ -73,14 +76,14 @@ T = ood_thresholds(0.95);
 FZ = struct('FM', [], 'N', 1);
 if isfile('data/fusion.mat'), FZ = load('data/fusion.mat', 'FM', 'N'); end   % temporal fusion (select_fusion.m)
 UW = 1; if isfield(D.ood, 'win'), UW = D.ood.win; end                        % unknown-score window (eval_ood_detection.m)
+DET_ID = detector_id(D.trained_at, D.ood, FZ, T.maha);
 ACTIONS = policy_actions();
 scen = [SINGLES, COMBOS];
 nA = numel(ACTIONS); nS = numel(EBNO);
 vrange = [p0.speed_kmh_min p0.speed_kmh_max];
 
 % Cells: (threat, severity index, level of a single threat, splits simulated); the
-% edge-speed split holds the clean link and the single threats at nominal severity,
-% the second test split the clean link and the single threats
+% edge-speed and second test splits hold the clean link and the single threats
 nSp = numel(SPLITS);
 iSpd = find(strcmp(SPLITS, 'speed'));
 cells = struct('threat', {}, 'sev', {}, 'level', {}, 'splits', {});
@@ -94,8 +97,7 @@ for i = 1:numel(scen)
         end
     else
         for v = 1:numel(C.sev_names)
-            sp_ = setdiff(1:nSp, iSpd); if v == C.nominal, sp_ = 1:nSp; end
-            cells(end+1) = struct('threat', t, 'sev', v, 'level', C.sev.(t).levels(v), 'splits', sp_); %#ok<SAGROW>
+            cells(end+1) = struct('threat', t, 'sev', v, 'level', C.sev.(t).levels(v), 'splits', 1:nSp); %#ok<SAGROW>
         end
     end
 end
@@ -119,7 +121,8 @@ nG = NGEO + NCOMB;                                      % geometries per split
 r0 = arrayfun(@(sp) sum(nG(1:sp-1) .* (BLOCK(1:sp-1) == BLOCK(sp))), 1:nSp);   % splits sharing a block take consecutive geometries
 runs = arrayfun(@(sp) 100 * BLOCK(sp) + r0(sp) + (1:nG(sp)), 1:nSp, 'UniformOutput', false);
 % Geometries of every cell per split (positions in runs): the shared ones, or the
-% combined threats' own where the split has them; the clean link flies all of them
+% combined threats' own where the split has them, or at the edge speeds only the hover
+% ones away from the nominal severity; the clean link flies all of them
 for c = 1:nC
     cells(c).geo = cell(1, nSp);
     for sp = cells(c).splits
@@ -127,6 +130,8 @@ for c = 1:nC
             cells(c).geo{sp} = 1:nG(sp);
         elseif contains(cells(c).threat, '+') && NCOMB(sp) > 0
             cells(c).geo{sp} = NGEO(sp) + (1:NCOMB(sp));
+        elseif sp == iSpd && cells(c).sev ~= C.nominal
+            cells(c).geo{sp} = 1:NHOVER;
         else
             cells(c).geo{sp} = 1:NGEO(sp);
         end
@@ -135,7 +140,8 @@ end
 old = [];
 if isfile('data/policy_pools.mat')
     Lo = load('data/policy_pools.mat', 'PP');
-    if isfield(Lo.PP, 'model_tag') && strcmp(Lo.PP.model_tag, MODEL_TAG) ...
+    if isfield(Lo.PP, 'model_tag') && strcmp(Lo.PP.model_tag, MODEL_TAG) && isfield(Lo.PP, 'det_id') ...
+            && strcmp(Lo.PP.det_id, DET_ID) ...
             && numel(Lo.PP.runs) == nSp && isequal(Lo.PP.runs(1:2), runs(1:2)) && ~isequal(Lo.PP.runs{3}, runs{3}) ...
             && isequal(Lo.PP.scen, {cells.threat}) && isequal(Lo.PP.sev, [cells.sev]) ...
             && isequal(Lo.PP.ebno, EBNO) && isequal(Lo.PP.actions, ACTIONS) && isequaln(Lo.PP.level, [cells.level])
@@ -146,17 +152,18 @@ if isfile('data/policy_pools.mat')
     clear Lo
 end
 
-% Geometries: seeds, speeds, altitudes and K of our signal per (Eb/N0, split), shared
-% by every cell that flies them (pool_geometries.m); the combined threats' own after
-% the shared ones, as a design of their own
+% Geometries: seeds, speeds, altitudes, K of our signal, first interferer direction and
+% receive correlation per (Eb/N0, split), shared by every cell that flies them
+% (pool_geometries.m); the combined threats' own after the shared ones, as a design of
+% their own
 geo = cell(1, nS);
 for s = 1:nS
-    g = struct('seed', {}, 'speed', {}, 'run', {}, 'alt', {}, 'ksig', {});
+    g = struct('seed', {}, 'speed', {}, 'run', {}, 'alt', {}, 'ksig', {}, 'aoa1', {}, 'rho', {});
     for sp = 1:nSp
         r = r0(sp) + (1:NGEO(sp));
         lhs = []; if LHS(sp), lhs = LHS_SEED + 100*s + sp; end
         if strcmp(SPLITS{sp}, 'speed')
-            g(sp) = pool_geometries(s, BLOCK(sp), r, VOUT(1 + ((1:NGEO(sp))' > NGEO(sp) / 2), :), p0);
+            g(sp) = pool_geometries(s, BLOCK(sp), r, VOUT(1 + ((1:NGEO(sp))' > NHOVER), :), p0);
         else
             g(sp) = pool_geometries(s, BLOCK(sp), r, vrange, p0, lhs);
         end
@@ -184,7 +191,8 @@ for sp = 1:nSp
         g = geo{s}(sp);
         for r = 1:nG(sp)
             fd = g.speed(r) / 3.6 * p0.carrier_freq / p0.c_light;
-            d = flight_draws(g.seed(r), fd, p0, struct('ebno', EBNO(s), 'alt_m', g.alt(r), 'k_sig_db', g.ksig(r)));
+            d = flight_draws(g.seed(r), fd, p0, struct('ebno', EBNO(s), 'alt_m', g.alt(r), 'k_sig_db', g.ksig(r), ...
+                'aoa1_deg', g.aoa1(r), 'rho', g.rho(r)));
             V.seed(s, r) = g.seed(r); V.speed(s, r) = g.speed(r); V.alt_m(s, r) = d.alt_m;
             V.k_sig(s, r) = d.k_sig; V.k_int(s, r) = d.k_int; V.yaw(s, r) = d.yaw; V.rho(s, r) = d.rho;
             V.gcs_point_db(s, r) = d.gcs_point_db; V.el_db(s, r) = d.el_db;
@@ -282,13 +290,13 @@ for a = 1:nA
 end
 PP = struct('scen', {{cells.threat}}, 'sev', [cells.sev], 'level', [cells.level], 'sev_names', {C.sev_names}, ...
     'splits', {SPLITS}, 'cell_splits', {{cells.splits}}, 'cell_geo', {{cells.geo}}, 'threats', {scen}, 'singles', {SINGLES}, ...
-    'combos', {COMBOS}, 'ebno', EBNO, 'actions', {ACTIONS}, 'ngeo', NGEO, 'ncomb', NCOMB, 'lhs', LHS, ...
+    'combos', {COMBOS}, 'ebno', EBNO, 'actions', {ACTIONS}, 'ngeo', NGEO, 'ncomb', NCOMB, 'nhover', NHOVER, 'lhs', LHS, ...
     'speed_range', vrange, 'speed_out', VOUT, 'speed', {spd}, 'cov', {cv}, ...
     'alt', {cellfun(@(V) V.alt_m, cv, 'UniformOutput', false)}, 'ksig', {cellfun(@(V) V.k_sig, cv, 'UniformOutput', false)}, ...
     'gp', gp, 'bw', bw, 'pw', pw, 'pools', {pools}, 'mber', mber, 'mfer', mfer, ...
     'clean', clean_ref.ber, 'clean_fer', clean_ref.fer, 'classes', {det.classes}, 'maha_thr', T.maha, ...
     'fuse', FZ.FM, 'fuse_N', FZ.N, 'unk_win', UW, ...
-    'F_SUB', opt.F_SUB, 'runs', {runs}, 'model_tag', MODEL_TAG, ...
+    'F_SUB', opt.F_SUB, 'runs', {runs}, 'model_tag', MODEL_TAG, 'det_id', DET_ID, ...
     'aoa_random', p0.int_aoa_random, 'k_random', p0.k_random, 'sps', p0.sps, 'bps', p0.bits_per_symbol, ...
     'feat_names', {link_features('names')}, 'created', datestr(now));
 save('data/policy_pools.mat', 'PP', 'clean_ref', '-v7.3');

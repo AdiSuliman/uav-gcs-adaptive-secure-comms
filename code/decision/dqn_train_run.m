@@ -37,9 +37,8 @@ for it = 1:n_iter
             [~, ar] = max(rand(rs, nA, NE) .* mk, [], 1);          % uniform over the allowed set
             a(ex) = ar(ex);
         end
-        prev = E.cfg;
+        mem = policy_monitor('change', mem, a ~= E.cfg);
         [E, r, obs] = link_env('step', E, PP, K, a);
-        ch = a ~= prev; mem.since(ch) = 0; mem.since(~ch) = mem.since(~ch) + 1;
         [mem, M] = policy_monitor('update', mem, obs, PP, E.cfg);
         s2 = policy_state(mem, E.cfg, M.confirmed, nA);
         mk2 = policy_mask(E.cfg, M.confirmed, mem.since, nA, na);

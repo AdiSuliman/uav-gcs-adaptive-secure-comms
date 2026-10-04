@@ -2,14 +2,21 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %POLICY_MONITOR  Link monitor shared by every decision-layer policy.
 %   mem = policy_monitor('init', NE, nA)
 %   [mem, M] = policy_monitor('update', mem, obs, PP, cfg)
+%   mem = policy_monitor('change', mem, ch)      after a decision; ch (1 x NE): the
+%                                                configuration changed
 %
+%   cfg is the configuration requested; obs.cfg_link, when present, the one the frame
+%   was received with. While they differ the request is on its way to the GCS: the
+%   cycles since the change stay at 0, so the hold and the escalation wait. The first
+%   frame received with the request restarts the BER and CRC windows and the count
+%   of degraded cycles, and the cycles since the change count from there.
 %   Receiver measurements only (link_features.m): the estimated BER and the CRC
 %   packet loss of the last C.win frames. Degradation: the estimated BER above
 %   C.ratio_ok x the clean link's estimated BER at the receiver's own Eb/N0
 %   estimate (clean_ber_ref.m, floor C.deg_floor); with fec_interleave in the
 %   configuration the channel BER stays high while the decoder repairs the bursts,
 %   so there the CRC packet loss decides (above C.ratio_ok x the clean coded link,
-%   at least 2 of the C.win packets).
+%   at least 2 lost packets in the window).
 %   Detected class: from the temporal fusion of the last PP.fuse_N cycles
 %   (temporal_evidence.m, fuse_classes.m) when PP.fuse is set, otherwise the
 %   frame's own detector output; 'unknown' when the unknown-threat score, averaged
@@ -26,7 +33,8 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   and the window of the temporal fusion (probabilities, antenna gains, quiet-slot
 %   interference, unknown scores).
 %   mem.since starts saturated (10): the policies never see the episode clock.
-%   mem.deg_n / mem.conf_n: consecutive degraded / confirmed-alarm cycles.
+%   mem.deg_n / mem.conf_n: consecutive degraded / confirmed-alarm cycles; mem.pend:
+%   a requested change not yet received.
 %   M: ber_avg, plr (NE x 1), ebno_est, drop (dB), degraded, cls, alarm, confirmed (1 x NE),
 %      probs (NE x classes, fused), te (NE x 4, persistence measurements of the window)
 C = decision_config();
@@ -37,10 +45,15 @@ switch cmd
             'since', 10 * ones(1, NE), 'cand', zeros(1, NE), 'cand_n', zeros(1, NE), 'good', zeros(1, NE), ...
             'deg_n', zeros(1, NE), 'conf_n', zeros(1, NE), 'alarm', false(NE, 8), 'ebno', nan(NE, 3), ...
             'ref', nan(NE, 10), 'hist', [], 'wp', [], 'wg', [], 'wq', [], 'wu', [], 'wd', [], 'wn', zeros(1, NE), ...
-            'unk_now', false(1, NE));
+            'unk_now', false(1, NE), 'pend', false(1, NE));
         M = [];
     case 'update'
         [mem, M] = update(C, varargin{:});
+    case 'change'
+        mem = varargin{1}; ch = varargin{2}(:)';
+        mem.since(ch) = 0; mem.pend(ch) = true;
+        k = ~ch & ~mem.pend; mem.since(k) = mem.since(k) + 1;
+        M = [];
     otherwise
         error('policy_monitor: unknown command %s', cmd);
 end
@@ -50,8 +63,13 @@ function [mem, M] = update(C, mem, obs, PP, cfg)
 cf = C.confirm;
 if isfield(PP, 'confirm') && ~isempty(PP.confirm), cf = PP.confirm; end
 fi = @(n) obs.feat(:, feature_index(n));
+link = cfg(:)'; if isfield(obs, 'cfg_link'), link = obs.cfg_link(:)'; end   % the configuration this frame was received with
+wait = link ~= cfg(:)';                                 % the request is still on its way
+arr = mem.pend & ~wait;                                 % first frame received with the request
+mem.pend = wait; mem.since(wait) = 0;
 mem.ber = [mem.ber(:, 2:end), 10.^fi('log_ber')];
 mem.crc = [mem.crc(:, 2:end), fi('crc_fail')];
+mem.ber(arr, 1:end-1) = NaN; mem.crc(arr, 1:end-1) = NaN; mem.deg_n(arr) = 0;
 M.ber_avg = mean(mem.ber, 2, 'omitnan');
 M.plr = mean(mem.crc, 2, 'omitnan');
 M.ebno_est = fi('sinr') + fi('iot') + 10*log10(PP.sps) - 10*log10(PP.bps);
@@ -62,12 +80,11 @@ ref(isnan(ref)) = e3(isnan(ref));
 M.drop = (ref - e3)';
 bc = max(clean_ber_ref(M.ebno_est, 'ber_est'), C.deg_floor);
 deg = M.ber_avg > C.ratio_ok * bc;
-if isfield(obs, 'cfg_link'), cfg = obs.cfg_link(:)'; end        % the configuration this frame was received with
-coded = contains(PP.actions(cfg), 'fec_interleave');
+coded = contains(PP.actions(link), 'fec_interleave');
 if any(coded)
     pc = clean_ber_ref(M.ebno_est(coded), 'plr_fec');
     pc(isnan(pc)) = 0;
-    deg(coded) = M.plr(coded) > max(C.ratio_ok * pc, 1.5 / C.win);
+    deg(coded) = M.plr(coded) > C.ratio_ok * pc & sum(mem.crc(coded, :), 2, 'omitnan') >= 2;
 end
 M.degraded = deg(:)';
 mem.good(~M.degraded) = mem.good(~M.degraded) + 1; mem.good(M.degraded) = 0;

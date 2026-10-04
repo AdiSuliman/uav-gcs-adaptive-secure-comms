@@ -6,8 +6,9 @@ function [P, info] = pool_cell(p, threat, actions, ebno, geo, det, opt)
 %   actions  configuration names (policy_actions.m)
 %   ebno     Eb/N0 grid [dB]
 %   geo      1 x nS cell, one per Eb/N0: 1 x nSplit struct array, fields seed,
-%            speed (km/h), run (ids), and optionally alt (m) and ksig (dB), which
-%            replace the seed's altitude and K of our signal (NaN: the seed's own);
+%            speed (km/h), run (ids), and optionally alt (m), ksig (dB), aoa1 (deg) and
+%            rho, which replace the seed's altitude, K of our signal, first interferer
+%            direction and receive correlation (NaN: the seed's own);
 %            one entry per geometry (sub-run); the same geometries under every
 %            configuration (common random numbers)
 %   det      detector: net, ood, classes, mu, sd (feature normalization), fs; [] = no
@@ -48,7 +49,7 @@ for a = 1:nA
                 seed = g.seed(r);
                 fd = g.speed(r) / 3.6 * p.carrier_freq / p.c_light;
                 d = link_seed(modelName, seed, fd, struct('ebno', ebno(s), 'alt_m', geo_value(g, 'alt', r), ...
-                    'k_sig_db', geo_value(g, 'ksig', r)));
+                    'k_sig_db', geo_value(g, 'ksig', r), 'aoa1_deg', geo_value(g, 'aoa1', r), 'rho', geo_value(g, 'rho', r)));
                 F = extract_closed_loop_frames(sim(modelName, 'StopTime', stop_time), p2, opt.delay_bits);
                 disk_guard;
                 Q = add_run(Q, F, det, opt.tw, g.run(r), d.aoa);

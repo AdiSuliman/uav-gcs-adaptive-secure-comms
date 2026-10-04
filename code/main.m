@@ -109,7 +109,7 @@ RUN.eval_unseen_severity        = false;    % B4s : detector at severities never
 
 % ---- Phase C: decision layer ----
 RUN.build_policy_pools          = false;    % C1p : frame pools, every cell x configuration x Eb/N0 x geometry (~3-4 h)
-RUN.build_clean_test_pools      = false;    % C1c : clean link on new geometries: validation set and test set for KPI 6 (~40 min; skips when up to date)
+RUN.build_clean_test_pools      = false;    % C1c : clean link on new geometries: validation set and test set for KPI 6, and the off-grid check flights of the edge map (skip when up to date)
 RUN.choose_drop_threshold       = false;    % C1d : path_loss alarm threshold from the train pools (< 1 min)
 RUN.train_dqn                   = false;    % C2  : Double DQN + shield, alarm x penalty x gamma x seeds, selection on validation (~3 h)
 RUN.evaluate_policies           = false;    % C2e : every policy on the test pools: single, follower, combined, unknown, clean (~1 h)
@@ -235,6 +235,7 @@ if RUN.build_clean_test_pools
     fprintf('  [C1c] Measuring the clean link on new geometries: validation set, test set (KPI 6)...\n');
     CLEAN_SET = 'val';  build_clean_test_pools;
     CLEAN_SET = 'test'; build_clean_test_pools;
+    build_check_pools;
 end
 if RUN.choose_drop_threshold
     fprintf('  [C1d] Choosing the Eb/N0-drop threshold of the path_loss alarm (train pools)...\n');
@@ -261,6 +262,7 @@ fprintf('  [C] Pipeline status:\n');
 report_file('data/policy_pools.mat',          '      policy_pools.mat       ', 'build_policy_pools');
 report_file('data/clean_val_pools.mat',       '      clean_val_pools.mat    ', 'build_clean_test_pools');
 report_file('data/clean_test_pools.mat',      '      clean_test_pools.mat   ', 'build_clean_test_pools');
+report_file('data/check_pools.mat',           '      check_pools.mat        ', 'build_check_pools');
 report_file('results/drop_threshold.txt',     '      drop threshold (C1d)   ', 'choose_drop_threshold');
 report_file('data/trained_dqn.mat',           '      trained_dqn.mat        ', 'train_dqn');
 report_file('results/dqn_training.txt',       '      C2 training report     ', 'train_dqn');

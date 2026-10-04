@@ -3,8 +3,9 @@ function d = link_seed(modelName, seed, fd, geo)
 %   link_seed(modelName, seed)               seed only
 %   link_seed(modelName, seed, fd)           seed and maximum Doppler shift [Hz]
 %   d = link_seed(modelName, seed, fd, geo)  also the GCS at the distance of geo.ebno [dB],
-%                                            with geo.alt_m and geo.k_sig_db replacing the
-%                                            seed's altitude and K when finite
+%                                            with geo.alt_m, geo.k_sig_db, geo.aoa1_deg and
+%                                            geo.rho replacing the seed's altitude, K, first
+%                                            interferer direction and correlation when finite
 %   The 'Seed' block gets the flight's first stream seed, seed_base(seed): the channel
 %   seeds its stream there and the threat 7 above it; the AWGN block gets 1 above, the bit
 %   source 2 above (seed_stream.m). Channel and threat blocks read 'Seed' and 'Doppler' at

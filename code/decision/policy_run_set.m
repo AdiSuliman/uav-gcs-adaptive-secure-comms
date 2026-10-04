@@ -4,7 +4,8 @@ function R = policy_run_set(kind, PP, K, specs, split, ag, opt, seed0)
 %   the frame-draw seed seed0 + b, so every policy sees the same draws; the padding of
 %   the last batch (n_valid, policy_episodes.m) is dropped. Per episode, besides the
 %   rollout outputs: scn, s, threat (not the clean link), the scenario of the spec
-%   (onset, follow, fdelay, unk, delay: signalling delay of a change in cycles), split,
+%   (onset, follow, fdelay, unk, delay: signalling delay of a change in cycles, comb:
+%   a jammer on every channel we can use), split,
 %   geom (flight geometry, the bootstrap cluster within a split) and speed (UAV speed
 %   the geometry was flown at, km/h).
 R = [];
@@ -17,6 +18,7 @@ for b = 1:numel(specs)
     Rb.onset = sp.onset; Rb.follow = sp.follow; Rb.fdelay = sp.fdelay; Rb.unk = sp.unk;
     if isfield(sp, 'delay') && ~isempty(sp.delay), Rb.delay = sp.delay * ones(size(sp.scn));
     else, Rb.delay = D * ones(size(sp.scn)); end
+    Rb.comb = false(size(sp.scn)); if isfield(sp, 'comb') && ~isempty(sp.comb), Rb.comb = sp.comb; end
     Rb.split = split * ones(size(sp.scn));
     Rb = rmfield(Rb, 'cfg_trace');
     if isfield(sp, 'n_valid')

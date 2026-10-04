@@ -8,7 +8,7 @@ function run_stage(varargin)
 %   B3 eval_detector |
 %   B3a compare_architectures |
 %   B4 eval_unseen_snr | OOD eval_ood_detection | B4s eval_unseen_severity | C1p build_policy_pools |
-%   C1c build_clean_test_pools | C1d choose_drop_threshold | C2 train_dqn |
+%   C1c build_clean_test_pools and build_check_pools | C1d choose_drop_threshold | C2 train_dqn |
 %   C2e evaluate_policies | C2g experiment_combo_generalization | C2u experiment_unknown_threat |
 %   GAL threat_gallery |
 %   SURV map_survivability_boundary | SURV3 experiment_survivability_options | OHP overhead_pass | GCSA gcs_antenna_analysis |
@@ -49,12 +49,13 @@ end
 
 function run_one(name, SMOKE) %#ok<INUSD>
 % Scripts run in this function's workspace; CLEAN_SET selects the clean-pool set of
-% C1c; SMOKE switches the reduced problem on.
+% C1c, which then builds the off-grid check pools; SMOKE switches the reduced problem on.
 if strcmp(name, 'build_clean_test_pools')
     for CLEAN_SET = {'val', 'test'}
         CLEAN_SET = CLEAN_SET{1}; %#ok<FXSET,NASGU>
         run(name);
     end
+    run('build_check_pools');
 elseif strcmp(name, 'validate_phy')
     if ~validate_phy(), error('run_stage:phy', 'PHY validation failed'); end
 else

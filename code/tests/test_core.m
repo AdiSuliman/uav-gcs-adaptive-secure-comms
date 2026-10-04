@@ -92,6 +92,174 @@ verifyTrue(tc, all(m(:, 2)));                        % hold over
 verifyEqual(tc, find(m(:, 3))', 7);
 end
 
+%% ---------- signalling delay, follower and comb jammers ----------
+function test_follower_rehop_delay(tc)
+% A policy that holds channel_switch against a follower: the request needs D frames,
+% then fdelay good frames and D + 1 jammed ones per re-acquisition (the re-hop is asked
+% on the first failed CRC, the link stays on the jammed channel until it arrives, no
+% second hop while one is on its way); none at fdelay 0; at fdelay 5 the first run is
+% exactly 5, so only fdelay >= 5 "recovers" by hopping alone. A re-hop is a change at
+% the switch cost, and a jammed frame that passes its CRC asks for none.
+[PP, K] = toy_world(true);
+cs = find(strcmp(PP.actions, 'channel_switch')); T = 24;
+for D = [1 2]
+    for f = [0 3 4 5]
+        [ok, ch] = hold_config(PP, K, cs, f, D, T);
+        t = 1:T; u = mod(t - D - 1, f + D + 1);
+        verifyEqual(tc, ok, t > D & u < f, sprintf('D %d, fdelay %d', D, f));
+        verifyEqual(tc, find(ch(D+2:end)) + D, find(t > D & t < T & u == f), sprintf('re-hops D %d, fdelay %d', D, f));
+    end
+end
+ok = hold_config(PP, K, cs, 5, 1, T);
+verifyEqual(tc, find(~ok(2:end), 1) - 1, 5);                     % first run of good frames
+spec = struct('scn', [2 2], 's', [1 1], 'onset', [1 1], 'follow', [true true], 'fdelay', [4 5], 'unk', [false false], ...
+    'T', 20, 'r', [1 1], 'delay', 1);
+R = rollout_policy('fixed', PP, K, spec, 1, [], struct('fixed', cs), 3);
+verifyEqual(tc, R.recovered, [false true]);
+R = rollout_policy('oracle', PP, K, spec, 1, [], [], 3);         % the oracle runs on the same hop rule
+verifyEqual(tc, size(R.ok_post), [1 2]);
+[PP0, K0] = toy_world(false);                                   % jammed frames pass their CRC
+verifyEqual(tc, find(hold_config(PP0, K0, cs, 3, 1, T)), 2:4);
+end
+
+function test_comb_jammer(tc)
+% A jammer on every channel takes frequency diversity's second carrier too, at its cost;
+% recoverable then means a configuration without channel_switch and freq_diversity.
+[PP, K] = toy_world(true);
+fd = find(strcmp(PP.actions, 'freq_diversity'));
+verifyEqual(tc, PP.actions{K.strip_fd(find(strcmp(PP.actions, 'freq_diversity+spatial_diversity+power_control'), 1))}, ...
+    'spatial_diversity+power_control');
+spec = struct('scn', [2 2], 's', [1 1], 'onset', [1 1], 'follow', [true true], 'fdelay', [0 0], 'unk', [false false], ...
+    'T', 10, 'r', [1 1], 'delay', 1, 'comb', [false true]);
+[E, ~] = link_env('reset', PP, K, spec, 1, RandStream('mt19937ar', 'Seed', 1));
+ok = false(10, 2); rec = ok; cost = zeros(10, 2);
+for t = 1:10
+    [E, r, ~, info] = link_env('step', E, PP, K, fd * [1 1]);
+    ok(t, :) = info.restored; rec(t, :) = info.recoverable; cost(t, :) = r;
+end
+verifyEqual(tc, ok(2:end, :), repmat([true false], 9, 1));
+verifyEqual(tc, rec(end, :), [true false]);
+verifyLessThan(tc, cost(end, 2), 0);                             % the second carrier still costs spectrum
+end
+
+function test_escalation_after_arrival(tc)
+% No escalation and no hold count while the configuration requested has not reached
+% the link; its first frame restarts the BER window and the degraded count, so the
+% escalation waits C.esc cycles from there.
+C = decision_config(); A = policy_actions();
+cls = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', 'antenna_fault', ...
+    'benign_interference', 'sweeping_jammer', 'tone_jamming', 'airframe_shadowing'};
+PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0);
+c0 = find(strcmp(A, rule_based_policy('jamming', true, 0)));
+obs = struct('probs', double(strcmp(cls, 'jamming')), 'unknown', false, 'feat', zeros(1, numel(link_features('names'))), ...
+    'cfg_link', find(strcmp(A, 'no_action')));
+obs.feat(feature_index('log_ber')) = -1; obs.feat(feature_index('crc_fail')) = 1;
+mem = [];
+for k = 1:8                                                      % requested c0, the link still on no_action
+    [a, mem, d] = policy_decide('rule_esc', obs, c0, mem, PP, []);
+    verifyEqual(tc, [a, d.escalated, mem.since], [c0, false, 0]);
+end
+obs.cfg_link = c0; obs.feat(feature_index('log_ber')) = -1.5;
+esc = false(1, 8);
+for k = 1:8
+    [a, mem, d] = policy_decide('rule_esc', obs, c0, mem, PP, []);
+    if k == 1, verifyEqual(tc, d.ber_avg, 10^-1.5, 'RelTol', 1e-9); end   % the window restarted
+    esc(k) = d.escalated;
+    if esc(k), break; end
+    verifyEqual(tc, a, c0);
+end
+verifyEqual(tc, find(esc, 1), C.esc + 1);
+% the hold counts from the arrival too: a change requested now waits D frames, then C.hold
+m = policy_monitor('change', mem, true);
+verifyEqual(tc, m.since, 0);
+m = policy_monitor('update', m, obs, PP, c0 + 1);               % frame still on c0
+verifyTrue(tc, m.pend);
+m = policy_monitor('change', m, false); verifyEqual(tc, m.since, 0);
+obs.cfg_link = c0 + 1;
+m = policy_monitor('update', m, obs, PP, c0 + 1);
+m = policy_monitor('change', m, false);
+verifyEqual(tc, [m.since, m.pend], [1 0]);
+end
+
+function test_policy_own_monitor(tc)
+% A policy's own monitor (the rule fallback of train_dqn.m) replaces the pools' one: the
+% same hostile frames confirm after 2 cycles with 2-of-2 and after 3 with 3-of-3.
+A = policy_actions();
+cls = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', 'antenna_fault', ...
+    'benign_interference', 'sweeping_jammer', 'tone_jamming', 'airframe_shadowing'};
+PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0, 'confirm', [2 2], 'alarm_mode', 'class');
+obs = struct('probs', double(strcmp(cls, 'jamming')), 'unknown', false, 'feat', zeros(1, numel(link_features('names'))));
+obs.feat(feature_index('log_ber')) = -6;
+own = struct('monitor', struct('alarm_mode', 'class', 'confirm', [3 3], 'drop_db', []));
+[c1, c2] = deal(false(1, 4)); [m1, m2] = deal([]);
+for k = 1:4
+    [~, m1, d1] = policy_decide('rule_esc', obs, 1, m1, PP, []);
+    [~, m2, d2] = policy_decide('rule_esc', obs, 1, m2, PP, [], own);
+    c1(k) = d1.confirmed; c2(k) = d2.confirmed;
+end
+verifyEqual(tc, [find(c1, 1), find(c2, 1)], [2 3]);
+end
+
+function test_choose_deployed(tc)
+% The DQN when it passed its gate; else the rule setting with the best recovery among
+% those within the false-alarm bound; else the lowest bound, committed only within it.
+[d, m] = choose_deployed(true, 0.03, [0.90 0.95], [0.04 0.06], 0.05);
+verifyEqual(tc, {d, m}, {'dqn_esc', true});
+[d, m, ir] = choose_deployed(false, 0.03, [0.90 0.95 0.92], [0.04 0.06 0.045], 0.05);
+verifyEqual(tc, {d, m, ir}, {'rule_sel', true, 3});
+[d, m, ir] = choose_deployed(false, 0.03, [0.90 0.95], [0.07 0.06], 0.05);
+verifyEqual(tc, {d, m, ir}, {'dqn_esc', true, 2});
+[d, m] = choose_deployed(false, 0.055, [0.90 0.95], [0.07 0.06], 0.05);
+verifyEqual(tc, {d, m}, {'dqn_esc', false});
+[d, m] = choose_deployed(false, 0.08, [0.90 0.95], [0.07 0.06], 0.05);
+verifyEqual(tc, {d, m}, {'rule_sel', false});
+[d, m] = choose_deployed(false, NaN, [0.90 0.95], [NaN NaN], 0.05);          % no clean validation flights
+verifyEqual(tc, {d, m}, {'rule_sel', true});
+end
+
+function test_false_change_rate(tc)
+% False changes per cycle, per hour and between them at 20 ms; the bound reaches at
+% least the Clopper-Pearson bound over all cycles.
+F = false_change_rate([zeros(1, 98), 1, 2], 30, 1:100, 20);
+verifyEqual(tc, [F.k, F.cycles], [3 3000]);
+verifyEqual(tc, [F.rate, F.per_hour, F.mtbf_s], [1e-3, 180, 20], 'RelTol', 1e-12);
+verifyGreaterThanOrEqual(tc, F.hi, betaincinv(0.975, 4, 2997) - 1e-12);
+verifyEqual(tc, F.mtbf_lo_s, 0.02 / F.hi, 'RelTol', 1e-12);
+F0 = false_change_rate(zeros(1, 100), 30, 1:100, 20);
+verifyEqual(tc, [F0.rate, F0.hi], [0, 1 - 0.025^(1/3000)], 'AbsTol', 1e-12);
+verifyEqual(tc, F0.mtbf_s, Inf);
+E = false_change_rate([], 30, [], 20);
+verifyTrue(tc, isnan(E.rate) && E.k == 0);
+end
+
+function test_check_point_cut(tc)
+% An "up to" edge stops before the first check point NOT COMMITTED that it spans: in
+% distance (Eb/N0 from the top down) and in level (from the lowest up); check points
+% beyond the edge, UNDETERMINED or missing leave it.
+x = 15:-3:0; vm = [1 0 -1 NaN -1];                     % between 15/12, 12/9, 9/6, 6/3, 3/0 dB
+verifyEqual(tc, nthout(1:2, @check_point_cut, 3, x, vm), {9, true});
+verifyEqual(tc, nthout(1:2, @check_point_cut, 9, x, vm), {9, false});
+verifyEqual(tc, nthout(1:2, @check_point_cut, 12, x, vm), {12, false});
+verifyEqual(tc, nthout(1:2, @check_point_cut, NaN, x, vm), {NaN, false});
+verifyEqual(tc, nthout(1:2, @check_point_cut, 5, 1:5, [1 -1 1 1]), {2, true});
+end
+
+function test_detector_id(tc)
+% One detector, one identity; another training time, unknown-score window, fusion or
+% threshold gives another, and pools and agent of two detectors stop the reading.
+FZ = struct('FM', struct('W', ones(3, 2)), 'N', 4); ood = struct('score', 'last', 'win', 3);
+id = detector_id(1, ood, FZ, -2);
+verifyEqual(tc, detector_id(1, ood, FZ, -2), id);
+verifyEqual(tc, numel(id), 16);
+o2 = ood; o2.win = 4; F2 = FZ; F2.N = 5; F3 = FZ; F3.FM.W(1) = 2;
+ids = {id, detector_id(2, ood, FZ, -2), detector_id(1, o2, FZ, -2), detector_id(1, ood, F2, -2), ...
+    detector_id(1, ood, F3, -2), detector_id(1, ood, FZ, -3)};
+verifyEqual(tc, numel(unique(ids)), 6);
+check_det_id(struct('det_id', id), struct('det_id', id), 'test');
+verifyError(tc, @() check_det_id(struct('det_id', id), struct('det_id', ids{2}), 'test'), 'check_det_id:mismatch');
+verifyError(tc, @() check_det_id(struct('det_id', id), struct(), 'test'), 'check_det_id:mismatch');
+end
+
 %% ---------- statistics ----------
 function test_boot_cluster(tc)
 rs = RandStream('mt19937ar', 'Seed', 5);
@@ -236,6 +404,8 @@ verifyEqual(tc, numel(unique(off)), numel(P));
 verifyTrue(tc, all(off >= 0 & off < 64));
 [s, r, b] = ndgrid(1:6, 1:99, 1:19);                    % every pool block that keeps its own seed range
 S = arrayfun(@(si, ri, bi) pool_seed(1, si, bi, ri), s(:), r(:), b(:));
+[s, r] = ndgrid(1:6, 1:99);                             % the off-grid check flights (family 2, block 10)
+S = [S; arrayfun(@(si, ri) pool_seed(2, si, 10, ri), s(:), r(:))];
 [s, b] = ndgrid(1:6, [4 15]);                           % the 100th clean-link geometry
 S = [S; arrayfun(@(si, bi) pool_seed(1, si, bi, 100), s(:), b(:))];
 [t, li, s] = ndgrid(1:20, 1:8, 1:6);                    % survivability map: entries, levels, Eb/N0
@@ -273,43 +443,63 @@ end
 
 function test_lhs_nested(tc)
 % The test (12) and second test (60) designs of build_policy_pools.m put 2 + 10
-% flights in every sixth of the speed range and 4 + 20 in every third of the altitude
-% range at every Eb/N0, a design of 24 (the smaller second test) 4 and 8; every axis has
-% one flight per stratum, the value inside it is the flight's own draw, and every value
-% lies in its range. The edge-speed split flies exactly hover and 161 km/h.
+% flights in every sixth of the speed range and of the first interferer's direction, and
+% 4 + 20 in every third of the altitude range and of the receive correlation at every
+% Eb/N0, a design of 24 (the smaller second test) 4 and 8; every axis has one flight per
+% stratum, the value inside it is the flight's own draw, and every value lies in its
+% range. The edge-speed split flies exactly hover (the first 24) and 161 km/h; the
+% check flights of build_check_pools.m are a design of 36 in a family of their own.
 p = base_params();
-vr = [p.speed_kmh_min p.speed_kmh_max]; ha = p.alt_range_m; kr = p.k_range_db;
-six = @(g) histcounts(g.speed, linspace(vr(1), vr(2), 7));
-thr = @(g) histcounts(g.alt, linspace(ha(1), ha(2), 4));
+vr = [p.speed_kmh_min p.speed_kmh_max]; ha = p.alt_range_m; kr = p.k_range_db; ar = p.int_aoa_range_deg; cr = p.corr_range;
+six = @(x, rg) histcounts(x, linspace(rg(1), rg(2), 7));
+thr = @(x, rg) histcounts(x, linspace(rg(1), rg(2), 4));
 for s = 1:6
     g1 = pool_geometries(s, 14, 1:12, vr, p, 7100000 + 100*s + 3);
     g2 = pool_geometries(s, 17, 1:60, vr, p, 7100000 + 100*s + 5);
     gc = pool_geometries(s, 17, 61:84, vr, p, 7100000 + 100*s + 15);
-    verifyEqual(tc, [six(g1); six(g2); six(gc)], repmat([2; 10; 4], 1, 6));
-    verifyEqual(tc, [thr(g1); thr(g2); thr(gc)], repmat([4; 20; 8], 1, 3));
+    G = [g1, g2, gc];
+    verifyEqual(tc, cell2mat(arrayfun(@(x) six(x.speed, vr), G', 'UniformOutput', false)), repmat([2; 10; 4], 1, 6));
+    verifyEqual(tc, cell2mat(arrayfun(@(x) six(x.aoa1, ar), G', 'UniformOutput', false)), repmat([2; 10; 4], 1, 6));
+    verifyEqual(tc, cell2mat(arrayfun(@(x) thr(x.alt, ha), G', 'UniformOutput', false)), repmat([4; 20; 8], 1, 3));
+    verifyEqual(tc, cell2mat(arrayfun(@(x) thr(x.rho, cr), G', 'UniformOutput', false)), repmat([4; 20; 8], 1, 3));
     verifyEqual(tc, histcounts(g2.ksig, kr(1):5:kr(2)), 12 * ones(1, 5));    % 5-dB K bands
     for g = {g1, g2, gc}
         x = g{1}; n = numel(x.seed);
         verifyEqual(tc, sort(floor(n * (x.speed - vr(1)) / diff(vr))), 0:n-1);
         verifyEqual(tc, sort(floor(n * (x.alt - ha(1)) / diff(ha))), 0:n-1);
         verifyEqual(tc, sort(floor(n * (x.ksig - kr(1)) / diff(kr))), 0:n-1);
+        verifyEqual(tc, sort(floor(n * (x.aoa1 - ar(1)) / diff(ar))), 0:n-1);
+        verifyEqual(tc, sort(floor(n * (x.rho - cr(1)) / diff(cr))), 0:n-1);
         verifyTrue(tc, all(x.speed > vr(1) & x.speed < vr(2) & x.alt > ha(1) & x.alt < ha(2) ...
-            & x.ksig > kr(1) & x.ksig < kr(2)));
+            & x.ksig > kr(1) & x.ksig < kr(2) & x.aoa1 > ar(1) & x.aoa1 < ar(2) & x.rho > cr(1) & x.rho < cr(2)));
         u = rand(seed_stream(x.seed(1), 'alt'));
         k = floor(n * (x.alt(1) - ha(1)) / diff(ha));
         verifyEqual(tc, x.alt(1), ha(1) + diff(ha) * (k + u) / n, 'AbsTol', 1e-9);
+        u = rand(seed_stream(x.seed(1), 'aoa'));
+        k = floor(n * (x.aoa1(1) - ar(1)) / diff(ar));
+        verifyEqual(tc, x.aoa1(1), ar(1) + diff(ar) * (k + u) / n, 'AbsTol', 1e-9);
+        d = flight_draws(x.seed(1), 100, p, struct('aoa1_deg', x.aoa1(1), 'rho', x.rho(1)));
+        verifyEqual(tc, [d.aoa(1) d.rho], [x.aoa1(1) x.rho(1)]);
     end
 end
 verifyEqual(tc, pool_geometries(6, 17, 1:60, vr, p, 7100605), g2);              % reproducible
 q = @(x) floor(numel(x.seed) * (x.alt - ha(1)) / diff(ha));
 verifyNotEqual(tc, q(pool_geometries(1, 14, 1:12, vr, p, 7100103)), q(g1));    % own permutation per Eb/N0
-verifyLessThan(tc, 7100000 + 100*6 + 15, seed_base(700001));                   % below every flight stream
-p.alt_random = false;
-verifyTrue(tc, all(isnan(pool_geometries(1, 17, 1:12, vr, p, 7100105).alt)));
-VOUT = [0 0; 161 161];
-ge = pool_geometries(1, 16, 1:24, VOUT(1 + ((1:24)' > 12), :), p);
-verifyEqual(tc, ge.speed, [zeros(1, 12), 161 * ones(1, 12)]);
-verifyTrue(tc, all(isnan([ge.alt ge.ksig])));
+verifyLessThan(tc, 7200000 + 100*6, seed_base(700001));                        % below every flight stream
+gk = pool_geometries(1, 10, 1:36, vr, p, 7200100, 2);                          % check flights
+verifyEqual(tc, gk.seed, arrayfun(@(r) pool_seed(2, 1, 10, r), 1:36));
+verifyEqual(tc, [six(gk.speed, vr), thr(gk.alt, ha), six(gk.aoa1, ar), thr(gk.rho, cr)], [6 * ones(1, 6), 12 * ones(1, 3), ...
+    6 * ones(1, 6), 12 * ones(1, 3)]);
+p.alt_random = false; p.int_aoa_random = false; p.corr_random = false;
+x = pool_geometries(1, 17, 1:12, vr, p, 7100105);
+verifyTrue(tc, all(isnan([x.alt x.aoa1 x.rho])));
+VOUT = [0 0; 161 161]; NHOVER = 24;
+ge = pool_geometries(1, 16, 1:36, VOUT(1 + ((1:36)' > NHOVER), :), p);
+verifyEqual(tc, ge.speed, [zeros(1, 24), 161 * ones(1, 12)]);
+verifyTrue(tc, all(isnan([ge.alt ge.ksig ge.aoa1 ge.rho])));
+txt = fileread(which('build_policy_pools'));
+verifyNotEmpty(tc, regexp(txt, 'NHOVER = 24;', 'once'));
+verifyNotEmpty(tc, regexp(txt, 'sp == iSpd && cells\(c\).sev ~= C.nominal', 'once'));   % hover at every level
 end
 
 function test_receiver_measurements(tc)
@@ -430,8 +620,11 @@ verifyEqual(tc, d0.el_db, 0);                                   % no distance: n
 d1 = flight_draws(77, 100, p, struct('ebno', 9, 'alt_m', 50, 'k_sig_db', 3));
 verifyEqual(tc, [d1.alt_m d1.k_sig], [50 3]);
 verifyEqual(tc, [d1.k_int d1.aoa d1.yaw d1.rho d1.gcs_point_db], [d0.k_int d0.aoa d0.yaw d0.rho d0.gcs_point_db]);
-d2 = flight_draws(77, 100, p, struct('ebno', 9, 'alt_m', NaN, 'k_sig_db', NaN));
-verifyEqual(tc, [d2.alt_m d2.k_sig], [d0.alt_m d0.k_sig]);
+d2 = flight_draws(77, 100, p, struct('ebno', 9, 'alt_m', NaN, 'k_sig_db', NaN, 'aoa1_deg', NaN, 'rho', NaN));
+verifyEqual(tc, [d2.alt_m d2.k_sig d2.aoa d2.rho], [d0.alt_m d0.k_sig d0.aoa d0.rho]);
+d4 = flight_draws(77, 100, p, struct('aoa1_deg', 12, 'rho', 0.5));
+verifyEqual(tc, [d4.aoa d4.rho], [12 d0.aoa(2:end) 0.5]);
+verifyEqual(tc, [d4.k_sig d4.k_int d4.yaw d4.alt_m], [d0.k_sig d0.k_int d0.yaw d0.alt_m]);
 p.alt_random = false;
 d3 = flight_draws(77, 100, p, struct('ebno', 9));
 verifyTrue(tc, isnan(d3.alt_m));
@@ -603,4 +796,43 @@ end
 function p = base_params()
 evalc('init_params');
 p = load('params.mat').params;
+end
+
+function c = nthout(k, f, varargin)
+% Outputs k of f(varargin{:}) in a cell array.
+out = cell(1, max(k));
+[out{:}] = f(varargin{:});
+c = out(k);
+end
+
+function [PP, K] = toy_world(crc_fails)
+% Frame pools of one flight: the clean link, and a jammer that only channel_switch and
+% freq_diversity escape; crc_fails false lets the jammed frames pass their CRC.
+A = policy_actions(); nA = numel(A); names = link_features('names');
+PP = struct('actions', {A}, 'scen', {{'none', 'jamming'}}, 'ebno', [10 12], 'runs', {{101}}, 'F_SUB', 20, ...
+    'classes', {{'none', 'jamming'}}, 'feat_names', {names}, 'maha_thr', 0, 'clean', [1e-6 1e-6], 'clean_fer', [0 0], ...
+    'gp', ones(1, nA), 'bw', 1 + contains(A, 'freq_diversity'), 'pw', ones(1, nA), 'sps', 4, 'bps', 2);
+PP.pools = cell(2, 2, nA, 1);
+for sc = 1:2
+    for a = 1:nA
+        good = sc == 1 || contains(A{a}, 'channel_switch') || contains(A{a}, 'freq_diversity');
+        F = zeros(20, numel(names)); F(:, feature_index('crc_fail')) = ~good && crc_fails;
+        F(:, feature_index('log_ber')) = log10(max(0.1 * ~good, 1e-6));
+        PP.pools(sc, :, a, 1) = {struct('ber', repmat(0.1 * ~good, 20, 1), 'fer', repmat(single(~good), 20, 1), ...
+            'run', 101 * ones(20, 1), 'probs', repmat(double([sc == 1, sc == 2]), 20, 1), 'maha', ones(20, 1), 'feat', F)};
+    end
+end
+K = link_env('tables', PP);
+end
+
+function [ok, ch] = hold_config(PP, K, a, fdelay, D, T)
+% A follower episode in which the policy holds configuration a from the onset (the
+% first cycle): frames restored, and the cycles with a change or a hop.
+spec = struct('scn', 2, 's', 1, 'onset', 1, 'follow', true, 'fdelay', fdelay, 'unk', false, 'T', T, 'r', 1, 'delay', D);
+[E, ~] = link_env('reset', PP, K, spec, 1, RandStream('mt19937ar', 'Seed', 1));
+ok = false(1, T); ch = ok;
+for t = 1:T
+    [E, ~, ~, info] = link_env('step', E, PP, K, a);
+    ok(t) = info.restored; ch(t) = info.changed;
+end
 end

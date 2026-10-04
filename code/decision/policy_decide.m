@@ -5,11 +5,13 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %   kind   'dqn' | 'dqn_esc' | 'rule' | 'rule_esc' | 'table' | 'table_esc' |
 %          'blind_esc' | 'random' | 'fixed'
 %   obs    link_env observation of the frame just received (receiver measurements)
-%   cfg    configuration currently applied (1 x NE)
+%   cfg    configuration currently requested (1 x NE); obs.cfg_link, when present,
+%          the one the frame was received with
 %   mem    policy memory ([] on the first cycle of an episode)
 %   agent  trained agent (dqn kinds)
 %   opt    fixed (action index, 'fixed'); table (1 x classes action index) and
-%          table_unknown (action for 'unknown'), 'table' kinds; rs (RandStream, 'random')
+%          table_unknown (action for 'unknown'), 'table' kinds; rs (RandStream, 'random');
+%          monitor (alarm_mode, confirm, drop_db): the policy's own monitor in place of PP's
 %
 %   Link monitor, alarm confirmation and the agent's observation history:
 %   policy_monitor.m (shared). Timing constants: decision_config.m.
@@ -18,14 +20,15 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %             that threat on the train pools (policy_table.m); a 'none' or
 %             'unknown' class on a degraded link takes table_unknown
 %   rule and table commit a proposal after C.dwell consecutive cycles, not within
-%   C.hold cycles of the last change, and only on a confirmed alarm (the same
-%   confirmation as the DQN shield)
+%   C.hold cycles of the last change reaching the link, and only on a confirmed alarm
+%   (the same confirmation as the DQN shield)
 %   dqn       argmax of the Q-network over the configurations allowed by the
 %             shield (policy_mask.m); switching costs are part of its reward
 %   *_esc     escalation: move to the next configuration not yet tried in this
 %             incident (DQN: next-highest Q; rule and table: the fixed ladder C.ladder)
 %             when the base policy keeps
-%             - a configuration it applied while the link stays degraded for C.esc cycles
+%             - a configuration it applied while the link stays degraded for C.esc
+%               cycles from the first frame received with it
 %             - no_action while the alarm stays confirmed for C.esc cycles: an
 %               intermittent fault can leave the windowed BER estimate near clean
 %               while the threat is on
@@ -38,6 +41,9 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %   info: q (Q-values, dqn kinds), cls, degraded, confirmed, escalated, ber_avg, drop
 if nargin < 7, opt = struct(); end
 C = decision_config();
+if isfield(opt, 'monitor')
+    PP.alarm_mode = opt.monitor.alarm_mode; PP.confirm = opt.monitor.confirm; PP.drop_db = opt.monitor.drop_db;
+end
 NE = numel(cfg); A = PP.actions; nA = numel(A);
 na = find(strcmp(A, 'no_action'));
 if startsWith(kind, 'blind')
@@ -103,8 +109,7 @@ if endsWith(kind, '_esc')
     end
 end
 
-ch = a ~= cfg;
-mem.since(ch) = 0; mem.since(~ch) = mem.since(~ch) + 1;
+mem = policy_monitor('change', mem, a ~= cfg);
 info = struct('q', q, 'cls', {M.cls}, 'degraded', M.degraded, 'confirmed', M.confirmed, ...
     'escalated', escalated, 'ber_avg', M.ber_avg', 'drop', M.drop);
 end
