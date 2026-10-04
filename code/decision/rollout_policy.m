@@ -4,7 +4,8 @@ function R = rollout_policy(kind, PP, K, spec, split, agent, opt, seed)
 %          follower state and geometry; picks the configuration with the best
 %          reward of the next cycle from the measured geometry means: a one-step
 %          oracle, not a bound on every metric)
-%   spec   episode specification (link_env.m); split 1 train, 2 validation, 3 test
+%   spec   episode specification (link_env.m); split 1 train, 2 validation, 3 test,
+%          4 edge speeds, 5 second test
 %   seed   frame-draw seed: the same seed gives every policy the same draws
 %          wherever their configurations coincide
 %   R      per episode (after onset unless noted):

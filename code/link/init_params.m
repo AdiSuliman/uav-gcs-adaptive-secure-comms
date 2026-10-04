@@ -45,7 +45,7 @@ params.rolloff      = 0.25;            % RRC roll-off factor
 params.filter_span  = 10;              % RRC filter span (symbols)
 params.rician_k      = 10;             % K-factor (dB) when not drawn per flight (PHY validation)
 params.k_random      = true;           % K-factor of every channel drawn per seeded flight (channel_k.m)
-params.k_range_db    = [-5 20];        % measured air-ground K: foliage 2-5, urban -5..10, open L-band ~12, C-band ~28 dB (Khawaja et al.)
+params.k_range_db    = [-5 20];        % measured air-ground K: foliage 2-5, airports -5..10 (5.75 GHz, Tu & Shimamoto), open L-band ~12, C-band ~28 dB (Khawaja et al.)
 params.carrier_freq  = 2.4e9;          % 2.4 GHz ISM (range for a given Eb/N0: link_budget_table.m)
 
 % UAV platform velocity and Doppler
@@ -136,8 +136,8 @@ params.cm_fec_rate    = 1/2;        % fec_interleave: code rate, K = 7, generato
 % Modeled link: GCS -> UAV command uplink; the receiver (and the detector) is on the UAV.
 % Eb/N0 is per UAV antenna (per branch) and includes the GCS antenna gain.
 % GCS: a low-power 2.4 GHz radio (nRF24L01+ steps 0 / -6 / -12 / -18 dBm) at -6 dBm, its 0 dBm
-% step being the power_control action, feeding a 12 dBi directional antenna (the ground
-% antenna of the air-ground measurements of Rodriguez-Pineiro et al.) on a GPS tracker
+% step being the power_control action, feeding a 12 dBi directional antenna (the gain
+% class of the fixed sector antenna of Rodriguez-Pineiro et al.) on a GPS tracker
 % (mean pointing error 5.62 deg azimuth, 1.51 deg elevation, measured with a quadcopter,
 % Nugroho & Dectaviansyah). Licence-exempt cap: 100 mW e.i.r.p. in Israel (Ministry of
 % Communications), as ETSI EN 300 328, which also caps 10 dBm/MHz: 11 dBm for our 1.25 MHz

@@ -135,11 +135,7 @@ v = find(~isnan(F.ber));
 n = numel(v);
 D.iq = [D.iq, F.iq(v)];
 lab = label * ones(1, n);
-if strcmp(p.active_threat, 'benign_interference')
-    lab(F.act(v) < 0.1) = 1;                            % no WLAN packet in this frame: a clean frame
-elseif strcmp(p.active_threat, 'antenna_fault')
-    lab(F.act(v) == 0) = 1;                             % a fault model with the contact closed in a frame: a clean frame
-end
+lab(~threat_active(p.active_threat, F.act(v))) = 1;     % a WLAN frame without a packet, a fault with its contact closed: clean
 D.label = [D.label, lab]; D.level = [D.level, level * ones(1, n)];
 D.snr = [D.snr, ebno * ones(1, n)]; D.speed = [D.speed, v_kmh * ones(1, n)];
 D.run = [D.run, run_id * ones(1, n)]; D.seed = [D.seed, seed * ones(1, n)]; D.fold = [D.fold, fold * ones(1, n)];

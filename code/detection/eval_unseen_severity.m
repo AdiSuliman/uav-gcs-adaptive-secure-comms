@@ -1,15 +1,18 @@
 %% EVAL_UNSEEN_SEVERITY - detector at threat severities never seen in training
 % The dataset trains every threat on 8 severity levels (dataset_levels.m). This script generates
 % fresh frames with the dataset's recipe (random UAV speed per block, every
-% training Eb/N0) at three kinds of level and classifies them with the
-% production detector:
+% training Eb/N0, the dataset's labels: threat_active.m) at three kinds of level and
+% reads them as the deployed detector does, fused over the last cycles of the block
+% (detector_block.m):
 %   seen     every other training level (reference from the same generator)
 %   between  midpoints between training levels (never trained on), every other one
 %   above    beyond the strongest training level, where the sources allow it; every
 %            threat is trained up to the sources' most severe value, so none is tested above
-% Per frame: correct class, a class that calls for the same countermeasure
+% Per frame of the threat: correct class, a class that calls for the same countermeasure
 % (rule_based_policy.m), or flagged unknown (production score below the threshold
-% keeping 95% of known validation frames).
+% keeping 95% of known validation frames). One block per Eb/N0 gives fewer flights than
+% a verdict needs (edge_verdict.m): generalization evidence at the midpoints, read by
+% edge_map.m. Block k runs on seed 5,000,000 + k.
 % Decision rule, fixed before the run: the training levels are extended to the
 % map's levels when, above the range, fewer than 90% of a threat's frames are
 % read as a class with the same countermeasure.
@@ -22,6 +25,7 @@ fprintf('=== Detector at unseen threat severities ===\n\n');
 %% 1. Levels
 EBNO = load('params.mat').params.EbNo_dB;
 N_FRAMES = 20;                   % frames per (threat, level, Eb/N0) block
+SEED0 = 5000000;                 % block k: seed SEED0 + k
 delay_bits = 20; temporal_window = 10;
 rng(4343, 'twister');
 clear threat_cfg
@@ -47,15 +51,18 @@ end
 D = load('data/trained_detector.mat', 'net', 'classes', 'ood');
 classes = cellstr(string(D.classes(:)'));
 Tood = ood_thresholds(0.95);
-N = load_norm();
+FZ = struct('FM', [], 'N', 1);
+if isfile('data/fusion.mat'), FZ = load('data/fusion.mat', 'FM', 'N'); end   % temporal fusion (select_fusion.m)
 p0 = load('params.mat').params; p0.quiet_build = true;
-modelName = 'UAV_GCS_Threat_Link';
-fs = p0.symbol_rate * p0.sps;
-stop_time = num2str(N_FRAMES * p0.frame_duration);
+G = struct('model', 'UAV_GCS_Threat_Link', 'stop_time', num2str(N_FRAMES * p0.frame_duration), ...
+    'delay_bits', delay_bits, 'tw', temporal_window, 'fs', p0.symbol_rate * p0.sps, 'D', D, 'N', load_norm(), ...
+    'classes', {classes}, 'FM', FZ.FM, 'FN', FZ.N);
 act_of = containers.Map(classes, cellfun(@(c) rule_based_policy(c), classes, 'UniformOutput', false));
 
 %% 2. Generate and classify
-R = struct('threat', {}, 'kind', {}, 'level', {}, 'ebno', {}, 'n', {}, 'correct', {}, 'same_action', {}, 'unknown', {});
+R = struct('threat', {}, 'kind', {}, 'level', {}, 'ebno', {}, 'seed', {}, 'speed', {}, 'n', {}, 'correct', {}, ...
+    'same_action', {}, 'unknown', {});
+kb = 0;
 t0 = tic;
 for t = 1:numel(threat_cfg)
     cfg = threat_cfg(t);
@@ -64,25 +71,14 @@ for t = 1:numel(threat_cfg)
             p = p0; p.active_threat = cfg.name; p.(cfg.param) = lv;
             evalc('build_threat_model(p)');
             for ebno = EBNO
+                kb = kb + 1;
                 v_kmh = p0.speed_kmh_min + rand() * (p0.speed_kmh_max - p0.speed_kmh_min);
-                snr_dB = ebno + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
-                set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/p.sps));
-                link_seed(modelName, randi(2^31 - 1000), v_kmh / 3.6 * p0.carrier_freq / p0.c_light, ...
-                    struct('ebno', ebno, 'alt_m', NaN, 'k_sig_db', NaN));
-                F = extract_closed_loop_frames(sim(modelName, 'StopTime', stop_time), p, delay_bits);
-                disk_guard;
-                v = find(~isnan(F.ber));
-                X = zeros(128, 128, 1, numel(v), 'single'); Fr = zeros(numel(v), numel(N.mu));
-                for i = 1:numel(v)
-                    X(:, :, 1, i) = spec_image(F.iq{v(i)}, fs);
-                    Fr(i, :) = link_features(F, v(i), temporal_window);
-                end
-                [pr, sc] = detect_scores(D.net, D.ood, X, ((Fr - N.mu) ./ N.sd)');
-                [~, k] = max(pr, [], 1); pred = classes(k);
-                R(end+1) = struct('threat', cfg.name, 'kind', KINDS{kk}, 'level', lv, 'ebno', ebno, 'n', numel(v), ...
-                    'correct', sum(strcmp(pred, cfg.name)), ...
-                    'same_action', sum(cellfun(@(c) strcmp(act_of(c), act_of(cfg.name)), pred)), ...
-                    'unknown', sum(sc(:)' < Tood.maha)); %#ok<SAGROW>
+                [tl, pred, sc] = detector_block(G, p, ebno, SEED0 + kb, v_kmh);
+                on = strcmp(tl, cfg.name);                  % frames of the threat (the dataset's labels)
+                R(end+1) = struct('threat', cfg.name, 'kind', KINDS{kk}, 'level', lv, 'ebno', ebno, 'seed', SEED0 + kb, ...
+                    'speed', v_kmh, 'n', sum(on), 'correct', sum(strcmp(pred(on), cfg.name)), ...
+                    'same_action', sum(cellfun(@(c) strcmp(act_of(c), act_of(cfg.name)), pred(on))), ...
+                    'unknown', sum(sc(on) < Tood.maha)); %#ok<SAGROW>
             end
         end
     end
@@ -91,8 +87,9 @@ end
 
 %% 3. Report: per threat and level, pooled over Eb/N0
 rep = {'=== DETECTOR AT UNSEEN THREAT SEVERITIES ==='};
-rep{end+1} = sprintf(['Generated: %s | %d frames per (level, Eb/N0) block, Eb/N0 %s dB, random speed per block | ' ...
-    'unknown = production score (%s) below the 95%%-retention threshold'], datestr(now), N_FRAMES, mat2str(EBNO), D.ood.score);
+rep{end+1} = sprintf(['Generated: %s | %d frames per (level, Eb/N0) block, Eb/N0 %s dB, random speed per block | %s | ' ...
+    'unknown = production score (%s) below the 95%%-retention threshold'], datestr(now), N_FRAMES, mat2str(EBNO), ...
+    ternary(isempty(FZ.FM), 'per-frame reading', sprintf('fused over the last %d cycles', FZ.N)), D.ood.score);
 rep{end+1} = 'Rule fixed before the run: extend the training levels if, above the range, < 90% of a threat''s frames get the same countermeasure.';
 rep{end+1} = '';
 rep{end+1} = sprintf('%-20s %-8s %7s %7s %9s %13s %9s', 'threat', 'kind', 'level', 'frames', 'correct', 'same action', 'unknown');
@@ -138,4 +135,8 @@ if ~isfile(cache) || (isfile('data/splits.mat') && dir(cache).datenum < dir('dat
 end
 L = load(cache, 'feat_mean', 'feat_std');
 N = struct('mu', L.feat_mean, 'sd', L.feat_std);
+end
+
+function out = ternary(c, a, b)
+if c, out = a; else, out = b; end
 end

@@ -2,13 +2,15 @@
 % Breaks the test results down by every factor (weak_points.m): the detector's
 % accuracy by class, Eb/N0, severity level, UAV speed, K-factor and interferer
 % direction, and every class's detection rate by the same factors; the deployed
-% policy's recovery by threat, severity, Eb/N0, speed, K-factor and test set, and
-% every threat's recovery by the same factors. For every cell: value, 95% interval
-% (bootstrap over sub-runs or flight geometries), difference to the rest, and the
-% points of the overall result it pulls down below the target. Cells whose
-% interval lies entirely below or above the rest are listed as weak or strong
-% points, and the pairs (class x Eb/N0, class x level, class x speed; threat x
-% severity, threat x Eb/N0) are mapped.
+% policy's recovery on the threat sets (single, follower, combined: the KPI 4 pool)
+% by threat, severity, Eb/N0, speed and K-factor of our signal (the flight's draw,
+% PP.cov), every threat's recovery by the same factors, and the recovery per test set
+% (the sets reported apart included). For every cell: value, 95% interval
+% (bootstrap over sub-runs, or over flights: a flight flown in several sets is one
+% cluster), difference to the rest, and the points of the overall result it pulls down
+% below the target. Cells whose interval lies entirely below or above the rest are
+% listed as weak or strong points, and the pairs (class x Eb/N0, class x level, class
+% x speed; threat x severity, threat x Eb/N0) are mapped.
 % Output: results/weak_points.{txt,json}
 
 close all; clc;
@@ -55,8 +57,8 @@ if isfile('results/policy_evaluation.mat') && isfile('data/policy_pools.mat')
     E = load('results/policy_evaluation.mat', 'RES', 'POL', 'set_names', 'iDQN');
     Lp = load('data/policy_pools.mat', 'PP'); PP = Lp.PP; clear Lp
     iD = E.iDQN;                                          % the deployed policy
+    THREAT_SETS = {'single', 'follower', 'combined'};     % the threat cells; the other sets only per set
     y = []; th = {}; sv = {}; eb = []; spd = []; kd = []; st = {}; g = [];
-    kr = [-5 20]; if isfield(PP, 'k_range'), kr = PP.k_range; end
     for si = 1:numel(E.set_names)
         if any(strcmp(E.set_names{si}, {'clean'})), continue; end
         R = E.RES{si, iD};
@@ -66,18 +68,21 @@ if isfile('results/policy_evaluation.mat') && isfile('data/policy_pools.mat')
         th = [th; PP.scen(R.scn(m))']; %#ok<AGROW>
         sv = [sv; PP.sev_names(PP.sev(R.scn(m)))']; %#ok<AGROW>
         eb = [eb; PP.ebno(R.s(m))']; spd = [spd; R.speed(m)']; %#ok<AGROW>
-        sp = find(strcmp(PP.splits, 'test'));
-        blk = floor(PP.runs{sp}(R.r(m)) / 100);
-        kk = arrayfun(@(s, b, r) first(channel_k(pool_seed(1, s, b, r), kr)), R.s(m), blk, R.r(m));
-        kd = [kd; kk(:)]; st = [st; repmat(E.set_names(si), sum(m), 1)]; g = [g; R.geom(m)' + 1e6 * si]; %#ok<AGROW>
+        kd = [kd; flight_k(PP, R, m)]; st = [st; repmat(E.set_names(si), sum(m), 1)]; %#ok<AGROW>
+        g = [g; R.geom(m)' + 1e6 * R.split(m)']; %#ok<AGROW>
     end
-    F = table(categorical(th), categorical(sv, PP.sev_names), eb, spd, kd, categorical(st), ...
-        'VariableNames', {'threat', 'severity', 'ebno', 'speed', 'k_db', 'set'});
+    ts = ismember(st, THREAT_SETS);
+    F = table(categorical(th(ts)), categorical(sv(ts), PP.sev_names), eb(ts), spd(ts), kd(ts), ...
+        'VariableNames', {'threat', 'severity', 'ebno', 'speed', 'k_db'});
     opt = struct('target', 90, 'bins', struct('speed', SPEED, 'k_db', KB), ...
         'pairs', {{'threat', 'severity'; 'threat', 'ebno'; 'threat', 'speed'}});
-    Wp = weak_points(y, F, g, opt);
-    rep = [rep, section('DECISION LAYER: recovered among recoverable threat episodes, deployed policy', Wp)];
+    Wp = weak_points(y(ts), F, g(ts), opt);
+    rep = [rep, section('DECISION LAYER: recovered among recoverable threat episodes, deployed policy (threat sets)', Wp)];
     J.policy = pack(Wp);
+    Ws = weak_points(y, table(categorical(st), 'VariableNames', {'set'}), g, struct('target', 90));
+    rep = [rep, section('DECISION LAYER: recovered among recoverable episodes per test set, deployed policy', Ws)];
+    J.policy_set = pack(Ws);
+    y = y(ts); g = g(ts); th = th(ts);
     ths = unique(th, 'stable');
     for t = 1:numel(ths)
         m = strcmp(th, ths{t});
@@ -138,6 +143,13 @@ for q = 1:numel(W.pairs)
 end
 end
 
-function v = first(x)
-v = x(1);
+function k = flight_k(PP, R, m)
+% K-factor of our signal on the flight of every episode m: the flight's own draw in its
+% split (PP.cov, flight_draws.m).
+k = zeros(sum(m), 1);
+s = R.s(m); r = R.r(m); sp = R.split(m);
+for q = unique(sp)
+    i = sp == q;
+    k(i) = PP.cov{q}.k_sig(sub2ind(size(PP.cov{q}.k_sig), s(i), r(i)));
+end
 end

@@ -1,8 +1,9 @@
 %% EXPORT_REPORT_NUMBERS - Result numbers of the final reading in one JSON file
 % Collects the numbers the written reports quote (KPI summary, detector
 % metrics and main confusions, unknown-threat scores, policy evaluation,
-% latency, unseen Eb/N0, unseen combined threats) so no number is copied by
-% hand. Large arrays are left out. Run from the repository root after the KPI stage.
+% latency, unseen Eb/N0, unseen combined threats, the edge map's verdicts and edges)
+% so no number is copied by hand. Large arrays are left out. Run from the repository
+% root after the KPI stage.
 % Output: results/report_numbers.json
 
 N = struct('generated', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
@@ -31,6 +32,7 @@ if isfile('results/unseen_snr.mat')
     N.unseen_snr = load('results/unseen_snr.mat', 'EBNO_ALL', 'EBNO_SEEN', 'acc', 'f1', 'gap', 'summary');
 end
 N.combo = take('results/combo_generalization.mat', 'res');
+N.edge = take('results/edge_map.mat', 'EDGE_NUM');                 % verdict counts, edges, clean link, overhead pass
 
 N = clean(N);
 fid = fopen('results/report_numbers.json', 'w');

@@ -8,8 +8,8 @@
 % The antenna therefore helps exactly as far as the radio stays below the cap: a radio
 % that already reaches it with an omni gains nothing. The GCS of init_params.m is a
 % low-power radio (nRF24L01+, 0 / -6 / -12 / -18 dBm) at -6 dBm, its 0 dBm step being the
-% power_control action, on a 12 dBi antenna (the ground antenna of Rodriguez-Pineiro et
-% al.'s air-ground measurements) on a GPS tracker. Pointing: measured mean errors 5.62 deg
+% power_control action, on a 12 dBi antenna (the gain class of the fixed sector antenna of
+% Rodriguez-Pineiro et al.) on a GPS tracker. Pointing: measured mean errors 5.62 deg
 % azimuth and 1.51 deg elevation (Nugroho & Dectaviansyah), half-normal, ITU-R F.1336
 % main lobe G = G0 - 12 (phi/phi3)^2, phi3 = sqrt(27000 10^(-G0/10)) deg (gcs_pointing.m).
 % A tracker that lost its target (GPS not fixed for 202 s at start-up, Nugroho &

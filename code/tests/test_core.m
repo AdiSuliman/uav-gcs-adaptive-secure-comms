@@ -21,6 +21,21 @@ Simulink.fileGenControl('setConfig', 'config', tc.TestData.cfg);
 cd(tc.TestData.cwd);
 end
 
+%% ---------- code ----------
+function test_m_files_parse(tc)
+% Every .m file of the code (legacy excepted) parses, so no stage stops on a syntax
+% error in a file the other tests never reach.
+f = dir(fullfile(tc.TestData.root, 'code', '**', '*.m'));
+f = f(~contains({f.folder}, [filesep 'legacy']));
+bad = {};
+for i = 1:numel(f)
+    t = mtree(fileread(fullfile(f(i).folder, f(i).name)));
+    if strcmp(t.root.kind, 'ERR'), bad{end+1} = f(i).name; end %#ok<AGROW>
+end
+verifyGreaterThan(tc, numel(f), 50);
+verifyEmpty(tc, bad, strjoin(bad, ', '));
+end
+
 %% ---------- configurations and countermeasures ----------
 function test_actions_one_per_domain(tc)
 A = policy_actions();
@@ -87,6 +102,32 @@ verifyEqual(tc, m, mean(x), 'AbsTol', 1e-12);
 verifyLessThan(tc, lo, m); verifyGreaterThan(tc, hi, m);
 [~, lo1, hi1] = boot_cluster(double(x), ones(size(x)), 1:numel(x), 2000, 1);
 verifyGreaterThan(tc, hi - lo, hi1 - lo1);           % clustering widens the interval
+end
+
+function test_edge_verdict(tc)
+% The verdict thresholds for one outcome per flight: against 0.90 at 36 and 72
+% flights, all-success below N_MIN, false alarms against 5% at 172 flights. Two
+% episodes per flight widen the interval to the hull; a rate with every flight at 100%
+% takes the all-success bound, and a packet loss never gets a better bound by losing more.
+vd = @(k, n) getfield(edge_verdict(double((1:n) <= k), ones(1, n), 1:n, 0.9, 'ge', true), 'verdict');
+verifyEqual(tc, [vd(36, 36), vd(35, 36), vd(28, 36)], [1 0 -1]);
+verifyEqual(tc, [vd(70, 72), vd(69, 72)], [1 0]);
+verifyEqual(tc, vd(35, 35), 0);
+fa = @(a) getfield(edge_verdict(double((1:172) <= a), ones(1, 172), 1:172, 0.05, 'le', true), 'verdict');
+verifyEqual(tc, [fa(2), fa(3), fa(15), fa(16)], [1 0 0 -1]);
+V1 = edge_verdict(double((1:72) <= 66), ones(1, 72), 1:72, 0.9, 'ge', true);
+V2 = edge_verdict(double(repelem((1:72) <= 66, 2)), ones(1, 144), repelem(1:72, 2), 0.9, 'ge', true);
+verifyEqual(tc, [V2.value, V2.n, V2.k], [V1.value, 72, 66], 'AbsTol', 1e-12);
+verifyLessThanOrEqual(tc, V2.lo, V1.lo); verifyGreaterThanOrEqual(tc, V2.hi, V1.hi);
+D = edge_verdict(20 * ones(1, 36), 20 * ones(1, 36), 1:36, 0.9, 'ge', false);
+verifyEqual(tc, [D.lo, D.verdict], [0.025^(1/36), 1], 'AbsTol', 1e-9);
+L0 = edge_verdict(zeros(1, 196), 20 * ones(1, 196), 1:196, 0.014, 'le', false);
+L1 = edge_verdict([1, zeros(1, 195)], 20 * ones(1, 196), 1:196, 0.014, 'le', false);
+verifyEqual(tc, L0.hi, 1 - 0.025^(1/196), 'AbsTol', 1e-9);
+verifyGreaterThanOrEqual(tc, L1.hi, L0.hi);
+verifyEqual(tc, [L0.verdict, L1.verdict], [0 0]);
+E = edge_verdict([], [], [], 0.9, 'ge', false);
+verifyEqual(tc, [E.n, E.verdict], [0 0]);
 end
 
 %% ---------- features and state ----------
@@ -165,6 +206,15 @@ k1 = channel_k(12345, [-5 20]); k2 = channel_k(12345, [-5 20]);
 verifyEqual(tc, k1, k2);
 K = cell2mat(arrayfun(@(s) channel_k(s, [-5 20]), (1:500)', 'UniformOutput', false));
 verifyTrue(tc, all(K(:) >= -5 & K(:) <= 20));
+end
+
+function test_surv3_run_ids(tc)
+% The survivability-options experiment builds its geometries and reads their frames back
+% with one run id per geometry, the pools' numbering in its seed block 13.
+r = 1:99;
+verifyEqual(tc, surv3_run_id(r), 100 * 13 + r);
+txt = fileread(which('experiment_survivability_options'));
+verifyGreaterThanOrEqual(tc, numel(strfind(txt, 'surv3_run_id(')), 2);
 end
 
 function test_seed_streams_disjoint(tc)
@@ -416,7 +466,7 @@ verifyEqual(tc, q(2) - q(1), 22, 'AbsTol', 1.5);
 end
 
 function test_overhead_drop(tc)
-% largest drop of an overhead pass: D73's value at 300 m without a mast, none at 15 m
+% largest drop of an overhead pass: 22.9 dB at 300 m without a mast, none at 15 m
 verifyEqual(tc, overhead_drop_db(120, 0.56, 10, -30), 15.6, 'AbsTol', 0.2);
 verifyEqual(tc, overhead_drop_db(300, 0.5, 0, -30), 22.9, 'AbsTol', 0.1);
 verifyLessThan(tc, arrayfun(@(r) overhead_drop_db(15, r, 10, -30), [0.28 0.4 0.56 0.79 1.12 1.58]), 1e-9);

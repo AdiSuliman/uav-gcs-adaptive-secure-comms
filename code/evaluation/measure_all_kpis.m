@@ -21,6 +21,9 @@
 %          and p95 < 20 ms (also on one CPU core); robustness over the speed
 %          envelope (recovery spread <= 10 points), flights at its ends reported
 %   KPI 8  minimum: a closed loop restoring at least one recoverable threat
+% With results/edge_map.mat (edge_map.m), the verdicts per point are added as details:
+% detection (KPI 1), the system and its distance edges and the overhead pass (KPI 4),
+% the clean link (KPI 6), hover and 161 km/h (KPI 7).
 %
 % Output: results/kpi_summary.txt, results/kpi_summary.mat (KPI struct array)
 
@@ -30,7 +33,7 @@ F = struct('det', 'results/eval_detector_metrics.mat', 'unseen', 'results/unseen
     'ood', 'results/ood_detection.mat', 'phy', 'results/phy_validation.txt', ...
     'pol', 'results/policy_evaluation.mat', 'lat', 'results/latency.mat', ...
     'surv', 'data/survivability_boundary.mat', 'dqn', 'data/trained_dqn.mat', 'arch', 'results/architecture_comparison.txt', ...
-    'ant3', 'results/survivability_options.txt', 'combo', 'results/combo_generalization.mat');
+    'ant3', 'results/survivability_options.txt', 'combo', 'results/combo_generalization.mat', 'edge', 'results/edge_map.mat');
 KPI2_TARGET = 0.8;                                 % mean AUROC (the submitted proposal's target, kept in the update)
 t_det = file_time('data/trained_detector.mat'); t_dqn = file_time(F.dqn);
 if isfile('data/trained_detector.mat')             % training time (the file is updated later by the OOD stage)
@@ -132,7 +135,7 @@ if isfile(F.pol)
             100 * mean([Cg.res.dqn_in]), 100 * mean([Cg.res.rule]));
     end
     if isfield(P.KP, 'envelope')
-        % inside the operating envelope fixed on validation (D70); the full result stays in the details
+        % inside the operating envelope fixed on validation; the full result stays in the details
         pe = P.KP.per_threat_env(:)'; he = ~isnan(pe);
         te = P.KP.threats(he);
         det = [{sprintf(['operating envelope (validation: >= %d%% of >= %d recoverable episodes): %d of %d ' ...
@@ -238,6 +241,36 @@ else
     for k = 4:8, KPI(end+1) = missing(k, sprintf('KPI %d', k), F.pol); end %#ok<SAGROW>
 end
 
+%% Edge map: verdicts per point (edge_map.m)
+if isfile(F.edge)
+    En = load(F.edge, 'EDGE_NUM'); en = En.EDGE_NUM;
+    cnt = @(x) sprintf('%d COMMITTED / %d NOT COMMITTED / %d UNDETERMINED', x);
+    pts = @(i) sprintf('edge map, %s per (threat, level, Eb/N0): single threats %s | combined threats %s', ...
+        en.layers{i}, cnt(en.counts_single(i, :)), cnt(en.counts_combined(i, :)));
+    det = {pts(1)};
+    if ~isempty(en.b4)
+        det{end+1} = sprintf('edge map, detector beyond 0-15 dB (%d classes, >= 90%% same countermeasure): %s', ...
+            numel(unique({en.b4.cls})), strjoin(arrayfun(@(e) sprintf('%g dB %s', e, ...
+            cnt(arrayfun(@(v) sum([en.b4([en.b4.ebno] == e).verdict] == v), [1 -1 0]))), unique([en.b4.ebno]), ...
+            'UniformOutput', false), ' | '));
+    end
+    k = find([KPI.id] == 1, 1); KPI(k).detail = [KPI(k).detail, det];
+    inom = find(ismember(en.cells, en.nominal));
+    det = {pts(4), pts(5), sprintf(['edge map, SYSTEM distance edge at the nominal level (Eb/N0 from 15 dB down to the ' ...
+        'last COMMITTED point): %s'], strjoin(arrayfun(@(i) sprintf('%s %s', en.cells{i}, ...
+        edge_km(en.edge_sys_db(i), en.edge_sys_km(i))), inom, 'UniformOutput', false), ', ')), ...
+        sprintf('edge map, overhead pass (altitude x distance): %s', cnt(arrayfun(@(v) sum(en.ohp_verdict(:) == v), [1 -1 0])))};
+    k = find([KPI.id] == 4, 1); KPI(k).detail = [KPI(k).detail, det];
+    k = find([KPI.id] == 6, 1);
+    KPI(k).detail{end+1} = sprintf('edge map, clean link per Eb/N0 (%s dB): FA <= 5%% %s | LINK <= 1.4%% %s', ...
+        strjoin(compose('%g', en.ebno), '/'), strjoin(arrayfun(@(v, n) sprintf('%s(%d)', vsym(v), n), en.fa_verdict, ...
+        en.fa_n, 'UniformOutput', false), ' '), strjoin(arrayfun(@(v, n) sprintf('%s(%d)', vsym(v), n), en.link_verdict, ...
+        en.link_n, 'UniformOutput', false), ' '));
+    k = find([KPI.id] == 7, 1);
+    KPI(k).detail{end+1} = sprintf('edge map, SYSTEM at the nominal level of %d threats: hover %s | 161 km/h %s', ...
+        numel(inom), cnt(arrayfun(@(v) sum(en.hover == v), [1 -1 0])), cnt(arrayfun(@(v) sum(en.v161 == v), [1 -1 0])));
+end
+
 %% Report
 for k = 1:numel(KPI)
     q = KPI(k);
@@ -290,6 +323,15 @@ end
 function s = band_txt(b)
 % Speed band [km/h] as text, one value when the band is a single speed.
 if b(1) == b(2), s = sprintf('%g', b(1)); else, s = sprintf('%g-%g', b); end
+end
+
+function s = vsym(v)
+% Verdict of edge_verdict.m as a letter: C COMMITTED, N NOT COMMITTED, U UNDETERMINED.
+if isnan(v), s = '-'; else, s = 'NUC'; s = s(v + 2); end
+end
+
+function s = edge_km(e, d)
+if isnan(e), s = 'none'; else, s = sprintf('%g dB (%.2f km)', e, d); end
 end
 
 function s = lat_class(ms)
