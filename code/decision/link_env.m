@@ -42,8 +42,8 @@ function varargout = link_env(cmd, varargin)
 %     false  per change on a healthy link
 %   restored: m <= C.ratio_ok x clean; restored_plr: true packet loss <= C.ratio_ok
 %   x the clean link's + one packet of the geometry (two frames with fec_interleave,
-%   packet_share.m; its packet is decoded after the second, 40 ms, a delay not counted
-%   in the cycles); healthy: unmitigated m <=
+%   packet_share.m; its packet is decoded after the second, one cycle (20 ms) later than
+%   an uncoded packet, a delay not counted in the cycles); healthy: unmitigated m <=
 %   C.ratio_ok x clean; recoverable: some configuration restores both BER and
 %   packet loss in this geometry.
 %   obs: probs (NE x classes), maha (unknown-threat score), unknown (score below

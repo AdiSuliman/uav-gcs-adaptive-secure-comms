@@ -10,9 +10,10 @@ function [ber, fer, crcf] = fec_packets(tx_al, rx_al, iq, p, nf)
 %   errors of the two frames are applied to the codeword; a symbol whose received energy
 %   is more than 6 dB above the median of the two frames is erased (a burst visible at
 %   the receiver), the rest are hard decisions (Viterbi on +1/-1/0). Both frames carry
-%   their packet's result: the BER and any error of its decoded 1032 bits and its CRC
-%   check. The packet is decoded after its second frame, 40 ms after its first at the
-%   20 ms cycle. A frame without its pair, or past the aligned bits, is NaN.
+%   their packet's ground truth, the BER and any error of its decoded 1032 bits; its CRC
+%   check, a receiver measurement, exists only from the second frame on, when the packet
+%   is decoded (one cycle, 20 ms, later than an uncoded packet), so the first frame's is
+%   NaN. A frame without its pair, or past the aligned bits, is NaN.
 ber = nan(1, nf); fer = nan(1, nf); crcf = nan(1, nf);
 bpf = p.frame_length;
 e = double(tx_al(:) ~= rx_al(:));
@@ -53,6 +54,6 @@ for k = 1:floor(nf / 2)
     err = double(dec(1:bpf) ~= u);
     ber([f f+1]) = mean(err);
     fer([f f+1]) = double(any(err));
-    crcf([f f+1]) = crc32_fail(u(1:bpf - p.crc_bits), err);
+    crcf(f+1) = crc32_fail(u(1:bpf - p.crc_bits), err);
 end
 end

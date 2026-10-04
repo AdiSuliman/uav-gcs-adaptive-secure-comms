@@ -52,7 +52,8 @@ p = base_params();
 verifyEqual(tc, g, 10*log10(p.cm_rate_factor) + power_step_db(p), 'AbsTol', 1e-9);
 % the power step never takes the GCS above the e.i.r.p. cap
 verifyLessThanOrEqual(tc, p.gcs_pt_dbm + p.gcs_ant_dbi + power_step_db(p), p.gcs_eirp_cap_dbm + 1e-9);
-verifyEqual(tc, power_step_db(rmfield(p, 'gcs_ant_dbi')), p.gcs_pmax_dbm - p.gcs_pt_dbm);   % the radio's own limit
+verifyEqual(tc, power_step_db(rmfield(p, 'gcs_ant_dbi')), ...
+    floor((p.gcs_pmax_dbm - p.gcs_papr_db - p.gcs_pt_dbm) / p.gcs_step_db) * p.gcs_step_db, 'AbsTol', 1e-12);   % the radio's own limit
 p2 = apply_countermeasure(p, 'sweeping_jammer', 'freq_diversity+power_control');
 verifyTrue(tc, p2.sweep_fdiv);
 verifyEqual(tc, p2.jsr_db, p.jsr_db - power_step_db(p), 'AbsTol', 1e-9);
@@ -257,8 +258,9 @@ end
 
 function test_draws_independent(tc)
 % The draws of a flight are independent: our signal's K is uncorrelated with the
-% heading rate and the other draws, and no draw repeats on another seed (the AoA of
-% geometry r+12 is not the K of geometry r).
+% heading rate and the other draws (the hover attitude and wobble and the airframe loss
+% included), and no draw repeats on another seed (the AoA of geometry r+12 is not the K
+% of geometry r).
 p = base_params();
 [r, s, b] = ndgrid(1:99, 1:6, [5 14 16 17]);            % pool geometries, consecutive seeds along r
 [S, v] = arrayfun(@(bi, si, ri) pool_seed(1, si, bi, ri, [0 1]), b(:), s(:), r(:));
@@ -269,13 +271,17 @@ w = arrayfun(@(x) heading_rate(x, 1, p), S) / wmax;     % 1 Hz: below the speed 
 rho = arrayfun(@(x) rx_correlation(x, [0 1]), S);
 G = arrayfun(@(x) gcs_aoa(x, [0 1]), S);
 W = cell2mat(arrayfun(@(x) hover_attitude(x, 0, p), S, 'UniformOutput', false));
-W = (W(:, 1) - p.wobble_roll_deg(1)) / diff(p.wobble_roll_deg);
+am = min([p.wobble_amp_deg * ones(size(W, 1), 1), p.wobble_pitch_lim_deg(2) - W(:, 2), W(:, 2) - p.wobble_pitch_lim_deg(1)], [], 2);
+W = [(W(:, 1) - p.wobble_roll_deg(1)) / diff(p.wobble_roll_deg), (W(:, 2) - p.wobble_pitch_deg(1)) / diff(p.wobble_pitch_deg), ...
+    (W(:, 3) ./ am + 1) / 2, (W(:, 4) - p.wobble_freq_hz(1)) / diff(p.wobble_freq_hz), W(:, 5) / (2*pi)];
+bm = p.body_loss_db; cn = @(x) 0.5 * erfc(-(x - bm(1)) / (bm(2) * sqrt(2)));
+B = (cn(cell2mat(arrayfun(@(x) body_loss(x, 3, bm), S, 'UniformOutput', false))) - cn(bm(3))) / (cn(bm(4)) - cn(bm(3)));
 J = cell2mat(arrayfun(@(x) jam_timing(x, [0 1]), S, 'UniformOutput', false));
 J(:, 2) = J(:, 2) ./ J(:, 1);
 q = p; q.tdl_clip_ns = Inf;                             % no altitude: every channel on the omni fit
 Z = cell2mat(arrayfun(@(x) delay_spread(x, NaN, 3, q), S, 'UniformOutput', false));
 Z = 0.5 * erfc(-(log10(Z * 1e-9) - q.tdl_int_ds(1)) / sqrt(2 * q.tdl_int_ds(2)));
-U = [K, A, (w + 1) / 2, rho, v, G, W, J, Z];            % the uniform behind every draw
+U = [K, A, (w + 1) / 2, rho, v, G, W, J, Z, B];         % the uniform behind every draw
 c = corrcoef(K(:, 1), w);
 verifyLessThan(tc, abs(c(1, 2)), 0.1);
 C = corrcoef(U);
@@ -488,6 +494,13 @@ verifyEqual(tc, inband_cap_amp(23, 18, 30), 10^(-11/20), 'RelTol', 1e-12);
 s = min(1, inband_cap_amp(L, PL, 30) .* 10.^(G / 20));             % the threat block's scale
 verifyEqual(tc, L + PL - G + 20*log10(s), min(L + PL - G, 30), 'AbsTol', 1e-9);
 verifyEqual(tc, s(L + PL - G <= 30), ones(nnz(L + PL - G <= 30), 1), 'AbsTol', 1e-12);
+% with the airframe loss: no antenna of any drawn flight above the cap
+q = base_params();
+D = arrayfun(@(x) flight_draws(x, 100, q, struct('ebno', 15, 'alt_m', 120)), 1:2000);
+ga = 20*log10(vertcat(D.gcs_amp) .* vertcat(D.body_amp));             % our signal on each antenna [dB]
+sb = min(1, inband_cap_amp(30, 22, 30) * vertcat(D.gcs_amp) .* min(vertcat(D.body_amp), [], 2));
+verifyLessThanOrEqual(tc, max(30 + 22 + 20*log10(sb) - ga, [], 'all'), 30 + 1e-9);
+verifyGreaterThan(tc, max(max(ga, [], 2) - min(ga, [], 2)), 3);      % the antennas differ
 p = base_params(); p.jsr_db = 23; p.path_loss_db = 18;
 p2 = apply_countermeasure(p, 'jamming+path_loss', 'power_control');
 verifyEqual(tc, p2.inband_ref.jsr_db, 23);
@@ -500,6 +513,9 @@ q = zeros(1, 2);
 for k = 1:2
     if k == 2, p.inband_cap_db = Inf; end
     evalc('build_threat_model(p)');
+    if k == 1   % the threat block caps on the weakest antenna
+        verifyTrue(tc, contains(sfroot().find('-isa', 'Stateflow.EMChart', 'Path', [mdl '/Threat']).Script, '* gcs * min(bdy))'));
+    end
     set_param([mdl '/AWGN'], 'SNR', num2str(12 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), 'SignalPower', num2str(1/p.sps));
     link_seed(mdl, 11, 160);
     F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(4 * p.frame_duration)), p, 20);
@@ -515,6 +531,11 @@ verifyEqual(tc, overhead_drop_db(120, 0.56, 10, -30), 15.6, 'AbsTol', 0.2);
 verifyEqual(tc, overhead_drop_db(300, 0.5, 0, -30), 22.9, 'AbsTol', 0.1);
 verifyLessThan(tc, arrayfun(@(r) overhead_drop_db(15, r, 10, -30), [0.28 0.4 0.56 0.79 1.12 1.58]), 1e-9);
 verifyGreaterThan(tc, overhead_drop_db(120, 0.28, 10, -30), overhead_drop_db(60, 0.28, 10, -30));
+% banked over the GCS (the largest measured bank, 57.9 deg): 26.9 dB at 120 m and 0.28 km
+% against the wings-level cruise gain; no bank is the level pass, and more bank drops more
+verifyEqual(tc, overhead_drop_db(120, 0.28, 10, -30, 57.9), 26.9, 'AbsTol', 0.1);
+verifyEqual(tc, overhead_drop_db(120, 0.28, 10, -30, 0), overhead_drop_db(120, 0.28, 10, -30));
+verifyGreaterThan(tc, overhead_drop_db(60, 0.4, 10, -30, 45), overhead_drop_db(60, 0.4, 10, -30, 20));
 end
 
 %% ---------- temporal evidence and fusion ----------
@@ -706,10 +727,11 @@ end
 
 function test_hover_wobble(tc)
 % Attitude in wind: none from 8 m/s up; below, the static tilt within Polle et al.'s
-% measured means and the pitch wobble within Banagar & Dhillon's ranges. The wobble's
-% lever-arm phase k aD cos(phi) sin(pitch) (phi = 20 deg, their example) decorrelates the
-% channel (ACF 0.5 at the worst phase) after 6.74 ms at 10 deg and 12.26 ms at 7 deg
-% (+-30%), and never at 5 deg, as they found at 2.4 GHz.
+% measured means and the pitch wobble within Banagar & Dhillon's ranges, the pitch with
+% its wobble within Polle et al.'s largest calibrated tilts. Banagar & Dhillon's wobble,
+% its lever-arm phase k aD cos(phi) sin(pitch) (phi = 20 deg, their example),
+% decorrelates the channel (ACF 0.5 at the worst phase) after 6.74 ms at 10 deg and
+% 12.26 ms at 7 deg (+-30%), and never at 5 deg, as they found at 2.4 GHz.
 p = base_params();
 fd = @(v) v * p.carrier_freq / p.c_light;
 verifyEqual(tc, hover_attitude(5, fd(p.wobble_v_max), p), zeros(1, 5));
@@ -718,6 +740,10 @@ W = cell2mat(arrayfun(@(s) hover_attitude(s, fd(3), p), (1:4000)', 'UniformOutpu
 verifyTrue(tc, all(W(:, 1) >= p.wobble_roll_deg(1) & W(:, 1) <= p.wobble_roll_deg(2)));
 verifyTrue(tc, all(W(:, 2) >= p.wobble_pitch_deg(1) & W(:, 2) <= p.wobble_pitch_deg(2)));
 verifyTrue(tc, all(abs(W(:, 3)) <= p.wobble_amp_deg & W(:, 4) >= p.wobble_freq_hz(1) & W(:, 4) < p.wobble_freq_hz(2)));
+verifyTrue(tc, all(W(:, 2) + abs(W(:, 3)) <= p.wobble_pitch_lim_deg(2) + 1e-9 & ...
+    W(:, 2) - abs(W(:, 3)) >= p.wobble_pitch_lim_deg(1) - 1e-9));
+verifyGreaterThan(tc, max(abs(W(:, 3))), 9.5);                 % the full wobble where the tilt leaves room
+verifyLessThan(tc, max(W(:, 2) + abs(W(:, 3))), 21.1 + 1e-9);
 d = flight_draws(5, fd(3), p);
 verifyEqual(tc, [d.roll - sign(d.yaw) * d.bank, d.pitch, d.wobble], hover_attitude(5, fd(3), p), 'AbsTol', 1e-12);
 d = flight_draws(5, fd(p.wobble_v_max), p);
@@ -725,8 +751,9 @@ verifyEqual(tc, [d.pitch d.wobble], zeros(1, 4));
 ka = 2*pi * p.wobble_arm_m * p.carrier_freq / p.c_light;
 tau = (0:0.05:30) * 1e-3;
 tco = zeros(1, 3); m = [10 7 5];
+A = 2 * rand(RandStream('mt19937ar', 'Seed', 5), size(W, 1), 1) - 1;   % their amplitude, uniform in +-m
 for i = 1:3
-    R = abs(mean(exp(1j * ka * cosd(20) * sind(W(:, 3) * m(i) / 10 .* sin(2*pi * W(:, 4) * tau))), 1));
+    R = abs(mean(exp(1j * ka * cosd(20) * sind(A * m(i) .* sin(2*pi * W(:, 4) * tau))), 1));
     j = find(R <= 0.5, 1); tco(i) = Inf; if ~isempty(j), tco(i) = tau(j); end
 end
 verifyEqual(tc, tco(1:2), [6.74 12.26] * 1e-3, 'RelTol', 0.3);
@@ -947,11 +974,11 @@ end
 function test_receiver_delay_spread(tc)
 % The real receiver on the delay line, three flights at 160 Hz: MRC over the antennas and
 % the channel's lags with the linear MMSE equalizer keeps a clean link at K -5 dB and a
-% 1 us RMS delay spread below 1e-3 at 12 dB (2e-5 here; the flat receiver: 7e-2, the flat
-% channel 4e-5); the space-time MMSE answers a 16 dB jammer whose channel spreads 234 ns
-% (8e-3 here, 0.12 with the antennas alone); a 30 dB jammer on the flat channel stays
-% below 0.06 (0.03 here; 0.11 with the quiet slot holding the previous frame's filter
-% memory and the pilot steps weighed by the training's whitening).
+% 1 us RMS delay spread below 1e-3 at 12 dB; the MMSE receiver keeps a 16 dB jammer whose
+% channel spreads 234 ns below 0.03 at 15 dB, and one that spreads 64 ns, nearly flat,
+% about as well as the flat receiver on the flat channel at 6 dB (each frame keeps the
+% space-time or the antennas-alone output by its pilots); a 30 dB jammer on the flat
+% channel stays below 0.06.
 p = base_params(); p.quiet_build = true; p.rx_sync = 'real'; p.int_aoa_random = false; p.yaw_random = false;
 p.corr_random = false; p.gcs_tracked = false; p.k_random = false; p.gcs_aoa_random = false; p.body_random = false;
 p.tdl = true; p.tdl_random = false;
@@ -961,7 +988,11 @@ verifyLessThan(tc, link_ber(mdl, q, 12, 21:23, 20), 1e-3);
 q = p; q.active_threat = 'jamming'; q.jsr_db = 16; q.rx_combiner = 'mmse'; q.rician_k = 10; q.int_rician_k = 10;
 q.tdl_ds_ns = [0 234];
 verifyLessThan(tc, link_ber(mdl, q, 15, 21:23, 20), 0.03);
-q.tdl = false; q.jsr_db = 30;
+q.tdl_ds_ns = [0 64];
+b64 = link_ber(mdl, q, 6, 21:23, 20);
+q.tdl = false;
+verifyLessThan(tc, b64, 1.5 * link_ber(mdl, q, 6, 21:23, 20));
+q.jsr_db = 30;
 verifyLessThan(tc, link_ber(mdl, q, 15, 21:23, 20), 0.06);
 end
 
@@ -969,8 +1000,10 @@ function test_power_cap(tc)
 % The licence-exempt density cap of 10 dBm in any 1 MHz (ETSI EN 300 328) on our RRC
 % signal: 95.5% of its power in the central 1 MHz, so 10.20 dBm; the AD9361-class radio
 % steps up by its largest 0.25 dB step under it, +4.0 dB to 10.0 dBm e.i.r.p.; on the omni
-% its 7.5 dBm output binds first. The share also from the transmit filter's own spectrum,
-% and one frame per cycle within the standard's limits for non-adaptive equipment.
+% its 7.5 dBm CW output, less our waveform's peak-to-average ratio (4-6 dB for RRC QPSK at
+% a 0.25 roll-off; no lower than the model's own transmit filter shows), binds first. The
+% share also from the transmit filter's own spectrum, and one frame per cycle within the
+% standard's limits for non-adaptive equipment.
 p = base_params();
 [cap, share] = eirp_cap_dbm(10, 0.25, 1e6);
 verifyEqual(tc, share, 0.75 + 2 * (0.25/4 + 0.25/(2*pi)), 'AbsTol', 1e-12);
@@ -983,7 +1016,14 @@ H = abs(fft(rcosdesign(p.rolloff, 40, os, 'sqrt'), N)).^2;
 f = (0:N-1) / N * os * p.symbol_rate; f = min(f, os * p.symbol_rate - f);
 verifyEqual(tc, sum(H(f <= 0.5e6)) / sum(H), share, 'AbsTol', 2e-3);
 q = p; q.gcs_ant_dbi = p.gcs_omni_dbi;
-verifyEqual(tc, power_step_db(q), p.gcs_pmax_dbm - p.gcs_pt_dbm, 'AbsTol', 1e-12);
+verifyEqual(tc, power_step_db(q), floor((p.gcs_pmax_dbm - p.gcs_papr_db - p.gcs_pt_dbm) / 0.25) * 0.25, 'AbsTol', 1e-12);
+verifyEqual(tc, p.gcs_papr_db, papr_db(p));
+verifyTrue(tc, p.gcs_papr_db > 4 && p.gcs_papr_db < 6);
+txf = comm.RaisedCosineTransmitFilter('RolloffFactor', p.rolloff, 'FilterSpanInSymbols', p.filter_span, ...
+    'OutputSamplesPerSymbol', p.sps);
+y = txf(pskmod(randi(RandStream('mt19937ar', 'Seed', 2), [0 3], 4096, 1), 4, pi/4));
+a = abs(y(p.filter_span * p.sps + 1:end)).^2;
+verifyLessThanOrEqual(tc, 10*log10(max(a) / mean(a)), p.gcs_papr_db + 0.3);
 o = rmfield(p, {'gcs_pmax_dbm', 'gcs_step_db'}); o.cm_power_db = 6; o.gcs_eirp_cap_dbm = 10 + 10*log10(1.25);
 verifyEqual(tc, power_step_db(o), 10*log10(1.25) + 4, 'AbsTol', 1e-12);    % without the radio fields: its next step under the cap
 ton = p.air_symbols / p.symbol_rate;
@@ -1018,6 +1058,50 @@ verifyGreaterThanOrEqual(tc, g(1), g(2));
 p.fdiv_spacing_hz = 2e6;
 verifyEqual(tc, sweep_window_s(p), [2e-3 5.25e-3], 'AbsTol', 1e-15);
 verifyEqual(tc, threat_active('sweeping_jammer', [0 0.05 0.1 1]), [false false true true]);   % labels as the WLAN's
+end
+
+function test_sweep_hit_share(tc)
+% The sweeping jammer counts in about 13% of the frames (Liu et al.'s 5.25 ms window per
+% 20-83.5 ms sweep): the share the frames of seeded flights, a cycle apart on the channel
+% clock, have with at least 10% of their air time inside the window; the dataset flies its
+% cells 1/share times the sub-runs.
+p = base_params();
+h = sweep_hit_share(p);
+verifyGreaterThan(tc, h, 0.10); verifyLessThan(tc, h, 0.16);
+g = sweep_window_s(p); ta = p.air_symbols / p.symbol_rate;
+J = cell2mat(arrayfun(@(x) jam_timing(x, p.sweep_period_s), (1:4000)', 'UniformOutput', false));
+t = (0:19) * p.cycle_s + linspace(0, ta, 200)';                  % air time of 20 frames
+on = zeros(4000, 20);
+for i = 1:4000
+    u = mod(t + J(i, 2), J(i, 1));
+    on(i, :) = mean(u >= g(1) & u < g(2), 1);
+end
+verifyEqual(tc, mean(on(:) >= 0.1), h, 'AbsTol', 0.01);
+verifyEqual(tc, round(6 / h), 45, 'AbsTol', 3);
+end
+
+function test_receiver_coherence_tdl(tc)
+% With the delay line, the production channel, a jammer at a low trained level (4 dB) is
+% still more coherent than the clean link on the same five flights; the margin is below
+% the flat channel's (test_receiver_measurements: 0.15), a loss of separation the
+% detector's training and reading carry.
+p = base_params(); p.quiet_build = true; p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false;
+p.gcs_tracked = false; p.seed = 11; p.k_random = false; p.gcs_aoa_random = false; p.body_random = false;
+p.tdl = true;
+mdl = 'UAV_GCS_Threat_Link';
+CS = 11:15; coh = zeros(2, numel(CS)); thr = {'none', 'jamming'};
+for j = 1:2
+    p.active_threat = thr{j}; p.jsr_db = 4;
+    evalc('build_threat_model(p)');
+    set_param([mdl '/AWGN'], 'SNR', num2str(12 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), 'SignalPower', num2str(1/p.sps));
+    for k = 1:numel(CS)
+        link_seed(mdl, CS(k), 160);
+        F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
+        coh(j, k) = mean(F.coh, 'omitnan');
+    end
+    close_system(mdl, 0);
+end
+verifyGreaterThan(tc, mean(coh(2, :)) - mean(coh(1, :)), 0.10);
 end
 
 function test_gated_jammers(tc)
@@ -1073,16 +1157,19 @@ end
 
 function test_fec_packets(tc)
 % FEC: one codeword per 1000 + 32-bit packet over two frames (2064 coded bits, two frames
-% of channel bits). A clean run decodes every frame; both frames carry their packet's
-% result, in steps of 1/1032; a packet's result does not change with another packet's
-% errors; scattered errors are repaired, a burst only when the receiver sees it (erased),
-% a whole jammed frame not; a last frame without its pair is NaN.
+% of channel bits). A clean run decodes every frame; both frames carry their packet's BER
+% and error, in steps of 1/1032, and only the second its CRC result (decoded there); a
+% packet's result does not change with another packet's errors; scattered errors are
+% repaired, a burst only when the receiver sees it (erased), a whole jammed frame not; a
+% last frame without its pair is NaN.
 p = base_params(); L = frame_layout(p); bpf = p.frame_length; nf = 20; d = p.filter_span / 2;
 rs = RandStream('mt19937ar', 'Seed', 3);
 tx = randi(rs, [0 1], nf * bpf, 1);
 iq = ones(L.air * p.sps, nf);
 [b, f, c] = fec_packets(tx, tx, iq, p, nf);
-verifyEqual(tc, [b; f; c], zeros(3, nf));
+verifyEqual(tc, [b; f], zeros(2, nf));
+verifyEqual(tc, c(2:2:nf), zeros(1, nf / 2));
+verifyTrue(tc, all(isnan(c(1:2:nf))));
 verifyEqual(tc, [crc32_fail(tx(1:1000), zeros(bpf, 1)), crc32_fail(tx(1:1000), [1; zeros(bpf - 1, 1)])], [0 1]);
 rx = tx;
 i1 = randperm(rs, 2 * bpf, 10); rx(i1) = 1 - rx(i1);                   % packet 1: scattered errors
@@ -1090,8 +1177,9 @@ rx(2*bpf + (1:bpf)) = randi(rs, [0 1], bpf, 1);                          % frame
 [b, f, c] = fec_packets(tx, rx, iq, p, nf);
 verifyEqual(tc, b([1 2 5:nf]), zeros(1, nf - 2));
 verifyGreaterThan(tc, b(3), 0);
-verifyEqual(tc, [f(3) c(3)], [1 1]);
-verifyEqual(tc, [b(4) f(4) c(4)], [b(3) f(3) c(3)]);
+verifyEqual(tc, [f(3) f(4) c(4)], [1 1 1]);
+verifyEqual(tc, b(4), b(3));
+verifyTrue(tc, isnan(c(3)));
 verifyEqual(tc, b(3) * bpf, round(b(3) * bpf), 'AbsTol', 1e-9);
 rx2 = rx; rx2(8*bpf + (1:2*bpf)) = randi(rs, [0 1], 2*bpf, 1);         % packet 5 jammed
 b2 = fec_packets(tx, rx2, iq, p, nf);
@@ -1116,8 +1204,9 @@ end
 function test_packet_loss_once(tc)
 % A lost packet is one packet: the slack of the packet-loss criterion is two frames with
 % FEC (a packet over two frames) and one frame without; the monitor counts a lost coded
-% packet once, so one lost packet does not degrade a coded link and two do, while an
-% uncoded link counts its frames.
+% packet once, at its second frame (decoded there: a result on its first frame is not
+% read), so one lost packet does not degrade a coded link and two do, while an uncoded
+% link counts its frames.
 verifyEqual(tc, packet_share({'no_action', 'power_control+fec_interleave'}, 20), [1 2] / 20);
 verifyEqual(tc, packet_share('fec_interleave', 57), 2 / 56);
 A = policy_actions(); ic = find(strcmp(A, 'fec_interleave')); iu = find(strcmp(A, 'no_action'));
@@ -1131,6 +1220,7 @@ for t = 1:8
     obs.feat(:, feature_index('crc_fail')) = crc(:, t);
     obs.feat(:, feature_index('log_ber')) = -6;
     [mem, M] = policy_monitor('update', mem, obs, PP, [ic ic iu]);
+    if t == 5, verifyEqual(tc, M.plr, [0; 0; 1/5], 'AbsTol', 1e-12); end
 end
 verifyEqual(tc, M.plr, [1/3; 2/3; 2/5], 'AbsTol', 1e-12);
 verifyEqual(tc, M.degraded, [false true false]);

@@ -8,7 +8,8 @@
 % central 1 MHz, so 10.2 dBm (eirp_cap_dbm.m), the stricter.
 % The antenna therefore helps exactly as far as the radio stays below the cap: a radio
 % that already reaches it with an omni gains nothing. The GCS of init_params.m is an
-% AD9361-class transmitter (0.25 dB steps, up to 7.5 dBm at 2.4 GHz) at -6 dBm, raised by
+% AD9361-class transmitter (0.25 dB steps, up to 7.5 dBm at 2.4 GHz for a CW tone, so our
+% waveform's mean up to its peak-to-average ratio below, papr_db.m) at -6 dBm, raised by
 % its largest step under the cap as the power_control action (power_step_db.m), on a 12 dBi
 % antenna (the gain class of the fixed sector antenna of Rodriguez-Pineiro et al.) on a
 % GPS tracker. Pointing: measured mean errors 5.62 deg
@@ -28,9 +29,10 @@ ANT = struct('name', {'omni (fallback)', 'sector (Sun et al.)', 'tracked directi
 NS = 20000;
 
 rep = {'=== DIRECTIONAL GCS ANTENNA ON THE UPLINK (Israel / ETSI e.i.r.p. cap) ===', ...
-    sprintf(['Radio %g dBm nominal, up to %g dBm in %g dB steps; cap %.2f dBm e.i.r.p. (%g dBm in any 1 MHz, %.1f%% of ' ...
-    'our signal in its central 1 MHz). Gains relative to the omni on the same radio.'], ...
-    p.gcs_pt_dbm, p.gcs_pmax_dbm, p.gcs_step_db, cap, p.gcs_psd_dbm_mhz, 100 * share), ''};
+    sprintf(['Radio %g dBm nominal, up to %g dBm in %g dB steps (a CW tone; our waveform''s mean %.1f dB lower, its ' ...
+    'peak-to-average ratio); cap %.2f dBm e.i.r.p. (%g dBm in any 1 MHz, %.1f%% of our signal in its central 1 MHz). ' ...
+    'Gains relative to the omni on the same radio.'], p.gcs_pt_dbm, p.gcs_pmax_dbm, p.gcs_step_db, p.gcs_papr_db, cap, ...
+    p.gcs_psd_dbm_mhz, 100 * share), ''};
 rep{end+1} = sprintf('%-36s %6s %10s %10s %11s %12s %14s', 'antenna', 'G dBi', 'e.i.r.p.', 'gain', 'power step', 'pointing', 'with step');
 e_omni = min(p.gcs_pt_dbm + p.gcs_omni_dbi, cap);
 for a = 1:numel(ANT)

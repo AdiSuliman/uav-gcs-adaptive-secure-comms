@@ -5,7 +5,7 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %
 %   Receiver measurements only (link_features.m): the estimated BER of the last C.win
 %   frames and the CRC packet loss of the packets they carry (a coded packet spans two
-%   frames, obs.pkt, and counts once). Degradation: the estimated BER above
+%   frames, obs.pkt, and counts once, at its second frame, when it is decoded). Degradation: the estimated BER above
 %   C.ratio_ok x the clean link's estimated BER at the receiver's own Eb/N0
 %   estimate (clean_ber_ref.m, floor C.deg_floor); with fec_interleave in the
 %   configuration the channel BER stays high while the decoder repairs the bursts,
@@ -58,8 +58,9 @@ coded = contains(PP.actions(cfg), 'fec_interleave');
 pk = nan(size(mem.crc, 1), 1);                                   % a frame is its own packet unless coded
 if isfield(obs, 'pkt') && ~isempty(obs.pkt), pk(coded) = obs.pkt(coded); end
 if ~isfield(mem, 'pk'), mem.pk = nan(size(mem.crc)); end
+mem.crc(coded(:) & (isnan(mem.pk(:, end)) | pk ~= mem.pk(:, end)), end) = NaN;   % first frame: not decoded yet
 mem.pk = [mem.pk(:, 2:end), pk];
-[npk, lost] = packets(mem.crc, mem.pk);
+[npk, lost] = packets(mem.crc);
 M.ber_avg = mean(mem.ber, 2, 'omitnan');
 M.plr = lost ./ npk;
 M.ebno_est = fi('sinr') + fi('iot') + 10*log10(PP.sps) - 10*log10(PP.bps);
@@ -155,13 +156,10 @@ unk = obs.unknown(:)';
 if Nu > 1 && ~all(isnan(mh)), unk = mem.unk_now(:)' | (obs.unknown(:)' & isinf(mh(:)')); end
 end
 
-function [n, lost] = packets(crc, pk)
-% Packets in the window and the lost ones (NE x 1): consecutive frames with the same
-% packet key are one packet (a coded packet over two frames, both carrying its CRC
-% result), counted once; a frame without a key is a packet of its own.
-first = true(size(pk));
-first(:, 2:end) = isnan(pk(:, 2:end)) | pk(:, 2:end) ~= pk(:, 1:end-1);
-k = first & ~isnan(crc);
+function [n, lost] = packets(crc)
+% Packets in the window and the lost ones (NE x 1): every frame with a CRC result, a
+% coded packet's second frame or an uncoded frame.
+k = ~isnan(crc);
 n = sum(k, 2);
 lost = sum(k & crc > 0, 2);
 end

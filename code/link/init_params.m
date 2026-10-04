@@ -106,6 +106,7 @@ params.wobble_v_max     = 8;                     % [m/s] below it: hover attitud
 params.wobble_roll_deg  = [-17.5 19.3];          % [deg] static roll (Polle et al.)
 params.wobble_pitch_deg = [-11.0 14.9];          % [deg] static pitch (Polle et al.)
 params.wobble_amp_deg   = 10;                    % [deg] largest pitch wobble (Banagar & Dhillon)
+params.wobble_pitch_lim_deg = [-17.7 21.1];      % [deg] largest calibrated pitch tilt, forward and backward (Polle et al.)
 params.wobble_freq_hz   = [5 25];                % [Hz] wobble frequency (Banagar & Dhillon)
 params.wobble_arm_m     = 0.4;                   % [m] antenna offset from the centre of rotation (Banagar & Dhillon)
 
@@ -160,7 +161,8 @@ params.sweep_period_s   = [20e-3 83.5e-3];   % [s] range of the sweep period
 params.jam_timing_random = true;       % sweep period and phase, burst phase drawn per flight; else the shortest period, phase 0
 % In-band cap: no emitter reaches the UAV more than 30 dB over our received signal, the
 % sources' most severe in-band level (Liu et al.), whatever path loss, pointing or
-% elevation loss our signal has (inband_cap_amp.m, applied in build_threat_model.m).
+% elevation loss our signal has, on its weakest antenna (inband_cap_amp.m, applied in
+% build_threat_model.m).
 params.inband_cap_db = 30;          % [dB] largest in-band power of an emitter over our received signal
 
 % Countermeasure physics (apply_countermeasure.m)
@@ -186,7 +188,8 @@ params.cm_fec_rate    = 1/2;        % fec_interleave: code rate, K = 7, generato
 % each flight (gcs_pointing.m) is applied in the channel. A tracker that lost its target
 % falls back to an omni (Boeing, US 8,503,941): 10 dB less, to the receiver a path loss.
 params.gcs_pt_dbm      = -6;          % [dBm] nominal conducted power of the GCS radio
-params.gcs_pmax_dbm    = 7.5;         % [dBm] largest output of the radio at 2.4 GHz
+params.gcs_pmax_dbm    = 7.5;         % [dBm] largest output of the radio at 2.4 GHz (a 1 MHz CW tone, AD9361)
+params.gcs_papr_db     = papr_db(params);   % [dB] peak over mean of our waveform: its mean stays this far below
 params.gcs_step_db     = 0.25;        % [dB] power-control step of the radio
 params.gcs_ant_dbi     = 12;          % [dBi] tracked directional GCS antenna
 params.gcs_omni_dbi    = 2;           % [dBi] omni fallback antenna

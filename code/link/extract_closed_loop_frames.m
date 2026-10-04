@@ -75,7 +75,8 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %   Ground truth: act, share of the frame with the threat on the air (packet traffic
 %   of benign interference, the sweeping jammer on our channel), analysis and labels only.
 % With p.fec (fec_interleave) ber, fer and crc_fail are those of the decoded packet,
-% 1000 + 32 bits over two frames, both frames carrying its result (fec_packets.m).
+% 1000 + 32 bits over two frames: ber and fer on both frames, crc_fail on the second only,
+% when the receiver has decoded it (NaN on the first; fec_packets.m).
 
 NQ = 0; if isfield(p, 'quiet_symbols'), NQ = p.quiet_symbols; end
 if NQ >= p.filter_span, delay_bits = 0; end              % the receiver aligns each frame's bits

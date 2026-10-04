@@ -31,7 +31,9 @@ function [ok, v12] = validate_phy(only, rows)
 %   second environment of Rodriguez-Pineiro et al.
 %   V12c, a gate on the flat channel: the tapped delay line (build_threat_model.m) against
 %   the flat channel, real receiver, RMS delay spread 64-1000 ns (v12c). It stops the run
-%   when the flat channel fails it while the link runs flat (p.tdl false).
+%   when the flat channel fails it while the link runs flat (p.tdl false). With the line on
+%   the same table is the receiver's own verdict on the delay line, reported apart (it does
+%   not stop the run: a failing case leaves its cells to the commitment).
 %   V1-V12 run the flat channel of the closed forms.
 % Gap = Eb/N0 shift between measured and theoretical BER, points with >= 100 errors.
 % Outputs: results/phy_validation.txt, results/phy_validation.png
@@ -72,15 +74,14 @@ flat_only = nargin >= 1 && strcmpi(only, 'flat');
 if nargin >= 1 && strcmpi(only, 'V12c')
     if nargin < 2, rows = []; end
     v12 = v12c(p0, modelName, delay_bits, rows);
-    rep = v12.rep;
-    rep{end+1} = sprintf('V12c gate: %s%s | %.1f min', passfail(v12.pass), ...
-        ternary(tdl_on && ~v12.pass, ' (the link runs the delay line: not stopping)', ''), toc(t0)/60);
+    rep = [v12.rep, v12c_verdict(v12, tdl_on)];
+    rep{end+1} = sprintf('V12c run time %.1f min', toc(t0)/60);
     if ~exist('results', 'dir'); mkdir('results'); end
     fid = fopen('results/phy_validation_v12c.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
     fprintf('\n%s\n', rep{:});
     params = S.params; save('params.mat', 'params');
     if bdIsLoaded(modelName), close_system(modelName, 0); end
-    ok = v12.pass || tdl_on;
+    ok = v12.pass || tdl_on;               % the channel model's gate; the receiver's verdict is v12.pass
     return
 end
 
@@ -229,9 +230,11 @@ for i = 1:numel(iReal)
         sprintf('%9.2e', BERR(i,:)), LOSS(i)); %#ok<AGROW>
 end
 rep = [rep, {''}, v12.rep];
-rep{end+1} = sprintf('Overall: theory gaps %d/%d within %.1f dB, seeds %s, tone %s, V12c %s%s | %.1f min', ...
-    sum(g_ok), nTh, CFG.gap_ok, passfail(seed_same && seed_diff), passfail(tone_ok), ternary(flat_only, 'not run', passfail(v12.pass)), ...
-    ternary(tdl_on && ~v12.pass, ' (the link runs the delay line)', ''), toc(t0)/60);
+if ~flat_only, rep = [rep, v12c_verdict(v12, tdl_on)]; end
+rep{end+1} = sprintf(['Overall: theory gaps %d/%d within %.1f dB, seeds %s, tone %s, V12c channel model %s, ' ...
+    'receiver on the delay line %s | %.1f min'], sum(g_ok), nTh, CFG.gap_ok, passfail(seed_same && seed_diff), ...
+    passfail(tone_ok), ternary(flat_only, 'not run', passfail(v12_ok)), ...
+    ternary(flat_only || ~tdl_on, 'not run', passfail(v12.pass)), toc(t0)/60);
 rep{end+1} = sprintf('Pass rule: |gap| <= %.1f dB or within 2 standard errors (spread over %d channel realizations).', CFG.gap_ok, CFG.n_real);
 if ~exist('results', 'dir'); mkdir('results'); end
 fid = fopen('results/phy_validation.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
@@ -295,33 +298,39 @@ function R = v12c(p0, modelName, delay_bits, rows)
 % channel dispersive and ours flat, MMSE: shift <= 3 dB. Shift: the largest over the
 % points with >= 100 errors of the Eb/N0 shift to the flat curve's BER; a BER above the
 % flat curve's highest counts from the lowest Eb/N0 (worst_shift).
+% Informational (no limit): the 16 dB jammer at 234 ns and the envelope's top Doppler
+% (161 km/h, 358 Hz), where the interferer's space-time null ages fastest.
 CFG = struct('EbNo', 0:3:15, 'sim_time', 0.5, 'n_real', 20, 'fd_val', p0.fd_max, 'min_err', 100);
 DS = [64 138 234 302 372 1000];
+fdt = p0.v_max * p0.carrier_freq / p0.c_light;
 C = {
-  % name                        K    JSR  rho  threat     combiner  limit [dB]
-  'clean K -5 dB, MRC',         -5,  0,   0.3, 'none',    'mrc',    0.5
-  'clean K 2 dB, MRC',           2,  0,   0.3, 'none',    'mrc',    0.5
-  'clean K 10 dB, MRC',         10,  0,   0.3, 'none',    'mrc',    0.5
-  'jam 16 dB, rho 0.3, MMSE',   10,  16,  0.3, 'jamming', 'mmse',   3
-  'jam 16 dB, rho 0.9, MMSE',   10,  16,  0.9, 'jamming', 'mmse',   3
-  'jam 30 dB, rho 0.3, MMSE',   10,  30,  0.3, 'jamming', 'mmse',   3
-  'jam 30 dB, rho 0.9, MMSE',   10,  30,  0.9, 'jamming', 'mmse',   3
+  % name                          K    JSR  rho  threat     combiner  limit [dB] fd [Hz]    spreads [ns]
+  'clean K -5 dB, MRC',           -5,  0,   0.3, 'none',    'mrc',    0.5,       p0.fd_max, DS
+  'clean K 2 dB, MRC',             2,  0,   0.3, 'none',    'mrc',    0.5,       p0.fd_max, DS
+  'clean K 10 dB, MRC',           10,  0,   0.3, 'none',    'mrc',    0.5,       p0.fd_max, DS
+  'jam 16 dB, rho 0.3, MMSE',     10,  16,  0.3, 'jamming', 'mmse',   3,         p0.fd_max, DS
+  'jam 16 dB, rho 0.9, MMSE',     10,  16,  0.9, 'jamming', 'mmse',   3,         p0.fd_max, DS
+  'jam 30 dB, rho 0.3, MMSE',     10,  30,  0.3, 'jamming', 'mmse',   3,         p0.fd_max, DS
+  'jam 30 dB, rho 0.9, MMSE',     10,  30,  0.9, 'jamming', 'mmse',   3,         p0.fd_max, DS
+  'jam 16 dB, rho 0.3, 358 Hz',   10,  16,  0.3, 'jamming', 'mmse',   NaN,       fdt,       234
+  'jam 16 dB, rho 0.9, 358 Hz',   10,  16,  0.9, 'jamming', 'mmse',   NaN,       fdt,       234
 };
 if isempty(rows), rows = 1:size(C, 1); end
 nC = numel(rows); nD = numel(DS); nS = numel(CFG.EbNo);
 nt = 1 + floor(p0.tdl_max_ns / p0.tdl_step_ns);
 R = struct('name', {C(rows, 1)}, 'ds', DS, 'reached', nan(nC, nD), 'shift', nan(nC, nD), ...
-    'limit', cell2mat(C(rows, 7)), 'ber_flat', nan(nC, nS), 'ber', nan(nC, nD, nS), 'pass', true, 'rep', {{}});
+    'limit', cell2mat(C(rows, 7)), 'fd', cell2mat(C(rows, 8)), 'ber_flat', nan(nC, nS), 'ber', nan(nC, nD, nS), ...
+    'pass', true, 'rep', {{}});
 t0 = tic;
 for i = 1:nC
     c = rows(i);
     jam = ~strcmp(C{c,5}, 'none');
-    p = p0;
+    p = p0; CFG.fd_val = C{c,8};
     p.rician_k = C{c,2}; p.int_rician_k = 10; p.jsr_db = C{c,3}; p.rx_corr = C{c,4};
     p.active_threat = C{c,5}; p.rx_combiner = C{c,6}; p.rx_sync = 'real'; p.seed = 4000 + c;
     [R.ber_flat(i, :), ~] = run_curve(p, modelName, CFG, delay_bits);
     p.tdl = true; p.tdl_random = false;
-    for j = 1:nD
+    for j = find(ismember(DS, C{c,9}))
         p.tdl_ds_ns = DS(j) * [~jam, jam];
         [b, ne] = run_curve(p, modelName, CFG, delay_bits);
         R.ber(i, j, :) = b;
@@ -330,22 +339,43 @@ for i = 1:nC
         fprintf('V12c %-26s %4d ns  shift %+5.2f dB | %.1f min\n', C{c,1}, DS(j), R.shift(i, j), toc(t0)/60);
     end
 end
-ok = ~(R.shift > R.limit);                  % no point with enough errors: no measurable loss
+ok = ~(R.shift > R.limit);                  % no point with enough errors, or no limit: no measurable loss
 R.pass = all(ok(:));
-R.rep{end+1} = sprintf(['V12c delay line vs flat channel: real receiver, fd %.0f Hz, %.1f s per point over %d ' ...
-    'flights, taps %g ns apart up to %g ns, Eb/N0 %s dB'], CFG.fd_val, CFG.sim_time, CFG.n_real, ...
+R.rep{end+1} = sprintf(['V12c delay line vs flat channel: real receiver, fd %.0f Hz (358 Hz rows: %.0f Hz), %.1f s ' ...
+    'per point over %d flights, taps %g ns apart up to %g ns, Eb/N0 %s dB'], p0.fd_max, fdt, CFG.sim_time, CFG.n_real, ...
     p0.tdl_step_ns, p0.tdl_max_ns, mat2str(CFG.EbNo));
 R.rep{end+1} = sprintf('%-28s %s', 'RMS delay spread [ns]', sprintf('%8d', DS));
 for i = 1:nC
     R.rep{end+1} = sprintf('%-28s %s', R.name{i}, sprintf('%8.0f', R.reached(i, :)));
-    R.rep{end+1} = sprintf('%-28s %s  (limit %.1f dB)', '  shift [dB]', sprintf('%+8.2f', R.shift(i, :)), R.limit(i));
+    R.rep{end+1} = sprintf('%-28s %s  (%s)', '  shift [dB]', sprintf('%+8.2f', R.shift(i, :)), ...
+        ternary(isfinite(R.limit(i)), sprintf('limit %.1f dB', R.limit(i)), 'informational'));
     R.rep{end+1} = sprintf('%-28s %s', '  flat BER', sprintf('%9.2e', R.ber_flat(i, :)));
-    for j = 1:nD
+    for j = find(isfinite(R.reached(i, :)))
         R.rep{end+1} = sprintf('%-28s %s -> %s', sprintf('  %4d ns BER', DS(j)), ...
-            sprintf('%9.2e', squeeze(R.ber(i, j, :))), passfail(ok(i, j)));
+            sprintf('%9.2e', squeeze(R.ber(i, j, :))), ternary(isfinite(R.limit(i)), passfail(ok(i, j)), 'info'));
     end
 end
 R.rep{end+1} = 'Rows: the spread the delay line reached at the case''s K (the flat profile when its window holds less).';
+end
+
+function r = v12c_verdict(v12, tdl_on)
+% V12c's two readings: whether the flat channel holds (the channel model's gate) and, with
+% the delay line on, whether the receiver meets the limits on it (its own verdict).
+if all(~isfinite(v12.limit))
+    r = {'V12c: informational cases only, no verdict'};
+    return
+elseif v12.pass
+    r = {'V12c channel model: the flat channel holds -> PASS'};
+elseif tdl_on
+    r = {'V12c channel model: the flat channel fails, the link runs the delay line -> PASS'};
+else
+    r = {'V12c channel model: the flat channel fails and the link runs flat -> FAIL'};
+end
+if tdl_on
+    bad = v12.name(any(v12.shift > v12.limit, 2));
+    r{end+1} = sprintf('V12c receiver on the delay line: %s%s', passfail(v12.pass), ...
+        ternary(isempty(bad), '', sprintf(' (above the limit: %s)', strjoin(bad', '; '))));
+end
 end
 
 function d = worst_shift(ebno, ber, nerr, ref, min_err)

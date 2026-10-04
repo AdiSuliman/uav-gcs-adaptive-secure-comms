@@ -15,8 +15,9 @@ function [P, info] = pool_cell(p, threat, actions, ebno, geo, det, opt)
 %   opt      F_SUB (frames per sub-run), tw (temporal window), delay_bits
 %   P        {nS, nA, nSplit} pools; per frame: probs (classes x ... stored N x C),
 %            maha, feat (link_features.m), gant (mean channel gain of every antenna),
-%            ber and fer (ground truth), run, aoa, act (share of the frame with the
-%            threat on the air)
+%            ber and fer (ground truth), crc (the receiver's CRC result, NaN on a coded
+%            packet's first frame), run, aoa, act (share of the frame with the threat
+%            on the air)
 %   info     configurations actually simulated (identical physics is simulated once)
 modelName = 'UAV_GCS_Threat_Link';
 nA = numel(actions); nS = numel(ebno); nSp = numel(geo{1});
@@ -66,7 +67,8 @@ end
 
 function Q = empty_pool(nC, nF)
 Q = struct('probs', zeros(0, nC, 'single'), 'maha', zeros(0, 1, 'single'), 'feat', zeros(0, nF, 'single'), ...
-    'gant', zeros(0, 0, 'single'), 'ber', zeros(0, 1), 'fer', zeros(0, 1, 'single'), 'run', zeros(0, 1), ...
+    'gant', zeros(0, 0, 'single'), 'ber', zeros(0, 1), 'fer', zeros(0, 1, 'single'), 'crc', zeros(0, 1, 'single'), ...
+    'run', zeros(0, 1), ...
     'aoa', zeros(0, 3, 'single'), 'act', zeros(0, 1, 'single'));
 end
 
@@ -90,7 +92,8 @@ if ~isempty(det)
     Q.probs = [Q.probs; single(probs')]; Q.maha = [Q.maha; single(maha(:))]; Q.feat = [Q.feat; single(Fr)];
 end
 if isfield(F, 'gain_ant'), Q.gant = [Q.gant; single(F.gain_ant(:, v)')]; end
-Q.ber = [Q.ber; F.ber(v)']; Q.fer = [Q.fer; single(F.fer(v)')]; Q.run = [Q.run; repmat(run_id, n, 1)];
+Q.ber = [Q.ber; F.ber(v)']; Q.fer = [Q.fer; single(F.fer(v)')]; Q.crc = [Q.crc; single(F.crc_fail(v)')];
+Q.run = [Q.run; repmat(run_id, n, 1)];
 a3 = nan(1, 3); a3(1:min(3, numel(aoa))) = aoa(1:min(3, numel(aoa)));
 Q.aoa = [Q.aoa; repmat(single(a3), n, 1)];
 Q.act = [Q.act; single(F.act(v)')];

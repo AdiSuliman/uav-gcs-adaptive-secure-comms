@@ -50,7 +50,8 @@ function [p, snr_gain_db, cm] = apply_countermeasure(p, threat, action)
 %                        erasure decoding of symbols hit by an energy burst; same
 %                        channel symbols, so no Eb/N0 change here -- the decoding is
 %                        applied to the measured error pattern (fec_packets.m, p.fec);
-%                        goodput x1/2, the packet decoded after its second frame (40 ms)
+%                        goodput x1/2, the packet decoded after its second frame
+%                        (one cycle, 20 ms, later than an uncoded packet)
 %
 %   p.inband_ref keeps the in-band levels before any countermeasure: the in-band cap
 %   acts on them (build_threat_model.m), so a capped emitter keeps one power under every
