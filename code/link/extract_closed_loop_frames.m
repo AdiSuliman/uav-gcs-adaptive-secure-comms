@@ -41,8 +41,6 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %               our transmission, > 0 when it is triggered by it (reactive jamming)
 %     iot       interference over thermal [dB] (iot_db.m); the thermal floor is the
 %               receiver's calibration constant (the AWGN setting of the run)
-%     coh       spatial coherence of interference + noise between the antennas
-%               (0 = thermal noise, 1 = one directional source)
 %     mmse_gain predicted SINR gain of MMSE over MRC combining [dB] from the
 %               interference covariance and the channel estimate (optimum combining, Winters)
 %     align     alignment of the dominant interference direction with the GCS
@@ -56,7 +54,7 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %               fading moves both around the same mean, a shadowed antenna (the
 %               airframe between it and the GCS in a banking turn) stays tens of
 %               dB below the other (Khawaja et al.)
-%   The last five come from the receiver's channel estimator (per-32-symbol
+%   The last four come from the receiver's channel estimator (per-32-symbol
 %   channel estimates and the frame's interference + noise covariance, the
 %   quantities MMSE combining uses; from the training, the pilots and the decision-directed passes).
 %   Quiet slot (p.quiet_symbols): the start of every frame carries no signal of ours.
@@ -65,6 +63,12 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %     q_react   residual power while we transmit over the quiet-slot power on the
 %               reference antenna [dB]: ~0 for interference independent of us,
 %               large for a jammer that transmits only while it senses our signal
+%     coh       spatial coherence of the quiet slot: mean over the antenna pairs of
+%               |R_ij| / sqrt(R_ii R_jj) of the matched-filtered quiet-slot
+%               covariance (interference + noise, none of our signal; the
+%               covariance the real receiver whitens with before synchronization):
+%               thermal noise alone stays at its estimation floor at every Eb/N0,
+%               one directional source -> 1
 %     gain_ant  mean channel gain of every antenna over the frame [dB] (antennas x
 %               frames), for measurements over several decision cycles
 %   Synchronization (receiver output 6; zeros with an ideal receiver):
@@ -123,12 +127,13 @@ end
 
 % Decision-directed link quality, channel-estimator spatial measurements
 [F.ber_est, F.snr_post] = symbol_metrics(zc, p);
-[F.coh, F.mmse_gain, F.align] = spatial_metrics(Hq, Rq, nf);
+[F.mmse_gain, F.align] = spatial_metrics(Hq, Rq, nf);
 F.branch_dip = branch_dip(Hq, nf);
 F.branch_gap = branch_gap(Hq, nf);
 F.gain_ant = gain_ant(Hq, nf);
 xh = remod_frames(rx_all(delay_bits+1:end), p, ns, nf, sy(1, 1:nf) + sy(5, 1:nf), sy(2, 1:nf));
 qn = NQ * p.sps;                                         % quiet slot before the frame: free of our pulse tails
+F.coh = quiet_coherence(iqa, p, qn);
 dat = (qn + 1:ns)';                                      % samples that carry our signal
 rs = nan(na, nf); sn = nan(na, nf); ec = nan(na, nf); io = nan(na, nf); pe = nan(na, nf); pq = nan(na, nf);
 for a = 1:na
@@ -250,22 +255,14 @@ function y = sign0(x)
 y = sign(x); y(y == 0) = 1;
 end
 
-function [coh, mmse_gain, align] = spatial_metrics(Hq, Rq, nf)
+function [mmse_gain, align] = spatial_metrics(Hq, Rq, nf)
 % Hq: antennas x blocks x frames channel estimates, Rq: antennas x antennas x
 % frames interference + noise covariance, both from the receiver's estimator.
-coh = nan(1, nf); mmse_gain = nan(1, nf); align = nan(1, nf);
+mmse_gain = nan(1, nf); align = nan(1, nf);
 nr = size(Rq, 1);
 for f = 1:min(nf, size(Rq, 3))
     R = Rq(:, :, f); R = (R + R') / 2;
     H = Hq(:, :, f);
-    dg = real(diag(R));
-    c = 0; np = 0;
-    for i = 1:nr
-        for j = i+1:nr
-            c = c + abs(R(i, j)) / sqrt(max(dg(i) * dg(j), eps)); np = np + 1;
-        end
-    end
-    coh(f) = c / max(np, 1);
     [V, D] = eig(R);
     [~, im] = max(real(diag(D)));
     v1 = V(:, im);
@@ -356,6 +353,34 @@ for f = 1:nf
     c = corrcoef(abs(E(:)).^2, abs(X(:)).^2);
     ec(f) = c(1, 2);
 end
+end
+
+function coh = quiet_coherence(iqa, p, qn)
+% Spatial coherence of every frame's quiet slot. The receive filter runs over the
+% whole run as in the receiver, so the slot also holds the filter's memory of the
+% previous guard, and no signal of ours.
+[ns, na, nf] = size(iqa);
+coh = nan(1, nf);
+if qn < 1, return; end
+h = rcosdesign(p.rolloff, p.filter_span, p.sps, 'sqrt');
+rf = reshape(filter(h, 1, reshape(permute(iqa, [1 3 2]), ns * nf, na)), ns, nf, na);
+for f = 1:nf
+    q = reshape(rf(1:qn, f, :), qn, na);
+    coh(f) = pair_coherence(q' * q);
+end
+end
+
+function c = pair_coherence(R)
+% Mean over the antenna pairs of |R_ij| / sqrt(R_ii R_jj); 0 with one antenna.
+nr = size(R, 1);
+dg = real(diag(R));
+c = 0; np = 0;
+for i = 1:nr
+    for j = i+1:nr
+        c = c + abs(R(i, j)) / sqrt(max(dg(i) * dg(j), eps)); np = np + 1;
+    end
+end
+c = c / max(np, 1);
 end
 
 function d = gain_ant(Hq, nf)

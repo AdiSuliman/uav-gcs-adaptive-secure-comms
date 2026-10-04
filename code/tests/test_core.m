@@ -528,14 +528,13 @@ verifyLessThan(tc, abs(median(F.q_iot)), 1.5);                 % nothing but the
 verifyLessThan(tc, mean(F.ber_est(v)), 1e-3);        % clean link at 12 dB
 verifyLessThan(tc, max(F.branch_dip), 6);            % fading changes little within a frame, first frame included
 sinr_clean = median(F.sinr(v));
-% spatial coherence of the clean link on five flights, against a weak jammer on the same
-% flights below: only our own signal's residual after the channel estimate is coherent
-CS = 11:15; coh0 = zeros(size(CS)); coh0(1) = mean(F.coh, 'omitnan');
-for k = 2:numel(CS)
-    link_seed(mdl, CS(k), 160);
-    Fk = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
-    coh0(k) = mean(Fk.coh, 'omitnan');
-end
+% quiet-slot spatial coherence of the clean link: thermal noise alone, at the floor of
+% matched-filtered white noise over the same slot at every Eb/N0; the flights' noise is
+% the same at every Eb/N0, so any signal of ours in the slot would move it
+EQ = [-3 0 6 12 18 24]; CS = 11:13;
+coh0 = quiet_coh(mdl, p, EQ, CS);
+verifyLessThan(tc, max(abs(coh0 - coh_floor(p))), 0.04);
+verifyLessThan(tc, max(coh0) - min(coh0), 0.01);
 % the flight's draws reach the blocks: first stream seed, and our signal's amplitude with
 % the UAV antenna's gain toward the GCS at 120 m and 0.28 km
 d = link_seed(mdl, 11, 160, struct('ebno', 15, 'alt_m', 120));
@@ -581,6 +580,7 @@ link_seed(mdl, 11, 160);
 F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
 verifyLessThan(tc, median(F.q_iot), 2);
 verifyGreaterThan(tc, median(F.q_react), 10);
+verifyLessThan(tc, abs(mean(F.coh) - coh_floor(p)), 0.06);   % silent there: thermal noise alone
 close_system(mdl, 0);
 p.active_threat = 'jamming';
 evalc('build_threat_model(p)');
@@ -589,20 +589,52 @@ link_seed(mdl, 11, 160);
 F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
 verifyGreaterThan(tc, median(F.q_iot), 10);
 verifyLessThan(tc, abs(median(F.q_react)), 3);
-verifyGreaterThan(tc, mean(F.coh, 'omitnan'), 0.8);  % one directional source
+% one directional source: the jammer (16 dB) on the clean link's flights is near 1 at
+% every Eb/N0; at the lowest trained level (0 dB) it follows its ratio to the noise
+% (JSR + 3 dB + Eb/N0): above the floor everywhere, rising with Eb/N0 and with JSR
+c16 = quiet_coh(mdl, p, EQ, CS);
+verifyGreaterThan(tc, min(c16), 0.9);
 close_system(mdl, 0);
-% a jammer at a low trained level (4 dB) is clearly more coherent than the clean link
-p.jsr_db = 4;
+p.jsr_db = 0;
 evalc('build_threat_model(p)');
-set_param([mdl '/AWGN'], 'SNR', num2str(snr), 'SignalPower', num2str(1/p.sps));
-coh4 = zeros(size(CS));
-for k = 1:numel(CS)
-    link_seed(mdl, CS(k), 160);
-    F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
-    coh4(k) = mean(F.coh, 'omitnan');
-end
-verifyGreaterThan(tc, mean(coh4) - mean(coh0), 0.15);
+c0 = quiet_coh(mdl, p, EQ, CS);
+verifyGreaterThan(tc, min(c0 - coh0), 0.2);
+verifyGreaterThan(tc, c0(EQ == 12) - c0(1), 0.3);
+verifyGreaterThan(tc, min(diff(c0)), -0.01);
+verifyGreaterThan(tc, c16(1) - c0(1), 0.3);
+verifyGreaterThan(tc, min(c16 - c0), -0.01);
 close_system(mdl, 0);
+end
+
+function c = quiet_coh(mdl, p, E, seeds)
+% Mean quiet-slot coherence of 10-frame flights (seeds) at every Eb/N0 of E [dB].
+c = zeros(numel(seeds), numel(E));
+for ie = 1:numel(E)
+    set_param([mdl '/AWGN'], 'SNR', num2str(E(ie) + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), ...
+        'SignalPower', num2str(1/p.sps));
+    for k = 1:numel(seeds)
+        link_seed(mdl, seeds(k), 160);
+        F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
+        c(k, ie) = mean(F.coh);
+    end
+end
+c = mean(c, 1);
+end
+
+function c = coh_floor(p)
+% Mean pairwise coherence of independent white noise on the antennas after the
+% receive filter, over one quiet slot: the estimation floor of thermal noise alone.
+h = rcosdesign(p.rolloff, p.filter_span, p.sps, 'sqrt');
+qn = p.quiet_symbols * p.sps; n0 = p.filter_span * p.sps;
+rs = RandStream('mt19937ar', 'Seed', 3);
+c = zeros(1, 1000);
+for r = 1:numel(c)
+    x = filter(h, 1, complex(randn(rs, n0 + qn, p.n_rx), randn(rs, n0 + qn, p.n_rx)));
+    R = x(n0+1:end, :)' * x(n0+1:end, :);
+    g = abs(R) ./ sqrt(real(diag(R)) * real(diag(R))');
+    c(r) = mean(g(triu(true(p.n_rx), 1)));
+end
+c = mean(c);
 end
 
 %% ---------- altitude, distance and the in-band cap ----------

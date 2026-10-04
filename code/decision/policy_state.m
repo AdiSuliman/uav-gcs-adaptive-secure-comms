@@ -4,8 +4,8 @@ function st = policy_state(mem, cfg, confirmed, nA)
 %   mem        policy memory of policy_monitor.m (after its update this cycle):
 %              mem.hist holds the observation vectors of the last C.hist cycles,
 %              newest first (class probabilities, unknown flag, estimated BER,
-%              degradation, packet loss, SINR, IoT, post-combining SNR, spatial
-%              coherence, predicted MMSE gain, alignment, antenna gain gap, Eb/N0
+%              degradation, packet loss, SINR, IoT, post-combining SNR, quiet-slot
+%              spatial coherence, predicted MMSE gain, alignment, antenna gain gap, Eb/N0
 %              drop) -- the
 %              history of the spectrum waterfall (Liu et al.) and of the stacked
 %              frames (Mnih et al.)

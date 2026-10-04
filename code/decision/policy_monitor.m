@@ -123,7 +123,7 @@ function o = policy_obs(obs, M, bc, unk)
 % Per-cycle observation (rows) x episodes: class probabilities (fused over the
 % last cycles), unknown flag, log10 estimated BER (window), degradation (log10 of
 % estimate / clean estimate, clipped to [-1, 3]), packet loss (window), SINR, IoT,
-% post-combining SNR, spatial coherence, predicted MMSE gain, alignment, antenna
+% post-combining SNR, quiet-slot spatial coherence, predicted MMSE gain, alignment, antenna
 % gain gap, Eb/N0 drop (clipped), quiet-slot interference, reactive ratio, and the
 % persistence measurements of the window (gap of the antennas' local means, share
 % of cycles with the same weakest antenna, share with quiet-slot interference,

@@ -15,7 +15,7 @@ function [raw, names] = link_features(M, k, tw, ~)
 %   var_rssi   RSSI variance over the window   dlog_ber   change of log_ber from the last frame
 %   plr        packet loss rate over the window (CRC failures)
 %   env_corr   residual vs own envelope        iot        interference over thermal [dB]
-%   snr_post   post-combining SNR [dB]         coh        spatial coherence of the interference
+%   snr_post   post-combining SNR [dB]         coh        spatial coherence of the quiet slot
 %   mmse_gain  predicted MMSE gain [dB]        align      interference vs GCS direction
 %   branch_dip deepest within-frame drop of one antenna's channel gain [dB]
 %   branch_gap gap between the antennas' mean channel gains over the frame [dB]
