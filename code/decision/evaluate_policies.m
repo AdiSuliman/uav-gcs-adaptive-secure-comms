@@ -388,6 +388,24 @@ for ti = 1:numel(PP.singles) - 1
     rep{end+1} = sprintf('  %-22s %s', threats{ti}, txt); %#ok<SAGROW>
 end
 
+% Onset latency beside KPI 1: cycles from the onset to the monitor's first class of the
+% threat and to its first confirmed alarm, deployed policy, single set
+rep{end+1} = '';
+rep{end+1} = sprintf(['Onset latency, deployed policy (single set) [cycles of %g ms]: first class of the threat ' ...
+    'median / p90 (never) | first confirmed alarm median / p90 (never)'], C.period_ms);
+onset = struct('threat', {}, 'n', {}, 'cls_median', {}, 'cls_p90', {}, 'cls_never_pct', {}, 'conf_median', {}, ...
+    'conf_p90', {}, 'conf_never_pct', {});
+for ti = 1:numel(PP.singles) - 1
+    m = strcmp(PP.scen(Rd.scn), threats{ti}) & Rd.threat & ~Rd.unk;
+    a = Rd.t_cls(m); b = Rd.t_conf(m);
+    onset(end+1) = struct('threat', threats{ti}, 'n', sum(m), 'cls_median', median(a, 'omitnan'), ...
+        'cls_p90', p90(a), 'cls_never_pct', 100 * mean(isnan(a)), 'conf_median', median(b, 'omitnan'), ...
+        'conf_p90', p90(b), 'conf_never_pct', 100 * mean(isnan(b))); %#ok<SAGROW>
+    rep{end+1} = sprintf('  %-22s %5d: %4.1f / %4.1f (%5.1f%%) | %4.1f / %4.1f (%5.1f%%)', threats{ti}, sum(m), ...
+        onset(end).cls_median, onset(end).cls_p90, onset(end).cls_never_pct, onset(end).conf_median, ...
+        onset(end).conf_p90, onset(end).conf_never_pct); %#ok<SAGROW>
+end
+
 fid = fopen('results/policy_evaluation.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('\n%s\n', rep{:});
 set_names = {sets.name};
@@ -397,7 +415,7 @@ KP = struct('per_threat', PT, 'per_threat_sev', PTsev, 'threats', {threats}, 're
     'speed_bins', bins_v, 'show', {show}, 'show_lbl', {hdr}, 'far', FAR, 'far_diag', FD, 'far_testpools', FAR_t, ...
     'far_diag_testpools', FD_t, 'far_geoms', n_geom, 'cls_list', {cls_list}, 'ebno_thr', ebno_thr, ...
     'selected_gamma', Q.seed_summary.selected_gamma, 'confirm', PP.confirm, 'alarm_mode', PP.alarm_mode, ...
-    'per_speed_out', PS, 'speed_out', PP.speed_out, 'per_delay', PD, 'sev_names', {PP.sev_names});
+    'per_speed_out', PS, 'speed_out', PP.speed_out, 'per_delay', PD, 'sev_names', {PP.sev_names}, 'onset', onset);
 save('results/policy_evaluation.mat', 'RES', 'RW', 'POL', 'LBL', 'set_names', 'fixed_best', 'tab', 'iDQN', 'KP', ...
     'iThreat', 'ALL', 'top_cfg');
 
@@ -519,6 +537,12 @@ end
 
 function s = ci_txt(m, lo, hi, f)
 s = sprintf([f ' [' f ', ' f ']'], m, lo, hi);
+end
+
+function q = p90(x)
+% 90th percentile of the finite values (nearest rank), NaN when there are none.
+x = sort(x(isfinite(x)));
+if isempty(x), q = NaN; else, q = x(min(numel(x), max(1, round(0.9 * numel(x))))); end
 end
 
 function s = med(x)

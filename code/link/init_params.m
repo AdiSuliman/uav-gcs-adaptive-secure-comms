@@ -117,12 +117,16 @@ params.jsr_db        = 16;          % [dB] Jamming-to-Signal Ratio (barrage jamm
 params.burst_duty    = 0.3;         % Noise Burst: fraction of time jammer is ON (0-1)
 params.burst_period  = 100;         % Noise Burst: on/off cycle length (symbols); its phase drawn per flight (jam_timing.m)
 params.path_loss_db  = 14;          % Path Loss: attenuation (dB) applied to Tx signal
-% Antenna Fault: a connector of one antenna is open for the flight (a broken connector that
-% separates at altitude and stays open, Fedde & Carter, US 4,506,385; opens are the most
-% common connector failure, Ginart et al.). The open contact couples only through its gap
-% capacitance: an estimate of 0.01-0.03 pF at 2.4 GHz in 50 ohm gives 26-36 dB (no
-% measurement of this depth was found).
-params.fault_atten_db = 31;         % Antenna Fault: loss of the open antenna [dB]
+% Antenna Fault: a connector of one antenna is faulty for the flight, from a partial loss
+% to an open contact (a broken connector that separates at altitude and stays open, Fedde &
+% Carter, US 4,506,385; opens are the most common connector failure, Ginart et al.). A
+% sustained diversity imbalance above 5 dB marks a degraded antenna connection (Heath,
+% US 10,404,368, Table 2), a steady branch loss above 3 dB a loss in the RF path (Willgert,
+% US 8,548,029, Table 1); real connector faults are small losses or intermittent (Enquebecq
+% et al.; Smith et al. 2008). An open contact couples only through its gap capacitance:
+% an estimate of 0.01-0.03 pF at 2.4 GHz in 50 ohm gives 26-36 dB (no measurement of this
+% depth was found). Levels 5-31 dB, evenly spread (no source gives their distribution).
+params.fault_atten_db = 18;         % Antenna Fault: loss of the faulty antenna [dB], nominal level
 % Spoofing: a counterfeit GCS on the same radio as ours (Mekdad et al.); its power over our
 % signal is set by geometry: 30 dB is a spoofer 31 times closer to the UAV than the GCS
 % (it captures the receiver from a 0.2-3 dB advantage, Whitehouse et al.).

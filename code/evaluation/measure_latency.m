@@ -33,11 +33,11 @@ N = load('data/splits.mat', 'splits');
 mu = N.splits.norm.feat_mean; sd = N.splits.norm.feat_std; clear N
 Q = load('data/trained_dqn.mat', 'agent', 'confirm', 'alarm_mode', 'drop_db');
 T = ood_thresholds(0.95);
-FZ = struct('FM', [], 'N', 1);
-if isfile('data/fusion.mat'), FZ = load('data/fusion.mat', 'FM', 'N'); end   % temporal fusion (select_fusion.m), as evaluated
+FZ = fusion_model();                                   % temporal fusion (select_fusion.m), as evaluated
 UW = 1; if isfield(D.ood, 'win'), UW = D.ood.win; end                        % unknown-score window (eval_ood_detection.m)
 PPm = struct('actions', {policy_actions()}, 'classes', {cellstr(string(D.classes(:)'))}, ...
-    'sps', p0.sps, 'bps', p0.bits_per_symbol, 'maha_thr', T.maha, 'fuse', FZ.FM, 'fuse_N', FZ.N, 'unk_win', UW);
+    'sps', p0.sps, 'bps', p0.bits_per_symbol, 'maha_thr', T.maha, 'fuse', FZ.FM, 'fuse_N', FZ.N, 'q_thr', FZ.q_thr, ...
+    'unk_win', UW);
 if isfield(Q, 'confirm'), PPm.confirm = Q.confirm; end
 if isfield(Q, 'alarm_mode'), PPm.alarm_mode = Q.alarm_mode; end
 if isfield(Q, 'drop_db') && ~isempty(Q.drop_db), PPm.drop_db = Q.drop_db; end

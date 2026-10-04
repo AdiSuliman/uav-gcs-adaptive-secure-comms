@@ -32,13 +32,14 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   last 3 cycles. An alarm is CONFIRMED when at least m of the last n cycles carried
 %   one (M-of-N binary integration, PP.confirm, default C.confirm).
 %   The monitor also keeps the last C.hist observation vectors of policy_state.m,
-%   and the window of the temporal fusion (probabilities, antenna gains, quiet-slot
-%   interference, unknown scores).
+%   and the window of the temporal fusion (probabilities, antenna gains, link
+%   features, unknown scores).
 %   mem.since starts saturated (10): the policies never see the episode clock.
 %   mem.deg_n / mem.conf_n: consecutive degraded / confirmed-alarm cycles; mem.pend:
 %   a requested change not yet received.
 %   M: ber_avg, plr (NE x 1), ebno_est, drop (dB), degraded, cls, alarm, confirmed (1 x NE),
-%      probs (NE x classes, fused), te (NE x 4, persistence measurements of the window)
+%      probs (NE x classes, fused), te (NE x 9, persistence measurements of the window,
+%      temporal_evidence.m)
 C = decision_config();
 switch cmd
     case 'init'
@@ -46,7 +47,7 @@ switch cmd
         mem = struct('ber', nan(NE, C.win), 'crc', nan(NE, C.win), 'pk', nan(NE, C.win), 'tried', false(NE, nA), ...
             'since', 10 * ones(1, NE), 'cand', zeros(1, NE), 'cand_n', zeros(1, NE), 'good', zeros(1, NE), ...
             'deg_n', zeros(1, NE), 'conf_n', zeros(1, NE), 'alarm', false(NE, 8), 'ebno', nan(NE, 3), ...
-            'ref', nan(NE, 10), 'hist', [], 'wp', [], 'wg', [], 'wq', [], 'wu', [], 'wd', [], 'wn', zeros(1, NE), ...
+            'ref', nan(NE, 10), 'hist', [], 'wp', [], 'wg', [], 'wf', [], 'wu', [], 'wn', zeros(1, NE), ...
             'unk_now', false(1, NE), 'pend', false(1, NE));
         M = [];
     case 'update'
@@ -133,9 +134,10 @@ function o = policy_obs(obs, M, bc, unk)
 % estimate / clean estimate, clipped to [-1, 3]), packet loss (window), SINR, IoT,
 % post-combining SNR, quiet-slot spatial coherence, predicted MMSE gain, alignment, antenna
 % gain gap, Eb/N0 drop (clipped), quiet-slot interference, reactive ratio, and the
-% persistence measurements of the window (gap of the antennas' local means, share
-% of cycles with the same weakest antenna, share with quiet-slot interference,
-% share with one antenna 20 dB below the next).
+% persistence measurements of the window (temporal_evidence.m: gap of the antennas'
+% local means, share of cycles with the same weakest antenna, share with quiet-slot
+% interference, share with one antenna 20 dB below the next, the weakest antenna's
+% offset and its spread, its K-factor and the share of cycles it is valid, busy share).
 fi = @(n) obs.feat(:, feature_index(n));
 lb = log10(max(M.ber_avg, 1e-6));
 deg = min(3, max(-1, log10(max(M.ber_avg, 1e-6) ./ bc)));
@@ -152,20 +154,20 @@ Nu = 1; if isfield(PP, 'unk_win') && ~isempty(PP.unk_win), Nu = PP.unk_win; end
 W = max([N, Nu, 1]);
 g = zeros(NE, 1); if isfield(obs, 'gant') && ~isempty(obs.gant), g = obs.gant; end
 mh = nan(NE, 1); if isfield(obs, 'maha') && ~isempty(obs.maha), mh = obs.maha(:); end
-q = obs.feat(:, feature_index('q_iot')); dp = obs.feat(:, feature_index('branch_dip'));
 if isempty(mem.wp)
     mem.wp = repmat(obs.probs, 1, 1, W); mem.wg = repmat(g, 1, 1, W);
-    mem.wq = repmat(q, 1, W); mem.wu = repmat(mh, 1, W); mem.wd = repmat(dp, 1, W);
+    mem.wf = repmat(obs.feat, 1, 1, W); mem.wu = repmat(mh, 1, W);
 end
 mem.wp = cat(3, mem.wp(:, :, 2:end), obs.probs); mem.wg = cat(3, mem.wg(:, :, 2:end), g);
-mem.wq = [mem.wq(:, 2:end), q]; mem.wu = [mem.wu(:, 2:end), mh]; mem.wd = [mem.wd(:, 2:end), dp];
+mem.wf = cat(3, mem.wf(:, :, 2:end), obs.feat); mem.wu = [mem.wu(:, 2:end), mh];
 mem.wn = min(mem.wn + 1, W);
-pf = obs.probs; te = zeros(NE, 4);
+nC = size(obs.probs, 2);
+pf = obs.probs; te = zeros(NE, numel(temporal_evidence('names', nC)) - nC);
 for n = unique(mem.wn)                                     % episodes with the same filled window length
     e = find(mem.wn == n);
     k = W - min(n, N) + 1:W;
-    Z = temporal_evidence(mem.wp(e, :, k), mem.wg(e, :, k), mem.wq(e, k), mem.wd(e, k));
-    te(e, :) = Z(:, end-3:end);
+    Z = temporal_evidence(mem.wp(e, :, k), mem.wg(e, :, k), mem.wf(e, :, k));
+    te(e, :) = Z(:, nC + 1:end);
     if isfield(PP, 'fuse') && ~isempty(PP.fuse), pf(e, :) = fuse_classes('apply', PP.fuse, Z); end
     ku = W - min(n, Nu) + 1:W;
     mem.unk_now(e) = mean(mem.wu(e, ku), 2) < PP.maha_thr;

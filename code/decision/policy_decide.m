@@ -15,7 +15,8 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %
 %   Link monitor, alarm confirmation and the agent's observation history:
 %   policy_monitor.m (shared). Timing constants: decision_config.m.
-%   rule      detected class and predicted MMSE gain -> rule_based_policy.m
+%   rule      detected class, predicted MMSE gain and quiet-slot interference (alarm
+%             threshold PP.q_thr) -> rule_based_policy.m
 %   table     detected class -> the configuration with the best mean reward for
 %             that threat on the train pools (policy_table.m); a 'none' or
 %             'unknown' class on a degraded link takes table_unknown
@@ -66,10 +67,11 @@ switch base
         [~, a] = max(q, [], 1);
     case {'rule', 'table'}
         a = cfg;
-        gain = obs.feat(:, feature_index('mmse_gain'));
+        gain = obs.feat(:, feature_index('mmse_gain')); qi = obs.feat(:, feature_index('q_iot'));
+        qt = NaN; if isfield(PP, 'q_thr') && ~isempty(PP.q_thr), qt = PP.q_thr; end
         for i = 1:NE
             if strcmp(base, 'rule')
-                p = find(strcmp(A, rule_based_policy(M.cls{i}, M.degraded(i), gain(i))), 1);
+                p = find(strcmp(A, rule_based_policy(M.cls{i}, M.degraded(i), gain(i), qi(i), qt)), 1);
             else
                 p = table_action(M.cls{i}, M.degraded(i), PP, opt, na);
             end

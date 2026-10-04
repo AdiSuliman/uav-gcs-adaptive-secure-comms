@@ -6,8 +6,10 @@
 % (detector_block.m):
 %   seen     every other training level (reference from the same generator)
 %   between  midpoints between training levels (never trained on), every other one
-%   above    beyond the strongest training level, where the sources allow it; every
-%            threat is trained up to the sources' most severe value, so none is tested above
+%   above    beyond the strongest training level, where the sources allow it: every
+%            threat is trained up to the sources' most severe value, but the antenna
+%            fault, trained up to 31 dB, is tested at 36 dB (an open contact of
+%            0.01 pF, the gap-capacitance estimate)
 % Per frame of the threat: correct class, a class that calls for the same countermeasure
 % (rule_based_policy.m), or flagged unknown (production score below the threshold
 % keeping 95% of known validation frames). One block per Eb/N0 gives fewer flights than
@@ -31,7 +33,7 @@ rng(4343, 'twister');
 clear threat_cfg
 % Above the training range only where the sources go further than the training levels
 ABOVE = struct('jamming', [], 'noise_burst', [], 'reactive_jamming', [], 'sweeping_jammer', [], ...
-    'tone_jamming', [], 'path_loss', [], 'spoofing', [], 'antenna_fault', [], ...
+    'tone_jamming', [], 'path_loss', [], 'spoofing', [], 'antenna_fault', 36, ...
     'benign_interference', [], 'airframe_shadowing', []);
 DL = dataset_levels();
 threat_cfg = struct('name', {}, 'param', {}, 'lv', {});

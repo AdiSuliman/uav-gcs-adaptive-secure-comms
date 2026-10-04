@@ -1,4 +1,4 @@
-function [action, reason] = rule_based_policy(threat_class, degraded, mmse_gain_db)
+function [action, reason] = rule_based_policy(threat_class, degraded, mmse_gain_db, q_iot_db, q_thr_db)
 %RULE_BASED_POLICY  Fixed expert policy: detected threat class -> configuration.
 %   Baseline for the DQN comparison (proposal: rule-based first, DQN second).
 %   Each class maps to the configuration that addresses its physics as modeled in
@@ -10,12 +10,24 @@ function [action, reason] = rule_based_policy(threat_class, degraded, mmse_gain_
 %                 (link_features.m): when the interferer is spatially separable
 %                 (>= C.rule_mmse_db) the rule also nulls it with the antennas,
 %                 so the rule sees the same spatial information as the agent
+%   q_iot_db      interference over thermal in this frame's quiet slot (link_features.m)
+%   q_thr_db      its alarm threshold, from the clean validation frames
+%                 (select_fusion.m; default C.q_alarm_db)
+%   A degraded link whose class is none or benign_interference while the quiet slot
+%   shows interference is interference on our channel: a low packet delivery with a
+%   high signal level is jamming, not a weak link (Xu et al. 2005, pp. 8-9); the
+%   slot's power plays the part of the AGC level of a jamming monitor (Kazim et al.
+%   2026, eq. 1.3, p. 2; AGC gain as a detector, Ndili & Enge 1998, p. 5). The rule
+%   leaves the channel there.
 %   With one argument the class mapping alone is returned.
 C = decision_config();
 threat_class = char(threat_class);
 if nargin < 2 || isempty(degraded), degraded = false; end
 if nargin < 3 || isempty(mmse_gain_db), mmse_gain_db = 0; end
+if nargin < 4 || isempty(q_iot_db), q_iot_db = -Inf; end
+if nargin < 5 || isempty(q_thr_db) || isnan(q_thr_db), q_thr_db = C.q_alarm_db; end
 sep = mmse_gain_db >= C.rule_mmse_db;
+slot = q_iot_db >= q_thr_db;
 
 switch threat_class
     case {'jamming', 'reactive_jamming', 'spoofing', 'tone_jamming'}
@@ -42,6 +54,9 @@ end
 if strcmp(action, 'no_action') && degraded
     if strcmp(threat_class, 'benign_interference')
         action = 'channel_switch'; reason = 'interference degrades the link: leave the channel';
+    elseif strcmp(threat_class, 'none') && slot
+        action = 'channel_switch'; reason = 'degraded link with interference in the quiet slot: leave the channel';
+        if sep, action = 'channel_switch+spatial_diversity'; reason = [reason ', and null it (separable)']; end
     elseif sep
         action = 'spatial_diversity+power_control'; reason = 'degraded link, separable interference: null it';
     else

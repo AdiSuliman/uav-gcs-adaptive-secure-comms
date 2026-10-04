@@ -68,6 +68,22 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %               covariance the real receiver whitens with before synchronization):
 %               thermal noise alone stays at its estimation floor at every Eb/N0,
 %               one directional source -> 1
+%     q_sfm     spectral flatness of the quiet slot, exp(mean ln S) / mean S of the
+%               periodogram averaged over the antennas: ~1 for noise and wideband
+%               interference, near 0 for a tone, one spectral line (Shahriar et al.
+%               2015, eq. 19, p. 7); a modulated signal in between
+%     q_par     peak-to-average power ratio of the quiet-slot envelope [dB] on the
+%               antenna with the most slot power: a tone's envelope is constant (envelope
+%               dynamic range as a feature: Grimaldi et al. 2019, p. 4)
+%     duty      share of the frame's 32-sample residual blocks on the reference antenna
+%               more than 3 dB over thermal: busy time over observed time (Cheema &
+%               Salous 2019, eq. 1, p. 5; duty cycle, Airshark F3, Rayanchu et al., p. 7)
+%     edges     busy/idle changes between those blocks: the energy edges of packets and
+%               bursts inside the frame (burst length, envelope ripple: Grimaldi et al.
+%               2019, p. 4; inter-pulse timing: Airshark, p. 5)
+%     est_margin  lowest over the antennas of the channel gain over the noise of its
+%               32-symbol estimate, |h|^2 / (R_aa / 32) [dB], floor -30 dB: below 0 dB
+%               the antenna's gain estimate is mostly noise
 %     gain_ant  mean channel gain of every antenna over the frame [dB] (antennas x
 %               frames), for measurements over several decision cycles
 %   Synchronization (receiver output 6; zeros with an ideal receiver):
@@ -131,15 +147,19 @@ end
 F.branch_dip = branch_dip(Hq, nf);
 F.branch_gap = branch_gap(Hq, nf);
 F.gain_ant = gain_ant(Hq, nf);
+F.est_margin = est_margin(Hq, Rq, nf);
 xh = remod_frames(rx_all(delay_bits+1:end), p, ns, nf, sy(1, 1:nf) + sy(5, 1:nf), sy(2, 1:nf));
 qn = NQ * p.sps;                                         % quiet slot before the frame: free of our pulse tails
 F.coh = quiet_coherence(iqa, p, qn);
+[F.q_sfm, F.q_par] = quiet_shape(iqa, qn);
+nv = thermal_of(out, p);                                 % thermal noise power per sample
 dat = (qn + 1:ns)';                                      % samples that carry our signal
 rs = nan(na, nf); sn = nan(na, nf); ec = nan(na, nf); io = nan(na, nf); pe = nan(na, nf); pq = nan(na, nf);
+du = nan(na, nf); ed = nan(na, nf);
 for a = 1:na
     ia = reshape(iqa(:, a, :), ns, nf);
     rs(a, :) = 10*log10(mean(abs(ia(dat, :)).^2, 1) + eps);
-    [sn(a, :), ec(a, :), pe(a, :)] = residual_metrics(xh(dat, :), ia(dat, :));
+    [sn(a, :), ec(a, :), pe(a, :), du(a, :), ed(a, :)] = residual_metrics(xh(dat, :), ia(dat, :), nv);
     io(a, :) = iot_of(out, p, rs(a, :), sn(a, :));
     if qn > 0, pq(a, :) = mean(abs(ia(1:qn, :)).^2, 1); end
 end
@@ -150,13 +170,13 @@ F.ref = ref; F.sinr_ant = sn;
 F.iq = arrayfun(@(f) iqa(:, ref(f), f), 1:nf, 'UniformOutput', false);
 F.rssi = rs(k); F.sinr = sn(k); F.env_corr = ec(k); F.iot = io(k);
 F.sinr_gap = F.sinr - min(sn, [], 1);
+F.duty = du(k); F.edges = ed(k);
 F.act = ones(1, nf);
 try
     a = squeeze(out.get('Thr_act')); F.act = reshape(a(1:min(nf, numel(a))), 1, []);
     if numel(F.act) < nf, F.act(end+1:nf) = F.act(end); end
 catch
 end
-nv = thermal_of(out, p);                                 % thermal noise power per sample
 F.q_iot = 10*log10(mean(pq, 1) / nv);
 F.q_react = 10*log10(pe(k) ./ pq(k));
 end
@@ -264,13 +284,14 @@ for f = 1:nc
 end
 end
 
-function [sinr, ec, pe] = residual_metrics(x, r)
+function [sinr, ec, pe, du, ed] = residual_metrics(x, r, nv)
 % Per frame: whole-frame LS gain for the SINR and the residual power pe;
 % 32-sample block LS gains (absorb fading and gain steps) for the residual used in
-% the envelope correlation.
+% the envelope correlation, and the residual blocks more than 3 dB over the thermal
+% power nv: their share du and the busy/idle changes between them ed.
 B = 32;
 nf = size(r, 2);
-sinr = nan(1, nf); ec = nan(1, nf); pe = nan(1, nf);
+sinr = nan(1, nf); ec = nan(1, nf); pe = nan(1, nf); du = nan(1, nf); ed = nan(1, nf);
 for f = 1:nf
     xf = x(:, f); rf = r(:, f);
     if any(isnan(xf)), continue; end
@@ -286,6 +307,10 @@ for f = 1:nf
     E = R - X .* hb;
     c = corrcoef(abs(E(:)).^2, abs(X(:)).^2);
     ec(f) = c(1, 2);
+    if isfinite(nv)
+        busy = mean(abs(E).^2, 1) > 2 * nv;
+        du(f) = mean(busy); ed(f) = sum(diff(busy) ~= 0);
+    end
 end
 end
 
@@ -317,6 +342,33 @@ for i = 1:nr
     end
 end
 c = c / max(np, 1);
+end
+
+function [sfm, par] = quiet_shape(iqa, qn)
+% Spectral flatness of the quiet slot (periodogram averaged over the antennas) and the
+% peak-to-average power of its envelope on the antenna with the most slot power [dB].
+[~, na, nf] = size(iqa);
+sfm = nan(1, nf); par = nan(1, nf);
+if qn < 2, return; end
+for f = 1:nf
+    q = reshape(iqa(1:qn, :, f), qn, na);
+    S = mean(abs(fft(q, [], 1)).^2, 2) + eps;
+    sfm(f) = exp(mean(log(S))) / mean(S);
+    pw = abs(q).^2;
+    [~, a] = max(sum(pw, 1));
+    par(f) = 10*log10(max(pw(:, a)) / max(mean(pw(:, a)), eps));
+end
+end
+
+function m = est_margin(Hq, Rq, nf)
+% Lowest over the antennas of |h|^2 over the noise of its 32-symbol estimate, R_aa / 32
+% [dB] (Hq: antennas x blocks x frames, Rq: antennas x antennas x frames). The mean
+% |h_est|^2 holds that noise once, so it is taken out; floor -30 dB.
+m = nan(1, nf);
+for f = 1:min([nf, size(Hq, 3), size(Rq, 3)])
+    g = mean(abs(Hq(:, :, f)).^2, 2);
+    m(f) = 10*log10(max(min(32 * g ./ max(real(diag(Rq(:, :, f))), eps)) - 1, 1e-3));
+end
 end
 
 function d = gain_ant(Hq, nf)

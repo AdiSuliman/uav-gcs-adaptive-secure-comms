@@ -208,7 +208,7 @@ function s = level_label(base)
     switch base
         case 'path_loss',          s = 'Extra path loss (dB)';
         case 'spoofing',           s = 'Spoofer over signal (dB)';
-        case 'antenna_fault',      s = 'Open-connector loss (dB)';
+        case 'antenna_fault',      s = 'Antenna-fault loss (dB)';
         case 'benign_interference', s = 'Interference over signal (dB)';
         case 'airframe_shadowing', s = 'Shadowing loss (dB)';
         otherwise,                 s = 'JSR (dB)';

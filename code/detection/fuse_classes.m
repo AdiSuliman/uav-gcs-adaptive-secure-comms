@@ -21,9 +21,10 @@ end
 end
 
 function Z = windows(S, probs, N)
-iq = find(strcmp(S.feat_names, 'q_iot'), 1); id = find(strcmp(S.feat_names, 'branch_dip'), 1);
+[ok, jf] = ismember(link_features('names'), S.feat_names);
+if ~all(ok), error('fuse_classes: feats_raw lacks link features (rerun extract_spectrograms, prepare_data)'); end
 n = numel(S.run);
-Z = zeros(n, size(probs, 2) + 4);
+Z = zeros(n, numel(temporal_evidence('names', size(probs, 2))));
 [~, ~, rid] = unique(S.run(:));
 byrun = accumarray(rid, (1:n)', [], @(v) {v});
 for r = 1:numel(byrun)
@@ -32,7 +33,7 @@ for r = 1:numel(byrun)
     for j = 1:numel(ix)
         w = ix(max(1, j - N + 1):j);
         Z(ix(j), :) = temporal_evidence(permute(probs(w, :), [3 2 1]), permute(S.gain_ant(w, :), [3 2 1]), ...
-            S.feats_raw(w, iq)', S.feats_raw(w, id)');
+            permute(S.feats_raw(w, jf), [3 2 1]));
     end
 end
 end

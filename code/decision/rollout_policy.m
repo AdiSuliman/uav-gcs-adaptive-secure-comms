@@ -26,6 +26,9 @@ function R = rollout_policy(kind, PP, K, spec, split, agent, opt, seed)
 %          switches, false_sw (whole episode), esc (escalations), aoa (3 x NE),
 %          cfg_final, r (geometry index), cfg_trace (T x NE); at the first change:
 %          fc_t, fc_cls (index into PP.classes, numel + 1 = unknown), fc_deg, fc_drop
+%          t_cls, t_conf  cycles from the onset to the first cycle whose monitor class is
+%                     the threat (a component of a combined one) and to the first
+%                     confirmed alarm (NaN if never; the oracle has no monitor)
 if nargin < 7 || isempty(opt), opt = struct(); end
 rs = RandStream('mt19937ar', 'Seed', seed);
 opt.rs = RandStream('mt19937ar', 'Seed', seed + 1);
@@ -36,13 +39,16 @@ cls_list = [cellstr(string(PP.classes(:)')), {'unknown'}];
 fc = struct('t', zeros(1, NE), 'cls', zeros(1, NE), 'deg', false(1, NE), 'drop', nan(1, NE));
 tr = struct('r', zeros(T, NE), 'q', zeros(T, NE), 'rest', false(T, NE), 'rplr', false(T, NE), 'gput', zeros(T, NE), ...
     'ch', false(T, NE), 'fs', false(T, NE), 'post', false(T, NE), 'esc', false(T, NE), 'cfg', zeros(T, NE), ...
-    'recov', false(T, NE), 'fer', zeros(T, NE));
+    'recov', false(T, NE), 'fer', zeros(T, NE), 'cls', false(T, NE), 'conf', false(T, NE));
+comp = cellfun(@(c) strsplit(c, '+'), PP.scen(E.scn), 'UniformOutput', false);
 for t = 1:T
     if strcmp(kind, 'oracle')
         a = oracle_action(E, K);
     else
         [a, mem, dinf] = policy_decide(kind, obs, E.cfg, mem, PP, agent, opt);
         tr.esc(t, :) = dinf.escalated;
+        tr.cls(t, :) = cellfun(@(c, q) ismember(c, q), dinf.cls, comp);
+        tr.conf(t, :) = dinf.confirmed;
     end
     [E, r, obs, info] = link_env('step', E, PP, K, a);
     nw = info.changed & fc.t == 0;
@@ -94,4 +100,11 @@ R.cfg_final = E.cfg;
 R.r = E.r;
 R.cfg_trace = tr.cfg;
 R.fc_t = fc.t; R.fc_cls = fc.cls; R.fc_deg = fc.deg; R.fc_drop = fc.drop;
+[R.t_cls, R.t_conf] = deal(nan(1, NE));
+for i = 1:NE
+    t0 = find(post(:, i), 1);
+    if isempty(t0) || strcmp(kind, 'oracle'), continue; end
+    k = find(tr.cls(t0:T, i), 1); if ~isempty(k), R.t_cls(i) = k - 1; end
+    k = find(tr.conf(t0:T, i), 1); if ~isempty(k), R.t_conf(i) = k - 1; end
+end
 end

@@ -86,6 +86,38 @@ for c = {'jamming', 'reactive_jamming', 'spoofing', 'sweeping_jammer', 'noise_bu
 end
 end
 
+function test_rule_quiet_slot(tc)
+% A degraded link read as clean while the quiet slot holds interference is interference
+% on our channel (low delivery at a high signal level, Xu et al.): the rule leaves the
+% channel instead of the generic diversity; below the alarm, or on a healthy link, not.
+C = decision_config();
+verifyEqual(tc, rule_based_policy('none', true, 0, 10, 5), 'channel_switch');
+verifyEqual(tc, rule_based_policy('none', true, 10, 10, 5), 'channel_switch+spatial_diversity');
+verifyEqual(tc, rule_based_policy('none', true, 0, 4, 5), 'freq_diversity+power_control');
+verifyEqual(tc, rule_based_policy('none', true, 10, 4, 5), 'spatial_diversity+power_control');
+verifyEqual(tc, rule_based_policy('none', false, 0, 10, 5), 'no_action');
+verifyEqual(tc, rule_based_policy('benign_interference', true, 0, 0, 5), 'channel_switch');
+verifyEqual(tc, rule_based_policy('unknown', true, 0, 10, 5), 'freq_diversity+power_control');
+verifyEqual(tc, rule_based_policy('none', true, 0, C.q_alarm_db), 'channel_switch');          % default alarm
+verifyEqual(tc, rule_based_policy('none', true, 0, C.q_alarm_db, NaN), 'channel_switch');
+verifyEqual(tc, rule_based_policy('none', true, 0, C.q_alarm_db - 0.1), 'freq_diversity+power_control');
+% through the decision cycle: the pools' alarm PP.q_thr reaches the rule
+A = policy_actions();
+cls = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', 'antenna_fault', ...
+    'benign_interference', 'sweeping_jammer', 'tone_jamming', 'airframe_shadowing'};
+na = find(strcmp(A, 'no_action'));
+for qt = [8 12]
+    PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0, 'q_thr', qt);
+    obs = struct('probs', double(strcmp(cls, 'none')), 'unknown', false, ...
+        'feat', zeros(1, numel(link_features('names'))));
+    obs.feat(feature_index('log_ber')) = -1; obs.feat(feature_index('crc_fail')) = 1;
+    obs.feat(feature_index('q_iot')) = 10;
+    mem = []; a = na;
+    for k = 1:4, [a, mem] = policy_decide('rule', obs, a, mem, PP, []); end
+    if qt < 10, verifyEqual(tc, A{a}, 'channel_switch'); else, verifyEqual(tc, A{a}, 'freq_diversity+power_control'); end
+end
+end
+
 function test_shield(tc)
 m = policy_mask([3 5], [false true], [10 10], 36, 1);
 verifyEqual(tc, size(m), [36 2]);
@@ -501,6 +533,12 @@ verifyEqual(tc, raw(feature_index('sinr_gap')), 7);
 verifyEqual(tc, raw(feature_index('log_ber')), log10(M.ber_est(10)), 'AbsTol', 1e-12);
 verifyEqual(tc, raw(feature_index('plr')), mean(M.crc_fail(1:10)), 'AbsTol', 1e-12);
 verifyEqual(tc, feature_index({'sinr', 'iot'}), [1 9]);
+verifyEqual(tc, numel(names), 23);
+verifyEqual(tc, raw(feature_index({'q_sfm', 'q_par', 'duty', 'edges', 'est_margin'})), zeros(1, 5));   % not measured: 0
+M.q_sfm = 0.01 * ones(1, n); M.q_par = 0.7 * ones(1, n); M.duty = 0.4 * ones(1, n); M.edges = 3 * ones(1, n);
+M.est_margin = 12 * ones(1, n);
+raw = link_features(M, 10, 10);
+verifyEqual(tc, raw(feature_index({'q_sfm', 'q_par', 'duty', 'edges', 'est_margin'})), [0.01 0.7 0.4 3 12]);
 end
 
 function test_ood_candidates(tc)
@@ -536,18 +574,52 @@ obs.feat(:, feature_index('log_ber')) = -5;
 st = policy_state(mem, ones(1, NE), M.confirmed, nA);
 [nS, cont] = policy_state_size(nA, nC);
 verifyEqual(tc, size(st), [nS NE]);
+verifyEqual(tc, size(M.te), [NE numel(temporal_evidence('names', 0))]);
 verifyTrue(tc, all(cont <= nS));
 verifyFalse(tc, any(M.alarm));                       % clean class, low BER: no alarm
 % the history of one episode never mixes with another's
 obs.feat(2, feature_index('sinr')) = 7;
 [mem, M] = policy_monitor('update', mem, obs, PP, ones(1, NE));
 st = policy_state(mem, ones(1, NE), M.confirmed, nA);
-nObs = nC + 18; isinr = nC + 5;
+nObs = nC + 14 + numel(temporal_evidence('names', 0)); isinr = nC + 5;
 verifyEqual(tc, st(isinr, :), [0 7 0]);              % newest cycle
 verifyEqual(tc, st(nObs + isinr, :), [0 0 0]);       % previous cycle
 end
 
 %% ---------- receiver measurements on the real link ----------
+function test_slot_and_burst_measurements(tc)
+% A tone is one spectral line with a constant envelope in the quiet slot (Shahriar et
+% al., eq. 19); a counterfeit of our modulation is flat over its band and not constant;
+% thermal noise is flat. WLAN packets fill part of a frame and their edges show inside
+% it (busy share and energy edges, Cheema & Salous; Grimaldi et al.); noise bursts give
+% many edges; the clean link none.
+p0 = base_params(); mdl = 'UAV_GCS_Threat_Link';
+TH = {'none', 'tone_jamming', 'spoofing', 'benign_interference', 'noise_burst'};
+F = struct();
+for t = 1:numel(TH)
+    p = p0; p.quiet_build = true; p.active_threat = TH{t}; p.seed = 11; p.benign_int_db = 12; p.spoof_sir_db = 16;
+    evalc('build_threat_model(p)');
+    set_param([mdl '/AWGN'], 'SNR', num2str(12 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), ...
+        'SignalPower', num2str(1/p.sps));
+    link_seed(mdl, 11, 160);
+    F.(TH{t}) = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
+    close_system(mdl, 0);
+end
+md = @(t, f) median(F.(t).(f));
+verifyGreaterThan(tc, md('none', 'q_sfm'), 0.7);
+verifyLessThan(tc, md('tone_jamming', 'q_sfm'), 0.05);
+verifyGreaterThan(tc, md('spoofing', 'q_sfm'), 2 * md('tone_jamming', 'q_sfm'));
+verifyLessThan(tc, md('tone_jamming', 'q_par'), 2);
+verifyGreaterThan(tc, md('spoofing', 'q_par'), md('tone_jamming', 'q_par') + 1.5);
+verifyEqual(tc, [max(F.none.duty), max(F.none.edges)], [0 0]);
+verifyEqual(tc, md('tone_jamming', 'duty'), 1);
+B = F.benign_interference;
+verifyTrue(tc, any(B.duty > 0 & B.duty < 1 & B.edges >= 1));
+c = corrcoef(B.duty, B.act); verifyGreaterThan(tc, c(1, 2), 0.8);
+verifyGreaterThanOrEqual(tc, md('noise_burst', 'edges'), 5);
+verifyGreaterThan(tc, md('none', 'est_margin'), 10);
+end
+
 function test_seeds_and_k(tc)
 % Pool geometries never share a seed across the blocks in use (the second test 17,
 % the reduced chain check 18 and 19); K-factors are reproducible per seed and stay
@@ -957,25 +1029,80 @@ function test_temporal_evidence(tc)
 % Fading: independent per cycle, the weakest antenna changes and the local means
 % agree; a hidden antenna stays 8 dB down in every cycle.
 rng(3);
-n = 12; nr = 3; C = 4;
+n = 12; nr = 3; C = 4; nF = numel(link_features('names'));
 fade = 10 * log10(-log(rand(1, nr, n)));                       % Rayleigh power per cycle [dB]
 sh = fade; sh(1, 2, :) = sh(1, 2, :) - 8;
 P = repmat([0.7 0.1 0.1 0.1], 1, 1, n);
-Q = zeros(1, n);
-xf = temporal_evidence(P, fade, Q); xs = temporal_evidence(P, sh, Q);
-verifyEqual(tc, numel(xf), C + 4);
+Fw = zeros(1, nF, n); Fw(1, feature_index('est_margin'), :) = 20;
+nm = temporal_evidence('names', C); col = @(c) find(strcmp(nm, c));
+xf = temporal_evidence(P, fade, Fw); xs = temporal_evidence(P, sh, Fw);
+verifyEqual(tc, numel(xf), numel(nm)); verifyEqual(tc, numel(nm), C + 9);
 verifyEqual(tc, xf(1:C), log([0.7 0.1 0.1 0.1]), 'AbsTol', 1e-9);
-verifyGreaterThan(tc, xs(C + 1), xf(C + 1) + 4);              % gap of the local means
-verifyGreaterThan(tc, xs(C + 2), xf(C + 2));                  % the same antenna is the weakest
-xq = temporal_evidence(P, fade, [5 5 5 0 0 0 5 5 5 0 0 0]);
-verifyEqual(tc, xq(C + 3), 0.5, 'AbsTol', 1e-12);             % share of cycles with quiet-slot interference
+verifyGreaterThan(tc, xs(col('gap_w')), xf(col('gap_w')) + 4);           % gap of the local means
+verifyGreaterThan(tc, xs(col('weak_w')), xf(col('weak_w')));             % the same antenna is the weakest
+Fq = Fw; Fq(1, feature_index('q_iot'), :) = [5 5 5 0 0 0 5 5 5 0 0 0];
+xq = temporal_evidence(P, fade, Fq);
+verifyEqual(tc, xq(col('occ_w')), 0.5, 'AbsTol', 1e-12);                % share of cycles with quiet-slot interference
 op = fade; op(1, 3, 1:3:end) = op(1, 3, 1:3:end) - 30;          % a connector open in every third cycle
-xo = temporal_evidence(P, op, Q);
-verifyGreaterThan(tc, xo(C + 4), 0.2);                        % the drops are counted
+xo = temporal_evidence(P, op, Fw);
+verifyGreaterThan(tc, xo(col('drop_w')), 0.2);                           % the drops are counted
 dp = zeros(1, n); dp(2:3:end) = 25;                            % open for part of other cycles: in-frame drops
-xp = temporal_evidence(P, fade, Q, dp);
-verifyEqual(tc, xp(C + 4), mean(dp >= 15), 'AbsTol', 0.1);
-verifyLessThan(tc, xf(C + 4), 0.2);                            % fading alone rarely drops 20 dB below the next
+Fd = Fw; Fd(1, feature_index('branch_dip'), :) = dp;
+xp = temporal_evidence(P, fade, Fd);
+verifyEqual(tc, xp(col('drop_w')), mean(dp >= 15), 'AbsTol', 0.1);
+verifyLessThan(tc, xf(col('drop_w')), 0.2);                   % fading alone rarely drops 20 dB below the next
+end
+
+function test_branch_imbalance(tc)
+% Willgert's reading (US 8,548,029, Table 1): a loss in series with one antenna is a
+% steady offset with a small spread over its mean, a pattern effect a small mean with a
+% large spread. The moment-method K (Aoki & Honda, eq. 2) follows the branch's own
+% fading: a series loss keeps the line of sight, a shadowed antenna loses it.
+rng(5);
+n = 12; nr = 3; nF = numel(link_features('names'));
+P = repmat([0.5 0.5], 1, 1, n);
+nm = temporal_evidence('names', 2); col = @(c) find(strcmp(nm, c));
+Fw = zeros(1, nF, n); Fw(1, feature_index('est_margin'), :) = 20;
+K = 10^(15/10);                                                 % K 15 dB on every antenna
+h = sqrt(K / (K + 1)) + sqrt(1 / (2 * (K + 1))) * (randn(1, nr, n) + 1j * randn(1, nr, n));
+G = 20 * log10(abs(h));
+Gf = G; Gf(1, 2, :) = Gf(1, 2, :) - 18;                         % an 18 dB fault
+x = temporal_evidence(P, Gf, Fw);
+verifyEqual(tc, x(col('off_w')), -18, 'AbsTol', 2);
+verifyLessThan(tc, x(col('rat_w')), 0.3);
+verifyGreaterThan(tc, x(col('k_w')), 8);
+verifyEqual(tc, x(col('kv_w')), 1);
+hs = sqrt(1 / 2) * (randn(1, 1, n) + 1j * randn(1, 1, n));      % shadowed: Rayleigh, 15 dB down
+Gs = G; Gs(1, 2, :) = 20 * log10(abs(hs)) - 15;
+xs = temporal_evidence(P, Gs, Fw);
+verifyLessThan(tc, xs(col('k_w')), 5);
+verifyGreaterThan(tc, xs(col('rat_w')), x(col('rat_w')));
+Gp = G; Gp(1, 2, :) = Gp(1, 2, :) + reshape(4 * (-1) .^ (1:n), 1, 1, n);   % a pattern effect, +-4 dB
+xp = temporal_evidence(P, Gp, Fw);
+verifyLessThan(tc, abs(xp(col('off_w'))), 3);
+verifyGreaterThan(tc, xp(col('rat_w')), 3);
+Fl = Fw; Fl(1, feature_index('est_margin'), :) = -5;            % below the noise of its estimate: no K
+xl = temporal_evidence(P, Gf, Fl);
+verifyEqual(tc, [xl(col('k_w')), xl(col('kv_w'))], [0 0]);
+Fb = Fw; Fb(1, feature_index('duty'), :) = linspace(0, 1, n);   % busy share of the window
+xb = temporal_evidence(P, G, Fb);
+verifyEqual(tc, xb(col('duty_w')), 0.5, 'AbsTol', 1e-12);
+xg = temporal_evidence(P, G(:, 1, :), Fw);                     % one antenna: no other to compare
+verifyEqual(tc, [xg(col('off_w')), xg(col('rat_w'))], [0 0]);
+end
+
+function test_fusion_target(tc)
+% A WLAN frame without a packet keeps its per-frame label, but the fused decision is
+% judged by its window: with a packet frame among the last N frames of its run the
+% target is benign_interference.
+cls = {'none', 'jamming', 'benign_interference'};
+y   = [3 1 1 1 3 1   1 1 1];
+run = [1 1 1 1 1 1   2 2 2];
+pos = [1 2 3 4 5 6   3 1 2];
+[yt, rk] = fusion_target(y, run, pos, 3, cls);
+verifyEqual(tc, yt', [3 3 3 1 3 3   1 1 1]);
+verifyEqual(tc, rk', [1 2 3 4 5 6   3 1 2]);
+verifyEqual(tc, fusion_target(y, run, pos, 1, cls)', y);    % a window of one frame: the label
 end
 
 function test_fusion(tc)

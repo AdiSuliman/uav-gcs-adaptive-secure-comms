@@ -91,11 +91,11 @@ env.na = find(strcmp(env.action_names, 'no_action'), 1);
 env.ood = D.ood;
 Tood = ood_thresholds(0.95);                   % Mahalanobis unknown-threat threshold (95% of known kept)
 env.maha_val = Tood.maha_val;
-FZ = struct('FM', [], 'N', 1);
-if isfile('data/fusion.mat'), FZ = load('data/fusion.mat', 'FM', 'N'); end   % temporal fusion (select_fusion.m), as evaluated
+FZ = fusion_model();                           % temporal fusion (select_fusion.m), as evaluated
 UW = 1; if isfield(D.ood, 'win'), UW = D.ood.win; end                        % unknown-score window (eval_ood_detection.m)
 env.PP = struct('actions', {env.action_names}, 'classes', {env.class_list(:)'}, 'sps', p0.sps, ...
-    'bps', p0.bits_per_symbol, 'maha_thr', Tood.maha, 'fuse', FZ.FM, 'fuse_N', FZ.N, 'unk_win', UW);
+    'bps', p0.bits_per_symbol, 'maha_thr', Tood.maha, 'fuse', FZ.FM, 'fuse_N', FZ.N, 'q_thr', FZ.q_thr, ...
+    'unk_win', UW);
 if isfield(Q, 'confirm'), env.PP.confirm = Q.confirm; end
 if isfield(Q, 'alarm_mode'), env.PP.alarm_mode = Q.alarm_mode; end
 if isfield(Q, 'drop_db') && ~isempty(Q.drop_db), env.PP.drop_db = Q.drop_db; end

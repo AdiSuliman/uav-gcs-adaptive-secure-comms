@@ -7,7 +7,9 @@ function [truth, pred, sc] = detector_block(G, p, ebno, seed, v_kmh)
 %          fusion, fused_class.m; FM empty: per frame)
 %   p      params of the built model (active_threat set); ebno [dB]; seed of the block's
 %          streams (link_seed.m); v_kmh UAV speed
-%   truth  1 x frames class names, the dataset's labels (threat_active.m)
+%   truth  1 x frames class names, the dataset's labels (threat_active.m); with a fusion
+%          the fused decision's target (fusion_target.m: a WLAN frame without a packet
+%          whose window holds packet frames is benign_interference)
 %   pred   1 x frames fused class names
 %   sc     1 x frames unknown-threat score of each frame
 snr_dB = ebno + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
@@ -27,5 +29,9 @@ k = fused_class(pr', struct('run', ones(numel(v), 1), 'pos', v(:), 'gain_ant', F
 pred = G.classes(k(:)');
 truth = repmat({p.active_threat}, 1, numel(v));
 truth(~threat_active(p.active_threat, F.act(v))) = {'none'};
+if ~isempty(G.FM)
+    [~, yi] = ismember(truth, G.classes);
+    truth = G.classes(fusion_target(yi, ones(numel(v), 1), v(:), G.FN, G.classes)');
+end
 sc = sc(:)';
 end

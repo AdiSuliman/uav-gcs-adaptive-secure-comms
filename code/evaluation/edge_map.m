@@ -24,6 +24,7 @@
 %          the countermeasure of the threat (rule_based_policy.m), for a combined
 %          threat that of one of its components                                >= 90%
 %   DET_h  DET on the flights whose unmitigated link is not restored (harmed)   >= 90%
+%          (DET_u, DET on the unharmed flights, is reported beside it, no target)
 %   SURV   flights some configuration restores (link_env.m); follower rows: one
 %          without channel_switch; comb rows: without channel_switch and
 %          freq_diversity                                                       >= 90%
@@ -73,9 +74,10 @@
 % above the drop, COMMITTED when the tracker-lost bound is, NOT COMMITTED when the
 % tracked bound is not; a drop above the top level is not measured. The detector beyond
 % 0-15 dB and between levels: eval_unseen_snr.m and eval_unseen_severity.m.
-% Level basis: the spoofer at 30 dB, the open connector and WLAN at 30 dB are assumed
-% levels, the others measured; * marks a level the detector never trained on; the comb
-% row is assumed (no source jams every channel).
+% Level basis: the spoofer at 30 dB, every antenna-fault level (5-31 dB spread evenly over
+% the range the sources back; no source measured a fault depth) and WLAN at 30 dB are
+% assumed levels, the others measured; * marks a level the detector never trained on; the
+% comb row is assumed (no source jams every channel).
 % Output: results/edge_map.{txt,mat}, results/edge_summary.txt, results/edge_bands.png,
 % results/edge_heatmap_{det,surv,rec,prot,system,commit}.png, results/link_budget.{txt,mat}
 
@@ -420,12 +422,12 @@ end
 nB = numel(BD); iv = find([BD.veto]);
 
 % Policy-independent layers of every point
-BL = struct('det', repmat(VZ, nT, nS), 'deth', repmat(VZ, nT, nS), 'surv', repmat(VZ, nT, nS), ...
-    'surv_f', repmat(VZ, nT, nS), 'surv_c', repmat(VZ, nT, nS));
+BL = struct('det', repmat(VZ, nT, nS), 'deth', repmat(VZ, nT, nS), 'detu', repmat(VZ, nT, nS), ...
+    'surv', repmat(VZ, nT, nS), 'surv_f', repmat(VZ, nT, nS), 'surv_c', repmat(VZ, nT, nS));
 for i = 1:nT
     for s = 1:nS
         F = take_rows(FTi{i}, FTi{i}.s == s);
-        [BL.det(i, s), BL.deth(i, s)] = det_layers(F, TGT, B);
+        [BL.det(i, s), BL.deth(i, s), BL.detu(i, s)] = det_layers(F, TGT, B);
         BL.surv(i, s) = surv_layer(F, 'surv', TGT, B);
         if ismember(i, ifo), BL.surv_f(i, s) = surv_layer(F, 'surv_f', TGT, B); end
         if ismember(i, ij), BL.surv_c(i, s) = surv_layer(F, 'surv_c', TGT, B); end
@@ -489,7 +491,8 @@ end
 c1 = find(strcmp({CR.kind}, 'static') & [CR.d] == 1, 1); X1 = CR(c1).X;   % the deployed delay
 cst = find(strcmp({CR.kind}, 'static'));              % static commitment at every delay
 % The relative layers at the deployed delay, every policy's REC beside them
-PT = struct('det', BL.det, 'deth', BL.deth, 'surv', BL.surv, 'rec', X1.rec, 'prot', X1.prot, 'linkt', X1.linkt, ...
+PT = struct('det', BL.det, 'deth', BL.deth, 'detu', BL.detu, 'surv', BL.surv, 'rec', X1.rec, 'prot', X1.prot, ...
+    'linkt', X1.linkt, ...
     'sys', zeros(nT, nS), 'lim', {repmat({''}, nT, nS)}, 'sysl', zeros(nT, nS), 'rec_pol', nan(nT, nS, nP), ...
     'rec4_pol', nan(nT, nS, nP));
 for i = 1:nT
@@ -525,7 +528,8 @@ if vu > 0
         end
     end
 end
-VD = struct('det', vt(PT.det), 'deth', vt(PT.deth), 'surv', vt(PT.surv), 'rec', vt(PT.rec), 'prot', vt(PT.prot), ...
+VD = struct('det', vt(PT.det), 'deth', vt(PT.deth), 'detu', vt(PT.detu), 'surv', vt(PT.surv), 'rec', vt(PT.rec), ...
+    'prot', vt(PT.prot), ...
     'linkt', vt(PT.linkt), 'sys', PT.sys, 'sysl', PT.sysl);
 FR = arrayfun(@(s) false_change_rate(CF.sw_k(CF.s == s, var_of(VAR, 'clean', NaN, DLY(1), 1)), T, CF.geo(CF.s == s), ...
     C.period_ms), 1:nS);
@@ -854,8 +858,8 @@ rep{end+1} = sprintf(['Two-sided 95%% intervals (edge_verdict.m: bootstrap over 
 rep{end+1} = sprintf(['Distance, profile A tracked (link_distance_km.m): %s; every position of a flight x%.2f (ground ' ...
     'reflection); the 0.6 F1 clearance (%.1f km at %g m) and the radio horizon never bind below %.2f km.'], ...
     strjoin(hdr_e, ' | '), LB.all_pos, min(LB.fresnel_km), LB.alt_m(1), max(km));
-rep{end+1} = ['Level basis: assumed = the spoofer at 30 dB, the open connector and WLAN at 30 dB (no source measured ' ...
-    'the level); * = a level the detector never trained on (between its trained levels).'];
+rep{end+1} = ['Level basis: assumed = the spoofer at 30 dB, every antenna-fault level and WLAN at 30 dB (no source ' ...
+    'measured the level); * = a level the detector never trained on (between its trained levels).'];
 ttl = {'DET: fused detection on the threat-active frames at no_action', 'DET_h: DET on the harmed flights', ...
     'SURV: flights some configuration recovers', 'REC: held recovery among recoverable flights, deployed policy', ...
     'PROT: held recovery among all threat flights, deployed policy', ...
@@ -869,6 +873,14 @@ for f = 1:6
         rep{end+1} = sprintf('%s %s', rowl{i}, strjoin(arrayfun(@(s) cell_txt(PT.(LAY{f})(i, s), fmt), 1:nS, ...
             'UniformOutput', false), ' ')); %#ok<SAGROW>
     end
+end
+rep{end+1} = '';
+rep{end+1} = ['--- DET_u: DET on the unharmed flights (no_action restores the link), beside DET_h; no target, ' ...
+    '% [95% interval] flights verdict against the DET target ---'];
+rep{end+1} = sprintf('%-49s %s', '', sprintf('%-29s', hdr_e{:}));
+for i = 1:nT
+    rep{end+1} = sprintf('%s %s', rowl{i}, strjoin(arrayfun(@(s) cell_txt(PT.detu(i, s), '%5.1f'), 1:nS, ...
+        'UniformOutput', false), ' ')); %#ok<SAGROW>
 end
 for f = 7:8
     rep{end+1} = ''; %#ok<SAGROW>
@@ -1017,6 +1029,8 @@ sm{end+1} = 'Points per layer, single threats | combined threats: COMMITTED / NO
 for f = 1:numel(LAY)
     sm{end+1} = sprintf('  %-16s %s | %s', LAYN{f}, cnt3(VD.(LAY{f}), isg), cnt3(VD.(LAY{f}), ~isg)); %#ok<SAGROW>
 end
+sm{end+1} = sprintf('  %-16s %s | %s   (unharmed flights, beside DET_h; no target)', 'DET_u', cnt3(VD.detu, isg), ...
+    cnt3(VD.detu, ~isg));
 for d = 1:nD
     x = CR(cst(d)).X;
     sm{end+1} = sprintf(['  %-16s %s | %s; inside a walk region %d, outside every walk (reported, not committed) %d; ' ...
@@ -1206,7 +1220,10 @@ EDGE_NUM = struct('ebno', PP.ebno, 'km', km, 'ebno_thr', ebno_thr, 'deployed', N
     'link_n', [CL.link.n], 'fa_edge_db', [CE.fa.edge], 'link_edge_db', CE.link.edge, 'ohp_verdict', OV, 'ohp_alt_m', OHP.alt_m, ...
     'ohp_r0_km', OHP.r0_km, 'b4', B4, 'fa_bound_met', FAV == 1, 'fa_per_hour', FRall.per_hour, ...
     'fa_per_hour_hi', FRall.per_hour_hi, 'fa_mtbf_s', FRall.mtbf_s, 'check_commit', reshape([CKV.commit], nD, []), ...
-    'predicted_vs_committed', AGR, 'bands_skipped', {skipped});
+    'predicted_vs_committed', AGR, 'bands_skipped', {skipped}, ...
+    'det_split', struct('harmed', [cnt_of(VD.deth, isg); cnt_of(VD.deth, ~isg)], ...
+    'unharmed', [cnt_of(VD.detu, isg); cnt_of(VD.detu, ~isg)], 'n_harmed', reshape([PT.deth.n], nT, nS), ...
+    'n_unharmed', reshape([PT.detu.n], nT, nS)));
 save('results/edge_map.mat', 'EM', 'EDGE_NUM', 'FT', 'CF', 'CS', 'VAR');
 fprintf('Saved results/edge_map.{txt,mat}, results/edge_summary.txt, results/edge_bands.png, ');
 fprintf('results/edge_heatmap_{%s}.png (%.1f min)\n', strjoin(FIG, ','), toc(t0) / 60);
@@ -1238,11 +1255,12 @@ v = find(strcmp({VAR.kind}, kind) & arrayfun(@(x) isequaln(x.fd, fd), VAR) & [VA
 if isempty(v), v = 0; end
 end
 
-function [det, deth] = det_layers(F, TGT, B)
-% DET over the flights F and DET_h over the harmed ones.
+function [det, deth, detu] = det_layers(F, TGT, B)
+% DET over the flights F, DET_h over the harmed ones and DET_u over the others.
 det = edge_verdict(F.det_k, F.det_n, F.geo, TGT.det, 'ge', false, B);
 m = F.harm;
 deth = edge_verdict(F.det_k(m), F.det_n(m), F.geo(m), TGT.det, 'ge', false, B);
+if nargout > 2, detu = edge_verdict(F.det_k(~m), F.det_n(~m), F.geo(~m), TGT.det, 'ge', false, B); end
 end
 
 function V = fa_claim(CF, v, e, thr, TGT, B)
