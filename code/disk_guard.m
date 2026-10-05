@@ -9,7 +9,7 @@ function disk_guard(varargin)
 %   disk_guard          after a run: empty the repository; stop the pipeline when
 %                       the drive of tempdir has less than MIN_FREE_GB free, or
 %                       when this machine's .dmr files exceed MAX_DMR_GB
-MIN_FREE_GB = 200;
+MIN_FREE_GB = 150;
 MAX_DMR_GB  = 2;
 if nargin && strcmp(varargin{1}, 'init')
     load_system('simulink');                                % the SDI calls need Simulink loaded (parallel workers)
