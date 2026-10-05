@@ -130,6 +130,36 @@ verifyTrue(tc, all(m(:, 2)));                        % hold over
 verifyEqual(tc, find(m(:, 3))', 7);
 end
 
+%% ---------- operator console ----------
+function test_console_scenario(tc)
+% Every combined threat of the decision layer builds in the console: each component at
+% the selected level of its own severity axis, the components the detector classes that
+% count as correct, and the countermeasures act on the combination.
+p0 = base_params(); C = decision_config();
+DL = dataset_levels(); sev = struct();
+for t = 1:numel(DL), sev.(DL(t).name) = struct('param', DL(t).param, 'levels', DL(t).levels); end
+verifyTrue(tc, any(cellfun(@(x) numel(strsplit(x, '+')) == 3, C.combos)));      % the triples are there
+for i = 1:numel(C.combos)
+    th = C.combos{i}; parts = strsplit(th, '+');
+    [p, txt, fd, comps] = console_scenario(p0, sev, th, 3, 72);
+    verifyEqual(tc, p.active_threat, th);
+    verifyEqual(tc, comps, parts);
+    verifyTrue(tc, all(isfield(sev, parts)));                                   % every component is a detector class
+    verifyEqual(tc, fd, 20 * p0.carrier_freq / p0.c_light, 'RelTol', 1e-12);
+    for j = 1:numel(parts)
+        sv = sev.(parts{j});
+        verifyEqual(tc, p.(sv.param), sv.levels(3), th);
+        verifyTrue(tc, contains(txt, sprintf('%s=%g', sv.param, sv.levels(3))), th);
+    end
+    pn = console_scenario(p0, sev, th, 0, 72);                                  % nominal: init_params' values
+    for j = 1:numel(parts), verifyEqual(tc, pn.(sev.(parts{j}).param), p0.(sev.(parts{j}).param)); end
+    p2 = apply_countermeasure(p, th, 'channel_switch+spatial_diversity');
+    verifyEqual(tc, p2.active_threat, th);
+end
+[p, txt, ~, comps] = console_scenario(p0, sev, 'none', 5, 0);
+verifyEqual(tc, comps, {'none'}); verifyEqual(tc, txt, 'nominal'); verifyEqual(tc, p.fd_max, 0);
+end
+
 %% ---------- signalling delay, follower and comb jammers ----------
 function test_follower_rehop_delay(tc)
 % A policy that holds channel_switch against a follower: the request needs D frames,

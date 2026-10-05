@@ -78,13 +78,14 @@ env.fs         = p0.symbol_rate * p0.sps;
 env.delay_bits = 20;
 env.img_size = 128; env.win = 128; env.novlp = 113; env.nfft = 128;
 env.db_lo = -40; env.db_hi = 40; env.temporal_window = 10;
-env.threats = {'jamming','reactive_jamming','sweeping_jammer','noise_burst','tone_jamming', ...
-    'path_loss','spoofing','antenna_fault','airframe_shadowing','benign_interference','none'};
+env.DC = decision_config();
+env.threats = [{'jamming','reactive_jamming','sweeping_jammer','noise_burst','tone_jamming', ...
+    'path_loss','spoofing','antenna_fault','airframe_shadowing','benign_interference','none'}, env.DC.combos(:)'];
 env.snr_levels = p0.EbNo_dB(:)';
 if isfield(p0, 'speed_kmh_min')
     env.speed_range = [p0.speed_kmh_min p0.speed_kmh_max];
 else
-    env.speed_range = [50 120];
+    env.speed_range = 3.6 * [p0.v_min p0.v_max];
 end
 env.action_names = env.dqn_agent.action_names;
 env.na = find(strcmp(env.action_names, 'no_action'), 1);
@@ -99,9 +100,6 @@ env.PP = struct('actions', {env.action_names}, 'classes', {env.class_list(:)'}, 
 if isfield(Q, 'confirm'), env.PP.confirm = Q.confirm; end
 if isfield(Q, 'alarm_mode'), env.PP.alarm_mode = Q.alarm_mode; end
 if isfield(Q, 'drop_db') && ~isempty(Q.drop_db), env.PP.drop_db = Q.drop_db; end
-env.baseline = struct('jsr_db',p0.jsr_db,'path_loss_db',p0.path_loss_db, ...
-    'fault_atten_db',p0.fault_atten_db,'spoof_sir_db',p0.spoof_sir_db, ...
-    'benign_int_db',p0.benign_int_db,'tone_jsr_db',p0.tone_jsr_db,'shadow_db',p0.shadow_db);
 env.sev = buildSeverityTable();
 env.surv = loadSurvReference();
 env.ber_floor = 0.5 / p0.frame_length;      % "zero errors in a frame" plotting floor
@@ -139,10 +137,10 @@ root.BackgroundColor = c.bg;
 hdr = uipanel(root, 'BackgroundColor', c.panelBg, 'BorderType', 'none');
 hdr.Layout.Row = 1;
 hg = uigridlayout(hdr, [1 5]);
-hg.ColumnWidth = {'1x', 430, 170, 30, 270}; hg.Padding = [14 4 14 4]; hg.BackgroundColor = c.panelBg;
+hg.ColumnWidth = {'1x', 530, 200, 30, 270}; hg.Padding = [14 4 14 4]; hg.BackgroundColor = c.panelBg;
 place(mkLabel(hg, 'UAV-GCS ADAPTIVE SECURE COMMUNICATIONS', c, 'FontSize', 17, 'FontWeight', 'bold'), 1, 1);
-place(mkLabel(hg, sprintf('CNN %d-class detector | DQN %d configurations | 2.4 GHz', ...
-    numel(env.class_list), numel(env.action_names)), c, ...
+place(mkLabel(hg, sprintf('CNN %d-class detector | DQN %d configurations | %d UAV antennas | %s | %.1f GHz', ...
+    numel(env.class_list), numel(env.action_names), p0.n_rx, kText(p0), p0.carrier_freq / 1e9), c, ...
     'FontColor', c.mut, 'FontSize', 11, 'HorizontalAlignment', 'right'), 1, 2);
 [pItems, pData] = profileMenu(p0.n_rx, profile);
 pMenu = uidropdown(hg, 'Items', pItems, 'ItemsData', pData, 'Value', profile, 'FontName', c.font, ...
@@ -162,7 +160,7 @@ tabLog  = uitab(tg, 'Title', '  SESSION LOG  ',       'BackgroundColor', c.bg);
 
 ui = buildLiveTab(tabLive, env, c);
 ui = mergeStructs(ui, buildEpisodeTab(tabEp, env, c));
-ui = mergeStructs(ui, buildKpiTab(tabKpi, c));
+ui = mergeStructs(ui, buildKpiTab(tabKpi, env, c));
 ui = mergeStructs(ui, buildSurvTab(tabSurv, env, c));
 ui = mergeStructs(ui, buildLogTab(tabLog, c));
 ui.linkLamp = lamp; ui.linkTxt = lampTxt; ui.tabGroup = tg;
@@ -198,7 +196,7 @@ fig.CloseRequestFcn              = @closeApp;
 speedChanged(ui.speedSpin, []);
 ui.thrSlider.Value = 95;                              % production threshold: 95% of known frames kept
 thrChanged(ui.thrSlider, []);
-resetRunViews(fig);
+resetRunViews(fig, 'AWAITING SEQUENCE');
 drawLinkDiagram(fig, 'idle', '', '', struct());
 setProgress(fig, 0);
 loadKpiTab(fig);
@@ -234,7 +232,7 @@ function ui = buildLiveTab(tab, env, c)
     cedit    = [true false true(1, nS)];
     tdata = cell(numel(env.threats), 2 + nS);
     tdata(:,1) = {false};
-    tdata(:,2) = cellfun(@(x) upper(strrep(x,'_',' ')), env.threats(:), 'UniformOutput', false);
+    tdata(:,2) = cellfun(@threatLabel, env.threats(:), 'UniformOutput', false);
     tdata(:,3:end) = {false};
     k4 = find(env.snr_levels == 4, 1); if isempty(k4), k4 = 1; end
     tdata{1, 2 + k4} = true;                      % default: jamming @ 4 dB
@@ -242,7 +240,8 @@ function ui = buildLiveTab(tab, env, c)
         'Tooltip', {'Your test plan: tick which attacks to run, and at which link quality.', ...
         'Eb/N0 = how strong the link is to begin with: 0 dB = weak, far, noisy;', ...
         '10 dB = strong and close. The same attack that is harmless at 10 dB', ...
-        'can take the link down at 0-2 dB. One live simulation per ticked cell.'}, ...
+        'can take the link down at 0-2 dB. One live simulation per ticked cell.', ...
+        'The rows below NONE are combined threats: two or three at once.'}, ...
         'ColumnEditable', cedit, 'ColumnWidth', [{36, 124}, repmat({30}, 1, nS)], 'RowName', [], ...
         'FontSize', 10, 'FontName', c.font, 'BackgroundColor', [c.termBg; c.axBg], ...
         'ForegroundColor', c.txt);
@@ -286,12 +285,13 @@ function ui = buildLiveTab(tab, env, c)
         'SLOWER flight = long, deep dips in signal - harder, a natural dip can', ...
         'look like an attack. FASTER flight = short, frequent dips that average', ...
         'out. Attack power and link budget do not change with speed.'};
-    tipSev = {'How strong the attack is. NOMINAL = exactly what the system was', ...
-        'trained against. L1-L2 = weaker than trained (easy). L4-L5 = stronger', ...
-        'than trained (hard: more corrupted commands, slower recovery, and some', ...
-        'cells become impossible for ANY response - see the survivability map).', ...
+    tipSev = {'How strong the attack is. NOMINAL = the middle of the trained range.', ...
+        sprintf('Level 1 = the weakest, Level %d = the most severe value the sources measured', nLv), ...
+        '(hard: more corrupted commands, slower recovery, and some cells become', ...
+        'impossible for ANY response - see the survivability map).', ...
         'What it scales per threat: jammer power, depth of the range loss,', ...
-        'fake-signal power, how long the antenna is dead, neighbor power.'};
+        'fake-signal power, antenna-fault loss, shadowing depth, neighbor power.', ...
+        'A combined threat sets every component to the same level.'};
     tipThr = {'How suspicious the system is of signals it does not recognize.', ...
         'LEFT (80) = very suspicious: reacts earlier to never-seen attacks, but', ...
         'also mistrusts normal frames - UNKNOWN appears more often.', ...
@@ -342,11 +342,12 @@ function ui = buildLiveTab(tab, env, c)
         'Tooltip', {'Runs waiting their turn; the top one runs next. ABORT stops after', 'the current run.'});
 
     % ---- Terminal ----
-    p6 = mkPanel(gl, 'EVENT TERMINAL', c); p6.Layout.Row = 6;
+    p6 = mkPanel(gl, 'EVENT TERMINAL  (newest on top)', c); p6.Layout.Row = 6;
     g6 = uigridlayout(p6, [1 1]); g6.Padding = [6 2 6 6]; g6.BackgroundColor = c.panelBg;
     termArea = uitextarea(g6, 'Value', {''}, 'Editable', 'off', 'FontName', c.mono, 'FontSize', 10, ...
         'BackgroundColor', c.termBg, 'FontColor', c.term, ...
-        'Tooltip', {'Everything that happened, in order, with timestamps. The same text', 'is saved to a log file per session.'});
+        'Tooltip', {'Everything that happened, newest on top, with timestamps. The same text', ...
+        'is saved in time order to a log file per sequence.'});
 
     %% ---------------- CENTER COLUMN ----------------
     gc = uigridlayout(g, [4 1]); gc.Layout.Column = 2;
@@ -418,7 +419,7 @@ function ui = buildLiveTab(tab, env, c)
     gOut.Padding = [8 4 8 6]; gOut.RowSpacing = 3; gOut.BackgroundColor = c.panelBg;
     outAx = place(uiaxes(gOut), 1, 1); styleAx(outAx, c);
     outLbl = place(mkLabel(gOut, {'-'}, c, 'FontSize', 10, 'FontName', c.mono, 'VerticalAlignment', 'top', ...
-        'Tooltip', {'Errors before vs after each policy, how much of the damage was', ...
+        'WordWrap', 'on', 'Tooltip', {'Errors before vs after each policy, how much of the damage was', ...
         'undone, and what the response costs while active (data rate, spectrum).'}), 2, 1);
 
     ui = struct('matrixTbl',matrixTbl,'speedSpin',speedSpin,'speedInfo',speedInfo,'sevDD',sevDD, ...
@@ -445,15 +446,17 @@ function ui = buildEpisodeTab(tab, env, c)
     % ---- hover help: one '?' per setting, same text on the control ----
     tipThreat = {'Which attack hits the link mid-flight; until the onset the link is', ...
         'clean. Pick NONE for a fully clean flight - then ANY response you see', ...
-        'fire is a false alarm, which is exactly what that setting demonstrates.'};
+        'fire is a false alarm, which is exactly what that setting demonstrates.', ...
+        'The entries after NONE are combined threats (two or three at once);', ...
+        'detecting any one of their components counts as correct.'};
     tipEbno = {'How strong the link is before the attack. 0-2 dB = far, weak link:', ...
         'errors exist even with no attack, and natural signal dips can be', ...
         'mistaken for one. 8-10 dB = strong link: any trouble you see is the', ...
         'attack itself. Same attack, very different difficulty.'};
-    tipSevE = {'How strong the attack is. NOMINAL = exactly what the system was', ...
-        'trained against; L1-L2 weaker (easy); L4-L5 stronger than trained', ...
-        '(more corrupted commands, slower recovery, some cells impossible for', ...
-        'any response - see the survivability map).'};
+    tipSevE = {'How strong the attack is. NOMINAL = the middle of the trained range;', ...
+        sprintf('Level 1 the weakest, Level %d the most severe value the sources measured', ...
+        numel(env.sev.jamming.levels)), '(more corrupted commands, slower recovery, some cells impossible for', ...
+        'any response - see the survivability map). A combined threat sets every', 'component to the same level.'};
     tipSpeedE = {'How fast the UAV flies. Slower = long, deep dips in signal strength', ...
         '(harder, a dip can look like an attack); faster = short, frequent dips', ...
         'that average out. Attack power and link budget are unchanged.'};
@@ -467,15 +470,16 @@ function ui = buildEpisodeTab(tab, env, c)
     tipPost = {'How long the flight continues under attack. Longer = the full story:', ...
         'detection, the switch, recovery, and whether it stays stable.', ...
         'T_detect / T_act / T_recover are measured over these cycles.'};
+    DC = env.DC; cf = confirmOf(env);
     tipHyst = {'Plan B, part of the deployed system: if the chosen response has not', ...
-        'healed the link within 3 cycles, or the policy keeps no response while', ...
-        'the alarm stays confirmed for 3 cycles, try the next-best response not', ...
+        sprintf('healed the link within %d cycles, or the policy keeps no response while', DC.esc), ...
+        sprintf('the alarm stays confirmed for %d cycles, try the next-best response not', DC.esc), ...
         'used yet in this incident. Rescues wrong first picks, at the price of extra switching.'};
-    tipConf = {'Trigger discipline: the attack must be seen on 2 cycles in a row', ...
+    tipConf = {sprintf('Trigger discipline: the attack must be seen on %d of the last %d cycles', cf(1), cf(2)), ...
         'before ANY response may fire. One noisy frame never causes a switch -', ...
-        'this is why reactions take at least ~1 ms and false alarms are rare.'};
+        sprintf('this is why reactions take at least %d cycles and false alarms are rare.', cf(1))};
     tipDwell = {'The rule policy''s own patience: it commits a new response only', ...
-        'after proposing it 2 cycles in a row, and never within 3 cycles of', ...
+        sprintf('after proposing it %d cycles in a row, and never within %d cycles of', DC.dwell, DC.hold), ...
         'its last change - so it does not flap between responses.'};
     tipPace = {'Screen speed only. Decisions and all measured times are unaffected.', ...
         '"fastest" for getting results; 150-400 ms per cycle for an audience.'};
@@ -486,7 +490,7 @@ function ui = buildEpisodeTab(tab, env, c)
     ddArgs = {'BackgroundColor', c.termBg, 'FontColor', c.txt, 'FontName', c.font};
     place(mkLabel(gl, 'Threat', c, 'FontColor', c.mut), 1, 1);
     place(mkLabel(gl, 'Eb/N0 (dB)', c, 'FontColor', c.mut), 1, 3);
-    epThreatDD = place(uidropdown(gl, 'Items', cellfun(@niceName, env.threats, 'UniformOutput', false), ...
+    epThreatDD = place(uidropdown(gl, 'Items', cellfun(@threatLabel, env.threats, 'UniformOutput', false), ...
         'ItemsData', env.threats, 'Value', 'jamming', 'Tooltip', tipThreat, ddArgs{:}), 2, 1);
     helpMark(gl, 2, 2, tipThreat, c);
     k4 = find(env.snr_levels == 4, 1); if isempty(k4), k4 = 1; end
@@ -525,7 +529,7 @@ function ui = buildEpisodeTab(tab, env, c)
     epDwellSpin = place(mkLabel(gl, sprintf('alarm confirmation %d-of-%d', confirmOf(env)), c, 'FontColor', c.mut, ...
         'FontSize', 10, 'Tooltip', tipConf), 10, 1);
     helpMark(gl, 10, 2, tipConf, c);
-    epHoldSpin  = place(mkLabel(gl, 'rule: dwell 2, hold 3', c, 'FontColor', c.mut, 'FontSize', 10, ...
+    epHoldSpin  = place(mkLabel(gl, sprintf('rule: dwell %d, hold %d', DC.dwell, DC.hold), c, 'FontColor', c.mut, 'FontSize', 10, ...
         'Tooltip', tipDwell), 10, 3);
     helpMark(gl, 10, 4, tipDwell, c);
 
@@ -549,21 +553,26 @@ function ui = buildEpisodeTab(tab, env, c)
         'BackgroundColor', c.cyan, 'FontColor', [0.03 0.06 0.12], 'Enable', 'off', ...
         'Tooltip', {'Replays the last episode in the Unreal 3D view (viz3d/v3d_live.m): the UAV,', ...
         'the GCS, the interferer in its real direction, the link and the receive pattern', ...
-        'of the two UAV antennas, DQN and rules side by side, cycle by cycle.'}), 14, [3 4]);
+        sprintf('of the %d UAV antennas, DQN and rules side by side, cycle by cycle.', env.p0.n_rx)}), 14, [3 4]);
     epStatus = place(uitextarea(gl, 'Value', {'Frame pools are built per scenario on the first run', ...
-        '(10 Simulink runs, about a minute) and reused afterwards.'}, 'Editable', 'off', ...
+        sprintf('(%d Simulink runs: every configuration on two flights) and reused afterwards.', ...
+        2 * numel(env.action_names))}, 'Editable', 'off', ...
         'FontName', c.mono, 'FontSize', 10, 'BackgroundColor', c.termBg, 'FontColor', c.txt, ...
-        'Tooltip', {'First run of a scenario does about a minute of real simulations to', ...
-        'build its frames; every run after that reuses them and starts fast.'}), 15, [1 4]);
+        'Tooltip', {'First run of a scenario simulates every configuration to build its', ...
+        'frames; every run after that reuses them and starts fast.'}), 15, [1 4]);
 
     pr = mkPanel(g, 'CONTINUOUS EPISODE  (one cycle = one received frame; decision every cycle)', c);
     pr.Layout.Column = 2;
-    gr = uigridlayout(pr, [4 1]); gr.RowHeight = {'1.3x', '1x', '1x', 24};
+    gr = uigridlayout(pr, [2 1]); gr.RowHeight = {'1x', 24};
     gr.Padding = [8 4 8 6]; gr.RowSpacing = 6; gr.BackgroundColor = c.panelBg;
-    epBerAx = place(uiaxes(gr), 1, 1); styleAx(epBerAx, c);
-    epDetAx = place(uiaxes(gr), 2, 1); styleAx(epDetAx, c);
-    epActAx = place(uiaxes(gr), 3, 1); styleAx(epActAx, c);
-    epCycleLbl = place(mkLabel(gr, 'Idle.', c, 'FontName', c.mono, 'FontSize', 11), 4, 1);
+    % one tiled layout, so the three time axes share their plot-box edges
+    pa = uipanel(gr, 'BackgroundColor', c.panelBg, 'BorderType', 'none'); pa.Layout.Row = 1;
+    tl = tiledlayout(pa, 10, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+    epBerAx = nexttile(tl, 1, [4 1]); styleAx(epBerAx, c);
+    epDetAx = nexttile(tl, 5, [3 1]); styleAx(epDetAx, c);
+    epActAx = nexttile(tl, 8, [3 1]); styleAx(epActAx, c);
+    linkaxes([epBerAx epDetAx epActAx], 'x');
+    epCycleLbl = place(mkLabel(gr, 'Idle.', c, 'FontName', c.mono, 'FontSize', 11), 2, 1);
 
     ui = struct('epThreatDD',epThreatDD,'epSnrDD',epSnrDD,'epSevDD',epSevDD,'epSpeedSpin',epSpeedSpin, ...
         'epPolicyDD',epPolicyDD,'epPreSpin',epPreSpin,'epPostSpin',epPostSpin,'epHystChk',epHystChk, ...
@@ -575,7 +584,7 @@ end
 %% =====================================================================
 %% =========================  BUILD: KPI TAB  ===========================
 %% =====================================================================
-function ui = buildKpiTab(tab, c)
+function ui = buildKpiTab(tab, env, c)
     g = uigridlayout(tab, [3 1]); g.RowHeight = {112, '1x', '1x'}; g.Padding = [4 4 4 4];
     g.RowSpacing = 8; g.BackgroundColor = c.bg;
 
@@ -589,7 +598,9 @@ function ui = buildKpiTab(tab, c)
         {'Median reaction time per decision on this computer. Under 10 ms =', 'real time by the bar used for detection systems.'}, ...
         {'How often a response fired on a perfectly healthy link, over 600', 'independent clean flights. Target: statistical bound under 5%.'}, ...
         {'How much better the AI flies the link than the fixed rules, in mean', 'reward per cycle (paired comparison, 95% interval above zero).'}, ...
-        {'Does performance hold from hover to 161 km/h. Target: the restored-', 'cycles spread across speeds stays under 10 points.'}};
+        {sprintf('Does performance hold from %s to %g km/h. Target: the restored-', ...
+        ternaryTxt(env.speed_range(1) == 0, 'hover', sprintf('%g km/h', env.speed_range(1))), env.speed_range(2)), ...
+        'cycles spread across speeds stays under 10 points.'}};
     kpiVal = gobjects(1, 6); kpiSub = gobjects(1, 6);
     for k = 1:6
         card = uipanel(top, 'BackgroundColor', c.panelBg, 'BorderType', 'line');
@@ -855,6 +866,34 @@ function s = niceName(x)
     s = upper(strrep(x, '_', ' '));
 end
 
+function s = threatLabel(x)
+    % Menu label of a threat; a combination by short component names.
+    if ~contains(x, '+'), s = niceName(x); return; end
+    short = containers.Map({'jamming','reactive_jamming','sweeping_jammer','noise_burst','tone_jamming', ...
+        'path_loss','spoofing','antenna_fault','airframe_shadowing','benign_interference'}, ...
+        {'JAM','REACTIVE','SWEEP','BURST','TONE','PATH LOSS','SPOOF','ANT FAULT','SHADOW','BENIGN'});
+    s = strjoin(cellfun(@(t) short(t), strsplit(x, '+'), 'UniformOutput', false), '+');
+end
+
+function s = kText(p)
+    % Rician K-factor of the link as init_params.m sets it.
+    if isfield(p, 'k_random') && p.k_random && isfield(p, 'k_range_db')
+        s = sprintf('Rician K %g..%g dB per flight', p.k_range_db);
+    else
+        s = sprintf('Rician K = %g dB', p.rician_k);
+    end
+end
+
+function idx = classIdx(env, threat)
+    % Detector classes that count as a correct detection of the threat: its components.
+    idx = find(ismember(env.class_list, strsplit(threat, '+')))';
+end
+
+function clearAx(ax)
+    % Removes every child, also those with hidden handles that cla keeps.
+    legend(ax, 'off'); delete(allchild(ax)); hold(ax, 'off');
+end
+
 %% =====================================================================
 %% ===========================  CALLBACKS  ==============================
 %% =====================================================================
@@ -977,7 +1016,7 @@ function runSequence(btn, ~)
     setappdata(fig, 'abortFlag', false);
     qItems = cell(1, nRuns);
     for q = 1:nRuns
-        qItems{q} = sprintf('%2d. %-20s @ %g dB', q, niceName(queue{q,1}), queue{q,2});
+        qItems{q} = sprintf('%2d. %-20s @ %g dB', q, threatLabel(queue{q,1}), queue{q,2});
     end
     ui.queueList.Items = qItems; ui.queueList.FontColor = c.txt;
 
@@ -1001,7 +1040,7 @@ function runSequence(btn, ~)
         if getappdata(fig, 'abortFlag')
             appLog(fig, 'SEQUENCE ABORTED BY OPERATOR.'); break;
         end
-        appLog(fig, sprintf('RUN %d/%d: %s @ %g dB', i, nRuns, niceName(queue{i,1}), queue{i,2}));
+        appLog(fig, sprintf('RUN %d/%d: %s @ %g dB', i, nRuns, threatLabel(queue{i,1}), queue{i,2}));
         try
             runOneRun(fig, queue{i,1}, queue{i,2}, sevLevel, tSeq);
         catch ME
@@ -1050,7 +1089,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
 
     [p, sevTxt] = scenarioParams(env, threat, sevLevel, v_kmh);
     snr_dB = ebno + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
-    truth_idx = find(strcmp(env.class_list, threat), 1);
+    truth_idx = classIdx(env, threat);
 
     refBer = NaN;                                                  % clean-channel BER at this Eb/N0
     if ~isempty(env.surv)
@@ -1058,10 +1097,10 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
         if ~isempty(kref), refBer = survRef(env.surv, kref); end
     end
 
-    resetRunViews(fig);
+    resetRunViews(fig, 'RUNNING...');
     drawLinkDiagram(fig, 'scenario', threat, '', info0);
     appLog(fig, sprintf('Scenario: %s | severity %s | %.1f km/h (fd %.0f Hz) | Eb/N0 %g dB', ...
-        niceName(threat), sevTxt, v_kmh, fd_hz, ebno));
+        threatLabel(threat), sevTxt, v_kmh, fd_hz, ebno));
 
     %% ---- 1a. clean lead-in of the same link (monitor reference) ----
     % The monitor's Eb/N0 reference and the path_loss drop gate need
@@ -1104,14 +1143,13 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     raw_feats = link_features(F, i_last, env.temporal_window);
     plr_win = raw_feats(feature_index('plr'));
     iq_before = iq_frames{i_last};
+    z_before = combinerSymbols(out, i_last, p);
     ber_before_mean = mean(ber_f, 'omitnan');
     appLog(fig, sprintf('Channel: BER %.2e (mean of %d frames) | RSSI %.2f dB | packets lost (CRC) %.0f%% | %s', ...
         ber_before_mean, nf, rssi_f(i_last), 100 * plr_win, bitsTxt(ber_before_mean)));
 
     % Pre-mitigation views (drawn BEFORE the timed decision block)
-    nPts = min(400, numel(iq_before));
-    Lq = max(0.6, min(6, 1.15 * max(abs([real(iq_before(1:nPts)); imag(iq_before(1:nPts))]))));
-    drawIQ(fig, iq_before, c.red, 'Received symbols - before  (4 tight clusters = clean signal)', Lq);
+    drawIQ(fig, z_before, c.red, 'Receiver symbols - before  (4 tight clusters = clean QPSK)');
     tl = struct('ber_b', ber_f, 'rssi_b', rssi_f, 'ber_d', [], 'rssi_d', [], ...
         'ber_r', [], 'rssi_r', [], 'ref', refBer);
     drawTimeline(fig, tl);
@@ -1181,8 +1219,8 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     end
 
     %% ---- 3. show detection + decision ----
-    correct = strcmp(cnn_class, threat);
-    drawSpec(fig, Pw_db, Fq, Tq, sprintf('Spectrogram - %s @ %g dB', niceName(threat), ebno));
+    correct = ismember(cnn_class, strsplit(threat, '+'));      % a combination: any of its components
+    drawSpec(fig, Pw_db, Fq, Tq, sprintf('Spectrogram - %s @ %g dB', threatLabel(threat), ebno));
     drawProbs(fig, probs, env.class_list, idx, truth_idx, is_unknown);
     ui.confGauge.Value = min(100, 100 * conf);
     ui.latGauge.Value = min(30, total_ms);
@@ -1193,7 +1231,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
         ui.detLbl.Text = sprintf('%s   (%.1f%%)  -  CORRECT', niceName(cnn_class), 100*conf);
         ui.detLbl.FontColor = c.green;
     else
-        ui.detLbl.Text = sprintf('%s   (%.1f%%)  -  TRUE: %s', niceName(cnn_class), 100*conf, niceName(threat));
+        ui.detLbl.Text = sprintf('%s   (%.1f%%)  -  TRUE: %s', niceName(cnn_class), 100*conf, threatLabel(threat));
         ui.detLbl.FontColor = c.red;
     end
     appLog(fig, sprintf('CNN: %s (%.1f%%) | decision latency %.2f ms (CNN %.2f + DQN %.2f)', ...
@@ -1241,13 +1279,16 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     if ~doRule || (dqnNone && ruleNone), rec_rule = NaN; else, rec_rule = recOf(ber_rule); end
 
     %% ---- 5. outcome views ----
-    if ~isempty(Rd), iq_after = Rd.iq; else, iq_after = iq_before; end
-    drawIQ(fig, iq_after, c.green, 'Received symbols - after the response', Lq);
+    if ~isempty(Rd)
+        drawIQ(fig, Rd.z, c.green, 'Receiver symbols - after the DQN response');
+    else
+        drawIQ(fig, z_before, c.red, 'Receiver symbols - no response applied');
+    end
     if ~isempty(Rd), tl.ber_d = Rd.ber_f; tl.rssi_d = Rd.rssi_f; end
     if ~isempty(Rr) && ~strcmp(rule_action, action_name), tl.ber_r = Rr.ber_f; tl.rssi_r = Rr.rssi_f; end
     drawTimeline(fig, tl);
 
-    [verdict, vcol, vstat] = verdictFor(env, c, ebno, ber_dqn, action_name);
+    [verdict, vcol, vstat, notDeg] = verdictFor(env, c, ebno, ber_dqn, action_name, ber_before_mean);
     names = {'NO ACTION', 'DQN'}; vals = [ber_before_mean, ber_dqn]; cols = [c.red; c.green];
     if doRule
         names{end+1} = 'RULE'; vals(end+1) = ber_rule; cols = [cols; c.purp]; %#ok<AGROW>
@@ -1255,22 +1296,26 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     drawOutcome(fig, vals, names, cols);
 
     [~, ~, cmD] = apply_countermeasure(p, threat, action_name);
-    goodput = sprintf('COST of the response: data rate x%.2f | spectrum x%d | %s', cmD.goodput_factor, cmD.bw_factor, cmD.effect);
+    goodput = sprintf('DQN cost: data rate x%.2f | spectrum x%d', cmD.goodput_factor, cmD.bw_factor);
     lines = {outLine('Errors before', ber_before_mean, NaN), outLine('After DQN    ', ber_dqn, rec_dqn)};
     if doRule, lines{end+1} = outLine('After rule   ', ber_rule, rec_rule); else, lines{end+1} = '(rule comparison off)'; end
     lines{end+1} = goodput;
     ui.outLbl.Text = lines;
-    ui.verdictLbl.Text = {verdict, flightLine(vstat, dqnNone, threat)}; ui.verdictLbl.FontColor = vcol;
+    ui.outLbl.Tooltip = {'Errors before vs after each policy, how much of the damage was', ...
+        'undone, and what the DQN response costs while active (data rate, spectrum).', ...
+        ['Effect: ' cmD.effect]};
+    if ~dqnNone, appLog(fig, ['DQN response effect: ' cmD.effect]); end
+    bottom = flightLine(vstat, dqnNone, threat, notDeg);
+    ui.verdictLbl.Text = {verdict, bottom}; ui.verdictLbl.FontColor = vcol;
     threatRemains = (vstat == 3) && ~ismember(threat, {'none','benign_interference'});
     drawLinkDiagram(fig, 'resolved', threat, action_name, struct('v_kmh', v_kmh, 'fd', fd_hz, ...
         'verdict', verdict, 'color', vcol, 'threatRemains', threatRemains));
     if isnan(rec_dqn)
         appLog(fig, sprintf('Outcome: no countermeasure applied - %s', verdict));
-        appLog(fig, flightLine(vstat, dqnNone, threat));
     else
         appLog(fig, sprintf('Outcome: BER %.2e -> %.2e (%.1f%% recovered) - %s', ber_before_mean, ber_dqn, rec_dqn, verdict));
-        appLog(fig, flightLine(vstat, dqnNone, threat));
     end
+    appLog(fig, bottom);
     smartPause(fig, 0.9, tSeq);
 
     %% ---- 6. log the run ----
@@ -1289,7 +1334,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
         'verdict', verdict, 'verdict_status', vstat, ...
         'cnn_latency_ms', cnn_ms, 'dqn_latency_ms', dqn_ms, 'decision_latency_ms', total_ms);
     H{end+1} = entry; setappdata(fig, 'history', H);
-    ui.histTbl.Data = [ui.histTbl.Data; { n, niceName(threat), sprintf('%g dB', ebno), ...
+    ui.histTbl.Data = [ui.histTbl.Data; { n, threatLabel(threat), sprintf('%g dB', ebno), ...
         sprintf('%.1f', v_kmh), sevTxt, [niceName(detShown) ' [' ok ']'], sprintf('%.0f%%', 100*conf), ...
         niceName(action_name), niceName(ruleShown), pctStr(rec_dqn), pctStr(rec_rule), verdict, ...
         sprintf('%.1f', total_ms) }];
@@ -1299,25 +1344,16 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
 end
 
 function [p, sevTxt, fd_hz] = scenarioParams(env, threat, sevLevel, v_kmh)
-    % Link parameters of one scenario: nominal threat parameters, optional
-    % severity level (same axes as the dataset), UAV speed -> channel Doppler.
-    fd_hz = (v_kmh/3.6) * env.p0.carrier_freq / env.p0.c_light;
-    p = env.p0;
-    p.jsr_db = env.baseline.jsr_db; p.path_loss_db = env.baseline.path_loss_db;
-    p.fault_atten_db = env.baseline.fault_atten_db; p.spoof_sir_db = env.baseline.spoof_sir_db;
-    p.benign_int_db = env.baseline.benign_int_db; p.tone_jsr_db = env.baseline.tone_jsr_db;
-    p.shadow_db = env.baseline.shadow_db; p.fault_atten_db = env.baseline.fault_atten_db;
-    p.active_threat = threat;
-    sevTxt = 'nominal';
-    sv = env.sev.(threat);
-    if sevLevel > 0 && ~isempty(sv.param)
-        p.(sv.param) = sv.levels(sevLevel);
-        sevTxt = sprintf('L%d (%s=%g)', sevLevel, sv.param, sv.levels(sevLevel));
-    end
-    p.v_kmh = v_kmh; p.v = v_kmh/3.6; p.fd_max = fd_hz;
-    p.quiet_build = true;                      % build the Simulink model without opening its window
-    p.gcs_aoa_random = false;                  % the GCS at broadside, as the 3D view draws it
-    p.jam_timing_random = false;               % the sweeper on our channel in every frame of the run
+    % Link parameters of one scenario, single or combined threat (console_scenario.m).
+    [p, sevTxt, fd_hz] = console_scenario(env.p0, env.sev, threat, sevLevel, v_kmh);
+end
+
+function z = combinerSymbols(out, f, p)
+    % Symbol-spaced combiner output of frame f, scaled to unit power (QPSK points at +-0.71).
+    zc = squeeze(out.get('Rx_Z')); if isvector(zc), zc = zc(:); end
+    z = zc(:, min(f, size(zc, 2)));
+    if f == 1, z = z(p.filter_span + 1:end); end            % filter transient of the first frame
+    z = z / max(sqrt(mean(abs(z).^2)), eps);
 end
 
 function s = pctStr(x)
@@ -1336,15 +1372,17 @@ function R = applyMitigation(env, p, threat, action_name, snr_dB) %#ok<INUSL>
     saveParams(p2);
     build_threat_model;
     set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p2.sps));
-    F2 = extract_closed_loop_frames(sim(env.modelName), p2, env.delay_bits);
+    out2 = sim(env.modelName);
+    F2 = extract_closed_loop_frames(out2, p2, env.delay_bits);
     disk_guard;
     i2 = find(~isnan(F2.ber), 1, 'last'); if isempty(i2), i2 = F2.nf; end
-    R = struct('iq', F2.iq{i2}, 'ber_f', F2.ber, 'rssi_f', F2.rssi, 'ber_mean', mean(F2.ber, 'omitnan'));
+    R = struct('iq', F2.iq{i2}, 'z', combinerSymbols(out2, i2, p2), 'ber_f', F2.ber, 'rssi_f', F2.rssi, ...
+        'ber_mean', mean(F2.ber, 'omitnan'));
 end
 
 function cf = confirmOf(env)
-    % Alarm confirmation m-of-n of the decision layer (policy_monitor.m).
-    cf = [2 2]; if isfield(env.PP, 'confirm'), cf = env.PP.confirm; end
+    % Alarm confirmation m-of-n of the decision layer (policy_monitor.m), as deployed.
+    cf = env.DC.confirm; if isfield(env.PP, 'confirm') && ~isempty(env.PP.confirm), cf = env.PP.confirm; end
 end
 
 function r = survRef(surv, k)
@@ -1358,14 +1396,18 @@ function t = mahaThreshold(env, retain_pct)
     t = v(max(1, ceil((1 - retain_pct / 100) * numel(v))));
 end
 
-function [txt, col, status] = verdictFor(env, c, ebno, ber_final, action_name)
+function [txt, col, status, notDeg] = verdictFor(env, c, ebno, ber_final, action_name, ber_before)
     % Classify the FINAL link state with the same criteria as the survivability
-    % map (proposal deliverable #7): BER relative to the clean channel.
-    status = 0; txt = 'VERDICT N/A (no survivability reference - run map_survivability_boundary)'; col = c.mut;
+    % map (proposal deliverable #7): BER relative to the clean channel. notDeg: the
+    % link was within the restoration bound before any response.
+    status = 0; notDeg = false; col = c.mut;
+    txt = 'VERDICT N/A (no survivability reference - run map_survivability_boundary)';
     if isempty(env.surv), return; end
     k = find(env.surv.SNR_points == ebno, 1);
     if isempty(k), return; end
     ratio = ber_final / survRef(env.surv, k);
+    ratio0 = ber_before / survRef(env.surv, k);
+    notDeg = ratio0 <= env.surv.RATIO_RECOVERABLE;
     if ratio <= env.surv.RATIO_RECOVERABLE, status = 1;
     elseif ratio <= env.surv.RATIO_MARGINAL, status = 2;
     else, status = 3; end
@@ -1373,33 +1415,42 @@ function [txt, col, status] = verdictFor(env, c, ebno, ber_final, action_name)
     switch status
         case 1
             col = c.green;
-            if noAct, txt = sprintf('LINK NOMINAL - no action needed  (BER = %.1fx clean)', ratio);
-            else,     txt = sprintf('RECOVERABLE - link restored  (BER = %.1fx clean)', ratio); end
+            if notDeg && noAct      % no response: the final link is the starting one
+                txt = sprintf('NOT DEGRADED - no action needed  (BER = %s clean)', ratioTxt(ratio));
+            elseif notDeg
+                txt = sprintf('NOT DEGRADED - response not needed  (BER %s -> %s clean)', ratioTxt(ratio0), ratioTxt(ratio));
+            else
+                txt = sprintf('RECOVERABLE - link restored  (BER %s -> %s clean)', ratioTxt(ratio0), ratioTxt(ratio));
+            end
         case 2
             col = c.amber;
-            if noAct, txt = sprintf('DEGRADED - no action taken  (BER = %.1fx clean)', ratio);
-            else,     txt = sprintf('MARGINAL - partially restored  (BER = %.1fx clean)', ratio); end
+            if noAct, txt = sprintf('DEGRADED - no action taken  (BER = %s clean)', ratioTxt(ratio));
+            else,     txt = sprintf('MARGINAL - partially restored  (BER %s -> %s clean)', ratioTxt(ratio0), ratioTxt(ratio)); end
         otherwise
             col = c.red;
-            if noAct, txt = sprintf('UNMITIGATED - link degraded  (BER = %.1fx clean)', ratio);
-            else,     txt = sprintf('NON-RECOVERABLE - countermeasure insufficient  (BER = %.1fx clean)', ratio); end
+            if noAct, txt = sprintf('UNMITIGATED - link degraded  (BER = %s clean)', ratioTxt(ratio));
+            else,     txt = sprintf('NON-RECOVERABLE - countermeasure insufficient  (BER %s -> %s clean)', ratioTxt(ratio0), ratioTxt(ratio)); end
     end
+end
+
+function s = ratioTxt(r)
+    % BER over the clean reference, readable for small and large values.
+    if r < 10, s = sprintf('%.2gx', r); else, s = sprintf('%.0fx', r); end
 end
 
 %% =====================================================================
 %% ============================  VIEW HELPERS  ==========================
 %% =====================================================================
-function resetRunViews(fig)
+function resetRunViews(fig, msg)
     data = fig.UserData; ui = data.ui; c = data.colors;
     axs = {ui.specAx, ui.iqAx, ui.berAx, ui.rssiAx, ui.probAx, ui.qAx, ui.outAx};
-    for k = 1:numel(axs)
-        legend(axs{k}, 'off'); cla(axs{k});
-    end
-    setTitle(ui.specAx, 'Spectrogram', c); setTitle(ui.iqAx, 'IQ constellation', c);
+    for k = 1:numel(axs), clearAx(axs{k}); end
+    setTitle(ui.specAx, 'Spectrogram', c); setTitle(ui.iqAx, 'Receiver symbols', c);
     ui.confGauge.Value = 0; ui.latGauge.Value = 0;
     ui.detLbl.Text = '-'; ui.detLbl.FontColor = c.txt;
     ui.decLbl.Text = {'-'}; ui.outLbl.Text = {'-'};
-    ui.verdictLbl.Text = 'RUNNING...'; ui.verdictLbl.FontColor = c.accent;
+    ui.verdictLbl.Text = msg;
+    if strcmp(msg, 'RUNNING...'), ui.verdictLbl.FontColor = c.accent; else, ui.verdictLbl.FontColor = c.mut; end
 end
 
 function setProgress(fig, frac)
@@ -1422,19 +1473,24 @@ function drawSpec(fig, Pw_db, Fq, Tq, ttl)
     setTitle(ax, ttl, c);
 end
 
-function drawIQ(fig, iq, colr, ttl, L)
+function drawIQ(fig, z, colr, ttl)
+    % Combiner output of one frame, one point per symbol, unit power.
     data = fig.UserData; ax = data.ui.iqAx; c = data.colors;
-    cla(ax);
-    s = iq(1:min(400, numel(iq)));
-    scatter(ax, real(s), imag(s), 14, colr, 'filled', 'MarkerFaceAlpha', 0.55);
-    ax.XLim = [-L L]; ax.YLim = [-L L]; grid(ax, 'on');
+    clearAx(ax);
+    scatter(ax, real(z), imag(z), 12, colr, 'filled', 'MarkerFaceAlpha', 0.5);
+    L = 2; ax.XLim = [-L L]; ax.YLim = [-L L]; grid(ax, 'on');
     xlabel(ax, 'In-phase', 'Color', c.mut); ylabel(ax, 'Quadrature', 'Color', c.mut);
     setTitle(ax, ttl, c);
 end
 
-function txt = flightLine(status, noAct, threat)
+function txt = flightLine(status, noAct, threat, notDeg)
     % One plain sentence for the operator: what this outcome means for the flight.
     benign = ismember(threat, {'none', 'benign_interference'});
+    if nargin < 4, notDeg = false; end
+    if status == 1 && notDeg && ~noAct
+        txt = 'Bottom line: the link was never degraded - flight continues; the response was a precaution.';
+        return;
+    end
     switch status
         case 1
             if noAct && benign, txt = 'Bottom line: link healthy - flight continues, nothing was spent.';
@@ -1470,7 +1526,7 @@ function drawProbs(fig, probs, classes, idx, truth_idx, isUnknown)
     ax.TickLabelInterpreter = 'none'; ax.FontSize = 9;
     ax.XLim = [0 135]; ax.XTick = [0 25 50 75 100];
     for k = 1:n
-        isTruth = ~isempty(truth_idx) && k == truth_idx;
+        isTruth = ismember(k, truth_idx);
         if probs(k) >= 0.005 || isTruth
             lab = sprintf('%.1f%%', 100 * probs(k));
             if isTruth, lab = [lab '  <- truth']; end %#ok<AGROW>
@@ -1508,8 +1564,8 @@ function drawQ(fig, qv, aidx, ridx)
     ax.YTick = 1:n; ax.YTickLabel = names(show); ax.FontSize = 8;
     ax.YLim = [0.4 n + 0.6]; ax.XLim = [lo, max(v) + 0.25 * span];
     grid(ax, 'on');
-    setTitle(ax, sprintf('Action scores: best %d of %d allowed  (blue = DQN, purple > = rule)', ...
-        min(TOP, numel(ok)), numel(ok)), c);
+    setTitle(ax, sprintf('Scores: best %d of %d allowed (blue DQN, > rule)', min(TOP, numel(ok)), numel(ok)), c);
+    ax.TitleHorizontalAlignment = 'right';                   % long tick labels leave the room on the left
 end
 
 function drawOutcome(fig, vals, names, cols)
@@ -1533,7 +1589,7 @@ function drawTimeline(fig, tl)
     ms_per_frame = env.p0.frame_duration * 1e3;
 
     % ---------- BER ----------
-    ax = ui.berAx; legend(ax, 'off'); cla(ax); hold(ax, 'on');
+    ax = ui.berAx; clearAx(ax); hold(ax, 'on');
     nb = numel(tl.ber_b); h = gobjects(0); nm = {};
     h(end+1) = plot(ax, 1:nb, floorBer(tl.ber_b, fl), '-o', 'Color', c.red, 'LineWidth', 1.8, ...
         'MarkerSize', 4, 'MarkerFaceColor', c.red); nm{end+1} = 'Before (no action)'; %#ok<AGROW>
@@ -1567,7 +1623,7 @@ function drawTimeline(fig, tl)
     setTitle(ax, 'Bit errors per frame  (amber line = response applied; a drop after it = the response works)', c);
 
     % ---------- RSSI ----------
-    ax = ui.rssiAx; legend(ax, 'off'); cla(ax); hold(ax, 'on');
+    ax = ui.rssiAx; clearAx(ax); hold(ax, 'on');
     plot(ax, 1:nb, tl.rssi_b, '-o', 'Color', c.red, 'LineWidth', 1.6, 'MarkerSize', 3, 'MarkerFaceColor', c.red);
     if ~isempty(tl.rssi_d)
         plot(ax, nb + (1:numel(tl.rssi_d)), tl.rssi_d, '-o', 'Color', c.green, 'LineWidth', 1.6, ...
@@ -1593,7 +1649,7 @@ function drawLinkDiagram(fig, state, scen, det, info)
     cla(ax); hold(ax, 'on'); ax.XLim = [0 16]; ax.YLim = [0 3];
     hostile = ~ismember(scen, {'none','benign_interference',''});
     xg = 1.6; yg = 1.95; xu = 13.0; yu = 1.55;
-    if strcmp(scen, 'path_loss') && ~strcmp(state, 'idle'), xu = 14.4; end
+    if ismember('path_loss', strsplit(scen, '+')) && ~strcmp(state, 'idle'), xu = 14.4; end
 
     % ----- state -> colours / message -----
     hdrState = 'idle';
@@ -1608,7 +1664,7 @@ function drawLinkDiagram(fig, state, scen, det, info)
             else
                 lc = c.green; ls = '-'; hdrState = 'nominal';
             end
-            mc = lc; msg = ['SCENARIO INJECTED (ground truth): ' niceName(scen)];
+            mc = lc; msg = ['SCENARIO INJECTED (ground truth): ' threatLabel(scen)];
         case 'detected'
             lc = c.amber; ls = '--'; hdrState = 'attack';
             if strcmp(scen, 'benign_interference')
@@ -1635,7 +1691,8 @@ function drawLinkDiagram(fig, state, scen, det, info)
 
     % ----- endpoints -----
     drawGCS(ax, xg, c);
-    faulty = strcmp(scen, 'antenna_fault') && any(strcmp(state, {'scenario','detected','mitigating'}));
+    comps = strsplit(scen, '+');
+    faulty = ismember('antenna_fault', comps) && any(strcmp(state, {'scenario','detected','mitigating'}));
     drawUAV(ax, xu, yu, c, faulty);
 
     % ----- main link -----
@@ -1645,7 +1702,10 @@ function drawLinkDiagram(fig, state, scen, det, info)
     % ----- threat overlay -----
     showThreat = any(strcmp(state, {'scenario','detected','mitigating'})) || ...
         (strcmp(state, 'resolved') && isfield(info, 'threatRemains') && info.threatRemains);
-    if showThreat, drawThreat(ax, scen, xm, ym, xg, yg, xu, yu, c); end
+    if showThreat                                       % a combination: its components side by side
+        dx = 3.4 * ((1:numel(comps)) - (numel(comps) + 1) / 2);
+        for i = 1:numel(comps), drawThreat(ax, comps{i}, xm + dx(i), ym, xg, yg, xu, yu, c); end
+    end
 
     % ----- countermeasure overlay -----
     if strcmp(state, 'mitigating'), drawCountermeasure(ax, det, xg, yg, xu, yu, c); end
@@ -1837,10 +1897,9 @@ function appLog(fig, msg)
     v = ta.Value;
     if ischar(v), v = {v}; end
     if numel(v) == 1 && isempty(v{1}), v = {}; end
-    v = [v(:); {line}];
-    if numel(v) > 200, v = v(end-199:end); end
+    v = [{line}; v(:)];                      % newest on top: visible without scrolling (a scrolled
+    if numel(v) > 200, v = v(1:200); end     % text area renders blank in exportapp captures)
     ta.Value = v;
-    scroll(ta, 'bottom');
     fid = getappdata(fig, 'logFid');
     if ~isempty(fid) && fid > 0, fprintf(fid, '%s\n', line); end
     drawnow;
@@ -1943,7 +2002,7 @@ function runEpisode(btn, ~)
     nP = numel(policies);
     [p, sevTxt] = scenarioParams(env, threat, sevLevel, v_kmh);
     appLog(fig, sprintf('EPISODE: %s @ %g dB | %s | %.1f km/h | %s | escalation %s | seed %d', ...
-        niceName(threat), ebno, sevTxt, v_kmh, strjoin(upper(policies), ' + '), ternaryStr(esc, 'on', 'off'), seed));
+        threatLabel(threat), ebno, sevTxt, v_kmh, strjoin(upper(policies), ' + '), ternaryStr(esc, 'on', 'off'), seed));
 
     %% ---- frame pools (real Simulink runs, cached per scenario) ----
     try
@@ -1975,8 +2034,9 @@ function runEpisode(btn, ~)
     T = struct('ber', nan(nP, N), 'det', nan(nP, N), 'ok', false(nP, N), 'mit', false(nP, N), 'conf', nan(nP, N), ...
         'prop', nan(nP, N), 'cfg', nan(nP, N), 'sw', false(nP, N), 'unk', false(nP, N), 'q', nan(nP, N, nA));
     cls_idx = @(cl) find(strcmp(env.class_list, cl), 1);
-    truthIdx = [repmat(cls_idx('none'), 1, N_PRE), repmat(cls_idx(threat), 1, N_POST)];
-    H = epInitPlots(fig, N_PRE, N_POST, bc, truthIdx, policies);
+    compIdx = classIdx(env, threat);                         % a combination: every component is correct
+    truthIdx = [repmat(cls_idx('none'), 1, N_PRE), repmat(compIdx(1), 1, N_POST)];
+    H = epInitPlots(fig, N_PRE, N_POST, bc, compIdx, policies);
 
     %% ---- stream ----
     tLoop = tic; kDone = 0;
@@ -1990,14 +2050,16 @@ function runEpisode(btn, ~)
             fr = struct('iq', double(F.iq{j}), 'ber', F.ber(j), 'feat', F.feat(j, :), 'pkt', floor((k0 + k) / 2));
             if isfield(F, 'gant') && ~isempty(F.gant), fr.gant = F.gant(j, :); end
             [Ep{i}, info] = episode_cycle(Ep{i}, k, fr, ctx{i});
-            T.ber(i, k) = fr.ber; T.det(i, k) = cls_idx(info.cls); T.ok(i, k) = T.det(i, k) == truthIdx(k);
+            T.ber(i, k) = fr.ber; T.det(i, k) = cls_idx(info.cls);
+            if onset, T.ok(i, k) = ismember(T.det(i, k), compIdx); else, T.ok(i, k) = T.det(i, k) == truthIdx(k); end
             T.conf(i, k) = info.conf; T.prop(i, k) = info.prop; T.cfg(i, k) = info.cfg; T.sw(i, k) = info.switched;
             T.unk(i, k) = info.unknown;
             if numel(info.qv) == nA, T.q(i, k, :) = info.qv; end
-            T.mit(i, k) = ~T.ok(i, k) && onset && info.cfg ~= na && strcmp(info.cls, 'none');   % countermeasure active, link looks clean
+            % countermeasure active and the residual read as not hostile (rule_based_policy: no action)
+            T.mit(i, k) = ~T.ok(i, k) && onset && info.cfg ~= na && ismember(info.cls, {'none', 'benign_interference'});
         end
         kDone = k;
-        epUpdatePlots(H, T, k, env.ber_floor);
+        epUpdatePlots(H, T, k, env.ber_floor, env.action_names);
         msg = sprintf('cycle %3d/%d  %s', k, N, ternaryStr(onset, sprintf('(onset + %d)', k - N_PRE), '(clean)'));
         for i = 1:nP
             msg = sprintf('%s  |  %s: %s -> %s', msg, upper(policies{i}), niceName(env.class_list{T.det(i, k)}), ...
@@ -2010,12 +2072,13 @@ function runEpisode(btn, ~)
     drawnow;
 
     %% ---- summary ----
-    lines = {sprintf('%s @ %g dB, %s, %.1f km/h | seed %d | %d/%d cycles (%.1f s)', niceName(threat), ebno, ...
-        sevTxt, v_kmh, seed, kDone, N, toc(tLoop)), sprintf('clean BER %.2e | alarm confirmation %d-of-%d, rule dwell 2 / hold 3, escalation %s', ...
-        bc, confirmOf(env), ternaryStr(esc, 'on', 'off'))};
+    lines = {sprintf('%s @ %g dB, %s, %.1f km/h | seed %d | %d/%d cycles (%.1f s)', threatLabel(threat), ebno, ...
+        sevTxt, v_kmh, seed, kDone, N, toc(tLoop)), sprintf('clean BER %.2e | alarm confirmation %d-of-%d, rule dwell %d / hold %d, escalation %s', ...
+        bc, confirmOf(env), env.DC.dwell, env.DC.hold, ternaryStr(esc, 'on', 'off'))};
     rows = {};
+    truthName = [repmat({'none'}, 1, N_PRE), repmat({threat}, 1, N_POST)];
     for i = 1:nP
-        S = epSummary(T, i, N_PRE, kDone, bc, truthIdx, gp_act, env.action_names);
+        S = epSummary(T, i, N_PRE, kDone, bc, gp_act, env.action_names);
         lines{end+1} = sprintf('%s: T_detect %s | T_act %s | T_recover %s (%s)', upper(policies{i}), ...
             cycTxt(S.T_detect), cycTxt(S.T_act), cycTxt(S.T_recover), S.status); %#ok<AGROW>
         lines{end+1} = sprintf('   switches %d before onset, %d after | final BER %.2fx clean | goodput %.2f', ...
@@ -2025,7 +2088,7 @@ function runEpisode(btn, ~)
             upper(policies{i}), cycTxt(S.T_detect), cycTxt(S.T_act), cycTxt(S.T_recover), S.status, ...
             S.sw_pre, S.sw_post, S.final_ratio, S.goodput));
         for k = 1:kDone
-            rows(end+1, :) = {k, k - N_PRE, policies{i}, env.class_list{truthIdx(k)}, env.class_list{T.det(i, k)}, ...
+            rows(end+1, :) = {k, k - N_PRE, policies{i}, truthName{k}, env.class_list{T.det(i, k)}, ...
                 T.conf(i, k), env.action_names{T.prop(i, k)}, env.action_names{T.cfg(i, k)}, T.sw(i, k), T.ber(i, k)}; %#ok<AGROW>
         end
     end
@@ -2133,7 +2196,7 @@ function P = epBuildPool(fig, p, threat, ebno, seedBase)
     P = cell(1, nA);
     for a = 1:nA
         if getappdata(fig, 'epAbort'), error('demoGui:aborted', 'stopped'); end
-        epSay(fig, sprintf('Building frame pool: %s, action %d/%d (%s)...', niceName(threat), a, nA, ...
+        epSay(fig, sprintf('Building frame pool: %s, action %d/%d (%s)...', threatLabel(threat), a, nA, ...
             niceName(env.action_names{a})));
         [p2, g_db] = apply_countermeasure(p, threat, env.action_names{a});
         saveParams(p2);
@@ -2156,13 +2219,14 @@ function P = epBuildPool(fig, p, threat, ebno, seedBase)
     restoreParams(env.p0);
 end
 
-function H = epInitPlots(fig, N_PRE, N_POST, bc, truthIdx, policies)
+function H = epInitPlots(fig, N_PRE, N_POST, bc, compIdx, policies)
     data = fig.UserData; ui = data.ui; c = data.colors; env = data.env;
     N = N_PRE + N_POST; fl = env.ber_floor; nP = numel(policies);
     pc = {c.accent, c.purp}; mk = {'o', 's'}; off = [-0.15 0.15]; if nP == 1, off = 0; end
     nanN = nan(1, N);
+    iNone = find(strcmp(env.class_list, 'none'), 1);
 
-    ax = ui.epBerAx; legend(ax, 'off'); cla(ax); hold(ax, 'on');
+    ax = ui.epBerAx; clearAx(ax); hold(ax, 'on');
     patch(ax, [0.5 N_PRE+0.5 N_PRE+0.5 0.5], [fl*0.6 fl*0.6 1 1], c.cyan, 'FaceAlpha', 0.05, 'EdgeColor', 'none', ...
         'HandleVisibility', 'off');
     hh = gobjects(0); nm = {};
@@ -2184,8 +2248,11 @@ function H = epInitPlots(fig, N_PRE, N_POST, bc, truthIdx, policies)
     legend(ax, hh, nm, 'Location', 'northwest', 'TextColor', c.txt, 'Color', c.panelBg, 'EdgeColor', c.mut, 'FontSize', 9);
     setTitle(ax, 'Link BER per cycle', c);
 
-    ax = ui.epDetAx; legend(ax, 'off'); cla(ax); hold(ax, 'on');
-    stairs(ax, (1:N+1) - 0.5, [truthIdx truthIdx(end)], '-', 'Color', c.mut, 'LineWidth', 3);
+    ax = ui.epDetAx; clearAx(ax); hold(ax, 'on');
+    for t = compIdx                                          % one grey trace per true class
+        tr = [repmat(iNone, 1, N_PRE), repmat(t, 1, N_POST)];
+        stairs(ax, (1:N+1) - 0.5, [tr tr(end)], '-', 'Color', c.mut, 'LineWidth', 3);
+    end
     H.detOk = gobjects(1, nP); H.detBad = gobjects(1, nP); H.detMit = gobjects(1, nP);
     for i = 1:nP
         H.detOk(i)  = plot(ax, 1:N, nanN, mk{i}, 'MarkerSize', 4, 'MarkerFaceColor', c.green, 'MarkerEdgeColor', pc{i});
@@ -2197,9 +2264,10 @@ function H = epInitPlots(fig, N_PRE, N_POST, bc, truthIdx, policies)
     nC = numel(env.class_list);
     ax.YDir = 'reverse'; ax.YTick = 1:nC; ax.YTickLabel = cellfun(@niceName, env.class_list, 'UniformOutput', false);
     ax.YLim = [0.4 nC+0.6]; ax.XLim = [0.5 N+0.5]; ax.FontSize = 8; grid(ax, 'on');
-    setTitle(ax, 'Detected class per cycle  (grey = true class, green = correct, amber = NONE on the mitigated link, red = wrong)', c);
+    setTitle(ax, ['Detected class per cycle  (grey = true class, green = correct, amber = NONE / BENIGN ' ...
+        'on the mitigated link, red = wrong)'], c);
 
-    ax = ui.epActAx; legend(ax, 'off'); cla(ax); hold(ax, 'on');
+    ax = ui.epActAx; clearAx(ax); hold(ax, 'on');
     H.prop = gobjects(1, nP); H.cfg = gobjects(1, nP);
     hh = gobjects(0); nm = {};
     for i = 1:nP
@@ -2209,18 +2277,26 @@ function H = epInitPlots(fig, N_PRE, N_POST, bc, truthIdx, policies)
     end
     xline(ax, N_PRE + 0.5, '-', 'Color', c.amber, 'LineWidth', 1.5);
     hold(ax, 'off');
-    nA = numel(env.action_names);
-    ax.YDir = 'reverse'; ax.YTick = 1:nA; ax.YTickLabel = cellfun(@niceName, env.action_names, 'UniformOutput', false);
-    ax.YLim = [0.4 nA+0.6]; ax.XLim = [0.5 N+0.5]; ax.FontSize = 8; grid(ax, 'on');
+    ax.YDir = 'reverse'; ax.XLim = [0.5 N+0.5]; ax.FontSize = 8; ax.TickLabelInterpreter = 'none'; grid(ax, 'on');
     xlabel(ax, sprintf('Decision cycle (1 cycle = 1 frame = %.3f ms of signal)', env.p0.frame_duration * 1e3), 'Color', c.mut);
     legend(ax, hh, nm, 'Location', 'southeast', 'TextColor', c.txt, 'Color', c.panelBg, 'EdgeColor', c.mut, 'FontSize', 9);
-    setTitle(ax, 'Policy: proposed action and committed configuration', c);
+    setTitle(ax, 'Policy: proposed action and committed configuration (only those used in the episode)', c);
+    H.actAx = ax;
+    epActTicks(ax, env.na, env.action_names);
 
-    H.off = off; H.fl = fl;
+    H.off = off; H.fl = fl; H.na = env.na;
 end
 
-function epUpdatePlots(H, T, k, fl)
-    % Only the new sample of cycle k is written into each preallocated line.
+function epActTicks(ax, used, actions)
+    % Rows of the configuration axis: the configurations used so far, short codes.
+    n = numel(used); ax.UserData = used;
+    ax.YTick = 1:n; ax.YTickLabel = cellfun(@actionLabel, actions(used), 'UniformOutput', false);
+    ax.YLim = [0.4 n+0.6];
+end
+
+function epUpdatePlots(H, T, k, fl, actions)
+    % The new sample of cycle k is written into each preallocated line; the
+    % configuration rows are redrawn when a configuration appears for the first time.
     for i = 1:numel(H.ber)
         b = max(T.ber(i, max(1, k-4):k), fl);
         setY(H.ber(i), k, b(end));
@@ -2230,8 +2306,16 @@ function epUpdatePlots(H, T, k, fl)
         if T.ok(i, k), setY(H.detOk(i), k, y);
         elseif T.mit(i, k), setY(H.detMit(i), k, y);
         else, setY(H.detBad(i), k, y); end
-        setY(H.prop(i), k, T.prop(i, k) + H.off(i));
-        setY(H.cfg(i), k, T.cfg(i, k) + H.off(i));
+    end
+    a = [T.prop(:, 1:k); T.cfg(:, 1:k)];
+    used = unique([H.na; a(isfinite(a))])';
+    if ~isequal(used, H.actAx.UserData), epActTicks(H.actAx, used, actions); end
+    [~, row] = ismember(1:numel(actions), used);
+    for i = 1:numel(H.ber)
+        yp = nan(1, numel(H.prop(i).YData)); yc = yp;
+        ok = isfinite(T.prop(i, 1:k)); yp(ok) = row(T.prop(i, ok)) + H.off(i);
+        ok = isfinite(T.cfg(i, 1:k)); yc(ok) = row(T.cfg(i, ok)) + H.off(i);
+        H.prop(i).YData = yp; H.cfg(i).YData = yc;
     end
 end
 
@@ -2239,12 +2323,12 @@ function setY(h, k, v)
     y = h.YData; y(k) = v; h.YData = y;
 end
 
-function S = epSummary(T, i, N_PRE, kDone, bc, truthIdx, gp_act, actions)
+function S = epSummary(T, i, N_PRE, kDone, bc, gp_act, actions)
     % Recovered when the causal 5-cycle BER mean stays <= 2x clean for 10 cycles.
     ber = T.ber(i, 1:kDone);
     post = N_PRE+1:kDone;
     S.T_detect = NaN; S.T_act = NaN; S.T_recover = NaN;
-    kd = find(T.det(i, post) == truthIdx(post), 1); if ~isempty(kd), S.T_detect = kd; end
+    kd = find(T.ok(i, post), 1); if ~isempty(kd), S.T_detect = kd; end
     sw = find(T.sw(i, 1:kDone));
     S.sw_pre = sum(sw <= N_PRE); S.sw_post = sum(sw > N_PRE);
     ka = sw(sw > N_PRE); if ~isempty(ka), S.T_act = ka(1) - N_PRE; end
@@ -2512,7 +2596,7 @@ function updateSurvMap(fig)
     for i = 1:nL
         for j = 1:nS
             if ~isnan(g.ratio(i, j))
-                text(ax, j, i, sprintf('%.1f', g.ratio(i, j)), 'HorizontalAlignment', 'center', ...
+                text(ax, j, i, sprintf('%.2g', g.ratio(i, j)), 'HorizontalAlignment', 'center', ...
                     'Color', [0.05 0.05 0.08], 'FontWeight', 'bold', 'FontSize', 11, 'FontName', c.font);
             else
                 text(ax, j, i, '-', 'HorizontalAlignment', 'center', 'Color', c.mut, 'FontSize', 11);
