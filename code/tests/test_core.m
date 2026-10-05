@@ -1989,6 +1989,7 @@ for t = 1:12
     obs.feat(:, feature_index('log_ber')) = -6;
     [mem, M] = policy_monitor('update', mem, obs, PP, cl');
     cnt(:, t) = ~isnan(mem.crc(:, end));
+    verifyTrue(tc, all(isfinite(M.plr)));                                  % no packet decoded yet: no loss seen
     if t == 6, verifyEqual(tc, [M.plr(1), M.degraded(1)], [1 0]); end
     if t == 8, verifyEqual(tc, M.plr(3), 1/5, 'AbsTol', 1e-12); end
 end

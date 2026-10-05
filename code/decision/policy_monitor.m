@@ -94,7 +94,7 @@ mem.ber(arr, 1:end-1) = NaN; mem.crc(arr, 1:end-1) = NaN; mem.deg_n(arr) = 0;
 [nq, lq] = packets(mem.crc(:, nw - 2 * C.win + 1:nw));
 npk(coded) = nq(coded); lost(coded) = lq(coded);
 M.ber_avg = mean(mem.ber, 2, 'omitnan');
-M.plr = lost ./ npk;
+M.plr = lost ./ max(npk, 1);                                    % no packet decoded yet in the window: no loss seen
 M.ebno_est = fi('sinr') + fi('iot') + 10*log10(PP.sps) - 10*log10(PP.bps);
 mem.ebno = [mem.ebno(:, 2:end), M.ebno_est(:)];
 e3 = median(mem.ebno, 2, 'omitnan');
