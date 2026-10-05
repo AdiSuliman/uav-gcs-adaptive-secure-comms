@@ -90,6 +90,9 @@ end
 env.action_names = env.dqn_agent.action_names;
 env.na = find(strcmp(env.action_names, 'no_action'), 1);
 env.ood = D.ood;
+if strcmp(D.ood.score, 'last_or_if') && ~isfield(D.ood, 'forest_pack')   % a bundle without the packed trees
+    env.ood.forest_pack = iforest_pack(D.ood.forest);
+end
 Tood = ood_thresholds(0.95);                   % Mahalanobis unknown-threat threshold (95% of known kept)
 env.maha_val = Tood.maha_val;
 FZ = fusion_model();                           % temporal fusion (select_fusion.m), as evaluated

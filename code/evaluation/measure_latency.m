@@ -1,7 +1,8 @@
 %% MEASURE_LATENCY - Decision latency per cycle (KPI 7: real time)
 % One decision cycle as deployed: spectrogram image of the received frame, link
 % features, detector (class probabilities and the unknown-threat score from one
-% forward pass, detect_scores.m), link monitor with the temporal fusion and the
+% forward pass, detect_scores.m; the score selected by eval_ood_detection.m within the
+% KPI 7 budget), link monitor with the temporal fusion and the
 % unknown-score window + policy (policy_decide.m, the selected DQN and the rule). Real frames of the threat link (none, jamming,
 % noise_burst, spoofing at 4 dB).
 % A deployed receiver runs the detector on one device, so each device (GPU when
@@ -113,7 +114,7 @@ LAT = struct('names', {names}, 'median_ms', median(tm), 'p95_ms', p95(tm), ...
     'devices', device_name(gpu), ...
     'single_core', struct('total_dqn_median_ms', median(T.cpu1.dqn), 'total_dqn_p95_ms', p95(T.cpu1.dqn), ...
         'detector_median_ms', median(T.cpu1.tm(:, 3)), 'detector_p95_ms', p95(T.cpu1.tm(:, 3))), ...
-    'generated', datestr(now));
+    'score', D.ood.score, 'generated', datestr(now));
 if ~isempty(oth)
     LAT.other = struct('device', device_name(strcmp(oth{1}, 'gpu')), 'total_dqn_median_ms', median(T.(oth{1}).dqn), ...
         'total_dqn_p95_ms', p95(T.(oth{1}).dqn));
@@ -123,6 +124,7 @@ rep{end+1} = '=== DECISION LATENCY PER CYCLE ===';
 rep{end+1} = sprintf('Generated: %s | %d timed cycles per device (%d frames x %d passes, after 1 warm-up pass) | %s', ...
     LAT.generated, n, nF, N_REP, LAT.device);
 rep{end+1} = 'Each device timed in its own passes (a deployed receiver uses one); components of the selected device, detector on both.';
+rep{end+1} = sprintf('Unknown-threat score of the detector: %s (eval_ood_detection.m).', LAT.score);
 rep{end+1} = sprintf('%-16s %10s %10s', 'component', 'median ms', 'p95 ms');
 for i = 1:numel(names)
     rep{end+1} = sprintf('%-16s %10.3f %10.3f', names{i}, LAT.median_ms(i), LAT.p95_ms(i)); %#ok<SAGROW>

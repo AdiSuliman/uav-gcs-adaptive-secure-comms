@@ -10,7 +10,8 @@ function M = fit_ood_model(net, tr, classes, va)
 %   (the paper's validation without OOD samples). Isolation forest (Liu, Ting &
 %   Zhou, ICDM 2008) on the normalized link features of the training split, with
 %   the larger sub-sample the paper recommends when training on normal data only
-%   (their section 5.4). The standardization of the fused candidates uses the known
+%   (their section 5.4); its trees are also kept packed for iforest_score.m
+%   (M.forest_pack). The standardization of the fused candidates uses the known
 %   validation frames.
 %   M.score, the production candidate, is 'last' until eval_ood_detection.m
 %   selects it by leave-one-threat-out.
@@ -31,6 +32,7 @@ for l = 1:numel(M.layers)
 end
 [M.raw_mu, M.raw_P] = tied_gauss(tr.feats', y);
 M.forest = iforest(tr.feats, 'NumLearners', 100, 'NumObservationsPerLearner', min(8192, size(tr.feats, 1)));
+M.forest_pack = iforest_pack(M.forest);
 
 % Ensemble weights: logistic regression, known validation frames vs their FGSM versions
 nL = numel(M.layers);

@@ -36,7 +36,8 @@ for i0 = 1:128:N
         Z{lay(j)} = v;
     end
     if pre
-        S = ood_score_set(M, Z, double(X_feat(:, idx)), {M.score}, pre_features(net, M, X_spec(:, :, :, idx), X_feat(:, idx)));
+        Zp = pre_features(net, M, X_spec(:, :, :, idx), X_feat(:, idx), [], device);
+        S = ood_score_set(M, Z, double(X_feat(:, idx)), {M.score}, Zp);
     else
         S = ood_score_set(M, Z, double(X_feat(:, idx)), {M.score});
     end

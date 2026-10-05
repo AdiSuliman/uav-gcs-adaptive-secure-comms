@@ -8,18 +8,23 @@
 %   msp, energy   maximum softmax probability and logsumexp of the logits: baselines
 %   iforest       isolation forest on the link features alone (Liu, Ting & Zhou)
 %   candidates of the production score (ood_score_set.m): last, ensemble, raw,
-%                 last_or_raw, last_or_if
+%                 last_or_raw, last_or_if, last_pre
 % The held-out threat is never used to fit, weight or choose anything inside its
 % fold. Reported per held-out threat: AUROC, and FPR@95%TPR (share of unknown
 % frames accepted as known at the threshold that keeps 95% of known validation
 % frames); every candidate also averaged over the last 2, 5 and 8 decision cycles
 % of a run (one frame per cycle).
 % Selection: the production score and its window are the (candidate, window) pair
-% with the highest mean AUROC over the held-out threats; they are written to
-% data/trained_detector.mat (ood.score, ood.win) and the thresholds are recomputed,
-% so this stage runs before the frame pools (C1p). Because the choice uses the same
-% folds, the value to quote is the nested estimate: for each held-out threat, the
-% pair chosen on the OTHER threats, scored on this one.
+% with the highest mean AUROC over the held-out threats, among the candidates that fit
+% the decision-cycle budget of KPI 7: each candidate's detector cost on one frame
+% is measured first on the production detector (ood_latency.m, timed as
+% measure_latency.m times it), and a candidate whose median exceeds 5 ms or p95 10 ms
+% (half of the KPI 7 targets, kpi7_admit.m) is excluded and reported with its cost.
+% The selected pair is written to data/trained_detector.mat (ood.score, ood.win)
+% and the thresholds are recomputed, so this stage runs before the frame pools (C1p).
+% Because the choice uses the same folds, the value to quote is the nested estimate:
+% for each held-out threat, the pair chosen on the OTHER threats (within the same
+% budget), scored on this one.
 % Learning the new threat (Lee et al., Algorithm 2): once flagged and labelled, the
 % held-out threat is added as a new class from K of its validation frames (never
 % used in the fold) by its mean and an update of the tied covariance in the last
@@ -42,8 +47,16 @@ sp = S.splits;
 all_classes = cellstr(string(sp.classes(:)'));
 held_out = setdiff(all_classes, {'none'}, 'stable');
 if exist('SMOKE', 'var') && SMOKE, held_out = held_out(1:2); N_EPOCHS = 3; end   % reduced chain check
-D0 = load('data/trained_detector.mat', 'ood');
+D0 = load('data/trained_detector.mat', 'net', 'ood');
+if ~isfield(D0.ood, 'forest_pack'), D0.ood.forest_pack = iforest_pack(D0.ood.forest); end   % a detector without the packed trees
 CAND = D0.ood.candidates;
+N_LAT = 200; if exist('SMOKE', 'var') && SMOKE, N_LAT = 30; end   % timed calls per candidate and device
+LC = ood_latency(D0.net, D0.ood, sp.val.X, sp.val.feats', N_LAT);
+fprintf('Detector cost per frame on the device with the lower p95 (median / p95 ms):\n');
+for c = 1:numel(CAND)
+    fprintf('  %-12s %s %7.2f / %7.2f%s\n', CAND{c}, upper(LC.dev{c}), LC.med(c), LC.p95(c), ternary(LC.ok(c), '', '  EXCLUDED'));
+end
+fprintf('\n');
 SC = [{'msp', 'energy', 'iforest'}, CAND];
 R = struct('held_out', {}, 'n_ood', {}, 'auroc', {}, 'fpr95', {}, 'auroc_win', {}, 'id_acc', {}, ...
     'mapped_to', {}, 'same_action', {}, 'incr', {});
@@ -100,14 +113,16 @@ for j = jc                                              % (candidate, window) pa
         if w == 1, Mp(:, c) = A(:, j); else, Mp(:, c) = squeeze(AW(j, WIN == w, :)); end
     end
 end
-[~, b] = max(mean(Mp, 1)); sel = SC{pj(b)}; sel_win = pw(b);
+[~, ic] = ismember(SC(pj), CAND);
+[b, nb] = ood_select(Mp, LC.ok(ic));                   % pairs of the candidates within the KPI 7 budget only
+sel = SC{pj(b)}; sel_win = pw(b);
 NEST = struct('auroc', zeros(1, numel(R)), 'pick', {cell(1, numel(R))});
 for i = 1:numel(R)
-    [~, b2] = max(mean(Mp(setdiff(1:numel(R), i), :), 1));
-    NEST.auroc(i) = Mp(i, b2); NEST.pick{i} = sprintf('%s over %d', SC{pj(b2)}, pw(b2));
+    NEST.auroc(i) = Mp(i, nb(i)); NEST.pick{i} = sprintf('%s over %d', SC{pj(nb(i))}, pw(nb(i)));
 end
 if ~(exist('SMOKE', 'var') && SMOKE)
-    D = load('data/trained_detector.mat', 'ood'); ood = D.ood; ood.score = sel; ood.win = sel_win; %#ok<NASGU>
+    D = load('data/trained_detector.mat', 'ood'); ood = D.ood; ood.score = sel; ood.win = sel_win;
+    if ~isfield(ood, 'forest_pack'), ood.forest_pack = D0.ood.forest_pack; end
     save('data/trained_detector.mat', 'ood', '-append');
     if isfile('data/ood_thresholds.mat'), delete('data/ood_thresholds.mat'); end
 end
@@ -137,9 +152,22 @@ for w = 1:numel(WIN)
         sprintf(sprintf(' %%%d.3f', w8), mean(squeeze(AW(:, w, :)), 2))); %#ok<SAGROW>
 end
 rep{end+1} = '';
+rep{end+1} = sprintf(['Detector cost per frame, one forward pass with the score (ood_latency.m: %d timed calls after ' ...
+    'a warm-up, as measure_latency.m), median / p95 ms; KPI 7 budget (D80): median <= %.0f ms and p95 <= %.0f ms on ' ...
+    'the device with the lower p95 (half of the %.0f / %.0f ms targets):'], LC.n, LC.budget.det_median_ms, ...
+    LC.budget.det_p95_ms, LC.budget.median_ms, LC.budget.p95_ms);
+for c = 1:numel(CAND)
+    rep{end+1} = sprintf('  %-12s %s -> %s %s', CAND{c}, strjoin(cellfun(@(d, m, q) sprintf('%s %7.2f / %7.2f', ...
+        upper(d), m, q), LC.devices, num2cell(LC.med_ms(c, :)), num2cell(LC.p95_ms(c, :)), 'UniformOutput', false), ...
+        ' | '), upper(LC.dev{c}), ternary(LC.ok(c), 'within the budget', 'EXCLUDED (over the budget)')); %#ok<SAGROW>
+end
 rep{end+1} = sprintf(['Production score (highest mean AUROC among %s, each over 1, %s cycles): %s over %d ' ...
-    'cycles, mean AUROC %.3f (single frame %.3f, FPR95 %.2f).'], strjoin(CAND, ', '), strjoin(compose('%d', WIN), ', '), ...
-    sel, sel_win, max(mean(Mp, 1)), mean(A(:, js)), mean(F(:, js)));
+    'cycles, mean AUROC %.3f (single frame %.3f, FPR95 %.2f).'], strjoin(CAND(LC.ok), ', '), strjoin(compose('%d', WIN), ', '), ...
+    sel, sel_win, mean(Mp(:, b)), mean(A(:, js)), mean(F(:, js)));
+if ~all(LC.ok)
+    rep{end+1} = sprintf('Excluded by the KPI 7 budget (their AUROC above is reported, never selected): %s.', ...
+        strjoin(CAND(~LC.ok), ', '));
+end
 rep{end+1} = sprintf(['Nested estimate (score chosen on the other held-out threats, the value to quote): mean AUROC %.3f; ' ...
     'per threat %s; picks %s.'], mean(NEST.auroc), sprintf('%.3f ', NEST.auroc), strjoin(unique(NEST.pick, 'stable'), ', '));
 rep{end+1} = sprintf('Production thresholds (%.0f%% of known validation frames kept): MSP %.3f | energy %.2f | %s %.3f.', ...
@@ -158,7 +186,7 @@ rep{end+1} = sprintf('%-20s %13.1f%% / %5.1f%% %13.1f%% / %5.1f%%', 'mean', 100*
 if ~exist('results', 'dir'), mkdir('results'); end
 fid = fopen('results/ood_detection.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('%s\n', rep{:});
-save('results/ood_detection.mat', 'R', 'SC', 'CAND', 'sel', 'sel_win', 'NEST', 'WIN', 'RETAIN', 'N_EPOCHS', 'T_prod', 'K_NEW');
+save('results/ood_detection.mat', 'R', 'SC', 'CAND', 'sel', 'sel_win', 'NEST', 'WIN', 'RETAIN', 'N_EPOCHS', 'T_prod', 'K_NEW', 'LC');
 fprintf('\nSaved results/ood_detection.{txt,mat}; production score written to data/trained_detector.mat (%.1f min)\n', toc(t0)/60);
 
 
@@ -268,4 +296,8 @@ end
 function q = lowq(x, frac)
 x = sort(x(:));
 q = x(max(1, ceil(frac * numel(x))));
+end
+
+function out = ternary(c, a, b)
+if c, out = a; else, out = b; end
 end

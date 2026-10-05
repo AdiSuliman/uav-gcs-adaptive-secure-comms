@@ -27,6 +27,7 @@ if isfile('results/ood_detection.mat')
     O = load('results/ood_detection.mat', 'R', 'NEST', 'SC', 'sel', 'K_NEW');
     N.ood = O;
 end
+N.ood_latency = take('results/ood_detection.mat', 'LC');            % detector cost of every unknown-threat candidate, KPI 7 budget
 N.policy = take('results/policy_evaluation.mat', 'KP');
 N.policy_top = take('results/policy_evaluation.mat', 'top_cfg');     % most frequent final configuration per threat
 N.latency = take('results/latency.mat', 'LAT');

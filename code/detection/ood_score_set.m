@@ -14,7 +14,8 @@ function S = ood_score_set(M, Z, Xf, need, Zp)
 %     last_or_raw  the lower of the two standardized scores: an alarm when either
 %                  the network's features or the measurements look unfamiliar
 %     last_or_if   the same with the isolation forest on the link features (Liu et
-%                  al.), the pairing named in the proposal
+%                  al.), the pairing named in the proposal; scored from the packed
+%                  trees (M.forest_pack, iforest_score.m), else by isanomaly
 %     last_pre     'last' on inputs pre-processed toward the closest known class
 %                  (Lee et al.'s input pre-processing; M.eps_pre)
 %   Components are standardized with the known validation frames (M.zs).
@@ -35,8 +36,12 @@ if use('raw') || use('last_or_raw')
     S.raw = -min_dist(Xf, M.raw_mu, M.raw_P);
 end
 if use('last_or_if')
-    [~, a] = isanomaly(M.forest, Xf');
-    S.iforest = -a(:)';
+    if isfield(M, 'forest_pack')
+        S.iforest = -iforest_score(M.forest_pack, Xf);
+    else
+        [~, a] = isanomaly(M.forest, Xf');
+        S.iforest = -a(:)';
+    end
 end
 if use('last_pre') && nargin >= 5 && ~isempty(Zp)
     S.last_pre = -min_dist(Zp, M.mu{end}, M.P{end});

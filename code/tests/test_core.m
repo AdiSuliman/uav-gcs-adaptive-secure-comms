@@ -637,6 +637,41 @@ T = ood_score_set(M, {[], Z{2}}, Xf, {'last'});           % the production path 
 verifyEqual(tc, T.last, S.last);
 end
 
+function test_iforest_fast(tc)
+% The packed isolation forest (iforest_pack.m, iforest_score.m) gives the scores of
+% isanomaly: a constant predictor dropped at training, a missing value, one frame or many.
+rng(2);
+F = iforest([randn(600, 2), ones(600, 1), randn(600, 1)], 'NumLearners', 40, 'NumObservationsPerLearner', 256);
+P = iforest_pack(F);
+X = [3 * randn(4, 200), [NaN; 0; 1; 0]];
+[~, a] = isanomaly(F, X');
+verifyEqual(tc, iforest_score(P, X), a(:)', 'AbsTol', 1e-12);
+[~, a1] = isanomaly(F, X(:, 7)');
+verifyEqual(tc, iforest_score(P, X(:, 7)), a1, 'AbsTol', 1e-12);
+M = struct('candidates', {{'last_or_if'}}, 'mu', {{zeros(2, 1)}}, 'P', {{eye(2)}}, ...
+    'zs', struct('last', [0 1], 'iforest', [0 1]), 'forest', F);
+Z = {randn(2, 201)};
+S0 = ood_score_set(M, Z, X, {'last_or_if'});
+M.forest_pack = P;
+S1 = ood_score_set(M, Z, X, {'last_or_if'});
+verifyEqual(tc, S1.last_or_if, S0.last_or_if, 'AbsTol', 1e-12);
+end
+
+function test_ood_latency_budget(tc)
+% KPI 7 budget of the unknown-threat score (kpi7_admit.m): half of the 10 ms
+% median and 20 ms p95 targets; the selection (ood_select.m) never picks a candidate
+% over it, for the production pair nor for the nested estimate.
+[ok, B] = kpi7_admit([1.2 4.9 5.1 3.0 85.8], [2.0 9.9 6.0 10.5 95.8]);
+verifyEqual(tc, ok, [true true false false false]);
+verifyEqual(tc, [B.det_median_ms B.det_p95_ms], [5 10]);
+Mp = [0.70 0.90 0.75; 0.74 0.88 0.60; 0.68 0.91 0.80];   % threats x pairs; pair 2 best but over the budget
+[b, nb] = ood_select(Mp, [true false true]);
+verifyEqual(tc, b, 3);
+verifyEqual(tc, nb, [1 3 1]);                         % chosen on the other threats, within the budget
+[b, nb] = ood_select(Mp, true(1, 3));
+verifyEqual(tc, b, 2); verifyEqual(tc, nb, [2 2 2]);
+end
+
 function test_state_size(tc)
 nA = 36; NE = 3; nC = 11;
 mem = policy_monitor('init', NE, nA);

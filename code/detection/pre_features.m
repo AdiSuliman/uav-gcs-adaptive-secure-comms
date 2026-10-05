@@ -1,12 +1,14 @@
-function Zp = pre_features(net, M, X, F, ep)
+function Zp = pre_features(net, M, X, F, ep, device)
 %PRE_FEATURES  Last-hidden-layer features after the input pre-processing of Lee et al.
 %   (NeurIPS 2018): every input takes a small step that lowers its Mahalanobis distance
 %   to the closest known class, x - eps sign(grad d(x)); known inputs move closer than
 %   unknown ones, which separates them more.
-%   ep   [image step (image in [0,1]), feature step (z-score units)]; default M.eps_pre
-%   Zp   features of M.layers{end} (dims x N) of the pre-processed inputs
+%   ep      [image step (image in [0,1]), feature step (z-score units)]; default M.eps_pre
+%   device  'auto' (GPU when available, default), 'gpu' or 'cpu'
+%   Zp      features of M.layers{end} (dims x N) of the pre-processed inputs
 if nargin < 5 || isempty(ep), ep = M.eps_pre; end
-useGPU = canUseGPU;
+if nargin < 6 || isempty(device), device = 'auto'; end
+useGPU = strcmp(device, 'gpu') || (strcmp(device, 'auto') && canUseGPU);
 lay = M.layers{end};
 MU = dlarray(single(M.mu{end})); P = dlarray(single(M.P{end}));
 if useGPU, MU = gpuArray(MU); P = gpuArray(P); end
