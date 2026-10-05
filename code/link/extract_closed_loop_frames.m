@@ -92,6 +92,10 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %     sync_pk   timing peak over the mean of the arrival window (a clean frame stands out)
 %     sync_p2   second timing peak, more than one symbol away, over the first (two
 %               frames with our training on the air: a spoofer)
+%     sync_coh  coherence of the training with the received space-time snapshots at the
+%               frame's arrival and frequency, 0..1 (build_threat_model.m, st_coh)
+%     sync_fail 1 when sync_coh is below p.sync_coh_min: the training was not found, the
+%               frame's symbols are erasures for a decoder
 %   Ground truth: act, share of the frame with the threat on the air (packet traffic
 %   of benign interference, the sweeping jammer on our channel), analysis and labels only.
 % With p.fec (fec_interleave) ber, fer and crc_fail are those of the decoded packet,
@@ -106,9 +110,9 @@ iqa = out.get('Rx_IQ');                                  % samples x antennas x 
 zc  = squeeze(out.get('Rx_Z'));
 Hq  = out.get('Rx_H');
 Rq  = out.get('Rx_R');
-sy  = zeros(5, size(iqa, ndims(iqa)));
+sy  = zeros(7, size(iqa, ndims(iqa)));
 try
-    sy = reshape(out.get('Rx_S'), 5, []);
+    sy = reshape(out.get('Rx_S'), 7, []);
 catch
 end
 if ismatrix(iqa), iqa = reshape(iqa, size(iqa, 1), 1, []); end
@@ -124,6 +128,7 @@ rx_al = rx_all(delay_bits+1:delay_bits+Lmax);
 F = struct('nf', nf);
 if size(sy, 2) < nf, sy(:, end+1:nf) = 0; end
 F.sync_d = sy(1, 1:nf); F.cfo_hz = sy(2, 1:nf); F.sync_pk = sy(3, 1:nf); F.sync_p2 = sy(4, 1:nf);
+F.sync_coh = sy(6, 1:nf); F.sync_fail = sy(7, 1:nf);
 
 % Ground truth and CRC
 if isfield(p, 'fec') && p.fec
