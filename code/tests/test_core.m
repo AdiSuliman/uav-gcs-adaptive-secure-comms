@@ -291,9 +291,10 @@ end
 
 function test_coded_degraded_after_arrival(tc)
 % With fec_interleave on the link the CRC packet loss decides (above twice the clean
-% coded link's, 0 without the pools, and at least 2 lost packets in the window), from the
-% first frame received with it: one lost packet after the arrival is not degraded,
-% whatever the window held before and however high the channel BER; a second is.
+% coded link's, 0 without the pools, and at least 3 lost packets in the window: one frame
+% costs the two packets that share it), from the first frame received with it: two lost
+% packets after the arrival are not degraded, whatever the window held before and
+% however high the channel BER; a third is.
 A = policy_actions();
 cls = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', 'antenna_fault', ...
     'benign_interference', 'sweeping_jammer', 'tone_jamming', 'airframe_shadowing'};
@@ -311,13 +312,13 @@ verifyTrue(tc, M.degraded);
 [m, M] = policy_monitor('update', m, obs, PP, cf); m = policy_monitor('change', m, false);
 verifyTrue(tc, m.pend && M.degraded);                            % still on its way: the uncoded frame
 obs.cfg_link = cf;
-deg = false(1, 3);
-for k = 1:3                                                      % lost, received, lost
+deg = false(1, 4);
+for k = 1:4                                                      % lost, received, lost, lost
     obs.feat(feature_index('crc_fail')) = k ~= 2;
     [m, M] = policy_monitor('update', m, obs, PP, cf); m = policy_monitor('change', m, false);
     deg(k) = M.degraded;
 end
-verifyEqual(tc, deg, [false false true]);
+verifyEqual(tc, deg, [false false false true]);
 end
 
 function test_policy_own_monitor(tc)
@@ -1544,9 +1545,11 @@ end
 
 function test_sync_flag(tc)
 % Sync coherence and the sync-failure flag: on a clean link at 6 dB the training is found
-% in every frame (coherence above p.sync_coh_min, no flag); with our signal absent from
-% the air (the 'GCS' amplitude 0) every frame is flagged, on the flat and the delay-line
-% receivers alike.
+% in every frame (coherence above p.sync_coh_min, no flag) and no frame is erased for the
+% decoder (pilot error below p.erase_pilot_mse); with our signal absent from the air (the
+% 'GCS' amplitude 0) every frame is flagged and erased, on the flat and the delay-line
+% receivers alike. The clean frames coded (soft values, four frames per codeword) decode
+% every packet, the CRC result on the second frame of each pair.
 p = base_params(); p.quiet_build = true; p.rx_sync = 'real'; p.int_aoa_random = false; p.yaw_random = false;
 p.corr_random = false; p.gcs_tracked = false; p.k_random = false; p.gcs_aoa_random = false; p.body_random = false;
 p.tdl_random = false; p.active_threat = 'none'; p.rician_k = 10;
@@ -1557,12 +1560,20 @@ for i = 1:size(C, 1)
     evalc('build_threat_model(p)');
     set_param([mdl '/AWGN'], 'SNR', num2str(6 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), 'SignalPower', num2str(1/p.sps));
     link_seed(mdl, 31, 160);
-    F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
+    o = sim(mdl, 'StopTime', num2str(10 * p.frame_duration));
+    F = extract_closed_loop_frames(o, p, 20);
+    q = p; q.fec = true;                                         % the same frames coded: every packet decoded
+    Fc = extract_closed_loop_frames(o, q, 20); n2 = 2 * floor(F.nf / 2);
+    verifyEqual(tc, [Fc.ber(1:n2); Fc.crc_fail(2:2:n2), zeros(1, n2 / 2)], zeros(2, n2));
+    verifyTrue(tc, all(isnan(Fc.crc_fail(1:2:n2))));
     verifyGreaterThan(tc, min(F.sync_coh(2:end)), p.sync_coh_min);
     verifyEqual(tc, F.sync_fail(2:end), zeros(1, F.nf - 1));
+    verifyLessThan(tc, max(F.pilot_err(2:end)), p.erase_pilot_mse);
+    verifyEqual(tc, F.erase(2:end), false(1, F.nf - 1));
     set_param([mdl '/GCS'], 'Value', '0');
     F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
     verifyEqual(tc, F.sync_fail, ones(1, F.nf));
+    verifyEqual(tc, F.erase, true(1, F.nf));
     close_system(mdl, 0);
 end
 end
@@ -1752,74 +1763,112 @@ close_system(mdl, 0);
 end
 
 function test_fec_packets(tc)
-% FEC: one codeword per 1000 + 32-bit packet over two frames (2064 coded bits, two frames
-% of channel bits). A clean run decodes every frame; both frames carry their packet's BER
-% and error, in steps of 1/1032, and only the second its CRC result (decoded there); a
-% packet's result does not change with another packet's errors; scattered errors are
-% repaired, a burst only when the receiver sees it (erased), a whole jammed frame not; a
-% last frame without its pair is NaN.
+% FEC: one codeword per 1000 + 32-bit packet (2064 coded bits) spread over four frames, one
+% packet per frame pair: every channel bit of the run carries one coded bit, every frame
+% 516 bits of each of two packets, a packet's four frames are the two pairs up to the one
+% it ends on, cyclic over the run. A clean run decodes every frame; both frames of a pair
+% carry its packet's BER and error, in steps of 1/1032, and only the second its CRC result
+% (decoded there). A frame the receiver flags is erased: one of the four frames of a
+% codeword, even jammed whole, still decodes, unflagged it does not unless its soft
+% values carry its low reliability; two flagged frames
+% of one pair do not (half of each codeword), also across the run's wrap. Scattered errors
+% are repaired, a burst only when the receiver sees it (erased by energy). A last frame
+% without its pair, and a run shorter than a codeword, is NaN. Two frames per codeword:
+% one flagged frame loses its packet.
 p = base_params(); L = frame_layout(p); bpf = p.frame_length; nf = 20; d = p.filter_span / 2;
+verifyEqual(tc, p.fec_frames, 4);
 rs = RandStream('mt19937ar', 'Seed', 3);
 tx = randi(rs, [0 1], nf * bpf, 1);
 iq = ones(L.air * p.sps, nf);
-[b, f, c] = fec_packets(tx, tx, iq, p, nf);
+[b, f, c, map] = fec_packets(tx, tx, iq, p, nf);
+verifyEqual(tc, sort(map(:)), (1:nf * bpf)');                          % every channel bit once
+fm = ceil(map / bpf);                                                    % frame of every coded bit
+for k = 1:nf / 2
+    verifyEqual(tc, accumarray(fm(:, k), 1, [nf 1])', 516 * ismember(1:nf, mod(2*k - 4 + (0:3), nf) + 1));
+end
 verifyEqual(tc, [b; f], zeros(2, nf));
 verifyEqual(tc, c(2:2:nf), zeros(1, nf / 2));
 verifyTrue(tc, all(isnan(c(1:2:nf))));
 verifyEqual(tc, [crc32_fail(tx(1:1000), zeros(bpf, 1)), crc32_fail(tx(1:1000), [1; zeros(bpf - 1, 1)])], [0 1]);
 rx = tx;
-i1 = randperm(rs, 2 * bpf, 10); rx(i1) = 1 - rx(i1);                   % packet 1: scattered errors
-rx(2*bpf + (1:bpf)) = randi(rs, [0 1], bpf, 1);                          % frame 3 jammed whole
+i1 = map(randperm(rs, 2 * bpf, 10), 2); rx(i1) = 1 - rx(i1);           % packet 2: scattered errors
+rx(6*bpf + (1:bpf)) = 1 - rx(6*bpf + (1:bpf));                           % frame 7 inverted whole
+er = false(1, nf); er(7) = true;
+verifyEqual(tc, fec_packets(tx, rx, iq, p, nf, er), zeros(1, nf));       % erased: packets 4 and 5 decode
+rel = ones(nf * bpf, 1); rel(6*bpf + (1:bpf)) = 0.01;                    % or entered with their low reliability
+verifyEqual(tc, fec_packets(tx, rx, iq, p, nf, [], rel), zeros(1, nf));
 [b, f, c] = fec_packets(tx, rx, iq, p, nf);
-verifyEqual(tc, b([1 2 5:nf]), zeros(1, nf - 2));
-verifyGreaterThan(tc, b(3), 0);
-verifyEqual(tc, [f(3) f(4) c(4)], [1 1 1]);
-verifyEqual(tc, b(4), b(3));
-verifyTrue(tc, isnan(c(3)));
-verifyEqual(tc, b(3) * bpf, round(b(3) * bpf), 'AbsTol', 1e-9);
-rx2 = rx; rx2(8*bpf + (1:2*bpf)) = randi(rs, [0 1], 2*bpf, 1);         % packet 5 jammed
-b2 = fec_packets(tx, rx2, iq, p, nf);
-verifyEqual(tc, b2([1:8 11:nf]), b([1:8 11:nf]));
-verifyGreaterThan(tc, b2(9), 0);
+verifyEqual(tc, b([1:6 11:nf]), zeros(1, nf - 4));
+verifyGreaterThan(tc, b([7 9]), [0 0]);                                  % unflagged: both packets lost
+verifyEqual(tc, [f(7) f(8) c(8) b(8)], [1 1 1 b(7)]);
+verifyTrue(tc, isnan(c(7)));
+verifyEqual(tc, b(7) * bpf, round(b(7) * bpf), 'AbsTol', 1e-9);
+rx2 = tx; rx2(18*bpf + (1:2*bpf)) = randi(rs, [0 1], 2*bpf, 1);         % pair 10 jammed, flagged
+er2 = false(1, nf); er2([19 20]) = true;
+b2 = fec_packets(tx, rx2, iq, p, nf, er2);
+verifyEqual(tc, b2(3:18), zeros(1, 16));
+verifyGreaterThan(tc, b2([1 19]), [0 0]);                                % packet 1 starts on the run's last pair
 s = 101:250;                                                             % 150 data symbols of frame 7, random bits
 k = 6*bpf + reshape([2*s - 1; 2*s], [], 1);
 rx3 = tx; rx3(k) = randi(rs, [0 1], numel(k), 1);
+rx3(map(randperm(rs, 2 * bpf, 60), 4)) = randi(rs, [0 1], 60, 1);      % and noise on packet 4
 iq3 = iq;
 for m = L.idx_data(s)' + d
     iq3((m-1)*p.sps + 1:m*p.sps, 7) = sqrt(10);                         % 10 dB above the rest: erased
 end
-b3 = fec_packets(tx, rx3, iq, p, nf);
-verifyGreaterThan(tc, b3(7), 0);
-b3 = fec_packets(tx, rx3, iq3, p, nf);
-verifyEqual(tc, b3, zeros(1, nf));
+verifyEqual(tc, fec_packets(tx, rx3, iq3, p, nf), zeros(1, nf));
 b4 = fec_packets(tx(1:19*bpf), tx(1:19*bpf), iq(:, 1:19), p, 19);
 verifyEqual(tc, b4(1:18), zeros(1, 18));
 verifyTrue(tc, isnan(b4(19)));
+verifyTrue(tc, all(isnan(fec_packets(tx(1:3*bpf), tx(1:3*bpf), iq(:, 1:3), p, 3))));
+q = p; q.fec_frames = 2;
+b5 = fec_packets(tx, rx2, iq, q, nf, er2);
+verifyEqual(tc, b5(1:18), zeros(1, 18));
+verifyGreaterThan(tc, b5(19), 0);
+b6 = fec_packets(tx, tx, iq, q, nf, er);
+verifyEqual(tc, b6([1:6 9:nf]), zeros(1, nf - 2));
+verifyGreaterThan(tc, b6(7), 0);
 end
 
 function test_packet_loss_once(tc)
-% A lost packet is one packet: the slack of the packet-loss criterion is two frames with
-% FEC (a packet over two frames) and one frame without; the monitor counts a lost coded
-% packet once, at its second frame (decoded there: a result on its first frame is not
-% read), so one lost packet does not degrade a coded link and two do, while an uncoded
-% link counts its frames.
-verifyEqual(tc, packet_share({'no_action', 'power_control+fec_interleave'}, 20), [1 2] / 20);
-verifyEqual(tc, packet_share('fec_interleave', 57), 2 / 56);
+% A loss event is the slack of the packet-loss criterion: one frame without FEC, with it
+% the two packets that share a frame (one packet per frame pair, both frames carrying its
+% result: four frames). The monitor counts a lost coded packet once, at the second frame
+% of its pair (decoded there: a result on another frame is not read), and only when the
+% four frames of its codeword were received coded, so after a switch to the code the
+% first packet counts on the fourth coded frame or later. A coded link's loss is read
+% over six frames (three packets): two lost packets, one event, do not degrade it and
+% three do, while an uncoded link counts its last five frames.
+verifyEqual(tc, packet_share({'no_action', 'power_control+fec_interleave'}, 20), [1 4] / 20);
+verifyEqual(tc, packet_share('fec_interleave', 57), 4 / 56);
+verifyEqual(tc, packet_share('fec_interleave', 20, 2), 2 / 20);
 A = policy_actions(); ic = find(strcmp(A, 'fec_interleave')); iu = find(strcmp(A, 'no_action'));
-PP = struct('actions', {A}, 'classes', {{'none', 'jamming'}}, 'sps', 4, 'bps', 2, 'maha_thr', -Inf);
+PP = struct('actions', {A}, 'classes', {{'none', 'jamming'}}, 'sps', 4, 'bps', 2, 'maha_thr', -Inf, 'fec_frames', 4);
 nF = numel(link_features('names'));
-crc = [0 0 0 0 1 1 0 0; 0 0 0 0 1 1 1 1; 0 0 0 0 1 1 0 0];               % coded, coded, uncoded episode
-mem = policy_monitor('init', 3, numel(A));
+crc = [0 0 0 0 1 1 0 0; 0 0 0 1 1 1 1 1; 0 0 0 0 1 1 0 0; 0 0 1 1 1 1 1 1];   % coded, coded, uncoded, coded from frame 3
+mem = policy_monitor('init', 4, numel(A));
+cnt = false(4, 8);
 for t = 1:8
-    obs = struct('probs', repmat([1 0], 3, 1), 'unknown', false(3, 1), 'feat', zeros(3, nF), ...
-        'cfg_link', [ic; ic; iu], 'pkt', floor((t - 1) / 2) * ones(3, 1));
+    cl = [ic; ic; iu; ic]; if t < 3, cl(4) = iu; end
+    obs = struct('probs', repmat([1 0], 4, 1), 'unknown', false(4, 1), 'feat', zeros(4, nF), ...
+        'cfg_link', cl, 'pkt', floor((t - 1) / 2) * ones(4, 1));
     obs.feat(:, feature_index('crc_fail')) = crc(:, t);
     obs.feat(:, feature_index('log_ber')) = -6;
-    [mem, M] = policy_monitor('update', mem, obs, PP, [ic ic iu]);
-    if t == 5, verifyEqual(tc, M.plr, [0; 0; 1/5], 'AbsTol', 1e-12); end
+    [mem, M] = policy_monitor('update', mem, obs, PP, cl');
+    cnt(:, t) = ~isnan(mem.crc(:, end));
+    if t == 5, verifyEqual(tc, M.plr([1 3]), [0; 1/5], 'AbsTol', 1e-12); end
 end
-verifyEqual(tc, M.plr, [1/3; 2/3; 2/5], 'AbsTol', 1e-12);
-verifyEqual(tc, M.degraded, [false true false]);
+verifyEqual(tc, cnt, logical([0 0 0 1 0 1 0 1; 0 0 0 1 0 1 0 1; ones(1, 8); 1 1 0 0 0 1 0 1]));
+verifyEqual(tc, M.plr, [1/3; 1; 2/5; 1], 'AbsTol', 1e-12);
+verifyEqual(tc, M.degraded, [false true false false]);
+PP.fec_frames = 2;                                                        % two frames: counted from the second
+mem = policy_monitor('init', 1, numel(A));
+for t = 1:4
+    obs = struct('probs', [1 0], 'unknown', false, 'feat', zeros(1, nF), 'cfg_link', ic, 'pkt', floor((t + 1) / 2));
+    [mem, ~] = policy_monitor('update', mem, obs, PP, ic);
+    cnt(1, t) = ~isnan(mem.crc(end));
+end
+verifyEqual(tc, cnt(1, 1:4), logical([0 1 0 1]));
 end
 
 function [Y, H] = run_link(mdl, p, fd, kfac, rho, att, body, nfr)

@@ -9,8 +9,8 @@ function [E, info] = episode_cycle(E, k, fr, ctx)
 %   k    cycle index (1-based)
 %   fr   received frame: iq, ber (true BER, display only), feat (link_features.m
 %        of the frame within its own run, as in the frame pools), gant (mean
-%        channel gain of every antenna, optional), pkt (its coded packet, two
-%        frames of the run, optional: policy_monitor.m)
+%        channel gain of every antenna, optional), pkt (the frame pair of the run
+%        its coded packet ends on, optional: policy_monitor.m)
 %   ctx  policy (a policy_decide.m kind), net, ood, feat_mean, feat_std, fs,
 %        agent, PP (actions, classes, sps, bps, maha_thr, confirm, alarm_mode,
 %        drop_db), na

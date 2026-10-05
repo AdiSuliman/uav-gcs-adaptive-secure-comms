@@ -46,12 +46,13 @@ function [p, snr_gain_db, cm] = apply_countermeasure(p, threat, action)
 %                        that much against noise and every additive interferer,
 %                        including a spoofer; attenuation threats keep their loss
 %     fec_interleave     one 1000 + 32-bit packet per two frames: rate-1/2
-%                        convolutional code (K = 7), interleaved over the two frames,
-%                        erasure decoding of symbols hit by an energy burst; same
+%                        convolutional code (K = 7), its codeword interleaved over
+%                        p.fec_frames = 4 frames, erasure decoding of the frames the
+%                        receiver flags and of symbols hit by an energy burst; same
 %                        channel symbols, so no Eb/N0 change here -- the decoding is
 %                        applied to the measured error pattern (fec_packets.m, p.fec);
-%                        goodput x1/2, the packet decoded after its second frame
-%                        (one cycle, 20 ms, later than an uncoded packet)
+%                        goodput x1/2, the packet decoded after its fourth frame
+%                        (three cycles, 60 ms, later than an uncoded packet)
 %
 %   p.inband_ref keeps the in-band levels before any countermeasure: the in-band cap
 %   acts on them (build_threat_model.m), so a capped emitter keeps one power under every

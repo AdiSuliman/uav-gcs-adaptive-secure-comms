@@ -121,8 +121,11 @@ function build_threat_model(p)
 %           second timing peak (more than one symbol away) over the first,
 %           fractional arrival [samples] from a parabola through the timing peak, sync
 %           coherence (0..1: the training's space-time coherence at the frame's arrival
-%           and frequency) and the sync-failure flag (1: coherence below p.sync_coh_min,
-%           the training was not found; zeros with an ideal receiver).
+%           and frequency), the sync-failure flag (1: coherence below p.sync_coh_min,
+%           the training was not found) and the pilots' mean squared error under the
+%           frame's final weights (space-time: the held-out pilots of the output kept;
+%           antennas alone: MVDR weights from the decisions only; equalizer: its last
+%           pass); zeros with an ideal receiver.
 %           The receiver measurements of extract_closed_loop_frames.m use only
 %           outputs 1-6.
 % Seeds     p.seed, or drawn from the global stream when empty; channel, interferer
@@ -657,7 +660,7 @@ c = {
     'rf = rxf(ua);'
     'Ns = size(rf, 1);'
     'base = Dt * SPS + QN;'
-    'sy = zeros(7, 1);'
+    'sy = zeros(8, 1);'
     'y = complex(zeros(NS, NR));'
     'yw = complex(zeros(NS, NR));'
     'Wi = complex(eye(NR));'
@@ -1209,6 +1212,7 @@ c = {
     '        sf(1:NPRE) = PRE;'
     '        sf(IDXP) = PIL;'
     '        sf(IDXD) = sh;'
+    '        ep = 0;'
     '        for bi = 1:nb'
     '            i0 = (bi-1)*B + 1; i1 = bi*B; if bi == nb, i1 = ND; end'
     '            kA = max(1, IDXD(i0) - HWE); kB = min(NS, IDXD(i1) + HWE);'
@@ -1257,7 +1261,28 @@ c = {
     '                end'
     '                z(m) = fe'' * ue;'
     '            end'
+    '            % the pilots after the previous window''s last data symbol up to its own'
+    '            lo = 0; hi = IDXD(i1);'
+    '            if bi > 1'
+    '                lo = IDXD(i0 - 1);'
+    '            end'
+    '            if bi == nb'
+    '                hi = NS;'
+    '            end'
+    '            for q = 1:numel(IDXP)'
+    '                if IDXP(q) > lo && IDXP(q) <= hi'
+    '                    ue = complex(zeros(NE, 1));'
+    '                    for a = 1:NE'
+    '                        k = IDXP(q) + a - 1 - E0;'
+    '                        for l = 1:NRK'
+    '                            ue(a) = ue(a) + Gw(:, l)'' * yx(k + l - 1 - RP + XO, :).'';'
+    '                        end'
+    '                    end'
+    '                    ep = ep + abs(fe'' * ue - PIL(q))^2;'
+    '                end'
+    '            end'
     '        end'
+    '        sy(8) = ep / numel(IDXP);'
     '        end'
     '    else'
     '        if NT > 1'
@@ -1270,11 +1295,14 @@ c = {
     '            % space-time degrees of freedom cost more estimation noise than they null'
     '            [z, est] = st_dd(Y, z, SK, IDXD, IDXP, PIL, MH, B, B / 2, s2, DDI);'
     '            za = dd_mvdr(y, za, IDXD, BA, true, DDI);'
-    '            if pilot_mse(y, za, IDXD, IDXP, PIL, BA) < est'
+    '            ea = pilot_mse(y, za, IDXD, IDXP, PIL, BA);'
+    '            if ea < est'
     '                z(:) = za;'
     '            end'
+    '            sy(8) = min(ea, est);'
     '        else'
     '            z = dd_mvdr(Y, z, IDXD, B, MODE == 2, DDI);'
+    '            sy(8) = pilot_mse(Y, z, IDXD, IDXP, PIL, B);'
     '        end'
     '    end'
     '    % per-32-symbol antenna channel and frame residual covariance from the decisions'

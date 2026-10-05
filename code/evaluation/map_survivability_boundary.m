@@ -235,7 +235,7 @@ end
 function grid_data = build_map(ber_all, fer_all, threat_cfg, ACTIONS, act_set, ber_clean, fer_clean, nfr, ...
     RATIO_RECOVERABLE, RATIO_MARGINAL)
     % Recoverable: some configuration of act_set with BER <= 2x and packet loss
-    % <= 2x (+ one packet of the run, packet_share.m) of the clean link; otherwise the
+    % <= 2x (+ one loss event of the run, packet_share.m) of the clean link; otherwise the
     % best BER decides between marginal and non-recoverable.
     nS = numel(ber_clean);
     cols = find(ismember(ACTIONS, act_set));

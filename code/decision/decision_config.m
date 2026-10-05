@@ -13,6 +13,8 @@ C.deg_floor  = 1e-4;        % smallest clean reference of the estimated BER
 C.heal       = 5;           % healthy cycles that close an incident (tried list reset)
 C.confirm    = [2 2];       % alarm confirmation m-of-n (consecutive detections, Barajas et al.)
 C.drop_db    = 4;           % default Eb/N0-estimate drop that confirms path_loss; the deployed value comes from choose_drop_threshold.m
+C.fec_frames = 4;           % frames of a coded packet's codeword when the pools do not record it (init_params.m fec_frames);
+                            % the coded packet loss is read over fec_frames + 2 frames (fec_frames / 2 + 1 packets)
 
 % Decision period: one cycle decides on one received frame; with the decision
 % latency (median < 10 ms, p95 < 20 ms target) a deployed loop decides every 20 ms.

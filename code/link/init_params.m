@@ -180,7 +180,9 @@ params.inband_cap_db = 30;          % [dB] largest in-band power of an emitter o
 params.cm_acr_db      = 30;         % [dB] rejection of an interferer left on another channel
 params.fdiv_spacing_hz = 25e6;      % [Hz] freq_diversity: second carrier at 802.11's adjacent-channel separation, where it specifies >= 35 dB rejection (IEEE 802.11-2007 18.4.8.3)
 params.cm_rate_factor = 4;          % rate_reduce: data rate / 4 -> +6 dB processing gain, goodput x0.25
-params.cm_fec_rate    = 1/2;        % fec_interleave: code rate, K = 7, generators [171 133] octal; one packet over two frames (fec_packets.m)
+params.cm_fec_rate    = 1/2;        % fec_interleave: code rate, K = 7, generators [171 133] octal; one packet per two frames (fec_packets.m)
+params.fec_frames     = 4;          % fec_interleave: frames a packet's codeword is spread over, a quarter per frame: a lost frame erases a quarter of a codeword, not half (N - k, the most any code can recover: e <= N - k, Ercan et al. 2023)
+params.erase_pilot_mse = 0.80;      % pilot error above which a frame's bits are erasures for the decoder (<= 1% of the dev frames with BER <= 0.2 flagged, D78)
 
 %% ========== ANTENNAS & RECEIVER ==========
 % Modeled link: GCS -> UAV command uplink; the receiver (and the detector) is on the UAV.
