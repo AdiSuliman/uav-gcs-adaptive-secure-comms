@@ -61,11 +61,12 @@ function build_threat_model(p)
 %           the Doppler shift of its direction, fd sin(aoa), and its diffuse part is
 %           centred on its own direction. With p.tdl every interferer has a delay line
 %           as ours, its waveform running from the line's longest delay before the frame.
-% Rx        Front end (p.adc_bits, adc_frontend.m): per antenna an AGC that holds one gain
-%           over the frame, set from the quiet slot and the start of the short training,
-%           and an ADC of p.adc_bits per rail with hard clipping at full scale,
-%           p.adc_backoff_db above the rail RMS; before synchronization and combining,
-%           and on output 2.
+% Rx        Front end (p.adc_bits, adc_frontend.m): per antenna an AGC that sets its gain
+%           from the quiet slot and the start of the short training and steps it down
+%           within the frame when a block of 16 samples rises p.adc_attack_db above that
+%           level (fast attack; Inf: held), and an ADC of p.adc_bits per rail with hard
+%           clipping at full scale, p.adc_backoff_db above the rail RMS; before
+%           synchronization and combining, and on output 2.
 %           'real': coarse frequency from the repeats of the short training, timing from
 %           the long training over the arrival window, fine frequency from the two long
 %           repeats; every statistic over all antennas in a whitened domain: whitening
@@ -102,8 +103,9 @@ function build_threat_model(p)
 %           interference + noise covariance of the residuals free of our signal, loaded
 %           with the noise floor; the first pass window by window with the phase of every
 %           window and the residual frequency from their slope, then DDI passes over the
-%           frame; per frame the space-time or the antennas-alone output by held-out
-%           pilots.
+%           frame; per frame the space-time or the antennas-alone output, whichever
+%           reproduces the pilots better under weights whose last pass excludes the pilot
+%           rows.
 %           'ideal': known timing, frequency and transmitted symbols; per window of
 %           data symbols the LS channel estimate from the OTHER symbols of the window
 %           (leave-one-out) and the covariance of the residual r - h*s.
@@ -122,8 +124,9 @@ function build_threat_model(p)
 %           fractional arrival [samples] from a parabola through the timing peak, sync
 %           coherence (0..1: the training's space-time coherence at the frame's arrival
 %           and frequency), the sync-failure flag (1: coherence below p.sync_coh_min,
-%           the training was not found) and the pilots' mean squared error under the
-%           frame's final weights (space-time: the held-out pilots of the output kept;
+%           the training was not found; reported, not an erasure) and the pilots' mean
+%           squared error under the frame's final weights (space-time: the pilot rows
+%           excluded from the last pass's weights, of the output kept;
 %           antennas alone: MVDR weights from the decisions only; equalizer: its last
 %           pass); zeros with an ideal receiver.
 %           The receiver measurements of extract_closed_loop_frames.m use only
@@ -632,8 +635,8 @@ c = {
         sum(rk) + 1, (ne - 1) / 2 + max(rk), B / 2)
     sprintf('NTS = %d; NTN = %d; MH = %d; BS = %d; FIT = %d; TAU = %.4f;', tp.ns, tp.nn, tp.mh * (nt > 1), ...
         p.mmse_window, 2 * (nt == 1), p.sync_coh_min)
-    sprintf('ADCB = %d; ABO = %.2f; IS0 = %d;', ternary(isfinite(p.adc_bits) && p.adc_bits > 0, p.adc_bits, 0), ...
-        p.adc_backoff_db, L.NQ * p.sps + p.filter_span / 2 * p.sps + TM)
+    sprintf('ADCB = %d; ABO = %.2f; IS0 = %d; AAT = %.2f;', ternary(isfinite(p.adc_bits) && p.adc_bits > 0, p.adc_bits, 0), ...
+        p.adc_backoff_db, L.NQ * p.sps + p.filter_span / 2 * p.sps + TM, p.adc_attack_db)
     sprintf('FS = %.1f; SR = %.1f; NSTF = %d; LS = %d; NLTF = %d; LL = %d;', p.symbol_rate * p.sps, p.symbol_rate, ...
         numel(L.stf), p.stf_len, numel(L.ltf), p.ltf_len)
     sprintf('NS = %d; ND = %d; NP = %d; PB = %d; NB = %d; TM = %d; LC = %.1f; QN = %d; NPRE = %d; SEGL = %d;', NS, L.n_data, L.n_pil, ...
@@ -654,7 +657,7 @@ c = {
     'ua = u;'
     'if ADCB > 0'
     '    % receive front end: AGC and ADCB-bit ADC on every antenna (adc_frontend.m)'
-    '    ua = adc_frontend(u, ADCB, ABO, 1:QN, IS0 + (1:16*SPS));'
+    '    ua = adc_frontend(u, ADCB, ABO, 1:QN, IS0 + (1:16*SPS), AAT);'
     'end'
     'iqa = ua;'
     'rf = rxf(ua);'
@@ -826,8 +829,8 @@ c = {
     '        end'
     '    end'
     '    % sync coherence of the frame (the space-time statistic at the arrival its taps sit on'
-    '    % and the found frequency); below TAU the training was not found: sync failure, the'
-    '    % frame''s symbols are erasures for a decoder'
+    '    % and the found frequency); below TAU the training was not found: the sync-failure'
+    '    % flag, reported, not an erasure'
     '    dsy = d;'
     '    if NT > 1'
     '        dsy = dst;'
@@ -1288,11 +1291,12 @@ c = {
     '        if NT > 1'
     '            % space-time: DDI passes over the whole frame (Marti et al. 2023, eq. 15: the'
     '            % channel by LS on the frame''s known and decided symbols), the covariance of the'
-    '            % residuals around every window, loaded; the last pass holds out the rows that'
-    '            % carry a pilot and returns the pilots'' error under its weights. The frame keeps'
-    '            % the space-time or the antennas-alone output, whichever reproduces its pilots'
-    '            % better under weights that never used them: on a nearly flat interferer the'
-    '            % space-time degrees of freedom cost more estimation noise than they null'
+    '            % residuals around every window, loaded; the last pass excludes the rows that'
+    '            % carry a pilot from its weights and returns the pilots'' error under them. The'
+    '            % frame keeps the space-time or the antennas-alone output, whichever reproduces'
+    '            % its pilots better under weights whose last pass excludes them: on a nearly'
+    '            % flat interferer the space-time degrees of freedom cost more estimation noise'
+    '            % than they null'
     '            [z, est] = st_dd(Y, z, SK, IDXD, IDXP, PIL, MH, B, B / 2, s2, DDI);'
     '            za = dd_mvdr(y, za, IDXD, BA, true, DDI);'
     '            ea = pilot_mse(y, za, IDXD, IDXP, PIL, BA);'
@@ -1362,8 +1366,7 @@ c = {
     'for k = 1:K'
     '    g = g + Z(k, :).'' * (conj(PRE(k)) * exp(-1j*2*pi*f*(k-1)/SR));'
     'end'
-    'R = Z.'' * conj(Z) / K;'
-    'R = (R + R'') / 2 + s2 * eye(NV);'
+    'R = st_load(Z.'' * conj(Z) / K, s2);'
     'a = real(g'' * (R \ g)) / K^2;'
     'end'
     ''
@@ -1377,9 +1380,7 @@ c = {
     'PF = zeros(NFFT, TM + 1); V = complex(zeros(NFFT, NV));'
     'for dd = 0:TM'
     '    Z = st_snap(rf, base + dd, 0, K, NT, HS, SPS, SR * SPS);'
-    '    R = Z.'' * conj(Z) / K;'
-    '    R = (R + R'') / 2 + s2 * eye(NV);'
-    '    Lc = chol(R, ''lower'');'
+    '    Lc = chol(st_load(Z.'' * conj(Z) / K, s2), ''lower'');'
     '    Zw = (Lc \ Z.'').'';'
     '    for k = 1:K'
     '        V(k, :) = Zw(k, :) * conj(PRE(k));'
@@ -1403,6 +1404,17 @@ c = {
     '    kb = kb - NFFT;'
     'end'
     'fc = (kb + de) * SR / NFFT;'
+    'end'
+    ''
+    'function R = st_load(R, s2)'
+    '% The snapshots'' covariance R made Hermitian and loaded with the noise floor s2; a floor'
+    '% that does not reach 1e-9 of the mean eigenvalue (a noise-free or empty quiet slot)'
+    '% is replaced by 1e-3 of it, so R stays positive definite for the Cholesky factor.'
+    'NV = size(R, 1); R = (R + R'') / 2; t = real(trace(R)) / NV; mu = s2;'
+    'if ~(mu > 1e-9 * t)'
+    '    mu = 1e-3 * t + 1e-12;'
+    'end'
+    'R = R + mu * eye(NV);'
     'end'
     ''
     'function s = st_reg(sv, k, MH)'
@@ -1462,7 +1474,12 @@ c = {
     '        R = R + Rt; n = n + nt;'
     '    end'
     '    w = (R / n + Ri) \ h0;'
-    '    w = w / conj(w'' * h0);'
+    '    c = w'' * h0;'
+    '    if abs(c) > 1e-12'
+    '        w = w / conj(c);'
+    '    else'
+    '        w = complex(zeros(NV, 1));      % no gain towards our signal: the window outputs 0'
+    '    end'
     '    gn = complex(0);'
     '    for k = IDXD(i0) : IDXD(i1)'
     '        zk = Y(k, :) * conj(w);'
@@ -1537,6 +1554,9 @@ c = {
     '        end'
     '        w = (R / max(n, 1) + Ri) \ h0;'
     '        c = w'' * h0;'
+    '        if abs(c) <= 1e-12'
+    '            w = complex(zeros(NV, 1)); c = complex(1);   % no gain towards our signal: the window outputs 0'
+    '        end'
     '        for m = i0:i1'
     '            z(m) = (Y(IDXD(m), :) * conj(w)) / c;'
     '        end'
@@ -1827,7 +1847,7 @@ d = struct('n_rx', 3, 'ant_aperture_m', 1.2, 'rx_corr', 0.3, 'gcs_aoa_deg', 0, .
     'chain_amp_db', 0, 'chain_phase_deg', 0, 'spec_amp', 0, 'spec_delay_ns', 0, ...
     'stf_len', 4, 'stf_rep', 10, 'ltf_len', 16, 'ltf_rep', 2, 'pilot_block', 4, 'pilot_every', 48, ...
     'rx_sync', 'ideal', 'cfo_ppm', 25, 'timing_max_sym', 4, 'rx_dd_iter', 2, 'sync_coh_min', 0, ...
-    'adc_bits', 0, 'adc_backoff_db', 12, ...
+    'adc_bits', 0, 'adc_backoff_db', 12, 'adc_attack_db', Inf, ...
     'gcs_tracked', false, 'gcs_ant_dbi', 12, 'gcs_err_deg', [5.62 1.51], 'gcs_floor_db', 14, 'gcs_pt_dbm', -6, ...
     'alt_random', false, 'alt_range_m', [15 120], 'gcs_h_m', 10, 'uav_null_db', -30, 'inband_cap_db', 30, ...
     'lb_uav_dbi', 2, 'lb_nf_db', 5, 'lb_margin_db', 10, 'lb_rate_bps', 2e6, ...

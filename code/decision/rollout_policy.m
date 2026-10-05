@@ -12,23 +12,27 @@ function R = rollout_policy(kind, PP, K, spec, split, agent, opt, seed)
 %   R      per episode (after onset unless noted):
 %          ret        mean reward per cycle (whole episode)
 %          restored_post  share of cycles with BER <= 2x clean
-%          plr_ok_post    share of cycles with packet loss <= 2x clean (+1 packet)
+%          plr_ok_post    share of cycles with packet loss <= 2x clean (+ one loss event, packet_share.m)
 %          ok_post        share of cycles with both
 %          gput_post  normalized goodput (NaN where the clean link loses > 90% of packets)
 %          recovered  both BER and packet loss restored for 5 consecutive cycles
-%          t_rec      cycles from onset until that run of 5 starts (NaN if never)
+%          t_rec      cycles from onset until that run of 5 starts (NaN if never); after the
+%                     link turns coded its first fec_frames - 1 frames are not restored
 %          held       recovered, and restored on every cycle from the start of that run
 %                     to the end of the episode, but for one run of at most 1 + D
 %                     cycles in a follower episode of a followable threat without a
 %                     comb jammer (one re-acquisition; D the signalling delay)
-%          lost_rec, n_rec  lost packets and frames from the start of that run to the end
+%          lost_rec, n_rec  lost packets and frames from the start of that run to the end,
+%                     but the frames after the link turns coded that deliver no packet yet
+%                     (link_env.m, fec_gap: never restored, so no run starts in them)
 %          recoverable  some configuration restores this geometry (link_env.m)
 %          switches, false_sw (whole episode), esc (escalations), aoa (3 x NE),
 %          cfg_final, r (geometry index), cfg_trace (T x NE); at the first change:
 %          fc_t, fc_cls (index into PP.classes, numel + 1 = unknown), fc_deg, fc_drop
-%          t_cls, t_conf  cycles from the onset to the first cycle whose monitor class is
+%          t_cls, t_conf  frames from the onset to the first frame whose monitor class is
 %                     the threat (a component of a combined one) and to the first
-%                     confirmed alarm (NaN if never; the oracle has no monitor)
+%                     confirmed alarm, read one cycle later (0: the onset frame itself, as
+%                     eval_detector.m counts; NaN if never; the oracle has no monitor)
 if nargin < 7 || isempty(opt), opt = struct(); end
 rs = RandStream('mt19937ar', 'Seed', seed);
 opt.rs = RandStream('mt19937ar', 'Seed', seed + 1);
@@ -39,7 +43,7 @@ cls_list = [cellstr(string(PP.classes(:)')), {'unknown'}];
 fc = struct('t', zeros(1, NE), 'cls', zeros(1, NE), 'deg', false(1, NE), 'drop', nan(1, NE));
 tr = struct('r', zeros(T, NE), 'q', zeros(T, NE), 'rest', false(T, NE), 'rplr', false(T, NE), 'gput', zeros(T, NE), ...
     'ch', false(T, NE), 'fs', false(T, NE), 'post', false(T, NE), 'esc', false(T, NE), 'cfg', zeros(T, NE), ...
-    'recov', false(T, NE), 'fer', zeros(T, NE), 'cls', false(T, NE), 'conf', false(T, NE));
+    'recov', false(T, NE), 'fer', zeros(T, NE), 'cls', false(T, NE), 'conf', false(T, NE), 'gap', false(T, NE));
 comp = cellfun(@(c) strsplit(c, '+'), PP.scen(E.scn), 'UniformOutput', false);
 for t = 1:T
     if strcmp(kind, 'oracle')
@@ -60,6 +64,7 @@ for t = 1:T
     end
     tr.r(t, :) = r; tr.q(t, :) = info.q; tr.rest(t, :) = info.restored; tr.gput(t, :) = info.gput;
     tr.rplr(t, :) = info.restored_plr; tr.recov(t, :) = info.recoverable; tr.fer(t, :) = obs.fer_true;
+    tr.gap(t, :) = info.fec_gap;
     tr.ch(t, :) = info.changed; tr.fs(t, :) = info.false_switch; tr.post(t, :) = info.post; tr.cfg(t, :) = E.cfg;
 end
 post = tr.post; npost = max(sum(post, 1), 1);
@@ -91,7 +96,8 @@ for i = find(R.recovered)
     nb = sum(e == 1); len = find(e == -1) - find(e == 1);
     reacq = E.follow(i) && K.followable(E.scn(i)) && ~E.comb(i);   % a follower that re-acquires after a hop
     R.held(i) = nb == 0 || (reacq && nb == 1 && len <= 1 + E.D);
-    R.lost_rec(i) = sum(tr.fer(k0:T, i)); R.n_rec(i) = T - k0 + 1;
+    g = ~tr.gap(k0:T, i);
+    R.lost_rec(i) = sum(tr.fer(k0:T, i) .* g); R.n_rec(i) = sum(g);
 end
 last = arrayfun(@(i) find(post(:, i), 1, 'last'), 1:NE);
 R.recoverable = tr.recov(sub2ind([T NE], last, 1:NE));
@@ -104,7 +110,7 @@ R.fc_t = fc.t; R.fc_cls = fc.cls; R.fc_deg = fc.deg; R.fc_drop = fc.drop;
 for i = 1:NE
     t0 = find(post(:, i), 1);
     if isempty(t0) || strcmp(kind, 'oracle'), continue; end
-    k = find(tr.cls(t0:T, i), 1); if ~isempty(k), R.t_cls(i) = k - 1; end
-    k = find(tr.conf(t0:T, i), 1); if ~isempty(k), R.t_conf(i) = k - 1; end
+    k = find(tr.cls(t0+1:T, i), 1); if ~isempty(k), R.t_cls(i) = k - 1; end   % the decision of cycle t reads frame t - 1
+    k = find(tr.conf(t0+1:T, i), 1); if ~isempty(k), R.t_conf(i) = k - 1; end
 end
 end

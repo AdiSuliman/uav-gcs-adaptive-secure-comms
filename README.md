@@ -42,6 +42,8 @@ A closed-loop simulation of the command uplink from a ground control station (GC
 │   ├── gui/                 # operator console demo_gui.m; gui/viz3d/ the Unreal 3D view (D57, D58)
 │   ├── tests/               # unit tests: runtests('code/tests')
 │   ├── diagnostics/         # one-off investigation scripts
+│   ├── dev/                 # dev-flight scripts behind the receiver's and the coded link's thresholds (D77-D79);
+│   │                        #   outputs to tempdir/uav_gcs_dev, never data/ or results/
 │   └── legacy/              # replaced code kept for the record (not on the path)
 ├── docs/
 │   ├── DECISIONS.md         # decision record D1–D61 (why every design choice was made)

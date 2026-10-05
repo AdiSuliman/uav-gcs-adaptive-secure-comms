@@ -94,8 +94,8 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %               frames with our training on the air: a spoofer)
 %     sync_coh  coherence of the training with the received space-time snapshots at the
 %               frame's arrival and frequency, 0..1 (build_threat_model.m, st_coh)
-%     sync_fail 1 when sync_coh is below p.sync_coh_min: the training was not found, the
-%               frame's symbols are erasures for a decoder
+%     sync_fail 1 when sync_coh is below p.sync_coh_min: the training was not found
+%               (reported, not an erasure: the decoder's erasures are the erase flag)
 %     pilot_err mean squared error of the frame's pilots under its final weights, the
 %               unit-power pilot symbol as reference (build_threat_model.m, output 6)
 %     erase     1 when the frame is unreliable for a decoder: pilot_err above
@@ -116,14 +116,14 @@ iqa = out.get('Rx_IQ');                                  % samples x antennas x 
 zc  = squeeze(out.get('Rx_Z'));
 Hq  = out.get('Rx_H');
 Rq  = out.get('Rx_R');
-sy  = zeros(8, size(iqa, ndims(iqa)));
-try
-    sy = reshape(out.get('Rx_S'), 8, []);
-catch
-end
+syr = out.get('Rx_S');
 if ismatrix(iqa), iqa = reshape(iqa, size(iqa, 1), 1, []); end
 if isvector(zc), zc = zc(:); end
 [ns, na, nf] = size(iqa);
+if numel(syr) ~= 8 * nf
+    error('extract_closed_loop_frames: receiver output 6 holds %d values for %d frames, not 8 per frame (a model built before its eighth row: rebuild it)', numel(syr), nf);
+end
+sy = reshape(syr, 8, nf);
 
 bpf = p.frame_length;
 tx_all = txb(:); rx_all = rxb(:);
@@ -132,7 +132,6 @@ tx_al = tx_all(1:Lmax);
 rx_al = rx_all(delay_bits+1:delay_bits+Lmax);
 
 F = struct('nf', nf);
-if size(sy, 2) < nf, sy(:, end+1:nf) = 0; end
 F.sync_d = sy(1, 1:nf); F.cfo_hz = sy(2, 1:nf); F.sync_pk = sy(3, 1:nf); F.sync_p2 = sy(4, 1:nf);
 F.sync_coh = sy(6, 1:nf); F.sync_fail = sy(7, 1:nf); F.pilot_err = sy(8, 1:nf);
 F.erase = false(1, nf);
@@ -222,33 +221,6 @@ end
 
 function y = sign0(x)
 y = sign(x); y(y == 0) = 1;
-end
-
-function r = bit_reliability(zc, p)
-% Magnitude of the log-likelihood ratio of every received data bit, frames in order (a
-% column aligned with the receiver's bits): per 32-symbol block the gain g and the error
-% power es of the decisions, as symbol_metrics, so every symbol carries the noise
-% variance of its block (jammer state information, Baldi et al. 2013, Sec. V);
-% LLR = 2 sqrt(2) Im / Re(conj(g) z) / es for the first / second bit of the Gray-mapped
-% pi/4 QPSK symbol (z = g s + n, s = (+-1 +-j) / sqrt(2), es / 2 per rail).
-B = 32;
-nd = p.frame_length / 2;
-nf = size(zc, 2);
-r = zeros(2 * nd, nf);
-nb = max(1, floor(nd / B));
-for f = 1:nf
-    z = zc(1:nd, f);
-    s = (sign0(real(z)) + 1j * sign0(imag(z))) / sqrt(2);
-    for b = 1:nb
-        k = (b-1)*B + 1 : b*B;
-        if b == nb, k = (b-1)*B + 1 : nd; end
-        g = mean(z(k) .* conj(s(k)));
-        es = max(mean(abs(z(k) - g * s(k)).^2), eps);
-        v = 2 * sqrt(2) * conj(g) * z(k) / es;
-        r(2*k - 1, f) = abs(imag(v)); r(2*k, f) = abs(real(v));
-    end
-end
-r = r(:);
 end
 
 function [mmse_gain, align] = spatial_metrics(Hq, Rq, nf)

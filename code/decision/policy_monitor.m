@@ -17,13 +17,14 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   second frame of its pair, when it is decoded, and only when all Q frames of its
 %   codeword were received coded; without obs.pkt every frame's CRC result counts. An
 %   uncoded link's packet loss is read over the last C.win frames, a coded link's over
-%   the last Q + 2, the Q/2 + 1 packets decoded there.
+%   the last 2 C.win, the C.win packets decoded there (as many packets as uncoded).
 %   Degradation: the estimated BER above C.ratio_ok x the clean link's estimated BER
 %   at the receiver's own Eb/N0 estimate (clean_ber_ref.m, floor C.deg_floor); with
 %   fec_interleave in the configuration the channel BER stays high while the decoder
-%   repairs the bursts, so there the CRC packet loss decides (above C.ratio_ok x the
-%   clean coded link, at least Q/2 + 1 lost packets in the window: a frame the decoder
-%   cannot repair costs the Q/2 packets that share it, D78).
+%   repairs the bursts, so there the CRC packet loss decides: more lost packets in the
+%   window than C.ratio_ok x the clean coded link's loss over its packets plus one loss
+%   event, the Q/2 packets whose codewords share a frame the decoder cannot repair (the
+%   slack of restored_plr, packet_share.m).
 %   Detected class: from the temporal fusion of the last PP.fuse_N cycles
 %   (temporal_evidence.m, fuse_classes.m) when PP.fuse is set, otherwise the
 %   frame's own detector output; 'unknown' when the unknown-threat score, averaged
@@ -49,7 +50,7 @@ C = decision_config();
 switch cmd
     case 'init'
         NE = varargin{1}; nA = varargin{2};
-        nw = max(C.win, C.fec_frames + 2);
+        nw = max(2 * C.win, C.fec_frames + 2);
         mem = struct('ber', nan(NE, C.win), 'crc', nan(NE, nw), 'pk', nan(NE, nw), 'tried', false(NE, nA), ...
             'since', 10 * ones(1, NE), 'cand', zeros(1, NE), 'cand_n', zeros(1, NE), 'good', zeros(1, NE), ...
             'deg_n', zeros(1, NE), 'conf_n', zeros(1, NE), 'alarm', false(NE, 8), 'ebno', nan(NE, 3), ...
@@ -84,13 +85,13 @@ if isfield(obs, 'pkt') && ~isempty(obs.pkt), pk(coded) = obs.pkt(coded); end
 if ~isfield(mem, 'pk'), mem.pk = nan(size(mem.crc)); end
 Q = C.fec_frames; if isfield(PP, 'fec_frames') && ~isempty(PP.fec_frames), Q = PP.fec_frames; end
 nw = size(mem.crc, 2);
-assert(Q + 2 <= nw, 'policy_monitor: a codeword of %d frames does not fit the packet window', Q);
+assert(Q + 2 <= nw && 2 * C.win <= nw, 'policy_monitor: a codeword of %d frames does not fit the packet window', Q);
 kx = pk - floor((Q-1:-1:1) / 2);                                % keys of the codeword's earlier frames, oldest first
 mem.crc(~isnan(pk) & ~all(mem.pk(:, end-Q+2:end) == kx, 2), end) = NaN;   % not decoded here, or not all of it coded
 mem.pk = [mem.pk(:, 2:end), pk];
 mem.ber(arr, 1:end-1) = NaN; mem.crc(arr, 1:end-1) = NaN; mem.deg_n(arr) = 0;
 [npk, lost] = packets(mem.crc(:, nw - C.win + 1:nw));
-[nq, lq] = packets(mem.crc(:, nw - Q - 1:nw));
+[nq, lq] = packets(mem.crc(:, nw - 2 * C.win + 1:nw));
 npk(coded) = nq(coded); lost(coded) = lq(coded);
 M.ber_avg = mean(mem.ber, 2, 'omitnan');
 M.plr = lost ./ npk;
@@ -105,7 +106,7 @@ deg = M.ber_avg > C.ratio_ok * bc;
 if any(coded)
     pc = clean_ber_ref(M.ebno_est(coded), 'plr_fec');
     pc(isnan(pc)) = 0;
-    deg(coded) = M.plr(coded) > C.ratio_ok * pc & lost(coded) >= Q / 2 + 1;
+    deg(coded) = lost(coded) > C.ratio_ok * pc .* npk(coded) + Q / 2;
 end
 M.degraded = deg(:)';
 mem.good(~M.degraded) = mem.good(~M.degraded) + 1; mem.good(M.degraded) = 0;

@@ -54,9 +54,12 @@ function varargout = link_env(cmd, varargin)
 %     false  per change on a healthy link
 %   restored: m <= C.ratio_ok x clean; restored_plr: true packet loss <= C.ratio_ok
 %   x the clean link's + one loss event of the geometry (one packet; with fec_interleave
-%   the PP.fec_frames / 2 packets that share a frame, packet_share.m; a coded packet is
-%   decoded on the last of its PP.fec_frames frames, PP.fec_frames - 1 cycles after an
-%   uncoded one, a delay not counted in the cycles); healthy: unmitigated m <=
+%   the geometry's longest run of consecutive lost packets, at most the PP.fec_frames / 2
+%   that share a frame, packet_share.m); after the link turns to fec_interleave
+%   (a coded configuration reaches the link after an uncoded one) its first coded packet
+%   is decoded on the PP.fec_frames-th coded frame: the PP.fec_frames - 1 frames before
+%   deliver no packet and count as neither restored nor restored_plr (info.fec_gap);
+%   healthy: unmitigated m <=
 %   C.ratio_ok x clean; recoverable: some configuration restores both BER and
 %   packet loss in this geometry (under a comb jammer, one without channel_switch
 %   and freq_diversity).
@@ -68,7 +71,7 @@ function varargout = link_env(cmd, varargin)
 %   PP.fec_frames frames up to them, cyclic over the geometry's frames as the frame
 %   positions are, fec_packets.m), ber_true and fer_true (the frame's BER and packet
 %   error, analysis only)
-%   info: per episode q, restored, restored_plr, gput, changed (a change or a hop),
+%   info: per episode q, restored, restored_plr, fec_gap, gput, changed (a change or a hop),
 %   false_switch, healthy, recoverable, sc_eff, cfg_eff, post, hop (requested this
 %   cycle), hop_in (a hop reached the link on this frame), compromised
 switch cmd
@@ -88,6 +91,7 @@ K.na = find(strcmp(A, 'no_action'));
 K.clean = find(strcmp(PP.scen, 'none'), 1);
 K.hasCh = cellfun(@(a) contains(a, 'channel_switch'), A);
 K.hasFd = cellfun(@(a) contains(a, 'freq_diversity'), A);
+K.hasFec = cellfun(@(a) contains(a, 'fec_interleave'), A);
 K.strip = 1:nA; K.strip_fd = 1:nA;
 for a = find(K.hasCh | K.hasFd)
     rest = regexprep(A{a}, '^(channel_switch|freq_diversity)\+?', '');
@@ -99,6 +103,7 @@ K.cost = C.w_goodput * (1 - PP.gp) + C.w_spectrum * (PP.bw - 1) + C.w_power * lo
 K.SW = C.w_switch; K.FA = C.w_false;
 K.ref = ref;
 Q = C.fec_frames; if isfield(PP, 'fec_frames'), Q = PP.fec_frames; end   % frames of a coded packet's codeword
+K.Q = Q;
 K.runs = PP.runs;                                   % geometry ids per split
 K.nR = cellfun(@numel, PP.runs);
 nSc = numel(PP.scen); nS = numel(PP.ebno); nSp = numel(PP.runs); nRm = max(K.nR);
@@ -132,7 +137,7 @@ for sp = 1:nSp
                     end
                     K.q(sc, s, a, sp, r) = q;
                     K.restored(sc, s, a, sp, r) = rest;
-                    K.restored_plr(sc, s, a, sp, r) = pl <= C.ratio_ok * pr + packet_share(A{a}, sum(k), Q);
+                    K.restored_plr(sc, s, a, sp, r) = pl <= C.ratio_ok * pr + packet_share(A{a}, P.fer(k), Q);
                     if 1 - pr >= 0.1, K.gput(sc, s, a, sp, r) = PP.gp(a) * (1 - pl) / (1 - pr); end
                 end
                 ok = K.restored(sc, s, :, sp, r) & K.restored_plr(sc, s, :, sp, r);
@@ -176,6 +181,7 @@ E.hopq = false(E.D, NE);                            % the requests that carry a 
 E.last_switch = -inf(1, NE);
 E.hop_live = -inf(1, NE);                           % frame from which the channel in use was taken
 E.crc = false(1, NE);                               % CRC of the frame just received failed
+E.fec_t = -inf(1, NE);                              % frame from which the link runs coded
 if ~isfield(spec, 'comb') || isempty(spec.comb), E.comb = false(1, NE); end
 if ~isfield(spec, 'r') || isempty(spec.r)
     E.r = randi(rs, K.nR(split), 1, NE);             % geometry of the episode
@@ -196,7 +202,7 @@ end
 
 function [E, r, obs, info] = step_env(E, PP, K, a)
 a = a(:)';
-prev = E.cfg;
+prev = E.cfg; prev_link = E.cfg_link;
 pend = any(E.hopq, 1);                              % a hop on its way to the GCS
 hop = K.hasCh(a) & (~K.hasCh(prev) | E.crc) & ~pend;
 changed = a ~= prev;
@@ -209,6 +215,9 @@ else
 end
 E.last_switch(changed | hop) = E.t(changed | hop) + 1;
 E.t = E.t + 1;
+turn = K.hasFec(E.cfg_link) & ~K.hasFec(prev_link);  % the link runs coded from this frame
+E.fec_t(turn) = E.t(turn);
+gap = K.hasFec(E.cfg_link) & E.t - E.fec_t < K.Q - 1;   % no coded packet decoded yet
 E.hop_live(arr) = E.t(arr);                         % the new channel is in use from this frame
 [E, obs, sc_eff, cfg_eff, cm] = draw(E, PP, K);
 sp = E.split * ones(1, E.NE);
@@ -218,7 +227,8 @@ healthy = K.healthy(ih);
 q = K.q(idx);
 r = (q - K.cost(E.cfg_link) - K.SW * (changed | hop) - K.FA * (changed & healthy)) / 100;
 rec = K.recoverable(ih); rec(E.comb) = K.recoverable_comb(ih(E.comb));
-info = struct('q', q, 'restored', K.restored(idx), 'restored_plr', K.restored_plr(idx), 'gput', K.gput(idx), ...
+info = struct('q', q, 'restored', K.restored(idx) & ~gap, 'restored_plr', K.restored_plr(idx) & ~gap, ...
+    'fec_gap', gap, 'gput', K.gput(idx), ...
     'changed', changed | hop, 'false_switch', changed & healthy, 'healthy', healthy, ...
     'recoverable', rec, 'sc_eff', sc_eff, 'cfg_eff', cfg_eff, 'post', E.t >= E.onset, ...
     'hop', hop, 'hop_in', arr, 'compromised', cm);

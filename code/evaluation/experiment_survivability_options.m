@@ -14,9 +14,9 @@
 % severity) and the directional single threats at high severity. Each (threat,
 % Eb/N0) is simulated on N_GEOM random flight geometries (interferer directions
 % uniform, as in the pools) under every configuration. A geometry is recoverable
-% when some configuration brings BER and packet loss within 2x (+ one packet) of
-% the clean link: each receiver's own clean link, and the system's direct link for
-% the relay (the service the relay must give back).
+% when some configuration brings BER and packet loss within 2x (+ one loss event,
+% packet_share.m) of the clean link: each receiver's own clean link, and the
+% system's direct link for the relay (the service the relay must give back).
 %
 % Output: results/survivability_options.txt, data/survivability_options.mat
 
@@ -87,7 +87,7 @@ parfor (j = 1:nJ, NWP)
             rid = surv3_run_id(r); okc = false(1, numel(ACTIONS));
             for a = 1:numel(ACTIONS)
                 Q = P{s, a, 1}; m = Q.run == rid;
-                okc(a) = mean(Q.ber(m)) <= RATIO * bc && mean(double(Q.fer(m))) <= RATIO * fc + packet_share(ACTIONS{a}, sum(m));
+                okc(a) = mean(Q.ber(m)) <= RATIO * bc && mean(double(Q.fer(m))) <= RATIO * fc + packet_share(ACTIONS{a}, Q.fer(m));
             end
             R(s, r) = any(okc);
             if any(okc), Bc{s, r} = ACTIONS{find(okc, 1)}; end

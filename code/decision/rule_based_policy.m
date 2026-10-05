@@ -13,12 +13,13 @@ function [action, reason] = rule_based_policy(threat_class, degraded, mmse_gain_
 %   q_iot_db      interference over thermal in this frame's quiet slot (link_features.m)
 %   q_thr_db      its alarm threshold, from the clean validation frames
 %                 (select_fusion.m; default C.q_alarm_db)
-%   A degraded link whose class is none or benign_interference while the quiet slot
-%   shows interference is interference on our channel: a low packet delivery with a
-%   high signal level is jamming, not a weak link (Xu et al. 2005, pp. 8-9); the
-%   slot's power plays the part of the AGC level of a jamming monitor (Kazim et al.
-%   2026, eq. 1.3, p. 2; AGC gain as a detector, Ndili & Enge 1998, p. 5). The rule
-%   leaves the channel there.
+%   On a degraded link whose class is benign_interference the rule leaves the channel.
+%   A degraded link whose class is none while the quiet slot shows interference is
+%   interference on our channel: a low packet delivery with a high signal level is
+%   jamming, not a weak link (Xu et al. 2005, pp. 8-9); the slot's power plays the part
+%   of the AGC level of a jamming monitor (Kazim et al. 2026, eq. 1.3, p. 2; AGC gain as
+%   a detector, Ndili & Enge 1998, p. 5). The rule leaves the channel there too, and
+%   nulls the interferer when it is separable.
 %   With one argument the class mapping alone is returned.
 C = decision_config();
 threat_class = char(threat_class);

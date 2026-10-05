@@ -6,7 +6,7 @@
 % run of RUN_FRAMES frames with its own seed, shared by all configurations (common random
 % numbers; identical physics simulated once, pool_cell.m, parallel workers). A cell
 % is RECOVERABLE when some configuration brings BER within 2x AND packet loss (CRC)
-% within 2x (+ one packet) of the clean link at the same Eb/N0 (proposal KPI 4),
+% within 2x (+ one loss event of the run, packet_share.m) of the clean link at the same Eb/N0 (proposal KPI 4),
 % MARGINAL when the best BER is within 5x, otherwise NON-RECOVERABLE. Directional
 % threats are mapped for two flight geometries: interferer 42.2 deg from the
 % GCS direction (separable by the antenna array) and 11.4 deg (aligned);
@@ -115,7 +115,7 @@ for t = 1:nT
     for li = 1:numel(maps(t).levels), jobs(end+1, :) = [t li]; end %#ok<AGROW>
 end
 nJ = size(jobs, 1);
-resB = cell(1, nJ); resF = cell(1, nJ);
+resB = cell(1, nJ); resF = cell(1, nJ); resS = cell(1, nJ);
 parfor (j = 1:nJ, NWP)
     t = jobs(j, 1); li = jobs(j, 2);
     cfg = maps(t);
@@ -126,24 +126,26 @@ parfor (j = 1:nJ, NWP)
     P = pool_cell(p, cfg.base, ACTIONS, SNR_points, g, [], opt);
     resB{j} = cellfun(@(Q) mean(Q.ber), P(:, :, 1))';            % configurations x Eb/N0
     resF{j} = cellfun(@(Q) mean(double(Q.fer)), P(:, :, 1))';
+    resS{j} = cellfun(@(Q, a) packet_share(a, Q.fer), P(:, :, 1), repmat(ACTIONS(:)', nS, 1))';   % one loss event of the run
 end
-ber_all = cell(1, nT); fer_all = cell(1, nT);             % {entry}(level, configuration, snr)
+ber_all = cell(1, nT); fer_all = cell(1, nT); slack_all = cell(1, nT);             % {entry}(level, configuration, snr)
 for t = 1:nT
     nL = numel(maps(t).levels);
-    B = nan(nL, nAct, nS); Fe = nan(nL, nAct, nS);
+    B = nan(nL, nAct, nS); Fe = nan(nL, nAct, nS); Sl = nan(nL, nAct, nS);
     for li = 1:nL
         j = find(jobs(:, 1) == t & jobs(:, 2) == li);
         B(li, :, :) = reshape(resB{j}, [1 nAct nS]); Fe(li, :, :) = reshape(resF{j}, [1 nAct nS]);
+        Sl(li, :, :) = reshape(resS{j}, [1 nAct nS]);
     end
-    ber_all{t} = B; fer_all{t} = Fe;
+    ber_all{t} = B; fer_all{t} = Fe; slack_all{t} = Sl;
 end
 fprintf('Mapped %d entries x levels in %.1f min\n\n', nJ, toc(t0)/60);
 
 %% ========== 3. Build both maps ==========
 fprintf('Classifying (ratio to clean link): recoverable <= %gx (BER and packet loss), marginal <= %gx\n\n', ...
     RATIO_RECOVERABLE, RATIO_MARGINAL);
-grid_data_A = build_map(ber_all, fer_all, maps, ACTIONS, MECH_A, ber_ref, fer_clean, RUN_FRAMES, RATIO_RECOVERABLE, RATIO_MARGINAL);
-grid_data_B = build_map(ber_all, fer_all, maps, ACTIONS, MECH_B, ber_ref, fer_clean, RUN_FRAMES, RATIO_RECOVERABLE, RATIO_MARGINAL);
+grid_data_A = build_map(ber_all, fer_all, maps, ACTIONS, MECH_A, ber_ref, fer_clean, slack_all, RATIO_RECOVERABLE, RATIO_MARGINAL);
+grid_data_B = build_map(ber_all, fer_all, maps, ACTIONS, MECH_B, ber_ref, fer_clean, slack_all, RATIO_RECOVERABLE, RATIO_MARGINAL);
 
 %% ========== 4. Reports ==========
 if ~exist('results','dir'), mkdir('results'); end
@@ -186,7 +188,7 @@ fprintf('\n--- GAP ANALYSIS ---\n'); fprintf('%s\n', gap_report{:});
 
 if ~exist('data','dir'), mkdir('data'); end
 save('data/survivability_boundary.mat','grid_data_A','grid_data_B','ber_clean','ber_ref','fer_clean','BER_FLOOR', ...
-    'SNR_points','RATIO_RECOVERABLE','RATIO_MARGINAL','MECH_A','MECH_B','ber_all','fer_all','threat_cfg','maps', ...
+    'SNR_points','RATIO_RECOVERABLE','RATIO_MARGINAL','MECH_A','MECH_B','ber_all','fer_all','slack_all','threat_cfg','maps', ...
     'GEOM_AOA','RUN_FRAMES','ACTIONS');
 
 %% ========== 6. Figures ==========
@@ -232,14 +234,13 @@ function p = load_params_quiet()
     p = load('params.mat').params;
 end
 
-function grid_data = build_map(ber_all, fer_all, threat_cfg, ACTIONS, act_set, ber_clean, fer_clean, nfr, ...
+function grid_data = build_map(ber_all, fer_all, threat_cfg, ACTIONS, act_set, ber_clean, fer_clean, slack_all, ...
     RATIO_RECOVERABLE, RATIO_MARGINAL)
     % Recoverable: some configuration of act_set with BER <= 2x and packet loss
     % <= 2x (+ one loss event of the run, packet_share.m) of the clean link; otherwise the
     % best BER decides between marginal and non-recoverable.
     nS = numel(ber_clean);
     cols = find(ismember(ACTIONS, act_set));
-    slack = reshape(packet_share(ACTIONS(cols), nfr), 1, []);
     grid_data = struct('threat',{},'base',{},'aoa',{},'levels',{},'ber_best',{},'ratio',{}, ...
         'status',{},'ber_attacked',{},'best_action',{});
     for t = 1:numel(threat_cfg)
@@ -253,7 +254,7 @@ function grid_data = build_map(ber_all, fer_all, threat_cfg, ACTIONS, act_set, b
         for li = 1:nL
             for s = 1:nS
                 okc = B(li, cols, s) <= RATIO_RECOVERABLE * ber_clean(s) & ...
-                      Fe(li, cols, s) <= RATIO_RECOVERABLE * fer_clean(s) + slack;
+                      Fe(li, cols, s) <= RATIO_RECOVERABLE * fer_clean(s) + slack_all{t}(li, cols, s);
                 if any(okc)
                     cand = cols(okc); [ber_best(li,s), k] = min(B(li, cand, s)); kc = cand(k);
                     status(li,s) = 1;

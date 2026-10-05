@@ -40,12 +40,13 @@ params.cfo_ppm        = 25;            % [ppm] oscillator tolerance of each radi
 params.timing_max_sym = 4;             % [symbols] unknown arrival time of a frame (uniform, fractional)
 params.rx_dd_iter     = 4;             % decision-directed estimation passes after the pilot-based one
 params.sync_coh_min   = 0.60;          % sync coherence below which the training was not found: sync-failure flag (<= 1% of correctly synchronized dev frames)
-% Receive front end (adc_frontend.m): per antenna an AGC held over the frame and a 12-bit ADC
+% Receive front end (adc_frontend.m): per antenna an AGC set per frame, with a fast attack, and a 12-bit ADC
 % (AD9361 data sheet, Rev. F: 12-bit ADCs, 1 dB gain steps). Resolution under jamming: about
 % one bit per 6.02 dB of jammer (Marti et al. 2024, eq. 19), 8 bits for a 25 dB jammer
 % (Castaneda et al. 2021), up to 6 dB of anti-jam per A/D bit (Knight, Cahn & Nair 2007).
 params.adc_bits       = 12;            % ADC bits per rail (0 or Inf: no front end)
 params.adc_backoff_db = 12;            % [dB] full scale over the rail RMS: the composite's measured 1e-4 rail quantile (11.1-12.1 dB)
+params.adc_attack_db  = 6;             % [dB] fast attack: a 16-sample block this far above the gain's level steps the gain down (Inf: held over the frame)
 %% ========== CHANNEL MODEL ==========
 % Pulse shaping (RRC)
 params.rolloff      = 0.25;            % RRC roll-off factor
@@ -181,8 +182,8 @@ params.cm_acr_db      = 30;         % [dB] rejection of an interferer left on an
 params.fdiv_spacing_hz = 25e6;      % [Hz] freq_diversity: second carrier at 802.11's adjacent-channel separation, where it specifies >= 35 dB rejection (IEEE 802.11-2007 18.4.8.3)
 params.cm_rate_factor = 4;          % rate_reduce: data rate / 4 -> +6 dB processing gain, goodput x0.25
 params.cm_fec_rate    = 1/2;        % fec_interleave: code rate, K = 7, generators [171 133] octal; one packet per two frames (fec_packets.m)
-params.fec_frames     = 4;          % fec_interleave: frames a packet's codeword is spread over, a quarter per frame: a lost frame erases a quarter of a codeword, not half (N - k, the most any code can recover: e <= N - k, Ercan et al. 2023)
-params.erase_pilot_mse = 0.80;      % pilot error above which a frame's bits are erasures for the decoder (<= 1% of the dev frames with BER <= 0.2 flagged, D78)
+params.fec_frames     = 4;          % fec_interleave: frames a packet's codeword is spread over, a quarter per frame: a lost frame erases a quarter of a codeword, not half, N - k (e <= N - k, the erasures GRAND-EDGE can solve for, Ercan et al. 2023, Sec. III-B)
+params.erase_pilot_mse = 0.80;      % pilot error above which a frame's bits are erasures for the decoder (the smallest on a 0.05 grid flagging <= 1% of the dev frames with BER <= 0.2)
 
 %% ========== ANTENNAS & RECEIVER ==========
 % Modeled link: GCS -> UAV command uplink; the receiver (and the detector) is on the UAV.

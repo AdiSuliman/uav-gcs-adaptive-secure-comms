@@ -189,6 +189,34 @@ verifyEqual(tc, [R.recovered, R.held, Rc.recovered, Rc.held], [true true true fa
 verifyEqual(tc, [Rc.lost_rec, Rc.n_rec], [R.lost_rec, R.n_rec]);
 end
 
+function test_fec_restoration_start(tc)
+% After the link turns coded (a configuration with fec_interleave reaches it after one
+% without) the first coded packet is decoded on the fourth coded frame: the three frames
+% before are neither restored nor restored_plr, from the arrival of the change on (the
+% signalling delay first); a change between coded configurations keeps the code running.
+% The cycles to recover count them and the packet loss after recovery leaves them out.
+[PP, K] = toy_world(true);
+A = PP.actions; na = find(strcmp(A, 'no_action')); fc = find(strcmp(A, 'fec_interleave'));
+fp = find(strcmp(A, 'power_control+fec_interleave')); cf = find(strcmp(A, 'channel_switch+fec_interleave'));
+for D = [0 1]
+    seq = [na na fc fc fc fc fc fp fp na fc fc fc fc];
+    spec = struct('scn', 1, 's', 1, 'onset', 99, 'follow', false, 'fdelay', 0, 'unk', false, 'T', numel(seq), ...
+        'r', 1, 'delay', D);
+    [E, ~] = link_env('reset', PP, K, spec, 1, RandStream('mt19937ar', 'Seed', 1));
+    ok = false(1, numel(seq)); gap = ok;
+    for t = 1:numel(seq)
+        [E, ~, ~, info] = link_env('step', E, PP, K, seq(t));
+        ok(t) = info.restored && info.restored_plr; gap(t) = info.fec_gap;
+    end
+    g = false(1, numel(seq)); g(D + [3 4 5 11 12 13]) = true; g = g(1:numel(seq));
+    verifyEqual(tc, gap, g, sprintf('D %d', D));
+    verifyEqual(tc, ok, ~g, sprintf('D %d', D));
+end
+spec = struct('scn', 2, 's', 1, 'onset', 1, 'follow', false, 'fdelay', 0, 'unk', false, 'T', 12, 'r', 1, 'delay', 0);
+R = rollout_policy('fixed', PP, K, spec, 1, [], struct('fixed', cf), 3);
+verifyEqual(tc, [R.recovered, R.t_rec, R.held, R.lost_rec, R.n_rec], [1 3 1 0 9]);
+end
+
 function test_oracle_timing(tc)
 % The one-step oracle scores the frame its choice reaches the link on (t + 1 + D), with
 % the channel in use after a hop on its way (its arrival frame) and link_env.m's re-hop
@@ -290,11 +318,11 @@ verifyEqual(tc, [m.since, m.pend], [1 0]);
 end
 
 function test_coded_degraded_after_arrival(tc)
-% With fec_interleave on the link the CRC packet loss decides (above twice the clean
-% coded link's, 0 without the pools, and at least 3 lost packets in the window: one frame
-% costs the two packets that share it), from the first frame received with it: two lost
-% packets after the arrival are not degraded, whatever the window held before and
-% however high the channel BER; a third is.
+% With fec_interleave on the link the CRC packet loss decides (more lost packets in the
+% window than twice the clean coded link's loss, 0 without the pools, plus one loss event
+% of two packets), from the first frame received with it: two lost packets after the
+% arrival are not degraded, whatever the window held before and however high the channel
+% BER; a third is.
 A = policy_actions();
 cls = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', 'antenna_fault', ...
     'benign_interference', 'sweeping_jammer', 'tone_jamming', 'airframe_shadowing'};
@@ -390,16 +418,17 @@ verifyEqual(tc, nthout(1:2, @check_point_cut, 5, 1:5, [1 -1 1 1]), {2, true});
 end
 
 function test_detector_id(tc)
-% One detector, one identity; another training time, unknown-score window, fusion or
-% threshold gives another, and pools and agent of two detectors stop the reading.
-FZ = struct('FM', struct('W', ones(3, 2)), 'N', 4); ood = struct('score', 'last', 'win', 3);
+% One detector, one identity; another training time, unknown-score window, fusion,
+% quiet-slot threshold or unknown-threat threshold gives another, and pools and agent of
+% two detectors stop the reading.
+FZ = struct('FM', struct('W', ones(3, 2)), 'N', 4, 'q_thr', 5.5); ood = struct('score', 'last', 'win', 3);
 id = detector_id(1, ood, FZ, -2);
 verifyEqual(tc, detector_id(1, ood, FZ, -2), id);
 verifyEqual(tc, numel(id), 16);
-o2 = ood; o2.win = 4; F2 = FZ; F2.N = 5; F3 = FZ; F3.FM.W(1) = 2;
+o2 = ood; o2.win = 4; F2 = FZ; F2.N = 5; F3 = FZ; F3.FM.W(1) = 2; F4 = FZ; F4.q_thr = 6;
 ids = {id, detector_id(2, ood, FZ, -2), detector_id(1, o2, FZ, -2), detector_id(1, ood, F2, -2), ...
-    detector_id(1, ood, F3, -2), detector_id(1, ood, FZ, -3)};
-verifyEqual(tc, numel(unique(ids)), 6);
+    detector_id(1, ood, F3, -2), detector_id(1, ood, FZ, -3), detector_id(1, ood, F4, -2)};
+verifyEqual(tc, numel(unique(ids)), 7);
 check_det_id(struct('det_id', id), struct('det_id', id), 'test');
 verifyError(tc, @() check_det_id(struct('det_id', id), struct('det_id', ids{2}), 'test'), 'check_det_id:mismatch');
 verifyError(tc, @() check_det_id(struct('det_id', id), struct(), 'test'), 'check_det_id:mismatch');
@@ -466,6 +495,22 @@ verifyGreaterThan(tc, blo, 0.9);
 Ri = edge_verdict(20 - double((1:72) <= 30), 20 * ones(1, 72), 1:72, 0.9, 'ge', false);
 verifyEqual(tc, Ri.verdict, 1);
 verifyGreaterThan(tc, Ri.lo, 0.96);
+end
+
+function test_det_layers(tc)
+% DET over every flight, DET_h over the harmed ones and DET_u, the third output, over the
+% unharmed ones (edge_map.m's three detection layers): 36 harmed flights detected on
+% every cycle and 36 unharmed ones on none.
+n = 72; harm = (1:n) <= 36;
+F = struct('det_k', 10 * harm, 'det_n', 10 * ones(1, n), 'geo', 1:n, 'harm', harm);
+TGT = struct('det', 0.9);
+[d, dh, du] = det_layers(F, TGT, 500);
+verifyEqual(tc, [d.value, dh.value, du.value, dh.n, du.n], [0.5 1 0 36 36], 'AbsTol', 1e-12);
+verifyEqual(tc, [dh.verdict, du.verdict, d.verdict], [1 -1 -1]);
+[d2, dh2] = det_layers(F, TGT, 500);
+verifyEqual(tc, [d2.value, dh2.value], [d.value, dh.value]);
+src = fileread(which('edge_map'));
+verifyTrue(tc, contains(src, '[BL.det(i, s), BL.deth(i, s), BL.detu(i, s)] = det_layers(F, TGT, B);'));
 end
 
 function test_edge_walk(tc)
@@ -1523,7 +1568,7 @@ function test_receiver_delay_spread(tc)
 % about as well as the flat receiver on the flat channel at 6 dB (each frame keeps the
 % space-time or the antennas-alone output by its pilots); a 30 dB jammer on the flat
 % channel stays below 0.06, and one whose channel spreads 234 ns below 0.03 (the
-% space-time sync finds the frame under it: the spatial whitening alone lost 0.36).
+% space-time sync finds the frame under it).
 p = base_params(); p.quiet_build = true; p.rx_sync = 'real'; p.int_aoa_random = false; p.yaw_random = false;
 p.corr_random = false; p.gcs_tracked = false; p.k_random = false; p.gcs_aoa_random = false; p.body_random = false;
 p.tdl = true; p.tdl_random = false;
@@ -1582,7 +1627,11 @@ function test_adc_frontend(tc)
 % Receive front end: the AGC puts full scale adc_backoff_db to 1 dB more above the rail
 % RMS (1 dB gain steps); a tone within full scale is quantized with the SQNR of a uniform
 % 12-bit quantizer (step^2 / 12 per rail); samples beyond full scale are clipped to the
-% outermost level; 0 bits leave the samples unchanged.
+% outermost level; 0 bits leave the samples unchanged. A burst 20 dB above the frame's
+% level that starts after the AGC windows clips for the rest of the frame with the gain
+% held; with the fast attack the gain steps down 32 samples (16 averaged, 16 waited) after
+% the burst's first block, on the 1 dB grid bo_db above the burst's rail RMS, and only
+% those samples clip; the attack leaves a steady frame unchanged.
 rs = RandStream('mt19937ar', 'Seed', 3);
 N = 4000; iq = 1:500; is = 501:1000;
 u = 0.01 * exp(1j * 2*pi * 0.0123 * (0:N-1).') * [1 3];
@@ -1602,6 +1651,19 @@ verifyEqual(tc, clip, 2 / (2 * numel(v)));
 g = complex(randn(rs, N, 2), randn(rs, N, 2));
 verifyEqual(tc, adc_frontend(g, 0, 12, iq, is), g);
 verifyEqual(tc, adc_frontend(g, Inf, 12, iq, is), g);
+verifyEqual(tc, adc_frontend(g, 12, 12, iq, is, 6), adc_frontend(g, 12, 12, iq, is));   % steady: no step
+b = g; k0 = is(end) + 1 + 16 * 63; b(k0:end, :) = 10 * b(k0:end, :);   % +20 dB from a block start
+[~, ~, ch] = adc_frontend(b, 12, 12, iq, is);
+[yb, fb, ca] = adc_frontend(b, 12, 12, iq, is, 6);
+verifyGreaterThan(tc, ch, 0.05);
+cl = abs(real(b)) >= fb | abs(imag(b)) >= fb;                     % rails beyond the final full scale
+verifyLessThan(tc, mean(cl(k0 + 32:end, :), 'all'), 1e-3);
+verifyLessThan(tc, ca, 32 / N);
+lv = 20*log10(fb ./ sqrt(mean(real(b(k0:end, :)).^2)));
+verifyGreaterThan(tc, lv, 11); verifyLessThan(tc, lv, 14);
+ok = ~cl(k0 + 32:end, :);
+e = abs(real(yb(k0 + 32:end, :) - b(k0 + 32:end, :)));
+verifyLessThanOrEqual(tc, max(e(ok)), max(fb) / 2^11 / 2 + 1e-12);   % half a step off, at the new gain
 end
 
 function test_power_cap(tc)
@@ -1830,25 +1892,96 @@ verifyEqual(tc, b6([1:6 9:nf]), zeros(1, nf - 2));
 verifyGreaterThan(tc, b6(7), 0);
 end
 
+function test_bit_reliability(tc)
+% The reliability of every bit sits on its own rail of the Gray-mapped pi/4 QPSK symbol
+% (pskmod): the first bit on Im(conj(g) z), the second on Re(conj(g) z), g the block's gain.
+% A symbol pushed onto the real axis leaves its first bit uncertain, one pushed onto the
+% imaginary axis its second; the signs of the rails give pskdemod's bits.
+p = struct('frame_length', 1032);
+rs = RandStream('mt19937ar', 'Seed', 3);
+b = randi(rs, [0 1], p.frame_length, 1);
+s = pskmod(b, 4, pi/4, 'gray', 'InputType', 'bit');
+g = 0.7 * exp(1j * 0.4);
+z = g * s + 0.02 * complex(randn(rs, size(s)), randn(rs, size(s)));
+k1 = 40; k2 = 300;
+z(k1) = g * real(s(k1)) * (1 + 0.01j);                         % Im of conj(g) z near 0
+z(k2) = g * 1j * imag(s(k2)) * (1 + 0.01j);                    % Re of conj(g) z near 0
+r = bit_reliability(z, p);
+verifyEqual(tc, size(r), [p.frame_length, 1]);
+verifyLessThan(tc, r(2*k1 - 1), 0.05 * r(2*k1));
+verifyLessThan(tc, r(2*k2), 0.05 * r(2*k2 - 1));
+y = conj(g) * z; k = setdiff(1:numel(s), [k1 k2]);
+hb = reshape([imag(y(:)) < 0, real(y(:)) < 0]', [], 1);       % first bit from Im, second from Re
+verifyEqual(tc, hb([2*k - 1, 2*k]), logical(b([2*k - 1, 2*k])));
+d = pskdemod(z, 4, pi/4, 'gray', 'OutputType', 'bit');
+verifyEqual(tc, d([2*k - 1, 2*k]), b([2*k - 1, 2*k]));
+end
+
+function test_sync_frequency_sign(tc)
+% The space-time synchronization (st_sync on the delay line) reports the frequency offset
+% with its sign: a known offset of +-30 kHz on the transmitted frames (three antennas,
+% their own gains, 30 dB) is found within 1 kHz with the same sign, and every frame decodes.
+p = base_params(); p.quiet_build = true; p.rx_sync = 'real'; p.int_aoa_random = false; p.yaw_random = false;
+p.corr_random = false; p.gcs_tracked = false; p.k_random = false; p.gcs_aoa_random = false; p.body_random = false;
+p.tdl = true; p.tdl_random = false; p.tdl_ds_ns = [234 0]; p.active_threat = 'none'; p.rx_combiner = 'mmse';
+mdl = 'UAV_GCS_Threat_Link';
+evalc('build_threat_model(p)');
+link_seed(mdl, 31, 160);
+o = sim(mdl, 'StopTime', num2str(4 * p.frame_duration));
+X = squeeze(o.get('Tx_IQ')); tb = reshape(double(o.get('tx_bits_out')), p.frame_length, []);
+ch = sfroot().find('-isa', 'Stateflow.EMChart', 'Path', [mdl '/Rx']);
+src = regexprep(ch.Script, 'function \[bits, iqa, z, Hq, Rq, sy\] = fcn\(u, txbits\)', ...
+    'function [bits, iqa, z, Hq, Rq, sy] = rx_sign_check(u, txbits)', 'once');
+close_system(mdl, 0);
+fid = fopen(fullfile(pwd, 'rx_sign_check.m'), 'w'); fwrite(fid, src); fclose(fid);
+rehash;
+verifyGreaterThan(tc, rx_taps(p).nt, 1);                         % the space-time path
+rs = RandStream('mt19937ar', 'Seed', 7);
+G = [1, 0.8j, -0.6 + 0.3j];
+fs = p.symbol_rate * p.sps; cyc = round(p.cycle_s * fs); Ns = size(X, 1);
+for f0 = [-30e3 30e3]
+    clear rx_sign_check
+    for k = 1:min(size(X, 2), size(tb, 2))
+        t = ((k - 1) * cyc + (0:Ns-1)') / fs;
+        u = (X(:, k) .* exp(1j*2*pi*f0*t)) * G + sqrt(1e-3 / p.sps / 2) * complex(randn(rs, Ns, 3), randn(rs, Ns, 3));
+        [bits, ~, ~, ~, ~, sy] = rx_sign_check(u, tb(:, k));
+        if k > 1
+            verifyLessThan(tc, abs(sy(2) - f0), 1e3, sprintf('f0 %g, frame %d', f0, k));
+            verifyEqual(tc, double(bits(:)), tb(:, k), sprintf('f0 %g, frame %d', f0, k));
+        end
+    end
+end
+delete(fullfile(pwd, 'rx_sign_check.m'));
+end
+
 function test_packet_loss_once(tc)
-% A loss event is the slack of the packet-loss criterion: one frame without FEC, with it
-% the two packets that share a frame (one packet per frame pair, both frames carrying its
-% result: four frames). The monitor counts a lost coded packet once, at the second frame
-% of its pair (decoded there: a result on another frame is not read), and only when the
-% four frames of its codeword were received coded, so after a switch to the code the
-% first packet counts on the fourth coded frame or later. A coded link's loss is read
-% over six frames (three packets): two lost packets, one event, do not degrade it and
-% three do, while an uncoded link counts its last five frames.
-verifyEqual(tc, packet_share({'no_action', 'power_control+fec_interleave'}, 20), [1 4] / 20);
-verifyEqual(tc, packet_share('fec_interleave', 57), 4 / 56);
-verifyEqual(tc, packet_share('fec_interleave', 20, 2), 2 / 20);
+% A loss event is the slack of the packet-loss criterion: one frame without FEC; with it
+% (one packet per frame pair, both frames carrying its result, four frames per codeword)
+% the run's longest run of consecutive lost packets, at most the two that share a frame,
+% cyclic over the run's pairs, the same count at 20 and 56 frames. The monitor counts a
+% lost coded packet once, at the second frame of its pair (decoded there: a result on
+% another frame is not read), and only when the four frames of its codeword were received
+% coded, so after a switch to the code the first packet counts on the fourth coded frame
+% or later. A coded link's loss is read over ten frames (five packets): two lost packets,
+% one event, do not degrade it and a third does, eight frames later too, while an
+% uncoded link counts its last five frames.
+z = zeros(1, 20); f = @(k) reshape([k; k], 1, []);                % frame pattern of packet results
+verifyEqual(tc, packet_share('no_action', z), 1 / 20);
+verifyEqual(tc, packet_share('power_control+fec_interleave', z), 1 / 10);
+verifyEqual(tc, packet_share('fec_interleave', f([0 0 1 0 0 0 0 0 0 0])), 1 / 10);
+verifyEqual(tc, packet_share('fec_interleave', f([0 0 1 1 0 0 0 0 0 0])), 2 / 10);
+verifyEqual(tc, packet_share('fec_interleave', f([0 1 0 0 0 1 0 0 0 0])), 1 / 10);   % two events of one packet
+verifyEqual(tc, packet_share('fec_interleave', f([0 1 1 1 0 0 0 0 0 0])), 2 / 10);   % at most Q/2
+verifyEqual(tc, packet_share('fec_interleave', f([1 0 0 0 0 0 0 0 0 1])), 2 / 10);   % across the wrap
+verifyEqual(tc, packet_share('fec_interleave', f([zeros(1, 26) 1 1])), 2 / 28);
+verifyEqual(tc, packet_share('fec_interleave', f([0 0 1 1 0 0 0 0 0 0]), 2), 1 / 10);
 A = policy_actions(); ic = find(strcmp(A, 'fec_interleave')); iu = find(strcmp(A, 'no_action'));
 PP = struct('actions', {A}, 'classes', {{'none', 'jamming'}}, 'sps', 4, 'bps', 2, 'maha_thr', -Inf, 'fec_frames', 4);
 nF = numel(link_features('names'));
-crc = [0 0 0 0 1 1 0 0; 0 0 0 1 1 1 1 1; 0 0 0 0 1 1 0 0; 0 0 1 1 1 1 1 1];   % coded, coded, uncoded, coded from frame 3
-mem = policy_monitor('init', 4, numel(A));
-cnt = false(4, 8);
-for t = 1:8
+crc = [0 0 0 1 0 1 0 0 0 0 0 0; 0 0 0 1 0 0 0 1 0 0 0 1; 0 0 0 0 0 0 0 1 0 0 0 1; 0 0 0 0 0 1 0 1 0 1 0 0];
+mem = policy_monitor('init', 4, numel(A));                      % coded, coded, uncoded, coded from frame 3
+cnt = false(4, 12);
+for t = 1:12
     cl = [ic; ic; iu; ic]; if t < 3, cl(4) = iu; end
     obs = struct('probs', repmat([1 0], 4, 1), 'unknown', false(4, 1), 'feat', zeros(4, nF), ...
         'cfg_link', cl, 'pkt', floor((t - 1) / 2) * ones(4, 1));
@@ -1856,11 +1989,12 @@ for t = 1:8
     obs.feat(:, feature_index('log_ber')) = -6;
     [mem, M] = policy_monitor('update', mem, obs, PP, cl');
     cnt(:, t) = ~isnan(mem.crc(:, end));
-    if t == 5, verifyEqual(tc, M.plr([1 3]), [0; 1/5], 'AbsTol', 1e-12); end
+    if t == 6, verifyEqual(tc, [M.plr(1), M.degraded(1)], [1 0]); end
+    if t == 8, verifyEqual(tc, M.plr(3), 1/5, 'AbsTol', 1e-12); end
 end
-verifyEqual(tc, cnt, logical([0 0 0 1 0 1 0 1; 0 0 0 1 0 1 0 1; ones(1, 8); 1 1 0 0 0 1 0 1]));
-verifyEqual(tc, M.plr, [1/3; 1; 2/5; 1], 'AbsTol', 1e-12);
-verifyEqual(tc, M.degraded, [false true false false]);
+verifyEqual(tc, cnt, logical([repmat([0 0 0 1 0 1 0 1 0 1 0 1], 2, 1); ones(1, 12); 1 1 0 0 0 1 0 1 0 1 0 1]));
+verifyEqual(tc, M.plr, [2/5; 3/5; 2/5; 3/4], 'AbsTol', 1e-12);
+verifyEqual(tc, M.degraded, [false true false true]);
 PP.fec_frames = 2;                                                        % two frames: counted from the second
 mem = policy_monitor('init', 1, numel(A));
 for t = 1:4
