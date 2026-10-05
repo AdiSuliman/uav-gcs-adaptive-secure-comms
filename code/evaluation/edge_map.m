@@ -602,10 +602,10 @@ if isfile('data/check_pools.mat')
     end
     i0 = KI(sub2ind(size(KI), k0 + 0 * KF.s, KF.s, KF.r)); m = i0 > 0;
     KF.cl_k(m) = KF.link_k(i0(m)); KF.cl_n(m) = KF.link_n(i0(m));
-    KFC = zeros(nD, nK); ek = min(CK.ebno, ebno_thr);   % FA of the claim at every check Eb/N0
+    KFC = zeros(nD, nK); eck = min(CK.ebno, ebno_thr);  % FA of the claim at every check Eb/N0
     for d = 1:nD
-        for e = unique(ek)
-            V = fa_claim(CF, var_of(VAR, 'clean', NaN, DLY(d), 1), e, ebno_thr, TGT, B); KFC(d, ek == e) = V.verdict;
+        for e = unique(eck)
+            V = fa_claim(CF, var_of(VAR, 'clean', NaN, DLY(d), 1), e, ebno_thr, TGT, B); KFC(d, eck == e) = V.verdict;
         end
     end
     for c = ck
