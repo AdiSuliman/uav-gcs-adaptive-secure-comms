@@ -1,46 +1,60 @@
-=== PROPOSAL KPI SUMMARY (updated proposal) ===
-Generated: 30-Sep-2026 01:52:04 | commit 67beac7 + local changes
+=== PROPOSAL KPI SUMMARY (proposal wording) ===
+Generated: 04-Oct-2026 08:57:13 | commit 2e6f362 + local changes
 
-KPI 1  Detection vs SNR             [MET]    macro-F1 97.02%, lowest class 93.85%, from 0 dB   (target: macro-F1 and every class >= 90% above a threshold)
-        accuracy 97.02%, macro-F1 97.02% [96.24, 97.60] (bootstrap over sub-runs)
-        class F1 above the threshold: none 94.7%, jamming 93.9%, noise_burst 99.9%, reactive_jamming 97.7%, path_loss 94.9%, spoofing 99.1%, antenna_fault 99.0%, benign_interference 94.4%, sweeping_jammer 99.6%
-        macro-F1 per Eb/N0: 0 dB 95.1% | 2 dB 96.1% | 4 dB 97.6% | 6 dB 97.9% | 8 dB 97.5% | 10 dB 97.9%
-        unseen Eb/N0 (1,3,5,7,9 dB): accuracy 97.93% vs 97.69% seen, largest gap 1.33 points
+KPI 1  Detection accuracy vs SNR    [NOT MET] macro-F1 NaN%, lowest class NaN%, from NaN dB   (target: macro-F1 and every class >= 90% above a threshold)
+        accuracy 75.00%, macro-F1 71.82% [61.69, 85.05] (bootstrap over sub-runs)
+        class F1 above the threshold: none NaN%, jamming NaN%, noise_burst NaN%, reactive_jamming NaN%, path_loss NaN%, spoofing NaN%, antenna_fault NaN%, benign_interference NaN%, sweeping_jammer NaN%, tone_jamming NaN%, airframe_shadowing NaN%
+        macro-F1 per Eb/N0: 3 dB 75.2% | 12 dB 73.8%
+        unseen Eb/N0 (1.5 dB): accuracy 40.48% vs 60.71% seen, largest gap 20.24 points
         architecture comparison: results/architecture_comparison.txt
+        edge map, DET per (threat, level, Eb/N0): single threats 0 COMMITTED / 2 NOT COMMITTED / 28 UNDETERMINED | combined threats 0 COMMITTED / 3 NOT COMMITTED / 9 UNDETERMINED
+        edge map, detector beyond 0-15 dB (4 classes, >= 90% same countermeasure): -3 dB 0 COMMITTED / 2 NOT COMMITTED / 2 UNDETERMINED | 18 dB 0 COMMITTED / 0 NOT COMMITTED / 4 UNDETERMINED
 
-KPI 2  Unknown threats (LOTO)       [MET]    mean AUROC 0.859 (nested)   (target: >= 0.8)
-        production score last_or_raw (selected by leave-one-threat-out, D60): mean AUROC 0.898, FPR at 95% known kept 0.40
-        nested estimate per held-out threat: jamming 0.888 (last_or_raw), noise_burst 0.912 (last_or_raw), reactive_jamming 0.641 (last), path_loss 0.884 (last_or_raw), spoofing 0.843 (last_or_raw), antenna_fault 0.882 (last_or_raw), benign_interference 0.900 (last_or_raw), sweeping_jammer 0.923 (last_or_raw)
-        every score (mean AUROC): msp 0.661, energy 0.656, iforest 0.685, last 0.871, ensemble 0.782, raw 0.696, last_or_raw 0.898, last_or_if 0.881
-        production score averaged over 2 / 5 frames of a run: 0.907 / 0.920
+KPI 2  Unknown threat (LOTO)        [STALE]  mean AUROC 0.872 (nested)   (target: >= 0.8)
+        production score last (selected by leave-one-threat-out): mean AUROC 0.920, FPR at 95% known kept 0.32
+        nested estimate per held-out threat: jamming 0.841 (ensemble over 8), noise_burst 0.903 (last over 8)
+        every score (mean AUROC): msp 0.325, energy 0.319, iforest 0.688, last 0.920, ensemble 0.885, raw 0.763, last_or_raw 0.898, last_or_if 0.893, last_pre 0.920
+        production score averaged over 2 / 5 / 8 frames of a run: 0.937 / 0.940 / 0.938
 
-KPI 3  BER vs theory                [MET]    5/5 within 0.3 dB (gaps +0.05, -0.21, +0.05, +0.13, +0.17 dB)   (target: <= 0.3 dB)
+KPI 3  Model validation vs theory   [MET]    7/7 within 0.3 dB (gaps +0.04, +0.01, +0.08, +0.06, +0.13, +0.14, +0.07 dB)   (target: <= 0.3 dB)
         seeded reproducibility: PASS
+        tone jammer calibration: PASS
 
-KPI 4  Restoration (<= 2x clean)    [NOT MET] lowest threat benign_interference 87.2%, 14 of 16 threats >= 90%   (target: >= 90% of recoverable episodes, every threat)
-        recovered among recoverable, per threat (DQN + escalation): jamming 96.4%, noise_burst 97.2%, reactive_jamming 96.7%, path_loss 94.7%, spoofing 95.8%, antenna_fault 98.3%, benign_interference 87.2%, sweeping_jammer 99.7%, jamming+path_loss 100.0%, noise_burst+antenna_fault 88.7%, sweeping_jammer+path_loss 96.9%, spoofing+noise_burst 95.8%, reactive_jamming+path_loss 97.9%, jamming+antenna_fault 100.0%, spoofing+sweeping_jammer 100.0%, benign_interference+noise_burst 94.8%
-        all threat episodes pooled: DQN + escalation 96.1% [94.8, 97.5] of 3856 recoverable episodes; recoverable share jamming 100%, noise_burst 99%, reactive_jamming 100%, path_loss 85%, spoofing 100%, antenna_fault 100%, benign_interference 100%, sweeping_jammer 100%, jamming+path_loss 100%, noise_burst+antenna_fault 65%, sweeping_jammer+path_loss 100%, spoofing+noise_burst 100%, reactive_jamming+path_loss 100%, jamming+antenna_fault 100%, spoofing+sweeping_jammer 100%, benign_interference+noise_burst 100%
-        per severity low / nominal / high, lowest threat: 79.2% / 88.5% / 83.3%
-        survivability map (threat x severity x Eb/N0 x geometry): Map A recoverable 82% / marginal 5% / non-recoverable 12% | Map B recoverable 93% / marginal 1% / non-recoverable 5%
-        survivability options (3 antennas, relay path): results/survivability_options.txt
-        combined threats never trained on (leave-one-combination-out, D61): DQN + escalation 84.4% of the recoverable episodes (trained on them: 97.6%, rule + escalation 44.0%)
+KPI 4  Link restoration (<= 2x clean) [NOT MET] no (threat, level) cell inside the operating envelope   (target: >= 90% of recoverable episodes, every threat, inside the operating envelope)
+        operating envelope (validation: >= 90% of >= 10 recoverable episodes): 0 of 0 (threat, level) cells inside; every level: lowest threat jamming+path_loss 0.0%, 1 of 5 threats >= 90%
+        recovered among recoverable, per threat (rule + escalation, deployed): jamming 70.0%, path_loss 72.7%, airframe_shadowing 100.0%, jamming+path_loss 0.0%, tone_jamming+path_loss 0.0%
+        all threat episodes pooled: rule + escalation 67.5% [61.6, 71.8] of 83 recoverable episodes; recoverable share jamming 100%, path_loss 55%, airframe_shadowing 100%, jamming+path_loss 50%, tone_jamming+path_loss 50%
+        per severity very low / low / nominal / high / very high, lowest threat: 75.0% / 50.0% / 100.0% / 50.0% / 12.5%
+        survivability map (threat x severity x Eb/N0 x geometry): Map A recoverable 75% / marginal 8% / non-recoverable 17% | Map B recoverable 92% / marginal 0% / non-recoverable 8%
+        survivability options (antenna count, relay path): results/survivability_options.txt
+        combined threats never trained on (leave-one-combination-out): DQN + escalation 80.0% of the recoverable episodes (trained on them: 80.0%, rule + escalation 20.0%)
+        edge map, SYSTEM per (threat, level, Eb/N0): single threats 0 COMMITTED / 10 NOT COMMITTED / 20 UNDETERMINED | combined threats 0 COMMITTED / 9 NOT COMMITTED / 3 UNDETERMINED
+        edge map, SYSTEM+LINK per (threat, level, Eb/N0): single threats 0 COMMITTED / 22 NOT COMMITTED / 8 UNDETERMINED | combined threats 0 COMMITTED / 10 NOT COMMITTED / 2 UNDETERMINED
+        edge map, SYSTEM distance edge at the nominal level (Eb/N0 from 15 dB down to the last COMMITTED point): jamming 16 dB none, path_loss 14 dB none, airframe_shadowing 15.5 dB none
+        edge map, overhead pass (altitude x distance): 0 COMMITTED / 7 NOT COMMITTED / 11 UNDETERMINED
 
-KPI 5  DQN + escalation vs baselines [MET]    +16.5 points recovery vs rule + escalation [+14.8, +18.4]   (target: better than rule (paired 95% bootstrap > 0))
-        recovered among recoverable, threat sets pooled: no response 6.1% | random 74.7% | fixed: channel_switch+spatial_diversity+power_control 86.7% | rule + escalation 79.6% | table (train pools) 81.9% | DQN + escalation (deployed) 96.1% | oracle (one-step) 94.6%
-        DQN + escalation: median T_rec 3 cycles (60 ms at the 20 ms decision period) | cycles restored 81.4% | goodput 1.208
-        follower  recovered: DQN + esc. 95.0% | rule+esc 91.9% | table 88.7% | fixed 96.6% | oracle 93.8%
-        combined  recovered: DQN + esc. 97.1% | rule+esc 42.9% | table 41.6% | fixed 57.2% | oracle 94.8%
-        comb      recovered: DQN + esc. 97.6% | rule+esc 90.6% | table 18.1% | fixed 94.1% | oracle 93.8%
-        selected: alarm class_drop 3/3, gamma 0.50, training false-switch penalty 160, seed 42, validation gate PASS
+KPI 5  DQN vs rules and baselines   [MET]    +14.5 points recovery vs rule + escalation [+2.3, +26.2]   (target: better than rule (paired 95% bootstrap > 0))
+        recovered among recoverable, threat sets pooled: no response 24.1% | random 50.6% | fixed: channel_switch+power_control 60.2% | rule + escalation (deployed) 67.5% | no detector + escalation 49.4% | table (train pools) 69.9% | DQN + escalation 81.9% | oracle (one-step) 89.2%
+        DQN + escalation: median T_rec 3 cycles (60 ms at the 20 ms decision period) | cycles restored 53.2% | goodput 0.549
+        what the detection adds: rule + escalation vs the same response without the detector (alarm from measured degradation only) +18.1 points [+0.0, +33.3]
+        follower  recovered: DQN + esc. 80.0% | rule+esc 75.0% | table 65.0% | fixed 40.0% | oracle 65.0%
+        combined  recovered: DQN + esc. 50.0% | rule+esc 0.0% | table 0.0% | fixed 0.0% | oracle 91.7%
+        comb      recovered: DQN + esc. 95.0% | rule+esc 45.0% | table 70.0% | fixed 5.0% | oracle 100.0%
+        selected: alarm class_drop 2/2, gamma 0.50, training false-switch penalty 80, seed 42, validation gate FAIL
 
-KPI 6  False alarms (clean link)    [MET]    13/600 episodes, upper bound 3.42%   (target: <= 5% (one-sided 95%), >= 600 episodes)
-        Eb/N0 >= 0 dB, one episode per independent geometry; per-cycle rate 0.1167% | rule + escalation 161/600, upper 29.97%
+KPI 6  False alarms on a clean link [NOT MET] 2/8 episodes, upper bound 59.97%   (target: <= 5% (one-sided 95%), >= 600 episodes)
+        Eb/N0 >= 3 dB, one episode per independent geometry; per-cycle rate 0.8333% | rule + escalation 2/8, upper 59.97%
+        edge map, clean link per Eb/N0 (3/12 dB): FA <= 5% N(8) U(8) | LINK <= 1.4% N(8) U(8)
 
-KPI 7  Real time + speed            [MET]    median 2.91 ms, p95 3.97 ms   (target: median < 10 ms, p95 < 20 ms; spread <= 10 points over 50-120 km/h)
-        decision latency per cycle (GPU NVIDIA GeForce RTX 4070 SUPER): median 2.91 ms, p95 3.97 ms (DQN + escalation chain); rule chain 2.82 / 3.81 ms
-        components (median ms): spectrogram 1.01, features 0.03, detector GPU 1.47, detector CPU 2.12, DQN policy 0.39, rule policy 0.29
+KPI 7  Decision time and robustness [NOT MET] median 6.65 ms, p95 7.94 ms   (target: median < 10 ms, p95 < 20 ms; spread <= 10 points over the speed envelope)
+        decision latency per cycle (CPU): median 6.65 ms, p95 7.94 ms (DQN + escalation chain); rule chain 6.19 / 7.53 ms
+        components (median ms): spectrogram 1.91, features 0.07, detector GPU 3.21, detector CPU 3.46, DQN policy 1.01, rule policy 0.66
         latency class (Oli & Mahalal 2025, detection systems: low < 10 ms, medium 10-100 ms): median low (< 10 ms), p95 low (< 10 ms); measured on a desktop computer, not on UAV hardware
-        DQN + escalation recovered per speed band (50-68, 68-85, 85-102, 102-120 km/h): 96.4, 97.6, 95.0, 97.3 %
+        whole cycle on one CPU core: median 13.39 ms, p95 15.32 ms
+        rule + escalation recovered per speed band (0-40, 40-80, 80-121, 121-161 km/h): 76.0, NaN, 76.9, 92.3 %
+        ends of the speed envelope (nominal severity): 0 km/h 83.3%, 161 km/h 83.3%
+        signalling delay of a change: 1 cycle 80.4%, 2 cycles 82.4% (single set)
+        edge map, SYSTEM at the nominal level of 3 threats: hover 0 COMMITTED / 0 NOT COMMITTED / 3 UNDETERMINED | 161 km/h 0 COMMITTED / 0 NOT COMMITTED / 3 UNDETERMINED
 
-KPI 8  End-to-end closed loop       [MET]    16 threats recovered on >= 50% of recoverable episodes   (target: >= 1 recoverable threat)
+KPI 8  Performance floor (closed loop) [MET]    3 threats recovered on >= 50% of recoverable episodes   (target: >= 1 recoverable threat)
 

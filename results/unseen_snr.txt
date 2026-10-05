@@ -1,29 +1,31 @@
-=== DETECTOR GENERALIZATION TO UNSEEN Eb/N0 (proposal mitigation 4; D34) ===
-Generated: 29-Sep-2026 01:42:21 | 20 frames per block, all threats x 5 levels + balanced none, random speed per block
-Training grid: 0,2,4,6,8,10 dB. Unseen: 1,3,5,7,9 dB. Same generator and run for both.
+=== DETECTOR GENERALIZATION TO UNSEEN Eb/N0 (proposal mitigation 4) ===
+Generated: 04-Oct-2026 05:56:38 | 20 frames per block, all threats x every other level + balanced none, random speed per (threat, level) | fused over the last 8 cycles (deployed detector)
+Training grid: [0 3 6 9 12 15] dB. Unseen: 1.5 dB. Same generator and run for both.
 
  Eb/N0 in train  frames   accuracy   macro-F1   action-equiv  gap to interp
-   0 dB      yes     900      96.4%      96.5%          97.6%              -
-   1 dB       no     900      96.8%      96.8%          97.2%           -0.1
-   2 dB      yes     900      97.2%      97.2%          97.7%              -
-   3 dB       no     900      98.6%      98.6%          99.3%           +1.3
-   4 dB      yes     900      97.2%      97.2%          97.9%              -
-   5 dB       no     900      98.3%      98.3%          98.9%           +0.3
-   6 dB      yes     900      98.8%      98.8%          99.2%              -
-   7 dB       no     900      98.2%      98.2%          98.6%           -0.4
-   8 dB      yes     900      98.6%      98.6%          99.0%              -
-   9 dB       no     900      97.8%      97.8%          98.4%           -0.4
-  10 dB      yes     900      97.9%      97.9%          98.9%              -
+   0 dB      yes      84      25.0%      25.0%          50.0%              -
+ 1.5 dB       no      84      40.5%      48.6%          53.6%          -20.2
+   3 dB      yes      84      96.4%      97.5%          96.4%              -
+  -3 dB   beyond     168      20.8%      22.7%          50.0%              -
+  18 dB   beyond     168      97.6%      98.8%          97.6%              -
 
-Accuracy: unseen 97.9% | training grid 97.7% | largest gap to the interpolated curve 1.3 points (mean +0.1)
+Accuracy: unseen 40.5% | training grid 60.7% | largest gap to the interpolated curve 20.2 points (mean -20.2)
 
 --- Recall per class: training grid vs unseen Eb/N0 ---
-  none                   97.3% ->   99.4%
-  jamming                93.8% ->   91.8%
-  noise_burst           100.0% ->  100.0%
-  reactive_jamming       96.7% ->   96.8%
-  path_loss              96.5% ->   98.4%
-  spoofing               99.2% ->   99.0%
-  antenna_fault          98.5% ->   99.8%
-  benign_interference    98.0% ->   96.2%
-  sweeping_jammer        99.2% ->  100.0%
+  none                   42.9% ->    0.0%
+  jamming               100.0% ->   95.2%
+  noise_burst             NaN% ->    NaN%
+  reactive_jamming        NaN% ->    NaN%
+  path_loss               NaN% ->    NaN%
+  spoofing                NaN% ->    NaN%
+  antenna_fault           NaN% ->    NaN%
+  benign_interference     NaN% ->    NaN%
+  sweeping_jammer         NaN% ->    NaN%
+  tone_jamming           50.0% ->   42.9%
+  airframe_shadowing     50.0% ->   23.8%
+
+--- Beyond the trained range (2 blocks per class and point, levels cycled): frames read as a class with the same countermeasure [95% interval], blocks, verdict against 90% (edge_verdict.m) ---
+  jamming              -3 dB 100.0% [ 15.8, 100.0]  2 UNDETERMINED | 18 dB 100.0% [ 15.8, 100.0]  2 UNDETERMINED
+  tone_jamming         -3 dB 100.0% [ 15.8, 100.0]  2 UNDETERMINED | 18 dB 100.0% [ 15.8, 100.0]  2 UNDETERMINED
+  airframe_shadowing   -3 dB   0.0% [  0.0,   0.0]  2 NOT COMMITTED | 18 dB 100.0% [ 15.8, 100.0]  2 UNDETERMINED
+  none                 -3 dB   0.0% [  0.0,   0.0]  2 NOT COMMITTED | 18 dB  90.5% [ 15.8,  95.2]  2 UNDETERMINED
