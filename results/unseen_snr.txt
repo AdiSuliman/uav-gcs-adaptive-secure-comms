@@ -1,29 +1,31 @@
-=== DETECTOR GENERALIZATION TO UNSEEN Eb/N0 (proposal mitigation 4; D34) ===
-Generated: 29-Sep-2026 01:42:21 | 20 frames per block, all threats x 5 levels + balanced none, random speed per block
-Training grid: 0,2,4,6,8,10 dB. Unseen: 1,3,5,7,9 dB. Same generator and run for both.
+=== DETECTOR GENERALIZATION TO UNSEEN Eb/N0 (proposal mitigation 4) ===
+Generated: 30-Sep-2026 21:17:37 | 20 frames per block, all threats x every other level + balanced none, random speed per block
+Training grid: [0 3 6 9 12 15] dB. Unseen: [1.5 4.5 7.5 10.5 13.5] dB. Same generator and run for both.
 
  Eb/N0 in train  frames   accuracy   macro-F1   action-equiv  gap to interp
-   0 dB      yes     900      96.4%      96.5%          97.6%              -
-   1 dB       no     900      96.8%      96.8%          97.2%           -0.1
-   2 dB      yes     900      97.2%      97.2%          97.7%              -
-   3 dB       no     900      98.6%      98.6%          99.3%           +1.3
-   4 dB      yes     900      97.2%      97.2%          97.9%              -
-   5 dB       no     900      98.3%      98.3%          98.9%           +0.3
-   6 dB      yes     900      98.8%      98.8%          99.2%              -
-   7 dB       no     900      98.2%      98.2%          98.6%           -0.4
-   8 dB      yes     900      98.6%      98.6%          99.0%              -
-   9 dB       no     900      97.8%      97.8%          98.4%           -0.4
-  10 dB      yes     900      97.9%      97.9%          98.9%              -
+   0 dB      yes     880      90.2%      90.5%          92.0%              -
+ 1.5 dB       no     880      88.2%      88.3%          89.5%           -3.7
+   3 dB      yes     880      93.5%      93.5%          95.2%              -
+ 4.5 dB       no     880      91.8%      91.9%          93.2%           -0.2
+   6 dB      yes     880      90.5%      90.6%          91.4%              -
+ 7.5 dB       no     880      93.0%      93.0%          93.9%           +1.6
+   9 dB      yes     880      92.3%      92.3%          93.3%              -
+10.5 dB       no     880      93.2%      93.2%          95.3%           -0.2
+  12 dB      yes     880      94.4%      94.4%          95.2%              -
+13.5 dB       no     880      92.5%      92.5%          93.3%           -1.1
+  15 dB      yes     880      92.7%      92.8%          93.2%              -
 
-Accuracy: unseen 97.9% | training grid 97.7% | largest gap to the interpolated curve 1.3 points (mean +0.1)
+Accuracy: unseen 91.7% | training grid 92.3% | largest gap to the interpolated curve 3.7 points (mean -0.7)
 
 --- Recall per class: training grid vs unseen Eb/N0 ---
-  none                   97.3% ->   99.4%
-  jamming                93.8% ->   91.8%
-  noise_burst           100.0% ->  100.0%
-  reactive_jamming       96.7% ->   96.8%
-  path_loss              96.5% ->   98.4%
-  spoofing               99.2% ->   99.0%
-  antenna_fault          98.5% ->   99.8%
-  benign_interference    98.0% ->   96.2%
-  sweeping_jammer        99.2% ->  100.0%
+  none                   86.9% ->   88.8%
+  jamming                88.5% ->   87.2%
+  noise_burst            96.7% ->   99.5%
+  reactive_jamming       92.9% ->   90.5%
+  path_loss              86.9% ->   83.2%
+  spoofing               97.7% ->   97.5%
+  antenna_fault          91.7% ->   91.2%
+  benign_interference    95.8% ->   97.0%
+  sweeping_jammer        98.5% ->   98.8%
+  tone_jamming           99.0% ->   95.5%
+  airframe_shadowing     80.4% ->   79.8%

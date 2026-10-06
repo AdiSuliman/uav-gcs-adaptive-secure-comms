@@ -1,34 +1,38 @@
-=== UNKNOWN-THREAT DETECTION: LEAVE-ONE-THREAT-OUT (D32, D42, D59, D60) ===
-Generated: 29-Sep-2026 02:37:55 | detector retrained without each threat (30 epochs), test split by sub-run
+=== UNKNOWN-THREAT DETECTION: LEAVE-ONE-THREAT-OUT ===
+Generated: 30-Sep-2026 23:33:14 | detector retrained without each threat (30 epochs), test split by sub-run
 AUROC: 0.5 = no separation, 1 = perfect. FPR95: unknown frames accepted as known at the threshold keeping 95% of known validation frames.
 
 held-out threat          n |          msp       energy      iforest         last     ensemble          raw  last_or_raw   last_or_if |  known  mistaken for          same
                            |        AUROC |
-jamming               1200 |        0.644        0.732        0.503        0.903        0.883        0.570        0.888        0.856 |  98.1%  reactive_jamming       67%
-noise_burst           1200 |        0.044        0.042        0.451        0.932        0.981        0.422        0.912        0.905 |  96.7%  sweeping_jammer         0%
-reactive_jamming      1200 |        0.559        0.493        0.876        0.641        0.671        0.971        0.950        0.852 |  97.5%  jamming                81%
-path_loss             1200 |        0.825        0.907        0.840        0.906        0.843        0.840        0.884        0.891 |  98.1%  none                    0%
-spoofing              1200 |        0.846        0.906        0.711        0.869        0.700        0.736        0.843        0.839 |  97.0%  benign_interference    21%
-antenna_fault         1200 |        0.902        0.646        0.940        0.828        0.457        0.908        0.882        0.915 |  96.9%  none                    0%
-benign_interference   1200 |        0.909        0.957        0.609        0.933        0.787        0.636        0.900        0.887 |  98.0%  jamming                 5%
-sweeping_jammer       1200 |        0.556        0.567        0.551        0.957        0.937        0.486        0.923        0.900 |  96.9%  noise_burst             0%
-mean AUROC                 |        0.661        0.656        0.685        0.871        0.782        0.696        0.898        0.881 |
-mean FPR95                 |         0.80         0.77         0.77         0.39         0.66         0.72         0.40         0.45 |
-mean AUROC, 2 frames       |        0.671        0.660        0.690        0.880        0.788        0.699        0.907        0.891 |
-mean AUROC, 5 frames       |        0.685        0.663        0.696        0.893        0.797        0.702        0.920        0.905 |
+jamming                960 |        0.425        0.449        0.374        0.875        0.818        0.501        0.848        0.785 |  94.8%  reactive_jamming       74%
+noise_burst            960 |        0.058        0.062        0.500        0.956        0.976        0.444        0.944        0.934 |  92.9%  sweeping_jammer         0%
+reactive_jamming       960 |        0.472        0.391        0.647        0.636        0.748        0.721        0.697        0.649 |  93.9%  jamming                86%
+path_loss              960 |        0.945        0.925        0.746        0.600        0.612        0.790        0.689        0.689 |  94.1%  airframe_shadowing      0%
+spoofing               960 |        0.626        0.597        0.505        0.899        0.711        0.549        0.874        0.819 |  93.1%  tone_jamming           87%
+antenna_fault          960 |        0.735        0.881        0.854        0.739        0.346        0.828        0.774        0.824 |  93.4%  none                    0%
+benign_interference    960 |        0.864        0.935        0.670        0.895        0.544        0.670        0.863        0.819 |  94.3%  jamming                 5%
+sweeping_jammer        960 |        0.604        0.616        0.566        0.954        0.880        0.477        0.934        0.891 |  92.6%  noise_burst             0%
+tone_jamming           960 |        0.234        0.198        0.739        0.852        0.820        0.814        0.843        0.821 |  92.9%  spoofing              100%
+airframe_shadowing     960 |        0.919        0.909        0.883        0.794        0.282        0.875        0.846        0.856 |  94.6%  none                    0%
+mean AUROC                 |        0.588        0.596        0.648        0.820        0.674        0.667        0.831        0.809 |
+mean FPR95                 |         0.82         0.81         0.82         0.61         0.81         0.80         0.62         0.66 |
+mean AUROC, 2 frames       |        0.601        0.598        0.653        0.832        0.677        0.670        0.843        0.820 |
+mean AUROC, 5 frames       |        0.614        0.599        0.659        0.846        0.682        0.676        0.857        0.833 |
 
-Production score (highest mean AUROC among last, ensemble, raw, last_or_raw, last_or_if): last_or_raw, mean AUROC 0.898, FPR95 0.40.
-Nested estimate (score chosen on the other held-out threats, the value to quote): mean AUROC 0.859; per threat 0.888 0.912 0.641 0.884 0.843 0.882 0.900 0.923 ; picks last_or_raw, last.
-Production thresholds (95% of known validation frames kept): MSP 0.761 | energy 5.30 | last_or_raw -2.028.
+Production score (highest mean AUROC among last, ensemble, raw, last_or_raw, last_or_if): last_or_raw, mean AUROC 0.831, FPR95 0.62.
+Nested estimate (score chosen on the other held-out threats, the value to quote): mean AUROC 0.831; per threat 0.848 0.944 0.697 0.689 0.874 0.774 0.863 0.934 0.843 0.846 ; picks last_or_raw.
+Production thresholds (95% of known validation frames kept): MSP 0.611 | energy 3.90 | last_or_raw -1.696.
 
-Learning the new threat without retraining (Lee et al., Algorithm 2; last hidden layer, generative classifier): known-class accuracy before 96.6% (softmax 97.4%)
+Learning the new threat without retraining (Lee et al., Algorithm 2; last hidden layer, generative classifier): known-class accuracy before 92.1% (softmax 93.7%)
 new threat           100 frames: new / known         all val frames   frames available
-jamming                       90.4% /  96.2%          90.9% /  96.2%                600
-noise_burst                   87.4% /  96.0%          87.8% /  96.0%                600
-reactive_jamming              47.0% /  93.5%          50.0% /  93.5%                600
-path_loss                     83.9% /  96.5%          84.9% /  96.5%                600
-spoofing                      90.0% /  95.4%          90.4% /  95.3%                600
-antenna_fault                 89.2% /  95.7%          89.8% /  95.7%                600
-benign_interference           92.7% /  95.5%          93.5% /  95.5%                600
-sweeping_jammer               98.2% /  94.8%          98.2% /  94.8%                600
-mean                          84.9% /  95.5%          85.7% /  95.4%
+jamming                       85.9% /  92.0%          86.0% /  92.0%                960
+noise_burst                   86.5% /  91.2%          86.5% /  91.2%                960
+reactive_jamming              39.6% /  90.0%          37.9% /  90.3%                960
+path_loss                     87.1% /  90.7%          87.9% /  90.6%                960
+spoofing                      94.5% /  90.2%          94.6% /  90.3%                960
+antenna_fault                 74.5% /  91.2%          73.8% /  91.3%                960
+benign_interference           90.1% /  91.2%          90.5% /  91.2%                960
+sweeping_jammer               97.3% /  90.6%          97.6% /  90.5%                960
+tone_jamming                  77.5% /  91.3%          77.6% /  91.3%                960
+airframe_shadowing            84.3% /  91.7%          84.5% /  91.7%                960
+mean                          81.8% /  91.0%          81.7% /  91.1%
