@@ -626,3 +626,8 @@ while giving deterministic mathematical control under the hood.
 - *Training scale* (no shortcuts, the envelope widened): 50 000 episodes per DQN run; 8 training and 6 validation geometries per (cell, Eb/N0) in the decision-layer pools.
 - *Proposal:* no commitment on speed, distance, weight, size or number of antennas (KPI 7 now reads "robustness to the UAV's speed"; "several receive antennas").
 **Adoption:** part of v5 before any test reading; test blocks 10, 11, 12 unread.
+
+## D71 — Unseen-severity rule in profile 2: antenna fault at 70% duty kept as a stated limit
+**Why (2026-10-01, with the user):** the rule fixed before the run (extend the training levels when, above the range, fewer than 90% of a threat's frames get the same countermeasure) fired in profile 2 only: antenna fault at 70% duty, 88.3% (106 of 120 frames; 108 needed). Profile 1 at the same level: 90.8%. The rule extends the training levels to the survivability map's levels, and the map uses the training levels (duty up to 60%); the decision layer, the map and the evaluation stop at 60%. The gap is two frames, inside the sampling uncertainty (about 81-93% at n = 120), and extending one profile only would break the two-profile comparison.
+**Decision:** the training levels stay in both profiles. Profile 2 reports antenna fault above 60% duty as a stated limit (88.3% same countermeasure at 70%).
+**Adoption:** before any decision-layer test reading; no stage is rerun.
