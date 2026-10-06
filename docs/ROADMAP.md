@@ -40,6 +40,22 @@ Last updated: 2026-10-06
 
 ---
 
+## v7 full run: status at the system-drive swap (2026-10-06 19:46)
+
+v7 code frozen on v7-dev (8799fde: D75-D80, 73/73 tests, full smoke passed 2026-10-05/06). Runs started 2026-10-06 09:20
+(an earlier start at 01:08 was cut at 03:02 when the app session closed; long runs are now launched detached via WMI).
+Stopped by hand at 19:46 for the drive swap; completed stages are kept in each profile's data/ and results/.
+
+| Profile | Worktree | Stages done | Resumes at |
+|---|---|---|---|
+| 1 (3 antennas) | uav-gcs-v7 | A0, A4v, A5, A6, B1, B2, B2F, B3 | B3a |
+| 3 (4 antennas) | D:/uav-gcs-v7-p3 | A0, A4v | A5 |
+| 2 (2 antennas) | created at start | - | A0, after profile 1 |
+
+A4v: V12c fails only at the 30 dB jammer, rho 0.3, 1 us in profile 1 (stated limit); it passes in profile 3 (4 antennas).
+Resume: docs/drive_swap/AFTER_DRIVE_SWAP.md and docs/drive_swap/v7_resume.sh (logs in C:/Users/Adi Suliman/uav-gcs-logs).
+v6 ended 2026-10-06 (both profiles, LAT on the idle machine); summary document in the Desktop project folder.
+
 ## Remaining work
 
 1. **v6 and v7 full runs:** v6 (profiles 1, 2) running; v7 (profiles 1, 3, then 2) starts when v6 ends; latency on the idle machine after each; then the single test reading per profile, the weak-point analysis, the v6-vs-v7 comparison, README and the log.
