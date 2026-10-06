@@ -1,16 +1,16 @@
-=== DETECTOR ARCHITECTURES, TEST SPLIT (D59) ===
-Generated: 29-Sep-2026 20:22:47 | same splits, schedule and seed; test frames 10800
+=== DETECTOR ARCHITECTURES, TEST SPLIT ===
+Generated: 01-Oct-2026 14:09:43 | same splits, schedule and seed; test frames 11088
 
-architecture                              accuracy  macro-F1      none  jamming noise_bu reactive path_los spoofing antenna_ benign_i sweeping
-hybrid (spectrogram + link features)        96.99%    97.00%     94.7%    93.8%    99.9%    97.7%    94.8%    99.1%    99.0%    94.3%    99.6%
-spectrogram only (CNN)                      75.08%    74.77%     56.7%    55.5%    99.3%    38.0%    89.3%    79.3%    93.6%    63.3%    98.1%
-link features only (MLP)                    85.86%    85.66%     94.6%    84.3%    60.5%    96.9%    94.8%    96.9%    98.9%    76.1%    67.9%
-link features only, random forest           85.29%    85.15%     95.4%    85.1%    58.8%    97.4%    95.1%    96.6%    99.1%    73.0%    66.1%
-link features only, kernel SVM              69.65%    69.61%     83.5%    69.9%    43.2%    71.1%    91.2%    81.5%    79.9%    60.5%    45.7%
+architecture                              accuracy  macro-F1      none  jamming noise_bu reactive path_los spoofing antenna_ benign_i sweeping tone_jam airframe
+hybrid (spectrogram + link features)        88.76%    88.09%     77.0%    93.6%    98.7%    98.4%    95.4%    98.9%    47.7%    80.7%    98.1%    99.3%    81.2%
+spectrogram only (CNN)                      74.41%    73.41%     51.2%    88.9%    99.2%    96.4%    81.4%    94.9%    21.2%    52.4%    97.9%    99.1%    25.1%
+link features only (MLP)                    81.85%    80.37%     77.1%    90.9%    80.9%    97.4%    94.4%    82.2%    46.0%    66.8%    87.4%    79.7%    81.3%
+link features only, random forest           83.28%    82.27%     77.7%    91.6%    82.8%    97.9%    96.2%    83.8%    49.2%    73.2%    87.2%    81.9%    83.4%
+link features only, kernel SVM              70.06%    67.47%     70.7%    84.5%    60.9%    84.1%    91.0%    66.2%    38.1%    31.0%    72.7%    71.2%    71.8%
 
-Macro-F1 per Eb/N0 [dB]        0       2       4       6       8      10
-hybrid (spectrogram + link features)       95.1%   96.1%   97.5%   97.9%   97.5%   97.8%
-spectrogram only (CNN)                     63.8%   66.8%   79.8%   77.6%   77.7%   77.8%
-link features only (MLP)                   80.4%   83.0%   87.8%   87.0%   87.5%   88.3%
-link features only, random forest          80.3%   82.3%   86.4%   86.4%   87.7%   87.6%
-link features only, kernel SVM             70.1%   71.9%   73.3%   70.8%   67.2%   64.2%
+Macro-F1 per Eb/N0 [dB]        0       3       6       9      12      15
+hybrid (spectrogram + link features)       85.5%   88.2%   89.0%   90.2%   87.5%   88.3%
+spectrogram only (CNN)                     71.0%   71.2%   74.5%   75.3%   74.5%   73.4%
+link features only (MLP)                   77.0%   78.4%   83.4%   82.7%   79.4%   81.6%
+link features only, random forest          77.7%   81.3%   84.6%   84.7%   81.8%   83.6%
+link features only, kernel SVM             66.9%   69.1%   69.0%   66.9%   65.9%   66.7%

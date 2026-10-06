@@ -1,34 +1,43 @@
-=== PHY VALIDATION (D41): multi-antenna UAV receiver vs theory ===
-Generated: 29-Sep-2026 00:44:17 | 1.0 s per point, 20 channel realizations, fd 1000 Hz | CSI block 64 sym (MRC), window 32 sym (MMSE)
+=== PHY VALIDATION: multi-antenna UAV receiver vs theory ===
+Generated: 01-Oct-2026 12:24:49 | 1.0 s per point, 20 channel realizations, fd 358 Hz | CSI block 64 sym (MRC), window 32 sym (MMSE)
 Eb/N0 per branch [dB]: [0 2 4 6 8 10]
 
-V1 AWGN, 1 ant             BER   8.00e-02 3.85e-02 1.30e-02 2.46e-03 1.96e-04 6.99e-06
-                           err     160209    77021    25982     4917      392       14
+V1 AWGN, 1 ant             BER   7.96e-02 3.81e-02 1.27e-02 2.44e-03 1.97e-04 6.49e-06
+                           err     159310    76216    25525     4889      395       13
                            th.   7.86e-02 3.75e-02 1.25e-02 2.39e-03 1.91e-04 3.87e-06
-                           gap +0.05 dB (standard error 0.01 dB) -> PASS  (bit delay found: 20)
-V2 Rician, 1 ant           BER   9.20e-02 5.06e-02 2.26e-02 7.93e-03 2.16e-03 4.76e-04
-                           err     184250   101341    45274    15877     4319      953
+                           gap +0.03 dB (standard error 0.01 dB) -> PASS  (bit delay found: 0)
+V2 Rician, 1 ant           BER   9.39e-02 5.22e-02 2.39e-02 8.87e-03 2.68e-03 6.43e-04
+                           err     187991   104592    47936    17758     5365     1287
                            th.   9.26e-02 5.15e-02 2.37e-02 8.80e-03 2.67e-03 7.01e-04
-                           gap -0.21 dB (standard error 0.06 dB) -> PASS  (bit delay found: 20)
-V3 Rician, MRC 2 ant       BER   2.96e-02 1.00e-02 2.34e-03 3.58e-04 3.55e-05 9.99e-07
-                           err      59328    20068     4677      716       71        2
+                           gap +0.00 dB (standard error 0.07 dB) -> PASS  (bit delay found: 0)
+V3 Rician, MRC 2 ant       BER   2.88e-02 9.53e-03 2.12e-03 2.75e-04 2.45e-05 4.00e-06
+                           err      57640    19078     4252      551       49        8
                            th.   2.89e-02 9.80e-03 2.26e-03 3.35e-04 3.23e-05 2.26e-06
-                           gap +0.05 dB (standard error 0.04 dB) -> PASS  (bit delay found: 20)
-V4 Rician, MRC 3 ant       BER   1.05e-02 2.28e-03 2.86e-04 1.80e-05 5.00e-07 0.00e+00
-                           err      20953     4564      573       36        1        0
+                           gap -0.07 dB (standard error 0.06 dB) -> PASS  (bit delay found: 0)
+V4 Rician, MRC 3 ant       BER   1.03e-02 2.13e-03 2.34e-04 1.35e-05 1.50e-06 0.00e+00
+                           err      20627     4267      469       27        3        0
                            th.   9.85e-03 2.05e-03 2.40e-04 1.43e-05 4.43e-07 8.34e-09
-                           gap +0.13 dB (standard error 0.06 dB) -> PASS  (bit delay found: 20)
-V5 default, MRC 2 ant      BER   3.30e-02 1.21e-02 3.25e-03 6.12e-04 8.94e-05 6.99e-06
-                           err      66038    24194     6506     1226      179       14
+                           gap +0.03 dB (standard error 0.04 dB) -> PASS  (bit delay found: 0)
+V5 default, MRC 2 ant      BER   3.23e-02 1.17e-02 3.00e-03 5.40e-04 8.44e-05 7.49e-06
+                           err      64580    23390     6012     1082      169       15
                            th.   3.08e-02 1.11e-02 2.90e-03 5.34e-04 7.33e-05 8.50e-06
-                           gap +0.17 dB (standard error 0.04 dB) -> PASS  (bit delay found: 20)
-V6a jam 10 dB, MRC         BER   2.95e-01 2.91e-01 2.88e-01 2.86e-01 2.85e-01 2.84e-01
-                           err     591231   582238   576041   571860   569506   567982
-V6b jam 10 dB, MMSE        BER   6.33e-02 3.12e-02 1.27e-02 4.17e-03 1.16e-03 2.79e-04
-                           err     126798    62388    25369     8337     2316      559
+                           gap +0.08 dB (standard error 0.10 dB) -> PASS  (bit delay found: 0)
+V6 K = -5 dB, MRC 2 ant    BER   6.26e-02 3.60e-02 1.89e-02 9.27e-03 4.17e-03 1.74e-03
+                           err     125403    72072    37937    18567     8356     3490
+                           th.   6.06e-02 3.48e-02 1.84e-02 8.98e-03 4.14e-03 1.82e-03
+                           gap +0.06 dB (standard error 0.14 dB) -> PASS  (bit delay found: 0)
+V7 K = 20 dB, MRC 2 ant    BER   2.46e-02 6.80e-03 9.95e-04 5.74e-05 9.99e-07 0.00e+00
+                           err      49319    13613     1993      115        2        0
+                           th.   2.36e-02 6.41e-03 9.20e-04 5.09e-05 7.02e-07 1.38e-09
+                           gap +0.08 dB (standard error 0.03 dB) -> PASS  (bit delay found: 0)
+V8a jam 10 dB, MRC 2 ant   BER   2.95e-01 2.90e-01 2.87e-01 2.85e-01 2.84e-01 2.83e-01
+                           err     590282   580672   574627   570824   568158   566587
+V8b jam 10 dB, MMSE 2 ant  BER   6.42e-02 3.21e-02 1.31e-02 4.38e-03 1.28e-03 3.40e-04
+                           err     128550    64250    26202     8768     2568      681
 
-V6 MMSE vs MRC under jamming (JSR 10 dB, interferer at 40 deg): BER ratio [dB]    6.7   9.7  13.6  18.4  23.9  30.1
-V6 MMSE under jamming vs jammer-free MRC (V5): BER ratio     1.92    2.58    3.90    6.80   12.94   39.93
-V7 seeds: same seed identical PASS, different seed differs PASS (BER [0.001743 0.001743 0.004766])
-Overall: theory gaps V1-V5 5/5 within 0.3 dB, seeds PASS | 14.1 min
+V8 MMSE vs MRC under jamming (JSR 10 dB, interferer at 44.1 deg): BER ratio [dB]    6.6   9.6  13.4  18.1  23.4  29.2
+V8 MMSE under jamming vs jammer-free MRC (V5): BER ratio     1.99    2.75    4.36    8.10   15.20   45.40
+V9 seeds: same seed identical PASS, different seed differs PASS (BER [0.002128 0.002128 0.002702])
+V10 tone jammer: in-band JSR after the receive filter 16.24 dB (noise jammer 16.23 dB, set 16 dB) -> PASS
+Overall: theory gaps 7/7 within 0.3 dB, seeds PASS, tone PASS | 26.1 min
 Pass rule: |gap| <= 0.3 dB or within 2 standard errors (spread over 20 channel realizations).
