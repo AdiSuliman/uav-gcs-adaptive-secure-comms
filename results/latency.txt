@@ -1,15 +1,16 @@
 === DECISION LATENCY PER CYCLE ===
-Generated: 30-Sep-2026 01:52:04 | 800 timed cycles per device (80 frames x 10 passes, after 1 warm-up pass) | GPU NVIDIA GeForce RTX 4070 SUPER
+Generated: 06-Oct-2026 00:19:27 | 840 timed cycles per device (84 frames x 10 passes, after 1 warm-up pass) | GPU NVIDIA GeForce RTX 4070 SUPER
 Each device timed in its own passes (a deployed receiver uses one); components of the selected device, detector on both.
 component         median ms     p95 ms
-spectrogram           1.007      1.311
-features              0.031      0.048
-detector GPU          1.472      2.184
-detector CPU          2.123      2.462
-DQN policy            0.386      0.548
-rule policy           0.286      0.375
+spectrogram           1.328      1.660
+features              0.051      0.062
+detector GPU         85.768     95.817
+detector CPU         86.164    106.239
+DQN policy            0.603      0.821
+rule policy           0.389      0.602
 Cycle total with the detector on the GPU NVIDIA GeForce RTX 4070 SUPER (lower p95):
-total (DQN)           2.912      3.969
-total (rule)          2.815      3.812
-total (DQN)           3.717      4.293   (detector on the CPU)
-Frame duration 0.516 ms: one decision per 8 frames at the p95 latency.
+total (DQN)          87.809     98.028
+total (rule)         87.589     97.818
+total (DQN)          88.096    108.350   (detector on the CPU)
+total (DQN)          91.173     96.641   (whole cycle on one CPU core; detector 88.977 / 94.255 ms)
+Frame duration 0.516 ms: one decision per 190 frames at the p95 latency.

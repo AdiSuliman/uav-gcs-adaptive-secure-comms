@@ -1,24 +1,37 @@
 === DQN TRAINING ===
-Generated: 29-Sep-2026 22:48:51 | Double DQN + shield, state history 4 cycles, hidden [256 256], replay 200000, target every 500 updates, lr 5e-04 -> 5e-05, 20000 episodes x 30 cycles | monitor class_drop 3/3 x drop 3 dB x penalty [120 160] x gamma 0.5 x 3 seeds
+Generated: 05-Oct-2026 10:07:43 | Double DQN + shield, state history 4 cycles, hidden [256 256], replay 200000, target every 500 updates, lr 5e-04 -> 5e-05, 50000 episodes x 30 cycles | monitor class_drop 3/3/class_drop 2/2 x drop 3.5 dB x penalty [80 120 160] x gamma 0.5 x 3 seeds
 False-switch penalty and cost scales: training reward only; validation and test use the standard reward.
-Runs scored as deployed: the DQN with escalation (D64). Follower jammers re-acquire the channel 0-5 cycles after a hop (training and validation).
-Validation: 1584 episodes, every (threat cell, Eb/N0, geometry) of the VALIDATION split (geometries never used in training) 2 times: single threats at three severities, combined threats, clean link. Recovered = BER and packet loss <= 2x clean for 5 consecutive cycles, among recoverable threat episodes; weakest threat = lowest per-threat recovery (severities pooled, KPI 4). FA: false-alarm episodes on 600 independent clean validation geometries (data/clean_val_pools.mat).
-'class_drop': path_loss alarm after an Eb/N0 drop >= the run's threshold; train-pool threshold 5.0 dB (data/drop_threshold.mat)
+Runs scored as deployed: the DQN with escalation. Follower jammers re-acquire the channel 0-5 cycles after a hop (training and validation).
+Validation: 5832 episodes, every (threat cell, Eb/N0, geometry) of the VALIDATION split (geometries never used in training) 2 times: single threats at five severities, combined threats at three, clean link. Recovered = BER and packet loss <= 2x clean for 5 consecutive cycles, among recoverable threat episodes; weakest threat = lowest per-threat recovery (severities pooled, KPI 4). FA: false-alarm episodes on 600 independent clean validation geometries (data/clean_val_pools.mat).
+'class_drop': path_loss alarm after an Eb/N0 drop >= the run's threshold; train-pool threshold 5.5 dB (data/drop_threshold.mat)
 run                                             recovered               weakest threat   restored    return      FA indep.  switches/ep
-class_drop 3/3 drop 3.0 pen 120 costs x0.5 sw x1.0 g=0.50 seed 42      96.5%              path_loss 90.3%      81.2%     0.714         22/600         2.49   (checkpoint 8320)
-class_drop 3/3 drop 3.0 pen 120 costs x0.5 sw x1.0 g=0.50 seed 43      97.3%              path_loss 89.5%      81.7%     0.733         21/600         2.21   (checkpoint 19968)
-class_drop 3/3 drop 3.0 pen 120 costs x0.5 sw x1.0 g=0.50 seed 44      96.6%              path_loss 89.5%      81.0%     0.715         32/600         2.47   (checkpoint 7488)
-class_drop 3/3 drop 3.0 pen 160 costs x0.5 sw x1.0 g=0.50 seed 42      96.6%              path_loss 88.7%      81.5%     0.723         15/600         2.38   (checkpoint 13312)
-class_drop 3/3 drop 3.0 pen 160 costs x0.5 sw x1.0 g=0.50 seed 43      98.0%              path_loss 90.3%      82.2%     0.723         22/600         2.09   (checkpoint 11648)
-class_drop 3/3 drop 3.0 pen 160 costs x0.5 sw x1.0 g=0.50 seed 44      96.7%              path_loss 90.3%      81.4%     0.726         21/600         2.19   (checkpoint 19136)
+class_drop 3/3 drop 3.5 pen 80 costs x0.5 sw x1.0 g=0.50 seed 42      97.1%              path_loss 77.4%      75.9%     0.692        113/600         2.86   (checkpoint 47616)
+class_drop 3/3 drop 3.5 pen 80 costs x0.5 sw x1.0 g=0.50 seed 43      96.5%              path_loss 77.8%      75.0%     0.674        121/600         2.93   (checkpoint 25792)
+class_drop 3/3 drop 3.5 pen 80 costs x0.5 sw x1.0 g=0.50 seed 44      97.0%              path_loss 79.9%      75.7%     0.684        117/600         2.90   (checkpoint 49600)
+class_drop 3/3 drop 3.5 pen 120 costs x0.5 sw x1.0 g=0.50 seed 42      97.4%              path_loss 78.6%      76.1%     0.691        116/600         2.74   (checkpoint 49600)
+class_drop 3/3 drop 3.5 pen 120 costs x0.5 sw x1.0 g=0.50 seed 43      96.3%              path_loss 78.2%      74.8%     0.677        111/600         2.86   (checkpoint 29760)
+class_drop 3/3 drop 3.5 pen 120 costs x0.5 sw x1.0 g=0.50 seed 44      96.9%              path_loss 77.8%      75.7%     0.688        122/600         2.95   (checkpoint 43648)
+class_drop 3/3 drop 3.5 pen 160 costs x0.5 sw x1.0 g=0.50 seed 42      97.0%              path_loss 79.1%      75.2%     0.679         99/600         2.79   (checkpoint 33728)
+class_drop 3/3 drop 3.5 pen 160 costs x0.5 sw x1.0 g=0.50 seed 43      97.0%              path_loss 77.8%      75.7%     0.686        101/600         2.83   (checkpoint 47616)
+class_drop 3/3 drop 3.5 pen 160 costs x0.5 sw x1.0 g=0.50 seed 44      97.1%              path_loss 76.5%      75.9%     0.684        118/600         2.76   (checkpoint 43648)
+class_drop 2/2 drop 3.5 pen 80 costs x0.5 sw x1.0 g=0.50 seed 42      97.5%              path_loss 80.8%      79.0%     0.707        127/600         2.92   (checkpoint 50048)
+class_drop 2/2 drop 3.5 pen 80 costs x0.5 sw x1.0 g=0.50 seed 43      96.9%              path_loss 81.6%      78.2%     0.702        122/600         2.96   (checkpoint 47616)
+class_drop 2/2 drop 3.5 pen 80 costs x0.5 sw x1.0 g=0.50 seed 44      96.7%              path_loss 81.2%      78.1%     0.703        131/600         3.12   (checkpoint 35712)
+class_drop 2/2 drop 3.5 pen 120 costs x0.5 sw x1.0 g=0.50 seed 42      97.2%              path_loss 81.6%      78.8%     0.702        135/600         3.03   (checkpoint 49600)
+class_drop 2/2 drop 3.5 pen 120 costs x0.5 sw x1.0 g=0.50 seed 43      96.6%              path_loss 79.9%      78.0%     0.706        120/600         2.89   (checkpoint 35712)
+class_drop 2/2 drop 3.5 pen 120 costs x0.5 sw x1.0 g=0.50 seed 44      96.7%              path_loss 80.3%      79.0%     0.710        133/600         2.97   (checkpoint 45632)
+class_drop 2/2 drop 3.5 pen 160 costs x0.5 sw x1.0 g=0.50 seed 42      96.9%              path_loss 80.3%      78.1%     0.705        117/600         2.94   (checkpoint 49600)
+class_drop 2/2 drop 3.5 pen 160 costs x0.5 sw x1.0 g=0.50 seed 43      96.8%              path_loss 80.3%      77.7%     0.683        115/600         2.98   (checkpoint 19840)
+class_drop 2/2 drop 3.5 pen 160 costs x0.5 sw x1.0 g=0.50 seed 44      97.0%              path_loss 80.3%      78.5%     0.707        119/600         2.94   (checkpoint 49600)
 
 Baselines on the same validation episodes:
-  class_drop 3/3 drop 3.0 dB  rule + escalation: recovered 71.3%, return 0.638, FA 27.2% | table: recovered 72.3%, return 0.668, FA 27.2%
-Selected: monitor 'class_drop 3/3', drop 3.0 dB, false-switch penalty 160, running costs x0.5, switching x1.0, gamma 0.50, seed 42 (highest recovery of the weakest threat among runs with a one-sided 95% false-alarm bound <= 5%; within 1 point, the best pooled recovery). Gate (recovery >= rule + escalation with the same monitor, false-alarm bound <= 5%): PASS
+  class_drop 3/3 drop 3.5 dB  rule + escalation: recovered 77.8%, return 0.625, FA 30.3% | table: recovered 85.8%, return 0.656, FA 30.3%
+  class_drop 2/2 drop 3.5 dB  rule + escalation: recovered 80.9%, return 0.651, FA 37.5% | table: recovered 86.4%, return 0.674, FA 37.5%
+Selected: monitor 'class_drop 3/3', drop 3.5 dB, false-switch penalty 160, running costs x0.5, switching x1.0, gamma 0.50, seed 42 (no run met the false-alarm bound: the three with the fewest false alarms, then the weakest threat). Gate (recovery >= rule + escalation with the same monitor, false-alarm bound <= 5%): FAIL
 
 Reward-weight sensitivity (validation; every cost term scaled, DQN retrained per scale, seed 42):
 scale        recovered DQN/rule/table    DQN ret   DQN gput
-x 1.0                 96.6/71.3/72.3%      0.723      1.189
-x 0.5                 97.8/71.3/74.7%      0.787      1.092
-x 2.0                 95.3/71.3/57.8%      0.622      1.161
+x 1.0                 97.0/77.8/85.8%      0.679      0.679
+x 0.5                 97.2/77.8/87.1%      0.746      0.679
+x 2.0                 94.3/77.8/67.1%      0.573      0.706
 DQN recovery at least that of rule + escalation and table at every scale: YES

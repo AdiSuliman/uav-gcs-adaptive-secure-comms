@@ -1,5 +1,5 @@
 === SURVIVABILITY BOUNDARY MAP — MAP A — WITHOUT GOODPUT LOSS ===
-Generated: 29-Sep-2026 10:30:16
+Generated: 05-Oct-2026 17:32:42
 Configurations included: 11 (policy_actions.m, apply_countermeasure.m)
 
 A state is classified by the best configuration relative to the clean link at the same Eb/N0:
@@ -7,159 +7,220 @@ A state is classified by the best configuration relative to the clean link at th
 Letters after the status = configuration achieving it: C channel_switch, F freq_diversity, S spatial_diversity, R rate_reduce, P power_control, E fec_interleave.
 
 Clean-link reference BER per Eb/N0 (measured, floor 1e-4 = resolution of a cell):
-   0 dB : 3.2429e-02
-   2 dB : 1.1699e-02
-   4 dB : 3.2538e-03
-   6 dB : 6.0520e-04
-   8 dB : 1.0000e-04
-  10 dB : 1.0000e-04
+   0 dB : 1.1277e-02
+   3 dB : 1.1394e-03
+   6 dB : 1.0000e-04
+   9 dB : 1.0000e-04
+  12 dB : 1.0000e-04
+  15 dB : 1.0000e-04
 
 --- Boundary map, per threat (rows = severity level, cols = Eb/N0) ---
-jamming @ 45 deg:
-  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  0             RCSP     RCP    RCSP     RCP     RCP     RCS
-  4             RCSP    RCSP     RCP     RCP     RCP     RCP
-  8             RCSP     RCP     RCP     RCP     RCP      RC
-  12             RCP     RCP     RCP     RCP      RC      RC
-  16            RCSP     RCP     RCP     RCP     RCP      RC
-  22            RCSP    RCSP    RCSP     RCP     RCP     RCP
-  28            RCSP     RSP     RSP     RSP     RSP     RCS
-  -> recoverable 42/42 (100%) | marginal 0 | non-recoverable 0
+jamming @ 42.2 deg:
+  level\SNR      0dB     3dB     6dB     9dB    12dB    15dB
+  0              RCP     RCP     RCP      RC      RC      RC
+  4              RCP     RCP     RCP      RC      RC      RC
+  8              RCP     RCP     RCP      RC      RC      RC
+  12            RCSP     RCP     RCP      RC      RC      RC
+  16            RCSP     RCP     RCP      RC      RC      RC
+  20            RCSP     RCP     RCP      RS      RS      RS
+  25            RCSP     RSP     RCP     RCS      RS      RS
+  30            RCSP    RCSP    RCSP     RSP     RCS     RCS
+  -> recoverable 48/48 (100%) | marginal 0 | non-recoverable 0
 
-jamming @ 10 deg:
-  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  0             RCSP     RCP     RCP     RCP      RC      RC
-  4              RCP    RCSP     RCP     RCP     RCP      RC
-  8             RCSP    RCSP     RCP     RCP     RCP      RC
-  12            RCSP     RCP     RCP     RCP     RCP     RCS
-  16            RCSP     RCP     RCP     RCP     RCP     RCP
-  22            RCSP    RCSP    RCSP    RCSP    MCSP    MCSP
-  28            RCSP    RCSP    RCSP    XCSP    XCSP    XCSP
-  -> recoverable 37/42 (88%) | marginal 2 | non-recoverable 3
+jamming @ 11.4 deg:
+  level\SNR      0dB     3dB     6dB     9dB    12dB    15dB
+  0             RCSP     RCP     RCP      RC      RC      RC
+  4              RCP     RCP     RCP      RC      RC      RC
+  8             RCSP     RCP     RCP     RCP      RC      RC
+  12            RCSP     RCP     RCP      RC      RC      RC
+  16             RCP     RCP     RCP     RCP     RCS     RCS
+  20            RCSP    RCSP     RCP     RCP     RCP     RCS
+  25            RCSP    RCSP    RCSP    RCSP    RCSP    RCSP
+  30            RCSP    MCSP    XCSP    MCSP    MCSP    RCSP
+  -> recoverable 44/48 (92%) | marginal 3 | non-recoverable 1
 
-noise_burst @ 45 deg:
-  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  0              RSP     RSP     RSP     RSP     RSP     RSP
-  4              RSP     RSP     RSP     RSP     RSP     RSP
-  8              RSP     RSP     RSP     RSP     RSP     RSP
-  12             RSP     RSP     RSP     RSP     RSP      RS
-  16             RSP     RSP     RSP     RSP     RSP     RSP
-  22             RSP     RSP     RSP     RSP     RSP      RS
-  28             RSP     RSP     RSP     RSP     RSP     RSP
-  -> recoverable 42/42 (100%) | marginal 0 | non-recoverable 0
+noise_burst @ 42.2 deg:
+  level\SNR      0dB     3dB     6dB     9dB    12dB    15dB
+  0              RSP     RSP     RSP      RS      RS      RS
+  4              RSP     RSP     RSP      RS      RS      RS
+  8              RSP     RSP     RSP     RSP      RS      RS
+  12             RSP     RSP     RSP      RS      RS      RS
+  16             RSP     RSP     RSP      RS      RS      RS
+  20             RSP     RSP     RSP      RS      RS      RS
+  25             RSP     RSP     RSP     RSP      RS      RS
+  30             RSP     RSP     RSP     RSP     RSP     RSP
+  -> recoverable 48/48 (100%) | marginal 0 | non-recoverable 0
 
-noise_burst @ 10 deg:
-  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  0              RSP     RSP     RSP     MSP     XSP     MSP
-  4              RSP     RSP     MSP     XSP     XSP     XSP
-  8              RSP     RSP     MSP     XSP     XSP     XSP
-  12             RSP     MSP     XSP     XSP     XSP     XSP
-  16             MSP     MSP     XSP     XSP     XSP     XSP
-  22             MSP     MSP     XSP     XSP     XSP     XSP
-  28             MSP     XSP     XSP     XSP     XSP     XSP
-  -> recoverable 8/42 (19%) | marginal 10 | non-recoverable 24
+noise_burst @ 11.4 deg:
+  level\SNR      0dB     3dB     6dB     9dB    12dB    15dB
+  0              RSP     RSP     MSP     RSP     RSP     RSP
+  4              RSP     MSP     XSP     MSP     MSP     RSP
+  8              RSP     XSP     XSP     MSP     MSP     RSP
+  12             RSP     MSP     XSP     MSP     MSP     RSP
+  16             MSP     XSP     XSP     XSP     XSP     MSP
+  20             MSP     XSP     XSP     XSP     XSP     MSP
+  25             MSP     XSP     XSP     XSP     XSP     XSP
+  30             MSP     XSP     XSP     XSP     XSP     XSP
+  -> recoverable 11/48 (23%) | marginal 15 | non-recoverable 22
 
-reactive_jamming @ 45 deg:
-  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  0             RCSP    RCSP     RCP     RCP     RCP      RC
-  4             RCSP    RCSP     RCP     RCP     RCP     RCP
-  8             RCSP    RCSP     RCP     RCP     RCP      RC
-  12            RCSP     RCP     RCP     RCP     RCP      RC
-  16            RCSP     RCP     RCP     RCP     RCP      RC
-  22            RCSP     RCP     RCP     RCP     RCP      RS
-  28            RCSP     RSP     RSP     RSP     RCS     RCS
-  -> recoverable 42/42 (100%) | marginal 0 | non-recoverable 0
+reactive_jamming @ 42.2 deg:
+  level\SNR      0dB     3dB     6dB     9dB    12dB    15dB
+  0             RCSP     RCP     RCS      RC      RC      RC
+  4             RCSP     RCP     RCP      RC      RC      RC
+  8              RCP     RCP      RC      RC      RC      RC
+  12             RCP     RCP     RCP      RC      RC      RC
+  16             RCP     RCP     RCP      RC      RC      RC
+  20            RCSP     RCP     RCP      RS      RC      RC
+  25            RCSP     RCP     RCP      RS      RS      RS
+  30            RCSP     RSP     RSP     RCS     RCS      RS
+  -> recoverable 48/48 (100%) | marginal 0 | non-recoverable 0
 
-reactive_jamming @ 10 deg:
-  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  0              RCP     RCP     RCP     RCP     RCP      RC
-  4             RCSP     RCP     RCP     RCP     RCP      RC
-  8             RCSP     RCP     RCP     RCP     RCP      RC
-  12            RCSP     RCP     RCP     RCP     RCP     RCP
-  16             RCP     RCP     RCP     RCP     RCP     RCP
-  22            RCSP    RCSP    RCSP    RCSP     RCP     RCP
-  28            RCSP    RCSP    RCSP    RCSP    MCSP    MCSP
-  -> recoverable 40/42 (95%) | marginal 2 | non-recoverable 0
+reactive_jamming @ 11.4 deg:
+  level\SNR      0dB     3dB     6dB     9dB    12dB    15dB
+  0              RCP     RCP     RCP      RC      RC      RC
+  4             RCSP     RCP     RCP      RC      RC      RC
+  8              RCP     RCP     RCP      RC      RC      RC
+  12             RCP     RCP     RCP      RC      RC      RC
+  16            RCSP    RCSP     RCP     RCP      RC      RC
+  20            RCSP     RCP     RCP     RCP     RCP     RCP
+  25            RCSP    RCSP    RCSP    RCSP    RCSP    RCSP
+  30            RCSP    MCSP    XCSP    MCSP    MCSP    RCSP
+  -> recoverable 44/48 (92%) | marginal 3 | non-recoverable 1
 
 path_loss:
-  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  4              RSP     RSP     RSP     RSP      RP      RP
-  8              MSP     MSP     MSP     XSP     XSP      MP
-  12              XP     XSP     XSP     XSP     XSP     XSP
-  16              XP     XSP     XSP     XSP     XSP     XSP
-  20              XP      XP      XP     XSP     XSP     XSP
-  26              XP      XP      XP      XP      XP      XP
-  -> recoverable 6/36 (17%) | marginal 4 | non-recoverable 26
+  level\SNR      0dB     3dB     6dB     9dB    12dB    15dB
+  4              RSP     RSP      RP      RP      RC      RC
+  7              RSP     RSP      MP      RP      RP      RC
+  10             XSP     XSP     XSP      RP      RP      RC
+  13             XSP     XSP     XSP     XSP     MSP      RP
+  16             XSP     XSP     XSP     XSP     XSP      MP
+  18              XP     XSP     XSP     XSP     XSP     XSP
+  20              XP      XP     XSP     XSP     XSP     XSP
+  22              XP      XP     XSP     XSP     XSP     XSP
+  -> recoverable 15/48 (31%) | marginal 3 | non-recoverable 30
 
-spoofing @ 45 deg:
-  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  -4            RCSP    RCSP     RCP     RCP      RP      RC
-  -1             RCP     RCP     RCP     RCP      RC      RC
-  2             RCSP    RCSP     RCP     RCP     RCS      RC
-  5             RCSP     RCP     RCP     RCP      RC      RC
-  8             RCSP     RCP     RCP     RCP      RC      RC
-  -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
+spoofing @ 42.2 deg:
+  level\SNR      0dB     3dB     6dB     9dB    12dB    15dB
+  -4            RCSP      RP      RC      RC      RC      RC
+  0              RCP     RCP      RC      RC      RC      RC
+  3             RCSP     RCP     RCP      RC      RC      RC
+  6              RCP     RCP      RC      RC      RC      RC
+  10             RCP     RCP     RCP      RC      RC      RC
+  15            RCSP     RCP     RCP      RC      RC      RC
+  22            RCSP     RCP     RCP      RS      RC      RC
+  30            RCSP     RSP     RCP     RCS      RS      RS
+  -> recoverable 48/48 (100%) | marginal 0 | non-recoverable 0
 
-spoofing @ 10 deg:
-  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  -4             RCP     RCP     RCP     RCP      RC      RC
-  -1            RCSP     RCP     RCP     RCP      RC      RC
-  2             RCSP     RCP     RCP     RCP     RCP      RC
-  5             RCSP     RCP     RCP     RCP     RCP      RC
-  8             RCSP     RCP     RCP     RCP     RCP      RC
-  -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
+spoofing @ 11.4 deg:
+  level\SNR      0dB     3dB     6dB     9dB    12dB    15dB
+  -4             RCP     RCP     RCP      RC      RC      RC
+  0             RCSP     RCP     RCP      RC      RC      RC
+  3              RCP     RCP      RC      RC      RC      RC
+  6             RCSP     RCP     RCP      RC      RC      RC
+  10             RCP     RCP      RC      RC      RC      RC
+  15             RCP     RCP     RCP      RC      RC      RC
+  22             RCP     RCP     RCP     RCP     RCP      RC
+  30            RCSP    MCSP    XCSP    MCSP    RCSP    RCSP
+  -> recoverable 45/48 (94%) | marginal 2 | non-recoverable 1
 
 antenna_fault:
-  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  0.1            RSP     RSP     RSP     RSP     RSP     RSP
-  0.2            RSP     RSP     RSP     RSP      RP      RS
-  0.3            RSP     RSP     RSP     RSP     RSP     RSP
-  0.4            RSP     RSP     RSP     RSP     RSP      RP
-  0.5            RSP     RSP     RSP     RSP     RSP      RP
-  -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
+  level\SNR      0dB     3dB     6dB     9dB    12dB    15dB
+  0.05            RP      RP      RP      RP      RC      RC
+  0.1            RSP      RP      RP      RC      RC      RC
+  0.15           RSP      RP      RP      RP      RC      RC
+  0.2             RP      RP      RP      RC      RC      RC
+  0.3            RSP      RP      RP      RC      RC      RC
+  0.4            RSP     RSP      RP      RS      RC      RC
+  0.5            RSP      RP      RP      RC      RC      RC
+  0.6            RSP      RP      RP      RC      RC      RC
+  -> recoverable 48/48 (100%) | marginal 0 | non-recoverable 0
 
-sweeping_jammer @ 45 deg:
-  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  0             RFSP    RFSP     RSP     RSP     RSP      RS
-  4             RFSP    RFSP     RSP     RSP     RSP      RS
-  8             RFSP    RFSP     RSP     RSP     RSP      RS
-  12            RFSP    RFSP    RFSP     RSP     RFS     RFS
-  16            RFSP    RFSP     RSP     RSP     RSP      RS
-  22            RFSP    RFSP     RSP     RSP     RSP     RSP
-  28            RFSP    RFSP    RFSP     RSP     RSP     RSP
-  -> recoverable 42/42 (100%) | marginal 0 | non-recoverable 0
+benign_interference @ 42.2 deg:
+  level\SNR      0dB     3dB     6dB     9dB    12dB    15dB
+  -12           RCSP      RP     RCS      RC      RC      RC
+  -8             RSP      RP      RP      RC      RC      RC
+  -4             RSP     RCP      RP      RC      RC      RC
+  0              RSP     RCP     RCP      RC      RC      RC
+  5             RCSP     RCP     RCP      RC      RC      RC
+  12             RCP     RCP     RCP      RC      RC      RC
+  20            RCSP     RSP     RCP      RS      RS      RS
+  30             RSP     RSP     RCS      RS      RS      RS
+  -> recoverable 48/48 (100%) | marginal 0 | non-recoverable 0
 
-sweeping_jammer @ 10 deg:
-  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  0             RFSP    RFSP    RFSP    RFSP    MFSP    MFSP
-  4             RFSP    RFSP    RFSP    RFSP    MFSP    MFSP
-  8             RFSP    RFSP    RFSP    RFSP    MFSP    MFSP
-  12            RFSP    RFSP    RFSP    MFSP    XFSP    XFSP
-  16             RFP    RFSP    MFSP    XFSP    XFSP    XFSP
-  22             RFP     RFP    MFSP    XFSP    XFSP    XFSP
-  28            RFSP    RFSP    MFSP    XFSP    XFSP    XFSP
-  -> recoverable 21/42 (50%) | marginal 10 | non-recoverable 11
+benign_interference @ 11.4 deg:
+  level\SNR      0dB     3dB     6dB     9dB    12dB    15dB
+  -12           RCSP      RP     RCS      RC      RC      RC
+  -8             RCP      RP      RC      RC      RC      RC
+  -4             RCP     RCP     RCP      RC      RC      RC
+  0             RCSP     RCP     RCP      RC      RC      RC
+  5              RCP     RCP     RCP      RC      RC      RC
+  12             RCP     RCP      RC      RC      RC      RC
+  20             RCP     RCP     RCP     RCP     RCP     RCP
+  30            RCSP    RCSP    XCSP    MCSP    RCSP    RCSP
+  -> recoverable 46/48 (96%) | marginal 1 | non-recoverable 1
 
-benign_interference @ 45 deg:
-  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  -10            RCP     RCP     RCP      RP      RP      RC
-  -8            RCSP     RCP      RP      RP      RP      RC
-  -6             RCP    RCSP     RSP     RCP     RCP      RS
-  -4             RCP    RCSP     RCP     RCP      RC      RC
-  -2             RCP     RCP     RCP     RCP     RCP      RC
-  -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
+sweeping_jammer @ 42.2 deg:
+  level\SNR      0dB     3dB     6dB     9dB    12dB    15dB
+  0             RFSP     RSP     RSP      RS      RS      RS
+  4             RFSP     RSP     RSP      RS      RS      RS
+  8              RSP     RSP     RSP      RS      RS      RS
+  12            RFSP     RSP     RSP      RS      RS      RS
+  16            RFSP     RSP     RSP      RS      RS      RS
+  20            RFSP     RSP     RFS      RS      RS      RS
+  25            RFSP     RSP     RSP      RS      RS      RS
+  30            RFSP     RSP     RSP     RFS     RFS     RFS
+  -> recoverable 48/48 (100%) | marginal 0 | non-recoverable 0
 
-benign_interference @ 10 deg:
-  level\SNR      0dB     2dB     4dB     6dB     8dB    10dB
-  -10            RCP     RCP     RCP     RCP      RC      RC
-  -8             RCP     RCP     RCP     RCP      RC      RC
-  -6            RCSP     RCP     RCP     RCP      RC      RC
-  -4             RCP    RCSP     RCP     RCP     RCP      RC
-  -2            RCSP    RCSP     RCP     RCP     RCP      RC
-  -> recoverable 30/30 (100%) | marginal 0 | non-recoverable 0
+sweeping_jammer @ 11.4 deg:
+  level\SNR      0dB     3dB     6dB     9dB    12dB    15dB
+  0             RFSP    RFSP    RFSP    MFSP    RFSP     RSP
+  4             RFSP    RFSP    RFSP    RFSP     RSP     RSP
+  8             RFSP    RFSP    MFSP    MFSP    RFSP    RFSP
+  12            RFSP    RFSP    XFSP    MFSP    RFSP     RSP
+  16            RFSP    RFSP    MFSP    MFSP    MFSP     RSP
+  20            RFSP    MFSP    XFSP    MFSP    MFSP    RFSP
+  25            RFSP    MFSP    XFSP    MFSP    MFSP    RFSP
+  30            RFSP    MFSP    XFSP    MFSP    MFSP    MFSP
+  -> recoverable 27/48 (56%) | marginal 17 | non-recoverable 4
+
+tone_jamming @ 42.2 deg:
+  level\SNR      0dB     3dB     6dB     9dB    12dB    15dB
+  0              RCP     RCP      RC      RC      RC      RC
+  4              RCP     RCP      RC      RC      RC      RC
+  8             RCSP     RCP     RCS      RC      RC      RC
+  12             RCP     RCP     RCP      RC      RC      RC
+  16            RCSP     RCP     RCP      RS      RC      RC
+  20             RCP     RCP     RCP     RCP     RCP      RS
+  25            RCSP     RCP     RCP     RCP      RS      RS
+  30            RCSP    RCSP     RSP     RSP     RCS     RCS
+  -> recoverable 48/48 (100%) | marginal 0 | non-recoverable 0
+
+tone_jamming @ 11.4 deg:
+  level\SNR      0dB     3dB     6dB     9dB    12dB    15dB
+  0             RCSP     RCP     RCP      RC      RC      RC
+  4             RCSP     RCP     RCP      RC      RC      RC
+  8             RCSP     RCP     RCP      RC      RC      RC
+  12             RCP     RCP     RCP      RC      RC      RC
+  16            RCSP     RCP     RCP     RCP      RC      RC
+  20             RCP     RCP     RCP     RCP     RCP     RCP
+  25            RCSP    RCSP     RCP     RCP     RCP     RCP
+  30            RCSP    RCSP    MCSP    RCSP    RCSP    RCSP
+  -> recoverable 47/48 (98%) | marginal 1 | non-recoverable 0
+
+airframe_shadowing:
+  level\SNR      0dB     3dB     6dB     9dB    12dB    15dB
+  5              RSP      RP      RP      RC      RC      RC
+  10              RP      RP      RP      RP      RC      RC
+  15             RSP      RP      RP      RC      RC      RC
+  20             RSP     RSP      RP      RS      RC      RC
+  25             RSP      RP      RP      RC      RC      RC
+  30             RSP      RP      RP      RC      RC      RC
+  35             RSP     RSP      RP      RS      RC      RC
+  40             RSP      RP      RP      RC      RC      RC
+  -> recoverable 48/48 (100%) | marginal 0 | non-recoverable 0
 
 === OVERALL ===
-Total states mapped: 522
-  Recoverable     : 430 (82.4%)
-  Marginal        : 28 (5.4%)
-  Non-recoverable : 64 (12.3%)
+Total states mapped: 816
+  Recoverable     : 711 (87.1%)
+  Marginal        : 45 (5.5%)
+  Non-recoverable : 60 (7.4%)
