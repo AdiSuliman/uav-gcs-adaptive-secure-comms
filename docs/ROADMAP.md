@@ -5,7 +5,7 @@
 **Supervisor:** Golan Ein-Tzvi
 **History:** [PROJECT_LOG.md](PROJECT_LOG.md) · **Design decisions:** [DECISIONS.md](DECISIONS.md) · **Results:** [README.md](../README.md)
 
-Last updated: 2026-10-03
+Last updated: 2026-10-06
 
 ---
 
