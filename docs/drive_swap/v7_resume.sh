@@ -11,7 +11,7 @@
 #   Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine='"C:\Program Files\Git\bin\bash.exe" -lc "bash ''/c/Users/Adi Suliman/uav-gcs-v7/docs/drive_swap/v7_resume.sh'' > ''/c/Users/Adi Suliman/uav-gcs-logs/v7_resume.log'' 2>&1"'; CurrentDirectory='C:\Users\Adi Suliman\uav-gcs-v7'}
 V7="/c/Users/Adi Suliman/uav-gcs-v7"
 P3="${1:-/d/uav-gcs-v7-p3}"
-P2="$(dirname "$P3")/uav-gcs-v7-p2"
+P2="/c/Users/Adi Suliman/uav-gcs-v7-p2"   # new worktrees on C: (4 TB system drive)
 OLD="${2:-/c/Users/Adi Suliman/uav-gcs-logs/interrupted_20261006}"
 L="/c/Users/Adi Suliman/uav-gcs-logs"
 mkdir -p "$L"
