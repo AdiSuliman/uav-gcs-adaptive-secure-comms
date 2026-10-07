@@ -470,6 +470,51 @@ for f = {'evaluate_policies', 'experiment_unknown_threat', 'experiment_combo_gen
 end
 end
 
+function test_rekey_pools(tc)
+% A new fusion re-keys the pools of the same detector: only fuse, fuse_N, q_thr and
+% det_id change and a backup is kept; a file without the keys is left as it is. Pools of
+% another detector, with a field that might depend on the fusion or with a frame field
+% that is not a per-frame output stop it, the file unchanged.
+d = fullfile(tc.TestData.tmp, 'rekey'); mkdir(fullfile(d, 'data'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+ood = struct('score', 'last', 'win', 3); classes = {'none', 'jamming'}; trained_at = 7;
+save('data/trained_detector.mat', 'ood', 'classes', 'trained_at');
+T = struct('retain', 0.95, 'maha', -2, 'maha_val', [-3; -1]);
+save('data/ood_thresholds.mat', 'T');
+F0 = struct('FM', struct('mu', zeros(1, 11)), 'N', 1, 'q_thr', 4);
+FM = struct('mu', zeros(1, 13)); N = 12; q_thr = 4.5;
+save('data/fusion.mat', 'FM', 'N', 'q_thr');
+Q = struct('probs', single([0.9 0.1]), 'maha', single(0), 'feat', single([1 2]), 'ber', 0, 'run', 1);
+PP = struct('pools', {{Q, []}}, 'classes', {classes}, 'maha_thr', -2, 'unk_win', 3, 'fuse', F0.FM, 'fuse_N', 1, ...
+    'q_thr', 4, 'det_id', detector_id(trained_at, ood, F0, -2), 'created', 'x');
+clean_ref = struct('ebno', 1);
+save('data/policy_pools.mat', 'PP', 'clean_ref', '-v7.3');
+CT = struct('pools', {{Q}}, 'runs', 1);
+save('data/clean_test_pools.mat', 'CT', '-v7.3');
+evalc('rekey_pools({''data/policy_pools.mat'', ''data/clean_test_pools.mat''})');
+L = load('data/policy_pools.mat');
+keys = {'fuse', 'fuse_N', 'q_thr', 'det_id'};
+verifyEqual(tc, {L.PP.fuse, L.PP.fuse_N, L.PP.q_thr}, {FM, N, q_thr});
+verifyEqual(tc, L.PP.det_id, detector_id(trained_at, ood, struct('FM', FM, 'N', N, 'q_thr', q_thr), -2));
+verifyEqual(tc, rmfield(L.PP, keys), rmfield(PP, keys));
+verifyEqual(tc, L.clean_ref, clean_ref);
+b = dir('data/policy_pools_before_rekey_*.mat');
+verifyNumElements(tc, b, 1);
+verifyEqual(tc, load(fullfile('data', b(1).name)).PP, PP);
+verifyEmpty(tc, dir('data/clean_test_pools_before_rekey_*.mat'));
+evalc('rekey_pools({''data/policy_pools.mat''})');                 % already keyed: nothing to do
+verifyNumElements(tc, dir('data/policy_pools_before_rekey_*.mat'), 1);
+P2 = PP; P2.fused = 1;
+P3 = PP; P3.pools{1}.cls = 1;
+P4 = PP; P4.det_id = detector_id(8, ood, F0, -2);
+for c = {{P2, 'rekey_pools:field'}, {P3, 'rekey_pools:frame'}, {P4, 'rekey_pools:detector'}}
+    S = struct('PP', c{1}{1});
+    save('data/policy_pools.mat', '-struct', 'S', '-v7.3');
+    verifyError(tc, @() rekey_pools({'data/policy_pools.mat'}), c{1}{2});
+    verifyEqual(tc, load('data/policy_pools.mat').PP, c{1}{1});
+end
+end
+
 %% ---------- statistics ----------
 function test_boot_cluster(tc)
 rs = RandStream('mt19937ar', 'Seed', 5);
@@ -1217,13 +1262,56 @@ verifyEqual(tc, fusion_target(y, run, pos, 1, cls)', y);    % a window of one fr
 end
 
 function test_fusion(tc)
-% Two classes told apart only by the persistence gap: the fusion learns it.
+% Two classes told apart only by the persistence gap: the fusion learns it. Input
+% layout of fuse_classes.m: the window's C + 9 columns, then the current frame's C.
 rng(4);
 n = 400; y = [ones(n, 1); 2 * ones(n, 1)];
-Z = [log(0.5) * ones(2 * n, 2), [randn(n, 1); 6 + randn(n, 1)], rand(2 * n, 2)];
+Z = [log(0.5) * ones(2 * n, 2), [randn(n, 1); 6 + randn(n, 1)], rand(2 * n, 8), log(0.5) * ones(2 * n, 2)];
 FM = fuse_classes('fit', Z, y, 2, 1e-3);
 [~, k] = fuse_classes('apply', FM, Z);
 verifyGreaterThan(tc, mean(k == y), 0.95);
+verifyError(tc, @() fuse_classes('apply', FM, Z(:, 1:end-2)), 'fuse_classes:columns');   % a fusion of another layout
+end
+
+function test_fusion_current_frame(tc)
+% A sweeping jammer hits single frames. Over a window of 12 cycles the hit frame and
+% its clean neighbours share the window's evidence; the current frame's own
+% log-probabilities, the last C columns of the fusion input, tell them apart. The
+% decision cycle (policy_monitor.m) builds the same input and the same decision.
+rng(6);
+C = 2; nr = 3; N = 12; nRun = 60; nF = 20; fn = link_features('names');
+n = nRun * nF;
+run = repelem((1:nRun)', nF); pos = repmat((1:nF)', nRun, 1);
+y = ones(n, 1);
+for r = 1:nRun, y((r - 1) * nF + [4 10 16] + randi([0 2], 1, 3)) = 2; end   % isolated hits, 4 frames apart or more
+p2 = 0.02 + 0.38 * rand(n, 1); p2(y == 2) = 0.6 + 0.35 * rand(sum(y == 2), 1);
+probs = [1 - p2, p2];
+S = struct('run', run, 'pos', pos, 'gain_ant', randn(n, nr), 'feats_raw', zeros(n, numel(fn)), 'feat_names', {fn});
+S.feats_raw(:, feature_index('est_margin')) = 20; S.feats_raw(:, feature_index('log_ber')) = -5;
+Z = fuse_classes('windows', S, probs, N);
+nT = numel(temporal_evidence('names', C));
+verifyEqual(tc, size(Z, 2), nT + C);
+verifyEqual(tc, Z(:, nT + 1:end), log(probs), 'AbsTol', 1e-12);
+tr = run <= nRun / 2; te = ~tr; yt = y(te);
+FM = fuse_classes('fit', Z(tr, :), y(tr), C, 1e-3);
+[~, k] = fuse_classes('apply', FM, Z(te, :));
+verifyGreaterThan(tc, mean(k(yt == 2) == 2), 0.9);             % the hit frames
+verifyGreaterThan(tc, mean(k(yt == 1) == 1), 0.9);             % their clean neighbours
+Fw = fuse_classes('fit', Z(tr, 1:nT), y(tr), C, 1e-3);          % the window alone misses most hits
+[~, kw] = fuse_classes('apply', Fw, Z(te, 1:nT));
+verifyLessThan(tc, mean(kw(yt == 2) == 2), 0.5);
+PP = struct('actions', {policy_actions()}, 'classes', {{'none', 'sweeping_jammer'}}, 'sps', 4, 'bps', 2, ...
+    'maha_thr', 0, 'fuse', FM, 'fuse_N', N);
+mem = policy_monitor('init', 1, numel(PP.actions));
+r1 = find(run == nRun);
+for j = 1:nF
+    f = r1(j);
+    obs = struct('probs', probs(f, :), 'unknown', false, 'feat', S.feats_raw(f, :), 'gant', S.gain_ant(f, :));
+    [mem, M] = policy_monitor('update', mem, obs, PP, 1);
+    verifyEqual(tc, M.probs, fuse_classes('apply', FM, Z(f, :)), 'AbsTol', 1e-9);
+    verifyEqual(tc, M.cls, PP.classes(y(f)));
+end
+verifyEqual(tc, size(M.te), [1 nT - C]);                        % the agent's state keeps its size
 end
 
 function test_pre_features(tc)

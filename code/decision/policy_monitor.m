@@ -25,9 +25,9 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   window than C.ratio_ok x the clean coded link's loss over its packets plus one loss
 %   event, the Q/2 packets whose codewords share a frame the decoder cannot repair (the
 %   slack of restored_plr, packet_share.m).
-%   Detected class: from the temporal fusion of the last PP.fuse_N cycles
-%   (temporal_evidence.m, fuse_classes.m) when PP.fuse is set, otherwise the
-%   frame's own detector output; 'unknown' when the unknown-threat score, averaged
+%   Detected class: from the temporal fusion of the last PP.fuse_N cycles and the
+%   current one (temporal_evidence.m, fuse_classes.m) when PP.fuse is set, otherwise
+%   the frame's own detector output; 'unknown' when the unknown-threat score, averaged
 %   over the last PP.unk_win cycles, is below its threshold.
 %   Alarm, PP.alarm_mode 'class' (default): a hostile threat class, or degradation;
 %   'none', 'benign_interference' (non-hostile, D9) and 'unknown' raise it only
@@ -181,7 +181,9 @@ for n = unique(mem.wn)                                     % episodes with the s
     k = W - min(n, N) + 1:W;
     Z = temporal_evidence(mem.wp(e, :, k), mem.wg(e, :, k), mem.wf(e, :, k));
     te(e, :) = Z(:, nC + 1:end);
-    if isfield(PP, 'fuse') && ~isempty(PP.fuse), pf(e, :) = fuse_classes('apply', PP.fuse, Z); end
+    if isfield(PP, 'fuse') && ~isempty(PP.fuse)                  % with the current frame's own evidence (fuse_classes.m)
+        pf(e, :) = fuse_classes('apply', PP.fuse, [Z, log(max(double(mem.wp(e, :, W)), 1e-6))]);
+    end
     ku = W - min(n, Nu) + 1:W;
     mem.unk_now(e) = mean(mem.wu(e, ku), 2) < PP.maha_thr;
 end

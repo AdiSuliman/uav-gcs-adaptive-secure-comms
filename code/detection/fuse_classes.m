@@ -1,12 +1,15 @@
 function varargout = fuse_classes(cmd, varargin)
 %FUSE_CLASSES  Temporal fusion: the class of the current decision cycle from the
-%   evidence of the last N cycles (temporal_evidence.m), a multinomial logistic
-%   regression on the fused detector log-probabilities and the persistence
-%   measurements.
+%   evidence of the last N cycles (temporal_evidence.m) and of the current cycle, a
+%   multinomial logistic regression on the window's mean detector log-probabilities,
+%   the persistence measurements and the current frame's log-probabilities.
 %   Z = fuse_classes('windows', S, probs, N)
 %       evidence of every frame of split S (fields run, pos, gain_ant, feats_raw,
 %       feat_names) from the frames of its own sub-run at positions pos-N+1..pos
-%       (causal); probs frames x C
+%       (causal); probs frames x C. Z is frames x (C + 9 + C): temporal_evidence.m's
+%       columns, then log(max(p, 1e-6)) of the frame's own probabilities, so a threat
+%       that hits single frames (a sweeping jammer crossing the band) is not averaged
+%       away by its clean neighbours. policy_monitor.m builds the same row per cycle.
 %   FM = fuse_classes('fit', Z, y, C, lambda)     y class index per frame
 %   [pc, k] = fuse_classes('apply', FM, Z)        pc frames x C, k predicted class
 %   The fusion is fitted on the validation split (the detector's outputs on its own
@@ -36,6 +39,7 @@ for r = 1:numel(byrun)
             permute(S.feats_raw(w, jf), [3 2 1]));
     end
 end
+Z = [Z, log(max(double(probs), 1e-6))];                   % the current frame's own evidence
 end
 
 function FM = fit(Z, y, C, lambda)
@@ -55,6 +59,8 @@ FM = struct('W', W, 'mu', mu, 'sd', sd, 'C', C, 'lambda', lambda);
 end
 
 function [pc, k] = apply(FM, Z)
+assert(size(Z, 2) == numel(FM.mu), 'fuse_classes:columns', 'fuse_classes: %d evidence columns, the fusion was fitted on %d (rerun select_fusion)', ...
+    size(Z, 2), numel(FM.mu));
 X = [(Z - FM.mu) ./ FM.sd, ones(size(Z, 1), 1)];
 pc = softmax_rows(X * FM.W);
 [~, k] = max(pc, [], 2);
