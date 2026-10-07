@@ -1,12 +1,14 @@
 %% BUILD_CLEAN_TEST_POOLS - Clean-link pools over many independent geometries
 % The false-alarm KPI needs independent trials. This script measures the clean
-% link ('none') on 100 new geometries per Eb/N0 (seeds never used before), under
+% link ('none') on 300 new geometries per Eb/N0 (seeds never used before), under
 % every configuration (common random numbers, as in build_policy_pools.m), with
 % the same detector, frames per geometry and features (pool_cell.m, in parallel).
 % Two sets, chosen by CLEAN_SET (default 'test'):
 %   'test'  seed block 15 -> data/clean_test_pools.mat: evaluate_policies.m runs
-%           one clean episode per geometry (600 independent episodes) and KPI 6
-%           is computed over them
+%           one clean episode per geometry and KPI 6 is computed over them with the
+%           clean episodes of the test pools (one per geometry), from the KPI 1
+%           threshold up: at least 600 independent episodes (312 per Eb/N0) as long
+%           as two Eb/N0 points are above it
 %   'val'   seed block 4 -> data/clean_val_pools.mat: train_dqn.m checks the false
 %           alarms of every run on it, so the test set is used once
 %
@@ -23,7 +25,7 @@ switch CLEAN_SET
     case 'val',  SP = 4; f_out = 'data/clean_val_pools.mat';
     otherwise, error('build_clean_test_pools: CLEAN_SET must be ''test'' or ''val''');
 end
-N_GEOM = 100;                                 % geometries per Eb/N0 (at most 99 per seed block + 1)
+N_GEOM = 300;                                 % geometries per Eb/N0: 100 per geometry family 1, 3, 5 (pool_seed.m)
 CHUNK = 10;                                   % geometries per parallel job
 N_WORKERS = 6;
 opt = struct('F_SUB', 20, 'tw', 10, 'delay_bits', 20);
@@ -55,7 +57,7 @@ geo = cell(nJ, nS);
 for j = 1:nJ
     r = (j-1)*CHUNK + 1 : min(j*CHUNK, N_GEOM);
     for s = 1:nS
-        [sd_, v_] = arrayfun(@(k) pool_seed(1, s, SP, k, vrange), r);
+        [sd_, v_] = arrayfun(@(k) pool_seed(1 + 2 * floor((k - 1) / 100), s, SP, mod(k - 1, 100) + 1, vrange), r);
         geo{j, s} = struct('seed', sd_, 'speed', v_, 'run', runs(r));
     end
 end

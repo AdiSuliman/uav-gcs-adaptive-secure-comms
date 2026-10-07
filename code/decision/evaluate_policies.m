@@ -11,9 +11,10 @@
 %             (unknown-threat path: the policy sees only the link measurements)
 %   clean     no threat, one 30-cycle episode per flight; every change is a false
 %             alarm. KPI 6 (one-sided 95% Clopper-Pearson bound, >= 600 episodes) is
-%             computed on data/clean_test_pools.mat, one episode per new geometry,
+%             computed over every independent clean flight: these episodes and one
+%             episode per geometry of data/clean_test_pools.mat (another seed block),
 %             with the false changes per cycle, per hour of flight and the mean time
-%             between them (false_change_rate.m)
+%             between them (false_change_rate.m); each source is also reported alone
 %   comb      jamming / reactive_jamming on every channel we can use: the jammer is
 %             on the new channel at the hop itself and on frequency diversity's
 %             second carrier, so only space and link budget can help (assumed: no
@@ -370,9 +371,26 @@ if isfile('data/clean_test_pools.mat')
     aboveW = PP.ebno(RW{1}.s) >= ebno_thr;
     rep{end+1} = '';
     rep{end+1} = sprintf(['False alarms on the clean link, %d new geometries per Eb/N0 (data/clean_test_pools.mat), ' ...
-        'one episode per geometry, Eb/N0 >= %g dB (%d independent episodes x %d cycles) -> KPI 6'], n_geom, ...
+        'one episode per geometry, Eb/N0 >= %g dB (%d independent episodes x %d cycles)'], n_geom, ...
         ebno_thr, sum(aboveW), T);
     [FAR, FD, lines] = far_report(RW, POL, LBL, aboveW, T, iDQN, PP.ebno, cls_list, C.period_ms);
+    rep = [rep, lines];
+end
+% KPI 6 over every independent clean flight: the test pools' clean episodes and those of
+% data/clean_test_pools.mat (split id 6 here, so their geometries stay apart)
+FAR_c = FAR; FD_c = FD;
+if ~isempty(RW)
+    RU = cell(1, numel(POL));
+    for pk = 1:numel(POL)
+        Rw = RW{pk}; Rw.split(:) = 6;
+        RU{pk} = cat_struct(RES{iC, pk}, Rw);
+    end
+    aboveU = [above, aboveW];
+    rep{end+1} = '';
+    rep{end+1} = sprintf(['False alarms on the clean link, every independent clean flight: %d test-pool and %d ' ...
+        'data/clean_test_pools.mat geometries per Eb/N0, one episode each, Eb/N0 >= %g dB (%d episodes x %d cycles) ' ...
+        '-> KPI 6'], nG, n_geom, ebno_thr, sum(aboveU), T);
+    [FAR, FD, lines] = far_report(RU, POL, LBL, aboveU, T, iDQN, PP.ebno, cls_list, C.period_ms);
     rep = [rep, lines];
 end
 
@@ -417,7 +435,8 @@ KP = struct('per_threat', PT, 'per_threat_sev', PTsev, 'threats', {threats}, 're
     'envelope', ENV, 'envelope_val', ENVv, 'per_threat_env', PTenv, 'kpi4_env_met', kpi4_env, 'env_rule', [ENV_MIN ENV_N], ...
     'kpi4_met', kpi4, 'per_ebno', PE, 'ebno', PP.ebno, 'per_aoa', PA, 'aoa_bins', bins_aoa, 'per_speed', PV, ...
     'speed_bins', bins_v, 'show', {show}, 'show_lbl', {hdr}, 'far', FAR, 'far_diag', FD, 'far_testpools', FAR_t, ...
-    'far_diag_testpools', FD_t, 'far_geoms', n_geom, 'cls_list', {cls_list}, 'ebno_thr', ebno_thr, ...
+    'far_diag_testpools', FD_t, 'far_cleanpools', FAR_c, 'far_diag_cleanpools', FD_c, 'far_geoms', n_geom, ...
+    'far_geoms_test', nG, 'cls_list', {cls_list}, 'ebno_thr', ebno_thr, ...
     'selected_gamma', Q.seed_summary.selected_gamma, 'confirm', PP.confirm, 'alarm_mode', PP.alarm_mode, ...
     'per_speed_out', PS, 'speed_out', PP.speed_out, 'per_delay', PD, 'sev_names', {PP.sev_names}, 'onset', onset);
 save('results/policy_evaluation.mat', 'RES', 'RW', 'POL', 'LBL', 'set_names', 'fixed_best', 'tab', 'iDQN', 'KP', ...

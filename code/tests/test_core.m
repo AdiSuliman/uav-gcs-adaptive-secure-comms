@@ -398,6 +398,35 @@ end
 verifyEqual(tc, [find(c1, 1), find(c2, 1)], [2 3]);
 end
 
+function test_monitor_m_of_n(tc)
+% 4-of-5 confirms on the fourth hostile cycle among five with one miss; 5-of-5 needs five
+% hostile cycles in a row; a confirmation longer than the alarm memory stops.
+A = policy_actions();
+cls = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', 'antenna_fault', ...
+    'benign_interference', 'sweeping_jammer', 'tone_jamming', 'airframe_shadowing'};
+PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0, 'confirm', [2 2], 'alarm_mode', 'class');
+hos = struct('probs', double(strcmp(cls, 'jamming')), 'unknown', false, 'feat', zeros(1, numel(link_features('names'))));
+hos.feat(feature_index('log_ber')) = -6;
+cln = hos; cln.probs = double(strcmp(cls, 'none'));
+seq = [1 1 0 1 1 1 1 1 1];
+first = zeros(1, 2); cf = {[4 5], [5 5]};
+for j = 1:2
+    own = struct('monitor', struct('alarm_mode', 'class', 'confirm', cf{j}, 'drop_db', []));
+    m = []; c = false(size(seq));
+    for k = 1:numel(seq)
+        o = cln; if seq(k), o = hos; end
+        [~, m, d] = policy_decide('rule_esc', o, 1, m, PP, [], own);
+        c(k) = d.confirmed;
+    end
+    first(j) = find(c, 1);
+end
+verifyEqual(tc, first, [5 8]);
+own = struct('monitor', struct('alarm_mode', 'class', 'confirm', [3 9], 'drop_db', []));
+msg = '';
+try, policy_decide('rule_esc', hos, 1, [], PP, [], own); catch e, msg = e.message; end
+verifyTrue(tc, contains(msg, 'alarm memory'));
+end
+
 function test_choose_deployed(tc)
 % The DQN when it passed its gate; else the rule setting with the best recovery among
 % those within the false-alarm bound; else the lowest bound, committed only within it. A
@@ -820,10 +849,13 @@ S = arrayfun(@(si, ri, bi) pool_seed(1, si, bi, ri), s(:), r(:), b(:));
 S = [S; arrayfun(@(si, ri) pool_seed(2, si, 10, ri), s(:), r(:))];
 [s, b] = ndgrid(1:6, [4 15]);                           % the 100th clean-link geometry
 S = [S; arrayfun(@(si, bi) pool_seed(1, si, bi, 100), s(:), b(:))];
+[s, r, b, f] = ndgrid(1:6, 1:100, [4 15], [3 5]);       % clean-link geometries 101-300 (families 3 and 5)
+S = [S; arrayfun(@(si, ri, bi, fi) pool_seed(fi, si, bi, ri), s(:), r(:), b(:), f(:))];
 [t, li, s] = ndgrid(1:20, 1:8, 1:6);                    % survivability map: entries, levels, Eb/N0
 S = [S; 900000 + 1000*t(:) + 10*li(:) + s(:); 700000 + (1:5)'];
 k = (1:99999)';
 S = [S; 3000000 + k; 4000000 + k; 5000000 + k];         % dataset, unseen Eb/N0 and unseen severity runs
+S = [S; 3500000 + k; 4500000 + k; 5500000 + k];         % the second test set and the second B4 and B4s readings
 verifyEqual(tc, numel(unique(S)), numel(S));
 verifyLessThan(tc, max(S), 2^26);
 N = seed_base(S) + off;

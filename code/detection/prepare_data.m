@@ -7,9 +7,16 @@
 % Input:  data/spectrograms.mat
 % Output: data/splits.mat (train/val/test with X, Y, feats, ebno, speed, run, level, and
 %         the frame position and per-antenna gains when present; norm stats)
+% With FRESH_TEST true (build_fresh_test.m): the second test set of data/spectrograms_fresh.mat,
+% z-scored with the training statistics of data/splits.mat -> data/splits_fresh.mat
+% (test, norm and classes only).
 
 close all; clc;
 fprintf('=== B1: Prepare Data (split by sub-run) ===\n\n');
+if exist('FRESH_TEST', 'var') && FRESH_TEST
+    prepare_fresh_test();
+    return
+end
 S = load('data/spectrograms.mat');
 sp0 = S.spec;
 if ~isfield(sp0, 'fold')
@@ -60,3 +67,27 @@ fprintf('\n');
 save('data/splits.mat', 'splits', '-v7.3');
 fprintf('Saved data/splits.mat\n=== B1 Complete ===\n');
 clear S sp0 splits feats_norm   % large arrays; main.m runs the stages in one workspace
+
+function prepare_fresh_test()
+% The second test set: every sub-run in the test fold, the training z-score of data/splits.mat.
+S = load('data/spectrograms_fresh.mat'); sp0 = S.spec; clear S
+N = load('data/splits.mat', 'splits'); nm = N.splits.norm; classes = N.splits.classes; clear N
+assert(isequal(categories(sp0.Y), classes(:)), 'prepare_data: the second test set has other classes');
+assert(isequal(sp0.feat_names, nm.feat_names), 'prepare_data: the second test set has other features');
+assert(all(sp0.fold == 6), 'prepare_data: the second test set holds sub-runs outside the test fold');
+splits = struct();
+splits.test = struct('X', sp0.X, 'Y', sp0.Y, 'feats', (sp0.feats - nm.feat_mean) ./ nm.feat_std, ...
+    'ebno', sp0.ebno, 'speed', sp0.speed_kmh, 'run', sp0.run, 'level', sp0.level);
+if isfield(sp0, 'pos')
+    splits.test.pos = sp0.pos; splits.test.gain_ant = sp0.gain_ant; splits.test.feats_raw = sp0.feats;
+end
+if isfield(sp0, 'k_db'), splits.test.k_db = sp0.k_db; splits.test.aoa = sp0.aoa; end
+splits.norm = nm;
+splits.classes = classes;
+fprintf('Second test set: %d frames, %d sub-runs\n', numel(sp0.Y), numel(unique(sp0.run)));
+for c = 1:numel(classes)
+    fprintf('  %-20s %5d\n', classes{c}, sum(sp0.Y == classes{c}));
+end
+save('data/splits_fresh.mat', 'splits', '-v7.3');
+fprintf('Saved data/splits_fresh.mat\n=== B1 Complete ===\n');
+end

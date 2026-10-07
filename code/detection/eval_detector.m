@@ -1,10 +1,26 @@
 %% B3 — EVALUATE HYBRID DETECTOR (Test Set)
+% Test set: the second test set of build_fresh_test.m (data/splits_fresh.mat, sub-runs never
+% read before) when it exists, else the test split of data/splits.mat. With DET_TEST = 'split'
+% in the calling workspace the test split is read even then, and the outputs carry the
+% suffix _split. The KPI 1 threshold is chosen on the validation split in both cases.
 close all; clc;fprintf('=== B3: Test Evaluation ===\n\n');
 
 %% 1. Load data and model
+has_fresh = isfile('data/splits_fresh.mat');
+read_split = exist('DET_TEST', 'var') && strcmp(DET_TEST, 'split');
+tag = ''; if has_fresh && read_split, tag = '_split'; end
+set_name = 'test split';
 fprintf('Loading test data and trained model...\n');
 S = load('data/splits.mat');
 sp = S.splits;
+if has_fresh && ~read_split
+    Sf = load('data/splits_fresh.mat');
+    assert(isequal(Sf.splits.norm, sp.norm), 'eval_detector: the second test set has another normalization');
+    sp.test = Sf.splits.test; clear Sf
+    set_name = 'second test set';
+end
+sp.train = [];                                          % not read here
+fprintf('Test set: %s (%d frames)\n', set_name, numel(sp.test.Y));
 Y_test = sp.test.Y;
 
 load('data/trained_detector.mat', 'net', 'classes');
@@ -63,11 +79,11 @@ end
 fig_cm = figure('Name', 'Confusion Matrix', 'Color', 'w', 'Position', [100 100 700 600]);
 cm_lbl = strrep(string(cm_order), '_', ' ');                       % no TeX subscripts in the labels
 cm = confusionchart(conf_mat, categorical(cm_lbl, cm_lbl));          % categorical keeps the class order
-cm.Title = 'Hybrid Detector Confusion Matrix (Test Set)';
+cm.Title = sprintf('Hybrid Detector Confusion Matrix (%s)', set_name);
 cm.RowSummary = 'row-normalized';
 cm.ColumnSummary = 'column-normalized';
 if ~exist('results', 'dir'), mkdir('results'); end
-saveas(fig_cm, 'results/confusion_matrix.png');
+saveas(fig_cm, ['results/confusion_matrix' tag '.png']);
 
 %% 5. Accuracy vs SNR (true Eb/N0 values in dB, denormalized)
 % sp.test.feats is z-scored; denormalize column 1 (SNR) back to dB
@@ -153,10 +169,10 @@ if ~isnan(thr_db)
     xline(thr_db, 'r-', 'LineWidth', 1.2, 'DisplayName', sprintf('threshold %g dB (chosen on validation)', thr_db));
 end
 xlabel('E_b/N_0 per antenna [dB]'); ylabel('Test set [%]'); ylim([0 100]); xticks(unique_snrs);
-title('Hybrid detector on the test set');
+title(['Hybrid detector, ' set_name]);
 legend('Location', 'southeast');
-saveas(fig_snr, 'results/accuracy_vs_snr.png');
-fprintf('Saved results/confusion_matrix.png and results/accuracy_vs_snr.png\n');
+saveas(fig_snr, ['results/accuracy_vs_snr' tag '.png']);
+fprintf('Saved results/confusion_matrix%s.png and results/accuracy_vs_snr%s.png\n', tag, tag);
 
 %% 5b2. Beside KPI 1 (which stays as above): steady state and onset latency
 % Steady state: the frames whose fusion window is full (rank >= N in their sub-run); a
@@ -235,7 +251,7 @@ fprintf('95%% bootstrap CI: accuracy [%.2f, %.2f] | macro-F1 [%.2f, %.2f] | macr
 snr_breakdown = struct('snr_db', num2cell(unique_snrs), 'accuracy_pct', num2cell(100*acc_vs_snr), ...
     'macro_f1_pct', num2cell(f1_vs_snr));
 metrics = struct( ...
-    'generated', datestr(now), ...
+    'generated', datestr(now), 'test_set', set_name, ...
     'overall_accuracy_pct', 100*sum(Y_test==Y_pred)/numel(Y_test), ...
     'macro_f1_pct', 100*macro_f1, ...
     'classes', {cellstr(classes)}, ...
@@ -281,16 +297,16 @@ if isfield(sp.test, 'speed') && ~isempty(sp.test.speed)
     metrics.speed_breakdown = speed_breakdown;
 end
 
-save('results/eval_detector_metrics.mat', 'metrics');
-fprintf('Saved results/eval_detector_metrics.mat (for KPI aggregation)\n');
+save(['results/eval_detector_metrics' tag '.mat'], 'metrics');
+fprintf('Saved results/eval_detector_metrics%s.mat (for KPI aggregation)\n', tag);
 % Per-frame outcomes for the breakdown of weak points (analyze_weak_points.m)
 pred = struct('y_true', Y_test, 'y_pred', Y_pred, 'ebno', snr_vals(:), 'level', sp.test.level(:), ...
     'speed', sp.test.speed(:), 'run', sp.test.run(:), 'rank', rk(:));
 for f = {'pos', 'k_db', 'aoa'}
     if isfield(sp.test, f{1}), pred.(f{1}) = sp.test.(f{1}); end
 end
-save('results/detector_predictions.mat', 'pred');
-clear S sp Y_pred_prob   % large arrays; main.m runs the stages in one workspace
+save(['results/detector_predictions' tag '.mat'], 'pred');
+clear S sp Y_pred_prob DET_TEST   % large arrays; main.m runs the stages in one workspace
 
 %% Local functions
 function q = prctile_nan(x, pct)

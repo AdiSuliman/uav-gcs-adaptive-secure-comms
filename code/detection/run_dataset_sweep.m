@@ -25,6 +25,10 @@
 % the spread of the airframe loss over the antennas, the timing of the gated jammers
 % (sweep period and phase, burst phase), and the RMS delay spreads of our signal and of the
 % first interferer (0 on a flat channel). Frames whose BER is incomplete are dropped.
+%
+% With FRESH_TEST true in the calling workspace (build_fresh_test.m) the same recipe gives a
+% second, independent test set: 2 sub-runs per cell, every one in the test fold (6), seeds
+% 3,500,000 + run id and their own speed stream, saved as data/dataset_fresh.mat.
 
 close all; clc;
 warning('off', 'Simulink:cgxe:LeakedJITEngine');
@@ -35,12 +39,20 @@ S = load('params.mat');
 p0 = S.params; p0.quiet_build = true;
 
 %% ---- Configuration ----
+FRESH      = exist('FRESH_TEST', 'var') && FRESH_TEST;
 EbNo_list  = p0.EbNo_dB;          % Eb/N0 grid of init_params
 N_SUB      = 6;                   % independent sub-runs per cell (split unit)
 F_SUB      = 20;                  % frames per sub-run
 delay_bits = 20;
 modelName  = 'UAV_GCS_Threat_Link';
+SEED0      = 3000000;             % sub-run seed: SEED0 + run id
+FOLD       = @(k) mod(k - 1, N_SUB) + 1;   % fold of the k-th sub-run of a cell
+f_out      = 'data/dataset.mat';
 rng(2027, 'twister');             % speeds of every sub-run
+if FRESH
+    N_SUB = 2; SEED0 = 3500000; FOLD = @(k) 6; f_out = 'data/dataset_fresh.mat';
+    rng(2029, 'twister');
+end
 
 clear threat_cfg
 threat_cfg = dataset_levels();
@@ -81,7 +93,7 @@ for tt = 1:numel(threat_cfg)
             for sub = 1:n_sub(tt)
                 run_id = run_id + 1;
                 D = add_subrun(D, p, modelName, EbNo_list(s), stop_time, delay_bits, ...
-                    tt + 1, cfg.levels(lv), run_id, mod(sub - 1, N_SUB) + 1, MEAS);
+                    tt + 1, cfg.levels(lv), run_id, FOLD(sub), MEAS, SEED0);
             end
         end
         report_row(cfg.name, cfg.levels(lv), D, i_start);
@@ -95,7 +107,7 @@ i_start = numel(D.label) + 1;
 for s = 1:numel(EbNo_list)
     for k = 1:n_levels * N_SUB
         run_id = run_id + 1;
-        D = add_subrun(D, p, modelName, EbNo_list(s), stop_time, delay_bits, 1, NaN, run_id, mod(k-1, N_SUB) + 1, MEAS);
+        D = add_subrun(D, p, modelName, EbNo_list(s), stop_time, delay_bits, 1, NaN, run_id, FOLD(k), MEAS, SEED0);
     end
 end
 report_row('none', NaN, D, i_start);
@@ -118,9 +130,9 @@ dataset.jam = D.jam';                      % sweep period [s], sweep phase [s], 
 dataset.ds_ns = D.ds_ns(:); dataset.ds_int = D.ds_int(:);
 dataset.meta = struct('N_SUB', N_SUB, 'n_sub', n_sub, 'F_SUB', F_SUB, 'EbNo_list', EbNo_list, 'delay_bits', delay_bits, ...
     'mode', 'seeded_subruns_D59', 'n_rx', p0.n_rx, 'speed_range_kmh', [p0.speed_kmh_min p0.speed_kmh_max], ...
-    'threat_cfg', threat_cfg, 'created', datestr(now));
+    'threat_cfg', threat_cfg, 'fresh', FRESH, 'seed0', SEED0, 'created', datestr(now));
 if ~exist('data', 'dir'); mkdir('data'); end
-save('data/dataset.mat', 'dataset', '-v7.3');
+save(f_out, 'dataset', '-v7.3');
 
 fprintf('\n=== Dataset summary ===\n');
 fprintf('Frames: %d | sub-runs: %d | speed %.1f-%.1f km/h | %.1f min\n', numel(D.label), run_id, ...
@@ -129,7 +141,7 @@ fprintf('Labelled frames per class (and frames of the class''s own sub-runs):\n'
 for c = 1:numel(class_names)
     fprintf('  %-22s %d (%d)\n', class_names{c}, sum(D.label == c), sum(D.class_run == c));
 end
-fprintf('Saved data/dataset.mat. Next: extract_spectrograms.\n');
+fprintf('Saved %s. Next: extract_spectrograms.\n', f_out);
 clear D dataset   % large arrays; main.m runs the stages in one workspace
 
 %% ===================== Local functions =====================
@@ -138,11 +150,11 @@ params = p; save('params.mat', 'params'); %#ok<NASGU>
 evalc('build_threat_model');
 end
 
-function D = add_subrun(D, p, modelName, ebno, stop_time, delay_bits, label, level, run_id, fold, MEAS)
+function D = add_subrun(D, p, modelName, ebno, stop_time, delay_bits, label, level, run_id, fold, MEAS, seed0)
 % One seeded sub-run at its own random UAV speed; appends its complete frames.
 v_kmh = p.speed_kmh_min + rand() * (p.speed_kmh_max - p.speed_kmh_min);
 fd = v_kmh / 3.6 * p.carrier_freq / p.c_light;
-seed = 3000000 + run_id;                                % own seed range, fixed by the run id
+seed = seed0 + run_id;                                  % own seed range, fixed by the run id
 d = link_seed(modelName, seed, fd, struct('ebno', ebno, 'alt_m', NaN, 'k_sig_db', NaN));
 snr_dB = ebno + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
 set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/p.sps));

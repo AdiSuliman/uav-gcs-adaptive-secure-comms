@@ -81,7 +81,7 @@ disk_guard('init');                                % Simulink temporary data and
 % ---- Decision-layer training; defaults of train_dqn.m when absent ----
 CFG.dqn_seeds       = 3;                 % C2: training seeds per setting
 CFG.dqn_gammas      = 0.5;               % C2: discount factor (selected on validation)
-CFG.monitors        = {'class_drop 3/3', 'class_drop 2/2'};  % C2: alarm definition and m/n confirmation (selected on validation)
+CFG.monitors        = {'class_drop 3/3', 'class_drop 2/2', 'class_drop 4/5', 'class_drop 5/5'};  % C2: alarm definition and m/n confirmation (selected on validation)
 CFG.drop_steps      = 2;                 % C2: path_loss alarm threshold, 2 dB below the train-pool value (selected on validation)
 CFG.fa_penalty_grid = [80 120 160];      % C2: training reward variants: false-switch penalty,
 CFG.cost_scale_grid = [0.5 0.5 0.5];     %     running costs x scale,

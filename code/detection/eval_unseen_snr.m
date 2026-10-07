@@ -12,7 +12,7 @@
 % 36 blocks per class at each point, each at its own speed, the levels cycled over
 % dataset_levels.m, for the detector's verdict there (edge_verdict.m, read by
 % edge_map.m); the policy is not measured beyond 0-15 dB.
-% Block k runs on seed 4,000,000 + k.
+% Block k runs on seed 4,500,000 + k.
 %
 % Output: results/unseen_snr.{txt,mat,png}
 
@@ -25,10 +25,10 @@ EBNO_ALL  = sort([EBNO_SEEN, EBNO_SEEN(1:end-1) + diff(EBNO_SEEN) / 2]);
 EBNO_EDGE = [EBNO_SEEN(1) - 3, EBNO_SEEN(end) + 3];   % beyond the trained range (detector only)
 N_FRAMES  = 20;                 % frames per (threat, level, Eb/N0) block
 N_EDGE    = 36;                 % blocks per class at each edge point (N_MIN of edge_verdict.m)
-SEED0     = 4000000;            % block k: seed SEED0 + k
+SEED0     = 4500000;            % block k: seed SEED0 + k
 delay_bits = 20;
 temporal_window = 10;           % as extract_spectrograms.m
-rng(4242, 'twister');
+rng(4244, 'twister');
 
 clear threat_cfg                                  % scripts share the base workspace
 DL = dataset_levels();

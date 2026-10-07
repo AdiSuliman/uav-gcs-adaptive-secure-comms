@@ -133,6 +133,7 @@ end
 q = ~M.alarm;
 mem.ref(q, :) = [mem.ref(q, 2:end), M.ebno_est(q)];
 mem.alarm = [mem.alarm(:, 2:end), M.alarm(:)];
+assert(cf(2) <= size(mem.alarm, 2), 'policy_monitor: confirmation over %d cycles exceeds the alarm memory', cf(2));
 M.confirmed = sum(mem.alarm(:, end-cf(2)+1:end), 2)' >= cf(1);
 mem.conf_n(M.confirmed) = mem.conf_n(M.confirmed) + 1; mem.conf_n(~M.confirmed) = 0;
 % Observation of this cycle for the agent's state (policy_state.m), newest first

@@ -14,7 +14,7 @@
 % (rule_based_policy.m), or flagged unknown (production score below the threshold
 % keeping 95% of known validation frames). One block per Eb/N0 gives fewer flights than
 % a verdict needs (edge_verdict.m): generalization evidence at the midpoints, read by
-% edge_map.m. Block k runs on seed 5,000,000 + k.
+% edge_map.m. Block k runs on seed 5,500,000 + k.
 % Decision rule, fixed before the run: the training levels are extended to the
 % map's levels when, above the range, fewer than 90% of a threat's frames are
 % read as a class with the same countermeasure.
@@ -27,9 +27,9 @@ fprintf('=== Detector at unseen threat severities ===\n\n');
 %% 1. Levels
 EBNO = load('params.mat').params.EbNo_dB;
 N_FRAMES = 20;                   % frames per (threat, level, Eb/N0) block
-SEED0 = 5000000;                 % block k: seed SEED0 + k
+SEED0 = 5500000;                 % block k: seed SEED0 + k
 delay_bits = 20; temporal_window = 10;
-rng(4343, 'twister');
+rng(4345, 'twister');
 clear threat_cfg
 % Above the training range only where the sources go further than the training levels
 ABOVE = struct('jamming', [], 'noise_burst', [], 'reactive_jamming', [], 'sweeping_jammer', [], ...

@@ -3,13 +3,16 @@
 % (receiver measurements), temporal ones over a causal window of 10 frames
 % inside each sub-run. The same two functions are used by every closed-loop
 % script and the GUI, so training and deployment see identical inputs.
+% With FRESH_TEST true (build_fresh_test.m): data/dataset_fresh.mat -> data/spectrograms_fresh.mat.
 
 close all; clc;
-if ~exist('data/dataset.mat', 'file')
-    error('data/dataset.mat not found. Run run_dataset_sweep.m first.');
+f_in = 'data/dataset.mat'; f_out = 'data/spectrograms.mat';
+if exist('FRESH_TEST', 'var') && FRESH_TEST, f_in = 'data/dataset_fresh.mat'; f_out = 'data/spectrograms_fresh.mat'; end
+if ~exist(f_in, 'file')
+    error('%s not found. Run run_dataset_sweep.m first.', f_in);
 end
-fprintf('Loading dataset...\n');
-L = load('data/dataset.mat'); ds = L.dataset;
+fprintf('Loading %s...\n', f_in);
+L = load(f_in); ds = L.dataset;
 S = load('params.mat'); p = S.params;
 fs = p.symbol_rate * p.sps;
 tw = 10;                                  % temporal window [frames]
@@ -53,10 +56,10 @@ if isfield(ds, 'k_db'), spec.k_db = ds.k_db(:); spec.aoa = ds.aoa(:); end       
 spec.img_size = 128;
 spec.meta = ds.meta;
 spec.meta.temporal_window = tw;
-save('data/spectrograms.mat', 'spec', '-v7.3');
+save(f_out, 'spec', '-v7.3');
 
-fprintf('\nSaved data/spectrograms.mat: X [128 128 1 %d], %d classes, feats [%d x %d] (%s)\n', ...
-    N, numel(ds.class_names), N, numel(feat_names), strjoin(feat_names, ', '));
+fprintf('\nSaved %s: X [128 128 1 %d], %d classes, feats [%d x %d] (%s)\n', ...
+    f_out, N, numel(ds.class_names), N, numel(feat_names), strjoin(feat_names, ', '));
 fprintf('%-22s', 'mean per class'); fprintf('%10s', feat_names{:}); fprintf('\n');
 for c = 1:numel(ds.class_names)
     fprintf('%-22s', ds.class_names{c}); fprintf('%10.3f', mean(feats(ds.label == c, :), 1)); fprintf('\n');

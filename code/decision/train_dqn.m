@@ -58,7 +58,9 @@ H = struct('gamma', 0.9, 'NE', 64, 'T', 30, 'episodes', 50000, 'buffer', 200000,
     'eps_end', 0.05, 'eps_frac', 0.6, 'huber', 1, 'p_unknown', 0.10, 'p_follow', 0.5, 'n_eval', 4, ...
     'hidden', [256 256]);
 N_SEEDS = 3; GAMMAS = 0.5;
-ALARMS = {'class_drop 3/3', 'class_drop 2/2'};   % monitor: alarm definition, m/n confirmation (selected on validation)
+% monitor: alarm definition, m/n confirmation (M-of-N binary integration, Richards), selected on
+% validation; 4/5 and 5/5 trade a later alarm for fewer false ones
+ALARMS = {'class_drop 3/3', 'class_drop 2/2', 'class_drop 4/5', 'class_drop 5/5'};
 DROP_STEPS = 2;                          % path_loss alarm: 2 dB below the train-pool threshold (selected on validation)
 % Training reward variants, one entry each: false-switch penalty, scale of the
 % running costs (goodput, spectrum, power, combining) and of the switching cost
@@ -76,7 +78,7 @@ if exist('CFG', 'var') && isstruct(CFG)
 end
 VAL_REPS = 2;                            % validation: every (cell, Eb/N0, geometry) of the split, twice
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
-    N_SEEDS = 1; GAMMAS = 0.5; FA_PEN = 80; COST_SCALE = 1; SW_SCALE = 1; ALARMS = {'class_drop 2/2'}; SENS_SCALES = 2; VAL_REPS = 1;
+    N_SEEDS = 1; GAMMAS = 0.5; FA_PEN = 80; COST_SCALE = 1; SW_SCALE = 1; ALARMS = {'class_drop 4/5'}; SENS_SCALES = 2; VAL_REPS = 1;
     DROP_STEPS = 1; H.episodes = 1280; H.buffer = 20000; H.warmup = 2000; H.n_eval = 1;
 end
 SEEDS = 42 + (0:N_SEEDS-1);

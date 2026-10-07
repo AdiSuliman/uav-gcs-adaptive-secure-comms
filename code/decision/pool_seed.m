@@ -3,7 +3,8 @@ function [seed, v_kmh] = pool_seed(sc, s, sp, r, vrange)
 %   sc  geometry family: 1 for every pool (the clean link and every threat cell
 %       fly the same geometries, so an episode's frames before and after the
 %       onset come from one flight); 2 the off-grid check flights
-%       (build_check_pools.m, block 10)
+%       (build_check_pools.m, block 10); 3 and 5 the clean-link geometries 101-200
+%       and 201-300 of build_clean_test_pools.m (blocks 4 and 15)
 %   s   Eb/N0 index
 %   sp  seed block: 1 train, 5 validation, 14 test, 16 edge-speed and 17 second test
 %       pools (build_policy_pools.m); 4 clean validation and 15 clean test geometries
