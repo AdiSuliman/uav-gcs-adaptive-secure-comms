@@ -156,8 +156,8 @@ for c = 1:numel(cls_names)
 end
 fprintf('\nMacro-F1 per Eb/N0:');
 fprintf(' %g dB %.1f%% |', [unique_snrs(:)'; f1_vs_snr(:)']);
-fprintf('\nKPI #1 threshold (chosen on validation): %g dB; on the test split above it macro-F1 %.2f%%, lowest class %.2f%%\n', ...
-    thr_db, f1_above, min(f1_class_above));
+fprintf('\nKPI #1 threshold (chosen on validation): %g dB; on the %s above it macro-F1 %.2f%%, lowest class %.2f%%\n', ...
+    thr_db, set_name, f1_above, min(f1_class_above));
 fprintf('Action-equivalent accuracy: %.2f%% (class accuracy %.2f%%)\n', 100*mean(act_ok), 100*mean(Y_test == Y_pred));
 
 fig_snr = figure('Name', 'Detection vs Eb/N0', 'Color', 'w', 'Position', [100 100 640 420]);
