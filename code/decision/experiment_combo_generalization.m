@@ -99,7 +99,8 @@ specs{end}.n_valid = NE - pad;
 end
 
 function R = mark(R, specs, PP)
-% Geometry id per episode (for the bootstrap); padding of the last batch dropped.
+% Geometry id per episode (for the bootstrap); padding of the last batch dropped. R.threat
+% keeps dqn_eval_batches.m's reading: a threat on the air in the geometry (link_env.m K.on).
 g = cell2mat(cellfun(@(sp) sp.s * 1000 + sp.r, specs, 'UniformOutput', false));
 n = numel(g) - (numel(specs{end}.scn) - specs{end}.n_valid);
 f = fieldnames(R);
@@ -107,5 +108,5 @@ for i = 1:numel(f)
     if size(R.(f{i}), 2) == numel(g), R.(f{i}) = R.(f{i})(:, 1:n); end
 end
 R.geom = g(1:n);
-R.threat = true(1, n) & ~strcmp(PP.scen(specs{1}.scn(1)), 'none');
+R.threat = R.threat(1:n) & ~strcmp(PP.scen(specs{1}.scn(1)), 'none');
 end

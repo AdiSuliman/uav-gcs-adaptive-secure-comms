@@ -18,8 +18,8 @@
 %
 % Grid: monitor (alarm definition and m-of-n confirmation, CFG.monitors,
 % policy_monitor.m; Barajas et al.) x Eb/N0-drop threshold of the
-% drop alarm (DROP_STEPS dB below the threshold of choose_drop_threshold.m, above the
-% moving-away floor it records)
+% drop alarm (the threshold of choose_drop_threshold.m and DROP_STEPS dB below it, above
+% the moving-away floor it records)
 % x false-switch penalty of the TRAINING reward (CFG.fa_penalty_grid) x
 % CFG.dqn_gammas x CFG.dqn_seeds. Every run keeps the checkpoint with the best
 % recovery on its own validation episodes. All runs are then compared on every
@@ -62,7 +62,7 @@ N_SEEDS = 3; GAMMAS = 0.5;
 % monitor: alarm definition, m/n confirmation (M-of-N binary integration, Richards), selected on
 % validation; 4/5 and 5/5 trade a later alarm for fewer false ones
 ALARMS = {'class_drop 3/3', 'class_drop 2/2', 'class_drop 4/5', 'class_drop 5/5'};
-DROP_STEPS = 2;                          % drop alarm: 2 dB below the train-pool threshold (selected on validation)
+DROP_STEPS = [0 2];                      % drop alarm: the train-pool threshold and 2 dB below it (selected on validation)
 % Training reward variants, one entry each: false-switch penalty, scale of the
 % running costs (goodput, spectrum, power, combining) and of the switching cost
 FA_PEN = [80 120 160]; COST_SCALE = [0.5 0.5 0.5]; SW_SCALE = [1 1 1];
@@ -80,7 +80,7 @@ end
 VAL_REPS = 2;                            % validation: every (cell, Eb/N0, geometry) of the split, twice
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
     N_SEEDS = 1; GAMMAS = 0.5; FA_PEN = 80; COST_SCALE = 1; SW_SCALE = 1; ALARMS = {'class_drop 4/5'}; SENS_SCALES = 2; VAL_REPS = 1;
-    DROP_STEPS = 1; H.episodes = 1280; H.buffer = 20000; H.warmup = 2000; H.n_eval = 1;
+    DROP_STEPS = [0 2]; H.episodes = 1280; H.buffer = 20000; H.warmup = 2000; H.n_eval = 1;
 end
 SEEDS = 42 + (0:N_SEEDS-1);
 FA_BOUND = 0.05;                         % one-sided 95% bound of the clean-link false alarms (KPI 6)
@@ -93,7 +93,10 @@ if isfile('data/drop_threshold.mat')
 end
 if ~isempty(DROP_DB), PP.drop_db = DROP_DB; end
 CV = [];                                 % independent clean validation geometries
-if isfile('data/clean_val_pools.mat'), Cv = load('data/clean_val_pools.mat', 'CT'); CV = Cv.CT; clear Cv; end
+if isfile('data/clean_val_pools.mat')
+    Cv = load('data/clean_val_pools.mat', 'CT'); CV = Cv.CT; clear Cv
+    check_det_id(PP, CV, 'train_dqn', 'data/clean_val_pools.mat');
+end
 EBNO_THR = PP.ebno(1);                   % false alarms from the KPI 1 threshold up (KPI 6), fixed on validation
 if isfile('results/eval_detector_metrics.mat')
     Md = load('results/eval_detector_metrics.mat', 'metrics');

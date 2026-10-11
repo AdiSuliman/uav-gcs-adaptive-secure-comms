@@ -6,8 +6,10 @@
 % off-grid check flights of data/check_pools.mat, the leave-one-out agents of
 % data/unknown_threat_agents.mat and the trained policy, all from the same detector
 % (check_det_id.m). Restoration is judged against the same flight's clean link
-% (link_env.m 'flight'). The deployed policy as train_dqn.m chose it (the selected DQN
-% with escalation, or the rule with escalation on its own monitor) runs every flight at
+% (link_env.m 'flight'). Every policy runs with the deployed policy's monitor (alarm,
+% confirmation, drop threshold: the DQN's, or rule_sel's when the rule fallback is
+% deployed), and so does DET's drop alarm. The deployed policy as train_dqn.m chose it
+% (the selected DQN with escalation, or the rule with escalation on its own monitor) runs every flight at
 % the signalling delays DLY (cycles from a decision to the first frame the link runs it
 % on: the model's 1, 2, and 7, about the 141 ms switch Barajas et al. measured); no
 % response, the rule with escalation, the one-step oracle, the random policy and the
@@ -25,15 +27,19 @@
 %          threat that of one of its components; an antenna fault and airframe
 %          shadowing take the same answer, so each counts as detected only as its own
 %          class there (DET_b, beside it, no target: the branch level, either of the two
-%          as one branch lost, branch_level.m). A path-loss step: every attenuated frame
-%          after the same flight's clean link at no_action (the onset), detected by the
-%          fused class or by the monitor's drop alarm (policy_monitor.m, 'class_drop')
+%          as one branch lost, branch_level.m). A path-loss step, alone or in a
+%          combination: every attenuated frame after the same flight's clean link at
+%          no_action (the onset); with the monitor's 'class_drop' alarm the class
+%          path_loss counts only with the drop, so the path-loss component is detected by
+%          the drop alarm alone (policy_monitor.m), the others by their classes; with
+%          'class' by the fused class
 %                                                                               >= 90%
 %   DET_h  DET on the flights whose unmitigated link is not restored (harmed)   >= 90%
 %          (DET_u, DET on the unharmed flights, is reported beside it, no target)
-%   SURV   flights some configuration restores (link_env.m); follower rows: one
-%          without channel_switch; comb rows: without channel_switch and
-%          freq_diversity                                                       >= 90%
+%   SURV   flights with the threat on the air (link_env.m K.on: airframe shadowing only
+%          where the attitude hides an antenna) that some configuration restores
+%          (link_env.m); follower rows: one without channel_switch; comb rows: without
+%          channel_switch and freq_diversity                                    >= 90%
 %   REC    held recovery among the recoverable flights: restored for 5 cycles and
 %          on every cycle after, but one follower re-acquisition of 1 + D cycles
 %          (rollout_policy.m); a flight succeeds when all its episodes do      >= 90%
@@ -65,7 +71,8 @@
 % the clean link, and per band of each (threat, level) over the Eb/N0 from the KPI 1
 % threshold up (fixed on validation; all six points without one); a band commits with
 % the claim's FA and its own clean flights' FA not NOT COMMITTED. Per-point verdicts are
-% for moving flights; hover is hover in calm air (a frozen channel). Edges, every layer
+% for moving flights; hover is hover in wind, the tilt and wobble of hover_attitude.m
+% (HOVER). Edges, every layer
 % apart: fixed-sequence walks that stop at the first point not COMMITTED (each "up to"
 % claim keeps a 5% family error): Eb/N0 from 15 dB down (its km, and x0.63 for every
 % position of a flight, link_budget_table.m), levels from the nominal one down and up,
@@ -76,10 +83,15 @@
 % the nominal level, between the levels at 9 dB, 36 flights each): an "up to" edge that
 % spans a check point NOT COMMITTED stops before it (x); an edge that spans none (levels
 % at another Eb/N0, distance at another level) holds at the grid points it lists only.
-% Overhead pass (overhead_pass.m): the path_loss commitment at the smallest level at or
-% above the drop, COMMITTED when the tracker-lost bound is, NOT COMMITTED when the
-% tracked bound is not; a drop above the top level is not measured. The detector beyond
-% 0-15 dB and between levels: eval_unseen_snr.m and eval_unseen_severity.m.
+% Overhead pass (overhead_pass.m), per altitude, distance and speed band: the pass is a
+% ramp, so the path_loss commitment (at the smallest level at or above the drop) holds
+% only where the drop the monitor reads along it (win_drop_db; a lost tracker's fallback a
+% step on top) reaches the deployed drop threshold; elsewhere the policy sees no drop and
+% the link is as without a response: the no-response PROT at that level, COMMITTED when
+% it is, else UNDETERMINED. COMMITTED when both bounds (tracked, tracker lost) are, NOT
+% COMMITTED when the tracked bound's commitment is not; a drop above the top level is not
+% measured. The detector beyond 0-15 dB and between levels: eval_unseen_snr.m and
+% eval_unseen_severity.m.
 % Level basis: the spoofer at 30 dB, every antenna-fault level (5-31 dB spread evenly over
 % the range the sources back; no source measured a fault depth) and WLAN at 30 dB are
 % assumed levels, the others measured; * marks a level the detector never trained on; the
@@ -98,8 +110,10 @@ end
 Q = load('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'H', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db', ...
     'deployed', 'rule_sel', 'fa_bound_met', 'det_id');
 check_det_id(PP, Q, 'edge_map');
-PP.confirm = Q.confirm; PP.alarm_mode = Q.alarm_mode;           % the monitor of evaluate_policies.m
-if ~isempty(Q.drop_db), PP.drop_db = Q.drop_db; end
+MON = struct('alarm_mode', Q.alarm_mode, 'confirm', Q.confirm, 'drop_db', Q.drop_db);
+if strcmp(Q.deployed, 'rule_sel'), MON = Q.rule_sel; end      % the deployed policy's monitor
+PP.confirm = MON.confirm; PP.alarm_mode = MON.alarm_mode;
+if ~isempty(MON.drop_db), PP.drop_db = MON.drop_db; end
 K = link_env('tables', PP, 'flight');
 C = decision_config();
 p0 = load('params.mat').params;
@@ -109,7 +123,9 @@ TGT = struct('det', 0.90, 'surv', 0.90, 'rec', 0.90, 'prot', 0.90, 'fa', 0.05, '
 DLY = unique([C.switch_delay 2 7], 'stable');   % [cycles] signalling delays, the model's first
 FDL = [0 1 2];                  % [cycles] follower re-acquisition after a hop
 K_READ = -3;                    % [dB] lowest in-flight K near 2.4 GHz (Aoki et al.): second reading of the lowest band
-HOVER = 'hover in calm air (attitude within +-1 deg, Lin 2026; a frozen channel)';   % what the hover flights stand for
+HOVER = sprintf(['hover in wind: the tilt a multirotor holds against it (roll %g..%g deg, pitch %g..%g deg, Polle et ' ...
+    'al.) and a pitch wobble up to %g deg at %g-%g Hz (Banagar & Dhillon); the channel hardly changes'], ...
+    p0.wobble_roll_deg, p0.wobble_pitch_deg, p0.wobble_amp_deg, p0.wobble_freq_hz);   % what the hover flights stand for (hover_attitude.m)
 if exist('SMOKE', 'var') && SMOKE, REPS = 1; B = 400; end       % reduced chain check (run_stage smoke)
 nS = numel(PP.ebno); nC = numel(PP.scen); nD = numel(DLY);
 single_cells = find(ismember(PP.scen, PP.singles) & ~strcmp(PP.scen, 'none'));
@@ -247,6 +263,7 @@ end
 RW = cell(nD, nP); CT = [];
 if isfile('data/clean_test_pools.mat')
     L = load('data/clean_test_pools.mat', 'CT'); CT = L.CT; clear L
+    check_det_id(PP, CT, 'edge_map', 'data/clean_test_pools.mat');
     PPw = PP;
     PPw.pools(:) = {[]};
     PPw.pools(clean_cell, :, :, TEST) = reshape(CT.pools(1, :, :), [1 nS numel(PP.actions)]);
@@ -288,7 +305,7 @@ ii = sub2ind(size(K.recoverable), fc, fs, fsp, fr);
 Z = zeros(nF, nV); E1 = nan(nF, 1);
 FT = struct('c', fc, 'sp', fsp, 's', fs, 'r', fr, 'geo', 1e6 * fsp + 1000 * fs + fr, 'eb', reshape(PP.ebno(fs), [], 1), ...
     'speed', E1, 'alt', E1, 'ksig', E1, 'rho', E1, 'align', E1, 'bank', E1, 'ds', E1, ...
-    'surv', K.recoverable(ii), 'surv_f', RF(ii), 'surv_c', K.recoverable_comb(ii), 'harm', HM(ii), ...
+    'surv', K.recoverable(ii), 'surv_f', RF(ii), 'surv_c', K.recoverable_comb(ii), 'harm', HM(ii), 'on', K.on(ii), ...
     'det_k', zeros(nF, 1), 'detb_k', zeros(nF, 1), 'det_n', zeros(nF, 1), 'link_k', zeros(nF, 1), 'link_n', zeros(nF, 1), ...
     'cl_k', E1, 'cl_n', E1, 'ep_n', Z, 'held_k', Z, 'rec_k', Z, 'lt_k', Z, 'lt_n', Z, 'fa_k', Z, 'fa_n', Z, 'sw_k', Z);
 clear Z RF HM
@@ -353,21 +370,24 @@ for sp = [SPL SPEED]
 end
 ic = IDX(sub2ind(size(IDX), clean_cell + 0 * FT.s, FT.s, FT.sp, FT.r)); m = ic > 0;
 FT.cl_k(m) = FT.link_k(ic(m)); FT.cl_n(m) = FT.link_n(ic(m));
-% The clean-link flights of data/clean_test_pools.mat (split id 6): draws from their seeds
+% The clean-link flights of data/clean_test_pools.mat (split id 6): the draws the pools
+% kept (CT.cov), or, in pools without them, those of the seeds they flew
+% (clean_pool_seed.m)
 CF = take_rows(FT, FT.c == clean_cell & ismember(FT.sp, SPL));
 if ~isempty(CT)
     [s_, r_] = ndgrid(1:nS, 1:CT.n_geom); s_ = s_(:); r_ = r_(:); n = numel(s_);
-    blk = floor((CT.runs(1) - 1) / 100);               % seed block of the clean-link flights (pool_seed.m)
     CW = blank_rows(FT, n);
     CW.c(:) = clean_cell; CW.sp(:) = 6; CW.s = s_; CW.r = r_; CW.geo = 6e6 + 1000 * s_ + r_; CW.eb = reshape(PP.ebno(s_), [], 1);
     CW.speed = CT.speed(sub2ind(size(CT.speed), s_, r_)); CW.align(:) = NaN;
-    for q = 1:n
-        d = flight_draws(pool_seed(1, s_(q), blk, r_(q)), CW.speed(q) / 3.6 * p0.carrier_freq / p0.c_light, p0, ...
-            struct('ebno', PP.ebno(s_(q))));
-        dv = struct('alt', d.alt_m, 'ksig', d.k_sig, 'rho', d.rho, 'bank', field_or_nan(d, 'bank'), ...
-            'ds', field_or_nan(d, 'ds_ns'));
-        for f = fieldnames(dv)', CW.(f{1})(q) = dv.(f{1})(1); end
+    if isfield(CT, 'cov')
+        V = CT.cov;
+    else
+        blk = floor((CT.runs(1) - 1) / 100);           % seed block of the clean-link flights
+        V = flight_cov(arrayfun(@(s) struct('seed', arrayfun(@(k) clean_pool_seed(s, blk, k), 1:CT.n_geom), ...
+            'speed', CT.speed(s, :)), 1:nS, 'UniformOutput', false), PP.ebno, p0);
     end
+    j = sub2ind(size(V.alt_m), s_, r_);
+    CW.alt = V.alt_m(j); CW.ksig = V.k_sig(j); CW.rho = V.rho(j); CW.bank = V.bank(j); CW.ds = V.ds_ns(j);
     for d = 1:nD
         for pk = find(~cellfun(@isempty, RW(d, :)))
             v = var_of(VAR, 'clean', NaN, DLY(d), pk);
@@ -574,7 +594,7 @@ if isfile('data/check_pools.mat')
     okc = Kc.restored & Kc.restored_plr; ik = sub2ind(size(Kc.recoverable), kc, ks, 1 + 0 * kc, kr);
     hmc = ~reshape(okc(:, :, Kc.na, :, :), size(Kc.recoverable));
     Z = zeros(nKF, nD);
-    KF = struct('c', kc, 's', ks, 'r', kr, 'geo', 7e6 + 1000 * ks + kr, 'surv', Kc.recoverable(ik), 'harm', hmc(ik), ...
+    KF = struct('c', kc, 's', ks, 'r', kr, 'geo', 7e6 + 1000 * ks + kr, 'surv', Kc.recoverable(ik), 'harm', hmc(ik), 'on', Kc.on(ik), ...
         'det_k', zeros(nKF, 1), 'det_n', zeros(nKF, 1), 'link_k', zeros(nKF, 1), 'link_n', zeros(nKF, 1), ...
         'cl_k', nan(nKF, 1), 'cl_n', nan(nKF, 1), 'ep_n', Z, 'held_k', Z, 'rec_k', Z, 'lt_k', Z, 'lt_n', Z, 'fa_k', Z, 'fa_n', Z);
     for d = 1:nD
@@ -785,17 +805,25 @@ for f = {'det', 'surv', 'rec', 'sys', 'commit'}
     RN.(f{1}) = E;
 end
 
-%% 7. Overhead pass: the path_loss commitment at the drop of each bound
+%% 7. Overhead pass: per altitude, distance and speed band, the path_loss commitment at
+% the drop of each bound where the monitor reads the drop, the no-response PROT where not
+if ~isfield(OHP, 'win_drop_db'), OHP = overhead(); end        % a pass file without the read drop
 pl = tc(strcmp(PP.scen(tc), 'path_loss'));
 [lvs, o] = sort(PP.level(pl)); ip = arrayfun(@(c) find(tc == c), pl(o));
-OV = nan(numel(OHP.alt_m), numel(OHP.ebno)); OLt = OV; OLl = OV;
+nB0 = size(OHP.win_drop_db, 3);
+OV = nan(numel(OHP.alt_m), numel(OHP.ebno), nB0); OLt = OV; OLl = OV;
+vn = var_of(VAR, 'static', NaN, DLY(1), find(strcmp(POL, 'none'), 1));   % no response
+thr_ohp = Inf; if strcmp(PP.alarm_mode, 'class_drop') && isfield(PP, 'drop_db'), thr_ohp = PP.drop_db; end
 for j = 1:numel(OHP.ebno)
     s = find(PP.ebno == OHP.ebno(j), 1);
     if isempty(s) || isempty(ip), continue; end
+    NR = arrayfun(@(i) pol_layers(take_rows(FTi{i}, FTi{i}.s == s), vn, 'surv', TGT, B).prot.verdict, ip);
     for h = 1:numel(OHP.alt_m)
-        [vtk, OLt(h, j)] = level_verdict(OHP.drop_tracked_db(h, j), lvs, X1.commit(ip, s));
-        [vl, OLl(h, j)] = level_verdict(OHP.drop_lost_db(h, j), lvs, X1.commit(ip, s));
-        if vl == 1, OV(h, j) = 1; elseif vtk == -1, OV(h, j) = -1; else, OV(h, j) = 0; end
+        for b = 1:nB0                                 % a lost tracker's fallback is a step, read in full
+            w = OHP.win_drop_db(h, j, b);
+            [OV(h, j, b), OLt(h, j, b), OLl(h, j, b)] = overhead_verdict(OHP.drop_band_db(h, j, b) + [OHP.track_db OHP.lost_db], ...
+                [w, max(w, OHP.lost_db)] >= thr_ohp, lvs, X1.commit(ip, s), NR);
+        end
     end
 end
 
@@ -1127,14 +1155,17 @@ for i = 1:nT
         per_layer(arrayfun(@(E) num_txt(E.kmin_read(i), '%g dB'), q, 'UniformOutput', false))); %#ok<SAGROW>
 end
 sm{end+1} = '';
-sm{end+1} = sprintf(['--- Overhead pass (overhead_pass.m, results/overhead_pass.mat): path_loss COMMITTED (D%d) at the ' ...
-    'smallest level >= the drop; C when the tracker-lost bound (+%g dB) is, N when the tracked bound (+%.2f dB) is not; ' ...
-    '* the lost bound above %g dB, not measured ---'], DLY(1), OHP.lost_db, OHP.track_db, OHP.pl_top_db);
+sm{end+1} = sprintf(['--- Overhead pass (overhead_pass.m, results/overhead_pass.mat), one letter per speed band (from %s ' ...
+    'km/h): where the drop every flight of the band reads along the pass reaches the deployed threshold (%g dB), path_loss COMMITTED ' ...
+    '(D%d) at the smallest level >= the drop, else the no-response PROT there (C, or U); C when both the tracked ' ...
+    '(+%.2f dB) and the tracker-lost (+%g dB, a step) bounds are, N when the tracked one is not; * the lost bound ' ...
+    'above %g dB, not measured ---'], strjoin(compose('%.0f', OHP.win_v_kmh), '/'), thr_ohp, DLY(1), OHP.track_db, ...
+    OHP.lost_db, OHP.pl_top_db);
 x = arrayfun(@(e, r) sprintf('%g dB %.2f km', e, r), OHP.ebno, OHP.r0_km, 'UniformOutput', false);
 sm{end+1} = sprintf('%-10s %s', 'altitude', sprintf('%-16s', x{:}));
 for h = 1:numel(OHP.alt_m)
-    x = arrayfun(@(j) sprintf('%s%s', vsym_nan(OV(h, j)), repmat('*', 1, isnan(OLl(h, j)) && ~isnan(OV(h, j)))), ...
-        1:numel(OHP.ebno), 'UniformOutput', false);
+    x = arrayfun(@(j) sprintf('%s%s', strjoin(arrayfun(@(b) vsym_nan(OV(h, j, b)), 1:nB0, 'UniformOutput', false), ''), ...
+        repmat('*', 1, any(isnan(OLl(h, j, :)) & ~isnan(OV(h, j, :))))), 1:numel(OHP.ebno), 'UniformOutput', false);
     sm{end+1} = sprintf('%-10s %s', sprintf('%g m', OHP.alt_m(h)), sprintf('%-16s', x{:})); %#ok<SAGROW>
 end
 sm{end+1} = '';
@@ -1211,10 +1242,11 @@ EM = struct('ebno', PP.ebno, 'km', km, 'all_pos', LB.all_pos, 'targets', TGT, 'n
     'between', between, 'delays', DLY, 'follower_delays', FDL, 'pt', PT, 'clean', CL, 'commit', CMS, 'floor', FL, ...
     'unknown', UK, 'bands', {BD}, 'bands_skipped', {skipped}, 'bt', BT, 'cb', CB, 'walks', {{WK.name}}, 'dist', {ED}, ...
     'clean_dist', CE, 'sev', {SV}, 'threats', {THR}, 'follower', FRG, 'inside', INR, 'runs', RN, ...
-    'ohp', struct('alt_m', OHP.alt_m, 'ebno', OHP.ebno, 'r0_km', OHP.r0_km, 'verdict', OV, 'level_tracked', OLt, ...
-    'level_lost', OLl), 'b4', B4, 'b4s', B4s, 'fa_bound_met', FAV == 1, 'fa_rate', {FR}, 'fa_rate_all', FRall, ...
+    'ohp', struct('alt_m', OHP.alt_m, 'ebno', OHP.ebno, 'r0_km', OHP.r0_km, 'band_kmh', OHP.win_v_kmh, 'verdict', OV, ...
+    'level_tracked', OLt, 'level_lost', OLl, 'win_drop_db', OHP.win_drop_db, 'drop_thr_db', thr_ohp), ...
+    'b4', B4, 'b4s', B4s, 'fa_bound_met', FAV == 1, 'fa_rate', {FR}, 'fa_rate_all', FRall, ...
     'fa_commit', FAP, 'hover_label', HOVER, 'check', {CKV}, 'predicted_vs_committed', AGR, 'det_id', PP.det_id, ...
-    'created', datestr(now));
+    'policy_stamp', policy_stamp(Q), 'monitor', MON, 'created', datestr(now));
 inom = find(ismember(tc, nom));
 cnt_of = @(x, m) [sum(x(m, :) == 1, 'all'), sum(x(m, :) == -1, 'all'), sum(x(m, :) == 0, 'all')];
 EDGE_NUM = struct('ebno', PP.ebno, 'km', km, 'ebno_thr', ebno_thr, 'deployed', NAMES.(dep), 'n_min', N_MIN, ...
@@ -1238,7 +1270,7 @@ EDGE_NUM = struct('ebno', PP.ebno, 'km', km, 'ebno_thr', ebno_thr, 'deployed', N
     'link_n', [CL.link.n], 'fa_edge_db', [CE.fa.edge], 'link_edge_db', CE.link.edge, 'ohp_verdict', OV, 'ohp_alt_m', OHP.alt_m, ...
     'ohp_r0_km', OHP.r0_km, 'b4', B4, 'fa_bound_met', FAV == 1, 'fa_per_hour', FRall.per_hour, ...
     'fa_per_hour_hi', FRall.per_hour_hi, 'fa_mtbf_s', FRall.mtbf_s, 'check_commit', reshape([CKV.commit], nD, []), ...
-    'predicted_vs_committed', AGR, 'bands_skipped', {skipped}, ...
+    'predicted_vs_committed', AGR, 'bands_skipped', {skipped}, 'det_id', PP.det_id, 'policy_stamp', policy_stamp(Q), ...
     'det_split', struct('harmed', [cnt_of(VD.deth, isg); cnt_of(VD.deth, ~isg)], ...
     'unharmed', [cnt_of(VD.detu, isg); cnt_of(VD.detu, ~isg)], 'n_harmed', reshape([PT.deth.n], nT, nS), ...
     'n_unharmed', reshape([PT.detu.n], nT, nS), 'branch', [cnt_of(VD.detb, isg); cnt_of(VD.detb, ~isg)]));
@@ -1278,11 +1310,6 @@ function V = fa_claim(CF, v, e, thr, TGT, B)
 % from the KPI 1 threshold thr up (KPI 6), from e up when e lies below it.
 F = take_rows(CF, CF.eb >= min(e, thr) - 1e-9);
 V = edge_verdict(F.fa_k(:, v), F.fa_n(:, v), F.geo, TGT.fa, 'le', true, B);
-end
-
-function V = surv_layer(F, sk, TGT, B)
-% Flights some configuration recovers (sk: the recoverability of the set).
-V = edge_verdict(double(F.(sk)), ones(size(F.geo)), F.geo, TGT.surv, 'ge', true, B);
 end
 
 function P = pol_layers(F, v, sk, TGT, B)
@@ -1411,12 +1438,6 @@ for k = {i0:numel(vd), i0:-1:1}
 end
 end
 
-function [v, lv] = level_verdict(drop, lvs, vds)
-% Verdict at the smallest level at or above the drop; NaN beyond the top level.
-k = find(lvs >= drop, 1);
-if isempty(k), v = NaN; lv = NaN; else, v = vds(k); lv = lvs(k); end
-end
-
 function m = in_band(F, b)
 % Flights of band b: [lo, hi), the top band of an axis closed; edge speeds exactly.
 switch b.axis
@@ -1444,54 +1465,6 @@ br = ismember(classes, {'antenna_fault', 'airframe_shadowing'});
 ok = [okb & (~br | ismember(classes, comps)); okb];
 end
 
-function [hit, on] = det_frames(P, Pc, scen, ok_c, PP)
-% DET of every frame of a pool at no_action: hit (frames x rows of ok_c, det_classes.m),
-% the fused class is one ok_c counts for the threat; on, the threat is on the air
-% (threat_active.m). A path-loss cell starts with its full loss, so every flight is read
-% after the same flight's clean link (Pc, the onset between them): the fused class over
-% the joined frames, or the monitor's drop alarm, the Eb/N0 estimate's 3-cycle median
-% that many dB below the median of the last 10 clean cycles (policy_monitor.m).
-on = reshape(threat_active(scen, P.act), [], 1);
-if ~strcmp(scen, 'path_loss') || isempty(Pc) || isempty(Pc.ber)
-    k = fused_class(P.probs, struct('run', P.run, 'pos', run_pos(P.run), 'gain_ant', P.gant, 'feats_raw', P.feat), ...
-        PP.fuse, PP.fuse_N);
-    hit = ok_c(:, k(:))';
-    return
-end
-C = decision_config();
-dd = C.drop_db; if isfield(PP, 'drop_db') && ~isempty(PP.drop_db), dd = PP.drop_db; end
-use_drop = isfield(PP, 'alarm_mode') && strcmp(PP.alarm_mode, 'class_drop');
-eb = @(F) double(F(:, feature_index('sinr')) + F(:, feature_index('iot'))) + 10*log10(PP.sps) - 10*log10(PP.bps);
-hit = false(numel(P.run), size(ok_c, 1));
-[ur, ~, ir] = unique(P.run, 'stable');
-J = struct('probs', [], 'gant', [], 'feat', [], 'run', [], 'part', []);
-for r = 1:numel(ur)
-    ic = find(Pc.run == ur(r)); ip = find(ir == r);
-    J.probs = [J.probs; Pc.probs(ic, :); P.probs(ip, :)]; J.gant = [J.gant; Pc.gant(ic, :); P.gant(ip, :)];
-    J.feat = [J.feat; Pc.feat(ic, :); P.feat(ip, :)]; J.run = [J.run; repmat(ur(r), numel(ic) + numel(ip), 1)];
-    J.part = [J.part; zeros(numel(ic), 1); ip(:)];
-end
-k = fused_class(J.probs, struct('run', J.run, 'pos', run_pos(J.run), 'gain_ant', J.gant, 'feats_raw', J.feat), ...
-    PP.fuse, PP.fuse_N);
-e = eb(J.feat);
-for r = 1:numel(ur)
-    j = find(J.run == ur(r)); jc = j(J.part(j) == 0); jp = j(J.part(j) > 0);
-    hit(J.part(jp), :) = ok_c(:, k(jp))';
-    if ~use_drop || isempty(jc), continue; end
-    ref = median(e(jc(max(1, end - 9):end)));
-    for q = jp(:)'
-        hit(J.part(q), :) = hit(J.part(q), :) | ref - median(e(max(j(1), q - 2):q)) >= dd;
-    end
-end
-end
-
-function pos = run_pos(run)
-% Position of every frame in its run (the frames of a run are consecutive).
-st = [true; diff(run(:)) ~= 0];
-i0 = find(st);
-pos = (1:numel(run))' - i0(cumsum(st)) + 1;
-end
-
 function S = take_rows(S, m)
 f = fieldnames(S);
 for i = 1:numel(f), S.(f{i}) = S.(f{i})(m, :); end
@@ -1508,10 +1481,6 @@ f = fieldnames(S);
 for i = 1:numel(f)
     if islogical(S.(f{i})), S.(f{i}) = false(n, size(S.(f{i}), 2)); else, S.(f{i}) = zeros(n, size(S.(f{i}), 2)); end
 end
-end
-
-function x = field_or_nan(d, f)
-if isfield(d, f), x = d.(f); else, x = NaN; end
 end
 
 function r = rate_of(F, m, v, f)

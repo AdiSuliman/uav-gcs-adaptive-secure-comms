@@ -4,7 +4,7 @@ function [seed, v_kmh] = pool_seed(sc, s, sp, r, vrange)
 %       fly the same geometries, so an episode's frames before and after the
 %       onset come from one flight); 2 the off-grid check flights
 %       (build_check_pools.m, block 10); 3 and 5 the clean-link geometries 101-200
-%       and 201-300 of build_clean_test_pools.m (blocks 4 and 15)
+%       and 201-300 of build_clean_test_pools.m (blocks 4 and 15, clean_pool_seed.m)
 %   s   Eb/N0 index
 %   sp  seed block: 1 train, 5 validation, 14 test, 16 edge-speed and 17 second test
 %       pools (build_policy_pools.m); 4 clean validation and 15 clean test geometries
@@ -13,12 +13,16 @@ function [seed, v_kmh] = pool_seed(sc, s, sp, r, vrange)
 %       chain check (run_stage smoke), so its flights are never test flights. Blocks 2,
 %       3, 6 to 9, 10, 11 and 12 hold the test flights of earlier test readings and are
 %       not used again.
-%   r   geometry (at most 99 per block)
+%   r   geometry, 1 to 99, or 100 (the clean-link pools' hundredth: the next block's
+%       geometry 0, which no block uses); any other value would take the seed of another
+%       block's geometry, so it stops
 %   The seed is shared by every configuration (common random numbers); the speed
 %   comes from the seed's speed stream (seed_stream.m), uniform in vrange [km/h] (one
 %   stratum of the speed range in a stratified design, pool_geometries.m).
 %   Blocks 10 and above take their own seed range, so no two (Eb/N0, block,
 %   geometry) triples share a seed.
+assert(all(r(:) >= 1 & r(:) <= 100 & r(:) == round(r(:))), ...
+    'pool_seed: geometry %s outside 1-100 of a seed block (clean_pool_seed.m maps more)', mat2str(r));
 if sp < 10
     seed = 800000 + 20000*sc + 1000*s + 100*sp + r;
 else

@@ -11,8 +11,9 @@ function rekey_pools(files)
 %   Every file is copied to <name>_before_rekey_<time>.mat before it is saved.
 %   files  pool files (default: data/policy_pools.mat, then data/check_pools.mat,
 %          data/clean_val_pools.mat, data/clean_test_pools.mat, so the check pools stay
-%          newer than the policy pools); a file without the keys (the clean-link pools)
-%          is left as it is
+%          newer than the policy pools); a file without the keys is left as it is; the
+%          clean-link pools carry det_id alone (build_clean_test_pools.m) and take the new
+%          one when theirs is the old det_id of pools re-keyed before them in this call
 %   Run from the repository root.
 if nargin < 1
     files = {'data/policy_pools.mat', 'data/check_pools.mat', 'data/clean_val_pools.mat', 'data/clean_test_pools.mat'};
@@ -21,7 +22,7 @@ KEYS = {'fuse', 'fuse_N', 'q_thr', 'det_id'};
 FRAME = {'probs', 'maha', 'feat', 'gant', 'ber', 'fer', 'crc', 'run', 'aoa', 'act', 'act_comp', 'ebno_rx'};   % pool_cell.m
 KNOWN = [KEYS, {'scen', 'sev', 'level', 'sev_names', 'splits', 'cell_splits', 'cell_geo', 'threats', 'singles', ...
     'combos', 'ebno', 'actions', 'ngeo', 'ncomb', 'nhover', 'lhs', 'speed_range', 'speed_out', 'speed', 'cov', ...
-    'alt', 'ksig', 'gp', 'bw', 'pw', 'pools', 'mber', 'mfer', 'clean', 'clean_fer', 'classes', 'maha_thr', ...
+    'alt', 'ksig', 'gp', 'bw', 'pw', 'cfg_gain_db', 'pools', 'mber', 'mfer', 'clean', 'clean_fer', 'classes', 'maha_thr', ...
     'unk_win', 'F_SUB', 'fec_frames', 'runs', 'model_tag', 'aoa_random', 'k_random', 'sps', 'bps', 'feat_names', ...
     'created', 'kind', 'cell_ebs', 'ebno_grid', 'e_level', 'family', 'block'}];   % build_policy_pools.m, build_check_pools.m
 D = load('data/trained_detector.mat', 'classes', 'ood', 'trained_at');
@@ -30,9 +31,23 @@ FZ = fusion_model();
 UW = 1; if isfield(D.ood, 'win'), UW = D.ood.win; end
 classes = cellstr(string(D.classes(:)'));
 new_id = detector_id(D.trained_at, D.ood, FZ, T.maha);
+moved = {};                                             % det_id of the pools re-keyed in this call
 for i = 1:numel(files)
     f = files{i};
     if ~isfile(f), fprintf('%s: absent\n', f); continue; end
+    if ismember('CT', who('-file', f))
+        L = load(f);
+        if ~isfield(L.CT, 'det_id'), fprintf('%s: no detector keys, left as it is\n', f); continue; end
+        if strcmp(L.CT.det_id, new_id), fprintf('%s: already keyed to this fusion\n', f); continue; end
+        if ~ismember(L.CT.det_id, moved)
+            fprintf('%s: det_id %s is not that of pools re-keyed here, left as it is\n', f, L.CT.det_id); continue
+        end
+        bak = backup(f);
+        fprintf('%s: det_id %s -> %s (backup %s)\n', f, L.CT.det_id, new_id, bak);
+        L.CT.det_id = new_id;
+        save(f, '-struct', 'L', '-v7.3');
+        continue
+    end
     var = intersect({'PP', 'CK'}, who('-file', f));
     if isempty(var), fprintf('%s: no detector keys, left as it is\n', f); continue; end
     L = load(f); X = L.(var{1});
@@ -52,16 +67,22 @@ for i = 1:numel(files)
             'not only another fusion; rebuild the pools'], f);
     end
     if strcmp(old_id, new_id), fprintf('%s: already keyed to this fusion\n', f); continue; end
-    bak = sprintf('%s_before_rekey_%s.mat', f(1:end-4), char(datetime('now', 'Format', 'yyyyMMdd_HHmmss')));
-    if isfile(bak), error('rekey_pools:backup', '%s exists', bak); end
-    [ok, msg] = copyfile(f, bak);
-    if ~ok || dir(bak).bytes ~= dir(f).bytes, error('rekey_pools:backup', 'no backup of %s: %s', f, msg); end
+    bak = backup(f);
     fprintf('%s: fusion %d -> %d inputs, N %d -> %d, q_thr %.2f -> %.2f dB, det_id %s -> %s (backup %s)\n', f, ...
         n_inputs(X.fuse), n_inputs(FZ.FM), X.fuse_N, FZ.N, X.q_thr, FZ.q_thr, X.det_id, new_id, bak);
+    moved{end+1} = X.det_id; %#ok<AGROW>
     X.fuse = FZ.FM; X.fuse_N = FZ.N; X.q_thr = FZ.q_thr; X.det_id = new_id;
     L.(var{1}) = X;
     save(f, '-struct', 'L', '-v7.3');
 end
+end
+
+function bak = backup(f)
+% Copy of f as <name>_before_rekey_<time>.mat, checked by its size.
+bak = sprintf('%s_before_rekey_%s.mat', f(1:end-4), char(datetime('now', 'Format', 'yyyyMMdd_HHmmss')));
+if isfile(bak), error('rekey_pools:backup', '%s exists', bak); end
+[ok, msg] = copyfile(f, bak);
+if ~ok || dir(bak).bytes ~= dir(f).bytes, error('rekey_pools:backup', 'no backup of %s: %s', f, msg); end
 end
 
 function n = n_inputs(FM)

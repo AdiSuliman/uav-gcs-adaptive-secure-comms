@@ -21,6 +21,16 @@
 %            gcs_pointing.m)
 %   lost     plus the omni fallback of a tracker that lost the UAV (gcs_ant_dbi - gcs_omni_dbi)
 % A bound above the top path-loss level (22 dB) is beyond the measured levels.
+% The pass is a ramp, not the step the path-loss pools fly: the link monitor reads a drop
+% as the median of its last 10 cycles minus that of the last 3 (policy_monitor.m), so a
+% slow pass may never reach the drop alarm's threshold, and a fast one crosses the narrow
+% null overhead within fewer cycles than the medians span. Per speed band, the largest
+% drop the monitor reads along the pass (monitor_window_drop.m, one cycle per decision
+% period), the smallest over the band's speeds (every 2 km/h, both ends), the wings-level
+% pass and the banked pass at every fixed bearing of the GCS (win_drop_db): the drop every
+% flight of the band reads; a tracker that loses the UAV adds its fallback as a step, read
+% in full. edge_map.m commits the path_loss level only where the read drop reaches the
+% deployed threshold.
 % Output: results/overhead_pass.txt, results/overhead_pass.mat
 
 S = load('params.mat'); p = S.params;
@@ -48,6 +58,27 @@ for i = 1:numel(H_M)
 end
 A = max(AB, [], 3);
 At = A + TRACK_DB; Al = A + LOST_DB;
+DT = C.period_ms / 1000;                       % [s] one decision cycle
+W = zeros(numel(H_M), numel(R0_KM), numel(BK));
+for i = 1:numel(H_M)
+    for j = 1:numel(R0_KM)
+        [~, r0, d] = overhead_drop_db(H_M(i), R0_KM(j), hG, p.uav_null_db);
+        for b = 1:numel(BK)
+            [~, rb] = overhead_drop_db(H_M(i), R0_KM(j), hG, p.uav_null_db, BK(b));
+            ra = [r0; rb];                     % wings level, then banked at every bearing
+            vs = linspace(VB(b), VB(b + 1), max(2, ceil((VB(b + 1) - VB(b)) / 2) + 1));   % the band's speeds [km/h]
+            w = Inf;
+            for v = vs
+                for k = 1:size(ra, 1)
+                    w = min(w, pass_drop(ra(k, :), d, v / 3.6, DT));
+                    if w == 0, break; end
+                end
+                if w == 0, break; end
+            end
+            W(i, j, b) = w;
+        end
+    end
+end
 
 rep = {'=== OVERHEAD PASS: our signal relative to the cruise point of the flight ===', ...
     sprintf(['Dipole pattern floored at %g dB directly below (Badi et al.); free space; GCS antenna on a %g m mast; ' ...
@@ -72,6 +103,15 @@ for b = 1:numel(BK)
     x = AB(:, :, b);
     rep{end+1} = sprintf('  %5.1f-%5.1f km/h, bank %4.1f deg: %.1f dB', VB(b), VB(b+1), BK(b), max(x(:))); %#ok<SAGROW>
 end
+rep{end+1} = '';
+rep{end+1} = sprintf(['Largest drop the link monitor reads along the pass [dB] (10-cycle reference minus 3-cycle median, ' ...
+    '%g ms per cycle), the smallest over each band''s speeds, wings level and every bearing banked:'], C.period_ms);
+for i = 1:numel(H_M)
+    for j = 1:numel(R0_KM)
+        rep{end+1} = sprintf('  %4g m, %s (pass drop %.1f dB): %s', H_M(i), hd{j}, A(i, j), strjoin(arrayfun(@(b) ...
+            sprintf('%.0f-%.0f km/h %.1f', VB(b), VB(b + 1), W(i, j, b)), 1:numel(BK), 'UniformOutput', false), ' | ')); %#ok<SAGROW>
+    end
+end
 rep{end+1} = sprintf(['Largest drop of our signal below its cruise level during the pass: %.1f dB with the dipole ' ...
     'alone (%.1f dB wings level), %.1f dB with the tracker lost (the jammer-to-signal ratio rises by the same).'], ...
     max(A(:)), max(A0(:)), max(Al(:)));
@@ -81,8 +121,17 @@ fprintf('%s\n', rep{:});
 OHP = struct('alt_m', H_M, 'ebno', EBNO, 'r0_km', R0_KM, 'gcs_h_m', hG, 'null_db', p.uav_null_db, ...
     'drop_db', A, 'track_db', TRACK_DB, 'lost_db', LOST_DB, 'drop_tracked_db', At, 'drop_lost_db', Al, ...
     'drop_level_db', A0, 'drop_band_db', AB, 'band_kmh', VB, 'bank_deg', BK, ...
-    'pl_top_db', PL_TOP, 'el_rate_dps', rate, 'v_kmh', p.speed_kmh_max, 'created', datestr(now));
+    'pl_top_db', PL_TOP, 'el_rate_dps', rate, 'v_kmh', p.speed_kmh_max, 'win_drop_db', W, 'win_v_kmh', VB(1:end-1), ...
+    'period_ms', C.period_ms, 'created', datestr(now));
 save('results/overhead_pass.mat', 'OHP');
+
+function w = pass_drop(rel, d, v, dt)
+% Largest drop the monitor reads along a pass flown at v [m/s] from the cruise point
+% (d(end)) over the GCS and out again, the level rel at the horizontal distances d.
+if v <= 0, w = 0; return; end
+s = 0:v * dt:2 * d(end);
+w = monitor_window_drop(interp1(d, rel, abs(d(end) - s)));
+end
 
 function b = bank_top(v_kmh, p)
 % Largest bank of a coordinated turn at v_kmh [km/h]: bank_angle.m at the largest heading

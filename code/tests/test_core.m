@@ -2836,3 +2836,427 @@ end
 function v = ternary_(c, a, b)
 if c, v = a; else, v = b; end
 end
+
+%% ---------- known gains, link budget, evaluation identity ----------
+function test_config_gain(tc)
+% The known Eb/N0 gain of every configuration: the power step of power_control, the
+% processing gain of rate_reduce, both together, none for the rest; from the pools when
+% they carry it, from the params otherwise.
+p = base_params(); A = policy_actions();
+g = config_gain_db(A, p);
+gr = 10*log10(p.cm_rate_factor);
+for a = 1:numel(A)
+    e = power_step_db(p) * contains(A{a}, 'power_control') + gr * contains(A{a}, 'rate_reduce');
+    verifyEqual(tc, g(a), e, 'AbsTol', 1e-9, A{a});
+end
+verifyEqual(tc, config_gain_db(struct('actions', {A}, 'cfg_gain_db', 1:numel(A))), 1:numel(A));
+verifyEqual(tc, config_gain_db(struct('actions', {A})), g, 'AbsTol', 1e-9);     % params.mat of this folder
+verifyEqual(tc, config_gain_db({'power_control', 'rate_reduce'}, struct()), [6 10*log10(4)], 'AbsTol', 1e-9);
+end
+
+function test_monitor_known_gain(tc)
+% A configuration held on a clean link and released: the frames received with
+% power_control or rate_reduce+power_control carry its known gain in the Eb/N0 estimate, and
+% the monitor's drop memory takes it out, so the release reads no drop and raises no alarm;
+% without the compensation the release reads the gain as a drop. The estimate itself (the
+% degradation reference) stays as measured.
+A = policy_actions(); na = find(strcmp(A, 'no_action'));
+cls = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', 'antenna_fault', ...
+    'benign_interference', 'sweeping_jammer', 'tone_jamming', 'airframe_shadowing'};
+p = base_params(); gk = config_gain_db(A, p);
+PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0, 'confirm', [2 2], ...
+    'alarm_mode', 'class_drop', 'drop_db', 3, 'cfg_gain_db', gk);
+o = struct('probs', double(strcmp(cls, 'none')), 'unknown', false, 'feat', zeros(1, numel(link_features('names'))));
+o.feat(feature_index('log_ber')) = -6;
+e0 = 12;                                                        % Eb/N0 of the link without any gain
+for c = {'power_control', 'rate_reduce+power_control'}
+    ac = find(strcmp(A, c{1}));
+    seq = [na * ones(1, 12), ac * ones(1, 12), na * ones(1, 8)];
+    for comp = [true false]
+        PPc = PP; if ~comp, PPc.cfg_gain_db = zeros(1, numel(A)); end
+        m = policy_monitor('init', 1, numel(A)); dr = false(size(seq)); mx = 0;
+        for t = 1:numel(seq)
+            x = o; x.cfg_link = seq(t);
+            x.feat(feature_index('sinr')) = e0 + gk(seq(t)) - 10*log10(4) + 10*log10(2);   % as the frame shows it
+            [m, M] = policy_monitor('update', m, x, PPc, seq(t));
+            m = policy_monitor('change', m, t < numel(seq) && seq(t + 1) ~= seq(t));
+            dr(t) = M.drop_alarm; mx = max(mx, M.drop);
+            verifyEqual(tc, M.ebno_est, e0 + gk(seq(t)), 'AbsTol', 1e-9);
+        end
+        if comp
+            verifyFalse(tc, any(dr), c{1}); verifyLessThan(tc, mx, 1e-9);
+        else
+            verifyTrue(tc, any(dr(25:end)), c{1}); verifyEqual(tc, mx, gk(ac), 'AbsTol', 1e-9);
+        end
+    end
+end
+end
+
+function test_rule_budget_match(tc)
+% The rule's answer to a loss of our signal is a link-budget match: the smallest
+% link-budget gain that covers the drop, the largest when none does, the configuration in
+% use when it already covers it; without the budget the class mapping as before. In the
+% closed loop a 3 dB step takes power_control and a 5 dB step rate_reduce, once.
+p = base_params(); A = policy_actions(); gk = config_gain_db(A, p);
+lb = {'power_control', 'rate_reduce', 'rate_reduce+power_control'};
+B = @(d, cur) struct('drop_db', d, 'current', cur, 'current_db', gk(strcmp(A, cur)), 'names', {lb}, ...
+    'gain_db', arrayfun(@(k) gk(strcmp(A, lb{k})), 1:3));
+verifyEqual(tc, rule_based_policy('none', false, 0, -Inf, 3, true, B(3, 'no_action')), 'power_control');
+verifyEqual(tc, rule_based_policy('none', true, 0, -Inf, 3, true, B(5, 'no_action')), 'rate_reduce');
+verifyEqual(tc, rule_based_policy('unknown', false, 0, -Inf, 3, true, B(8, 'no_action')), 'rate_reduce+power_control');
+verifyEqual(tc, rule_based_policy('none', false, 0, -Inf, 3, true, B(30, 'power_control')), 'rate_reduce+power_control');
+verifyEqual(tc, rule_based_policy('none', false, 0, -Inf, 3, true, B(8, 'rate_reduce+power_control')), 'rate_reduce+power_control');
+verifyEqual(tc, rule_based_policy('path_loss', false, 0, -Inf, 3, true, B(5, 'no_action')), 'rate_reduce');
+verifyEqual(tc, rule_based_policy('path_loss', false, 0, -Inf, 3, false, B(-0.5, 'no_action')), 'no_action');
+verifyEqual(tc, rule_based_policy('none', false, 0, 10, 3, true, B(5, 'no_action')), 'no_action');    % interference in the slot
+verifyEqual(tc, rule_based_policy('jamming', false, 0, -Inf, 3, true, B(5, 'no_action')), 'channel_switch');
+verifyEqual(tc, rule_based_policy('path_loss'), 'rate_reduce+power_control');
+cls = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', 'antenna_fault', ...
+    'benign_interference', 'sweeping_jammer', 'tone_jamming', 'airframe_shadowing'};
+PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0, 'confirm', [2 2], ...
+    'alarm_mode', 'class_drop', 'drop_db', 2.5, 'cfg_gain_db', gk);
+o = struct('probs', double(strcmp(cls, 'none')), 'unknown', false, 'feat', zeros(1, numel(link_features('names'))));
+o.feat(feature_index('log_ber')) = -6;
+na = find(strcmp(A, 'no_action'));
+for st = [3 5; find(strcmp(A, 'power_control')), find(strcmp(A, 'rate_reduce'))]
+    m = []; cfg = na; ch = [];
+    for k = 1:40
+        x = o; x.cfg_link = cfg;
+        x.feat(feature_index('sinr')) = 12 - st(1) * (k > 12) + gk(cfg) - 10*log10(2);
+        [a, m] = policy_decide('rule_esc', x, cfg, m, PP, []);
+        if a ~= cfg, ch(end+1) = a; end %#ok<AGROW>
+        cfg = a;
+    end
+    verifyEqual(tc, ch, st(2));
+end
+end
+
+function test_escalation_needs_confirmation(tc)
+% Escalation, as every change of the rule and the table, waits for a confirmed alarm: with
+% 5-of-5 confirmation three degraded cycles in an applied configuration do not escalate;
+% the fifth does.
+A = policy_actions();
+cls = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', 'antenna_fault', ...
+    'benign_interference', 'sweeping_jammer', 'tone_jamming', 'airframe_shadowing'};
+c0 = find(strcmp(A, rule_based_policy('unknown', true, 0)));   % the rule's own answer: it keeps it
+PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0, 'alarm_mode', 'class');
+obs = struct('probs', zeros(1, numel(cls)), 'unknown', true, 'feat', zeros(1, numel(link_features('names'))), 'cfg_link', c0);
+obs.feat(feature_index('log_ber')) = -1;
+for cf = {[2 2], [5 5]}
+    own = struct('monitor', struct('alarm_mode', 'class', 'confirm', cf{1}, 'drop_db', []));
+    m = []; esc = 0;
+    for k = 1:6
+        [a, m, d] = policy_decide('rule_esc', obs, c0, m, PP, [], own);
+        if d.escalated, esc = k; break; end
+        verifyEqual(tc, a, c0);
+    end
+    verifyEqual(tc, esc, max(decision_config().esc, cf{1}(1)));
+end
+end
+
+function test_rate_reduce_chip_level(tc)
+% rate_reduce spreads each bit over cm_rate_factor symbols at the same rate and power:
+% the simulated field is the despread link, our signal up by the processing gain,
+% and the receiver's level measurements, taken before despreading, show the chip-rate
+% field: rssi, the detector image and the antennas' channel gains of the same flight
+% stay those of no_action, while the despread SINR and the channel estimate's margin over
+% its noise (despread pilots) rise by the gain. The counterfeit spoofer, not spread like
+% our signal, keeps its power: its field drops by the gain.
+p = base_params(); p.quiet_build = true; p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false;
+p.gcs_tracked = false; p.k_random = false; p.gcs_aoa_random = false; p.body_random = false; p.tdl = false;
+mdl = 'UAV_GCS_Threat_Link'; fs = p.symbol_rate * p.sps; nv = thermal_nv(p);
+A = {'no_action', 'rate_reduce'}; gr = 10*log10(p.cm_rate_factor);
+for thr = {'none', 'jamming'}                                  % the clean link, and a 10 dB jammer
+    p.active_threat = thr{1}; p.jsr_db = 10;
+    [rs, sn, ga, im, em] = deal(zeros(1, 2));
+    for k = 1:2
+        [p2, g] = apply_countermeasure(p, thr{1}, A{k});
+        evalc('build_threat_model(p2)');
+        set_link_snr(mdl, 6 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps) + g, p2);
+        link_seed(mdl, 31, 160);
+        F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(8 * p.frame_duration)), p2, 20);
+        rs(k) = median(F.rssi); sn(k) = median(F.sinr); ga(k) = median(F.gain_ant(:)); em(k) = median(F.est_margin);
+        im(k) = 80 * mean(cellfun(@(x) mean(spec_image(x, fs, nv), 'all'), F.iq));
+        close_system(mdl, 0);
+    end
+    verifyEqual(tc, rs(2), rs(1), 'AbsTol', 0.5, thr{1});
+    verifyEqual(tc, im(2), im(1), 'AbsTol', 0.5, thr{1});
+    if strcmp(thr{1}, 'none')                                  % our channel's estimates (a jammed receiver's track the jammer)
+        verifyEqual(tc, ga(2), ga(1), 'AbsTol', 0.5);
+        verifyEqual(tc, em(2) - em(1), gr, 'AbsTol', 1);
+        verifyEqual(tc, sn(2) - sn(1), gr, 'AbsTol', 1);
+    end
+end
+p.spoof_sir_db = 3;
+p3 = apply_countermeasure(p, 'spoofing', 'rate_reduce');
+verifyEqual(tc, [p3.spoof_sir_db, p3.proc_gain_db], [3 - gr, gr], 'AbsTol', 1e-9);
+p3 = apply_countermeasure(p, 'spoofing', 'power_control');
+verifyFalse(tc, isfield(p3, 'proc_gain_db'));
+end
+
+function test_drop_step_grid(tc)
+% The drop alarm's threshold is selected on validation between the train-pool value and 2
+% dB below it, in train_dqn.m and main.m alike; the edge map, DET's drop alarm
+% included, runs on the deployed policy's monitor (rule_sel's when the rule is deployed).
+verifyNotEmpty(tc, regexp(fileread(which('train_dqn')), 'DROP_STEPS = \[0 2\];', 'once'));
+verifyNotEmpty(tc, regexp(fileread(which('main')), 'CFG.drop_steps\s*= \[0 2\];', 'once'));
+src = fileread(which('edge_map'));
+verifyNotEmpty(tc, strfind(src, 'if strcmp(Q.deployed, ''rule_sel''), MON = Q.rule_sel; end'));
+verifyNotEmpty(tc, strfind(src, 'PP.confirm = MON.confirm; PP.alarm_mode = MON.alarm_mode;'));
+end
+
+function test_det_frames_drop(tc)
+% DET of a path-loss step, alone or in a combination: with the 'class_drop' monitor
+% the class path_loss counts only with the drop, so the path-loss component is detected by
+% the drop alarm alone, the other components by their classes; with 'class' the fused
+% class counts.
+cls = {'none', 'jamming', 'path_loss'};
+acts = cellfun(@(x) rule_based_policy(x), cls, 'UniformOutput', false);
+nf = numel(link_features('names'));
+mk = @(cl, e, n) struct('probs', repmat(double(strcmp(cls, cl)), n, 1), 'run', 101 * ones(n, 1), ...
+    'gant', zeros(n, 3), 'feat', [e * ones(n, 1), zeros(n, nf - 1)], 'ber', zeros(n, 1), 'act', ones(n, 1));
+Pc = mk('none', 10, 10);
+PP = struct('classes', {cls}, 'fuse', [], 'fuse_N', 1, 'sps', 2, 'bps', 2, 'alarm_mode', 'class_drop', 'drop_db', 3);
+ok = @(scen) [ismember(acts, cellfun(@(x) rule_based_policy(x), strsplit(scen, '+'), 'UniformOutput', false)); ...
+    ismember(acts, cellfun(@(x) rule_based_policy(x), strsplit(scen, '+'), 'UniformOutput', false))];
+h = det_frames(mk('path_loss', 10, 10), Pc, 'path_loss', ok('path_loss'), PP);            % the class, no drop
+verifyFalse(tc, any(h(:, 1)));
+h = det_frames(mk('none', 4, 10), Pc, 'path_loss', ok('path_loss'), PP);                  % a 6 dB drop, read as clean
+verifyTrue(tc, all(h(2:end, 1)));
+h = det_frames(mk('path_loss', 10, 10), Pc, 'jamming+path_loss', ok('jamming+path_loss'), PP);
+verifyFalse(tc, any(h(:, 1)));
+h = det_frames(mk('jamming', 10, 10), Pc, 'jamming+path_loss', ok('jamming+path_loss'), PP);
+verifyTrue(tc, all(h(:, 1)));
+PP.alarm_mode = 'class';
+h = det_frames(mk('path_loss', 10, 10), Pc, 'path_loss', ok('path_loss'), PP);
+verifyTrue(tc, all(h(:, 1)));
+h = det_frames(mk('none', 4, 10), Pc, 'path_loss', ok('path_loss'), PP);
+verifyFalse(tc, any(h(:, 1)));
+end
+
+function test_clean_pool_draws(tc)
+% The clean-link pools keep the seeds and every per-flight draw they flew:
+% geometry k takes family 1 + 2 floor((k - 1) / 100), geometry mod(k - 1, 100) + 1 of the
+% block; the edge map reads the kept draws; a geometry outside 1-100 of a block stops.
+for k = [1 100 101 200 201 300]
+    verifyEqual(tc, clean_pool_seed(2, 15, k), pool_seed(1 + 2 * floor((k - 1) / 100), 2, 15, mod(k - 1, 100) + 1));
+end
+verifyError(tc, @() pool_seed(1, 1, 15, 101), ?MException);
+verifyError(tc, @() pool_seed(1, 1, 15, 0), ?MException);
+p = base_params();
+s = arrayfun(@(k) clean_pool_seed(1, 4, k), [5 150 250]);
+V = flight_cov({struct('seed', s, 'speed', [30 60 90])}, 6, p);
+v = [30 60 90];
+for q = 1:3
+    d = flight_draws(s(q), v(q) / 3.6 * p.carrier_freq / p.c_light, p, struct('ebno', 6));
+    verifyEqual(tc, [V.alt_m(q), V.k_sig(q), V.rho(q), V.bank(q), V.ds_ns(q)], [d.alt_m, d.k_sig, d.rho, d.bank, d.ds_ns(1)], ...
+        'AbsTol', 1e-9);
+end
+src = fileread(which('edge_map'));
+verifyEmpty(tc, strfind(src, 'pool_seed(1, s_(q), blk, r_(q))'));
+verifyNotEmpty(tc, strfind(src, 'V = CT.cov;'));
+src = fileread(which('build_clean_test_pools'));
+verifyNotEmpty(tc, regexp(src, '''seed'', sds, ''cov'', V', 'once'));
+end
+
+function test_surv_on_air(tc)
+% SURV counts the flights with the threat on the air: a shadowing flight whose
+% attitude hides no antenna is no threat flight, recoverable or not.
+TGT = struct('surv', 0.9);
+F = struct('geo', (1:40)', 'surv', [true(36, 1); false(4, 1)], 'on', [true(36, 1); false(4, 1)]);
+V = surv_layer(F, 'surv', TGT, 200);
+verifyEqual(tc, [V.n, V.value, V.verdict], [36 1 1]);
+F.on(:) = true;
+V = surv_layer(F, 'surv', TGT, 200);
+verifyEqual(tc, V.n, 40); verifyEqual(tc, V.value, 0.9);
+verifyEqual(tc, surv_layer(rmfield(F, 'on'), 'surv', TGT, 200).n, 40);
+src = fileread(which('edge_map'));
+verifyNotEmpty(tc, strfind(src, '''harm'', HM(ii), ''on'', K.on(ii)'));
+verifyNotEmpty(tc, strfind(src, '''harm'', hmc(ik), ''on'', Kc.on(ik)'));
+end
+
+function test_experiments_keep_on_air(tc)
+% The unknown-threat and the unseen-combination experiments keep the threat flag of
+% dqn_eval_batches.m (link_env.m K.on) instead of counting every episode as a threat one.
+for f = {'experiment_unknown_threat', 'experiment_combo_generalization'}
+    src = fileread(which(f{1}));
+    verifyEmpty(tc, strfind(src, 'R.threat = true(1, n)'), f{1});
+    verifyNotEmpty(tc, strfind(src, 'R.threat = R.threat(1:n) &'), f{1});
+end
+end
+
+function test_clean_pool_identity(tc)
+% The clean-link pools carry the detector and the link model of the pools they belong to:
+% another det_id or model tag stops the reader; train_dqn.m, evaluate_policies.m
+% and edge_map.m check them; a fusion re-key moves the clean pools' det_id with the pools'.
+P = struct('det_id', 'a', 'model_tag', 'm1');
+check_det_id(P, struct('det_id', 'a', 'model_tag', 'm1'), 'test', 'data/clean_val_pools.mat');
+verifyError(tc, @() check_det_id(P, struct('det_id', 'b', 'model_tag', 'm1'), 'test', 'x'), 'check_det_id:mismatch');
+verifyError(tc, @() check_det_id(P, struct('det_id', 'a', 'model_tag', 'm2'), 'test', 'x'), 'check_det_id:model');
+verifyError(tc, @() check_det_id(P, struct('model_tag', 'm1'), 'test', 'x'), 'check_det_id:mismatch');
+for f = {{'train_dqn', 'CV'}, {'evaluate_policies', 'CT'}, {'edge_map', 'CT'}}
+    verifyNotEmpty(tc, strfind(fileread(which(f{1}{1})), sprintf('check_det_id(PP, %s, ''%s'', ''data/clean_', f{1}{2}, f{1}{1})), f{1}{1});
+end
+d = fullfile(tc.TestData.tmp, 'rekey_ct'); mkdir(fullfile(d, 'data'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+ood = struct('score', 'last', 'win', 3); classes = {'none', 'jamming'}; trained_at = 7;
+save('data/trained_detector.mat', 'ood', 'classes', 'trained_at');
+T = struct('retain', 0.95, 'maha', -2, 'maha_val', [-3; -1]); save('data/ood_thresholds.mat', 'T');
+F0 = struct('FM', struct('mu', zeros(1, 11)), 'N', 1, 'q_thr', 4);
+FM = struct('mu', zeros(1, 13)); N = 12; q_thr = 4.5; save('data/fusion.mat', 'FM', 'N', 'q_thr');
+Q = struct('probs', single([0.9 0.1]), 'maha', single(0), 'feat', single([1 2]), 'ber', 0, 'run', 1);
+old = detector_id(trained_at, ood, F0, -2);
+PP = struct('pools', {{Q, []}}, 'classes', {classes}, 'maha_thr', -2, 'unk_win', 3, 'fuse', F0.FM, 'fuse_N', 1, ...
+    'q_thr', 4, 'det_id', old, 'cfg_gain_db', [0 1], 'created', 'x');
+save('data/policy_pools.mat', 'PP', '-v7.3');
+CT = struct('pools', {{Q}}, 'runs', 1, 'det_id', old); save('data/clean_val_pools.mat', 'CT', '-v7.3');
+CT.det_id = 'other'; save('data/clean_test_pools.mat', 'CT', '-v7.3');
+evalc('rekey_pools({''data/policy_pools.mat'', ''data/clean_val_pools.mat'', ''data/clean_test_pools.mat''})');
+new = detector_id(trained_at, ood, struct('FM', FM, 'N', N, 'q_thr', q_thr), -2);
+verifyEqual(tc, load('data/policy_pools.mat').PP.det_id, new);
+verifyEqual(tc, load('data/clean_val_pools.mat').CT.det_id, new);
+verifyEqual(tc, load('data/clean_test_pools.mat').CT.det_id, 'other');          % not of these pools: left
+verifyNumElements(tc, dir('data/clean_val_pools_before_rekey_*.mat'), 1);
+end
+
+function test_result_status(tc)
+% A latency, an evaluation or an edge map of another detector or deployed policy, or older
+% than its inputs, is STALE; the policy stamp follows the deployed policy, its
+% monitors and weights; the KPIs read the deployed chain's latency, PENDING without one.
+d = fullfile(tc.TestData.tmp, 'status'); mkdir(fullfile(d, 'data')); mkdir(fullfile(d, 'results'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+ood = struct('score', 'last', 'win', 3); classes = {'none'}; trained_at = 7; %#ok<NASGU>
+save('data/trained_detector.mat', 'ood', 'classes', 'trained_at');
+T = struct('retain', 0.95, 'maha', -2, 'maha_val', [-3; -1]); save('data/ood_thresholds.mat', 'T');
+FM = struct('mu', zeros(1, 3)); N = 4; q_thr = 4; save('data/fusion.mat', 'FM', 'N', 'q_thr');
+id = detector_id(trained_at, ood, fusion_model(), T.maha);
+agent = struct('dense', struct('W', {{1, 2}}, 'b', {{0, 0}})); confirm = [4 5]; alarm_mode = 'class_drop'; drop_db = 5;
+deployed = 'dqn_esc'; rule_sel = struct('alarm_mode', 'class_drop', 'confirm', [5 5], 'drop_db', 6); det_id = id;
+save('data/trained_dqn.mat', 'agent', 'confirm', 'alarm_mode', 'drop_db', 'deployed', 'rule_sel', 'det_id');
+Q = load('data/trained_dqn.mat'); st = policy_stamp(Q);
+Q2 = Q; Q2.deployed = 'rule_sel'; Q3 = Q; Q3.rule_sel.drop_db = 7; Q4 = Q; Q4.agent.dense.W{1} = 3;
+verifyEqual(tc, numel(unique({st, policy_stamp(Q2), policy_stamp(Q3), policy_stamp(Q4)})), 4);
+pause(1.1);
+LAT = struct('det_id', id, 'policy_stamp', st); save('results/latency.mat', 'LAT');
+KP = struct('policy_stamp', st); save('results/policy_evaluation.mat', 'KP');
+pause(1.1);
+EM = struct('det_id', id, 'policy_stamp', 'zzz'); save('results/edge_map.mat', 'EM');
+S = result_status();
+verifyFalse(tc, status_of(S, 'results/latency.mat').stale);
+verifyFalse(tc, status_of(S, 'results/policy_evaluation.mat').stale);
+verifyTrue(tc, status_of(S, 'results/edge_map.mat').stale);
+LAT.det_id = 'other'; save('results/latency.mat', 'LAT');
+verifyTrue(tc, status_of(result_status(), 'results/latency.mat').stale);
+LAT = rmfield(LAT, 'det_id'); save('results/latency.mat', 'LAT');
+verifyTrue(tc, status_of(result_status(), 'results/latency.mat').stale);
+verifyFalse(tc, status_of(result_status(), 'results/phy_validation.txt').present);
+src = fileread(which('measure_all_kpis'));
+verifyNotEmpty(tc, strfind(src, 'st7 = ''PENDING'''));
+verifyNotEmpty(tc, strfind(src, 'Lt.total_dep_median_ms < 10 && Lt.total_dep_p95_ms < 20'));
+src = fileread(which('measure_latency'));
+verifyNotEmpty(tc, strfind(src, '[kindP, agP, optP] = policy_setup(dep, Q, sel, [], [], [], na);'));
+end
+
+function e = status_of(S, f)
+% The entry of result_status.m for file f.
+e = S(strcmp({S.file}, f));
+end
+
+function test_overhead_monitor_drop(tc)
+% The pass over the GCS is a ramp: the monitor reads a drop as its 10-cycle
+% reference minus its 3-cycle median, the same as monitor_window_drop.m; a step reads in
+% full, a ramp of s dB per cycle 4.5 s; the verdict commits the path_loss level only where
+% the read drop reaches the threshold, else reads the no-response PROT.
+A = policy_actions();
+cls = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', 'antenna_fault', ...
+    'benign_interference', 'sweeping_jammer', 'tone_jamming', 'airframe_shadowing'};
+PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0, 'alarm_mode', 'class_drop', 'drop_db', 100, ...
+    'cfg_gain_db', zeros(1, numel(A)));
+o = struct('probs', double(strcmp(cls, 'none')), 'unknown', false, 'feat', zeros(1, numel(link_features('names'))));
+o.feat(feature_index('log_ber')) = -6;
+for e = {[10 * ones(1, 12), 4 * ones(1, 10)], [10 * ones(1, 12), 10 - 0.2 * (1:60)], [10 * ones(1, 12), 10 - 3 * sin(linspace(0, pi, 40))]}
+    m = policy_monitor('init', 1, numel(A)); mx = 0;
+    for t = 1:numel(e{1})
+        x = o; x.feat(feature_index('sinr')) = e{1}(t) - 10*log10(2);
+        [m, M] = policy_monitor('update', m, x, PP, 1); m = policy_monitor('change', m, false);
+        mx = max(mx, M.drop);
+    end
+    verifyEqual(tc, monitor_window_drop(e{1}), mx, 'AbsTol', 1e-9);
+end
+verifyEqual(tc, monitor_window_drop([10 * ones(1, 12), 4 * ones(1, 10)]), 6, 'AbsTol', 1e-9);
+verifyEqual(tc, monitor_window_drop(10 - 0.2 * (0:59)), 0.9, 'AbsTol', 1e-9);
+verifyEqual(tc, monitor_window_drop([10 * ones(1, 12), 4, 4, 10 * ones(1, 10)]), 6, 'AbsTol', 1e-9);   % a 2-cycle dip reads
+verifyEqual(tc, monitor_window_drop([10 * ones(1, 12), 4, 10 * ones(1, 10)]), 0, 'AbsTol', 1e-9);      % a 1-cycle dip does not
+lvs = [6 10 14]; com = [1 1 -1]; nr = [1 0 -1];
+verifyEqual(tc, overhead_verdict([5 9], [true true], lvs, com, nr), 1);           % both read, both committed
+verifyEqual(tc, overhead_verdict([5 13], [true true], lvs, com, nr), 0);          % the lost bound not committed
+verifyEqual(tc, overhead_verdict([11 15], [true true], lvs, com, nr), -1);        % the tracked bound not
+verifyEqual(tc, overhead_verdict([5 9], [false true], lvs, com, nr), 1);          % unread: no-response PROT 1 at 6 dB
+verifyEqual(tc, overhead_verdict([7 9], [false true], lvs, com, nr), 0);          % unread at 10 dB: UNDETERMINED
+verifyEqual(tc, overhead_verdict([11 15], [false false], lvs, com, nr), 0);       % unread: never NOT COMMITTED
+[v, lt, ll] = overhead_verdict([5 20], [true true], lvs, com, nr);
+verifyEqual(tc, [v lt], [0 6]); verifyTrue(tc, isnan(ll));                         % beyond the top level
+p = base_params();
+[A0, rel, dd] = overhead_drop_db(120, 0.56, p.gcs_h_m, p.uav_null_db);
+verifyEqual(tc, A0, max(0, -min(rel)), 'AbsTol', 1e-12); verifyEqual(tc, rel(end), 0, 'AbsTol', 1e-9);
+[Ab, relb] = overhead_drop_db(120, 0.56, p.gcs_h_m, p.uav_null_db, 30);
+verifyEqual(tc, size(relb, 1), 72); verifyEqual(tc, Ab, max(0, -min(min(relb, [], 1))), 'AbsTol', 1e-12);
+verifyEqual(tc, numel(dd), size(rel, 2));
+end
+
+function test_kpi6_union_and_intervals(tc)
+% KPI 6 counts the clean flights of the second test split beside the test split's and the
+% clean pools', with the threshold's source and a warning on a fallback; KPI 4 lists
+% the threats outside the envelope and gives per-threat intervals, KPI 7 the speed spread
+% with its bootstrap interval.
+src = fileread(which('evaluate_policies'));
+verifyNotEmpty(tc, strfind(src, 'sets(end+1) = struct(''name'', ''clean2'''));
+verifyNotEmpty(tc, strfind(src, 'RU{pk} = cat_struct(RU{pk}, RES{iC2, pk})'));
+verifyNotEmpty(tc, strfind(src, 'warning(''evaluate_policies:kpi1'''));
+verifyNotEmpty(tc, strfind(src, 'warning(''evaluate_policies:cleanpools'''));
+verifyNotEmpty(tc, strfind(fileread(which('measure_all_kpis')), 'threats with no level inside the envelope'));
+x = [ones(1, 50), zeros(1, 50)]; bin = [ones(1, 50), 2 * ones(1, 50)]; cl = 1:100;
+S = spread_boot(x, bin, cl, 2, 500, 1);
+verifyEqual(tc, S(1), 1); verifyLessThanOrEqual(tc, S(2), 1); verifyEqual(tc, S(3), 1);
+rs = RandStream('mt19937ar', 'Seed', 3);
+x = double(rand(rs, 1, 400) < 0.8); bin = repmat(1:4, 1, 100); cl = repelem(1:100, 4);
+S = spread_boot(x, bin, cl, 4, 1000, 2);
+r = arrayfun(@(b) mean(x(bin == b)), 1:4);
+verifyEqual(tc, S(1), max(r) - min(r), 'AbsTol', 1e-12); verifyLessThanOrEqual(tc, S(2), S(3));
+verifyTrue(tc, all(S >= 0 & S <= 1));
+verifyEqual(tc, spread_boot(x, zeros(size(x)), cl, 4, 100, 1), [NaN NaN NaN]);
+end
+
+function test_main_stage_list(tc)
+% main.m runs every stage of run_stage.m, the edge map and the other script stages
+% in a workspace of their own.
+src = fileread(which('run_stage'));
+t = regexp(src, '''(\w+)'', ''(\w+)''', 'tokens');
+names = cellfun(@(c) c{2}, t, 'UniformOutput', false);
+names = setdiff(names, {'build_fresh_test'});            % run_dataset_sweep, extract_spectrograms, prepare_data
+m = fileread(which('main'));
+for n = names
+    verifyTrue(tc, contains(m, n{1}), n{1});
+end
+verifyNotEmpty(tc, strfind(m, 'run_own(''edge_map'')'));
+verifyNotEmpty(tc, strfind(m, 'run_own(scr{1}, true)'));
+end
+
+function test_hover_label(tc)
+% The hover rows are labelled with the attitude they fly: the tilt and wobble of
+% hover_attitude.m, not calm air.
+src = fileread(which('edge_map'));
+verifyEmpty(tc, strfind(src, 'calm air'));
+verifyNotEmpty(tc, strfind(src, 'p0.wobble_roll_deg, p0.wobble_pitch_deg, p0.wobble_amp_deg, p0.wobble_freq_hz'));
+p = base_params();
+verifyNotEmpty(tc, p.wobble_roll_deg); verifyNotEmpty(tc, p.wobble_freq_hz);
+end
+
+function test_episode_cycle_link(tc)
+% The live decision cycle tells the monitor the configuration its frame was received with
+% (the console draws each frame under the configuration in use), so the known gain comes
+% out there too.
+src = fileread(which('episode_cycle'));
+verifyNotEmpty(tc, strfind(src, 'obs.cfg_link = prev;'));
+verifyNotEmpty(tc, strfind(fileread(which('demo_gui')), '''cfg_gain_db'', config_gain_db(env.action_names, p0)'));
+end

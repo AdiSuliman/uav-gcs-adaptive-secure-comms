@@ -7,7 +7,9 @@ function export_gui_bundle(target)
 %                                profiles in the main checkout)
 %   The bundle mirrors the repository layout (params.mat, profile.json, data/, results/),
 %   without the multi-GB dataset files: the normalisation statistics come as
-%   data/gui_norm_stats.mat.
+%   data/gui_norm_stats.mat. A result of another detector or deployed policy, or older
+%   than its inputs (result_status.m), is not exported, and a KPI summary older than the
+%   evaluation or the latency it reads neither: the console shows no stale number.
 root = project_root();
 if nargin < 1 || isempty(target), target = fullfile(root, 'profiles'); end
 S = load(fullfile(root, 'params.mat')); n = S.params.n_rx;
@@ -29,13 +31,22 @@ for f = need
     if ~isfile(src), error('export_gui_bundle:missing', 'missing %s: run the pipeline first', f{1}); end
     copyfile(src, fullfile(dst, f{1}));
 end
-miss = {};
+c0 = cd(root); RS = result_status(); cd(c0);
+bad = {RS([RS.stale]).file};
+kp = fullfile(root, 'results', 'kpi_summary.mat');
+if isfile(kp) && any(cellfun(@(f) isfile(fullfile(root, f)) && dir(fullfile(root, f)).datenum > dir(kp).datenum, ...
+        {'results/policy_evaluation.mat', 'results/latency.mat', 'results/edge_map.mat'}))
+    bad{end+1} = 'results/kpi_summary.mat';
+end
+miss = {}; stale = {};
 for f = opt
     src = fullfile(root, f{1});
+    if ismember(f{1}, bad), stale{end+1} = f{1}; continue; end %#ok<AGROW>
     if isfile(src), copyfile(src, fullfile(dst, f{1})); else, miss{end+1} = f{1}; end %#ok<AGROW>
 end
 fid = fopen(fullfile(dst, 'profile.json'), 'w');
 fprintf(fid, '{"profile":"%d UAV antennas","n_rx":%d}\n', n, n); fclose(fid);
 fprintf('GUI bundle: %d UAV antennas -> %s\n', n, dst);
 if ~isempty(miss), fprintf('  not exported (not produced yet): %s\n', strjoin(miss, ', ')); end
+if ~isempty(stale), warning('export_gui_bundle:stale', 'not exported (stale, result_status.m): %s', strjoin(stale, ', ')); end
 end

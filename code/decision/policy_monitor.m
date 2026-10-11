@@ -40,7 +40,11 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   161 km/h and 0.28 km. The estimate is our signal over the thermal floor (SINR +
 %   interference over thermal), so interference does not move it. Drop: reference = median
 %   Eb/N0 estimate of the last 10 cycles without an alarm, minus the median of the
-%   last 3 cycles. An alarm is CONFIRMED when at least m of the last n cycles carried
+%   last 3 cycles. Both windows hold the estimate less the known gain of the
+%   configuration the frame was received with (config_gain_db.m: the power step and the
+%   processing gain), so a change of our own configuration never reads as a drop or a
+%   rise of the link; the degradation test keeps the estimate as measured.
+%   An alarm is CONFIRMED when at least m of the last n cycles carried
 %   one (M-of-N binary integration, PP.confirm, default C.confirm).
 %   The monitor also keeps the last C.hist observation vectors of policy_state.m,
 %   and the window of the temporal fusion (probabilities, antenna gains, link
@@ -48,7 +52,8 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   mem.since starts saturated (10): the policies never see the episode clock.
 %   mem.deg_n / mem.conf_n: consecutive degraded / confirmed-alarm cycles; mem.pend:
 %   a requested change not yet received.
-%   M: ber_avg, plr (NE x 1), ebno_est, drop (dB), drop_alarm, degraded, cls, alarm, confirmed (1 x NE),
+%   M: ber_avg, plr (NE x 1), ebno_est (as measured), drop (dB, without the configurations'
+%      known gains), drop_alarm, degraded, cls, alarm, confirmed (1 x NE),
 %      probs (NE x classes, fused), te (NE x 9, persistence measurements of the window,
 %      temporal_evidence.m)
 C = decision_config();
@@ -101,7 +106,9 @@ npk(coded) = nq(coded); lost(coded) = lq(coded);
 M.ber_avg = mean(mem.ber, 2, 'omitnan');
 M.plr = lost ./ max(npk, 1);                                    % no packet decoded yet in the window: no loss seen
 M.ebno_est = fi('sinr') + fi('iot') + 10*log10(PP.sps) - 10*log10(PP.bps);
-mem.ebno = [mem.ebno(:, 2:end), M.ebno_est(:)];
+gk = config_gain_db(PP);
+eg = M.ebno_est(:) - reshape(gk(link), [], 1);                  % without the gain of the configuration received
+mem.ebno = [mem.ebno(:, 2:end), eg];
 e3 = median(mem.ebno, 2, 'omitnan');
 ref = median(mem.ref, 2, 'omitnan');
 ref(isnan(ref)) = e3(isnan(ref));
@@ -138,7 +145,7 @@ switch mode
         M.alarm = hostile | M.degraded;
 end
 q = ~M.alarm;
-mem.ref(q, :) = [mem.ref(q, 2:end), M.ebno_est(q)];
+mem.ref(q, :) = [mem.ref(q, 2:end), eg(q)];
 mem.alarm = [mem.alarm(:, 2:end), M.alarm(:)];
 assert(cf(2) <= size(mem.alarm, 2), 'policy_monitor: confirmation over %d cycles exceeds the alarm memory', cf(2));
 M.confirmed = sum(mem.alarm(:, end-cf(2)+1:end), 2)' >= cf(1);

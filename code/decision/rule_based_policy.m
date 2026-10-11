@@ -1,4 +1,4 @@
-function [action, reason] = rule_based_policy(threat_class, degraded, mmse_gain_db, q_iot_db, q_thr_db, drop)
+function [action, reason] = rule_based_policy(threat_class, degraded, mmse_gain_db, q_iot_db, q_thr_db, drop, budget)
 %RULE_BASED_POLICY  Fixed expert policy: detected threat class -> configuration.
 %   Baseline for the DQN comparison (proposal: rule-based first, DQN second).
 %   Each class maps to the configuration that addresses its physics as modeled in
@@ -15,6 +15,11 @@ function [action, reason] = rule_based_policy(threat_class, degraded, mmse_gain_
 %                 (select_fusion.m; default C.q_alarm_db)
 %   drop          the monitor's drop alarm: our signal over thermal noise fell by the
 %                 drop threshold from its reference before (policy_monitor.m)
+%   budget        the link budget of the cycle (optional): drop_db, the monitor's drop
+%                 without the known gains of the configurations (policy_monitor.m);
+%                 current, the configuration in use, and current_db its known gain;
+%                 names and gain_db, the link-budget configurations and their known
+%                 gains (config_gain_db.m)
 %   A lost branch (an antenna fault or airframe shadowing) leaves white noise on the
 %   antennas, where adaptive combining (MVDR) is maximum-ratio combining (Winters, Salz &
 %   Gitlin 1994) and only pays its estimation loss (Besson 2021, eq. 20-21): both take
@@ -28,8 +33,14 @@ function [action, reason] = rule_based_policy(threat_class, degraded, mmse_gain_
 %   a detector, Ndili & Enge 1998, p. 5). The rule leaves the channel there too, and
 %   nulls the interferer when it is separable.
 %   A drop alarm whose class has no mapping (none, unknown) is a loss on our signal's side,
-%   attenuation and not interference (the slot is quiet): power_control, and
-%   rate_reduce+power_control when the link is also degraded.
+%   attenuation and not interference (the slot is quiet). The answer to a loss of our
+%   signal, that drop alarm and the class path_loss, is a link-budget match when the
+%   budget is given: the received power falls by the drop, and the known gain of a
+%   configuration raises Eb/N0 by that gain (Friis; Eb/N0 = S/N0 x 1/R), so the rule takes
+%   the link-budget configuration with the smallest gain that covers the drop (the
+%   largest when none does), and keeps the configuration in use when its own gain already
+%   covers it. Without the budget: power_control, rate_reduce+power_control when the link
+%   is also degraded, and rate_reduce+power_control for the class path_loss.
 %   With one argument the class mapping alone is returned.
 C = decision_config();
 threat_class = char(threat_class);
@@ -38,6 +49,7 @@ if nargin < 3 || isempty(mmse_gain_db), mmse_gain_db = 0; end
 if nargin < 4 || isempty(q_iot_db), q_iot_db = -Inf; end
 if nargin < 5 || isempty(q_thr_db) || isnan(q_thr_db), q_thr_db = C.q_alarm_db; end
 if nargin < 6 || isempty(drop), drop = false; end
+if nargin < 7, budget = []; end
 sep = mmse_gain_db >= C.rule_mmse_db;
 slot = q_iot_db >= q_thr_db;
 
@@ -53,6 +65,7 @@ switch threat_class
         if sep, action = 'spatial_diversity+fec_interleave'; reason = 'broadband bursts from one direction: null and code'; end
     case 'path_loss'
         action = 'rate_reduce+power_control'; reason = 'weak signal: largest link-budget gain';
+        if ~isempty(budget), [action, reason] = budget_match(budget); end
     case {'antenna_fault', 'airframe_shadowing'}
         action = 'power_control';     reason = 'one branch lost: raise the link budget';
         if sep, action = 'spatial_diversity+power_control'; reason = [reason ', and null the separable interferer']; end
@@ -65,6 +78,7 @@ end
 if strcmp(action, 'no_action') && drop && ~slot && ~strcmp(threat_class, 'benign_interference')
     action = 'power_control'; reason = 'our signal dropped over thermal noise: raise the link budget';
     if degraded, action = 'rate_reduce+power_control'; reason = 'our signal dropped and the link degraded: largest link-budget gain'; end
+    if ~isempty(budget), [action, reason] = budget_match(budget); end
 elseif strcmp(action, 'no_action') && degraded
     if strcmp(threat_class, 'benign_interference')
         action = 'channel_switch'; reason = 'interference degrades the link: leave the channel';
@@ -77,4 +91,19 @@ elseif strcmp(action, 'no_action') && degraded
         action = 'freq_diversity+power_control'; reason = 'link degraded without a known cause: generic diversity';
     end
 end
+end
+
+function [action, reason] = budget_match(b)
+% Link-budget match of a drop: keep the configuration in use when its known gain covers
+% the drop, else the link-budget configuration with the smallest gain that does, the
+% largest when none does.
+if b.current_db >= b.drop_db
+    action = b.current; reason = sprintf('the configuration in use covers the %.1f dB drop', b.drop_db);
+    return
+end
+[g, o] = sort(b.gain_db);
+k = find(g >= b.drop_db, 1);
+if isempty(k), k = numel(g); end
+action = b.names{o(k)};
+reason = sprintf('our signal dropped %.1f dB: the smallest link-budget gain that covers it (%.1f dB)', b.drop_db, g(k));
 end
