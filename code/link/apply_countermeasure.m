@@ -44,7 +44,7 @@ function [p, snr_gain_db, cm] = apply_countermeasure(p, threat, action)
 %                        against noise and every interferer not spread like our signal:
 %                        the noise-like jammers, the WLAN, the tone and the spoofer, a
 %                        counterfeit of our modulation and pulse shape that does not
-%                        follow our protocol (D74), so not our spreading either; goodput
+%                        follow our protocol, so not our spreading either; goodput
 %                        / factor. The simulated field is that of the despread link (our
 %                        signal up by the gain, those interferers held at their power);
 %                        p.proc_gain_db tells the receiver to take the gain out of the

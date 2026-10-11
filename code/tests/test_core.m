@@ -2531,7 +2531,7 @@ function v = ternary_(c, a, b)
 if c, v = a; else, v = b; end
 end
 
-%% ---------- D84 group C: decision layer and evaluation ----------
+%% ---------- known gains, link budget, evaluation identity ----------
 function test_config_gain(tc)
 % The known Eb/N0 gain of every configuration: the power step of power_control, the
 % processing gain of rate_reduce, both together, none for the rest; from the pools when
@@ -2549,7 +2549,7 @@ verifyEqual(tc, config_gain_db({'power_control', 'rate_reduce'}, struct()), [6 1
 end
 
 function test_monitor_known_gain(tc)
-% A configuration held on a clean link and released (DL-F1): the frames received with
+% A configuration held on a clean link and released: the frames received with
 % power_control or rate_reduce+power_control carry its known gain in the Eb/N0 estimate, and
 % the monitor's drop memory takes it out, so the release reads no drop and raises no alarm;
 % without the compensation the release reads the gain as a drop. The estimate itself (the
@@ -2587,7 +2587,7 @@ end
 end
 
 function test_rule_budget_match(tc)
-% The rule's answer to a loss of our signal is a link-budget match (DL-F1): the smallest
+% The rule's answer to a loss of our signal is a link-budget match: the smallest
 % link-budget gain that covers the drop, the largest when none does, the configuration in
 % use when it already covers it; without the budget the class mapping as before. In the
 % closed loop a 3 dB step takes power_control and a 5 dB step rate_reduce, once.
@@ -2649,8 +2649,8 @@ end
 end
 
 function test_rate_reduce_chip_level(tc)
-% rate_reduce spreads each bit over cm_rate_factor symbols at the same rate and power
-% (L-F3): the simulated field is the despread link, our signal up by the processing gain,
+% rate_reduce spreads each bit over cm_rate_factor symbols at the same rate and power:
+% the simulated field is the despread link, our signal up by the processing gain,
 % and the receiver's level measurements, taken before despreading, show the chip-rate
 % field: rssi, the detector image and the antennas' channel gains of the same flight
 % stay those of no_action, while the despread SINR and the channel estimate's margin over
@@ -2690,7 +2690,7 @@ end
 
 function test_drop_step_grid(tc)
 % The drop alarm's threshold is selected on validation between the train-pool value and 2
-% dB below it (DL-F2), in train_dqn.m and main.m alike; the edge map, DET's drop alarm
+% dB below it, in train_dqn.m and main.m alike; the edge map, DET's drop alarm
 % included, runs on the deployed policy's monitor (rule_sel's when the rule is deployed).
 verifyNotEmpty(tc, regexp(fileread(which('train_dqn')), 'DROP_STEPS = \[0 2\];', 'once'));
 verifyNotEmpty(tc, regexp(fileread(which('main')), 'CFG.drop_steps\s*= \[0 2\];', 'once'));
@@ -2700,7 +2700,7 @@ verifyNotEmpty(tc, strfind(src, 'PP.confirm = MON.confirm; PP.alarm_mode = MON.a
 end
 
 function test_det_frames_drop(tc)
-% DET of a path-loss step, alone or in a combination (DL-F3): with the 'class_drop' monitor
+% DET of a path-loss step, alone or in a combination: with the 'class_drop' monitor
 % the class path_loss counts only with the drop, so the path-loss component is detected by
 % the drop alarm alone, the other components by their classes; with 'class' the fused
 % class counts.
@@ -2729,7 +2729,7 @@ verifyFalse(tc, any(h(:, 1)));
 end
 
 function test_clean_pool_draws(tc)
-% The clean-link pools keep the seeds and every per-flight draw they flew (DL-F4/E-F1):
+% The clean-link pools keep the seeds and every per-flight draw they flew:
 % geometry k takes family 1 + 2 floor((k - 1) / 100), geometry mod(k - 1, 100) + 1 of the
 % block; the edge map reads the kept draws; a geometry outside 1-100 of a block stops.
 for k = [1 100 101 200 201 300]
@@ -2754,7 +2754,7 @@ verifyNotEmpty(tc, regexp(src, '''seed'', sds, ''cov'', V', 'once'));
 end
 
 function test_surv_on_air(tc)
-% SURV counts the flights with the threat on the air (E-F2): a shadowing flight whose
+% SURV counts the flights with the threat on the air: a shadowing flight whose
 % attitude hides no antenna is no threat flight, recoverable or not.
 TGT = struct('surv', 0.9);
 F = struct('geo', (1:40)', 'surv', [true(36, 1); false(4, 1)], 'on', [true(36, 1); false(4, 1)]);
@@ -2780,8 +2780,8 @@ end
 end
 
 function test_clean_pool_identity(tc)
-% The clean-link pools carry the detector and the link model of the pools they belong to
-% (DL-F7): another det_id or model tag stops the reader; train_dqn.m, evaluate_policies.m
+% The clean-link pools carry the detector and the link model of the pools they belong to:
+% another det_id or model tag stops the reader; train_dqn.m, evaluate_policies.m
 % and edge_map.m check them; a fusion re-key moves the clean pools' det_id with the pools'.
 P = struct('det_id', 'a', 'model_tag', 'm1');
 check_det_id(P, struct('det_id', 'a', 'model_tag', 'm1'), 'test', 'data/clean_val_pools.mat');
@@ -2815,7 +2815,7 @@ end
 
 function test_result_status(tc)
 % A latency, an evaluation or an edge map of another detector or deployed policy, or older
-% than its inputs, is STALE (E-F3); the policy stamp follows the deployed policy, its
+% than its inputs, is STALE; the policy stamp follows the deployed policy, its
 % monitors and weights; the KPIs read the deployed chain's latency, PENDING without one.
 d = fullfile(tc.TestData.tmp, 'status'); mkdir(fullfile(d, 'data')); mkdir(fullfile(d, 'results'));
 c0 = cd(d); back = onCleanup(@() cd(c0));
@@ -2857,7 +2857,7 @@ e = S(strcmp({S.file}, f));
 end
 
 function test_overhead_monitor_drop(tc)
-% The pass over the GCS is a ramp (E-F4): the monitor reads a drop as its 10-cycle
+% The pass over the GCS is a ramp: the monitor reads a drop as its 10-cycle
 % reference minus its 3-cycle median, the same as monitor_window_drop.m; a step reads in
 % full, a ramp of s dB per cycle 4.5 s; the verdict commits the path_loss level only where
 % the read drop reaches the threshold, else reads the no-response PROT.
@@ -2898,9 +2898,9 @@ end
 
 function test_kpi6_union_and_intervals(tc)
 % KPI 6 counts the clean flights of the second test split beside the test split's and the
-% clean pools' (E-F6), with the threshold's source and a warning on a fallback; KPI 4 lists
+% clean pools', with the threshold's source and a warning on a fallback; KPI 4 lists
 % the threats outside the envelope and gives per-threat intervals, KPI 7 the speed spread
-% with its bootstrap interval (E-F7).
+% with its bootstrap interval.
 src = fileread(which('evaluate_policies'));
 verifyNotEmpty(tc, strfind(src, 'sets(end+1) = struct(''name'', ''clean2'''));
 verifyNotEmpty(tc, strfind(src, 'RU{pk} = cat_struct(RU{pk}, RES{iC2, pk})'));
@@ -2920,7 +2920,7 @@ verifyEqual(tc, spread_boot(x, zeros(size(x)), cl, 4, 100, 1), [NaN NaN NaN]);
 end
 
 function test_main_stage_list(tc)
-% main.m runs every stage of run_stage.m (E-F8), the edge map and the other script stages
+% main.m runs every stage of run_stage.m, the edge map and the other script stages
 % in a workspace of their own.
 src = fileread(which('run_stage'));
 t = regexp(src, '''(\w+)'', ''(\w+)''', 'tokens');
@@ -2935,7 +2935,7 @@ verifyNotEmpty(tc, strfind(m, 'run_own(scr{1}, true)'));
 end
 
 function test_hover_label(tc)
-% The hover rows are labelled with the attitude they fly (L-F9): the tilt and wobble of
+% The hover rows are labelled with the attitude they fly: the tilt and wobble of
 % hover_attitude.m, not calm air.
 src = fileread(which('edge_map'));
 verifyEmpty(tc, strfind(src, 'calm air'));

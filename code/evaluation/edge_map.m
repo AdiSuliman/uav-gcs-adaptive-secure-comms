@@ -371,7 +371,7 @@ end
 ic = IDX(sub2ind(size(IDX), clean_cell + 0 * FT.s, FT.s, FT.sp, FT.r)); m = ic > 0;
 FT.cl_k(m) = FT.link_k(ic(m)); FT.cl_n(m) = FT.link_n(ic(m));
 % The clean-link flights of data/clean_test_pools.mat (split id 6): the draws the pools
-% kept (CT.cov), or, in pools built before they were kept, those of the seeds they flew
+% kept (CT.cov), or, in pools without them, those of the seeds they flew
 % (clean_pool_seed.m)
 CF = take_rows(FT, FT.c == clean_cell & ismember(FT.sp, SPL));
 if ~isempty(CT)
@@ -807,7 +807,7 @@ end
 
 %% 7. Overhead pass: per altitude, distance and speed band, the path_loss commitment at
 % the drop of each bound where the monitor reads the drop, the no-response PROT where not
-if ~isfield(OHP, 'win_drop_db'), OHP = overhead(); end        % a pass file written before the read drop
+if ~isfield(OHP, 'win_drop_db'), OHP = overhead(); end        % a pass file without the read drop
 pl = tc(strcmp(PP.scen(tc), 'path_loss'));
 [lvs, o] = sort(PP.level(pl)); ip = arrayfun(@(c) find(tc == c), pl(o));
 nB0 = size(OHP.win_drop_db, 3);

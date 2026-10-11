@@ -8,7 +8,7 @@ function g = config_gain_db(A, p)
 %   g = config_gain_db(actions)     the same from params.mat of the current folder, or
 %       apply_countermeasure.m's defaults without one
 %   g = config_gain_db(PP)          PP.cfg_gain_db when the pools carry it, else the
-%       gains of PP.actions as above (pools built before it was stored)
+%       gains of PP.actions as above (pools that do not carry it)
 persistent key cache
 if isstruct(A)
     if isfield(A, 'cfg_gain_db') && ~isempty(A.cfg_gain_db), g = A.cfg_gain_db; return; end

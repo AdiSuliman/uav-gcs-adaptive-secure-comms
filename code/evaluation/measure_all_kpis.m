@@ -28,7 +28,8 @@
 % Identity and age (result_status.m): a result of another detector or deployed policy, or
 % older than its inputs, is STALE (KPI 3 against params.mat, KPI 6 also when its Eb/N0
 % threshold is not the current KPI 1 threshold, the edge map's details flagged); KPI 7 is
-% PENDING while the latency of the deployed chain has not been measured.
+% PENDING while the latency of the current detector and deployed chain has not been
+% measured (results/latency.mat absent, or of another detector or policy).
 %
 % Output: results/kpi_summary.txt, results/kpi_summary.mat (KPI struct array)
 
@@ -261,7 +262,7 @@ if isfile(F.pol)
     sl = rst(F.lat); lat_pending = ~isfile(F.lat);
     if isfile(F.lat)
         Lt = load(F.lat, 'LAT'); Lt = Lt.LAT;
-        if ~isfield(Lt, 'total_dep_median_ms')            % written before the deployed chain was timed: the DQN chain
+        if ~isfield(Lt, 'total_dep_median_ms')            % a latency without the deployed chain: the DQN chain
             Lt.total_dep_median_ms = Lt.total_dqn_median_ms; Lt.total_dep_p95_ms = Lt.total_dqn_p95_ms; Lt.deployed = 'dqn_esc';
         end
         det{end+1} = sprintf(['decision latency per cycle (%s): median %.2f ms, p95 %.2f ms (deployed chain, %s); DQN + ' ...
@@ -305,8 +306,8 @@ if isfile(F.pol)
         det{end+1} = sprintf('signalling delay of a change: %d cycle %.1f%%, %d cycles %.1f%% (single set)', ...
             CDk.switch_delay, pd(1), 2 * CDk.switch_delay, pd(2));
     end
-    st7 = status(lat_ok && max(pv) - min(pv) <= 10, stale || sl.stale);
-    if lat_pending && ~stale, st7 = 'PENDING'; end
+    st7 = status(lat_ok && max(pv) - min(pv) <= 10, stale);
+    if (lat_pending || sl.stale) && ~stale, st7 = 'PENDING'; end   % the deployed chain not timed yet
     KPI(end+1) = kpi(7, 'Decision time and robustness', latv, 'median < 10 ms, p95 < 20 ms; spread <= 10 points over the speed envelope', ...
         st7, det);
 

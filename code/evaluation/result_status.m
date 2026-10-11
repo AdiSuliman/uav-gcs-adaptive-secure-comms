@@ -15,7 +15,7 @@ function S = result_status()
 %                                   than results/policy_evaluation.mat
 %     results/phy_validation.txt    newer than params.mat (the link model's parameters)
 %     results/eval_detector_metrics.mat  newer than the detector's training
-%   A file without its identity fields was written before them and counts as stale.
+%   A file without its identity fields counts as stale.
 cur_det = ''; cur_pol = ''; t_det = -inf;
 if all(isfile({'data/trained_detector.mat', 'data/ood_thresholds.mat'}))
     D = load('data/trained_detector.mat', 'trained_at', 'ood');
@@ -65,7 +65,7 @@ function why = id_check(X, field, cur, what)
 % Reason the identity field of X is not the current one ({} when it is).
 why = {};
 if isempty(cur), return; end
-if ~isfield(X, field) || isempty(X.(field)), why = {sprintf('no %s (written before the identity checks)', field)};
+if ~isfield(X, field) || isempty(X.(field)), why = {sprintf('no %s', field)};
 elseif ~strcmp(X.(field), cur), why = {sprintf('%s of %s', field, what)};
 end
 end
