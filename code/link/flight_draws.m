@@ -129,10 +129,11 @@ end
 
 function [hid, cap] = run_attitude(d, fd, p)
 % Hidden antenna at the start of every frame of the run and our signal's weakest-antenna
-% amplitude over the run (sig_weak_db.m), the frames p.cycle_s apart, each p.air_s long.
+% amplitude over the run (sig_weak_db.m), the frames p.cycle_s apart, p.air_s from a frame's
+% first sample to its last.
 H = max(1, getf(p, 'cap_frames', 1)); cyc = getf(p, 'cycle_s', 0);
 air = getf(p, 'air_s', NaN);
-if isnan(air), air = getf(p, 'air_symbols', 0) / getf(p, 'symbol_rate', 1); end
+if isnan(air), air = (getf(p, 'samples_per_frame', 1) - 1) / (getf(p, 'symbol_rate', 1) * getf(p, 'sps', 1)); end
 if isfield(p, 'shadow_spec')
     shd = p.shadow_spec;
 elseif all(isfield(p, {'shadow_db', 'shadow_fit', 'shadow_fit_z', 'shadow_roll_deg', 'roll_max_deg', ...

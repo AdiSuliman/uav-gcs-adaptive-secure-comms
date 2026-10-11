@@ -349,7 +349,7 @@ set_param([modelName '/Tdl'], 'UserDataPersistent', 'on', 'UserData', struct('td
     'tdl_int_ds', p.tdl_int_ds, 'tdl_clip_ns', p.tdl_clip_ns));
 set_param([modelName '/Cap'], 'Value', '1');
 set_param([modelName '/Cap'], 'UserDataPersistent', 'on', 'UserData', struct('cap_frames', p.cap_frames, ...
-    'cycle_s', p.cycle_s, 'air_s', p.samples_per_frame / fs, 'shadow_spec', shadow_spec(p)));
+    'cycle_s', p.cycle_s, 'air_s', (p.samples_per_frame - 1) / fs, 'shadow_spec', shadow_spec(p)));
 set_param([modelName '/Cal'], 'Value', mat2str(zeros(1, nr)));
 set_param([modelName '/Cal'], 'UserDataPersistent', 'on', 'UserData', struct('cal_random', logical(p.cal_random), ...
     'cal_err_db', p.cal_err_db));
