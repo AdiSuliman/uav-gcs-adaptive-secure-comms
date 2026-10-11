@@ -23,12 +23,14 @@
 % A bound above the top path-loss level (22 dB) is beyond the measured levels.
 % The pass is a ramp, not the step the path-loss pools fly: the link monitor reads a drop
 % as the median of its last 10 cycles minus that of the last 3 (policy_monitor.m), so a
-% slow pass may never reach the drop alarm's threshold. Per speed band, the largest drop
-% the monitor reads along the pass (monitor_window_drop.m, one cycle per decision period)
-% at the band's lowest speed, the smaller of the wings-level pass and the banked pass at
-% every fixed bearing of the GCS (win_drop_db); a tracker that loses the UAV adds its
-% fallback as a step, read in full. edge_map.m commits the path_loss level only where the
-% read drop reaches the deployed threshold.
+% slow pass may never reach the drop alarm's threshold, and a fast one crosses the narrow
+% null overhead within fewer cycles than the medians span. Per speed band, the largest
+% drop the monitor reads along the pass (monitor_window_drop.m, one cycle per decision
+% period), the smallest over the band's speeds (every 2 km/h, both ends), the wings-level
+% pass and the banked pass at every fixed bearing of the GCS (win_drop_db): the drop every
+% flight of the band reads; a tracker that loses the UAV adds its fallback as a step, read
+% in full. edge_map.m commits the path_loss level only where the read drop reaches the
+% deployed threshold.
 % Output: results/overhead_pass.txt, results/overhead_pass.mat
 
 S = load('params.mat'); p = S.params;
@@ -64,7 +66,16 @@ for i = 1:numel(H_M)
         for b = 1:numel(BK)
             [~, rb] = overhead_drop_db(H_M(i), R0_KM(j), hG, p.uav_null_db, BK(b));
             ra = [r0; rb];                     % wings level, then banked at every bearing
-            W(i, j, b) = min(arrayfun(@(k) pass_drop(ra(k, :), d, VB(b) / 3.6, DT), 1:size(ra, 1)));
+            vs = linspace(VB(b), VB(b + 1), max(2, ceil((VB(b + 1) - VB(b)) / 2) + 1));   % the band's speeds [km/h]
+            w = Inf;
+            for v = vs
+                for k = 1:size(ra, 1)
+                    w = min(w, pass_drop(ra(k, :), d, v / 3.6, DT));
+                    if w == 0, break; end
+                end
+                if w == 0, break; end
+            end
+            W(i, j, b) = w;
         end
     end
 end
@@ -94,11 +105,11 @@ for b = 1:numel(BK)
 end
 rep{end+1} = '';
 rep{end+1} = sprintf(['Largest drop the link monitor reads along the pass [dB] (10-cycle reference minus 3-cycle median, ' ...
-    '%g ms per cycle), at each band''s lowest speed, the smaller of wings level and every bearing banked:'], C.period_ms);
+    '%g ms per cycle), the smallest over each band''s speeds, wings level and every bearing banked:'], C.period_ms);
 for i = 1:numel(H_M)
     for j = 1:numel(R0_KM)
         rep{end+1} = sprintf('  %4g m, %s (pass drop %.1f dB): %s', H_M(i), hd{j}, A(i, j), strjoin(arrayfun(@(b) ...
-            sprintf('%.0f km/h %.1f', VB(b), W(i, j, b)), 1:numel(BK), 'UniformOutput', false), ' | ')); %#ok<SAGROW>
+            sprintf('%.0f-%.0f km/h %.1f', VB(b), VB(b + 1), W(i, j, b)), 1:numel(BK), 'UniformOutput', false), ' | ')); %#ok<SAGROW>
     end
 end
 rep{end+1} = sprintf(['Largest drop of our signal below its cruise level during the pass: %.1f dB with the dipole ' ...

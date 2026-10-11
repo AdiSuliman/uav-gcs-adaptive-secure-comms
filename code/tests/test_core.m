@@ -2879,6 +2879,8 @@ for e = {[10 * ones(1, 12), 4 * ones(1, 10)], [10 * ones(1, 12), 10 - 0.2 * (1:6
 end
 verifyEqual(tc, monitor_window_drop([10 * ones(1, 12), 4 * ones(1, 10)]), 6, 'AbsTol', 1e-9);
 verifyEqual(tc, monitor_window_drop(10 - 0.2 * (0:59)), 0.9, 'AbsTol', 1e-9);
+verifyEqual(tc, monitor_window_drop([10 * ones(1, 12), 4, 4, 10 * ones(1, 10)]), 6, 'AbsTol', 1e-9);   % a 2-cycle dip reads
+verifyEqual(tc, monitor_window_drop([10 * ones(1, 12), 4, 10 * ones(1, 10)]), 0, 'AbsTol', 1e-9);      % a 1-cycle dip does not
 lvs = [6 10 14]; com = [1 1 -1]; nr = [1 0 -1];
 verifyEqual(tc, overhead_verdict([5 9], [true true], lvs, com, nr), 1);           % both read, both committed
 verifyEqual(tc, overhead_verdict([5 13], [true true], lvs, com, nr), 0);          % the lost bound not committed
