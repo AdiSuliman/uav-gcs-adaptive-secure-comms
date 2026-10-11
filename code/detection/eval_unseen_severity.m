@@ -56,6 +56,7 @@ Tood = ood_thresholds(0.95);
 FZ = struct('FM', [], 'N', 1);
 if isfile('data/fusion.mat'), FZ = load('data/fusion.mat', 'FM', 'N'); end   % temporal fusion (select_fusion.m)
 p0 = load('params.mat').params; p0.quiet_build = true;
+p0.pl_onset_frames = p0.pl_onset_det;              % the dataset's recipe: a path-loss step inside the block
 G = struct('model', 'UAV_GCS_Threat_Link', 'stop_time', num2str(N_FRAMES * p0.frame_duration), ...
     'delay_bits', delay_bits, 'tw', temporal_window, 'fs', p0.symbol_rate * p0.sps, 'D', D, 'N', load_norm(), ...
     'classes', {classes}, 'FM', FZ.FM, 'FN', FZ.N);

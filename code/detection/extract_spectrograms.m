@@ -24,7 +24,7 @@ N = numel(ds.iq);
 X = zeros(128, 128, 1, N, 'single');
 fprintf('Extracting %d spectrograms...\n', N);
 for i = 1:N
-    X(:, :, 1, i) = spec_image(ds.iq{i}, fs);
+    X(:, :, 1, i) = spec_image(ds.iq{i}, fs, thermal_nv(p));
     if mod(i, 2000) == 0, fprintf('  %d/%d\n', i, N); end
 end
 

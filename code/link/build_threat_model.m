@@ -3,8 +3,15 @@ function build_threat_model(p)
 % build_threat_model      params from params.mat, model saved to models/
 % build_threat_model(p)   params struct p, model built in memory only (parallel
 %                         workers of build_policy_pools.m)
-% [Tx: frame + QPSK + RRC] -> [Channel: Rician per UAV antenna] -> [Threat] -> [AWGN per antenna]
-%   -> [Rx: RRC per antenna, synchronization, channel estimation, combining, QPSK demod]
+% [Tx: frame + QPSK + RRC] -> [Channel: Rician per UAV antenna] -> [Threat] -> [Level]
+%   -> [AWGN per antenna] -> [Rx: RRC per antenna, synchronization, channel estimation,
+%   combining, QPSK demod]
+%
+% Level     the receiver's thermal noise is fixed (thermal_nv.m, the AWGN block); the gain
+%           block 'Level' scales everything the antennas receive, our signal and every
+%           interferer, to the Eb/N0 of the run (set_link_snr.m), as distance does: the
+%           received power the receiver measures is absolute, and every interferer keeps
+%           its level over our received signal.
 %
 % Link: command uplink, tracked directional GCS antenna -> p.n_rx omni antennas on the UAV
 % (line array along the fuselage over p.ant_aperture_m, spacing from the number of antennas).
@@ -36,9 +43,17 @@ function build_threat_model(p)
 %           to p.tdl_max_ns, the LoS on tap 0, every tap with its own sinusoids and centred
 %           on its source; the Constant block 'Tdl' holds the diffuse tap amplitudes of our
 %           signal and of every interferer (flight_draws.m, tdl_profile.m).
-% Threat    signal-side threats scale our signal (antenna_fault and
-%           airframe_shadowing hit one antenna, drawn per seeded run); every additive threat is ONE
-%           waveform arriving through its own spatial channel (own diffuse fading).
+% Threat    signal-side threats: path loss scales our signal from its onset frame
+%           (p.pl_onset_frames, drawn per run when a range: a step of attenuation, an
+%           obstruction or terrain masking; frames before it carry no threat); airframe
+%           shadowing, applied in the channel, hides the end of the array farther from
+%           the GCS while the attitude allows it (shadow_hidden.m: roll and heading against
+%           the GCS azimuth, Sun et al.), no threat on the air otherwise; an antenna fault
+%           (one antenna, drawn per seeded run) is an open or lossy connector between the
+%           antenna and its receiver, so it attenuates everything that antenna receives,
+%           our signal and every interferer, before the receiver's thermal noise.
+%           Every additive threat is ONE waveform arriving through its own spatial channel
+%           (own diffuse fading).
 %           In-band cap: every additive component reaches at most p.inband_cap_db
 %           over our received signal on the weakest antenna (path loss, the 'GCS'
 %           block's loss and the 'Body' block's airframe loss included,
@@ -46,8 +61,9 @@ function build_threat_model(p)
 %           (p.inband_ref, apply_countermeasure.m), so a countermeasure still lowers it
 %           by its own amount.
 %           Output 2: share of the frame's samples with the threat on the air
-%           (benign packet traffic, the sweeping jammer on our channel, an antenna
-%           fault with its contact open; 1 for every other threat, 0 for none).
+%           (benign packet traffic, the sweeping jammer on our channel; path loss 0 before
+%           its onset, airframe shadowing 0 while the attitude hides no antenna, when they
+%           are the only components; 1 for every other threat, 0 for none).
 %           The gated jammers run with the timing of the Constant block 'Gate'
 %           (jam_timing.m): the sweeping jammer is on our channel while
 %           mod(t + p0, T) of the channel clock lies in sweep_window_s.m, and the
@@ -176,7 +192,8 @@ add_block('commrandsrc3/Bernoulli Binary Generator', [modelName '/BitSource'], '
 add_block('simulink/User-Defined Functions/MATLAB Function', [modelName '/Tx'],      'Position', [150 95 250 145]);
 add_block('simulink/User-Defined Functions/MATLAB Function', [modelName '/Channel'], 'Position', [300 90 390 150]);
 add_block('simulink/User-Defined Functions/MATLAB Function', [modelName '/Threat'],  'Position', [440 90 530 150]);
-add_block('commchan3/AWGN Channel',                          [modelName '/AWGN'],    'Position', [580 95 650 125]);
+add_block('simulink/Math Operations/Gain',                    [modelName '/Level'],   'Position', [560 95 590 125]);
+add_block('commchan3/AWGN Channel',                          [modelName '/AWGN'],    'Position', [610 95 670 125]);
 add_block('simulink/User-Defined Functions/MATLAB Function', [modelName '/Rx'],      'Position', [710 90 810 150]);
 add_block('simulink/Sources/Constant', [modelName '/Seed'],    'Position', [150 190 220 210]);
 add_block('simulink/Sources/Constant', [modelName '/Doppler'], 'Position', [150 230 220 250]);
@@ -215,8 +232,8 @@ set_param([modelName '/BitSource'], ...
     'SampleTime', num2str(1 / p.symbol_rate / p.bits_per_symbol), ...
     'SamplesPerFrame', num2str(p.frame_length));
 
-snr0 = p.EbNo_dB(1) + 10*log10(p.bits_per_symbol) - 10*log10(sps);
-set_param([modelName '/AWGN'], 'SNR', num2str(snr0), 'SignalPower', num2str(1/sps));
+set_param([modelName '/AWGN'], 'NoiseMethod', 'Variance', 'VarianceSource', 'Parameter', 'Variance', sprintf('%.12g', thermal_nv(p)));
+set_link_snr(modelName, p.EbNo_dB(1) + 10*log10(p.bits_per_symbol) - 10*log10(sps), p);
 
 set_param([modelName '/tx_sink'], 'VariableName', 'tx_bits_out', 'SaveFormat', 'Array');
 set_param([modelName '/rx_sink'], 'VariableName', 'rx_bits_out', 'SaveFormat', 'Array');
@@ -252,7 +269,8 @@ add_line(modelName, 'Tdl/1',       'Channel/10', 'autorouting', 'on');
 add_line(modelName, 'Tdl/1',       'Threat/11', 'autorouting', 'on');
 add_line(modelName, 'Body/1',      'Threat/12', 'autorouting', 'on');
 add_line(modelName, 'Channel/1',   'Threat/1',  'autorouting', 'on');
-add_line(modelName, 'Threat/1',    'AWGN/1',    'autorouting', 'on');
+add_line(modelName, 'Threat/1',    'Level/1',   'autorouting', 'on');
+add_line(modelName, 'Level/1',     'AWGN/1',    'autorouting', 'on');
 add_line(modelName, 'Threat/2',    'Thr_act/1', 'autorouting', 'on');
 add_line(modelName, 'AWGN/1',      'Rx/1',      'autorouting', 'on');
 add_line(modelName, 'BitSource/1', 'Rx/2',      'autorouting', 'on');
@@ -277,7 +295,7 @@ set_param([modelName '/Corr'], 'Value', sprintf('%.6f', p.rx_corr));
 set_param([modelName '/Corr'], 'UserDataPersistent', 'on', 'UserData', struct('corr_random', logical(p.corr_random), ...
     'corr_range', p.corr_range, 'rx_corr', p.rx_corr));
 set_param([modelName '/Yaw'], 'UserDataPersistent', 'on', 'UserData', struct('yaw_random', logical(p.yaw_random), ...
-    'roll_max_deg', p.roll_max_deg, 'turn_v_floor', p.turn_v_floor, 'yaw_rate_max', p.yaw_rate_max, ...
+    'roll_max_deg', p.roll_max_deg, 'turn_v_floor', p.turn_v_floor, 'yaw_rate_max', p.yaw_rate_max, 'roll_deg', p.roll_deg, ...
     'c_light', p.c_light, 'carrier_freq', p.carrier_freq));
 set_param([modelName '/GCS'], 'Value', '1');
 set_param([modelName '/GCS'], 'UserDataPersistent', 'on', 'UserData', struct('gcs_tracked', logical(p.gcs_tracked), ...
@@ -285,7 +303,7 @@ set_param([modelName '/GCS'], 'UserDataPersistent', 'on', 'UserData', struct('gc
     'alt_random', logical(p.alt_random), 'alt_range_m', p.alt_range_m, 'gcs_h_m', p.gcs_h_m, 'uav_null_db', p.uav_null_db, ...
     'gcs_pt_dbm', p.gcs_pt_dbm, 'carrier_freq', p.carrier_freq, 'lb_uav_dbi', p.lb_uav_dbi, 'lb_nf_db', p.lb_nf_db, ...
     'lb_margin_db', p.lb_margin_db, 'lb_rate_bps', p.lb_rate_bps));
-set_param([modelName '/Att'], 'Value', mat2str([p.gcs_aoa_deg zeros(1, 6)], 8));
+set_param([modelName '/Att'], 'Value', mat2str([p.gcs_aoa_deg 0 p.roll_deg zeros(1, 4)], 8));
 set_param([modelName '/Att'], 'UserDataPersistent', 'on', 'UserData', struct('gcs_aoa_random', logical(p.gcs_aoa_random), ...
     'gcs_aoa_range_deg', p.gcs_aoa_range_deg, 'gcs_aoa_deg', p.gcs_aoa_deg, 'wobble_random', logical(p.wobble_random), ...
     'wobble_v_max', p.wobble_v_max, 'wobble_roll_deg', p.wobble_roll_deg, 'wobble_pitch_deg', p.wobble_pitch_deg, ...
@@ -366,13 +384,12 @@ else
     pers = ''; imp = ''; dly = '';
     mix = '    y(:, k) = gk * bdy(k) * x .* (sqrt(Kk/(Kk+1)) * a(:, k) .* gl + sqrt(1/(Kk+1)) * D(:, k));\n';
 end
-% airframe shadowing: one antenna, drawn per run, loses p.shadow_db and its line of sight
-% (K-factor p.shadow_k_db, Sun et al.)
+% airframe shadowing: the antenna the airframe hides from the GCS at this frame's attitude
+% (shadow_hidden.m; none while the roll or the heading leaves the line of sight clear)
+% loses p.shadow_db and its line of sight (K-factor p.shadow_k_db, Sun et al.)
 thr = lower(p.active_threat);
 shd = any(strcmp(strsplit(thr, '+'), 'airframe_shadowing'));
 if shd
-    pers = [pers ' hs'];
-    imp = [imp sprintf('if isempty(hs)\n    hs = randi(%d);\nend\n', nr)];
     sel = sprintf(['    Kk = K; gk = 1;\n    if k == hs\n        Kk = %.10f; gk = %.10f;\n    end\n'], ...
         10^(p.shadow_k_db/10), 10^(-p.shadow_db/20));
 else
@@ -421,7 +438,7 @@ s = [sprintf('function y = fcn(x, seed, fd, kdb, yaw, rho, gcs, att, bdy, tdl)\n
     sos_init('f0', 'ph', nr) imp ...
     sprintf('if isempty(n)\n    n = 0;\nend\nNs = size(x, 1);\nt = (n + (0:Ns-1).'') / %.1f;\nn = n + max(Ns, %d);\n', fs, cyc) ...
     pitch_code() sos_gains('D', 'f0', 'ph', p) dly xs ...
-    sprintf('K = 10^(kdb(1)/10);\n') tilt lt ...
+    sprintf('K = 10^(kdb(1)/10);\n') tilt lt shadow_code(p, shd) ...
     sprintf(['y = complex(zeros(Ns, %d));\n' ...
     'for k = 1:%d\n' sel mix ...
     'end\n' ...
@@ -460,19 +477,28 @@ pers = {}; init = {}; body = {}; tpers = {}; tinit = {};
 if any(ismember(sig, {'antenna_fault'}))
     pers{end+1} = 'hit_ant'; init{end+1} = sprintf('hit_ant = randi(%d);', nr);   % the antenna with the open connector
 end
-body{end+1} = sprintf('Ns = size(u, 1);\ny = u;\nt = (nI + (0:Ns-1).'') / %.1f;\nnI = nI + max(Ns, %d);\nact = %d;\n', ...
-    fs, round(p.cycle_s * fs), double(~isempty(parts)));   % interferer channels on the same clock as ours
+body{end+1} = sprintf('Ns = size(u, 1);\ny = u;\nt = (nI + (0:Ns-1).'') / %.1f;\nnI = nI + max(Ns, %d);\nnfr = nfr + 1;\nact = %d;\nasg = 0;\n', ...
+    fs, round(p.cycle_s * fs), double(~isempty(parts)));   % interferer channels on the same clock as ours; nfr: frame of the run
 
+on1 = p.pl_onset_frames(1); on2 = p.pl_onset_frames(end);
 for i = 1:numel(sig)
     switch sig{i}
         case 'path_loss'
-            body{end+1} = sprintf('y = y * %.8f;\n', 10^(-p.path_loss_db/20)); %#ok<AGROW>
+            % a step of attenuation from the onset frame on, drawn per run in the range
+            % (an obstruction or terrain masking; a constant loss from the first frame is a
+            % longer range)
+            body{end+1} = sprintf('if nfr >= pl_on\n    y = y * %.8f;\n    asg = 1;\nend\n', 10^(-p.path_loss_db/20)); %#ok<AGROW>
         case 'antenna_fault'
-            % a connector of one antenna, drawn per run, is open for the flight
-            body{end+1} = sprintf('y(:, hit_ant) = y(:, hit_ant) * %.8f;\n', 10^(-p.fault_atten_db/20)); %#ok<AGROW>
+            % applied after the interferers: the connector sits between the antenna and its receiver
+            body{end+1} = sprintf('asg = 1;\n'); %#ok<AGROW>
         case 'airframe_shadowing'
             % applied in the channel: the hidden antenna loses its line of sight there
+            body{end+1} = sprintf(['if shadow_hidden(att(1) + yaw * t(1), att(2), att(3), att(4), %d, %.6f, %.6f) > 0\n' ...
+                '    asg = 1;\nend\n'], nr, p.shadow_roll_deg, p.shadow_hdg_deg); %#ok<AGROW>
     end
+end
+if ~isempty(sig) && isempty(addc)
+    body{end+1} = sprintf('act = asg;\n');          % signal-side threats only: on the air as their state says
 end
 [NT, S] = tdl_taps(p, fs); E = (NT - 1) * S;
 if NT > 1 && ~isempty(addc)                         % ys: our signal as the reactive jammer senses it
@@ -576,6 +602,12 @@ for c = 1:numel(addc)
         'dI = dI .* aI;\n'], c, 2*pi*p.ant_spacing_wl, ant_pos(nr), dop, lever_k(p)) lt ...
         sprintf('for k = 1:%d\n', nr) mx sprintf('end\n')]; %#ok<AGROW>
 end
+if ismember('antenna_fault', sig)
+    % the faulty connector attenuates everything its antenna receives, our signal and every
+    % interferer, ahead of the receiver's thermal noise (an attenuator at ambient
+    % temperature leaves the noise floor at kTB)
+    body{end+1} = sprintf('y(:, hit_ant) = y(:, hit_ant) * %.8f;\n', 10^(-p.fault_atten_db/20));
+end
 if p.chain_amp_db > 0 || p.chain_phase_deg > 0
     % receive chains: a gain and phase error per antenna, fixed for the flight (everything
     % the antenna receives passes its chain)
@@ -585,7 +617,10 @@ if p.chain_amp_db > 0 || p.chain_phase_deg > 0
     body{end+1} = sprintf('for k = 1:%d\n    y(:, k) = y(:, k) * gch(k);\nend\n', nr); %#ok<AGROW>
 end
 
-pers = [{'nI'}, pers, tpers]; init = [{'nI = 0;'}, init, tinit];   % the delay line's sinusoids drawn last
+pers = [{'nI', 'nfr'}, pers, tpers]; init = [{'nI = 0;', 'nfr = 0;'}, init, tinit];   % the delay line's sinusoids drawn last
+if ismember('path_loss', sig)                       % then the onset frame of the path-loss step
+    pers{end+1} = 'pl_on'; init{end+1} = sprintf('pl_on = %d + floor(%d * rand);', on1, on2 - on1 + 1);
+end
 head = sprintf('function [y, act] = fcn(u, seed, fd, aoa, kdb, yaw, rho, gcs, att, gate, tdl, bdy)\n%%#codegen\npersistent seeded\n');
 for i = 1:numel(pers)
     head = [head sprintf('persistent %s\n', pers{i})]; %#ok<AGROW>
@@ -1710,6 +1745,14 @@ s = sprintf('%s\n', c{:});
 end
 
 %% ===================== Helpers =====================
+function c = shadow_code(p, on)
+% Hidden antenna hs of the frame, from the 'Att' block and the heading (shadow_hidden.m).
+c = '';
+if ~on, return; end
+c = sprintf('hs = shadow_hidden(att(1) + yaw * t(1), att(2), att(3), att(4), %d, %.6f, %.6f);\n', ...
+    p.n_rx, p.shadow_roll_deg, p.shadow_hdg_deg);
+end
+
 function g = tone_gain(p)
 % Power of a unit-JSR tone: a noise jammer of power JSR per sample puts JSR/sps
 % into our band after the receive filter, a tone inside the passband puts all of
@@ -1857,7 +1900,8 @@ d = struct('n_rx', 3, 'ant_aperture_m', 1.2, 'rx_corr', 0.3, 'gcs_aoa_deg', 0, .
     'sweep_speed_hz_s', 1e9, 'sweep_bw_hz', 4e6, 'sweep_period_s', [20e-3 83.5e-3], 'jam_timing_random', false, ...
     'fdiv_spacing_hz', 25e6, 'sweep_fdiv', false, ...
     'tdl', false, 'tdl_random', false, 'tdl_ds_ns', [0 0], 'tdl_step_ns', 250, 'tdl_max_ns', 4500, ...
-    'tdl_sig_ds', [-6.52 0.32; -6.63 0.16], 'tdl_sig_alt_m', 25, 'tdl_int_ds', [-6.63 0.16], 'tdl_clip_ns', 1000);
+    'tdl_sig_ds', [-6.52 0.32; -6.63 0.16], 'tdl_sig_alt_m', 25, 'tdl_int_ds', [-6.63 0.16], 'tdl_clip_ns', 1000, ...
+    'pl_onset_frames', [1 1], 'shadow_roll_deg', 5, 'shadow_hdg_deg', 30, 'roll_deg', 0);
 f = fieldnames(d);
 for i = 1:numel(f)
     if ~isfield(p, f{i}), p.(f{i}) = d.(f{i}); end

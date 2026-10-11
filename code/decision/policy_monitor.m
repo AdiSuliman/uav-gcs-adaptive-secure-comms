@@ -33,7 +33,12 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   'none', 'benign_interference' (non-hostile, D9) and 'unknown' raise it only
 %   through degradation. 'class_drop': as 'class', but the class path_loss
 %   counts only when the signal-over-thermal estimate has dropped by at least
-%   PP.drop_db from the episode's reference. Drop: reference = median
+%   PP.drop_db from the episode's reference, and that drop raises the alarm by itself
+%   (drop_alarm): a step of attenuation stays a lower signal over thermal noise after the
+%   detector's window has passed its onset, while moving away lowers it by at most
+%   8.69 v / d dB/s, about 0.2 dB between the reference and the last 3 cycles at
+%   161 km/h and 0.28 km. The estimate is our signal over the thermal floor (SINR +
+%   interference over thermal), so interference does not move it. Drop: reference = median
 %   Eb/N0 estimate of the last 10 cycles without an alarm, minus the median of the
 %   last 3 cycles. An alarm is CONFIRMED when at least m of the last n cycles carried
 %   one (M-of-N binary integration, PP.confirm, default C.confirm).
@@ -43,7 +48,7 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   mem.since starts saturated (10): the policies never see the episode clock.
 %   mem.deg_n / mem.conf_n: consecutive degraded / confirmed-alarm cycles; mem.pend:
 %   a requested change not yet received.
-%   M: ber_avg, plr (NE x 1), ebno_est, drop (dB), degraded, cls, alarm, confirmed (1 x NE),
+%   M: ber_avg, plr (NE x 1), ebno_est, drop (dB), drop_alarm, degraded, cls, alarm, confirmed (1 x NE),
 %      probs (NE x classes, fused), te (NE x 9, persistence measurements of the window,
 %      temporal_evidence.m)
 C = decision_config();
@@ -120,13 +125,15 @@ cls(unk) = {'unknown'};
 M.cls = cls(:)';
 mode = 'class'; if isfield(PP, 'alarm_mode'), mode = PP.alarm_mode; end
 hostile = ~ismember(M.cls, {'none', 'benign_interference', 'unknown'});
+M.drop_alarm = false(1, numel(M.cls));
 switch mode
     case 'degraded'
         M.alarm = M.degraded;
     case 'class_drop'
         dd = C.drop_db; if isfield(PP, 'drop_db') && ~isempty(PP.drop_db), dd = PP.drop_db; end
-        hostile(strcmp(M.cls, 'path_loss') & M.drop < dd) = false;
-        M.alarm = hostile | M.degraded;
+        M.drop_alarm = M.drop >= dd;
+        hostile(strcmp(M.cls, 'path_loss') & ~M.drop_alarm) = false;
+        M.alarm = hostile | M.degraded | M.drop_alarm;
     otherwise
         M.alarm = hostile | M.degraded;
 end

@@ -16,7 +16,8 @@ function d = flight_draws(seed, fd, p, geo)
 %   d.yaw             heading rate [deg/s] (heading_rate.m)
 %   d.bank            bank angle of the turn [deg] (bank_angle.m)
 %   d.roll, d.pitch   attitude [deg]: the bank to the side of the turn, plus the tilt of a
-%                     slow flight in wind (hover_attitude.m)
+%                     slow flight in wind (hover_attitude.m); with the heading rate fixed
+%                     (p.yaw_random off) the bank is p.roll_deg (default 0)
 %   d.wobble          pitch wobble of a slow flight [amp deg, freq Hz, phase rad], zeros
 %                     from p.wobble_v_max up (hover_attitude.m)
 %   d.rho             receive correlation (rx_correlation.m)
@@ -61,9 +62,11 @@ d.yaw = 0;
 if getf(p, 'yaw_random', false), d.yaw = heading_rate(seed, fd, p); end
 d.bank = 0;
 if d.yaw ~= 0, d.bank = bank_angle(d.yaw, fd, p); end
+if ~getf(p, 'yaw_random', false), d.bank = abs(getf(p, 'roll_deg', 0)); end   % a fixed geometry's roll
 w = zeros(1, 5);
 if getf(p, 'wobble_random', false), w = hover_attitude(seed, fd, p); end
 d.roll = sign(d.yaw) * d.bank + w(1);           % a right turn (yaw > 0) banks right wing down
+if ~getf(p, 'yaw_random', false), d.roll = getf(p, 'roll_deg', 0) + w(1); end
 d.pitch = w(2); d.wobble = w(3:5);
 d.rho = getf(p, 'rx_corr', NaN);
 if getf(p, 'corr_random', false), d.rho = rx_correlation(seed, p.corr_range); end

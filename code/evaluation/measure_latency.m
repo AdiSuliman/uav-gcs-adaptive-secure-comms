@@ -50,8 +50,7 @@ F = {};
 for t = 1:numel(THREATS)
     p = p0; p.active_threat = THREATS{t}; p.seed = 4242 + t;
     evalc('build_threat_model(p)');
-    set_param([modelName '/AWGN'], 'SNR', num2str(EBNO + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), ...
-        'SignalPower', num2str(1/p.sps));
+    set_link_snr(modelName, EBNO + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
     M = extract_closed_loop_frames(sim(modelName, 'StopTime', num2str(20 * p.frame_duration)), p, delay_bits);
     disk_guard;
     for k = reshape(find(~isnan(M.ber)), 1, [])
@@ -77,7 +76,7 @@ for di = 1:numel(devs)
         memD = []; memR = []; cfgD = na; cfgR = na;
         for f = 1:nF
             x = F{f};
-            t0 = tic; img = spec_image(x.iq, fs); t_spec = toc(t0);
+            t0 = tic; img = spec_image(x.iq, fs, thermal_nv(p0)); t_spec = toc(t0);
             t0 = tic; raw = link_features(x.M, x.k, tw); t_feat = toc(t0);
             X = reshape(single(img), 128, 128, 1, 1); Fn = ((raw - mu) ./ sd)';
             t0 = tic; [probs, maha] = detect_scores(D.net, D.ood, X, Fn, ddev); sync(ug); t_det = toc(t0);

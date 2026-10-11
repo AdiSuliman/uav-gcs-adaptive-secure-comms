@@ -39,10 +39,11 @@ for a = 1:nA
     keys{end+1} = k; first(end+1) = a; %#ok<AGROW>
     info.map(a) = a; info.n_unique = info.n_unique + 1;
     build_threat_model(p2);
+    if ~isempty(det), det.nv = thermal_nv(p2); end         % the receiver's thermal floor (spec_image.m)
     for s = 1:nS
         snr_dB = ebno(s) + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps);
         loss = 0; if isfield(p2, 'link_loss_db'), loss = p2.link_loss_db; end   % extra path loss (relay experiment)
-        set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db - loss), 'SignalPower', num2str(1/p2.sps));
+        set_link_snr(modelName, snr_dB + g_db - loss, p2);
         for sp = 1:nSp
             g = geo{s}(sp);
             if isempty(det), Q = empty_pool(0, 0); else, Q = empty_pool(numel(det.classes), numel(det.mu)); end
@@ -86,7 +87,7 @@ n = numel(v);
 if ~isempty(det)
     X = zeros(128, 128, 1, n, 'single'); Fr = zeros(n, numel(det.mu));
     for i = 1:n
-        X(:, :, 1, i) = spec_image(F.iq{v(i)}, det.fs);
+        X(:, :, 1, i) = spec_image(F.iq{v(i)}, det.fs, det.nv);
         Fr(i, :) = link_features(F, v(i), tw);
     end
     [probs, maha] = detect_scores(det.net, det.ood, X, ((Fr - det.mu) ./ det.sd)', 'cpu');

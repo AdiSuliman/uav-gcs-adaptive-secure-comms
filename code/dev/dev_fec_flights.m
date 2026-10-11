@@ -24,7 +24,7 @@ for ci = 1:size(C, 1)
     if isfinite(C{ci, 9}), p.int_rician_k = C{ci, 9}; end
     evalc('build_threat_model(p)');
     for eb = C{ci, 5}
-        set_param([mdl '/AWGN'], 'SNR', num2str(eb + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), 'SignalPower', num2str(1/p.sps));
+        set_link_snr(mdl, eb + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
         S = struct('ber', [], 'sf', [], 'pe', [], 'coh', [], 'tx', {{}}, 'rx', {{}}, 'iq', {{}}, 'z', {{}});
         for sd = seeds
             link_seed(mdl, sd, p.fd_max, struct('ebno', eb));

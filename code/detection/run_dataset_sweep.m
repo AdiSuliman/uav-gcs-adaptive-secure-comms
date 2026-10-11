@@ -11,7 +11,12 @@
 % 'none' gets n_levels x N_SUB sub-runs per Eb/N0 (class balance). The sweeping jammer is
 % on our channel in a share of its frames only (its sweep period and phase per flight,
 % jam_timing.m): its cells fly N_SUB over that share, so its labelled frames match the
-% other threats'; its other frames are clean frames.
+% other threats'; its other frames are clean frames. Likewise a path-loss step starts
+% inside the sub-run (p.pl_onset_det) and its frames count while the onset lies in their
+% link-feature window of TW frames (threat_active.m): TW of F_SUB frames, so its cells fly
+% N_SUB F_SUB / TW; airframe shadowing counts only while the attitude lets the airframe
+% hide an antenna (shadow_hidden.m), so its cells fly N_SUB over that share
+% (shadow_hit_share.m).
 %
 % Per frame: reference-antenna IQ, label, level, configured Eb/N0, the receiver
 % measurements of extract_closed_loop_frames.m, the true BER and frame
@@ -43,6 +48,7 @@ FRESH      = exist('FRESH_TEST', 'var') && FRESH_TEST;
 EbNo_list  = p0.EbNo_dB;          % Eb/N0 grid of init_params
 N_SUB      = 6;                   % independent sub-runs per cell (split unit)
 F_SUB      = 20;                  % frames per sub-run
+TW         = 10;                  % link-feature window [frames], as extract_spectrograms.m
 delay_bits = 20;
 modelName  = 'UAV_GCS_Threat_Link';
 SEED0      = 3000000;             % sub-run seed: SEED0 + run id
@@ -64,6 +70,9 @@ n_levels    = numel(threat_cfg(1).levels);
 n_sub       = N_SUB * ones(1, numel(threat_cfg));
 hit         = sweep_hit_share(p0);
 n_sub(strcmp({threat_cfg.name}, 'sweeping_jammer')) = round(N_SUB / hit);
+shd         = shadow_hit_share(p0);
+n_sub(strcmp({threat_cfg.name}, 'airframe_shadowing')) = round(N_SUB / shd);
+n_sub(strcmp({threat_cfg.name}, 'path_loss')) = round(N_SUB * F_SUB / TW);
 if exist('SMOKE', 'var') && SMOKE, n_sub(:) = N_SUB; end
 class_names = ['none', {threat_cfg.name}];
 stop_time   = num2str(F_SUB * p0.frame_duration);
@@ -79,7 +88,11 @@ run_id = 0;
 t0 = tic;
 fprintf('\n=== A5 dataset: %d threats x %d levels x %d Eb/N0 x %d sub-runs x %d frames (+ none) ===\n', ...
     numel(threat_cfg), n_levels, numel(EbNo_list), N_SUB, F_SUB);
-fprintf('sweeping jammer: on our channel in %.1f%% of the frames, %d sub-runs per cell\n', 100 * hit, max(n_sub));
+fprintf('sweeping jammer: on our channel in %.1f%% of the frames, %d sub-runs per cell\n', 100 * hit, ...
+    n_sub(strcmp({threat_cfg.name}, 'sweeping_jammer')));
+fprintf('airframe shadowing: the attitude hides an antenna in %.1f%% of the flights, %d sub-runs per cell\n', 100 * shd, ...
+    n_sub(strcmp({threat_cfg.name}, 'airframe_shadowing')));
+fprintf('path loss: a step at frame %d-%d, %d sub-runs per cell\n', p0.pl_onset_det, n_sub(strcmp({threat_cfg.name}, 'path_loss')));
 fprintf('%-22s %6s %10s %10s %9s %7s %7s\n', 'class', 'level', 'meanBER', 'meanSINR', 'envcorr', 'coh', 'Gmmse');
 
 %% ---- Threat classes ----
@@ -87,13 +100,14 @@ for tt = 1:numel(threat_cfg)
     cfg = threat_cfg(tt);
     for lv = 1:n_levels
         p = p0; p.active_threat = cfg.name; p.(cfg.param) = cfg.levels(lv); p.seed = [];
+        p.pl_onset_frames = p0.pl_onset_det;           % a path-loss step inside the sub-run
         build(p, modelName);
         i_start = numel(D.label) + 1;
         for s = 1:numel(EbNo_list)
             for sub = 1:n_sub(tt)
                 run_id = run_id + 1;
                 D = add_subrun(D, p, modelName, EbNo_list(s), stop_time, delay_bits, ...
-                    tt + 1, cfg.levels(lv), run_id, FOLD(sub), MEAS, SEED0);
+                    tt + 1, cfg.levels(lv), run_id, FOLD(sub), MEAS, SEED0, TW);
             end
         end
         report_row(cfg.name, cfg.levels(lv), D, i_start);
@@ -107,7 +121,7 @@ i_start = numel(D.label) + 1;
 for s = 1:numel(EbNo_list)
     for k = 1:n_levels * N_SUB
         run_id = run_id + 1;
-        D = add_subrun(D, p, modelName, EbNo_list(s), stop_time, delay_bits, 1, NaN, run_id, FOLD(k), MEAS, SEED0);
+        D = add_subrun(D, p, modelName, EbNo_list(s), stop_time, delay_bits, 1, NaN, run_id, FOLD(k), MEAS, SEED0, TW);
     end
 end
 report_row('none', NaN, D, i_start);
@@ -150,22 +164,23 @@ params = p; save('params.mat', 'params'); %#ok<NASGU>
 evalc('build_threat_model');
 end
 
-function D = add_subrun(D, p, modelName, ebno, stop_time, delay_bits, label, level, run_id, fold, MEAS, seed0)
+function D = add_subrun(D, p, modelName, ebno, stop_time, delay_bits, label, level, run_id, fold, MEAS, seed0, tw)
 % One seeded sub-run at its own random UAV speed; appends its complete frames.
 v_kmh = p.speed_kmh_min + rand() * (p.speed_kmh_max - p.speed_kmh_min);
 fd = v_kmh / 3.6 * p.carrier_freq / p.c_light;
 seed = seed0 + run_id;                                  % own seed range, fixed by the run id
 d = link_seed(modelName, seed, fd, struct('ebno', ebno, 'alt_m', NaN, 'k_sig_db', NaN));
 snr_dB = ebno + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
-set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/p.sps));
+set_link_snr(modelName, snr_dB, p);
 F = extract_closed_loop_frames(sim(modelName, 'StopTime', stop_time), p, delay_bits);
 disk_guard;
 v = find(~isnan(F.ber));
 n = numel(v);
 D.iq = [D.iq, F.iq(v)];
 lab = label * ones(1, n);
-lab(~threat_active(p.active_threat, F.act(v))) = 1;     % a WLAN frame without a packet, a frame outside the sweep's
-                                                        % window, a fault with its contact closed: clean
+lab(~threat_active(p.active_threat, F.act(v), v, tw)) = 1;   % a WLAN frame without a packet, a frame outside the
+                                                        % sweep's window, no hidden antenna, a path-loss frame before its
+                                                        % step or past its onset's window: clean
 D.label = [D.label, lab]; D.class_run = [D.class_run, label * ones(1, n)]; D.level = [D.level, level * ones(1, n)];
 D.snr = [D.snr, ebno * ones(1, n)]; D.speed = [D.speed, v_kmh * ones(1, n)];
 D.run = [D.run, run_id * ones(1, n)]; D.seed = [D.seed, seed * ones(1, n)]; D.fold = [D.fold, fold * ones(1, n)];

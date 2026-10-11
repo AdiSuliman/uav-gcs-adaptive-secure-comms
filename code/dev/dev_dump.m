@@ -17,7 +17,7 @@ mdl = 'UAV_GCS_Threat_Link';
 D = struct('u', {}, 'tx', {}, 'rx', {}, 'sy', {}, 'seed', {}, 'f', {}, 'ebno', {});
 evalc('build_threat_model(q)');
 for e = c{7}
-    set_param([mdl '/AWGN'], 'SNR', num2str(e + 10*log10(q.bits_per_symbol) - 10*log10(q.sps)), 'SignalPower', num2str(1/q.sps));
+    set_link_snr(mdl, e + 10*log10(q.bits_per_symbol) - 10*log10(q.sps), q);
     for s = seeds
         link_seed(mdl, s, q.fd_max);
         o = sim(mdl, 'StopTime', num2str(nfr * q.frame_duration));
@@ -33,7 +33,7 @@ end
 close_system(mdl, 0);
 g = q; g.active_threat = 'none'; g.rx_combiner = 'mrc';
 evalc('build_threat_model(g)');
-set_param([mdl '/AWGN'], 'SNR', '40', 'SignalPower', num2str(1/q.sps));
+set_link_snr(mdl, 40, q);
 GS = containers.Map('KeyType', 'double', 'ValueType', 'any');
 for s = seeds
     link_seed(mdl, s, q.fd_max);

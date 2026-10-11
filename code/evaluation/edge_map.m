@@ -22,7 +22,11 @@
 %   DET    fused detection of the deployed detector (fused_class.m) on the
 %          threat-active frames at no_action (threat_active.m): the class calls for
 %          the countermeasure of the threat (rule_based_policy.m), for a combined
-%          threat that of one of its components                                >= 90%
+%          threat that of one of its components; an antenna fault and airframe
+%          shadowing take the same answer, so DET reads them at the branch level (one
+%          branch lost, branch_level.m). A path-loss step: every attenuated frame after
+%          the same flight's clean link at no_action (the onset), detected by the fused
+%          class or by the monitor's drop alarm (policy_monitor.m, 'class_drop')   >= 90%
 %   DET_h  DET on the flights whose unmitigated link is not restored (harmed)   >= 90%
 %          (DET_u, DET on the unharmed flights, is reported beside it, no target)
 %   SURV   flights some configuration restores (link_env.m); follower rows: one
@@ -325,11 +329,9 @@ for c = tc
         for s = 1:nS
             P = PP.pools{c, s, K.na, sp};
             if isempty(P) || isempty(P.ber), continue; end
-            k = fused_class(P.probs, struct('run', P.run, 'pos', run_pos(P.run), 'gain_ant', P.gant, 'feats_raw', P.feat), ...
-                PP.fuse, PP.fuse_N);
-            on = threat_active(PP.scen{c}, P.act);
+            [hit, on] = det_frames(P, PP.pools{clean_cell, s, K.na, sp}, PP.scen{c}, ok_c, PP);
             i = flight_of(IDX, c, s, sp, P.run, PP.runs{sp});
-            FT.det_k = FT.det_k + accumarray(i, double(reshape(ok_c(k), [], 1) & on), [nF 1]);
+            FT.det_k = FT.det_k + accumarray(i, double(hit & on), [nF 1]);
             FT.det_n = FT.det_n + accumarray(i, double(on), [nF 1]);
         end
     end
@@ -592,11 +594,10 @@ if isfile('data/check_pools.mat')
                 KF.link_n = KF.link_n + accumarray(i, 1, [nKF 1]);
                 continue
             end
-            k = fused_class(P.probs, struct('run', P.run, 'pos', run_pos(P.run), 'gain_ant', P.gant, 'feats_raw', P.feat), ...
-                CK.fuse, CK.fuse_N);
-            on = threat_active(CK.scen{c}, P.act);
             ok_c = ismember(acts, rule_based_policy(CK.scen{c}));
-            KF.det_k = KF.det_k + accumarray(i, double(reshape(ok_c(k), [], 1) & on), [nKF 1]);
+            Pc = []; if size(CK.pools, 2) >= s, Pc = CK.pools{k0, s, Kc.na, 1}; end
+            [hit, on] = det_frames(P, Pc, CK.scen{c}, ok_c, CK);
+            KF.det_k = KF.det_k + accumarray(i, double(hit & on), [nKF 1]);
             KF.det_n = KF.det_n + accumarray(i, double(on), [nKF 1]);
         end
     end
@@ -1415,6 +1416,47 @@ function i = flight_of(IDX, c, s, sp, run, runs)
 % Flight row of every frame of a pool.
 [~, r] = ismember(run, runs);
 i = IDX(sub2ind(size(IDX), c + 0 * r, s + 0 * r, sp + 0 * r, r));
+end
+
+function [hit, on] = det_frames(P, Pc, scen, ok_c, PP)
+% DET of every frame of a pool at no_action: hit, the fused class calls for the threat's
+% countermeasure; on, the threat is on the air (threat_active.m). A path-loss cell starts
+% with its full loss, so every flight is read after the same flight's clean link (Pc,
+% the onset between them): the fused class over the joined frames, or the monitor's drop
+% alarm, the Eb/N0 estimate's 3-cycle median that many dB below the median of the last 10
+% clean cycles (policy_monitor.m).
+on = reshape(threat_active(scen, P.act), [], 1);
+if ~strcmp(scen, 'path_loss') || isempty(Pc) || isempty(Pc.ber)
+    k = fused_class(P.probs, struct('run', P.run, 'pos', run_pos(P.run), 'gain_ant', P.gant, 'feats_raw', P.feat), ...
+        PP.fuse, PP.fuse_N);
+    hit = reshape(ok_c(k), [], 1);
+    return
+end
+C = decision_config();
+dd = C.drop_db; if isfield(PP, 'drop_db') && ~isempty(PP.drop_db), dd = PP.drop_db; end
+use_drop = isfield(PP, 'alarm_mode') && strcmp(PP.alarm_mode, 'class_drop');
+eb = @(F) double(F(:, feature_index('sinr')) + F(:, feature_index('iot'))) + 10*log10(PP.sps) - 10*log10(PP.bps);
+hit = false(numel(P.run), 1);
+[ur, ~, ir] = unique(P.run, 'stable');
+J = struct('probs', [], 'gant', [], 'feat', [], 'run', [], 'part', []);
+for r = 1:numel(ur)
+    ic = find(Pc.run == ur(r)); ip = find(ir == r);
+    J.probs = [J.probs; Pc.probs(ic, :); P.probs(ip, :)]; J.gant = [J.gant; Pc.gant(ic, :); P.gant(ip, :)];
+    J.feat = [J.feat; Pc.feat(ic, :); P.feat(ip, :)]; J.run = [J.run; repmat(ur(r), numel(ic) + numel(ip), 1)];
+    J.part = [J.part; zeros(numel(ic), 1); ip(:)];
+end
+k = fused_class(J.probs, struct('run', J.run, 'pos', run_pos(J.run), 'gain_ant', J.gant, 'feats_raw', J.feat), ...
+    PP.fuse, PP.fuse_N);
+e = eb(J.feat);
+for r = 1:numel(ur)
+    j = find(J.run == ur(r)); jc = j(J.part(j) == 0); jp = j(J.part(j) > 0);
+    hit(J.part(jp)) = ok_c(k(jp));
+    if ~use_drop || isempty(jc), continue; end
+    ref = median(e(jc(max(1, end - 9):end)));
+    for q = jp(:)'
+        hit(J.part(q)) = hit(J.part(q)) || ref - median(e(max(j(1), q - 2):q)) >= dd;
+    end
+end
 end
 
 function pos = run_pos(run)

@@ -120,6 +120,7 @@ parfor (j = 1:nJ, NWP)
     t = jobs(j, 1); li = jobs(j, 2);
     cfg = maps(t);
     p = p0; p.active_threat = cfg.base; p.(cfg.level_field) = cfg.levels(li);
+    if strcmp(cfg.base, 'airframe_shadowing'), p.roll_deg = p.shadow_view_roll_deg; end   % a turn that lets the airframe hide an antenna
     if ~isnan(cfg.aoa), p.int_aoa_deg(1) = p.gcs_aoa_deg + cfg.aoa; end
     sd = 900000 + 1000*t + 10*li;                         % + s: each Eb/N0 column its own flight (nS < 10)
     g = arrayfun(@(s) struct('seed', sd + s, 'speed', v_nom, 'run', 1), 1:nS, 'UniformOutput', false);

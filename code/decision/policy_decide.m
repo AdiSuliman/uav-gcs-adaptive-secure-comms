@@ -15,8 +15,8 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %
 %   Link monitor, alarm confirmation and the agent's observation history:
 %   policy_monitor.m (shared). Timing constants: decision_config.m.
-%   rule      detected class, predicted MMSE gain and quiet-slot interference (alarm
-%             threshold PP.q_thr) -> rule_based_policy.m
+%   rule      detected class, predicted MMSE gain, quiet-slot interference (alarm
+%             threshold PP.q_thr) and the monitor's drop alarm -> rule_based_policy.m
 %   table     detected class -> the configuration with the best mean reward for
 %             that threat on the train pools (policy_table.m); a 'none' or
 %             'unknown' class on a degraded link takes table_unknown
@@ -30,16 +30,17 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %             when the base policy keeps
 %             - a configuration it applied while the link stays degraded for C.esc
 %               cycles from the first frame received with it
-%             - no_action while the alarm stays confirmed for C.esc cycles: an
-%               intermittent fault can leave the windowed BER estimate near clean
-%               while the threat is on
+%             - no_action while the alarm stays confirmed for C.esc cycles: a threat
+%               the detector names can leave the windowed BER estimate near clean (a
+%               jammer between our packets, a lost branch the other antennas cover)
+%               while it is on
 %   blind_esc the rule with escalation without the detector: every cycle reads as
 %             'unknown', so the alarm comes from measured degradation only (what the
 %             detection adds to an adaptive recovery)
 %   random, fixed: reference policies, no monitor gating ('fixed' at no_action is
 %   the link that does not respond)
 %
-%   info: q (Q-values, dqn kinds), cls, degraded, confirmed, escalated, ber_avg, drop
+%   info: q (Q-values, dqn kinds), cls, degraded, confirmed, escalated, ber_avg, drop, drop_alarm
 if nargin < 7, opt = struct(); end
 C = decision_config();
 if isfield(opt, 'monitor')
@@ -71,7 +72,7 @@ switch base
         qt = NaN; if isfield(PP, 'q_thr') && ~isempty(PP.q_thr), qt = PP.q_thr; end
         for i = 1:NE
             if strcmp(base, 'rule')
-                p = find(strcmp(A, rule_based_policy(M.cls{i}, M.degraded(i), gain(i), qi(i), qt)), 1);
+                p = find(strcmp(A, rule_based_policy(M.cls{i}, M.degraded(i), gain(i), qi(i), qt, M.drop_alarm(i))), 1);
             else
                 p = table_action(M.cls{i}, M.degraded(i), PP, opt, na);
             end
@@ -113,7 +114,7 @@ end
 
 mem = policy_monitor('change', mem, a ~= cfg);
 info = struct('q', q, 'cls', {M.cls}, 'degraded', M.degraded, 'confirmed', M.confirmed, ...
-    'escalated', escalated, 'ber_avg', M.ber_avg', 'drop', M.drop);
+    'escalated', escalated, 'ber_avg', M.ber_avg', 'drop', M.drop, 'drop_alarm', M.drop_alarm);
 end
 
 function p = table_action(cls, degraded, PP, opt, na)

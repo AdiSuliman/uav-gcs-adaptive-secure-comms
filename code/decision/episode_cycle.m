@@ -11,7 +11,8 @@ function [E, info] = episode_cycle(E, k, fr, ctx)
 %        of the frame within its own run, as in the frame pools), gant (mean
 %        channel gain of every antenna, optional), pkt (the frame pair of the run
 %        its coded packet ends on, optional: policy_monitor.m)
-%   ctx  policy (a policy_decide.m kind), net, ood, feat_mean, feat_std, fs,
+%   ctx  policy (a policy_decide.m kind), net, ood, feat_mean, feat_std, fs, nv (thermal
+%        noise per sample, thermal_nv.m),
 %        agent, PP (actions, classes, sps, bps, maha_thr, confirm, alarm_mode,
 %        drop_db), na
 %
@@ -22,7 +23,7 @@ if isempty(E), E = struct('cfg', ctx.na, 'mem', [], 'k', 0); end
 E.k = k;
 
 %% Detection and unknown-threat score
-X = reshape(single(spec_image(fr.iq, ctx.fs)), 128, 128, 1, 1);
+X = reshape(single(spec_image(fr.iq, ctx.fs, ctx.nv)), 128, 128, 1, 1);
 Xf = ((fr.feat - ctx.feat_mean) ./ ctx.feat_std)';
 [probs, maha] = detect_scores(ctx.net, ctx.ood, X, Xf);
 [conf, ic] = max(probs);

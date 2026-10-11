@@ -77,7 +77,8 @@ env.modelName  = 'UAV_GCS_Threat_Link';
 env.fs         = p0.symbol_rate * p0.sps;
 env.delay_bits = 20;
 env.img_size = 128; env.win = 128; env.novlp = 113; env.nfft = 128;
-env.db_lo = -40; env.db_hi = 40; env.temporal_window = 10;
+env.db_lo = -25; env.db_hi = 55;   % dB over the thermal floor of a bin, as spec_image.m
+env.temporal_window = 10;
 env.DC = decision_config();
 env.threats = [{'jamming','reactive_jamming','sweeping_jammer','noise_burst','tone_jamming', ...
     'path_loss','spoofing','antenna_fault','airframe_shadowing','benign_interference','none'}, env.DC.combos(:)'];
@@ -1115,13 +1116,13 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
         pl = p; pl.active_threat = 'none';
         saveParams(pl);
         build_threat_model;
-        set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/pl.sps));
+        set_link_snr(env.modelName, snr_dB, pl);
         FL = extract_closed_loop_frames(sim(env.modelName), pl, env.delay_bits);
         disk_guard;
         vl = reshape(find(~isnan(FL.ber)), 1, []);
         XL = zeros(env.img_size, env.img_size, 1, numel(vl), 'single'); leadF = zeros(numel(vl), numel(env.feat_mean));
         for i = 1:numel(vl)
-            XL(:, :, 1, i) = spec_image(FL.iq{vl(i)}, env.fs);
+            XL(:, :, 1, i) = spec_image(FL.iq{vl(i)}, env.fs, thermal_nv(pl));
             leadF(i, :) = link_features(FL, vl(i), env.temporal_window);
         end
         leadB = FL.ber(vl); leadG = FL.gain_ant(:, vl)';
@@ -1135,7 +1136,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     appLog(fig, 'Building Simulink threat model and simulating the link...');
     saveParams(p);
     build_threat_model;
-    set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/p.sps));
+    set_link_snr(env.modelName, snr_dB, p);
     out = sim(env.modelName);
     updateTimer(fig, tSeq); checkAbort(fig);
 
@@ -1160,12 +1161,12 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
 
     %% ---- 2. decision layer over the frames of the run (policy_decide.m, as evaluated) ----
     [Sxx, Fq, Tq] = spectrogram(iq_before, hann(env.win), env.novlp, env.nfft, env.fs, 'centered');
-    Pw_db = 20*log10(abs(Sxx) + eps);
+    Pw_db = 20*log10(abs(Sxx) + eps) - 10*log10(thermal_nv(p) * sum(hann(env.win).^2));   % over the thermal floor of a bin
     vf = reshape(find(~isnan(ber_f)), 1, []); nv = numel(vf);
     if nv == 0, error('demoGui:noFrames', 'no complete frame in the run'); end
     X = zeros(env.img_size, env.img_size, 1, nv, 'single'); Fr = zeros(nv, numel(env.feat_mean));
     for i = 1:nv
-        X(:, :, 1, i) = spec_image(iq_frames{vf(i)}, env.fs);
+        X(:, :, 1, i) = spec_image(iq_frames{vf(i)}, env.fs, thermal_nv(p));
         Fr(i, :) = link_features(F, vf(i), env.temporal_window);
     end
     Fn = ((Fr - env.feat_mean) ./ env.feat_std)';
@@ -1374,7 +1375,7 @@ function R = applyMitigation(env, p, threat, action_name, snr_dB) %#ok<INUSL>
     [p2, g_db] = apply_countermeasure(p, threat, action_name);
     saveParams(p2);
     build_threat_model;
-    set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p2.sps));
+    set_link_snr(env.modelName, snr_dB + g_db, p2);
     out2 = sim(env.modelName);
     F2 = extract_closed_loop_frames(out2, p2, env.delay_bits);
     disk_guard;
@@ -2026,7 +2027,7 @@ function runEpisode(btn, ~)
 
     %% ---- episode state, one per policy, identical frame draws ----
     base = struct('net', env.cnn_net, 'ood', env.ood, 'feat_mean', env.feat_mean, 'feat_std', env.feat_std, ...
-        'fs', env.fs, 'agent', env.dqn_agent, 'PP', env.PP, 'na', na, ...
+        'fs', env.fs, 'nv', thermal_nv(env.p0), 'agent', env.dqn_agent, 'PP', env.PP, 'na', na, ...
         'tw', env.temporal_window, 'frame_dur', env.p0.frame_duration);
     ctx = cell(1, nP); Ep = cell(1, nP);
     for i = 1:nP
@@ -2205,7 +2206,7 @@ function P = epBuildPool(fig, p, threat, ebno, seedBase)
         saveParams(p2);
         evalc('build_threat_model');
         snr_dB = ebno + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps);
-        set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p2.sps));
+        set_link_snr(env.modelName, snr_dB + g_db, p2);
         F = struct('iq', {{}}, 'ber', [], 'feat', [], 'run', []);    % link features per frame within its run, as the pools
         for r = 1:2
             link_seed(env.modelName, seedBase + r, p2.fd_max);

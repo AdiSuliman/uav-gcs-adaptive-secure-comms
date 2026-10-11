@@ -784,8 +784,7 @@ F = struct();
 for t = 1:numel(TH)
     p = p0; p.quiet_build = true; p.active_threat = TH{t}; p.seed = 11; p.benign_int_db = 12; p.spoof_sir_db = 16;
     evalc('build_threat_model(p)');
-    set_param([mdl '/AWGN'], 'SNR', num2str(12 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), ...
-        'SignalPower', num2str(1/p.sps));
+    set_link_snr(mdl, 12 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
     link_seed(mdl, 11, 160);
     F.(TH{t}) = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
     close_system(mdl, 0);
@@ -976,7 +975,7 @@ p.tdl = false;                                       % the measurements on the f
 mdl = 'UAV_GCS_Threat_Link';
 evalc('build_threat_model(p)');
 snr = 12 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
-set_param([mdl '/AWGN'], 'SNR', num2str(snr), 'SignalPower', num2str(1/p.sps));
+set_link_snr(mdl, snr, p);
 link_seed(mdl, 11, 160);
 out = sim(mdl, 'StopTime', num2str(10 * p.frame_duration));
 F = extract_closed_loop_frames(out, p, 20);
@@ -1013,16 +1012,17 @@ close_system(mdl, 0);
 % an open connector: one antenna stays tens of dB below the others in every frame
 p.active_threat = 'antenna_fault'; p.fault_atten_db = 31;
 evalc('build_threat_model(p)');
-set_param([mdl '/AWGN'], 'SNR', num2str(snr), 'SignalPower', num2str(1/p.sps));
+set_link_snr(mdl, snr, p);
 link_seed(mdl, 11, 160);
 F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
 g = sort(F.gain_ant, 1);
 verifyGreaterThan(tc, mean(g(2, :) - g(1, :) >= 15), 0.9);
 close_system(mdl, 0);
-% an antenna hidden by the airframe stays far below the other over the frame
-p.active_threat = 'airframe_shadowing'; p.shadow_db = 20;
+% an antenna hidden by the airframe stays far below the other over the frame: a turn of
+% 20 deg with the GCS abeam (shadow_hidden.m)
+p.active_threat = 'airframe_shadowing'; p.shadow_db = 20; p.roll_deg = 20;
 evalc('build_threat_model(p)');
-set_param([mdl '/AWGN'], 'SNR', num2str(snr), 'SignalPower', num2str(1/p.sps));
+set_link_snr(mdl, snr, p);
 link_seed(mdl, 11, 160);
 F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
 verifyGreaterThan(tc, median(F.branch_gap), 12);
@@ -1031,19 +1031,33 @@ verifyGreaterThan(tc, median(F.sinr_gap, 'omitnan'), 10);   % the other antenna,
 verifyLessThan(tc, abs(median(F.sinr, 'omitnan') - sinr_clean), 3);   % the reference is the antenna the airframe does not hide
 [~, hidden] = min(median(F.sinr_ant, 2, 'omitnan'));
 verifyLessThan(tc, mean(F.ref == hidden), 0.1);      % the hidden antenna is not the reference
-% the hidden antenna is drawn per run: different antennas are hit over ten runs
-hit = zeros(1, 10);
-for r = 1:10
-    link_seed(mdl, 10 + r, 160);
+verifyEqual(tc, hidden, p.n_rx);                     % the GCS abeam: the aft end of the array
+verifyEqual(tc, F.act, ones(1, F.nf));
+close_system(mdl, 0);
+% the attitude decides: the GCS ahead of the beam hides the aft end, behind it the front
+% end; level flight hides none (no threat on the air)
+for b = [40 -40]
+    p.gcs_aoa_deg = b;
+    evalc('build_threat_model(p)');
+    set_link_snr(mdl, snr, p);
+    link_seed(mdl, 11, 160);
     F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(4 * p.frame_duration)), p, 20);
-    [~, hit(r)] = min(median(F.sinr_ant, 2, 'omitnan'));
+    [~, hidden] = min(median(F.sinr_ant, 2, 'omitnan'));
+    verifyEqual(tc, hidden, ternary_(b > 0, p.n_rx, 1));
+    close_system(mdl, 0);
 end
-verifyGreaterThanOrEqual(tc, numel(unique(hit)), 2);
+p.gcs_aoa_deg = 0; p.roll_deg = 0;
+evalc('build_threat_model(p)');
+set_link_snr(mdl, snr, p);
+link_seed(mdl, 11, 160);
+F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(4 * p.frame_duration)), p, 20);
+verifyEqual(tc, F.act, zeros(1, F.nf));
+verifyLessThan(tc, median(F.sinr_gap, 'omitnan'), 8);
 close_system(mdl, 0);
 % quiet slot: a reactive jammer is silent there, a continuous one is not
 p.active_threat = 'reactive_jamming'; p.jsr_db = 16;
 evalc('build_threat_model(p)');
-set_param([mdl '/AWGN'], 'SNR', num2str(snr), 'SignalPower', num2str(1/p.sps));
+set_link_snr(mdl, snr, p);
 link_seed(mdl, 11, 160);
 F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
 verifyLessThan(tc, median(F.q_iot), 2);
@@ -1052,7 +1066,7 @@ verifyLessThan(tc, abs(mean(F.coh) - coh_floor(p)), 0.06);   % silent there: the
 close_system(mdl, 0);
 p.active_threat = 'jamming';
 evalc('build_threat_model(p)');
-set_param([mdl '/AWGN'], 'SNR', num2str(snr), 'SignalPower', num2str(1/p.sps));
+set_link_snr(mdl, snr, p);
 link_seed(mdl, 11, 160);
 F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
 verifyGreaterThan(tc, median(F.q_iot), 10);
@@ -1078,8 +1092,7 @@ function c = quiet_coh(mdl, p, E, seeds)
 % Mean quiet-slot coherence of 10-frame flights (seeds) at every Eb/N0 of E [dB].
 c = zeros(numel(seeds), numel(E));
 for ie = 1:numel(E)
-    set_param([mdl '/AWGN'], 'SNR', num2str(E(ie) + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), ...
-        'SignalPower', num2str(1/p.sps));
+    set_link_snr(mdl, E(ie) + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
     for k = 1:numel(seeds)
         link_seed(mdl, seeds(k), 160);
         F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
@@ -1190,7 +1203,7 @@ for k = 1:2
     if k == 1   % the threat block caps on the weakest antenna
         verifyTrue(tc, contains(sfroot().find('-isa', 'Stateflow.EMChart', 'Path', [mdl '/Threat']).Script, '* gcs * min(bdy))'));
     end
-    set_param([mdl '/AWGN'], 'SNR', num2str(12 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), 'SignalPower', num2str(1/p.sps));
+    set_link_snr(mdl, 12 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
     link_seed(mdl, 11, 160);
     F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(4 * p.frame_duration)), p, 20);
     q(k) = median(F.q_iot);
@@ -1542,7 +1555,7 @@ p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false; p.gcs_tra
 p.gcs_aoa_random = false; p.body_random = false; p.wobble_random = false; p.chain_amp_db = 0; p.chain_phase_deg = 0;
 mdl = 'UAV_GCS_Threat_Link';
 evalc('build_threat_model(p)');
-set_param([mdl '/AWGN'], 'SNR', num2str(60 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), 'SignalPower', num2str(1/p.sps));
+set_link_snr(mdl, 60 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
 n = p.n_rx; fs = p.symbol_rate * p.sps; fdx = p.v_max * p.carrier_freq / p.c_light;
 st = @(c) exp(-1j * 2*pi * p.ant_spacing_wl * (0:n-1)' * c) / sqrt(n);
 Y = run_link(mdl, p, 160, [60 10], 0.3, [40 30 zeros(1, 5)], ones(1, n), 4);
@@ -1581,7 +1594,7 @@ p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false; p.gcs_tra
 p.gcs_aoa_random = false; p.body_random = false; p.wobble_random = false; p.chain_amp_db = 0; p.chain_phase_deg = 0;
 mdl = 'UAV_GCS_Threat_Link';
 evalc('build_threat_model(p)');
-set_param([mdl '/AWGN'], 'SNR', num2str(60 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), 'SignalPower', num2str(1/p.sps));
+set_link_snr(mdl, 60 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
 n = p.n_rx; fs = p.symbol_rate * p.sps; fdx = p.v_max * p.carrier_freq / p.c_light;
 Y1 = run_link(mdl, p, fdx, [10 60], 0.3, zeros(1, 7), ones(1, n), 10);
 Y0 = run_link(mdl, p, 0, [10 60], 0.3, zeros(1, 7), ones(1, n), 10);
@@ -1665,7 +1678,7 @@ p.gcs_aoa_random = false; p.body_random = false; p.wobble_random = false; p.chai
 p.tdl = true; p.tdl_random = false; p.tdl_ds_ns = [500 500]; p.rician_k = 0; p.int_rician_k = 0;
 mdl = 'UAV_GCS_Threat_Link';
 evalc('build_threat_model(p)');
-set_param([mdl '/AWGN'], 'SNR', '60', 'SignalPower', num2str(1/p.sps));
+gl = set_link_snr(mdl, 60, p);                          % the received level's amplitude gain
 Y = []; X = [];
 for s = 1:10                                            % fd 50 Hz: frames 20 ms apart fade apart
     d = link_seed(mdl, s, 50);
@@ -1685,13 +1698,13 @@ for df = [0.25 0.5] * 1e6
     end
     verifyEqual(tc, abs(num / den), abs(0.5 + 0.5 * sum(P .* exp(-1j * 2*pi * k * fs / ns * m * 250e-9))), 'AbsTol', 0.06);
 end
-verifyEqual(tc, mean(abs(Y).^2, 'all') / mean(abs(X).^2, 'all'), 1, 'AbsTol', 0.1);
+verifyEqual(tc, mean(abs(Y).^2, 'all') / mean(abs(X).^2, 'all') / gl^2, 1, 'AbsTol', 0.1);
 p.active_threat = 'jamming'; p.jsr_db = 30; p.rician_k = 10;
 e = zeros(1, 2); g = e;
 for t = [false true]
     p.tdl = t;
     evalc('build_threat_model(p)');
-    set_param([mdl '/AWGN'], 'SNR', '60', 'SignalPower', num2str(1/p.sps));
+    set_link_snr(mdl, 60, p);
     link_seed(mdl, 11, 0);
     out = sim(mdl, 'StopTime', num2str(40 * p.frame_duration));
     Y = out.get('Rx_IQ');
@@ -1788,7 +1801,7 @@ C = {false, 'mrc', [0 0]; true, 'mmse', [234 0]};
 for i = 1:size(C, 1)
     p.tdl = C{i, 1}; p.rx_combiner = C{i, 2}; p.tdl_ds_ns = C{i, 3};
     evalc('build_threat_model(p)');
-    set_param([mdl '/AWGN'], 'SNR', num2str(6 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), 'SignalPower', num2str(1/p.sps));
+    set_link_snr(mdl, 6 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
     link_seed(mdl, 31, 160);
     o = sim(mdl, 'StopTime', num2str(10 * p.frame_duration));
     F = extract_closed_loop_frames(o, p, 20);
@@ -1947,7 +1960,7 @@ CS = 11:15; coh = zeros(2, numel(CS)); thr = {'none', 'jamming'};
 for j = 1:2
     p.active_threat = thr{j}; p.jsr_db = 4;
     evalc('build_threat_model(p)');
-    set_param([mdl '/AWGN'], 'SNR', num2str(12 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), 'SignalPower', num2str(1/p.sps));
+    set_link_snr(mdl, 12 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
     for k = 1:numel(CS)
         link_seed(mdl, CS(k), 160);
         F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
@@ -1976,7 +1989,7 @@ for fdiv = [false true]
     q = p;
     if fdiv, q = apply_countermeasure(p, 'sweeping_jammer', 'freq_diversity+fec_interleave'); end
     evalc('build_threat_model(q)');
-    set_param([mdl '/AWGN'], 'SNR', num2str(15 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), 'SignalPower', num2str(1/p.sps));
+    set_link_snr(mdl, 15 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
     link_seed(mdl, 11, 160);
     set_param([mdl '/Gate'], 'Value', mat2str(gate));
     F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str((nfr - 1) * p.frame_duration)), q, 20);   % frames at 0 .. stop
@@ -1996,7 +2009,7 @@ for fdiv = [false true]
 end
 p.active_threat = 'noise_burst';
 evalc('build_threat_model(p)');
-set_param([mdl '/AWGN'], 'SNR', num2str(30 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), 'SignalPower', num2str(1/p.sps));
+set_link_snr(mdl, 30 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
 link_seed(mdl, 11, 160);
 pw = zeros(1, 2);
 for k = 1:2
@@ -2206,8 +2219,7 @@ end
 function b = link_ber(mdl, p, ebno, seeds, nfr)
 % BER of the built model p at Eb/N0 ebno [dB] over the flights seeds, nfr frames each.
 evalc('build_threat_model(p)');
-set_param([mdl '/AWGN'], 'SNR', num2str(ebno + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), ...
-    'SignalPower', num2str(1/p.sps));
+set_link_snr(mdl, ebno + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
 e = 0; n = 0;
 for s = seeds
     link_seed(mdl, s, 160);
@@ -2292,4 +2304,184 @@ for t = 1:spec.T
     [E, ~, ~, info] = link_env('step', E, PP, K, a(t));
     ok(t) = info.restored && info.restored_plr; eff(t) = info.cfg_eff;
 end
+end
+
+%% ---------- received level, lost branches, path-loss steps, drop alarm ----------
+function test_fixed_noise_floor(tc)
+% The thermal noise is fixed and the received fields scale with Eb/N0: the quiet slot holds
+% thermal noise at the same power at 0 and 12 dB, our signal's level rises by 12 dB, and an
+% interferer keeps its level over our signal (its slot power rises with it).
+p = base_params(); p.quiet_build = true; p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false;
+p.gcs_tracked = false; p.k_random = false; p.gcs_aoa_random = false; p.body_random = false; p.tdl = false;
+mdl = 'UAV_GCS_Threat_Link';
+qn = p.quiet_symbols * p.sps;
+for thr = {'none', 'jamming'}
+    p.active_threat = thr{1}; p.jsr_db = 10;
+    evalc('build_threat_model(p)');
+    verifyEqual(tc, str2double(get_param([mdl '/AWGN'], 'Variance')), thermal_nv(p), 'RelTol', 1e-9);
+    qs = zeros(1, 2); rs = zeros(1, 2); qi = zeros(1, 2);
+    E = [0 12];
+    for k = 1:2
+        g = set_link_snr(mdl, E(k) + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
+        verifyEqual(tc, g, 10^(E(k) / 20), 'RelTol', 1e-9);       % our signal's amplitude at unit symbol energy
+        link_seed(mdl, 21, 160);
+        out = sim(mdl, 'StopTime', num2str(8 * p.frame_duration));
+        F = extract_closed_loop_frames(out, p, 20);
+        U = out.get('Rx_IQ');
+        qs(k) = 10*log10(mean(abs(U(1:qn, :, :)).^2, 'all'));
+        rs(k) = median(F.rssi); qi(k) = median(F.q_iot);
+    end
+    if strcmp(thr{1}, 'none')
+        verifyEqual(tc, qs, 10*log10(thermal_nv(p)) * [1 1], 'AbsTol', 0.5);   % the floor does not move
+        pw = @(e) 10*log10(10^(e / 10) / p.sps + thermal_nv(p));               % our signal + noise per sample
+        verifyEqual(tc, rs(2) - rs(1), pw(12) - pw(0), 'AbsTol', 1.5);
+        verifyLessThan(tc, abs(qi), 1);
+    else
+        verifyEqual(tc, qs(2) - qs(1), 12, 'AbsTol', 1);                         % the jammer scales with our signal
+        verifyEqual(tc, qi(2) - qi(1), 12, 'AbsTol', 1);
+    end
+    close_system(mdl, 0);
+end
+% the detector image keeps the absolute level: thermal noise near 0 dB over the floor of a bin
+img = spec_image(sqrt(thermal_nv(p) / 2) * complex(randn(4096, 1), randn(4096, 1)), p.symbol_rate * p.sps, thermal_nv(p));
+verifyEqual(tc, median(img(:)) * 80 - 25, -1.6, 'AbsTol', 1);   % the median of an exponential bin is 1.6 dB below its mean
+end
+
+function test_fault_scales_interferer(tc)
+% An open connector sits between its antenna and the receiver: it attenuates the jammer on
+% that antenna as much as our signal, and the receiver's thermal noise stays.
+p = base_params(); p.quiet_build = true; p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false;
+p.gcs_tracked = false; p.k_random = false; p.gcs_aoa_random = false; p.body_random = false; p.tdl = false;
+p.active_threat = 'jamming+antenna_fault'; p.jsr_db = 16; p.fault_atten_db = 31;
+mdl = 'UAV_GCS_Threat_Link';
+evalc('build_threat_model(p)');
+set_link_snr(mdl, 12 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
+link_seed(mdl, 31, 160);
+out = sim(mdl, 'StopTime', num2str(6 * p.frame_duration));
+F = extract_closed_loop_frames(out, p, 20);
+U = out.get('Rx_IQ'); qn = p.quiet_symbols * p.sps;
+qa = 10*log10(squeeze(mean(mean(abs(U(1:qn, :, :)).^2, 1), 3)));    % the slot's power per antenna: jammer + noise
+[qlo, ia] = min(qa);
+[~, ig] = min(mean(F.gain_ant, 2));
+verifyEqual(tc, ia, ig);                                            % the jammer is low where our signal is
+verifyLessThan(tc, qlo - median(qa(setdiff(1:p.n_rx, ia))), -20);
+verifyLessThan(tc, qlo - 10*log10(thermal_nv(p)), 6);             % close to the thermal floor there
+close_system(mdl, 0);
+end
+
+function test_path_loss_onset(tc)
+% A path-loss step starts at its onset frame: no threat on the air before it, our signal's
+% level drops by the loss from it on; labels and fused targets count it while the onset
+% lies in the window.
+p = base_params(); p.quiet_build = true; p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false;
+p.gcs_tracked = false; p.k_random = false; p.gcs_aoa_random = false; p.body_random = false; p.tdl = false;
+p.active_threat = 'path_loss'; p.path_loss_db = 14; p.pl_onset_frames = [5 5];
+mdl = 'UAV_GCS_Threat_Link';
+evalc('build_threat_model(p)');
+set_link_snr(mdl, 15 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
+link_seed(mdl, 41, 160);
+F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(9 * p.frame_duration)), p, 20);
+verifyEqual(tc, F.act(1:F.nf), double((1:F.nf) >= 5));
+pw = @(e) 10*log10(10^(e / 10) / p.sps + thermal_nv(p));                     % our signal + noise per sample
+verifyEqual(tc, median(F.rssi(1:4)) - median(F.rssi(6:F.nf)), pw(15) - pw(1), 'AbsTol', 1.5);
+verifyLessThan(tc, abs(median(F.q_iot)), 1);                       % the floor stays: no interference
+% the onset drawn per run inside the range
+p.pl_onset_frames = [2 11];
+evalc('build_threat_model(p)');
+on = zeros(1, 6);
+for r = 1:6
+    link_seed(mdl, 50 + r, 160);
+    F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(11 * p.frame_duration)), p, 20);
+    on(r) = find(F.act > 0, 1);
+end
+verifyTrue(tc, all(on >= 2 & on <= 11));
+verifyGreaterThan(tc, numel(unique(on)), 1);
+close_system(mdl, 0);
+% labels: from the onset while it lies in the link-feature window
+verifyEqual(tc, threat_active('path_loss', [0 0 1 1 1 1 1], 1:7, 3), logical([0 0 1 1 1 0 0]));
+verifyEqual(tc, threat_active('path_loss', [1 1 1]), true(1, 3));     % without positions: every attenuated frame
+% fused targets: a clean frame whose fusion window holds the onset reads path_loss
+cls = {'none', 'path_loss', 'benign_interference'};
+y = [1 1 2 2 1 1 1];
+yt = fusion_target(y, ones(1, 7), 1:7, 4, cls);
+verifyEqual(tc, yt', [1 1 2 2 2 2 1]);
+verifyEqual(tc, fusion_target(y, ones(1, 7), 1:7, 1, cls)', y);
+end
+
+function test_shadow_attitude(tc)
+% Airframe shadowing needs a roll above 5 deg and the GCS more than 30 deg off the heading
+% (Sun et al.); it hides the end of the array farther from the GCS.
+verifyEqual(tc, shadow_hidden(0, 2, 3, 0, 3, 5, 30), 0);       % level enough: none
+verifyEqual(tc, shadow_hidden(0, 2, 20, 0, 3, 5, 30), 3);      % abeam in a turn: the aft end
+verifyEqual(tc, shadow_hidden(40, 2, -20, 0, 3, 5, 30), 3);    % ahead of the beam: the aft end
+verifyEqual(tc, shadow_hidden(-40, 2, 20, 0, 3, 5, 30), 1);    % behind it: the front end
+verifyEqual(tc, shadow_hidden(70, 2, 20, 0, 3, 5, 30), 0);     % 20 deg off the nose: none
+verifyEqual(tc, shadow_hidden(95, 2, 20, 0, 3, 5, 30), 0);     % the heading turned past the GCS
+verifyEqual(tc, shadow_hidden(-90, 2, 20, 0, 4, 5, 30), 1);    % behind the tail
+% the dataset's share of flights with an antenna hidden, and the fixed views' turn
+p = base_params();
+h = shadow_hit_share(p, 600);
+verifyGreaterThan(tc, h, 0.4); verifyLessThan(tc, h, 0.95);
+p.yaw_random = false; p.roll_deg = p.shadow_view_roll_deg;
+d = flight_draws(7, 100, p);
+verifyEqual(tc, d.roll, p.shadow_view_roll_deg);
+verifyGreaterThan(tc, shadow_hidden(0, d.el_deg, d.roll, d.pitch, p.n_rx, p.shadow_roll_deg, p.shadow_hdg_deg), 0);
+end
+
+function test_rule_lost_branch_and_drop(tc)
+% A lost branch (fault or shadowing) takes power_control, with spatial_diversity only where
+% the receiver predicts a separable interferer; a drop alarm without a class answers with
+% power_control, and rate_reduce on top when the link is degraded too.
+C = decision_config();
+for c = {'antenna_fault', 'airframe_shadowing'}
+    verifyEqual(tc, rule_based_policy(c{1}), 'power_control');
+    verifyEqual(tc, rule_based_policy(c{1}, false, C.rule_mmse_db - 1), 'power_control');
+    verifyEqual(tc, rule_based_policy(c{1}, false, C.rule_mmse_db), 'spatial_diversity+power_control');
+end
+verifyEqual(tc, rule_based_policy('none', false, 0, -Inf, 3, true), 'power_control');
+verifyEqual(tc, rule_based_policy('none', true, 0, -Inf, 3, true), 'rate_reduce+power_control');
+verifyEqual(tc, rule_based_policy('unknown', false, 0, -Inf, 3, true), 'power_control');
+verifyEqual(tc, rule_based_policy('none', true, 0, 10, 3, true), 'channel_switch');      % interference in the slot
+verifyEqual(tc, rule_based_policy('benign_interference', false, 0, -Inf, 3, true), 'no_action');
+verifyEqual(tc, rule_based_policy('jamming', false, 0, -Inf, 3, true), 'channel_switch');
+A = policy_actions();
+verifyTrue(tc, all(ismember({'power_control', 'spatial_diversity+power_control', 'rate_reduce+power_control'}, A)));
+[~, names] = branch_level({'none', 'antenna_fault', 'airframe_shadowing', 'jamming'});
+verifyEqual(tc, names, {'none'; 'one_branch_lost'; 'jamming'});
+end
+
+function test_drop_alarm(tc)
+% The monitor's drop alarm fires on a 4 dB step of our signal over thermal noise within a
+% few cycles, and not on the clean link moving away at the largest rate, 1.4 dB/s
+% (161 km/h at 0.28 km, 8.69 v / d), over 3 s.
+A = policy_actions();
+cls = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', 'antenna_fault', ...
+    'benign_interference', 'sweeping_jammer', 'tone_jamming', 'airframe_shadowing'};
+PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0, 'confirm', [2 2], ...
+    'alarm_mode', 'class_drop', 'drop_db', 4);
+o = struct('probs', double(strcmp(cls, 'none')), 'unknown', false, 'feat', zeros(1, numel(link_features('names'))));
+o.feat(feature_index('log_ber')) = -6;
+eb = @(e) e - 10*log10(PP.sps) + 10*log10(PP.bps);              % SINR (iot 0) for an Eb/N0 estimate e
+p = base_params();
+ramp = 20 / log(10) * p.v_max / (1000 * link_distance_km(15, p));
+verifyLessThan(tc, ramp, 1.5);
+dt = decision_config().period_ms / 1000;
+seqs = {[15 * ones(1, 15), 11 * ones(1, 10)], 15 - ramp * dt * (0:149)};
+first = nan(1, 2); conf = nan(1, 2);
+for j = 1:2
+    m = []; cfg = find(strcmp(A, 'no_action'));
+    for k = 1:numel(seqs{j})
+        x = o; x.feat(feature_index('sinr')) = eb(seqs{j}(k));
+        [a, m, d] = policy_decide('rule_esc', x, cfg, m, PP, []);
+        if d.drop_alarm && isnan(first(j)), first(j) = k; end
+        if a ~= cfg && isnan(conf(j)), conf(j) = k; verifyEqual(tc, A{a}, 'power_control'); end
+    end
+end
+verifyLessThanOrEqual(tc, first(1) - 15, 3);                     % the step at cycle 16
+verifyLessThanOrEqual(tc, conf(1) - 15, 5);                      % confirmed, then the rule's dwell
+verifyTrue(tc, isnan(first(2)) && isnan(conf(2)));
+end
+
+function v = ternary_(c, a, b)
+if c, v = a; else, v = b; end
 end
