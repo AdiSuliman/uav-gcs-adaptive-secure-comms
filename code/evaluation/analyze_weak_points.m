@@ -34,7 +34,9 @@ if isfile('results/detector_predictions.mat')
         m = strcmp(yt, DL(t).name);
         [~, lr(m)] = ismember(round(pr.level(m) * 1000), round(DL(t).levels * 1000));
     end
-    F = table(categorical(yt), pr.ebno(:), pr.speed(:), lr, 'VariableNames', {'class', 'ebno', 'speed', 'level_rank'});
+    eb = pr.ebno(:); vs = compose('%g', unique(eb(~isnan(eb)))); ebl = compose('%g', eb);   % the KPI 1 bins
+    if any(isnan(eb)), ebl(isnan(eb)) = {'beyond'}; vs = [{'beyond'}; vs(:)]; end           % received below the grid
+    F = table(categorical(yt), categorical(ebl, vs), pr.speed(:), lr, 'VariableNames', {'class', 'ebno', 'speed', 'level_rank'});
     opt = struct('target', 90, 'bins', struct('speed', SPEED, 'k_db', KB), ...
         'pairs', {{'class', 'ebno'; 'class', 'level_rank'; 'class', 'speed'}});
     if isfield(pr, 'k_db'), F.k_db = pr.k_db(:); F.aoa_abs = abs(pr.aoa(:)); opt.bins.aoa_abs = [0 15 30 45 60 90]; end

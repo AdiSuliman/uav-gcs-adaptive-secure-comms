@@ -1209,7 +1209,8 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     probs = probsAll(:, nv);
     [conf, idx] = max(probs);
     top_class = env.class_list{idx};
-    is_unknown = mahaAll(nv) < PPr.maha_thr;
+    sw = [mahaL(:); mahaAll(:)];                              % the monitor's statistic: the last unk_win cycles
+    is_unknown = mean(sw(max(1, end - PPr.unk_win + 1):end)) < PPr.maha_thr;
     if is_unknown, cnn_class = 'unknown'; else, cnn_class = top_class; end
     qv = dD.q(:); qv(~isfinite(qv)) = NaN;
     aidx = cfgD; action_name = env.action_names{aidx};

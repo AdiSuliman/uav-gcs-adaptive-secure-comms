@@ -3,6 +3,10 @@
 % read before) when it exists, else the test split of data/splits.mat. With DET_TEST = 'split'
 % in the calling workspace the test split is read even then, and the outputs carry the
 % suffix _split. The KPI 1 threshold is chosen on the validation split in both cases.
+% Eb/N0 of a frame (kpi_ebno.m): the Eb/N0 our signal is received with, the configured
+% value less a path-loss step from its onset on; a frame judged as path_loss is read at the
+% link's Eb/N0 when the step began (the step's depth is its severity level). Frames
+% received below the grid are reported beside the reading as beyond range.
 close all; clc;fprintf('=== B3: Test Evaluation ===\n\n');
 
 %% 1. Load data and model
@@ -85,15 +89,16 @@ cm.ColumnSummary = 'column-normalized';
 if ~exist('results', 'dir'), mkdir('results'); end
 saveas(fig_cm, ['results/confusion_matrix' tag '.png']);
 
-%% 5. Accuracy vs SNR (true Eb/N0 values in dB, denormalized)
-% sp.test.feats is z-scored; denormalize column 1 (SNR) back to dB
-% using the same train-set mean/std saved in splits.norm
+%% 5. Accuracy per Eb/N0: the bins of kpi_ebno.m (the highest grid point at or below the
+% frame's Eb/N0; NaN below the grid: beyond range, reported beside)
 if isfield(sp.test, 'ebno')
-    snr_vals = sp.test.ebno(:);                          % configured Eb/N0
+    [snr_vals, eb_kpi, eb_rx, bin_rx] = kpi_ebno(sp.test, Y_test, classes);
 else
     snr_vals = round(sp.test.feats(:, 1) .* sp.norm.feat_std(1) + sp.norm.feat_mean(1));
+    eb_kpi = snr_vals; eb_rx = snr_vals; bin_rx = snr_vals;
 end
-unique_snrs = unique(snr_vals);
+beyond = isnan(snr_vals);
+unique_snrs = unique(snr_vals(~beyond));
 acc_vs_snr  = zeros(length(unique_snrs), 1);
 
 for i = 1:length(unique_snrs)
@@ -135,7 +140,7 @@ if ~isempty(fus) && isfield(fus, 'val_target')                % the fused decisi
     Y_val = reshape(categorical(classes(fus.val_target)', classes), [], 1);
 end
 if isfield(sp.val, 'ebno')
-    snr_val = sp.val.ebno(:);
+    snr_val = kpi_ebno(sp.val, Y_val, classes);
 else
     snr_val = round(sp.val.feats(:, 1) .* sp.norm.feat_std(1) + sp.norm.feat_mean(1));
 end
@@ -144,6 +149,46 @@ above = snr_vals >= thr_db;
 f1_class_above = nan(numel(classes), 1);
 if any(above), f1_class_above = 100 * class_f1_of(Y_test(above), Y_pred(above), classes); end
 f1_above = 100 * macro_f1_of(Y_test(above), Y_pred(above), classes);
+
+% Beside KPI 1, fixed before any test reading: the class prevalence above the threshold
+% and the prevalence-normalized reading, every class weighted equally (each frame by one
+% over its class's frame count), so a class's precision is read at equal class priors:
+% P_c = R_cc / sum_j R_jc of the row-normalized confusion matrix R (Bayes' rule, priors
+% 1 / C), and the number of 'none' frames does not weigh on the threats' precision.
+[bf_above, bf_class] = balanced_macro_f1(Y_test(above), Y_pred(above), classes);
+n_cls_above = arrayfun(@(c) sum(Y_test(above) == cls_names{c}), 1:numel(cls_names))';
+prevalence = struct('classes', {cls_names}, 'n_above', n_cls_above, ...
+    'share_above_pct', 100 * n_cls_above / max(sum(n_cls_above), 1), ...
+    'macro_f1_above_threshold_pct', 100 * bf_above, 'class_f1_above_threshold_pct', 100 * bf_class);
+fprintf(['Beside KPI 1, prevalence-normalized (every class weighted equally): macro-F1 above the threshold %.2f%%, ' ...
+    'lowest class %.2f%%; class shares of the frames above it: %s\n'], prevalence.macro_f1_above_threshold_pct, ...
+    min(prevalence.class_f1_above_threshold_pct), strjoin(cellfun(@(c, v) sprintf('%s %.1f%%', c, v), cls_names, ...
+    num2cell(prevalence.share_above_pct(:)'), 'UniformOutput', false), ', '));
+% Beside KPI 1: the frames received below the Eb/N0 grid (beyond range), never dropped
+yb = cellstr(string(Y_test(beyond)));
+[ub, ~, ib] = unique(yb);
+beyond_rep = struct('n', sum(beyond), 'n_all', numel(beyond), 'grid_low_db', min(unique_snrs), ...
+    'rx_min_db', min([eb_kpi(beyond); NaN]), 'classes', {ub(:)'}, 'n_class', accumarray(ib(:), 1, [numel(ub) 1])', ...
+    'accuracy_pct', 100 * mean(Y_test(beyond) == Y_pred(beyond)), ...
+    'read_as_path_loss_pct', 100 * mean(Y_pred(beyond) == 'path_loss'));
+fprintf(['Beyond range (received below the %g dB grid point, down to %.1f dB): %d of %d frames (%s), read right in ' ...
+    '%.1f%%, read as path_loss in %.1f%%; not in the per-Eb/N0 reading\n'], beyond_rep.grid_low_db, beyond_rep.rx_min_db, ...
+    beyond_rep.n, beyond_rep.n_all, strjoin(cellfun(@(c, v) sprintf('%s %d', c, v), beyond_rep.classes, ...
+    num2cell(beyond_rep.n_class), 'UniformOutput', false), ', '), beyond_rep.accuracy_pct, beyond_rep.read_as_path_loss_pct);
+% Beside KPI 1: path-loss frames by the Eb/N0 they are received with after the step
+ipl = Y_test == 'path_loss';
+path_loss_rx = struct('bin_db', {}, 'n', {}, 'recall_pct', {});
+if any(ipl)
+    br = bin_rx(ipl); ok_pl = Y_pred(ipl) == 'path_loss';
+    br(isnan(br)) = -Inf;
+    for v = unique(br)'
+        m = br == v;
+        path_loss_rx(end+1) = struct('bin_db', v, 'n', sum(m), 'recall_pct', 100 * mean(ok_pl(m))); %#ok<SAGROW>
+    end
+    fprintf('path_loss frames by their received Eb/N0 after the step (bin; -Inf below the grid): %s\n', ...
+        strjoin(arrayfun(@(q) sprintf('%g dB %.1f%% (%d)', q.bin_db, q.recall_pct, q.n), path_loss_rx, ...
+        'UniformOutput', false), ' | '));
+end
 
 act_of = containers.Map(cls_names, cellfun(@(c) rule_based_policy(c), cls_names, 'UniformOutput', false));
 act_true = cellfun(@(c) act_of(c), cellstr(string(Y_test)), 'UniformOutput', false);
@@ -180,7 +225,7 @@ yline(90, 'k:', 'LineWidth', 1.2, 'DisplayName', 'KPI 1 target (90%)');
 if ~isnan(thr_db)
     xline(thr_db, 'r-', 'LineWidth', 1.2, 'DisplayName', sprintf('threshold %g dB (chosen on validation)', thr_db));
 end
-xlabel('E_b/N_0 per antenna [dB]'); ylabel('Test set [%]'); ylim([0 100]); xticks(unique_snrs);
+xlabel('E_b/N_0 per antenna [dB] (received; a path-loss step at its onset)'); ylabel('Test set [%]'); ylim([0 100]); xticks(unique_snrs);
 title(['Hybrid detector, ' set_name]);
 legend('Location', 'southeast');
 saveas(fig_snr, ['results/accuracy_vs_snr' tag '.png']);
@@ -246,16 +291,16 @@ nT = numel(Y_test);
 if isfield(sp.test, 'run'), grp = sp.test.run(:); else, grp = (1:nT)'; end
 [ug, ~, gi] = unique(grp);
 members = accumarray(gi, (1:nT)', [], @(v) {v});
-boot = nan(N_BOOT, 4);
+boot = nan(N_BOOT, 5);
 for b = 1:N_BOOT
     ix = vertcat(members{randi(bs, numel(ug), numel(ug), 1)});
     yb = Y_test(ix); yp = Y_pred(ix); ab = above(ix); fb = fullw(ix);
     boot(b, :) = 100 * [mean(yb == yp), macro_f1_of(yb, yp, classes), macro_f1_of(yb(ab), yp(ab), classes), ...
-        macro_f1_of(yb(ab & fb), yp(ab & fb), classes)];
+        macro_f1_of(yb(ab & fb), yp(ab & fb), classes), balanced_macro_f1(yb(ab), yp(ab), classes)];
 end
 ci = prctile_cols(boot, [2.5 97.5]);
 ci95 = struct('n_boot', N_BOOT, 'accuracy', ci(:, 1)', 'macro_f1', ci(:, 2)', 'macro_f1_above', ci(:, 3)', ...
-    'macro_f1_above_steady', ci(:, 4)');
+    'macro_f1_above_steady', ci(:, 4)', 'macro_f1_above_balanced', ci(:, 5)');
 fprintf('95%% bootstrap CI: accuracy [%.2f, %.2f] | macro-F1 [%.2f, %.2f] | macro-F1 above threshold [%.2f, %.2f]\n', ...
     ci95.accuracy, ci95.macro_f1, ci95.macro_f1_above);
 
@@ -274,7 +319,9 @@ metrics = struct( ...
     'kpi1_threshold_db', thr_db, 'macro_f1_above_threshold_pct', f1_above, ...
     'class_f1_above_threshold_pct', f1_class_above, ...
     'action_equiv_accuracy_pct', 100*mean(act_ok), 'action_equiv_per_class_pct', act_acc_class, ...
-    'ci95', ci95, 'steady', steady, 'onset', onset, 'branch', branch);
+    'ci95', ci95, 'steady', steady, 'onset', onset, 'branch', branch, 'prevalence', prevalence, ...
+    'beyond', beyond_rep, 'path_loss_rx', path_loss_rx, 'ebno_rule', ['received Eb/N0 (configured, less a path-loss ' ...
+    'step after its onset); a path_loss target at the Eb/N0 of its onset']);
 if ~isempty(fus)
     metrics.fusion_cycles = fus.N;
     metrics.per_frame = struct('accuracy_pct', frame_acc, 'macro_f1_pct', frame_f1, 'class_f1_pct', frame_class_f1);
@@ -312,8 +359,8 @@ end
 save(['results/eval_detector_metrics' tag '.mat'], 'metrics');
 fprintf('Saved results/eval_detector_metrics%s.mat (for KPI aggregation)\n', tag);
 % Per-frame outcomes for the breakdown of weak points (analyze_weak_points.m)
-pred = struct('y_true', Y_test, 'y_pred', Y_pred, 'ebno', snr_vals(:), 'level', sp.test.level(:), ...
-    'speed', sp.test.speed(:), 'run', sp.test.run(:), 'rank', rk(:));
+pred = struct('y_true', Y_test, 'y_pred', Y_pred, 'ebno', snr_vals(:), 'ebno_kpi', eb_kpi(:), 'ebno_rx', eb_rx(:), ...
+    'level', sp.test.level(:), 'speed', sp.test.speed(:), 'run', sp.test.run(:), 'rank', rk(:));
 for f = {'pos', 'k_db', 'aoa'}
     if isfield(sp.test, f{1}), pred.(f{1}) = sp.test.(f{1}); end
 end
@@ -344,8 +391,9 @@ end
 
 function thr = kpi1_threshold(yt, yp, snr, classes)
 % Lowest Eb/N0 from which macro-F1 stays >= 90% at every higher point and every
-% class reaches F1 >= 90% over the frames at or above it (NaN when none).
-u = unique(snr);
+% class reaches F1 >= 90% over the frames at or above it (NaN when none); frames
+% beyond range (snr NaN) are in no bin.
+u = unique(snr(~isnan(snr)));
 f1 = arrayfun(@(v) 100 * macro_f1_of(yt(snr == v), yp(snr == v), classes), u);
 k_thr = find(f1 < 90, 1, 'last');
 if isempty(k_thr), k0 = 1; else, k0 = k_thr + 1; end

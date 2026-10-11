@@ -1,5 +1,5 @@
 %% EXTRACT_SPECTROGRAMS - Phase A6: detector inputs from data/dataset.mat
-% Image: spec_image.m (fixed [-40, 40] dB scale). Scalar features: link_features.m
+% Image: spec_image.m (dB over the thermal floor of a bin on a fixed [-25, 55] dB scale). Scalar features: link_features.m
 % (receiver measurements), temporal ones over a causal window of 10 frames
 % inside each sub-run. The same two functions are used by every closed-loop
 % script and the GUI, so training and deployment see identical inputs.

@@ -508,7 +508,7 @@ d = fullfile(tc.TestData.tmp, 'rekey'); mkdir(fullfile(d, 'data'));
 c0 = cd(d); back = onCleanup(@() cd(c0));
 ood = struct('score', 'last', 'win', 3); classes = {'none', 'jamming'}; trained_at = 7;
 save('data/trained_detector.mat', 'ood', 'classes', 'trained_at');
-T = struct('retain', 0.95, 'maha', -2, 'maha_val', [-3; -1]);
+T = struct('retain', 0.95, 'maha', -2, 'maha_val', [-3; -1], 'win', 3, 'score', 'last');
 save('data/ood_thresholds.mat', 'T');
 F0 = struct('FM', struct('mu', zeros(1, 11)), 'N', 1, 'q_thr', 4);
 FM = struct('mu', zeros(1, 13)); N = 12; q_thr = 4.5;
@@ -2525,6 +2525,233 @@ end
 verifyLessThanOrEqual(tc, first(1) - 15, 3);                     % the step at cycle 16
 verifyLessThanOrEqual(tc, conf(1) - 15, 5);                      % confirmed, then the rule's dwell
 verifyTrue(tc, isnan(first(2)) && isnan(conf(2)));
+end
+
+%% ---------- unknown-threat statistic, KPI 1 Eb/N0, masking, timing load ----------
+function test_ood_window_monitor(tc)
+% The unknown-threat statistic of the offline readings (ood_window.m) is the decision
+% cycle's: the mean over the last unk_win cycles of the run, partial at its start, the same
+% flag cycle by cycle as policy_monitor.m; frames given out of order are put in time order,
+% and every run has its own window.
+A = policy_actions();
+PP = struct('actions', {A}, 'classes', {{'none', 'jamming'}}, 'sps', 4, 'bps', 2, 'maha_thr', -1, 'unk_win', 5);
+rng(11); mh = -1 + 0.8 * randn(1, 30);
+o = struct('probs', [0.9 0.1], 'unknown', false, 'feat', zeros(1, numel(link_features('names'))));
+o.feat(feature_index('log_ber')) = -6;
+mem = policy_monitor('init', 1, numel(A)); cfg = find(strcmp(A, 'no_action'));
+flag = false(1, 30);
+for k = 1:30
+    x = o; x.maha = mh(k); x.unknown = mh(k) < PP.maha_thr;
+    mem = policy_monitor('update', mem, x, PP, cfg);
+    flag(k) = mem.unk_now(1);
+end
+w = ood_window(mh, ones(1, 30), 1:30, 5);
+verifyEqual(tc, flag, w' < PP.maha_thr);
+verifyEqual(tc, w(1:3)', cumsum(mh(1:3)) ./ (1:3), 'AbsTol', 1e-12);   % partial windows at the start
+p = randperm(30);
+verifyEqual(tc, ood_window(mh(p), ones(1, 30), p, 5), w(p), 'AbsTol', 1e-12);
+verifyEqual(tc, ood_window(mh, [ones(1, 15), 2 * ones(1, 15)], 1:30, 5), ...
+    [ood_window(mh(1:15), ones(1, 15), [], 5); ood_window(mh(16:30), ones(1, 15), [], 5)], 'AbsTol', 1e-12);
+verifyEqual(tc, ood_window(mh, ones(1, 30), [], 1), mh(:));
+end
+
+function test_ood_fold_metrics(tc)
+% Every score read as the decision cycle reads it: a window over the whole sub-run in time
+% order, labelled by its newest frame, so an isolated held-out frame shares its window with
+% known neighbours (the held-out frames are not joined); the selection reads the
+% validation frames only, and FPR95 takes its threshold from the known validation windows.
+s = ones(1, 12); s([4 9]) = -2;                               % two isolated held-out frames
+T = struct('run', ones(12, 1), 'pos', (1:12)', 'kn', true(12, 1), 'un', false(12, 1));
+T.un([4 9]) = true; T.kn = ~T.un;
+Q = ood_fold_metrics(struct('a', s), T, struct('a', s), T, {'a'}, [1 4], 0.95);
+verifyEqual(tc, Q.test(1, 1), 1);                             % per frame: separated
+verifyEqual(tc, Q.test(1, 2), 0.7, 'AbsTol', 1e-12);          % 4 cycles: 4 known windows above, 6 tied at 0.25
+p = [12 1 5 3 9 2 4 11 6 8 7 10];                             % the same frames out of time order
+T2 = struct('run', ones(12, 1), 'pos', p', 'kn', ~ismember(p', [4 9]), 'un', ismember(p', [4 9]));
+Q2 = ood_fold_metrics(struct('a', s(p)), T2, struct('a', s(p)), T2, {'a'}, [1 4], 0.95);
+verifyEqual(tc, Q2.test, Q.test, 'AbsTol', 1e-12);
+% 'a' separates on validation, 'b' on the test frames: the selection takes 'a'
+k10 = (1:10)';
+V = struct('run', [ones(10, 1); 2 * ones(10, 1)], 'pos', [k10; k10], 'kn', [true(10, 1); false(10, 1)], ...
+    'un', [false(10, 1); true(10, 1)]);
+Sv = struct('a', [linspace(1, 2, 10), zeros(1, 10)], 'b', [linspace(1, 2, 10), 1.5 * ones(1, 10)]);
+St = struct('a', [linspace(1, 2, 10), 1.5 * ones(1, 10)], 'b', [linspace(1, 2, 10), zeros(1, 10)]);
+Q = ood_fold_metrics(Sv, V, St, V, {'a', 'b'}, 1, 0.95);
+verifyEqual(tc, Q.val(:)', [1 0.5], 'AbsTol', 1e-12);
+verifyEqual(tc, Q.test(:)', [0.5 1], 'AbsTol', 1e-12);
+verifyEqual(tc, ood_select(Q.val', true(1, 2)), 1);
+verifyEqual(tc, Q.thr(:)', [1 1], 'AbsTol', 1e-12);           % the lowest of 10 known validation windows
+verifyEqual(tc, Q.fpr(:)', [1 0]);
+end
+
+function test_ood_loto_split(tc)
+% The frames of one held-out threat: it never trains, stops the training or fits a model;
+% the known windows of the selection come from the other half of the validation sub-runs;
+% the reading is the second test set, z-scored with the known training frames' statistics.
+rng(12);
+cls = {'none', 'jamming', 'spoofing'};
+mk = @(r0) struct('X', rand(4, 4, 1, 60), 'feats', randn(60, 2), ...
+    'Y', categorical(cls(mod(floor((0:59)' / 5), 3) + 1), cls), 'run', r0 + floor((0:59)' / 5), ...
+    'pos', mod((0:59)', 5) + 1);
+sp = struct('train', mk(1), 'val', mk(101), 'norm', struct('feat_mean', [1 -1], 'feat_std', [2 3]), ...
+    'classes', {cls'});
+fresh = mk(201); fresh.X = fresh.X(:, :, :, 1:30); fresh.feats = fresh.feats(1:30, :);
+fresh.Y = fresh.Y(1:30); fresh.run = fresh.run(1:30); fresh.pos = fresh.pos(1:30);
+[tr, vfit, va, vk, te] = ood_loto_split(sp, fresh, 'jamming');
+verifyEqual(tc, categories(tr.Y)', {'none', 'spoofing'});
+verifyEqual(tc, numel(tr.Y), 40);
+verifyEqual(tc, mean(tr.feats, 1), [0 0], 'AbsTol', 1e-12);
+verifyEqual(tc, std(tr.feats, 0, 1), [1 1], 'AbsTol', 1e-12);
+runs = unique(sp.val.run);
+verifyFalse(tc, any(vfit.Y == 'jamming'));
+verifyTrue(tc, all(ismember(vfit.run, runs(1:2:end))));
+verifyEqual(tc, va.sel, ismember(sp.val.run, runs(2:2:end)));
+verifyEqual(tc, numel(va.Y), 60);
+verifyEqual(tc, numel(vfit.Y) + sum(va.sel & va.Y ~= 'jamming'), 40);
+verifyTrue(tc, all(vk.Y == 'jamming')); verifyEqual(tc, numel(vk.Y), 20);
+verifyEqual(tc, te.X, fresh.X);
+raw = @(f) f .* sp.norm.feat_std + sp.norm.feat_mean;
+k = sp.train.Y ~= 'jamming';
+mu = mean(raw(sp.train.feats(k, :)), 1); sd = std(raw(sp.train.feats(k, :)), 0, 1);
+verifyEqual(tc, te.feats, (raw(fresh.feats) - mu) ./ sd, 'AbsTol', 1e-12);
+verifyEqual(tc, te.pos, fresh.pos);
+end
+
+function test_ood_thresholds_window(tc)
+% The unknown-threat threshold is the 5% quantile of the statistic the decision cycle
+% compares with it: the production score's mean over the last ood.win cycles of each
+% validation sub-run; a detector with another window recomputes it.
+d = fullfile(tc.TestData.tmp, 'oodthr'); mkdir(fullfile(d, 'data'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+[net, ood, X, F] = tiny_detector();
+ood.win = 4;
+run = repelem((1:10)', 8); pos = repmat((1:8)', 10, 1);
+splits.val = struct('X', X, 'feats', F', 'run', run, 'pos', pos);
+save('data/splits.mat', 'splits');
+save('data/trained_detector.mat', 'net', 'ood');
+T = ood_thresholds(0.95);
+mh = ood_scores(net, ood, X, F);
+mw = sort(ood_window(mh, run, pos, 4));
+mf = sort(mh(:));
+q = max(1, ceil((1 - 0.95) * 80));                            % the quantile's index, as ood_thresholds
+verifyEqual(tc, T.maha, mw(q), 'AbsTol', 1e-12);
+verifyEqual(tc, T.maha_val, mw, 'AbsTol', 1e-12);
+verifyEqual(tc, T.maha_frame, mf(q), 'AbsTol', 1e-12);
+verifyEqual(tc, [T.win, T.n_val], [4 80]);
+verifyNotEqual(tc, T.maha, T.maha_frame);
+ood.win = 1; save('data/trained_detector.mat', 'net', 'ood');
+T1 = ood_thresholds(0.95);
+verifyEqual(tc, [T1.win, T1.maha], [1 mf(q)], 'AbsTol', 1e-12);
+end
+
+function test_kpi_ebno(tc)
+% KPI 1 reads a frame at the Eb/N0 our signal is received with: a clean frame after a
+% path-loss step's window at the configured Eb/N0 less the step, in the bin of the grid
+% point at or below it, beyond range below the grid; a frame judged as path_loss at the
+% link's Eb/N0 when the step began; the dataset's ebno_rx when present.
+cls = {'none', 'path_loss', 'jamming'};
+y = {'none', 'none', 'path_loss', 'path_loss', 'path_loss', 'none', 'none', 'none'};
+P = struct('ebno', [12 * ones(8, 1); 3 * ones(8, 1); 0; 6; 9; 15], ...
+    'Y', categorical([y, y, {'none', 'jamming', 'none', 'none'}], cls)', ...
+    'run', [ones(8, 1); 2 * ones(8, 1); (3:6)'], 'pos', [(1:8)'; (1:8)'; ones(4, 1)], ...
+    'level', [10 * ones(8, 1); 13 * ones(8, 1); NaN; 30; NaN; NaN]);
+[bin, eb, rx, brx] = kpi_ebno(P, P.Y, cls);
+verifyEqual(tc, rx(1:8)', [12 12 2 2 2 2 2 2]);
+verifyEqual(tc, eb(1:8)', [12 12 12 12 12 2 2 2]);
+verifyEqual(tc, bin(1:8)', [12 12 12 12 12 0 0 0]);
+verifyEqual(tc, brx(3:5)', [0 0 0]);
+verifyEqual(tc, bin(9:13)', [3 3 3 3 3]);
+verifyTrue(tc, all(isnan(bin(14:16))));                       % received at -10 dB: below the grid
+verifyEqual(tc, bin(17:20)', [0 6 9 15]);                     % no step: the configured Eb/N0
+t = P.Y; t(6) = 'path_loss';                                  % a fused target: the onset in its window
+b2 = kpi_ebno(P, double(t), cls);
+verifyEqual(tc, b2(6), 12);
+P.ebno_rx = rx; P.ebno_rx(6:8) = 9 - 1e-12;                   % the dataset's value, a rounding below 9 dB
+b3 = kpi_ebno(P, P.Y, cls);
+verifyEqual(tc, b3(6:8)', [9 9 9]);
+end
+
+function test_balanced_macro_f1(tc)
+% The prevalence-normalized reading: with ten times more clean frames, 5% of them read as
+% the threat lower its plain precision, not its precision at equal priors; with equal
+% class counts both readings agree; a class absent among the true labels is out of the mean.
+cls = {'none', 'jamming'};
+yt = categorical([repmat({'none'}, 1, 1000), repmat({'jamming'}, 1, 100)], cls);
+yp = yt; yp(1:50) = 'jamming';
+[~, f1] = balanced_macro_f1(yt, yp, cls);
+pb = 1 / 1.05;                                                % R: none row [0.95 0.05], jamming row [0 1]
+verifyEqual(tc, f1(2), 2 * pb / (pb + 1), 'AbsTol', 1e-12);
+pp = 100 / 150;
+verifyLessThan(tc, 2 * pp / (pp + 1), f1(2));
+yt2 = categorical([repmat({'none'}, 1, 100), repmat({'jamming'}, 1, 100)], cls);
+yp2 = yt2; yp2(1:5) = 'jamming'; yp2(150) = 'none';
+cm = confusionmat(yt2, yp2, 'Order', cls); pr = diag(cm) ./ sum(cm, 1)'; rc = diag(cm) ./ sum(cm, 2);
+verifyEqual(tc, balanced_macro_f1(yt2, yp2, cls), mean(2 * pr .* rc ./ (pr + rc)), 'AbsTol', 1e-12);
+verifyEqual(tc, balanced_macro_f1(categorical({'none'}, cls), categorical({'jamming'}, cls), cls), 0);
+end
+
+function test_spec_mask_fill(tc)
+% Masks fill with the image's thermal-noise level, the mean of a noise-only image
+% (spec_image('noise'), -2.51 dB over the floor), not with 0 (25 dB below it).
+rng(8); nv = 0.5;
+iq = sqrt(nv / 2) * complex(randn(6000, 1), randn(6000, 1));
+v = spec_image('noise');
+verifyEqual(tc, v, (25 - 10 * 0.5772156649 / log(10)) / 80, 'AbsTol', 1e-9);
+verifyEqual(tc, mean(spec_image(iq, 1, nv), 'all'), v, 'AbsTol', 0.01);
+X = rand(128, 128, 1, 40, 'single') + 0.1;
+Xm = spec_mask(X);
+ch = Xm ~= X;
+verifyTrue(tc, any(ch(:)));
+verifyEqual(tc, unique(Xm(ch)), single(v));
+verifyFalse(tc, any(Xm(:) == 0));
+end
+
+function test_ood_latency_load(tc)
+% The detector's cost per candidate is timed with the machine's load logged before and
+% after (machine_load.m); this MATLAB counts among the MATLAB processes.
+[net, M, X, F] = tiny_detector();
+L = ood_latency(net, M, X, F, 5);
+verifyEqual(tc, fieldnames(L.load)', {'before', 'after'});
+for f = {'before', 'after'}
+    q = L.load.(f{1});
+    verifyTrue(tc, isnan(q.n_matlab) || q.n_matlab >= 1);
+    verifyTrue(tc, isnan(q.cpu_pct) || (q.cpu_pct >= 0 && q.cpu_pct <= 100));
+    verifyGreaterThanOrEqual(tc, q.n_cpu, 1);
+end
+if ispc, verifyGreaterThanOrEqual(tc, L.load.before.n_matlab, 1); end
+end
+
+function test_reading_sets_and_labels(tc)
+% The unknown-threat stage reads the second test set and never the dataset's test split,
+% and selects on validation; the unseen-severity reading counts the windowed statistic;
+% the architecture comparison reads the second test set when it exists; the image scale
+% is stated as it is.
+src = fileread(which('eval_ood_detection'));
+verifyEqual(tc, numel(regexp(src, 'sp\.test')), 1);
+verifyNotEmpty(tc, strfind(src, 'sp.test = [];'));
+verifyNotEmpty(tc, strfind(src, 'data/splits_fresh.mat'));
+verifyNotEmpty(tc, strfind(src, 'ood_select(MpV'));
+verifyNotEmpty(tc, strfind(fileread(which('eval_unseen_severity')), 'sum(sw(on) < Tood.maha)'));
+verifyNotEmpty(tc, strfind(fileread(which('compare_architectures')), 'data/splits_fresh.mat'));
+verifyNotEmpty(tc, strfind(fileread(which('extract_spectrograms')), '[-25, 55] dB'));
+end
+
+function [net, M, X, F] = tiny_detector()
+% A small network with the detector's named layers and an unknown-threat model on it.
+rng(5);
+lg = layerGraph([imageInputLayer([8 8 1], 'Normalization', 'none', 'Name', 'img')
+    convolution2dLayer(3, 2, 'Name', 'conv'); reluLayer('Name', 'relu1')
+    fullyConnectedLayer(4, 'Name', 'fc_img'); concatenationLayer(1, 2, 'Name', 'cat')
+    fullyConnectedLayer(4, 'Name', 'fc_m'); reluLayer('Name', 'relu_merge')
+    fullyConnectedLayer(2, 'Name', 'fc_out')]);
+lg = addLayers(lg, [featureInputLayer(3, 'Name', 'feat'); fullyConnectedLayer(4, 'Name', 'fc_f')]);
+lg = connectLayers(lg, 'fc_f', 'cat/in2');
+net = dlnetwork(lg);
+X = rand(8, 8, 1, 80, 'single'); F = randn(3, 80);
+M = struct('layers', {{'relu_merge'}}, 'candidates', {{'last'}}, 'score', 'last', 'mu', {{rand(4, 2)}}, ...
+    'P', {{eye(4)}}, 'zs', struct('last', [0 1], 'iforest', [0 1]));
+M.forest = iforest(randn(200, 3), 'NumLearners', 20, 'NumObservationsPerLearner', 64);
+M.forest_pack = iforest_pack(M.forest);
 end
 
 function v = ternary_(c, a, b)
