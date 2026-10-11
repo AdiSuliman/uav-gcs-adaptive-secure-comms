@@ -35,8 +35,9 @@ function [p, snr_gain_db, cm] = apply_countermeasure(p, threat, action)
 %                        no effect on broadband or signal-side threats; 2x spectrum
 %     spatial_diversity  the UAV receiver switches from MRC to adaptive MMSE combining
 %                        over its n_rx antennas: sample-covariance weights null
-%                        up to n_rx-1 interferers arriving from other directions and
-%                        track a faulty branch; the effect is in the link model
+%                        up to n_rx-1 interferers arriving from other directions (with
+%                        white noise alone they are MRC's, with an estimation loss: no
+%                        gain on a lost branch); the effect is in the link model
 %                        (p.rx_combiner), no Eb/N0 offset
 %     rate_reduce        rate / cm_rate_factor: +10*log10(factor) dB processing gain
 %                        against noise and noise-like interference; no gain against

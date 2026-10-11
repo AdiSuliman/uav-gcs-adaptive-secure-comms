@@ -39,7 +39,7 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %               envelope (32-sample block fit): ~0 for interference independent of
 %               our transmission, > 0 when it is triggered by it (reactive jamming)
 %     iot       interference over thermal [dB] (iot_db.m); the thermal floor is the
-%               receiver's calibration constant (the AWGN setting of the run)
+%               receiver's calibration constant (thermal_nv.m)
 %     mmse_gain predicted SINR gain of MMSE over MRC combining [dB] from the
 %               interference covariance and the channel estimate (optimum combining, Winters)
 %     align     alignment of the dominant interference direction with the GCS
@@ -166,7 +166,7 @@ xh = remod_frames(rx_all(delay_bits+1:end), p, ns, nf, sy(1, 1:nf) + sy(5, 1:nf)
 qn = NQ * p.sps;                                         % quiet slot before the frame: free of our pulse tails
 F.coh = quiet_coherence(iqa, p, qn);
 [F.q_sfm, F.q_par] = quiet_shape(iqa, qn);
-nv = thermal_of(out, p);                                 % thermal noise power per sample
+nv = thermal_nv(p);                                      % thermal noise power per sample
 dat = (qn + 1:ns)';                                      % samples that carry our signal
 rs = nan(na, nf); sn = nan(na, nf); ec = nan(na, nf); io = nan(na, nf); pe = nan(na, nf); pq = nan(na, nf);
 du = nan(na, nf); ed = nan(na, nf);
@@ -174,7 +174,7 @@ for a = 1:na
     ia = reshape(iqa(:, a, :), ns, nf);
     rs(a, :) = 10*log10(mean(abs(ia(dat, :)).^2, 1) + eps);
     [sn(a, :), ec(a, :), pe(a, :), du(a, :), ed(a, :)] = residual_metrics(xh(dat, :), ia(dat, :), nv);
-    io(a, :) = iot_of(out, p, rs(a, :), sn(a, :));
+    io(a, :) = iot_db(rs(a, :), sn(a, :), nv);
     if qn > 0, pq(a, :) = mean(abs(ia(1:qn, :)).^2, 1); end
 end
 s0 = sn; s0(isnan(s0)) = -Inf;
@@ -391,27 +391,4 @@ d = nan(size(Hq, 1), nf);
 for f = 1:min(nf, size(Hq, 3))
     d(:, f) = 10*log10(mean(abs(Hq(:, :, f)).^2, 2) + eps);
 end
-end
-
-function nv = thermal_of(out, p)
-% Thermal noise power per sample: the receiver's calibration constant (the AWGN
-% setting of the run, signal power 1/sps per sample).
-nv = NaN;
-try
-    mdl = out.SimulationMetadata.ModelInfo.ModelName;
-    snr_s = str2double(get_param([mdl '/AWGN'], 'SNR'));
-    nv = (1 / p.sps) / 10^(snr_s / 10);
-catch
-end
-end
-
-function iot = iot_of(out, p, rssi, sinr)
-iot = nan(size(rssi));
-try
-    mdl = out.SimulationMetadata.ModelInfo.ModelName;
-    snr_s = str2double(get_param([mdl '/AWGN'], 'SNR'));
-catch
-    return;
-end
-iot = iot_db(rssi, sinr, snr_s, p.sps);
 end

@@ -65,6 +65,11 @@ if isfile(F.det)
             strjoin(arrayfun(@(o) sprintf('%s class %g/%g alarm %g/%g', o.class, o.cls_median, o.cls_p90, ...
             o.conf_median, o.conf_p90), m.onset, 'UniformOutput', false), ', '));
     end
+    if isfield(m, 'branch')                          % beside KPI 1, never in its place
+        det{end+1} = sprintf(['beside KPI 1, branch level (antenna fault and airframe shadowing as one branch lost): ' ...
+            'macro-F1 above the threshold %.2f%%, one branch lost found in %.2f%% of its %d frames (%.2f%% above the threshold)'], ...
+            m.branch.macro_f1_above_threshold_pct, m.branch.lost_recall_pct, m.branch.n_lost, m.branch.lost_recall_above_threshold_pct);
+    end
     if isfile(F.pol)
         Po = load(F.pol, 'KP');
         if isfield(Po.KP, 'onset')

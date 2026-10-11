@@ -408,7 +408,7 @@ fprintf('    build + compile %.1f s\n', toc(tb));
 nS = numel(CFG.EbNo); ber = nan(1, nS); nerr = zeros(1, nS); dly = NaN; BR = [];
 for s = 1:nS
     snr_dB = CFG.EbNo(s) + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
-    set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/p.sps));
+    set_link_snr(modelName, snr_dB, p);
     nr = 1; if isfield(CFG, 'n_real'), nr = CFG.n_real; end
     fdv = p.fd_max; if isfield(CFG, 'fd_val'), fdv = CFG.fd_val; end
     e_tot = 0; n_tot = 0; br = zeros(1, nr);

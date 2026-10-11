@@ -62,7 +62,10 @@ function varargout = link_env(cmd, varargin)
 %   healthy: unmitigated m <=
 %   C.ratio_ok x clean; recoverable: some configuration restores both BER and
 %   packet loss in this geometry (under a comb jammer, one without channel_switch
-%   and freq_diversity).
+%   and freq_diversity); on: the cell's threat is on the air in some frame of this
+%   geometry (pool_cell.m act; airframe shadowing only where the flight's attitude lets
+%   the airframe hide an antenna, shadow_hidden.m), so an episode whose threat never is
+%   counts as no threat episode (policy_run_set.m, dqn_eval_batches.m).
 %   obs: probs (NE x classes), maha (unknown-threat score), unknown (score below
 %   threshold, or masked), feat (NE x link features, receiver measurements), gant
 %   (NE x antennas, mean channel gain of every antenna), cfg_link (configuration
@@ -110,6 +113,7 @@ nSc = numel(PP.scen); nS = numel(PP.ebno); nSp = numel(PP.runs); nRm = max(K.nR)
 K.q = nan(nSc, nS, nA, nSp, nRm); K.gput = nan(nSc, nS, nA, nSp, nRm);
 K.restored = false(nSc, nS, nA, nSp, nRm); K.restored_plr = false(nSc, nS, nA, nSp, nRm);
 K.healthy = false(nSc, nS, nSp, nRm); K.recoverable = false(nSc, nS, nSp, nRm); K.recoverable_comb = K.recoverable;
+K.on = false(nSc, nS, nSp, nRm);
 stay = ~K.hasCh & ~K.hasFd;                         % configurations a comb jammer leaves as they are
 for sp = 1:nSp
     [BC, PC] = clean_reference(PP, K, sp, ref, C);   % clean BER (floored) and packet loss, Eb/N0 x geometry
@@ -125,6 +129,7 @@ for sp = 1:nSp
                 bu = mean(Pu.ber(ku));
                 bw = max(bu, 10 * bt);
                 K.healthy(sc, s, sp, r) = bu <= bt;
+                K.on(sc, s, sp, r) = sc ~= K.clean && (~isfield(Pu, 'act') || isempty(Pu.act) || any(Pu.act(ku) > 0));
                 for a = 1:nA
                     P = PP.pools{sc, s, a, sp};
                     k = P.run == rid;

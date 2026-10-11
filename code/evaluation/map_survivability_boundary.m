@@ -10,7 +10,9 @@
 % MARGINAL when the best BER is within 5x, otherwise NON-RECOVERABLE. Directional
 % threats are mapped for two flight geometries: interferer 42.2 deg from the
 % GCS direction (separable by the antenna array) and 11.4 deg (aligned);
-% path_loss, antenna_fault and airframe_shadowing do not depend on the geometry.
+% path_loss and antenna_fault do not depend on the geometry; airframe shadowing is mapped
+% in a coordinated turn at the smallest bank of the measured events (p.shadow_view_roll_deg,
+% the GCS abeam), where the airframe hides an antenna (shadow_hidden.m).
 % The K-factor is fixed at the nominal 10 dB and the UAV antenna keeps its horizon gain
 % toward the GCS (the pools draw K and altitude per flight).
 %
@@ -120,6 +122,7 @@ parfor (j = 1:nJ, NWP)
     t = jobs(j, 1); li = jobs(j, 2);
     cfg = maps(t);
     p = p0; p.active_threat = cfg.base; p.(cfg.level_field) = cfg.levels(li);
+    if contains(cfg.base, 'airframe_shadowing'), p.roll_deg = p.shadow_view_roll_deg; end   % a turn that lets the airframe hide an antenna
     if ~isnan(cfg.aoa), p.int_aoa_deg(1) = p.gcs_aoa_deg + cfg.aoa; end
     sd = 900000 + 1000*t + 10*li;                         % + s: each Eb/N0 column its own flight (nS < 10)
     g = arrayfun(@(s) struct('seed', sd + s, 'speed', v_nom, 'run', 1), 1:nS, 'UniformOutput', false);

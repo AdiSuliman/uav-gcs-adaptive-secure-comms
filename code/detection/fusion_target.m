@@ -2,17 +2,21 @@ function [yt, rank] = fusion_target(y, run, pos, N, classes)
 %FUSION_TARGET  Target of the fused decision of every frame, and its place in its run.
 %   [yt, rank] = fusion_target(y, run, pos, N, classes)
 %   y        class index per frame (the per-frame label of the proposal: a frame of a
-%            WLAN run without a packet on the air is 'none', mitigation 3)
+%            WLAN run without a packet on the air is 'none', mitigation 3; a path-loss
+%            frame counts while the step's onset lies in its link-feature window,
+%            threat_active.m)
 %   run, pos sub-run and position of every frame; N the fusion window [cycles]
 %   classes  class names (y indexes them)
-%   yt       the fused decision is judged on its window: a 'none' frame whose window
-%            (the last N frames of its run, fuse_classes.m) holds a
-%            'benign_interference' frame has the target 'benign_interference'; every
-%            other frame keeps its label
+%   yt       the fused decision is judged on its window (the last N frames of its run,
+%            fuse_classes.m): a 'none' frame whose window holds a 'benign_interference'
+%            frame has the target 'benign_interference', one whose window holds the
+%            onset of a path-loss step (the run's first 'path_loss' frame) the target
+%            'path_loss'; every other frame keeps its label
 %   rank     place of the frame in its run's order (1 = first); its window is full
 %            from rank N on
 classes = cellstr(string(classes));
 ib = find(strcmp(classes, 'benign_interference'), 1); i0 = find(strcmp(classes, 'none'), 1);
+ip = find(strcmp(classes, 'path_loss'), 1);
 y = double(y(:)); n = numel(y);
 yt = y; rank = zeros(n, 1);
 [~, ~, rid] = unique(run(:));
@@ -21,11 +25,18 @@ for r = 1:numel(byrun)
     ix = byrun{r};
     [~, o] = sort(pos(ix)); ix = ix(o);
     rank(ix) = 1:numel(ix);
-    if isempty(ib) || isempty(i0), continue; end
-    isb = y(ix) == ib;
-    if ~any(isb), continue; end
-    for j = find(y(ix)' == i0)
-        if any(isb(max(1, j - N + 1):j)), yt(ix(j)) = ib; end
+    if isempty(i0), continue; end
+    pr = pos(ix); pr = pr(:);
+    if ~isempty(ib) && any(y(ix) == ib)
+        isb = y(ix) == ib;
+        for j = find(y(ix)' == i0)
+            if any(isb(max(1, j - N + 1):j)), yt(ix(j)) = ib; end
+        end
+    end
+    if ~isempty(ip) && any(y(ix) == ip)
+        t0 = pr(find(y(ix) == ip, 1));                    % onset of the step
+        k = y(ix) == i0 & pr >= t0 & pr - t0 < N;
+        yt(ix(k)) = ip;
     end
 end
 end

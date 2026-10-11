@@ -18,7 +18,8 @@
 %
 % Grid: monitor (alarm definition and m-of-n confirmation, CFG.monitors,
 % policy_monitor.m; Barajas et al.) x Eb/N0-drop threshold of the
-% path_loss alarm (DROP_STEPS dB below the threshold of choose_drop_threshold.m)
+% drop alarm (DROP_STEPS dB below the threshold of choose_drop_threshold.m, above the
+% moving-away floor it records)
 % x false-switch penalty of the TRAINING reward (CFG.fa_penalty_grid) x
 % CFG.dqn_gammas x CFG.dqn_seeds. Every run keeps the checkpoint with the best
 % recovery on its own validation episodes. All runs are then compared on every
@@ -61,7 +62,7 @@ N_SEEDS = 3; GAMMAS = 0.5;
 % monitor: alarm definition, m/n confirmation (M-of-N binary integration, Richards), selected on
 % validation; 4/5 and 5/5 trade a later alarm for fewer false ones
 ALARMS = {'class_drop 3/3', 'class_drop 2/2', 'class_drop 4/5', 'class_drop 5/5'};
-DROP_STEPS = 2;                          % path_loss alarm: 2 dB below the train-pool threshold (selected on validation)
+DROP_STEPS = 2;                          % drop alarm: 2 dB below the train-pool threshold (selected on validation)
 % Training reward variants, one entry each: false-switch penalty, scale of the
 % running costs (goodput, spectrum, power, combining) and of the switching cost
 FA_PEN = [80 120 160]; COST_SCALE = [0.5 0.5 0.5]; SW_SCALE = [1 1 1];
@@ -83,8 +84,13 @@ if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (r
 end
 SEEDS = 42 + (0:N_SEEDS-1);
 FA_BOUND = 0.05;                         % one-sided 95% bound of the clean-link false alarms (KPI 6)
-DROP_DB = [];                            % path_loss alarm threshold of 'class_drop'
-if isfile('data/drop_threshold.mat'), Dd = load('data/drop_threshold.mat', 'drop_db'); DROP_DB = Dd.drop_db; clear Dd; end
+DROP_DB = [];                            % drop alarm threshold of 'class_drop'
+DROP_FLOOR = 0;                          % moving away over the monitor's window (choose_drop_threshold.m)
+if isfile('data/drop_threshold.mat')
+    Dd = load('data/drop_threshold.mat'); DROP_DB = Dd.drop_db;
+    if isfield(Dd, 'floor_db'), DROP_FLOOR = Dd.floor_db; end
+    clear Dd
+end
 if ~isempty(DROP_DB), PP.drop_db = DROP_DB; end
 CV = [];                                 % independent clean validation geometries
 if isfile('data/clean_val_pools.mat'), Cv = load('data/clean_val_pools.mat', 'CT'); CV = Cv.CT; clear Cv; end
@@ -120,7 +126,7 @@ norm_in.sd(cont) = max(std(S_all(cont, :), 0, 2), 1e-3);
 val_spec = full_val_spec(PP, K, H, SPLIT_VAL, VAL_REPS, RandStream('mt19937ar', 'Seed', 99));
 val_thr = threat_of(PP, val_spec);                   % threat name per validation episode (severities pooled)
 DROPS = [];
-if ~isempty(DROP_DB), DROPS = DROP_DB - DROP_STEPS; DROPS = DROPS(DROPS > 0); end
+if ~isempty(DROP_DB), DROPS = DROP_DB - DROP_STEPS; DROPS = DROPS(DROPS > DROP_FLOOR); end
 if isempty(DROPS), DROPS = NaN; end
 tab = policy_table(PP, K);
 
@@ -222,8 +228,8 @@ rep{end+1} = sprintf(['Validation: %d episodes, every (threat cell, Eb/N0, geome
     'validation geometries (data/clean_val_pools.mat, one 30-cycle episode each) at Eb/N0 >= %g dB (KPI 6).'], ...
     numel(val_thr), VAL_REPS, n_txt(CV, PP, EBNO_THR), EBNO_THR);
 if ~isempty(DROP_DB)
-    rep{end+1} = sprintf(['''class_drop'': path_loss alarm after an Eb/N0 drop >= the run''s threshold; train-pool ' ...
-        'threshold %.1f dB (data/drop_threshold.mat)'], DROP_DB);
+    rep{end+1} = sprintf(['''class_drop'': drop alarm (and the path_loss class) after an Eb/N0 drop >= the run''s ' ...
+        'threshold; train-pool threshold %.1f dB, moving-away floor %.2f dB (data/drop_threshold.mat)'], DROP_DB, DROP_FLOOR);
 end
 rep{end+1} = sprintf('%-46s %10s %28s %10s %9s %14s %12s', 'run', 'recovered', 'weakest threat', 'restored', 'return', ...
     'FA indep.', 'switches/ep');

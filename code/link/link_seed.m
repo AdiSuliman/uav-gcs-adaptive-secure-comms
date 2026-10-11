@@ -12,7 +12,8 @@ function d = link_seed(modelName, seed, fd, geo)
 %   the start of each run. The flight's draws (flight_draws.m, under the draw switches and
 %   ranges the model was built with: UserData of its Constant blocks, build_threat_model.m)
 %   go to the blocks whose draw is on: interferer directions to 'AoA', K-factors of our
-%   signal and of the interferers to 'Kfac', heading rate to 'Yaw', receive correlation to
+%   signal and of the interferers to 'Kfac', heading rate to 'Yaw' (also the turn of a fixed
+%   bank, p.roll_deg), receive correlation to
 %   'Corr'. 'GCS' gets the amplitude of our signal: the tracker's pointing loss and the gain
 %   of the tilted UAV antenna toward the GCS (its elevation is 0 without geo.ebno). 'Att'
 %   gets the GCS direction and elevation, the roll, the pitch and its wobble; 'Body' our
@@ -35,7 +36,7 @@ end
 if getf(p, 'k_random', false) || isfinite(getf(geo, 'k_sig_db', NaN))
     set_param([modelName '/Kfac'], 'Value', mat2str([d.k_sig d.k_int], 8));
 end
-if getf(p, 'yaw_random', false)
+if getf(p, 'yaw_random', false) || getf(p, 'roll_deg', 0) ~= 0   % a drawn heading rate, or the turn of a fixed bank
     set_param([modelName '/Yaw'], 'Value', sprintf('%.8f', d.yaw));
 end
 if getf(p, 'corr_random', false)

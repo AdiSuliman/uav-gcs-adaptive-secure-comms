@@ -49,7 +49,7 @@ if isfile('data/fusion.mat') && isfield(sp.test, 'pos')
     fprintf('Decision over the last %d cycles (temporal fusion)\n', fus.N);
     [yt, rk] = fusion_target(double(sp.test.Y(:)), sp.test.run, sp.test.pos, fus.N, classes);
     Y_test = categorical(classes(yt)', classes);
-    fprintf('WLAN frames without a packet judged by their window as benign_interference: %d\n', ...
+    fprintf('Frames judged by their window (WLAN gaps as benign_interference, path-loss onsets as path_loss): %d\n', ...
         sum(Y_test(:) ~= sp.test.Y(:)));
 end
 [~, max_idx] = max(Y_pred_prob, [], 1);
@@ -159,6 +159,18 @@ fprintf(' %g dB %.1f%% |', [unique_snrs(:)'; f1_vs_snr(:)']);
 fprintf('\nKPI #1 threshold (chosen on validation): %g dB; on the %s above it macro-F1 %.2f%%, lowest class %.2f%%\n', ...
     thr_db, set_name, f1_above, min(f1_class_above));
 fprintf('Action-equivalent accuracy: %.2f%% (class accuracy %.2f%%)\n', 100*mean(act_ok), 100*mean(Y_test == Y_pred));
+% Beside KPI 1 (which reads the classes above): the branch level, where an antenna fault
+% and airframe shadowing are one class, 'one branch lost' (branch_level.m)
+[~, bnames] = branch_level(classes); bt = branch_level(Y_test); bp = branch_level(Y_pred);
+bt = categorical(bt, bnames); bp = categorical(bp, bnames); bo = categorical(bnames, bnames);
+lost = bt == 'one_branch_lost';
+branch = struct('classes', {bnames}, 'macro_f1_above_threshold_pct', 100 * macro_f1_of(bt(above), bp(above), bo), ...
+    'class_f1_above_threshold_pct', 100 * class_f1_of(bt(above), bp(above), bo), ...
+    'lost_recall_pct', 100 * mean(bp(lost) == 'one_branch_lost'), ...
+    'lost_recall_above_threshold_pct', 100 * mean(bp(lost & above) == 'one_branch_lost'), 'n_lost', sum(lost));
+fprintf(['Branch level, beside KPI 1 (antenna fault and airframe shadowing as one branch lost): above the threshold ' ...
+    'macro-F1 %.2f%%; one branch lost found in %.2f%% of its frames (%.2f%% above the threshold)\n'], ...
+    branch.macro_f1_above_threshold_pct, branch.lost_recall_pct, branch.lost_recall_above_threshold_pct);
 
 fig_snr = figure('Name', 'Detection vs Eb/N0', 'Color', 'w', 'Position', [100 100 640 420]);
 hold on; grid on;
@@ -180,8 +192,8 @@ fprintf('Saved results/confusion_matrix%s.png and results/accuracy_vs_snr%s.png\
 % cycles from the first frame of the threat in a test sub-run to the first correct fused
 % class, and to the confirmed alarm (a hostile fused class, not none or
 % benign_interference, on m of the last n cycles, decision_config.m confirm; the
-% monitor's degradation path is not part of this detector reading). A sub-run holds no
-% frame before the onset, so the window starts with the threat.
+% monitor's degradation path is not part of this detector reading). A sub-run starts with
+% the threat (its window holds no clean frame), but for a path-loss step, whose onset lies inside it.
 Cd = decision_config();
 Nf = 1; if ~isempty(fus), Nf = fus.N; end
 fullw = rk(:) >= Nf;
@@ -262,7 +274,7 @@ metrics = struct( ...
     'kpi1_threshold_db', thr_db, 'macro_f1_above_threshold_pct', f1_above, ...
     'class_f1_above_threshold_pct', f1_class_above, ...
     'action_equiv_accuracy_pct', 100*mean(act_ok), 'action_equiv_per_class_pct', act_acc_class, ...
-    'ci95', ci95, 'steady', steady, 'onset', onset);
+    'ci95', ci95, 'steady', steady, 'onset', onset, 'branch', branch);
 if ~isempty(fus)
     metrics.fusion_cycles = fus.N;
     metrics.per_frame = struct('accuracy_pct', frame_acc, 'macro_f1_pct', frame_f1, 'class_f1_pct', frame_class_f1);

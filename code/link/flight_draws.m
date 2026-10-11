@@ -16,7 +16,9 @@ function d = flight_draws(seed, fd, p, geo)
 %   d.yaw             heading rate [deg/s] (heading_rate.m)
 %   d.bank            bank angle of the turn [deg] (bank_angle.m)
 %   d.roll, d.pitch   attitude [deg]: the bank to the side of the turn, plus the tilt of a
-%                     slow flight in wind (hover_attitude.m)
+%                     slow flight in wind (hover_attitude.m); without the heading-rate draw
+%                     (p.yaw_random off) a fixed bank p.roll_deg (default 0): the coordinated
+%                     turn it flies sets d.yaw (a tilt without a turn at hover)
 %   d.wobble          pitch wobble of a slow flight [amp deg, freq Hz, phase rad], zeros
 %                     from p.wobble_v_max up (hover_attitude.m)
 %   d.rho             receive correlation (rx_correlation.m)
@@ -61,9 +63,15 @@ d.yaw = 0;
 if getf(p, 'yaw_random', false), d.yaw = heading_rate(seed, fd, p); end
 d.bank = 0;
 if d.yaw ~= 0, d.bank = bank_angle(d.yaw, fd, p); end
+r0 = getf(p, 'roll_deg', 0);
+if ~getf(p, 'yaw_random', false) && r0 ~= 0      % a fixed geometry's bank: the coordinated turn it flies
+    d.bank = abs(r0);
+    d.yaw = sign(r0) * turn_rate(d.bank, fd, p);
+end
 w = zeros(1, 5);
 if getf(p, 'wobble_random', false), w = hover_attitude(seed, fd, p); end
 d.roll = sign(d.yaw) * d.bank + w(1);           % a right turn (yaw > 0) banks right wing down
+if d.yaw == 0 && r0 ~= 0 && ~getf(p, 'yaw_random', false), d.roll = r0 + w(1); end   % hover: a tilt, no turn
 d.pitch = w(2); d.wobble = w(3:5);
 d.rho = getf(p, 'rx_corr', NaN);
 if getf(p, 'corr_random', false), d.rho = rx_correlation(seed, p.corr_range); end
@@ -103,6 +111,15 @@ if nt > 1
         [d.tdl(:, i), d.ds_ns(i)] = tdl_profile(ds(i), k(i), nt, p.tdl_step_ns);
     end
 end
+end
+
+function w = turn_rate(b, fd, p)
+% Heading rate of a coordinated turn at bank b [deg/s], g tan(b) / v, with the speed from
+% the Doppler fd and not below p.turn_v_floor (heading_rate.m); 0 at hover.
+w = 0;
+if fd == 0, return; end
+v = max(fd * p.c_light / p.carrier_freq, getf(p, 'turn_v_floor', 0));
+w = rad2deg(9.81 * tand(b) / v);
 end
 
 function v = getf(s, name, default)

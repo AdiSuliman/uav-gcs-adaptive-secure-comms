@@ -18,9 +18,9 @@ function [x, names] = temporal_evidence(P, G, Fw)
 %       occ_w    share of cycles with interference in the quiet slot (> 3 dB over
 %                thermal): continuous interference ~1, intermittent in between
 %       drop_w   share of cycles in which one antenna drops: 20 dB or more below the
-%                next one over the frame, or 15 dB inside the frame (a connector open
-%                for part of it). An open connector (~30 dB) comes and goes, a shadow
-%                stays, and fading rarely separates two antennas that far
+%                next one over the frame, or 15 dB inside the frame. A deep lost branch
+%                (an open connector, a hidden antenna) stays down from cycle to cycle,
+%                and fading rarely separates two antennas that far
 %       off_w    mean per-cycle offset of the weakest antenna (lowest window mean)
 %                from the median of the others [dB] (Willgert, US 8,548,029, eq. 5)
 %       rat_w    standard deviation of that offset over |off_w|, at most 10: a loss in

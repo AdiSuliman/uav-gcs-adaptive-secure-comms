@@ -81,11 +81,11 @@ fprintf('Saved %s\n', OUT);
 function R = run_link(p0, threat, action, ebno, seed, fd, nf)
 % One seeded run of the threat link with a configuration applied (apply_countermeasure.m).
 p = p0; p.active_threat = threat;
+if contains(threat, 'airframe_shadowing'), p.roll_deg = p.shadow_view_roll_deg; end   % a turn that lets the airframe hide an antenna
 [p2, g_db] = apply_countermeasure(p, threat, action);
 evalc('build_threat_model(p2)');
 mdl = 'UAV_GCS_Threat_Link';
-set_param([mdl '/AWGN'], 'SNR', num2str(ebno + g_db + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps)), ...
-    'SignalPower', num2str(1/p2.sps));
+set_link_snr(mdl, ebno + g_db + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps), p2);
 link_seed(mdl, seed, fd);
 out = sim(mdl, 'StopTime', num2str(nf * p2.frame_duration));
 F = extract_closed_loop_frames(out, p2, 20);

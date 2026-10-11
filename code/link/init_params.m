@@ -100,6 +100,7 @@ params.yaw_random    = true;                     % heading rate drawn per seeded
 params.roll_max_deg  = 57.9;                     % [deg] largest measured bank angle of a small UAV
 params.turn_v_floor  = 8;                        % [m/s] speed floor of the turn-rate formula
 params.yaw_rate_max  = 28.7;                     % [deg/s] largest measured yaw rate of a small UAV
+params.roll_deg      = 0;                        % [deg] bank of a fixed geometry (yaw_random off): maps and views set a turn for airframe shadowing
 % The turn banks the UAV by atan(w v / g) (bank_angle.m): its antennas tilt and their
 % polarization turns against the GCS antenna (uav_attitude_db.m), on our signal only.
 % Wind (hover_attitude.m): below the slowest measured flying UAV a multirotor holds its
@@ -124,7 +125,13 @@ params.active_threat = 'jamming';   % threat of the next model build: 'none', a 
 params.jsr_db        = 16;          % [dB] Jamming-to-Signal Ratio (barrage jammer power)
 params.burst_duty    = 0.3;         % Noise Burst: fraction of time jammer is ON (0-1)
 params.burst_period  = 100;         % Noise Burst: on/off cycle length (symbols); its phase drawn per flight (jam_timing.m)
-params.path_loss_db  = 14;          % Path Loss: attenuation (dB) applied to Tx signal
+% Path loss as a threat is a sudden step of attenuation (an obstruction, terrain masking,
+% a building between the UAV and the GCS: up to 22 dB, Cui et al.); a loss present from the
+% first frame is the same link as a longer range. Moving away is no threat: free-space loss
+% changes by 8.69 v / d dB/s, at most 1.4 dB/s at 161 km/h and 0.28 km (15 dB).
+params.path_loss_db  = 14;          % Path Loss: attenuation step (dB) on our signal
+params.pl_onset_frames = [1 1];     % frame of the run at which the step starts, drawn per run in the range ([1 1]: from the first frame, the pools' cells, whose episodes set their own onset)
+params.pl_onset_det  = [2 11];      % the detector's 20-frame sub-runs: a clean frame before the step at least, and the step inside the 10-frame window of the link features after it
 % Antenna Fault: a connector of one antenna is faulty for the flight, from a partial loss
 % to an open contact (a broken connector that separates at altitude and stays open, Fedde &
 % Carter, US 4,506,385; opens are the most common connector failure, Ginart et al.). A
@@ -142,12 +149,18 @@ params.spoof_sir_db   = 3;          % Spoofing: Spoof-to-Signal Ratio (dB), 0 = 
 params.reactive_threshold = 0.5;    % Reactive Jamming: signal-energy threshold to trigger jammer
 params.tone_jsr_db    = 16;         % Tone (CW) jammer: in-band power over our signal (dB)
 params.tone_offset_hz = 300e3;      % Tone offset from our carrier, uniform in +-this per flight (flat part of the RRC band)
-% Airframe shadowing: in a banking turn the airframe hides one antenna for seconds; the
+% Airframe shadowing: in a turn the airframe hides one antenna for seconds; the
 % median loss of an event is 15.5 +- 4.9 dB (C-band; 10.8 +- 3 dB at L-band), events up
 % to about 25 dB, and the hidden antenna loses its line of sight: its K-factor falls to
 % about -16 dB (Sun et al.). Applied in the channel (build_threat_model.m).
 params.shadow_db      = 15.5;       % Airframe shadowing: median loss of the hidden antenna [dB]
 params.shadow_k_db    = -16;        % Airframe shadowing: K-factor of the hidden antenna [dB]
+% It occurs only while the attitude puts the airframe in the line of sight: roll above 5 deg
+% and the GCS azimuth more than 30 deg off the heading (Sun et al., Part IV, Sec. III), on
+% the end of the array farther from the GCS (shadow_hidden.m).
+params.shadow_roll_deg = 5;         % [deg] smallest roll of a shadowing event
+params.shadow_hdg_deg  = 30;        % [deg] smallest heading-to-GCS-azimuth difference of a shadowing event
+params.shadow_view_roll_deg = 16.1; % [deg] bank of a fixed geometry with airframe shadowing (maps, gallery, console): the smallest roll of the measured events (Sun et al., Table II)
 
 % Benign Interference: packet traffic of a WLAN in our channel, not an attack.
 % Frames of 0.27-3.2 ms and channel occupancy 5-86% (Wollenberg et al.; field duty

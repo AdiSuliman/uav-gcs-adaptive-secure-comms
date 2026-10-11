@@ -22,7 +22,13 @@
 %   DET    fused detection of the deployed detector (fused_class.m) on the
 %          threat-active frames at no_action (threat_active.m): the class calls for
 %          the countermeasure of the threat (rule_based_policy.m), for a combined
-%          threat that of one of its components                                >= 90%
+%          threat that of one of its components; an antenna fault and airframe
+%          shadowing take the same answer, so each counts as detected only as its own
+%          class there (DET_b, beside it, no target: the branch level, either of the two
+%          as one branch lost, branch_level.m). A path-loss step: every attenuated frame
+%          after the same flight's clean link at no_action (the onset), detected by the
+%          fused class or by the monitor's drop alarm (policy_monitor.m, 'class_drop')
+%                                                                               >= 90%
 %   DET_h  DET on the flights whose unmitigated link is not restored (harmed)   >= 90%
 %          (DET_u, DET on the unharmed flights, is reported beside it, no target)
 %   SURV   flights some configuration restores (link_env.m); follower rows: one
@@ -283,8 +289,8 @@ Z = zeros(nF, nV); E1 = nan(nF, 1);
 FT = struct('c', fc, 'sp', fsp, 's', fs, 'r', fr, 'geo', 1e6 * fsp + 1000 * fs + fr, 'eb', reshape(PP.ebno(fs), [], 1), ...
     'speed', E1, 'alt', E1, 'ksig', E1, 'rho', E1, 'align', E1, 'bank', E1, 'ds', E1, ...
     'surv', K.recoverable(ii), 'surv_f', RF(ii), 'surv_c', K.recoverable_comb(ii), 'harm', HM(ii), ...
-    'det_k', zeros(nF, 1), 'det_n', zeros(nF, 1), 'link_k', zeros(nF, 1), 'link_n', zeros(nF, 1), 'cl_k', E1, 'cl_n', E1, ...
-    'ep_n', Z, 'held_k', Z, 'rec_k', Z, 'lt_k', Z, 'lt_n', Z, 'fa_k', Z, 'fa_n', Z, 'sw_k', Z);
+    'det_k', zeros(nF, 1), 'detb_k', zeros(nF, 1), 'det_n', zeros(nF, 1), 'link_k', zeros(nF, 1), 'link_n', zeros(nF, 1), ...
+    'cl_k', E1, 'cl_n', E1, 'ep_n', Z, 'held_k', Z, 'rec_k', Z, 'lt_k', Z, 'lt_n', Z, 'fa_k', Z, 'fa_n', Z, 'sw_k', Z);
 clear Z RF HM
 % Covariates of the bands (PP.cov); a band whose field the pools do not record is skipped
 COV = {'alt', 'alt_m'; 'ksig', 'k_sig'; 'rho', 'rho'; 'bank', 'bank'; 'ds', 'ds_ns'};
@@ -318,18 +324,18 @@ for ri = 1:numel(RUN)
 end
 clear RES
 % DET: fused class of every frame at no_action, against the countermeasure of the threat
+% (a lost branch as its own class); DET_b: the branch level
 acts = cellfun(@(x) rule_based_policy(x), PP.classes, 'UniformOutput', false);
 for c = tc
-    ok_c = ismember(acts, cellfun(@(x) rule_based_policy(x), strsplit(PP.scen{c}, '+'), 'UniformOutput', false));
+    ok_c = det_classes(PP.classes, acts, PP.scen{c});
     for sp = [SPL SPEED]
         for s = 1:nS
             P = PP.pools{c, s, K.na, sp};
             if isempty(P) || isempty(P.ber), continue; end
-            k = fused_class(P.probs, struct('run', P.run, 'pos', run_pos(P.run), 'gain_ant', P.gant, 'feats_raw', P.feat), ...
-                PP.fuse, PP.fuse_N);
-            on = threat_active(PP.scen{c}, P.act);
+            [hit, on] = det_frames(P, PP.pools{clean_cell, s, K.na, sp}, PP.scen{c}, ok_c, PP);
             i = flight_of(IDX, c, s, sp, P.run, PP.runs{sp});
-            FT.det_k = FT.det_k + accumarray(i, double(reshape(ok_c(k), [], 1) & on), [nF 1]);
+            FT.det_k = FT.det_k + accumarray(i, double(hit(:, 1) & on), [nF 1]);
+            FT.detb_k = FT.detb_k + accumarray(i, double(hit(:, 2) & on), [nF 1]);
             FT.det_n = FT.det_n + accumarray(i, double(on), [nF 1]);
         end
     end
@@ -423,11 +429,12 @@ nB = numel(BD); iv = find([BD.veto]);
 
 % Policy-independent layers of every point
 BL = struct('det', repmat(VZ, nT, nS), 'deth', repmat(VZ, nT, nS), 'detu', repmat(VZ, nT, nS), ...
-    'surv', repmat(VZ, nT, nS), 'surv_f', repmat(VZ, nT, nS), 'surv_c', repmat(VZ, nT, nS));
+    'detb', repmat(VZ, nT, nS), 'surv', repmat(VZ, nT, nS), 'surv_f', repmat(VZ, nT, nS), 'surv_c', repmat(VZ, nT, nS));
 for i = 1:nT
     for s = 1:nS
         F = take_rows(FTi{i}, FTi{i}.s == s);
         [BL.det(i, s), BL.deth(i, s), BL.detu(i, s)] = det_layers(F, TGT, B);
+        Fb = F; Fb.det_k = F.detb_k; BL.detb(i, s) = det_layers(Fb, TGT, B);
         BL.surv(i, s) = surv_layer(F, 'surv', TGT, B);
         if ismember(i, ifo), BL.surv_f(i, s) = surv_layer(F, 'surv_f', TGT, B); end
         if ismember(i, ij), BL.surv_c(i, s) = surv_layer(F, 'surv_c', TGT, B); end
@@ -491,7 +498,7 @@ end
 c1 = find(strcmp({CR.kind}, 'static') & [CR.d] == 1, 1); X1 = CR(c1).X;   % the deployed delay
 cst = find(strcmp({CR.kind}, 'static'));              % static commitment at every delay
 % The relative layers at the deployed delay, every policy's REC beside them
-PT = struct('det', BL.det, 'deth', BL.deth, 'detu', BL.detu, 'surv', BL.surv, 'rec', X1.rec, 'prot', X1.prot, ...
+PT = struct('det', BL.det, 'deth', BL.deth, 'detu', BL.detu, 'detb', BL.detb, 'surv', BL.surv, 'rec', X1.rec, 'prot', X1.prot, ...
     'linkt', X1.linkt, ...
     'sys', zeros(nT, nS), 'lim', {repmat({''}, nT, nS)}, 'sysl', zeros(nT, nS), 'rec_pol', nan(nT, nS, nP), ...
     'rec4_pol', nan(nT, nS, nP));
@@ -528,7 +535,7 @@ if vu > 0
         end
     end
 end
-VD = struct('det', vt(PT.det), 'deth', vt(PT.deth), 'detu', vt(PT.detu), 'surv', vt(PT.surv), 'rec', vt(PT.rec), ...
+VD = struct('det', vt(PT.det), 'deth', vt(PT.deth), 'detu', vt(PT.detu), 'detb', vt(PT.detb), 'surv', vt(PT.surv), 'rec', vt(PT.rec), ...
     'prot', vt(PT.prot), ...
     'linkt', vt(PT.linkt), 'sys', PT.sys, 'sysl', PT.sysl);
 FR = arrayfun(@(s) false_change_rate(CF.sw_k(CF.s == s, var_of(VAR, 'clean', NaN, DLY(1), 1)), T, CF.geo(CF.s == s), ...
@@ -592,11 +599,10 @@ if isfile('data/check_pools.mat')
                 KF.link_n = KF.link_n + accumarray(i, 1, [nKF 1]);
                 continue
             end
-            k = fused_class(P.probs, struct('run', P.run, 'pos', run_pos(P.run), 'gain_ant', P.gant, 'feats_raw', P.feat), ...
-                CK.fuse, CK.fuse_N);
-            on = threat_active(CK.scen{c}, P.act);
-            ok_c = ismember(acts, rule_based_policy(CK.scen{c}));
-            KF.det_k = KF.det_k + accumarray(i, double(reshape(ok_c(k), [], 1) & on), [nKF 1]);
+            ok_c = det_classes(CK.classes, acts, CK.scen{c});
+            Pc = []; if size(CK.pools, 2) >= s, Pc = CK.pools{k0, s, Kc.na, 1}; end
+            [hit, on] = det_frames(P, Pc, CK.scen{c}, ok_c, CK);
+            KF.det_k = KF.det_k + accumarray(i, double(hit(:, 1) & on), [nKF 1]);
             KF.det_n = KF.det_n + accumarray(i, double(on), [nKF 1]);
         end
     end
@@ -884,6 +890,14 @@ for i = 1:nT
     rep{end+1} = sprintf('%s %s', rowl{i}, strjoin(arrayfun(@(s) cell_txt(PT.detu(i, s), '%5.1f'), 1:nS, ...
         'UniformOutput', false), ' ')); %#ok<SAGROW>
 end
+rep{end+1} = '';
+rep{end+1} = ['--- DET_b: DET at the branch level (an antenna fault and airframe shadowing as one branch lost, ' ...
+    'branch_level.m), beside DET; no target, % [95% interval] flights verdict against the DET target ---'];
+rep{end+1} = sprintf('%-49s %s', '', sprintf('%-29s', hdr_e{:}));
+for i = 1:nT
+    rep{end+1} = sprintf('%s %s', rowl{i}, strjoin(arrayfun(@(s) cell_txt(PT.detb(i, s), '%5.1f'), 1:nS, ...
+        'UniformOutput', false), ' ')); %#ok<SAGROW>
+end
 for f = 7:8
     rep{end+1} = ''; %#ok<SAGROW>
     rep{end+1} = sprintf(['--- %s: verdict (not COMMITTED: D DET, S SURV, R REC, L LINK, F the false-alarm bound ' ...
@@ -1033,6 +1047,8 @@ for f = 1:numel(LAY)
 end
 sm{end+1} = sprintf('  %-16s %s | %s   (unharmed flights, beside DET_h; no target)', 'DET_u', cnt3(VD.detu, isg), ...
     cnt3(VD.detu, ~isg));
+sm{end+1} = sprintf('  %-16s %s | %s   (branch level: fault and shadowing as one branch lost, beside DET; no target)', ...
+    'DET_b', cnt3(VD.detb, isg), cnt3(VD.detb, ~isg));
 for d = 1:nD
     x = CR(cst(d)).X;
     sm{end+1} = sprintf(['  %-16s %s | %s; inside a walk region %d, outside every walk (reported, not committed) %d; ' ...
@@ -1225,7 +1241,7 @@ EDGE_NUM = struct('ebno', PP.ebno, 'km', km, 'ebno_thr', ebno_thr, 'deployed', N
     'predicted_vs_committed', AGR, 'bands_skipped', {skipped}, ...
     'det_split', struct('harmed', [cnt_of(VD.deth, isg); cnt_of(VD.deth, ~isg)], ...
     'unharmed', [cnt_of(VD.detu, isg); cnt_of(VD.detu, ~isg)], 'n_harmed', reshape([PT.deth.n], nT, nS), ...
-    'n_unharmed', reshape([PT.detu.n], nT, nS)));
+    'n_unharmed', reshape([PT.detu.n], nT, nS), 'branch', [cnt_of(VD.detb, isg); cnt_of(VD.detb, ~isg)]));
 save('results/edge_map.mat', 'EM', 'EDGE_NUM', 'FT', 'CF', 'CS', 'VAR');
 fprintf('Saved results/edge_map.{txt,mat}, results/edge_summary.txt, results/edge_bands.png, ');
 fprintf('results/edge_heatmap_{%s}.png (%.1f min)\n', strjoin(FIG, ','), toc(t0) / 60);
@@ -1415,6 +1431,58 @@ function i = flight_of(IDX, c, s, sp, run, runs)
 % Flight row of every frame of a pool.
 [~, r] = ismember(run, runs);
 i = IDX(sub2ind(size(IDX), c + 0 * r, s + 0 * r, sp + 0 * r, r));
+end
+
+function ok = det_classes(classes, acts, scen)
+% Classes DET counts for a threat (row 1) and at the branch level (row 2): the classes
+% whose countermeasure (acts, rule_based_policy.m) one of the threat's components calls
+% for; in row 1 an antenna fault and airframe shadowing count only as themselves.
+classes = reshape(cellstr(string(classes)), 1, []); acts = reshape(acts, 1, []);
+comps = strsplit(scen, '+');
+okb = ismember(acts, cellfun(@(x) rule_based_policy(x), comps, 'UniformOutput', false));
+br = ismember(classes, {'antenna_fault', 'airframe_shadowing'});
+ok = [okb & (~br | ismember(classes, comps)); okb];
+end
+
+function [hit, on] = det_frames(P, Pc, scen, ok_c, PP)
+% DET of every frame of a pool at no_action: hit (frames x rows of ok_c, det_classes.m),
+% the fused class is one ok_c counts for the threat; on, the threat is on the air
+% (threat_active.m). A path-loss cell starts with its full loss, so every flight is read
+% after the same flight's clean link (Pc, the onset between them): the fused class over
+% the joined frames, or the monitor's drop alarm, the Eb/N0 estimate's 3-cycle median
+% that many dB below the median of the last 10 clean cycles (policy_monitor.m).
+on = reshape(threat_active(scen, P.act), [], 1);
+if ~strcmp(scen, 'path_loss') || isempty(Pc) || isempty(Pc.ber)
+    k = fused_class(P.probs, struct('run', P.run, 'pos', run_pos(P.run), 'gain_ant', P.gant, 'feats_raw', P.feat), ...
+        PP.fuse, PP.fuse_N);
+    hit = ok_c(:, k(:))';
+    return
+end
+C = decision_config();
+dd = C.drop_db; if isfield(PP, 'drop_db') && ~isempty(PP.drop_db), dd = PP.drop_db; end
+use_drop = isfield(PP, 'alarm_mode') && strcmp(PP.alarm_mode, 'class_drop');
+eb = @(F) double(F(:, feature_index('sinr')) + F(:, feature_index('iot'))) + 10*log10(PP.sps) - 10*log10(PP.bps);
+hit = false(numel(P.run), size(ok_c, 1));
+[ur, ~, ir] = unique(P.run, 'stable');
+J = struct('probs', [], 'gant', [], 'feat', [], 'run', [], 'part', []);
+for r = 1:numel(ur)
+    ic = find(Pc.run == ur(r)); ip = find(ir == r);
+    J.probs = [J.probs; Pc.probs(ic, :); P.probs(ip, :)]; J.gant = [J.gant; Pc.gant(ic, :); P.gant(ip, :)];
+    J.feat = [J.feat; Pc.feat(ic, :); P.feat(ip, :)]; J.run = [J.run; repmat(ur(r), numel(ic) + numel(ip), 1)];
+    J.part = [J.part; zeros(numel(ic), 1); ip(:)];
+end
+k = fused_class(J.probs, struct('run', J.run, 'pos', run_pos(J.run), 'gain_ant', J.gant, 'feats_raw', J.feat), ...
+    PP.fuse, PP.fuse_N);
+e = eb(J.feat);
+for r = 1:numel(ur)
+    j = find(J.run == ur(r)); jc = j(J.part(j) == 0); jp = j(J.part(j) > 0);
+    hit(J.part(jp), :) = ok_c(:, k(jp))';
+    if ~use_drop || isempty(jc), continue; end
+    ref = median(e(jc(max(1, end - 9):end)));
+    for q = jp(:)'
+        hit(J.part(q), :) = hit(J.part(q), :) | ref - median(e(max(j(1), q - 2):q)) >= dd;
+    end
+end
 end
 
 function pos = run_pos(run)

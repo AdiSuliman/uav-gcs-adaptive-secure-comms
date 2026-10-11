@@ -26,4 +26,7 @@ p.v_kmh = v_kmh; p.v = v_kmh/3.6; p.fd_max = fd_hz;
 p.quiet_build = true;                      % build the Simulink model without opening its window
 p.gcs_aoa_random = false;                  % the GCS at broadside, as the 3D view draws it
 p.jam_timing_random = false;               % the sweeper on our channel in every frame of the run
+if contains(threat, 'airframe_shadowing')  % a turn that lets the airframe hide an antenna (shadow_hidden.m)
+    p.yaw_random = false; p.roll_deg = p0.shadow_view_roll_deg;
+end
 end

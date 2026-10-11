@@ -1,7 +1,7 @@
 %% EXPORT_REPORT_NUMBERS - Result numbers of the final reading in one JSON file
 % Collects the numbers the written reports quote (KPI summary, detector
 % metrics and main confusions with the readings beside KPI 1 (steady state, onset
-% latency: metrics.steady, metrics.onset, KP.onset), unknown-threat scores, policy evaluation,
+% latency, branch level: metrics.steady, metrics.onset, metrics.branch, KP.onset), unknown-threat scores, policy evaluation,
 % latency, unseen Eb/N0, unseen combined threats, the edge map's verdicts, the commitment
 % at every signalling delay and its edges)
 % so no number is copied by hand. Large arrays are left out. Run from the repository
