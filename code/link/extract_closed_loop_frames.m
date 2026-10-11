@@ -101,7 +101,18 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %     erase     1 when the frame is unreliable for a decoder: pilot_err above
 %               p.erase_pilot_mse (its bits are erasures for fec_packets.m)
 %   Ground truth: act, share of the frame with the threat on the air (packet traffic
-%   of benign interference, the sweeping jammer on our channel), analysis and labels only.
+%   of benign interference, the sweeping jammer on our channel; for a combination the
+%   union over its components, build_threat_model.m output 2), analysis and labels only;
+%   act_comp (3 x frames), the share of each component in the threat's order, and lev_db
+%   (3 x frames), the level an additive component reaches over our signal on the weakest
+%   antenna in the frame [dB] (output 3; NaN beyond the threat's components).
+%   Level calibration: cal_db, each antenna's calibration error [dB] (the model's 'Cal'
+%   block, flight_draws.m). The receiver reports its absolute levels with it: the received
+%   samples behind rssi, iot, q_iot, duty, edges and the detector image (iq) and the channel
+%   gains behind gain_ant and branch_gap are those of each antenna scaled by its error;
+%   ratios within a chain (sinr, env_corr, q_react, coh, q_sfm, q_par, est_margin,
+%   branch_dip) do not change, and the combiner and its predictions (mmse_gain, align)
+%   work on the samples as they are.
 % With p.fec (fec_interleave) ber, fer and crc_fail are those of the decoded packet,
 % 1000 + 32 bits over p.fec_frames frames, decoded from the combiner output's soft values
 % with the erased frames' bits as erasures, one packet per frame pair: ber and fer on both
@@ -120,6 +131,15 @@ syr = out.get('Rx_S');
 if ismatrix(iqa), iqa = reshape(iqa, size(iqa, 1), 1, []); end
 if isvector(zc), zc = zc(:); end
 [ns, na, nf] = size(iqa);
+cal_db = zeros(1, na);
+try
+    c = out.get('Cal_db');
+    if ndims(c) == 3, c = permute(c, [3 2 1]); end      % 1 x antennas x samples: a row per sample
+    if ~isempty(c), cal_db = reshape(c(1, 1:na), 1, na); end
+catch
+end
+gcal = reshape(10.^(cal_db / 20), 1, na);
+iqa = iqa .* gcal;                                       % the levels as the receiver reports them
 if numel(syr) ~= 8 * nf
     error('extract_closed_loop_frames: receiver output 6 holds %d values for %d frames, not 8 per frame (a model built before its eighth row: rebuild it)', numel(syr), nf);
 end
@@ -159,8 +179,9 @@ end
 [F.ber_est, F.snr_post] = symbol_metrics(zc, p);
 [F.mmse_gain, F.align] = spatial_metrics(Hq, Rq, nf);
 F.branch_dip = branch_dip(Hq, nf);
-F.branch_gap = branch_gap(Hq, nf);
-F.gain_ant = gain_ant(Hq, nf);
+F.branch_gap = branch_gap(Hq .* gcal(:), nf);
+F.gain_ant = gain_ant(Hq .* gcal(:), nf);
+F.cal_db = cal_db;
 F.est_margin = est_margin(Hq, Rq, nf);
 xh = remod_frames(rx_all(delay_bits+1:end), p, ns, nf, sy(1, 1:nf) + sy(5, 1:nf), sy(2, 1:nf));
 qn = NQ * p.sps;                                         % quiet slot before the frame: free of our pulse tails
@@ -189,6 +210,14 @@ F.act = ones(1, nf);
 try
     a = squeeze(out.get('Thr_act')); F.act = reshape(a(1:min(nf, numel(a))), 1, []);
     if numel(F.act) < nf, F.act(end+1:nf) = F.act(end); end
+catch
+end
+F.act_comp = [F.act; nan(2, nf)]; F.lev_db = nan(3, nf);
+try
+    c = out.get('Thr_comp');
+    if ndims(c) == 3, c = reshape(c, 6, []); else, c = reshape(c, [], 6).'; end
+    c = c(:, [1:min(nf, size(c, 2)), size(c, 2) * ones(1, nf - size(c, 2))]);
+    F.act_comp = c(1:3, :); F.lev_db = c(4:6, :);
 catch
 end
 F.q_iot = 10*log10(mean(pq, 1) / nv);

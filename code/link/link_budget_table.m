@@ -4,9 +4,9 @@
 % into distances with the free-space (Friis) loss at 2.4 GHz (link_distance_km.m) for three
 % stated hardware profiles; the simulated results hold for every profile, only the
 % distance attached to each Eb/N0 changes. Profile A keeps the licence-exempt cap at
-% 2.4 GHz: 100 mW e.i.r.p. in Israel (Ministry of Communications), as ETSI EN 300 328,
-% which also caps 10 mW in any 1 MHz (10.2 dBm for our RRC signal, 95.5% of it in its
-% central 1 MHz, eirp_cap_dbm.m). It is the GCS of init_params.m: a -6 dBm AD9361-class
+% 2.4 GHz of ETSI EN 300 328: 100 mW e.i.r.p. (4.3.2.2.3) and 10 mW in any 1 MHz
+% (4.3.2.3.3; 10.2 dBm for our RRC signal, 95.5% of it in its central 1 MHz,
+% eirp_cap_dbm.m). It is the GCS of init_params.m: a -6 dBm AD9361-class
 % radio on the tracked 12 dBi antenna (6 dBm e.i.r.p., 10.0 dBm with the power step of
 % +4.0 dB), and the same radio on its omni fallback; profile A tracked is
 % the distance axis of the results. Profile B is a data link in licensed spectrum;
@@ -97,7 +97,8 @@ end
 rep{end+1} = '';
 pl = C.sev.path_loss.levels;
 rep{end+1} = sprintf(['Path loss %s dB = the signal of a UAV %s times farther, or an obstruction of that loss ' ...
-    '(the %g dB top level: a near-ground, below-roofline blockage, Cui et al.).'], ...
+    '(the %g dB top level: a knife edge v = 2.8 into the line of sight, below the 33-42 dB a building ' ...
+    'costs a 2 GHz low-elevation UAV link, Simunek et al. 2011, Figs. 6 and 11).'], ...
     strjoin(arrayfun(@(x) sprintf('%g', x), pl, 'UniformOutput', false), ' / '), ...
     strjoin(arrayfun(@(x) sprintf('%.1f', 10^(x/20)), pl, 'UniformOutput', false), ' / '), pl(end));
 sp = C.sev.spoofing.levels;

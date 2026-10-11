@@ -783,6 +783,7 @@ TH = {'none', 'tone_jamming', 'spoofing', 'benign_interference', 'noise_burst'};
 F = struct();
 for t = 1:numel(TH)
     p = p0; p.quiet_build = true; p.active_threat = TH{t}; p.seed = 11; p.benign_int_db = 12; p.spoof_sir_db = 16;
+    p.cal_random = false;                       % the measurements against an exact floor (calibration: test_level_calibration)
     evalc('build_threat_model(p)');
     set_link_snr(mdl, 12 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
     link_seed(mdl, 11, 160);
@@ -834,7 +835,7 @@ function test_seed_streams_disjoint(tc)
 % are distinct and below 64, and the flight seeds of every family are distinct and
 % below 2^26.
 P = {'channel', 'awgn', 'bits', 'threat', 'aoa', 'ds', 'k', 'yaw', 'corr', 'gcsaoa', 'gcs', 'jam', 'alt', 'speed', ...
-    'body', 'wobble'};
+    'body', 'wobble', 'cal'};
 off = zeros(1, numel(P));
 for i = 1:numel(P)
     [~, n] = seed_stream(12345, P{i});
@@ -892,12 +893,13 @@ W = [(W(:, 1) - p.wobble_roll_deg(1)) / diff(p.wobble_roll_deg), (W(:, 2) - p.wo
     (W(:, 3) ./ am + 1) / 2, (W(:, 4) - p.wobble_freq_hz(1)) / diff(p.wobble_freq_hz), W(:, 5) / (2*pi)];
 bm = p.body_loss_db; cn = @(x) 0.5 * erfc(-(x - bm(1)) / (bm(2) * sqrt(2)));
 B = (cn(cell2mat(arrayfun(@(x) body_loss(x, 3, bm), S, 'UniformOutput', false))) - cn(bm(3))) / (cn(bm(4)) - cn(bm(3)));
-J = cell2mat(arrayfun(@(x) jam_timing(x, [0 1]), S, 'UniformOutput', false));
+J = cell2mat(arrayfun(@(x) jam_timing(x, [0 1], [0 1]), S, 'UniformOutput', false));
 J(:, 2) = J(:, 2) ./ J(:, 1);
+Kc = cell2mat(arrayfun(@(x) rand(seed_stream(x, 'cal'), 1, 3), S, 'UniformOutput', false));
 q = p; q.tdl_clip_ns = Inf;                             % no altitude: every channel on the omni fit
 Z = cell2mat(arrayfun(@(x) delay_spread(x, NaN, 3, q), S, 'UniformOutput', false));
 Z = 0.5 * erfc(-(log10(Z * 1e-9) - q.tdl_int_ds(1)) / sqrt(2 * q.tdl_int_ds(2)));
-U = [K, A, (w + 1) / 2, rho, v, G, W, J, Z, B];         % the uniform behind every draw
+U = [K, A, (w + 1) / 2, rho, v, G, W, J, Z, B, Kc];     % the uniform behind every draw
 c = corrcoef(K(:, 1), w);
 verifyLessThan(tc, abs(c(1, 2)), 0.1);
 C = corrcoef(U);
@@ -972,6 +974,7 @@ function test_receiver_measurements(tc)
 p = base_params(); p.quiet_build = true; p.active_threat = 'none'; p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false; p.gcs_tracked = false; p.seed = 11;
 p.k_random = false; p.gcs_aoa_random = false; p.body_random = false;
 p.tdl = false;                                       % the measurements on the flat channel (the delay line: test_delay_line)
+p.cal_random = false;                                % against an exact floor (calibration: test_level_calibration)
 mdl = 'UAV_GCS_Threat_Link';
 evalc('build_threat_model(p)');
 snr = 12 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
@@ -1185,7 +1188,8 @@ verifyEqual(tc, s(L + PL - G <= 30), ones(nnz(L + PL - G <= 30), 1), 'AbsTol', 1
 q = base_params();
 D = arrayfun(@(x) flight_draws(x, 100, q, struct('ebno', 15, 'alt_m', 120)), 1:2000);
 ga = 20*log10(vertcat(D.gcs_amp) .* vertcat(D.body_amp));             % our signal on each antenna [dB]
-sb = min(1, inband_cap_amp(30, 22, 30) * vertcat(D.gcs_amp) .* min(vertcat(D.body_amp), [], 2));
+sb = min(1, inband_cap_amp(30, 22, 30) * vertcat(D.cap_amp));
+verifyLessThanOrEqual(tc, vertcat(D.cap_amp), vertcat(D.gcs_amp) .* min(vertcat(D.body_amp), [], 2) * (1 + 1e-9));   % its worst frame, the first one included
 verifyLessThanOrEqual(tc, max(30 + 22 + 20*log10(sb) - ga, [], 'all'), 30 + 1e-9);
 verifyGreaterThan(tc, max(max(ga, [], 2) - min(ga, [], 2)), 3);      % the antennas differ
 p = base_params(); p.jsr_db = 23; p.path_loss_db = 18;
@@ -1201,7 +1205,7 @@ for k = 1:2
     if k == 2, p.inband_cap_db = Inf; end
     evalc('build_threat_model(p)');
     if k == 1   % the threat block caps on the weakest antenna
-        verifyTrue(tc, contains(sfroot().find('-isa', 'Stateflow.EMChart', 'Path', [mdl '/Threat']).Script, '* gcs * min(bdy))'));
+        verifyTrue(tc, contains(sfroot().find('-isa', 'Stateflow.EMChart', 'Path', [mdl '/Threat']).Script, '* cap);'));
     end
     set_link_snr(mdl, 12 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
     link_seed(mdl, 11, 160);
@@ -1635,25 +1639,31 @@ verifyEqual(tc, tdl_profile(300, 10, 1, 250), 1);
 end
 
 function test_delay_spread(tc)
-% Per-flight RMS delay spreads, log-normal as Rodriguez-Pineiro et al.'s fits: our signal
-% below 25 m on the directional OLoS fit (median 302 ns, sigma 0.566 decades), above it
-% and without an altitude on the omni fit (234 ns, 0.4), every interferer on the omni fit,
-% all clipped at 1 us. flight_draws turns them into the delay line's profiles at the
-% flight's K, and gives a flat channel without the line.
+% Per-flight RMS delay spreads, log-normal as Rodriguez-Pineiro et al.'s fits (Table VII,
+% environment II, the larger of the omni and directional fits per height band): our
+% signal below 25 m on the directional OLoS fit (median 302 ns, sigma 0.566 decades),
+% 25-75 m and without an altitude on the omni fit (234 ns, 0.4), from 75 m on the
+% directional fit (372 ns, 0.51); every interferer on the omni fit; all clipped at half the
+% measured profile's 4.5 us range (2.25 us). flight_draws turns them into the delay line's
+% profiles at the flight's K, and gives a flat channel without the line.
 p = base_params(); p.tdl = true; p.tdl_random = true;
+verifyEqual(tc, p.tdl_clip_ns, p.tdl_max_ns / 2);
 n = 4000;
 lo = cell2mat(arrayfun(@(s) delay_spread(s, 20, 3, p), (1:n)', 'UniformOutput', false));
 hi = cell2mat(arrayfun(@(s) delay_spread(s, 60, 3, p), (1:n)', 'UniformOutput', false));
+up = cell2mat(arrayfun(@(s) delay_spread(s, 80, 3, p), (1:n)', 'UniformOutput', false));
 verifyEqual(tc, hi, cell2mat(arrayfun(@(s) delay_spread(s, NaN, 3, p), (1:n)', 'UniformOutput', false)));
-verifyEqual(tc, lo(:, 2:end), hi(:, 2:end));
+verifyEqual(tc, up, cell2mat(arrayfun(@(s) delay_spread(s, 75, 3, p), (1:n)', 'UniformOutput', false)));
+verifyEqual(tc, lo(:, 2:end), hi(:, 2:end)); verifyEqual(tc, up(:, 2:end), hi(:, 2:end));
 q = @(x, f) log10(sort(x(:)) * 1e-9);
-for c = {lo(:, 1), -6.52, 0.32; hi(:, 1), -6.63, 0.16; hi(:, 2:end), -6.63, 0.16}'
+for c = {lo(:, 1), -6.52, 0.32; hi(:, 1), -6.63, 0.16; up(:, 1), -6.43, 0.26; hi(:, 2:end), -6.63, 0.16}'
     v = q(c{1}); m = numel(v);
     verifyEqual(tc, v(round(m / 2)), c{2}, 'AbsTol', 0.03);
     verifyEqual(tc, (v(round(0.75 * m)) - v(round(0.25 * m))) / (2 * 0.6745), sqrt(c{3}), 'RelTol', 0.08);
 end
-verifyLessThanOrEqual(tc, max([lo(:); hi(:)]), p.tdl_clip_ns);
-verifyEqual(tc, mean(lo(:, 1) == p.tdl_clip_ns), 0.5 * erfc((-6 + 6.52) / sqrt(2 * 0.32)), 'AbsTol', 0.02);
+verifyLessThanOrEqual(tc, max([lo(:); hi(:); up(:)]), p.tdl_clip_ns);
+verifyEqual(tc, mean(up(:, 1) == p.tdl_clip_ns), 0.5 * erfc((log10(p.tdl_clip_ns * 1e-9) + 6.43) / sqrt(2 * 0.26)), 'AbsTol', 0.01);
+verifyEqual(tc, mean(up(:, 1) > 1000), 0.5 * erfc((-6 + 6.43) / sqrt(2 * 0.26)), 'AbsTol', 0.02);   % about a fifth above 1 us
 d = flight_draws(5, 100, p, struct('ebno', 9, 'alt_m', 20, 'k_sig_db', 2));
 ds = delay_spread(5, 20, numel(p.int_aoa_deg), p);
 verifyEqual(tc, size(d.tdl), [19, 1 + numel(p.int_aoa_deg)]);
@@ -1742,9 +1752,11 @@ verifyEqual(tc, rx_taps(rmfield(p, 'tdl')), t);
 p.tdl = true;
 t = rx_taps(p);
 verifyEqual(tc, [t.lags t.ne t.nt t.window t.mh t.ns t.nn], [2 5 11 9 64 4 5 9]);
-q = p; q.tdl_max_ns = 2000; q.tdl_clip_ns = 500;
+q = p; q.tdl_max_ns = 2000; q.rx_span_ns = 500;
 t = rx_taps(q);
 verifyEqual(tc, [t.lags t.ne t.nt t.window t.mh], [2 2 5 5 32 3]);
+q = p; q.tdl_clip_ns = 2250;                            % the channel's clip does not move the receiver
+verifyEqual(tc, rx_taps(q).nt, 9);
 p.quiet_build = true; p.rx_sync = 'real';
 mdl = 'UAV_GCS_Threat_Link';
 C = {false, 'mrc', 'NT = 1;', 'MH = 0;'; false, 'mmse', 'NT = 1;', 'MH = 0;'; ...
@@ -1907,18 +1919,20 @@ function test_jam_timing(tc)
 % each sweep; with frequency diversity on a carrier 25 MHz away never on both at once, on
 % one 2 MHz away from 2 ms on.
 p = base_params();
-W = cell2mat(arrayfun(@(s) jam_timing(s, p.sweep_period_s), (1:4000)', 'UniformOutput', false));
+W = cell2mat(arrayfun(@(s) jam_timing(s, p.sweep_period_s, p.burst_duty_range), (1:4000)', 'UniformOutput', false));
 verifyTrue(tc, all(W(:, 1) >= 20e-3 & W(:, 1) <= 83.5e-3));
 verifyTrue(tc, all(W(:, 2) >= 0 & W(:, 2) < W(:, 1) & W(:, 3) >= 0 & W(:, 3) < 1));
+verifyTrue(tc, all(W(:, 4) >= 0.2 & W(:, 4) <= 0.775));    % Marti et al.'s 20% to Xu et al.'s 77.5%
 verifyEqual(tc, mean(W(:, 1)), mean(p.sweep_period_s), 'AbsTol', 1e-3);
-u = rand(seed_stream(17, 'jam'), 1, 3);
+u = rand(seed_stream(17, 'jam'), 1, 4);
 T = 20e-3 + 63.5e-3 * u(1);
-verifyEqual(tc, jam_timing(17, p.sweep_period_s), [T, T * u(2), u(3)], 'AbsTol', 1e-15);
+w = [T, T * u(2), u(3), 0.2 + 0.575 * u(4)];
+verifyEqual(tc, jam_timing(17, p.sweep_period_s, p.burst_duty_range), w, 'AbsTol', 1e-15);
 d = flight_draws(17, 100, p);
-verifyEqual(tc, d.jam, [T, T * u(2), u(3)], 'AbsTol', 1e-15);
+verifyEqual(tc, d.jam, w, 'AbsTol', 1e-15);
 p.jam_timing_random = false;
 d = flight_draws(17, 100, p);
-verifyEqual(tc, d.jam, [20e-3 0 0]);
+verifyEqual(tc, d.jam, [20e-3 0 0 0.5]);
 verifyEqual(tc, sweep_window_s(p), [0 5.25e-3], 'AbsTol', 1e-15);
 p.sweep_fdiv = true;
 g = sweep_window_s(p);
@@ -1977,12 +1991,12 @@ function test_gated_jammers(tc)
 % of the 'Gate' block, so a frame is hit whole, in part or not at all, and its on-air
 % share is the share of the window; the frames outside are clean. With frequency
 % diversity (25 MHz) it never hits, and with FEC every frame of a run with the pools'
-% stop time (pool_cell.m) carries a whole packet. The noise bursts start at the flight's
-% phase.
+% stop time (pool_cell.m) carries a whole packet. The noise bursts start on when the
+% flight's draw gate(3) is below its duty gate(4), off otherwise (six flights each).
 p = base_params(); p.quiet_build = true; p.active_threat = 'sweeping_jammer'; p.jsr_db = 16; p.seed = 11;
 p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false; p.gcs_tracked = false; p.k_random = false;
 p.gcs_aoa_random = false; p.body_random = false; p.wobble_random = false; p.jam_timing_random = false;
-mdl = 'UAV_GCS_Threat_Link'; nfr = 8; gate = [25e-3 0.2e-3 0];
+mdl = 'UAV_GCS_Threat_Link'; nfr = 8; gate = [25e-3 0.2e-3 0 0.5];
 fs = p.symbol_rate * p.sps; ns = p.air_symbols * p.sps;
 t = (0:ns-1)' / fs + (0:nfr-1) * round(p.cycle_s * fs) / fs;
 for fdiv = [false true]
@@ -2011,14 +2025,19 @@ p.active_threat = 'noise_burst';
 evalc('build_threat_model(p)');
 set_link_snr(mdl, 30 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
 link_seed(mdl, 11, 160);
-pw = zeros(1, 2);
-for k = 1:2
-    set_param([mdl '/Gate'], 'Value', mat2str([20e-3 0 0.5 * (k - 1)]));
-    out = sim(mdl, 'StopTime', num2str(2 * p.frame_duration));
-    Y = out.get('Rx_IQ');
-    pw(k) = mean(abs(Y(1:100, 1, 1)).^2);       % the first frame's quiet slot: bursts from sample 0 at phase 0, from 200 at 0.5
+pw = zeros(6, 2);
+for s = 1:6
+    for k = 1:2
+        link_seed(mdl, 10 + s, 160);
+        set_param([mdl '/Gate'], 'Value', mat2str([20e-3 0 0.9 * (k - 1) 0.5]));
+        out = sim(mdl, 'StopTime', num2str(2 * p.frame_duration));
+        Y = out.get('Rx_IQ');
+        pw(s, k) = mean(abs(Y(1, :, 1)).^2);    % the first sample: a burst on (0 < 0.5) or a sleep (0.9 >= 0.5)
+    end
 end
-verifyGreaterThan(tc, 10*log10(pw(1) / pw(2)), 10);
+ps = thermal_nv(p) * 10^(30 / 10) * p.bits_per_symbol / p.sps;   % our signal's power per sample at 30 dB
+verifyGreaterThan(tc, min(pw(:, 1)), ps);                        % the burst: 16 dB over our signal in band
+verifyLessThan(tc, mean(pw(:, 2)), 3 * thermal_nv(p));           % the sleep: the quiet slot's noise
 close_system(mdl, 0);
 end
 
@@ -2313,6 +2332,7 @@ function test_fixed_noise_floor(tc)
 % interferer keeps its level over our signal (its slot power rises with it).
 p = base_params(); p.quiet_build = true; p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false;
 p.gcs_tracked = false; p.k_random = false; p.gcs_aoa_random = false; p.body_random = false; p.tdl = false;
+p.cal_random = false;                                   % the floor exact (calibration: test_level_calibration)
 mdl = 'UAV_GCS_Threat_Link';
 qn = p.quiet_symbols * p.sps;
 for thr = {'none', 'jamming'}
@@ -2387,6 +2407,7 @@ function test_path_loss_onset(tc)
 % lies in the window.
 p = base_params(); p.quiet_build = true; p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false;
 p.gcs_tracked = false; p.k_random = false; p.gcs_aoa_random = false; p.body_random = false; p.tdl = false;
+p.cal_random = false;
 p.active_threat = 'path_loss'; p.path_loss_db = 14; p.pl_onset_frames = [5 5];
 mdl = 'UAV_GCS_Threat_Link';
 evalc('build_threat_model(p)');
@@ -2394,6 +2415,8 @@ set_link_snr(mdl, 15 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
 link_seed(mdl, 41, 160);
 F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(9 * p.frame_duration)), p, 20);
 verifyEqual(tc, F.act(1:F.nf), double((1:F.nf) >= 5));
+verifyEqual(tc, F.act_comp(1, :), F.act);
+verifyEqual(tc, received_ebno(p.active_threat, 15, F.act_comp, p.path_loss_db), 15 - 14 * ((1:F.nf) >= 5));   % the received Eb/N0
 pw = @(e) 10*log10(10^(e / 10) / p.sps + thermal_nv(p));                     % our signal + noise per sample
 verifyEqual(tc, median(F.rssi(1:4)) - median(F.rssi(6:F.nf)), pw(15) - pw(1), 'AbsTol', 1.5);
 verifyLessThan(tc, abs(median(F.q_iot)), 1);                       % the floor stays: no interference
@@ -2409,8 +2432,9 @@ end
 verifyTrue(tc, all(on >= 2 & on <= 11));
 verifyGreaterThan(tc, numel(unique(on)), 1);
 close_system(mdl, 0);
-% labels: from the onset while it lies in the link-feature window
-verifyEqual(tc, threat_active('path_loss', [0 0 1 1 1 1 1], 1:7, 3), logical([0 0 1 1 1 0 0]));
+% labels: from the onset while the link-feature window still holds a frame before it
+verifyEqual(tc, threat_active('path_loss', [0 0 1 1 1 1 1], 1:7, 3), logical([0 0 1 1 0 0 0]));
+verifyEqual(tc, threat_active('path_loss', [0 1 1 1 1 1 1 1 1 1 1 1], 1:12, 10), logical([0 1 1 1 1 1 1 1 1 1 0 0]));
 verifyEqual(tc, threat_active('path_loss', [1 1 1]), true(1, 3));     % without positions: every attenuated frame
 % fused targets: a clean frame whose fusion window holds the onset reads path_loss
 cls = {'none', 'path_loss', 'benign_interference'};
@@ -2421,30 +2445,64 @@ verifyEqual(tc, fusion_target(y, ones(1, 7), 1:7, 1, cls)', y);
 end
 
 function test_shadow_attitude(tc)
-% Airframe shadowing needs a roll above 5 deg and the GCS more than 30 deg off the heading
-% (Sun et al.); it hides the end of the array farther from the GCS.
-verifyEqual(tc, shadow_hidden(0, 2, 3, 0, 3, 5, 30), 0);       % level enough: none
-verifyEqual(tc, shadow_hidden(0, 2, 20, 0, 3, 5, 30), 3);      % abeam in a turn: the aft end
-verifyEqual(tc, shadow_hidden(40, 2, -20, 0, 3, 5, 30), 3);    % ahead of the beam: the aft end
-verifyEqual(tc, shadow_hidden(-40, 2, 20, 0, 3, 5, 30), 1);    % behind it: the front end
-verifyEqual(tc, shadow_hidden(70, 2, 20, 0, 3, 5, 30), 0);     % 20 deg off the nose: none
-verifyEqual(tc, shadow_hidden(95, 2, 20, 0, 3, 5, 30), 0);     % the heading turned past the GCS
-verifyEqual(tc, shadow_hidden(-90, 2, 20, 0, 4, 5, 30), 1);    % behind the tail
-% the dataset's share of flights with an antenna hidden, and the fixed views' turn
+% Airframe shadowing needs the airframe in the line of sight: the GCS above the belly's
+% horizon in the body frame (banking toward it by more than its elevation), more than 30 deg
+% off the heading (Sun et al., Sec. III), at a roll the level is measured at (Sun et al.,
+% Table II, C-band fit: within 1.96 sigma of the level), never while hovering; it hides the
+% end of the array farther from the GCS.
 p = base_params();
-h = shadow_hit_share(p, 600);
-verifyGreaterThan(tc, h, 0.4); verifyLessThan(tc, h, 0.95);
-p.yaw_random = false; p.roll_deg = p.shadow_view_roll_deg;
-d = flight_draws(7, 100, p);
-verifyEqual(tc, d.roll, p.shadow_view_roll_deg);
-verifyGreaterThan(tc, shadow_hidden(0, d.el_deg, d.roll, d.pitch, p.n_rx, p.shadow_roll_deg, p.shadow_hdg_deg), 0);
-% the fixed bank flies its coordinated turn, g tan(bank) / v; at hover a tilt, no turn
-v = max(100 * p.c_light / p.carrier_freq, p.turn_v_floor);
-verifyEqual(tc, d.yaw, rad2deg(9.81 * tand(p.shadow_view_roll_deg) / v), 'RelTol', 1e-9);
-verifyEqual(tc, bank_angle(d.yaw, 100, p), p.shadow_view_roll_deg, 'AbsTol', 1e-9);   % above the speed floor
-verifyEqual(tc, flight_draws(7, 0, p).yaw, 0);
-p.roll_deg = 0;
-verifyEqual(tc, flight_draws(7, 100, p).yaw, 0);
+[b, r0] = shadow_roll_band(6, p);
+verifyEqual(tc, b, [16.1 25.0], 'AbsTol', 0.05); verifyEqual(tc, r0, 16.1, 'AbsTol', 1e-9);
+[b, r0] = shadow_roll_band(25, p);
+verifyEqual(tc, b, [32.0 57.9], 'AbsTol', 0.05); verifyEqual(tc, r0, 57.9, 'AbsTol', 1e-9);
+[b, r0] = shadow_roll_band(15.5, p);
+verifyEqual(tc, b, [16.1 57.9], 'AbsTol', 1e-9); verifyEqual(tc, r0, 16.1 + (15.5 - 12.4) / 0.25, 'AbsTol', 1e-9);
+verifyEqual(tc, shadow_roll_band(40, p), [Inf -Inf]);            % no roll supports it: never flown
+B = [16.1 57.9]; v = 20; vm = p.shadow_v_min;
+verifyEqual(tc, shadow_hidden(0, 2, 20, 0, 3, B, 30, v, vm), 3);       % GCS abeam on the right, banking toward it: the aft end
+verifyEqual(tc, shadow_hidden(0, 2, -20, 0, 3, B, 30, v, vm), 0);      % banking away: the belly sees it
+verifyEqual(tc, shadow_hidden(0, 25, 20, 0, 3, B, 30, v, vm), 0);      % 25 deg below: a 20 deg bank keeps it under the belly
+verifyEqual(tc, shadow_hidden(40, 2, 20, 0, 3, B, 30, v, vm), 3);      % ahead of the beam: the aft end
+verifyEqual(tc, shadow_hidden(-40, 2, 20, 0, 3, B, 30, v, vm), 1);     % behind it: the front end
+verifyEqual(tc, shadow_hidden(-40, 2, 20, 0, 4, B, 30, v, vm), 1);
+verifyEqual(tc, shadow_hidden(70, 2, 20, 0, 3, B, 30, v, vm), 0);      % 20 deg off the nose
+verifyEqual(tc, shadow_hidden(0, 2, 10, 0, 3, B, 30, v, vm), 0);       % below the smallest roll of the measured events
+verifyEqual(tc, shadow_hidden(0, 2, 20, 0, 3, [32 57.9], 30, v, vm), 0);   % a roll the level is not measured at
+verifyEqual(tc, shadow_hidden(0, 2, 20, 0, 3, B, 30, 7, vm), 0);       % hovering or holding position in wind
+% the flights' draws: the hidden antenna at every frame start as the model's channel takes it
+q = p; q.active_threat = 'airframe_shadowing'; q.shadow_db = 15.5;
+s = shadow_spec(q);
+verifyEqual(tc, s, [15.5 16.1 57.9 30 8 -16], 'AbsTol', 1e-9);
+verifyEqual(tc, shadow_spec(p), zeros(1, 6));                           % no shadowing in the threat
+for k = 1:200
+    fd = 40 + 2 * k;                                                    % 5-55 m/s
+    d = flight_draws(k, fd, q, struct('ebno', 9));
+    vk = fd * q.c_light / q.carrier_freq;
+    hs = arrayfun(@(j) shadow_hidden(d.gcs_aoa + d.yaw * (j - 1) * q.cycle_s, d.el_deg, d.roll, d.pitch, q.n_rx, ...
+        s(2:3), s(4), vk, s(5)), 1:q.cap_frames);
+    verifyEqual(tc, d.hidden, hs);
+end
+verifyEqual(tc, flight_draws(3, 30, q, struct('ebno', 9)).hidden, zeros(1, q.cap_frames));   % 3.75 m/s: none
+h = shadow_hit_share(q, 800);
+verifyGreaterThan(tc, h, 0.15); verifyLessThan(tc, h, 0.35);
+q6 = q; q6.shadow_db = 6;
+verifyLessThan(tc, shadow_hit_share(q6, 800), h);                      % a level paired with fewer rolls
+% the dataset flies its shadowing cells on flights that hide an antenna, one per fold
+txt = fileread(which('run_dataset_sweep'));
+verifyNotEmpty(tc, regexp(txt, 'while shd && ~hides\(', 'once'));
+verifyNotEmpty(tc, regexp(txt, 'any\(d\.hidden > 0\)', 'once'));
+% the fixed views fly the bank the fit pairs with the level, the GCS abeam, a coordinated turn
+q.yaw_random = false; q.gcs_aoa_random = false; [~, q.roll_deg] = shadow_roll_band(q.shadow_db, q);
+d = flight_draws(7, 100, q);
+verifyEqual(tc, d.roll, 28.5, 'AbsTol', 1e-9);
+verifyGreaterThan(tc, d.hidden(1), 0);
+v = max(100 * q.c_light / q.carrier_freq, q.turn_v_floor);
+verifyEqual(tc, d.yaw, rad2deg(9.81 * tand(q.roll_deg) / v), 'RelTol', 1e-9);
+verifyEqual(tc, bank_angle(d.yaw, 100, q), q.roll_deg, 'AbsTol', 1e-9);   % above the speed floor
+verifyEqual(tc, flight_draws(7, 0, q).yaw, 0);
+verifyEqual(tc, flight_draws(7, 0, q).hidden, zeros(1, q.cap_frames));  % hover: a tilt, no shadowing
+q.roll_deg = 0;
+verifyEqual(tc, flight_draws(7, 100, q).yaw, 0);
 end
 
 function test_threat_on_air(tc)
@@ -2525,6 +2583,254 @@ end
 verifyLessThanOrEqual(tc, first(1) - 15, 3);                     % the step at cycle 16
 verifyLessThanOrEqual(tc, conf(1) - 15, 5);                      % confirmed, then the rule's dwell
 verifyTrue(tc, isnan(first(2)) && isnan(conf(2)));
+end
+
+%% ---------- link, threats and dataset after the pre-launch review ----------
+function test_reactive_trigger(tc)
+% The reactive jammer listens to our transmitted frame (the Tx output, before any channel):
+% with our signal gone at the UAV ('GCS' 0) it still jams, from the frame's first sample
+% above its energy detector's threshold plus the reaction delay (3.75 us, 15 samples,
+% Wilhelm et al.) to the frame's last, and is silent outside; after a path-loss step it
+% keeps jamming at its fixed power.
+p = base_params(); p.quiet_build = true; p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false;
+p.gcs_tracked = false; p.k_random = false; p.gcs_aoa_random = false; p.body_random = false; p.tdl = false;
+p.wobble_random = false; p.cal_random = false; p.rx_sync = 'ideal'; p.int_rician_k = 30;
+p.chain_amp_db = 0; p.chain_phase_deg = 0; p.active_threat = 'reactive_jamming'; p.jsr_db = 30;
+mdl = 'UAV_GCS_Threat_Link';
+evalc('build_threat_model(p)');
+src = sfroot().find('-isa', 'Stateflow.EMChart', 'Path', [mdl '/Threat']).Script;
+verifyNotEmpty(tc, regexp(src, 'abs\(xt\(i\)\)\^2', 'once'));            % the trigger is our transmitter's output
+verifyEmpty(tc, regexp(src, 'abs\(ys\(', 'once'));
+set_link_snr(mdl, 20 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
+link_seed(mdl, 41, 160);
+set_param([mdl '/GCS'], 'Value', '0');
+out = sim(mdl, 'StopTime', num2str(3 * p.frame_duration));
+close_system(mdl, 0);
+X = squeeze(out.get('Tx_IQ')); Y = out.get('Rx_IQ'); nv = thermal_nv(p);
+dr = round(p.reactive_delay_s * p.symbol_rate * p.sps);
+verifyEqual(tc, dr, 15);
+for f = 2:3
+    a = find(abs(X(:, f)).^2 > p.reactive_threshold / p.sps);
+    P = mean(abs(Y(:, :, f)).^2, 2);
+    verifyLessThan(tc, mean(P(1:a(1) + dr - 2)), 3 * nv);              % the quiet slot and the reaction delay
+    verifyGreaterThan(tc, mean(P(a(1) + dr + 1:a(end))), 300 * nv);    % on over the frame
+    verifyLessThan(tc, mean(P(a(end) + 2:end)), 3 * nv);               % off after it
+end
+% after a 22 dB path-loss step the jammer stays on, at the power the cap fixed for the run
+p.active_threat = 'reactive_jamming+path_loss'; p.jsr_db = 16; p.path_loss_db = 22; p.pl_onset_frames = [4 4];
+p.rx_sync = 'real';
+evalc('build_threat_model(p)');
+set_link_snr(mdl, 12 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
+link_seed(mdl, 41, 160);
+F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(8 * p.frame_duration)), p, 20);
+close_system(mdl, 0);
+verifyGreaterThan(tc, min(F.q_react), 10);
+verifyEqual(tc, median(F.q_react(5:F.nf)), median(F.q_react(1:3)), 'AbsTol', 2);
+verifyEqual(tc, F.act, ones(1, F.nf));
+verifyEqual(tc, F.act_comp(2, :), double((1:F.nf) >= 4));
+verifyEqual(tc, F.lev_db(1, 5:F.nf), 30 * ones(1, F.nf - 4), 'AbsTol', 0.5);   % at the cap after the step
+end
+
+function test_inband_cap_run(tc)
+% The in-band cap holds on every antenna over the run (Liu et al.: 30 dB): a 23 dB jammer
+% on a flight in which the airframe hides an antenna by 20 dB reaches about 30 dB over our
+% signal there (43 dB if the cap left the depth out) and about 10 dB on the others, its
+% power fixed; the recorded level never exceeds the cap; and the cap's reference is our
+% signal's weakest antenna over the run, the depth included (flight_draws.m, d.cap_amp).
+p = base_params(); p.quiet_build = true; p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false;
+p.gcs_tracked = false; p.k_random = false; p.gcs_aoa_random = false; p.body_random = false; p.tdl = false;
+p.wobble_random = false; p.cal_random = false; p.rician_k = 30; p.int_rician_k = 30; p.chain_amp_db = 0;
+p.chain_phase_deg = 0; p.jsr_db = 23; p.shadow_db = 20; [~, p.roll_deg] = shadow_roll_band(p.shadow_db, p);
+mdl = 'UAV_GCS_Threat_Link'; nf = 20; qn = p.quiet_symbols * p.sps;
+pw = zeros(3, p.n_rx);
+for c = 1:3
+    q = p;
+    if c == 3, q.active_threat = 'airframe_shadowing'; else, q.active_threat = 'jamming+airframe_shadowing'; end
+    evalc('build_threat_model(q)');
+    set_link_snr(mdl, 40 + 10*log10(q.bits_per_symbol) - 10*log10(q.sps), q);
+    d = link_seed(mdl, 51, 160);
+    if c == 2, set_param([mdl '/GCS'], 'Value', '0'); end           % the jammer alone
+    out = sim(mdl, 'StopTime', num2str((nf - 1) * q.frame_duration));
+    U = out.get('Rx_IQ');
+    pw(c, :) = reshape(mean(abs(U(qn+1:end, :, :)).^2, [1 3]), 1, []) - thermal_nv(q);
+    if c == 1, F = extract_closed_loop_frames(out, q, 20); end
+    close_system(mdl, 0);
+end
+hs = d.hidden(1);
+verifyGreaterThan(tc, hs, 0);
+verifyTrue(tc, all(d.hidden == hs));
+verifyLessThan(tc, 20*log10(d.cap_amp / d.gcs_amp), -19);             % the depth is in the reference
+jsr = 10*log10(pw(2, :) ./ pw(3, :)) - 10*log10(p.sps);              % in band: the jammer fills the sampled band, our signal 1 / sps of it
+verifyEqual(tc, jsr(hs), 30, 'AbsTol', 1.5);
+verifyEqual(tc, jsr(setdiff(1:p.n_rx, hs)), 10 * ones(1, p.n_rx - 1), 'AbsTol', 2);
+verifyLessThanOrEqual(tc, max(F.lev_db(1, :)), 30 + 1e-6);
+verifyGreaterThan(tc, min(F.lev_db(1, :)), 29);
+verifyEqual(tc, F.act_comp(1:2, :), ones(2, F.nf));
+end
+
+function test_combination_on_air(tc)
+% A combination is on the air while any of its components is: a spoofer with a sweeping
+% jammer counts in every frame, the sweeper's own share kept per component; with gated
+% components only the 10% rule of the gated threats holds.
+verifyEqual(tc, threat_active('benign_interference+sweeping_jammer', [0 0.05 0.3 1]), [false false true true]);
+verifyEqual(tc, threat_active('jamming+airframe_shadowing', [1 1]), [true true]);
+verifyEqual(tc, threat_active('airframe_shadowing', [0 1]), [false true]);
+p = base_params(); p.quiet_build = true; p.active_threat = 'spoofing+sweeping_jammer'; p.jsr_db = 16; p.seed = 11;
+p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false; p.gcs_tracked = false; p.k_random = false;
+p.gcs_aoa_random = false; p.body_random = false; p.wobble_random = false; p.jam_timing_random = false; p.tdl = false;
+mdl = 'UAV_GCS_Threat_Link'; nfr = 8; gate = [25e-3 0.2e-3 0 0.5];
+evalc('build_threat_model(p)');
+set_link_snr(mdl, 15 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
+link_seed(mdl, 11, 160);
+set_param([mdl '/Gate'], 'Value', mat2str(gate));
+F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str((nfr - 1) * p.frame_duration)), p, 20);
+close_system(mdl, 0);
+fs = p.symbol_rate * p.sps; ns = p.air_symbols * p.sps;
+t = (0:ns-1)' / fs + (0:nfr-1) * round(p.cycle_s * fs) / fs;
+g = sweep_window_s(p); a = mean(mod(t + gate(2), gate(1)) >= g(1) & mod(t + gate(2), gate(1)) < g(2), 1);
+verifyGreaterThan(tc, nnz(a == 0), 0);
+verifyEqual(tc, F.act, ones(1, nfr));                                   % the spoofer is always on the air
+verifyEqual(tc, F.act_comp(1, :), ones(1, nfr));
+verifyEqual(tc, F.act_comp(2, :), a, 'AbsTol', 1e-9);
+verifyTrue(tc, all(isnan(F.act_comp(3, :))) && all(isnan(F.lev_db(3, :))));
+verifyTrue(tc, all(isfinite(F.lev_db(1:2, :)), 'all'));
+verifyEqual(tc, threat_active(p.active_threat, F.act), true(1, nfr));
+end
+
+function test_received_ebno(tc)
+% The received Eb/N0 of a frame: the configured value less a path-loss step on the frames
+% where it is on the air, in the dataset, the splits (the second test set too), the pools
+% and the detector's blocks.
+verifyEqual(tc, received_ebno('path_loss', 12, [0 0 1 1], 14), [12 12 -2 -2]);
+verifyEqual(tc, received_ebno('jamming+path_loss', 12, [1 1; 0 1; NaN NaN], 14), [12 -2]);
+verifyEqual(tc, received_ebno('jamming', 9, [1 1 1], 14), [9 9 9]);
+verifyEqual(tc, received_ebno('none', 9, nan(3, 2), 14), [9 9]);
+txt = fileread(which('run_dataset_sweep'));
+verifyNotEmpty(tc, regexp(txt, 'D\.ebno_rx = \[D\.ebno_rx, received_ebno\(', 'once'));
+verifyNotEmpty(tc, regexp(txt, 'dataset\.ebno_rx = ', 'once'));
+verifyNotEmpty(tc, regexp(fileread(which('extract_spectrograms')), 'spec\.ebno_rx = ds\.ebno_rx', 'once'));
+txt = fileread(which('prepare_data'));
+verifyNotEmpty(tc, regexp(txt, 'splits\.\(names\{i\}\)\.ebno_rx = sp0\.ebno_rx\(m\)', 'once'));
+verifyNotEmpty(tc, regexp(txt, 'splits\.test\.ebno_rx = sp0\.ebno_rx', 'once'));    % splits_fresh.mat
+verifyNotEmpty(tc, regexp(fileread(which('pool_cell')), 'Q\.ebno_rx = \[Q\.ebno_rx', 'once'));
+verifyEqual(tc, nargout('detector_block'), 4);
+end
+
+function test_dataset_balance(tc)
+% Every class keeps its labelled frames: a path-loss cell N_SUB F_SUB / (TW - 1) sub-runs
+% (9 labelled frames of 20), the WLAN N_SUB over its labelled share (about 0.58: 10), the
+% sweeper over its; the extra sub-runs go round the folds from cell to cell.
+p = base_params();
+h = benign_hit_share(p);                                % the dataset's: 3000 runs of 20 frames
+verifyGreaterThan(tc, h, 0.5); verifyLessThan(tc, h, 0.65);
+verifyEqual(tc, round(6 / h), 10);
+txt = fileread(which('run_dataset_sweep'));
+verifyNotEmpty(tc, regexp(txt, 'round\(N_SUB \* F_SUB / \(TW - 1\)\)', 'once'));
+verifyNotEmpty(tc, regexp(txt, 'round\(N_SUB / wlan\)', 'once'));
+verifyNotEmpty(tc, regexp(txt, 'FOLD\(nk\)', 'once'));
+k = 0; fo = zeros(48, 13);                                % 13 path-loss sub-runs over 48 cells
+for c = 1:48
+    for j = 1:13, k = k + 1; fo(c, j) = mod(k - 1, 6) + 1; end
+end
+verifyEqual(tc, histcounts(fo(:), 0.5:6.5), 104 * ones(1, 6));      % every fold the same share
+verifyTrue(tc, all(arrayfun(@(c) numel(unique(fo(c, :))), 1:48) == 6));   % and every cell in every fold
+end
+
+function test_noise_burst_duty(tc)
+% Noise bursts as a random jammer (Xu et al.): bursts of U[0, 31] symbols and sleeps that
+% give the flight's duty (Marti et al.'s 20% to 77.5%): the share of the time on matches
+% the duty, and at 20% (sleeps long enough to keep the bursts apart) a burst lasts 15.5
+% symbols on average.
+p = base_params(); p.quiet_build = true; p.active_threat = 'noise_burst'; p.jsr_db = 30; p.seed = 11;
+p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false; p.gcs_tracked = false; p.k_random = false;
+p.gcs_aoa_random = false; p.body_random = false; p.wobble_random = false; p.jam_timing_random = false; p.tdl = false;
+p.int_rician_k = 30; p.cal_random = false;
+mdl = 'UAV_GCS_Threat_Link'; nv = thermal_nv(p);
+evalc('build_threat_model(p)');
+set_link_snr(mdl, 10 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
+for a = [0.2 0.775]
+    link_seed(mdl, 11, 160);
+    set_param([mdl '/GCS'], 'Value', '0');
+    set_param([mdl '/Gate'], 'Value', mat2str([20e-3 0 0.5 a]));
+    Y = sim(mdl, 'StopTime', num2str(12 * p.frame_duration)).get('Rx_IQ');
+    on = squeeze(mean(abs(Y).^2, 2)) > 30 * nv;                         % samples x frames
+    verifyEqual(tc, mean(on, 'all'), a, 'AbsTol', 0.08);
+    if a == 0.2
+        r = diff([false; on(:); false]); len = find(r == -1) - find(r == 1);
+        verifyEqual(tc, mean(len) / p.sps, p.burst_on_sym / 2, 'AbsTol', 4);
+    end
+end
+close_system(mdl, 0);
+end
+
+function test_level_calibration(tc)
+% Each antenna's receiver reports its level within the RSSI accuracy of an AD9361-class
+% radio (+-2 dB, drawn per flight from its own stream): RSSI and interference over thermal
+% move by the reference antenna's error, the antenna gains by each one's; SINR and the
+% decoded bits do not.
+p = base_params();
+d = flight_draws(17, 160, p);
+verifyEqual(tc, d.cal_db, 2 * (2 * rand(seed_stream(17, 'cal'), 1, p.n_rx) - 1), 'AbsTol', 1e-12);
+C = cell2mat(arrayfun(@(s) getfield(flight_draws(s, 160, p), 'cal_db'), (1:2000)', 'UniformOutput', false));
+verifyTrue(tc, all(abs(C(:)) <= 2)); verifyGreaterThan(tc, max(abs(C(:))), 1.95);
+p.quiet_build = true; p.active_threat = 'jamming'; p.jsr_db = 10; p.tdl = false;
+mdl = 'UAV_GCS_Threat_Link';
+F = cell(1, 2);
+for k = 1:2
+    p.cal_random = k == 2;
+    evalc('build_threat_model(p)');
+    set_link_snr(mdl, 12 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
+    d = link_seed(mdl, 17, 160);
+    F{k} = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(6 * p.frame_duration)), p, 20);
+    close_system(mdl, 0);
+end
+verifyEqual(tc, F{1}.cal_db, zeros(1, p.n_rx));
+verifyEqual(tc, F{2}.cal_db, d.cal_db, 'AbsTol', 1e-9);
+verifyEqual(tc, F{2}.ref, F{1}.ref);
+verifyEqual(tc, F{2}.sinr, F{1}.sinr, 'AbsTol', 1e-6);
+verifyEqual(tc, F{2}.ber, F{1}.ber);
+verifyEqual(tc, F{2}.rssi - F{1}.rssi, d.cal_db(F{1}.ref), 'AbsTol', 1e-6);
+verifyEqual(tc, F{2}.iot - F{1}.iot, d.cal_db(F{1}.ref), 'AbsTol', 1e-6);
+verifyEqual(tc, F{2}.gain_ant - F{1}.gain_ant, repmat(d.cal_db(:), 1, F{1}.nf), 'AbsTol', 1e-6);
+verifyEqual(tc, F{2}.q_react, F{1}.q_react, 'AbsTol', 1e-6);
+end
+
+function test_los_doppler(tc)
+% Our LoS carries the Doppler of the GCS direction, fd cos(elevation) sin(direction): the
+% receiver finds +fd with the GCS ahead, -fd behind, none abeam (no oscillator offset).
+p = base_params(); p.quiet_build = true; p.active_threat = 'none'; p.int_aoa_random = false; p.yaw_random = false;
+p.corr_random = false; p.gcs_tracked = false; p.k_random = false; p.rician_k = 40; p.gcs_aoa_random = false;
+p.body_random = false; p.wobble_random = false; p.tdl = false; p.cfo_ppm = 0;
+mdl = 'UAV_GCS_Threat_Link'; fd = p.v_max * p.carrier_freq / p.c_light;
+for b = [90 -90 0]
+    p.gcs_aoa_deg = b;
+    evalc('build_threat_model(p)');
+    set_link_snr(mdl, 20 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
+    link_seed(mdl, 13, fd);
+    F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(5 * p.frame_duration)), p, 20);
+    verifyEqual(tc, median(F.cfo_hz), fd * sind(b), 'AbsTol', 40);
+    close_system(mdl, 0);
+end
+end
+
+function test_citations_in_library(tc)
+% The code cites only sources in the library: no Cui et al. (path loss, altitude), no
+% Boeing patent (tracker fallback), no Fedde & Carter or Ginart (connector faults), no
+% ministry rule (the e.i.r.p. cap is ETSI EN 300 328's); Heath's 5 dB is the imbalance
+% indicator of Table 2.
+f = dir(fullfile(tc.TestData.root, 'code', '**', '*.m'));
+f = f(~contains({f.folder}, [filesep 'legacy']) & ~strcmp({f.name}, 'test_core.m'));
+bad = {};
+for i = 1:numel(f)
+    t = fileread(fullfile(f(i).folder, f(i).name));
+    if ~isempty(regexp(t, 'Cui et al|Boeing|8,503,941|Fedde|Ginart|Ministry of Comm|6,147,985', 'once'))
+        bad{end+1} = f(i).name; %#ok<AGROW>
+    end
+end
+verifyEmpty(tc, bad, strjoin(bad, ', '));
+t = fileread(which('init_params'));
+verifyNotEmpty(tc, regexp(t, 'severely degraded antenna connection', 'once'));
+verifyNotEmpty(tc, regexp(t, 'Simunek et al\. 2011', 'once'));
 end
 
 function v = ternary_(c, a, b)

@@ -11,8 +11,8 @@
 % threats are mapped for two flight geometries: interferer 42.2 deg from the
 % GCS direction (separable by the antenna array) and 11.4 deg (aligned);
 % path_loss and antenna_fault do not depend on the geometry; airframe shadowing is mapped
-% in a coordinated turn at the smallest bank of the measured events (p.shadow_view_roll_deg,
-% the GCS abeam), where the airframe hides an antenna (shadow_hidden.m).
+% in a coordinated turn at the bank Sun et al.'s fit pairs with the level
+% (shadow_roll_band.m, the GCS abeam), where the airframe hides an antenna (shadow_hidden.m).
 % The K-factor is fixed at the nominal 10 dB and the UAV antenna keeps its horizon gain
 % toward the GCS (the pools draw K and altitude per flight).
 %
@@ -76,6 +76,7 @@ p0.gcs_tracked = false;                 % the GCS antenna on its axis
 p0.alt_random = false;                  % no altitude: the UAV antenna's horizon gain toward the GCS
 p0.jam_timing_random = false;           % the shortest sweep at phase 0: the sweeper on our channel in every frame
 p0.tdl_random = false;                  % the median delay spreads (p0.tdl_ds_ns), with the delay line on
+p0.cap_frames = RUN_FRAMES;             % the in-band cap holds over the whole run
 SNR_points = p0.EbNo_dB;
 nS = numel(SNR_points);
 v_nom = p0.v_nominal * 3.6;                       % nominal cruise speed [km/h]
@@ -122,7 +123,7 @@ parfor (j = 1:nJ, NWP)
     t = jobs(j, 1); li = jobs(j, 2);
     cfg = maps(t);
     p = p0; p.active_threat = cfg.base; p.(cfg.level_field) = cfg.levels(li);
-    if contains(cfg.base, 'airframe_shadowing'), p.roll_deg = p.shadow_view_roll_deg; end   % a turn that lets the airframe hide an antenna
+    if contains(cfg.base, 'airframe_shadowing'), [~, p.roll_deg] = shadow_roll_band(p.shadow_db, p); end   % a turn that lets the airframe hide an antenna
     if ~isnan(cfg.aoa), p.int_aoa_deg(1) = p.gcs_aoa_deg + cfg.aoa; end
     sd = 900000 + 1000*t + 10*li;                         % + s: each Eb/N0 column its own flight (nS < 10)
     g = arrayfun(@(s) struct('seed', sd + s, 'speed', v_nom, 'run', 1), 1:nS, 'UniformOutput', false);

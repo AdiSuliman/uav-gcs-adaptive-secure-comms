@@ -25,6 +25,7 @@ p0.quiet_build = true; p0.int_aoa_random = false; p0.k_random = false; p0.yaw_ra
 p0.gcs_aoa_random = false;
 p0.jam_timing_random = false;           % the shortest sweep at phase 0: the sweeper on our channel in every frame
 p0.tdl_random = false;                  % the median delay spreads (p0.tdl_ds_ns), with the delay line on
+p0.cap_frames = NF;                     % the in-band cap holds over the whole run
 fs = p0.symbol_rate * p0.sps;
 fd = V_KMH / 3.6 * p0.carrier_freq / p0.c_light;
 top = struct('threat', {}, 'action', {}, 'share', {});
@@ -81,7 +82,7 @@ fprintf('Saved %s\n', OUT);
 function R = run_link(p0, threat, action, ebno, seed, fd, nf)
 % One seeded run of the threat link with a configuration applied (apply_countermeasure.m).
 p = p0; p.active_threat = threat;
-if contains(threat, 'airframe_shadowing'), p.roll_deg = p.shadow_view_roll_deg; end   % a turn that lets the airframe hide an antenna
+if contains(threat, 'airframe_shadowing'), [~, p.roll_deg] = shadow_roll_band(p.shadow_db, p); end   % a turn that lets the airframe hide an antenna
 [p2, g_db] = apply_countermeasure(p, threat, action);
 evalc('build_threat_model(p2)');
 mdl = 'UAV_GCS_Threat_Link';

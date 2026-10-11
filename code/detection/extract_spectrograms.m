@@ -49,6 +49,7 @@ spec.feats = feats;
 spec.feat_names = feat_names;
 spec.class_names = ds.class_names;
 spec.ebno = ds.snr(:);                    % configured Eb/N0, analysis only (not an input)
+if isfield(ds, 'ebno_rx'), spec.ebno_rx = ds.ebno_rx(:); end   % received Eb/N0 (received_ebno.m), analysis only
 spec.speed_kmh = ds.speed_kmh(:);
 spec.run = ds.run(:); spec.fold = ds.fold(:); spec.level = ds.level(:);
 if isfield(ds, 'pos'), spec.pos = ds.pos(:); spec.gain_ant = ds.gain_ant; end   % temporal evidence

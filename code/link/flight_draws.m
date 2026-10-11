@@ -37,7 +37,16 @@ function d = flight_draws(seed, fd, p, geo)
 %                     interferer at the start of the flight
 %   d.gcs_amp         amplitude of our signal, 10^((att_db - gcs_point_db)/20) ('GCS' block)
 %   d.jam             timing of the gated jammers [sweep period s, sweep phase s, burst
-%                     phase] (jam_timing.m; fixed: the shortest period, phases 0) ('Gate' block)
+%                     start, burst duty] (jam_timing.m; fixed: the shortest period, phases
+%                     0, the duty p.burst_duty) ('Gate' block)
+%   d.cal_db          level calibration error of each antenna's receiver [dB], uniform
+%                     within +-p.cal_err_db ('Cal' block)
+%   d.hidden          antenna the airframe hides at the start of each of p.cap_frames
+%                     frames a cycle apart, 0 none (shadow_hidden.m; only when the threat
+%                     holds airframe shadowing, shadow_spec.m)
+%   d.cap_amp         our signal's amplitude on its weakest antenna at the worst frame of
+%                     those (sig_weak_db.m, the 'GCS' amplitude included): the reference of
+%                     the in-band cap ('Cap' block, inband_cap_amp.m)
 %   d.ds_ns           RMS delay spread of our signal and of every interferer that the
 %                     delay line reaches [ns] (delay_spread.m, or p.tdl_ds_ns; tdl_profile.m),
 %                     0 with a flat channel
@@ -98,8 +107,12 @@ if isfield(p, 'ant_spacing_wl')                 % interferers in the UAV's horiz
 end
 d.gcs_amp = 10^((d.att_db - d.gcs_point_db) / 20);
 sp = getf(p, 'sweep_period_s', [20e-3 83.5e-3]);
-d.jam = [sp(1) 0 0];
-if getf(p, 'jam_timing_random', false), d.jam = jam_timing(seed, sp); end
+d.jam = [sp(1) 0 0 getf(p, 'burst_duty', 0.5)];
+if getf(p, 'jam_timing_random', false)
+    d.jam = jam_timing(seed, sp, getf(p, 'burst_duty_range', [0.2 0.775]));
+end
+d.cal_db = zeros(1, n);
+if getf(p, 'cal_random', false), d.cal_db = getf(p, 'cal_err_db', 2) * (2 * rand(seed_stream(seed, 'cal'), 1, n) - 1); end
 ni = numel(d.aoa);
 nt = 1 + getf(p, 'tdl', false) * floor(getf(p, 'tdl_max_ns', 0) / getf(p, 'tdl_step_ns', 1));
 d.ds_ns = zeros(1, 1 + ni); d.tdl = [ones(1, 1 + ni); zeros(nt - 1, 1 + ni)];
@@ -111,6 +124,36 @@ if nt > 1
         [d.tdl(:, i), d.ds_ns(i)] = tdl_profile(ds(i), k(i), nt, p.tdl_step_ns);
     end
 end
+[d.hidden, d.cap_amp] = run_attitude(d, fd, p);
+end
+
+function [hid, cap] = run_attitude(d, fd, p)
+% Hidden antenna at the start of every frame of the run and our signal's weakest-antenna
+% amplitude over the run (sig_weak_db.m), the frames p.cycle_s apart, each p.air_s long.
+H = max(1, getf(p, 'cap_frames', 1)); cyc = getf(p, 'cycle_s', 0);
+air = getf(p, 'air_s', NaN);
+if isnan(air), air = getf(p, 'air_symbols', 0) / getf(p, 'symbol_rate', 1); end
+if isfield(p, 'shadow_spec')
+    shd = p.shadow_spec;
+elseif all(isfield(p, {'shadow_db', 'shadow_fit', 'shadow_fit_z', 'shadow_roll_deg', 'roll_max_deg', ...
+        'shadow_hdg_deg', 'shadow_v_min', 'shadow_k_db'}))
+    shd = shadow_spec(p);
+else
+    shd = zeros(1, 6);
+end
+v = fd * getf(p, 'c_light', 3e8) / getf(p, 'carrier_freq', 2.4e9);
+nul = getf(p, 'uav_null_db', -30);
+att = [d.gcs_aoa d.el_deg d.roll d.pitch d.wobble];
+k = d.k_sig; if ~isfinite(k), k = 100; end
+hid = zeros(1, H); w = Inf;
+for j = 1:H
+    t1 = (j - 1) * cyc;
+    w = min(w, sig_weak_db(att, d.yaw, t1, [t1; t1 + air], k, d.body_amp, shd, v, nul));
+    if shd(1) > 0
+        hid(j) = shadow_hidden(att(1) + d.yaw * t1, att(2), att(3), att(4), numel(d.body_amp), shd(2:3), shd(4), v, shd(5));
+    end
+end
+cap = d.gcs_amp * 10^(w / 20);
 end
 
 function w = turn_rate(b, fd, p)

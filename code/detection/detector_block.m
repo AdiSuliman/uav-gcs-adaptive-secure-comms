@@ -1,4 +1,4 @@
-function [truth, pred, sc] = detector_block(G, p, ebno, seed, v_kmh)
+function [truth, pred, sc, ebno_rx] = detector_block(G, p, ebno, seed, v_kmh)
 %DETECTOR_BLOCK  One seeded block of frames through the built link model, read as the
 %   deployed detector reads it: the shared generator of eval_unseen_snr.m and
 %   eval_unseen_severity.m.
@@ -12,6 +12,8 @@ function [truth, pred, sc] = detector_block(G, p, ebno, seed, v_kmh)
 %          whose window holds packet frames is benign_interference)
 %   pred   1 x frames fused class names
 %   sc     1 x frames unknown-threat score of each frame
+%   ebno_rx 1 x frames received Eb/N0 [dB]: ebno less a path-loss step from its onset
+%          (received_ebno.m)
 snr_dB = ebno + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
 set_link_snr(G.model, snr_dB, p);
 link_seed(G.model, seed, v_kmh / 3.6 * p.carrier_freq / p.c_light, struct('ebno', ebno, 'alt_m', NaN, 'k_sig_db', NaN));
@@ -34,4 +36,5 @@ if ~isempty(G.FM)
     truth = G.classes(fusion_target(yi, ones(numel(v), 1), v(:), G.FN, G.classes)');
 end
 sc = sc(:)';
+ebno_rx = received_ebno(p.active_threat, ebno, F.act_comp(:, v), p.path_loss_db);
 end

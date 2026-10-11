@@ -6,7 +6,8 @@
 %
 % Input:  data/spectrograms.mat
 % Output: data/splits.mat (train/val/test with X, Y, feats, ebno, speed, run, level, and
-%         the frame position and per-antenna gains when present; norm stats)
+%         the frame position, per-antenna gains and received Eb/N0 (ebno_rx) when present;
+%         norm stats)
 % With FRESH_TEST true (build_fresh_test.m): the second test set of data/spectrograms_fresh.mat,
 % z-scored with the training statistics of data/splits.mat -> data/splits_fresh.mat
 % (test, norm and classes only).
@@ -45,6 +46,7 @@ for i = 1:3
         splits.(names{i}).feats_raw = sp0.feats(m, :);
     end
     if isfield(sp0, 'k_db'), splits.(names{i}).k_db = sp0.k_db(m); splits.(names{i}).aoa = sp0.aoa(m); end
+    if isfield(sp0, 'ebno_rx'), splits.(names{i}).ebno_rx = sp0.ebno_rx(m); end
 end
 splits.norm = struct('feat_mean', feat_mean, 'feat_std', feat_std, 'feat_names', {sp0.feat_names});
 splits.classes = classes;
@@ -82,6 +84,7 @@ if isfield(sp0, 'pos')
     splits.test.pos = sp0.pos; splits.test.gain_ant = sp0.gain_ant; splits.test.feats_raw = sp0.feats;
 end
 if isfield(sp0, 'k_db'), splits.test.k_db = sp0.k_db; splits.test.aoa = sp0.aoa; end
+if isfield(sp0, 'ebno_rx'), splits.test.ebno_rx = sp0.ebno_rx; end
 splits.norm = nm;
 splits.classes = classes;
 fprintf('Second test set: %d frames, %d sub-runs\n', numel(sp0.Y), numel(unique(sp0.run)));

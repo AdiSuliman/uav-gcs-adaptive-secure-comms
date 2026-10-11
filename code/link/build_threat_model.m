@@ -37,8 +37,9 @@ function build_threat_model(p)
 %           p.k_range_db by link_seed.m (channel_k.m).
 %           With p.rx_sync 'real': carrier frequency offset of the two radios per flight
 %           (uniform within +-2 p.cfo_ppm of the carrier), Doppler shift of the LoS
-%           path (fd cos of a direction drawn per flight), and an unknown arrival
-%           time of every frame (uniform fractional delay up to p.timing_max_sym).
+%           path from the GCS direction, fd cos(elevation) sin(direction) at the frame,
+%           and an unknown arrival time of every frame (uniform fractional delay up to
+%           p.timing_max_sym; Channel output 2).
 %           With p.tdl, a tapped delay line: the diffuse part on taps p.tdl_step_ns apart up
 %           to p.tdl_max_ns, the LoS on tap 0, every tap with its own sinusoids and centred
 %           on its source; the Constant block 'Tdl' holds the diffuse tap amplitudes of our
@@ -47,29 +48,41 @@ function build_threat_model(p)
 %           (p.pl_onset_frames, drawn per run when a range: a step of attenuation, an
 %           obstruction or terrain masking; frames before it carry no threat); airframe
 %           shadowing, applied in the channel, hides the end of the array farther from
-%           the GCS while the attitude allows it (shadow_hidden.m: roll and heading against
-%           the GCS azimuth, Sun et al.), no threat on the air otherwise; an antenna fault
+%           the GCS while the attitude puts the airframe in its line of sight at a roll
+%           the level is measured at (shadow_hidden.m, shadow_roll_band.m: the GCS above the
+%           belly's horizon, the heading against the GCS azimuth, Sun et al.; never while
+%           hovering), no threat on the air otherwise; an antenna fault
 %           (one antenna, drawn per seeded run) is an open or lossy connector between the
 %           antenna and its receiver, so it attenuates everything that antenna receives,
 %           our signal and every interferer, before the receiver's thermal noise.
 %           Every additive threat is ONE waveform arriving through its own spatial channel
-%           (own diffuse fading).
+%           (own diffuse fading). The reactive jammer listens to our transmitted frame (the
+%           Tx output, before any channel) with an energy detector and is on from its
+%           start plus p.reactive_delay_s until its end, at the frame's arrival at the UAV.
 %           In-band cap: every additive component reaches at most p.inband_cap_db
-%           over our received signal on the weakest antenna (path loss, the 'GCS'
-%           block's loss and the 'Body' block's airframe loss included,
-%           inband_cap_amp.m), taken on its level before any countermeasure
+%           over our received signal on every antenna over the run: its power is fixed
+%           against the 'Cap' block, our signal's weakest antenna at the worst frame
+%           of the run (flight_draws.m: the 'GCS' block's loss, the 'Body' block's
+%           airframe loss, the attitude, the airframe-shadowing depth), and the path-loss
+%           step (inband_cap_amp.m), taken on its level before any countermeasure
 %           (p.inband_ref, apply_countermeasure.m), so a countermeasure still lowers it
 %           by its own amount.
-%           Output 2: share of the frame's samples with the threat on the air
-%           (benign packet traffic, the sweeping jammer on our channel; path loss 0 before
-%           its onset, airframe shadowing 0 while the attitude hides no antenna, when they
-%           are the only components; 1 for every other threat, 0 for none).
+%           Output 2: share of the frame's samples with the threat on the air, the union
+%           over its components: 1 while a component that is not gated is on the air (path
+%           loss from its onset, airframe shadowing while an antenna is hidden, every other
+%           threat always), else the largest share of a gated one (benign packet traffic,
+%           the sweeping jammer on our channel); 0 for none. Output 3: [actc levc], each
+%           component's share and the level an additive one reaches over our signal on the
+%           weakest antenna in the frame [dB], in the threat's order (NaN beyond it).
 %           The gated jammers run with the timing of the Constant block 'Gate'
 %           (jam_timing.m): the sweeping jammer is on our channel while
 %           mod(t + p0, T) of the channel clock lies in sweep_window_s.m, and the
-%           noise bursts start at a phase of their period.
+%           noise bursts switch on and off at random (a random jammer, Xu et al.) with
+%           the flight's duty.
 %           Last, every antenna's receive chain: a gain and phase error fixed per flight
-%           (p.chain_amp_db, p.chain_phase_deg).
+%           (p.chain_amp_db, p.chain_phase_deg). The 'Cal' block (to the 'Cal_db' sink)
+%           holds each antenna's level calibration error [dB], applied to the levels the
+%           receiver reports (extract_closed_loop_frames.m).
 %           Interferer directions come from the Constant block 'AoA': p.int_aoa_deg,
 %           or, with p.int_aoa_random, drawn per seed from p.int_aoa_range_deg by
 %           link_seed.m (interferer_aoa.m); they turn with the heading and the pitch
@@ -207,6 +220,8 @@ add_block('simulink/Sources/Constant', [modelName '/Att'],     'Position', [150 
 add_block('simulink/Sources/Constant', [modelName '/Body'],    'Position', [150 510 220 530]);
 add_block('simulink/Sources/Constant', [modelName '/Gate'],    'Position', [150 550 220 570]);
 add_block('simulink/Sources/Constant', [modelName '/Tdl'],     'Position', [150 590 220 610]);
+add_block('simulink/Sources/Constant', [modelName '/Cap'],     'Position', [150 630 220 650]);
+add_block('simulink/Sources/Constant', [modelName '/Cal'],     'Position', [150 670 220 690]);
 add_block('simulink/Sinks/To Workspace', [modelName '/tx_sink'], 'Position', [150 30 230 60]);
 add_block('simulink/Sinks/To Workspace', [modelName '/rx_sink'], 'Position', [870 90 950 120]);
 add_block('simulink/Sinks/To Workspace', [modelName '/Tx_IQ'],   'Position', [300 30 380 60]);
@@ -216,6 +231,8 @@ add_block('simulink/Sinks/To Workspace', [modelName '/Rx_H'],    'Position', [87
 add_block('simulink/Sinks/To Workspace', [modelName '/Rx_R'],    'Position', [870 330 950 360]);
 add_block('simulink/Sinks/To Workspace', [modelName '/Thr_act'], 'Position', [580 30 660 60]);
 add_block('simulink/Sinks/To Workspace', [modelName '/Rx_S'],    'Position', [870 390 950 420]);
+add_block('simulink/Sinks/To Workspace', [modelName '/Thr_comp'], 'Position', [580 -10 660 20]);
+add_block('simulink/Sinks/To Workspace', [modelName '/Cal_db'],  'Position', [300 670 380 690]);
 
 sf_root = sfroot;
 chart_tx = sf_root.find('-isa', 'Stateflow.EMChart', 'Path', [modelName '/Tx']);
@@ -245,6 +262,8 @@ set_param([modelName '/Rx_H'],    'VariableName', 'Rx_H',        'SaveFormat', '
 set_param([modelName '/Rx_R'],    'VariableName', 'Rx_R',        'SaveFormat', 'Array');
 set_param([modelName '/Thr_act'], 'VariableName', 'Thr_act',     'SaveFormat', 'Array');
 set_param([modelName '/Rx_S'],    'VariableName', 'Rx_S',        'SaveFormat', 'Array');
+set_param([modelName '/Thr_comp'], 'VariableName', 'Thr_comp',   'SaveFormat', 'Array');
+set_param([modelName '/Cal_db'],  'VariableName', 'Cal_db',      'SaveFormat', 'Array', 'SampleTime', num2str(p.frame_duration));
 
 %% ---- Wiring ----
 add_line(modelName, 'BitSource/1', 'Tx/1',      'autorouting', 'on');
@@ -269,6 +288,11 @@ add_line(modelName, 'Gate/1',      'Threat/10', 'autorouting', 'on');
 add_line(modelName, 'Tdl/1',       'Channel/10', 'autorouting', 'on');
 add_line(modelName, 'Tdl/1',       'Threat/11', 'autorouting', 'on');
 add_line(modelName, 'Body/1',      'Threat/12', 'autorouting', 'on');
+add_line(modelName, 'Tx/1',        'Threat/13', 'autorouting', 'on');
+add_line(modelName, 'Channel/2',   'Threat/14', 'autorouting', 'on');
+add_line(modelName, 'Cap/1',       'Threat/15', 'autorouting', 'on');
+add_line(modelName, 'Threat/3',    'Thr_comp/1', 'autorouting', 'on');
+add_line(modelName, 'Cal/1',       'Cal_db/1',  'autorouting', 'on');
 add_line(modelName, 'Channel/1',   'Threat/1',  'autorouting', 'on');
 add_line(modelName, 'Threat/1',    'Level/1',   'autorouting', 'on');
 add_line(modelName, 'Level/1',     'AWGN/1',    'autorouting', 'on');
@@ -313,15 +337,22 @@ set_param([modelName '/Att'], 'UserDataPersistent', 'on', 'UserData', struct('gc
 set_param([modelName '/Body'], 'Value', mat2str(ones(1, nr)));
 set_param([modelName '/Body'], 'UserDataPersistent', 'on', 'UserData', struct('body_random', logical(p.body_random), ...
     'body_loss_db', p.body_loss_db));
-set_param([modelName '/Gate'], 'Value', mat2str([p.sweep_period_s(1) 0 0], 10));
+set_param([modelName '/Gate'], 'Value', mat2str([p.sweep_period_s(1) 0 0 p.burst_duty], 10));
 set_param([modelName '/Gate'], 'UserDataPersistent', 'on', 'UserData', struct('jam_timing_random', ...
-    logical(p.jam_timing_random), 'sweep_period_s', p.sweep_period_s));
+    logical(p.jam_timing_random), 'sweep_period_s', p.sweep_period_s, 'burst_duty_range', p.burst_duty_range, ...
+    'burst_duty', p.burst_duty));
 NT = tdl_taps(p, fs); ni = numel(p.int_aoa_deg);
 set_param([modelName '/Tdl'], 'Value', mat2str([ones(1, 1 + ni); zeros(NT - 1, 1 + ni)]));
 set_param([modelName '/Tdl'], 'UserDataPersistent', 'on', 'UserData', struct('tdl', logical(p.tdl), ...
     'tdl_random', logical(p.tdl_random), 'tdl_ds_ns', p.tdl_ds_ns, 'tdl_step_ns', p.tdl_step_ns, ...
     'tdl_max_ns', p.tdl_max_ns, 'tdl_sig_ds', p.tdl_sig_ds, 'tdl_sig_alt_m', p.tdl_sig_alt_m, ...
     'tdl_int_ds', p.tdl_int_ds, 'tdl_clip_ns', p.tdl_clip_ns));
+set_param([modelName '/Cap'], 'Value', '1');
+set_param([modelName '/Cap'], 'UserDataPersistent', 'on', 'UserData', struct('cap_frames', p.cap_frames, ...
+    'cycle_s', p.cycle_s, 'air_s', p.samples_per_frame / fs, 'shadow_spec', shadow_spec(p)));
+set_param([modelName '/Cal'], 'Value', mat2str(zeros(1, nr)));
+set_param([modelName '/Cal'], 'UserDataPersistent', 'on', 'UserData', struct('cal_random', logical(p.cal_random), ...
+    'cal_err_db', p.cal_err_db));
 link_seed(modelName, seed, p.fd_max);
 
 %% ---- Save ----
@@ -363,31 +394,33 @@ function s = channel_script(p, fs)
 % as the attitude changes, and the lever-arm phase of every path; 'Body' our signal's
 % amplitude on each antenna. With a real receiver: frequency offset of
 % the two radios and LoS Doppler shift per flight, unknown arrival time per frame
-% (fractional delay applied in the frequency domain; the frame ends in its guard).
-% Our LoS Doppler fl is drawn apart from the GCS direction: the same arcsine distribution
-% as fd sin of a uniform direction. With the delay line, tap m carries the frame m taps
+% (fractional delay applied in the frequency domain; the frame ends in its guard; output 2,
+% the delay in samples, for the reactive jammer). Our LoS Doppler is that of the GCS
+% direction at the frame, fd cos(elevation) sin(direction): the UAV flies along its
+% heading, 90 deg the GCS ahead (gcs_aoa.m). With the delay line, tap m carries the frame m taps
 % later (our signal is silent before the frame) with the diffuse amplitude of column 1
 % of the 'Tdl' block.
 nr = p.n_rx;
 cyc = round(p.cycle_s * fs);          % channel samples from one frame to the next (one decision cycle)
 real_rx = strcmpi(p.rx_sync, 'real');
 if real_rx
-    pers = ' cfo fl';
-    imp = sprintf(['if isempty(cfo)\n    cfo = %.6f * (2*rand - 1);\nend\n' ...
-        'if isempty(fl)\n    fl = cos(2*pi*rand);\nend\n'], 2 * p.cfo_ppm * 1e-6 * p.carrier_freq);
+    pers = ' cfo';
+    imp = sprintf('if isempty(cfo)\n    cfo = %.6f * (2*rand - 1);\nend\n', 2 * p.cfo_ppm * 1e-6 * p.carrier_freq);
     dly = sprintf(['tau = rand * %.6f;\n' ...
         'kk = [0:ceil(Ns/2)-1, -floor(Ns/2):-1].'';\n' ...
         'x = ifft(fft(x) .* exp(-1j*2*pi*kk*tau/Ns));\n' ...
         'r = exp(1j*2*pi*cfo*t);\n' ...
+        'fl = cosd(att(2)) * sind(att(1) + yaw * t(1));\n' ...
         'los = exp(1j*2*pi*fd*fl*t);\n'], p.timing_max_sym * p.sps);
     mix = '    y(:, k) = gk * bdy(k) * x .* r .* (sqrt(Kk/(Kk+1)) * a(:, k) .* gl .* los + sqrt(1/(Kk+1)) * D(:, k));\n';
 else
-    pers = ''; imp = ''; dly = '';
+    pers = ''; imp = ''; dly = sprintf('tau = 0;\n');
     mix = '    y(:, k) = gk * bdy(k) * x .* (sqrt(Kk/(Kk+1)) * a(:, k) .* gl + sqrt(1/(Kk+1)) * D(:, k));\n';
 end
 % airframe shadowing: the antenna the airframe hides from the GCS at this frame's attitude
-% (shadow_hidden.m; none while the roll or the heading leaves the line of sight clear)
-% loses p.shadow_db and its line of sight (K-factor p.shadow_k_db, Sun et al.)
+% (shadow_hidden.m; none while the attitude leaves the line of sight clear, the roll is not
+% one the level is measured at, or the UAV hovers) loses p.shadow_db and its line of sight
+% (K-factor p.shadow_k_db, Sun et al.)
 thr = lower(p.active_threat);
 shd = any(strcmp(strsplit(thr, '+'), 'airframe_shadowing'));
 if shd
@@ -434,7 +467,7 @@ if NT > 1
     mix = [strrep(mix, 'sqrt(1/(Kk+1)) * D(:, k)', 'sqrt(1/(Kk+1)) * tdl(1, 1) * D(:, k)') sprintf(['    for m = 1:%d\n' ...
         '        y(:, k) = y(:, k) + gk * bdy(k) * sqrt(1/(Kk+1)) * tdl(m+1, 1) * xd(:, m) .* Dt(:, k, m);\n    end\n'], NT-1)];
 end
-s = [sprintf('function y = fcn(x, seed, fd, kdb, yaw, rho, gcs, att, bdy, tdl)\n%%%%#codegen\npersistent f0 ph n%s\n', pers) ...
+s = [sprintf('function [y, tau] = fcn(x, seed, fd, kdb, yaw, rho, gcs, att, bdy, tdl)\n%%%%#codegen\npersistent f0 ph n%s\n', pers) ...
     sprintf('if isempty(f0)\n    rng(seed, ''twister'');\nend\nx = gcs * x;\n') ...
     sos_init('f0', 'ph', nr) imp ...
     sprintf('if isempty(n)\n    n = 0;\nend\nNs = size(x, 1);\nt = (n + (0:Ns-1).'') / %.1f;\nn = n + max(Ns, %d);\n', fs, cyc) ...
@@ -457,6 +490,10 @@ function s = threat_script(p, fs)
 % delay line, every waveform runs Nw samples at times tw, from the line's longest delay
 % before the frame, and tap m carries it m taps late with the diffuse amplitude of the
 % interferer's column of the 'Tdl' block.
+% Per frame every component's share on the air, actc, in the threat's order; output 2 their
+% union (1 while a component that is not gated is on the air, else the largest gated
+% share), output 3 [actc levc]: levc the level each additive component reaches over our
+% signal on its weakest antenna in the frame [dB] (sig_weak_db.m).
 nr  = p.n_rx;
 sps = p.sps;
 thr = lower(p.active_threat);
@@ -465,55 +502,65 @@ if any(strcmp(thr, {'', 'none'}))
 else
     parts = strsplit(thr, '+');
 end
+if numel(parts) > 3
+    error('build_threat_model: at most three threat components, not %d', numel(parts));
+end
 SIGSIDE = {'path_loss', 'antenna_fault', 'airframe_shadowing'};
 sig  = parts(ismember(parts, SIGSIDE));
 addc = parts(~ismember(parts, SIGSIDE));
 if numel(addc) > numel(p.int_aoa_deg)
     error('build_threat_model: %d additive components, only %d interferer directions', numel(addc), numel(p.int_aoa_deg));
 end
+slot = @(c) find(strcmp(parts, c), 1);             % a component's place in actc and levc
 PL = 0;
 if ismember('path_loss', sig), PL = p.path_loss_db; end
+shd = shadow_spec(p);
+VC = p.c_light / p.carrier_freq;                   % speed per Hz of Doppler
 
 pers = {}; init = {}; body = {}; tpers = {}; tinit = {};
 if any(ismember(sig, {'antenna_fault'}))
     pers{end+1} = 'hit_ant'; init{end+1} = sprintf('hit_ant = randi(%d);', nr);   % the antenna with the open connector
 end
-body{end+1} = sprintf('Ns = size(u, 1);\ny = u;\nt = (nI + (0:Ns-1).'') / %.1f;\nnI = nI + max(Ns, %d);\nnfr = nfr + 1;\nact = %d;\nasg = 0;\n', ...
-    fs, round(p.cycle_s * fs), double(~isempty(parts)));   % interferer channels on the same clock as ours; nfr: frame of the run
+body{end+1} = sprintf(['Ns = size(u, 1);\ny = u;\nt = (nI + (0:Ns-1).'') / %.1f;\nnI = nI + max(Ns, %d);\nnfr = nfr + 1;\n' ...
+    'actc = nan(1, 3);\nlevc = nan(1, 3);\nplon = 0;\n'], fs, round(p.cycle_s * fs));   % interferer channels on the same clock as ours; nfr: frame of the run
 
 on1 = p.pl_onset_frames(1); on2 = p.pl_onset_frames(end);
 for i = 1:numel(sig)
+    k = slot(sig{i});
     switch sig{i}
         case 'path_loss'
             % a step of attenuation from the onset frame on, drawn per run in the range
             % (an obstruction or terrain masking; a constant loss from the first frame is a
             % longer range)
-            body{end+1} = sprintf('if nfr >= pl_on\n    y = y * %.8f;\n    asg = 1;\nend\n', 10^(-p.path_loss_db/20)); %#ok<AGROW>
+            body{end+1} = sprintf('actc(%d) = 0;\nif nfr >= pl_on\n    y = y * %.8f;\n    actc(%d) = 1;\n    plon = %.8f;\nend\n', ...
+                k, 10^(-PL/20), k, PL); %#ok<AGROW>
         case 'antenna_fault'
             % applied after the interferers: the connector sits between the antenna and its receiver
-            body{end+1} = sprintf('asg = 1;\n'); %#ok<AGROW>
+            body{end+1} = sprintf('actc(%d) = 1;\n', k); %#ok<AGROW>
         case 'airframe_shadowing'
             % applied in the channel: the hidden antenna loses its line of sight there
-            body{end+1} = sprintf(['if shadow_hidden(att(1) + yaw * t(1), att(2), att(3), att(4), %d, %.6f, %.6f) > 0\n' ...
-                '    asg = 1;\nend\n'], nr, p.shadow_roll_deg, p.shadow_hdg_deg); %#ok<AGROW>
+            body{end+1} = sprintf('actc(%d) = double(shadow_hidden(att(1) + yaw * t(1), att(2), att(3), att(4), %d, %s, %.6f, fd * %.12g, %.6f) > 0);\n', ...
+                k, nr, mat2str(shd(2:3), 10), shd(4), VC, shd(5)); %#ok<AGROW>
     end
 end
-if ~isempty(sig) && isempty(addc)
-    body{end+1} = sprintf('act = asg;\n');          % signal-side threats only: on the air as their state says
-end
 [NT, S] = tdl_taps(p, fs); E = (NT - 1) * S;
-if NT > 1 && ~isempty(addc)                         % ys: our signal as the reactive jammer senses it
-    body{end+1} = sprintf('Nw = Ns + %d;\ntw = [t(1) - (%d:-1:1).'' / %.1f; t];\nys = [zeros(%d, 1); y(:, 1)];\n', E, E, fs, E);
+if NT > 1 && ~isempty(addc)
+    body{end+1} = sprintf('Nw = Ns + %d;\ntw = [t(1) - (%d:-1:1).'' / %.1f; t];\n', E, E, fs);
 elseif ~isempty(addc)
-    body{end+1} = sprintf('Nw = Ns;\ntw = t;\nys = y(:, 1);\n');
+    body{end+1} = sprintf('Nw = Ns;\ntw = t;\n');
 end
 
 if ~isempty(addc)
-    body{end+1} = [sprintf('Ki = 10^(kdb(2)/10);\n') pitch_code()];
+    % our signal on its weakest antenna in this frame [dB], the path-loss step included
+    body{end+1} = [sprintf('Ki = 10^(kdb(2)/10);\n') pitch_code() ...
+        sprintf('wk = 20*log10(gcs) + sig_weak_db(att, yaw, t(1), [t(1); t(Ns)], kdb(1), bdy, %s, fd * %.12g, %.6f) - plon;\n', ...
+        mat2str(shd, 10), VC, p.uav_null_db)];
 end
 for c = 1:numel(addc)
     comp = addc{c};
+    k = slot(comp);
     lf = 'jsr_db';                                  % level field of the component
+    gated = false;
     switch comp
         case 'jamming'
             w = sprintf('w = sqrt(%.8f/2) * complex(randn(Nw, 1), randn(Nw, 1));\n', 10^(p.jsr_db/10));
@@ -529,37 +576,54 @@ for c = 1:numel(addc)
             if ~isempty(p.benign_occ)
                 % WLAN packets: log-uniform durations; idle gaps gamma-distributed with the
                 % field shape, their mean set by the flight's occupancy (Marsaglia-Tsang
-                % sampler, boosted for a shape below 1); the schedule runs on the channel clock
+                % sampler, boosted for a shape below 1); the schedule runs on the channel
+                % clock, on with the occupancy's probability from t = 0 (its first switch)
+                gated = true;
                 d = p.benign_pkt_s; md = (d(2) - d(1)) / log(d(2) / d(1));
                 pers{end+1} = 'b_occ'; init{end+1} = sprintf('b_occ = %.6f + %.6f * rand;', p.benign_occ(1), diff(p.benign_occ)); %#ok<AGROW>
-                pers{end+1} = 'b_on'; init{end+1} = 'b_on = rand < b_occ;'; %#ok<AGROW>
+                pers{end+1} = 'b_on'; init{end+1} = 'b_on = rand >= b_occ;'; %#ok<AGROW>
                 pers{end+1} = 'b_next'; init{end+1} = 'b_next = 0;'; %#ok<AGROW>
                 w = sprintf(['on = false(Nw, 1);\nfor i = 1:Nw\n    while tw(i) >= b_next\n' ...
                     '        if b_on\n            b_on = false;\n' gamma_draw(p.benign_idle_shape, 'gg') ...
                     '            b_next = b_next + gg * %.10f * (1 - b_occ) / b_occ / %.10f;\n' ...
                     '        else\n            b_on = true; b_next = b_next + exp(%.8f + %.8f * rand);\n        end\n' ...
-                    '    end\n    on(i) = b_on;\nend\nact = mean(double(on(Nw-Ns+1:Nw)));\n' ...
+                    '    end\n    on(i) = b_on;\nend\nactc(%d) = mean(double(on(Nw-Ns+1:Nw)));\n' ...
                     'w = sqrt(%.8f/2) * complex(randn(Nw, 1), randn(Nw, 1)) .* on;\n'], ...
-                    md, p.benign_idle_shape, log(d(1)), log(d(2) / d(1)), 10^(p.benign_int_db/10));
+                    md, p.benign_idle_shape, log(d(1)), log(d(2) / d(1)), k, 10^(p.benign_int_db/10));
             else
                 w = sprintf('w = sqrt(%.8f/2) * complex(randn(Nw, 1), randn(Nw, 1));\n', 10^(p.benign_int_db/10));
             end
         case 'noise_burst'
-            % bursts from the flight's phase of their period ('Gate' block)
-            ps = p.burst_period * sps; on = round(p.burst_duty * ps);
-            pers{end+1} = 'k_nb'; init{end+1} = sprintf('k_nb = floor(gate(3) * %d);', ps); %#ok<AGROW>
-            w = gated_noise('k_nb', ps, on, 10^(p.jsr_db/10));
+            % a random jammer (Xu et al.): bursts of U[0, p.burst_on_sym] symbols and sleeps
+            % of U[0, p.burst_on_sym (1 - a) / a], a the flight's duty gate(4), on the channel
+            % clock; on from the run's start when gate(3) < a, its first switch inside that
+            % burst or sleep
+            pers{end+1} = 'nb_on'; init{end+1} = 'nb_on = gate(3) < gate(4);'; %#ok<AGROW>
+            pers{end+1} = 'nb_next'; init{end+1} = sprintf('nb_next = rand * %.10g * (nb_on + (~nb_on) * (1 - gate(4)) / gate(4));', ...
+                p.burst_on_sym / p.symbol_rate); %#ok<AGROW>
+            w = sprintf(['ton = %.10g;\ntoff = ton * (1 - gate(4)) / gate(4);\non = false(Nw, 1);\nfor i = 1:Nw\n' ...
+                '    while tw(i) >= nb_next\n        if nb_on\n            nb_on = false; nb_next = nb_next + rand * toff;\n' ...
+                '        else\n            nb_on = true; nb_next = nb_next + rand * ton;\n        end\n    end\n' ...
+                '    on(i) = nb_on;\nend\nw = sqrt(%.8f/2) * complex(randn(Nw, 1), randn(Nw, 1)) .* on;\n'], ...
+                p.burst_on_sym / p.symbol_rate, 10^(p.jsr_db/10));
         case 'sweeping_jammer'
             % on our channel while the sweep's window covers it, on the channel clock: the
             % flight's sweep period gate(1) and phase gate(2)
+            gated = true;
             g = sweep_window_s(p);
             w = sprintf(['tsw = mod(tw + gate(2), gate(1));\non = tsw >= %.10g & tsw < %.10g;\n' ...
-                'act = mean(double(on(Nw-Ns+1:Nw)));\n' ...
-                'w = sqrt(%.8f/2) * complex(randn(Nw, 1), randn(Nw, 1)) .* on;\n'], g(1), g(2), 10^(p.jsr_db/10));
+                'actc(%d) = mean(double(on(Nw-Ns+1:Nw)));\n' ...
+                'w = sqrt(%.8f/2) * complex(randn(Nw, 1), randn(Nw, 1)) .* on;\n'], g(1), g(2), k, 10^(p.jsr_db/10));
         case 'reactive_jamming'
-            w = sprintf(['w = complex(zeros(Nw, 1));\nfor i = 1:Nw\n    if abs(ys(i))^2 > %.8f\n' ...
-                '        w(i) = sqrt(%.8f/2) * complex(randn, randn);\n    end\nend\n'], ...
-                p.reactive_threshold / sps, 10^(p.jsr_db/10));
+            % on from our transmitted frame's start, as an energy detector hears the GCS's
+            % transmitter output xt (before any channel: no fading, path loss or airframe
+            % loss of ours reaches it), plus the reaction delay p.reactive_delay_s, until the
+            % frame's end; at the frame's arrival at the UAV, tau samples late (Channel output 2)
+            w = sprintf(['i1 = 0; i2 = 0;\nfor i = 1:Ns\n    if abs(xt(i))^2 > %.8f\n        if i1 == 0\n' ...
+                '            i1 = i;\n        end\n        i2 = i;\n    end\nend\non = false(Nw, 1);\nif i1 > 0\n' ...
+                '    for i = 1:Ns\n        on(%d + i) = i - i1 >= tau + %.6f && i - i2 <= tau;\n    end\nend\n' ...
+                'w = sqrt(%.8f/2) * complex(randn(Nw, 1), randn(Nw, 1)) .* on;\n'], ...
+                p.reactive_threshold / sps, E, p.reactive_delay_s * fs, 10^(p.jsr_db/10));
         case 'spoofing'
             lf = 'spoof_sir_db';
             pers{end+1} = 'spoof_txf'; %#ok<AGROW>
@@ -571,12 +635,20 @@ for c = 1:numel(addc)
         otherwise
             error('build_threat_model: unsupported threat component ''%s''', comp);
     end
+    if ~gated
+        w = [w sprintf('actc(%d) = 1;\n', k)]; %#ok<AGROW>
+    end
     if isfinite(p.inband_cap_db)
-        % in-band cap on the level before any countermeasure; the countermeasure's own
-        % reduction (the level field of p) still applies on top
+        % in-band cap on the level before any countermeasure, against our signal's weakest
+        % antenna over the run (the 'Cap' block, flight_draws.m) and the path-loss step: the
+        % emitter's power stays fixed; the countermeasure's own reduction (the level field of
+        % p) still applies on top
         L = p.(lf);
         if isfield(p, 'inband_ref') && isfield(p.inband_ref, lf), L = p.inband_ref.(lf); end
-        w = [w sprintf('w = w * min(1, %.10g * gcs * min(bdy));\n', inband_cap_amp(L, PL, p.inband_cap_db))]; %#ok<AGROW>
+        w = [w sprintf('cf = min(1, %.10g * cap);\nw = w * cf;\nlevc(%d) = %.6f + 20*log10(cf) - wk;\n', ...
+            inband_cap_amp(L, PL, p.inband_cap_db), k, p.(lf))]; %#ok<AGROW>
+    else
+        w = [w sprintf('levc(%d) = %.6f - wk;\n', k, p.(lf))]; %#ok<AGROW>
     end
     fI = sprintf('fI%d', c); pI = sprintf('pI%d', c);
     pers{end+1} = fI; init{end+1} = sprintf('%s = cos(2*pi*rand(32, %d));', fI, nr); %#ok<AGROW>
@@ -617,12 +689,16 @@ if p.chain_amp_db > 0 || p.chain_phase_deg > 0
         p.chain_amp_db, nr, deg2rad(p.chain_phase_deg), nr); %#ok<AGROW>
     body{end+1} = sprintf('for k = 1:%d\n    y(:, k) = y(:, k) * gch(k);\nend\n', nr); %#ok<AGROW>
 end
+% union of the components on the air: 1 while one that is not gated is, else the largest
+% gated share
+body{end+1} = sprintf('act = 0;\nfor i = 1:3\n    if ~isnan(actc(i)) && actc(i) > act\n        act = actc(i);\n    end\nend\ncomp = [actc levc];\n');
 
 pers = [{'nI', 'nfr'}, pers, tpers]; init = [{'nI = 0;', 'nfr = 0;'}, init, tinit];   % the delay line's sinusoids drawn last
 if ismember('path_loss', sig)                       % then the onset frame of the path-loss step
     pers{end+1} = 'pl_on'; init{end+1} = sprintf('pl_on = %d + floor(%d * rand);', on1, on2 - on1 + 1);
 end
-head = sprintf('function [y, act] = fcn(u, seed, fd, aoa, kdb, yaw, rho, gcs, att, gate, tdl, bdy)\n%%#codegen\npersistent seeded\n');
+head = sprintf(['function [y, act, comp] = fcn(u, seed, fd, aoa, kdb, yaw, rho, gcs, att, gate, tdl, bdy, xt, tau, cap)\n' ...
+    '%%#codegen\npersistent seeded\n']);
 for i = 1:numel(pers)
     head = [head sprintf('persistent %s\n', pers{i})]; %#ok<AGROW>
 end
@@ -1747,11 +1823,13 @@ end
 
 %% ===================== Helpers =====================
 function c = shadow_code(p, on)
-% Hidden antenna hs of the frame, from the 'Att' block and the heading (shadow_hidden.m).
+% Hidden antenna hs of the frame, from the 'Att' block, the heading and the speed
+% (shadow_hidden.m, shadow_spec.m).
 c = '';
 if ~on, return; end
-c = sprintf('hs = shadow_hidden(att(1) + yaw * t(1), att(2), att(3), att(4), %d, %.6f, %.6f);\n', ...
-    p.n_rx, p.shadow_roll_deg, p.shadow_hdg_deg);
+s = shadow_spec(p);
+c = sprintf('hs = shadow_hidden(att(1) + yaw * t(1), att(2), att(3), att(4), %d, %s, %.6f, fd * %.12g, %.6f);\n', ...
+    p.n_rx, mat2str(s(2:3), 10), s(4), p.c_light / p.carrier_freq, s(5));
 end
 
 function g = tone_gain(p)
@@ -1759,12 +1837,6 @@ function g = tone_gain(p)
 % into our band after the receive filter, a tone inside the passband puts all of
 % its power there, so the tone gets JSR/sps for the same in-band ratio.
 g = 1 / p.sps;
-end
-
-function w = gated_noise(k, period, on, pw)
-w = sprintf(['w = complex(zeros(Nw, 1));\nfor i = 1:Nw\n    if mod(%s, %d) < %d\n' ...
-    '        w(i) = sqrt(%.8f/2) * complex(randn, randn);\n    end\n    %s = %s + 1;\nend\n'], ...
-    k, period, on, pw, k, k);
 end
 
 function c = sos_init(fv, pv, nr)
@@ -1901,8 +1973,12 @@ d = struct('n_rx', 3, 'ant_aperture_m', 1.2, 'rx_corr', 0.3, 'gcs_aoa_deg', 0, .
     'sweep_speed_hz_s', 1e9, 'sweep_bw_hz', 4e6, 'sweep_period_s', [20e-3 83.5e-3], 'jam_timing_random', false, ...
     'fdiv_spacing_hz', 25e6, 'sweep_fdiv', false, ...
     'tdl', false, 'tdl_random', false, 'tdl_ds_ns', [0 0], 'tdl_step_ns', 250, 'tdl_max_ns', 4500, ...
-    'tdl_sig_ds', [-6.52 0.32; -6.63 0.16], 'tdl_sig_alt_m', 25, 'tdl_int_ds', [-6.63 0.16], 'tdl_clip_ns', 1000, ...
-    'pl_onset_frames', [1 1], 'shadow_roll_deg', 5, 'shadow_hdg_deg', 30, 'roll_deg', 0);
+    'tdl_sig_ds', [-6.52 0.32; -6.63 0.16; -6.43 0.26], 'tdl_sig_alt_m', [25 75], 'tdl_int_ds', [-6.63 0.16], ...
+    'tdl_clip_ns', 2250, ...
+    'pl_onset_frames', [1 1], 'shadow_roll_deg', 16.1, 'shadow_hdg_deg', 30, 'roll_deg', 0, ...
+    'shadow_fit', [12.4 0.25 4.4], 'shadow_fit_z', 1.96, 'shadow_v_min', 8, 'reactive_delay_s', 0, ...
+    'burst_duty_range', [0.5 0.5], 'burst_duty', 0.5, 'burst_on_sym', 31, 'cap_frames', 1, ...
+    'cal_random', false, 'cal_err_db', 0);
 f = fieldnames(d);
 for i = 1:numel(f)
     if ~isfield(p, f{i}), p.(f{i}) = d.(f{i}); end

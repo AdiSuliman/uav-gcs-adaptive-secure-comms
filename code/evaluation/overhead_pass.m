@@ -1,8 +1,8 @@
 %% OVERHEAD_PASS - The link while the UAV flies over the GCS
 % When the UAV passes over the GCS, the GCS lies near the axis of the UAV's vertical
-% omni antennas: a half-wave dipole has a null there, and on a drone the measured
-% gain directly below is about 30 dB under its horizon gain (24 dB above; Badi et
-% al., 2019). The pass is also the shortest distance of the flight. For every height of
+% omni antennas: a half-wave dipole has a null there, floored at 30 dB under its horizon
+% gain (a drone-to-drone link lost up to 30 dB of RSS with the elevation angle, Badi et
+% al. 2019, Sec. 4.2). The pass is also the shortest distance of the flight. For every height of
 % the altitude grid and every cruise distance of the Eb/N0 grid (link_distance_km.m), this
 % script finds the largest drop of our signal below its cruise level along a straight
 % pass over the GCS mast (overhead_drop_db.m): the free-space change plus the change of

@@ -18,7 +18,10 @@ function [P, info] = pool_cell(p, threat, actions, ebno, geo, det, opt)
 %            maha, feat (link_features.m), gant (mean channel gain of every antenna),
 %            ber and fer (ground truth), crc (the receiver's CRC result, NaN on a coded
 %            packet's first frame), run, aoa, act (share of the frame with the threat
-%            on the air)
+%            on the air, the union over a combination's components), act_comp (frames x 3,
+%            each component's share in the threat's order) and ebno_rx (received Eb/N0
+%            [dB]: the Eb/N0 of the configuration, its gain and the relay loss included,
+%            less the path-loss step on the frames where it is on the air, received_ebno.m)
 %   info     configurations actually simulated (identical physics is simulated once)
 modelName = 'UAV_GCS_Threat_Link';
 nA = numel(actions); nS = numel(ebno); nSp = numel(geo{1});
@@ -54,7 +57,8 @@ for a = 1:nA
                     'k_sig_db', geo_value(g, 'ksig', r), 'aoa1_deg', geo_value(g, 'aoa1', r), 'rho', geo_value(g, 'rho', r)));
                 F = extract_closed_loop_frames(sim(modelName, 'StopTime', stop_time), p2, opt.delay_bits);
                 disk_guard;
-                Q = add_run(Q, F, det, opt.tw, g.run(r), d.aoa);
+                erx = received_ebno(p2.active_threat, ebno(s) + g_db - loss, F.act_comp, p2.path_loss_db);
+                Q = add_run(Q, F, det, opt.tw, g.run(r), d.aoa, erx);
             end
             P{s, a, sp} = Q;
         end
@@ -71,7 +75,8 @@ function Q = empty_pool(nC, nF)
 Q = struct('probs', zeros(0, nC, 'single'), 'maha', zeros(0, 1, 'single'), 'feat', zeros(0, nF, 'single'), ...
     'gant', zeros(0, 0, 'single'), 'ber', zeros(0, 1), 'fer', zeros(0, 1, 'single'), 'crc', zeros(0, 1, 'single'), ...
     'run', zeros(0, 1), ...
-    'aoa', zeros(0, 3, 'single'), 'act', zeros(0, 1, 'single'));
+    'aoa', zeros(0, 3, 'single'), 'act', zeros(0, 1, 'single'), 'act_comp', zeros(0, 3, 'single'), ...
+    'ebno_rx', zeros(0, 1, 'single'));
 end
 
 function v = geo_value(g, f, r)
@@ -79,7 +84,7 @@ function v = geo_value(g, f, r)
 if isfield(g, f), v = g.(f)(r); else, v = NaN; end
 end
 
-function Q = add_run(Q, F, det, tw, run_id, aoa)
+function Q = add_run(Q, F, det, tw, run_id, aoa, erx)
 % Complete frames of one sub-run with the detector outputs and link features.
 v = find(~isnan(F.ber));
 if isempty(v), return; end
@@ -99,4 +104,6 @@ Q.run = [Q.run; repmat(run_id, n, 1)];
 a3 = nan(1, 3); a3(1:min(3, numel(aoa))) = aoa(1:min(3, numel(aoa)));
 Q.aoa = [Q.aoa; repmat(single(a3), n, 1)];
 Q.act = [Q.act; single(F.act(v)')];
+Q.act_comp = [Q.act_comp; single(F.act_comp(:, v)')];
+Q.ebno_rx = [Q.ebno_rx; single(erx(v)')];
 end

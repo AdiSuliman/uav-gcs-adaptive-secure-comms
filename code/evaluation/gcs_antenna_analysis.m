@@ -2,10 +2,10 @@
 % The GCS antenna adds its gain to our signal at the UAV; the jammer is received by the
 % UAV's own antennas and is not changed, so every dB of gain is a dB less jammer-to-signal
 % ratio for the same jammer. In the 2.4 GHz licence-exempt band the radiated power is
-% capped in the direction of strongest radiation: 100 mW e.i.r.p. in Israel (Ministry of
-% Communications exemption list), as ETSI EN 300 328, which also caps the density at
-% 10 mW in any 1 MHz (non-FHSS wideband): our RRC signal puts 95.5% of its power in its
-% central 1 MHz, so 10.2 dBm (eirp_cap_dbm.m), the stricter.
+% capped in the direction of strongest radiation: ETSI EN 300 328, 100 mW e.i.r.p.
+% (4.3.2.2.3), and the density at 10 mW in any 1 MHz (4.3.2.3.3, non-FHSS wideband): our
+% RRC signal puts 95.5% of its power in its central 1 MHz, so 10.2 dBm (eirp_cap_dbm.m),
+% the stricter.
 % The antenna therefore helps exactly as far as the radio stays below the cap: a radio
 % that already reaches it with an omni gains nothing. The GCS of init_params.m is an
 % AD9361-class transmitter (0.25 dB steps, up to 7.5 dBm at 2.4 GHz for a CW tone, so our
@@ -16,7 +16,7 @@
 % azimuth and 1.51 deg elevation (Nugroho & Dectaviansyah), half-normal, ITU-R F.1336
 % main lobe G = G0 - 12 (phi/phi3)^2, phi3 = sqrt(27000 10^(-G0/10)) deg (gcs_pointing.m).
 % A tracker that lost its target (GPS not fixed for 202 s at start-up, Nugroho &
-% Dectaviansyah) falls back to the omni (Boeing, US 8,503,941).
+% Dectaviansyah) falls back to the omni (an assumed fallback: 12 - 2 = 10 dB less).
 % Every loss below is the same on every UAV antenna: to the detector and the policy it is
 % path loss.
 % Output: results/gcs_antenna.txt

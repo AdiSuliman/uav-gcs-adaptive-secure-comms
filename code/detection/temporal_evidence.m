@@ -24,10 +24,12 @@ function [x, names] = temporal_evidence(P, G, Fw)
 %       off_w    mean per-cycle offset of the weakest antenna (lowest window mean)
 %                from the median of the others [dB] (Willgert, US 8,548,029, eq. 5)
 %       rat_w    standard deviation of that offset over |off_w|, at most 10: a loss in
-%                the RF path is a steady offset (|mean| > 3 dB, ratio < 3), a pattern
-%                or geometry effect a small mean with a large spread (Willgert, Table
-%                1); a diversity imbalance above 5 dB that persists marks a degraded
-%                antenna connection (Heath, US 10,404,368, Table 2)
+%                the RF path is a steady offset (|average| > 3 dB, std / |average|
+%                under the "3 dB" Willgert's Table 1 writes for the ratio, read here as
+%                3), a pattern or geometry effect a small mean with a large spread
+%                (Willgert, Table 1); a severely degraded antenna connection shows as one
+%                branch weaker than the other with a diversity-imbalance indicator, which
+%                fires at a branch difference above 5 dB (Heath, US 10,404,368, Table 2)
 %       k_w      Rician K of the weakest antenna over the window's valid cycles,
 %                moment method K = sqrt(Ga^2 - Gv^2) / (Ga - sqrt(Ga^2 - Gv^2)), Ga
 %                the mean power and Gv its RMS fluctuation (Aoki & Honda 2025, eq. 2)

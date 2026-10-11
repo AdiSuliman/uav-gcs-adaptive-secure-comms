@@ -85,7 +85,7 @@ spd = cell2mat(arrayfun(@(s) geo{s}.speed, (1:nS)', 'UniformOutput', false));
 z = nan(nS, N_GEO);
 V = struct('seed', z, 'speed', z, 'alt_m', z, 'k_sig', z, 'k_int', z, 'yaw', z, 'rho', z, 'gcs_point_db', z, 'el_db', z, ...
     'aoa', nan(nS, N_GEO, 3), 'align', nan(nS, N_GEO, 3), 'gcs_aoa', z, 'el_deg', z, 'bank', z, 'roll', z, 'pitch', z, ...
-    'wob', z, 'att_db', z, 'body_spread_db', z, 'jam', nan(nS, N_GEO, 3), 'ds_ns', z, 'ds_int', nan(nS, N_GEO, 3));
+    'wob', z, 'att_db', z, 'body_spread_db', z, 'jam', nan(nS, N_GEO, 4), 'ds_ns', z, 'ds_int', nan(nS, N_GEO, 3));
 for s = 1:nS                                            % every per-flight draw, as in PP.cov (build_policy_pools.m)
     g = geo{s};
     for r = 1:N_GEO

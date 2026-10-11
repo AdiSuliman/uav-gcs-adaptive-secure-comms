@@ -61,7 +61,8 @@ C.q_partial  = 40;          % best quality below restoration (log-linear to 0 at
 % Threat severities of the frame pools, five per threat over the full range (the
 % middle one is init_params' nominal), the strongest at the sources' most severe
 % value (dataset_levels.m): in-band interferers, spoofer and WLAN packets up to
-% 30 dB over our signal, path loss up to 22 dB, airframe shadowing up to 25 dB, an
+% 30 dB over our signal, path loss up to 22 dB (Simunek et al. 2011), airframe shadowing
+% up to 25 dB, each level flown at the rolls Sun et al.'s fit pairs with it, an
 % antenna fault from a partial connector loss to an open contact, 5-31 dB in even steps
 % (dataset_levels.m).
 % Combined threats run at the middle three (C.combo_sev).
