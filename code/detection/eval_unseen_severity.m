@@ -11,8 +11,10 @@
 %            fault, trained up to 31 dB, is tested at 36 dB (an open contact of
 %            0.01 pF, the gap-capacitance estimate)
 % Per frame of the threat: correct class, a class that calls for the same countermeasure
-% (rule_based_policy.m), or flagged unknown (production score below the threshold
-% keeping 95% of known validation frames). One block per Eb/N0 gives fewer flights than
+% (rule_based_policy.m), or flagged unknown: the statistic of the decision cycle, the
+% production score averaged over the last ood.win cycles of the block (ood_window.m,
+% partial windows at its start), below its threshold (ood_thresholds.m, 95% of the known
+% validation frames kept on the same statistic). One block per Eb/N0 gives fewer flights than
 % a verdict needs (edge_verdict.m): generalization evidence at the midpoints, read by
 % edge_map.m. Block k runs on seed 5,500,000 + k.
 % Decision rule, fixed before the run: the training levels are extended to the
@@ -53,6 +55,7 @@ end
 D = load('data/trained_detector.mat', 'net', 'classes', 'ood');
 classes = cellstr(string(D.classes(:)'));
 Tood = ood_thresholds(0.95);
+UW = 1; if isfield(D.ood, 'win') && ~isempty(D.ood.win), UW = D.ood.win; end   % unknown-score window
 FZ = struct('FM', [], 'N', 1);
 if isfile('data/fusion.mat'), FZ = load('data/fusion.mat', 'FM', 'N'); end   % temporal fusion (select_fusion.m)
 p0 = load('params.mat').params; p0.quiet_build = true;
@@ -77,11 +80,12 @@ for t = 1:numel(threat_cfg)
                 kb = kb + 1;
                 v_kmh = p0.speed_kmh_min + rand() * (p0.speed_kmh_max - p0.speed_kmh_min);
                 [tl, pred, sc] = detector_block(G, p, ebno, SEED0 + kb, v_kmh);
+                sw = ood_window(sc, ones(size(sc)), [], UW)';   % the block's frames in time order
                 on = strcmp(tl, cfg.name);                  % frames of the threat (the dataset's labels)
                 R(end+1) = struct('threat', cfg.name, 'kind', KINDS{kk}, 'level', lv, 'ebno', ebno, 'seed', SEED0 + kb, ...
                     'speed', v_kmh, 'n', sum(on), 'correct', sum(strcmp(pred(on), cfg.name)), ...
                     'same_action', sum(cellfun(@(c) strcmp(act_of(c), act_of(cfg.name)), pred(on))), ...
-                    'unknown', sum(sc(on) < Tood.maha)); %#ok<SAGROW>
+                    'unknown', sum(sw(on) < Tood.maha)); %#ok<SAGROW>
             end
         end
     end
@@ -91,8 +95,9 @@ end
 %% 3. Report: per threat and level, pooled over Eb/N0
 rep = {'=== DETECTOR AT UNSEEN THREAT SEVERITIES ==='};
 rep{end+1} = sprintf(['Generated: %s | %d frames per (level, Eb/N0) block, Eb/N0 %s dB, random speed per block | %s | ' ...
-    'unknown = production score (%s) below the 95%%-retention threshold'], datestr(now), N_FRAMES, mat2str(EBNO), ...
-    ternary(isempty(FZ.FM), 'per-frame reading', sprintf('fused over the last %d cycles', FZ.N)), D.ood.score);
+    'unknown = production score (%s) averaged over the last %d cycles below the 95%%-retention threshold of the same ' ...
+    'statistic'], datestr(now), N_FRAMES, mat2str(EBNO), ...
+    ternary(isempty(FZ.FM), 'per-frame reading', sprintf('fused over the last %d cycles', FZ.N)), D.ood.score, UW);
 rep{end+1} = 'Rule fixed before the run: extend the training levels if, above the range, < 90% of a threat''s frames get the same countermeasure.';
 rep{end+1} = '';
 rep{end+1} = sprintf('%-20s %-8s %7s %7s %9s %13s %9s', 'threat', 'kind', 'level', 'frames', 'correct', 'same action', 'unknown');

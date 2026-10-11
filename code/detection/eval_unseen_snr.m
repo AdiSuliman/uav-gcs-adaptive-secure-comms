@@ -12,6 +12,9 @@
 % 36 blocks per class at each point, each at its own speed, the levels cycled over
 % dataset_levels.m, for the detector's verdict there (edge_verdict.m, read by
 % edge_map.m); the policy is not measured beyond 0-15 dB.
+% A block is read at its Eb/N0; the clean frames after a path-loss step's window are the
+% link at a longer range, received the step's depth below it (detector_block.m, kpi_ebno.m),
+% and are reported apart, beside the table.
 % Block k runs on seed 4,500,000 + k.
 %
 % Output: results/unseen_snr.{txt,mat,png}
@@ -54,7 +57,7 @@ G = struct('model', 'UAV_GCS_Threat_Link', 'stop_time', num2str(N_FRAMES * p0.fr
 act_of = containers.Map(classes, cellfun(@(c) rule_based_policy(c), classes, 'UniformOutput', false));
 
 %% 2. Generate and classify
-truth = {}; pred = {}; ebno_of = [];
+truth = {}; pred = {}; ebno_of = []; apart = false(1, 0); rx_of = [];
 blk = struct('cls', {}, 'level', {}, 'ebno', {}, 'seed', {}, 'speed', {}, 'n', {}, 'correct', {}, 'same_action', {});
 kb = 0;
 t0 = tic;
@@ -67,8 +70,9 @@ for t = 1:numel(threat_cfg)
         evalc('build_threat_model(p)');
         for s = 1:numel(EBNO_ALL)
             kb = kb + 1;
-            [tl, pl] = detector_block(G, p, EBNO_ALL(s), SEED0 + kb, v_kmh);
+            [tl, pl, ~, rx] = detector_block(G, p, EBNO_ALL(s), SEED0 + kb, v_kmh);
             truth = [truth, tl]; pred = [pred, pl]; ebno_of = [ebno_of, EBNO_ALL(s) * ones(1, numel(tl))]; %#ok<AGROW>
+            apart = [apart, rx < EBNO_ALL(s) & ~strcmp(tl, 'path_loss')]; rx_of = [rx_of, rx]; %#ok<AGROW>
             blk(end+1) = block_row(cfg.name, cfg.levels(lv), EBNO_ALL(s), SEED0 + kb, v_kmh, tl, pl, act_of); %#ok<SAGROW>
         end
     end
@@ -87,8 +91,9 @@ for t = 1:numel(DL)
             for b = bs
                 kb = kb + 1;
                 v_kmh = p0.speed_kmh_min + rand() * (p0.speed_kmh_max - p0.speed_kmh_min);
-                [tl, pl] = detector_block(G, p, e, SEED0 + kb, v_kmh);
+                [tl, pl, ~, rx] = detector_block(G, p, e, SEED0 + kb, v_kmh);
                 truth = [truth, tl]; pred = [pred, pl]; ebno_of = [ebno_of, e * ones(1, numel(tl))]; %#ok<AGROW>
+                apart = [apart, rx < e & ~strcmp(tl, 'path_loss')]; rx_of = [rx_of, rx]; %#ok<AGROW>
                 blk(end+1) = block_row(cfg.name, cfg.levels(lv), e, SEED0 + kb, v_kmh, tl, pl, act_of); %#ok<SAGROW>
             end
         end
@@ -96,11 +101,11 @@ for t = 1:numel(DL)
     fprintf('  [%d/%d] %-20s edge points done (%.1f min)\n', t, numel(DL), cfg.name, toc(t0)/60);
 end
 
-%% 3. Metrics per Eb/N0
+%% 3. Metrics per Eb/N0 (the frames read at their block's Eb/N0)
 EB = [EBNO_ALL, EBNO_EDGE];
 acc = nan(1, numel(EB)); f1 = acc; aeq = acc; n = acc;
 for s = 1:numel(EB)
-    m = ebno_of == EB(s);
+    m = ebno_of == EB(s) & ~apart;
     n(s) = sum(m);
     acc(s) = 100 * mean(strcmp(truth(m), pred(m)));
     f1(s)  = 100 * macro_f1(truth(m), pred(m), classes);
@@ -113,7 +118,11 @@ seen = ismember(EBNO_ALL, EBNO_SEEN);
 interp_acc = interp1(EBNO_ALL(seen), acc(seen), EBNO_ALL(~seen), 'linear');
 gap = acc(~seen) - interp_acc;
 
-mid = ismember(ebno_of, EBNO_ALL(~seen)); ms = ismember(ebno_of, EBNO_SEEN);
+mid = ismember(ebno_of, EBNO_ALL(~seen)) & ~apart; ms = ismember(ebno_of, EBNO_SEEN) & ~apart;
+% Apart: the clean frames after a path-loss step's window, received below their block
+AP = struct('n', sum(apart), 'n_all', numel(apart), 'rx_min_db', min([rx_of(apart), NaN]), ...
+    'rx_max_db', max([rx_of(apart), NaN]), 'accuracy_pct', 100 * mean(strcmp(truth(apart), pred(apart))), ...
+    'read_as_path_loss_pct', 100 * mean(strcmp(pred(apart), 'path_loss')));
 recall_unseen = nan(1, numel(classes)); recall_seen = recall_unseen;
 for c = 1:numel(classes)
     mu_ = strcmp(truth, classes{c}) & mid;
@@ -158,6 +167,11 @@ end
 rep{end+1} = '';
 rep{end+1} = sprintf('Accuracy: unseen %.1f%% | training grid %.1f%% | largest gap to the interpolated curve %.1f points (mean %+.1f)', ...
     summary.acc_unseen, summary.acc_seen, summary.max_gap, summary.mean_gap);
+if AP.n > 0
+    rep{end+1} = sprintf(['Apart from the table: %d of %d frames, the clean link after a path-loss step''s window, ' ...
+        'received %.1f to %.1f dB (the block less the step): read right (none) in %.1f%%, read as path_loss in %.1f%%.'], ...
+        AP.n, AP.n_all, AP.rx_min_db, AP.rx_max_db, AP.accuracy_pct, AP.read_as_path_loss_pct);
+end
 rep{end+1} = '';
 rep{end+1} = '--- Recall per class: training grid vs unseen Eb/N0 ---';
 for c = 1:numel(classes)
@@ -176,7 +190,7 @@ if ~exist('results', 'dir'), mkdir('results'); end
 fid = fopen('results/unseen_snr.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('\n%s\n', rep{:});
 save('results/unseen_snr.mat', 'summary', 'EBNO_ALL', 'EBNO_SEEN', 'EBNO_EDGE', 'acc', 'f1', 'aeq', 'n', 'gap', ...
-    'acc_edge', 'f1_edge', 'aeq_edge', 'n_edge', 'recall_seen', 'recall_unseen', 'classes', 'blk', 'edge');
+    'acc_edge', 'f1_edge', 'aeq_edge', 'n_edge', 'recall_seen', 'recall_unseen', 'classes', 'blk', 'edge', 'AP');
 
 fig = figure('Position', [100 100 760 420], 'Color', 'w'); hold on;
 plot(EBNO_ALL(seen), acc(seen), '-o', 'LineWidth', 1.6, 'MarkerFaceColor', [0 0.45 0.74], 'DisplayName', 'training Eb/N0');

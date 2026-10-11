@@ -10,11 +10,11 @@ function [net, info] = train_hybrid_net(tr, va, classes, opts)
 %   concat -> FC 64 (layer 'relu_merge', the embedding used for Mahalanobis
 %   scoring) -> dropout 0.3 -> FC nClasses ('fc_out') -> softmax.
 %   Training: Adam, cosine learning-rate decay to lr/20, L2 weight decay,
-%   time/frequency masking of the spectrogram (one band of each, 50% of the
-%   samples); cross-entropy weighted by the inverse class frequency of the
-%   training split (benign frames without a packet on the air are clean frames,
-%   so the classes are not equally large); best epoch by validation macro-F1,
-%   the KPI 1 metric.
+%   time/frequency masking of the spectrogram (spec_mask.m: one band of each, 50% of
+%   the samples, filled with the image's thermal-noise level); cross-entropy weighted
+%   by the inverse class frequency of the training split (benign frames without a
+%   packet on the air are clean frames, so the classes are not equally large); best
+%   epoch by validation macro-F1, the KPI 1 metric.
 
 if nargin < 4, opts = struct(); end
 o = struct('epochs', 30, 'batch', 64, 'lr', 1e-3, 'l2', 1e-4, 'augment', true, 'verbose', true);
@@ -115,14 +115,4 @@ for c = 1:C
     f(c) = 2 * tp / max(2 * tp + fp + fn, 1);
 end
 m = mean(f);
-end
-
-function X = spec_mask(X)
-% One time band (<= 16 columns) and one frequency band (<= 12 rows) set to the
-% image floor, on a random half of the batch.
-n = size(X, 4);
-for i = find(rand(1, n) < 0.5)
-    w = randi(16); c0 = randi(128 - w + 1); X(:, c0:c0+w-1, 1, i) = 0;
-    h = randi(12); r0 = randi(128 - h + 1); X(r0:r0+h-1, :, 1, i) = 0;
-end
 end
