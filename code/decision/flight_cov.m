@@ -8,15 +8,15 @@ function V = flight_cov(geo, ebno, p0)
 %           speed, alt_m, k_sig, k_int, yaw, rho, gcs_point_db, el_db, aoa and align (x 3:
 %           |a_g' a_i|^2 / n^2 of the steering vectors toward the GCS and each
 %           interferer), gcs_aoa, el_deg, bank, roll, pitch, wob, att_db, body_spread_db
-%           (spread of the airframe loss over the antennas), jam (x 3: sweep period, sweep
-%           phase, burst phase), ds_ns and ds_int (x 3: RMS delay spread of our signal and
-%           of each interferer [ns])
+%           (spread of the airframe loss over the antennas), jam (x 4: sweep period, sweep
+%           phase, burst start, burst duty; jam_timing.m), ds_ns and ds_int (x 3: RMS delay
+%           spread of our signal and of each interferer [ns])
 nS = numel(ebno); n = numel(geo{1}.seed);
 z = nan(nS, n);
 V = struct('seed', z, 'speed', z, 'alt_m', z, 'k_sig', z, 'k_int', z, 'yaw', z, 'rho', z, ...
     'gcs_point_db', z, 'el_db', z, 'aoa', nan(nS, n, 3), 'align', nan(nS, n, 3), ...
     'gcs_aoa', z, 'el_deg', z, 'bank', z, 'roll', z, 'pitch', z, 'wob', z, 'att_db', z, 'body_spread_db', z, ...
-    'jam', nan(nS, n, 3), 'ds_ns', z, 'ds_int', nan(nS, n, 3));
+    'jam', nan(nS, n, 4), 'ds_ns', z, 'ds_int', nan(nS, n, 3));
 for s = 1:nS
     g = geo{s};
     for r = 1:n
