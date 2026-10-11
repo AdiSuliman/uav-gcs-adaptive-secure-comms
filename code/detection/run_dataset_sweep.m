@@ -173,7 +173,7 @@ dataset.meta = struct('N_SUB', N_SUB, 'n_sub', n_sub, 'F_SUB', F_SUB, 'EbNo_list
     'mode', 'seeded_subruns_D59', 'n_rx', p0.n_rx, 'speed_range_kmh', [p0.speed_kmh_min p0.speed_kmh_max], ...
     'threat_cfg', threat_cfg, 'fresh', FRESH, 'seed0', SEED0, 'created', datestr(now), ...
     'sweep_hit', hit, 'wlan_hit', wlan);
-if ~exist('data', 'dir'); mkdir('data'); end
+if ~isfolder('data'), mkdir('data'); end         % a folder of that name elsewhere on the path does not count
 save(f_out, 'dataset', '-v7.3');
 
 fprintf('\n=== Dataset summary ===\n');
