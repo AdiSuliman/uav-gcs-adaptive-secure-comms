@@ -2831,6 +2831,8 @@ verifyEmpty(tc, bad, strjoin(bad, ', '));
 t = fileread(which('init_params'));
 verifyNotEmpty(tc, regexp(t, 'severely degraded antenna connection', 'once'));
 verifyNotEmpty(tc, regexp(t, 'Simunek et al\. 2011', 'once'));
+end
+
 %% ---------- unknown-threat statistic, KPI 1 Eb/N0, masking, timing load ----------
 function test_ood_window_monitor(tc)
 % The unknown-threat statistic of the offline readings (ood_window.m) is the decision
