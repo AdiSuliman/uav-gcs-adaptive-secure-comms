@@ -3485,3 +3485,13 @@ src = fileread(which('episode_cycle'));
 verifyNotEmpty(tc, strfind(src, 'obs.cfg_link = prev;'));
 verifyNotEmpty(tc, strfind(fileread(which('demo_gui')), '''cfg_gain_db'', config_gain_db(env.action_names, p0)'));
 end
+
+function test_params_id(tc)
+% The link model's identity is fixed by the parameters' content: the same struct gives the
+% same identity, any changed field another one.
+p = struct('a', 1, 'b', [1 2 3], 'c', 'x');
+verifyEqual(tc, params_id(p), params_id(p));
+q = p; q.b(2) = 2.5;
+verifyNotEqual(tc, params_id(p), params_id(q));
+verifyEqual(tc, numel(params_id(p)), 32);
+end

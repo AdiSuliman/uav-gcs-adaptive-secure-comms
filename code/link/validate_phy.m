@@ -236,6 +236,7 @@ rep{end+1} = sprintf(['Overall: theory gaps %d/%d within %.1f dB, seeds %s, tone
     passfail(tone_ok), ternary(flat_only, 'not run', passfail(v12_ok)), ...
     ternary(flat_only || ~tdl_on, 'not run', passfail(v12.pass)), toc(t0)/60);
 rep{end+1} = sprintf('Pass rule: |gap| <= %.1f dB or within 2 standard errors (spread over %d channel realizations).', CFG.gap_ok, CFG.n_real);
+rep{end+1} = sprintf('params_id %s', params_id(S.params));
 if ~exist('results', 'dir'); mkdir('results'); end
 fid = fopen('results/phy_validation.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('\n%s\n', rep{:});

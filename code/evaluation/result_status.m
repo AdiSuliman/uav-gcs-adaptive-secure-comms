@@ -13,7 +13,8 @@ function S = result_status()
 %                                   data/trained_dqn.mat
 %     results/edge_map.mat          EM.det_id and EM.policy_stamp the current ones; newer
 %                                   than results/policy_evaluation.mat
-%     results/phy_validation.txt    newer than params.mat (the link model's parameters)
+%     results/phy_validation.txt    run on the parameters of params.mat (params_id.m; its time
+%                                   when the report carries no identity)
 %     results/eval_detector_metrics.mat  newer than the detector's training
 %   A file without its identity fields counts as stale.
 cur_det = ''; cur_pol = ''; t_det = -inf;
@@ -54,7 +55,13 @@ if isfile(f)
 end
 S(end+1) = entry(f, why);
 f = 'results/phy_validation.txt'; why = {};
-if isfile(f) && t(f) < t('params.mat'), why = {'older than params.mat (the link model)'}; end
+if isfile(f)
+    tk = regexp(fileread(f), 'params_id (\w+)', 'tokens', 'once');
+    if isempty(tk) && t(f) < t('params.mat'), why = {'older than params.mat (the link model)'};
+    elseif ~isempty(tk) && isfile('params.mat') && ~strcmp(tk{1}, params_id(load('params.mat').params))
+        why = {'run on other link-model parameters'};
+    end
+end
 S(end+1) = entry(f, why);
 f = 'results/eval_detector_metrics.mat'; why = {};
 if isfile(f) && t(f) < t_det, why = {'older than the detector''s training'}; end
