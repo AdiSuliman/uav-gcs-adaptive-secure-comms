@@ -22,9 +22,12 @@
 % and on a reduced problem with run_stage('smoke', ...).
 %
 % DEPENDENCIES (what must exist before a stage can run):
-%   A5 needs A0 | A6 needs A5 | B1 needs A6 | B2 needs B1 | B3, B3a, B4, OOD need B2 | B4s needs OOD
+%   A5 needs A0 | A6 needs A5 | B1 needs A6 | B2 needs B1 | B2F needs B2 | B3n needs B2F |
+%   B3 (the test split and the second test set), B3a, B4, OOD need B2 | B4s needs OOD
 %   C1p needs OOD (it selects the production unknown-threat score) | C1c, C1d need C1p | C2 needs C1p, C1c (validation set), C1d | C2e needs C2 (and C1c for KPI 6)
-%   LAT needs C2 | SURV, SURV3 need A0 | KPI reads B3, B4, OOD, A4v, C2e, LAT, SURV | DASH needs KPI
+%   C2g, C2u need C2 | SURV, SURV3, OHP, GCSA need A0 | EDGE needs C2e, C2u, C1c, OHP, GCSA
+%   LAT needs C2 | KPI reads B3, B4, OOD, A4v, C2e, EDGE, LAT, SURV | DASH, WEAK, RPT need KPI
+% The order of the flags below is the order of run_stage.m's full chain (docs/runs).
 %
 % LOGGING: `diary` captures everything printed below into logs/run_*.txt,
 % surviving the close all/clc that each called script starts with.
@@ -82,7 +85,7 @@ disk_guard('init');                                % Simulink temporary data and
 CFG.dqn_seeds       = 3;                 % C2: training seeds per setting
 CFG.dqn_gammas      = 0.5;               % C2: discount factor (selected on validation)
 CFG.monitors        = {'class_drop 3/3', 'class_drop 2/2', 'class_drop 4/5', 'class_drop 5/5'};  % C2: alarm definition and m/n confirmation (selected on validation)
-CFG.drop_steps      = 2;                 % C2: path_loss alarm threshold, 2 dB below the train-pool value (selected on validation)
+CFG.drop_steps      = [0 2];             % C2: path_loss alarm threshold, the train-pool value and 2 dB below it (selected on validation)
 CFG.fa_penalty_grid = [80 120 160];      % C2: training reward variants: false-switch penalty,
 CFG.cost_scale_grid = [0.5 0.5 0.5];     %     running costs x scale,
 CFG.switch_scale_grid = [1 1 1];         %     switching cost x scale
@@ -100,7 +103,9 @@ RUN.extract_spectrograms        = false;    % A6  : spectrograms + 15 link featu
 % ---- Phase B: detection (CNN baseline) ----
 RUN.prepare_data                = false;    % B1  : split by sub-run 4/1/1 (~2 min)
 RUN.train_detector              = false;    % B2  : train CNN+scalar hybrid, unknown-threat models (~8 min); a new detector invalidates the pools
-RUN.eval_detector               = false;    % B3  : test eval + confusion/accuracy-vs-SNR + bootstrap CIs (~2 min)
+RUN.select_fusion               = false;    % B2F : temporal fusion and the quiet-slot alarm, chosen on validation
+RUN.build_fresh_test            = false;    % B3n : a second detector test set (dataset, spectrograms, splits)
+RUN.eval_detector               = false;    % B3  : test eval + confusion/accuracy-vs-SNR + bootstrap CIs (~2 min); the second test set beside it
 RUN.compare_architectures       = false;    % B3a : hybrid vs spectrogram-only vs features-only (~16 min)
 RUN.eval_unseen_snr             = false;    % B4  : detector at Eb/N0 never seen in training, midpoints of the grid (~30 min)
 RUN.eval_ood_detection          = false;    % OOD : leave-one-threat-out, retrains the detector 10 times; selects the production unknown-threat score (~2.5 h)
@@ -114,11 +119,15 @@ RUN.choose_drop_threshold       = false;    % C1d : path_loss alarm threshold fr
 RUN.train_dqn                   = false;    % C2  : Double DQN + shield, alarm x penalty x gamma x seeds, selection on validation (~3 h)
 RUN.evaluate_policies           = false;    % C2e : every policy on the test pools: single, follower, combined, unknown, clean (~1 h)
 RUN.combo_generalization        = false;    % C2g : combined threats never trained on, leave-one-combination-out (~50 min)
+RUN.unknown_threat              = false;    % C2u : unknown threats, a leave-one-threat-out agent per threat (the edge map's unknown path)
 RUN.threat_gallery              = false;    % GAL : one figure per threat for the report, with the DQN's most frequent response (~5 min)
 
 % ---- Phase SURV: survivability boundary mapping (deliverable 7) ----
 RUN.map_survivability           = false;    % SURV: Map A/B per threat, severity, Eb/N0 and geometry (~1.5 h)
 RUN.survivability_options       = false;    % SURV3: antenna count vs relay path (~1 h)
+RUN.overhead_pass               = false;    % OHP : the link while the UAV passes over the GCS (< 1 min)
+RUN.gcs_antenna                 = false;    % GCSA: GCS antenna and tracker analysis (< 1 min)
+RUN.edge_map                    = false;    % EDGE: a verdict at every point of the envelope (deliverable 7)
 
 % ---- Phase KPI: latency and proposal KPIs (section 5) ----
 RUN.measure_latency             = false;    % LAT : decision latency per cycle, median / p95 (~2 min)
@@ -126,6 +135,8 @@ RUN.measure_all_kpis            = true;    % KPI : the 8 proposal KPIs from the 
 
 % ---- Phase DASH: results dashboard (deliverable 1) ----
 RUN.build_dashboard             = true;    % DASH: 8-panel summary PNG
+RUN.weak_points                 = false;    % WEAK: where the system is weakest, from the result files
+RUN.report_numbers              = false;    % RPT : the report's numbers in one JSON file
 
 fprintf('========================================================\n');
 fprintf('  UAV-GCS ADAPTIVE SECURE COMMS - MASTER PIPELINE\n');
@@ -194,9 +205,21 @@ if RUN.train_detector
     fprintf('  [B2] Training hybrid CNN+scalar detector (9 classes)...\n');
     train_detector;
 end
+if RUN.select_fusion
+    fprintf('  [B2F] Temporal fusion and the quiet-slot alarm (validation)...\n');
+    run_own('select_fusion');
+end
+if RUN.build_fresh_test
+    fprintf('  [B3n] A second detector test set...\n');
+    for scr = {'run_dataset_sweep', 'extract_spectrograms', 'prepare_data'}, run_own(scr{1}, true); end
+end
 if RUN.eval_detector
     fprintf('  [B3] Evaluating on test set...\n');
-    eval_detector;
+    if isfile('data/splits_fresh.mat')                 % the test split, then the second test set (run_stage.m)
+        run_own('eval_detector', [], 'split'); run_own('eval_detector', [], 'fresh');
+    else
+        eval_detector;
+    end
 end
 if RUN.compare_architectures
     fprintf('  [B3a] Detector architectures on the same splits...\n');
@@ -253,6 +276,10 @@ if RUN.combo_generalization
     fprintf('  [C2g] Combined threats never trained on (leave-one-combination-out)...\n');
     experiment_combo_generalization;
 end
+if RUN.unknown_threat
+    fprintf('  [C2u] Unknown threats: a leave-one-threat-out agent per threat...\n');
+    run_own('experiment_unknown_threat');
+end
 if RUN.threat_gallery
     fprintf('  [GAL] Threat gallery figures...\n');
     threat_gallery;
@@ -281,6 +308,18 @@ end
 if RUN.survivability_options
     fprintf('  [SURV3] Survivability with 3 antennas and with a relay path...\n');
     experiment_survivability_options;
+end
+if RUN.overhead_pass
+    fprintf('  [OHP] The pass over the GCS...\n');
+    run_own('overhead_pass');
+end
+if RUN.gcs_antenna
+    fprintf('  [GCSA] GCS antenna and tracker...\n');
+    run_own('gcs_antenna_analysis');
+end
+if RUN.edge_map
+    fprintf('  [EDGE] A verdict at every point of the envelope...\n');
+    run_own('edge_map');
 end
 
 fprintf('  [SURV] Pipeline status:\n');
@@ -313,6 +352,14 @@ if RUN.build_dashboard
     fprintf('  [DASH] Building the results dashboard...\n');
     build_kpi_dashboard;
 end
+if RUN.weak_points
+    fprintf('  [WEAK] Weak points...\n');
+    run_own('analyze_weak_points');
+end
+if RUN.report_numbers
+    fprintf('  [RPT] Report numbers...\n');
+    run_own('export_report_numbers');
+end
 
 fprintf('  [DASH] Pipeline status:\n');
 report_file('results/kpi_dashboard.png', '      kpi_dashboard.png ', 'build_kpi_dashboard');
@@ -337,7 +384,14 @@ diary off;
 fprintf('Diary closed. Open %s for the complete unclipped run transcript.\n', log_filename);
 
 
-%% ========== local helper ==========
+%% ========== local helpers ==========
+function run_own(name, FRESH_TEST, DET_TEST) %#ok<INUSD>
+% A stage script in a workspace of its own, so its variables never overwrite this
+% script's flags; FRESH_TEST and DET_TEST (run_stage.m) reach it when given.
+if nargin >= 2 && isempty(FRESH_TEST), clear FRESH_TEST; end
+run(name);
+end
+
 function report_file(path, label, producer)
     % Prints "label : READY (date, size)" or "label : [PENDING] -> producer"
     if exist(path, 'file')

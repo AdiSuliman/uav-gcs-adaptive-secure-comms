@@ -11,6 +11,10 @@
 %           as two Eb/N0 points are above it
 %   'val'   seed block 4 -> data/clean_val_pools.mat: train_dqn.m checks the false
 %           alarms of every run on it, so the test set is used once
+% Geometry k takes clean_pool_seed.m's seed (families 1, 3 and 5 of the block); every
+% per-flight draw is kept as the pools keep theirs (CT.cov, flight_cov.m), so readers never
+% re-derive them. The detector must be that of data/policy_pools.mat: CT.det_id and
+% CT.model_tag carry it and the link model, and every reader checks them (check_det_id.m).
 %
 % Output: data/clean_test_pools.mat or data/clean_val_pools.mat (struct CT)
 
@@ -32,20 +36,29 @@ opt = struct('F_SUB', 20, 'tw', 10, 'delay_bits', 20);
 if exist('SMOKE', 'var') && SMOKE, N_GEOM = 4; CHUNK = 2; end   % reduced chain check (run_stage smoke)
 
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
-EBNO = PP.ebno; ACTIONS = PP.actions; opt.F_SUB = PP.F_SUB; vrange = PP.speed_range; clear PP
+EBNO = PP.ebno; ACTIONS = PP.actions; opt.F_SUB = PP.F_SUB; vrange = PP.speed_range;
+TAG = ''; if isfield(PP, 'model_tag'), TAG = PP.model_tag; end
+PID = ''; if isfield(PP, 'det_id'), PID = PP.det_id; end
+clear PP
 nS = numel(EBNO); nA = numel(ACTIONS);
 runs = 100 * SP + (1:N_GEOM);
 
+D = load('data/trained_detector.mat', 'net', 'classes', 'ood', 'trained_at');
+T = ood_thresholds(0.95);
+DET_ID = detector_id(D.trained_at, D.ood, fusion_model(), T.maha);
+if ~strcmp(PID, DET_ID)
+    error('build_clean_test_pools: data/policy_pools.mat comes from another detector; rerun C1p first');
+end
 if isfile(f_out) && dir(f_out).datenum > dir('data/policy_pools.mat').datenum
     Cx = load(f_out, 'CT');
-    if isequal(Cx.CT.runs, runs) && isequal(Cx.CT.ebno, EBNO) && isequal(Cx.CT.actions, ACTIONS)
+    if isequal(Cx.CT.runs, runs) && isequal(Cx.CT.ebno, EBNO) && isequal(Cx.CT.actions, ACTIONS) ...
+            && isfield(Cx.CT, 'cov') && isfield(Cx.CT, 'det_id') && strcmp(Cx.CT.det_id, DET_ID)
         fprintf('%s is up to date (%d geometries per Eb/N0), nothing to do\n', f_out, N_GEOM);
         clear CLEAN_SET; return
     end
 end
 
 S0 = load('params.mat'); p0 = S0.params; p0.quiet_build = true; p0.active_threat = 'none';
-D = load('data/trained_detector.mat', 'net', 'classes', 'ood');
 N = load('data/splits.mat', 'splits');
 det = struct('net', D.net, 'ood', D.ood, 'classes', {cellstr(string(D.classes(:)'))}, ...
     'mu', N.splits.norm.feat_mean, 'sd', N.splits.norm.feat_std, 'fs', p0.symbol_rate * p0.sps);
@@ -57,7 +70,7 @@ geo = cell(nJ, nS);
 for j = 1:nJ
     r = (j-1)*CHUNK + 1 : min(j*CHUNK, N_GEOM);
     for s = 1:nS
-        [sd_, v_] = arrayfun(@(k) pool_seed(1 + 2 * floor((k - 1) / 100), s, SP, mod(k - 1, 100) + 1, vrange), r);
+        [sd_, v_] = arrayfun(@(k) clean_pool_seed(s, SP, k, vrange), r);
         geo{j, s} = struct('seed', sd_, 'speed', v_, 'run', runs(r));
     end
 end
@@ -95,8 +108,11 @@ end
 
 spd = cell2mat(arrayfun(@(s) [cell2mat(cellfun(@(g) g.speed, geo(:, s)', 'UniformOutput', false))], (1:nS)', ...
     'UniformOutput', false));                   % UAV speed of every geometry, Eb/N0 x geometry
+sds = cell2mat(arrayfun(@(s) [cell2mat(cellfun(@(g) g.seed, geo(:, s)', 'UniformOutput', false))], (1:nS)', ...
+    'UniformOutput', false));                   % seed of every geometry
+V = flight_cov(arrayfun(@(s) struct('seed', sds(s, :), 'speed', spd(s, :)), 1:nS, 'UniformOutput', false), EBNO, p0);
 CT = struct('pools', {pools}, 'runs', runs, 'ebno', EBNO, 'actions', {ACTIONS}, 'n_geom', N_GEOM, ...
-    'speed', spd, 'set', CLEAN_SET, 'created', datestr(now));
+    'speed', spd, 'seed', sds, 'cov', V, 'set', CLEAN_SET, 'det_id', DET_ID, 'model_tag', TAG, 'created', datestr(now));
 save(f_out, 'CT', '-v7.3');
 fprintf('Saved %s (%.1f min)\n', f_out, toc(t0)/60);
 clear CLEAN_SET

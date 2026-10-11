@@ -102,6 +102,17 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %               p.erase_pilot_mse (its bits are erasures for fec_packets.m)
 %   Ground truth: act, share of the frame with the threat on the air (packet traffic
 %   of benign interference, the sweeping jammer on our channel), analysis and labels only.
+% With p.proc_gain_db (rate_reduce, apply_countermeasure.m) the field is that of the
+% despread link, our signal up by the processing gain; a despreading receiver measures the
+% chip-rate field, where our signal keeps its power. The level measurements it takes there
+% are taken with our signal scaled back by the gain: the receiver's own estimate of it on
+% every antenna (the re-modulated decisions fitted per 32-sample block, as for env_corr) is
+% scaled before rssi and the detector image (iq), and gain_ant, our channel's gain per
+% antenna, loses the gain. The despread measurements keep it: ber_est, snr_post, sinr and
+% est_margin (the channel estimate over the despread pilots), so the Eb/N0 estimate
+% (sinr + iot) rises by the gain, which the link monitor takes out (policy_monitor.m); iot
+% and the residual measurements are those of the interference and noise, which keep their
+% power.
 % With p.fec (fec_interleave) ber, fer and crc_fail are those of the decoded packet,
 % 1000 + 32 bits over p.fec_frames frames, decoded from the combiner output's soft values
 % with the erased frames' bits as erasures, one packet per frame pair: ber and fer on both
@@ -170,13 +181,20 @@ nv = thermal_nv(p);                                      % thermal noise power p
 dat = (qn + 1:ns)';                                      % samples that carry our signal
 rs = nan(na, nf); sn = nan(na, nf); ec = nan(na, nf); io = nan(na, nf); pe = nan(na, nf); pq = nan(na, nf);
 du = nan(na, nf); ed = nan(na, nf);
+gp = 0; if isfield(p, 'proc_gain_db') && ~isempty(p.proc_gain_db), gp = p.proc_gain_db; end
 for a = 1:na
     ia = reshape(iqa(:, a, :), ns, nf);
     rs(a, :) = 10*log10(mean(abs(ia(dat, :)).^2, 1) + eps);
     [sn(a, :), ec(a, :), pe(a, :), du(a, :), ed(a, :)] = residual_metrics(xh(dat, :), ia(dat, :), nv);
     io(a, :) = iot_db(rs(a, :), sn(a, :), nv);
     if qn > 0, pq(a, :) = mean(abs(ia(1:qn, :)).^2, 1); end
+    if gp > 0                                            % the chip-rate field of the level measurements
+        ia(dat, :) = chip_field(xh(dat, :), ia(dat, :), gp);
+        iqa(:, a, :) = reshape(ia, ns, 1, nf);
+        rs(a, :) = 10*log10(mean(abs(ia(dat, :)).^2, 1) + eps);
+    end
 end
+if gp > 0, F.gain_ant = F.gain_ant - gp; end
 s0 = sn; s0(isnan(s0)) = -Inf;
 [~, ref] = max(s0, [], 1);                                  % reference antenna per frame
 k = sub2ind([na nf], ref, 1:nf);
@@ -325,6 +343,23 @@ for f = 1:nf
         busy = mean(abs(E).^2, 1) > 2 * nv;
         du(f) = mean(busy); ed(f) = sum(diff(busy) ~= 0);
     end
+end
+end
+
+function r = chip_field(x, r, g)
+% The received samples r (samples x frames) with our own signal scaled down by g dB: the
+% re-modulated waveform x fitted to r per 32-sample block (the last block's gain for the
+% samples after the last whole block); frames without complete decisions are kept.
+B = 32; c = 1 - 10^(-g / 20);
+for f = 1:size(r, 2)
+    xf = x(:, f);
+    if any(isnan(xf)), continue; end
+    n = floor(numel(xf) / B) * B;
+    if n == 0, continue; end
+    X = reshape(xf(1:n), B, []); R = reshape(r(1:n, f), B, []);
+    hb = sum(conj(X) .* R, 1) ./ max(sum(abs(X).^2, 1), eps);
+    s = [reshape(X .* hb, [], 1); xf(n+1:end) * hb(end)];
+    r(:, f) = r(:, f) - c * s;
 end
 end
 

@@ -25,6 +25,10 @@
 % detection and detection on harmed flights (KPI 1); the commitment at every signalling
 % delay, the receiver alone, the relative criterion (SYSTEM), the distance edges and the
 % overhead pass (KPI 4); the clean link (KPI 6); hover and 161 km/h (KPI 7).
+% Identity and age (result_status.m): a result of another detector or deployed policy, or
+% older than its inputs, is STALE (KPI 3 against params.mat, KPI 6 also when its Eb/N0
+% threshold is not the current KPI 1 threshold, the edge map's details flagged); KPI 7 is
+% PENDING while the latency of the deployed chain has not been measured.
 %
 % Output: results/kpi_summary.txt, results/kpi_summary.mat (KPI struct array)
 
@@ -41,6 +45,8 @@ if isfile('data/trained_detector.mat')             % training time (the file is 
     Dt = load('data/trained_detector.mat', 'trained_at');
     if isfield(Dt, 'trained_at'), t_det = Dt.trained_at; end
 end
+RS = result_status();
+rst = @(f) RS(strcmp({RS.file}, f));                   % identity and age of a result file
 KPI = struct('id', {}, 'name', {}, 'value', {}, 'target', {}, 'status', {}, 'detail', {});
 rep = {'=== PROPOSAL KPI SUMMARY (proposal wording) ===', sprintf('Generated: %s | %s', datestr(now), git_stamp()), ''};
 
@@ -133,10 +139,12 @@ if isfile(F.phy)
     gaps = cellfun(@(c) str2double(c{1}), g); passed = cellfun(@(c) strcmp(c{3}, 'PASS'), g);
     seeds = contains(txt, 'seeds PASS');
     tone = ~contains(txt, 'tone ') || contains(txt, 'tone PASS');      % tone calibration, when the report has it
+    sp = rst(F.phy);
+    det = {sprintf('seeded reproducibility: %s', ternary(seeds, 'PASS', 'FAIL')), ...
+         sprintf('tone jammer calibration: %s', ternary(tone, 'PASS', 'FAIL'))};
+    if sp.stale, det{end+1} = ['STALE: ' sp.why]; end
     KPI(end+1) = kpi(3, 'Model validation vs theory', sprintf('%d/%d within 0.3 dB (gaps %s dB)', sum(passed), numel(passed), ...
-        strjoin(compose('%+.2f', gaps), ', ')), '<= 0.3 dB', status(all(passed) && seeds && tone && ~isempty(passed), false), ...
-        {sprintf('seeded reproducibility: %s', ternary(seeds, 'PASS', 'FAIL')), ...
-         sprintf('tone jammer calibration: %s', ternary(tone, 'PASS', 'FAIL'))});
+        strjoin(compose('%+.2f', gaps), ', ')), '<= 0.3 dB', status(all(passed) && seeds && tone && ~isempty(passed), sp.stale), det);
 else
     KPI(end+1) = missing(3, 'Model validation vs theory', F.phy);
 end
@@ -144,7 +152,8 @@ end
 %% KPI 4-8 - decision layer
 if isfile(F.pol)
     P = load(F.pol);
-    stale = file_time(F.pol) < t_dqn;
+    sp = rst(F.pol);
+    stale = file_time(F.pol) < t_dqn || sp.stale;
     col = @(p) find(strcmp(P.POL, p));
     iD = P.iDQN; iO = col('oracle'); iQ = col('dqn_esc');
     dep = erase(P.LBL{iD}, ' (deployed)');
@@ -153,8 +162,10 @@ if isfile(F.pol)
     [lo4, ilo] = min(pt);
     m4 = ALL{iD}.recoverable & ALL{iD}.threat;
     [r4, r4l, r4h] = boot_cluster(double(ALL{iD}.recovered(m4)), ones(1, sum(m4)), ALL{iD}.geom(m4), 2000, 3);
-    det = {sprintf('recovered among recoverable, per threat (%s, deployed): %s', dep, strjoin(cellfun(@(n, v) sprintf('%s %.1f%%', n, v), ...
-        P.KP.threats, num2cell(pt'), 'UniformOutput', false), ', ')), ...
+    pci = nan(numel(pt), 2); if isfield(P.KP, 'per_threat_ci'), pci = P.KP.per_threat_ci; end
+    det = {sprintf('recovered among recoverable, per threat (%s, deployed; 95%% bootstrap over flight geometries): %s', dep, ...
+        strjoin(cellfun(@(n, v, a, b) sprintf('%s %.1f%% [%.1f, %.1f]', n, v, a, b), P.KP.threats, num2cell(pt'), ...
+        num2cell(pci(:, 1)'), num2cell(pci(:, 2)'), 'UniformOutput', false), ', ')), ...
         sprintf('all threat episodes pooled: %s %.1f%% [%.1f, %.1f] of %d recoverable episodes; recoverable share %s', ...
         dep, 100*r4, 100*r4l, 100*r4h, sum(m4), strjoin(cellfun(@(n, v) sprintf('%s %.0f%%', n, 100*v), P.KP.threats, ...
         num2cell(P.KP.recoverable_share'), 'UniformOutput', false), ', ')), ...
@@ -180,10 +191,16 @@ if isfile(F.pol)
             '(threat, level) cells inside; every level: lowest threat %s %.1f%%, %d of %d threats >= 90%%'], ...
             P.KP.env_rule(1), P.KP.env_rule(2), sum(P.KP.envelope(:)), sum(~isnan(P.KP.envelope_val(:))), ...
             P.KP.threats{ilo}, lo4, sum(pt >= 90), numel(pt))}, det];
+        if any(~he)
+            det = [det(1), {sprintf(['threats with no level inside the envelope, left out of the KPI 4 reading inside ' ...
+                'it (their every-level rate below): %s'], strjoin(P.KP.threats(~he), ', '))}, det(2:end)];
+        end
         if any(he)
             [loe, ile] = min(pe(he));
-            det = [det(1), {sprintf('inside the envelope, per threat: %s', strjoin(cellfun(@(n, v) sprintf('%s %.1f%%', ...
-                n, v), te, num2cell(pe(he)), 'UniformOutput', false), ', '))}, det(2:end)];
+            eci = nan(numel(pe), 2); if isfield(P.KP, 'per_threat_env_ci'), eci = P.KP.per_threat_env_ci; end
+            det = [det(1), {sprintf('inside the envelope, per threat: %s', strjoin(cellfun(@(n, v, a, b) ...
+                sprintf('%s %.1f%% [%.1f, %.1f]', n, v, a, b), te, num2cell(pe(he)), num2cell(eci(he, 1)'), ...
+                num2cell(eci(he, 2)'), 'UniformOutput', false), ', '))}, det(2:end)];
             val4 = sprintf('inside the envelope predicted on validation: lowest threat %s %.1f%%, %d of %d threats >= 90%%', ...
                 te{ile}, loe, sum(pe(he) >= 90), sum(he));
         else
@@ -226,17 +243,32 @@ if isfile(F.pol)
 
     far = P.KP.far(strcmp({P.KP.far.policy}, P.LBL{iD}));
     fr = P.KP.far(strcmp({P.KP.far.policy}, P.LBL{k_r}));
+    src = 'the test pools'' clean flights and those of data/clean_test_pools.mat';
+    if isfield(P.KP, 'far_src'), src = P.KP.far_src; end
+    det = {sprintf(['Eb/N0 >= %g dB, one episode per independent geometry (%s); per-cycle rate %.4f%% | rule + ' ...
+        'escalation %d/%d, upper %.2f%%'], P.KP.ebno_thr, src, 100 * far.per_cycle, fr.k, fr.n, 100 * fr.upper)};
+    thr_now = NaN;                                    % the current KPI 1 threshold
+    if isfile(F.det), Mt = load(F.det, 'metrics'); if isfield(Mt.metrics, 'kpi1_threshold_db'), thr_now = Mt.metrics.kpi1_threshold_db; end, end
+    stale6 = stale;
+    if isfinite(thr_now) && ~isequal(P.KP.ebno_thr, thr_now)
+        stale6 = true;
+        det{end+1} = sprintf('STALE: read from %g dB, the current KPI 1 threshold is %g dB (rerun C2e)', P.KP.ebno_thr, thr_now);
+    end
     KPI(end+1) = kpi(6, 'False alarms on a clean link', sprintf('%d/%d episodes, upper bound %.2f%%', far.k, far.n, ...
-        100 * far.upper), '<= 5% (one-sided 95%), >= 600 episodes', status(far.upper <= 0.05 && far.n >= 600, stale), ...
-        {sprintf(['Eb/N0 >= %g dB, one episode per independent geometry (the test pools'' clean flights and those ' ...
-        'of data/clean_test_pools.mat); per-cycle rate %.4f%% | rule + escalation %d/%d, upper %.2f%%'], ...
-        P.KP.ebno_thr, 100 * far.per_cycle, fr.k, fr.n, 100 * fr.upper)});
+        100 * far.upper), '<= 5% (one-sided 95%), >= 600 episodes', status(far.upper <= 0.05 && far.n >= 600, stale6), det);
 
     det = {};
+    sl = rst(F.lat); lat_pending = ~isfile(F.lat);
     if isfile(F.lat)
         Lt = load(F.lat, 'LAT'); Lt = Lt.LAT;
-        det{end+1} = sprintf('decision latency per cycle (%s): median %.2f ms, p95 %.2f ms (DQN + escalation chain); rule chain %.2f / %.2f ms', ...
-            Lt.device, Lt.total_dqn_median_ms, Lt.total_dqn_p95_ms, Lt.total_rule_median_ms, Lt.total_rule_p95_ms);
+        if ~isfield(Lt, 'total_dep_median_ms')            % written before the deployed chain was timed: the DQN chain
+            Lt.total_dep_median_ms = Lt.total_dqn_median_ms; Lt.total_dep_p95_ms = Lt.total_dqn_p95_ms; Lt.deployed = 'dqn_esc';
+        end
+        det{end+1} = sprintf(['decision latency per cycle (%s): median %.2f ms, p95 %.2f ms (deployed chain, %s); DQN + ' ...
+            'escalation chain %.2f / %.2f ms; rule chain %.2f / %.2f ms'], Lt.device, Lt.total_dep_median_ms, ...
+            Lt.total_dep_p95_ms, Lt.deployed, Lt.total_dqn_median_ms, Lt.total_dqn_p95_ms, Lt.total_rule_median_ms, ...
+            Lt.total_rule_p95_ms);
+        if sl.stale, det{end+1} = ['STALE latency: ' sl.why ' (rerun LAT)']; end
         det{end+1} = sprintf('components (median ms): %s', strjoin(cellfun(@(n, v) sprintf('%s %.2f', n, v), Lt.names, ...
             num2cell(Lt.median_ms), 'UniformOutput', false), ', '));
         if isfield(Lt, 'score')
@@ -244,20 +276,25 @@ if isfile(F.pol)
         end
         det{end+1} = sprintf(['latency class (Oli & Mahalal 2025, detection systems: low < 10 ms, medium 10-100 ms): ' ...
             'median %s, p95 %s; measured on a desktop computer, not on UAV hardware'], ...
-            lat_class(Lt.total_dqn_median_ms), lat_class(Lt.total_dqn_p95_ms));
+            lat_class(Lt.total_dep_median_ms), lat_class(Lt.total_dep_p95_ms));
         if isfield(Lt, 'single_core')
-            det{end+1} = sprintf('whole cycle on one CPU core: median %.2f ms, p95 %.2f ms', ...
-                Lt.single_core.total_dqn_median_ms, Lt.single_core.total_dqn_p95_ms);
+            sc = Lt.single_core;
+            if ~isfield(sc, 'total_dep_median_ms'), sc.total_dep_median_ms = sc.total_dqn_median_ms; sc.total_dep_p95_ms = sc.total_dqn_p95_ms; end
+            det{end+1} = sprintf('whole cycle on one CPU core: median %.2f ms, p95 %.2f ms', sc.total_dep_median_ms, sc.total_dep_p95_ms);
         end
-        lat_ok = Lt.total_dqn_median_ms < 10 && Lt.total_dqn_p95_ms < 20;
-        latv = sprintf('median %.2f ms, p95 %.2f ms', Lt.total_dqn_median_ms, Lt.total_dqn_p95_ms);
+        lat_ok = Lt.total_dep_median_ms < 10 && Lt.total_dep_p95_ms < 20;
+        latv = sprintf('median %.2f ms, p95 %.2f ms', Lt.total_dep_median_ms, Lt.total_dep_p95_ms);
     else
-        lat_ok = false; latv = 'latency not measured'; det{end+1} = ['missing ' F.lat];
+        lat_ok = false; latv = 'latency not measured yet'; det{end+1} = ['PENDING: no ' F.lat ' (run LAT)'];
     end
     pv = P.KP.per_speed(:, strcmp(P.KP.show, P.POL{iD}));
     det{end+1} = sprintf('%s recovered per speed band (%s km/h): %s %%', dep, ...
         strjoin(arrayfun(@(b) sprintf('%.0f-%.0f', P.KP.speed_bins(b), P.KP.speed_bins(b+1)), ...
         1:numel(P.KP.speed_bins) - 1, 'UniformOutput', false), ', '), strjoin(compose('%.1f', pv'), ', '));
+    if isfield(P.KP, 'speed_spread')
+        det{end+1} = sprintf(['spread over the speed bands %.1f points [%.1f, %.1f] (95%% bootstrap over flight ' ...
+            'geometries; target <= 10)'], P.KP.speed_spread);
+    end
     if isfield(P.KP, 'per_speed_out') && ~isempty(P.KP.per_speed_out)
         po = P.KP.per_speed_out(:, strcmp(P.KP.show, P.POL{iD}));
         det{end+1} = sprintf('ends of the speed envelope (nominal severity): %s km/h %.1f%%, %s km/h %.1f%%', ...
@@ -268,8 +305,10 @@ if isfile(F.pol)
         det{end+1} = sprintf('signalling delay of a change: %d cycle %.1f%%, %d cycles %.1f%% (single set)', ...
             CDk.switch_delay, pd(1), 2 * CDk.switch_delay, pd(2));
     end
+    st7 = status(lat_ok && max(pv) - min(pv) <= 10, stale || sl.stale);
+    if lat_pending && ~stale, st7 = 'PENDING'; end
     KPI(end+1) = kpi(7, 'Decision time and robustness', latv, 'median < 10 ms, p95 < 20 ms; spread <= 10 points over the speed envelope', ...
-        status(lat_ok && max(pv) - min(pv) <= 10, stale), det);
+        st7, det);
 
     n_ok = sum(pt >= 50);
     KPI(end+1) = kpi(8, 'Performance floor (closed loop)', sprintf('%d threats recovered on >= 50%% of recoverable episodes', n_ok), ...
@@ -286,6 +325,7 @@ end
 %% Edge map: verdicts per point (edge_map.m)
 if isfile(F.edge)
     En = load(F.edge, 'EDGE_NUM'); en = En.EDGE_NUM;
+    se = rst(F.edge); n0 = arrayfun(@(q) numel(q.detail), KPI);
     cnt = @(x) sprintf('%d COMMITTED / %d NOT COMMITTED / %d UNDETERMINED', x);
     ly = @(name) find(strcmp(en.layers, name), 1);
     pts = @(i) sprintf('edge map, %s per (threat, level, Eb/N0): single threats %s | combined threats %s', ...
@@ -326,6 +366,11 @@ if isfile(F.edge)
     k = find([KPI.id] == 7, 1);
     KPI(k).detail{end+1} = sprintf('edge map, COMMITTED at the nominal level of %d threats: %s %s | 161 km/h %s', ...
         numel(inom), hv, cnt(arrayfun(@(v) sum(en.hover == v), [1 -1 0])), cnt(arrayfun(@(v) sum(en.v161 == v), [1 -1 0])));
+    if se.stale                                         % every edge-map detail of another detector or policy, flagged
+        for k = 1:numel(KPI)
+            for i = n0(k) + 1:numel(KPI(k).detail), KPI(k).detail{i} = ['[STALE edge map: ' se.why '] ' KPI(k).detail{i}]; end
+        end
+    end
 end
 
 %% Report

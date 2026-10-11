@@ -100,7 +100,7 @@ FZ = fusion_model();                           % temporal fusion (select_fusion.
 UW = 1; if isfield(D.ood, 'win'), UW = D.ood.win; end                        % unknown-score window (eval_ood_detection.m)
 env.PP = struct('actions', {env.action_names}, 'classes', {env.class_list(:)'}, 'sps', p0.sps, ...
     'bps', p0.bits_per_symbol, 'maha_thr', Tood.maha, 'fuse', FZ.FM, 'fuse_N', FZ.N, 'q_thr', FZ.q_thr, ...
-    'unk_win', UW);
+    'unk_win', UW, 'cfg_gain_db', config_gain_db(env.action_names, p0));
 if isfield(Q, 'confirm'), env.PP.confirm = Q.confirm; end
 if isfield(Q, 'alarm_mode'), env.PP.alarm_mode = Q.alarm_mode; end
 if isfield(Q, 'drop_db') && ~isempty(Q.drop_db), env.PP.drop_db = Q.drop_db; end

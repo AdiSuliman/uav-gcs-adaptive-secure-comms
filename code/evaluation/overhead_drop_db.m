@@ -1,4 +1,4 @@
-function A = overhead_drop_db(h, R0, hG, null_db, bank)
+function [A, rel, d] = overhead_drop_db(h, R0, hG, null_db, bank)
 %OVERHEAD_DROP_DB  Largest drop of our signal below its cruise level while the UAV passes over the GCS [dB].
 %   A = overhead_drop_db(h, R0, hG, null_db): a straight pass at altitude h [m] over a GCS
 %   antenna on a hG [m] mast, from the cruise point at slant distance R0 [km] to overhead.
@@ -10,16 +10,22 @@ function A = overhead_drop_db(h, R0, hG, null_db, bank)
 %   (a turn over the GCS): the tilted antenna's gain with its polarization loss
 %   (uav_attitude_db.m), the worst over the GCS's bearing from the nose, against the
 %   wings-level gain at the cruise point.
+%   [A, rel, d] = ...: also the level along the pass relative to the cruise point [dB] at
+%   the horizontal distances d [m] from the GCS (d(end) the cruise point): one row, or one
+%   row per bearing of the GCS from the nose (0:5:355 deg) when banked.
 if nargin < 5, bank = 0; end
 hh = h - hG;                                         % height over the GCS antenna [m]
 R = 1000 * R0;
 d = linspace(0, sqrt(max(R^2 - hh^2, 0)), 4001);     % horizontal distance to the GCS inside the cruise distance [m]
 r = hypot(d, hh);
 th = atand(hh ./ max(d, eps));                       % elevation of the GCS [deg]
-g = uav_dipole_db(th, null_db);
+G = uav_dipole_db(th, null_db);
+g = G;
 if bank ~= 0
-    g = min(uav_attitude_db(th, (0:5:355)', bank, 0, null_db), [], 1);
+    G = uav_attitude_db(th, (0:5:355)', bank, 0, null_db);
+    g = min(G, [], 1);
 end
-rel = 20*log10(R ./ r) + g - uav_dipole_db(asind(min(hh / R, 1)), null_db);
-A = max(0, -min(rel));
+g0 = uav_dipole_db(asind(min(hh / R, 1)), null_db);
+A = max(0, -min(20*log10(R ./ r) + g - g0));
+if nargout > 1, rel = 20*log10(R ./ r) + G - g0; end
 end
