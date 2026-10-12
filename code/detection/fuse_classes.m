@@ -6,7 +6,7 @@ function varargout = fuse_classes(cmd, varargin)
 %   Z = fuse_classes('windows', S, probs, N)
 %       evidence of every frame of split S (fields run, pos, gain_ant, feats_raw,
 %       feat_names) from the frames of its own sub-run at positions pos-N+1..pos
-%       (causal); probs frames x C. Z is frames x (C + 9 + C): temporal_evidence.m's
+%       (causal); probs frames x C. Z is frames x (C + 11 + C): temporal_evidence.m's
 %       columns, then log(max(p, 1e-6)) of the frame's own probabilities, so a threat
 %       that hits single frames (a sweeping jammer crossing the band) is not averaged
 %       away by its clean neighbours. policy_monitor.m builds the same row per cycle.

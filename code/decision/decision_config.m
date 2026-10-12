@@ -91,6 +91,17 @@ C.combos = {'jamming+path_loss', 'noise_burst+antenna_fault', 'sweeping_jammer+p
             'jamming+spoofing+benign_interference', 'noise_burst+spoofing+antenna_fault', ...
             'jamming+airframe_shadowing+path_loss', 'tone_jamming+spoofing+airframe_shadowing'};
 
+% Airframe-shadowing flights of the pools (build_policy_pools.m, build_check_pools.m): the
+% UAV rolls into its turn so that the airframe enters the line of sight just before frame
+% C.event_frame of the run (flight_draws.m, geo.event_frame), the same flight's clean link
+% before it; an episode's onset (cycle 3-10) reads that frame (link_env.m), so the run holds
+% the lead-in of the latest onset and the cycles after the earliest one of a 30-cycle
+% episode (C.event_run, whole frame pairs), and its shadowing must count (the loss at least
+% p.shadow_evt_db) by C.event_count, inside the shortest span after an onset (20 cycles)
+C.event_frame = 11;
+C.event_run   = 38;
+C.event_count = 30;
+
 % Signalling delay of a configuration change: the request reaches the GCS over the
 % telemetry return link and both ends change before the link runs on it, so a change
 % decided in one cycle takes effect this many cycles later (an assumption; edge_map.m

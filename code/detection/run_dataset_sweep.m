@@ -17,12 +17,19 @@
 % count while their link-feature window of TW frames still holds a frame before the onset
 % (threat_active.m): TW - 1 of F_SUB frames, so its cells fly N_SUB F_SUB / (TW - 1). The
 % sub-runs of a threat beyond N_SUB per cell go round the folds from cell to cell, so every
-% fold holds the same share of them. Airframe shadowing counts only while the attitude lets
-% the airframe hide an antenna at a roll the level is measured at (shadow_hidden.m,
-% shadow_roll_band.m): its cells fly N_SUB flights that hide one in some frame, one per
-% fold, found from the flights' draws before they are simulated (hides_antenna.m:
-% flight_draws.m, d.hidden); a flight that hides none would be the clean link. The share
-% of such flights per level (shadow_hit_share.m) is printed with the flights tried.
+% fold holds the same share of them. An antenna fault and airframe shadowing start inside
+% the sub-run too, at a frame drawn per sub-run in the same range (frames before it carry
+% no threat): the connector opens within one frame (p.fault_onset_frames), and the UAV rolls
+% into its turn so that the hidden antenna's loss first reaches p.shadow_evt_db at that
+% frame (p.roll_in_frames, flight_draws.m: the loss ramps in as the roll grows,
+% shadow_frame.m); both count from there on, so their cells fly N_SUB F_SUB over the mean
+% count of frames from the onset. Airframe shadowing counts only while the attitude lets
+% the airframe hide an antenna in a turn whose bank the level is measured at (shadow_frame.m,
+% shadow_roll_band.m): its cells fly flights that hide one in some frame, found from the
+% flights' draws before they are simulated (hides_antenna.m: flight_draws.m, d.hidden; the
+% roll-in has to bring the airframe into the line of sight); a flight that hides none
+% would be the clean link. The share of such flights per level (shadow_hit_share.m) is
+% printed with the flights tried.
 %
 % Per frame: reference-antenna IQ, label, level, configured Eb/N0, the received Eb/N0
 % (ebno_rx: the configured value less a path-loss step from its onset, received_ebno.m),
@@ -37,8 +44,9 @@
 % pointing loss, altitude, the UAV antenna's gain toward the GCS in level flight and at the
 % attitude, the spread of the airframe loss over the antennas, the timing of the gated
 % jammers (sweep period and phase, burst start and duty), the RMS delay spreads of our
-% signal and of the first interferer (0 on a flat channel) and every antenna's level
-% calibration error (cal_db). Frames whose BER is incomplete are dropped.
+% signal and of the first interferer (0 on a flat channel), every antenna's level
+% calibration error (cal_db) and the roll-in (roll_in: its start [s] and roll rate
+% [deg/s], 0 0 without one). Frames whose BER is incomplete are dropped.
 %
 % With FRESH_TEST true in the calling workspace (build_fresh_test.m) the same recipe gives a
 % second, independent test set: 2 sub-runs per cell, every one in the test fold (6), seeds
@@ -82,6 +90,8 @@ n_sub(strcmp({threat_cfg.name}, 'sweeping_jammer')) = round(N_SUB / hit);
 wlan        = benign_hit_share(p0, [], F_SUB);
 n_sub(strcmp({threat_cfg.name}, 'benign_interference')) = round(N_SUB / wlan);
 n_sub(strcmp({threat_cfg.name}, 'path_loss')) = round(N_SUB * F_SUB / (TW - 1));
+on_frames   = F_SUB + 1 - mean(p0.pl_onset_det(1):p0.pl_onset_det(end));   % mean frames from an onset inside the sub-run
+n_sub(ismember({threat_cfg.name}, {'antenna_fault', 'airframe_shadowing'})) = round(N_SUB * F_SUB / on_frames);
 if exist('SMOKE', 'var') && SMOKE, n_sub(:) = N_SUB; end
 class_names = ['none', {threat_cfg.name}];
 stop_time   = num2str(F_SUB * p0.frame_duration);
@@ -93,7 +103,7 @@ D = struct('iq', {{}}, 'label', [], 'class_run', [], 'level', [], 'snr', [], 'eb
     'speed', [], 'run', [], 'seed', [], 'fold', [], ...
     'pos', [], 'gain_ant', [], 'act', [], 'act_comp', [], 'lev_db', [], 'k_db', [], 'k_int', [], 'aoa', [], 'yaw', [], ...
     'rho', [], 'gcs_db', [], 'alt_m', [], 'el_db', [], 'align', [], 'gcs_aoa', [], 'bank', [], 'roll', [], 'pitch', [], ...
-    'wob', [], 'att_db', [], 'body_spread_db', [], 'jam', [], 'ds_ns', [], 'ds_int', [], 'cal_db', []);
+    'wob', [], 'att_db', [], 'body_spread_db', [], 'jam', [], 'ds_ns', [], 'ds_int', [], 'cal_db', [], 'roll_in', []);
 for i = 1:numel(MEAS), D.(MEAS{i}) = []; end
 run_id = 0;
 t0 = tic;
@@ -104,6 +114,9 @@ fprintf('sweeping jammer: on our channel in %.1f%% of the frames, %d sub-runs pe
 fprintf('WLAN: a packet on at least 10%% of the frame in %.1f%% of the frames, %d sub-runs per cell\n', 100 * wlan, ...
     n_sub(strcmp({threat_cfg.name}, 'benign_interference')));
 fprintf('path loss: a step at frame %d-%d, %d sub-runs per cell\n', p0.pl_onset_det, n_sub(strcmp({threat_cfg.name}, 'path_loss')));
+fprintf(['antenna fault: the connector opens at frame %d-%d; airframe shadowing: a roll-in brings the loss to %g dB ' ...
+    'there; %d and %d sub-runs per cell\n'], p0.pl_onset_det, p0.shadow_evt_db, n_sub(strcmp({threat_cfg.name}, 'antenna_fault')), ...
+    n_sub(strcmp({threat_cfg.name}, 'airframe_shadowing')));
 fprintf('%-22s %6s %10s %10s %9s %7s %7s\n', 'class', 'level', 'meanBER', 'meanSINR', 'envcorr', 'coh', 'Gmmse');
 
 %% ---- Threat classes ----
@@ -114,6 +127,8 @@ for tt = 1:numel(threat_cfg)
     for lv = 1:n_levels
         p = p0; p.active_threat = cfg.name; p.(cfg.param) = cfg.levels(lv); p.seed = [];
         p.pl_onset_frames = p0.pl_onset_det;           % a path-loss step inside the sub-run
+        p.fault_onset_frames = p0.pl_onset_det;        % the connector opens inside it
+        p.roll_in_frames = p0.pl_onset_det;            % the shadowing onset inside it, by a roll-in
         build(p, modelName);
         i_start = numel(D.label) + 1; tried = 0;
         for s = 1:numel(EbNo_list)
@@ -170,6 +185,7 @@ dataset.pitch = D.pitch(:); dataset.wob = D.wob(:); dataset.att_db = D.att_db(:)
 dataset.jam = D.jam';                      % sweep period [s], sweep phase [s], burst start, burst duty per frame
 dataset.ds_ns = D.ds_ns(:); dataset.ds_int = D.ds_int(:);
 dataset.cal_db = D.cal_db';                % level calibration error of every antenna [dB] (frames x antennas)
+dataset.roll_in = D.roll_in';              % roll-in start [s] and roll rate [deg/s] per frame (0 0 without one)
 dataset.meta = struct('N_SUB', N_SUB, 'n_sub', n_sub, 'F_SUB', F_SUB, 'EbNo_list', EbNo_list, 'delay_bits', delay_bits, ...
     'mode', 'seeded_subruns_D59', 'n_rx', p0.n_rx, 'speed_range_kmh', [p0.speed_kmh_min p0.speed_kmh_max], ...
     'threat_cfg', threat_cfg, 'fresh', FRESH, 'seed0', SEED0, 'created', datestr(now), ...
@@ -207,7 +223,8 @@ n = numel(v);
 D.iq = [D.iq, F.iq(v)];
 lab = label * ones(1, n);
 lab(~threat_active(p.active_threat, F.act(v), v, tw)) = 1;   % a WLAN frame without a packet, a frame outside the
-                                                        % sweep's window, no hidden antenna, a path-loss frame before its
+                                                        % sweep's window, no antenna hidden by the event's loss, a fault
+                                                        % frame before the connector opens, a path-loss frame before its
                                                         % step or past its onset's window: clean
 D.label = [D.label, lab]; D.class_run = [D.class_run, label * ones(1, n)]; D.level = [D.level, level * ones(1, n)];
 D.snr = [D.snr, ebno * ones(1, n)]; D.speed = [D.speed, v_kmh * ones(1, n)];
@@ -225,6 +242,7 @@ D.att_db = [D.att_db, d.att_db * o]; D.body_spread_db = [D.body_spread_db, (max(
 D.jam = [D.jam, d.jam(:) * o];
 D.ds_ns = [D.ds_ns, d.ds_ns(1) * o]; D.ds_int = [D.ds_int, d.ds_ns(min(2, end)) * o];
 D.cal_db = [D.cal_db, d.cal_db(:) * o];
+D.roll_in = [D.roll_in, d.roll_in(:) * o];
 D.ber = [D.ber, F.ber(v)]; D.fer = [D.fer, F.fer(v)];
 for i = 1:numel(MEAS), D.(MEAS{i}) = [D.(MEAS{i}), F.(MEAS{i})(v)]; end
 end

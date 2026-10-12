@@ -125,6 +125,12 @@ mem.good(~M.degraded) = mem.good(~M.degraded) + 1; mem.good(M.degraded) = 0;
 mem.deg_n(M.degraded) = mem.deg_n(M.degraded) + 1; mem.deg_n(~M.degraded) = 0;
 mem.tried(mem.good >= C.heal, :) = false;
 [mem, pf, te, unk] = fusion(mem, obs, PP);
+% Latched cause of a lost branch (onset_shape.m): read from the shape of its onset, a
+% step (antenna_fault) or a ramp (airframe_shadowing), and kept while the branch stays lost
+if ~isfield(mem, 'os'), mem.os = []; end
+if isfield(obs, 'gant') && ~isempty(obs.gant)
+    [mem.os, pf] = onset_shape('latch', mem.os, obs.gant, pf, PP.classes, C.heal);
+end
 M.probs = pf; M.te = te;
 [~, k] = max(pf, [], 2);
 cls = PP.classes(k);

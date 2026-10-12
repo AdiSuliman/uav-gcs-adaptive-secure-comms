@@ -26,15 +26,18 @@
 % leave-one-out agent of the threat when the DQN is deployed; evidence only, no rate is
 % committed for an emitter outside the detector's classes).
 % Layers and targets:
-%   DET    fused detection of the deployed detector (fused_class.m) on the
-%          threat-active frames at no_action (threat_active.m): the class calls for
-%          the countermeasure of the threat (rule_based_policy.m), for a combined
-%          threat that of one of its components; an antenna fault and airframe
-%          shadowing take the same answer, so each counts as detected only as its own
-%          class there (DET_b, beside it, no target: the branch level, either of the two
-%          as one branch lost, branch_level.m). A path-loss step, alone or in a
-%          combination: every attenuated frame after the same flight's clean link at
-%          no_action (the onset); with the monitor's 'class_drop' alarm the class
+%   DET    detection of the deployed detector and monitor (det_frames.m: the fused class,
+%          fused_class.m, and the cause of a lost branch latched from the shape of its
+%          onset, onset_shape.m) on the threat-active frames at no_action
+%          (threat_active.m): the class calls for the countermeasure of the threat
+%          (rule_based_policy.m), for a combined threat that of one of its components; an
+%          antenna fault and airframe shadowing take the same answer, so each counts as
+%          detected only as its own class there (DET_b, beside it, no target: the branch
+%          level, either of the two as one branch lost, branch_level.m; and the frames
+%          with and without the onset in the fusion window, by the monitor's class and the
+%          fused class alone). A path-loss step or an antenna fault, alone or in a
+%          combination: every frame after the same flight's clean link at no_action (the
+%          onset); a rolling-in shadowing flight from its own lead-in; with the monitor's 'class_drop' alarm the class
 %          path_loss counts only with the drop, so the path-loss component is detected by
 %          the drop alarm alone (policy_monitor.m), the others by their classes; with
 %          'class' by the fused class
@@ -350,20 +353,32 @@ for ri = 1:numel(RUN)
     end
 end
 clear RES
-% DET: fused class of every frame at no_action, against the countermeasure of the threat
-% (a lost branch as its own class); DET_b: the branch level
+% DET: the monitor's class of every frame at no_action (the fused class, a lost branch's
+% latched cause), against the countermeasure of the threat (a lost branch as its own class);
+% DET_b: the branch level. Beside them (OC), for the antenna fault and airframe shadowing
+% on the test sets: the frames whose fusion window holds the onset (age < fuse_N) and the
+% later ones, by the monitor's class and by the fused class alone
 acts = cellfun(@(x) rule_based_policy(x), PP.classes, 'UniformOutput', false);
+OC = struct('threat', {}, 'level', {}, 'n', {}, 'k_latch', {}, 'k_fused', {});   % n, k: [onset in the window, after it]
 for c = tc
     ok_c = det_classes(PP.classes, acts, PP.scen{c});
+    oc = ismember(PP.scen{c}, {'antenna_fault', 'airframe_shadowing'});
+    if oc, OC(end+1) = struct('threat', PP.scen{c}, 'level', PP.level(c), 'n', [0 0], 'k_latch', [0 0], 'k_fused', [0 0]); end %#ok<SAGROW>
     for sp = [SPL SPEED]
         for s = 1:nS
             P = PP.pools{c, s, K.na, sp};
             if isempty(P) || isempty(P.ber), continue; end
-            [hit, on] = det_frames(P, PP.pools{clean_cell, s, K.na, sp}, PP.scen{c}, ok_c, PP);
+            [hit, on, hit_f, age] = det_frames(P, PP.pools{clean_cell, s, K.na, sp}, PP.scen{c}, ok_c, PP);
             i = flight_of(IDX, c, s, sp, P.run, PP.runs{sp});
             FT.det_k = FT.det_k + accumarray(i, double(hit(:, 1) & on), [nF 1]);
             FT.detb_k = FT.detb_k + accumarray(i, double(hit(:, 2) & on), [nF 1]);
             FT.det_n = FT.det_n + accumarray(i, double(on), [nF 1]);
+            if oc && ismember(sp, SPL)
+                w = on & age < PP.fuse_N; a = on & age >= PP.fuse_N;
+                OC(end).n = OC(end).n + [sum(w), sum(a)];
+                OC(end).k_latch = OC(end).k_latch + [sum(hit(w, 1)), sum(hit(a, 1))];
+                OC(end).k_fused = OC(end).k_fused + [sum(hit_f(w, 1)), sum(hit_f(a, 1))];
+            end
         end
     end
 end
@@ -941,6 +956,16 @@ for i = 1:nT
         'UniformOutput', false), ' ')); %#ok<SAGROW>
 end
 rep{end+1} = '';
+rep{end+1} = sprintf(['--- A lost branch with and without its onset in the fusion window (test sets, frames on the ' ...
+    'air at no_action; the onset within the last %d cycles, then after them): DET %% by the monitor''s class (the ' ...
+    'fused class, and the cause latched from the onset''s shape, onset_shape.m) | by the fused class alone. The ' ...
+    'onset''s shape is read at the event''s start, the latched cause after it ---'], PP.fuse_N);
+for q = 1:numel(OC)
+    rep{end+1} = sprintf('%-20s %5.1f dB | onset in the window %5.1f | %5.1f (%d frames) | after it %5.1f | %5.1f (%d frames)', ...
+        OC(q).threat, OC(q).level, 100 * OC(q).k_latch(1) / max(OC(q).n(1), 1), 100 * OC(q).k_fused(1) / max(OC(q).n(1), 1), ...
+        OC(q).n(1), 100 * OC(q).k_latch(2) / max(OC(q).n(2), 1), 100 * OC(q).k_fused(2) / max(OC(q).n(2), 1), OC(q).n(2)); %#ok<SAGROW>
+end
+rep{end+1} = '';
 rep{end+1} = ['--- DET_b: DET at the branch level (an antenna fault and airframe shadowing as one branch lost, ' ...
     'branch_level.m), beside DET; no target, % [95% interval] flights verdict against the DET target ---'];
 rep{end+1} = sprintf('%-49s %s', '', sprintf('%-29s', hdr_e{:}));
@@ -1295,7 +1320,8 @@ EDGE_NUM = struct('ebno', PP.ebno, 'km', km, 'ebno_thr', ebno_thr, 'deployed', N
     'link_n', [CL.link.n], 'fa_edge_db', [CE.fa.edge], 'link_edge_db', CE.link.edge, 'ohp_verdict', OV, 'ohp_alt_m', OHP.alt_m, ...
     'ohp_r0_km', OHP.r0_km, 'b4', B4, 'fa_bound_met', FAV == 1, 'fa_per_hour', FRall.per_hour, ...
     'fa_per_hour_hi', FRall.per_hour_hi, 'fa_mtbf_s', FRall.mtbf_s, 'check_commit', reshape([CKV.commit], nD, []), ...
-    'predicted_vs_committed', AGR, 'bands_skipped', {skipped}, 'det_id', PP.det_id, 'policy_stamp', policy_stamp(Q), ...
+    'predicted_vs_committed', AGR, 'bands_skipped', {skipped}, 'onset_cue', {OC}, 'det_id', PP.det_id, ...
+    'policy_stamp', policy_stamp(Q), ...
     'det_split', struct('harmed', [cnt_of(VD.deth, isg); cnt_of(VD.deth, ~isg)], ...
     'unharmed', [cnt_of(VD.detu, isg); cnt_of(VD.detu, ~isg)], 'n_harmed', reshape([PT.deth.n], nT, nS), ...
     'n_unharmed', reshape([PT.detu.n], nT, nS), 'branch', [cnt_of(VD.detb, isg); cnt_of(VD.detb, ~isg)]));

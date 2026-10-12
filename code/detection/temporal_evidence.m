@@ -10,7 +10,7 @@ function [x, names] = temporal_evidence(P, G, Fw)
 %   P   E x C x n class probabilities of the per-frame detector
 %   G   E x nr x n mean channel gain of every antenna [dB] (extract_closed_loop_frames.m)
 %   Fw  E x nF x n link features of the window's frames (link_features.m order)
-%   x   E x (C + 9): mean log-probability of every class (the product of the
+%   x   E x (C + 11): mean log-probability of every class (the product of the
 %       per-frame likelihoods), then
 %       gap_w    largest over smallest window-mean antenna gain [dB]
 %       weak_w   share of the window's cycles in which the most often weakest
@@ -40,8 +40,12 @@ function [x, names] = temporal_evidence(P, G, Fw)
 %                channel estimate (est_margin > 0 dB)
 %       duty_w   mean busy share of the window's frames (duty): the occupancy of the
 %                channel over the window (Cheema & Salous 2019, eq. 1)
+%       os_rate, os_glr  the shape of a branch's fall inside the window (onset_shape.m):
+%                one over its length in cycles, and how much better a ramp than a step
+%                fits it; a connector opens within one frame, airframe shadowing grows as
+%                the bank rolls in; 0 0 when no branch falls by 5 dB inside the window
 %   names = temporal_evidence('names', C) returns the feature names.
-WN = {'gap_w', 'weak_w', 'occ_w', 'drop_w', 'off_w', 'rat_w', 'k_w', 'kv_w', 'duty_w'};
+WN = [{'gap_w', 'weak_w', 'occ_w', 'drop_w', 'off_w', 'rat_w', 'k_w', 'kv_w', 'duty_w'}, onset_shape('names')];
 if ischar(P)
     names = [arrayfun(@(c) sprintf('logp_%d', c), 1:G, 'UniformOutput', false), WN];
     x = names; return;
@@ -75,7 +79,7 @@ for e = 1:E
     if sum(valid(e, :)) >= 3, k_w(e) = k_moment(10 .^ (gw(valid(e, :)) / 10)); end
 end
 duty_w = mean(fi('duty'), 2, 'omitnan');
-x = [lp, gap_w, weak_w, occ_w, drop_w, off_w, rat_w, k_w, kv_w, duty_w];
+x = [lp, gap_w, weak_w, occ_w, drop_w, off_w, rat_w, k_w, kv_w, duty_w, onset_shape(G)];
 x(~isfinite(x)) = 0;
 names = [];
 end

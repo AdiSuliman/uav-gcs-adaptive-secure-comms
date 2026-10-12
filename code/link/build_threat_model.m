@@ -30,7 +30,10 @@ function build_threat_model(p)
 %           (a phase on every path, Banagar & Dhillon); with the roll it sets the gain of
 %           the tilted antenna toward the GCS on our LoS (uav_attitude_db.m; its
 %           flight-start value is in 'GCS'). The direction turns at the heading rate of
-%           the 'Yaw' block (heading_rate.m). 'Body' scales our signal on each antenna by
+%           the 'Yaw' block (heading_rate.m); a flight that rolls into its turn ('Att'
+%           holds the roll-in's start and rate) flies level, then rolls at that rate up to
+%           the bank, its heading rate following the roll (turn_attitude.m), the roll and
+%           the direction taken at every frame. 'Body' scales our signal on each antenna by
 %           the airframe loss (body_loss.m). K-factors of
 %           our signal and of the interferers come from the Constant block 'Kfac':
 %           [p.rician_k p.int_rician_k], or, with p.k_random, drawn per seed from
@@ -48,13 +51,17 @@ function build_threat_model(p)
 %           (p.pl_onset_frames, drawn per run when a range: a step of attenuation, an
 %           obstruction or terrain masking; frames before it carry no threat); airframe
 %           shadowing, applied in the channel, hides the end of the array farther from
-%           the GCS while the attitude puts the airframe in its line of sight at a roll
-%           the level is measured at (shadow_hidden.m, shadow_roll_band.m: the GCS above the
-%           belly's horizon, the heading against the GCS azimuth, Sun et al.; never while
-%           hovering), no threat on the air otherwise; an antenna fault
-%           (one antenna, drawn per seeded run) is an open or lossy connector between the
-%           antenna and its receiver, so it attenuates everything that antenna receives,
-%           our signal and every interferer, before the receiver's thermal noise.
+%           the GCS while the attitude puts the airframe in its line of sight in a turn
+%           whose bank the level is measured at (shadow_frame.m, shadow_roll_band.m: the GCS
+%           above the belly's horizon, the heading against the GCS azimuth, Sun et al.;
+%           never while hovering): during a roll-in the hidden antenna loses the share of
+%           the depth the roll has reached (Sun et al.'s shape of an event), and it counts
+%           as on the air while that loss is at least p.shadow_evt_db; no threat on the air
+%           otherwise. An antenna fault (one antenna, drawn per seeded run) is an open or
+%           lossy connector between the antenna and its receiver, so it attenuates
+%           everything that antenna receives, our signal and every interferer, before the
+%           receiver's thermal noise, from its onset frame (p.fault_onset_frames, drawn per
+%           run when a range: a step within one frame; frames before it carry no threat).
 %           Every additive threat is ONE waveform arriving through its own spatial channel
 %           (own diffuse fading). The reactive jammer listens to our transmitted frame (the
 %           Tx output, before any channel) with an energy detector and is on from its
@@ -69,8 +76,9 @@ function build_threat_model(p)
 %           by its own amount.
 %           Output 2: share of the frame's samples with the threat on the air, the union
 %           over its components: 1 while a component that is not gated is on the air (path
-%           loss from its onset, airframe shadowing while an antenna is hidden, every other
-%           threat always), else the largest share of a gated one (benign packet traffic,
+%           loss and an antenna fault from their onset, airframe shadowing while an antenna is
+%           hidden by at least p.shadow_evt_db, every other threat always), else the largest
+%           share of a gated one (benign packet traffic,
 %           the sweeping jammer on our channel); 0 for none. Output 3: [actc levc], each
 %           component's share and the level an additive one reaches over our signal on the
 %           weakest antenna in the frame [dB], in the threat's order (NaN beyond it).
@@ -328,12 +336,14 @@ set_param([modelName '/GCS'], 'UserDataPersistent', 'on', 'UserData', struct('gc
     'alt_random', logical(p.alt_random), 'alt_range_m', p.alt_range_m, 'gcs_h_m', p.gcs_h_m, 'uav_null_db', p.uav_null_db, ...
     'gcs_pt_dbm', p.gcs_pt_dbm, 'carrier_freq', p.carrier_freq, 'lb_uav_dbi', p.lb_uav_dbi, 'lb_nf_db', p.lb_nf_db, ...
     'lb_margin_db', p.lb_margin_db, 'lb_rate_bps', p.lb_rate_bps));
-set_param([modelName '/Att'], 'Value', mat2str([p.gcs_aoa_deg 0 p.roll_deg zeros(1, 4)], 8));
+set_param([modelName '/Att'], 'Value', mat2str([p.gcs_aoa_deg 0 p.roll_deg zeros(1, 7)], 8));   % ... wobble, roll-in start, rate and event start roll
 set_param([modelName '/Att'], 'UserDataPersistent', 'on', 'UserData', struct('gcs_aoa_random', logical(p.gcs_aoa_random), ...
     'gcs_aoa_range_deg', p.gcs_aoa_range_deg, 'gcs_aoa_deg', p.gcs_aoa_deg, 'wobble_random', logical(p.wobble_random), ...
     'wobble_v_max', p.wobble_v_max, 'wobble_roll_deg', p.wobble_roll_deg, 'wobble_pitch_deg', p.wobble_pitch_deg, ...
     'wobble_amp_deg', p.wobble_amp_deg, 'wobble_pitch_lim_deg', p.wobble_pitch_lim_deg, 'wobble_freq_hz', p.wobble_freq_hz, ...
-    'n_rx', nr, 'ant_spacing_wl', p.ant_spacing_wl));
+    'n_rx', nr, 'ant_spacing_wl', p.ant_spacing_wl, 'roll_in_frames', p.roll_in_frames, 'roll_rate_lo', p.roll_rate_lo, ...
+    'roll_rate_win', p.roll_rate_win, 'shadow_evt_db', p.shadow_evt_db, 'shadow_hdg_deg', p.shadow_hdg_deg, ...
+    'shadow_v_min', p.shadow_v_min));
 set_param([modelName '/Body'], 'Value', mat2str(ones(1, nr)));
 set_param([modelName '/Body'], 'UserDataPersistent', 'on', 'UserData', struct('body_random', logical(p.body_random), ...
     'body_loss_db', p.body_loss_db));
@@ -390,8 +400,9 @@ function s = channel_script(p, fs)
 % gain of the UAV antenna toward the GCS at the start of the flight), then LoS steering
 % vector toward the GCS + correlated diffuse fading centred on it; K-factor kdb(1) from the
 % 'Kfac' block. The 'Att' block [GCS direction, elevation, roll, pitch, wobble amplitude,
-% frequency, phase] sets the cone angle of the GCS on the array, the antenna gain on the LoS
-% as the attitude changes, and the lever-arm phase of every path; 'Body' our signal's
+% frequency, phase, roll-in start, roll rate] sets the cone angle of the GCS on the array,
+% the antenna gain on the LoS as the attitude changes (the direction and the roll at the
+% frame, turn_attitude.m), and the lever-arm phase of every path; 'Body' our signal's
 % amplitude on each antenna. With a real receiver: frequency offset of
 % the two radios and LoS Doppler shift per flight, unknown arrival time per frame
 % (fractional delay applied in the frequency domain; the frame ends in its guard; output 2,
@@ -410,7 +421,7 @@ if real_rx
         'kk = [0:ceil(Ns/2)-1, -floor(Ns/2):-1].'';\n' ...
         'x = ifft(fft(x) .* exp(-1j*2*pi*kk*tau/Ns));\n' ...
         'r = exp(1j*2*pi*cfo*t);\n' ...
-        'fl = cosd(att(2)) * sind(att(1) + yaw * t(1));\n' ...
+        'fl = cosd(att(2)) * sind(bt);\n' ...
         'los = exp(1j*2*pi*fd*fl*t);\n'], p.timing_max_sym * p.sps);
     mix = '    y(:, k) = gk * bdy(k) * x .* r .* (sqrt(Kk/(Kk+1)) * a(:, k) .* gl .* los + sqrt(1/(Kk+1)) * D(:, k));\n';
 else
@@ -418,14 +429,15 @@ else
     mix = '    y(:, k) = gk * bdy(k) * x .* (sqrt(Kk/(Kk+1)) * a(:, k) .* gl + sqrt(1/(Kk+1)) * D(:, k));\n';
 end
 % airframe shadowing: the antenna the airframe hides from the GCS at this frame's attitude
-% (shadow_hidden.m; none while the attitude leaves the line of sight clear, the roll is not
-% one the level is measured at, or the UAV hovers) loses p.shadow_db and its line of sight
-% (K-factor p.shadow_k_db, Sun et al.)
+% (shadow_frame.m; none while the attitude leaves the line of sight clear, the turn's bank
+% is not one the level is measured at, or the UAV hovers) loses the share gs of p.shadow_db
+% the event has reached and its K-factor moves by that share toward the shadow's
+% (p.shadow_k_db, Sun et al.): the whole depth and K in a turn that holds its bank
 thr = lower(p.active_threat);
 shd = any(strcmp(strsplit(thr, '+'), 'airframe_shadowing'));
 if shd
-    sel = sprintf(['    Kk = K; gk = 1;\n    if k == hs\n        Kk = %.10f; gk = %.10f;\n    end\n'], ...
-        10^(p.shadow_k_db/10), 10^(-p.shadow_db/20));
+    sel = sprintf(['    Kk = K; gk = 1;\n    if k == hs\n        Kk = 10^((kdb(1) + gs * (%.6f - kdb(1))) / 10); ' ...
+        'gk = 10^(-%.6f * gs / 20);\n    end\n'], p.shadow_k_db, p.shadow_db);
 else
     sel = sprintf('    Kk = K; gk = 1;\n');
 end
@@ -451,8 +463,8 @@ end
 % the antenna's gain toward the GCS relative to its flight-start value in 'GCS', and the
 % lever-arm phase of the LoS (the sign of the Doppler terms); the array tilts with the
 % pitch (uav_attitude_db.m)
-tilt = sprintf(['[ga, ca, cz] = uav_attitude_db(att(2), att(1) + yaw * t(1), att(3), th, %.6f);\n' ...
-    'gl = 10.^((ga - uav_attitude_db(att(2), att(1), att(3), att(4), %.6f)) / 20) .* exp(1j * %.12f * cz);\n' ...
+tilt = sprintf(['[ga, ca, cz] = uav_attitude_db(att(2), bt, rt, th, %.6f);\n' ...
+    'gl = 10.^((ga - uav_attitude_db(att(2), att(1), r0, att(4), %.6f)) / 20) .* exp(1j * %.12f * cz);\n' ...
     'a = exp(-1j * %.12f * ca * %s);\n' ...
     'D = D .* a;\n'], p.uav_null_db, p.uav_null_db, lever_k(p), 2*pi*p.ant_spacing_wl, ant_pos(nr));
 [NT, S] = tdl_taps(p, fs);
@@ -471,6 +483,7 @@ s = [sprintf('function [y, tau] = fcn(x, seed, fd, kdb, yaw, rho, gcs, att, bdy,
     sprintf('if isempty(f0)\n    rng(seed, ''twister'');\nend\nx = gcs * x;\n') ...
     sos_init('f0', 'ph', nr) imp ...
     sprintf('if isempty(n)\n    n = 0;\nend\nNs = size(x, 1);\nt = (n + (0:Ns-1).'') / %.1f;\nn = n + max(Ns, %d);\n', fs, cyc) ...
+    sprintf('[bt, rt] = turn_attitude(att, yaw, t(1));\n[~, r0] = turn_attitude(att, yaw, 0);\n') ...
     pitch_code() sos_gains('D', 'f0', 'ph', p) dly xs ...
     sprintf('K = 10^(kdb(1)/10);\n') tilt lt shadow_code(p, shd) ...
     sprintf(['y = complex(zeros(Ns, %d));\n' ...
@@ -522,9 +535,10 @@ if any(ismember(sig, {'antenna_fault'}))
     pers{end+1} = 'hit_ant'; init{end+1} = sprintf('hit_ant = randi(%d);', nr);   % the antenna with the open connector
 end
 body{end+1} = sprintf(['Ns = size(u, 1);\ny = u;\nt = (nI + (0:Ns-1).'') / %.1f;\nnI = nI + max(Ns, %d);\nnfr = nfr + 1;\n' ...
-    'actc = nan(1, 3);\nlevc = nan(1, 3);\nplon = 0;\n'], fs, round(p.cycle_s * fs));   % interferer channels on the same clock as ours; nfr: frame of the run
+    'actc = nan(1, 3);\nlevc = nan(1, 3);\nplon = 0;\n[bt, rt, dp] = turn_attitude(att, yaw, t(1));\n'], fs, round(p.cycle_s * fs));   % interferer channels on the same clock as ours; nfr: frame of the run; the attitude at the frame
 
 on1 = p.pl_onset_frames(1); on2 = p.pl_onset_frames(end);
+fo1 = p.fault_onset_frames(1); fo2 = p.fault_onset_frames(end);
 for i = 1:numel(sig)
     k = slot(sig{i});
     switch sig{i}
@@ -535,12 +549,15 @@ for i = 1:numel(sig)
             body{end+1} = sprintf('actc(%d) = 0;\nif nfr >= pl_on\n    y = y * %.8f;\n    actc(%d) = 1;\n    plon = %.8f;\nend\n', ...
                 k, 10^(-PL/20), k, PL); %#ok<AGROW>
         case 'antenna_fault'
-            % applied after the interferers: the connector sits between the antenna and its receiver
-            body{end+1} = sprintf('actc(%d) = 1;\n', k); %#ok<AGROW>
+            % applied after the interferers: the connector sits between the antenna and its
+            % receiver; it opens at its onset frame, within one frame
+            body{end+1} = sprintf('actc(%d) = double(nfr >= af_on);\n', k); %#ok<AGROW>
         case 'airframe_shadowing'
-            % applied in the channel: the hidden antenna loses its line of sight there
-            body{end+1} = sprintf('actc(%d) = double(shadow_hidden(att(1) + yaw * t(1), att(2), att(3), att(4), %d, %s, %.6f, fd * %.12g, %.6f) > 0);\n', ...
-                k, nr, mat2str(shd(2:3), 10), shd(4), VC, shd(5)); %#ok<AGROW>
+            % applied in the channel: the hidden antenna loses its line of sight there; the
+            % event counts while its loss reaches p.shadow_evt_db
+            body{end+1} = sprintf(['[hs, gs] = shadow_frame(bt, att(2), rt, [abs(att(3)) att(10)], att(4), %d, %s, %.6f, fd * %.12g, %.6f);\n' ...
+                'actc(%d) = double(hs > 0 && %.6f * gs >= %.6f);\n'], nr, mat2str(shd(2:3), 10), shd(4), VC, shd(5), ...
+                k, shd(1), p.shadow_evt_db); %#ok<AGROW>
     end
 end
 [NT, S] = tdl_taps(p, fs); E = (NT - 1) * S;
@@ -669,9 +686,9 @@ for c = 1:numel(addc)
             '    end\n'], NT-1, 1 + c, E + 1, S)];
     end
     body{end+1} = [w sos_gains('dI', fI, pI, p) sprintf([ ...
-        'sI = sind(aoa(%d) + yaw * t(1));\n' ...
+        'sI = sind(aoa(%d) + dp);\n' ...
         'aI = exp(-1j * %.12f * (cosd(th) * sI) * %s);\n' ...
-        'lI = exp(1j * (%s + %.12f * cosd(att(3)) * sI * sind(th)));\n' ...
+        'lI = exp(1j * (%s + %.12f * cosd(rt) * sI * sind(th)));\n' ...
         'dI = dI .* aI;\n'], c, 2*pi*p.ant_spacing_wl, ant_pos(nr), dop, lever_k(p)) lt ...
         sprintf('for k = 1:%d\n', nr) mx sprintf('end\n')]; %#ok<AGROW>
 end
@@ -679,7 +696,7 @@ if ismember('antenna_fault', sig)
     % the faulty connector attenuates everything its antenna receives, our signal and every
     % interferer, ahead of the receiver's thermal noise (an attenuator at ambient
     % temperature leaves the noise floor at kTB)
-    body{end+1} = sprintf('y(:, hit_ant) = y(:, hit_ant) * %.8f;\n', 10^(-p.fault_atten_db/20));
+    body{end+1} = sprintf('if nfr >= af_on\n    y(:, hit_ant) = y(:, hit_ant) * %.8f;\nend\n', 10^(-p.fault_atten_db/20));
 end
 if p.chain_amp_db > 0 || p.chain_phase_deg > 0
     % receive chains: a gain and phase error per antenna, fixed for the flight (everything
@@ -696,6 +713,10 @@ body{end+1} = sprintf('act = 0;\nfor i = 1:3\n    if ~isnan(actc(i)) && actc(i) 
 pers = [{'nI', 'nfr'}, pers, tpers]; init = [{'nI = 0;', 'nfr = 0;'}, init, tinit];   % the delay line's sinusoids drawn last
 if ismember('path_loss', sig)                       % then the onset frame of the path-loss step
     pers{end+1} = 'pl_on'; init{end+1} = sprintf('pl_on = %d + floor(%d * rand);', on1, on2 - on1 + 1);
+end
+if ismember('antenna_fault', sig)                   % then the connector's, drawn only over a range
+    pers{end+1} = 'af_on'; init{end+1} = sprintf('af_on = %d;', fo1);
+    if fo2 > fo1, init{end} = sprintf('af_on = %d + floor(%d * rand);', fo1, fo2 - fo1 + 1); end
 end
 head = sprintf(['function [y, act, comp] = fcn(u, seed, fd, aoa, kdb, yaw, rho, gcs, att, gate, tdl, bdy, xt, tau, cap)\n' ...
     '%%#codegen\npersistent seeded\n']);
@@ -1823,12 +1844,13 @@ end
 
 %% ===================== Helpers =====================
 function c = shadow_code(p, on)
-% Hidden antenna hs of the frame, from the 'Att' block, the heading and the speed
-% (shadow_hidden.m, shadow_spec.m).
+% Hidden antenna hs of the frame and the share gs of the depth it has lost, from the
+% attitude at the frame (bt, rt: turn_attitude.m), the turn's bank and the speed
+% (shadow_frame.m, shadow_spec.m).
 c = '';
 if ~on, return; end
 s = shadow_spec(p);
-c = sprintf('hs = shadow_hidden(att(1) + yaw * t(1), att(2), att(3), att(4), %d, %s, %.6f, fd * %.12g, %.6f);\n', ...
+c = sprintf('[hs, gs] = shadow_frame(bt, att(2), rt, [abs(att(3)) att(10)], att(4), %d, %s, %.6f, fd * %.12g, %.6f);\n', ...
     p.n_rx, mat2str(s(2:3), 10), s(4), p.c_light / p.carrier_freq, s(5));
 end
 
@@ -1976,6 +1998,8 @@ d = struct('n_rx', 3, 'ant_aperture_m', 1.2, 'rx_corr', 0.3, 'gcs_aoa_deg', 0, .
     'tdl_sig_ds', [-6.52 0.32; -6.63 0.16; -6.43 0.26], 'tdl_sig_alt_m', [25 75], 'tdl_int_ds', [-6.63 0.16], ...
     'tdl_clip_ns', 2250, ...
     'pl_onset_frames', [1 1], 'shadow_roll_deg', 16.1, 'shadow_hdg_deg', 30, 'roll_deg', 0, ...
+    'fault_onset_frames', [1 1], 'roll_in_frames', [], 'roll_rate_lo', 30 / 1.6, 'roll_rate_win', [0.5 45.4; 1 35.5], ...
+    'shadow_evt_db', 0, ...
     'shadow_fit', [12.4 0.25 4.4], 'shadow_fit_z', 1.96, 'shadow_v_min', 8, 'reactive_delay_s', 0, ...
     'burst_duty_range', [0.5 0.5], 'burst_duty', 0.5, 'burst_on_sym', 31, 'cap_frames', 1, ...
     'cal_random', false, 'cal_err_db', 0);
