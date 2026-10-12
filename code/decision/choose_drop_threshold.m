@@ -31,11 +31,14 @@ ramp = 20 / log(10) * p0.v_max / (1000 * link_distance_km(max(PP.ebno), p0));   
 floor_db = ramp * 12 * decision_config().period_ms / 1000;
 assert(THR(1) > floor_db, 'choose_drop_threshold: the grid starts below the moving-away drop of %.2f dB', floor_db);
 
-%% 1. Drops per frame, clean link and path loss, every train geometry
+%% 1. Drops per frame, clean link and path loss, every train geometry of the clean link's own
+% (not the airframe-shadowing flights it flies as their reference, PP.ref_geo)
+RR = 1:numel(PP.runs{TR});
+if isfield(PP, 'cell_geo'), RR = PP.cell_geo{icl}{TR}; end
 d_pl = []; e_pl = []; d_mis = []; e_mis = []; d_cl = []; e_cl = [];
 for s = 1:nS
     C = PP.pools{icl, s, na, TR};
-    for r = 1:numel(PP.runs{TR})
+    for r = RR
         run = PP.runs{TR}(r);
         ic = find(C.run == run);
         if isempty(ic), continue; end
@@ -73,7 +76,7 @@ end
 %% 3. Report
 rep = {'=== EB/N0-DROP THRESHOLD OF THE DROP ALARM ===', ...
     sprintf('Generated: %s | train pools, no_action, %d geometries per Eb/N0 | drop = clean reference - 3-frame median', ...
-    datestr(now), numel(PP.runs{TR})), ''};
+    datestr(now), numel(RR)), ''};
 rep{end+1} = sprintf('Frames: path_loss %d | clean %d, of which read as path_loss %d (%.2f%%)', numel(d_pl), ...
     numel(d_cl), numel(d_mis), 100 * numel(d_mis) / numel(d_cl));
 rep{end+1} = sprintf('Drop percentiles 5 / 50 / 95 [dB]: path_loss %.1f / %.1f / %.1f | clean read as path_loss %.1f / %.1f / %.1f | all clean %.1f / %.1f / %.1f', ...

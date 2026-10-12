@@ -188,6 +188,7 @@ if isfile(F.pol)
         sprintf('per severity %s, lowest threat: %s', strjoin(P.KP.sev_names, ' / '), strjoin(arrayfun(@(v) sprintf('%.1f%%', ...
         min(P.KP.per_threat_sev(~contains(P.KP.threats, '+'), v, strcmp(P.KP.show, P.POL{iD})))), ...
         1:numel(P.KP.sev_names), 'UniformOutput', false), ' / '))};
+    if isfield(P.KP, 'shadow_note') && ~isempty(P.KP.shadow_note), det{end+1} = P.KP.shadow_note; end   % airframe shadowing: conditioned
     if isfile(F.surv)
         S = load(F.surv, 'grid_data_A', 'grid_data_B');
         det{end+1} = sprintf('survivability map (threat x severity x Eb/N0 x geometry): %s', surv_txt(S));

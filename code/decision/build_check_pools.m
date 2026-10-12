@@ -13,6 +13,12 @@
 % configuration through the real link (pool_cell.m) with the detector of the frame pools
 % (det_id must match data/policy_pools.mat). Rule (edge_map.m): an "up to" claim that
 % spans a check point holds only if that point is not NOT COMMITTED.
+% Airframe shadowing flies 36 flights of its own per point, as in the frame pools
+% (build_policy_pools.m): a design of their own per group of levels flown at the same
+% rolls (shadow_groups.m), each flight the first candidate in its strata whose attitude
+% hides an antenna at the level (hides_antenna.m, shadow_pool_seed.m in block 10), over
+% the speeds at which the level can occur (shadow_speed_floor.m); the clean link flies them
+% too, only as their restoration reference (CK.ref_geo) where a group's cells fly.
 %
 % Output: data/check_pools.mat (CK: the fields of a PP with one split, the check
 % flights; CK.kind per cell: 'clean', 'ebno' or 'level')
@@ -26,14 +32,15 @@ C = decision_config();
 S0 = load('params.mat'); p0 = S0.params; p0.quiet_build = true;
 N_GEO = 36;                      % flights per check point
 FAM = 2; BLOCK = 10;             % pool_seed.m geometry family and seed block of the check flights
-LHS_SEED = 7200000;              % permutation stream of a design: LHS_SEED + 100 (Eb/N0 index)
+LHS_SEED = 7200000;              % permutation stream of a design: LHS_SEED + 100 (Eb/N0 index) (+ shadowing group)
+J_MAX = 99999;                   % candidates per (shadowing group, check Eb/N0), shadow_pool_seed.m
 E_LEVEL = 9;                     % [dB] Eb/N0 of the level midpoints
 N_WORKERS = 6;
 opt = struct('F_SUB', 20, 'tw', 10, 'delay_bits', 20);
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
 THREATS = setdiff(PP.singles, {'none'}, 'stable');
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
-    THREATS = THREATS(1); N_GEO = 2;
+    THREATS = THREATS(unique([1 find(strcmp(THREATS, 'airframe_shadowing'))])); N_GEO = 2;
 end
 EGRID = PP.ebno; ACTIONS = PP.actions; opt.F_SUB = PP.F_SUB; vrange = PP.speed_range;
 EMID = (EGRID(1:end-1) + EGRID(2:end)) / 2;             % between the Eb/N0 points
@@ -64,7 +71,21 @@ for t = THREATS
     end
 end
 nC = numel(cells);
-runs = 100 * BLOCK + (1:N_GEO);
+% Airframe shadowing: groups of levels flown at the same rolls (shadow_groups.m), each with
+% N_GEO flights of its own after the shared ones, at the check Eb/N0 its cells fly
+shd_db = nan(1, nC);
+ics = find(strcmp({cells.threat}, 'airframe_shadowing'));
+shd_db(ics) = [cells(ics).level];
+[grp, gband, glv] = shadow_groups(shd_db, p0);
+nGr = numel(glv);
+gpos = arrayfun(@(k) N_GEO * k + (1:N_GEO), 1:nGr, 'UniformOutput', false);   % positions of every group's flights
+gebs = arrayfun(@(k) unique([cells(grp == k).ebs]), 1:nGr, 'UniformOutput', false);
+cg = repmat({{1:N_GEO}}, 1, nC);
+for c = find(grp > 0), cg{c} = gpos(grp(c)); end
+ref = [gpos{:}];
+N_TOT = N_GEO * (1 + nGr);
+vshd = [max(vrange(1), shadow_speed_floor(gband, p0)), repmat(vrange(2), nGr, 1)];   % [km/h] per group: where it can occur
+runs = 100 * BLOCK + (1:N_TOT);
 f_out = 'data/check_pools.mat';
 if isfile(f_out) && dir(f_out).datenum > dir('data/policy_pools.mat').datenum
     Cx = load(f_out, 'CK');
@@ -76,19 +97,41 @@ if isfile(f_out) && dir(f_out).datenum > dir('data/policy_pools.mat').datenum
     clear Cx
 end
 
-% Flights per check Eb/N0, shared by every cell that flies it (common random numbers)
+% Flights per check Eb/N0, shared by every cell that flies it (common random numbers); then
+% every shadowing group's own, selected where its cells fly (NaN elsewhere)
+SH = struct('band', gband, 'level', glv, 'cell_levels', {arrayfun(@(k) unique(shd_db(grp == k)), 1:nGr, ...
+    'UniformOutput', false)}, 'cell_group', grp, 'ebs', {gebs}, 'v_kmh', vshd, 'speed_range', vrange, ...
+    'tried', zeros(nGr, 1, nS), 'kept', zeros(nGr, 1, nS));
 geo = cell(1, nS);
 for s = 1:nS
     geo{s} = pool_geometries(s, BLOCK, 1:N_GEO, vrange, p0, LHS_SEED + 100*s, FAM);
+    for k = 1:nGr
+        z = nan(1, N_GEO);                              % placeholders where the group does not fly
+        gk = struct('seed', z, 'speed', z, 'run', 100 * BLOCK + gpos{k}, 'alt', z, 'ksig', z, 'aoa1', z, 'rho', z);
+        if ismember(s, gebs{k})
+            ps = p0; ps.active_threat = 'airframe_shadowing'; ps.shadow_db = glv(k); ps.cap_frames = opt.F_SUB; eb = EB(s);
+            sel = struct('seed', @(j, v) shadow_pool_seed(k, s, BLOCK, j, v), 'j0', 0, 'jmax', J_MAX, ...
+                'keep', @(sd, v, a, kk, o, c) hides_antenna(sd, v, ps, struct('ebno', eb, 'alt_m', a, 'k_sig_db', kk, ...
+                'aoa1_deg', o, 'rho', c)));
+            [gk, info] = pool_geometries(s, BLOCK, gpos{k}, vshd(k, :), p0, LHS_SEED + 100*s + k, FAM, sel);
+            SH.tried(k, 1, s) = sum(info.tries); SH.kept(k, 1, s) = N_GEO;
+        end
+        for f = fieldnames(gk)', geo{s}.(f{1}) = [geo{s}.(f{1}), gk.(f{1})]; end
+    end
+end
+for k = 1:nGr
+    fprintf('Airframe shadowing %s dB (rolls %.1f-%.1f deg): own flights at %s dB, kept of the candidates tried %d/%d\n', ...
+        strjoin(compose('%g', SH.cell_levels{k}), '/'), gband(k, :), strjoin(compose('%g', EB(gebs{k})), '/'), ...
+        sum(SH.kept(k, 1, :)), sum(SH.tried(k, 1, :)));
 end
 spd = cell2mat(arrayfun(@(s) geo{s}.speed, (1:nS)', 'UniformOutput', false));
-z = nan(nS, N_GEO);
+z = nan(nS, N_TOT);
 V = struct('seed', z, 'speed', z, 'alt_m', z, 'k_sig', z, 'k_int', z, 'yaw', z, 'rho', z, 'gcs_point_db', z, 'el_db', z, ...
-    'aoa', nan(nS, N_GEO, 3), 'align', nan(nS, N_GEO, 3), 'gcs_aoa', z, 'el_deg', z, 'bank', z, 'roll', z, 'pitch', z, ...
-    'wob', z, 'att_db', z, 'body_spread_db', z, 'jam', nan(nS, N_GEO, 4), 'ds_ns', z, 'ds_int', nan(nS, N_GEO, 3));
+    'aoa', nan(nS, N_TOT, 3), 'align', nan(nS, N_TOT, 3), 'gcs_aoa', z, 'el_deg', z, 'bank', z, 'roll', z, 'pitch', z, ...
+    'wob', z, 'att_db', z, 'body_spread_db', z, 'jam', nan(nS, N_TOT, 4), 'ds_ns', z, 'ds_int', nan(nS, N_TOT, 3));
 for s = 1:nS                                            % every per-flight draw, as in PP.cov (build_policy_pools.m)
     g = geo{s};
-    for r = 1:N_GEO
+    for r = find(isfinite(g.seed))
         fd = g.speed(r) / 3.6 * p0.carrier_freq / p0.c_light;
         d = flight_draws(g.seed(r), fd, p0, struct('ebno', EB(s), 'alt_m', g.alt(r), 'k_sig_db', g.ksig(r), ...
             'aoa1_deg', g.aoa1(r), 'rho', g.rho(r)));
@@ -109,7 +152,13 @@ geoc = cell(1, nC);
 empty = geo{1}; for f = fieldnames(empty)', empty.(f{1}) = empty.(f{1})([]); end
 for c = 1:nC
     gc = repmat({empty}, 1, nS);
-    gc(cells(c).ebs) = geo(cells(c).ebs);
+    for s = cells(c).ebs
+        j = cg{c}{1};
+        if c == 1, j = [j, gpos{cellfun(@(e) ismember(s, e), gebs)}]; end %#ok<AGROW>   % the clean link: the groups flown here
+        g = geo{s};
+        for f = fieldnames(g)', g.(f{1}) = g.(f{1})(j); end
+        gc{s} = g;
+    end
     geoc{c} = gc;
 end
 
@@ -155,12 +204,13 @@ for a = 1:nA
     [~, ~, cm] = apply_countermeasure(p0, 'none', ACTIONS{a});
     gp(a) = cm.goodput_factor; bw(a) = cm.bw_factor; pw(a) = cm.power_factor;
 end
+own = @(Q) ismember(Q.run, runs(1:N_GEO));             % the clean link's own flights, not the shadowing reference
 CK = struct('scen', {{cells.threat}}, 'kind', {{cells.kind}}, 'sev', [cells.sev], 'level', [cells.level], ...
-    'sev_names', {C.sev_names}, 'splits', {{'check'}}, 'cell_geo', {arrayfun(@(c) {1:N_GEO}, 1:nC, 'UniformOutput', false)}, ...
+    'sev_names', {C.sev_names}, 'splits', {{'check'}}, 'cell_geo', {cg}, 'ref_geo', {{ref}}, 'shadow', SH, ...
     'cell_ebs', {{cells.ebs}}, 'singles', {[{'none'}, THREATS]}, 'combos', {{}}, 'ebno', EB, 'ebno_grid', EGRID, ...
     'e_level', E_LEVEL, 'actions', {ACTIONS}, 'speed_range', vrange, 'speed', {{spd}}, 'cov', {{V}}, ...
     'gp', gp, 'bw', bw, 'pw', pw, 'cfg_gain_db', config_gain_db(ACTIONS, p0), 'pools', {pools}, ...
-    'clean', cellfun(@(Q) mean(Q.ber), Pc), 'clean_fer', cellfun(@(Q) mean(double(Q.fer)), Pc), ...
+    'clean', cellfun(@(Q) mean(Q.ber(own(Q))), Pc), 'clean_fer', cellfun(@(Q) mean(double(Q.fer(own(Q)))), Pc), ...
     'classes', {det.classes}, 'maha_thr', T.maha, 'fuse', FZ.FM, 'fuse_N', FZ.N, 'q_thr', FZ.q_thr, 'unk_win', UW, ...
     'F_SUB', opt.F_SUB, 'fec_frames', p0.fec_frames, ...
     'runs', {{runs}}, 'family', FAM, 'block', BLOCK, 'model_tag', PP.model_tag, 'det_id', DET_ID, ...
@@ -169,5 +219,14 @@ CK = struct('scen', {{cells.threat}}, 'kind', {{cells.kind}}, 'sev', [cells.sev]
 save(f_out, 'CK', '-v7.3');
 fprintf('Clean link per check Eb/N0 (%s dB): BER %s | packet loss %s\n', strjoin(compose('%g', EB), '/'), ...
     sprintf('%.1e ', CK.clean), sprintf('%.3f ', CK.clean_fer));
+on = zeros(1, 2);                                       % shadowing flights with an antenna hidden in the model, flights
+for c = find(grp > 0)
+    for s = cells(c).ebs
+        Q = pools{c, s, na, 1};
+        [~, ~, ir] = unique(Q.run);
+        on = on + [sum(accumarray(ir, double(Q.act), [], @max) > 0), max([ir; 0])];
+    end
+end
+if nGr > 0, fprintf('Airframe shadowing on the air in %d of the %d flights of its check cells\n', on); end
 fprintf('Saved %s (%.1f min)\n', f_out, toc(t0) / 60);
 clear pools CK

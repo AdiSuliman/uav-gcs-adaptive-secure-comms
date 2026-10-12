@@ -6,7 +6,12 @@
 % off-grid check flights of data/check_pools.mat, the leave-one-out agents of
 % data/unknown_threat_agents.mat and the trained policy, all from the same detector
 % (check_det_id.m). Restoration is judged against the same flight's clean link
-% (link_env.m 'flight'). Every policy runs with the deployed policy's monitor (alarm,
+% (link_env.m 'flight'). Airframe shadowing, alone and in combinations, flies flights of
+% its own that hide an antenna at its level (build_policy_pools.m, build_check_pools.m;
+% none at hover or below 8 m/s, outside the sources), the clean link on the same flights
+% as their reference and lead-in only (PP.ref_geo, never in FA or LINK): its points are
+% conditioned on such a geometry, the share of flights that hide one stated beside them
+% (shadow_note.m). Every policy runs with the deployed policy's monitor (alarm,
 % confirmation, drop threshold: the DQN's, or rule_sel's when the rule fallback is
 % deployed), and so does DET's drop alarm. The deployed policy as train_dqn.m chose it
 % (the selected DQN with escalation, or the rule with escalation on its own monitor) runs every flight at
@@ -290,12 +295,17 @@ nV = numel(VAR);
 % edge-speed split; flight id 1e6 split + 1000 Eb/N0 + geometry (the bootstrap cluster).
 % Per variant (set kind, follower delay, signalling delay, policy) one column: episodes,
 % held, recovered (KPI 4), lost packets and frames after recovery; clean: flights with a
-% change, episodes, changes
-[fc, fsp, fs, fr] = deal(zeros(0, 1));
+% change, episodes, changes. The clean link also flies the airframe-shadowing cells' own
+% flights (PP.ref_geo), only as their reference: rows of their own (ref), outside every
+% clean-link statistic
+[fc, fsp, fs, fr, fref] = deal(zeros(0, 1));
 for c = [tc, clean_cell]
     for sp = [SPL SPEED]
-        [s_, r_] = ndgrid(1:nS, PP.cell_geo{c}{sp});
+        rr = PP.cell_geo{c}{sp}; rf = [];
+        if c == clean_cell && isfield(PP, 'ref_geo'), rf = PP.ref_geo{sp}; end
+        [s_, r_] = ndgrid(1:nS, [rr, rf]);
         fc = [fc; c + 0 * s_(:)]; fsp = [fsp; sp + 0 * s_(:)]; fs = [fs; s_(:)]; fr = [fr; r_(:)]; %#ok<AGROW>
+        fref = [fref; ismember(r_(:), rf)]; %#ok<AGROW>
     end
 end
 nF = numel(fc);
@@ -303,8 +313,8 @@ IDX = zeros(nC, nS, numel(PP.runs), max(K.nR));
 IDX(sub2ind(size(IDX), fc, fs, fsp, fr)) = 1:nF;
 ii = sub2ind(size(K.recoverable), fc, fs, fsp, fr);
 Z = zeros(nF, nV); E1 = nan(nF, 1);
-FT = struct('c', fc, 'sp', fsp, 's', fs, 'r', fr, 'geo', 1e6 * fsp + 1000 * fs + fr, 'eb', reshape(PP.ebno(fs), [], 1), ...
-    'speed', E1, 'alt', E1, 'ksig', E1, 'rho', E1, 'align', E1, 'bank', E1, 'ds', E1, ...
+FT = struct('c', fc, 'sp', fsp, 's', fs, 'r', fr, 'ref', fref > 0, 'geo', 1e6 * fsp + 1000 * fs + fr, ...
+    'eb', reshape(PP.ebno(fs), [], 1), 'speed', E1, 'alt', E1, 'ksig', E1, 'rho', E1, 'align', E1, 'bank', E1, 'ds', E1, ...
     'surv', K.recoverable(ii), 'surv_f', RF(ii), 'surv_c', K.recoverable_comb(ii), 'harm', HM(ii), 'on', K.on(ii), ...
     'det_k', zeros(nF, 1), 'detb_k', zeros(nF, 1), 'det_n', zeros(nF, 1), 'link_k', zeros(nF, 1), 'link_n', zeros(nF, 1), ...
     'cl_k', E1, 'cl_n', E1, 'ep_n', Z, 'held_k', Z, 'rec_k', Z, 'lt_k', Z, 'lt_n', Z, 'fa_k', Z, 'fa_n', Z, 'sw_k', Z);
@@ -373,7 +383,7 @@ FT.cl_k(m) = FT.link_k(ic(m)); FT.cl_n(m) = FT.link_n(ic(m));
 % The clean-link flights of data/clean_test_pools.mat (split id 6): the draws the pools
 % kept (CT.cov), or, in pools without them, those of the seeds they flew
 % (clean_pool_seed.m)
-CF = take_rows(FT, FT.c == clean_cell & ismember(FT.sp, SPL));
+CF = take_rows(FT, FT.c == clean_cell & ismember(FT.sp, SPL) & ~FT.ref);
 if ~isempty(CT)
     [s_, r_] = ndgrid(1:nS, 1:CT.n_geom); s_ = s_(:); r_ = r_(:); n = numel(s_);
     CW = blank_rows(FT, n);
@@ -407,7 +417,7 @@ if ~isempty(CT)
     CW.cl_k = CW.link_k; CW.cl_n = CW.link_n;
     CF = cat_rows(CF, CW);
 end
-CS = take_rows(FT, FT.c == clean_cell & FT.sp == SPEED);   % clean link at the edge speeds
+CS = take_rows(FT, FT.c == clean_cell & FT.sp == SPEED & ~FT.ref);   % clean link at the edge speeds
 FTi = arrayfun(@(c) take_rows(FT, FT.c == c & ismember(FT.sp, SPL)), tc, 'UniformOutput', false);
 FTe = arrayfun(@(c) take_rows(FT, FT.c == c & FT.sp == SPEED), tc, 'UniformOutput', false);
 fprintf('Flights: %d of the threat cells, %d of the clean link (%.1f min)\n', sum(FT.c ~= clean_cell), ...
@@ -578,23 +588,31 @@ if isfile('data/check_pools.mat')
     ck = find(~strcmp(CK.scen, 'none')); k0 = find(strcmp(CK.scen, 'none'), 1); nK = numel(CK.ebno);
     [kind, ag, opt] = policy_setup(dep, Q, sel, [], fixed_mmse, [], Kc.na);
     specs = {};
-    [u, ~, j] = unique(cellfun(@mat2str, CK.cell_ebs(ck), 'UniformOutput', false), 'stable');
+    [u, ~, j] = unique(cellfun(@(e, g) [mat2str(e) '|' mat2str(g{1})], CK.cell_ebs(ck), CK.cell_geo(ck), ...
+        'UniformOutput', false), 'stable');               % the cells at the same Eb/N0 on the same flights
     for g = 1:numel(u)
         cg = ck(j == g); ss = CK.cell_ebs{cg(1)}; rr = CK.cell_geo{cg(1)}{1};
         specs = [specs, policy_episodes(cg, nK, rr, REPS, false, false, NE, T, rs, [], ss)]; %#ok<AGROW>
     end
     spc = policy_episodes(k0, nK, CK.cell_geo{k0}{1}, 1, false, false, NE, T, rs, [], CK.cell_ebs{k0});
-    [kc, ks, kr] = deal(zeros(0, 1));
+    [kc, ks, kr, kref] = deal(zeros(0, 1));
     for c = [ck k0]
         [s_, r_] = ndgrid(CK.cell_ebs{c}, CK.cell_geo{c}{1});
-        kc = [kc; c + 0 * s_(:)]; ks = [ks; s_(:)]; kr = [kr; r_(:)]; %#ok<AGROW>
+        kc = [kc; c + 0 * s_(:)]; ks = [ks; s_(:)]; kr = [kr; r_(:)]; kref = [kref; 0 * s_(:)]; %#ok<AGROW>
+    end
+    if isfield(CK, 'ref_geo')                         % the clean link on the shadowing cells' own flights, their reference only
+        for s = CK.cell_ebs{k0}
+            [~, r_] = ismember(unique(CK.pools{k0, s, Kc.na, 1}.run), CK.runs{1}); r_ = r_(ismember(r_, CK.ref_geo{1}));
+            kc = [kc; k0 + 0 * r_(:)]; ks = [ks; s + 0 * r_(:)]; kr = [kr; r_(:)]; kref = [kref; 1 + 0 * r_(:)]; %#ok<AGROW>
+        end
     end
     nKF = numel(kc);
     KI = zeros(numel(CK.scen), nK, max(Kc.nR)); KI(sub2ind(size(KI), kc, ks, kr)) = 1:nKF;
     okc = Kc.restored & Kc.restored_plr; ik = sub2ind(size(Kc.recoverable), kc, ks, 1 + 0 * kc, kr);
     hmc = ~reshape(okc(:, :, Kc.na, :, :), size(Kc.recoverable));
     Z = zeros(nKF, nD);
-    KF = struct('c', kc, 's', ks, 'r', kr, 'geo', 7e6 + 1000 * ks + kr, 'surv', Kc.recoverable(ik), 'harm', hmc(ik), 'on', Kc.on(ik), ...
+    KF = struct('c', kc, 's', ks, 'r', kr, 'ref', kref > 0, 'geo', 7e6 + 1000 * ks + kr, 'surv', Kc.recoverable(ik), ...
+        'harm', hmc(ik), 'on', Kc.on(ik), ...
         'det_k', zeros(nKF, 1), 'det_n', zeros(nKF, 1), 'link_k', zeros(nKF, 1), 'link_n', zeros(nKF, 1), ...
         'cl_k', nan(nKF, 1), 'cl_n', nan(nKF, 1), 'ep_n', Z, 'held_k', Z, 'rec_k', Z, 'lt_k', Z, 'lt_n', Z, 'fa_k', Z, 'fa_n', Z);
     for d = 1:nD
@@ -636,7 +654,7 @@ if isfile('data/check_pools.mat')
     end
     for c = ck
         for s = CK.cell_ebs{c}
-            F = take_rows(KF, KF.c == c & KF.s == s); Fc = take_rows(KF, KF.c == k0 & KF.s == s);
+            F = take_rows(KF, KF.c == c & KF.s == s); Fc = take_rows(KF, KF.c == k0 & KF.s == s & ~KF.ref);
             [x.det, x.deth] = det_layers(F, TGT, B);
             x.surv = surv_layer(F, 'surv', TGT, B);
             lk = edge_verdict(Fc.link_k, Fc.link_n, Fc.geo, TGT.link, 'le', false, B);
@@ -874,7 +892,8 @@ rep{end+1} = sprintf(['Generated: %s | deployed policy %s, false-alarm bound met
     'cycles (%s ms) | follower re-acquisition %s cycles (%s ms)'], ...
     datestr(now), NAMES.(dep), ternary(FAV == 1, 'yes', 'NO (no point commits)'), numel(PP.cell_geo{tc(1)}{TEST}) + ...
     numel(PP.cell_geo{tc(1)}{TEST2}), numel(PP.cell_geo{tc(end)}{TEST}) + numel(PP.cell_geo{tc(end)}{TEST2}), HOVER, ...
-    nnz(PP.speed{SPEED}(1, :) == 0), nnz(PP.speed{SPEED}(1, :) > 0), REPS, strjoin(compose('%d', DLY), '/'), ...
+    nnz(PP.speed{SPEED}(1, PP.cell_geo{clean_cell}{SPEED}) == 0), nnz(PP.speed{SPEED}(1, PP.cell_geo{clean_cell}{SPEED}) > 0), ...
+    REPS, strjoin(compose('%d', DLY), '/'), ...
     strjoin(compose('%d', DLY * C.period_ms), '/'), strjoin(compose('%d', FDL), '/'), strjoin(compose('%d', FDL * C.period_ms), '/'));
 rep{end+1} = sprintf(['Targets: DET, DET_h >= %g%% | SURV >= %g%% | REC, PROT >= %g%% | LINK_T <= max(2x clean, %g%%) | ' ...
     'FA <= %g%% | LINK <= %g%% | COMMITTED: PROT, DET_h, FA, LINK and LINK_T COMMITTED (DET_h only not N below %d ' ...
@@ -896,6 +915,9 @@ rep{end+1} = sprintf(['Distance, profile A tracked (link_distance_km.m): %s; eve
     strjoin(hdr_e, ' | '), LB.all_pos, min(LB.fresnel_km), LB.alt_m(1), max(km));
 rep{end+1} = ['Level basis: assumed = the spoofer at 30 dB, every antenna-fault level and WLAN at 30 dB (no source ' ...
     'measured the level); * = a level the detector never trained on (between its trained levels).'];
+SHN = '';                                             % airframe shadowing: conditioned on a geometry that hides an antenna
+if isfield(PP, 'shadow'), SHN = shadow_note(PP.shadow, SPL, PP.ebno); end
+if ~isempty(SHN), rep{end+1} = [SHN ' Test and second test flights; at the edge speeds 161 km/h only.']; end
 ttl = {'DET: fused detection on the threat-active frames at no_action', 'DET_h: DET on the harmed flights', ...
     'SURV: flights some configuration recovers', 'REC: held recovery among recoverable flights, deployed policy', ...
     'PROT: held recovery among all threat flights, deployed policy', ...
@@ -1027,7 +1049,10 @@ if ~isempty(CKV)
     rep{end+1} = sprintf(['--- Off-grid check points (data/check_pools.mat, %d flights each): Eb/N0 between the grid points ' ...
         'at the nominal level, levels between the trained ones at %g dB; DET_h, PROT, LINK_T %% [95%% interval] flights ' ...
         'verdict, COMMITTED per signalling delay (FA of the claim from the grid''s clean flights; the point''s own only ' ...
-        'must not be NOT COMMITTED) ---'], numel(CK.runs{1}), CK.e_level);
+        'must not be NOT COMMITTED) ---'], numel(CK.cell_geo{k0}{1}), CK.e_level);
+    if isfield(CK, 'shadow') && ~isempty(shadow_note(CK.shadow, 1, CK.ebno))
+        rep{end+1} = ['  ' shadow_note(CK.shadow, 1, CK.ebno) ' (check flights, at the check Eb/N0 each level flies)'];
+    end
     for q = 1:numel(CKV)
         x = CKV(q);
         rep{end+1} = sprintf('%-22s %7g dB at %4g dB (%.2f km) | %s | %s | %s | %s', x.threat, x.level, x.ebno, ...
@@ -1066,7 +1091,7 @@ end
 fid = fopen('results/edge_map.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 
 % Summary
-sm = {'=== EDGE SUMMARY: WHERE THE SYSTEM IS COMMITTED ===', rep{2:7}, ''};
+sm = {'=== EDGE SUMMARY: WHERE THE SYSTEM IS COMMITTED ===', rep{2:7 + ~isempty(SHN)}, ''};
 isg = ismember(tc, single_cells);
 cnt3 = @(x, m) sprintf('%4d / %4d / %4d', sum(x(m, :) == 1, 'all'), sum(x(m, :) == -1, 'all'), sum(x(m, :) == 0, 'all'));
 sm{end+1} = 'Points per layer, single threats | combined threats: COMMITTED / NOT COMMITTED / UNDETERMINED:';
@@ -1246,7 +1271,7 @@ EM = struct('ebno', PP.ebno, 'km', km, 'all_pos', LB.all_pos, 'targets', TGT, 'n
     'level_tracked', OLt, 'level_lost', OLl, 'win_drop_db', OHP.win_drop_db, 'drop_thr_db', thr_ohp), ...
     'b4', B4, 'b4s', B4s, 'fa_bound_met', FAV == 1, 'fa_rate', {FR}, 'fa_rate_all', FRall, ...
     'fa_commit', FAP, 'hover_label', HOVER, 'check', {CKV}, 'predicted_vs_committed', AGR, 'det_id', PP.det_id, ...
-    'policy_stamp', policy_stamp(Q), 'monitor', MON, 'created', datestr(now));
+    'shadow_note', SHN, 'policy_stamp', policy_stamp(Q), 'monitor', MON, 'created', datestr(now));
 inom = find(ismember(tc, nom));
 cnt_of = @(x, m) [sum(x(m, :) == 1, 'all'), sum(x(m, :) == -1, 'all'), sum(x(m, :) == 0, 'all')];
 EDGE_NUM = struct('ebno', PP.ebno, 'km', km, 'ebno_thr', ebno_thr, 'deployed', NAMES.(dep), 'n_min', N_MIN, ...

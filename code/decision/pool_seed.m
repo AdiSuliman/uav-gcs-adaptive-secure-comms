@@ -20,7 +20,8 @@ function [seed, v_kmh] = pool_seed(sc, s, sp, r, vrange)
 %   comes from the seed's speed stream (seed_stream.m), uniform in vrange [km/h] (one
 %   stratum of the speed range in a stratified design, pool_geometries.m).
 %   Blocks 10 and above take their own seed range, so no two (Eb/N0, block,
-%   geometry) triples share a seed.
+%   geometry) triples share a seed. The airframe-shadowing cells' own geometries are
+%   selected from candidates of their own range (shadow_pool_seed.m).
 assert(all(r(:) >= 1 & r(:) <= 100 & r(:) == round(r(:))), ...
     'pool_seed: geometry %s outside 1-100 of a seed block (clean_pool_seed.m maps more)', mat2str(r));
 if sp < 10

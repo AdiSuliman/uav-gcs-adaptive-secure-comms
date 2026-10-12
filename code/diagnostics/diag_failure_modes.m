@@ -76,8 +76,8 @@ save('results/diag_failure_modes.mat', 'T');
 %% ===================== Local functions =====================
 function specs = mode_specs(cells, PP, K, H, split, reps, m, rs)
 % Every (cell, Eb/N0, geometry) of the split `reps` times in one jammer mode.
-[c, s, r] = ndgrid(cells, 1:numel(PP.ebno), 1:K.nR(split));
-c = repmat(c(:)', 1, reps); s = repmat(s(:)', 1, reps); r = repmat(r(:)', 1, reps);
+[c, s, r] = flight_triples(cells, K.geo(cells, split), 1:numel(PP.ebno));   % the geometries each cell flies
+c = repmat(c, 1, reps); s = repmat(s, 1, reps); r = repmat(r, 1, reps);
 n = numel(c); nb = ceil(n / H.NE);
 specs = cell(1, nb);
 for b = 1:nb
