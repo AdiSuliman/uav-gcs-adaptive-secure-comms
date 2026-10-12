@@ -861,6 +861,34 @@ verifyLessThan(tc, max(S), 2^26);
 N = seed_base(S) + off;
 verifyEqual(tc, numel(unique(N(:))), numel(N));
 verifyLessThan(tc, max(N(:)), 2^32);
+% The candidates of the airframe-shadowing pool flights (shadow_pool_seed.m): a range of their
+% own per (group, Eb/N0, seed block), every range above every seed above, the largest below
+% 2^26 and its streams below 2^32 (a flight seed owns 64 streams, so distinct seeds never
+% share one); B4's and B4s' candidates lie inside their block ranges (4 550 001-4 599 999,
+% 5 550 001-5 599 999), above the blocks' own seeds
+[g, s, b] = ndgrid(1:8, 1:8, [1 5 10 14 16 17 18 19]);
+lo = arrayfun(@(gi, si, bi) shadow_pool_seed(gi, si, bi, 1), g(:), s(:), b(:));
+hi = arrayfun(@(gi, si, bi) shadow_pool_seed(gi, si, bi, 99999), g(:), s(:), b(:));
+[lo, o] = sort(lo); hi = hi(o);
+verifyEqual(tc, hi - lo, 99998 * ones(size(lo)));
+verifyTrue(tc, all(hi(1:end-1) < lo(2:end)));
+verifyGreaterThan(tc, lo(1), max(S));
+verifyLessThan(tc, hi(end), 2^26);
+verifyLessThan(tc, seed_base(hi(end)) + 63, 2^32);
+verifyError(tc, @() shadow_pool_seed(1, 1, 4, 1), ?MException);       % the clean pools' blocks hold none
+verifyError(tc, @() shadow_pool_seed(1, 1, 17, 100000), ?MException);
+for f = {{'eval_unseen_snr', 'SEED_SHD  = SEED0 + 50000;'}, {'eval_unseen_severity', 'SEED_SHD = SEED0 + 50000;'}}
+    src = fileread(which(f{1}{1}));
+    verifyNotEmpty(tc, strfind(src, f{1}{2}), f{1}{1});
+    verifyNotEmpty(tc, regexp(src, 'hiding_flight\(p, \w+(\(s\))?, SEED_SHD, jsh, 49999\)', 'once'), f{1}{1});
+end
+% the permutation streams of the shadowing groups' designs (build_policy_pools.m,
+% build_check_pools.m) stay distinct from the designs' own and below every flight stream
+[s, sp, gi, pt] = ndgrid(1:8, 1:5, 1:7, 1:2);
+L = [7100000 + 100 * s(:) + 10 * (gi(:) + 1) + sp(:) + 5 * (pt(:) - 1); ...
+    reshape(7100000 + 100 * (1:8)' + [1:5, 11:15], [], 1); reshape(7200000 + 100 * (1:8)' + (0:7), [], 1)];
+verifyEqual(tc, numel(unique(L)), numel(L));
+verifyLessThan(tc, max(L), seed_base(700001));
 % Frame-draw seeds of the edge map's rollouts (edge_map.m: one base per set, the same at
 % every signalling delay, + batch below 1000; the base sets 200 000 + 1000 x set, at
 % most 99): disjoint ranges, all below the first flight stream
@@ -967,7 +995,7 @@ verifyEqual(tc, ge.speed, [zeros(1, 24), 161 * ones(1, 12)]);
 verifyTrue(tc, all(isnan([ge.alt ge.ksig ge.aoa1 ge.rho])));
 txt = fileread(which('build_policy_pools'));
 verifyNotEmpty(tc, regexp(txt, 'NHOVER = 24;', 'once'));
-verifyNotEmpty(tc, regexp(txt, 'sp == iSpd && cells\(c\).sev ~= C.nominal', 'once'));   % hover at every level
+verifyNotEmpty(tc, regexp(fileread(which('pool_layout')), 'sp == iSpd && sev\(c\) ~= nominal', 'once'));   % hover at every level
 end
 
 function test_receiver_measurements(tc)
@@ -2489,8 +2517,8 @@ q6 = q; q6.shadow_db = 6;
 verifyLessThan(tc, shadow_hit_share(q6, 800), h);                      % a level paired with fewer rolls
 % the dataset flies its shadowing cells on flights that hide an antenna, one per fold
 txt = fileread(which('run_dataset_sweep'));
-verifyNotEmpty(tc, regexp(txt, 'while shd && ~hides\(', 'once'));
-verifyNotEmpty(tc, regexp(txt, 'any\(d\.hidden > 0\)', 'once'));
+verifyNotEmpty(tc, regexp(txt, 'while shd && ~hides_antenna\(', 'once'));
+verifyNotEmpty(tc, regexp(fileread(which('hides_antenna')), 'any\(d\.hidden > 0\)', 'once'));
 % the fixed views fly the bank the fit pairs with the level, the GCS abeam, a coordinated turn
 q.yaw_random = false; q.gcs_aoa_random = false; [~, q.roll_deg] = shadow_roll_band(q.shadow_db, q);
 d = flight_draws(7, 100, q);
@@ -3496,4 +3524,203 @@ verifyEqual(tc, params_id(p), params_id(p));
 q = p; q.b(2) = 2.5;
 verifyNotEqual(tc, params_id(p), params_id(q));
 verifyEqual(tc, numel(params_id(p)), 32);
+end
+
+%% ---------- airframe shadowing on flights that hide an antenna ----------
+function test_shadow_pool_layout(tc)
+% The pools' layout (pool_layout.m): every (cell, Eb/N0) keeps its count per split (train 8,
+% validation 6, test 12, second test 60, the combined threats' own 24; the edge speeds 24 at
+% hover away from the nominal level and 36 at it); airframe shadowing flies flights of its
+% own in every split, the levels flown at the same rolls sharing them (shadow_groups.m), a
+% combination beside the single threat at its level and its own in the second test, at the
+% edge speeds the 161 km/h flights of the nominal level only (no hover); the clean link
+% keeps its own flights and flies the shadowing ones as their reference only.
+p = base_params(); C = decision_config();
+NGEO = [8 6 12 36 60]; NCOMB = [0 0 0 0 24]; NHOVER = 24; iSpd = 4;
+th = {}; sev = [];
+for t = {'none', 'jamming', 'airframe_shadowing'}
+    v = 1:numel(C.sev_names); if strcmp(t{1}, 'none'), v = C.nominal; end
+    th = [th, repmat(t, 1, numel(v))]; sev = [sev, v]; %#ok<AGROW>
+end
+for t = {'jamming+path_loss', 'jamming+airframe_shadowing', 'tone_jamming+spoofing+airframe_shadowing'}
+    th = [th, repmat(t, 1, numel(C.combo_sev))]; sev = [sev, C.combo_sev]; %#ok<AGROW>
+end
+lv = nan(1, numel(th));
+for c = find(contains(th, 'airframe_shadowing')), lv(c) = threat_params(p, th{c}, sev(c), C).shadow_db; end
+[grp, band, glv] = shadow_groups(lv, p);
+ish = find(strcmp(th, 'airframe_shadowing'));
+verifyEqual(tc, grp(ish), [1 2 3 3 4]);                                % 8 | 12 | 15.5 and 20 | 25 dB
+verifyEqual(tc, band, [16.1 33.0; 16.1 49.0; 16.1 57.9; 32.0 57.9], 'AbsTol', 0.05);
+verifyEqual(tc, glv, [8 12 15.5 25]);
+verifyEqual(tc, grp(~contains(th, 'airframe_shadowing')), zeros(1, sum(~contains(th, 'airframe_shadowing'))));
+kind = 1 + contains(th, '+'); kind(strcmp(th, 'none')) = 0;
+[geo, ref, nG, parts] = pool_layout(kind, grp, sev, C.nominal, NGEO, NCOMB, NHOVER, iSpd);
+verifyEqual(tc, nG, [40 30 60 48 372]);
+n = @(c) cellfun(@numel, geo{c});
+verifyEqual(tc, n(1), [8 6 12 36 84]);                                  % the clean link's own
+ij = find(strcmp(th, 'jamming'));
+verifyEqual(tc, n(ij(1)), [8 6 12 24 60]);
+verifyEqual(tc, n(ij(C.nominal)), [8 6 12 36 60]);
+verifyEqual(tc, geo{ij(1)}{4}, 1:24);                                   % hover
+for c = ish
+    verifyEqual(tc, n(c), [8 6 12 12 * (sev(c) == C.nominal) 60]);      % no hover
+    verifyTrue(tc, all(cellfun(@(g, r) all(ismember(g, r)), geo{c}, ref)));
+end
+verifyEqual(tc, geo{ish(C.nominal)}{4}, 36 + (1:12));                  % after the 24 hover and 12 at 161 km/h
+verifyEqual(tc, geo{ish(3)}([1 2 3 5]), geo{ish(4)}([1 2 3 5]));      % 15.5 and 20 dB: the same rolls, the same flights
+verifyEmpty(tc, intersect(geo{ish(1)}{3}, geo{ish(2)}{3}));
+for c = find(strcmp(th, 'jamming+path_loss')), verifyEqual(tc, n(c), [8 6 12 0 24]); verifyEqual(tc, geo{c}{5}, 61:84); end
+for c = find(contains(th, '+') & contains(th, 'airframe_shadowing'))
+    verifyEqual(tc, n(c), [8 6 12 0 24]);
+    for sp = 1:3, verifyEqual(tc, geo{c}{sp}, geo{ish(sev(c))}{sp}); end   % beside the single at its level
+    verifyEmpty(tc, intersect(geo{c}{5}, [geo{ish(sev(c))}{5}, 1:84]));  % its own in the second test
+    verifyTrue(tc, all(ismember(geo{c}{5}, ref{5})));
+end
+for sp = 1:5
+    verifyEmpty(tc, intersect(ref{sp}, geo{1}{sp}));                    % reference only
+    verifyEqual(tc, sort([geo{1}{sp}, ref{sp}]), 1:nG(sp));             % the clean link flies every geometry
+    verifyEqual(tc, sort([parts([parts.split] == sp).pos]), sort(ref{sp}));
+end
+verifyEqual(tc, sum(arrayfun(@(q) numel(q.pos), parts)), sum(nG - [8 6 12 36 84]));
+% the reduced chain check's layout
+[geo, ref, nG] = pool_layout(kind, grp, sev, C.nominal, [2 2 2 2 2], [0 0 0 0 2], 1, iSpd);
+verifyEqual(tc, nG, [10 10 10 3 16]);
+verifyEqual(tc, cellfun(@numel, geo{ish(C.nominal)}), [2 2 2 1 2]);
+verifyEqual(tc, cellfun(@numel, ref), [8 8 8 1 12]);
+end
+
+function test_shadow_selection(tc)
+% The shadowing cells' own flights (pool_geometries.m with a selection): every flight hides an
+% antenna at its level in some frame of the run (hides_antenna.m: flight_draws.m d.hidden
+% with the draws link_seed.m sets), the candidates are tried once each in order
+% (shadow_pool_seed.m), the skipped ones hide none; a Latin hypercube keeps one flight per
+% stratum over the speeds shadowing is flown at; the model hides an antenna on a kept flight
+% and none on a skipped one; the detector blocks of B4 and B4s select the same way.
+p = base_params(); p.active_threat = 'airframe_shadowing'; p.shadow_db = 25; p.cap_frames = 20;
+vsh = [shadow_speed_floor(shadow_roll_band(25, p), p), p.speed_kmh_max]; s = numel(p.EbNo_dB); eb = p.EbNo_dB(s);
+verifyEqual(tc, vsh(1), 3.6 * 9.81 * tand(32.0) / deg2rad(p.yaw_rate_max), 'AbsTol', 0.05);   % 44.1 km/h: a 32 deg turn
+fd = @(v) v / 3.6 * p.carrier_freq / p.c_light;
+w = arrayfun(@(k) abs(heading_rate(k, fd(vsh(1)), p)), 1:2000);       % the heading rates drawn there stay within the measured one
+verifyLessThanOrEqual(tc, max(w), p.yaw_rate_max);
+verifyEqual(tc, bank_angle(p.yaw_rate_max, fd(vsh(1)), p), shadow_roll_band(25, p) * [1; 0], 'AbsTol', 1e-6);   % its turn: 32 deg
+verifyEqual(tc, shadow_speed_floor([16.1 57.9], p), 3.6 * p.shadow_v_min);   % below 8 m/s none (shadow_hidden.m)
+keep = @(sd, v, a, k, o, c) hides_antenna(sd, v, p, struct('ebno', eb, 'alt_m', a, 'k_sig_db', k, 'aoa1_deg', o, 'rho', c));
+sel = struct('seed', @(j, v) shadow_pool_seed(4, s, 1, j, v), 'keep', keep, 'j0', 0, 'jmax', 99999);
+[g, info] = pool_geometries(s, 1, 9:16, vsh, p, [], 1, sel);           % a train split's own, at 15 dB
+verifyEqual(tc, sum(info.tries), info.j);
+verifyEqual(tc, g.run, 100 + (9:16));
+h = false(1, info.j); sd = zeros(1, info.j);
+for j = 1:info.j
+    [sd(j), v] = shadow_pool_seed(4, s, 1, j, vsh);
+    h(j) = keep(sd(j), v, NaN, NaN, NaN, NaN);
+end
+verifyEqual(tc, sd(h), g.seed);                                        % kept: exactly the candidates that hide one
+verifyEqual(tc, find(h), cumsum(info.tries));
+verifyTrue(tc, all(g.speed >= vsh(1) & g.speed <= vsh(2)));
+for i = 1:numel(g.seed)
+    d = flight_draws(g.seed(i), g.speed(i) / 3.6 * p.carrier_freq / p.c_light, p, struct('ebno', eb));
+    verifyTrue(tc, any(d.hidden > 0) && abs(d.roll) >= 32 - 1e-9);      % 25 dB: rolls 32.0-57.9 deg
+end
+verifyLessThan(tc, numel(g.seed) / info.j, 0.5);
+sel.j0 = info.j;                                                        % the next flights continue the candidates
+[g2, info2] = pool_geometries(s, 1, 17:20, vsh, p, [], 1, sel);
+verifyEmpty(tc, intersect(g2.seed, g.seed)); verifyGreaterThan(tc, info2.j, info.j);
+% a Latin hypercube of 12 selected flights: one per stratum of every axis
+lhs = 7100000 + 100 * s + 10 * (4 + 1) + 3;
+sel = struct('seed', @(j, v) shadow_pool_seed(4, s, 14, j, v), 'keep', keep, 'j0', 0, 'jmax', 99999);
+[gl, il] = pool_geometries(s, 14, 12 + (1:12), vsh, p, lhs, 1, sel);
+n = 12; ha = p.alt_range_m;
+verifyEqual(tc, sort(floor(n * (gl.speed - vsh(1)) / diff(vsh))), 0:n-1);
+verifyEqual(tc, sort(floor(n * (gl.alt - ha(1)) / diff(ha))), 0:n-1);
+verifyEqual(tc, sort(floor(n * (gl.ksig - p.k_range_db(1)) / diff(p.k_range_db))), 0:n-1);
+verifyEqual(tc, sort(floor(n * (gl.rho - p.corr_range(1)) / diff(p.corr_range))), 0:n-1);
+verifyTrue(tc, all(arrayfun(@(i) keep(gl.seed(i), gl.speed(i), gl.alt(i), gl.ksig(i), gl.aoa1(i), gl.rho(i)), 1:n)));
+verifyEqual(tc, pool_geometries(s, 14, 12 + (1:12), vsh, p, lhs, 1, sel), gl);   % reproducible
+verifyEqual(tc, sum(il.tries), il.j);
+% the model: the shadowing is on the air on a kept flight, never on a skipped one
+p.quiet_build = true; mdl = 'UAV_GCS_Threat_Link';
+evalc('build_threat_model(p)');
+set_link_snr(mdl, eb + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
+j0 = find(~h, 1);
+[s0, v0] = shadow_pool_seed(4, s, 1, j0, vsh);
+on = zeros(1, 2);
+for k = 1:2
+    if k == 1, [sk, vk] = deal(g.seed(1), g.speed(1)); else, [sk, vk] = deal(s0, v0); end
+    link_seed(mdl, sk, vk / 3.6 * p.carrier_freq / p.c_light, struct('ebno', eb));
+    F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(19 * p.frame_duration)), p, 20);
+    on(k) = sum(F.act(1:F.nf) > 0);
+end
+close_system(mdl, 0);
+verifyGreaterThan(tc, on(1), 0); verifyEqual(tc, on(2), 0);
+% B4 and B4s: the next candidate of their own range that hides an antenna
+q = p; q.shadow_db = 8;
+[sb, vb, jb, nb] = hiding_flight(q, 9, 4550000, 0, 49999);
+verifyEqual(tc, sb, 4550000 + jb); verifyEqual(tc, nb, jb);
+verifyTrue(tc, hides_antenna(sb, vb, q, struct('ebno', 9, 'alt_m', NaN, 'k_sig_db', NaN)));
+vk = @(k) q.speed_kmh_min + rand(seed_stream(4550000 + k, 'speed')) * (q.speed_kmh_max - q.speed_kmh_min);
+verifyFalse(tc, any(arrayfun(@(k) hides_antenna(4550000 + k, vk(k), q, struct('ebno', 9, 'alt_m', NaN, 'k_sig_db', NaN)), ...
+    1:jb - 1)));
+[sb2, ~, jb2] = hiding_flight(q, 9, 4550000, jb, 49999);
+verifyGreaterThan(tc, jb2, jb); verifyNotEqual(tc, sb2, sb);
+for f = {'eval_unseen_snr', 'eval_unseen_severity'}
+    verifyNotEmpty(tc, strfind(fileread(which(f{1})), 'if strcmp(cfg.name, ''airframe_shadowing'')'), f{1});
+end
+end
+
+function test_cell_geometries(tc)
+% Every episode runs its cell on a geometry the cell flies (PP.cell_geo, link_env.m K.geo):
+% a cell with flights of its own (airframe shadowing) is drawn on them only, with the clean
+% link of the same flight before the onset and as its restoration reference; the clean
+% link's statistics read its own flights only, never the shadowing reference.
+[PP, ~] = toy_world(true);
+PP.runs = {[101 102 103]};
+for k = find(~cellfun(@isempty, PP.pools(:)))'
+    [c, ~, ~] = ind2sub(size(PP.pools), k);
+    Q = PP.pools{k}; rr = [101 102 103]; if c == 2, rr = [102 103]; end
+    f = fieldnames(Q); X = Q;
+    for i = 1:numel(f), X.(f{i}) = repmat(Q.(f{i}), numel(rr), 1); end
+    X.run = reshape(repmat(rr, 20, 1), [], 1);
+    PP.pools{k} = X;
+end
+PP.cell_geo = {{1}, {[2 3]}}; PP.ref_geo = {[2 3]};
+K = link_env('tables', PP, 'flight');
+verifyEqual(tc, K.geo, {1; [2 3]});
+verifyTrue(tc, all(isfinite(K.q(2, :, :, 1, 2:3)), 'all'));             % the jammer's flights have their clean reference
+verifyTrue(tc, all(isnan(K.q(2, :, :, 1, 1)), 'all'));
+spec = struct('scn', repmat([1 2], 1, 20), 's', ones(1, 40), 'onset', 3 * ones(1, 40), 'follow', false(1, 40), ...
+    'fdelay', 2 * ones(1, 40), 'unk', false(1, 40), 'T', 5);
+E = link_env('reset', PP, K, spec, 1, RandStream('mt19937ar', 'Seed', 3));
+verifyTrue(tc, all(E.r(1:2:end) == 1) && all(ismember(E.r(2:2:end), [2 3])));
+verifyEqual(tc, numel(unique(E.r(2:2:end))), 2);
+[c, s, r] = flight_triples([1 2], K.geo(1:2, 1), 1:2);
+verifyEqual(tc, [c; s; r], [1 1 2 2 2 2; 1 2 1 2 1 2; 1 1 2 2 3 3]);
+[c, s, r] = flight_triples([1 2], 1:3, 1:2);                           % one list for every cell: ndgrid's order
+[c0, s0, r0] = ndgrid([1 2], 1:2, 1:3);
+verifyEqual(tc, [c; s; r], [c0(:)'; s0(:)'; r0(:)']);
+specs = policy_episodes([1 2], 2, K.geo(1:2, 1), 1, false, false, 4, 5, RandStream('mt19937ar', 'Seed', 4));
+x = cell2mat(cellfun(@(q) [q.scn; q.r], specs, 'UniformOutput', false));
+verifyTrue(tc, all(x(2, x(1, :) == 1) == 1) && all(ismember(x(2, x(1, :) == 2), [2 3])));
+verifyEqual(tc, policy_episodes([1 2], 2, 1:3, 1, false, false, 4, 5, RandStream('mt19937ar', 'Seed', 4)), ...
+    policy_episodes([1 2], 2, {1:3, 1:3}, 1, false, false, 4, 5, RandStream('mt19937ar', 'Seed', 4)));
+% the clean link's own flights in its statistics: the pools' clean reference, the drop
+% threshold, the edge map's FA and LINK, the check points
+verifyNotEmpty(tc, strfind(fileread(which('build_policy_pools')), 'own = @(Q, sp) ismember(Q.run, runs{sp}(cells(ic).geo{sp}));'));
+verifyNotEmpty(tc, strfind(fileread(which('build_check_pools')), 'own = @(Q) ismember(Q.run, runs(1:N_GEO));'));
+verifyNotEmpty(tc, strfind(fileread(which('choose_drop_threshold')), 'RR = PP.cell_geo{icl}{TR};'));
+src = fileread(which('edge_map'));
+verifyNotEmpty(tc, strfind(src, 'CF = take_rows(FT, FT.c == clean_cell & ismember(FT.sp, SPL) & ~FT.ref);'));
+verifyNotEmpty(tc, strfind(src, 'CS = take_rows(FT, FT.c == clean_cell & FT.sp == SPEED & ~FT.ref);'));
+verifyNotEmpty(tc, strfind(src, 'Fc = take_rows(KF, KF.c == k0 & KF.s == s & ~KF.ref);'));
+for f = {'evaluate_policies', 'experiment_combo_generalization', 'experiment_unknown_threat', 'train_dqn'}
+    verifyEmpty(tc, regexp(fileread(which(f{1})), '1:K\.nR\(|1:nG,|K\.nR\(TEST\), REPS', 'once'), f{1});
+end
+% the statement beside every shadowing reading
+SH = struct('band', [16.1 57.9], 'level', 15.5, 'cell_levels', {{[15.5 20]}}, 'cell_group', [0 1 1], 'v_kmh', [28.8 161], ...
+    'speed_range', [0 161], 'tried', cat(3, [40 0 50 0 100], [20 0 25 0 60]), 'kept', cat(3, [8 0 12 0 60], [8 0 12 0 60]));
+[txt, share, env] = shadow_note(SH, [3 5], [3 12]);
+verifyEqual(tc, share, [72 / 150, 72 / 85], 'AbsTol', 1e-12);
+verifyEqual(tc, env, share * (161 - 28.8) / 161, 'AbsTol', 1e-12);
+verifyNotEmpty(tc, strfind(txt, 'conditioned on such a geometry'));
+verifyNotEmpty(tc, strfind(txt, '15.5/20 dB'));
+verifyEmpty(tc, shadow_note(struct(), 1, 3));
 end

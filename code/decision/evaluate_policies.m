@@ -29,6 +29,11 @@
 %             reported apart
 %   delay2    the single set with a configuration change arriving two cycles late
 %             instead of one (sensitivity to the signalling assumption), reported apart
+% Every set runs each cell on the geometries it flies (link_env.m K.geo): airframe
+% shadowing, alone and in combinations, on its own flights, which hide an antenna at its
+% level (build_policy_pools.m), with the clean link of the same flight before the onset;
+% its readings are conditioned on such a geometry, the share of flights that hide one
+% stated beside them (shadow_note.m); the clean sets fly the clean link's own geometries.
 % Policies: no response (the link that does not react), random, always-on MMSE,
 % the best fixed configuration (train pools), expert rule with and without
 % escalation, the rule with escalation without the detector (alarm from measured
@@ -70,10 +75,12 @@ tab = policy_table(PP, K);
 VAL = 2; TEST = 3; SPEED = 4; T = Q.H.T; NE = 64; REPS = 2;
 ENV_MIN = 90; ENV_N = 10;     % envelope predicted on validation: >= ENV_MIN % of >= ENV_N recoverable episodes
 if exist('SMOKE', 'var') && SMOKE, REPS = 1; end         % reduced chain check (run_stage smoke)
-nA = numel(PP.actions); nS = numel(PP.ebno); nG = K.nR(TEST);
+nA = numel(PP.actions); nS = numel(PP.ebno);
 single_cells = find(ismember(PP.scen, PP.singles) & ~strcmp(PP.scen, 'none'));
 combo_cells = find(ismember(PP.scen, PP.combos));
 clean_cell = K.clean;
+G = @(cells, sp) K.geo(cells, sp);                    % the geometries each cell flies (airframe shadowing: its own)
+nG = numel(K.geo{clean_cell, TEST});                  % the clean link's test geometries per Eb/N0
 rs = RandStream('mt19937ar', 'Seed', 2027);
 ebno_thr = PP.ebno(1);                                % FAR threshold: lowest Eb/N0 with detector macro-F1 >= 90%
 thr_src = 'no KPI 1 threshold (results/eval_detector_metrics.mat absent or without one): every Eb/N0';
@@ -88,21 +95,27 @@ if ~startsWith(thr_src, 'the'), warning('evaluate_policies:kpi1', 'KPI 6 from %g
 %% 1. Episode sets
 foll = single_cells(K.followable(single_cells));
 sets = struct('name', {}, 'spec', {}, 'split', {});
-sets(end+1) = struct('name', 'single',   'spec', {policy_episodes(single_cells, nS, 1:nG, REPS, false, false, NE, T, rs)}, 'split', TEST);
-sets(end+1) = struct('name', 'follower', 'spec', {policy_episodes(foll, nS, 1:nG, REPS, true, false, NE, T, rs)}, 'split', TEST);
-sets(end+1) = struct('name', 'combined', 'spec', {policy_episodes(combo_cells, nS, 1:nG, REPS, false, false, NE, T, rs)}, 'split', TEST);
-sets(end+1) = struct('name', 'unknown',  'spec', {policy_episodes(single_cells, nS, 1:nG, 1, false, true, NE, T, rs)}, 'split', TEST);
-sets(end+1) = struct('name', 'clean',    'spec', {policy_episodes(clean_cell, nS, 1:nG, 1, false, false, NE, T, rs)}, 'split', TEST);
+sets(end+1) = struct('name', 'single',   'spec', {policy_episodes(single_cells, nS, G(single_cells, TEST), REPS, false, false, ...
+    NE, T, rs)}, 'split', TEST);
+sets(end+1) = struct('name', 'follower', 'spec', {policy_episodes(foll, nS, G(foll, TEST), REPS, true, false, NE, T, rs)}, ...
+    'split', TEST);
+sets(end+1) = struct('name', 'combined', 'spec', {policy_episodes(combo_cells, nS, G(combo_cells, TEST), REPS, false, false, ...
+    NE, T, rs)}, 'split', TEST);
+sets(end+1) = struct('name', 'unknown',  'spec', {policy_episodes(single_cells, nS, G(single_cells, TEST), 1, false, true, ...
+    NE, T, rs)}, 'split', TEST);
+sets(end+1) = struct('name', 'clean',    'spec', {policy_episodes(clean_cell, nS, G(clean_cell, TEST), 1, false, false, ...
+    NE, T, rs)}, 'split', TEST);
 jam = foll(ismember(PP.scen(foll), {'jamming', 'reactive_jamming'}));
-cm = policy_episodes(jam, nS, 1:nG, 1, true, false, NE, T, rs, [0 0]);
+cm = policy_episodes(jam, nS, G(jam, TEST), 1, true, false, NE, T, rs, [0 0]);
 for b = 1:numel(cm), cm{b}.comb = true(1, NE); end
 sets(end+1) = struct('name', 'comb',     'spec', {cm}, 'split', TEST);
 if numel(PP.runs) >= SPEED
     nom_cells = single_cells(PP.sev(single_cells) == C.nominal);
-    sets(end+1) = struct('name', 'speed', 'spec', {policy_episodes(nom_cells, nS, 1:K.nR(SPEED), REPS, false, false, NE, T, rs)}, ...
-        'split', SPEED);
+    nom_cells = nom_cells(~cellfun(@isempty, G(nom_cells, SPEED)));       % airframe shadowing: 161 km/h only, no hover
+    sets(end+1) = struct('name', 'speed', 'spec', {policy_episodes(nom_cells, nS, G(nom_cells, SPEED), REPS, false, false, ...
+        NE, T, rs)}, 'split', SPEED);
 end
-d2 = policy_episodes(single_cells, nS, 1:nG, 1, false, false, NE, T, rs);
+d2 = policy_episodes(single_cells, nS, G(single_cells, TEST), 1, false, false, NE, T, rs);
 for b = 1:numel(d2), d2{b}.delay = 2 * C.switch_delay; end
 sets(end+1) = struct('name', 'delay2', 'spec', {d2}, 'split', TEST);
 TEST2 = 5;                                             % the second test split: its clean flights join KPI 6
@@ -113,7 +126,8 @@ end
 iThreat = 1:3;                                         % sets pooled as "threat sets"
 
 %% 2. Best fixed configuration, chosen on the train pools
-vspec = policy_episodes([clean_cell, single_cells], nS, 1:K.nR(1), 1, false, false, NE, T, RandStream('mt19937ar', 'Seed', 11));
+vspec = policy_episodes([clean_cell, single_cells], nS, G([clean_cell, single_cells], 1), 1, false, false, NE, T, ...
+    RandStream('mt19937ar', 'Seed', 11));
 fr = zeros(1, nA);
 for a = 1:nA
     r = [];
@@ -164,9 +178,9 @@ end
 % when it restores >= ENV_MIN % of its recoverable episodes there (at least ENV_N). The
 % commitment is edge_map.m's, on the test flights.
 foll_cells = single_cells(K.followable(single_cells));
-vsets = {policy_episodes(single_cells, nS, 1:K.nR(VAL), REPS, false, false, NE, T, rs), ...
-         policy_episodes(foll_cells, nS, 1:K.nR(VAL), REPS, true, false, NE, T, rs), ...
-         policy_episodes(combo_cells, nS, 1:K.nR(VAL), REPS, false, false, NE, T, rs)};
+vsets = {policy_episodes(single_cells, nS, G(single_cells, VAL), REPS, false, false, NE, T, rs), ...
+         policy_episodes(foll_cells, nS, G(foll_cells, VAL), REPS, true, false, NE, T, rs), ...
+         policy_episodes(combo_cells, nS, G(combo_cells, VAL), REPS, false, false, NE, T, rs)};
 [kind, ag, opt] = policy_setup(POL{iDQN}, Q, sel, fixed_best, fixed_mmse, tab, K.na);
 RV = policy_run_set(kind, PP, K, vsets{1}, VAL, ag, opt, 70000);
 for vs = 2:3, RV = cat_struct(RV, policy_run_set(kind, PP, K, vsets{vs}, VAL, ag, opt, 70000 + 100*vs)); end
@@ -244,6 +258,9 @@ end
 kpi4 = PT(:, iK) >= 90;
 rep{end+1} = sprintf(['KPI 4 over every level (deployed policy >= 90%% of the recoverable episodes of every threat): ' ...
     '%d of %d threats | lowest %s %.1f%%'], sum(kpi4), numel(kpi4), threats{find(PT(:, iK) == min(PT(:, iK)), 1)}, min(PT(:, iK)));
+SHN = '';                                             % airframe shadowing: conditioned on a geometry that hides an antenna
+if isfield(PP, 'shadow'), SHN = shadow_note(PP.shadow, TEST, PP.ebno); end
+if ~isempty(SHN), rep{end+1} = ['  ' SHN ' (test split)']; end
 
 % Envelope predicted on validation and KPI 4 inside it (test)
 ENV = false(numel(threats), nV); ENVv = nan(numel(threats), nV); PTenv = nan(numel(threats), 1); PTenv_ci = nan(numel(threats), 2);
@@ -338,8 +355,11 @@ if ~isempty(iS)
     PS = [arrayfun(@(c) 100 * mean(RES{iS, col(show{c})}.recovered(ms & lo)), 1:numel(show)); ...
           arrayfun(@(c) 100 * mean(RES{iS, col(show{c})}.recovered(ms & hi)), 1:numel(show))];
     rep{end+1} = '';
+    ish = nom_cells(strcmp(PP.scen(nom_cells), 'airframe_shadowing')); nsh = 0;
+    if ~isempty(ish), nsh = numel(K.geo{ish(1), SPEED}); end
     rep{end+1} = sprintf(['Recovered among recoverable on dedicated flights at the ends of the speed envelope (single threats, nominal ' ...
-        'severity, %d geometries per Eb/N0), %%:'], K.nR(SPEED));
+        'severity, %d geometries per Eb/N0; airframe shadowing %d at 161 km/h, none at hover: no source measures it ' ...
+        'there), %%:'], numel(K.geo{clean_cell, SPEED}), nsh);
     rep{end+1} = sprintf('%-18s%s', 'speed [km/h]', sprintf('%11s', hdr{:}));
     rep{end+1} = sprintf('%-18s%s', sprintf('%s (%d)', band_txt(PP.speed_out(1, :)), sum(ms & lo)), sprintf('%11.1f', PS(1, :)));
     rep{end+1} = sprintf('%-18s%s', sprintf('%s (%d)', band_txt(PP.speed_out(2, :)), sum(ms & hi)), sprintf('%11.1f', PS(2, :)));
@@ -477,7 +497,7 @@ KP = struct('per_threat', PT, 'per_threat_sev', PTsev, 'threats', {threats}, 're
     'ebno_thr_src', thr_src, 'per_threat_ci', 100 * PTci, 'per_threat_env_ci', 100 * PTenv_ci, 'speed_spread', 100 * SPR, ...
     'selected_gamma', Q.seed_summary.selected_gamma, 'confirm', PP.confirm, 'alarm_mode', PP.alarm_mode, ...
     'per_speed_out', PS, 'speed_out', PP.speed_out, 'per_delay', PD, 'sev_names', {PP.sev_names}, 'onset', onset, ...
-    'det_id', PP.det_id, 'policy_stamp', policy_stamp(Q));
+    'shadow_note', SHN, 'det_id', PP.det_id, 'policy_stamp', policy_stamp(Q));
 save('results/policy_evaluation.mat', 'RES', 'RW', 'POL', 'LBL', 'set_names', 'fixed_best', 'tab', 'iDQN', 'KP', ...
     'iThreat', 'ALL', 'top_cfg');
 

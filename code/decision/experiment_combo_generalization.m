@@ -45,7 +45,7 @@ for ci = 1:numel(combos)
         Kt.cost = Q.seed_summary.selected_cost_scale * Kx.cost; Kt.SW = Q.seed_summary.selected_sw_scale * Kx.SW;
     end
     ag = dqn_train_run(H, PPx, Kt, Kx, Q.norm_in, seed, nS, 1, 2);
-    specs = test_episodes(c, numel(PP.ebno), K.nR(TEST), REPS, NE, H.T, RandStream('mt19937ar', 'Seed', 300 + ci));
+    specs = test_episodes(c, numel(PP.ebno), K.geo(c, TEST), REPS, NE, H.T, RandStream('mt19937ar', 'Seed', 300 + ci));
     Ro = dqn_eval_batches('dqn_esc', PP, K, specs, ag, struct(), 7000, TEST);
     Ri = dqn_eval_batches('dqn_esc', PP, K, specs, Q.agent, struct(), 7000, TEST);
     Rr = dqn_eval_batches('rule_esc', PP, K, specs, [], struct(), 7000, TEST);
@@ -63,7 +63,7 @@ end
 rep = {'=== COMBINED THREATS NEVER TRAINED ON: LEAVE-ONE-COMBINATION-OUT ==='};
 rep{end+1} = sprintf(['Generated: %s | DQN retrained without the combination (train and validation pools removed), ' ...
     'selected settings: monitor %s %d/%d, penalty %d, gamma %.2f, seed %d | test flights of the combination, %d per Eb/N0'], ...
-    datestr(now), PP.alarm_mode, PP.confirm, Q.seed_summary.selected_fa_pen, H.gamma, seed, K.nR(TEST));
+    datestr(now), PP.alarm_mode, PP.confirm, Q.seed_summary.selected_fa_pen, H.gamma, seed, numel(K.geo{K.clean, TEST}));
 rep{end+1} = 'Recovered = BER and packet loss <= 2x clean for 5 consecutive cycles, among recoverable episodes; [95% bootstrap over geometries].';
 rep{end+1} = '';
 rep{end+1} = sprintf('%-32s %6s %24s %24s %10s %10s', 'combination', 'n', 'DQN, never trained', 'DQN, trained', 'rule+esc', 'table');
@@ -81,12 +81,12 @@ save('results/combo_generalization.mat', 'res');
 fprintf('\nSaved results/combo_generalization.{txt,mat} (%.1f min)\n', toc(t0)/60);
 
 %% ===================== Local functions =====================
-function specs = test_episodes(c, nS, nG, reps, NE, T, rs)
-% Every (cell, Eb/N0, test geometry) of the cells c (the severities of one
-% combination) `reps` times, in batches of NE (cyclic padding of the last batch,
-% dropped again by mark()).
-[cc, s, r] = ndgrid(c(:)', 1:nS, 1:nG);
-cc = repmat(cc(:)', 1, reps); s = repmat(s(:)', 1, reps); r = repmat(r(:)', 1, reps);
+function specs = test_episodes(c, nS, rr, reps, NE, T, rs)
+% Every (cell, Eb/N0, test geometry the cell flies: rr, one list per cell) of the cells c
+% (the severities of one combination) `reps` times, in batches of NE (cyclic padding of the
+% last batch, dropped again by mark()).
+[cc, s, r] = flight_triples(c(:)', rr, 1:nS);
+cc = repmat(cc, 1, reps); s = repmat(s, 1, reps); r = repmat(r, 1, reps);
 n = numel(s); nb = ceil(n / NE); pad = nb * NE - n;
 k_ = mod(0:n + pad - 1, n) + 1; cc = cc(k_); s = s(k_); r = r(k_);
 specs = cell(1, nb);

@@ -11,7 +11,7 @@ function varargout = link_env(cmd, varargin)
 %   spec: scn (threat cell index into PP.scen), s (Eb/N0 index), onset, follow,
 %         fdelay, unk (1 x NE each), T; optional r (1 x NE): geometry of each
 %         episode (index into PP.runs{split}, one the cell flies: PP.cell_geo), drawn
-%         at random if absent; optional delay: signalling delay of a configuration
+%         at random among the cell's (K.geo) if absent; optional delay: signalling delay of a configuration
 %         change in cycles (default C.switch_delay); optional comb (1 x NE): the
 %         jammer is on every channel we can use (frequency diversity escapes it no
 %         more than a hop)
@@ -110,6 +110,15 @@ K.Q = Q;
 K.runs = PP.runs;                                   % geometry ids per split
 K.nR = cellfun(@numel, PP.runs);
 nSc = numel(PP.scen); nS = numel(PP.ebno); nSp = numel(PP.runs); nRm = max(K.nR);
+K.geo = cell(nSc, nSp);                             % the geometries every cell flies (PP.cell_geo; the clean link's
+for sc = 1:nSc                                      % own, without the shadowing reference), every one without it
+    for sp = 1:nSp
+        K.geo{sc, sp} = 1:K.nR(sp);
+        if isfield(PP, 'cell_geo') && numel(PP.cell_geo) >= sc && numel(PP.cell_geo{sc}) >= sp
+            K.geo{sc, sp} = PP.cell_geo{sc}{sp};
+        end
+    end
+end
 K.q = nan(nSc, nS, nA, nSp, nRm); K.gput = nan(nSc, nS, nA, nSp, nRm);
 K.restored = false(nSc, nS, nA, nSp, nRm); K.restored_plr = false(nSc, nS, nA, nSp, nRm);
 K.healthy = false(nSc, nS, nSp, nRm); K.recoverable = false(nSc, nS, nSp, nRm); K.recoverable_comb = K.recoverable;
@@ -188,8 +197,13 @@ E.hop_live = -inf(1, NE);                           % frame from which the chann
 E.crc = false(1, NE);                               % CRC of the frame just received failed
 E.fec_t = -inf(1, NE);                              % frame from which the link runs coded
 if ~isfield(spec, 'comb') || isempty(spec.comb), E.comb = false(1, NE); end
-if ~isfield(spec, 'r') || isempty(spec.r)
-    E.r = randi(rs, K.nR(split), 1, NE);             % geometry of the episode
+if ~isfield(spec, 'r') || isempty(spec.r)            % geometry of the episode, one its cell flies
+    G = K.geo(E.scn, split);
+    if all(cellfun(@(g) isequal(g, G{1}), G))
+        E.r = G{1}(randi(rs, numel(G{1}), 1, NE));
+    else
+        E.r = cellfun(@(g) g(randi(rs, numel(g))), G(:)');
+    end
 end
 E.k0 = randi(rs, PP.F_SUB, 1, NE) - 1;               % starting frame inside the geometry
 assert(mod(PP.F_SUB, 2) == 0, 'link_env: %d frames per geometry do not hold whole frame pairs (coded packets)', PP.F_SUB);

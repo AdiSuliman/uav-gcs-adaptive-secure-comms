@@ -20,9 +20,9 @@
 % fold holds the same share of them. Airframe shadowing counts only while the attitude lets
 % the airframe hide an antenna at a roll the level is measured at (shadow_hidden.m,
 % shadow_roll_band.m): its cells fly N_SUB flights that hide one in some frame, one per
-% fold, found from the flights' draws before they are simulated (flight_draws.m,
-% d.hidden); a flight that hides none would be the clean link. The share of such flights
-% per level (shadow_hit_share.m) is printed with the flights tried.
+% fold, found from the flights' draws before they are simulated (hides_antenna.m:
+% flight_draws.m, d.hidden); a flight that hides none would be the clean link. The share
+% of such flights per level (shadow_hit_share.m) is printed with the flights tried.
 %
 % Per frame: reference-antenna IQ, label, level, configured Eb/N0, the received Eb/N0
 % (ebno_rx: the configured value less a path-loss step from its onset, received_ebno.m),
@@ -120,7 +120,8 @@ for tt = 1:numel(threat_cfg)
             for sub = 1:n_sub(tt)
                 run_id = run_id + 1; tried = tried + 1;
                 v_kmh = p.speed_kmh_min + rand() * (p.speed_kmh_max - p.speed_kmh_min);
-                while shd && ~hides(p, SEED0 + run_id, v_kmh, EbNo_list(s))   % a flight that hides an antenna
+                while shd && ~hides_antenna(SEED0 + run_id, v_kmh, p, ...   % a flight that hides an antenna
+                        struct('ebno', EbNo_list(s), 'alt_m', NaN, 'k_sig_db', NaN))
                     run_id = run_id + 1; tried = tried + 1;
                     v_kmh = p.speed_kmh_min + rand() * (p.speed_kmh_max - p.speed_kmh_min);
                 end
@@ -190,13 +191,6 @@ clear D dataset   % large arrays; main.m runs the stages in one workspace
 function build(p, modelName)
 params = p; save('params.mat', 'params'); %#ok<NASGU>
 evalc('build_threat_model');
-end
-
-function h = hides(p, seed, v_kmh, ebno)
-% The flight's attitude lets the airframe hide an antenna in some frame of the sub-run
-% (flight_draws.m, d.hidden), the draws link_seed.m gives the model.
-d = flight_draws(seed, v_kmh / 3.6 * p.carrier_freq / p.c_light, p, struct('ebno', ebno, 'alt_m', NaN, 'k_sig_db', NaN));
-h = any(d.hidden > 0);
 end
 
 function D = add_subrun(D, p, modelName, ebno, v_kmh, stop_time, delay_bits, label, level, run_id, fold, MEAS, seed0, tw)

@@ -54,8 +54,8 @@ fprintf('%s\n', rep{:});
 
 %% ===================== Local functions =====================
 function specs = static_specs(cells, PP, K, H, split, reps, rs)
-[c, s, r] = ndgrid(cells, 1:numel(PP.ebno), 1:K.nR(split));
-c = repmat(c(:)', 1, reps); s = repmat(s(:)', 1, reps); r = repmat(r(:)', 1, reps);
+[c, s, r] = flight_triples(cells, K.geo(cells, split), 1:numel(PP.ebno));   % the geometries each cell flies
+c = repmat(c, 1, reps); s = repmat(s, 1, reps); r = repmat(r, 1, reps);
 n = numel(c); nb = ceil(n / H.NE);
 specs = cell(1, nb);
 for b = 1:nb

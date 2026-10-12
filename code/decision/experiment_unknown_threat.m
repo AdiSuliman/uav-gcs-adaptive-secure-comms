@@ -58,7 +58,7 @@ for ti = 1:numel(threats)
     agents_loo{ti} = dqn_dense(ag);
     [Ro, Ri, Rr] = deal([]);
     for sp = SPL
-        specs = test_episodes(c, numel(PP.ebno), PP.cell_geo{c(1)}{sp}, REPS, NE, H.T, ...
+        specs = test_episodes(c, numel(PP.ebno), K.geo(c, sp), REPS, NE, H.T, ...
             RandStream('mt19937ar', 'Seed', 500 + 100 * sp + ti));
         Ro = cat_struct(Ro, mark(dqn_eval_batches('dqn_esc', PP, K, specs, ag, struct(), 7000, sp), specs, PP, sp));
         Ri = cat_struct(Ri, mark(dqn_eval_batches('dqn_esc', PP, K, specs, Q.agent, struct(), 7000, sp), specs, PP, sp));
@@ -100,11 +100,11 @@ fprintf('\nSaved results/unknown_threat_policy.{txt,mat}, data/unknown_threat_ag
 
 %% ===================== Local functions =====================
 function specs = test_episodes(c, nS, rr, reps, NE, T, rs)
-% Every (cell, Eb/N0, geometry rr of the split) of the cells c (the severities of one
-% threat) `reps` times, in batches of NE (cyclic padding of the last batch, dropped
-% again by mark()), the detector output withheld after the onset.
-[cc, s, r] = ndgrid(c(:)', 1:nS, rr);
-cc = repmat(cc(:)', 1, reps); s = repmat(s(:)', 1, reps); r = repmat(r(:)', 1, reps);
+% Every (cell, Eb/N0, geometry of the split the cell flies: rr, one list per cell) of the
+% cells c (the severities of one threat) `reps` times, in batches of NE (cyclic padding of
+% the last batch, dropped again by mark()), the detector output withheld after the onset.
+[cc, s, r] = flight_triples(c(:)', rr, 1:nS);
+cc = repmat(cc, 1, reps); s = repmat(s, 1, reps); r = repmat(r, 1, reps);
 n = numel(s); nb = ceil(n / NE); pad = nb * NE - n;
 k_ = mod(0:n + pad - 1, n) + 1; cc = cc(k_); s = s(k_); r = r(k_);
 specs = cell(1, nb);

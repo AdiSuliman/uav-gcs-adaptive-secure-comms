@@ -3,7 +3,8 @@ function specs = policy_episodes(cells, nS, rr, reps, follow, unk, NE, T, rs, fd
 %   specs = policy_episodes(cells, nS, rr, reps, follow, unk, NE, T, rs)
 %   specs = policy_episodes(..., fdelay)
 %   specs = policy_episodes(..., fdelay, ss)    only the Eb/N0 indices ss
-%   Every (cell, Eb/N0 index 1:nS, geometry rr: indices into PP.runs{split}) `reps`
+%   Every (cell, Eb/N0 index 1:nS, geometry rr: indices into PP.runs{split}; one vector for
+%   every cell, or one per cell in a cell array, flight_triples.m) `reps`
 %   times, packed into batches of NE; the last batch is padded cyclically and keeps
 %   its n_valid episodes (policy_run_set.m drops the rest). Onset uniform in cycles
 %   3-10 and follower delay uniform in fdelay (cycles a follower needs to re-acquire
@@ -11,11 +12,12 @@ function specs = policy_episodes(cells, nS, rr, reps, follow, unk, NE, T, rs, fd
 %   unk: detector output withheld after the onset.
 if nargin < 10 || isempty(fdelay), fdelay = [2 5]; end
 if nargin < 11, ss = 1:nS; end
-[c, s, r] = ndgrid(cells, ss, rr);
-c = repmat(c(:)', 1, reps); s = repmat(s(:)', 1, reps); r = repmat(r(:)', 1, reps);
+[c, s, r] = flight_triples(cells, rr, ss);
+c = repmat(c, 1, reps); s = repmat(s, 1, reps); r = repmat(r, 1, reps);
 n = numel(c); nb = ceil(n / NE); pad = nb * NE - n;
-k_ = mod(0:n + pad - 1, n) + 1; c = c(k_); s = s(k_); r = r(k_);             % cyclic padding of the last batch
 specs = cell(1, nb);
+if n == 0, return; end
+k_ = mod(0:n + pad - 1, n) + 1; c = c(k_); s = s(k_); r = r(k_);             % cyclic padding of the last batch
 for b = 1:nb
     i = (b-1)*NE + (1:NE);
     specs{b} = struct('scn', c(i), 's', s(i), 'r', r(i), 'onset', randi(rs, [3 10], 1, NE), ...

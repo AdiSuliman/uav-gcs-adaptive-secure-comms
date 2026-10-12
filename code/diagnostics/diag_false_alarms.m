@@ -177,8 +177,8 @@ function specs = full_val_spec(PP, K, H, split, reps, rs)
 % The validation episodes of train_dqn.m.
 C = decision_config();
 cells = find(~cellfun(@isempty, PP.pools(:, 1, K.na, split))');
-[c, s, r] = ndgrid(cells, 1:numel(PP.ebno), 1:K.nR(split));
-c = repmat(c(:)', 1, reps); s = repmat(s(:)', 1, reps); r = repmat(r(:)', 1, reps);
+[c, s, r] = flight_triples(cells, K.geo(cells, split), 1:numel(PP.ebno));   % the geometries each cell flies
+c = repmat(c, 1, reps); s = repmat(s, 1, reps); r = repmat(r, 1, reps);
 n = numel(c); nb = ceil(n / H.NE);
 specs = cell(1, nb);
 for b = 1:nb
