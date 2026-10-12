@@ -3328,7 +3328,7 @@ d = fullfile(tc.TestData.tmp, 'rekey_ct'); mkdir(fullfile(d, 'data'));
 c0 = cd(d); back = onCleanup(@() cd(c0));
 ood = struct('score', 'last', 'win', 3); classes = {'none', 'jamming'}; trained_at = 7;
 save('data/trained_detector.mat', 'ood', 'classes', 'trained_at');
-T = struct('retain', 0.95, 'maha', -2, 'maha_val', [-3; -1]); save('data/ood_thresholds.mat', 'T');
+T = struct('retain', 0.95, 'maha', -2, 'maha_val', [-3; -1], 'win', 3, 'score', 'last'); save('data/ood_thresholds.mat', 'T');
 F0 = struct('FM', struct('mu', zeros(1, 11)), 'N', 1, 'q_thr', 4);
 FM = struct('mu', zeros(1, 13)); N = 12; q_thr = 4.5; save('data/fusion.mat', 'FM', 'N', 'q_thr');
 Q = struct('probs', single([0.9 0.1]), 'maha', single(0), 'feat', single([1 2]), 'ber', 0, 'run', 1);
@@ -3354,7 +3354,7 @@ d = fullfile(tc.TestData.tmp, 'status'); mkdir(fullfile(d, 'data')); mkdir(fullf
 c0 = cd(d); back = onCleanup(@() cd(c0));
 ood = struct('score', 'last', 'win', 3); classes = {'none'}; trained_at = 7; %#ok<NASGU>
 save('data/trained_detector.mat', 'ood', 'classes', 'trained_at');
-T = struct('retain', 0.95, 'maha', -2, 'maha_val', [-3; -1]); save('data/ood_thresholds.mat', 'T');
+T = struct('retain', 0.95, 'maha', -2, 'maha_val', [-3; -1], 'win', 3, 'score', 'last'); save('data/ood_thresholds.mat', 'T');
 FM = struct('mu', zeros(1, 3)); N = 4; q_thr = 4; save('data/fusion.mat', 'FM', 'N', 'q_thr');
 id = detector_id(trained_at, ood, fusion_model(), T.maha);
 agent = struct('dense', struct('W', {{1, 2}}, 'b', {{0, 0}})); confirm = [4 5]; alarm_mode = 'class_drop'; drop_db = 5;
