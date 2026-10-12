@@ -3911,6 +3911,16 @@ verifyEqual(tc, onset_shape('sequence', Lr, pn, cls, 5), pn);         % a fused 
 st = []; c1 = zeros(30, 1);
 for t = 1:30, [st, ~, c1(t)] = onset_shape('latch', st, Lr(t, :), [0.1 0.5 0.4], cls, 5); end
 verifyEqual(tc, c1, cause);                                           % one cycle at a time: the same
+% the threshold: the statistic at the diagnosis, chosen on validation, 0 without a choice
+verifyLessThan(tc, onset_shape('events', Ls), 0); verifyGreaterThan(tc, onset_shape('events', Lr), 0);
+verifyTrue(tc, isnan(onset_shape('events', L)));                       % no event
+verifyEqual(tc, onset_shape('choose', [-5 -3 -2 1 2 4], [1 1 1 2 2 2]), 0);
+verifyEqual(tc, onset_shape('choose', [-6 -4 -3 -2 -1 3], [1 1 1 2 2 2]), -2.25);
+verifyEqual(tc, onset_shape('choose', [-6 -4], [1 1]), 0);              % one cause only
+verifyEqual(tc, [onset_shape('threshold', struct('os_thr', -1.5)), onset_shape('threshold', [])], [-1.5 0]);
+[~, c3] = onset_shape('sequence', Lr, repmat([0.1 0.5 0.4], 30, 1), cls, 5, 1e3);   % above every ramp: a step
+verifyEqual(tc, c3(end), 1);
+verifyNotEmpty(tc, strfind(fileread(which('select_fusion')), 'FM.os_thr = onset_shape(''choose'', og, oy);'));
 end
 
 function test_monitor_onset_latch(tc)
@@ -3931,7 +3941,7 @@ for t = 1:30
 end
 verifyEqual(tc, cl(1:9), repmat({'airframe_shadowing'}, 1, 9));
 verifyEqual(tc, unique(cl(15:30)), {'antenna_fault'});
-verifyEqual(tc, numel(strfind(fileread(which('policy_monitor')), 'onset_shape(')), 1);
+verifyEqual(tc, numel(strfind(fileread(which('policy_monitor')), 'onset_shape(''latch''')), 1);
 end
 
 function test_event_frame_pools(tc)

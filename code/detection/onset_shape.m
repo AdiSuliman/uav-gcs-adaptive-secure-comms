@@ -22,29 +22,47 @@ function varargout = onset_shape(G, varargin)
 %   the diversity-imbalance indicator, Heath, US 10,404,368, Table 2; an event of airframe
 %   shadowing needs 5 dB of excess loss, Sun et al., Sec. III).
 %
-%   [st, pf, cause] = onset_shape('latch', st, g, pf, classes, heal)   one decision cycle
-%       of the latched diagnosis (policy_monitor.m): st the state ([] at the start), g
+%   [st, pf, cause] = onset_shape('latch', st, g, pf, classes, heal, thr)   one decision
+%       cycle of the latched diagnosis (policy_monitor.m): st the state ([] at the start), g
 %       E x nr this cycle's gains, pf E x C fused class probabilities, heal the healthy
-%       cycles that close the event (decision_config.m C.heal). A branch whose 3-cycle
-%       median offset falls C_LOST below the median of its earlier cycles (at least 3)
-%       starts an event; K_DIAG cycles later its offsets over the held history (up to
-%       N_HIST cycles, the onset and the lead-in before it) are fitted as above, and the
-%       cause is latched: a ramp when os_glr > 2 (Akaike's information criterion: the
-%       ramp's length is one parameter more), else a step. While latched, a fused class of
-%       antenna_fault or airframe_shadowing reads the latched cause (the two classes'
-%       probability goes to it); the latch resets once the branch's drop stays below
-%       C_LOST for heal cycles. cause: E x 1, 0 none or pending, 1 antenna_fault, 2
-%       airframe_shadowing.
+%       cycles that close the event (decision_config.m C.heal), thr the statistic's
+%       threshold (onset_shape('threshold', FM); default 0). A branch whose 3-cycle median
+%       offset falls C_LOST below the median of its earlier cycles (at least 3) starts an
+%       event; K_DIAG cycles later its offsets over the held history (up to N_HIST cycles,
+%       the onset and the lead-in before it) are fitted as above, and the cause is latched:
+%       a ramp (airframe_shadowing) when os_glr > thr, else a step (antenna_fault). While
+%       latched, a fused class of antenna_fault or airframe_shadowing reads the latched
+%       cause (the two classes' probability goes to it); the latch resets once the branch's
+%       drop stays below C_LOST for heal cycles. cause: E x 1, 0 none or pending, 1
+%       antenna_fault, 2 airframe_shadowing.
 %
-%   [pf, cause] = onset_shape('sequence', G, pf, classes, heal)   the latch over the cycles
-%       of one run (G n x nr, pf n x C), for the readings of eval_detector.m and det_frames.m
+%   [pf, cause] = onset_shape('sequence', G, pf, classes, heal, thr)   the latch over the
+%       cycles of one run (G n x nr, pf n x C), for the readings of eval_detector.m and
+%       det_frames.m
+%   g = onset_shape('events', G)   os_glr at the latch's diagnosis of the first event of one
+%       run (G n x nr), NaN without one: the input of the threshold's choice
+%   thr = onset_shape('choose', g, y)   the threshold that best tells the events' causes
+%       apart, y 1 for antenna_fault and 2 for airframe_shadowing (select_fusion.m, on the
+%       validation sub-runs): the largest mean of the two causes' shares read right over
+%       a grid of 0.25 from -8 to 8, the one nearest 0 among equals; 0 without both causes
+%   thr = onset_shape('threshold', FM)   FM.os_thr of the deployed fusion (select_fusion.m),
+%       0 without one: the model that fits better
 %   names = onset_shape('names')
-C_LOST = 5; K_DIAG = 3; N_HIST = 20; AIC = 2;
+C_LOST = 5; K_DIAG = 3; N_HIST = 20;
 if ischar(G)
     switch G
         case 'names', varargout{1} = {'os_rate', 'os_glr'};
-        case 'latch', [varargout{1:nargout}] = latch(varargin{:}, C_LOST, K_DIAG, N_HIST, AIC);
-        case 'sequence', [varargout{1:nargout}] = sequence(varargin{:});
+        case 'latch'
+            a = varargin; if numel(a) < 6, a{6} = 0; end
+            [varargout{1:nargout}] = latch(a{1:6}, C_LOST, K_DIAG, N_HIST);
+        case 'sequence'
+            a = varargin; if numel(a) < 5, a{5} = 0; end
+            [varargout{1:nargout}] = sequence(a{1:5});
+        case 'events', varargout{1} = events(varargin{:});
+        case 'choose', varargout{1} = choose(varargin{:});
+        case 'threshold'
+            FM = varargin{1}; varargout{1} = 0;
+            if isstruct(FM) && isfield(FM, 'os_thr') && ~isempty(FM.os_thr), varargout{1} = FM.os_thr; end
         otherwise, error('onset_shape: unknown command %s', G);
     end
     return
@@ -106,12 +124,12 @@ S.glr = reshape(g, E, 1);
 S.R_ramp = reshape(R(jr(ir)), E, 1);
 end
 
-function [st, pf, cause] = latch(st, g, pf, classes, heal, C_LOST, K_DIAG, N_HIST, AIC)
-% One cycle of the latched diagnosis over E episodes.
+function [st, pf, cause] = latch(st, g, pf, classes, heal, thr, C_LOST, K_DIAG, N_HIST)
+% One cycle of the latched diagnosis over E episodes (st.glr: the statistic at the diagnosis).
 [E, nr] = size(g);
 if isempty(st)
     st = struct('H', repmat(double(g), 1, 1, N_HIST), 'n', zeros(E, 1), 'on', false(E, 1), 'ant', zeros(E, 1), ...
-        'ref', zeros(E, 1), 'age', zeros(E, 1), 'ok', zeros(E, 1), 'cause', zeros(E, 1));
+        'ref', zeros(E, 1), 'age', zeros(E, 1), 'ok', zeros(E, 1), 'cause', zeros(E, 1), 'glr', nan(E, 1));
 end
 st.H = cat(3, st.H(:, :, 2:end), double(g)); st.n = min(st.n + 1, N_HIST);
 cause = st.cause;
@@ -135,7 +153,7 @@ for e = on
     end
     if st.cause(e) == 0 && st.age(e) >= K_DIAG
         S = fit(reshape(O(e, st.ant(e), N_HIST - st.n(e) + 1:N_HIST), [], 1));
-        st.cause(e) = 1 + (S.glr > AIC);
+        st.cause(e) = 1 + (S.glr > thr); st.glr(e) = S.glr;
     end
 end
 cause = st.cause;
@@ -153,10 +171,32 @@ if any(m)
 end
 end
 
-function [pf, cause] = sequence(G, pf, classes, heal)
+function [pf, cause] = sequence(G, pf, classes, heal, thr)
 % The latch over the n cycles of one run (G n x nr, pf n x C).
 n = size(G, 1); cause = zeros(n, 1); st = [];
 for t = 1:n
-    [st, pf(t, :), cause(t)] = onset_shape('latch', st, G(t, :), pf(t, :), classes, heal);
+    [st, pf(t, :), cause(t)] = onset_shape('latch', st, G(t, :), pf(t, :), classes, heal, thr);
 end
+end
+
+function g = events(G)
+% os_glr at the latch's diagnosis of the first event of one run, NaN without one.
+n = size(G, 1); st = []; g = NaN; pf = zeros(1, 1);
+for t = 1:n
+    [st, ~, c] = onset_shape('latch', st, G(t, :), pf, {'none'}, Inf, 0);
+    if c > 0, g = st.glr; return; end
+end
+end
+
+function thr = choose(g, y)
+% The threshold of the largest mean share read right (a ramp above it, a step at or
+% below), on a grid of 0.25 from -8 to 8, the one nearest 0 among equals.
+thr = 0; g = g(:); y = y(:);
+k = isfinite(g);
+if ~any(y(k) == 1) || ~any(y(k) == 2), return; end
+T = -8:0.25:8;
+ba = arrayfun(@(t) (mean(g(k & y(:) == 1) <= t) + mean(g(k & y(:) == 2) > t)) / 2, T);
+best = find(ba >= max(ba) - 1e-12);
+[~, i] = min(abs(T(best)));
+thr = T(best(i));
 end

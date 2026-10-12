@@ -41,7 +41,8 @@ kl = k;                                                  % with the latched caus
 if ~isempty(J.gant)
     for r = 1:numel(ur)
         j = find(J.run == ur(r));
-        [~, kl(j)] = max(onset_shape('sequence', J.gant(j, :), pc(j, :), PP.classes, C.heal), [], 2);
+        [~, kl(j)] = max(onset_shape('sequence', J.gant(j, :), pc(j, :), PP.classes, C.heal, ...
+            onset_shape('threshold', PP.fuse)), [], 2);
     end
 end
 dd = C.drop_db; if isfield(PP, 'drop_db') && ~isempty(PP.drop_db), dd = PP.drop_db; end

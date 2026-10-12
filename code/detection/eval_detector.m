@@ -231,9 +231,11 @@ if isfield(sp.test, 'gain_ant') && isfield(sp.test, 'pos')
     [~, ~, rid] = unique(sp.test.run(:));
     byrun = accumarray(rid, (1:numel(rid))', [], @(v) {v});
     age = nan(numel(Y_test), 1);
+    os_thr = 0; if ~isempty(fus), os_thr = onset_shape('threshold', fus.FM); end   % chosen on validation (select_fusion.m)
     for r = 1:numel(byrun)
         ix = byrun{r}; [~, o] = sort(sp.test.pos(ix)); ix = ix(o);
-        [~, kk] = max(onset_shape('sequence', sp.test.gain_ant(ix, :), pf_all(ix, :), cls_names, decision_config().heal), [], 2);
+        [~, kk] = max(onset_shape('sequence', sp.test.gain_ant(ix, :), pf_all(ix, :), cls_names, decision_config().heal, ...
+            os_thr), [], 2);
         y_latch(ix) = categorical(cls_names(kk), cls_names);
         for b = 1:2
             j0 = find(Y_test(ix) == BR{b}, 1);

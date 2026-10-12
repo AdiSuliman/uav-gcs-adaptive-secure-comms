@@ -12,9 +12,14 @@
 % the clean validation frames (the sub-runs without a threat), as an AGC jamming monitor
 % sets its threshold from interference-free samples, Th = mu - 3 sigma - 2 dB for a gain
 % drop (Kazim et al. 2026, eq. 1.3, p. 2); the slot's power rises instead, so
-% q_thr = mu + 3 sigma + 2 dB of q_iot. The test split is not used.
-% Output: data/fusion.mat (FM, N, lambda, cv table, out-of-fold probabilities and their
-% targets, q_thr)
+% q_thr = mu + 3 sigma + 2 dB of q_iot. The threshold of the onset's shape, which the
+% monitor's latched cause of a lost branch reads (onset_shape.m: a ramp above it, airframe
+% shadowing; a step at or below it, an antenna fault), is chosen on the validation sub-runs
+% of the two threats: the statistic at the latch's diagnosis of each sub-run's event, the
+% threshold that reads the two causes right in the largest mean share (FM.os_thr). The test
+% split is not used.
+% Output: data/fusion.mat (FM with os_thr, N, lambda, cv table, out-of-fold probabilities
+% and their targets, q_thr)
 
 close all; clc;
 fprintf('=== B2F: temporal fusion (validation split only) ===\n\n');
@@ -69,6 +74,21 @@ qi = va.feats_raw(isnan(va.level), strcmp(va.feat_names, 'q_iot'));
 q_thr = mean(qi) + 3 * std(qi) + 2;
 fprintf('Quiet-slot interference alarm: %.2f dB over thermal (clean frames: mean %.2f, std %.2f dB, n = %d)\n', ...
     q_thr, mean(qi), std(qi), numel(qi));
+iB = [find(strcmp(classes, 'antenna_fault')), find(strcmp(classes, 'airframe_shadowing'))];
+og = []; oy = [];                                       % the statistic at the latch's diagnosis, the sub-run's cause
+if numel(iB) == 2
+    for r = runs(:)'
+        ix = find(va.run == r); [~, o] = sort(va.pos(ix)); ix = ix(o);
+        b = find(ismember(iB, y(ix)), 1);
+        if isempty(b), continue; end
+        og(end+1) = onset_shape('events', va.gain_ant(ix, :)); oy(end+1) = b; %#ok<SAGROW>
+    end
+end
+FM.os_thr = onset_shape('choose', og, oy);
+k = isfinite(og);
+fprintf(['Onset shape: threshold %+.2f (validation sub-runs with a latched event: antenna fault %d of %d, read right ' ...
+    '%.1f%%; airframe shadowing %d of %d, %.1f%%)\n'], FM.os_thr, sum(k & oy == 1), sum(oy == 1), ...
+    100 * mean(og(k & oy == 1) <= FM.os_thr), sum(k & oy == 2), sum(oy == 2), 100 * mean(og(k & oy == 2) > FM.os_thr));
 if ~exist('results', 'dir'), mkdir('results'); end
 save('data/fusion.mat', 'FM', 'N', 'lambda', 'NS', 'LAMBDA', 'cv', 'val_probs_oof', 'val_target', 'q_thr');
 fprintf('Saved data/fusion.mat\n');

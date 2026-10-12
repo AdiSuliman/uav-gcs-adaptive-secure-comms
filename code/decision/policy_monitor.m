@@ -129,7 +129,8 @@ mem.tried(mem.good >= C.heal, :) = false;
 % step (antenna_fault) or a ramp (airframe_shadowing), and kept while the branch stays lost
 if ~isfield(mem, 'os'), mem.os = []; end
 if isfield(obs, 'gant') && ~isempty(obs.gant)
-    [mem.os, pf] = onset_shape('latch', mem.os, obs.gant, pf, PP.classes, C.heal);
+    FZ = []; if isfield(PP, 'fuse'), FZ = PP.fuse; end
+    [mem.os, pf] = onset_shape('latch', mem.os, obs.gant, pf, PP.classes, C.heal, onset_shape('threshold', FZ));
 end
 M.probs = pf; M.te = te;
 [~, k] = max(pf, [], 2);
