@@ -1,6 +1,8 @@
 %% MEASURE_LATENCY - Decision latency per cycle (KPI 7: real time)
 % One decision cycle as deployed: spectrogram image of the received frame, link
-% features, detector (class probabilities and the unknown-threat score from one
+% features with the record of the cycle's idle time (idle_summary.m from that time's
+% RSSI samples; the fusion's window cues run inside the monitor), detector (class
+% probabilities and the unknown-threat score from one
 % forward pass, detect_scores.m; the score selected by eval_ood_detection.m within the
 % KPI 7 budget), link monitor with the temporal fusion and the
 % unknown-score window + policy (policy_decide.m): the DEPLOYED policy as train_dqn.m chose
@@ -89,11 +91,11 @@ for di = 1:numel(devs)
         for f = 1:nF
             x = F{f};
             t0 = tic; img = spec_image(x.iq, fs, thermal_nv(p0)); t_spec = toc(t0);
-            t0 = tic; raw = link_features(x.M, x.k, tw); t_feat = toc(t0);
+            t0 = tic; raw = link_features(x.M, x.k, tw); iq_rec = idle_record(x.M, x.k, p0); t_feat = toc(t0);
             X = reshape(single(img), 128, 128, 1, 1); Fn = ((raw - mu) ./ sd)';
             t0 = tic; [probs, maha] = detect_scores(D.net, D.ood, X, Fn, ddev); sync(ug); t_det = toc(t0);
             obs = struct('probs', probs(:)', 'unknown', maha < PPm.maha_thr, 'maha', maha, 'feat', raw, ...
-                'gant', x.M.gain_ant(:, x.k)');
+                'gant', x.M.gain_ant(:, x.k)', 'idle', iq_rec);
             t0 = tic; [cfgD, memD] = policy_decide('dqn_esc', obs, cfgD, memD, PPm, Q.agent); t_dqn = toc(t0);
             t0 = tic; [cfgR, memR] = policy_decide('rule_esc', obs, cfgR, memR, PPm, []); t_rule = toc(t0);
             t0 = tic; [cfgP, memP] = policy_decide(kindP, obs, cfgP, memP, PPm, agP, optP); t_dep = toc(t0);
@@ -174,6 +176,12 @@ end
 
 function sync(gpu)
 if gpu, wait(gpuDevice); end
+end
+
+function r = idle_record(M, k, p)
+% The record of the idle time before frame k from that time's RSSI samples (idle_summary.m).
+r = nan(1, numel(idle_summary('names')));
+if isfield(M, 'idle_R') && ~isempty(M.idle_R), r = idle_summary(double(M.idle_R(:, :, k)), p); end
 end
 
 function s = device_name(gpu)

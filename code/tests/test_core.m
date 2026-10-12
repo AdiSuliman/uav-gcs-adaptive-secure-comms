@@ -835,7 +835,7 @@ function test_seed_streams_disjoint(tc)
 % are distinct and below 64, and the flight seeds of every family are distinct and
 % below 2^26.
 P = {'channel', 'awgn', 'bits', 'threat', 'aoa', 'ds', 'k', 'yaw', 'corr', 'gcsaoa', 'gcs', 'jam', 'alt', 'speed', ...
-    'body', 'wobble', 'cal'};
+    'body', 'wobble', 'cal', 'idle', 'amb'};
 off = zeros(1, numel(P));
 for i = 1:numel(P)
     [~, n] = seed_stream(12345, P{i});
@@ -1366,9 +1366,9 @@ probs = [1 - p2, p2];
 S = struct('run', run, 'pos', pos, 'gain_ant', randn(n, nr), 'feats_raw', zeros(n, numel(fn)), 'feat_names', {fn});
 S.feats_raw(:, feature_index('est_margin')) = 20; S.feats_raw(:, feature_index('log_ber')) = -5;
 Z = fuse_classes('windows', S, probs, N);
-nT = numel(temporal_evidence('names', C));
-verifyEqual(tc, size(Z, 2), nT + C);
-verifyEqual(tc, Z(:, nT + 1:end), log(probs), 'AbsTol', 1e-12);
+nT = numel(temporal_evidence('names', C)); nW = numel(window_cues('names'));
+verifyEqual(tc, size(Z, 2), nT + nW + C);
+verifyEqual(tc, Z(:, nT + nW + 1:end), log(probs), 'AbsTol', 1e-12);
 tr = run <= nRun / 2; te = ~tr; yt = y(te);
 FM = fuse_classes('fit', Z(tr, :), y(tr), C, 1e-3);
 [~, k] = fuse_classes('apply', FM, Z(te, :));
@@ -1974,8 +1974,8 @@ function test_sweep_hit_share(tc)
 % The sweeping jammer counts in about 13% of the frames (Liu et al.'s 5.25 ms window per
 % 20-83.5 ms sweep): the share the frames of seeded flights, a cycle apart on the channel
 % clock, have with at least 10% of their air time inside the window; the dataset flies its
-% cells 1/share times the sub-runs.
-p = base_params();
+% cells 1/share times the sub-runs. Without idle sensing (with it: test_threat_active_cycle).
+p = base_params(); p.idle_rssi_hz = 0;
 h = sweep_hit_share(p);
 verifyGreaterThan(tc, h, 0.10); verifyLessThan(tc, h, 0.16);
 g = sweep_window_s(p); ta = p.air_symbols / p.symbol_rate;
@@ -2746,12 +2746,15 @@ end
 
 function test_dataset_balance(tc)
 % Every class keeps its labelled frames: a path-loss cell N_SUB F_SUB / (TW - 1) sub-runs
-% (9 labelled frames of 20), the WLAN N_SUB over its labelled share (about 0.58: 10), the
-% sweeper over its; the extra sub-runs go round the folds from cell to cell.
-p = base_params();
-h = benign_hit_share(p);                                % the dataset's: 3000 runs of 20 frames
+% (9 labelled frames of 20), the WLAN N_SUB over its labelled share (frames: about 0.58, 10;
+% decision cycles with idle sensing: above 0.8, at most 7), the sweeper over its; the extra
+% sub-runs go round the folds from cell to cell.
+p = base_params(); q = p; q.idle_rssi_hz = 0;
+h = benign_hit_share(q);                                % the dataset's: 3000 runs of 20 frames
 verifyGreaterThan(tc, h, 0.5); verifyLessThan(tc, h, 0.65);
 verifyEqual(tc, round(6 / h), 10);
+hc = benign_hit_share(p);                               % per decision cycle (threat_active.m with act_idle)
+verifyGreaterThan(tc, hc, 0.8); verifyLessThanOrEqual(tc, round(6 / hc), 7);
 txt = fileread(which('run_dataset_sweep'));
 verifyNotEmpty(tc, regexp(txt, 'round\(N_SUB \* F_SUB / \(TW - 1\)\)', 'once'));
 verifyNotEmpty(tc, regexp(txt, 'round\(N_SUB / wlan\)', 'once'));
@@ -3723,4 +3726,178 @@ verifyEqual(tc, env, share * (161 - 28.8) / 161, 'AbsTol', 1e-12);
 verifyNotEmpty(tc, strfind(txt, 'conditioned on such a geometry'));
 verifyNotEmpty(tc, strfind(txt, '15.5/20 dB'));
 verifyEmpty(tc, shadow_note(struct(), 1, 3));
+end
+
+%% ---------- D85 obs: the idle time, the window cues, the per-cycle labels ----------
+function test_idle_record_bit_identical(tc)
+% Recording a gated schedule's on-shares in the idle time changes no draw: with and without
+% the recording (p.idle_rssi_hz 0) the same flight gives the same frames, bit for bit; the
+% record holds the idle time before every frame but the first.
+p = base_params(); p.quiet_build = true; p.cap_frames = 20;
+for thr = {'benign_interference', 'benign_interference+noise_burst'}
+    q = p; q.active_threat = thr{1}; q.benign_int_db = 10; q.jsr_db = 8; q.seed = 21;
+    q0 = q; q0.idle_rssi_hz = 0;
+    F0 = idle_run(q0, 4920001); F1 = idle_run(q, 4920001);
+    verifyEqual(tc, F1.iq, F0.iq); verifyEqual(tc, F1.act, F0.act); verifyEqual(tc, F1.act_comp, F0.act_comp, 'AbsTol', 0);
+    verifyTrue(tc, all(isnan(F0.idle), 'all'));                         % no idle sensing: no record
+    verifyTrue(tc, all(isnan(F1.idle(:, 1))) && all(isfinite(F1.idle(1, 2:end))));
+    verifyEqual(tc, size(F1.idle, 1), numel(idle_summary('names')));
+    nc = numel(strsplit(thr{1}, '+'));
+    verifyTrue(tc, all(isfinite(F1.idle_on(1:nc, :, 2:end)), 'all') && all(F1.idle_on(1:nc, :, 2:end) >= 0, 'all'));
+end
+close_system('UAV_GCS_Threat_Link', 0);
+end
+
+function test_idle_rssi_quiet_slot(tc)
+% The idle-time model reads the threat block's own schedule, levels and channels: its last
+% bin, 4.5 us before the frame's quiet slot, gives the slot's own interference over thermal
+% (q_iot, 128 samples per antenna) frame by frame; a faulty connector holds the emitter the
+% fault's depth down on its antenna; a reactive jammer is silent there.
+p = base_params(); p.quiet_build = true; p.cap_frames = 20;
+cs = {'jamming', 'jsr_db', 16, 0.8; 'benign_interference', 'benign_int_db', 12, 1.0; 'tone_jamming', 'tone_jsr_db', 12, 0.5; ...
+    'jamming+antenna_fault', 'jsr_db', 16, 1.0};
+for c = 1:size(cs, 1)
+    q = p; q.active_threat = cs{c, 1}; q.(cs{c, 2}) = cs{c, 3}; q.fault_atten_db = 18; q.seed = 31;
+    F = idle_run(q, 4920100 + c);
+    [R, ~, info] = idle_rssi(q, F.idle_ctx, double(F.idle_on), 1:F.nf, struct('meas', false));
+    last = squeeze(10*log10(mean(10.^((R(end, :, :) + reshape(F.idle_ctx.cal, 1, [])) / 10), 2)));
+    d = last(2:end) - F.q_iot(2:end)';
+    verifyLessThan(tc, median(abs(d)), cs{c, 4}, cs{c, 1});
+    if contains(cs{c, 1}, 'antenna_fault')
+        m = squeeze(mean(R(:, :, 2:end), [1 3]));
+        verifyLessThan(tc, m(info.hit) - median(m(setdiff(1:numel(m), info.hit))), -10);
+    end
+end
+q = p; q.active_threat = 'reactive_jamming'; q.jsr_db = 20; q.seed = 32;
+F = idle_run(q, 4920111);
+verifyLessThan(tc, max(F.idle(strcmp(idle_summary('names'), 'lvl'), 2:end)), 3);   % the floor only
+verifyEqual(tc, F.act_idle(2:end), zeros(1, F.nf - 1));
+close_system('UAV_GCS_Threat_Link', 0);
+end
+
+function test_idle_emitter_attenuation(tc)
+% An emitter in the idle time reaches the antenna behind a faulty connector the fault's
+% depth down (the connector attenuates everything its antenna receives), the antennas of a
+% shadowing flight alike (the airframe hides the GCS's direction only).
+p = base_params(); nr = p.n_rx;
+ctx = struct('seed', seed_base(4920200), 'fd', 300, 'lev', 1, 'aoa', [10 -20 30], 'kfac', [10 10], 'yaw', 0, ...
+    'rho', 0.5, 'att', [0 0 0 0 0 0 0], 'gate', [0.02 0 0 0.5], 'tdl', [ones(1, 4); zeros(18, 4)], 'cap', 1, 'cal', zeros(1, nr));
+NB = floor((round(p.cycle_s * p.symbol_rate * p.sps) - p.samples_per_frame - 18) / (p.symbol_rate * p.sps / p.idle_rssi_hz));
+amb = 100 * thermal_nv(p) * ones(NB, nr, 3);
+q = p; q.active_threat = 'antenna_fault'; q.fault_atten_db = 18;
+[R, ~, info] = idle_rssi(q, ctx, [], 1:3, struct('meas', false, 'ambient', amb));
+m = 10 * log10(squeeze(mean(10 .^ (R(:, :, 2:3) / 10) - 1, [1 3])));   % the emitter over the floor
+o = setdiff(1:nr, info.hit);
+verifyEqual(tc, m(info.hit) - mean(m(o)), -18, 'AbsTol', 0.6);           % the chains' 0.1 dB spread aside
+q = p; q.active_threat = 'airframe_shadowing';
+R = idle_rssi(q, ctx, [], 1:3, struct('meas', false, 'ambient', amb));
+m = squeeze(mean(R(:, :, 2:3), [1 3]));
+verifyLessThan(tc, max(m) - min(m), 0.6);
+end
+
+function test_idle_summary_and_cues(tc)
+% The record of an idle time and the window's idle cues: a quiet channel shows nothing; a
+% continuous jammer occupies it all; a sweep returns with one dwell length (5.25 ms); WLAN
+% packets of 0.27-3.2 ms spread their lengths.
+p = base_params(); nr = p.n_rx; NB = 357; n = 12; tb = 1e3 / p.idle_rssi_hz;
+nm = window_cues('names'); col = @(s) find(strcmp(nm, s));
+rs = RandStream('mt19937ar', 'Seed', 3);
+quiet = zeros(NB, nr, n); jam = 20 * ones(NB, nr, n);
+sw = zeros(NB, nr, n); wl = zeros(NB, nr, n);
+for j = 1:n
+    if mod(j, 2) == 0, a = 60 + mod(17 * j, 100); sw(a:a + 96, :, j) = 15; end   % a 97-bin (5.25 ms) dwell every other cycle
+    k = 3;
+    while k < NB - 60
+        L = randi(rs, [5 59]); wl(k:k + L - 1, :, j) = 15; k = k + L + randi(rs, [3 40]);
+    end
+end
+recs = {quiet, jam, sw, wl}; X = zeros(4, numel(nm));
+for i = 1:4
+    S = idle_summary(recs{i}, p);
+    verifyEqual(tc, size(S), [n numel(idle_summary('names'))]);
+    X(i, :) = window_cues(zeros(1, nr, n), zeros(1, 23, n), permute(S, [3 2 1]));
+end
+verifyEqual(tc, X(1, col('w_occ')), 0); verifyEqual(tc, X(2, col('w_occ')), 1);
+verifyLessThan(tc, X(3, col('w_bl_cv')), 0.05);
+verifyEqual(tc, X(3, col('w_bl_mean')), 97 * tb, 'AbsTol', 1e-9);
+verifyGreaterThan(tc, X(4, col('w_bl_cv')), 0.3);
+verifyGreaterThan(tc, X(4, col('w_rate')), 5 * X(3, col('w_rate')));
+Xn = window_cues(zeros(1, nr, n), zeros(1, 23, n), nan(1, numel(idle_summary('names')), n));   % no idle record
+verifyEqual(tc, Xn(col('i_occ'):end), zeros(1, numel(nm) - col('i_occ') + 1));
+end
+
+function test_window_cues_branch_and_step(tc)
+% A lost branch's cause in its fading: a faulty connector keeps the link's K on its branch,
+% a shadowed antenna loses its line of sight (Sun et al.: K about -16 dB); a step of our
+% received level inside the window is found with its size and age. (The cue over 60 cycles:
+% the moment K of 12 Rayleigh samples alone scatters by several dB.)
+rs = RandStream('mt19937ar', 'Seed', 5); n = 12; m60 = 60; nr = 3;
+ric = @(K, m) 10 * log10(abs(sqrt(K / (K + 1)) + sqrt(1 / (K + 1)) * (randn(rs, 1, m) + 1j * randn(rs, 1, m)) / sqrt(2)).^2);
+nm = window_cues('names'); col = @(s) find(strcmp(nm, s));
+G = zeros(2, nr, m60);
+for a = 2:nr, G(:, a, :) = reshape([ric(30, m60); ric(30, m60)], 2, 1, m60); end
+G(1, 1, :) = reshape(ric(30, m60) - 15, 1, 1, m60);                     % fault: the link's K, 15 dB down
+G(2, 1, :) = reshape(ric(10^(-1.6), m60) - 15, 1, 1, m60);              % shadowing: K -16 dB
+X = window_cues(G, zeros(2, 23, m60), []);
+verifyLessThan(tc, X(2, col('k_contrast')), X(1, col('k_contrast')) - 10);
+verifyGreaterThan(tc, X(2, col('sd_contrast')), X(1, col('sd_contrast')) + 2);
+Gs = repmat(reshape(0.3 * randn(rs, nr, n), 1, nr, n), 2, 1, 1);
+Gs(1, :, 7:end) = Gs(1, :, 7:end) - 8;                                  % our level 8 dB down from cycle 7
+X = window_cues(Gs, zeros(2, 23, n), []);
+verifyGreaterThan(tc, X(1, col('stp_t')), 10); verifyLessThan(tc, X(2, col('stp_t')), 4);
+verifyEqual(tc, X(1, col('stp_db')), 8, 'AbsTol', 0.5); verifyEqual(tc, X(1, col('stp_age')), 6);
+verifyFalse(tc, any(strcmp(nm, 'idx_mid')));                            % the antenna's place in the array is not read
+end
+
+function test_threat_active_cycle(tc)
+% Per decision cycle (idle sensing): a gated threat counts while it is on the air anywhere in
+% the cycle, the idle time before the frame or the frame; the first frame keeps its own share;
+% the other threats keep their rule; without the idle share the frame rule (10%).
+verifyEqual(tc, threat_active('benign_interference', [0 0.05 0 0.5 0], [], [], [0 0 0.2 NaN NaN]), ...
+    logical([0 1 1 1 0]));
+verifyEqual(tc, threat_active('benign_interference', [0 0.05 0 0.5 0]), logical([0 0 0 1 0]));
+verifyEqual(tc, threat_active('sweeping_jammer', [0 0 0.02], [], [], [0 0.01 0]), logical([0 1 1]));
+verifyEqual(tc, threat_active('jamming', [1 1], [], [], [0 0]), logical([1 1]));
+verifyEqual(tc, threat_active('path_loss', [0 1 1 1], 1:4, 3, [0 0 0 0]), logical([0 1 1 0]));
+p = base_params();
+h = sweep_hit_share(p);                                              % a 25.25 ms reach over 20-83.5 ms periods
+T = linspace(p.sweep_period_s(1), p.sweep_period_s(end), 1001);
+verifyEqual(tc, h, mean(min(1, (diff(sweep_window_s(p)) + p.cycle_s) ./ T)), 'AbsTol', 1e-12);
+verifyGreaterThan(tc, h, 0.5); verifyLessThan(tc, h, 0.7);
+verifyGreaterThan(tc, benign_hit_share(p, 500), 0.8);
+q = p; q.idle_rssi_hz = 0;
+verifyLessThan(tc, benign_hit_share(q, 500), 0.65);                 % the frame rule without idle sensing
+end
+
+function test_monitor_idle_window(tc)
+% The decision cycle builds the fusion's row as fuse_classes.m does, the idle time's records
+% included: the same fused probabilities frame by frame.
+rng(8);
+C = 2; nr = 3; N = 6; nF = 20; nRun = 30; fn = link_features('names'); nI = numel(idle_summary('names'));
+n = nRun * nF; run = repelem((1:nRun)', nF); pos = repmat((1:nF)', nRun, 1);
+y = 1 + (rand(n, 1) < 0.3); probs = [1 - 0.3 * y, 0.3 * y]; probs = probs ./ sum(probs, 2);
+I = rand(n, nI) .* (1 + (y == 2)); I(pos == 1, :) = NaN; I(:, end - 1) = 19; I(:, end) = 20;
+S = struct('run', run, 'pos', pos, 'gain_ant', randn(n, nr), 'feats_raw', randn(n, numel(fn)), 'feat_names', {fn}, 'idle', I);
+Z = fuse_classes('windows', S, probs, N);
+verifyEqual(tc, size(Z, 2), numel(temporal_evidence('names', C)) + numel(window_cues('names')) + C);
+FM = fuse_classes('fit', Z, y, C, 1e-3);
+PP = struct('actions', {policy_actions()}, 'classes', {{'none', 'benign_interference'}}, 'sps', 4, 'bps', 2, ...
+    'maha_thr', -Inf, 'fuse', FM, 'fuse_N', N);
+mem = policy_monitor('init', 1, numel(PP.actions));
+r1 = find(run == 3);
+for j = 1:nF
+    f = r1(j);
+    obs = struct('probs', probs(f, :), 'unknown', false, 'feat', S.feats_raw(f, :), 'gant', S.gain_ant(f, :), 'idle', I(f, :));
+    [mem, M] = policy_monitor('update', mem, obs, PP, 1);
+    verifyEqual(tc, M.probs, fuse_classes('apply', FM, Z(f, :)), 'AbsTol', 1e-9);
+end
+end
+
+function F = idle_run(q, seed)
+% One 20-frame run of the threat link at 9 dB with the idle time measured.
+mdl = 'UAV_GCS_Threat_Link';
+evalc('build_threat_model(q)');
+link_seed(mdl, seed, 100 / 3.6 * q.carrier_freq / q.c_light, struct('ebno', 9, 'alt_m', NaN, 'k_sig_db', NaN));
+set_link_snr(mdl, 9 + 10*log10(q.bits_per_symbol) - 10*log10(q.sps), q);
+F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(20 * q.frame_duration)), q, 20);
 end

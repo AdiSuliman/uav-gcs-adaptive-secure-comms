@@ -1110,7 +1110,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     % The monitor's Eb/N0 reference and the path_loss drop gate need
     % cycles of the healthy link; evaluation episodes start clean, so the live
     % run does too.
-    leadF = []; leadB = []; probsL = []; mahaL = []; leadG = [];
+    leadF = []; leadB = []; probsL = []; mahaL = []; leadG = []; leadI = [];
     if ~strcmp(threat, 'none')
         appLog(fig, 'Simulating a clean lead-in of the same link (monitor reference)...');
         pl = p; pl.active_threat = 'none';
@@ -1125,7 +1125,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
             XL(:, :, 1, i) = spec_image(FL.iq{vl(i)}, env.fs, thermal_nv(pl));
             leadF(i, :) = link_features(FL, vl(i), env.temporal_window);
         end
-        leadB = FL.ber(vl); leadG = FL.gain_ant(:, vl)';
+        leadB = FL.ber(vl); leadG = FL.gain_ant(:, vl)'; leadI = FL.idle(:, vl)';   % the idle time before each frame
         FnL = ((leadF - env.feat_mean) ./ env.feat_std)';
         [probsL, mahaL] = detect_scores(env.cnn_net, env.ood, XL, FnL);
         clear XL FnL FL
@@ -1175,7 +1175,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     cfgD = env.na; cfgR = env.na; memD = []; memR = []; dqn_ms = NaN;
     for i = 1:size(leadF, 1)                                    % clean lead-in: reference only
         obs = struct('probs', probsL(:, i)', 'unknown', mahaL(i) < PPr.maha_thr, 'maha', mahaL(i), 'feat', leadF(i, :), ...
-            'ber', leadB(i), 'gant', leadG(i, :));
+            'ber', leadB(i), 'gant', leadG(i, :), 'idle', leadI(i, :));
         [cfgD, memD] = policy_decide('dqn_esc', obs, cfgD, memD, PPr, env.dqn_agent);
         [cfgR, memR] = policy_decide('rule_esc', obs, cfgR, memR, PPr, []);
     end
@@ -1186,7 +1186,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     end
     for i = 1:nv
         obs = struct('probs', probsAll(:, i)', 'unknown', mahaAll(i) < PPr.maha_thr, 'maha', mahaAll(i), 'feat', Fr(i, :), ...
-            'ber', ber_f(vf(i)), 'gant', F.gain_ant(:, vf(i))');
+            'ber', ber_f(vf(i)), 'gant', F.gain_ant(:, vf(i))', 'idle', F.idle(:, vf(i))');
         t2 = tic;
         [cfgD, memD, dD] = policy_decide('dqn_esc', obs, cfgD, memD, PPr, env.dqn_agent);
         dqn_ms = toc(t2) * 1000;
@@ -2054,6 +2054,7 @@ function runEpisode(btn, ~)
             rows = find(F.run == rr); j = rows(mod(k0 + k, numel(rows)) + 1);
             fr = struct('iq', double(F.iq{j}), 'ber', F.ber(j), 'feat', F.feat(j, :), 'pkt', floor((k0 + k) / 2));
             if isfield(F, 'gant') && ~isempty(F.gant), fr.gant = F.gant(j, :); end
+            if isfield(F, 'idle') && ~isempty(F.idle), fr.idle = F.idle(j, :); end   % the idle time before the frame
             [Ep{i}, info] = episode_cycle(Ep{i}, k, fr, ctx{i});
             T.ber(i, k) = fr.ber; T.det(i, k) = cls_idx(info.cls);
             if onset, T.ok(i, k) = ismember(T.det(i, k), compIdx); else, T.ok(i, k) = T.det(i, k) == truthIdx(k); end
@@ -2208,7 +2209,7 @@ function P = epBuildPool(fig, p, threat, ebno, seedBase)
         evalc('build_threat_model');
         snr_dB = ebno + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps);
         set_link_snr(env.modelName, snr_dB + g_db, p2);
-        F = struct('iq', {{}}, 'ber', [], 'feat', [], 'run', []);    % link features per frame within its run, as the pools
+        F = struct('iq', {{}}, 'ber', [], 'feat', [], 'run', [], 'idle', []);    % link features per frame within its run, as the pools
         for r = 1:2
             link_seed(env.modelName, seedBase + r, p2.fd_max);
             Fr = extract_closed_loop_frames(sim(env.modelName), p2, env.delay_bits);
@@ -2218,6 +2219,7 @@ function P = epBuildPool(fig, p, threat, ebno, seedBase)
             F.ber  = [F.ber, Fr.ber(v)];
             F.feat = [F.feat; cell2mat(arrayfun(@(i) link_features(Fr, i, env.temporal_window), v(:), 'UniformOutput', false))];
             F.run  = [F.run, r * ones(1, numel(v))];
+            F.idle = [F.idle; Fr.idle(:, v)'];                          % the idle time before each frame
         end
         P{a} = F;
     end

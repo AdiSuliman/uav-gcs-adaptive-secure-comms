@@ -5,11 +5,14 @@ function varargout = fuse_classes(cmd, varargin)
 %   the persistence measurements and the current frame's log-probabilities.
 %   Z = fuse_classes('windows', S, probs, N)
 %       evidence of every frame of split S (fields run, pos, gain_ant, feats_raw,
-%       feat_names) from the frames of its own sub-run at positions pos-N+1..pos
-%       (causal); probs frames x C. Z is frames x (C + 9 + C): temporal_evidence.m's
-%       columns, then log(max(p, 1e-6)) of the frame's own probabilities, so a threat
-%       that hits single frames (a sweeping jammer crossing the band) is not averaged
-%       away by its clean neighbours. policy_monitor.m builds the same row per cycle.
+%       feat_names, and idle: frames x 24, the record of the idle time before each frame,
+%       idle_summary.m, when present) from the frames of its own sub-run at positions
+%       pos-N+1..pos (causal); probs frames x C. Z is frames x (C + 9 + 42 + C):
+%       temporal_evidence.m's columns, window_cues.m's (the branch cues, the step of the
+%       received level, the idle time), then log(max(p, 1e-6)) of the frame's own
+%       probabilities, so a threat that hits single frames (a sweeping jammer crossing the
+%       band) is not averaged away by its clean neighbours. policy_monitor.m builds the
+%       same row per cycle.
 %   FM = fuse_classes('fit', Z, y, C, lambda)     y class index per frame
 %   [pc, k] = fuse_classes('apply', FM, Z)        pc frames x C, k predicted class
 %   The fusion is fitted on the validation split (the detector's outputs on its own
@@ -27,7 +30,10 @@ function Z = windows(S, probs, N)
 [ok, jf] = ismember(link_features('names'), S.feat_names);
 if ~all(ok), error('fuse_classes: feats_raw lacks link features (rerun extract_spectrograms, prepare_data)'); end
 n = numel(S.run);
-Z = zeros(n, numel(temporal_evidence('names', size(probs, 2))));
+nT = numel(temporal_evidence('names', size(probs, 2))); nW = numel(window_cues('names'));
+Z = zeros(n, nT + nW);
+I = nan(n, numel(idle_summary('names')));
+if isfield(S, 'idle') && ~isempty(S.idle), I = double(S.idle); end
 [~, ~, rid] = unique(S.run(:));
 byrun = accumarray(rid, (1:n)', [], @(v) {v});
 for r = 1:numel(byrun)
@@ -35,8 +41,9 @@ for r = 1:numel(byrun)
     [~, o] = sort(S.pos(ix)); ix = ix(o);
     for j = 1:numel(ix)
         w = ix(max(1, j - N + 1):j);
-        Z(ix(j), :) = temporal_evidence(permute(probs(w, :), [3 2 1]), permute(S.gain_ant(w, :), [3 2 1]), ...
-            permute(S.feats_raw(w, jf), [3 2 1]));
+        Gw = permute(S.gain_ant(w, :), [3 2 1]); Fw = permute(S.feats_raw(w, jf), [3 2 1]);
+        Z(ix(j), :) = [temporal_evidence(permute(probs(w, :), [3 2 1]), Gw, Fw), ...
+            window_cues(Gw, Fw, permute(I(w, :), [3 2 1]))];
     end
 end
 Z = [Z, log(max(double(probs), 1e-6))];                   % the current frame's own evidence

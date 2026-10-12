@@ -138,7 +138,8 @@ for sp = 1:nSp
                 bu = mean(Pu.ber(ku));
                 bw = max(bu, 10 * bt);
                 K.healthy(sc, s, sp, r) = bu <= bt;
-                K.on(sc, s, sp, r) = sc ~= K.clean && (~isfield(Pu, 'act') || isempty(Pu.act) || any(Pu.act(ku) > 0));
+                K.on(sc, s, sp, r) = sc ~= K.clean && (~isfield(Pu, 'act') || isempty(Pu.act) || any(Pu.act(ku) > 0) || ...
+                    (isfield(Pu, 'act_idle') && ~isempty(Pu.act_idle) && any(Pu.act_idle(ku) > 0)));   % on the air in a frame or an idle time
                 for a = 1:nA
                     P = PP.pools{sc, s, a, sp};
                     k = P.run == rid;
@@ -275,6 +276,7 @@ icrc = feature_index('crc_fail');
 obs.probs = zeros(E.NE, nC); obs.unknown = false(E.NE, 1); obs.feat = zeros(E.NE, nF); obs.ber_true = zeros(E.NE, 1);
 obs.fer_true = zeros(E.NE, 1);
 obs.maha = zeros(E.NE, 1); obs.gant = [];
+obs.idle = nan(E.NE, numel(idle_summary('names')));     % the idle time before the frame (pools without it: none)
 for i = 1:E.NE
     P = PP.pools{sc_eff(i), E.s(i), cfg_eff(i), E.split};
     rows = find(P.run == PP.runs{E.split}(E.r(i)));
@@ -288,6 +290,7 @@ for i = 1:E.NE
         if isempty(obs.gant), obs.gant = zeros(E.NE, size(P.gant, 2)); end
         obs.gant(i, :) = P.gant(j, :);
     end
+    if isfield(P, 'idle') && ~isempty(P.idle), obs.idle(i, :) = P.idle(j, :); end
     obs.ber_true(i) = P.ber(j);
     obs.fer_true(i) = P.fer(j);
 end

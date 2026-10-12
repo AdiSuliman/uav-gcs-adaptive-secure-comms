@@ -6,8 +6,8 @@
 %
 % Input:  data/spectrograms.mat
 % Output: data/splits.mat (train/val/test with X, Y, feats, ebno, speed, run, level, and
-%         the frame position, per-antenna gains and received Eb/N0 (ebno_rx) when present;
-%         norm stats)
+%         the frame position, per-antenna gains, received Eb/N0 (ebno_rx) and the idle
+%         time's records (idle, act_idle, idle_amb) when present; norm stats)
 % With FRESH_TEST true (build_fresh_test.m): the second test set of data/spectrograms_fresh.mat,
 % z-scored with the training statistics of data/splits.mat -> data/splits_fresh.mat
 % (test, norm and classes only).
@@ -47,6 +47,7 @@ for i = 1:3
     end
     if isfield(sp0, 'k_db'), splits.(names{i}).k_db = sp0.k_db(m); splits.(names{i}).aoa = sp0.aoa(m); end
     if isfield(sp0, 'ebno_rx'), splits.(names{i}).ebno_rx = sp0.ebno_rx(m); end
+    splits.(names{i}) = idle_fields(splits.(names{i}), sp0, m);
 end
 splits.norm = struct('feat_mean', feat_mean, 'feat_std', feat_std, 'feat_names', {sp0.feat_names});
 splits.classes = classes;
@@ -85,6 +86,7 @@ if isfield(sp0, 'pos')
 end
 if isfield(sp0, 'k_db'), splits.test.k_db = sp0.k_db; splits.test.aoa = sp0.aoa; end
 if isfield(sp0, 'ebno_rx'), splits.test.ebno_rx = sp0.ebno_rx; end
+splits.test = idle_fields(splits.test, sp0, true(numel(sp0.run), 1));
 splits.norm = nm;
 splits.classes = classes;
 fprintf('Second test set: %d frames, %d sub-runs\n', numel(sp0.Y), numel(unique(sp0.run)));
@@ -93,4 +95,12 @@ for c = 1:numel(classes)
 end
 save('data/splits_fresh.mat', 'splits', '-v7.3');
 fprintf('Saved data/splits_fresh.mat\n=== B1 Complete ===\n');
+end
+
+function s = idle_fields(s, sp0, m)
+% The idle time's records (the fusion's input, window_cues.m), its on-air share and the
+% emitter-of-opportunity records (emitter_reading.m), when the spectrograms carry them.
+for f = {'idle', 'act_idle', 'idle_amb'}
+    if isfield(sp0, f{1}), s.(f{1}) = sp0.(f{1})(m, :); end
+end
 end

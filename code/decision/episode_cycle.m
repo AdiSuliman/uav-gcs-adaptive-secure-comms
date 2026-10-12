@@ -9,7 +9,8 @@ function [E, info] = episode_cycle(E, k, fr, ctx)
 %   k    cycle index (1-based)
 %   fr   received frame: iq, ber (true BER, display only), feat (link_features.m
 %        of the frame within its own run, as in the frame pools), gant (mean
-%        channel gain of every antenna, optional), pkt (the frame pair of the run
+%        channel gain of every antenna, optional), idle (the record of the idle time before
+%        the frame, idle_summary.m, optional), pkt (the frame pair of the run
 %        its coded packet ends on, optional: policy_monitor.m), cfg_link (the
 %        configuration the frame was received with, optional: by default the one in
 %        use before this cycle, E.cfg, as the console draws its frames)
@@ -33,6 +34,7 @@ Xf = ((fr.feat - ctx.feat_mean) ./ ctx.feat_std)';
 %% Decision
 obs = struct('probs', probs(:)', 'unknown', maha < ctx.PP.maha_thr, 'maha', maha, 'feat', fr.feat, 'ber_true', fr.ber);
 if isfield(fr, 'gant'), obs.gant = fr.gant(:)'; end
+if isfield(fr, 'idle'), obs.idle = fr.idle(:)'; end
 if isfield(fr, 'pkt'), obs.pkt = fr.pkt; end
 prev = E.cfg;
 obs.cfg_link = prev; if isfield(fr, 'cfg_link'), obs.cfg_link = fr.cfg_link; end

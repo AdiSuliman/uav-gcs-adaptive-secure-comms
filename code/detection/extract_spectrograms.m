@@ -53,6 +53,9 @@ if isfield(ds, 'ebno_rx'), spec.ebno_rx = ds.ebno_rx(:); end   % received Eb/N0 
 spec.speed_kmh = ds.speed_kmh(:);
 spec.run = ds.run(:); spec.fold = ds.fold(:); spec.level = ds.level(:);
 if isfield(ds, 'pos'), spec.pos = ds.pos(:); spec.gain_ant = ds.gain_ant; end   % temporal evidence
+if isfield(ds, 'idle'), spec.idle = ds.idle; end         % the idle time before each frame (window_cues.m)
+if isfield(ds, 'act_idle'), spec.act_idle = ds.act_idle(:); end   % its on-air share (labels; analysis only)
+if isfield(ds, 'idle_amb'), spec.idle_amb = ds.idle_amb; end   % with an emitter of opportunity (emitter_reading.m)
 if isfield(ds, 'k_db'), spec.k_db = ds.k_db(:); spec.aoa = ds.aoa(:); end         % analysis only
 spec.img_size = 128;
 spec.meta = ds.meta;

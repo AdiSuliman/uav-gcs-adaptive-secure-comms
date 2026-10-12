@@ -106,6 +106,14 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %   act_comp (3 x frames), the share of each component in the threat's order, and lev_db
 %   (3 x frames), the level an additive component reaches over our signal on the weakest
 %   antenna in the frame [dB] (output 3; NaN beyond the threat's components).
+%   Idle time (p.idle_rssi_hz > 0): the RSSI of every antenna between the previous frame and
+%   this one (idle_rssi.m, from the run's own block values, idle_context.m, and the threat
+%   block's recorded schedule), idle_R (bins x antennas x frames, dB over the floor constant,
+%   NaN for the first frame), its record idle (24 x frames, idle_summary.m), the receiver's
+%   input of the fusion, and act_idle (1 x frames), the share of that idle time with one of the
+%   threat's emitters on the air (ground truth: the per-cycle labels, threat_active.m);
+%   idle_ctx and idle_on keep what idle_rssi.m read (an emitter of opportunity can be added
+%   to the same idle time afterwards, emitter_reading.m).
 %   Level calibration: cal_db, each antenna's calibration error [dB] (the model's 'Cal'
 %   block, flight_draws.m). The receiver reports its absolute levels with it: the received
 %   samples behind rssi, iot, q_iot, duty, edges and the detector image (iq) and the channel
@@ -231,15 +239,37 @@ try
 catch
 end
 F.act_comp = [F.act; nan(2, nf)]; F.lev_db = nan(3, nf);
+ion = [];
 try
     c = out.get('Thr_comp');
-    if ndims(c) == 3, c = reshape(c, 6, []); else, c = reshape(c, [], 6).'; end
+    nc = size(c, 2); if ndims(c) == 3, nc = numel(c) / size(c, 3); end   % 6, then the idle on-shares
+    if ndims(c) == 3, c = reshape(c, nc, []); else, c = reshape(c, [], nc).'; end
     c = c(:, [1:min(nf, size(c, 2)), size(c, 2) * ones(1, nf - size(c, 2))]);
     F.act_comp = c(1:3, :); F.lev_db = c(4:6, :);
+    if nc > 6, ion = permute(reshape(c(7:end, :), [], 3, nf), [2 1 3]); end
 catch
 end
 F.q_iot = 10*log10(mean(pq, 1) / nv);
 F.q_react = 10*log10(pe(k) ./ pq(k));
+[F.idle, F.act_idle, F.idle_R, F.idle_ctx, F.idle_on] = idle_measure(out, p, ion, nf);
+end
+
+function [S, A, R, ctx, ion] = idle_measure(out, p, ion, nf)
+% The idle time before every frame (idle_rssi.m, idle_summary.m): S its record (24 x frames),
+% A the share of it with the threat on the air, R the RSSI (bins x antennas x frames), ctx the
+% run's block values; NaN without idle sensing (p.idle_rssi_hz 0) or the model's blocks.
+nm = idle_summary('names');
+S = nan(numel(nm), nf); A = nan(1, nf); R = []; ctx = [];
+if ~isfield(p, 'idle_rssi_hz') || isempty(p.idle_rssi_hz) || p.idle_rssi_hz <= 0, return; end
+try
+    ctx = idle_context(out.SimulationMetadata.ModelInfo.ModelName);
+catch
+    ctx = [];
+end
+if isempty(ctx), return; end
+[R, A] = idle_rssi(p, ctx, ion, 1:nf);
+S = idle_summary(R, p)';
+R = single(R); ion = single(ion);
 end
 
 %% ===================== Symbol-level estimates =====================
