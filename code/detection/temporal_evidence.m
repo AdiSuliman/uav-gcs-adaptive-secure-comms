@@ -3,9 +3,12 @@ function [x, names] = temporal_evidence(P, G, Fw)
 %   input of the temporal fusion (fuse_classes.m). One cycle carries one frame of
 %   0.5 ms, too short for the fading to change, so a deep fade on one antenna looks
 %   like a hidden antenna; the channel moves on between cycles, while a shadow, a
-%   jammer or a fault stays. Local mean per antenna over the window: the fading
-%   averages out and a persistent loss remains (Lee, local average power over 20-40
-%   wavelengths; shadowing lasts seconds, Khawaja et al.).
+%   jammer or a fault stays. Mean per antenna over the window's cycles: as the UAV moves
+%   between cycles the fading averages out and a persistent loss remains (shadowing
+%   lasts seconds, Khawaja et al.). It is Lee's local average power (20-40 wavelengths)
+%   only when the window spans that distance: 10 cycles at 29 km/h cover about 13
+%   wavelengths at 2.4 GHz, at 161 km/h about 72; at hover the fading barely changes
+%   between cycles and the mean averages little of it.
 %   Batch over E windows of n cycles:
 %   P   E x C x n class probabilities of the per-frame detector
 %   G   E x nr x n mean channel gain of every antenna [dB] (extract_closed_loop_frames.m)

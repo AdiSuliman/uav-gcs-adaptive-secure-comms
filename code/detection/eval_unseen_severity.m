@@ -38,9 +38,10 @@ SEED_SHD = SEED0 + 50000;        % airframe shadowing: candidate j, seed SEED_SH
 delay_bits = 20; temporal_window = 10;
 rng(4345, 'twister');
 clear threat_cfg
-% Above the training range only where the sources go further than the training levels
+% Above the training range only where the sources go further than the training levels;
+% path loss: Simunek et al. 2011 measured 33-42 dB behind the last building (Figs. 6, 11)
 ABOVE = struct('jamming', [], 'noise_burst', [], 'reactive_jamming', [], 'sweeping_jammer', [], ...
-    'tone_jamming', [], 'path_loss', [], 'spoofing', [], 'antenna_fault', 36, ...
+    'tone_jamming', [], 'path_loss', [33 42], 'spoofing', [], 'antenna_fault', 36, ...
     'benign_interference', [], 'airframe_shadowing', []);
 DL = dataset_levels();
 threat_cfg = struct('name', {}, 'param', {}, 'lv', {});

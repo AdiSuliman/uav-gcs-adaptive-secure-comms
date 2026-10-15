@@ -51,6 +51,8 @@ ACT_CODE = containers.Map(MECH_B, cellfun(@act_code, MECH_B, 'UniformOutput', fa
 clear threat_cfg                                  % scripts share the base workspace
 DL = dataset_levels();
 threat_cfg = struct('name', {DL.name}, 'level_field', {DL.param}, 'levels', {DL.levels});
+ip = strcmp({threat_cfg.name}, 'path_loss');            % up to the measured building loss (Simunek et al. 2011,
+threat_cfg(ip).levels = [threat_cfg(ip).levels, 33 42]; % 33-42 dB, Figs. 6 and 11), beyond the training levels
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
     threat_cfg = threat_cfg([1 4]); threat_cfg(1).levels = [4 16]; threat_cfg(2).levels = [7 16];
     RUN_FRAMES = 20; opt.F_SUB = RUN_FRAMES;

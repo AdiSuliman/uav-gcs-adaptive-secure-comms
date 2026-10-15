@@ -46,6 +46,7 @@ for i = 1:3
         splits.(names{i}).feats_raw = sp0.feats(m, :);
     end
     if isfield(sp0, 'k_db'), splits.(names{i}).k_db = sp0.k_db(m); splits.(names{i}).aoa = sp0.aoa(m); end
+    splits.(names{i}) = meta_fields(splits.(names{i}), sp0, m);
     if isfield(sp0, 'ebno_rx'), splits.(names{i}).ebno_rx = sp0.ebno_rx(m); end
     splits.(names{i}) = idle_fields(splits.(names{i}), sp0, m);
 end
@@ -85,6 +86,7 @@ if isfield(sp0, 'pos')
     splits.test.pos = sp0.pos; splits.test.gain_ant = sp0.gain_ant; splits.test.feats_raw = sp0.feats;
 end
 if isfield(sp0, 'k_db'), splits.test.k_db = sp0.k_db; splits.test.aoa = sp0.aoa; end
+splits.test = meta_fields(splits.test, sp0, true(numel(sp0.run), 1));
 if isfield(sp0, 'ebno_rx'), splits.test.ebno_rx = sp0.ebno_rx; end
 splits.test = idle_fields(splits.test, sp0, true(numel(sp0.run), 1));
 splits.norm = nm;
@@ -102,5 +104,13 @@ function s = idle_fields(s, sp0, m)
 % emitter-of-opportunity records (emitter_reading.m), when the spectrograms carry them.
 for f = {'idle', 'act_idle', 'idle_amb'}
     if isfield(sp0, f{1}), s.(f{1}) = sp0.(f{1})(m, :); end
+end
+end
+
+function S = meta_fields(S, sp0, m)
+% The flight's altitude, bank, delay spread and the interferers' levels over our signal of
+% the frames m, for the analysis only (analyze_weak_points.m), never a detector input.
+for f = {'alt_m', 'bank', 'ds_ns', 'lev_db'}
+    if isfield(sp0, f{1}), S.(f{1}) = sp0.(f{1})(m, :); end
 end
 end

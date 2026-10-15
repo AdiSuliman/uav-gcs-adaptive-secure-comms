@@ -144,11 +144,20 @@ if isfield(sp.val, 'ebno')
 else
     snr_val = round(sp.val.feats(:, 1) .* sp.norm.feat_std(1) + sp.norm.feat_mean(1));
 end
-thr_db = kpi1_threshold(Y_val, Y_val_pred, snr_val, classes);
+[thr_db, thr_all_db] = kpi1_threshold(Y_val, Y_val_pred, snr_val, classes);
 above = snr_vals >= thr_db;
 f1_class_above = nan(numel(classes), 1);
 if any(above), f1_class_above = 100 * class_f1_of(Y_test(above), Y_pred(above), classes); end
 f1_above = 100 * macro_f1_of(Y_test(above), Y_pred(above), classes);
+% Beside KPI 1, never in its place: the stricter reading, every class F1 >= 90% above its
+% own threshold (chosen on validation as well)
+ab_all = snr_vals >= thr_all_db;
+every_class = struct('threshold_db', thr_all_db, 'macro_f1_above_threshold_pct', NaN, ...
+    'class_f1_above_threshold_pct', nan(numel(classes), 1));
+if any(ab_all)
+    every_class.macro_f1_above_threshold_pct = 100 * macro_f1_of(Y_test(ab_all), Y_pred(ab_all), classes);
+    every_class.class_f1_above_threshold_pct = 100 * class_f1_of(Y_test(ab_all), Y_pred(ab_all), classes);
+end
 
 % Beside KPI 1, fixed before any test reading: the class prevalence above the threshold
 % and the prevalence-normalized reading, every class weighted equally (each frame by one
@@ -201,8 +210,11 @@ for c = 1:numel(cls_names)
 end
 fprintf('\nMacro-F1 per Eb/N0:');
 fprintf(' %g dB %.1f%% |', [unique_snrs(:)'; f1_vs_snr(:)']);
-fprintf('\nKPI #1 threshold (chosen on validation): %g dB; on the %s above it macro-F1 %.2f%%, lowest class %.2f%%\n', ...
-    thr_db, set_name, f1_above, min(f1_class_above));
+fprintf(['\nKPI #1 threshold (chosen on validation: macro-F1 >= 90%% at every higher point): %g dB; on the %s above ' ...
+    'it macro-F1 %.2f%%, lowest class %.2f%%\n'], thr_db, set_name, f1_above, min(f1_class_above));
+fprintf(['Beside KPI 1, every class F1 >= 90%% (the stricter reading, its threshold chosen on validation): %g dB; ' ...
+    'above it macro-F1 %.2f%%, lowest class %.2f%%\n'], every_class.threshold_db, every_class.macro_f1_above_threshold_pct, ...
+    min(every_class.class_f1_above_threshold_pct));
 fprintf('Action-equivalent accuracy: %.2f%% (class accuracy %.2f%%)\n', 100*mean(act_ok), 100*mean(Y_test == Y_pred));
 % Beside KPI 1 (which reads the classes above): the branch level, where an antenna fault
 % and airframe shadowing are one class, 'one branch lost' (branch_level.m)
@@ -223,23 +235,31 @@ fprintf(['Branch level, beside KPI 1 (antenna fault and airframe shadowing as on
 % event's start, the latched cause after it
 Nw = 1; if ~isempty(fus), Nw = fus.N; end
 y_latch = Y_pred;
+age = nan(numel(Y_test), 1);
 onset_cue = struct('class', {}, 'n', {}, 'recall_fused_pct', {}, 'recall_latched_pct', {}, 'as_other_fused_pct', {}, ...
     'as_other_latched_pct', {});
+onset_diag = struct('class', {}, 'n_events', {}, 'decided_pct', {}, 'right_pct', {}, 'right_ci95', {}, ...
+    'median_cycles', {}, 'median_ms', {});
 if isfield(sp.test, 'gain_ant') && isfield(sp.test, 'pos')
     BR = {'antenna_fault', 'airframe_shadowing'};
     pf_all = double(Y_pred_prob');
     [~, ~, rid] = unique(sp.test.run(:));
     byrun = accumarray(rid, (1:numel(rid))', [], @(v) {v});
-    age = nan(numel(Y_test), 1);
+    ev = nan(0, 3);                                      % per event: class, cause right, cycles to it
     os_thr = 0; if ~isempty(fus), os_thr = onset_shape('threshold', fus.FM); end   % chosen on validation (select_fusion.m)
     for r = 1:numel(byrun)
         ix = byrun{r}; [~, o] = sort(sp.test.pos(ix)); ix = ix(o);
-        [~, kk] = max(onset_shape('sequence', sp.test.gain_ant(ix, :), pf_all(ix, :), cls_names, decision_config().heal, ...
-            os_thr), [], 2);
+        [pq, cz] = onset_shape('sequence', sp.test.gain_ant(ix, :), pf_all(ix, :), cls_names, decision_config().heal, ...
+            os_thr);
+        [~, kk] = max(pq, [], 2);
         y_latch(ix) = categorical(cls_names(kk), cls_names);
         for b = 1:2
             j0 = find(Y_test(ix) == BR{b}, 1);
             if ~isempty(j0), age(ix(j0:end)) = sp.test.pos(ix(j0:end)) - sp.test.pos(ix(j0)); end
+            if isempty(j0), continue; end
+            jd = find(cz(j0:end) > 0, 1) + j0 - 1;       % the latch's first cause from the onset on
+            if isempty(jd), ev(end+1, :) = [b, NaN, NaN]; continue; end %#ok<AGROW>
+            ev(end+1, :) = [b, cz(jd) == b, sp.test.pos(ix(jd)) - sp.test.pos(ix(j0))]; %#ok<AGROW>
         end
     end
     for b = 1:2
@@ -256,6 +276,23 @@ if isfield(sp.test, 'gain_ant') && isfield(sp.test, 'pos')
         fprintf('  %-20s %5.1f%% -> %5.1f%% (%4.1f%% -> %4.1f%%), %d frames | %5.1f%% -> %5.1f%% (%4.1f%% -> %4.1f%%), %d frames\n', ...
             q.class, q.recall_fused_pct(1), q.recall_latched_pct(1), q.as_other_fused_pct(1), q.as_other_latched_pct(1), ...
             q.n(1), q.recall_fused_pct(2), q.recall_latched_pct(2), q.as_other_fused_pct(2), q.as_other_latched_pct(2), q.n(2));
+    end
+    % Per event (a test sub-run's onset of the class): the share whose first latched cause is
+    % the right one [Clopper-Pearson 95%], and the median cycles from the onset to it
+    cyc_ms = 20; Pc = load('params.mat'); if isfield(Pc.params, 'cycle_s'), cyc_ms = 1e3 * Pc.params.cycle_s; end
+    for b = 1:2
+        e = ev(ev(:, 1) == b, :); n = size(e, 1); k = sum(e(:, 2) == 1);
+        lo = 0; hi = 1;
+        if n > 0 && k > 0, lo = betaincinv(0.025, k, n - k + 1); end
+        if n > 0 && k < n, hi = betaincinv(0.975, k + 1, n - k); end
+        mc = median(e(e(:, 2) == 1, 3));
+        onset_diag(end+1) = struct('class', BR{b}, 'n_events', n, 'decided_pct', 100 * mean(isfinite(e(:, 2))), ...
+            'right_pct', 100 * k / max(n, 1), 'right_ci95', 100 * [lo hi], 'median_cycles', mc, 'median_ms', mc * cyc_ms); %#ok<SAGROW>
+    end
+    fprintf('Per event, beside KPI 1: the latched cause of a lost branch\n');
+    for q = onset_diag
+        fprintf('  %-20s %d events: decided %.1f%%, right cause %.1f%% [%.1f, %.1f], median %g cycles (%g ms) from the onset\n', ...
+            q.class, q.n_events, q.decided_pct, q.right_pct, q.right_ci95, q.median_cycles, q.median_ms);
     end
 end
 
@@ -365,12 +402,13 @@ metrics = struct( ...
     'conf_mat', conf_mat, ...
     'snr_breakdown', snr_breakdown, ...
     'kpi1_threshold_db', thr_db, 'macro_f1_above_threshold_pct', f1_above, ...
-    'class_f1_above_threshold_pct', f1_class_above, ...
+    'class_f1_above_threshold_pct', f1_class_above, 'every_class', every_class, ...
     'action_equiv_accuracy_pct', 100*mean(act_ok), 'action_equiv_per_class_pct', act_acc_class, ...
     'ci95', ci95, 'steady', steady, 'onset', onset, 'branch', branch, 'emitter', emitter, 'prevalence', prevalence, ...
     'beyond', beyond_rep, 'path_loss_rx', path_loss_rx, 'ebno_rule', ['received Eb/N0 (configured, less a path-loss ' ...
     'step after its onset); a path_loss target at the Eb/N0 of its onset']);
 metrics.onset_cue = onset_cue;
+metrics.onset_diag = onset_diag;
 if ~isempty(fus)
     metrics.fusion_cycles = fus.N;
     metrics.per_frame = struct('accuracy_pct', frame_acc, 'macro_f1_pct', frame_f1, 'class_f1_pct', frame_class_f1);
@@ -410,9 +448,10 @@ fprintf('Saved results/eval_detector_metrics%s.mat (for KPI aggregation)\n', tag
 % Per-frame outcomes for the breakdown of weak points (analyze_weak_points.m)
 pred = struct('y_true', Y_test, 'y_pred', Y_pred, 'y_latched', y_latch, 'ebno', snr_vals(:), 'ebno_kpi', eb_kpi(:), 'ebno_rx', eb_rx(:), ...
     'level', sp.test.level(:), 'speed', sp.test.speed(:), 'run', sp.test.run(:), 'rank', rk(:));
-for f = {'pos', 'k_db', 'aoa'}
+for f = {'pos', 'k_db', 'aoa', 'alt_m', 'bank', 'ds_ns', 'lev_db'}
     if isfield(sp.test, f{1}), pred.(f{1}) = sp.test.(f{1}); end
 end
+pred.onset_age = age; pred.fuse_N = Nw;              % cycles since a lost branch's onset (NaN: none)
 save(['results/detector_predictions' tag '.mat'], 'pred');
 clear S sp Y_pred_prob DET_TEST   % large arrays; main.m runs the stages in one workspace
 
@@ -438,18 +477,20 @@ f1 = 2 * pr .* rc ./ (pr + rc);
 f1(isnan(f1)) = 0;
 end
 
-function thr = kpi1_threshold(yt, yp, snr, classes)
-% Lowest Eb/N0 from which macro-F1 stays >= 90% at every higher point and every
-% class reaches F1 >= 90% over the frames at or above it (NaN when none); frames
-% beyond range (snr NaN) are in no bin.
+function [thr, thr_all] = kpi1_threshold(yt, yp, snr, classes)
+% KPI 1 (the proposal: macro-F1 >= 90% above an SNR threshold): the lowest Eb/N0 from
+% which macro-F1 stays >= 90% at every higher point (NaN when none). thr_all, the stricter
+% reading beside it: from thr on, the lowest point where every class also reaches F1 >= 90%
+% over the frames at or above it. Frames beyond range (snr NaN) are in no bin.
 u = unique(snr(~isnan(snr)));
 f1 = arrayfun(@(v) 100 * macro_f1_of(yt(snr == v), yp(snr == v), classes), u);
 k_thr = find(f1 < 90, 1, 'last');
 if isempty(k_thr), k0 = 1; else, k0 = k_thr + 1; end
-thr = NaN;
+thr = NaN; thr_all = NaN;
+if k0 <= numel(u), thr = u(k0); end
 for k = k0:numel(u)
     ab = snr >= u(k);
-    if all(100 * class_f1_of(yt(ab), yp(ab), classes) >= 90), thr = u(k); return; end
+    if all(100 * class_f1_of(yt(ab), yp(ab), classes) >= 90), thr_all = u(k); return; end
 end
 end
 

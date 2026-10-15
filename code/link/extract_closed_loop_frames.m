@@ -124,10 +124,13 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 % With p.proc_gain_db (rate_reduce, apply_countermeasure.m) the field is that of the
 % despread link, our signal up by the processing gain; a despreading receiver measures the
 % chip-rate field, where our signal keeps its power. The level measurements it takes there
-% are taken with our signal scaled back by the gain: the receiver's own estimate of it on
-% every antenna (the re-modulated decisions fitted per 32-sample block, as for env_corr) is
-% scaled before rssi and the detector image (iq), and gain_ant, our channel's gain per
-% antenna, loses the gain. The despread measurements keep it: ber_est, snr_post, sinr and
+% are taken with our signal scaled back by the gain: our own received component on every
+% antenna (the threat block's output 4, Thr_sig, through the Level gain and the antenna's
+% calibration error: the field the despreading receiver sees at the chip rate, emulated
+% exactly) is scaled before rssi and the detector image (iq); a model without that output
+% takes the receiver's own estimate of it (the re-modulated decisions fitted per 32-sample
+% block, as for env_corr), which a receiver broken by a jammer gets wrong. gain_ant, our
+% channel's gain per antenna, loses the gain. The despread measurements keep it: ber_est, snr_post, sinr and
 % est_margin (the channel estimate over the despread pilots), so the Eb/N0 estimate
 % (sinr + iot) rises by the gain, which the link monitor takes out (policy_monitor.m); iot
 % and the residual measurements are those of the interference and noise, which keep their
@@ -211,13 +214,26 @@ dat = (qn + 1:ns)';                                      % samples that carry ou
 rs = nan(na, nf); sn = nan(na, nf); ec = nan(na, nf); io = nan(na, nf); pe = nan(na, nf); pq = nan(na, nf);
 du = nan(na, nf); ed = nan(na, nf);
 gp = 0; if isfield(p, 'proc_gain_db') && ~isempty(p.proc_gain_db), gp = p.proc_gain_db; end
+ys = [];                                                 % our own received component (rate_reduce)
+if gp > 0
+    try
+        ys = out.get('Thr_sig') * str2double(get_param([out.SimulationMetadata.ModelInfo.ModelName '/Level'], 'Gain'));
+        ys = ys(:, :, 1:nf) .* gcal;
+    catch
+        ys = [];
+    end
+end
 for a = 1:na
     ia = reshape(iqa(:, a, :), ns, nf);
     rs(a, :) = 10*log10(mean(abs(ia(dat, :)).^2, 1) + eps);
     [sn(a, :), ec(a, :), pe(a, :), du(a, :), ed(a, :)] = residual_metrics(xh(dat, :), ia(dat, :), nv);
     io(a, :) = iot_db(rs(a, :), sn(a, :), nv);
     if qn > 0, pq(a, :) = mean(abs(ia(1:qn, :)).^2, 1); end
-    if gp > 0                                            % the chip-rate field of the level measurements
+    if gp > 0 && ~isempty(ys)                            % the chip-rate field of the level measurements
+        ia = ia - (1 - 10^(-gp / 20)) * reshape(ys(:, a, :), ns, nf);
+        iqa(:, a, :) = reshape(ia, ns, 1, nf);
+        rs(a, :) = 10*log10(mean(abs(ia(dat, :)).^2, 1) + eps);
+    elseif gp > 0
         ia(dat, :) = chip_field(xh(dat, :), ia(dat, :), gp);
         iqa(:, a, :) = reshape(ia, ns, 1, nf);
         rs(a, :) = 10*log10(mean(abs(ia(dat, :)).^2, 1) + eps);

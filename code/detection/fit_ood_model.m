@@ -12,7 +12,9 @@ function M = fit_ood_model(net, tr, classes, va)
 %   the larger sub-sample the paper recommends when training on normal data only
 %   (their section 5.4); its trees are also kept packed for iforest_score.m
 %   (M.forest_pack). The standardization of the fused candidates uses the known
-%   validation frames.
+%   validation frames. Mahalanobis++ (Mueller & Hein 2025, arXiv:2505.18032): the same
+%   class means and tied covariance on the last layer's features l2-normalized first
+%   (M.l2_mu, M.l2_P; candidate last_l2).
 %   M.score, the production candidate, is 'last' until eval_ood_detection.m
 %   selects it by leave-one-threat-out.
 %   Input pre-processing (Lee et al.): the step of last_pre is chosen on the validation
@@ -20,7 +22,7 @@ function M = fit_ood_model(net, tr, classes, va)
 %   versions (AUROC), from a small grid (0 = no pre-processing).
 %   va  validation split (X, feats, Y); without it the ensemble weights are equal.
 M.layers = {'relu1', 'relu2', 'relu3', 'relu_feat2', 'relu_merge'};
-M.candidates = {'last', 'ensemble', 'raw', 'last_or_raw', 'last_or_if', 'last_pre'};
+M.candidates = {'last', 'ensemble', 'raw', 'last_or_raw', 'last_or_if', 'last_pre', 'last_l2'};
 M.eps_pre = [0 0];
 M.score = 'last';
 M.eps_img = 0.02; M.eps_feat = 0.1;                 % FGSM step: image [0,1] units, z-score units
@@ -31,6 +33,7 @@ for l = 1:numel(M.layers)
     [M.mu{l}, M.P{l}] = tied_gauss(Z{l}, y);
 end
 [M.raw_mu, M.raw_P] = tied_gauss(tr.feats', y);
+[M.l2_mu, M.l2_P] = tied_gauss(ood_score_set('l2', Z{end}), y);
 M.forest = iforest(tr.feats, 'NumLearners', 100, 'NumObservationsPerLearner', min(8192, size(tr.feats, 1)));
 M.forest_pack = iforest_pack(M.forest);
 

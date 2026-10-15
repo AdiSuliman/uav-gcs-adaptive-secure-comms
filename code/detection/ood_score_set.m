@@ -18,7 +18,12 @@ function S = ood_score_set(M, Z, Xf, need, Zp)
 %                  trees (M.forest_pack, iforest_score.m), else by isanomaly
 %     last_pre     'last' on inputs pre-processed toward the closest known class
 %                  (Lee et al.'s input pre-processing; M.eps_pre)
+%     last_l2      Mahalanobis++ (Mueller & Hein 2025, arXiv:2505.18032): 'last' on the
+%                  last layer's features l2-normalized, with the class means and tied
+%                  covariance fitted on the normalized training features (M.l2_mu, M.l2_P)
+%   V = ood_score_set('l2', V): the columns of V scaled to unit l2 norm.
 %   Components are standardized with the known validation frames (M.zs).
+if ischar(M) && strcmp(M, 'l2'), S = Z ./ max(vecnorm(Z, 2, 1), eps); return; end
 if nargin < 4 || isempty(need), need = M.candidates; end
 N = size(Xf, 2);
 use = @(c) any(strcmp(need, c));
@@ -45,6 +50,9 @@ if use('last_or_if')
 end
 if use('last_pre') && nargin >= 5 && ~isempty(Zp)
     S.last_pre = -min_dist(Zp, M.mu{end}, M.P{end});
+end
+if use('last_l2') && isfield(M, 'l2_mu')
+    S.last_l2 = -min_dist(Z{end} ./ max(vecnorm(Z{end}, 2, 1), eps), M.l2_mu, M.l2_P);
 end
 if use('last_or_raw'), S.last_or_raw = min(z(S.last, 'last'), z(S.raw, 'raw')); end
 if use('last_or_if'), S.last_or_if = min(z(S.last, 'last'), z(S.iforest, 'iforest')); end

@@ -87,6 +87,10 @@ function build_threat_model(p)
 %           packets or the noise bursts in every RSSI bin of the idle time before the frame
 %           (idle_rssi.m; NaN for the other components and the run's first frame), recorded
 %           from the schedule's own draws in their own order, so no draw moves.
+%           With p.proc_gain_db > 0 (rate_reduce) output 4 is our own received component
+%           (after the path-loss step, a faulty connector and the chain errors), logged as
+%           Thr_sig: the receiver-side emulation of the chip-rate field its level
+%           measurements read (extract_closed_loop_frames.m), never a decision input.
 %           The gated jammers run with the timing of the Constant block 'Gate'
 %           (jam_timing.m): the sweeping jammer is on our channel while
 %           mod(t + p0, T) of the channel clock lies in sweep_window_s.m, and the
@@ -254,6 +258,7 @@ add_block('simulink/Sinks/To Workspace', [modelName '/Thr_act'], 'Position', [58
 add_block('simulink/Sinks/To Workspace', [modelName '/Rx_S'],    'Position', [870 390 950 420]);
 add_block('simulink/Sinks/To Workspace', [modelName '/Thr_comp'], 'Position', [580 -10 660 20]);
 add_block('simulink/Sinks/To Workspace', [modelName '/Cal_db'],  'Position', [300 670 380 690]);
+if own_output(p), add_block('simulink/Sinks/To Workspace', [modelName '/Thr_sig'], 'Position', [580 -50 660 -20]); end
 
 sf_root = sfroot;
 chart_tx = sf_root.find('-isa', 'Stateflow.EMChart', 'Path', [modelName '/Tx']);
@@ -285,6 +290,7 @@ set_param([modelName '/Thr_act'], 'VariableName', 'Thr_act',     'SaveFormat', '
 set_param([modelName '/Rx_S'],    'VariableName', 'Rx_S',        'SaveFormat', 'Array');
 set_param([modelName '/Thr_comp'], 'VariableName', 'Thr_comp',   'SaveFormat', 'Array');
 set_param([modelName '/Cal_db'],  'VariableName', 'Cal_db',      'SaveFormat', 'Array', 'SampleTime', num2str(p.frame_duration));
+if own_output(p), set_param([modelName '/Thr_sig'], 'VariableName', 'Thr_sig', 'SaveFormat', 'Array'); end
 
 %% ---- Wiring ----
 add_line(modelName, 'BitSource/1', 'Tx/1',      'autorouting', 'on');
@@ -313,6 +319,7 @@ add_line(modelName, 'Tx/1',        'Threat/13', 'autorouting', 'on');
 add_line(modelName, 'Channel/2',   'Threat/14', 'autorouting', 'on');
 add_line(modelName, 'Cap/1',       'Threat/15', 'autorouting', 'on');
 add_line(modelName, 'Threat/3',    'Thr_comp/1', 'autorouting', 'on');
+if own_output(p), add_line(modelName, 'Threat/4', 'Thr_sig/1', 'autorouting', 'on'); end
 add_line(modelName, 'Cal/1',       'Cal_db/1',  'autorouting', 'on');
 add_line(modelName, 'Channel/1',   'Threat/1',  'autorouting', 'on');
 add_line(modelName, 'Threat/1',    'Level/1',   'autorouting', 'on');
@@ -574,6 +581,8 @@ for i = 1:numel(sig)
                 k, shd(1), p.shadow_evt_db); %#ok<AGROW>
     end
 end
+own = own_output(p);
+if own, body{end+1} = sprintf('ys = y;\n'); end         % our own received component (rate_reduce's chip-rate field)
 [NT, S] = tdl_taps(p, fs); E = (NT - 1) * S;
 if NT > 1 && ~isempty(addc)
     body{end+1} = sprintf('Nw = Ns + %d;\ntw = [t(1) - (%d:-1:1).'' / %.1f; t];\n', E, E, fs);
@@ -718,6 +727,7 @@ if ismember('antenna_fault', sig)
     % interferer, ahead of the receiver's thermal noise (an attenuator at ambient
     % temperature leaves the noise floor at kTB)
     body{end+1} = sprintf('if nfr >= af_on\n    y(:, hit_ant) = y(:, hit_ant) * %.8f;\nend\n', 10^(-p.fault_atten_db/20));
+    if own, body{end+1} = sprintf('if nfr >= af_on\n    ys(:, hit_ant) = ys(:, hit_ant) * %.8f;\nend\n', 10^(-p.fault_atten_db/20)); end
 end
 if p.chain_amp_db > 0 || p.chain_phase_deg > 0
     % receive chains: a gain and phase error per antenna, fixed for the flight (everything
@@ -726,6 +736,7 @@ if p.chain_amp_db > 0 || p.chain_phase_deg > 0
     init{end+1} = sprintf('gch = 10.^(%.6f * randn(1, %d) / 20) .* exp(1j * %.8f * randn(1, %d));', ...
         p.chain_amp_db, nr, deg2rad(p.chain_phase_deg), nr); %#ok<AGROW>
     body{end+1} = sprintf('for k = 1:%d\n    y(:, k) = y(:, k) * gch(k);\nend\n', nr); %#ok<AGROW>
+    if own, body{end+1} = sprintf('for k = 1:%d\n    ys(:, k) = ys(:, k) * gch(k);\nend\n', nr); end %#ok<AGROW>
 end
 % union of the components on the air: 1 while one that is not gated is, else the largest
 % gated share
@@ -740,8 +751,9 @@ if ismember('antenna_fault', sig)                   % then the connector's, draw
     pers{end+1} = 'af_on'; init{end+1} = sprintf('af_on = %d;', fo1);
     if fo2 > fo1, init{end} = sprintf('af_on = %d + floor(%d * rand);', fo1, fo2 - fo1 + 1); end
 end
-head = sprintf(['function [y, act, comp] = fcn(u, seed, fd, aoa, kdb, yaw, rho, gcs, att, gate, tdl, bdy, xt, tau, cap)\n' ...
-    '%%#codegen\npersistent seeded\n']);
+outs = 'y, act, comp'; if own, outs = 'y, act, comp, ys'; end
+head = sprintf(['function [%s] = fcn(u, seed, fd, aoa, kdb, yaw, rho, gcs, att, gate, tdl, bdy, xt, tau, cap)\n' ...
+    '%%#codegen\npersistent seeded\n'], outs);
 for i = 1:numel(pers)
     head = [head sprintf('persistent %s\n', pers{i})]; %#ok<AGROW>
 end
@@ -2083,6 +2095,12 @@ tb = 0; n = 0;
 if ~isfield(p, 'idle_rssi_hz') || isempty(p.idle_rssi_hz) || p.idle_rssi_hz <= 0, return; end
 tb = 1 / p.idle_rssi_hz;
 n = max(0, floor((round(p.cycle_s * fs) - p.samples_per_frame - E) / (fs * tb)));
+end
+
+function own = own_output(p)
+% Our own received component as output 4 of the threat block (rate_reduce: the chip-rate
+% field of the level measurements, extract_closed_loop_frames.m).
+own = isfield(p, 'proc_gain_db') && ~isempty(p.proc_gain_db) && p.proc_gain_db > 0;
 end
 
 function c = idle_code(on, nxt, sw, k, n, tb, cyc, fs)

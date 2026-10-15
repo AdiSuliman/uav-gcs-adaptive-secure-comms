@@ -59,7 +59,7 @@ H = struct('gamma', 0.9, 'NE', 64, 'T', 30, 'episodes', 50000, 'buffer', 200000,
     'eps_end', 0.05, 'eps_frac', 0.6, 'huber', 1, 'p_unknown', 0.10, 'p_follow', 0.5, 'n_eval', 4, ...
     'hidden', [256 256]);
 N_SEEDS = 3; GAMMAS = 0.5;
-% monitor: alarm definition, m/n confirmation (M-of-N binary integration, Richards), selected on
+% monitor: alarm definition, m/n confirmation (k-out-of-n detection: Norouzi 2006; Barajas et al. 2026), selected on
 % validation; 4/5 and 5/5 trade a later alarm for fewer false ones
 ALARMS = {'class_drop 3/3', 'class_drop 2/2', 'class_drop 4/5', 'class_drop 5/5'};
 DROP_STEPS = [0 2];                      % drop alarm: the train-pool threshold and 2 dB below it (selected on validation)

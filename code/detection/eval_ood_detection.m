@@ -8,7 +8,7 @@
 %   msp, energy   maximum softmax probability and logsumexp of the logits: baselines
 %   iforest       isolation forest on the link features alone (Liu, Ting & Zhou)
 %   candidates of the production score (ood_score_set.m): last, ensemble, raw,
-%                 last_or_raw, last_or_if, last_pre
+%                 last_or_raw, last_or_if, last_pre, last_l2 (Mahalanobis++, Mueller & Hein 2025)
 % Every score is read as the decision cycle reads it (ood_fold_metrics.m): alone (one
 % frame) and averaged over the last 2, 5 and 8 cycles of each sub-run in time order
 % (ood_window.m, partial windows at its start), every window labelled by its newest frame.
