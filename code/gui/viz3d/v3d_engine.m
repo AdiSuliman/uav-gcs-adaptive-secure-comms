@@ -96,8 +96,10 @@ if ~ismember(G.r, own)                             % airframe shadowing flies fl
     G.r = own(min(k, numel(own))); G.E.r(:) = G.r;
     G.events0{end + 1} = 'Flight changed: one whose turn hides an antenna';
 end
-if isfield(M.K, 'ev') && isfinite(M.K.ev{M.split}(G.r))   % a rolling-in flight: the onset reads its event's frame (link_env.m)
-    G.E.ev(:) = true; G.E.k0(:) = M.K.ev{M.split}(G.r) - 1 - G.E.onset(1);
+if isfield(M.K, 'ev')                             % a rolling-in flight: the onset reads its event's frame (link_env.m)
+    ev = M.K.ev{M.split}(G.r);
+    G.E.ev(:) = isfinite(ev);
+    if isfinite(ev), G.E.k0(:) = ev - 1 - G.E.onset(1); end
 end
 end
 
