@@ -88,6 +88,21 @@ The two-class reading takes a lost branch as given (the detector's 'one branch l
 - Storage: 24 singles per frame (dataset, splits, pools: +96 bytes per frame); 15 more for the fault and shadowing frames of the dataset (O4).
 - The fusion's row: 31 -> 73 columns (C = 11); the agent's state unchanged (temporal_evidence.m's 9 columns).
 
+### Unit tests
+`code/tests/test_core.m`, 129 tests (122 of the base, 7 new), one MATLAB process in a scratch copy of 3894940, 24.7 min: 128 pass. `test_rate_reduce_chip_level` fails as on the base (the detector-image level under rate_reduce with a 10 dB jammer is -0.93 dB against a 0.5 dB tolerance, d84_shadow.md), independent of this change.
+
+### Smoke chain (scratch copy of 3894940, one MATLAB process, fresh data)
+`run_stage('smoke', 'A0', 'A5', 'A6', 'B1', 'B2', 'B2F', 'B3n', 'B3', 'OOD', 'B4', 'B4s')`: exit 0 in 28.0 min (A5 14.6, B3n 3.7, OOD 2.4, B4 2.3, B4s 1.6). Then `run_stage('smoke', 'C1p', 'C1c', 'C1d', 'C2', 'C2e', 'C2g', 'C2u', 'EDGE', 'LAT')`: exit 0 in 363.4 min (C1p 322.9 against 260.6 for d84-shadow's smoke, C1c 33.8, C1d 0.1, C2 1.9, C2e 0.5, C2g 0.6, C2u 0.5, EDGE 1.7, LAT 1.5).
+- A5 printed the per-cycle shares: the sweeper is on the air in 55.8% of the decision cycles, the WLAN in 94.1%.
+- B2F selected N = 8 on the smoke.
+- B3 printed the emitter-of-opportunity table on both test sets.
+- C1p: airframe shadowing was on the air in 130 of the 130 flights of its cells.
+- LAT, median / p95: the features (link features and the idle record) 0.22 / 0.26 ms; the deployed cycle 5.3 / 6.0 ms; the whole cycle on one CPU core 9.8 / 10.7 ms.
+- Warnings: only the smoke's known ones (the DQN gate; no KPI 1 threshold for KPI 6).
+- The console (demo_gui.m) started on the smoke data and loaded it in 31 s. Its live run and episode check had not reported when this was written.
+
+Smoke numbers are not results.
+
 ## Stated, not backed by a source
 - The RSSI's rate, averaging time and step are the CC2420's that Grimaldi et al. read (18.5 kHz, 128 us, 1 dB); the AD9361 data sheet in the library gives its RSSI accuracy (+-2 dB, used) but not its rate, averaging or step.
 - The RSSI's spread as Gamma(M, 1)/M (Wilson-Hilferty), the delay line's taps adding in power for a noise-like emitter over a bin.
