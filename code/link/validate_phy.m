@@ -79,7 +79,6 @@ if nargin >= 1 && strcmpi(only, 'V12c')
     if ~exist('results', 'dir'); mkdir('results'); end
     fid = fopen('results/phy_validation_v12c.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
     fprintf('\n%s\n', rep{:});
-    params = S.params; save('params.mat', 'params');
     if bdIsLoaded(modelName), close_system(modelName, 0); end
     ok = v12.pass || tdl_on;               % the channel model's gate; the receiver's verdict is v12.pass
     return
@@ -265,7 +264,6 @@ title(sprintf('Spatial nulling, %d antennas, jammer at %g deg', p0.n_rx, p0.int_
 legend('Location', 'southwest', 'FontSize', 8);
 exportgraphics(f, 'results/phy_validation.png', 'Resolution', 150);
 
-params = S.params; save('params.mat', 'params');
 if bdIsLoaded(modelName), close_system(modelName, 0); end
 ok = all(g_ok) && seed_same && seed_diff && tone_ok && v12_ok;
 end
@@ -406,8 +404,7 @@ end
 
 %% ===================== Local functions =====================
 function [ber, nerr, dly, BR] = run_curve(p, modelName, CFG, delay_bits)
-params = p; save('params.mat', 'params'); %#ok<NASGU>
-tb = tic; evalc('build_threat_model');
+tb = tic; evalc('build_threat_model(p)');                 % built in memory: params.mat is not written
 set_param(modelName, 'SimulationCommand', 'update');
 fprintf('    build + compile %.1f s\n', toc(tb));
 nS = numel(CFG.EbNo); ber = nan(1, nS); nerr = zeros(1, nS); dly = NaN; BR = [];

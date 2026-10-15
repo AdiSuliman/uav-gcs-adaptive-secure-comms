@@ -1395,6 +1395,194 @@ end
 verifyEqual(tc, size(M.te), [1 nT - C]);                        % the agent's state keeps its size
 end
 
+function test_frame_rule_labels(tc)
+% The per-frame network and its unknown-threat models learn what the frame itself holds (the
+% frame rule: threat_active.m without the idle time); the fusion, the KPI 1 threshold and the
+% readings of the system's decision keep the per-cycle labels.
+act = [0 0.5 0 0.05]; ai = [0.3 0 0 0.2];
+verifyEqual(tc, threat_active('sweeping_jammer', act, 1:4, 10, ai), logical([1 1 0 1]));   % per cycle
+verifyEqual(tc, threat_active('sweeping_jammer', act, 1:4, 10), logical([0 1 0 0]));       % per frame
+cls = {'none', 'sweeping_jammer'};
+S = struct('Y', categorical([2; 2; 1; 2], 1:2, cls), 'Y_frame', categorical([1; 2; 1; 1], 1:2, cls));
+F = frame_labels(S);
+verifyEqual(tc, F.Y, S.Y_frame);
+verifyError(tc, @() frame_labels(rmfield(S, 'Y_frame')), 'frame_labels:missing');
+txt = fileread(which('run_dataset_sweep'));
+verifyNotEmpty(tc, strfind(txt, 'labf(~threat_active(p.active_threat, F.act(v), v, tw)) = 1;'));
+verifyNotEmpty(tc, strfind(txt, 'dataset.label_frame = D.label_frame(:);'));
+verifyNotEmpty(tc, strfind(fileread(which('extract_spectrograms')), 'spec.Y_frame = categorical(ds.label_frame'));
+txt = fileread(which('prepare_data'));
+verifyNotEmpty(tc, strfind(txt, 'splits.(names{i}).Y_frame = sp0.Y_frame(m);'));
+verifyNotEmpty(tc, strfind(txt, 'splits.test.Y_frame = sp0.Y_frame;'));          % splits_fresh.mat
+verifyNotEmpty(tc, strfind(fileread(which('train_detector')), 'tr = frame_labels(sp.train); va = frame_labels(sp.val);'));
+verifyNotEmpty(tc, strfind(fileread(which('ood_loto_split')), 'fresh = frame_labels(fresh);'));
+verifyNotEmpty(tc, strfind(fileread(which('compare_architectures')), 'sp.test = frame_labels(sp.test);'));
+for f = {'select_fusion', 'fused_class', 'detector_block', 'kpi_ebno'}            % per cycle
+    verifyEmpty(tc, strfind(fileread(which(f{1})), 'frame_labels'), f{1});
+end
+end
+
+function test_params_written_by_init_only(tc)
+% The dataset sweep (A5, B3n) and the PHY validation (A4v) build their models in memory and
+% never write params.mat, so a stop in the middle leaves A0's file; the stages that set their
+% own onsets stop on a params.mat that does not put every threat on from the first frame.
+for f = {'run_dataset_sweep', 'validate_phy'}
+    s = fileread(which(f{1}));
+    verifyEmpty(tc, strfind(s, 'save(''params.mat'''), f{1});
+    verifyNotEmpty(tc, strfind(s, 'evalc(''build_threat_model(p)'')'), f{1});
+    verifyEmpty(tc, strfind(s, 'evalc(''build_threat_model'')'), f{1});
+end
+p = base_params();
+assert_frame1_onsets(p);                                         % A0's parameters pass
+q = p; q.pl_onset_frames = p.pl_onset_det;
+verifyError(tc, @() assert_frame1_onsets(q), 'assert_frame1_onsets:params');
+q = p; q.fault_onset_frames = p.pl_onset_det;
+verifyError(tc, @() assert_frame1_onsets(q), 'assert_frame1_onsets:params');
+q = p; q.roll_in_frames = p.pl_onset_det;
+verifyError(tc, @() assert_frame1_onsets(q), 'assert_frame1_onsets:params');
+verifyError(tc, @() assert_frame1_onsets(rmfield(p, 'roll_in_frames')), 'assert_frame1_onsets:params');
+for f = {'build_policy_pools', 'build_check_pools', 'build_clean_test_pools', 'measure_latency', 'threat_gallery'}
+    verifyNotEmpty(tc, strfind(fileread(which(f{1})), 'assert_frame1_onsets(p0);'), f{1});
+end
+end
+
+function test_monitor_class_reading(tc)
+% KPI 1, its validation threshold, B4 and B4s read the monitor's class (policy_monitor.m):
+% the fused class with the latched cause of a lost branch (latch_runs.m, fused_class.m), the
+% fused class alone beside it. The latch over the shuffled frames of several runs is each
+% run's latch in time order.
+rng(3);
+cls = {'none', 'antenna_fault', 'airframe_shadowing'};
+n = 30; G1 = 0.3 * randn(n, 3); G1(10:end, 2) = G1(10:end, 2) - 15;   % an open connector at cycle 10
+G2 = 0.3 * randn(n, 3);
+P1 = repmat([0.1 0.4 0.5], n, 1); P2 = repmat([0.8 0.1 0.1], n, 1);   % the fusion leans to shadowing
+[q1, c1] = onset_shape('sequence', G1, P1, cls, 5, 0);
+[q2, c2] = onset_shape('sequence', G2, P2, cls, 5, 0);
+o = randperm(2 * n)'; G = [G1; G2]; P = [P1; P2]; Q = [q1; q2]; Cz = [c1; c2];
+run = [ones(n, 1); 2 * ones(n, 1)]; pos = [(1:n)'; (1:n)'];
+[pl, cz] = latch_runs(P(o, :), run(o), pos(o), G(o, :), cls, 0, 5);
+verifyEqual(tc, pl, Q(o, :), 'AbsTol', 1e-12);
+verifyEqual(tc, cz, Cz(o));
+verifyEqual(tc, latch_runs(P(o, :), run(o), pos(o), G(o, :), cls, 0), pl);   % the deployed heal by default
+[k, kf] = fused_class(P1, struct('run', ones(n, 1), 'pos', (1:n)', 'gain_ant', G1), [], 1, cls);
+verifyEqual(tc, kf, 3 * ones(n, 1));                             % the fused class alone
+[~, ke] = max(q1, [], 2);
+verifyEqual(tc, k, ke);                                          % the monitor's class
+verifyEqual(tc, k(end), 2);                                      % the fault latched from its step
+src = fileread(which('eval_detector'));
+verifyNotEmpty(tc, strfind(src, ['latch_runs(double(Y_pred_prob''), sp.test.run, sp.test.pos, ' ...
+    'sp.test.gain_ant, cls_names, os_thr);']));
+verifyNotEmpty(tc, strfind(src, 'pv = fus.val_latch_oof;'));
+verifyNotEmpty(tc, strfind(src, '''y_fused'', Y_fused'));
+src = fileread(which('select_fusion'));
+verifyNotEmpty(tc, strfind(src, 'val_latch_oof(m, :) = latch_runs(val_probs_oof(m, :)'));
+verifyNotEmpty(tc, strfind(src, '''val_probs_oof'', ''val_latch_oof'''));
+verifyNotEmpty(tc, strfind(fileread(which('detector_block')), 'G.FM, G.FN, G.classes);'));
+end
+
+function test_onset_events_branch(tc)
+% The latch threshold's events (select_fusion.m) are read as the deployed latch reads them:
+% the deployed heal, the first diagnosis on the threat's branch. A fading dip on another
+% branch before a fault's step is diagnosed first, heals and leaves the step to be scored; a
+% ramp diagnosed before its labelled frame still counts; an event on another branch that
+% never heals leaves none.
+rng(11);
+n = 30; L = 0.3 * randn(n, 3);
+G = L; G(5:9, 3) = G(5:9, 3) - [3 6 9 9 6]'; G(13:end, 1) = G(13:end, 1) - 15;
+verifyGreaterThan(tc, onset_shape('events', G), 0);              % the first event: the dip, ramp-like
+g = onset_shape('events', G, 13, 5);
+verifyLessThan(tc, g, 0);                                        % the step on the fault's branch
+verifyTrue(tc, isnan(onset_shape('events', G, 13, Inf)));        % never healed: the step not reached
+verifyEqual(tc, onset_shape('events', G, 13), g);                % the deployed heal by default
+verifyEqual(tc, decision_config().heal, 5);
+Lr = L; Lr(:, 2) = Lr(:, 2) - 15 * min(1, max(0, ((1:n)' - 5) / 12));
+verifyGreaterThan(tc, onset_shape('events', Lr, 16), 0);
+verifyEqual(tc, onset_shape('events', Lr, 16), onset_shape('events', Lr));   % diagnosed before its labelled frame
+Gw = L; Gw(6:end, 3) = Gw(6:end, 3) - 15; Gw(13:end, 1) = Gw(13:end, 1) - 15;
+verifyTrue(tc, isnan(onset_shape('events', Gw, 13)));            % another branch, lost for good
+verifyNotEmpty(tc, strfind(fileread(which('select_fusion')), 'onset_shape(''events'', va.gain_ant(ix, :), j0, heal)'));
+end
+
+function test_ood_halves_stratified(tc)
+% The validation halves of the unknown-threat folds (ood_loto_split.m) on A5's run and fold
+% layout: every (class, Eb/N0) and (class, level) has sub-runs in both halves, the halves
+% differ by at most one sub-run per (class, Eb/N0), and a class with one sub-run per cell is
+% a checkerboard over level and Eb/N0.
+NS = [6 6 6 6 6 6 13 11 8 8]; EB = 0:3:15; nL = 8; nC = numel(NS);
+cls = [{'none'}, compose('t%d', 1:nC)];
+run = []; y = []; eb = []; lv = []; rid = 0;
+for c = 1:nC
+    nk = 0;
+    for l = 1:nL
+        for e = 1:6
+            for s = 1:NS(c)
+                rid = rid + 1; nk = nk + 1;
+                if mod(nk + l - 2, 6) + 1 == 5
+                    run(end+1) = rid; y(end+1) = c + 1; eb(end+1) = EB(e); lv(end+1) = l; %#ok<AGROW>
+                end
+            end
+        end
+    end
+end
+for e = 1:6
+    for k = 1:nL * 6
+        rid = rid + 1;
+        if mod(k - 1, 6) + 1 == 5, run(end+1) = rid; y(end+1) = 1; eb(end+1) = EB(e); lv(end+1) = NaN; end %#ok<AGROW>
+    end
+end
+n = numel(run); run = run(:); y = y(:); eb = eb(:); lv = lv(:);
+Yc = categorical(y, 1:nC + 1, cls);
+va = struct('X', zeros(2, 2, 1, n, 'single'), 'feats', zeros(n, 1), 'Y', Yc, 'Y_frame', Yc, 'run', run, ...
+    'pos', ones(n, 1), 'ebno', eb, 'level', lv);
+sp = struct('train', va, 'val', va, 'norm', struct('feat_mean', 0, 'feat_std', 1), 'classes', {cls'});
+[~, ~, V] = ood_loto_split(sp, va, 't1');
+for c = 1:nC + 1
+    m = y == c;
+    for e = EB
+        a = sum(m & eb == e & ~V.sel); b = sum(m & eb == e & V.sel);
+        verifyGreaterThan(tc, [a b], 0); verifyLessThanOrEqual(tc, abs(a - b), 1);
+    end
+    for l = 1:nL * (c > 1)
+        verifyGreaterThan(tc, [sum(m & lv == l & ~V.sel), sum(m & lv == l & V.sel)], 0);
+    end
+end
+m = y == 2; [~, ie] = ismember(eb(m), EB);
+verifyEqual(tc, ~V.sel(m), mod(ie + lv(m), 2) == 1);             % fit where level + Eb/N0 index is odd
+end
+
+function test_spec_only_baseline_unmasked(tc)
+% The features-only baseline of the architecture comparison holds its spectrogram at zero, where
+% the masking would paint noise-level bands (spec_mask.m): it trains without masking, the other
+% variants with it.
+rng(2); verifyGreaterThan(tc, nnz(spec_mask(zeros(128, 128, 1, 8, 'single'))), 0);
+src = fileread(which('compare_architectures'));
+verifyNotEmpty(tc, strfind(src, 'if strcmp(V(v).mask, ''spec''), opts.augment = false; end'));
+verifyNotEmpty(tc, strfind(src, 'net = train_hybrid_net(tr, va, classes, opts);'));
+end
+
+function test_kpi2_deployed_statistic(tc)
+% KPI 2's summary gives the statistic the decision cycle compares (the production score over
+% its window) with its FPR95, and the nested estimate's FPR95 beside the nested AUROC.
+d = fullfile(tc.TestData.tmp, 'kpi2'); mkdir(fullfile(d, 'results')); mkdir(fullfile(d, 'data'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+SC = {'msp', 'energy', 'iforest', 'last', 'raw'}; WIN = [2 5 8]; RETAIN = 0.95; sel = 'last'; sel_win = 5;
+R = struct('held_out', {'jamming', 'tone_jamming'}, 'auroc', {[0.6 0.6 0.6 0.81 0.7], [0.6 0.6 0.6 0.83 0.7]}, ...
+    'fpr95', {[0.5 0.5 0.5 0.41 0.6], [0.5 0.5 0.5 0.43 0.6]}, 'auroc_win', {0.9 * ones(5, 3), 0.9 * ones(5, 3)});
+pj = repelem(4:5, 4); pw = repmat([1 WIN], 1, 2);                % (candidate, window) pairs
+MpT = repmat(0.1 * (1:8), 2, 1); FpT = MpT / 10; MpV = MpT;
+NEST = struct('auroc', [0.84 0.86], 'fpr95', [0.31 0.33], 'auroc_val', [0.8 0.8], 'pick', {{'last over 5', 'last over 5'}});
+TEST_SET = 'second test set'; %#ok<NASGU>
+save('results/ood_detection.mat', 'R', 'SC', 'sel', 'sel_win', 'NEST', 'WIN', 'RETAIN', 'MpV', 'MpT', 'FpT', 'pj', 'pw', ...
+    'TEST_SET');
+evalc('measure_all_kpis');
+K = load('results/kpi_summary.mat', 'KPI'); k2 = K.KPI([K.KPI.id] == 2);
+verifyEqual(tc, k2.value, 'mean AUROC 0.850, FPR95 0.32 (nested)');
+verifyNotEmpty(tc, strfind(k2.detail{1}, ['deployed statistic: last averaged over the last 5 cycles, mean AUROC ' ...
+    '0.300, FPR at 95% known kept 0.03']));
+verifyNotEmpty(tc, strfind(k2.detail{1}, 'nested estimate: mean AUROC 0.850, FPR95 0.32'));
+verifyNotEmpty(tc, strfind(k2.detail{2}, '(per frame)'));
+end
+
 function test_pre_features(tc)
 % Lee et al.'s input pre-processing moves inputs toward the closest known class: the
 % smallest Mahalanobis distance of the last layer drops for most inputs
@@ -2809,7 +2997,8 @@ function test_dataset_balance(tc)
 % Every class keeps its labelled frames: a path-loss cell N_SUB F_SUB / (TW - 1) sub-runs
 % (9 labelled frames of 20), the WLAN N_SUB over its labelled share (frames: about 0.58, 10;
 % decision cycles with idle sensing: above 0.8, at most 7), the sweeper over its; the extra
-% sub-runs go round the folds from cell to cell.
+% sub-runs go round the folds from cell to cell, each level starting one fold further, so
+% every fold holds about the same share of every Eb/N0 point.
 p = base_params(); q = p; q.idle_rssi_hz = 0;
 h = benign_hit_share(q);                                % the dataset's: 3000 runs of 20 frames
 verifyGreaterThan(tc, h, 0.5); verifyLessThan(tc, h, 0.65);
@@ -2819,13 +3008,23 @@ verifyGreaterThan(tc, hc, 0.8); verifyLessThanOrEqual(tc, round(6 / hc), 7);
 txt = fileread(which('run_dataset_sweep'));
 verifyNotEmpty(tc, regexp(txt, 'round\(N_SUB \* F_SUB / \(TW - 1\)\)', 'once'));
 verifyNotEmpty(tc, regexp(txt, 'round\(N_SUB / wlan\)', 'once'));
-verifyNotEmpty(tc, regexp(txt, 'FOLD\(nk\)', 'once'));
-k = 0; fo = zeros(48, 13);                                % 13 path-loss sub-runs over 48 cells
-for c = 1:48
-    for j = 1:13, k = k + 1; fo(c, j) = mod(k - 1, 6) + 1; end
+verifyNotEmpty(tc, regexp(txt, 'FOLD\(nk \+ lv - 1\)', 'once'));
+for ns = [8 11 13]                                      % fault and shadowing, sweeper, path loss
+    k = 0; fo = zeros(8, 6, ns);                        % 8 levels x 6 Eb/N0 points x ns sub-runs
+    for lv = 1:8
+        for e = 1:6
+            for j = 1:ns, k = k + 1; fo(lv, e, j) = mod(k + lv - 2, 6) + 1; end
+        end
+    end
+    for f = 1:6
+        m = fo == f;
+        verifyEqual(tc, nnz(m), 8 * ns);                                         % every fold the same share
+        verifyEqual(tc, reshape(sum(m, [2 3]), 1, []), ns * ones(1, 8));          % of every level
+        verifyLessThanOrEqual(tc, max(abs(reshape(sum(m, [1 3]), 1, []) - 8 * ns / 6)), 2);   % and Eb/N0 point
+    end
+    nf = arrayfun(@(i) numel(unique(fo(mod(i - 1, 8) + 1, ceil(i / 8), :))), 1:48);
+    verifyEqual(tc, nf, 6 * ones(1, 48));                                       % every cell in every fold
 end
-verifyEqual(tc, histcounts(fo(:), 0.5:6.5), 104 * ones(1, 6));      % every fold the same share
-verifyTrue(tc, all(arrayfun(@(c) numel(unique(fo(c, :))), 1:48) == 6));   % and every cell in every fold
 end
 
 function test_noise_burst_duty(tc)
@@ -2984,32 +3183,38 @@ end
 
 function test_ood_loto_split(tc)
 % The frames of one held-out threat: it never trains, stops the training or fits a model;
-% the known windows of the selection come from the other half of the validation sub-runs;
-% the reading is the second test set, z-scored with the known training frames' statistics.
+% the known windows of the selection come from the other half of the validation sub-runs,
+% the halves a checkerboard over level and Eb/N0 within each class; the labels are the
+% frame rule's; the reading is the second test set, z-scored with the known training
+% frames' statistics.
 rng(12);
 cls = {'none', 'jamming', 'spoofing'};
-mk = @(r0) struct('X', rand(4, 4, 1, 60), 'feats', randn(60, 2), ...
-    'Y', categorical(cls(mod(floor((0:59)' / 5), 3) + 1), cls), 'run', r0 + floor((0:59)' / 5), ...
-    'pos', mod((0:59)', 5) + 1);
+i = floor((0:59)' / 5); c = mod(i, 3) + 1;               % 12 sub-runs of 5 frames: none, jamming, spoofing, ...
+yf = c; yf(c == 2 & mod((0:59)', 5) == 0) = 1;           % a jamming sub-run's first frame holds no jamming
+lvr = 1 + mod(floor(i / 3), 2); lvr(c == 1) = NaN;      % levels 1 2 1 2 per threat, Eb/N0 0 dB then 3 dB
+mk = @(r0) struct('X', rand(4, 4, 1, 60), 'feats', randn(60, 2), 'Y', categorical(cls(c), cls), ...
+    'Y_frame', categorical(cls(yf), cls), 'run', r0 + i, 'pos', mod((0:59)', 5) + 1, 'ebno', 3 * floor(i / 6), ...
+    'level', lvr);
 sp = struct('train', mk(1), 'val', mk(101), 'norm', struct('feat_mean', [1 -1], 'feat_std', [2 3]), ...
     'classes', {cls'});
 fresh = mk(201); fresh.X = fresh.X(:, :, :, 1:30); fresh.feats = fresh.feats(1:30, :);
-fresh.Y = fresh.Y(1:30); fresh.run = fresh.run(1:30); fresh.pos = fresh.pos(1:30);
+fresh.Y = fresh.Y(1:30); fresh.Y_frame = fresh.Y_frame(1:30); fresh.run = fresh.run(1:30); fresh.pos = fresh.pos(1:30);
 [tr, vfit, va, vk, te] = ood_loto_split(sp, fresh, 'jamming');
 verifyEqual(tc, categories(tr.Y)', {'none', 'spoofing'});
-verifyEqual(tc, numel(tr.Y), 40);
+verifyEqual(tc, numel(tr.Y), 44);                                % with the jamming sub-runs' first frames
 verifyEqual(tc, mean(tr.feats, 1), [0 0], 'AbsTol', 1e-12);
 verifyEqual(tc, std(tr.feats, 0, 1), [1 1], 'AbsTol', 1e-12);
-runs = unique(sp.val.run);
 verifyFalse(tc, any(vfit.Y == 'jamming'));
-verifyTrue(tc, all(ismember(vfit.run, runs(1:2:end))));
-verifyEqual(tc, va.sel, ismember(sp.val.run, runs(2:2:end)));
+verifyEqual(tc, va.sel, ismember(sp.val.run, 101 + [0 1 2 9 10 11]));   % per class: (level 1, 0 dB), (2, 3 dB)
+verifyTrue(tc, all(ismember(vfit.run, 101 + (3:8))));
+verifyEqual(tc, numel(vfit.Y), 22);
 verifyEqual(tc, numel(va.Y), 60);
-verifyEqual(tc, numel(vfit.Y) + sum(va.sel & va.Y ~= 'jamming'), 40);
-verifyTrue(tc, all(vk.Y == 'jamming')); verifyEqual(tc, numel(vk.Y), 20);
+verifyEqual(tc, numel(vfit.Y) + sum(va.sel & va.Y ~= 'jamming'), 44);
+verifyTrue(tc, all(vk.Y == 'jamming')); verifyEqual(tc, numel(vk.Y), 16);
 verifyEqual(tc, te.X, fresh.X);
+verifyEqual(tc, te.Y, fresh.Y_frame(:));
 raw = @(f) f .* sp.norm.feat_std + sp.norm.feat_mean;
-k = sp.train.Y ~= 'jamming';
+k = sp.train.Y_frame ~= 'jamming';
 mu = mean(raw(sp.train.feats(k, :)), 1); sd = std(raw(sp.train.feats(k, :)), 0, 1);
 verifyEqual(tc, te.feats, (raw(fresh.feats) - mu) ./ sd, 'AbsTol', 1e-12);
 verifyEqual(tc, te.pos, fresh.pos);

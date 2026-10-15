@@ -2,8 +2,8 @@
 % The dataset trains every threat on 8 severity levels (dataset_levels.m). This script generates
 % fresh frames with the dataset's recipe (random UAV speed per block, every
 % training Eb/N0, the dataset's labels: threat_active.m) at three kinds of level and
-% reads them as the deployed detector does, fused over the last cycles of the block
-% (detector_block.m):
+% reads them as the deployed monitor decides, fused over the last cycles of the block with
+% the latched cause of a lost branch (detector_block.m, fused_class.m):
 %   seen     every other training level (reference from the same generator)
 %   between  midpoints between training levels (never trained on), every other one
 %   above    beyond the strongest training level, where the sources allow it: every
@@ -111,7 +111,8 @@ rep = {'=== DETECTOR AT UNSEEN THREAT SEVERITIES ==='};
 rep{end+1} = sprintf(['Generated: %s | %d frames per (level, Eb/N0) block, Eb/N0 %s dB, random speed per block | %s | ' ...
     'unknown = production score (%s) averaged over the last %d cycles below the 95%%-retention threshold of the same ' ...
     'statistic'], datestr(now), N_FRAMES, mat2str(EBNO), ...
-    ternary(isempty(FZ.FM), 'per-frame reading', sprintf('fused over the last %d cycles', FZ.N)), D.ood.score, UW);
+    ternary(isempty(FZ.FM), 'per-frame reading with the latched cause of a lost branch', ...
+    sprintf('fused over the last %d cycles with the latched cause of a lost branch', FZ.N)), D.ood.score, UW);
 rep{end+1} = 'Rule fixed before the run: extend the training levels if, above the range, < 90% of a threat''s frames get the same countermeasure.';
 if SHT(1) > 0
     rep{end+1} = sprintf(['Airframe shadowing: every block flies a flight whose attitude hides an antenna at its level (its ' ...

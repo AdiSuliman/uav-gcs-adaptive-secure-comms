@@ -45,6 +45,9 @@ end
 spec = struct();
 spec.X = X;
 spec.Y = categorical(ds.label, 1:numel(ds.class_names), ds.class_names);
+if isfield(ds, 'label_frame')                            % the frame rule's labels (frame_labels.m)
+    spec.Y_frame = categorical(ds.label_frame, 1:numel(ds.class_names), ds.class_names);
+end
 spec.feats = feats;
 spec.feat_names = feat_names;
 spec.class_names = ds.class_names;

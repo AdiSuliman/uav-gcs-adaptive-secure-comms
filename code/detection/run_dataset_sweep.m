@@ -19,7 +19,8 @@
 % count while their link-feature window of TW frames still holds a frame before the onset
 % (threat_active.m): TW - 1 of F_SUB frames, so its cells fly N_SUB F_SUB / (TW - 1). The
 % sub-runs of a threat beyond N_SUB per cell go round the folds from cell to cell, so every
-% fold holds the same share of them. An antenna fault and airframe shadowing start inside
+% fold holds the same share of them; each level starts one fold further, so they fall on
+% every Eb/N0 point in turn. An antenna fault and airframe shadowing start inside
 % the sub-run too, at a frame drawn per sub-run in the same range (frames before it carry
 % no threat): the connector opens within one frame (p.fault_onset_frames), and the UAV rolls
 % into its turn so that the hidden antenna's loss first reaches p.shadow_evt_db at that
@@ -33,7 +34,9 @@
 % would be the clean link. The share of such flights per level (shadow_hit_share.m) is
 % printed with the flights tried.
 %
-% Per frame: reference-antenna IQ, label, level, configured Eb/N0, the received Eb/N0
+% Per frame: reference-antenna IQ, label (per decision cycle), label_frame (the frame rule:
+% threat_active.m without the idle time, what the frame itself holds; the labels of the
+% per-frame network, frame_labels.m), level, configured Eb/N0, the received Eb/N0
 % (ebno_rx: the configured value less a path-loss step from its onset, received_ebno.m),
 % the receiver measurements of extract_closed_loop_frames.m, the true BER and frame
 % error (analysis only), speed, run id and seed, fold (1..N_SUB), the frame's position in its
@@ -110,7 +113,7 @@ p0.cap_frames = F_SUB;                                  % the cap holds over the
 
 MEAS = {'rssi', 'crc_fail', 'ber_est', 'snr_post', 'sinr', 'env_corr', 'iot', 'coh', 'mmse_gain', 'align', ...
         'branch_dip', 'branch_gap', 'sinr_gap', 'q_iot', 'q_react', 'q_sfm', 'q_par', 'duty', 'edges', 'est_margin'};
-D = struct('iq', {{}}, 'label', [], 'class_run', [], 'level', [], 'snr', [], 'ebno_rx', [], 'ber', [], 'fer', [], ...
+D = struct('iq', {{}}, 'label', [], 'label_frame', [], 'class_run', [], 'level', [], 'snr', [], 'ebno_rx', [], 'ber', [], 'fer', [], ...
     'speed', [], 'run', [], 'seed', [], 'fold', [], ...
     'pos', [], 'gain_ant', [], 'act', [], 'act_comp', [], 'lev_db', [], 'k_db', [], 'k_int', [], 'aoa', [], 'yaw', [], ...
     'rho', [], 'gcs_db', [], 'alt_m', [], 'el_db', [], 'align', [], 'gcs_aoa', [], 'bank', [], 'roll', [], 'pitch', [], ...
@@ -141,7 +144,7 @@ for tt = 1:numel(threat_cfg)
         p.pl_onset_frames = p0.pl_onset_det;           % a path-loss step inside the sub-run
         p.fault_onset_frames = p0.pl_onset_det;        % the connector opens inside it
         p.roll_in_frames = p0.pl_onset_det;            % the shadowing onset inside it, by a roll-in
-        build(p, modelName);
+        build(p);
         i_start = numel(D.label) + 1; tried = 0;
         for s = 1:numel(EbNo_list)
             for sub = 1:n_sub(tt)
@@ -154,7 +157,7 @@ for tt = 1:numel(threat_cfg)
                 end
                 nk = nk + 1;
                 D = add_subrun(D, p, modelName, EbNo_list(s), v_kmh, stop_time, delay_bits, ...
-                    tt + 1, cfg.levels(lv), run_id, FOLD(nk), MEAS, SEED0, TW);
+                    tt + 1, cfg.levels(lv), run_id, FOLD(nk + lv - 1), MEAS, SEED0, TW);
             end
         end
         report_row(cfg.name, cfg.levels(lv), D, i_start);
@@ -168,7 +171,7 @@ end
 
 %% ---- None class (n_levels x N_SUB sub-runs per Eb/N0) ----
 p = p0; p.active_threat = 'none'; p.seed = [];
-build(p, modelName);
+build(p);
 i_start = numel(D.label) + 1;
 for s = 1:numel(EbNo_list)
     for k = 1:n_levels * N_SUB
@@ -178,11 +181,10 @@ for s = 1:numel(EbNo_list)
     end
 end
 report_row('none', NaN, D, i_start);
-params = S.params; save('params.mat', 'params');
 
 %% ---- Package ----
 dataset = struct();
-dataset.iq = D.iq; dataset.label = D.label(:); dataset.level = D.level(:);
+dataset.iq = D.iq; dataset.label = D.label(:); dataset.label_frame = D.label_frame(:); dataset.level = D.level(:);
 dataset.class_names = class_names; dataset.snr = D.snr(:); dataset.ebno_rx = D.ebno_rx(:);
 dataset.ber = D.ber(:); dataset.fer = D.fer(:);
 dataset.meas = struct();
@@ -212,17 +214,17 @@ save(f_out, 'dataset', '-v7.3');
 fprintf('\n=== Dataset summary ===\n');
 fprintf('Frames: %d | sub-runs: %d | speed %.1f-%.1f km/h | %.1f min\n', numel(D.label), numel(unique(D.run)), ...
     min(D.speed), max(D.speed), toc(t0)/60);
-fprintf('Labelled frames per class (and frames of the class''s own sub-runs):\n');
+fprintf('Labelled frames per class (and frames of the class''s own sub-runs; by the frame rule):\n');
 for c = 1:numel(class_names)
-    fprintf('  %-22s %d (%d)\n', class_names{c}, sum(D.label == c), sum(D.class_run == c));
+    fprintf('  %-22s %d (%d; %d)\n', class_names{c}, sum(D.label == c), sum(D.class_run == c), sum(D.label_frame == c));
 end
 fprintf('Saved %s. Next: extract_spectrograms.\n', f_out);
 clear D dataset   % large arrays; main.m runs the stages in one workspace
 
 %% ===================== Local functions =====================
-function build(p, modelName)
-params = p; save('params.mat', 'params'); %#ok<NASGU>
-evalc('build_threat_model');
+function build(p) %#ok<INUSD>
+% The level's model, built in memory from p; params.mat is not written.
+evalc('build_threat_model(p)');
 end
 
 function D = add_subrun(D, p, modelName, ebno, v_kmh, stop_time, delay_bits, label, level, run_id, fold, MEAS, seed0, tw)
@@ -242,6 +244,9 @@ lab(~threat_active(p.active_threat, F.act(v), v, tw, F.act_idle(v))) = 1;   % a 
                                                         % sweep on the air (frame or idle time), no antenna hidden by
                                                         % the event's loss, a fault frame before the connector opens, a
                                                         % path-loss frame before its step or past its onset's window: clean
+labf = label * ones(1, n);
+labf(~threat_active(p.active_threat, F.act(v), v, tw)) = 1;   % the frame rule: what the frame itself holds
+D.label_frame = [D.label_frame, labf];
 D.label = [D.label, lab]; D.class_run = [D.class_run, label * ones(1, n)]; D.level = [D.level, level * ones(1, n)];
 D.snr = [D.snr, ebno * ones(1, n)]; D.speed = [D.speed, v_kmh * ones(1, n)];
 D.ebno_rx = [D.ebno_rx, received_ebno(p.active_threat, ebno, F.act_comp(:, v), p.path_loss_db)];

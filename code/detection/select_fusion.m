@@ -15,11 +15,14 @@
 % q_thr = mu + 3 sigma + 2 dB of q_iot. The threshold of the onset's shape, which the
 % monitor's latched cause of a lost branch reads (onset_shape.m: a ramp above it, airframe
 % shadowing; a step at or below it, an antenna fault), is chosen on the validation sub-runs
-% of the two threats: the statistic at the latch's diagnosis of each sub-run's event, the
-% threshold that reads the two causes right in the largest mean share (FM.os_thr). The test
-% split is not used.
+% of the two threats: the statistic at the latch's diagnosis of each sub-run's event on the
+% threat's branch, the latch run as deployed (onset_shape.m 'events', decision_config.m
+% heal), the threshold that reads the two causes right in the largest mean share
+% (FM.os_thr). The monitor's class out of fold (val_latch_oof, the KPI 1 threshold of
+% eval_detector.m): the latch over the out-of-fold fused probabilities of every validation
+% sub-run, its threshold chosen on the other folds' sub-runs. The test split is not used.
 % Output: data/fusion.mat (FM with os_thr, N, lambda, cv table, out-of-fold probabilities
-% and their targets, q_thr)
+% (fused, and the monitor's) and their targets, q_thr)
 
 close all; clc;
 fprintf('=== B2F: temporal fusion (validation split only) ===\n\n');
@@ -65,8 +68,9 @@ Z = fuse_classes('windows', va, P, N);
 val_target = fusion_target(y, va.run, va.pos, N, classes);
 FM = fuse_classes('fit', Z, val_target, C, lambda);
 [~, y1] = max(P, [], 2);
-fprintf('\nSelected N = %d cycles, lambda %.0e: macro-F1 %.2f%% out of fold (per frame %.2f%%)\n', ...
-    N, lambda, 100 * cv(a, b), 100 * macro_f1(y, y1, C));
+yfr = y; if isfield(va, 'Y_frame'), yfr = double(va.Y_frame(:)); end   % the per-frame network's own labels
+fprintf('\nSelected N = %d cycles, lambda %.0e: macro-F1 %.2f%% out of fold (per frame, frame rule %.2f%%)\n', ...
+    N, lambda, 100 * cv(a, b), 100 * macro_f1(yfr, y1, C));
 fprintf('WLAN frames without a packet judged by their window as benign_interference: %d of %d none frames\n', ...
     sum(val_target ~= y), sum(y == find(strcmp(classes, 'none'))));
 val_probs_oof = oof{a, b};
@@ -75,22 +79,35 @@ q_thr = mean(qi) + 3 * std(qi) + 2;
 fprintf('Quiet-slot interference alarm: %.2f dB over thermal (clean frames: mean %.2f, std %.2f dB, n = %d)\n', ...
     q_thr, mean(qi), std(qi), numel(qi));
 iB = [find(strcmp(classes, 'antenna_fault')), find(strcmp(classes, 'airframe_shadowing'))];
-og = []; oy = [];                                       % the statistic at the latch's diagnosis, the sub-run's cause
+heal = decision_config().heal;
+og = []; oy = []; orun = [];                            % the statistic at the latch's diagnosis, the sub-run's cause
 if numel(iB) == 2
     for r = runs(:)'
         ix = find(va.run == r); [~, o] = sort(va.pos(ix)); ix = ix(o);
         b = find(ismember(iB, y(ix)), 1);
         if isempty(b), continue; end
-        og(end+1) = onset_shape('events', va.gain_ant(ix, :)); oy(end+1) = b; %#ok<SAGROW>
+        j0 = find(y(ix) == iB(b), 1);                   % the threat's first labelled frame
+        og(end+1) = onset_shape('events', va.gain_ant(ix, :), j0, heal); oy(end+1) = b; orun(end+1) = r; %#ok<SAGROW>
     end
 end
 FM.os_thr = onset_shape('choose', og, oy);
 k = isfinite(og);
-fprintf(['Onset shape: threshold %+.2f (validation sub-runs with a latched event: antenna fault %d of %d, read right ' ...
-    '%.1f%%; airframe shadowing %d of %d, %.1f%%)\n'], FM.os_thr, sum(k & oy == 1), sum(oy == 1), ...
-    100 * mean(og(k & oy == 1) <= FM.os_thr), sum(k & oy == 2), sum(oy == 2), 100 * mean(og(k & oy == 2) > FM.os_thr));
+fprintf(['Onset shape: threshold %+.2f (validation sub-runs with a latched event on the threat''s branch: antenna ' ...
+    'fault %d of %d, read right %.1f%%; airframe shadowing %d of %d, %.1f%%)\n'], FM.os_thr, sum(k & oy == 1), ...
+    sum(oy == 1), 100 * mean(og(k & oy == 1) <= FM.os_thr), sum(k & oy == 2), sum(oy == 2), ...
+    100 * mean(og(k & oy == 2) > FM.os_thr));
+val_latch_oof = val_probs_oof;                          % the monitor's class out of fold
+[~, ko] = ismember(orun, runs); ko = fold_of_run(ko);
+for f = 1:K
+    m = fold == f;
+    tf = onset_shape('choose', og(ko ~= f), oy(ko ~= f));
+    val_latch_oof(m, :) = latch_runs(val_probs_oof(m, :), va.run(m), va.pos(m), va.gain_ant(m, :), classes, tf, heal);
+end
+[~, yl] = max(val_latch_oof, [], 2); [~, yo] = max(val_probs_oof, [], 2);
+fprintf('Out of fold, the monitor''s class (latched cause of a lost branch): macro-F1 %.2f%% (fused class %.2f%%)\n', ...
+    100 * macro_f1(val_target, yl, C), 100 * macro_f1(val_target, yo, C));
 if ~exist('results', 'dir'), mkdir('results'); end
-save('data/fusion.mat', 'FM', 'N', 'lambda', 'NS', 'LAMBDA', 'cv', 'val_probs_oof', 'val_target', 'q_thr');
+save('data/fusion.mat', 'FM', 'N', 'lambda', 'NS', 'LAMBDA', 'cv', 'val_probs_oof', 'val_latch_oof', 'val_target', 'q_thr');
 fprintf('Saved data/fusion.mat\n');
 
 function m = macro_f1(y, yh, C)

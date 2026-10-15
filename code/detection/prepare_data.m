@@ -5,7 +5,8 @@
 % window is shared between training and test. Every cell is present in every split.
 %
 % Input:  data/spectrograms.mat
-% Output: data/splits.mat (train/val/test with X, Y, feats, ebno, speed, run, level, and
+% Output: data/splits.mat (train/val/test with X, Y (per decision cycle), Y_frame (the frame
+%         rule, frame_labels.m), feats, ebno, speed, run, level, and
 %         the frame position, per-antenna gains, received Eb/N0 (ebno_rx) and the idle
 %         time's records (idle, act_idle, idle_amb) when present; norm stats)
 % With FRESH_TEST true (build_fresh_test.m): the second test set of data/spectrograms_fresh.mat,
@@ -41,6 +42,7 @@ for i = 1:3
     m = ix.(names{i});
     splits.(names{i}) = struct('X', sp0.X(:, :, :, m), 'Y', sp0.Y(m), 'feats', feats_norm(m, :), ...
         'ebno', sp0.ebno(m), 'speed', sp0.speed_kmh(m), 'run', sp0.run(m), 'level', sp0.level(m));
+    if isfield(sp0, 'Y_frame'), splits.(names{i}).Y_frame = sp0.Y_frame(m); end
     if isfield(sp0, 'pos')
         splits.(names{i}).pos = sp0.pos(m); splits.(names{i}).gain_ant = sp0.gain_ant(m, :);
         splits.(names{i}).feats_raw = sp0.feats(m, :);
@@ -82,6 +84,7 @@ assert(all(sp0.fold == 6), 'prepare_data: the second test set holds sub-runs out
 splits = struct();
 splits.test = struct('X', sp0.X, 'Y', sp0.Y, 'feats', (sp0.feats - nm.feat_mean) ./ nm.feat_std, ...
     'ebno', sp0.ebno, 'speed', sp0.speed_kmh, 'run', sp0.run, 'level', sp0.level);
+if isfield(sp0, 'Y_frame'), splits.test.Y_frame = sp0.Y_frame; end
 if isfield(sp0, 'pos')
     splits.test.pos = sp0.pos; splits.test.gain_ant = sp0.gain_ant; splits.test.feats_raw = sp0.feats;
 end

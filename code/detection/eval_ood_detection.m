@@ -12,9 +12,10 @@
 % Every score is read as the decision cycle reads it (ood_fold_metrics.m): alone (one
 % frame) and averaged over the last 2, 5 and 8 cycles of each sub-run in time order
 % (ood_window.m, partial windows at its start), every window labelled by its newest frame.
-% Frames of one fold (ood_loto_split.m): the known classes' training frames train the
-% network and fit the unknown-threat models; the validation sub-runs are split in two
-% halves (every other sub-run): the known frames of one half stop the training
+% Frames of one fold (ood_loto_split.m, labels by the frame rule, frame_labels.m): the known
+% classes' training frames train the network and fit the unknown-threat models; the
+% validation sub-runs are split in two halves (stratified over class, level and Eb/N0,
+% ood_loto_split.m): the known frames of one half stop the training
 % early and fit the models' validation parts, the known windows of the other half are read
 % against the held-out threat's validation windows for the selection and set the
 % threshold of FPR95. The held-out threat never fits, weights or chooses anything inside

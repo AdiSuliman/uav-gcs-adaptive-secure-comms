@@ -2,6 +2,9 @@
 % Training in train_hybrid_net.m (shared with eval_ood_detection.m). After
 % training, the feature-space unknown-threat models (Mahalanobis on the hidden
 % layers, isolation forest on the link features) are fitted (fit_ood_model.m).
+% Labels: the frame rule (frame_labels.m), what the frame itself holds; the network sees the
+% frame and its link-feature window only. The per-cycle labels are the fusion's
+% (select_fusion.m).
 %
 % Input:  data/splits.mat
 % Output: data/trained_detector.mat (net, info, classes, ood)
@@ -16,16 +19,17 @@ fprintf('train %d | val %d | test %d | classes %d | features %d (%s)\n', ...
     size(sp.train.X, 4), size(sp.val.X, 4), size(sp.test.X, 4), numel(classes), ...
     size(sp.train.feats, 2), strjoin(sp.norm.feat_names, ', '));
 rng(42, 'twister');
+tr = frame_labels(sp.train); va = frame_labels(sp.val);
 
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
-    [net, info] = train_hybrid_net(sp.train, sp.val, classes, struct('epochs', 2));
+    [net, info] = train_hybrid_net(tr, va, classes, struct('epochs', 2));
 else
-    [net, info] = train_hybrid_net(sp.train, sp.val, classes);
+    [net, info] = train_hybrid_net(tr, va, classes);
 end
 fprintf('\nBest validation accuracy %.4f at epoch %d\n', info.bestValAcc, info.bestEpoch);
 
 fprintf('Fitting unknown-threat models (Mahalanobis, isolation forest)...\n');
-ood = fit_ood_model(net, sp.train, classes, sp.val);
+ood = fit_ood_model(net, tr, classes, va);
 fprintf('Production score: Mahalanobis of layer %s; ensemble weights for comparison (bias, %s): %s\n', ...
     ood.layers{end}, strjoin(ood.layers, ', '), mat2str(ood.w, 3));
 
@@ -44,4 +48,4 @@ sgtitle(sprintf('B2: Hybrid detector (%d link features, time/frequency masking, 
 if ~exist('results', 'dir'), mkdir('results'); end
 saveas(fig, 'results/training_curves.png'); close(fig);
 fprintf('=== B2 Complete ===\n');
-clear S sp   % large arrays; main.m runs the stages in one workspace
+clear S sp tr va   % large arrays; main.m runs the stages in one workspace
