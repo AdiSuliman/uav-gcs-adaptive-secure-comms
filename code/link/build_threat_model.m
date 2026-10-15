@@ -31,7 +31,8 @@ function build_threat_model(p)
 %           the tilted antenna toward the GCS on our LoS (uav_attitude_db.m; its
 %           flight-start value is in 'GCS'). The direction turns at the heading rate of
 %           the 'Yaw' block (heading_rate.m); a flight that rolls into its turn ('Att'
-%           holds the roll-in's start and rate) flies level, then rolls at that rate up to
+%           holds the roll-in's start and rate, and the roll at which a shadowing event
+%           started) flies level, then rolls at that rate up to
 %           the bank, its heading rate following the roll (turn_attitude.m), the roll and
 %           the direction taken at every frame. 'Body' scales our signal on each antenna by
 %           the airframe loss (body_loss.m). K-factors of
@@ -400,7 +401,8 @@ function s = channel_script(p, fs)
 % gain of the UAV antenna toward the GCS at the start of the flight), then LoS steering
 % vector toward the GCS + correlated diffuse fading centred on it; K-factor kdb(1) from the
 % 'Kfac' block. The 'Att' block [GCS direction, elevation, roll, pitch, wobble amplitude,
-% frequency, phase, roll-in start, roll rate] sets the cone angle of the GCS on the array,
+% frequency, phase, roll-in start, roll rate, roll at a shadowing event's start] sets the
+% cone angle of the GCS on the array,
 % the antenna gain on the LoS as the attitude changes (the direction and the roll at the
 % frame, turn_attitude.m), and the lever-arm phase of every path; 'Body' our signal's
 % amplitude on each antenna. With a real receiver: frequency offset of
