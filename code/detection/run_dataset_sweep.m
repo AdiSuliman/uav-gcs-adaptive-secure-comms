@@ -167,7 +167,7 @@ for tt = 1:numel(threat_cfg)
 end
 
 %% ---- None class (n_levels x N_SUB sub-runs per Eb/N0) ----
-p = p0; p.active_threat = 'none'; p.seed = [];
+p = p0; p.active_threat = 'none'; p.seed = []; p.roll_in_frames = p0.pl_onset_det;   % its turning flights roll in as every class's
 build(p, modelName);
 i_start = numel(D.label) + 1;
 for s = 1:numel(EbNo_list)

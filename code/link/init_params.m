@@ -127,15 +127,17 @@ params.wobble_arm_m     = 0.4;                   % [m] antenna offset from the c
 % levels (dataset levels: run_dataset_sweep.m; decision levels: decision_config.m)
 params.active_threat = 'jamming';   % threat of the next model build: 'none', a threat, or 'a+b'
 params.jsr_db        = 16;          % [dB] Jamming-to-Signal Ratio (barrage jammer power)
-% Noise bursts: a random jammer that alternates jamming and sleeping (Xu et al. 2005,
-% Sec. 2: on for tj, asleep for ts, both uniform, tj = U[0,31] with ts = U[0,31] or U[1,8]
-% slots, mean duty 50% and 78%); at the other end a sparse jammer on 20% of the symbols
-% in random unit-symbol bursts (Marti et al. 2023, Sec. VII-A, jammer J4, Fig. 5(d)). A slot
-% is one symbol here (Marti et al.'s time slot carries one symbol). Per
-% flight the duty is drawn in 20-77.5% (jam_timing.m); each burst lasts U[0,31] symbols
-% and each sleep U[0, 31 (1 - duty) / duty] symbols, so a duty of 50% is Xu et al.'s first
-% random jammer and 77.5% the mean sleep of their second (4.5 slots).
-params.burst_duty_range = [0.2 0.775];   % Noise Burst: duty drawn per flight
+% Noise bursts, each flight one of the two measured patterns (jam_timing.m). A random jammer
+% that alternates jamming and sleeping (Xu et al. 2005, Sec. 2.1, Table 1: on for tj, asleep
+% for ts, both uniform, tj = U[0,31] with ts = U[0,31] or U[1,8] slots, mean duty 50% and 78%):
+% bursts of U[0,31] symbols and sleeps of U[0, 31 (1 - duty) / duty], the duty uniform in
+% 50-77.5%, so the sleeps stay within their measured U[0,31]. Or a sparse jammer on 20% of
+% the symbols in random unit-symbol bursts (Marti et al. 2023, Sec. VII-A, jammer J4,
+% Fig. 5(d)): each one-symbol slot of its own clock jammed with probability 0.2. A slot is
+% one symbol here (Marti et al.'s time slot carries one symbol). No source gives how often
+% each pattern is met: half the flights each.
+params.burst_duty_range = [0.5 0.775];   % Noise Burst: duty of the random jammer drawn per flight
+params.burst_j4      = [0.2 0.5];   % Noise Burst: duty of the sparse jammer J4, its share of the flights
 params.burst_on_sym  = 31;          % Noise Burst: longest burst and the sleep scale [symbols]
 params.burst_duty    = 0.5;         % Noise Burst: duty of a fixed geometry (jam_timing_random off): Xu et al.'s first random jammer
 % Path loss as a threat is a sudden step of attenuation (an obstruction between the UAV and
@@ -189,7 +191,7 @@ params.shadow_k_db    = -16;        % Airframe shadowing: K-factor of the hidden
 % It occurs only while the airframe lies in the line of sight (shadow_hidden.m): the GCS
 % above the belly's horizon in the body frame (banking toward it by more than its
 % elevation), the GCS azimuth more than 30 deg off the heading (Sun et al., Sec. III), and a
-% roll the event's depth is measured at. Sun et al. fit the median loss against the
+% burial the event's depth is measured at. Sun et al. fit the median loss against the
 % event's largest roll, S = A + n (roll - 16.1) + X, X ~ N(0, sigma^2), over rolls of
 % 16.1-58.3 deg (Table II: C-band A 12.4 dB, n 0.25 dB/deg, sigma 4.4 dB; L-band 9.6,
 % 0.09, 2.8). At 2.4 GHz the loss lies between the bands (C-band's is about 5 dB larger, an
@@ -197,33 +199,46 @@ params.shadow_k_db    = -16;        % Airframe shadowing: K-factor of the hidden
 % so the C-band fit, the more severe, pairs them with the roll: a level is flown only at
 % rolls whose fit lies within 1.96 sigma of it (shadow_roll_band.m), 6 dB at 16.1-25.0 deg
 % up to 25 dB at 32.0-57.9 deg. The 5 deg roll of Sun et al.'s Sec. III is their criterion
-% to declare an event in the data, not the smallest roll of one (16.1 deg, Table II). No
-% source measures shadowing on a hovering or slow multirotor, so none is flown below the
-% slowest measured flying UAV (p.shadow_v_min).
+% to declare an event in the data, not the smallest roll of one (16.1 deg, Table II). Their
+% events lay at 1.4-2.9 deg elevation (Sec. II), where the roll sets how deep the airframe
+% lies in the line of sight; ours lies up to about 23 deg below the UAV, where the same
+% roll buries it far less. So an event is held against the band by its equivalent roll
+% (shadow_equiv_roll.m): its deepest burial, at the bank with the GCS abeam as their turns
+% passed it, plus 2.9 deg, the most severe of their elevations (the deepest level for a
+% burial); within the event the depth follows the burial (shadow_frame.m). No source
+% measures shadowing on a hovering or slow multirotor, so none is flown below the slowest
+% measured flying UAV (p.shadow_v_min).
 params.shadow_roll_deg = 16.1;      % [deg] smallest roll of the measured events (Sun et al., Table II)
 params.shadow_fit      = [12.4 0.25 4.4];   % C-band median loss at that roll [dB], slope [dB/deg], residual std [dB] (Table II)
 params.shadow_fit_z    = 1.96;      % half width of the fit's band [sigma]: two-sided 95%
 params.shadow_hdg_deg  = 30;        % [deg] smallest heading-to-GCS-azimuth difference of a shadowing event
 params.shadow_v_min    = 8;         % [m/s] no shadowing below it (hover and position holding in wind; Khawaja et al.'s slowest flying UAV)
+params.shadow_el_deg   = 2.9;       % [deg] elevation of the equivalent roll: the largest of Sun et al.'s events (Sec. II)
 % Onset: a bank is entered over a finite roll-in, so the airframe enters the line of sight
 % as the roll grows: the event starts where the GCS lies on the belly's horizon and reaches
-% its level at the turn's bank (the event's largest roll, the band above). Within it the
-% loss follows Sun et al.'s shape of an event (Part IV, Sec. IV-C, eq. 8: a cubic spline
-% through (0, 0), (0.5, 1), (1, 0) of the event's duration, its rising half), the progress
-% being the roll's between the two (shadow_frame.m); no source measures the loss against time
-% on a small UAV, so tying the shape to the roll-in is an assumption, and so is the K-factor
-% moving from the antenna's own to the shadow's with the same shape. An event counts while
-% the loss is at least 5 dB (Sun et al., Sec. III, their third criterion). The roll-in: level
-% flight, then a constant roll rate up to the bank (turn_attitude.m), the rate uniform from
-% the measured roll-in of a small UAV (Allen & Lin, Fig. 12, digitised: 0 to 30 deg in about
-% 1.6 s) to the largest rate measured over a window as long as the roll-in (Gross et al.,
-% Fig. 4, digitised: 45.4 deg/s over 0.5 s, 35.5 deg/s over 1 s; roll_rate.m). Only the
-% flights whose shadowing onset the data place roll in (p.roll_in_frames, the pools' event
-% frame); every other flight holds its bank.
+% its level at the turn's bank with the GCS abeam (the event's deepest burial, the band
+% above). Within it the loss follows Sun et al.'s shape of an event (Part IV, Sec. IV-C,
+% eq. 8: a cubic spline through (0, 0), (0.5, 1), (1, 0) of the event's duration, its rising
+% half), the progress being the burial's between the two (shadow_frame.m), so it also eases
+% as a held turn carries the GCS off the beam; no source measures the loss against time on
+% a small UAV, so tying the shape to the burial is an assumption. An event counts while the
+% loss is at least 5 dB (Sun et al., Sec. III, their third criterion), and
+% from then on the hidden antenna's K-factor is the shadow's: about 15 dB outside the
+% declared shadowing area and -16 dB inside it (Sec. III, Fig. 12), so before the onset it
+% keeps its own. The roll-in: level flight, then a constant roll rate up to the bank
+% (turn_attitude.m), the rate uniform from the measured roll-in of a small UAV (Allen & Lin,
+% Fig. 12, digitised: 0 to 30 deg in about 1.6 s) to the largest rate measured over a window
+% as long as the roll-in (Gross et al., Fig. 4, digitised: 45.4 deg/s over 0.5 s, 35.5 deg/s
+% over 1 s; roll_rate.m). In the detector's sub-runs (p.roll_in_frames) every turning flight
+% rolls in, whatever its class: where the threat holds airframe shadowing its onset falls at
+% the drawn frame, otherwise the roll-in falls anywhere it overlaps the run (flight_draws.m);
+% no source gives the share of flight time spent rolling in, so every class gets the same.
+% The pools roll in only their shadowing flights and those flights' clean reference (the
+% event frame); every other flight holds its bank.
 params.shadow_evt_db   = 5;         % [dB] smallest loss of a counted event (Sun et al., Sec. III)
 params.roll_rate_lo    = 30 / 1.6;  % [deg/s] measured roll-in of a small UAV (Allen & Lin, digitised)
 params.roll_rate_win   = [0.5 45.4; 1 35.5];   % [s deg/s] largest roll rate over a window (Gross et al., digitised)
-params.roll_in_frames  = [];        % frame of the shadowing onset (a loss reaching shadow_evt_db) drawn per flight in this range; [] no roll-in
+params.roll_in_frames  = [];        % the detector's sub-runs: every turning flight rolls in, a shadowing onset drawn per flight in this frame range; [] no roll-in
 
 % Benign Interference: packet traffic of a WLAN in our channel, not an attack.
 % Frames of 0.27-3.2 ms and channel occupancy 5-86% (Wollenberg et al.; field duty
@@ -366,7 +381,11 @@ params.idle_busy_db     = 3;          % [dB] busy: this far over the floor const
 % An emitter of opportunity in the band (the fault-vs-shadowing reading per condition,
 % emitter_reading.m; never part of the default link): 2.4 GHz channel duty cycles of
 % 4.6-11.5% measured with a busy threshold of -97 dBm (Cheema & Salous 2019, Table 6, Sec. 5),
-% about 11 dB over our -108 dBm floor (kTB at 1.25 MHz with the 5 dB noise figure).
+% about 11 dB over our -108 dBm floor (kTB at 1.25 MHz with the 5 dB noise figure). It lies on
+% the ground in any direction from the UAV, as far as the licence-exempt density cap
+% (10 dBm per MHz, ETSI EN 300 328) lets it reach each INR in free space: 11.2, 3.5 and
+% 1.1 km, 0.6, 1.8 and 5.6 deg below a UAV at 120 m (emitter_idle.m); in a bank the airframe
+% hides it as it hides the GCS.
 params.amb_duty         = [0.046 0.115];
 params.amb_inr_db       = [0 10 20];  % [dB] its level over the floor at the UAV, the conditions read
 params.rx_combiner    = 'mrc';        % 'mrc' baseline | 'mmse' (spatial_diversity action)

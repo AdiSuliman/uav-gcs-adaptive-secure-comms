@@ -10,8 +10,10 @@ function R = emitter_reading(va, te, classes, N, inr)
 %            recall on the test frames labelled fault or shadowing [%], their 95% bootstrap
 %            intervals over sub-runs and the sub-runs
 %   Why it separates: a faulty connector attenuates everything its antenna receives, the
-%   emitter too (build_threat_model.m); the airframe hides an antenna from the GCS's
-%   direction only, so the emitter reaches the shadowed antenna like the others. Per window
+%   emitter too (build_threat_model.m); the airframe hides an antenna from the directions
+%   above its belly's horizon (shadow_frame.m), so an emitter outside that region reaches
+%   the shadowed antenna like the others, and one inside it is hidden too (emitter_idle.m
+%   flies both, the emitter's direction drawn over the full circle). Per window
 %   of N cycles, the antenna weakest on our signal (its local mean, temporal_evidence.m) is
 %   read on the emitter's busy idle bins: its offset from the other antennas' median there,
 %   and that offset less its offset on our signal (0 for a fault, the depth for shadowing).
