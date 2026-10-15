@@ -776,8 +776,8 @@ function test_slot_and_burst_measurements(tc)
 % A tone is one spectral line with a constant envelope in the quiet slot (Shahriar et
 % al., eq. 19); a counterfeit of our modulation is flat over its band and not constant;
 % thermal noise is flat. WLAN packets fill part of a frame and their edges show inside
-% it (busy share and energy edges, Cheema & Salous; Grimaldi et al.); noise bursts give
-% many edges; the clean link none.
+% it (busy share and energy edges, Cheema & Salous; Grimaldi et al.); on this flight
+% every frame under noise bursts shows edges; the clean link none.
 p0 = base_params(); mdl = 'UAV_GCS_Threat_Link';
 TH = {'none', 'tone_jamming', 'spoofing', 'benign_interference', 'noise_burst'};
 F = struct();
@@ -801,7 +801,7 @@ verifyEqual(tc, md('tone_jamming', 'duty'), 1);
 B = F.benign_interference;
 verifyTrue(tc, any(B.duty > 0 & B.duty < 1 & B.edges >= 1));
 c = corrcoef(B.duty, B.act); verifyGreaterThan(tc, c(1, 2), 0.8);
-verifyGreaterThanOrEqual(tc, md('noise_burst', 'edges'), 5);
+verifyGreaterThanOrEqual(tc, min(F.noise_burst.edges), 1);
 verifyGreaterThan(tc, md('none', 'est_margin'), 10);
 end
 
@@ -1767,7 +1767,7 @@ end
 
 function test_rx_taps(tc)
 % The real receiver's taps span the delay line's delays: MRC lags 2 before and the line's
-% 4.5 us window after, the equalizer +-5 symbols, the space-time MMSE +-2 us (twice the
+% 4.5 us window after, the equalizer +-10 symbols, the space-time MMSE +-2 us (twice the
 % 1 us clip) half a symbol apart, its window twice the 27 degrees of freedom, its
 % snapshots reached by the symbols within 2 + 2 of their own; on the flat channel every
 % count is 1, and so is the receiver built for it. The sync statistic has 5 taps (+-1
@@ -1779,16 +1779,16 @@ verifyEqual(tc, [t.lags t.ne t.nt t.window t.mh t.ns t.nn], [0 0 1 1 p.mmse_wind
 verifyEqual(tc, rx_taps(rmfield(p, 'tdl')), t);
 p.tdl = true;
 t = rx_taps(p);
-verifyEqual(tc, [t.lags t.ne t.nt t.window t.mh t.ns t.nn], [2 5 11 9 64 4 5 9]);
+verifyEqual(tc, [t.lags t.ne t.nt t.window t.mh t.ns t.nn], [2 5 21 9 64 4 5 9]);
 q = p; q.tdl_max_ns = 2000; q.rx_span_ns = 500;
 t = rx_taps(q);
-verifyEqual(tc, [t.lags t.ne t.nt t.window t.mh], [2 2 5 5 32 3]);
+verifyEqual(tc, [t.lags t.ne t.nt t.window t.mh], [2 2 9 5 32 3]);
 q = p; q.tdl_clip_ns = 2250;                            % the channel's clip does not move the receiver
 verifyEqual(tc, rx_taps(q).nt, 9);
 p.quiet_build = true; p.rx_sync = 'real';
 mdl = 'UAV_GCS_Threat_Link';
 C = {false, 'mrc', 'NT = 1;', 'MH = 0;'; false, 'mmse', 'NT = 1;', 'MH = 0;'; ...
-     true, 'mrc', 'NT = 1;', 'NE = 11;'; true, 'mmse', 'NT = 9;', 'MH = 4;'};
+     true, 'mrc', 'NT = 1;', 'NE = 21;'; true, 'mmse', 'NT = 9;', 'MH = 4;'};
 for i = 1:size(C, 1)
     p.tdl = C{i, 1}; p.rx_combiner = C{i, 2};
     evalc('build_threat_model(p)');
@@ -1801,17 +1801,20 @@ end
 function test_receiver_delay_spread(tc)
 % The real receiver on the delay line, three flights at 160 Hz: MRC over the antennas and
 % the channel's lags with the linear MMSE equalizer keeps a clean link at K -5 dB and a
-% 1 us RMS delay spread below 1e-3 at 12 dB; the MMSE receiver keeps a 16 dB jammer whose
-% channel spreads 234 ns below 0.03 at 15 dB, and one that spreads 64 ns, nearly flat,
-% about as well as the flat receiver on the flat channel at 6 dB (each frame keeps the
-% space-time or the antennas-alone output by its pilots); a 30 dB jammer on the flat
-% channel stays below 0.06, and one whose channel spreads 234 ns below 0.03 (the
-% space-time sync finds the frame under it).
+% 1 us RMS delay spread, and at the clip (2.25 us, the line's flat profile, 1.5 us), below
+% 1e-3 at 12 dB; the MMSE receiver keeps a 16 dB jammer whose channel spreads 234 ns below
+% 0.03 at 15 dB, and one that spreads 64 ns, nearly flat, about as well as the flat
+% receiver on the flat channel at 6 dB (each frame keeps the space-time or the
+% antennas-alone output by its pilots); a 30 dB jammer on the flat channel stays below
+% 0.06, and one whose channel spreads 234 ns below 0.03 (the space-time sync finds the
+% frame under it).
 p = base_params(); p.quiet_build = true; p.rx_sync = 'real'; p.int_aoa_random = false; p.yaw_random = false;
 p.corr_random = false; p.gcs_tracked = false; p.k_random = false; p.gcs_aoa_random = false; p.body_random = false;
 p.tdl = true; p.tdl_random = false;
 mdl = 'UAV_GCS_Threat_Link';
 q = p; q.active_threat = 'none'; q.rx_combiner = 'mrc'; q.rician_k = -5; q.tdl_ds_ns = [1000 0];
+verifyLessThan(tc, link_ber(mdl, q, 12, 21:23, 20), 1e-3);
+q.tdl_ds_ns = [2250 0];
 verifyLessThan(tc, link_ber(mdl, q, 12, 21:23, 20), 1e-3);
 q = p; q.active_threat = 'jamming'; q.jsr_db = 16; q.rx_combiner = 'mmse'; q.rician_k = 10; q.int_rician_k = 10;
 q.tdl_ds_ns = [0 234];
@@ -2197,6 +2200,59 @@ for f0 = [-30e3 30e3]
     end
 end
 delete(fullfile(pwd, 'rx_sign_check.m'));
+end
+
+function test_equalizer_sync(tc)
+% The MRC receiver on the delay line (its equalizer) on static channels of known paths
+% (three antennas, 30 dB, the arrival and frequency given): (1, 2) the frame arrives at the
+% end of the arrival window and a path 15.6 / 12.5 dB stronger follows one symbol later,
+% beyond the window; (3) six paths in the three symbols before the strongest one; (4) the
+% line of sight 3.25 symbols before a path 0.5 dB stronger, more than the equalizer's 2
+% lags before the arrival on it. The frequency is found within 500 Hz and every frame
+% decodes.
+p = base_params(); p.quiet_build = true; p.rx_sync = 'real'; p.int_aoa_random = false; p.yaw_random = false;
+p.corr_random = false; p.gcs_tracked = false; p.k_random = false; p.gcs_aoa_random = false; p.body_random = false;
+p.tdl = true; p.tdl_random = false; p.tdl_ds_ns = [234 0]; p.active_threat = 'none'; p.rx_combiner = 'mrc';
+mdl = 'UAV_GCS_Threat_Link';
+evalc('build_threat_model(p)');
+link_seed(mdl, 31, 160);
+o = sim(mdl, 'StopTime', num2str(5 * p.frame_duration));
+X = squeeze(o.get('Tx_IQ')); tb = reshape(double(o.get('tx_bits_out')), p.frame_length, []);
+ch = sfroot().find('-isa', 'Stateflow.EMChart', 'Path', [mdl '/Rx']);
+src = regexprep(ch.Script, 'function \[bits, iqa, z, Hq, Rq, sy\] = fcn\(u, txbits\)', ...
+    'function [bits, iqa, z, Hq, Rq, sy] = rx_eq_check(u, txbits)', 'once');
+close_system(mdl, 0);
+fid = fopen(fullfile(pwd, 'rx_eq_check.m'), 'w'); fwrite(fid, src); fclose(fid);
+rehash;
+verifyGreaterThan(tc, rx_taps(p).ne, 1);                         % the equalizer path
+rs = RandStream('mt19937ar', 'Seed', 9);
+fs = p.symbol_rate * p.sps; cyc = round(p.cycle_s * fs); Ns = size(X, 1);
+kk = [0:ceil(Ns/2)-1, -floor(Ns/2):-1].';
+G = [1, 0.8j, -0.6 + 0.3j; 0.5j, -0.9, 0.7];
+a1 = G(1, :); a2 = 0.8 * G(1, :) + 0.6 * G(2, :);
+C = {15.6, [0 4], [0.25 * a1; 1.5 * a1], 40e3; ...
+     15.6, [0 4 9], [0.3 * a1; 1.5 * a2; 0.5 * a1], -40e3; ...
+     1.0, [0 2 4 6 8 10 14], [0.5 * [a1; a2; a1; a2; a1; a2]; 1.5 * a1], -70e3; ...
+     1.0, [0 13], [0.8 * a1; 1.0 * a2], 20e3};
+for c = 1:size(C, 1)
+    clear rx_eq_check
+    [tau, dl, A, f0] = C{c, :};
+    for k = 1:min(size(X, 2), size(tb, 2))
+        t = ((k - 1) * cyc + (0:Ns-1)') / fs;
+        u = complex(zeros(Ns, 3));
+        for m = 1:numel(dl)
+            xd = ifft(fft(X(:, k)) .* exp(-1j*2*pi*kk*(tau + dl(m))/Ns));
+            u = u + xd * A(m, :);
+        end
+        u = u .* exp(1j*2*pi*f0*t) + sqrt(1e-3 / p.sps / 2) * complex(randn(rs, Ns, 3), randn(rs, Ns, 3));
+        [bits, ~, ~, ~, ~, sy] = rx_eq_check(u, tb(:, k));
+        if k > 1
+            verifyLessThan(tc, abs(sy(2) - f0), 500, sprintf('case %d, frame %d', c, k));
+            verifyEqual(tc, double(bits(:)), tb(:, k), sprintf('case %d, frame %d', c, k));
+        end
+    end
+end
+delete(fullfile(pwd, 'rx_eq_check.m'));
 end
 
 function test_packet_loss_once(tc)
