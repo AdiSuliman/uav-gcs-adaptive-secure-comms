@@ -114,4 +114,4 @@ The latch only moves probability between antenna_fault and airframe_shadowing wh
 
 ## Tests
 
-Full suite: see the commit message of the last commit on this branch.
+Full suite, code/tests/test_core.m on this branch's code, one MATLAB R2026a process: 148 passed, 0 failed, 0 incomplete of 148 (31.1 min). New: test_frame_rule_labels, test_params_written_by_init_only, test_monitor_class_reading, test_onset_events_branch, test_ood_halves_stratified, test_spec_only_baseline_unmasked, test_kpi2_deployed_statistic (after test_fusion_current_frame). Updated: test_dataset_balance, test_ood_loto_split. No smoke chain here: the main session runs one after merging the groups.
