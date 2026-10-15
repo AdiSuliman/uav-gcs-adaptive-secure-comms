@@ -98,9 +98,10 @@ fprintf('Saved data/splits_fresh.mat\n=== B1 Complete ===\n');
 end
 
 function s = idle_fields(s, sp0, m)
-% The idle time's records (the fusion's input, window_cues.m), its on-air share and the
+% The idle time's records and the antennas' channel records (the fusion's inputs,
+% window_cues.m), the idle time's on-air share and the
 % emitter-of-opportunity records (emitter_reading.m), when the spectrograms carry them.
-for f = {'idle', 'act_idle', 'idle_amb'}
+for f = {'idle', 'act_idle', 'idle_amb', 'bch'}
     if isfield(sp0, f{1}), s.(f{1}) = sp0.(f{1})(m, :); end
 end
 end

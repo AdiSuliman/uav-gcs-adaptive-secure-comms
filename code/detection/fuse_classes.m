@@ -6,8 +6,10 @@ function varargout = fuse_classes(cmd, varargin)
 %   Z = fuse_classes('windows', S, probs, N)
 %       evidence of every frame of split S (fields run, pos, gain_ant, feats_raw,
 %       feat_names, and idle: frames x 24, the record of the idle time before each frame,
-%       idle_summary.m, when present) from the frames of its own sub-run at positions
-%       pos-N+1..pos (causal); probs frames x C. Z is frames x (C + 11 + 42 + C):
+%       idle_summary.m, when present; bch: frames x 9nr, every antenna's channel estimates,
+%       branch_record.m, when present) from the frames of its own sub-run at positions
+%       pos-N+1..pos (causal; the branch records over the last window_cues('branch_window')
+%       positions); probs frames x C. Z is frames x (C + 11 + 52 + C):
 %       temporal_evidence.m's columns, window_cues.m's (the branch cues, the step of the
 %       received level, the idle time), then log(max(p, 1e-6)) of the frame's own
 %       probabilities, so a threat that hits single frames (a sweeping jammer crossing the
@@ -34,6 +36,8 @@ nT = numel(temporal_evidence('names', size(probs, 2))); nW = numel(window_cues('
 Z = zeros(n, nT + nW);
 I = nan(n, numel(idle_summary('names')));
 if isfield(S, 'idle') && ~isempty(S.idle), I = double(S.idle); end
+B = []; if isfield(S, 'bch') && ~isempty(S.bch), B = double(S.bch); end   % every antenna's channel estimates
+NB = window_cues('branch_window');
 [~, ~, rid] = unique(S.run(:));
 byrun = accumarray(rid, (1:n)', [], @(v) {v});
 for r = 1:numel(byrun)
@@ -42,8 +46,9 @@ for r = 1:numel(byrun)
     for j = 1:numel(ix)
         w = ix(max(1, j - N + 1):j);
         Gw = permute(S.gain_ant(w, :), [3 2 1]); Fw = permute(S.feats_raw(w, jf), [3 2 1]);
+        Bw = []; if ~isempty(B), Bw = permute(B(ix(max(1, j - NB + 1):j), :), [3 2 1]); end
         Z(ix(j), :) = [temporal_evidence(permute(probs(w, :), [3 2 1]), Gw, Fw), ...
-            window_cues(Gw, Fw, permute(I(w, :), [3 2 1]))];
+            window_cues(Gw, Fw, permute(I(w, :), [3 2 1]), Bw)];
     end
 end
 Z = [Z, log(max(double(probs), 1e-6))];                   % the current frame's own evidence

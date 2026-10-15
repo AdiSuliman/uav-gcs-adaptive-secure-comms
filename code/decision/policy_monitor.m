@@ -49,7 +49,9 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   The monitor also keeps the last C.hist observation vectors of policy_state.m,
 %   and the window of the temporal fusion (probabilities, antenna gains, link
 %   features, unknown scores, and obs.idle, the record of each cycle's idle time,
-%   idle_summary.m: the fusion's row holds window_cues.m's columns, as fuse_classes.m's).
+%   idle_summary.m, and obs.bch, the record of each cycle's channel estimates per antenna,
+%   branch_record.m, over window_cues('branch_window') cycles: the fusion's row holds
+%   window_cues.m's columns, as fuse_classes.m's).
 %   mem.since starts saturated (10): the policies never see the episode clock.
 %   mem.deg_n / mem.conf_n: consecutive degraded / confirmed-alarm cycles; mem.pend:
 %   a requested change not yet received.
@@ -66,7 +68,7 @@ switch cmd
             'since', 10 * ones(1, NE), 'cand', zeros(1, NE), 'cand_n', zeros(1, NE), 'good', zeros(1, NE), ...
             'deg_n', zeros(1, NE), 'conf_n', zeros(1, NE), 'alarm', false(NE, 8), 'ebno', nan(NE, 3), ...
             'ref', nan(NE, 10), 'hist', [], 'wp', [], 'wg', [], 'wf', [], 'wu', [], 'wn', zeros(1, NE), ...
-            'unk_now', false(1, NE), 'pend', false(1, NE), 'wi', []);
+            'unk_now', false(1, NE), 'pend', false(1, NE), 'wi', [], 'wb', []);
         M = [];
     case 'update'
         [mem, M] = update(C, varargin{:});
@@ -187,7 +189,8 @@ function [mem, pf, te, unk] = fusion(mem, obs, PP)
 NE = size(obs.probs, 1);
 N = 1; if isfield(PP, 'fuse_N') && ~isempty(PP.fuse_N), N = PP.fuse_N; end
 Nu = 1; if isfield(PP, 'unk_win') && ~isempty(PP.unk_win), Nu = PP.unk_win; end
-W = max([N, Nu, 1]);
+NB = 1; if isfield(PP, 'fuse') && ~isempty(PP.fuse), NB = window_cues('branch_window'); end
+W = max([N, Nu, NB]);
 g = zeros(NE, 1); if isfield(obs, 'gant') && ~isempty(obs.gant), g = obs.gant; end
 mh = nan(NE, 1); if isfield(obs, 'maha') && ~isempty(obs.maha), mh = obs.maha(:); end
 if isempty(mem.wp)
@@ -202,6 +205,11 @@ nI = numel(idle_summary('names')); id = nan(NE, nI);
 if isfield(obs, 'idle') && ~isempty(obs.idle), id = double(obs.idle); end
 if ~isfield(mem, 'wi') || isempty(mem.wi), mem.wi = nan(NE, nI, W); end
 mem.wi = cat(3, mem.wi(:, :, 2:end), id);
+% The record of each cycle's channel estimates per antenna (branch_record.m), NaN without one
+nB = 9 * size(g, 2); bc = nan(NE, nB);
+if isfield(obs, 'bch') && ~isempty(obs.bch), bc = double(obs.bch); nB = size(bc, 2); end
+if ~isfield(mem, 'wb') || isempty(mem.wb) || size(mem.wb, 2) ~= nB, mem.wb = nan(NE, nB, W); end
+mem.wb = cat(3, mem.wb(:, :, 2:end), bc);
 nC = size(obs.probs, 2);
 pf = obs.probs; te = zeros(NE, numel(temporal_evidence('names', nC)) - nC);
 for n = unique(mem.wn)                                     % episodes with the same filled window length
@@ -210,7 +218,8 @@ for n = unique(mem.wn)                                     % episodes with the s
     Z = temporal_evidence(mem.wp(e, :, k), mem.wg(e, :, k), mem.wf(e, :, k));
     te(e, :) = Z(:, nC + 1:end);
     if isfield(PP, 'fuse') && ~isempty(PP.fuse)                  % with the current frame's own evidence (fuse_classes.m)
-        Zc = window_cues(mem.wg(e, :, k), mem.wf(e, :, k), mem.wi(e, :, k));   % branch, level step, idle time
+        kb = W - min(n, NB) + 1:W;
+        Zc = window_cues(mem.wg(e, :, k), mem.wf(e, :, k), mem.wi(e, :, k), mem.wb(e, :, kb));   % branch, level step, idle time, branch coherence
         pf(e, :) = fuse_classes('apply', PP.fuse, [Z, Zc, log(max(double(mem.wp(e, :, W)), 1e-6))]);
     end
     ku = W - min(n, Nu) + 1:W;
