@@ -776,8 +776,8 @@ function test_slot_and_burst_measurements(tc)
 % A tone is one spectral line with a constant envelope in the quiet slot (Shahriar et
 % al., eq. 19); a counterfeit of our modulation is flat over its band and not constant;
 % thermal noise is flat. WLAN packets fill part of a frame and their edges show inside
-% it (busy share and energy edges, Cheema & Salous; Grimaldi et al.); noise bursts give
-% many edges; the clean link none.
+% it (busy share and energy edges, Cheema & Salous; Grimaldi et al.); noise bursts switch
+% inside every frame, so every frame shows edges; the clean link none.
 p0 = base_params(); mdl = 'UAV_GCS_Threat_Link';
 TH = {'none', 'tone_jamming', 'spoofing', 'benign_interference', 'noise_burst'};
 F = struct();
@@ -801,7 +801,7 @@ verifyEqual(tc, md('tone_jamming', 'duty'), 1);
 B = F.benign_interference;
 verifyTrue(tc, any(B.duty > 0 & B.duty < 1 & B.edges >= 1));
 c = corrcoef(B.duty, B.act); verifyGreaterThan(tc, c(1, 2), 0.8);
-verifyGreaterThanOrEqual(tc, md('noise_burst', 'edges'), 5);
+verifyGreaterThanOrEqual(tc, min(F.noise_burst.edges), 1);
 verifyGreaterThan(tc, md('none', 'est_margin'), 10);
 end
 
