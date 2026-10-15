@@ -49,6 +49,8 @@
 % signal and of the first interferer (0 on a flat channel), every antenna's level
 % calibration error (cal_db) and the roll-in (roll_in: its start [s] and roll rate
 % [deg/s], 0 0 without one). Frames whose BER is incomplete are dropped.
+% Branch record (extract_closed_loop_frames.m): bch, every antenna's channel estimates per
+% frame (frames x 9 n_rx, branch_record.m), a receiver input of the fusion (window_cues.m).
 % Idle time (extract_closed_loop_frames.m): idle, the record of the idle time before each
 % frame (frames x 24, idle_summary.m), a receiver input of the fusion; act_idle, the share of
 % that idle time with the threat on the air (labels); idle_amb (frames x 15), for antenna
@@ -113,7 +115,7 @@ D = struct('iq', {{}}, 'label', [], 'class_run', [], 'level', [], 'snr', [], 'eb
     'pos', [], 'gain_ant', [], 'act', [], 'act_comp', [], 'lev_db', [], 'k_db', [], 'k_int', [], 'aoa', [], 'yaw', [], ...
     'rho', [], 'gcs_db', [], 'alt_m', [], 'el_db', [], 'align', [], 'gcs_aoa', [], 'bank', [], 'roll', [], 'pitch', [], ...
     'wob', [], 'att_db', [], 'body_spread_db', [], 'jam', [], 'ds_ns', [], 'ds_int', [], 'cal_db', [], 'roll_in', [], ...
-    'idle', [], 'act_idle', [], 'idle_amb', []);
+    'idle', [], 'act_idle', [], 'idle_amb', [], 'bch', []);
 for i = 1:numel(MEAS), D.(MEAS{i}) = []; end
 run_id = 0;
 t0 = tic;
@@ -199,6 +201,7 @@ dataset.roll_in = D.roll_in';              % roll-in start [s] and roll rate [de
 dataset.idle = D.idle'; dataset.act_idle = D.act_idle(:);   % the idle time before each frame (frames x 24) and its on-air share
 dataset.idle_amb = D.idle_amb';            % with an emitter of opportunity, per condition (frames x 15; fault and shadowing)
 dataset.idle_names = idle_summary('names');
+dataset.bch = D.bch'; dataset.bch_names = branch_record('names', p0.n_rx);   % every antenna's channel estimates per frame (frames x 9 n_rx, window_cues.m)
 dataset.meta = struct('N_SUB', N_SUB, 'n_sub', n_sub, 'F_SUB', F_SUB, 'EbNo_list', EbNo_list, 'delay_bits', delay_bits, ...
     'mode', 'seeded_subruns_D59', 'n_rx', p0.n_rx, 'speed_range_kmh', [p0.speed_kmh_min p0.speed_kmh_max], ...
     'threat_cfg', threat_cfg, 'fresh', FRESH, 'seed0', SEED0, 'created', datestr(now), ...
@@ -259,6 +262,7 @@ D.roll_in = [D.roll_in, d.roll_in(:) * o];
 D.ber = [D.ber, F.ber(v)]; D.fer = [D.fer, F.fer(v)];
 for i = 1:numel(MEAS), D.(MEAS{i}) = [D.(MEAS{i}), F.(MEAS{i})(v)]; end
 D.idle = [D.idle, single(F.idle(:, v))]; D.act_idle = [D.act_idle, F.act_idle(v)];
+D.bch = [D.bch, single(F.bch(:, v))];
 amb = nan(n, 5 * numel(p.amb_inr_db));                 % an emitter of opportunity: fault and shadowing only
 if any(strcmp(p.active_threat, {'antenna_fault', 'airframe_shadowing'})), amb = emitter_idle(F, p, seed, v); end
 D.idle_amb = [D.idle_amb, single(amb')];

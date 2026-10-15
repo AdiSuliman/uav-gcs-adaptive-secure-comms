@@ -205,7 +205,11 @@ F.branch_gap = branch_gap(Hq .* gcal(:), nf);
 F.gain_ant = gain_ant(Hq .* gcal(:), nf);
 F.cal_db = cal_db;
 F.est_margin = est_margin(Hq, Rq, nf);
+F.hq = branch_channel(Hq .* gcal(:), nf); F.hq_nb = size(Hq, 2);   % every antenna's frame-mean channel (branch_record.m)
+F.rq = branch_noise(Rq, nf, gcal);
 xh = remod_frames(rx_all(delay_bits+1:end), p, ns, nf, sy(1, 1:nf) + sy(5, 1:nf), sy(2, 1:nf));
+tdl_max = 0; if isfield(p, 'tdl') && p.tdl && isfield(p, 'tdl_max_ns'), tdl_max = p.tdl_max_ns; end
+[F.cir, F.cir_nv, F.cir_d] = lag_channels(xh, iqa, NQ * p.sps, p.sps, -3:1 + ceil(tdl_max * 1e-9 * p.symbol_rate));   % every antenna's channel at whole-symbol lags
 qn = NQ * p.sps;                                         % quiet slot before the frame: free of our pulse tails
 F.coh = quiet_coherence(iqa, p, qn);
 [F.q_sfm, F.q_par] = quiet_shape(iqa, qn);
@@ -240,6 +244,7 @@ for a = 1:na
     end
 end
 if gp > 0, F.gain_ant = F.gain_ant - gp; end
+F.bch = branch_record(F);                                % the fusion's branch-coherence record (window_cues.m)
 s0 = sn; s0(isnan(s0)) = -Inf;
 [~, ref] = max(s0, [], 1);                                  % reference antenna per frame
 k = sub2ind([na nf], ref, 1:nf);
@@ -500,5 +505,39 @@ function d = gain_ant(Hq, nf)
 d = nan(size(Hq, 1), nf);
 for f = 1:min(nf, size(Hq, 3))
     d(:, f) = 10*log10(mean(abs(Hq(:, :, f)).^2, 2) + eps);
+end
+end
+
+function h = branch_channel(Hq, nf)
+% Frame mean of every antenna's complex channel estimate (antennas x frames).
+h = nan(size(Hq, 1), nf);
+for f = 1:min(nf, size(Hq, 3)), h(:, f) = mean(Hq(:, :, f), 2); end
+end
+
+function r = branch_noise(Rq, nf, gcal)
+% Residual power of every antenna per frame (the diagonal of the residual covariance), on
+% the scale of the calibrated channel estimates.
+r = nan(size(Rq, 1), nf);
+for f = 1:min(nf, size(Rq, 3)), r(:, f) = real(diag(Rq(:, :, f))) .* abs(gcal(:)).^2; end
+end
+
+function [G, nv, dg] = lag_channels(xh, iqa, qn, sps, lags)
+% Every antenna's channel at whole-symbol lags from the receiver's arrival: LS of its
+% received samples on the frame rebuilt from the decisions (remod_frames), delayed by each
+% lag (antennas x lags x frames); nv the residual power per antenna, dg the diagonal of
+% inv(X'X) per lag (the estimate's noise power is nv dg). The equalizer's first pass
+% estimates the same lag channels from the training (build_threat_model.m, eq_train).
+[ns, na, nf] = size(iqa); nl = numel(lags);
+G = nan(na, nl, nf); nv = nan(na, nf); dg = nan(nl, nf); dat = (qn + 1:ns)';
+for f = 1:min(nf, size(xh, 2))
+    x = xh(:, f); if any(isnan(x)), continue; end
+    X = zeros(ns, nl);
+    for i = 1:nl
+        k = lags(i) * sps;
+        if k >= 0, X(k + 1:end, i) = x(1:end - k); else, X(1:end + k, i) = x(1 - k:end); end
+    end
+    Xd = X(dat, :); R = reshape(iqa(dat, :, f), [], na);
+    g = Xd \ R; E = R - Xd * g;
+    G(:, :, f) = g.'; nv(:, f) = mean(abs(E).^2, 1).'; dg(:, f) = real(diag(inv(Xd' * Xd)));
 end
 end

@@ -1,11 +1,13 @@
-function [x, names] = window_cues(G, Fw, Iw)
+function [x, names] = window_cues(G, Fw, Iw, Bw)
 %WINDOW_CUES  Evidence of the last decision cycles beside temporal_evidence.m: the fusion's
 %   further columns (fuse_classes.m; policy_monitor.m builds the same row per cycle).
 %   Batch over E windows of n cycles, oldest first:
 %   G   E x nr x n mean channel gain of every antenna [dB] (extract_closed_loop_frames.m)
 %   Fw  E x nF x n link features of the window's frames (link_features.m order)
 %   Iw  E x 24 x n records of the idle time before each frame (idle_summary.m), or []
-%   x   E x 42, names = window_cues('names').
+%   Bw  E x 9nr x nb records of every antenna's channel estimates (branch_record.m) over the
+%       last nb = window_cues('branch_window') cycles, oldest first, or [] (columns 0)
+%   x   E x 52, names = window_cues('names').
 %
 %   Branch cues (one branch lost: which cause; the receiver's per-antenna gains only):
 %   the weakest antenna of the window (lowest local mean) against the others, per cycle the
@@ -42,13 +44,35 @@ function [x, names] = window_cues(G, Fw, Iw)
 %   (Grimaldi et al. 2019: burst length, power, crest, envelope ripple; Rayanchu et al.
 %   2011, Airshark: duty and pulse timing; Cheema & Salous 2019: duty, idle windows).
 %   Windows without an idle record give 0 there (the first frame of a run).
+%   Branch coherence (Bw; the cause of one lost branch from the receiver's own channel
+%   estimates): a faulty connector scales everything its antenna receives, so the branch's
+%   normalised correlation with the other antennas and its line-of-sight share across delay
+%   are kept; a hidden antenna loses its line of sight (K about -16 dB, Sun et al., Part IV),
+%   so what stays correlated with the others is its diffuse part only. Over the record's
+%   cycles from the weakest antenna's step on (the best split of its offset, when it drops
+%   by more than 3 dB): coh_weak, the magnitude of the weakest's cross-correlation with each
+%   other antenna over the cycles, normalised by the noise-debiased powers (mean over the
+%   others); coh_others, the same between the other antennas (the link's own line-of-sight
+%   share); coh_ref, against the others' sum aligned by their mean cross phase;
+%   coh_contrast = coh_weak - coh_others; coh_cycles, the cycles used over nb. At the
+%   line-of-sight lag (the whole-symbol lag with the most power): los_weak, the weakest's
+%   power there over its other lags [dB], los_others the same for the others, los_contrast,
+%   los_k the Rician K of its power there over the cycles (moment method, Aoki & Honda
+%   2025, eq. 2) [dB], los_coh its coherence there with the others. A common phase of the
+%   frame cancels in every cross-correlation; only the antennas' gains decide which
+%   antenna is weakest (its place in the array is not used).
 names = {'k_strong', 'k_contrast', 'sd_weak', 'sd_contrast', 'corr_ws', 'trend', 'step_max', 'off_range', ...
     'cm_slope', 'cm_sd', 'margin_mean', 'sinr_gap_w', 'off_first', 'off_last', 'onset_in_win', 'gap_strong', ...
     'stp_t', 'stp_db', 'stp_age', 'stp_t_mon', 'stp_db_mon', ...
     'i_occ', 'i_lvl', 'i_p90', 'i_max', 'i_nb', 'i_contrast', 'i_ripple', 'i_ant_spread', 'i_bl_mean', ...
     'w_occ', 'w_occ_std', 'w_rate', 'w_bl_mean', 'w_bl_cv', 'w_il_cv', 'w_start_cv', 'w_lvl', 'w_lvl_std', ...
-    'w_contrast', 'w_ripple', 'w_ant_spread'};
-if ischar(G), x = names; return; end
+    'w_contrast', 'w_ripple', 'w_ant_spread', ...
+    'coh_weak', 'coh_others', 'coh_ref', 'coh_contrast', 'coh_cycles', 'los_weak', 'los_others', 'los_contrast', 'los_k', 'los_coh'};
+NB = 10;                                                           % the branch record's cycles (the link features' window)
+if ischar(G)
+    x = names; if strcmp(G, 'branch_window'), x = NB; end
+    return;
+end
 [E, nr, n] = size(G);
 G = double(G);
 fi = @(name) reshape(double(Fw(:, feature_index(name), :)), E, n);
@@ -132,6 +156,8 @@ if ~isempty(Iw)
     mr = z(col('ripple')) ./ max(nv, 1); x(has, 41) = mr(has);
     ma = z(col('ant_spread')) ./ max(nv, 1); x(has, 42) = ma(has);
 end
+% ---- branch coherence ----
+if nargin >= 4 && ~isempty(Bw), x(:, end - 9:end) = branch_coherence(double(Bw)); end
 x(~isfinite(x)) = 0;
 end
 
@@ -161,4 +187,56 @@ for s = 2:m
     n1 = s - 1; n2 = m - n1;
     b = max(b, abs(c(:, n1) / n1 - (T - c(:, n1)) / n2) * sqrt(n1 * n2 / m));
 end
+end
+
+function x = branch_coherence(B)
+% The branch-coherence columns (see the header) of E windows of branch records (E x 9nr x nb).
+[E, m, nb] = size(B); nr = m / 9; x = zeros(E, 10);
+if nr < 2 || nb < 1, return; end
+blk = @(k) (k - 1) * nr + (1:nr);
+for e = 1:E
+    R = reshape(B(e, :, :), m, nb).';
+    R = R(all(isfinite(R(:, 1:4 * nr)), 2), :);
+    nw = size(R, 1); if nw < 1, continue; end
+    Gc = R(:, blk(1)); gm = 10 * log10(mean(10 .^ (Gc / 10), 1)); [~, a] = min(gm); o = setdiff(1:nr, a);
+    if nw >= 3                                                     % the cycles from the weakest's step on
+        d = Gc(:, a) - median(Gc(:, o), 2); sb = inf; s0 = 1;
+        for s = 2:nw
+            v = sum((d(1:s-1) - mean(d(1:s-1))).^2) + sum((d(s:end) - mean(d(s:end))).^2);
+            if v < sb, sb = v; s0 = s; end
+        end
+        if mean(d(1:s0-1)) - mean(d(s0:end)) > 3, R = R(s0:end, :); nw = size(R, 1); end
+    end
+    h = R(:, blk(2)) + 1j * R(:, blk(3));
+    [cw, co, cm] = coherences(h, R(:, blk(4)), a, o);
+    x(e, 1:5) = [min(cw, 1.5), min(co, 1.5), min(cm, 1.5), min(cw, 1.5) - min(co, 1.5), nw / nb];
+    k = all(isfinite(R(:, 4 * nr + 1:end)), 2); nk = sum(k);
+    if nk < 1, continue; end
+    p0 = R(k, blk(8)); pr = R(k, blk(9));
+    lr = min(max(10 * log10(max(sum(p0, 1), eps) ./ max(sum(pr, 1), 1e-6 * max(sum(p0, 1), eps))), -20), 40);
+    kl = 0; if nk >= 3, kl = k_moment(p0(:, a)); end
+    cl = coherences(R(k, blk(5)) + 1j * R(k, blk(6)), R(k, blk(7)), a, o);
+    x(e, 6:10) = [lr(a), mean(lr(o)), lr(a) - mean(lr(o)), kl, min(cl, 1.5)];
+end
+end
+
+function [cw, co, cm] = coherences(h, nv, a, o)
+% Noise-debiased normalised cross-correlations over the cycles (rows) of antenna a with the
+% others o (mean), among the others (mean over their pairs), and of a with the others' sum
+% aligned to the first by their mean cross phase.
+pw = sum(abs(h).^2, 1); P = max(pw - sum(nv, 1), 0.05 * pw);
+cx = @(i, k) abs(sum(h(:, i) .* conj(h(:, k)))) / sqrt(max(P(i) * P(k), eps));
+cw = mean(arrayfun(@(k) cx(a, k), o));
+co = 0; if numel(o) > 1, pr = nchoosek(o, 2); co = mean(arrayfun(@(i) cx(pr(i, 1), pr(i, 2)), 1:size(pr, 1))); end
+rf = h(:, o(1)); nr0 = sum(nv(:, o(1)));
+for k = o(2:end), rf = rf + h(:, k) * exp(1j * angle(sum(h(:, o(1)) .* conj(h(:, k))))); nr0 = nr0 + sum(nv(:, k)); end
+prf = max(sum(abs(rf).^2) - nr0, 0.05 * sum(abs(rf).^2));
+cm = abs(sum(h(:, a) .* conj(rf))) / sqrt(max(P(a) * prf, eps));
+end
+
+function k = k_moment(pw)
+% Moment-method Rician K [dB] from power samples (Aoki & Honda 2025, eq. 2), -20..30 dB.
+Ga = mean(pw); Gv = std(pw, 1);
+r = sqrt(max(Ga^2 - Gv^2, 0));
+k = min(max(10 * log10(max(r / max(Ga - r, eps), 1e-2)), -20), 30);
 end

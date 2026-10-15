@@ -96,6 +96,7 @@ for di = 1:numel(devs)
             t0 = tic; [probs, maha] = detect_scores(D.net, D.ood, X, Fn, ddev); sync(ug); t_det = toc(t0);
             obs = struct('probs', probs(:)', 'unknown', maha < PPm.maha_thr, 'maha', maha, 'feat', raw, ...
                 'gant', x.M.gain_ant(:, x.k)', 'idle', iq_rec);
+            if isfield(x.M, 'bch'), obs.bch = x.M.bch(:, x.k)'; end
             t0 = tic; [cfgD, memD] = policy_decide('dqn_esc', obs, cfgD, memD, PPm, Q.agent); t_dqn = toc(t0);
             t0 = tic; [cfgR, memR] = policy_decide('rule_esc', obs, cfgR, memR, PPm, []); t_rule = toc(t0);
             t0 = tic; [cfgP, memP] = policy_decide(kindP, obs, cfgP, memP, PPm, agP, optP); t_dep = toc(t0);

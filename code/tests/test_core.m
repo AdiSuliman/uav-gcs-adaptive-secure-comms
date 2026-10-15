@@ -1049,6 +1049,9 @@ link_seed(mdl, 11, 160);
 F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(10 * p.frame_duration)), p, 20);
 g = sort(F.gain_ant, 1);
 verifyGreaterThan(tc, mean(g(2, :) - g(1, :) >= 15), 0.9);
+verifySize(tc, F.bch, [9 * p.n_rx, F.nf]);                   % every antenna's channel record (branch_record.m)
+verifyGreaterThan(tc, mean(all(isfinite(F.bch), 1)), 0.8);
+verifyEqual(tc, F.bch(1:p.n_rx, :), F.gain_ant);
 close_system(mdl, 0);
 % an antenna hidden by the airframe stays far below the other over the frame: a turn of
 % 20 deg with the GCS abeam (shadow_hidden.m)
@@ -3923,6 +3926,84 @@ X = window_cues(Gs, zeros(2, 23, n), []);
 verifyGreaterThan(tc, X(1, col('stp_t')), 10); verifyLessThan(tc, X(2, col('stp_t')), 4);
 verifyEqual(tc, X(1, col('stp_db')), 8, 'AbsTol', 0.5); verifyEqual(tc, X(1, col('stp_age')), 6);
 verifyFalse(tc, any(strcmp(nm, 'idx_mid')));                            % the antenna's place in the array is not read
+end
+
+function test_window_cues_branch_coherence(tc)
+% Branch coherence (branch_record.m records, window_cues.m): a faulty connector scales its
+% antenna's whole field, so the branch's normalised correlation with the others and its
+% line-of-sight share across delay stay the link's; a hidden antenna keeps only its diffuse
+% part (K -16 dB, Sun et al.), correlated with the others by the receive correlation only.
+% The columns do not change when the weak branch is scaled; the record's cycles start at
+% the weakest antenna's step; no record gives zeros.
+rs = RandStream('mt19937ar', 'Seed', 9); nr = 3; nb = window_cues('branch_window');
+nm = window_cues('names'); col = @(s) find(strcmp(nm, s));
+verifyEqual(tc, numel(nm), 52); verifyEqual(tc, nb, 10);
+verifyEqual(tc, numel(branch_record('names', nr)), 9 * nr);
+K = 10; rho = 0.5; ks = 10^(-1.6); L = chol(rho .^ abs((1:nr)' - (1:nr)), 'lower');
+psi = 2 * pi * rand(rs, nr, 1);
+    function B = rec(kw, gw, on)
+        % nb cycles of branch records; antenna 1 has K kw and amplitude gw from cycle on
+        B = zeros(1, 9 * nr, nb);
+        for f = 1:nb
+            kv = K * ones(nr, 1); g = ones(nr, 1);
+            if f >= on, kv(1) = kw; g(1) = gw; end
+            kap = kv ./ (1 + kv); d = L * (randn(rs, nr, 1) + 1j * randn(rs, nr, 1)) / sqrt(2);
+            h = g .* (sqrt(kap) .* exp(1j * (psi + 2 * pi * rand(rs))) + sqrt(1 - kap) .* d);
+            dl = g .* sqrt(1 - kap) .* (randn(rs, nr, 1) + 1j * randn(rs, nr, 1)) / sqrt(2) * 0.5;   % later lags: diffuse only
+            B(1, :, f) = [10 * log10(abs(h).^2 + abs(dl).^2); real(h); imag(h); 1e-9 * ones(nr, 1); real(h); imag(h); ...
+                1e-9 * ones(nr, 1); abs(h).^2; abs(dl).^2]';
+        end
+    end
+Gz = zeros(1, nr, 3); Fz = zeros(1, 23, 3);
+Xf = zeros(40, 52); Xs = Xf;
+for t = 1:40
+    Xf(t, :) = window_cues(Gz, Fz, [], rec(K, 10^(-20/20), 1));    % fault: the link's K, 20 dB down
+    Xs(t, :) = window_cues(Gz, Fz, [], rec(ks, 10^(-15/20), 1));   % shadowing: K -16 dB, 15 dB down
+end
+verifyGreaterThan(tc, mean(Xf(:, col('coh_contrast'))), mean(Xs(:, col('coh_contrast'))) + 0.3);
+verifyGreaterThan(tc, mean(Xf(:, col('coh_weak')) > Xs(:, col('coh_weak'))), 0.8);
+verifyGreaterThan(tc, mean(Xf(:, col('los_contrast'))), mean(Xs(:, col('los_contrast'))) + 5);
+B = rec(K, 1, 1); sc = @(B, db) scale1(B, db, nr);                   % the weak branch's field scaled
+x0 = window_cues(Gz, Fz, [], sc(B, 25)); x1 = window_cues(Gz, Fz, [], sc(B, 40));
+c = col('coh_weak'); verifyEqual(tc, x1(c:c + 9), x0(c:c + 9), 'AbsTol', 1e-6);
+Bt = rec(K, 10^(-20/20), 5);                                              % the fault from cycle 5
+xt = window_cues(Gz, Fz, [], Bt);
+verifyEqual(tc, xt(col('coh_cycles')), 0.6, 'AbsTol', 1e-12);
+x = window_cues(Gz, Fz, [], []); verifyEqual(tc, x(end - 9:end), zeros(1, 10));
+x = window_cues(Gz, Fz, [], nan(1, 9 * nr, nb)); verifyEqual(tc, x(end - 9:end), zeros(1, 10));
+end
+
+function B = scale1(B, db, nr)
+% Antenna 1's record with its field scaled by -db dB (amplitudes, powers, gain).
+a = 10^(-db / 20); B(1, 1, :) = B(1, 1, :) - db;
+B(1, 1 + [1 2 4 5] * nr, :) = B(1, 1 + [1 2 4 5] * nr, :) * a;
+B(1, 1 + [3 6 7 8] * nr, :) = B(1, 1 + [3 6 7 8] * nr, :) * a^2;
+end
+
+function test_fusion_monitor_branch_columns(tc)
+% The closed loop's fusion (policy_monitor.m) builds the same row as fuse_classes.m's
+% windows, the branch-coherence columns over the last window_cues('branch_window') cycles
+% included: equal fused probabilities at every cycle of a run.
+rs = RandStream('mt19937ar', 'Seed', 4); n = 14; nr = 3; Nf = 3;
+cls = {'none', 'antenna_fault', 'airframe_shadowing'}; A = policy_actions(); na = find(strcmp(A, 'no_action'));
+nF = numel(link_features('names')); nI = numel(idle_summary('names'));
+P = rand(rs, n, 3); P = P ./ sum(P, 2); Fr = randn(rs, n, nF); I = rand(rs, n, nI); I(1, :) = NaN;
+B = randn(rs, n, 9 * nr); nv = [3 * nr + (1:nr), 6 * nr + (1:nr)]; B(:, nv) = 0.01 * abs(B(:, nv));
+B(:, 1:nr) = 3 * randn(rs, n, nr); pw = 7 * nr + (1:2 * nr); B(:, pw) = abs(B(:, pw)) + 0.1;
+nZ = numel(temporal_evidence('names', 3)) + numel(window_cues('names')) + 3;
+FM = struct('W', 0.1 * randn(rs, nZ + 1, 3), 'mu', zeros(1, nZ), 'sd', ones(1, nZ), 'C', 3, 'lambda', 0);
+S = struct('run', ones(n, 1), 'pos', (1:n)', 'gain_ant', zeros(n, nr), 'feats_raw', Fr, 'feat_names', {link_features('names')}, ...
+    'idle', I, 'bch', B);
+pc = fuse_classes('apply', FM, fuse_classes('windows', S, P, Nf));
+PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0, 'fuse', FM, 'fuse_N', Nf);
+m = policy_monitor('init', 1, numel(A));
+for k = 1:n
+    obs = struct('probs', P(k, :), 'unknown', false, 'feat', Fr(k, :), 'cfg_link', na, 'gant', zeros(1, nr), ...
+        'idle', I(k, :), 'bch', B(k, :));
+    [m, M] = policy_monitor('update', m, obs, PP, na); m = policy_monitor('change', m, false);
+    verifyEqual(tc, M.probs, pc(k, :), 'AbsTol', 1e-10);
+end
+verifyGreaterThan(tc, max(abs(fuse_classes('windows', S, P, Nf) - fuse_classes('windows', rmfield(S, 'bch'), P, Nf)), [], 'all'), 0);
 end
 
 function test_threat_active_cycle(tc)

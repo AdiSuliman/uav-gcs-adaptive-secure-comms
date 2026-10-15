@@ -25,9 +25,11 @@ if use_drop && has_pl, ok_c(:, strcmp(cellstr(string(PP.classes)), 'path_loss'))
 join = (has_pl || any(strcmp(parts, 'antenna_fault'))) && ~isempty(Pc) && ~isempty(Pc.ber);
 C = decision_config();
 [ur, ~, ir] = unique(P.run, 'stable');
-J = struct('probs', [], 'gant', [], 'feat', [], 'run', [], 'part', [], 'idle', []);
+J = struct('probs', [], 'gant', [], 'feat', [], 'run', [], 'part', [], 'idle', [], 'bch', []);
 Ip = idle_of(P); Ic = zeros(0, size(Ip, 2));
 if join, Ic = idle_of(Pc); end
+Bp = bch_of(P); Bc = zeros(0, size(Bp, 2));
+if join, Bc = bch_of(Pc); end
 for r = 1:numel(ur)
     ip = find(ir == r); ic = zeros(0, 1);
     if join, ic = find(Pc.run == ur(r)); end
@@ -35,11 +37,12 @@ for r = 1:numel(ur)
     J.feat = [J.feat; Pc_rows(Pc, 'feat', ic); P.feat(ip, :)]; J.run = [J.run; repmat(ur(r), numel(ic) + numel(ip), 1)];
     J.part = [J.part; zeros(numel(ic), 1); ip(:)];
     J.idle = [J.idle; Ic(ic, :); Ip(ip, :)];
+    if ~isempty(Bp), J.bch = [J.bch; Bc(ic, :); Bp(ip, :)]; end
 end
 pc = double(J.probs);
 if ~isempty(PP.fuse)
     S = struct('run', J.run, 'pos', run_pos(J.run), 'gain_ant', J.gant, 'feats_raw', J.feat, 'feat_names', ...
-        {link_features('names')}, 'idle', J.idle);
+        {link_features('names')}, 'idle', J.idle, 'bch', J.bch);
     pc = fuse_classes('apply', PP.fuse, fuse_classes('windows', S, pc, PP.fuse_N));
 end
 [~, k] = max(pc, [], 2);
@@ -81,6 +84,12 @@ function pos = run_pos(run)
 st = [true; diff(run(:)) ~= 0];
 i0 = find(st);
 pos = (1:numel(run))' - i0(cumsum(st)) + 1;
+end
+
+function B = bch_of(P)
+% The antennas' channel records of a pool (branch_record.m), empty for pools without them.
+B = [];
+if isfield(P, 'bch') && ~isempty(P.bch), B = double(P.bch); end
 end
 
 function I = idle_of(P)

@@ -290,6 +290,7 @@ obs.probs = zeros(E.NE, nC); obs.unknown = false(E.NE, 1); obs.feat = zeros(E.NE
 obs.fer_true = zeros(E.NE, 1);
 obs.maha = zeros(E.NE, 1); obs.gant = [];
 obs.idle = nan(E.NE, numel(idle_summary('names')));     % the idle time before the frame (pools without it: none)
+obs.bch = [];                                           % every antenna's channel estimates (branch_record.m)
 for i = 1:E.NE
     P = PP.pools{sc_eff(i), E.s(i), cfg_eff(i), E.split};
     rows = find(P.run == PP.runs{E.split}(E.r(i)));
@@ -306,6 +307,10 @@ for i = 1:E.NE
         obs.gant(i, :) = P.gant(j, :);
     end
     if isfield(P, 'idle') && ~isempty(P.idle), obs.idle(i, :) = P.idle(j, :); end
+    if isfield(P, 'bch') && ~isempty(P.bch)
+        if isempty(obs.bch), obs.bch = nan(E.NE, size(P.bch, 2)); end
+        obs.bch(i, :) = P.bch(j, :);
+    end
     obs.ber_true(i) = P.ber(j);
     obs.fer_true(i) = P.fer(j);
 end

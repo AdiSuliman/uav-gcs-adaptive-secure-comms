@@ -28,7 +28,7 @@ for i = 1:numel(v)
 end
 [pr, sc] = detect_scores(G.D.net, G.D.ood, X, ((Fr - G.N.mu) ./ G.N.sd)');
 k = fused_class(pr', struct('run', ones(numel(v), 1), 'pos', v(:), 'gain_ant', F.gain_ant(:, v)', ...
-    'feats_raw', Fr, 'idle', F.idle(:, v)'), G.FM, G.FN);
+    'feats_raw', Fr, 'idle', F.idle(:, v)', 'bch', F.bch(:, v)'), G.FM, G.FN);
 pred = G.classes(k(:)');
 truth = repmat({p.active_threat}, 1, numel(v));
 truth(~threat_active(p.active_threat, F.act(v), v, G.tw, F.act_idle(v))) = {'none'};   % per decision cycle

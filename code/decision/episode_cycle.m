@@ -35,6 +35,7 @@ Xf = ((fr.feat - ctx.feat_mean) ./ ctx.feat_std)';
 obs = struct('probs', probs(:)', 'unknown', maha < ctx.PP.maha_thr, 'maha', maha, 'feat', fr.feat, 'ber_true', fr.ber);
 if isfield(fr, 'gant'), obs.gant = fr.gant(:)'; end
 if isfield(fr, 'idle'), obs.idle = fr.idle(:)'; end
+if isfield(fr, 'bch'), obs.bch = fr.bch(:)'; end
 if isfield(fr, 'pkt'), obs.pkt = fr.pkt; end
 prev = E.cfg;
 obs.cfg_link = prev; if isfield(fr, 'cfg_link'), obs.cfg_link = fr.cfg_link; end

@@ -85,7 +85,7 @@ Q = struct('probs', zeros(0, nC, 'single'), 'maha', zeros(0, 1, 'single'), 'feat
     'run', zeros(0, 1), ...
     'aoa', zeros(0, 3, 'single'), 'act', zeros(0, 1, 'single'), 'act_comp', zeros(0, 3, 'single'), ...
     'ebno_rx', zeros(0, 1, 'single'), 'idle', zeros(0, numel(idle_summary('names')), 'single'), ...
-    'act_idle', zeros(0, 1, 'single'));
+    'act_idle', zeros(0, 1, 'single'), 'bch', zeros(0, 0, 'single'));
 end
 
 function v = geo_value(g, f, r)
@@ -116,4 +116,5 @@ Q.act = [Q.act; single(F.act(v)')];
 Q.act_comp = [Q.act_comp; single(F.act_comp(:, v)')];
 Q.ebno_rx = [Q.ebno_rx; single(erx(v)')];
 Q.idle = [Q.idle; single(F.idle(:, v)')]; Q.act_idle = [Q.act_idle; single(F.act_idle(v)')];
+Q.bch = [Q.bch; single(F.bch(:, v)')];
 end
