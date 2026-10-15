@@ -83,8 +83,8 @@ Validation only: a private copy, 720 sub-runs, 8 levels x 6 Eb/N0 x 5 per class,
 |---|---|---|
 | C1 `coh_contrast` | 0.93 [0.91, 0.95] | 0.80 / 0.95 / 0.96 / 0.95 / 0.97 |
 | C2 `los_contrast` | 0.81 [0.76, 0.85] | 0.62 / 0.77 / 0.85 / 0.87 / 0.96 |
-| C2 `los_coh` | 0.88 | — |
-| Magnitude K of the gains (base) | 0.66 | — |
+| C2 `los_coh` | 0.88 | n/a |
+| Magnitude K of the gains (base) | 0.66 | n/a |
 
 ### On this branch (D85 fusion with its onset and obs cues)
 Validation-style set: 720 sub-runs, seeds 7 200 001 and up, all levels and Eb/N0, the D85 onsets. Sub-run-grouped 5-fold CV as select_fusion.m (stream 61), N chosen by CV macro-F1 (12 for both). Recall with a sub-run bootstrap interval.
