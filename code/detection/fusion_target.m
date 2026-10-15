@@ -1,10 +1,10 @@
 function [yt, rank] = fusion_target(y, run, pos, N, classes)
 %FUSION_TARGET  Target of the fused decision of every frame, and its place in its run.
 %   [yt, rank] = fusion_target(y, run, pos, N, classes)
-%   y        class index per frame (the per-frame label of the proposal: a frame of a
-%            WLAN run without a packet on the air is 'none', mitigation 3; a path-loss
-%            frame counts while the step's onset lies in its link-feature window,
-%            threat_active.m)
+%   y        class index per frame (the label of the proposal, by what is on the air,
+%            mitigation 3, over the decision cycle: a cycle of a WLAN run without a packet
+%            on the air in its idle time or its frame is 'none'; a path-loss frame counts
+%            while the step's onset lies in its link-feature window, threat_active.m)
 %   run, pos sub-run and position of every frame; N the fusion window [cycles]
 %   classes  class names (y indexes them)
 %   yt       the fused decision is judged on its window (the last N frames of its run,

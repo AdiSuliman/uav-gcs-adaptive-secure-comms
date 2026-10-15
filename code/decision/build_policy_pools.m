@@ -75,7 +75,7 @@ J_MAX  = 99999;                  % candidates per (shadowing group, Eb/N0, seed 
 VOUT   = [0 0; 161 161];         % speeds of the edge-speed split [km/h]: the first NHOVER geometries and the rest, at
                                  % the two ends of the envelope (dedicated test flights; the other splits draw over it)
 N_WORKERS = 6;
-MODEL_TAG = 'v7-D84';            % link model of the pools: train and validation splits are reused only under the same tag
+MODEL_TAG = 'v7-D85obs';         % link model of the pools (D85: the idle-time records): train and validation splits are reused only under the same tag
 opt = struct('F_SUB', 20, 'tw', 10, 'delay_bits', 20);
 C = decision_config();
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)

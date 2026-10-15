@@ -4,7 +4,9 @@ function [rs, n] = seed_stream(seed, purpose)
 %   n = seed_base(seed) + the purpose's offset, so every draw of a flight comes from
 %   its own stream and no stream serves two flights or two purposes.
 %   Offsets: channel 0, awgn 1, bits 2, threat 7, aoa 11, cal 13, ds 17, k 23, yaw 29,
-%   corr 31, gcsaoa 37, gcs 41, jam 43, alt 47, speed 53, body 59, wobble 61.
+%   corr 31, gcsaoa 37, gcs 41, jam 43, alt 47, speed 53, body 59, wobble 61, the idle-time
+%   RSSI's own estimation noise 5 (idle_rssi.m), an emitter of opportunity 19
+%   (emitter_reading.m).
 switch purpose
     case 'channel', off = 0;
     case 'awgn',    off = 1;
@@ -23,6 +25,8 @@ switch purpose
     case 'speed',   off = 53;
     case 'body',    off = 59;
     case 'wobble',  off = 61;
+    case 'idle',    off = 5;
+    case 'amb',     off = 19;
     otherwise, error('seed_stream: unknown purpose ''%s''', purpose);
 end
 n = seed_base(seed) + off;

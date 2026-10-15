@@ -332,6 +332,23 @@ params.chain_phase_deg = 1;           % [deg] std of each chain's phase error
 % affected (signal and noise of a chain scale alike).
 params.cal_random     = true;         % level calibration error drawn per seeded flight
 params.cal_err_db     = 2;            % [dB] largest level calibration error of an antenna
+% Idle-time sensing: one frame per decision cycle leaves the receiver idle for the rest of
+% the cycle, where each antenna's chain reports its RSSI (idle_rssi.m): as the CC2420 radio
+% Grimaldi et al. 2019 read, a sample every 54 us (18.5 kHz, Sec. III-A), each the mean power
+% over the last 128 us (the RSSI register's average, Sec. II-B), in 1 dB steps (Table III),
+% with the antenna's level calibration error above (AD9361). A bin is busy 3 dB over the
+% floor constant (the frame's busy rule, extract_closed_loop_frames.m duty; Cheema & Salous
+% 2019, eq. 1). 0 Hz: no idle sensing.
+params.idle_rssi_hz     = 18.5e3;     % [Hz] RSSI sampling rate in the idle time
+params.idle_rssi_avg_s  = 128e-6;     % [s] RSSI averaging time
+params.idle_rssi_step_db = 1;         % [dB] RSSI resolution
+params.idle_busy_db     = 3;          % [dB] busy: this far over the floor constant
+% An emitter of opportunity in the band (the fault-vs-shadowing reading per condition,
+% emitter_reading.m; never part of the default link): 2.4 GHz channel duty cycles of
+% 4.6-11.5% measured with a busy threshold of -97 dBm (Cheema & Salous 2019, Table 6, Sec. 5),
+% about 11 dB over our -108 dBm floor (kTB at 1.25 MHz with the 5 dB noise figure).
+params.amb_duty         = [0.046 0.115];
+params.amb_inr_db       = [0 10 20];  % [dB] its level over the floor at the UAV, the conditions read
 params.rx_combiner    = 'mrc';        % 'mrc' baseline | 'mmse' (spatial_diversity action)
 params.csi_block      = 64;           % [symbols] channel-estimation window (MRC)
 params.mmse_window    = 32;           % [symbols] channel + interference-covariance window (MMSE; the delay line's taps: rx_taps.m)

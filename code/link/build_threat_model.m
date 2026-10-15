@@ -73,7 +73,11 @@ function build_threat_model(p)
 %           threat always), else the largest share of a gated one (benign packet traffic,
 %           the sweeping jammer on our channel); 0 for none. Output 3: [actc levc], each
 %           component's share and the level an additive one reaches over our signal on the
-%           weakest antenna in the frame [dB], in the threat's order (NaN beyond it).
+%           weakest antenna in the frame [dB], in the threat's order (NaN beyond it); with
+%           p.idle_rssi_hz > 0 then, component by component, the on-share of a WLAN's
+%           packets or the noise bursts in every RSSI bin of the idle time before the frame
+%           (idle_rssi.m; NaN for the other components and the run's first frame), recorded
+%           from the schedule's own draws in their own order, so no draw moves.
 %           The gated jammers run with the timing of the Constant block 'Gate'
 %           (jam_timing.m): the sweeping jammer is on our channel while
 %           mod(t + p0, T) of the channel clock lies in sweep_window_s.m, and the
@@ -557,6 +561,10 @@ if NT > 1 && ~isempty(addc)
 elseif ~isempty(addc)
     body{end+1} = sprintf('Nw = Ns;\ntw = t;\n');
 end
+% the receiver's idle time between frames: a gated schedule's on-share per RSSI bin
+% (idle_rssi.m), recorded from the schedule's own draws in their own order
+[NBI, TBI] = idle_bins(p, fs, E);
+if NBI > 0, body{end+1} = sprintf('idl = nan(3, %d);\n', NBI); end
 
 if ~isempty(addc)
     % our signal on its weakest antenna in this frame [dB], the path-loss step included
@@ -591,13 +599,14 @@ for c = 1:numel(addc)
                 pers{end+1} = 'b_occ'; init{end+1} = sprintf('b_occ = %.6f + %.6f * rand;', p.benign_occ(1), diff(p.benign_occ)); %#ok<AGROW>
                 pers{end+1} = 'b_on'; init{end+1} = 'b_on = rand >= b_occ;'; %#ok<AGROW>
                 pers{end+1} = 'b_next'; init{end+1} = 'b_next = 0;'; %#ok<AGROW>
-                w = sprintf(['on = false(Nw, 1);\nfor i = 1:Nw\n    while tw(i) >= b_next\n' ...
-                    '        if b_on\n            b_on = false;\n' gamma_draw(p.benign_idle_shape, 'gg') ...
+                sw_on = sprintf(['        if b_on\n            b_on = false;\n' gamma_draw(p.benign_idle_shape, 'gg') ...
                     '            b_next = b_next + gg * %.10f * (1 - b_occ) / b_occ / %.10f;\n' ...
-                    '        else\n            b_on = true; b_next = b_next + exp(%.8f + %.8f * rand);\n        end\n' ...
-                    '    end\n    on(i) = b_on;\nend\nactc(%d) = mean(double(on(Nw-Ns+1:Nw)));\n' ...
-                    'w = sqrt(%.8f/2) * complex(randn(Nw, 1), randn(Nw, 1)) .* on;\n'], ...
-                    md, p.benign_idle_shape, log(d(1)), log(d(2) / d(1)), k, 10^(p.benign_int_db/10));
+                    '        else\n            b_on = true; b_next = b_next + exp(%.8f + %.8f * rand);\n        end\n'], ...
+                    md, p.benign_idle_shape, log(d(1)), log(d(2) / d(1)));
+                w = [idle_code('b_on', 'b_next', sw_on, k, NBI, TBI, p.cycle_s, fs) ...
+                    sprintf('on = false(Nw, 1);\nfor i = 1:Nw\n    while tw(i) >= b_next\n') sw_on ...
+                    sprintf(['    end\n    on(i) = b_on;\nend\nactc(%d) = mean(double(on(Nw-Ns+1:Nw)));\n' ...
+                    'w = sqrt(%.8f/2) * complex(randn(Nw, 1), randn(Nw, 1)) .* on;\n'], k, 10^(p.benign_int_db/10))];
             else
                 w = sprintf('w = sqrt(%.8f/2) * complex(randn(Nw, 1), randn(Nw, 1));\n', 10^(p.benign_int_db/10));
             end
@@ -609,11 +618,13 @@ for c = 1:numel(addc)
             pers{end+1} = 'nb_on'; init{end+1} = 'nb_on = gate(3) < gate(4);'; %#ok<AGROW>
             pers{end+1} = 'nb_next'; init{end+1} = sprintf('nb_next = rand * %.10g * (nb_on + (~nb_on) * (1 - gate(4)) / gate(4));', ...
                 p.burst_on_sym / p.symbol_rate); %#ok<AGROW>
-            w = sprintf(['ton = %.10g;\ntoff = ton * (1 - gate(4)) / gate(4);\non = false(Nw, 1);\nfor i = 1:Nw\n' ...
-                '    while tw(i) >= nb_next\n        if nb_on\n            nb_on = false; nb_next = nb_next + rand * toff;\n' ...
-                '        else\n            nb_on = true; nb_next = nb_next + rand * ton;\n        end\n    end\n' ...
-                '    on(i) = nb_on;\nend\nw = sqrt(%.8f/2) * complex(randn(Nw, 1), randn(Nw, 1)) .* on;\n'], ...
-                p.burst_on_sym / p.symbol_rate, 10^(p.jsr_db/10));
+            sw_on = sprintf(['        if nb_on\n            nb_on = false; nb_next = nb_next + rand * toff;\n' ...
+                '        else\n            nb_on = true; nb_next = nb_next + rand * ton;\n        end\n']);
+            w = [sprintf('ton = %.10g;\ntoff = ton * (1 - gate(4)) / gate(4);\n', p.burst_on_sym / p.symbol_rate) ...
+                idle_code('nb_on', 'nb_next', sw_on, k, NBI, TBI, p.cycle_s, fs) ...
+                sprintf('on = false(Nw, 1);\nfor i = 1:Nw\n    while tw(i) >= nb_next\n') sw_on ...
+                sprintf('    end\n    on(i) = nb_on;\nend\nw = sqrt(%.8f/2) * complex(randn(Nw, 1), randn(Nw, 1)) .* on;\n', ...
+                10^(p.jsr_db/10))];
         case 'sweeping_jammer'
             % on our channel while the sweep's window covers it, on the channel clock: the
             % flight's sweep period gate(1) and phase gate(2)
@@ -700,6 +711,7 @@ end
 % union of the components on the air: 1 while one that is not gated is, else the largest
 % gated share
 body{end+1} = sprintf('act = 0;\nfor i = 1:3\n    if ~isnan(actc(i)) && actc(i) > act\n        act = actc(i);\n    end\nend\ncomp = [actc levc];\n');
+if NBI > 0, body{end+1} = sprintf('comp = [comp, reshape(idl.'', 1, [])];\n'); end   % the idle on-shares, component by component
 
 pers = [{'nI', 'nfr'}, pers, tpers]; init = [{'nI = 0;', 'nfr = 0;'}, init, tinit];   % the delay line's sinusoids drawn last
 if ismember('path_loss', sig)                       % then the onset frame of the path-loss step
@@ -2037,6 +2049,29 @@ end
 function s = ant_pos(nr)
 % Antenna positions along the array from its centre [element spacings], a row literal.
 s = mat2str((0:nr-1) - (nr-1)/2);
+end
+
+function [n, tb] = idle_bins(p, fs, E)
+% RSSI bins of the idle time between two frames: p.idle_rssi_hz of them per second from the
+% previous frame's last sample to this frame's earliest delay-line sample; 0 without a rate
+% (no recording: the threat block as before).
+tb = 0; n = 0;
+if ~isfield(p, 'idle_rssi_hz') || isempty(p.idle_rssi_hz) || p.idle_rssi_hz <= 0, return; end
+tb = 1 / p.idle_rssi_hz;
+n = max(0, floor((round(p.cycle_s * fs) - p.samples_per_frame - E) / (fs * tb)));
+end
+
+function c = idle_code(on, nxt, sw, k, n, tb, cyc, fs)
+% Code recording component k's on-share in every idle bin before this frame (the gap from
+% the previous frame's end): the schedule's events are drawn by its own switch code sw, in
+% time order, before the frame's samples draw theirs, so every draw keeps its place.
+c = '';
+if n == 0, return; end
+c = [sprintf(['if nfr > 1\n    ga = t(1) - %.12g + Ns / %.1f;\n    for q = 1:%d\n' ...
+    '        qa = ga + (q - 1) * %.12g; qb = qa + %.12g; qs = 0; tc = qa;\n' ...
+    '        while %s < qb\n            if %s > tc\n                qs = qs + double(%s) * (%s - tc); tc = %s;\n            end\n'], ...
+    round(cyc * fs) / fs, fs, n, tb, tb, nxt, nxt, on, nxt, nxt) sw ...
+    sprintf('        end\n        qs = qs + double(%s) * (qb - tc);\n        idl(%d, q) = qs / %.12g;\n    end\nend\n', on, k, tb)];
 end
 
 function c = gamma_draw(k, v)

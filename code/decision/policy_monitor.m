@@ -48,7 +48,8 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   one (M-of-N binary integration, PP.confirm, default C.confirm).
 %   The monitor also keeps the last C.hist observation vectors of policy_state.m,
 %   and the window of the temporal fusion (probabilities, antenna gains, link
-%   features, unknown scores).
+%   features, unknown scores, and obs.idle, the record of each cycle's idle time,
+%   idle_summary.m: the fusion's row holds window_cues.m's columns, as fuse_classes.m's).
 %   mem.since starts saturated (10): the policies never see the episode clock.
 %   mem.deg_n / mem.conf_n: consecutive degraded / confirmed-alarm cycles; mem.pend:
 %   a requested change not yet received.
@@ -65,7 +66,7 @@ switch cmd
             'since', 10 * ones(1, NE), 'cand', zeros(1, NE), 'cand_n', zeros(1, NE), 'good', zeros(1, NE), ...
             'deg_n', zeros(1, NE), 'conf_n', zeros(1, NE), 'alarm', false(NE, 8), 'ebno', nan(NE, 3), ...
             'ref', nan(NE, 10), 'hist', [], 'wp', [], 'wg', [], 'wf', [], 'wu', [], 'wn', zeros(1, NE), ...
-            'unk_now', false(1, NE), 'pend', false(1, NE));
+            'unk_now', false(1, NE), 'pend', false(1, NE), 'wi', []);
         M = [];
     case 'update'
         [mem, M] = update(C, varargin{:});
@@ -189,6 +190,12 @@ end
 mem.wp = cat(3, mem.wp(:, :, 2:end), obs.probs); mem.wg = cat(3, mem.wg(:, :, 2:end), g);
 mem.wf = cat(3, mem.wf(:, :, 2:end), obs.feat); mem.wu = [mem.wu(:, 2:end), mh];
 mem.wn = min(mem.wn + 1, W);
+% --- D85 obs: the record of each cycle's idle time (idle_summary.m), NaN when the frame has none
+nI = numel(idle_summary('names')); id = nan(NE, nI);
+if isfield(obs, 'idle') && ~isempty(obs.idle), id = double(obs.idle); end
+if ~isfield(mem, 'wi') || isempty(mem.wi), mem.wi = nan(NE, nI, W); end
+mem.wi = cat(3, mem.wi(:, :, 2:end), id);
+% --- end D85 obs
 nC = size(obs.probs, 2);
 pf = obs.probs; te = zeros(NE, numel(temporal_evidence('names', nC)) - nC);
 for n = unique(mem.wn)                                     % episodes with the same filled window length
@@ -197,7 +204,8 @@ for n = unique(mem.wn)                                     % episodes with the s
     Z = temporal_evidence(mem.wp(e, :, k), mem.wg(e, :, k), mem.wf(e, :, k));
     te(e, :) = Z(:, nC + 1:end);
     if isfield(PP, 'fuse') && ~isempty(PP.fuse)                  % with the current frame's own evidence (fuse_classes.m)
-        pf(e, :) = fuse_classes('apply', PP.fuse, [Z, log(max(double(mem.wp(e, :, W)), 1e-6))]);
+        Zc = window_cues(mem.wg(e, :, k), mem.wf(e, :, k), mem.wi(e, :, k));   % D85 obs: branch, level step, idle time
+        pf(e, :) = fuse_classes('apply', PP.fuse, [Z, Zc, log(max(double(mem.wp(e, :, W)), 1e-6))]);
     end
     ku = W - min(n, Nu) + 1:W;
     mem.unk_now(e) = mean(mem.wu(e, ku), 2) < PP.maha_thr;

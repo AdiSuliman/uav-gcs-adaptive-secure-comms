@@ -9,11 +9,13 @@
 % Severity levels: dataset_levels.m (8 per threat, spanning the decision layer's levels and
 % the survivability map, up to the sources' most severe values).
 % 'none' gets n_levels x N_SUB sub-runs per Eb/N0 (class balance). The sweeping jammer is
-% on our channel in a share of its frames only (its sweep period and phase per flight,
-% jam_timing.m): its cells fly N_SUB over that share, so its labelled frames match the
-% other threats'; its other frames are clean frames. Likewise the WLAN counts in the frames
-% that carry a packet for at least 10% of the frame (benign_hit_share.m): N_SUB over that
-% share; and a path-loss step starts inside the sub-run (p.pl_onset_det) and its frames
+% on our channel in a share of the decision cycles only (its sweep period and phase per
+% flight, jam_timing.m): its cells fly N_SUB over that share (sweep_hit_share.m), so its
+% labelled frames match the other threats'; its other frames are clean frames. Likewise the
+% WLAN counts in the cycles with a packet on the air (benign_hit_share.m): N_SUB over that
+% share. With idle sensing (p.idle_rssi_hz) a cycle is the idle time before the frame and
+% the frame, and the gated threats are labelled while they are on the air anywhere in it
+% (threat_active.m, act_idle). A path-loss step starts inside the sub-run (p.pl_onset_det) and its frames
 % count while their link-feature window of TW frames still holds a frame before the onset
 % (threat_active.m): TW - 1 of F_SUB frames, so its cells fly N_SUB F_SUB / (TW - 1). The
 % sub-runs of a threat beyond N_SUB per cell go round the folds from cell to cell, so every
@@ -39,6 +41,12 @@
 % jammers (sweep period and phase, burst start and duty), the RMS delay spreads of our
 % signal and of the first interferer (0 on a flat channel) and every antenna's level
 % calibration error (cal_db). Frames whose BER is incomplete are dropped.
+% Idle time (extract_closed_loop_frames.m): idle, the record of the idle time before each
+% frame (frames x 24, idle_summary.m), a receiver input of the fusion; act_idle, the share of
+% that idle time with the threat on the air (labels); idle_amb (frames x 15), for antenna
+% fault and airframe shadowing only, the per-antenna idle levels with an emitter of
+% opportunity per condition (emitter_idle.m: the reading per condition of
+% emitter_reading.m, never the default link), NaN elsewhere.
 %
 % With FRESH_TEST true in the calling workspace (build_fresh_test.m) the same recipe gives a
 % second, independent test set: 2 sub-runs per cell, every one in the test fold (6), seeds
@@ -93,15 +101,16 @@ D = struct('iq', {{}}, 'label', [], 'class_run', [], 'level', [], 'snr', [], 'eb
     'speed', [], 'run', [], 'seed', [], 'fold', [], ...
     'pos', [], 'gain_ant', [], 'act', [], 'act_comp', [], 'lev_db', [], 'k_db', [], 'k_int', [], 'aoa', [], 'yaw', [], ...
     'rho', [], 'gcs_db', [], 'alt_m', [], 'el_db', [], 'align', [], 'gcs_aoa', [], 'bank', [], 'roll', [], 'pitch', [], ...
-    'wob', [], 'att_db', [], 'body_spread_db', [], 'jam', [], 'ds_ns', [], 'ds_int', [], 'cal_db', []);
+    'wob', [], 'att_db', [], 'body_spread_db', [], 'jam', [], 'ds_ns', [], 'ds_int', [], 'cal_db', [], ...
+    'idle', [], 'act_idle', [], 'idle_amb', []);
 for i = 1:numel(MEAS), D.(MEAS{i}) = []; end
 run_id = 0;
 t0 = tic;
 fprintf('\n=== A5 dataset: %d threats x %d levels x %d Eb/N0 x %d sub-runs x %d frames (+ none) ===\n', ...
     numel(threat_cfg), n_levels, numel(EbNo_list), N_SUB, F_SUB);
-fprintf('sweeping jammer: on our channel in %.1f%% of the frames, %d sub-runs per cell\n', 100 * hit, ...
+fprintf('sweeping jammer: on our channel in %.1f%% of the decision cycles, %d sub-runs per cell\n', 100 * hit, ...
     n_sub(strcmp({threat_cfg.name}, 'sweeping_jammer')));
-fprintf('WLAN: a packet on at least 10%% of the frame in %.1f%% of the frames, %d sub-runs per cell\n', 100 * wlan, ...
+fprintf('WLAN: a packet on the air in %.1f%% of the decision cycles, %d sub-runs per cell\n', 100 * wlan, ...
     n_sub(strcmp({threat_cfg.name}, 'benign_interference')));
 fprintf('path loss: a step at frame %d-%d, %d sub-runs per cell\n', p0.pl_onset_det, n_sub(strcmp({threat_cfg.name}, 'path_loss')));
 fprintf('%-22s %6s %10s %10s %9s %7s %7s\n', 'class', 'level', 'meanBER', 'meanSINR', 'envcorr', 'coh', 'Gmmse');
@@ -170,6 +179,9 @@ dataset.pitch = D.pitch(:); dataset.wob = D.wob(:); dataset.att_db = D.att_db(:)
 dataset.jam = D.jam';                      % sweep period [s], sweep phase [s], burst start, burst duty per frame
 dataset.ds_ns = D.ds_ns(:); dataset.ds_int = D.ds_int(:);
 dataset.cal_db = D.cal_db';                % level calibration error of every antenna [dB] (frames x antennas)
+dataset.idle = D.idle'; dataset.act_idle = D.act_idle(:);   % the idle time before each frame (frames x 24) and its on-air share
+dataset.idle_amb = D.idle_amb';            % with an emitter of opportunity, per condition (frames x 15; fault and shadowing)
+dataset.idle_names = idle_summary('names');
 dataset.meta = struct('N_SUB', N_SUB, 'n_sub', n_sub, 'F_SUB', F_SUB, 'EbNo_list', EbNo_list, 'delay_bits', delay_bits, ...
     'mode', 'seeded_subruns_D59', 'n_rx', p0.n_rx, 'speed_range_kmh', [p0.speed_kmh_min p0.speed_kmh_max], ...
     'threat_cfg', threat_cfg, 'fresh', FRESH, 'seed0', SEED0, 'created', datestr(now), ...
@@ -206,9 +218,9 @@ v = find(~isnan(F.ber));
 n = numel(v);
 D.iq = [D.iq, F.iq(v)];
 lab = label * ones(1, n);
-lab(~threat_active(p.active_threat, F.act(v), v, tw)) = 1;   % a WLAN frame without a packet, a frame outside the
-                                                        % sweep's window, no hidden antenna, a path-loss frame before its
-                                                        % step or past its onset's window: clean
+lab(~threat_active(p.active_threat, F.act(v), v, tw, F.act_idle(v))) = 1;   % a cycle without a WLAN packet or the
+                                                        % sweep on the air (frame or idle time), no hidden antenna, a
+                                                        % path-loss frame before its step or past its onset's window: clean
 D.label = [D.label, lab]; D.class_run = [D.class_run, label * ones(1, n)]; D.level = [D.level, level * ones(1, n)];
 D.snr = [D.snr, ebno * ones(1, n)]; D.speed = [D.speed, v_kmh * ones(1, n)];
 D.ebno_rx = [D.ebno_rx, received_ebno(p.active_threat, ebno, F.act_comp(:, v), p.path_loss_db)];
@@ -227,6 +239,10 @@ D.ds_ns = [D.ds_ns, d.ds_ns(1) * o]; D.ds_int = [D.ds_int, d.ds_ns(min(2, end)) 
 D.cal_db = [D.cal_db, d.cal_db(:) * o];
 D.ber = [D.ber, F.ber(v)]; D.fer = [D.fer, F.fer(v)];
 for i = 1:numel(MEAS), D.(MEAS{i}) = [D.(MEAS{i}), F.(MEAS{i})(v)]; end
+D.idle = [D.idle, single(F.idle(:, v))]; D.act_idle = [D.act_idle, F.act_idle(v)];
+amb = nan(n, 5 * numel(p.amb_inr_db));                 % an emitter of opportunity: fault and shadowing only
+if any(strcmp(p.active_threat, {'antenna_fault', 'airframe_shadowing'})), amb = emitter_idle(F, p, seed, v); end
+D.idle_amb = [D.idle_amb, single(amb')];
 end
 
 function report_row(name, level, D, i0)
