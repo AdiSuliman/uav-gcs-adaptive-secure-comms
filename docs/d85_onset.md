@@ -72,21 +72,21 @@ The deployed reading against the reading without any onset evidence (each at its
 - The latch's decision per event (the statistic at the diagnosis; threshold sweep): -1: fault 83.9%, shadowing 88.8%; -2: 78.2%, 94.8%; 0: 92.7%, 67.9%; +2 (the information-criterion threshold of the first version) 96.8%, 39.6%. It decided in 86.1% of the fault sub-runs and 93.1% of the shadowing ones; on clean sub-runs it detects a falling branch in 24.3% of them (the weakest antenna's fading), harmless because it acts only on a fused fault or shadowing class. The fused class's own vote over the cycles from the detection to the diagnosis read the cause right in 78.2% / 85.1%: below the statistic at the chosen threshold, so the latch keeps the statistic.
 - Against the research pass's Monte Carlo (86-99% from 9 dB with ramps of 0.25 s or more): the simulated ramps here follow the roll-in and Sun et al.'s shape, start at the airframe's entry (a slower start, the K-factor still high), and a decision is taken 3 cycles after the detection without knowing the depth, so the shape alone separates the causes at about 86% per event, and frame by frame the gain over the steady-state reading is the 7-22 points above.
 
-SMOKE
+Smoke: not run on this branch alone; the integrated code (v7-merge after the d85-obs and d85-onset merges) runs one smoke chain from A0 to RPT after the pre-launch review's fixes are merged (D85 in docs/DECISIONS.md).
 
 ### Unit tests (`code/tests/test_core.m`)
 
 New: `test_roll_in_attitude` (a held bank turns at its heading rate exactly as before; a roll-in is level, linear, then held, its heading the coordinated turn's integral against a numerical integration within 1e-4 deg; a roll-in started before the run), `test_roll_rate_sources` (the two measured bounds and the derivation between the windows), `test_shadow_onset_ramp` (`shadow_frame` equals `shadow_hidden` in a held bank; Sun et al.'s shape along a roll-in and from a later event start; the dataset's 5-dB onset at the drawn frame on 20+ flights, frames 2-11, rates within the bounds; the pools' event just before frame 11 with the clean link on the same timeline; no event at 5 m/s or for a fixed view asked for an onset), `test_onsets_in_the_model` (the model: the fault's act from frame 7 and a step of the level on the onset frame, onsets drawn in 2-11, no draw at the pools' [1 1]; the shadowing onset at frame 6 matching `d.hidden` frame by frame, the hidden antenna's loss deepening after it), `test_onset_shape` (a step and a ramp; no fall, a short window; the evidence columns of `temporal_evidence`; the latch for a step and a ramp, the probability handed over, its reset after 5 healthy cycles, a fused 'none' untouched, cycle by cycle equal to the sequence; the events' statistic, the threshold's choice and default, `select_fusion` choosing it), `test_monitor_onset_latch` (the monitor reads antenna_fault after an open connector's onset where the fused class leans to shadowing; one latch call in `policy_monitor.m`), `test_event_frame_pools` (link_env reads the event's frame at every onset, the same flight's clean frames before it, the last 10 frames beyond the run; the tables from the event's frame on), `test_det_frames_onset` (the fault read after the clean link, its age, the latched and the fused readings), `test_onset_recipes` (the dataset, B4 and B4s set both onsets; the label rules; the pools' event frame and selection). Updated: `test_temporal_evidence` (C + 11 columns), `test_seed_streams_disjoint` (the 'roll' stream), `test_draws_independent` (the roll-in's three draws among the flight's uniforms), the helper `run_link` (the 10-value 'Att').
 
-TESTS
+Integrated run (v7-merge, the merged tests of both D85 branches, one MATLAB process in a scratch copy): 139 tests, 138 passed on the first run in 26.0 min; the remaining one, test_rate_reduce_chip_level, passes after D84's exact chip-rate referral and its comparison on the same reference antenna (D84 in docs/DECISIONS.md).
 
 ### validate_phy
 
-PHY
+validate_phy('flat') on the integrated code: every check PASS in 98 min (V1-V7 gaps +0.03 / +0.01 / +0.08 / +0.06 / +0.13 / +0.14 / +0.07 dB, V11 +0.91 / +0.98 / +4.92 dB, V12 +0.49 dB), the same values as D84: a held bank and the flat checks' fixed geometry fly D84's arithmetic.
 
 ## Cost
 
-COST
+Not measured on its own. By construction: the pools' shadowing groups and their clean references fly 38 frames per run instead of 20 (x1.9 on those flights' simulation in C1p and C1c), and the onset statistic's least-squares fits run per cycle in the fusion and once per event in the latch; the joint smoke's stage times will give the measured cost.
 
 ## Not backed by a source, stated
 

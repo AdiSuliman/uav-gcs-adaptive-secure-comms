@@ -3277,26 +3277,35 @@ function test_rate_reduce_chip_level(tc)
 % field: rssi, the detector image and the antennas' channel gains of the same flight
 % stay those of no_action, while the despread SINR and the channel estimate's margin over
 % its noise (despread pilots) rise by the gain. The counterfeit spoofer, not spread like
-% our signal, keeps its power: its field drops by the gain.
+% our signal, keeps its power: its field drops by the gain. The chip-rate field is our own
+% received component scaled back exactly (Thr_sig): on the same antenna its image is
+% no_action's. The reference antenna is the one of the best despread SINR, so a jammed
+% receiver that works only with the gain may read another antenna; the levels are
+% compared on the frames whose reference antenna is the same.
 p = base_params(); p.quiet_build = true; p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false;
 p.gcs_tracked = false; p.k_random = false; p.gcs_aoa_random = false; p.body_random = false; p.tdl = false;
 mdl = 'UAV_GCS_Threat_Link'; fs = p.symbol_rate * p.sps; nv = thermal_nv(p);
 A = {'no_action', 'rate_reduce'}; gr = 10*log10(p.cm_rate_factor);
 for thr = {'none', 'jamming'}                                  % the clean link, and a 10 dB jammer
     p.active_threat = thr{1}; p.jsr_db = 10;
-    [rs, sn, ga, im, em] = deal(zeros(1, 2));
+    [rs, sn, ga, im, em] = deal(zeros(1, 2)); FF = cell(1, 2);
     for k = 1:2
         [p2, g] = apply_countermeasure(p, thr{1}, A{k});
         evalc('build_threat_model(p2)');
         set_link_snr(mdl, 6 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps) + g, p2);
         link_seed(mdl, 31, 160);
-        F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(8 * p.frame_duration)), p2, 20);
-        rs(k) = median(F.rssi); sn(k) = median(F.sinr); ga(k) = median(F.gain_ant(:)); em(k) = median(F.est_margin);
-        im(k) = 80 * mean(cellfun(@(x) mean(spec_image(x, fs, nv), 'all'), F.iq));
+        FF{k} = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(8 * p.frame_duration)), p2, 20);
+        F = FF{k}; sn(k) = median(F.sinr); ga(k) = median(F.gain_ant(:)); em(k) = median(F.est_margin);
         close_system(mdl, 0);
     end
-    verifyEqual(tc, rs(2), rs(1), 'AbsTol', 0.5, thr{1});
-    verifyEqual(tc, im(2), im(1), 'AbsTol', 0.5, thr{1});
+    same = FF{1}.ref == FF{2}.ref;                              % the same reference antenna
+    verifyGreaterThanOrEqual(tc, sum(same), 4, thr{1});
+    for k = 1:2
+        rs(k) = median(FF{k}.rssi(same));
+        im(k) = 80 * mean(cellfun(@(x) mean(spec_image(x, fs, nv), 'all'), FF{k}.iq(same)));
+    end
+    verifyEqual(tc, rs(2), rs(1), 'AbsTol', 0.05, thr{1});
+    verifyEqual(tc, im(2), im(1), 'AbsTol', 0.05, thr{1});
     if strcmp(thr{1}, 'none')                                  % our channel's estimates (a jammed receiver's track the jammer)
         verifyEqual(tc, ga(2), ga(1), 'AbsTol', 0.5);
         verifyEqual(tc, em(2) - em(1), gr, 'AbsTol', 1);
