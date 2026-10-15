@@ -8,7 +8,10 @@ function [P, info] = pool_cell(p, threat, actions, ebno, geo, det, opt)
 %   geo      1 x nS cell, one per Eb/N0: 1 x nSplit struct array, fields seed,
 %            speed (km/h), run (ids), and optionally alt (m), ksig (dB), aoa1 (deg) and
 %            rho, which replace the seed's altitude, K of our signal, first interferer
-%            direction and receive correlation (NaN: the seed's own);
+%            direction and receive correlation (NaN: the seed's own), frames (the run's
+%            frames, default opt.F_SUB) and event (the frame before which the UAV's roll-in
+%            brings the airframe into the line of sight, flight_draws.m geo.event_frame;
+%            NaN: none);
 %            one entry per geometry (sub-run); the same geometries under every
 %            configuration (common random numbers)
 %   det      detector: net, ood, classes, mu, sd (feature normalization), fs; [] = no
@@ -28,7 +31,7 @@ function [P, info] = pool_cell(p, threat, actions, ebno, geo, det, opt)
 %   info     configurations actually simulated (identical physics is simulated once)
 modelName = 'UAV_GCS_Threat_Link';
 nA = numel(actions); nS = numel(ebno); nSp = numel(geo{1});
-stop_time = num2str((opt.F_SUB - 1) * p.frame_duration);   % frames at 0 .. the stop time: F_SUB of them, whole FEC packets
+stop_of = @(nf) num2str((nf - 1) * p.frame_duration);   % frames at 0 .. the stop time: nf of them, whole FEC packets
 P = cell(nS, nA, nSp);
 keys = {}; first = zeros(1, 0);
 info = struct('n_unique', 0, 'map', zeros(1, nA));
@@ -56,9 +59,11 @@ for a = 1:nA
             for r = 1:numel(g.seed)
                 seed = g.seed(r);
                 fd = g.speed(r) / 3.6 * p.carrier_freq / p.c_light;
+                nf = geo_value(g, 'frames', r); if ~isfinite(nf), nf = opt.F_SUB; end
                 d = link_seed(modelName, seed, fd, struct('ebno', ebno(s), 'alt_m', geo_value(g, 'alt', r), ...
-                    'k_sig_db', geo_value(g, 'ksig', r), 'aoa1_deg', geo_value(g, 'aoa1', r), 'rho', geo_value(g, 'rho', r)));
-                F = extract_closed_loop_frames(sim(modelName, 'StopTime', stop_time), p2, opt.delay_bits);
+                    'k_sig_db', geo_value(g, 'ksig', r), 'aoa1_deg', geo_value(g, 'aoa1', r), 'rho', geo_value(g, 'rho', r), ...
+                    'event_frame', geo_value(g, 'event', r), 'frames', nf));
+                F = extract_closed_loop_frames(sim(modelName, 'StopTime', stop_of(nf)), p2, opt.delay_bits);
                 disk_guard;
                 erx = received_ebno(p2.active_threat, ebno(s) + g_db - loss, F.act_comp, p2.path_loss_db);
                 Q = add_run(Q, F, det, opt.tw, g.run(r), d.aoa, erx);

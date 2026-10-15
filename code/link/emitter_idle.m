@@ -69,7 +69,7 @@ end
 
 function h2 = fading(rs, Kd, aoa, ctx, p, NBI, TB, cyc, Ns, nf)
 % |h|^2 of every antenna: Rician K, LoS from the emitter's direction, 32 sinusoids per
-% antenna with the flight's Doppler, heading turn and receive correlation.
+% antenna with the flight's Doppler, heading turn (turn_attitude.m) and receive correlation.
 fs = p.symbol_rate * p.sps; nr = p.n_rx; K = 10^(Kd / 10);
 fI = cos(2*pi*rand(rs, 32, nr)); pI = 2*pi*rand(rs, 32, nr);
 Rr = zeros(nr); for i = 1:nr, for j = 1:nr, Rr(i, j) = ctx.rho^abs(i - j); end, end
@@ -77,7 +77,8 @@ Rc = chol(Rr); apos = (0:nr-1) - (nr-1)/2;
 h2 = zeros(NBI, nr, nf);
 for j = 2:nf
     tq = (j - 2) * cyc + Ns / fs + ((1:NBI)' - 0.5) * TB;
-    sI = sind(aoa + ctx.yaw * tq);
+    [~, ~, dq] = turn_attitude(ctx.att, ctx.yaw, tq);       % heading change (a roll-in included)
+    sI = sind(aoa + dq);
     aI = exp(-1j * 2*pi * p.ant_spacing_wl * sI * apos);
     D = zeros(NBI, nr);
     for a = 1:nr, D(:, a) = exp(1j * (2*pi*tq*(ctx.fd*fI(:, a)') + pI(:, a)')) * ones(32, 1) / sqrt(32); end

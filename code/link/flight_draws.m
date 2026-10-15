@@ -6,13 +6,20 @@ function d = flight_draws(seed, fd, p, geo)
 %                                       geo.k_sig_db [dB], geo.aoa1_deg [deg] and geo.rho,
 %                                       when finite, replace the seed's altitude, K of our
 %                                       signal, first interferer direction and receive
-%                                       correlation (stratified designs)
+%                                       correlation (stratified designs); geo.event_frame,
+%                                       when finite, makes the flight roll into its turn so
+%                                       that the airframe enters the line of sight of its
+%                                       belly antennas just before that frame (the pools'
+%                                       shadowing flights and their clean reference);
+%                                       geo.frames: the frames of the run (default
+%                                       p.cap_frames)
 %   fd is the maximum Doppler shift [Hz], p the params (init_params.m names). Each draw
 %   comes from its own stream of the seed (seed_stream.m); a draw switched off in p keeps
 %   its fixed value.
 %   d.k_sig, d.k_int  K-factors of our signal and of the interferers [dB] (channel_k.m)
 %   d.aoa             interferer directions [deg] (interferer_aoa.m)
-%   d.gcs_aoa         GCS direction [deg] (gcs_aoa.m), p.gcs_aoa_deg added
+%   d.gcs_aoa         GCS direction [deg] at the run's first frame (gcs_aoa.m, p.gcs_aoa_deg
+%                     added; with a roll-in that draw is the direction at its start)
 %   d.yaw             heading rate [deg/s] (heading_rate.m)
 %   d.bank            bank angle of the turn [deg] (bank_angle.m)
 %   d.roll, d.pitch   attitude [deg]: the bank to the side of the turn, plus the tilt of a
@@ -41,9 +48,24 @@ function d = flight_draws(seed, fd, p, geo)
 %                     0, the duty p.burst_duty) ('Gate' block)
 %   d.cal_db          level calibration error of each antenna's receiver [dB], uniform
 %                     within +-p.cal_err_db ('Cal' block)
-%   d.hidden          antenna the airframe hides at the start of each of p.cap_frames
-%                     frames a cycle apart, 0 none (shadow_hidden.m; only when the threat
-%                     holds airframe shadowing, shadow_spec.m)
+%   d.roll_in         [t_in w r_s]: start of the roll-in [s] (from the run's first frame),
+%                     its roll rate [deg/s] (roll_rate.m, first draw of the 'roll' stream)
+%                     and the roll [deg] at which the airframe starts to hide an antenna;
+%                     [0 0 0] for a flight that holds its bank. A turning flight rolls in
+%                     when geo.event_frame sets where the airframe enters the line of
+%                     sight, or when p.roll_in_frames is set and the threat holds airframe
+%                     shadowing: the loss then first reaches p.shadow_evt_db at a frame
+%                     drawn in that range (third draw). The crossing lies 0.1-0.9 of a
+%                     cycle before that frame (second draw). The event must start during
+%                     the roll-in; otherwise the flight holds its bank, and where an onset
+%                     was asked for it hides no antenna (d.hidden 0: every selection skips
+%                     it)
+%   d.onset_frame     the frame the roll-in places (NaN without one)
+%   d.hidden          antenna the airframe hides at the start of each of the run's frames
+%                     (geo.frames, or p.cap_frames) a cycle apart while the event counts,
+%                     its loss at least p.shadow_evt_db; 0 none (shadow_frame.m; only when
+%                     the threat holds airframe shadowing, shadow_spec.m)
+%   d.shadow_g        share of the level's depth at those frame starts (shadow_frame.m)
 %   d.cap_amp         our signal's amplitude on its weakest antenna at the worst frame of
 %                     those (sig_weak_db.m, the 'GCS' amplitude included): the reference of
 %                     the in-band cap ('Cap' block, inband_cap_amp.m)
@@ -95,7 +117,10 @@ if isfinite(ebno) && isfinite(d.alt_m)
     d.el_deg = asind(min((d.alt_m - p.gcs_h_m) / (1000 * link_distance_km(ebno, p)), 1));
     d.el_db = uav_dipole_db(d.el_deg, p.uav_null_db);
 end
-[d.att_db, ca] = uav_attitude_db(d.el_deg, d.gcs_aoa, d.roll, d.pitch, getf(p, 'uav_null_db', -30));
+shd = run_shadow(p);
+[d.roll_in, d.gcs_aoa, d.onset_frame, ok] = roll_in(seed, d, fd, p, geo, shd);
+[~, roll0] = turn_attitude([d.gcs_aoa d.el_deg d.roll d.pitch d.wobble d.roll_in], d.yaw, 0);
+[d.att_db, ca] = uav_attitude_db(d.el_deg, d.gcs_aoa, roll0, d.pitch, getf(p, 'uav_null_db', -30));
 n = getf(p, 'n_rx', 1);
 d.body_db = zeros(1, n);
 if getf(p, 'body_random', false), d.body_db = body_loss(seed, n, p.body_loss_db); end
@@ -124,16 +149,12 @@ if nt > 1
         [d.tdl(:, i), d.ds_ns(i)] = tdl_profile(ds(i), k(i), nt, p.tdl_step_ns);
     end
 end
-[d.hidden, d.cap_amp] = run_attitude(d, fd, p);
+[d.hidden, d.cap_amp, d.shadow_g] = run_attitude(d, fd, p, getf(geo, 'frames', getf(p, 'cap_frames', 1)), shd);
+if ~ok, d.hidden(:) = 0; end                    % an onset asked for and not placed: no shadowing flight
 end
 
-function [hid, cap] = run_attitude(d, fd, p)
-% Hidden antenna at the start of every frame of the run and our signal's weakest-antenna
-% amplitude over the run (sig_weak_db.m), the frames p.cycle_s apart, p.air_s from a frame's
-% first sample to its last.
-H = max(1, getf(p, 'cap_frames', 1)); cyc = getf(p, 'cycle_s', 0);
-air = getf(p, 'air_s', NaN);
-if isnan(air), air = (getf(p, 'samples_per_frame', 1) - 1) / (getf(p, 'symbol_rate', 1) * getf(p, 'sps', 1)); end
+function shd = run_shadow(p)
+% Airframe shadowing of the build (shadow_spec.m), from the blocks' params or the full ones.
 if isfield(p, 'shadow_spec')
     shd = p.shadow_spec;
 elseif all(isfield(p, {'shadow_db', 'shadow_fit', 'shadow_fit_z', 'shadow_roll_deg', 'roll_max_deg', ...
@@ -142,16 +163,68 @@ elseif all(isfield(p, {'shadow_db', 'shadow_fit', 'shadow_fit_z', 'shadow_roll_d
 else
     shd = zeros(1, 6);
 end
+end
+
+function [rin, a0, kf, ok] = roll_in(seed, d, fd, p, geo, shd)
+% Roll-in of a flight whose shadowing onset the data place (d.roll_in): the timeline from
+% the roll-in's start, the GCS at the drawn direction there, scanned every millisecond over
+% the roll-in for the first moment the airframe hides an antenna (its roll r_s starts the
+% event's shape, shadow_frame.m), then for the onset: that moment (geo.event_frame, every
+% level alike) or the loss reaching p.shadow_evt_db at the build's level (p.roll_in_frames);
+% the roll-in starts that long before the onset. a0: the GCS direction at t = 0; ok false
+% when an onset was asked for and the event does not start during the roll-in.
+rin = [0 0 0]; a0 = d.gcs_aoa; kf = NaN; ok = true;
+r = rand(seed_stream(seed, 'roll'), 1, 3);
+ef = getf(geo, 'event_frame', NaN); rf = getf(p, 'roll_in_frames', []);
+if isfinite(ef)
+    kf = ef; D0 = 0; band = [0 Inf]; L = 1;
+elseif ~isempty(rf) && shd(1) > 0
+    kf = rf(1) + floor(r(3) * (rf(end) - rf(1) + 1)); D0 = getf(p, 'shadow_evt_db', 0); band = shd(2:3); L = shd(1);
+else
+    return
+end
+ok = false;
+if d.yaw == 0 || d.bank <= 0 || ~getf(p, 'yaw_random', false), kf = NaN; return; end
+w = roll_rate(r(1), d.bank, p);
+T = d.bank / w;
+u = unique([(0:1e-3:T)'; T]);
+att = [d.gcs_aoa d.el_deg d.roll d.pitch d.wobble 0 w];
+[b, ro] = turn_attitude(att, d.yaw, u);
+v = fd * getf(p, 'c_light', 3e8) / getf(p, 'carrier_freq', 2.4e9);
+sh = @(rs) shadow_frame(b, d.el_deg, ro, [d.bank rs], d.pitch, getf(p, 'n_rx', 1), band, getf(p, 'shadow_hdg_deg', 30), ...
+    v, getf(p, 'shadow_v_min', 0));
+k = sh(0);
+i0 = find(k > 0, 1);
+if isempty(i0), kf = NaN; return; end
+rs = abs(ro(i0));
+[k, g] = sh(rs);
+i = find(k > 0 & L * g >= D0, 1);
+if isempty(i), kf = NaN; return; end
+tin = (kf - 1) * getf(p, 'cycle_s', 0) - (0.1 + 0.8 * r(2)) * getf(p, 'cycle_s', 0) - u(i);
+rin = [tin w rs]; ok = true;
+a0 = turn_attitude(att, d.yaw, -tin);           % the direction at the run's first frame
+end
+
+function [hid, cap, gs] = run_attitude(d, fd, p, H, shd)
+% Hidden antenna at the start of every frame of the run while the event counts, and our
+% signal's weakest-antenna amplitude over the run (sig_weak_db.m), the frames p.cycle_s
+% apart, p.air_s from a frame's first sample to its last.
+H = max(1, H); cyc = getf(p, 'cycle_s', 0);
+air = getf(p, 'air_s', NaN);
+if isnan(air), air = (getf(p, 'samples_per_frame', 1) - 1) / (getf(p, 'symbol_rate', 1) * getf(p, 'sps', 1)); end
 v = fd * getf(p, 'c_light', 3e8) / getf(p, 'carrier_freq', 2.4e9);
 nul = getf(p, 'uav_null_db', -30);
-att = [d.gcs_aoa d.el_deg d.roll d.pitch d.wobble];
+att = [d.gcs_aoa d.el_deg d.roll d.pitch d.wobble d.roll_in];
 k = d.k_sig; if ~isfinite(k), k = 100; end
-hid = zeros(1, H); w = Inf;
+evt = getf(p, 'shadow_evt_db', 0);
+hid = zeros(1, H); gs = zeros(1, H); w = Inf;
 for j = 1:H
     t1 = (j - 1) * cyc;
     w = min(w, sig_weak_db(att, d.yaw, t1, [t1; t1 + air], k, d.body_amp, shd, v, nul));
     if shd(1) > 0
-        hid(j) = shadow_hidden(att(1) + d.yaw * t1, att(2), att(3), att(4), numel(d.body_amp), shd(2:3), shd(4), v, shd(5));
+        [b, ro] = turn_attitude(att, d.yaw, t1);
+        [hs, gs(j)] = shadow_frame(b, att(2), ro, [abs(att(3)) att(10)], att(4), numel(d.body_amp), shd(2:3), shd(4), v, shd(5));
+        if shd(1) * gs(j) >= evt, hid(j) = hs; end
     end
 end
 cap = d.gcs_amp * 10^(w / 20);

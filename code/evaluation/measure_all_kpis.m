@@ -77,6 +77,13 @@ if isfile(F.det)
             'macro-F1 above the threshold %.2f%%, one branch lost found in %.2f%% of its %d frames (%.2f%% above the threshold)'], ...
             m.branch.macro_f1_above_threshold_pct, m.branch.lost_recall_pct, m.branch.n_lost, m.branch.lost_recall_above_threshold_pct);
     end
+    if isfield(m, 'onset_cue')                       % beside KPI 1: the onset's shape at the start, the latched cause after it
+        for q = m.onset_cue
+            det{end+1} = sprintf(['beside KPI 1, %s with the onset in the fusion window: %.2f%% fused, %.2f%% with the ' ...
+                'latched cause (%d frames); after it: %.2f%%, %.2f%% (%d frames)'], q.class, q.recall_fused_pct(1), ...
+                q.recall_latched_pct(1), q.n(1), q.recall_fused_pct(2), q.recall_latched_pct(2), q.n(2)); %#ok<AGROW>
+        end
+    end
     if isfield(m, 'prevalence')                      % beside KPI 1, never in its place
         pv = m.prevalence;
         det{end+1} = sprintf(['beside KPI 1, prevalence-normalized (every class weighted equally): macro-F1 above the ' ...

@@ -25,12 +25,17 @@
 % before and after the onset come from one flight; a geometry is never shared by two
 % splits. Seeds: pool_seed.m. Per geometry, every per-flight draw (flight_draws.m) is
 % kept in PP.cov.
-% Airframe shadowing is on the air only while the attitude hides an antenna at a roll its
-% level is measured at (shadow_hidden.m), on a minority of the shared flights. A cell
+% Airframe shadowing is on the air only while the attitude hides an antenna in a turn whose
+% bank its level is measured at (shadow_frame.m), on a minority of the shared flights. A cell
 % holding it (alone or in a combination) therefore flies geometries of its own, as many per
-% split as the cells it stands beside (pool_layout.m), selected from the flights' draws
-% before they are simulated so that an antenna is hidden at its level in some frame of the
-% run (hides_antenna.m, as the dataset selects its flights): candidates of their own seed
+% split as the cells it stands beside (pool_layout.m). On them the UAV rolls into its turn
+% so that the airframe enters the line of sight just before frame C.event_frame of a run of
+% C.event_run frames (flight_draws.m, geo.event_frame; the clean link of the same flight
+% before it, the same timeline for every cell that flies it): the shadowing ramps in as the
+% roll grows, and an episode's onset reads that frame (link_env.m, PP.event_frame). They are
+% selected from the flights' draws before they are simulated so that the event starts during
+% the roll-in and counts (its loss at least p.shadow_evt_db at the group's lowest level) by
+% frame C.event_count (hides_antenna.m, as the dataset selects its flights): candidates of their own seed
 % range (shadow_pool_seed.m), tried in turn, each in the flight's strata of the Latin
 % hypercube of its split, over the speeds at which the level can occur (from
 % p.shadow_v_min, and from the speed whose turn reaches its smallest roll,
@@ -75,7 +80,7 @@ J_MAX  = 99999;                  % candidates per (shadowing group, Eb/N0, seed 
 VOUT   = [0 0; 161 161];         % speeds of the edge-speed split [km/h]: the first NHOVER geometries and the rest, at
                                  % the two ends of the envelope (dedicated test flights; the other splits draw over it)
 N_WORKERS = 6;
-MODEL_TAG = 'v7-D85obs';         % link model of the pools (D85: the idle-time records): train and validation splits are reused only under the same tag
+MODEL_TAG = 'v7-D85';            % link model of the pools: train and validation splits are reused only under the same tag
 opt = struct('F_SUB', 20, 'tw', 10, 'delay_bits', 20);
 C = decision_config();
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
@@ -175,12 +180,12 @@ end
 % receive correlation per (Eb/N0, split), shared by every cell that flies them
 % (pool_geometries.m); the combined threats' own after the shared ones, as a design of
 % their own; then every shadowing group's own, each a design of its own whose flights are
-% the first candidates that hide an antenna at the group's level in their strata
-% (shadow_pool_seed.m, hides_antenna.m: over the run's frames, at the Eb/N0's distance);
-% the edge speeds' at 161 km/h
+% the first candidates in their strata whose roll-in lets the airframe hide an antenna, the
+% loss of the group's lowest level counting by frame C.event_count (shadow_pool_seed.m,
+% hides_antenna.m: at the Eb/N0's distance); the edge speeds' at 161 km/h
 pS = cell(1, nGr);                                      % the selection's params of every group
 for k = 1:nGr
-    pS{k} = p0; pS{k}.active_threat = 'airframe_shadowing'; pS{k}.shadow_db = glv(k); pS{k}.cap_frames = opt.F_SUB;
+    pS{k} = p0; pS{k}.active_threat = 'airframe_shadowing'; pS{k}.shadow_db = min(shd_db(grp == k));
 end
 SH = struct('band', gband, 'level', glv, 'cell_levels', {arrayfun(@(k) unique(shd_db(grp == k)), 1:nGr, ...
     'UniformOutput', false)}, 'cell_group', grp, 'v_kmh', vshd, 'speed_range', vrange, ...
@@ -214,14 +219,20 @@ for s = 1:nS
         ps = pS{gi}; eb = EBNO(s);
         sel = struct('seed', @(j, v) shadow_pool_seed(gi, s, b, j, v), 'j0', jc(gi, b), 'jmax', J_MAX, ...
             'keep', @(sd, v, a, kk, o, c) hides_antenna(sd, v, ps, struct('ebno', eb, 'alt_m', a, 'k_sig_db', kk, ...
-            'aoa1_deg', o, 'rho', c)));
+            'aoa1_deg', o, 'rho', c, 'event_frame', C.event_frame, 'frames', C.event_count)));
         [gk, info] = pool_geometries(s, b, r0(sp) + P.pos, vr, p0, lhs, 1, sel);
         jc(gi, b) = info.j;
         SH.tried(gi, sp, s) = SH.tried(gi, sp, s) + sum(info.tries); SH.kept(gi, sp, s) = SH.kept(gi, sp, s) + n;
         for f = fieldnames(gk)', g(sp).(f{1}) = [g(sp).(f{1}), gk.(f{1})]; end
     end
+    for sp = 1:nSp                                      % the groups' flights roll in: longer runs, the event's frame
+        n = numel(g(sp).seed);
+        g(sp).frames = opt.F_SUB * ones(1, n); g(sp).event = nan(1, n);
+        g(sp).frames(ref{sp}) = C.event_run; g(sp).event(ref{sp}) = C.event_frame;
+    end
     geo{s} = g;
 end
+evf = arrayfun(@(sp) geo{1}(sp).event, 1:nSp, 'UniformOutput', false);   % the event's frame per split geometry
 if nGr > 0
     fprintf(['Airframe shadowing: own flights of %d groups of levels (shadow_groups.m), every one hiding an antenna at ' ...
         'its level; none below %g m/s or at hover (no source measures it there), nor below the speed whose turn ' ...
@@ -242,20 +253,22 @@ spd = arrayfun(@(sp) cell2mat(arrayfun(@(s) geo{s}(sp).speed, (1:nS)', 'UniformO
 % of the steering vectors toward the GCS and toward each interferer; body_spread_db: the
 % spread of the airframe loss over the antennas; jam: sweep period [s], sweep phase [s]
 % and burst phase of the gated jammers; ds_ns, ds_int: RMS delay spread of our signal and
-% of each interferer [ns] (0 on a flat channel)
+% of each interferer [ns] (0 on a flat channel); roll_in: the roll-in's start [s], rate
+% [deg/s] and the roll at the event's start [deg] (0 0 0 without one)
 cv = cell(1, nSp);
 for sp = 1:nSp
     z = nan(nS, nG(sp));
     V = struct('seed', z, 'speed', z, 'alt_m', z, 'k_sig', z, 'k_int', z, 'yaw', z, 'rho', z, ...
         'gcs_point_db', z, 'el_db', z, 'aoa', nan(nS, nG(sp), 3), 'align', nan(nS, nG(sp), 3), ...
         'gcs_aoa', z, 'el_deg', z, 'bank', z, 'roll', z, 'pitch', z, 'wob', z, 'att_db', z, 'body_spread_db', z, ...
-        'jam', nan(nS, nG(sp), 4), 'ds_ns', z, 'ds_int', nan(nS, nG(sp), 3));
+        'jam', nan(nS, nG(sp), 4), 'ds_ns', z, 'ds_int', nan(nS, nG(sp), 3), 'roll_in', nan(nS, nG(sp), 3));
     for s = 1:nS
         g = geo{s}(sp);
         for r = 1:nG(sp)
             fd = g.speed(r) / 3.6 * p0.carrier_freq / p0.c_light;
             d = flight_draws(g.seed(r), fd, p0, struct('ebno', EBNO(s), 'alt_m', g.alt(r), 'k_sig_db', g.ksig(r), ...
-                'aoa1_deg', g.aoa1(r), 'rho', g.rho(r)));
+                'aoa1_deg', g.aoa1(r), 'rho', g.rho(r), 'event_frame', g.event(r), 'frames', g.frames(r)));
+            V.roll_in(s, r, :) = d.roll_in;
             V.seed(s, r) = g.seed(r); V.speed(s, r) = g.speed(r); V.alt_m(s, r) = d.alt_m;
             V.k_sig(s, r) = d.k_sig; V.k_int(s, r) = d.k_int; V.yaw(s, r) = d.yaw; V.rho(s, r) = d.rho;
             V.gcs_point_db(s, r) = d.gcs_point_db; V.el_db(s, r) = d.el_db;
@@ -345,7 +358,7 @@ for c = 1:nC
             for sp = 1:nSp
                 Q = pools{c, s, a, sp};
                 if isempty(Q) || isempty(Q.ber), continue; end
-                k = true(size(Q.ber)); if c == ic, k = own(Q, sp); end
+                k = event_rows(Q, runs{sp}, evf{sp}); if c == ic, k = own(Q, sp); end   % a rolling-in flight from its event's frame
                 mber(c, s, a, sp) = mean(Q.ber(k)); mfer(c, s, a, sp) = mean(Q.fer(k));
             end
         end
@@ -391,8 +404,8 @@ PP = struct('scen', {{cells.threat}}, 'sev', [cells.sev], 'level', [cells.level]
     'gp', gp, 'bw', bw, 'pw', pw, 'cfg_gain_db', config_gain_db(ACTIONS, p0), 'pools', {pools}, 'mber', mber, 'mfer', mfer, ...
     'clean', clean_ref.ber, 'clean_fer', clean_ref.fer, 'classes', {det.classes}, 'maha_thr', T.maha, ...
     'fuse', FZ.FM, 'fuse_N', FZ.N, 'q_thr', FZ.q_thr, 'unk_win', UW, ...
-    'F_SUB', opt.F_SUB, 'fec_frames', p0.fec_frames, 'runs', {runs}, 'model_tag', MODEL_TAG, 'det_id', DET_ID, ...
-    'aoa_random', p0.int_aoa_random, 'k_random', p0.k_random, 'sps', p0.sps, 'bps', p0.bits_per_symbol, ...
+    'F_SUB', opt.F_SUB, 'event_frame', {evf}, 'fec_frames', p0.fec_frames, 'runs', {runs}, 'model_tag', MODEL_TAG, ...
+    'det_id', DET_ID, 'aoa_random', p0.int_aoa_random, 'k_random', p0.k_random, 'sps', p0.sps, 'bps', p0.bits_per_symbol, ...
     'feat_names', {link_features('names')}, 'created', datestr(now));
 save('data/policy_pools.mat', 'PP', 'clean_ref', '-v7.3');
 

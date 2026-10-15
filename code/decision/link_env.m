@@ -26,7 +26,14 @@ function varargout = link_env(cmd, varargin)
 %   direction, threat waveform). Every configuration of the same (cell, Eb/N0,
 %   split) shares the seeds of its geometries, so after a change the episode
 %   continues in the SAME geometry at the same frame position: the outcome of an
-%   action is the outcome in this geometry (common random numbers).
+%   action is the outcome in this geometry (common random numbers). On a geometry whose
+%   UAV rolls into its turn (PP.event_frame: the airframe enters the line of sight just
+%   before that frame of its run, build_policy_pools.m) the onset cycle reads that frame, so
+%   the frames after the onset follow the shadowing's ramp and those before it are the same
+%   flight's clean link before the event; beyond the run's end the episode cycles over its
+%   last 10 frames; the per-flight tables read such a run from that frame on (event_rows.m).
+%   Every other geometry starts at a random frame (an antenna fault, path loss and every
+%   additive threat are on from their run's first frame: a step at the onset).
 %
 %   Scenario: clean link until the onset cycle, then the cell's threat. A follower
 %   jammer (in-channel threats, spec.follow) re-acquires our channel fdelay cycles
@@ -110,6 +117,8 @@ K.Q = Q;
 K.runs = PP.runs;                                   % geometry ids per split
 K.nR = cellfun(@numel, PP.runs);
 nSc = numel(PP.scen); nS = numel(PP.ebno); nSp = numel(PP.runs); nRm = max(K.nR);
+K.ev = arrayfun(@(sp) nan(1, K.nR(sp)), 1:nSp, 'UniformOutput', false);   % frame of the event of a rolling-in flight
+if isfield(PP, 'event_frame') && ~isempty(PP.event_frame), K.ev = PP.event_frame; end
 K.geo = cell(nSc, nSp);                             % the geometries every cell flies (PP.cell_geo; the clean link's
 for sc = 1:nSc                                      % own, without the shadowing reference), every one without it
     for sp = 1:nSp
@@ -132,7 +141,7 @@ for sp = 1:nSp
             if isempty(Pu) || isempty(Pu.ber), continue; end
             for r = 1:K.nR(sp)
                 rid = PP.runs{sp}(r);
-                ku = Pu.run == rid;
+                ku = span(Pu.run == rid, K.ev{sp}(r));
                 if ~any(ku), continue; end              % a geometry the cell does not fly
                 bt = C.ratio_ok * BC(s, r); pr = PC(s, r);
                 bu = mean(Pu.ber(ku));
@@ -142,7 +151,7 @@ for sp = 1:nSp
                     (isfield(Pu, 'act_idle') && ~isempty(Pu.act_idle) && any(Pu.act_idle(ku) > 0)));   % on the air in a frame or an idle time
                 for a = 1:nA
                     P = PP.pools{sc, s, a, sp};
-                    k = P.run == rid;
+                    k = span(P.run == rid, K.ev{sp}(r));
                     m = mean(P.ber(k)); pl = mean(double(P.fer(k)));
                     rest = m <= bt;
                     if rest
@@ -177,7 +186,7 @@ for s = 1:nS
     P = PP.pools{K.clean, s, K.na, sp};
     if isempty(P) || isempty(P.ber), continue; end
     for r = 1:K.nR(sp)
-        k = P.run == PP.runs{sp}(r);
+        k = span(P.run == PP.runs{sp}(r), K.ev{sp}(r));
         if any(k), BC(s, r) = max(mean(P.ber(k)), C.ber_floor); PC(s, r) = mean(double(P.fer(k))); end
     end
 end
@@ -208,6 +217,9 @@ if ~isfield(spec, 'r') || isempty(spec.r)            % geometry of the episode, 
 end
 E.k0 = randi(rs, PP.F_SUB, 1, NE) - 1;               % starting frame inside the geometry
 assert(mod(PP.F_SUB, 2) == 0, 'link_env: %d frames per geometry do not hold whole frame pairs (coded packets)', PP.F_SUB);
+ev = K.ev{split}(E.r);                              % a rolling-in flight: the onset reads its event's frame
+E.ev = isfinite(ev);
+E.k0(E.ev) = ev(E.ev) - 1 - E.onset(E.ev);
 E.aoa = nan(NE, 3);
 for i = 1:NE
     P = PP.pools{E.scn(i), E.s(i), K.na, split};
@@ -264,7 +276,8 @@ end
 
 function [E, obs, sc_eff, cfg_eff, cm] = draw(E, PP, K)
 % Frame of the effective (cell, configuration), same geometry, frame position
-% k0 + t inside the geometry (cyclic).
+% k0 + t inside the geometry (cyclic; a rolling-in flight beyond its run's end cycles over
+% its last 10 frames).
 sc_eff = E.scn; sc_eff(E.t < E.onset) = K.clean;
 cfg_eff = E.cfg_link;
 [cm, cf] = compromised(E, K, E.cfg_link);
@@ -280,7 +293,9 @@ obs.idle = nan(E.NE, numel(idle_summary('names')));     % the idle time before t
 for i = 1:E.NE
     P = PP.pools{sc_eff(i), E.s(i), cfg_eff(i), E.split};
     rows = find(P.run == PP.runs{E.split}(E.r(i)));
-    j = rows(mod(E.k0(i) + E.t(i), numel(rows)) + 1);
+    q = E.k0(i) + E.t(i); n = numel(rows);
+    if isfield(E, 'ev') && E.ev(i) && q >= n, q = n - 10 + mod(q - n, 10); end
+    j = rows(mod(q, n) + 1);
     obs.probs(i, :) = P.probs(j, :);
     obs.unknown(i) = P.maha(j) < PP.maha_thr;
     obs.maha(i) = P.maha(j);
@@ -298,4 +313,12 @@ mask = E.unk & E.t >= E.onset;
 obs.probs(mask, :) = 0; obs.unknown(mask) = true; obs.maha(mask) = -Inf;
 obs.cfg_link = E.cfg_link(:);
 obs.pkt = floor((E.k0(:) + E.t(:)) / 2);           % frame position k0 + t: pairs of the geometry's frames (F_SUB even, so the pairs wrap with the frames)
+end
+
+function k = span(k, e)
+% The rows k of one run from its event's frame e on for a rolling-in flight (event_rows.m).
+if isfinite(e)
+    i = find(k);
+    k(i(1:min(e - 1, numel(i)))) = false;
+end
 end

@@ -26,7 +26,7 @@ function [x, names] = window_cues(G, Fw, Iw)
 %   A loss in the RF path is a steady branch offset; a pattern or geometry effect varies
 %   (Willgert, US 8,548,029, Table 1); the imbalance indicator (Heath, US 10,404,368,
 %   Table 2). The antenna's place in the array is not used: no source says which antenna
-%   the airframe hides (D83's far end is a stated assumption).
+%   the airframe hides (shadow_hidden.m's far end is a stated assumption).
 %   Step of our received level (path loss): on the combined level of all antennas and on
 %   the monitor's estimate (sinr + iot), the best split of the window: its t statistic with
 %   the pooled spread (at least 0.5 dB), its size [dB] and the cycles since it, stp_t,

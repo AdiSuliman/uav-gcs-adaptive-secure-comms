@@ -5,7 +5,8 @@ function on = threat_active(threat, act, pos, tw, act_idle)
 %   air (extract_closed_loop_frames.m; for a combination the union over its components). A
 %   WLAN frame with less than 10% of it carrying a packet, a frame with less than 10% of it
 %   inside the sweeping jammer's window, an airframe-shadowing frame whose attitude hides no
-%   antenna and a path-loss frame before the step's onset are clean frames; every other
+%   antenna by 5 dB or more (shadow_frame.m), an antenna-fault frame before its connector
+%   opens and a path-loss frame before the step's onset are clean frames; every other
 %   threat counts in every frame. A combination with a gated component counts by the same
 %   10% (its union is 1 while a component that is not gated is on).
 %   on = threat_active(threat, act, pos, tw): the frames of one run at positions pos; a

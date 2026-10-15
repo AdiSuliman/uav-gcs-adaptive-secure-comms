@@ -835,7 +835,7 @@ function test_seed_streams_disjoint(tc)
 % are distinct and below 64, and the flight seeds of every family are distinct and
 % below 2^26.
 P = {'channel', 'awgn', 'bits', 'threat', 'aoa', 'ds', 'k', 'yaw', 'corr', 'gcsaoa', 'gcs', 'jam', 'alt', 'speed', ...
-    'body', 'wobble', 'cal', 'idle', 'amb'};
+    'body', 'wobble', 'cal', 'roll', 'idle', 'amb'};
 off = zeros(1, numel(P));
 for i = 1:numel(P)
     [~, n] = seed_stream(12345, P{i});
@@ -924,6 +924,7 @@ B = (cn(cell2mat(arrayfun(@(x) body_loss(x, 3, bm), S, 'UniformOutput', false)))
 J = cell2mat(arrayfun(@(x) jam_timing(x, [0 1], [0 1]), S, 'UniformOutput', false));
 J(:, 2) = J(:, 2) ./ J(:, 1);
 Kc = cell2mat(arrayfun(@(x) rand(seed_stream(x, 'cal'), 1, 3), S, 'UniformOutput', false));
+Kc = [Kc, cell2mat(arrayfun(@(x) rand(seed_stream(x, 'roll'), 1, 3), S, 'UniformOutput', false))];   % the roll-in's draws
 q = p; q.tdl_clip_ns = Inf;                             % no altitude: every channel on the omni fit
 Z = cell2mat(arrayfun(@(x) delay_spread(x, NaN, 3, q), S, 'UniformOutput', false));
 Z = 0.5 * erfc(-(log10(Z * 1e-9) - q.tdl_int_ds(1)) / sqrt(2 * q.tdl_int_ds(2)));
@@ -1269,7 +1270,7 @@ P = repmat([0.7 0.1 0.1 0.1], 1, 1, n);
 Fw = zeros(1, nF, n); Fw(1, feature_index('est_margin'), :) = 20;
 nm = temporal_evidence('names', C); col = @(c) find(strcmp(nm, c));
 xf = temporal_evidence(P, fade, Fw); xs = temporal_evidence(P, sh, Fw);
-verifyEqual(tc, numel(xf), numel(nm)); verifyEqual(tc, numel(nm), C + 9);
+verifyEqual(tc, numel(xf), numel(nm)); verifyEqual(tc, numel(nm), C + 11);
 verifyEqual(tc, xf(1:C), log([0.7 0.1 0.1 0.1]), 'AbsTol', 1e-9);
 verifyGreaterThan(tc, xs(col('gap_w')), xf(col('gap_w')) + 4);           % gap of the local means
 verifyGreaterThan(tc, xs(col('weak_w')), xf(col('weak_w')));             % the same antenna is the weakest
@@ -2313,6 +2314,7 @@ function [Y, H] = run_link(mdl, p, fd, kfac, rho, att, body, nfr)
 link_seed(mdl, 11, fd);
 set_param([mdl '/Kfac'], 'Value', mat2str(kfac));
 set_param([mdl '/Corr'], 'Value', num2str(rho));
+att(end+1:10) = 0;                                      % no roll-in (turn_attitude.m)
 set_param([mdl '/Att'], 'Value', mat2str(att));
 set_param([mdl '/Body'], 'Value', mat2str(body, 10));
 out = sim(mdl, 'StopTime', num2str(nfr * p.frame_duration));
@@ -3808,7 +3810,8 @@ function test_idle_rssi_quiet_slot(tc)
 % The idle-time model reads the threat block's own schedule, levels and channels: its last
 % bin, 4.5 us before the frame's quiet slot, gives the slot's own interference over thermal
 % (q_iot, 128 samples per antenna) frame by frame; a faulty connector holds the emitter the
-% fault's depth down on its antenna; a reactive jammer is silent there.
+% fault's depth down on its antenna, from the idle time after its onset frame (the block's
+% own draw); a reactive jammer is silent there.
 p = base_params(); p.quiet_build = true; p.cap_frames = 20;
 cs = {'jamming', 'jsr_db', 16, 0.8; 'benign_interference', 'benign_int_db', 12, 1.0; 'tone_jamming', 'tone_jsr_db', 12, 0.5; ...
     'jamming+antenna_fault', 'jsr_db', 16, 1.0};
@@ -3824,6 +3827,14 @@ for c = 1:size(cs, 1)
         verifyLessThan(tc, m(info.hit) - median(m(setdiff(1:numel(m), info.hit))), -10);
     end
 end
+q = p; q.active_threat = 'jamming+antenna_fault'; q.jsr_db = 16; q.fault_atten_db = 18; q.seed = 33;
+q.fault_onset_frames = [6 9];
+F = idle_run(q, 4920112);
+[R, ~, info] = idle_rssi(q, F.idle_ctx, double(F.idle_on), 1:F.nf, struct('meas', false));
+verifyEqual(tc, info.af_on, find(F.act_comp(2, :) > 0, 1));          % the block's onset frame
+m = squeeze(mean(R, 1)); dh = m(info.hit, :) - median(m(setdiff(1:size(m, 1), info.hit), :), 1);
+verifyGreaterThan(tc, min(dh(2:info.af_on)), -6);                     % before the connector opens
+verifyLessThan(tc, max(dh(info.af_on + 1:end)), -10);                 % after it
 q = p; q.active_threat = 'reactive_jamming'; q.jsr_db = 20; q.seed = 32;
 F = idle_run(q, 4920111);
 verifyLessThan(tc, max(F.idle(strcmp(idle_summary('names'), 'lvl'), 2:end)), 3);   % the floor only
@@ -3837,7 +3848,7 @@ function test_idle_emitter_attenuation(tc)
 % shadowing flight alike (the airframe hides the GCS's direction only).
 p = base_params(); nr = p.n_rx;
 ctx = struct('seed', seed_base(4920200), 'fd', 300, 'lev', 1, 'aoa', [10 -20 30], 'kfac', [10 10], 'yaw', 0, ...
-    'rho', 0.5, 'att', [0 0 0 0 0 0 0], 'gate', [0.02 0 0 0.5], 'tdl', [ones(1, 4); zeros(18, 4)], 'cap', 1, 'cal', zeros(1, nr));
+    'rho', 0.5, 'att', zeros(1, 10), 'gate', [0.02 0 0 0.5], 'tdl', [ones(1, 4); zeros(18, 4)], 'cap', 1, 'cal', zeros(1, nr));
 NB = floor((round(p.cycle_s * p.symbol_rate * p.sps) - p.samples_per_frame - 18) / (p.symbol_rate * p.sps / p.idle_rssi_hz));
 amb = 100 * thermal_nv(p) * ones(NB, nr, 3);
 q = p; q.active_threat = 'antenna_fault'; q.fault_atten_db = 18;
@@ -3956,4 +3967,306 @@ evalc('build_threat_model(q)');
 link_seed(mdl, seed, 100 / 3.6 * q.carrier_freq / q.c_light, struct('ebno', 9, 'alt_m', NaN, 'k_sig_db', NaN));
 set_link_snr(mdl, 9 + 10*log10(q.bits_per_symbol) - 10*log10(q.sps), q);
 F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(20 * q.frame_duration)), q, 20);
+end
+
+%% ---------- the onset of a lost branch ----------
+function test_roll_in_attitude(tc)
+% A flight that holds its bank turns at its heading rate; one that rolls in flies level,
+% rolls at its rate up to the bank, and its heading follows the roll as a coordinated turn
+% (yaw tan(roll) / tan(bank)).
+att = [12 3 25 1 0 0 0];
+[b, r, dp] = turn_attitude(att, 10, [0 0.37 1.2]);
+verifyEqual(tc, b, 12 + 10 * [0 0.37 1.2]); verifyEqual(tc, r, 25 * ones(1, 3)); verifyEqual(tc, dp, 10 * [0 0.37 1.2]);
+verifyEqual(tc, turn_attitude([att 0 0 0], 10, 0.37), 12 + 10 * 0.37);   % rate 0: no roll-in
+att = [12 3 -30 0 0 0 0 0.1 25 0];
+t = (0:1e-4:3)';
+[b, r, dp] = turn_attitude(att, -15, t);
+verifyEqual(tc, r(t <= 0.1), zeros(sum(t <= 0.1), 1));
+verifyEqual(tc, r(t >= 0.1 + 30 / 25 + 1e-9), -30 * ones(sum(t >= 0.1 + 30 / 25 + 1e-9), 1));
+k = t > 0.1 & t < 1.3;
+verifyEqual(tc, r(k), -25 * (t(k) - 0.1), 'AbsTol', 1e-9);
+hn = cumtrapz(t, -15 * tand(abs(r)) / tand(30));                 % the coordinated turn's heading
+verifyEqual(tc, dp, hn, 'AbsTol', 1e-4);
+verifyEqual(tc, b - 12, dp, 'AbsTol', 1e-12);
+[b0, r0] = turn_attitude([12 3 -30 0 0 0 0 -0.5 25 0], -15, 0);  % started before the run: rolled 12.5 deg at t = 0
+verifyEqual(tc, [b0 r0], [12 -12.5], 'AbsTol', 1e-12);
+end
+
+function test_roll_rate_sources(tc)
+% The rate of a roll-in lies between the measured roll-in of a small UAV (Allen & Lin, 30 deg
+% in about 1.6 s) and the largest rate measured over a window as long as the roll-in
+% (Gross et al.: 45.4 deg/s over 0.5 s, 35.5 deg/s over 1 s; linear in between).
+p = base_params();
+verifyEqual(tc, p.roll_rate_lo, 30 / 1.6, 'AbsTol', 1e-12);
+verifyEqual(tc, p.roll_rate_win, [0.5 45.4; 1 35.5]);
+verifyEqual(tc, roll_rate(0, 40, p), 30 / 1.6, 'AbsTol', 1e-12);
+verifyEqual(tc, roll_rate(1, 20, p), 45.4, 'AbsTol', 1e-12);       % 20 deg within 0.5 s
+verifyEqual(tc, roll_rate(1, 40, p), 35.5, 'AbsTol', 1e-12);       % 40 deg in more than 1 s
+for b = 23:0.5:35
+    w = roll_rate(1, b, p); T = b / w;
+    verifyEqual(tc, w, 45.4 - (45.4 - 35.5) * (T - 0.5) / 0.5, 'AbsTol', 1e-9);
+end
+w = arrayfun(@(u) roll_rate(u, 30, p), linspace(0, 1, 50));
+verifyTrue(tc, all(w >= 30 / 1.6 - 1e-12 & w <= roll_rate(1, 30, p) + 1e-12));
+end
+
+function test_shadow_onset_ramp(tc)
+% Airframe shadowing ramps in as the bank rolls in: shadow_frame.m is shadow_hidden.m in a
+% held bank (the whole depth); during a roll-in the share of the depth rises from 0 where the
+% airframe enters the line of sight to 1 at the bank by Sun et al.'s shape, (3x - x^3) / 2.
+% flight_draws.m places the dataset's onset (the loss reaching 5 dB) at the drawn frame and
+% the pools' event (the airframe's entry) just before frame 11, the clean link of the same
+% flight on the same timeline.
+B = [16.1 57.9]; vm = 8;
+for be = [0 40 -40 70]
+    for r = [10 20 -20]
+        [k, g] = shadow_frame(be, 2, r, abs(r), 0, 3, B, 30, 20, vm);
+        verifyEqual(tc, k, shadow_hidden(be, 2, r, 0, 3, B, 30, 20, vm));
+        if k > 0, verifyEqual(tc, g, 1, 'AbsTol', 1e-12); end
+    end
+end
+r = 2.5:0.5:30;                                                  % the GCS abeam, 2 deg below: the event from a 2 deg roll
+[k, g] = shadow_frame(zeros(size(r)), 2, r, 30, 0, 3, B, 30, 20, vm);
+x = (r - 2) / 28;
+verifyEqual(tc, k, 3 * ones(size(r)));
+verifyEqual(tc, g, (3 * x - x .^ 3) / 2, 'AbsTol', 1e-6);
+[~, g2] = shadow_frame(0, 2, 16, [30 10], 0, 3, B, 30, 20, vm);  % an event that started at a 10 deg roll
+verifyEqual(tc, g2, (3 * 0.3 - 0.3^3) / 2, 'AbsTol', 1e-9);
+verifyEqual(tc, shadow_frame(0, 2, 20, 10, 0, 3, B, 30, 20, vm), 0);   % a bank the level is not flown at
+p = base_params();
+q = p; q.active_threat = 'airframe_shadowing'; q.shadow_db = 15.5; q.roll_in_frames = [2 11]; q.cap_frames = 20;
+n = 0; f0 = []; fr = [];
+for s = 1:300
+    v = 30 + 130 * mod(s * 0.618, 1);
+    d = flight_draws(7000000 + s, v / 3.6 * q.carrier_freq / q.c_light, q, struct('ebno', 9));
+    if ~any(d.hidden > 0), continue; end
+    n = n + 1;
+    verifyEqual(tc, find(d.hidden > 0, 1), d.onset_frame);
+    if d.onset_frame > 1, verifyLessThan(tc, q.shadow_db * d.shadow_g(d.onset_frame - 1), q.shadow_evt_db); end
+    f0(end+1) = d.onset_frame; fr(end+1) = d.roll_in(2); %#ok<AGROW>
+end
+verifyGreaterThan(tc, n, 20);
+verifyTrue(tc, all(f0 >= 2 & f0 <= 11)); verifyGreaterThan(tc, numel(unique(f0)), 5);
+verifyTrue(tc, all(fr >= q.roll_rate_lo - 1e-9 & fr <= 45.4 + 1e-9));
+q.roll_in_frames = [];
+d = flight_draws(7000003, 1000, q, struct('ebno', 9));
+verifyEqual(tc, d.roll_in, [0 0 0]); verifyTrue(tc, isnan(d.onset_frame));   % a held bank as before
+q2 = p; q2.active_threat = 'none';
+m = 0; geo = struct('ebno', 9, 'event_frame', 11, 'frames', 38);
+for s = 1:300
+    fd = (60 + 100 * mod(s * 0.618, 1)) / 3.6 * q.carrier_freq / q.c_light;
+    ds = flight_draws(7100000 + s, fd, q, geo);
+    if ~any(ds.hidden > 0), continue; end
+    m = m + 1;
+    dc = flight_draws(7100000 + s, fd, q2, geo);
+    verifyEqual(tc, [dc.roll_in dc.gcs_aoa], [ds.roll_in ds.gcs_aoa]);
+    verifyEqual(tc, ds.shadow_g(1:10), zeros(1, 10));
+    verifyGreaterThan(tc, ds.shadow_g(11), 0); verifyLessThan(tc, ds.shadow_g(11), 0.5);
+end
+verifyGreaterThan(tc, m, 20);
+q.roll_in_frames = [2 11];
+verifyEqual(tc, flight_draws(7000003, 40, q, struct('ebno', 9)).hidden, zeros(1, 20));   % 5 m/s: no event
+q.yaw_random = false; q.gcs_aoa_random = false; [~, q.roll_deg] = shadow_roll_band(q.shadow_db, q);
+verifyEqual(tc, flight_draws(7, 100, q).hidden, zeros(1, 20));   % an onset asked of a fixed view: none placed
+end
+
+function test_onsets_in_the_model(tc)
+% In the model an antenna fault opens within one frame at its onset (no threat before it),
+% drawn per run over a range; airframe shadowing ramps in on the flight's roll-in: its frames
+% count from the frame flight_draws.m places and the hidden antenna's loss deepens after it.
+p = base_params(); p.quiet_build = true; p.cal_random = false;
+mdl = 'UAV_GCS_Threat_Link';
+q = p; q.active_threat = 'antenna_fault'; q.fault_atten_db = 18; q.fault_onset_frames = [7 7];
+evalc('build_threat_model(q)');
+set_link_snr(mdl, 12 + 10*log10(q.bits_per_symbol) - 10*log10(q.sps), q);
+link_seed(mdl, 3000501, 160, struct('ebno', 12));
+F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(14 * q.frame_duration)), q, 20);
+v = 1:14;
+verifyEqual(tc, F.act(v), double(v >= 7));
+G = F.gain_ant(:, v); [~, h] = min(mean(G(:, 8:end), 2));
+off = G(h, :) - median(G(setdiff(1:q.n_rx, h), :), 1);
+verifyEqual(tc, median(off(1:6)) - median(off(7:end)), 18, 'AbsTol', 4);   % a step of the level
+verifyLessThan(tc, off(7), median(off(1:6)) - 10);                         % on the onset frame itself
+q.fault_onset_frames = [2 11];
+evalc('build_threat_model(q)');
+on = zeros(1, 6);
+for s = 1:6
+    link_seed(mdl, 50 + s, 160);
+    F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(12 * q.frame_duration)), q, 20);
+    on(s) = find(F.act > 0, 1);
+end
+verifyTrue(tc, all(on >= 2 & on <= 11)); verifyGreaterThan(tc, numel(unique(on)), 1);
+verifyNotEmpty(tc, strfind(fileread(which('build_threat_model')), 'if fo2 > fo1'));   % no draw at the pools' [1 1]
+q = p; q.active_threat = 'airframe_shadowing'; q.shadow_db = 20; q.roll_in_frames = [6 6]; q.cap_frames = 20;
+evalc('build_threat_model(q)');
+set_link_snr(mdl, 12 + 10*log10(q.bits_per_symbol) - 10*log10(q.sps), q);
+found = 0;
+for s = 1:200
+    geo = struct('ebno', 12, 'alt_m', NaN, 'k_sig_db', NaN);
+    if ~hides_antenna(3000000 + s, 100, q, geo), continue; end
+    d = link_seed(mdl, 3000000 + s, 100 / 3.6 * q.carrier_freq / q.c_light, geo);
+    F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(20 * q.frame_duration)), q, 20);
+    v = 1:20;
+    verifyEqual(tc, F.act(v) > 0, d.hidden(v) > 0);
+    verifyEqual(tc, find(F.act > 0, 1), 6);
+    G = F.gain_ant(:, v); h = d.hidden(6);
+    off = G(h, :) - median(G(setdiff(1:q.n_rx, h), :), 1);
+    verifyLessThan(tc, mean(off(16:20)), mean(off(1:5)) - 3);          % the loss has deepened
+    found = found + 1;
+    if found == 2, break; end
+end
+verifyEqual(tc, found, 2);
+close_system(mdl, 0);
+end
+
+function test_onset_shape(tc)
+% The shape of a lost branch's onset from the per-antenna gains: a step against a ramp; no
+% fall, no statistic; the latched cause, the two classes' probability handed to it while the
+% branch stays lost, its reset once the branch has recovered for heal cycles.
+rng(11);
+n = 16; G = 0.3 * randn(n, 3);
+Gs = G; Gs(9:end, 2) = Gs(9:end, 2) - 15;                            % a step at cycle 9
+Gr = G; Gr(:, 2) = Gr(:, 2) - 15 * min(1, max(0, ((1:n)' - 5) / 10));   % a ramp over 10 cycles from cycle 6
+[xs, Fs] = onset_shape(permute(Gs, [3 2 1])); [xr, Fr] = onset_shape(permute(Gr, [3 2 1]));
+verifyEqual(tc, [Fs.ant Fs.tau Fs.R], [2 9 1]); verifyEqual(tc, xs(1), 1); verifyLessThan(tc, xs(2), 2);
+verifyEqual(tc, Fr.ant, 2); verifyEqual(tc, Fr.R, 10, 'AbsTol', 1); verifyGreaterThan(tc, xr(2), 2); verifyLessThan(tc, xr(1), 0.2);
+verifyEqual(tc, onset_shape(permute(G, [3 2 1])), [0 0]);             % no fall
+verifyEqual(tc, onset_shape(permute(Gs(1:3, :), [3 2 1])), [0 0]);     % too short a window
+verifyEqual(tc, onset_shape('names'), {'os_rate', 'os_glr'});
+nm = temporal_evidence('names', 2); nF = numel(link_features('names'));
+x = temporal_evidence(repmat([0.5 0.5], 1, 1, n), permute(Gr, [3 2 1]), zeros(1, nF, n));
+verifyEqual(tc, x(ismember(nm, {'os_rate', 'os_glr'})), xr, 'AbsTol', 1e-12);
+cls = {'none', 'antenna_fault', 'airframe_shadowing'};
+L = 0.3 * randn(30, 3); Ls = L; Ls(10:24, 2) = Ls(10:24, 2) - 15;     % a fault from cycle 10, back at 25
+[pl, cause] = onset_shape('sequence', Ls, repmat([0.1 0.4 0.5], 30, 1), cls, 5);   % the fusion leans to shadowing
+verifyEqual(tc, cause(1:10)', zeros(1, 10));
+k = find(cause > 0, 1); verifyLessThanOrEqual(tc, k, 15);
+verifyEqual(tc, unique(cause(k:24))', 1);
+verifyEqual(tc, pl(k:24, :), repmat([0.1 0.9 0], 24 - k + 1, 1), 'AbsTol', 1e-12);
+verifyEqual(tc, cause(end), 0);                                       % reset after 5 healthy cycles
+Lr = L; Lr(:, 2) = Lr(:, 2) - 15 * min(1, max(0, ((1:30)' - 5) / 12));
+[pl, cause] = onset_shape('sequence', Lr, repmat([0.1 0.5 0.4], 30, 1), cls, 5);
+verifyEqual(tc, cause(end), 2);
+verifyEqual(tc, pl(end, :), [0.1 0 0.9], 'AbsTol', 1e-12);
+pn = repmat([0.8 0.1 0.1], 30, 1);
+verifyEqual(tc, onset_shape('sequence', Lr, pn, cls, 5), pn);         % a fused 'none' stays
+st = []; c1 = zeros(30, 1);
+for t = 1:30, [st, ~, c1(t)] = onset_shape('latch', st, Lr(t, :), [0.1 0.5 0.4], cls, 5); end
+verifyEqual(tc, c1, cause);                                           % one cycle at a time: the same
+% the threshold: the statistic at the diagnosis, chosen on validation, 0 without a choice
+verifyLessThan(tc, onset_shape('events', Ls), 0); verifyGreaterThan(tc, onset_shape('events', Lr), 0);
+verifyTrue(tc, isnan(onset_shape('events', L)));                       % no event
+verifyEqual(tc, onset_shape('choose', [-5 -3 -2 1 2 4], [1 1 1 2 2 2]), 0);
+verifyEqual(tc, onset_shape('choose', [-6 -4 -3 -2 -1 3], [1 1 1 2 2 2]), -2.25);
+verifyEqual(tc, onset_shape('choose', [-6 -4], [1 1]), 0);              % one cause only
+verifyEqual(tc, [onset_shape('threshold', struct('os_thr', -1.5)), onset_shape('threshold', [])], [-1.5 0]);
+[~, c3] = onset_shape('sequence', Lr, repmat([0.1 0.5 0.4], 30, 1), cls, 5, 1e3);   % above every ramp: a step
+verifyEqual(tc, c3(end), 1);
+verifyNotEmpty(tc, strfind(fileread(which('select_fusion')), 'FM.os_thr = onset_shape(''choose'', og, oy);'));
+end
+
+function test_monitor_onset_latch(tc)
+% The monitor keeps the cause read from the onset of a lost branch while it stays lost (one
+% block calling onset_shape.m): an open connector reads antenna_fault once its onset is read,
+% though the fused class leans to airframe shadowing.
+A = policy_actions(); nF = numel(link_features('names'));
+PP = struct('actions', {A}, 'classes', {{'none', 'antenna_fault', 'airframe_shadowing'}}, 'maha_thr', -Inf, ...
+    'sps', 4, 'bps', 2);
+mem = policy_monitor('init', 1, numel(A));
+rng(2); G = 0.3 * randn(30, 3); G(10:end, 2) = G(10:end, 2) - 18;
+cl = cell(1, 30);
+for t = 1:30
+    obs = struct('probs', [0.1 0.4 0.5], 'unknown', false, 'feat', zeros(1, nF), 'gant', G(t, :), 'maha', 0);
+    obs.feat(feature_index('log_ber')) = -6;
+    [mem, M] = policy_monitor('update', mem, obs, PP, find(strcmp(A, 'no_action')));
+    cl{t} = M.cls{1};
+end
+verifyEqual(tc, cl(1:9), repmat({'airframe_shadowing'}, 1, 9));
+verifyEqual(tc, unique(cl(15:30)), {'antenna_fault'});
+verifyEqual(tc, numel(strfind(fileread(which('policy_monitor')), 'onset_shape(''latch''')), 1);
+end
+
+function test_event_frame_pools(tc)
+% A rolling-in flight of the pools: the episode's onset reads the run's frame where the
+% airframe enters the line of sight (PP.event_frame), the cycles before it the same flight's
+% clean link before the event, beyond the run's end its last 10 frames; its per-flight tables
+% read the run from that frame on (event_rows.m).
+A = policy_actions(); nA = numel(A); fn = link_features('names');
+n = 38; E0 = 11;
+PP = struct('actions', {A}, 'scen', {{'none', 'airframe_shadowing'}}, 'ebno', 9, 'runs', {{101}}, 'F_SUB', 20, ...
+    'event_frame', {{E0}}, 'classes', {{'none', 'airframe_shadowing'}}, 'feat_names', {fn}, 'maha_thr', 0, ...
+    'clean', 1e-6, 'clean_fer', 0, 'gp', ones(1, nA), 'bw', ones(1, nA), 'pw', ones(1, nA), 'sps', 4, 'bps', 2);
+PP.pools = cell(2, 1, nA, 1);
+for sc = 1:2
+    F = zeros(n, numel(fn)); F(:, 1) = (1:n)' + 100 * sc;            % which frame of which cell was read
+    b = zeros(n, 1); if sc == 2, b(1:E0 - 1) = 0.1; end             % only the frames before the event are bad
+    for a = 1:nA
+        PP.pools{sc, 1, a, 1} = struct('ber', b, 'fer', single(b > 0), 'run', 101 * ones(n, 1), ...
+            'probs', repmat([sc == 1, sc == 2], n, 1), 'maha', ones(n, 1), 'feat', F, 'act', double((1:n)' >= E0) * (sc == 2));
+    end
+end
+K = link_env('tables', PP);
+verifyTrue(tc, K.healthy(2, 1, 1, 1));                               % the event's frames alone
+verifyTrue(tc, K.on(2, 1, 1, 1));
+verifyEqual(tc, event_rows(PP.pools{2, 1, 1, 1}, 101, E0)', (1:n) >= E0);
+for on = [3 10]
+    spec = struct('scn', 2, 's', 1, 'onset', on, 'follow', false, 'fdelay', 2, 'unk', false, 'T', 40, 'r', 1);
+    [E, obs] = link_env('reset', PP, K, spec, 1, RandStream('mt19937ar', 'Seed', 1));
+    rd = obs.feat(1);
+    for t = 1:39
+        [E, ~, obs] = link_env('step', E, PP, K, find(strcmp(A, 'no_action')));
+        rd(end+1) = obs.feat(1); %#ok<AGROW>
+    end
+    verifyEqual(tc, rd(1:on), 100 + (E0 - on:E0 - 1));                 % the same flight before the event
+    verifyEqual(tc, rd(on + 1), 200 + E0);                            % the onset reads the event's frame
+    q = (0:39) + E0 - 1 - on; q(q >= n) = n - 10 + mod(q(q >= n) - n, 10);
+    verifyEqual(tc, rd(on + 1:end), 200 + q(on + 1:end) + 1);
+end
+end
+
+function test_det_frames_onset(tc)
+% DET of an antenna fault is read after the same flight's clean link (the connector's step
+% between them); age counts the cycles since the threat's first frame on the air; the
+% monitor's class takes the cause latched from the onset (onset_shape.m), the fused class
+% alone does not.
+cls = {'none', 'antenna_fault', 'airframe_shadowing'}; nf = numel(link_features('names'));
+ok = [strcmp(cls, 'antenna_fault'); ismember(cls, {'antenna_fault', 'airframe_shadowing'})];
+rng(1); Gc = 0.3 * randn(10, 3); Gf = 0.3 * randn(10, 3); Gf(:, 2) = Gf(:, 2) - 18;
+mk = @(pr, G, act) struct('probs', repmat(pr, 10, 1), 'run', 101 * ones(10, 1), 'gant', G, 'feat', zeros(10, nf), ...
+    'ber', zeros(10, 1), 'act', act * ones(10, 1));
+PP = struct('classes', {cls}, 'fuse', [], 'fuse_N', 4, 'sps', 2, 'bps', 2);
+[hit, on, hit_f, age] = det_frames(mk([0.1 0.4 0.5], Gf, 1), mk([1 0 0], Gc, 0), 'antenna_fault', ok, PP);
+verifyEqual(tc, age', 0:9); verifyTrue(tc, all(on));
+verifyFalse(tc, any(hit_f(:, 1)));                                    % the fused class leans to shadowing
+verifyTrue(tc, all(hit(5:end, 1)));                                   % the cause latched from the step
+verifyTrue(tc, all(hit(:, 2) & hit_f(:, 2)));                         % the branch level either way
+[~, ~, ~, age] = det_frames(mk([0.1 0.4 0.5], Gf, 1), [], 'airframe_shadowing', ok, PP);
+verifyEqual(tc, age', 0:9);
+end
+
+function test_onset_recipes(tc)
+% The dataset, the second test set, B4 and B4s fly the fault's and the shadowing's onsets
+% inside their sub-runs as path loss does (frames before them clean), and those cells fly
+% N_SUB F_SUB over the mean frames from an onset; the pools roll the shadowing flights in.
+txt = fileread(which('run_dataset_sweep'));
+verifyNotEmpty(tc, strfind(txt, 'p.fault_onset_frames = p0.pl_onset_det;'));
+verifyNotEmpty(tc, strfind(txt, 'p.roll_in_frames = p0.pl_onset_det;'));
+verifyNotEmpty(tc, strfind(txt, 'round(N_SUB * F_SUB / on_frames)'));
+for f = {'eval_unseen_snr', 'eval_unseen_severity'}
+    s = fileread(which(f{1}));
+    verifyNotEmpty(tc, strfind(s, 'p0.fault_onset_frames = p0.pl_onset_det;'), f{1});
+    verifyNotEmpty(tc, strfind(s, 'p0.roll_in_frames = p0.pl_onset_det;'), f{1});
+end
+p = base_params();
+verifyEqual(tc, p.fault_onset_frames, [1 1]); verifyEmpty(tc, p.roll_in_frames); verifyEqual(tc, p.shadow_evt_db, 5);
+verifyEqual(tc, threat_active('antenna_fault', [0 0 1 1 1], 1:5, 10), logical([0 0 1 1 1]));
+verifyEqual(tc, threat_active('airframe_shadowing', [0 1 1 0 1], 1:5, 10), logical([0 1 1 0 1]));
+verifyEqual(tc, fusion_target([1 1 2 2 2], ones(1, 5), 1:5, 4, {'none', 'antenna_fault', 'path_loss'})', [1 1 2 2 2]);
+C = decision_config();
+verifyEqual(tc, [C.event_frame C.event_run C.event_count], [11 38 30]);
+verifyEqual(tc, C.event_run, C.event_frame - 3 + 30);                % the latest onset's lead-in, the earliest's 27 cycles
+src = fileread(which('build_policy_pools'));
+verifyNotEmpty(tc, strfind(src, '''event_frame'', C.event_frame, ''frames'', C.event_count'));
+verifyNotEmpty(tc, strfind(src, 'g(sp).frames(ref{sp}) = C.event_run; g(sp).event(ref{sp}) = C.event_frame;'));
+verifyNotEmpty(tc, strfind(fileread(which('build_check_pools')), '''event_frame'', C.event_frame, ''frames'', C.event_count'));
 end

@@ -7,7 +7,7 @@ function varargout = fuse_classes(cmd, varargin)
 %       evidence of every frame of split S (fields run, pos, gain_ant, feats_raw,
 %       feat_names, and idle: frames x 24, the record of the idle time before each frame,
 %       idle_summary.m, when present) from the frames of its own sub-run at positions
-%       pos-N+1..pos (causal); probs frames x C. Z is frames x (C + 9 + 42 + C):
+%       pos-N+1..pos (causal); probs frames x C. Z is frames x (C + 11 + 42 + C):
 %       temporal_evidence.m's columns, window_cues.m's (the branch cues, the step of the
 %       received level, the idle time), then log(max(p, 1e-6)) of the frame's own
 %       probabilities, so a threat that hits single frames (a sweeping jammer crossing the

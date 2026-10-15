@@ -18,7 +18,7 @@ function R = emitter_reading(va, te, classes, N, inr)
 %   A two-class logistic regression (fuse_classes.m's fit) on the branch cues of
 %   window_cues.m with and without these, fitted on the validation frames, read on the test
 %   frames. The thermal floor alone carries no such cue: a matched attenuator at 290 K keeps
-%   it (D83), and against an antenna temperature below 290 K it rises by at most about 1 dB
+%   it, and against an antenna temperature below 290 K it rises by at most about 1 dB
 %   (noise figure 5 dB), inside the +-2 dB calibration error.
 cls = cellstr(string(classes));
 iF = find(strcmp(cls, 'antenna_fault')); iS = find(strcmp(cls, 'airframe_shadowing'));

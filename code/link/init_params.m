@@ -160,6 +160,7 @@ params.pl_onset_det  = [2 11];      % the detector's 20-frame sub-runs: a clean 
 % |S21| = 2 w C Z0 gives 26-36 dB for 0.03-0.01 pF at 2.4 GHz (no measurement of this
 % depth was found). Levels 5-31 dB, evenly spread (no source gives their distribution).
 params.fault_atten_db = 18;         % Antenna Fault: loss of the faulty antenna [dB], nominal level
+params.fault_onset_frames = [1 1]; % frame at which the connector opens, drawn per run in the range: a step within one frame ([1 1]: from the first frame, the pools' cells, whose episodes set their own onset)
 % Spoofing: a counterfeit GCS on the same radio as ours (Mekdad et al.); its power over our
 % signal is set by geometry: 30 dB is a spoofer 31 times closer to the UAV than the GCS
 % (it captures the receiver from a 0.2-3 dB advantage, Whitehouse et al.).
@@ -204,6 +205,25 @@ params.shadow_fit      = [12.4 0.25 4.4];   % C-band median loss at that roll [d
 params.shadow_fit_z    = 1.96;      % half width of the fit's band [sigma]: two-sided 95%
 params.shadow_hdg_deg  = 30;        % [deg] smallest heading-to-GCS-azimuth difference of a shadowing event
 params.shadow_v_min    = 8;         % [m/s] no shadowing below it (hover and position holding in wind; Khawaja et al.'s slowest flying UAV)
+% Onset: a bank is entered over a finite roll-in, so the airframe enters the line of sight
+% as the roll grows: the event starts where the GCS lies on the belly's horizon and reaches
+% its level at the turn's bank (the event's largest roll, the band above). Within it the
+% loss follows Sun et al.'s shape of an event (Part IV, Sec. IV-C, eq. 8: a cubic spline
+% through (0, 0), (0.5, 1), (1, 0) of the event's duration, its rising half), the progress
+% being the roll's between the two (shadow_frame.m); no source measures the loss against time
+% on a small UAV, so tying the shape to the roll-in is an assumption, and so is the K-factor
+% moving from the antenna's own to the shadow's with the same shape. An event counts while
+% the loss is at least 5 dB (Sun et al., Sec. III, their third criterion). The roll-in: level
+% flight, then a constant roll rate up to the bank (turn_attitude.m), the rate uniform from
+% the measured roll-in of a small UAV (Allen & Lin, Fig. 12, digitised: 0 to 30 deg in about
+% 1.6 s) to the largest rate measured over a window as long as the roll-in (Gross et al.,
+% Fig. 4, digitised: 45.4 deg/s over 0.5 s, 35.5 deg/s over 1 s; roll_rate.m). Only the
+% flights whose shadowing onset the data place roll in (p.roll_in_frames, the pools' event
+% frame); every other flight holds its bank.
+params.shadow_evt_db   = 5;         % [dB] smallest loss of a counted event (Sun et al., Sec. III)
+params.roll_rate_lo    = 30 / 1.6;  % [deg/s] measured roll-in of a small UAV (Allen & Lin, digitised)
+params.roll_rate_win   = [0.5 45.4; 1 35.5];   % [s deg/s] largest roll rate over a window (Gross et al., digitised)
+params.roll_in_frames  = [];        % frame of the shadowing onset (a loss reaching shadow_evt_db) drawn per flight in this range; [] no roll-in
 
 % Benign Interference: packet traffic of a WLAN in our channel, not an attack.
 % Frames of 0.27-3.2 ms and channel occupancy 5-86% (Wollenberg et al.; field duty

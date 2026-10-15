@@ -126,6 +126,13 @@ mem.good(~M.degraded) = mem.good(~M.degraded) + 1; mem.good(M.degraded) = 0;
 mem.deg_n(M.degraded) = mem.deg_n(M.degraded) + 1; mem.deg_n(~M.degraded) = 0;
 mem.tried(mem.good >= C.heal, :) = false;
 [mem, pf, te, unk] = fusion(mem, obs, PP);
+% Latched cause of a lost branch (onset_shape.m): read from the shape of its onset, a
+% step (antenna_fault) or a ramp (airframe_shadowing), and kept while the branch stays lost
+if ~isfield(mem, 'os'), mem.os = []; end
+if isfield(obs, 'gant') && ~isempty(obs.gant)
+    FZ = []; if isfield(PP, 'fuse'), FZ = PP.fuse; end
+    [mem.os, pf] = onset_shape('latch', mem.os, obs.gant, pf, PP.classes, C.heal, onset_shape('threshold', FZ));
+end
 M.probs = pf; M.te = te;
 [~, k] = max(pf, [], 2);
 cls = PP.classes(k);
@@ -190,12 +197,11 @@ end
 mem.wp = cat(3, mem.wp(:, :, 2:end), obs.probs); mem.wg = cat(3, mem.wg(:, :, 2:end), g);
 mem.wf = cat(3, mem.wf(:, :, 2:end), obs.feat); mem.wu = [mem.wu(:, 2:end), mh];
 mem.wn = min(mem.wn + 1, W);
-% --- D85 obs: the record of each cycle's idle time (idle_summary.m), NaN when the frame has none
+% The record of each cycle's idle time (idle_summary.m), NaN when the frame has none
 nI = numel(idle_summary('names')); id = nan(NE, nI);
 if isfield(obs, 'idle') && ~isempty(obs.idle), id = double(obs.idle); end
 if ~isfield(mem, 'wi') || isempty(mem.wi), mem.wi = nan(NE, nI, W); end
 mem.wi = cat(3, mem.wi(:, :, 2:end), id);
-% --- end D85 obs
 nC = size(obs.probs, 2);
 pf = obs.probs; te = zeros(NE, numel(temporal_evidence('names', nC)) - nC);
 for n = unique(mem.wn)                                     % episodes with the same filled window length
@@ -204,7 +210,7 @@ for n = unique(mem.wn)                                     % episodes with the s
     Z = temporal_evidence(mem.wp(e, :, k), mem.wg(e, :, k), mem.wf(e, :, k));
     te(e, :) = Z(:, nC + 1:end);
     if isfield(PP, 'fuse') && ~isempty(PP.fuse)                  % with the current frame's own evidence (fuse_classes.m)
-        Zc = window_cues(mem.wg(e, :, k), mem.wf(e, :, k), mem.wi(e, :, k));   % D85 obs: branch, level step, idle time
+        Zc = window_cues(mem.wg(e, :, k), mem.wf(e, :, k), mem.wi(e, :, k));   % branch, level step, idle time
         pf(e, :) = fuse_classes('apply', PP.fuse, [Z, Zc, log(max(double(mem.wp(e, :, W)), 1e-6))]);
     end
     ku = W - min(n, Nu) + 1:W;

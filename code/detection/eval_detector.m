@@ -216,6 +216,49 @@ branch = struct('classes', {bnames}, 'macro_f1_above_threshold_pct', 100 * macro
 fprintf(['Branch level, beside KPI 1 (antenna fault and airframe shadowing as one branch lost): above the threshold ' ...
     'macro-F1 %.2f%%; one branch lost found in %.2f%% of its frames (%.2f%% above the threshold)\n'], ...
     branch.macro_f1_above_threshold_pct, branch.lost_recall_pct, branch.lost_recall_above_threshold_pct);
+% Beside KPI 1: an antenna fault and airframe shadowing with their onset in the fusion window
+% (the frames up to N - 1 cycles after the sub-run's first frame of the class) and after it,
+% by the fused class and by the monitor's class, the cause latched from the shape of the
+% lost branch's onset (onset_shape.m, policy_monitor.m): the onset's shape is read at the
+% event's start, the latched cause after it
+Nw = 1; if ~isempty(fus), Nw = fus.N; end
+y_latch = Y_pred;
+onset_cue = struct('class', {}, 'n', {}, 'recall_fused_pct', {}, 'recall_latched_pct', {}, 'as_other_fused_pct', {}, ...
+    'as_other_latched_pct', {});
+if isfield(sp.test, 'gain_ant') && isfield(sp.test, 'pos')
+    BR = {'antenna_fault', 'airframe_shadowing'};
+    pf_all = double(Y_pred_prob');
+    [~, ~, rid] = unique(sp.test.run(:));
+    byrun = accumarray(rid, (1:numel(rid))', [], @(v) {v});
+    age = nan(numel(Y_test), 1);
+    os_thr = 0; if ~isempty(fus), os_thr = onset_shape('threshold', fus.FM); end   % chosen on validation (select_fusion.m)
+    for r = 1:numel(byrun)
+        ix = byrun{r}; [~, o] = sort(sp.test.pos(ix)); ix = ix(o);
+        [~, kk] = max(onset_shape('sequence', sp.test.gain_ant(ix, :), pf_all(ix, :), cls_names, decision_config().heal, ...
+            os_thr), [], 2);
+        y_latch(ix) = categorical(cls_names(kk), cls_names);
+        for b = 1:2
+            j0 = find(Y_test(ix) == BR{b}, 1);
+            if ~isempty(j0), age(ix(j0:end)) = sp.test.pos(ix(j0:end)) - sp.test.pos(ix(j0)); end
+        end
+    end
+    for b = 1:2
+        m = Y_test == BR{b}; ot = BR{3 - b};
+        w = m & age < Nw; a = m & age >= Nw;
+        rc = @(y, k) 100 * [mean(y(w) == k), mean(y(a) == k)];
+        onset_cue(end+1) = struct('class', BR{b}, 'n', [sum(w), sum(a)], 'recall_fused_pct', rc(Y_pred, BR{b}), ...
+            'recall_latched_pct', rc(y_latch, BR{b}), 'as_other_fused_pct', rc(Y_pred, ot), ...
+            'as_other_latched_pct', rc(y_latch, ot)); %#ok<SAGROW>
+    end
+    fprintf(['A lost branch, beside KPI 1: recall with the onset in the %d-cycle window | after it, fused class -> with ' ...
+        'the latched cause (read as the other branch class)\n'], Nw);
+    for q = onset_cue
+        fprintf('  %-20s %5.1f%% -> %5.1f%% (%4.1f%% -> %4.1f%%), %d frames | %5.1f%% -> %5.1f%% (%4.1f%% -> %4.1f%%), %d frames\n', ...
+            q.class, q.recall_fused_pct(1), q.recall_latched_pct(1), q.as_other_fused_pct(1), q.as_other_latched_pct(1), ...
+            q.n(1), q.recall_fused_pct(2), q.recall_latched_pct(2), q.as_other_fused_pct(2), q.as_other_latched_pct(2), q.n(2));
+    end
+end
+
 % Beside KPI 1, never in it: the cause of a lost branch where an emitter of opportunity is on
 % the air in the idle time, per condition (emitter_reading.m: fitted on validation)
 Pe = load('params.mat'); NW = 12; if ~isempty(fus), NW = fus.N; end
@@ -242,7 +285,8 @@ fprintf('Saved results/confusion_matrix%s.png and results/accuracy_vs_snr%s.png\
 % class, and to the confirmed alarm (a hostile fused class, not none or
 % benign_interference, on m of the last n cycles, decision_config.m confirm; the
 % monitor's degradation path is not part of this detector reading). A sub-run starts with
-% the threat (its window holds no clean frame), but for a path-loss step, whose onset lies inside it.
+% the threat (its window holds no clean frame), but for a path-loss step, an antenna fault
+% and airframe shadowing, whose onsets lie inside it.
 Cd = decision_config();
 Nf = 1; if ~isempty(fus), Nf = fus.N; end
 fullw = rk(:) >= Nf;
@@ -326,6 +370,7 @@ metrics = struct( ...
     'ci95', ci95, 'steady', steady, 'onset', onset, 'branch', branch, 'emitter', emitter, 'prevalence', prevalence, ...
     'beyond', beyond_rep, 'path_loss_rx', path_loss_rx, 'ebno_rule', ['received Eb/N0 (configured, less a path-loss ' ...
     'step after its onset); a path_loss target at the Eb/N0 of its onset']);
+metrics.onset_cue = onset_cue;
 if ~isempty(fus)
     metrics.fusion_cycles = fus.N;
     metrics.per_frame = struct('accuracy_pct', frame_acc, 'macro_f1_pct', frame_f1, 'class_f1_pct', frame_class_f1);
@@ -363,7 +408,7 @@ end
 save(['results/eval_detector_metrics' tag '.mat'], 'metrics');
 fprintf('Saved results/eval_detector_metrics%s.mat (for KPI aggregation)\n', tag);
 % Per-frame outcomes for the breakdown of weak points (analyze_weak_points.m)
-pred = struct('y_true', Y_test, 'y_pred', Y_pred, 'ebno', snr_vals(:), 'ebno_kpi', eb_kpi(:), 'ebno_rx', eb_rx(:), ...
+pred = struct('y_true', Y_test, 'y_pred', Y_pred, 'y_latched', y_latch, 'ebno', snr_vals(:), 'ebno_kpi', eb_kpi(:), 'ebno_rx', eb_rx(:), ...
     'level', sp.test.level(:), 'speed', sp.test.speed(:), 'run', sp.test.run(:), 'rank', rk(:));
 for f = {'pos', 'k_db', 'aoa'}
     if isfield(sp.test, f{1}), pred.(f{1}) = sp.test.(f{1}); end

@@ -28,9 +28,11 @@ function [R, A, info] = idle_rssi(p, ctx, ion, pos, opt)
 %   our frame); each emitter's power is the block's (its level, the in-band cap on the run's
 %   reference); its channel to each antenna is the block's sum of sinusoids, the first draws
 %   of the block's stream in its own order (threat_script: a faulty antenna, each
-%   component's own draws then its 32 sinusoids, the chain errors, the delay line's taps),
-%   at the bin's centre, with the heading's turn and the pitch wobble; a faulty connector
-%   attenuates the antenna's whole field ahead of the fixed thermal floor.
+%   component's own draws then its 32 sinusoids, the chain errors, the delay line's taps,
+%   the path-loss step's and the connector's onset frames), at the bin's centre, with the
+%   heading's turn and the roll (turn_attitude.m: a roll-in included) and the pitch wobble;
+%   a faulty connector attenuates the antenna's whole field ahead of the fixed thermal
+%   floor from the idle time after its onset frame (the step falls in that frame).
 %   Measurement (Grimaldi et al. 2019, CC2420 on TelosB): a sample every 54 us, the mean
 %   power over the last 128 us (Sec. II-B), 1 dB steps (Table III); the estimate of a
 %   noise-like field over that time is Gamma(M, 1) / M times its mean, M = B x 128 us
@@ -48,7 +50,7 @@ NT = 1 + p.tdl * floor(p.tdl_max_ns / p.tdl_step_ns); S = round(p.tdl_step_ns * 
 NBI = max(0, floor((round(p.cycle_s * fs) - Ns - (NT - 1) * S) / (fs * TB)));
 nf = numel(pos);
 R = nan(NBI, nr, nf); A = nan(1, nf);
-info = struct('NBI', NBI, 'TB', TB, 'hit', 0);
+info = struct('NBI', NBI, 'TB', TB, 'hit', 0, 'af_on', 1);
 if NBI == 0, return; end
 M = max(1, round(p.symbol_rate * (1 + p.rolloff) * p.idle_rssi_avg_s));
 wa = max([p.idle_rssi_avg_s / TB - 2, 1, 1], 0); wa = fliplr(wa / sum(wa));   % bins q, q-1, q-2 of the average
@@ -78,6 +80,14 @@ end
 if NT > 1
     for c = 1:nc, fT{c} = cos(2*pi*rand(tb, 32, nr, NT - 1)); pT{c} = 2*pi*rand(tb, 32, nr, NT - 1); end
 end
+if ismember('path_loss', sig), rand(tb); end              % the path-loss step's onset frame
+af_on = 1;                                                % the connector's onset frame
+if ismember('antenna_fault', sig)
+    fo = p.fault_onset_frames([1 end]);
+    af_on = fo(1);
+    if fo(2) > fo(1), af_on = fo(1) + floor((fo(2) - fo(1) + 1) * rand(tb)); end
+end
+info.af_on = af_on;
 % ---- each component's power per sample (model units, before the Level gain) ----
 PL = 0; if ismember('path_loss', sig), PL = p.path_loss_db; end
 P = zeros(1, nc); kind = zeros(1, nc);                    % kind: 1 noise-like, 2 tone, 0 silent in the idle time
@@ -88,8 +98,8 @@ for c = 1:nc
     cf = 1; if isfinite(p.inband_cap_db), cf = min(1, inband_cap_amp(Lr, PL, p.inband_cap_db) * ctx.cap); end
     P(c) = 10^(L / 10) * wsc * cf^2;
 end
-Gf = abs(gch).^2;
-if info.hit > 0, Gf(info.hit) = Gf(info.hit) * 10^(-p.fault_atten_db / 10); end
+G0 = abs(gch).^2; Ga = G0;
+if info.hit > 0, Ga(info.hit) = Ga(info.hit) * 10^(-p.fault_atten_db / 10); end
 % ---- bins ----
 ms = seed_stream_of(ctx.seed);
 Rr = zeros(nr); for i = 1:nr, for j = 1:nr, Rr(i, j) = ctx.rho^abs(i - j); end, end
@@ -104,6 +114,8 @@ for j = 1:nf
     if k < 2, continue; end
     ga0 = (k - 1) * cyc - cyc + Ns / fs;                      % the previous frame's end on the channel clock
     tq = ga0 + ((1:NBI)' - 0.5) * TB;
+    [~, rq, dq] = turn_attitude(att, ctx.yaw, tq);           % roll and heading change at each bin
+    Gf = G0; if k - 1 >= af_on, Gf = Ga; end
     pw = zeros(NBI, nr); pt = zeros(NBI, nr); on_any = zeros(NBI, 1);
     for c = 1:nc
         s = on_share(addc{c}, p, ctx, ion, slot(c), k, ga0, NBI, TB);
@@ -111,9 +123,9 @@ for j = 1:nf
         if kind(c) == 0 || P(c) == 0 || ~any(s > 0), continue; end
         th = att(4) + att(5) * sin(2*pi*att(6)*tq + att(7));
         sw = lk * sind(th);
-        sI = sind(ctx.aoa(c) + ctx.yaw * tq);
+        sI = sind(ctx.aoa(c) + dq);
         aI = exp(-1j * 2*pi * p.ant_spacing_wl * (cosd(th) .* sI) * apos);
-        lI = exp(1j * (2*pi*ctx.fd*sind(ctx.aoa(c)) * tq * ild + lk * cosd(att(3)) * sI .* sind(th)));
+        lI = exp(1j * (2*pi*ctx.fd*sind(ctx.aoa(c)) * tq * ild + lk * cosd(rq) .* sI .* sind(th)));
         D0 = zeros(NBI, nr);
         for a = 1:nr
             D0(:, a) = exp(1j * (2*pi*tq*(ctx.fd*fI{c}(:, a)') + sw*fI{c}(:, a)' + pI{c}(:, a)')) * ones(32, 1) / sqrt(32);
