@@ -1508,7 +1508,7 @@ function test_ood_halves_stratified(tc)
 % layout: every (class, Eb/N0) and (class, level) has sub-runs in both halves, the halves
 % differ by at most one sub-run per (class, Eb/N0), and a class with one sub-run per cell is
 % a checkerboard over level and Eb/N0.
-NS = [6 6 6 6 6 6 13 11 8 8]; EB = 0:3:15; nL = 8; nC = numel(NS);
+NS = [6 6 6 6 6 13 10 46 8 8]; EB = 0:3:15; nL = 8; nC = numel(NS);
 cls = [{'none'}, compose('t%d', 1:nC)];
 run = []; y = []; eb = []; lv = []; rid = 0;
 for c = 1:nC
@@ -2995,21 +2995,29 @@ end
 
 function test_dataset_balance(tc)
 % Every class keeps its labelled frames: a path-loss cell N_SUB F_SUB / (TW - 1) sub-runs
-% (9 labelled frames of 20), the WLAN N_SUB over its labelled share (frames: about 0.58, 10;
-% decision cycles with idle sensing: above 0.8, at most 7), the sweeper over its; the extra
-% sub-runs go round the folds from cell to cell, each level starting one fold further, so
-% every fold holds about the same share of every Eb/N0 point.
+% (9 labelled frames of 20), the WLAN N_SUB over its labelled share by the frame rule, the
+% per-frame network's labels (about 0.58, 10), which holds the per-cycle labels' need too
+% (above 0.8, at most 7), the sweeper over its (about 0.13, 46; per cycle about 0.56, 11);
+% the extra sub-runs go round the folds from cell to cell, each level starting one fold
+% further, so every fold holds about the same share of every Eb/N0 point.
 p = base_params(); q = p; q.idle_rssi_hz = 0;
 h = benign_hit_share(q);                                % the dataset's: 3000 runs of 20 frames
 verifyGreaterThan(tc, h, 0.5); verifyLessThan(tc, h, 0.65);
 verifyEqual(tc, round(6 / h), 10);
 hc = benign_hit_share(p);                               % per decision cycle (threat_active.m with act_idle)
 verifyGreaterThan(tc, hc, 0.8); verifyLessThanOrEqual(tc, round(6 / hc), 7);
+verifyEqual(tc, max(round(6 / h), round(6 / hc)), 10);
+hs = sweep_hit_share(q); hsc = sweep_hit_share(p);
+verifyLessThan(tc, hs, hsc);
+verifyEqual(tc, max(round(6 / hs), round(6 / hsc)), round(6 / hs));
+verifyEqual(tc, round(6 / hs), 46, 'AbsTol', 3);
 txt = fileread(which('run_dataset_sweep'));
 verifyNotEmpty(tc, regexp(txt, 'round\(N_SUB \* F_SUB / \(TW - 1\)\)', 'once'));
-verifyNotEmpty(tc, regexp(txt, 'round\(N_SUB / wlan\)', 'once'));
+verifyNotEmpty(tc, strfind(txt, 'q           = p0; q.idle_rssi_hz = 0;'));
+verifyNotEmpty(tc, strfind(txt, 'max(round(N_SUB / hit_f), round(N_SUB / hit))'));
+verifyNotEmpty(tc, strfind(txt, 'max(round(N_SUB / wlan_f), round(N_SUB / wlan))'));
 verifyNotEmpty(tc, regexp(txt, 'FOLD\(nk \+ lv - 1\)', 'once'));
-for ns = [8 11 13]                                      % fault and shadowing, sweeper, path loss
+for ns = [8 10 13 46]                                   % fault and shadowing, WLAN, path loss, sweeper
     k = 0; fo = zeros(8, 6, ns);                        % 8 levels x 6 Eb/N0 points x ns sub-runs
     for lv = 1:8
         for e = 1:6
@@ -3182,11 +3190,12 @@ verifyEqual(tc, Q.fpr(:)', [1 0]);
 end
 
 function test_ood_loto_split(tc)
-% The frames of one held-out threat: it never trains, stops the training or fits a model;
-% the known windows of the selection come from the other half of the validation sub-runs,
-% the halves a checkerboard over level and Eb/N0 within each class; the labels are the
-% frame rule's; the reading is the second test set, z-scored with the known training
-% frames' statistics.
+% The frames of one held-out threat: no frame of its sub-runs trains, stops the training,
+% fits a model or is read as known, the frames the frame rule calls clean included; the
+% known windows of the selection come from the other half of the validation sub-runs, the
+% halves a checkerboard over level and Eb/N0 within each class; the labels are the frame
+% rule's; the reading is the second test set, z-scored with the known training frames'
+% statistics.
 rng(12);
 cls = {'none', 'jamming', 'spoofing'};
 i = floor((0:59)' / 5); c = mod(i, 3) + 1;               % 12 sub-runs of 5 frames: none, jamming, spoofing, ...
@@ -3200,21 +3209,30 @@ sp = struct('train', mk(1), 'val', mk(101), 'norm', struct('feat_mean', [1 -1], 
 fresh = mk(201); fresh.X = fresh.X(:, :, :, 1:30); fresh.feats = fresh.feats(1:30, :);
 fresh.Y = fresh.Y(1:30); fresh.Y_frame = fresh.Y_frame(1:30); fresh.run = fresh.run(1:30); fresh.pos = fresh.pos(1:30);
 [tr, vfit, va, vk, te] = ood_loto_split(sp, fresh, 'jamming');
+jr = 1 + [1 4 7 10];                                     % the jamming sub-runs of the training split
 verifyEqual(tc, categories(tr.Y)', {'none', 'spoofing'});
-verifyEqual(tc, numel(tr.Y), 44);                                % with the jamming sub-runs' first frames
+verifyEqual(tc, numel(tr.Y), 40);                                % without the jamming sub-runs' clean first frames
+verifyFalse(tc, any(ismember(tr.run, jr)));
 verifyEqual(tc, mean(tr.feats, 1), [0 0], 'AbsTol', 1e-12);
 verifyEqual(tc, std(tr.feats, 0, 1), [1 1], 'AbsTol', 1e-12);
 verifyFalse(tc, any(vfit.Y == 'jamming'));
+verifyFalse(tc, any(ismember(vfit.run, 100 + jr)));
 verifyEqual(tc, va.sel, ismember(sp.val.run, 101 + [0 1 2 9 10 11]));   % per class: (level 1, 0 dB), (2, 3 dB)
-verifyTrue(tc, all(ismember(vfit.run, 101 + (3:8))));
-verifyEqual(tc, numel(vfit.Y), 22);
+verifyEqual(tc, va.own, ismember(sp.val.run, 100 + jr));
+verifyEqual(tc, te.own, ismember(fresh.run, 200 + jr));
+verifyTrue(tc, all(ismember(vfit.run, 101 + [3 5 6 8])));
+verifyEqual(tc, numel(vfit.Y), 20);
 verifyEqual(tc, numel(va.Y), 60);
-verifyEqual(tc, numel(vfit.Y) + sum(va.sel & va.Y ~= 'jamming'), 44);
+verifyEqual(tc, sum(va.Y ~= 'jamming' & va.own), 4);             % clean by the frame rule, not known
+verifyEqual(tc, numel(vfit.Y) + sum(va.sel & va.Y ~= 'jamming' & ~va.own), 40);
 verifyTrue(tc, all(vk.Y == 'jamming')); verifyEqual(tc, numel(vk.Y), 16);
 verifyEqual(tc, te.X, fresh.X);
 verifyEqual(tc, te.Y, fresh.Y_frame(:));
+src = fileread(which('eval_ood_detection'));
+verifyNotEmpty(tc, strfind(src, '''kn'', ismember(yv, known) & va.sel & ~va.own'));
+verifyNotEmpty(tc, strfind(src, '''kn'', ismember(yt, known) & ~te.own'));
 raw = @(f) f .* sp.norm.feat_std + sp.norm.feat_mean;
-k = sp.train.Y_frame ~= 'jamming';
+k = ~ismember(sp.train.run, jr);
 mu = mean(raw(sp.train.feats(k, :)), 1); sd = std(raw(sp.train.feats(k, :)), 0, 1);
 verifyEqual(tc, te.feats, (raw(fresh.feats) - mu) ./ sd, 'AbsTol', 1e-12);
 verifyEqual(tc, te.pos, fresh.pos);

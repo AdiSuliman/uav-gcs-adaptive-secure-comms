@@ -9,13 +9,15 @@
 % Severity levels: dataset_levels.m (8 per threat, spanning the decision layer's levels and
 % the survivability map, up to the sources' most severe values).
 % 'none' gets n_levels x N_SUB sub-runs per Eb/N0 (class balance). The sweeping jammer is
-% on our channel in a share of the decision cycles only (its sweep period and phase per
-% flight, jam_timing.m): its cells fly N_SUB over that share (sweep_hit_share.m), so its
+% on our channel in a share of the frames only (its sweep period and phase per flight,
+% jam_timing.m): its cells fly N_SUB over the share of the frames the frame rule labels
+% (sweep_hit_share.m without idle sensing), the labels of the per-frame network, so its
 % labelled frames match the other threats'; its other frames are clean frames. Likewise the
-% WLAN counts in the cycles with a packet on the air (benign_hit_share.m): N_SUB over that
-% share. With idle sensing (p.idle_rssi_hz) a cycle is the idle time before the frame and
-% the frame, and the gated threats are labelled while they are on the air anywhere in it
-% (threat_active.m, act_idle). A path-loss step starts inside the sub-run (p.pl_onset_det) and its frames
+% WLAN with a packet in the frame (benign_hit_share.m). With idle sensing (p.idle_rssi_hz) a
+% decision cycle is the idle time before the frame and the frame, and the per-cycle labels
+% count the gated threats while they are on the air anywhere in it (threat_active.m,
+% act_idle): a larger share, so the cells fly the larger of the two needs, N_SUB over the
+% smaller share. A path-loss step starts inside the sub-run (p.pl_onset_det) and its frames
 % count while their link-feature window of TW frames still holds a frame before the onset
 % (threat_active.m): TW - 1 of F_SUB frames, so its cells fly N_SUB F_SUB / (TW - 1). The
 % sub-runs of a threat beyond N_SUB per cell go round the folds from cell to cell, so every
@@ -99,10 +101,11 @@ if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (r
 end
 n_levels    = numel(threat_cfg(1).levels);
 n_sub       = N_SUB * ones(1, numel(threat_cfg));
-hit         = sweep_hit_share(p0);
-n_sub(strcmp({threat_cfg.name}, 'sweeping_jammer')) = round(N_SUB / hit);
-wlan        = benign_hit_share(p0, [], F_SUB);
-n_sub(strcmp({threat_cfg.name}, 'benign_interference')) = round(N_SUB / wlan);
+q           = p0; q.idle_rssi_hz = 0;                   % the frame rule
+hit         = sweep_hit_share(p0); hit_f = sweep_hit_share(q);
+n_sub(strcmp({threat_cfg.name}, 'sweeping_jammer')) = max(round(N_SUB / hit_f), round(N_SUB / hit));
+wlan        = benign_hit_share(p0, [], F_SUB); wlan_f = benign_hit_share(q, [], F_SUB);
+n_sub(strcmp({threat_cfg.name}, 'benign_interference')) = max(round(N_SUB / wlan_f), round(N_SUB / wlan));
 n_sub(strcmp({threat_cfg.name}, 'path_loss')) = round(N_SUB * F_SUB / (TW - 1));
 on_frames   = F_SUB + 1 - mean(p0.pl_onset_det(1):p0.pl_onset_det(end));   % mean frames from an onset inside the sub-run
 n_sub(ismember({threat_cfg.name}, {'antenna_fault', 'airframe_shadowing'})) = round(N_SUB * F_SUB / on_frames);
@@ -124,10 +127,10 @@ run_id = 0;
 t0 = tic;
 fprintf('\n=== A5 dataset: %d threats x %d levels x %d Eb/N0 x %d sub-runs x %d frames (+ none) ===\n', ...
     numel(threat_cfg), n_levels, numel(EbNo_list), N_SUB, F_SUB);
-fprintf('sweeping jammer: on our channel in %.1f%% of the decision cycles, %d sub-runs per cell\n', 100 * hit, ...
-    n_sub(strcmp({threat_cfg.name}, 'sweeping_jammer')));
-fprintf('WLAN: a packet on the air in %.1f%% of the decision cycles, %d sub-runs per cell\n', 100 * wlan, ...
-    n_sub(strcmp({threat_cfg.name}, 'benign_interference')));
+fprintf('sweeping jammer: on our channel in %.1f%% of the frames (frame rule), %.1f%% of the decision cycles, %d sub-runs per cell\n', ...
+    100 * hit_f, 100 * hit, n_sub(strcmp({threat_cfg.name}, 'sweeping_jammer')));
+fprintf('WLAN: a packet on the air in %.1f%% of the frames (frame rule), %.1f%% of the decision cycles, %d sub-runs per cell\n', ...
+    100 * wlan_f, 100 * wlan, n_sub(strcmp({threat_cfg.name}, 'benign_interference')));
 fprintf('path loss: a step at frame %d-%d, %d sub-runs per cell\n', p0.pl_onset_det, n_sub(strcmp({threat_cfg.name}, 'path_loss')));
 fprintf(['antenna fault: the connector opens at frame %d-%d; airframe shadowing: a roll-in brings the loss to %g dB ' ...
     'there; %d and %d sub-runs per cell\n'], p0.pl_onset_det, p0.shadow_evt_db, n_sub(strcmp({threat_cfg.name}, 'antenna_fault')), ...
@@ -207,7 +210,7 @@ dataset.bch = D.bch'; dataset.bch_names = branch_record('names', p0.n_rx);   % e
 dataset.meta = struct('N_SUB', N_SUB, 'n_sub', n_sub, 'F_SUB', F_SUB, 'EbNo_list', EbNo_list, 'delay_bits', delay_bits, ...
     'mode', 'seeded_subruns_D59', 'n_rx', p0.n_rx, 'speed_range_kmh', [p0.speed_kmh_min p0.speed_kmh_max], ...
     'threat_cfg', threat_cfg, 'fresh', FRESH, 'seed0', SEED0, 'created', datestr(now), ...
-    'sweep_hit', hit, 'wlan_hit', wlan);
+    'sweep_hit', hit, 'wlan_hit', wlan, 'sweep_hit_frame', hit_f, 'wlan_hit_frame', wlan_f);
 if ~isfolder('data'), mkdir('data'); end         % a folder of that name elsewhere on the path does not count
 save(f_out, 'dataset', '-v7.3');
 
