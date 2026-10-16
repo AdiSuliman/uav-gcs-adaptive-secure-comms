@@ -30,7 +30,8 @@ function [R, A, info] = idle_rssi(p, ctx, ion, pos, opt)
 %   of the block's stream in its own order (threat_script: a faulty antenna, each
 %   component's own draws then its 32 sinusoids, the chain errors, the delay line's taps,
 %   the path-loss step's and the connector's onset frames), at the bin's centre, with the
-%   heading's turn and the roll (turn_attitude.m: a roll-in included) and the pitch wobble;
+%   heading's turn and the roll (turn_attitude.m: a roll-in included), the line of sight's
+%   Doppler phase on the block's law (los_phase.m) and the pitch wobble;
 %   a faulty connector attenuates the antenna's whole field ahead of the fixed thermal
 %   floor from the idle time after its onset frame (the step falls in that frame).
 %   Measurement (Grimaldi et al. 2019, CC2420 on TelosB): a sample every 54 us, the mean
@@ -125,7 +126,7 @@ for j = 1:nf
         sw = lk * sind(th);
         sI = sind(ctx.aoa(c) + dq);
         aI = exp(-1j * 2*pi * p.ant_spacing_wl * (cosd(th) .* sI) * apos);
-        lI = exp(1j * (2*pi*ctx.fd*sind(ctx.aoa(c)) * tq * ild + lk * cosd(rq) .* sI .* sind(th)));
+        lI = exp(1j * (los_phase(ctx.aoa(c), att, ctx.yaw, ctx.fd, tq) * ild + lk * cosd(rq) .* sI .* sind(th)));
         D0 = zeros(NBI, nr);
         for a = 1:nr
             D0(:, a) = exp(1j * (2*pi*tq*(ctx.fd*fI{c}(:, a)') + sw*fI{c}(:, a)' + pI{c}(:, a)')) * ones(32, 1) / sqrt(32);

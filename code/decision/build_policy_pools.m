@@ -25,8 +25,9 @@
 % before and after the onset come from one flight; a geometry is never shared by two
 % splits. Seeds: pool_seed.m. Per geometry, every per-flight draw (flight_draws.m) is
 % kept in PP.cov.
-% Airframe shadowing is on the air only while the attitude hides an antenna in a turn whose
-% bank its level is measured at (shadow_frame.m), on a minority of the shared flights. A cell
+% Airframe shadowing is on the air only while the attitude hides an antenna in an event whose
+% deepest burial, through its equivalent roll, lies in its level's band (shadow_frame.m,
+% shadow_equiv_roll.m), on a minority of the shared flights. A cell
 % holding it (alone or in a combination) therefore flies geometries of its own, as many per
 % split as the cells it stands beside (pool_layout.m). On them the UAV rolls into its turn
 % so that the airframe enters the line of sight just before frame C.event_frame of a run of
@@ -38,8 +39,10 @@
 % frame C.event_count (hides_antenna.m, as the dataset selects its flights): candidates of their own seed
 % range (shadow_pool_seed.m), tried in turn, each in the flight's strata of the Latin
 % hypercube of its split, over the speeds at which the level can occur (from
-% p.shadow_v_min, and from the speed whose turn reaches its smallest roll,
-% shadow_speed_floor.m); levels flown at the same rolls share them (shadow_groups.m). The clean
+% p.shadow_v_min, and from the speed whose turn reaches the bank that buries the line of
+% sight as deep as the level's smallest roll, shadow_speed_floor.m; in a Latin hypercube from
+% that floor at the flight's altitude, shadow_alt_floor.m); levels flown at the same rolls
+% share them (shadow_groups.m). The clean
 % link flies them too, only as their restoration reference and lead-in (PP.ref_geo), never
 % as clean-link flights of a statistic. At the edge speeds shadowing flies the 161 km/h
 % flights of the nominal level only: no source measures it at hover. The share of the
@@ -77,6 +80,7 @@ LHS    = [false false true false true];   % splits laid out as nested Latin hype
 LHS_SEED = 7100000;              % permutation stream of a design: LHS_SEED + 100 (Eb/N0 index) + split (+ 10: combined threats;
                                  % + 10 (shadowing group + 1), + 5 more for its combined threats' own)
 J_MAX  = 99999;                  % candidates per (shadowing group, Eb/N0, seed block), shadow_pool_seed.m
+N_COUNT = 60;                    % unstratified candidates kept per (shadowing group, Eb/N0), counted only (shadow_note.m)
 VOUT   = [0 0; 161 161];         % speeds of the edge-speed split [km/h]: the first NHOVER geometries and the rest, at
                                  % the two ends of the envelope (dedicated test flights; the other splits draw over it)
 N_WORKERS = 6;
@@ -86,7 +90,7 @@ C = decision_config();
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
     SINGLES = {'none', 'jamming', 'path_loss', 'airframe_shadowing'};
     COMBOS = {'jamming+path_loss', 'tone_jamming+path_loss', 'jamming+airframe_shadowing'};
-    EBNO = [3 12]; NGEO = [2 2 2 2 2]; NCOMB = [0 0 0 0 2]; NHOVER = 1;
+    EBNO = [3 12]; NGEO = [2 2 2 2 2]; NCOMB = [0 0 0 0 2]; NHOVER = 1; N_COUNT = 2;
     BLOCK(3:5) = [18 18 19];                            % blocks of its own: its flights are never test flights
 end
 
@@ -189,7 +193,7 @@ for k = 1:nGr
 end
 SH = struct('band', gband, 'level', glv, 'cell_levels', {arrayfun(@(k) unique(shd_db(grp == k)), 1:nGr, ...
     'UniformOutput', false)}, 'cell_group', grp, 'v_kmh', vshd, 'speed_range', vrange, ...
-    'tried', zeros(nGr, nSp, nS), 'kept', zeros(nGr, nSp, nS));
+    'tried', zeros(nGr, nSp, nS), 'kept', zeros(nGr, nSp, nS), 'count', zeros(nGr, 2, nS));
 geo = cell(1, nS);
 for s = 1:nS
     g = struct('seed', {}, 'speed', {}, 'run', {}, 'alt', {}, 'ksig', {}, 'aoa1', {}, 'rho', {});
@@ -217,13 +221,21 @@ for s = 1:nS
             lhs = LHS_SEED + 100*s + 10 * (gi + 1) + sp + 5 * (P.part - 1);
         end
         ps = pS{gi}; eb = EBNO(s);
-        sel = struct('seed', @(j, v) shadow_pool_seed(gi, s, b, j, v), 'j0', jc(gi, b), 'jmax', J_MAX, ...
+        sel = struct('seed', @(j, v) shadow_pool_seed(gi, s, b, j, v), 'j0', jc(gi, b), 'jmax', J_MAX, 'floor', @(a) shadow_alt_floor(a, eb, ps), ...
             'keep', @(sd, v, a, kk, o, c) hides_antenna(sd, v, ps, struct('ebno', eb, 'alt_m', a, 'k_sig_db', kk, ...
             'aoa1_deg', o, 'rho', c, 'event_frame', C.event_frame, 'frames', C.event_count)));
         [gk, info] = pool_geometries(s, b, r0(sp) + P.pos, vr, p0, lhs, 1, sel);
         jc(gi, b) = info.j;
         SH.tried(gi, sp, s) = SH.tried(gi, sp, s) + sum(info.tries); SH.kept(gi, sp, s) = SH.kept(gi, sp, s) + n;
         for f = fieldnames(gk)', g(sp).(f{1}) = [g(sp).(f{1}), gk.(f{1})]; end
+    end
+    for gi = 1:nGr                                      % the share of the flights that hide an antenna (shadow_note.m): the next
+        b = BLOCK(end); ps = pS{gi}; eb = EBNO(s);      % candidates of the second test split's block, unstratified, counted only
+        sel = struct('seed', @(j, v) shadow_pool_seed(gi, s, b, j, v), 'j0', jc(gi, b), 'jmax', J_MAX, ...
+            'keep', @(sd, v, a, kk, o, c) hides_antenna(sd, v, ps, struct('ebno', eb, 'alt_m', a, 'k_sig_db', kk, ...
+            'aoa1_deg', o, 'rho', c, 'event_frame', C.event_frame, 'frames', C.event_count)));
+        [~, ie] = pool_geometries(s, b, 1:N_COUNT, vshd(gi, :), p0, [], 1, sel);
+        SH.count(gi, :, s) = [sum(ie.tries), N_COUNT];
     end
     for sp = 1:nSp                                      % the groups' flights roll in: longer runs, the event's frame
         n = numel(g(sp).seed);
@@ -236,7 +248,8 @@ evf = arrayfun(@(sp) geo{1}(sp).event, 1:nSp, 'UniformOutput', false);   % the e
 if nGr > 0
     fprintf(['Airframe shadowing: own flights of %d groups of levels (shadow_groups.m), every one hiding an antenna at ' ...
         'its level; none below %g m/s or at hover (no source measures it there), nor below the speed whose turn ' ...
-        'reaches the level''s smallest roll (shadow_speed_floor.m):\n'], nGr, p0.shadow_v_min);
+        'reaches the bank that buries the line of sight as deep as the level''s smallest roll (shadow_speed_floor.m; ' ...
+        'in the Latin hypercubes at the flight''s altitude, shadow_alt_floor.m):\n'], nGr, p0.shadow_v_min);
     for k = 1:nGr
         sk = find(sum(SH.tried(k, :, :), 3) > 0);
         fprintf('  %s dB, rolls %.1f-%.1f deg, from %.1f km/h, %d cells | kept of the candidates tried: %s\n', ...

@@ -53,13 +53,16 @@ function build_threat_model(p)
 %           obstruction or terrain masking; frames before it carry no threat); airframe
 %           shadowing, applied in the channel, hides the end of the array farther from
 %           the GCS while the attitude puts the airframe in its line of sight in a turn
-%           whose bank the level is measured at (shadow_frame.m, shadow_roll_band.m: the GCS
-%           above the belly's horizon, the heading against the GCS azimuth, Sun et al.;
-%           never while hovering): during a roll-in the hidden antenna loses the share of
-%           the depth the roll has reached (Sun et al.'s shape of an event), and it counts
-%           as on the air while that loss is at least p.shadow_evt_db; no threat on the air
-%           otherwise. An antenna fault (one antenna, drawn per seeded run) is an open or
-%           lossy connector between the antenna and its receiver, so it attenuates
+%           whose bank buries it, at its deepest with the GCS abeam, as deep as the rolls
+%           the level is measured at do in Sun et al.'s geometry (shadow_frame.m,
+%           shadow_equiv_roll.m, shadow_roll_band.m: the GCS above the belly's horizon, the
+%           heading against the GCS azimuth; never while hovering): the hidden antenna loses
+%           the share of the depth the burial has reached (Sun et al.'s shape of an event,
+%           over a roll-in and as the turn carries the GCS), and it counts as on the air
+%           while that loss is at least p.shadow_evt_db, its K-factor the shadow's from
+%           then on; no threat on the air otherwise. An antenna fault (one antenna, drawn
+%           per seeded run) is an open or lossy connector between the antenna and its
+%           receiver, so it attenuates
 %           everything that antenna receives, our signal and every interferer, before the
 %           receiver's thermal noise, from its onset frame (p.fault_onset_frames, drawn per
 %           run when a range: a step within one frame; frames before it carry no threat).
@@ -94,8 +97,9 @@ function build_threat_model(p)
 %           The gated jammers run with the timing of the Constant block 'Gate'
 %           (jam_timing.m): the sweeping jammer is on our channel while
 %           mod(t + p0, T) of the channel clock lies in sweep_window_s.m, and the
-%           noise bursts switch on and off at random (a random jammer, Xu et al.) with
-%           the flight's duty.
+%           noise bursts switch on and off at random with the flight's duty: a random
+%           jammer (Xu et al.) at their duties, or a sparse jammer of one-symbol slots
+%           (Marti et al.'s J4) at its own.
 %           Last, every antenna's receive chain: a gain and phase error fixed per flight
 %           (p.chain_amp_db, p.chain_phase_deg). The 'Cal' block (to the 'Cal_db' sink)
 %           holds each antenna's level calibration error [dB], applied to the levels the
@@ -104,8 +108,9 @@ function build_threat_model(p)
 %           or, with p.int_aoa_random, drawn per seed from p.int_aoa_range_deg by
 %           link_seed.m (interferer_aoa.m); they turn with the heading and the pitch
 %           as our LoS does, in the UAV's horizontal plane. Every interferer's LoS has
-%           the Doppler shift of its direction, fd sin(aoa), and its diffuse part is
-%           centred on its own direction. With p.tdl every interferer has a delay line
+%           the Doppler shift of its direction as it turns, fd sin(aoa + heading
+%           change), its phase that frequency's integral (los_phase.m), and its diffuse
+%           part is centred on its own direction. With p.tdl every interferer has a delay line
 %           as ours, its waveform running from the line's longest delay before the frame.
 % Rx        Front end (p.adc_bits, adc_frontend.m): per antenna an AGC that sets its gain
 %           from the quiet slot and the start of the short training and steps it down
@@ -363,14 +368,14 @@ set_param([modelName '/Att'], 'UserDataPersistent', 'on', 'UserData', struct('gc
     'wobble_amp_deg', p.wobble_amp_deg, 'wobble_pitch_lim_deg', p.wobble_pitch_lim_deg, 'wobble_freq_hz', p.wobble_freq_hz, ...
     'n_rx', nr, 'ant_spacing_wl', p.ant_spacing_wl, 'roll_in_frames', p.roll_in_frames, 'roll_rate_lo', p.roll_rate_lo, ...
     'roll_rate_win', p.roll_rate_win, 'shadow_evt_db', p.shadow_evt_db, 'shadow_hdg_deg', p.shadow_hdg_deg, ...
-    'shadow_v_min', p.shadow_v_min));
+    'shadow_v_min', p.shadow_v_min, 'shadow_el_deg', p.shadow_el_deg));
 set_param([modelName '/Body'], 'Value', mat2str(ones(1, nr)));
 set_param([modelName '/Body'], 'UserDataPersistent', 'on', 'UserData', struct('body_random', logical(p.body_random), ...
     'body_loss_db', p.body_loss_db));
 set_param([modelName '/Gate'], 'Value', mat2str([p.sweep_period_s(1) 0 0 p.burst_duty], 10));
 set_param([modelName '/Gate'], 'UserDataPersistent', 'on', 'UserData', struct('jam_timing_random', ...
     logical(p.jam_timing_random), 'sweep_period_s', p.sweep_period_s, 'burst_duty_range', p.burst_duty_range, ...
-    'burst_duty', p.burst_duty));
+    'burst_duty', p.burst_duty, 'burst_j4', p.burst_j4));
 NT = tdl_taps(p, fs); ni = numel(p.int_aoa_deg);
 set_param([modelName '/Tdl'], 'Value', mat2str([ones(1, 1 + ni); zeros(NT - 1, 1 + ni)]));
 set_param([modelName '/Tdl'], 'UserDataPersistent', 'on', 'UserData', struct('tdl', logical(p.tdl), ...
@@ -451,14 +456,15 @@ else
 end
 % airframe shadowing: the antenna the airframe hides from the GCS at this frame's attitude
 % (shadow_frame.m; none while the attitude leaves the line of sight clear, the turn's bank
-% is not one the level is measured at, or the UAV hovers) loses the share gs of p.shadow_db
-% the event has reached and its K-factor moves by that share toward the shadow's
-% (p.shadow_k_db, Sun et al.): the whole depth and K in a turn that holds its bank
+% does not bury it as the level's rolls do, or the UAV hovers) loses the share gs of
+% p.shadow_db the event has reached; its K-factor is its own until that loss counts as an
+% event (p.shadow_evt_db) and the shadow's from then on (p.shadow_k_db: about 15 dB
+% outside the shadowing area, -16 dB inside it, Sun et al., Sec. III, Fig. 12)
 thr = lower(p.active_threat);
 shd = any(strcmp(strsplit(thr, '+'), 'airframe_shadowing'));
 if shd
-    sel = sprintf(['    Kk = K; gk = 1;\n    if k == hs\n        Kk = 10^((kdb(1) + gs * (%.6f - kdb(1))) / 10); ' ...
-        'gk = 10^(-%.6f * gs / 20);\n    end\n'], p.shadow_k_db, p.shadow_db);
+    sel = sprintf(['    Kk = K; gk = 1;\n    if k == hs\n        if %.6f * gs >= %.6f\n            Kk = %.10g;\n        end\n' ...
+        '        gk = 10^(-%.6f * gs / 20);\n    end\n'], p.shadow_db, p.shadow_evt_db, 10^(p.shadow_k_db / 10), p.shadow_db);
 else
     sel = sprintf('    Kk = K; gk = 1;\n');
 end
@@ -519,7 +525,9 @@ function s = threat_script(p, fs)
 % additive component as one waveform through its own spatial channel, held to the
 % in-band cap over our received signal. An emitter stays in the UAV's horizontal plane:
 % its LoS turns with the heading, is seen by the array tilted by the pitch ('Att' block)
-% and has the Doppler shift of its direction, fd sin(aoa); its diffuse part is centred on
+% and has the Doppler shift of its direction at the frame, fd sin(aoa + heading change),
+% its phase at the frame's start the integral of that shift (los_phase.m, as the idle time
+% takes it, idle_rssi.m); its diffuse part is centred on
 % its own direction; the antennas' lever arm moves the phase of every path. With the
 % delay line, every waveform runs Nw samples at times tw, from the line's longest delay
 % before the frame, and tap m carries it m taps late with the diffuse amplitude of the
@@ -576,9 +584,9 @@ for i = 1:numel(sig)
         case 'airframe_shadowing'
             % applied in the channel: the hidden antenna loses its line of sight there; the
             % event counts while its loss reaches p.shadow_evt_db
-            body{end+1} = sprintf(['[hs, gs] = shadow_frame(bt, att(2), rt, [abs(att(3)) att(10)], att(4), %d, %s, %.6f, fd * %.12g, %.6f);\n' ...
-                'actc(%d) = double(hs > 0 && %.6f * gs >= %.6f);\n'], nr, mat2str(shd(2:3), 10), shd(4), VC, shd(5), ...
-                k, shd(1), p.shadow_evt_db); %#ok<AGROW>
+            body{end+1} = sprintf(['[hs, gs] = shadow_frame(bt, att(2), rt, [abs(att(3)) att(10)], att(4), %d, %s, %.6f, fd * %.12g, %.6f, %.6f);\n' ...
+                'actc(%d) = double(hs > 0 && %.6f * gs >= %.6f);\n'], nr, mat2str(shd(2:3), 10), shd(4), VC, shd(5), shd(8), ...
+                k, shd(1), shd(7)); %#ok<AGROW>
     end
 end
 own = own_output(p);
@@ -639,15 +647,20 @@ for c = 1:numel(addc)
                 w = sprintf('w = sqrt(%.8f/2) * complex(randn(Nw, 1), randn(Nw, 1));\n', 10^(p.benign_int_db/10));
             end
         case 'noise_burst'
-            % a random jammer (Xu et al.): bursts of U[0, p.burst_on_sym] symbols and sleeps
-            % of U[0, p.burst_on_sym (1 - a) / a], a the flight's duty gate(4), on the channel
-            % clock; on from the run's start when gate(3) < a, its first switch inside that
-            % burst or sleep
+            % the flight's duty a = gate(4) sets the pattern, on the channel clock. From
+            % Xu et al.'s duties up (p.burst_duty_range): a random jammer, bursts of
+            % U[0, p.burst_on_sym] symbols and sleeps of U[0, p.burst_on_sym (1 - a) / a].
+            % Below them: Marti et al.'s sparse jammer J4, each one-symbol slot of the
+            % jammer's own clock (a random phase) jammed with probability a. On from the
+            % run's start when gate(3) < a, its first switch inside that burst, sleep or slot
+            sj = p.burst_duty_range(1); ts = 1 / p.symbol_rate;
             pers{end+1} = 'nb_on'; init{end+1} = 'nb_on = gate(3) < gate(4);'; %#ok<AGROW>
-            pers{end+1} = 'nb_next'; init{end+1} = sprintf('nb_next = rand * %.10g * (nb_on + (~nb_on) * (1 - gate(4)) / gate(4));', ...
-                p.burst_on_sym / p.symbol_rate); %#ok<AGROW>
-            sw_on = sprintf(['        if nb_on\n            nb_on = false; nb_next = nb_next + rand * toff;\n' ...
-                '        else\n            nb_on = true; nb_next = nb_next + rand * ton;\n        end\n']);
+            pers{end+1} = 'nb_next'; init{end+1} = sprintf(['nb_next = rand * ((gate(4) < %.10g) * %.10g + ' ...
+                '(gate(4) >= %.10g) * %.10g * (nb_on + (~nb_on) * (1 - gate(4)) / gate(4)));'], ...
+                sj, ts, sj, p.burst_on_sym / p.symbol_rate); %#ok<AGROW>
+            sw_on = sprintf(['        if gate(4) < %.10g\n            nb_on = rand < gate(4); nb_next = nb_next + %.10g;\n' ...
+                '        elseif nb_on\n            nb_on = false; nb_next = nb_next + rand * toff;\n' ...
+                '        else\n            nb_on = true; nb_next = nb_next + rand * ton;\n        end\n'], sj, ts);
             w = [sprintf('ton = %.10g;\ntoff = ton * (1 - gate(4)) / gate(4);\n', p.burst_on_sym / p.symbol_rate) ...
                 idle_code('nb_on', 'nb_next', sw_on, k, NBI, TBI, p.cycle_s, fs) ...
                 sprintf('on = false(Nw, 1);\nfor i = 1:Nw\n    while tw(i) >= nb_next\n') sw_on ...
@@ -701,7 +714,7 @@ for c = 1:numel(addc)
     pers{end+1} = fI; init{end+1} = sprintf('%s = cos(2*pi*rand(32, %d));', fI, nr); %#ok<AGROW>
     pers{end+1} = pI; init{end+1} = sprintf('%s = 2*pi*rand(32, %d);', pI, nr); %#ok<AGROW>
     dop = '0 * t';
-    if p.int_los_doppler, dop = sprintf('2*pi*fd*sind(aoa(%d)) * t', c); end
+    if p.int_los_doppler, dop = sprintf('los_phase(aoa(%d), att, yaw, fd, t(1)) + 2*pi*fd*sind(aoa(%d) + dp) * (t - t(1))', c, c); end
     mx = sprintf('    y(:, k) = y(:, k) + w .* (sqrt(Ki/(Ki+1)) * aI(:, k) .* lI + sqrt(1/(Ki+1)) * dI(:, k));\n');
     lt = '';
     if NT > 1
@@ -2000,8 +2013,8 @@ function c = shadow_code(p, on)
 c = '';
 if ~on, return; end
 s = shadow_spec(p);
-c = sprintf('[hs, gs] = shadow_frame(bt, att(2), rt, [abs(att(3)) att(10)], att(4), %d, %s, %.6f, fd * %.12g, %.6f);\n', ...
-    p.n_rx, mat2str(s(2:3), 10), s(4), p.c_light / p.carrier_freq, s(5));
+c = sprintf('[hs, gs] = shadow_frame(bt, att(2), rt, [abs(att(3)) att(10)], att(4), %d, %s, %.6f, fd * %.12g, %.6f, %.6f);\n', ...
+    p.n_rx, mat2str(s(2:3), 10), s(4), p.c_light / p.carrier_freq, s(5), s(8));
 end
 
 function g = tone_gain(p)
@@ -2178,9 +2191,9 @@ d = struct('n_rx', 3, 'ant_aperture_m', 1.2, 'rx_corr', 0.3, 'gcs_aoa_deg', 0, .
     'tdl_clip_ns', 2250, ...
     'pl_onset_frames', [1 1], 'shadow_roll_deg', 16.1, 'shadow_hdg_deg', 30, 'roll_deg', 0, ...
     'fault_onset_frames', [1 1], 'roll_in_frames', [], 'roll_rate_lo', 30 / 1.6, 'roll_rate_win', [0.5 45.4; 1 35.5], ...
-    'shadow_evt_db', 0, ...
+    'shadow_evt_db', 0, 'shadow_el_deg', 2.9, ...
     'shadow_fit', [12.4 0.25 4.4], 'shadow_fit_z', 1.96, 'shadow_v_min', 8, 'reactive_delay_s', 0, ...
-    'burst_duty_range', [0.5 0.5], 'burst_duty', 0.5, 'burst_on_sym', 31, 'cap_frames', 1, ...
+    'burst_duty_range', [0.5 0.5], 'burst_duty', 0.5, 'burst_on_sym', 31, 'burst_j4', [0.2 0], 'cap_frames', 1, ...
     'cal_random', false, 'cal_err_db', 0);
 f = fieldnames(d);
 for i = 1:numel(f)
