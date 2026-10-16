@@ -5410,7 +5410,7 @@ function test_onset_recipes(tc)
 % N_SUB F_SUB over the mean frames from an onset; the pools roll the shadowing flights in.
 txt = fileread(which('run_dataset_sweep'));
 verifyNotEmpty(tc, strfind(txt, 'p.fault_onset_frames = p0.pl_onset_det;'));
-verifyNotEmpty(tc, strfind(txt, 'p.roll_in_frames = p0.pl_onset_det;'));
+verifyNotEmpty(tc, strfind(txt, 'p0.roll_in_frames = p0.pl_onset_det;'));
 verifyNotEmpty(tc, strfind(txt, 'round(N_SUB * F_SUB / on_frames)'));
 for f = {'eval_unseen_snr', 'eval_unseen_severity'}
     s = fileread(which(f{1}));
