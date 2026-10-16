@@ -22,6 +22,11 @@
 % occur (shadow_speed_floor.m); the clean link flies them too, only as their restoration
 % reference and lead-in (CK.ref_geo) where a group's cells fly; CK.event_frame as PP's.
 %
+% Every finished cell is kept on disk (data/c1c_check_cells, pool_checkpoint.m) under a key
+% of everything its frames depend on, so a build stopped at any point simulates only the
+% cells it does not hold when started again; the output is written once complete and the
+% cells removed after.
+%
 % Output: data/check_pools.mat (CK: the fields of a PP with one split, the check
 % flights; CK.kind per cell: 'clean', 'ebno' or 'level')
 
@@ -46,20 +51,22 @@ if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (r
     THREATS = THREATS(unique([1 find(strcmp(THREATS, 'airframe_shadowing'))])); N_GEO = 2;
 end
 EGRID = PP.ebno; ACTIONS = PP.actions; opt.F_SUB = PP.F_SUB; vrange = PP.speed_range;
+PTAG = PP.model_tag; PID = ''; if isfield(PP, 'det_id'), PID = PP.det_id; end
+clear PP                                                % the pools' fields read, not their frames (memory)
 EMID = (EGRID(1:end-1) + EGRID(2:end)) / 2;             % between the Eb/N0 points
 EB = unique([EMID, E_LEVEL]);                           % check Eb/N0 points
 iM = find(ismember(EB, EMID)); iL = find(EB == E_LEVEL);
 nS = numel(EB); nA = numel(ACTIONS);
 D = load('data/trained_detector.mat', 'net', 'classes', 'ood', 'trained_at');
-N = load('data/splits.mat', 'splits');
+nm = split_norm();                                     % the training z-score alone
 det = struct('net', D.net, 'ood', D.ood, 'classes', {cellstr(string(D.classes(:)'))}, ...
-    'mu', N.splits.norm.feat_mean, 'sd', N.splits.norm.feat_std, 'fs', p0.symbol_rate * p0.sps);
-clear N
+    'mu', nm.feat_mean, 'sd', nm.feat_std, 'fs', p0.symbol_rate * p0.sps);
+clear nm
 T = ood_thresholds(0.95);
 FZ = fusion_model();
 UW = 1; if isfield(D.ood, 'win'), UW = D.ood.win; end
 DET_ID = detector_id(D.trained_at, D.ood, FZ, T.maha);
-if ~isfield(PP, 'det_id') || ~strcmp(PP.det_id, DET_ID)
+if ~strcmp(PID, DET_ID)
     error('build_check_pools: data/policy_pools.mat comes from another detector; rerun C1p first');
 end
 
@@ -188,26 +195,28 @@ else
         pool_worker_init(repo);
     end
 end
-results = cell(1, nC); nuniq = zeros(1, nC);
 fld = arrayfun(@(ce) C.sev.(ce.threat).field, cells(2:end), 'UniformOutput', false);
 fld = [{''}, fld];                                      % the level field of every cell (none for the clean link)
+CKD = fullfile(pwd, 'data', 'c1c_check_cells');        % finished cells (pool_checkpoint.m; the workers work elsewhere)
+keys = arrayfun(@(c) pool_checkpoint('key', {PTAG, DET_ID, runs, cells(c), fld{c}, EB, ACTIONS, geoc{c}, opt, p0}), ...
+    1:nC, 'UniformOutput', false);
+todo = pool_checkpoint('todo', CKD, keys);
 t0 = tic;
-fprintf('%d cells x %d configurations, %d flights per point, on %d workers\n', nC, nA, N_GEO, N_WORKERS);
-parfor (c = 1:nC, NWP)
-    ce = cells(c);
+fprintf('%d cells x %d configurations, %d flights per point, on %d workers; %d cells kept from an earlier start (%s)\n', ...
+    nC, nA, N_GEO, N_WORKERS, nC - numel(todo), CKD);
+parfor (k = 1:numel(todo), NWP)
+    c = todo(k); ce = cells(c);
     p = p0; p.active_threat = ce.threat;
     if ~isempty(fld{c}), p.(fld{c}) = ce.level; end
     [Ps, pinfo] = pool_cell(p, ce.threat, ACTIONS, EB, geoc{c}, det, opt);
-    results{c} = Ps;
-    nuniq(c) = pinfo.n_unique;
-    fprintf('  cell %2d/%d %-22s %-6s %6.2f  %2d unique configurations\n', c, nC, ce.threat, ce.kind, ce.level, nuniq(c));
+    pool_checkpoint('save', CKD, c, keys{c}, Ps);
+    fprintf('  cell %2d/%d %-22s %-6s %6.2f  %2d unique configurations\n', c, nC, ce.threat, ce.kind, ce.level, pinfo.n_unique);
 end
 fprintf('Simulated in %.1f min\n', toc(t0) / 60);
 
 %% 3. Package
 pools = cell(nC, nS, nA, 1);
-for c = 1:nC, pools(c, :, :, 1) = results{c}; end
-clear results
+for c = 1:nC, pools(c, :, :, 1) = pool_checkpoint('load', CKD, c); end   % one cell at a time from disk
 na = find(strcmp(ACTIONS, 'no_action'));
 Pc = pools(1, :, na, 1);
 gp = ones(1, nA); bw = ones(1, nA); pw = ones(1, nA);
@@ -224,10 +233,11 @@ CK = struct('scen', {{cells.threat}}, 'kind', {{cells.kind}}, 'sev', [cells.sev]
     'clean', cellfun(@(Q) mean(Q.ber(own(Q))), Pc), 'clean_fer', cellfun(@(Q) mean(double(Q.fer(own(Q)))), Pc), ...
     'classes', {det.classes}, 'maha_thr', T.maha, 'fuse', FZ.FM, 'fuse_N', FZ.N, 'q_thr', FZ.q_thr, 'unk_win', UW, ...
     'F_SUB', opt.F_SUB, 'event_frame', {{evf}}, 'fec_frames', p0.fec_frames, ...
-    'runs', {{runs}}, 'family', FAM, 'block', BLOCK, 'model_tag', PP.model_tag, 'det_id', DET_ID, ...
+    'runs', {{runs}}, 'family', FAM, 'block', BLOCK, 'model_tag', PTAG, 'det_id', DET_ID, ...
     'aoa_random', p0.int_aoa_random, 'sps', p0.sps, 'bps', p0.bits_per_symbol, ...
     'feat_names', {link_features('names')}, 'created', datestr(now));
-save(f_out, 'CK', '-v7.3');
+pool_checkpoint('commit', f_out, struct('CK', CK));
+pool_checkpoint('clear', CKD);
 fprintf('Clean link per check Eb/N0 (%s dB): BER %s | packet loss %s\n', strjoin(compose('%g', EB), '/'), ...
     sprintf('%.1e ', CK.clean), sprintf('%.3f ', CK.clean_fer));
 on = zeros(1, 2);                                       % shadowing flights with an antenna hidden in the model, flights

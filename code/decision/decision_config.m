@@ -13,6 +13,7 @@ C.deg_floor  = 1e-4;        % smallest clean reference of the estimated BER
 C.heal       = 5;           % healthy cycles that close an incident (tried list reset)
 C.confirm    = [2 2];       % alarm confirmation m-of-n (consecutive detections, Barajas et al.)
 C.drop_db    = 4;           % default Eb/N0-estimate drop that confirms path_loss; the deployed value comes from choose_drop_threshold.m
+C.cusum_win  = 3;           % cycles of the window-limited CUSUM's post-change estimate (drop_cusum.m): the monitor's 3-cycle window
 C.fec_frames = 4;           % frames of a coded packet's codeword when the pools do not record it (init_params.m fec_frames);
                             % the coded packet loss is read over 2 x win frames (win packets)
 

@@ -119,6 +119,12 @@ K.nR = cellfun(@numel, PP.runs);
 nSc = numel(PP.scen); nS = numel(PP.ebno); nSp = numel(PP.runs); nRm = max(K.nR);
 K.ev = arrayfun(@(sp) nan(1, K.nR(sp)), 1:nSp, 'UniformOutput', false);   % frame of the event of a rolling-in flight
 if isfield(PP, 'event_frame') && ~isempty(PP.event_frame), K.ev = PP.event_frame; end
+for sp = 1:max(nSp, numel(K.ev))                    % one event frame per geometry of every split
+    if sp > nSp || sp > numel(K.ev) || numel(K.ev{sp}) ~= K.nR(sp)
+        error('link_env:event_frame', ['link_env: split %d of PP.event_frame does not match PP.runs (its runs ' ...
+            'replaced without their event frames)'], sp);
+    end
+end
 K.geo = cell(nSc, nSp);                             % the geometries every cell flies (PP.cell_geo; the clean link's
 for sc = 1:nSc                                      % own, without the shadowing reference), every one without it
     for sp = 1:nSp

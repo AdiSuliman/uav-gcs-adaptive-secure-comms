@@ -44,6 +44,13 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   configuration the frame was received with (config_gain_db.m: the power step and the
 %   processing gain), so a change of our own configuration never reads as a drop or a
 %   rise of the link; the degradation test keeps the estimate as measured.
+%   'class_cusum': as 'class_drop', the drop alarm raised when the window-limited CUSUM of
+%   every cycle's drop against the reference (drop_cusum.m: reference less the cycle's
+%   estimate, the change's size estimated over the cycles before, bounded at twice
+%   PP.drop_db so the alarm clears on the same evidence in reverse) reaches PP.drop_db; the
+%   reference takes the cycles without an alarm of an excursion of the statistic above 0 only
+%   once it has returned to 0 without the drop alarm (drop_ref.m), so it keeps the level
+%   before a change while the evidence of one builds up.
 %   An alarm is CONFIRMED when at least m of the last n cycles carried
 %   one (M-of-N binary integration, PP.confirm, default C.confirm).
 %   The monitor also keeps the last C.hist observation vectors of policy_state.m,
@@ -51,7 +58,11 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   features, unknown scores, and obs.idle, the record of each cycle's idle time,
 %   idle_summary.m, and obs.bch, the record of each cycle's channel estimates per antenna,
 %   branch_record.m, over window_cues('branch_window') cycles: the fusion's row holds
-%   window_cues.m's columns, as fuse_classes.m's).
+%   window_cues.m's columns, as fuse_classes.m's). The window's antenna gains are kept
+%   less the power step and its SINR less the whole known gain of the configuration each
+%   frame was received with, so the fusion reads no level step at a change of our own
+%   configuration; within one configuration the window's statistics are those of the
+%   frames as measured (each is unchanged by a common shift or scale).
 %   mem.since starts saturated (10): the policies never see the episode clock.
 %   mem.deg_n / mem.conf_n: consecutive degraded / confirmed-alarm cycles; mem.pend:
 %   a requested change not yet received.
@@ -68,7 +79,8 @@ switch cmd
             'since', 10 * ones(1, NE), 'cand', zeros(1, NE), 'cand_n', zeros(1, NE), 'good', zeros(1, NE), ...
             'deg_n', zeros(1, NE), 'conf_n', zeros(1, NE), 'alarm', false(NE, 8), 'ebno', nan(NE, 3), ...
             'ref', nan(NE, 10), 'hist', [], 'wp', [], 'wg', [], 'wf', [], 'wu', [], 'wn', zeros(1, NE), ...
-            'unk_now', false(1, NE), 'pend', false(1, NE), 'wi', [], 'wb', []);
+            'unk_now', false(1, NE), 'pend', false(1, NE), 'wi', [], 'wb', [], 'cs', zeros(NE, 1), ...
+            'dx', nan(NE, C.cusum_win), 'rp', nan(NE, 10), 'rx', false(NE, 1));
         M = [];
     case 'update'
         [mem, M] = update(C, varargin{:});
@@ -109,7 +121,7 @@ npk(coded) = nq(coded); lost(coded) = lq(coded);
 M.ber_avg = mean(mem.ber, 2, 'omitnan');
 M.plr = lost ./ max(npk, 1);                                    % no packet decoded yet in the window: no loss seen
 M.ebno_est = fi('sinr') + fi('iot') + 10*log10(PP.sps) - 10*log10(PP.bps);
-gk = config_gain_db(PP);
+[gk, gw] = config_gain_db(PP);
 eg = M.ebno_est(:) - reshape(gk(link), [], 1);                  % without the gain of the configuration received
 mem.ebno = [mem.ebno(:, 2:end), eg];
 e3 = median(mem.ebno, 2, 'omitnan');
@@ -127,7 +139,7 @@ M.degraded = deg(:)';
 mem.good(~M.degraded) = mem.good(~M.degraded) + 1; mem.good(M.degraded) = 0;
 mem.deg_n(M.degraded) = mem.deg_n(M.degraded) + 1; mem.deg_n(~M.degraded) = 0;
 mem.tried(mem.good >= C.heal, :) = false;
-[mem, pf, te, unk] = fusion(mem, obs, PP);
+[mem, pf, te, unk] = fusion(mem, obs, PP, gk(link), gw(link));
 % Latched cause of a lost branch (onset_shape.m): read from the shape of its onset, a
 % step (antenna_fault) or a ramp (airframe_shadowing), and kept while the branch stays lost
 if ~isfield(mem, 'os'), mem.os = []; end
@@ -146,16 +158,28 @@ M.drop_alarm = false(1, numel(M.cls));
 switch mode
     case 'degraded'
         M.alarm = M.degraded;
-    case 'class_drop'
+    case {'class_drop', 'class_cusum'}
         dd = C.drop_db; if isfield(PP, 'drop_db') && ~isempty(PP.drop_db), dd = PP.drop_db; end
-        M.drop_alarm = M.drop >= dd;
+        if strcmp(mode, 'class_cusum')
+            if ~isfield(mem, 'cs'), mem.cs = zeros(numel(eg), 1); mem.dx = nan(numel(eg), C.cusum_win); end
+            dc = ref - eg;                                              % this cycle's drop
+            mem.cs = drop_cusum(dc, mem.cs, mem.dx, dd); mem.dx = [mem.dx(:, 2:end), dc];
+            M.drop_alarm = mem.cs' >= dd;
+        else
+            M.drop_alarm = M.drop >= dd;
+        end
         hostile(strcmp(M.cls, 'path_loss') & ~M.drop_alarm) = false;
         M.alarm = hostile | M.degraded | M.drop_alarm;
     otherwise
         M.alarm = hostile | M.degraded;
 end
 q = ~M.alarm;
-mem.ref(q, :) = [mem.ref(q, 2:end), eg(q)];
+if strcmp(mode, 'class_cusum')                                  % the reference before a change building up
+    if ~isfield(mem, 'rp'), mem.rp = nan(size(mem.ref)); mem.rx = false(numel(eg), 1); end
+    [mem.ref, mem.rp, mem.rx] = drop_ref(mem.ref, mem.rp, mem.rx, eg, q(:), mem.cs, M.drop_alarm(:));
+else
+    mem.ref(q, :) = [mem.ref(q, 2:end), eg(q)];
+end
 mem.alarm = [mem.alarm(:, 2:end), M.alarm(:)];
 assert(cf(2) <= size(mem.alarm, 2), 'policy_monitor: confirmation over %d cycles exceeds the alarm memory', cf(2));
 M.confirmed = sum(mem.alarm(:, end-cf(2)+1:end), 2)' >= cf(1);
@@ -184,21 +208,27 @@ o = [M.probs'; double(unk(:)'); lb'; deg'; M.plr'; fi('sinr')'; fi('iot')'; fi('
      min(40, max(-5, fi('q_iot')')); min(40, max(-10, fi('q_react')')); M.te'];
 end
 
-function [mem, pf, te, unk] = fusion(mem, obs, PP)
-% Window of the last cycles (oldest first) and the fused class probabilities.
+function [mem, pf, te, unk] = fusion(mem, obs, PP, gl, gp)
+% Window of the last cycles (oldest first) and the fused class probabilities. The window
+% holds every frame's levels less the known gain of the configuration it was received with
+% (config_gain_db.m; gl the whole gain, gp its power step, per episode): the antennas'
+% channel gains less the power step, the SINR less the whole gain, so a change of our own
+% configuration is never read as a step of the level.
 NE = size(obs.probs, 1);
 N = 1; if isfield(PP, 'fuse_N') && ~isempty(PP.fuse_N), N = PP.fuse_N; end
 Nu = 1; if isfield(PP, 'unk_win') && ~isempty(PP.unk_win), Nu = PP.unk_win; end
 NB = 1; if isfield(PP, 'fuse') && ~isempty(PP.fuse), NB = window_cues('branch_window'); end
 W = max([N, Nu, NB]);
-g = zeros(NE, 1); if isfield(obs, 'gant') && ~isempty(obs.gant), g = obs.gant; end
+g = zeros(NE, 1); if isfield(obs, 'gant') && ~isempty(obs.gant), g = obs.gant - reshape(gp, [], 1); end
+f = obs.feat; is = feature_index('sinr');
+f(:, is) = f(:, is) - reshape(gl, [], 1);
 mh = nan(NE, 1); if isfield(obs, 'maha') && ~isempty(obs.maha), mh = obs.maha(:); end
 if isempty(mem.wp)
     mem.wp = repmat(obs.probs, 1, 1, W); mem.wg = repmat(g, 1, 1, W);
-    mem.wf = repmat(obs.feat, 1, 1, W); mem.wu = repmat(mh, 1, W);
+    mem.wf = repmat(f, 1, 1, W); mem.wu = repmat(mh, 1, W);
 end
 mem.wp = cat(3, mem.wp(:, :, 2:end), obs.probs); mem.wg = cat(3, mem.wg(:, :, 2:end), g);
-mem.wf = cat(3, mem.wf(:, :, 2:end), obs.feat); mem.wu = [mem.wu(:, 2:end), mh];
+mem.wf = cat(3, mem.wf(:, :, 2:end), f); mem.wu = [mem.wu(:, 2:end), mh];
 mem.wn = min(mem.wn + 1, W);
 % The record of each cycle's idle time (idle_summary.m), NaN when the frame has none
 nI = numel(idle_summary('names')); id = nan(NE, nI);
