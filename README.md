@@ -63,24 +63,24 @@ A closed-loop simulation of the command uplink from a ground control station (GC
 1. MATLAB R2026a with Simulink, Communications, DSP System, Deep Learning and Statistics toolboxes; Parallel Computing for the frame pools.
 2. Open MATLAB in the repository folder: `startup.m` puts `code/` on the path.
 3. Full pipeline: `matlab -batch "main"` from the repository folder. The flags at the top of `code/main.m` choose the stages.
-4. Single stages: `matlab -batch "run_stage('B2','B3')"`; `run_stage('smoke', ...)` runs a reduced version to check the chain. A full run takes about 20 h.
+4. Single stages: `matlab -batch "run_stage('B2','B3')"`; `run_stage('smoke', ...)` runs a reduced version to check the chain. A full run takes about 6-7.2 days per profile, about 14.4-19.0 days for the three profiles (docs/DECISIONS.md, "Cost and resources, re-derived (2026-10-16)").
 5. Unit tests: `runtests('code/tests')`.
 6. Operator console: `demo_gui` (after the pipeline has produced `data/` and `results/`).
 7. 3D view (Simulink 3D Animation and UAV Toolbox): `v3d_live` for the live console, `v3d_videos` for the defense videos.
-8. Every run writes its console output to `logs/`. `disk_guard` stops a run before the drive falls below 200 GB free.
+8. Every run writes its console output to `logs/`. `disk_guard` stops a run before the drive falls below 150 GB free.
 
-| Stage | What it does | Time (RTX 4070) |
+| Stage | What it does | Time, profile 1 (RTX 4070) |
 |---|---|---|
-| A4v `validate_phy` | BER vs theory: AWGN, Rician, MRC 2 and 3 antennas, correlated branches; MMSE under jamming; seeds | ~12 min |
-| A5–A6 | 43,200 frames from 2,160 seeded sub-runs; spectrograms and 14 link features | ~25 min |
-| B1–B3a | split by sub-run, detector training, test evaluation with bootstrap intervals; architecture comparison | ~30 min |
-| B4, OOD, B4s | detector at unseen Eb/N0; leave-one-threat-out unknown-threat study, score selection, new-threat learning; detector at unseen severities | ~6 + 90 + 10 min |
-| C1p | frame pools: every scenario × configuration × Eb/N0 × geometry through the real link | ~3.5 h |
-| C1c, C1d | clean link on 100 new geometries per Eb/N0 (validation and test sets, KPI 6); path-loss drop threshold | ~1.3 h |
-| C2, C2e | DQN training (2 monitors × 2 false-switch penalties × 2 discount factors × 3 seeds, and 2 reward-weight retrains); every policy on the test pools | ~7 h |
-| C2g | combined threats never trained on: DQN retrained without each combination | ~2.5 h |
-| SURV, SURV3 | survivability map; 2 vs 3 antennas vs relay path | ~2 h |
-| LAT, KPI, DASH | latency per decision cycle, proposal KPIs, dashboard | ~5 min |
+| A4v `validate_phy` | BER vs theory: AWGN, Rician, MRC 2 and 3 antennas, correlated branches; MMSE under jamming; seeds | ~6-8 h |
+| A5–A6 | 43,200 frames from 2,160 seeded sub-runs; spectrograms and 23 link features | A5 ~3.6-4 h, A6 ~35 min |
+| B1–B3a | split by sub-run, detector training, test evaluation with bootstrap intervals; architecture comparison | B1 ~4 min, B2 ~20-35 min, B3 ~2 min, B3a ~45-75 min |
+| B4, OOD, B4s | detector at unseen Eb/N0; leave-one-threat-out unknown-threat study, score selection, new-threat learning; detector at unseen severities | ~40-50 min + 3.7-4 h + 20-35 min |
+| C1p | frame pools: every scenario × configuration × Eb/N0 × geometry through the real link | ~90-105 h |
+| C1c, C1d | clean link on 100 new geometries per Eb/N0 (validation and test sets, KPI 6); path-loss drop threshold | C1c ~11-13 h |
+| C2, C2e | DQN training (2 monitors × 2 false-switch penalties × 2 discount factors × 3 seeds, and 2 reward-weight retrains); every policy on the test pools | C2 ~12 h, C2e ~0.5-1.5 h |
+| C2g | combined threats never trained on: DQN retrained without each combination | ~3.6 h |
+| SURV, SURV3 | survivability map; 2 vs 3 antennas vs relay path | SURV ~2.6-4.2 h, SURV3 ~3.6-6 h |
+| LAT, KPI, DASH | latency per decision cycle, proposal KPIs, dashboard | LAT ~1-6 min |
 
 ---
 
@@ -99,10 +99,10 @@ A closed-loop simulation of the command uplink from a ground control station (GC
 - **SINR, envelope correlation:** against the waveform re-modulated from the receiver's own decisions; interference over thermal.
 - **Spatial features:** spatial coherence of the quiet slot (the antennas' matched-filtered covariance while the GCS is silent: interference + noise, none of our signal); from the per-block channel estimates and the residual covariance the MMSE combiner already computes: predicted MMSE gain over MRC (h^H R⁻¹ h · h^H R h / ‖h‖⁴) and the alignment of the dominant interference direction with the GCS channel (Shebert et al.: MMSE weights from the steering vector, separation harder at close angles).
 - **Per-antenna dip:** for each UAV antenna, the median minus the minimum of its per-block channel gain (dB) over the frame, the larger of the two. It tells a fault or a deep fade of one antenna from attenuation of the whole link.
-- 14 link features per frame (`link_features.m`): SINR, estimated BER and its change, RSSI and its variance, CRC failure and packet loss over the window, envelope correlation, IoT, post-combining SNR, coherence, predicted MMSE gain, alignment, per-antenna dip.
+- 23 link features per frame (`link_features.m`): SINR, estimated BER and its change, RSSI and its variance, CRC failure and packet loss over the window, envelope correlation, IoT, post-combining SNR, coherence, predicted MMSE gain, alignment, per-antenna dip, the gap between the antennas' mean channel gains, the SINR gap to the other antennas, the quiet slot's interference over thermal, residual, spectral flatness and peak-to-average power, the frame's busy share and busy/idle edges, and the lowest antenna's estimate margin.
 
 ### Detection (D42, D43, D59)
-- Input: 128×128 spectrogram of the antenna-1 frame and the 14 link features.
+- Input: 128×128 spectrogram of the antenna-1 frame and the 23 link features.
 - Network: CNN (32-64-128 filters, global pooling) and a feature branch, merged into a 64-unit embedding, softmax over 9 classes; cosine learning rate, L2, time/frequency masking of the spectrogram. `compare_architectures.m` compares it with a spectrogram-only network, a features-only network, a random forest and a kernel SVM on the same splits.
 - Unknown threats: candidate scores are the Mahalanobis distance of the last hidden layer (Lee et al.), Lee et al.'s feature ensemble over five layers (weights fitted on known validation frames against their FGSM versions), the Mahalanobis distance of the link features, and the lower of two standardized scores (last layer with the link features, or with an isolation forest). Leave-one-threat-out (the detector retrained without each threat in turn) chooses the production score; the reported value is the nested estimate, where each held-out threat is scored with the candidate chosen on the other seven. Threshold keeping 95% of known validation frames.
 - Learning a new threat (Lee et al., Algorithm 2): a flagged and labelled threat becomes a new class from 100 of its frames (class mean and tied covariance update in the last hidden layer), without retraining the network.

@@ -61,7 +61,7 @@ if isfield(ds, 'idle'), spec.idle = ds.idle; end         % the idle time before 
 if isfield(ds, 'act_idle'), spec.act_idle = ds.act_idle(:); end   % its on-air share (labels; analysis only)
 if isfield(ds, 'idle_amb'), spec.idle_amb = ds.idle_amb; end   % with an emitter of opportunity (emitter_reading.m)
 if isfield(ds, 'k_db'), spec.k_db = ds.k_db(:); spec.aoa = ds.aoa(:); end         % analysis only
-for f = {'alt_m', 'bank', 'ds_ns', 'lev_db'}                                       % analysis only (weak points)
+for f = {'alt_m', 'bank', 'ds_ns', 'lev_db', 'class_run', 'roll_in'}               % analysis only (weak points, roll_in_false_alarms.m)
     if isfield(ds, f{1}), spec.(f{1}) = ds.(f{1}); end
 end
 spec.img_size = 128;

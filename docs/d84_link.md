@@ -74,11 +74,11 @@ Source of every item: the pre-launch review of v7-merge a66ebb9 (2026-10-11), fi
 
 **Why.** Duty 0.3 and period 100 symbols had no source.
 
-**Decision.** The noise burst is Xu et al.'s random jammer: bursts of tj and sleeps of ts, uniform; the slot is one symbol (Marti et al.'s time slot carries one symbol). Per flight the duty a is drawn in [0.2, 0.775] (`jam_timing.m`, fourth draw of the 'jam' stream, the first three unchanged): each burst U[0, 31] symbols, each sleep U[0, 31 (1 - a) / a] symbols; a = 0.5 is Xu et al.'s first random jammer (tj, ts = U[0, 31]) exactly, a = 0.775 its second's mean duty (ts = U[1, 8], mean 4.5 slots), a = 0.2 Marti et al.'s sparse jammer's duty. The bursts start on when the third draw is below a, the first switch drawn inside that first burst or sleep, so the samples before the frame (the delay line's early taps) carry the same state. Fixed geometries: a = 0.5. `p.burst_duty`/`p.burst_period` replaced by `p.burst_duty_range`, `p.burst_on_sym`, `p.burst_duty` (fixed).
+**Decision.** The noise burst is a sourced random jammer; the slot is one symbol (Marti et al.'s time slot carries one symbol). Per flight the regime is drawn (`jam_timing.m`, fourth draw of the 'jam' stream, the first three unchanged): Marti et al.'s J4 at 20% (one-symbol slots, each jammed with probability 0.2), or Xu et al.'s random jammer with the duty a uniform in [0.5, 0.775] (bursts U[0, 31] symbols, sleeps U[0, 31 (1 - a) / a] <= 31 symbols); half the flights each (D86 item 12). a = 0.5 is Xu et al.'s first random jammer (tj, ts = U[0, 31]) exactly, a = 0.775 its second's mean duty (ts = U[1, 8], mean 4.5 slots). The bursts start on when the third draw is below a, the first switch drawn inside that first burst or sleep, so the samples before the frame (the delay line's early taps) carry the same state. Fixed geometries: a = 0.5. `p.burst_duty`/`p.burst_period` replaced by `p.burst_duty_range`, `p.burst_on_sym`, `p.burst_duty` (fixed), and `p.burst_j4` (J4's duty and the share of flights).
 
 **Sources.** Xu et al. 2005, Sec. 2 (random jammer) and Table 1 (tj = U[0,31], ts = U[0,31] or U[1,8]); Marti et al. 2023 (Mitigating Smart Jammers in MU-MIMO), Sec. VII-A (J4) and Fig. 5(d): random unit-symbol bursts, duty 20%.
 
-**Tests.** `test_jam_timing` (four draws, the duty in 0.2-0.775, the fixed duty 0.5), `test_noise_burst_duty` (in the model the share of the time on matches the duty at 0.2 and 0.775 within 0.08; at 0.2 a burst lasts 15.5 symbols on average), `test_gated_jammers` (the bursts start on or off with the flight's draws), `test_draws_independent` (the duty's uniform among the flight's draws).
+**Tests.** `test_jam_timing` (four draws, half J4 at 0.2 and the rest uniform in 0.5-0.775, the fixed duty 0.5), `test_noise_burst_duty` (the duty at 0.2, 0.5 and 0.775; at 0.2 runs of 1.25 symbols and almost no jam-free 32-symbol window; at 0.5 bursts of 15.5 symbols), `test_gated_jammers` (the bursts start on or off with the flight's draws), `test_draws_independent` (the duty's uniform among the flight's draws).
 
 ## A8. Delay spread of high flights and its clip (S-3, S-3b)
 
@@ -106,7 +106,7 @@ Source of every item: the pre-launch review of v7-merge a66ebb9 (2026-10-11), fi
 
 **Why.** Our LoS Doppler was fd cos(2 pi rand), drawn apart from the GCS direction (`gcs_aoa.m`) used for the steering vector, the attitude gain and shadowing: inconsistent (mostly absorbed by the frequency estimate).
 
-**Decision.** The channel block takes fd cos(elevation) sin(direction + heading rate x t) at every frame (the UAV flies along its heading; 90 deg the GCS ahead), as the interferers take fd sin(aoa). The per-flight draw is gone (the channel's later draws shift: every realization changes, so validate_phy's real-receiver rows are new realizations).
+**Decision.** The channel block takes fd cos(elevation) sin(direction + heading rate x t) at every frame (the UAV flies along its heading; 90 deg the GCS ahead), as each interferer takes fd sin(aoa + heading change), its line-of-sight phase integrated over the turn (`los_phase.m`; the threat block, `idle_rssi.m` and `emitter_idle.m`; D86 item 4). The per-flight draw is gone (the channel's later draws shift: every realization changes, so validate_phy's real-receiver rows are new realizations).
 
 **Tests.** `test_los_doppler`: no oscillator offset, LoS only: the receiver finds +fd (358 Hz) with the GCS ahead, -fd behind and 0 abeam, within 40 Hz.
 
@@ -196,7 +196,7 @@ Verdicts (results/phy_validation_v12c.txt of the scratch copy, 272 min): channel
 - The C-band fit for 2.4 GHz (the more severe measured band) and the two-sided 1.96 sigma band pairing a level with the roll.
 - No shadowing below 8 m/s (no source covers a hovering multirotor).
 - The reactive jammer's energy detector threshold (`p.reactive_threshold`, unchanged) and its detector time taken as zero.
-- The noise bursts' slot as one symbol, the duty uniform between the sources' values, the sleep law that gives the duty.
+- The noise bursts' slot as one symbol, the duty uniform between Xu et al.'s values, the sleep law that gives the duty, half the flights J4.
 - The delay-spread clip as a physics bound from the measured profile's range.
 - The calibration error uniform within the data sheet's bound, independent per antenna.
 - A14's assumptions.

@@ -1607,6 +1607,42 @@ verifyNotEmpty(tc, strfind(src, '''val_probs_oof'', ''val_latch_oof'''));
 verifyNotEmpty(tc, strfind(fileread(which('detector_block')), 'G.FM, G.FN, G.classes);'));
 end
 
+function test_roll_in_false_alarms(tc)
+% The false-alarm reading beside KPI 1 (roll_in_false_alarms.m, eval_detector.m): the frames of
+% the clean sub-runs inside their roll-in, the share read as any threat, as path_loss and as
+% airframe_shadowing, next to the same shares over every frame whose target is none.
+cls = {'none', 'path_loss', 'airframe_shadowing', 'jamming'};
+n = 6; pos = repmat((1:n)', 3, 1); run = kron((1:3)', ones(n, 1));
+P = struct('run', run, 'pos', pos, 'class_run', [ones(2 * n, 1); 3 * ones(n, 1)], ...
+    'roll_in', [repmat([2 10], n, 1); zeros(n, 2); repmat([2 10], n, 1)], 'bank', [-20 * ones(n, 1); 20 * ones(2 * n, 1)]);
+yt = repmat({'none'}, 3 * n, 1); yt(2 * n + 4:end) = {'airframe_shadowing'};
+yp = repmat({'none'}, 3 * n, 1);
+yp([1 3 4]) = {'jamming', 'path_loss', 'airframe_shadowing'};      % run 1: frame 1 before its roll-in
+yp(n + 2) = {'jamming'};                                           % run 2 holds its bank from the start
+yp([2 * n + 2, 2 * n + 5]) = {'path_loss', 'airframe_shadowing'};
+yt = categorical(yt, cls); yp = categorical(yp, cls);
+R = roll_in_false_alarms(P, yt, yp, 1);                            % frame k lies k - 1 s into its run
+% run 1 rolls in from 2 s to 2 + 20 / 10 = 4 s: its frames 3, 4 and 5 (the end of the roll-in counts);
+% run 2 has no roll-in, run 3 is not clean
+verifyEqual(tc, [R.roll_in.n R.roll_in.n_runs], [3 1]);
+verifyEqual(tc, [R.roll_in.any_pct R.roll_in.path_loss_pct R.roll_in.airframe_shadowing_pct], 100 * [2 1 1] / 3, 'AbsTol', 1e-9);
+verifyEqual(tc, [R.clean.n R.clean.n_runs], [3 * n - 3, 3]);        % every frame whose target is none
+verifyEqual(tc, [R.clean.any_pct R.clean.path_loss_pct R.clean.airframe_shadowing_pct], 100 * [5 2 1] / 15, 'AbsTol', 1e-9);
+P.roll_in(:) = 0;                                                  % no clean sub-run rolls in
+R = roll_in_false_alarms(P, yt, yp, 1);
+verifyEqual(tc, [R.roll_in.n R.roll_in.n_runs], [0 0]);
+verifyTrue(tc, all(isnan([R.roll_in.any_pct R.roll_in.path_loss_pct R.roll_in.airframe_shadowing_pct])));
+verifyEqual(tc, R.clean.n, 3 * n - 3);
+P.roll_in = repmat([2 10], 3 * n, 1); P.pos = P.pos + 100;          % every frame past the roll-in
+verifyEqual(tc, roll_in_false_alarms(P, yt, yp, 1).roll_in.n, 0);
+src = fileread(which('eval_detector'));
+verifyNotEmpty(tc, strfind(src, 'roll_in_false_alarms(sp.test, Y_test, Y_pred, cyc_s);'));
+verifyNotEmpty(tc, strfind(src, 'metrics.roll_in_false_alarms = roll_in_fa;'));
+verifyNotEmpty(tc, strfind(fileread(which('run_dataset_sweep')), 'dataset.class_run = D.class_run(:);'));
+verifyNotEmpty(tc, strfind(fileread(which('extract_spectrograms')), '''class_run'', ''roll_in''}'));
+verifyNotEmpty(tc, strfind(fileread(which('prepare_data')), '''class_run'', ''roll_in''}'));   % test, fresh test and the folds alike
+end
+
 function test_onset_events_branch(tc)
 % The latch threshold's events (select_fusion.m) are read as the deployed latch reads them:
 % the deployed heal, the first diagnosis on the threat's branch. A fading dip on another

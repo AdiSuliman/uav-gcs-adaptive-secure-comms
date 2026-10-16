@@ -26,10 +26,13 @@
 % the sub-run too, at a frame drawn per sub-run in the same range (frames before it carry
 % no threat): the connector opens within one frame (p.fault_onset_frames), and the UAV rolls
 % into its turn so that the hidden antenna's loss first reaches p.shadow_evt_db at that
-% frame (p.roll_in_frames, flight_draws.m: the loss ramps in as the roll grows,
+% frame (p.roll_in_frames, flight_draws.m: the loss ramps in as the burial grows,
 % shadow_frame.m); both count from there on, so their cells fly N_SUB F_SUB over the mean
-% count of frames from the onset. Airframe shadowing counts only while the attitude lets
-% the airframe hide an antenna in a turn whose bank the level is measured at (shadow_frame.m,
+% count of frames from the onset. Every other turning flight, of the clean link and of every
+% threat, rolls in too (p0.roll_in_frames), its start uniform over the times that put some of
+% the roll-in inside the sub-run, its labels its class's. Airframe shadowing counts only while
+% the attitude lets the airframe hide an antenna in an event whose deepest burial, through its
+% equivalent roll, lies in the level's band (shadow_frame.m, shadow_equiv_roll.m,
 % shadow_roll_band.m): its cells fly flights that hide one in some frame, found from the
 % flights' draws before they are simulated (hides_antenna.m: flight_draws.m, d.hidden; the
 % roll-in has to bring the airframe into the line of sight); a flight that hides none
@@ -38,7 +41,8 @@
 %
 % Per frame: reference-antenna IQ, label (per decision cycle), label_frame (the frame rule:
 % threat_active.m without the idle time, what the frame itself holds; the labels of the
-% per-frame network, frame_labels.m), level, configured Eb/N0, the received Eb/N0
+% per-frame network, frame_labels.m), class_run (the class of its sub-run), level, configured
+% Eb/N0, the received Eb/N0
 % (ebno_rx: the configured value less a path-loss step from its onset, received_ebno.m),
 % the receiver measurements of extract_closed_loop_frames.m, the true BER and frame
 % error (analysis only), speed, run id and seed, fold (1..N_SUB), the frame's position in its
@@ -147,7 +151,6 @@ for tt = 1:numel(threat_cfg)
         p = p0; p.active_threat = cfg.name; p.(cfg.param) = cfg.levels(lv); p.seed = [];
         p.pl_onset_frames = p0.pl_onset_det;           % a path-loss step inside the sub-run
         p.fault_onset_frames = p0.pl_onset_det;        % the connector opens inside it
-        p.roll_in_frames = p0.pl_onset_det;            % the shadowing onset inside it, by a roll-in
         build(p);
         i_start = numel(D.label) + 1; tried = 0;
         for s = 1:numel(EbNo_list)
@@ -189,6 +192,7 @@ report_row('none', NaN, D, i_start);
 %% ---- Package ----
 dataset = struct();
 dataset.iq = D.iq; dataset.label = D.label(:); dataset.label_frame = D.label_frame(:); dataset.level = D.level(:);
+dataset.class_run = D.class_run(:);        % the class of the frame's sub-run (1 = none)
 dataset.class_names = class_names; dataset.snr = D.snr(:); dataset.ebno_rx = D.ebno_rx(:);
 dataset.ber = D.ber(:); dataset.fer = D.fer(:);
 dataset.meas = struct();

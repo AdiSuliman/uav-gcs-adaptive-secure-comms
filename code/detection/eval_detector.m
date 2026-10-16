@@ -314,6 +314,20 @@ if isfield(sp.test, 'gain_ant') && isfield(sp.test, 'pos')
     end
 end
 
+% Beside KPI 1: false alarms of the clean sub-runs while they roll into their turn (every turning
+% flight of every class rolls in, run_dataset_sweep.m), against KPI 1's clean false-alarm rate
+% over every 'none' frame; the class is the monitor's, any threat is any class but none
+roll_in_fa = [];
+if all(isfield(sp.test, {'run', 'pos', 'class_run', 'roll_in', 'bank'}))
+    Pr = load('params.mat'); cyc_s = 0.02; if isfield(Pr.params, 'cycle_s'), cyc_s = Pr.params.cycle_s; end
+    roll_in_fa = roll_in_false_alarms(sp.test, Y_test, Y_pred, cyc_s);
+    fprintf('Clean false alarms, beside KPI 1 (read as any threat, path_loss, airframe_shadowing):\n');
+    fa_line('in a clean sub-run''s roll-in', roll_in_fa.roll_in);
+    fa_line('every ''none'' frame (KPI 1)', roll_in_fa.clean);
+else
+    fprintf('Clean false alarms in a roll-in not read: the test set lacks class_run or roll_in (run A5 to B1)\n');
+end
+
 % Beside KPI 1, never in it: the cause of a lost branch where an emitter of opportunity is on
 % the air in the idle time, per condition (emitter_reading.m: fitted on validation)
 Pe = load('params.mat'); NW = 12; if ~isempty(fus), NW = fus.N; end
@@ -428,6 +442,7 @@ metrics = struct( ...
 metrics.onset_cue = onset_cue;
 metrics.onset_diag = onset_diag;
 metrics.fused_alone = fused_alone;
+metrics.roll_in_false_alarms = roll_in_fa;
 if ~isempty(fus)
     metrics.fusion_cycles = fus.N;
     metrics.per_frame = struct('accuracy_pct', frame_acc, 'macro_f1_pct', frame_f1, 'class_f1_pct', frame_class_f1);
@@ -475,6 +490,16 @@ save(['results/detector_predictions' tag '.mat'], 'pred');
 clear S sp Y_pred_prob DET_TEST   % large arrays; main.m runs the stages in one workspace
 
 %% Local functions
+function fa_line(label, s)
+% One line of the clean false-alarm reading: the frames and the shares read as a threat.
+if s.n == 0
+    fprintf('  %-28s n = 0\n', label);
+else
+    fprintf('  %-28s n = %d (%d sub-runs): %.2f%%, %.2f%%, %.2f%%\n', label, s.n, s.n_runs, s.any_pct, s.path_loss_pct, ...
+        s.airframe_shadowing_pct);
+end
+end
+
 function q = prctile_nan(x, pct)
 % Percentile of the finite values (nearest rank), NaN when there are none.
 x = sort(x(isfinite(x)));

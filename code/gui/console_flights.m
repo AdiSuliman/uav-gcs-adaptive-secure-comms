@@ -26,7 +26,7 @@ end
 vmin = shadow_speed_floor(band, p);
 if v_kmh < vmin
     why = sprintf(['airframe shadowing at %g dB needs a turn banked %.1f deg or more, which no flight ' ...
-        'below %.1f km/h reaches'], p.shadow_db, band(1), vmin);
+        'below %.1f km/h reaches'], p.shadow_db, band(1) - p.shadow_el_deg, vmin);
     return
 end
 sel = struct('ebno', ebno, 'alt_m', NaN, 'k_sig_db', NaN, 'event_frame', C.event_frame, 'frames', C.event_count);

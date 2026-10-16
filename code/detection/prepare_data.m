@@ -114,9 +114,10 @@ end
 end
 
 function S = meta_fields(S, sp0, m)
-% The flight's altitude, bank, delay spread and the interferers' levels over our signal of
-% the frames m, for the analysis only (analyze_weak_points.m), never a detector input.
-for f = {'alt_m', 'bank', 'ds_ns', 'lev_db'}
+% The flight's altitude, bank, delay spread, the interferers' levels over our signal, the
+% class of the frame's sub-run and its roll-in of the frames m, for the analysis only
+% (analyze_weak_points.m, roll_in_false_alarms.m), never a detector input.
+for f = {'alt_m', 'bank', 'ds_ns', 'lev_db', 'class_run', 'roll_in'}
     if isfield(sp0, f{1}), S.(f{1}) = sp0.(f{1})(m, :); end
 end
 end
