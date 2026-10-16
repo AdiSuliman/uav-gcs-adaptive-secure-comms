@@ -87,3 +87,7 @@ On the smoke configuration (`SMOKE`, `CLEAN_SET = 'val'`: 4 clean geometries in 
 - interrupted: the MATLAB process tree killed (taskkill /T /F, a power loss's effect on the build) 376 s after start, with chunk 2 on disk and chunk 1 in progress; started again: "2 chunks of geometries; 1 kept from an earlier start", only chunk 1 simulated, 2.6 min, committed, the folder removed.
 
 The two outputs are identical: runs, seeds, per-flight draws and speeds equal, and all 72 (Eb/N0 x configuration) pools equal bit for bit (isequaln, largest difference 0, 80 frames per Eb/N0 and configuration); neither build left its chunk folder. C1p and the check pools use the same pool_checkpoint.m calls.
+
+## Test suite
+
+code/tests/test_core.m on the branch: 147 passed, 0 failed (46.2 min of tests, run in time-boxed parts of the same suite, every test once).
