@@ -32,8 +32,7 @@ for c = 1:size(C, 1)
         for adc = [0 p0.adc_bits]
             p = p0; p.active_threat = C{c, 1}; p.(C{c, 2}) = L; p.adc_bits = adc; p.rx_combiner = comb;
             evalc('build_threat_model(p)');
-            set_param([mdl '/AWGN'], 'SNR', num2str(ebno + 10*log10(p.bits_per_symbol) - 10*log10(p.sps)), ...
-                'SignalPower', num2str(1/p.sps));
+            set_link_snr(mdl, ebno + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
             b = [];
             for sd = seeds
                 link_seed(mdl, sd, p.fd_max, struct('ebno', ebno));

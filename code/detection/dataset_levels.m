@@ -7,12 +7,15 @@ function cfg = dataset_levels()
 %   interferers up to 30 dB over our signal (Liu et al.); a spoofer on the same
 %   radio as our GCS (Mekdad et al.), up to the same 30 dB by geometry (it captures
 %   the receiver from a 0.2-3 dB advantage, Whitehouse et al.); WLAN packets up to
-%   30 dB; path loss up to 22 dB (building blockage, Cui et al.); airframe shadowing
-%   over the measured event depths, about 6-25 dB (Sun et al.); an antenna fault from a
-%   partial loss to an open contact, 5-31 dB in eight even steps: a sustained diversity
-%   imbalance above 5 dB marks a degraded antenna connection (Heath, US 10,404,368,
-%   Table 2), a steady branch loss above 3 dB a loss in the RF path (Willgert,
-%   US 8,548,029, Table 1), and real connector faults are small losses or intermittent
+%   30 dB; path loss up to 22 dB (an obstruction below the 33-42 dB a building costs a
+%   2 GHz low-elevation UAV link, Simunek et al. 2011, Figs. 6 and 11); airframe shadowing
+%   over the measured median event losses, about 6-25 dB (Sun et al.; each level flown at
+%   the rolls their fit pairs with it, shadow_roll_band.m); an antenna fault from a
+%   partial loss to an open contact, 5-31 dB in eight even steps: a severely degraded
+%   antenna connection shows as a diversity imbalance, one branch weaker, whose
+%   indicator fires at a branch difference above 5 dB (Heath, US 10,404,368, Table 2), a
+%   steady branch loss above 3 dB is a loss in the RF path (Willgert, US 8,548,029,
+%   Table 1), and real connector faults are small losses or intermittent
 %   (Enquebecq et al.: fretting raises the loss by tenths of a dB; Smith et al. 2008);
 %   the 26-36 dB of an open contact is a gap-capacitance estimate (0.01-0.03 pF). No
 %   source gives the distribution of fault depths, so the levels are spread evenly over

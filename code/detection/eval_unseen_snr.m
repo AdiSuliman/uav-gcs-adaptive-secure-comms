@@ -5,14 +5,22 @@
 % of dataset_levels.m, a balanced 'none' class, each (threat, level) at its own random
 % UAV speed over the envelope, run-aware causal temporal features, the dataset's labels:
 % threat_active.m) at the midpoints 1.5:3:13.5 dB AND at the training values, and reads
-% them as the deployed detector does: the temporal fusion over the last cycles of the
-% block (fused_class.m). Seen and unseen points come from the same run, so the
+% them as the deployed monitor decides: the temporal fusion over the last cycles of the
+% block and the latched cause of a lost branch (fused_class.m, KPI 1's reading). Seen and
+% unseen points come from the same run, so the
 % comparison isolates the effect of Eb/N0 values the network never saw.
 % Beyond the trained range, at -3 dB (2.2 km) and 18 dB (0.20 km, link_distance_km.m):
 % 36 blocks per class at each point, each at its own speed, the levels cycled over
 % dataset_levels.m, for the detector's verdict there (edge_verdict.m, read by
 % edge_map.m); the policy is not measured beyond 0-15 dB.
-% Block k runs on seed 4,000,000 + k.
+% A block is read at its Eb/N0; the clean frames after a path-loss step's window are the
+% link at a longer range, received the step's depth below it (detector_block.m, kpi_ebno.m),
+% and are reported apart, beside the table.
+% Block k runs on seed 4,500,000 + k. An airframe-shadowing block flies, in its place, the next
+% candidate 4,550,000 + j whose attitude hides an antenna at its level (hiding_flight.m, as
+% the dataset selects its flights; each candidate tried once), at the candidate's own speed
+% over the envelope: its frames are conditioned on such a flight, the share of the
+% candidates that hide one reported beside.
 %
 % Output: results/unseen_snr.{txt,mat,png}
 
@@ -25,10 +33,11 @@ EBNO_ALL  = sort([EBNO_SEEN, EBNO_SEEN(1:end-1) + diff(EBNO_SEEN) / 2]);
 EBNO_EDGE = [EBNO_SEEN(1) - 3, EBNO_SEEN(end) + 3];   % beyond the trained range (detector only)
 N_FRAMES  = 20;                 % frames per (threat, level, Eb/N0) block
 N_EDGE    = 36;                 % blocks per class at each edge point (N_MIN of edge_verdict.m)
-SEED0     = 4000000;            % block k: seed SEED0 + k
+SEED0     = 4500000;            % block k: seed SEED0 + k
+SEED_SHD  = SEED0 + 50000;     % airframe shadowing: candidate j, seed SEED_SHD + j (j < 50 000, inside the block range)
 delay_bits = 20;
 temporal_window = 10;           % as extract_spectrograms.m
-rng(4242, 'twister');
+rng(4244, 'twister');
 
 clear threat_cfg                                  % scripts share the base workspace
 DL = dataset_levels();
@@ -47,15 +56,20 @@ classes = cellstr(string(D.classes(:)'));
 FZ = struct('FM', [], 'N', 1);
 if isfile('data/fusion.mat'), FZ = load('data/fusion.mat', 'FM', 'N'); end   % temporal fusion (select_fusion.m)
 p0 = load('params.mat').params; p0.quiet_build = true;
+p0.pl_onset_frames = p0.pl_onset_det;              % the dataset's recipe: a path-loss step inside the block,
+p0.fault_onset_frames = p0.pl_onset_det;           % the connector's opening and the shadowing onset (a roll-in)
+p0.roll_in_frames = p0.pl_onset_det;               % inside it too
+p0.cap_frames = N_FRAMES;                         % the block's frames (the cap's, and those a shadowing flight hides an antenna in)
 G = struct('model', 'UAV_GCS_Threat_Link', 'stop_time', num2str(N_FRAMES * p0.frame_duration), ...
     'delay_bits', delay_bits, 'tw', temporal_window, 'fs', p0.symbol_rate * p0.sps, 'D', D, 'N', load_norm(), ...
     'classes', {classes}, 'FM', FZ.FM, 'FN', FZ.N);
 act_of = containers.Map(classes, cellfun(@(c) rule_based_policy(c), classes, 'UniformOutput', false));
 
 %% 2. Generate and classify
-truth = {}; pred = {}; ebno_of = [];
+truth = {}; pred = {}; ebno_of = []; apart = false(1, 0); rx_of = [];
 blk = struct('cls', {}, 'level', {}, 'ebno', {}, 'seed', {}, 'speed', {}, 'n', {}, 'correct', {}, 'same_action', {});
 kb = 0;
+jsh = 0; SHT = [0 0];                             % airframe shadowing: last candidate; blocks, candidates tried
 t0 = tic;
 for t = 1:numel(threat_cfg)
     cfg = threat_cfg(t);
@@ -66,9 +80,14 @@ for t = 1:numel(threat_cfg)
         evalc('build_threat_model(p)');
         for s = 1:numel(EBNO_ALL)
             kb = kb + 1;
-            [tl, pl] = detector_block(G, p, EBNO_ALL(s), SEED0 + kb, v_kmh);
+            [sd, v] = deal(SEED0 + kb, v_kmh);
+            if strcmp(cfg.name, 'airframe_shadowing')
+                [sd, v, jsh, nt] = hiding_flight(p, EBNO_ALL(s), SEED_SHD, jsh, 49999); SHT = SHT + [1 nt];
+            end
+            [tl, pl, ~, rx] = detector_block(G, p, EBNO_ALL(s), sd, v);
             truth = [truth, tl]; pred = [pred, pl]; ebno_of = [ebno_of, EBNO_ALL(s) * ones(1, numel(tl))]; %#ok<AGROW>
-            blk(end+1) = block_row(cfg.name, cfg.levels(lv), EBNO_ALL(s), SEED0 + kb, v_kmh, tl, pl, act_of); %#ok<SAGROW>
+            apart = [apart, rx < EBNO_ALL(s) & ~strcmp(tl, 'path_loss')]; rx_of = [rx_of, rx]; %#ok<AGROW>
+            blk(end+1) = block_row(cfg.name, cfg.levels(lv), EBNO_ALL(s), sd, v, tl, pl, act_of); %#ok<SAGROW>
         end
     end
     fprintf('  [%d/%d] %-20s done (%.1f min)\n', t, numel(threat_cfg), cfg.name, toc(t0)/60);
@@ -86,20 +105,25 @@ for t = 1:numel(DL)
             for b = bs
                 kb = kb + 1;
                 v_kmh = p0.speed_kmh_min + rand() * (p0.speed_kmh_max - p0.speed_kmh_min);
-                [tl, pl] = detector_block(G, p, e, SEED0 + kb, v_kmh);
+                [sd, v] = deal(SEED0 + kb, v_kmh);
+                if strcmp(cfg.name, 'airframe_shadowing')
+                    [sd, v, jsh, nt] = hiding_flight(p, e, SEED_SHD, jsh, 49999); SHT = SHT + [1 nt];
+                end
+                [tl, pl, ~, rx] = detector_block(G, p, e, sd, v);
                 truth = [truth, tl]; pred = [pred, pl]; ebno_of = [ebno_of, e * ones(1, numel(tl))]; %#ok<AGROW>
-                blk(end+1) = block_row(cfg.name, cfg.levels(lv), e, SEED0 + kb, v_kmh, tl, pl, act_of); %#ok<SAGROW>
+                apart = [apart, rx < e & ~strcmp(tl, 'path_loss')]; rx_of = [rx_of, rx]; %#ok<AGROW>
+                blk(end+1) = block_row(cfg.name, cfg.levels(lv), e, sd, v, tl, pl, act_of); %#ok<SAGROW>
             end
         end
     end
     fprintf('  [%d/%d] %-20s edge points done (%.1f min)\n', t, numel(DL), cfg.name, toc(t0)/60);
 end
 
-%% 3. Metrics per Eb/N0
+%% 3. Metrics per Eb/N0 (the frames read at their block's Eb/N0)
 EB = [EBNO_ALL, EBNO_EDGE];
 acc = nan(1, numel(EB)); f1 = acc; aeq = acc; n = acc;
 for s = 1:numel(EB)
-    m = ebno_of == EB(s);
+    m = ebno_of == EB(s) & ~apart;
     n(s) = sum(m);
     acc(s) = 100 * mean(strcmp(truth(m), pred(m)));
     f1(s)  = 100 * macro_f1(truth(m), pred(m), classes);
@@ -112,7 +136,11 @@ seen = ismember(EBNO_ALL, EBNO_SEEN);
 interp_acc = interp1(EBNO_ALL(seen), acc(seen), EBNO_ALL(~seen), 'linear');
 gap = acc(~seen) - interp_acc;
 
-mid = ismember(ebno_of, EBNO_ALL(~seen)); ms = ismember(ebno_of, EBNO_SEEN);
+mid = ismember(ebno_of, EBNO_ALL(~seen)) & ~apart; ms = ismember(ebno_of, EBNO_SEEN) & ~apart;
+% Apart: the clean frames after a path-loss step's window, received below their block
+AP = struct('n', sum(apart), 'n_all', numel(apart), 'rx_min_db', min([rx_of(apart), NaN]), ...
+    'rx_max_db', max([rx_of(apart), NaN]), 'accuracy_pct', 100 * mean(strcmp(truth(apart), pred(apart))), ...
+    'read_as_path_loss_pct', 100 * mean(strcmp(pred(apart), 'path_loss')));
 recall_unseen = nan(1, numel(classes)); recall_seen = recall_unseen;
 for c = 1:numel(classes)
     mu_ = strcmp(truth, classes{c}) & mid;
@@ -140,8 +168,14 @@ rep = {};
 rep{end+1} = '=== DETECTOR GENERALIZATION TO UNSEEN Eb/N0 (proposal mitigation 4) ===';
 rep{end+1} = sprintf(['Generated: %s | %d frames per block, all threats x every other level + balanced none, random speed ' ...
     'per (threat, level) | %s'], datestr(now), N_FRAMES, ...
-    ternary(isempty(FZ.FM), 'per-frame reading', sprintf('fused over the last %d cycles (deployed detector)', FZ.N)));
+    ternary(isempty(FZ.FM), 'per-frame reading with the latched cause of a lost branch', ...
+    sprintf('fused over the last %d cycles with the latched cause of a lost branch (the deployed monitor''s class)', FZ.N)));
 rep{end+1} = sprintf('Training grid: %s dB. Unseen: %s dB. Same generator and run for both.', mat2str(EBNO_SEEN), mat2str(setdiff(EBNO_ALL, EBNO_SEEN)));
+if SHT(1) > 0
+    rep{end+1} = sprintf(['Airframe shadowing: every block flies a flight whose attitude hides an antenna at its level (its ' ...
+        'readings conditioned on one, at the flight''s own speed); %d blocks kept of %d candidates (%.1f%% hide one).'], ...
+        SHT(1), SHT(2), 100 * SHT(1) / SHT(2));
+end
 rep{end+1} = '';
 rep{end+1} = sprintf('%6s %8s %7s %10s %10s %14s %14s', 'Eb/N0', 'in train', 'frames', 'accuracy', 'macro-F1', 'action-equiv', 'gap to interp');
 ku = 0;
@@ -157,6 +191,11 @@ end
 rep{end+1} = '';
 rep{end+1} = sprintf('Accuracy: unseen %.1f%% | training grid %.1f%% | largest gap to the interpolated curve %.1f points (mean %+.1f)', ...
     summary.acc_unseen, summary.acc_seen, summary.max_gap, summary.mean_gap);
+if AP.n > 0
+    rep{end+1} = sprintf(['Apart from the table: %d of %d frames, the clean link after a path-loss step''s window, ' ...
+        'received %.1f to %.1f dB (the block less the step): read right (none) in %.1f%%, read as path_loss in %.1f%%.'], ...
+        AP.n, AP.n_all, AP.rx_min_db, AP.rx_max_db, AP.accuracy_pct, AP.read_as_path_loss_pct);
+end
 rep{end+1} = '';
 rep{end+1} = '--- Recall per class: training grid vs unseen Eb/N0 ---';
 for c = 1:numel(classes)
@@ -175,7 +214,7 @@ if ~exist('results', 'dir'), mkdir('results'); end
 fid = fopen('results/unseen_snr.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('\n%s\n', rep{:});
 save('results/unseen_snr.mat', 'summary', 'EBNO_ALL', 'EBNO_SEEN', 'EBNO_EDGE', 'acc', 'f1', 'aeq', 'n', 'gap', ...
-    'acc_edge', 'f1_edge', 'aeq_edge', 'n_edge', 'recall_seen', 'recall_unseen', 'classes', 'blk', 'edge');
+    'acc_edge', 'f1_edge', 'aeq_edge', 'n_edge', 'recall_seen', 'recall_unseen', 'classes', 'blk', 'edge', 'AP', 'SHT');
 
 fig = figure('Position', [100 100 760 420], 'Color', 'w'); hold on;
 plot(EBNO_ALL(seen), acc(seen), '-o', 'LineWidth', 1.6, 'MarkerFaceColor', [0 0.45 0.74], 'DisplayName', 'training Eb/N0');

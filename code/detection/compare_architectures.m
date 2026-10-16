@@ -5,27 +5,41 @@
 % same network seeing only one input: spectrogram only (link features held at
 % zero) and link features only (spectrogram held at zero). A constant input
 % leaves its branch a fixed bias, so each variant is the single-branch network
-% with the same training schedule (train_hybrid_net.m), splits and seed.
+% with the same training schedule (train_hybrid_net.m), splits and seed; the spectrogram's
+% time and frequency masking is off where the spectrogram is held at zero.
 % Classical baselines on the same link features (the traditional classifiers of
 % UAV intrusion detection, Papathanasiou et al. [2]; a random forest on spectral
 % descriptors, Barajas et al.): a random forest (200 trees) and a kernel SVM
 % (one-vs-one, random-feature Gaussian kernel), default settings, no tuning.
+% Test frames: the second test set (data/splits_fresh.mat, build_fresh_test) when it exists;
+% else the test split of data/splits.mat, labelled as a second reading of frames read
+% before. Every variant is a per-frame classifier: trained and read on the frame rule's
+% labels (frame_labels.m). Macro-F1 per Eb/N0 on the KPI 1 bins (kpi_ebno.m), the frames
+% received below the grid in their own column.
 % Output: results/architecture_comparison.txt
 
 close all; clc;
 fprintf('=== Detector architecture comparison ===\n\n');
 S = load('data/splits.mat', 'splits'); sp = S.splits; clear S
 classes = sp.classes;
+set_name = 'test split of the dataset (a second reading of frames read before)';
+if isfile('data/splits_fresh.mat')
+    Sf = load('data/splits_fresh.mat', 'splits');
+    assert(isequal(Sf.splits.norm, sp.norm), 'compare_architectures: the second test set has another normalization');
+    sp.test = Sf.splits.test; clear Sf
+    set_name = 'second test set (data/splits_fresh.mat)';
+end
+sp.train = frame_labels(sp.train); sp.val = frame_labels(sp.val); sp.test = frame_labels(sp.test);
 V = struct('name', {'hybrid (spectrogram + link features)', 'spectrogram only (CNN)', 'link features only (MLP)', ...
     'link features only, random forest', 'link features only, kernel SVM'}, ...
     'mask', {'', 'feat', 'spec', '', ''}, 'kind', {'net', 'net', 'net', 'rf', 'svm'});
-rep = {'=== DETECTOR ARCHITECTURES, TEST SPLIT ===', ...
-    sprintf('Generated: %s | same splits, schedule and seed; test frames %d', datestr(now), size(sp.test.X, 4)), ''};
+rep = {'=== DETECTOR ARCHITECTURES ===', ...
+    sprintf('Generated: %s | same splits, schedule and seed | test frames %d: %s', datestr(now), size(sp.test.X, 4), set_name), ''};
 hdr = sprintf('%-40s %9s %9s  %s', 'architecture', 'accuracy', 'macro-F1', strjoin(cellfun(@(c) sprintf('%8.8s', c), ...
     cellstr(string(classes(:)')), 'UniformOutput', false), ' '));
 rep{end+1} = hdr;
-eb = sp.test.ebno(:); ebs = unique(eb);
-PE = zeros(numel(V), numel(ebs));
+eb = kpi_ebno(sp.test, sp.test.Y, classes); ebs = unique(eb(~isnan(eb)));
+PE = zeros(numel(V), numel(ebs) + any(isnan(eb)));
 for v = 1:numel(V)
     rng(42, 'twister');
     fprintf('Training: %s\n', V(v).name);
@@ -33,7 +47,9 @@ for v = 1:numel(V)
     switch V(v).kind
         case 'net'
             tr = masked(sp.train, V(v).mask); va = masked(sp.val, V(v).mask); te = masked(sp.test, V(v).mask);
-            net = train_hybrid_net(tr, va, classes, struct('verbose', false));
+            opts = struct('verbose', false);
+            if strcmp(V(v).mask, 'spec'), opts.augment = false; end   % no masking of an image held at zero
+            net = train_hybrid_net(tr, va, classes, opts);
             [~, yp] = max(cnn_scores(net, te.X, te.feats'), [], 1);
         case 'rf'
             mdl = TreeBagger(200, double(sp.train.feats), double(sp.train.Y(:)), 'Method', 'classification');
@@ -44,12 +60,13 @@ for v = 1:numel(V)
             yp = predict(mdl, (double(sp.test.feats) - mu) ./ sd)';
     end
     f1 = per_class_f1(yt, yp, numel(classes));
-    for e = 1:numel(ebs), m = eb' == ebs(e); PE(v, e) = mean(per_class_f1(yt(m), yp(m), numel(classes))); end
+    for e = 1:numel(ebs), m = eb' == ebs(e); PE(v, e) = macro_present(yt(m), yp(m), numel(classes)); end
+    if any(isnan(eb)), m = isnan(eb'); PE(v, end) = macro_present(yt(m), yp(m), numel(classes)); end
     rep{end+1} = sprintf('%-40s %8.2f%% %8.2f%%  %s', V(v).name, 100 * mean(yp == yt), 100 * mean(f1), ...
         strjoin(arrayfun(@(x) sprintf('%7.1f%%', 100 * x), f1, 'UniformOutput', false), ' ')); %#ok<SAGROW>
 end
 rep{end+1} = '';
-rep{end+1} = sprintf('Macro-F1 per Eb/N0 [dB] %s', sprintf('%8g', ebs));
+rep{end+1} = sprintf('Macro-F1 per Eb/N0 [dB] %s%s', sprintf('%8g', ebs), repmat(sprintf('  %s', 'beyond'), 1, any(isnan(eb))));
 for v = 1:numel(V)
     rep{end+1} = sprintf('%-40s%s', V(v).name, sprintf('%7.1f%%', 100 * PE(v, :))); %#ok<SAGROW>
 end
@@ -62,6 +79,12 @@ switch what
     case 'feat', P.feats = zeros(size(P.feats), 'like', P.feats);
     case 'spec', P.X = zeros(size(P.X), 'like', P.X);
 end
+end
+
+function f = macro_present(yt, yp, nC)
+% Macro-F1 over the classes present among the true labels.
+f1 = per_class_f1(yt, yp, nC);
+f = mean(f1(ismember(1:nC, yt)));
 end
 
 function f1 = per_class_f1(yt, yp, nC)

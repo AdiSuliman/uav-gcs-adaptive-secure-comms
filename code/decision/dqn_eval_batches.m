@@ -4,7 +4,8 @@ R = [];
 for b = 1:numel(specs)
     Rb = rollout_policy(kind, PP, K, specs{b}, split, agent, opt, seed0 + b);
     Rb = rmfield(Rb, 'cfg_trace');
-    Rb.threat = ~strcmp(PP.scen(specs{b}.scn), 'none');
+    Rb.threat = ~strcmp(PP.scen(specs{b}.scn), 'none') & ...      % a threat on the air in the geometry (link_env.m K.on)
+        K.on(sub2ind(size(K.on), specs{b}.scn, specs{b}.s, split + 0 * specs{b}.s, Rb.r));
     if isempty(R), R = Rb; else, R = structfun_cat(R, Rb); end
 end
 end

@@ -28,9 +28,9 @@ MODES = {'static', 'follower', 'immediate'};
 POL = {'dqn', 'dqn_esc', 'rule_esc'};
 cells = find(~cellfun(@isempty, PP.pools(:, 1, K.na, VAL))');
 cells = cells(~strcmp(PP.scen(cells), 'none'));
-rep = {sprintf(['=== FAILURE MODES ON THE VALIDATION SPLIT (%s: %s %d/%d, drop %.1f dB) ===\n' ...
+rep = {sprintf(['=== FAILURE MODES ON THE VALIDATION SPLIT (%s: %s %d/%d, drop %.1f %s) ===\n' ...
     'recovered among recoverable episodes, %%; DQN failures by mechanism, %% of the failed episodes'], ...
-    AGENT_FILE, Q.alarm_mode, Q.confirm, Q.drop_db)};
+    AGENT_FILE, Q.alarm_mode, Q.confirm, Q.drop_db, drop_unit(Q.alarm_mode))};
 rep{end+1} = sprintf('%-40s %-10s %5s %7s %8s %9s | %6s %6s %8s %6s', 'threat', 'mode', 'n', 'DQN', 'DQN+esc', 'rule+esc', ...
     'never', 'releas', 'channel', 'other');
 T = struct('thr', {}, 'mode', {}, 'n', {}, 'rec', {}, 'why', {}, 'rel_any', {}, 'rec_rel', {}, 'rec_norel', {});
@@ -76,8 +76,8 @@ save('results/diag_failure_modes.mat', 'T');
 %% ===================== Local functions =====================
 function specs = mode_specs(cells, PP, K, H, split, reps, m, rs)
 % Every (cell, Eb/N0, geometry) of the split `reps` times in one jammer mode.
-[c, s, r] = ndgrid(cells, 1:numel(PP.ebno), 1:K.nR(split));
-c = repmat(c(:)', 1, reps); s = repmat(s(:)', 1, reps); r = repmat(r(:)', 1, reps);
+[c, s, r] = flight_triples(cells, K.geo(cells, split), 1:numel(PP.ebno));   % the geometries each cell flies
+c = repmat(c, 1, reps); s = repmat(s, 1, reps); r = repmat(r, 1, reps);
 n = numel(c); nb = ceil(n / H.NE);
 specs = cell(1, nb);
 for b = 1:nb

@@ -1,5 +1,5 @@
 === PHY VALIDATION: multi-antenna UAV receiver vs theory ===
-Generated: 06-Oct-2026 15:21:53 | 1.0 s per point, 20 channel realizations, fd 358 Hz | CSI block 64 sym (MRC), window 32 sym (MMSE)
+Generated: 05-Oct-2026 14:36:59 | 1.0 s per point, 20 channel realizations, fd 358 Hz | CSI block 64 sym (MRC), window 32 sym (MMSE)
 Eb/N0 per branch [dB]: [0 2 4 6 8 10]
 
 V1 AWGN, 1 ant             BER   8.00e-02 3.82e-02 1.28e-02 2.43e-03 1.95e-04 6.49e-06
@@ -127,5 +127,5 @@ jam 16 dB, rho 0.9, 358 Hz        NaN     NaN     234     NaN     NaN     NaN
 Rows: the spread the delay line reached at the case's K (the flat profile when its window holds less).
 V12c channel model: the flat channel fails, the link runs the delay line -> PASS
 V12c receiver on the delay line: FAIL (above the limit: jam 30 dB, rho 0.3, MMSE)
-Overall: theory gaps 7/7 within 0.3 dB, seeds PASS, tone PASS, V12c channel model PASS, receiver on the delay line FAIL | 361.6 min
+Overall: theory gaps 7/7 within 0.3 dB, seeds PASS, tone PASS, V12c channel model PASS, receiver on the delay line FAIL | 366.5 min
 Pass rule: |gap| <= 0.3 dB or within 2 standard errors (spread over 20 channel realizations).

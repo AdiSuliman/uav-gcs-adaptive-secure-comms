@@ -1,15 +1,18 @@
 %% EXTRACT_SPECTROGRAMS - Phase A6: detector inputs from data/dataset.mat
-% Image: spec_image.m (fixed [-40, 40] dB scale). Scalar features: link_features.m
+% Image: spec_image.m (dB over the thermal floor of a bin on a fixed [-25, 55] dB scale). Scalar features: link_features.m
 % (receiver measurements), temporal ones over a causal window of 10 frames
 % inside each sub-run. The same two functions are used by every closed-loop
 % script and the GUI, so training and deployment see identical inputs.
+% With FRESH_TEST true (build_fresh_test.m): data/dataset_fresh.mat -> data/spectrograms_fresh.mat.
 
 close all; clc;
-if ~exist('data/dataset.mat', 'file')
-    error('data/dataset.mat not found. Run run_dataset_sweep.m first.');
+f_in = 'data/dataset.mat'; f_out = 'data/spectrograms.mat';
+if exist('FRESH_TEST', 'var') && FRESH_TEST, f_in = 'data/dataset_fresh.mat'; f_out = 'data/spectrograms_fresh.mat'; end
+if ~exist(f_in, 'file')
+    error('%s not found. Run run_dataset_sweep.m first.', f_in);
 end
-fprintf('Loading dataset...\n');
-L = load('data/dataset.mat'); ds = L.dataset;
+fprintf('Loading %s...\n', f_in);
+L = load(f_in); ds = L.dataset;
 S = load('params.mat'); p = S.params;
 fs = p.symbol_rate * p.sps;
 tw = 10;                                  % temporal window [frames]
@@ -21,7 +24,7 @@ N = numel(ds.iq);
 X = zeros(128, 128, 1, N, 'single');
 fprintf('Extracting %d spectrograms...\n', N);
 for i = 1:N
-    X(:, :, 1, i) = spec_image(ds.iq{i}, fs);
+    X(:, :, 1, i) = spec_image(ds.iq{i}, fs, thermal_nv(p));
     if mod(i, 2000) == 0, fprintf('  %d/%d\n', i, N); end
 end
 
@@ -42,21 +45,32 @@ end
 spec = struct();
 spec.X = X;
 spec.Y = categorical(ds.label, 1:numel(ds.class_names), ds.class_names);
+if isfield(ds, 'label_frame')                            % the frame rule's labels (frame_labels.m)
+    spec.Y_frame = categorical(ds.label_frame, 1:numel(ds.class_names), ds.class_names);
+end
 spec.feats = feats;
 spec.feat_names = feat_names;
 spec.class_names = ds.class_names;
 spec.ebno = ds.snr(:);                    % configured Eb/N0, analysis only (not an input)
+if isfield(ds, 'ebno_rx'), spec.ebno_rx = ds.ebno_rx(:); end   % received Eb/N0 (received_ebno.m), analysis only
 spec.speed_kmh = ds.speed_kmh(:);
 spec.run = ds.run(:); spec.fold = ds.fold(:); spec.level = ds.level(:);
 if isfield(ds, 'pos'), spec.pos = ds.pos(:); spec.gain_ant = ds.gain_ant; end   % temporal evidence
+if isfield(ds, 'bch'), spec.bch = ds.bch; end           % every antenna's channel estimates per frame (window_cues.m)
+if isfield(ds, 'idle'), spec.idle = ds.idle; end         % the idle time before each frame (window_cues.m)
+if isfield(ds, 'act_idle'), spec.act_idle = ds.act_idle(:); end   % its on-air share (labels; analysis only)
+if isfield(ds, 'idle_amb'), spec.idle_amb = ds.idle_amb; end   % with an emitter of opportunity (emitter_reading.m)
 if isfield(ds, 'k_db'), spec.k_db = ds.k_db(:); spec.aoa = ds.aoa(:); end         % analysis only
+for f = {'alt_m', 'bank', 'ds_ns', 'lev_db', 'class_run', 'roll_in'}               % analysis only (weak points, roll_in_false_alarms.m)
+    if isfield(ds, f{1}), spec.(f{1}) = ds.(f{1}); end
+end
 spec.img_size = 128;
 spec.meta = ds.meta;
 spec.meta.temporal_window = tw;
-save('data/spectrograms.mat', 'spec', '-v7.3');
+save(f_out, 'spec', '-v7.3');
 
-fprintf('\nSaved data/spectrograms.mat: X [128 128 1 %d], %d classes, feats [%d x %d] (%s)\n', ...
-    N, numel(ds.class_names), N, numel(feat_names), strjoin(feat_names, ', '));
+fprintf('\nSaved %s: X [128 128 1 %d], %d classes, feats [%d x %d] (%s)\n', ...
+    f_out, N, numel(ds.class_names), N, numel(feat_names), strjoin(feat_names, ', '));
 fprintf('%-22s', 'mean per class'); fprintf('%10s', feat_names{:}); fprintf('\n');
 for c = 1:numel(ds.class_names)
     fprintf('%-22s', ds.class_names{c}); fprintf('%10.3f', mean(feats(ds.label == c, :), 1)); fprintf('\n');

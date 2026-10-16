@@ -35,12 +35,21 @@ function [p, snr_gain_db, cm] = apply_countermeasure(p, threat, action)
 %                        no effect on broadband or signal-side threats; 2x spectrum
 %     spatial_diversity  the UAV receiver switches from MRC to adaptive MMSE combining
 %                        over its n_rx antennas: sample-covariance weights null
-%                        up to n_rx-1 interferers arriving from other directions and
-%                        track a faulty branch; the effect is in the link model
+%                        up to n_rx-1 interferers arriving from other directions (with
+%                        white noise alone they are MRC's, with an estimation loss: no
+%                        gain on a lost branch); the effect is in the link model
 %                        (p.rx_combiner), no Eb/N0 offset
-%     rate_reduce        rate / cm_rate_factor: +10*log10(factor) dB processing gain
-%                        against noise and noise-like interference; no gain against
-%                        a coherent spoofer; goodput / factor
+%     rate_reduce        rate / cm_rate_factor: each bit spread over factor symbols at the
+%                        same symbol rate and power, +10*log10(factor) dB processing gain
+%                        against noise and every interferer not spread like our signal:
+%                        the noise-like jammers, the WLAN, the tone and the spoofer, a
+%                        counterfeit of our modulation and pulse shape that does not
+%                        follow our protocol, so not our spreading either; goodput
+%                        / factor. The simulated field is that of the despread link (our
+%                        signal up by the gain, those interferers held at their power);
+%                        p.proc_gain_db tells the receiver to take the gain out of the
+%                        level measurements it takes before despreading
+%                        (extract_closed_loop_frames.m)
 %     power_control      the GCS radio's largest power step under the licence-exempt
 %                        e.i.r.p. cap, per carrier (power_step_db.m): the signal rises by
 %                        that much against noise and every additive interferer,
@@ -116,7 +125,8 @@ switch action
         g = 10*log10(rate_f);
         snr_gain_db = g;
         cm.goodput_factor = 1 / rate_f;
-        if ~isempty(field) && ~ismember(threat, {'spoofing','path_loss','antenna_fault','airframe_shadowing'})
+        p.proc_gain_db = g;
+        if ~isempty(field) && ~ismember(threat, {'path_loss','antenna_fault','airframe_shadowing'})
             p.(field) = p.(field) - g;
         end
         cm.effect = sprintf('processing gain +%.1f dB, goodput x%.2f', g, 1/rate_f);

@@ -14,17 +14,22 @@
 % They execute top to bottom in dependency order. Launch headless from cmd or
 % Git Bash in the project folder:  matlab -batch "main"
 %
-% Runtimes (Ryzen 7 7700, RTX 4070 SUPER, 6 parallel workers): A5 ~17 min, A6 ~7 min,
-% B1 ~1 min, B2 ~8 min, B3a ~16 min, B4 ~25 min, OOD ~70 min, C1p ~3-4 h, C1c ~40 min,
-% C2 ~3 h, C2e ~1 h, SURV ~1.5 h, SURV3 ~1 h, LAT ~2 min, KPI and DASH < 1 min.
+% Runtimes at full scale, per profile, are given at each flag below (profile 1 on a Ryzen 7
+% 7700, RTX 4070 SUPER, 6 parallel workers; profile 3 up to 1.2x on the parallel stages;
+% derived in docs/DECISIONS.md, "Cost and resources, re-derived (2026-10-16)"). A profile
+% alone takes about 6-7.2 days; the three profiles side by side, their parallel stages
+% taking turns (parallel_turn.m), about 14.4-19.0 days.
 % The same stages run headless and logged with run_stage.m, e.g.
 %   matlab -batch "run_stage('C1p','C1c','C1d','C2','C2e')"
 % and on a reduced problem with run_stage('smoke', ...).
 %
 % DEPENDENCIES (what must exist before a stage can run):
-%   A5 needs A0 | A6 needs A5 | B1 needs A6 | B2 needs B1 | B3, B3a, B4, OOD need B2 | B4s needs OOD
+%   A5 needs A0 | A6 needs A5 | B1 needs A6 | B2 needs B1 | B2F needs B2 | B3n needs B2F |
+%   B3 (the test split and the second test set), B3a, B4, OOD need B2 | B4s needs OOD
 %   C1p needs OOD (it selects the production unknown-threat score) | C1c, C1d need C1p | C2 needs C1p, C1c (validation set), C1d | C2e needs C2 (and C1c for KPI 6)
-%   LAT needs C2 | SURV, SURV3 need A0 | KPI reads B3, B4, OOD, A4v, C2e, LAT, SURV | DASH needs KPI
+%   C2g, C2u need C2 | SURV, SURV3, OHP, GCSA need A0 | EDGE needs C2e, C2u, C1c, OHP, GCSA
+%   LAT needs C2 | KPI reads B3, B4, OOD, A4v, C2e, EDGE, LAT, SURV | DASH, WEAK, RPT need KPI
+% The order of the flags below is the order of run_stage.m's full chain (docs/runs).
 %
 % LOGGING: `diary` captures everything printed below into logs/run_*.txt,
 % surviving the close all/clc that each called script starts with.
@@ -60,15 +65,15 @@ fprintf('(This file will contain EVERYTHING printed below, even across clc calls
 %  ================================================================
 %  QUICK PRESETS - copy the block you want over the flags below:
 %
-%  FULL CLEAN RUN (everything from scratch, ~13 hours):
+%  FULL CLEAN RUN (everything from scratch, about 6-7.2 days per profile):
 %    every flag below = true except validate_A and check_A4
 %
-%  DECISION LAYER + RESULTS (detector unchanged, ~10 hours):
+%  DECISION LAYER + RESULTS (detector unchanged, about 5-6 days):
 %    build_policy_pools, build_clean_test_pools, choose_drop_threshold, train_dqn,
 %    evaluate_policies, map_survivability, survivability_options, measure_latency,
 %    measure_all_kpis, build_dashboard = true; rest = false
 %
-%  RESULTS ONLY (models and pools exist, ~1 hour):
+%  RESULTS ONLY (models and pools exist, about 0.5-1.5 hours):
 %    evaluate_policies, measure_latency, measure_all_kpis, build_dashboard = true
 %
 %  DASHBOARD ONLY (< 1 min):
@@ -76,13 +81,13 @@ fprintf('(This file will contain EVERYTHING printed below, even across clc calls
 %% ================================================================
 
 warning('off', 'Simulink:cgxe:LeakedJITEngine');   % internal Simulink notice on repeated sim() of MATLAB Function blocks
-disk_guard('init');                                % Simulink temporary data and the 200 GB free-disk floor
+disk_guard('init');                                % Simulink temporary data and the 150 GB free-disk floor
 
 % ---- Decision-layer training; defaults of train_dqn.m when absent ----
 CFG.dqn_seeds       = 3;                 % C2: training seeds per setting
 CFG.dqn_gammas      = 0.5;               % C2: discount factor (selected on validation)
-CFG.monitors        = {'class_drop 3/3', 'class_drop 2/2'};  % C2: alarm definition and m/n confirmation (selected on validation)
-CFG.drop_steps      = 2;                 % C2: path_loss alarm threshold, 2 dB below the train-pool value (selected on validation)
+CFG.monitors        = {'class_drop 3/3', 'class_drop 2/2', 'class_drop 4/5', 'class_drop 5/5'};  % C2: alarm definition and m/n confirmation (selected on validation)
+CFG.drop_steps      = [0 2];             % C2: path_loss alarm threshold, the train-pool value and 2 dB below it (selected on validation)
 CFG.fa_penalty_grid = [80 120 160];      % C2: training reward variants: false-switch penalty,
 CFG.cost_scale_grid = [0.5 0.5 0.5];     %     running costs x scale,
 CFG.switch_scale_grid = [1 1 1];         %     switching cost x scale
@@ -92,40 +97,48 @@ CFG.switch_scale_grid = [1 1 1];         %     switching cost x scale
 RUN.init                        = false;    % A0  : regenerate params.mat
 RUN.validate_A                  = false;   % A1-A3: build+validate AWGN & Rician links (fast)
 RUN.check_A4                    = false;   % A4  : build threat model + sanity BER (fast)
-RUN.validate_phy                = false;    % A4v : link vs theory, MRC/MMSE, seeds; stops main on FAIL
-RUN.build_dataset               = false;    % A5  : seeded sub-run dataset, 10 threats x 8 levels, receiver measurements (~40 min)
-RUN.extract_spectrograms        = false;    % A6  : spectrograms + 15 link features (~12 min)
+RUN.validate_phy                = false;    % A4v : link vs theory, MRC/MMSE, seeds; stops main on FAIL (~6-8 h)
+RUN.build_dataset               = false;    % A5  : seeded sub-run dataset, 10 threats x 8 levels, receiver measurements (~3.6-4 h)
+RUN.extract_spectrograms        = false;    % A6  : spectrograms + link features (link_features.m) (~35 min)
 
 
 % ---- Phase B: detection (CNN baseline) ----
-RUN.prepare_data                = false;    % B1  : split by sub-run 4/1/1 (~2 min)
-RUN.train_detector              = false;    % B2  : train CNN+scalar hybrid, unknown-threat models (~8 min); a new detector invalidates the pools
-RUN.eval_detector               = false;    % B3  : test eval + confusion/accuracy-vs-SNR + bootstrap CIs (~2 min)
-RUN.compare_architectures       = false;    % B3a : hybrid vs spectrogram-only vs features-only (~16 min)
-RUN.eval_unseen_snr             = false;    % B4  : detector at Eb/N0 never seen in training, midpoints of the grid (~30 min)
-RUN.eval_ood_detection          = false;    % OOD : leave-one-threat-out, retrains the detector 10 times; selects the production unknown-threat score (~2.5 h)
-RUN.eval_unseen_severity        = false;    % B4s : detector at severities never seen in training, between and above the levels (~10 min)
+RUN.prepare_data                = false;    % B1  : split by sub-run 4/1/1 (~4 min)
+RUN.train_detector              = false;    % B2  : train CNN+scalar hybrid, unknown-threat models (~20-35 min); a new detector invalidates the pools
+RUN.select_fusion               = false;    % B2F : temporal fusion and the quiet-slot alarm, chosen on validation (~4 min)
+RUN.build_fresh_test            = false;    % B3n : a second detector test set (dataset, spectrograms, splits) (~2.8-3.2 h)
+RUN.eval_detector               = false;    % B3  : test eval + confusion/accuracy-vs-SNR + bootstrap CIs; the second test set beside it (~2 min)
+RUN.compare_architectures       = false;    % B3a : hybrid vs spectrogram-only vs features-only (~45-75 min)
+RUN.eval_unseen_snr             = false;    % B4  : detector at Eb/N0 never seen in training, midpoints of the grid (~40-50 min)
+RUN.eval_ood_detection          = false;    % OOD : leave-one-threat-out, retrains the detector 10 times; selects the production unknown-threat score (~3.7-4 h)
+RUN.eval_unseen_severity        = false;    % B4s : detector at severities never seen in training, between and above the levels (~20-35 min)
 
 
 % ---- Phase C: decision layer ----
-RUN.build_policy_pools          = false;    % C1p : frame pools, every cell x configuration x Eb/N0 x geometry (~3-4 h)
-RUN.build_clean_test_pools      = false;    % C1c : clean link on new geometries: validation set and test set for KPI 6, and the off-grid check flights of the edge map (skip when up to date)
+RUN.build_policy_pools          = false;    % C1p : frame pools, every cell x configuration x Eb/N0 x geometry (~90-105 h)
+RUN.build_clean_test_pools      = false;    % C1c : clean link on new geometries: validation set and test set for KPI 6, and the off-grid check flights of the edge map (skip when up to date) (~11-13 h)
 RUN.choose_drop_threshold       = false;    % C1d : path_loss alarm threshold from the train pools (< 1 min)
-RUN.train_dqn                   = false;    % C2  : Double DQN + shield, alarm x penalty x gamma x seeds, selection on validation (~3 h)
-RUN.evaluate_policies           = false;    % C2e : every policy on the test pools: single, follower, combined, unknown, clean (~1 h)
-RUN.combo_generalization        = false;    % C2g : combined threats never trained on, leave-one-combination-out (~50 min)
+RUN.train_dqn                   = false;    % C2  : Double DQN + shield, alarm x penalty x gamma x seeds, selection on validation (~12 h)
+RUN.evaluate_policies           = false;    % C2e : every policy on the test pools: single, follower, combined, unknown, clean (~0.5-1.5 h)
+RUN.combo_generalization        = false;    % C2g : combined threats never trained on, leave-one-combination-out (~3.6 h)
+RUN.unknown_threat              = false;    % C2u : unknown threats, a leave-one-threat-out agent per threat (the edge map's unknown path) (~2.5 h)
 RUN.threat_gallery              = false;    % GAL : one figure per threat for the report, with the DQN's most frequent response (~5 min)
 
 % ---- Phase SURV: survivability boundary mapping (deliverable 7) ----
-RUN.map_survivability           = false;    % SURV: Map A/B per threat, severity, Eb/N0 and geometry (~1.5 h)
-RUN.survivability_options       = false;    % SURV3: antenna count vs relay path (~1 h)
+RUN.map_survivability           = false;    % SURV: Map A/B per threat, severity, Eb/N0 and geometry (~2.6-4.2 h)
+RUN.survivability_options       = false;    % SURV3: antenna count vs relay path (~3.6-6 h)
+RUN.overhead_pass               = false;    % OHP : the link while the UAV passes over the GCS (< 1 min)
+RUN.gcs_antenna                 = false;    % GCSA: GCS antenna and tracker analysis (< 1 min)
+RUN.edge_map                    = false;    % EDGE: a verdict at every point of the envelope (deliverable 7) (~0.5-2 h)
 
 % ---- Phase KPI: latency and proposal KPIs (section 5) ----
-RUN.measure_latency             = false;    % LAT : decision latency per cycle, median / p95 (~2 min)
-RUN.measure_all_kpis            = true;    % KPI : the 8 proposal KPIs from the result files
+RUN.measure_latency             = false;    % LAT : decision latency per cycle, median / p95, on an idle machine (~1-6 min)
+RUN.measure_all_kpis            = true;    % KPI : the 8 proposal KPIs from the result files (< 1 min)
 
 % ---- Phase DASH: results dashboard (deliverable 1) ----
-RUN.build_dashboard             = true;    % DASH: 8-panel summary PNG
+RUN.build_dashboard             = true;    % DASH: 8-panel summary PNG (< 1 min)
+RUN.weak_points                 = false;    % WEAK: where the system is weakest, from the result files (< 1 min)
+RUN.report_numbers              = false;    % RPT : the report's numbers in one JSON file (< 1 min)
 
 fprintf('========================================================\n');
 fprintf('  UAV-GCS ADAPTIVE SECURE COMMS - MASTER PIPELINE\n');
@@ -169,12 +182,12 @@ if RUN.validate_phy
 end
 
 if RUN.build_dataset
-    fprintf('  [A5] Generating the seeded sub-run dataset, 8 threats x 5 levels + none (HEAVY)...\n');
+    fprintf('  [A5] Generating the seeded sub-run dataset, 10 threats x 8 levels + none (HEAVY)...\n');
     run_dataset_sweep;
 end
 
 if RUN.extract_spectrograms
-    fprintf('  [A6] Extracting spectrograms + 13 link features (HEAVY)...\n');
+    fprintf('  [A6] Extracting spectrograms + link features (HEAVY)...\n');
     extract_spectrograms;
 end
 
@@ -194,9 +207,21 @@ if RUN.train_detector
     fprintf('  [B2] Training hybrid CNN+scalar detector (9 classes)...\n');
     train_detector;
 end
+if RUN.select_fusion
+    fprintf('  [B2F] Temporal fusion and the quiet-slot alarm (validation)...\n');
+    run_own('select_fusion');
+end
+if RUN.build_fresh_test
+    fprintf('  [B3n] A second detector test set...\n');
+    for scr = {'run_dataset_sweep', 'extract_spectrograms', 'prepare_data'}, run_own(scr{1}, true); end
+end
 if RUN.eval_detector
     fprintf('  [B3] Evaluating on test set...\n');
-    eval_detector;
+    if isfile('data/splits_fresh.mat')                 % the test split, then the second test set (run_stage.m)
+        run_own('eval_detector', [], 'split'); run_own('eval_detector', [], 'fresh');
+    else
+        eval_detector;
+    end
 end
 if RUN.compare_architectures
     fprintf('  [B3a] Detector architectures on the same splits...\n');
@@ -253,6 +278,10 @@ if RUN.combo_generalization
     fprintf('  [C2g] Combined threats never trained on (leave-one-combination-out)...\n');
     experiment_combo_generalization;
 end
+if RUN.unknown_threat
+    fprintf('  [C2u] Unknown threats: a leave-one-threat-out agent per threat...\n');
+    run_own('experiment_unknown_threat');
+end
 if RUN.threat_gallery
     fprintf('  [GAL] Threat gallery figures...\n');
     threat_gallery;
@@ -281,6 +310,18 @@ end
 if RUN.survivability_options
     fprintf('  [SURV3] Survivability with 3 antennas and with a relay path...\n');
     experiment_survivability_options;
+end
+if RUN.overhead_pass
+    fprintf('  [OHP] The pass over the GCS...\n');
+    run_own('overhead_pass');
+end
+if RUN.gcs_antenna
+    fprintf('  [GCSA] GCS antenna and tracker...\n');
+    run_own('gcs_antenna_analysis');
+end
+if RUN.edge_map
+    fprintf('  [EDGE] A verdict at every point of the envelope...\n');
+    run_own('edge_map');
 end
 
 fprintf('  [SURV] Pipeline status:\n');
@@ -313,6 +354,14 @@ if RUN.build_dashboard
     fprintf('  [DASH] Building the results dashboard...\n');
     build_kpi_dashboard;
 end
+if RUN.weak_points
+    fprintf('  [WEAK] Weak points...\n');
+    run_own('analyze_weak_points');
+end
+if RUN.report_numbers
+    fprintf('  [RPT] Report numbers...\n');
+    run_own('export_report_numbers');
+end
 
 fprintf('  [DASH] Pipeline status:\n');
 report_file('results/kpi_dashboard.png', '      kpi_dashboard.png ', 'build_kpi_dashboard');
@@ -337,7 +386,14 @@ diary off;
 fprintf('Diary closed. Open %s for the complete unclipped run transcript.\n', log_filename);
 
 
-%% ========== local helper ==========
+%% ========== local helpers ==========
+function run_own(name, FRESH_TEST, DET_TEST) %#ok<INUSD>
+% A stage script in a workspace of its own, so its variables never overwrite this
+% script's flags; FRESH_TEST and DET_TEST (run_stage.m) reach it when given.
+if nargin >= 2 && isempty(FRESH_TEST), clear FRESH_TEST; end
+run(name);
+end
+
 function report_file(path, label, producer)
     % Prints "label : READY (date, size)" or "label : [PENDING] -> producer"
     if exist(path, 'file')

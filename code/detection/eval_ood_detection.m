@@ -8,23 +8,35 @@
 %   msp, energy   maximum softmax probability and logsumexp of the logits: baselines
 %   iforest       isolation forest on the link features alone (Liu, Ting & Zhou)
 %   candidates of the production score (ood_score_set.m): last, ensemble, raw,
-%                 last_or_raw, last_or_if, last_pre
-% The held-out threat is never used to fit, weight or choose anything inside its
-% fold. Reported per held-out threat: AUROC, and FPR@95%TPR (share of unknown
-% frames accepted as known at the threshold that keeps 95% of known validation
-% frames); every candidate also averaged over the last 2, 5 and 8 decision cycles
-% of a run (one frame per cycle).
-% Selection: the production score and its window are the (candidate, window) pair
-% with the highest mean AUROC over the held-out threats, among the candidates that fit
-% the decision-cycle budget of KPI 7: each candidate's detector cost on one frame
-% is measured first on the production detector (ood_latency.m, timed as
-% measure_latency.m times it), and a candidate whose median exceeds 5 ms or p95 10 ms
-% (half of the KPI 7 targets, kpi7_admit.m) is excluded and reported with its cost.
-% The selected pair is written to data/trained_detector.mat (ood.score, ood.win)
-% and the thresholds are recomputed, so this stage runs before the frame pools (C1p).
-% Because the choice uses the same folds, the value to quote is the nested estimate:
-% for each held-out threat, the pair chosen on the OTHER threats (within the same
-% budget), scored on this one.
+%                 last_or_raw, last_or_if, last_pre, last_l2 (Mahalanobis++, Mueller & Hein 2025)
+% Every score is read as the decision cycle reads it (ood_fold_metrics.m): alone (one
+% frame) and averaged over the last 2, 5 and 8 cycles of each sub-run in time order
+% (ood_window.m, partial windows at its start), every window labelled by its newest frame.
+% Frames of one fold (ood_loto_split.m, labels by the frame rule, frame_labels.m): the known
+% classes' training frames train the network and fit the unknown-threat models; the
+% validation sub-runs are split in two halves (stratified over class, level and Eb/N0,
+% ood_loto_split.m): the known frames of one half stop the training
+% early and fit the models' validation parts, the known windows of the other half are read
+% against the held-out threat's validation windows for the selection and set the
+% threshold of FPR95. Known frames and windows come from the known classes' sub-runs only:
+% no frame of the held-out threat's sub-runs, its clean frames included, fits, weights or
+% chooses anything inside its fold, or is read as known. AUROC, FPR95 (share of unknown
+% windows accepted as known at the threshold that keeps 95% of the known validation
+% windows) and Algorithm 2 are read on the second test
+% set (data/splits_fresh.mat, build_fresh_test: sub-runs no decision has read); the test
+% split of data/splits.mat is not read.
+% Selection, on validation only: the production score and its window are the (candidate,
+% window) pair with the highest mean validation AUROC over the held-out threats, among
+% the candidates that fit the decision-cycle budget of KPI 7: each candidate's detector cost
+% on one frame is measured first on the production detector (ood_latency.m, timed as
+% measure_latency.m times it, with the machine's load logged beside the timings), and a
+% candidate whose median exceeds 5 ms or p95 10 ms (half of the KPI 7 targets,
+% kpi7_admit.m) is excluded and reported with its cost. The selected pair is written to
+% data/trained_detector.mat (ood.score, ood.win) and the thresholds are recomputed on the
+% statistic the decision cycle compares with them (ood_thresholds.m), so this stage runs
+% before the frame pools (C1p). The value to quote is the nested estimate: for each
+% held-out threat, the pair chosen on the validation AUROC of the OTHER threats (within
+% the same budget), read on this one's test frames.
 % Learning the new threat (Lee et al., Algorithm 2): once flagged and labelled, the
 % held-out threat is added as a new class from K of its validation frames (never
 % used in the fold) by its mean and an update of the tied covariance in the last
@@ -43,7 +55,15 @@ WIN      = [2 5 8];                    % decision cycles of the averaged score
 rng(2026, 'twister');
 
 S = load('data/splits.mat', 'splits');
-sp = S.splits;
+sp = S.splits; clear S
+sp.test = [];                          % the test split is not read here
+if ~isfile('data/splits_fresh.mat')
+    error('eval_ood_detection:fresh', 'data/splits_fresh.mat not found: run build_fresh_test (B3n) first');
+end
+Sf = load('data/splits_fresh.mat', 'splits');
+assert(isequal(Sf.splits.norm, sp.norm), 'eval_ood_detection: the second test set has another normalization');
+assert(isequal(Sf.splits.classes, sp.classes), 'eval_ood_detection: the second test set has other classes');
+fresh = Sf.splits.test; clear Sf
 all_classes = cellstr(string(sp.classes(:)'));
 held_out = setdiff(all_classes, {'none'}, 'stable');
 if exist('SMOKE', 'var') && SMOKE, held_out = held_out(1:2); N_EPOCHS = 3; end   % reduced chain check
@@ -56,10 +76,11 @@ fprintf('Detector cost per frame on the device with the lower p95 (median / p95 
 for c = 1:numel(CAND)
     fprintf('  %-12s %s %7.2f / %7.2f%s\n', CAND{c}, upper(LC.dev{c}), LC.med(c), LC.p95(c), ternary(LC.ok(c), '', '  EXCLUDED'));
 end
-fprintf('\n');
+fprintf('%s\n\n', load_text(LC.load));
 SC = [{'msp', 'energy', 'iforest'}, CAND];
-R = struct('held_out', {}, 'n_ood', {}, 'auroc', {}, 'fpr95', {}, 'auroc_win', {}, 'id_acc', {}, ...
-    'mapped_to', {}, 'same_action', {}, 'incr', {});
+WALL = [1 WIN];                        % window 1 = the frame alone
+R = struct('held_out', {}, 'n_ood', {}, 'n_val_ood', {}, 'auroc', {}, 'fpr95', {}, 'auroc_win', {}, ...
+    'auroc_val', {}, 'auroc_win_val', {}, 'fpr95_win', {}, 'id_acc', {}, 'mapped_to', {}, 'same_action', {}, 'incr', {});
 K_NEW = 100; N_DRAW = 5;               % Algorithm 2: frames of the new threat, random draws
 
 %% 2. One retraining per held-out class
@@ -68,57 +89,63 @@ for h = 1:numel(held_out)
     k = held_out{h};
     fprintf('[%d/%d] Held-out threat: %s\n', h, numel(held_out), k);
     known = setdiff(all_classes, {k}, 'stable');
-    [tr, va, te_id, te_ood, vk] = loto_split(sp, known, k);
+    [tr, vfit, va, vk, te] = ood_loto_split(sp, fresh, k);
 
-    net = train_hybrid_net(tr, va, known, struct('verbose', false, 'epochs', N_EPOCHS));
-    M = fit_ood_model(net, tr, known, va);
+    net = train_hybrid_net(tr, vfit, known, struct('verbose', false, 'epochs', N_EPOCHS));
+    M = fit_ood_model(net, tr, known, vfit);
 
     Sv = all_scores(net, M, va);
-    Si = all_scores(net, M, te_id);
-    So = all_scores(net, M, te_ood);
+    St = all_scores(net, M, te);
+    yv = cellstr(string(va.Y)); yt = cellstr(string(te.Y));
+    V = struct('run', va.run, 'pos', va.pos, 'kn', ismember(yv, known) & va.sel & ~va.own, 'un', strcmp(yv, k));
+    T = struct('run', te.run, 'pos', te.pos, 'kn', ismember(yt, known) & ~te.own, 'un', strcmp(yt, k));
+    Q = ood_fold_metrics(Sv, V, St, T, SC, WALL, RETAIN);
 
-    au = zeros(1, numel(SC)); fp = zeros(1, numel(SC)); aw = zeros(numel(SC), numel(WIN));
-    for j = 1:numel(SC)
-        thr = lowq(Sv.(SC{j}), 1 - RETAIN);
-        au(j) = auroc(Si.(SC{j}), So.(SC{j}));
-        fp(j) = mean(So.(SC{j}) >= thr);
-        for w = 1:numel(WIN)
-            aw(j, w) = auroc(win_mean(Si.(SC{j}), te_id.run, WIN(w)), win_mean(So.(SC{j}), te_ood.run, WIN(w)));
-        end
-    end
-    [~, yi] = max(Si.probs, [], 1);
-    id_acc = mean(strcmp(known(yi), cellstr(string(te_id.Y(:)'))));
-    [~, yo] = max(So.probs, [], 1);
+    [~, yi] = max(St.probs(:, T.kn), [], 1);
+    id_acc = mean(strcmp(known(yi), yt(T.kn)'));
+    [~, yo] = max(St.probs(:, T.un), [], 1);
     mapped = known(yo);
     [u, ~, ic] = unique(mapped); [~, im] = max(accumarray(ic(:), 1));
     true_act = rule_based_policy(k);
     same = mean(cellfun(@(c) strcmp(rule_based_policy(c), true_act), mapped));
+    te_id = pick(te, T.kn, known); te_ood = pick(te, T.un, {k});
     inc = learn_new_class(net, M, te_id, te_ood, vk, K_NEW, N_DRAW);
-    R(end+1) = struct('held_out', k, 'n_ood', numel(yo), 'auroc', au, 'fpr95', fp, 'auroc_win', aw, ...
-        'id_acc', id_acc, 'mapped_to', u{im}, 'same_action', same, 'incr', inc); %#ok<SAGROW>
-    ca = [SC; num2cell(au)];
-    fprintf('    AUROC  %s\n    known acc %.1f%% | learned from %d frames: new threat %.1f%%, known %.1f%% (%.1f min)\n\n', ...
-        sprintf('%s %.3f  ', ca{:}), 100*id_acc, K_NEW, 100*inc.new_k, 100*inc.known_k, toc(t0)/60);
+    clear te_id te_ood
+    R(end+1) = struct('held_out', k, 'n_ood', sum(T.un), 'n_val_ood', sum(V.un), 'auroc', Q.test(:, 1)', ...
+        'fpr95', Q.fpr(:, 1)', 'auroc_win', Q.test(:, 2:end), 'auroc_val', Q.val(:, 1)', ...
+        'auroc_win_val', Q.val(:, 2:end), 'fpr95_win', Q.fpr(:, 2:end), 'id_acc', id_acc, ...
+        'mapped_to', u{im}, 'same_action', same, 'incr', inc); %#ok<SAGROW>
+    ca = [SC; num2cell(Q.test(:, 1)')]; cv = [SC; num2cell(Q.val(:, 1)')];
+    fprintf(['    AUROC test  %s\n    AUROC val   %s\n    known acc %.1f%% | learned from %d frames: new threat ' ...
+        '%.1f%%, known %.1f%% (%.1f min)\n\n'], sprintf('%s %.3f  ', ca{:}), sprintf('%s %.3f  ', cv{:}), ...
+        100*id_acc, K_NEW, 100*inc.new_k, 100*inc.known_k, toc(t0)/60);
+    clear tr vfit va vk te Sv St net M
 end
 
-%% 3. Selection of the production score, nested estimate
-A = vertcat(R.auroc); F = vertcat(R.fpr95);
-AW = cat(3, R.auroc_win);                               % scores x windows x held-out threats
+%% 3. Selection of the production score on validation, nested estimate on the test frames
 jc = find(ismember(SC, CAND));
-Mp = zeros(numel(R), numel(jc) * (1 + numel(WIN))); pj = zeros(1, size(Mp, 2)); pw = pj;
+nP = numel(jc) * numel(WALL);
+MpV = zeros(numel(R), nP); MpT = MpV; FpT = MpV; pj = zeros(1, nP); pw = pj;
 c = 0;
-for j = jc                                              % (candidate, window) pairs; window 1 = the frame alone
-    for w = [1 WIN]
-        c = c + 1; pj(c) = j; pw(c) = w;
-        if w == 1, Mp(:, c) = A(:, j); else, Mp(:, c) = squeeze(AW(j, WIN == w, :)); end
+for j = jc                                              % (candidate, window) pairs
+    for w = 1:numel(WALL)
+        c = c + 1; pj(c) = j; pw(c) = WALL(w);
+        for i = 1:numel(R)
+            av = [R(i).auroc_val(j), R(i).auroc_win_val(j, :)];
+            at = [R(i).auroc(j), R(i).auroc_win(j, :)];
+            ft = [R(i).fpr95(j), R(i).fpr95_win(j, :)];
+            MpV(i, c) = av(w); MpT(i, c) = at(w); FpT(i, c) = ft(w);
+        end
     end
 end
 [~, ic] = ismember(SC(pj), CAND);
-[b, nb] = ood_select(Mp, LC.ok(ic));                   % pairs of the candidates within the KPI 7 budget only
+[b, nb] = ood_select(MpV, LC.ok(ic));                  % pairs of the candidates within the KPI 7 budget only
 sel = SC{pj(b)}; sel_win = pw(b);
-NEST = struct('auroc', zeros(1, numel(R)), 'pick', {cell(1, numel(R))});
+NEST = struct('auroc', zeros(1, numel(R)), 'fpr95', zeros(1, numel(R)), 'auroc_val', zeros(1, numel(R)), ...
+    'pick', {cell(1, numel(R))});
 for i = 1:numel(R)
-    NEST.auroc(i) = Mp(i, nb(i)); NEST.pick{i} = sprintf('%s over %d', SC{pj(nb(i))}, pw(nb(i)));
+    NEST.auroc(i) = MpT(i, nb(i)); NEST.fpr95(i) = FpT(i, nb(i)); NEST.auroc_val(i) = MpV(i, nb(i));
+    NEST.pick{i} = sprintf('%s over %d', SC{pj(nb(i))}, pw(nb(i)));
 end
 if ~(exist('SMOKE', 'var') && SMOKE)
     D = load('data/trained_detector.mat', 'ood'); ood = D.ood; ood.score = sel; ood.win = sel_win;
@@ -129,11 +156,17 @@ end
 T_prod = ood_thresholds(RETAIN);
 
 %% 4. Report
+A = vertcat(R.auroc); F = vertcat(R.fpr95); Av = vertcat(R.auroc_val);
+AW = cat(3, R.auroc_win); AWv = cat(3, R.auroc_win_val);   % scores x windows x held-out threats
 js = find(strcmp(SC, sel));
 rep = {};
 rep{end+1} = '=== UNKNOWN-THREAT DETECTION: LEAVE-ONE-THREAT-OUT ===';
-rep{end+1} = sprintf('Generated: %s | detector retrained without each threat (%d epochs), test split by sub-run', datestr(now), N_EPOCHS);
-rep{end+1} = sprintf('AUROC: 0.5 = no separation, 1 = perfect. FPR95: unknown frames accepted as known at the threshold keeping %.0f%% of known validation frames.', 100*RETAIN);
+rep{end+1} = sprintf(['Generated: %s | detector retrained without each threat (%d epochs) | selection on the validation ' ...
+    'split, reading on the second test set (data/splits_fresh.mat, %d frames); the test split of the dataset is not read'], ...
+    datestr(now), N_EPOCHS, numel(fresh.Y));
+rep{end+1} = sprintf(['AUROC: 0.5 = no separation, 1 = perfect. Every score read as the decision cycle reads it: windows ' ...
+    'of the last cycles of each sub-run in time order, labelled by their newest frame. FPR95: unknown windows accepted ' ...
+    'as known at the threshold keeping %.0f%% of the known validation windows.'], 100*RETAIN);
 rep{end+1} = '';
 w8 = max(8, max(cellfun(@numel, SC)) + 1);
 rep{end+1} = sprintf('%-20s %5s |%s | %6s  %-20s %5s', 'held-out threat', 'n', sprintf(sprintf(' %%%ds', w8), SC{:}), ...
@@ -144,12 +177,16 @@ for i = 1:numel(R)
     rep{end+1} = sprintf('%-20s %5d |%s | %5.1f%%  %-20s %4.0f%%', r.held_out, r.n_ood, ...
         sprintf(sprintf(' %%%d.3f', w8), r.auroc), 100*r.id_acc, r.mapped_to, 100*r.same_action); %#ok<SAGROW>
 end
-rep{end+1} = sprintf('%-20s %5s |%s |', 'mean AUROC', '', sprintf(sprintf(' %%%d.3f', w8), mean(A, 1)));
-rep{end+1} = sprintf('%-20s %5s |%s |', 'mean FPR95', '', sprintf(sprintf(' %%%d.2f', w8), mean(F, 1)));
-AW = cat(3, R.auroc_win);
+rep{end+1} = sprintf('%-20s %5s |%s |', 'mean AUROC (test)', '', sprintf(sprintf(' %%%d.3f', w8), mean(A, 1)));
+rep{end+1} = sprintf('%-20s %5s |%s |', 'mean FPR95 (test)', '', sprintf(sprintf(' %%%d.2f', w8), mean(F, 1)));
 for w = 1:numel(WIN)
-    rep{end+1} = sprintf('%-20s %5s |%s |', sprintf('mean AUROC, %d frames', WIN(w)), '', ...
+    rep{end+1} = sprintf('%-20s %5s |%s |', sprintf('mean AUROC, %d cycles', WIN(w)), '', ...
         sprintf(sprintf(' %%%d.3f', w8), mean(squeeze(AW(:, w, :)), 2))); %#ok<SAGROW>
+end
+rep{end+1} = sprintf('%-20s %5s |%s |', 'mean AUROC (val)', '', sprintf(sprintf(' %%%d.3f', w8), mean(Av, 1)));
+for w = 1:numel(WIN)
+    rep{end+1} = sprintf('%-20s %5s |%s |', sprintf('val, %d cycles', WIN(w)), '', ...
+        sprintf(sprintf(' %%%d.3f', w8), mean(squeeze(AWv(:, w, :)), 2))); %#ok<SAGROW>
 end
 rep{end+1} = '';
 rep{end+1} = sprintf(['Detector cost per frame, one forward pass with the score (ood_latency.m: %d timed calls after ' ...
@@ -161,21 +198,27 @@ for c = 1:numel(CAND)
         upper(d), m, q), LC.devices, num2cell(LC.med_ms(c, :)), num2cell(LC.p95_ms(c, :)), 'UniformOutput', false), ...
         ' | '), upper(LC.dev{c}), ternary(LC.ok(c), 'within the budget', 'EXCLUDED (over the budget)')); %#ok<SAGROW>
 end
-rep{end+1} = sprintf(['Production score (highest mean AUROC among %s, each over 1, %s cycles): %s over %d ' ...
-    'cycles, mean AUROC %.3f (single frame %.3f, FPR95 %.2f).'], strjoin(CAND(LC.ok), ', '), strjoin(compose('%d', WIN), ', '), ...
-    sel, sel_win, mean(Mp(:, b)), mean(A(:, js)), mean(F(:, js)));
+rep{end+1} = sprintf(['  %s. A concurrent load can only slow the calls, so a candidate admitted here fits on an idle ' ...
+    'machine too (conservative); one excluded under load may fit idle.'], load_text(LC.load));
+rep{end+1} = sprintf(['Production score (highest mean validation AUROC among %s, each over 1, %s cycles): %s over %d ' ...
+    'cycles, mean AUROC validation %.3f, test %.3f, FPR95 test %.2f (single frame: test AUROC %.3f, FPR95 %.2f).'], ...
+    strjoin(CAND(LC.ok), ', '), strjoin(compose('%d', WIN), ', '), sel, sel_win, mean(MpV(:, b)), mean(MpT(:, b)), ...
+    mean(FpT(:, b)), mean(A(:, js)), mean(F(:, js)));
 if ~all(LC.ok)
     rep{end+1} = sprintf('Excluded by the KPI 7 budget (their AUROC above is reported, never selected): %s.', ...
         strjoin(CAND(~LC.ok), ', '));
 end
-rep{end+1} = sprintf(['Nested estimate (score chosen on the other held-out threats, the value to quote): mean AUROC %.3f; ' ...
-    'per threat %s; picks %s.'], mean(NEST.auroc), sprintf('%.3f ', NEST.auroc), strjoin(unique(NEST.pick, 'stable'), ', '));
-rep{end+1} = sprintf('Production thresholds (%.0f%% of known validation frames kept): MSP %.3f | energy %.2f | %s %.3f.', ...
-    100*RETAIN, T_prod.msp, T_prod.energy, sel, T_prod.maha);
+rep{end+1} = sprintf(['Nested estimate (pair chosen on the validation AUROC of the other held-out threats, read on this ' ...
+    'one''s test frames; the value to quote): mean AUROC %.3f, FPR95 %.2f; per threat %s; picks %s.'], mean(NEST.auroc), ...
+    mean(NEST.fpr95), sprintf('%.3f ', NEST.auroc), strjoin(unique(NEST.pick, 'stable'), ', '));
+rep{end+1} = sprintf(['Production thresholds (%.0f%% of the known validation frames kept; the unknown-threat score on ' ...
+    'the statistic of the decision cycle, its mean over the last %d cycles): MSP %.3f | energy %.2f | %s %.3f ' ...
+    '(per frame %.3f).'], 100*RETAIN, T_prod.win, T_prod.msp, T_prod.energy, T_prod.score, T_prod.maha, T_prod.maha_frame);
 IN = [R.incr];
 rep{end+1} = '';
 rep{end+1} = sprintf(['Learning the new threat without retraining (Lee et al., Algorithm 2; last hidden layer, generative ' ...
-    'classifier): known-class accuracy before %.1f%% (softmax %.1f%%)'], 100*mean([IN.known_before]), 100*mean([R.id_acc]));
+    'classifier; test frames of the second test set): known-class accuracy before %.1f%% (softmax %.1f%%)'], ...
+    100*mean([IN.known_before]), 100*mean([R.id_acc]));
 rep{end+1} = sprintf('%-20s %22s %22s %18s', 'new threat', sprintf('%d frames: new / known', K_NEW), 'all val frames', 'frames available');
 for i = 1:numel(R)
     rep{end+1} = sprintf('%-20s %13.1f%% / %5.1f%% %13.1f%% / %5.1f%% %18d', R(i).held_out, 100*IN(i).new_k, ...
@@ -186,8 +229,11 @@ rep{end+1} = sprintf('%-20s %13.1f%% / %5.1f%% %13.1f%% / %5.1f%%', 'mean', 100*
 if ~exist('results', 'dir'), mkdir('results'); end
 fid = fopen('results/ood_detection.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('%s\n', rep{:});
-save('results/ood_detection.mat', 'R', 'SC', 'CAND', 'sel', 'sel_win', 'NEST', 'WIN', 'RETAIN', 'N_EPOCHS', 'T_prod', 'K_NEW', 'LC');
+TEST_SET = 'second test set (data/splits_fresh.mat)';
+save('results/ood_detection.mat', 'R', 'SC', 'CAND', 'sel', 'sel_win', 'NEST', 'WIN', 'RETAIN', 'N_EPOCHS', 'T_prod', ...
+    'K_NEW', 'LC', 'MpV', 'MpT', 'FpT', 'pj', 'pw', 'TEST_SET');
 fprintf('\nSaved results/ood_detection.{txt,mat}; production score written to data/trained_detector.mat (%.1f min)\n', toc(t0)/60);
+clear sp fresh
 
 
 %% ===== Local functions =====
@@ -232,27 +278,10 @@ end
 [~, y] = min(D2, [], 1);
 end
 
-function [tr, va, te_id, te_ood, vk] = loto_split(sp, known, k)
-% Known-class train/val/test, the held-out test frames and the held-out
-% validation frames (Algorithm 2 only); link features re-normalized with
-% statistics of the known training frames only.
-raw = @(P) P.feats .* sp.norm.feat_std + sp.norm.feat_mean;
-pick = @(P, keep) pick_rows(P, keep, raw(P));
-tr = pick(sp.train, known); va = pick(sp.val, known);
-te_id = pick(sp.test, known); te_ood = pick(sp.test, {k}); vk = pick(sp.val, {k});
-mu = mean(tr.feats, 1); sd = std(tr.feats, 0, 1); sd(sd < 1e-8) = 1;
-tr.feats = (tr.feats - mu) ./ sd; va.feats = (va.feats - mu) ./ sd;
-te_id.feats = (te_id.feats - mu) ./ sd; te_ood.feats = (te_ood.feats - mu) ./ sd; vk.feats = (vk.feats - mu) ./ sd;
-te_ood.Y = categorical(cellstr(string(te_ood.Y(:))));
-end
-
-function d = pick_rows(P, keep, F)
-y = cellstr(string(P.Y(:)));
-m = ismember(y, keep);
-d.X = P.X(:, :, :, m);
-d.feats = F(m, :);
-d.Y = categorical(y(m), keep);
-d.run = P.run(m);
+function d = pick(P, m, cats)
+% Frames m of a fold's set, Y over the categories cats.
+d.X = P.X(:, :, :, m); d.feats = P.feats(m, :);
+d.Y = categorical(cellstr(string(P.Y(m))), cats);
 end
 
 function S = all_scores(net, M, P)
@@ -261,41 +290,15 @@ function S = all_scores(net, M, P)
 for f = fieldnames(T)', S.(f{1}) = T.(f{1}); end
 end
 
-function m = win_mean(s, run, W)
-% Causal mean over the last W frames of the same run (frames in time order
-% within a run); frames without W predecessors in their run are dropped.
-s = s(:); run = run(:); m = [];
-for r = unique(run)'
-    v = s(run == r);
-    if numel(v) < W, continue; end
-    c = movmean(v, [W - 1, 0]);
-    m = [m; c(W:end)]; %#ok<AGROW>
-end
+function s = load_text(L)
+% The machine's load logged with the timings (machine_load.m).
+s = sprintf(['Timed with the machine''s load logged before / after: CPU %s / %s %%, other MATLAB processes ' ...
+    '%s / %s'], num_txt(L.before.cpu_pct), num_txt(L.after.cpu_pct), num_txt(L.before.n_matlab - 1), ...
+    num_txt(L.after.n_matlab - 1));
 end
 
-function a = auroc(pos, neg)
-% Probability that a known-class frame scores above an unknown one (ties count half).
-pos = pos(:); neg = neg(:);
-ranks = tiedrank_local([pos; neg]);
-np = numel(pos); nn = numel(neg);
-a = (sum(ranks(1:np)) - np*(np + 1)/2) / (np * nn);
-end
-
-function r = tiedrank_local(x)
-[xs, ord] = sort(x(:));
-n = numel(xs); r = zeros(n, 1);
-i = 1;
-while i <= n
-    j = i;
-    while j < n && xs(j + 1) == xs(i), j = j + 1; end
-    r(ord(i:j)) = (i + j) / 2;
-    i = j + 1;
-end
-end
-
-function q = lowq(x, frac)
-x = sort(x(:));
-q = x(max(1, ceil(frac * numel(x))));
+function s = num_txt(v)
+if isnan(v), s = 'n/a'; else, s = sprintf('%g', round(v)); end
 end
 
 function out = ternary(c, a, b)

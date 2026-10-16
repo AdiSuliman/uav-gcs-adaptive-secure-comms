@@ -8,7 +8,10 @@ function [P, info] = pool_cell(p, threat, actions, ebno, geo, det, opt)
 %   geo      1 x nS cell, one per Eb/N0: 1 x nSplit struct array, fields seed,
 %            speed (km/h), run (ids), and optionally alt (m), ksig (dB), aoa1 (deg) and
 %            rho, which replace the seed's altitude, K of our signal, first interferer
-%            direction and receive correlation (NaN: the seed's own);
+%            direction and receive correlation (NaN: the seed's own), frames (the run's
+%            frames, default opt.F_SUB) and event (the frame before which the UAV's roll-in
+%            brings the airframe into the line of sight, flight_draws.m geo.event_frame;
+%            NaN: none);
 %            one entry per geometry (sub-run); the same geometries under every
 %            configuration (common random numbers)
 %   det      detector: net, ood, classes, mu, sd (feature normalization), fs; [] = no
@@ -18,11 +21,17 @@ function [P, info] = pool_cell(p, threat, actions, ebno, geo, det, opt)
 %            maha, feat (link_features.m), gant (mean channel gain of every antenna),
 %            ber and fer (ground truth), crc (the receiver's CRC result, NaN on a coded
 %            packet's first frame), run, aoa, act (share of the frame with the threat
-%            on the air)
+%            on the air, the union over a combination's components), act_comp (frames x 3,
+%            each component's share in the threat's order), ebno_rx (received Eb/N0
+%            [dB]: the Eb/N0 of the configuration, its gain and the relay loss included,
+%            less the path-loss step on the frames where it is on the air, received_ebno.m),
+%            idle (frames x 24, the record of the idle time before the frame,
+%            idle_summary.m) and act_idle (the share of that idle time with the threat on
+%            the air: the per-cycle labels, threat_active.m)
 %   info     configurations actually simulated (identical physics is simulated once)
 modelName = 'UAV_GCS_Threat_Link';
 nA = numel(actions); nS = numel(ebno); nSp = numel(geo{1});
-stop_time = num2str((opt.F_SUB - 1) * p.frame_duration);   % frames at 0 .. the stop time: F_SUB of them, whole FEC packets
+stop_of = @(nf) num2str((nf - 1) * p.frame_duration);   % frames at 0 .. the stop time: nf of them, whole FEC packets
 P = cell(nS, nA, nSp);
 keys = {}; first = zeros(1, 0);
 info = struct('n_unique', 0, 'map', zeros(1, nA));
@@ -39,21 +48,25 @@ for a = 1:nA
     keys{end+1} = k; first(end+1) = a; %#ok<AGROW>
     info.map(a) = a; info.n_unique = info.n_unique + 1;
     build_threat_model(p2);
+    if ~isempty(det), det.nv = thermal_nv(p2); end         % the receiver's thermal floor (spec_image.m)
     for s = 1:nS
         snr_dB = ebno(s) + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps);
         loss = 0; if isfield(p2, 'link_loss_db'), loss = p2.link_loss_db; end   % extra path loss (relay experiment)
-        set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db - loss), 'SignalPower', num2str(1/p2.sps));
+        set_link_snr(modelName, snr_dB + g_db - loss, p2);
         for sp = 1:nSp
             g = geo{s}(sp);
             if isempty(det), Q = empty_pool(0, 0); else, Q = empty_pool(numel(det.classes), numel(det.mu)); end
             for r = 1:numel(g.seed)
                 seed = g.seed(r);
                 fd = g.speed(r) / 3.6 * p.carrier_freq / p.c_light;
+                nf = geo_value(g, 'frames', r); if ~isfinite(nf), nf = opt.F_SUB; end
                 d = link_seed(modelName, seed, fd, struct('ebno', ebno(s), 'alt_m', geo_value(g, 'alt', r), ...
-                    'k_sig_db', geo_value(g, 'ksig', r), 'aoa1_deg', geo_value(g, 'aoa1', r), 'rho', geo_value(g, 'rho', r)));
-                F = extract_closed_loop_frames(sim(modelName, 'StopTime', stop_time), p2, opt.delay_bits);
+                    'k_sig_db', geo_value(g, 'ksig', r), 'aoa1_deg', geo_value(g, 'aoa1', r), 'rho', geo_value(g, 'rho', r), ...
+                    'event_frame', geo_value(g, 'event', r), 'frames', nf));
+                F = extract_closed_loop_frames(sim(modelName, 'StopTime', stop_of(nf)), p2, opt.delay_bits);
                 disk_guard;
-                Q = add_run(Q, F, det, opt.tw, g.run(r), d.aoa);
+                erx = received_ebno(p2.active_threat, ebno(s) + g_db - loss, F.act_comp, p2.path_loss_db);
+                Q = add_run(Q, F, det, opt.tw, g.run(r), d.aoa, erx);
             end
             P{s, a, sp} = Q;
         end
@@ -70,7 +83,9 @@ function Q = empty_pool(nC, nF)
 Q = struct('probs', zeros(0, nC, 'single'), 'maha', zeros(0, 1, 'single'), 'feat', zeros(0, nF, 'single'), ...
     'gant', zeros(0, 0, 'single'), 'ber', zeros(0, 1), 'fer', zeros(0, 1, 'single'), 'crc', zeros(0, 1, 'single'), ...
     'run', zeros(0, 1), ...
-    'aoa', zeros(0, 3, 'single'), 'act', zeros(0, 1, 'single'));
+    'aoa', zeros(0, 3, 'single'), 'act', zeros(0, 1, 'single'), 'act_comp', zeros(0, 3, 'single'), ...
+    'ebno_rx', zeros(0, 1, 'single'), 'idle', zeros(0, numel(idle_summary('names')), 'single'), ...
+    'act_idle', zeros(0, 1, 'single'), 'bch', zeros(0, 0, 'single'));
 end
 
 function v = geo_value(g, f, r)
@@ -78,7 +93,7 @@ function v = geo_value(g, f, r)
 if isfield(g, f), v = g.(f)(r); else, v = NaN; end
 end
 
-function Q = add_run(Q, F, det, tw, run_id, aoa)
+function Q = add_run(Q, F, det, tw, run_id, aoa, erx)
 % Complete frames of one sub-run with the detector outputs and link features.
 v = find(~isnan(F.ber));
 if isempty(v), return; end
@@ -86,7 +101,7 @@ n = numel(v);
 if ~isempty(det)
     X = zeros(128, 128, 1, n, 'single'); Fr = zeros(n, numel(det.mu));
     for i = 1:n
-        X(:, :, 1, i) = spec_image(F.iq{v(i)}, det.fs);
+        X(:, :, 1, i) = spec_image(F.iq{v(i)}, det.fs, det.nv);
         Fr(i, :) = link_features(F, v(i), tw);
     end
     [probs, maha] = detect_scores(det.net, det.ood, X, ((Fr - det.mu) ./ det.sd)', 'cpu');
@@ -98,4 +113,8 @@ Q.run = [Q.run; repmat(run_id, n, 1)];
 a3 = nan(1, 3); a3(1:min(3, numel(aoa))) = aoa(1:min(3, numel(aoa)));
 Q.aoa = [Q.aoa; repmat(single(a3), n, 1)];
 Q.act = [Q.act; single(F.act(v)')];
+Q.act_comp = [Q.act_comp; single(F.act_comp(:, v)')];
+Q.ebno_rx = [Q.ebno_rx; single(erx(v)')];
+Q.idle = [Q.idle; single(F.idle(:, v)')]; Q.act_idle = [Q.act_idle; single(F.act_idle(v)')];
+Q.bch = [Q.bch; single(F.bch(:, v)')];
 end

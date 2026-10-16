@@ -89,3 +89,16 @@ Ranges: the link's 2.4 GHz band, 50–120 km/h and Eb/N0 0–10 dB (about 15.7 t
 
 Dropped for lack of a basis in these sources: CUSUM change detection, finer power and rate levels,
 a recurrent (GRU) Q-network.
+
+## In the library, cited from D85 (library audit, 2026-10-15)
+
+| Paper | File | What it supports |
+|---|---|---|
+| M. Norouzi, "K-out-of-N detector," EUSIPCO 2006 | V7_Norouzi2006_K_out_of_N_Detector_EUSIPCO.pdf | The monitor's m-of-n alarm confirmation (binary integration), beside Barajas et al. 2026's three consecutive classifications; replaces the earlier citation of Richards' book, which is not in the library |
+| F. Abdullayeva, O. Valikhanli, "Multimodal deep neural network for UAV GPS jamming attack detection," Cyber Security and Applications 3 (2025) 100094 | 1-s2.0-S2772918425000116-main.pdf | A hybrid detector: a CNN on images and an MLP on tabular features, fused, above either alone (99% against 94.66% and 96.25%): the hybrid CNN + link-feature detector |
+| L. D. Brown, T. T. Cai, A. DasGupta, "Interval estimation for a binomial proportion," Statistical Science, 2001 | V7_Brown2001_Interval_Estimation_Binomial_Proportion_StatSci.pdf | Why the commitment claims use the Clopper-Pearson interval: its coverage never falls below the nominal level, where the Wald interval's does |
+| Wang et al. 2025, jamming-resistant UAV multichannel link | V7_Wang2025_Jamming_Resistant_UAV_Multichannel.pdf | A measured cancellation of about 40 dB of a CW jammer with two antennas: the scale of spatial nulling the MMSE combiner is credited with |
+| E. Yanmaz et al. 2013, 3D aerial mobility with 802.11 and antenna orientation | V7_Yanmaz2013_3D_Aerial_Mobility_80211_Antenna.pdf | A measured three-antenna array on a small UAV: backs profile 1's three antennas |
+| Fang et al., IEEE 802.11-24/2043r0 (TGbn PHY receiver specification text), 2024 | V7_IEEE_802.11-24-2043r0_Fang2024_PDT_PHY_Receiver_Spec_TGbn.docx | The receiver's maximum input level of −20 dBm |
+| M. Müller, M. Hein, "Mahalanobis++," arXiv:2505.18032, 2025 | (arXiv, not in the library folder) | l2-normalizing the features before the Mahalanobis score: the last_l2 unknown-threat candidate, chosen only if validation picks it |
+| J. H. Winters, J. Salz, R. D. Gitlin, "The impact of antenna diversity on the capacity of wireless communication systems," IEEE Trans. Commun. 42(2/3/4), 1994 | V7_Winters_Salz_Gitlin1994_Antenna_Diversity_Capacity.pdf | With M antennas, M - 1 interferers can be nulled (Sec. I, p. 1740; again for a channel without multipath, p. 1747); optimum combining by direct matrix inversion, w = R_xx^-1 r_xd from the sample covariance of the received snapshots and their correlation with a known reference signal (eqs. 19-23, p. 1745), the form of the MMSE combiner's weights (build_threat_model.m, w = R \ h); replaces the citations of Richards' book in D59 and D61 |

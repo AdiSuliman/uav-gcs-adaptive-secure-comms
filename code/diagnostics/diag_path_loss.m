@@ -15,14 +15,21 @@ Cv = load('data/clean_val_pools.mat', 'CT'); CV = Cv.CT; clear Cv
 PP.confirm = Q.confirm; PP.alarm_mode = Q.alarm_mode;
 K = link_env('tables', PP);
 VAL = 2; NE = 64; T = Q.H.T; REPS = 4;
-nS = numel(PP.ebno); nG = K.nR(VAL);
+nS = numel(PP.ebno);
 cells = find(strcmp(PP.scen, 'path_loss'));
-rep = {sprintf('=== PATH LOSS ON THE VALIDATION SPLIT (selected DQN, trained with drop %.1f dB) ===', Q.drop_db)};
-for dd = [Q.drop_db, 4, 3]
+un = drop_unit(Q.alarm_mode);
+DD = [Q.drop_db, 4, 3];                                     % the trained threshold and more sensitive ones
+if strcmp(Q.alarm_mode, 'class_cusum')                      % the next ones of the CUSUM's validation grid
+    Dd = load('data/drop_threshold.mat', 'THC'); j = find(Dd.THC == Q.drop_db, 1);
+    DD = Q.drop_db; if ~isempty(j), DD = Dd.THC(j:-1:max(1, j - 2)); end
+end
+rep = {sprintf('=== PATH LOSS ON THE VALIDATION SPLIT (selected DQN, %s, trained with drop %.1f %s) ===', ...
+    Q.alarm_mode, Q.drop_db, un)};
+for dd = DD
     PPd = PP; PPd.drop_db = dd;
-    rep{end+1} = sprintf('--- drop threshold %.1f dB ---', dd); %#ok<SAGROW>
+    rep{end+1} = sprintf('--- drop threshold %.1f %s ---', dd, un); %#ok<SAGROW>
     for c = cells(:)'
-        specs = val_specs(c, nS, nG, REPS, NE, T, RandStream('mt19937ar', 'Seed', 77));
+        specs = val_specs(c, nS, K.geo{c, VAL}, REPS, NE, T, RandStream('mt19937ar', 'Seed', 77));
         R = dqn_eval_batches('dqn', PPd, K, specs, Q.agent, struct(), 5100, VAL);
         R.s = cell2mat(cellfun(@(sp) sp.s, specs, 'UniformOutput', false));
         m = R.recoverable;
@@ -44,8 +51,8 @@ end
 fid = fopen('results/diag_path_loss.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('%s\n', rep{:});
 
-function specs = val_specs(c, nS, nG, reps, NE, T, rs)
-[s, r] = ndgrid(1:nS, 1:nG); s = repmat(s(:)', 1, reps); r = repmat(r(:)', 1, reps);
+function specs = val_specs(c, nS, rr, reps, NE, T, rs)
+[s, r] = ndgrid(1:nS, rr);   % the geometries the cell flies s = repmat(s(:)', 1, reps); r = repmat(r(:)', 1, reps);
 n = numel(s); nb = ceil(n / NE); pad = nb * NE - n;
 k_ = mod(0:n + pad - 1, n) + 1; s = s(k_); r = r(k_);
 specs = cell(1, nb);
@@ -58,11 +65,8 @@ end
 
 function [fa, n] = clean_fa(PP, CT, agent, NE, T)
 % One clean episode per independent validation geometry and Eb/N0 (as train_dqn.m).
-nS = numel(PP.ebno); nA = numel(PP.actions);
-PPw = PP; PPw.pools(:, :, :, 2) = {[]};
-ic = find(strcmp(PP.scen, 'none'), 1);
-PPw.pools(ic, :, :, 2) = reshape(CT.pools(1, :, :), [1 nS nA]);
-PPw.runs{2} = CT.runs;
+nS = numel(PP.ebno);
+PPw = clean_split(PP, CT, 2);
 Kw = link_env('tables', PPw);
 [ss, rr] = ndgrid(1:nS, 1:CT.n_geom); ss = ss(:)'; rr = rr(:)';
 n = numel(ss); nb = ceil(n / NE); pad = nb * NE - n;

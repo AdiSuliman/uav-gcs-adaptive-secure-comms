@@ -8,6 +8,9 @@ function [p, sevTxt, fd_hz, comps] = console_scenario(p0, sev, threat, sevLevel,
 %   v_kmh     UAV speed -> channel Doppler fd = v*fc/c
 %   comps     the component threats: a detection of any of them is correct, as the
 %             evaluation counts a combined threat (edge_map.m, DET)
+%   With airframe shadowing the UAV flies a drawn turn (heading rate and bank); the console
+%   picks the flights that roll into it so that the airframe hides an antenna
+%   (console_flights.m), so the shadowing ramps in as on the evaluated flights.
 fd_hz = (v_kmh/3.6) * p0.carrier_freq / p0.c_light;
 p = p0;
 p.active_threat = threat;
@@ -26,4 +29,8 @@ p.v_kmh = v_kmh; p.v = v_kmh/3.6; p.fd_max = fd_hz;
 p.quiet_build = true;                      % build the Simulink model without opening its window
 p.gcs_aoa_random = false;                  % the GCS at broadside, as the 3D view draws it
 p.jam_timing_random = false;               % the sweeper on our channel in every frame of the run
+if contains(threat, 'airframe_shadowing')  % a drawn turn the UAV rolls into, as the evaluated flights (console_flights.m)
+    p.yaw_random = true;
+    p.roll_deg = 0;
+end
 end

@@ -39,7 +39,7 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %               envelope (32-sample block fit): ~0 for interference independent of
 %               our transmission, > 0 when it is triggered by it (reactive jamming)
 %     iot       interference over thermal [dB] (iot_db.m); the thermal floor is the
-%               receiver's calibration constant (the AWGN setting of the run)
+%               receiver's calibration constant (thermal_nv.m)
 %     mmse_gain predicted SINR gain of MMSE over MRC combining [dB] from the
 %               interference covariance and the channel estimate (optimum combining, Winters)
 %     align     alignment of the dominant interference direction with the GCS
@@ -101,7 +101,40 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %     erase     1 when the frame is unreliable for a decoder: pilot_err above
 %               p.erase_pilot_mse (its bits are erasures for fec_packets.m)
 %   Ground truth: act, share of the frame with the threat on the air (packet traffic
-%   of benign interference, the sweeping jammer on our channel), analysis and labels only.
+%   of benign interference, the sweeping jammer on our channel; for a combination the
+%   union over its components, build_threat_model.m output 2), analysis and labels only;
+%   act_comp (3 x frames), the share of each component in the threat's order, and lev_db
+%   (3 x frames), the level an additive component reaches over our signal on the weakest
+%   antenna in the frame [dB] (output 3; NaN beyond the threat's components).
+%   Idle time (p.idle_rssi_hz > 0): the RSSI of every antenna between the previous frame and
+%   this one (idle_rssi.m, from the run's own block values, idle_context.m, and the threat
+%   block's recorded schedule), idle_R (bins x antennas x frames, dB over the floor constant,
+%   NaN for the first frame), its record idle (24 x frames, idle_summary.m), the receiver's
+%   input of the fusion, and act_idle (1 x frames), the share of that idle time with one of the
+%   threat's emitters on the air (ground truth: the per-cycle labels, threat_active.m);
+%   idle_ctx and idle_on keep what idle_rssi.m read (an emitter of opportunity can be added
+%   to the same idle time afterwards, emitter_reading.m).
+%   Level calibration: cal_db, each antenna's calibration error [dB] (the model's 'Cal'
+%   block, flight_draws.m). The receiver reports its absolute levels with it: the received
+%   samples behind rssi, iot, q_iot, duty, edges and the detector image (iq) and the channel
+%   gains behind gain_ant and branch_gap are those of each antenna scaled by its error;
+%   ratios within a chain (sinr, env_corr, q_react, coh, q_sfm, q_par, est_margin,
+%   branch_dip) do not change, and the combiner and its predictions (mmse_gain, align)
+%   work on the samples as they are.
+% With p.proc_gain_db (rate_reduce, apply_countermeasure.m) the field is that of the
+% despread link, our signal up by the processing gain; a despreading receiver measures the
+% chip-rate field, where our signal keeps its power. The level measurements it takes there
+% are taken with our signal scaled back by the gain: our own received component on every
+% antenna (the threat block's output 4, Thr_sig, through the Level gain and the antenna's
+% calibration error: the field the despreading receiver sees at the chip rate, emulated
+% exactly) is scaled before rssi and the detector image (iq); a model without that output
+% takes the receiver's own estimate of it (the re-modulated decisions fitted per 32-sample
+% block, as for env_corr), which a receiver broken by a jammer gets wrong. gain_ant, our
+% channel's gain per antenna, loses the gain. The despread measurements keep it: ber_est, snr_post, sinr and
+% est_margin (the channel estimate over the despread pilots), so the Eb/N0 estimate
+% (sinr + iot) rises by the gain, which the link monitor takes out (policy_monitor.m); iot
+% and the residual measurements are those of the interference and noise, which keep their
+% power.
 % With p.fec (fec_interleave) ber, fer and crc_fail are those of the decoded packet,
 % 1000 + 32 bits over p.fec_frames frames, decoded from the combiner output's soft values
 % with the erased frames' bits as erasures, one packet per frame pair: ber and fer on both
@@ -120,6 +153,15 @@ syr = out.get('Rx_S');
 if ismatrix(iqa), iqa = reshape(iqa, size(iqa, 1), 1, []); end
 if isvector(zc), zc = zc(:); end
 [ns, na, nf] = size(iqa);
+cal_db = zeros(1, na);
+try
+    c = out.get('Cal_db');
+    if ndims(c) == 3, c = permute(c, [3 2 1]); end      % 1 x antennas x samples: a row per sample
+    if ~isempty(c), cal_db = reshape(c(1, 1:na), 1, na); end
+catch
+end
+gcal = reshape(10.^(cal_db / 20), 1, na);
+iqa = iqa .* gcal;                                       % the levels as the receiver reports them
 if numel(syr) ~= 8 * nf
     error('extract_closed_loop_frames: receiver output 6 holds %d values for %d frames, not 8 per frame (a model built before its eighth row: rebuild it)', numel(syr), nf);
 end
@@ -159,24 +201,50 @@ end
 [F.ber_est, F.snr_post] = symbol_metrics(zc, p);
 [F.mmse_gain, F.align] = spatial_metrics(Hq, Rq, nf);
 F.branch_dip = branch_dip(Hq, nf);
-F.branch_gap = branch_gap(Hq, nf);
-F.gain_ant = gain_ant(Hq, nf);
+F.branch_gap = branch_gap(Hq .* gcal(:), nf);
+F.gain_ant = gain_ant(Hq .* gcal(:), nf);
+F.cal_db = cal_db;
 F.est_margin = est_margin(Hq, Rq, nf);
+F.hq = branch_channel(Hq .* gcal(:), nf); F.hq_nb = size(Hq, 2);   % every antenna's frame-mean channel (branch_record.m)
+F.rq = branch_noise(Rq, nf, gcal);
 xh = remod_frames(rx_all(delay_bits+1:end), p, ns, nf, sy(1, 1:nf) + sy(5, 1:nf), sy(2, 1:nf));
+tdl_max = 0; if isfield(p, 'tdl') && p.tdl && isfield(p, 'tdl_max_ns'), tdl_max = p.tdl_max_ns; end
+[F.cir, F.cir_nv, F.cir_d] = lag_channels(xh, iqa, NQ * p.sps, p.sps, -3:1 + ceil(tdl_max * 1e-9 * p.symbol_rate));   % every antenna's channel at whole-symbol lags
 qn = NQ * p.sps;                                         % quiet slot before the frame: free of our pulse tails
 F.coh = quiet_coherence(iqa, p, qn);
 [F.q_sfm, F.q_par] = quiet_shape(iqa, qn);
-nv = thermal_of(out, p);                                 % thermal noise power per sample
+nv = thermal_nv(p);                                      % thermal noise power per sample
 dat = (qn + 1:ns)';                                      % samples that carry our signal
 rs = nan(na, nf); sn = nan(na, nf); ec = nan(na, nf); io = nan(na, nf); pe = nan(na, nf); pq = nan(na, nf);
 du = nan(na, nf); ed = nan(na, nf);
+gp = 0; if isfield(p, 'proc_gain_db') && ~isempty(p.proc_gain_db), gp = p.proc_gain_db; end
+ys = [];                                                 % our own received component (rate_reduce)
+if gp > 0
+    try
+        ys = out.get('Thr_sig') * str2double(get_param([out.SimulationMetadata.ModelInfo.ModelName '/Level'], 'Gain'));
+        ys = ys(:, :, 1:nf) .* gcal;
+    catch
+        ys = [];
+    end
+end
 for a = 1:na
     ia = reshape(iqa(:, a, :), ns, nf);
     rs(a, :) = 10*log10(mean(abs(ia(dat, :)).^2, 1) + eps);
     [sn(a, :), ec(a, :), pe(a, :), du(a, :), ed(a, :)] = residual_metrics(xh(dat, :), ia(dat, :), nv);
-    io(a, :) = iot_of(out, p, rs(a, :), sn(a, :));
+    io(a, :) = iot_db(rs(a, :), sn(a, :), nv);
     if qn > 0, pq(a, :) = mean(abs(ia(1:qn, :)).^2, 1); end
+    if gp > 0 && ~isempty(ys)                            % the chip-rate field of the level measurements
+        ia = ia - (1 - 10^(-gp / 20)) * reshape(ys(:, a, :), ns, nf);
+        iqa(:, a, :) = reshape(ia, ns, 1, nf);
+        rs(a, :) = 10*log10(mean(abs(ia(dat, :)).^2, 1) + eps);
+    elseif gp > 0
+        ia(dat, :) = chip_field(xh(dat, :), ia(dat, :), gp);
+        iqa(:, a, :) = reshape(ia, ns, 1, nf);
+        rs(a, :) = 10*log10(mean(abs(ia(dat, :)).^2, 1) + eps);
+    end
 end
+if gp > 0, F.gain_ant = F.gain_ant - gp; end
+F.bch = branch_record(F);                                % the fusion's branch-coherence record (window_cues.m)
 s0 = sn; s0(isnan(s0)) = -Inf;
 [~, ref] = max(s0, [], 1);                                  % reference antenna per frame
 k = sub2ind([na nf], ref, 1:nf);
@@ -191,8 +259,38 @@ try
     if numel(F.act) < nf, F.act(end+1:nf) = F.act(end); end
 catch
 end
+F.act_comp = [F.act; nan(2, nf)]; F.lev_db = nan(3, nf);
+ion = [];
+try
+    c = out.get('Thr_comp');
+    nc = size(c, 2); if ndims(c) == 3, nc = numel(c) / size(c, 3); end   % 6, then the idle on-shares
+    if ndims(c) == 3, c = reshape(c, nc, []); else, c = reshape(c, [], nc).'; end
+    c = c(:, [1:min(nf, size(c, 2)), size(c, 2) * ones(1, nf - size(c, 2))]);
+    F.act_comp = c(1:3, :); F.lev_db = c(4:6, :);
+    if nc > 6, ion = permute(reshape(c(7:end, :), [], 3, nf), [2 1 3]); end
+catch
+end
 F.q_iot = 10*log10(mean(pq, 1) / nv);
 F.q_react = 10*log10(pe(k) ./ pq(k));
+[F.idle, F.act_idle, F.idle_R, F.idle_ctx, F.idle_on] = idle_measure(out, p, ion, nf);
+end
+
+function [S, A, R, ctx, ion] = idle_measure(out, p, ion, nf)
+% The idle time before every frame (idle_rssi.m, idle_summary.m): S its record (24 x frames),
+% A the share of it with the threat on the air, R the RSSI (bins x antennas x frames), ctx the
+% run's block values; NaN without idle sensing (p.idle_rssi_hz 0) or the model's blocks.
+nm = idle_summary('names');
+S = nan(numel(nm), nf); A = nan(1, nf); R = []; ctx = [];
+if ~isfield(p, 'idle_rssi_hz') || isempty(p.idle_rssi_hz) || p.idle_rssi_hz <= 0, return; end
+try
+    ctx = idle_context(out.SimulationMetadata.ModelInfo.ModelName);
+catch
+    ctx = [];
+end
+if isempty(ctx), return; end
+[R, A] = idle_rssi(p, ctx, ion, 1:nf);
+S = idle_summary(R, p)';
+R = single(R); ion = single(ion);
 end
 
 %% ===================== Symbol-level estimates =====================
@@ -328,6 +426,23 @@ for f = 1:nf
 end
 end
 
+function r = chip_field(x, r, g)
+% The received samples r (samples x frames) with our own signal scaled down by g dB: the
+% re-modulated waveform x fitted to r per 32-sample block (the last block's gain for the
+% samples after the last whole block); frames without complete decisions are kept.
+B = 32; c = 1 - 10^(-g / 20);
+for f = 1:size(r, 2)
+    xf = x(:, f);
+    if any(isnan(xf)), continue; end
+    n = floor(numel(xf) / B) * B;
+    if n == 0, continue; end
+    X = reshape(xf(1:n), B, []); R = reshape(r(1:n, f), B, []);
+    hb = sum(conj(X) .* R, 1) ./ max(sum(abs(X).^2, 1), eps);
+    s = [reshape(X .* hb, [], 1); xf(n+1:end) * hb(end)];
+    r(:, f) = r(:, f) - c * s;
+end
+end
+
 function coh = quiet_coherence(iqa, p, qn)
 % Spatial coherence of every frame's quiet slot, no signal of ours. The receive filter
 % runs over the whole run as in the receiver, and the slot counts, as there, from its
@@ -393,25 +508,36 @@ for f = 1:min(nf, size(Hq, 3))
 end
 end
 
-function nv = thermal_of(out, p)
-% Thermal noise power per sample: the receiver's calibration constant (the AWGN
-% setting of the run, signal power 1/sps per sample).
-nv = NaN;
-try
-    mdl = out.SimulationMetadata.ModelInfo.ModelName;
-    snr_s = str2double(get_param([mdl '/AWGN'], 'SNR'));
-    nv = (1 / p.sps) / 10^(snr_s / 10);
-catch
-end
+function h = branch_channel(Hq, nf)
+% Frame mean of every antenna's complex channel estimate (antennas x frames).
+h = nan(size(Hq, 1), nf);
+for f = 1:min(nf, size(Hq, 3)), h(:, f) = mean(Hq(:, :, f), 2); end
 end
 
-function iot = iot_of(out, p, rssi, sinr)
-iot = nan(size(rssi));
-try
-    mdl = out.SimulationMetadata.ModelInfo.ModelName;
-    snr_s = str2double(get_param([mdl '/AWGN'], 'SNR'));
-catch
-    return;
+function r = branch_noise(Rq, nf, gcal)
+% Residual power of every antenna per frame (the diagonal of the residual covariance), on
+% the scale of the calibrated channel estimates.
+r = nan(size(Rq, 1), nf);
+for f = 1:min(nf, size(Rq, 3)), r(:, f) = real(diag(Rq(:, :, f))) .* abs(gcal(:)).^2; end
 end
-iot = iot_db(rssi, sinr, snr_s, p.sps);
+
+function [G, nv, dg] = lag_channels(xh, iqa, qn, sps, lags)
+% Every antenna's channel at whole-symbol lags from the receiver's arrival: LS of its
+% received samples on the frame rebuilt from the decisions (remod_frames), delayed by each
+% lag (antennas x lags x frames); nv the residual power per antenna, dg the diagonal of
+% inv(X'X) per lag (the estimate's noise power is nv dg). The equalizer's first pass
+% estimates the same lag channels from the training (build_threat_model.m, eq_train).
+[ns, na, nf] = size(iqa); nl = numel(lags);
+G = nan(na, nl, nf); nv = nan(na, nf); dg = nan(nl, nf); dat = (qn + 1:ns)';
+for f = 1:min(nf, size(xh, 2))
+    x = xh(:, f); if any(isnan(x)), continue; end
+    X = zeros(ns, nl);
+    for i = 1:nl
+        k = lags(i) * sps;
+        if k >= 0, X(k + 1:end, i) = x(1:end - k); else, X(1:end + k, i) = x(1 - k:end); end
+    end
+    Xd = X(dat, :); R = reshape(iqa(dat, :, f), [], na);
+    g = Xd \ R; E = R - Xd * g;
+    G(:, :, f) = g.'; nv(:, f) = mean(abs(E).^2, 1).'; dg(:, f) = real(diag(inv(Xd' * Xd)));
+end
 end

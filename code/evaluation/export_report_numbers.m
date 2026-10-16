@@ -1,14 +1,30 @@
 %% EXPORT_REPORT_NUMBERS - Result numbers of the final reading in one JSON file
 % Collects the numbers the written reports quote (KPI summary, detector
 % metrics and main confusions with the readings beside KPI 1 (steady state, onset
-% latency: metrics.steady, metrics.onset, KP.onset), unknown-threat scores, policy evaluation,
+% latency, branch level: metrics.steady, metrics.onset, metrics.branch, KP.onset), unknown-threat scores, policy evaluation,
 % latency, unseen Eb/N0, unseen combined threats, the edge map's verdicts, the commitment
 % at every signalling delay and its edges)
 % so no number is copied by hand. Large arrays are left out. Run from the repository
 % root after the KPI stage.
+% A result of another detector or deployed policy, or older than its inputs
+% (result_status.m), and a KPI summary older than a file it reads are flagged in
+% N.stale and printed as a warning; the numbers stay, marked, for the reader to see.
 % Output: results/report_numbers.json
 
 N = struct('generated', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
+RS = result_status();
+st = RS([RS.stale]);
+kin = {'results/eval_detector_metrics.mat', 'results/ood_detection.mat', 'results/policy_evaluation.mat', ...
+    'results/latency.mat', 'results/edge_map.mat', 'results/phy_validation.txt'};   % files the KPI summary reads
+if isfile('results/kpi_summary.mat')
+    old = kin(cellfun(@(f) isfile(f) && dir(f).datenum > dir('results/kpi_summary.mat').datenum, kin));
+    if ~isempty(old)
+        st(end+1) = struct('file', 'results/kpi_summary.mat', 'present', true, 'stale', true, ...
+            'why', ['older than ' strjoin(old, ', ') ' (rerun KPI)']);
+    end
+end
+N.stale = st;
+for i = 1:numel(st), warning('export_report_numbers:stale', 'STALE %s: %s', st(i).file, st(i).why); end
 N.kpi = take('results/kpi_summary.mat', 'KPI');
 
 M = take('results/eval_detector_metrics.mat', 'metrics');

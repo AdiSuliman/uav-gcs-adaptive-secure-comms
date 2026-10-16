@@ -10,7 +10,9 @@
 % MARGINAL when the best BER is within 5x, otherwise NON-RECOVERABLE. Directional
 % threats are mapped for two flight geometries: interferer 42.2 deg from the
 % GCS direction (separable by the antenna array) and 11.4 deg (aligned);
-% path_loss, antenna_fault and airframe_shadowing do not depend on the geometry.
+% path_loss and antenna_fault do not depend on the geometry; airframe shadowing is mapped
+% in a coordinated turn at the bank Sun et al.'s fit pairs with the level
+% (shadow_roll_band.m, the GCS abeam), where the airframe hides an antenna (shadow_hidden.m).
 % The K-factor is fixed at the nominal 10 dB and the UAV antenna keeps its horizon gain
 % toward the GCS (the pools draw K and altitude per flight).
 %
@@ -49,6 +51,8 @@ ACT_CODE = containers.Map(MECH_B, cellfun(@act_code, MECH_B, 'UniformOutput', fa
 clear threat_cfg                                  % scripts share the base workspace
 DL = dataset_levels();
 threat_cfg = struct('name', {DL.name}, 'level_field', {DL.param}, 'levels', {DL.levels});
+ip = strcmp({threat_cfg.name}, 'path_loss');            % up to the measured building loss (Simunek et al. 2011,
+threat_cfg(ip).levels = [threat_cfg(ip).levels, 33 42]; % 33-42 dB, Figs. 6 and 11), beyond the training levels
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
     threat_cfg = threat_cfg([1 4]); threat_cfg(1).levels = [4 16]; threat_cfg(2).levels = [7 16];
     RUN_FRAMES = 20; opt.F_SUB = RUN_FRAMES;
@@ -74,6 +78,7 @@ p0.gcs_tracked = false;                 % the GCS antenna on its axis
 p0.alt_random = false;                  % no altitude: the UAV antenna's horizon gain toward the GCS
 p0.jam_timing_random = false;           % the shortest sweep at phase 0: the sweeper on our channel in every frame
 p0.tdl_random = false;                  % the median delay spreads (p0.tdl_ds_ns), with the delay line on
+p0.cap_frames = RUN_FRAMES;             % the in-band cap holds over the whole run
 SNR_points = p0.EbNo_dB;
 nS = numel(SNR_points);
 v_nom = p0.v_nominal * 3.6;                       % nominal cruise speed [km/h]
@@ -120,6 +125,8 @@ parfor (j = 1:nJ, NWP)
     t = jobs(j, 1); li = jobs(j, 2);
     cfg = maps(t);
     p = p0; p.active_threat = cfg.base; p.(cfg.level_field) = cfg.levels(li);
+    if contains(cfg.base, 'airframe_shadowing'), [~, p.roll_deg] = shadow_roll_band(p.shadow_db, p); end   % a turn that lets the airframe hide an antenna
+    p.gcs_aoa_deg = p.gcs_aoa_deg - rad2deg(9.81 * tand(p.roll_deg) / max(p.v_nominal, p.turn_v_floor)) * (RUN_FRAMES - 1) * p.cycle_s / 2;   % the turn carries the GCS through the beam at mid-run
     if ~isnan(cfg.aoa), p.int_aoa_deg(1) = p.gcs_aoa_deg + cfg.aoa; end
     sd = 900000 + 1000*t + 10*li;                         % + s: each Eb/N0 column its own flight (nS < 10)
     g = arrayfun(@(s) struct('seed', sd + s, 'speed', v_nom, 'run', 1), 1:nS, 'UniformOutput', false);

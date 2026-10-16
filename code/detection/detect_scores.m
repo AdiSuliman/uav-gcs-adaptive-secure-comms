@@ -15,7 +15,7 @@ end
 N = size(X_spec, 4);
 nL = numel(M.layers);
 lay = [];                                           % layers the production score reads
-if any(strcmp(M.score, {'last', 'last_or_raw', 'last_or_if'})), lay = nL; end
+if any(strcmp(M.score, {'last', 'last_l2', 'last_or_raw', 'last_or_if'})), lay = nL; end
 if strcmp(M.score, 'ensemble'), lay = 1:nL; end
 probs = zeros(size(M.mu{end}, 2), N); maha = zeros(1, N);
 pre = strcmp(M.score, 'last_pre');                 % input pre-processing: one extra gradient pass

@@ -3,7 +3,8 @@ function R = policy_run_set(kind, PP, K, specs, split, ag, opt, seed0)
 %   R = policy_run_set(kind, PP, K, specs, split, ag, opt, seed0): batch b runs with
 %   the frame-draw seed seed0 + b, so every policy sees the same draws; the padding of
 %   the last batch (n_valid, policy_episodes.m) is dropped. Per episode, besides the
-%   rollout outputs: scn, s, threat (not the clean link), the scenario of the spec
+%   rollout outputs: scn, s, threat (not the clean link, and on the air in the geometry:
+%   link_env.m K.on), the scenario of the spec
 %   (onset, follow, fdelay, unk, delay: signalling delay of a change in cycles, comb:
 %   a jammer on every channel we can use), split,
 %   geom (flight geometry, the bootstrap cluster within a split) and speed (UAV speed
@@ -14,7 +15,7 @@ for b = 1:numel(specs)
     sp = specs{b};
     Rb = rollout_policy(kind, PP, K, sp, split, ag, opt, seed0 + b);
     Rb.scn = sp.scn; Rb.s = sp.s;
-    Rb.threat = ~strcmp(PP.scen(Rb.scn), 'none');
+    Rb.threat = ~strcmp(PP.scen(Rb.scn), 'none') & K.on(sub2ind(size(K.on), Rb.scn, Rb.s, split + 0 * Rb.s, Rb.r));
     Rb.onset = sp.onset; Rb.follow = sp.follow; Rb.fdelay = sp.fdelay; Rb.unk = sp.unk;
     if isfield(sp, 'delay') && ~isempty(sp.delay), Rb.delay = sp.delay * ones(size(sp.scn));
     else, Rb.delay = D * ones(size(sp.scn)); end
