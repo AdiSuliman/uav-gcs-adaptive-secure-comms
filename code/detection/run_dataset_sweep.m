@@ -107,6 +107,7 @@ if exist('SMOKE', 'var') && SMOKE, n_sub(:) = N_SUB; end
 class_names = ['none', {threat_cfg.name}];
 stop_time   = num2str(F_SUB * p0.frame_duration);
 p0.cap_frames = F_SUB;                                  % the cap holds over the sub-run
+p0.roll_in_frames = p0.pl_onset_det;                    % every turning flight of every class rolls in inside the sub-run
 
 MEAS = {'rssi', 'crc_fail', 'ber_est', 'snr_post', 'sinr', 'env_corr', 'iot', 'coh', 'mmse_gain', 'align', ...
         'branch_dip', 'branch_gap', 'sinr_gap', 'q_iot', 'q_react', 'q_sfm', 'q_par', 'duty', 'edges', 'est_margin'};
@@ -167,7 +168,7 @@ for tt = 1:numel(threat_cfg)
 end
 
 %% ---- None class (n_levels x N_SUB sub-runs per Eb/N0) ----
-p = p0; p.active_threat = 'none'; p.seed = []; p.roll_in_frames = p0.pl_onset_det;   % its turning flights roll in as every class's
+p = p0; p.active_threat = 'none'; p.seed = [];
 build(p, modelName);
 i_start = numel(D.label) + 1;
 for s = 1:numel(EbNo_list)

@@ -31,7 +31,7 @@ if numel(ev) > 1, rs = ev(2); end
 k = zeros(size(beta)); g = zeros(size(beta));
 if v < v_min, return; end
 [ep, dp] = shadow_equiv_roll(0, el, bank, pitch, el_s);    % the event's deepest burial and its equivalent roll
-if ~(ep >= roll_band(1) && ep <= roll_band(2)), return; end
+if ~(ep >= roll_band(1) - 1e-6 && ep <= roll_band(2) + 1e-6), return; end   % in the band, to the rounding of the arcsine and the model's 10-digit parameters
 d = abs(mod(90 - beta + 180, 360) - 180);                 % heading minus GCS azimuth [deg]
 [~, ca, cz] = uav_attitude_db(el, beta, roll, pitch, -30);
 on = d > hdg_min & cz < 0;

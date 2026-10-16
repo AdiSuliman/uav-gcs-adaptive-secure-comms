@@ -2,8 +2,9 @@ function h = hides_antenna(seed, v_kmh, p, geo)
 %HIDES_ANTENNA  The flight's attitude lets the airframe hide a UAV antenna, the event
 %   counting (its loss at least p.shadow_evt_db), in some frame of its run: any(d.hidden > 0)
 %   of flight_draws.m over the run's frames a cycle apart (geo.frames, or p.cap_frames;
-%   shadow_frame.m, in a turn whose bank the level is measured at, shadow_roll_band.m), from
-%   the draws link_seed.m gives the model, before the flight is simulated. Where the flight
+%   shadow_frame.m: in an event whose deepest burial, through its equivalent roll, lies in
+%   the level's band, shadow_equiv_roll.m, shadow_roll_band.m), from the draws link_seed.m
+%   gives the model, before the flight is simulated. Where the flight
 %   rolls into its turn (p.roll_in_frames, geo.event_frame) the event must start during the
 %   roll-in. The selection of the flights an airframe-shadowing cell flies
 %   (run_dataset_sweep.m, build_policy_pools.m, build_check_pools.m, eval_unseen_snr.m,

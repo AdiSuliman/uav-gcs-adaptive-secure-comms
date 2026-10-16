@@ -25,7 +25,7 @@ function k = shadow_hidden(beta, el, roll, pitch, nr, roll_band, hdg_min, v, v_m
 k = 0;
 if v < v_min, return; end
 e = shadow_equiv_roll(0, el, abs(roll), pitch, el_s);
-if ~(e >= roll_band(1) && e <= roll_band(2)), return; end
+if ~(e >= roll_band(1) - 1e-6 && e <= roll_band(2) + 1e-6), return; end     % in the band, to the rounding of the arcsine and the model's 10-digit parameters
 d = abs(mod(90 - beta + 180, 360) - 180);                 % heading minus GCS azimuth [deg]
 if d <= hdg_min, return; end
 [~, ca, cz] = uav_attitude_db(el, beta, roll, pitch, -30);

@@ -103,7 +103,7 @@ end
 % every shadowing group's own, selected where its cells fly (NaN elsewhere)
 SH = struct('band', gband, 'level', glv, 'cell_levels', {arrayfun(@(k) unique(shd_db(grp == k)), 1:nGr, ...
     'UniformOutput', false)}, 'cell_group', grp, 'ebs', {gebs}, 'v_kmh', vshd, 'speed_range', vrange, ...
-    'tried', zeros(nGr, 1, nS), 'kept', zeros(nGr, 1, nS));
+    'tried', zeros(nGr, 1, nS), 'kept', zeros(nGr, 1, nS), 'count', zeros(nGr, 2, nS));
 geo = cell(1, nS);
 for s = 1:nS
     geo{s} = pool_geometries(s, BLOCK, 1:N_GEO, vrange, p0, LHS_SEED + 100*s, FAM);
@@ -117,6 +117,9 @@ for s = 1:nS
                 'aoa1_deg', o, 'rho', c, 'event_frame', C.event_frame, 'frames', C.event_count)));
             [gk, info] = pool_geometries(s, BLOCK, gpos{k}, vshd(k, :), p0, LHS_SEED + 100*s + k, FAM, sel);
             SH.tried(k, 1, s) = sum(info.tries); SH.kept(k, 1, s) = N_GEO;
+            se = sel; se.j0 = info.j;                   % the next candidates, unstratified, counted only (shadow_note.m)
+            [~, ie] = pool_geometries(s, BLOCK, gpos{k}, vshd(k, :), p0, [], FAM, se);
+            SH.count(k, :, s) = [sum(ie.tries), N_GEO];
         end
         for f = fieldnames(gk)', geo{s}.(f{1}) = [geo{s}.(f{1}), gk.(f{1})]; end
     end

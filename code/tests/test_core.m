@@ -2563,6 +2563,18 @@ verifyEqual(tc, shadow_equiv_roll(0, 4, r4, 0, es), 28.5, 'AbsTol', 1e-9);
 verifyEqual(tc, b, [32.0 57.9], 'AbsTol', 0.05); verifyEqual(tc, r0, 57.9 - es, 'AbsTol', 1e-9);
 verifyEqual(tc, shadow_roll_band(40, p), [Inf -Inf]);            % no roll supports it: never flown
 B = [16.1 57.9]; v = 20; vm = p.shadow_v_min;
+for el = [0 0.5 1 2 2.9]                                         % a view on the band's edge (the clamped levels) hides an antenna
+    for L = [6 12.4 15.5 22.5 22.85 23 25]
+        [bd, r] = shadow_roll_band(L, p, el);
+        verifyEqual(tc, shadow_frame(0, el, r, r, 0, 3, bd, 30, v, vm, es), 3, sprintf('%g dB, %g deg', L, el));
+        verifyEqual(tc, shadow_hidden(0, el, r, 0, 3, bd, 30, v, vm, es), 3, sprintf('%g dB, %g deg', L, el));
+    end
+end
+for rm = [57.5 57.6 57.7 57.8]                                   % and with another bank limit
+    pm = p; pm.roll_max_deg = rm; [bd, r] = shadow_roll_band(25, pm);
+    verifyEqual(tc, shadow_frame(0, 0, r, r, 0, 3, bd, 30, v, vm, es), 3, sprintf('%g deg', rm));
+end
+verifyEqual(tc, shadow_frame(0, 0, 16.1 - es - 1e-4, 16.1 - es - 1e-4, 0, 3, B, 30, v, vm, es), 0);   % just below the band: none
 verifyEqual(tc, shadow_hidden(0, 2, 20, 0, 3, B, 30, v, vm, es), 3);       % GCS abeam on the right, banking toward it: the aft end
 verifyEqual(tc, shadow_hidden(0, 2, -20, 0, 3, B, 30, v, vm, es), 0);      % banking away: the belly sees it
 verifyEqual(tc, shadow_hidden(0, 25, 20, 0, 3, B, 30, v, vm, es), 0);      % 25 deg below: a 20 deg bank keeps it under the belly
@@ -2599,14 +2611,22 @@ txt = fileread(which('run_dataset_sweep'));
 verifyNotEmpty(tc, regexp(txt, 'while shd && ~hides_antenna\(', 'once'));
 verifyNotEmpty(tc, regexp(fileread(which('hides_antenna')), 'any\(d\.hidden > 0\)', 'once'));
 % the fixed views fly the bank whose equivalent roll the fit pairs with the level, the GCS
-% abeam, a coordinated turn; every level's view hides an antenna over a 57-frame run
+% abeam, a coordinated turn; the survivability map's view (57 frames at 72 km/h, the turn
+% carrying the GCS through the beam at mid-run) hides an antenna over the whole run, the
+% level's whole depth at mid-run and within 0.5 dB of it over the run
 q.yaw_random = false; q.gcs_aoa_random = false; [~, q.roll_deg] = shadow_roll_band(q.shadow_db, q);
 d = flight_draws(7, 100, q);
 verifyEqual(tc, d.roll, 28.5 - es, 'AbsTol', 1e-9);
 verifyGreaterThan(tc, d.hidden(1), 0);
-for L = [6 8 12 15.5 20 25]
+verifyNotEmpty(tc, strfind(fileread(which('map_survivability_boundary')), ['p.gcs_aoa_deg = p.gcs_aoa_deg - ' ...
+    'rad2deg(9.81 * tand(p.roll_deg) / max(p.v_nominal, p.turn_v_floor)) * (RUN_FRAMES - 1) * p.cycle_s / 2;']));
+for L = [6 8 12 15.5 20 22.5 23 25]
     qv = q; qv.shadow_db = L; qv.alt_random = false; qv.cap_frames = 57; [~, qv.roll_deg] = shadow_roll_band(L, qv);
-    verifyTrue(tc, all(flight_draws(7, 160, qv).hidden > 0), sprintf('%g dB', L));
+    qv.gcs_aoa_deg = qv.gcs_aoa_deg - rad2deg(9.81 * tand(qv.roll_deg) / max(qv.v_nominal, qv.turn_v_floor)) * 56 * qv.cycle_s / 2;
+    dv = flight_draws(7, qv.v_nominal * qv.carrier_freq / qv.c_light, qv);
+    verifyTrue(tc, all(dv.hidden > 0), sprintf('%g dB', L));
+    verifyEqual(tc, L * dv.shadow_g(29), L, 'AbsTol', 1e-6, sprintf('%g dB', L));
+    verifyGreaterThan(tc, L * min(dv.shadow_g), L - 0.5, sprintf('%g dB', L));
 end
 v = max(100 * q.c_light / q.carrier_freq, q.turn_v_floor);
 verifyEqual(tc, d.yaw, rad2deg(9.81 * tand(q.roll_deg) / v), 'RelTol', 1e-9);
@@ -3004,7 +3024,8 @@ function test_roll_in_every_class(tc)
 % the rate as roll_rate.m draws it and the start uniform over the times that put some of
 % the roll-in inside the run, level flight before it; such a flight hides no antenna and
 % its labels stay its threat's. Without p.roll_in_frames (the pools) a flight that the data
-% place no event in holds its bank; the dataset's clean class asks for the roll-in.
+% place no event in holds its bank; the dataset's base params ask for the roll-in, so its
+% clean class rolls in as every threat does.
 p = base_params(); p.roll_in_frames = p.pl_onset_det; p.cap_frames = 20; cyc = p.cycle_s;
 for thr = {'none', 'jamming', 'antenna_fault', 'path_loss'}
     q = p; q.active_threat = thr{1}; n = 0;
@@ -3029,8 +3050,12 @@ for thr = {'none', 'jamming', 'antenna_fault', 'path_loss'}
 end
 q = p; q.roll_in_frames = []; q.active_threat = 'none';
 verifyEqual(tc, flight_draws(3200001, 300, q, struct('ebno', 9)).roll_in, [0 0 0]);
-verifyNotEmpty(tc, strfind(fileread(which('run_dataset_sweep')), ...
-    'p = p0; p.active_threat = ''none''; p.seed = []; p.roll_in_frames = p0.pl_onset_det;'));
+src = fileread(which('run_dataset_sweep'));
+i0 = strfind(src, 'p0.roll_in_frames = p0.pl_onset_det;');
+verifyNotEmpty(tc, i0);
+verifyLessThan(tc, i0(1), strfind(src, 'p = p0; p.active_threat = ''none''; p.seed = [];'));
+verifyLessThan(tc, i0(1), strfind(src, 'p = p0; p.active_threat = cfg.name;'));
+verifyEmpty(tc, regexp(src, 'roll_in_frames = \[\]', 'once'));
 q = p; q.active_threat = 'none'; q.quiet_build = true; mdl = 'UAV_GCS_Threat_Link';
 evalc('build_threat_model(q)');
 d = link_seed(mdl, 3200002, 300, struct('ebno', 9, 'alt_m', NaN, 'k_sig_db', NaN));
@@ -3947,6 +3972,10 @@ verifyEqual(tc, sort(floor(n * (gl.rho - p.corr_range(1)) / diff(p.corr_range)))
 verifyTrue(tc, all(arrayfun(@(i) keep(gl.seed(i), gl.speed(i), gl.alt(i), gl.ksig(i), gl.aoa1(i), gl.rho(i)), 1:n)));
 verifyEqual(tc, pool_geometries(s, 14, 12 + (1:12), vsh, p, lhs, 1, sel), gl);   % reproducible
 verifyEqual(tc, sum(il.tries), il.j);
+se = sel; se.j0 = il.j;                                                % the check pools' count: the next candidates, unstratified
+[ge, ie] = pool_geometries(s, 14, 12 + (1:12), vsh, p, [], 1, se);
+verifyEqual(tc, sum(ie.tries), ie.j - il.j);
+verifyTrue(tc, all(isnan(ge.alt)) && all(ge.speed >= vsh(1) & ge.speed <= vsh(2)));
 sel.floor = @(a) Inf; sel.jmax = 50;                                    % no speed reaches it: no shadowing flight claimed
 verifyError(tc, @() pool_geometries(s, 14, 12 + (1:12), vsh, p, lhs, 1, sel), ?MException);
 q6 = p; q6.shadow_db = 6; v6 = [shadow_speed_floor(shadow_roll_band(6, q6), q6), q6.speed_kmh_max];
@@ -3958,6 +3987,12 @@ verifyEqual(tc, pool_geometries(1, 14, 1:12, v6, q6, 7100103, 1, s6), g6);
 for f = {'build_policy_pools', 'build_check_pools'}
     verifyNotEmpty(tc, strfind(fileread(which(f{1})), '''floor'', @(a) shadow_alt_floor(a, eb, ps)'), f{1});
 end
+src = fileread(which('build_policy_pools'));
+verifyNotEmpty(tc, strfind(src, '[~, ie] = pool_geometries(s, b, 1:N_COUNT, vshd(gi, :), p0, [], 1, sel);'));
+verifyNotEmpty(tc, strfind(src, 'SH.count(gi, :, s) = [sum(ie.tries), N_COUNT];'));
+src = fileread(which('build_check_pools'));
+verifyNotEmpty(tc, strfind(src, '[~, ie] = pool_geometries(s, BLOCK, gpos{k}, vshd(k, :), p0, [], FAM, se);'));
+verifyNotEmpty(tc, strfind(src, 'SH.count(k, :, s) = [sum(ie.tries), N_GEO];'));
 % the model: the shadowing is on the air on a kept flight, never on a skipped one
 p.quiet_build = true; mdl = 'UAV_GCS_Threat_Link';
 evalc('build_threat_model(p)');
@@ -4044,6 +4079,11 @@ verifyEqual(tc, env, share * (161 - 28.8) / 161, 'AbsTol', 1e-12);
 verifyNotEmpty(tc, strfind(txt, 'conditioned on such a geometry'));
 verifyNotEmpty(tc, strfind(txt, '15.5/20 dB'));
 verifyEmpty(tc, shadow_note(struct(), 1, 3));
+SH.count = cat(3, [200 30], [300 30]);                                 % the share from the unstratified count, whatever the splits read
+[txt, share, env] = shadow_note(SH, [3 5], [3 12]);
+verifyEqual(tc, share, [30 / 200, 30 / 300], 'AbsTol', 1e-12);
+verifyEqual(tc, env, share * (161 - 28.8) / 161, 'AbsTol', 1e-12);
+verifyNotEmpty(tc, strfind(txt, 'shadow_alt_floor.m'));
 end
 
 %% ---------- D85 obs: the idle time, the window cues, the per-cycle labels ----------
