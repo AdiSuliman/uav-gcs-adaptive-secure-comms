@@ -18,9 +18,12 @@
 % nearest desktop proxy of a small on-board computer (Tariq et al.: a real-time
 % claim needs measured wall-clock time); it is not a measurement on UAV hardware.
 % Reported: median and 95th percentile in ms per component and per cycle, every
-% device, and the frame duration for reference. LAT keeps the identity of what was timed,
-% the detector (det_id, detector_id.m) and the deployed policy (policy_stamp.m), so the
-% KPIs read a latency of another detector or policy as STALE (result_status.m).
+% device, and the frame duration for reference. The machine's load is logged before and
+% after the timings (machine_load.m: CPU load, other MATLAB processes), in latency.txt and
+% beside KPI 7: a concurrent load only slows the cycle. LAT keeps the identity of what
+% was timed, the detector (det_id, detector_id.m) and the deployed policy
+% (policy_stamp.m), so the KPIs read a latency of another detector or policy as STALE
+% (result_status.m).
 %
 % Output: results/latency.txt, results/latency.mat
 
@@ -76,6 +79,7 @@ nF = numel(F);
 fprintf('%d frames from %d threat runs at %g dB\n', nF, numel(THREATS), EBNO);
 
 %% 2. Timed cycles, one device at a time
+ld0 = machine_load();
 names = {'spectrogram', 'features', 'detector GPU', 'detector CPU', 'DQN policy', 'rule policy', 'deployed policy'};
 devs = {'cpu', 'cpu1'}; if gpu, devs = {'gpu', 'cpu', 'cpu1'}; end
 T = struct();
@@ -111,6 +115,7 @@ for di = 1:numel(devs)
         'rule', sum(tm(1:n, 1:3), 2) + tr(1:n), 'dep', sum(tm(1:n, 1:3), 2) + tp(1:n));
 end
 maxNumCompThreads(nt0);
+ld1 = machine_load();
 p95 = @(x) quant(x, 0.95);
 dsel = 'cpu'; if gpu && p95(T.gpu.dep) < p95(T.cpu.dep), dsel = 'gpu'; end   % detector device used in the cycle
 jd = 4; if strcmp(dsel, 'gpu'), jd = 3; end
@@ -135,6 +140,8 @@ LAT = struct('names', {names}, 'median_ms', median(tm), 'p95_ms', p95(tm), ...
         'total_dep_median_ms', median(T.cpu1.dep), 'total_dep_p95_ms', p95(T.cpu1.dep), ...
         'detector_median_ms', median(T.cpu1.tm(:, 3)), 'detector_p95_ms', p95(T.cpu1.tm(:, 3))), ...
     'score', D.ood.score, 'det_id', DET_ID, 'policy_stamp', policy_stamp(Q), 'generated', datestr(now));
+LAT.load = struct('before', ld0, 'after', ld1);
+LAT.load_text = load_text(LAT.load);
 if ~isempty(oth)
     LAT.other = struct('device', device_name(strcmp(oth{1}, 'gpu')), 'total_dqn_median_ms', median(T.(oth{1}).dqn), ...
         'total_dqn_p95_ms', p95(T.(oth{1}).dqn));
@@ -163,6 +170,7 @@ rep{end+1} = sprintf('%-16s %10.3f %10.3f   (whole cycle on one CPU core; detect
 rep{end+1} = sprintf('Frame duration %.3f ms: one decision per %d frames at the p95 latency.', LAT.frame_ms, ...
     ceil(LAT.total_dep_p95_ms / LAT.frame_ms));
 rep{end+1} = sprintf('Timed: detector %s, deployed policy %s (result_status.m checks them).', LAT.det_id, LAT.policy_stamp);
+rep{end+1} = LAT.load_text;
 if ~exist('results', 'dir'), mkdir('results'); end
 fid = fopen('results/latency.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('\n%s\n', rep{:});
@@ -188,4 +196,16 @@ end
 
 function s = device_name(gpu)
 if gpu, g = gpuDevice; s = ['GPU ' g.Name]; else, s = 'CPU'; end
+end
+
+function s = load_text(L)
+% The machine's load logged with the timings (machine_load.m); a load only slows the cycle.
+s = sprintf(['Timed with the machine''s load before / after: CPU %s / %s %%, other MATLAB processes %s / %s. ' ...
+    'A concurrent load only slows the cycle: a pass under load holds on an idle machine, a fail under load is ' ...
+    'measured again on an idle machine (run_stage(''LAT'')).'], num_txt(L.before.cpu_pct), num_txt(L.after.cpu_pct), ...
+    num_txt(L.before.n_matlab - 1), num_txt(L.after.n_matlab - 1));
+end
+
+function s = num_txt(v)
+if isnan(v), s = 'n/a'; else, s = sprintf('%g', round(v)); end
 end

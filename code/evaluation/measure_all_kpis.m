@@ -316,6 +316,7 @@ if isfile(F.pol)
             Lt.total_dep_p95_ms, Lt.deployed, Lt.total_dqn_median_ms, Lt.total_dqn_p95_ms, Lt.total_rule_median_ms, ...
             Lt.total_rule_p95_ms);
         if sl.stale, det{end+1} = ['STALE latency: ' sl.why ' (rerun LAT)']; end
+        if isfield(Lt, 'load_text'), det{end+1} = Lt.load_text; end   % the machine's load at the timings
         det{end+1} = sprintf('components (median ms): %s', strjoin(cellfun(@(n, v) sprintf('%s %.2f', n, v), Lt.names, ...
             num2cell(Lt.median_ms), 'UniformOutput', false), ', '));
         if isfield(Lt, 'score')

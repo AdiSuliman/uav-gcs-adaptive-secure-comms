@@ -36,6 +36,131 @@ verifyGreaterThan(tc, numel(f), 50);
 verifyEmpty(tc, bad, strjoin(bad, ', '));
 end
 
+function test_parallel_turn_owner(tc)
+% The parallel turn is held only by a running MATLAB session under the recorded id that
+% started before the turn file was written: this session's fresh turn is held; a file
+% dated a minute before this session started, yet after the computer's last start (as
+% after a Fast Startup power-on), or the id of a process of another image (4, the
+% system), is free and taken over; a session that waits prints the holder every hour.
+assumeTrue(tc, ispc);
+f = [tempname '.txt']; me = feature('getpid');
+fid = fopen(f, 'w'); fprintf(fid, '%d', me); fclose(fid);
+verifyEqual(tc, parallel_turn('owner', f), me);
+[~, out] = system(sprintf(['powershell -NoProfile -Command "$e = [datetime]''1970-01-01''; ' ...
+    '[long]((Get-Process -Id %d).StartTime.ToUniversalTime() - $e).TotalMilliseconds; ' ...
+    '[long]((Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime() - $e).TotalMilliseconds"'], me));
+t = str2double(strsplit(strtrim(out)));                 % this session's start, the computer's last start [ms]
+assertNumElements(tc, t, 2);
+assumeGreaterThan(tc, t(1) - 60e3, t(2));
+java.io.File(f).setLastModified(t(1) - 60e3);           % a minute before this session started
+verifyEmpty(tc, parallel_turn('owner', f));
+fid = fopen(f, 'w'); fprintf(fid, '%d', 4); fclose(fid);
+assertEmpty(tc, parallel_turn('owner', f));
+verifyEqual(tc, parallel_turn('take', f), me);
+verifyEqual(tc, str2double(fileread(f)), me);
+parallel_turn('give', f);
+verifyFalse(tc, isfile(f));
+verifyEmpty(tc, parallel_turn('owner', f));
+src = fileread(which('parallel_turn'));
+verifyNotEmpty(tc, strfind(src, 'toc(t0) >= 3600 * said'));
+verifyNotEmpty(tc, strfind(src, '*win64*'));
+end
+
+function test_latency_load_logged(tc)
+% KPI 7's timings carry the machine's load before and after them (machine_load.m), in
+% latency.txt and beside KPI 7, as the unknown-threat candidates' timings do.
+src = fileread(which('measure_latency'));
+a = strfind(src, 'ld0 = machine_load();'); b = strfind(src, 'ld1 = machine_load();');
+verifyNumElements(tc, a, 1); verifyNumElements(tc, b, 1);
+verifyGreaterThan(tc, a, strfind(src, '%% 2. Timed cycles'));
+verifyLessThan(tc, a, strfind(src, 'for di = 1:numel(devs)'));
+verifyGreaterThan(tc, b, strfind(src, 'T.(dv) = struct('));
+verifyLessThan(tc, b, strfind(src, '%% 3. Report'));
+verifyNotEmpty(tc, strfind(src, 'LAT.load = struct(''before'', ld0, ''after'', ld1);'));
+verifyNotEmpty(tc, strfind(src, 'rep{end+1} = LAT.load_text;'));
+verifyNotEmpty(tc, strfind(fileread(which('measure_all_kpis')), 'det{end+1} = Lt.load_text;'));
+end
+
+function test_gui_bundle_drops_stale(tc)
+% An optional result the export does not copy, missing or stale (result_status.m), leaves
+% no older copy in the bundle: the console shows none, never an older number.
+root = fullfile(tc.TestData.tmp, 'bundle_root'); tgt = fullfile(tc.TestData.tmp, 'bundle_target');
+mkdir(fullfile(root, 'data')); mkdir(fullfile(root, 'results'));
+params = struct('n_rx', 3); save(fullfile(root, 'params.mat'), 'params');
+x = 1;
+for f = {'trained_detector', 'trained_dqn', 'gui_norm_stats', 'ood_thresholds', 'fusion'}
+    save(fullfile(root, 'data', [f{1} '.mat']), 'x');
+end
+save(fullfile(root, 'results', 'eval_detector_metrics.mat'), 'x');           % current: exported
+save(fullfile(root, 'results', 'kpi_summary.mat'), 'x');                     % older than its latency: stale
+java.io.File(fullfile(root, 'results', 'kpi_summary.mat')).setLastModified(0);
+LAT = struct('n', 1); save(fullfile(root, 'results', 'latency.mat'), 'LAT'); % no identity: stale
+dst = fullfile(tgt, 'rx3'); mkdir(fullfile(dst, 'data')); mkdir(fullfile(dst, 'results'));
+y = 2;                                                                       % an older bundle
+old = {'results/latency.mat', 'results/kpi_summary.mat', 'results/policy_evaluation.mat', ...
+    'data/survivability_boundary.mat', 'results/eval_detector_metrics.mat'};
+for f = old, save(fullfile(dst, f{1}), 'y'); end
+w = warning('off', 'MATLAB:load:variableNotFound'); c = onCleanup(@() warning(w));
+verifyWarning(tc, @() export_gui_bundle(tgt, root), 'export_gui_bundle:stale');
+for f = old(1:4), verifyFalse(tc, isfile(fullfile(dst, f{1})), f{1}); end
+verifyEqual(tc, load(fullfile(dst, 'results', 'eval_detector_metrics.mat')), struct('x', 1));
+verifyTrue(tc, isfile(fullfile(dst, 'data', 'fusion.mat')));
+end
+
+function test_console_shadowing_rolls_in(tc)
+% The console flies airframe shadowing as the evaluated flights do: a drawn turn the UAV
+% rolls into (console_scenario.m) on flights selected as the pools select theirs
+% (console_flights.m, hides_antenna.m): no antenna hidden before the event's frame, one
+% hidden after it, none below the speed at which the level can occur; the live run, its
+% lead-in and the responses fly that flight; the episode pools carry the antennas' gains
+% and read the event's frame at the onset.
+p0 = base_params(); C = decision_config();
+DL = dataset_levels(); sev = struct();
+for t = 1:numel(DL), sev.(DL(t).name) = struct('param', DL(t).param, 'levels', DL(t).levels); end
+for th = {'airframe_shadowing', 'jamming+airframe_shadowing'}
+    p = console_scenario(p0, sev, th{1}, 0, 72);
+    verifyTrue(tc, p.yaw_random); verifyEqual(tc, p.roll_deg, 0);
+    [fl, why] = console_flights(p, 9, 72, 1000, 2);
+    verifyEmpty(tc, why); verifyNumElements(tc, fl.seed, 2);
+    verifyEqual(tc, [fl.k fl.nf], [C.event_frame C.event_run]);
+    verifyEqual(tc, str2double(fl.stop), (C.event_run - 1) * p.frame_duration, 'RelTol', 1e-6);
+    fd = 72 / 3.6 * p.carrier_freq / p.c_light;
+    for s = fl.seed
+        d = flight_draws(s, fd, p, fl.geo);
+        verifyGreaterThan(tc, d.roll_in(2), 0);                                 % rolls in
+        verifyEqual(tc, d.hidden(1:fl.k - 1), zeros(1, fl.k - 1));              % the lead-in hides nothing
+        verifyTrue(tc, any(d.hidden(fl.k:C.event_count) > 0));
+    end
+end
+p = console_scenario(p0, sev, 'airframe_shadowing', 0, 10);
+[fl, why] = console_flights(p, 9, 10, 1000, 1);
+verifyEmpty(tc, fl); verifyNotEmpty(tc, why);
+src = fileread(which('demo_gui'));
+verifyNotEmpty(tc, strfind(src, '[~, FL] = simRun(env, pl, snr_dB, fl);'));
+verifyNotEmpty(tc, strfind(src, '[out, F] = simRun(env, p, snr_dB, fl);'));
+verifyNotEmpty(tc, strfind(src, '[out2, F2] = simRun(env, p2, snr_dB + g_db, fl);'));
+verifyNotEmpty(tc, strfind(src, 'link_seed(env.modelName, fl.seed(1), p.fd_max, fl.geo);'));
+verifyNotEmpty(tc, strfind(src, 'F.gant = [F.gant; single(Fr.gain_ant(:, v)'')];'));
+verifyNotEmpty(tc, strfind(src, 'if isfinite(ev), k0 = ev - 2 - N_PRE; end'));
+verifyNotEmpty(tc, strfind(src, 'if ~isfield(P{1}, ''gant''), remove(M, kk{1}); end'));
+end
+
+function test_v3d_inject_resets_event(tc)
+% The 3D engine reads a flight from its event's frame only while it flies a rolling-in
+% one: a threat injected after shadowing that moves to a shared flight clears the flag.
+M = struct('split', 3, 'avail', 1:3);
+M.PP.scen = {'none', 'airframe_shadowing', 'jamming'};
+M.K.clean = 1; M.K.geo = cell(3, 3); M.K.geo(:, 3) = {[1 2]; [3 4]; [1 2]};
+M.K.ev = {[], [], [NaN NaN 11 11]};
+G = struct('r', 1, 'events0', {{}});
+G.E = struct('scn', [1 1], 'onset', [inf inf], 't', [5 5], 'follow', [false false], 'unk', [false false], ...
+    'fdelay', [3 3], 'hop_live', [-inf -inf], 'r', [1 1], 'ev', [false false], 'k0', [2 2]);
+G = v3d_engine('inject', G, M, 'airframe_shadowing', false, false);
+verifyEqual(tc, G.r, 3); verifyEqual(tc, G.E.ev, [true true]); verifyEqual(tc, G.E.k0, [4 4]);
+G = v3d_engine('inject', G, M, 'jamming', false, false);
+verifyEqual(tc, G.r, 1); verifyEqual(tc, G.E.ev, [false false]);
+end
+
 %% ---------- configurations and countermeasures ----------
 function test_actions_one_per_domain(tc)
 A = policy_actions();
