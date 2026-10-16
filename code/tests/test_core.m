@@ -37,15 +37,22 @@ verifyEmpty(tc, bad, strjoin(bad, ', '));
 end
 
 function test_parallel_turn_owner(tc)
-% The parallel turn is held only by a running MATLAB process under the recorded id, with
-% the turn file written since the computer last started: this session's fresh turn is
-% held; a file from before the last start, or the id of a process of another image (4,
-% the system), is free and taken over; a session that waits prints the holder every hour.
+% The parallel turn is held only by a running MATLAB session under the recorded id that
+% started before the turn file was written: this session's fresh turn is held; a file
+% dated a minute before this session started, yet after the computer's last start (as
+% after a Fast Startup power-on), or the id of a process of another image (4, the
+% system), is free and taken over; a session that waits prints the holder every hour.
 assumeTrue(tc, ispc);
 f = [tempname '.txt']; me = feature('getpid');
 fid = fopen(f, 'w'); fprintf(fid, '%d', me); fclose(fid);
 verifyEqual(tc, parallel_turn('owner', f), me);
-java.io.File(f).setLastModified(0);                     % written before the last start
+[~, out] = system(sprintf(['powershell -NoProfile -Command "$e = [datetime]''1970-01-01''; ' ...
+    '[long]((Get-Process -Id %d).StartTime.ToUniversalTime() - $e).TotalMilliseconds; ' ...
+    '[long]((Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime() - $e).TotalMilliseconds"'], me));
+t = str2double(strsplit(strtrim(out)));                 % this session's start, the computer's last start [ms]
+assertNumElements(tc, t, 2);
+assumeGreaterThan(tc, t(1) - 60e3, t(2));
+java.io.File(f).setLastModified(t(1) - 60e3);           % a minute before this session started
 verifyEmpty(tc, parallel_turn('owner', f));
 fid = fopen(f, 'w'); fprintf(fid, '%d', 4); fclose(fid);
 assertEmpty(tc, parallel_turn('owner', f));
@@ -56,7 +63,7 @@ verifyFalse(tc, isfile(f));
 verifyEmpty(tc, parallel_turn('owner', f));
 src = fileread(which('parallel_turn'));
 verifyNotEmpty(tc, strfind(src, 'toc(t0) >= 3600 * said'));
-verifyNotEmpty(tc, strfind(src, '/FI "IMAGENAME eq MATLAB.exe"'));
+verifyNotEmpty(tc, strfind(src, '*win64*'));
 end
 
 function test_latency_load_logged(tc)

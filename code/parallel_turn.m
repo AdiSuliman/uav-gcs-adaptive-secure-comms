@@ -7,17 +7,18 @@ function owner = parallel_turn(action, f)
 %   parallel_turn(action, f)         the same on the turn file f (default in tempdir)
 %   The two antenna profiles run side by side: their other stages overlap, their
 %   parallel simulations (6 workers each) take turns, so memory stays within limits.
-%   The turn is held only by a running MATLAB process under the recorded process id
-%   with the turn file written since this computer last started; a turn left by a session
-%   that no longer runs, or by a process id reused after a restart, is taken over.
+%   The turn is held only by a running MATLAB session (its win64 process, not the
+%   launcher) under the recorded process id that started before the turn file was
+%   written; a turn left by a session that no longer runs, or a process id reused by a
+%   later process (after any restart, Fast Startup included), is taken over.
 if nargin < 2 || isempty(f), f = fullfile(tempdir, 'uav_gcs_parallel_turn.txt'); end
 me = feature('getpid');
 owner = [];
 switch action
     case 'take'
-        boot = boot_time(); t0 = tic; said = 0;
+        t0 = tic; said = 0;
         while true
-            owner = holder(f, boot);
+            owner = holder(f);
             if isempty(owner) || owner == me
                 fid = fopen(f, 'w'); fprintf(fid, '%d', me); fclose(fid);
                 pause(2);
@@ -38,19 +39,18 @@ switch action
         delete(gcp('nocreate'));
         if read_owner(f) == me, delete(f); end
     case 'owner'
-        owner = holder(f, boot_time());
+        owner = holder(f);
     otherwise
         error('parallel_turn: action ''take'', ''give'' or ''owner''');
 end
 end
 
-function owner = holder(f, boot)
-% The recorded process while it holds the turn: a MATLAB process under that id, the file
-% written after the last start of the computer; [] otherwise.
+function owner = holder(f)
+% The recorded process while it holds the turn: a MATLAB session under that id that
+% started before the turn file was written; [] otherwise. Times in UTC milliseconds.
 owner = read_owner(f);
 if isempty(owner), return; end
-d = dir(f);
-if isempty(d) || d.datenum < boot || ~matlab_alive(owner), owner = []; end
+if ~(matlab_start(owner) <= java.io.File(f).lastModified()), owner = []; end
 end
 
 function owner = read_owner(f)
@@ -61,17 +61,11 @@ if isfile(f)
 end
 end
 
-function alive = matlab_alive(pid)
-% A process with this id runs the MATLAB image.
-[~, out] = system(sprintf('tasklist /FI "PID eq %d" /FI "IMAGENAME eq MATLAB.exe" /NH', pid));
-alive = contains(out, sprintf(' %d ', pid));
-end
-
-function t = boot_time()
-% Last start of this computer as a datenum (local time); -Inf when not reported.
-t = -Inf;
-[st, out] = system(['powershell -NoProfile -Command "(Get-CimInstance Win32_OperatingSystem).LastBootUpTime' ...
-    '.ToString(''yyyy-MM-dd HH:mm:ss'')"']);
-s = regexp(out, '\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}', 'match', 'once');
-if st == 0 && ~isempty(s), t = datenum(s, 'yyyy-mm-dd HH:MM:SS'); end
+function t = matlab_start(pid)
+% Start of the MATLAB session (win64 image) under this process id in UTC milliseconds
+% since 1970; NaN when no such process runs.
+[st, out] = system(sprintf(['powershell -NoProfile -Command "$p = Get-Process -Id %d -ErrorAction SilentlyContinue; ' ...
+    'if ($p -and $p.Path -like ''*win64*'') { [long]($p.StartTime.ToUniversalTime() - [datetime]''1970-01-01'').TotalMilliseconds }"'], pid));
+t = NaN;
+if st == 0, t = str2double(regexp(out, '^\s*\d+\s*$', 'match', 'once')); end
 end
