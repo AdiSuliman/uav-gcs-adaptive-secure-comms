@@ -19,9 +19,10 @@
 % Grid: monitor (alarm definition and m-of-n confirmation, CFG.monitors,
 % policy_monitor.m; Barajas et al.) x threshold of the drop alarm in the form
 % choose_drop_threshold.m chose on validation (drop_alarm: the monitors' 'class_drop' reads
-% as that form): the 3-cycle median window at its train-pool threshold and DROP_STEPS dB
-% below it, above the moving-away floor it records, or the window-limited CUSUM at its
-% validation threshold and the next more sensitive ones of its grid, as many as DROP_STEPS
+% as that form): the 3-cycle median window at its threshold (validation, or the train pools'
+% without an admissible one) and DROP_STEPS dB below it, above the moving-away floor it
+% records, or the window-limited CUSUM at its validation threshold and the next more
+% sensitive ones of its grid, as many as DROP_STEPS
 % x false-switch penalty of the TRAINING reward (CFG.fa_penalty_grid) x
 % CFG.dqn_gammas x CFG.dqn_seeds. Every run keeps the checkpoint with the best
 % recovery on its own validation episodes. All runs are then compared on every
@@ -90,9 +91,11 @@ FA_BOUND = 0.05;                         % one-sided 95% bound of the clean-link
 DROP_DB = [];                            % drop alarm threshold of 'class_drop'
 DROP_FLOOR = 0;                          % moving away over the monitor's window (choose_drop_threshold.m)
 DROP_MODE = 'class_drop';                % form of the drop alarm (choose_drop_threshold.m, on validation)
+DROP_FROM = 'train pools';               % where the median window's threshold was chosen
 if isfile('data/drop_threshold.mat')
     Dd = load('data/drop_threshold.mat'); DROP_DB = Dd.drop_db;
     if isfield(Dd, 'floor_db'), DROP_FLOOR = Dd.floor_db; end
+    if isfield(Dd, 'drop_from'), DROP_FROM = Dd.drop_from; end
     if isfield(Dd, 'drop_alarm') && strcmp(Dd.drop_alarm, 'class_cusum')
         DROP_MODE = Dd.drop_alarm; DROP_DB = Dd.cusum_db; THC = Dd.THC;
     end
@@ -141,6 +144,7 @@ if strcmp(DROP_MODE, 'class_cusum')       % the validation threshold and the nex
     j = find(THC == DROP_DB, 1); DROPS = unique(THC(max(1, j - (0:numel(DROP_STEPS) - 1))), 'stable');
 end
 if isempty(DROPS), DROPS = NaN; end
+DU = drop_unit(DROP_MODE);               % unit of the drop thresholds
 tab = policy_table(PP, K);
 
 %% 4. Training: monitor x drop threshold x false-switch penalty x discount factor x seeds
@@ -159,15 +163,16 @@ for ai = 1:numel(ALARMS)
         base(end+1) = struct('alarm', ALARMS{ai}, 'drop', dd, 'rule_rec', dqn_recovered(Rr), 'rule_ret', mean(Rr.ret), ...
             'rule_fa_w', rw, 'rule_n_w', rn, 'rule_sw', rsw, 'tab_rec', dqn_recovered(Rt), 'tab_ret', mean(Rt.ret), ...
             'tab_fa_w', tw); %#ok<SAGROW>
-        fprintf('=== Monitor ''%s'', drop %.1f dB: rule+esc recovered %.1f%%, return %.3f, FA %s | table recovered %.1f%%, return %.3f\n', ...
-            ALARMS{ai}, dd, 100*base(end).rule_rec, base(end).rule_ret, pct_txt(rw), 100*base(end).tab_rec, base(end).tab_ret);
+        fprintf('=== Monitor %s, drop %.1f %s: rule+esc recovered %.1f%%, return %.3f, FA %s | table recovered %.1f%%, return %.3f\n', ...
+            mon_txt(ALARMS{ai}, DROP_MODE), dd, DU, 100*base(end).rule_rec, base(end).rule_ret, pct_txt(rw), ...
+            100*base(end).tab_rec, base(end).tab_ret);
         for fi = 1:numel(FA_PEN)
             fp = FA_PEN(fi); cs = COST_SCALE(fi); ss = SW_SCALE(fi);
             Kt = K; Kt.FA = fp; Kt.cost = cs * K.cost; Kt.SW = ss * K.SW;   % training reward only
             for g = GAMMAS
                 for k = 1:N_SEEDS
-                    fprintf(['--- monitor ''%s'', drop %.1f dB, false-switch penalty %d, costs x%.1f, switch x%.1f, ' ...
-                        'gamma %.2f, seed %d ---\n'], ALARMS{ai}, dd, fp, cs, ss, g, SEEDS(k));
+                    fprintf(['--- monitor %s, drop %.1f %s, false-switch penalty %d, costs x%.1f, switch x%.1f, ' ...
+                        'gamma %.2f, seed %d ---\n'], mon_txt(ALARMS{ai}, DROP_MODE), dd, DU, fp, cs, ss, g, SEEDS(k));
                     Hg = H; Hg.gamma = g;
                     [ag, curve, lossc, best_ep] = dqn_train_run(Hg, PPc, Kt, K, norm_in, SEEDS(k), nS, SPLIT_TRAIN, SPLIT_VAL);
                     V = dqn_eval_batches('dqn_esc', PPc, K, val_spec, ag, struct(), 5000, SPLIT_VAL);
@@ -228,9 +233,9 @@ FR = false_change_rate(base(ir).rule_sw, H.T, 1:numel(base(ir).rule_sw), CD.peri
 rep = {};
 rep{end+1} = '=== DQN TRAINING ===';
 rep{end+1} = sprintf(['Generated: %s | Double DQN + shield, state history %d cycles, hidden %s, replay %d, target every ' ...
-    '%d updates, lr %.0e -> %.0e, %d episodes x %d cycles | monitor %s x drop %s dB x penalty %s x gamma %s x %d seeds'], ...
+    '%d updates, lr %.0e -> %.0e, %d episodes x %d cycles | monitor %s x drop %s %s x penalty %s x gamma %s x %d seeds'], ...
     datestr(now), CD.hist, mat2str(H.hidden), H.buffer, H.target_every, H.lr, H.lr_end, H.episodes, H.T, ...
-    strjoin(ALARMS, '/'), mat2str(DROPS), mat2str(FA_PEN), mat2str(GAMMAS), N_SEEDS);
+    strjoin(ALARMS, '/'), mat2str(DROPS), DU, mat2str(FA_PEN), mat2str(GAMMAS), N_SEEDS);
 rep{end+1} = 'False-switch penalty and cost scales: training reward only; validation and test use the standard reward.';
 rep{end+1} = sprintf(['Runs scored as deployed: the DQN with escalation. Follower jammers re-acquire the channel ' ...
     '%d-%d cycles after a hop (training and validation).'], CD.fdelay(1), CD.fdelay(2));
@@ -246,7 +251,8 @@ if ~isempty(DROP_DB) && strcmp(DROP_MODE, 'class_cusum')
         'validation threshold %.1f dB^2'], DROP_DB);
 elseif ~isempty(DROP_DB)
     rep{end+1} = sprintf(['''class_drop'': drop alarm (and the path_loss class) after an Eb/N0 drop >= the run''s ' ...
-        'threshold; train-pool threshold %.1f dB, moving-away floor %.2f dB (data/drop_threshold.mat)'], DROP_DB, DROP_FLOOR);
+        'threshold; deployed threshold %.1f dB (%s), moving-away floor %.2f dB (data/drop_threshold.mat)'], DROP_DB, DROP_FROM, ...
+        DROP_FLOOR);
 end
 rep{end+1} = sprintf('%-46s %10s %28s %10s %9s %14s %12s', 'run', 'recovered', 'weakest threat', 'restored', 'return', ...
     'FA indep.', 'switches/ep');
@@ -261,17 +267,17 @@ end
 rep{end+1} = '';
 rep{end+1} = 'Baselines on the same validation episodes:';
 for ai = 1:numel(base)
-    rep{end+1} = sprintf(['  %-12s drop %.1f dB  rule + escalation: recovered %.1f%%, return %.3f, FA %s | table: ' ...
-        'recovered %.1f%%, return %.3f, FA %s'], base(ai).alarm, base(ai).drop, 100*base(ai).rule_rec, base(ai).rule_ret, ...
+    rep{end+1} = sprintf(['  %-12s drop %.1f %s  rule + escalation: recovered %.1f%%, return %.3f, FA %s | table: ' ...
+        'recovered %.1f%%, return %.3f, FA %s'], base(ai).alarm, base(ai).drop, DU, 100*base(ai).rule_rec, base(ai).rule_ret, ...
         pct_txt(base(ai).rule_fa_w), 100*base(ai).tab_rec, base(ai).tab_ret, pct_txt(base(ai).tab_fa_w)); %#ok<SAGROW>
 end
-rep{end+1} = sprintf(['Selected: monitor ''%s'', drop %.1f dB, false-switch penalty %d, running costs x%.1f, switching ' ...
+rep{end+1} = sprintf(['Selected: monitor %s, drop %.1f %s, false-switch penalty %d, running costs x%.1f, switching ' ...
     'x%.1f, gamma %.2f, seed %d (%s). Gate (recovery >= rule + escalation with the same monitor, false-alarm bound ' ...
-    '<= %.0f%%): %s'], alarm_sel, drop_sel, fa_pen_sel, cs_sel, ss_sel, gamma_sel, runs(best).seed, sel_rule, ...
-    100*FA_BOUND, ternary(gate, 'PASS', 'FAIL'));
+    '<= %.0f%%): %s'], mon_txt(alarm_sel, DROP_MODE), drop_sel, DU, fa_pen_sel, cs_sel, ss_sel, gamma_sel, ...
+    runs(best).seed, sel_rule, 100*FA_BOUND, ternary(gate, 'PASS', 'FAIL'));
 rep{end+1} = sprintf(['Fallback, rule + escalation with its own monitor (the best recovery among the settings whose ' ...
-    'false-alarm bound is <= %.0f%%%s): monitor ''%s'', drop %.1f dB, recovered %.1f%%, FA %s, bound %s'], 100*FA_BOUND, ...
-    ternary(rok, '', '; none is: the lowest bound'), rule_sel.alarm, rule_sel.drop, 100*rule_sel.rec, ...
+    'false-alarm bound is <= %.0f%%%s): monitor %s, drop %.1f %s, recovered %.1f%%, FA %s, bound %s'], 100*FA_BOUND, ...
+    ternary(rok, '', '; none is: the lowest bound'), mon_txt(rule_sel.alarm, DROP_MODE), rule_sel.drop, DU, 100*rule_sel.rec, ...
     fa_txt(rule_sel.fa_w, rule_sel.n_w), pct_txt(rule_sel.fa_upper));
 rep{end+1} = sprintf('Deployed: %s | false-alarm bound met on validation: %s%s', ternary(strcmp(deployed, 'dqn_esc'), ...
     'the selected DQN + escalation', 'rule + escalation (fallback)'), ternary(fa_bound_met, 'YES', 'NO'), ...
@@ -437,7 +443,7 @@ if ~isequal(key, k)
     key = k; cache = struct('W', W, 'Kw', link_env('tables', W));
 end
 PPw = PP;
-for f = {'pools', 'runs', 'event_frame', 'speed', 'cell_geo'}   % the split's per-geometry fields
+for f = {'pools', 'runs', 'event_frame', 'speed', 'cell_geo', 'cov', 'alt', 'ksig', 'ref_geo'}   % the split's per-geometry fields
     if isfield(cache.W, f{1}), PPw.(f{1}) = cache.W.(f{1}); end
 end
 Kw = cache.Kw;
@@ -470,6 +476,13 @@ end
 
 function out = ternary(c, a, b)
 if c, out = a; else, out = b; end
+end
+
+function t = mon_txt(name, drop_mode)
+% A monitor of the grid as reported: its label, and the deployed form of its drop alarm
+% when 'class_drop' reads as another.
+t = sprintf('''%s''', name);
+if ~strcmp(drop_mode, 'class_drop'), t = sprintf('''%s'' (%s)', name, strrep(name, 'class_drop', drop_mode)); end
 end
 
 function [mode, confirm] = monitor(name, drop_mode)

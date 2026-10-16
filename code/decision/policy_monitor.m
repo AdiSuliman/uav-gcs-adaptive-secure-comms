@@ -46,9 +46,11 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   rise of the link; the degradation test keeps the estimate as measured.
 %   'class_cusum': as 'class_drop', the drop alarm raised when the window-limited CUSUM of
 %   every cycle's drop against the reference (drop_cusum.m: reference less the cycle's
-%   estimate, the change's size estimated over the cycles before) reaches PP.drop_db; the
-%   reference takes only cycles without an alarm and with the statistic at 0, so it keeps
-%   the level before a change while the evidence of one builds up.
+%   estimate, the change's size estimated over the cycles before, bounded at twice
+%   PP.drop_db so the alarm clears on the same evidence in reverse) reaches PP.drop_db; the
+%   reference takes the cycles without an alarm of an excursion of the statistic above 0 only
+%   once it has returned to 0 without the drop alarm (drop_ref.m), so it keeps the level
+%   before a change while the evidence of one builds up.
 %   An alarm is CONFIRMED when at least m of the last n cycles carried
 %   one (M-of-N binary integration, PP.confirm, default C.confirm).
 %   The monitor also keeps the last C.hist observation vectors of policy_state.m,
@@ -78,7 +80,7 @@ switch cmd
             'deg_n', zeros(1, NE), 'conf_n', zeros(1, NE), 'alarm', false(NE, 8), 'ebno', nan(NE, 3), ...
             'ref', nan(NE, 10), 'hist', [], 'wp', [], 'wg', [], 'wf', [], 'wu', [], 'wn', zeros(1, NE), ...
             'unk_now', false(1, NE), 'pend', false(1, NE), 'wi', [], 'wb', [], 'cs', zeros(NE, 1), ...
-            'dx', nan(NE, C.cusum_win));
+            'dx', nan(NE, C.cusum_win), 'rp', nan(NE, 10), 'rx', false(NE, 1));
         M = [];
     case 'update'
         [mem, M] = update(C, varargin{:});
@@ -161,7 +163,7 @@ switch mode
         if strcmp(mode, 'class_cusum')
             if ~isfield(mem, 'cs'), mem.cs = zeros(numel(eg), 1); mem.dx = nan(numel(eg), C.cusum_win); end
             dc = ref - eg;                                              % this cycle's drop
-            mem.cs = drop_cusum(dc, mem.cs, mem.dx); mem.dx = [mem.dx(:, 2:end), dc];
+            mem.cs = drop_cusum(dc, mem.cs, mem.dx, dd); mem.dx = [mem.dx(:, 2:end), dc];
             M.drop_alarm = mem.cs' >= dd;
         else
             M.drop_alarm = M.drop >= dd;
@@ -172,8 +174,12 @@ switch mode
         M.alarm = hostile | M.degraded;
 end
 q = ~M.alarm;
-if strcmp(mode, 'class_cusum'), q = q & mem.cs' == 0; end   % the reference before a change building up
-mem.ref(q, :) = [mem.ref(q, 2:end), eg(q)];
+if strcmp(mode, 'class_cusum')                                  % the reference before a change building up
+    if ~isfield(mem, 'rp'), mem.rp = nan(size(mem.ref)); mem.rx = false(numel(eg), 1); end
+    [mem.ref, mem.rp, mem.rx] = drop_ref(mem.ref, mem.rp, mem.rx, eg, q(:), mem.cs, M.drop_alarm(:));
+else
+    mem.ref(q, :) = [mem.ref(q, 2:end), eg(q)];
+end
 mem.alarm = [mem.alarm(:, 2:end), M.alarm(:)];
 assert(cf(2) <= size(mem.alarm, 2), 'policy_monitor: confirmation over %d cycles exceeds the alarm memory', cf(2));
 M.confirmed = sum(mem.alarm(:, end-cf(2)+1:end), 2)' >= cf(1);

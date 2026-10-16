@@ -82,7 +82,7 @@ for r = 1:numel(ur)
     if ~use_drop || ~has_pl || isempty(jc), continue; end
     ref = median(e(jc(max(1, end - 9):end)));
     if strcmp(mode, 'class_cusum')                       % its window from the lead-in's last cycles
-        dr = seq_cusum(ref - e(jp), ref - e(jc), C.cusum_win) >= dd;
+        dr = seq_cusum(ref - e(jp), ref - e(jc), C.cusum_win, dd) >= dd;
     else
         dr = arrayfun(@(q) ref - median(e(max(j(1), q - 2):q)) >= dd, jp(:)');
     end
@@ -91,14 +91,14 @@ for r = 1:numel(ur)
 end
 end
 
-function W = seq_cusum(d, dl, w)
-% drop_cusum.m over the drops d of the read cycles, its window filled by the lead-in's last
-% w drops dl, the statistic from 0 at the first read cycle.
+function W = seq_cusum(d, dl, w, thr)
+% drop_cusum.m (bounded at 2 thr) over the drops d of the read cycles, its window filled by
+% the lead-in's last w drops dl, the statistic from 0 at the first read cycle.
 d = d(:)'; dl = dl(:)';
 dx = [nan(1, w - min(numel(dl), w)), dl(max(1, end - w + 1):end)];
 W = zeros(size(d)); w0 = 0;
 for t = 1:numel(d)
-    w0 = drop_cusum(d(t), w0, dx); W(t) = w0;
+    w0 = drop_cusum(d(t), w0, dx, thr); W(t) = w0;
     dx = [dx(2:end), d(t)];
 end
 end

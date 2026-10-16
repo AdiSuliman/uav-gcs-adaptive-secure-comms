@@ -3365,10 +3365,11 @@ end
 function test_clean_split_event_frames(tc)
 % A split whose geometries hold rolling-in flights (event frames) replaced by a clean pool
 % larger than the split, as C2, C2e, the edge map and the diagnostics replace it
-% (clean_split.m): every per-geometry field follows the clean pool's runs, the tables build
-% with either reference, and no clean geometry is read as a rolling-in one (no event, the
-% episode on the clean pool's own run). Runs replaced without their event frames stop
-% link_env at once.
+% (clean_split.m): every per-geometry field follows the clean pool's runs (event frames,
+% speeds, per-flight draws, the clean cell's geometries, no reference-only geometry), the
+% tables build with either reference, and no clean geometry is read as a rolling-in one (no
+% event, the episode on the clean pool's own run). Runs replaced without their event frames
+% stop link_env at once.
 A = policy_actions(); nA = numel(A); fn = link_features('names'); n = 20;
 mk = @(runs) struct('ber', zeros(n * numel(runs), 1), 'fer', zeros(n * numel(runs), 1, 'single'), ...
     'run', repelem(runs(:), n), 'probs', repmat([1 0], n * numel(runs), 1), 'maha', ones(n * numel(runs), 1), ...
@@ -3377,9 +3378,12 @@ PP = struct('actions', {A}, 'scen', {{'none', 'airframe_shadowing'}}, 'ebno', 9,
     'event_frame', {{nan(1, 3), [NaN 11 11]}}, 'F_SUB', n, 'classes', {{'none', 'airframe_shadowing'}}, ...
     'feat_names', {fn}, 'maha_thr', 0, 'clean', 1e-6, 'clean_fer', 0, 'gp', ones(1, nA), 'bw', ones(1, nA), ...
     'pw', ones(1, nA), 'sps', 4, 'bps', 2, 'speed', {{ones(1, 3), ones(1, 3)}}, 'cell_geo', {{{1:3, 1:3}, {1:3, 2:3}}});
+cv = @(m, v) struct('alt_m', v * ones(1, m), 'k_sig', v + ones(1, m), 'yaw', zeros(1, m));
+PP.cov = {cv(3, 100), cv(3, 200)}; PP.alt = {100 * ones(1, 3), 200 * ones(1, 3)}; PP.ksig = {101 * ones(1, 3), 201 * ones(1, 3)};
+PP.ref_geo = {zeros(1, 0), 1};
 PP.pools = cell(2, 1, nA, 2);
 for sp = 1:2, for a = 1:nA, PP.pools{1, 1, a, sp} = mk(PP.runs{sp}); PP.pools{2, 1, a, sp} = mk(PP.runs{sp}); end, end
-CT = struct('runs', 401:407, 'n_geom', 7, 'speed', 50 * ones(1, 7));
+CT = struct('runs', 401:407, 'n_geom', 7, 'speed', 50 * ones(1, 7), 'cov', cv(7, 400));
 CT.pools = cell(1, 1, nA);
 for a = 1:nA, CT.pools{1, 1, a} = mk(CT.runs); end
 W = clean_split(PP, CT, 2);
@@ -3387,6 +3391,11 @@ verifyEqual(tc, W.runs{2}, CT.runs);
 verifyEqual(tc, W.event_frame{2}, nan(1, 7));
 verifyEqual(tc, W.event_frame{1}, PP.event_frame{1});
 verifyEqual(tc, [W.speed{2}; W.cell_geo{1}{2}], [CT.speed; 1:7]);
+verifyEqual(tc, {W.cov{2}, W.alt{2}, W.ksig{2}}, {CT.cov, CT.cov.alt_m, CT.cov.k_sig});
+verifyEmpty(tc, W.ref_geo{2});
+verifyEqual(tc, {W.cov{1}, W.alt{1}, W.ksig{1}, W.ref_geo{1}}, {PP.cov{1}, PP.alt{1}, PP.ksig{1}, PP.ref_geo{1}});
+W0 = clean_split(PP, rmfield(CT, {'cov', 'speed'}), 2);             % a clean pool without them: none of the old split's
+verifyEqual(tc, {W0.cov{2}, W0.alt{2}, W0.ksig{2}, W0.speed{2}}, {[], [], [], []});
 verifyEmpty(tc, W.pools{2, 1, 1, 2});
 for ref = {'mean', 'flight'}
     K = link_env('tables', W, ref{1});
@@ -3405,14 +3414,19 @@ for f = {'train_dqn', 'evaluate_policies', 'edge_map', 'diag_false_alarms', 'dia
     verifyNotEmpty(tc, strfind(src, 'clean_split(PP, CT, '), f{1});
     verifyEmpty(tc, regexp(src, 'runs\{(2|TEST)\} = CT\.runs', 'once'), f{1});
 end
+verifyNotEmpty(tc, strfind(fileread(which('train_dqn')), ...                % C2's cached clean world carries them all
+    'for f = {''pools'', ''runs'', ''event_frame'', ''speed'', ''cell_geo'', ''cov'', ''alt'', ''ksig'', ''ref_geo''}'));
 end
 
 function test_pool_checkpoint_resume(tc)
 % The pool builders keep every finished cell on disk under a key of everything its frames
 % depend on (pool_checkpoint.m): a build stopped part-way, with the next cell's write cut
 % off, resumes with the cells it holds, computes only the others, and gives the same result
-% as an uninterrupted build; a cell of another key (another detector) is computed again; the
-% output is written whole or not at all, and the cells are removed after it.
+% as an uninterrupted build; a cell of another key (another detector) is computed again; a
+% cell file whose result cannot be read (only its key on disk, or cut off as a power loss
+% leaves it) is computed again, and reading it stops the assembly naming it and removes it;
+% every file is flushed to the disk before its rename; the output is written whole or not at
+% all, and the cells are removed after it.
 keys = arrayfun(@(c) pool_checkpoint('key', {'v7-tag', 'det-1', 100 + (1:3), c}), 1:5, 'UniformOutput', false);
 verifyEqual(tc, numel(unique(keys)), 5);
 verifyEqual(tc, pool_checkpoint('key', {'v7-tag', 'det-1', 100 + (1:3), 2}), keys{2});
@@ -3427,11 +3441,24 @@ verifyEqual(tc, R1, R0);
 verifyEmpty(tc, dir(fullfile('part', '*.tmp.mat')));
 k2 = keys; k2{2} = pool_checkpoint('key', {'v7-tag', 'det-2', 100 + (1:3), 2});
 verifyEqual(tc, pool_checkpoint('todo', 'part', k2), 2);
+f3 = fullfile('part', 'cell_0003.mat');
+key = keys{3}; save(f3, 'key', '-v7.3');                              % its key on disk, its result not
+verifyEqual(tc, pool_checkpoint('todo', 'part', keys), 3);
+verifyError(tc, @() pool_checkpoint('load', 'part', 3), 'pool_checkpoint:unreadable');
+verifyFalse(tc, isfile(f3));
+pool_checkpoint('save', 'part', 3, keys{3}, job(3));
+fid = fopen(f3, 'r'); b = fread(fid, Inf, '*uint8'); fclose(fid);
+fid = fopen(f3, 'w'); fwrite(fid, b(1:floor(end / 2))); fclose(fid);  % renamed, half of it on the disk
+verifyEqual(tc, pool_checkpoint('todo', 'part', keys), 3);
+verifyError(tc, @() pool_checkpoint('load', 'part', 3), 'pool_checkpoint:unreadable');
+verifyFalse(tc, isfile(f3));
 pool_checkpoint('commit', 'out.mat', struct('PP', R1{1}, 'clean_ref', 7));
 verifyEqual(tc, sort(who('-file', 'out.mat'))', {'PP', 'clean_ref'});
 verifyFalse(tc, isfile('out.tmp.mat'));
 pool_checkpoint('clear', 'part');
 verifyFalse(tc, isfolder('part'));
+src = fileread(which('pool_checkpoint'));
+verifyEqual(tc, numel(regexp(src, 'flush_file\(tmp\);\s*\n\s*movefile\(tmp, ')), 2);   % a cell and the output
 src = fileread(which('build_policy_pools'));
 verifyNotEmpty(tc, strfind(src, 'pool_checkpoint(''key'', {MODEL_TAG, DET_ID, runs, cells(c), EBNO, ACTIONS, geoc{c}, opt, ...'));
 verifyNotEmpty(tc, strfind(src, 'parfor (k = 1:numel(todo), NWP)'));
@@ -3510,7 +3537,8 @@ function test_det_frames_rolling_in(tc)
 % same flight's clean link before the event's frame as the lead-in, the cell's frames from it
 % on; the cell's earlier frames (the jammer alone before the roll-in) never count, the fusion
 % window at the event's frame holds the clean lead-in, and the drop alarm's reference is the
-% lead-in's (not the clean flight's frames after the event).
+% lead-in's (not the clean flight's frames after the event). The edge map's LINK reads the
+% reference flights the same way (event_rows.m), in its clean pool and in the check pools.
 cls = {'none', 'jamming', 'path_loss', 'airframe_shadowing'}; C = numel(cls); nf = numel(link_features('names'));
 n = 38; e0 = 11; is = feature_index('sinr');
 oh = @(k, m) repmat(double(strcmp(cls, k)), m, 1);
@@ -3541,6 +3569,17 @@ for md = {'class_drop', 36; 'class_cusum', 36}'
     verifyFalse(tc, any(h([1:e0 - 1, e0], 1)), md{1});
     verifyTrue(tc, all(h(e0 + 1:end, 1)), md{1});
 end
+verifyEqual(tc, find(event_rows(Pc, [99 101], [NaN e0]))', e0:n);
+src = fileread(which('edge_map'));
+verifyNotEmpty(tc, regexp(src, ['k = event_rows\(P, PP\.runs\{sp\}, K\.ev\{sp\}\);\s*\n[^\n]*flight_of\([^\n]*\n' ...
+    '\s*FT\.link_k = FT\.link_k \+ accumarray\(i\(k\), double\(P\.fer\(k\)\), \[nF 1\]\);\s*\n' ...
+    '\s*FT\.link_n = FT\.link_n \+ accumarray\(i\(k\), 1, \[nF 1\]\);'], 'once'));
+verifyNotEmpty(tc, regexp(src, ['k = event_rows\(P, CK\.runs\{1\}, Kc\.ev\{1\}\);\s*\n' ...
+    '\s*KF\.link_k = KF\.link_k \+ accumarray\(i\(k\), double\(P\.fer\(k\)\), \[nKF 1\]\);\s*\n' ...
+    '\s*KF\.link_n = KF\.link_n \+ accumarray\(i\(k\), 1, \[nKF 1\]\);'], 'once'));
+verifyEmpty(tc, regexp(src, '(FT|KF)\.link_[kn] \+ accumarray\(i, ', 'once'));   % no reference flight over every row
+verifyNotEmpty(tc, strfind(src, 'det_frames(P, Pc, CK.scen{c}, ok_c, CK, CK.runs{1}, Kc.ev{1});'));
+verifyNotEmpty(tc, regexp(src, 'det_frames\(P, PP\.pools\{clean_cell, s, K\.na, sp\}, PP\.scen\{c\}, ok_c, PP, PP\.runs\{sp\}, \.\.\.\s*\n\s*K\.ev\{sp\}\)', 'once'));
 end
 
 function test_drop_cusum_alarm(tc)
@@ -3579,10 +3618,11 @@ verifyEqual(tc, drop_alarm_any([r; s], 'class_cusum', 36), [false; true]);
 V = struct('grid', {2:0.5:10, 18 * (1:0.5:10)}, 'pick', {3, 2}, 'det', {0.80 * ones(1, 17), 0.83 * ones(1, 19)}, ...
     'delay', {2 * ones(1, 17), 3 * ones(1, 19)});
 [f, h] = drop_alarm_form(V); verifyEqual(tc, {f, h}, {'class_cusum', 27});
-V(2).det(:) = 0.805; verifyEqual(tc, drop_alarm_form(V), 'class_drop');   % within a point, a longer delay
+V(2).det(:) = 0.805; [f, h] = drop_alarm_form(V); verifyEqual(tc, {f, h}, {'class_drop', 3});   % within a point, a longer delay
 V(2).delay(:) = 1.5; verifyEqual(tc, drop_alarm_form(V), 'class_cusum');
 V(1).pick = NaN; V(2).det(:) = 0.5; verifyEqual(tc, drop_alarm_form(V), 'class_cusum');
 V(2).pick = NaN; [f, h] = drop_alarm_form(V); verifyEqual(tc, f, 'class_drop'); verifyTrue(tc, isnan(h));
+V(1).pick = 5; [f, h] = drop_alarm_form(V); verifyEqual(tc, {f, h}, {'class_drop', 4});   % the median at its own pick
 src = fileread(which('train_dqn'));
 verifyNotEmpty(tc, strfind(src, 'if strcmp(mode, ''class_drop''), mode = drop_mode; end'));
 ln = regexp(src, '[^\n]*(?<!\w)monitor\([^\n]*', 'match');      % the local monitor's calls and definition
@@ -3593,9 +3633,70 @@ verifyNotEmpty(tc, strfind(fileread(which('edge_map')), 'RD = pass_cusum(OHP, th
 verifyEqual(tc, {drop_unit('class_drop'), drop_unit('class_cusum')}, {'dB', 'dB^2'});
 src = fileread(which('diag_path_loss'));                             % its sweep stays in the deployed form's units
 verifyNotEmpty(tc, strfind(src, 'DD = Dd.THC(j:-1:max(1, j - 2));'));
-for f = {'diag_path_loss', 'diag_false_alarms', 'diag_failure_modes', 'diag_never_acted', 'diag_switching'}
-    verifyEmpty(tc, strfind(fileread(which(f{1})), 'drop %.1f dB'), f{1});
+for f = {'diag_path_loss', 'diag_false_alarms', 'diag_failure_modes', 'diag_never_acted', 'diag_switching', 'train_dqn'}
+    verifyEmpty(tc, regexp(fileread(which(f{1})), 'drop %(\.1f|s) dB', 'once'), f{1});
 end
+verifyNotEmpty(tc, strfind(fileread(which('train_dqn')), 'DU = drop_unit(DROP_MODE);'));
+end
+
+function test_drop_cusum_bounded(tc)
+% The CUSUM drop alarm clears when the drop ends (drop_cusum.m bounded at twice the
+% threshold: its end read by the same test in reverse) and its reference resumes
+% (drop_ref.m: an excursion of the statistic that returns to 0 without the alarm joins the
+% reference, one that raised it does not), in the monitor as in drop_alarm_seq.m; on a noisy
+% clean link the reference stays at the link's level. C1d reads both forms through the
+% monitor's confirmation (confirm_alarm.m): single-cycle blips are no confirmed alarm, a
+% lasting one is, and the median window is deployed at the threshold it was compared at.
+z = zeros(1, 3);
+verifyEqual(tc, drop_cusum([z, 10 * ones(1, 4), z], 36), [z, 42 72 72 72 22 0 0], 'AbsTol', 1e-9);
+verifyEqual(tc, drop_cusum([z, 6 * ones(1, 4)], 36), drop_cusum([z, 6 * ones(1, 4)]));   % to the crossing as unbounded
+R0 = [nan(1, 8), 12, 12];
+[R, P, x] = drop_ref(R0, nan(1, 10), false, 8, true, 6, false);      % held while the statistic is above 0
+verifyEqual(tc, R, R0); verifyEqual(tc, P(end), 8);
+verifyEqual(tc, drop_ref(R, P, x, 12, true, 0, false), [nan(1, 6), 12, 12, 8, 12]);
+[R, P, x] = drop_ref(R, P, x, 4, false, 40, true);                   % the excursion raised the alarm
+verifyEqual(tc, drop_ref(R, P, x, 12, true, 0, false), [nan(1, 7), 12, 12, 12]);
+A = policy_actions(); na = find(strcmp(A, 'no_action')); nF = numel(link_features('names'));
+rng(8); n = 60; e = 12 * ones(3, n);
+e(1, :) = e(1, :) + randn(1, n); e(1, 11:40) = e(1, 11:40) - 10;   % a 30-cycle 10 dB loss in 1 dB noise
+e(2, 11:40) = -10; e(2, 51:end) = 6;                                 % a 30-cycle 22 dB loss, then a 6 dB step
+e(3, :) = e(3, :) + randn(1, n); e(3, 21:40) = e(3, 21:40) - 6;
+for md = {'class_drop', 3; 'class_cusum', 36}'
+    PP = struct('actions', {A}, 'classes', {{'none', 'path_loss'}}, 'sps', 4, 'bps', 2, 'maha_thr', -Inf, ...
+        'confirm', [2 2], 'alarm_mode', md{1}, 'drop_db', md{2}, 'cfg_gain_db', zeros(1, numel(A)));
+    m = policy_monitor('init', 3, numel(A)); da = false(3, n); dc = da;
+    for t = 1:n
+        o = struct('probs', repmat([1 0], 3, 1), 'unknown', false(3, 1), 'feat', zeros(3, nF));
+        o.feat(:, feature_index('log_ber')) = -6;
+        o.feat(:, feature_index('sinr')) = e(:, t) - 10*log10(4) + 10*log10(2);
+        [m, M] = policy_monitor('update', m, o, PP, na * ones(1, 3));
+        da(:, t) = M.drop_alarm'; dc(:, t) = M.confirmed';
+    end
+    verifyEqual(tc, da, drop_alarm_seq(e, md{1}, md{2}), md{1});
+    verifyEqual(tc, dc, confirm_alarm(da, PP.confirm), md{1});
+    verifyTrue(tc, all(da(1:2, 13:40), 'all'), md{1});              % held through the loss
+    verifyFalse(tc, any(da(1:2, 43:50), 'all'), md{1});             % clear within 2 cycles of its end
+    verifyEqual(tc, find(da(2, 43:end), 1), 10, md{1});              % the step after it, read from the restored reference
+end
+[~, W] = drop_alarm_seq(e(2, :), 'class_cusum', 36);
+verifyEqual(tc, W(39:42), [72 72 0 0]);
+rng(9); x = 12 + 2.4 * randn(400, 100);                              % a clean link at the estimate's spread
+[~, ~, dr] = drop_alarm_seq(x, 'class_cusum', 72);
+verifyLessThan(tc, abs(median(dr(:, end) + median(x(:, end - 2:end), 2)) - 12), 0.6);
+a = false(3, 30); a(1, [5 9 14 20]) = true; a(2, 10:11) = true; a(3, [5 7 9]) = true;
+CF = [2 2; 3 3; 4 5; 5 5];                                           % C2's monitors
+c = confirm_alarm(a, CF);
+verifyEqual(tc, any(c, 2), [false; true; false]); verifyEqual(tc, find(c(2, :), 1), 11);
+rng(10); a = rand(500, 30) < 0.3;
+verifyEqual(tc, any(confirm_alarm(a, CF), 2), any(confirm_alarm(a, [2 2]), 2));
+src = fileread(which('choose_drop_threshold'));
+verifyNotEmpty(tc, strfind(src, 'a = confirm_alarm(drop_alarm_seq(Ecl, FM{f}, GR{f}(j)), CF);'));
+verifyNotEmpty(tc, strfind(src, 'a = confirm_alarm(drop_alarm_seq(Epl, FM{f}, GR{f}(j)), CF);'));
+verifyNotEmpty(tc, strfind(src, 'drop_db = thr_val; drop_from = ''validation'';'));
+verifyNotEmpty(tc, strfind(fileread(which('train_dqn')), 'if isfield(Dd, ''drop_from''), DROP_FROM = Dd.drop_from; end'));
+src = fileread(which('det_frames'));
+verifyNotEmpty(tc, strfind(src, 'seq_cusum(ref - e(jp), ref - e(jc), C.cusum_win, dd) >= dd'));
+verifyNotEmpty(tc, strfind(src, 'w0 = drop_cusum(d(t), w0, dx, thr);'));
 end
 
 function test_split_norm_memory(tc)
