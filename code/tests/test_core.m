@@ -3590,6 +3590,12 @@ verifyEqual(tc, numel(ln), 5); verifyTrue(tc, all(contains(ln, {'DROP_MODE', 'dr
 verifyNotEmpty(tc, strfind(fileread(which('choose_drop_threshold')), '''drop_alarm'', ''cusum_db'''));
 verifyNotEmpty(tc, strfind(fileread(which('det_frames')), 'use_drop = any(strcmp(mode, {''class_drop'', ''class_cusum''}));'));
 verifyNotEmpty(tc, strfind(fileread(which('edge_map')), 'RD = pass_cusum(OHP, thr_ohp);'));
+verifyEqual(tc, {drop_unit('class_drop'), drop_unit('class_cusum')}, {'dB', 'dB^2'});
+src = fileread(which('diag_path_loss'));                             % its sweep stays in the deployed form's units
+verifyNotEmpty(tc, strfind(src, 'DD = Dd.THC(j:-1:max(1, j - 2));'));
+for f = {'diag_path_loss', 'diag_false_alarms', 'diag_failure_modes', 'diag_never_acted', 'diag_switching'}
+    verifyEmpty(tc, strfind(fileread(which(f{1})), 'drop %.1f dB'), f{1});
+end
 end
 
 function test_split_norm_memory(tc)

@@ -24,8 +24,8 @@ Q0 = load(AGENT_FILES{1}, 'H', 'alarm_mode', 'drop_db');
 H = Q0.H; PP.alarm_mode = Q0.alarm_mode; PP.drop_db = Q0.drop_db;
 K = link_env('tables', PP);
 VAL = 2; nS = numel(PP.ebno);
-rep = {sprintf('=== CLEAN-LINK FALSE ALARMS AND CONFIRMATION, VALIDATION SPLIT (%s, drop %.1f dB) ===', ...
-    PP.alarm_mode, PP.drop_db)};
+rep = {sprintf('=== CLEAN-LINK FALSE ALARMS AND CONFIRMATION, VALIDATION SPLIT (%s, drop %.1f %s) ===', ...
+    PP.alarm_mode, PP.drop_db, drop_unit(PP.alarm_mode))};
 
 %% Part 1a. Monitor on the clean validation geometries
 [PPw, Kw] = clean_world(PP, CV);

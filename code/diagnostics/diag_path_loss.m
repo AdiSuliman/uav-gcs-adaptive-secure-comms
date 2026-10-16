@@ -17,10 +17,17 @@ K = link_env('tables', PP);
 VAL = 2; NE = 64; T = Q.H.T; REPS = 4;
 nS = numel(PP.ebno);
 cells = find(strcmp(PP.scen, 'path_loss'));
-rep = {sprintf('=== PATH LOSS ON THE VALIDATION SPLIT (selected DQN, trained with drop %.1f dB) ===', Q.drop_db)};
-for dd = [Q.drop_db, 4, 3]
+un = drop_unit(Q.alarm_mode);
+DD = [Q.drop_db, 4, 3];                                     % the trained threshold and more sensitive ones
+if strcmp(Q.alarm_mode, 'class_cusum')                      % the next ones of the CUSUM's validation grid
+    Dd = load('data/drop_threshold.mat', 'THC'); j = find(Dd.THC == Q.drop_db, 1);
+    DD = Q.drop_db; if ~isempty(j), DD = Dd.THC(j:-1:max(1, j - 2)); end
+end
+rep = {sprintf('=== PATH LOSS ON THE VALIDATION SPLIT (selected DQN, %s, trained with drop %.1f %s) ===', ...
+    Q.alarm_mode, Q.drop_db, un)};
+for dd = DD
     PPd = PP; PPd.drop_db = dd;
-    rep{end+1} = sprintf('--- drop threshold %.1f dB ---', dd); %#ok<SAGROW>
+    rep{end+1} = sprintf('--- drop threshold %.1f %s ---', dd, un); %#ok<SAGROW>
     for c = cells(:)'
         specs = val_specs(c, nS, K.geo{c, VAL}, REPS, NE, T, RandStream('mt19937ar', 'Seed', 77));
         R = dqn_eval_batches('dqn', PPd, K, specs, Q.agent, struct(), 5100, VAL);
