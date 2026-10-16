@@ -11,14 +11,15 @@ Code: `code/parallel_turn.m`.
 **Why.** A turn file stays in %TEMP% after a crash or a power loss (one from 2026-10-07, PID 15316, had already survived a restart). The owner check was `tasklist /FI "PID eq n"` without an image filter, so any process that reused the PID after a restart held the turn (about 3% per restart at the PIDs seen on this machine), and `take` printed its message once and waited without a limit: C1p could stall unattended.
 
 **What.**
-- The owner counts only as a running process of the MATLAB image: `tasklist /FI "PID eq n" /FI "IMAGENAME eq MATLAB.exe"`.
-- A turn file written before the computer's last start (`Win32_OperatingSystem.LastBootUpTime`, read once per `take`) is stale and taken over.
+- The owner counts only while a MATLAB session runs under the recorded PID and started before the turn file was written. One PowerShell call per check reads the process (`Get-Process`): its path must contain `win64`, so the `bin\matlab.exe` launcher stubs do not count (the rule of `machine_load.m`), and its start time is compared in UTC with the file's write time (`java.io.File.lastModified`). A session that ended, or a PID reused by a later process, is not the holder, and the turn is taken over.
 - While a session waits it prints the holder at once and again every hour ("Still waiting for the parallel turn after n h ...").
 - `owner = parallel_turn('owner')` returns the live holder ([] when free); an optional second argument names the turn file (the test uses its own file and never touches the live one). The five callers are unchanged.
 
-**Limits.** The image filter also matches the `bin\matlab.exe` launcher stubs (verifier); a PID reused by another MATLAB within the same boot still counts until that MATLAB ends. The hourly message makes such a wait visible in the log. The verifier's optional start-time check was not added.
+**Why the start time, not the boot time.** A check against `Win32_OperatingSystem.LastBootUpTime` misses a Fast Startup power-on: that hybrid boot ends every process (PIDs are reused) but does not move LastBootUpTime. Fast Startup is on for this machine (HiberbootEnabled = 1), and the System log holds one such boot (Kernel-Boot event 27, boot type 0x1, 2026-10-09 10:16:54) after which LastBootUpTime still read 2026-10-08 23:01:44 until the full boot of 2026-10-15. The process's own start time covers a cold boot, a Fast Startup boot and a PID reused within one boot alike. The comparison is in UTC because the campaign crosses the end of daylight saving time (Israel Standard Time, 2026-10-25), where local times repeat an hour.
 
-**Test.** `test_parallel_turn_owner`: this session's fresh turn is held; the same file dated before the last start is free; PID 4 (the System process) is free; `take` takes the stale turn, `give` removes the file; the hourly message and the image filter are in the source.
+**Limits.** A process whose path or start time the query cannot read (another user's or an elevated session) does not count; the sessions the launcher starts share its user and elevation. When PowerShell fails the turn counts as free, as the `tasklist` check did before.
+
+**Test.** `test_parallel_turn_owner`: this session's fresh turn is held; the same file dated one minute before this session started, yet after the computer's last start (the Fast Startup case, which a boot-time check reads as held), is free; PID 4 (the System process) is free; `take` takes the stale turn, `give` removes the file; the hourly message and the `win64` filter are in the source.
 
 ## 2. The machine's load beside KPI 7 (item 23, code part; ops-11)
 
@@ -116,13 +117,22 @@ Code and docs: `code/main.m` (header, presets, every flag); `docs/DECISIONS.md`:
 | SURV3 | 1 h | 3.6-6 h |
 | EDGE | none | 0.5-2 h (estimate) |
 | LAT | 2 min | 1-6 min |
-| Full run, one profile | 13 h | about 6-7.5 days |
+| Full run, one profile | 13 h | about 6-7.2 days |
 | Decision layer + results | 10 h | about 5-6 days |
 | Results only | 1 h | about 0.5-1.5 h |
-| Three profiles (critical path) | none | 343-459 h, 14.3-19.1 days |
+| Three profiles (critical path) | none | 345-457 h, 14.4-19.0 days |
 | Disk floor | 200 GB | 150 GB |
 
-The review's own campaign estimate was 345-450 h; the difference is SURV and SURV3, which it took without the delay-line factor. The entry also states: the pools at 40.2 M stored frames, about 12.5 / 12.7 / 12.4 GB in memory on profiles 1 / 3 / 2 and 12-15 GB on disk, K tables about 0.7 GB each; side-by-side peaks of 32-40 GB against 31.2 GB of RAM at this base (the 83 GB commit limit prevents an out-of-memory stop; the memory item of the review lowers them); about 38-41 GB written per profile, 115-125 GB for the three, so a launch needs about 275 GB free against the 150 GB floor (2.6 TB free on 2026-10-16); the Windows Update pause ends 2026-11-05 13:38 UTC, inside the campaign's span.
+A profile alone is A0-B4s 19-23 h, the parallel block 107-128 h and C1d-RPT 19-22 h (C2 11.7-12.1, C2e 0.5-1.5, C2g 3.6, C2u 2.5, EDGE 0.5-2, the nine short stages 0.3 h at most): 145-173 h. The campaign is 0.5 + 19-23 + 107-128 + 107-154 + 91-128 + 19-22 + 1.5 = 345-457 h. The review's own estimate was 345-450 h; it took SURV and SURV3 without the delay-line factor.
+
+The entry also states:
+- The pools: 40.2 M stored frames per profile at 416 / 456 / 376 B per frame on profiles 1 / 3 / 2: the 308 B measured on the d85run smoke (built before the antennas' channel records entered the pools) plus those records, 9 x n_rx singles (`branch_record.m`, `pool_cell.m`), and one gain per antenna. About 16.7 / 18.4 / 15.1 GB in memory, 1.0-1.26 times that on disk (17-21 GB on profile 1, 15-23 GB across the profiles); K tables about 0.7 GB each.
+- Side-by-side peaks of about 38-42 GB (C2-EDGE beside the next profile's C1p) and 35-42 GB (profile 2's B1 beside profile 3's C1p) against 31.2 GB of RAM at this base: the review's 32-35 and 34-40 GB with the pools' terms scaled. The 83 GB commit limit prevents an out-of-memory stop; the memory item of the review lowers them.
+- About 42-48 GB written on profile 1, 126-143 GB for the three, so a launch needs about 295 GB free against the 150 GB floor (2.6 TB free on 2026-10-16).
+- The floor's basis (D61's note): the user lowered it from 200 to 150 GB on 2026-10-05; it has to hold only what can be written between two checks, a pool file of up to 23 GB beside the other profile's largest save (5.6 GB) and the .dmr files (2 GB at most in the tempdir that the sessions and their workers share; checked: a worker's `tempdir` is the client's), under 31 GB.
+- The Windows Update pause ends 2026-11-05 13:38 UTC, inside the campaign's span.
+
+**Counts in main.m.** The A6 flag and its message no longer give a feature count (`link_features.m` holds the 23), and the A5 message reads 10 threats x 8 levels + none, as `run_dataset_sweep.m` and the flag do.
 
 ## 8. Citations: Richards replaced by a library source
 
@@ -130,12 +140,33 @@ The review's own campaign estimate was 345-450 h; the difference is SURV and SUR
 
 - "an N-element array nulls N-1 interferers": Winters, Salz & Gitlin 1994, Sec. I, p. 1740: with M antennas, M - 1 interferers can be nulled out; p. 1747 repeats it for a channel without multipath.
 - "Richards, ch. 9" for the spatial measurements from the channel estimator the MMSE combiner runs: the same paper's optimum combining by direct matrix inversion, weights w = R^-1 r from the sample covariance of the received snapshots and their correlation with a known reference signal (eqs. 19-23, p. 1745); the known-symbol estimator stays the assumption of proposal risk 8.
-- Library file: `V7_Winters_Salz_Gitlin1994_Antenna_Diversity_Capacity.pdf`. LITERATURE.md does not list it yet (outside this group's files).
+- Library file: `V7_Winters_Salz_Gitlin1994_Antenna_Diversity_Capacity.pdf`. LITERATURE.md does not list it yet (outside this group's files; the row for the merge is at the end of this note).
 
 ## Tests
 
 Five new tests directly after `test_m_files_parse`: `test_parallel_turn_owner`, `test_latency_load_logged`, `test_gui_bundle_drops_stale`, `test_console_shadowing_rolls_in`, `test_v3d_inject_resets_event`. No existing test changes its expectation (`test_console_scenario` and the fixed-view check in the shadowing test still hold: the maps and the gallery keep the held bank). Full suite (`runtests('code/tests/test_core.m')`): 146 passed, 0 failed, 32.3 min. `console_flights.m` was saved again about 1.5 min after that run started (before the commit), so `test_m_files_parse` and the five new tests were run again on the committed code: 6 passed.
 
+## Review of the fixes (two reviewers, 2026-10-16)
+
+Each issue was checked against the code and the machine before it was acted on.
+
+- **Fast Startup and the boot-time check (parallel_turn.m): fixed** (item 1). Confirmed on this machine: HiberbootEnabled = 1, a hybrid boot on 2026-10-09 that left LastBootUpTime unchanged. The holder is now judged by its own start time; the test has the case a boot-time check misses.
+- **Cost totals do not add up: fixed** (item 7). C1d-RPT is 19-22 h from its listed stages (it read 18-24 h), a profile 145-173 h (about 6-7.2 days), the campaign 345-457 h (14.4-19.0 days); DECISIONS.md, main.m's header and preset and the table above carry the same figures.
+- **No reason for the 150 GB floor: fixed** (D61's note). The user lowered the floor on 2026-10-05; the note now gives what the floor has to hold between two checks (under 31 GB). The reviewer's figure of 2 GB of .dmr per process for 13-19 processes does not hold: `disk_guard.m` sums every .dmr file in `tempdir`, and the workers share the client's `tempdir` (checked with a one-worker pool), so the .dmr term is 2 GB in all.
+- **Pool figures leave out the channel records: fixed** (item 7). Confirmed: `pool_cell.m` stores `bch` (9 x n_rx singles per frame) since the D85 cues, and the d85run smoke's pools (fields probs ... act_idle, no bch; 308.0 B per frame, measured again here) predate it. Per frame 416 / 456 / 376 B on profiles 1 / 3 / 2; memory, disk, peaks and the launch's free space are scaled from them. The runtimes do not change.
+- **A6 flag says 15 link features: fixed.** The flag and the A6 message (which said 13) give no count now; the A5 message's "8 threats x 5 levels" reads 10 x 8, as the flag and `run_dataset_sweep.m` do.
+- **README.md stale runtimes and floor: not changed here**, outside this group's files; the text for the merge is below.
+- **Winters, Salz & Gitlin 1994 missing from LITERATURE.md (raised by both reviewers): not changed here**, outside this group's files; the row for the merge is below.
+
 ## Files outside this group's list
 
 - `code/evaluation/measure_all_kpis.m`: one line prints `LAT.load_text` under KPI 7.
+
+## For the main session at the merge (files this group does not own)
+
+- `README.md`, Quick start 4: "A full run takes about 6-7.2 days per profile, about 14.4-19.0 days for the three profiles (docs/DECISIONS.md, "Cost and resources, re-derived (2026-10-16)")." Quick start 8: "below 150 GB free". The stage table's time column: the figures at main.m's flags, or one pointer to that DECISIONS.md entry (the same table's "14 link features" is 23 now).
+- `docs/LITERATURE.md`, table "In the library, cited from D85 (library audit, 2026-10-15)", one row:
+
+```text
+| J. H. Winters, J. Salz, R. D. Gitlin, "The impact of antenna diversity on the capacity of wireless communication systems," IEEE Trans. Commun. 42(2/3/4), 1994 | V7_Winters_Salz_Gitlin1994_Antenna_Diversity_Capacity.pdf | With M antennas, M - 1 interferers can be nulled (Sec. I, p. 1740; again for a channel without multipath, p. 1747); optimum combining by direct matrix inversion, w = R_xx^-1 r_xd from the sample covariance of the received snapshots and their correlation with a known reference signal (eqs. 19-23, p. 1745), the form of the MMSE combiner's weights (build_threat_model.m, w = R \ h); replaces the citations of Richards' book in D59 and D61 |
+```
