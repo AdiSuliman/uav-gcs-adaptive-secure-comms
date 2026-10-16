@@ -101,7 +101,7 @@ Branch `d86-link` from v7-merge `a5f0687` (D81-D85 with the cues C1/C2). Source:
 
 ## Tests
 
-Full suite `runtests('code/tests/test_core.m')` on this branch: see the report line below. New: `test_shadow_burial`, `test_los_phase_turns`, `test_shadow_k_onset`, `test_roll_in_every_class`, `test_shadow_reach` (placed directly after `test_noise_burst_duty`). Rewritten: `test_noise_burst_duty`, `test_idle_emitter_attenuation`. Updated: `test_shadow_attitude`, `test_shadow_onset_ramp`, `test_shadow_selection`, `test_jam_timing`, `test_draws_independent`, `test_slot_and_burst_measurements`.
+Full suite `runtests('code/tests/test_core.m')` on this branch after the second review (commit 5a4871b): 146 passed, 0 failed (25 min). New: `test_shadow_burial`, `test_los_phase_turns`, `test_shadow_k_onset`, `test_roll_in_every_class`, `test_shadow_reach` (placed directly after `test_noise_burst_duty`). Rewritten: `test_noise_burst_duty`, `test_idle_emitter_attenuation`. Updated: `test_shadow_attitude`, `test_shadow_onset_ramp`, `test_shadow_selection`, `test_jam_timing`, `test_draws_independent`, `test_slot_and_burst_measurements`.
 
 ## Files
 
@@ -129,3 +129,13 @@ Full suite `runtests('code/tests/test_core.m')` on this branch: see the report l
 2. The GCS elevation still spans up to about 23 deg against Sun et al.'s 1.4-2.9 deg; the pairing is by burial, not by elevation.
 3. The pools' non-shadowing cells hold their bank (a decision for the pools' owner, on validation).
 4. The shadowing class exists only where a bank the airframe can fly reaches the level's band (the table under item 3): at 15 dB Eb/N0 its flights leave out up to 5.2% (16.1 deg) and 19.4% (32.0 deg, 25 dB) of the groups' speed-altitude plane, the slow, high corner; there the selected flights are faster and lower than the clean ones, which is the geometry, not a sampling artefact. In the shadowing groups' own Latin hypercubes at the short distances the speed strata are relative to the floor at the flight's altitude, so a high flight's slowest stratum is faster than a low one's.
+
+## Second review (seven items)
+
+1. The share beside every shadowing reading (`shadow_note.m`): the proposed weighting (kept_w / tried) was measured and not adopted, since a Latin hypercube's kept / tried is a harmonic mean of its strata and the weighting moves it further from the share; the share is counted on unstratified candidates after each design (item 3, "The share stated beside every shadowing reading"). The per-altitude floor is in the note's text.
+2. The fixed views on the band's edge: the band held to 1e-6 deg in `shadow_frame.m` and `shadow_hidden.m` (item 3, "Fixed views"), not 1e-9, because the model's band and attitude are written to 10 digits.
+3. Stale wording: `hides_antenna.m` help, `build_policy_pools.m` header and console text restated on this branch; `run_dataset_sweep.m` header and line 143 under "For the merge"; d84_link A10 under item 11.
+4. The survivability map's views eased over the run: the beam at mid-run (item 3, "The survivability map's views over their run"), tested on the loss over the run.
+5. The textual conflict with d86-det in `run_dataset_sweep.m`: the clean class's roll-in sits on the sweep's base params; `git merge-tree` with d86-det, d86-dec and d86-ops, alone and in sequence, reports no conflict, and the merged file holds the base-params line and d86-det's `build(p)`.
+6. The bank printed by d86-ops's `console_flights.m`: under "For the merge" (the file is not on this branch).
+7. The false-alarm reading on rolled-in clean sub-runs: open, for the main session to assign (item 10).
