@@ -5,8 +5,9 @@
 % of dataset_levels.m, a balanced 'none' class, each (threat, level) at its own random
 % UAV speed over the envelope, run-aware causal temporal features, the dataset's labels:
 % threat_active.m) at the midpoints 1.5:3:13.5 dB AND at the training values, and reads
-% them as the deployed detector does: the temporal fusion over the last cycles of the
-% block (fused_class.m). Seen and unseen points come from the same run, so the
+% them as the deployed monitor decides: the temporal fusion over the last cycles of the
+% block and the latched cause of a lost branch (fused_class.m, KPI 1's reading). Seen and
+% unseen points come from the same run, so the
 % comparison isolates the effect of Eb/N0 values the network never saw.
 % Beyond the trained range, at -3 dB (2.2 km) and 18 dB (0.20 km, link_distance_km.m):
 % 36 blocks per class at each point, each at its own speed, the levels cycled over
@@ -167,7 +168,8 @@ rep = {};
 rep{end+1} = '=== DETECTOR GENERALIZATION TO UNSEEN Eb/N0 (proposal mitigation 4) ===';
 rep{end+1} = sprintf(['Generated: %s | %d frames per block, all threats x every other level + balanced none, random speed ' ...
     'per (threat, level) | %s'], datestr(now), N_FRAMES, ...
-    ternary(isempty(FZ.FM), 'per-frame reading', sprintf('fused over the last %d cycles (deployed detector)', FZ.N)));
+    ternary(isempty(FZ.FM), 'per-frame reading with the latched cause of a lost branch', ...
+    sprintf('fused over the last %d cycles with the latched cause of a lost branch (the deployed monitor''s class)', FZ.N)));
 rep{end+1} = sprintf('Training grid: %s dB. Unseen: %s dB. Same generator and run for both.', mat2str(EBNO_SEEN), mat2str(setdiff(EBNO_ALL, EBNO_SEEN)));
 if SHT(1) > 0
     rep{end+1} = sprintf(['Airframe shadowing: every block flies a flight whose attitude hides an antenna at its level (its ' ...

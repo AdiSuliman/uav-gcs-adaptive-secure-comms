@@ -12,14 +12,17 @@
 % Every score is read as the decision cycle reads it (ood_fold_metrics.m): alone (one
 % frame) and averaged over the last 2, 5 and 8 cycles of each sub-run in time order
 % (ood_window.m, partial windows at its start), every window labelled by its newest frame.
-% Frames of one fold (ood_loto_split.m): the known classes' training frames train the
-% network and fit the unknown-threat models; the validation sub-runs are split in two
-% halves (every other sub-run): the known frames of one half stop the training
+% Frames of one fold (ood_loto_split.m, labels by the frame rule, frame_labels.m): the known
+% classes' training frames train the network and fit the unknown-threat models; the
+% validation sub-runs are split in two halves (stratified over class, level and Eb/N0,
+% ood_loto_split.m): the known frames of one half stop the training
 % early and fit the models' validation parts, the known windows of the other half are read
 % against the held-out threat's validation windows for the selection and set the
-% threshold of FPR95. The held-out threat never fits, weights or chooses anything inside
-% its fold. AUROC, FPR95 (share of unknown windows accepted as known at the threshold that
-% keeps 95% of the known validation windows) and Algorithm 2 are read on the second test
+% threshold of FPR95. Known frames and windows come from the known classes' sub-runs only:
+% no frame of the held-out threat's sub-runs, its clean frames included, fits, weights or
+% chooses anything inside its fold, or is read as known. AUROC, FPR95 (share of unknown
+% windows accepted as known at the threshold that keeps 95% of the known validation
+% windows) and Algorithm 2 are read on the second test
 % set (data/splits_fresh.mat, build_fresh_test: sub-runs no decision has read); the test
 % split of data/splits.mat is not read.
 % Selection, on validation only: the production score and its window are the (candidate,
@@ -94,8 +97,8 @@ for h = 1:numel(held_out)
     Sv = all_scores(net, M, va);
     St = all_scores(net, M, te);
     yv = cellstr(string(va.Y)); yt = cellstr(string(te.Y));
-    V = struct('run', va.run, 'pos', va.pos, 'kn', ismember(yv, known) & va.sel, 'un', strcmp(yv, k));
-    T = struct('run', te.run, 'pos', te.pos, 'kn', ismember(yt, known), 'un', strcmp(yt, k));
+    V = struct('run', va.run, 'pos', va.pos, 'kn', ismember(yv, known) & va.sel & ~va.own, 'un', strcmp(yv, k));
+    T = struct('run', te.run, 'pos', te.pos, 'kn', ismember(yt, known) & ~te.own, 'un', strcmp(yt, k));
     Q = ood_fold_metrics(Sv, V, St, T, SC, WALL, RETAIN);
 
     [~, yi] = max(St.probs(:, T.kn), [], 1);

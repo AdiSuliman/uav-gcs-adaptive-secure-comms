@@ -39,8 +39,15 @@ function varargout = onset_shape(G, varargin)
 %   [pf, cause] = onset_shape('sequence', G, pf, classes, heal, thr)   the latch over the
 %       cycles of one run (G n x nr, pf n x C), for the readings of eval_detector.m and
 %       det_frames.m
-%   g = onset_shape('events', G)   os_glr at the latch's diagnosis of the first event of one
-%       run (G n x nr), NaN without one: the input of the threshold's choice
+%   g = onset_shape('events', G, j0, heal)   os_glr at the latch's diagnosis of the first
+%       event of one run (G n x nr) on the threat's branch, NaN without one: the input of the
+%       threshold's choice. The latch runs as deployed (heal, default decision_config.m
+%       C.heal): an event on another branch, a fading dip before the onset, holds the latch
+%       until it heals, as in the monitor. j0 the run's first frame labelled with the
+%       threat; its branch is the antenna whose median offset falls most from the frames
+%       before j0 to the frames from j0 on (j0 empty: the first event on any branch). A
+%       diagnosis before j0 on that branch counts: the ramp's loss can be detected before
+%       it reaches the label's 5 dB.
 %   thr = onset_shape('choose', g, y)   the threshold that best tells the events' causes
 %       apart, y 1 for antenna_fault and 2 for airframe_shadowing (select_fusion.m, on the
 %       validation sub-runs): the largest mean of the two causes' shares read right over
@@ -179,12 +186,20 @@ for t = 1:n
 end
 end
 
-function g = events(G)
-% os_glr at the latch's diagnosis of the first event of one run, NaN without one.
-n = size(G, 1); st = []; g = NaN; pf = zeros(1, 1);
+function g = events(G, j0, heal)
+% os_glr at the latch's diagnosis of the first event on the threat's branch, NaN without one.
+if nargin < 2, j0 = []; end
+if nargin < 3 || isempty(heal), heal = decision_config().heal; end
+[n, nr] = size(G); st = []; g = NaN; pf = zeros(1, 1);
+br = 0;                                                    % 0: any branch
+if ~isempty(j0) && nr >= 2 && j0 <= n
+    O = reshape(offsets(reshape(double(G)', 1, nr, n)), nr, n)';   % n x nr
+    pre = zeros(1, nr); if j0 > 1, pre = median(O(1:j0 - 1, :), 1); end
+    [~, br] = max(pre - median(O(j0:end, :), 1));
+end
 for t = 1:n
-    [st, ~, c] = onset_shape('latch', st, G(t, :), pf, {'none'}, Inf, 0);
-    if c > 0, g = st.glr; return; end
+    [st, ~, c] = onset_shape('latch', st, G(t, :), pf, {'none'}, heal, 0);
+    if c > 0 && (br == 0 || st.ant == br), g = st.glr; return; end
 end
 end
 

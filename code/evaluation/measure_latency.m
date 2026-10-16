@@ -34,6 +34,7 @@ EBNO = 4; delay_bits = 20; tw = 10;
 modelName = 'UAV_GCS_Threat_Link';
 
 S0 = load('params.mat'); p0 = S0.params; p0.quiet_build = true;
+assert_frame1_onsets(p0);                       % every threat on from its run's first frame (init_params.m)
 fs = p0.symbol_rate * p0.sps;
 D = load('data/trained_detector.mat', 'net', 'classes', 'ood');
 N = load('data/splits.mat', 'splits');

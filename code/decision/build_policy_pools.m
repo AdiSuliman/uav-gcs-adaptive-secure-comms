@@ -69,6 +69,7 @@ SINGLES = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 's
 C = decision_config();
 COMBOS  = C.combos;
 S0 = load('params.mat'); p0 = S0.params; p0.quiet_build = true;
+assert_frame1_onsets(p0);                       % every threat on from its run's first frame (init_params.m)
 EBNO   = p0.EbNo_dB;
 NGEO   = [8 6 12 36 60];         % geometries per (cell, Eb/N0): train, validation, test, edge speeds, second test
 NHOVER = 24;                     % edge speeds: the first NHOVER at hover (every severity), the rest at 161 km/h (nominal)

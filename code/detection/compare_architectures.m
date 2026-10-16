@@ -5,14 +5,16 @@
 % same network seeing only one input: spectrogram only (link features held at
 % zero) and link features only (spectrogram held at zero). A constant input
 % leaves its branch a fixed bias, so each variant is the single-branch network
-% with the same training schedule (train_hybrid_net.m), splits and seed.
+% with the same training schedule (train_hybrid_net.m), splits and seed; the spectrogram's
+% time and frequency masking is off where the spectrogram is held at zero.
 % Classical baselines on the same link features (the traditional classifiers of
 % UAV intrusion detection, Papathanasiou et al. [2]; a random forest on spectral
 % descriptors, Barajas et al.): a random forest (200 trees) and a kernel SVM
 % (one-vs-one, random-feature Gaussian kernel), default settings, no tuning.
 % Test frames: the second test set (data/splits_fresh.mat, build_fresh_test) when it exists;
 % else the test split of data/splits.mat, labelled as a second reading of frames read
-% before. Macro-F1 per Eb/N0 on the KPI 1 bins (kpi_ebno.m, per-frame labels), the frames
+% before. Every variant is a per-frame classifier: trained and read on the frame rule's
+% labels (frame_labels.m). Macro-F1 per Eb/N0 on the KPI 1 bins (kpi_ebno.m), the frames
 % received below the grid in their own column.
 % Output: results/architecture_comparison.txt
 
@@ -27,6 +29,7 @@ if isfile('data/splits_fresh.mat')
     sp.test = Sf.splits.test; clear Sf
     set_name = 'second test set (data/splits_fresh.mat)';
 end
+sp.train = frame_labels(sp.train); sp.val = frame_labels(sp.val); sp.test = frame_labels(sp.test);
 V = struct('name', {'hybrid (spectrogram + link features)', 'spectrogram only (CNN)', 'link features only (MLP)', ...
     'link features only, random forest', 'link features only, kernel SVM'}, ...
     'mask', {'', 'feat', 'spec', '', ''}, 'kind', {'net', 'net', 'net', 'rf', 'svm'});
@@ -44,7 +47,9 @@ for v = 1:numel(V)
     switch V(v).kind
         case 'net'
             tr = masked(sp.train, V(v).mask); va = masked(sp.val, V(v).mask); te = masked(sp.test, V(v).mask);
-            net = train_hybrid_net(tr, va, classes, struct('verbose', false));
+            opts = struct('verbose', false);
+            if strcmp(V(v).mask, 'spec'), opts.augment = false; end   % no masking of an image held at zero
+            net = train_hybrid_net(tr, va, classes, opts);
             [~, yp] = max(cnn_scores(net, te.X, te.feats'), [], 1);
         case 'rf'
             mdl = TreeBagger(200, double(sp.train.feats), double(sp.train.Y(:)), 'Method', 'classification');

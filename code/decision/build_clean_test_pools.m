@@ -59,6 +59,7 @@ if isfile(f_out) && dir(f_out).datenum > dir('data/policy_pools.mat').datenum
 end
 
 S0 = load('params.mat'); p0 = S0.params; p0.quiet_build = true; p0.active_threat = 'none';
+assert_frame1_onsets(p0);                       % every threat on from its run's first frame (init_params.m)
 N = load('data/splits.mat', 'splits');
 det = struct('net', D.net, 'ood', D.ood, 'classes', {cellstr(string(D.classes(:)'))}, ...
     'mu', N.splits.norm.feat_mean, 'sd', N.splits.norm.feat_std, 'fs', p0.symbol_rate * p0.sps);

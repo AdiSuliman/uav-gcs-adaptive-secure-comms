@@ -6,8 +6,9 @@ function Q = ood_fold_metrics(Sv, V, St, T, names, wins, retain)
 %   Sv, St   per-frame scores, one field per name (1 x frames), on the validation and on
 %            the test frames
 %   V, T     run, pos (frames' sub-runs and positions) and the windows read as known (kn:
-%            the newest frame of a known class) and as unknown (un: the newest frame of the
-%            held-out threat), on the validation and on the test frames
+%            the newest frame of a known class in a known class's sub-run) and as unknown
+%            (un: the newest frame of the held-out threat), on the validation and on the
+%            test frames
 %   names    scores; wins  windows [cycles] (1 = the frame alone)
 %   retain   share of the known validation windows kept above the threshold
 %   Q        names x windows: val, AUROC on the validation frames (the selection's input);

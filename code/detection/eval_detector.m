@@ -33,20 +33,27 @@ load('data/trained_detector.mat', 'net', 'classes');
 %% 3. Inference (batched: the whole test split does not fit on the GPU)
 fprintf('Running inference on %d test samples...\n', numel(Y_test));
 Y_pred_prob = cnn_scores(net, sp.test.X, sp.test.feats');
-% Temporal fusion (select_fusion.m): the class of every cycle from the last N
-% cycles of its own sub-run, as the system decides; the per-frame reading is kept.
-% The fused decision is judged on its window (fusion_target.m): a WLAN frame without a
-% packet whose window holds packet frames has the target benign_interference.
+% The class of every cycle as the system decides it (policy_monitor.m): the temporal fusion
+% (select_fusion.m) over the last N cycles of its own sub-run, then the monitor's latched
+% cause of a lost branch (onset_shape.m, latch_runs.m). The fused class alone and the
+% per-frame reading are kept beside. The fused decision is judged on its window
+% (fusion_target.m): a WLAN frame without a packet whose window holds packet frames has the
+% target benign_interference.
 fus = [];
 rk = ones(numel(Y_test), 1);
+cls_names = cellstr(string(classes(:)'));
 if isfile('data/fusion.mat') && isfield(sp.test, 'pos')
-    fus = load('data/fusion.mat', 'FM', 'N', 'val_probs_oof', 'val_target');
+    fus = load('data/fusion.mat', 'FM', 'N', 'val_probs_oof', 'val_latch_oof', 'val_target');
+    if ~isfield(fus, 'val_latch_oof')
+        error('eval_detector: data/fusion.mat has no out-of-fold monitor''s class (val_latch_oof); run select_fusion');
+    end
     [~, i1] = max(Y_pred_prob, [], 1);
     yf = categorical(classes(i1)', classes);
-    frame_acc = 100 * mean(yf(:) == sp.test.Y(:));
-    frame_f1 = 100 * macro_f1_of(sp.test.Y(:), yf(:), classes);
-    frame_class_f1 = 100 * class_f1_of(sp.test.Y(:), yf(:), classes);
-    fprintf('Per frame (0.5 ms): accuracy %.2f%%, macro-F1 %.2f%%\n', frame_acc, frame_f1);
+    tf = frame_labels(sp.test); y_fr = tf.Y(:); clear tf          % the per-frame network's own labels
+    frame_acc = 100 * mean(yf(:) == y_fr);
+    frame_f1 = 100 * macro_f1_of(y_fr, yf(:), classes);
+    frame_class_f1 = 100 * class_f1_of(y_fr, yf(:), classes);
+    fprintf('Per frame, on the frame rule''s labels (frame_labels.m): accuracy %.2f%%, macro-F1 %.2f%%\n', frame_acc, frame_f1);
     sp.test.feat_names = sp.norm.feat_names;
     Z = fuse_classes('windows', sp.test, Y_pred_prob', fus.N);
     Y_pred_prob = fuse_classes('apply', fus.FM, Z)';
@@ -57,6 +64,14 @@ if isfile('data/fusion.mat') && isfield(sp.test, 'pos')
         sum(Y_test(:) ~= sp.test.Y(:)));
 end
 [~, max_idx] = max(Y_pred_prob, [], 1);
+Y_fused = reshape(categorical(classes(max_idx)', classes), [], 1);   % the fused class alone, beside
+os_thr = 0; if ~isempty(fus), os_thr = onset_shape('threshold', fus.FM); end   % chosen on validation (select_fusion.m)
+cz_all = zeros(numel(Y_test), 1);
+if isfield(sp.test, 'gain_ant') && isfield(sp.test, 'pos')
+    [pm, cz_all] = latch_runs(double(Y_pred_prob'), sp.test.run, sp.test.pos, sp.test.gain_ant, cls_names, os_thr);
+    [~, max_idx] = max(pm, [], 2); clear pm
+    fprintf('Decision with the monitor''s latched cause of a lost branch (threshold %+.2f)\n', os_thr);
+end
 
 Y_pred = categorical(classes(max_idx)', classes);
 
@@ -121,7 +136,6 @@ end
 % stays >= 90% at every higher point. Action-equivalent accuracy counts a
 % confusion as harmless when both classes map to the same countermeasure in the
 % rule table (e.g. jamming <-> reactive_jamming -> channel_switch).
-cls_names = cellstr(string(classes(:)'));
 f1_vs_snr = nan(numel(unique_snrs), 1);
 for i = 1:numel(unique_snrs)
     idx = (snr_vals == unique_snrs(i));
@@ -129,12 +143,17 @@ for i = 1:numel(unique_snrs)
 end
 % Threshold (proposal), chosen on the VALIDATION split and then read on the test
 % split: the lowest Eb/N0 from which macro-F1 stays >= 90% at every higher point
-% AND every class reaches F1 >= 90% over the frames at or above it.
+% AND every class reaches F1 >= 90% over the frames at or above it. The validation
+% decision is the monitor's class, as on the test frames.
 if isempty(fus)
-    [~, iv] = max(cnn_scores(net, sp.val.X, sp.val.feats'), [], 1);
+    pv = cnn_scores(net, sp.val.X, sp.val.feats')';
+    if isfield(sp.val, 'gain_ant') && isfield(sp.val, 'pos')
+        pv = latch_runs(pv, sp.val.run, sp.val.pos, sp.val.gain_ant, cls_names, 0);
+    end
 else
-    [~, iv] = max(fus.val_probs_oof, [], 2);                % out-of-fold fused predictions on validation
+    pv = fus.val_latch_oof;                                 % out-of-fold, the monitor's class (select_fusion.m)
 end
+[~, iv] = max(pv, [], 2); clear pv
 Y_val = sp.val.Y(:); Y_val_pred = reshape(categorical(classes(iv)', classes), [], 1);
 if ~isempty(fus) && isfield(fus, 'val_target')                % the fused decision's targets (fusion_target.m)
     Y_val = reshape(categorical(classes(fus.val_target)', classes), [], 1);
@@ -149,6 +168,11 @@ above = snr_vals >= thr_db;
 f1_class_above = nan(numel(classes), 1);
 if any(above), f1_class_above = 100 * class_f1_of(Y_test(above), Y_pred(above), classes); end
 f1_above = 100 * macro_f1_of(Y_test(above), Y_pred(above), classes);
+% Beside KPI 1: the fused class alone, without the monitor's latched cause
+fused_alone = struct('macro_f1_above_threshold_pct', 100 * macro_f1_of(Y_test(above), Y_fused(above), classes), ...
+    'class_f1_above_threshold_pct', 100 * class_f1_of(Y_test(above), Y_fused(above), classes));
+fprintf('Beside KPI 1, the fused class alone (no latched cause): macro-F1 above the threshold %.2f%%\n', ...
+    fused_alone.macro_f1_above_threshold_pct);
 % Beside KPI 1, never in its place: the stricter reading, every class F1 >= 90% above its
 % own threshold (chosen on validation as well)
 ab_all = snr_vals >= thr_all_db;
@@ -230,11 +254,10 @@ fprintf(['Branch level, beside KPI 1 (antenna fault and airframe shadowing as on
     branch.macro_f1_above_threshold_pct, branch.lost_recall_pct, branch.lost_recall_above_threshold_pct);
 % Beside KPI 1: an antenna fault and airframe shadowing with their onset in the fusion window
 % (the frames up to N - 1 cycles after the sub-run's first frame of the class) and after it,
-% by the fused class and by the monitor's class, the cause latched from the shape of the
-% lost branch's onset (onset_shape.m, policy_monitor.m): the onset's shape is read at the
-% event's start, the latched cause after it
+% by the fused class alone and by the monitor's class (KPI 1's), the cause latched from the
+% shape of the lost branch's onset (onset_shape.m, policy_monitor.m): the onset's shape is
+% read at the event's start, the latched cause after it
 Nw = 1; if ~isempty(fus), Nw = fus.N; end
-y_latch = Y_pred;
 age = nan(numel(Y_test), 1);
 onset_cue = struct('class', {}, 'n', {}, 'recall_fused_pct', {}, 'recall_latched_pct', {}, 'as_other_fused_pct', {}, ...
     'as_other_latched_pct', {});
@@ -242,17 +265,12 @@ onset_diag = struct('class', {}, 'n_events', {}, 'decided_pct', {}, 'right_pct',
     'median_cycles', {}, 'median_ms', {});
 if isfield(sp.test, 'gain_ant') && isfield(sp.test, 'pos')
     BR = {'antenna_fault', 'airframe_shadowing'};
-    pf_all = double(Y_pred_prob');
     [~, ~, rid] = unique(sp.test.run(:));
     byrun = accumarray(rid, (1:numel(rid))', [], @(v) {v});
     ev = nan(0, 3);                                      % per event: class, cause right, cycles to it
-    os_thr = 0; if ~isempty(fus), os_thr = onset_shape('threshold', fus.FM); end   % chosen on validation (select_fusion.m)
     for r = 1:numel(byrun)
         ix = byrun{r}; [~, o] = sort(sp.test.pos(ix)); ix = ix(o);
-        [pq, cz] = onset_shape('sequence', sp.test.gain_ant(ix, :), pf_all(ix, :), cls_names, decision_config().heal, ...
-            os_thr);
-        [~, kk] = max(pq, [], 2);
-        y_latch(ix) = categorical(cls_names(kk), cls_names);
+        cz = cz_all(ix);                                 % the latch's cause per cycle (latch_runs.m)
         for b = 1:2
             j0 = find(Y_test(ix) == BR{b}, 1);
             if ~isempty(j0), age(ix(j0:end)) = sp.test.pos(ix(j0:end)) - sp.test.pos(ix(j0)); end
@@ -266,9 +284,9 @@ if isfield(sp.test, 'gain_ant') && isfield(sp.test, 'pos')
         m = Y_test == BR{b}; ot = BR{3 - b};
         w = m & age < Nw; a = m & age >= Nw;
         rc = @(y, k) 100 * [mean(y(w) == k), mean(y(a) == k)];
-        onset_cue(end+1) = struct('class', BR{b}, 'n', [sum(w), sum(a)], 'recall_fused_pct', rc(Y_pred, BR{b}), ...
-            'recall_latched_pct', rc(y_latch, BR{b}), 'as_other_fused_pct', rc(Y_pred, ot), ...
-            'as_other_latched_pct', rc(y_latch, ot)); %#ok<SAGROW>
+        onset_cue(end+1) = struct('class', BR{b}, 'n', [sum(w), sum(a)], 'recall_fused_pct', rc(Y_fused, BR{b}), ...
+            'recall_latched_pct', rc(Y_pred, BR{b}), 'as_other_fused_pct', rc(Y_fused, ot), ...
+            'as_other_latched_pct', rc(Y_pred, ot)); %#ok<SAGROW>
     end
     fprintf(['A lost branch, beside KPI 1: recall with the onset in the %d-cycle window | after it, fused class -> with ' ...
         'the latched cause (read as the other branch class)\n'], Nw);
@@ -318,8 +336,8 @@ fprintf('Saved results/confusion_matrix%s.png and results/accuracy_vs_snr%s.png\
 %% 5b2. Beside KPI 1 (which stays as above): steady state and onset latency
 % Steady state: the frames whose fusion window is full (rank >= N in their sub-run); a
 % sub-run of F_SUB frames starts with a window of one frame. Onset latency per class:
-% cycles from the first frame of the threat in a test sub-run to the first correct fused
-% class, and to the confirmed alarm (a hostile fused class, not none or
+% cycles from the first frame of the threat in a test sub-run to the first correct class
+% (the monitor's), and to the confirmed alarm (a hostile class, not none or
 % benign_interference, on m of the last n cycles, decision_config.m confirm; the
 % monitor's degradation path is not part of this detector reading). A sub-run starts with
 % the threat (its window holds no clean frame), but for a path-loss step, an antenna fault
@@ -359,7 +377,7 @@ for c = 2:numel(cls_names)
         'conf_median', median(tf_, 'omitnan'), 'conf_p90', prctile_nan(tf_, 90), ...
         'conf_never_pct', 100 * alarm_cls * mean(isnan(tf_))); %#ok<SAGROW>
 end
-fprintf(['Onset latency [cycles of %g ms; 0 = on the onset frame itself], test sub-runs: first correct fused class median / p90 (never) | ' ...
+fprintf(['Onset latency [cycles of %g ms; 0 = on the onset frame itself], test sub-runs: first correct class median / p90 (never) | ' ...
     'confirmed alarm median / p90 (never; benign_interference raises none)\n'], Cd.period_ms);
 for c = 1:numel(onset)
     fprintf('  %-20s %3d runs: %4.1f / %4.1f (%5.1f%%) | %4.1f / %4.1f (%5.1f%%)\n', onset(c).class, onset(c).n_runs, ...
@@ -409,6 +427,7 @@ metrics = struct( ...
     'step after its onset); a path_loss target at the Eb/N0 of its onset']);
 metrics.onset_cue = onset_cue;
 metrics.onset_diag = onset_diag;
+metrics.fused_alone = fused_alone;
 if ~isempty(fus)
     metrics.fusion_cycles = fus.N;
     metrics.per_frame = struct('accuracy_pct', frame_acc, 'macro_f1_pct', frame_f1, 'class_f1_pct', frame_class_f1);
@@ -446,7 +465,7 @@ end
 save(['results/eval_detector_metrics' tag '.mat'], 'metrics');
 fprintf('Saved results/eval_detector_metrics%s.mat (for KPI aggregation)\n', tag);
 % Per-frame outcomes for the breakdown of weak points (analyze_weak_points.m)
-pred = struct('y_true', Y_test, 'y_pred', Y_pred, 'y_latched', y_latch, 'ebno', snr_vals(:), 'ebno_kpi', eb_kpi(:), 'ebno_rx', eb_rx(:), ...
+pred = struct('y_true', Y_test, 'y_pred', Y_pred, 'y_fused', Y_fused, 'ebno', snr_vals(:), 'ebno_kpi', eb_kpi(:), 'ebno_rx', eb_rx(:), ...
     'level', sp.test.level(:), 'speed', sp.test.speed(:), 'run', sp.test.run(:), 'rank', rk(:));
 for f = {'pos', 'k_db', 'aoa', 'alt_m', 'bank', 'ds_ns', 'lev_db'}
     if isfield(sp.test, f{1}), pred.(f{1}) = sp.test.(f{1}); end

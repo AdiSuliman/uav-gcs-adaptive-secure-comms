@@ -32,6 +32,7 @@ fprintf('=== Off-grid check pools ===\n\n');
 %% 1. Configuration
 C = decision_config();
 S0 = load('params.mat'); p0 = S0.params; p0.quiet_build = true;
+assert_frame1_onsets(p0);                       % every threat on from its run's first frame (init_params.m)
 N_GEO = 36;                      % flights per check point
 FAM = 2; BLOCK = 10;             % pool_seed.m geometry family and seed block of the check flights
 LHS_SEED = 7200000;              % permutation stream of a design: LHS_SEED + 100 (Eb/N0 index) (+ shadowing group)
