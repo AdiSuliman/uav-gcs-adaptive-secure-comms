@@ -134,7 +134,7 @@ The review's own campaign estimate was 345-450 h; the difference is SURV and SUR
 
 ## Tests
 
-Five new tests directly after `test_m_files_parse`: `test_parallel_turn_owner`, `test_latency_load_logged`, `test_gui_bundle_drops_stale`, `test_console_shadowing_rolls_in`, `test_v3d_inject_resets_event`. No existing test changes its expectation (`test_console_scenario` and the fixed-view check in the shadowing test still hold: the maps and the gallery keep the held bank). Full suite (`runtests('code/tests/test_core.m')`): 146 passed, 0 failed, 32.3 min. `console_flights.m` received a comment edit while that run was starting, so `test_m_files_parse` and the five new tests were run again on the committed code: 6 passed.
+Five new tests directly after `test_m_files_parse`: `test_parallel_turn_owner`, `test_latency_load_logged`, `test_gui_bundle_drops_stale`, `test_console_shadowing_rolls_in`, `test_v3d_inject_resets_event`. No existing test changes its expectation (`test_console_scenario` and the fixed-view check in the shadowing test still hold: the maps and the gallery keep the held bank). Full suite (`runtests('code/tests/test_core.m')`): 146 passed, 0 failed, 32.3 min. `console_flights.m` was saved again about 1.5 min after that run started (before the commit), so `test_m_files_parse` and the five new tests were run again on the committed code: 6 passed.
 
 ## Files outside this group's list
 
