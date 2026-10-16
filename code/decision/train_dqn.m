@@ -17,9 +17,11 @@
 % sensitivity are scored as deployed: the DQN with escalation (policy_decide.m).
 %
 % Grid: monitor (alarm definition and m-of-n confirmation, CFG.monitors,
-% policy_monitor.m; Barajas et al.) x Eb/N0-drop threshold of the
-% drop alarm (the threshold of choose_drop_threshold.m and DROP_STEPS dB below it, above
-% the moving-away floor it records)
+% policy_monitor.m; Barajas et al.) x threshold of the drop alarm in the form
+% choose_drop_threshold.m chose on validation (drop_alarm: the monitors' 'class_drop' reads
+% as that form): the 3-cycle median window at its train-pool threshold and DROP_STEPS dB
+% below it, above the moving-away floor it records, or the window-limited CUSUM at its
+% validation threshold and the next more sensitive ones of its grid, as many as DROP_STEPS
 % x false-switch penalty of the TRAINING reward (CFG.fa_penalty_grid) x
 % CFG.dqn_gammas x CFG.dqn_seeds. Every run keeps the checkpoint with the best
 % recovery on its own validation episodes. All runs are then compared on every
@@ -48,6 +50,7 @@ close all; clc;
 fprintf('=== C2: Train DQN ===\n\n');
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
 K = link_env('tables', PP);
+PP.pools(:, :, :, 3:end) = {[]};         % C2 reads the train and validation splits only (memory)
 nA = numel(PP.actions);
 [nS, cont] = policy_state_size(nA, numel(PP.classes));
 SPLIT_TRAIN = 1; SPLIT_VAL = 2;
@@ -86,9 +89,13 @@ SEEDS = 42 + (0:N_SEEDS-1);
 FA_BOUND = 0.05;                         % one-sided 95% bound of the clean-link false alarms (KPI 6)
 DROP_DB = [];                            % drop alarm threshold of 'class_drop'
 DROP_FLOOR = 0;                          % moving away over the monitor's window (choose_drop_threshold.m)
+DROP_MODE = 'class_drop';                % form of the drop alarm (choose_drop_threshold.m, on validation)
 if isfile('data/drop_threshold.mat')
     Dd = load('data/drop_threshold.mat'); DROP_DB = Dd.drop_db;
     if isfield(Dd, 'floor_db'), DROP_FLOOR = Dd.floor_db; end
+    if isfield(Dd, 'drop_alarm') && strcmp(Dd.drop_alarm, 'class_cusum')
+        DROP_MODE = Dd.drop_alarm; DROP_DB = Dd.cusum_db; THC = Dd.THC;
+    end
     clear Dd
 end
 if ~isempty(DROP_DB), PP.drop_db = DROP_DB; end
@@ -130,6 +137,9 @@ val_spec = full_val_spec(PP, K, H, SPLIT_VAL, VAL_REPS, RandStream('mt19937ar', 
 val_thr = threat_of(PP, val_spec);                   % threat name per validation episode (severities pooled)
 DROPS = [];
 if ~isempty(DROP_DB), DROPS = DROP_DB - DROP_STEPS; DROPS = DROPS(DROPS > DROP_FLOOR); end
+if strcmp(DROP_MODE, 'class_cusum')       % the validation threshold and the next more sensitive ones
+    j = find(THC == DROP_DB, 1); DROPS = unique(THC(max(1, j - (0:numel(DROP_STEPS) - 1))), 'stable');
+end
 if isempty(DROPS), DROPS = NaN; end
 tab = policy_table(PP, K);
 
@@ -140,7 +150,7 @@ base = struct('alarm', {}, 'drop', {}, 'rule_rec', {}, 'rule_ret', {}, 'rule_fa_
     'tab_rec', {}, 'tab_ret', {}, 'tab_fa_w', {});
 for ai = 1:numel(ALARMS)
     for dd = DROPS
-        PPc = PP; [PPc.alarm_mode, PPc.confirm] = monitor(ALARMS{ai});
+        PPc = PP; [PPc.alarm_mode, PPc.confirm] = monitor(ALARMS{ai}, DROP_MODE);
         if ~isnan(dd), PPc.drop_db = dd; end
         Rr = dqn_eval_batches('rule_esc', PPc, K, val_spec, [], struct(), 5000, SPLIT_VAL);
         Rt = dqn_eval_batches('table', PPc, K, val_spec, [], tab, 5000, SPLIT_VAL);
@@ -211,7 +221,7 @@ rb = arrayfun(@(b) fa_up(b.rule_fa_w, b.rule_n_w), base);
 rok = any(rb <= FA_BOUND | isnan(rb));
 rule_sel = struct('alarm', base(ir).alarm, 'drop', base(ir).drop, 'rec', base(ir).rule_rec, 'fa_w', base(ir).rule_fa_w, ...
     'n_w', base(ir).rule_n_w, 'fa_upper', rb(ir), 'alarm_mode', '', 'confirm', [], 'drop_db', DROP_DB);
-[rule_sel.alarm_mode, rule_sel.confirm] = monitor(base(ir).alarm);
+[rule_sel.alarm_mode, rule_sel.confirm] = monitor(base(ir).alarm, DROP_MODE);
 if ~isnan(base(ir).drop), rule_sel.drop_db = base(ir).drop; end
 FD = false_change_rate(runs(best).sw_w, H.T, 1:numel(runs(best).sw_w), CD.period_ms);
 FR = false_change_rate(base(ir).rule_sw, H.T, 1:numel(base(ir).rule_sw), CD.period_ms);
@@ -230,7 +240,11 @@ rep{end+1} = sprintf(['Validation: %d episodes, every (threat cell, Eb/N0, geome
     'lowest per-threat recovery (severities pooled, KPI 4). FA: false-alarm episodes on %s independent clean ' ...
     'validation geometries (data/clean_val_pools.mat, one 30-cycle episode each) at Eb/N0 >= %g dB (KPI 6).'], ...
     numel(val_thr), VAL_REPS, n_txt(CV, PP, EBNO_THR), EBNO_THR);
-if ~isempty(DROP_DB)
+if ~isempty(DROP_DB) && strcmp(DROP_MODE, 'class_cusum')
+    rep{end+1} = sprintf(['''class_drop'' read as ''class_cusum'' (chosen on validation, data/drop_threshold.mat): drop ' ...
+        'alarm (and the path_loss class) when the window-limited CUSUM of the Eb/N0 drop reaches the run''s threshold; ' ...
+        'validation threshold %.1f dB^2'], DROP_DB);
+elseif ~isempty(DROP_DB)
     rep{end+1} = sprintf(['''class_drop'': drop alarm (and the path_loss class) after an Eb/N0 drop >= the run''s ' ...
         'threshold; train-pool threshold %.1f dB, moving-away floor %.2f dB (data/drop_threshold.mat)'], DROP_DB, DROP_FLOOR);
 end
@@ -280,7 +294,7 @@ seed_summary = struct('alarms', {{runs.alarm}}, 'drops', [runs.drop], 'fa_pens',
 H.gamma = gamma_sel; H.fa_pen = fa_pen_sel; H.cost_scale = cs_sel; H.sw_scale = ss_sel;
 action_names = PP.actions;
 gammas = GAMMAS;
-[alarm_mode, confirm] = monitor(alarm_sel);
+[alarm_mode, confirm] = monitor(alarm_sel, DROP_MODE);
 drop_db = drop_sel; if isnan(drop_db), drop_db = DROP_DB; end
 agent = dqn_dense(agent);                          % matrix form for deployment
 for gi = find(~cellfun(@isempty, agents)), agents{gi} = dqn_dense(agents{gi}); end
@@ -318,7 +332,7 @@ saveas(fig, 'results/dqn_training_curves.png'); close(fig);
 % alarm, penalty and gamma; DQN, rule + escalation and table are compared on the
 % validation episodes. The conclusion holds when the DQN stays ahead of both
 % baselines in recovery at every scale.
-PPc = PP; [PPc.alarm_mode, PPc.confirm] = monitor(alarm_sel);
+PPc = PP; [PPc.alarm_mode, PPc.confirm] = monitor(alarm_sel, DROP_MODE);
 if ~isempty(drop_db), PPc.drop_db = drop_db; end
 sens = struct('scale', {}, 'dqn_rec', {}, 'rule_rec', {}, 'tab_rec', {}, 'dqn_ret', {}, 'dqn_gput', {});
 for f = [1, SENS_SCALES]
@@ -413,22 +427,19 @@ fa = mean(sw > 0);
 end
 
 function [PPw, Kw] = clean_world(PP, CT)
-% The pools with the validation split replaced by the independent clean geometries.
-% Only the pools and their tables are cached: the monitor settings (alarm,
-% confirmation, drop threshold) always come from the PP of this call.
+% The pools with the validation split replaced by the independent clean geometries
+% (clean_split.m). Only the split's per-geometry fields and their tables are cached: the
+% monitor settings (alarm, confirmation, drop threshold) always come from the PP of this call.
 persistent key cache
 k = sprintf('%s|%s', CT.created, PP.created);
 if ~isequal(key, k)
-    nS = numel(PP.ebno); nA = numel(PP.actions);
-    pools = PP.pools;
-    pools(:, :, :, 2) = {[]};
-    ic = find(strcmp(PP.scen, 'none'), 1);
-    pools(ic, :, :, 2) = reshape(CT.pools(1, :, :), [1 nS nA]);
-    runs = PP.runs; runs{2} = CT.runs;
-    PPt = PP; PPt.pools = pools; PPt.runs = runs;
-    key = k; cache = struct('pools', {pools}, 'runs', {runs}, 'Kw', link_env('tables', PPt));
+    W = clean_split(PP, CT, 2);
+    key = k; cache = struct('W', W, 'Kw', link_env('tables', W));
 end
-PPw = PP; PPw.pools = cache.pools; PPw.runs = cache.runs;
+PPw = PP;
+for f = {'pools', 'runs', 'event_frame', 'speed', 'cell_geo'}   % the split's per-geometry fields
+    if isfield(cache.W, f{1}), PPw.(f{1}) = cache.W.(f{1}); end
+end
 Kw = cache.Kw;
 end
 
@@ -461,9 +472,11 @@ function out = ternary(c, a, b)
 if c, out = a; else, out = b; end
 end
 
-function [mode, confirm] = monitor(name)
-% 'class_drop 3/3' -> alarm definition 'class_drop', confirmation on 3 of the last 3 cycles.
+function [mode, confirm] = monitor(name, drop_mode)
+% 'class_drop 3/3' -> alarm definition 'class_drop', confirmation on 3 of the last 3 cycles;
+% 'class_drop' reads as the drop alarm's form drop_mode.
 t = strsplit(name);
 mode = t{1};
+if strcmp(mode, 'class_drop'), mode = drop_mode; end
 confirm = sscanf(t{2}, '%d/%d')';
 end

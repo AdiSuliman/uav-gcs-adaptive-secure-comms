@@ -37,10 +37,12 @@
 %          with and without the onset in the fusion window, by the monitor's class and the
 %          fused class alone). A path-loss step or an antenna fault, alone or in a
 %          combination: every frame after the same flight's clean link at no_action (the
-%          onset); a rolling-in shadowing flight from its own lead-in; with the monitor's 'class_drop' alarm the class
-%          path_loss counts only with the drop, so the path-loss component is detected by
-%          the drop alarm alone (policy_monitor.m), the others by their classes; with
-%          'class' by the fused class
+%          onset); a rolling-in flight (every cell on the shadowing groups' flights) from
+%          its event's frame on, after the same flight's clean link before it, as its
+%          episodes read it; with the monitor's drop alarm ('class_drop', 'class_cusum') the
+%          class path_loss counts only with the drop, so the path-loss component is
+%          detected by the drop alarm alone (policy_monitor.m), the others by their
+%          classes; with 'class' by the fused class
 %                                                                               >= 90%
 %   DET_h  DET on the flights whose unmitigated link is not restored (harmed)   >= 90%
 %          (DET_u, DET on the unharmed flights, is reported beside it, no target)
@@ -272,11 +274,8 @@ RW = cell(nD, nP); CT = [];
 if isfile('data/clean_test_pools.mat')
     L = load('data/clean_test_pools.mat', 'CT'); CT = L.CT; clear L
     check_det_id(PP, CT, 'edge_map', 'data/clean_test_pools.mat');
-    PPw = PP;
-    PPw.pools(:) = {[]};
-    PPw.pools(clean_cell, :, :, TEST) = reshape(CT.pools(1, :, :), [1 nS numel(PP.actions)]);
-    PPw.runs{TEST} = CT.runs; PPw.speed{TEST} = CT.speed;
-    PPw.cell_geo{clean_cell}{TEST} = 1:CT.n_geom;
+    PPw = clean_split(PP, CT, TEST);
+    PPw.pools(:, :, :, setdiff(1:numel(PP.runs), TEST)) = {[]};
     Kw = link_env('tables', PPw, 'flight');
     spec = cell_episodes(PPw, clean_cell, TEST, 1, false, false, NE, T, rs, []);
     for d = 1:nD
@@ -368,7 +367,8 @@ for c = tc
         for s = 1:nS
             P = PP.pools{c, s, K.na, sp};
             if isempty(P) || isempty(P.ber), continue; end
-            [hit, on, hit_f, age] = det_frames(P, PP.pools{clean_cell, s, K.na, sp}, PP.scen{c}, ok_c, PP);
+            [hit, on, hit_f, age] = det_frames(P, PP.pools{clean_cell, s, K.na, sp}, PP.scen{c}, ok_c, PP, PP.runs{sp}, ...
+                K.ev{sp});
             i = flight_of(IDX, c, s, sp, P.run, PP.runs{sp});
             FT.det_k = FT.det_k + accumarray(i, double(hit(:, 1) & on), [nF 1]);
             FT.detb_k = FT.detb_k + accumarray(i, double(hit(:, 2) & on), [nF 1]);
@@ -383,14 +383,16 @@ for c = tc
     end
 end
 % LINK: packet loss of the clean link at no_action; every flight also carries the clean
-% link of its own geometry (the LINK_T reference)
+% link of its own geometry (the LINK_T reference), a rolling-in flight from its event's
+% frame on, the frames its episodes read after the onset (event_rows.m, link_env.m 'flight')
 for sp = [SPL SPEED]
     for s = 1:nS
         P = PP.pools{clean_cell, s, K.na, sp};
         if isempty(P) || isempty(P.ber), continue; end
+        k = event_rows(P, PP.runs{sp}, K.ev{sp});
         i = flight_of(IDX, clean_cell, s, sp, P.run, PP.runs{sp});
-        FT.link_k = FT.link_k + accumarray(i, double(P.fer), [nF 1]);
-        FT.link_n = FT.link_n + accumarray(i, 1, [nF 1]);
+        FT.link_k = FT.link_k + accumarray(i(k), double(P.fer(k)), [nF 1]);
+        FT.link_n = FT.link_n + accumarray(i(k), 1, [nF 1]);
     end
 end
 ic = IDX(sub2ind(size(IDX), clean_cell + 0 * FT.s, FT.s, FT.sp, FT.r)); m = ic > 0;
@@ -647,14 +649,15 @@ if isfile('data/check_pools.mat')
             P = CK.pools{c, s, Kc.na, 1};
             [~, r] = ismember(P.run, CK.runs{1});
             i = KI(sub2ind(size(KI), c + 0 * r, s + 0 * r, r));
-            if c == k0
-                KF.link_k = KF.link_k + accumarray(i, double(P.fer), [nKF 1]);
-                KF.link_n = KF.link_n + accumarray(i, 1, [nKF 1]);
+            if c == k0                                % a rolling-in flight from its event's frame on
+                k = event_rows(P, CK.runs{1}, Kc.ev{1});
+                KF.link_k = KF.link_k + accumarray(i(k), double(P.fer(k)), [nKF 1]);
+                KF.link_n = KF.link_n + accumarray(i(k), 1, [nKF 1]);
                 continue
             end
             ok_c = det_classes(CK.classes, acts, CK.scen{c});
             Pc = []; if size(CK.pools, 2) >= s, Pc = CK.pools{k0, s, Kc.na, 1}; end
-            [hit, on] = det_frames(P, Pc, CK.scen{c}, ok_c, CK);
+            [hit, on] = det_frames(P, Pc, CK.scen{c}, ok_c, CK, CK.runs{1}, Kc.ev{1});
             KF.det_k = KF.det_k + accumarray(i, double(hit(:, 1) & on), [nKF 1]);
             KF.det_n = KF.det_n + accumarray(i, double(on), [nKF 1]);
         end
@@ -846,16 +849,20 @@ pl = tc(strcmp(PP.scen(tc), 'path_loss'));
 nB0 = size(OHP.win_drop_db, 3);
 OV = nan(numel(OHP.alt_m), numel(OHP.ebno), nB0); OLt = OV; OLl = OV;
 vn = var_of(VAR, 'static', NaN, DLY(1), find(strcmp(POL, 'none'), 1));   % no response
-thr_ohp = Inf; if strcmp(PP.alarm_mode, 'class_drop') && isfield(PP, 'drop_db'), thr_ohp = PP.drop_db; end
+thr_ohp = Inf; if any(strcmp(PP.alarm_mode, {'class_drop', 'class_cusum'})) && isfield(PP, 'drop_db'), thr_ohp = PP.drop_db; end
+RD = OHP.win_drop_db >= thr_ohp; RL = max(OHP.win_drop_db, OHP.lost_db) >= thr_ohp;   % read along the pass: tracked, lost
+if strcmp(PP.alarm_mode, 'class_cusum')                % the CUSUM along the pass; a lost tracker's lasting step
+    RD = pass_cusum(OHP, thr_ohp);                    % raises it when above half its smallest change (drop_cusum.m)
+    RL = RD | OHP.lost_db > C.sev.path_loss.levels(1) / 2;
+end
 for j = 1:numel(OHP.ebno)
     s = find(PP.ebno == OHP.ebno(j), 1);
     if isempty(s) || isempty(ip), continue; end
     NR = arrayfun(@(i) pol_layers(take_rows(FTi{i}, FTi{i}.s == s), vn, 'surv', TGT, B).prot.verdict, ip);
     for h = 1:numel(OHP.alt_m)
         for b = 1:nB0                                 % a lost tracker's fallback is a step, read in full
-            w = OHP.win_drop_db(h, j, b);
             [OV(h, j, b), OLt(h, j, b), OLl(h, j, b)] = overhead_verdict(OHP.drop_band_db(h, j, b) + [OHP.track_db OHP.lost_db], ...
-                [w, max(w, OHP.lost_db)] >= thr_ohp, lvs, X1.commit(ip, s), NR);
+                [RD(h, j, b), RL(h, j, b)], lvs, X1.commit(ip, s), NR);
         end
     end
 end
@@ -1206,11 +1213,11 @@ for i = 1:nT
 end
 sm{end+1} = '';
 sm{end+1} = sprintf(['--- Overhead pass (overhead_pass.m, results/overhead_pass.mat), one letter per speed band (from %s ' ...
-    'km/h): where the drop every flight of the band reads along the pass reaches the deployed threshold (%g dB), path_loss COMMITTED ' ...
-    '(D%d) at the smallest level >= the drop, else the no-response PROT there (C, or U); C when both the tracked ' ...
+    'km/h): where every flight of the band raises the deployed drop alarm along the pass (%s, threshold %g), path_loss ' ...
+    'COMMITTED (D%d) at the smallest level >= the drop, else the no-response PROT there (C, or U); C when both the tracked ' ...
     '(+%.2f dB) and the tracker-lost (+%g dB, a step) bounds are, N when the tracked one is not; * the lost bound ' ...
-    'above %g dB, not measured ---'], strjoin(compose('%.0f', OHP.win_v_kmh), '/'), thr_ohp, DLY(1), OHP.track_db, ...
-    OHP.lost_db, OHP.pl_top_db);
+    'above %g dB, not measured ---'], strjoin(compose('%.0f', OHP.win_v_kmh), '/'), PP.alarm_mode, thr_ohp, DLY(1), ...
+    OHP.track_db, OHP.lost_db, OHP.pl_top_db);
 x = arrayfun(@(e, r) sprintf('%g dB %.2f km', e, r), OHP.ebno, OHP.r0_km, 'UniformOutput', false);
 sm{end+1} = sprintf('%-10s %s', 'altitude', sprintf('%-16s', x{:}));
 for h = 1:numel(OHP.alt_m)
@@ -1679,4 +1686,28 @@ function OHP = overhead()
 % The overhead pass when its stage has not run (overhead_pass.m, in its own workspace).
 overhead_pass;
 L = load('results/overhead_pass.mat', 'OHP'); OHP = L.OHP;
+end
+
+function R = pass_cusum(OHP, thr)
+% Whether the 'class_cusum' drop alarm (drop_alarm_any.m) is raised along the pass over the
+% GCS at every speed of a band (every 2 km/h, both ends), wings level and banked at every
+% bearing of the GCS: the passes of overhead_pass.m's win_drop_db, per altitude, distance and
+% speed band.
+VB = OHP.band_kmh; dt = OHP.period_ms / 1000;
+R = false(numel(OHP.alt_m), numel(OHP.r0_km), numel(OHP.bank_deg));
+for i = 1:numel(OHP.alt_m)
+    for j = 1:numel(OHP.r0_km)
+        [~, r0, d] = overhead_drop_db(OHP.alt_m(i), OHP.r0_km(j), OHP.gcs_h_m, OHP.null_db);
+        for b = 1:numel(OHP.bank_deg)
+            [~, rb] = overhead_drop_db(OHP.alt_m(i), OHP.r0_km(j), OHP.gcs_h_m, OHP.null_db, OHP.bank_deg(b));
+            ra = [r0; rb];
+            ok = true;
+            for v = linspace(VB(b), VB(b + 1), max(2, ceil((VB(b + 1) - VB(b)) / 2) + 1)) / 3.6
+                ok = v > 0 && all(drop_alarm_any(interp1(d, ra', abs(d(end) - (0:v * dt:2 * d(end))))', 'class_cusum', thr));
+                if ~ok, break; end
+            end
+            R(i, j, b) = ok;
+        end
+    end
+end
 end

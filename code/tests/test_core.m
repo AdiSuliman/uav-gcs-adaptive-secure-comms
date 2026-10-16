@@ -3362,6 +3362,261 @@ h = det_frames(mk('none', 4, 10), Pc, 'path_loss', ok('path_loss'), PP);
 verifyFalse(tc, any(h(:, 1)));
 end
 
+function test_clean_split_event_frames(tc)
+% A split whose geometries hold rolling-in flights (event frames) replaced by a clean pool
+% larger than the split, as C2, C2e, the edge map and the diagnostics replace it
+% (clean_split.m): every per-geometry field follows the clean pool's runs, the tables build
+% with either reference, and no clean geometry is read as a rolling-in one (no event, the
+% episode on the clean pool's own run). Runs replaced without their event frames stop
+% link_env at once.
+A = policy_actions(); nA = numel(A); fn = link_features('names'); n = 20;
+mk = @(runs) struct('ber', zeros(n * numel(runs), 1), 'fer', zeros(n * numel(runs), 1, 'single'), ...
+    'run', repelem(runs(:), n), 'probs', repmat([1 0], n * numel(runs), 1), 'maha', ones(n * numel(runs), 1), ...
+    'feat', [repelem(runs(:), n), zeros(n * numel(runs), numel(fn) - 1)], 'act', zeros(n * numel(runs), 1));
+PP = struct('actions', {A}, 'scen', {{'none', 'airframe_shadowing'}}, 'ebno', 9, 'runs', {{101:103, 201:203}}, ...
+    'event_frame', {{nan(1, 3), [NaN 11 11]}}, 'F_SUB', n, 'classes', {{'none', 'airframe_shadowing'}}, ...
+    'feat_names', {fn}, 'maha_thr', 0, 'clean', 1e-6, 'clean_fer', 0, 'gp', ones(1, nA), 'bw', ones(1, nA), ...
+    'pw', ones(1, nA), 'sps', 4, 'bps', 2, 'speed', {{ones(1, 3), ones(1, 3)}}, 'cell_geo', {{{1:3, 1:3}, {1:3, 2:3}}});
+PP.pools = cell(2, 1, nA, 2);
+for sp = 1:2, for a = 1:nA, PP.pools{1, 1, a, sp} = mk(PP.runs{sp}); PP.pools{2, 1, a, sp} = mk(PP.runs{sp}); end, end
+CT = struct('runs', 401:407, 'n_geom', 7, 'speed', 50 * ones(1, 7));
+CT.pools = cell(1, 1, nA);
+for a = 1:nA, CT.pools{1, 1, a} = mk(CT.runs); end
+W = clean_split(PP, CT, 2);
+verifyEqual(tc, W.runs{2}, CT.runs);
+verifyEqual(tc, W.event_frame{2}, nan(1, 7));
+verifyEqual(tc, W.event_frame{1}, PP.event_frame{1});
+verifyEqual(tc, [W.speed{2}; W.cell_geo{1}{2}], [CT.speed; 1:7]);
+verifyEmpty(tc, W.pools{2, 1, 1, 2});
+for ref = {'mean', 'flight'}
+    K = link_env('tables', W, ref{1});
+    verifyEqual(tc, K.nR, [3 7]);
+    verifyTrue(tc, all(isnan(K.ev{2})));
+end
+spec = struct('scn', ones(1, 4), 's', ones(1, 4), 'onset', 3 * ones(1, 4), 'follow', false(1, 4), 'fdelay', 2 * ones(1, 4), ...
+    'unk', false(1, 4), 'T', 30, 'r', 4:7);                          % geometries beyond the replaced split's
+[E, obs] = link_env('reset', W, K, spec, 2, RandStream('mt19937ar', 'Seed', 3));
+verifyFalse(tc, any(E.ev));
+verifyEqual(tc, obs.feat(:, 1)', CT.runs(4:7));
+B = PP; B.pools(1, :, :, 2) = CT.pools(1, :, :); B.runs{2} = CT.runs;
+verifyError(tc, @() link_env('tables', B), 'link_env:event_frame');
+for f = {'train_dqn', 'evaluate_policies', 'edge_map', 'diag_false_alarms', 'diag_path_loss'}
+    src = fileread(which(f{1}));
+    verifyNotEmpty(tc, strfind(src, 'clean_split(PP, CT, '), f{1});
+    verifyEmpty(tc, regexp(src, 'runs\{(2|TEST)\} = CT\.runs', 'once'), f{1});
+end
+end
+
+function test_pool_checkpoint_resume(tc)
+% The pool builders keep every finished cell on disk under a key of everything its frames
+% depend on (pool_checkpoint.m): a build stopped part-way, with the next cell's write cut
+% off, resumes with the cells it holds, computes only the others, and gives the same result
+% as an uninterrupted build; a cell of another key (another detector) is computed again; the
+% output is written whole or not at all, and the cells are removed after it.
+keys = arrayfun(@(c) pool_checkpoint('key', {'v7-tag', 'det-1', 100 + (1:3), c}), 1:5, 'UniformOutput', false);
+verifyEqual(tc, numel(unique(keys)), 5);
+verifyEqual(tc, pool_checkpoint('key', {'v7-tag', 'det-1', 100 + (1:3), 2}), keys{2});
+job = @(c) struct('Pc', {num2cell(c * (1:6))}, 'x', sin(c * (1:1000)));
+[R0, ran0] = ckpt_build('full', keys, job, Inf);
+verifyEqual(tc, ran0, 1:5);
+verifyError(tc, @() ckpt_build('part', keys, job, 3), 'test:stop');
+fid = fopen(fullfile('part', 'cell_0004.tmp.mat'), 'w'); fwrite(fid, uint8(1:100)); fclose(fid);   % a write cut off
+[R1, ran1] = ckpt_build('part', keys, job, Inf);
+verifyEqual(tc, ran1, [4 5]);
+verifyEqual(tc, R1, R0);
+verifyEmpty(tc, dir(fullfile('part', '*.tmp.mat')));
+k2 = keys; k2{2} = pool_checkpoint('key', {'v7-tag', 'det-2', 100 + (1:3), 2});
+verifyEqual(tc, pool_checkpoint('todo', 'part', k2), 2);
+pool_checkpoint('commit', 'out.mat', struct('PP', R1{1}, 'clean_ref', 7));
+verifyEqual(tc, sort(who('-file', 'out.mat'))', {'PP', 'clean_ref'});
+verifyFalse(tc, isfile('out.tmp.mat'));
+pool_checkpoint('clear', 'part');
+verifyFalse(tc, isfolder('part'));
+src = fileread(which('build_policy_pools'));
+verifyNotEmpty(tc, strfind(src, 'pool_checkpoint(''key'', {MODEL_TAG, DET_ID, runs, cells(c), EBNO, ACTIONS, geoc{c}, opt, ...'));
+verifyNotEmpty(tc, strfind(src, 'parfor (k = 1:numel(todo), NWP)'));
+verifyNotEmpty(tc, strfind(fileread(which('pool_worker_init')), 'cd(d);'));   % the workers' own folder: the cells' path is absolute
+for f = {'build_policy_pools', 'build_clean_test_pools', 'build_check_pools'}
+    src = fileread(which(f{1}));
+    for c = {'todo', 'save', 'load', 'commit', 'clear'}
+        verifyNotEmpty(tc, strfind(src, ['pool_checkpoint(''' c{1} ''''])', [f{1} ' ' c{1}]);
+    end
+    verifyEmpty(tc, regexp(src, 'save\(f_out|save\(''data/policy_pools\.mat''', 'once'), f{1});
+    verifyNotEmpty(tc, strfind(src, 'CKD = fullfile(pwd, ''data'', '), f{1});
+end
+end
+
+function [out, ran] = ckpt_build(dirn, keys, job, stop)
+% The pool builders' loop: the cells not on disk, each saved as it finishes (an error after
+% cell stop), then every cell read back from disk.
+todo = pool_checkpoint('todo', dirn, keys); ran = [];
+for c = todo
+    pool_checkpoint('save', dirn, c, keys{c}, job(c)); ran(end+1) = c; %#ok<AGROW>
+    if c == stop, error('test:stop', 'stopped after cell %d', c); end
+end
+out = arrayfun(@(c) pool_checkpoint('load', dirn, c), 1:numel(keys), 'UniformOutput', false);
+end
+
+function test_monitor_release_fusion(tc)
+% The fusion's window holds every frame's levels less the known gain of the configuration it
+% was received with (policy_monitor.m): released after power_control, rate_reduce or both, a
+% clean link reads no level step and the fused class stays that of no_action, while a real
+% 4 dB step behind a held configuration still reads as one. Without the compensation the
+% release of rate_reduce+power_control reads as a step of our level.
+A = policy_actions(); na = find(strcmp(A, 'no_action')); nF = numel(link_features('names'));
+p = base_params(); [gk, gw] = config_gain_db(A, p);
+cls = {'none', 'path_loss'}; C = numel(cls);
+nT = numel(temporal_evidence('names', C)); wn = window_cues('names'); nZ = nT + numel(wn) + C;
+FM = struct('W', zeros(nZ + 1, C), 'mu', zeros(1, nZ), 'sd', ones(1, nZ), 'C', C, 'lambda', 0);
+FM.W(nT + find(strcmp(wn, 'stp_db')), 2) = 2; FM.W(nT + find(strcmp(wn, 'stp_db_mon')), 2) = 2; FM.W(end, 2) = -12;
+PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', -Inf, 'confirm', [2 2], ...
+    'alarm_mode', 'class_drop', 'drop_db', 3, 'cfg_gain_db', gk, 'pw', 10.^(gw / 10), 'fuse', FM, 'fuse_N', 5);
+rng(5); T = 24; ng = 0.3 * randn(T, 3); ns = 0.3 * randn(T, 1);
+    function [cl, pr, st] = relrun(PPx, seq, step)
+        m = policy_monitor('init', 1, numel(A)); cl = cell(1, T); pr = zeros(T, C); st = zeros(T, 2);
+        for t = 1:T
+            o = struct('probs', [1 0], 'unknown', false, 'feat', zeros(1, nF), 'maha', 0);
+            o.feat(feature_index('log_ber')) = -6; o.feat(feature_index('est_margin')) = 20;
+            lv = -step * (t > 12);
+            o.feat(feature_index('sinr')) = 12 + lv + gk(seq(t)) + ns(t) - 10*log10(4) + 10*log10(2);
+            o.gant = lv + gw(seq(t)) + ng(t, :); o.cfg_link = seq(t);
+            [m, M] = policy_monitor('update', m, o, PPx, seq(t));
+            m = policy_monitor('change', m, t < T && seq(t + 1) ~= seq(t));
+            cl{t} = M.cls{1}; pr(t, :) = M.probs;
+            Z = window_cues(m.wg(:, :, end-4:end), m.wf(:, :, end-4:end), [], []);
+            st(t, :) = Z([find(strcmp(wn, 'stp_db')), find(strcmp(wn, 'stp_db_mon'))]);
+        end
+    end
+[c0, p0, s0] = relrun(PP, na * ones(1, T), 0);                         % no_action throughout
+verifyEqual(tc, unique(c0), {'none'});
+for c = {'power_control', 'rate_reduce', 'rate_reduce+power_control'}
+    ac = find(strcmp(A, c{1}));
+    [c1, p1, s1] = relrun(PP, [ac * ones(1, 12), na * ones(1, 12)], 0);
+    verifyEqual(tc, unique(c1), {'none'}, c{1});
+    verifyEqual(tc, p1, p0, 'AbsTol', 1e-9, c{1});
+    verifyEqual(tc, s1, s0, 'AbsTol', 1e-9, c{1});
+    [c2, ~, s2] = relrun(PP, ac * ones(1, T), 4);                    % a real 4 dB step behind it
+    verifyTrue(tc, all(strcmp(c2(13:16), 'path_loss')), c{1});
+    verifyGreaterThan(tc, min(s2(13:16, :), [], 'all'), 3, c{1});
+end
+PPu = PP; PPu.cfg_gain_db = zeros(1, numel(A)); PPu.pw = ones(1, numel(A));
+ac = find(strcmp(A, 'rate_reduce+power_control'));
+cu = relrun(PPu, [ac * ones(1, 12), na * ones(1, 12)], 0);
+verifyTrue(tc, all(strcmp(cu(13:16), 'path_loss')));
+end
+
+function test_det_frames_rolling_in(tc)
+% DET of a rolling-in flight (an event frame) reads it as its episodes do (link_env.m): the
+% same flight's clean link before the event's frame as the lead-in, the cell's frames from it
+% on; the cell's earlier frames (the jammer alone before the roll-in) never count, the fusion
+% window at the event's frame holds the clean lead-in, and the drop alarm's reference is the
+% lead-in's (not the clean flight's frames after the event).
+cls = {'none', 'jamming', 'path_loss', 'airframe_shadowing'}; C = numel(cls); nf = numel(link_features('names'));
+n = 38; e0 = 11; is = feature_index('sinr');
+oh = @(k, m) repmat(double(strcmp(cls, k)), m, 1);
+mk = @(pr, act, sinr) struct('probs', pr, 'run', 101 * ones(n, 1), 'gant', zeros(n, 3), ...
+    'feat', [zeros(n, is - 1), sinr(:), zeros(n, nf - is)], 'ber', zeros(n, 1), 'act', act * ones(n, 1));
+nT = numel(temporal_evidence('names', C)); nZ = nT + numel(window_cues('names')) + C;
+FM = struct('W', [eye(C); zeros(nZ + 1 - C, C)], 'mu', zeros(1, nZ), 'sd', ones(1, nZ), 'C', C, 'lambda', 0);
+PP = struct('classes', {cls}, 'fuse', FM, 'fuse_N', 3, 'sps', 2, 'bps', 2);   % fused: the window's mean log-probabilities
+P = mk([oh('jamming', e0 - 1); oh('airframe_shadowing', n - e0 + 1)], 1, 10 * ones(n, 1));
+Pc = mk(oh('none', n), 0, 10 * ones(n, 1));
+okn = repmat(strcmp(cls, 'none'), 2, 1);                             % rows whose class is 'none'
+[~, on, hf, age] = det_frames(P, Pc, 'jamming+airframe_shadowing', okn, PP, [99 101], [NaN e0]);
+verifyFalse(tc, any(on(1:e0 - 1))); verifyTrue(tc, all(on(e0:end)));
+verifyTrue(tc, all(isnan(age(1:e0 - 1)))); verifyEqual(tc, age(e0:end)', 0:n - e0);
+verifyTrue(tc, hf(e0, 1));                                           % the window: the clean lead-in and the event's frame
+verifyFalse(tc, any(hf(e0 + 2:end, 1)));
+[~, on0, hf0] = det_frames(P, Pc, 'jamming+airframe_shadowing', okn, PP);   % read from the run's first frame
+verifyTrue(tc, all(on0)); verifyFalse(tc, hf0(e0, 1));
+sc = 'jamming+airframe_shadowing+path_loss';
+ok = repmat(ismember(cls, {'jamming', 'path_loss', 'airframe_shadowing'}), 2, 1);
+PP = struct('classes', {cls}, 'fuse', [], 'fuse_N', 1, 'sps', 2, 'bps', 2, 'alarm_mode', 'class_drop', 'drop_db', 3);
+Pc = mk(oh('none', n), 0, [10 * ones(e0 - 1, 1); 30 * ones(n - e0 + 1, 1)]);   % the clean flight rises after the event
+for md = {'class_drop', 36; 'class_cusum', 36}'
+    PP.alarm_mode = md{1}; if strcmp(md{1}, 'class_drop'), PP.drop_db = 3; else, PP.drop_db = md{2}; end
+    h = det_frames(mk(oh('none', n), 1, 10 * ones(n, 1)), Pc, sc, ok, PP, 101, e0);   % no drop below the lead-in
+    verifyFalse(tc, any(h(:, 1)), md{1});
+    h = det_frames(mk(oh('none', n), 1, 4 * ones(n, 1)), Pc, sc, ok, PP, 101, e0);    % 6 dB below it
+    verifyFalse(tc, any(h([1:e0 - 1, e0], 1)), md{1});
+    verifyTrue(tc, all(h(e0 + 1:end, 1)), md{1});
+end
+end
+
+function test_drop_cusum_alarm(tc)
+% The window-limited CUSUM drop alarm (drop_cusum.m: Page's recursion, the drop's size the
+% mean of the last 3 drops held in the path-loss levels' range): its statistic for steps, none
+% for a drop below half the smallest level; the monitor's 'class_cusum' and 'class_drop' equal
+% their sequence form (drop_alarm_seq.m), the reference held while the statistic builds;
+% the pass reading (drop_alarm_any.m) equals the whole sequence's; the form chosen on
+% validation (drop_alarm_form.m) and read by the policies, DET and the edge map.
+z = zeros(1, 3);
+verifyEqual(tc, drop_cusum([z, 6 * ones(1, 4)]), [z, 18 36 54 72], 'AbsTol', 1e-9);
+verifyEqual(tc, drop_cusum([z, 10 * ones(1, 4)]), [z, 42 84 84 + 20/3 * (10 - 10/3) 84 + 20/3 * (10 - 10/3) + 50], 'AbsTol', 1e-9);
+verifyEqual(tc, drop_cusum(2.5 * ones(1, 30)), zeros(1, 30));        % the attitude's common change, at most 2.5 dB
+A = policy_actions(); na = find(strcmp(A, 'no_action')); nF = numel(link_features('names'));
+rng(7); n = 60; e = 12 + randn(6, n);
+e(2, 31:end) = e(2, 31:end) - 6; e(3, 31:end) = e(3, 31:end) - 4; e(4, 31:end) = e(4, 31:end) - 10;
+e(5, :) = 12 - 0.1 * (1:n); e(6, :) = 12; e(6, 21:end) = 8;        % a ramp; a noise-free 4 dB step
+for md = {'class_drop', 3; 'class_cusum', 36}'
+    PP = struct('actions', {A}, 'classes', {{'none', 'path_loss'}}, 'sps', 4, 'bps', 2, 'maha_thr', -Inf, ...
+        'confirm', [2 2], 'alarm_mode', md{1}, 'drop_db', md{2}, 'cfg_gain_db', zeros(1, numel(A)));
+    m = policy_monitor('init', 6, numel(A)); da = false(6, n);
+    for t = 1:n
+        o = struct('probs', repmat([1 0], 6, 1), 'unknown', false(6, 1), 'feat', zeros(6, nF));
+        o.feat(:, feature_index('log_ber')) = -6;
+        o.feat(:, feature_index('sinr')) = e(:, t) - 10*log10(4) + 10*log10(2);
+        [m, M] = policy_monitor('update', m, o, PP, na * ones(1, 6));
+        da(:, t) = M.drop_alarm';
+    end
+    verifyEqual(tc, da, drop_alarm_seq(e, md{1}, md{2}), md{1});
+    verifyEqual(tc, drop_alarm_any(e, md{1}, md{2}), any(drop_alarm_seq([repmat(e(:, 1), 1, 20), e], md{1}, md{2}), 2), md{1});
+end
+verifyEqual(tc, find(da(6, :), 1), 26);                              % 6 per cycle from the step on, the reference held
+verifyEqual(tc, find(drop_alarm_seq(e(6, :), 'class_drop', 3), 1), 22);
+r = 12 - 0.02 * (1:1000); s = 12 * ones(1, 1000); s(500:end) = 4;
+verifyEqual(tc, drop_alarm_any([r; s], 'class_cusum', 36), [false; true]);
+V = struct('grid', {2:0.5:10, 18 * (1:0.5:10)}, 'pick', {3, 2}, 'det', {0.80 * ones(1, 17), 0.83 * ones(1, 19)}, ...
+    'delay', {2 * ones(1, 17), 3 * ones(1, 19)});
+[f, h] = drop_alarm_form(V); verifyEqual(tc, {f, h}, {'class_cusum', 27});
+V(2).det(:) = 0.805; verifyEqual(tc, drop_alarm_form(V), 'class_drop');   % within a point, a longer delay
+V(2).delay(:) = 1.5; verifyEqual(tc, drop_alarm_form(V), 'class_cusum');
+V(1).pick = NaN; V(2).det(:) = 0.5; verifyEqual(tc, drop_alarm_form(V), 'class_cusum');
+V(2).pick = NaN; [f, h] = drop_alarm_form(V); verifyEqual(tc, f, 'class_drop'); verifyTrue(tc, isnan(h));
+src = fileread(which('train_dqn'));
+verifyNotEmpty(tc, strfind(src, 'if strcmp(mode, ''class_drop''), mode = drop_mode; end'));
+ln = regexp(src, '[^\n]*(?<!\w)monitor\([^\n]*', 'match');      % the local monitor's calls and definition
+verifyEqual(tc, numel(ln), 5); verifyTrue(tc, all(contains(ln, {'DROP_MODE', 'drop_mode'})));
+verifyNotEmpty(tc, strfind(fileread(which('choose_drop_threshold')), '''drop_alarm'', ''cusum_db'''));
+verifyNotEmpty(tc, strfind(fileread(which('det_frames')), 'use_drop = any(strcmp(mode, {''class_drop'', ''class_cusum''}));'));
+verifyNotEmpty(tc, strfind(fileread(which('edge_map')), 'RD = pass_cusum(OHP, thr_ohp);'));
+end
+
+function test_split_norm_memory(tc)
+% The pool builders read the training z-score and the classes alone (split_norm.m: the
+% top-level variables prepare_data.m writes beside the splits; a file without them read
+% whole); C2 keeps the train and validation pools only, and the check-pool builder no
+% frames of the policy pools.
+splits = struct('train', struct('X', rand(64, 64, 1, 50)), 'norm', struct('feat_mean', 1:3, 'feat_std', 4:6, ...
+    'feat_names', {{'a', 'b', 'c'}}), 'classes', {{'none'; 'jamming'}});
+save('splits_old.mat', 'splits', '-v7.3');
+save('splits_new.mat', 'splits', '-v7.3');
+N = struct('norm', splits.norm, 'classes', {splits.classes});
+save('splits_new.mat', '-struct', 'N', '-append');
+for f = {'splits_old.mat', 'splits_new.mat'}
+    [nm, cl] = split_norm(f{1});
+    verifyEqual(tc, nm, splits.norm, f{1}); verifyEqual(tc, cl, splits.classes, f{1});
+end
+verifyNotEmpty(tc, strfind(fileread(which('prepare_data')), 'save(''data/splits.mat'', ''-struct'', ''N'', ''-append'');'));
+for f = {'build_policy_pools', 'build_clean_test_pools', 'build_check_pools'}
+    src = fileread(which(f{1}));
+    verifyNotEmpty(tc, strfind(src, 'nm = split_norm();'), f{1});
+    verifyEmpty(tc, strfind(src, 'load(''data/splits.mat'''), f{1});
+end
+verifyNotEmpty(tc, regexp(fileread(which('train_dqn')), 'K = link_env\(''tables'', PP\);\r?\nPP\.pools\(:, :, :, 3:end\) = \{\[\]\};', 'once'));
+verifyNotEmpty(tc, regexp(fileread(which('build_check_pools')), 'PTAG = PP\.model_tag;[^\n]*\r?\nclear PP', 'once'));
+end
+
 function test_clean_pool_draws(tc)
 % The clean-link pools keep the seeds and every per-flight draw they flew:
 % geometry k takes family 1 + 2 floor((k - 1) / 100), geometry mod(k - 1, 100) + 1 of the

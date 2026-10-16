@@ -7,7 +7,8 @@
 % Input:  data/spectrograms.mat
 % Output: data/splits.mat (train/val/test with X, Y, feats, ebno, speed, run, level, and
 %         the frame position, per-antenna gains, received Eb/N0 (ebno_rx) and the idle
-%         time's records (idle, act_idle, idle_amb) when present; norm stats)
+%         time's records (idle, act_idle, idle_amb) when present; norm stats; norm and
+%         classes also as variables of their own, read without the splits, split_norm.m)
 % With FRESH_TEST true (build_fresh_test.m): the second test set of data/spectrograms_fresh.mat,
 % z-scored with the training statistics of data/splits.mat -> data/splits_fresh.mat
 % (test, norm and classes only).
@@ -69,13 +70,15 @@ for f = 1:numel(sp0.feat_names)
 end
 fprintf('\n');
 save('data/splits.mat', 'splits', '-v7.3');
+N = struct('norm', splits.norm, 'classes', {classes});
+save('data/splits.mat', '-struct', 'N', '-append');
 fprintf('Saved data/splits.mat\n=== B1 Complete ===\n');
-clear S sp0 splits feats_norm   % large arrays; main.m runs the stages in one workspace
+clear S sp0 splits feats_norm N   % large arrays; main.m runs the stages in one workspace
 
 function prepare_fresh_test()
 % The second test set: every sub-run in the test fold, the training z-score of data/splits.mat.
 S = load('data/spectrograms_fresh.mat'); sp0 = S.spec; clear S
-N = load('data/splits.mat', 'splits'); nm = N.splits.norm; classes = N.splits.classes; clear N
+[nm, classes] = split_norm('data/splits.mat');
 assert(isequal(categories(sp0.Y), classes(:)), 'prepare_data: the second test set has other classes');
 assert(isequal(sp0.feat_names, nm.feat_names), 'prepare_data: the second test set has other features');
 assert(all(sp0.fold == 6), 'prepare_data: the second test set holds sub-runs outside the test fold');

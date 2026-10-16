@@ -28,7 +28,8 @@ function R = rollout_policy(kind, PP, K, spec, split, agent, opt, seed)
 %          recoverable  some configuration restores this geometry (link_env.m)
 %          switches, false_sw (whole episode), esc (escalations), aoa (3 x NE),
 %          cfg_final, r (geometry index), cfg_trace (T x NE); at the first change:
-%          fc_t, fc_cls (index into PP.classes, numel + 1 = unknown), fc_deg, fc_drop
+%          fc_t, fc_cls (index into PP.classes, numel + 1 = unknown), fc_deg, fc_drop,
+%          fc_dal (the monitor's drop alarm)
 %          t_cls, t_conf  frames from the onset to the first frame whose monitor class is
 %                     the threat (a component of a combined one) and to the first
 %                     confirmed alarm, read one cycle later (0: the onset frame itself, as
@@ -40,7 +41,7 @@ opt.rs = RandStream('mt19937ar', 'Seed', seed + 1);
 NE = E.NE; T = spec.T;
 mem = [];
 cls_list = [cellstr(string(PP.classes(:)')), {'unknown'}];
-fc = struct('t', zeros(1, NE), 'cls', zeros(1, NE), 'deg', false(1, NE), 'drop', nan(1, NE));
+fc = struct('t', zeros(1, NE), 'cls', zeros(1, NE), 'deg', false(1, NE), 'drop', nan(1, NE), 'dal', false(1, NE));
 tr = struct('r', zeros(T, NE), 'q', zeros(T, NE), 'rest', false(T, NE), 'rplr', false(T, NE), 'gput', zeros(T, NE), ...
     'ch', false(T, NE), 'fs', false(T, NE), 'post', false(T, NE), 'esc', false(T, NE), 'cfg', zeros(T, NE), ...
     'recov', false(T, NE), 'fer', zeros(T, NE), 'cls', false(T, NE), 'conf', false(T, NE), 'gap', false(T, NE));
@@ -60,7 +61,7 @@ for t = 1:T
         fc.t(nw) = t;
         fc.cls(nw) = cellfun(@(c) find(strcmp(cls_list, c), 1), dinf.cls(nw));
         fc.deg(nw) = dinf.degraded(nw);
-        fc.drop(nw) = dinf.drop(nw);
+        fc.drop(nw) = dinf.drop(nw); fc.dal(nw) = dinf.drop_alarm(nw);
     end
     tr.r(t, :) = r; tr.q(t, :) = info.q; tr.rest(t, :) = info.restored; tr.gput(t, :) = info.gput;
     tr.rplr(t, :) = info.restored_plr; tr.recov(t, :) = info.recoverable; tr.fer(t, :) = obs.fer_true;
@@ -105,7 +106,7 @@ R.aoa = E.aoa';
 R.cfg_final = E.cfg;
 R.r = E.r;
 R.cfg_trace = tr.cfg;
-R.fc_t = fc.t; R.fc_cls = fc.cls; R.fc_deg = fc.deg; R.fc_drop = fc.drop;
+R.fc_t = fc.t; R.fc_cls = fc.cls; R.fc_deg = fc.deg; R.fc_drop = fc.drop; R.fc_dal = fc.dal;
 [R.t_cls, R.t_conf] = deal(nan(1, NE));
 for i = 1:NE
     t0 = find(post(:, i), 1);

@@ -1,4 +1,4 @@
-%% CHOOSE_DROP_THRESHOLD - Eb/N0-drop threshold of the drop alarm from the train pools
+%% CHOOSE_DROP_THRESHOLD - Eb/N0-drop threshold and form of the drop alarm
 % A clean link in a deep Rician fade and an attenuated link look alike in one
 % frame; the drop of the Eb/N0 estimate from the episode's reference tells them
 % apart. The drop raises the alarm by itself (policy_monitor.m, 'class_drop'), so every
@@ -13,8 +13,27 @@
 % Physics floor: moving away lowers the estimate by at most 8.69 v / d dB/s (free space,
 % d(20 log10 d)/dt), at 161 km/h and the shortest distance of the grid; over the 12 cycles
 % between the oldest reference cycle and the newest one the threshold must stay above it.
+% Form of the alarm, on the VALIDATION split only, before train_dqn.m: the 3-cycle median
+% window ('class_drop') against the window-limited CUSUM of every cycle's drop
+% ('class_cusum', drop_cusum.m; Page's CUSUM, Xie et al. 2021; the window-limited estimate of
+% the drop, Xie, Moustakides & Xie 2022), both on the same compensated estimate with the
+% monitor's reference, alone (drop_alarm_seq.m). False alarms: the independent clean
+% validation geometries (data/clean_val_pools.mat), one 30-cycle episode per geometry and
+% Eb/N0 from the KPI 1 threshold up, from a random frame, as train_dqn.m reads them; an
+% episode with the alarm in some cycle is a false alarm, and a threshold is admissible when
+% the one-sided 95% Clopper-Pearson bound of their share is at most 5%, KPI 6's bound, so
+% the drop alarm alone never spends it. Detection: the path_loss cells of the validation
+% split, every level, Eb/N0 and geometry, REPS episodes each: the same flight's clean link
+% until the onset (cycle 3-10), the attenuated flight from it at the same frame positions
+% (link_env.m); detected when the alarm is raised at or after the onset. Each form at its
+% most sensitive admissible threshold; the form that detects more, within one point the one
+% with the shorter mean delay; the median window on a tie, when the CUSUM has no admissible
+% threshold, or without clean validation flights. The CUSUM's thresholds are counted in
+% cycles of a step of the smallest path-loss level at the statistic's full drift (D^2 / 2
+% per cycle, drop_cusum.m).
 %
-% Output: data/drop_threshold.mat (drop_db), results/drop_threshold.txt
+% Output: data/drop_threshold.mat (drop_db; drop_alarm, cusum_db and the validation
+% readings VAL), results/drop_threshold.txt
 
 clc;
 fprintf('=== Eb/N0-drop threshold of the drop alarm ===\n\n');
@@ -101,7 +120,58 @@ if ~separable, rep{end+1} = 'WARNING: the distributions overlap; the gate trades
 if ~exist('results', 'dir'), mkdir('results'); end
 fid = fopen('results/drop_threshold.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('%s\n', rep{:});
-save('data/drop_threshold.mat', 'drop_db', 'separable', 'THR', 'kept', 'leak', 'leak_all', 'p95_mis', 'p99_cl', 'p05_pl', 'floor_db');
+
+%% 4. Form of the alarm on validation: the median window against the window-limited CUSUM
+VA = 2; T = 30; REPS = 4; FA_BOUND = 0.05;
+D1 = decision_config().sev.path_loss.levels(1);
+THC = D1^2 / 2 * (1:0.5:10);                                % CUSUM thresholds: cycles of a D1 step at full drift
+EBNO_THR = PP.ebno(1);                                      % false alarms from the KPI 1 threshold up (KPI 6)
+if isfile('results/eval_detector_metrics.mat')
+    Md = load('results/eval_detector_metrics.mat', 'metrics');
+    if isfield(Md.metrics, 'kpi1_threshold_db') && isfinite(Md.metrics.kpi1_threshold_db)
+        EBNO_THR = Md.metrics.kpi1_threshold_db;
+    end
+    clear Md
+end
+CV = [];
+if isfile('data/clean_val_pools.mat')
+    Cv = load('data/clean_val_pools.mat', 'CT'); CV = Cv.CT; clear Cv
+    check_det_id(PP, CV, 'choose_drop_threshold', 'data/clean_val_pools.mat');
+end
+[Ecl, Epl, Opl] = val_episodes(PP, CV, icl, iPL, na, VA, T, REPS, EBNO_THR);
+FM = {'class_drop', 'class_cusum'}; GR = {THR, THC};
+VAL = struct('mode', FM, 'grid', GR, 'fa_k', [], 'fa_n', size(Ecl, 1), 'fa_up', [], 'det', [], 'delay', [], 'pick', NaN);
+for f = 1:2
+    for j = 1:numel(GR{f})
+        a = drop_alarm_seq(Ecl, FM{f}, GR{f}(j));
+        VAL(f).fa_k(j) = sum(any(a, 2)); VAL(f).fa_up(j) = cp_upper(VAL(f).fa_k(j), size(Ecl, 1));
+        a = drop_alarm_seq(Epl, FM{f}, GR{f}(j));
+        a(Opl > (0:T-1)) = false;                            % read from the onset on
+        [hit, t1] = max(a, [], 2);
+        VAL(f).det(j) = mean(hit); VAL(f).delay(j) = mean(t1(hit) - 1 - Opl(hit));
+    end
+    k = find(VAL(f).fa_up <= FA_BOUND, 1);                   % the most sensitive admissible threshold
+    if ~isempty(k), VAL(f).pick = k; end
+end
+[drop_alarm, cusum_db] = drop_alarm_form(VAL);
+rv = {'', sprintf(['Form of the drop alarm on validation (alone, the monitor''s reference): false alarms on %d ' ...
+    'clean validation episodes (%s geometries x Eb/N0 >= %g dB, %d cycles), admissible at a one-sided 95%% bound ' ...
+    '<= %.0f%%; detection on %d path_loss episodes of the validation split (every level, Eb/N0 and geometry, %d each, ' ...
+    'onset at cycle 3-10)'], size(Ecl, 1), n_geo(CV), EBNO_THR, T, 100 * FA_BOUND, size(Epl, 1), REPS)};
+for f = 1:2
+    rv{end+1} = sprintf('  %-12s %10s %14s %10s %18s', FM{f}, 'threshold', 'false alarms', 'bound', 'detected / delay'); %#ok<SAGROW>
+    for j = 1:numel(GR{f})
+        rv{end+1} = sprintf('  %-12s %10.1f %8d/%-5d %9.2f%% %8.1f%% / %4.1f%s', '', GR{f}(j), VAL(f).fa_k(j), VAL(f).fa_n, ...
+            100 * VAL(f).fa_up(j), 100 * VAL(f).det(j), VAL(f).delay(j), repmat('  <-', 1, j == VAL(f).pick)); %#ok<SAGROW>
+    end
+end
+rv{end+1} = sprintf(['Form: %s (each at its most sensitive admissible threshold: the higher detection, within one ' ...
+    'point the shorter delay; the median window on a tie or without an admissible CUSUM threshold)%s'], drop_alarm, ...
+    ternary(isempty(Ecl), ' -- no clean validation flights: not measured', ''));
+fid = fopen('results/drop_threshold.txt', 'a'); fprintf(fid, '%s\n', rv{:}); fclose(fid);
+fprintf('%s\n', rv{:});
+save('data/drop_threshold.mat', 'drop_db', 'separable', 'THR', 'kept', 'leak', 'leak_all', 'p95_mis', 'p99_cl', 'p05_pl', ...
+    'floor_db', 'drop_alarm', 'cusum_db', 'THC', 'VAL', 'EBNO_THR');
 fprintf('\nSaved data/drop_threshold.mat, results/drop_threshold.txt\n');
 
 %% ===================== Local functions =====================
@@ -117,4 +187,51 @@ n = numel(e); m = zeros(n, 1);
 for i = 1:n
     m(i) = median(e(mod(i - 3:i - 1, n) + 1));
 end
+end
+
+function [Ecl, Epl, Opl] = val_episodes(PP, CV, icl, iPL, na, sp, T, reps, thr)
+% Eb/N0 estimates per cycle (rows: episodes) of the clean validation episodes (one per CV
+% geometry and Eb/N0 from thr up, from a random frame) and of the path_loss episodes of split
+% sp (the same flight's clean link before the onset Opl, the attenuated one from it).
+rs = RandStream('mt19937ar', 'Seed', 4300);
+Ecl = zeros(0, T); Epl = zeros(0, T); Opl = zeros(0, 1);
+if ~isempty(CV)
+    for s = find(PP.ebno >= thr)
+        P = CV.pools{1, s, na};
+        for r = 1:CV.n_geom
+            k = find(P.run == CV.runs(r)); n = numel(k);
+            q = mod(randi(rs, n) - 1 + (0:T-1), n) + 1;
+            Ecl(end+1, :) = ebno_est(P.feat(k(q), :), PP)'; %#ok<AGROW>
+        end
+    end
+end
+for v = iPL
+    for s = 1:numel(PP.ebno)
+        C = PP.pools{icl, s, na, sp}; A = PP.pools{v, s, na, sp};
+        if isempty(A) || isempty(A.ber), continue; end
+        for r = PP.cell_geo{v}{sp}
+            kc = find(C.run == PP.runs{sp}(r)); ka = find(A.run == PP.runs{sp}(r));
+            if isempty(kc) || numel(kc) ~= numel(ka), continue; end
+            ec = ebno_est(C.feat(kc, :), PP); ea = ebno_est(A.feat(ka, :), PP); n = numel(kc);
+            for k = 1:reps
+                o = randi(rs, [3 10]); q = mod(randi(rs, n) - 1 + (0:T-1), n) + 1;
+                x = ec(q); x((0:T-1) >= o) = ea(q((0:T-1) >= o));
+                Epl(end+1, :) = x'; Opl(end+1, 1) = o; %#ok<AGROW>
+            end
+        end
+    end
+end
+end
+
+function u = cp_upper(k, n)
+% One-sided 95% Clopper-Pearson upper bound of a binomial proportion (NaN without trials).
+if n == 0, u = NaN; elseif k >= n, u = 1; else, u = betaincinv(0.95, k + 1, n - k); end
+end
+
+function t = n_geo(CV)
+if isempty(CV), t = '0'; else, t = sprintf('%d', CV.n_geom); end
+end
+
+function out = ternary(c, a, b)
+if c, out = a; else, out = b; end
 end

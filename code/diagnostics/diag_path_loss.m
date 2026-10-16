@@ -58,11 +58,8 @@ end
 
 function [fa, n] = clean_fa(PP, CT, agent, NE, T)
 % One clean episode per independent validation geometry and Eb/N0 (as train_dqn.m).
-nS = numel(PP.ebno); nA = numel(PP.actions);
-PPw = PP; PPw.pools(:, :, :, 2) = {[]};
-ic = find(strcmp(PP.scen, 'none'), 1);
-PPw.pools(ic, :, :, 2) = reshape(CT.pools(1, :, :), [1 nS nA]);
-PPw.runs{2} = CT.runs;
+nS = numel(PP.ebno);
+PPw = clean_split(PP, CT, 2);
 Kw = link_env('tables', PPw);
 [ss, rr] = ndgrid(1:nS, 1:CT.n_geom); ss = ss(:)'; rr = rr(:)';
 n = numel(ss); nb = ceil(n / NE); pad = nb * NE - n;

@@ -49,7 +49,12 @@
 % features of link_features.m (receiver measurements only), and the true BER and
 % frame error (reward and evaluation only).
 % The cells run in parallel, each worker in its own folder with its own copy of
-% the model. When data/policy_pools.mat holds the same train and validation
+% the model. Every finished cell is kept on disk (data/c1p_cells, pool_checkpoint.m) under a
+% key of everything its frames depend on (link model MODEL_TAG, detector DET_ID, the
+% geometry ids of every split, the cell, the Eb/N0 grid, the configurations, its
+% geometries' draws, the frame options and its params), so a build stopped at any point
+% simulates only the cells it does not hold when started again; the pools are written once
+% complete and the cells removed after. When data/policy_pools.mat holds the same train and validation
 % geometries of the same link model (MODEL_TAG) and only the test block differs, only
 % the test, edge-speed and second test splits are simulated. PP.det_id identifies the
 % detector (detector_id.m); pools of another detector are never reused.
@@ -91,10 +96,10 @@ if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (r
 end
 
 D = load('data/trained_detector.mat', 'net', 'classes', 'ood', 'trained_at');
-N = load('data/splits.mat', 'splits');
+nm = split_norm();                                     % the training z-score alone
 det = struct('net', D.net, 'ood', D.ood, 'classes', {cellstr(string(D.classes(:)'))}, ...
-    'mu', N.splits.norm.feat_mean, 'sd', N.splits.norm.feat_std, 'fs', p0.symbol_rate * p0.sps);
-clear N
+    'mu', nm.feat_mean, 'sd', nm.feat_std, 'fs', p0.symbol_rate * p0.sps);
+clear nm
 T = ood_thresholds(0.95);
 FZ = fusion_model();                                   % temporal fusion, the rule's quiet-slot alarm (select_fusion.m)
 UW = 1; if isfield(D.ood, 'win'), UW = D.ood.win; end                        % unknown-score window (eval_ood_detection.m)
@@ -329,26 +334,33 @@ else
         pool_worker_init(repo);
     end
 end
-results = cell(1, nC); nuniq = zeros(1, nC);
+CKD = fullfile(pwd, 'data', 'c1p_cells');               % finished cells (pool_checkpoint.m; the workers work elsewhere)
+keys = arrayfun(@(c) pool_checkpoint('key', {MODEL_TAG, DET_ID, runs, cells(c), EBNO, ACTIONS, geoc{c}, opt, ...
+    threat_params(p0, cells(c).threat, cells(c).sev, C)}), 1:nC, 'UniformOutput', false);
+todo = pool_checkpoint('todo', CKD, keys);
 t0 = tic;
-fprintf('%d cells x %d configurations x %d Eb/N0 on %d workers\n', nC, nA, nS, N_WORKERS);
-parfor (c = 1:nC, NWP)
-    ce = cells(c);
+fprintf('%d cells x %d configurations x %d Eb/N0 on %d workers; %d cells kept from an earlier start (%s)\n', ...
+    nC, nA, nS, N_WORKERS, nC - numel(todo), CKD);
+parfor (k = 1:numel(todo), NWP)
+    c = todo(k); ce = cells(c);
     p = threat_params(p0, ce.threat, ce.sev, C);
     [Ps, pinfo] = pool_cell(p, ce.threat, ACTIONS, EBNO, geoc{c}, det, opt);
     Pc = cell(nS, nA, nSp);
     Pc(:, :, ce.splits) = Ps;
-    nuniq(c) = pinfo.n_unique;
-    results{c} = Pc;
-    fprintf('  cell %2d/%d %-28s %-8s %2d unique configurations\n', c, nC, ce.threat, C.sev_names{ce.sev}, nuniq(c));
+    pool_checkpoint('save', CKD, c, keys{c}, struct('Pc', {Pc}, 'nuniq', pinfo.n_unique));
+    fprintf('  cell %2d/%d %-28s %-8s %2d unique configurations\n', c, nC, ce.threat, C.sev_names{ce.sev}, pinfo.n_unique);
 end
 fprintf('Simulated in %.1f min\n', toc(t0) / 60);
 
 %% 3. Package
 pools = cell(nC, nS, nA, nSp);
-for c = 1:nC, pools(c, :, :, :) = results{c}; end
+for c = 1:nC                                            % one cell at a time from disk
+    R = pool_checkpoint('load', CKD, c);
+    pools(c, :, :, :) = R.Pc;
+end
+clear R
 if ~isempty(old), pools(:, :, :, 1:2) = old; end
-clear results old
+clear old
 ic = find(strcmp({cells.threat}, 'none'));
 own = @(Q, sp) ismember(Q.run, runs{sp}(cells(ic).geo{sp}));   % the clean link's own flights, not the shadowing reference
 mber = nan(nC, nS, nA, nSp); mfer = nan(nC, nS, nA, nSp);
@@ -407,7 +419,8 @@ PP = struct('scen', {{cells.threat}}, 'sev', [cells.sev], 'level', [cells.level]
     'F_SUB', opt.F_SUB, 'event_frame', {evf}, 'fec_frames', p0.fec_frames, 'runs', {runs}, 'model_tag', MODEL_TAG, ...
     'det_id', DET_ID, 'aoa_random', p0.int_aoa_random, 'k_random', p0.k_random, 'sps', p0.sps, 'bps', p0.bits_per_symbol, ...
     'feat_names', {link_features('names')}, 'created', datestr(now));
-save('data/policy_pools.mat', 'PP', 'clean_ref', '-v7.3');
+pool_checkpoint('commit', 'data/policy_pools.mat', struct('PP', PP, 'clean_ref', clean_ref));
+pool_checkpoint('clear', CKD);
 
 fprintf('\nClean link per Eb/N0: BER %s | estimated BER %s | packet loss %s\n', sprintf('%.1e ', clean_ref.ber), ...
     sprintf('%.1e ', clean_ref.ber_est), sprintf('%.2f ', clean_ref.plr));

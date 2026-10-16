@@ -392,11 +392,7 @@ if isfile('data/clean_test_pools.mat')
     Ct = load('data/clean_test_pools.mat', 'CT'); CT = Ct.CT; clear Ct
     check_det_id(PP, CT, 'evaluate_policies', 'data/clean_test_pools.mat');
     n_geom = CT.n_geom;
-    PPw = PP;
-    PPw.pools(:, :, :, TEST) = {[]};
-    PPw.pools(clean_cell, :, :, TEST) = reshape(CT.pools(1, :, :), [1 nS nA]);
-    PPw.runs{TEST} = CT.runs;
-    PPw.speed{TEST} = CT.speed;
+    PPw = clean_split(PP, CT, TEST);
     Kw = link_env('tables', PPw);
     [ss, rr] = ndgrid(1:nS, 1:n_geom); ss = ss(:)'; rr = rr(:)';
     n = numel(ss); nb = ceil(n / NE); pad = nb * NE - n;
