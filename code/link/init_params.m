@@ -56,7 +56,7 @@ params.k_random      = true;           % K-factor of every channel drawn per see
 params.k_range_db    = [-5 20];        % measured air-ground K: foliage 2-5, airports -5..10 (5.75 GHz, Tu & Shimamoto), open L-band ~12, C-band ~28 dB (Khawaja et al.)
 params.carrier_freq  = 2.4e9;          % 2.4 GHz ISM (range for a given Eb/N0: link_budget_table.m)
 % Delay spread: measured at 2.5 GHz from the ground to a UAV at 15-105 m, median RMS delay
-% spread 120-302 ns, log-normal, 90th percentiles up to 1.6 us (Rodriguez-Pineiro et al.,
+% spread 120-372 ns, log-normal, 90th percentiles up to 1.7 us (Rodriguez-Pineiro et al.,
 % Table VII); 64-90 ns in rural flight (Lyu et al.). The tapped delay line
 % (build_threat_model.m) puts the diffuse part of our signal and of every interferer on
 % taps 250 ns apart (one sample) up to 4.5 us, the delay range of their measured power
@@ -68,15 +68,17 @@ params.tdl_random    = true;           % RMS delay spreads drawn per seeded flig
 params.tdl_ds_ns     = [234 234];      % [ns] fixed spread of our signal and of every interferer (environment II omni median)
 params.tdl_step_ns   = 250;            % [ns] tap spacing
 params.tdl_max_ns    = 4500;           % [ns] last tap
-params.tdl_sig_ds    = [-6.52 0.32; -6.63 0.16];   % our signal, log10 s (mean, variance): env. II directional OLoS below tdl_sig_alt_m, omni above
-params.tdl_sig_alt_m = 25;             % [m]
+params.tdl_sig_ds    = [-6.52 0.32; -6.63 0.16; -6.43 0.26];   % our signal, log10 s (mean, variance), env. II, the larger of the omni and directional fits per height band: directional OLoS, omni, directional (Table VII)
+params.tdl_sig_alt_m = [25 75];        % [m] lower edges of the second and third bands (the table's 25 m and 75 m rows)
 params.tdl_int_ds    = [-6.63 0.16];   % every interferer, log10 s: env. II omni
-params.tdl_clip_ns   = 1000;           % [ns] top of their Fig. 7a
+params.tdl_clip_ns   = 2250;           % [ns] half the 4.5 us delay range of the measured power delay profile (Fig. 6a): the largest RMS spread a profile within that range can have
+params.rx_span_ns    = 1000;           % [ns] the real receiver's design spread: its space-time taps span +-2 of it (rx_taps.m)
 
 % UAV platform velocity and Doppler
 % Platform: mini UAV (Tlili et al.: 5-25 kg, 0.5-2 m). Speed envelope 0-161 km/h:
 % from a hovering rotorcraft (measured while hovering, Khawaja et al.; the channel
-% then hardly changes, Gomez-Ponce et al.) to the small-UAV limit of 161 km/h quoted
+% then hardly changes: LoS power std 0.48 dB hovering, 0.08 dB static, Gomez-Ponce et al.,
+% Sec. IV-B) to the small-UAV limit of 161 km/h quoted
 % by Khawaja et al. -> Doppler 0-358 Hz @ 2.4 GHz.
 % Speed is a CONTINUOUS parameter (any real value inside the envelope, not only
 % whole km/h). The dataset generator draws a random real-valued speed per block
@@ -92,14 +94,17 @@ params.c_light   = 3e8;     % [m/s] speed of light
 params.fd_max    = params.v_nominal * params.carrier_freq / params.c_light;  % [Hz] ~160 @ 20 m/s
 % Manoeuvres: the heading turns during a flight (heading_rate.m), so the directions of
 % the GCS and of every interferer rotate across the antenna array: a coordinated turn
-% at up to the largest bank angle measured on a small UAV (57.9 deg, Gross et al.),
-% turn rate g tan(bank) / v with v not below the slowest measured UAV (8 m/s, Khawaja
-% et al.), and never above the largest measured yaw rate of a small UAV (28.7 deg/s
-% while circling, Allen & Lin).
+% at up to the largest bank angle measured on a small UAV (57.9 deg, digitised from Gross
+% et al., Fig. 4), turn rate g tan(bank) / v with v not below the slowest measured UAV
+% (8 m/s, Khawaja et al.), and never above the largest measured yaw rate of a small UAV
+% (28.7 deg/s while circling, digitised from Allen & Lin, Fig. 12). Theirs is the body yaw
+% rate r; the heading rate of the same turn is r / cos(bank), larger, so capping the
+% heading rate at r keeps every turn within the measured one.
 params.yaw_random    = true;                     % heading rate drawn per seeded sub-run
-params.roll_max_deg  = 57.9;                     % [deg] largest measured bank angle of a small UAV
+params.roll_max_deg  = 57.9;                     % [deg] largest measured bank angle of a small UAV (digitised)
 params.turn_v_floor  = 8;                        % [m/s] speed floor of the turn-rate formula
-params.yaw_rate_max  = 28.7;                     % [deg/s] largest measured yaw rate of a small UAV
+params.yaw_rate_max  = 28.7;                     % [deg/s] largest measured yaw rate of a small UAV (digitised)
+params.roll_deg      = 0;                        % [deg] bank of a fixed geometry (yaw_random off): maps and views set a turn for airframe shadowing
 % The turn banks the UAV by atan(w v / g) (bank_angle.m): its antennas tilt and their
 % polarization turns against the GCS antenna (uav_attitude_db.m), on our signal only.
 % Wind (hover_attitude.m): below the slowest measured flying UAV a multirotor holds its
@@ -122,32 +127,118 @@ params.wobble_arm_m     = 0.4;                   % [m] antenna offset from the c
 % levels (dataset levels: run_dataset_sweep.m; decision levels: decision_config.m)
 params.active_threat = 'jamming';   % threat of the next model build: 'none', a threat, or 'a+b'
 params.jsr_db        = 16;          % [dB] Jamming-to-Signal Ratio (barrage jammer power)
-params.burst_duty    = 0.3;         % Noise Burst: fraction of time jammer is ON (0-1)
-params.burst_period  = 100;         % Noise Burst: on/off cycle length (symbols); its phase drawn per flight (jam_timing.m)
-params.path_loss_db  = 14;          % Path Loss: attenuation (dB) applied to Tx signal
-% Antenna Fault: a connector of one antenna is faulty for the flight, from a partial loss
-% to an open contact (a broken connector that separates at altitude and stays open, Fedde &
-% Carter, US 4,506,385; opens are the most common connector failure, Ginart et al.). A
-% sustained diversity imbalance above 5 dB marks a degraded antenna connection (Heath,
-% US 10,404,368, Table 2), a steady branch loss above 3 dB a loss in the RF path (Willgert,
-% US 8,548,029, Table 1); real connector faults are small losses or intermittent (Enquebecq
-% et al.; Smith et al. 2008). An open contact couples only through its gap capacitance:
-% an estimate of 0.01-0.03 pF at 2.4 GHz in 50 ohm gives 26-36 dB (no measurement of this
+% Noise bursts, each flight one of the two measured patterns (jam_timing.m). A random jammer
+% that alternates jamming and sleeping (Xu et al. 2005, Sec. 2.1, Table 1: on for tj, asleep
+% for ts, both uniform, tj = U[0,31] with ts = U[0,31] or U[1,8] slots, mean duty 50% and 78%):
+% bursts of U[0,31] symbols and sleeps of U[0, 31 (1 - duty) / duty], the duty uniform in
+% 50-77.5%, so the sleeps stay within their measured U[0,31]. Or a sparse jammer on 20% of
+% the symbols in random unit-symbol bursts (Marti et al. 2023, Sec. VII-A, jammer J4,
+% Fig. 5(d)): each one-symbol slot of its own clock jammed with probability 0.2. A slot is
+% one symbol here (Marti et al.'s time slot carries one symbol). No source gives how often
+% each pattern is met: half the flights each.
+params.burst_duty_range = [0.5 0.775];   % Noise Burst: duty of the random jammer drawn per flight
+params.burst_j4      = [0.2 0.5];   % Noise Burst: duty of the sparse jammer J4, its share of the flights
+params.burst_on_sym  = 31;          % Noise Burst: longest burst and the sleep scale [symbols]
+params.burst_duty    = 0.5;         % Noise Burst: duty of a fixed geometry (jam_timing_random off): Xu et al.'s first random jammer
+% Path loss as a threat is a sudden step of attenuation (an obstruction between the UAV and
+% the GCS); a loss present from the first frame is the same link as a longer range. A
+% building in front of a street-level GCS costs a 2 GHz UAV link at 1.6-6.5 deg elevation
+% 33-42 dB over free space (Simunek et al. 2011, Figs. 6 and 11, 4000-wavelength means),
+% knife-edge diffraction (their eqs. 6-8: 20 log10(v / 0.225) dB for v > 2.5); the levels up
+% to 22 dB (an edge v = 2.8 above the line of sight) are obstructions below it. Moving away
+% is no threat: free-space loss changes by 8.69 v / d dB/s, at most 1.4 dB/s at 161 km/h
+% and 0.28 km (15 dB).
+params.path_loss_db  = 14;          % Path Loss: attenuation step (dB) on our signal
+params.pl_onset_frames = [1 1];     % frame of the run at which the step starts, drawn per run in the range ([1 1]: from the first frame, the pools' cells, whose episodes set their own onset)
+params.pl_onset_det  = [2 11];      % the detector's 20-frame sub-runs: a clean frame before the step at least, and the step inside the 10-frame window of the link features after it
+% Antenna Fault: a connector of one antenna degraded for the flight, from a partial loss to
+% an open contact. A severely degraded antenna connection shows as one branch weaker than
+% the other with a diversity-imbalance indicator (and a high VSWR alarm), and the table's
+% imbalance indicator fires at a branch difference above 5 dB (Heath, US 10,404,368,
+% Table 2, cols. 41-42); a branch average loss above 3 dB with std / |average| under its
+% "3 dB" is a loss in the RF path (Willgert, US 8,548,029, Table 1). Real connector faults
+% are small losses or intermittent (Enquebecq et al.; Smith et al. 2008). An open contact
+% couples only through its gap capacitance, a series C between 50-ohm ports:
+% |S21| = 2 w C Z0 gives 26-36 dB for 0.03-0.01 pF at 2.4 GHz (no measurement of this
 % depth was found). Levels 5-31 dB, evenly spread (no source gives their distribution).
 params.fault_atten_db = 18;         % Antenna Fault: loss of the faulty antenna [dB], nominal level
+params.fault_onset_frames = [1 1]; % frame at which the connector opens, drawn per run in the range: a step within one frame ([1 1]: from the first frame, the pools' cells, whose episodes set their own onset)
 % Spoofing: a counterfeit GCS on the same radio as ours (Mekdad et al.); its power over our
 % signal is set by geometry: 30 dB is a spoofer 31 times closer to the UAV than the GCS
 % (it captures the receiver from a 0.2-3 dB advantage, Whitehouse et al.).
 params.spoof_sir_db   = 3;          % Spoofing: Spoof-to-Signal Ratio (dB), 0 = equal power
-params.reactive_threshold = 0.5;    % Reactive Jamming: signal-energy threshold to trigger jammer
+% Reactive jamming: the jammer stays quiet while the channel is idle and transmits as soon
+% as it senses activity (Xu et al. 2005, Sec. 2): it hears OUR transmission, the GCS's
+% transmitted frame, over its own channel, not what the UAV receives. An energy detector
+% (no knowledge of our protocol) marks the frame from the first to the last sample of our
+% transmitted waveform above p.reactive_threshold of its mean power; the jammer is on from
+% that start plus its reaction delay until the frame ends. Reaction delay: the shortest
+% initialization delay of Wilhelm et al.'s reactive jammer, 3.75 us (2011, Sec. 5.1,
+% Fig. 4a, digitised; mean 14.4 us), the detector's own time taken as zero, the most
+% severe measured value; a jammer off the GCS-UAV line adds a geometric delay, zero on it.
+params.reactive_threshold = 0.5;    % Reactive Jamming: energy-detector threshold, a share of our transmitted mean power
+params.reactive_delay_s   = 3.75e-6;   % Reactive Jamming: reaction delay [s]
 params.tone_jsr_db    = 16;         % Tone (CW) jammer: in-band power over our signal (dB)
 params.tone_offset_hz = 300e3;      % Tone offset from our carrier, uniform in +-this per flight (flat part of the RRC band)
-% Airframe shadowing: in a banking turn the airframe hides one antenna for seconds; the
-% median loss of an event is 15.5 +- 4.9 dB (C-band; 10.8 +- 3 dB at L-band), events up
-% to about 25 dB, and the hidden antenna loses its line of sight: its K-factor falls to
-% about -16 dB (Sun et al.). Applied in the channel (build_threat_model.m).
+% Airframe shadowing: in a turn the airframe hides one antenna for seconds; the
+% median loss of an event is 15.5 +- 4.9 dB at C-band (10.8 +- 3 dB at L-band; Fig. 13, the
+% medians' CDF reaching about 27.5 dB), the largest loss measured over 35 dB (abstract;
+% 47 dB at L-band), and the hidden antenna loses its line of sight: its K-factor falls to
+% about -16 dB (Sun et al., Part IV). The levels (6-25 dB) are the event's median loss.
+% Applied in the channel (build_threat_model.m).
 params.shadow_db      = 15.5;       % Airframe shadowing: median loss of the hidden antenna [dB]
 params.shadow_k_db    = -16;        % Airframe shadowing: K-factor of the hidden antenna [dB]
+% It occurs only while the airframe lies in the line of sight (shadow_hidden.m): the GCS
+% above the belly's horizon in the body frame (banking toward it by more than its
+% elevation), the GCS azimuth more than 30 deg off the heading (Sun et al., Sec. III), and a
+% burial the event's depth is measured at. Sun et al. fit the median loss against the
+% event's largest roll, S = A + n (roll - 16.1) + X, X ~ N(0, sigma^2), over rolls of
+% 16.1-58.3 deg (Table II: C-band A 12.4 dB, n 0.25 dB/deg, sigma 4.4 dB; L-band 9.6,
+% 0.09, 2.8). At 2.4 GHz the loss lies between the bands (C-band's is about 5 dB larger, an
+% electrically larger obstruction, Sec. IV-A); the levels come from the C-band statistics,
+% so the C-band fit, the more severe, pairs them with the roll: a level is flown only at
+% rolls whose fit lies within 1.96 sigma of it (shadow_roll_band.m), 6 dB at 16.1-25.0 deg
+% up to 25 dB at 32.0-57.9 deg. The 5 deg roll of Sun et al.'s Sec. III is their criterion
+% to declare an event in the data, not the smallest roll of one (16.1 deg, Table II). Their
+% events lay at 1.4-2.9 deg elevation (Sec. II), where the roll sets how deep the airframe
+% lies in the line of sight; ours lies up to about 23 deg below the UAV, where the same
+% roll buries it far less. So an event is held against the band by its equivalent roll
+% (shadow_equiv_roll.m): its deepest burial, at the bank with the GCS abeam as their turns
+% passed it, plus 2.9 deg, the most severe of their elevations (the deepest level for a
+% burial); within the event the depth follows the burial (shadow_frame.m). No source
+% measures shadowing on a hovering or slow multirotor, so none is flown below the slowest
+% measured flying UAV (p.shadow_v_min).
+params.shadow_roll_deg = 16.1;      % [deg] smallest roll of the measured events (Sun et al., Table II)
+params.shadow_fit      = [12.4 0.25 4.4];   % C-band median loss at that roll [dB], slope [dB/deg], residual std [dB] (Table II)
+params.shadow_fit_z    = 1.96;      % half width of the fit's band [sigma]: two-sided 95%
+params.shadow_hdg_deg  = 30;        % [deg] smallest heading-to-GCS-azimuth difference of a shadowing event
+params.shadow_v_min    = 8;         % [m/s] no shadowing below it (hover and position holding in wind; Khawaja et al.'s slowest flying UAV)
+params.shadow_el_deg   = 2.9;       % [deg] elevation of the equivalent roll: the largest of Sun et al.'s events (Sec. II)
+% Onset: a bank is entered over a finite roll-in, so the airframe enters the line of sight
+% as the roll grows: the event starts where the GCS lies on the belly's horizon and reaches
+% its level at the turn's bank with the GCS abeam (the event's deepest burial, the band
+% above). Within it the loss follows Sun et al.'s shape of an event (Part IV, Sec. IV-C,
+% eq. 8: a cubic spline through (0, 0), (0.5, 1), (1, 0) of the event's duration, its rising
+% half), the progress being the burial's between the two (shadow_frame.m), so it also eases
+% as a held turn carries the GCS off the beam; no source measures the loss against time on
+% a small UAV, so tying the shape to the burial is an assumption. An event counts while the
+% loss is at least 5 dB (Sun et al., Sec. III, their third criterion), and
+% from then on the hidden antenna's K-factor is the shadow's: about 15 dB outside the
+% declared shadowing area and -16 dB inside it (Sec. III, Fig. 12), so before the onset it
+% keeps its own. The roll-in: level flight, then a constant roll rate up to the bank
+% (turn_attitude.m), the rate uniform from the measured roll-in of a small UAV (Allen & Lin,
+% Fig. 12, digitised: 0 to 30 deg in about 1.6 s) to the largest rate measured over a window
+% as long as the roll-in (Gross et al., Fig. 4, digitised: 45.4 deg/s over 0.5 s, 35.5 deg/s
+% over 1 s; roll_rate.m). In the detector's sub-runs (p.roll_in_frames) every turning flight
+% rolls in, whatever its class: where the threat holds airframe shadowing its onset falls at
+% the drawn frame, otherwise the roll-in falls anywhere it overlaps the run (flight_draws.m);
+% no source gives the share of flight time spent rolling in, so every class gets the same.
+% The pools roll in only their shadowing flights and those flights' clean reference (the
+% event frame); every other flight holds its bank.
+params.shadow_evt_db   = 5;         % [dB] smallest loss of a counted event (Sun et al., Sec. III)
+params.roll_rate_lo    = 30 / 1.6;  % [deg/s] measured roll-in of a small UAV (Allen & Lin, digitised)
+params.roll_rate_win   = [0.5 45.4; 1 35.5];   % [s deg/s] largest roll rate over a window (Gross et al., digitised)
+params.roll_in_frames  = [];        % the detector's sub-runs: every turning flight rolls in, a shadowing onset drawn per flight in this frame range; [] no roll-in
 
 % Benign Interference: packet traffic of a WLAN in our channel, not an attack.
 % Frames of 0.27-3.2 ms and channel occupancy 5-86% (Wollenberg et al.; field duty
@@ -163,8 +254,9 @@ params.benign_idle_shape = 0.49;          % gamma shape of the idle gaps
 
 % Sweeping Jammer (Liu et al.: sweep 1 GHz/s, instantaneous bandwidth 4 MHz, a 20 MHz band):
 % its band covers our 1.25 MHz channel for (4 + 1.25) MHz / 1 GHz/s = 5.25 ms of every
-% sweep (sweep_window_s.m); the sweep period is the swept band over the speed, 20 ms over
-% Liu's 20 MHz to 83.5 ms over the whole 2.4 GHz band (2400-2483.5 MHz, ETSI EN 300 328).
+% sweep (sweep_window_s.m); the sweep period is the swept band over the speed: 20 ms over
+% Liu's 20 MHz band; the longer periods up to 83.5 ms are a derivation, Liu's sweep rate over
+% the whole 2.4 GHz band (2400-2483.5 MHz, ETSI EN 300 328), not a band Liu et al. swept.
 % Period and phase on the channel clock drawn per flight (jam_timing.m): a frame is
 % jammed whole, in part or not at all. Severity axis jsr_db, as jamming.
 params.sweep_speed_hz_s = 1e9;         % [Hz/s] sweep speed
@@ -174,8 +266,13 @@ params.jam_timing_random = true;       % sweep period and phase, burst phase dra
 % In-band cap: no emitter reaches the UAV more than 30 dB over our received signal, the
 % sources' most severe in-band level (Liu et al.), whatever path loss, pointing or
 % elevation loss our signal has, on its weakest antenna (inband_cap_amp.m, applied in
-% build_threat_model.m).
+% build_threat_model.m). An emitter's power is fixed: the cap holds it at the level that stays
+% within 30 dB of our signal on every antenna over the whole run, with the path-loss step,
+% the airframe-shadowing depth on the hidden antenna and the attitude's gain toward the GCS
+% at every frame (flight_draws.m, d.cap_amp, over p.cap_frames frames); the level it
+% reaches in each frame is recorded (extract_closed_loop_frames.m, lev_db).
 params.inband_cap_db = 30;          % [dB] largest in-band power of an emitter over our received signal
+params.cap_frames    = 20;          % frames of a run the cap holds over (the dataset's and the pools' runs)
 
 % Countermeasure physics (apply_countermeasure.m)
 params.cm_acr_db      = 30;         % [dB] rejection of an interferer left on another channel
@@ -192,15 +289,16 @@ params.erase_pilot_mse = 0.80;      % pilot error above which a frame's bits are
 % 7.5 dBm at 2.4 GHz, AD9361 Rev F) at -6 dBm, feeding a 12 dBi directional antenna (the gain
 % class of the fixed sector antenna of Rodriguez-Pineiro et al.) on a GPS tracker
 % (mean pointing error 5.62 deg azimuth, 1.51 deg elevation, measured with a quadcopter,
-% Nugroho & Dectaviansyah). Licence-exempt cap: 100 mW e.i.r.p. in Israel (Ministry of
-% Communications), as ETSI EN 300 328, which also caps 10 dBm in any 1 MHz (4.3.2.3): our
-% RRC signal puts 95.5% of its power in its central 1 MHz, so 10.2 dBm (eirp_cap_dbm.m),
-% the stricter. Nominal e.i.r.p. 6 dBm, 10 dB above an omni on the same radio;
+% Nugroho & Dectaviansyah). Licence-exempt cap: ETSI EN 300 328 v2.2.2, 20 dBm (100 mW)
+% e.i.r.p. (4.3.2.2.3) and 10 dBm in any 1 MHz (4.3.2.3.3): our RRC signal puts 95.5% of
+% its power in its central 1 MHz, so 10.2 dBm (eirp_cap_dbm.m), the stricter. Nominal
+% e.i.r.p. 6 dBm, 10 dB above an omni on the same radio;
 % power_control raises it by the largest step under the cap, +4.0 dB to 10.0 dBm, per
 % carrier with freq_diversity (power_step_db.m). One 0.69 ms frame per 20 ms cycle (3.4%
 % duty) meets the standard's limits for non-adaptive equipment. The pointing loss of
 % each flight (gcs_pointing.m) is applied in the channel. A tracker that lost its target
-% falls back to an omni (Boeing, US 8,503,941): 10 dB less, to the receiver a path loss.
+% falls back to the omni (an assumed fallback): 12 - 2 = 10 dB less, to the receiver a path
+% loss.
 params.gcs_pt_dbm      = -6;          % [dBm] nominal conducted power of the GCS radio
 params.gcs_pmax_dbm    = 7.5;         % [dBm] largest output of the radio at 2.4 GHz (a 1 MHz CW tone, AD9361)
 params.gcs_papr_db     = papr_db(params);   % [dB] peak over mean of our waveform: its mean stays this far below
@@ -225,9 +323,11 @@ if isfile('profile.json')             % antenna profile of this checkout (branch
 end
 params.ant_aperture_m = 1.2;          % distance between the outer antennas [m]
 params.ant_spacing_wl = params.ant_aperture_m / (3e8 / params.carrier_freq) / (params.n_rx - 1);   % element spacing [wavelengths]
-% Diffuse-fading correlation between adjacent antennas: no source gives it for a small UAV
-% (on an aircraft underside the received amplitudes, line of sight included, correlate
-% 0.85-0.99, Sun); drawn per flight over a wide range (rx_correlation.m).
+% Diffuse-fading correlation between adjacent antennas, drawn per flight over the measured
+% range (rx_correlation.m): two antennas 2/3 wavelength apart on a drone had envelope
+% correlations of 0.2-0.62 (Badi et al. 2019, Sec. 4.3, Fig. 7(c)), ours are 3.2-9.6
+% wavelengths apart; on an aircraft underside the received amplitudes, line of sight
+% included, correlate 0.85-0.99 (Sun et al.).
 params.rx_corr        = 0.3;          % fixed value (PHY validation, maps)
 params.corr_random    = true;         % correlation drawn per seeded sub-run
 params.corr_range     = [0.3 0.9];
@@ -258,24 +358,53 @@ params.int_rician_k   = params.rician_k;  % K-factor of the interferer -> UAV ch
 % 0.2 deg: image about 54 dB down) leaves even a 30 dB jammer's image far below our signal.
 params.chain_amp_db   = 0.1;          % [dB] std of each chain's gain error
 params.chain_phase_deg = 1;           % [deg] std of each chain's phase error
+% Level calibration: the receiver reports absolute levels from its gain index and compares
+% them with its thermal-floor constant (thermal_nv.m), each antenna to within the RSSI
+% accuracy of an AD9361-class receiver, +-2 dB (data sheet Rev. F, Table 1). Drawn per flight
+% and antenna, uniform within it (flight_draws.m), on every level the receiver reports
+% against that floor (RSSI, interference over thermal, the quiet slot, the busy share, the
+% antenna gains, the detector image: extract_closed_loop_frames.m); its combining is not
+% affected (signal and noise of a chain scale alike).
+params.cal_random     = true;         % level calibration error drawn per seeded flight
+params.cal_err_db     = 2;            % [dB] largest level calibration error of an antenna
+% Idle-time sensing: one frame per decision cycle leaves the receiver idle for the rest of
+% the cycle, where each antenna's chain reports its RSSI (idle_rssi.m): as the CC2420 radio
+% Grimaldi et al. 2019 read, a sample every 54 us (18.5 kHz, Sec. III-A), each the mean power
+% over the last 128 us (the RSSI register's average, Sec. II-B), in 1 dB steps (Table III),
+% with the antenna's level calibration error above (AD9361). A bin is busy 3 dB over the
+% floor constant (the frame's busy rule, extract_closed_loop_frames.m duty; Cheema & Salous
+% 2019, eq. 1). 0 Hz: no idle sensing.
+params.idle_rssi_hz     = 18.5e3;     % [Hz] RSSI sampling rate in the idle time
+params.idle_rssi_avg_s  = 128e-6;     % [s] RSSI averaging time
+params.idle_rssi_step_db = 1;         % [dB] RSSI resolution
+params.idle_busy_db     = 3;          % [dB] busy: this far over the floor constant
+% An emitter of opportunity in the band (the fault-vs-shadowing reading per condition,
+% emitter_reading.m; never part of the default link): 2.4 GHz channel duty cycles of
+% 4.6-11.5% measured with a busy threshold of -97 dBm (Cheema & Salous 2019, Table 6, Sec. 5),
+% about 11 dB over our -108 dBm floor (kTB at 1.25 MHz with the 5 dB noise figure). It lies on
+% the ground in any direction from the UAV, as far as the licence-exempt density cap
+% (10 dBm per MHz, ETSI EN 300 328) lets it reach each INR in free space: 11.2, 3.5 and
+% 1.1 km, 0.6, 1.8 and 5.6 deg below a UAV at 120 m (emitter_idle.m); in a bank the airframe
+% hides it as it hides the GCS.
+params.amb_duty         = [0.046 0.115];
+params.amb_inr_db       = [0 10 20];  % [dB] its level over the floor at the UAV, the conditions read
 params.rx_combiner    = 'mrc';        % 'mrc' baseline | 'mmse' (spatial_diversity action)
 params.csi_block      = 64;           % [symbols] channel-estimation window (MRC)
 params.mmse_window    = 32;           % [symbols] channel + interference-covariance window (MMSE; the delay line's taps: rx_taps.m)
 params.seed           = [];           % [] = drawn from the global stream at every model build
 
 %% ========== ALTITUDE & LINK BUDGET ==========
-% Altitude, drawn per flight: up to the FAA small-UAV ceiling of 122 m, the rule behind the
-% 161 km/h cap (Khawaja et al.; 120 m, Cui et al.), down to 15 m, the lowest height with a
-% full 2.5 GHz channel table (Rodriguez-Pineiro et al.), above the 0-11 m below-roofline
-% band (Cui et al.). It reaches the link only through the UAV dipole's gain toward the GCS
-% (flight_draws.m) and, below 25 m, the obstructed-LoS delay spread of our signal
-% (delay_spread.m): K and the delay spread above it show no height trend and the Doppler
-% spread falls with height (Rodriguez-Pineiro et al.).
+% Altitude, drawn per flight: up to 120 m, within the FAA small-UAV ceiling of 122 m, the rule
+% behind the 161 km/h cap (Khawaja et al.), down to 15 m, the lowest height with a full
+% 2.5 GHz channel table (Rodriguez-Pineiro et al.). It reaches the link only through the UAV
+% dipole's gain toward the GCS (flight_draws.m) and the delay spread of our signal by height
+% band (delay_spread.m): K shows no height trend and the Doppler spread falls with height
+% (Rodriguez-Pineiro et al.).
 params.alt_random   = true;               % altitude drawn per seeded flight (flight_altitude.m)
 params.alt_range_m  = [15 120];           % [m] UAV height above ground
 params.alt_grid_m   = [15 25 35 45 60 75 90 105 120];   % [m] table heights: Rodriguez-Pineiro et al.'s and the ceiling
 params.gcs_h_m      = 10;                 % [m] GCS antenna mast
-params.uav_null_db  = -30;                % [dB] UAV dipole gain directly below a drone (Badi et al.)
+params.uav_null_db  = -30;                % [dB] floor of the UAV dipole's null: a drone-to-drone link's RSS fell by up to 30 dB with the elevation angle (Badi et al. 2019, Sec. 4.2)
 % Distance attached to each Eb/N0 (link_distance_km.m): the GCS above, free space at the carrier
 params.lb_uav_dbi   = 2;                  % [dBi] UAV antenna (omni dipole)
 params.lb_nf_db     = 5;                  % [dB] UAV receiver noise figure

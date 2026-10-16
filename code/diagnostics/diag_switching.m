@@ -25,9 +25,9 @@ specs = val_specs(PP, K, H, VAL, REPS, RandStream('mt19937ar', 'Seed', 99));
 thr = PP.scen(cell2mat(cellfun(@(sp) sp.scn, specs, 'UniformOutput', false)));
 names = unique(thr, 'stable');
 POL = {'dqn', 'rule_esc'};
-rep = {sprintf(['=== CONFIGURATION CHANGES ON THE VALIDATION SPLIT (%s: alarm ''%s'' %d/%d, drop %.1f dB) ===\n' ...
+rep = {sprintf(['=== CONFIGURATION CHANGES ON THE VALIDATION SPLIT (%s: alarm ''%s'' %d/%d, drop %.1f %s) ===\n' ...
     'quick = change within %d cycles of the previous one; ping-pong = A -> B -> A with B held <= %d cycles'], ...
-    AGENT_FILE, Q.alarm_mode, Q.confirm, Q.drop_db, C.hold, C.hold)};
+    AGENT_FILE, Q.alarm_mode, Q.confirm, Q.drop_db, drop_unit(Q.alarm_mode), C.hold, C.hold)};
 
 for p = 1:numel(POL)
     sw = []; qk = []; pg = []; rec = []; ok = [];
@@ -69,8 +69,8 @@ end
 function specs = val_specs(PP, K, H, split, reps, rs)
 % Every (cell, Eb/N0, geometry) of the split `reps` times (as train_dqn.m).
 cells = find(~cellfun(@isempty, PP.pools(:, 1, K.na, split))');
-[c, s, r] = ndgrid(cells, 1:numel(PP.ebno), 1:K.nR(split));
-c = repmat(c(:)', 1, reps); s = repmat(s(:)', 1, reps); r = repmat(r(:)', 1, reps);
+[c, s, r] = flight_triples(cells, K.geo(cells, split), 1:numel(PP.ebno));   % the geometries each cell flies
+c = repmat(c, 1, reps); s = repmat(s, 1, reps); r = repmat(r, 1, reps);
 n = numel(c); nb = ceil(n / H.NE);
 specs = cell(1, nb);
 for b = 1:nb

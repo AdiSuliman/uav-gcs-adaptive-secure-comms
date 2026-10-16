@@ -10,7 +10,14 @@
 % cluster), difference to the rest, and the points of the overall result it pulls down
 % below the target. Cells whose interval lies entirely below or above the rest are
 % listed as weak or strong points, and the pairs (class x Eb/N0, class x level, class
-% x speed; threat x severity, threat x Eb/N0) are mapped.
+% x speed; threat x severity, threat x Eb/N0) are mapped. Every class is also broken down
+% by the flight's altitude, bank and delay spread, the interferers' level over the noise
+% (INR, the benign emitter and the jammers: the frame's lev_db, its level over our signal on
+% the weakest antenna, plus our per-sample SNR, Eb/N0 + 10 log10(bits per symbol / samples
+% per symbol), as set_link_snr.m sets it), the path-loss step and, for an antenna fault
+% and airframe shadowing, the onset inside the fusion window or after it. These are
+% readings beside KPI 1, never in it. compare_weak_points.m puts the weak_points.json of
+% several profiles side by side.
 % Output: results/weak_points.{txt,json}
 
 close all; clc;
@@ -22,6 +29,11 @@ rep{end+1} = sprintf(['Generated: %s | value = %% of units; [95%% bootstrap over
 J = struct();
 SPEED = [0 21 48 67 86 105 124 143 161];   % first band: hover and slow flight (0-21 km/h)
 KB = [-5 0 5 10 15 20];
+ALT = [15 35 60 90 120];                    % [m] the altitude range (init_params.m alt_range_m)
+BANK = [0 5 15 30 45 90];                   % [deg] |bank|; Sun et al.'s events need a roll above 5 deg
+DS = [0 100 200 300 500 1000 5000];         % [ns] RMS delay spread
+INR = [-30 -10 0 10 20 30 40 60];           % [dB]
+JAM = {'benign_interference', 'jamming', 'tone_jamming', 'sweeping_jammer', 'reactive_jamming', 'noise_burst'};
 
 %% 1. Detector
 if isfile('results/detector_predictions.mat')
@@ -34,10 +46,25 @@ if isfile('results/detector_predictions.mat')
         m = strcmp(yt, DL(t).name);
         [~, lr(m)] = ismember(round(pr.level(m) * 1000), round(DL(t).levels * 1000));
     end
-    F = table(categorical(yt), pr.ebno(:), pr.speed(:), lr, 'VariableNames', {'class', 'ebno', 'speed', 'level_rank'});
+    eb = pr.ebno(:); vs = compose('%g', unique(eb(~isnan(eb)))); ebl = compose('%g', eb);   % the KPI 1 bins
+    if any(isnan(eb)), ebl(isnan(eb)) = {'beyond'}; vs = [{'beyond'}; vs(:)]; end           % received below the grid
+    F = table(categorical(yt), categorical(ebl, vs), pr.speed(:), lr, 'VariableNames', {'class', 'ebno', 'speed', 'level_rank'});
     opt = struct('target', 90, 'bins', struct('speed', SPEED, 'k_db', KB), ...
         'pairs', {{'class', 'ebno'; 'class', 'level_rank'; 'class', 'speed'}});
     if isfield(pr, 'k_db'), F.k_db = pr.k_db(:); F.aoa_abs = abs(pr.aoa(:)); opt.bins.aoa_abs = [0 15 30 45 60 90]; end
+    if isfield(pr, 'alt_m'), F.alt_m = double(pr.alt_m(:)); opt.bins.alt_m = ALT; end
+    if isfield(pr, 'bank'), F.bank_abs = abs(double(pr.bank(:))); opt.bins.bank_abs = BANK; end
+    if isfield(pr, 'ds_ns'), F.ds_ns = double(pr.ds_ns(:)); opt.bins.ds_ns = DS; end
+    inr = nan(numel(yt), 1);                             % interferers' level over the noise [dB]
+    if isfield(pr, 'lev_db') && isfield(pr, 'ebno_rx')
+        Pq = load('params.mat'); q = Pq.params; clear Pq
+        inr = max(double(pr.lev_db), [], 2, 'omitnan') + double(pr.ebno_rx(:)) + 10*log10(q.bits_per_symbol / q.sps);
+        inr(~ismember(yt, JAM)) = NaN;
+    end
+    ona = strings(numel(yt), 1); ona(:) = missing;       % a lost branch's onset inside the fusion window or after it
+    if isfield(pr, 'onset_age')
+        ona(pr.onset_age < pr.fuse_N) = "in window"; ona(pr.onset_age >= pr.fuse_N) = "after";
+    end
     Wd = weak_points(100 * ok, F, pr.run(:), opt);
     rep = [rep, section('DETECTOR: accuracy per frame, every class', Wd)];
     J.detector = pack(Wd);
@@ -46,6 +73,11 @@ if isfile('results/detector_predictions.mat')
         m = strcmp(yt, cls{c});
         Fc = F(m, setdiff(F.Properties.VariableNames, {'class'}, 'stable'));
         oc = opt; oc.pairs = {'level_rank', 'ebno'};
+        if ismember(cls{c}, JAM), Fc.inr_db = inr(m); oc.bins.inr_db = INR; end
+        if strcmp(cls{c}, 'path_loss'), Fc.step_db = categorical(compose('%g dB', pr.level(m))); end
+        if ismember(cls{c}, {'antenna_fault', 'airframe_shadowing'}) && any(~ismissing(ona(m)))
+            Fc.onset = categorical(ona(m));
+        end
         Wc = weak_points(100 * ok(m), Fc, pr.run(m), oc);
         rep = [rep, section(sprintf('DETECTOR: %s detected as itself', cls{c}), Wc)]; %#ok<AGROW>
         J.detector_class.(matlab.lang.makeValidName(cls{c})) = pack(Wc);

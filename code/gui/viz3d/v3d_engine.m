@@ -48,7 +48,7 @@ M.K = link_env('tables', PP);
 M.agent = Q.agents{find(Q.gammas == Q.seed_summary.selected_gamma, 1)};
 M.na = M.K.na;
 M.split = 3;                                       % test split: flights never used in training
-M.nR = numel(PP.runs{M.split});
+M.nR = numel(M.K.geo{M.K.clean, M.split});         % the test geometries the clean link and most threats fly
 M.avail = find(PP.sev(:)' == decision_config().nominal & ...   % nominal severity: one cell per threat, the clean link first
     cellfun(@(p) ~isempty(p) && ~isempty(p.ber), PP.pools(:, 1, M.na, M.split))');
 S = load(fullfile(root, 'params.mat')); p = S.params;
@@ -90,6 +90,17 @@ G.score = repmat(emptyScore(), 1, 2);
 G.sides = struct('phase', {'threat', 'threat'}, 'okRun', {0, 0}, 'wasOk', {true, true}, 'detT', {0, 0}, ...
     'confT', {0, 0}, 'actT', {0, 0}, 'recT', {0, 0});
 G.events0{end + 1} = sprintf('%s switched on', threatName(M, scn));
+own = M.K.geo{scn, M.split};
+if ~ismember(G.r, own)                             % airframe shadowing flies flights of its own that hide an antenna
+    k = find(M.K.geo{M.K.clean, M.split} == G.r, 1); if isempty(k), k = 1; end
+    G.r = own(min(k, numel(own))); G.E.r(:) = G.r;
+    G.events0{end + 1} = 'Flight changed: one whose turn hides an antenna';
+end
+if isfield(M.K, 'ev')                             % a rolling-in flight: the onset reads its event's frame (link_env.m)
+    ev = M.K.ev{M.split}(G.r);
+    G.E.ev(:) = isfinite(ev);
+    if isfinite(ev), G.E.k0(:) = ev - 1 - G.E.onset(1); end
+end
 end
 
 function G = clearThreat(G)

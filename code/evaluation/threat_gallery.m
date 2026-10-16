@@ -21,10 +21,12 @@ OUT = fullfile('results', 'threat_gallery');
 if ~isfolder(OUT), mkdir(OUT); end
 
 p0 = load('params.mat').params;
+assert_frame1_onsets(p0);                       % every threat on from its run's first frame (init_params.m)
 p0.quiet_build = true; p0.int_aoa_random = false; p0.k_random = false; p0.yaw_random = false; p0.corr_random = false; p0.gcs_tracked = false;
 p0.gcs_aoa_random = false;
 p0.jam_timing_random = false;           % the shortest sweep at phase 0: the sweeper on our channel in every frame
 p0.tdl_random = false;                  % the median delay spreads (p0.tdl_ds_ns), with the delay line on
+p0.cap_frames = NF;                     % the in-band cap holds over the whole run
 fs = p0.symbol_rate * p0.sps;
 fd = V_KMH / 3.6 * p0.carrier_freq / p0.c_light;
 top = struct('threat', {}, 'action', {}, 'share', {});
@@ -81,11 +83,11 @@ fprintf('Saved %s\n', OUT);
 function R = run_link(p0, threat, action, ebno, seed, fd, nf)
 % One seeded run of the threat link with a configuration applied (apply_countermeasure.m).
 p = p0; p.active_threat = threat;
+if contains(threat, 'airframe_shadowing'), [~, p.roll_deg] = shadow_roll_band(p.shadow_db, p); end   % a turn that lets the airframe hide an antenna
 [p2, g_db] = apply_countermeasure(p, threat, action);
 evalc('build_threat_model(p2)');
 mdl = 'UAV_GCS_Threat_Link';
-set_param([mdl '/AWGN'], 'SNR', num2str(ebno + g_db + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps)), ...
-    'SignalPower', num2str(1/p2.sps));
+set_link_snr(mdl, ebno + g_db + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps), p2);
 link_seed(mdl, seed, fd);
 out = sim(mdl, 'StopTime', num2str(nf * p2.frame_duration));
 F = extract_closed_loop_frames(out, p2, 20);

@@ -13,6 +13,7 @@ C.deg_floor  = 1e-4;        % smallest clean reference of the estimated BER
 C.heal       = 5;           % healthy cycles that close an incident (tried list reset)
 C.confirm    = [2 2];       % alarm confirmation m-of-n (consecutive detections, Barajas et al.)
 C.drop_db    = 4;           % default Eb/N0-estimate drop that confirms path_loss; the deployed value comes from choose_drop_threshold.m
+C.cusum_win  = 3;           % cycles of the window-limited CUSUM's post-change estimate (drop_cusum.m): the monitor's 3-cycle window
 C.fec_frames = 4;           % frames of a coded packet's codeword when the pools do not record it (init_params.m fec_frames);
                             % the coded packet loss is read over 2 x win frames (win packets)
 
@@ -61,7 +62,8 @@ C.q_partial  = 40;          % best quality below restoration (log-linear to 0 at
 % Threat severities of the frame pools, five per threat over the full range (the
 % middle one is init_params' nominal), the strongest at the sources' most severe
 % value (dataset_levels.m): in-band interferers, spoofer and WLAN packets up to
-% 30 dB over our signal, path loss up to 22 dB, airframe shadowing up to 25 dB, an
+% 30 dB over our signal, path loss up to 22 dB (Simunek et al. 2011), airframe shadowing
+% up to 25 dB, each level flown at the rolls Sun et al.'s fit pairs with it, an
 % antenna fault from a partial connector loss to an open contact, 5-31 dB in even steps
 % (dataset_levels.m).
 % Combined threats run at the middle three (C.combo_sev).
@@ -89,6 +91,17 @@ C.combos = {'jamming+path_loss', 'noise_burst+antenna_fault', 'sweeping_jammer+p
             'benign_interference+noise_burst', 'jamming+airframe_shadowing', 'tone_jamming+path_loss', ...
             'jamming+spoofing+benign_interference', 'noise_burst+spoofing+antenna_fault', ...
             'jamming+airframe_shadowing+path_loss', 'tone_jamming+spoofing+airframe_shadowing'};
+
+% Airframe-shadowing flights of the pools (build_policy_pools.m, build_check_pools.m): the
+% UAV rolls into its turn so that the airframe enters the line of sight just before frame
+% C.event_frame of the run (flight_draws.m, geo.event_frame), the same flight's clean link
+% before it; an episode's onset (cycle 3-10) reads that frame (link_env.m), so the run holds
+% the lead-in of the latest onset and the cycles after the earliest one of a 30-cycle
+% episode (C.event_run, whole frame pairs), and its shadowing must count (the loss at least
+% p.shadow_evt_db) by C.event_count, inside the shortest span after an onset (20 cycles)
+C.event_frame = 11;
+C.event_run   = 38;
+C.event_count = 30;
 
 % Signalling delay of a configuration change: the request reaches the GCS over the
 % telemetry return link and both ends change before the link runs on it, so a change

@@ -5,7 +5,7 @@
 **Supervisor:** Golan Ein-Tzvi
 **History:** [PROJECT_LOG.md](PROJECT_LOG.md) · **Design decisions:** [DECISIONS.md](DECISIONS.md) · **Results:** [README.md](../README.md)
 
-Last updated: 2026-10-03
+Last updated: 2026-10-11
 
 ---
 
@@ -30,8 +30,8 @@ Last updated: 2026-10-03
 | Fixes | Latency tail; false-alarm bound (KPI 6) | ✅ latency p95 48.9 → 19.4 ms / ✅ KPI 6: 1.5% over 600 independent geometries, bound 2.60% (D52) | D48–D51 |
 | v4 | Receiver-side measurements, 36 combined configurations, combined threats in training, three severities, per-antenna feature, unknown-threat score selection, new-threat learning, 20 ms decision period | ✅ Full run A0–C2g done; hold in the shield (D63); escalation out of no_action (D64) | D59–D64 |
 | v5 | Ten threats (tone jamming, airframe shadowing), K 0–20 dB per flight, Eb/N0 0–15 dB, eight dataset and five decision levels, ten combined threats, one-cycle signalling delay, speeds outside training, single-core latency | ✅ Superseded by v6 (detector reading led to D72) | D68–D70 |
-| v6 | Evidence over time, quiet slot, levels to the sources' caps, weak-point analysis | ⏳ Profiles 1 and 2 running (resumed from C1p after the 2.10 power loss) | D71, D72 |
-| v7 | Real receiver with training and pilots, hover and turns, source-corrected severities, triples, profile 3 (four antennas), tracked directional GCS antenna under the e.i.r.p. cap | ⏳ Code ready, tests 16/16; starts automatically when v6 ends | D73 |
+| v6 | Evidence over time, quiet slot, levels to the sources' caps, weak-point analysis | ✅ Done, both profiles (summary document 2026-10-06); superseded by v7 | D71, D72 |
+| v7 | Real receiver with training and pilots, hover and turns, source-corrected severities, triples, profile 3 (four antennas), tracked directional GCS antenna under the e.i.r.p. cap; verdict per point (EDGE); fusion with the current frame; second detector test set; RF realism of distance, path loss, antenna fault and airframe shadowing | ⏳ First run stopped 2026-10-08 (profiles 1 and 3 after A0–B4s, profile 1 partly in C1p; kept as the first reading). D83 being finished, then an independent review, a smoke run and the full rerun of every profile from A0 on C: | D73–D83 |
 | Layout | Code into `code/` by stage | ✅ Done | D47, D61 |
 | D1 | Interim report | ⏳ Drafted, results to sync with the final run | — |
 | D2 | Final report | ⏳ | — |
@@ -40,13 +40,29 @@ Last updated: 2026-10-03
 
 ---
 
+## v7 full run: status at the system-drive swap (2026-10-06 19:46)
+
+v7 code frozen on v7-dev (8799fde: D75-D80, 73/73 tests, full smoke passed 2026-10-05/06). Runs started 2026-10-06 09:20
+(an earlier start at 01:08 was cut at 03:02 when the app session closed; long runs are now launched detached via WMI).
+Stopped by hand at 19:46 for the drive swap; completed stages are kept in each profile's data/ and results/.
+
+| Profile | Worktree | Stages done | Resumes at |
+|---|---|---|---|
+| 1 (3 antennas) | uav-gcs-v7 | A0, A4v, A5, A6, B1, B2, B2F, B3 | B3a |
+| 3 (4 antennas) | D:/uav-gcs-v7-p3 | A0, A4v | A5 |
+| 2 (2 antennas) | created at start | - | A0, after profile 1 |
+
+A4v: V12c fails only at the 30 dB jammer, rho 0.3, 1 us in profile 1 (stated limit); it passes in profile 3 (4 antennas).
+Resume: docs/drive_swap/AFTER_DRIVE_SWAP.md and docs/drive_swap/v7_resume.sh (logs in C:/Users/Adi Suliman/uav-gcs-logs).
+v6 ended 2026-10-06 (both profiles, LAT on the idle machine); summary document in the Desktop project folder.
+
 ## Remaining work
 
-1. **v6 and v7 full runs:** v6 (profiles 1, 2) running; v7 (profiles 1, 3, then 2) starts when v6 ends; latency on the idle machine after each; then the single test reading per profile, the weak-point analysis, the v6-vs-v7 comparison, README and the log.
+1. **v7 full rerun:** finish D83 (RF realism), an independent review of the whole chain against the sources, a smoke run, then every profile from A0 on C: (`docs/runs/v7_d83_launch.sh`: profile 1 first with its heavy parallel stages early, profile 3's C1p after profile 1's SURV3, profile 2 after profile 1, its C1p after profile 3's SURV3; LAT on the idle machine at the end). Every finished stage is reviewed by an agent on its outputs (fixes from the sources, validation data only; the run continues when downstream stages are unaffected). Then the single test reading per profile, the weak-point analysis, the v6-vs-v7 comparison, README and the log.
 2. **Fourth reading (D67 agent):** ✅ done; the v4 final state is in `archive/v4_final_D67_20260930/`. Its per-speed breakdown is not reliable (D68).
 3. **Operator console:** screenshots and a live check with the v5 agent; the threat gallery is part of the run. The high-quality 3D view waits until the code, the final proposal and the interim report are done.
 4. **Code comments:** ✅ full pass done (short explanation, no history), except `legacy/`.
-5. **Interim report:** chapters 1–4 and 7 drafted (front matter, theory and literature review, threats, method, status/risks/plan, review-form appendix); results, discussion and abstracts after the v5 reading.
+5. **Interim report (due 2026-11-01, writing from about 2026-10-20):** a chapter per threat (what it is, how it harms, where more or less, the planned answer), good and correct figures; it does not depend on the final v7 numbers.
 6. **Proposal:** v4 (final) from a full review of v3 against the v7 code and the sources; no 3D mention.
 7. **Final report, slides and poster:** last, when the user asks.
 8. **Housekeeping:** the v3 backups in `archive/` stay until the user approves deleting them.

@@ -4,12 +4,18 @@ function t = rx_taps(p)
 %   the flat one; with the delay line it spans the line's delays.
 %   t.lags    [before after]: symbol lags of the MRC over the antennas and the channel's
 %             delays (baseline, rx_combiner 'mrc'): 2 before (a later path's receive-pulse
-%             precursors, and a timing found on a later path) and the line's window
-%             p.tdl_max_ns after (the measured delay range).
+%             precursors) and the line's window p.tdl_max_ns after (the measured delay
+%             range); the receiver moves them by whole symbols from the arrival it finds
+%             to where they hold the most of the training's energy.
 %   t.ne      symbol-spaced taps of the linear MMSE equalizer after that MRC, centred on
-%             the symbol: the MRC output's symbol response spans +-t.lags(2).
+%             the symbol, twice the line's window on either side: the MRC output's symbol
+%             response spans +-(t.lags(1) + t.lags(2)), and a linear equalizer inverting it
+%             reaches beyond it (11 taps left a clean link at K -5 dB and the clip, 1.5 us
+%             on the line, at 3e-5 BER at 15 dB on the dev flights, 21 taps at 3e-6).
 %   t.nt      space-time taps per antenna of the MMSE combiner (rx_combiner 'mmse'), half
-%             a symbol apart and centred: +-2 RMS delay spreads at the clip p.tdl_clip_ns.
+%             a symbol apart and centred: +-2 RMS delay spreads of p.rx_span_ns, the
+%             receiver's design spread (1 us; longer spans did worse on the dev frames),
+%             fixed whatever spread the channel draws (p.tdl_clip_ns without the field).
 %             Symbol spacing would alias the RRC's excess band, where a dispersive
 %             interferer then fills every antenna dimension.
 %   t.window  [symbols] MMSE window: at least twice the space-time degrees of freedom
@@ -24,8 +30,10 @@ t = struct('lags', [0 0], 'ne', 1, 'nt', 1, 'window', p.mmse_window, 'mh', 0, 'n
 if ~isfield(p, 'tdl') || ~p.tdl, return; end
 T = 1e9 / p.symbol_rate;                                  % symbol period [ns]
 t.lags = [2, ceil(p.tdl_max_ns / T)];
-t.ne = 2 * t.lags(2) + 1;
-t.nt = 2 * ceil(4 * p.tdl_clip_ns / T) + 1;
+t.ne = 4 * t.lags(2) + 1;
+span = p.tdl_clip_ns;
+if isfield(p, 'rx_span_ns'), span = p.rx_span_ns; end
+t.nt = 2 * ceil(4 * span / T) + 1;
 t.window = max(p.mmse_window, 2^nextpow2(2 * p.n_rx * t.nt));
 t.mh = (t.nt - 1) / 4 + 2;
 end

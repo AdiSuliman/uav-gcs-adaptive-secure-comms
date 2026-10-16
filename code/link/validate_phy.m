@@ -30,7 +30,7 @@ function [ok, v12] = validate_phy(only, rows)
 %   the same ray 480 ns late, a 234 ns RMS delay spread, the median at 15-105 m of the
 %   second environment of Rodriguez-Pineiro et al.
 %   V12c, a gate on the flat channel: the tapped delay line (build_threat_model.m) against
-%   the flat channel, real receiver, RMS delay spread 64-1000 ns (v12c). It stops the run
+%   the flat channel, real receiver, RMS delay spread 64-2250 ns (v12c). It stops the run
 %   when the flat channel fails it while the link runs flat (p.tdl false). With the line on
 %   the same table is the receiver's own verdict on the delay line, reported apart (it does
 %   not stop the run: a failing case leaves its cells to the commitment).
@@ -79,7 +79,6 @@ if nargin >= 1 && strcmpi(only, 'V12c')
     if ~exist('results', 'dir'); mkdir('results'); end
     fid = fopen('results/phy_validation_v12c.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
     fprintf('\n%s\n', rep{:});
-    params = S.params; save('params.mat', 'params');
     if bdIsLoaded(modelName), close_system(modelName, 0); end
     ok = v12.pass || tdl_on;               % the channel model's gate; the receiver's verdict is v12.pass
     return
@@ -236,6 +235,7 @@ rep{end+1} = sprintf(['Overall: theory gaps %d/%d within %.1f dB, seeds %s, tone
     passfail(tone_ok), ternary(flat_only, 'not run', passfail(v12_ok)), ...
     ternary(flat_only || ~tdl_on, 'not run', passfail(v12.pass)), toc(t0)/60);
 rep{end+1} = sprintf('Pass rule: |gap| <= %.1f dB or within 2 standard errors (spread over %d channel realizations).', CFG.gap_ok, CFG.n_real);
+rep{end+1} = sprintf('params_id %s', params_id(S.params));
 if ~exist('results', 'dir'); mkdir('results'); end
 fid = fopen('results/phy_validation.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('\n%s\n', rep{:});
@@ -264,7 +264,6 @@ title(sprintf('Spatial nulling, %d antennas, jammer at %g deg', p0.n_rx, p0.int_
 legend('Location', 'southwest', 'FontSize', 8);
 exportgraphics(f, 'results/phy_validation.png', 'Resolution', 150);
 
-params = S.params; save('params.mat', 'params');
 if bdIsLoaded(modelName), close_system(modelName, 0); end
 ok = all(g_ok) && seed_same && seed_diff && tone_ok && v12_ok;
 end
@@ -293,7 +292,10 @@ function R = v12c(p0, modelName, delay_bits, rows)
 % (with the line, its taps span the line's delays: rx_taps.m), at the nominal speed, so
 % the shift is the delay spread's alone. RMS delay spreads: Lyu et al.'s 64 ns, the
 % medians of Rodriguez-Pineiro et al. (138, 234, 302 ns; 372 ns, their directional fit at
-% 60-90 m) and 1 us. (i) Clean link, our signal dispersive, MRC: shift <= 0.5 dB.
+% 75-105 m), 1 us and the clip of the drawn spreads, 2.25 us (p.tdl_clip_ns; the line
+% reaches its flat profile there, about 1.5 us at K -5 dB and 1.4 us at K 2 dB, only the
+% rows whose K lets it go beyond 1 us run it). (i) Clean link, our signal dispersive, MRC:
+% shift <= 0.5 dB.
 % (ii) A noise jammer at K 10 dB (16 and 30 dB, the jammer at p0.int_aoa_deg(1)), its
 % channel dispersive and ours flat, MMSE: shift <= 3 dB. Shift: the largest over the
 % points with >= 100 errors of the Eb/N0 shift to the flat curve's BER; a BER above the
@@ -301,17 +303,18 @@ function R = v12c(p0, modelName, delay_bits, rows)
 % Informational (no limit): the 16 dB jammer at 234 ns and the envelope's top Doppler
 % (161 km/h, 358 Hz), where the interferer's space-time null ages fastest.
 CFG = struct('EbNo', 0:3:15, 'sim_time', 0.5, 'n_real', 20, 'fd_val', p0.fd_max, 'min_err', 100);
-DS = [64 138 234 302 372 1000];
+DS = [64 138 234 302 372 1000 2250];
+D6 = DS(1:6);                         % the K 10 dB line holds its flat profile (767 ns) from 1 us
 fdt = p0.v_max * p0.carrier_freq / p0.c_light;
 C = {
   % name                          K    JSR  rho  threat     combiner  limit [dB] fd [Hz]    spreads [ns]
   'clean K -5 dB, MRC',           -5,  0,   0.3, 'none',    'mrc',    0.5,       p0.fd_max, DS
   'clean K 2 dB, MRC',             2,  0,   0.3, 'none',    'mrc',    0.5,       p0.fd_max, DS
-  'clean K 10 dB, MRC',           10,  0,   0.3, 'none',    'mrc',    0.5,       p0.fd_max, DS
-  'jam 16 dB, rho 0.3, MMSE',     10,  16,  0.3, 'jamming', 'mmse',   3,         p0.fd_max, DS
-  'jam 16 dB, rho 0.9, MMSE',     10,  16,  0.9, 'jamming', 'mmse',   3,         p0.fd_max, DS
-  'jam 30 dB, rho 0.3, MMSE',     10,  30,  0.3, 'jamming', 'mmse',   3,         p0.fd_max, DS
-  'jam 30 dB, rho 0.9, MMSE',     10,  30,  0.9, 'jamming', 'mmse',   3,         p0.fd_max, DS
+  'clean K 10 dB, MRC',           10,  0,   0.3, 'none',    'mrc',    0.5,       p0.fd_max, D6
+  'jam 16 dB, rho 0.3, MMSE',     10,  16,  0.3, 'jamming', 'mmse',   3,         p0.fd_max, D6
+  'jam 16 dB, rho 0.9, MMSE',     10,  16,  0.9, 'jamming', 'mmse',   3,         p0.fd_max, D6
+  'jam 30 dB, rho 0.3, MMSE',     10,  30,  0.3, 'jamming', 'mmse',   3,         p0.fd_max, D6
+  'jam 30 dB, rho 0.9, MMSE',     10,  30,  0.9, 'jamming', 'mmse',   3,         p0.fd_max, D6
   'jam 16 dB, rho 0.3, 358 Hz',   10,  16,  0.3, 'jamming', 'mmse',   NaN,       fdt,       234
   'jam 16 dB, rho 0.9, 358 Hz',   10,  16,  0.9, 'jamming', 'mmse',   NaN,       fdt,       234
 };
@@ -401,14 +404,13 @@ end
 
 %% ===================== Local functions =====================
 function [ber, nerr, dly, BR] = run_curve(p, modelName, CFG, delay_bits)
-params = p; save('params.mat', 'params'); %#ok<NASGU>
-tb = tic; evalc('build_threat_model');
+tb = tic; evalc('build_threat_model(p)');                 % built in memory: params.mat is not written
 set_param(modelName, 'SimulationCommand', 'update');
 fprintf('    build + compile %.1f s\n', toc(tb));
 nS = numel(CFG.EbNo); ber = nan(1, nS); nerr = zeros(1, nS); dly = NaN; BR = [];
 for s = 1:nS
     snr_dB = CFG.EbNo(s) + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
-    set_param([modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/p.sps));
+    set_link_snr(modelName, snr_dB, p);
     nr = 1; if isfield(CFG, 'n_real'), nr = CFG.n_real; end
     fdv = p.fd_max; if isfield(CFG, 'fd_val'), fdv = CFG.fd_val; end
     e_tot = 0; n_tot = 0; br = zeros(1, nr);

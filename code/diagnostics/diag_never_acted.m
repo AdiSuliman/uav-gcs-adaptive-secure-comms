@@ -17,8 +17,8 @@ Q = load('data/trained_dqn.mat', 'agent', 'H', 'confirm', 'alarm_mode', 'drop_db
 PP.confirm = Q.confirm; PP.alarm_mode = Q.alarm_mode; PP.drop_db = Q.drop_db;
 K = link_env('tables', PP);
 VAL = 2; REPS = 2; H = Q.H;
-rep = {sprintf('=== NEVER-ACTED EPISODES OF THE SELECTED DQN, VALIDATION (%s %d/%d, drop %.1f dB) ===', ...
-    Q.alarm_mode, Q.confirm, Q.drop_db)};
+rep = {sprintf('=== NEVER-ACTED EPISODES OF THE SELECTED DQN, VALIDATION (%s %d/%d, drop %.1f %s) ===', ...
+    Q.alarm_mode, Q.confirm, Q.drop_db, drop_unit(Q.alarm_mode))};
 for th = {'path_loss', 'antenna_fault'}
     cells = find(strcmp(PP.scen, th{1}));
     specs = static_specs(cells, PP, K, H, VAL, REPS, RandStream('mt19937ar', 'Seed', 100));
@@ -54,8 +54,8 @@ fprintf('%s\n', rep{:});
 
 %% ===================== Local functions =====================
 function specs = static_specs(cells, PP, K, H, split, reps, rs)
-[c, s, r] = ndgrid(cells, 1:numel(PP.ebno), 1:K.nR(split));
-c = repmat(c(:)', 1, reps); s = repmat(s(:)', 1, reps); r = repmat(r(:)', 1, reps);
+[c, s, r] = flight_triples(cells, K.geo(cells, split), 1:numel(PP.ebno));   % the geometries each cell flies
+c = repmat(c, 1, reps); s = repmat(s, 1, reps); r = repmat(r, 1, reps);
 n = numel(c); nb = ceil(n / H.NE);
 specs = cell(1, nb);
 for b = 1:nb

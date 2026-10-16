@@ -24,8 +24,8 @@ Q0 = load(AGENT_FILES{1}, 'H', 'alarm_mode', 'drop_db');
 H = Q0.H; PP.alarm_mode = Q0.alarm_mode; PP.drop_db = Q0.drop_db;
 K = link_env('tables', PP);
 VAL = 2; nS = numel(PP.ebno);
-rep = {sprintf('=== CLEAN-LINK FALSE ALARMS AND CONFIRMATION, VALIDATION SPLIT (%s, drop %.1f dB) ===', ...
-    PP.alarm_mode, PP.drop_db)};
+rep = {sprintf('=== CLEAN-LINK FALSE ALARMS AND CONFIRMATION, VALIDATION SPLIT (%s, drop %.1f %s) ===', ...
+    PP.alarm_mode, PP.drop_db, drop_unit(PP.alarm_mode))};
 
 %% Part 1a. Monitor on the clean validation geometries
 [PPw, Kw] = clean_world(PP, CV);
@@ -92,7 +92,7 @@ for a = 1:numel(AGENT_FILES)
         f = R.switches > 0;
         pl_cls = find(strcmp(PP.classes, 'path_loss'));
         hostile_cls = find(~ismember(PP.classes, {'none', 'benign_interference'}));
-        s1 = sum(f & R.fc_cls == pl_cls & R.fc_drop >= PP.drop_db);
+        s1 = sum(f & R.fc_cls == pl_cls & R.fc_dal);
         s2 = sum(f & ismember(R.fc_cls, hostile_cls) & R.fc_cls ~= pl_cls);
         s3 = sum(f) - s1 - s2;
         rep{end+1} = sprintf('  %-34s %d/%d   %8.1f%% %22s %5.1f%% %4d/%d | %3d / %3d / %3d', AGENT_FILES{a}, ...
@@ -108,7 +108,7 @@ function M = replay_batches(PP, K, specs, split, seed0)
 % No-action replay of every batch (the random streams of rollout_policy.m):
 % per cycle and episode the raw alarm, its source, the Eb/N0 drop.
 M = struct('alarm', [], 'src', [], 'drop', []);
-na = K.na; dd = PP.drop_db;
+na = K.na;
 for b = 1:numel(specs)
     spec = specs{b}; T = spec.T;
     rs = RandStream('mt19937ar', 'Seed', seed0 + b);
@@ -120,7 +120,7 @@ for b = 1:numel(specs)
         [a, mem, d] = policy_decide('fixed', obs, E.cfg, mem, PP, [], opt);
         al(t, :) = mem.alarm(:, end)';
         pl = strcmp(d.cls, 'path_loss');
-        hostile = ~ismember(d.cls, {'none', 'benign_interference', 'unknown'}) & ~(pl & d.drop < dd);
+        hostile = ~ismember(d.cls, {'none', 'benign_interference', 'unknown'}) & ~(pl & ~d.drop_alarm);
         src(t, al(t, :) & hostile & pl) = 1;
         src(t, al(t, :) & hostile & ~pl) = 2;
         src(t, al(t, :) & ~hostile) = 3;
@@ -177,8 +177,8 @@ function specs = full_val_spec(PP, K, H, split, reps, rs)
 % The validation episodes of train_dqn.m.
 C = decision_config();
 cells = find(~cellfun(@isempty, PP.pools(:, 1, K.na, split))');
-[c, s, r] = ndgrid(cells, 1:numel(PP.ebno), 1:K.nR(split));
-c = repmat(c(:)', 1, reps); s = repmat(s(:)', 1, reps); r = repmat(r(:)', 1, reps);
+[c, s, r] = flight_triples(cells, K.geo(cells, split), 1:numel(PP.ebno));   % the geometries each cell flies
+c = repmat(c, 1, reps); s = repmat(s, 1, reps); r = repmat(r, 1, reps);
 n = numel(c); nb = ceil(n / H.NE);
 specs = cell(1, nb);
 for b = 1:nb
@@ -204,12 +204,6 @@ end
 
 function [PPw, Kw] = clean_world(PP, CT)
 % The pools with the validation split replaced by the independent clean geometries.
-nS = numel(PP.ebno); nA = numel(PP.actions);
-pools = PP.pools;
-pools(:, :, :, 2) = {[]};
-ic = find(strcmp(PP.scen, 'none'), 1);
-pools(ic, :, :, 2) = reshape(CT.pools(1, :, :), [1 nS nA]);
-runs = PP.runs; runs{2} = CT.runs;
-PPw = PP; PPw.pools = pools; PPw.runs = runs;
+PPw = clean_split(PP, CT, 2);
 Kw = link_env('tables', PPw);
 end

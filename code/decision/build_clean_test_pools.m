@@ -1,14 +1,24 @@
 %% BUILD_CLEAN_TEST_POOLS - Clean-link pools over many independent geometries
 % The false-alarm KPI needs independent trials. This script measures the clean
-% link ('none') on 100 new geometries per Eb/N0 (seeds never used before), under
+% link ('none') on 300 new geometries per Eb/N0 (seeds never used before), under
 % every configuration (common random numbers, as in build_policy_pools.m), with
 % the same detector, frames per geometry and features (pool_cell.m, in parallel).
 % Two sets, chosen by CLEAN_SET (default 'test'):
 %   'test'  seed block 15 -> data/clean_test_pools.mat: evaluate_policies.m runs
-%           one clean episode per geometry (600 independent episodes) and KPI 6
-%           is computed over them
+%           one clean episode per geometry and KPI 6 is computed over them with the
+%           clean episodes of the test pools (one per geometry), from the KPI 1
+%           threshold up: at least 600 independent episodes (312 per Eb/N0) as long
+%           as two Eb/N0 points are above it
 %   'val'   seed block 4 -> data/clean_val_pools.mat: train_dqn.m checks the false
 %           alarms of every run on it, so the test set is used once
+% Geometry k takes clean_pool_seed.m's seed (families 1, 3 and 5 of the block); every
+% per-flight draw is kept as the pools keep theirs (CT.cov, flight_cov.m), so readers never
+% re-derive them. The detector must be that of data/policy_pools.mat: CT.det_id and
+% CT.model_tag carry it and the link model, and every reader checks them (check_det_id.m).
+% Every finished chunk of geometries is kept on disk (data/c1c_<set>_chunks,
+% pool_checkpoint.m) under a key of everything its frames depend on, so a build stopped at
+% any point simulates only the chunks it does not hold when started again; the output is
+% written once complete and the chunks removed after.
 %
 % Output: data/clean_test_pools.mat or data/clean_val_pools.mat (struct CT)
 
@@ -23,31 +33,41 @@ switch CLEAN_SET
     case 'val',  SP = 4; f_out = 'data/clean_val_pools.mat';
     otherwise, error('build_clean_test_pools: CLEAN_SET must be ''test'' or ''val''');
 end
-N_GEOM = 100;                                 % geometries per Eb/N0 (at most 99 per seed block + 1)
+N_GEOM = 300;                                 % geometries per Eb/N0: 100 per geometry family 1, 3, 5 (pool_seed.m)
 CHUNK = 10;                                   % geometries per parallel job
 N_WORKERS = 6;
 opt = struct('F_SUB', 20, 'tw', 10, 'delay_bits', 20);
 if exist('SMOKE', 'var') && SMOKE, N_GEOM = 4; CHUNK = 2; end   % reduced chain check (run_stage smoke)
 
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
-EBNO = PP.ebno; ACTIONS = PP.actions; opt.F_SUB = PP.F_SUB; vrange = PP.speed_range; clear PP
+EBNO = PP.ebno; ACTIONS = PP.actions; opt.F_SUB = PP.F_SUB; vrange = PP.speed_range;
+TAG = ''; if isfield(PP, 'model_tag'), TAG = PP.model_tag; end
+PID = ''; if isfield(PP, 'det_id'), PID = PP.det_id; end
+clear PP
 nS = numel(EBNO); nA = numel(ACTIONS);
 runs = 100 * SP + (1:N_GEOM);
 
+D = load('data/trained_detector.mat', 'net', 'classes', 'ood', 'trained_at');
+T = ood_thresholds(0.95);
+DET_ID = detector_id(D.trained_at, D.ood, fusion_model(), T.maha);
+if ~strcmp(PID, DET_ID)
+    error('build_clean_test_pools: data/policy_pools.mat comes from another detector; rerun C1p first');
+end
 if isfile(f_out) && dir(f_out).datenum > dir('data/policy_pools.mat').datenum
     Cx = load(f_out, 'CT');
-    if isequal(Cx.CT.runs, runs) && isequal(Cx.CT.ebno, EBNO) && isequal(Cx.CT.actions, ACTIONS)
+    if isequal(Cx.CT.runs, runs) && isequal(Cx.CT.ebno, EBNO) && isequal(Cx.CT.actions, ACTIONS) ...
+            && isfield(Cx.CT, 'cov') && isfield(Cx.CT, 'det_id') && strcmp(Cx.CT.det_id, DET_ID)
         fprintf('%s is up to date (%d geometries per Eb/N0), nothing to do\n', f_out, N_GEOM);
         clear CLEAN_SET; return
     end
 end
 
 S0 = load('params.mat'); p0 = S0.params; p0.quiet_build = true; p0.active_threat = 'none';
-D = load('data/trained_detector.mat', 'net', 'classes', 'ood');
-N = load('data/splits.mat', 'splits');
+assert_frame1_onsets(p0);                       % every threat on from its run's first frame (init_params.m)
+nm = split_norm();                                     % the training z-score alone
 det = struct('net', D.net, 'ood', D.ood, 'classes', {cellstr(string(D.classes(:)'))}, ...
-    'mu', N.splits.norm.feat_mean, 'sd', N.splits.norm.feat_std, 'fs', p0.symbol_rate * p0.sps);
-clear N D
+    'mu', nm.feat_mean, 'sd', nm.feat_std, 'fs', p0.symbol_rate * p0.sps);
+clear nm D
 
 %% 2. Simulation: every configuration x Eb/N0 x geometry, clean link, in parallel chunks
 nJ = ceil(N_GEOM / CHUNK);
@@ -55,7 +75,7 @@ geo = cell(nJ, nS);
 for j = 1:nJ
     r = (j-1)*CHUNK + 1 : min(j*CHUNK, N_GEOM);
     for s = 1:nS
-        [sd_, v_] = arrayfun(@(k) pool_seed(1, s, SP, k, vrange), r);
+        [sd_, v_] = arrayfun(@(k) clean_pool_seed(s, SP, k, vrange), r);
         geo{j, s} = struct('seed', sd_, 'speed', v_, 'run', runs(r));
     end
 end
@@ -73,12 +93,18 @@ else
         pool_worker_init(repo);
     end
 end
+CKD = fullfile(pwd, 'data', sprintf('c1c_%s_chunks', CLEAN_SET));   % finished chunks (pool_checkpoint.m; the workers work elsewhere)
+keys = arrayfun(@(j) pool_checkpoint('key', {TAG, DET_ID, runs, EBNO, ACTIONS, geo(j, :), opt, p0}), 1:nJ, ...
+    'UniformOutput', false);
+todo = pool_checkpoint('todo', CKD, keys);
+fprintf('%d chunks of geometries; %d kept from an earlier start (%s)\n', nJ, nJ - numel(todo), CKD);
 t0 = tic;
-res = cell(1, nJ);
-parfor (j = 1:nJ, NWP)
-    res{j} = pool_cell(p0, 'none', ACTIONS, EBNO, geo(j, :), det, opt);
+parfor (k = 1:numel(todo), NWP)
+    j = todo(k);
+    pool_checkpoint('save', CKD, j, keys{j}, pool_cell(p0, 'none', ACTIONS, EBNO, geo(j, :), det, opt));
     fprintf('  geometries chunk %d/%d done\n', j, nJ);
 end
+res = arrayfun(@(j) pool_checkpoint('load', CKD, j), 1:nJ, 'UniformOutput', false);
 pools = cell(1, nS, nA);
 f = fieldnames(res{1}{1, 1, 1});
 for s = 1:nS
@@ -93,8 +119,12 @@ end
 
 spd = cell2mat(arrayfun(@(s) [cell2mat(cellfun(@(g) g.speed, geo(:, s)', 'UniformOutput', false))], (1:nS)', ...
     'UniformOutput', false));                   % UAV speed of every geometry, Eb/N0 x geometry
+sds = cell2mat(arrayfun(@(s) [cell2mat(cellfun(@(g) g.seed, geo(:, s)', 'UniformOutput', false))], (1:nS)', ...
+    'UniformOutput', false));                   % seed of every geometry
+V = flight_cov(arrayfun(@(s) struct('seed', sds(s, :), 'speed', spd(s, :)), 1:nS, 'UniformOutput', false), EBNO, p0);
 CT = struct('pools', {pools}, 'runs', runs, 'ebno', EBNO, 'actions', {ACTIONS}, 'n_geom', N_GEOM, ...
-    'speed', spd, 'set', CLEAN_SET, 'created', datestr(now));
-save(f_out, 'CT', '-v7.3');
+    'speed', spd, 'seed', sds, 'cov', V, 'set', CLEAN_SET, 'det_id', DET_ID, 'model_tag', TAG, 'created', datestr(now));
+pool_checkpoint('commit', f_out, struct('CT', CT));
+pool_checkpoint('clear', CKD);
 fprintf('Saved %s (%.1f min)\n', f_out, toc(t0)/60);
 clear CLEAN_SET

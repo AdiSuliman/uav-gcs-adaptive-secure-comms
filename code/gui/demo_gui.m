@@ -77,7 +77,8 @@ env.modelName  = 'UAV_GCS_Threat_Link';
 env.fs         = p0.symbol_rate * p0.sps;
 env.delay_bits = 20;
 env.img_size = 128; env.win = 128; env.novlp = 113; env.nfft = 128;
-env.db_lo = -40; env.db_hi = 40; env.temporal_window = 10;
+env.db_lo = -25; env.db_hi = 55;   % dB over the thermal floor of a bin, as spec_image.m
+env.temporal_window = 10;
 env.DC = decision_config();
 env.threats = [{'jamming','reactive_jamming','sweeping_jammer','noise_burst','tone_jamming', ...
     'path_loss','spoofing','antenna_fault','airframe_shadowing','benign_interference','none'}, env.DC.combos(:)'];
@@ -99,7 +100,7 @@ FZ = fusion_model();                           % temporal fusion (select_fusion.
 UW = 1; if isfield(D.ood, 'win'), UW = D.ood.win; end                        % unknown-score window (eval_ood_detection.m)
 env.PP = struct('actions', {env.action_names}, 'classes', {env.class_list(:)'}, 'sps', p0.sps, ...
     'bps', p0.bits_per_symbol, 'maha_thr', Tood.maha, 'fuse', FZ.FM, 'fuse_N', FZ.N, 'q_thr', FZ.q_thr, ...
-    'unk_win', UW);
+    'unk_win', UW, 'cfg_gain_db', config_gain_db(env.action_names, p0));
 if isfield(Q, 'confirm'), env.PP.confirm = Q.confirm; end
 if isfield(Q, 'alarm_mode'), env.PP.alarm_mode = Q.alarm_mode; end
 if isfield(Q, 'drop_db') && ~isempty(Q.drop_db), env.PP.drop_db = Q.drop_db; end
@@ -1093,6 +1094,14 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     [p, sevTxt] = scenarioParams(env, threat, sevLevel, v_kmh);
     snr_dB = ebno + 10*log10(p.bits_per_symbol) - 10*log10(p.sps);
     truth_idx = classIdx(env, threat);
+    fl = [];                                                       % airframe shadowing: a rolling-in flight (console_flights.m)
+    if contains(threat, 'airframe_shadowing')
+        [fl, why] = console_flights(p, ebno, v_kmh, randi(2^25), 1);
+        if isempty(fl)
+            appLog(fig, sprintf('Skipped %s @ %g dB: %s.', threatLabel(threat), ebno, why));
+            return;
+        end
+    end
 
     refBer = NaN;                                                  % clean-channel BER at this Eb/N0
     if ~isempty(env.surv)
@@ -1108,23 +1117,27 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     %% ---- 1a. clean lead-in of the same link (monitor reference) ----
     % The monitor's Eb/N0 reference and the path_loss drop gate need
     % cycles of the healthy link; evaluation episodes start clean, so the live
-    % run does too.
-    leadF = []; leadB = []; probsL = []; mahaL = []; leadG = [];
+    % run does too. A rolling-in flight's lead-in is the clean link of the same
+    % flight up to the frame the airframe enters the line of sight, as the pools'.
+    leadF = []; leadB = []; probsL = []; mahaL = []; leadG = []; leadI = [];
     if ~strcmp(threat, 'none')
-        appLog(fig, 'Simulating a clean lead-in of the same link (monitor reference)...');
+        if isempty(fl)
+            appLog(fig, 'Simulating a clean lead-in of the same link (monitor reference)...');
+        else
+            appLog(fig, sprintf(['Simulating the clean link of the same flight while the UAV rolls into its turn ' ...
+                '(monitor reference), up to frame %d, where the airframe enters the line of sight...'], fl.k));
+        end
         pl = p; pl.active_threat = 'none';
-        saveParams(pl);
-        build_threat_model;
-        set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/pl.sps));
-        FL = extract_closed_loop_frames(sim(env.modelName), pl, env.delay_bits);
-        disk_guard;
+        [~, FL] = simRun(env, pl, snr_dB, fl);
         vl = reshape(find(~isnan(FL.ber)), 1, []);
+        if ~isempty(fl), vl = vl(vl < fl.k); end
         XL = zeros(env.img_size, env.img_size, 1, numel(vl), 'single'); leadF = zeros(numel(vl), numel(env.feat_mean));
         for i = 1:numel(vl)
-            XL(:, :, 1, i) = spec_image(FL.iq{vl(i)}, env.fs);
+            XL(:, :, 1, i) = spec_image(FL.iq{vl(i)}, env.fs, thermal_nv(pl));
             leadF(i, :) = link_features(FL, vl(i), env.temporal_window);
         end
-        leadB = FL.ber(vl); leadG = FL.gain_ant(:, vl)';
+        leadB = FL.ber(vl); leadG = FL.gain_ant(:, vl)'; leadI = FL.idle(:, vl)';   % the idle time before each frame
+        leadC = nan(numel(vl), 0); if isfield(FL, 'bch'), leadC = FL.bch(:, vl)'; end   % the antennas' channel records
         FnL = ((leadF - env.feat_mean) ./ env.feat_std)';
         [probsL, mahaL] = detect_scores(env.cnn_net, env.ood, XL, FnL);
         clear XL FnL FL
@@ -1133,39 +1146,35 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
 
     %% ---- 1. real Simulink run of the attacked link ----
     appLog(fig, 'Building Simulink threat model and simulating the link...');
-    saveParams(p);
-    build_threat_model;
-    set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB), 'SignalPower', num2str(1/p.sps));
-    out = sim(env.modelName);
+    [out, F] = simRun(env, p, snr_dB, fl);
     updateTimer(fig, tSeq); checkAbort(fig);
 
-    F = extract_closed_loop_frames(out, p, env.delay_bits);
-    disk_guard;
-    iq_frames = F.iq; ber_f = F.ber; rssi_f = F.rssi; nf = F.nf;
-    i_last = find(~isnan(ber_f), 1, 'last'); if isempty(i_last), i_last = nf; end
+    f0 = 1; if ~isempty(fl), f0 = fl.k; end                       % the run's frames from the threat on
+    iq_frames = F.iq; ber_f = F.ber; rssi_f = F.rssi; nf = F.nf - f0 + 1;
+    i_last = find(~isnan(ber_f), 1, 'last'); if isempty(i_last), i_last = F.nf; end
     raw_feats = link_features(F, i_last, env.temporal_window);
     plr_win = raw_feats(feature_index('plr'));
     iq_before = iq_frames{i_last};
     z_before = combinerSymbols(out, i_last, p);
-    ber_before_mean = mean(ber_f, 'omitnan');
+    ber_before_mean = mean(ber_f(f0:end), 'omitnan');
     appLog(fig, sprintf('Channel: BER %.2e (mean of %d frames) | RSSI %.2f dB | packets lost (CRC) %.0f%% | %s', ...
         ber_before_mean, nf, rssi_f(i_last), 100 * plr_win, bitsTxt(ber_before_mean)));
 
     % Pre-mitigation views (drawn BEFORE the timed decision block)
     drawIQ(fig, z_before, c.red, 'Receiver symbols - before  (4 tight clusters = clean QPSK)');
-    tl = struct('ber_b', ber_f, 'rssi_b', rssi_f, 'ber_d', [], 'rssi_d', [], ...
+    tl = struct('ber_b', ber_f(f0:end), 'rssi_b', rssi_f(f0:end), 'ber_d', [], 'rssi_d', [], ...
         'ber_r', [], 'rssi_r', [], 'ref', refBer);
     drawTimeline(fig, tl);
     smartPause(fig, 0.5, tSeq); checkAbort(fig);
 
     %% ---- 2. decision layer over the frames of the run (policy_decide.m, as evaluated) ----
     [Sxx, Fq, Tq] = spectrogram(iq_before, hann(env.win), env.novlp, env.nfft, env.fs, 'centered');
-    Pw_db = 20*log10(abs(Sxx) + eps);
-    vf = reshape(find(~isnan(ber_f)), 1, []); nv = numel(vf);
+    Pw_db = 20*log10(abs(Sxx) + eps) - 10*log10(thermal_nv(p) * sum(hann(env.win).^2));   % over the thermal floor of a bin
+    vf = reshape(find(~isnan(ber_f)), 1, []); vf = vf(vf >= f0); nv = numel(vf);
     if nv == 0, error('demoGui:noFrames', 'no complete frame in the run'); end
     X = zeros(env.img_size, env.img_size, 1, nv, 'single'); Fr = zeros(nv, numel(env.feat_mean));
     for i = 1:nv
-        X(:, :, 1, i) = spec_image(iq_frames{vf(i)}, env.fs);
+        X(:, :, 1, i) = spec_image(iq_frames{vf(i)}, env.fs, thermal_nv(p));
         Fr(i, :) = link_features(F, vf(i), env.temporal_window);
     end
     Fn = ((Fr - env.feat_mean) ./ env.feat_std)';
@@ -1174,7 +1183,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     cfgD = env.na; cfgR = env.na; memD = []; memR = []; dqn_ms = NaN;
     for i = 1:size(leadF, 1)                                    % clean lead-in: reference only
         obs = struct('probs', probsL(:, i)', 'unknown', mahaL(i) < PPr.maha_thr, 'maha', mahaL(i), 'feat', leadF(i, :), ...
-            'ber', leadB(i), 'gant', leadG(i, :));
+            'ber', leadB(i), 'gant', leadG(i, :), 'idle', leadI(i, :), 'bch', leadC(i, :));
         [cfgD, memD] = policy_decide('dqn_esc', obs, cfgD, memD, PPr, env.dqn_agent);
         [cfgR, memR] = policy_decide('rule_esc', obs, cfgR, memR, PPr, []);
     end
@@ -1185,7 +1194,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     end
     for i = 1:nv
         obs = struct('probs', probsAll(:, i)', 'unknown', mahaAll(i) < PPr.maha_thr, 'maha', mahaAll(i), 'feat', Fr(i, :), ...
-            'ber', ber_f(vf(i)), 'gant', F.gain_ant(:, vf(i))');
+            'ber', ber_f(vf(i)), 'gant', F.gain_ant(:, vf(i))', 'idle', F.idle(:, vf(i))', 'bch', F.bch(:, vf(i))');
         t2 = tic;
         [cfgD, memD, dD] = policy_decide('dqn_esc', obs, cfgD, memD, PPr, env.dqn_agent);
         dqn_ms = toc(t2) * 1000;
@@ -1208,7 +1217,8 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     probs = probsAll(:, nv);
     [conf, idx] = max(probs);
     top_class = env.class_list{idx};
-    is_unknown = mahaAll(nv) < PPr.maha_thr;
+    sw = [mahaL(:); mahaAll(:)];                              % the monitor's statistic: the last unk_win cycles
+    is_unknown = mean(sw(max(1, end - PPr.unk_win + 1):end)) < PPr.maha_thr;
     if is_unknown, cnn_class = 'unknown'; else, cnn_class = top_class; end
     qv = dD.q(:); qv(~isfinite(qv)) = NaN;
     aidx = cfgD; action_name = env.action_names{aidx};
@@ -1256,7 +1266,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     ruleNone = strcmp(rule_action, 'no_action');
     if ~dqnNone
         appLog(fig, sprintf('Applying DQN countermeasure (%s) and re-simulating the link...', niceName(action_name)));
-        Rd = applyMitigation(env, p, threat, action_name, snr_dB);
+        Rd = applyMitigation(env, p, threat, action_name, snr_dB, fl);
         updateTimer(fig, tSeq); checkAbort(fig);
     else
         appLog(fig, 'DQN chose NO ACTION - monitoring the link.');
@@ -1266,7 +1276,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
             Rr = Rd;
         else
             appLog(fig, sprintf('Re-simulating with the rule-based choice (%s) for comparison...', niceName(rule_action)));
-            Rr = applyMitigation(env, p, threat, rule_action, snr_dB);
+            Rr = applyMitigation(env, p, threat, rule_action, snr_dB, fl);
             updateTimer(fig, tSeq); checkAbort(fig);
         end
     end
@@ -1368,19 +1378,33 @@ function s = outLine(lbl, ber, rec)
     else,          s = sprintf('%s: %.2e   (%.1f%% recovered)', lbl, ber, rec); end
 end
 
-function R = applyMitigation(env, p, threat, action_name, snr_dB) %#ok<INUSL>
+function R = applyMitigation(env, p, threat, action_name, snr_dB, fl)
     % Real second simulation of the link with the countermeasure applied to the
-    % TRUE threat (same physics as training and evaluation, apply_countermeasure.m).
+    % TRUE threat (same physics as training and evaluation, apply_countermeasure.m);
+    % a rolling-in flight is flown again and read from the frame of its event.
     [p2, g_db] = apply_countermeasure(p, threat, action_name);
-    saveParams(p2);
-    build_threat_model;
-    set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p2.sps));
-    out2 = sim(env.modelName);
-    F2 = extract_closed_loop_frames(out2, p2, env.delay_bits);
-    disk_guard;
+    [out2, F2] = simRun(env, p2, snr_dB + g_db, fl);
+    f0 = 1; if ~isempty(fl), f0 = fl.k; end
     i2 = find(~isnan(F2.ber), 1, 'last'); if isempty(i2), i2 = F2.nf; end
-    R = struct('iq', F2.iq{i2}, 'z', combinerSymbols(out2, i2, p2), 'ber_f', F2.ber, 'rssi_f', F2.rssi, ...
-        'ber_mean', mean(F2.ber, 'omitnan'));
+    R = struct('iq', F2.iq{i2}, 'z', combinerSymbols(out2, i2, p2), 'ber_f', F2.ber(f0:end), 'rssi_f', F2.rssi(f0:end), ...
+        'ber_mean', mean(F2.ber(f0:end), 'omitnan'));
+end
+
+function [out, F] = simRun(env, p, snr_dB, fl)
+    % One simulated run of the scenario's link at snr_dB: a flight of the build's own
+    % seed, or the rolling-in flight fl (console_flights.m), the same flight for every
+    % build that flies it.
+    saveParams(p);
+    build_threat_model;
+    set_link_snr(env.modelName, snr_dB, p);
+    if isempty(fl)
+        out = sim(env.modelName);
+    else
+        link_seed(env.modelName, fl.seed(1), p.fd_max, fl.geo);
+        out = sim(env.modelName, 'StopTime', fl.stop);
+    end
+    F = extract_closed_loop_frames(out, p, env.delay_bits);
+    disk_guard;
 end
 
 function cf = confirmOf(env)
@@ -2017,6 +2041,17 @@ function runEpisode(btn, ~)
     end
     na = find(strcmp(env.action_names, 'no_action'), 1);
     nA = numel(env.action_names);
+    ev = Pt{na}.ev;                                            % a rolling-in flight: the frame its event starts
+    if isfinite(ev) && N_PRE > ev - 1
+        N_PRE = ev - 1; N = N_PRE + N_POST;
+        appLog(fig, sprintf(['Airframe shadowing flies rolling-in flights: %d clean cycles before the airframe ' ...
+            'enters the line of sight, as on the evaluated flights.'], N_PRE));
+    end
+    if isfield(env.PP, 'fuse') && ~isempty(env.PP.fuse) && (isempty(Pn{na}.gant) || isempty(Pt{na}.gant))
+        warning('demoGui:noGant', ['episode pools without the antennas'' gains: the fusion''s gain columns and ' ...
+            'the cause latch do not run as evaluated']);
+        appLog(fig, 'WARNING: episode pools without the antennas'' gains; the fusion and the latch do not run as evaluated.');
+    end
     bc = mean(Pn{na}.ber);
     gp_act = ones(1, nA);
     for a = 1:nA
@@ -2026,7 +2061,7 @@ function runEpisode(btn, ~)
 
     %% ---- episode state, one per policy, identical frame draws ----
     base = struct('net', env.cnn_net, 'ood', env.ood, 'feat_mean', env.feat_mean, 'feat_std', env.feat_std, ...
-        'fs', env.fs, 'agent', env.dqn_agent, 'PP', env.PP, 'na', na, ...
+        'fs', env.fs, 'nv', thermal_nv(env.p0), 'agent', env.dqn_agent, 'PP', env.PP, 'na', na, ...
         'tw', env.temporal_window, 'frame_dur', env.p0.frame_duration);
     ctx = cell(1, nP); Ep = cell(1, nP);
     for i = 1:nP
@@ -2034,6 +2069,7 @@ function runEpisode(btn, ~)
     end
     rsE = RandStream('mt19937ar', 'Seed', seed);               % same sub-run and frame positions for every policy
     rr = randi(rsE, 2); k0 = randi(rsE, 20) - 1;
+    if isfinite(ev), k0 = ev - 2 - N_PRE; end                  % cycle N_PRE + 1 reads the event's frame
     T = struct('ber', nan(nP, N), 'det', nan(nP, N), 'ok', false(nP, N), 'mit', false(nP, N), 'conf', nan(nP, N), ...
         'prop', nan(nP, N), 'cfg', nan(nP, N), 'sw', false(nP, N), 'unk', false(nP, N), 'q', nan(nP, N, nA));
     cls_idx = @(cl) find(strcmp(env.class_list, cl), 1);
@@ -2049,9 +2085,13 @@ function runEpisode(btn, ~)
         for i = 1:nP
             if isempty(Ep{i}), cfg = na; else, cfg = Ep{i}.cfg; end
             if onset, F = Pt{cfg}; else, F = Pn{cfg}; end
-            rows = find(F.run == rr); j = rows(mod(k0 + k, numel(rows)) + 1);
+            rows = find(F.run == rr); q = k0 + k; n = numel(rows);
+            if isfinite(ev) && q >= n, q = n - 10 + mod(q - n, 10); end   % past the run's end: its last 10 frames (link_env.m)
+            j = rows(mod(q, n) + 1);
             fr = struct('iq', double(F.iq{j}), 'ber', F.ber(j), 'feat', F.feat(j, :), 'pkt', floor((k0 + k) / 2));
             if isfield(F, 'gant') && ~isempty(F.gant), fr.gant = F.gant(j, :); end
+            if isfield(F, 'idle') && ~isempty(F.idle), fr.idle = F.idle(j, :); end   % the idle time before the frame
+            if isfield(F, 'bch') && ~isempty(F.bch), fr.bch = F.bch(j, :); end      % the antennas' channel records
             [Ep{i}, info] = episode_cycle(Ep{i}, k, fr, ctx{i});
             T.ber(i, k) = fr.ber; T.det(i, k) = cls_idx(info.cls);
             if onset, T.ok(i, k) = ismember(T.det(i, k), compIdx); else, T.ok(i, k) = T.det(i, k) == truthIdx(k); end
@@ -2106,7 +2146,7 @@ function runEpisode(btn, ~)
         appLog(fig, ['Episode trace saved to ' fn]);
         setappdata(fig, 'epLastFile', fn);
         ui.epExportBtn.Enable = 'on';
-        ep3d = episodeRecord(env, p, T, kDone, threat, ebno, sevLevel, sevTxt, v_kmh, seed, rr, ...
+        ep3d = episodeRecord(env, p, T, kDone, threat, ebno, sevLevel, sevTxt, v_kmh, seed, Pt{na}.seed(rr), ...
             N_PRE, policies, truthIdx, bc, gp_act, esc);
         fm = strrep(fn, '.csv', '.mat');
         save(fm, 'ep3d');
@@ -2116,11 +2156,10 @@ function runEpisode(btn, ~)
     end
 end
 
-function ep3d = episodeRecord(env, p, T, kDone, threat, ebno, sevLevel, sevTxt, v_kmh, seed, rr, ...
+function ep3d = episodeRecord(env, p, T, kDone, threat, ebno, sevLevel, sevTxt, v_kmh, seed, seedGeom, ...
         N_PRE, policies, truthIdx, bc, gp_act, esc)
     % Everything the 3D view (viz3d/v3d_replay.m) needs to replay the episode: the trace of every policy and
-    % the flight geometry of the sub-run it used (seed -> interferer directions).
-    seedGeom = 500000 + round(100 * ebno) * 1000 + round(10 * v_kmh) + rr;   % as in epPools / epBuildPool
+    % the flight geometry of the sub-run it used (its seed seedGeom -> interferer directions).
     aoaFixed = fieldOr(p, 'int_aoa_deg', [42 -52.2 61.3]);
     if fieldOr(p, 'int_aoa_random', false)
         aoa = interferer_aoa(seedGeom, fieldOr(p, 'int_aoa_range_deg', [-90 90]), numel(aoaFixed));
@@ -2176,24 +2215,37 @@ end
 function [Pn, Pt] = epPools(fig, p, threat, ebno, sevLevel, v_kmh)
     % Frames of the scenario's link under every configuration: the clean link
     % (before onset) and the attacked link, each through every action, from
-    % real Simulink runs with apply_countermeasure.m. Cached per scenario.
+    % real Simulink runs with apply_countermeasure.m. Cached per scenario; a
+    % cached pool without the antennas' gains is built again. With airframe
+    % shadowing both pools fly two rolling-in flights (console_flights.m): the
+    % clean link of the same flights before the airframe enters the line of sight.
     M = getappdata(fig, 'epPools');
+    for kk = keys(M)
+        P = M(kk{1}); if ~isfield(P{1}, 'gant'), remove(M, kk{1}); end
+    end
     keyN = sprintf('none|%g|%.1f', ebno, v_kmh);
     keyT = sprintf('%s|%g|%.1f|%d', threat, ebno, v_kmh, sevLevel);
     pn = p; pn.active_threat = 'none';
     seedBase = 500000 + round(100 * ebno) * 1000 + round(10 * v_kmh);   % clean and attacked pools share fading
-    if ~isKey(M, keyN), M(keyN) = epBuildPool(fig, pn, 'none', ebno, seedBase); end
+    fl = [];
+    if contains(threat, 'airframe_shadowing')
+        [fl, why] = console_flights(p, ebno, v_kmh, seedBase, 2);
+        if isempty(fl), error('demoGui:noShadow', '%s', why); end
+        keyN = sprintf('%s|%s', keyN, mat2str(fl.seed));
+    end
+    if ~isKey(M, keyN), M(keyN) = epBuildPool(fig, pn, 'none', ebno, seedBase, fl); end
     if strcmp(threat, 'none')
         M(keyT) = M(keyN);
     elseif ~isKey(M, keyT)
-        M(keyT) = epBuildPool(fig, p, threat, ebno, seedBase);
+        M(keyT) = epBuildPool(fig, p, threat, ebno, seedBase, fl);
     end
     Pn = M(keyN); Pt = M(keyT);
 end
 
-function P = epBuildPool(fig, p, threat, ebno, seedBase)
+function P = epBuildPool(fig, p, threat, ebno, seedBase, fl)
     % Every configuration runs on the same two seeds (same fading, geometry and
-    % threat waveform), so a change of configuration keeps the flight geometry.
+    % threat waveform), so a change of configuration keeps the flight geometry;
+    % the rolling-in flights fl when given (ev: the frame their event starts).
     env = fig.UserData.env;
     nA = numel(env.action_names);
     P = cell(1, nA);
@@ -2205,17 +2257,27 @@ function P = epBuildPool(fig, p, threat, ebno, seedBase)
         saveParams(p2);
         evalc('build_threat_model');
         snr_dB = ebno + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps);
-        set_param([env.modelName '/AWGN'], 'SNR', num2str(snr_dB + g_db), 'SignalPower', num2str(1/p2.sps));
-        F = struct('iq', {{}}, 'ber', [], 'feat', [], 'run', []);    % link features per frame within its run, as the pools
+        set_link_snr(env.modelName, snr_dB + g_db, p2);
+        F = struct('iq', {{}}, 'ber', [], 'feat', [], 'run', [], 'idle', [], 'bch', [], 'gant', [], ...
+            'seed', seedBase + (1:2), 'ev', NaN);                    % link features per frame within its run, as the pools
+        if ~isempty(fl), F.seed = fl.seed; F.ev = fl.k; end
         for r = 1:2
-            link_seed(env.modelName, seedBase + r, p2.fd_max);
-            Fr = extract_closed_loop_frames(sim(env.modelName), p2, env.delay_bits);
+            if isempty(fl)
+                link_seed(env.modelName, F.seed(r), p2.fd_max);
+                Fr = extract_closed_loop_frames(sim(env.modelName), p2, env.delay_bits);
+            else
+                link_seed(env.modelName, F.seed(r), p2.fd_max, fl.geo);
+                Fr = extract_closed_loop_frames(sim(env.modelName, 'StopTime', fl.stop), p2, env.delay_bits);
+            end
             disk_guard;
             v = find(~isnan(Fr.ber));
             F.iq   = [F.iq, reshape(cellfun(@single, Fr.iq(v), 'UniformOutput', false), 1, [])];
             F.ber  = [F.ber, Fr.ber(v)];
             F.feat = [F.feat; cell2mat(arrayfun(@(i) link_features(Fr, i, env.temporal_window), v(:), 'UniformOutput', false))];
             F.run  = [F.run, r * ones(1, numel(v))];
+            F.idle = [F.idle; Fr.idle(:, v)'];                       % the idle time before each frame
+            F.bch = [F.bch; Fr.bch(:, v)'];                          % the antennas' channel records
+            F.gant = [F.gant; single(Fr.gain_ant(:, v)')];           % every antenna's mean gain (fusion and latch)
         end
         P{a} = F;
     end

@@ -6,9 +6,13 @@ function L = ood_latency(net, M, X, F, nRep)
 %   percentile over nRep calls, frames cycled. A candidate runs on the device with the
 %   lower p95 (the device choice of measure_latency.m) and is admissible when that
 %   cost fits the KPI 7 budget (kpi7_admit.m). When none fits, the cheapest is kept.
+%   The machine's load is logged before and after the timings (machine_load.m): a run
+%   beside another only slows the calls, so an admitted candidate also fits on an idle
+%   machine.
 %   X  128x128x1xN images, F  nFeat x N normalized link features
 %   L  cand, devices, med_ms and p95_ms (candidates x devices), dev, med, p95 (on the
-%      candidate's device), ok, budget
+%      candidate's device), ok, budget, load (before, after)
+ld0 = machine_load();
 devs = {'cpu'}; if canUseGPU, devs = {'gpu', 'cpu'}; end
 nC = numel(M.candidates); N = size(X, 4); WARM = 10;
 med = nan(nC, numel(devs)); q95 = med;
@@ -27,6 +31,7 @@ for d = 1:numel(devs)
         med(c, d) = median(t); q95(c, d) = t(ceil(0.95 * nRep));
     end
 end
+ld1 = machine_load();
 [~, j] = min(q95, [], 2);
 ix = sub2ind(size(med), (1:nC)', j);
 [ok, B] = kpi7_admit(med(ix), q95(ix));
@@ -35,5 +40,6 @@ if ~any(ok)
     warning('ood_latency:budget', 'no candidate fits the KPI 7 budget; the cheapest (%s) is kept', M.candidates{c});
 end
 L = struct('cand', {M.candidates}, 'devices', {devs}, 'med_ms', med, 'p95_ms', q95, 'dev', {reshape(devs(j), 1, [])}, ...
-    'med', med(ix)', 'p95', q95(ix)', 'ok', ok(:)', 'budget', B, 'n', nRep);
+    'med', med(ix)', 'p95', q95(ix)', 'ok', ok(:)', 'budget', B, 'n', nRep, ...
+    'load', struct('before', ld0, 'after', ld1));
 end

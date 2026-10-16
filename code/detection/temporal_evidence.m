@@ -3,14 +3,17 @@ function [x, names] = temporal_evidence(P, G, Fw)
 %   input of the temporal fusion (fuse_classes.m). One cycle carries one frame of
 %   0.5 ms, too short for the fading to change, so a deep fade on one antenna looks
 %   like a hidden antenna; the channel moves on between cycles, while a shadow, a
-%   jammer or a fault stays. Local mean per antenna over the window: the fading
-%   averages out and a persistent loss remains (Lee, local average power over 20-40
-%   wavelengths; shadowing lasts seconds, Khawaja et al.).
+%   jammer or a fault stays. Mean per antenna over the window's cycles: as the UAV moves
+%   between cycles the fading averages out and a persistent loss remains (shadowing
+%   lasts seconds, Khawaja et al.). It is Lee's local average power (20-40 wavelengths)
+%   only when the window spans that distance: 10 cycles at 29 km/h cover about 13
+%   wavelengths at 2.4 GHz, at 161 km/h about 72; at hover the fading barely changes
+%   between cycles and the mean averages little of it.
 %   Batch over E windows of n cycles:
 %   P   E x C x n class probabilities of the per-frame detector
 %   G   E x nr x n mean channel gain of every antenna [dB] (extract_closed_loop_frames.m)
 %   Fw  E x nF x n link features of the window's frames (link_features.m order)
-%   x   E x (C + 9): mean log-probability of every class (the product of the
+%   x   E x (C + 11): mean log-probability of every class (the product of the
 %       per-frame likelihoods), then
 %       gap_w    largest over smallest window-mean antenna gain [dB]
 %       weak_w   share of the window's cycles in which the most often weakest
@@ -18,16 +21,18 @@ function [x, names] = temporal_evidence(P, G, Fw)
 %       occ_w    share of cycles with interference in the quiet slot (> 3 dB over
 %                thermal): continuous interference ~1, intermittent in between
 %       drop_w   share of cycles in which one antenna drops: 20 dB or more below the
-%                next one over the frame, or 15 dB inside the frame (a connector open
-%                for part of it). An open connector (~30 dB) comes and goes, a shadow
-%                stays, and fading rarely separates two antennas that far
+%                next one over the frame, or 15 dB inside the frame. A deep lost branch
+%                (an open connector, a hidden antenna) stays down from cycle to cycle,
+%                and fading rarely separates two antennas that far
 %       off_w    mean per-cycle offset of the weakest antenna (lowest window mean)
 %                from the median of the others [dB] (Willgert, US 8,548,029, eq. 5)
 %       rat_w    standard deviation of that offset over |off_w|, at most 10: a loss in
-%                the RF path is a steady offset (|mean| > 3 dB, ratio < 3), a pattern
-%                or geometry effect a small mean with a large spread (Willgert, Table
-%                1); a diversity imbalance above 5 dB that persists marks a degraded
-%                antenna connection (Heath, US 10,404,368, Table 2)
+%                the RF path is a steady offset (|average| > 3 dB, std / |average|
+%                under the "3 dB" Willgert's Table 1 writes for the ratio, read here as
+%                3), a pattern or geometry effect a small mean with a large spread
+%                (Willgert, Table 1); a severely degraded antenna connection shows as one
+%                branch weaker than the other with a diversity-imbalance indicator, which
+%                fires at a branch difference above 5 dB (Heath, US 10,404,368, Table 2)
 %       k_w      Rician K of the weakest antenna over the window's valid cycles,
 %                moment method K = sqrt(Ga^2 - Gv^2) / (Ga - sqrt(Ga^2 - Gv^2)), Ga
 %                the mean power and Gv its RMS fluctuation (Aoki & Honda 2025, eq. 2)
@@ -38,8 +43,12 @@ function [x, names] = temporal_evidence(P, G, Fw)
 %                channel estimate (est_margin > 0 dB)
 %       duty_w   mean busy share of the window's frames (duty): the occupancy of the
 %                channel over the window (Cheema & Salous 2019, eq. 1)
+%       os_rate, os_glr  the shape of a branch's fall inside the window (onset_shape.m):
+%                one over its length in cycles, and how much better a ramp than a step
+%                fits it; a connector opens within one frame, airframe shadowing grows as
+%                the bank rolls in; 0 0 when no branch falls by 5 dB inside the window
 %   names = temporal_evidence('names', C) returns the feature names.
-WN = {'gap_w', 'weak_w', 'occ_w', 'drop_w', 'off_w', 'rat_w', 'k_w', 'kv_w', 'duty_w'};
+WN = [{'gap_w', 'weak_w', 'occ_w', 'drop_w', 'off_w', 'rat_w', 'k_w', 'kv_w', 'duty_w'}, onset_shape('names')];
 if ischar(P)
     names = [arrayfun(@(c) sprintf('logp_%d', c), 1:G, 'UniformOutput', false), WN];
     x = names; return;
@@ -73,7 +82,7 @@ for e = 1:E
     if sum(valid(e, :)) >= 3, k_w(e) = k_moment(10 .^ (gw(valid(e, :)) / 10)); end
 end
 duty_w = mean(fi('duty'), 2, 'omitnan');
-x = [lp, gap_w, weak_w, occ_w, drop_w, off_w, rat_w, k_w, kv_w, duty_w];
+x = [lp, gap_w, weak_w, occ_w, drop_w, off_w, rat_w, k_w, kv_w, duty_w, onset_shape(G)];
 x(~isfinite(x)) = 0;
 names = [];
 end

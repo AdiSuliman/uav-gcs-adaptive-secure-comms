@@ -5,19 +5,24 @@ function d = link_seed(modelName, seed, fd, geo)
 %   d = link_seed(modelName, seed, fd, geo)  also the GCS at the distance of geo.ebno [dB],
 %                                            with geo.alt_m, geo.k_sig_db, geo.aoa1_deg and
 %                                            geo.rho replacing the seed's altitude, K, first
-%                                            interferer direction and correlation when finite
+%                                            interferer direction and correlation when finite;
+%                                            geo.event_frame and geo.frames as flight_draws.m
 %   The 'Seed' block gets the flight's first stream seed, seed_base(seed): the channel
 %   seeds its stream there and the threat 7 above it; the AWGN block gets 1 above, the bit
 %   source 2 above (seed_stream.m). Channel and threat blocks read 'Seed' and 'Doppler' at
 %   the start of each run. The flight's draws (flight_draws.m, under the draw switches and
 %   ranges the model was built with: UserData of its Constant blocks, build_threat_model.m)
 %   go to the blocks whose draw is on: interferer directions to 'AoA', K-factors of our
-%   signal and of the interferers to 'Kfac', heading rate to 'Yaw', receive correlation to
+%   signal and of the interferers to 'Kfac', heading rate to 'Yaw' (also the turn of a fixed
+%   bank, p.roll_deg), receive correlation to
 %   'Corr'. 'GCS' gets the amplitude of our signal: the tracker's pointing loss and the gain
 %   of the tilted UAV antenna toward the GCS (its elevation is 0 without geo.ebno). 'Att'
-%   gets the GCS direction and elevation, the roll, the pitch and its wobble; 'Body' our
+%   gets the GCS direction and elevation, the roll, the pitch and its wobble, and the
+%   roll-in's start and rate (turn_attitude.m; 0 0 for a flight that holds its bank); 'Body' our
 %   signal's amplitude on each antenna; 'Gate' the timing of the gated jammers; 'Tdl' the
-%   diffuse tap amplitudes of the delay line of every channel. No rebuild is needed.
+%   diffuse tap amplitudes of the delay line of every channel; 'Cap' the reference of the
+%   in-band cap, our signal's weakest-antenna amplitude over the run; 'Cal' the level
+%   calibration error of every antenna's receiver. No rebuild is needed.
 %   d: the flight's draws (flight_draws.m).
 b0 = seed_base(seed);
 set_param([modelName '/Seed'], 'Value', sprintf('%d', b0));
@@ -35,7 +40,7 @@ end
 if getf(p, 'k_random', false) || isfinite(getf(geo, 'k_sig_db', NaN))
     set_param([modelName '/Kfac'], 'Value', mat2str([d.k_sig d.k_int], 8));
 end
-if getf(p, 'yaw_random', false)
+if getf(p, 'yaw_random', false) || getf(p, 'roll_deg', 0) ~= 0   % a drawn heading rate, or the turn of a fixed bank
     set_param([modelName '/Yaw'], 'Value', sprintf('%.8f', d.yaw));
 end
 if getf(p, 'corr_random', false)
@@ -45,7 +50,7 @@ if getSimulinkBlockHandle([modelName '/GCS']) ~= -1
     set_param([modelName '/GCS'], 'Value', sprintf('%.8f', d.gcs_amp));
 end
 if getSimulinkBlockHandle([modelName '/Att']) ~= -1
-    set_param([modelName '/Att'], 'Value', mat2str([d.gcs_aoa d.el_deg d.roll d.pitch d.wobble], 10));
+    set_param([modelName '/Att'], 'Value', mat2str([d.gcs_aoa d.el_deg d.roll d.pitch d.wobble d.roll_in], 10));
     set_param([modelName '/Body'], 'Value', mat2str(d.body_amp, 10));
 end
 if getSimulinkBlockHandle([modelName '/Gate']) ~= -1
@@ -53,6 +58,12 @@ if getSimulinkBlockHandle([modelName '/Gate']) ~= -1
 end
 if getSimulinkBlockHandle([modelName '/Tdl']) ~= -1
     set_param([modelName '/Tdl'], 'Value', mat2str(d.tdl, 10));
+end
+if getSimulinkBlockHandle([modelName '/Cap']) ~= -1
+    set_param([modelName '/Cap'], 'Value', sprintf('%.10g', d.cap_amp));
+end
+if getSimulinkBlockHandle([modelName '/Cal']) ~= -1
+    set_param([modelName '/Cal'], 'Value', mat2str(d.cal_db, 10));
 end
 blks = {[modelName '/AWGN'], [modelName '/BitSource']};
 for b = 1:numel(blks)
@@ -77,7 +88,7 @@ end
 function p = block_params(modelName)
 % Draw switches, ranges and fixed values of the model (UserData of its Constant blocks) in one struct.
 p = struct();
-for b = {'AoA', 'Kfac', 'Yaw', 'Corr', 'GCS', 'Att', 'Body', 'Gate', 'Tdl'}
+for b = {'AoA', 'Kfac', 'Yaw', 'Corr', 'GCS', 'Att', 'Body', 'Gate', 'Tdl', 'Cap', 'Cal'}
     blk = [modelName '/' b{1}];
     if getSimulinkBlockHandle(blk) == -1, continue; end
     u = get_param(blk, 'UserData');

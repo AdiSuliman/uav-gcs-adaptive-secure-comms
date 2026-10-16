@@ -865,3 +865,26 @@ One pass from A0 to OOD, 2 h 26 min, no error; then B4s (10 min).
 - **Power loss 2026-10-02 03:07:** the computer shut down during v6 stage C1p (no partial results); both v6 profiles resumed from C1p on 2026-10-03 22:05 (stages before it are saved in data/).
 - **Latency (KPI 7):** the v6 and v7 run lists had no LAT stage; the launcher now measures latency on the idle machine after each version's runs and repeats KPI, DASH, WEAK and RPT with it.
 - **Runs:** start automatically when v6 ends and the tests pass: profiles 1 and 3 together, profile 2 last.
+
+### v7: verdict per point, gap fixes, real receiver, coded packets, review (D74–D79) (2026-10-04/05)
+- **Envelope and commitment (D74):** every point (threat and level, combinations, Eb/N0, speed, altitude, distance) gets a verdict COMMITTED / NOT COMMITTED / UNDETERMINED with 95% intervals and N_MIN = 36 (stage EDGE); 72 flights per single-threat point, 36 per combination, hover at every level.
+- **Gap fixes:** link side (D75: TDL delay spread, attitude, GCS direction, FEC per packet, power step, sweeper timing per Liu), detector (D76: steady-state reading and onset latency beside KPI 1, WLAN gaps judged by their window, branch persistence, quiet-slot shape, antenna faults 5–31 dB), receiver (D77: space-time sync, loaded residual MVDR, frame-wide passes, AGC with a 12-bit ADC), coded packets (D78: codeword over four frames, soft Viterbi, pilot-error erasures) and a review (D79).
+- **V12c (receiver on the delay line):** passes everywhere except a 30 dB jammer at ρ 0.3 with 1 µs delay spread in profile 1 (stated limit; it passes with four antennas).
+
+### v6 end and the first v7 run (D80) (2026-10-05/07)
+- **v6:** both profiles finished; summary document (Hebrew, 32 pages) delivered 2026-10-06.
+- **KPI 7 (D80):** an exact fast isolation-forest scorer (41 → 0.5 ms per frame) and an unknown-threat score selected within the decision-cycle budget.
+- **v7 launched 2026-10-06 01:08**; the runs died at 03:02 when the app session closed (a detached launch via WMI is required on Windows) and were relaunched at 09:09.
+- **System-drive swap (2026-10-06 evening):** v7 stopped at 19:46, everything committed and pushed, the system cloned to a Samsung 990 PRO 4 TB (now C:); runs resumed 22:39 (`docs/drive_swap/`). Later (2026-10-08) profile 3's worktree was copied to C: (`C:\Users\Adi Suliman\uav-gcs-v7-p3`) and the old Kingston disk was merged into one D: partition.
+
+### v7: fusion regression and the test reading (D81, D82) (2026-10-07)
+- **D81:** B2F chose a fusion window of one cycle (validation macro-F1 81.3%) because single-frame sweeper hits vanished in the window; the fusion input now carries the current frame's log-probabilities (85.8% at N = 12). Pools are re-keyed, not simulated again (rekey_pools.m).
+- **D82:** the detector's test split had been read before D81, so B3 reads a second, never-read test set (B3n) and reports the split's reading beside it; B4/B4s on new seeds; 4-of-5 and 5-of-5 alarm confirmations in the monitor grid; 300 clean geometries per Eb/N0; KPI 6 over every independent clean flight.
+- An audit and a rehearsal of the fix procedure passed at smoke scale (all stages, exit 0).
+
+### v7: physics review of the weak classes and the restart decision (D83) (2026-10-08/11)
+- **Validation-only diagnosis:** "one branch lost" is detected for 98% of antenna faults ≥ 12.4 dB and 95–100% of shadowing ≥ 12 dB, but their cause only 58–67% within 0.6 s (physics: only the hidden branch's fading statistics differ); a 5 dB fault lies inside the healthy airframe spread; strong WLAN (≥ 0 dB) harms the link and is answered by leaving the channel.
+- **Simulation errors found:** Eb/N0 was set by the noise with our signal level fixed, so absolute level gave path loss away (a real receiver's noise floor is fixed and the signal falls with distance); an antenna fault attenuated only our signal, not the interferers; shadowing was not tied to attitude.
+- **Decision (user, 2026-10-08):** fix them all and rerun every profile from A0 (D83: fixed noise floor and scaled field, path loss as a sudden step with its onset inside the sub-run, the fault on everything the antenna receives, shadowing per Sun et al., a uniform response to a lost branch, a sudden-drop alarm, a "one branch lost" reading beside KPI 1). The system's inputs are RF measurements only (no IMU, no GNSS); flight conditions are simulated through their RF effect.
+- **Run stopped 2026-10-08 17:20** (profile 1 in C1p, 33 of 93 cells). The D83 implementation was cut off by a usage limit on 2026-10-08 and resumed on 2026-10-11.
+- **Machine:** no thermal throttling or hardware errors in a week of full load; the CPU fan curve was made gentler in the BIOS (2026-10-08); the stock CPU cooler runs at its maximum speed under load (a tower cooler is the user's option).
