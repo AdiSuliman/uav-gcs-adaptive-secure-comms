@@ -3040,6 +3040,46 @@ verifyGreaterThan(tc, d.roll_in(2), 0);
 close_system(mdl, 0);
 end
 
+function test_shadow_reach(tc)
+% A level is flown only where the airframe can bank deep enough: with the GCS at elevation el
+% the smallest bank whose equivalent roll reaches the band is lo - 2.9 + el, and a turn at
+% speed v banks at most atand(min(tan(57.9 deg), w_max v / g)) (heading_rate.m), so below
+% g tan(lo - 2.9 + el) / w_max (shadow_speed_floor.m at el) no flight hides an antenna, and
+% none at all where that bank exceeds 57.9 deg; just above it the largest bank reaches the
+% band. Seeded flights over the whole envelope at the shortest distance agree: none below
+% the floor at their altitude hides one, some above it do (shadow_alt_floor.m,
+% hides_antenna.m).
+p = base_params(); g = 9.81; wm = deg2rad(p.yaw_rate_max); es = p.shadow_el_deg;
+verifyEqual(tc, shadow_speed_floor([16.1 57.9; 32.0 57.9], p), shadow_speed_floor([16.1 57.9; 32.0 57.9], p, 0));
+el = [0 2 5 10 20 23]; bd = shadow_roll_band(25, p);
+vf = shadow_speed_floor(bd, p, el);
+verifyEqual(tc, vf, 3.6 * max(p.shadow_v_min, g * tand(bd(1) - es + el) / wm), 'RelTol', 1e-12);
+verifyEqual(tc, shadow_speed_floor(bd, p, 29), Inf);                    % 58.1 deg of bank
+verifyEqual(tc, shadow_speed_floor(bd, p, 28.5), 3.6 * g * tand(bd(1) - es + 28.5) / wm, 'RelTol', 1e-12);
+bmax = @(v) atand(min(tand(p.roll_max_deg), wm * v / 3.6 / g));
+for i = 1:numel(el)
+    verifyGreaterThanOrEqual(tc, shadow_equiv_roll(0, el(i), bmax(vf(i) + 1e-6), 0, es), bd(1) - 1e-6);
+    verifyLessThan(tc, shadow_equiv_roll(0, el(i), bmax(vf(i) - 1e-3), 0, es), bd(1));
+end
+q = p; q.shadow_db = 25; eb = q.EbNo_dB(end); d = 1000 * link_distance_km(eb, q);
+verifyEqual(tc, shadow_alt_floor([15 120; 60 90], eb, q), ...
+    reshape(shadow_speed_floor(bd, q, asind(([15 60 120 90] - q.gcs_h_m) / d)), 2, 2), 'RelTol', 1e-12);
+verifyEqual(tc, shadow_alt_floor(NaN, eb, q), shadow_speed_floor(bd, q));   % no altitude: the GCS on the horizon
+verifyEqual(tc, shadow_alt_floor(50, NaN, q), shadow_speed_floor(bd, q));
+q.active_threat = 'airframe_shadowing'; q.cap_frames = 20;
+for L = [6 25]
+    q.shadow_db = L; nb = 0; na = 0;
+    for k = 1:500
+        v = 161 * mod(k * 0.618, 1); a = q.alt_range_m(1) + diff(q.alt_range_m) * mod(k * 0.382 + 0.1, 1);
+        h = hides_antenna(3300000 + k, v, q, struct('ebno', eb, 'alt_m', a, 'k_sig_db', NaN));
+        r = v >= shadow_alt_floor(a, eb, q);
+        verifyFalse(tc, h && ~r);
+        nb = nb + ~r; na = na + h;
+    end
+    verifyGreaterThan(tc, nb, 50); verifyGreaterThan(tc, na, 5);
+end
+end
+
 function test_level_calibration(tc)
 % Each antenna's receiver reports its level within the RSSI accuracy of an AD9361-class
 % radio (+-2 dB, drawn per flight from its own stream): RSSI and interference over thermal
@@ -3855,16 +3895,17 @@ function test_shadow_selection(tc)
 % stratum over the speeds shadowing is flown at; the model hides an antenna on a kept flight
 % and none on a skipped one; the detector blocks of B4 and B4s select the same way.
 p = base_params(); p.active_threat = 'airframe_shadowing'; p.shadow_db = 25; p.cap_frames = 20;
-vsh = [shadow_speed_floor(shadow_roll_band(25, p), p), p.speed_kmh_max]; s = numel(p.EbNo_dB); eb = p.EbNo_dB(s);
+bd = shadow_roll_band(25, p); verifyEqual(tc, bd(1), 32.0, 'AbsTol', 0.01);
+vsh = [shadow_speed_floor(bd, p), p.speed_kmh_max]; s = numel(p.EbNo_dB); eb = p.EbNo_dB(s);
 fd = @(v) v / 3.6 * p.carrier_freq / p.c_light;
 w = arrayfun(@(k) abs(heading_rate(k, fd(vsh(1)), p)), 1:2000);       % the heading rates drawn there stay within the measured one
 verifyLessThanOrEqual(tc, max(w), p.yaw_rate_max);
-bk = bank_angle(p.yaw_rate_max, fd(vsh(1)), p);                        % its turn: the smallest bank whose equivalent roll is 32 deg,
-verifyEqual(tc, bk, 32.0 - p.shadow_el_deg, 'AbsTol', 0.05);           % the GCS on the horizon
-verifyEqual(tc, shadow_equiv_roll(0, 0, bk, 0, p.shadow_el_deg), 32.0, 'AbsTol', 0.05);
+bk = bank_angle(p.yaw_rate_max, fd(vsh(1)), p);                        % its turn: the smallest bank whose equivalent roll is the band's lowest,
+verifyEqual(tc, bk, bd(1) - p.shadow_el_deg, 'AbsTol', 1e-9);          % the GCS on the horizon
+verifyEqual(tc, shadow_equiv_roll(0, 0, bk, 0, p.shadow_el_deg), bd(1), 'AbsTol', 1e-9);
 verifyEqual(tc, vsh(1), 39.2, 'AbsTol', 0.1);
 [B, E] = ndgrid(linspace(0.5 * bk, bk - 1e-6, 30), [0 1 3 8 20]);
-verifyFalse(tc, any(shadow_equiv_roll(0, E(:), B(:), 0, p.shadow_el_deg) >= 32.0));   % no smaller bank reaches the band
+verifyFalse(tc, any(shadow_equiv_roll(0, E(:), B(:), 0, p.shadow_el_deg) >= bd(1)));   % no smaller bank reaches the band
 verifyEqual(tc, shadow_speed_floor([16.1 57.9], p), 3.6 * p.shadow_v_min);   % below 8 m/s none (shadow_hidden.m)
 keep = @(sd, v, a, k, o, c) hides_antenna(sd, v, p, struct('ebno', eb, 'alt_m', a, 'k_sig_db', k, 'aoa1_deg', o, 'rho', c));
 sel = struct('seed', @(j, v) shadow_pool_seed(4, s, 1, j, v), 'keep', keep, 'j0', 0, 'jmax', 99999);
@@ -3889,18 +3930,34 @@ verifyLessThan(tc, numel(g.seed) / info.j, 0.5);
 sel.j0 = info.j;                                                        % the next flights continue the candidates
 [g2, info2] = pool_geometries(s, 1, 17:20, vsh, p, [], 1, sel);
 verifyEmpty(tc, intersect(g2.seed, g.seed)); verifyGreaterThan(tc, info2.j, info.j);
-% a Latin hypercube of 12 selected flights: one per stratum of every axis
-lhs = 7100000 + 100 * s + 10 * (4 + 1) + 3;
-sel = struct('seed', @(j, v) shadow_pool_seed(4, s, 14, j, v), 'keep', keep, 'j0', 0, 'jmax', 99999);
+% a Latin hypercube of 12 selected flights: one per stratum of every axis, the speed strata
+% over the speeds at which the level can be flown at the flight's altitude (from its floor
+% there, shadow_alt_floor.m, up), which at 15 dB Eb/N0 rises above the group's floor; where
+% it does not (6 dB at 0 dB Eb/N0) the same design as without the floor
+lhs = 7100000 + 100 * s + 10 * (4 + 1) + 3; n = 12; ha = p.alt_range_m;
+sel = struct('seed', @(j, v) shadow_pool_seed(4, s, 14, j, v), 'keep', keep, 'j0', 0, 'jmax', 99999, ...
+    'floor', @(a) shadow_alt_floor(a, eb, p));
 [gl, il] = pool_geometries(s, 14, 12 + (1:12), vsh, p, lhs, 1, sel);
-n = 12; ha = p.alt_range_m;
-verifyEqual(tc, sort(floor(n * (gl.speed - vsh(1)) / diff(vsh))), 0:n-1);
+vf = max(vsh(1), shadow_alt_floor(gl.alt, eb, p));
+verifyGreaterThan(tc, max(vf), vsh(1) + 10);
+verifyEqual(tc, sort(floor(n * (gl.speed - vf) ./ (vsh(2) - vf))), 0:n-1);
 verifyEqual(tc, sort(floor(n * (gl.alt - ha(1)) / diff(ha))), 0:n-1);
 verifyEqual(tc, sort(floor(n * (gl.ksig - p.k_range_db(1)) / diff(p.k_range_db))), 0:n-1);
 verifyEqual(tc, sort(floor(n * (gl.rho - p.corr_range(1)) / diff(p.corr_range))), 0:n-1);
 verifyTrue(tc, all(arrayfun(@(i) keep(gl.seed(i), gl.speed(i), gl.alt(i), gl.ksig(i), gl.aoa1(i), gl.rho(i)), 1:n)));
 verifyEqual(tc, pool_geometries(s, 14, 12 + (1:12), vsh, p, lhs, 1, sel), gl);   % reproducible
 verifyEqual(tc, sum(il.tries), il.j);
+sel.floor = @(a) Inf; sel.jmax = 50;                                    % no speed reaches it: no shadowing flight claimed
+verifyError(tc, @() pool_geometries(s, 14, 12 + (1:12), vsh, p, lhs, 1, sel), ?MException);
+q6 = p; q6.shadow_db = 6; v6 = [shadow_speed_floor(shadow_roll_band(6, q6), q6), q6.speed_kmh_max];
+k6 = @(sd, v, a, k, o, c) hides_antenna(sd, v, q6, struct('ebno', q6.EbNo_dB(1), 'alt_m', a, 'k_sig_db', k, 'aoa1_deg', o, 'rho', c));
+s6 = struct('seed', @(j, v) shadow_pool_seed(1, 1, 14, j, v), 'keep', k6, 'j0', 0, 'jmax', 99999);
+g6 = pool_geometries(1, 14, 1:12, v6, q6, 7100103, 1, s6);
+s6.floor = @(a) shadow_alt_floor(a, q6.EbNo_dB(1), q6);
+verifyEqual(tc, pool_geometries(1, 14, 1:12, v6, q6, 7100103, 1, s6), g6);
+for f = {'build_policy_pools', 'build_check_pools'}
+    verifyNotEmpty(tc, strfind(fileread(which(f{1})), '''floor'', @(a) shadow_alt_floor(a, eb, ps)'), f{1});
+end
 % the model: the shadowing is on the air on a kept flight, never on a skipped one
 p.quiet_build = true; mdl = 'UAV_GCS_Threat_Link';
 evalc('build_threat_model(p)');

@@ -21,6 +21,12 @@ function [g, info] = pool_geometries(s, block, r, vr, p, lhs_seed, fam, sel)
 %       draws in flight i's strata satisfy sel.keep(seed, speed, alt, ksig, aoa1, rho)
 %       (hides_antenna.m); [seed, speed] = sel.seed(j, speed range) (shadow_pool_seed.m),
 %       the other values the candidate's own draws as above; at most sel.jmax candidates.
+%       With sel.floor(alt), the slowest speed [km/h] at which a candidate at altitude alt
+%       can be kept (shadow_alt_floor.m), a Latin hypercube's speed strata cut the speeds
+%       from max(vr(1), sel.floor(alt)) to vr(2) at the candidate's altitude (drawn first,
+%       in its stratum), so no flight is asked for where none can be kept; the same strata
+%       as without it where the floor lies at or below vr(1); a candidate whose altitude no
+%       speed of the range reaches is skipped.
 %       r only numbers the runs. info.tries: candidates tried per flight; info.j: the last.
 %   g: seed, speed [km/h], run (100 block + r), alt [m], ksig [dB], aoa1 [deg] and rho
 %      (NaN: the flight's own draw), 1 x n each
@@ -54,6 +60,11 @@ for i = 1:n
         [sd, vv] = sel.seed(j, vri);
         a = NaN; k = NaN; o = NaN; c = NaN;
         if lhs, [a, k, o, c] = strata_draws(sd, p, q(:, i), st); end
+        if lhs && isfield(sel, 'floor') && isfinite(a)
+            vf = max(vr(1), sel.floor(a));              % the speeds at which this altitude can be kept
+            if vf >= vr(2), continue; end
+            [sd, vv] = sel.seed(j, st([vf vr(2)], q(1, i)));
+        end
         if sel.keep(sd, vv, a, k, o, c), break; end
     end
     seed(i) = sd; v(i) = vv; alt(i) = a; ksig(i) = k; aoa1(i) = o; rho(i) = c;
