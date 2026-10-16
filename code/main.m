@@ -17,8 +17,8 @@
 % Runtimes at full scale, per profile, are given at each flag below (profile 1 on a Ryzen 7
 % 7700, RTX 4070 SUPER, 6 parallel workers; profile 3 up to 1.2x on the parallel stages;
 % derived in docs/DECISIONS.md, "Cost and resources, re-derived (2026-10-16)"). A profile
-% alone takes about 6-7.5 days; the three profiles side by side, their parallel stages
-% taking turns (parallel_turn.m), about 14.3-19.1 days.
+% alone takes about 6-7.2 days; the three profiles side by side, their parallel stages
+% taking turns (parallel_turn.m), about 14.4-19.0 days.
 % The same stages run headless and logged with run_stage.m, e.g.
 %   matlab -batch "run_stage('C1p','C1c','C1d','C2','C2e')"
 % and on a reduced problem with run_stage('smoke', ...).
@@ -65,7 +65,7 @@ fprintf('(This file will contain EVERYTHING printed below, even across clc calls
 %  ================================================================
 %  QUICK PRESETS - copy the block you want over the flags below:
 %
-%  FULL CLEAN RUN (everything from scratch, about 6-7.5 days per profile):
+%  FULL CLEAN RUN (everything from scratch, about 6-7.2 days per profile):
 %    every flag below = true except validate_A and check_A4
 %
 %  DECISION LAYER + RESULTS (detector unchanged, about 5-6 days):
@@ -99,7 +99,7 @@ RUN.validate_A                  = false;   % A1-A3: build+validate AWGN & Rician
 RUN.check_A4                    = false;   % A4  : build threat model + sanity BER (fast)
 RUN.validate_phy                = false;    % A4v : link vs theory, MRC/MMSE, seeds; stops main on FAIL (~6-8 h)
 RUN.build_dataset               = false;    % A5  : seeded sub-run dataset, 10 threats x 8 levels, receiver measurements (~3.6-4 h)
-RUN.extract_spectrograms        = false;    % A6  : spectrograms + 15 link features (~35 min)
+RUN.extract_spectrograms        = false;    % A6  : spectrograms + link features (link_features.m) (~35 min)
 
 
 % ---- Phase B: detection (CNN baseline) ----
@@ -182,12 +182,12 @@ if RUN.validate_phy
 end
 
 if RUN.build_dataset
-    fprintf('  [A5] Generating the seeded sub-run dataset, 8 threats x 5 levels + none (HEAVY)...\n');
+    fprintf('  [A5] Generating the seeded sub-run dataset, 10 threats x 8 levels + none (HEAVY)...\n');
     run_dataset_sweep;
 end
 
 if RUN.extract_spectrograms
-    fprintf('  [A6] Extracting spectrograms + 13 link features (HEAVY)...\n');
+    fprintf('  [A6] Extracting spectrograms + link features (HEAVY)...\n');
     extract_spectrograms;
 end
 
