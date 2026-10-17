@@ -2,7 +2,10 @@
 % Test set: the second test set of build_fresh_test.m (data/splits_fresh.mat, sub-runs never
 % read before) when it exists, else the test split of data/splits.mat. With DET_TEST = 'split'
 % in the calling workspace the test split is read even then, and the outputs carry the
-% suffix _split. The KPI 1 threshold is chosen on the validation split in both cases.
+% suffix _split. With DET_TEST = 'fresh2' (stage B3m) the third test set is read
+% (data/splits_fresh2.mat, new seeds, built after the monitor's last validation choice), and
+% the outputs carry the suffix _fresh2. The KPI 1 threshold is chosen on the validation split
+% in every case.
 % Eb/N0 of a frame (kpi_ebno.m): the Eb/N0 our signal is received with, the configured
 % value less a path-loss step from its onset on; a frame judged as path_loss is read at the
 % link's Eb/N0 when the step began (the step's depth is its severity level). Frames
@@ -12,12 +15,22 @@ close all; clc;fprintf('=== B3: Test Evaluation ===\n\n');
 %% 1. Load data and model
 has_fresh = isfile('data/splits_fresh.mat');
 read_split = exist('DET_TEST', 'var') && strcmp(DET_TEST, 'split');
+read_fresh2 = exist('DET_TEST', 'var') && strcmp(DET_TEST, 'fresh2');
+if read_fresh2 && ~isfile('data/splits_fresh2.mat')
+    error('eval_detector:fresh2', 'data/splits_fresh2.mat not found: run B3m');
+end
 tag = ''; if has_fresh && read_split, tag = '_split'; end
+if read_fresh2, tag = '_fresh2'; end
 set_name = 'test split';
 fprintf('Loading test data and trained model...\n');
 S = load('data/splits.mat');
 sp = S.splits;
-if has_fresh && ~read_split
+if read_fresh2
+    Sf = load('data/splits_fresh2.mat');
+    assert(isequal(Sf.splits.norm, sp.norm), 'eval_detector: the third test set has another normalization');
+    sp.test = Sf.splits.test; clear Sf
+    set_name = 'third test set';
+elseif has_fresh && ~read_split
     Sf = load('data/splits_fresh.mat');
     assert(isequal(Sf.splits.norm, sp.norm), 'eval_detector: the second test set has another normalization');
     sp.test = Sf.splits.test; clear Sf
@@ -35,10 +48,11 @@ fprintf('Running inference on %d test samples...\n', numel(Y_test));
 Y_pred_prob = cnn_scores(net, sp.test.X, sp.test.feats');
 % The class of every cycle as the system decides it (policy_monitor.m): the temporal fusion
 % (select_fusion.m) over the last N cycles of its own sub-run, then the monitor's latched
-% cause of a lost branch (onset_shape.m, latch_runs.m). The fused class alone and the
-% per-frame reading are kept beside. The fused decision is judged on its window
-% (fusion_target.m): a WLAN frame without a packet whose window holds packet frames has the
-% target benign_interference.
+% cause of a lost branch (onset_shape.m, latch_runs.m) when the deployed fusion latches
+% (onset_shape('on', FM), chosen on validation; off, the monitor's class is the fused class).
+% The fused class alone and the per-frame reading are kept beside. The fused decision is
+% judged on its window (fusion_target.m): a WLAN frame without a packet whose window holds
+% packet frames has the target benign_interference.
 fus = [];
 rk = ones(numel(Y_test), 1);
 cls_names = cellstr(string(classes(:)'));
@@ -65,15 +79,21 @@ if isfile('data/fusion.mat') && isfield(sp.test, 'pos')
 end
 [~, max_idx] = max(Y_pred_prob, [], 1);
 Y_fused = reshape(categorical(classes(max_idx)', classes), [], 1);   % the fused class alone, beside
-os_thr = 0; if ~isempty(fus), os_thr = onset_shape('threshold', fus.FM); end   % chosen on validation (select_fusion.m)
+os_thr = 0; latch_on = true;                           % both chosen on validation (select_fusion.m)
+if ~isempty(fus), os_thr = onset_shape('threshold', fus.FM); latch_on = onset_shape('on', fus.FM); end
 cz_all = zeros(numel(Y_test), 1);
-if isfield(sp.test, 'gain_ant') && isfield(sp.test, 'pos')
+if isfield(sp.test, 'gain_ant') && isfield(sp.test, 'pos') && latch_on
     [pm, cz_all] = latch_runs(double(Y_pred_prob'), sp.test.run, sp.test.pos, sp.test.gain_ant, cls_names, os_thr);
     [~, max_idx] = max(pm, [], 2); clear pm
     fprintf('Decision with the monitor''s latched cause of a lost branch (threshold %+.2f)\n', os_thr);
+elseif ~latch_on
+    fprintf('Decision by the fused class: the latch of a lost branch''s cause is off (chosen on validation)\n');
 end
 
 Y_pred = categorical(classes(max_idx)', classes);
+if ~latch_on                                            % the cause a lost branch is read as: the monitor's class
+    cz_all = double(Y_pred(:) == 'antenna_fault') + 2 * double(Y_pred(:) == 'airframe_shadowing');
+end
 
 Y_test = Y_test(:);
 Y_pred = Y_pred(:);
@@ -150,8 +170,10 @@ if isempty(fus)
     if isfield(sp.val, 'gain_ant') && isfield(sp.val, 'pos')
         pv = latch_runs(pv, sp.val.run, sp.val.pos, sp.val.gain_ant, cls_names, 0);
     end
-else
+elseif latch_on
     pv = fus.val_latch_oof;                                 % out-of-fold, the monitor's class (select_fusion.m)
+else
+    pv = fus.val_probs_oof;                                 % out-of-fold, the monitor's class: the fused class
 end
 [~, iv] = max(pv, [], 2); clear pv
 Y_val = sp.val.Y(:); Y_val_pred = reshape(categorical(classes(iv)', classes), [], 1);
@@ -296,7 +318,8 @@ if isfield(sp.test, 'gain_ant') && isfield(sp.test, 'pos')
             q.n(1), q.recall_fused_pct(2), q.recall_latched_pct(2), q.as_other_fused_pct(2), q.as_other_latched_pct(2), q.n(2));
     end
     % Per event (a test sub-run's onset of the class): the share whose first latched cause is
-    % the right one [Clopper-Pearson 95%], and the median cycles from the onset to it
+    % the right one [Clopper-Pearson 95%], and the median cycles from the onset to it; with the
+    % latch off, the first cycle from the onset whose monitor's class is a lost branch's
     cyc_ms = 20; Pc = load('params.mat'); if isfield(Pc.params, 'cycle_s'), cyc_ms = 1e3 * Pc.params.cycle_s; end
     for b = 1:2
         e = ev(ev(:, 1) == b, :); n = size(e, 1); k = sum(e(:, 2) == 1);
@@ -307,7 +330,11 @@ if isfield(sp.test, 'gain_ant') && isfield(sp.test, 'pos')
         onset_diag(end+1) = struct('class', BR{b}, 'n_events', n, 'decided_pct', 100 * mean(isfinite(e(:, 2))), ...
             'right_pct', 100 * k / max(n, 1), 'right_ci95', 100 * [lo hi], 'median_cycles', mc, 'median_ms', mc * cyc_ms); %#ok<SAGROW>
     end
-    fprintf('Per event, beside KPI 1: the latched cause of a lost branch\n');
+    if latch_on
+        fprintf('Per event, beside KPI 1: the latched cause of a lost branch\n');
+    else
+        fprintf('Per event, beside KPI 1: the cause of a lost branch the monitor''s class reads first (latch off)\n');
+    end
     for q = onset_diag
         fprintf('  %-20s %d events: decided %.1f%%, right cause %.1f%% [%.1f, %.1f], median %g cycles (%g ms) from the onset\n', ...
             q.class, q.n_events, q.decided_pct, q.right_pct, q.right_ci95, q.median_cycles, q.median_ms);
@@ -441,6 +468,7 @@ metrics = struct( ...
     'step after its onset); a path_loss target at the Eb/N0 of its onset']);
 metrics.onset_cue = onset_cue;
 metrics.onset_diag = onset_diag;
+metrics.latch = latch_on;                              % the monitor latches a lost branch's cause (select_fusion.m)
 metrics.fused_alone = fused_alone;
 metrics.roll_in_false_alarms = roll_in_fa;
 if ~isempty(fus)

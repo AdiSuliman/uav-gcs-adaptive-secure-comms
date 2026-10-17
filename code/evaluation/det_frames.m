@@ -5,7 +5,8 @@ function [hit, on, hit_f, age] = det_frames(P, Pc, scen, ok_c, PP, runs, ev)
 %   (threat_active.m, per decision cycle: in the frame or the idle time before it). The
 %   monitor's class (policy_monitor.m) is the fused class, and while the latched cause of a
 %   lost branch holds (onset_shape.m: read from the shape of its onset) that cause for a
-%   fused antenna_fault or airframe_shadowing; hit_f the same
+%   fused antenna_fault or airframe_shadowing, when the deployed fusion latches
+%   (onset_shape('on', PP.fuse); off, the monitor's class is the fused class); hit_f the same
 %   reading by the fused class alone. A path-loss or antenna-fault cell, alone or in a
 %   combination, has its full loss from its run's first frame, so every flight is read after
 %   the same flight's clean link (Pc, the onset between them: the connector's step, the
@@ -62,7 +63,7 @@ if ~isempty(PP.fuse)
 end
 [~, k] = max(pc, [], 2);
 kl = k;                                                  % with the latched cause of a lost branch
-if ~isempty(J.gant)
+if ~isempty(J.gant) && onset_shape('on', PP.fuse)
     for r = 1:numel(ur)
         j = find(J.run == ur(r));
         [~, kl(j)] = max(onset_shape('sequence', J.gant(j, :), pc(j, :), PP.classes, C.heal, ...

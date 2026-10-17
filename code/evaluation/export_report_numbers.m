@@ -14,7 +14,7 @@
 N = struct('generated', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
 RS = result_status();
 st = RS([RS.stale]);
-kin = {'results/eval_detector_metrics.mat', 'results/ood_detection.mat', 'results/policy_evaluation.mat', ...
+kin = {'results/eval_detector_metrics.mat', 'results/eval_detector_metrics_fresh2.mat', 'results/ood_detection.mat', 'results/policy_evaluation.mat', ...
     'results/latency.mat', 'results/edge_map.mat', 'results/phy_validation.txt'};   % files the KPI summary reads
 if isfile('results/kpi_summary.mat')
     old = kin(cellfun(@(f) isfile(f) && dir(f).datenum > dir('results/kpi_summary.mat').datenum, kin));
@@ -27,17 +27,19 @@ N.stale = st;
 for i = 1:numel(st), warning('export_report_numbers:stale', 'STALE %s: %s', st(i).file, st(i).why); end
 N.kpi = take('results/kpi_summary.mat', 'KPI');
 
-M = take('results/eval_detector_metrics.mat', 'metrics');
-if ~isempty(M)
-    cm = M.conf_mat; rn = 100 * cm ./ max(sum(cm, 2), 1);
-    rn(logical(eye(size(rn)))) = 0;
-    [v, ix] = sort(rn(:), 'descend'); k = min(8, nnz(v > 0));
-    [ti, pj] = ind2sub(size(rn), ix(1:k));
-    cls = cellstr(string(M.classes(:)));
-    M.top_confusions = struct('true', reshape(cls(ti), 1, []), 'predicted', reshape(cls(pj), 1, []), ...
-        'pct_of_true', num2cell(reshape(round(v(1:k), 2), 1, [])));
+for f = {'detector', 'results/eval_detector_metrics.mat'; 'detector_third', 'results/eval_detector_metrics_fresh2.mat'}'
+    M = take(f{2}, 'metrics');                          % detector_third: the third test set (B3m), KPI 1's reading
+    if ~isempty(M)
+        cm = M.conf_mat; rn = 100 * cm ./ max(sum(cm, 2), 1);
+        rn(logical(eye(size(rn)))) = 0;
+        [v, ix] = sort(rn(:), 'descend'); k = min(8, nnz(v > 0));
+        [ti, pj] = ind2sub(size(rn), ix(1:k));
+        cls = cellstr(string(M.classes(:)));
+        M.top_confusions = struct('true', reshape(cls(ti), 1, []), 'predicted', reshape(cls(pj), 1, []), ...
+            'pct_of_true', num2cell(reshape(round(v(1:k), 2), 1, [])));
+    end
+    N.(f{1}) = M;
 end
-N.detector = M;
 
 if isfile('results/ood_detection.mat')
     O = load('results/ood_detection.mat', 'R', 'NEST', 'SC', 'sel', 'K_NEW');
