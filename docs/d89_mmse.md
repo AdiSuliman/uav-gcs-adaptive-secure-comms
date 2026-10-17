@@ -239,7 +239,17 @@ At 725a2f1 the same cell read +14.4 dB (p10 +2.0) at no_action.
 
 ### Tests
 
-TESTS_RESULT
+- **Targeted tests while working**, all passing:
+  - `test_mmse_predict_search` (new): a synthetic fractional arrival 2 symbols off at Eb/N0 -3 dB,
+    and a 30 dB tone with the receiver 3 pilot alias steps off. The 725a2f1 predictor fails both
+    parts on the same frames: 7/12 arrivals, 0/12 frequencies.
+  - `test_latency_times_predictor` (new).
+  - `test_mmse_predict_known_symbols`, with the delay-line clean case over the pools' draws
+    (300 s).
+  - `test_policy_mmse_pred`, `test_params_written_by_init_only`, `test_latency_load_logged` and
+    `test_m_files_parse`.
+- **Full suite.** `runtests('code/tests/test_core.m')` from the worktree root at `bf32b5e`, one
+  MATLAB batch: **174/174 passed** (40.8 min).
 
 ## Sources
 
