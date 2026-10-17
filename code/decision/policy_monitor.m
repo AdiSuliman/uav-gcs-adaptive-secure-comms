@@ -141,10 +141,11 @@ mem.deg_n(M.degraded) = mem.deg_n(M.degraded) + 1; mem.deg_n(~M.degraded) = 0;
 mem.tried(mem.good >= C.heal, :) = false;
 [mem, pf, te, unk] = fusion(mem, obs, PP, gk(link), gw(link));
 % Latched cause of a lost branch (onset_shape.m): read from the shape of its onset, a
-% step (antenna_fault) or a ramp (airframe_shadowing), and kept while the branch stays lost
+% step (antenna_fault) or a ramp (airframe_shadowing), and kept while the branch stays lost;
+% only while the deployed fusion latches (onset_shape('on', PP.fuse), chosen on validation)
 if ~isfield(mem, 'os'), mem.os = []; end
-if isfield(obs, 'gant') && ~isempty(obs.gant)
-    FZ = []; if isfield(PP, 'fuse'), FZ = PP.fuse; end
+FZ = []; if isfield(PP, 'fuse'), FZ = PP.fuse; end
+if isfield(obs, 'gant') && ~isempty(obs.gant) && onset_shape('on', FZ)
     [mem.os, pf] = onset_shape('latch', mem.os, obs.gant, pf, PP.classes, C.heal, onset_shape('threshold', FZ));
 end
 M.probs = pf; M.te = te;

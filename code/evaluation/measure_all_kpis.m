@@ -4,7 +4,9 @@
 % is flagged STALE. Targets as worded in the proposal:
 %   KPI 1  detection: macro-F1 >= 90% above an Eb/N0 threshold chosen on validation (the
 %          proposal's wording); every class F1 >= 90%, the stricter reading, beside it
-%          (eval_detector), unseen Eb/N0 (eval_unseen_snr)
+%          (eval_detector), unseen Eb/N0 (eval_unseen_snr); read on the third test set
+%          (B3m, results/eval_detector_metrics_fresh2.mat) when it exists, the second test
+%          set's reading beside it
 %   KPI 2  unknown threats: leave-one-threat-out mean AUROC >= KPI2_TARGET, FPR at 95%
 %          of known frames kept (eval_ood_detection; the nested estimate of the
 %          selected production score)
@@ -41,6 +43,7 @@ F = struct('det', 'results/eval_detector_metrics.mat', 'unseen', 'results/unseen
     'pol', 'results/policy_evaluation.mat', 'lat', 'results/latency.mat', ...
     'surv', 'data/survivability_boundary.mat', 'dqn', 'data/trained_dqn.mat', 'arch', 'results/architecture_comparison.txt', ...
     'ant3', 'results/survivability_options.txt', 'combo', 'results/combo_generalization.mat', 'edge', 'results/edge_map.mat');
+if isfile('results/eval_detector_metrics_fresh2.mat'), F.det = 'results/eval_detector_metrics_fresh2.mat'; end
 KPI2_TARGET = 0.8;                                 % mean AUROC (the submitted proposal's target, kept in the update)
 t_det = file_time('data/trained_detector.mat'); t_dqn = file_time(F.dqn);
 if isfile('data/trained_detector.mat')             % training time (the file is updated later by the OOD stage)
@@ -86,9 +89,10 @@ if isfile(F.det)
             m.branch.macro_f1_above_threshold_pct, m.branch.lost_recall_pct, m.branch.n_lost, m.branch.lost_recall_above_threshold_pct);
     end
     if isfield(m, 'onset_diag')                      % beside KPI 1: the latched cause per event
+        how = 'latched'; if isfield(m, 'latch') && ~m.latch, how = 'read first by the monitor''s class (latch off)'; end
         for q = m.onset_diag
-            det{end+1} = sprintf(['beside KPI 1, per event, %s: right cause latched in %.1f%% [%.1f, %.1f] of %d events ' ...
-                '(decided in %.1f%%), median %g cycles (%g ms) from the onset'], q.class, q.right_pct, q.right_ci95, ...
+            det{end+1} = sprintf(['beside KPI 1, per event, %s: right cause %s in %.1f%% [%.1f, %.1f] of %d events ' ...
+                '(decided in %.1f%%), median %g cycles (%g ms) from the onset'], q.class, how, q.right_pct, q.right_ci95, ...
                 q.n_events, q.decided_pct, q.median_cycles, q.median_ms); %#ok<AGROW>
         end
     end
@@ -129,6 +133,12 @@ if isfile(F.det)
             U.summary.max_gap);
     end
     if isfile(F.arch), det{end+1} = 'architecture comparison: results/architecture_comparison.txt'; end
+    if contains(F.det, '_fresh2') && isfile('results/eval_detector_metrics.mat')
+        Ms = load('results/eval_detector_metrics.mat', 'metrics'); ms = Ms.metrics;
+        det{end+1} = sprintf(['read on the %s, built after the monitor''s last validation choice; the %s, read before ' ...
+            'it: macro-F1 above the threshold %.2f%%, lowest class %.2f%%, accuracy %.2f%%'], m.test_set, ms.test_set, ...
+            ms.macro_f1_above_threshold_pct, min(ms.class_f1_above_threshold_pct), ms.overall_accuracy_pct);
+    end
     if isfield(m, 'test_set') && isfile('results/eval_detector_metrics_split.mat')
         Ms = load('results/eval_detector_metrics_split.mat', 'metrics'); ms = Ms.metrics;
         det{end+1} = sprintf(['read on the %s; the test split of the dataset, also read before the last detector ' ...
@@ -137,7 +147,7 @@ if isfile(F.det)
     end
     KPI(end+1) = kpi(1, 'Detection accuracy vs SNR', sprintf('macro-F1 %.2f%%, lowest class %.2f%%, from %g dB', val, min(cl), ...
         m.kpi1_threshold_db), 'macro-F1 >= 90% above a threshold chosen on validation', ...
-        status(isfinite(m.kpi1_threshold_db) && val >= 90, file_time(F.det) < t_det), det);
+        status(isfinite(m.kpi1_threshold_db) && val >= 90, file_time(F.det) < max(t_det, file_time('data/fusion.mat'))), det);
 else
     KPI(end+1) = missing(1, 'Detection accuracy vs SNR', F.det);
 end

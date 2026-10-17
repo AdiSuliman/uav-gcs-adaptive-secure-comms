@@ -983,6 +983,7 @@ S = [S; 900000 + 1000*t(:) + 10*li(:) + s(:); 700000 + (1:5)'];
 k = (1:99999)';
 S = [S; 3000000 + k; 4000000 + k; 5000000 + k];         % dataset, unseen Eb/N0 and unseen severity runs
 S = [S; 3500000 + k; 4500000 + k; 5500000 + k];         % the second test set and the second B4 and B4s readings
+S = [S; 6500000 + k];                                   % the third test set (B3m)
 verifyEqual(tc, numel(unique(S)), numel(S));
 verifyLessThan(tc, max(S), 2^26);
 N = seed_base(S) + off;
@@ -1605,6 +1606,70 @@ src = fileread(which('select_fusion'));
 verifyNotEmpty(tc, strfind(src, 'val_latch_oof(m, :) = latch_runs(val_probs_oof(m, :)'));
 verifyNotEmpty(tc, strfind(src, '''val_probs_oof'', ''val_latch_oof'''));
 verifyNotEmpty(tc, strfind(fileread(which('detector_block')), 'G.FM, G.FN, G.classes);'));
+end
+
+function test_latch_choice(tc)
+% Whether the monitor latches a lost branch's cause is a validation choice (FM.latch,
+% select_fusion.m) that every reading honours alike: off, the monitor's class is the fused
+% class (fused_class.m, policy_monitor.m, det_frames.m, eval_detector.m); on, or a fusion
+% fitted before the choice (no flag), the latch as before.
+cls = {'none', 'antenna_fault', 'airframe_shadowing'}; C = 3;
+nZ = numel(temporal_evidence('names', C)) + numel(window_cues('names')) + C;
+FMn = struct('W', [zeros(nZ, C); 0 0 5], 'mu', zeros(1, nZ), 'sd', ones(1, nZ), 'C', C, 'lambda', 0);   % reads shadowing
+FM1 = FMn; FM1.latch = true; FM0 = FMn; FM0.latch = false;
+verifyTrue(tc, onset_shape('on', FMn)); verifyTrue(tc, onset_shape('on', FM1)); verifyTrue(tc, onset_shape('on', []));
+verifyFalse(tc, onset_shape('on', FM0));
+% fused_class.m (KPI 1, B4, B4s)
+rng(3); n = 30; nf = numel(link_features('names'));
+G = 0.3 * randn(n, 3); G(10:end, 2) = G(10:end, 2) - 15;           % an open connector at cycle 10
+S = struct('run', ones(n, 1), 'pos', (1:n)', 'gain_ant', G, 'feats_raw', zeros(n, nf));
+P = repmat([0.2 0.3 0.5], n, 1);
+[kn, kfn] = fused_class(P, S, FMn, 4, cls);
+[k0, kf0] = fused_class(P, S, FM0, 4, cls);
+verifyEqual(tc, kfn, 3 * ones(n, 1)); verifyEqual(tc, kf0, kfn);
+verifyEqual(tc, k0, kf0);                                             % off: the fused class everywhere
+verifyEqual(tc, kn(end), 2);                                          % no flag: the fault latched from its step
+verifyEqual(tc, fused_class(P, S, FM1, 4, cls), kn);                  % on: as without the flag
+% policy_monitor.m (the closed loop)
+A = policy_actions();
+for v = 1:3
+    FM = {FMn, FM1, FM0}; PP = struct('actions', {A}, 'classes', {cls}, 'maha_thr', -Inf, 'sps', 4, 'bps', 2, ...
+        'fuse', FM{v}, 'fuse_N', 4);
+    mem = policy_monitor('init', 1, numel(A)); cl = cell(1, n);
+    for t = 1:n
+        obs = struct('probs', P(t, :), 'unknown', false, 'feat', zeros(1, nf), 'gant', G(t, :), 'maha', 0);
+        obs.feat(feature_index('log_ber')) = -6;
+        [mem, M] = policy_monitor('update', mem, obs, PP, find(strcmp(A, 'no_action')));
+        cl{t} = M.cls{1};
+    end
+    if v < 3
+        verifyEqual(tc, unique(cl(15:n)), {'antenna_fault'});
+    else
+        verifyEqual(tc, unique(cl), {'airframe_shadowing'});           % off: the fused class
+    end
+end
+% det_frames.m (the edge map's DET)
+ok = [strcmp(cls, 'antenna_fault'); ismember(cls, {'antenna_fault', 'airframe_shadowing'})];
+Gc = 0.3 * randn(10, 3); Gf = 0.3 * randn(10, 3); Gf(:, 2) = Gf(:, 2) - 18;
+mk = @(pr, Gx, act) struct('probs', repmat(pr, 10, 1), 'run', 101 * ones(10, 1), 'gant', Gx, 'feat', zeros(10, nf), ...
+    'ber', zeros(10, 1), 'act', act * ones(10, 1));
+PP = struct('classes', {cls}, 'fuse', FM0, 'fuse_N', 4, 'sps', 2, 'bps', 2);
+[hit, ~, hit_f] = det_frames(mk([0.1 0.4 0.5], Gf, 1), mk([1 0 0], Gc, 0), 'antenna_fault', ok, PP);
+verifyEqual(tc, hit, hit_f);                                          % off: the fused class
+verifyFalse(tc, any(hit(:, 1)));
+PP.fuse = FMn;
+hit = det_frames(mk([0.1 0.4 0.5], Gf, 1), mk([1 0 0], Gc, 0), 'antenna_fault', ok, PP);
+verifyTrue(tc, all(hit(5:end, 1)));                                   % no flag: the cause latched from the step
+% the choice and its readings
+src = fileread(which('select_fusion'));
+verifyNotEmpty(tc, strfind(src, 'FM.latch = mf_latch > mf_fused;'));
+verifyLessThan(tc, strfind(src, 'FM.latch = mf_latch > mf_fused;'), strfind(src, 'save(''data/fusion.mat'''));
+src = fileread(which('eval_detector'));
+verifyNotEmpty(tc, strfind(src, 'latch_on = onset_shape(''on'', fus.FM);'));
+verifyNotEmpty(tc, strfind(src, 'pv = fus.val_probs_oof;'));
+verifyNotEmpty(tc, strfind(src, '&& latch_on'));
+verifyNotEmpty(tc, strfind(fileread(which('policy_monitor')), '&& onset_shape(''on'', FZ)'));
+verifyNotEmpty(tc, strfind(fileread(which('det_frames')), '&& onset_shape(''on'', PP.fuse)'));
 end
 
 function test_roll_in_false_alarms(tc)
@@ -3766,6 +3831,47 @@ verifyNotEmpty(tc, strfind(src, 'ood_select(MpV'));
 verifyNotEmpty(tc, strfind(fileread(which('eval_unseen_severity')), 'sum(sw(on) < Tood.maha)'));
 verifyNotEmpty(tc, strfind(fileread(which('compare_architectures')), 'data/splits_fresh.mat'));
 verifyNotEmpty(tc, strfind(fileread(which('extract_spectrograms')), '[-25, 55] dB'));
+end
+
+function test_third_test_set(tc)
+% Stage B3m builds a third test set with the dataset's recipe, the second test set's counts
+% per cell and seeds of its own (6 500 000 + run id, test_seed_streams_disjoint; its own speed
+% stream), and reads it once, its outputs suffixed _fresh2; the earlier readings keep theirs.
+src = fileread(which('run_dataset_sweep'));
+verifyNotEmpty(tc, strfind(src, 'SET2       = FRESH && exist(''FRESH_SET'', ''var'') && isequal(FRESH_SET, 2);'));
+i0 = strfind(src, 'if SET2'); verifyNumElements(tc, i0, 1);
+e = strfind(src(i0:end), 'end'); seg = src(i0:i0 + e(1) + 1);
+verifyNotEmpty(tc, strfind(seg, 'SEED0 = 6500000; f_out = ''data/dataset_fresh2.mat'';'));
+verifyEmpty(tc, strfind(seg, 'N_SUB'));                               % the second test set's counts and test fold
+verifyLessThan(tc, strfind(src, 'N_SUB = 4; SEED0 = 3500000;'), i0);
+verifyNumElements(tc, strfind(src, 'rng(2035'), 1);
+verifyNotEmpty(tc, strfind(fileread(which('extract_spectrograms')), ...
+    'f_in = ''data/dataset_fresh2.mat''; f_out = ''data/spectrograms_fresh2.mat'';'));
+rs = fileread(which('run_stage'));
+verifyNotEmpty(tc, strfind(rs, '''B3m'', ''build_fresh_test2'''));
+verifyNotEmpty(tc, strfind(rs, 'FRESH_TEST = true; FRESH_SET = 2;'));
+verifyNotEmpty(tc, strfind(rs, 'DET_TEST = ''fresh2'';'));
+ed = fileread(which('eval_detector'));
+verifyNotEmpty(tc, strfind(ed, 'if read_fresh2, tag = ''_fresh2''; end'));
+verifyNotEmpty(tc, strfind(ed, 'Sf = load(''data/splits_fresh2.mat'');'));
+verifyNotEmpty(tc, strfind(fileread(which('measure_all_kpis')), 'F.det = ''results/eval_detector_metrics_fresh2.mat'';'));
+% B1 on the third set: data/spectrograms_fresh2.mat -> data/splits_fresh2.mat, the training
+% z-score, the second test set's file untouched
+d = fullfile(tc.TestData.tmp, 'fresh2'); mkdir(fullfile(d, 'data'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+classes = {'none'; 'jamming'}; norm = struct('feat_mean', [1 2], 'feat_std', [2 4], 'feat_names', {{'a', 'b'}}); %#ok<NASGU>
+save('data/splits.mat', 'norm', 'classes');
+n = 6;
+spec = struct('X', zeros(8, 8, 1, n, 'single'), 'Y', categorical([1 2 1 2 1 2]', 1:2, classes), 'feats', [3 6; 5 10; 1 2; 3 6; 5 10; 1 2], ...
+    'feat_names', {{'a', 'b'}}, 'fold', 6 * ones(n, 1), 'ebno', zeros(n, 1), 'speed_kmh', ones(n, 1), 'run', [1 1 2 2 3 3]', ...
+    'level', ones(n, 1)); %#ok<NASGU>
+save('data/spectrograms_fresh2.mat', 'spec');
+FRESH_TEST = true; FRESH_SET = 2; %#ok<NASGU>
+evalc('run(''prepare_data'')');
+verifyTrue(tc, isfile('data/splits_fresh2.mat')); verifyFalse(tc, isfile('data/splits_fresh.mat'));
+L = load('data/splits_fresh2.mat');
+verifyEqual(tc, L.splits.test.feats(1, :), [1 1]);
+verifyEqual(tc, L.splits.test.run, [1 1 2 2 3 3]');
 end
 
 function [net, M, X, F] = tiny_detector()
