@@ -40,8 +40,10 @@ function [ok, v12] = validate_phy(only, rows)
 %   (mmse_predict.m, the policies' nulling input) against the theory of optimum combining
 %   (Winters, Salz & Gitlin 1994) on the true channel and interference of every frame (our
 %   own received component, the threat block's output 4 with p.own_out): the clean link, the
-%   V8b and V11 jammer, the V12c jammers on the delay line, the tone at 4/16/30 dB and the
-%   reactive jammer (v13).
+%   V8b and V11 jammer, the V12c jammers, the tone at 4/16/30 dB and the reactive jammer, on
+%   the delay line as the profile runs it (V8b: flat, the closed forms' ideal receiver); the
+%   clean link over the pools' draws; two dispersive clean corners, informational (v13).
+%   It stops the run with the other checks.
 % Gap = Eb/N0 shift between measured and theoretical BER, points with >= 100 errors.
 % Outputs: results/phy_validation.txt, results/phy_validation.png
 
@@ -91,7 +93,7 @@ if nargin >= 1 && strcmpi(only, 'V12c')
     return
 end
 if nargin >= 1 && strcmpi(only, 'V13')
-    v12 = v13(p0, modelName, delay_bits);
+    v12 = v13(p0, modelName, delay_bits, S.params, tdl_on);
     rep = [v12.rep, {sprintf('V13 run time %.1f min', toc(t0)/60), sprintf('params_id %s', params_id(S.params))}];
     if ~exist('results', 'dir'); mkdir('results'); end
     fid = fopen('results/phy_validation_v13.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
@@ -190,7 +192,7 @@ end
 v12_ok = v12.pass || tdl_on;
 
 %% V13 predicted MMSE gain against optimum-combining theory (its own verdict)
-r13 = v13(p0, modelName, delay_bits);
+r13 = v13(p0, modelName, delay_bits, S.params, tdl_on);
 
 %% V9 seeds (default link, 4 dB)
 p = p0; p.rician_k = 10; p.active_threat = 'none';
@@ -252,9 +254,9 @@ rep = [rep, {''}, v12.rep];
 if ~flat_only, rep = [rep, v12c_verdict(v12, tdl_on)]; end
 rep = [rep, {''}, r13.rep];
 rep{end+1} = sprintf(['Overall: theory gaps %d/%d within %.1f dB, seeds %s, tone %s, V12c channel model %s, ' ...
-    'receiver on the delay line %s | %.1f min'], sum(g_ok), nTh, CFG.gap_ok, passfail(seed_same && seed_diff), ...
-    passfail(tone_ok), ternary(flat_only, 'not run', passfail(v12_ok)), ...
-    ternary(flat_only || ~tdl_on, 'not run', passfail(v12.pass)), toc(t0)/60);
+    'receiver on the delay line %s, V13 predicted MMSE gain %s | %.1f min'], sum(g_ok), nTh, CFG.gap_ok, ...
+    passfail(seed_same && seed_diff), passfail(tone_ok), ternary(flat_only, 'not run', passfail(v12_ok)), ...
+    ternary(flat_only || ~tdl_on, 'not run', passfail(v12.pass)), passfail(r13.pass), toc(t0)/60);
 rep{end+1} = sprintf('Pass rule: |gap| <= %.1f dB or within 2 standard errors (spread over %d channel realizations).', CFG.gap_ok, CFG.n_real);
 rep{end+1} = sprintf('params_id %s', params_id(S.params));
 if ~exist('results', 'dir'); mkdir('results'); end
@@ -286,7 +288,7 @@ legend('Location', 'southwest', 'FontSize', 8);
 exportgraphics(f, 'results/phy_validation.png', 'Resolution', 150);
 
 if bdIsLoaded(modelName), close_system(modelName, 0); end
-ok = all(g_ok) && seed_same && seed_diff && tone_ok && v12_ok;
+ok = all(g_ok) && seed_same && seed_diff && tone_ok && v12_ok && r13.pass;
 end
 
 function [jn, jt] = tone_check(p)
@@ -382,57 +384,89 @@ end
 R.rep{end+1} = 'Rows: the spread the delay line reached at the case''s K (the flat profile when its window holds less).';
 end
 
-function R = v13(p0, modelName, delay_bits)
+function R = v13(p0, modelName, delay_bits, P, tdl_on)
 % V13: the predicted MMSE gain over MRC (mmse_predict.m, F.mmse_pred) against the theory of
-% optimum combining on the true channel and interference of every frame, Eb/N0 6 dB, the
-% real receiver (V8b: the ideal one), 6 flights of 20 frames per row, the frames after the
-% run's first. Theory (v13_theory): per held-out group of known symbols, our own received
-% component on the true symbols around the group gives the channel h, the samples less h s
-% the interference + noise covariance Rn; a combiner w reaches |w' h|^2 / (w' Rn w), the
-% optimum w = Rn^-1 h reaches h' Rn^-1 h and MRC on the true channel |h|^4 / (h' Rn h)
-% (Winters, Salz & Gitlin 1994); pooled over the groups as the measurement pools its
-% held-out symbols. The closed form of one directional interferer, (1 + JMc)(1 - JMc /
-% (1 + JM)), about JMc(1 - c) for a large JM (28 dB at J = 30 dB, M = 3, c = 1/3), from the
-% largest eigenvalue of Rn over the floor (JM) and the share c of the channel's power in its
+% optimum combining on the true channel and interference of every frame, the real receiver
+% (V8b: the ideal one), the frames after each run's first. The rows run the delay line as the
+% profile P runs it ('run': P.tdl, the spreads drawn per flight with P.tdl_random), V8b the
+% flat channel of the closed forms, the V12c jammers V12c's line (their channel at 234 ns,
+% ours flat); 6 flights of 20 frames at Eb/N0 6 dB, K 10 dB. The clean link over the pools'
+% draws (every draw of P: K, correlation, directions, attitude and spreads; the speed
+% uniform over the envelope, the GCS at the distance of the Eb/N0, as pool_cell.m runs a
+% flight), 100 flights of 12 frames at the grid's top Eb/N0, 15 dB, where our own echoes
+% stand highest over the noise. Informational: two clean corners of the drawn range (K -5 dB
+% at 1000 ns, K 0 dB at 300 ns), where the single-tap DMI suppresses our own echoes at
+% whole-symbol lags that the single-tap MRC leaves (the deployed receivers equalize them,
+% rx_taps.m), so G reads a few dB there.
+% Theory (v13_theory): per held-out group of known symbols, our own received component on
+% the true symbols around the group gives the channel h, the samples less h s the
+% interference + noise covariance Rn; a combiner w reaches |w' h|^2 / (w' Rn w), the optimum
+% w = Rn^-1 h reaches h' Rn^-1 h and MRC on the true channel |h|^4 / (h' Rn h) (Winters,
+% Salz & Gitlin 1994); pooled over the groups as the measurement pools its held-out symbols.
+% The closed form of one directional interferer, (1 + JMc)(1 - JMc / (1 + JM)), about
+% JMc(1 - c) for a large JM (28 dB at J = 30 dB, M = 3, c = 1/3), from the largest
+% eigenvalue of Rn over the floor (JM) and the share c of the channel's power in its
 % direction, is printed beside.
-% Checks: (a) the clean link's median G within 1 dB of 0; (b) every interferer row's median
-% G within 3 dB of the theory of the two combiners the predictor formed (its DMI and MRC
-% weights on the true channel and interference, each SINR floored at the measurement's
-% resolution, 1 / the held-out symbols): the measurement; (c) every interferer row's median
-% G at most 3 dB below the optimum-combining theory or the measurement's ceiling (the
-% measured MMSE SINR over that floor), the lower: no collapse; (d) the tone's median G at
-% least 3 dB higher at 16 dB than at 4 dB, and at 30 dB at most 3 dB below the lower of its
-% 16 dB value and its own ceiling (a decision-directed reading stays near 0 dB at every
-% level instead).
+% Checks: (a) the clean rows: at most 2% of their frames read G at or above the rule's
+% threshold (decision_config.m rule_mmse_db: a false nulling flag); the fixed clean link's
+% median G within 1 dB of the theory of its own combiners (the DMI's estimation loss, about
+% 10 log10((K + 2 - M) / (K + 1)) with K = 16 training snapshots: -0.5 dB at M = 3, -0.8 dB
+% at M = 4, the Reed-Mallett-Brennan mean, Besson 2021 eq. 21); over the pools' draws within
+% 1 dB of 0;
+% (b) every interferer row's median G within 3 dB of the theory of the two combiners the
+% predictor formed (its DMI and MRC weights on the true channel and interference, each SINR
+% floored at the measurement's resolution, 1 / the held-out symbols): the measurement;
+% (c) every interferer row's median G at most 3 dB below the optimum-combining theory or the
+% measurement's ceiling (the measured MMSE SINR over that floor), the lower: no collapse;
+% (d) the tone's median G at least 3 dB higher at 16 dB than at 4 dB, and at 30 dB at most
+% 3 dB below the lower of its 16 dB value and its own ceiling (a decision-directed reading
+% stays near 0 dB at every level instead).
 C = {
-  % name                     threat              field          level  sync     combiner  ds [ns]  rho
-  'clean link',              'none',             'jsr_db',      0,     'real',  'mrc',    0,       0.3
-  'V8b jam 10 dB',           'jamming',          'jsr_db',      10,    'ideal', 'mmse',   0,       0.3
-  'V11 jam 10 dB',           'jamming',          'jsr_db',      10,    'real',  'mmse',   0,       0.3
-  'V12c jam 16 dB rho 0.3',  'jamming',          'jsr_db',      16,    'real',  'mmse',   234,     0.3
-  'V12c jam 16 dB rho 0.9',  'jamming',          'jsr_db',      16,    'real',  'mmse',   234,     0.9
-  'V12c jam 30 dB rho 0.3',  'jamming',          'jsr_db',      30,    'real',  'mmse',   234,     0.3
-  'V12c jam 30 dB rho 0.9',  'jamming',          'jsr_db',      30,    'real',  'mmse',   234,     0.9
-  'tone 4 dB',               'tone_jamming',     'tone_jsr_db', 4,     'real',  'mrc',    0,       0.3
-  'tone 16 dB',              'tone_jamming',     'tone_jsr_db', 16,    'real',  'mrc',    0,       0.3
-  'tone 30 dB',              'tone_jamming',     'tone_jsr_db', 30,    'real',  'mrc',    0,       0.3
-  'reactive 16 dB',          'reactive_jamming', 'jsr_db',      16,    'real',  'mrc',    0,       0.3
+  % name                     threat              field          level  sync     combiner  line         rho  K    Eb/N0 flights frames kind
+  'clean link',              'none',             'jsr_db',      0,     'real',  'mrc',    'run',       0.3, 10,  6,    6,      20,    'clean'
+  'V8b jam 10 dB',           'jamming',          'jsr_db',      10,    'ideal', 'mmse',   'flat',      0.3, 10,  6,    6,      20,    'int'
+  'V11 jam 10 dB',           'jamming',          'jsr_db',      10,    'real',  'mmse',   'run',       0.3, 10,  6,    6,      20,    'int'
+  'V12c jam 16 dB rho 0.3',  'jamming',          'jsr_db',      16,    'real',  'mmse',   [0 234],     0.3, 10,  6,    6,      20,    'int'
+  'V12c jam 16 dB rho 0.9',  'jamming',          'jsr_db',      16,    'real',  'mmse',   [0 234],     0.9, 10,  6,    6,      20,    'int'
+  'V12c jam 30 dB rho 0.3',  'jamming',          'jsr_db',      30,    'real',  'mmse',   [0 234],     0.3, 10,  6,    6,      20,    'int'
+  'V12c jam 30 dB rho 0.9',  'jamming',          'jsr_db',      30,    'real',  'mmse',   [0 234],     0.9, 10,  6,    6,      20,    'int'
+  'tone 4 dB',               'tone_jamming',     'tone_jsr_db', 4,     'real',  'mrc',    'run',       0.3, 10,  6,    6,      20,    'int'
+  'tone 16 dB',              'tone_jamming',     'tone_jsr_db', 16,    'real',  'mrc',    'run',       0.3, 10,  6,    6,      20,    'int'
+  'tone 30 dB',              'tone_jamming',     'tone_jsr_db', 30,    'real',  'mrc',    'run',       0.3, 10,  6,    6,      20,    'int'
+  'reactive 16 dB',          'reactive_jamming', 'jsr_db',      16,    'real',  'mrc',    'run',       0.3, 10,  6,    6,      20,    'int'
+  'clean, pools'' draws',    'none',             'jsr_db',      0,     'real',  'mrc',    'run',       NaN, NaN, 15,   100,    12,    'pool'
+  'clean K -5 dB 1000 ns',   'none',             'jsr_db',      0,     'real',  'mrc',    [1000 1000], 0.3, -5,  15,   6,      20,    'info'
+  'clean K 0 dB 300 ns',     'none',             'jsr_db',      0,     'real',  'mrc',    [300 300],   0.3, 0,   15,   6,      20,    'info'
 };
-EB = 6; NFR = 20; NSEED = 6; TOL = 3;
+TOL = 3; FLAG = 0.02;
 nC = size(C, 1); thr = decision_config().rule_mmse_db;
 Q = nan(nC, 11);   % medians: G, theory of the predictor's combiners, optimum theory, ceiling, closed form,
                    % MMSE measured / theory (its weights), MRC measured / theory (its weights); share >= thr
+NFM = zeros(nC, 1); LN = cell(nC, 1);
 t0 = tic;
 for c = 1:nC
-    p = p0;
+    pool = strcmp(C{c,13}, 'pool');
+    if pool, p = P; p.quiet_build = true; else, p = p0; p.rician_k = C{c,9}; p.int_rician_k = 10; p.rx_corr = C{c,8}; end
     p.active_threat = C{c,2}; p.(C{c,3}) = C{c,4}; p.rx_sync = C{c,5}; p.rx_combiner = C{c,6};
-    p.rician_k = 10; p.int_rician_k = 10; p.rx_corr = C{c,8}; p.own_out = true; p.seed = 7000 + c;
-    if C{c,7} > 0, p.tdl = true; p.tdl_random = false; p.tdl_ds_ns = [0 C{c,7}]; end
+    p.own_out = true; p.seed = 7000 + c;
+    if ischar(C{c,7})
+        p.tdl = strcmp(C{c,7}, 'run') && tdl_on; p.tdl_random = isfield(P, 'tdl_random') && P.tdl_random;
+    else
+        p.tdl = true; p.tdl_random = false; p.tdl_ds_ns = C{c,7};
+    end
+    LN{c} = line_name(p);
+    EB = C{c,10}; NSEED = C{c,11}; NFR = C{c,12};
     evalc('build_threat_model(p)');
     set_link_snr(modelName, EB + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
+    rs = RandStream('mt19937ar', 'Seed', p.seed);
     A = [];
     for r = 1:NSEED
-        link_seed(modelName, p.seed * 100 + r, p.v_max * p.carrier_freq / p.c_light);
+        if pool
+            v = P.speed_kmh_min + (P.speed_kmh_max - P.speed_kmh_min) * rand(rs);
+            link_seed(modelName, p.seed * 100 + r, v / 3.6 * p.carrier_freq / p.c_light, struct('ebno', EB, 'frames', NFR));
+        else
+            link_seed(modelName, p.seed * 100 + r, p.v_max * p.carrier_freq / p.c_light);
+        end
         out = sim(modelName, 'StopTime', num2str((NFR - 1) * p.frame_duration));
         disk_guard;
         F = extract_closed_loop_frames(out, p, delay_bits);
@@ -443,46 +477,60 @@ for c = 1:nC
             T.cf(v); D.mmse_db(v); T.mmse_est(v); D.mrc_db(v); T.mrc_est(v)]']; %#ok<AGROW>
     end
     Q(c, 1:9) = median(A, 1, 'omitnan');
-    Q(c, 10) = mean(A(:, 1) >= thr); Q(c, 11) = mean(A(:, 3) >= thr);
-    fprintf('V13 %-24s G %+6.1f dB (its combiners %+6.1f, optimum %+6.1f) | %.1f min\n', C{c,1}, Q(c, 1:3), toc(t0)/60);
+    Q(c, 10) = mean(A(:, 1) >= thr); Q(c, 11) = mean(A(:, 3) >= thr); NFM(c) = sum(isfinite(A(:, 1)));
+    fprintf('V13 %-24s G %+6.1f dB (its combiners %+6.1f, optimum %+6.1f), >= %g dB %4.1f%% | %.1f min\n', C{c,1}, ...
+        Q(c, 1:3), thr, 100 * Q(c, 10), toc(t0)/60);
 end
-ok = abs(Q(:, 1) - Q(:, 2)) <= TOL & Q(:, 1) >= min(Q(:, 3), Q(:, 4)) - TOL;
-ok(1) = abs(Q(1, 1)) <= 1;
+kind = C(:, 13);
+ic = strcmp(kind, 'clean'); ip = strcmp(kind, 'pool'); ii = strcmp(kind, 'int'); gate = ~strcmp(kind, 'info');
+ok = true(nC, 1);
+ok(ii) = abs(Q(ii, 1) - Q(ii, 2)) <= TOL & Q(ii, 1) >= min(Q(ii, 3), Q(ii, 4)) - TOL;
+ok(ic) = abs(Q(ic, 1) - Q(ic, 2)) <= 1 & Q(ic, 10) <= FLAG;
+ok(ip) = abs(Q(ip, 1)) <= 1 & Q(ip, 10) <= FLAG;
 it = find(startsWith(C(:, 1), 'tone'));
 tone_ok = Q(it(2), 1) >= Q(it(1), 1) + 3 && Q(it(3), 1) >= min(Q(it(2), 1), Q(it(3), 4)) - TOL;
-R = struct('name', {C(:, 1)}, 'Q', Q, 'ok', ok, 'tone_ok', tone_ok, 'pass', all(ok) && tone_ok, 'rep', {{}});
+R = struct('name', {C(:, 1)}, 'Q', Q, 'ok', ok, 'gate', gate, 'tone_ok', tone_ok, 'pass', all(ok(gate)) && tone_ok, ...
+    'rep', {{}});
 grp = mmse_predict('groups', p0);
 R.rep{end+1} = sprintf(['V13 predicted MMSE gain over MRC (mmse_predict.m) vs optimum combining on the true channel: ' ...
-    'Eb/N0 %g dB, %d flights x %d frames per row, %d held-out known symbols per frame; medians [dB]'], EB, NSEED, NFR - 1, ...
+    '%d antennas, %d held-out known symbols per frame, the frames after each run''s first; medians [dB]'], p0.n_rx, ...
     sum(cellfun(@numel, grp(2:end))));
-R.rep{end+1} = sprintf('%-24s %7s %9s %8s %8s %8s %13s %13s %13s', 'row', 'G', 'its comb.', 'optimum', 'ceiling', ...
-    'JMc(1-c)', 'MMSE meas/th', 'MRC meas/th', sprintf('>=%g dB G/opt', thr));
+R.rep{end+1} = sprintf('%-24s %-9s %5s %6s %7s %9s %8s %8s %8s %13s %13s %13s', 'row', 'line [ns]', 'Eb/N0', 'frames', 'G', ...
+    'its comb.', 'optimum', 'ceiling', 'JMc(1-c)', 'MMSE meas/th', 'MRC meas/th', sprintf('>=%g dB G/opt', thr));
 for c = 1:nC
-    R.rep{end+1} = sprintf('%-24s %+7.1f %+9.1f %+8.1f %+8.1f %+8.1f %6.1f/%6.1f %6.1f/%6.1f %5.0f%%/%4.0f%%  %s', C{c,1}, ...
-        Q(c, 1:5), Q(c, 6:9), 100 * Q(c, 10:11), passfail(ok(c))); %#ok<AGROW>
+    vd = passfail(ok(c)); if ~gate(c), vd = 'info'; end
+    R.rep{end+1} = sprintf('%-24s %-9s %5g %6d %+7.1f %+9.1f %+8.1f %+8.1f %+8.1f %6.1f/%6.1f %6.1f/%6.1f %5.1f%%/%4.0f%%  %s', ...
+        C{c,1}, LN{c}, C{c,10}, NFM(c), Q(c, 1:5), Q(c, 6:9), 100 * Q(c, 10:11), vd);
 end
-R.rep{end+1} = sprintf(['V13 rules: the clean link within 1 dB of 0; every other row within %g dB of the theory of its ' ...
-    'combiners and at most %g dB below the optimum or the ceiling, the lower; the tone rising from 4 to 16 dB and ' ...
-    'holding at 30 dB (%+.1f, %+.1f, %+.1f dB) -> %s'], TOL, TOL, Q(it, 1), passfail(tone_ok));
-R.rep{end+1} = sprintf('V13 predicted MMSE gain: %d/%d rows -> %s', sum(ok), nC, passfail(R.pass));
+R.rep{end+1} = sprintf(['V13 rules: the clean rows at most %g%% of frames at or above %g dB, the clean link within 1 dB of ' ...
+    'the theory of its combiners (the DMI''s estimation loss), the pools'' draws within 1 dB of 0; every interferer row ' ...
+    'within %g dB of the theory of its combiners and at most %g dB below the optimum or the ceiling, the lower; the ' ...
+    'tone rising from 4 to 16 dB and holding at 30 dB (%+.1f, %+.1f, %+.1f dB) -> %s; the corners informational'], ...
+    100 * FLAG, thr, TOL, TOL, Q(it, 1), passfail(tone_ok));
+R.rep{end+1} = sprintf('V13 predicted MMSE gain: %d/%d rows -> %s', sum(ok & gate), sum(gate), passfail(R.pass));
+end
+
+function s = line_name(p)
+% The channel a V13 row runs: flat, the drawn delay line, or its fixed spreads [ns].
+if ~p.tdl, s = 'flat';
+elseif p.tdl_random, s = 'drawn';
+else, s = sprintf('%g/%g', p.tdl_ds_ns(1), p.tdl_ds_ns(end));
+end
 end
 
 function T = v13_theory(out, p, sy, D)
 % Optimum combining and the predictor's own combiners on the true channel and interference of
-% every frame of one run, per held-out group of known symbols (mmse_predict.m) at the arrival
-% and residual frequency the predictor measured MMSE at, pooled over the groups as the
-% measurement pools its held-out symbols (one gain fitted over all of them) [dB]: opt and mrc,
-% the optimum and MRC on the true channel; mmse_est and mrc_est, the predictor's DMI and MRC
-% weights (frames measured at the receiver's arrival), floored at 1 / the held-out symbols;
-% cf, the closed form of one directional interferer.
+% every frame of one run, per held-out group of known symbols (mmse_predict.m), pooled over the
+% groups as the measurement pools its held-out symbols (one gain fitted over all of them) [dB]:
+% opt and mrc, the optimum and MRC on the true channel at the arrival and frequency the
+% predictor measured MMSE at; mmse_est, the predictor's DMI weights there, and mrc_est, its MRC
+% weights at the receiver's arrival and frequency, where it measured MRC, both floored at
+% 1 / the held-out symbols; cf, the closed form of one directional interferer.
 own = out.get('Thr_sig') * str2double(get_param([out.SimulationMetadata.ModelInfo.ModelName '/Level'], 'Gain'));
 iq = out.get('Rx_IQ');
 nf = size(iq, 3); own = own(:, :, 1:nf);
-sa = [D.arrival; sy(2, :)];
-Y = mmse_predict('snapshots', iq, p, sa); Yo = mmse_predict('snapshots', own, p, sa);
-rot = exp(-1j * 2*pi * (0:size(Y, 1) - 1)' .* reshape(D.df_hz, 1, 1, []) / p.symbol_rate);
-rot(isnan(rot)) = 1;
-Y = Y .* rot; Yo = Yo .* rot;
+[Y, Yo] = v13_snapshots(iq, own, p, [D.arrival; sy(2, :)], D.df_hz);
+[Yr, Yor] = v13_snapshots(iq, own, p, [round(sy(1, :)); sy(2, :)], D.df_mrc_hz);
 [grp, sk] = mmse_predict('groups', p);
 L = frame_layout(p); bpf = p.frame_length; NS = L.n_sig; ng = numel(grp); fl = 1 / D.n_ref;
 txb = double(squeeze(out.get('tx_bits_out'))); txb = txb(:);
@@ -490,7 +538,9 @@ T = struct('opt', nan(1, nf), 'mrc', nan(1, nf), 'mmse_est', nan(1, nf), 'mrc_es
 pool0 = @(n, c, v) abs(sum(n .* c) / sum(n))^2 / (sum(n .* (abs(c - sum(n .* c) / sum(n)).^2 + v)) / sum(n));
 pool = @(n, c, v) max(pool0(n, c, v), fl);
 for f = 1:nf
-    if f * bpf > numel(txb) || any(isnan(reshape(Y(:, :, f), [], 1))), continue; end
+    if f * bpf > numel(txb) || any(isnan(reshape(Y(:, :, f), [], 1))) || any(isnan(reshape(Yr(:, :, f), [], 1)))
+        continue
+    end
     s = sk; s(L.idx_data - L.NQ) = pskmod(txb((f-1)*bpf + (1:bpf)), 4, pi/4, 'gray', 'InputType', 'bit');
     n = zeros(1, ng - 1); vo = n; vr = n; cr = n; ver = n; cm = n; vem = n; jm = n; cc = n;
     for g = 2:ng
@@ -500,20 +550,29 @@ for f = 1:nf
         n(i) = numel(k);
         vo(i) = 1 / real(h' * (Rn \ h));
         vr(i) = real(h' * Rn * h) / real(h' * h)^2;
-        wr = D.w_mrc(:, g, f); wm = D.w_mmse(:, g, f);
-        cr(i) = (wr' * h) / real(wr' * wr); ver(i) = real(wr' * Rn * wr) / real(wr' * wr)^2;
-        cm(i) = (wm' * h) / (wm' * wr); vem(i) = real(wm' * Rn * wm) / abs(wm' * wr)^2;
+        hr = Yor(kw, :, f).' * conj(s(kw)) / numel(kw);
+        E = Yr(kw, :, f).' - hr * s(kw).'; Rr = E * E' / numel(kw);
+        wr = D.w_mrc(:, g, f); wm = D.w_mmse(:, g, f); rm = D.r_mmse(:, g, f);
+        cr(i) = (wr' * hr) / real(wr' * wr); ver(i) = real(wr' * Rr * wr) / real(wr' * wr)^2;
+        cm(i) = (wm' * h) / (wm' * rm); vem(i) = real(wm' * Rn * wm) / abs(wm' * rm)^2;
         [V, Lm] = eig((Rn + Rn') / 2); [lm, o] = sort(real(diag(Lm)), 'descend');
         s2 = mean(lm(2:end)); jm(i) = (lm(1) - s2) / s2; cc(i) = abs(V(:, o(1))' * h)^2 / real(h' * h);
     end
     u = ones(1, ng - 1);
     T.opt(f) = 10*log10(pool0(n, u, vo)); T.mrc(f) = 10*log10(pool0(n, u, vr));
-    if D.arrival(f) == round(sy(1, f))
-        T.mrc_est(f) = 10*log10(pool(n, cr, ver)); T.mmse_est(f) = 10*log10(pool(n, cm, vem));
-    end
+    T.mrc_est(f) = 10*log10(pool(n, cr, ver)); T.mmse_est(f) = 10*log10(pool(n, cm, vem));
     JM = median(jm); c = median(cc);
     T.cf(f) = 10*log10((1 + JM * c) * (1 - JM * c / (1 + JM)));
 end
+end
+
+function [Y, Yo] = v13_snapshots(iq, own, p, sa, df)
+% The received and our own component's snapshots at arrival and frequency sa (2 x frames), the
+% frequency df [Hz] removed as mmse_predict.m removes it.
+Y = mmse_predict('snapshots', iq, p, sa); Yo = mmse_predict('snapshots', own, p, sa);
+rot = exp(-1j * 2*pi * (0:size(Y, 1) - 1)' .* reshape(df, 1, 1, []) / p.symbol_rate);
+rot(isnan(rot)) = 1;
+Y = Y .* rot; Yo = Yo .* rot;
 end
 
 function r = v12c_verdict(v12, tdl_on)
