@@ -62,6 +62,8 @@ if isfile('data/fusion.mat') && isfield(sp.test, 'pos')
     Y_test = categorical(classes(yt)', classes);
     fprintf('Frames judged by their window (WLAN gaps as benign_interference, path-loss onsets as path_loss): %d\n', ...
         sum(Y_test(:) ~= sp.test.Y(:)));
+    fprintf(['Per frame, on these targets (the change of labels alone, no fusion): macro-F1 %.2f%%; the fusion''s own ' ...
+        'gain on them: select_fusion.m, N = 1 to %d out of fold\n'], 100 * macro_f1_of(Y_test(:), yf(:), classes), fus.N);
 end
 [~, max_idx] = max(Y_pred_prob, [], 1);
 Y_fused = reshape(categorical(classes(max_idx)', classes), [], 1);   % the fused class alone, beside
@@ -221,6 +223,31 @@ if any(ipl)
     fprintf('path_loss frames by their received Eb/N0 after the step (bin; -Inf below the grid): %s\n', ...
         strjoin(arrayfun(@(q) sprintf('%g dB %.1f%% (%d)', q.bin_db, q.recall_pct, q.n), path_loss_rx, ...
         'UniformOutput', false), ' | '));
+end
+% Beside KPI 1: path-loss recall by the step [dB], the K-factor band of our signal (a flight
+% draw, analysis only) and the onset's age in cycles (at N - 1 the fusion window holds no
+% cycle before the step); recall % (frames / sub-runs) per cell
+if any(ipl) && isfield(sp.test, 'k_db') && isfield(sp.test, 'level')
+    Np = 1; if ~isempty(fus), Np = fus.N; end
+    rr = sp.test.run(:); age = nan(numel(Y_test), 1);
+    for r = unique(rr(ipl))'
+        ix = find(rr == r); age(ix) = rk(ix) - min(rk(ix(Y_test(ix) == 'path_loss')));
+    end
+    ed = [unique([0, min(3, Np - 1), Np - 1, Np]), Inf];
+    ab = discretize(age, ed); kb = discretize(double(sp.test.k_db(:)), [-Inf 0 10 Inf]);
+    KB = {'K < 0', 'K 0-10', 'K >= 10'};
+    AB = arrayfun(@(i) ternary(isinf(ed(i + 1)), sprintf('age >= %d', ed(i)), ternary(ed(i + 1) - 1 == ed(i), ...
+        sprintf('age %d', ed(i)), sprintf('age %d-%d', ed(i), ed(i + 1) - 1))), 1:numel(ed) - 1, 'UniformOutput', false);
+    fprintf('path_loss recall by step x K band [dB] x onset age [cycles] (frames / sub-runs): %s\n', strjoin(AB, ' | '));
+    ok_pl = Y_pred == 'path_loss';
+    for lv = unique(sp.test.level(ipl))'
+        for b = 1:3
+            m0 = ipl & sp.test.level(:) == lv & kb == b;
+            if ~any(m0), continue; end
+            cells = arrayfun(@(a) pl_cell(ok_pl(m0 & ab == a), rr(m0 & ab == a)), 1:numel(AB), 'UniformOutput', false);
+            fprintf('  step %4g dB, %-8s %s\n', lv, KB{b}, strjoin(cells, ' | '));
+        end
+    end
 end
 
 act_of = containers.Map(cls_names, cellfun(@(c) rule_based_policy(c), cls_names, 'UniformOutput', false));
@@ -398,6 +425,22 @@ for c = 1:numel(onset)
         onset(c).cls_median, onset(c).cls_p90, onset(c).cls_never_pct, onset(c).conf_median, onset(c).conf_p90, ...
         onset(c).conf_never_pct);
 end
+% The sweeper's sub-runs never confirmed by the class path, split by whether the sweep hit a
+% frame of ours (a frame the frame rule labels sweeping_jammer): one without leaves no damage
+% to answer, and the monitor's degradation path (not read here) confirms the hit ones
+isw = find(strcmp(cls_names, 'sweeping_jammer'));
+if ~isempty(isw) && isfield(sp.test, 'Y_frame')
+    rc = unique(runs_t(Y_test == cls_names{isw})); nev = false(numel(rc), 1); hit = nev;
+    for r = 1:numel(rc)
+        ix = find(runs_t == rc(r)); [~, o] = sort(rk(ix)); ix = ix(o);
+        j0 = find(Y_test(ix) == cls_names{isw}, 1);
+        nev(r) = ~any(movsum(double(hostile(ix(j0:end))), [Cd.confirm(2) - 1, 0]) >= Cd.confirm(1));
+        hit(r) = any(sp.test.Y_frame(ix) == cls_names{isw});
+    end
+    fprintf(['  sweeping_jammer never confirmed by the class path: %d of %d sub-runs with a frame of ours hit (%.1f%%), ' ...
+        '%d of %d without one (%.1f%%)\n'], sum(nev & hit), sum(hit), 100 * sum(nev & hit) / max(sum(hit), 1), ...
+        sum(nev & ~hit), sum(~hit), 100 * sum(nev & ~hit) / max(sum(~hit), 1));
+end
 
 %% 5c. 95% bootstrap confidence intervals
 % Resamples whole test sub-runs with replacement (frames of one sub-run are
@@ -544,4 +587,14 @@ pr = diag(cm) ./ sum(cm, 1)';
 rc = diag(cm) ./ sum(cm, 2);
 f1 = 2 * pr .* rc ./ (pr + rc);
 f = mean(f1(sum(cm, 2) > 0), 'omitnan');
+end
+
+function s = pl_cell(ok, run)
+% One cell of the path-loss table: recall % (frames / sub-runs), '-' without frames.
+s = '        -';
+if ~isempty(ok), s = sprintf('%5.1f%% (%d/%d)', 100 * mean(ok), numel(ok), numel(unique(run))); end
+end
+
+function out = ternary(c, a, b)
+if c, out = a; else, out = b; end
 end
