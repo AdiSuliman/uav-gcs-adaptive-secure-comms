@@ -50,7 +50,7 @@
 % decision cycles), the share of the frame with the threat on the air (act; act_comp per
 % component; lev_db the level an interferer reaches over our signal on the weakest antenna),
 % and the sub-run's draws (flight_draws.m, analysis only): K-factors of our signal and of the
-% interferers, first interferer direction and its alignment with the GCS, GCS direction,
+% interferers, first interferer direction and its alignment with the GCS (align_gcs), GCS direction,
 % heading rate, bank, roll, pitch and pitch-wobble amplitude, receive correlation, GCS
 % pointing loss, altitude, the UAV antenna's gain toward the GCS in level flight and at the
 % attitude, the spread of the airframe loss over the antennas, the timing of the gated
@@ -124,9 +124,11 @@ MEAS = {'rssi', 'crc_fail', 'ber_est', 'snr_post', 'sinr', 'env_corr', 'iot', 'c
 D = struct('iq', {{}}, 'label', [], 'label_frame', [], 'class_run', [], 'level', [], 'snr', [], 'ebno_rx', [], 'ber', [], 'fer', [], ...
     'speed', [], 'run', [], 'seed', [], 'fold', [], ...
     'pos', [], 'gain_ant', [], 'act', [], 'act_comp', [], 'lev_db', [], 'k_db', [], 'k_int', [], 'aoa', [], 'yaw', [], ...
-    'rho', [], 'gcs_db', [], 'alt_m', [], 'el_db', [], 'align', [], 'gcs_aoa', [], 'bank', [], 'roll', [], 'pitch', [], ...
+    'rho', [], 'gcs_db', [], 'alt_m', [], 'el_db', [], 'align_gcs', [], 'gcs_aoa', [], 'bank', [], 'roll', [], 'pitch', [], ...
     'wob', [], 'att_db', [], 'body_spread_db', [], 'jam', [], 'ds_ns', [], 'ds_int', [], 'cal_db', [], 'roll_in', [], ...
     'idle', [], 'act_idle', [], 'idle_amb', [], 'bch', []);
+dup = intersect(MEAS, fieldnames(D));                   % a measurement and a draw in one field would mix them
+assert(isempty(dup), 'run_dataset_sweep: %s is both a measurement and a field of its own', strjoin(dup, ', '));
 for i = 1:numel(MEAS), D.(MEAS{i}) = []; end
 run_id = 0;
 t0 = tic;
@@ -202,7 +204,7 @@ dataset.pos = D.pos(:); dataset.gain_ant = D.gain_ant'; dataset.act = D.act(:);
 dataset.act_comp = D.act_comp'; dataset.lev_db = D.lev_db';   % per component (frames x 3)
 dataset.k_db = D.k_db(:); dataset.k_int = D.k_int(:); dataset.aoa = D.aoa(:); dataset.yaw = D.yaw(:);
 dataset.rho = D.rho(:); dataset.gcs_db = D.gcs_db(:); dataset.alt_m = D.alt_m(:); dataset.el_db = D.el_db(:);
-dataset.align = D.align(:); dataset.gcs_aoa = D.gcs_aoa(:); dataset.bank = D.bank(:); dataset.roll = D.roll(:);
+dataset.align_gcs = D.align_gcs(:); dataset.gcs_aoa = D.gcs_aoa(:); dataset.bank = D.bank(:); dataset.roll = D.roll(:);
 dataset.pitch = D.pitch(:); dataset.wob = D.wob(:); dataset.att_db = D.att_db(:); dataset.body_spread_db = D.body_spread_db(:);
 dataset.jam = D.jam';                      % sweep period [s], sweep phase [s], burst start, burst duty per frame
 dataset.ds_ns = D.ds_ns(:); dataset.ds_int = D.ds_int(:);
@@ -216,6 +218,8 @@ dataset.meta = struct('N_SUB', N_SUB, 'n_sub', n_sub, 'F_SUB', F_SUB, 'EbNo_list
     'mode', 'seeded_subruns_D59', 'n_rx', p0.n_rx, 'speed_range_kmh', [p0.speed_kmh_min p0.speed_kmh_max], ...
     'threat_cfg', threat_cfg, 'fresh', FRESH, 'seed0', SEED0, 'created', datestr(now), ...
     'sweep_hit', hit, 'wlan_hit', wlan, 'sweep_hit_frame', hit_f, 'wlan_hit_frame', wlan_f);
+assert_frames(D, numel(D.label), 'run_dataset_sweep', {}, 2);   % every field one entry per frame
+assert_frames(dataset.meas, numel(dataset.run), 'run_dataset_sweep: the receiver measurements');
 if ~isfolder('data'), mkdir('data'); end         % a folder of that name elsewhere on the path does not count
 save(f_out, 'dataset', '-v7.3');
 
@@ -265,7 +269,7 @@ o = ones(1, n);
 D.k_db = [D.k_db, d.k_sig * o]; D.k_int = [D.k_int, d.k_int * o]; D.aoa = [D.aoa, d.aoa(1) * o];
 D.yaw = [D.yaw, d.yaw * o]; D.rho = [D.rho, d.rho * o]; D.gcs_db = [D.gcs_db, d.gcs_point_db * o];
 D.alt_m = [D.alt_m, d.alt_m * o]; D.el_db = [D.el_db, d.el_db * o];
-D.align = [D.align, d.align(1) * o]; D.gcs_aoa = [D.gcs_aoa, d.gcs_aoa * o]; D.bank = [D.bank, d.bank * o];
+D.align_gcs = [D.align_gcs, d.align(1) * o]; D.gcs_aoa = [D.gcs_aoa, d.gcs_aoa * o]; D.bank = [D.bank, d.bank * o];
 D.roll = [D.roll, d.roll * o]; D.pitch = [D.pitch, d.pitch * o]; D.wob = [D.wob, d.wobble(1) * o];
 D.att_db = [D.att_db, d.att_db * o]; D.body_spread_db = [D.body_spread_db, (max(d.body_db) - min(d.body_db)) * o];
 D.jam = [D.jam, d.jam(:) * o];

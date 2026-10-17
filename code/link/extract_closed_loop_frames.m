@@ -40,10 +40,14 @@ function F = extract_closed_loop_frames(out, p, delay_bits)
 %               our transmission, > 0 when it is triggered by it (reactive jamming)
 %     iot       interference over thermal [dB] (iot_db.m); the thermal floor is the
 %               receiver's calibration constant (thermal_nv.m)
-%     mmse_gain predicted SINR gain of MMSE over MRC combining [dB] from the
-%               interference covariance and the channel estimate (optimum combining, Winters)
+%     mmse_gain SINR gain of MMSE over MRC combining [dB] read from the interference
+%               covariance and the channel estimate of the decision-directed pass (optimum
+%               combining, Winters): a detector input; it follows the decisions, so it
+%               reads little gain where those fail (a strong or CW interferer)
 %     align     alignment of the dominant interference direction with the GCS
 %               channel (0 = orthogonal, 1 = same direction: no spatial null)
+%     mmse_pred predicted SINR gain of MMSE over MRC combining [dB] from the frame's
+%               known symbols only (mmse_predict.m): the policies' nulling input
 %     branch_dip deepest drop of one antenna's channel gain inside the frame [dB]:
 %               per antenna, median minus minimum of the 32-symbol channel-gain
 %               estimates, the larger of the antennas. A fading branch
@@ -200,6 +204,7 @@ end
 % Decision-directed link quality, channel-estimator spatial measurements
 [F.ber_est, F.snr_post] = symbol_metrics(zc, p);
 [F.mmse_gain, F.align] = spatial_metrics(Hq, Rq, nf);
+F.mmse_pred = mmse_predict(iqa ./ gcal, p, sy);             % the combiner's samples, before the level calibration
 F.branch_dip = branch_dip(Hq, nf);
 F.branch_gap = branch_gap(Hq .* gcal(:), nf);
 F.gain_ant = gain_ant(Hq .* gcal(:), nf);

@@ -5,8 +5,8 @@ function rekey_pools(files)
 %   build_check_pools.m pass the detector without the fusion); the decision cycle
 %   applies the fusion itself (policy_monitor.m). A new fusion therefore changes only
 %   the keys PP.fuse, PP.fuse_N, PP.q_thr and PP.det_id (detector_id.m).
-%   It stops, changing nothing, when the pools come from another detector network,
-%   unknown-threat score or threshold, when they hold a field that is not known to be
+%   It stops, changing nothing, when the pools come from another detector network or
+%   unknown-threat score, when they hold a field that is not known to be
 %   independent of the fusion, or when a frame field is not a per-frame output.
 %   Every file is copied to <name>_before_rekey_<time>.mat before it is saved.
 %   files  pool files (default: data/policy_pools.mat, then data/check_pools.mat,
@@ -20,18 +20,18 @@ if nargin < 1
 end
 KEYS = {'fuse', 'fuse_N', 'q_thr', 'det_id'};
 FRAME = {'probs', 'maha', 'feat', 'gant', 'ber', 'fer', 'crc', 'run', 'aoa', 'act', 'act_comp', 'ebno_rx', ...
-    'idle', 'act_idle', 'bch'};   % pool_cell.m
+    'idle', 'act_idle', 'bch', 'mmse_pred'};   % pool_cell.m
 KNOWN = [KEYS, {'scen', 'sev', 'level', 'sev_names', 'splits', 'cell_splits', 'cell_geo', 'ref_geo', 'shadow', 'threats', 'singles', ...
     'combos', 'ebno', 'actions', 'ngeo', 'ncomb', 'nhover', 'lhs', 'speed_range', 'speed_out', 'speed', 'cov', ...
+    'maha_val', 'unk_retain', 'rule_mmse_db', ...
     'alt', 'ksig', 'gp', 'bw', 'pw', 'cfg_gain_db', 'pools', 'mber', 'mfer', 'clean', 'clean_fer', 'classes', 'maha_thr', ...
     'unk_win', 'F_SUB', 'event_frame', 'fec_frames', 'runs', 'model_tag', 'aoa_random', 'k_random', 'sps', 'bps', 'feat_names', ...
     'created', 'kind', 'cell_ebs', 'ebno_grid', 'e_level', 'family', 'block'}];   % build_policy_pools.m, build_check_pools.m
 D = load('data/trained_detector.mat', 'classes', 'ood', 'trained_at');
-T = ood_thresholds(0.95);
 FZ = fusion_model();
 UW = 1; if isfield(D.ood, 'win'), UW = D.ood.win; end
 classes = cellstr(string(D.classes(:)'));
-new_id = detector_id(D.trained_at, D.ood, FZ, T.maha);
+new_id = detector_id(D.trained_at, D.ood, FZ);
 moved = {};                                             % det_id of the pools re-keyed in this call
 for i = 1:numel(files)
     f = files{i};
@@ -62,9 +62,9 @@ for i = 1:numel(files)
     if ~isempty(bad)
         error('rekey_pools:frame', '%s: frame field %s is not a per-frame output (pool_cell.m); rebuild the pools', f, strjoin(bad, ', '));
     end
-    old_id = detector_id(D.trained_at, D.ood, struct('FM', X.fuse, 'N', X.fuse_N, 'q_thr', X.q_thr), X.maha_thr);
-    if ~strcmp(old_id, X.det_id) || ~isequal(X.classes, classes) || ~isequal(X.maha_thr, T.maha) || ~isequal(X.unk_win, UW)
-        error('rekey_pools:detector', ['%s comes from another detector network, unknown-threat score or threshold, ' ...
+    old_id = detector_id(D.trained_at, D.ood, struct('FM', X.fuse, 'N', X.fuse_N, 'q_thr', X.q_thr));
+    if ~strcmp(old_id, X.det_id) || ~isequal(X.classes, classes) || ~isequal(X.unk_win, UW)
+        error('rekey_pools:detector', ['%s comes from another detector network or unknown-threat score, ' ...
             'not only another fusion; rebuild the pools'], f);
     end
     if strcmp(old_id, new_id), fprintf('%s: already keyed to this fusion\n', f); continue; end
