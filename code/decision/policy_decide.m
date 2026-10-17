@@ -15,7 +15,9 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %
 %   Link monitor, alarm confirmation and the agent's observation history:
 %   policy_monitor.m (shared). Timing constants: decision_config.m.
-%   rule      detected class, predicted MMSE gain, quiet-slot interference (alarm
+%   rule      detected class, predicted MMSE gain (obs.mmse_pred, mmse_predict.m: from the
+%             frame's known symbols; nulling threshold PP.rule_mmse_db, default
+%             C.rule_mmse_db), quiet-slot interference (alarm
 %             threshold PP.q_thr), the monitor's drop alarm and the link budget (its drop
 %             without the configurations' known gains, the configuration in use and the
 %             gains of power_control, rate_reduce and both, config_gain_db.m) ->
@@ -73,15 +75,16 @@ switch base
         [~, a] = max(q, [], 1);
     case {'rule', 'table'}
         a = cfg;
-        gain = obs.feat(:, feature_index('mmse_gain')); qi = obs.feat(:, feature_index('q_iot'));
+        gain = obs_mmse_pred(obs, NE); qi = obs.feat(:, feature_index('q_iot'));
         qt = NaN; if isfield(PP, 'q_thr') && ~isempty(PP.q_thr), qt = PP.q_thr; end
+        mt = C.rule_mmse_db; if isfield(PP, 'rule_mmse_db') && ~isempty(PP.rule_mmse_db), mt = PP.rule_mmse_db; end
         gk = config_gain_db(PP);
         lb = find(ismember(A, {'power_control', 'rate_reduce', 'rate_reduce+power_control'}));   % link-budget configurations
         bud = struct('drop_db', 0, 'current', '', 'current_db', 0, 'names', {A(lb)}, 'gain_db', gk(lb));
         for i = 1:NE
             if strcmp(base, 'rule')
                 bud.drop_db = M.drop(i); bud.current = A{cfg(i)}; bud.current_db = gk(cfg(i));
-                p = find(strcmp(A, rule_based_policy(M.cls{i}, M.degraded(i), gain(i), qi(i), qt, M.drop_alarm(i), bud)), 1);
+                p = find(strcmp(A, rule_based_policy(M.cls{i}, M.degraded(i), gain(i), qi(i), qt, M.drop_alarm(i), bud, mt)), 1);
             else
                 p = table_action(M.cls{i}, M.degraded(i), PP, opt, na);
             end

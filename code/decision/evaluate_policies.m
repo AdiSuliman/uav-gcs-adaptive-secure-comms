@@ -65,8 +65,9 @@ close all; clc;
 fprintf('=== Decision-layer evaluation on the test pools ===\n\n');
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
 Q = load('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'H', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db', ...
-    'deployed', 'rule_sel', 'det_id');
+    'deployed', 'rule_sel', 'det_id', 'maha_thr');
 check_det_id(PP, Q, 'evaluate_policies');
+if isfield(Q, 'maha_thr'), PP.maha_thr = Q.maha_thr; end         % the unknown-threat threshold the agent ran with
 PP.confirm = Q.confirm; PP.alarm_mode = Q.alarm_mode;           % same monitor for every policy but the rule fallback
 if ~isempty(Q.drop_db), PP.drop_db = Q.drop_db; end
 K = link_env('tables', PP);

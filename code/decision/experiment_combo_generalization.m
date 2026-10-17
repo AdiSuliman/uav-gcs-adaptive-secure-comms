@@ -18,8 +18,9 @@
 close all; clc;
 fprintf('=== Combined threats never trained on: leave-one-combination-out ===\n\n');
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
-Q = load('data/trained_dqn.mat', 'agent', 'H', 'norm_in', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db', 'det_id');
+Q = load('data/trained_dqn.mat', 'agent', 'H', 'norm_in', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db', 'det_id', 'maha_thr');
 check_det_id(PP, Q, 'experiment_combo_generalization');
+if isfield(Q, 'maha_thr'), PP.maha_thr = Q.maha_thr; end         % the unknown-threat threshold the agent ran with
 PP.confirm = Q.confirm; PP.alarm_mode = Q.alarm_mode;
 if ~isempty(Q.drop_db), PP.drop_db = Q.drop_db; end
 K = link_env('tables', PP);

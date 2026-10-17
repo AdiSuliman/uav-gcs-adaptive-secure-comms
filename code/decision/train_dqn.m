@@ -44,8 +44,8 @@
 % not measured). The best run of every gamma at the selected monitor, drop threshold
 % and penalty is kept as an ablation. Reward-weight sensitivity: proposal mitigation 2.
 %
-% Output: data/trained_dqn.mat (also deployed, rule_sel, fa_bound_met and the pools'
-% det_id and created), results/dqn_training.txt, results/dqn_training_curves.png
+% Output: data/trained_dqn.mat (also deployed, rule_sel, fa_bound_met, the pools'
+% det_id and created and the unknown-threat threshold maha_thr), results/dqn_training.txt, results/dqn_training_curves.png
 
 close all; clc;
 fprintf('=== C2: Train DQN ===\n\n');
@@ -305,9 +305,10 @@ drop_db = drop_sel; if isnan(drop_db), drop_db = DROP_DB; end
 agent = dqn_dense(agent);                          % matrix form for deployment
 for gi = find(~cellfun(@isempty, agents)), agents{gi} = dqn_dense(agents{gi}); end
 det_id = PP.det_id; pools_created = PP.created;    % the pools (and their detector) the agent learned on
+maha_thr = PP.maha_thr;                            % the unknown-threat threshold it ran with (its readers set PP.maha_thr)
 save('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'confirm', 'alarm_mode', 'drop_db', 'H', ...
     'norm_in', 'seed_summary', 'action_names', 'tab', 'deployed', 'rule_sel', 'fa_bound_met', 'det_id', ...
-    'pools_created', '-v7.3');
+    'pools_created', 'maha_thr', '-v7.3');
 fprintf('Saved data/trained_dqn.mat\n');
 
 fig = figure('Position', [100 100 1000 430], 'Color', 'w');

@@ -29,7 +29,8 @@ C.period_ms = 20;
 C.dwell = 2;                % consecutive cycles a proposal must persist
 C.hold  = 3;                % cycles after a change before the next one
 C.esc   = 3;                % escalation: degraded cycles in an applied configuration, or confirmed-alarm cycles at no_action
-C.rule_mmse_db = 6;         % predicted MMSE gain from which the rule also nulls the interferer
+C.rule_mmse_db = 6;         % predicted MMSE gain (mmse_predict.m) from which the rule also nulls the interferer;
+                            % PP.rule_mmse_db, when set, is the deployed value (policy_decide.m)
 C.q_alarm_db = 3;           % default quiet-slot interference alarm [dB over thermal]; the deployed value
                             % comes from the clean validation frames (select_fusion.m, q_thr)
 C.ladder = {'spatial_diversity+power_control', 'channel_switch+spatial_diversity+power_control', ...
