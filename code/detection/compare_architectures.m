@@ -19,9 +19,11 @@
 % Selection basis (validation only): each variant's per-frame validation outputs through the
 % deployed temporal fusion (fuse_classes.m) with select_fusion.m's N and lambda fixed
 % (data/fusion.mat), fitted and read out of fold over select_fusion's 5 folds by sub-run
-% (seed 61) on the per-cycle targets (fusion_target.m), as KPI 1 reads the system's class;
-% beside it the latched cause of a lost branch (latch_runs.m, the deployed threshold
-% FM.os_thr), the monitor's class when the deployed fusion latches. The hybrid's
+% (seed 61) on the per-cycle targets (fusion_target.m), as KPI 1 reads the system's class,
+% with the deployed fusion's further columns and target rule (FM.cues, FM.target_age);
+% beside it the latched cause of a lost branch (latch_runs.m), its threshold chosen on the
+% other folds' sub-runs as select_fusion.m chooses it, the monitor's class when the deployed
+% fusion latches (FM.latch, stated in the report; the deployed FM.os_thr on the test set). The hybrid's
 % validation outputs come from the epoch chosen there, so the fused test reading is the
 % unbiased check. The forest and the SVM are unweighted while the networks' loss is
 % inverse-frequency weighted, so accuracy follows the 'none' frames; macro-F1 is the
@@ -49,15 +51,17 @@ end
 fz = isfile('data/fusion.mat') && isfield(sp.val, 'pos') && isfield(sp.test, 'pos');
 if fz
     FZ = load('data/fusion.mat', 'FM', 'N', 'lambda');
-    os_thr = onset_shape('threshold', FZ.FM);
+    os_thr = onset_shape('threshold', FZ.FM); latch_on = onset_shape('on', FZ.FM); cues = fuse_classes('cues', FZ.FM);
     sp.val.feat_names = sp.norm.feat_names; sp.test.feat_names = sp.norm.feat_names;
     yv_cyc = double(sp.val.Y(:)); yt_cyc = double(sp.test.Y(:));            % per-cycle labels (the fusion's)
-    tv = fusion_target(yv_cyc, sp.val.run, sp.val.pos, FZ.N, cls_names);
-    tt = fusion_target(yt_cyc, sp.test.run, sp.test.pos, FZ.N, cls_names);
+    tv = fusion_target(yv_cyc, sp.val.run, sp.val.pos, FZ.N, cls_names, FZ.FM);
+    tt = fusion_target(yt_cyc, sp.test.run, sp.test.pos, FZ.N, cls_names, FZ.FM);
     runs = unique(sp.val.run);                                              % select_fusion.m's folds
     rs = RandStream('mt19937ar', 'Seed', 61);
     fold_of_run = mod(randperm(rs, numel(runs)), 5) + 1;
     [~, ir] = ismember(sp.val.run, runs); fold = fold_of_run(ir)';
+    tf = fold_thresholds(sp.val, yv_cyc, cls_names, runs, fold_of_run);   % the latch's threshold of every fold
+    mon = ternary(latch_on, 'fused+latch (FM.latch = true)', 'fused class (FM.latch = false)');
 end
 sp.train = frame_labels(sp.train); sp.val = frame_labels(sp.val); sp.test = frame_labels(sp.test);
 V = struct('name', {'hybrid (spectrogram + link features)', 'spectrogram only (CNN)', 'link features only (MLP)', ...
@@ -122,8 +126,8 @@ for v = 1:nV
     for e = 1:numel(ebs), m = eb' == ebs(e); PE(v, e) = 100 * macro_present(yt(m), yp(m), C); end
     if any(beyond), BY(v) = 100 * mean(yp(beyond) == yt(beyond)); end
     if fz
-        [VA(v, 2:3), FV(v, :)] = fused_oof(sp.val, Pv, FZ.N, FZ.lambda, tv, fold, cls_names, os_thr);
-        Zv = fuse_classes('windows', sp.val, Pv, FZ.N); Zt = fuse_classes('windows', sp.test, Pt, FZ.N);
+        [VA(v, 2:3), FV(v, :)] = fused_oof(sp.val, Pv, FZ.N, FZ.lambda, tv, fold, cls_names, tf, cues);
+        Zv = fuse_classes('windows', sp.val, Pv, FZ.N, cues); Zt = fuse_classes('windows', sp.test, Pt, FZ.N, cues);
         FMv = fuse_classes('fit', Zv, tv, C, FZ.lambda);
         pt = fuse_classes('apply', FMv, Zt); [~, kf] = max(pt, [], 2);
         [~, kl] = max(latch_runs(pt, sp.test.run, sp.test.pos, sp.test.gain_ant, cls_names, os_thr), [], 2);
@@ -135,8 +139,10 @@ rep = {'=== DETECTOR ARCHITECTURES ===', sprintf(['Generated: %s | same splits, 
     'test frames %d: %s'], datestr(now), numel(yv), numel(yt), set_name), ''};
 rep{end+1} = '--- Selection basis: the validation split (macro-F1 %) ---';
 if fz
+    rep{end+1} = sprintf('Deployed monitor: %s (select_fusion.m, chosen on validation).', mon);
     rep{end+1} = sprintf(['%-40s %10s %14s %14s   (fusion N = %d cycles, lambda %.0e fixed; out of fold over select_fusion''s ' ...
-        '5 folds by sub-run; per-cycle targets)'], 'architecture', 'per frame', 'fused (OOF)', 'fused+latch', FZ.N, FZ.lambda);
+        '5 folds by sub-run; per-cycle targets; the latch''s threshold chosen on the other folds)'], 'architecture', ...
+        'per frame', 'fused (OOF)', latch_col(latch_on), FZ.N, FZ.lambda);
     for v = 1:nV
         rep{end+1} = sprintf('%-40s %9.2f%% %13.2f%% %13.2f%%', V(v).name, VA(v, 1:3)); %#ok<SAGROW>
     end
@@ -144,7 +150,8 @@ if fz
     for v = 1:nV
         rep{end+1} = sprintf('%-40s %s', V(v).name, sprintf('%8.1f ', FV(v, :))); %#ok<SAGROW>
     end
-    rep{end+1} = 'fused+latch: the monitor''s class when the deployed fusion latches the cause of a lost branch (select_fusion.m).';
+    rep{end+1} = sprintf(['fused+latch: the monitor''s class when the deployed fusion latches the cause of a lost branch ' ...
+        '(select_fusion.m); here %s.'], ternary(latch_on, 'it latches', 'it does not: the fused class is the monitor''s'));
 else
     rep{end+1} = sprintf('%-40s %10s   (no fusion or frame positions: per frame only)', 'architecture', 'per frame');
     for v = 1:nV, rep{end+1} = sprintf('%-40s %9.2f%%', V(v).name, VA(v, 1)); end %#ok<SAGROW>
@@ -162,7 +169,9 @@ for v = 1:nV
 end
 rep{end+1} = 'Accuracy follows the ''none'' frames (the forest and the SVM are unweighted, the networks inverse-frequency weighted): macro-F1 is the comparable figure.';
 if fz
-    rep{end+1} = sprintf('%-40s %14s %14s   (the fusion refitted on each variant''s validation outputs)', 'fused (macro-F1)', 'fused', 'fused+latch');
+    rep{end+1} = sprintf('Deployed monitor: %s.', mon);
+    rep{end+1} = sprintf(['%-40s %14s %14s   (the fusion refitted on each variant''s validation outputs; the latch at the ' ...
+        'deployed threshold %+.2f)'], 'fused (macro-F1)', 'fused', latch_col(latch_on), os_thr);
     for v = 1:nV
         rep{end+1} = sprintf('%-40s %13.2f%% %13.2f%%', V(v).name, FT(v, :)); %#ok<SAGROW>
     end
@@ -176,21 +185,44 @@ fid = fopen('results/architecture_comparison.txt', 'w'); fprintf(fid, '%s\n', re
 fprintf('\n%s\n', rep{:});
 clear sp
 
-function [mf, f1] = fused_oof(va, P, N, lambda, tv, fold, classes, thr)
+function [mf, f1] = fused_oof(va, P, N, lambda, tv, fold, classes, tf, cues)
 % The fused class out of fold on the validation split (select_fusion.m's folds, N and
-% lambda fixed): macro-F1 % fused and with the latched cause of a lost branch, and the
-% fused per-class F1 %.
+% lambda fixed): macro-F1 % fused and with the latched cause of a lost branch (each fold
+% latched at tf(fold), its threshold chosen on the other folds), and the fused per-class F1 %.
 C = size(P, 2);
-Z = fuse_classes('windows', va, P, N);
-pc = zeros(size(P));
+Z = fuse_classes('windows', va, P, N, cues);
+pc = zeros(size(P)); pl = pc;
 for k = 1:max(fold)
-    FM = fuse_classes('fit', Z(fold ~= k, :), tv(fold ~= k), C, lambda);
-    pc(fold == k, :) = fuse_classes('apply', FM, Z(fold == k, :));
+    m = fold == k;
+    FM = fuse_classes('fit', Z(~m, :), tv(~m), C, lambda);
+    pc(m, :) = fuse_classes('apply', FM, Z(m, :));
+    pl(m, :) = latch_runs(pc(m, :), va.run(m), va.pos(m), va.gain_ant(m, :), classes, tf(k));
 end
 [~, kf] = max(pc, [], 2);
-[~, kl] = max(latch_runs(pc, va.run, va.pos, va.gain_ant, classes, thr), [], 2);
+[~, kl] = max(pl, [], 2);
 f1 = 100 * per_class_f1(tv', kf', C);
 mf = [mean(f1), 100 * mean(per_class_f1(tv', kl', C))];
+end
+
+function tf = fold_thresholds(va, y, classes, runs, fold_of_run)
+% The onset shape's threshold of every fold, chosen on the other folds' validation sub-runs
+% of the two lost-branch classes as select_fusion.m chooses it (onset_shape.m 'events', 'choose').
+iB = [find(strcmp(classes, 'antenna_fault')), find(strcmp(classes, 'airframe_shadowing'))];
+heal = decision_config().heal; og = []; oy = []; orun = [];
+if numel(iB) == 2
+    for r = runs(:)'
+        ix = find(va.run == r); [~, o] = sort(va.pos(ix)); ix = ix(o);
+        b = find(ismember(iB, y(ix)), 1);
+        if isempty(b), continue; end
+        og(end+1) = onset_shape('events', va.gain_ant(ix, :), find(y(ix) == iB(b), 1), heal); oy(end+1) = b; orun(end+1) = r; %#ok<AGROW>
+    end
+end
+[~, ko] = ismember(orun, runs); ko = fold_of_run(ko);
+tf = arrayfun(@(k) onset_shape('choose', og(ko ~= k), oy(ko ~= k)), 1:max(fold_of_run));
+end
+
+function t = latch_col(on)
+t = 'fused+latch'; if ~on, t = 'fused+latch (not deployed)'; end
 end
 
 function P = rf_probs(mdl, X, C)

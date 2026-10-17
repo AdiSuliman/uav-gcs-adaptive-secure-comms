@@ -14,7 +14,8 @@
 %   KPI 4  restoration: BER and packet loss back to <= 2x clean on >= 90% of the
 %          recoverable episodes of EVERY threat, combined threats included, over
 %          five severities; survivability boundary (evaluate_policies,
-%          map_survivability_boundary)
+%          map_survivability_boundary); beside it, the stricter reading on the harmed
+%          episodes only (no response does not restore them), never in its place
 %   KPI 5  DQN vs no response, rule, random, fixed and oracle: recovery, recovery
 %          time, restored cycles, goodput, follower and unseen combinations;
 %          paired 95% bootstrap interval of the recovery difference vs rule > 0
@@ -23,7 +24,8 @@
 %   KPI 7  real time: decision latency median < 10 ms (Oli & Mahalal, low class)
 %          and p95 < 20 ms (also on one CPU core); robustness over the speed
 %          envelope (recovery spread <= 10 points), flights at its ends reported
-%   KPI 8  minimum: a closed loop restoring at least one recoverable threat
+%   KPI 8  minimum: a closed loop restoring at least one recoverable threat, read on the
+%          harmed episodes (an episode no response restores shows no closed loop)
 % With results/edge_map.mat (edge_map.m), the verdicts per point are added as details:
 % detection and detection on harmed flights (KPI 1); the commitment at every signalling
 % delay, the receiver alone, the relative criterion (SYSTEM), the distance edges and the
@@ -43,7 +45,7 @@ F = struct('det', 'results/eval_detector_metrics.mat', 'unseen', 'results/unseen
     'pol', 'results/policy_evaluation.mat', 'lat', 'results/latency.mat', ...
     'surv', 'data/survivability_boundary.mat', 'dqn', 'data/trained_dqn.mat', 'arch', 'results/architecture_comparison.txt', ...
     'ant3', 'results/survivability_options.txt', 'combo', 'results/combo_generalization.mat', 'edge', 'results/edge_map.mat');
-if isfile('results/eval_detector_metrics_fresh2.mat'), F.det = 'results/eval_detector_metrics_fresh2.mat'; end
+F.det = kpi1_file('eval_detector_metrics');            % the third test set when it exists
 KPI2_TARGET = 0.8;                                 % mean AUROC (the submitted proposal's target, kept in the update)
 t_det = file_time('data/trained_detector.mat'); t_dqn = file_time(F.dqn);
 if isfile('data/trained_detector.mat')             % training time (the file is updated later by the OOD stage)
@@ -212,6 +214,7 @@ if isfile(F.pol)
     stale = file_time(F.pol) < t_dqn || sp.stale;
     col = @(p) find(strcmp(P.POL, p));
     iD = P.iDQN; iO = col('oracle'); iQ = col('dqn_esc');
+    if startsWith(P.POL{iD}, 'dqn'), iQ = iD; end        % the deployed DQN, with or without the escalation
     dep = erase(P.LBL{iD}, ' (deployed)');
     ALL = P.ALL;
     pt = P.KP.per_threat(:, strcmp(P.KP.show, P.POL{iD}));
@@ -229,6 +232,30 @@ if isfile(F.pol)
         min(P.KP.per_threat_sev(~contains(P.KP.threats, '+'), v, strcmp(P.KP.show, P.POL{iD})))), ...
         1:numel(P.KP.sev_names), 'UniformOutput', false), ' / '))};
     if isfield(P.KP, 'shadow_note') && ~isempty(P.KP.shadow_note), det{end+1} = P.KP.shadow_note; end   % airframe shadowing: conditioned
+    if isfield(P.KP, 'per_threat_h')                 % the stricter reading, beside KPI 4, never in its place
+        ph = P.KP.per_threat_h(:, strcmp(P.KP.show, P.POL{iD}));
+        det{end+1} = sprintf(['beside KPI 4, the stricter reading on the HARMED recoverable episodes only (no response does not ' ...
+            'restore them): %d of %d threats >= 90%%, per threat (harmed episodes; 95%% bootstrap): %s'], sum(ph >= 90), ...
+            sum(~isnan(ph)), strjoin(cellfun(@(n, v, k, a, b) sprintf('%s %.1f%% (%d) [%.1f, %.1f]', n, v, k, a, b), ...
+            P.KP.threats, num2cell(ph'), num2cell(P.KP.n_harmed'), num2cell(P.KP.per_threat_h_ci(:, 1)'), ...
+            num2cell(P.KP.per_threat_h_ci(:, 2)'), 'UniformOutput', false), ', '));
+        if isfield(P.KP, 'per_threat_env_h')
+            pe = P.KP.per_threat_env_h(:)';
+            det{end+1} = sprintf(['beside KPI 4, inside the envelope predicted on validation on the harmed episodes: %d of ' ...
+                '%d threats >= 90%%'], sum(pe(~isnan(pe)) >= 90), sum(~isnan(pe)));
+        end
+    end
+    if isfield(P.KP, 'offset') && ~isempty(P.KP.offset)   % threats that end, reported apart
+        o = P.KP.offset(strcmp({P.KP.offset.policy}, P.LBL{iD}));
+        if ~isempty(o)
+            det{end+1} = sprintf(['threats that end %d cycles after the onset (reported apart), %s: holding a configuration at ' ...
+                'the end %s; its release to no_action median %s cycles; running cost held after the end %s points per cycle'], ...
+                P.KP.offset_after, dep, strjoin(arrayfun(@(x) sprintf('%s %.0f%%', x.threat, x.held_pct), o, ...
+                'UniformOutput', false), ', '), strjoin(arrayfun(@(x) sprintf('%s %g', x.threat, x.rel_median), o, ...
+                'UniformOutput', false), ', '), strjoin(arrayfun(@(x) sprintf('%s %.2f', x.threat, x.cost_end), o, ...
+                'UniformOutput', false), ', '));
+        end
+    end
     if isfile(F.surv)
         S = load(F.surv, 'grid_data_A', 'grid_data_B');
         det{end+1} = sprintf('survivability map (threat x severity x Eb/N0 x geometry): %s', surv_txt(S));
@@ -272,15 +299,15 @@ if isfile(F.pol)
             status(all(pt >= 90), stale), det);
     end
 
-    k_r = col('rule_esc'); CDk = decision_config();
+    k_r = col('rule_esc'); CDk = decision_config(); nq = erase(P.LBL{iQ}, ' (deployed)');
     [dr, drl, drh] = boot_cluster(double(ALL{iQ}.recovered(m4)) - double(ALL{k_r}.recovered(m4)), ones(1, sum(m4)), ...
         ALL{iQ}.geom(m4), 2000, 4);
     rec = ~isnan(ALL{iQ}.t_rec);
     det = {sprintf('recovered among recoverable, threat sets pooled: %s', strjoin(cellfun(@(p) sprintf('%s %.1f%%', ...
         P.LBL{col(p)}, 100 * mean(ALL{col(p)}.recovered(m4))), unique({'none', 'random', 'fixed', 'rule_esc', 'blind_esc', ...
         'table', 'dqn_esc', P.POL{iD}, 'oracle'}, 'stable'), 'UniformOutput', false), ' | ')), ...
-        sprintf('DQN + escalation: median T_rec %s cycles (%s ms at the %d ms decision period) | cycles restored %.1f%% | goodput %.3f', ...
-        num_txt(median(ALL{iQ}.t_rec(rec))), num_txt(median(ALL{iQ}.t_rec(rec)) * CDk.period_ms), CDk.period_ms, ...
+        sprintf('%s: median T_rec %s cycles (%s ms at the %d ms decision period) | cycles restored %.1f%% | goodput %.3f', ...
+        nq, num_txt(median(ALL{iQ}.t_rec(rec))), num_txt(median(ALL{iQ}.t_rec(rec)) * CDk.period_ms), CDk.period_ms, ...
         100 * mean(ALL{iQ}.ok_post), mean(ALL{iQ}.gput_post, 'omitnan'))};
     k_b = col('blind_esc');
     if ~isempty(k_b)
@@ -291,12 +318,12 @@ if isfile(F.pol)
     end
     for si = find(ismember(P.set_names, {'follower', 'combined', 'comb'}))
         R = P.RES(si, :); mm = R{iQ}.recoverable & R{iQ}.threat;
-        det{end+1} = sprintf('%-9s recovered: DQN + esc. %.1f%% | rule+esc %.1f%% | table %.1f%% | fixed %.1f%% | oracle %.1f%%', ...
-            P.set_names{si}, 100*mean(R{iQ}.recovered(mm)), 100*mean(R{k_r}.recovered(mm)), 100*mean(R{col('table')}.recovered(mm)), ...
+        det{end+1} = sprintf('%-9s recovered: %s %.1f%% | rule+esc %.1f%% | table %.1f%% | fixed %.1f%% | oracle %.1f%%', ...
+            P.set_names{si}, nq, 100*mean(R{iQ}.recovered(mm)), 100*mean(R{k_r}.recovered(mm)), 100*mean(R{col('table')}.recovered(mm)), ...
             100*mean(R{col('fixed')}.recovered(mm)), 100*mean(R{iO}.recovered(mm))); %#ok<SAGROW>
     end
-    KPI(end+1) = kpi(5, 'DQN vs rules and baselines', sprintf('%+.1f points recovery vs rule + escalation [%+.1f, %+.1f]', ...
-        100*dr, 100*drl, 100*drh), 'better than rule (paired 95% bootstrap > 0)', status(drl > 0, stale), det);
+    KPI(end+1) = kpi(5, 'DQN vs rules and baselines', sprintf('%s: %+.1f points recovery vs rule + escalation [%+.1f, %+.1f]', ...
+        nq, 100*dr, 100*drl, 100*drh), 'better than rule (paired 95% bootstrap > 0)', status(drl > 0, stale), det);
 
     far = P.KP.far(strcmp({P.KP.far.policy}, P.LBL{iD}));
     fr = P.KP.far(strcmp({P.KP.far.policy}, P.LBL{k_r}));
@@ -368,13 +395,25 @@ if isfile(F.pol)
     KPI(end+1) = kpi(7, 'Decision time and robustness', latv, 'median < 10 ms, p95 < 20 ms; spread <= 10 points over the speed envelope', ...
         st7, det);
 
-    n_ok = sum(pt >= 50);
-    KPI(end+1) = kpi(8, 'Performance floor (closed loop)', sprintf('%d threats recovered on >= 50%% of recoverable episodes', n_ok), ...
-        '>= 1 recoverable threat', status(n_ok >= 1, stale), {});
+    if isfield(P.KP, 'per_threat_h')                 % on the harmed episodes: no response restores none of them
+        ph = P.KP.per_threat_h(:, strcmp(P.KP.show, P.POL{iD})); n_ok = sum(ph >= 50);
+        KPI(end+1) = kpi(8, 'Performance floor (closed loop)', sprintf(['%d threats recovered on >= 50%% of the harmed ' ...
+            'recoverable episodes'], n_ok), '>= 1 recoverable threat', status(n_ok >= 1, stale), ...
+            {sprintf('on every recoverable episode (no response''s own restorations included): %d threats', sum(pt >= 50))});
+    else
+        n_ok = sum(pt >= 50);
+        KPI(end+1) = kpi(8, 'Performance floor (closed loop)', sprintf('%d threats recovered on >= 50%% of recoverable episodes', n_ok), ...
+            '>= 1 recoverable threat', status(n_ok >= 1, stale), {});
+    end
     if isfile(F.dqn)
         Dq = load(F.dqn, 'seed_summary'); ss = Dq.seed_summary;
         KPI(5).detail{end+1} = sprintf('selected: alarm %s, gamma %.2f, training false-switch penalty %d, seed %d, validation gate %s', ...
             ss.selected_alarm, ss.selected_gamma, ss.selected_fa_pen, ss.selected_seed, ternary(ss.gate_pass, 'PASS', 'FAIL'));
+        if isfield(ss, 'selected_kind')
+            KPI(5).detail{end+1} = sprintf(['selected on validation by held recovery (restored to the end, the edge map''s REC): ' ...
+                '%s, held %.1f%% (recovered %.1f%%) against rule + escalation with the same monitor %.1f%% (%.1f%%)'], ...
+                ss.selected_kind, 100 * ss.dqn_held, 100 * ss.dqn_recovered, 100 * ss.rule_held, 100 * ss.rule_recovered);
+        end
     end
 else
     for k = 4:8, KPI(end+1) = missing(k, sprintf('KPI %d', k), F.pol); end %#ok<SAGROW>

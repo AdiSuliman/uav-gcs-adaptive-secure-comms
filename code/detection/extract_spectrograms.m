@@ -24,7 +24,13 @@ tw = 10;                                  % temporal window [frames]
 if ~isfield(ds, 'meas')
     error('dataset.mat predates D59 (no receiver measurements). Run run_dataset_sweep.m first.');
 end
-% one value per frame in every field (an align that also holds the flight draws: repair_align.m)
+% one value per frame in every field; the layout from before align_gcs names its repair
+n = numel(ds.run);
+if isfield(ds.meas, 'align') && numel(ds.meas.align) == 2 * n && ~isfield(ds, 'align_gcs')
+    error('extract_spectrograms:align', ['%s: meas.align holds %d values for %d frames (the layout from before ' ...
+        'align_gcs). Run repair_align(''%s'', true), then repair_align(''%s''), and rerun A6.'], f_in, ...
+        numel(ds.meas.align), n, f_in, f_in);
+end
 assert_frames(ds.meas, numel(ds.run), sprintf('extract_spectrograms: the receiver measurements of %s', f_in));
 assert_frames(ds, numel(ds.run), sprintf('extract_spectrograms: %s', f_in), {'class_names', 'idle_names', 'bch_names'});
 
@@ -75,6 +81,8 @@ end
 spec.img_size = 128;
 spec.meta = ds.meta;
 spec.meta.temporal_window = tw;
+spec.meta.frames_checked = true;                         % built after the per-frame guards above (prepare_data.m)
+spec.meta.src_align_gcs = isfield(ds, 'align_gcs');
 save(f_out, 'spec', '-v7.3');
 
 fprintf('\nSaved %s: X [128 128 1 %d], %d classes, feats [%d x %d] (%s)\n', ...

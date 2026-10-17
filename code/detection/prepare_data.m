@@ -26,6 +26,7 @@ sp0 = S.spec;
 if ~isfield(sp0, 'fold')
     error('spectrograms.mat predates D42. Run run_dataset_sweep and extract_spectrograms first.');
 end
+checked_a6(sp0, 'data/spectrograms.mat', 'data/dataset.mat');
 assert_frames(sp0, numel(sp0.run), 'prepare_data: data/spectrograms.mat', spec_meta());
 classes = categories(sp0.Y);
 fold = sp0.fold(:);
@@ -84,6 +85,7 @@ function prepare_fresh_test(third)
 % z-score of data/splits.mat.
 sfx = ''; name = 'second'; if third, sfx = '2'; name = 'third'; end
 S = load(['data/spectrograms_fresh' sfx '.mat']); sp0 = S.spec; clear S
+checked_a6(sp0, ['data/spectrograms_fresh' sfx '.mat'], ['data/dataset_fresh' sfx '.mat']);
 [nm, classes] = split_norm('data/splits.mat');
 assert(isequal(categories(sp0.Y), classes(:)), 'prepare_data: the %s test set has other classes', name);
 assert(isequal(sp0.feat_names, nm.feat_names), 'prepare_data: the %s test set has other features', name);
@@ -108,6 +110,16 @@ for c = 1:numel(classes)
 end
 save(['data/splits_fresh' sfx '.mat'], 'splits', '-v7.3');
 fprintf('Saved data/splits_fresh%s.mat\n=== B1 Complete ===\n', sfx);
+end
+
+function checked_a6(sp0, f_spec, f_ds)
+% Spectrograms built by the guarded A6 (extract_spectrograms.m: one value per frame in every
+% field) and newer than their dataset; otherwise B1 stops before splitting them.
+assert(isfield(sp0, 'meta') && isfield(sp0.meta, 'frames_checked') && sp0.meta.frames_checked, 'prepare_data:stale', ...
+    '%s was not built by the guarded A6 (run repair_align on an old dataset, then extract_spectrograms)', f_spec);
+if isfile(f_ds)
+    assert(dir(f_ds).datenum <= dir(f_spec).datenum, 'prepare_data:stale', '%s is older than %s: rerun A6', f_spec, f_ds);
+end
 end
 
 function s = idle_fields(s, sp0, m)

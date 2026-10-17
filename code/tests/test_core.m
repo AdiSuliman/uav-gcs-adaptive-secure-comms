@@ -625,9 +625,9 @@ for f = {'link_env', 'policy_monitor'}                  % read at decision time
     verifyNotEmpty(tc, regexp(fileread(which(f{1})), '< PP\.maha_thr', 'once'), f{1});
 end
 for f = {'evaluate_policies', 'experiment_unknown_threat', 'experiment_combo_generalization', 'edge_map'}
-    verifyNotEmpty(tc, strfind(fileread(which(f{1})), 'if isfield(Q, ''maha_thr''), PP.maha_thr = Q.maha_thr; end'), f{1});
+    verifyNotEmpty(tc, strfind(fileread(which(f{1})), 'decision_settings(PP, '), f{1});
 end
-verifyNotEmpty(tc, strfind(fileread(which('train_dqn')), 'maha_thr = PP.maha_thr;'));
+verifyNotEmpty(tc, strfind(fileread(which('train_dqn')), 'maha_thr = dec.maha_thr;'));
 check_det_id(struct('det_id', id), struct('det_id', id), 'test');
 verifyError(tc, @() check_det_id(struct('det_id', id), struct('det_id', ids{2}), 'test'), 'check_det_id:mismatch');
 verifyError(tc, @() check_det_id(struct('det_id', id), struct(), 'test'), 'check_det_id:mismatch');
@@ -3878,7 +3878,8 @@ verifyNotEmpty(tc, strfind(rs, 'DET_TEST = ''fresh2'';'));
 ed = fileread(which('eval_detector'));
 verifyNotEmpty(tc, strfind(ed, 'if read_fresh2, tag = ''_fresh2''; end'));
 verifyNotEmpty(tc, strfind(ed, 'Sf = load(''data/splits_fresh2.mat'');'));
-verifyNotEmpty(tc, strfind(fileread(which('measure_all_kpis')), 'F.det = ''results/eval_detector_metrics_fresh2.mat'';'));
+verifyNotEmpty(tc, strfind(fileread(which('measure_all_kpis')), 'F.det = kpi1_file(''eval_detector_metrics'');'));
+verifyNotEmpty(tc, strfind(fileread(which('kpi1_file')), 'f = [''results/'' stem ''_fresh2.mat''];'));
 % B1 on the third set: data/spectrograms_fresh2.mat -> data/splits_fresh2.mat, the training
 % z-score, the second test set's file untouched
 d = fullfile(tc.TestData.tmp, 'fresh2'); mkdir(fullfile(d, 'data'));
@@ -3888,7 +3889,7 @@ save('data/splits.mat', 'norm', 'classes');
 n = 6;
 spec = struct('X', zeros(8, 8, 1, n, 'single'), 'Y', categorical([1 2 1 2 1 2]', 1:2, classes), 'feats', [3 6; 5 10; 1 2; 3 6; 5 10; 1 2], ...
     'feat_names', {{'a', 'b'}}, 'fold', 6 * ones(n, 1), 'ebno', zeros(n, 1), 'speed_kmh', ones(n, 1), 'run', [1 1 2 2 3 3]', ...
-    'level', ones(n, 1)); %#ok<NASGU>
+    'level', ones(n, 1), 'meta', struct('frames_checked', true)); %#ok<NASGU>
 save('data/spectrograms_fresh2.mat', 'spec');
 FRESH_TEST = true; FRESH_SET = 2; %#ok<NASGU>
 evalc('run(''prepare_data'')');
@@ -4087,14 +4088,15 @@ verifyFalse(tc, isfield(p3, 'proc_gain_db'));
 end
 
 function test_drop_step_grid(tc)
-% The drop alarm's threshold is selected on validation between the train-pool value and 2
-% dB below it, in train_dqn.m and main.m alike; the edge map, DET's drop alarm
+% The drop alarm's threshold is selected on validation around each monitor's own (C1d) and
+% 2 dB either side, in train_dqn.m and main.m alike; the edge map, DET's drop alarm
 % included, runs on the deployed policy's monitor (rule_sel's when the rule is deployed).
-verifyNotEmpty(tc, regexp(fileread(which('train_dqn')), 'DROP_STEPS = \[0 2\];', 'once'));
-verifyNotEmpty(tc, regexp(fileread(which('main')), 'CFG.drop_steps\s*= \[0 2\];', 'once'));
+verifyNotEmpty(tc, strfind(fileread(which('train_dqn')), 'DROP_STEPS = CD.drop_steps;'));
+verifyEqual(tc, decision_config().drop_steps, [-2 0 2]);
+verifyNotEmpty(tc, regexp(fileread(which('main')), 'CFG.drop_steps\s*= \[-2 0 2\];', 'once'));
 src = fileread(which('edge_map'));
-verifyNotEmpty(tc, strfind(src, 'if strcmp(Q.deployed, ''rule_sel''), MON = Q.rule_sel; end'));
-verifyNotEmpty(tc, strfind(src, 'PP.confirm = MON.confirm; PP.alarm_mode = MON.alarm_mode;'));
+verifyNotEmpty(tc, strfind(src, 'MON = Q; if strcmp(Q.deployed, ''rule_sel''), MON = Q.rule_sel; end'));
+verifyNotEmpty(tc, strfind(src, 'PP = decision_settings(PP, MON);'));
 end
 
 function test_det_frames_drop(tc)
@@ -4173,12 +4175,12 @@ verifyFalse(tc, any(E.ev));
 verifyEqual(tc, obs.feat(:, 1)', CT.runs(4:7));
 B = PP; B.pools(1, :, :, 2) = CT.pools(1, :, :); B.runs{2} = CT.runs;
 verifyError(tc, @() link_env('tables', B), 'link_env:event_frame');
-for f = {'train_dqn', 'evaluate_policies', 'edge_map', 'diag_false_alarms', 'diag_path_loss'}
+for f = {'clean_world', 'evaluate_policies', 'edge_map', 'diag_false_alarms', 'diag_path_loss'}
     src = fileread(which(f{1}));
     verifyNotEmpty(tc, strfind(src, 'clean_split(PP, CT, '), f{1});
     verifyEmpty(tc, regexp(src, 'runs\{(2|TEST)\} = CT\.runs', 'once'), f{1});
 end
-verifyNotEmpty(tc, strfind(fileread(which('train_dqn')), ...                % C2's cached clean world carries them all
+verifyNotEmpty(tc, strfind(fileread(which('clean_world')), ...              % C2's cached clean world carries them all
     'for f = {''pools'', ''runs'', ''event_frame'', ''speed'', ''cell_geo'', ''cov'', ''alt'', ''ksig'', ''ref_geo''}'));
 end
 
@@ -4390,7 +4392,7 @@ V(1).pick = 5; [f, h] = drop_alarm_form(V); verifyEqual(tc, {f, h}, {'class_drop
 src = fileread(which('train_dqn'));
 verifyNotEmpty(tc, strfind(src, 'if strcmp(mode, ''class_drop''), mode = drop_mode; end'));
 ln = regexp(src, '[^\n]*(?<!\w)monitor\([^\n]*', 'match');      % the local monitor's calls and definition
-verifyEqual(tc, numel(ln), 5); verifyTrue(tc, all(contains(ln, {'DROP_MODE', 'drop_mode'})));
+verifyEqual(tc, numel(ln), 4); verifyTrue(tc, all(contains(ln, {'DROP_MODE', 'drop_mode'})));
 verifyNotEmpty(tc, strfind(fileread(which('choose_drop_threshold')), '''drop_alarm'', ''cusum_db'''));
 verifyNotEmpty(tc, strfind(fileread(which('det_frames')), 'use_drop = any(strcmp(mode, {''class_drop'', ''class_cusum''}));'));
 verifyNotEmpty(tc, strfind(fileread(which('edge_map')), 'RD = pass_cusum(OHP, thr_ohp);'));
@@ -5789,4 +5791,456 @@ function a = rule_cycles(o, PP, na)
 % The rule's configuration after four cycles of the same observation from no_action.
 mem = []; a = na;
 for k = 1:4, [a, mem] = policy_decide('rule', o, a, mem, PP, []); end
+end
+
+%% ---------- the monitor, the drop alarm, the decision layer's settings and the KPI readings ----------
+function test_a6_stamp_required(tc)
+% B1 splits only spectrograms the guarded A6 built (spec.meta.frames_checked, written after
+% its per-frame guards) and not older than their dataset; A6 names repair_align for a
+% dataset of the layout from before align_gcs.
+src = fileread(which('extract_spectrograms'));
+verifyNotEmpty(tc, strfind(src, 'spec.meta.frames_checked = true;'));
+src = fileread(which('prepare_data'));
+verifyNotEmpty(tc, strfind(src, 'checked_a6(sp0, ''data/spectrograms.mat'', ''data/dataset.mat'');'));
+verifyNotEmpty(tc, strfind(src, 'checked_a6(sp0, [''data/spectrograms_fresh'' sfx ''.mat''], [''data/dataset_fresh'' sfx ''.mat'']);'));
+d = fullfile(tc.TestData.tmp, 'b1_stamp'); mkdir(fullfile(d, 'data'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+spec = struct('fold', [1; 5; 6], 'meta', struct('temporal_window', 10));      % built before the stamp
+save('data/spectrograms.mat', 'spec', '-v7.3');
+verifyError(tc, @() run_script('prepare_data'), 'prepare_data:stale');
+spec.meta.frames_checked = true; save('data/spectrograms.mat', 'spec', '-v7.3');
+dataset = struct('run', 1); save('data/dataset.mat', 'dataset');
+java.io.File(fullfile(d, 'data', 'dataset.mat')).setLastModified(java.lang.System.currentTimeMillis() + 60e3);   % a newer dataset
+verifyError(tc, @() run_script('prepare_data'), 'prepare_data:stale');
+n = 4;
+dataset = struct('iq', {num2cell(rand(2, n), 1)}, 'run', ones(n, 1), 'label', ones(n, 1), 'align', rand(2 * n, 1), ...
+    'meas', struct('align', rand(2 * n, 1)), 'meta', struct());
+save('data/dataset.mat', 'dataset', '-v7.3');
+params = base_params(); save('params.mat', 'params');
+verifyError(tc, @() run_script('extract_spectrograms'), 'extract_spectrograms:align');
+end
+
+function run_script(name)
+% A pipeline script run in a function's workspace, as run_stage.m runs it.
+run(name);
+end
+
+function test_kpi1_file(tc)
+% KPI 1 is read on the third test set when its reading exists (measure_all_kpis.m), and the
+% dashboard, the console, the GUI bundle and the weak points show the same set.
+d = fullfile(tc.TestData.tmp, 'kpi1file'); mkdir(fullfile(d, 'results'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+verifyEqual(tc, kpi1_file('eval_detector_metrics'), 'results/eval_detector_metrics.mat');
+x = 1; save('results/eval_detector_metrics_fresh2.mat', 'x');
+verifyEqual(tc, kpi1_file('eval_detector_metrics'), 'results/eval_detector_metrics_fresh2.mat');
+verifyEqual(tc, kpi1_file('detector_predictions'), 'results/detector_predictions.mat');
+for f = {'measure_all_kpis', 'build_kpi_dashboard', 'demo_gui'}
+    verifyNotEmpty(tc, strfind(fileread(which(f{1})), 'kpi1_file(''eval_detector_metrics'')'), f{1});
+end
+verifyNotEmpty(tc, strfind(fileread(which('analyze_weak_points')), 'kpi1_file(''detector_predictions'')'));
+verifyNotEmpty(tc, strfind(fileread(which('export_gui_bundle')), '''results/eval_detector_metrics_fresh2.mat'''));
+verifyNotEmpty(tc, strfind(fileread(which('build_kpi_dashboard')), 'set_txt(Md.metrics)'));
+end
+
+function test_decision_settings(tc)
+% The settings train_dqn.m chose on validation reach every reader through
+% decision_settings.m: the deployed DQN's (dec), or the monitor an agent saved before dec;
+% an empty drop threshold keeps the pools'; the rule fallback's own through policy_decide's
+% opt.monitor; the edge map's check flights, the console and the 3D view alike; the
+% deployed policy's stamp follows them.
+PP = struct('alarm_mode', 'class', 'confirm', [2 2], 'drop_db', 4, 'maha_thr', -1);
+S = struct('alarm_mode', 'class_drop', 'confirm', [3 3], 'drop_db', [], 'maha_thr', -2, 'unk_mode', 'nonhostile', ...
+    'rule_mmse_db', 7.5, 'rule_slot', false, 'rule_dwell', 'group', 'esc_drop', true, 'confirm_sweep', [2 6], 'unk_retain', 0.99);
+X = decision_settings(PP, S);
+verifyEqual(tc, {X.alarm_mode, X.confirm, X.drop_db, X.maha_thr, X.unk_mode, X.rule_mmse_db, X.rule_slot, X.rule_dwell, ...
+    X.esc_drop, X.confirm_sweep, X.unk_retain}, {'class_drop', [3 3], 4, -2, 'nonhostile', 7.5, false, 'group', true, [2 6], 0.99});
+Q = struct('confirm', [4 5], 'alarm_mode', 'class_cusum', 'drop_db', 36, 'maha_thr', -3);      % an agent saved before dec
+X = decision_settings(PP, Q);
+verifyEqual(tc, {X.confirm, X.alarm_mode, X.drop_db, X.maha_thr}, {[4 5], 'class_cusum', 36, -3});
+Q.dec = S; X = decision_settings(PP, Q); verifyEqual(tc, {X.rule_mmse_db, X.drop_db}, {7.5, 4});
+verifyEqual(tc, decision_settings(struct('confirm_sweep', [2 6]), struct('confirm_sweep', [])).confirm_sweep, []);
+for f = {'evaluate_policies', 'experiment_unknown_threat', 'experiment_combo_generalization', 'measure_latency'}
+    src = fileread(which(f{1}));
+    verifyNotEmpty(tc, regexp(src, 'PPm? = decision_settings\(PPm?, Q\);', 'once'), f{1});
+    verifyNotEmpty(tc, strfind(src, '''dec'''), f{1});
+end
+src = fileread(which('edge_map'));
+verifyNotEmpty(tc, strfind(src, 'MON = Q; if strcmp(Q.deployed, ''rule_sel''), MON = Q.rule_sel; end'));
+verifyNotEmpty(tc, strfind(src, 'PP = decision_settings(PP, MON);'));
+verifyNotEmpty(tc, strfind(src, 'CK = decision_settings(CK, PP);'));
+for f = {'demo_gui', 'v3d_engine'}
+    src = fileread(which(f{1}));
+    verifyNotEmpty(tc, regexp(src, 'decision_settings\((env\.)?PP, Q\)', 'once'), f{1});
+    verifyNotEmpty(tc, strfind(src, '''maha_thr'', ''dec'''), f{1});
+end
+verifyNotEmpty(tc, strfind(fileread(which('demo_gui')), 'ui.thrSlider.Value = env.unk_retain;'));
+verifyNotEmpty(tc, strfind(fileread(which('policy_decide')), 'PP = decision_settings(PP, opt.monitor);'));
+Q = struct('deployed', 'dqn_esc', 'alarm_mode', 'class_drop', 'confirm', [2 2], 'drop_db', 4, 'det_id', 'x', 'maha_thr', -1, 'dec', S);
+s1 = policy_stamp(Q); Q.dec.rule_mmse_db = 9;
+verifyNotEqual(tc, policy_stamp(Q), s1);
+end
+
+function test_architecture_monitor_stated(tc)
+% B3a states the deployed monitor (the fused class, or with the latched cause), labels the
+% latch column not deployed when it is off, latches each validation fold at a threshold
+% chosen on the other folds (out of fold, as select_fusion.m), and reads the fusion with its
+% own further columns and target rule.
+src = fileread(which('compare_architectures'));
+verifyNotEmpty(tc, strfind(src, 'Deployed monitor: %s'));
+verifyNotEmpty(tc, strfind(src, 'tf = fold_thresholds(sp.val, yv_cyc, cls_names, runs, fold_of_run);'));
+verifyNotEmpty(tc, strfind(src, 'latch_runs(pc(m, :), va.run(m), va.pos(m), va.gain_ant(m, :), classes, tf(k));'));
+verifyNotEmpty(tc, strfind(src, '''fused+latch (not deployed)'''));
+verifyNotEmpty(tc, strfind(src, 'fusion_target(yv_cyc, sp.val.run, sp.val.pos, FZ.N, cls_names, FZ.FM)'));
+verifyNotEmpty(tc, strfind(src, 'fuse_classes(''windows'', va, P, N, cues)'));
+end
+
+function test_window_cues_extra(tc)
+% The fusion's further columns (window_cues.m 'extra'): each gap's crest and spread over its
+% own floor p10 against thresholds from clean gaps (cfar), and the branch isolated by its own
+% step (iso); a fusion without them keeps its row; the closed loop's monitor builds the same
+% row as fuse_classes.m with them.
+nm = idle_summary('names'); ci = @(s) find(strcmp(nm, s)); nF = numel(link_features('names'));
+E = 2; n = 4; nr = 3; Iw = nan(E, numel(nm), n);
+for e = 1:E
+    for k = 1:n
+        v = zeros(1, numel(nm)); v(ci('gap_ms')) = 10; v(ci('p10')) = 1; v(ci('p90')) = 1.5; v(ci('max')) = 2;
+        if e == 2 && k >= 3, v(ci('max')) = 7; v(ci('p90')) = 4; end   % a weak emitter's crest over the gap's floor
+        Iw(e, :, k) = v;
+    end
+end
+opt = struct('cfar', [1.5 1 0.9], 'iso', false);
+verifyEqual(tc, window_cues('extra', zeros(E, nr, n), zeros(E, nF, n), Iw, opt), [0 0 0.1 0; 0.5 0.5 2.6 1], 'AbsTol', 1e-12);
+verifyEqual(tc, window_cues('extra_names', opt), {'cf_crest_hi', 'cf_spread_hi', 'cf_crest_ex', 'cf_crest_now'});
+verifyEmpty(tc, window_cues('extra_names', []));
+G = zeros(1, nr, 8); G(1, 2, 5:8) = -10; G(1, 3, :) = -12;           % antenna 2 steps down 10 dB; antenna 3 weakest by its mean
+x = window_cues('extra', G, zeros(1, nF, 8), [], struct('iso', true, 'cfar', []));
+verifyEqual(tc, x, [10 / 0.5 / sqrt(0.5), 10, 10 / 0.5 / sqrt(0.5), 0], 'AbsTol', 1e-9);
+% the fusion's row with them, and the monitor's
+rs = RandStream('mt19937ar', 'Seed', 5); n = 12; Nf = 4;
+cls = {'none', 'antenna_fault', 'airframe_shadowing'}; A = policy_actions(); na = find(strcmp(A, 'no_action'));
+P = rand(rs, n, 3); P = P ./ sum(P, 2); Fr = randn(rs, n, nF); I = 2 * rand(rs, n, numel(nm)); I(:, ci('gap_ms')) = 10; I(1, :) = NaN;
+Gn = randn(rs, n, nr); Gn(7:end, 1) = Gn(7:end, 1) - 8;
+S = struct('run', ones(n, 1), 'pos', (1:n)', 'gain_ant', Gn, 'feats_raw', Fr, 'feat_names', {link_features('names')}, 'idle', I);
+cues = struct('cfar', [1 0.5 0.4], 'iso', true);
+Zx = fuse_classes('windows', S, P, Nf, cues);
+verifyEqual(tc, Zx, [fuse_classes('windows', S, P, Nf), fuse_classes('extra', S, Nf, cues)]);
+nZ = size(Zx, 2);
+FM = struct('W', 0.1 * randn(rs, nZ + 1, 3), 'mu', zeros(1, nZ), 'sd', ones(1, nZ), 'C', 3, 'lambda', 0, 'cues', cues);
+verifyEqual(tc, fuse_classes('cues', FM), cues);
+pc = fuse_classes('apply', FM, Zx);
+PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0, 'fuse', FM, 'fuse_N', Nf);
+m = policy_monitor('init', 1, numel(A));
+for k = 1:n
+    obs = struct('probs', P(k, :), 'unknown', false, 'feat', Fr(k, :), 'cfg_link', na, 'gant', Gn(k, :), 'idle', I(k, :));
+    [m, M] = policy_monitor('update', m, obs, PP, na); m = policy_monitor('change', m, false);
+    verifyEqual(tc, M.probs, pc(k, :), 'AbsTol', 1e-10);
+end
+verifyNotEmpty(tc, strfind(fileread(which('fused_class')), 'fuse_classes(''windows'', S, pf, N, fuse_classes(''cues'', FM))'));
+verifyNotEmpty(tc, strfind(fileread(which('det_frames')), 'fuse_classes(''cues'', PP.fuse)'));
+end
+
+function test_fusion_target_age(tc)
+% A path-loss onset is the fused target while the window still holds a cycle before it
+% (pos - onset < N - 1, threat_active.m's rule) for a fusion fitted on that rule
+% (FM.target_age, select_fusion.m with FUSION_REV); one fitted before it keeps its own
+% (pos - onset < N). With FUSION_REV, N is scored on the per-cycle label, the shortest within
+% one standard error; without it the selection is the one the profiles' fusions were chosen by.
+cls = {'none', 'path_loss'};
+y = [1 1 2 2 1 1 1]; run = ones(1, 7); pos = 1:7;
+verifyEqual(tc, fusion_target(y, run, pos, 4, cls)', [1 1 2 2 2 2 1]);
+verifyEqual(tc, fusion_target(y, run, pos, 4, cls, struct('target_age', 3))', [1 1 2 2 2 1 1]);
+verifyEqual(tc, fusion_target(y, run, pos, 4, cls, struct('W', 1))', [1 1 2 2 2 2 1]);
+src = fileread(which('select_fusion'));
+verifyNotEmpty(tc, strfind(src, 'FM.target_age = TA.target_age; FM.cues = cues;'));
+verifyNotEmpty(tc, strfind(src, 'a = find(max(cv, [], 2) >= mx - se, 1);'));
+verifyNotEmpty(tc, strfind(src, 'cvy(a, b) = macro_f1(y, yh, C); cvo(a, b) = macro_f1(yn, yh, C);'));
+verifyNotEmpty(tc, strfind(src, 'REV = exist(''FUSION_REV'', ''var'') && isequal(FUSION_REV, true);'));
+verifyNotEmpty(tc, strfind(src, 'TAa = []; if REV, TAa = struct(''target_age'', NS(a) - 1); end'));
+for f = {'eval_detector', 'compare_architectures', 'detector_block'}
+    verifyNotEmpty(tc, regexp(fileread(which(f{1})), 'fusion_target\([^\n]*(FZ\.FM|fus\.FM|G\.FM)\)', 'once'), f{1});
+end
+end
+
+function test_sweeper_confirmation(tc)
+% The sweeping jammer revisits our channel once per period, on isolated cycles: with its own
+% confirmation (PP.confirm_sweep = [2 6]) a 1-0-1-0 sequence of its reads confirms on the
+% second read under 2/2 and 3/3, without it never; a clean sequence and another class's
+% isolated reads stay unconfirmed; the detector's latency line reads it beside the class path.
+A = policy_actions(); na = find(strcmp(A, 'no_action'));
+cls = {'none', 'jamming', 'sweeping_jammer'};
+seqs = {repmat({'sweeping_jammer', 'none'}, 1, 4), repmat({'none'}, 1, 8), repmat({'jamming', 'none'}, 1, 4)};
+for cf = {[2 2], [3 3]}
+    for sw = {[], [2 6]}
+        PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0, 'confirm', cf{1}, ...
+            'alarm_mode', 'class', 'confirm_sweep', sw{1});
+        for q = 1:3
+            m = []; c = false(1, 8);
+            for k = 1:8
+                o = struct('probs', double(strcmp(cls, seqs{q}{k})), 'unknown', false, 'feat', zeros(1, numel(link_features('names'))));
+                o.feat(feature_index('log_ber')) = -6;
+                [~, m, d] = policy_decide('rule_esc', o, na, m, PP, []); c(k) = d.confirmed;
+            end
+            msg = sprintf('sequence %d, confirm %s, sweeper %d', q, mat2str(cf{1}), ~isempty(sw{1}));
+            if q == 1 && ~isempty(sw{1}), verifyEqual(tc, find(c, 1), 3, msg); else, verifyFalse(tc, any(c), msg); end
+        end
+    end
+end
+verifyEqual(tc, decision_config().confirm_sweep, [2 6]);
+verifyNotEmpty(tc, strfind(fileread(which('eval_detector')), 'cf = cf | movsum(swr(ix(j0:end)), [CS(2) - 1, 0]) >= CS(1);'));
+end
+
+function test_drop_hold_release(tc)
+% The median window's reference holds the cycles of a drop above half the smallest path-loss
+% level until it ends (drop_ref.m, as the CUSUM's): a 4 dB step below a 5 dB threshold is
+% not absorbed, so a further 2 dB step raises the alarm; the monitor equals
+% drop_alarm_seq.m with another path's alarm cycles kept out of the reference; a ramp past
+% the excursion's start reads its whole depth (monitor_window_drop.m).
+e = 12 * ones(1, 60); e(21:end) = 8; e(41:end) = 6;
+[a, W] = drop_alarm_seq(e, 'class_drop', 5);
+verifyEqual(tc, find(a, 1), 42);
+verifyTrue(tc, all(W(22:41)));
+A = policy_actions(); na = find(strcmp(A, 'no_action')); nF = numel(link_features('names'));
+cls = {'none', 'jamming', 'path_loss'};
+rng(11); n = 50; x = 12 + randn(2, n); x(:, 21:end) = x(:, 21:end) - 7; oth = false(2, n); oth(2, [5:8 30:33]) = true;
+PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', -Inf, 'confirm', [2 2], ...
+    'alarm_mode', 'class_drop', 'drop_db', 5, 'cfg_gain_db', zeros(1, numel(A)));
+m = policy_monitor('init', 2, numel(A)); da = false(2, n);
+for t = 1:n
+    o = struct('probs', [double(~oth(:, t)), double(oth(:, t)), zeros(2, 1)], 'unknown', false(2, 1), 'feat', zeros(2, nF));
+    o.feat(:, feature_index('log_ber')) = -6;
+    o.feat(:, feature_index('sinr')) = x(:, t) - 10*log10(4) + 10*log10(2);
+    [m, M] = policy_monitor('update', m, o, PP, na * ones(1, 2)); m = policy_monitor('change', m, false(1, 2));
+    da(:, t) = M.drop_alarm';
+end
+verifyEqual(tc, da, drop_alarm_seq(x, 'class_drop', 5, [], oth));
+r = [12 * ones(1, 5), 12 - (1:10), 2 * ones(1, 10)];
+verifyGreaterThan(tc, monitor_window_drop(r), 9.5);
+verifyEqual(tc, monitor_window_drop(10 - 0.2 * (0:59)), 0.9, 'AbsTol', 1e-9);   % below the start: absorbed as before
+end
+
+function test_drop_whole_monitor(tc)
+% C1d admits each monitor's drop threshold on the whole monitor (monitor_confirm.m): the drop
+% alarm or any other path, confirmed by that monitor's m of n, with the sweeper's own
+% confirmation when set; up to a policy's first change its episode is the no_action one
+% (monitor_trace.m on the same seeds), so the first confirmation is the policy's earliest.
+Tr = struct('other', false(3, 12), 'sw', false(3, 12), 'eg', 12 * ones(3, 12));
+Tr.other(1, [3 4]) = true; Tr.other(2, [3 5 7]) = true; Tr.sw(2, [3 5]) = true; Tr.eg(3, 6:end) = 4;
+c = @(thr, cf, cs) any(monitor_confirm(Tr, 'class_drop', thr, cf, cs), 2)';
+verifyEqual(tc, c(Inf, [2 2], []), [true false false]);
+verifyEqual(tc, c(6, [2 2], []), [true false true]);
+verifyEqual(tc, c(6, [3 3], []), [false false true]);
+verifyEqual(tc, c(Inf, [2 2], [2 6]), [true true false]);
+verifyEqual(tc, c(10, [2 2], []), [true false false]);
+[PP, K] = toy_world(true);
+spec = struct('scn', [1 2 2], 's', [1 1 1], 'onset', [3 3 6], 'follow', false(1, 3), 'fdelay', [0 0 0], 'unk', false(1, 3), ...
+    'T', 12, 'r', [1 1 1]);
+T = monitor_trace(PP, K, {spec}, 1, 7);
+cm = monitor_confirm(T, 'class_drop', Inf, decision_config().confirm);
+R = rollout_policy('rule_esc', PP, K, spec, 1, [], struct(), 8);
+for i = 1:3
+    k = find(cm(i, spec.onset(i) + 1:end), 1);
+    if isempty(k), verifyTrue(tc, isnan(R.t_conf(i))); else, verifyEqual(tc, R.t_conf(i), k - 1); end
+end
+verifyTrue(tc, any(T.other(2, :)) && ~any(T.other(1, :)));
+src = fileread(which('choose_drop_threshold'));
+verifyNotEmpty(tc, strfind(src, '''MONP'', ''confirm_sweep'''));
+verifyNotEmpty(tc, strfind(src, 'Tc = monitor_trace(PPw, Kw, spc, VA, 41000);'));
+src = fileread(which('train_dqn'));
+verifyNotEmpty(tc, strfind(src, 'if isfield(Dd, ''confirm_sweep''), PP.confirm_sweep = Dd.confirm_sweep; end'));
+verifyNotEmpty(tc, strfind(src, 'for dd = drops_of(ALARMS{ai}, MONP, DROP_MODE, DROP_DB, THC, DROP_STEPS, DROP_FLOOR)'));
+verifyNotEmpty(tc, strfind(src, '[specs, n] = clean_wide_specs(PP, CT, ebno_thr, H.T);'));
+verifyEqual(tc, decision_config().drop_steps, [-2 0 2]);
+end
+
+function test_reward_needs_plr(tc)
+% The reward's restoration and the healthy link are KPI 4's test, BER and packet loss: a
+% configuration that restores the BER but not the packet loss earns at most C.q_partial, a
+% geometry whose no_action loses packets is not healthy; K.restored stays the BER test.
+[PP, K] = toy_world(true);
+A = PP.actions; na = find(strcmp(A, 'no_action')); C = decision_config();
+fd = find(strcmp(A, 'freq_diversity'));
+verifyEqual(tc, [K.q(2, 1, fd, 1, 1), K.healthy(1, 1, 1, 1)], [C.q_restored, true]);
+PP.pools{2, 1, fd, 1}.fer(1:2:end) = 1;                        % the BER restored, half the packets lost
+PP.pools{1, 1, na, 1}.fer(1:2:end) = 1;                        % the clean link's no_action loses packets
+K2 = link_env('tables', PP);
+verifyTrue(tc, K2.restored(2, 1, fd, 1, 1)); verifyFalse(tc, K2.restored_plr(2, 1, fd, 1, 1));
+verifyEqual(tc, K2.q(2, 1, fd, 1, 1), C.q_partial);
+verifyFalse(tc, K2.healthy(1, 1, 1, 1));
+end
+
+function test_held_selection(tc)
+% C2 selects on held recovery (dqn_held.m, the edge map's REC): a hop-only configuration
+% against a follower that re-acquires after 5 cycles recovers (KPI 4's 5 cycles) but does not
+% hold, and ranks below one that holds; checkpoints, runs and the gate read it.
+[PP, K] = toy_world(true);
+cs = find(strcmp(PP.actions, 'channel_switch')); fd = find(strcmp(PP.actions, 'freq_diversity'));
+spec = struct('scn', [2 2], 's', [1 1], 'onset', [1 1], 'follow', [true true], 'fdelay', [5 5], 'unk', [false false], ...
+    'T', 30, 'r', [1 1], 'delay', 1);
+Rh = rollout_policy('fixed', PP, K, spec, 1, [], struct('fixed', cs), 3); Rh.threat = true(1, 2);
+Rf = rollout_policy('fixed', PP, K, spec, 1, [], struct('fixed', fd), 3); Rf.threat = true(1, 2);
+verifyEqual(tc, [dqn_recovered(Rh), dqn_held(Rh), dqn_recovered(Rf), dqn_held(Rf)], [1 0 1 1]);
+verifyNotEmpty(tc, strfind(fileread(which('dqn_train_run')), 'sc = dqn_held(Re) + 1e-3 * mean(Re.ret);'));
+src = fileread(which('train_dqn'));
+verifyNotEmpty(tc, strfind(src, 'gate = B.held >= bsel.held && B.fa_ok;'));
+verifyNotEmpty(tc, strfind(src, 'top = top([X(top).held] >= max([X(top).held]) - 0.005);'));
+end
+
+function test_rule_slot_and_group_dwell(tc)
+% The rule's quiet-slot branch is a setting (PP.rule_slot): off, a degraded link read as none
+% with interference in the slot takes the generic answer, while the slot still keeps a drop
+% alarm from the link-budget answer. The group dwell (PP.rule_dwell 'group') commits a
+% proposal whose group appears in 2 of the last 4 cycles, so alternating freq_diversity and
+% freq_diversity+power_control proposals commit where the consecutive dwell never does, and
+% it never regresses to a configuration the one in use covers.
+verifyEqual(tc, rule_based_policy('none', true, 0, 10, 5, false, [], 6, false), 'freq_diversity+power_control');
+verifyEqual(tc, rule_based_policy('none', true, 0, 10, 5, false, [], 6, true), 'channel_switch');
+verifyEqual(tc, rule_based_policy('none', false, 0, 10, 5, true, [], 6, false), 'no_action');
+A = policy_actions(); na = find(strcmp(A, 'no_action')); cls = {'none', 'sweeping_jammer'};
+fp = find(strcmp(A, 'freq_diversity+power_control'));
+for dw = {'run', 'group'}
+    PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0, 'q_thr', 5, 'confirm', [2 2], ...
+        'alarm_mode', 'class', 'rule_dwell', dw{1});
+    m = []; a = na; trace = zeros(1, 10);
+    for k = 1:10
+        o = struct('probs', double(strcmp(cls, ternary_t(mod(k, 2) == 1, 'sweeping_jammer', 'none'))), 'unknown', false, ...
+            'feat', zeros(1, numel(link_features('names'))));
+        o.feat(feature_index('log_ber')) = -1; o.feat(feature_index('crc_fail')) = 1;
+        [a, m] = policy_decide('rule', o, a, m, PP, []); trace(k) = a;
+    end
+    if strcmp(dw{1}, 'run'), verifyTrue(tc, all(trace == na));
+    else, verifyEqual(tc, trace, [na, fp * ones(1, 9)]); end
+end
+end
+
+function x = ternary_t(c, a, b)
+if c, x = a; else, x = b; end
+end
+
+function test_escalation_on_drop(tc)
+% With PP.esc_drop a confirmed drop alarm read as none escalates out of no_action, its first
+% step the link-budget configuration with the smallest known gain covering the drop; without
+% the setting the class none blocks it; a configuration whose known gain covers the drop is
+% not left on degraded cycles.
+A = policy_actions(); na = find(strcmp(A, 'no_action')); cls = {'none', 'jamming'}; nF = numel(link_features('names'));
+g = zeros(1, numel(A)); pc = find(strcmp(A, 'power_control')); rr = find(strcmp(A, 'rate_reduce'));
+rp = find(strcmp(A, 'rate_reduce+power_control')); g([pc rr rp]) = [6 3 9];
+opt = struct('table', na * ones(1, 2), 'table_unknown', find(strcmp(A, 'freq_diversity')));
+for ed = [false true]
+    PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', -Inf, 'confirm', [2 2], ...
+        'alarm_mode', 'class_drop', 'drop_db', 4, 'cfg_gain_db', g, 'esc_drop', ed);
+    m = []; a = na; first = NaN;
+    for k = 1:24
+        o = struct('probs', [1 0], 'unknown', false, 'feat', zeros(1, nF), 'cfg_link', a);
+        o.feat(feature_index('log_ber')) = -6;
+        o.feat(feature_index('sinr')) = 12 - 8 * (k > 12) + g(a) - 10*log10(4) + 10*log10(2);
+        b = a; [a, m] = policy_decide('table_esc', o, a, m, PP, [], opt);
+        if a ~= b && isnan(first), first = a; end
+    end
+    if ed, verifyEqual(tc, first, rp); else, verifyTrue(tc, isnan(first)); end
+end
+PP.esc_drop = true; m = []; a = rp; ch = false(1, 20); opt.table_unknown = rp;   % the table keeps it on a degraded link
+for k = 1:20
+    o = struct('probs', [1 0], 'unknown', false, 'feat', zeros(1, nF), 'cfg_link', rp);
+    o.feat(feature_index('log_ber')) = -6 + 5 * (k > 12);           % degraded cycles from 13 on
+    o.feat(feature_index('sinr')) = 12 - 8 * (k > 12) + g(rp) - 10*log10(4) + 10*log10(2);
+    b = a; [a, m] = policy_decide('table_esc', o, a, m, PP, [], opt); ch(k) = a ~= b;
+end
+verifyGreaterThan(tc, m.deg_n, decision_config().esc);             % stuck long enough to escalate but for the cover
+verifyFalse(tc, any(ch));
+end
+
+function test_unknown_override_mode(tc)
+% The unknown-threat flag overrides every class ('all', the default) or only a class that
+% raises no alarm ('nonhostile'): a hostile class read keeps its alarm under 'nonhostile',
+% none is overridden under both, and the agent's state keeps the flag either way.
+A = policy_actions(); na = find(strcmp(A, 'no_action')); cls = {'none', 'jamming'};
+for md = {'all', 'nonhostile'}
+    PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0, 'unk_mode', md{1});
+    for c = {'none', 'jamming'}
+        o = struct('probs', double(strcmp(cls, c{1})), 'unknown', true, 'maha', -1, 'feat', zeros(1, numel(link_features('names'))));
+        o.feat(feature_index('log_ber')) = -6;
+        [m, M] = policy_monitor('update', policy_monitor('init', 1, numel(A)), o, PP, na);
+        ex = 'unknown'; if strcmp(md{1}, 'nonhostile') && strcmp(c{1}, 'jamming'), ex = 'jamming'; end
+        verifyEqual(tc, M.cls{1}, ex, [md{1} ' ' c{1}]);
+        verifyEqual(tc, M.alarm, strcmp(ex, 'jamming'), [md{1} ' ' c{1}]);
+        verifyEqual(tc, m.hist(numel(cls) + 1, 1, 1), 1, [md{1} ' ' c{1}]);
+    end
+end
+end
+
+function test_threat_offset(tc)
+% A threat that ends (link_env.m spec.offset): from the offset the episode flies the same
+% flight's clean link; a change back to no_action decided after it is a release, no false
+% switch; rollout_policy.m reads the configuration held at the end, the cycles to its
+% release, the running cost held after it and the re-alarms; evaluate_policies.m reports them.
+[PP, K] = toy_world(true);
+fd = find(strcmp(PP.actions, 'freq_diversity'));
+spec = struct('scn', 2, 's', 1, 'onset', 2, 'follow', false, 'fdelay', 0, 'unk', false, 'T', 20, 'r', 1, 'delay', 1, 'offset', 8);
+[E, ~] = link_env('reset', PP, K, spec, 1, RandStream('mt19937ar', 'Seed', 1));
+seq = [K.na fd fd fd fd fd fd fd fd fd K.na K.na];
+[fs, rel] = deal(false(1, numel(seq))); sc = zeros(1, numel(seq));
+for t = 1:numel(seq)
+    [E, ~, ~, info] = link_env('step', E, PP, K, seq(t));
+    fs(t) = info.false_switch; rel(t) = info.released; sc(t) = info.sc_eff;
+end
+verifyEqual(tc, sc, [1 2 2 2 2 2 2 1 1 1 1 1]);
+verifyEqual(tc, find(rel), 11);
+verifyFalse(tc, any(fs));
+R = rollout_policy('fixed', PP, K, spec, 1, [], struct('fixed', fd), 3);
+verifyEqual(tc, [R.cfg_end, R.rel_t, R.on_end], [fd NaN 1]);
+verifyEqual(tc, R.cost_end, K.cost(fd), 'AbsTol', 1e-12);
+R0 = rollout_policy('fixed', PP, K, spec, 1, [], struct('fixed', K.na), 3);
+verifyEqual(tc, [R0.cfg_end, R0.rel_t, R0.on_end], [K.na 0 0]);
+spec.offset = Inf; R = rollout_policy('fixed', PP, K, spec, 1, [], struct('fixed', fd), 3);
+verifyTrue(tc, isnan(R.rel_t) && isnan(R.cfg_end));
+verifyNotEmpty(tc, strfind(fileread(which('evaluate_policies')), 'for b = 1:numel(so), so{b}.offset = so{b}.onset + OFF_AFTER; end'));
+end
+
+function test_harmed_readings(tc)
+% KPI 4 beside its proposal reading on the harmed episodes only (no response does not
+% restore them), its envelope on validation alike, KPI 8 on them; the edge map's REC_h,
+% PROT_h and the no-response attribution mark.
+[~, K] = toy_world(true);
+ih = sub2ind(size(K.restored), [1 2], [1 1], K.na * [1 1], [1 1], [1 1]);
+verifyEqual(tc, ~(K.restored(ih) & K.restored_plr(ih)), [false true]);
+src = fileread(which('evaluate_policies'));
+verifyNotEmpty(tc, strfind(src, 'h = ~(K.restored(ih) & K.restored_plr(ih));'));
+verifyNotEmpty(tc, strfind(src, 'HV = harmed(RV, K);'));
+verifyNotEmpty(tc, strfind(src, '''per_threat_h'', PTh'));
+verifyNotEmpty(tc, strfind(fileread(which('measure_all_kpis')), ...
+    'ph = P.KP.per_threat_h(:, strcmp(P.KP.show, P.POL{iD})); n_ok = sum(ph >= 50);'));
+src = fileread(which('edge_map'));
+verifyNotEmpty(tc, strfind(src, 'P.prot_h = edge_verdict(F.held_k(h, v), F.ep_n(h, v), F.geo(h), TGT.prot, ''ge'', true, B);'));
+verifyNotEmpty(tc, strfind(src, 'X.nresp(q, s) = Vn.verdict;'));
+end
+
+function test_dqn_deployment_kinds(tc)
+% C2 scores every run with and without the escalation and may deploy the DQN without it
+% ('dqn'); every reader runs the deployed kind.
+Q = struct('agent', struct('k', 1), 'agents', {{struct('k', 2)}}, 'rule_sel', struct());
+[kind, ag] = policy_setup('dqn', Q, 1, [], [], [], 1);
+verifyEqual(tc, {kind, ag.k}, {'dqn', 1});
+verifyNotEmpty(tc, strfind(fileread(which('evaluate_policies')), 'dep = Q.deployed; if strcmp(dep, ''dqn''), dep = POL{iBase}; end'));
+verifyNotEmpty(tc, strfind(fileread(which('edge_map')), '''dqn'', ''DQN'''));
+verifyNotEmpty(tc, strfind(fileread(which('measure_latency')), 'kindD = ''dqn_esc''; if strcmp(dep, ''dqn''), kindD = ''dqn''; end'));
+for f = {'experiment_unknown_threat', 'experiment_combo_generalization'}
+    verifyNotEmpty(tc, strfind(fileread(which(f{1})), 'dqn_eval_batches(DK, PP, K, specs, Q.agent'), f{1});
+end
+src = fileread(which('train_dqn'));
+verifyNotEmpty(tc, strfind(src, 'xe = ev(''dqn_esc'', PPc, ag, struct()); xn = ev(''dqn'', PPc, ag, struct());'));
+verifyNotEmpty(tc, strfind(src, ['[deployed, fa_bound_met, ir] = choose_deployed(gate, fa_up(B.fa_w, B.n_w), rr, rb_up, ' ...
+    'FA_BOUND, B.held, sel_kind);']));
+end
+
+function test_rule_settings_on_validation(tc)
+% The rule's settings are chosen on validation in C2 against the setting in force: the
+% nulling threshold among mu + 3 sigma (+ 2 dB) of the clean validation frames' predicted
+% MMSE gain, 3, 6 and 9 dB, the quiet-slot branch on and off, the dwell, the unknown flag's
+% retention and override, the escalation on a drop; stored with the agent (dec, rule_sel).
+src = fileread(which('train_dqn'));
+verifyNotEmpty(tc, strfind(src, 'TH = [mu_s(1) + 3 * mu_s(2), mu_s(1) + 3 * mu_s(2) + 2, TH];'));
+verifyNotEmpty(tc, strfind(src, 'v{end+1} = struct(''unk_mode'', md{1}, ''unk_retain'', rt, ''maha_thr'', unk_threshold(PP.maha_val, rt));'));
+verifyNotEmpty(tc, strfind(src, 'for f = fieldnames(Ssel)'', rule_sel.(f{1}) = Ssel.(f{1}); end'));
+verifyNotEmpty(tc, strfind(src, '''pools_created'', ''maha_thr'', ''dec'', ''-v7.3'''));
+verifyNotEmpty(tc, strfind(src, 'maha_thr = dec.maha_thr;'));
 end

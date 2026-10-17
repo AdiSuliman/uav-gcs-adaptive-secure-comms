@@ -29,7 +29,7 @@ if all(isfile({'data/trained_detector.mat', 'data/ood_thresholds.mat'}))
     end
 end
 if isfile('data/trained_dqn.mat')
-    Q = load('data/trained_dqn.mat', 'agent', 'confirm', 'alarm_mode', 'drop_db', 'deployed', 'rule_sel', 'det_id', 'maha_thr');
+    Q = load('data/trained_dqn.mat', 'agent', 'confirm', 'alarm_mode', 'drop_db', 'deployed', 'rule_sel', 'det_id', 'maha_thr', 'dec');
     cur_pol = policy_stamp(Q);
 end
 t = @(f) file_time(f);

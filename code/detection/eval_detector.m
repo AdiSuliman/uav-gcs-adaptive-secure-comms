@@ -9,7 +9,9 @@
 % Eb/N0 of a frame (kpi_ebno.m): the Eb/N0 our signal is received with, the configured
 % value less a path-loss step from its onset on; a frame judged as path_loss is read at the
 % link's Eb/N0 when the step began (the step's depth is its severity level). Frames
-% received below the grid are reported beside the reading as beyond range.
+% received below the grid are reported beside the reading as beyond range. The class read is
+% the monitor's (fused_class.m) without the unknown-threat override, which the closed loop's
+% monitor applies at decision time (policy_monitor.m: PP.maha_thr, PP.unk_mode).
 close all; clc;fprintf('=== B3: Test Evaluation ===\n\n');
 
 %% 1. Load data and model
@@ -69,10 +71,10 @@ if isfile('data/fusion.mat') && isfield(sp.test, 'pos')
     frame_class_f1 = 100 * class_f1_of(y_fr, yf(:), classes);
     fprintf('Per frame, on the frame rule''s labels (frame_labels.m): accuracy %.2f%%, macro-F1 %.2f%%\n', frame_acc, frame_f1);
     sp.test.feat_names = sp.norm.feat_names;
-    Z = fuse_classes('windows', sp.test, Y_pred_prob', fus.N);
+    Z = fuse_classes('windows', sp.test, Y_pred_prob', fus.N, fuse_classes('cues', fus.FM));
     Y_pred_prob = fuse_classes('apply', fus.FM, Z)';
     fprintf('Decision over the last %d cycles (temporal fusion)\n', fus.N);
-    [yt, rk] = fusion_target(double(sp.test.Y(:)), sp.test.run, sp.test.pos, fus.N, classes);
+    [yt, rk] = fusion_target(double(sp.test.Y(:)), sp.test.run, sp.test.pos, fus.N, classes, fus.FM);
     Y_test = categorical(classes(yt)', classes);
     fprintf('Frames judged by their window (WLAN gaps as benign_interference, path-loss onsets as path_loss): %d\n', ...
         sum(Y_test(:) ~= sp.test.Y(:)));
@@ -407,7 +409,9 @@ fprintf('Saved results/confusion_matrix%s.png and results/accuracy_vs_snr%s.png\
 % cycles from the first frame of the threat in a test sub-run to the first correct class
 % (the monitor's), and to the confirmed alarm (a hostile class, not none or
 % benign_interference, on m of the last n cycles, decision_config.m confirm; the
-% monitor's degradation path is not part of this detector reading). A sub-run starts with
+% monitor's degradation path is not part of this detector reading), and beside it the same
+% with the sweeping jammer's own confirmation (k of the last n cycles read as it,
+% decision_config.m confirm_sweep, policy_monitor.m; adopted or not at C1d). A sub-run starts with
 % the threat (its window holds no clean frame), but for a path-loss step, an antenna fault
 % and airframe shadowing, whose onsets lie inside it.
 Cd = decision_config();
@@ -424,11 +428,12 @@ fprintf(['Steady state (window full, %d of %d frames): accuracy %.2f%%, macro-F1
     steady.macro_f1_above_threshold_pct, steady.action_equiv_accuracy_pct);
 hostile = ~ismember(cellstr(string(Y_pred)), {'none', 'benign_interference'});
 onset = struct('class', {}, 'n_runs', {}, 'cls_median', {}, 'cls_p90', {}, 'cls_never_pct', {}, ...
-    'conf_median', {}, 'conf_p90', {}, 'conf_never_pct', {});
+    'conf_median', {}, 'conf_p90', {}, 'conf_never_pct', {}, 'sw_median', {}, 'sw_p90', {}, 'sw_never_pct', {});
 runs_t = sp.test.run(:);
+swr = double(Y_pred(:) == 'sweeping_jammer'); CS = Cd.confirm_sweep;
 for c = 2:numel(cls_names)
     rc = unique(runs_t(Y_test == cls_names{c}));
-    tc_ = nan(numel(rc), 1); tf_ = nan(numel(rc), 1);
+    tc_ = nan(numel(rc), 1); tf_ = nan(numel(rc), 1); ts_ = nan(numel(rc), 1);
     alarm_cls = ~strcmp(cls_names{c}, 'benign_interference');
     for r = 1:numel(rc)
         ix = find(runs_t == rc(r)); [~, o] = sort(rk(ix)); ix = ix(o);
@@ -438,19 +443,24 @@ for c = 2:numel(cls_names)
         if alarm_cls
             cf = movsum(double(hostile(ix(j0:end))), [Cd.confirm(2) - 1, 0]) >= Cd.confirm(1);
             j = find(cf, 1); if ~isempty(j), tf_(r) = j - 1; end
+            cf = cf | movsum(swr(ix(j0:end)), [CS(2) - 1, 0]) >= CS(1);
+            j = find(cf, 1); if ~isempty(j), ts_(r) = j - 1; end
         end
     end
     onset(end+1) = struct('class', cls_names{c}, 'n_runs', numel(rc), 'cls_median', median(tc_, 'omitnan'), ...
         'cls_p90', prctile_nan(tc_, 90), 'cls_never_pct', 100 * mean(isnan(tc_)), ...
         'conf_median', median(tf_, 'omitnan'), 'conf_p90', prctile_nan(tf_, 90), ...
-        'conf_never_pct', 100 * alarm_cls * mean(isnan(tf_))); %#ok<SAGROW>
+        'conf_never_pct', 100 * alarm_cls * mean(isnan(tf_)), 'sw_median', median(ts_, 'omitnan'), ...
+        'sw_p90', prctile_nan(ts_, 90), 'sw_never_pct', 100 * alarm_cls * mean(isnan(ts_))); %#ok<SAGROW>
 end
-fprintf(['Onset latency [cycles of %g ms; 0 = on the onset frame itself], test sub-runs: first correct class median / p90 (never) | ' ...
-    'confirmed alarm median / p90 (never; benign_interference raises none)\n'], Cd.period_ms);
+fprintf(['Onset latency [cycles of %g ms; 0 = on the onset frame itself], test sub-runs, the class path only (the ' ...
+    'monitor''s degradation and drop paths not read here): first correct class median / p90 (never) | confirmed alarm ' ...
+    '%d of %d median / p90 (never; benign_interference raises none) | the same or %d of %d cycles read as ' ...
+    'sweeping_jammer\n'], Cd.period_ms, Cd.confirm, CS);
 for c = 1:numel(onset)
-    fprintf('  %-20s %3d runs: %4.1f / %4.1f (%5.1f%%) | %4.1f / %4.1f (%5.1f%%)\n', onset(c).class, onset(c).n_runs, ...
-        onset(c).cls_median, onset(c).cls_p90, onset(c).cls_never_pct, onset(c).conf_median, onset(c).conf_p90, ...
-        onset(c).conf_never_pct);
+    fprintf('  %-20s %3d runs: %4.1f / %4.1f (%5.1f%%) | %4.1f / %4.1f (%5.1f%%) | %4.1f / %4.1f (%5.1f%%)\n', onset(c).class, ...
+        onset(c).n_runs, onset(c).cls_median, onset(c).cls_p90, onset(c).cls_never_pct, onset(c).conf_median, onset(c).conf_p90, ...
+        onset(c).conf_never_pct, onset(c).sw_median, onset(c).sw_p90, onset(c).sw_never_pct);
 end
 % The sweeper's sub-runs never confirmed by the class path, split by whether the sweep hit a
 % frame of ours (a frame the frame rule labels sweeping_jammer): one without leaves no damage
@@ -464,9 +474,10 @@ if ~isempty(isw) && isfield(sp.test, 'Y_frame')
         nev(r) = ~any(movsum(double(hostile(ix(j0:end))), [Cd.confirm(2) - 1, 0]) >= Cd.confirm(1));
         hit(r) = any(sp.test.Y_frame(ix) == cls_names{isw});
     end
-    fprintf(['  sweeping_jammer never confirmed by the class path: %d of %d sub-runs with a frame of ours hit (%.1f%%), ' ...
-        '%d of %d without one (%.1f%%)\n'], sum(nev & hit), sum(hit), 100 * sum(nev & hit) / max(sum(hit), 1), ...
-        sum(nev & ~hit), sum(~hit), 100 * sum(nev & ~hit) / max(sum(~hit), 1));
+    fprintf(['  sweeping_jammer never confirmed by the class path (%d of %d): %d of %d sub-runs with a frame of ours hit (%.1f%%), ' ...
+        '%d of %d without one (%.1f%%); a sub-run without a hit frame leaves nothing to restore\n'], Cd.confirm, ...
+        sum(nev & hit), sum(hit), 100 * sum(nev & hit) / max(sum(hit), 1), sum(nev & ~hit), sum(~hit), ...
+        100 * sum(nev & ~hit) / max(sum(~hit), 1));
 end
 
 %% 5c. 95% bootstrap confidence intervals

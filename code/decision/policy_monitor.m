@@ -28,13 +28,19 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   Detected class: from the temporal fusion of the last PP.fuse_N cycles and the
 %   current one (temporal_evidence.m, fuse_classes.m) when PP.fuse is set, otherwise
 %   the frame's own detector output; 'unknown' when the unknown-threat score, averaged
-%   over the last PP.unk_win cycles, is below its threshold.
+%   over the last PP.unk_win cycles, is below its threshold PP.maha_thr: every class with
+%   PP.unk_mode 'all' (the default), only a class that raises no alarm (none,
+%   benign_interference) with 'nonhostile', so a hostile class read keeps its alarm (the mode
+%   and the threshold's retention are chosen on validation, train_dqn.m).
 %   Alarm, PP.alarm_mode 'class' (default): a hostile threat class, or degradation;
 %   'none', 'benign_interference' (non-hostile, D9) and 'unknown' raise it only
 %   through degradation. 'class_drop': as 'class', but the class path_loss
 %   counts only when the signal-over-thermal estimate has dropped by at least
 %   PP.drop_db from the episode's reference, and that drop raises the alarm by itself
-%   (drop_alarm): a step of attenuation stays a lower signal over thermal noise after the
+%   (drop_alarm); the reference takes the cycles without an alarm of an excursion of that
+%   drop above half the smallest path-loss level only once it has returned below it without
+%   the drop alarm (drop_ref.m, as 'class_cusum' holds it): a step below the threshold is
+%   never absorbed into the reference. A step of attenuation stays a lower signal over thermal noise after the
 %   detector's window has passed its onset, while moving away lowers it by at most
 %   8.69 v / d dB/s, about 0.2 dB between the reference and the last 3 cycles at
 %   161 km/h and 0.28 km. The estimate is our signal over the thermal floor (SINR +
@@ -52,7 +58,10 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   once it has returned to 0 without the drop alarm (drop_ref.m), so it keeps the level
 %   before a change while the evidence of one builds up.
 %   An alarm is CONFIRMED when at least m of the last n cycles carried
-%   one (M-of-N binary integration, PP.confirm, default C.confirm).
+%   one (M-of-N binary integration, PP.confirm, default C.confirm), or, with PP.confirm_sweep
+%   = [k n] (chosen on validation, choose_drop_threshold.m), when at least k of the last n
+%   cycles read sweeping_jammer: a sweep revisits our channel once per period, up to 83.5 ms,
+%   so it is on isolated cycles (k-out-of-n detection of a swept jammer, Norouzi et al. 2006).
 %   The monitor also keeps the last C.hist observation vectors of policy_state.m,
 %   and the window of the temporal fusion (probabilities, antenna gains, link
 %   features, unknown scores, and obs.idle, the record of each cycle's idle time,
@@ -80,7 +89,7 @@ switch cmd
             'deg_n', zeros(1, NE), 'conf_n', zeros(1, NE), 'alarm', false(NE, 8), 'ebno', nan(NE, 3), ...
             'ref', nan(NE, 10), 'hist', [], 'wp', [], 'wg', [], 'wf', [], 'wu', [], 'wn', zeros(1, NE), ...
             'unk_now', false(1, NE), 'pend', false(1, NE), 'wi', [], 'wb', [], 'cs', zeros(NE, 1), ...
-            'dx', nan(NE, C.cusum_win), 'rp', nan(NE, 10), 'rx', false(NE, 1));
+            'dx', nan(NE, C.cusum_win), 'rp', nan(NE, 10), 'rx', false(NE, 1), 'sw', false(NE, 8));
         M = [];
     case 'update'
         [mem, M] = update(C, varargin{:});
@@ -150,9 +159,11 @@ if isfield(obs, 'gant') && ~isempty(obs.gant) && onset_shape('on', FZ)
 end
 M.probs = pf; M.te = te;
 [~, k] = max(pf, [], 2);
-cls = PP.classes(k);
-cls(unk) = {'unknown'};
-M.cls = cls(:)';
+cls = PP.classes(k); cls = cls(:)';
+ov = unk;                                                       % the class the unknown-threat flag overrides
+if isfield(PP, 'unk_mode') && strcmp(PP.unk_mode, 'nonhostile'), ov = unk & ismember(cls, {'none', 'benign_interference'}); end
+cls(ov) = {'unknown'};
+M.cls = cls;
 mode = 'class'; if isfield(PP, 'alarm_mode'), mode = PP.alarm_mode; end
 hostile = ~ismember(M.cls, {'none', 'benign_interference', 'unknown'});
 M.drop_alarm = false(1, numel(M.cls));
@@ -175,15 +186,23 @@ switch mode
         M.alarm = hostile | M.degraded;
 end
 q = ~M.alarm;
-if strcmp(mode, 'class_cusum')                                  % the reference before a change building up
+if any(strcmp(mode, {'class_drop', 'class_cusum'}))            % the reference before a change building up
     if ~isfield(mem, 'rp'), mem.rp = nan(size(mem.ref)); mem.rx = false(numel(eg), 1); end
-    [mem.ref, mem.rp, mem.rx] = drop_ref(mem.ref, mem.rp, mem.rx, eg, q(:), mem.cs, M.drop_alarm(:));
+    ex = mem.cs; if strcmp(mode, 'class_drop'), ex = double(M.drop(:) >= C.sev.path_loss.levels(1) / 2); end
+    [mem.ref, mem.rp, mem.rx] = drop_ref(mem.ref, mem.rp, mem.rx, eg, q(:), ex, M.drop_alarm(:));
 else
     mem.ref(q, :) = [mem.ref(q, 2:end), eg(q)];
 end
 mem.alarm = [mem.alarm(:, 2:end), M.alarm(:)];
 assert(cf(2) <= size(mem.alarm, 2), 'policy_monitor: confirmation over %d cycles exceeds the alarm memory', cf(2));
 M.confirmed = sum(mem.alarm(:, end-cf(2)+1:end), 2)' >= cf(1);
+if ~isfield(mem, 'sw'), mem.sw = false(size(mem.alarm)); end
+mem.sw = [mem.sw(:, 2:end), strcmp(M.cls(:), 'sweeping_jammer')];
+cs = []; if isfield(PP, 'confirm_sweep'), cs = PP.confirm_sweep; end
+if ~isempty(cs) && ~strcmp(mode, 'degraded')                    % the sweeper's own revisit window
+    assert(cs(2) <= size(mem.sw, 2), 'policy_monitor: the sweeper''s confirmation over %d cycles exceeds the alarm memory', cs(2));
+    M.confirmed = M.confirmed | sum(mem.sw(:, end-cs(2)+1:end), 2)' >= cs(1);
+end
 mem.conf_n(M.confirmed) = mem.conf_n(M.confirmed) + 1; mem.conf_n(~M.confirmed) = 0;
 % Observation of this cycle for the agent's state (policy_state.m), newest first
 o = policy_obs(obs, M, bc, unk);
@@ -253,7 +272,8 @@ for n = unique(mem.wn)                                     % episodes with the s
     if isfield(PP, 'fuse') && ~isempty(PP.fuse)                  % with the current frame's own evidence (fuse_classes.m)
         kb = W - min(n, NB) + 1:W;
         Zc = window_cues(mem.wg(e, :, k), mem.wf(e, :, k), mem.wi(e, :, k), mem.wb(e, :, kb));   % branch, level step, idle time, branch coherence
-        pf(e, :) = fuse_classes('apply', PP.fuse, [Z, Zc, log(max(double(mem.wp(e, :, W)), 1e-6))]);
+        Xe = window_cues('extra', mem.wg(e, :, k), mem.wf(e, :, k), mem.wi(e, :, k), fuse_classes('cues', PP.fuse));
+        pf(e, :) = fuse_classes('apply', PP.fuse, [Z, Zc, log(max(double(mem.wp(e, :, W)), 1e-6)), Xe]);
     end
     ku = W - min(n, Nu) + 1:W;
     mem.unk_now(e) = mean(mem.wu(e, ku), 2) < PP.maha_thr;

@@ -15,6 +15,10 @@ function varargout = fuse_classes(cmd, varargin)
 %       probabilities, so a threat that hits single frames (a sweeping jammer crossing the
 %       band) is not averaged away by its clean neighbours. policy_monitor.m builds the
 %       same row per cycle.
+%   Z = fuse_classes('windows', S, probs, N, opt)  the same with window_cues('extra', ..., opt)'s
+%       columns last (opt = fuse_classes('cues', FM), a fusion's own further columns)
+%   X = fuse_classes('extra', S, N, opt)          those columns alone
+%   opt = fuse_classes('cues', FM)                the further columns of fusion FM ([] for none)
 %   FM = fuse_classes('fit', Z, y, C, lambda)     y class index per frame
 %   [pc, k] = fuse_classes('apply', FM, Z)        pc frames x C, k predicted class
 %   The fusion is fitted on the validation split (the detector's outputs on its own
@@ -22,13 +26,16 @@ function varargout = fuse_classes(cmd, varargin)
 %   validation sub-runs (select_fusion.m); the test split is never used.
 switch cmd
     case 'windows', varargout{1} = windows(varargin{:});
+    case 'extra',   varargout{1} = extra(varargin{:});
+    case 'cues',    varargout{1} = cues(varargin{:});
     case 'fit',     varargout{1} = fit(varargin{:});
     case 'apply',   [varargout{1}, varargout{2}] = apply(varargin{:});
     otherwise, error('fuse_classes: unknown command %s', cmd);
 end
 end
 
-function Z = windows(S, probs, N)
+function Z = windows(S, probs, N, opt)
+if nargin < 4, opt = []; end
 [ok, jf] = ismember(link_features('names'), S.feat_names);
 if ~all(ok), error('fuse_classes: feats_raw lacks link features (rerun extract_spectrograms, prepare_data)'); end
 n = numel(S.run);
@@ -52,6 +59,34 @@ for r = 1:numel(byrun)
     end
 end
 Z = [Z, log(max(double(probs), 1e-6))];                   % the current frame's own evidence
+if ~isempty(window_cues('extra_names', opt)), Z = [Z, extra(S, N, opt)]; end
+end
+
+function X = extra(S, N, opt)
+% window_cues('extra', ..., opt) of every frame of split S over its own sub-run's last N frames.
+[~, jf] = ismember(link_features('names'), S.feat_names);
+n = numel(S.run);
+X = zeros(n, numel(window_cues('extra_names', opt)));
+if isempty(X), return; end
+I = nan(n, numel(idle_summary('names')));
+if isfield(S, 'idle') && ~isempty(S.idle), I = double(S.idle); end
+[~, ~, rid] = unique(S.run(:));
+byrun = accumarray(rid, (1:n)', [], @(v) {v});
+for r = 1:numel(byrun)
+    ix = byrun{r};
+    [~, o] = sort(S.pos(ix)); ix = ix(o);
+    for j = 1:numel(ix)
+        w = ix(max(1, j - N + 1):j);
+        X(ix(j), :) = window_cues('extra', permute(S.gain_ant(w, :), [3 2 1]), permute(S.feats_raw(w, jf), [3 2 1]), ...
+            permute(I(w, :), [3 2 1]), opt);
+    end
+end
+end
+
+function opt = cues(FM)
+% The further columns fusion FM was fitted with (select_fusion.m), [] for none.
+opt = [];
+if ~isempty(FM) && isfield(FM, 'cues'), opt = FM.cues; end
 end
 
 function FM = fit(Z, y, C, lambda)
