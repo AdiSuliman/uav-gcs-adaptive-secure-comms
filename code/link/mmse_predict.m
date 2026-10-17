@@ -6,7 +6,8 @@ function [G, D] = mmse_predict(varargin)
 %   [grp, sk] = mmse_predict('groups', p)
 %
 %   iqa  samples x antennas x frames, the received samples as the combiner sees them
-%   p    params of the run (sps, filter_span, rolloff, timing_max_sym, the frame layout)
+%   p    params of the run (sps, filter_span, rolloff, timing_max_sym, the frame layout,
+%        cfo_ppm, carrier_freq, v_max, c_light)
 %   sy   receiver output 6 (8 x frames): sy(1) the arrival [samples], sy(2) the frequency
 %        offset [Hz] (zeros with the ideal receiver)
 %   Snapshots: every antenna's matched-filtered samples at the receiver's symbol times and
@@ -22,16 +23,25 @@ function [G, D] = mmse_predict(varargin)
 %   symbols against their known values (a complex gain fitted, floor 1 / the number of
 %   symbols), and G is their ratio. No symbol is judged by weights fitted on it; the reactive
 %   and bursty interferers that are on the air while our signal is are in the snapshots.
-%   MRC is measured at the receiver's arrival, the link as it runs. Where MMSE reads no
-%   SINR above 0 dB there, the frame's training is searched over the receiver's arrival
-%   window (0 to p.timing_max_sym symbols) for the arrival of the highest MMSE SINR, as the
-%   MMSE receiver acquires the frame on its own (build_threat_model.m); it is taken when its
-%   SINR is at least twice (3 dB) the receiver's arrival's, so the largest of noisy readings
-%   at a weak link's right arrival is not.
+%   MRC is measured at the receiver's arrival and frequency, the link as it runs. Where MMSE
+%   reads no SINR above 0 dB there, the frame is searched as the MMSE receiver acquires it on
+%   its own (build_threat_model.m): every arrival of the receiver's window (0 to
+%   p.timing_max_sym symbols) and every frequency of its acquisition window (the oscillators'
+%   +-2 p.cfo_ppm and the largest Doppler) is scored by the long training's in-sample DMI fit
+%   (search). The pilot blocks' phase steps cannot tell a frequency from one p.symbol_rate /
+%   (p.pilot_block + p.pilot_every) away, and a strong interferer can pull the receiver's
+%   estimate several such steps off; the contiguous long training tells them apart. The two
+%   best are measured as above and the higher MMSE SINR is taken when it is at least twice
+%   (3 dB) the receiver's, so the largest of noisy readings at a weak link's right arrival is
+%   not.
+%   On the delay line G also counts the single-tap suppression of our own echoes at
+%   whole-symbol lags, a few dB on low-K, long-spread links (validate_phy.m V13).
 %   D: mmse_db, mrc_db (1 x frames, the measured SINRs [dB]), n_ref (held-out symbols),
 %   w_mrc, w_mmse (antennas x groups x frames, the weights each group was combined with),
-%   df_hz (1 x frames, the residual frequency removed) and arrival (the arrival MMSE is
-%   measured at [samples]), for validate_phy.m
+%   r_mmse (the reference correlations of the DMI weights), df_hz and df_mrc_hz (1 x frames,
+%   the frequency removed beyond the receiver's for MMSE and MRC), arrival (the arrival MMSE
+%   is measured at [samples]) and search (1 x frames, true where MMSE is measured at the
+%   search's arrival and frequency), for validate_phy.m
 if ischar(varargin{1})
     switch varargin{1}
         case 'snapshots', G = snapshots(varargin{2:end});
@@ -41,31 +51,76 @@ if ischar(varargin{1})
     return
 end
 [iqa, p, sy] = varargin{:};
+n0 = maxNumCompThreads(1); c0 = onCleanup(@() maxNumCompThreads(n0));   % small matrices: one thread is faster
 [~, na, nf] = size(iqa);
 [grp, sk] = groups(p);
 [rf, base, t] = filtered(iqa, p);
 nk = numel([grp{2:end}]); NS = numel(sk);
-TM = round(p.timing_max_sym * p.sps);
 G = nan(1, nf);
 D = struct('mmse_db', nan(1, nf), 'mrc_db', nan(1, nf), 'n_ref', nk, 'w_mrc', nan(na, numel(grp), nf), ...
-    'w_mmse', nan(na, numel(grp), nf), 'df_hz', nan(1, nf), 'arrival', nan(1, nf));
+    'w_mmse', nan(na, numel(grp), nf), 'r_mmse', nan(na, numel(grp), nf), 'df_hz', nan(1, nf), ...
+    'df_mrc_hz', nan(1, nf), 'arrival', nan(1, nf), 'search', false(1, nf));
 for f = 1:min(nf, size(sy, 2))
     Yf = take(rf, f, base, t, sy(1:2, f), NS, p.sps);
     if isempty(Yf), continue; end
-    [Yf, D.df_hz(f)] = residual_frequency(Yf, grp, sk, p.symbol_rate);
+    [Yf, D.df_mrc_hz(f)] = residual_frequency(Yf, grp, sk, p.symbol_rate);
     [sm, sr, D.w_mrc(:, :, f), D.w_mmse(:, :, f)] = measure(Yf, grp, sk);
-    D.arrival(f) = round(sy(1, f));
+    D.r_mmse(:, :, f) = D.w_mrc(:, :, f); D.df_hz(f) = D.df_mrc_hz(f); D.arrival(f) = round(sy(1, f));
     if sm < 1
-        for d = setdiff(0:TM, round(sy(1, f)))
-            Yc = take(rf, f, base, t, [d; sy(2, f)], NS, p.sps);
-            if isempty(Yc), continue; end
-            [Yc, dfc] = residual_frequency(Yc, grp, sk, p.symbol_rate);
-            [sc, ~, ~, wc] = measure(Yc, grp, sk);
-            if sc > 2 * sm, sm = sc; D.arrival(f) = d; D.df_hz(f) = dfc; D.w_mmse(:, :, f) = wc; end
+        [sc, d, dfc, rc, wc] = search(rf, f, base, t, sy(1:2, f), D.df_hz(f), NS, grp, sk, p);
+        if sc > 2 * sm
+            sm = sc; D.arrival(f) = d; D.df_hz(f) = dfc; D.r_mmse(:, :, f) = rc; D.w_mmse(:, :, f) = wc; D.search(f) = true;
         end
     end
     D.mrc_db(f) = 10*log10(sr); D.mmse_db(f) = 10*log10(sm);
     G(f) = D.mmse_db(f) - D.mrc_db(f);
+end
+end
+
+function [sb, db, fb, rb, wb] = search(rf, f, base, t, sy, df0, NS, grp, sk, p)
+% The arrivals 0 to p.timing_max_sym symbols and the frequencies sy(2) + j fp / 4 (fp the
+% pilot alias step) within the receiver's acquisition window, +-(2 p.cfo_ppm of the carrier
+% + the largest Doppler) as build_threat_model.m searches it, scored by the long training's
+% in-sample DMI fit q = r' R^-1 r (the share of its snapshots' power the known symbols
+% explain; R does not depend on the frequency); the receiver's own alias (arrival sy(1),
+% within fp / 2 of sy(2) + df0) is left out. The two best, the second at another arrival or
+% more than fp / 2 away, are measured as the frame is (residual_frequency, measure); sb the
+% higher MMSE SINR, at arrival db [samples] and frequency fb beyond sy(2) [Hz], with the
+% reference correlations rb and the weights wb (sb = 0: none held).
+sb = 0; db = NaN; fb = NaN; rb = []; wb = [];
+fp = p.symbol_rate / (p.pilot_block + p.pilot_every);
+fw = 2 * p.cfo_ppm * 1e-6 * p.carrier_freq + p.v_max * p.carrier_freq / p.c_light;
+TM = round(p.timing_max_sym * p.sps);
+[ns, ~, na] = size(rf);
+kl = grp{2}(:); nl = numel(kl);
+ki = base + (0:TM) + (kl - 1) * p.sps + 1;
+ok = ki(1, :) >= 1 & ki(end, :) <= ns;
+if ~any(ok), return; end
+dv = find(ok) - 1; ki = ki(:, ok);
+X = reshape(rf(ki, f, :), nl, numel(dv), na) .* exp(-1j * 2*pi * sy(2) * t(ki));
+X = permute(X, [3 1 2]);
+fj = (ceil(4 * (-fw - sy(2)) / fp):floor(4 * (fw - sy(2)) / fp)) * fp / 4;
+if isempty(fj), return; end
+S = conj(sk(kl)) .* exp(-1j * 2*pi * (0:nl-1)' * fj / p.symbol_rate) / nl;
+r = pagemtimes(X, S);
+R = pagemtimes(X, 'none', X, 'ctranspose') / nl;
+R = R + 1e-9 * sum(real(R .* eye(na)), [1 2]) / na .* eye(na);
+q = reshape(real(sum(conj(r) .* pagemldivide(R, r), 1)), numel(fj), numel(dv));
+q(abs(fj - df0) < fp / 2, dv == round(sy(1))) = -Inf;
+[~, o] = sort(q(:), 'descend');
+[j1, i1] = ind2sub(size(q), o(1));
+c = o(1);
+for i = 2:numel(o)
+    [j, k] = ind2sub(size(q), o(i));
+    if k ~= i1 || abs(fj(j) - fj(j1)) > fp / 2, c = [c, o(i)]; break; end %#ok<AGROW>
+end
+for i = c(isfinite(q(c)))
+    [j, k] = ind2sub(size(q), i);
+    Yc = take(rf, f, base, t, [dv(k); sy(2) + fj(j)], NS, p.sps);
+    if isempty(Yc), continue; end
+    [Yc, dfc] = residual_frequency(Yc, grp, sk, p.symbol_rate);
+    [sc, ~, rc, wc] = measure(Yc, grp, sk);
+    if sc > sb, sb = sc; db = dv(k); fb = fj(j) + dfc; rb = rc; wb = wc; end
 end
 end
 
