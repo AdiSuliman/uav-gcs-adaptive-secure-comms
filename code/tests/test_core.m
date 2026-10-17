@@ -5924,6 +5924,7 @@ S = struct('run', ones(n, 1), 'pos', (1:n)', 'gain_ant', Gn, 'feats_raw', Fr, 'f
 cues = struct('cfar', [1 0.5 0.4], 'iso', true);
 Zx = fuse_classes('windows', S, P, Nf, cues);
 verifyEqual(tc, Zx, [fuse_classes('windows', S, P, Nf), fuse_classes('extra', S, Nf, cues)]);
+verifyEqual(tc, fuse_classes('windows', S, P, Nf, fuse_classes('cues', struct('W', 1))), fuse_classes('windows', S, P, Nf));
 nZ = size(Zx, 2);
 FM = struct('W', 0.1 * randn(rs, nZ + 1, 3), 'mu', zeros(1, nZ), 'sd', ones(1, nZ), 'C', 3, 'lambda', 0, 'cues', cues);
 verifyEqual(tc, fuse_classes('cues', FM), cues);
@@ -5943,8 +5944,10 @@ function test_fusion_target_age(tc)
 % A path-loss onset is the fused target while the window still holds a cycle before it
 % (pos - onset < N - 1, threat_active.m's rule) for a fusion fitted on that rule
 % (FM.target_age, select_fusion.m with FUSION_REV); one fitted before it keeps its own
-% (pos - onset < N). With FUSION_REV, N is scored on the per-cycle label, the shortest within
-% one standard error; without it the selection is the one the profiles' fusions were chosen by.
+% (pos - onset < N). With FUSION_REV, N is scored on the frames no candidate's window
+% relabels (all candidates share the per-cycle label there), the shortest within one standard
+% error; without it the selection, its printout's scores and fusion.mat's layout are the ones
+% the profiles' fusions were chosen by.
 cls = {'none', 'path_loss'};
 y = [1 1 2 2 1 1 1]; run = ones(1, 7); pos = 1:7;
 verifyEqual(tc, fusion_target(y, run, pos, 4, cls)', [1 1 2 2 2 2 1]);
@@ -5953,7 +5956,12 @@ verifyEqual(tc, fusion_target(y, run, pos, 4, cls, struct('W', 1))', [1 1 2 2 2 
 src = fileread(which('select_fusion'));
 verifyNotEmpty(tc, strfind(src, 'FM.target_age = TA.target_age; FM.cues = cues;'));
 verifyNotEmpty(tc, strfind(src, 'a = find(max(cv, [], 2) >= mx - se, 1);'));
-verifyNotEmpty(tc, strfind(src, 'cvy(a, b) = macro_f1(y, yh, C); cvo(a, b) = macro_f1(yn, yh, C);'));
+verifyNotEmpty(tc, strfind(src, 'cm = true(size(y)); lab = ''the per-cycle label'';'));
+verifyNotEmpty(tc, strfind(src, 'if REV, cm = all(YN == y, 2); lab = ''the frames no candidate relabels''; end'));
+verifyNotEmpty(tc, strfind(src, ['save(''data/fusion.mat'', ''FM'', ''N'', ''lambda'', ''NS'', ''LAMBDA'', ''cv'', ''val_probs_oof'', ' ...
+    '''val_latch_oof'', ''val_target'', ''q_thr'');']));
+verifyNotEmpty(tc, strfind(src, 'if REV, save(''data/fusion.mat'', ''cvy'', ''cvo'', ''-append''); end'));
+verifyNotEmpty(tc, strfind(src, 'cvy(a, b) = macro_f1(y(cm), yh(cm), C); cvo(a, b) = macro_f1(yn, yh, C);'));
 verifyNotEmpty(tc, strfind(src, 'REV = exist(''FUSION_REV'', ''var'') && isequal(FUSION_REV, true);'));
 verifyNotEmpty(tc, strfind(src, 'TAa = []; if REV, TAa = struct(''target_age'', NS(a) - 1); end'));
 for f = {'eval_detector', 'compare_architectures', 'detector_block'}

@@ -11,13 +11,15 @@
 % eval_detector.m. Every candidate's score on the per-cycle label of threat_active.m is
 % printed beside.
 % With FUSION_REV true the path-loss target ends while the window still holds a cycle before
-% the onset (threat_active.m's rule, FM.target_age = N - 1), every candidate is scored on one
-% target that does not depend on N, the per-cycle label (scored on its own target a longer
-% window gains by the frames it relabels), and of the candidates within one standard error
-% (over the 5 folds) of the best the shortest window is taken (the one-standard-error rule,
-% Hastie, Tibshirani & Friedman, The Elements of Statistical Learning, 2nd ed., sec. 7.10:
-% each cycle of the window is 20 ms of memory), with its best regularization; and the
-% fusion's further columns (window_cues.m 'extra') are chosen, each against the fusion without it
+% the onset (threat_active.m's rule, FM.target_age = N - 1); every candidate is scored on the
+% frames whose target no candidate's window changes, where all of them share the per-cycle
+% label: on its own targets a longer window gains by the frames it relabels, on the per-cycle
+% label of every frame it loses by the same frames it was fitted to call by its window; of the
+% candidates within one standard error (over the 5 folds) of the best the shortest window is
+% taken (the one-standard-error rule, Hastie, Tibshirani & Friedman, The Elements of
+% Statistical Learning, 2nd ed., sec. 7.10: each cycle of the window is 20 ms of memory), with
+% its best regularization; and the fusion's further columns (window_cues.m 'extra') are
+% chosen, each against the fusion without it
 % on validation, out of fold over the same folds at the chosen N and lambda, paired by
 % bootstrap over sub-runs: the idle time against the radio's own noise (cfar: the crest and
 % spread of every gap over its own floor, thresholds from the training folds' clean gaps,
@@ -49,13 +51,15 @@
 % airframe_shadowing, the right one) is printed beside. The monitor's class out of fold, with
 % or without the latch as chosen, sets the KPI 1 threshold of eval_detector.m. The test split
 % is not used.
-% Output: data/fusion.mat (FM with os_thr, latch, cues and target_age, N, lambda, cv table,
-% out-of-fold probabilities (fused, and with the latch) and their targets, q_thr)
+% Output: data/fusion.mat (FM with os_thr and latch, N, lambda, cv table, out-of-fold
+% probabilities (fused, and with the latch) and their targets, q_thr; with FUSION_REV also
+% FM.cues, FM.target_age and the cvy, cvo tables). Without FUSION_REV the fusion and its file
+% are those of the selection by the own targets alone.
 
 close all; clc;
 fprintf('=== B2F: temporal fusion (validation split only) ===\n\n');
 REV = exist('FUSION_REV', 'var') && isequal(FUSION_REV, true);
-if REV, fprintf('The revised selection (FUSION_REV): N on the per-cycle label, target age N - 1, the further columns\n\n'); end
+if REV, fprintf('The revised selection (FUSION_REV): N on the frames no candidate relabels, target age N - 1, the further columns\n\n'); end
 S = load('data/splits.mat'); va = S.splits.val; norm = S.splits.norm;
 if ~isfield(va, 'pos')
     error('splits.mat has no frame positions (v6 dataset). Run run_dataset_sweep, extract_spectrograms, prepare_data.');
@@ -78,30 +82,36 @@ ib = find(strcmp(classes, 'benign_interference')); ip = find(strcmp(classes, 'pa
 
 %% 1. N and lambda
 cvy = zeros(numel(NS), numel(LAMBDA)); cvo = cvy; cvf = zeros(numel(NS), numel(LAMBDA), K); oof = cell(numel(NS), numel(LAMBDA));
-ZN = cell(1, numel(NS));
+ZN = cell(1, numel(NS)); YN = zeros(numel(y), numel(NS));
+for a = 1:numel(NS)
+    TAa = []; if REV, TAa = struct('target_age', NS(a) - 1); end
+    YN(:, a) = fusion_target(y, va.run, va.pos, NS(a), classes, TAa);
+end
+cm = true(size(y)); lab = 'the per-cycle label';
+if REV, cm = all(YN == y, 2); lab = 'the frames no candidate relabels'; end
 for a = 1:numel(NS)
     ZN{a} = fuse_classes('windows', va, P, NS(a));
-    TAa = []; if REV, TAa = struct('target_age', NS(a) - 1); end
-    yn = fusion_target(y, va.run, va.pos, NS(a), classes, TAa);
+    yn = YN(:, a);
     for b = 1:numel(LAMBDA)
         pc = oof_fit(ZN{a}, yn, fold, C, LAMBDA(b));
         [~, yh] = max(pc, [], 2);
-        cvy(a, b) = macro_f1(y, yh, C); cvo(a, b) = macro_f1(yn, yh, C);
-        cvf(a, b, :) = arrayfun(@(k) macro_f1(y(fold == k), yh(fold == k), C), 1:K);
+        cvy(a, b) = macro_f1(y(cm), yh(cm), C); cvo(a, b) = macro_f1(yn, yh, C);
+        cvf(a, b, :) = arrayfun(@(k) macro_f1(y(cm & fold == k), yh(cm & fold == k), C), 1:K);
         oof{a, b} = pc;
-        fprintf(['  N = %2d cycles, lambda %.0e: macro-F1 %.2f%% out of fold on its own window''s targets, %.2f%% on the ' ...
-            'per-cycle label; path-loss relabels %d, benign %d\n'], NS(a), LAMBDA(b), 100 * cvo(a, b), 100 * cvy(a, b), ...
+        fprintf(['  N = %2d cycles, lambda %.0e: macro-F1 %.2f%% out of fold on its own window''s targets, %.2f%% on %s; ' ...
+            'path-loss relabels %d, benign %d\n'], NS(a), LAMBDA(b), 100 * cvo(a, b), 100 * cvy(a, b), lab, ...
             sum(yn ~= y & yn == ip), sum(yn ~= y & yn == ib));
     end
 end
+if REV, fprintf('Frames no candidate''s window relabels: %d of %d\n', sum(cm), numel(y)); end
 if REV
     cv = cvy;
     [mx, i] = max(cv(:)); [a1, b1] = ind2sub(size(cv), i);
     se = std(squeeze(cvf(a1, b1, :))) / sqrt(K);
     a = find(max(cv, [], 2) >= mx - se, 1);           % the shortest window within one standard error
     [~, b] = max(cv(a, :));
-    fprintf(['\nBest on the per-cycle label: N = %d, lambda %.0e, %.2f%% (standard error %.2f over the folds); the ' ...
-        'one-standard-error rule: N = %d cycles, lambda %.0e, %.2f%%\n'], NS(a1), LAMBDA(b1), 100 * mx, 100 * se, ...
+    fprintf(['\nBest on the frames no candidate relabels: N = %d, lambda %.0e, %.2f%% (standard error %.2f over the folds); ' ...
+        'the one-standard-error rule: N = %d cycles, lambda %.0e, %.2f%%\n'], NS(a1), LAMBDA(b1), 100 * mx, 100 * se, ...
         NS(a), LAMBDA(b), 100 * cv(a, b));
     TA = struct('target_age', NS(a) - 1);
 else
@@ -217,7 +227,8 @@ else
     fprintf('The monitor''s class is the fused class: the latch is off (FM.latch = false)\n');
 end
 if ~exist('results', 'dir'), mkdir('results'); end
-save('data/fusion.mat', 'FM', 'N', 'lambda', 'NS', 'LAMBDA', 'cv', 'cvy', 'cvo', 'val_probs_oof', 'val_latch_oof', 'val_target', 'q_thr');
+save('data/fusion.mat', 'FM', 'N', 'lambda', 'NS', 'LAMBDA', 'cv', 'val_probs_oof', 'val_latch_oof', 'val_target', 'q_thr');
+if REV, save('data/fusion.mat', 'cvy', 'cvo', '-append'); end
 fprintf('Saved data/fusion.mat\n');
 
 function c = classes_of(D)

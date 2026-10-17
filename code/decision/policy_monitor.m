@@ -278,8 +278,8 @@ for n = unique(mem.wn)                                     % episodes with the s
     ku = W - min(n, Nu) + 1:W;
     mem.unk_now(e) = mean(mem.wu(e, ku), 2) < PP.maha_thr;
 end
-unk = obs.unknown(:)';
-if Nu > 1 && ~all(isnan(mh)), unk = mem.unk_now(:)' | (obs.unknown(:)' & isinf(mh(:)')); end
+unk = obs.unknown(:)';                                     % the monitor's own threshold PP.maha_thr wherever a score is read
+if ~all(isnan(mh)), unk = mem.unk_now(:)' | (obs.unknown(:)' & isinf(mh(:)')); end
 end
 
 function [n, lost] = packets(crc)
