@@ -118,8 +118,9 @@ if ~isfield(PP, 'cov') || ~isfield(PP, 'cell_geo') || numel(PP.runs) < 5
     error('edge_map: the pools have no second test split or flight draws (built before v7-D74); run build_policy_pools');
 end
 Q = load('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'H', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db', ...
-    'deployed', 'rule_sel', 'fa_bound_met', 'det_id');
+    'deployed', 'rule_sel', 'fa_bound_met', 'det_id', 'maha_thr');
 check_det_id(PP, Q, 'edge_map');
+if isfield(Q, 'maha_thr'), PP.maha_thr = Q.maha_thr; end         % the unknown-threat threshold the agent ran with
 MON = struct('alarm_mode', Q.alarm_mode, 'confirm', Q.confirm, 'drop_db', Q.drop_db);
 if strcmp(Q.deployed, 'rule_sel'), MON = Q.rule_sel; end      % the deployed policy's monitor
 PP.confirm = MON.confirm; PP.alarm_mode = MON.alarm_mode;

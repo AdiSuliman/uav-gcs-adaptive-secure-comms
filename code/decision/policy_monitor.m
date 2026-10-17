@@ -195,17 +195,19 @@ function o = policy_obs(obs, M, bc, unk)
 % Per-cycle observation (rows) x episodes: class probabilities (fused over the
 % last cycles), unknown flag, log10 estimated BER (window), degradation (log10 of
 % estimate / clean estimate, clipped to [-1, 3]), packet loss (window), SINR, IoT,
-% post-combining SNR, quiet-slot spatial coherence, predicted MMSE gain, alignment, antenna
+% post-combining SNR, quiet-slot spatial coherence, predicted MMSE gain (obs.mmse_pred,
+% mmse_predict.m, 0 dB where a frame has none), alignment, antenna
 % gain gap, Eb/N0 drop (clipped), quiet-slot interference, reactive ratio, and the
 % persistence measurements of the window (temporal_evidence.m: gap of the antennas'
 % local means, share of cycles with the same weakest antenna, share with quiet-slot
 % interference, share with one antenna 20 dB below the next, the weakest antenna's
 % offset and its spread, its K-factor and the share of cycles it is valid, busy share).
 fi = @(n) obs.feat(:, feature_index(n));
+mp = obs_mmse_pred(obs, size(obs.feat, 1)); mp(isnan(mp)) = 0;
 lb = log10(max(M.ber_avg, 1e-6));
 deg = min(3, max(-1, log10(max(M.ber_avg, 1e-6) ./ bc)));
 o = [M.probs'; double(unk(:)'); lb'; deg'; M.plr'; fi('sinr')'; fi('iot')'; fi('snr_post')'; ...
-     fi('coh')'; fi('mmse_gain')'; fi('align')'; fi('branch_gap')'; min(20, max(-10, M.drop)); ...
+     fi('coh')'; mp'; fi('align')'; fi('branch_gap')'; min(20, max(-10, M.drop)); ...
      min(40, max(-5, fi('q_iot')')); min(40, max(-10, fi('q_react')')); M.te'];
 end
 

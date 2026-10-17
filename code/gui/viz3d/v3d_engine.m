@@ -261,6 +261,7 @@ function o = sliceObs(obs, i)
 o = struct('probs', obs.probs(i, :), 'unknown', obs.unknown(i), 'feat', obs.feat(i, :), 'ber_true', obs.ber_true(i));
 if isfield(obs, 'cfg_link'), o.cfg_link = obs.cfg_link(i); end
 if isfield(obs, 'pkt'), o.pkt = obs.pkt(i); end
+if isfield(obs, 'mmse_pred'), o.mmse_pred = obs.mmse_pred(i); end
 end
 
 function [emit, th, inr] = emitterSet(M, scn, s, r, active)

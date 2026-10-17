@@ -24,13 +24,12 @@ if all(isfile({'data/trained_detector.mat', 'data/ood_thresholds.mat'}))
     D = load('data/trained_detector.mat', 'trained_at', 'ood');
     if isfield(D, 'trained_at'), t_det = D.trained_at; end
     try
-        T = ood_thresholds(0.95);
-        cur_det = detector_id(D.trained_at, D.ood, fusion_model(), T.maha);
+        cur_det = detector_id(D.trained_at, D.ood, fusion_model());
     catch
     end
 end
 if isfile('data/trained_dqn.mat')
-    Q = load('data/trained_dqn.mat', 'agent', 'confirm', 'alarm_mode', 'drop_db', 'deployed', 'rule_sel', 'det_id');
+    Q = load('data/trained_dqn.mat', 'agent', 'confirm', 'alarm_mode', 'drop_db', 'deployed', 'rule_sel', 'det_id', 'maha_thr');
     cur_pol = policy_stamp(Q);
 end
 t = @(f) file_time(f);

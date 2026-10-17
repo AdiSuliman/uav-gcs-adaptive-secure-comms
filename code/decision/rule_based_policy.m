@@ -1,4 +1,4 @@
-function [action, reason] = rule_based_policy(threat_class, degraded, mmse_gain_db, q_iot_db, q_thr_db, drop, budget)
+function [action, reason] = rule_based_policy(threat_class, degraded, mmse_gain_db, q_iot_db, q_thr_db, drop, budget, mmse_thr_db)
 %RULE_BASED_POLICY  Fixed expert policy: detected threat class -> configuration.
 %   Baseline for the DQN comparison (proposal: rule-based first, DQN second).
 %   Each class maps to the configuration that addresses its physics as modeled in
@@ -6,10 +6,11 @@ function [action, reason] = rule_based_policy(threat_class, degraded, mmse_gain_
 %   degraded      the link monitor's degradation flag (policy_monitor.m): a
 %                 non-hostile or unknown class on a degraded link gets a generic
 %                 configuration instead of no_action (proposal mitigation 15)
-%   mmse_gain_db  the receiver's predicted gain of MMSE combining over MRC
-%                 (link_features.m): when the interferer is spatially separable
-%                 (>= C.rule_mmse_db) the rule also nulls it with the antennas,
-%                 so the rule sees the same spatial information as the agent
+%   mmse_gain_db  the receiver's predicted gain of MMSE combining over MRC from the
+%                 frame's known symbols (mmse_predict.m, obs.mmse_pred): when the
+%                 interferer is spatially separable (>= mmse_thr_db) the rule also nulls
+%                 it with the antennas, so the rule sees the same spatial information as
+%                 the agent; NaN reads as not separable
 %   q_iot_db      interference over thermal in this frame's quiet slot (link_features.m)
 %   q_thr_db      its alarm threshold, from the clean validation frames
 %                 (select_fusion.m; default C.q_alarm_db)
@@ -20,6 +21,7 @@ function [action, reason] = rule_based_policy(threat_class, degraded, mmse_gain_
 %                 current, the configuration in use, and current_db its known gain;
 %                 names and gain_db, the link-budget configurations and their known
 %                 gains (config_gain_db.m)
+%   mmse_thr_db   the nulling threshold (optional; PP.rule_mmse_db, default C.rule_mmse_db)
 %   A lost branch (an antenna fault or airframe shadowing) leaves white noise on the
 %   antennas, where adaptive combining (MVDR) is maximum-ratio combining (Winters, Salz &
 %   Gitlin 1994) and only pays its estimation loss (Besson 2021, eq. 20-21): both take
@@ -50,7 +52,8 @@ if nargin < 4 || isempty(q_iot_db), q_iot_db = -Inf; end
 if nargin < 5 || isempty(q_thr_db) || isnan(q_thr_db), q_thr_db = C.q_alarm_db; end
 if nargin < 6 || isempty(drop), drop = false; end
 if nargin < 7, budget = []; end
-sep = mmse_gain_db >= C.rule_mmse_db;
+if nargin < 8 || isempty(mmse_thr_db), mmse_thr_db = C.rule_mmse_db; end
+sep = mmse_gain_db >= mmse_thr_db;
 slot = q_iot_db >= q_thr_db;
 
 switch threat_class

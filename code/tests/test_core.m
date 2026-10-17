@@ -602,17 +602,32 @@ verifyEqual(tc, nthout(1:2, @check_point_cut, 5, 1:5, [1 -1 1 1]), {2, true});
 end
 
 function test_detector_id(tc)
-% One detector, one identity; another training time, unknown-score window, fusion,
-% quiet-slot threshold or unknown-threat threshold gives another, and pools and agent of
-% two detectors stop the reading.
+% One detector, one identity; another training time, unknown-score window, fusion or
+% quiet-slot threshold gives another, and pools and agent of two detectors stop the
+% reading. The unknown-threat threshold is not part of it: the pools hold every frame's
+% score, the threshold is compared at decision time (PP.maha_thr) and any retention is a
+% quantile of the validation statistic (unk_threshold.m, as ood_thresholds.m).
 FZ = struct('FM', struct('W', ones(3, 2)), 'N', 4, 'q_thr', 5.5); ood = struct('score', 'last', 'win', 3);
-id = detector_id(1, ood, FZ, -2);
-verifyEqual(tc, detector_id(1, ood, FZ, -2), id);
+id = detector_id(1, ood, FZ);
+verifyEqual(tc, detector_id(1, ood, FZ), id);
 verifyEqual(tc, numel(id), 16);
+verifyEqual(tc, nargin('detector_id'), 3);
 o2 = ood; o2.win = 4; F2 = FZ; F2.N = 5; F3 = FZ; F3.FM.W(1) = 2; F4 = FZ; F4.q_thr = 6;
-ids = {id, detector_id(2, ood, FZ, -2), detector_id(1, o2, FZ, -2), detector_id(1, ood, F2, -2), ...
-    detector_id(1, ood, F3, -2), detector_id(1, ood, FZ, -3), detector_id(1, ood, F4, -2)};
-verifyEqual(tc, numel(unique(ids)), 7);
+ids = {id, detector_id(2, ood, FZ), detector_id(1, o2, FZ), detector_id(1, ood, F2), ...
+    detector_id(1, ood, F3), detector_id(1, ood, F4)};
+verifyEqual(tc, numel(unique(ids)), 6);
+v = sort(randn(1000, 1));
+verifyEqual(tc, unk_threshold(v, 0.95), v(ceil((1 - 0.95) * 1000))); verifyEqual(tc, unk_threshold(v, 0.99), v(ceil((1 - 0.99) * 1000)));
+src = fileread(which('ood_thresholds'));
+verifyNotEmpty(tc, strfind(src, '''maha'', lowq(mw, 1 - retain), ''maha_val'', sort(mw(:))'));
+verifyNotEmpty(tc, strfind(src, 'q = x(max(1, ceil(frac * numel(x))));'));
+for f = {'link_env', 'policy_monitor'}                  % read at decision time
+    verifyNotEmpty(tc, regexp(fileread(which(f{1})), '< PP\.maha_thr', 'once'), f{1});
+end
+for f = {'evaluate_policies', 'experiment_unknown_threat', 'experiment_combo_generalization', 'edge_map'}
+    verifyNotEmpty(tc, strfind(fileread(which(f{1})), 'if isfield(Q, ''maha_thr''), PP.maha_thr = Q.maha_thr; end'), f{1});
+end
+verifyNotEmpty(tc, strfind(fileread(which('train_dqn')), 'maha_thr = PP.maha_thr;'));
 check_det_id(struct('det_id', id), struct('det_id', id), 'test');
 verifyError(tc, @() check_det_id(struct('det_id', id), struct('det_id', ids{2}), 'test'), 'check_det_id:mismatch');
 verifyError(tc, @() check_det_id(struct('det_id', id), struct(), 'test'), 'check_det_id:mismatch');
@@ -640,7 +655,7 @@ FM = struct('mu', zeros(1, 13)); N = 12; q_thr = 4.5;
 save('data/fusion.mat', 'FM', 'N', 'q_thr');
 Q = struct('probs', single([0.9 0.1]), 'maha', single(0), 'feat', single([1 2]), 'ber', 0, 'run', 1);
 PP = struct('pools', {{Q, []}}, 'classes', {classes}, 'maha_thr', -2, 'unk_win', 3, 'fuse', F0.FM, 'fuse_N', 1, ...
-    'q_thr', 4, 'det_id', detector_id(trained_at, ood, F0, -2), 'created', 'x');
+    'q_thr', 4, 'det_id', detector_id(trained_at, ood, F0), 'created', 'x');
 clean_ref = struct('ebno', 1);
 save('data/policy_pools.mat', 'PP', 'clean_ref', '-v7.3');
 CT = struct('pools', {{Q}}, 'runs', 1);
@@ -649,7 +664,7 @@ evalc('rekey_pools({''data/policy_pools.mat'', ''data/clean_test_pools.mat''})')
 L = load('data/policy_pools.mat');
 keys = {'fuse', 'fuse_N', 'q_thr', 'det_id'};
 verifyEqual(tc, {L.PP.fuse, L.PP.fuse_N, L.PP.q_thr}, {FM, N, q_thr});
-verifyEqual(tc, L.PP.det_id, detector_id(trained_at, ood, struct('FM', FM, 'N', N, 'q_thr', q_thr), -2));
+verifyEqual(tc, L.PP.det_id, detector_id(trained_at, ood, struct('FM', FM, 'N', N, 'q_thr', q_thr)));
 verifyEqual(tc, rmfield(L.PP, keys), rmfield(PP, keys));
 verifyEqual(tc, L.clean_ref, clean_ref);
 b = dir('data/policy_pools_before_rekey_*.mat');
@@ -660,13 +675,22 @@ evalc('rekey_pools({''data/policy_pools.mat''})');                 % already key
 verifyNumElements(tc, dir('data/policy_pools_before_rekey_*.mat'), 1);
 P2 = PP; P2.fused = 1;
 P3 = PP; P3.pools{1}.cls = 1;
-P4 = PP; P4.det_id = detector_id(8, ood, F0, -2);
+P4 = PP; P4.det_id = detector_id(8, ood, F0);
 for c = {{P2, 'rekey_pools:field'}, {P3, 'rekey_pools:frame'}, {P4, 'rekey_pools:detector'}}
     S = struct('PP', c{1}{1});
     save('data/policy_pools.mat', '-struct', 'S', '-v7.3');
     verifyError(tc, @() rekey_pools({'data/policy_pools.mat'}), c{1}{2});
     verifyEqual(tc, load('data/policy_pools.mat').PP, c{1}{1});
 end
+% another unknown-threat threshold (a retention chosen later): the same detector, re-keyed,
+% its decision-time threshold and validation statistic kept
+P5 = PP; P5.maha_thr = -5; P5.maha_val = single([-6; -5; -1]); P5.unk_retain = 0.99; P5.pools{1}.mmse_pred = single(3);
+delete('data/policy_pools_before_rekey_*.mat');
+S = struct('PP', P5);
+save('data/policy_pools.mat', '-struct', 'S', '-v7.3');
+evalc('rekey_pools({''data/policy_pools.mat''})');
+L = load('data/policy_pools.mat');
+verifyEqual(tc, {L.PP.maha_thr, L.PP.maha_val, L.PP.unk_retain, L.PP.fuse_N}, {-5, single([-6; -5; -1]), 0.99, N});
 end
 
 %% ---------- statistics ----------
@@ -4535,14 +4559,14 @@ T = struct('retain', 0.95, 'maha', -2, 'maha_val', [-3; -1], 'win', 3, 'score', 
 F0 = struct('FM', struct('mu', zeros(1, 11)), 'N', 1, 'q_thr', 4);
 FM = struct('mu', zeros(1, 13)); N = 12; q_thr = 4.5; save('data/fusion.mat', 'FM', 'N', 'q_thr');
 Q = struct('probs', single([0.9 0.1]), 'maha', single(0), 'feat', single([1 2]), 'ber', 0, 'run', 1);
-old = detector_id(trained_at, ood, F0, -2);
+old = detector_id(trained_at, ood, F0);
 PP = struct('pools', {{Q, []}}, 'classes', {classes}, 'maha_thr', -2, 'unk_win', 3, 'fuse', F0.FM, 'fuse_N', 1, ...
     'q_thr', 4, 'det_id', old, 'cfg_gain_db', [0 1], 'created', 'x');
 save('data/policy_pools.mat', 'PP', '-v7.3');
 CT = struct('pools', {{Q}}, 'runs', 1, 'det_id', old); save('data/clean_val_pools.mat', 'CT', '-v7.3');
 CT.det_id = 'other'; save('data/clean_test_pools.mat', 'CT', '-v7.3');
 evalc('rekey_pools({''data/policy_pools.mat'', ''data/clean_val_pools.mat'', ''data/clean_test_pools.mat''})');
-new = detector_id(trained_at, ood, struct('FM', FM, 'N', N, 'q_thr', q_thr), -2);
+new = detector_id(trained_at, ood, struct('FM', FM, 'N', N, 'q_thr', q_thr));
 verifyEqual(tc, load('data/policy_pools.mat').PP.det_id, new);
 verifyEqual(tc, load('data/clean_val_pools.mat').CT.det_id, new);
 verifyEqual(tc, load('data/clean_test_pools.mat').CT.det_id, 'other');          % not of these pools: left
@@ -4559,13 +4583,14 @@ ood = struct('score', 'last', 'win', 3); classes = {'none'}; trained_at = 7; %#o
 save('data/trained_detector.mat', 'ood', 'classes', 'trained_at');
 T = struct('retain', 0.95, 'maha', -2, 'maha_val', [-3; -1], 'win', 3, 'score', 'last'); save('data/ood_thresholds.mat', 'T');
 FM = struct('mu', zeros(1, 3)); N = 4; q_thr = 4; save('data/fusion.mat', 'FM', 'N', 'q_thr');
-id = detector_id(trained_at, ood, fusion_model(), T.maha);
+id = detector_id(trained_at, ood, fusion_model());
 agent = struct('dense', struct('W', {{1, 2}}, 'b', {{0, 0}})); confirm = [4 5]; alarm_mode = 'class_drop'; drop_db = 5;
 deployed = 'dqn_esc'; rule_sel = struct('alarm_mode', 'class_drop', 'confirm', [5 5], 'drop_db', 6); det_id = id;
-save('data/trained_dqn.mat', 'agent', 'confirm', 'alarm_mode', 'drop_db', 'deployed', 'rule_sel', 'det_id');
+maha_thr = T.maha;
+save('data/trained_dqn.mat', 'agent', 'confirm', 'alarm_mode', 'drop_db', 'deployed', 'rule_sel', 'det_id', 'maha_thr');
 Q = load('data/trained_dqn.mat'); st = policy_stamp(Q);
-Q2 = Q; Q2.deployed = 'rule_sel'; Q3 = Q; Q3.rule_sel.drop_db = 7; Q4 = Q; Q4.agent.dense.W{1} = 3;
-verifyEqual(tc, numel(unique({st, policy_stamp(Q2), policy_stamp(Q3), policy_stamp(Q4)})), 4);
+Q2 = Q; Q2.deployed = 'rule_sel'; Q3 = Q; Q3.rule_sel.drop_db = 7; Q4 = Q; Q4.agent.dense.W{1} = 3; Q5 = Q; Q5.maha_thr = -3;
+verifyEqual(tc, numel(unique({st, policy_stamp(Q2), policy_stamp(Q3), policy_stamp(Q4), policy_stamp(Q5)})), 5);
 pause(1.1);
 LAT = struct('det_id', id, 'policy_stamp', st); save('results/latency.mat', 'LAT');
 KP = struct('policy_stamp', st); save('results/policy_evaluation.mat', 'KP');
@@ -5535,4 +5560,152 @@ src = fileread(which('build_policy_pools'));
 verifyNotEmpty(tc, strfind(src, '''event_frame'', C.event_frame, ''frames'', C.event_count'));
 verifyNotEmpty(tc, strfind(src, 'g(sp).frames(ref{sp}) = C.event_run; g(sp).event(ref{sp}) = C.event_frame;'));
 verifyNotEmpty(tc, strfind(fileread(which('build_check_pools')), '''event_frame'', C.event_frame, ''frames'', C.event_count'));
+end
+
+%% ---------- the dataset's align, the predicted MMSE gain, the unknown-threat threshold ----------
+function test_dataset_align_fields(tc)
+% A5 keeps the flight draw of the interferer's alignment (align_gcs) apart from the
+% receiver's measured align, and stops before saving when a field does not hold one entry
+% per frame; A6 and B1 check the same on what they read.
+txt = fileread(which('run_dataset_sweep'));
+i0 = strfind(txt, 'MEAS = {'); i1 = strfind(txt, 'D = struct('); i2 = strfind(txt, 'dup = intersect');
+meas = regexp(txt(i0:i1 - 1), '''(\w+)''', 'tokens'); meas = [meas{:}];
+dfl = regexp(txt(i1:i2 - 1), '''(\w+)''', 'tokens'); dfl = [dfl{:}];
+verifyEmpty(tc, intersect(meas, dfl));
+verifyTrue(tc, ismember('align', meas) && ismember('align_gcs', dfl) && ~ismember('align', dfl));
+verifyNotEmpty(tc, strfind(txt, 'D.align_gcs = [D.align_gcs, d.align(1) * o];'));
+verifyEmpty(tc, regexp(txt, 'D\.align = ', 'once'));
+verifyNotEmpty(tc, strfind(txt, 'dataset.align_gcs = D.align_gcs(:);'));
+verifyNotEmpty(tc, strfind(txt, 'assert_frames(D, numel(D.label), ''run_dataset_sweep'', {}, 2);'));
+verifyNotEmpty(tc, strfind(fileread(which('extract_spectrograms')), 'assert_frames(ds.meas, numel(ds.run)'));
+verifyEqual(tc, numel(strfind(fileread(which('prepare_data')), 'assert_frames(sp0, numel(sp0.run)')), 2);
+% the guard: columns (A5's rows of frames), rows, cell vectors, the last dimension of an
+% array; structs and named fields skipped
+S = struct('a', 1:4, 'b', ones(2, 4), 'c', {{1, 2, 3, 4}}, 'x', zeros(2, 2, 4), 'm', struct('q', 1));
+assert_frames(S, 4, 'test', {}, 2);
+S.a = 1:8;
+verifyError(tc, @() assert_frames(S, 4, 'test', {}, 2), 'assert_frames:count');
+assert_frames(struct('a', (1:4)', 'n', {{'u', 'v'}}), 4, 'test', {'n'});
+end
+
+function test_align_repair(tc)
+% A dataset whose align holds the flight draw and the measurement of every sub-run (2N
+% values: per sub-run the draw n times, then its n measurements) is split by
+% repair_align.m into meas.align (the measurement) and align_gcs (the draw), the original
+% kept; a dry run writes nothing; a second call changes nothing; a layout that does not
+% hold stops it with the file untouched; the old layout fails A6's guard.
+d = fullfile(tc.TestData.tmp, 'align_fix'); mkdir(fullfile(d, 'data'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+n = [5 3 7]; run = repelem([11; 12; 13], n); N = sum(n);
+draw = [0.2 0.7 0.4]; rng(3); meas = rand(N, 1); A = []; k = 0;
+for r = 1:3, A = [A; draw(r) * ones(n(r), 1); meas(k + (1:n(r)))]; k = k + n(r); end %#ok<AGROW>
+dataset = struct('iq', {num2cell(rand(4, N), 1)}, 'run', run, 'label', ones(N, 1), 'align', A, ...
+    'meas', struct('align', A, 'sinr', rand(N, 1)), 'meta', struct('fresh', false));
+verifyError(tc, @() assert_frames(dataset.meas, N, 'A6'), 'assert_frames:count');
+verifyError(tc, @() assert_frames(dataset, N, 'A6'), 'assert_frames:count');
+D0 = dataset;
+save('data/dataset.mat', 'dataset', '-v7.3');
+R = repair_align('data/dataset.mat', true);
+verifyEqual(tc, {R.state, R.n_frames, R.n_runs, R.runs_const, R.runs_vary}, {'checked', N, 3, 3, 3});
+verifyEqual(tc, load('data/dataset.mat').dataset, D0);
+R = repair_align('data/dataset.mat');
+L = load('data/dataset.mat').dataset;
+verifyEqual(tc, R.state, 'repaired');
+verifyEqual(tc, L.meas.align, meas);
+verifyEqual(tc, L.align_gcs, repelem(draw(:), n(:)));
+verifyFalse(tc, isfield(L, 'align'));
+verifyEqual(tc, {L.meas.sinr, L.run, L.iq}, {D0.meas.sinr, D0.run, D0.iq});
+verifyEqual(tc, load('data/dataset_before_align_repair.mat').dataset, D0);
+assert_frames(L.meas, N, 'A6'); assert_frames(L, N, 'A6');
+verifyEqual(tc, repair_align('data/dataset.mat').state, 'already');
+verifyEqual(tc, repair_align('data/dataset.mat', true).state, 'already');
+% a draw that is not one value: stopped, nothing written
+dataset = D0; dataset.meas.align(2) = 0.99; dataset.align = dataset.meas.align; B = dataset;
+save('data/dataset_fresh.mat', 'dataset', '-v7.3');
+verifyError(tc, @() repair_align('data/dataset_fresh.mat'), 'repair_align:layout');
+verifyEqual(tc, load('data/dataset_fresh.mat').dataset, B);
+verifyEmpty(tc, dir('data/dataset_fresh_*repair*'));
+end
+
+function test_mmse_predict_known_symbols(tc)
+% The predicted MMSE gain over MRC (mmse_predict.m, F.mmse_pred) reads the frame's known
+% symbols only: near 0 dB on the clean link (MMSE is MRC in white noise), and against a
+% tone at 16 dB the optimum-combining gain of one directional interferer (about JMc(1 - c),
+% Winters, Salz & Gitlin 1994), well above the rule's threshold, where the decision-directed
+% mmse_gain of the MRC link stays low.
+p = base_params(); p.quiet_build = true; p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false;
+p.gcs_tracked = false; p.k_random = false; p.gcs_aoa_random = false; p.body_random = false; p.tdl = false;
+p.rician_k = 10; p.int_rician_k = 10; p.rx_corr = 0.3; p.seed = 21; p.tone_jsr_db = 16;
+mdl = 'UAV_GCS_Threat_Link'; C = decision_config();
+G = struct();
+for t = {'none', 'tone_jamming'}
+    q = p; q.active_threat = t{1};
+    evalc('build_threat_model(q)');
+    set_link_snr(mdl, 6 + 10*log10(q.bits_per_symbol) - 10*log10(q.sps), q);
+    g = []; dd = [];
+    for r = 1:2
+        link_seed(mdl, 2100 + r, 160);
+        F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(9 * q.frame_duration)), q, 20);
+        verifyEqual(tc, numel(F.mmse_pred), F.nf);
+        g = [g, F.mmse_pred(2:end)]; dd = [dd, F.mmse_gain(2:end)]; %#ok<AGROW>
+    end
+    G.(t{1}) = [median(g), median(dd)];
+end
+close_system(mdl, 0);
+verifyLessThan(tc, abs(G.none(1)), 1.5);
+verifyGreaterThan(tc, G.tone_jamming(1), C.rule_mmse_db + 6);
+verifyGreaterThan(tc, G.tone_jamming(1), G.tone_jamming(2) + 6);
+end
+
+function test_policy_mmse_pred(tc)
+% The rule nulls on the predicted MMSE gain of the frame's known symbols (obs.mmse_pred),
+% not on the detector's decision-directed mmse_gain, at PP.rule_mmse_db when the pools set
+% it (C.rule_mmse_db otherwise; no prediction: not separable); the agent's state reads the
+% same value (0 dB without one); the pools carry it frame by frame to the observation.
+A = policy_actions(); C = decision_config(); cls = {'none', 'jamming'};
+na = find(strcmp(A, 'no_action'));
+PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', -Inf, 'confirm', [2 2], 'alarm_mode', 'class');
+o = struct('probs', [0 1], 'unknown', false, 'feat', zeros(1, numel(link_features('names'))));
+o.feat(feature_index('log_ber')) = -1; o.feat(feature_index('mmse_gain')) = 20;
+x = o; x.mmse_pred = 0;
+verifyEqual(tc, A{rule_cycles(x, PP, na)}, 'channel_switch');
+x.mmse_pred = C.rule_mmse_db;
+verifyEqual(tc, A{rule_cycles(x, PP, na)}, 'channel_switch+spatial_diversity');
+P2 = PP; P2.rule_mmse_db = C.rule_mmse_db + 3;
+verifyEqual(tc, A{rule_cycles(x, P2, na)}, 'channel_switch');
+verifyEqual(tc, A{rule_cycles(o, PP, na)}, 'channel_switch');
+verifyEqual(tc, rule_based_policy('jamming', false, 7, [], [], [], [], 8), 'channel_switch');
+verifyEqual(tc, rule_based_policy('jamming', false, 8, [], [], [], [], 8), 'channel_switch+spatial_diversity');
+verifyEqual(tc, rule_based_policy('jamming', false, NaN), 'channel_switch');
+verifyEqual(tc, C.rule_mmse_db, 6);
+mem = policy_monitor('init', 1, numel(A));
+x.mmse_pred = 13.5; mem = policy_monitor('update', mem, x, PP, na);
+verifyEqual(tc, mem.hist(numel(cls) + 9, 1, 1), 13.5);
+mem = policy_monitor('update', mem, o, PP, na);
+verifyEqual(tc, mem.hist(numel(cls) + 9, 1, 1), 0);
+nA = numel(A); fn = link_features('names'); n = 20;
+PL = struct('actions', {A}, 'scen', {{'none'}}, 'ebno', 9, 'runs', {{101}}, 'F_SUB', n, 'classes', {cls}, ...
+    'feat_names', {fn}, 'maha_thr', 0, 'clean', 1e-6, 'clean_fer', 0, 'gp', ones(1, nA), 'bw', ones(1, nA), ...
+    'pw', ones(1, nA), 'sps', 4, 'bps', 2);
+PL.pools = cell(1, 1, nA, 1);
+for a = 1:nA
+    PL.pools{1, 1, a, 1} = struct('ber', zeros(n, 1), 'fer', zeros(n, 1, 'single'), 'run', 101 * ones(n, 1), ...
+        'probs', repmat([1 0], n, 1), 'maha', ones(n, 1), 'feat', [(1:n)', zeros(n, numel(fn) - 1)], 'act', zeros(n, 1), ...
+        'mmse_pred', single(100 + (1:n)'));
+end
+K = link_env('tables', PL);
+spec = struct('scn', 1, 's', 1, 'onset', 3, 'follow', false, 'fdelay', 0, 'unk', false, 'T', 10, 'r', 1);
+[E, ob] = link_env('reset', PL, K, spec, 1, RandStream('mt19937ar', 'Seed', 1));
+verifyEqual(tc, ob.mmse_pred, 100 + ob.feat(1));
+[~, ~, ob] = link_env('step', E, PL, K, na);
+verifyEqual(tc, ob.mmse_pred, 100 + ob.feat(1));
+src = fileread(which('pool_cell'));
+verifyNotEmpty(tc, strfind(src, 'Q.mmse_pred = [Q.mmse_pred; single(F.mmse_pred(v)'')];'));
+verifyNotEmpty(tc, strfind(fileread(which('rekey_pools')), '''bch'', ''mmse_pred''};   % pool_cell.m'));
+end
+
+function a = rule_cycles(o, PP, na)
+% The rule's configuration after four cycles of the same observation from no_action.
+mem = []; a = na;
+for k = 1:4, [a, mem] = policy_decide('rule', o, a, mem, PP, []); end
 end

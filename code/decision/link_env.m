@@ -75,7 +75,8 @@ function varargout = link_env(cmd, varargin)
 %   counts as no threat episode (policy_run_set.m, dqn_eval_batches.m).
 %   obs: probs (NE x classes), maha (unknown-threat score), unknown (score below
 %   threshold, or masked), feat (NE x link features, receiver measurements), gant
-%   (NE x antennas, mean channel gain of every antenna), cfg_link (configuration
+%   (NE x antennas, mean channel gain of every antenna), mmse_pred (NE x 1, the predicted
+%   MMSE gain over MRC [dB], mmse_predict.m; NaN from pools without it), cfg_link (configuration
 %   the frame was received with), pkt (the frame's coded packet: the one that ends on
 %   frames 2k-1 and 2k of the geometry, the receiver's framing; its codeword spans the
 %   PP.fec_frames frames up to them, cyclic over the geometry's frames as the frame
@@ -297,6 +298,7 @@ obs.fer_true = zeros(E.NE, 1);
 obs.maha = zeros(E.NE, 1); obs.gant = [];
 obs.idle = nan(E.NE, numel(idle_summary('names')));     % the idle time before the frame (pools without it: none)
 obs.bch = [];                                           % every antenna's channel estimates (branch_record.m)
+obs.mmse_pred = nan(E.NE, 1);                           % the predicted MMSE gain over MRC (pools without it: none)
 for i = 1:E.NE
     P = PP.pools{sc_eff(i), E.s(i), cfg_eff(i), E.split};
     rows = find(P.run == PP.runs{E.split}(E.r(i)));
@@ -317,6 +319,7 @@ for i = 1:E.NE
         if isempty(obs.bch), obs.bch = nan(E.NE, size(P.bch, 2)); end
         obs.bch(i, :) = P.bch(j, :);
     end
+    if isfield(P, 'mmse_pred') && ~isempty(P.mmse_pred), obs.mmse_pred(i) = P.mmse_pred(j); end
     obs.ber_true(i) = P.ber(j);
     obs.fer_true(i) = P.fer(j);
 end

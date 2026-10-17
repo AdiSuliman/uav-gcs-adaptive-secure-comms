@@ -90,7 +90,7 @@ N_COUNT = 60;                    % unstratified candidates kept per (shadowing g
 VOUT   = [0 0; 161 161];         % speeds of the edge-speed split [km/h]: the first NHOVER geometries and the rest, at
                                  % the two ends of the envelope (dedicated test flights; the other splits draw over it)
 N_WORKERS = 6;
-MODEL_TAG = 'v7-D86';            % link model of the pools: train and validation splits are reused only under the same tag
+MODEL_TAG = 'v7-D88';            % link model of the pools: train and validation splits are reused only under the same tag
 opt = struct('F_SUB', 20, 'tw', 10, 'delay_bits', 20);
 C = decision_config();
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
@@ -108,7 +108,7 @@ clear nm
 T = ood_thresholds(0.95);
 FZ = fusion_model();                                   % temporal fusion, the rule's quiet-slot alarm (select_fusion.m)
 UW = 1; if isfield(D.ood, 'win'), UW = D.ood.win; end                        % unknown-score window (eval_ood_detection.m)
-DET_ID = detector_id(D.trained_at, D.ood, FZ, T.maha);
+DET_ID = detector_id(D.trained_at, D.ood, FZ);
 ACTIONS = policy_actions();
 scen = [SINGLES, COMBOS];
 nA = numel(ACTIONS); nS = numel(EBNO);
@@ -429,6 +429,7 @@ PP = struct('scen', {{cells.threat}}, 'sev', [cells.sev], 'level', [cells.level]
     'alt', {cellfun(@(V) V.alt_m, cv, 'UniformOutput', false)}, 'ksig', {cellfun(@(V) V.k_sig, cv, 'UniformOutput', false)}, ...
     'gp', gp, 'bw', bw, 'pw', pw, 'cfg_gain_db', config_gain_db(ACTIONS, p0), 'pools', {pools}, 'mber', mber, 'mfer', mfer, ...
     'clean', clean_ref.ber, 'clean_fer', clean_ref.fer, 'classes', {det.classes}, 'maha_thr', T.maha, ...
+    'maha_val', single(T.maha_val), 'unk_retain', T.retain, ...
     'fuse', FZ.FM, 'fuse_N', FZ.N, 'q_thr', FZ.q_thr, 'unk_win', UW, ...
     'F_SUB', opt.F_SUB, 'event_frame', {evf}, 'fec_frames', p0.fec_frames, 'runs', {runs}, 'model_tag', MODEL_TAG, ...
     'det_id', DET_ID, 'aoa_random', p0.int_aoa_random, 'k_random', p0.k_random, 'sps', p0.sps, 'bps', p0.bits_per_symbol, ...

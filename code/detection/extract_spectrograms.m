@@ -24,6 +24,9 @@ tw = 10;                                  % temporal window [frames]
 if ~isfield(ds, 'meas')
     error('dataset.mat predates D59 (no receiver measurements). Run run_dataset_sweep.m first.');
 end
+% one value per frame in every field (an align that also holds the flight draws: repair_align.m)
+assert_frames(ds.meas, numel(ds.run), sprintf('extract_spectrograms: the receiver measurements of %s', f_in));
+assert_frames(ds, numel(ds.run), sprintf('extract_spectrograms: %s', f_in), {'class_names', 'idle_names', 'bch_names'});
 
 N = numel(ds.iq);
 X = zeros(128, 128, 1, N, 'single');

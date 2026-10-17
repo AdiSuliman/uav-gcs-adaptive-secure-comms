@@ -90,7 +90,7 @@ function build_threat_model(p)
 %           packets or the noise bursts in every RSSI bin of the idle time before the frame
 %           (idle_rssi.m; NaN for the other components and the run's first frame), recorded
 %           from the schedule's own draws in their own order, so no draw moves.
-%           With p.proc_gain_db > 0 (rate_reduce) output 4 is our own received component
+%           With p.proc_gain_db > 0 (rate_reduce) or p.own_out, output 4 is our own received component
 %           (after the path-loss step, a faulty connector and the chain errors), logged as
 %           Thr_sig: the receiver-side emulation of the chip-rate field its level
 %           measurements read (extract_closed_loop_frames.m), never a decision input.
@@ -2112,8 +2112,10 @@ end
 
 function own = own_output(p)
 % Our own received component as output 4 of the threat block (rate_reduce: the chip-rate
-% field of the level measurements, extract_closed_loop_frames.m).
-own = isfield(p, 'proc_gain_db') && ~isempty(p.proc_gain_db) && p.proc_gain_db > 0;
+% field of the level measurements, extract_closed_loop_frames.m; p.own_out: the true
+% channel of the predicted MMSE gain's check, validate_phy.m). The link is the same.
+own = (isfield(p, 'proc_gain_db') && ~isempty(p.proc_gain_db) && p.proc_gain_db > 0) || ...
+    (isfield(p, 'own_out') && p.own_out);
 end
 
 function c = idle_code(on, nxt, sw, k, n, tb, cyc, fs)

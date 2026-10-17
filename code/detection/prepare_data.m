@@ -26,6 +26,7 @@ sp0 = S.spec;
 if ~isfield(sp0, 'fold')
     error('spectrograms.mat predates D42. Run run_dataset_sweep and extract_spectrograms first.');
 end
+assert_frames(sp0, numel(sp0.run), 'prepare_data: data/spectrograms.mat', spec_meta());
 classes = categories(sp0.Y);
 fold = sp0.fold(:);
 ix = struct();
@@ -95,6 +96,7 @@ if isfield(sp0, 'pos')
     splits.test.pos = sp0.pos; splits.test.gain_ant = sp0.gain_ant; splits.test.feats_raw = sp0.feats;
 end
 if isfield(sp0, 'k_db'), splits.test.k_db = sp0.k_db; splits.test.aoa = sp0.aoa; end
+assert_frames(sp0, numel(sp0.run), 'prepare_data: the test set''s spectrograms', spec_meta());
 splits.test = meta_fields(splits.test, sp0, true(numel(sp0.run), 1));
 if isfield(sp0, 'ebno_rx'), splits.test.ebno_rx = sp0.ebno_rx; end
 splits.test = idle_fields(splits.test, sp0, true(numel(sp0.run), 1));
@@ -123,4 +125,9 @@ function S = meta_fields(S, sp0, m)
 for f = {'alt_m', 'bank', 'ds_ns', 'lev_db', 'class_run', 'roll_in'}
     if isfield(sp0, f{1}), S.(f{1}) = sp0.(f{1})(m, :); end
 end
+end
+
+function f = spec_meta()
+% Fields of the spectrograms that are not per frame (structs aside: assert_frames.m).
+f = {'feat_names', 'class_names', 'img_size'};
 end
