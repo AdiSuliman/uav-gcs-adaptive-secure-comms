@@ -57,7 +57,14 @@ default, and nothing in the pipeline sets it. With the switch off:
   column. So `policy_monitor.m`, `fused_class.m`, `det_frames.m`, `eval_detector.m` and
   `compare_architectures.m` build the same row as before.
 
-**Bit-identity check.** BITID_PLACEHOLDER
+**Bit-identity check** (scratchpad `d90_bitid/bitid.m`). B2F and B3 ran on the same smoke data,
+once with `9b5c9f1`'s code and once with this branch, switch off:
+- `fusion.mat`: the same 10 variables, every one identical (`isequaln`);
+- `detector_predictions.mat`: identical;
+- `eval_detector_metrics.mat`: every field identical except the `generated` time stamp. The only
+  additions are the sweeper path's onset fields (`sw_median`, `sw_p90`, `sw_never_pct`; section 2);
+- the closed-loop monitor's fused probabilities over 63 validation cycles: largest difference 0,
+  the same classes.
 
 ### What the switch would do
 
