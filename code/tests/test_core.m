@@ -5629,10 +5629,12 @@ end
 
 function test_mmse_predict_known_symbols(tc)
 % The predicted MMSE gain over MRC (mmse_predict.m, F.mmse_pred) reads the frame's known
-% symbols only: near 0 dB on the clean link (MMSE is MRC in white noise), and against a
-% tone at 16 dB the optimum-combining gain of one directional interferer (about JMc(1 - c),
-% Winters, Salz & Gitlin 1994), well above the rule's threshold, where the decision-directed
-% mmse_gain of the MRC link stays low.
+% symbols only: near 0 dB on the clean link (MMSE is MRC in white noise), also on the delay
+% line over the pools' draws at the grid's top Eb/N0 (our own echoes add a little there),
+% with few frames at the rule's threshold; and against a tone at 16 dB the
+% optimum-combining gain of one directional interferer (about JMc(1 - c), Winters, Salz &
+% Gitlin 1994), well above the rule's threshold, where the decision-directed mmse_gain of
+% the MRC link stays low.
 p = base_params(); p.quiet_build = true; p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false;
 p.gcs_tracked = false; p.k_random = false; p.gcs_aoa_random = false; p.body_random = false; p.tdl = false;
 p.rician_k = 10; p.int_rician_k = 10; p.rx_corr = 0.3; p.seed = 21; p.tone_jsr_db = 16;
@@ -5651,10 +5653,89 @@ for t = {'none', 'tone_jamming'}
     end
     G.(t{1}) = [median(g), median(dd)];
 end
+q = p; q.active_threat = 'none'; q.tdl = true; q.tdl_random = true; q.k_random = true; q.corr_random = true;
+evalc('build_threat_model(q)');
+set_link_snr(mdl, 15 + 10*log10(q.bits_per_symbol) - 10*log10(q.sps), q);
+g = [];
+for r = 1:8
+    link_seed(mdl, 2110 + r, 160);
+    F = extract_closed_loop_frames(sim(mdl, 'StopTime', num2str(9 * q.frame_duration)), q, 20);
+    g = [g, F.mmse_pred(2:end)]; %#ok<AGROW>
+end
 close_system(mdl, 0);
 verifyLessThan(tc, abs(G.none(1)), 1.5);
+verifyLessThan(tc, abs(median(g)), 1.5);
+verifyLessThanOrEqual(tc, mean(g >= C.rule_mmse_db), 0.05);
 verifyGreaterThan(tc, G.tone_jamming(1), C.rule_mmse_db + 6);
 verifyGreaterThan(tc, G.tone_jamming(1), G.tone_jamming(2) + 6);
+end
+
+function test_mmse_predict_search(tc)
+% Where MMSE reads no SINR above 0 dB at the receiver's arrival and frequency, mmse_predict
+% measures the frame where the MMSE receiver would acquire it: with the receiver's arrival
+% 2 symbols off (a fractional arrival, Eb/N0 -3 dB), the arrival of the highest MMSE SINR
+% of the window as each candidate measures on its own; with a 30 dB tone and the receiver's
+% frequency 3 pilot alias steps off, our signal's frequency. One frame with the previous one
+% as the filter's memory reads what the run reads (KPI 7 times that call).
+p = base_params(); C = decision_config(); rng(7);
+TM = round(p.timing_max_sym * p.sps); fp = p.symbol_rate / (p.pilot_block + p.pilot_every);
+nf = 12; tau = 2 + 4 * rand(1, nf);
+y = synth_frames(p, -3, tau, zeros(1, nf), -Inf);
+sy = [round(tau) + 2 * p.sps; zeros(1, nf)];
+[G, D] = mmse_predict(y, p, sy);
+c = nan(TM + 1, nf);
+for d = 0:TM
+    [~, Dd] = mmse_predict(y, p, [d * ones(1, nf); zeros(1, nf)]);
+    v = ~Dd.search; c(d + 1, v) = Dd.mmse_db(v);
+end
+verifyTrue(tc, all(D.search));
+verifyLessThan(tc, abs(D.arrival - tau), 1);
+verifyGreaterThan(tc, D.mmse_db, max(c, [], 1) - 0.3);
+for k = 2:nf
+    s2 = sy(:, k-1:k); s2(:, 1) = NaN;
+    g2 = mmse_predict(y(:, :, k-1:k), p, s2);
+    verifyTrue(tc, isnan(g2(1)));
+    verifyEqual(tc, g2(2), G(k), 'AbsTol', 1e-9);
+end
+fo = 1e3 * (rand(1, nf) - 0.5);
+y = synth_frames(p, 6, tau, fo, 30);
+[G, D] = mmse_predict(y, p, [round(tau); fo - 3 * fp]);
+verifyLessThan(tc, abs(fo - 3 * fp + D.df_hz - fo), fp / 4);
+verifyLessThan(tc, abs(D.arrival - tau), 1);
+verifyGreaterThan(tc, median(G), C.rule_mmse_db + 6);
+end
+
+function y = synth_frames(p, eb, tau, fo, jsr)
+% Frames of our signal at arrival tau [samples, fractional] and frequency fo [Hz] on a
+% Rician K 10 dB channel from 10 deg, every antenna's noise at Eb/N0 eb, and a tone jsr dB
+% above our signal at 37 kHz from -40 deg (none: -Inf); samples x antennas x frames.
+L = frame_layout(p); ns = L.air * p.sps; na = p.n_rx; nf = numel(tau);
+h = rcosdesign(p.rolloff, p.filter_span, p.sps, 'sqrt');
+t = (0:ns-1)' / (p.symbol_rate * p.sps); m = 2 * ns; k = (0:m-1)'; fr = (k - m * (k >= m / 2)) / m;
+y = complex(zeros(ns, na, nf));
+for f = 1:nf
+    sym = L.tmpl; sym(L.idx_data) = exp(1j * pi / 4 * (2 * randi([0 3], L.n_data, 1) + 1));
+    x = zeros(ns, 1); x(1:p.sps:end) = sym;
+    x = ifft(fft(filter(h, 1, x), m) .* exp(-1j * 2*pi * fr * tau(f)));
+    x = x(1:ns) .* exp(1j * 2*pi * fo(f) * t);
+    a = sqrt(10/11) * exp(1j * (pi * (0:na-1) * sind(10) + 2*pi * rand)) + sqrt(1/22) * (randn(1, na) + 1j * randn(1, na));
+    y(:, :, f) = x * a + sqrt(1 / 10^((eb + 3.01) / 10) / 2) * (randn(ns, na) + 1j * randn(ns, na));
+    if isfinite(jsr)
+        y(:, :, f) = y(:, :, f) + sqrt(10^(jsr / 10) / p.sps) * exp(1j * (2*pi * 37e3 * t + 2*pi * rand)) * ...
+            exp(1j * pi * (0:na-1) * sind(-40));
+    end
+end
+end
+
+function test_latency_times_predictor(tc)
+% KPI 7 times the predicted MMSE gain in the cycle: frame k on every antenna as the
+% combiner sees it, frame k - 1 only the filter's memory; the observation reads its value.
+src = fileread(which('measure_latency'));
+verifyNotEmpty(tc, strfind(src, 't0 = tic; g = mmse_predict(x.iqa, p0, x.sy); t_pred = toc(t0);'));
+verifyNotEmpty(tc, strfind(src, 'if k > 1, s2(:, 1) = NaN; end'));
+verifyNotEmpty(tc, strfind(src, 'obs.mmse_pred = g(end);'));
+verifyNotEmpty(tc, strfind(src, 'tm(n, :) = 1000 * [t_spec, t_feat, t_pred, t_det, t_dqn];'));
+verifyNotEmpty(tc, strfind(src, '''dep'', sum(tm(1:n, 1:4), 2) + tp(1:n)'));
 end
 
 function test_policy_mmse_pred(tc)
