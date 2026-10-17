@@ -7,6 +7,8 @@ function run_stage(varargin)
 %   A6 extract_spectrograms | B1 prepare_data | B2 train_detector | B2F select_fusion |
 %   B3n build_fresh_test (run_dataset_sweep, extract_spectrograms and prepare_data on a
 %   second test set) | B3 eval_detector (the test split, then the second test set) |
+%   B3m build_fresh_test2 (the same recipe on a third test set, new seeds, then
+%   eval_detector on it: the reading after the monitor's last validation choice) |
 %   B3a compare_architectures |
 %   B4 eval_unseen_snr | OOD eval_ood_detection | B4s eval_unseen_severity | C1p build_policy_pools |
 %   C1c build_clean_test_pools and build_check_pools | C1d choose_drop_threshold | C2 train_dqn |
@@ -30,7 +32,8 @@ cleanup = onCleanup(@() diary('off'));
 warning('off', 'Simulink:cgxe:LeakedJITEngine');
 disk_guard('init');
 map = struct('A0', 'init_params', 'A4v', 'validate_phy', 'A5', 'run_dataset_sweep', 'A6', 'extract_spectrograms', ...
-    'B1', 'prepare_data', 'B2', 'train_detector', 'B2F', 'select_fusion', 'B3n', 'build_fresh_test', 'B3', 'eval_detector', 'B3a', 'compare_architectures', ...
+    'B1', 'prepare_data', 'B2', 'train_detector', 'B2F', 'select_fusion', 'B3n', 'build_fresh_test', 'B3', 'eval_detector', ...
+    'B3m', 'build_fresh_test2', 'B3a', 'compare_architectures', ...
     'B4', 'eval_unseen_snr', ...
     'OOD', 'eval_ood_detection', 'B4s', 'eval_unseen_severity', 'C1p', 'build_policy_pools', 'C1c', 'build_clean_test_pools', ...
     'C1d', 'choose_drop_threshold', 'C2', 'train_dqn', 'C2e', 'evaluate_policies', ...
@@ -51,13 +54,21 @@ end
 function run_one(name, SMOKE) %#ok<INUSD>
 % Scripts run in this function's workspace; CLEAN_SET selects the clean-pool set of
 % C1c, which then builds the off-grid check pools; FRESH_TEST makes A5, A6 and B1 build the
-% second test set; DET_TEST makes B3 read the test split beside it; SMOKE switches the
-% reduced problem on.
+% second test set, with FRESH_SET = 2 the third; DET_TEST makes B3 read the test split beside
+% it, and the third test set after B3m builds it; SMOKE switches the reduced problem on.
 if strcmp(name, 'build_fresh_test')
     FRESH_TEST = true; %#ok<NASGU>
     for scr = {'run_dataset_sweep', 'extract_spectrograms', 'prepare_data'}
         run(scr{1});
     end
+elseif strcmp(name, 'build_fresh_test2')
+    FRESH_TEST = true; FRESH_SET = 2; %#ok<NASGU>
+    for scr = {'run_dataset_sweep', 'extract_spectrograms', 'prepare_data'}
+        run(scr{1});
+    end
+    clear FRESH_TEST FRESH_SET
+    DET_TEST = 'fresh2'; %#ok<NASGU>
+    run('eval_detector');
 elseif strcmp(name, 'eval_detector') && isfile('data/splits_fresh.mat')
     for DET_TEST = {'split', 'fresh'}
         DET_TEST = DET_TEST{1}; %#ok<FXSET,NASGU>

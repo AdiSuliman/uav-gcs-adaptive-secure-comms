@@ -54,6 +54,9 @@ function varargout = onset_shape(G, varargin)
 %       a grid of 0.25 from -8 to 8, the one nearest 0 among equals; 0 without both causes
 %   thr = onset_shape('threshold', FM)   FM.os_thr of the deployed fusion (select_fusion.m),
 %       0 without one: the model that fits better
+%   on = onset_shape('on', FM)   whether the monitor latches the cause at all: FM.latch of the
+%       deployed fusion, chosen on validation (select_fusion.m); true without it (a fusion
+%       fitted before that choice, or no fusion). Off, the monitor's class is the fused class.
 %   names = onset_shape('names')
 C_LOST = 5; K_DIAG = 3; N_HIST = 20;
 if ischar(G)
@@ -70,6 +73,9 @@ if ischar(G)
         case 'threshold'
             FM = varargin{1}; varargout{1} = 0;
             if isstruct(FM) && isfield(FM, 'os_thr') && ~isempty(FM.os_thr), varargout{1} = FM.os_thr; end
+        case 'on'
+            FM = varargin{1}; varargout{1} = true;
+            if isstruct(FM) && isfield(FM, 'latch') && ~isempty(FM.latch), varargout{1} = logical(FM.latch); end
         otherwise, error('onset_shape: unknown command %s', G);
     end
     return

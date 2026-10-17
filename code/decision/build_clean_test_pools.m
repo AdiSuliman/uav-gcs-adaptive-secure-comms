@@ -48,8 +48,7 @@ nS = numel(EBNO); nA = numel(ACTIONS);
 runs = 100 * SP + (1:N_GEOM);
 
 D = load('data/trained_detector.mat', 'net', 'classes', 'ood', 'trained_at');
-T = ood_thresholds(0.95);
-DET_ID = detector_id(D.trained_at, D.ood, fusion_model(), T.maha);
+DET_ID = detector_id(D.trained_at, D.ood, fusion_model());
 if ~strcmp(PID, DET_ID)
     error('build_clean_test_pools: data/policy_pools.mat comes from another detector; rerun C1p first');
 end

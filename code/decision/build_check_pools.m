@@ -65,7 +65,7 @@ clear nm
 T = ood_thresholds(0.95);
 FZ = fusion_model();
 UW = 1; if isfield(D.ood, 'win'), UW = D.ood.win; end
-DET_ID = detector_id(D.trained_at, D.ood, FZ, T.maha);
+DET_ID = detector_id(D.trained_at, D.ood, FZ);
 if ~strcmp(PID, DET_ID)
     error('build_check_pools: data/policy_pools.mat comes from another detector; rerun C1p first');
 end

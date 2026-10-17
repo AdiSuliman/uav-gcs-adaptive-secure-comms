@@ -118,8 +118,9 @@ if ~isfield(PP, 'cov') || ~isfield(PP, 'cell_geo') || numel(PP.runs) < 5
     error('edge_map: the pools have no second test split or flight draws (built before v7-D74); run build_policy_pools');
 end
 Q = load('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'H', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db', ...
-    'deployed', 'rule_sel', 'fa_bound_met', 'det_id');
+    'deployed', 'rule_sel', 'fa_bound_met', 'det_id', 'maha_thr');
 check_det_id(PP, Q, 'edge_map');
+if isfield(Q, 'maha_thr'), PP.maha_thr = Q.maha_thr; end         % the unknown-threat threshold the agent ran with
 MON = struct('alarm_mode', Q.alarm_mode, 'confirm', Q.confirm, 'drop_db', Q.drop_db);
 if strcmp(Q.deployed, 'rule_sel'), MON = Q.rule_sel; end      % the deployed policy's monitor
 PP.confirm = MON.confirm; PP.alarm_mode = MON.alarm_mode;
@@ -967,6 +968,9 @@ rep{end+1} = sprintf(['--- A lost branch with and without its onset in the fusio
     'air at no_action; the onset within the last %d cycles, then after them): DET %% by the monitor''s class (the ' ...
     'fused class, and the cause latched from the onset''s shape, onset_shape.m) | by the fused class alone. The ' ...
     'onset''s shape is read at the event''s start, the latched cause after it ---'], PP.fuse_N);
+if ~onset_shape('on', PP.fuse)
+    rep{end+1} = 'The latch is off (chosen on validation, select_fusion.m): the monitor''s class is the fused class.';
+end
 for q = 1:numel(OC)
     rep{end+1} = sprintf('%-20s %5.1f dB | onset in the window %5.1f | %5.1f (%d frames) | after it %5.1f | %5.1f (%d frames)', ...
         OC(q).threat, OC(q).level, 100 * OC(q).k_latch(1) / max(OC(q).n(1), 1), 100 * OC(q).k_fused(1) / max(OC(q).n(1), 1), ...

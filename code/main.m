@@ -25,7 +25,8 @@
 %
 % DEPENDENCIES (what must exist before a stage can run):
 %   A5 needs A0 | A6 needs A5 | B1 needs A6 | B2 needs B1 | B2F needs B2 | B3n needs B2F |
-%   B3 (the test split and the second test set), B3a, B4, OOD need B2 | B4s needs OOD
+%   B3 (the test split and the second test set), B3a, B4, OOD need B2 | B4s needs OOD |
+%   B3m (the third test set and its reading) needs B2F
 %   C1p needs OOD (it selects the production unknown-threat score) | C1c, C1d need C1p | C2 needs C1p, C1c (validation set), C1d | C2e needs C2 (and C1c for KPI 6)
 %   C2g, C2u need C2 | SURV, SURV3, OHP, GCSA need A0 | EDGE needs C2e, C2u, C1c, OHP, GCSA
 %   LAT needs C2 | KPI reads B3, B4, OOD, A4v, C2e, EDGE, LAT, SURV | DASH, WEAK, RPT need KPI
@@ -108,6 +109,7 @@ RUN.train_detector              = false;    % B2  : train CNN+scalar hybrid, unk
 RUN.select_fusion               = false;    % B2F : temporal fusion and the quiet-slot alarm, chosen on validation (~4 min)
 RUN.build_fresh_test            = false;    % B3n : a second detector test set (dataset, spectrograms, splits) (~2.8-3.2 h)
 RUN.eval_detector               = false;    % B3  : test eval + confusion/accuracy-vs-SNR + bootstrap CIs; the second test set beside it (~2 min)
+RUN.build_fresh_test2           = false;    % B3m : a third detector test set (new seeds) and its reading, after the monitor's last validation choice (~4.5-5 h)
 RUN.compare_architectures       = false;    % B3a : hybrid vs spectrogram-only vs features-only (~45-75 min)
 RUN.eval_unseen_snr             = false;    % B4  : detector at Eb/N0 never seen in training, midpoints of the grid (~40-50 min)
 RUN.eval_ood_detection          = false;    % OOD : leave-one-threat-out, retrains the detector 10 times; selects the production unknown-threat score (~3.7-4 h)
@@ -222,6 +224,11 @@ if RUN.eval_detector
     else
         eval_detector;
     end
+end
+if RUN.build_fresh_test2
+    fprintf('  [B3m] A third detector test set and its reading...\n');
+    for scr = {'run_dataset_sweep', 'extract_spectrograms', 'prepare_data'}, run_own(scr{1}, true, [], 2); end
+    run_own('eval_detector', [], 'fresh2');
 end
 if RUN.compare_architectures
     fprintf('  [B3a] Detector architectures on the same splits...\n');
@@ -387,10 +394,11 @@ fprintf('Diary closed. Open %s for the complete unclipped run transcript.\n', lo
 
 
 %% ========== local helpers ==========
-function run_own(name, FRESH_TEST, DET_TEST) %#ok<INUSD>
+function run_own(name, FRESH_TEST, DET_TEST, FRESH_SET) %#ok<INUSD>
 % A stage script in a workspace of its own, so its variables never overwrite this
-% script's flags; FRESH_TEST and DET_TEST (run_stage.m) reach it when given.
+% script's flags; FRESH_TEST, DET_TEST and FRESH_SET (run_stage.m) reach it when given.
 if nargin >= 2 && isempty(FRESH_TEST), clear FRESH_TEST; end
+if nargin >= 3 && isempty(DET_TEST), clear DET_TEST; end
 run(name);
 end
 

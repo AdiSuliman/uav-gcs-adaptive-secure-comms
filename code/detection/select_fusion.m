@@ -18,11 +18,17 @@
 % of the two threats: the statistic at the latch's diagnosis of each sub-run's event on the
 % threat's branch, the latch run as deployed (onset_shape.m 'events', decision_config.m
 % heal), the threshold that reads the two causes right in the largest mean share
-% (FM.os_thr). The monitor's class out of fold (val_latch_oof, the KPI 1 threshold of
-% eval_detector.m): the latch over the out-of-fold fused probabilities of every validation
-% sub-run, its threshold chosen on the other folds' sub-runs. The test split is not used.
-% Output: data/fusion.mat (FM with os_thr, N, lambda, cv table, out-of-fold probabilities
-% (fused, and the monitor's) and their targets, q_thr)
+% (FM.os_thr). The monitor's class out of fold with the latch (val_latch_oof): the latch over
+% the out-of-fold fused probabilities of every validation sub-run, its threshold chosen on the
+% other folds' sub-runs. Whether the monitor latches at all (FM.latch, onset_shape('on', FM))
+% is chosen here too: the latch only where its out-of-fold macro-F1 is above the fused class's
+% (val_probs_oof), the measure that chose N and lambda; the per-event reading of a lost
+% branch's cause (the first cycle from the onset read as antenna_fault or
+% airframe_shadowing, the right one) is printed beside. The monitor's class out of fold, with
+% or without the latch as chosen, sets the KPI 1 threshold of eval_detector.m. The test split
+% is not used.
+% Output: data/fusion.mat (FM with os_thr and latch, N, lambda, cv table, out-of-fold
+% probabilities (fused, and with the latch) and their targets, q_thr)
 
 close all; clc;
 fprintf('=== B2F: temporal fusion (validation split only) ===\n\n');
@@ -104,11 +110,42 @@ for f = 1:K
     val_latch_oof(m, :) = latch_runs(val_probs_oof(m, :), va.run(m), va.pos(m), va.gain_ant(m, :), classes, tf, heal);
 end
 [~, yl] = max(val_latch_oof, [], 2); [~, yo] = max(val_probs_oof, [], 2);
-fprintf('Out of fold, the monitor''s class (latched cause of a lost branch): macro-F1 %.2f%% (fused class %.2f%%)\n', ...
-    100 * macro_f1(val_target, yl, C), 100 * macro_f1(val_target, yo, C));
+mf_latch = macro_f1(val_target, yl, C); mf_fused = macro_f1(val_target, yo, C);
+FM.latch = mf_latch > mf_fused;                         % the latch only where it raises macro-F1 out of fold
+fprintf('Out of fold, the monitor''s class with the latched cause of a lost branch: macro-F1 %.2f%%; the fused class %.2f%%\n', ...
+    100 * mf_latch, 100 * mf_fused);
+[ef, nf] = event_cause(yo, val_target, va.run, va.pos, iB); [el, ~] = event_cause(yl, val_target, va.run, va.pos, iB);
+fprintf(['Per event, the first cycle from the onset read as a lost branch reads the right cause: antenna fault %.1f%% ' ...
+    'fused, %.1f%% latched (%d events); airframe shadowing %.1f%%, %.1f%% (%d events)\n'], 100 * ef(1), 100 * el(1), nf(1), ...
+    100 * ef(2), 100 * el(2), nf(2));
+if FM.latch
+    fprintf('The monitor latches the cause of a lost branch (FM.latch = true)\n');
+else
+    fprintf('The monitor''s class is the fused class: the latch is off (FM.latch = false)\n');
+end
 if ~exist('results', 'dir'), mkdir('results'); end
 save('data/fusion.mat', 'FM', 'N', 'lambda', 'NS', 'LAMBDA', 'cv', 'val_probs_oof', 'val_latch_oof', 'val_target', 'q_thr');
 fprintf('Saved data/fusion.mat\n');
+
+function [r, n] = event_cause(k, y, run, pos, iB)
+% Per lost-branch class (iB: antenna_fault, airframe_shadowing), the share of the validation
+% sub-runs whose first cycle from the class's onset read as either class reads the right one
+% (never read: wrong), and their number.
+r = nan(1, 2); n = zeros(1, 2);
+if numel(iB) < 2, return; end
+ok = zeros(1, 2);
+for q = unique(run(ismember(y, iB)))'
+    ix = find(run == q); [~, o] = sort(pos(ix)); ix = ix(o);
+    for b = 1:2
+        j0 = find(y(ix) == iB(b), 1);
+        if isempty(j0), continue; end
+        j = find(ismember(k(ix(j0:end)), iB), 1);
+        n(b) = n(b) + 1;
+        if ~isempty(j), ok(b) = ok(b) + (k(ix(j0 + j - 1)) == iB(b)); end
+    end
+end
+r = ok ./ max(n, 1);
+end
 
 function m = macro_f1(y, yh, C)
 f = zeros(1, C);

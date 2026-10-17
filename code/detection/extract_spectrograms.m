@@ -3,11 +3,16 @@
 % (receiver measurements), temporal ones over a causal window of 10 frames
 % inside each sub-run. The same two functions are used by every closed-loop
 % script and the GUI, so training and deployment see identical inputs.
-% With FRESH_TEST true (build_fresh_test.m): data/dataset_fresh.mat -> data/spectrograms_fresh.mat.
+% With FRESH_TEST true (build_fresh_test.m): data/dataset_fresh.mat -> data/spectrograms_fresh.mat;
+% with FRESH_SET = 2 as well (B3m, the third test set): data/dataset_fresh2.mat ->
+% data/spectrograms_fresh2.mat.
 
 close all; clc;
 f_in = 'data/dataset.mat'; f_out = 'data/spectrograms.mat';
 if exist('FRESH_TEST', 'var') && FRESH_TEST, f_in = 'data/dataset_fresh.mat'; f_out = 'data/spectrograms_fresh.mat'; end
+if exist('FRESH_TEST', 'var') && FRESH_TEST && exist('FRESH_SET', 'var') && isequal(FRESH_SET, 2)
+    f_in = 'data/dataset_fresh2.mat'; f_out = 'data/spectrograms_fresh2.mat';
+end
 if ~exist(f_in, 'file')
     error('%s not found. Run run_dataset_sweep.m first.', f_in);
 end
@@ -19,6 +24,9 @@ tw = 10;                                  % temporal window [frames]
 if ~isfield(ds, 'meas')
     error('dataset.mat predates D59 (no receiver measurements). Run run_dataset_sweep.m first.');
 end
+% one value per frame in every field (an align that also holds the flight draws: repair_align.m)
+assert_frames(ds.meas, numel(ds.run), sprintf('extract_spectrograms: the receiver measurements of %s', f_in));
+assert_frames(ds, numel(ds.run), sprintf('extract_spectrograms: %s', f_in), {'class_names', 'idle_names', 'bch_names'});
 
 N = numel(ds.iq);
 X = zeros(128, 128, 1, N, 'single');

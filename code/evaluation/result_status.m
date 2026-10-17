@@ -15,20 +15,21 @@ function S = result_status()
 %                                   than results/policy_evaluation.mat
 %     results/phy_validation.txt    run on the parameters of params.mat (params_id.m; its time
 %                                   when the report carries no identity)
-%     results/eval_detector_metrics.mat  newer than the detector's training
+%     results/eval_detector_metrics.mat  newer than the detector's training and than the
+%                                   fusion (data/fusion.mat: the monitor's class); the same
+%                                   for the third test set's reading (_fresh2) when present
 %   A file without its identity fields counts as stale.
 cur_det = ''; cur_pol = ''; t_det = -inf;
 if all(isfile({'data/trained_detector.mat', 'data/ood_thresholds.mat'}))
     D = load('data/trained_detector.mat', 'trained_at', 'ood');
     if isfield(D, 'trained_at'), t_det = D.trained_at; end
     try
-        T = ood_thresholds(0.95);
-        cur_det = detector_id(D.trained_at, D.ood, fusion_model(), T.maha);
+        cur_det = detector_id(D.trained_at, D.ood, fusion_model());
     catch
     end
 end
 if isfile('data/trained_dqn.mat')
-    Q = load('data/trained_dqn.mat', 'agent', 'confirm', 'alarm_mode', 'drop_db', 'deployed', 'rule_sel', 'det_id');
+    Q = load('data/trained_dqn.mat', 'agent', 'confirm', 'alarm_mode', 'drop_db', 'deployed', 'rule_sel', 'det_id', 'maha_thr');
     cur_pol = policy_stamp(Q);
 end
 t = @(f) file_time(f);
@@ -63,9 +64,13 @@ if isfile(f)
     end
 end
 S(end+1) = entry(f, why);
-f = 'results/eval_detector_metrics.mat'; why = {};
-if isfile(f) && t(f) < t_det, why = {'older than the detector''s training'}; end
-S(end+1) = entry(f, why);
+for f = {'results/eval_detector_metrics.mat', 'results/eval_detector_metrics_fresh2.mat'}
+    if strcmp(f{1}, 'results/eval_detector_metrics_fresh2.mat') && ~isfile(f{1}), continue; end
+    why = {};
+    if isfile(f{1}) && t(f{1}) < t_det, why{end+1} = 'older than the detector''s training'; end %#ok<AGROW>
+    if isfile(f{1}) && t(f{1}) < t('data/fusion.mat'), why{end+1} = 'older than data/fusion.mat (rerun its reading, B3 or B3m)'; end %#ok<AGROW>
+    S(end+1) = entry(f{1}, why); %#ok<AGROW>
+end
 end
 
 function why = id_check(X, field, cur, what)

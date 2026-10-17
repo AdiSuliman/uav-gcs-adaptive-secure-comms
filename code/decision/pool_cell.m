@@ -26,8 +26,10 @@ function [P, info] = pool_cell(p, threat, actions, ebno, geo, det, opt)
 %            [dB]: the Eb/N0 of the configuration, its gain and the relay loss included,
 %            less the path-loss step on the frames where it is on the air, received_ebno.m),
 %            idle (frames x 24, the record of the idle time before the frame,
-%            idle_summary.m) and act_idle (the share of that idle time with the threat on
-%            the air: the per-cycle labels, threat_active.m)
+%            idle_summary.m), act_idle (the share of that idle time with the threat on
+%            the air: the per-cycle labels, threat_active.m) and mmse_pred (the predicted
+%            MMSE gain over MRC [dB] from the frame's known symbols, mmse_predict.m: the
+%            policies' nulling input)
 %   info     configurations actually simulated (identical physics is simulated once)
 modelName = 'UAV_GCS_Threat_Link';
 nA = numel(actions); nS = numel(ebno); nSp = numel(geo{1});
@@ -85,7 +87,7 @@ Q = struct('probs', zeros(0, nC, 'single'), 'maha', zeros(0, 1, 'single'), 'feat
     'run', zeros(0, 1), ...
     'aoa', zeros(0, 3, 'single'), 'act', zeros(0, 1, 'single'), 'act_comp', zeros(0, 3, 'single'), ...
     'ebno_rx', zeros(0, 1, 'single'), 'idle', zeros(0, numel(idle_summary('names')), 'single'), ...
-    'act_idle', zeros(0, 1, 'single'), 'bch', zeros(0, 0, 'single'));
+    'act_idle', zeros(0, 1, 'single'), 'bch', zeros(0, 0, 'single'), 'mmse_pred', zeros(0, 1, 'single'));
 end
 
 function v = geo_value(g, f, r)
@@ -117,4 +119,5 @@ Q.act_comp = [Q.act_comp; single(F.act_comp(:, v)')];
 Q.ebno_rx = [Q.ebno_rx; single(erx(v)')];
 Q.idle = [Q.idle; single(F.idle(:, v)')]; Q.act_idle = [Q.act_idle; single(F.act_idle(v)')];
 Q.bch = [Q.bch; single(F.bch(:, v)')];
+Q.mmse_pred = [Q.mmse_pred; single(F.mmse_pred(v)')];
 end

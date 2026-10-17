@@ -1119,7 +1119,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     % cycles of the healthy link; evaluation episodes start clean, so the live
     % run does too. A rolling-in flight's lead-in is the clean link of the same
     % flight up to the frame the airframe enters the line of sight, as the pools'.
-    leadF = []; leadB = []; probsL = []; mahaL = []; leadG = []; leadI = [];
+    leadF = []; leadB = []; probsL = []; mahaL = []; leadG = []; leadI = []; leadM = [];
     if ~strcmp(threat, 'none')
         if isempty(fl)
             appLog(fig, 'Simulating a clean lead-in of the same link (monitor reference)...');
@@ -1137,6 +1137,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
             leadF(i, :) = link_features(FL, vl(i), env.temporal_window);
         end
         leadB = FL.ber(vl); leadG = FL.gain_ant(:, vl)'; leadI = FL.idle(:, vl)';   % the idle time before each frame
+        leadM = FL.mmse_pred(vl)';                                                   % the predicted MMSE gain (mmse_predict.m)
         leadC = nan(numel(vl), 0); if isfield(FL, 'bch'), leadC = FL.bch(:, vl)'; end   % the antennas' channel records
         FnL = ((leadF - env.feat_mean) ./ env.feat_std)';
         [probsL, mahaL] = detect_scores(env.cnn_net, env.ood, XL, FnL);
@@ -1183,7 +1184,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     cfgD = env.na; cfgR = env.na; memD = []; memR = []; dqn_ms = NaN;
     for i = 1:size(leadF, 1)                                    % clean lead-in: reference only
         obs = struct('probs', probsL(:, i)', 'unknown', mahaL(i) < PPr.maha_thr, 'maha', mahaL(i), 'feat', leadF(i, :), ...
-            'ber', leadB(i), 'gant', leadG(i, :), 'idle', leadI(i, :), 'bch', leadC(i, :));
+            'ber', leadB(i), 'gant', leadG(i, :), 'idle', leadI(i, :), 'bch', leadC(i, :), 'mmse_pred', leadM(i));
         [cfgD, memD] = policy_decide('dqn_esc', obs, cfgD, memD, PPr, env.dqn_agent);
         [cfgR, memR] = policy_decide('rule_esc', obs, cfgR, memR, PPr, []);
     end
@@ -1194,7 +1195,8 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     end
     for i = 1:nv
         obs = struct('probs', probsAll(:, i)', 'unknown', mahaAll(i) < PPr.maha_thr, 'maha', mahaAll(i), 'feat', Fr(i, :), ...
-            'ber', ber_f(vf(i)), 'gant', F.gain_ant(:, vf(i))', 'idle', F.idle(:, vf(i))', 'bch', F.bch(:, vf(i))');
+            'ber', ber_f(vf(i)), 'gant', F.gain_ant(:, vf(i))', 'idle', F.idle(:, vf(i))', 'bch', F.bch(:, vf(i))', ...
+            'mmse_pred', F.mmse_pred(vf(i)));
         t2 = tic;
         [cfgD, memD, dD] = policy_decide('dqn_esc', obs, cfgD, memD, PPr, env.dqn_agent);
         dqn_ms = toc(t2) * 1000;
@@ -2092,6 +2094,7 @@ function runEpisode(btn, ~)
             if isfield(F, 'gant') && ~isempty(F.gant), fr.gant = F.gant(j, :); end
             if isfield(F, 'idle') && ~isempty(F.idle), fr.idle = F.idle(j, :); end   % the idle time before the frame
             if isfield(F, 'bch') && ~isempty(F.bch), fr.bch = F.bch(j, :); end      % the antennas' channel records
+            if isfield(F, 'mmse_pred') && ~isempty(F.mmse_pred), fr.mmse_pred = F.mmse_pred(j); end   % mmse_predict.m
             [Ep{i}, info] = episode_cycle(Ep{i}, k, fr, ctx{i});
             T.ber(i, k) = fr.ber; T.det(i, k) = cls_idx(info.cls);
             if onset, T.ok(i, k) = ismember(T.det(i, k), compIdx); else, T.ok(i, k) = T.det(i, k) == truthIdx(k); end
@@ -2258,7 +2261,7 @@ function P = epBuildPool(fig, p, threat, ebno, seedBase, fl)
         evalc('build_threat_model');
         snr_dB = ebno + 10*log10(p2.bits_per_symbol) - 10*log10(p2.sps);
         set_link_snr(env.modelName, snr_dB + g_db, p2);
-        F = struct('iq', {{}}, 'ber', [], 'feat', [], 'run', [], 'idle', [], 'bch', [], 'gant', [], ...
+        F = struct('iq', {{}}, 'ber', [], 'feat', [], 'run', [], 'idle', [], 'bch', [], 'gant', [], 'mmse_pred', [], ...
             'seed', seedBase + (1:2), 'ev', NaN);                    % link features per frame within its run, as the pools
         if ~isempty(fl), F.seed = fl.seed; F.ev = fl.k; end
         for r = 1:2
@@ -2278,6 +2281,7 @@ function P = epBuildPool(fig, p, threat, ebno, seedBase, fl)
             F.idle = [F.idle; Fr.idle(:, v)'];                       % the idle time before each frame
             F.bch = [F.bch; Fr.bch(:, v)'];                          % the antennas' channel records
             F.gant = [F.gant; single(Fr.gain_ant(:, v)')];           % every antenna's mean gain (fusion and latch)
+            F.mmse_pred = [F.mmse_pred, Fr.mmse_pred(v)];            % the predicted MMSE gain (mmse_predict.m)
         end
         P{a} = F;
     end
