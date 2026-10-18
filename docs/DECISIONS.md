@@ -929,7 +929,7 @@ Channel model: the flat channel fails, the link runs the delay line → PASS; re
 - *Second detector test set (B3n, build_fresh_test in run_stage.m).* run_dataset_sweep.m, extract_spectrograms.m and prepare_data.m run with FRESH_TEST: the dataset's own recipe (every threat, every level, every Eb/N0, the balanced clean class, the sweeper's extra sub-runs, each sub-run at its own speed), 2 sub-runs per cell (the test split has 1), every one in the test fold, seeds 3,500,000 + run id and their own speed stream (rng 2029), z-scored with the training statistics -> data/splits_fresh.mat (checked: same classes, features, normalization, test fold only). No decision of the chain reads it before B3.
 - *B3 reads both (eval_detector.m).* First the test split (outputs with the suffix _split: eval_detector_metrics_split.mat, confusion_matrix_split.png, accuracy_vs_snr_split.png, detector_predictions_split.mat), then the second test set under the standard names, which KPI 1, the edge map, the weak-point analysis and the console read. The KPI 1 threshold is chosen on the validation split in both. measure_all_kpis.m states which set KPI 1 was read on and gives the test split's reading beside it.
 - *B4 and B4s on new seeds.* Blocks 4,500,000 + k (rng 4244) and 5,500,000 + k (rng 4345) in place of 4,000,000 + k and 5,000,000 + k: the same recipe and the same points, frames never read.
-- *Stricter confirmations in the monitor grid (train_dqn.m).* class_drop 4/5 and 5/5 beside 3/3 and 2/2 (k-out-of-n detection: Norouzi 2006, Barajas et al. 2026; D48): a later alarm for fewer false ones, chosen on validation with the false-switch penalty, γ and the seed under the same bound; the rule fallback's monitor is chosen from the same grid. The alarm memory holds 8 cycles; policy_monitor.m stops on a longer confirmation. The grid doubles C2 (36 runs).
+- *Stricter confirmations in the monitor grid (train_dqn.m).* class_drop 4/5 and 5/5 beside 3/3 and 2/2 (k-out-of-n detection: Norouzi 2006, Barajas et al. 2026; D48): a later alarm for fewer false ones, chosen on validation with the false-switch penalty, γ and the seed under the same bound; the rule fallback's monitor is chosen from the same grid. The alarm memory holds 8 cycles; policy_monitor.m stops on a longer confirmation. The grid doubles C2 (36 runs). [Correction 2026-10-18: γ is not chosen here. It is one fixed value, 0.5, since D67; see D90.]
 - *More independent clean flights (build_clean_test_pools.m, pool_seed.m).* 300 geometries per Eb/N0 in each clean set (validation, block 4, and test, block 15), 100 per geometry family 1, 3 and 5, seeds disjoint from every other block, the dataset and the B4/B4s ranges (test_seed_streams_disjoint).
 - *KPI 6 over every independent clean flight (evaluate_policies.m).* The test pools' clean episodes (one per geometry) and those of data/clean_test_pools.mat, from the KPI 1 threshold up; the edge map already counts both (and the second test pools' 84 flights). Each source is also reported alone (KP.far_testpools, KP.far_cleanpools). With the test pools' 12 geometries per Eb/N0 that is 312 per Eb/N0, at least 600 (624) whenever two Eb/N0 points are above the threshold; the edge map has 396 clean flights per point.
 **Disclosure:** the first reading (before D81) is kept in archive/prefix_D81_<time>/ of each profile (results/ and data/fusion.mat) and is reported beside the second; the B3 reading on the test split after D81 is a second reading of those frames and is labelled so.
@@ -1098,3 +1098,175 @@ Channel model: the flat channel fails, the link runs the delay line → PASS; re
 **Open:** (a) the pools' non-shadowing cells hold their bank (a validation decision of the pools' owner); (b) shadowing frames whose burial lies below the level's band carry no loss, so the class is milder there than physics and the emitter's shadow is a lower bound; the GCS elevation spans up to about 23 deg against Sun et al.'s 1.4-2.9 deg; (c) the drop alarms (median window and CUSUM) start every episode from a fresh monitor whose reference is the median of the first few cycles: about 9% of synthetic clean 30-cycle episodes (2.4 dB per-cycle spread) raise the CUSUM at 72 because that reference was set high; C1d, C2 and KPI 6 read the clean episodes the same way, so their false-alarm readings include it, while a real flight starts the monitor once (a warm-up would delay the detection of onsets at cycle 3-10); (d) the hover flights are not in the clean validation pools; (e) memory: side by side the profiles peak at about 38-42 GB (C2-EDGE beside the next profile's C1p) and 35-42 GB (profile 2's B1 beside profile 3's C1p) against 31.2 GB of RAM; the 83 GB commit limit prevents an out-of-memory stop, and the review's memory item lowers the peaks; (f) the console's other scenarios still draw a new flight per build; (g) the launcher's items (the bounded wait for zero MATLAB sessions before LAT, archiving profiles/ with data/ and results/, exporting the bundle only after LAT and KPI succeed, RESUME mode) belong to the launcher; (h) MODEL_TAG in build_policy_pools.m is still 'v7-D85', so no data/ of an earlier D85 run may be present at the launch.
 
 **Adoption:** every stage of every profile reruns from A0 (the threat link, the labels, the cell sizes, the folds, the attitudes and the emitter records changed). The merged suite runs at the launch gate; the smoke chain runs once on the merged code.
+
+**Launch (2026-10-16; written 2026-10-18).** Where the numbers come from: the launcher's log `uav-gcs-logs/v7_d86_launch.log`, the gate logs `uav-gcs-logs/v7_d86/gate_<stamp>.log`, `v7_d86/code_commit_launch_20261016.txt` and the profile logs `v7_d86/p1.log` and `p3.log` (all outside the repository). The launcher itself is in `docs/runs/v7_d86_launch_20261017.sh` (a read-only copy, see `docs/runs/README.md`).
+- *The launcher* (`v7_d86_launch.sh`, open item g). It takes the code as a commit SHA (SRC), never a branch name. Launch mode: (1) the full `test_core` on a `git archive` export of SRC, N of N must pass; (2) a dry merge into every profile (conflicts allowed only in generated files: `params.mat`, `models/*.slx`, `results/`); (3) the first reading of every profile moved to `archive/first_reading_<stamp>/`; (4) SRC merged into v7-dev and v7-dev into v7-p3 (a merge, not a cherry-pick), then the code of every profile checked equal to SRC; (5) the chains. Resume mode skips the gate, the archive and the merge, checks that every profile's code equals SRC and restarts each chain at its first unfinished stage, read from the `##### STAGE <s> done` markers of the current `##### PART` in the profile's log. A heartbeat file, `v7_d86/run.lock`, is touched at least every 5 min; a resume refuses while it is younger than 20 min and newer than the last boot. Order: profile 1 every stage; profile 3 A0-B4s, then C1p once profile 1 has passed SURV3; profile 2 after profile 1, its C1p after profile 3's SURV3; LAT, KPI, DASH, WEAK and RPT again on an idle machine at the end.
+- *First launch refused by its own gate.* 10:43 on `47c7ac8`: `test_core` 165/166, `test_onset_recipes` failed (v7_d86_launch.log 10:43-11:08; gate_20261016_104305.log). The fix is `c2c8b8b` ("test_onset_recipes reads the sweep's roll-in on its base parameters"); its code differs from `47c7ac8` in that test only.
+- *Launched 11:09 on `c2c8b8b`.* Gate 166/166 at 11:34:10 (v7_d86_launch.log; gate_20261016_110932.log). The first reading moved to `archive/first_reading_20261016_110932/` in both profiles. Merged: profile 1 v7-dev `27c2634`, profile 3 v7-p3 `26fffb5` (code_commit_launch_20261016.txt). Both chains started at 11:34:24; profile 3's C1p waits for profile 1's SURV3.
+- *Smoke on the merged code.* The full smoke chain A0 to RPT with LAT ran on `47c7ac8` (the same code as `c2c8b8b` outside one test) and passed at 20:00. Every stage ran, C2, C2e and EDGE included; the only warnings were smoke-scale ones (STALE phy, no KPI 1 threshold, the DQN gate failed so the rules were deployed). Smoke figures are not results (run notes 2026-10-16 20:00).
+- *Open item (h)* is closed: `47c7ac8` tags the pools `v7-D86`; the run resumed on 2026-10-17 tags them `v7-D89` (D89).
+- *Windows Update.* The pause read by the launcher ends 2026-11-05 13:38 UTC (v7_d86_launch.log). The user decided on 2026-10-16 not to install the updates before then. The mitigation is the resume mode and the per-cell C1p checkpoints (item 15).
+
+## D87 — The onset latch chosen on validation; a third detector test set (B3m)
+**Why (2026-10-17; note docs/d87_fusion.md).** Profile 1's B3 read the second test set once at 07:38 on 2026-10-17. KPI 1 was 93.11% [92.39, 93.71] above the 6 dB threshold (p1.log:1036, 1067). The fused class alone, without the latched cause, read 94.78% above the same threshold (p1.log:1030). Antenna-fault recall fell from 81% to 66% with the latch (run notes 2026-10-17 08:50). Validation had already shown it: B2F's out-of-fold macro-F1 was 91.94% for the monitor's class against 93.32% for the fused class (p1.log:718). `select_fusion.m` chose the latch threshold but never whether to latch (D86 item 10). This is a deployed component without a validation on/off choice. Antenna fault and airframe shadowing take the same rule action, so the latch changed the class, not the action.
+**Decision.**
+- *The latch is a validation choice* (d87 sec. 1). `select_fusion.m` sets `FM.latch = mf_latch > mf_fused` on the out-of-fold macro-F1, the measure that already chooses N and lambda. Every reader honours the flag: `fused_class.m`, `policy_monitor.m`, `det_frames.m`, `eval_detector.m`, `eval_unseen_snr.m`, `eval_unseen_severity.m`. The flag is part of `FM`, so `detector_id.m` changes with it and pools built with an older fusion must be re-keyed.
+- *Remedies for the weak classes, tested and rejected on validation* (d87 sec. 2, nested CV over the validation sub-runs): per-class logit offsets (+0.04 [-0.21, +0.36] on profile 1), class-prior correction (0.00), balanced priors (-1.41 [-1.98, -0.86], clean false alarms 12.04%), a majority of the last m monitor classes (m = 1 chosen in every fold).
+- *A third detector test set, B3m* (d87 sec. 3). The second set was read before this choice, so KPI 1 after it is read on new sub-runs. Same recipe as the second set (4 sub-runs per cell, every sub-run in the test fold); seeds 6,500,000 + run id; speeds from `rng(2035)`. Outputs `data/*_fresh2.mat` and `results/*_fresh2*`. `measure_all_kpis.m` reads KPI 1 from it when present.
+**Evidence (validation, out of fold).** Profile 1: latch off, 93.32% against 91.94% latched; nested gain +1.38 [+0.60, +2.26]. Profile 3: +2.34 [+1.36, +3.28] (d87 sec. 1). After the redo (D88), B2F chose the latch off on both profiles: profile 1 fused 93.43% against latched 92.06% (p1.log:1496-1498); profile 3 93.01% against 90.66% (p3.log:1278-1280). With the latch off, profile 1's KPI 1 threshold, chosen on validation, moves from 6 dB to 0 dB; profile 3 stays at 3 dB (d87 sec. 1; p1.log:1668, p3.log:1450).
+**Adoption.** Merged on v7-merge as `2cbf7e4` (2026-10-17 10:18). The note's mid-run deployment plan (d87 sec. 4: profile 1 at B4, then OOD, B4s, C1p) was not used: the align defect (D88) stopped the run first, and d87 entered the profiles with the redo of D88. B3m ran in isolated worktree copies (`uav-gcs-b3m-p1`, `uav-gcs-b3m-p3`; `docs/runs/v7_d87_b3m_20261017.sh`), so no Simulink build was shared with the running chains. Profile 1: 348.4 min, ended 22:04 (p1_b3m.log:323-325). Profile 3: 395.2 min, ended 22:51 (p3_b3m.log). The readings are in PROJECT_LOG ("Official detector readings").
+
+## D88 — The align field, the predicted MMSE gain on known symbols, the unknown-threat threshold out of the detector identity, fair baselines
+**Why (2026-10-17; note docs/d88_blockers.md).** An audit of the running chain (27 of 30 findings confirmed; session files audit1_confirmed.json and audit1_plan.md) found a blocker. `run_dataset_sweep.m` wrote both the flight's drawn `align` and the measured `align` into `D.align`, 2N values for N frames. Link feature 13 was therefore scrambled in every dataset (training, validation, every test set), while the pools, B4 and the console read the true value: a mismatch between training and deployment (d88 sec. 1). The audit also found that the predicted MMSE gain was decision-directed and collapsed under strong interference. Under a 23 dB jammer the old `mmse_gain` read +5.3 dB where the predictor on known symbols reads +18.4 dB (d88, reduced C1p check). Both feed the rule's nulling flag and the agent's state, and C1p bakes them into every pool frame, so the fix had to land before C1p.
+**Decision.**
+- *align* (d88 sec. 1): the draw is renamed `align_gcs`, so the measurement loop is the only writer of `align`. Guards: no MEAS name may also be a field of its own; `assert_frames.m` checks one entry per frame before every save (A5, A6, B1). `repair_align.m` rebuilt `data/dataset.mat` and `data/dataset_fresh.mat` of profiles 1 and 3 from the stored measurements; backups `*_before_align_repair.mat`.
+- *The predicted MMSE gain* (d88 sec. 2): `F.mmse_pred`, from the known training and pilot symbols (optimum combining by direct matrix inversion, Winters, Salz & Gitlin 1994, eqs. 19-23). The predictor's limits are stated in d88 sec. 2.
+- *The unknown-threat threshold out of the detector identity* (d88 sec. 3): `maha_thr` leaves `detector_id.m`; it is kept as `PP.maha_val` with the retention level, so changing the threshold no longer forces a pool rebuild.
+- *Fair architecture comparison* (d88 sec. 4): `compare_architectures.m` tunes the random forest and the kernel SVM on validation and compares every variant fused out of fold. The earlier SVM figure (19.8%, untuned and unscaled) was an unfair baseline.
+- *Print-only lines in `eval_detector.m`* (d88 sec. 5).
+**Evidence.** d88's branch: full suite 170/170, `validate_phy('flat')` PASS, smoke A0-B3a passed (d88, Verification). Merged as v7-merge `725a2f1` (c2c8b8b + d87 + d88): full suite 172/172 (run notes 2026-10-17 14:26). The redo's B3a on profile 1 (p1.log:1850-1912), selection basis the validation split, fused out of fold: hybrid 93.33%, spectrogram-only CNN 93.26%, link-feature MLP 92.42%, random forest 92.03%, kernel SVM 92.19%. Per frame on validation the random forest leads (83.79% against the hybrid's 81.07%). Fused and read on the second test set, the hybrid stays first: 93.86% against 92.77% for the forest.
+**Adoption.**
+- The user stopped the run at 13:28 (the launcher's process trees). Profile 1 had finished through B4; its OOD was cut at the eighth of ten held-out threats (p1.log:1301). Profile 3 had finished through B3; its B3a was cut (p3.log:1080-1084).
+- The redo started at 14:26 on `725a2f1` (`docs/runs/v7_d87_redo_20261017.sh`; p1.log:1302, p3.log:1084). Per profile: A0, A6, B1, B2, B2F, then the second test set's A6 and B1 from its repaired dataset, logged as B3n. Both profiles finished at 16:14 (v7_d87_redo.log). The best epoch's validation macro-F1 was 0.8131 on profile 1 and 0.8062 on profile 3 (p1.log:1459, p3.log:1244).
+- A HOLD file paused the redo at 14:55 for D89. The redo's own resume on `725a2f1` was refused as designed at 16:14, because code_commit.txt had been set to a placeholder SRC (v7_d86_launch.log 16:14:24).
+
+## D89 — The MMSE predictor's frequency hypotheses and arrival search, its cost in the cycle, the delay-line clean row
+**Why (2026-10-17; note docs/d89_mmse.md).** An independent review of d87 and d88 confirmed 9 findings (session file rev88_confirmed.json). Four concern the new predictor, which C1p bakes into the pools (d89 secs. 1-4):
+- dec-01: under a 30 dB tone the predictor locked onto a pilot alias, about 19.2 kHz off; profile 3 failed V13 on 9 of 11 rows;
+- phy-02: a greedy arrival search;
+- phy-03: the predictor's 9-20 ms were not timed inside LAT's decision cycle;
+- phy-01: V13 had no clean row on the delay line.
+**Decision.** The search tests the frequency hypotheses that the pilot spacing leaves ambiguous, inside the receiver's ±25 ppm window, and searches the arrival jointly (d89 sec. 1). The predictor is timed in the cycle, and its search is made cheap (d89 sec. 2). V13 gains a delay-line clean row and is read as the profiles deploy, with its verdict in the result (d89 secs. 3-4). `MODEL_TAG` becomes `v7-D89`, so no C1p checkpoint built with the d88 predictor is reused.
+**Evidence.** V13 12 of 12 rows PASS for n_rx 3 (profile 1's params, params_id add18af2...) and for n_rx 4 (profile 3's, 7ecc49e9...) (d89 sec. 5). The reduced C1p check passes: a 23 dB tone at no_action reads `mmse_pred` +20.5 dB (p10 +4.2 dB), against +14.4 dB (p10 +2.0 dB) at `725a2f1` (d89 sec. 5). Full suite 174/174 (d89 sec. 5).
+**Adoption.**
+- d89 merged into v7-merge as `9b5c9f1`; v7-merge merged into v7-dev (`208602b`) and v7-p3 (`29510e7`).
+- Because of the HOLD file, the fresh step (the second test set's A6 and B1) was run by hand in both profiles with B3n markers appended (p1.log:1501-1576, p3.log:1283-1358).
+- The run was resumed at 16:42 on `9b5c9f1` with `docs/runs/v7_d87_resume_20261017.ps1`. code_commit.txt: SRC `9b5c9f1beec4bef1ceadaa18068239c36d82c77a`, p1 v7-dev `208602b`, p3 v7-p3 `29510e7` (v7_d86/code_commit.txt).
+- Both chains restarted at B3 with A0 first (v7_d86_launch.log 16:42:13; p1.log:1577, p3.log:1359).
+- The launcher's `stage_pids` was edited at 16:42 to skip command lines that name B3m, so the isolated B3m copies do not block a resume.
+
+## D90 — Choices on validation before C1d and C2: the sweeper's confirmation, the drop threshold on the whole monitor, the C2 reward and selection; fusion candidates behind a switch (branch d90-loop, not merged)
+**Why (2026-10-17; note `docs/d90_loop.md` on branch `d90-loop`, commit `2cbe559`).** The remaining confirmed findings of the audit (audit1_plan.md secs. 1.3-1.6) and of the d87/d88 review (data-01, data-02, data-03, dec-04, dec-05, dec-06) act on C1d, C2, C2e, EDGE and the KPI readings, not on C1p. Every choice is made on validation; no test split or test set was read on the branch (d90_loop.md, "What was read").
+**Decision** (d90_loop.md, Summary and secs. 1-6):
+1. *SWEEP*: the sweeping jammer gets its own k-of-n confirmation, 2 of 6 (Norouzi 2006), adopted at C1d only if it passes there (sec. 2).
+2. *DROP*: each monitor's drop threshold is chosen on the whole monitor; the median window's reference is held through an excursion (Xie et al. 2021, eqs. 2-3) (sec. 3).
+3. *C2*:
+   - the reward counts BER and packet loss (loop-reward-plr);
+   - the selection uses held recovery (loop-select-held);
+   - sel-06, and sel-07: every run is scored with and without escalation, so the plain DQN can be deployed;
+   - dec-04, sel-02, sel-08: the rule's nulling threshold, its quiet-slot branch and the unknown-threat flag's retention and override are chosen on validation and stored as `dec` in `trained_dqn.mat` (`decision_settings.m`);
+   - loop-rule-dwell and loop-esc-none (sec. 4).
+4. *KPI reporting*: harmed-episode readings and an offset set of threats that end (sec. 5).
+5. *rev88 items*: data-01 (an A6 stamp: a B1 on spectrograms built before the branch stops with `prepare_data:stale`, so A6 must run again first, about 30 min), data-02, data-03, dec-05, dec-06 (sec. 6).
+6. *FUSE*: candidates behind `FUSION_REV`, off by default and bit-identical when off. Adi decided on 2026-10-17 that the detector stays as it is (sec. 1).
+- *The discount factor* (sel-07 (c)). γ is one fixed value, 0.5 (`train_dqn.m`: `GAMMAS = 0.5`, line 65 on v7-merge, line 86 on d90-loop). It was last chosen on validation in D64's grid (two discount factors, 0.5 chosen). D67 fixed it at 0.5, and every run since (v5-v7, D68 on) trains with that one value. On d90-loop, γ = 0 (the contextual bandit) is tried as one coordinate step on validation after the grid, at the selected monitor, drop threshold and penalty (sec. 4, sel-07). Earlier wording that has γ "chosen on validation" in v5-v7 is corrected by this entry (ROADMAP; DECISIONS D82, bracketed note).
+**Cost** (d90_loop.md sec. 7). C2 grows from 72 to 108 runs (4 monitors x 3 drop thresholds x 3 penalties x 3 seeds), plus up to 9 coordinate runs, and every run is scored twice. At v6's 18-20 min per run that is about 38-42 h per profile, against 22-24 h. `decision_config.m` `C.drop_steps = [-2 0]` brings the grid back to 72 runs, about 26 h, if the timeline needs it; profile 2's C2 is on the campaign's critical path. C1d grows from under 1 min to minutes.
+**Evidence and status.**
+- The full `test_core` passed on `d91-speed` `1249ef3`, which contains d90: V7TESTS 196/196; the baseline `9b5c9f1` 174/174 (uav-gcs-logs/v7_d91_tests2_summary.log, 2026-10-18 19:49).
+- d90's own smoke run and an independent review of the d90 diff are not recorded. d90_loop.md secs. 8 and 9 still hold placeholders.
+- Pending: the d90 smoke and review.
+**Adoption (not done).** d90-loop is not merged into v7-merge or into any profile. Merge rules (d90_loop.md sec. 10; run notes 2026-10-18):
+- Nothing of d90 runs in C1p, C1c, SURV or SURV3. A merge is safe in that window and must land before C1d.
+- Never merge into `uav-gcs-v7` while profile 1's C1p workers run: they read code files live, and the cell keys hold no code version.
+- `data/fusion.mat` stays fixed from C1p to C1c.
+- Into v7-p3 only while no profile 3 MATLAB runs.
+- After the merge, code_commit.txt SRC must name the merged commit, or a later resume refuses.
+**Sources.** As listed in d90_loop.md, "Sources". Hastie, Tibshirani & Friedman (ESL, sec. 7.10, the one-standard-error rule) is cited only on the `FUSION_REV` path and is not in the library (LITERATURE.md).
+
+## D91 — Fault and shadowing below 85% on the third test set: a branch-evidence fusion revision on an enlarged fit set, a fourth test set read once, value-neutral speedups for profiles 3 and 2, a takeover of the launcher, and the C1p slowdown
+**Why (2026-10-17/18).**
+- *The official KPI 1* (B3m, read once). Antenna fault and airframe shadowing are below the user's 85% bar on both profiles: profile 1 fault F1 83.1%, shadowing 82.7% (p1_b3m.log:236, 240); profile 3 83.6% and 82.0% (p3_b3m.log:236, 240). Profile 1's earlier second-set figures after the fixes (fault 85.4%, shadowing 86.7%) were the higher reading.
+- *The weak-branch analysis* (session file weak_branch/recommendation.md, read-only, validation and code):
+  - No label bug: the fault label and attenuation switch on from the same onset; the shadowing label and loss come from the same `shadow_frame` call.
+  - Most misses are a lost branch read as 'none'.
+  - Most 5 dB fault misses at K < 10 dB are limited by information. The static imbalance between antennas has an SD of 2.9 dB (body loss, Badi 2019, Table 1, plus the ±2 dB calibration error). A window holds at most 12 independent samples against the 36 that Lee 1985 needs for ±1 dB (eq. 31).
+  - The recoverable part: shallow faults at K ≥ 10 dB (on the third set the CNN recalls 10.6-48.1% against 88.1-99.5% for a gain-only ideal), hover, and frames after the onset has left the 12-cycle window.
+  - True out-of-fold validation: fault 83.4%, shadowing 85.2%. The 84.7 / 83.2 quoted earlier as validation was the first test split.
+- *The user's decision* (2026-10-18 00:35, option A): fit a fusion-only revision on validation plus the test sets already read, and read KPI 1 once on a new fourth test set.
+**Decision, in five parts.**
+1. *A fourth detector test set* (branch `d91-set4`, `0e410cf`; note `docs/d91_set4.md`).
+   - Stage B3q builds it and reads nothing. Seeds 6,000,000 + run id; speeds from `rng(2037)`; disjoint from every stream (`test_seed_streams_disjoint`, `test_fourth_test_set`).
+   - Stage B3r reads it once. Its guards in `eval_detector.m`: the switch `code/evaluation/kpi1_set.m` must say 'fresh3' (it says 'fresh2' until adoption); no earlier fresh3 reading or start marker may exist; `data/fusion.mat` must be the adopted revision.
+   - Built in isolated copies at `31ab0de`: profile 1 done 12:15 (420.0 min), profile 3 done 19:36 (439.5 min) (p1_set4.log:215, p3_set4.log:215).
+   - Outputs are in `uav-gcs-logs/set4_out/p1` and `p3` with `sha256_fresh3.txt`. They are unread and stay unread until the go/no-go.
+2. *The branch-evidence fusion revision* (branch `d91-fuse`, `2ea990a`; note `docs/d91_fuse.md`).
+   - Four column groups computed from the stored per-antenna gains only, behind `FUSION_REV`:
+     - iso, the largest step over the antennas (Xie 2021, Sec. III-I);
+     - held, a per-branch reference held through a drop, with a one-sided window-limited CUSUM (Lee 1985, Sec. IV; Xie 2021, eqs. 2-3; Xie 2022);
+     - glr, a one-sided GLR of a branch against the pooled others (Xie 2021, eq. 20);
+     - post, K and spread after the split (Aoki & Honda 2025, eq. 2).
+   - The fit set is enlarged (`FUSION_FIT = 'enlarged'`): validation, the first test split and the second and third test sets, 5 folds by sub-run. N and lambda stay chosen on validation.
+   - *Pre-registration.* The adoption rule was coded in `code/detection/fusion_adopt.m`, last written 05:15:41 on 2026-10-18 (d91_fuse.md sec. 4). The measurement started 05:48:26 and was committed as `ad3cde8` at 05:48:34. A code check on every 20th sub-run reached a verdict at 05:47:47, before that commit but after the rule and the script were last written; the rule's file and the script are byte-identical to what ran (sha256 in d91_fuse.md sec. 4), and the check's numbers are not used.
+   - *The rule.* Against the deployed design refitted on the same folds, with paired sub-run bootstrap intervals (1,000 resamples), a variant is adopted only if all of these hold: the fault F1 gain's lower bound is above 0; the macro-F1 gain's lower bounds, over all frames and above the KPI 1 threshold, are above 0; the shadowing F1 upper bound is at least 0; at K ≤ 0 dB, the fault and shadowing F1 upper bounds are at least 0; the clean-frame false alarms' lower bounds are at most 0. The verdict also requires the nested reading to pass.
+3. *Value-neutral speedups for profiles 3 and 2* (branch `d91-speed`, `0069d03`; merge candidate `d91-speed-on-v7-p3`, `686fd11`, built onto v7-p3 `29510e7`; note `docs/d91_speed.md`).
+   - FEC twins share one simulation: only the ground truth and the CRC are computed again, by `closed_loop_truth.m` and `pool_configs.m`.
+   - The longest job goes first, one job per free worker, by `parfeval` FIFO (`pool_lpt.m`, `pool_job.m`) in all five pool stages.
+   - Pool values and checkpoint keys stay bit-identical. Nothing changes for profile 1's live run.
+4. *A takeover of the d86 launcher* (branch `d91-takeover`, `7d4d0b6`; `ops/v7_d91_takeover.md`, `ops/v7_d91_takeover.sh`).
+   - The overnight audit (session file overnight_audit.txt) found these launcher defects:
+     - (a) the launcher counts profile 3 as ended (its subshell died at 22:02 on 2026-10-17), so profile 2's C1p would not wait for profile 3's SURV3;
+     - (b) after any code merge into v7-dev, the in-memory SRC refuses profile 2 and runs LAT early on a busy machine;
+     - (c) a profile 1 crash writes 'chain ended', and the fix script then starts profile 3's C1p at once;
+     - (d) the launcher's stage list has no B3m, so profile 2's KPI 1 would come from its second set;
+     - (e) the zombie MATLAB 32824 is counted as a live session;
+     - (f) the campaign's end against the Windows Update pause.
+   - The takeover keeps profile 1's chain and reads every dependency from log markers, never from process ids.
+5. *The C1p slowdown* (session analysis c1p_slow/model.py, c1p_rate.txt; run notes 2026-10-18 12:30 and 13:10).
+   - Profile 1's C1p ran 86 builds in its first 9 h (9.7 per hour), against about 20 per hour in the first reading of 2026-10-07.
+   - Not a bug. The cost per simulation is x1.7 on emitter cells and x1.18 on clean ones. The idle-time RSSI model (D85) explains about one third of the emitter increase; 0.5-0.7 s per simulation is unexplained (a profile of the emitter path is wanted).
+   - The 38-frame roll-in flights add x1.115, and parfor's default chunking adds more.
+**Evidence (fit-set numbers, out of fold or nested; not test readings).**
+- *Verdict* (d91_fuse.md sec. 5; session logs d91_fuse/m_p1.log:132-134, m_p3.log:132-134). The rule adopts 'branch evidence' on both profiles, and all 5 outer folds pick it. Profile 1 finished 11:02, profile 3 16:24 on 2026-10-18.
+
+  | Nested gain against the base, points [95%] | Profile 1 | Profile 3 |
+  |---|---|---|
+  | Fault F1 | +5.14 [+4.16, +6.20] | +5.19 [+4.23, +6.25] |
+  | Macro-F1, all frames | +0.64 [+0.52, +0.76] | +0.61 [+0.49, +0.74] |
+  | Clean frames read as a threat | -0.29 [-0.43, -0.15] | -0.32 [-0.47, -0.17] |
+  | Shadowing F1 | +0.39 [-0.02, +0.80] | +0.30 [-0.13, +0.74] |
+
+- *Profile 1 fault recall, base -> branch evidence*, out of fold on the enlarged fit set (m_p1.log:95-101):
+
+  | Stratum | Base | Branch evidence |
+  |---|---|---|
+  | 5 dB | 20.9% | 52.0% |
+  | 8.7 dB | 56.6% | 79.8% |
+  | K ≥ 10 dB | 86.1% | 96.3% |
+  | Onset age ≥ 12 cycles | 75.0% | 90.7% |
+  | Hover | 77.9% | 87.5% |
+
+  The held reference is the main lever.
+- *phi.* The hover factor phi = (1-rho)/(1+rho) in the GLR has no source in the library. Its comparison with phi = 1 was declared before it ran (d91_fuse.md sec. 8, commit `5abf87d`). The profile 1 job started at 20:18 on 2026-10-18 (d91q/fuse/logs/queue.log). Pending: the phi verdict.
+- *Wrap check* (d91_fuse.md sec. 10). Pool episodes jump from frame 20 back to frame 1 inside their 30 cycles. The check ran on the d90 smoke pools only, as a mechanism check; its rates are not results.
+- *Speed proofs* (d91_speed.md sec. 4; uav-gcs-logs/v7_d91_speed_summary.log).
+  - A_static, B_old_vs_new, C_order, C_vs_B, P_parfor and P_order2 PASS, with the detector applied.
+  - The first full-suite runs failed for an environment reason, a Stateflow build path over 260 characters in the long scratch TEMP; they are voided. tests3 was voided too.
+  - tests2 in a short path: new `1249ef3` 196/196, old `9b5c9f1` 174/174, focused 8/8 (v7_d91_tests2_summary.log).
+  - tests4, the 4-antenna proofs and the full suite on the merge candidate: pold, pnew and porder ended rc=0 by 20:18; the merge job was waiting at the gate at 20:49 (v7_d91_tests4_queue.log). Pending: the tests4 VERDICT.
+  - Estimated gains (the analysis's cost model, not measurements): profile 3's C1p about 169 h -> 105-115 h, profile 2's about 135 h -> 85-95 h (d91_speed.md sec. 3).
+- *Takeover* (run notes 2026-10-18 19:40). Test harness 287/287 at `7d4d0b6`. The round-3 review is FIX-NEEDED: `main()` must parse the whole script before it runs, and the main loop needs a watchdog. A round-4 fix is running.
+- *Timeline after the slowdown* (run notes 2026-10-18 13:10):
+
+  | Milestone | Projected |
+  |---|---|
+  | Profile 1 C1p (155-175 h) ends | 2026-10-24 14:00 to 10-25 10:00 |
+  | Profile 1 ends | about 27-28.10 |
+  | Profile 3 ends | about 4-6.11 |
+  | Profile 2, the whole campaign | about 10-15.11 |
+
+  These dates pass the Windows Update pause's end (2026-11-05 13:38 UTC); the takeover's resume handles reboots. The speedups could save about 3 days on profiles 3 and 2. The earlier projection (profile 1 about 23.10, everything about 2.11) is superseded.
+**Adoption (not done; the go/no-go with the user is planned for 2026-10-21 evening).** Deployment follows d91_fuse.md sec. 7, the deploy checklist:
+- `fusion_pick.m` ties B2F to the measured pick, with the latch off as measured.
+- Then the B2F rerun on the enlarged fit set, `kpi1_set.m` = 'fresh3', the copy of `set4_out` into the profile with its hash check, and B3r once.
+- Profile 3 before its C1p.
+- Profile 1 after its chain, with `rekey_pools` (the new columns read only the stored gains, so no C1p rebuild).
+- B3, B3n and B3m become in-sample under an adopted revision; KPI 1 is then read only on the fourth set.
+- Profile 2 has no enlarged fit set at its B2F and needs its own fusion decision (d91_fuse.md sec. 7 F, proposed). Pending: the user's approval of profile 2's fusion decision.
+- If the user decides no-go, `kpi1_set.m` stays 'fresh2' and the fourth set stays unread.
+- d91-speed merges into v7-p3 while profile 3 waits for profile 1's SURV3, and into v7-p2 before profile 2's C1p, under the merge rule of d91_speed.md sec. 7.
+- The user launches the takeover before profile 1's chain ends; the steps are in `ops/v7_d91_takeover.md`, "Procedure".
+**Stated, not backed by a source:** phi's AR(1) form (pending its comparison); alpha = 1.87%, profile 1's clean lost-branch rate on validation, also used for profile 3 (it only decides whether an excursion's cycles join the held reference); the Clarke coherence-time approximation used in the wrap analysis.
+**Open:**
+- KPI 2 is below its 0.8 target on both profiles (nested 0.769 and 0.763); the untried options are in PROJECT_LOG, weak-class status.
+- Path loss and WLAN stay below 90% on the third set (87.8% and 89.0% on profile 1).
+- Shadowing is expected unchanged by the revision.
