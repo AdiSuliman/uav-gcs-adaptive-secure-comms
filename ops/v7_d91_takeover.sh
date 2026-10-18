@@ -7,6 +7,7 @@
 #   bash v7_d91_takeover.sh <launcher PID> <p3 fix PID>          run (resumable: run it again
 #                                                                after a reboot or a crash)
 #   bash v7_d91_takeover.sh <launcher PID> <p3 fix PID> status   state of every track; changes nothing
+#   V7T_ALLOW_PIDS='43428 43972'   profile 1's live chain subshells of the launcher (see Safety)
 #
 # Profile 1 (uav-gcs-v7): its chain keeps running to RPT in the launcher's own subshell; the track
 #   only reads p1.log. A chain that ends with rc != 0 or is cut by a reboot raises
@@ -14,19 +15,23 @@
 #   than p1.log); then the chain goes on from its first unfinished stage under a new part.
 # Profile 3 (uav-gcs-v7-p3): C1p to RPT once profile 1's current part is past SURV3; before that,
 #   while waiting, the B-stage rerun listed in v7_d86/p3_brerun.go (A0 first; once per version of
-#   the file; never after P3's C1p has started).
-# Profile 2 (uav-gcs-v7-p2): once profile 1's chain has ended with rc=0 past RPT, branch v7-p2 from
-#   v7-dev (profile.json n_rx 2, fresh data/ and results/, pushed; the commit goes to
-#   code_commit.txt); A0-B2F, B3n, B3m, the stages of v7_d86/p2_set4.stages if present, B3, B3a, B4,
-#   OOD, B4s; then C1p to RPT once profile 3's current part is past SURV3.
+#   the file; never after P3's C1p has started; only while profile 1 has no C1p/C1c running, with
+#   RERUN_NEED_GB of free commit, on one computational thread).
+# Profile 2 (uav-gcs-v7-p2): once profile 1's chain has ended with rc=0 past RPT, or on
+#   v7_d86/p2_start.go, branch v7-p2 from v7-dev (profile.json n_rx 2, fresh data/ and results/,
+#   pushed; the commit goes to code_commit.txt); A0-B2F, B3n, B3m, the stages of
+#   v7_d86/p2_set4.stages if present, B3, B3a, B4, OOD, B4s; then C1p to RPT once profile 3's
+#   current part is past SURV3.
 # Final: when all three tracks are over, on an idle machine (no live MATLAB running pipeline
-#   stages, exited processes not counted; CPU below CPU_IDLE % on two polls IDLE_POLL apart; at
-#   most IDLE_MAX_S), LAT, KPI, DASH, WEAK, RPT and the console bundle of every finished profile.
+#   stages, exited processes and the worktree copies' exact commands not counted; CPU below
+#   CPU_IDLE % on two polls IDLE_POLL apart; at most IDLE_MAX_S), LAT, KPI, DASH, WEAK, RPT and
+#   the console bundle of every finished profile.
 #
 # Control files in v7_d86/ (written by Adi or the agent):
 #   p1_resume.go, p3_resume.go, p2_resume.go   go on after a failed or cut chain (must be newer
 #                                              than the profile's log; renamed to .used_<time>)
-#   p3_brerun.go       stage list of P3's B-stage rerun, e.g. "B2F B3 B3a B4 OOD B4s"
+#   p2_start.go        start profile 2 before profile 1's chain has finished
+#   p3_brerun.go       stage list of P3's B-stage rerun, e.g. "B2F B3 B3a B4 B4s"
 #   p2_set4.stages     extra stages of profile 2 after B3m, e.g. "B3q B3r"
 #   p3_c1p.hold, p2_c1p.hold     hold the profile before C1p
 #   p3_c1p.force, p2_c1p.force   start C1p without the other profile's SURV3 and past a failed rerun
@@ -34,15 +39,20 @@
 # Alerts: v7_d86/ALERT_<topic>.txt (delete after handling) and this script's log.
 #
 # Safety: refuses unless cygpath -w "$TEMP" is TEMP_WIN (the parallel turn file lives there),
-# while either given PID still runs its script, or while another takeover's heartbeat
-# (v7_d86/takeover.lock) is fresh. Touches v7_d86/run.lock and takeover.lock at least every HB_S
-# seconds for its whole life, so the launcher's resume always refuses. One MATLAB per profile
-# worktree at a time; never touches the parallel turn file.
+# unless the boot time can be read, while either given PID still runs its script, while any bash
+# runs v7_d86_launch.sh or v7_d87_p3fix.sh other than the V7T_ALLOW_PIDS subshells (an allowed
+# PID counts only for a process created within ALLOW_WIN_S after the start of profile 1's current
+# launcher part, in this boot), or while another takeover's heartbeat (v7_d86/takeover.lock) is
+# fresh. At its start it renames code_commit.txt's 'SRC <sha>' line to 'SRC_RETIRED_BY_D91 <sha>'
+# (backup code_commit_before_d91_<time>.txt, SHA kept in retired_src.txt), so the launcher's
+# resume refuses from then on, also after a reboot. While running it alerts on such a script and
+# starts no MATLAB until it is gone. Touches v7_d86/run.lock and takeover.lock at least every
+# HB_S seconds. One MATLAB per profile worktree at a time; never touches the parallel turn file.
 #
 # Start detached (PowerShell), the same way as the launcher (same TEMP):
 #   $si = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ShowWindow=[uint16]0}
-#   Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine='"C:\Program Files\Git\bin\bash.exe" -lc "bash ''/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_takeover.sh'' 24172 49732 >> ''/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_takeover.log'' 2>&1"'; CurrentDirectory='C:\Users\Adi Suliman\uav-gcs-logs'; ProcessStartupInformation=$si}
-# V7T_* environment variables point it at a test copy; a real run leaves them unset.
+#   Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine='"C:\Program Files\Git\bin\bash.exe" -lc "V7T_ALLOW_PIDS=''43428 43972'' bash ''/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_takeover.sh'' 24172 49732 >> ''/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_takeover.log'' 2>&1"'; CurrentDirectory='C:\Users\Adi Suliman\uav-gcs-logs'; ProcessStartupInformation=$si}
+# Other V7T_* environment variables point it at a test copy; a real run leaves them unset.
 
 LPID=${1:-}
 FPID=${2:-}
@@ -65,8 +75,14 @@ IDLE_MAX_S=${V7T_IDLE_MAX_S:-14400}        # [s] longest wait for an idle machin
 IDLE_POLL=${V7T_IDLE_POLL:-600}            # [s] between the two idle polls
 CPU_IDLE=${V7T_CPU_IDLE:-15}               # [%]
 NEED_GB=${V7T_NEED_GB:-45}                 # [GB] free commit before a chain's MATLAB starts
+RERUN_NEED_GB=${V7T_RERUN_NEED_GB:-65}     # [GB] before P3's B-stage rerun: OOD's 36 GB peak + P1's pool gather + margin
 HEADROOM_ALERT_S=${V7T_HEADROOM_ALERT_S:-3600}
-COPY_RE=${V7T_COPY_RE:-'B3m|B3q|B3r'}      # stages run in worktree copies, not counted as busy
+ML_PID_WAIT_S=${V7T_ML_PID_WAIT_S:-60}     # [s] longest wait for a started MATLAB's Windows PID
+BOOT_RETRY_S=${V7T_BOOT_RETRY_S:-5}        # [s] between boot time queries
+ALLOW_PIDS=${V7T_ALLOW_PIDS:-}             # profile 1's live chain subshells of the launcher
+ALLOW_WIN_S=${V7T_ALLOW_WIN_S:-900}        # [s] an allowed subshell is created this soon after its part's start
+# exact -batch commands of the worktree copies (B3m builds, fourth test set), not counted as busy
+IFS='|' read -ra COPY_CMDS <<< "${V7T_COPY_CMDS:-run_stage('A0','B3m')|run_stage('A0','B3q')|run_stage('A0','B3r')|set4_build}"
 R="$L/v7_d86"
 LOCK="$R/takeover.lock"
 GO3="$R/p3_brerun.go"
@@ -86,7 +102,7 @@ wt()  { case $1 in p1) echo "$V7";; p3) echo "$P3";; p2) echo "$P2";; esac; }
 br()  { case $1 in p1) echo v7-dev;; p3) echo v7-p3;; p2) echo v7-p2;; esac; }
 dep() { case $1 in p3) echo p1;; p2) echo p3;; esac; }   # whose SURV3 this profile's C1p waits for
 mtime() { stat -c %Y "$1" 2>/dev/null || echo 0; }
-hb()  { touch -c "$R/run.lock" "$LOCK" 2>/dev/null; }   # never recreates the takeover lock after its removal
+hb()  { touch "$R/run.lock" 2>/dev/null; touch -c "$LOCK" 2>/dev/null; }   # never recreates the takeover lock after its removal
 nap() {   # sleep $1 seconds with heartbeats
   local end=$(( $(date +%s) + $1 )) now
   while hb; now=$(date +%s); [ "$now" -lt "$end" ]; do
@@ -109,10 +125,13 @@ sysq() {
   local q
   if [ -n "$SYS" ]; then "$SYS" "$@"; return; fi
   case $1 in
-    cmdline|state) [[ "${2:-}" =~ ^[0-9]+$ ]] || return 0;;
+    cmdline|state|created|mlchild) [[ "${2:-}" =~ ^[0-9]+$ ]] || return 0;;
   esac
   case $1 in
     cmdline)  q="(Get-CimInstance Win32_Process -Filter \"ProcessId=$2\").CommandLine";;
+    created)  q="\$p = Get-CimInstance Win32_Process -Filter \"ProcessId=$2\"; if (\$p) { ([DateTimeOffset]\$p.CreationDate).ToUnixTimeSeconds() }";;
+    mlchild)  q="Get-CimInstance Win32_Process -Filter \"ParentProcessId=$2\" | Where-Object { \$_.Name -like 'matlab*' } | ForEach-Object { \$_.ProcessId }";;
+    scripts)  q="Get-CimInstance Win32_Process -Filter \"Name='bash.exe'\" | Where-Object { \$_.CommandLine -like ('*v7_d8' + '6_launch.sh*') -or \$_.CommandLine -like ('*v7_d8' + '7_p3fix.sh*') } | ForEach-Object { '{0}|{1}|{2}' -f \$_.ProcessId, ([DateTimeOffset]\$_.CreationDate).ToUnixTimeSeconds(), \$_.CommandLine }";;
     state)    q="\$p = Get-Process -Id $2 -ErrorAction SilentlyContinue; if (-not \$p) {'none'} elseif (\$p.HasExited) {'exited'} elseif (\$p.Path -like '*win64*') {'live'} else {'other'}";;
     matlab)   q="Get-CimInstance Win32_Process -Filter \"Name='MATLAB.exe'\" | Where-Object { \$_.CommandLine -like '*win64*' } | ForEach-Object { \$p = Get-Process -Id \$_.ProcessId -ErrorAction SilentlyContinue; \$x = if (-not \$p -or \$p.HasExited) {1} else {0}; '{0}|{1}|{2}' -f \$_.ProcessId, \$x, \$_.CommandLine }";;
     cpu)      q="(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average";;
@@ -123,7 +142,16 @@ sysq() {
   powershell.exe -NoProfile -Command "$q" 2>/dev/null | tr -d '\r'
 }
 stage_live() {   # live MATLAB sessions running pipeline stages (smoke runs and worktree copies not counted)
-  sysq matlab | awk -F'|' '$2 == 0' | grep 'run_stage(' | grep -v "run_stage(.smoke" | grep -Ev "$COPY_RE" | cut -d'|' -f1 | tr '\n' ' ' | sed 's/ *$//'
+  local pid x cmd b
+  while IFS='|' read -r pid x cmd; do
+    [ "$x" = 0 ] || continue
+    b=$cmd
+    [[ $cmd == *'"-batch" "'* ]] && b=$(sed 's/.*"-batch" "\([^"]*\)".*/\1/' <<< "$cmd")
+    [[ $b == *'run_stage('* ]] || continue
+    [[ $b == *'run_stage('?smoke* ]] && continue
+    in_list "$b" "${COPY_CMDS[@]}" && continue
+    echo "$pid"
+  done < <(sysq matlab) | tr '\n' ' ' | sed 's/ *$//'
 }
 n_live_matlab() { sysq matlab | awk -F'|' '$2 == 0' | wc -l | tr -d ' '; }
 cpu_int() { local c; c=$(sysq cpu); c=${c%%.*}; c=$(tr -dc '0-9' <<< "$c"); echo "${c:-100}"; }
@@ -200,6 +228,51 @@ part_idle() {   # nothing writes the profile's current part any more
   [ "$g" = p1 ] && return 1
   [ -z "$(open_stage "$g")" ] && [ $(( $(date +%s) - $(mtime "$f") )) -ge "$QUIET_S" ]
 }
+p1_heavy() {   # profile 1's chain between C1p and the end of C1c (pool build, gather, clean pools)
+  local r
+  [ -f "$R/p1.abandon" ] && return 1
+  [ -n "$(end_rc p1)" ] && return 1
+  [ "$(mtime "$R/p1.log")" -ge "$BOOT" ] || return 1
+  r=$(next_idx p1)
+  [ "$r" -ge "$(idx_of p1 C1p)" ] && [ "$r" -le "$(idx_of p1 C1c)" ]
+}
+
+# The old launcher and the p3 fix script
+stamp_epoch() { local s=$1; date -d "${s:0:8} ${s:9:2}:${s:11:2}:${s:13:2}" +%s 2>/dev/null; }
+foreign_scripts() {   # bash processes running v7_d86_launch.sh or v7_d87_p3fix.sh, allowed subshells left out
+  local pid ct cmd se mode
+  mode=$(part_mode p1); se=$(stamp_epoch "$(part_stamp p1)")
+  while IFS='|' read -r pid ct cmd; do
+    [ -n "$pid" ] || continue
+    if in_list "$pid" $ALLOW_PIDS && [[ $cmd == *v7_d86_launch.sh* ]] && [[ $mode != takeover* ]] && \
+       [[ "$ct" =~ ^[0-9]+$ ]] && [ -n "$se" ] && [ "$se" -ge "$BOOT" ] && [ "$ct" -ge "$se" ] && [ "$ct" -le $(( se + ALLOW_WIN_S )) ]; then
+      continue
+    fi
+    echo "$pid|$ct|$cmd"
+  done < <(sysq scripts)
+}
+scripts_alert() {
+  local pid ct cmd
+  while IFS='|' read -r pid ct cmd; do
+    alert "old_script_${pid}_$ct" "Bash PID $pid runs an old script outside V7T_ALLOW_PIDS: $cmd. No MATLAB starts until it is gone; end it (taskkill /PID $pid /F, no /T) once sure it is not one of profile 1's chain subshells."
+  done <<< "$1"
+}
+scripts_wait() {   # no MATLAB starts while such a script runs
+  local f
+  while f=$(foreign_scripts); [ -n "$f" ]; do scripts_alert "$f"; nap "$POLL"; done
+}
+retire_launcher() {   # code_commit.txt's SRC line renamed: v7_d86_launch.sh's resume reads '^SRC ' and refuses
+  local f="$R/code_commit.txt" sha s
+  sha=$(sed -n 's/^SRC //p' "$f")
+  if [ -n "$sha" ]; then
+    s=$(date +%Y%m%d_%H%M%S)
+    cp -p "$f" "$R/code_commit_before_d91_$s.txt" || return 1
+    echo "retired SRC $sha at $(date '+%Y-%m-%d %H:%M:%S %z') by v7_d91_takeover.sh (backup code_commit_before_d91_$s.txt): the run's code until the takeover; v7_d86_launch.sh resume refuses from here on" >> "$R/retired_src.txt" || return 1
+    sed -i 's/^SRC \(.*\)$/SRC_RETIRED_BY_D91 \1/' "$f" || return 1
+    say "code_commit.txt: SRC $sha retired (the launcher's resume refuses)"
+  fi
+  [ -z "$(sed -n 's/^SRC //p' "$f")" ] && grep -q '^SRC_RETIRED_BY_D91 ' "$f"
+}
 
 stage_cmd() { local q; q=$(printf ",'%s'" "$@"); echo "run_stage(${q#,})"; }
 part_header() {   # profile $1, list index $2, A0 first $3, mode $4, extra header fields $5
@@ -213,23 +286,46 @@ commit_note() { echo "$1 $(br "$1") $(git -C "$(wt "$1")" rev-parse HEAD) $(date
 
 # MATLAB -batch "$2" in profile $1's worktree, output appended to its log; heartbeat while it runs
 ml_guard() {   # a MATLAB this takeover started earlier in the worktree, still alive: wait
-  local g=$1 pf="$R/takeover_ml_$1.pid" op
+  local g=$1 pf="$R/takeover_ml_$1.pid" op c ct
   while [ -f "$pf" ]; do
-    op=$(tr -dc '0-9' < "$pf")
+    op=$(head -1 "$pf" | tr -dc '0-9')
     [ -n "$op" ] && [ "$(mtime "$pf")" -ge "$BOOT" ] || break
-    grep -qi matlab <<< "$(sysq cmdline "$op")" || break
+    c=$(sysq cmdline "$op")
+    if [[ $c == *v7_d91_takeover* ]]; then
+      # an earlier takeover's subshell that had not yet exec'd MATLAB: alive while it has a MATLAB
+      # child, or while it predates this takeover (it may still exec)
+      ct=$(sysq created "$op" | tr -dc '0-9')
+      [ -n "$(sysq mlchild "$op")" ] || [ "${ct:-$START_T}" -lt "$START_T" ] || break
+    else
+      grep -qi matlab <<< "$c" || break
+    fi
     alert "ml_alive_$g" "A MATLAB started earlier in $(wt "$g") (Windows PID $op) is still alive; no new MATLAB starts there until it exits."
     nap "$POLL"
   done
   rm -f "$pf"
 }
-run_ml() {
+ml_pid() {   # Windows PID of the MATLAB started as subshell $2, into $3, once the subshell has exec'd it
+  local g=$1 mp=$2 pf=$3 wp="" end
+  end=$(( $(date +%s) + ML_PID_WAIT_S ))
+  while kill -0 "$mp" 2>/dev/null; do
+    wp=$(cat "/proc/$mp/winpid" 2>/dev/null)
+    if [ -n "$wp" ] && grep -qi matlab <<< "$(sysq cmdline "$wp")"; then echo "$wp" > "$pf"; return 0; fi
+    [ "$(date +%s)" -lt "$end" ] || break
+    hb; sleep 1
+  done
+  kill -0 "$mp" 2>/dev/null || return 0
+  printf '%s\nmsys %s\n' "${wp:-$mp}" "$mp" > "$pf"
+  alert "ml_pid_${g}_$(date +%s)" "MATLAB started in $(wt "$g") did not show as a matlab process within $ML_PID_WAIT_S s (Windows PID ${wp:-?}, MSYS PID $mp); its PID file holds the subshell's PID, which a restarted takeover treats as possibly alive."
+}
+run_ml() {   # profile $1, command $2, further MATLAB options after them
   local g=$1 cmd=$2 w mp rc pf="$R/takeover_ml_$1.pid"
+  shift 2
   w=$(wt "$g")
   ml_guard "$g"
-  ( cd "$w" && exec "$MATLAB" -batch "$cmd" ) >> "$R/$g.log" 2>&1 &
+  scripts_wait
+  ( cd "$w" && exec "$MATLAB" "$@" -batch "$cmd" ) >> "$R/$g.log" 2>&1 &
   mp=$!
-  sleep 1; cat "/proc/$mp/winpid" > "$pf" 2>/dev/null
+  ml_pid "$g" "$mp" "$pf"
   while kill -0 "$mp" 2>/dev/null; do hb; sleep "$STEP"; done
   wait "$mp"; rc=$?
   rm -f "$pf"
@@ -249,12 +345,12 @@ code_wait() {   # the worktree on its branch, no merge in progress, its code com
     nap "$POLL"
   done
 }
-headroom_wait() {   # free commit of at least NEED_GB before a chain's MATLAB starts
-  local g=$1 h t0 said=0
+headroom_wait() {   # free commit of at least $2 GB (default NEED_GB) before a chain's MATLAB starts
+  local g=$1 need=${2:-$NEED_GB} h t0 said=0
   t0=$(date +%s)
-  while h=$(sysq headroom | tr -dc '0-9'); [ "${h:-0}" -lt "$NEED_GB" ]; do
-    [ "$said" = 1 ] || { say "$g: free commit ${h:-?} GB < $NEED_GB GB; waiting"; said=1; }
-    [ $(( $(date +%s) - t0 )) -lt "$HEADROOM_ALERT_S" ] || alert "headroom_${g}_$t0" "$g has waited $(( ($(date +%s) - t0) / 60 )) min for $NEED_GB GB of free commit (now ${h:-?} GB)."
+  while h=$(sysq headroom | tr -dc '0-9'); [ "${h:-0}" -lt "$need" ]; do
+    [ "$said" = 1 ] || { say "$g: free commit ${h:-?} GB < $need GB; waiting"; said=1; }
+    [ $(( $(date +%s) - t0 )) -lt "$HEADROOM_ALERT_S" ] || alert "headroom_${g}_$t0" "$g has waited $(( ($(date +%s) - t0) / 60 )) min for $need GB of free commit (now ${h:-?} GB)."
     nap "$POLL"
   done
   [ "$said" = 1 ] && say "$g: free commit $h GB"
@@ -309,9 +405,10 @@ track_p1() {
     complete p1 && { say "p1: chain finished"; return 0; }
     rc=$(end_rc p1)
     if [ -n "$rc" ] || part_idle p1; then
+      complete p1 && continue   # its end marker written since the check above
       read -ra F <<< "$(list_of p1)"; r=$(next_idx p1)
       if [ -n "$rc" ]; then
-        alert "p1_failed_$(part_stamp p1)" "Profile 1's chain ended with rc=$rc before ${F[$r]:-end} (see $R/p1.log). Profile 3 does not start C1p before profile 1 is past SURV3, and profile 2 does not start. After the cause is understood and fixed: write $R/p1_resume.go to go on from ${F[$r]:-end} (or p1.abandon to give profile 1 up; then p3_c1p.force lets profile 3 go on)."
+        alert "p1_failed_$(part_stamp p1)" "Profile 1's chain ended with rc=$rc before ${F[$r]:-end} (see $R/p1.log). Profile 3 does not start C1p before profile 1 is past SURV3, and profile 2 does not start (p2_start.go starts it anyway). After the cause is understood and fixed: write $R/p1_resume.go to go on from ${F[$r]:-end} (or p1.abandon to give profile 1 up; then p3_c1p.force lets profile 3 go on)."
       else
         alert "p1_cut_$(part_stamp p1)" "Profile 1's chain stopped without an end marker (a reboot) before ${F[$r]:-end}. Write $R/p1_resume.go to go on from ${F[$r]:-end} (C1p keeps its per-cell checkpoints)."
       fi
@@ -368,14 +465,14 @@ run_rerun() {
     echo "##### rerun ended rc=0 GO $id (its stages were done before an interruption) $(date) #####" >> "$R/p3.log"
     return 0
   fi
-  code_wait p3; headroom_wait p3
+  code_wait p3; headroom_wait p3 "$RERUN_NEED_GB"
   read -ra F <<< "$(list_of p3)"
   r=$(( $(idx_of p3 C1p) - 1 ))
   for x in "${!F[@]}"; do in_list "${F[$x]}" "${list[@]}" && { r=$x; break; }; done
   part_header p3 "$r" 1 takeover-rerun " RERUN $(IFS=,; echo "${list[*]}") GO $id"
   commit_note p3 "B-stage rerun ${list[*]} (request $id)"
   say "p3: B-stage rerun A0 ${list[*]} started (request $id)"
-  run_ml p3 "$(stage_cmd A0 "${list[@]}")"; rc=$?
+  run_ml p3 "$(stage_cmd A0 "${list[@]}")" -singleCompThread; rc=$?
   echo "##### rerun ended rc=$rc GO $id $(date) #####" >> "$R/p3.log"
   say "p3: B-stage rerun ended rc=$rc"
 }
@@ -396,7 +493,7 @@ run_ab() {   # B stages from list index $2 (A0 first inside them); end marker on
   return "$rc"
 }
 pre_c1p() {   # 0 when C1p may start; 1 after a rerun ran or the track was given up
-  local g=$1 d st blk said=""
+  local g=$1 d st blk rc3 said=""
   d=$(dep "$g")
   while :; do
     [ -f "$R/$g.abandon" ] && return 1
@@ -404,7 +501,9 @@ pre_c1p() {   # 0 when C1p may start; 1 after a rerun ran or the track was given
     if [ "$g" = p3 ]; then
       st=$(go_state)
       case $st in
-        pending) run_rerun; return 1;;
+        pending) if ! p1_heavy; then run_rerun; return 1; fi
+                 [ "$said" = rerun_wait ] || { say "p3: B-stage rerun waits until profile 1 is past C1c"; said=rerun_wait; }
+                 nap "$POLL"; continue;;
         failed)  blk="B-stage rerun failed"
                  alert "p3_rerun_failed_$(go_id)" "P3's B-stage rerun (p3_brerun.go) failed (see $R/p3.log); C1p does not start. Fix it, then write p3_brerun.go again (a new version reruns its whole list), or write p3_c1p.force to start C1p as it is.";;
         blocked) blk="last B-stage rerun not ended well"
@@ -413,6 +512,14 @@ pre_c1p() {   # 0 when C1p may start; 1 after a rerun ran or the track was given
         invalid:*) blk="p3_brerun.go invalid"
                  alert "p3_rerun_invalid_$(mtime "$GO3")" "p3_brerun.go names '${st#invalid:}', which is not a B stage of $P3/code/run_stage.m; C1p does not start until the file is fixed or removed.";;
       esac
+    fi
+    if [ "$g" = p2 ] && ! past_surv3 p3; then
+      rc3=$(end_rc p3)
+      if [ -f "$R/p3.abandon" ]; then
+        alert p2_c1p_p3_abandon "Profile 3 is given up (p3.abandon) before its SURV3, so profile 2's C1p does not start by itself; write $R/p2_c1p.force to start it."
+      elif [ -n "$rc3" ] && [ "$rc3" != 0 ]; then
+        alert "p2_c1p_p3_failed_$(part_stamp p3)" "Profile 3's chain ended with rc=$rc3 before its SURV3, so profile 2's C1p waits. Resume profile 3 (p3_resume.go), or write $R/p2_c1p.force to start profile 2's C1p without it."
+      fi
     fi
     [ -f "$R/${g}_c1p.hold" ] && blk="${blk:+$blk; }${g}_c1p.hold"
     if [ -f "$R/${g}_c1p.force" ]; then
@@ -538,8 +645,10 @@ p2_ab_new() {   # profile 2's B stages, with the stages of p2_set4.stages after 
 }
 track_p2() {
   local said=0
-  until complete p1 || [ -f "$R/p1.abandon" ] || [ -n "$(cur_part p2)" ]; do
+  until complete p1 || [ -n "$(cur_part p2)" ]; do
     [ -f "$R/p2.abandon" ] && { say "p2: track ended (p2.abandon)"; return 0; }
+    take_go p2 p2_start.go && { say "p2: starts on p2_start.go before profile 1's chain has finished"; break; }
+    [ -f "$R/p1.abandon" ] && alert p2_wait_p1_abandon "Profile 1 is given up (p1.abandon), so profile 2 does not start by itself; write $R/p2_start.go to start it."
     [ "$said" = 1 ] || { say "p2: waits for profile 1's chain to end with rc=0"; said=1; }
     nap "$POLL"
   done
@@ -626,6 +735,8 @@ status() {
   for f in "$R/run.lock" "$LOCK"; do [ -f "$f" ] && echo "$(basename "$f") age $(( $(date +%s) - $(mtime "$f") )) s"; done
   echo "launcher $LPID: $(sysq cmdline "$LPID" | cut -c1-120)"
   echo "p3 fix $FPID: $(sysq cmdline "$FPID" | cut -c1-120)"
+  echo "old scripts outside V7T_ALLOW_PIDS ('$ALLOW_PIDS'): $(foreign_scripts | cut -d'|' -f1 | tr '\n' ' ')"
+  echo "code_commit.txt: $(grep -m1 '^SRC' "$R/code_commit.txt" 2>/dev/null | cut -c1-60)"
   [ -f "$T/uav_gcs_parallel_turn.txt" ] && echo "parallel turn: PID $(tr -dc '0-9' < "$T/uav_gcs_parallel_turn.txt") ($(sysq state "$(tr -dc '0-9' < "$T/uav_gcs_parallel_turn.txt")"))"
   echo "free commit $(sysq headroom) GB; live pipeline MATLAB: $(stage_live)"
 }
@@ -639,10 +750,19 @@ case "$MODE" in run|status) ;; *) usage; exit 1;; esac
 tw=$(cygpath -w "${TEMP:-/nonexistent}" 2>/dev/null)
 [ "$tw" = "$TEMP_WIN" ] || { say "TEMP is '$tw', not $TEMP_WIN (the parallel turn file would split); not started"; exit 1; }
 T=$(cygpath -u "$TEMP")
-BOOT=$(sysq boot | tr -dc '0-9'); BOOT=${BOOT:-0}
+START_T=$(date +%s)
+BOOT=""
+for i in 1 2 3 4 5; do
+  BOOT=$(sysq boot | tr -dc '0-9')
+  [[ "$BOOT" =~ ^[0-9]{9,}$ ]] && [ "$BOOT" -le "$START_T" ] && break
+  BOOT=""; sleep "$BOOT_RETRY_S"
+done
+[ -n "$BOOT" ] || { say "the boot time could not be read (5 tries); not started (a reboot could not be told from a running chain)"; exit 1; }
 if [ "$MODE" = status ]; then status; exit 0; fi
 c=$(sysq cmdline "$LPID"); grep -q 'v7_d86_launch' <<< "$c" && { say "the launcher (PID $LPID) still runs: $c; not started"; exit 1; }
 c=$(sysq cmdline "$FPID"); grep -q 'v7_d87_p3fix' <<< "$c" && { say "the p3 fix script (PID $FPID) still runs: $c; not started"; exit 1; }
+c=$(foreign_scripts)
+[ -z "$c" ] || { say "bash processes run v7_d86_launch.sh or v7_d87_p3fix.sh outside V7T_ALLOW_PIDS ('$ALLOW_PIDS', each created within $ALLOW_WIN_S s after p1's launcher part in this boot): $(tr '\n' ';' <<< "$c") not started"; exit 1; }
 if [ -f "$LOCK" ]; then
   lt=$(mtime "$LOCK"); age=$(( $(date +%s) - lt ))
   if [ "$age" -lt "$STALE_S" ] && [ "$lt" -ge "$BOOT" ]; then
@@ -659,12 +779,13 @@ for g in p1 p3 p2; do
   b=$(git -C "$w" symbolic-ref --short -q HEAD)
   [ "$b" = "$(br "$g")" ] || { say "$w is on '$b', not $(br "$g"); not started"; exit 1; }
 done
+retire_launcher || { say "the SRC line of $R/code_commit.txt could not be retired; not started"; exit 1; }
 { cat "/proc/$$/winpid" 2>/dev/null || echo "$$"; date '+%Y-%m-%d %H:%M:%S'; } > "$LOCK"
 [ -f "$R/run.lock" ] || echo "$(cat "/proc/$$/winpid" 2>/dev/null || echo "$$")" > "$R/run.lock"
 trap 'rm -f "$LOCK"' EXIT
 hb
 ( while kill -0 $$ 2>/dev/null; do hb; sleep "$HB_S"; done ) &   # heartbeat while this script lives (the tracks beat in their own waits too)
-say "v7 takeover started (boot $(date -d @"$BOOT" '+%F %T'), TEMP $tw, poll $POLL s)"
+say "v7 takeover started (boot $(date -d @"$BOOT" '+%F %T'), TEMP $tw, poll $POLL s, allowed launcher subshells: ${ALLOW_PIDS:-none})"
 for g in p1 p3 p2; do
   [ -f "$R/$g.log" ] && say "$g: next $(list_of "$g" | cut -d' ' -f$(( $(next_idx "$g") + 1 ))) (index $(next_idx "$g")); $(cur_part "$g" | head -1)"
 done
@@ -674,7 +795,7 @@ track_p1 & T1=$!
 track_run p3 & T3=$!
 track_p2 & T2=$!
 alive() { local p; for p in "$T1" "$T3" "$T2"; do kill -0 "$p" 2>/dev/null && return 0; done; return 1; }
-while alive; do turn_check; nap "$POLL"; done
+while alive; do turn_check; c=$(foreign_scripts); [ -z "$c" ] || scripts_alert "$c"; nap "$POLL"; done
 wait "$T1" "$T3" "$T2"
 say "tracks ended"
 final_phase
