@@ -421,8 +421,8 @@ commit free, at most one other non-pipeline MATLAB). It adds a shared start stam
 reads `WAIT a job started n s ago`. So two queues cannot both read OK in the same poll window. The
 MATLAB started on one OK runs, and is counted, before another one can start. The edit was made
 before the next job of the tests2, tests3 and fuse queues started, and it is recorded in their
-queue logs. The fuse log's line was split in two when it was written; the next line in the
-tests2 and tests3 logs gives the mutex name.
+queue logs. In all three logs that line was split in two when it was written, inside the
+mutex name; the name is the one above and in the committed text.
 
 ### 7.4 The merge candidate, and a rerun for another target
 
