@@ -980,7 +980,8 @@ rep{end+1} = sprintf(['--- A lost branch with and without its onset in the fusio
     'fused class, and the cause latched from the onset''s shape, onset_shape.m) | by the fused class alone. The ' ...
     'onset''s shape is read at the event''s start, the latched cause after it ---'], PP.fuse_N);
 if ~onset_shape('on', PP.fuse)
-    rep{end+1} = 'The latch is off (chosen on validation, select_fusion.m): the monitor''s class is the fused class.';
+    rep{end+1} = ['The latch is off (set by B2F, select_fusion.m: chosen on validation, or the measured pick''s state): ' ...
+        'the monitor''s class is the fused class.'];
 end
 for q = 1:numel(OC)
     rep{end+1} = sprintf('%-20s %5.1f dB | onset in the window %5.1f | %5.1f (%d frames) | after it %5.1f | %5.1f (%d frames)', ...

@@ -152,7 +152,7 @@ mem.tried(mem.good >= C.heal, :) = false;
 [mem, pf, te, unk] = fusion(mem, obs, PP, gk(link), gw(link));
 % Latched cause of a lost branch (onset_shape.m): read from the shape of its onset, a
 % step (antenna_fault) or a ramp (airframe_shadowing), and kept while the branch stays lost;
-% only while the deployed fusion latches (onset_shape('on', PP.fuse), chosen on validation)
+% only while the deployed fusion latches (onset_shape('on', PP.fuse), set by B2F)
 if ~isfield(mem, 'os'), mem.os = []; end
 FZ = []; if isfield(PP, 'fuse'), FZ = PP.fuse; end
 if isfield(obs, 'gant') && ~isempty(obs.gant) && onset_shape('on', FZ)

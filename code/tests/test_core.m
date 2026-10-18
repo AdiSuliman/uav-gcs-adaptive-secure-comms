@@ -6109,7 +6109,7 @@ function test_fusion_pick_deploy(tc)
 % measurement adopted (fusion_pick.m) as measured, never choosing again: its N and lambda,
 % the deployed target rule, no cfar, the latch off as measured; it stops unless the adoption
 % rule holds for it on its own fit set, and records the pick and the revision id that B3r
-% checks (fusion_rev_id.m).
+% checks (fusion_rev_id.m); FUSION_PICK overrides the pick only on the validation fit.
 P = fusion_pick();
 verifyEqual(tc, P.name, 'branch evidence');
 verifyEqual(tc, [P.N P.lambda], [12 1e-3]);
@@ -6120,7 +6120,7 @@ verifyFalse(tc, isfield(P.cues, 'phi1') && P.cues.phi1);
 verifyClass(tc, P.latch, 'logical');
 verifyFalse(tc, P.latch);                                % the measured state (m_all.m, latch 0)
 dp = P; dp.check = struct('all', [0 0 0]); dp.check.latch_val = struct('macro_f1_latched', 0.9, 'macro_f1_fused', 0.91);
-verifyTrue(tc, isequal(rmfield(dp, 'check'), fusion_pick()));   % the deploy guard on deployed_pick (docs/d91_fuse.md, section 7)
+verifyTrue(tc, isequal(rmfield(dp, 'check'), fusion_pick()));   % a deployed_pick built as B2F builds it passes the planned guard (section 7); the guard's own test lands with it
 verifyEqual(tc, fusion_rev_id('enlarged'), 'd91_branch_evidence_enlarged');
 verifyEqual(tc, fusion_rev_id('validation'), 'd91_branch_evidence_validation');
 verifyError(tc, @() fusion_rev_id('test'), 'fusion_rev_id:fit');
@@ -6128,9 +6128,13 @@ src = fileread(which('select_fusion'));
 for t = {'ENL = REV && exist(''FUSION_FIT'', ''var'') && strcmp(FUSION_FIT, ''enlarged'');', ...
         'elseif ENL, PK = fusion_pick(); end', 'TA = struct(''target_age'', NS(a));', '''select_fusion:pick_rule''', ...
         'assert(fusion_adopt(''branch'', GP), ''select_fusion:pick_rule''', 'deployed_pick = PK; deployed_pick.check = GP;', ...
-        '''select_fusion:pick_latch''', 'deployed_pick.check.latch_val = struct(''macro_f1_latched'', mf_latch, ''macro_f1_fused'', mf_fused);'}
+        '''select_fusion:pick_latch''', 'deployed_pick.check.latch_val = struct(''macro_f1_latched'', mf_latch, ''macro_f1_fused'', mf_fused);', ...
+        'assert(~ENL || isequal(PK, fusion_pick()), ''select_fusion:pick_measured'''}
     verifyNotEmpty(tc, strfind(src, t{1}), t{1});
 end
+k1 = strfind(src, 'elseif ENL, PK = fusion_pick(); end'); k2 = strfind(src, '''select_fusion:pick_measured''');
+k3 = strfind(src, 'S = load(''data/splits.mat'');');
+verifyTrue(tc, isscalar(k1) && isscalar(k2) && isscalar(k3) && k1 < k2 && k2 < k3);   % an override of the enlarged fit stops before any data is read
 j1 = strfind(src, 'FM.latch = mf_latch > mf_fused;'); j2 = strfind(src, 'FM.latch = PK.latch;');
 j3 = strfind(src, 'save(''data/fusion.mat'', ''FM''');
 verifyTrue(tc, isscalar(j1) && isscalar(j2) && isscalar(j3) && j1 < j2 && j2 < j3);   % the pick's latch replaces validation's choice before the save

@@ -41,9 +41,10 @@
 % N and lambda stay chosen on validation), and val_probs_oof holds its validation frames;
 % the test sets' readings are then spent, and KPI 1 is read on a test set built after it.
 % There the further columns are not chosen again: the design the measurement adopted
-% (fusion_pick.m, or FUSION_PICK; docs/d91_fuse.md) is deployed as measured, at its N and
-% lambda, on the deployed target rule (pos - onset < N, FM.target_age = N) and without cfar,
-% and B2F stops (select_fusion:pick_rule) unless the adoption rule fusion_adopt('branch')
+% (fusion_pick.m; docs/d91_fuse.md) is deployed as measured, at its N and lambda (a
+% FUSION_PICK override only on the validation fit, select_fusion:pick_measured), on the
+% deployed target rule (pos - onset < N, FM.target_age = N) and without cfar, and B2F stops
+% (select_fusion:pick_rule) unless the adoption rule fusion_adopt('branch')
 % holds for it against the fusion without it, out of fold on the same fit set and folds.
 % The quiet-slot interference alarm of the rule (rule_based_policy.m) is set here from
 % the clean validation frames (the sub-runs without a threat), as an AGC jamming monitor
@@ -79,6 +80,8 @@ ENL = REV && exist('FUSION_FIT', 'var') && strcmp(FUSION_FIT, 'enlarged');
 PK = [];                                                 % the measured design, deployed without choosing again
 if exist('FUSION_PICK', 'var') && ~isempty(FUSION_PICK), PK = FUSION_PICK; elseif ENL, PK = fusion_pick(); end
 assert(isempty(PK) || REV, 'select_fusion:pick', 'FUSION_PICK needs FUSION_REV');
+assert(~ENL || isequal(PK, fusion_pick()), 'select_fusion:pick_measured', ...
+    'with FUSION_FIT = ''enlarged'' only the measured design (fusion_pick.m) is deployed; FUSION_PICK is for the validation fit');
 S = load('data/splits.mat'); va = S.splits.val; norm = S.splits.norm;
 if ~isfield(va, 'pos')
     error('splits.mat has no frame positions (v6 dataset). Run run_dataset_sweep, extract_spectrograms, prepare_data.');
