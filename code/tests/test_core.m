@@ -14,6 +14,13 @@ tc.TestData.cwd = pwd;
 tc.TestData.tmp = tempname; mkdir(tc.TestData.tmp); cd(tc.TestData.tmp);
 tc.TestData.cfg = Simulink.fileGenControl('getConfig');
 Simulink.fileGenControl('set', 'CacheFolder', tc.TestData.tmp, 'CodeGenFolder', tc.TestData.tmp);
+if ispc
+    % Stateflow build files add up to ~110 characters below the work folder (long names).
+    w = char(java.io.File(tc.TestData.tmp).getCanonicalPath());
+    assertLessThanOrEqual(tc, numel(w), 150, sprintf(['ENVIRONMENT, not code: the test work ' ...
+        'folder %s has %d characters, so Stateflow build files under it pass the Windows limit of ' ...
+        '260. Set TEMP and TMP to a short folder (e.g. C:\\Users\\<name>\\t) and rerun.'], w, numel(w)));
+end
 end
 
 function teardownOnce(tc)
