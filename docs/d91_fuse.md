@@ -416,3 +416,42 @@ pool). All pass:
 4. `rekey_pools` (the columns read only `gant`), then the closed loop from C1d on.
 5. Profile 3 before its C1p, profile 1 after its run, profile 2 from its start, as the
    recommendation lays out.
+
+## 8. phi: the declared comparison (fixed before any phi = 1 number exists)
+
+phi = (1 - rho) / (1 + rho) (section 1) has no library source and was never compared with
+phi = 1. Every adopted choice is compared with its baseline, so it is measured now. This
+section was written and committed before the comparison ran; no phi = 1 number existed then.
+
+**Variants.** 'branch evidence' (iso + glr + held + post, phi as is, the adopted variant) and
+'branch evidence, phi = 1': the same four groups with phi fixed at 1 in the GLR
+(`window_cues.m` `branch_glr`) and in every CUSUM step (`branch_ref.m`), and without the
+`gl_phi` column (a constant). Everything else as in section 5: the enlarged fit set from the
+same extracts, N 12, lambda 1e-3, the deployed target rule, no cfar, the outer folds by
+sub-run (stream seed 9101), the paired bootstrap over sub-runs (1,000 resamples, seed 9102).
+The checkpoints of section 5 are reused (windows, the phi columns, the base and 'branch
+evidence' out of fold), after the job checks that its code rebuilds the same phi columns.
+
+**Readings.** D = 'branch evidence' less 'branch evidence, phi = 1' (the gain of keeping
+phi), in points with 95% intervals, the items of `fusion_adopt('paired')`:
+- (i) out of fold on the whole fit set;
+- (ii) nested: each outer fold applies the keep rule below to inner out-of-fold readings of
+  its four training folds (500 resamples, seeds 9151-9155), fits the variant it keeps on them
+  and predicts the held-out fold; D over the nested predictions against phi = 1 out of fold.
+
+**Keep rule.** D keeps phi only if fault F1 gains (lower bound > 0) and no other rule item is
+worse: macro-F1 over every frame and above the KPI 1 threshold, shadowing F1, and both
+lost-branch F1 at K <= 0 dB each with upper bound >= 0; clean frames read as a threat and as
+a lost branch each with lower bound <= 0. phi is kept on a profile only if (i) and (ii) both
+pass the keep rule.
+
+**Deployment (one design for both profiles).**
+1. phi kept on both profiles: deploy 'branch evidence' (phi as is).
+2. Otherwise deploy 'branch evidence, phi = 1' (simpler, no unsourced factor), provided that
+   on both profiles it passes the adoption rule of section 4 against the base, out of fold
+   and through the nested reading of (ii) (`fusion_adopt('branch')`).
+3. If phi = 1 fails that rule on a profile, 'branch evidence' stays, and phi stays flagged as
+   an unsourced factor.
+
+The verdict line is printed by the job, per profile and for both together. The pick goes
+into `fusion_pick.m`, which `select_fusion.m` deploys (section 9).
