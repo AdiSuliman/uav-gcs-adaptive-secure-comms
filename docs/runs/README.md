@@ -21,7 +21,7 @@ The other d91 scripts are not copied here, because their branches already carry 
 
 ## Analysis outputs (`analysis/`, read-only snapshots)
 
-The decision record cites these working files of 2026-10-17/18. The originals are in the session's scratch folder, outside the repository. The copies here are byte-identical, with one exception: `weak_branch_recommendation.md` is the `recommendation` text field, extracted from the workflow's JSON result. Line numbers cited in the docs (for example `d91_fuse_m_p1_log.txt:71-77`) refer to these copies. The two measurement logs were `m_p1.log` and `m_p3.log`; they are renamed because `.gitignore` excludes `*.log`.
+The decision record cites these working files of 2026-10-17/18. The originals are in the session's scratch folder, outside the repository. The sha256 values are of the originals. Git stores these files with LF line ends: for the originals with CRLF line ends (`audit1_*`, `rev88_confirmed.json`, `overnight_audit.txt`, `d91_fuse_*`) the blob differs from the original by its CR characters only, and the line numbers are the same. One file is not a plain copy: `weak_branch_recommendation.md` is the `recommendation` text field, extracted from the workflow's JSON result. Line numbers cited in the docs (for example `d91_fuse_m_p1_log.txt:71-77`) refer to these copies. The two measurement logs were `m_p1.log` and `m_p3.log`; they are renamed because `.gitignore` excludes `*.log`.
 
 | File | What it is | Written | sha256 |
 |---|---|---|---|
