@@ -847,7 +847,104 @@ to steps, such as the held revision, is moved more, in either direction. The siz
 C on the profiles' pools (see above), not from the smoke.
 
 <!-- WRAP RESULTS -->
-Pending: `wrap_check.txt` of the queue (`C:\Users\Adi Suliman\d91q\fuse\wrap\wrap_check.txt`).
+The job wrote the log below (smoke data: the levels are not results; the question is whether the jump moves the rates). Interpretation follows at review.
+
+```
+===== d91 wrap check, 18-Oct-2026 19:56:02, code C:\Users\ADISUL~1\d91q\fuse\eb87297\code =====
+=== B2F: temporal fusion (validation split only) ===
+
+The revised selection (FUSION_REV): N on the frames no candidate relabels, target age N - 1, the further columns
+
+  N =  1 cycles, lambda 1e-04: macro-F1 44.91% out of fold on its own window's targets, 44.98% on the frames no candidate relabels; path-loss relabels 0, benign 0
+  N =  1 cycles, lambda 1e-03: macro-F1 46.27% out of fold on its own window's targets, 46.35% on the frames no candidate relabels; path-loss relabels 0, benign 0
+  N =  1 cycles, lambda 1e-02: macro-F1 44.95% out of fold on its own window's targets, 45.03% on the frames no candidate relabels; path-loss relabels 0, benign 0
+  N =  3 cycles, lambda 1e-04: macro-F1 42.58% out of fold on its own window's targets, 42.61% on the frames no candidate relabels; path-loss relabels 0, benign 0
+  N =  3 cycles, lambda 1e-03: macro-F1 42.36% out of fold on its own window's targets, 42.41% on the frames no candidate relabels; path-loss relabels 0, benign 0
+  N =  3 cycles, lambda 1e-02: macro-F1 44.96% out of fold on its own window's targets, 45.00% on the frames no candidate relabels; path-loss relabels 0, benign 0
+  N =  5 cycles, lambda 1e-04: macro-F1 40.48% out of fold on its own window's targets, 40.49% on the frames no candidate relabels; path-loss relabels 0, benign 0
+  N =  5 cycles, lambda 1e-03: macro-F1 42.61% out of fold on its own window's targets, 42.74% on the frames no candidate relabels; path-loss relabels 0, benign 0
+  N =  5 cycles, lambda 1e-02: macro-F1 45.83% out of fold on its own window's targets, 45.92% on the frames no candidate relabels; path-loss relabels 0, benign 0
+  N =  8 cycles, lambda 1e-04: macro-F1 40.44% out of fold on its own window's targets, 40.64% on the frames no candidate relabels; path-loss relabels 0, benign 0
+  N =  8 cycles, lambda 1e-03: macro-F1 42.12% out of fold on its own window's targets, 42.23% on the frames no candidate relabels; path-loss relabels 0, benign 0
+  N =  8 cycles, lambda 1e-02: macro-F1 46.63% out of fold on its own window's targets, 46.70% on the frames no candidate relabels; path-loss relabels 0, benign 0
+  N = 12 cycles, lambda 1e-04: macro-F1 42.78% out of fold on its own window's targets, 43.11% on the frames no candidate relabels; path-loss relabels 8, benign 0
+  N = 12 cycles, lambda 1e-03: macro-F1 44.82% out of fold on its own window's targets, 45.14% on the frames no candidate relabels; path-loss relabels 8, benign 0
+  N = 12 cycles, lambda 1e-02: macro-F1 48.68% out of fold on its own window's targets, 48.88% on the frames no candidate relabels; path-loss relabels 8, benign 0
+Frames no candidate's window relabels: 916 of 924
+
+Best on the frames no candidate relabels: N = 12, lambda 1e-02, 48.88% (standard error 3.65 over the folds); the one-standard-error rule: N = 1 cycles, lambda 1e-03, 46.35%
+The measured design (branch evidence): N = 12 cycles, lambda 1e-03, the deployed target rule; the selection above gives N = 1, lambda 1e-03
+Frames judged by their window: path-loss onsets 12, WLAN frames without a packet as benign_interference 0 (of 210 none frames)
+The measured design branch evidence against none at N = 12, lambda 1e-03, out of fold over 924 frames (KPI 1 threshold NaN dB): every frame +3.30 [-2.78, +12.14], above the threshold NaN [NaN, NaN], clean as a threat +1.52 [-4.82, +5.49], clean as a lost branch -2.53 [-7.41, +0.77]; F1 antenna_fault +36.60 [+9.09, +77.36], airframe_shadowing +5.91 [-24.86, +37.63]; at K <= 0 dB +0.00 [+0.00, +0.00], +36.65 [+0.00, +46.55] -> rule no
+PICK PATH: stopped with select_fusion:pick_rule: the measured design branch evidence fails the adoption rule on this fit set: no-go (docs/d91_fuse.md)
+pools: F_SUB 20, T 30, alarm class_drop, confirm [4 5], drop_db 5, gant 1; clean validation geometries 4
+
+A. jump frame 20 -> 1 against consecutive frames, 8 geometry runs x Eb/N0:
+  per-antenna gain |dB|: consecutive median 2.04, p95 10.44; wrap median 1.36, p95 10.02; wrap above the consecutive p95 4.2%
+  branch ratio |dB| (power over the others' mean): consecutive median 1.86, p95 10.30; wrap median 1.49, p95 9.30; above the p95 4.2%
+    speed 0-23 km/h (2): ratio consecutive median 0.76, p95 10.13; wrap median 1.23, p95 6.11
+    speed 23-60 km/h (2): ratio consecutive median 2.03, p95 14.12; wrap median 1.31, p95 3.70
+    speed 60-120 km/h (4): ratio consecutive median 2.30, p95 8.56; wrap median 2.11, p95 15.61
+
+B. held CUSUM at its threshold b (phi as is), 160 sequences: after the jump less before it -1.91 [-12.52, +8.14] points
+    W >= b per cycle from the jump [-8 -7 -6 -5 -4 -3 -2 -1 0 1 2 3 4 5 6 7 8 9 10 11 12]: [12.5 12.5 12.5 12.5 12.5 10.4 8.9 7.8 6.9 7.5 5.7 7.3 6.7 3.6 5.8 10.2 6.6 5.6 4.2 5.6 5.9]% (cycles [8 16 24 32 40 48 56 64 72 80 88 96 104 112 120 128 136 144 144 144 136])
+
+B. held CUSUM at its threshold b (phi = 1), 160 sequences: after the jump less before it -1.79 [-12.36, +6.93] points
+    W >= b per cycle from the jump [-8 -7 -6 -5 -4 -3 -2 -1 0 1 2 3 4 5 6 7 8 9 10 11 12]: [12.5 12.5 12.5 12.5 12.5 10.4 8.9 7.8 6.9 7.5 5.7 7.3 7.7 3.6 5.8 10.2 6.6 4.9 4.2 5.6 6.6]% (cycles [8 16 24 32 40 48 56 64 72 80 88 96 104 112 120 128 136 144 144 144 136])
+
+C. deployed (smoke fusion), 8 clean validation episodes (no rolling-in event: 8):
+  lb  cycles t >= 13: rate 25.00%; after the jump (0-11 cycles) less before it +25.75 [-3.74, +68.50] points
+    lb per cycle from the jump [-8 -7 -6 -5 -4 -3 -2 -1 0 1 2 3 4 5 6 7 8 9 10 11 12]: [0 0 0 0 0 33.3 0 0 25 25 0 0 0 0 0 14.3 14.3 25 25 28.6 28.6]% (cycles [0 1 1 2 2 3 3 3 4 4 4 4 5 5 5 7 7 8 8 7 7])
+      hover (< 23 km/h, 2) +0.00 [+0.00, +0.00]; faster (6) +30.95 [-11.76, +80.00]
+  af  cycles t >= 13: rate 11.11%; after the jump (0-11 cycles) less before it +16.83 [+0.00, +53.12] points
+      hover (< 23 km/h, 2) +0.00 [+0.00, +0.00]; faster (6) +25.00 [+0.00, +75.00]
+  da  cycles t >= 13: rate 0.00%; after the jump (0-11 cycles) less before it +0.00 [+0.00, +0.00] points
+    da per cycle from the jump [-8 -7 -6 -5 -4 -3 -2 -1 0 1 2 3 4 5 6 7 8 9 10 11 12]: [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]% (cycles [0 1 1 2 2 3 3 3 4 4 4 4 5 5 5 7 7 8 8 7 7])
+      hover (< 23 km/h, 2) +0.00 [+0.00, +0.00]; faster (6) +0.00 [+0.00, +0.00]
+  al  cycles t >= 13: rate 30.56%; after the jump (0-11 cycles) less before it +38.86 [+0.00, +75.18] points
+      hover (< 23 km/h, 2) +0.00 [+0.00, +0.00]; faster (6) +50.00 [+0.00, +93.33]
+  cf  cycles t >= 13: rate 25.00%; after the jump (0-11 cycles) less before it +29.93 [+0.00, +61.72] points
+      hover (< 23 km/h, 2) +0.00 [+0.00, +0.00]; faster (6) +44.05 [+0.00, +77.78]
+  bw  cycles t >= 13: rate 0.00%; after the jump (0-11 cycles) less before it +0.00 [+0.00, +0.00] points
+    bw per cycle from the jump [-8 -7 -6 -5 -4 -3 -2 -1 0 1 2 3 4 5 6 7 8 9 10 11 12]: [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]% (cycles [0 1 1 2 2 3 3 3 4 4 4 4 5 5 5 7 7 8 8 7 7])
+      hover (< 23 km/h, 2) +0.00 [+0.00, +0.00]; faster (6) +0.00 [+0.00, +0.00]
+
+C. branch evidence, 8 clean validation episodes (no rolling-in event: 8):
+  lb  cycles t >= 13: rate 20.14%; after the jump (0-11 cycles) less before it +20.79 [+0.00, +50.00] points
+    lb per cycle from the jump [-8 -7 -6 -5 -4 -3 -2 -1 0 1 2 3 4 5 6 7 8 9 10 11 12]: [0 0 0 0 0 0 0 0 0 0 0 0 0 20 0 14.3 14.3 25 25 14.3 28.6]% (cycles [0 1 1 2 2 3 3 3 4 4 4 4 5 5 5 7 7 8 8 7 7])
+      hover (< 23 km/h, 2) +0.00 [+0.00, +0.00]; faster (6) +25.00 [+0.00, +54.55]
+  af  cycles t >= 13: rate 0.00%; after the jump (0-11 cycles) less before it +0.00 [+0.00, +0.00] points
+      hover (< 23 km/h, 2) +0.00 [+0.00, +0.00]; faster (6) +0.00 [+0.00, +0.00]
+  da  cycles t >= 13: rate 0.00%; after the jump (0-11 cycles) less before it +0.00 [+0.00, +0.00] points
+    da per cycle from the jump [-8 -7 -6 -5 -4 -3 -2 -1 0 1 2 3 4 5 6 7 8 9 10 11 12]: [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]% (cycles [0 1 1 2 2 3 3 3 4 4 4 4 5 5 5 7 7 8 8 7 7])
+      hover (< 23 km/h, 2) +0.00 [+0.00, +0.00]; faster (6) +0.00 [+0.00, +0.00]
+  al  cycles t >= 13: rate 24.31%; after the jump (0-11 cycles) less before it +31.95 [+0.00, +73.47] points
+      hover (< 23 km/h, 2) +0.00 [+0.00, +0.00]; faster (6) +42.86 [+0.00, +90.91]
+  cf  cycles t >= 13: rate 20.14%; after the jump (0-11 cycles) less before it +20.79 [+0.00, +59.31] points
+      hover (< 23 km/h, 2) +0.00 [+0.00, +0.00]; faster (6) +25.00 [+0.00, +72.39]
+  bw  cycles t >= 13: rate 12.50%; after the jump (0-11 cycles) less before it +20.79 [+0.00, +62.54] points
+    bw per cycle from the jump [-8 -7 -6 -5 -4 -3 -2 -1 0 1 2 3 4 5 6 7 8 9 10 11 12]: [0 0 0 0 0 0 0 0 0 0 0 0 20 20 20 14.3 14.3 12.5 12.5 14.3 14.3]% (cycles [0 1 1 2 2 3 3 3 4 4 4 4 5 5 5 7 7 8 8 7 7])
+      hover (< 23 km/h, 2) +0.00 [+0.00, +0.00]; faster (6) +25.00 [+0.00, +75.00]
+
+C. branch evidence, phi = 1, 8 clean validation episodes (no rolling-in event: 8):
+  lb  cycles t >= 13: rate 21.53%; after the jump (0-11 cycles) less before it +17.07 [+0.00, +42.02] points
+    lb per cycle from the jump [-8 -7 -6 -5 -4 -3 -2 -1 0 1 2 3 4 5 6 7 8 9 10 11 12]: [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 14.3 14.3 25 25 14.3 28.6]% (cycles [0 1 1 2 2 3 3 3 4 4 4 4 5 5 5 7 7 8 8 7 7])
+      hover (< 23 km/h, 2) +0.00 [+0.00, +0.00]; faster (6) +19.05 [+0.00, +48.20]
+  af  cycles t >= 13: rate 0.00%; after the jump (0-11 cycles) less before it +0.00 [+0.00, +0.00] points
+      hover (< 23 km/h, 2) +0.00 [+0.00, +0.00]; faster (6) +0.00 [+0.00, +0.00]
+  da  cycles t >= 13: rate 0.00%; after the jump (0-11 cycles) less before it +0.00 [+0.00, +0.00] points
+    da per cycle from the jump [-8 -7 -6 -5 -4 -3 -2 -1 0 1 2 3 4 5 6 7 8 9 10 11 12]: [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]% (cycles [0 1 1 2 2 3 3 3 4 4 4 4 5 5 5 7 7 8 8 7 7])
+      hover (< 23 km/h, 2) +0.00 [+0.00, +0.00]; faster (6) +0.00 [+0.00, +0.00]
+  al  cycles t >= 13: rate 24.31%; after the jump (0-11 cycles) less before it +28.23 [+0.00, +66.92] points
+      hover (< 23 km/h, 2) +0.00 [+0.00, +0.00]; faster (6) +36.90 [+0.00, +78.79]
+  cf  cycles t >= 13: rate 22.92%; after the jump (0-11 cycles) less before it +20.79 [+0.00, +60.62] points
+      hover (< 23 km/h, 2) +0.00 [+0.00, +0.00]; faster (6) +25.00 [+0.00, +75.00]
+  bw  cycles t >= 13: rate 12.50%; after the jump (0-11 cycles) less before it +20.79 [+0.00, +60.00] points
+    bw per cycle from the jump [-8 -7 -6 -5 -4 -3 -2 -1 0 1 2 3 4 5 6 7 8 9 10 11 12]: [0 0 0 0 0 0 0 0 0 0 0 0 20 20 20 14.3 14.3 12.5 12.5 14.3 14.3]% (cycles [0 1 1 2 2 3 3 3 4 4 4 4 5 5 5 7 7 8 8 7 7])
+      hover (< 23 km/h, 2) +0.00 [+0.00, +0.00]; faster (6) +25.00 [+0.00, +75.00]
+
+##### wrap check done 18-Oct-2026 19:57:49
+```
 <!-- END WRAP -->
 
 ## The queue
