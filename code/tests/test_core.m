@@ -974,11 +974,44 @@ end
 
 function test_surv3_run_ids(tc)
 % The survivability-options experiment builds its geometries and reads their frames back
-% with one run id per geometry, the pools' numbering in its seed block 13.
+% with one run id per geometry, the pools' numbering in its seed block 13: the stage builds
+% them with surv3_run_id.m, and its job (pool_job.m 'surv3') judges geometry r on the frames
+% of run surv3_run_id(r) only (a pool_cell.m stand-in: odd geometries recoverable, frames of
+% other run ids recoverable everywhere).
 r = 1:99;
 verifyEqual(tc, surv3_run_id(r), 100 * 13 + r);
 txt = fileread(which('experiment_survivability_options'));
-verifyGreaterThanOrEqual(tc, numel(strfind(txt, 'surv3_run_id(')), 2);
+verifyNotEmpty(tc, strfind(txt, '''run'', surv3_run_id(1:N_GEOM)), ...'));
+verifyNotEmpty(tc, strfind(txt, '''geo'', {geo}'));
+d = fullfile(pwd, 'surv3_stub'); mkdir(d);
+fid = fopen(fullfile(d, 'pool_cell.m'), 'w');
+fprintf(fid, '%s\n', 'function P = pool_cell(~, ~, A, EB, geo, ~, ~)', ...
+    'P = cell(numel(EB), numel(A), 1);', 'for s = 1:numel(EB)', '    for a = 1:numel(A)', ...
+    '        run = [repelem(geo{s}.run, 3), 1:numel(geo{s}.run)];', ...
+    '        ok = [repelem(mod(geo{s}.run, 2) == 1 & a > 1, 3), true(1, numel(geo{s}.run))];', ...
+    '        P{s, a, 1} = struct(''run'', run, ''ber'', double(~ok), ''fer'', zeros(size(run)));', ...
+    '    end', 'end', 'end');
+fclose(fid);
+addpath(d, '-begin'); clear pool_cell
+cl = onCleanup(@() stub_off(d)); %#ok<NASGU>
+verifyEqual(tc, which('pool_cell'), fullfile(d, 'pool_cell.m'));
+N = 6; nS = 2; A = {'no_action', 'power_control'};
+S = struct('cases', struct('threat', 'jamming', 'field', '', 'level', NaN), ...
+    'VAR', struct('n_rx', 3, 'gcs', 0, 'loss', 0, 'ref', 1), 'jobs', [1 1], 'p0', struct(), 'ACTIONS', {A}, ...
+    'EBNO', [5 9], 'geo', {repmat({struct('seed', 1:N, 'speed', 50 * ones(1, N), 'run', surv3_run_id(1:N))}, 1, nS)}, ...
+    'opt', [], 'nS', nS, 'N_GEOM', N, 'clean', {{struct('ber', [1e-3 1e-3], 'fer', [0 0])}}, ...
+    'C', struct('ber_floor', 1e-5), 'RATIO', 2);
+out = pool_job('surv3', S, 1);
+odd = repmat(mod(1:N, 2) == 1, nS, 1);
+verifyEqual(tc, out{1}, odd);
+verifyEqual(tc, out{2}(odd), repmat({'power_control'}, nnz(odd), 1));
+verifyTrue(tc, all(cellfun(@isempty, out{2}(~odd))));
+end
+
+function stub_off(d)
+% Removes a stand-in folder from the path and the disk.
+rmpath(d); clear pool_cell
+rmdir(d, 's');
 end
 
 function test_seed_streams_disjoint(tc)
@@ -3056,8 +3089,9 @@ q.yaw_random = false; q.gcs_aoa_random = false; [~, q.roll_deg] = shadow_roll_ba
 d = flight_draws(7, 100, q);
 verifyEqual(tc, d.roll, 28.5 - es, 'AbsTol', 1e-9);
 verifyGreaterThan(tc, d.hidden(1), 0);
-verifyNotEmpty(tc, strfind(fileread(which('map_survivability_boundary')), ['p.gcs_aoa_deg = p.gcs_aoa_deg - ' ...
-    'rad2deg(9.81 * tand(p.roll_deg) / max(p.v_nominal, p.turn_v_floor)) * (RUN_FRAMES - 1) * p.cycle_s / 2;']));
+verifyNotEmpty(tc, strfind(fileread(which('pool_job')), ['p.gcs_aoa_deg = p.gcs_aoa_deg - ' ...
+    'rad2deg(9.81 * tand(p.roll_deg) / max(p.v_nominal, p.turn_v_floor)) * (S.RUN_FRAMES - 1) * p.cycle_s / 2;']));   % the map's job
+verifyNotEmpty(tc, strfind(fileread(which('map_survivability_boundary')), '''RUN_FRAMES'', {RUN_FRAMES}'));
 for L = [6 8 12 15.5 20 22.5 23 25]
     qv = q; qv.shadow_db = L; qv.alt_random = false; qv.cap_frames = 57; [~, qv.roll_deg] = shadow_roll_band(L, qv);
     qv.gcs_aoa_deg = qv.gcs_aoa_deg - rad2deg(9.81 * tand(qv.roll_deg) / max(qv.v_nominal, qv.turn_v_floor)) * 56 * qv.cycle_s / 2;
@@ -4227,11 +4261,15 @@ src = fileread(which('build_policy_pools'));
 verifyNotEmpty(tc, strfind(src, 'pool_checkpoint(''key'', {MODEL_TAG, DET_ID, runs, cells(c), EBNO, ACTIONS, geoc{c}, opt, ...'));
 verifyNotEmpty(tc, strfind(src, 'pool_lpt(@(S, c) pool_job(''c1p'', S, c), S, todo, pl);'));
 verifyNotEmpty(tc, strfind(fileread(which('pool_worker_init')), 'cd(d);'));   % the workers' own folder: the cells' path is absolute
-for f = {'build_policy_pools', 'build_clean_test_pools', 'build_check_pools'}
+job = fileread(which('pool_job'));
+st = struct('build_policy_pools', 'c1p', 'build_clean_test_pools', 'clean', 'build_check_pools', 'c1c');
+for f = fieldnames(st)'
     src = fileread(which(f{1}));
-    for c = {'todo', 'save', 'load', 'commit', 'clear'}
+    for c = {'todo', 'load', 'commit', 'clear'}
         verifyNotEmpty(tc, strfind(src, ['pool_checkpoint(''' c{1} ''''])', [f{1} ' ' c{1}]);
     end
+    b = regexp(job, ['case ''' st.(f{1}) '''(.*?)(\n    case |\n    otherwise)'], 'tokens', 'once');   % its job saves the cell
+    verifyNotEmpty(tc, strfind(b{1}, 'pool_checkpoint(''save'', S.CKD, '), [f{1} ' save']);
     verifyEmpty(tc, regexp(src, 'save\(f_out|save\(''data/policy_pools\.mat''', 'once'), f{1});
     verifyNotEmpty(tc, strfind(src, 'CKD = fullfile(pwd, ''data'', '), f{1});
 end
