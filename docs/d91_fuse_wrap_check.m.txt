@@ -47,6 +47,7 @@ end
 b = abs(log(0.0187));
 
 %% A. The jump in the gains
+try
 dcon = []; dwr = []; rcon = []; rwr = []; vc = []; vw = [];
 for s = 1:numel(PP.ebno)
     P = PPw.pools{ic, s, na, VA};
@@ -92,6 +93,9 @@ for one = [false true]
         tern(one, '= 1', 'as is'), size(X, 1), rd, ci);
     aligned(X, TW, TW2, T, 'W >= b');
 end
+catch e
+    fprintf('A/B stopped: %s\n', getReport(e, 'basic'));
+end
 
 %% C. The whole monitor at no_action
 S = load('data/splits.mat'); va = S.splits.val; va.feat_names = S.splits.norm.feat_names; clear S
@@ -101,11 +105,15 @@ pk = fusion_pick(); N = pk.N;
 FZ = PP.fuse;
 mons = {'deployed (smoke fusion)', FZ, PP.fuse_N};
 for one = [false true]
-    cu = pk.cues; if one, cu.phi1 = true; end
-    Zr = fuse_classes('windows', va, Pv, N, cu);
-    FMr = fuse_classes('fit', Zr, fusion_target(y, va.run, va.pos, N, cls), numel(cls), pk.lambda);
-    FMr.cues = cu; FMr.target_age = N; FMr.latch = false; if isfield(FZ, 'os_thr'), FMr.os_thr = FZ.os_thr; end
-    mons(end + 1, :) = {['branch evidence' tern(one, ', phi = 1', '')], FMr, N}; %#ok<AGROW>
+    try
+        cu = pk.cues; if one, cu.phi1 = true; end
+        Zr = fuse_classes('windows', va, Pv, N, cu);
+        FMr = fuse_classes('fit', Zr, fusion_target(y, va.run, va.pos, N, cls), numel(cls), pk.lambda);
+        FMr.cues = cu; FMr.target_age = N; FMr.latch = false; if isfield(FZ, 'os_thr'), FMr.os_thr = FZ.os_thr; end
+        mons(end + 1, :) = {['branch evidence' tern(one, ', phi = 1', '')], FMr, N}; %#ok<AGROW>
+    catch e
+        fprintf('C. the revision (phi1 %d) was not fitted: %s\n', one, getReport(e, 'basic'));
+    end
 end
 [spc, ncl] = clean_wide_specs(PP, CT, ebno_thr, T);
 iaf = find(strcmp(PP.scen, 'antenna_fault'));
@@ -113,6 +121,7 @@ PPv = PP; PPv.pools(:, :, :, setdiff(1:numel(PP.runs), VA)) = {[]};
 Kv = link_env('tables', PPv);
 spf = {}; if ~isempty(iaf), spf = policy_episodes(iaf, numel(PP.ebno), Kv.geo(iaf, VA), 1, false, false, 64, T, RandStream('mt19937ar', 'Seed', 4400)); end
 for m = 1:size(mons, 1)
+  try
     PPm = PPw; PPm.fuse = mons{m, 2}; PPm.fuse_N = mons{m, 3};
     R = mon_trace(PPm, Kw, spc, VA, 41000, na, ic);
     R = trim(R, ncl);
@@ -142,6 +151,9 @@ for m = 1:size(mons, 1)
             sum(k), 100 * sum(Xf(k, :), 'all') / sum(on(k, :), 'all'), 100 * sum(Xf(k, :) & A(k, :), 'all') / max(sum(on(k, :) & A(k, :), 'all'), 1), ...
             100 * sum(Xf(k, :) & ~A(k, :), 'all') / max(sum(on(k, :) & ~A(k, :), 'all'), 1));
     end
+  catch e
+    fprintf('C. %s stopped: %s\n', mons{m, 1}, getReport(e, 'basic'));
+  end
 end
 fprintf('\n##### wrap check done %s\n', char(datetime('now')));
 end
