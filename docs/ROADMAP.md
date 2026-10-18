@@ -5,7 +5,7 @@
 **Supervisor:** Golan Ein-Tzvi
 **History:** [PROJECT_LOG.md](PROJECT_LOG.md) · **Design decisions:** [DECISIONS.md](DECISIONS.md) · **Results:** [README.md](../README.md)
 
-Last updated: 2026-10-11
+Last updated: 2026-10-18
 
 ---
 
@@ -21,7 +21,7 @@ Last updated: 2026-10-11
 | B-unknown | Mahalanobis and isolation-forest scores, leave-one-threat-out | ✅ Done, AUROC 0.887 | D42, D46 |
 | C1p | Frame pools: every scenario × configuration × Eb/N0 × geometry | ✅ Done | D44–D46 |
 | C1c | Clean link on 100 new geometries per Eb/N0 under every configuration (KPI 6) | ✅ Done | D51 |
-| C2 | Double DQN with shield; monitor, drop threshold, γ and seed chosen on validation; deployed with escalation | ✅ D67 agent (3/3, 3 dB, γ 0.5, running costs ×0.5, false-switch penalty 160), adopted as a documented exception; D65, D66 not adopted | D44–D52, D59–D67 |
+| C2 | Double DQN with shield; monitor, drop threshold, false-switch penalty and seed chosen on validation (γ chosen on validation up to D64; one fixed value, 0.5, since D67; D90); deployed with escalation | ✅ D67 agent (3/3, 3 dB, γ 0.5, running costs ×0.5, false-switch penalty 160), adopted as a documented exception; D65, D66 not adopted | D44–D52, D59–D67 |
 | C2e | Every policy on the test pools: single, follower, combined, unknown, clean, comb; false alarms on 600 independent clean geometries | ✅ Four readings; the fourth (new flights, blocks 8 and 9, D67 agent) is final | D44–D46, D51, D64–D67 |
 | SURV | Survivability maps A/B, two geometries (deliverable 8) | ✅ Done, 86% / 94% | D30, D46 |
 | LAT + KPI + DASH | Latency per cycle, eight proposal KPIs, dashboard (deliverable 1) | Fourth reading 7/8 met: KPI 4 14/16 (benign interference 87.2%, noise burst + antenna fault 88.7%); KPI 7 met (speed spread 2.6 points, latency 2.91 / 3.97 ms); KPI 6 13/600 | D46, D48, D51, D52, D64–D67 |
@@ -31,7 +31,7 @@ Last updated: 2026-10-11
 | v4 | Receiver-side measurements, 36 combined configurations, combined threats in training, three severities, per-antenna feature, unknown-threat score selection, new-threat learning, 20 ms decision period | ✅ Full run A0–C2g done; hold in the shield (D63); escalation out of no_action (D64) | D59–D64 |
 | v5 | Ten threats (tone jamming, airframe shadowing), K 0–20 dB per flight, Eb/N0 0–15 dB, eight dataset and five decision levels, ten combined threats, one-cycle signalling delay, speeds outside training, single-core latency | ✅ Superseded by v6 (detector reading led to D72) | D68–D70 |
 | v6 | Evidence over time, quiet slot, levels to the sources' caps, weak-point analysis | ✅ Done, both profiles (summary document 2026-10-06); superseded by v7 | D71, D72 |
-| v7 | Real receiver with training and pilots, hover and turns, source-corrected severities, triples, profile 3 (four antennas), tracked directional GCS antenna under the e.i.r.p. cap; verdict per point (EDGE); fusion with the current frame; second detector test set; RF realism of distance, path loss, antenna fault and airframe shadowing | ⏳ First run stopped 2026-10-08 (profiles 1 and 3 after A0–B4s, profile 1 partly in C1p; kept as the first reading). D83 being finished, then an independent review, a smoke run and the full rerun of every profile from A0 on C: | D73–D83 |
+| v7 | Real receiver with training and pilots, hover and turns, source-corrected severities, triples, profile 3 (four antennas), tracked directional GCS antenna under the e.i.r.p. cap; verdict per point (EDGE); fusion with the current frame; second detector test set; RF realism of distance, path loss, antenna fault and airframe shadowing | ⏳ Full run on 9b5c9f1 (D86-D89; launched 2026-10-16, stopped and redone 2026-10-17, resumed 16:42). Profile 1 in C1p since 2026-10-18 03:20; profile 3 done through B4s, waits for profile 1's SURV3; profile 2 after profile 1. KPI 1 read once on the third test set (B3m), KPI 2 nested, B4, B4s (PROJECT_LOG). The D90 and D91 branches wait for the go/no-go of 2026-10-21 | D73–D91 |
 | Layout | Code into `code/` by stage | ✅ Done | D47, D61 |
 | D1 | Interim report | ⏳ Drafted, results to sync with the final run | — |
 | D2 | Final report | ⏳ | — |
@@ -40,32 +40,67 @@ Last updated: 2026-10-11
 
 ---
 
-## v7 full run: status at the system-drive swap (2026-10-06 19:46)
+## v7 full run: status 2026-10-18 (about 21:00)
 
-v7 code frozen on v7-dev (8799fde: D75-D80, 73/73 tests, full smoke passed 2026-10-05/06). Runs started 2026-10-06 09:20
-(an earlier start at 01:08 was cut at 03:02 when the app session closed; long runs are now launched detached via WMI).
-Stopped by hand at 19:46 for the drive swap; completed stages are kept in each profile's data/ and results/.
+The run is on code `9b5c9f1` (v7-merge: c2c8b8b + D87 + D88 + D89). It was launched on 2026-10-16 11:09, stopped and redone on 2026-10-17, and resumed at 16:42 (DECISIONS D86-D89; PROJECT_LOG 2026-10-15/18). Logs: `C:\Users\Adi Suliman\uav-gcs-logs\v7_d86\` (p1.log, p3.log, p1_b3m.log, p3_b3m.log, p3_fix.log, p1_set4.log, p3_set4.log). The earlier status at the drive swap (2026-10-06) is in `docs/drive_swap/`.
 
-| Profile | Worktree | Stages done | Resumes at |
+| Profile | Worktree, branch | Done (log markers) | Now |
 |---|---|---|---|
-| 1 (3 antennas) | uav-gcs-v7 | A0, A4v, A5, A6, B1, B2, B2F, B3 | B3a |
-| 3 (4 antennas) | D:/uav-gcs-v7-p3 | A0, A4v | A5 |
-| 2 (2 antennas) | created at start | - | A0, after profile 1 |
+| 1 (3 antennas) | uav-gcs-v7, v7-dev `208602b` | A0-B4s (p1.log:2382), B3m (p1_b3m.log:323) | C1p since 2026-10-18 03:20 (p1.log:2384); 5 of 93 cells at 18:44 |
+| 3 (4 antennas) | uav-gcs-v7-p3, v7-p3 `29510e7` | A0-B3a, B4 (p3.log:1832), OOD and B4s after the out-of-memory stop (p3.log:2022, :2227), B3m (p3_b3m.log) | the fix script waits for profile 1's SURV3, then C1p to RPT |
+| 2 (2 antennas) | made from v7-dev after profile 1 | - | after profile 1; its C1p after profile 3's SURV3 |
 
-A4v: V12c fails only at the 30 dB jammer, rho 0.3, 1 us in profile 1 (stated limit); it passes in profile 3 (4 antennas).
-Resume: docs/drive_swap/AFTER_DRIVE_SWAP.md and docs/drive_swap/v7_resume.sh (logs in C:/Users/Adi Suliman/uav-gcs-logs).
-v6 ended 2026-10-06 (both profiles, LAT on the idle machine); summary document in the Desktop project folder.
+**Official readings so far** (numbers and log lines in PROJECT_LOG, "Official detector readings"):
+- KPI 1 on the third test set B3m, read once: profile 1 93.58% [93.08, 94.07] above 0 dB; profile 3 94.19% [93.69, 94.68] above 3 dB. The every-class reading has no threshold on either profile: fault, shadowing, path loss and WLAN are below 90%.
+- KPI 2 nested: 0.769 and 0.763, below the 0.8 target.
+- B4: unseen Eb/N0 92.1% and 91.8%. B4s keeps the training levels on both profiles.
+- The decision-layer KPIs (3-8) come after C2e.
+
+**Branches waiting for the go/no-go of 2026-10-21 evening** (pushed; none is merged into a profile):
+
+| Branch, commit | Content | Status |
+|---|---|---|
+| `d90-loop` `2cbe559` | C1d/C2/KPI choices on validation (DECISIONS D90; `docs/d90_loop.md`) | full suite passed inside d91-speed (196/196); its own smoke and review pending; merge window: profile 1's C1p-SURV3, before C1d |
+| `d91-fuse` `2ea990a` | branch-evidence fusion revision (DECISIONS D91; `docs/d91_fuse.md`) | verdict ADOPT on both profiles by the pre-registered rule; phi comparison pending; deploy checklist in sec. 7 |
+| `d91-set4` `0e410cf` | fourth detector test set B3q and its single reading B3r (`docs/d91_set4.md`) | built for both profiles, unread (`uav-gcs-logs/set4_out/`) |
+| `d91-speed` `0069d03`, `d91-speed-on-v7-p3` `686fd11` | value-neutral pool speedups for profiles 3 and 2 (`docs/d91_speed.md`) | proofs PASS; tests2 196/196; tests4 VERDICT pending |
+| `d91-takeover` `7d4d0b6` | takeover of the d86 launcher (`ops/v7_d91_takeover.md`) | not launched; review round 3 FIX-NEEDED, round 4 running |
+
+**Timeline after the C1p slowdown** (DECISIONS D91 part 5; projections, not measurements):
+
+| Milestone | Projected |
+|---|---|
+| Profile 1 C1p (155-175 h) ends | 2026-10-24 14:00 to 10-25 10:00 |
+| Profile 1 ends | about 2026-10-27/28 |
+| Profile 3 ends | about 2026-11-04/06 |
+| Profile 2, the whole campaign | about 2026-11-10/15 |
+
+- These dates pass the end of the Windows Update pause (2026-11-05 13:38 UTC); the takeover's resume handles a reboot.
+- The d91 speedups could save about 3 days on profiles 3 and 2.
+- d90's C2 grid of 108 runs takes about 38-42 h per profile, against 22-24 h for the 72-run grid (`C.drop_steps = [-2 0]` keeps 72 runs, about 26 h; d90_loop.md sec. 7). These hours are not yet in the dates above.
+- The earlier projection (profile 1 about 2026-10-23, the whole campaign about 2026-11-02) is superseded.
 
 ## Remaining work
 
-1. **v7 full rerun:** finish D83 (RF realism), an independent review of the whole chain against the sources, a smoke run, then every profile from A0 on C: (`docs/runs/v7_d83_launch.sh`: profile 1 first with its heavy parallel stages early, profile 3's C1p after profile 1's SURV3, profile 2 after profile 1, its C1p after profile 3's SURV3; LAT on the idle machine at the end). Every finished stage is reviewed by an agent on its outputs (fixes from the sources, validation data only; the run continues when downstream stages are unaffected). Then the single test reading per profile, the weak-point analysis, the v6-vs-v7 comparison, README and the log.
-2. **Fourth reading (D67 agent):** ✅ done; the v4 final state is in `archive/v4_final_D67_20260930/`. Its per-speed breakdown is not reliable (D68).
-3. **Operator console:** screenshots and a live check with the v5 agent; the threat gallery is part of the run. The high-quality 3D view waits until the code, the final proposal and the interim report are done.
-4. **Code comments:** ✅ full pass done (short explanation, no history), except `legacy/`.
-5. **Interim report (due 2026-11-01, writing from about 2026-10-20):** a chapter per threat (what it is, how it harms, where more or less, the planned answer), good and correct figures; it does not depend on the final v7 numbers.
-6. **Proposal:** v4 (final) from a full review of v3 against the v7 code and the sources; no 3D mention.
-7. **Final report, slides and poster:** last, when the user asks.
-8. **Housekeeping:** the v3 backups in `archive/` stay until the user approves deleting them.
+1. **Go/no-go, 2026-10-21 evening:** the fusion revision (d91-fuse) and the single reading of the fourth set (B3r). Pending inputs: the phi verdict, the tests4 VERDICT, and whether the user approves profile 2's own fusion decision.
+2. **Deploy integration** (if go; d91_fuse.md sec. 7 and d91_speed.md sec. 7):
+   - merge d90 and the d91 branches into one deploy branch outside the live trees, then the full suite;
+   - profile 3 before its C1p: B2F rerun, B3r once, the speedups;
+   - profile 1 after its chain: `rekey_pools`, then the stages that read the fusion;
+   - profile 2: its own fusion decision.
+   - If no-go, `kpi1_set.m` stays 'fresh2' and the fourth set stays unread.
+3. **The takeover**, launched by the user before profile 1's chain ends; the steps are in `ops/v7_d91_takeover.md`, "Procedure". It corrects launcher defects (a)-(f) (DECISIONS D91 part 4).
+4. **d90 into the profiles**, inside profile 1's C1p-SURV3 window, after its smoke and an independent review. Never under a running stage that reads the changed files; `data/fusion.mat` stays fixed from C1p to C1c.
+5. **KPI 2 below its target** (0.769 / 0.763): the untried options are in PROJECT_LOG, weak-class status. The OOD score is in the detector identity, so a change after C1p means a pool rebuild.
+6. **Classes below 90%** (path loss, WLAN, fault, shadowing): the user accepts at least 85% per class for now and decides with the full results. The candidates are in PROJECT_LOG, weak-class status.
+7. **Interim report** (due 2026-11-01, writing from about 2026-10-20): a chapter per threat, good and correct figures; it needs no final v7 numbers.
+8. **Operator console and 3D:** screenshots and a live check with the v7 agent after the run. The high-quality 3D view waits until the code, the final proposal and the interim report are done.
+9. **Final report, slides and poster:** last, when the user asks.
+10. **Housekeeping**, with the user's approval:
+    - the zombie MATLAB 32824 (only a reboot frees its 4.6 GB);
+    - the worktree copies `uav-gcs-b3m-p1/-p3` and `uav-gcs-set4-p1/-p3`, after their files are merged into the profiles;
+    - the stray empty folder `C:\ADISUL~1`;
+    - the v3 backups in `archive/`, which stay until the user approves deleting them.
 
 ---
 
@@ -78,14 +113,14 @@ v6 ended 2026-10-06 (both profiles, LAT on the idle machine); summary document i
 | 5 threat classes | 10 threats + none, ten pairs and four triples | A more realistic EW set within RF scope (D68, D73) |
 | Single-antenna link | Two UAV antennas, MRC baseline, MMSE as the spatial countermeasure | Spatial diversity as a real receiver function (D41) |
 | Actions: channel switch, bit rate, diversity | 36 configurations, one choice per domain (frequency, space, link budget): the originals, power control, FEC + interleaving | Threats that no single original action repairs (D39, D45, D59) |
-| DQN on a reward table | Sequential environment on measured frames, shield with hold, γ chosen on validation, escalation as a fallback | One-shot decisions could not show recovery over time or a follower jammer (D44–D46, D63, D64) |
+| DQN on a reward table | Sequential environment on measured frames, shield with hold, γ chosen on validation in v4 and fixed at 0.5 since D67 (γ = 0 tried as one coordinate step on validation in d90), escalation as a fallback | One-shot decisions could not show recovery over time or a follower jammer (D44–D46, D63, D64) |
 | Rule vs DQN by convergence and reward | Return, restored cycles, goodput, recovery time, false alarms, with 95% intervals and paired differences | KPIs as worded in the proposal |
 
 ---
 
 ## Risk mitigation (proposal section 10)
 
-- **DQN convergence:** rule and table baselines in every comparison; 3 seeds per γ, best checkpoint, validation gate (D44–D46).
+- **DQN convergence:** rule and table baselines in every comparison; 3 seeds per run setting (γ fixed at 0.5 since D67), best checkpoint, validation gate (D44–D46).
 - **Reward design:** reward from link quality minus costs; baselines and oracle show where the policy stands.
 - **Data leakage:** splits by seeded sub-run; test pools with unseen seeds and geometries.
 - **Oscillation:** switching costs, alarm confirmation and shield (D45).
