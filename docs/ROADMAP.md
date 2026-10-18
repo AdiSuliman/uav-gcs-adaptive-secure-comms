@@ -21,7 +21,7 @@ Last updated: 2026-10-18
 | B-unknown | Mahalanobis and isolation-forest scores, leave-one-threat-out | ✅ Done, AUROC 0.887 | D42, D46 |
 | C1p | Frame pools: every scenario × configuration × Eb/N0 × geometry | ✅ Done | D44–D46 |
 | C1c | Clean link on 100 new geometries per Eb/N0 under every configuration (KPI 6) | ✅ Done | D51 |
-| C2 | Double DQN with shield; monitor, drop threshold, false-switch penalty and seed chosen on validation (γ chosen on validation up to D64; one fixed value, 0.5, since D67; D90); deployed with escalation | ✅ D67 agent (3/3, 3 dB, γ 0.5, running costs ×0.5, false-switch penalty 160), adopted as a documented exception; D65, D66 not adopted | D44–D52, D59–D67 |
+| C2 | Double DQN with shield; monitor, drop threshold, false-switch penalty and seed chosen on validation (γ chosen on validation up to D64; one fixed value, 0.5, since D65: D65-D67 retrain at the D64 selection, v5-v7 from D68 on; D90); deployed with escalation | ✅ D67 agent (3/3, 3 dB, γ 0.5, running costs ×0.5, false-switch penalty 160), adopted as a documented exception; D65, D66 not adopted | D44–D52, D59–D67 |
 | C2e | Every policy on the test pools: single, follower, combined, unknown, clean, comb; false alarms on 600 independent clean geometries | ✅ Four readings; the fourth (new flights, blocks 8 and 9, D67 agent) is final | D44–D46, D51, D64–D67 |
 | SURV | Survivability maps A/B, two geometries (deliverable 8) | ✅ Done, 86% / 94% | D30, D46 |
 | LAT + KPI + DASH | Latency per cycle, eight proposal KPIs, dashboard (deliverable 1) | Fourth reading 7/8 met: KPI 4 14/16 (benign interference 87.2%, noise burst + antenna fault 88.7%); KPI 7 met (speed spread 2.6 points, latency 2.91 / 3.97 ms); KPI 6 13/600 | D46, D48, D51, D52, D64–D67 |
@@ -40,13 +40,13 @@ Last updated: 2026-10-18
 
 ---
 
-## v7 full run: status 2026-10-18 (about 21:00)
+## v7 full run: status 2026-10-18 (about 21:30)
 
 The run is on code `9b5c9f1` (v7-merge: c2c8b8b + D87 + D88 + D89). It was launched on 2026-10-16 11:09, stopped and redone on 2026-10-17, and resumed at 16:42 (DECISIONS D86-D89; PROJECT_LOG 2026-10-15/18). Logs: `C:\Users\Adi Suliman\uav-gcs-logs\v7_d86\` (p1.log, p3.log, p1_b3m.log, p3_b3m.log, p3_fix.log, p1_set4.log, p3_set4.log). The earlier status at the drive swap (2026-10-06) is in `docs/drive_swap/`.
 
 | Profile | Worktree, branch | Done (log markers) | Now |
 |---|---|---|---|
-| 1 (3 antennas) | uav-gcs-v7, v7-dev `208602b` | A0-B4s (p1.log:2382), B3m (p1_b3m.log:323) | C1p since 2026-10-18 03:20 (p1.log:2384); 5 of 93 cells at 18:44 |
+| 1 (3 antennas) | uav-gcs-v7, v7-dev `208602b` | A0-B4s (p1.log:2382), B3m (p1_b3m.log:323) | C1p since 2026-10-18 03:20 (p1.log:2384); at 21:33, 170 builds (about 9.3 per hour) and 5 of 93 cells, the last at 18:44 |
 | 3 (4 antennas) | uav-gcs-v7-p3, v7-p3 `29510e7` | A0-B3a, B4 (p3.log:1832), OOD and B4s after the out-of-memory stop (p3.log:2022, :2227), B3m (p3_b3m.log) | the fix script waits for profile 1's SURV3, then C1p to RPT |
 | 2 (2 antennas) | made from v7-dev after profile 1 | - | after profile 1; its C1p after profile 3's SURV3 |
 
@@ -60,10 +60,10 @@ The run is on code `9b5c9f1` (v7-merge: c2c8b8b + D87 + D88 + D89). It was launc
 
 | Branch, commit | Content | Status |
 |---|---|---|
-| `d90-loop` `2cbe559` | C1d/C2/KPI choices on validation (DECISIONS D90; `docs/d90_loop.md`) | full suite passed inside d91-speed (196/196); its own smoke and review pending; merge window: profile 1's C1p-SURV3, before C1d |
+| `d90-loop` `2cbe559` | C1d/C2/KPI choices on validation (DECISIONS D90; `docs/d90_loop.md`) | full suite passed inside d91-speed (196/196); its own smoke and review pending; merge window: after profile 1's C1c (SURV/SURV3), before C1d, and only once the takeover runs the campaign (launcher defect (b), D91 part 4); into v7-p3 only while no profile 3 MATLAB runs |
 | `d91-fuse` `2ea990a` | branch-evidence fusion revision (DECISIONS D91; `docs/d91_fuse.md`) | verdict ADOPT on both profiles by the pre-registered rule; phi comparison pending; deploy checklist in sec. 7 |
 | `d91-set4` `0e410cf` | fourth detector test set B3q and its single reading B3r (`docs/d91_set4.md`) | built for both profiles, unread (`uav-gcs-logs/set4_out/`) |
-| `d91-speed` `0069d03`, `d91-speed-on-v7-p3` `686fd11` | value-neutral pool speedups for profiles 3 and 2 (`docs/d91_speed.md`) | proofs PASS; tests2 196/196; tests4 VERDICT pending |
+| `d91-speed` `0069d03`, `d91-speed-on-v7-p3` `686fd11` | value-neutral pool speedups for profiles 3 and 2 (`docs/d91_speed.md`) | proofs PASS on `70f69f4` (B_old_vs_new, C_order and C_vs_B with the detector applied) and on `686fd11` with 4 antennas (B_old_vs_new_nrx4, C_order, C_vs_B_nrx4); tests2 196/196; tests4 merge job started 21:09:09, VERDICT pending; goes into v7-p3 by `git cherry-pick 2cbe559..d91-speed` (d91_speed.md sec. 7) |
 | `d91-takeover` `7d4d0b6` | takeover of the d86 launcher (`ops/v7_d91_takeover.md`) | not launched; review round 3 FIX-NEEDED, round 4 running |
 
 **Timeline after the C1p slowdown** (DECISIONS D91 part 5; projections, not measurements):
@@ -77,7 +77,8 @@ The run is on code `9b5c9f1` (v7-merge: c2c8b8b + D87 + D88 + D89). It was launc
 
 - These dates pass the end of the Windows Update pause (2026-11-05 13:38 UTC); the takeover's resume handles a reboot.
 - The d91 speedups could save about 3 days on profiles 3 and 2.
-- d90's C2 grid of 108 runs takes about 38-42 h per profile, against 22-24 h for the 72-run grid (`C.drop_steps = [-2 0]` keeps 72 runs, about 26 h; d90_loop.md sec. 7). These hours are not yet in the dates above.
+- C2: the 72-run grid of 9b5c9f1 takes about 22-24 h per profile, not D86's 12 h; d90's 108 runs about 38-42 h (`C.drop_steps = [-2 0]` keeps 72 runs, about 26 h; d90_loop.md sec. 7). The projection allows 22-52 h for C1d-RPT per profile (docs/runs/analysis/c1p_slow_timeline.py): its later dates cover d90's C2, its earlier dates are short even for the 72-run grid.
+- The C1p figure is a projection from a cost model of the 93 cells (docs/runs/analysis/c1p_slow_model.py; DECISIONS D91 part 5).
 - The earlier projection (profile 1 about 2026-10-23, the whole campaign about 2026-11-02) is superseded.
 
 ## Remaining work
@@ -88,17 +89,18 @@ The run is on code `9b5c9f1` (v7-merge: c2c8b8b + D87 + D88 + D89). It was launc
    - profile 3 before its C1p: B2F rerun, B3r once, the speedups;
    - profile 1 after its chain: `rekey_pools`, then the stages that read the fusion;
    - profile 2: its own fusion decision.
-   - If no-go, `kpi1_set.m` stays 'fresh2' and the fourth set stays unread.
+   - The speedups can reach v7-p3 earlier by the cherry-pick of d91_speed.md sec. 7.5 (candidate `686fd11`); d91_fuse.md sec. 7 D2 covers that case. If no-go, `kpi1_set.m` stays 'fresh2' and the fourth set stays unread; whether the speedups then go in alone is for the go/no-go.
 3. **The takeover**, launched by the user before profile 1's chain ends; the steps are in `ops/v7_d91_takeover.md`, "Procedure". It corrects launcher defects (a)-(f) (DECISIONS D91 part 4).
-4. **d90 into the profiles**, inside profile 1's C1p-SURV3 window, after its smoke and an independent review. Never under a running stage that reads the changed files; `data/fusion.mat` stays fixed from C1p to C1c.
-5. **KPI 2 below its target** (0.769 / 0.763): the untried options are in PROJECT_LOG, weak-class status. The OOD score is in the detector identity, so a change after C1p means a pool rebuild.
-6. **Classes below 90%** (path loss, WLAN, fault, shadowing): the user accepts at least 85% per class for now and decides with the full results. The candidates are in PROJECT_LOG, weak-class status.
-7. **Interim report** (due 2026-11-01, writing from about 2026-10-20): a chapter per threat, good and correct figures; it needs no final v7 numbers.
-8. **Operator console and 3D:** screenshots and a live check with the v7 agent after the run. The high-quality 3D view waits until the code, the final proposal and the interim report are done.
-9. **Final report, slides and poster:** last, when the user asks.
-10. **Housekeeping**, with the user's approval:
+4. **d90 into the profiles**, after its smoke and an independent review. Profile 1: after its C1c (the SURV/SURV3 window), before C1d; the C1p and C1c workers read the code live (docs/runs/analysis/overnight_audit.txt:27-29, :110). A merge into v7-dev also triggers launcher defect (b), so it waits for the takeover. Profile 3: only while no profile 3 MATLAB runs. `data/fusion.mat` stays fixed from C1p to C1c. (d90_loop.md sec. 10's window, the whole of C1p-SURV3, is superseded.)
+5. **Checks after profile 1's C1p:** `PP.model_tag` in its pools must read `v7-D89` (DECISIONS D89, Adoption), and C1c must pass its detector check.
+6. **KPI 2 below its target** (0.769 / 0.763): the untried options are in PROJECT_LOG, weak-class status. The OOD score is in the detector identity, so a change after C1p means a pool rebuild.
+7. **Classes below 90%** (path loss, WLAN, fault, shadowing): the user accepts at least 85% per class for now and decides with the full results. The candidates are in PROJECT_LOG, weak-class status. For shadowing, M3 of d91-fuse (the coherence columns) meets its note's criterion on the fit set and is a candidate, not yet designed (DECISIONS D91, Evidence).
+8. **Interim report** (due 2026-11-01, writing from about 2026-10-20): a chapter per threat, good and correct figures; it needs no final v7 numbers.
+9. **Operator console and 3D:** screenshots and a live check with the v7 agent after the run. The high-quality 3D view waits until the code, the final proposal and the interim report are done.
+10. **Final report, slides and poster:** last, when the user asks.
+11. **Housekeeping**, with the user's approval:
     - the zombie MATLAB 32824 (only a reboot frees its 4.6 GB);
-    - the worktree copies `uav-gcs-b3m-p1/-p3` and `uav-gcs-set4-p1/-p3`, after their files are merged into the profiles;
+    - the worktree copies `uav-gcs-b3m-p1/-p3` (their files are already in the profiles: copied 2026-10-17 22:04:19 and 22:51:15, p1_b3m.log:325, p3_b3m.log:325) and `uav-gcs-set4-p1/-p3` (after the fourth set is copied in at deployment, or after a no-go);
     - the stray empty folder `C:\ADISUL~1`;
     - the v3 backups in `archive/`, which stay until the user approves deleting them.
 
@@ -113,14 +115,14 @@ The run is on code `9b5c9f1` (v7-merge: c2c8b8b + D87 + D88 + D89). It was launc
 | 5 threat classes | 10 threats + none, ten pairs and four triples | A more realistic EW set within RF scope (D68, D73) |
 | Single-antenna link | Two UAV antennas, MRC baseline, MMSE as the spatial countermeasure | Spatial diversity as a real receiver function (D41) |
 | Actions: channel switch, bit rate, diversity | 36 configurations, one choice per domain (frequency, space, link budget): the originals, power control, FEC + interleaving | Threats that no single original action repairs (D39, D45, D59) |
-| DQN on a reward table | Sequential environment on measured frames, shield with hold, γ chosen on validation in v4 and fixed at 0.5 since D67 (γ = 0 tried as one coordinate step on validation in d90), escalation as a fallback | One-shot decisions could not show recovery over time or a follower jammer (D44–D46, D63, D64) |
+| DQN on a reward table | Sequential environment on measured frames, shield with hold, γ chosen on validation in v4 up to D64 and fixed at 0.5 since D65 (γ = 0 tried as one coordinate step on validation in d90), escalation as a fallback | One-shot decisions could not show recovery over time or a follower jammer (D44–D46, D63, D64) |
 | Rule vs DQN by convergence and reward | Return, restored cycles, goodput, recovery time, false alarms, with 95% intervals and paired differences | KPIs as worded in the proposal |
 
 ---
 
 ## Risk mitigation (proposal section 10)
 
-- **DQN convergence:** rule and table baselines in every comparison; 3 seeds per run setting (γ fixed at 0.5 since D67), best checkpoint, validation gate (D44–D46).
+- **DQN convergence:** rule and table baselines in every comparison; 3 seeds per run setting (γ fixed at 0.5 since D65), best checkpoint, validation gate (D44–D46).
 - **Reward design:** reward from link quality minus costs; baselines and oracle show where the policy stands.
 - **Data leakage:** splits by seeded sub-run; test pools with unseen seeds and geometries.
 - **Oscillation:** switching costs, alarm confirmation and shield (D45).

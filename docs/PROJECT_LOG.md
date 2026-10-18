@@ -1,8 +1,8 @@
 # Project Execution Log (Living Document)
 
-**Last updated:** 2026-10-18. The newest entries are at the end of the file (v7, 2026-10-12 to 2026-10-18). The header line and the headline numbers below are from 2026-09-21/23 and are kept as they were written.
+**Last updated:** 2026-10-18. The newest entries are at the end of the file (v7, 2026-10-12 to 2026-10-18).
 
-**Last Updated:** 2026-09-23 (Session 12) | **Status:** KPI #2 now measured against the no-attack link as the proposal defines it (D27): 95.6%, 37/41 runs restored within 2× clean. Work proceeds item by item through the agreed improvement plan (Session 12). Speed-diverse full re-run (D25) and demo_gui v3 (D26) from Session 11 unchanged.
+*Historical header, as written on 2026-09-23 (Session 12); the headline numbers below are from 2026-09-21 and are kept as they were written:* **Status:** KPI #2 now measured against the no-attack link as the proposal defines it (D27): 95.6%, 37/41 runs restored within 2× clean. Work proceeds item by item through the agreed improvement plan (Session 12). Speed-diverse full re-run (D25) and demo_gui v3 (D26) from Session 11 unchanged.
 
 ## Current headline numbers (2026-09-21 full re-run, speed-diverse data, D25)
 | Metric | Latest | Previous (single-speed, D22/D23 baseline) |
@@ -922,27 +922,33 @@ Sources for the entries below: the profile logs `p1.log`, `p3.log`, `p1_b3m.log`
 - **07:38, profile 1's B3** read the second test set once (p1.log:911-1078):
   - KPI 1 macro-F1 93.11% [92.39, 93.71] above the 6 dB threshold chosen on validation (:1036, :1067); the fused class alone 94.78% (:1030);
   - branch level 95.95% (:1039); clean frames read as a threat 2.70% (:1048);
-  - fault and shadowing F1 74.7% and 77.9% (run notes 08:50).
-  - The latch lowered fault recall from 81% to 66% (run notes 08:50). The user approved making it a validation choice (D87).
-- **09:40, review of profile 1's B3a and B4** (run notes 09:40):
-  - the kernel SVM read 19.8%, an untuned baseline; a random forest beat the hybrid per frame;
-  - fault recall fell to 51.8% at unseen Eb/N0.
+  - fault and shadowing F1 74.7% and 77.9% (:1017, :1021).
+  - The latch lowered fault recall, fused → latched, from 81.3% to 66.3% with the onset in the 12-cycle window (3,426 frames) and from 76.4% to 64.3% after it (1,048 frames) (:1041). The user approved making it a validation choice (D87).
+- **09:40, review of profile 1's B3a and B4:**
+  - the kernel SVM read 19.82% macro-F1 per frame, an untuned baseline (p1.log:1105); a random forest beat the hybrid per frame, 82.36% against 80.40% (:1103, :1097);
+  - fault recall fell from 71.9% on the grid to 51.8% at unseen Eb/N0 (:1208).
   - Both went to the audit.
-- **10:20, the audit's blocker** (D88): link feature 13 (`align`) was scrambled in every dataset. The user stopped the run at 13:28: profile 1 had finished through B4, its OOD cut at the eighth held-out threat (p1.log:1301); profile 3 through B3, its B3a cut.
+- **10:20, the audit's blocker** (D88): link feature 13 (`align`) was scrambled in every dataset.
+- **12:57, profile 3's B3** read the second test set once (p3.log:911-1078), its first reading of that set:
+  - KPI 1 macro-F1 92.20% [91.50, 92.84] above the 3 dB threshold chosen on validation (:1036, :1067); the fused class alone 93.92% (:1030);
+  - fault and shadowing F1 72.5% and 75.8% (:1017, :1021); fault recall, fused → latched, 78.6% → 62.4% with the onset in the window (:1041).
+- **13:28, the stop.** The user stopped the run: profile 1 had finished through B4, its OOD cut at the eighth held-out threat (p1.log:1301); profile 3 through B3, its B3a cut (p3.log:1080-1084).
 - **14:26, the redo** on v7-merge `725a2f1` (c2c8b8b + d87 + d88, suite 172/172). Datasets repaired with backups; profiles merged (v7-dev `aea4cc1`, v7-p3 `7546c4e`). Script `docs/runs/v7_d87_redo_20261017.sh` (p1.log:1302, p3.log:1084).
-- **14:55, HOLD.** The review of d87 and d88 confirmed 9 findings; the four on the MMSE predictor (D89) had to land before C1p. At 15:55 the HOLD was released, with code_commit.txt's SRC set to a placeholder. The redo then ran its fresh step, logged as B3n (p1.log:1501, p3.log:1283), and its resume on `725a2f1` was refused at 16:14, as designed.
-- **15:55, redo done** on both profiles.
+- **14:55, HOLD.** The review of d87 and d88 confirmed 9 findings; the four on the MMSE predictor (D89) had to land before C1p. A HOLD file was written. The redo script checks it only between steps, so its A0-B2F MATLAB call ran on.
+- **15:53, the redo's A0-B2F done** on both profiles (p1.log:1500, p3.log:1282). The script then waited on the HOLD.
   - The best epoch's validation macro-F1: 0.8131 on profile 1, 0.8062 on profile 3 (p1.log:1459, p3.log:1244).
   - B2F chose the latch off on both: profile 1 fused 93.43% against latched 92.06% (:1496); profile 3 93.01% against 90.66% (p3.log:1278).
-- **16:42, resume** on `9b5c9f1` (code_commit.txt: v7-dev `208602b`, v7-p3 `29510e7`), chains from B3 with A0 first (v7_d86_launch.log). The resume on `725a2f1` at 16:14 had been refused as designed. The deployment steps of docs/d88_blockers.md and docs/d89_mmse.md were carried out by the redo (14:26) and this resume. The mid-run deployment of docs/d87_fusion.md sec. 4 was overtaken by the stop and was not used.
+- **About 15:54, HOLD removed**, after code_commit.txt's SRC was set to a placeholder ('pending-d89-mmse-fix'). The fresh step, logged as B3n, ran 15:54-16:13 (p1.log:1501-1576, p3.log:1283-1358). The redo ended at 16:14:20 (v7_d87_redo.log). Its resume on `725a2f1` was refused at 16:14:24, as designed.
+- **16:41:38, a resume refused.** The launcher counted the B3m copies' MATLAB sessions (PIDs 43448, 11808) as pipeline stages and did not start (v7_d86_launch.log). Its `stage_pids` was edited to skip command lines that name B3m (D89).
+- **16:42, resume** on `9b5c9f1` (code_commit.txt: v7-dev `208602b`, v7-p3 `29510e7`), chains from B3 with A0 first (v7_d86_launch.log 16:42:05-16:42:13). The deployment steps of docs/d88_blockers.md and docs/d89_mmse.md were carried out by the redo (14:26) and this resume. The mid-run deployment of docs/d87_fusion.md sec. 4 was overtaken by the stop and was not used.
 - **16:47, B3 after the fixes**, a second reading of the second test set, diagnostic only (KPI 1 is B3m):
-  - profile 1: 94.00% [93.52, 94.43] above 0 dB (p1.log:1778, :1810); fault 85.4%, shadowing 86.7%; clean frames read as a threat 2.88% (:1790);
-  - profile 3: 94.22% [93.73, 94.69] above 3 dB (p3.log:1560, :1592); fault 84.9%, shadowing 83.8% (run notes 17:00).
+  - profile 1: 94.00% [93.52, 94.43] above 0 dB (p1.log:1778, :1810); fault 85.4%, shadowing 86.7% (:1734, :1738); clean frames read as a threat 2.88% (:1790);
+  - profile 3: 94.22% [93.73, 94.69] above 3 dB (p3.log:1560, :1592); fault 84.9%, shadowing 83.8% (p3.log:1516, :1520). This is profile 3's second reading of the set; its first was at 12:57.
 - **17:10, the user's bar:** a per-class F1 of at least 85% is accepted for now. The classes below 90% are examined, and the untried levers are recorded for the full results (weak-class status below).
 - **19:00, branch d90-loop** built (`2cbe559`; DECISIONS D90). Not merged, smoke not run.
 
 ### v7: profile 3 out of memory in OOD, and its fix (2026-10-17 22:02 to 2026-10-18 04:57)
-- **The stop:** at 22:02 profile 3's OOD stopped with "Out of memory" in `ood_layer_features>pooled`, at the second held-out threat, noise burst. Profile 1's OOD, profile 3's OOD and both B3m copies ran at once, and the commit charge was near its 127 GB ceiling. The chain ended rc=1 (p3.log:1853, :1878).
+- **The stop:** at 22:02 profile 3's OOD stopped with "Out of memory" in `ood_layer_features>pooled`, at the second held-out threat, noise burst. Profile 1's OOD, profile 3's OOD and both B3m copies ran at once, and the commit charge was near its 127 GiB ceiling. (The 83 GB limit in DECISIONS D86 was the limit with the 52 GB page file of 2026-10-16. The page file is system-managed and had grown to 98 GB by 23:45; docs/runs/analysis/overnight_audit.txt:108.) The chain ended rc=1 (p3.log:1853, :1878).
 - **The fix** (`docs/runs/v7_d87_p3fix_20261017.sh`, started 22:09):
   - It waited for profile 3's B3m to end and for 45 GB of commit headroom (61 GB at 22:54).
   - It ran A0, OOD (326.9 min) and B4s (34.9 min), done at 04:57 (p3_fix.log; p3.log:2022, :2227).
@@ -979,7 +985,9 @@ Per-class F1 on B3m (:230-240):
 | tone jamming | 100.0 | 99.8 |
 | airframe shadowing | 82.7 | 82.0 |
 
-- The different thresholds (0 dB and 3 dB) are validation noise: both profiles read 90.6% at 0 dB on the third set (p1_b3m.log:279, p3_b3m.log:279). Both should also be reported at a common threshold.
+- The different thresholds (0 dB and 3 dB) are validation noise: both profiles read 90.6% at 0 dB on the third set (p1_b3m.log:279, p3_b3m.log:279).
+- The two KPI 1 figures are not a profile comparison. Profile 1's 93.58% covers 0-15 dB and profile 3's 94.19% covers 3-15 dB. Over all frames of the third set they read 93.46% and 93.50% (p1_b3m.log:228, p3_b3m.log:228).
+- Planned extra reporting, no rerun and no reselection on a test set (docs/runs/analysis/overnight_audit.txt:37-39): both profiles at a common threshold fixed in advance (0 dB), and the threshold's stability under a bootstrap of the validation sub-runs (the share of resamples that pick 0 dB).
 - **KPI 2, nested leave-one-threat-out** (the value to quote; target mean AUROC ≥ 0.8):
   - profile 1: 0.769, FPR95 0.76 (p1.log:2159); production score last_or_if over 2 cycles, validation 0.784, test 0.783 (:2157);
   - profile 3: 0.763, FPR95 0.74 (p3.log:2004); last_or_if over 1 cycle, validation 0.779, test 0.778 (:2002).
@@ -992,7 +1000,7 @@ Per-class F1 on B3m (:230-240):
   - The rule fixed before the run keeps the training levels on both.
 
 ### v7: 2026-10-18
-- **00:10, overnight audit** (session file overnight_audit.txt): the out-of-memory risk tonight is below about 3% if no side MATLAB job starts. Launcher defects a-f (DECISIONS D91 part 4). The zombie MATLAB 32824 (exited, 4.6 GB held) is freed only by a reboot.
+- **00:10, overnight audit** (docs/runs/analysis/overnight_audit.txt): the out-of-memory risk tonight is below about 3% if no side MATLAB job starts. Launcher defects a-f (DECISIONS D91 part 4). The zombie MATLAB 32824 (exited, 4.6 GB held) is freed only by a reboot.
 - **00:35, the user approved option A** (DECISIONS D91), after the weak-branch analysis (no label bug; fault 83.4% and shadowing 85.2% true out of fold on validation).
 - **03:20:02, profile 1 C1p started:** 93 cells x 36 configurations x 6 Eb/N0, 6 workers, no cells from an earlier start (p1.log:2384, :2407). Before it: OOD 362.8 min, done 02:49 (:2177); B4s 30.8 min (:2382).
 - **05:10, the d91 workflow:**
@@ -1000,8 +1008,8 @@ Per-class F1 on B3m (:230-240):
   - branch-evidence fusion (`d91-fuse`): adoption rule fixed at 05:15:41; measurement from 05:48; verdict ADOPT on profile 1 at 11:02 and on profile 3 at 16:24 (d91_fuse.md sec. 5);
   - takeover (`d91-takeover`).
   - Each track had fix and review rounds through the day.
-- **12:30, C1p slowdown found:** 86 builds in 9 h, against about 20 per hour on 2026-10-07 (session file c1p_rate.txt).
-- **13:10, explained** (DECISIONS D91 part 5). New timeline:
+- **12:30, C1p slowdown found:** 86 builds in 9 h (docs/runs/analysis/c1p_rate.txt, 12:20), against about 20 per hour in the first reading (740 'Building model' lines in 37 h: `uav-gcs-logs/full_v7p1_first_reading_20261016_110932.log`). At that rate C1p would take about 200 h.
+- **13:10, explained** (DECISIONS D91 part 5). C1p projected at 155-175 h from a cost model of the 93 cells (docs/runs/analysis/c1p_slow_model.py). New timeline:
 
   | Milestone | Projected |
   |---|---|
@@ -1013,21 +1021,23 @@ Per-class F1 on B3m (:230-240):
   The earlier dates (profile 1 about 23.10, all about 2.11) are superseded.
 - **13:10, a forgotten background task stopped:** the session's own Word COM PowerShell task had hung and burned one core for two days beside C1p.
 - **13:45-19:30, d91-speed** built, reviewed and fixed. Proofs PASS with the detector applied. The first full-suite runs were voided by a Stateflow path-length limit in the long scratch TEMP.
+- **19:40, takeover round 3** (`7d4d0b6`, harness 287/287). The review is FIX-NEEDED; round 4 is running. Not launched; the user's launch steps are in ops/v7_d91_takeover.md, "Procedure".
 - **19:49, tests2:** new 196/196, old 174/174, focused 8/8. tests4, on the 4-antenna merge candidate `686fd11`, was queued.
 - **19:57, fuse queue:** the wrap check done (smoke pools, a mechanism check). phi on profile 1 from 20:18; pending: the phi verdict.
-- **19:40, takeover round 3** (`7d4d0b6`, harness 287/287). The review is FIX-NEEDED; round 4 is running. Not launched; the user's launch steps are in ops/v7_d91_takeover.md, "Procedure".
-- **About 20:50, profile 1's C1p:** 5 of 93 cells on disk (the last at 18:44; `uav-gcs-v7/data/c1p_cells`).
-- **C2's longer cost under d90:** 108 runs, about 38-42 h per profile, or 72 runs and about 26 h with `C.drop_steps = [-2 0]` (d90_loop.md sec. 7). Not yet in the timeline above.
+- **20:18, tests4 proofs:** B_old_vs_new_nrx4, C_order and C_vs_B_nrx4 PASS with the detector applied on `686fd11` (v7_d91_tests4_pnew.log, _porder.log).
+- **21:09:09, tests4 merge job** (full `test_core` on `686fd11`) started (v7_d91_tests4_queue.log). Pending: its VERDICT.
+- **21:33, profile 1's C1p:** 170 builds in 18.2 h (about 9.3 per hour, p1.log from :2384); 5 of 93 cells on disk, the last at 18:44 (`uav-gcs-v7/data/c1p_cells`).
+- **C2's cost.** The 72-run grid of 9b5c9f1 takes about 22-24 h per profile, not the 12 h of D86's estimate (DECISIONS, the bracket in the cost note after D74). d90's 108 runs take about 38-42 h, or about 26 h with `C.drop_steps = [-2 0]` (d90_loop.md sec. 7). The timeline above allows 22-52 h for C1d-RPT per profile (docs/runs/analysis/c1p_slow_timeline.py), so its later dates cover d90's C2 and its earlier dates are short even for the 72-run grid.
 
 ### v7: weak-class status (2026-10-18)
-Classes below 90% F1 on the third test set (B3m, read once), with the levers. Sources: the readings above, docs/d87_fusion.md sec. 2, DECISIONS D91, and the run notes on the weak classes.
+Classes below 90% F1 on the third test set (B3m, read once), with the levers. Sources: the readings above, docs/d87_fusion.md sec. 2, DECISIONS D91, docs/runs/analysis/ (weak_branch_recommendation.md, audit1_confirmed.json, d91_fuse_m_p1_log.txt, d91_fuse_m_p3_log.txt), and the run notes on the weak classes.
 
 | Class | P1 / P3 F1 | Physics limit | Tried and rejected on validation | Measured, not deployed | Untried |
 |---|---|---|---|---|---|
 | antenna fault | 83.1 / 83.6 | a 5 dB fault at K < 10 dB lies inside the static imbalance between antennas (SD 2.9 dB) | per-class logit offsets, prior correction, balanced priors, majority vote (d87 sec. 2) | branch-evidence fusion: nested fault F1 +5.1 on both profiles (D91; deployment after the go/no-go) | a slow layer on how long a branch loss lasts; per-antenna CNN inputs; more training sub-runs for shallow faults and low K (CNN retraining, about 4 days of C1p per profile) |
-| airframe shadowing | 82.7 / 82.0 | the onset is still on its ramp at the 5 dB event criterion; the K change cannot be seen in 12 samples at low K | as above | branch evidence +0.3-0.4, interval touches 0 (D91) | coherence-based bound (M3 of d91_fuse.md) only if it beats the fusion |
-| path loss | 87.8 / 88.4 | a 4 dB step at K < 10 dB is near the 12-cycle window's information limit (Lee 1985: about 36 samples for ±1 dB) | common-mode step, level-CUSUM column (no gain) | branch isolation (iso, Xie 2021 Sec. III-I): out-of-fold macro-F1 +0.19 [+0.02, +0.37] on P1, rarely kept by the nested procedure (d90_loop.md sec. 1); the audit's reading: 4 dB step recall 34.4 -> 37.7% (audit1_confirmed.json lit-3); the N-1 path-loss target, +0.1-0.26 points (lit-4(3)) | Eb/N0 as an explicit fusion input |
-| WLAN | 89.0 / 89.2 | at -12 dB with Eb/N0 0-3 dB, below the energy-detection floor | - | floor-relative CFAR crest cues (Grimaldi 2019; López-Benítez 2016 eq. 9): weak-WLAN recall (≤ -8 dB, Eb/N0 0-3 dB) 17.1 -> 38.2% (P1), 15.3 -> 49.2% (P3); out-of-fold macro-F1 +0.19 [+0.02, +0.38] (P1); nested gain only +0.05 [-0.03, +0.13] (P1) (d90_loop.md sec. 1) | - |
+| airframe shadowing | 82.7 / 82.0 | the onset is still on its ramp at the 5 dB event criterion; the K change cannot be seen in 12 samples at low K | as above | branch evidence +0.3-0.4, interval touches 0 (D91); M3, the coherence bound (fit set, out of fold; shadowing against clean frames only, so a bound, not a deployable class decision): coherence trees over the fusion's shadowing recall at its clean budget +4.7 [+3.9, +5.6] (P1), +7.0 [+6.1, +7.9] (P3), at onset age 0-2 +10.8 and +15.7 (d91_fuse_m_p1_log.txt:71-77, d91_fuse_m_p3_log.txt:71-77); this meets d91_fuse.md sec. 5's criterion for a shadowing change | a fusion design with the coherence columns for shadowing (a candidate after M3; not yet designed or deployed) |
+| path loss | 87.8 / 88.4 | a 4 dB step at K < 10 dB is near the 12-cycle window's information limit (Lee 1985: about 36 samples for ±1 dB) | common-mode step, level-CUSUM column (no gain) | branch isolation (iso, Xie 2021 Sec. III-I): out-of-fold macro-F1 +0.19 [+0.02, +0.37] on P1, rarely kept by the nested procedure (d90_loop.md sec. 1); the audit's reading: 4 dB step recall 34.4 → 37.7% (docs/runs/analysis/audit1_confirmed.json, lit-3); the N-1 path-loss target, +0.1-0.26 points (lit-4(3)) | Eb/N0 as an explicit fusion input |
+| WLAN | 89.0 / 89.2 | at -12 dB with Eb/N0 0-3 dB, below the energy-detection floor | - | floor-relative CFAR crest cues (Grimaldi 2019; López-Benítez 2016 eq. 9): weak-WLAN recall (≤ -8 dB, Eb/N0 0-3 dB) 17.1 → 38.2% (P1), 15.3 → 49.2% (P3); out-of-fold macro-F1 +0.19 [+0.02, +0.38] (P1); nested gain only +0.05 [-0.03, +0.13] (P1) (d90_loop.md sec. 1) | - |
 
 - **KPI 2** (0.769 / 0.763): an unknown lost-branch threat is close to its known sibling class, so for the action it counts as 'known'; an unknown path loss looks like a weaker clean link.
   - Untried: Outlier Exposure (Hendrycks 2019, not in the library), per-branch and level-step novelty in the score, and an action-aware reading beside KPI 2.

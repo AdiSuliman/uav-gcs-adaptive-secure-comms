@@ -123,6 +123,8 @@ The files are in the project's source folder (`מקורות`). The "Where" colum
 | ETSI EN 300 328 v2.2.2 (2019) | V7_ETSI_EN300328_v2.2.2_2019_24GHz_wideband.pdf | The licence-exempt density cap, 10 dBm/MHz (4.3.2.3): the emitter of opportunity at the cap | D86 item 2 |
 | M. Simunek, P. Pechac, F. P. Fontán, "Excess loss model for low elevation links in urban areas for UAVs," Radioengineering 20(3), 2011 | V7_Simunek2011_Excess_Loss_Low_Elevation_UAV.pdf | 33-42 dB of building loss on a low-elevation 2 GHz UAV link; the path-loss step up to 22 dB stays below it | D84 (README, path loss) |
 
+How D91 uses the two Xie papers (d91_fuse.md sec. 1, "What the sources support"): the glr columns are adapted from Xie 2021, eq. 20 and Xie, Moustakides & Xie 2022, eq. 9, not taken from them, because both means are estimated in the window while the sources assume a known pre-change density. b = abs(log alpha) is the sources' asymptotic threshold for a false-alarm rate alpha = 1/ARL; D91 applies it to a frame share, an analogy. The cap W <= 2b and the exponential (Rayleigh) likelihood have no source.
+
 Also cited, listed above: Norouzi 2006 (the sweeper's 2-of-6 confirmation, D90 sec. 2), Barajas et al. 2026, Winters, Salz & Gitlin 1994 (the MMSE predictor on known symbols, D88-D89).
 
 ## Not in the library (stated where used)
