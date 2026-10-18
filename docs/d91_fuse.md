@@ -19,7 +19,8 @@ not read. Every number below is a fit-set number (out of fold, or nested), never
 | Adoption rule, fixed before the M4 numbers | section 4 |
 | M1-M4 on both profiles | done: adopt 'branch evidence' on both profiles, section 5 |
 | phi against phi = 1 | declared before it ran (section 8, commit 5abf87d); queued, results in section 12 |
-| Deployment tied to the measured pick | `fusion_pick.m` (latch off, as measured), `select_fusion.m`, section 9 |
+| Deployment tied to the measured pick | `fusion_pick.m` (latch off, as measured), `select_fusion.m` (an override only on the validation fit), section 9 |
+| Deploy checklist | section 7: the merge order, the deploy commit with the B3r guard, the tests, profiles 3, 1 and 2 (profile 2's decision proposed) |
 | Closed-loop wrap check | queued on the d90 smoke pools, section 10 |
 | Focused tests | 5 of 5 pass (section 6); the new and changed ones queued |
 
@@ -452,26 +453,206 @@ pool). All pass:
   it now also checks them, and the measurement's streams (section 11), against every flight
   stream of the test: none shared, all below the lowest (queued, section 9).
 
-## 7. If a profile adopts: what deployment takes
+## 7. Deploy checklist
 
-1. `run_stage.m` `run_one`: `FUSION_REV = true; FUSION_FIT = 'enlarged';` before `select_fusion`
-   (in the deploy commit, with the fourth set's `kpi1_set` switch, `docs/d91_set4.md` step 2).
-   B2F then deploys `fusion_pick.m` without choosing again (section 9). It reads the three test
-   sets by HDF5 (the images in blocks) and fits two variants out of fold: about an hour, not the
-   6-10 min of today's B2F. The smoke has no third test set, so the smoke's B2F needs
-   `FUSION_FIT` off.
-2. In the same deploy commit, the fourth set's guard in `eval_detector.m` (d91-set4, B3r) also
-   requires `deployed_pick` in `data/fusion.mat` and
-   `isequal(rmfield(deployed_pick, 'check'), fusion_pick())`. Every pick writes the same
-   `fusion_rev`, so without this a `fusion.mat` from an earlier B2F (before `fusion_pick.m`
-   changes, for example after the phi verdict) would pass on the revision id alone.
-   `fusion_rev_id.m` stays byte-identical to `d91-set4`'s.
-3. Rerun B3, B3a, B4 and B4s. They are in-sample on the read sets and are kept only as
-   descriptions.
-4. Read KPI 1 once, on the fourth test set (FRESH_SET = 3, the d91-set4 track).
-5. `rekey_pools` (the columns read only `gant`), then the closed loop from C1d on.
-6. Profile 3 before its C1p, profile 1 after its run, profile 2 from its start, as the
-   recommendation lays out.
+This is the whole deployment of the adopted revision, written before the 21.10 go/no-go. It
+covers the merge, the code of the deploy commit, the tests, and each profile in turn. Only G
+applies with a no-go. `docs/d91_set4.md` cites the steps of an earlier, shorter list. Its
+"section 7, step 1" is B2 here, "step 2" is B3 (and D3 for the reruns), and "step 4" is E5-E6.
+
+### A. The deploy branch (outside every live tree)
+
+1. Branch `d91-deploy` from `d90-loop` (`2cbe559`). Merge with `--no-ff`, in this order:
+   `d91-set4`, then `d91-fuse`, then `d91-speed`. All three branch from `2cbe559`. Do this in a
+   worktree of its own (for example `uav-gcs-d91-deploy`), never in `uav-gcs-v7`,
+   `uav-gcs-v7-p3` or a profile 2 tree.
+2. A trial merge in the object store on 18.10 (`git merge-tree --write-tree`, nothing checked
+   out) had no conflict. It used the tips `0e410cf` (set4), `9e7a3fb` (fuse) and `2d93abb`
+   (speed). Its result then merged with no conflict into `v7-p3` (`29510e7`) and into `v7-dev`
+   (`208602b`). `fusion_rev_id.m` is byte-identical on set4 and fuse. Repeat the trial at the
+   merge, with the tips of that day.
+3. If the phi verdict (section 12) is phi = 1, commit it on `d91-fuse` before the merge:
+   `fusion_pick.m` (name `'branch evidence, phi = 1'`, `cues.phi1 = true`, latch still false)
+   and the phi1 expectation in `test_fusion_pick_deploy`.
+
+### B. The deploy commit (one commit on `d91-deploy`, after the merges)
+
+1. `kpi1_set.m`: `s = 'fresh3';`. In `test_core.m`, change the two `kpi1_set()` expectations:
+   one in `test_third_test_set`, one in the first part of `test_fourth_test_set`.
+2. `run_stage.m` `run_one`: before `select_fusion`, set `FUSION_REV = true;`, and also
+   `FUSION_FIT = 'enlarged';` unless `SMOKE`, since the smoke has no third test set:
+   ```matlab
+   elseif strcmp(name, 'select_fusion')
+       FUSION_REV = true; %#ok<NASGU>
+       if ~SMOKE, FUSION_FIT = 'enlarged'; end %#ok<NASGU>
+       run(name);
+   ```
+   `run_one`'s `%#ok<INUSD>` on `SMOKE` then goes. B2F with the enlarged fit takes about an
+   hour per profile, not the 6-10 min of the old B2F.
+3. The B3r guard in `eval_detector.m`, in the `read_fresh3` block. Put it after the check on
+   `FM.target_age` and `FM.cues`, before `eval_detector:fresh3_fusion_old`:
+   ```matlab
+   assert(ismember('deployed_pick', fz), 'eval_detector:fresh3_pick', ...
+       'data/fusion.mat records no deployed_pick: run B2F with FUSION_REV and FUSION_FIT = ''enlarged''');
+   Fp = load('data/fusion.mat', 'deployed_pick');
+   assert(isstruct(Fp.deployed_pick) && isfield(Fp.deployed_pick, 'check') && ...
+       isequal(rmfield(Fp.deployed_pick, 'check'), fusion_pick()), 'eval_detector:fresh3_pick', ...
+       'the design in data/fusion.mat is not fusion_pick.m''s: rerun B2F (docs/d91_fuse.md, section 7)');
+   ```
+   Add `Fp` to the `clear` line after the marker. Every pick writes the same `fusion_rev`.
+   Without this guard, a `fusion.mat` from a B2F that ran before `fusion_pick.m` changed (for
+   example, after the phi verdict) would pass on the revision id alone.
+4. The guard's own test goes in `test_fourth_test_set`, beside the `fresh3_fusion_rev` cases
+   and built the same way:
+   - the adopted id and a revised `FM` without `deployed_pick`: `eval_detector:fresh3_pick`,
+     and no marker is written;
+   - a `deployed_pick` that differs from `fusion_pick()` in one field (say
+     `cues.held = false`): the same, again with no marker;
+   - `deployed_pick = fusion_pick()` with a `check` field: passes this guard, so the next
+     refusal is `fresh3_fusion_old`;
+   - every later case of that test that saves `fusion.mat` with the adopted id (from
+     `fresh3_fusion_old` on) must also save such a `deployed_pick`, or it stops at the new
+     guard.
+
+   This is the real guard test. Today's line in `test_fusion_pick_deploy` only shows that a
+   `deployed_pick` built the way B2F builds it passes the planned comparison (section 9).
+5. `d91_bitid/rev.m` (the revised smoke run): check that its `fusion.mat` holds
+   `fusion_rev = fusion_rev_id('validation')` (`docs/d91_set4.md`, step 2).
+
+### C. Tests before any profile takes it
+
+1. The full `test_core` in short paths: work folder at most 150 characters, one
+   `-singleCompThread` MATLAB per job, through the gate. Run it as the `merge`/`tip` pair of
+   `docs/d91_speed.md` section 7. Each candidate is built with `git merge-tree` and
+   `git commit-tree`, outside the live trees:
+   - `d91-deploy` merged onto the `v7-p3` tip, against that tip;
+   - after profile 1's chain, `d91-deploy` merged onto the `v7-dev` tip of that day, against
+     that tip;
+   - for profile 2, the same against `v7-p2` (F).
+
+   Merge only when the pair has no `fail-new-only`, `not-run`, failing `new-test` or TIMEOUT.
+   After the merge, `git rev-parse HEAD^{tree}` in the live tree must equal the tested tree.
+2. The d90 smoke chain on `d91-deploy` (`run_stage('smoke', ...)`), in a scratch copy. Its
+   B2F runs with `FUSION_FIT` off (B2). It checks the code path only; smoke numbers are not
+   results.
+3. The speed preconditions of `docs/d91_speed.md` section 7: every `D91PROOF` PASS with the
+   detector.
+4. `check_fit_sets` once more, with its log kept.
+
+### D. Profile 3 (between the go/no-go and its C1p, about 21.10-25.10)
+
+Profile 3 ran its B stages with the old fusion. It now waits in the takeover for profile 1's
+SURV3 before C1p (`ops/v7_d91_takeover.md`, "Fusion revision and the fourth test set").
+1. Write `uav-gcs-logs\v7_d86\p3_c1p.hold` first. Then check that no MATLAB runs in
+   `uav-gcs-v7-p3`: query the processes, check `takeover_ml_p3.pid`, and check that the
+   current part of p3.log has not started C1p.
+2. Merge `d91-deploy` into `v7-p3`, using the tree tested in C1. If `d91-speed` was already
+   cherry-picked into `v7-p3`, both sides of the merge carry the same hunks: check that
+   `git merge-tree` is clean and that the tree equals the tested one. `git status` must be
+   clean; then push.
+3. Write `p3_brerun.go` with `B2F B3 B3a B4 B4s`. The takeover runs them with A0 first, once
+   profile 1 is past C1c and 65 GB of commit is free. Leave out OOD (it reads no fusion
+   output), B2 (the detector stays frozen from B3r until RPT), and B3n and B3m (they would
+   rebuild the sets). After the rerun:
+   - `data/fusion.mat` must hold `fusion_rev = 'd91_branch_evidence_enlarged'` and
+     `deployed_pick`;
+   - B2F's rule line must read `rule yes`.
+
+   A stop at `select_fusion:pick_rule` is a no-go for profile 3 (G). B3, B3a, B4 and B4s are
+   in-sample on the sets already read, so they are kept as descriptions only.
+4. The fourth set goes into `data/`: copy `set4_out/p3/data/*fresh3*`, check the hashes, then
+   check `params_id` and the run-id block (`docs/d91_set4.md`, step 3).
+5. In a separate MATLAB in the profile's folder, logging to its own file (never to p3.log):
+   1. the rehearsal on the third test set, without rebuilding it,
+      `DET_TEST = 'fresh2'; run('eval_detector')` (`docs/d91_set4.md`, step 4.3);
+   2. `run_stage('B3r')`, once. Archive the marker and the results right away, then commit
+      `docs/d91_fresh3_read_p3.txt` on `v7-p3` (`docs/d91_set4.md`, steps 5-6).
+
+   The takeover counts any MATLAB whose `-batch` command holds `run_stage(` as a pipeline
+   session. Before step 5, check that this does not trip its checks; otherwise run B3r's
+   script directly, with `DET_TEST = 'fresh3'`.
+6. Remove `p3_c1p.hold`. C1p builds the pools on the new fusion, so no rekey is needed. Check
+   that C1c passes its `det_id` check.
+7. After profile 3's C1p, rerun wrap check A, B and C on its pools (section 10).
+
+### E. Profile 1 (after its chain ends, before the final phase)
+
+Profile 1's live C1p runs with the old fusion. Its `data/fusion.mat` stays unchanged until the
+chain has ended (`chain ended rc=0` past RPT), because C1c checks the pools' `det_id` against
+it. The takeover's final phase (LAT, KPI, DASH, WEAK, RPT, bundle) waits for all three tracks
+and an idle machine, so the reruns below fit between profile 1's chain end and that phase.
+1. When `chain ended rc=0` appears, archive `results/` and `data/fusion.mat`: they are the
+   record from before the revision.
+2. The fourth set goes into `data/`, with the checks of `docs/d91_set4.md` step 3 (P1's
+   `params_id` is `add18af2b7532a0bd2f7fbc78f06e526`).
+3. Run the `merge`/`tip` pair on that day's `v7-dev` tip (C1). Then merge `d91-deploy` into
+   `v7-dev` and push. Profile 2 has branched by then (F).
+4. In a separate MATLAB logging to its own file (never to p1.log): B2F, the rehearsal, B3,
+   B3a, B4, B4s, then B3r once, with the record committed. The checks are those of D3 and D5.
+5. `rekey_pools` on the policy, check, clean_val and clean_test pools; each is backed up
+   first. The new columns read only `gant`, which every pool frame holds, so no pool is
+   simulated again.
+6. The closed loop from C1d on: C1d, C2, C2e, C2g, C2u and EDGE. SURV, SURV3, OHP, GCSA and
+   GAL read nothing of the fusion, so they stay. The new `FM` changes `det_id`, so LAT (in the
+   final phase) and EDGE read it anew.
+7. Rerun wrap check A, B and C on profile 1's pools (section 10).
+
+These reruns go through the same gate as every side job. Their length comes from the
+stage-done lines of profile 1's v7 log; C2 trains the DQN again. Update the timeline with it
+before they start.
+
+### F. Profile 2: its own fusion decision (proposed, for Adi at the go/no-go)
+
+`fusion_pick.m` was measured on profiles 1 and 3. Profile 2's enlarged fit set does not exist
+at its B2F: its chain builds the second and third test sets (B3n, B3m) after B2F. The takeover
+also branches `v7-p2` from `v7-dev` when profile 1's chain ends, which is before E3. So
+profile 2's chain runs the old fusion, as profiles 1 and 3 did. The decision below is declared
+before any profile 2 number exists.
+1. Write `p2_c1p.hold` before profile 1's chain ends (`docs/d91_speed.md`, section 7). Profile
+   2 then runs A0-B2F, B3n, B3m, B3, B3a, B4, OOD and B4s on the old fusion, and stops before
+   C1p. Its B3m reading is its first reading of the third test set. Do not write a
+   `p2_set4.stages`: B3q is not in `v7-dev` when profile 2 branches, and B3r never goes into
+   the chain (`docs/d91_set4.md`, step 7).
+2. Build profile 2's fourth set in a copy, as was done for profiles 1 and 3. B3q reads nothing.
+   - The copy: a detached worktree of `d91-deploy` with profile 2's `params.mat`,
+     `profile.json` and `data/splits.mat`, set up after profile 2's B1.
+   - The recipe and seeds: the same as profiles 1 and 3 (6.0M + run id, speed stream 2037),
+     with profile 2's link model.
+   - It can run while profile 2's chain continues, as long as only one side MATLAB runs at a
+     time.
+3. At the hold, run profile 2's own `merge`/`tip` pair (C1), then merge `d91-deploy` into
+   `v7-p2`.
+4. **The decision is B2F's rule check.** `run_stage('B2F')` with `FUSION_FIT = 'enlarged'`
+   refits the base and the fixed design out of fold on profile 2's enlarged fit set:
+   validation, the test split, and the second and third sets; folds by sub-run (seed 9101);
+   bootstrap seed 9102. It then applies the rule of section 4 (`fusion_adopt('branch')`) to
+   the design to be deployed.
+   - Nothing is chosen on profile 2: not the variant, N, lambda, phi or the latch. The test is
+     therefore the out-of-fold comparison of one fixed design.
+   - No nested reading is needed. Nesting accounted for the choice among variants on profiles
+     1 and 3, and there is no such choice here.
+
+   The two outcomes:
+   - **Adopt** (`rule yes`): run the rehearsal, B3, B3a, B4 and B4s. Then run B3r once on
+     profile 2's fourth set and commit its record, as in D5. Remove `p2_c1p.hold`; C1p builds
+     the pools on the new fusion.
+   - **No-go** (`select_fusion:pick_rule`): B2F stops before its save, so the chain's
+     `fusion.mat` stays and profile 2 keeps the old fusion. One commit on `v7-p2` sets
+     `kpi1_set.m` back to `'fresh2'`, with the two test expectations. Profile 2's KPI 1 is
+     then its B3m reading, taken with that same fusion before any profile 2 fusion number
+     existed. The report gives the rule line as the reason and states that the profiles'
+     fusions differ. Then remove the hold.
+5. Either way, copy B2F's rule-check line into this note (section 5, under a profile 2
+   heading) before C1p starts.
+
+### G. No-go
+
+With a no-go on 21.10, nothing is merged. `kpi1_set.m` stays `'fresh2'`, each profile's fourth
+set waits unread for a revision adopted later, and the old fusion and its pools stay. If a
+profile's own B2F stops at `select_fusion:pick_rule` after the merge (D3, E4, F4), that B2F
+has not saved, and the profile's `data/fusion.mat` is still the old one. One commit on that
+profile's branch then sets `kpi1_set.m` back to `'fresh2'` (with the two test expectations),
+and the profile goes on with the old fusion. Its pools need no rekey.
 
 ## 8. phi: the declared comparison (fixed before any phi = 1 number exists)
 
@@ -524,8 +705,11 @@ B2F now deploys exactly the measured design.
   ('N') and where the verdict is recorded. It is the one place the phi verdict of section 8
   changes (to `'branch evidence, phi = 1'` with `cues.phi1 = true`).
 - **`select_fusion.m`.** With `FUSION_REV` and `FUSION_FIT = 'enlarged'` it takes
-  `fusion_pick()` (or `FUSION_PICK` when the caller gives one) and never runs
-  `fusion_adopt('choose')`. The measured N and lambda replace validation's own choice, which is
+  `fusion_pick()` and never runs `fusion_adopt('choose')`. A caller's `FUSION_PICK` is
+  taken only on the validation fit (the smoke and code checks). Under `FUSION_FIT = 'enlarged'`
+  any pick other than `fusion_pick()` stops B2F before it reads data
+  (`select_fusion:pick_measured`), so the enlarged revision id is written only for the
+  measured design. The measured N and lambda replace validation's own choice, which is
   printed beside. The target is `FM.target_age = N`, the deployed rule. With these, on the
   enlarged set's folds (seed 9101) and bootstrap (seed 9102), it refits the base and the design
   out of fold and checks the rule of section 4 on the target it deploys. If the rule fails, B2F
@@ -537,7 +721,10 @@ B2F now deploys exactly the measured design.
   `FM.latch = PK.latch` instead of choosing it on validation, prints validation's out-of-fold
   latch comparison beside it and records it in `deployed_pick.check.latch_val`. A pick without
   a latch state stops B2F (`select_fusion:pick_latch`). Without a pick the latch is chosen on
-  validation as before.
+  validation as before. The readers' lines say where the state came from: 'set by B2F: chosen
+  on validation, or the measured pick's state'. These are `eval_detector.m` (the KPI 1 log),
+  `compare_architectures.m`, `edge_map.m`, and the `onset_shape.m` and `policy_monitor.m`
+  comments.
 - **`data/fusion.mat`** also holds:
   - `fusion_rev = fusion_rev_id('enlarged')`, the id the fourth set's B3r requires
     (`docs/d91_set4.md`, step 2; `fusion_rev_id.m` is byte-identical to `d91-set4`'s, so the
@@ -555,14 +742,18 @@ B2F now deploys exactly the measured design.
   it reuses them).
 - **Profile 2 is not covered.** `fusion_pick.m` was measured on profiles 1 and 3 only. In
   profile 2's chain B2F runs before B3n and B3m have built its second and third test sets, so
-  its enlarged fit set does not exist then. Profile 2 needs its own decision: measure there
-  first, or deploy only after its test sets exist. Either way the rule check above is its
-  guard.
+  its enlarged fit set does not exist then. Its own decision is proposed in section 7, F: the
+  chain runs the old fusion up to the hold before C1p, and then B2F's rule check of the fixed
+  design on profile 2's enlarged fit set decides.
 - **Tests (queued, section 6):**
   - `test_fusion_pick_deploy` (new) checks the pick (latch off), the revision ids, and that
     select_fusion takes the pick, asserts the rule, sets the pick's latch before the save,
-    records the latch comparison and never reaches 'choose' when it has a pick; and the deploy
-    guard of section 7, step 2, on a `deployed_pick` built as B2F builds it;
+    records the latch comparison and never reaches 'choose' when it has a pick. It also checks
+    that an override of the pick under the enlarged fit stops before any data is read
+    (`select_fusion:pick_measured`, placed before the first load). Its `deployed_pick` line
+    builds a `deployed_pick` the way B2F builds it and shows that it passes the comparison the
+    guard will make. It runs no guard code: the guard and its real test land with the deploy
+    commit (section 7, B3-B4);
   - `test_branch_evidence_cues` adds phi = 1: the unscaled GLR, the columns without `gl_phi`,
     the held CUSUM step by step equal to the batch run, and the monitor equal to
     `fuse_classes` with phi = 1;
@@ -689,6 +880,18 @@ reproduces m_all's M4 row before anything uses it, and stops with `m_phi:tests` 
 failed test run; `phi_both` is then skipped by the queue, as its inputs are missing). The
 summary header still names `eb87297`, the folder's name.
 
+**Not in the queue: the deploy-only changes made after 774a73e.** These are:
+- the `select_fusion:pick_measured` assert and its test lines;
+- the latch wording of the readers;
+- the test comment on the guard.
+
+None of them is on a path a queued job runs. The wrap check's pick path uses the validation fit
+(`FUSION_PICK` without `FUSION_FIT`), and the phi jobs do not call `select_fusion`. At 18:54,
+with the tests job still waiting at the gate, the export was therefore left at `774a73e`. A
+test edit that MATLAB has never parsed would otherwise risk the tests job, and a failed tests
+job also skips the phi jobs. These changes are tested in the deploy's full `test_core`
+(section 7, C1).
+
 ## 11. Resampling streams
 
 | Seed | Where | What |
@@ -716,8 +919,12 @@ The verdict is mechanical from section 8.
 **Which reading governs for phi = 1.** phi = 1 is a fixed design, so its out-of-fold check
 against the base, (i) (`af`), is the governing check. The nested reading (ii) is a mixture: in
 an outer fold whose inner reading keeps phi, the predictions are those of 'branch evidence'
-with phi as is, so `an` does not test phi = 1 alone. Rule 2 of section 8 requires both, so the
-nested reading can only make deploying phi = 1 stricter.
+with phi as is, so `an` does not test phi = 1 alone. The nested reading acts on the verdict in
+two places, in opposite directions:
+- In rule 2 (`ok1 = af && an`), `an` can only make deploying phi = 1 stricter.
+- In the keep rule (`keep_p = kf && kn`), `kn` can only make keeping phi stricter. When `kn`
+  fails, `keep_p` is false and the verdict goes to rule 2, so on that side the nested reading
+  can make deploying phi = 1 easier.
 
 <!-- PHI RESULTS -->
 Pending.
