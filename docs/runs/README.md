@@ -18,3 +18,23 @@ The other d91 scripts are not copied here, because their branches already carry 
 - the fourth set's build script and driver: branch `d91-set4`, `docs/`;
 - the speed gate and the tests3 and tests4 queues: branch `d91-speed`, `docs/`;
 - the takeover and its test harness: branch `d91-takeover`, `ops/`.
+
+## Analysis outputs (`analysis/`, read-only snapshots)
+
+The decision record cites these working files of 2026-10-17/18. The originals are in the session's scratch folder, outside the repository. The copies here are byte-identical, with one exception: `weak_branch_recommendation.md` is the `recommendation` text field, extracted from the workflow's JSON result. Line numbers cited in the docs (for example `d91_fuse_m_p1_log.txt:71-77`) refer to these copies. The two measurement logs were `m_p1.log` and `m_p3.log`; they are renamed because `.gitignore` excludes `*.log`.
+
+| File | What it is | Written | sha256 |
+|---|---|---|---|
+| `audit1_confirmed.json` | the audit of the running chain: 27 of 30 findings confirmed (D88, D90) | 2026-10-17 10:06 | `a88dde838b4c95a00136cc9f8859fe938bff70d7fc8fb164eb75848f44eaa7ee` |
+| `audit1_plan.md` | the fix plan for those findings (D88, D90) | 2026-10-17 10:05 | `81cc95b0623fa713da91dae9301772d9e7461c08f8c901798290787e263dc605` |
+| `rev88_confirmed.json` | the review of d87 and d88: 9 confirmed findings (D89, D90) | 2026-10-17 14:54 | `d56445965f6ed5e66acb5048f6a93360bf9f76f78f789b79c65bb52e8ec1b65f` |
+| `weak_branch_recommendation.md` | the weak-branch analysis of antenna fault and airframe shadowing; it read validation, the already-read third test set and the code (D91) | 2026-10-17 22:58 | `1494865686a79970fe4ce49e45eb861a8cfd9e4d5f57d6d1f5299d436c5f8b4b` |
+| `overnight_audit.txt` | the overnight audit: memory, launcher defects (a)-(f), merge rules, the KPI 1 threshold across profiles (D90, D91) | 2026-10-17 23:53 | `9baee4cfaab24c4d04788b461f6bf5d43a29ebae8d554add16091b0a65c82b93` |
+| `c1p_rate.txt` | profile 1's C1p build count every 30 min, 12:20-15:20 on 2026-10-18 (D91 part 5) | 2026-10-18 15:20 | `22db5195a23bfbb93d7ec6d3649dac65e795b495ed02aad064068e49c46a9b32` |
+| `c1p_slow_model.py` | the C1p cost model of the 93 cells (D91 part 5) | 2026-10-18 12:40 | `db945ec98040848f83facbef3ddfb704feb40f2762762d47005456b83a80546b` |
+| `c1p_slow_timeline.py` | the campaign timeline built on that model (D91 part 5) | 2026-10-18 12:43 | `224760272d516c1ffc8ef0c72b71bcefb6cf161c9678b9d506535f6c9924d844` |
+| `d91_fuse_m_all.m.txt` | the M1-M4 measurement script of d91-fuse (renamed `.txt`; it is not run from here) | 2026-10-18 | `b0fa6dc8cf171e8abf061c3361c0f02fc8113fccdb71dbd258f2b510117fe398` |
+| `d91_fuse_m_p1_log.txt` | its log on profile 1's enlarged fit set (fit-set numbers, out of fold or nested; D91) | 2026-10-18 11:02 | `0ccaf4fdec4f7ec31cecb415fc3bb43dcce1d7bc47fbcf6d86b5d95f699bdd52` |
+| `d91_fuse_m_p3_log.txt` | the same on profile 3 | 2026-10-18 16:24 | `c1f7bca764e2dd96b1e47e3a2cb6cf8dc221286327cba4f8d3467ed7636e8e19` |
+
+"Run notes" in the docs are the run's dated working notes. They are kept outside the repository and are not copied. Where a log line holds the same fact, the docs cite the log line instead.

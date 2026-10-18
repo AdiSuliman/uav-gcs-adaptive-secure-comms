@@ -1,0 +1,136 @@
+2026-10-18 05:48:19 free commit 49 GB
+
+===== d91 measurements, p1, 18-Oct-2026 05:48:26: N 12, lambda 1e-03, latch 0, 3 antennas =====
+val     20328 frames,  968 sub-runs, classes of sub-runs [1 2 3 4 5 6 7 8 9 10 11], Eb/N0 [0 3 6 9 12 15] dB, K -5.0..20.0 dB (median 7.8), speed 0.4..160.9 km/h, sub-runs per (class, level, Eb/N0) cell [1 1 8 486]
+test    20328 frames,  968 sub-runs, classes of sub-runs [1 2 3 4 5 6 7 8 9 10 11], Eb/N0 [0 3 6 9 12 15] dB, K -5.0..20.0 dB (median 7.6), speed 0.1..161.0 km/h, sub-runs per (class, level, Eb/N0) cell [1 1 8 486]
+fresh   83664 frames, 3984 sub-runs, classes of sub-runs [1 2 3 4 5 6 7 8 9 10 11], Eb/N0 [0 3 6 9 12 15] dB, K -5.0..20.0 dB (median 7.4), speed 0.1..161.0 km/h, sub-runs per (class, level, Eb/N0) cell [4 6 32 486]
+fresh2  83664 frames, 3984 sub-runs, classes of sub-runs [1 2 3 4 5 6 7 8 9 10 11], Eb/N0 [0 3 6 9 12 15] dB, K -5.0..20.0 dB (median 7.1), speed 0.1..161.0 km/h, sub-runs per (class, level, Eb/N0) cell [4 6 32 486]
+  test: same class/level/Eb/N0 grid as validation: 1
+  fresh: same class/level/Eb/N0 grid as validation: 1
+  fresh2: same class/level/Eb/N0 grid as validation: 1
+  val    K bands of the sub-runs (<0, 0-5, 5-10, 10-15, >=15 dB): [0.206 0.189 0.191 0.213 0.201]
+  test   K bands of the sub-runs (<0, 0-5, 5-10, 10-15, >=15 dB): [0.198 0.194 0.207 0.207 0.194]
+  fresh  K bands of the sub-runs (<0, 0-5, 5-10, 10-15, >=15 dB): [0.201 0.193 0.201 0.208 0.197]
+  fresh2 K bands of the sub-runs (<0, 0-5, 5-10, 10-15, >=15 dB): [0.204 0.204 0.207 0.19 0.196]
+windows of 207984 frames: 3.0 min
+branch-evidence columns: 2.0 min
+validation rows of the fit set equal the validation windows: 1
+extra columns: iso_t iso_db iso_margin iso_agree gl_llr gl_db gl_age gl_margin gl_phi ps_k_weak ps_k_strong ps_k_contrast ps_sd_weak ps_sd_contrast ps_n br_w br_db br_len br_nref
+  OOF base: 12.5 min
+
+M1 shadowing: 704 sub-runs recomputed, draws equal to the stored ones in 704; hidden antenna equal to the label in 14784 of 14784 frames
+  labelled shadowing frames by real loss [5-6 6-7 7-8 8-10 >=10 dB]: n [3583 2110 1703 1968 1481], read as shadowing [70.6 83.1 88.6 91.8 92.3]%, as none [25.1 12.9 7.9 4.4 1.4]%
+  by age [0-2 3-5 6-11 12+]: n [2108 2102 4123 2512], read as shadowing [58.8 80.3 90.2 92.3]%
+  by K [<0 0-5 5-10 10-15 >=15 dB]: n [1989 2129 2153 2234 2340], read as shadowing [62.3 73.6 87.4 91.3 95.6]%
+    K [-Inf 0]: by real loss n [697 401 337 321 233], read [48.4 54.9 72.1 81.3 76.4]%
+    K [0 5]: by real loss n [749 353 305 414 308], read [56.7 76.2 83.6 83.6 88]%
+    K [5 10]: by real loss n [693 436 339 382 303], read [76.9 87.8 91.7 95.8 95.4]%
+    K [10 15]: by real loss n [722 454 366 401 291], read [80.7 94.9 96.7 96.5 97.9]%
+    K [15 Inf]: by real loss n [722 466 356 450 346], read [90 96.8 97.2 99.3 99.4]%
+  none frames of shadowing sub-runs by real loss [0-1 1-2 2-3 3-4 4-5 dB]: n [238 164 380 958 2199], read as shadowing [10.5 0.6 1.1 2.1 3.5]%
+  clean sub-runs: read as shadowing 4.14% of 10080 frames
+
+M1 antenna fault: 10870 labelled frames, recall 80.6%, read as none 15.0%
+  level x K [<0 0-5 5-10 10-15 >=15 dB]: recall % (frames; sub-runs)
+      5.0 dB:  17.9 (179; 12)   12.9 (364; 24)    7.9 (254; 16)   20.1 (204; 13)   41.0 (344; 23)  
+      8.7 dB:  33.0 (215; 14)   44.4 (284; 19)   60.9 (284; 18)   66.4 (268; 17)   72.7 (293; 20)  
+     12.4 dB:  75.5 (351; 22)   77.1 (236; 15)   87.8 (188; 12)   90.2 (307; 21)   93.2 (263; 18)  
+     16.1 dB:  82.8 (250; 16)   90.5 (285; 18)   96.8 (221; 15)   94.4 (356; 22)   98.5 (267; 17)  
+     19.9 dB:  89.2 (369; 25)   95.3 (214; 14)   96.9 (356; 22)   98.9 (262; 16)   98.9 (179; 11)  
+     23.6 dB:  88.2 (238; 15)   97.2 (352; 23)   99.0 (292; 19)   99.3 (275; 17)   99.1 (221; 14)  
+     27.3 dB:  93.1 (189; 12)   98.4 (245; 16)   99.7 (334; 22)  100.0 (334; 21)   97.8 (273; 17)  
+     31.0 dB:  95.0 (242; 17)   99.6 (241; 15)   98.8 (172; 13)   99.2 (386; 25)   99.6 (283; 18)  
+  level x age [0-2 3-5 6-11 12+]:
+      5.0 dB:   9.8 (264; 88)   25.8 (264; 88)   32.9 (520; 88)    5.4 (297; 69)  
+      8.7 dB:  42.0 (264; 88)   76.1 (264; 88)   69.8 (517; 88)   29.4 (299; 72)  
+     12.4 dB:  67.0 (264; 88)   94.3 (264; 88)   93.4 (517; 88)   75.0 (300; 65)  
+     16.1 dB:  84.5 (264; 88)   97.0 (264; 88)   96.9 (522; 88)   89.1 (329; 74)  
+     19.9 dB:  82.2 (264; 88)   97.3 (264; 88)   98.8 (520; 88)   98.2 (332; 71)  
+     23.6 dB:  91.3 (264; 88)   98.5 (264; 88)   99.0 (520; 88)   96.1 (330; 72)  
+     27.3 dB:  93.2 (264; 88)   98.9 (264; 88)   99.8 (521; 88)   99.4 (326; 76)  
+     31.0 dB:  96.6 (264; 88)   98.5 (264; 88)   98.8 (514; 88)  100.0 (282; 67)  
+  level x speed [0-23 23-60 60-120 >=120 km/h]:
+      5.0 dB:  20.3 (231; 15)   21.6 (194; 13)   19.4 (464; 30)   22.4 (456; 30)  
+      8.7 dB:  45.3 (128; 8)   58.1 (353; 23)   58.3 (568; 38)   56.6 (295; 19)  
+     12.4 dB:  77.9 (172; 12)   87.8 (263; 18)   84.3 (516; 32)   84.8 (394; 26)  
+     16.1 dB:  91.6 (226; 13)   89.2 (223; 14)   93.9 (542; 36)   93.6 (388; 25)  
+     19.9 dB:  93.0 (243; 16)   93.4 (346; 22)   98.1 (476; 29)   94.6 (315; 21)  
+     23.6 dB:  98.8 (173; 12)   98.5 (264; 17)   94.0 (531; 33)   98.3 (410; 26)  
+     27.3 dB:  96.0 (174; 12)   99.2 (393; 24)   98.0 (560; 35)   98.8 (248; 17)  
+     31.0 dB:  98.9 (190; 12)   99.0 (381; 25)   97.7 (442; 30)   99.0 (311; 21)  
+  K x age at 5-8.7 dB:
+    K [-Inf 0]:  21.8 (78; 26)   34.6 (78; 26)   34.0 (153; 26)    8.2 (85; 21)  
+    K [0 5]:  16.3 (129; 43)   34.1 (129; 43)   33.5 (251; 43)   17.3 (139; 31)  
+    K [5 10]:  22.5 (102; 34)   48.0 (102; 34)   47.8 (203; 34)   18.3 (131; 31)  
+    K [10 15]:  31.1 (90; 30)   63.3 (90; 30)   61.5 (179; 30)   21.2 (113; 27)  
+    K [15 Inf]:  37.2 (129; 43)   71.3 (129; 43)   75.3 (251; 43)   19.5 (128; 31)  
+
+M2: 480 clean sub-runs (draws equal to the stored ones in 480), 480 turning; 83 of them (17.3%) would hide an antenna at the level of their bank in 1490 of 10080 frames (14.8%); frames per level [99 428 1090 1358 1425 1464 1308 1117]
+  read as shadowing: on those frames 3.4% (1490), on the other frames of turning clean flights 4.3% (8590)
+
+M3 shadowing: 10845 shadowing and 10080 clean frames; the fusion's clean budget 4.14% (trees at 4.14% / 4.14%)
+  all               n 10845: recall fusion 82.7%, gain-only trees 79.5%, with coherence 87.4%; coherence trees - fusion +4.7 [+3.9, +5.6], coherence - gain-only +7.9 [+6.6, +9.1] points
+  age 0-2           n  2108: recall fusion 58.8%, gain-only trees 61.8%, with coherence 69.5%; coherence trees - fusion +10.8 [+8.9, +12.8], coherence - gain-only +7.7 [+6.0, +9.7] points
+  K < 0 dB          n  1989: recall fusion 62.3%, gain-only trees 53.1%, with coherence 65.0%; coherence trees - fusion +2.7 [-0.3, +5.5], coherence - gain-only +11.9 [+8.1, +15.4] points
+  K 0-5 dB          n  2129: recall fusion 73.6%, gain-only trees 64.4%, with coherence 80.9%; coherence trees - fusion +7.4 [+5.2, +9.6], coherence - gain-only +16.5 [+13.2, +19.9] points
+  real loss 5-6 dB  n  3583: recall fusion 70.6%, gain-only trees 67.1%, with coherence 77.1%; coherence trees - fusion +6.6 [+5.0, +8.2], coherence - gain-only +10.0 [+8.1, +12.1] points
+  real loss >= 8 dB n  3449: recall fusion 92.0%, gain-only trees 91.6%, with coherence 96.0%; coherence trees - fusion +4.0 [+2.7, +5.3], coherence - gain-only +4.4 [+3.0, +5.8] points
+  OOF iso: 12.2 min
+  OOF glr: 24.7 min
+  OOF held: 36.5 min
+  OOF post: 48.5 min
+  OOF branch evidence: 60.4 min
+
+M4 out of fold over 207984 frames (9904 sub-runs), KPI 1 threshold of the base reading 0 dB
+  base: macro-F1 all 94.26%, above 94.36%; F1 fault 85.80%, shadowing 84.78%; clean as a threat 2.79%, as a lost branch 1.70%
+  iso              all +0.22 [+0.16, +0.27], above +0.22 [+0.16, +0.27], clean as threat -0.06 [-0.13, +0.00], as lost branch -0.06 [-0.12, +0.00], F1 fault +1.62 [+1.21, +2.07], shadowing +0.25 [+0.06, +0.45], K<=0 fault +1.14 [+0.22, +2.18], shadowing -0.11 [-0.92, +0.57] -> rule yes
+  glr              all +0.20 [+0.14, +0.26], above +0.20 [+0.15, +0.26], clean as threat -0.07 [-0.16, +0.02], as lost branch -0.04 [-0.11, +0.03], F1 fault +1.47 [+1.11, +1.89], shadowing +0.10 [-0.13, +0.33], K<=0 fault +2.08 [+0.88, +3.35], shadowing -0.11 [-0.93, +0.78] -> rule yes
+  held             all +0.44 [+0.33, +0.55], above +0.44 [+0.33, +0.55], clean as threat -0.15 [-0.27, -0.02], as lost branch -0.15 [-0.26, -0.02], F1 fault +3.75 [+2.79, +4.67], shadowing +0.14 [-0.24, +0.55], K<=0 fault +2.13 [-0.29, +4.49], shadowing -0.52 [-2.25, +1.09] -> rule yes
+  post             all +0.03 [-0.01, +0.07], above +0.03 [-0.01, +0.07], clean as threat -0.05 [-0.12, +0.01], as lost branch -0.04 [-0.09, +0.01], F1 fault +0.15 [-0.04, +0.35], shadowing +0.03 [-0.24, +0.29], K<=0 fault +0.16 [-0.54, +0.87], shadowing -0.32 [-1.37, +0.77] -> rule no
+  branch evidence  all +0.64 [+0.52, +0.76], above +0.64 [+0.52, +0.77], clean as threat -0.29 [-0.43, -0.15], as lost branch -0.23 [-0.36, -0.10], F1 fault +5.14 [+4.16, +6.20], shadowing +0.39 [-0.02, +0.80], K<=0 fault +3.38 [+0.78, +6.07], shadowing -0.54 [-2.17, +0.96] -> rule yes
+  set val    fault F1 base 85.74%: iso +0.64, glr +1.02, held +5.40, post +0.34, branch evidence +5.65
+  set test   fault F1 base 85.73%: iso +2.06, glr +1.58, held +3.47, post -0.19, branch evidence +4.73
+  set fresh  fault F1 base 87.24%: iso +1.65, glr +1.30, held +3.04, post +0.10, branch evidence +4.48
+  set fresh2 fault F1 base 84.35%: iso +1.72, glr +1.73, held +4.17, post +0.24, branch evidence +5.80
+  fault recall 5 dB               ( 1345 frames): base 20.9%, iso 29.1%, glr 25.1%, held 44.2%, post 20.6%, branch evidence 52.0%
+  fault recall 8.7 dB             ( 1344 frames): base 56.6%, iso 60.9%, glr 62.5%, held 77.6%, post 57.3%, branch evidence 79.8%
+  fault recall K >= 10 dB         ( 4515 frames): base 86.1%, iso 89.9%, glr 88.0%, held 93.3%, post 86.6%, branch evidence 96.3%
+  fault recall K < 0 dB           ( 2033 frames): base 74.8%, iso 75.4%, glr 77.1%, held 79.3%, post 75.0%, branch evidence 79.8%
+  fault recall age >= 12          ( 2495 frames): base 75.0%, iso 74.9%, glr 76.1%, held 90.9%, post 75.4%, branch evidence 90.7%
+  fault recall age 0-2            ( 2112 frames): base 70.8%, iso 77.1%, glr 73.7%, held 71.3%, post 71.4%, branch evidence 76.6%
+  fault recall hover (< 23 km/h)  ( 1537 frames): base 77.9%, iso 80.4%, glr 79.2%, held 84.5%, post 78.1%, branch evidence 87.5%
+  nested outer fold 1: inner rule iso 1, glr 1, held 1, post 0, branch evidence 1 -> branch evidence (48.2 min)
+      inner iso              all +0.20 [+0.14, +0.26], above +0.20 [+0.14, +0.27], clean as threat -0.02 [-0.10, +0.05], as lost branch -0.02 [-0.09, +0.04], F1 fault +1.49 [+1.01, +1.99], shadowing +0.11 [-0.09, +0.31], K<=0 fault +0.56 [-0.73, +2.03], shadowing -0.16 [-0.92, +0.66]
+      inner glr              all +0.16 [+0.10, +0.23], above +0.16 [+0.11, +0.24], clean as threat -0.02 [-0.12, +0.08], as lost branch +0.01 [-0.07, +0.07], F1 fault +1.34 [+0.87, +1.84], shadowing -0.09 [-0.35, +0.17], K<=0 fault +1.74 [+0.29, +3.31], shadowing -0.81 [-1.86, +0.26]
+      inner held             all +0.43 [+0.31, +0.57], above +0.44 [+0.31, +0.57], clean as threat -0.12 [-0.26, +0.01], as lost branch -0.11 [-0.24, +0.01], F1 fault +3.72 [+2.74, +4.81], shadowing +0.13 [-0.28, +0.54], K<=0 fault +2.26 [-0.63, +5.19], shadowing -0.26 [-2.07, +1.54]
+      inner post             all +0.01 [-0.03, +0.05], above +0.00 [-0.04, +0.05], clean as threat -0.02 [-0.08, +0.05], as lost branch -0.01 [-0.07, +0.04], F1 fault -0.01 [-0.26, +0.24], shadowing -0.08 [-0.34, +0.18], K<=0 fault -0.35 [-1.31, +0.47], shadowing -0.27 [-1.35, +0.85]
+      inner branch evidence  all +0.60 [+0.47, +0.76], above +0.61 [+0.47, +0.75], clean as threat -0.26 [-0.40, -0.13], as lost branch -0.22 [-0.35, -0.09], F1 fault +5.06 [+3.96, +6.27], shadowing +0.26 [-0.20, +0.72], K<=0 fault +2.78 [-0.58, +6.04], shadowing -0.34 [-2.09, +1.30]
+  nested outer fold 2: inner rule iso 1, glr 1, held 1, post 0, branch evidence 1 -> branch evidence (93.4 min)
+      inner iso              all +0.24 [+0.18, +0.31], above +0.25 [+0.19, +0.32], clean as threat -0.07 [-0.14, +0.00], as lost branch -0.08 [-0.14, -0.01], F1 fault +1.65 [+1.17, +2.19], shadowing +0.44 [+0.18, +0.64], K<=0 fault +1.09 [-0.04, +2.33], shadowing +0.68 [-0.16, +1.43]
+      inner glr              all +0.24 [+0.17, +0.31], above +0.24 [+0.17, +0.31], clean as threat -0.11 [-0.23, +0.00], as lost branch -0.08 [-0.17, +0.00], F1 fault +1.56 [+1.13, +2.08], shadowing +0.24 [-0.02, +0.50], K<=0 fault +2.11 [+0.77, +3.74], shadowing +0.18 [-0.72, +1.15]
+      inner held             all +0.40 [+0.29, +0.54], above +0.41 [+0.30, +0.54], clean as threat -0.17 [-0.33, -0.02], as lost branch -0.18 [-0.32, -0.04], F1 fault +3.59 [+2.64, +4.65], shadowing +0.11 [-0.35, +0.56], K<=0 fault +2.52 [+0.01, +5.20], shadowing +0.02 [-1.88, +1.77]
+      inner post             all +0.03 [-0.01, +0.07], above +0.03 [-0.01, +0.07], clean as threat -0.06 [-0.12, +0.01], as lost branch -0.03 [-0.09, +0.02], F1 fault +0.17 [-0.05, +0.37], shadowing +0.05 [-0.19, +0.29], K<=0 fault -0.13 [-0.88, +0.59], shadowing -0.12 [-1.16, +0.93]
+      inner branch evidence  all +0.64 [+0.51, +0.78], above +0.64 [+0.51, +0.78], clean as threat -0.37 [-0.54, -0.20], as lost branch -0.28 [-0.43, -0.12], F1 fault +4.92 [+3.91, +6.15], shadowing +0.52 [+0.04, +0.97], K<=0 fault +3.42 [+0.75, +6.18], shadowing +0.26 [-1.57, +2.01]
+  nested outer fold 3: inner rule iso 1, glr 1, held 1, post 0, branch evidence 1 -> branch evidence (139.5 min)
+      inner iso              all +0.18 [+0.12, +0.25], above +0.19 [+0.12, +0.26], clean as threat -0.08 [-0.15, -0.01], as lost branch -0.07 [-0.13, -0.00], F1 fault +1.50 [+1.05, +2.03], shadowing +0.13 [-0.09, +0.34], K<=0 fault +1.39 [+0.15, +2.60], shadowing -0.13 [-0.95, +0.70]
+      inner glr              all +0.16 [+0.08, +0.22], above +0.16 [+0.09, +0.23], clean as threat -0.09 [-0.20, +0.02], as lost branch -0.04 [-0.12, +0.03], F1 fault +1.21 [+0.78, +1.64], shadowing +0.02 [-0.27, +0.28], K<=0 fault +2.00 [+0.45, +3.45], shadowing -0.34 [-1.38, +0.60]
+      inner held             all +0.41 [+0.28, +0.53], above +0.42 [+0.28, +0.54], clean as threat -0.21 [-0.36, -0.07], as lost branch -0.19 [-0.33, -0.04], F1 fault +3.68 [+2.55, +4.72], shadowing +0.37 [-0.06, +0.75], K<=0 fault +2.77 [-0.18, +5.22], shadowing -0.20 [-2.04, +1.42]
+      inner post             all +0.01 [-0.03, +0.06], above +0.01 [-0.04, +0.05], clean as threat -0.09 [-0.16, -0.03], as lost branch -0.03 [-0.10, +0.02], F1 fault +0.15 [-0.08, +0.39], shadowing -0.03 [-0.35, +0.25], K<=0 fault +0.16 [-0.76, +1.10], shadowing -0.60 [-1.93, +0.57]
+      inner branch evidence  all +0.64 [+0.50, +0.77], above +0.65 [+0.51, +0.78], clean as threat -0.34 [-0.50, -0.18], as lost branch -0.25 [-0.41, -0.10], F1 fault +5.14 [+3.91, +6.31], shadowing +0.60 [+0.15, +1.05], K<=0 fault +4.10 [+1.06, +6.89], shadowing -0.19 [-1.96, +1.70]
+  nested outer fold 4: inner rule iso 1, glr 1, held 1, post 1, branch evidence 1 -> branch evidence (186.9 min)
+      inner iso              all +0.26 [+0.20, +0.32], above +0.26 [+0.20, +0.32], clean as threat -0.09 [-0.16, -0.00], as lost branch -0.03 [-0.10, +0.03], F1 fault +1.73 [+1.24, +2.21], shadowing +0.45 [+0.23, +0.63], K<=0 fault +1.20 [+0.26, +2.15], shadowing +0.79 [-0.04, +1.48]
+      inner glr              all +0.19 [+0.12, +0.25], above +0.19 [+0.12, +0.25], clean as threat -0.11 [-0.21, -0.01], as lost branch -0.06 [-0.13, +0.02], F1 fault +1.45 [+1.03, +1.87], shadowing +0.15 [-0.11, +0.44], K<=0 fault +1.52 [+0.27, +2.80], shadowing +0.31 [-0.71, +1.41]
+      inner held             all +0.43 [+0.31, +0.56], above +0.44 [+0.31, +0.56], clean as threat -0.20 [-0.33, -0.06], as lost branch -0.19 [-0.33, -0.05], F1 fault +3.67 [+2.61, +4.76], shadowing +0.24 [-0.25, +0.65], K<=0 fault +1.47 [-0.99, +4.17], shadowing +0.01 [-1.60, +1.54]
+      inner post             all +0.05 [+0.01, +0.10], above +0.05 [+0.00, +0.10], clean as threat -0.07 [-0.13, -0.00], as lost branch -0.02 [-0.06, +0.03], F1 fault +0.32 [+0.06, +0.56], shadowing +0.07 [-0.23, +0.35], K<=0 fault +0.19 [-0.58, +0.99], shadowing -0.10 [-1.26, +1.03]
+      inner branch evidence  all +0.66 [+0.53, +0.78], above +0.66 [+0.53, +0.78], clean as threat -0.32 [-0.48, -0.17], as lost branch -0.23 [-0.38, -0.09], F1 fault +5.16 [+4.04, +6.29], shadowing +0.54 [+0.04, +0.95], K<=0 fault +2.60 [+0.17, +5.41], shadowing -0.17 [-1.99, +1.44]
+  nested outer fold 5: inner rule iso 1, glr 1, held 1, post 0, branch evidence 1 -> branch evidence (234.6 min)
+      inner iso              all +0.22 [+0.16, +0.29], above +0.22 [+0.16, +0.29], clean as threat -0.08 [-0.15, -0.01], as lost branch -0.07 [-0.13, -0.01], F1 fault +1.68 [+1.17, +2.21], shadowing +0.35 [+0.09, +0.58], K<=0 fault +0.59 [-0.50, +1.65], shadowing +0.88 [-0.03, +1.74]
+      inner glr              all +0.18 [+0.11, +0.25], above +0.18 [+0.11, +0.25], clean as threat -0.08 [-0.19, +0.01], as lost branch -0.04 [-0.11, +0.04], F1 fault +1.51 [+1.05, +2.02], shadowing +0.00 [-0.30, +0.28], K<=0 fault +1.58 [+0.10, +2.89], shadowing -0.50 [-1.62, +0.47]
+      inner held             all +0.46 [+0.33, +0.60], above +0.47 [+0.34, +0.60], clean as threat -0.17 [-0.33, -0.02], as lost branch -0.14 [-0.28, +0.01], F1 fault +4.28 [+3.22, +5.38], shadowing +0.23 [-0.26, +0.67], K<=0 fault +1.90 [-0.56, +4.64], shadowing +0.36 [-1.61, +2.24]
+      inner post             all +0.01 [-0.04, +0.05], above +0.00 [-0.04, +0.04], clean as threat -0.07 [-0.13, -0.00], as lost branch -0.04 [-0.09, +0.02], F1 fault +0.18 [-0.08, +0.42], shadowing -0.06 [-0.32, +0.21], K<=0 fault +0.19 [-0.65, +1.06], shadowing -0.51 [-1.58, +0.77]
+      inner branch evidence  all +0.65 [+0.53, +0.79], above +0.65 [+0.52, +0.79], clean as threat -0.34 [-0.51, -0.18], as lost branch -0.24 [-0.40, -0.09], F1 fault +5.60 [+4.40, +6.81], shadowing +0.49 [+0.00, +0.96], K<=0 fault +2.22 [-0.64, +4.81], shadowing +0.11 [-1.73, +2.24]
+  NESTED selection against the base: all +0.64 [+0.52, +0.76], above +0.64 [+0.52, +0.77], clean as threat -0.29 [-0.43, -0.15], as lost branch -0.23 [-0.36, -0.10], F1 fault +5.14 [+4.16, +6.20], shadowing +0.39 [-0.02, +0.80], K<=0 fault +3.38 [+0.78, +6.07], shadowing -0.54 [-2.17, +0.96] -> rule yes
+  on the whole fit set the rule picks: branch evidence; nested picks per outer fold: branch evidence, branch evidence, branch evidence, branch evidence, branch evidence
+  VERDICT p1: adopt branch evidence
+##### m_all p1 done 18-Oct-2026 11:02:35
+2026-10-18 11:02:41 ##### done rc=0
