@@ -1,5 +1,7 @@
 # v7 plan (worktree C:/Users/Adi Suliman/uav-gcs-v7, branch v7-dev from v6 7dfe444)
 
+**Note 2026-10-18:** this is the plan of 2026-10-01, kept as written. What was built and why is in docs/DECISIONS.md D73-D91; the run status is in docs/ROADMAP.md.
+
 Approved by Adi 2026-10-01. Everything goes into training (except held-out triples / unseen-threat tests).
 Full runs start only after v6 ends. Code + smoke tests now (serial smoke, light CPU).
 
