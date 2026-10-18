@@ -17,8 +17,11 @@ not read. Every number below is a fit-set number (out of fold, or nested), never
 | Code behind `FUSION_REV` (off: bit-identical) | done, section 1; bit-identity shown, section 2 |
 | Enlarged fit set (`FUSION_FIT = 'enlarged'`) | done, section 3; grids checked (M4 check) |
 | Adoption rule, fixed before the M4 numbers | section 4 |
-| M1-M4 on both profiles | detached run; numbers and verdicts in section 5 |
-| Focused tests | 5 of 5 pass, section 6 |
+| M1-M4 on both profiles | done: adopt 'branch evidence' on both profiles, section 5 |
+| phi against phi = 1 | declared before it ran (section 8, commit 5abf87d); queued, results in section 12 |
+| Deployment tied to the measured pick | `fusion_pick.m`, `select_fusion.m`, section 9 |
+| Closed-loop wrap check | queued on the d90 smoke pools, section 10 |
+| Focused tests | 5 of 5 pass (section 6); the new and changed ones queued |
 
 ## 1. The revision: four column groups, computed from `gain_ant` only
 
@@ -32,21 +35,39 @@ onset latch's lesson, d87).
 | Group | Columns | What it is | Sources |
 |---|---|---|---|
 | (a) iso | `iso_t iso_db iso_margin iso_agree` | d90's columns, unchanged: per antenna the best split of its offset to the others' median, the largest t over all antennas, not the antenna weakest by its mean | Xie et al. 2021, Sec. III-I (detection-isolation) |
-| (b) held | `br_w br_db br_len br_nref` | `branch_ref.m`: each antenna's power over the others' mean (linear), its reference the linear mean of the last 10 reference cycles, a one-sided window-limited CUSUM of a drop below it, the reference held while a drop is under test | Xie et al. 2021, eq. 2-3 (CUSUM) and Sec. II-D1 (b = abs(log alpha)); Xie, Moustakides & Xie 2022, eq. 6-7 (WL-CUSUM); Lee 1985, Sec. IV (linear local mean; Rayleigh as the worst case); `drop_ref.m` (hold and release) |
-| (c) glr | `gl_llr gl_db gl_age gl_margin gl_phi` | per antenna the exponential GLR of a drop of its power over the others' mean at an unknown cycle of the window, n log m - n1 log m1 - n2 log m2, one-sided, times the share of independent cycles phi; the largest over the antennas | Xie et al. 2021, eq. 20 (GLR-CUSUM, one-parameter exponential families); Xie, Moustakides & Xie 2022, eq. 9 (window-limited GLR); Lee 1985, Sec. IV (correlated samples count less) |
-| (d) post | `ps_k_weak ps_k_strong ps_k_contrast ps_sd_weak ps_sd_contrast ps_n` | the K and spread cues over the cycles after that antenna's split (at least 3, else the whole window); with no drop, the weakest antenna over the whole window, which equals the base columns | Aoki & Honda 2025, eq. 2 (the moment K assumes a stationary sample) |
+| (b) held | `br_w br_db br_len br_nref` | `branch_ref.m`: each antenna's power over the others' mean (linear), its reference the linear mean of the last 10 reference cycles, a one-sided window-limited CUSUM of a drop below it, the reference held while a drop is under test | Xie et al. 2021, eq. 2-3 (CUSUM) and Sec. II-D1 (b = abs(log alpha), asymptotic, alpha a false-alarm rate; here a frame share, see below); Xie, Moustakides & Xie 2022, eq. 6-7 (WL-CUSUM); Lee 1985, Sec. IV, eq. 31 (the local mean; 36 uncorrelated samples for +-1 dB at 90%); the cap W <= 2 b has no source; `drop_ref.m` (hold and release) |
+| (c) glr | `gl_llr gl_db gl_age gl_margin gl_phi` | per antenna the exponential GLR of a drop of its power over the others' mean at an unknown cycle of the window, n log m - n1 log m1 - n2 log m2, one-sided, times the share of independent cycles phi; the largest over the antennas | an exponential change-point GLR with the means before and after the change both unknown (estimated in the window), adapted from Xie et al. 2021, eq. 20 and Xie, Moustakides & Xie 2022, eq. 9, which assume a known pre-change density; phi has no library source (Lee 1985, Sec. IV, says only that correlated samples count less) |
+| (d) post | `ps_k_weak ps_k_strong ps_k_contrast ps_sd_weak ps_sd_contrast ps_n` | the K and spread cues over the cycles after that antenna's split (at least 3, else the whole window); with no drop, the weakest antenna over the whole window, which equals the base columns | Aoki & Honda 2025, eq. 2 (the moment K assumes a stationary sample) and Sec. 3.4 (with few samples its error can be large; here as few as 3 cycles) |
 
 **Fixed settings (not tuned):** 10 reference cycles (the monitor's reference,
 `policy_monitor.m`); the first 3 cycles join the reference as they come (the latch's "at least 3
 earlier cycles", `onset_shape.m`); the drop's size estimated over the last `C.cusum_win` = 3
 cycles and held in the antenna fault's levels of the envelope, 5-31 dB (`decision_config.m`, as
 `drop_cusum.m` holds the path loss's); alpha = 1.87%, the deployed fusion's share of clean frames
-read as a lost branch on profile 1's validation (used for both profiles; it only decides whether
-an excursion's cycles join the reference).
+read as a lost branch on profile 1's validation (117 of 6,270 frames; used for both profiles; it
+only decides whether an excursion's cycles join the reference).
+
+**What the sources support, and what they do not.**
+- b = |log alpha| is the threshold Xie et al. 2021, Sec. II-D1 give asymptotically (alpha -> 0)
+  for a false-alarm rate alpha = 1/ARL (eq. 6-7). Here alpha is a frame share (clean frames read
+  as a lost branch), used as the per-cycle false-alarm rate. That is an analogy, not the source's
+  quantity.
+- The cap W <= 2 b has no source.
+- The GLR of group (c) estimates the mean before the change in the window as well as the mean
+  after it. Xie et al. 2021, eq. 20 and Xie, Moustakides & Xie 2022, eq. 9 assume a known
+  pre-change density, so the form here is adapted from them, not taken from them.
+- Lee 1985, Sec. IV, eq. 31 averages the envelope r and needs at least 36 uncorrelated samples
+  for the local mean to be within +-1 dB at 90%. The held reference averages NR = 10 cycles of
+  linear power. For 10 independent exponential powers the 90% interval of their mean is
+  -2.7/+2.0 dB about the true mean (chi-square with 20 degrees of freedom; computed, not a
+  library number), and wider when the cycles are correlated (hover).
+- The exponential power (Rayleigh fading) is the likelihood model. It is an assumption, not a
+  sourced worst case.
 
 **Effective sample count for hover.** phi = (1 - rho) / (1 + rho), rho the median over the
 antennas of the lag-1 correlation of each antenna's power over the window (at least 0). It scales
-the GLR and each CUSUM step.
+the GLR and each CUSUM step. It has no library source and was not compared with phi = 1 in
+section 5; the comparison is declared in section 8.
 
 **Sources that are missing from the library (said plainly):**
 - The variance of the log of an exponential variable (pi^2/6, so averaging in dB is about 61%
@@ -54,7 +75,9 @@ the GLR and each CUSUM step.
   because the exponential likelihood is the model of Xie et al. 2021, eq. 20, not for an
   efficiency claim.
 - The first-order autoregressive form of phi. No time-series text is in the library. Lee 1985,
-  Sec. IV supports only that correlated cycles carry fewer independent samples.
+  Sec. IV supports only that correlated cycles carry fewer independent samples. rho is also
+  computed on the raw power about the window mean, so a step inside the window raises it.
+  Section 8 compares phi with phi = 1.
 - Hastie, Tibshirani & Friedman (one-standard-error rule), already flagged in d90.
 
 **Selection code.** `select_fusion.m` (FUSION_REV): the candidates are cfar (d90) and the branch
@@ -86,23 +109,45 @@ over sub-runs (stream seed 9101), never splitting one.
 Checks:
 - **M4 check (grids).** Every read set has validation's classes, level grid per class and Eb/N0
   grid (0-15 dB), K over -5 to 20 dB in five near-equal bands, speeds 0.1-161 km/h (section 5
-  per profile). The second and third sets hold 4 sub-runs per cell where validation and the first
-  split hold 1 (the datasets' design).
+  per profile). Sub-runs per (class, level, Eb/N0) cell, min/median/max over 486 cells: 1/1/8 in
+  validation and the first split, 4/6/32 in the second and third sets (`m_p1.log`, `m_p3.log`;
+  the datasets' design).
 - **The extracted copies are the stored readings.** The deployed fusion re-applied to each read
   set reproduces its stored reading exactly (monitor and fused class, 100.000% of frames, both
   profiles).
 - **`fit_sets.m` against the copies (P1).** Runs, positions, labels, gains, branch records, idle
-  records and K equal; the detector's probabilities agree to 3e-8 (the copies store single
-  precision).
+  records and K were equal, and the detector's probabilities agreed to 3e-8 (the copies store
+  single precision). That run (`check_fit_sets.m`) printed to the console only; no log of it was
+  saved, so the figure is not cited as evidence. It reads profile 1's live worktree, so it is
+  rerun with a log only when profile 1 runs no MATLAB. The extracts themselves are checked by
+  the line above (`extract_p1.log`, `extract_p3.log`).
 
 Consequence: once the fusion is fitted on this set, the B3, B3n and B3m readings are in-sample.
 KPI 1 is then read on the fourth test set only.
 
 ## 4. Adoption rule (fixed before the M4 numbers were read)
 
-The rule was coded in `fusion_adopt.m` ('branch') before any fit-set reading existed. The
-measurement script was first run on every 20th sub-run as a code check. Those numbers are not
-used, and the rule was not changed after it.
+The rule was coded in `fusion_adopt.m` ('branch') before any fit-set reading existed. Only file
+times prove the order before the first commit. The timeline (18.10, local time; files in the
+scratchpad folder `d91_fuse` unless a path is given):
+
+| Time | Event |
+|---|---|
+| 05:15:41 | `code/detection/fusion_adopt.m` last written (the rule; unchanged since: sha256 of the file as run `159dd59cc51fcfaebb1de5e0c1f6a3e2e5a6fd043dbfef90b1df7a5156edd6f3`, git blob `f31285a3`) |
+| 05:38:53 | `m_all.m` last written (by `ed3.py`; unchanged since: sha256 `b0fa6dc8cf171e8abf061c3361c0f02fc8113fccdb71dbd258f2b510117fe398`, git blob `d36747ff`) |
+| 05:39:10 | the code check starts: `m_all('p1', true)`, every 20th sub-run |
+| 05:39:16 | `branch_ref.m` header comment edited (`ed4.py`, comment only) while the check ran its windows |
+| 05:47:47 | the code check ends: `quick_p1.log` holds the full M4 table, the nested picks and the line **`VERDICT p1: adopt branch evidence`** |
+| 05:48:26 | the full measurement starts (`m_p1.log` header; `job_m.sh` 05:48:15) |
+| 05:48:34 | commit `ad3cde8`: the code, the rule included, as the measurement loaded it |
+| 05:51:15 | commit `21d1a62`: this note with section 4 |
+
+So the code check reached a verdict before the rule was committed, but after both the rule
+(05:15:41) and the measurement script (05:38:53) were last written. The rule's file and the
+script are byte-identical to what ran (the hashes above). The check's numbers are not used.
+Verbatim copies: `docs/d91_fuse_m_all.m.txt` and `docs/d91_fuse_quick_p1.log.txt` (sha256
+`3cda6fc2690c570e88c787d35e95b348f9989a7476512d9881c488e90b814a09`); `m_p1_quick.mat` stays in the scratchpad folder (sha256
+`e55c8e3f85325c5a07afa7e039a1295246ce1a525b56f4c7eacbbc1cd500a375`).
 
 A branch variant (or the selection procedure, nested) is adopted for a profile only if, against
 the deployed fusion's design refitted on the same folds (N 12, lambda 1e-3, the deployed target
@@ -403,13 +448,18 @@ pool). All pass:
   combination with cfar, and the paired bootstrap's point values against direct counts.
 - `test_window_cues_extra`, `test_fusion_target_age` (d90) pass unchanged.
 - `test_seed_streams_disjoint` additionally checks the selection's resampling streams (61, 62,
-  9101, 9102). No simulation seed was added.
+  9101, 9102). No simulation seed was added. That check compared them only with a fixed list;
+  it now also checks them, and the measurement's streams (section 11), against every flight
+  stream of the test: none shared, all below the lowest (queued, section 9).
 
 ## 7. If a profile adopts: what deployment takes
 
-1. `run_stage.m` `run_one`: `FUSION_REV = true; FUSION_FIT = 'enlarged';` before `select_fusion`.
-   B2F then reads the three test sets by HDF5 (the images in blocks). It costs about as much as
-   the out-of-fold part of section 5: hours, not the 6-10 min of today's B2F.
+1. `run_stage.m` `run_one`: `FUSION_REV = true; FUSION_FIT = 'enlarged';` before `select_fusion`
+   (in the deploy commit, with the fourth set's `kpi1_set` switch, `docs/d91_set4.md` step 2).
+   B2F then deploys `fusion_pick.m` without choosing again (section 9). It reads the three test
+   sets by HDF5 (the images in blocks) and fits two variants out of fold: about an hour, not the
+   6-10 min of today's B2F. The smoke has no third test set, so the smoke's B2F needs
+   `FUSION_FIT` off.
 2. Rerun B3, B3a, B4 and B4s. They are in-sample on the read sets and are kept only as
    descriptions.
 3. Read KPI 1 once, on the fourth test set (FRESH_SET = 3, the d91-set4 track).
@@ -455,3 +505,151 @@ pass the keep rule.
 
 The verdict line is printed by the job, per profile and for both together. The pick goes
 into `fusion_pick.m`, which `select_fusion.m` deploys (section 9).
+
+## 9. Deployment tied to the measured pick
+
+The pick of section 5 was measured on one design: N 12, lambda 1e-3, the deployed target rule
+(a path-loss onset is the target while pos - onset < N), the four branch groups, no cfar. B2F's
+revised selection by itself would choose again: it uses d90's target rule (N - 1), and it can
+add cfar or the combination 'cfar and X'. Neither of those was measured on the enlarged set, so
+B2F now deploys exactly the measured design.
+
+- **`fusion_pick.m`** holds the design: name, its columns (`cues`), N, lambda, the target rule
+  ('N') and where the verdict is recorded. It is the one place the phi verdict of section 8
+  changes (to `'branch evidence, phi = 1'` with `cues.phi1 = true`).
+- **`select_fusion.m`.** With `FUSION_REV` and `FUSION_FIT = 'enlarged'` it takes
+  `fusion_pick()` (or `FUSION_PICK` when the caller gives one) and never runs
+  `fusion_adopt('choose')`. The measured N and lambda replace validation's own choice, which is
+  printed beside. The target is `FM.target_age = N`, the deployed rule. With these, on the
+  enlarged set's folds (seed 9101) and bootstrap (seed 9102), it refits the base and the design
+  out of fold and checks the rule of section 4 on the target it deploys. If the rule fails, B2F
+  stops with `select_fusion:pick_rule`, which is a no-go. On profiles 1 and 3 this reproduces
+  section 5's 'branch evidence' row, up to the precision of the extracts (their probabilities
+  are single precision; B2F scores in double).
+- **`data/fusion.mat`** also holds:
+  - `fusion_rev = fusion_rev_id('enlarged')`, the id the fourth set's B3r requires
+    (`docs/d91_set4.md`, step 2; `fusion_rev_id.m` is byte-identical to `d91-set4`'s, so the
+    merge has no conflict);
+  - `deployed_pick`, the design with its rule check (`check`, the paired comparison).
+
+  Without `FUSION_REV` the file keeps its old layout, so section 2's bit-identity holds. With
+  `FUSION_REV` alone (validation fit, no pick) the d90 selection runs as before and records
+  `fusion_rev_id('validation')`.
+- **phi = 1 option.** `opt.phi1 = true` fixes phi at 1 in `window_cues.m` (`branch_glr`, without
+  the `gl_phi` column) and in `branch_ref.m` (`'init'` and `'run'` take it). `fuse_classes.m`
+  and `policy_monitor.m` pass it on, so every reader builds the same row. Without the field
+  nothing changes, so section 5's columns are rebuilt bit for bit (`m_phi.m` checks this before
+  it reuses them).
+- **Profile 2 is not covered.** `fusion_pick.m` was measured on profiles 1 and 3 only. In
+  profile 2's chain B2F runs before B3n and B3m have built its second and third test sets, so
+  its enlarged fit set does not exist then. Profile 2 needs its own decision: measure there
+  first, or deploy only after its test sets exist. Either way the rule check above is its
+  guard.
+- **Tests (queued, section 6):**
+  - `test_fusion_pick_deploy` (new) checks the pick, the revision ids, and that select_fusion
+    takes the pick, asserts the rule and never reaches 'choose' when it has a pick;
+  - `test_branch_evidence_cues` adds phi = 1: the unscaled GLR, the columns without `gl_phi`,
+    the held CUSUM step by step equal to the batch run, and the monitor equal to
+    `fuse_classes` with phi = 1;
+  - `test_fusion_target_age` reads the new save lines;
+  - `test_seed_streams_disjoint` compares the resampling streams with the flight streams.
+
+  The wrap job also runs the pick path once on the smoke data, as a code check: it either
+  saves the file or stops at the rule check. Smoke numbers are not results.
+
+## 10. Closed-loop wrap check
+
+**The mechanism.**
+- A closed-loop episode plays its geometry's pool frames cyclically. `link_env.m`
+  `draw()` reads row `mod(k0 + t, n) + 1`, with n = `F_SUB` = 20 frames per geometry
+  (`build_policy_pools.m`).
+- An episode lasts T = 30 decisions (`train_dqn.m`, `H.T`). The decision of cycle t reads frame
+  k0 + t - 1, and k0 is drawn in 0..19.
+- So every episode except a rolling-in flight jumps from frame 20 back to frame 1 at cycle
+  tw = 21 - k0, and again at cycle 41 - k0 when k0 >= 11. A rolling-in flight instead cycles
+  over its last 10 frames past its run's end.
+- At the jump, every antenna's gain is that of a frame 19 cycles earlier: 0.38 s back in the
+  flight.
+
+**What it can do to a monitor.** The fading itself is not the issue at speed. At 2.4 GHz
+(wavelength 0.125 m) the coherence time is about 0.423 / f_D (Clarke model, a standard
+approximation, not from the library). That is 8 ms at 23 km/h, below one 20 ms cycle, so
+consecutive cycles are already nearly independent fades and the jump looks like any other cycle.
+In hover (0.1-23 km/h) consecutive cycles share a fade, and the jump replaces it by one 19
+cycles away. Any monitor that compares the latest cycles with a reference then sees a change:
+- the held reference and its CUSUM (`branch_ref.m`);
+- the fusion's window cues;
+- the Eb/N0 drop alarm (`drop_cusum.m`, `drop_ref.m`).
+
+**The check (queued; d90 smoke pools only, no live data).** `wrap_check.m` runs on a copy of
+`scratchpad/d90_smoke/data` and reports three things:
+- A. The jump in the pools' gains (frame 20 to 1) against consecutive frames, per antenna and
+  for the branch ratio, by speed band.
+- B. The held CUSUM alone, on the gains as an episode plays them for every k0, with phi as is
+  and phi = 1.
+- C. The whole monitor at no_action, on the clean validation episodes the false-alarm readings
+  use (`clean_world.m`, `clean_wide_specs.m`, frame seeds 41000 + batch). It runs three
+  monitors: the deployed smoke fusion, and the revision with phi as is and with phi = 1, each
+  fitted on the smoke validation split.
+
+The quantities:
+- per cycle relative to the jump, the clean cycles read as a lost branch and as an antenna
+  fault, drop alarms, any alarm and confirmed alarms;
+- the rate within 11 cycles after the jump less the rate before it, over cycles t >= 13 (the
+  fusion's window and the held reference full), stratified by t, with a 95% interval of a
+  bootstrap over episodes (seed 9161), for hover and faster flights apart;
+- antenna-fault recall within 11 cycles of the jump and elsewhere (seed 4400 episodes).
+
+The smoke detector is reduced, so C's levels are not results. Its question is whether the jump
+moves the rates at all. A and B depend only on the pools' simulated gains, which the smoke
+builds as the profiles do.
+
+**If the jump raises alarms: the fix belongs in the environment, not the detector.** None is
+implemented here.
+
+| Option | What it does | Cost | Physically |
+|---|---|---|---|
+| (a) Longer pools, F_SUB >= max(k0) + T + 1 = 50 | every episode reads consecutive frames of one flight | every pool rebuilt (C1p, the clean, check and edge pools) at 2.5 times the frames: days per profile, on the critical path | exact |
+| (b) Ping-pong playback (1..20, 19..1, 2..20, ...) | the gains stay continuous at the turn | `link_env.m` only (and its coded-packet pairing, `obs.pkt`); no pool rebuilt; the closed loop rerun from C1d on, which the deployment reruns anyway (section 7, step 4) | the fading's second-order statistics are time-reversible (an even autocorrelation), so the reversed run is a valid continuation. The slow parts reverse too (attitude in a turn, range drift up to 18 m per 0.4 s at 161 km/h), and hover repeats recent fades. |
+| (c) T <= n - k0 | no jump | none | changes the closed loop's protocol (episode length and start diversity); not recommended |
+
+**Bias of the existing closed-loop results, if the jump raises alarms.** All of these read
+T = 30 episodes on 20-frame pools: train_dqn, choose_drop_threshold (monitor_trace),
+evaluate_policies and the edge map. Clean false alarms (KPI 6) would be overstated, which is
+conservative. The drop alarm's threshold, chosen against a false-alarm bound on clean
+episodes, would be set higher than the link needs, so detection delays would be pessimistic.
+Every monitor sees the same jump, so the comparisons stay paired. A monitor that is more
+sensitive to steps, such as the held revision, would pay more. The size comes from C: no
+measurable excess means no change is needed.
+
+<!-- WRAP RESULTS -->
+Pending: `wrap_check.txt` of the queue (`C:\Users\Adi Suliman\d91q\wrap\`).
+<!-- END WRAP -->
+
+## 11. Resampling streams
+
+| Seed | Where | What |
+|---|---|---|
+| 61, 62 | `select_fusion.m` | folds of the validation sub-runs; bootstrap over them |
+| 9101 | `select_fusion.m` (enlarged), `m_all.m`, `m_phi.m` | folds of the enlarged fit set's sub-runs |
+| 9102 | the same | paired bootstrap over sub-runs, 1,000 resamples |
+| 9103 | `m_all.m` M3 | bootstrap of the shadowing bound |
+| 9111-9115 | `m_all.m` M4 nested | inner bootstraps (500), one per outer fold |
+| 9131-9135, 9141-9145 | `m_all.m` M3 | `rng(9120 + 10 j + k, 'twister')` of the bagged trees (j = 1 gain-only, 2 with coherence; k the fold) |
+| 9151-9155 | `m_phi.m` nested | inner bootstraps (500), one per outer fold |
+| 9161 | `wrap_check.m` | bootstrap over the smoke episodes (smoke only) |
+
+All of them lie below 64 x 700 001, the lowest flight stream (`seed_base.m`, `pool_seed.m`).
+`test_seed_streams_disjoint` checks them against every flight stream of the test. The wrap
+check's frame draws reuse the readings' own seeds (41000 + batch for the clean episodes, 4400
+and 4500 + batch for the threat episodes, as `choose_drop_threshold.m`), so it flies the same
+frames as those readings.
+
+## 12. phi: results
+
+The job (`m_phi.m`, verbatim in `docs/d91_fuse_m_phi.m.txt`) appends its log here when it ends.
+The verdict is mechanical from section 8.
+
+<!-- PHI RESULTS -->
+Pending.
+<!-- END PHI -->

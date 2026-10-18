@@ -78,20 +78,24 @@ function [x, names] = window_cues(G, Fw, Iw, Bw, varargin)
 %     second largest, iso_agree 1 when it is the weakest by its mean as above.
 %   opt.glr = true, one branch's drop against the others in linear power: per antenna its
 %     power over the mean of the others' per cycle, r (a common change of our level cancels),
-%     and the window-limited generalized likelihood ratio of a drop of r's mean at an unknown
-%     cycle (Xie et al. 2021, eq. 20; the window-limited form, Xie, Moustakides & Xie 2022,
-%     eq. 9), fading power exponential about its mean (Rayleigh, the worst case):
+%     and the generalized likelihood ratio of a drop of r's mean at an unknown cycle of the
+%     window, both the mean before and the mean after it unknown and estimated in the window:
+%     an exponential change-point GLR adapted from Xie et al. 2021, eq. 20, and its
+%     window-limited form, Xie, Moustakides & Xie 2022, eq. 9 (both with a known pre-change
+%     density), the power taken as exponential about its mean (Rayleigh, an assumption):
 %     n log m - n1 log m1 - n2 log m2 over the splits whose later mean m2 is below the
 %     earlier m1 (m the window's), times phi = branch_ref('eff', P), the share of
-%     independent cycles (hover repeats one fade, Lee 1985, Sec. IV); the largest over the
-%     antennas (the branch that steps, not the weakest by its mean: detection-isolation,
-%     Xie et al. 2021, Sec. III-I). gl_llr that ratio, gl_db 10 log10(m1 / m2), gl_age the
-%     cycles since the split, gl_margin the ratio less the largest of the other antennas,
-%     gl_phi phi.
+%     independent cycles (no library source; hover repeats one fade, Lee 1985, Sec. IV); the
+%     largest over the antennas (the branch that steps, not the weakest by its mean:
+%     detection-isolation, Xie et al. 2021, Sec. III-I). gl_llr that ratio, gl_db
+%     10 log10(m1 / m2), gl_age the cycles since the split, gl_margin the ratio less the
+%     largest of the other antennas, gl_phi phi. opt.phi1 = true: phi fixed at 1 here and in
+%     the held columns' CUSUM, without gl_phi.
 %   opt.post = true, the branch cues of the Rician K and the spread above taken over the
 %     cycles from that split on (at least 3, else the whole window), on the antenna gl_llr
 %     picks (the weakest by its mean where no antenna drops): the moment K assumes a
-%     stationary sample (Aoki & Honda 2025, eq. 2), which a window across a step is not.
+%     stationary sample (Aoki & Honda 2025, eq. 2), which a window across a step is not;
+%     over few cycles its error can be large (Aoki & Honda 2025, Sec. 3.4).
 %     ps_k_weak, ps_k_strong (the others' mean), ps_k_contrast, ps_sd_weak, ps_sd_contrast
 %     [dB], ps_n the share of the window's cycles used.
 %   opt.held = true, the held reference of every branch and its drop's window-limited CUSUM
@@ -209,7 +213,7 @@ n = {};
 if isempty(opt), return; end
 if isfield(opt, 'cfar') && ~isempty(opt.cfar), n = [n, {'cf_crest_hi', 'cf_spread_hi', 'cf_crest_ex', 'cf_crest_now'}]; end
 if isfield(opt, 'iso') && opt.iso, n = [n, {'iso_t', 'iso_db', 'iso_margin', 'iso_agree'}]; end
-if isfield(opt, 'glr') && opt.glr, n = [n, {'gl_llr', 'gl_db', 'gl_age', 'gl_margin', 'gl_phi'}]; end
+if isfield(opt, 'glr') && opt.glr, n = [n, {'gl_llr', 'gl_db', 'gl_age', 'gl_margin'}]; if ~phi1(opt), n = [n, {'gl_phi'}]; end, end
 if isfield(opt, 'post') && opt.post, n = [n, {'ps_k_weak', 'ps_k_strong', 'ps_k_contrast', 'ps_sd_weak', 'ps_sd_contrast', 'ps_n'}]; end
 if isfield(opt, 'held') && opt.held, n = [n, branch_ref('names')]; end
 end
@@ -251,11 +255,12 @@ end
 if isfield(opt, 'iso') && opt.iso, k = k + 4; end
 gl = isfield(opt, 'glr') && opt.glr; ps = isfield(opt, 'post') && opt.post;
 if (gl || ps) && nr > 1
-    [L, a, s, db, mg, phi] = branch_glr(double(G));
-    if gl, x(:, k + (1:5)) = [L, db, (n - s + 1) .* (L > 0), mg, phi]; k = k + 5; end
+    [L, a, s, db, mg, phi] = branch_glr(double(G), phi1(opt));
+    c = [L, db, (n - s + 1) .* (L > 0), mg, phi]; c = c(:, 1:5 - phi1(opt));
+    if gl, x(:, k + (1:size(c, 2))) = c; k = k + size(c, 2); end
     if ps, x(:, k + (1:6)) = post_split(double(G), a, s, L > 0); k = k + 6; end
 elseif gl || ps
-    k = k + 5 * gl + 6 * ps;
+    k = k + (5 - phi1(opt)) * gl + 6 * ps;
 end
 if isfield(opt, 'held') && opt.held
     if nargin < 5 || size(H, 2) ~= numel(branch_ref('names')), error('window_cues: the held columns (branch_ref.m) are missing'); end
@@ -264,13 +269,14 @@ end
 x(~isfinite(x)) = 0;
 end
 
-function [L, a, s, db, mg, phi] = branch_glr(G)
+function [L, a, s, db, mg, phi] = branch_glr(G, one)
 % Per window the largest one-sided exponential GLR of one antenna's power over the others'
-% mean (see the header), times phi: its value, antenna, split (first cycle after), drop [dB],
-% margin over the other antennas, phi. Without a drop: 0, the weakest antenna by its mean.
+% mean (see the header), times phi (1 with one): its value, antenna, split (first cycle
+% after), drop [dB], margin over the other antennas, phi. Without a drop: 0, the weakest
+% antenna by its mean.
 [E, nr, n] = size(G);
 P = 10 .^ (G / 10);
-phi = branch_ref('eff', P);
+phi = ones(E, 1); if ~one, phi = branch_ref('eff', P); end
 La = zeros(E, nr); Sa = ones(E, nr); Da = zeros(E, nr);
 for b = 1:nr
     r = reshape(P(:, b, :), E, n) ./ max(reshape(mean(P(:, setdiff(1:nr, b), :), 2), E, n), realmin);
@@ -291,6 +297,11 @@ mg = L; if nr > 1, mg = L - Ls(:, 2); end
 a(L <= 0) = w(L <= 0);
 i = sub2ind([E nr], (1:E)', a);
 s = Sa(i); db = Da(i); s(L <= 0) = 1; db(L <= 0) = 0;
+end
+
+function t = phi1(opt)
+% phi fixed at 1 (opt.phi1)
+t = isfield(opt, 'phi1') && opt.phi1;
 end
 
 function x = post_split(G, a, s, dr)

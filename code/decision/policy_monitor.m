@@ -266,7 +266,7 @@ mem.wb = cat(3, mem.wb(:, :, 2:end), bc);
 Hx = [];                                                   % the held reference of every branch (branch_ref.m)
 cu = []; if isfield(PP, 'fuse') && ~isempty(PP.fuse), cu = fuse_classes('cues', PP.fuse); end
 if isfield(cu, 'held') && cu.held && size(g, 2) > 1
-    if ~isfield(mem, 'br') || isempty(mem.br), mem.br = branch_ref('init', NE, size(g, 2)); end
+    if ~isfield(mem, 'br') || isempty(mem.br), mem.br = branch_ref('init', NE, size(g, 2), isfield(cu, 'phi1') && cu.phi1); end
     [mem.br, Hx] = branch_ref('step', mem.br, g);
 end
 nC = size(obs.probs, 2);

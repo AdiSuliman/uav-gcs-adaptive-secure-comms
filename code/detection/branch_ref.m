@@ -2,34 +2,40 @@ function varargout = branch_ref(cmd, varargin)
 %BRANCH_REF  Held reference of every receive branch and the window-limited CUSUM of one
 %   branch's drop below it: the fusion's held columns (window_cues.m 'extra', opt.held).
 %   st = branch_ref('init', E, nr)          the state of E episodes with nr antennas
+%   st = branch_ref('init', E, nr, phi1)    phi1 true: phi fixed at 1 (opt.phi1)
 %   [st, x] = branch_ref('step', st, g)      one decision cycle: g E x nr mean channel gains
 %                                            [dB] (gain_ant), x E x 4 the columns
 %   x = branch_ref('run', G)                 the cycles of one run, G n x nr, oldest first,
-%                                            from an empty state: n x 4
+%   x = branch_ref('run', G, phi1)           from an empty state: n x 4
 %   phi = branch_ref('eff', P)               the share phi below of E windows of linear
 %                                            powers P (E x nr x n)
 %   names = branch_ref('names')
 %
 %   Per cycle each antenna's power over the mean of the other antennas' (linear; a common
 %   change of our level or attitude cancels), r. Its reference is the linear mean of r over
-%   the last NR = 10 reference cycles (the local mean is a linear average, Lee 1985, Sec.
-%   IV; the monitor's 10-cycle reference, policy_monitor.m). The first NR_MIN = 3 cycles join
-%   it as they come (the latch's 3 earlier cycles, onset_shape.m). From then on xi = r / ref
-%   is tested for a drop: fading power is exponential about its mean (Rayleigh, the worst
+%   the last NR = 10 reference cycles (the monitor's 10-cycle reference, policy_monitor.m).
+%   Lee 1985, Sec. IV, eq. 31, averages the envelope and needs at least 36 uncorrelated
+%   samples for +-1 dB at 90%; the mean of 10 independent exponential powers lies within
+%   -2.7/+2.0 dB of the true mean at 90% (chi-square, 20 degrees of freedom), wider for
+%   correlated cycles. The first NR_MIN = 3 cycles join it as they come (the latch's 3
+%   earlier cycles, onset_shape.m). From then on xi = r / ref is tested for a drop, the
+%   power taken as exponential about its mean (Rayleigh; an assumption, not a sourced worst
 %   case), so the log-likelihood ratio of a drop to the mean theta is
 %       l = -log(theta) - xi (1 / theta - 1)
-%   in Page's recursion W = min(max(0, W + phi l), 2 b) (Xie et al. 2021, eq. 2-3), with the
-%   unknown theta estimated by the mean xi of the last w = C.cusum_win cycles before the
-%   current one and held in the set of changes, the antenna fault's levels of the envelope
-%   (decision_config.m): the window-limited CUSUM of Xie, Moustakides & Xie 2022 (eq. 6-7),
-%   as drop_cusum.m does for our level. phi = (1 - rho) / (1 + rho), the share of a
-%   first-order autoregressive series' samples that count as independent, rho the median
-%   over the antennas of the lag-1 correlation of each one's power over the last NR cycles
-%   (at least 0; branch_ref('eff', P)): slow or hovering flight repeats one fade from cycle
-%   to cycle, so its cycles carry less than one independent sample each (Lee 1985, Sec. IV:
-%   samples about 0.8 wavelength apart are uncorrelated). b = |log alpha| (Xie et al. 2021,
-%   Sec. II-D1), alpha = 1.87%, the deployed fusion's share of clean frames read as a lost
-%   branch on profile 1's validation.
+%   in Page's recursion W = max(0, W + phi l) (Xie et al. 2021, eq. 2-3), capped at 2 b
+%   (the cap has no source), with the unknown theta estimated by the mean xi of the last
+%   w = C.cusum_win cycles before the current one and held in the set of changes, the
+%   antenna fault's levels of the envelope (decision_config.m): the window-limited CUSUM of
+%   Xie, Moustakides & Xie 2022 (eq. 6-7), as drop_cusum.m does for our level.
+%   phi = (1 - rho) / (1 + rho), the share of a first-order autoregressive series' samples
+%   that count as independent (no library source), rho the median over the antennas of the
+%   lag-1 correlation of each one's power over the last NR cycles (at least 0;
+%   branch_ref('eff', P)); Lee 1985, Sec. IV, supports only that correlated samples count
+%   less (samples about 0.8 wavelength apart are uncorrelated). b = |log alpha|, the
+%   asymptotic threshold of Xie et al. 2021, Sec. II-D1, for a false-alarm rate alpha
+%   (1 / ARL); here alpha = 1.87% is a frame share, the deployed fusion's share of clean
+%   frames read as a lost branch on profile 1's validation, used as the per-cycle
+%   false-alarm rate (an analogy, not the source's quantity).
 %   The reference is held while a drop is under test, as drop_ref.m holds the level's: the
 %   cycles since the statistic left 0 are kept aside; when it returns to 0 without having
 %   reached b they join the reference, when it reached b they are the change's and are left
@@ -45,13 +51,14 @@ switch cmd
         E = varargin{1}; nr = varargin{2}; C = decision_config();
         varargout{1} = struct('R', nan(E, nr, NR), 'H', nan(E, nr, NR), 'hs', zeros(E, nr), 'hn', zeros(E, nr), ...
             'W', zeros(E, nr), 'x', false(E, nr), 'dx', nan(E, nr, C.cusum_win), 'q', nan(E, nr, NR));
+        if numel(varargin) >= 3 && varargin{3}, varargout{1}.phi1 = true; end
     case 'step'
         [varargout{1}, varargout{2}] = step(varargin{1}, double(varargin{2}), NR, NR_MIN, abs(log(ALPHA)));
     case 'eff'
         varargout{1} = eff_share(double(varargin{1}));
     case 'run'
         G = double(varargin{1}); [n, nr] = size(G);
-        st = branch_ref('init', 1, nr); x = zeros(n, 4);
+        st = branch_ref('init', 1, nr, numel(varargin) >= 2 && varargin{2}); x = zeros(n, 4);
         for t = 1:n, [st, x(t, :)] = step(st, G(t, :), NR, NR_MIN, abs(log(ALPHA))); end
         varargout{1} = x;
     otherwise
@@ -67,7 +74,7 @@ p = 10 .^ (g / 10);
 r = zeros(E, nr);
 for a = 1:nr, r(:, a) = p(:, a) ./ max(mean(p(:, setdiff(1:nr, a)), 2), realmin); end
 st.q = cat(3, st.q(:, :, 2:end), p);
-phi = eff_share(st.q);
+phi = ones(E, 1); if ~isfield(st, 'phi1'), phi = eff_share(st.q); end
 nref = sum(~isnan(st.R), 3);
 ref = mean(st.R, 3, 'omitnan');
 xi = r ./ max(ref, realmin);

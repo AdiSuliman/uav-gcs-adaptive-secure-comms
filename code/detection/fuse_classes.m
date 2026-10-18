@@ -77,7 +77,7 @@ held = isfield(opt, 'held') && opt.held;
 for r = 1:numel(byrun)
     ix = byrun{r};
     [~, o] = sort(S.pos(ix)); ix = ix(o);
-    H = []; if held, H = branch_ref('run', S.gain_ant(ix, :)); end   % the held reference over the run's cycles
+    H = []; if held, H = branch_ref('run', S.gain_ant(ix, :), isfield(opt, 'phi1') && opt.phi1); end   % the held reference over the run's cycles
     for j = 1:numel(ix)
         w = ix(max(1, j - N + 1):j);
         a = {}; if held, a = {H(j, :)}; end

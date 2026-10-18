@@ -1057,6 +1057,15 @@ src = fileread(which('select_fusion'));
 q = [cellfun(@(x) str2double(x{1}), regexp(src, '''Seed'', (\d+)', 'tokens')), ...
     cellfun(@(x) str2double(x{1}), regexp(src, 'sb = (\d+)', 'tokens'))];
 verifyEqual(tc, sort(q), [61 62 9101 9102]);
+% The d91 measurement's resampling streams (docs/d91_fuse.md, sections 5 and 8: folds 9101,
+% bootstraps 9102, 9103, 9111-9115 and 9151-9155, trees 9131-9135 and 9141-9145) are each their
+% own, and every one lies below the lowest flight stream
+m = [9101 9102 9103 9111:9115 9131:9135 9141:9145 9151:9155];
+verifyEqual(tc, numel(unique(m)), numel(m));
+for x = {q, m}
+    verifyEmpty(tc, intersect(x{1}, N(:)));
+    verifyLessThan(tc, max(x{1}), min(N(:)));
+end
 end
 
 function test_draws_independent(tc)
@@ -5998,6 +6007,19 @@ verifyLessThan(tc, min(reshape(st.R(1, 3, :), 1, [])), 0.2);
 verifyEqual(tc, branch_ref('eff', ones(1, nr, 3)), 1);
 pv = reshape(repmat(1:10, nr, 1), 1, nr, 10);                    % a slow fade repeats from cycle to cycle
 verifyLessThan(tc, branch_ref('eff', pv), 0.3);
+% phi fixed at 1 (opt.phi1): the GLR unscaled, no gl_phi, the other columns unchanged; the
+% held CUSUM steps unscaled, cycle by cycle as in the batch run
+o1 = o; o1.phi1 = true;
+verifyEqual(tc, window_cues('extra_names', o1), setdiff(window_cues('extra_names', o), {'gl_phi'}, 'stable'));
+x1 = window_cues('extra', G, zeros(1, nF, n), [], o1);
+verifyEqual(tc, x1(5), 8 * log(m) - 4 * log(m1) - 4 * log(m2), 'RelTol', 1e-9);
+verifyEqual(tc, x1([1:4 6 7 9:14]), x([1:4 6 7 10:15]), 'AbsTol', 1e-9);
+Gf = 10 * log10(reshape(repmat((1:30)', 1, nr), 30, nr)); Gf(20:end, 2) = Gf(20:end, 2) - 10;   % a slow fade, then a step
+H0 = branch_ref('run', Gf); H1 = branch_ref('run', Gf, true);
+verifyEqual(tc, branch_ref('run', Gf, false), H0);
+verifyGreaterThan(tc, max(abs(H1(:, 1) - H0(:, 1))), 0);
+st = branch_ref('init', 1, nr, true);
+for t = 1:30, [st, h] = branch_ref('step', st, Gf(t, :)); verifyEqual(tc, h, H1(t, :), 'AbsTol', 1e-12); end
 % the fusion's row with every column, and the monitor's
 nm = idle_summary('names'); ci = @(s) find(strcmp(nm, s));
 n = 14; Nf = 5; cls = {'none', 'antenna_fault', 'airframe_shadowing'}; A = policy_actions(); na = find(strcmp(A, 'no_action'));
@@ -6020,6 +6042,19 @@ for k = 1:n
     [m, M] = policy_monitor('update', m, obs, PP, na); m = policy_monitor('change', m, false);
     verifyEqual(tc, M.probs, pc(k, :), 'AbsTol', 1e-10);
 end
+cues1 = cues; cues1.phi1 = true;                                % the same row with phi fixed at 1
+X1 = fuse_classes('extra', S, Nf, cues1); Zx1 = fuse_classes('windows', S, Pm, Nf, cues1);
+verifyEqual(tc, size(X1, 2), size(X, 2) - 1);
+verifyEqual(tc, X1(:, end - 3:end), branch_ref('run', Gn, true));
+FM1 = FM; FM1.cues = cues1; FM1.W = FM.W([1:nZ - 11, nZ - 9:end], :); FM1.mu = zeros(1, nZ - 1); FM1.sd = ones(1, nZ - 1);
+pc1 = fuse_classes('apply', FM1, Zx1); PP1 = PP; PP1.fuse = FM1;
+m = policy_monitor('init', 1, numel(A));
+for k = 1:n
+    obs = struct('probs', Pm(k, :), 'unknown', false, 'feat', Fr(k, :), 'cfg_link', na, 'gant', Gn(k, :), 'idle', I(k, :));
+    [m, M] = policy_monitor('update', m, obs, PP1, na); m = policy_monitor('change', m, false);
+    verifyEqual(tc, M.probs, pc1(k, :), 'AbsTol', 1e-10);
+end
+verifyTrue(tc, isfield(m.br, 'phi1'));
 verifyError(tc, @() window_cues('extra', G, zeros(1, nF, 8), [], struct('held', true)), ?MException);
 m0 = policy_monitor('init', 1, numel(A));                         % a fusion without the held columns keeps no state
 PP.fuse = rmfield(FM, 'cues'); PP.fuse.W = 0.1 * randn(rs, numel(fuse_classes('windows', S, Pm, Nf)) / n + 1, 3);
@@ -6069,6 +6104,33 @@ verifyEqual(tc, r.lb(1), -100 * 1 / 3, 'AbsTol', 1e-9);              % one of th
 verifyEqual(tc, r.cl(1), -100 * 1 / 3, 'AbsTol', 1e-9);
 end
 
+function test_fusion_pick_deploy(tc)
+% With FUSION_REV and FUSION_FIT = 'enlarged' select_fusion.m deploys the design the d91
+% measurement adopted (fusion_pick.m) as measured, never choosing again: its N and lambda,
+% the deployed target rule, no cfar; it stops unless the adoption rule holds for it on its
+% own fit set, and records the pick and the revision id that B3r checks (fusion_rev_id.m).
+P = fusion_pick();
+verifyEqual(tc, P.name, 'branch evidence');
+verifyEqual(tc, [P.N P.lambda], [12 1e-3]);
+verifyEqual(tc, P.target_age, 'N');
+verifyEmpty(tc, P.cues.cfar);
+verifyTrue(tc, P.cues.iso && P.cues.glr && P.cues.held && P.cues.post);
+verifyFalse(tc, isfield(P.cues, 'phi1') && P.cues.phi1);
+verifyEqual(tc, fusion_rev_id('enlarged'), 'd91_branch_evidence_enlarged');
+verifyEqual(tc, fusion_rev_id('validation'), 'd91_branch_evidence_validation');
+verifyError(tc, @() fusion_rev_id('test'), 'fusion_rev_id:fit');
+src = fileread(which('select_fusion'));
+for t = {'ENL = REV && exist(''FUSION_FIT'', ''var'') && strcmp(FUSION_FIT, ''enlarged'');', ...
+        'elseif ENL, PK = fusion_pick(); end', 'TA = struct(''target_age'', NS(a));', '''select_fusion:pick_rule''', ...
+        'assert(fusion_adopt(''branch'', GP), ''select_fusion:pick_rule''', 'deployed_pick = PK; deployed_pick.check = GP;'}
+    verifyNotEmpty(tc, strfind(src, t{1}), t{1});
+end
+i1 = strfind(src, 'if ~isempty(PK)                                      % the measured design and its rule check');
+i2 = strfind(src, '[pick, bs] = fusion_adopt(''choose'', G);');
+i3 = regexp(src, '\r?\n    else\r?\n', 'once');
+verifyTrue(tc, isscalar(i1) && isscalar(i2) && i1 < i3 && i3 < i2);   % 'choose' only without a pick
+end
+
 function test_fusion_target_age(tc)
 % A path-loss onset is the fused target while the window still holds a cycle before it
 % (pos - onset < N - 1, threat_active.m's rule) for a fusion fitted on that rule
@@ -6089,7 +6151,8 @@ verifyNotEmpty(tc, strfind(src, 'cm = true(size(y)); lab = ''the per-cycle label
 verifyNotEmpty(tc, strfind(src, 'if REV, cm = all(YN == y, 2); lab = ''the frames no candidate relabels''; end'));
 verifyNotEmpty(tc, strfind(src, ['save(''data/fusion.mat'', ''FM'', ''N'', ''lambda'', ''NS'', ''LAMBDA'', ''cv'', ''val_probs_oof'', ' ...
     '''val_latch_oof'', ''val_target'', ''q_thr'');']));
-verifyNotEmpty(tc, strfind(src, 'if REV, save(''data/fusion.mat'', ''cvy'', ''cvo'', ''-append''); end'));
+verifyNotEmpty(tc, strfind(src, 'fusion_rev = fusion_rev_id(fit_name);'));
+verifyNotEmpty(tc, strfind(src, 'save(''data/fusion.mat'', ''cvy'', ''cvo'', ''fusion_rev'', ''-append'');'));
 verifyNotEmpty(tc, strfind(src, 'cvy(a, b) = macro_f1(y(cm), yh(cm), C); cvo(a, b) = macro_f1(yn, yh, C);'));
 verifyNotEmpty(tc, strfind(src, 'REV = exist(''FUSION_REV'', ''var'') && isequal(FUSION_REV, true);'));
 verifyNotEmpty(tc, strfind(src, 'TAa = []; if REV, TAa = struct(''target_age'', NS(a) - 1); end'));

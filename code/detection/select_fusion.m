@@ -40,6 +40,11 @@
 % test split and the second and third test sets, 5 folds by sub-run, a sub-run never split;
 % N and lambda stay chosen on validation), and val_probs_oof holds its validation frames;
 % the test sets' readings are then spent, and KPI 1 is read on a test set built after it.
+% There the further columns are not chosen again: the design the measurement adopted
+% (fusion_pick.m, or FUSION_PICK; docs/d91_fuse.md) is deployed as measured, at its N and
+% lambda, on the deployed target rule (pos - onset < N, FM.target_age = N) and without cfar,
+% and B2F stops (select_fusion:pick_rule) unless the adoption rule fusion_adopt('branch')
+% holds for it against the fusion without it, out of fold on the same fit set and folds.
 % The quiet-slot interference alarm of the rule (rule_based_policy.m) is set here from
 % the clean validation frames (the sub-runs without a threat), as an AGC jamming monitor
 % sets its threshold from interference-free samples, Th = mu - 3 sigma - 2 dB for a gain
@@ -61,13 +66,18 @@
 % is not used (but in the enlarged fit set).
 % Output: data/fusion.mat (FM with os_thr and latch, N, lambda, cv table, out-of-fold
 % probabilities (fused, and with the latch) and their targets, q_thr; with FUSION_REV also
-% FM.cues, FM.target_age and the cvy, cvo tables). Without FUSION_REV the fusion and its file
-% are those of the selection by the own targets alone.
+% FM.cues, FM.target_age, the cvy, cvo tables and fusion_rev (fusion_rev_id.m); with a pick
+% also deployed_pick, the design and its rule check). Without FUSION_REV the fusion and its
+% file are those of the selection by the own targets alone.
 
 close all; clc;
 fprintf('=== B2F: temporal fusion (validation split only) ===\n\n');
 REV = exist('FUSION_REV', 'var') && isequal(FUSION_REV, true);
 if REV, fprintf('The revised selection (FUSION_REV): N on the frames no candidate relabels, target age N - 1, the further columns\n\n'); end
+ENL = REV && exist('FUSION_FIT', 'var') && strcmp(FUSION_FIT, 'enlarged');
+PK = [];                                                 % the measured design, deployed without choosing again
+if exist('FUSION_PICK', 'var') && ~isempty(FUSION_PICK), PK = FUSION_PICK; elseif ENL, PK = fusion_pick(); end
+assert(isempty(PK) || REV, 'select_fusion:pick', 'FUSION_PICK needs FUSION_REV');
 S = load('data/splits.mat'); va = S.splits.val; norm = S.splits.norm;
 if ~isfield(va, 'pos')
     error('splits.mat has no frame positions (v6 dataset). Run run_dataset_sweep, extract_spectrograms, prepare_data.');
@@ -127,6 +137,14 @@ else
     [~, i] = max(cv(:)); [a, b] = ind2sub(size(cv), i);
     TA = [];
 end
+if ~isempty(PK)
+    fprintf('The measured design (%s): N = %d cycles, lambda %.0e, the deployed target rule; the selection above gives N = %d, lambda %.0e\n', ...
+        PK.name, PK.N, PK.lambda, NS(a), LAMBDA(b));
+    a = find(NS == PK.N); b = find(LAMBDA == PK.lambda);
+    assert(isscalar(a) && isscalar(b), 'select_fusion:pick_grid', 'the measured N %d or lambda %g is not on the grid', PK.N, PK.lambda);
+    assert(strcmp(PK.target_age, 'N'), 'select_fusion:pick_target', 'only the deployed target rule was measured');
+    TA = struct('target_age', NS(a));
+end
 N = NS(a); lambda = LAMBDA(b);
 Z = ZN{a}; clear ZN
 val_target = fusion_target(y, va.run, va.pos, N, classes, TA);
@@ -138,7 +156,8 @@ pc0 = oof{a, b}; clear oof
 cues = []; pick = 1; PV = {pc0}; Zf = Z; ft = val_target; vr = (1:numel(y))';
 if REV
     fit = va; fit.y = y; fit.P = P; foldf = fold; pf0 = pc0; sb = 62;
-    if exist('FUSION_FIT', 'var') && strcmp(FUSION_FIT, 'enlarged')   % the enlarged fit set (fit_sets.m)
+    if ~isempty(PK) && ~ENL, pf0 = oof_fit(Zf, ft, foldf, C, lambda); end   % the base on the pick's own target
+    if ENL                                               % the enlarged fit set (fit_sets.m)
         [fit, finfo] = fit_sets(fit, S.splits.test, D.net, classes);
         fit.feat_names = va.feat_names;
         for k = 1:numel(finfo), fprintf('Fit set: %s, %d frames, %d sub-runs\n', finfo(k).name, finfo(k).frames, finfo(k).subruns); end
@@ -150,46 +169,61 @@ if REV
         fr = mod(randperm(rf, numel(ru)), K) + 1; [~, ir] = ismember(fit.run, ru); foldf = fr(ir)';
         pf0 = oof_fit(Zf, ft, foldf, C, lambda); sb = 9102;
     end
-    OPT = {struct('iso', true), struct('glr', true), struct('held', true), struct('post', true), ...
-        struct('iso', true, 'glr', true, 'held', true, 'post', true)};
-    V = {'none', 'cfar', 'iso', 'glr', 'held', 'post', 'branch evidence'};
-    XB = cellfun(@(o) fuse_classes('extra', fit, N, o), OPT, 'UniformOutput', false);
-    PV = cell(1, numel(V)); PV{1} = pf0; TH = nan(K, 3);
-    for v = 2:numel(V)
-        [PV{v}, T] = oof_cols(Zf, ft, foldf, C, lambda, fit, N, v == 2, XB, v - 2);
-        if v == 2, TH = T; end
-    end
     [bin, ~] = kpi_ebno(fit, ft, classes);
     yb = argmax(pf0); thr = kpi1_thr(ft, yb, bin, classes);
     low = false(numel(ft), 1); if isfield(fit, 'k_db'), low = double(fit.k_db(:)) <= 0; end
     B = fusion_adopt('boot', fit.run, 1000, sb);
-    G = cell(1, numel(V));
-    for v = 2:numel(V), G{v} = fusion_adopt('paired', ft, yb, argmax(PV{v}), bin >= thr, low, classes, B); end
-    [pick, bs] = fusion_adopt('choose', G);
-    if pick == 0                                         % the idle-time columns with the adopted branch variant
-        [PV{end + 1}, ~] = oof_cols(Zf, ft, foldf, C, lambda, fit, N, true, XB, bs - 2);
-        V{end + 1} = ['cfar and ' V{bs}];
-        G{end + 1} = fusion_adopt('paired', ft, yb, argmax(PV{end}), bin >= thr, low, classes, B);
-        pick = fusion_adopt('combo', G(1:end - 1), bs, G{end});
-    end
-    fprintf(['Further columns at N = %d, lambda %.0e, out of fold over %d frames, against none (points, 95%% bootstrap over ' ...
-        'sub-runs; KPI 1 threshold of the fusion without them %g dB):\n'], N, lambda, numel(ft), thr);
-    for v = 2:numel(V)
-        fprintf(['  %-26s every frame %+.2f [%+.2f, %+.2f], above the threshold %+.2f [%+.2f, %+.2f], clean as a threat %+.2f ' ...
-            '[%+.2f, %+.2f], clean as a lost branch %+.2f [%+.2f, %+.2f]; F1 antenna_fault %+.2f [%+.2f, %+.2f], ' ...
-            'airframe_shadowing %+.2f [%+.2f, %+.2f]; at K <= 0 dB %+.2f [%+.2f, %+.2f], %+.2f [%+.2f, %+.2f]\n'], V{v}, G{v}.all, ...
-            G{v}.above, G{v}.cl, G{v}.lb, G{v}.fault, G{v}.shad, G{v}.fault_low, G{v}.shad_low);
-    end
-    fprintf('  cfar thresholds per training folds [dB] (crest T1, spread T2, median crest): %s\n', mat2str(TH, 3));
-    fprintf('  adopted: cfar %s; branch variants %s -> the fusion''s further columns: %s\n', yn_txt(fusion_adopt('cfar', G{2})), ...
-        strjoin(cellfun(@(n, d) sprintf('%s %s', n, yn_txt(fusion_adopt('branch', d))), V(3:7), G(3:7), 'UniformOutput', false), ', '), V{pick});
-    if pick > 1
-        cues = struct('cfar', [], 'iso', false, 'glr', false, 'held', false, 'post', false);
-        if pick == 2 || pick == 8, cues.cfar = cfar_thr(fit, true(numel(ft), 1)); end
-        b = 0; if pick >= 3 && pick <= 7, b = pick - 2; elseif pick == 8, b = bs - 2; end
-        if b > 0, for f = fieldnames(OPT{b})', cues.(f{1}) = true; end, end
-        Zf = [Zf, fuse_classes('extra', fit, N, cues)];
-        if ~isempty(cues.cfar), fprintf('  clean gaps of the fit set: T1 %.2f dB, T2 %.2f dB, median crest %.2f dB\n', cues.cfar); end
+    if ~isempty(PK)                                      % the measured design and its rule check
+        cues = PK.cues;
+        XP = fuse_classes('extra', fit, N, cues);
+        PV = {oof_cols(Zf, ft, foldf, C, lambda, fit, N, false, {XP}, 1)}; pick = 1;
+        GP = fusion_adopt('paired', ft, yb, argmax(PV{1}), bin >= thr, low, classes, B);
+        fprintf(['The measured design %s against none at N = %d, lambda %.0e, out of fold over %d frames (KPI 1 threshold %g dB): ' ...
+            'every frame %+.2f [%+.2f, %+.2f], above the threshold %+.2f [%+.2f, %+.2f], clean as a threat %+.2f [%+.2f, %+.2f], ' ...
+            'clean as a lost branch %+.2f [%+.2f, %+.2f]; F1 antenna_fault %+.2f [%+.2f, %+.2f], airframe_shadowing %+.2f ' ...
+            '[%+.2f, %+.2f]; at K <= 0 dB %+.2f [%+.2f, %+.2f], %+.2f [%+.2f, %+.2f] -> rule %s\n'], PK.name, N, lambda, numel(ft), ...
+            thr, GP.all, GP.above, GP.cl, GP.lb, GP.fault, GP.shad, GP.fault_low, GP.shad_low, yn_txt(fusion_adopt('branch', GP)));
+        assert(fusion_adopt('branch', GP), 'select_fusion:pick_rule', ...
+            'the measured design %s fails the adoption rule on this fit set: no-go (docs/d91_fuse.md)', PK.name);
+        Zf = [Zf, XP]; clear XP
+    else
+        OPT = {struct('iso', true), struct('glr', true), struct('held', true), struct('post', true), ...
+            struct('iso', true, 'glr', true, 'held', true, 'post', true)};
+        V = {'none', 'cfar', 'iso', 'glr', 'held', 'post', 'branch evidence'};
+        XB = cellfun(@(o) fuse_classes('extra', fit, N, o), OPT, 'UniformOutput', false);
+        PV = cell(1, numel(V)); PV{1} = pf0; TH = nan(K, 3);
+        for v = 2:numel(V)
+            [PV{v}, T] = oof_cols(Zf, ft, foldf, C, lambda, fit, N, v == 2, XB, v - 2);
+            if v == 2, TH = T; end
+        end
+        G = cell(1, numel(V));
+        for v = 2:numel(V), G{v} = fusion_adopt('paired', ft, yb, argmax(PV{v}), bin >= thr, low, classes, B); end
+        [pick, bs] = fusion_adopt('choose', G);
+        if pick == 0                                         % the idle-time columns with the adopted branch variant
+            [PV{end + 1}, ~] = oof_cols(Zf, ft, foldf, C, lambda, fit, N, true, XB, bs - 2);
+            V{end + 1} = ['cfar and ' V{bs}];
+            G{end + 1} = fusion_adopt('paired', ft, yb, argmax(PV{end}), bin >= thr, low, classes, B);
+            pick = fusion_adopt('combo', G(1:end - 1), bs, G{end});
+        end
+        fprintf(['Further columns at N = %d, lambda %.0e, out of fold over %d frames, against none (points, 95%% bootstrap over ' ...
+            'sub-runs; KPI 1 threshold of the fusion without them %g dB):\n'], N, lambda, numel(ft), thr);
+        for v = 2:numel(V)
+            fprintf(['  %-26s every frame %+.2f [%+.2f, %+.2f], above the threshold %+.2f [%+.2f, %+.2f], clean as a threat %+.2f ' ...
+                '[%+.2f, %+.2f], clean as a lost branch %+.2f [%+.2f, %+.2f]; F1 antenna_fault %+.2f [%+.2f, %+.2f], ' ...
+                'airframe_shadowing %+.2f [%+.2f, %+.2f]; at K <= 0 dB %+.2f [%+.2f, %+.2f], %+.2f [%+.2f, %+.2f]\n'], V{v}, G{v}.all, ...
+                G{v}.above, G{v}.cl, G{v}.lb, G{v}.fault, G{v}.shad, G{v}.fault_low, G{v}.shad_low);
+        end
+        fprintf('  cfar thresholds per training folds [dB] (crest T1, spread T2, median crest): %s\n', mat2str(TH, 3));
+        fprintf('  adopted: cfar %s; branch variants %s -> the fusion''s further columns: %s\n', yn_txt(fusion_adopt('cfar', G{2})), ...
+            strjoin(cellfun(@(n, d) sprintf('%s %s', n, yn_txt(fusion_adopt('branch', d))), V(3:7), G(3:7), 'UniformOutput', false), ', '), V{pick});
+        if pick > 1
+            cues = struct('cfar', [], 'iso', false, 'glr', false, 'held', false, 'post', false);
+            if pick == 2 || pick == 8, cues.cfar = cfar_thr(fit, true(numel(ft), 1)); end
+            b = 0; if pick >= 3 && pick <= 7, b = pick - 2; elseif pick == 8, b = bs - 2; end
+            if b > 0, for f = fieldnames(OPT{b})', cues.(f{1}) = true; end, end
+            Zf = [Zf, fuse_classes('extra', fit, N, cues)];
+            if ~isempty(cues.cfar), fprintf('  clean gaps of the fit set: T1 %.2f dB, T2 %.2f dB, median crest %.2f dB\n', cues.cfar); end
+        end
     end
     PV{pick} = PV{pick}(vr, :);                          % the validation frames' out-of-fold reading
 end
@@ -245,7 +279,13 @@ else
 end
 if ~exist('results', 'dir'), mkdir('results'); end
 save('data/fusion.mat', 'FM', 'N', 'lambda', 'NS', 'LAMBDA', 'cv', 'val_probs_oof', 'val_latch_oof', 'val_target', 'q_thr');
-if REV, save('data/fusion.mat', 'cvy', 'cvo', '-append'); end
+if REV
+    fit_name = 'validation';
+    if exist('FUSION_FIT', 'var') && strcmp(FUSION_FIT, 'enlarged'), fit_name = 'enlarged'; end
+    fusion_rev = fusion_rev_id(fit_name);                % B3r reads the fourth test set only with fusion_rev_id('enlarged')
+    save('data/fusion.mat', 'cvy', 'cvo', 'fusion_rev', '-append');
+    if ~isempty(PK), deployed_pick = PK; deployed_pick.check = GP; save('data/fusion.mat', 'deployed_pick', '-append'); end
+end
 fprintf('Saved data/fusion.mat\n');
 
 function c = classes_of(D)
