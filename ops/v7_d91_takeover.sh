@@ -60,9 +60,15 @@
 # (ALERT_unknown_* after UNKNOWN_ALERT_S). PowerShell queries end after Q_TIMEOUT_S. Touches
 # v7_d86/run.lock and takeover.lock at least every HB_S seconds; each track writes its beat file
 # at every heartbeat and its end file when it ends on purpose; the main loop raises
-# ALERT_takeover_track_<g>_stalled / _died; when its main bash is gone, each track stops at its
-# next heartbeat (ALERT_takeover_main_gone; a running MATLAB keeps its PID file). One MATLAB per
-# profile worktree at a time; never touches the parallel turn file.
+# ALERT_takeover_track_<g>_stalled / _died. The main bash writes takeover_beat_main at every pass
+# and in its naps; the tracks and the heartbeat raise ALERT_takeover_main_stalled_<beat> when it is
+# STALL_S old. When the main bash is gone, each track stops at its next heartbeat
+# (ALERT_takeover_main_gone; a running MATLAB keeps its PID file). One MATLAB per profile worktree
+# at a time; never touches the parallel turn file.
+#
+# The run section is the function main, called on the last line, so bash has parsed the whole file
+# before anything runs. Replace the live copy only while no takeover runs, or by a temp file and mv
+# (never cp onto it, v7_d91_takeover.md).
 #
 # Stop: end every bash that runs this script and has no MATLAB child, all with taskkill /F and none
 # with /T (v7_d91_takeover.md).
@@ -109,8 +115,10 @@ R="$L/v7_d86"
 LOCK="$R/takeover.lock"
 GATE="$R/takeover_gate.d"                  # one track at a time between a check and its part header
 GO3="$R/p3_brerun.go"
-OLD_SCRIPTS=(v7_d86_launch.sh v7_d87_p3fix.sh v7_d87_redo.sh v7_d87_resume.ps1 v7_d83_launch.sh v7_fix_resume.sh)
-SCRIPT_RE='(v7_d8(6_launch|7_p3fix|7_redo|3_launch)|v7_fix_resume)'   # old bash run scripts (without .sh)
+OLD_SCRIPTS=(v7_d86_launch.sh v7_d87_p3fix.sh v7_d87_redo.sh v7_d87_resume.ps1 v7_d83_launch.sh v7_fix_resume.sh
+             v7_d87_b3m.sh v7_wait_c1p_then_fix.sh v7_guard_c1p_fail.sh)
+SCRIPT_RE='(v7_d8(6_launch|7_p3fix|7_redo|3_launch|7_b3m)|v7_fix_resume|v7_wait_c1p_then_fix|v7_guard_c1p_fail)'   # old bash run scripts (without .sh)
+TESTSET=(B3m B3q B3r)                      # test-set stages: never in P3's rerun (d91_set4.md step 4)
 TRAILER="Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 export GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never GIT_EDITOR=true
 
@@ -137,10 +145,19 @@ main_gone() {   # a track whose takeover main bash is gone: stop here (a running
   alert takeover_main_gone "The takeover's main bash (MSYS PID $MAIN) is gone; each track stopped at its next heartbeat and starts nothing more. A MATLAB it started runs on, and its PID stays in $R/takeover_ml_<profile>.pid. Start the takeover again with the same launch command; it waits for that MATLAB."
   exit 0
 }
-hb() {   # heartbeat; never recreates the takeover lock after its removal; a track's beat file (no fork)
+main_check() {   # the main bash's beat STALL_S old: an alert once per beat value (builtin read, no fork)
+  local t=""
+  { read -r t < "$R/takeover_beat_main"; } 2>/dev/null
+  isnum "$t" && [ $(( EPOCHSECONDS - t )) -ge "$STALL_S" ] || return 0
+  alert "takeover_main_stalled_$t" "The takeover's main bash (MSYS PID $MAIN) has not beaten for $(( (EPOCHSECONDS - t) / 60 )) min ($R/takeover_beat_main): it may hang in a process query, a git command or a fork. While it hangs, nothing watches the tracks, and the final phase does not run once they end. Check free memory and the number of processes. If it does not beat again, stop the takeover (v7_d91_takeover.md, Stopping the takeover: every bash that runs this script and has no MATLAB child, taskkill /F, no /T) and start it again with the same launch command; a MATLAB it started runs on, and the restart waits for it."
+}
+hb() {   # heartbeat; never recreates the takeover lock after its removal; beat files (no fork)
   if [ -n "${TRACK:-}" ]; then
     kill -0 "$MAIN" 2>/dev/null || main_gone
     { printf '%s\n' "$EPOCHSECONDS" > "$R/takeover_beat_$TRACK"; } 2>/dev/null
+    main_check
+  elif [ "$BASHPID" = "${MAIN:-}" ]; then   # the main bash itself, not its heartbeat subshell
+    { printf '%s\n' "$EPOCHSECONDS" > "$R/takeover_beat_main"; } 2>/dev/null
   fi
   touch "$R/run.lock" 2>/dev/null; touch -c "$LOCK" 2>/dev/null
 }
@@ -197,7 +214,7 @@ sysq() {
     cmdline)  q="\$p = Get-CimInstance Win32_Process -Filter \"ProcessId=$2\"; if (-not \$p) {'none'} elseif (\$p.CommandLine) {\$p.CommandLine} else {'(no command line)'}";;
     created)  q="\$p = Get-CimInstance Win32_Process -Filter \"ProcessId=$2\"; if (\$p) { ([DateTimeOffset]\$p.CreationDate).ToUnixTimeSeconds() } else {'none'}";;
     mlchild)  q="\$c = @(Get-CimInstance Win32_Process -Filter \"ParentProcessId=$2\" | Where-Object { \$_.Name -like 'matlab*' }); if (\$c.Count) { \$c | ForEach-Object { \$_.ProcessId } } else {'none'}";;
-    scripts)  q="Get-CimInstance Win32_Process -Filter \"Name='bash.exe'\" | Where-Object { \$_.CommandLine -like ('*v7_d8' + '*') -or \$_.CommandLine -like ('*v7_fix' + '_resume*') } | ForEach-Object { '{0}|{1}|{2}' -f \$_.ProcessId, ([DateTimeOffset]\$_.CreationDate).ToUnixTimeSeconds(), \$_.CommandLine }; 'end'";;
+    scripts)  q="Get-CimInstance Win32_Process -Filter \"Name='bash.exe'\" | Where-Object { \$_.CommandLine -like ('*v7_d8' + '*') -or \$_.CommandLine -like ('*v7_fix' + '_resume*') -or \$_.CommandLine -like ('*v7_wait' + '_c1p_then_fix*') -or \$_.CommandLine -like ('*v7_guard' + '_c1p_fail*') } | ForEach-Object { '{0}|{1}|{2}' -f \$_.ProcessId, ([DateTimeOffset]\$_.CreationDate).ToUnixTimeSeconds(), \$_.CommandLine }; 'end'";;
     state)    q="\$p = Get-Process -Id $2 -ErrorAction SilentlyContinue; if (-not \$p) {'none'} elseif (\$p.HasExited) {'exited'} elseif (\$p.Path -like '*win64*') {'live'} else {'other'}";;
     matlab)   q="Get-CimInstance Win32_Process -Filter \"Name='MATLAB.exe'\" | Where-Object { \$_.CommandLine -like '*win64*' } | ForEach-Object { \$p = Get-Process -Id \$_.ProcessId -ErrorAction SilentlyContinue; \$x = if (-not \$p -or \$p.HasExited) {1} else {0}; '{0}|{1}|{2}' -f \$_.ProcessId, \$x, \$_.CommandLine }; 'end'";;
     cpu)      q="(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average";;
@@ -260,8 +277,18 @@ hdr_ok() {   # $1 a well-formed part header; its fields into H_STAMP, H_MODE, H_
 }
 cur_part() {   # the profile's log from its last '##### PART' line
   local f="$R/$1.log" n
-  n=$(grep -n '^##### PART ' "$f" 2>/dev/null | tail -1 | cut -d: -f1)
+  n=$(grep_end -n '^##### PART ' "$f" 2>/dev/null) && ge_ok n "$n" || return 1
+  n=${n##*$'\n'}; n=${n%%:*}
   isnum "$n" && tail -n +"$n" "$f"
+}
+log_req() {   # profile $1's log: 0 it exists, 1 missing for p2 (nothing yet), 2 missing for p1 or p3 (unknown)
+  [ -e "$R/$1.log" ] && return 0
+  [ "$1" = p2 ] && return 1
+  return 2
+}
+log_alert() {   # profile 1's or 3's log missing: an alert (the track waits as on any unknown value)
+  log_req "$1"; [ $? = 2 ] || return 0
+  alert "log_missing_$1" "$R/$1.log is missing, so profile ${1#p}'s state cannot be read and nothing runs for it; a missing log is never taken as a fresh profile (that would rebuild A0 to B4s). Restore the log, or write $R/$1.abandon to give the profile up."
 }
 part_head() { local h; h=$(cur_part "$1" | head -1); hdr_ok "$h" && echo "$h"; }
 part_mode() { local h; h=$(part_head "$1") && hdr_ok "$h" && echo "$H_MODE"; }
@@ -288,11 +315,12 @@ load_list() {   # F: all stages of profile $1, complete (A0 first, the C and fin
   case $1 in p1|p3) [ "${#F[@]}" = $(( ${#AB[@]} + NTAIL )) ];; esac
 }
 idx_of() { local F i; load_list "$1" || return 1; for i in "${!F[@]}"; do [ "${F[$i]}" = "$2" ] && { echo "$i"; return 0; }; done; return 1; }
-# index of the profile's first unfinished stage (0 without a log): the part's start, advanced over
-# the '##### STAGE <s> done' markers that follow the list in order; a rerun part leaves it at C1p
+# index of the profile's first unfinished stage (0 for profile 2 without a log): the part's start,
+# advanced over the '##### STAGE <s> done' markers that follow the list in order; a rerun part
+# leaves it at C1p
 next_idx() {
   local g=$1 part h x r i=0 F seq
-  [ -e "$R/$g.log" ] || { echo 0; return 0; }
+  log_req "$g" || { [ $? = 1 ] && { echo 0; return 0; }; return 1; }   # p2 without a log: index 0; p1, p3: unknown
   load_list "$g" || return 1
   part=$(cur_part "$g") || return 1
   h=${part%%$'\n'*}
@@ -312,7 +340,7 @@ next_idx() {
 }
 end_rc() {   # rc of the chain's end marker in the current part, 'none' without one
   local part x
-  [ -e "$R/$1.log" ] || { echo none; return 0; }
+  log_req "$1" || { [ $? = 1 ] && { echo none; return 0; }; return 1; }
   part=$(cur_part "$1") && hdr_ok "${part%%$'\n'*}" || return 1
   x=$(tgrep_end "$part" -o '^##### chain ended rc=[0-9]*') && ge_ok x "$x" || return 1
   [ -n "$x" ] || { echo none; return 0; }
@@ -320,7 +348,7 @@ end_rc() {   # rc of the chain's end marker in the current part, 'none' without 
 }
 open_stage() {   # the part's last stage when it has no done marker (nothing when none)
   local part x
-  [ -e "$R/$1.log" ] || return 0
+  log_req "$1" || { [ $? = 1 ] && return 0; return 1; }
   part=$(cur_part "$1") && hdr_ok "${part%%$'\n'*}" || return 1
   x=$(tgrep_end "$part" '^##### STAGE [A-Za-z0-9]* ') && ge_ok x "$x" || return 1
   [ -n "$x" ] || return 0
@@ -339,7 +367,7 @@ complete() {   # 0 past RPT with the chain's MATLAB over (its end marker, or a f
 }
 part_idle() {   # 0 nothing writes the profile's current part any more; 1 something may; 2 unknown
   local g=$1 f="$R/$1.log" part x m op
-  [ -e "$f" ] || return 0
+  log_req "$g" || { [ $? = 1 ] && return 0; return 2; }
   part=$(cur_part "$g") || return 2
   hdr_ok "${part%%$'\n'*}" || return 2
   x=$(tgrep_end "$part" -c '^##### \(chain\|rerun\) ended') && ge_ok x "$x" && isnum "$x" || return 2
@@ -354,7 +382,7 @@ part_idle() {   # 0 nothing writes the profile's current part any more; 1 someth
 }
 p1_heavy() {   # profile 1's chain between C1p and the end of C1c (pool build, gather, clean pools); true when unknown
   local r a b rc m
-  [ -f "$R/p1.abandon" ] && return 1
+  [ -f "$R/p1.abandon" ] && chain_dead p1 && return 1   # given up counts once its chain has stopped
   rc=$(end_rc p1) || return 0
   [ "$rc" = none ] || return 1
   m=$(mtime "$R/p1.log") || return 0
@@ -623,7 +651,7 @@ gate_enter() {
 gate_leave() { rmdir "$GATE" 2>/dev/null; }
 p3_rerun_open() {   # P3's current part is a B-stage rerun of this boot without its end marker; true when unknown
   local h m part x
-  [ -e "$R/p3.log" ] || return 1
+  log_req p3 || return 0
   h=$(part_head p3) && hdr_ok "$h" || return 0
   [ "$H_MODE" = takeover-rerun ] || return 1
   m=$(mtime "$R/p3.log") || return 0
@@ -683,7 +711,7 @@ track_p1() {
     complete p1 && { say "p1: chain finished"; return 0; }
     part_idle p1; pi=$?
     if [ "$pi" = 2 ] || ! rc=$(end_rc p1) || ! load_list p1 || ! r=$(next_idx p1); then
-      unknown_wait p1log "p1: p1.log could not be read; nothing is decided on it"; continue
+      log_alert p1; unknown_wait p1log "p1: p1.log could not be read; nothing is decided on it"; continue
     fi
     known p1log
     if [ "$rc" != none ] || [ "$pi" = 0 ] || p1_cut_now; then
@@ -731,7 +759,7 @@ go_state() {   # none, done, pending, failed, ignored, blocked (the latest rerun
     keys=$(map_keys "$P3") || return 1
     split_lines K "$keys"
     for x in $list; do
-      if ! in_list "$x" "${K[@]}" || in_list "$x" smoke "${HV[@]}" "${FIN[@]}"; then echo "invalid:$x"; return 0; fi
+      if ! in_list "$x" "${K[@]}" || in_list "$x" smoke "${TESTSET[@]}" "${HV[@]}" "${FIN[@]}"; then echo "invalid:$x"; return 0; fi
     done
     x=$(go_id) && sec=$(go_section "$x") && e=$(sec_end "$sec") || return 1
     rc=${e% *}; acc=${e#* }
@@ -844,7 +872,11 @@ pre_c1p() {   # 0 when C1p may start; 1 after a rerun ran or the track was given
                  fi;;
         ignored) alert "p3_go_ignored_$(go_id)" "p3_brerun.go was written after P3's C1p had started; it is ignored.";;
         invalid:*) blk="p3_brerun.go invalid"
-                 alert "p3_rerun_invalid_$(mtime "$GO3")" "p3_brerun.go names '${st#invalid:}', which is not a B stage of $P3/code/run_stage.m; C1p does not start until the file is fixed or removed.";;
+                 if in_list "${st#invalid:}" "${TESTSET[@]}"; then
+                   alert "p3_rerun_invalid_$(mtime "$GO3")_${st//[!A-Za-z0-9_]/_}" "p3_brerun.go names '${st#invalid:}', a test-set stage (B3m rebuilds the third test set, B3q builds the fourth, B3r is the fourth set's single reading). None of them runs in the rerun: the fourth set is read by hand after the go/no-go, in the order of d91_set4.md step 4 (docs/d91_set4.md on d91-set4), and anything that re-saves the detector after it breaks its freeze. Remove the stage from the file; C1p does not start until the file is fixed or removed."
+                 else
+                   alert "p3_rerun_invalid_$(mtime "$GO3")_${st//[!A-Za-z0-9_]/_}" "p3_brerun.go names '${st#invalid:}', which is not a B stage of $P3/code/run_stage.m; C1p does not start until the file is fixed or removed."
+                 fi;;
       esac
     fi
     if [ "$g" = p2 ] && ! past_surv3 p3; then
@@ -902,7 +934,7 @@ track_run() {
     part_idle "$g"; pi=$?
     if [ "$pi" = 2 ] || ! rc=$(end_rc "$g") || ! load_list "$g" || ! r=$(next_idx "$g") || \
        ! nab=$(idx_of "$g" C1p) || ! op=$(open_stage "$g"); then
-      unknown_wait "${g}log" "$g: $g.log could not be read; nothing is decided on it"; continue
+      log_alert "$g"; unknown_wait "${g}log" "$g: $g.log could not be read; nothing is decided on it"; continue
     fi
     known "${g}log"
     if [ "$rc" != none ]; then
@@ -986,11 +1018,11 @@ p2_ab_new() {   # profile 2's B stages, with the stages of p2_set4.stages after 
     split_lines K "$keys"
     for x in $s; do
       if [ "$x" = B3r ]; then   # the fourth set's single reading: by hand after the go/no-go and OOD (d91_set4.md step 7)
-        alert "p2_set4_invalid_$(mtime "$f")" "p2_set4.stages names B3r, the fourth test set's single reading. It never runs in the chain: OOD re-saves the detector after it. Run it by hand after the go/no-go (d91_set4.md step 7); list only B3q. Profile 2 waits until the file is fixed or removed."
+        alert "p2_set4_invalid_$(mtime "$f")_B3r" "p2_set4.stages names B3r, the fourth test set's single reading. It never runs in the chain: OOD re-saves the detector after it. Run it by hand after the go/no-go (d91_set4.md step 7); list only B3q. Profile 2 waits until the file is fixed or removed."
         nap "$POLL"; return 1
       fi
       if ! in_list "$x" "${K[@]}" || in_list "$x" smoke A0 "${AB2_HEAD[@]}" "${AB2_TAIL[@]}" "${HV[@]}" "${FIN[@]}"; then
-        alert "p2_set4_invalid_$(mtime "$f")" "p2_set4.stages names '$x', which is not a new stage of $P2/code/run_stage.m; profile 2 waits until the file is fixed or removed."
+        alert "p2_set4_invalid_$(mtime "$f")_${x//[!A-Za-z0-9_]/_}" "p2_set4.stages names '$x', which is not a new stage of $P2/code/run_stage.m; profile 2 waits until the file is fixed or removed."
         nap "$POLL"; return 1
       fi
       in_list "$x" "${extra[@]}" || extra+=("$x")
@@ -1051,11 +1083,15 @@ final_phase() {
   local g r F nlat nfull idle ld c
   for g in p1 p3 p2; do
     [ -f "$R/$g.abandon" ] && { say "$g given up: no LAT"; continue; }
-    [ -d "$(wt "$g")" ] && [ -f "$R/$g.log" ] || continue
+    [ -d "$(wt "$g")" ] || continue
+    log_req "$g"; [ $? = 1 ] && continue   # profile 2 never started
+    ml_guard "$g"   # a final MATLAB of an earlier takeover first; the log is read after it
     while complete "$g"; c=$?; [ "$c" = 2 ] || ! load_list "$g" || ! r=$(next_idx "$g") || ! nlat=$(idx_of "$g" LAT); do
-      unknown_wait "${g}final" "$g: $g.log could not be read before the final phase"
+      [ -f "$R/$g.abandon" ] && break
+      log_alert "$g"; unknown_wait "${g}final" "$g: $g.log could not be read before the final phase"
     done
     known "${g}final"
+    [ -f "$R/$g.abandon" ] && { say "$g given up: no LAT"; continue; }
     [ "$c" = 0 ] || { say "$g did not finish (stage ${F[$r]:-end}): no LAT"; continue; }
     nfull=${#F[@]}
     [ "$r" -lt "$nfull" ] || continue
@@ -1067,7 +1103,7 @@ final_phase() {
       commit_note "$g" "final ${F[$r]} to RPT"
       run_ml "$g" "$(stage_cmd "${F[@]:r:nfull-1-r}")"
     fi
-    until r=$(next_idx "$g"); do unknown_wait "${g}final" "$g: $g.log could not be read after the final stages"; done
+    until r=$(next_idx "$g"); do log_alert "$g"; unknown_wait "${g}final" "$g: $g.log could not be read after the final stages"; done
     if [ "$r" -gt $((nlat + 1)) ]; then
       if run_ml "$g" "startup; export_gui_bundle('$(cygpath -m "$V7")/profiles')"; then
         echo "##### STAGE BUNDLE done #####" >> "$R/$g.log"; say "$g: console bundle exported"
@@ -1083,7 +1119,7 @@ final_phase() {
 status() {
   local g r F f h rc op pi s
   for g in p1 p3 p2; do
-    [ -f "$R/$g.log" ] || { echo "$g: no log"; continue; }
+    log_req "$g" || { if [ $? = 1 ]; then echo "$g: no log"; else echo "$g: no log (unknown; nothing runs for it)"; fi; continue; }
     if ! load_list "$g" || ! r=$(next_idx "$g") || ! h=$(part_head "$g") || ! rc=$(end_rc "$g") || ! op=$(open_stage "$g"); then
       echo "$g: log could not be read (unknown)"; continue
     fi
@@ -1106,41 +1142,6 @@ status() {
 }
 
 usage() { echo "usage: bash v7_d91_takeover.sh <launcher PID> <p3 fix PID> [status]"; }
-
-# Checks (nothing is changed before they pass)
-case "$MODE" in run|status) ;; *) usage; exit 1;; esac
-[[ "$LPID" =~ ^[0-9]+$ ]] && [[ "$FPID" =~ ^[0-9]+$ ]] || { usage; exit 1; }
-[ -d "$R" ] || { say "$R missing; not started"; exit 1; }
-tw=$(cygpath -w "${TEMP:-/nonexistent}" 2>/dev/null)
-[ "$tw" = "$TEMP_WIN" ] || { say "TEMP is '$tw', not $TEMP_WIN (the parallel turn file would split); not started"; exit 1; }
-T=$(cygpath -u "$TEMP")
-START_T=$EPOCHSECONDS
-BOOT=""
-for i in 1 2 3 4 5; do
-  BOOT=$(sysq boot | tr -dc '0-9')
-  [[ "$BOOT" =~ ^[0-9]{9,}$ ]] && [ "$BOOT" -le "$START_T" ] && break
-  BOOT=""; sleep "$BOOT_RETRY_S"
-done
-[ -n "$BOOT" ] || { say "the boot time could not be read (5 tries); not started (a reboot could not be told from a running chain)"; exit 1; }
-if [ "$MODE" = status ]; then status; exit 0; fi
-MAIN=$$
-for x in "$LPID launcher v7_d86_launch" "$FPID p3_fix_script v7_d87_p3fix"; do
-  read -r p n s <<< "$x"
-  c=$(q_known cmdline "$p") || { say "the command line of PID $p could not be read (5 tries); not started"; exit 1; }
-  [ "$c" != none ] && runs_script "$c" "$s" && { say "the ${n//_/ } (PID $p) still runs: $c; not started"; exit 1; }
-done
-for i in 1 2 3 4 5; do c=$(foreign_seen_twice) && break; c="?"; sleep "$BOOT_RETRY_S"; done
-[ "$c" != "?" ] || { say "the process scan for old scripts could not be read (5 tries); not started"; exit 1; }
-[ -z "$c" ] || { say "bash processes run old run scripts outside V7T_ALLOW_PIDS ('$ALLOW_PIDS', each created within $ALLOW_WIN_S s after p1's launcher part in this boot): $(tr '\n' ';' <<< "$c") not started"; exit 1; }
-[ -f "$MATLAB" ] || { say "MATLAB not found at $MATLAB; not started"; exit 1; }
-[ -f "$R/code_commit.txt" ] || { say "$R/code_commit.txt missing; not started"; exit 1; }
-for g in p1 p3 p2; do
-  w=$(wt "$g")
-  [ "$g" = p2 ] && [ ! -d "$w" ] && continue
-  [ -d "$w" ] || { say "worktree $w missing; not started"; exit 1; }
-  b=$(git -C "$w" symbolic-ref --short -q HEAD)
-  [ "$b" = "$(br "$g")" ] || { say "$w is on '$b', not $(br "$g"); not started"; exit 1; }
-done
 lock_take() {   # takeover.lock created atomically (mkdir section, noclobber); a live takeover's lock refuses
   local d="$LOCK.d" lt age lp="" c m me=""
   if ! mkdir "$d" 2>/dev/null; then
@@ -1174,33 +1175,13 @@ lock_take() {   # takeover.lock created atomically (mkdir section, noclobber); a
   fi
   rmdir "$d"
 }
-lock_take || exit 1
 alive() { local g; for g in p1 p3 p2; do [ -n "${TPID[$g]:-}" ] && kill -0 "${TPID[$g]}" 2>/dev/null && return 0; done; return 1; }
-trap 'alive || rm -f "$LOCK"' EXIT   # a live track keeps the lock until it goes stale
-retire_launcher || { say "the SRC line of $R/code_commit.txt could not be retired; not started"; exit 1; }
-rmdir "$GATE" 2>/dev/null   # left by a takeover that died inside it
-rm -f "$R"/takeover_beat_* "$R"/takeover_end_*
-[ -f "$R/run.lock" ] || echo "$(cat "/proc/$$/winpid" 2>/dev/null || echo "$$")" > "$R/run.lock"
-hb
-( while kill -0 $$ 2>/dev/null; do hb; sleep "$HB_S"; done ) &   # heartbeat while this script lives (the tracks beat in their own waits too)
-retire_old
-say "v7 takeover started (boot $(date -d @"$BOOT" '+%F %T'), TEMP $tw, poll $POLL s, allowed launcher subshells: ${ALLOW_PIDS:-none})"
-for g in p1 p3 p2; do
-  [ -f "$R/$g.log" ] || continue
-  if load_list "$g" && r=$(next_idx "$g") && h=$(part_head "$g"); then say "$g: next ${F[$r]:-end} (index $r); $h"
-  else say "$g: $g.log could not be read yet"; fi
-done
-
 # Tracks: each beats in its waits and writes its end file when it ends on purpose
 start_track() {
   printf '%s\n' "$EPOCHSECONDS" > "$R/takeover_beat_$1"
   { TRACK=$1; hb; "${@:2}"; printf '%s\n' "$EPOCHSECONDS" > "$R/takeover_end_$TRACK"; } &
   TPID[$1]=$!
 }
-start_track p1 track_p1
-start_track p3 track_run p3
-start_track p2 track_p2
-for g in p1 p3 p2; do wp=""; read -r wp < "/proc/${TPID[$g]}/winpid" 2>/dev/null; echo "$g ${TPID[$g]} ${wp:-?}"; done > "$R/takeover_tracks.txt"
 DIED=""
 watch_tracks() {   # a track whose beat is old: alert; one gone without its end file: alert, and listed in DIED
   local g t
@@ -1215,19 +1196,80 @@ watch_tracks() {   # a track whose beat is old: alert; one gone without its end 
     fi
   done
 }
-while alive; do
-  turn_check
-  if c=$(foreign_seen_twice) && [ -n "$c" ]; then scripts_alert "$c"; fi
+
+main() {   # the run section, called on the last line once bash has parsed the whole file
+  local tw i x p n s c g w b h r F wp
+  # Checks (nothing is changed before they pass)
+  case "$MODE" in run|status) ;; *) usage; exit 1;; esac
+  [[ "$LPID" =~ ^[0-9]+$ ]] && [[ "$FPID" =~ ^[0-9]+$ ]] || { usage; exit 1; }
+  [ -d "$R" ] || { say "$R missing; not started"; exit 1; }
+  tw=$(cygpath -w "${TEMP:-/nonexistent}" 2>/dev/null)
+  [ "$tw" = "$TEMP_WIN" ] || { say "TEMP is '$tw', not $TEMP_WIN (the parallel turn file would split); not started"; exit 1; }
+  T=$(cygpath -u "$TEMP")
+  START_T=$EPOCHSECONDS
+  BOOT=""
+  for i in 1 2 3 4 5; do
+    BOOT=$(sysq boot | tr -dc '0-9')
+    [[ "$BOOT" =~ ^[0-9]{9,}$ ]] && [ "$BOOT" -le "$START_T" ] && break
+    BOOT=""; sleep "$BOOT_RETRY_S"
+  done
+  [ -n "$BOOT" ] || { say "the boot time could not be read (5 tries); not started (a reboot could not be told from a running chain)"; exit 1; }
+  if [ "$MODE" = status ]; then status; exit 0; fi
+  MAIN=$$
+  for x in "$LPID launcher v7_d86_launch" "$FPID p3_fix_script v7_d87_p3fix"; do
+    read -r p n s <<< "$x"
+    c=$(q_known cmdline "$p") || { say "the command line of PID $p could not be read (5 tries); not started"; exit 1; }
+    [ "$c" != none ] && runs_script "$c" "$s" && { say "the ${n//_/ } (PID $p) still runs: $c; not started"; exit 1; }
+  done
+  for i in 1 2 3 4 5; do c=$(foreign_seen_twice) && break; c="?"; sleep "$BOOT_RETRY_S"; done
+  [ "$c" != "?" ] || { say "the process scan for old scripts could not be read (5 tries); not started"; exit 1; }
+  [ -z "$c" ] || { say "bash processes run old run scripts outside V7T_ALLOW_PIDS ('$ALLOW_PIDS', each created within $ALLOW_WIN_S s after p1's launcher part in this boot): $(tr '\n' ';' <<< "$c") not started"; exit 1; }
+  [ -f "$MATLAB" ] || { say "MATLAB not found at $MATLAB; not started"; exit 1; }
+  [ -f "$R/code_commit.txt" ] || { say "$R/code_commit.txt missing; not started"; exit 1; }
+  for g in p1 p3 p2; do
+    w=$(wt "$g")
+    [ "$g" = p2 ] && [ ! -d "$w" ] && continue
+    [ -d "$w" ] || { say "worktree $w missing; not started"; exit 1; }
+    b=$(git -C "$w" symbolic-ref --short -q HEAD)
+    [ "$b" = "$(br "$g")" ] || { say "$w is on '$b', not $(br "$g"); not started"; exit 1; }
+  done
+  lock_take || exit 1
+  trap 'alive || rm -f "$LOCK"' EXIT   # a live track keeps the lock until it goes stale
+  retire_launcher || { say "the SRC line of $R/code_commit.txt could not be retired; not started"; exit 1; }
+  rmdir "$GATE" 2>/dev/null   # left by a takeover that died inside it
+  rm -f "$R"/takeover_beat_* "$R"/takeover_end_*
+  [ -f "$R/run.lock" ] || echo "$(cat "/proc/$$/winpid" 2>/dev/null || echo "$$")" > "$R/run.lock"
+  hb
+  ( while kill -0 $$ 2>/dev/null; do hb; main_check; sleep "$HB_S"; done ) &   # heartbeat while this script lives (the tracks beat in their own waits too)
   retire_old
+  say "v7 takeover started (boot $(date -d @"$BOOT" '+%F %T'), TEMP $tw, poll $POLL s, allowed launcher subshells: ${ALLOW_PIDS:-none})"
+  for g in p1 p3 p2; do
+    log_req "$g" || { [ $? = 2 ] && say "$g: $g.log missing (unknown; nothing runs for it)"; continue; }
+    if load_list "$g" && r=$(next_idx "$g") && h=$(part_head "$g"); then say "$g: next ${F[$r]:-end} (index $r); $h"
+    else say "$g: $g.log could not be read yet"; fi
+  done
+
+  start_track p1 track_p1
+  start_track p3 track_run p3
+  start_track p2 track_p2
+  for g in p1 p3 p2; do wp=""; read -r wp < "/proc/${TPID[$g]}/winpid" 2>/dev/null; echo "$g ${TPID[$g]} ${wp:-?}"; done > "$R/takeover_tracks.txt"
+  while alive; do
+    hb   # the main bash's beat (takeover_beat_main) at every pass, and in its nap
+    turn_check
+    if c=$(foreign_seen_twice) && [ -n "$c" ]; then scripts_alert "$c"; fi
+    retire_old
+    watch_tracks
+    nap "$POLL"
+  done
+  wait "${TPID[p1]}" "${TPID[p3]}" "${TPID[p2]}"
   watch_tracks
-  nap "$POLL"
-done
-wait "${TPID[p1]}" "${TPID[p3]}" "${TPID[p2]}"
-watch_tracks
-if [ -n "$DIED" ]; then
-  say "tracks ended; final phase skipped: track $DIED died (ALERT_takeover_track_*_died); start the takeover again with the same launch command"
-  exit 1
-fi
-say "tracks ended"
-final_phase
-say "v7 done"
+  if [ -n "$DIED" ]; then
+    say "tracks ended; final phase skipped: track $DIED died (ALERT_takeover_track_*_died); start the takeover again with the same launch command"
+    exit 1
+  fi
+  say "tracks ended"
+  final_phase
+  say "v7 done"
+}
+
+main "$@"; exit $?

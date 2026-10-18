@@ -7,16 +7,17 @@
 #
 #   bash d91_takeover_test.sh [sandbox dir] [scenario ...]
 # Scenarios: rename status normal p1crash rerun accept rerungate reboot oldlaunch p1gone p1wait
-# orphan mainkill slowexec zombie turn unknown unread mlstub watchdog forcegate p2gate refuse
-# (default: all). oldlaunch runs a copy of v7_d86_launch.sh (as old_launcher_copy.sh, so that no
+# orphan mainkill slowexec zombie turn unknown unread nolog mlstub watchdog mainstall overwrite
+# forcegate p2gate refuse (default: all). oldlaunch runs a copy of v7_d86_launch.sh (as old_launcher_copy.sh, so that no
 # process scan takes it for the launcher) in the sandbox, with its PowerShell queries replaced by a
 # function and every V7L_* variable in the sandbox.
 HERE=$(cd "$(dirname "$0")" && pwd)
 TK="$HERE/v7_d91_takeover.sh"
 SB=${1:-"/c/Users/ADISUL~1/AppData/Local/Temp/claude/C--Users-Adi-Suliman-uav-gcs-adaptive-secure-comms/0ff3360f-912b-4701-bfb0-77d6917b5fc3/scratchpad/d91_takeover_test"}
 shift 2>/dev/null
-SCEN=("$@"); [ "${#SCEN[@]}" -gt 0 ] || SCEN=(rename status normal p1crash rerun accept rerungate reboot oldlaunch p1gone p1wait orphan mainkill slowexec zombie turn unknown unread mlstub watchdog forcegate p2gate refuse)
-OLD_SCRIPTS=(v7_d86_launch.sh v7_d87_p3fix.sh v7_d87_redo.sh v7_d87_resume.ps1 v7_d83_launch.sh v7_fix_resume.sh)
+SCEN=("$@"); [ "${#SCEN[@]}" -gt 0 ] || SCEN=(rename status normal p1crash rerun accept rerungate reboot oldlaunch p1gone p1wait orphan mainkill slowexec zombie turn unknown unread nolog mlstub watchdog mainstall overwrite forcegate p2gate refuse)
+OLD_SCRIPTS=(v7_d86_launch.sh v7_d87_p3fix.sh v7_d87_redo.sh v7_d87_resume.ps1 v7_d83_launch.sh v7_fix_resume.sh
+             v7_d87_b3m.sh v7_wait_c1p_then_fix.sh v7_guard_c1p_fail.sh)
 LIVE_LOGS="/c/Users/Adi Suliman/uav-gcs-logs"
 LIVE_REPO="/c/Users/Adi Suliman/uav-gcs-adaptive-secure-comms"
 case "$(cygpath -m "$SB")" in
@@ -97,7 +98,7 @@ setup() {   # fresh sandbox $SB/$1: logs, git repository with v7-dev and v7-p3 w
   unset V7T_ALLOW_PIDS
   [ "$V7T_LOGS" != "$LIVE_LOGS" ] && [ "$V7T_P1" != "/c/Users/Adi Suliman/uav-gcs-v7" ] || { echo "not a sandbox; stopped"; exit 1; }
 }
-tk_start() { bash "$TK" 24172 49732 >> "$S/takeover.log" 2>&1 & TKP=$!; disown "$TKP"; }
+tk_start() { bash "${TKRUN:-$TK}" 24172 49732 >> "$S/takeover.log" 2>&1 & TKP=$!; disown "$TKP"; }   # TKRUN: a copy of the script
 tk_wait()  { until_t "${1:-240}" bash -c "! kill -0 $TKP 2>/dev/null"; }
 tk_kill()  {
   local p
@@ -234,18 +235,25 @@ t_rerun() {
   echo "B2F C1p" > "$RD/p3_brerun.go"
   until_t 40 alerted p3_rerun_invalid; check "alert on a C stage in the go file" alerted p3_rerun_invalid
   check "nothing run on it" bash -c "! grep -q 'uav-gcs-v7-p3 call' '$S/ctl/calls.log'"
+  local x
+  for x in B3m B3q B3r; do   # stages of run_stage.m, but test-set stages
+    sleep 1.1; echo "B2F $x" > "$RD/p3_brerun.go"
+    until_t 40 bash -c "grep -lq \"names '$x', a test-set stage\" '$RD'/ALERT_p3_rerun_invalid_*.txt"
+    check "$x in the go file: refused, the alert naming d91_set4.md step 4" bash -c "grep -h \"names '$x', a test-set stage\" '$RD'/ALERT_p3_rerun_invalid_*.txt | grep -q 'd91_set4.md step 4'"
+  done
+  check "nothing run on the test-set stages" bash -c "! grep -q 'uav-gcs-v7-p3 call' '$S/ctl/calls.log'"
   touch "$S/ctl/fail_uav-gcs-v7-p3_B4"; sleep 1.1
-  echo "B2F B3 B3a B4 OOD B4s B3m" > "$RD/p3_brerun.go"
+  echo "B2F B3 B3a B4 OOD B4s" > "$RD/p3_brerun.go"
   until_t 40 grep -q '^##### rerun ended rc=1' "$RD/p3.log"
-  check "rerun part: A0 first, its list and request id" grep -q '^##### PART [0-9_]* takeover-rerun SRC [0-9a-f]* FROM 6 B2F A0 1 RERUN B2F,B3,B3a,B4,OOD,B4s,B3m GO [0-9a-f]* #####$' "$RD/p3.log"
-  check "rerun MATLAB call" grep -q "uav-gcs-v7-p3 call run_stage('A0','B2F','B3','B3a','B4','OOD','B4s','B3m')" "$S/ctl/calls.log"
+  check "rerun part: A0 first, its list and request id" grep -q '^##### PART [0-9_]* takeover-rerun SRC [0-9a-f]* FROM 6 B2F A0 1 RERUN B2F,B3,B3a,B4,OOD,B4s GO [0-9a-f]* #####$' "$RD/p3.log"
+  check "rerun MATLAB call" grep -q "uav-gcs-v7-p3 call run_stage('A0','B2F','B3','B3a','B4','OOD','B4s')" "$S/ctl/calls.log"
   check "rerun failure recorded" grep -q '^##### rerun ended rc=1' "$RD/p3.log"
   until_t 40 alerted p3_rerun_failed; check "alert on the failed rerun" alerted p3_rerun_failed
   touch "$S/ctl/p1_release_SURV"; until_t 40 test -f "$S/ctl/p1_surv3_at"; sleep 4
   check "after a failed rerun C1p does not start" bash -c "! grep -q 'FROM 13 C1p' '$RD/p3.log'"
   sleep 1.1; touch "$RD/p3_brerun.go"
   until_t 40 grep -q '^##### rerun ended rc=0' "$RD/p3.log"
-  check "a new version of the go file reruns its whole list" [ "$(grep -c "uav-gcs-v7-p3 call run_stage('A0','B2F','B3','B3a','B4','OOD','B4s','B3m')" "$S/ctl/calls.log")" = 2 ]
+  check "a new version of the go file reruns its whole list" [ "$(grep -c "uav-gcs-v7-p3 call run_stage('A0','B2F','B3','B3a','B4','OOD','B4s')" "$S/ctl/calls.log")" = 2 ]
   touch "$S/ctl/fail_uav-gcs-v7-p3_C1p"
   until_t 40 alerted p3_failed; check "alert on P3's failed C1p" alerted p3_failed
   check "C part after the rerun" bash -c "[ \$(grep -n 'rerun ended rc=0' '$RD/p3.log' | tail -1 | cut -d: -f1) -lt \$(grep -n 'FROM 13 C1p A0 0' '$RD/p3.log' | tail -1 | cut -d: -f1) ]"
@@ -288,6 +296,21 @@ t_rerungate() {   # P3's rerun: not while profile 1 is in C1p..C1c, its own memo
   check "p3's C1p after profile 1's SURV3" lt "$a" "$b"
   check "v7 done" has "$S/takeover.log" 'v7 done'
   check "no two MATLAB in one worktree" bash -c "! grep -q CONCURRENT '$S/ctl/calls.log'"
+
+  setup rerungate2 || return   # profile 1 given up while its launcher chain is between C1p and C1c
+  local t
+  echo "B2F B3" > "$RD/p3_brerun.go"
+  tk_start; FAIL_AT=C1c HOLD_AT=C1c D=0.2 p1_fake
+  until_t 40 test -f "$S/ctl/p1_C1p_at"
+  until_t 60 grep -q 'p3: B-stage rerun waits until profile 1 is past C1c' "$S/takeover.log"
+  touch "$RD/p1.abandon"
+  until_t 60 grep -q 'p1: track ended (p1.abandon)' "$S/takeover.log"; sleep 15   # many polls (1 s each)
+  check "p1.abandon while its chain is between C1p and C1c: no rerun" bash -c "grep -q 'p1: track ended (p1.abandon)' '$S/takeover.log' && ! grep -q 'uav-gcs-v7-p3 call' '$S/ctl/calls.log'"
+  t=$(date +%s%N); touch "$S/ctl/p1_release_C1c"
+  until_t 60 grep -q 'uav-gcs-v7-p3 start A0' "$S/ctl/calls.log"
+  b=$(ns_of "$S" uav-gcs-v7-p3 start A0)
+  check "the rerun once profile 1's chain has ended" bash -c "[ -n '$b' ] && [ '$t' -lt '$b' ] && grep -q '^##### chain ended rc=1' '$RD/p1.log'"
+  tk_kill
 }
 
 t_reboot() {
@@ -865,6 +888,67 @@ t_watchdog() {   # a stalled track and a died track: alerts, no final phase; a r
   for g in p1 p3 p2; do check "$g: final part LAT..RPT and the bundle" final_ok "$g"; done
   a=$(cat "$S/ctl/p1_surv3_at"); b=$(ns_of "$S" uav-gcs-v7-p3 start C1p)
   check "p3's C1p after profile 1's SURV3" lt "$a" "$b"
+  check "no two MATLAB in one worktree" bash -c "! grep -q CONCURRENT '$S/ctl/calls.log'"
+}
+
+t_nolog() {   # a missing p3.log is unknown: never index 0 (no rebuild from A0), an alert, nothing runs for it
+  setup nolog || return
+  local out
+  mv "$RD/p3.log" "$S/p3.log.away"
+  tk_start; until_t 30 grep -q 'p3: p3.log missing (unknown' "$S/takeover.log"
+  check "logged as missing at the start" grep -q 'p3: p3.log missing (unknown' "$S/takeover.log"
+  until_t 40 alerted log_missing_p3; check "p3.log missing: alert" alerted log_missing_p3
+  D=0.05 p1_fake; until_t 60 test -f "$S/ctl/p1_end_at"; sleep 4
+  check "nothing run for p3 and no p3.log written" bash -c "! grep -q 'uav-gcs-v7-p3 call' '$S/ctl/calls.log' && [ ! -e '$RD/p3.log' ]"
+  out=$(bash "$TK" 24172 49732 status 2>&1)
+  check "status: p3 without its log is unknown" grep -q '^p3: no log (unknown' <<< "$out"
+  mv "$S/p3.log.away" "$RD/p3.log"
+  until_t 60 grep -q 'uav-gcs-v7-p3 start C1p' "$S/ctl/calls.log"
+  check "p3.log back: p3 goes on at C1p" grep -q '^##### PART [0-9_]* takeover SRC [0-9a-f]* FROM 13 C1p A0 0 #####$' "$RD/p3.log"
+  check "no rerun or B stages for p3" bash -c "! grep -q 'uav-gcs-v7-p3 start A0' '$S/ctl/calls.log'"
+  tk_kill
+}
+
+t_mainstall() {   # only the main bash stopped: the tracks raise the main-stall alert, once for its beat
+  setup mainstall || return
+  export V7T_STALL_S=30
+  local t t2
+  tk_start; HOLD_AT=SURV D=0.2 p1_fake
+  until_t 30 bash -c "[ \"\$(grep -c '^p[123] [0-9]' '$RD/takeover_tracks.txt' 2>/dev/null)\" = 3 ]"
+  sleep 3
+  check "the main bash beats, no stall alert" bash -c "[ \$(( \$(date +%s) - \$(cat '$RD/takeover_beat_main') )) -lt 20 ] && ! ls '$RD'/ALERT_takeover_main_stalled_* >/dev/null 2>&1"
+  kill -STOP "$TKP"; sleep 4
+  t=$(cat "$RD/takeover_beat_main"); sleep 3; t2=$(cat "$RD/takeover_beat_main")
+  check "main bash stopped (SIGSTOP): its beat stays" [ "$t" = "$t2" ]
+  until_t 60 test -f "$RD/ALERT_takeover_main_stalled_$t.txt"
+  check "stall alert for that beat" test -f "$RD/ALERT_takeover_main_stalled_$t.txt"
+  check "the alert says how to stop and restart" bash -c "grep -q 'Stopping the takeover' '$RD/ALERT_takeover_main_stalled_$t.txt' && grep -q 'start it again with the same launch command' '$RD/ALERT_takeover_main_stalled_$t.txt'"
+  sleep 5
+  check "raised once for that beat (one log line)" [ "$(grep -c "ALERT takeover_main_stalled_$t:" "$S/takeover.log")" = 1 ]
+  check "the tracks beat on meanwhile" bash -c "[ \$(( \$(date +%s) - \$(cat '$RD/takeover_beat_p3') )) -lt 20 ]"
+  kill -CONT "$TKP"
+  touch "$S/ctl/p1_release_SURV"
+  tk_wait 240 || bad "takeover did not end in time"
+  check "after SIGCONT the run ends normally" has "$S/takeover.log" 'v7 done'
+  for g in p1 p3 p2; do check "$g: final part LAT..RPT and the bundle" final_ok "$g"; done
+  check "no two MATLAB in one worktree" bash -c "! grep -q CONCURRENT '$S/ctl/calls.log'"
+  export V7T_STALL_S=60
+}
+
+t_overwrite() {   # the script file overwritten (cp, another length) while the takeover runs: it runs on as parsed
+  setup overwrite || return
+  local run="$S/run/v7_d91_takeover.sh" i
+  mkdir -p "$S/run"; cp "$TK" "$run"
+  { for i in $(seq 1 2500); do echo "echo STRAY_LINE_RAN >> '$S/stray'"; done; cat "$TK"; } > "$S/longer.sh"
+  TKRUN=$run tk_start
+  until_t 30 grep -q 'v7 takeover started' "$S/takeover.log"; sleep 2
+  cp "$S/longer.sh" "$run"
+  check "the running script overwritten in place by a longer file" bash -c "[ \$(stat -c %s '$run') -gt \$(stat -c %s '$TK') ]"
+  D=0.2 p1_fake
+  tk_wait 240 || bad "takeover did not end in time"
+  check "no line of the new file ran" bash -c "[ ! -e '$S/stray' ] && ! grep -q 'STRAY_LINE_RAN\|command not found\|syntax error' '$S/takeover.log'"
+  check "v7 done" has "$S/takeover.log" 'v7 done'
+  for g in p1 p3 p2; do check "$g: final part LAT..RPT and the bundle" final_ok "$g"; done
   check "no two MATLAB in one worktree" bash -c "! grep -q CONCURRENT '$S/ctl/calls.log'"
 }
 
