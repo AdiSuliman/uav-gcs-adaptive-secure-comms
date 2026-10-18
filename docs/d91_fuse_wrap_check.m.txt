@@ -149,11 +149,12 @@ for m = 1:size(mons, 1)
         on = (1:T) >= Rf.onset(:) + 1;
         Xf = Rf.af & on; k = ~Rf.ev;
         A = (1:T) >= Rf.tw(:) & (1:T) - Rf.tw(:) <= 11 & (1:T) < Rf.tw2(:);
-        fprintf('  antenna fault, %d episodes: recall %.1f%% of the cycles from the onset; %.1f%% within 11 cycles after the jump, %.1f%% otherwise\n', ...
+        B = ~A & (1:T) < Rf.tw2(:);                          % elsewhere: before the second jump
+        fprintf('  antenna fault, %d episodes: recall %.1f%% of the cycles from the onset; %.1f%% within 11 cycles after the jump, %.1f%% elsewhere before the second jump\n', ...
             sum(k), 100 * sum(Xf(k, :), 'all') / sum(on(k, :), 'all'), 100 * sum(Xf(k, :) & A(k, :), 'all') / max(sum(on(k, :) & A(k, :), 'all'), 1), ...
-            100 * sum(Xf(k, :) & ~A(k, :), 'all') / max(sum(on(k, :) & ~A(k, :), 'all'), 1));
+            100 * sum(Xf(k, :) & B(k, :), 'all') / max(sum(on(k, :) & B(k, :), 'all'), 1));
         Ga = max((1:T) - Rf.onset(:), 1);                    % stratum: cycles since the onset
-        [rq, cq] = age_excess(Rf.af(k, :), on(k, :) & A(k, :), on(k, :) & ~A(k, :), Ga(k, :), rs);
+        [rq, cq] = age_excess(Rf.af(k, :), on(k, :) & A(k, :), on(k, :) & B(k, :), Ga(k, :), rs);
         fprintf('    recall within 11 cycles after the jump less elsewhere, stratified by the cycles since the onset: %+.2f [%+.2f, %+.2f] points\n', rq, cq);
     end
   catch e
