@@ -1128,7 +1128,7 @@ Channel model: the flat channel fails, the link runs the delay line → PASS; re
 **Adoption.**
 - The user stopped the run at 13:28 (the launcher's process trees). Profile 1 had finished through B4; its OOD was cut at the eighth of ten held-out threats (p1.log:1301). Profile 3 had finished through B3; its B3a was cut (p3.log:1080-1084).
 - The redo started at 14:26 on `725a2f1` (`docs/runs/v7_d87_redo_20261017.sh`; p1.log:1302, p3.log:1084). Per profile: A0, A6, B1, B2, B2F, then the second test set's A6 and B1 from its repaired dataset, logged as B3n. Both profiles finished at 16:14 (v7_d87_redo.log). The best epoch's validation macro-F1 was 0.8131 on profile 1 and 0.8062 on profile 3 (p1.log:1459, p3.log:1244).
-- A HOLD file paused the redo at 14:55 for D89. The redo's own resume on `725a2f1` was refused as designed at 16:14, because code_commit.txt had been set to a placeholder SRC (v7_d86_launch.log 16:14:24).
+- A HOLD file paused the redo at 14:55 for D89. At 15:55 code_commit.txt's SRC was set to a placeholder ('pending-d89-mmse-fix') and the HOLD was released. The redo then ran its own fresh step: the second test set's A6 and B1, logged as B3n, 18.0 min on each profile (p1.log:1501-1576, p3.log:1283-1358). The fresh step reads nothing D89 changes. The redo's own resume on `725a2f1` was then refused as designed at 16:14 (v7_d86_launch.log 16:14:24).
 
 ## D89 — The MMSE predictor's frequency hypotheses and arrival search, its cost in the cycle, the delay-line clean row
 **Why (2026-10-17; note docs/d89_mmse.md).** An independent review of d87 and d88 confirmed 9 findings (session file rev88_confirmed.json). Four concern the new predictor, which C1p bakes into the pools (d89 secs. 1-4):
@@ -1139,8 +1139,7 @@ Channel model: the flat channel fails, the link runs the delay line → PASS; re
 **Decision.** The search tests the frequency hypotheses that the pilot spacing leaves ambiguous, inside the receiver's ±25 ppm window, and searches the arrival jointly (d89 sec. 1). The predictor is timed in the cycle, and its search is made cheap (d89 sec. 2). V13 gains a delay-line clean row and is read as the profiles deploy, with its verdict in the result (d89 secs. 3-4). `MODEL_TAG` becomes `v7-D89`, so no C1p checkpoint built with the d88 predictor is reused.
 **Evidence.** V13 12 of 12 rows PASS for n_rx 3 (profile 1's params, params_id add18af2...) and for n_rx 4 (profile 3's, 7ecc49e9...) (d89 sec. 5). The reduced C1p check passes: a 23 dB tone at no_action reads `mmse_pred` +20.5 dB (p10 +4.2 dB), against +14.4 dB (p10 +2.0 dB) at `725a2f1` (d89 sec. 5). Full suite 174/174 (d89 sec. 5).
 **Adoption.**
-- d89 merged into v7-merge as `9b5c9f1`; v7-merge merged into v7-dev (`208602b`) and v7-p3 (`29510e7`).
-- Because of the HOLD file, the fresh step (the second test set's A6 and B1) was run by hand in both profiles with B3n markers appended (p1.log:1501-1576, p3.log:1283-1358).
+- v7-merge fast-forwarded to d89-mmse's `9b5c9f1`; v7-merge merged into v7-dev (`208602b`) and v7-p3 (`29510e7`).
 - The run was resumed at 16:42 on `9b5c9f1` with `docs/runs/v7_d87_resume_20261017.ps1`. code_commit.txt: SRC `9b5c9f1beec4bef1ceadaa18068239c36d82c77a`, p1 v7-dev `208602b`, p3 v7-p3 `29510e7` (v7_d86/code_commit.txt).
 - Both chains restarted at B3 with A0 first (v7_d86_launch.log 16:42:13; p1.log:1577, p3.log:1359).
 - The launcher's `stage_pids` was edited at 16:42 to skip command lines that name B3m, so the isolated B3m copies do not block a resume.

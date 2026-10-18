@@ -930,7 +930,7 @@ Sources for the entries below: the profile logs `p1.log`, `p3.log`, `p1_b3m.log`
   - Both went to the audit.
 - **10:20, the audit's blocker** (D88): link feature 13 (`align`) was scrambled in every dataset. The user stopped the run at 13:28: profile 1 had finished through B4, its OOD cut at the eighth held-out threat (p1.log:1301); profile 3 through B3, its B3a cut.
 - **14:26, the redo** on v7-merge `725a2f1` (c2c8b8b + d87 + d88, suite 172/172). Datasets repaired with backups; profiles merged (v7-dev `aea4cc1`, v7-p3 `7546c4e`). Script `docs/runs/v7_d87_redo_20261017.sh` (p1.log:1302, p3.log:1084).
-- **14:55, HOLD.** The review of d87 and d88 confirmed 9 findings; the four on the MMSE predictor (D89) had to land before C1p. The fresh step was run by hand with B3n markers (p1.log:1501, p3.log:1283).
+- **14:55, HOLD.** The review of d87 and d88 confirmed 9 findings; the four on the MMSE predictor (D89) had to land before C1p. At 15:55 the HOLD was released, with code_commit.txt's SRC set to a placeholder. The redo then ran its fresh step, logged as B3n (p1.log:1501, p3.log:1283), and its resume on `725a2f1` was refused at 16:14, as designed.
 - **15:55, redo done** on both profiles.
   - The best epoch's validation macro-F1: 0.8131 on profile 1, 0.8062 on profile 3 (p1.log:1459, p3.log:1244).
   - B2F chose the latch off on both: profile 1 fused 93.43% against latched 92.06% (:1496); profile 3 93.01% against 90.66% (p3.log:1278).
