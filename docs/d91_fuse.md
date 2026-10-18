@@ -1024,5 +1024,82 @@ two places, in opposite directions:
   can make deploying phi = 1 easier.
 
 <!-- PHI RESULTS -->
-Pending.
+**VERDICT phi (both profiles, 19-Oct-2026 01:16:33): deploy branch evidence, phi = 1: phi not kept on both profiles, phi = 1 passes the adoption rule on both**
+
+### Profile 1
+
+```
+===== d91 phi comparison, p1, 18-Oct-2026 20:18:16: N 12, lambda 1e-03, code C:\Users\ADISUL~1\d91q\fuse\eb87297\code =====
+this code rebuilds the checkpoint's windows and phi columns: 1 (4.9 min)
+
+KPI 1 threshold of the base reading 0 dB; branch evidence against the base reproduces m_all's M4 row: 1
+phi = 1 columns (iso_t iso_db iso_margin iso_agree gl_llr gl_db gl_age gl_margin ps_k_weak ps_k_strong ps_k_contrast ps_sd_weak ps_sd_contrast ps_n br_w br_db br_len br_nref): 1.9 min
+  OOF branch evidence, phi = 1: 13.1 min
+phi over the fit set: median 1.00, share below 0.5 5.2%; median by speed [0-23 23-60 60-120 >=120 km/h] [1 1 1 1]
+(i) out of fold, branch evidence less branch evidence, phi = 1: all -0.00 [-0.03, +0.02], above +0.00 [-0.03, +0.03], clean as threat -0.01 [-0.06, +0.05], as lost branch +0.00 [-0.02, +0.03], F1 fault -0.06 [-0.16, +0.03], shadowing -0.08 [-0.18, +0.01], K<=0 fault -0.07 [-0.42, +0.28], shadowing -0.47 [-0.91, -0.06] -> keep phi no
+    branch evidence, phi = 1 against the base: all +0.64 [+0.52, +0.76], above +0.64 [+0.51, +0.76], clean as threat -0.29 [-0.42, -0.15], as lost branch -0.23 [-0.36, -0.10], F1 fault +5.21 [+4.21, +6.24], shadowing +0.47 [+0.06, +0.87], K<=0 fault +3.45 [+0.91, +6.05], shadowing -0.07 [-1.68, +1.42] -> rule yes
+    branch evidence against the base:            all +0.64 [+0.52, +0.76], above +0.64 [+0.52, +0.77], clean as threat -0.29 [-0.43, -0.15], as lost branch -0.23 [-0.36, -0.10], F1 fault +5.14 [+4.16, +6.20], shadowing +0.39 [-0.02, +0.80], K<=0 fault +3.38 [+0.78, +6.07], shadowing -0.54 [-2.17, +0.96] -> rule yes
+  set val    fault F1 base 85.74%: branch evidence +5.65, phi = 1 +5.91
+  set test   fault F1 base 85.73%: branch evidence +4.73, phi = 1 +4.71
+  set fresh  fault F1 base 87.24%: branch evidence +4.48, phi = 1 +4.58
+  set fresh2 fault F1 base 84.35%: branch evidence +5.80, phi = 1 +5.81
+  fault recall 5 dB               ( 1345 frames): base 20.9%, branch evidence 52.0%, phi = 1 52.3%
+  fault recall 8.7 dB             ( 1344 frames): base 56.6%, branch evidence 79.8%, phi = 1 80.1%
+  fault recall K >= 10 dB         ( 4515 frames): base 86.1%, branch evidence 96.3%, phi = 1 96.3%
+  fault recall K < 0 dB           ( 2033 frames): base 74.8%, branch evidence 79.8%, phi = 1 79.8%
+  fault recall age >= 12          ( 2495 frames): base 75.0%, branch evidence 90.7%, phi = 1 90.9%
+  fault recall age 0-2            ( 2112 frames): base 70.8%, branch evidence 76.6%, phi = 1 76.5%
+  fault recall hover (< 23 km/h)  ( 1537 frames): base 77.9%, branch evidence 87.5%, phi = 1 87.7%
+  nested outer fold 1: inner all -0.02 [-0.05, +0.02], above -0.02 [-0.05, +0.02], clean as threat +0.02 [-0.03, +0.08], as lost branch +0.01 [-0.02, +0.04], F1 fault -0.11 [-0.28, +0.04], shadowing -0.04 [-0.18, +0.08], K<=0 fault -0.58 [-1.15, -0.05], shadowing -0.18 [-0.82, +0.37] -> keep phi no (25.0 min)
+  nested outer fold 2: inner all +0.03 [-0.01, +0.06], above +0.03 [-0.01, +0.06], clean as threat -0.04 [-0.10, +0.03], as lost branch +0.00 [-0.02, +0.03], F1 fault +0.06 [-0.05, +0.18], shadowing -0.04 [-0.15, +0.08], K<=0 fault +0.14 [-0.21, +0.52], shadowing -0.11 [-0.49, +0.24] -> keep phi no (51.4 min)
+  nested outer fold 3: inner all +0.01 [-0.02, +0.04], above +0.01 [-0.02, +0.04], clean as threat -0.03 [-0.08, +0.03], as lost branch +0.01 [-0.02, +0.04], F1 fault -0.12 [-0.25, -0.00], shadowing -0.02 [-0.14, +0.08], K<=0 fault -0.32 [-0.82, +0.19], shadowing -0.11 [-0.64, +0.36] -> keep phi no (75.7 min)
+  nested outer fold 4: inner all +0.01 [-0.02, +0.04], above +0.00 [-0.02, +0.03], clean as threat -0.00 [-0.06, +0.05], as lost branch +0.00 [-0.03, +0.03], F1 fault -0.03 [-0.13, +0.06], shadowing -0.00 [-0.09, +0.09], K<=0 fault -0.26 [-0.56, +0.02], shadowing -0.00 [-0.39, +0.42] -> keep phi no (102.0 min)
+  nested outer fold 5: inner all -0.00 [-0.04, +0.03], above -0.00 [-0.04, +0.03], clean as threat -0.03 [-0.08, +0.03], as lost branch -0.01 [-0.04, +0.01], F1 fault -0.07 [-0.19, +0.08], shadowing -0.05 [-0.17, +0.07], K<=0 fault -0.22 [-0.72, +0.23], shadowing -0.34 [-0.95, +0.16] -> keep phi no (128.3 min)
+(ii) nested reading less branch evidence, phi = 1: all +0.00 [+0.00, +0.00], above +0.00 [+0.00, +0.00], clean as threat +0.00 [+0.00, +0.00], as lost branch +0.00 [+0.00, +0.00], F1 fault +0.00 [+0.00, +0.00], shadowing +0.00 [+0.00, +0.00], K<=0 fault +0.00 [+0.00, +0.00], shadowing +0.00 [+0.00, +0.00] -> keep phi no
+     nested reading against the base: all +0.64 [+0.52, +0.76], above +0.64 [+0.51, +0.76], clean as threat -0.29 [-0.42, -0.15], as lost branch -0.23 [-0.36, -0.10], F1 fault +5.21 [+4.21, +6.24], shadowing +0.47 [+0.06, +0.87], K<=0 fault +3.45 [+0.91, +6.05], shadowing -0.07 [-1.68, +1.42] -> rule yes
+  VERDICT phi p1: keep phi no (out of fold no, nested no); phi = 1 passes the adoption rule yes (out of fold yes, nested yes); nested keeps per fold [false false false false false]
+##### m_phi p1 done 18-Oct-2026 22:46:44
+```
+
+### Profile 3
+
+```
+===== d91 phi comparison, p3, 18-Oct-2026 22:47:00: N 12, lambda 1e-03, code C:\Users\ADISUL~1\d91q\fuse\eb87297\code =====
+this code rebuilds the checkpoint's windows and phi columns: 1 (5.5 min)
+
+KPI 1 threshold of the base reading 0 dB; branch evidence against the base reproduces m_all's M4 row: 1
+phi = 1 columns (iso_t iso_db iso_margin iso_agree gl_llr gl_db gl_age gl_margin ps_k_weak ps_k_strong ps_k_contrast ps_sd_weak ps_sd_contrast ps_n br_w br_db br_len br_nref): 2.4 min
+  OOF branch evidence, phi = 1: 14.2 min
+phi over the fit set: median 1.00, share below 0.5 4.7%; median by speed [0-23 23-60 60-120 >=120 km/h] [1 1 1 1]
+(i) out of fold, branch evidence less branch evidence, phi = 1: all +0.01 [-0.03, +0.04], above +0.00 [-0.03, +0.04], clean as threat -0.03 [-0.09, +0.03], as lost branch -0.00 [-0.03, +0.02], F1 fault -0.10 [-0.23, +0.01], shadowing -0.08 [-0.18, +0.03], K<=0 fault -0.41 [-0.86, +0.02], shadowing -0.29 [-0.72, +0.13] -> keep phi no
+    branch evidence, phi = 1 against the base: all +0.61 [+0.49, +0.72], above +0.62 [+0.50, +0.74], clean as threat -0.29 [-0.43, -0.14], as lost branch -0.21 [-0.36, -0.07], F1 fault +5.29 [+4.29, +6.33], shadowing +0.37 [-0.04, +0.82], K<=0 fault +2.94 [+0.76, +5.22], shadowing +1.17 [-0.49, +2.91] -> rule yes
+    branch evidence against the base:            all +0.61 [+0.49, +0.74], above +0.62 [+0.50, +0.74], clean as threat -0.32 [-0.47, -0.17], as lost branch -0.22 [-0.35, -0.07], F1 fault +5.19 [+4.23, +6.25], shadowing +0.30 [-0.13, +0.74], K<=0 fault +2.53 [+0.45, +4.69], shadowing +0.88 [-0.71, +2.58] -> rule yes
+  set val    fault F1 base 84.74%: branch evidence +2.71, phi = 1 +2.99
+  set test   fault F1 base 85.58%: branch evidence +5.23, phi = 1 +5.14
+  set fresh  fault F1 base 85.70%: branch evidence +5.38, phi = 1 +5.47
+  set fresh2 fault F1 base 84.84%: branch evidence +5.54, phi = 1 +5.66
+  fault recall 5 dB               ( 1319 frames): base 15.2%, branch evidence 49.1%, phi = 1 50.3%
+  fault recall 8.7 dB             ( 1368 frames): base 57.7%, branch evidence 80.8%, phi = 1 81.1%
+  fault recall K >= 10 dB         ( 4491 frames): base 85.2%, branch evidence 95.9%, phi = 1 96.0%
+  fault recall K < 0 dB           ( 2042 frames): base 77.1%, branch evidence 80.0%, phi = 1 80.7%
+  fault recall age >= 12          ( 2490 frames): base 78.0%, branch evidence 92.8%, phi = 1 93.0%
+  fault recall age 0-2            ( 2112 frames): base 68.3%, branch evidence 75.2%, phi = 1 75.3%
+  fault recall hover (< 23 km/h)  ( 1541 frames): base 81.8%, branch evidence 89.7%, phi = 1 90.0%
+  nested outer fold 1: inner all +0.01 [-0.03, +0.05], above +0.01 [-0.03, +0.05], clean as threat -0.00 [-0.06, +0.06], as lost branch +0.01 [-0.02, +0.04], F1 fault -0.03 [-0.16, +0.09], shadowing -0.17 [-0.32, -0.03], K<=0 fault -0.37 [-0.86, +0.11], shadowing -0.57 [-1.08, -0.11] -> keep phi no (27.3 min)
+  nested outer fold 2: inner all +0.02 [-0.02, +0.07], above +0.02 [-0.02, +0.06], clean as threat -0.02 [-0.09, +0.04], as lost branch +0.01 [-0.02, +0.04], F1 fault +0.03 [-0.08, +0.15], shadowing -0.07 [-0.20, +0.06], K<=0 fault -0.20 [-0.61, +0.22], shadowing -0.09 [-0.55, +0.40] -> keep phi no (53.9 min)
+  nested outer fold 3: inner all +0.03 [-0.01, +0.06], above +0.02 [-0.01, +0.06], clean as threat -0.03 [-0.09, +0.03], as lost branch -0.02 [-0.05, +0.01], F1 fault +0.09 [-0.03, +0.22], shadowing +0.07 [-0.06, +0.21], K<=0 fault +0.35 [-0.04, +0.73], shadowing -0.06 [-0.53, +0.39] -> keep phi no (78.8 min)
+  nested outer fold 4: inner all -0.02 [-0.05, +0.02], above -0.01 [-0.05, +0.03], clean as threat +0.03 [-0.04, +0.09], as lost branch +0.01 [-0.02, +0.04], F1 fault -0.10 [-0.25, +0.03], shadowing -0.01 [-0.15, +0.13], K<=0 fault -0.27 [-0.78, +0.15], shadowing -0.05 [-0.64, +0.60] -> keep phi no (103.1 min)
+  nested outer fold 5: inner all +0.03 [-0.01, +0.07], above +0.02 [-0.02, +0.06], clean as threat -0.05 [-0.12, +0.01], as lost branch +0.00 [-0.03, +0.03], F1 fault -0.10 [-0.24, +0.05], shadowing -0.08 [-0.21, +0.04], K<=0 fault -0.36 [-0.92, +0.10], shadowing -0.47 [-1.14, +0.07] -> keep phi no (127.0 min)
+(ii) nested reading less branch evidence, phi = 1: all +0.00 [+0.00, +0.00], above +0.00 [+0.00, +0.00], clean as threat +0.00 [+0.00, +0.00], as lost branch +0.00 [+0.00, +0.00], F1 fault +0.00 [+0.00, +0.00], shadowing +0.00 [+0.00, +0.00], K<=0 fault +0.00 [+0.00, +0.00], shadowing +0.00 [+0.00, +0.00] -> keep phi no
+     nested reading against the base: all +0.61 [+0.49, +0.72], above +0.62 [+0.50, +0.74], clean as threat -0.29 [-0.43, -0.14], as lost branch -0.21 [-0.36, -0.07], F1 fault +5.29 [+4.29, +6.33], shadowing +0.37 [-0.04, +0.82], K<=0 fault +2.94 [+0.76, +5.22], shadowing +1.17 [-0.49, +2.91] -> rule yes
+  VERDICT phi p3: keep phi no (out of fold no, nested no); phi = 1 passes the adoption rule yes (out of fold yes, nested yes); nested keeps per fold [false false false false false]
+##### m_phi p3 done 19-Oct-2026 01:16:19
+```
+
+### Both profiles
+
+```
+VERDICT phi (both profiles, 19-Oct-2026 01:16:33): deploy branch evidence, phi = 1: phi not kept on both profiles, phi = 1 passes the adoption rule on both
+```
+
 <!-- END PHI -->
