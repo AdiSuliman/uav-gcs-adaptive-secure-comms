@@ -345,7 +345,8 @@ The categories are `fail-both`, `fail-new-only`, `fail-old-only`, `new-test` (ab
 older suite, listed when it does not pass, counted when it does), `removed-test` and `not-run`
 (listed but without an outcome). Each MATLAB is bounded by `timeout -k 10m 6h`. rc 124 or 137 is
 written as `V7TIMEOUT` and reported as TIMEOUT, and that pair's outcomes are incomplete. A full run
-takes about 1.5 h (the running `new` job of the first queue was at 103 of 196 tests after 37 min). The limit kills `bin\matlab.exe`; if its `win64\MATLAB.exe` outlives it, the
+takes about 1.5 h (the first queue's `new` job was at 103 of 196 tests after 37 min).
+The limit kills `bin\matlab.exe`; if its `win64\MATLAB.exe` outlives it, the
 gate counts it, and the next job waits.
 
 `test_core` itself now stops with an `ENVIRONMENT, not code` message when its work folder (long
@@ -401,8 +402,7 @@ d90.
      `extract_closed_loop_frames.m`) must have ended.
   2. Build the candidate for `origin/v7-p2` (above) and run the `merge`/`tip` pair on it.
   3. Cherry-pick in `uav-gcs-v7-p2`, check that the status is clean and that the tree equals the
-     tested tree,
-     then push.
+     tested tree, then push.
   4. Remove the hold.
 - **The task's alternative: into `v7-dev` after profile 1's SURV3**, so that `v7-p2` inherits it.
   `uav-gcs-v7` is profile 1's live tree, and past-bugs item 13 says never to merge under a stage the
