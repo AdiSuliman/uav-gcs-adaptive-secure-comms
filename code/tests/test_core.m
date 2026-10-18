@@ -3983,22 +3983,40 @@ verifyEqual(tc, kpi1_file('eval_detector_metrics'), 'results/eval_detector_metri
 verifyEqual(tc, kpi1_file('detector_predictions'), 'results/detector_predictions_fresh3.mat');
 verifyError(tc, @() run_det_test('fresh3'), 'eval_detector:fresh3_read');
 verifyFalse(tc, isfile(mk));
-% The start marker: its call after the input checks and before both data loads; the
-% predictions saved before the metrics; the code's state read from code, models and startup.m
+% The start marker: its call after every check and before both data loads, a line in the log
+% right after it; no outcome printed before the fusion and the latch have run; the predictions
+% saved before the metrics; the code's state read from code, models and startup.m, untracked
+% .m files listed
 es = fileread(which('eval_detector'));
-im = strfind(es, 'fresh3_read_marker(''results/fresh3_read_started.txt'');'); verifyNumElements(tc, im, 1);
+im = strfind(es, 'fresh3_read_marker(''results/fresh3_read_started.txt'', pid);'); verifyNumElements(tc, im, 1);
 verifyLessThan(tc, im, strfind(es, 'S = load(''data/splits.mat'');'));
 verifyLessThan(tc, im, strfind(es, 'Sf = load(''data/splits_fresh3.mat'');'));
-verifyGreaterThan(tc, im, strfind(es, '''eval_detector:fresh3_fusion_old'''));
+for id = {'fresh3_fusion_rev', 'fresh3_fusion_old', 'fresh3_rehearsal', 'fresh3_recorded'}
+    verifyGreaterThan(tc, im, max(strfind(es, ['''eval_detector:' id{1} ''''])), id{1});
+end
+il = strfind(es, 'fprintf(''B3r: start marker written (results/fresh3_read_started.txt)\n'');'); verifyNumElements(tc, il, 1);
+verifyEmpty(tc, strtrim(regexprep(es(im:il - 1), 'fresh3_read_marker\([^\n]*\n', '')));
+io = strfind(es, 'fprintf(''%s'', out_fus);'); verifyNumElements(tc, io, 1);
+verifyGreaterThan(tc, io, strfind(es, 'Y_pred_prob = fuse_classes(''apply'', fus.FM, Z)'''));
+verifyGreaterThan(tc, io, strfind(es, '[yt, rk] = fusion_target('));
+verifyGreaterThan(tc, io, strfind(es, '[pm, cz_all] = latch_runs('));
+verifyLessThan(tc, io, strfind(es, 'fprintf(''Overall Accuracy'));
+verifyEmpty(tc, regexp(es(1:io), 'fprintf\([^\n]*(accuracy|macro-F1|Frames judged)', 'once'));
 ip = strfind(es, 'save([''results/detector_predictions'' tag ''.mat''], ''pred'');'); verifyNumElements(tc, ip, 1);
 verifyLessThan(tc, ip, strfind(es, 'save([''results/eval_detector_metrics'' tag ''.mat''], ''metrics'');'));
-verifyNotEmpty(tc, strfind(es, 'status --porcelain --untracked-files=no -- code models startup.m'));
+verifyNotEmpty(tc, strfind(es, 'status --porcelain --untracked-files=all -- code models startup.m'));
+verifyNotEmpty(tc, strfind(es, 'ls-files -o --exclude-standard -- "*.m"'));
 verifyNotEmpty(tc, strfind(es, 'rev-parse HEAD HEAD:code'));
-% Each missing input, a fusion without the monitor's class and a fusion older than the
-% detector refuse before the marker
+% The adopted fusion's id (select_fusion.m stores it as fusion_rev, docs/d91_set4.md step 2)
+verifyEqual(tc, fusion_rev_id('enlarged'), 'd91_branch_evidence_enlarged');
+verifyEqual(tc, fusion_rev_id('validation'), 'd91_branch_evidence_validation');
+verifyError(tc, @() fusion_rev_id('test'), 'fusion_rev_id:fit');
+% Each missing input, a fusion without the monitor's class, a fusion that is not the adopted
+% revision, a fusion older than the detector, no current reading of the third set and a
+% committed record of a reading refuse before the marker
 delete('results/eval_detector_metrics_fresh3.mat');
 trained_at = now - 1; save('data/trained_detector.mat', 'trained_at');
-FM = 1; val_latch_oof = 1; save('data/fusion.mat', 'FM', 'val_latch_oof'); %#ok<NASGU>
+FM = 1; val_latch_oof = 1; save('data/fusion.mat', 'FM', 'val_latch_oof');
 params = struct('n_rx', 3); save('params.mat', 'params');
 for f = {'data/splits.mat', 'data/trained_detector.mat', 'data/fusion.mat', 'params.mat'}
     movefile(f{1}, [f{1} '.away']);
@@ -4009,13 +4027,38 @@ for f = {'data/splits.mat', 'data/trained_detector.mat', 'data/fusion.mat', 'par
 end
 save('data/fusion.mat', 'FM');
 verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_fusion'); verifyFalse(tc, isfile(mk));
+save('data/fusion.mat', 'FM', 'val_latch_oof');                     % the old layout
+verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_fusion_rev'); verifyFalse(tc, isfile(mk));
+cvy = 1; cvo = 1; fusion_rev = fusion_rev_id('validation'); FM = struct('target_age', 7, 'cues', []); %#ok<NASGU>
+save('data/fusion.mat', 'FM', 'val_latch_oof', 'cvy', 'cvo', 'fusion_rev');     % revised, fitted on validation only
+ex = det_test_error('fresh3');
+verifyEqual(tc, ex.identifier, 'eval_detector:fresh3_fusion_rev'); verifySubstring(tc, ex.message, fusion_rev_id('enlarged'));
+verifyFalse(tc, isfile(mk));
+fusion_rev = fusion_rev_id('enlarged'); FM = 1;
+save('data/fusion.mat', 'FM', 'val_latch_oof', 'cvy', 'cvo', 'fusion_rev');     % the id without the revised fusion
+verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_fusion_rev'); verifyFalse(tc, isfile(mk));
+FM = struct('target_age', 7, 'cues', []);
+save('data/fusion.mat', 'FM', 'val_latch_oof', 'cvy', 'cvo', 'fusion_rev');
 trained_at = now + 1; save('data/trained_detector.mat', 'trained_at');
-save('data/fusion.mat', 'FM', 'val_latch_oof');
 verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_fusion_old'); verifyFalse(tc, isfile(mk));
+trained_at = now - 1; save('data/trained_detector.mat', 'trained_at');
+verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_rehearsal'); verifyFalse(tc, isfile(mk));
+movefile('results/eval_detector_metrics_fresh2.mat', 'results/fresh2.away');
+verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_rehearsal'); verifyFalse(tc, isfile(mk));
+movefile('results/fresh2.away', 'results/eval_detector_metrics_fresh2.mat');
+pause(1.1); save('results/eval_detector_metrics_fresh2.mat', 'x');   % the third set reread with this fusion
+pid = params_id(params); mkdir('docs');
+rec = @(f, id) write_text(fullfile('docs', f), sprintf('fourth test set (B3r) reading started\nparams_id %s\n', id));
+rec('d91_fresh3_read_p1.txt', pid);
+ex = det_test_error('fresh3');
+verifyEqual(tc, ex.identifier, 'eval_detector:fresh3_recorded'); verifySubstring(tc, ex.message, pid);
+verifyFalse(tc, isfile(mk));
+delete('docs/d91_fresh3_read_p1.txt');
+rec('d91_fresh3_read_p1_aborted_20261022_1200.txt', pid);           % an aborted reading does not count
+rec('d91_fresh3_read_p3.txt', repmat('0', 1, 32));                   % nor another link model's reading
 % With every input in place the marker is written before any data is loaded (here
 % data/splits.mat holds no splits, so the reading stops right after it); it names the
 % detector and the fusion by hash and blocks every later reading
-trained_at = now - 1; save('data/trained_detector.mat', 'trained_at');
 ex = det_test_error('fresh3');
 verifyNotEmpty(tc, ex.identifier); verifyFalse(tc, startsWith(ex.identifier, 'eval_detector:'));
 verifyTrue(tc, isfile(mk));
@@ -4024,6 +4067,7 @@ verifyNotEmpty(tc, regexp(txt, 'time \d{4}-\d\d-\d\d \d\d:\d\d:\d\d', 'once'));
 verifyNotEmpty(tc, regexp(txt, 'commit (\w+|unknown)', 'once'));
 verifyNotEmpty(tc, regexp(txt, 'code_tree (\w+|unknown)', 'once'));
 verifyNotEmpty(tc, strfind(txt, ['params_id ' params_id(params)]));
+verifyNotEmpty(tc, regexp(txt, 'untracked_m [^\n]+\n', 'once'));
 verifyNotEmpty(tc, strfind(txt, ['data/trained_detector.mat sha256 ' sha256_of('data/trained_detector.mat') ' mtime ']));
 verifyNotEmpty(tc, strfind(txt, ['trained_at ' datestr(trained_at, 'yyyy-mm-dd HH:MM:SS')]));
 verifyNotEmpty(tc, strfind(txt, ['data/fusion.mat sha256 ' sha256_of('data/fusion.mat') ' mtime ' ...
@@ -4047,6 +4091,11 @@ try
     evalc('run(''eval_detector'')');
 catch ex
 end
+end
+
+function write_text(f, t)
+% Writes text to a file.
+fid = fopen(f, 'w'); fprintf(fid, '%s', t); fclose(fid);
 end
 
 function h = sha256_of(f)

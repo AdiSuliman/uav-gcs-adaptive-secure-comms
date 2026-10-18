@@ -7,9 +7,11 @@
 % the outputs carry the suffix _fresh2. With DET_TEST = 'fresh3' (stage B3r) the fourth test set
 % (data/splits_fresh3.mat, stage B3q) is read once, only when kpi1_set.m names it (its
 % go/no-go), and the outputs carry the suffix _fresh3; once its inputs are checked (the
-% fusion with the monitor's class, not older than the detector), results/fresh3_read_started.txt
-% is written before the set is loaded and blocks any later reading. The KPI 1 threshold is chosen on the
-% validation split in every case.
+% adopted fusion revision, not older than the detector; a current reading of the third test set
+% with them; no committed record of a reading, docs/d91_fresh3_read_*.txt),
+% results/fresh3_read_started.txt is written before the set is loaded and blocks any later
+% reading. No outcome is printed before the fusion and the latch have run. The KPI 1 threshold
+% is chosen on the validation split in every case.
 % Eb/N0 of a frame (kpi_ebno.m): the Eb/N0 our signal is received with, the configured
 % value less a path-loss step from its onset on; a frame judged as path_loss is read at the
 % link's Eb/N0 when the step began (the step's depth is its severity level). Frames
@@ -37,12 +39,29 @@ if read_fresh3                                          % the fourth test set: o
     for f_in = {'data/splits.mat', 'data/trained_detector.mat', 'data/fusion.mat', 'params.mat'}
         assert(isfile(f_in{1}), 'eval_detector:fresh3_input', '%s not found: the fourth test set is read with every input in place', f_in{1});
     end
-    assert(ismember('val_latch_oof', {whos('-file', 'data/fusion.mat').name}), 'eval_detector:fresh3_fusion', ...
+    fz = {whos('-file', 'data/fusion.mat').name};
+    assert(ismember('val_latch_oof', fz), 'eval_detector:fresh3_fusion', ...
         'data/fusion.mat has no out-of-fold monitor''s class (val_latch_oof): run select_fusion (B2F)');
+    assert(all(ismember({'cvy', 'cvo', 'fusion_rev'}, fz)), 'eval_detector:fresh3_fusion_rev', ...
+        'data/fusion.mat is not the revised selection (no cvy, cvo or fusion_rev): run B2F with the adopted revision (docs/d91_set4.md)');
+    Fz = load('data/fusion.mat', 'fusion_rev', 'FM');
+    assert(ischar(Fz.fusion_rev) && strcmp(Fz.fusion_rev, fusion_rev_id('enlarged')), 'eval_detector:fresh3_fusion_rev', ...
+        'data/fusion.mat is not the adopted revision %s: run B2F with FUSION_REV and FUSION_FIT = ''enlarged''', fusion_rev_id('enlarged'));
+    assert(isstruct(Fz.FM) && all(isfield(Fz.FM, {'target_age', 'cues'})), 'eval_detector:fresh3_fusion_rev', ...
+        'the fusion in data/fusion.mat has no target_age or cues: run B2F with the adopted revision');
     Dt = load('data/trained_detector.mat', 'trained_at');
-    assert(isfield(Dt, 'trained_at') && dir('data/fusion.mat').datenum >= Dt.trained_at, 'eval_detector:fresh3_fusion_old', ...
-        'data/fusion.mat is older than the detector''s training: run B2F before B3r'); clear Dt f_in
-    fresh3_read_marker('results/fresh3_read_started.txt');   % before the set is loaded: a crashed reading counts
+    t_fus = dir('data/fusion.mat').datenum;
+    assert(isfield(Dt, 'trained_at') && t_fus >= Dt.trained_at, 'eval_detector:fresh3_fusion_old', ...
+        'data/fusion.mat is older than the detector''s training: run B2F before B3r');
+    r2 = 'results/eval_detector_metrics_fresh2.mat';        % the same path on the third set, run to its end
+    assert(isfile(r2) && dir(r2).datenum >= max(t_fus, Dt.trained_at), 'eval_detector:fresh3_rehearsal', ...
+        '%s is missing or older than this fusion or detector: reread the third test set first (DET_TEST = ''fresh2'', docs/d91_set4.md)', r2);
+    pid = params_id(load('params.mat').params);
+    assert(~fresh3_recorded(pid), 'eval_detector:fresh3_recorded', ...
+        'docs/d91_fresh3_read_*.txt records a reading of the fourth test set with params_id %s: it is read once', pid);
+    fresh3_read_marker('results/fresh3_read_started.txt', pid);   % before the set is loaded: a crashed reading counts
+    fprintf('B3r: start marker written (results/fresh3_read_started.txt)\n');
+    clear fz Fz Dt t_fus r2 pid f_in
 end
 tag = ''; if has_fresh && read_split, tag = '_split'; end
 if read_fresh2, tag = '_fresh2'; end
@@ -87,6 +106,7 @@ Y_pred_prob = cnn_scores(net, sp.test.X, sp.test.feats');
 % packet frames has the target benign_interference.
 fus = [];
 rk = ones(numel(Y_test), 1);
+out_fus = '';                                           % printed once the fusion and the latch have run
 cls_names = cellstr(string(classes(:)'));
 if isfile('data/fusion.mat') && isfield(sp.test, 'pos')
     fus = load('data/fusion.mat', 'FM', 'N', 'val_probs_oof', 'val_latch_oof', 'val_target');
@@ -99,17 +119,17 @@ if isfile('data/fusion.mat') && isfield(sp.test, 'pos')
     frame_acc = 100 * mean(yf(:) == y_fr);
     frame_f1 = 100 * macro_f1_of(y_fr, yf(:), classes);
     frame_class_f1 = 100 * class_f1_of(y_fr, yf(:), classes);
-    fprintf('Per frame, on the frame rule''s labels (frame_labels.m): accuracy %.2f%%, macro-F1 %.2f%%\n', frame_acc, frame_f1);
+    out_fus = sprintf('Per frame, on the frame rule''s labels (frame_labels.m): accuracy %.2f%%, macro-F1 %.2f%%\n', frame_acc, frame_f1);
     sp.test.feat_names = sp.norm.feat_names;
     Z = fuse_classes('windows', sp.test, Y_pred_prob', fus.N, fuse_classes('cues', fus.FM));
     Y_pred_prob = fuse_classes('apply', fus.FM, Z)';
     fprintf('Decision over the last %d cycles (temporal fusion)\n', fus.N);
     [yt, rk] = fusion_target(double(sp.test.Y(:)), sp.test.run, sp.test.pos, fus.N, classes, fus.FM);
     Y_test = categorical(classes(yt)', classes);
-    fprintf('Frames judged by their window (WLAN gaps as benign_interference, path-loss onsets as path_loss): %d\n', ...
-        sum(Y_test(:) ~= sp.test.Y(:)));
-    fprintf(['Per frame, on these targets (the change of labels alone, no fusion): macro-F1 %.2f%%; the fusion''s own ' ...
-        'gain on them: select_fusion.m, N = 1 to %d out of fold\n'], 100 * macro_f1_of(Y_test(:), yf(:), classes), fus.N);
+    out_fus = [out_fus, sprintf('Frames judged by their window (WLAN gaps as benign_interference, path-loss onsets as path_loss): %d\n', ...
+        sum(Y_test(:) ~= sp.test.Y(:)))];
+    out_fus = [out_fus, sprintf(['Per frame, on these targets (the change of labels alone, no fusion): macro-F1 %.2f%%; the fusion''s own ' ...
+        'gain on them: select_fusion.m, N = 1 to %d out of fold\n'], 100 * macro_f1_of(Y_test(:), yf(:), classes), fus.N)];
 end
 [~, max_idx] = max(Y_pred_prob, [], 1);
 Y_fused = reshape(categorical(classes(max_idx)', classes), [], 1);   % the fused class alone, beside
@@ -123,6 +143,7 @@ if isfield(sp.test, 'gain_ant') && isfield(sp.test, 'pos') && latch_on
 elseif ~latch_on
     fprintf('Decision by the fused class: the latch of a lost branch''s cause is off (chosen on validation)\n');
 end
+fprintf('%s', out_fus); clear out_fus
 
 Y_pred = categorical(classes(max_idx)', classes);
 if ~latch_on                                            % the cause a lost branch is read as: the monitor's class
@@ -669,19 +690,31 @@ function out = ternary(c, a, b)
 if c, out = a; else, out = b; end
 end
 
-function fresh3_read_marker(f)
-% The fourth test set's reading starts: time, the code's commit and tree, the link model's
-% params_id, and the detector and fusion it is read with.
+function yes = fresh3_recorded(pid)
+% A committed record of the fourth test set's reading with this link model
+% (docs/d91_fresh3_read_*.txt, docs/d91_set4.md step 5); records of aborted readings do not count.
+yes = false;
+for r = dir('docs/d91_fresh3_read_*.txt')'
+    if contains(r.name, '_aborted'), continue; end
+    yes = yes || any(strcmp(strtrim(splitlines(fileread(fullfile(r.folder, r.name)))), ['params_id ' pid]));
+end
+end
+
+function fresh3_read_marker(f, pid)
+% The fourth test set's reading starts: time, the code's commit and tree, untracked .m files
+% (they can shadow the code), the link model's params_id, and the detector and fusion it is read with.
 root = fileparts(fileparts(fileparts(which('eval_detector'))));
 gcmd = sprintf('git --no-optional-locks -C "%s" ', root);
 [st, o] = system([gcmd 'rev-parse HEAD HEAD:code']);
-[sd, d] = system([gcmd 'status --porcelain --untracked-files=no -- code models startup.m']);
+[sd, d] = system([gcmd 'status --porcelain --untracked-files=all -- code models startup.m']);
+[su, u] = system([gcmd 'ls-files -o --exclude-standard -- "*.m"']);
 o = strsplit(strtrim(o));
-cm = 'unknown'; tr = 'unknown';
+cm = 'unknown'; tr = 'unknown'; um = 'unknown';
 if st == 0 && numel(o) == 2, cm = o{1}; tr = o{2}; end
 if st == 0 && sd ~= 0, cm = [cm ' + local changes not checked']; end
 if st == 0 && sd == 0 && ~isempty(strtrim(d)), cm = [cm ' + local changes in code, models or startup.m']; end
-pid = params_id(load('params.mat').params);
+if su == 0, um = regexprep(strtrim(u), '\s*\n\s*', ' '); end
+if isempty(um), um = 'none'; end
 Dt = load('data/trained_detector.mat', 'trained_at');
 ds = sprintf('%s trained_at %s', file_stamp('data/trained_detector.mat'), datestr(Dt.trained_at, 'yyyy-mm-dd HH:MM:SS'));
 fs = file_stamp('data/fusion.mat');
@@ -689,7 +722,7 @@ if ~isfolder('results'), mkdir('results'); end
 fid = fopen(f, 'w');
 assert(fid > 0, 'eval_detector:fresh3_marker', 'cannot write %s', f);
 fprintf(fid, ['fourth test set (B3r) reading started\ntime %s\ncommit %s\ncode_tree %s\nparams_id %s\n' ...
-    'data/trained_detector.mat %s\ndata/fusion.mat %s\n'], datestr(now, 'yyyy-mm-dd HH:MM:SS'), cm, tr, pid, ds, fs);
+    'untracked_m %s\ndata/trained_detector.mat %s\ndata/fusion.mat %s\n'], datestr(now, 'yyyy-mm-dd HH:MM:SS'), cm, tr, pid, um, ds, fs);
 fclose(fid);
 end
 
