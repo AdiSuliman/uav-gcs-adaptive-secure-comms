@@ -6,8 +6,9 @@
 % (data/splits_fresh2.mat, new seeds, built after the monitor's last validation choice), and
 % the outputs carry the suffix _fresh2. With DET_TEST = 'fresh3' (stage B3r) the fourth test set
 % (data/splits_fresh3.mat, stage B3q) is read once, only when kpi1_set.m names it (its
-% go/no-go), and the outputs carry the suffix _fresh3; results/fresh3_read_started.txt is
-% written before the set is loaded and blocks any later reading. The KPI 1 threshold is chosen on the
+% go/no-go), and the outputs carry the suffix _fresh3; once its inputs are checked (the
+% fusion with the monitor's class, not older than the detector), results/fresh3_read_started.txt
+% is written before the set is loaded and blocks any later reading. The KPI 1 threshold is chosen on the
 % validation split in every case.
 % Eb/N0 of a frame (kpi_ebno.m): the Eb/N0 our signal is received with, the configured
 % value less a path-loss step from its onset on; a frame judged as path_loss is read at the
@@ -33,6 +34,14 @@ if read_fresh3                                          % the fourth test set: o
         'the fourth test set was read already (results/eval_detector_metrics_fresh3.mat)');
     assert(~isfile('results/fresh3_read_started.txt'), 'eval_detector:fresh3_started', ...
         'a reading of the fourth test set started already (results/fresh3_read_started.txt; docs/d91_set4.md)');
+    for f_in = {'data/splits.mat', 'data/trained_detector.mat', 'data/fusion.mat', 'params.mat'}
+        assert(isfile(f_in{1}), 'eval_detector:fresh3_input', '%s not found: the fourth test set is read with every input in place', f_in{1});
+    end
+    assert(ismember('val_latch_oof', {whos('-file', 'data/fusion.mat').name}), 'eval_detector:fresh3_fusion', ...
+        'data/fusion.mat has no out-of-fold monitor''s class (val_latch_oof): run select_fusion (B2F)');
+    Dt = load('data/trained_detector.mat', 'trained_at');
+    assert(isfield(Dt, 'trained_at') && dir('data/fusion.mat').datenum >= Dt.trained_at, 'eval_detector:fresh3_fusion_old', ...
+        'data/fusion.mat is older than the detector''s training: run B2F before B3r'); clear Dt f_in
     fresh3_read_marker('results/fresh3_read_started.txt');   % before the set is loaded: a crashed reading counts
 end
 tag = ''; if has_fresh && read_split, tag = '_split'; end
@@ -51,6 +60,7 @@ elseif read_fresh3
     Sf = load('data/splits_fresh3.mat');
     assert(isequal(Sf.splits.norm, sp.norm), 'eval_detector: the fourth test set has another normalization');
     sp.test = Sf.splits.test; clear Sf
+    assert(isfield(sp.test, 'pos'), 'eval_detector:fresh3_pos', 'the fourth test set has no frame positions: the fusion cannot run');
     set_name = 'fourth test set';
 elseif has_fresh && ~read_split
     Sf = load('data/splits_fresh.mat');
@@ -579,9 +589,8 @@ if isfield(sp.test, 'speed') && ~isempty(sp.test.speed)
     metrics.speed_breakdown = speed_breakdown;
 end
 
-save(['results/eval_detector_metrics' tag '.mat'], 'metrics');
-fprintf('Saved results/eval_detector_metrics%s.mat (for KPI aggregation)\n', tag);
-% Per-frame outcomes for the breakdown of weak points (analyze_weak_points.m)
+% Per-frame outcomes for the breakdown of weak points (analyze_weak_points.m), saved before
+% the metrics: a reading cut off between the two still leaves WEAK its input
 pred = struct('y_true', Y_test, 'y_pred', Y_pred, 'y_fused', Y_fused, 'ebno', snr_vals(:), 'ebno_kpi', eb_kpi(:), 'ebno_rx', eb_rx(:), ...
     'level', sp.test.level(:), 'speed', sp.test.speed(:), 'run', sp.test.run(:), 'rank', rk(:));
 for f = {'pos', 'k_db', 'aoa', 'alt_m', 'bank', 'ds_ns', 'lev_db'}
@@ -589,6 +598,8 @@ for f = {'pos', 'k_db', 'aoa', 'alt_m', 'bank', 'ds_ns', 'lev_db'}
 end
 pred.onset_age = age; pred.fuse_N = Nw;              % cycles since a lost branch's onset (NaN: none)
 save(['results/detector_predictions' tag '.mat'], 'pred');
+save(['results/eval_detector_metrics' tag '.mat'], 'metrics');
+fprintf('Saved results/eval_detector_metrics%s.mat (for KPI aggregation)\n', tag);
 clear S sp Y_pred_prob DET_TEST   % large arrays; main.m runs the stages in one workspace
 
 %% Local functions
@@ -659,18 +670,40 @@ if c, out = a; else, out = b; end
 end
 
 function fresh3_read_marker(f)
-% The fourth test set's reading starts: time, the code's commit and the link model's params_id.
-src = fileparts(which('eval_detector'));
-[st, h] = system(sprintf('git -C "%s" rev-parse HEAD', src));
-[~, d] = system(sprintf('git -C "%s" status --porcelain --untracked-files=no', src));
-cm = 'unknown'; if st == 0, cm = strtrim(h); end
-if st == 0 && ~isempty(strtrim(d)), cm = [cm ' + local changes']; end
-pid = 'unknown (no params.mat)';
-if isfile('params.mat'), pid = params_id(load('params.mat').params); end
+% The fourth test set's reading starts: time, the code's commit and tree, the link model's
+% params_id, and the detector and fusion it is read with.
+root = fileparts(fileparts(fileparts(which('eval_detector'))));
+gcmd = sprintf('git --no-optional-locks -C "%s" ', root);
+[st, o] = system([gcmd 'rev-parse HEAD HEAD:code']);
+[sd, d] = system([gcmd 'status --porcelain --untracked-files=no -- code models startup.m']);
+o = strsplit(strtrim(o));
+cm = 'unknown'; tr = 'unknown';
+if st == 0 && numel(o) == 2, cm = o{1}; tr = o{2}; end
+if st == 0 && sd ~= 0, cm = [cm ' + local changes not checked']; end
+if st == 0 && sd == 0 && ~isempty(strtrim(d)), cm = [cm ' + local changes in code, models or startup.m']; end
+pid = params_id(load('params.mat').params);
+Dt = load('data/trained_detector.mat', 'trained_at');
+ds = sprintf('%s trained_at %s', file_stamp('data/trained_detector.mat'), datestr(Dt.trained_at, 'yyyy-mm-dd HH:MM:SS'));
+fs = file_stamp('data/fusion.mat');
 if ~isfolder('results'), mkdir('results'); end
 fid = fopen(f, 'w');
 assert(fid > 0, 'eval_detector:fresh3_marker', 'cannot write %s', f);
-fprintf(fid, 'fourth test set (B3r) reading started\ntime %s\ncommit %s\nparams_id %s\n', ...
-    datestr(now, 'yyyy-mm-dd HH:MM:SS'), cm, pid);
+fprintf(fid, ['fourth test set (B3r) reading started\ntime %s\ncommit %s\ncode_tree %s\nparams_id %s\n' ...
+    'data/trained_detector.mat %s\ndata/fusion.mat %s\n'], datestr(now, 'yyyy-mm-dd HH:MM:SS'), cm, tr, pid, ds, fs);
 fclose(fid);
+end
+
+function s = file_stamp(f)
+% SHA-256 of a file (as sha256sum prints it) and its modification time.
+md = java.security.MessageDigest.getInstance('SHA-256');
+fid = fopen(f, 'r');
+assert(fid > 0, 'eval_detector:fresh3_marker', 'cannot read %s', f);
+b = fread(fid, 2^24, '*uint8');
+while ~isempty(b)
+    md.update(b);
+    b = fread(fid, 2^24, '*uint8');
+end
+fclose(fid);
+h = typecast(md.digest(), 'uint8');
+s = sprintf('sha256 %s mtime %s', lower(reshape(dec2hex(h, 2)', 1, [])), datestr(dir(f).datenum, 'yyyy-mm-dd HH:MM:SS'));
 end

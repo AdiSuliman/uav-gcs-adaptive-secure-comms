@@ -3966,6 +3966,14 @@ verifyTrue(tc, w2.stale); verifyTrue(tc, w3.stale);
 verifySubstring(tc, w2.why, 'rerun its reading, B3 or B3m');
 verifySubstring(tc, w3.why, 'read once with an earlier fusion; cannot be reread, see docs/d91_set4.md');
 verifyEmpty(tc, strfind(w3.why, 'rerun'));
+% A detector trained after the readings: the same, with the fourth set's own reason
+ood = struct('score', 'last', 'win', 3); trained_at = now + 1; %#ok<NASGU>
+save('data/trained_detector.mat', 'ood', 'classes', 'trained_at'); save('data/ood_thresholds.mat', 'ood');
+S = result_status();
+w2 = status_of(S, 'results/eval_detector_metrics_fresh2.mat'); w3 = status_of(S, 'results/eval_detector_metrics_fresh3.mat');
+verifySubstring(tc, w2.why, 'older than the detector''s training'); verifyEmpty(tc, strfind(w2.why, 'earlier detector'));
+verifySubstring(tc, w3.why, 'older than the detector''s training: the fourth set was read once with an earlier detector; cannot be reread');
+delete('data/trained_detector.mat'); delete('data/ood_thresholds.mat');
 % Once kpi1_set.m names the fourth set: KPI 1 is read there (missing shows as missing, no
 % fallback), and B3r reads it once
 fid = fopen('kpi1_set.m', 'w'); fprintf(fid, 'function s = kpi1_set()\ns = ''fresh3'';\nend\n'); fclose(fid);
@@ -3975,24 +3983,51 @@ verifyEqual(tc, kpi1_file('eval_detector_metrics'), 'results/eval_detector_metri
 verifyEqual(tc, kpi1_file('detector_predictions'), 'results/detector_predictions_fresh3.mat');
 verifyError(tc, @() run_det_test('fresh3'), 'eval_detector:fresh3_read');
 verifyFalse(tc, isfile(mk));
-% The start marker: written before any data is loaded (here data/splits.mat holds no splits,
-% so the reading stops right after it), it blocks every later reading
+% The start marker: its call after the input checks and before both data loads; the
+% predictions saved before the metrics; the code's state read from code, models and startup.m
 es = fileread(which('eval_detector'));
 im = strfind(es, 'fresh3_read_marker(''results/fresh3_read_started.txt'');'); verifyNumElements(tc, im, 1);
 verifyLessThan(tc, im, strfind(es, 'S = load(''data/splits.mat'');'));
 verifyLessThan(tc, im, strfind(es, 'Sf = load(''data/splits_fresh3.mat'');'));
+verifyGreaterThan(tc, im, strfind(es, '''eval_detector:fresh3_fusion_old'''));
+ip = strfind(es, 'save([''results/detector_predictions'' tag ''.mat''], ''pred'');'); verifyNumElements(tc, ip, 1);
+verifyLessThan(tc, ip, strfind(es, 'save([''results/eval_detector_metrics'' tag ''.mat''], ''metrics'');'));
+verifyNotEmpty(tc, strfind(es, 'status --porcelain --untracked-files=no -- code models startup.m'));
+verifyNotEmpty(tc, strfind(es, 'rev-parse HEAD HEAD:code'));
+% Each missing input, a fusion without the monitor's class and a fusion older than the
+% detector refuse before the marker
 delete('results/eval_detector_metrics_fresh3.mat');
-try
-    run_det_test('fresh3'); id = '';
-catch err
-    id = err.identifier;
+trained_at = now - 1; save('data/trained_detector.mat', 'trained_at');
+FM = 1; val_latch_oof = 1; save('data/fusion.mat', 'FM', 'val_latch_oof'); %#ok<NASGU>
+params = struct('n_rx', 3); save('params.mat', 'params');
+for f = {'data/splits.mat', 'data/trained_detector.mat', 'data/fusion.mat', 'params.mat'}
+    movefile(f{1}, [f{1} '.away']);
+    ex = det_test_error('fresh3');
+    movefile([f{1} '.away'], f{1});
+    verifyEqual(tc, ex.identifier, 'eval_detector:fresh3_input'); verifySubstring(tc, ex.message, f{1});
+    verifyFalse(tc, isfile(mk));
 end
-verifyNotEmpty(tc, id); verifyFalse(tc, startsWith(id, 'eval_detector:'));
+save('data/fusion.mat', 'FM');
+verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_fusion'); verifyFalse(tc, isfile(mk));
+trained_at = now + 1; save('data/trained_detector.mat', 'trained_at');
+save('data/fusion.mat', 'FM', 'val_latch_oof');
+verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_fusion_old'); verifyFalse(tc, isfile(mk));
+% With every input in place the marker is written before any data is loaded (here
+% data/splits.mat holds no splits, so the reading stops right after it); it names the
+% detector and the fusion by hash and blocks every later reading
+trained_at = now - 1; save('data/trained_detector.mat', 'trained_at');
+ex = det_test_error('fresh3');
+verifyNotEmpty(tc, ex.identifier); verifyFalse(tc, startsWith(ex.identifier, 'eval_detector:'));
 verifyTrue(tc, isfile(mk));
 txt = fileread(mk);
 verifyNotEmpty(tc, regexp(txt, 'time \d{4}-\d\d-\d\d \d\d:\d\d:\d\d', 'once'));
 verifyNotEmpty(tc, regexp(txt, 'commit (\w+|unknown)', 'once'));
-verifyNotEmpty(tc, strfind(txt, 'params_id unknown (no params.mat)'));
+verifyNotEmpty(tc, regexp(txt, 'code_tree (\w+|unknown)', 'once'));
+verifyNotEmpty(tc, strfind(txt, ['params_id ' params_id(params)]));
+verifyNotEmpty(tc, strfind(txt, ['data/trained_detector.mat sha256 ' sha256_of('data/trained_detector.mat') ' mtime ']));
+verifyNotEmpty(tc, strfind(txt, ['trained_at ' datestr(trained_at, 'yyyy-mm-dd HH:MM:SS')]));
+verifyNotEmpty(tc, strfind(txt, ['data/fusion.mat sha256 ' sha256_of('data/fusion.mat') ' mtime ' ...
+    datestr(dir('data/fusion.mat').datenum, 'yyyy-mm-dd HH:MM:SS')]));
 verifyError(tc, @() run_det_test('fresh3'), 'eval_detector:fresh3_started');
 delete('data/splits_fresh3.mat');
 verifyError(tc, @() run_det_test('fresh3'), 'eval_detector:fresh3');
@@ -4003,6 +4038,22 @@ end
 function run_det_test(DET_TEST) %#ok<INUSD>
 % eval_detector with DET_TEST set, as run_stage.m runs it.
 evalc('run(''eval_detector'')');
+end
+
+function ex = det_test_error(DET_TEST) %#ok<INUSD>
+% The error eval_detector stops with when run with DET_TEST set (test:none when it does not).
+ex = MException('test:none', 'no error');
+try
+    evalc('run(''eval_detector'')');
+catch ex
+end
+end
+
+function h = sha256_of(f)
+% SHA-256 of a file's bytes, as sha256sum prints it.
+fid = fopen(f, 'r'); b = fread(fid, inf, '*uint8'); fclose(fid);
+md = java.security.MessageDigest.getInstance('SHA-256');
+h = lower(reshape(dec2hex(typecast(md.digest(b), 'uint8'), 2)', 1, []));
 end
 
 function remove_shadow(f)

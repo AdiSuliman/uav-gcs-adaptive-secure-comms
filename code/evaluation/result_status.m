@@ -19,7 +19,8 @@ function S = result_status()
 %                                   fusion (data/fusion.mat: the monitor's class); the same
 %                                   for the third and fourth test sets' readings (_fresh2,
 %                                   _fresh3) when present; the fourth set's reading cannot
-%                                   be rerun, so data/fusion.mat stays as it was from B3r on
+%                                   be rerun, so data/trained_detector.mat, ood_thresholds.mat
+%                                   and fusion.mat stay as they were from B3r on
 %   A file without its identity fields counts as stale.
 cur_det = ''; cur_pol = ''; t_det = -inf;
 if all(isfile({'data/trained_detector.mat', 'data/ood_thresholds.mat'}))
@@ -69,7 +70,14 @@ S(end+1) = entry(f, why);
 for f = {'results/eval_detector_metrics.mat', 'results/eval_detector_metrics_fresh2.mat', 'results/eval_detector_metrics_fresh3.mat'}
     if contains(f{1}, '_fresh') && ~isfile(f{1}), continue; end
     why = {};
-    if isfile(f{1}) && t(f{1}) < t_det, why{end+1} = 'older than the detector''s training'; end %#ok<AGROW>
+    if isfile(f{1}) && t(f{1}) < t_det
+        if contains(f{1}, '_fresh3')                    % B3r reads its set once
+            why{end+1} = ['older than the detector''s training: the fourth set was read once with an earlier detector; ' ...
+                'cannot be reread, see docs/d91_set4.md']; %#ok<AGROW>
+        else
+            why{end+1} = 'older than the detector''s training'; %#ok<AGROW>
+        end
+    end
     if isfile(f{1}) && t(f{1}) < t('data/fusion.mat')
         if contains(f{1}, '_fresh3')                    % B3r reads its set once
             why{end+1} = ['older than data/fusion.mat: the fourth set was read once with an earlier fusion; ' ...
