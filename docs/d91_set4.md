@@ -18,8 +18,8 @@ All of these sets have been read already. So KPI 1 is read **once**, on a new fo
 | Stage `B3q` | `run_stage.m` (`build_fresh_test3`), `main.m` (`RUN.build_fresh_test3`) | Builds the set and **does not read it**: no `eval_detector`, no `DET_TEST`. |
 | Stage `B3r` | `run_stage.m` (`read_fresh_test3`), `main.m` (`RUN.read_fresh_test3`) | Runs `eval_detector` with `DET_TEST = 'fresh3'`. Outputs: `results/eval_detector_metrics_fresh3.mat`, `detector_predictions_fresh3.mat`, `confusion_matrix_fresh3.png` and `accuracy_vs_snr_fresh3.png`. |
 | The switch | `code/evaluation/kpi1_set.m` (now `'fresh2'`) | Every KPI 1 reader goes through `kpi1_file.m`, which follows this one switch: `measure_all_kpis`, `build_kpi_dashboard`, `analyze_weak_points` and the GUI. With `'fresh2'`, readers stay on the third test set even when a `_fresh3` reading exists. With `'fresh3'`, they read the fourth set and never fall back: a missing reading shows as missing. |
-| Guards in `eval_detector.m` | `DET_TEST = 'fresh3'` | The reading stops unless all of these hold: `kpi1_set()` is `'fresh3'` (`eval_detector:kpi1_set`), `data/splits_fresh3.mat` exists (`eval_detector:fresh3`), and `results/eval_detector_metrics_fresh3.mat` does not exist yet (`eval_detector:fresh3_read`, the read-once rule). |
-| Other readers | `result_status.m`, `export_report_numbers.m` (`detector_fourth`, `kpi1_set`), `export_gui_bundle.m`, `measure_all_kpis.m` | These readers pick up the fourth set's file when it is present. `measure_all_kpis` lists the third and second sets' readings beside the fourth. |
+| Guards in `eval_detector.m` | `DET_TEST = 'fresh3'` | The reading stops unless all of these hold: `kpi1_set()` is `'fresh3'` (`eval_detector:kpi1_set`), `data/splits_fresh3.mat` exists (`eval_detector:fresh3`), `results/eval_detector_metrics_fresh3.mat` does not exist yet (`eval_detector:fresh3_read`), and neither does `results/fresh3_read_started.txt` (`eval_detector:fresh3_started`). Once these pass, B3r writes that marker (time, code commit, `params_id`) before it loads any data, so a reading that crashes after printing its numbers still counts as the one reading. |
+| Other readers | `result_status.m` (a `_fresh3` reading older than `data/fusion.mat` is STALE with its own reason: read once with an earlier fusion, cannot be reread), `export_report_numbers.m` (`detector_fourth`, `kpi1_set`), `export_gui_bundle.m`, `measure_all_kpis.m` | These readers pick up the fourth set's file when it is present. `measure_all_kpis` lists the third and second sets' readings beside the fourth. |
 
 ## Seeds (disjoint from every existing stream)
 
@@ -60,11 +60,13 @@ The first diff shows only these hunks:
 
 d90 changed no generator value. So the set is built from `d91-set4` itself (31ab0de), with no minimal patch needed on 9b5c9f1.
 
+After the builds started, `run_dataset_sweep.m` gained one line after its loops: `assert(run_id < 100000, 'run_dataset_sweep:run_id', ...)`. The sub-run seeds SEED0 + run id stay inside their 100 000 block only while this holds, and `test_seed_streams_disjoint` checks k = 1 to 99 999. The assert only compares a scalar: it draws no random number and changes no variable or output, so every set it lets through is the same as without it. The running builds (31ab0de) do not have it; their run ids are checked at the merge (step 3 below).
+
 Before the build, A0 in each copy gave the same `params_id` as the profile's live `params.mat`:
 - P1: `add18af2b7532a0bd2f7fbc78f06e526`, n_rx 3;
 - P3: `7ecc49e97d0a5639f458997caa6b58c8`, n_rx 4.
 
-`set4_build.m` checks this again before B3q and stops if it differs.
+`set4_build.m` checks this again before B3q and stops if it differs. Verbatim copies of the two drivers and of the script are kept here: `docs/d91_set4_build_p1.m.txt`, `docs/d91_set4_build_p3.m.txt` (untracked `set4_build.m` of each copy) and `docs/v7_d91_set4.sh.txt` (`uav-gcs-logs/v7_d91_set4.sh`).
 
 ## The build (running)
 
@@ -98,8 +100,11 @@ Before the build, A0 in each copy gave the same `params_id` as the profile's liv
 3. For each profile, when no MATLAB of that profile runs:
    - copy `set4_out/<p>/data/*fresh3*` into the profile's `data/`;
    - check `sha256sum -c ../sha256_fresh3.txt`;
-   - check that the profile's `params.mat` still has the `params_id` above.
-4. Run `run_stage('B3r')` once per profile, after the profile's B2F has selected the adopted fusion. Then rerun KPI, DASH, WEAK and RPT. KPI 1 is read from `results/eval_detector_metrics_fresh3.mat`, with the third and second sets' readings beside it. A second B3r refuses to run (`eval_detector:fresh3_read`).
+   - check that the profile's `params.mat` still has the `params_id` above;
+   - check that the run ids stay inside the seed block: `assert(max(h5read('data/dataset_fresh3.mat', '/dataset/run')) < 1e5)`. It reads only the run ids, not the labels or the frames, so it does not count as reading the set.
+4. Run `run_stage('B3r')` once per profile, after the profile's B2F has selected the adopted fusion. Then rerun KPI, DASH, WEAK and RPT. KPI 1 is read from `results/eval_detector_metrics_fresh3.mat`, with the third and second sets' readings beside it. A second B3r refuses to run (`eval_detector:fresh3_read`, or `eval_detector:fresh3_started` once the marker exists).
+   - **Freeze `data/fusion.mat` from B3r until RPT.** No B2F and no other save of `data/fusion.mat` in that profile after its B3r: the reading cannot be repeated, so a newer fusion leaves KPI 1 STALE for good (`result_status`: read once with an earlier fusion, cannot be reread).
+   - `results/fresh3_read_started.txt` travels with the results: any copy or archive of the `*fresh3*` results takes it along (the `*fresh3*` glob of `v7_d91_set4.sh` matches it), and nobody deletes it to rerun B3r.
 5. Profile 2 has no fourth set yet. If its KPI 1 is to come from set 4, run B3q in its own copy the same way, one profile at a time.
 
 ## Tests
@@ -125,5 +130,12 @@ Focused run, one MATLAB, `-singleCompThread`, 2026-10-18: **12/12 passed**. The 
 - KPI 1 stays on `_fresh2` while a `_fresh3` reading is on disk;
 - B3r refuses while the switch is `'fresh2'`;
 - with a stand-in switch set to `'fresh3'`: no fallback, the read-once refusal, and the missing-set refusal.
+
+Added after that run (not yet run; no MATLAB was started for them):
+- `test_fourth_test_set` also checks:
+  - the `run_id < 100000` assert, after the last `run_id = run_id + 1` and before the save;
+  - the `result_status` reasons for a fusion newer than the readings: rerun for `_fresh2`, read once and cannot be reread for `_fresh3`;
+  - the start marker: not written when a guard refuses, its call placed before both data loads, written with time, commit and `params_id` by a reading that stops right after it, and `eval_detector:fresh3_started` for the next reading.
+- To run later: `test_fourth_test_set`, `test_result_status`, `test_seed_streams_disjoint`, `test_third_test_set`, `test_kpi1_file` and `test_m_files_parse`.
 
 The full suite and d90's smoke have not been run on this branch, and neither has run on d90 yet.

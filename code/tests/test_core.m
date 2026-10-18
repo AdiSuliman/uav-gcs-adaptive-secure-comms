@@ -3917,6 +3917,10 @@ verifyNotEmpty(tc, strfind(seg, 'rng(2037, ''twister'');'));
 verifyEmpty(tc, strfind(seg, 'N_SUB'));                               % the second and third sets' counts and test fold
 tw = cellfun(@(c) str2double(c{1}), regexp(src, 'rng\((\d+), ''twister''\)', 'tokens'));
 verifyEqual(tc, sort(tw), [2027 2029 2035 2037]);                      % a speed stream per set
+ia = strfind(src, 'assert(run_id < 100000, ''run_dataset_sweep:run_id''');   % run ids inside the seed block
+verifyNumElements(tc, ia, 1);
+verifyGreaterThan(tc, ia, max(strfind(src, 'run_id = run_id + 1;')));
+verifyLessThan(tc, ia, strfind(src, 'save(f_out, ''dataset'', ''-v7.3'');'));
 verifyNotEmpty(tc, strfind(fileread(which('extract_spectrograms')), ...
     'f_in = ''data/dataset_fresh3.mat''; f_out = ''data/spectrograms_fresh3.mat'';'));
 rs = fileread(which('run_stage'));
@@ -3952,6 +3956,16 @@ x = 1; save('results/eval_detector_metrics_fresh2.mat', 'x'); save('results/eval
 verifyEqual(tc, kpi1_set(), 'fresh2');
 verifyEqual(tc, kpi1_file('eval_detector_metrics'), 'results/eval_detector_metrics_fresh2.mat');
 verifyError(tc, @() run_det_test('fresh3'), 'eval_detector:kpi1_set');
+mk = 'results/fresh3_read_started.txt';
+verifyFalse(tc, isfile(mk));
+% A fusion newer than the readings: the third set's is rerun, the fourth set's cannot be
+pause(1.1); FM = 1; save('data/fusion.mat', 'FM'); %#ok<NASGU>
+S = result_status();
+w2 = status_of(S, 'results/eval_detector_metrics_fresh2.mat'); w3 = status_of(S, 'results/eval_detector_metrics_fresh3.mat');
+verifyTrue(tc, w2.stale); verifyTrue(tc, w3.stale);
+verifySubstring(tc, w2.why, 'rerun its reading, B3 or B3m');
+verifySubstring(tc, w3.why, 'read once with an earlier fusion; cannot be reread, see docs/d91_set4.md');
+verifyEmpty(tc, strfind(w3.why, 'rerun'));
 % Once kpi1_set.m names the fourth set: KPI 1 is read there (missing shows as missing, no
 % fallback), and B3r reads it once
 fid = fopen('kpi1_set.m', 'w'); fprintf(fid, 'function s = kpi1_set()\ns = ''fresh3'';\nend\n'); fclose(fid);
@@ -3960,7 +3974,27 @@ verifyEqual(tc, kpi1_set(), 'fresh3');
 verifyEqual(tc, kpi1_file('eval_detector_metrics'), 'results/eval_detector_metrics_fresh3.mat');
 verifyEqual(tc, kpi1_file('detector_predictions'), 'results/detector_predictions_fresh3.mat');
 verifyError(tc, @() run_det_test('fresh3'), 'eval_detector:fresh3_read');
-delete('results/eval_detector_metrics_fresh3.mat'); delete('data/splits_fresh3.mat');
+verifyFalse(tc, isfile(mk));
+% The start marker: written before any data is loaded (here data/splits.mat holds no splits,
+% so the reading stops right after it), it blocks every later reading
+es = fileread(which('eval_detector'));
+im = strfind(es, 'fresh3_read_marker(''results/fresh3_read_started.txt'');'); verifyNumElements(tc, im, 1);
+verifyLessThan(tc, im, strfind(es, 'S = load(''data/splits.mat'');'));
+verifyLessThan(tc, im, strfind(es, 'Sf = load(''data/splits_fresh3.mat'');'));
+delete('results/eval_detector_metrics_fresh3.mat');
+try
+    run_det_test('fresh3'); id = '';
+catch err
+    id = err.identifier;
+end
+verifyNotEmpty(tc, id); verifyFalse(tc, startsWith(id, 'eval_detector:'));
+verifyTrue(tc, isfile(mk));
+txt = fileread(mk);
+verifyNotEmpty(tc, regexp(txt, 'time \d{4}-\d\d-\d\d \d\d:\d\d:\d\d', 'once'));
+verifyNotEmpty(tc, regexp(txt, 'commit (\w+|unknown)', 'once'));
+verifyNotEmpty(tc, strfind(txt, 'params_id unknown (no params.mat)'));
+verifyError(tc, @() run_det_test('fresh3'), 'eval_detector:fresh3_started');
+delete('data/splits_fresh3.mat');
 verifyError(tc, @() run_det_test('fresh3'), 'eval_detector:fresh3');
 clear shadow
 verifyEqual(tc, kpi1_set(), 'fresh2');

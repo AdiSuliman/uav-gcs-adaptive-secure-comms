@@ -205,6 +205,8 @@ for s = 1:numel(EbNo_list)
         D = add_subrun(D, p, modelName, EbNo_list(s), v_kmh, stop_time, delay_bits, 1, NaN, run_id, FOLD(k), MEAS, SEED0, TW);
     end
 end
+assert(run_id < 100000, 'run_dataset_sweep:run_id', ...      % seeds SEED0 + run id stay in their block (test_seed_streams_disjoint)
+    'run id %d leaves the 100 000 block of the sub-run seeds', run_id);
 report_row('none', NaN, D, i_start);
 
 %% ---- Package ----

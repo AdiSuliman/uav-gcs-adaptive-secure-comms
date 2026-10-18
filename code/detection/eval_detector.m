@@ -6,7 +6,8 @@
 % (data/splits_fresh2.mat, new seeds, built after the monitor's last validation choice), and
 % the outputs carry the suffix _fresh2. With DET_TEST = 'fresh3' (stage B3r) the fourth test set
 % (data/splits_fresh3.mat, stage B3q) is read once, only when kpi1_set.m names it (its
-% go/no-go), and the outputs carry the suffix _fresh3. The KPI 1 threshold is chosen on the
+% go/no-go), and the outputs carry the suffix _fresh3; results/fresh3_read_started.txt is
+% written before the set is loaded and blocks any later reading. The KPI 1 threshold is chosen on the
 % validation split in every case.
 % Eb/N0 of a frame (kpi_ebno.m): the Eb/N0 our signal is received with, the configured
 % value less a path-loss step from its onset on; a frame judged as path_loss is read at the
@@ -30,6 +31,9 @@ if read_fresh3                                          % the fourth test set: o
     assert(isfile('data/splits_fresh3.mat'), 'eval_detector:fresh3', 'data/splits_fresh3.mat not found: run B3q');
     assert(~isfile('results/eval_detector_metrics_fresh3.mat'), 'eval_detector:fresh3_read', ...
         'the fourth test set was read already (results/eval_detector_metrics_fresh3.mat)');
+    assert(~isfile('results/fresh3_read_started.txt'), 'eval_detector:fresh3_started', ...
+        'a reading of the fourth test set started already (results/fresh3_read_started.txt; docs/d91_set4.md)');
+    fresh3_read_marker('results/fresh3_read_started.txt');   % before the set is loaded: a crashed reading counts
 end
 tag = ''; if has_fresh && read_split, tag = '_split'; end
 if read_fresh2, tag = '_fresh2'; end
@@ -652,4 +656,21 @@ end
 
 function out = ternary(c, a, b)
 if c, out = a; else, out = b; end
+end
+
+function fresh3_read_marker(f)
+% The fourth test set's reading starts: time, the code's commit and the link model's params_id.
+src = fileparts(which('eval_detector'));
+[st, h] = system(sprintf('git -C "%s" rev-parse HEAD', src));
+[~, d] = system(sprintf('git -C "%s" status --porcelain --untracked-files=no', src));
+cm = 'unknown'; if st == 0, cm = strtrim(h); end
+if st == 0 && ~isempty(strtrim(d)), cm = [cm ' + local changes']; end
+pid = 'unknown (no params.mat)';
+if isfile('params.mat'), pid = params_id(load('params.mat').params); end
+if ~isfolder('results'), mkdir('results'); end
+fid = fopen(f, 'w');
+assert(fid > 0, 'eval_detector:fresh3_marker', 'cannot write %s', f);
+fprintf(fid, 'fourth test set (B3r) reading started\ntime %s\ncommit %s\nparams_id %s\n', ...
+    datestr(now, 'yyyy-mm-dd HH:MM:SS'), cm, pid);
+fclose(fid);
 end
