@@ -271,6 +271,23 @@ Logs: `uav-gcs-logs\v7_d91_speed_<job>.log` and `v7_d91_speed_queue.log`. Every 
 The summary's header names the SHA the queue was started with. The code a proof actually ran is
 the `D91CODE` at the end of its line. They differ after a swap (below).
 
+**Swap of 18.10, 13:55.** The queue was started at 13:27 with `f06a260` (bash PID 5628). At
+13:55:24, while its first job `static` was still waiting, its exports were moved onto `70f69f4`
+(the review fixes). The queue was not stopped. The steps:
+1. Checked that the log's last line was a WAIT of `static`, that no job had started, and that no
+   MATLAB of the queue was alive.
+2. Exported into `new.tmp_<time>`, with `D91_SHA.txt` holding the full SHA, and copied the
+   drivers to `drv.tmp_<time>`.
+3. Checked again, then renamed `new`/`drv` to `*.old_f06a260_<time>` and the temporary folders to
+   `new`/`drv`.
+4. Installed the new gate.
+5. Checked a third time and appended a `SWAP` line to the queue log.
+
+The queue's commands are fixed strings: driver names, arguments and the focused test names. The
+new code keeps all of them, so its jobs run the new code unchanged. The `old` export (`9b5c9f1`)
+is untouched. The summary's header still reads `new f06a260`; the `D91CODE 70f69f4...` on each
+proof line is what ran.
+
 **A second run** (needed when the code changes after the first job has started, since the lock
 allows one queue at a time):
 1. Wait for `queue done` in `v7_d91_speed_queue.log`. The lock folder is then gone.
