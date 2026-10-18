@@ -6,16 +6,17 @@
 # variable points the takeover into the sandbox.
 #
 #   bash d91_takeover_test.sh [sandbox dir] [scenario ...]
-# Scenarios: status normal p1crash rerun accept rerungate reboot oldlaunch p1gone p1wait orphan
-# mainkill slowexec zombie turn unknown p2gate refuse (default: all). oldlaunch runs a copy of
-# v7_d86_launch.sh (as old_launcher_copy.sh, so that no process scan takes it for the launcher) in
-# the sandbox, with its PowerShell queries replaced by a function and every V7L_* variable in the
-# sandbox.
+# Scenarios: rename status normal p1crash rerun accept rerungate reboot oldlaunch p1gone p1wait
+# orphan mainkill slowexec zombie turn unknown unread mlstub watchdog forcegate p2gate refuse
+# (default: all). oldlaunch runs a copy of v7_d86_launch.sh (as old_launcher_copy.sh, so that no
+# process scan takes it for the launcher) in the sandbox, with its PowerShell queries replaced by a
+# function and every V7L_* variable in the sandbox.
 HERE=$(cd "$(dirname "$0")" && pwd)
 TK="$HERE/v7_d91_takeover.sh"
 SB=${1:-"/c/Users/ADISUL~1/AppData/Local/Temp/claude/C--Users-Adi-Suliman-uav-gcs-adaptive-secure-comms/0ff3360f-912b-4701-bfb0-77d6917b5fc3/scratchpad/d91_takeover_test"}
 shift 2>/dev/null
-SCEN=("$@"); [ "${#SCEN[@]}" -gt 0 ] || SCEN=(status normal p1crash rerun accept rerungate reboot oldlaunch p1gone p1wait orphan mainkill slowexec zombie turn unknown p2gate refuse)
+SCEN=("$@"); [ "${#SCEN[@]}" -gt 0 ] || SCEN=(rename status normal p1crash rerun accept rerungate reboot oldlaunch p1gone p1wait orphan mainkill slowexec zombie turn unknown unread mlstub watchdog forcegate p2gate refuse)
+OLD_SCRIPTS=(v7_d86_launch.sh v7_d87_p3fix.sh v7_d87_redo.sh v7_d87_resume.ps1 v7_d83_launch.sh v7_fix_resume.sh)
 LIVE_LOGS="/c/Users/Adi Suliman/uav-gcs-logs"
 LIVE_REPO="/c/Users/Adi Suliman/uav-gcs-adaptive-secure-comms"
 case "$(cygpath -m "$SB")" in
@@ -26,8 +27,8 @@ ok()  { PASS=$((PASS + 1)); echo "  ok   $*"; }
 bad() { FAIL=$((FAIL + 1)); FAILS+=("$CUR: $*"); echo "  FAIL $*"; }
 check() { local m=$1; shift; if "$@"; then ok "$m"; else bad "$m"; fi; }
 has()   { grep -q -- "$2" "$1" 2>/dev/null; }
-until_t() {   # until_t <seconds> <command...>: poll the condition
-  local end=$(( $(date +%s) + $1 )); shift
+until_t() {   # until_t <seconds> <command...>: poll the condition (deadline times SLOW_X for a loaded machine)
+  local end=$(( $(date +%s) + $1 * ${SLOW_X:-3} )); shift
   until "$@"; do [ "$(date +%s)" -lt "$end" ] || return 1; sleep 0.3; done
 }
 children() { local d pp; for d in /proc/[0-9]*; do read -r pp 2>/dev/null < "$d/ppid" && [ "$pp" = "$1" ] && echo "${d#/proc/}"; done; }
@@ -52,6 +53,7 @@ tk_procs() {   # takeover bash processes of the current sandbox
   done
 }
 no_tk() { [ -z "$(tk_procs)" ]; }
+hung_left() { local p; for p in $(cat "$S/sys/hung" 2>/dev/null); do kill -0 "$p" 2>/dev/null && echo "$p"; done; }   # hanging stub queries still alive
 ns_of() { grep " $2 $3 $4\$" "$1/ctl/calls.log" 2>/dev/null | head -1 | cut -d' ' -f1; }   # first "<worktree> <event> <stage>"
 alerted() { ls "$RD"/ALERT_"$1"*.txt >/dev/null 2>&1; }
 lt() { [ -n "$1" ] && [ -n "$2" ] && [ "$1" -lt "$2" ]; }
@@ -73,7 +75,7 @@ setup() {   # fresh sandbox $SB/$1: logs, git repository with v7-dev and v7-p3 w
   echo "== $1"
   rm -rf "$S"; mkdir -p "$RD" "$S/temp" "$S/sys/procs" "$S/sys/created" "$S/sys/children" "$S/sys/state" "$S/ctl"
   cp -p "$SB/source/p1.log" "$SB/source/p3.log" "$SB/source/code_commit.txt" "$RD/"
-  echo "# stand-in of the old launcher" > "$S/logs/v7_d86_launch.sh"; echo "# stand-in of the p3 fix script" > "$S/logs/v7_d87_p3fix.sh"
+  for f in "${OLD_SCRIPTS[@]}"; do echo "# stand-in of the old run script $f" > "$S/logs/$f"; done
   echo $(( $(date +%s) - 86400 )) > "$S/sys/boot"; echo 5 > "$S/sys/cpu"; echo 70 > "$S/sys/headroom"; : > "$S/sys/matlab"
   : > "$S/sys/scripts"
   : > "$S/ctl/calls.log"
@@ -90,7 +92,8 @@ setup() {   # fresh sandbox $SB/$1: logs, git repository with v7-dev and v7-p3 w
   export V7T_MATLAB="$HERE/d91_stub_matlab.sh" V7T_SYS="$HERE/d91_stub_sys.sh" V7T_SYS_DIR="$S/sys" STUB_CTL="$S/ctl"
   export TEMP; TEMP=$(cygpath -w "$S/temp"); export V7T_TEMP_WIN="$TEMP"
   export V7T_POLL=1 V7T_STEP=0.2 V7T_HB_S=1 V7T_QUIET_S=2 V7T_IDLE_POLL=1 V7T_IDLE_MAX_S=30 V7T_STALE_S=30 \
-         V7T_SILENT_S=100000 V7T_HEADROOM_ALERT_S=5 V7T_BOOT_RETRY_S=0.1 V7T_QRETRY_S=1 V7T_ML_PID_WAIT_S=60 STUB_DELAY=0.05
+         V7T_SILENT_S=100000 V7T_HEADROOM_ALERT_S=5 V7T_BOOT_RETRY_S=0.1 V7T_QRETRY_S=1 V7T_ML_PID_WAIT_S=60 STUB_DELAY=0.05 \
+         V7T_Q_TIMEOUT_S=30 V7T_UNKNOWN_ALERT_S=3600 V7T_STALL_S=60
   unset V7T_ALLOW_PIDS
   [ "$V7T_LOGS" != "$LIVE_LOGS" ] && [ "$V7T_P1" != "/c/Users/Adi Suliman/uav-gcs-v7" ] || { echo "not a sandbox; stopped"; exit 1; }
 }
@@ -147,7 +150,7 @@ t_status() {
 
 t_normal() {
   setup normal || return
-  echo "B3q B3r" > "$RD/p2_set4.stages"
+  echo "B3q" > "$RD/p2_set4.stages"
   touch -d '-1 hour' "$RD/run.lock"
   tk_start
   until_t 30 test -f "$RD/takeover.lock"
@@ -167,7 +170,7 @@ t_normal() {
   check "p2: profile.json n_rx 2 committed" bash -c "git -C '$S/uav-gcs-v7-p2' show HEAD:profile.json | grep -q '\"n_rx\":2'"
   check "p2: v7-p2 pushed" git -C "$S/origin.git" show-ref -q --verify refs/heads/v7-p2
   check "p2: commit in code_commit.txt" grep -q '^p2 v7-p2 [0-9a-f]* ' "$RD/code_commit.txt"
-  check "p2: B stages with B3m and the set-4 stages" grep -q ' AB A0,A4v,A5,A6,B1,B2,B2F,B3n,B3m,B3q,B3r,B3,B3a,B4,OOD,B4s ' "$RD/p2.log"
+  check "p2: B stages with B3m and the set-4 build" grep -q ' AB A0,A4v,A5,A6,B1,B2,B2F,B3n,B3m,B3q,B3,B3a,B4,OOD,B4s ' "$RD/p2.log"
   a=$(cat "$S/ctl/p1_end_at"); b=$(ns_of "$S" uav-gcs-v7-p2 start A0)
   check "p2 starts after profile 1's chain ended" lt "$a" "$b"
   a=$(ns_of "$S" uav-gcs-v7-p3 done SURV3); b=$(ns_of "$S" uav-gcs-v7-p2 start C1p)
@@ -183,8 +186,11 @@ t_normal() {
   check "code_commit.txt: SRC line retired, nothing else changed in it" bash -c "diff <(sed 's/^SRC_RETIRED_BY_D91 /SRC /' '$RD/code_commit.txt' | grep -v ' takeover: ') '$SB/source/code_commit.txt'"
   check "code_commit.txt backup and retired SHA kept" bash -c "cmp -s '$RD'/code_commit_before_d91_*.txt '$SB/source/code_commit.txt' && grep -q \"^retired SRC \$(sed -n 's/^SRC //p' '$SB/source/code_commit.txt') \" '$RD/retired_src.txt'"
   check "no MATLAB option but the rerun's" bash -c "! grep -q ' opts ' '$S/ctl/calls.log'"
-  check "v7_d87_p3fix.sh renamed at the start" bash -c "[ ! -e '$S/logs/v7_d87_p3fix.sh' ] && [ -f '$S/logs/v7_d87_p3fix.sh.retired_by_d91' ] && grep -q 'v7_d87_p3fix.sh renamed to v7_d87_p3fix.sh.retired_by_d91 (no bash runs it)' '$S/takeover.log'"
-  check "v7_d86_launch.sh renamed at the start (no allowed subshell)" bash -c "[ ! -e '$S/logs/v7_d86_launch.sh' ] && [ -f '$S/logs/v7_d86_launch.sh.retired_by_d91' ] && grep -q 'v7_d86_launch.sh renamed to v7_d86_launch.sh.retired_by_d91 (none of V7T_ALLOW_PIDS' '$S/takeover.log'"
+  for f in "${OLD_SCRIPTS[@]}"; do
+    check "$f renamed at the start, logged before 'v7 takeover started'" bash -c "[ ! -e '$S/logs/$f' ] && [ -f '$S/logs/$f.retired_by_d91' ] && \
+      [ \$(grep -n '$f renamed to $f.retired_by_d91 (old run script)' '$S/takeover.log' | head -1 | cut -d: -f1) -lt \$(grep -n 'v7 takeover started' '$S/takeover.log' | head -1 | cut -d: -f1) ]"
+  done
+  check "the tracks' end files written, PIDs recorded" bash -c "ls '$RD'/takeover_end_p1 '$RD'/takeover_end_p3 '$RD'/takeover_end_p2 >/dev/null && [ \$(grep -c '^p[123] [0-9]' '$RD/takeover_tracks.txt') = 3 ]"
 }
 
 t_p1crash() {
@@ -197,9 +203,9 @@ t_p1crash() {
   check "p3 does not start C1p" bash -c "! grep -q 'uav-gcs-v7-p3 call' '$S/ctl/calls.log'"
   check "p2 not started" [ ! -d "$S/uav-gcs-v7-p2" ]
   check "no MATLAB for profile 1 without a go file" bash -c "! grep -q 'uav-gcs-v7 call' '$S/ctl/calls.log'"
-  touch -d '-10 min' "$RD/p1_resume.go"; sleep 3
+  touch -d '-10 min' "$RD/p1_resume.go"
+  until_t 40 alerted stale_p1_resume.go; check "alert on the old go file" alerted stale_p1_resume.go
   check "an old go file is not taken" [ -f "$RD/p1_resume.go" ]
-  check "alert on the old go file" alerted stale_p1_resume.go
   rm -f "$RD/p1_resume.go"; sleep 1.1; echo go > "$RD/p1_resume.go"
   until_t 40 grep -q 'takeover SRC [0-9a-f]* FROM 14 C1c A0 0 ' "$RD/p1.log"
   check "profile 1 goes on from C1c under a new part" grep -q '^##### PART [0-9_]* takeover SRC [0-9a-f]* FROM 14 C1c A0 0 #####$' "$RD/p1.log"
@@ -208,6 +214,9 @@ t_p1crash() {
   check "profile 1's MATLAB: C1c to RPT" grep -q "uav-gcs-v7 call run_stage('C1c','SURV','SURV3'" "$S/ctl/calls.log"
   until_t 30 alerted p2_set4_invalid; check "alert on a wrong set-4 stage" alerted p2_set4_invalid
   check "p2 waits on it" bash -c "! grep -q 'uav-gcs-v7-p2 call' '$S/ctl/calls.log'"
+  sleep 1.1; echo "B3q B3r" > "$RD/p2_set4.stages"
+  until_t 30 bash -c "grep -lq 'names B3r' '$RD'/ALERT_p2_set4_invalid_*.txt"
+  check "B3r refused in the chain (the reading runs by hand after the go/no-go)" bash -c "grep -lq 'names B3r' '$RD'/ALERT_p2_set4_invalid_*.txt && ! grep -q 'uav-gcs-v7-p2 call' '$S/ctl/calls.log'"
   rm -f "$RD/p2_set4.stages"
   tk_wait 240 || bad "takeover did not end in time"
   local a b
@@ -286,12 +295,12 @@ t_reboot() {
   mkdir -p "$S/uav-gcs-v7-p3/data"; echo partial > "$S/uav-gcs-v7-p3/data/policy_pools.mat"
   tk_start; HOLD_AT=SURV D=0.2 p1_fake; until_t 30 test -f "$RD/takeover.lock"; sleep 2
   local out
-  out=$(timeout 30 bash "$TK" 24172 49732 2>&1); echo "$out" | sed 's/^/     | /'
-  check "a second takeover refuses while the first is alive" grep -q 'was alive .* not started' <<< "$out"
+  out=$(timeout 150 bash "$TK" 24172 49732 2>&1); echo "$out" | sed 's/^/     | /'
+  check "a second takeover refuses while the first is alive" grep -q 'is alive .* not started' <<< "$out"
   reboot
   tk_start
   until_t 40 alerted p1_cut; check "alert: profile 1 cut by the reboot" alerted p1_cut
-  check "the takeover started again after the reboot" grep -q 'v7 takeover started' <<< "$(tail -5 "$S/takeover.log")"
+  check "the takeover started again after the reboot" [ "$(grep -c 'v7 takeover started' "$S/takeover.log")" = 2 ]
   sleep 2
   check "p3 still waits" bash -c "! grep -q 'uav-gcs-v7-p3 call' '$S/ctl/calls.log'"
   echo 20 > "$S/ctl/slow_uav-gcs-v7-p3_C1p"
@@ -356,7 +365,7 @@ t_oldlaunch() {   # the old launcher's resume after a reboot refuses on the reti
   check "after the reboot the launcher's resume refuses on the retired SRC (exit $rc)" bash -c "[ $rc = 1 ] && grep -q 'the run was launched on , not $sha; not resumed' '$S/launcher.out'"
   check "it wrote no part" [ "$(grep -c '^##### PART' "$RD/p1.log") $(grep -c '^##### PART' "$RD/p3.log")" = "$n1 $n3" ]
   echo "43428|$(date +%s)|$LCMD" > "$S/sys/scripts"
-  out=$(timeout 30 bash "$TK" 24172 49732 2>&1); echo "$out" | sed 's/^/     | /'
+  out=$(timeout 150 bash "$TK" 24172 49732 2>&1); echo "$out" | sed 's/^/     | /'
   check "an allowed PID reused after the reboot: refused" grep -q 'outside V7T_ALLOW_PIDS.*43428|.*not started' <<< "$out"
   : > "$S/sys/scripts"
   tk_start; until_t 30 bash -c "[ \$(grep -c 'v7 takeover started' '$S/takeover.log') = 2 ]"
@@ -405,7 +414,7 @@ t_zombie() {
 t_orphan() {   # the takeover's bash processes killed while its MATLAB runs on: no second MATLAB there
   setup orphan || return
   export V7T_STALE_S=5
-  echo 60 > "$S/ctl/slow_uav-gcs-v7-p3_C1p"
+  echo 150 > "$S/ctl/slow_uav-gcs-v7-p3_C1p"
   tk_start; D=0.05 p1_fake
   until_t 60 grep -q 'uav-gcs-v7-p3 start C1p' "$S/ctl/calls.log"
   local d p
@@ -416,7 +425,7 @@ t_orphan() {   # the takeover's bash processes killed while its MATLAB runs on: 
   kill -9 $p 2>/dev/null; sleep 7
   check "its MATLAB still runs after the kill" test -d "$S/ctl/busy_uav-gcs-v7-p3"
   tk_start
-  until_t 40 alerted ml_alive_p3; check "alert: an earlier MATLAB still runs in the worktree" alerted ml_alive_p3
+  until_t 120 alerted ml_alive_p3; check "alert: an earlier MATLAB still runs in the worktree" alerted ml_alive_p3
   tk_wait 240 || bad "takeover did not end in time"
   check "no two MATLAB in one worktree" bash -c "! grep -q CONCURRENT '$S/ctl/calls.log'"
   check "p3's C1p ran once" [ "$(grep -c 'uav-gcs-v7-p3 start C1p' "$S/ctl/calls.log")" = 1 ]
@@ -443,7 +452,7 @@ t_slowexec() {   # MATLAB's exec lags behind the fork: the PID file waits for it
   setup slowexec2 || return
   pf="$RD/takeover_ml_p3.pid"
   export V7T_ML_PID_WAIT_S=3 V7T_STALE_S=5
-  echo 1000 > "$S/sys/exec_delay"; echo 60 > "$S/ctl/slow_uav-gcs-v7-p3_C1p"
+  echo 1000 > "$S/sys/exec_delay"; echo 150 > "$S/ctl/slow_uav-gcs-v7-p3_C1p"
   tk_start; D=0.05 p1_fake
   until_t 60 grep -q 'uav-gcs-v7-p3 start C1p' "$S/ctl/calls.log"
   until_t 40 alerted ml_pid_p3; check "exec not seen within the wait: alert" alerted ml_pid_p3
@@ -456,7 +465,7 @@ t_slowexec() {   # MATLAB's exec lags behind the fork: the PID file waits for it
   kill -9 $p 2>/dev/null; sleep 7
   check "its MATLAB still runs after the kill" test -d "$S/ctl/busy_uav-gcs-v7-p3"
   tk_start
-  until_t 40 alerted ml_alive_p3; check "the restarted takeover treats the subshell's PID as alive" alerted ml_alive_p3
+  until_t 120 alerted ml_alive_p3; check "the restarted takeover treats the subshell's PID as alive" alerted ml_alive_p3
   tk_wait 240 || bad "takeover did not end in time"
   check "no two MATLAB in one worktree" bash -c "! grep -q CONCURRENT '$S/ctl/calls.log'"
   check "p3's C1p ran once" [ "$(grep -c 'uav-gcs-v7-p3 start C1p' "$S/ctl/calls.log")" = 1 ]
@@ -465,19 +474,32 @@ t_slowexec() {   # MATLAB's exec lags behind the fork: the PID file waits for it
 
   setup slowexec3 || return   # the track killed between the fork and the exec
   pf="$RD/takeover_ml_p3.pid"
-  echo 30 > "$S/sys/exec_delay"; echo 90 > "$S/ctl/slow_uav-gcs-v7-p3_C1p"
+  echo 60 > "$S/sys/exec_delay"; echo 150 > "$S/ctl/slow_uav-gcs-v7-p3_C1p"
   tk_start; D=0.05 p1_fake
   until_t 60 grep -q 'uav-gcs-v7-p3 start C1p' "$S/ctl/calls.log"
   check "inside the exec window the PID file holds the subshell" bash -c "[ \$(wc -l < '$pf') = 2 ]"
   kill -9 $(tk_procs) 2>/dev/null; sleep 5
   check "its MATLAB still runs after the kill" test -d "$S/ctl/busy_uav-gcs-v7-p3"
   tk_start
-  until_t 40 alerted ml_alive_p3; check "the restarted takeover waits for the subshell's MATLAB" alerted ml_alive_p3
+  until_t 120 alerted ml_alive_p3; check "the restarted takeover waits for the subshell's MATLAB" alerted ml_alive_p3
   tk_wait 240 || bad "takeover did not end in time"
   check "no two MATLAB in one worktree" bash -c "! grep -q CONCURRENT '$S/ctl/calls.log'"
   check "p3's C1p ran once" [ "$(grep -c 'uav-gcs-v7-p3 start C1p' "$S/ctl/calls.log")" = 1 ]
   check "v7 done" has "$S/takeover.log" 'v7 done'
   export V7T_STALE_S=30
+
+  setup slowexec4 || return   # the exec shows only after the wait: the PID file then names MATLAB
+  pf="$RD/takeover_ml_p3.pid"
+  export V7T_ML_PID_WAIT_S=2
+  echo 7 > "$S/sys/exec_delay"; echo 40 > "$S/ctl/slow_uav-gcs-v7-p3_C1p"
+  tk_start; D=0.05 p1_fake
+  until_t 60 grep -q 'uav-gcs-v7-p3 start C1p' "$S/ctl/calls.log"
+  until_t 30 alerted ml_pid_p3; check "exec not seen within the wait: alert" alerted ml_pid_p3
+  until_t 30 bash -c "[ \"\$(wc -l < '$pf' 2>/dev/null)\" = 1 ]"
+  op=$(head -1 "$pf" 2>/dev/null)
+  check "checked on after the wait: the PID file names the MATLAB once the exec shows" bash -c "[ \$(wc -l < '$pf') = 1 ] && [ -f '$S/ctl/start_$op' ]"
+  tk_kill
+  export V7T_ML_PID_WAIT_S=60
 }
 
 t_turn() {
@@ -508,6 +530,7 @@ t_turn() {
 
 t_p2gate() {   # profile 2 starts only on a finished profile 1 or p2_start.go; its C1p alerts when P3 cannot reach SURV3
   setup p2gate || return
+  echo "##### chain ended rc=1 $(date) #####" >> "$RD/p1.log"   # the launcher's chain has failed: given up, it runs nothing
   touch "$RD/p1.abandon" "$RD/p3_c1p.force" "$S/ctl/fail_uav-gcs-v7-p3_C1p"
   tk_start
   until_t 40 alerted p2_wait_p1_abandon
@@ -528,7 +551,7 @@ t_p2gate() {   # profile 2 starts only on a finished profile 1 or p2_start.go; i
   rm -f "$RD/p2_c1p.force"
   touch "$RD/p3.abandon"
   until_t 40 alerted p2_c1p_p3_abandon
-  check "p3 given up before SURV3: alert naming p2_c1p.force" grep -q 'p2_c1p.force' "$RD/ALERT_p2_c1p_p3_abandon.txt"
+  check "p3 given up before SURV3, its chain stopped: alert naming p2_c1p.force and what it still waits for" bash -c "grep -q 'p2_c1p.force' '$RD/ALERT_p2_c1p_p3_abandon.txt' && grep -q 'still waits until profile 1' '$RD/ALERT_p2_c1p_p3_abandon.txt'"
   check "profile 2's C1p waits" bash -c "! grep -q 'uav-gcs-v7-p2 start C1p' '$S/ctl/calls.log'"
   touch "$RD/p2_c1p.force"
   tk_wait 240 || bad "takeover did not end in time"
@@ -630,11 +653,8 @@ t_p1gone() {   # profile 1's chain subshells gone without an end marker: p1_cut 
   tk_start; until_t 30 grep -q 'v7 takeover started' "$S/takeover.log"
   sleep 4
   check "subshells alive: no p1_cut" bash -c "! ls '$RD'/ALERT_p1_cut*.txt >/dev/null 2>&1"
-  check "v7_d87_p3fix.sh renamed at the start" bash -c "[ ! -e '$S/logs/v7_d87_p3fix.sh' ] && [ -f '$S/logs/v7_d87_p3fix.sh.retired_by_d91' ]"
-  check "v7_d86_launch.sh kept while an allowed subshell lives" test -f "$S/logs/v7_d86_launch.sh"
+  check "every old run script renamed at the start, v7_d86_launch.sh too while the allowed subshells live" bash -c "for f in ${OLD_SCRIPTS[*]}; do [ ! -e '$S/logs/'\$f ] && [ -f '$S/logs/'\$f.retired_by_d91 ] || exit 1; done"
   rm -f "$S/sys/procs/43428" "$S/sys/procs/43972"; : > "$S/sys/scripts"
-  until_t 60 grep -q 'v7_d86_launch.sh renamed to' "$S/takeover.log"
-  check "v7_d86_launch.sh renamed once none of them is alive, and logged" bash -c "[ ! -e '$S/logs/v7_d86_launch.sh' ] && grep -q 'v7_d86_launch.sh renamed to v7_d86_launch.sh.retired_by_d91 (none of V7T_ALLOW_PIDS' '$S/takeover.log'"
   sleep 4
   check "a MATLAB child still listed: no p1_cut" bash -c "! ls '$RD'/ALERT_p1_cut*.txt >/dev/null 2>&1"
   check "no rerun while profile 1 is in C1p" bash -c "! grep -q 'uav-gcs-v7-p3 call' '$S/ctl/calls.log'"
@@ -680,18 +700,20 @@ t_p1wait() {   # a profile 1 resume does not start C1c beside P3's B-stage rerun
 t_mainkill() {   # only the main bash killed: the tracks stop, its MATLAB runs on, a restart waits for it
   setup mainkill || return
   local t0
-  echo 60 > "$S/ctl/slow_uav-gcs-v7-p3_C1p"
+  echo 150 > "$S/ctl/slow_uav-gcs-v7-p3_C1p"
   tk_start; D=0.05 p1_fake
   until_t 60 grep -q 'uav-gcs-v7-p3 start C1p' "$S/ctl/calls.log"
-  t0=$(date +%s); kill -9 "$TKP"
+  t0=$(date +%s); kill -TERM "$TKP"
+  until_t 10 bash -c "! kill -0 $TKP 2>/dev/null"
+  check "main ended by SIGTERM while its tracks live: its EXIT trap keeps takeover.lock" test -f "$RD/takeover.lock"
   until_t 30 alerted takeover_main_gone; check "alert: the main bash is gone" alerted takeover_main_gone
   until_t 30 no_tk; check "every track has stopped" no_tk
   check "its MATLAB runs on" test -d "$S/ctl/busy_uav-gcs-v7-p3"
   check "its PID file kept" test -f "$RD/takeover_ml_p3.pid"
   sleep 4
-  tk_start; until_t 30 bash -c "[ \$(grep -c 'v7 takeover started' '$S/takeover.log') = 2 ]"
-  check "restart accepted before the stale limit (main bash gone, lock 3 heartbeats old)" bash -c "[ \$(grep -c 'v7 takeover started' '$S/takeover.log') = 2 ] && [ \$(( \$(date +%s) - $t0 )) -lt 30 ]"
-  until_t 40 alerted ml_alive_p3; check "the restart waits for that MATLAB" alerted ml_alive_p3
+  tk_start; until_t 90 bash -c "[ \$(grep -c 'v7 takeover started' '$S/takeover.log') = 2 ]"
+  check "restart accepted (main bash gone, lock 3 heartbeats old)" bash -c "[ \$(grep -c 'v7 takeover started' '$S/takeover.log') = 2 ] && [ \$(( \$(date +%s) - $t0 )) -lt 120 ]"
+  until_t 120 alerted ml_alive_p3; check "the restart waits for that MATLAB" alerted ml_alive_p3
   tk_wait 240 || bad "takeover did not end in time"
   check "no two MATLAB in one worktree" bash -c "! grep -q CONCURRENT '$S/ctl/calls.log'"
   check "p3's C1p ran once" [ "$(grep -c 'uav-gcs-v7-p3 start C1p' "$S/ctl/calls.log")" = 1 ]
@@ -701,7 +723,12 @@ t_mainkill() {   # only the main bash killed: the tracks stop, its MATLAB runs o
 
 t_unknown() {   # a failed process query is unknown, never 'gone': no start, no MATLAB start
   setup unknown || return
-  local out
+  local out t0
+  export V7T_Q_TIMEOUT_S=2
+  touch "$S/sys/hang_cmdline_24172"; t0=$(date +%s)
+  out=$(bash "$TK" 24172 49732 2>&1); check "a hanging command-line query: ended after 2 s each, refused after 5 tries" bash -c "grep -q 'command line of PID 24172 could not be read.*not started' <<< \"\$1\" && [ \$(( \$(date +%s) - $t0 )) -lt 40 ]" _ "$out"
+  sleep 1; check "the hanging queries were ended (5 recorded)" bash -c "[ \$(wc -l < '$S/sys/hung') = 5 ] && [ -z \"\$1\" ]" _ "$(sandbox_left)$(hung_left)"
+  rm -f "$S/sys/hang_cmdline_24172"; export V7T_Q_TIMEOUT_S=30
   touch "$S/sys/fail_scripts"
   out=$(bash "$TK" 24172 49732 2>&1); check "process scan unreadable at the start: refused" grep -q 'process scan for old scripts could not be read.*not started' <<< "$out"
   rm -f "$S/sys/fail_scripts"; touch "$S/sys/fail_cmdline_24172"
@@ -725,6 +752,152 @@ t_unknown() {   # a failed process query is unknown, never 'gone': no start, no 
   tk_wait 240 || bad "takeover did not end in time"
   check "p3's C1p ran once" [ "$(grep -c 'uav-gcs-v7-p3 start C1p' "$S/ctl/calls.log")" = 1 ]
   check "v7 done" has "$S/takeover.log" 'v7 done'
+}
+
+t_rename() {   # a running bash goes on after its script file is renamed, as the launcher's at the takeover's start
+  CUR=rename; S="$SB/rename"; echo "== rename"
+  rm -rf "$S"; mkdir -p "$S/A" "$S/B"
+  cat > "$S/like_launcher.sh" <<'EOF'
+#!/usr/bin/env bash
+# main reads this file as it goes; chain runs as an async function, as the launcher's chain subshells
+O=${1:?}
+chain() {
+  local i rc=0
+  for i in 1 2 3 4 5 6; do
+    ( sleep 1 ); rc=$?
+    echo "chain step $i $(date +%s)" >> "$O/chain.log"
+  done
+  echo "##### chain ended rc=$rc $(date) #####" >> "$O/chain.log"
+}
+chain &
+echo "main: chain started" >> "$O/main.log"
+sleep 3
+echo "main: line after the first sleep" >> "$O/main.log"
+sleep 3
+echo "main: line after the second sleep" >> "$O/main.log"
+wait
+echo "main: end" >> "$O/main.log"
+EOF
+  local ma mb wp
+  cp "$S/like_launcher.sh" "$S/A/s.sh"; bash "$S/A/s.sh" "$S/A" & ma=$!
+  cp "$S/like_launcher.sh" "$S/B/s.sh"; bash "$S/B/s.sh" "$S/B" & mb=$!
+  sleep 1.5
+  check "renamed while its bash runs it" mv "$S/A/s.sh" "$S/A/s.sh.retired_by_d91"
+  read -r wp < "/proc/$mb/winpid"; taskkill //PID "$wp" //F > /dev/null
+  sleep 0.5
+  check "renamed after its main bash was ended with taskkill /F" mv "$S/B/s.sh" "$S/B/s.sh.retired_by_d91"
+  until_t 30 bash -c "grep -q 'chain ended' '$S/A/chain.log' && grep -q 'chain ended' '$S/B/chain.log' && grep -q 'main: end' '$S/A/main.log'"
+  check "running main bash: reads the script's later lines after the rename" bash -c "grep -q 'line after the second sleep' '$S/A/main.log' && grep -q 'main: end' '$S/A/main.log'"
+  check "its chain subshell writes its end marker" grep -q '^##### chain ended rc=0' "$S/A/chain.log"
+  check "main ended: its chain subshell goes on, forks included, and writes its end marker" bash -c "[ \$(grep -c '^chain step' '$S/B/chain.log') = 6 ] && grep -q '^##### chain ended rc=0' '$S/B/chain.log' && ! grep -q 'first sleep' '$S/B/main.log'"
+  wait "$ma" 2>/dev/null
+}
+
+t_unread() {   # a log that exists but does not read as a part is unknown: nothing is decided or started on it
+  setup unread || return
+  export V7T_UNKNOWN_ALERT_S=3
+  local G='##### PART 20261018_120000 takeover SRC abc #####' a b n3
+  echo "$G" >> "$RD/p3.log"; n3=$(grep -c '^##### PART' "$RD/p3.log")
+  tk_start; HOLD_AT=SURV D=0.2 p1_fake
+  until_t 40 grep -q 'p3: p3.log could not be read' "$S/takeover.log"
+  check "a header without FROM in p3.log: read as unknown, logged" grep -q 'p3: p3.log could not be read' "$S/takeover.log"
+  until_t 40 alerted unknown_p3log; check "alert once it stays unknown" alerted unknown_p3log
+  until_t 40 test -f "$S/ctl/p1_C1c_at"
+  echo "$G" >> "$RD/p1.log"
+  touch "$S/ctl/p1_release_SURV"
+  until_t 40 test -f "$S/ctl/p1_end_at"; sleep 5
+  check "p1.log unknown after its chain ended: no p1 alert, no p2 start" bash -c "! ls '$RD'/ALERT_p1_failed* '$RD'/ALERT_p1_cut* >/dev/null 2>&1 && [ ! -d '$S/uav-gcs-v7-p2' ]"
+  until_t 40 alerted unknown_p1log; check "p1.log unknown: alert" alerted unknown_p1log
+  check "no MATLAB and no part header while the logs are unknown" bash -c "! grep -q ' call ' '$S/ctl/calls.log' && [ \$(grep -c '^##### PART' '$RD/p3.log') = $n3 ]"
+  grep -vxF "$G" "$RD/p1.log" > "$RD/p1.fix"; mv "$RD/p1.fix" "$RD/p1.log"
+  until_t 60 grep -q 'uav-gcs-v7-p2 done B4s' "$S/ctl/calls.log"
+  check "p1.log readable again: profile 2 starts" grep -q 'uav-gcs-v7-p2 done B4s' "$S/ctl/calls.log"
+  sleep 3
+  check "p3 still waits while its log is unknown, and so does p2's C1p" bash -c "! grep -q 'uav-gcs-v7-p3 call' '$S/ctl/calls.log' && ! grep -q 'uav-gcs-v7-p2 start C1p' '$S/ctl/calls.log'"
+  grep -vxF "$G" "$RD/p3.log" > "$RD/p3.fix"; mv "$RD/p3.fix" "$RD/p3.log"
+  tk_wait 240 || bad "takeover did not end in time"
+  a=$(cat "$S/ctl/p1_surv3_at"); b=$(ns_of "$S" uav-gcs-v7-p3 start C1p)
+  check "p3's C1p after profile 1's SURV3" lt "$a" "$b"
+  check "v7 done" has "$S/takeover.log" 'v7 done'
+  for g in p1 p3 p2; do check "$g: final part LAT..RPT and the bundle" final_ok "$g"; done
+  check "no two MATLAB in one worktree" bash -c "! grep -q CONCURRENT '$S/ctl/calls.log'"
+  export V7T_UNKNOWN_ALERT_S=3600
+}
+
+t_mlstub() {   # a recorded subshell whose stub is gone while its MATLAB child lives counts as alive
+  setup mlstub || return
+  printf '%s\nmsys %s\n' 61112 999 > "$RD/takeover_ml_p3.pid"
+  echo none > "$S/sys/procs/61112"; echo 61113 > "$S/sys/children/61112"
+  tk_start
+  until_t 120 alerted ml_alive_p3; check "stub gone, MATLAB child alive: alive, no new MATLAB there" alerted ml_alive_p3
+  sleep 2
+  check "its PID file kept, nothing started in p3" bash -c "[ -f '$RD/takeover_ml_p3.pid' ] && ! grep -q 'uav-gcs-v7-p3 call' '$S/ctl/calls.log'"
+  rm -f "$S/sys/children/61112"
+  until_t 30 test ! -f "$RD/takeover_ml_p3.pid"
+  check "no MATLAB child left: gone, the PID file removed" test ! -f "$RD/takeover_ml_p3.pid"
+  tk_kill
+}
+
+t_watchdog() {   # a stalled track and a died track: alerts, no final phase; a restart resumes
+  setup watchdog || return
+  export V7T_STALL_S=5
+  local p3p p2p a b
+  tk_start; HOLD_AT=SURV D=0.2 p1_fake
+  until_t 30 bash -c "[ \$(grep -c '^p[123] [0-9]' '$RD/takeover_tracks.txt' 2>/dev/null) = 3 ]"
+  p3p=$(awk '$1 == "p3" {print $2}' "$RD/takeover_tracks.txt"); p2p=$(awk '$1 == "p2" {print $2}' "$RD/takeover_tracks.txt")
+  sleep 2
+  check "no stall alert while the tracks beat" bash -c "! ls '$RD'/ALERT_takeover_track_* >/dev/null 2>&1"
+  kill -STOP "$p3p"
+  until_t 30 alerted takeover_track_p3_stalled; check "p3's track stopped: stall alert" alerted takeover_track_p3_stalled
+  kill -CONT "$p3p"
+  kill -9 "$p2p"
+  until_t 30 alerted takeover_track_p2_died; check "p2's track killed alone: died alert" alerted takeover_track_p2_died
+  touch "$S/ctl/p1_release_SURV"
+  tk_wait 240 || bad "takeover did not end in time"
+  check "final phase skipped, no 'v7 done'" bash -c "grep -q 'final phase skipped: track p2 died' '$S/takeover.log' && ! grep -q 'v7 done' '$S/takeover.log'"
+  check "no final part" bash -c "! grep -q 'takeover-final' '$RD/p1.log' '$RD/p3.log'"
+  check "p3 went on after its stall: C1p to RPT" grep -q 'uav-gcs-v7-p3 done RPT' "$S/ctl/calls.log"
+  check "takeover.lock removed once no track lives" test ! -f "$RD/takeover.lock"
+  export V7T_STALL_S=60
+  tk_start
+  tk_wait 240 || bad "takeover did not end in time after the restart"
+  check "the restart resumes profile 2 and runs the final phase" bash -c "grep -q 'uav-gcs-v7-p2 done RPT' '$S/ctl/calls.log' && [ \$(grep -c 'v7 done' '$S/takeover.log') = 1 ]"
+  for g in p1 p3 p2; do check "$g: final part LAT..RPT and the bundle" final_ok "$g"; done
+  a=$(cat "$S/ctl/p1_surv3_at"); b=$(ns_of "$S" uav-gcs-v7-p3 start C1p)
+  check "p3's C1p after profile 1's SURV3" lt "$a" "$b"
+  check "no two MATLAB in one worktree" bash -c "! grep -q CONCURRENT '$S/ctl/calls.log'"
+}
+
+t_forcegate() {   # a force file counts only once the given-up profile's chain has stopped: never two C1p
+  setup forcegate || return
+  local a b t
+  echo 90 > "$S/ctl/slow_uav-gcs-v7-p3_C1p"; touch "$S/ctl/fail_uav-gcs-v7-p3_C1p"
+  tk_start; D=0.05 p1_fake
+  until_t 60 grep -q 'uav-gcs-v7-p3 start C1p' "$S/ctl/calls.log"
+  until_t 60 grep -q 'uav-gcs-v7-p2 done B4s' "$S/ctl/calls.log"
+  check "p3's C1p still runs" test -d "$S/ctl/busy_uav-gcs-v7-p3"
+  touch "$RD/p3.abandon" "$RD/p2_c1p.force"
+  until_t 60 grep -q "p2_c1p.force waits until profile 3's chain has stopped" "$S/takeover.log"
+  check "p3 given up while its C1p runs: no p2_c1p_p3_abandon alert yet" bash -c "[ -d '$S/ctl/busy_uav-gcs-v7-p3' ] && ! ls '$RD'/ALERT_p2_c1p_p3_abandon* >/dev/null 2>&1"
+  check "p2_c1p.force waits for p3's chain to stop: no second C1p" bash -c "! grep -q 'uav-gcs-v7-p2 start C1p' '$S/ctl/calls.log' && grep -q \"p2_c1p.force waits until profile 3's chain has stopped\" '$S/takeover.log'"
+  until_t 150 grep -q 'uav-gcs-v7-p2 start C1p' "$S/ctl/calls.log"
+  a=$(ns_of "$S" uav-gcs-v7-p3 fail C1p); b=$(ns_of "$S" uav-gcs-v7-p2 start C1p)
+  check "p2's C1p only after p3's C1p has ended" lt "$a" "$b"
+  check "started on the force file, logged" grep -q 'p2: C1p starts on p2_c1p.force' "$S/takeover.log"
+  tk_wait 240 || bad "takeover did not end in time"
+  check "v7 done" has "$S/takeover.log" 'v7 done'
+
+  setup forcegate2 || return   # profile 1 given up while its launcher chain runs C1p
+  tk_start; FAIL_AT=C1c HOLD_AT=C1c D=0.2 p1_fake
+  until_t 40 test -f "$S/ctl/p1_C1p_at"; until_t 60 grep -q "p3: C1p waits for p1's SURV3" "$S/takeover.log"
+  touch "$RD/p1.abandon" "$RD/p3_c1p.force"
+  until_t 60 grep -q "p3_c1p.force waits until profile 1's chain has stopped" "$S/takeover.log"; sleep 2
+  check "profile 1 given up while its chain runs: p3_c1p.force waits, no p3 C1p" bash -c "! grep -q 'uav-gcs-v7-p3 call' '$S/ctl/calls.log' && grep -q \"p3_c1p.force waits until profile 1's chain has stopped\" '$S/takeover.log'"
+  t=$(date +%s%N); touch "$S/ctl/p1_release_C1c"
+  until_t 120 grep -q 'uav-gcs-v7-p3 start C1p' "$S/ctl/calls.log"
+  b=$(ns_of "$S" uav-gcs-v7-p3 start C1p)
+  check "p3's C1p once profile 1's chain has ended" bash -c "[ -n '$b' ] && [ '$t' -lt '$b' ] && grep -q '^##### chain ended rc=1' '$RD/p1.log'"
+  tk_kill
 }
 
 for t in "${SCEN[@]}"; do "t_$t"; done

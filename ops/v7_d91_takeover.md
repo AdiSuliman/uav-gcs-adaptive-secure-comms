@@ -5,7 +5,7 @@ In the repository it lives on branch `d91-takeover`, under `ops/`, together with
 
 ## What it replaces, and why
 
-These processes still run (checked on 18.10 at 09:10):
+These processes still run (checked on 18.10 at 09:10, and unchanged at 12:40):
 
 - The d86 launcher, bash PID 24172, in resume mode, holding SRC 9b5c9f1 in memory. Its wrappers are 39928 (`Git\bin\bash.exe -lc …`) and 32328 (`Git\bin\..\usr\bin\bash.exe -lc …`). Three forks of 24172, 47724 → 46828 → 50260 (created 08:49), also carry its command line.
 - Its profile 1 chain subshell, 43428, which runs 43972, then the MATLAB stub 44984, then MATLAB 42560. This chain is in C1p. 43428 and 43972 carry the launcher's command line, because MSYS forks keep it; they were created on 17.10 at 16:42:13, 8 s after the launcher's part `20261017_164205` began. 43428 writes the chain's end marker.
@@ -25,8 +25,8 @@ The takeover keeps profile 1's chain as it is and replaces everything else.
 |---|---|
 | P1 | Only reads p1.log. If the chain ends with rc != 0, is cut by a reboot, or its subshells (43428, 43972) are gone with no MATLAB child left and no end marker, it writes an alert and runs nothing until `p1_resume.go` exists. A resume from C1p or C1c waits while profile 3's B-stage rerun runs. |
 | P3 | Waits until p1.log's current part is past SURV3. Never accepts 'chain ended' instead. Meanwhile it runs the B-stage rerun listed in `p3_brerun.go`, if that file exists (conditions below). Then it runs C1p..RPT under a new `##### PART` header in the launcher's format. |
-| P2 | Starts once p1.log's current part shows `chain ended rc=0` past RPT, or on `p2_start.go`. Nothing else starts it: not `p1.abandon`, not a failed profile 1. It branches v7-p2 from v7-dev, sets profile.json n_rx to 2, makes fresh data/ and results/, pushes, and writes the commit to code_commit.txt (no SRC check). It runs A0-B2F, B3n, B3m, the stages listed in `p2_set4.stages`, then B3, B3a, B4, OOD and B4s. It waits until p3.log's current part is past SURV3, then runs C1p..RPT. If profile 3 is given up or its chain failed before SURV3, it raises an alert that names `p2_c1p.force`. |
-| Final | Waits until all three tracks have ended and the machine is idle. It then runs LAT, KPI, DASH, WEAK, RPT and the console bundle for each profile. |
+| P2 | Starts once p1.log's current part shows `chain ended rc=0` past RPT, or on `p2_start.go`. Nothing else starts it: not `p1.abandon`, not a failed profile 1. It branches v7-p2 from v7-dev, sets profile.json n_rx to 2, makes fresh data/ and results/, pushes, and writes the commit to code_commit.txt (no SRC check). It runs A0-B2F, B3n, B3m, the stages listed in `p2_set4.stages` (B3q only; B3r is refused), then B3, B3a, B4, OOD and B4s. It waits until p3.log's current part is past SURV3, then runs C1p..RPT. If profile 3 failed before SURV3, or was given up and its chain has stopped, it raises an alert that names `p2_c1p.force`. |
+| Final | Waits until all three tracks have ended on purpose and the machine is idle. It then runs LAT, KPI, DASH, WEAK, RPT and the console bundle for each profile. If a track died, the final phase is skipped (see "Watchdog"). |
 
 The machine counts as idle when all of these hold:
 
@@ -40,7 +40,8 @@ The machine counts as idle when all of these hold:
 - no merge is in progress;
 - there are no uncommitted changes in code/;
 - at least 45 GB of commit is free (65 GB for profile 3's B-stage rerun);
-- no bash runs an old script outside the allow-list (below), and the process scan could be read.
+- no bash runs an old run script outside the allow-list (below), and the process scan could be read;
+- the profile's log reads as a well-formed part (below); it is read again just before the part header.
 
 **Profile 3's B-stage rerun** starts only when all of these hold:
 
@@ -57,20 +58,33 @@ The other direction holds too: a profile 1 resume from C1p or C1c (on `p1_resume
 - `cygpath -w "$TEMP"` is not `C:\Users\ADISUL~1\AppData\Local\Temp`. Otherwise the parallel turn file would split.
 - The boot time cannot be read (5 tries), or it lies in the future. Without it a chain cut by a reboot could not be told from a running one.
 - PID 24172 or 49732 is still a bash running its script, or its command line cannot be read (5 tries).
-- A bash runs `v7_d86_launch.sh` or `v7_d87_p3fix.sh` as its script, other than an allowed subshell, or the process scan cannot be read (5 tries). Only a bash that runs the script counts: as its first argument, or as `bash <script>` inside `-lc "…"`. A command that only mentions the name (a grep, an agent's tool call) does not. A process counts only when two scans 5 s apart both list it, so a fork that lives for milliseconds (a command substitution inside the launcher's chain subshell) is not counted. A PID in `V7T_ALLOW_PIDS` counts as allowed only when all of these hold: it runs the launcher; profile 1's current part was written by the launcher (not by the takeover) in this boot; and the process was created within 15 min after that part began. After a reboot, or for a PID reused by a new process, the allow-list therefore matches nothing.
-- Another takeover holds `v7_d86/takeover.lock`: the lock is under 20 min old and newer than the last boot, unless it is at least 90 s old (3 heartbeats) and the PID in it is no longer a takeover's main bash. The lock is taken atomically (a short `takeover.lock.d` section, then a no-clobber write), so two launches at once start one takeover.
+- A bash runs an old run script as its script (`v7_d86_launch.sh`, `v7_d87_p3fix.sh`, `v7_d87_redo.sh`, `v7_d83_launch.sh` or `v7_fix_resume.sh`), other than an allowed subshell, or the process scan cannot be read (5 tries). Only a bash that runs the script counts: as its first argument, or as `bash <script>` inside `-lc "…"`. A command that only mentions the name (a grep, an agent's tool call) does not. A process counts only when two scans 5 s apart both list it, so a fork that lives for milliseconds (a command substitution inside the launcher's chain subshell) is not counted. A PID in `V7T_ALLOW_PIDS` counts as allowed only when all of these hold: it runs the launcher; profile 1's current part was written by the launcher (not by the takeover) in this boot; and the process was created within 15 min after that part began. After a reboot, or for a PID reused by a new process, the allow-list therefore matches nothing.
+- Another takeover holds `v7_d86/takeover.lock`, written in this boot: the PID in it still runs the takeover, at any lock age (a lock whose takeover still runs is never counted as stale; at 20 min or more the refused start also writes `ALERT_takeover_lock_held_*`); or its main bash is gone but the lock is under 90 s old (3 heartbeats); or that PID's command line cannot be read (5 tries). A lock from before the last boot is stale. The lock is taken atomically (a short `takeover.lock.d` section, then a no-clobber write), so two launches at once start one takeover.
 
-A failed process query never counts as 'process gone'. Every query prints an explicit answer (`none` for a missing process, an `end` line after a list); empty output means the query failed, and the takeover asks again (start checks 5 times, then refuses; while running, every 30 s, starting nothing meanwhile).
+**Unknown is never an answer.** A failed process query never counts as 'process gone'. Every query prints an explicit answer (`none` for a missing process, an `end` line after a list); empty output means the query failed. Each PowerShell call is ended after 120 s, with its process tree (`taskkill /T` on that PowerShell only), and then also counts as failed.
+
+The same holds for the logs. Every value derived from a log is unknown unless it is well formed:
+
+- the current part's header must read `##### PART <stamp> <mode> SRC <sha> FROM <i> <stage> A0 <0|1> … #####`;
+- the stage list must be complete (36 stages for profiles 1 and 3; profile 2's from its header's `AB` field);
+- each grep over a part must have read all of it (only then does a line `#END` follow its output);
+- only a log file that does not exist reads as 'nothing yet' (index 0); an existing log that reads empty or garbled is unknown.
+
+On unknown, nothing acts. 'Past SURV3', 'finished' and 'chain stopped' read as no; 'profile 1 in C1p or C1c' and 'rerun open' read as yes. No part header is written and no MATLAB starts. The track logs it once (`… could not be read … (read again every 30 s)`), reads again every 30 s, and writes `ALERT_unknown_<what>_*` after 1 h. The start checks ask 5 times, then refuse.
 
 **Retiring the old scripts.** Once the checks pass, the takeover:
 
 1. renames the `SRC <sha>` line of `v7_d86/code_commit.txt` to `SRC_RETIRED_BY_D91 <sha>`. Before that it copies the file to `code_commit_before_d91_<time>.txt` and appends the SHA to `retired_src.txt`, so the run's provenance is kept;
-2. renames `v7_d87_p3fix.sh` to `v7_d87_p3fix.sh.retired_by_d91` (no bash runs it at that point, which the start checks guarantee);
-3. renames `v7_d86_launch.sh` to `v7_d86_launch.sh.retired_by_d91` once none of `V7T_ALLOW_PIDS` is a live bash running it. With 43428 and 43972 alive that is when profile 1's chain has ended (after RPT); the takeover checks every 5 min.
+2. renames every old run script in `uav-gcs-logs` to `<name>.retired_by_d91`: `v7_d86_launch.sh`, `v7_d87_p3fix.sh`, `v7_d87_redo.sh`, `v7_d87_resume.ps1`, `v7_d83_launch.sh` and `v7_fix_resume.sh`. A rename that fails is alerted and retried every 5 min.
 
-Each rename is logged (`… renamed to ….retired_by_d91 (…); it cannot be run any more`). After step 3, neither script can be started in any mode, also not the launcher's launch mode (`<SHA>` without `resume`). The renamed launcher stays readable for the record.
+Each rename is logged (`<name> renamed to <name>.retired_by_d91 (old run script); it cannot be run any more`), before the line `v7 takeover started`. From then on none of them can be started in any mode, also not the launcher's launch mode (`<SHA>` without `resume`), which does not read SRC. The renamed files stay readable for the record. `v7_d87_redo.sh` had no lock and no SRC check, and would start MATLAB in both live worktrees at once.
 
-Until step 3, the retired SRC line already blocks the launcher's resume. The launcher reads that line with `sed -n 's/^SRC //p'` and refuses when it does not equal its own SHA (v7_d86_launch.sh lines 348-350, message `the run was launched on , not <sha>; not resumed`), before it writes any part header or starts any chain. A refused resume removes run.lock when it exits; the takeover's heartbeat recreates it. Nothing else reads that line:
+**Renaming the launcher while its chain subshells run is safe.** Only the launcher's main bash (24172) reads the script file, and the start checks confirm it is gone. The chain subshells 43428 and 43972 run the `chain` and `run_ml` functions, which bash parsed before it forked them. They read nothing more from the file, and they write `##### chain ended` with builtins and forks only. On Windows/MSYS a rename (not an edit) leaves every open handle valid. The harness checks this in the sandbox (scenario `rename`):
+
+- a bash whose script is renamed while it runs goes on reading the script's later lines;
+- a chain function forked in the background, whose main bash was ended with `taskkill /F` before the rename, runs its forks to the end and writes its end marker.
+
+The retired SRC line also blocks the launcher's resume. The launcher reads that line with `sed -n 's/^SRC //p'` and refuses when it does not equal its own SHA (v7_d86_launch.sh lines 348-350, message `the run was launched on , not <sha>; not resumed`), before it writes any part header or starts any chain. A refused resume removes run.lock when it exits; the takeover's heartbeat recreates it. Nothing else reads that line:
 
 - the takeover writes its own commit notes;
 - v7_d87_p3fix.sh read it only for its part header, at its start;
@@ -78,20 +92,26 @@ Until step 3, the retired SRC line already blocks the launcher's resume. The lau
 
 The harness runs a copy of the launcher in a sandbox and confirms both cases. Before the takeover, with SRC intact, its resume passes the code check. After the takeover and a reboot, it refuses with exit 1 and writes nothing.
 
-**While running.** It touches `v7_d86/run.lock` and `takeover.lock` every 30 s, and never more than 60 s apart. Every 5 min it scans for bash processes running the old scripts (two scans 5 s apart, as at the start). For each one outside the allow-list it writes `ALERT_old_script_<pid>_<created>`, and it starts no MATLAB until that process is gone.
+**While running.** It touches `v7_d86/run.lock` and `takeover.lock` every 30 s, and never more than 60 s apart. Every 5 min it scans for bash processes running the old run scripts (two scans 5 s apart, as at the start). For each one outside the allow-list it writes `ALERT_old_script_<pid>_<created>`, and it starts no MATLAB until that process is gone.
 
-Each track checks at every heartbeat that the takeover's main bash still lives. If it is gone (for example after `taskkill` of the PID in takeover.lock), every track stops within 30 s, `ALERT_takeover_main_gone` is written, and a MATLAB the takeover started runs on with its PID kept in `takeover_ml_<profile>.pid`. Nothing then refreshes the lock, so the same launch command can start the takeover again after 90 s.
+**Watchdog.** The three tracks' MSYS and Windows PIDs are in `v7_d86/takeover_tracks.txt`. Each track writes `takeover_beat_<g>` (the time, with a shell builtin, no fork) at every heartbeat, and `takeover_end_<g>` when it ends on purpose (finished, or given up). Every 5 min the main loop checks them:
+
+- a beat older than 20 min (2 polls + 10 min): `ALERT_takeover_track_<g>_stalled_<beat>`. The track may hang in a query, a git command or a fork. If it does not beat again, stop the takeover and start it again;
+- a track gone without its end file (a fork that failed for good, a stray taskkill): `ALERT_takeover_track_<g>_died`. The other tracks go on, but the final phase is skipped (log line `final phase skipped: track <g> died`). Stop the takeover and start it again with the same launch command; the restart resumes that profile from its log.
+
+Each track checks at every heartbeat that the takeover's main bash still lives, and it beats right before every part header and every MATLAB start. If the main bash is gone (for example after `taskkill` of the PID in takeover.lock), every track stops within 30 s, `ALERT_takeover_main_gone` is written, and a MATLAB the takeover started runs on, with its PID kept in `takeover_ml_<profile>.pid`. When the main bash exits, it removes takeover.lock only once no track lives. Otherwise nothing refreshes the lock, so the same launch command can start the takeover again after 90 s.
 
 It never touches the parallel turn file. If the PID in that file has exited but still lingers as a zombie, every `take` blocks, so the takeover writes an alert instead.
 
-**MATLAB's PID.** Right after forking a MATLAB, the takeover writes the subshell's Windows PID and an `msys <pid>` line to `takeover_ml_<profile>.pid`. It then waits up to 60 s until that subshell shows a process with `matlab` in its command line, and replaces the file with MATLAB's Windows PID. If that does not happen within 60 s (a heavily paging machine), it raises `ALERT_ml_pid_<profile>_*` and keeps the subshell's PID.
+**MATLAB's PID.** Right after forking a MATLAB, the takeover writes the subshell's Windows PID and an `msys <pid>` line to `takeover_ml_<profile>.pid`. It then checks every second until that subshell shows a process with `matlab` in its command line, and replaces the file with MATLAB's Windows PID. If that does not happen within 60 s (a heavily paging machine), it raises `ALERT_ml_pid_<profile>_*` and rewrites the file with the subshell's current Windows PID and its `msys` line. It goes on checking every 60 s while MATLAB runs, and the file names MATLAB once it shows.
 
-Before it starts a MATLAB in a worktree, it reads the PID in that file (written in this boot):
+Before it starts a MATLAB in a worktree, it reads the PID in that file (written in this boot). When the file has an `msys <pid>` line and MSYS still knows that process (`/proc/<pid>/winpid`, also from a restarted takeover), the Windows process that subshell is now, after its exec, is checked instead of the first line. Then:
 
 - a MATLAB command line: alive, it waits (`ALERT_ml_alive_<profile>`);
-- a takeover's command line (a subshell before or around its exec): alive while it has a MATLAB child or was created before this takeover started;
-- `none`, or another program: gone, the file is removed;
-- the query failed: unknown, it waits and asks again.
+- a takeover's command line (the subshell's stub around its exec): alive while it has a MATLAB child, or when it was created before this takeover started;
+- `none` with an `msys` line (the subshell's stub is gone): alive while a MATLAB child of that PID lives (Windows keeps a child's ParentProcessId after its parent exits), else gone;
+- `none` without an `msys` line, or another program: gone, and the file is removed;
+- the query failed, or the file reads empty: unknown, it waits and asks again.
 
 ## Procedure
 
@@ -105,12 +125,12 @@ V7T_ALLOW_PIDS='43428 43972' bash '/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_take
 
 What it should show:
 
-- p1 at `next C1p (index 13)` with `idle part: no` (later stages as profile 1 goes on);
+- p1 at `next C1p (index 13)` with `end marker rc=none` and `idle part: no` (later stages as profile 1 goes on);
 - p3 at `next C1p (index 13)` with `idle part: yes`;
 - `p2: no log`;
 - `p3 rerun request: none`;
 - `old scripts outside V7T_ALLOW_PIDS ('43428 43972'):` 39928 32328 24172 47724 46828 50260 39124 24652 49732 before steps 2 and 3 (the forks may be gone), and an empty list after them;
-- `allowed launcher subshells: alive; old scripts not yet renamed: v7_d86_launch.sh v7_d87_p3fix.sh`;
+- `allowed launcher subshells: alive; old scripts not yet renamed: v7_d86_launch.sh v7_d87_p3fix.sh v7_d87_redo.sh v7_d87_resume.ps1 v7_d83_launch.sh v7_fix_resume.sh`;
 - `code_commit.txt: SRC 9b5c9f1…` (still intact);
 - a free commit figure.
 
@@ -170,36 +190,37 @@ This is the one launch command for every later start too: after a crash, after s
 
 - `v7_d91_takeover.log` shows these lines, in order:
   1. `code_commit.txt: SRC 9b5c9f1… retired (the launcher's resume refuses)`;
-  2. `v7_d87_p3fix.sh renamed to v7_d87_p3fix.sh.retired_by_d91 (no bash runs it); it cannot be run any more`;
+  2. six lines `<name> renamed to <name>.retired_by_d91 (old run script); it cannot be run any more`, for `v7_d86_launch.sh`, `v7_d87_p3fix.sh`, `v7_d87_redo.sh`, `v7_d87_resume.ps1`, `v7_d83_launch.sh` and `v7_fix_resume.sh`;
   3. `v7 takeover started (boot …, TEMP C:\Users\ADISUL~1\AppData\Local\Temp, poll 300 s, allowed launcher subshells: 43428 43972)`;
   4. one line each for p1 and p3: `next C1p (index 13)` (or later for p1);
   5. `p2: waits for profile 1's chain to end with rc=0`;
   6. `p3: C1p waits for p1's SURV3`.
 - `v7_d86\code_commit.txt` starts with `SRC_RETIRED_BY_D91 9b5c9f1…`. `code_commit_before_d91_<time>.txt` holds the old line, and `retired_src.txt` names the SHA.
-- `uav-gcs-logs\v7_d87_p3fix.sh.retired_by_d91` exists and `v7_d87_p3fix.sh` does not. `v7_d86_launch.sh` is still there; it is renamed when profile 1's chain ends, with a log line `v7_d86_launch.sh renamed to v7_d86_launch.sh.retired_by_d91 (none of V7T_ALLOW_PIDS ('43428 43972') alive)`.
-- `v7_d86\takeover.lock` holds the takeover's PID and is under 60 s old. `run.lock` is under 60 s old.
+- `uav-gcs-logs` holds the six `….retired_by_d91` files and none of the six old names.
+- Profile 1's chain runs on: 43428, 43972, 44984 and 42560 are alive, and p1.log keeps growing.
+- `v7_d86\takeover.lock` holds the takeover's PID and is under 60 s old. `run.lock` is under 60 s old. `takeover_tracks.txt` lists p1, p3 and p2, and the three `takeover_beat_*` files are under 60 s old.
 - The status mode (step 1) still shows the same state, with `SRC_RETIRED_BY_D91` and an empty old-script list.
 - There is no `v7_d86\ALERT_*.txt`.
 - The log has no line `still runs`, `outside V7T_ALLOW_PIDS`, `could not be read` or `not started`.
 
 ## Stopping the takeover
 
-End every bash that runs the takeover, all with `/F` and none with `/T` (PowerShell, one line):
+End every bash that runs the takeover and has no MATLAB child, oldest first, all with `/F` and none with `/T` (PowerShell, one line):
 
 ```powershell
-Get-CimInstance Win32_Process -Filter "Name='bash.exe'" | Where-Object { $_.CommandLine -match '^"[^"]*\\bash\.exe"\s+(-lc\s+"(\w+=(''[^'']*''|\S*)\s+)*bash\s+)?[''"]/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_takeover\.sh[''"]' } | ForEach-Object { taskkill /PID $_.ProcessId /F }
+$all = @(Get-CimInstance Win32_Process); $mp = @($all | Where-Object { $_.Name -like 'matlab*' } | ForEach-Object { $_.ParentProcessId }); $all | Where-Object { $_.Name -eq 'bash.exe' -and $mp -notcontains $_.ProcessId -and $_.CommandLine -match '^"[^"]*\\bash\.exe"\s+(-lc\s+"(\w+=(''[^'']*''|\S*)\s+)*bash\s+)?[''"]/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_takeover\.sh[''"]' } | Sort-Object CreationDate | ForEach-Object { taskkill /PID $_.ProcessId /F }
 ```
 
-It matches the wrapper, the main bash and its track subshells (MSYS forks keep the main bash's command line), and only a bash that runs the live script, not a command that mentions it. It never ends a MATLAB:
+It matches the wrapper, the main bash and its track subshells (MSYS forks keep the main bash's command line), and only a bash that runs the live script, not a command that mentions it. The oldest go first, so the main bash and the tracks end before any of their short-lived forks. It never ends a MATLAB, nor the bash stub that waits on one:
 
-- A MATLAB the takeover started runs on. Its PID is in `v7_d86\takeover_ml_<profile>.pid`. A restarted takeover waits for it. To stop it as well, end that PID separately with `/F`.
+- A MATLAB the takeover started runs on, with the takeover's subshell stub as its parent. Its PID is in `v7_d86\takeover_ml_<profile>.pid`. A restarted takeover waits for it. To stop it as well, end that MATLAB PID separately with `/F`; its stub then exits.
 - Profile 1's launcher chain (43428, 43972) does not match and runs on.
 
-Run the same query without the `ForEach-Object` part afterwards: it must list nothing.
+Run the same query without the `ForEach-Object` part afterwards: it must list nothing. A stub left beside a running MATLAB is not listed, by design.
 
 Ending only the PID in takeover.lock also stops the takeover: its tracks stop within 30 s with `ALERT_takeover_main_gone`. The one-liner is the cleaner way.
 
-To start it again, use the launch command of step 4. It starts once the lock is 90 s old (its main bash is gone); before that it says `not started` and changes nothing.
+To start it again, use the launch command of step 4. It starts once its main bash is gone and the lock is 90 s old; before that it says `not started` and changes nothing. While the PID in the lock still runs the takeover, a start is always refused, also when that takeover hangs.
 
 ## Latest dates
 
@@ -221,9 +242,9 @@ Launch it as soon as this review is done (18-19.10). It also covers a profile 1 
 | `p3_brerun.go` | The stages of profile 3's B-stage rerun, e.g. `B2F B3 B3a B4 B4s`. They must be stages of uav-gcs-v7-p3's run_stage.m, and no C stage. They run with A0 first, while profile 3 waits for SURV3, under the conditions above. Each version (content plus time) runs once; touching the file runs it again. It is ignored once profile 3's C1p has started. A failed rerun holds C1p back until the file is written again, or until `p3_rerun.accept`. |
 | `p3_rerun.accept` | After `ALERT_p3_rerun_failed_*` or `ALERT_p3_rerun_blocked`: go on with profile 3's B stages as they are. It clears only the failed rerun; C1p still waits for profile 1's SURV3. It must be newer than p3.log; it is renamed `.used_<time>`, and p3.log gets a line `##### rerun accepted GO <id> …`. |
 | `p3_c1p.hold`, `p2_c1p.hold` | Hold that profile before C1p. Example: until the 21.10 go/no-go on the fusion revision. |
-| `p3_c1p.force`, `p2_c1p.force` | Skip only the wait for the other profile's SURV3 (profile 1 for P3, profile 3 for P2). It counts only while that other profile is given up (`p1.abandon`, `p3.abandon`); otherwise it is ignored with `ALERT_<g>_force_ignored_*`, so that two C1p never run at once. It does not clear a hold or a failed rerun. |
-| `p2_set4.stages` | Extra profile 2 stages run after B3m, e.g. `B3q B3r`. They must be in v7-dev's run_stage.m when profile 2 branches. The file is read once, when profile 2's B stages first start. |
-| `p1.abandon`, `p3.abandon`, `p2.abandon` | End that track. The final phase skips that profile. If profile 1 is given up, profile 3 also needs `p3_c1p.force` and profile 2 needs `p2_start.go`. If profile 3 is given up before its SURV3, profile 2 needs `p2_c1p.force`. |
+| `p3_c1p.force`, `p2_c1p.force` | Skip only the wait for the other profile's SURV3 (profile 1 for P3, profile 3 for P2). It counts only once that other profile is given up (`p1.abandon`, `p3.abandon`) **and its chain has stopped**: its takeover track has ended, no takeover MATLAB is recorded for it, and for profile 1 the launcher's chain is over too (its end marker, a reboot since, or its chain subshells gone with no MATLAB child). `p2_c1p.force` also needs profile 1 past SURV3, finished, or given up with its chain stopped, since profile 2 otherwise waits on profile 1 through profile 3. Without `.abandon` the file is ignored with `ALERT_<g>_force_ignored_*`. While the chain still runs, it waits (log line `… force waits until profile <n>'s chain has stopped`). So two C1p never run at once. It does not clear a hold or a failed rerun. |
+| `p2_set4.stages` | Extra profile 2 stages run after B3m: `B3q` (the fourth test set's build; it reads nothing). `B3r`, the set's single reading, is refused with `ALERT_p2_set4_invalid_*`. It runs by hand after the go/no-go and after profile 2's OOD, because OOD re-saves the detector (d91_set4.md step 7). The stages must be in v7-dev's run_stage.m when profile 2 branches. The file is read once, when profile 2's B stages first start. |
+| `p1.abandon`, `p3.abandon`, `p2.abandon` | End that track at its next loop; a running MATLAB is not stopped. The final phase skips that profile. If profile 1 is given up, profile 3 also needs `p3_c1p.force` and profile 2 needs `p2_start.go`. If profile 3 is given up before its SURV3, profile 2 needs `p2_c1p.force`. |
 
 **Alerts** go to `v7_d86\ALERT_<topic>.txt` and to the takeover log. Delete each alert once it is handled. Every alert that names a force file says what it skips.
 
@@ -236,16 +257,21 @@ Launch it as soon as this review is done (18-19.10). It also covers a profile 1 
 | `p3_rerun_failed`, `p3_rerun_blocked` | The rerun failed, or the last one did not end well and the go file is gone. Write `p3_brerun.go` again, or `p3_rerun.accept`. |
 | `p3_rerun_invalid`, `p3_go_ignored` | The go file names a stage that is not a B stage, or came after C1p started. |
 | `p3_force_ignored`, `p2_force_ignored` | A force file while the other profile is not given up; remove it, or give that profile up. |
+| `unknown_<what>` | A log, a control file or a process query has not read as well formed for 1 h (`p1log`, `p3log`, `p2log`, `go3`, `rerun`, `set4`, `scan`, `ml_<g>`, `<g>final`). Nothing starts on it meanwhile. Check that file, free memory and the number of processes; the takeover goes on by itself once it reads. |
+| `takeover_track_<g>_stalled_<beat>` | A track has not beaten for 20 min. If it does not beat again, stop the takeover and start it again. |
+| `takeover_track_<g>_died` | A track ended without its end file; the final phase will be skipped. Stop the takeover and start it again; the restart resumes that profile. |
+| `takeover_lock_held_<time>` | A start found takeover.lock held by a takeover that still runs but has not refreshed the lock for 20 min. Check its log, stop it, and start it again. |
+| `gate_<time>` | `takeover_gate.d` has been held for 1 h; its holder may have died inside it. Stop the takeover and start it again (the start clears it). |
 | `p2_set4_invalid`, `p2_prep` | A problem with `p2_set4.stages`, or profile 2's worktree could not be prepared. |
 | `p2_wait_p1_abandon` | Profile 1 is given up; profile 2 starts only on `p2_start.go`. |
-| `p2_c1p_p3_abandon`, `p2_c1p_p3_failed` | Profile 3 was given up or failed before its SURV3; profile 2's C1p starts only on `p2_c1p.force` once profile 3 is given up (or after profile 3 resumes past SURV3). |
-| `old_script_<pid>_<created>` | A bash outside the allow-list runs v7_d86_launch.sh or v7_d87_p3fix.sh; no takeover MATLAB starts until it is gone. End it with `/F` once sure it is not one of profile 1's chain subshells. |
+| `p2_c1p_p3_abandon`, `p2_c1p_p3_failed` | Profile 3 failed before its SURV3, or was given up and its chain has stopped (the abandon alert comes only then). Profile 2's C1p then starts only on `p2_c1p.force`, once profile 3 is given up with its chain stopped and profile 1 is past SURV3, finished, or given up with its chain stopped; or after profile 3 resumes past SURV3. |
+| `old_script_<pid>_<created>` | A bash outside the allow-list runs an old run script; no takeover MATLAB starts until it is gone. End it with `/F` once sure it is not one of profile 1's chain subshells. |
 | `retire_<script>` | An old script could not be renamed; retried every 5 min. |
 | `takeover_main_gone` | The takeover's main bash died; its tracks stopped. Start it again with the step 4 command. |
 | `code_<g>` | A worktree is on the wrong branch, a merge is in progress, or code is uncommitted. |
 | `headroom_<g>` | More than 1 h below the free-commit gate (45 GB, 65 GB for the rerun). |
 | `ml_alive_<g>` | An earlier takeover MATLAB still runs in that worktree. |
-| `ml_pid_<g>` | A started MATLAB did not show its Windows PID within 60 s; the subshell's PID was recorded instead. |
+| `ml_pid_<g>` | A started MATLAB did not show its Windows PID within 60 s. The subshell's PID was recorded instead; it is replaced once MATLAB shows. |
 | `stale_<file>` | A go file older than the event it should answer. |
 | `turn_holder_<pid>` | The parallel turn file names an exited MATLAB. |
 
@@ -272,11 +298,11 @@ Do not list B3m or B3r: they re-read a test set, and that decision belongs to th
 - If the rerun fails and the B stages should stay as they are, write `p3_rerun.accept`, not `p3_c1p.force`.
 - The rerun's code commit and its request id go to code_commit.txt.
 
-**Profile 2.** It uses whatever v7-dev holds when profile 1's chain ends. Its commit goes to code_commit.txt. To give profile 2 the fourth test set inside its own chain, write `p2_set4.stages` (e.g. `B3q B3r`) before then.
+**Profile 2.** It uses whatever v7-dev holds when profile 1's chain ends. Its commit goes to code_commit.txt. To build profile 2's fourth test set inside its own chain, write `p2_set4.stages` holding `B3q` before then. The single reading B3r is never listed there, and the takeover refuses it: it runs by hand after the go/no-go and after profile 2's OOD (d91_set4.md step 7).
 
 ## After a reboot or a crash
 
-Recovery goes only through the takeover, with the launch command of step 4, unchanged. Never run `v7_d86_launch.sh` or `v7_d87_p3fix.sh` (renamed `.retired_by_d91`; the launcher's resume also refuses on the retired SRC line).
+Recovery goes only through the takeover, with the launch command of step 4, unchanged. Never run an old run script (all are renamed `.retired_by_d91`; the launcher's resume also refuses on the retired SRC line).
 
 1. Run the step 4 command. The PIDs and the allow-list can stay: a PID that no longer runs its script does not block, and the allow-list no longer matches anything after a reboot.
 2. Profile 3's and profile 2's own parts go on from their first unfinished stage. A0 runs first inside the B stages. An unreadable `policy_pools.mat` is moved aside before C1p, and C1p keeps its per-cell checkpoints.
@@ -286,7 +312,8 @@ Recovery goes only through the takeover, with the launch command of step 4, unch
 
 A crash without a reboot is handled like this:
 
-- A takeover whose main bash still lives refuses a second start. If only the main bash died, its tracks stop within 30 s (`ALERT_takeover_main_gone`), and the step 4 command starts a new takeover once the lock is 90 s old.
+- A takeover whose main bash still lives refuses a second start, however old its lock. If only the main bash died, its tracks stop within 30 s (`ALERT_takeover_main_gone`), and the step 4 command starts a new takeover once the lock is 90 s old.
+- If a track died (`ALERT_takeover_track_<g>_died`), stop the takeover with the one-liner and start it again; the restart resumes that profile from its log.
 - If the takeover's own MATLAB outlived its bash, the new takeover waits for it (`ALERT_ml_alive_*`) before starting another in that worktree. This also holds when the recorded PID is still the subshell that had not yet exec'd MATLAB, and when the bash died between the fork and the exec.
 
 ## Tests
@@ -295,26 +322,28 @@ A crash without a reboot is handled like this:
 bash ops/d91_takeover_test.sh [sandbox] [scenario ...]
 ```
 
-The default sandbox is `…\scratchpad\d91_takeover_test\`. The default scenarios are `status normal p1crash rerun accept rerungate reboot oldlaunch p1gone p1wait orphan mainkill slowexec zombie turn unknown p2gate refuse`.
+The default sandbox is `…\scratchpad\d91_takeover_test\`. The default scenarios are `rename status normal p1crash rerun accept rerungate reboot oldlaunch p1gone p1wait orphan mainkill slowexec zombie turn unknown unread mlstub watchdog forcegate p2gate refuse`.
 
 **How it runs.**
 
 - It copies p1.log, p3.log, code_commit.txt and v7_d86_launch.sh (or its `.retired_by_d91` name) once from the live logs, as the starting state: profile 1 inside C1p, profile 3 idle after the fix script. The launcher's copy is named `old_launcher_copy.sh`, so no process scan takes it for the launcher.
-- It builds a git repository with v7-dev and v7-p3 worktrees and a bare origin, and puts stand-ins of the two old scripts in the sandbox's logs folder.
+- It builds a git repository with v7-dev and v7-p3 worktrees and a bare origin, and puts stand-ins of the six old run scripts in the sandbox's logs folder.
 - It replaces MATLAB with `ops/d91_stub_matlab.sh`. The stub prints run_stage's markers, can fail or slow a stage, logs concurrent calls and MATLAB options, and records each start.
-- It replaces the PowerShell queries with `ops/d91_stub_sys.sh`, which includes the old-script scan, process creation times, MATLAB children, a lagging exec, the sandbox's own processes by Windows PID, and failing queries.
+- It replaces the PowerShell queries with `ops/d91_stub_sys.sh`, which includes the old-script scan, process creation times, MATLAB children, a lagging exec, the sandbox's own processes by Windows PID, and failing or hanging queries. The stub runs under the same query timeout as PowerShell.
 - Every `V7T_*` variable points into the sandbox. The launcher's copy runs with every `V7L_*` variable in the sandbox and its PowerShell calls replaced by a function. The harness refuses a sandbox path inside a live folder.
 
 **What the scenarios cover.**
 
+- `rename`: a bash whose script file is renamed while it runs reads the script's later lines; a chain function forked in the background, whose main bash was ended with `taskkill /F` before the rename, runs its forks to the end and writes its end marker.
 - Normal flow:
   - p3's C1p starts only after profile 1's SURV3;
-  - p2 is created, pushed, given the set-4 stages, and starts after profile 1's chain ends;
+  - p2 is created, pushed, given the set-4 build (B3q), and starts after profile 1's chain ends;
   - p2's C1p starts after p3's SURV3;
   - every final phase runs;
   - code_commit.txt changes only in its retired SRC line plus the takeover's notes, with its backup and the retired SHA kept;
-  - both old scripts are renamed at the start (no allowed subshell), with log lines.
-- A profile 1 crash before SURV3: alert; p3 and p2 held; an old go file is refused; a fresh one resumes from C1c.
+  - all six old run scripts are renamed at the start, each logged before `v7 takeover started`;
+  - every track writes its end file, and the track PIDs are recorded.
+- A profile 1 crash before SURV3: alert; p3 and p2 held; an old go file is refused; a fresh one resumes from C1c; a set-4 stage that is not in run_stage.m, and then B3r, are refused.
 - The rerun go file: an invalid list, a failed rerun that holds C1p back, a new version that reruns, and a go file written after C1p has started.
 - `accept`: a rerun fails while profile 1 is in SURV; the alert names `p3_rerun.accept` and says C1p still waits; `p3_c1p.force` without `p1.abandon` is ignored with an alert; the accept file is taken and logged in p3.log; C1p still starts only after profile 1's SURV3.
 - The rerun gate:
@@ -329,23 +358,29 @@ The default sandbox is `…\scratchpad\d91_takeover_test\`. The default scenario
   - after a reboot, the launcher's resume refuses with exit 1 and writes no part;
   - an allowed PID reused after the reboot is refused;
   - the takeover restarts, with run.lock back and one backup.
-- `p1gone`: profile 1's chain subshells alive: no alert, launcher kept, fix script renamed; subshells gone: launcher renamed and logged; a MATLAB child still listed: no alert and no rerun; no child left: `p1_cut` (asking to check for a MATLAB first); the go file resumes from C1p; the pending rerun runs only after the resumed C1c.
+- `p1gone`: profile 1's chain subshells alive: no alert, and every old run script renamed at the start, the launcher too; subshells gone but a MATLAB child still listed: no alert and no rerun; no child left: `p1_cut` (asking to check for a MATLAB first); the go file resumes from C1p; the pending rerun runs only after the resumed C1c.
 - `p1wait`: profile 1 fails at C1c, the rerun starts, `p1_resume.go` comes during the rerun: the resume waits, and profile 1's C1c starts after the rerun's last stage.
 - The takeover's bash processes killed while its MATLAB runs on (`orphan`): no second MATLAB in that worktree.
-- `mainkill`: only the main bash killed: `ALERT_takeover_main_gone`, every track stops, the MATLAB runs on with its PID file; a restart is accepted before the stale limit and waits for that MATLAB; C1p runs once.
+- `mainkill`: only the main bash ended (SIGTERM, so its EXIT trap runs): takeover.lock is kept while its tracks live; `ALERT_takeover_main_gone`, every track stops, the MATLAB runs on with its PID file; a restart is accepted once the lock is 3 heartbeats old and waits for that MATLAB; C1p runs once.
 - A lagging exec:
   - the PID file is written at the fork with the subshell's PIDs;
   - at 3 s, it is then rewritten with MATLAB's PID, with no alert;
   - beyond the wait, there is an alert and the subshell's PIDs stay;
   - after the takeover is killed and restarted, that PID counts as alive and no second MATLAB starts;
-  - the takeover killed inside the exec window: the restart waits for that MATLAB; C1p runs once.
+  - the takeover killed inside the exec window: the restart waits for that MATLAB; C1p runs once;
+  - an exec that shows only after the wait: the alert, then the PID file names MATLAB once it shows;
+  - in the harness the stub MATLAB is an MSYS script, so its exec replaces the subshell's Windows process; a restart that comes before the PID file names MATLAB finds it through the `msys` line.
 - Idle: the zombie, exited sessions, smoke runs and the copies' exact commands are not counted. Profile 2's own chain, which names B3m, B3q and B3r, holds LAT back, and so do CPU, a live session and a failed MATLAB query. Also a chain that stopped after RPT before its end marker.
 - A turn holder that exited (alert; turn file untouched) and one that is gone; a silent p1.log; a p3 stage left open, resumed on its go file.
-- `unknown`: a failed process scan or a failed command-line query of 24172 refuses the start (no lock, SRC and scripts untouched); a recorded MATLAB whose query fails holds the worktree, then counts as alive once readable; a failed scan while running holds MATLAB starts.
+- `unknown`: a hanging command-line query is ended after the query timeout (5 times, each process ended) and the start is refused; a failed process scan or a failed command-line query of 24172 refuses the start (no lock, SRC and scripts untouched); a recorded MATLAB whose query fails holds the worktree, then counts as alive once readable; a failed scan while running holds MATLAB starts.
+- `unread`: a part header without FROM in p3.log, then in p1.log after its chain has ended: each is logged as unread and alerted after the (test) hour; no MATLAB starts, no part header is written, no p1 alert, profile 2 does not start; once p1.log reads again, profile 2 runs its B stages while p3 and p2's C1p still wait; once p3.log reads again, the run finishes in order.
+- `mlstub`: a PID file with an `msys` line whose stub is gone (`none`) while a MATLAB child lives: alive, nothing starts; once no child is left: gone, the file is removed.
+- `watchdog`: a track stopped (SIGSTOP) raises `takeover_track_p3_stalled`; a track killed alone raises `takeover_track_p2_died`; the other tracks finish, the final phase is skipped, no `v7 done`, and the lock is removed once no track lives; a restart resumes profile 2 and runs the final phase for all three.
+- `forcegate`: profile 3 given up while its C1p runs, with `p2_c1p.force` written at once: no `p2_c1p_p3_abandon` alert and no second C1p while profile 3's MATLAB runs; profile 2's C1p starts only after it has ended. Profile 1 given up while its launcher chain runs C1p, with `p3_c1p.force`: profile 3's C1p starts only after that chain has ended.
 - Profile 2's start:
   - after `p1.abandon`, an alert names `p2_start.go`, and p2 waits for it;
   - profile 3 failing before SURV3 raises an alert naming `p2_c1p.force` and what it skips; that file is ignored while profile 3 is not given up;
-  - profile 3 given up: an alert, and p2's C1p starts on the force file.
+  - profile 3 given up (its chain already stopped): an alert naming the force file and what it still waits for, and p2's C1p starts on the force file.
 - The refusals:
   - TEMP elsewhere, launcher alive, fix script alive, a PID reused, a PID missing;
   - a boot time that is empty, non-numeric or in the future;
@@ -354,13 +389,15 @@ The default sandbox is `…\scratchpad\d91_takeover_test\`. The default scenario
   - two starts at the same moment: exactly one runs;
   - none of the refusals leaves a lock or changes code_commit.txt.
 
-**Result, 18.10.** 236 of 236 checks passed in the final full run on the committed code, 11:01-11:50 (log `scratchpad\d91_tk_full5.log`), beside the live profile 1 C1p and the two side MATLAB jobs; it started no MATLAB. The run before it (09:57-10:44, before the main loop's retry of the fix-script rename) also passed 236 of 236. An earlier full run (before the two-scan rule) failed 5 checks, all harness timing on the loaded machine (a wait of 40 s for an alert that came after 38 s, a stub MATLAB that ended before the restart, flag files removed before the track read them); those waits now follow the takeover's log lines, and the behaviour checks of those scenarios passed in both runs.
+**Result, 18.10 (round 3).** 287 of 287 checks passed in the final full run on the committed files, 17:30-19:18 (log `scratchpad\r4_full3.log`; an md5 check confirmed the tested files are the committed ones). It ran beside the live profile 1 C1p and the two side MATLAB jobs and started no MATLAB. The full run before it (13:35-17:20) passed 285 of 287: its two failures were harness checks in `reboot` (a direct second start cut by a 30 s `timeout` before its start-up, which takes 30-40 s on the loaded machine, reached the lock check; and a `tail -5` that no longer held the start line). Both checks were fixed, and `reboot` and `oldlaunch` passed (25 of 25) before the final run. A first full run of this round showed one real gap: a restart that came before the PID file named MATLAB checked the subshell's old Windows PID only. That is fixed by the `msys`-line resolution in `ml_state` and the rewrite at the PID alert; the other failures of that run were harness waits on the loaded machine, now condition-based, with every `until_t` deadline scaled by `SLOW_X` (3).
 
-Read-only checks on the live machine (18.10, 09:05-10:00):
+Read-only checks on the live machine (18.10):
 
-- the status mode with `V7T_ALLOW_PIDS='43428 43972'` reads p1 and p3 at `next C1p (index 13)`, old scripts outside the allow-list 39928 32328 24172 39124 24652 49732 47724 46828 50260, `allowed launcher subshells: alive`, SRC intact, the parallel turn held by 42560 (live), 42 GB of free commit, and 42560 as the only live pipeline MATLAB;
-- the real PowerShell queries answer `none` for a missing process (command line and creation time), 43972's MATLAB child is 44984, 43428 has none, and the scan and MATLAB lists end with `end`;
+- the status mode with `V7T_ALLOW_PIDS='43428 43972'` (19:20, real PowerShell queries under the 120 s timeout, 26 s in all) reads p1 and p3 at `next C1p (index 13)`, `end marker rc=none`, p1's part not idle and p3's idle, old scripts outside the allow-list 39928 32328 24172 39124 24652 49732 47724 46828 50260, `allowed launcher subshells: alive`, all six old run scripts not yet renamed, SRC intact, the parallel turn held by 42560 (live), and 42560 as the only live pipeline MATLAB;
+- the log parsers on copies of the live p1.log and p3.log give the same indices; with a header without FROM, or with the log replaced by a directory, every value reads as unknown (no index 0, not past SURV3, not finished, profile 1 counted as in C1p/C1c, part not idle);
+- a PowerShell query killed by the timeout leaves no PowerShell process (`taskkill /T` on its Windows PID), while plain `timeout` (also with `-s KILL`) left the native PowerShell running;
+- the real queries answer `none` for a missing process, 43972's MATLAB child is 44984, and the scan and MATLAB lists end with `end`;
 - the old-script pattern counts every live launcher and fix-script bash as running its script; of 16 test command lines, it counts the 9 that run a script and none of the 7 that only mention a name or run another file;
-- the stop one-liner's pattern matches the takeover's wrapper (both forms) and its main bash (whose command line the tracks share), and neither the launcher, an agent's grep, nor the harness's copy under `uav-gcs-d91-takeover`.
+- the stop one-liner, in listing mode, lists nothing now; its pattern matches the takeover's wrapper (both forms) and its main bash, not the launcher nor an agent's grep; a bash with a MATLAB child (such as 43972) is left out.
 
 **Heartbeat.** In one earlier run on the loaded machine, the 1 s test heartbeat once stalled for 11 s. With the 30 s period, the live gap therefore stays well under 60 s.

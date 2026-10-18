@@ -12,10 +12,12 @@
 #   exec_delay                       seconds after its start during which a stub MATLAB still shows the
 #                                    command line of the takeover's subshell (exec not done yet)
 #   fail_<query>, fail_<query>_<pid> that query fails (no output) while the file exists
+#   hang_<query>, hang_<query>_<pid> that query hangs (the takeover's query timeout ends it); its PID goes to hung
 # As the real queries: cmdline and created print 'none' for a missing process, mlchild 'none' for
 # no MATLAB child, and scripts and matlab end with a line 'end'.
 D=${V7T_SYS_DIR:?}
 { [ -f "$D/fail_$1" ] || { [ -n "${2:-}" ] && [ -f "$D/fail_$1_$2" ]; }; } && exit 0
+{ [ -f "$D/hang_$1" ] || { [ -n "${2:-}" ] && [ -f "$D/hang_$1_$2" ]; }; } && { echo $$ >> "$D/hung"; exec sleep 1000; }
 proc_of() {   # MSYS /proc entry of the process of this sandbox with Windows PID $1
   local p
   for p in /proc/[0-9]*; do
