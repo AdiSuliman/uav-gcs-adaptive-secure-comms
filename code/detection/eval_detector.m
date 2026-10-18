@@ -4,8 +4,10 @@
 % in the calling workspace the test split is read even then, and the outputs carry the
 % suffix _split. With DET_TEST = 'fresh2' (stage B3m) the third test set is read
 % (data/splits_fresh2.mat, new seeds, built after the monitor's last validation choice), and
-% the outputs carry the suffix _fresh2. The KPI 1 threshold is chosen on the validation split
-% in every case.
+% the outputs carry the suffix _fresh2. With DET_TEST = 'fresh3' (stage B3r) the fourth test set
+% (data/splits_fresh3.mat, stage B3q) is read once, only when kpi1_set.m names it (its
+% go/no-go), and the outputs carry the suffix _fresh3. The KPI 1 threshold is chosen on the
+% validation split in every case.
 % Eb/N0 of a frame (kpi_ebno.m): the Eb/N0 our signal is received with, the configured
 % value less a path-loss step from its onset on; a frame judged as path_loss is read at the
 % link's Eb/N0 when the step began (the step's depth is its severity level). Frames
@@ -21,8 +23,17 @@ read_fresh2 = exist('DET_TEST', 'var') && strcmp(DET_TEST, 'fresh2');
 if read_fresh2 && ~isfile('data/splits_fresh2.mat')
     error('eval_detector:fresh2', 'data/splits_fresh2.mat not found: run B3m');
 end
+read_fresh3 = exist('DET_TEST', 'var') && strcmp(DET_TEST, 'fresh3');
+if read_fresh3                                          % the fourth test set: one reading, after its go/no-go
+    assert(strcmp(kpi1_set(), 'fresh3'), 'eval_detector:kpi1_set', ...
+        'the fourth test set is read only once kpi1_set.m names it (docs/d91_set4.md)');
+    assert(isfile('data/splits_fresh3.mat'), 'eval_detector:fresh3', 'data/splits_fresh3.mat not found: run B3q');
+    assert(~isfile('results/eval_detector_metrics_fresh3.mat'), 'eval_detector:fresh3_read', ...
+        'the fourth test set was read already (results/eval_detector_metrics_fresh3.mat)');
+end
 tag = ''; if has_fresh && read_split, tag = '_split'; end
 if read_fresh2, tag = '_fresh2'; end
+if read_fresh3, tag = '_fresh3'; end
 set_name = 'test split';
 fprintf('Loading test data and trained model...\n');
 S = load('data/splits.mat');
@@ -32,6 +43,11 @@ if read_fresh2
     assert(isequal(Sf.splits.norm, sp.norm), 'eval_detector: the third test set has another normalization');
     sp.test = Sf.splits.test; clear Sf
     set_name = 'third test set';
+elseif read_fresh3
+    Sf = load('data/splits_fresh3.mat');
+    assert(isequal(Sf.splits.norm, sp.norm), 'eval_detector: the fourth test set has another normalization');
+    sp.test = Sf.splits.test; clear Sf
+    set_name = 'fourth test set';
 elseif has_fresh && ~read_split
     Sf = load('data/splits_fresh.mat');
     assert(isequal(Sf.splits.norm, sp.norm), 'eval_detector: the second test set has another normalization');

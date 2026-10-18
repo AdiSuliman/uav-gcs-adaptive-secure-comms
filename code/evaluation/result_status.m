@@ -17,7 +17,8 @@ function S = result_status()
 %                                   when the report carries no identity)
 %     results/eval_detector_metrics.mat  newer than the detector's training and than the
 %                                   fusion (data/fusion.mat: the monitor's class); the same
-%                                   for the third test set's reading (_fresh2) when present
+%                                   for the third and fourth test sets' readings (_fresh2,
+%                                   _fresh3) when present
 %   A file without its identity fields counts as stale.
 cur_det = ''; cur_pol = ''; t_det = -inf;
 if all(isfile({'data/trained_detector.mat', 'data/ood_thresholds.mat'}))
@@ -64,11 +65,11 @@ if isfile(f)
     end
 end
 S(end+1) = entry(f, why);
-for f = {'results/eval_detector_metrics.mat', 'results/eval_detector_metrics_fresh2.mat'}
-    if strcmp(f{1}, 'results/eval_detector_metrics_fresh2.mat') && ~isfile(f{1}), continue; end
+for f = {'results/eval_detector_metrics.mat', 'results/eval_detector_metrics_fresh2.mat', 'results/eval_detector_metrics_fresh3.mat'}
+    if contains(f{1}, '_fresh') && ~isfile(f{1}), continue; end
     why = {};
     if isfile(f{1}) && t(f{1}) < t_det, why{end+1} = 'older than the detector''s training'; end %#ok<AGROW>
-    if isfile(f{1}) && t(f{1}) < t('data/fusion.mat'), why{end+1} = 'older than data/fusion.mat (rerun its reading, B3 or B3m)'; end %#ok<AGROW>
+    if isfile(f{1}) && t(f{1}) < t('data/fusion.mat'), why{end+1} = 'older than data/fusion.mat (rerun its reading, B3, B3m or B3r)'; end %#ok<AGROW>
     S(end+1) = entry(f{1}, why); %#ok<AGROW>
 end
 end

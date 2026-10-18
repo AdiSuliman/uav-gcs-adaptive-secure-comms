@@ -74,6 +74,9 @@
 % FRESH_SET = 2 as well (stage B3m) the same recipe gives a third test set: seeds 6,500,000 +
 % run id (above every dataset, B4 and B4s seed, below the pools' shadowing candidates,
 % test_seed_streams_disjoint) and a speed stream of its own, saved as data/dataset_fresh2.mat.
+% With FRESH_SET = 3 (stage B3q) the same recipe gives a fourth test set: seeds 6,000,000 + run
+% id (between the second B4s reading's and the third test set's) and a speed stream of its
+% own, saved as data/dataset_fresh3.mat.
 
 close all; clc;
 warning('off', 'Simulink:cgxe:LeakedJITEngine');
@@ -86,6 +89,7 @@ p0 = S.params; p0.quiet_build = true;
 %% ---- Configuration ----
 FRESH      = exist('FRESH_TEST', 'var') && FRESH_TEST;
 SET2       = FRESH && exist('FRESH_SET', 'var') && isequal(FRESH_SET, 2);   % the third test set (B3m)
+SET3       = FRESH && exist('FRESH_SET', 'var') && isequal(FRESH_SET, 3);   % the fourth test set (B3q)
 EbNo_list  = p0.EbNo_dB;          % Eb/N0 grid of init_params
 N_SUB      = 6;                   % independent sub-runs per cell (split unit)
 F_SUB      = 20;                  % frames per sub-run
@@ -103,6 +107,10 @@ end
 if SET2
     SEED0 = 6500000; f_out = 'data/dataset_fresh2.mat';
     rng(2035, 'twister');
+end
+if SET3
+    SEED0 = 6000000; f_out = 'data/dataset_fresh3.mat';
+    rng(2037, 'twister');
 end
 
 clear threat_cfg

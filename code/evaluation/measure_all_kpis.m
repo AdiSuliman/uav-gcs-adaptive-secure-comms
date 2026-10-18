@@ -6,7 +6,8 @@
 %          proposal's wording); every class F1 >= 90%, the stricter reading, beside it
 %          (eval_detector), unseen Eb/N0 (eval_unseen_snr); read on the third test set
 %          (B3m, results/eval_detector_metrics_fresh2.mat) when it exists, the second test
-%          set's reading beside it
+%          set's reading beside it; on the fourth (B3r, _fresh3) once kpi1_set.m names it, the
+%          third and second beside it
 %   KPI 2  unknown threats: leave-one-threat-out mean AUROC >= KPI2_TARGET, FPR at 95%
 %          of known frames kept (eval_ood_detection; the nested estimate of the
 %          selected production score)
@@ -45,7 +46,7 @@ F = struct('det', 'results/eval_detector_metrics.mat', 'unseen', 'results/unseen
     'pol', 'results/policy_evaluation.mat', 'lat', 'results/latency.mat', ...
     'surv', 'data/survivability_boundary.mat', 'dqn', 'data/trained_dqn.mat', 'arch', 'results/architecture_comparison.txt', ...
     'ant3', 'results/survivability_options.txt', 'combo', 'results/combo_generalization.mat', 'edge', 'results/edge_map.mat');
-F.det = kpi1_file('eval_detector_metrics');            % the third test set when it exists
+F.det = kpi1_file('eval_detector_metrics');            % the set of kpi1_set.m
 KPI2_TARGET = 0.8;                                 % mean AUROC (the submitted proposal's target, kept in the update)
 t_det = file_time('data/trained_detector.mat'); t_dqn = file_time(F.dqn);
 if isfile('data/trained_detector.mat')             % training time (the file is updated later by the OOD stage)
@@ -135,7 +136,13 @@ if isfile(F.det)
             U.summary.max_gap);
     end
     if isfile(F.arch), det{end+1} = 'architecture comparison: results/architecture_comparison.txt'; end
-    if contains(F.det, '_fresh2') && isfile('results/eval_detector_metrics.mat')
+    if contains(F.det, '_fresh3') && isfile('results/eval_detector_metrics_fresh2.mat')
+        Ms = load('results/eval_detector_metrics_fresh2.mat', 'metrics'); ms = Ms.metrics;
+        det{end+1} = sprintf(['read on the %s, read once after the fusion revision''s go/no-go; the %s, read before ' ...
+            'it: macro-F1 above the threshold %.2f%%, lowest class %.2f%%, accuracy %.2f%%'], m.test_set, ms.test_set, ...
+            ms.macro_f1_above_threshold_pct, min(ms.class_f1_above_threshold_pct), ms.overall_accuracy_pct);
+    end
+    if ~isempty(regexp(F.det, '_fresh[23]\.mat$', 'once')) && isfile('results/eval_detector_metrics.mat')
         Ms = load('results/eval_detector_metrics.mat', 'metrics'); ms = Ms.metrics;
         det{end+1} = sprintf(['read on the %s, built after the monitor''s last validation choice; the %s, first read ' ...
             'before that choice: macro-F1 above the threshold %.2f%%, lowest class %.2f%%, accuracy %.2f%%'], m.test_set, ms.test_set, ...

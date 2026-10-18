@@ -12,8 +12,9 @@
 %   7. Survivability map summary per threat and geometry (deliverable 7)
 %   8. KPI status (results/kpi_summary.mat)
 %
-% Inputs: the KPI 1 reading (kpi1_file.m: results/eval_detector_metrics_fresh2.mat, the third
-%         test set, when it exists, else results/eval_detector_metrics.mat), results/ood_detection.mat,
+% Inputs: the KPI 1 reading (kpi1_file.m on the set of kpi1_set.m: results/eval_detector_metrics_fresh2.mat,
+%         the third test set, when it exists, else results/eval_detector_metrics.mat; _fresh3, the
+%         fourth, once kpi1_set.m names it), results/ood_detection.mat,
 %         results/policy_evaluation.mat, data/survivability_boundary.mat,
 %         results/kpi_summary.mat
 % Output: results/kpi_dashboard.png

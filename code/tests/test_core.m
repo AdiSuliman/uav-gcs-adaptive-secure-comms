@@ -1008,6 +1008,10 @@ k = (1:99999)';
 S = [S; 3000000 + k; 4000000 + k; 5000000 + k];         % dataset, unseen Eb/N0 and unseen severity runs
 S = [S; 3500000 + k; 4500000 + k; 5500000 + k];         % the second test set and the second B4 and B4s readings
 S = [S; 6500000 + k];                                   % the third test set (B3m)
+S = [S; 6000000 + k];                                   % the fourth test set (B3q)
+src = fileread(which('run_dataset_sweep'));              % every dataset stream of the sweep is listed above
+s0 = cellfun(@(c) str2double(c{1}), regexp(src, 'SEED0\s*=\s*(\d+);', 'tokens'));
+verifyEqual(tc, sort(s0), [3000000 3500000 6000000 6500000]);
 verifyEqual(tc, numel(unique(S)), numel(S));
 verifyLessThan(tc, max(S), 2^26);
 N = seed_base(S) + off;
@@ -3879,7 +3883,7 @@ ed = fileread(which('eval_detector'));
 verifyNotEmpty(tc, strfind(ed, 'if read_fresh2, tag = ''_fresh2''; end'));
 verifyNotEmpty(tc, strfind(ed, 'Sf = load(''data/splits_fresh2.mat'');'));
 verifyNotEmpty(tc, strfind(fileread(which('measure_all_kpis')), 'F.det = kpi1_file(''eval_detector_metrics'');'));
-verifyNotEmpty(tc, strfind(fileread(which('kpi1_file')), 'f = [''results/'' stem ''_fresh2.mat''];'));
+verifyEqual(tc, kpi1_set(), 'fresh2');
 % B1 on the third set: data/spectrograms_fresh2.mat -> data/splits_fresh2.mat, the training
 % z-score, the second test set's file untouched
 d = fullfile(tc.TestData.tmp, 'fresh2'); mkdir(fullfile(d, 'data'));
@@ -3897,6 +3901,80 @@ verifyTrue(tc, isfile('data/splits_fresh2.mat')); verifyFalse(tc, isfile('data/s
 L = load('data/splits_fresh2.mat');
 verifyEqual(tc, L.splits.test.feats(1, :), [1 1]);
 verifyEqual(tc, L.splits.test.run, [1 1 2 2 3 3]');
+end
+
+function test_fourth_test_set(tc)
+% Stage B3q builds a fourth test set with the third's recipe and seeds of its own (6 000 000 +
+% run id, test_seed_streams_disjoint; its own speed stream), data only; B3r reads it once, and
+% only after kpi1_set.m names it; until then every KPI 1 reader stays on the third test set.
+src = fileread(which('run_dataset_sweep'));
+verifyNotEmpty(tc, strfind(src, 'SET3       = FRESH && exist(''FRESH_SET'', ''var'') && isequal(FRESH_SET, 3);'));
+i2 = strfind(src, 'if SET2'); i0 = strfind(src, 'if SET3'); verifyNumElements(tc, i0, 1);
+verifyGreaterThan(tc, i0, i2);
+e = strfind(src(i0:end), 'end'); seg = src(i0:i0 + e(1) + 1);
+verifyNotEmpty(tc, strfind(seg, 'SEED0 = 6000000; f_out = ''data/dataset_fresh3.mat'';'));
+verifyNotEmpty(tc, strfind(seg, 'rng(2037, ''twister'');'));
+verifyEmpty(tc, strfind(seg, 'N_SUB'));                               % the second and third sets' counts and test fold
+tw = cellfun(@(c) str2double(c{1}), regexp(src, 'rng\((\d+), ''twister''\)', 'tokens'));
+verifyEqual(tc, sort(tw), [2027 2029 2035 2037]);                      % a speed stream per set
+verifyNotEmpty(tc, strfind(fileread(which('extract_spectrograms')), ...
+    'f_in = ''data/dataset_fresh3.mat''; f_out = ''data/spectrograms_fresh3.mat'';'));
+rs = fileread(which('run_stage'));
+verifyNotEmpty(tc, strfind(rs, '''B3q'', ''build_fresh_test3'''));
+verifyNotEmpty(tc, strfind(rs, '''B3r'', ''read_fresh_test3'''));
+i0 = strfind(rs, 'strcmp(name, ''build_fresh_test3'')'); i1 = strfind(rs, 'strcmp(name, ''read_fresh_test3'')');
+verifyNumElements(tc, i0, 1); verifyNumElements(tc, i1, 1);
+seg = rs(i0:i1);                                                      % B3q builds, never reads
+verifyNotEmpty(tc, strfind(seg, 'FRESH_TEST = true; FRESH_SET = 3;'));
+verifyEmpty(tc, strfind(seg, 'eval_detector')); verifyEmpty(tc, strfind(seg, 'DET_TEST'));
+verifyNotEmpty(tc, strfind(rs(i1:end), 'DET_TEST = ''fresh3'';'));
+% B1 on the fourth set: data/spectrograms_fresh3.mat -> data/splits_fresh3.mat, the training
+% z-score, the other test sets' files untouched
+d = fullfile(tc.TestData.tmp, 'fresh3'); mkdir(fullfile(d, 'data')); mkdir(fullfile(d, 'results'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+classes = {'none'; 'jamming'}; norm = struct('feat_mean', [1 2], 'feat_std', [2 4], 'feat_names', {{'a', 'b'}}); %#ok<NASGU>
+save('data/splits.mat', 'norm', 'classes');
+n = 6;
+spec = struct('X', zeros(8, 8, 1, n, 'single'), 'Y', categorical([1 2 1 2 1 2]', 1:2, classes), 'feats', [3 6; 5 10; 1 2; 3 6; 5 10; 1 2], ...
+    'feat_names', {{'a', 'b'}}, 'fold', 6 * ones(n, 1), 'ebno', zeros(n, 1), 'speed_kmh', ones(n, 1), 'run', [1 1 2 2 3 3]', ...
+    'level', ones(n, 1), 'meta', struct('frames_checked', true)); %#ok<NASGU>
+save('data/spectrograms_fresh3.mat', 'spec');
+FRESH_TEST = true; FRESH_SET = 3; %#ok<NASGU>
+evalc('run(''prepare_data'')');
+verifyTrue(tc, isfile('data/splits_fresh3.mat'));
+verifyFalse(tc, isfile('data/splits_fresh2.mat')); verifyFalse(tc, isfile('data/splits_fresh.mat'));
+L = load('data/splits_fresh3.mat');
+verifyEqual(tc, L.splits.test.feats(1, :), [1 1]);
+verifyEqual(tc, L.splits.test.run, [1 1 2 2 3 3]');
+% KPI 1 stays on the third test set while kpi1_set.m names it, even with a fourth reading on disk,
+% and the fourth set is not read before
+x = 1; save('results/eval_detector_metrics_fresh2.mat', 'x'); save('results/eval_detector_metrics_fresh3.mat', 'x');
+verifyEqual(tc, kpi1_set(), 'fresh2');
+verifyEqual(tc, kpi1_file('eval_detector_metrics'), 'results/eval_detector_metrics_fresh2.mat');
+verifyError(tc, @() run_det_test('fresh3'), 'eval_detector:kpi1_set');
+% Once kpi1_set.m names the fourth set: KPI 1 is read there (missing shows as missing, no
+% fallback), and B3r reads it once
+fid = fopen('kpi1_set.m', 'w'); fprintf(fid, 'function s = kpi1_set()\ns = ''fresh3'';\nend\n'); fclose(fid);
+rehash; shadow = onCleanup(@() remove_shadow(fullfile(d, 'kpi1_set.m')));
+verifyEqual(tc, kpi1_set(), 'fresh3');
+verifyEqual(tc, kpi1_file('eval_detector_metrics'), 'results/eval_detector_metrics_fresh3.mat');
+verifyEqual(tc, kpi1_file('detector_predictions'), 'results/detector_predictions_fresh3.mat');
+verifyError(tc, @() run_det_test('fresh3'), 'eval_detector:fresh3_read');
+delete('results/eval_detector_metrics_fresh3.mat'); delete('data/splits_fresh3.mat');
+verifyError(tc, @() run_det_test('fresh3'), 'eval_detector:fresh3');
+clear shadow
+verifyEqual(tc, kpi1_set(), 'fresh2');
+end
+
+function run_det_test(DET_TEST) %#ok<INUSD>
+% eval_detector with DET_TEST set, as run_stage.m runs it.
+evalc('run(''eval_detector'')');
+end
+
+function remove_shadow(f)
+% Removes a stand-in function file and refreshes the path cache.
+if isfile(f), delete(f); end
+rehash;
 end
 
 function [net, M, X, F] = tiny_detector()
