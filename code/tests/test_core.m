@@ -6107,8 +6107,9 @@ end
 function test_fusion_pick_deploy(tc)
 % With FUSION_REV and FUSION_FIT = 'enlarged' select_fusion.m deploys the design the d91
 % measurement adopted (fusion_pick.m) as measured, never choosing again: its N and lambda,
-% the deployed target rule, no cfar; it stops unless the adoption rule holds for it on its
-% own fit set, and records the pick and the revision id that B3r checks (fusion_rev_id.m).
+% the deployed target rule, no cfar, the latch off as measured; it stops unless the adoption
+% rule holds for it on its own fit set, and records the pick and the revision id that B3r
+% checks (fusion_rev_id.m).
 P = fusion_pick();
 verifyEqual(tc, P.name, 'branch evidence');
 verifyEqual(tc, [P.N P.lambda], [12 1e-3]);
@@ -6116,15 +6117,23 @@ verifyEqual(tc, P.target_age, 'N');
 verifyEmpty(tc, P.cues.cfar);
 verifyTrue(tc, P.cues.iso && P.cues.glr && P.cues.held && P.cues.post);
 verifyFalse(tc, isfield(P.cues, 'phi1') && P.cues.phi1);
+verifyClass(tc, P.latch, 'logical');
+verifyFalse(tc, P.latch);                                % the measured state (m_all.m, latch 0)
+dp = P; dp.check = struct('all', [0 0 0]); dp.check.latch_val = struct('macro_f1_latched', 0.9, 'macro_f1_fused', 0.91);
+verifyTrue(tc, isequal(rmfield(dp, 'check'), fusion_pick()));   % the deploy guard on deployed_pick (docs/d91_fuse.md, section 7)
 verifyEqual(tc, fusion_rev_id('enlarged'), 'd91_branch_evidence_enlarged');
 verifyEqual(tc, fusion_rev_id('validation'), 'd91_branch_evidence_validation');
 verifyError(tc, @() fusion_rev_id('test'), 'fusion_rev_id:fit');
 src = fileread(which('select_fusion'));
 for t = {'ENL = REV && exist(''FUSION_FIT'', ''var'') && strcmp(FUSION_FIT, ''enlarged'');', ...
         'elseif ENL, PK = fusion_pick(); end', 'TA = struct(''target_age'', NS(a));', '''select_fusion:pick_rule''', ...
-        'assert(fusion_adopt(''branch'', GP), ''select_fusion:pick_rule''', 'deployed_pick = PK; deployed_pick.check = GP;'}
+        'assert(fusion_adopt(''branch'', GP), ''select_fusion:pick_rule''', 'deployed_pick = PK; deployed_pick.check = GP;', ...
+        '''select_fusion:pick_latch''', 'deployed_pick.check.latch_val = struct(''macro_f1_latched'', mf_latch, ''macro_f1_fused'', mf_fused);'}
     verifyNotEmpty(tc, strfind(src, t{1}), t{1});
 end
+j1 = strfind(src, 'FM.latch = mf_latch > mf_fused;'); j2 = strfind(src, 'FM.latch = PK.latch;');
+j3 = strfind(src, 'save(''data/fusion.mat'', ''FM''');
+verifyTrue(tc, isscalar(j1) && isscalar(j2) && isscalar(j3) && j1 < j2 && j2 < j3);   % the pick's latch replaces validation's choice before the save
 i1 = strfind(src, 'if ~isempty(PK)                                      % the measured design and its rule check');
 i2 = strfind(src, '[pick, bs] = fusion_adopt(''choose'', G);');
 i3 = regexp(src, '\r?\n    else\r?\n', 'once');

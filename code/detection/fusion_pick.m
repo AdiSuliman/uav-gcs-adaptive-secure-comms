@@ -6,7 +6,8 @@ function P = fusion_pick()
 %   P.cues        its further columns (window_cues.m 'extra'), no cfar
 %   P.N, P.lambda the window and regularization it was measured at
 %   P.target_age  'N': the deployed target rule, pos - onset < N (fusion_target.m)
+%   P.latch       false: the onset latch is off, the state it was measured in (m_all.m)
 %   P.source      where the verdict is recorded
 P = struct('name', 'branch evidence', 'cues', struct('cfar', [], 'iso', true, 'glr', true, 'held', true, 'post', true), ...
-    'N', 12, 'lambda', 1e-3, 'target_age', 'N', 'source', 'docs/d91_fuse.md, section 5 (m_p1.log, m_p3.log)');
+    'N', 12, 'lambda', 1e-3, 'target_age', 'N', 'latch', false, 'source', 'docs/d91_fuse.md, section 5 (m_p1.log, m_p3.log)');
 end

@@ -8,7 +8,9 @@ function wrap_check(root, code)
 %      false-alarm readings use (clean_world.m, clean_wide_specs.m), for the deployed smoke
 %      fusion and the revision (branch evidence, phi as is and phi = 1, fitted on the smoke
 %      validation split): per cycle relative to the jump, the clean cycles read as a lost
-%      branch, the drop alarm, any alarm, confirmed alarms; and antenna-fault recall
+%      branch, the drop alarm, any alarm, confirmed alarms; and antenna-fault recall near the
+%      jump, stratified by the cycles since the onset. Rolling-in flights (10-frame cycling
+%      past their run's end) are not covered.
 % Also runs select_fusion.m's pick path (FUSION_REV, FUSION_PICK) once on the smoke data.
 % Smoke figures check the mechanism only; they are not results.
 cd(root); addpath(code); setup_paths; cd(root);
@@ -57,7 +59,7 @@ for s = 1:numel(PP.ebno)
         rr = ratio_db(g);
         dcon = [dcon; abs(diff(g))]; dwr = [dwr; abs(g(1, :) - g(end, :))]; %#ok<AGROW>
         rcon = [rcon; abs(diff(rr))]; rwr = [rwr; abs(rr(1, :) - rr(end, :))]; %#ok<AGROW>
-        v = NaN; if isfield(PPw, 'speed') && numel(PPw.speed) >= VA && numel(PPw.speed{VA}) >= r, v = PPw.speed{VA}(r); end
+        v = NaN; if isfield(PPw, 'speed') && numel(PPw.speed) >= VA && all(size(PPw.speed{VA}) >= [s r]), v = PPw.speed{VA}(s, r); end   % Eb/N0 x geometry
         vc = [vc; repmat(v, size(g, 1) - 1, 1)]; vw = [vw; v]; %#ok<AGROW>
     end
 end
@@ -150,6 +152,9 @@ for m = 1:size(mons, 1)
         fprintf('  antenna fault, %d episodes: recall %.1f%% of the cycles from the onset; %.1f%% within 11 cycles after the jump, %.1f%% otherwise\n', ...
             sum(k), 100 * sum(Xf(k, :), 'all') / sum(on(k, :), 'all'), 100 * sum(Xf(k, :) & A(k, :), 'all') / max(sum(on(k, :) & A(k, :), 'all'), 1), ...
             100 * sum(Xf(k, :) & ~A(k, :), 'all') / max(sum(on(k, :) & ~A(k, :), 'all'), 1));
+        Ga = max((1:T) - Rf.onset(:), 1);                    % stratum: cycles since the onset
+        [rq, cq] = age_excess(Rf.af(k, :), on(k, :) & A(k, :), on(k, :) & ~A(k, :), Ga(k, :), rs);
+        fprintf('    recall within 11 cycles after the jump less elsewhere, stratified by the cycles since the onset: %+.2f [%+.2f, %+.2f] points\n', rq, cq);
     end
   catch e
     fprintf('C. %s stopped: %s\n', mons{m, 1}, getReport(e, 'basic'));
@@ -183,7 +188,9 @@ for bb = 1:numel(specs)
     n = zeros(1, NE); v = nan(1, NE);
     for i = 1:NE
         P = PP.pools{ic, E.s(i), na, split}; n(i) = sum(P.run == PP.runs{split}(E.r(i)));
-        if isfield(PP, 'speed') && numel(PP.speed) >= split && numel(PP.speed{split}) >= E.r(i), v(i) = PP.speed{split}(E.r(i)); end
+        if isfield(PP, 'speed') && numel(PP.speed) >= split && all(size(PP.speed{split}) >= [E.s(i) E.r(i)])
+            v(i) = PP.speed{split}(E.s(i), E.r(i));                % Eb/N0 x geometry
+        end
     end
     ev = false(1, NE); if isfield(E, 'ev'), ev = E.ev; end
     u = 1:NE; if isfield(sp, 'n_valid'), u = 1:sp.n_valid; end
@@ -214,6 +221,23 @@ end
 
 function r = mh(X, A, B, c)
 xa = sum(c .* (X & A), 1); na = sum(c .* A, 1); xb = sum(c .* (X & B), 1); nb = sum(c .* B, 1);
+k = na > 0 & nb > 0; h = na(k) .* nb(k) ./ (na(k) + nb(k));
+r = 100 * sum(h .* (xa(k) ./ na(k) - xb(k) ./ nb(k))) / max(sum(h), eps);
+end
+
+function [rd, ci] = age_excess(X, A, B, G, rs)
+% As wrap_excess, the strata G (cycles since the onset) in place of the cycle.
+X = logical(X);
+rd = mh_g(X, A, B, G, ones(size(X, 1), 1));
+w = zeros(1000, 1); E = size(X, 1);
+for bb = 1:1000, c = accumarray(randi(rs, E, E, 1), 1, [E 1]); w(bb) = mh_g(X, A, B, G, c); end
+ci = prctile(w, [2.5 97.5]);
+end
+
+function r = mh_g(X, A, B, G, c)
+C = repmat(c(:), 1, size(X, 2)); n = max(G(:));
+xa = accumarray(G(A), C(A) .* X(A), [n 1]); na = accumarray(G(A), C(A), [n 1]);
+xb = accumarray(G(B), C(B) .* X(B), [n 1]); nb = accumarray(G(B), C(B), [n 1]);
 k = na > 0 & nb > 0; h = na(k) .* nb(k) ./ (na(k) + nb(k));
 r = 100 * sum(h .* (xa(k) ./ na(k) - xb(k) ./ nb(k))) / max(sum(h), eps);
 end

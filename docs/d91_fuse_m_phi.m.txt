@@ -6,11 +6,15 @@ function m_phi(prof, code)
 %   m_phi('p1', code)   one profile; code: the code folder of the job's working copy
 %   m_phi('both')       the deployment verdict over m_phi_p1.mat and m_phi_p3.mat
 % Output: m_phi_<prof>.txt, m_phi_<prof>.mat (checkpoint ck_phi_<prof>.mat).
+% Runs only after the queue's focused tests passed (logs/tests.log beside the code export).
 here = fileparts(mfilename('fullpath')); cd(here);
 if strcmp(prof, 'both'), verdict_both(here); return; end
-addpath(code); setup_paths; cd(here);
 fid = fopen(sprintf('m_phi_%s.txt', prof), 'a'); cl = onCleanup(@() fclose(fid));
 out = @(varargin) both(fid, varargin{:});
+[ok, tl] = tests_passed(code);
+if ~ok, out('\nm_phi %s skipped %s: the focused tests did not pass (%s)\n', prof, char(datetime('now')), tl); end
+assert(ok, 'm_phi:tests', 'the focused tests did not pass (%s): the phi job is skipped', tl);
+addpath(code); setup_paths; cd(here);
 L = load(fullfile(here, ['data_' prof], 'sets.mat')); S = L.S; F = L.F; classes = L.info.classes;
 C = numel(classes); N = F.N; lam = F.lambda; K = 5;
 i0 = find(strcmp(classes, 'none')); ia = find(strcmp(classes, 'antenna_fault'));
@@ -42,6 +46,15 @@ out('this code rebuilds the checkpoint''s windows and phi columns: %d (%.1f min)
 assert(same, 'm_phi: the code does not rebuild the checkpoint''s columns; the reused readings would not be its own');
 clear Z XA
 Z = W.Z; XA = W.XA; pb0 = W.pb0; p0 = W.PV{6}; clear W
+pb = amax(pb0); y0 = amax(p0);
+[bin, ~] = kpi_ebno(fit, yt, classes); thr = kpi1_thr(yt, pb, bin, classes);
+low = fit.k_db <= 0; above = bin >= thr;
+B = fusion_adopt('boot', fit.run, 1000, 9102);
+M = load(sprintf('m_%s.mat', prof), 'G');
+G0 = fusion_adopt('paired', yt, pb, y0, above, low, classes, B);
+rep = isequaln(G0, M.G{6});
+out('\nKPI 1 threshold of the base reading %g dB; branch evidence against the base reproduces m_all''s M4 row: %d\n', thr, rep);
+assert(rep, 'm_phi:reproduce', 'the reused branch evidence reading does not reproduce m_all''s M4 row; the comparison would not be against the measured design');
 ck = sprintf('ck_phi_%s.mat', prof);
 if isfile(ck), Wc = load(ck); X1 = Wc.X1; p1 = Wc.p1; out('checkpoint: phi = 1 columns and reading loaded\n');
 else
@@ -50,15 +63,8 @@ else
     t0 = tic; p1 = oof(Z, X1, yt, fold, 1:K, C, lam); out('  OOF branch evidence, phi = 1: %.1f min\n', toc(t0) / 60);
     save(ck, 'X1', 'p1', '-v7.3');
 end
-pb = amax(pb0); y0 = amax(p0); y1 = amax(p1);
-[bin, ~] = kpi_ebno(fit, yt, classes); thr = kpi1_thr(yt, pb, bin, classes);
-low = fit.k_db <= 0; above = bin >= thr;
-B = fusion_adopt('boot', fit.run, 1000, 9102);
-M = load(sprintf('m_%s.mat', prof), 'G');
-G0 = fusion_adopt('paired', yt, pb, y0, above, low, classes, B);
-out('\nKPI 1 threshold of the base reading %g dB; branch evidence against the base reproduces m_all''s M4 row: %d\n', thr, ...
-    isequaln(G0, M.G{6}));
-ph = XA(:, 9);                                           % gl_phi of the phi columns
+y1 = amax(p1);
+ph = XA(:, 9);                                          % gl_phi of the phi columns
 sb = [0 23 60 120 Inf];
 out('phi over the fit set: median %.2f, share below 0.5 %.1f%%; median by speed [0-23 23-60 60-120 >=120 km/h] %s\n', ...
     median(ph), 100 * mean(ph < 0.5), mat2str(arrayfun(@(q) round(median(ph(fit.speed >= sb(q) & fit.speed < sb(q + 1))), 2), 1:4)));
@@ -117,6 +123,15 @@ elseif A.ok1 && B.ok1, d = 'branch evidence, phi = 1: phi not kept on both profi
 else, d = sprintf('branch evidence (phi as is): phi not kept on both, but phi = 1 fails the adoption rule (p1 %d, p3 %d); phi stays flagged', A.ok1, B.ok1);
 end
 out('VERDICT phi (both profiles, %s): deploy %s\n', char(datetime('now')), d);
+end
+
+function [ok, f] = tests_passed(code)
+% The last D91TESTS line of the queue's tests log reads n/n and no D91FAIL follows it.
+f = fullfile(fileparts(fileparts(code)), 'logs', 'tests.log');
+ok = false; if ~isfile(f), return; end
+t = fileread(f); i = strfind(t, 'D91TESTS'); if isempty(i), return; end
+s = t(i(end):end); m = regexp(s, '^D91TESTS (\d+)/(\d+)', 'tokens', 'once');
+ok = ~isempty(m) && strcmp(m{1}, m{2}) && str2double(m{2}) > 0 && isempty(strfind(s, 'D91FAIL'));
 end
 
 function ok = keep_rule(d)

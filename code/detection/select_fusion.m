@@ -59,7 +59,8 @@
 % the out-of-fold fused probabilities of every validation sub-run, its threshold chosen on the
 % other folds' sub-runs. Whether the monitor latches at all (FM.latch, onset_shape('on', FM))
 % is chosen here too: the latch only where its out-of-fold macro-F1 is above the fused class's
-% (val_probs_oof), the measure that chose N and lambda; the per-event reading of a lost
+% (val_probs_oof), the measure that chose N and lambda; with a pick it is the pick's measured
+% state (PK.latch), validation's choice printed beside. The per-event reading of a lost
 % branch's cause (the first cycle from the onset read as antenna_fault or
 % airframe_shadowing, the right one) is printed beside. The monitor's class out of fold, with
 % or without the latch as chosen, sets the KPI 1 threshold of eval_detector.m. The test split
@@ -67,8 +68,8 @@
 % Output: data/fusion.mat (FM with os_thr and latch, N, lambda, cv table, out-of-fold
 % probabilities (fused, and with the latch) and their targets, q_thr; with FUSION_REV also
 % FM.cues, FM.target_age, the cvy, cvo tables and fusion_rev (fusion_rev_id.m); with a pick
-% also deployed_pick, the design and its rule check). Without FUSION_REV the fusion and its
-% file are those of the selection by the own targets alone.
+% also deployed_pick, the design, its rule check and the latch comparison). Without
+% FUSION_REV the fusion and its file are those of the selection by the own targets alone.
 
 close all; clc;
 fprintf('=== B2F: temporal fusion (validation split only) ===\n\n');
@@ -143,6 +144,8 @@ if ~isempty(PK)
     a = find(NS == PK.N); b = find(LAMBDA == PK.lambda);
     assert(isscalar(a) && isscalar(b), 'select_fusion:pick_grid', 'the measured N %d or lambda %g is not on the grid', PK.N, PK.lambda);
     assert(strcmp(PK.target_age, 'N'), 'select_fusion:pick_target', 'only the deployed target rule was measured');
+    assert(isfield(PK, 'latch') && isscalar(PK.latch) && islogical(PK.latch), 'select_fusion:pick_latch', ...
+        'the measured design names no latch state');
     TA = struct('target_age', NS(a));
 end
 N = NS(a); lambda = LAMBDA(b);
@@ -268,6 +271,10 @@ mf_latch = macro_f1(val_target, yl, C); mf_fused = macro_f1(val_target, yo, C);
 FM.latch = mf_latch > mf_fused;                         % the latch only where it raises macro-F1 out of fold
 fprintf('Out of fold, the monitor''s class with the latched cause of a lost branch: macro-F1 %.2f%%; the fused class %.2f%%\n', ...
     100 * mf_latch, 100 * mf_fused);
+if ~isempty(PK)                                          % the measured state, not chosen again
+    fprintf('The measured design deploys latch %d, its measured state; validation out of fold would choose latch %d\n', PK.latch, FM.latch);
+    FM.latch = PK.latch;
+end
 [ef, nf] = event_cause(yo, val_target, va.run, va.pos, iB); [el, ~] = event_cause(yl, val_target, va.run, va.pos, iB);
 fprintf(['Per event, the first cycle from the onset read as a lost branch reads the right cause: antenna fault %.1f%% ' ...
     'fused, %.1f%% latched (%d events); airframe shadowing %.1f%%, %.1f%% (%d events)\n'], 100 * ef(1), 100 * el(1), nf(1), ...
@@ -284,7 +291,11 @@ if REV
     if exist('FUSION_FIT', 'var') && strcmp(FUSION_FIT, 'enlarged'), fit_name = 'enlarged'; end
     fusion_rev = fusion_rev_id(fit_name);                % B3r reads the fourth test set only with fusion_rev_id('enlarged')
     save('data/fusion.mat', 'cvy', 'cvo', 'fusion_rev', '-append');
-    if ~isempty(PK), deployed_pick = PK; deployed_pick.check = GP; save('data/fusion.mat', 'deployed_pick', '-append'); end
+    if ~isempty(PK)
+        deployed_pick = PK; deployed_pick.check = GP;
+        deployed_pick.check.latch_val = struct('macro_f1_latched', mf_latch, 'macro_f1_fused', mf_fused);   % validation out of fold
+        save('data/fusion.mat', 'deployed_pick', '-append');
+    end
 end
 fprintf('Saved data/fusion.mat\n');
 
