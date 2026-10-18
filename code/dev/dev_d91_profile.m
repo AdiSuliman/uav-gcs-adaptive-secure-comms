@@ -32,8 +32,8 @@ for i = 1:2
             'aoa1_deg', g.aoa1(r), 'rho', g.rho(r), 'frames', opt.F_SUB)); tt(r, 1) = toc(t0);
         t0 = tic; o = sim(mdl, 'StopTime', stop); tt(r, 2) = toc(t0);
         t0 = tic; F = extract_closed_loop_frames(o, p2, opt.delay_bits); tt(r, 3) = toc(t0);
-        t0 = tic; idle_alone(o, p2, F.nf); tt(r, 4) = toc(t0);
-        t0 = tic; mmse_predict(o.get('Rx_IQ'), p2, reshape(o.get('Rx_S'), 8, [])); tt(r, 5) = toc(t0);
+        t0 = tic; try, idle_alone(o, p2, F.nf); tt(r, 4) = toc(t0); catch, tt(r, 4) = NaN; end
+        t0 = tic; try, mmse_predict(o.get('Rx_IQ'), p2, reshape(o.get('Rx_S'), 8, [])); tt(r, 5) = toc(t0); catch, tt(r, 5) = NaN; end
         t0 = tic; detector_part(F, det, opt.tw); tt(r, 6) = toc(t0);
         disk_guard;
     end
@@ -86,12 +86,13 @@ else
     [self, o2] = sort(self, 'descend'); nm = nm(o2);
     fprintf('\nSimulink profiler, jamming, %d runs: blocks by self time [s]\n', numel(g.seed));
     for j = 1:min(25, numel(nm)), fprintf('  %8.3f  %s\n', self(j), nm{j}); end
-    grp = {'Threat', 'Channel', 'Rx', 'Tx', '_sink|Rx_|Tx_IQ|Thr_|Cal_db', 'AWGN', 'BitSource'};
-    gl = {'threat', 'channel', 'receiver', 'transmitter', 'sinks', 'AWGN', 'bit source'};
+    grp = {'tx_sink|rx_sink|Tx_IQ|Rx_IQ|Rx_Z|Rx_H|Rx_R|Rx_S|Thr_act|Thr_comp|Thr_sig|Cal_db', 'Threat', 'Channel', 'Rx', 'Tx', ...
+        'AWGN', 'BitSource'};
+    gl = {'sinks', 'threat', 'channel', 'receiver', 'transmitter', 'AWGN', 'bit source'};
     acc = zeros(1, numel(grp) + 1);
     for j = 1:numel(nm)
         leaf = regexprep(nm{j}, '^[^/]*/', '');
-        h = find(cellfun(@(e) ~isempty(regexp(leaf, ['^(' e ')'], 'once')), grp), 1);
+        h = find(cellfun(@(e) ~isempty(regexp(leaf, ['^(' e ')(/|$)'], 'once')), grp), 1);
         if isempty(h), h = numel(grp) + 1; end
         acc(h) = acc(h) + self(j);
     end
