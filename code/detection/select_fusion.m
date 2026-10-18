@@ -19,19 +19,27 @@
 % taken (the one-standard-error rule, Hastie, Tibshirani & Friedman, The Elements of
 % Statistical Learning, 2nd ed., sec. 7.10: each cycle of the window is 20 ms of memory), with
 % its best regularization; and the fusion's further columns (window_cues.m 'extra') are
-% chosen, each against the fusion without it
-% on validation, out of fold over the same folds at the chosen N and lambda, paired by
-% bootstrap over sub-runs: the idle time against the radio's own noise (cfar: the crest and
-% spread of every gap over its own floor, thresholds from the training folds' clean gaps,
-% realized clean exceedance at most 1%; Grimaldi et al. 2019, Kazim et al. 2026 eq. 1.3)
-% when macro-F1 above the KPI 1 threshold loses nothing (95% lower bound >= -0.1 point),
-% every frame's gains (lower bound > 0) and the clean frames read as a threat do not rise
-% (lower bound <= 0); the branch that steps (iso: detection-isolation, Xie et al. 2021, Sec.
-% III-I) when every frame's macro-F1 gains (lower bound > 0), the clean frames read as a lost
-% branch do not rise and airframe-shadowing recall, overall and at K below 0 dB, does not
-% fall; both when the two rules hold for both together, else the single one with the larger
-% gain. FM.cues records them (fuse_classes('cues', FM)) and every reader builds the same row;
-% without FUSION_REV the fusion has none.
+% chosen, each against the fusion without it, out of fold by sub-run at the chosen N and
+% lambda, paired by bootstrap over sub-runs (fusion_adopt.m): the idle time against the radio's
+% own noise (cfar: the crest and spread of every gap over its own floor, thresholds from the
+% training folds' clean gaps, realized clean exceedance at most 1%; Grimaldi et al. 2019,
+% Kazim et al. 2026 eq. 1.3) when macro-F1 above the KPI 1 threshold loses nothing (95% lower
+% bound >= -0.1 point), every frame's gains (lower bound > 0) and the clean frames read as a
+% threat do not rise (lower bound <= 0); a lost branch's evidence, each alone and all
+% together (iso, the branch that steps, detection-isolation, Xie et al. 2021, Sec. III-I;
+% glr, its drop against the others in linear power; held, its held reference, branch_ref.m;
+% post, the K and spread cues after its step), when antenna_fault F1 and macro-F1 over every
+% frame and above the threshold gain (lower bounds > 0), airframe_shadowing F1 loses nothing
+% beyond its interval, neither lost-branch class loses beyond its interval at K <= 0 dB and
+% the clean frames read as a threat or as a lost branch do not rise; of the branch variants
+% so adopted the one with the largest gain, and with cfar both when the two rules hold for
+% them together, else the single one with the larger gain. FM.cues records them
+% (fuse_classes('cues', FM)) and every reader builds the same row; without FUSION_REV the
+% fusion has none. With FUSION_FIT = 'enlarged' as well, the further columns are chosen and
+% the fusion is fitted on the enlarged fit set (fit_sets.m: the validation split, the first
+% test split and the second and third test sets, 5 folds by sub-run, a sub-run never split;
+% N and lambda stay chosen on validation), and val_probs_oof holds its validation frames;
+% the test sets' readings are then spent, and KPI 1 is read on a test set built after it.
 % The quiet-slot interference alarm of the rule (rule_based_policy.m) is set here from
 % the clean validation frames (the sub-runs without a threat), as an AGC jamming monitor
 % sets its threshold from interference-free samples, Th = mu - 3 sigma - 2 dB for a gain
@@ -50,7 +58,7 @@
 % branch's cause (the first cycle from the onset read as antenna_fault or
 % airframe_shadowing, the right one) is printed beside. The monitor's class out of fold, with
 % or without the latch as chosen, sets the KPI 1 threshold of eval_detector.m. The test split
-% is not used.
+% is not used (but in the enlarged fit set).
 % Output: data/fusion.mat (FM with os_thr and latch, N, lambda, cv table, out-of-fold
 % probabilities (fused, and with the latch) and their targets, q_thr; with FUSION_REV also
 % FM.cues, FM.target_age and the cvy, cvo tables). Without FUSION_REV the fusion and its file
@@ -127,57 +135,66 @@ fprintf('Frames judged by their window: path-loss onsets %d, WLAN frames without
 pc0 = oof{a, b}; clear oof
 
 %% 2. The fusion's further columns, each against the fusion without it (FUSION_REV)
-cues = []; pick = 1; PV = {pc0};
+cues = []; pick = 1; PV = {pc0}; Zf = Z; ft = val_target; vr = (1:numel(y))';
 if REV
-    iso_x = fuse_classes('extra', va, N, struct('iso', true));
-    V = {'none', 'cfar', 'iso', 'cfar and iso'}; PV = cell(1, 4); PV{1} = pc0; TH = nan(K, 3);
-    for v = 2:4
-        pc = zeros(numel(y), C);
-        for k = 1:K
-            tr = fold ~= k; te = fold == k;
-            [X, TH(k, :)] = extra_cols(va, N, v, tr, iso_x);
-            FMv = fuse_classes('fit', [Z(tr, :), X(tr, :)], val_target(tr), C, lambda);
-            pc(te, :) = fuse_classes('apply', FMv, [Z(te, :), X(te, :)]);
-        end
-        PV{v} = pc;
+    fit = va; fit.y = y; fit.P = P; foldf = fold; pf0 = pc0; sb = 62;
+    if exist('FUSION_FIT', 'var') && strcmp(FUSION_FIT, 'enlarged')   % the enlarged fit set (fit_sets.m)
+        [fit, finfo] = fit_sets(fit, S.splits.test, D.net, classes);
+        fit.feat_names = va.feat_names;
+        for k = 1:numel(finfo), fprintf('Fit set: %s, %d frames, %d sub-runs\n', finfo(k).name, finfo(k).frames, finfo(k).subruns); end
+        vr = find(fit.set == 1);
+        Zf = fuse_classes('windows', fit, fit.P, N);
+        assert(isequal(Zf(vr, :), Z), 'select_fusion: the validation rows of the fit set differ');
+        ft = fusion_target(fit.y, fit.run, fit.pos, N, classes, TA);
+        ru = unique(fit.run); rf = RandStream('mt19937ar', 'Seed', 9101);
+        fr = mod(randperm(rf, numel(ru)), K) + 1; [~, ir] = ismember(fit.run, ru); foldf = fr(ir)';
+        pf0 = oof_fit(Zf, ft, foldf, C, lambda); sb = 9102;
     end
-    [bin, ~] = kpi_ebno(va, val_target, classes);
-    yb = argmax(pc0); thr = kpi1_thr(val_target, yb, bin, classes);
-    G = struct('all', {}, 'above', {}, 'cl', {}, 'lb', {}); RC = zeros(4, 3); i0 = find(strcmp(classes, 'none'));
-    iaf = find(strcmp(classes, 'antenna_fault')); ias = find(strcmp(classes, 'airframe_shadowing'));
-    kdb = nan(numel(y), 1); if isfield(va, 'k_db'), kdb = double(va.k_db(:)); end
-    B = run_boot(va.run, 1000, 62);
-    for v = 1:4
-        yh = argmax(PV{v});
-        RC(v, :) = 100 * [mean(yh(val_target == i0) == iaf | yh(val_target == i0) == ias), mean(yh(val_target == ias) == ias), ...
-            mean(yh(val_target == ias & kdb < 0) == ias)];
-        if v > 1, G(v) = paired(val_target, yb, yh, bin >= thr, C, B, i0, [iaf ias]); end
+    OPT = {struct('iso', true), struct('glr', true), struct('held', true), struct('post', true), ...
+        struct('iso', true, 'glr', true, 'held', true, 'post', true)};
+    V = {'none', 'cfar', 'iso', 'glr', 'held', 'post', 'branch evidence'};
+    XB = cellfun(@(o) fuse_classes('extra', fit, N, o), OPT, 'UniformOutput', false);
+    PV = cell(1, numel(V)); PV{1} = pf0; TH = nan(K, 3);
+    for v = 2:numel(V)
+        [PV{v}, T] = oof_cols(Zf, ft, foldf, C, lambda, fit, N, v == 2, XB, v - 2);
+        if v == 2, TH = T; end
     end
-    ok_cfar = @(v) G(v).above(2) >= -0.1 && G(v).all(2) > 0 && G(v).cl(2) <= 0;
-    ok_iso = @(v) G(v).all(2) > 0 && RC(v, 1) <= RC(1, 1) && RC(v, 2) >= RC(1, 2) && RC(v, 3) >= RC(1, 3);
-    ad = [ok_cfar(2), ok_iso(3), ok_cfar(4) && ok_iso(4)];
-    if ad(3), pick = 4; elseif ad(1) && ad(2), pick = 2 + (G(3).all(1) > G(2).all(1)); elseif ad(1), pick = 2; elseif ad(2), pick = 3;
-    else, pick = 1; end
-    fprintf(['Further columns at N = %d, lambda %.0e, out of fold, against none (macro-F1 points, 95%% bootstrap over sub-runs; ' ...
-        'KPI 1 threshold of the fusion without them %g dB):\n'], N, lambda, thr);
-    for v = 2:4
-        fprintf(['  %-13s every frame %+.2f [%+.2f, %+.2f], above the threshold %+.2f [%+.2f, %+.2f], clean as a threat %+.2f ' ...
-            '[%+.2f, %+.2f], clean as a lost branch %+.2f [%+.2f, %+.2f]; shadowing recall %.1f%% (K < 0 dB %.1f%%) against %.1f%% (%.1f%%)\n'], ...
-            V{v}, G(v).all, G(v).above, G(v).cl, G(v).lb, RC(v, 2), RC(v, 3), RC(1, 2), RC(1, 3));
+    [bin, ~] = kpi_ebno(fit, ft, classes);
+    yb = argmax(pf0); thr = kpi1_thr(ft, yb, bin, classes);
+    low = false(numel(ft), 1); if isfield(fit, 'k_db'), low = double(fit.k_db(:)) <= 0; end
+    B = fusion_adopt('boot', fit.run, 1000, sb);
+    G = cell(1, numel(V));
+    for v = 2:numel(V), G{v} = fusion_adopt('paired', ft, yb, argmax(PV{v}), bin >= thr, low, classes, B); end
+    [pick, bs] = fusion_adopt('choose', G);
+    if pick == 0                                         % the idle-time columns with the adopted branch variant
+        [PV{end + 1}, ~] = oof_cols(Zf, ft, foldf, C, lambda, fit, N, true, XB, bs - 2);
+        V{end + 1} = ['cfar and ' V{bs}];
+        G{end + 1} = fusion_adopt('paired', ft, yb, argmax(PV{end}), bin >= thr, low, classes, B);
+        pick = fusion_adopt('combo', G(1:end - 1), bs, G{end});
+    end
+    fprintf(['Further columns at N = %d, lambda %.0e, out of fold over %d frames, against none (points, 95%% bootstrap over ' ...
+        'sub-runs; KPI 1 threshold of the fusion without them %g dB):\n'], N, lambda, numel(ft), thr);
+    for v = 2:numel(V)
+        fprintf(['  %-26s every frame %+.2f [%+.2f, %+.2f], above the threshold %+.2f [%+.2f, %+.2f], clean as a threat %+.2f ' ...
+            '[%+.2f, %+.2f], clean as a lost branch %+.2f [%+.2f, %+.2f]; F1 antenna_fault %+.2f [%+.2f, %+.2f], ' ...
+            'airframe_shadowing %+.2f [%+.2f, %+.2f]; at K <= 0 dB %+.2f [%+.2f, %+.2f], %+.2f [%+.2f, %+.2f]\n'], V{v}, G{v}.all, ...
+            G{v}.above, G{v}.cl, G{v}.lb, G{v}.fault, G{v}.shad, G{v}.fault_low, G{v}.shad_low);
     end
     fprintf('  cfar thresholds per training folds [dB] (crest T1, spread T2, median crest): %s\n', mat2str(TH, 3));
-    fprintf('  adopted: cfar %s, iso %s, both %s -> the fusion''s further columns: %s\n', yn_txt(ad(1)), yn_txt(ad(2)), yn_txt(ad(3)), V{pick});
-    if ismember(pick, [2 4]), cues.cfar = cfar_thr(va, true(numel(y), 1)); end
-    if ismember(pick, [3 4]), cues.iso = true; end
-    if ~isempty(cues)
-        if ~isfield(cues, 'cfar'), cues.cfar = []; end
-        if ~isfield(cues, 'iso'), cues.iso = false; end
-        Z = [Z, fuse_classes('extra', va, N, cues)];
-        if ~isempty(cues.cfar), fprintf('  clean gaps of the validation split: T1 %.2f dB, T2 %.2f dB, median crest %.2f dB\n', cues.cfar); end
+    fprintf('  adopted: cfar %s; branch variants %s -> the fusion''s further columns: %s\n', yn_txt(fusion_adopt('cfar', G{2})), ...
+        strjoin(cellfun(@(n, d) sprintf('%s %s', n, yn_txt(fusion_adopt('branch', d))), V(3:7), G(3:7), 'UniformOutput', false), ', '), V{pick});
+    if pick > 1
+        cues = struct('cfar', [], 'iso', false, 'glr', false, 'held', false, 'post', false);
+        if pick == 2 || pick == 8, cues.cfar = cfar_thr(fit, true(numel(ft), 1)); end
+        b = 0; if pick >= 3 && pick <= 7, b = pick - 2; elseif pick == 8, b = bs - 2; end
+        if b > 0, for f = fieldnames(OPT{b})', cues.(f{1}) = true; end, end
+        Zf = [Zf, fuse_classes('extra', fit, N, cues)];
+        if ~isempty(cues.cfar), fprintf('  clean gaps of the fit set: T1 %.2f dB, T2 %.2f dB, median crest %.2f dB\n', cues.cfar); end
     end
+    PV{pick} = PV{pick}(vr, :);                          % the validation frames' out-of-fold reading
 end
 val_probs_oof = PV{pick};
-FM = fuse_classes('fit', Z, val_target, C, lambda);
+FM = fuse_classes('fit', Zf, ft, C, lambda);
 if REV, FM.target_age = TA.target_age; FM.cues = cues; end
 [~, y1] = max(P, [], 2);
 yfr = y; if isfield(va, 'Y_frame'), yfr = double(va.Y_frame(:)); end   % the per-frame network's own labels
@@ -261,11 +278,18 @@ q = @(x) x(max(1, ceil(0.99 * numel(x))));
 T = [q(cr), q(sp), median(cr)];
 end
 
-function [X, T] = extra_cols(va, N, v, tr, iso_x)
-% The further columns of variant v (2 cfar, 3 iso, 4 both), cfar thresholds from the frames tr.
-T = nan(1, 3); X = zeros(numel(va.run), 0);
-if ismember(v, [2 4]), T = cfar_thr(va, tr); X = fuse_classes('extra', va, N, struct('cfar', T)); end
-if ismember(v, [3 4]), X = [X, iso_x]; end
+function [pc, T] = oof_cols(Z, yt, fold, C, lambda, fit, N, cf, XB, b)
+% Out-of-fold probabilities with the further columns: the idle time's (cf, thresholds from
+% each training folds' clean gaps) and the branch variant b (XB{b}, 0 none).
+pc = zeros(numel(yt), C); T = nan(max(fold), 3);
+for k = 1:max(fold)
+    tr = fold ~= k; te = fold == k;
+    X = zeros(numel(yt), 0);
+    if cf, T(k, :) = cfar_thr(fit, tr); X = fuse_classes('extra', fit, N, struct('cfar', T(k, :))); end
+    if b > 0, X = [X, XB{b}]; end %#ok<AGROW>
+    FMv = fuse_classes('fit', [Z(tr, :), X(tr, :)], yt(tr), C, lambda);
+    pc(te, :) = fuse_classes('apply', FMv, [Z(te, :), X(te, :)]);
+end
 end
 
 function thr = kpi1_thr(yt, yp, bin, classes)
@@ -281,34 +305,6 @@ function f = mf1_cm(cm)
 pr = diag(cm) ./ sum(cm, 1)'; rc = diag(cm) ./ sum(cm, 2);
 f1 = 2 * pr .* rc ./ (pr + rc);
 f = mean(f1(sum(cm, 2) > 0), 'omitnan');
-end
-
-function B = run_boot(run, nb, seed)
-% Bootstrap weights over the sub-runs: nb resamples of the sub-runs with replacement.
-[u, ~, ri] = unique(run(:));
-s = RandStream('mt19937ar', 'Seed', seed);
-B = struct('ri', ri, 'n', numel(u), 'w', zeros(nb, numel(u)));
-for b = 1:nb, B.w(b, :) = accumarray(randi(s, numel(u), numel(u), 1), 1, [numel(u) 1])'; end
-end
-
-function d = paired(yt, ya, yb, above, C, B, i0, lost)
-% Paired sub-run bootstrap of b - a [points, 95%]: macro-F1 over every frame and above the
-% KPI 1 threshold, the clean frames read as any threat and as a lost branch.
-nr = B.n;
-cmr = @(m, yh) accumarray([B.ri(m), sub2ind([C C], yt(m), yh(m))], 1, [nr C * C]);
-A1 = cmr(true(size(yt)), ya); B1 = cmr(true(size(yt)), yb); A2 = cmr(above, ya); B2 = cmr(above, yb);
-cl = yt == i0; cnt = @(x) accumarray(B.ri(cl), double(x(cl)), [nr 1]);
-n1a = cnt(ya ~= i0); n1b = cnt(yb ~= i0); n2a = cnt(ismember(ya, lost)); n2b = cnt(ismember(yb, lost)); dn = cnt(true(size(yt)));
-f = @(w, M) mf1_cm(reshape(w * M, C, C));
-x = zeros(size(B.w, 1), 4);
-for k = 1:size(B.w, 1)
-    w = B.w(k, :);
-    x(k, :) = 100 * [f(w, B1) - f(w, A1), f(w, B2) - f(w, A2), (w * (n1b - n1a)) / max(w * dn, 1), (w * (n2b - n2a)) / max(w * dn, 1)];
-end
-o = ones(1, nr);
-pt = 100 * [f(o, B1) - f(o, A1), f(o, B2) - f(o, A2), sum(n1b - n1a) / sum(dn), sum(n2b - n2a) / sum(dn)];
-ci = prctile(x, [2.5 97.5]);
-d = struct('all', [pt(1) ci(:, 1)'], 'above', [pt(2) ci(:, 2)'], 'cl', [pt(3) ci(:, 3)'], 'lb', [pt(4) ci(:, 4)']);
 end
 
 function t = yn_txt(x)

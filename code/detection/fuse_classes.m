@@ -17,7 +17,8 @@ function varargout = fuse_classes(cmd, varargin)
 %       same row per cycle.
 %   Z = fuse_classes('windows', S, probs, N, opt)  the same with window_cues('extra', ..., opt)'s
 %       columns last (opt = fuse_classes('cues', FM), a fusion's own further columns)
-%   X = fuse_classes('extra', S, N, opt)          those columns alone
+%   X = fuse_classes('extra', S, N, opt)          those columns alone (opt.held: branch_ref.m over
+%                                                each sub-run's cycles from its first)
 %   opt = fuse_classes('cues', FM)                the further columns of fusion FM ([] for none)
 %   FM = fuse_classes('fit', Z, y, C, lambda)     y class index per frame
 %   [pc, k] = fuse_classes('apply', FM, Z)        pc frames x C, k predicted class
@@ -72,13 +73,16 @@ I = nan(n, numel(idle_summary('names')));
 if isfield(S, 'idle') && ~isempty(S.idle), I = double(S.idle); end
 [~, ~, rid] = unique(S.run(:));
 byrun = accumarray(rid, (1:n)', [], @(v) {v});
+held = isfield(opt, 'held') && opt.held;
 for r = 1:numel(byrun)
     ix = byrun{r};
     [~, o] = sort(S.pos(ix)); ix = ix(o);
+    H = []; if held, H = branch_ref('run', S.gain_ant(ix, :)); end   % the held reference over the run's cycles
     for j = 1:numel(ix)
         w = ix(max(1, j - N + 1):j);
+        a = {}; if held, a = {H(j, :)}; end
         X(ix(j), :) = window_cues('extra', permute(S.gain_ant(w, :), [3 2 1]), permute(S.feats_raw(w, jf), [3 2 1]), ...
-            permute(I(w, :), [3 2 1]), opt);
+            permute(I(w, :), [3 2 1]), opt, a{:});
     end
 end
 end
