@@ -626,6 +626,24 @@ measurable excess means no change is needed.
 Pending: `wrap_check.txt` of the queue (`C:\Users\Adi Suliman\d91q\wrap\`).
 <!-- END WRAP -->
 
+## The queue
+
+The jobs of sections 9, 10 and 12 run in `C:\Users\Adi Suliman\d91q\fuse\d91q.sh` (verbatim:
+`docs/d91_fuse_queue.sh.txt`, its fill step `docs/d91_fuse_fill.py.txt`). It was started hidden on
+18.10 at 18:14:56 (bash PID 27552) with code `eb87297`, exported by `git archive` to
+`d91q\fuse\eb87297`. The jobs:
+1. tests, focused;
+2. wrap, `wrap_check.m` on the smoke copy `d91q\fuse\wrap`;
+3. phi_p1, then phi_p3, `m_phi.m` in the scratchpad folder `d91_fuse`;
+4. phi_both, the verdict.
+
+They run one at a time, single thread, with TEMP `C:\Users\ADISUL~1\d91q\fuse\tmp`. Each job
+starts only when at least 35 GB of commit is free and at most one other non-pipeline MATLAB
+runs (`gate.ps1`, the d91-speed queue's gate). The gate is checked every 10 min, and a job is
+given up after 24 h of waiting. Logs: `d91q\fuse\logs` (`queue.log`, one log per job, and
+`summary.log` at the end). The wrap and phi results are written into sections 10 and 12 and
+committed (this file only).
+
 ## 11. Resampling streams
 
 | Seed | Where | What |
