@@ -7,6 +7,7 @@ function dev_d91_fec_static()
 %   jsonencode) those of the configuration without it, at the same Eb/N0 offset, and the run
 %   it takes is that configuration's (pool_configs.m). Also the runs per stage before and
 %   after, weighted by pool_cost.m's emitter cost. Prints 'D91PROOF A_static PASS' or errors.
+sha = dev_d91_code();
 p0 = load('params.mat').params;
 C = decision_config(); A = policy_actions(); nA = numel(A);
 ifec = find(contains(A, 'fec_interleave'));
@@ -51,6 +52,6 @@ for n = [2 3 4]
         'x%.3f\n'], n, numel(cl), old, new, new / old, wn / wo);
 end
 fprintf('%d fec_interleave configurations checked, %d failed%s\n', nchk, numel(bad), sprintf('\n  %s', bad{:}));
-if ~isempty(bad), fprintf('D91PROOF A_static FAIL\n'); error('dev_d91_fec_static:fail', 'proof (a) failed'); end
-fprintf('D91PROOF A_static PASS\n');
+if ~isempty(bad), fprintf('D91PROOF A_static FAIL D91CODE %s\n', sha); error('dev_d91_fec_static:fail', 'proof (a) failed'); end
+fprintf('D91PROOF A_static PASS D91CODE %s\n', sha);
 end

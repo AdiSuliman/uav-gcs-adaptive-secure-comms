@@ -3,6 +3,7 @@ function dev_d91_pool_run(out_file, src)
 %   path over the reduced cells (dev_d91_cells.m) with the detector of src (dev_d91_det.m);
 %   saves R (threat, P, info, seconds per cell) to out_file. Run once on the old commit and
 %   once on the new one, then dev_d91_compare.m.
+dev_d91_code();
 p0 = load('params.mat').params; p0.quiet_build = true;
 C = decision_config();
 [cells, A, eb, opt] = dev_d91_cells(p0, C);

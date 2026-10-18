@@ -126,22 +126,14 @@ for j = 1:nJ
     cfg = maps(jobs(j, 1)); p = p0; p.active_threat = cfg.base; p.(cfg.level_field) = cfg.levels(jobs(j, 2));
     w(j) = pool_cost(p, cfg.base, ACTIONS, nS * RUN_FRAMES, opt);
 end
-[ord, po] = pool_schedule(w, pl, NWP);                 % the longest job first, one per hand-out
-parfor (k = 1:nJ, po)
-    j = ord(k); t = jobs(j, 1); li = jobs(j, 2);
-    cfg = maps(t);
-    p = p0; p.active_threat = cfg.base; p.(cfg.level_field) = cfg.levels(li);
-    if contains(cfg.base, 'airframe_shadowing'), [~, p.roll_deg] = shadow_roll_band(p.shadow_db, p); end   % a turn that lets the airframe hide an antenna
-    p.gcs_aoa_deg = p.gcs_aoa_deg - rad2deg(9.81 * tand(p.roll_deg) / max(p.v_nominal, p.turn_v_floor)) * (RUN_FRAMES - 1) * p.cycle_s / 2;   % the turn carries the GCS through the beam at mid-run
-    if ~isnan(cfg.aoa), p.int_aoa_deg(1) = p.gcs_aoa_deg + cfg.aoa; end
-    sd = 900000 + 1000*t + 10*li;                         % + s: each Eb/N0 column its own flight (nS < 10)
-    g = arrayfun(@(s) struct('seed', sd + s, 'speed', v_nom, 'run', 1), 1:nS, 'UniformOutput', false);
-    P = pool_cell(p, cfg.base, ACTIONS, SNR_points, g, [], opt);
-    resB{k} = cellfun(@(Q) mean(Q.ber), P(:, :, 1))';            % configurations x Eb/N0
-    resF{k} = cellfun(@(Q) mean(double(Q.fer)), P(:, :, 1))';
-    resS{k} = cellfun(@(Q, a) packet_share(a, Q.fer), P(:, :, 1), repmat(ACTIONS(:)', nS, 1))';   % one loss event of the run
-end
-resB(ord) = resB; resF(ord) = resF; resS(ord) = resS;  % back in job order
+ord = pool_schedule(w);                                % the longest job first, one per free worker
+S = struct('jobs', {jobs}, 'maps', {maps}, 'p0', {p0}, 'RUN_FRAMES', {RUN_FRAMES}, 'v_nom', {v_nom}, 'nS', {nS}, ...
+    'ACTIONS', {ACTIONS}, 'SNR_points', {SNR_points}, 'opt', {opt});
+res = pool_lpt(@(S, j) pool_job('surv', S, j), S, ord, pl);
+clear S
+res(ord) = res;                                        % back in job order
+for j = 1:nJ, [resB{j}, resF{j}, resS{j}] = res{j}{:}; end
+clear res
 ber_all = cell(1, nT); fer_all = cell(1, nT); slack_all = cell(1, nT);             % {entry}(level, configuration, snr)
 for t = 1:nT
     nL = numel(maps(t).levels);

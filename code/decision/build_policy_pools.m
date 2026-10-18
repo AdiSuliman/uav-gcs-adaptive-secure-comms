@@ -353,19 +353,14 @@ keys = arrayfun(@(c) pool_checkpoint('key', {MODEL_TAG, DET_ID, runs, cells(c), 
     threat_params(p0, cells(c).threat, cells(c).sev, C)}), 1:nC, 'UniformOutput', false);
 todo = pool_checkpoint('todo', CKD, keys);
 w = arrayfun(@(c) pool_cost(threat_params(p0, cells(c).threat, cells(c).sev, C), cells(c).threat, ACTIONS, geoc{c}, opt), todo);
-[o, po] = pool_schedule(w, pl, NWP); todo = todo(o);   % the longest cell first, one cell per hand-out
+todo = todo(pool_schedule(w));                         % the longest cell first, one cell per free worker
 t0 = tic;
 fprintf('%d cells x %d configurations x %d Eb/N0 on %d workers; %d cells kept from an earlier start (%s)\n', ...
     nC, nA, nS, N_WORKERS, nC - numel(todo), CKD);
-parfor (k = 1:numel(todo), po)
-    c = todo(k); ce = cells(c);
-    p = threat_params(p0, ce.threat, ce.sev, C);
-    [Ps, pinfo] = pool_cell(p, ce.threat, ACTIONS, EBNO, geoc{c}, det, opt);
-    Pc = cell(nS, nA, nSp);
-    Pc(:, :, ce.splits) = Ps;
-    pool_checkpoint('save', CKD, c, keys{c}, struct('Pc', {Pc}, 'nuniq', pinfo.n_unique));
-    fprintf('  cell %2d/%d %-28s %-8s %2d unique configurations\n', c, nC, ce.threat, C.sev_names{ce.sev}, pinfo.n_unique);
-end
+S = struct('cells', {cells}, 'p0', {p0}, 'C', {C}, 'ACTIONS', {ACTIONS}, 'EBNO', {EBNO}, 'geoc', {geoc}, 'det', {det}, ...
+    'opt', {opt}, 'nS', {nS}, 'nA', {nA}, 'nSp', {nSp}, 'CKD', {CKD}, 'keys', {keys}, 'nC', {nC});
+pool_lpt(@(S, c) pool_job('c1p', S, c), S, todo, pl);
+clear S
 fprintf('Simulated in %.1f min\n', toc(t0) / 60);
 
 %% 3. Package
