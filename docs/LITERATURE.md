@@ -1,4 +1,4 @@
-# Literature check (2026-09-28, updated 2026-09-29)
+# Literature check (2026-09-28, updated 2026-09-29; sources of D85-D91 added 2026-10-15 and 2026-10-18)
 
 Every source of the three proposal documents was read again before the v4 changes: the lecturer's
 original proposal (seven recommended papers), the approved proposal form (six references) and the
@@ -87,8 +87,8 @@ Also downloaded and screened (abstract, introduction, conclusion) but not used: 
 
 Ranges: the link's 2.4 GHz band, 50–120 km/h and Eb/N0 0–10 dB (about 15.7 to 5 km by the link budget, `link_budget_table.m`) are within those of the sources (Nanayakkara et al.: 2.4 GHz drone links and an SNR range of −10 to 20 dB in the literature; [4]: jamming up to 30 dB above the signal); the surveys [1]–[3] give no numeric ranges. No range needed widening.
 
-Dropped for lack of a basis in these sources: CUSUM change detection, finer power and rate levels,
-a recurrent (GRU) Q-network.
+Dropped for lack of a basis in these sources (2026-09-29): CUSUM change detection, finer power and rate levels,
+a recurrent (GRU) Q-network. [Note 2026-10-18: CUSUM change detection now rests on Xie et al. 2021 and Xie, Moustakides & Xie 2022, both in the library (D86 item 19, D90, D91; table below).]
 
 ## In the library, cited from D85 (library audit, 2026-10-15)
 
@@ -102,3 +102,37 @@ a recurrent (GRU) Q-network.
 | Fang et al., IEEE 802.11-24/2043r0 (TGbn PHY receiver specification text), 2024 | V7_IEEE_802.11-24-2043r0_Fang2024_PDT_PHY_Receiver_Spec_TGbn.docx | The receiver's maximum input level of −20 dBm |
 | M. Müller, M. Hein, "Mahalanobis++," arXiv:2505.18032, 2025 | (arXiv, not in the library folder) | l2-normalizing the features before the Mahalanobis score: the last_l2 unknown-threat candidate, chosen only if validation picks it |
 | J. H. Winters, J. Salz, R. D. Gitlin, "The impact of antenna diversity on the capacity of wireless communication systems," IEEE Trans. Commun. 42(2/3/4), 1994 | V7_Winters_Salz_Gitlin1994_Antenna_Diversity_Capacity.pdf | With M antennas, M - 1 interferers can be nulled (Sec. I, p. 1740; again for a channel without multipath, p. 1747); optimum combining by direct matrix inversion, w = R_xx^-1 r_xd from the sample covariance of the received snapshots and their correlation with a known reference signal (eqs. 19-23, p. 1745), the form of the MMSE combiner's weights (build_threat_model.m, w = R \ h); replaces the citations of Richards' book in D59 and D61 |
+
+## In the library, cited from D86-D91 (2026-10-16 to 10-18)
+
+The files are in the project's source folder (`מקורות`). The "Where" column gives the decision or note that uses the source.
+
+| Paper | File | What it supports | Where |
+|---|---|---|---|
+| R. Sun, D. W. Matolak, W. Rayess, "Air-ground channel characterization for unmanned aircraft systems, Part IV: Airframe shadowing," IEEE Trans. Veh. Technol. 66(9), 2017 | Air-Ground_Channel_Characterization_for_Unmanned_Aircraft_SystemsPart_IV_Airframe_Shadowing.pdf | Events at 1.4-2.9° elevation, rolls up to 58.3° (Sec. II). The loss-against-roll fit (Table II) and the event shape (Sec. IV-C, eq. 8). K about 15 dB outside an event and -16 dB inside it (Fig. 12). The basis of the airframe-shadowing model and of the pairing by burial | D83-D86 (d86_link.md item 1), D91 |
+| L. Xie, S. Zou, Y. Xie, V. V. Veeravalli, "Sequential (quickest) change detection: classical results and new directions," IEEE J. Sel. Areas Inf. Theory, 2021 | V7_Xie2021_Sequential_Change_Detection_Survey_JSAIT.pdf | Page's CUSUM and the change point (eqs. 2-3); Lorden's bound (Theorem 1); the threshold b = abs(log alpha) (Sec. II-D1); the GLR (eq. 20); detection and isolation (Sec. III-I) | D86 item 19 (drop CUSUM), D90 (drop_ref), D91 (held, glr, iso) |
+| L. Xie, G. V. Moustakides, Y. Xie, "Window-limited CUSUM for sequential change detection," arXiv:2206.06777 (2023) | W04_Xie2022_Window_Limited_CUSUM.pdf | The window-limited CUSUM (eqs. 6-7, Remark 4, Lemma 6) and its GLR form (eq. 9) | D86 item 19, D91 (held, glr) |
+| S. Grimaldi, A. Mahmood, M. Gidlund, "Real-time interference identification via supervised learning: embedding coexistence awareness in IoT devices," 2019 | V7_Grimaldi2019_RealTime_Interference_Identification_IoT.pdf | The CC2420 RSSI sampling of the idle time (D85). A threshold on the radio's own noise and the crest factor (the cfar candidate) | D85, D90 sec. 1 |
+| S. A. Kazim, A. Darwich, J. Marais, "GNSS jamming detection with AGC and C/N0 observables from a COTS receiver," 2026 | V7_Kazim2026_GNSS_Jamming_Detection_AGC_CN0_COTS.pdf | A threshold from interference-free samples (eq. 1.3): the cfar thresholds and the rule's nulling-threshold candidates | D90 secs. 1 and 4 |
+| M. López-Benítez, J. Lehtomäki, "Energy detection based estimation of primary channel occupancy rate in cognitive radio," 2016 | V7_LopezBenitez2016_Energy_Detection_Channel_Occupancy_Rate.pdf | The occupancy reading at a low detection probability (eq. 9): the weak-WLAN diagnosis | D90 sec. 1 |
+| W. C. Y. Lee, "Estimate of local average power of a mobile radio signal," IEEE Trans. Veh. Technol. VT-34(1), 1985 | Estimate_of_local_average_power_of_a_mobile_radio_signal.pdf | The local average power (Sec. IV): about 36 samples for ±1 dB (eq. 31), the information limit of a 12-cycle window; the held reference's mean over 10 cycles | D90 sec. 1, D91 |
+| M. Badi, J. Wensowitch, D. Rajan, J. Camp, "Experimental evaluation of antenna polarization and elevation effects on drone communications," MSWiM 2019 | V7_Badi2019_Antenna_Polarization_Elevation_Drone.pdf | The body loss between drone-mounted antennas (Table 1). With the ±2 dB calibration error, a static imbalance of SD 2.9 dB, which a 5 dB fault falls inside. Envelope correlations 0.2-0.62 (Sec. 4.3) | D84, D91 (weak-branch analysis) |
+| K. Aoki, K. Honda, "Measurement and analysis of the Rician K-factor for low-altitude UAV air-to-ground communications at 2.5 GHz," 2025 | V7_Aoki2025_Rician_K_LowAltitude_UAV_25GHz.pdf | The moment-method K (eq. 2), which assumes a stationary sample: the post-split K | D85 (los_k), D91 (post) |
+| G. Marti, T. Kölle, C. Studer, "Mitigating smart jammers in multi-user MIMO," IEEE Trans. Signal Process., 2023 (arXiv:2208.01453) | V7_Marti2023_Mitigating_Smart_Jammers_MU_MIMO.pdf | The J4 jammer: random bursts of one time slot at 20% (Sec. VII-A, Fig. 5(d)), one of the two noise-burst patterns | D84 A7, D86 item 5 |
+| W. Xu, W. Trappe, Y. Zhang, T. Wood, MobiHoc 2005 (proposal ref. [14]) | A02_Xu2005_Jamming_Attacks_Detection_MobiHoc.pdf | The random jammer, bursts and sleeps U[0, 31] (Sec. 2.1, Table 1): the other noise-burst pattern, duty 0.5-0.775 | D84 A7, D86 item 5 |
+| ETSI EN 300 328 v2.2.2 (2019) | V7_ETSI_EN300328_v2.2.2_2019_24GHz_wideband.pdf | The licence-exempt density cap, 10 dBm/MHz (4.3.2.3): the emitter of opportunity at the cap | D86 item 2 |
+| M. Simunek, P. Pechac, F. P. Fontán, "Excess loss model for low elevation links in urban areas for UAVs," Radioengineering 20(3), 2011 | V7_Simunek2011_Excess_Loss_Low_Elevation_UAV.pdf | 33-42 dB of building loss on a low-elevation 2 GHz UAV link; the path-loss step up to 22 dB stays below it | D84 (README, path loss) |
+
+Also cited, listed above: Norouzi 2006 (the sweeper's 2-of-6 confirmation, D90 sec. 2), Barajas et al. 2026, Winters, Salz & Gitlin 1994 (the MMSE predictor on known symbols, D88-D89).
+
+## Not in the library (stated where used)
+
+| Item | Used for | Where |
+|---|---|---|
+| T. Hastie, R. Tibshirani, J. Friedman, *The Elements of Statistical Learning*, 2nd ed., sec. 7.10 (the one-standard-error rule) | the fusion window N on the `FUSION_REV` path only | D90 sec. 1, D91 |
+| L. J. Greenstein et al. 1999; C. Tepedelenlioglu, A. Abdi, G. B. Giannakis 2003 (K estimators) | named in the weak-class notes; the code uses Aoki & Honda's eq. 2, the same estimator form | D85 (d85_cues.md), weak-class status |
+| D. Hendrycks et al. 2019, Outlier Exposure | an untried KPI 2 option (the library holds Hendrycks & Gimpel 2017, the MSP baseline, which is another paper) | weak-class status |
+| T. L. Lai 1998 | the lower bound on detection delay, used through Xie et al. 2021 Theorem 1 | D91 (weak-branch analysis) |
+| Clarke's coherence-time approximation, about 0.423 / f_D | the closed-loop wrap analysis: consecutive cycles are nearly independent fades above about 23 km/h | d91_fuse.md sec. 10 |
+| A textbook source for the AR(1) form of phi = (1 - rho) / (1 + rho) | the hover factor of the GLR; its comparison with phi = 1 was declared before it ran | D91, d91_fuse.md secs. 8 and 12 |
+| Z. C. Lipton, C. Elkan, B. Naryanaswamy 2014 (thresholding for F1) | the per-class offsets, stated by their derivation and rejected on validation | D87 (d87_fusion.md sec. 2) |
