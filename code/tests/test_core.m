@@ -4225,7 +4225,7 @@ src = fileread(which('pool_checkpoint'));
 verifyEqual(tc, numel(regexp(src, 'flush_file\(tmp\);\s*\n\s*movefile\(tmp, ')), 2);   % a cell and the output
 src = fileread(which('build_policy_pools'));
 verifyNotEmpty(tc, strfind(src, 'pool_checkpoint(''key'', {MODEL_TAG, DET_ID, runs, cells(c), EBNO, ACTIONS, geoc{c}, opt, ...'));
-verifyNotEmpty(tc, strfind(src, 'parfor (k = 1:numel(todo), NWP)'));
+verifyNotEmpty(tc, strfind(src, 'parfor (k = 1:numel(todo), po)'));
 verifyNotEmpty(tc, strfind(fileread(which('pool_worker_init')), 'cd(d);'));   % the workers' own folder: the cells' path is absolute
 for f = {'build_policy_pools', 'build_clean_test_pools', 'build_check_pools'}
     src = fileread(which(f{1}));
@@ -4246,6 +4246,126 @@ for c = todo
     if c == stop, error('test:stop', 'stopped after cell %d', c); end
 end
 out = arrayfun(@(c) pool_checkpoint('load', dirn, c), 1:numel(keys), 'UniformOutput', false);
+end
+
+%% ---------- shared runs of the FEC twins and the order of the pool stages ----------
+function test_fec_twin_configs(tc)
+% A configuration that differs from an earlier one in p.fec alone shares its run
+% (pool_configs.m): in every cell at every level and every array, each fec_interleave
+% configuration takes the run of the same configuration without it, whose params are its
+% own less p.fec (the same key) at the same Eb/N0 offset, and every run is flown without
+% p.fec; identical physics still takes the first configuration's frames. Only
+% closed_loop_truth.m reads p.fec (apply_countermeasure.m sets it, pool_configs.m leaves it
+% out of the run's key).
+p0 = base_params(); C = decision_config(); A = policy_actions(); nA = numel(A);
+sg = fieldnames(C.sev)';
+ifec = find(contains(A, 'fec_interleave'));
+for n = [2 3 4]
+    p0.n_rx = n;
+    for t = [{'none'}, sg, C.combos]
+        sv = 1:numel(C.sev_names); if strcmp(t{1}, 'none'), sv = C.nominal; elseif contains(t{1}, '+'), sv = C.combo_sev; end
+        for v = sv
+            [Cf, map, twin] = pool_configs(threat_params(p0, t{1}, v, C), t{1}, A);
+            for a = ifec
+                b = find(strcmp(A, twin_of(A{a})));
+                q = rmfield(Cf(a).p, 'fec');
+                verifyTrue(tc, isequal(q, Cf(b).p) && strcmp(jsonencode(q), jsonencode(Cf(b).p)) && Cf(a).g_db == Cf(b).g_db, ...
+                    sprintf('%s %d %s', t{1}, v, A{a}));
+                verifyEqual(tc, twin(map(a)), map(b), sprintf('%s %d %s', t{1}, v, A{a}));
+            end
+            lead = find(twin == 1:nA);
+            verifyFalse(tc, any(arrayfun(@(a) isfield(Cf(a).p, 'fec'), lead)), t{1});
+            verifyEqual(tc, numel(lead), sum(map == 1:nA) - numel(unique(map(ifec))), t{1});
+        end
+    end
+end
+[~, map] = pool_configs(threat_params(p0, 'path_loss', C.nominal, C), 'path_loss', A);
+verifyEqual(tc, map(strcmp(A, 'channel_switch+fec_interleave')), find(strcmp(A, 'fec_interleave')));
+f = dir(fullfile(tc.TestData.root, 'code', '**', '*.m'));
+f = f(~contains({f.folder}, {[filesep 'legacy'], [filesep 'dev'], [filesep 'tests'], [filesep 'gui']}));
+rd = {};
+for i = 1:numel(f)
+    src = regexprep(fileread(fullfile(f(i).folder, f(i).name)), '%[^\n]*', '');   % code only, no comments
+    if ~isempty(regexp(src, '\.fec\>|''fec''', 'once')), rd{end+1} = f(i).name; end %#ok<AGROW>
+end
+verifyEqual(tc, sort(rd), {'apply_countermeasure.m', 'closed_loop_truth.m', 'pool_configs.m'});
+end
+
+function n = twin_of(a)
+% The configuration a without fec_interleave.
+n = regexprep(a, '\+?fec_interleave$', '');
+if isempty(n), n = 'no_action'; end
+end
+
+function test_closed_loop_truth(tc)
+% p.fec changes only the ground truth and CRC of a run: the frames with and without it are
+% the same apart from ber, fer and crc_fail, the truth inputs are the same, and
+% closed_loop_truth.m on them gives either truth exactly.
+p = base_params(); p.quiet_build = true; p.active_threat = 'jamming';
+mdl = 'UAV_GCS_Threat_Link';
+evalc('build_threat_model(p)');
+set_link_snr(mdl, 8 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
+link_seed(mdl, 31, 160);
+o = sim(mdl, 'StopTime', num2str(9 * p.frame_duration));
+[F, T] = extract_closed_loop_frames(o, p, 20);
+q = p; q.fec = true;
+[Fc, Tc] = extract_closed_loop_frames(o, q, 20);
+tf = {'ber', 'fer', 'crc_fail'};
+verifyTrue(tc, isequaln(rmfield(F, tf), rmfield(Fc, tf)));
+verifyTrue(tc, isequaln(T, Tc));
+[b, e, c] = closed_loop_truth(T, q);
+verifyTrue(tc, isequaln({b, e, c}, {Fc.ber, Fc.fer, Fc.crc_fail}));
+[b, e, c] = closed_loop_truth(Tc, p);
+verifyTrue(tc, isequaln({b, e, c}, {F.ber, F.fer, F.crc_fail}));
+verifyTrue(tc, all(isnan(Fc.crc_fail(1:2:end))) && ~isnan(F.crc_fail(1)));   % the coded CRC on every second frame only
+close_system(mdl, 0);
+end
+
+function test_pool_cell_fec_twins(tc)
+% pool_cell.m flies a fec_interleave configuration on the run of its twin without it: the
+% frames of every configuration are those it gets when simulated alone, and map and
+% n_unique count the configurations as before.
+p = threat_params(base_params(), 'jamming', 3); p.quiet_build = true;
+opt = struct('F_SUB', 6, 'tw', 10, 'delay_bits', 20);
+geo = {struct('seed', 11, 'speed', 80, 'run', 1)};
+A = {'no_action', 'fec_interleave', 'channel_switch+fec_interleave', 'power_control+fec_interleave'};
+[~, ~, twin] = pool_configs(p, 'jamming', A);
+verifyEqual(tc, twin, [1 1 3 4]);
+[P, info] = pool_cell(p, 'jamming', A, 8, geo, [], opt);
+verifyEqual(tc, info, struct('n_unique', 4, 'map', 1:4));
+for a = 1:numel(A)
+    Pa = pool_cell(p, 'jamming', A(a), 8, geo, [], opt);
+    verifyTrue(tc, isequaln(P{1, a, 1}, Pa{1, 1, 1}), A{a});
+end
+verifyFalse(tc, isequaln(P{1, 1, 1}.crc, P{1, 2, 1}.crc));
+close_system('UAV_GCS_Threat_Link', 0);
+end
+
+function test_pool_schedule(tc)
+% The pool stages hand out one job at a time, the longest first (equal costs keep their
+% order; without a pool on this process); a job's cost counts a shared run once, its frames
+% and its emitters.
+[o, po] = pool_schedule([3 9 3 1 9], [], 0);
+verifyEqual(tc, o, [2 5 1 3 4]);
+verifyEqual(tc, po, 0);
+p = base_params(); A = policy_actions(); nA = numel(A);
+pc = threat_params(p, 'none', 3);
+[~, map, twin] = pool_configs(pc, 'none', A);
+verifyLessThan(tc, sum(twin == 1:nA), sum(map == 1:nA));
+g = {struct('seed', [1 2], 'speed', [50 60], 'run', [1 2], 'frames', [NaN 38])};
+verifyEqual(tc, pool_cost(pc, 'none', A, g, struct('F_SUB', 20)), sum(twin == 1:nA) * 58 * 1.75 / 20, 'AbsTol', 1e-9);
+pj = threat_params(p, 'spoofing+noise_burst', 3);
+verifyEqual(tc, pool_cost(pj, 'spoofing+noise_burst', A, 40, []) / pool_cost(pj, 'spoofing+noise_burst', A, 20, []), 2, 'AbsTol', 1e-12);
+[~, ~, tj] = pool_configs(pj, 'spoofing+noise_burst', A);
+verifyEqual(tc, pool_cost(pj, 'spoofing+noise_burst', A, 20, []), sum(tj == 1:nA) * (1.75 + 2 * 1.15), 'AbsTol', 1e-9);
+for f = {'build_policy_pools', 'build_check_pools', 'build_clean_test_pools'}
+    verifyNotEmpty(tc, strfind(fileread(which(f{1})), 'parfor (k = 1:numel(todo), po)'), f{1});
+end
+for f = {'map_survivability_boundary', 'experiment_survivability_options'}
+    src = fileread(which(f{1}));
+    verifyNotEmpty(tc, strfind(src, 'parfor (k = 1:nJ, po)'), f{1});
+    verifyNotEmpty(tc, regexp(src, '\(ord\) = [a-zA-Z]+;', 'once'), f{1});   % the results back in job order
+end
 end
 
 function test_monitor_release_fusion(tc)

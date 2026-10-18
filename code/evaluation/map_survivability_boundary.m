@@ -84,7 +84,7 @@ nS = numel(SNR_points);
 v_nom = p0.v_nominal * 3.6;                       % nominal cruise speed [km/h]
 t0 = tic;
 
-NWP = N_WORKERS;
+NWP = N_WORKERS; pl = [];
 if exist('SMOKE', 'var') && SMOKE
     NWP = 0;                                            % reduced chain check: on this process, no parallel turn
 else
@@ -121,8 +121,14 @@ for t = 1:nT
 end
 nJ = size(jobs, 1);
 resB = cell(1, nJ); resF = cell(1, nJ); resS = cell(1, nJ);
-parfor (j = 1:nJ, NWP)
-    t = jobs(j, 1); li = jobs(j, 2);
+w = zeros(1, nJ);
+for j = 1:nJ
+    cfg = maps(jobs(j, 1)); p = p0; p.active_threat = cfg.base; p.(cfg.level_field) = cfg.levels(jobs(j, 2));
+    w(j) = pool_cost(p, cfg.base, ACTIONS, nS * RUN_FRAMES, opt);
+end
+[ord, po] = pool_schedule(w, pl, NWP);                 % the longest job first, one per hand-out
+parfor (k = 1:nJ, po)
+    j = ord(k); t = jobs(j, 1); li = jobs(j, 2);
     cfg = maps(t);
     p = p0; p.active_threat = cfg.base; p.(cfg.level_field) = cfg.levels(li);
     if contains(cfg.base, 'airframe_shadowing'), [~, p.roll_deg] = shadow_roll_band(p.shadow_db, p); end   % a turn that lets the airframe hide an antenna
@@ -131,10 +137,11 @@ parfor (j = 1:nJ, NWP)
     sd = 900000 + 1000*t + 10*li;                         % + s: each Eb/N0 column its own flight (nS < 10)
     g = arrayfun(@(s) struct('seed', sd + s, 'speed', v_nom, 'run', 1), 1:nS, 'UniformOutput', false);
     P = pool_cell(p, cfg.base, ACTIONS, SNR_points, g, [], opt);
-    resB{j} = cellfun(@(Q) mean(Q.ber), P(:, :, 1))';            % configurations x Eb/N0
-    resF{j} = cellfun(@(Q) mean(double(Q.fer)), P(:, :, 1))';
-    resS{j} = cellfun(@(Q, a) packet_share(a, Q.fer), P(:, :, 1), repmat(ACTIONS(:)', nS, 1))';   % one loss event of the run
+    resB{k} = cellfun(@(Q) mean(Q.ber), P(:, :, 1))';            % configurations x Eb/N0
+    resF{k} = cellfun(@(Q) mean(double(Q.fer)), P(:, :, 1))';
+    resS{k} = cellfun(@(Q, a) packet_share(a, Q.fer), P(:, :, 1), repmat(ACTIONS(:)', nS, 1))';   % one loss event of the run
 end
+resB(ord) = resB; resF(ord) = resF; resS(ord) = resS;  % back in job order
 ber_all = cell(1, nT); fer_all = cell(1, nT); slack_all = cell(1, nT);             % {entry}(level, configuration, snr)
 for t = 1:nT
     nL = numel(maps(t).levels);

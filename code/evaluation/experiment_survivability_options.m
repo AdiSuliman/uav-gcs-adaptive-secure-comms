@@ -47,7 +47,7 @@ geo = arrayfun(@(s) struct('seed', arrayfun(@(r) pool_seed(1, s, 13, r), 1:N_GEO
     'speed', arrayfun(@(r) nth2(@pool_seed, 1, s, 13, r, vrange), 1:N_GEOM), 'run', surv3_run_id(1:N_GEOM)), ...
     1:nS, 'UniformOutput', false);
 
-NWP = N_WORKERS;
+NWP = N_WORKERS; pl = [];
 if exist('SMOKE', 'var') && SMOKE
     NWP = 0;                                            % reduced chain check: on this process, no parallel turn
 else
@@ -75,8 +75,15 @@ end
 jobs = [kron((1:numel(cases))', ones(numel(VAR), 1)), repmat((1:numel(VAR))', numel(cases), 1)];
 nJ = size(jobs, 1);
 rec = cell(1, nJ); best = cell(1, nJ);
-parfor (j = 1:nJ, NWP)
-    c = cases(jobs(j, 1)); v = VAR(jobs(j, 2));
+w = zeros(1, nJ);
+for j = 1:nJ
+    c = cases(jobs(j, 1)); p = p0; p.n_rx = VAR(jobs(j, 2)).n_rx; p.active_threat = c.threat;
+    if ~isempty(c.field), p.(c.field) = c.level; end
+    w(j) = pool_cost(p, c.threat, ACTIONS, geo, opt);
+end
+[ord, po] = pool_schedule(w, pl, NWP);                 % the longest job first, one per hand-out
+parfor (k = 1:nJ, po)
+    j = ord(k); c = cases(jobs(j, 1)); v = VAR(jobs(j, 2));
     p = p0; p.n_rx = v.n_rx; p.gcs_aoa_deg = v.gcs; p.link_loss_db = v.loss; p.active_threat = c.threat;
     if ~isempty(c.field), p.(c.field) = c.level; end
     P = pool_cell(p, c.threat, ACTIONS, EBNO, geo, [], opt);
@@ -93,8 +100,9 @@ parfor (j = 1:nJ, NWP)
             if any(okc), Bc{s, r} = ACTIONS{find(okc, 1)}; end
         end
     end
-    rec{j} = R; best{j} = Bc;
+    rec{k} = R; best{k} = Bc;
 end
+rec(ord) = rec; best(ord) = best;                      % back in job order
 
 % Report
 rep = {sprintf('=== SURVIVABILITY OPTIONS: %s, %s, RELAY PATH ===', upper(VAR(1).name), upper(VAR(2).name)), ...
