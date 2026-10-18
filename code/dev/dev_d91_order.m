@@ -5,14 +5,15 @@ function dev_d91_order(out_dir, src)
 %   index order) after rng(99). The global stream gives every model build its own seed
 %   (build_threat_model.m) and a worker runs whatever cells it is handed, so equal results
 %   show that no value depends on the order, the worker or the stream. Saves order_1.mat and
-%   order_2.mat in out_dir (dev_d91_compare.m layout) and compares them.
+%   order_2.mat in out_dir (dev_d91_compare.m layout) and compares them (PASS needs the detector).
+dev_d91_code();
 p0 = load('params.mat').params; p0.quiet_build = true;
 C = decision_config();
 [cells, A, eb, opt] = dev_d91_cells(p0, C);
 det = dev_d91_det(src, p0);
 has_det = ~isempty(det);
 w = arrayfun(@(c) pool_cost(c.p, c.threat, A, c.geo, opt), cells);
-o2 = pool_schedule(w, [], 0);
+o2 = pool_schedule(w);
 if isequal(o2, 1:numel(cells)), o2 = fliplr(o2); end
 runs = {1:numel(cells), o2}; seeds = [1 99];
 for k = 1:2

@@ -81,28 +81,14 @@ for j = 1:nJ
     if ~isempty(c.field), p.(c.field) = c.level; end
     w(j) = pool_cost(p, c.threat, ACTIONS, geo, opt);
 end
-[ord, po] = pool_schedule(w, pl, NWP);                 % the longest job first, one per hand-out
-parfor (k = 1:nJ, po)
-    j = ord(k); c = cases(jobs(j, 1)); v = VAR(jobs(j, 2));
-    p = p0; p.n_rx = v.n_rx; p.gcs_aoa_deg = v.gcs; p.link_loss_db = v.loss; p.active_threat = c.threat;
-    if ~isempty(c.field), p.(c.field) = c.level; end
-    P = pool_cell(p, c.threat, ACTIONS, EBNO, geo, [], opt);
-    R = false(nS, N_GEOM); Bc = cell(nS, N_GEOM);
-    for s = 1:nS
-        bc = max(clean{v.ref}.ber(s), C.ber_floor); fc = clean{v.ref}.fer(s);
-        for r = 1:N_GEOM
-            rid = surv3_run_id(r); okc = false(1, numel(ACTIONS));
-            for a = 1:numel(ACTIONS)
-                Q = P{s, a, 1}; m = Q.run == rid;
-                okc(a) = mean(Q.ber(m)) <= RATIO * bc && mean(double(Q.fer(m))) <= RATIO * fc + packet_share(ACTIONS{a}, Q.fer(m));
-            end
-            R(s, r) = any(okc);
-            if any(okc), Bc{s, r} = ACTIONS{find(okc, 1)}; end
-        end
-    end
-    rec{k} = R; best{k} = Bc;
-end
-rec(ord) = rec; best(ord) = best;                      % back in job order
+ord = pool_schedule(w);                                % the longest job first, one per free worker
+S = struct('cases', {cases}, 'VAR', {VAR}, 'jobs', {jobs}, 'p0', {p0}, 'ACTIONS', {ACTIONS}, 'EBNO', {EBNO}, ...
+    'geo', {geo}, 'opt', {opt}, 'nS', {nS}, 'N_GEOM', {N_GEOM}, 'clean', {clean}, 'C', {C}, 'RATIO', {RATIO});
+res = pool_lpt(@(S, j) pool_job('surv3', S, j), S, ord, pl);
+clear S
+res(ord) = res;                                        % back in job order
+for j = 1:nJ, [rec{j}, best{j}] = res{j}{:}; end
+clear res
 
 % Report
 rep = {sprintf('=== SURVIVABILITY OPTIONS: %s, %s, RELAY PATH ===', upper(VAR(1).name), upper(VAR(2).name)), ...

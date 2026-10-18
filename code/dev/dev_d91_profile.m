@@ -10,6 +10,7 @@ function dev_d91_profile(out_dir, src)
 %      profiler (blocks by self time, summed into threat, channel, receiver, transmitter, sinks
 %      and the rest).
 %   Prints both and saves profile.mat in out_dir.
+dev_d91_code();
 p0 = load('params.mat').params; p0.quiet_build = true;
 C = decision_config();
 det = dev_d91_det(src, p0);

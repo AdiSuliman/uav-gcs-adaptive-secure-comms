@@ -4227,7 +4227,7 @@ src = fileread(which('pool_checkpoint'));
 verifyEqual(tc, numel(regexp(src, 'flush_file\(tmp\);\s*\n\s*movefile\(tmp, ')), 2);   % a cell and the output
 src = fileread(which('build_policy_pools'));
 verifyNotEmpty(tc, strfind(src, 'pool_checkpoint(''key'', {MODEL_TAG, DET_ID, runs, cells(c), EBNO, ACTIONS, geoc{c}, opt, ...'));
-verifyNotEmpty(tc, strfind(src, 'parfor (k = 1:numel(todo), po)'));
+verifyNotEmpty(tc, strfind(src, 'pool_lpt(@(S, c) pool_job(''c1p'', S, c), S, todo, pl);'));
 verifyNotEmpty(tc, strfind(fileread(which('pool_worker_init')), 'cd(d);'));   % the workers' own folder: the cells' path is absolute
 for f = {'build_policy_pools', 'build_clean_test_pools', 'build_check_pools'}
     src = fileread(which(f{1}));
@@ -4344,12 +4344,17 @@ close_system('UAV_GCS_Threat_Link', 0);
 end
 
 function test_pool_schedule(tc)
-% The pool stages hand out one job at a time, the longest first (equal costs keep their
-% order; without a pool on this process); a job's cost counts a shared run once, its frames
-% and its emitters.
-[o, po] = pool_schedule([3 9 3 1 9], [], 0);
-verifyEqual(tc, o, [2 5 1 3 4]);
-verifyEqual(tc, po, 0);
+% The pool stages run their jobs longest first (equal costs keep their order), one per free
+% worker (pool_lpt.m; on this process in that order without a pool); a job's cost counts a
+% shared run once, its frames and its emitters; every stage's job body (pool_job.m) reads only
+% variables the stage hands it.
+verifyEqual(tc, pool_schedule([3 9 3 1 9]), [2 5 1 3 4]);
+out = pool_lpt(@(S, j) S.f(j), struct('f', @(j) j^2), [4 2 7], []);
+verifyEqual(tc, out, {16, 4, 49});
+M = containers.Map('KeyType', 'double', 'ValueType', 'double');
+pool_lpt(@(S, j) note_job(S, j), M, [3 1 2], []);
+verifyEqual(tc, cell2mat(values(M)), [3 1 2]);
+verifyEqual(tc, pool_lpt(@(S, j) j, [], [], []), cell(1, 0));
 p = base_params(); A = policy_actions(); nA = numel(A);
 pc = threat_params(p, 'none', 3);
 [~, map, twin] = pool_configs(pc, 'none', A);
@@ -4360,14 +4365,29 @@ pj = threat_params(p, 'spoofing+noise_burst', 3);
 verifyEqual(tc, pool_cost(pj, 'spoofing+noise_burst', A, 40, []) / pool_cost(pj, 'spoofing+noise_burst', A, 20, []), 2, 'AbsTol', 1e-12);
 [~, ~, tj] = pool_configs(pj, 'spoofing+noise_burst', A);
 verifyEqual(tc, pool_cost(pj, 'spoofing+noise_burst', A, 20, []), sum(tj == 1:nA) * (1.75 + 2 * 1.15), 'AbsTol', 1e-9);
-for f = {'build_policy_pools', 'build_check_pools', 'build_clean_test_pools'}
-    verifyNotEmpty(tc, strfind(fileread(which(f{1})), 'parfor (k = 1:numel(todo), po)'), f{1});
+job = fileread(which('pool_job'));
+st = struct('c1p', 'build_policy_pools', 'c1c', 'build_check_pools', 'clean', 'build_clean_test_pools', ...
+    'surv', 'map_survivability_boundary', 'surv3', 'experiment_survivability_options');
+for f = fieldnames(st)'
+    src = fileread(which(st.(f{1})));
+    verifyEmpty(tc, regexp(src, '\nparfor \(k = 1:(numel\(todo\)|nJ)', 'once'), f{1});
+    jobs = 'todo'; if startsWith(f{1}, 'surv'), jobs = 'ord'; end
+    verifyNotEmpty(tc, regexp(src, ['pool_lpt\(@\(S, [cj]\) pool_job\(''' f{1} ''', S, [cj]\), S, ' jobs ', pl\);'], 'once'), f{1});
+    m = regexp(src, '\nS = struct\((.*?)\);', 'tokens', 'once');
+    have = regexp(m{1}, '''(\w+)'', \{', 'tokens'); have = [have{:}];
+    b = regexp(job, ['case ''' f{1} '''(.*?)(\n    case |\n    otherwise)'], 'tokens', 'once');
+    used = regexp(b{1}, '(?<![\w.])S\.(\w+)', 'tokens'); used = unique([used{:}]);
+    verifyEmpty(tc, setdiff(used, have), f{1});
+    verifyEmpty(tc, setdiff(have, used), f{1});
 end
 for f = {'map_survivability_boundary', 'experiment_survivability_options'}
-    src = fileread(which(f{1}));
-    verifyNotEmpty(tc, strfind(src, 'parfor (k = 1:nJ, po)'), f{1});
-    verifyNotEmpty(tc, regexp(src, '\(ord\) = [a-zA-Z]+;', 'once'), f{1});   % the results back in job order
+    verifyNotEmpty(tc, regexp(fileread(which(f{1})), 'res\(ord\) = res;', 'once'), f{1});   % the results back in job order
 end
+end
+
+function j = note_job(M, j)
+% The order pool_lpt.m runs its jobs in: job j as the next entry of M.
+M(M.Count + 1) = j;
 end
 
 function test_monitor_release_fusion(tc)
