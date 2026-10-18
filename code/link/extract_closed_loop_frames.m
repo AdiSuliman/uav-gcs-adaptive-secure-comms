@@ -1,7 +1,9 @@
-function F = extract_closed_loop_frames(out, p, delay_bits)
+function [F, T] = extract_closed_loop_frames(out, p, delay_bits)
 %EXTRACT_CLOSED_LOOP_FRAMES  Every frame of one sim() run: what the UAV receiver
 % measures, and the ground truth kept for evaluation. Single source for the
 % per-frame measurements of the dataset, the decision-layer pools and the GUI.
+% [F, T] = ...: T the run's ground-truth inputs (closed_loop_truth.m), from which the
+% truth under another p.fec is computed without a new run (pool_cell.m).
 %
 % Inputs:
 %   out         Simulink SimulationOutput of the threat link (build_threat_model.m)
@@ -171,7 +173,6 @@ if numel(syr) ~= 8 * nf
 end
 sy = reshape(syr, 8, nf);
 
-bpf = p.frame_length;
 tx_all = txb(:); rx_all = rxb(:);
 Lmax = min(numel(tx_all), numel(rx_all)) - delay_bits;
 tx_al = tx_all(1:Lmax);
@@ -183,23 +184,10 @@ F.sync_coh = sy(6, 1:nf); F.sync_fail = sy(7, 1:nf); F.pilot_err = sy(8, 1:nf);
 F.erase = false(1, nf);
 if isfield(p, 'erase_pilot_mse'), F.erase = F.pilot_err > p.erase_pilot_mse; end
 
-% Ground truth and CRC
-if isfield(p, 'fec') && p.fec
-    rel = bit_reliability(zc, p);
-    rel = rel(delay_bits+1:delay_bits+Lmax);
-    [F.ber, F.fer, F.crc_fail] = fec_packets(tx_al, rx_al, reshape(iqa(:, 1, :), ns, nf), p, nf, F.erase, rel);
-else
-    err = double(tx_al ~= rx_al);
-    F.ber = nan(1, nf); F.fer = nan(1, nf); F.crc_fail = nan(1, nf);
-    for f = 1:nf
-        i0 = (f-1)*bpf + 1; i1 = f*bpf;
-        if i1 > numel(err), continue; end
-        e = err(i0:i1);
-        F.ber(f) = mean(e);
-        F.fer(f) = double(any(e));
-        F.crc_fail(f) = crc32_fail(tx_al(i0:i0 + bpf - p.crc_bits - 1), e);
-    end
-end
+% Ground truth and CRC: the only part that reads p.fec (closed_loop_truth.m)
+T = struct('tx_al', tx_al, 'rx_al', rx_al, 'iq', reshape(iqa(:, 1, :), ns, nf), 'zc', zc, ...
+    'delay_bits', delay_bits, 'nf', nf, 'erase', F.erase);
+[F.ber, F.fer, F.crc_fail] = closed_loop_truth(T, p);
 
 % Decision-directed link quality, channel-estimator spatial measurements
 [F.ber_est, F.snr_post] = symbol_metrics(zc, p);
