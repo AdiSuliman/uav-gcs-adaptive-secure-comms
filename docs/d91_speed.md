@@ -305,43 +305,86 @@ allows one queue at a time):
 - B_old_vs_new, C_order and C_vs_B read `detector 1, features and scores on every frame 1`
   (`has_det == 1`). A PARTIAL is not a pass;
 - every `D91CODE` is the commit being cherry-picked, or one whose later commits change only `docs/`;
-- both `V7TESTS` lines read n/n;
 - the profile has run;
-- the focused tests pass on the target's merged tree (below).
+- the full `test_core` on the merged tree and on the target's tip (below) shows no merge regression.
 
-**Focused tests on the merged tree, before every push.** The queue tests d90+d91, and the target
-also carries its own commits. So test the tree the cherry-pick will produce, in a scratch export,
-with one single-thread MATLAB that respects the queue's gate (`v7_d91_speed_gate.ps1` prints OK):
+**Which run says what.** d91-speed branches from `2cbe559` (d90-loop), so `2cbe559` is the baseline
+for attributing a failure to d91. `9b5c9f1` is not: `9b5c9f1..2cbe559` holds the three d90 commits
+(52 files, 488 lines of `test_core.m`), so a comparison against it blames d90 on d91. The
+`old` job of `v7_d91_tests2.sh` (bash 23720) still runs `9b5c9f1`; it was already queued, and a
+running bash queue is not edited. Its result is context only. The comparisons that count come from
+the second queue.
+
+**The second queue: `uav-gcs-logs\v7_d91_tests3.sh 74ca87c 686fd11`** (bash 43464, started 18.10
+18:36; copy in `docs/d91_speed_tests3.sh.txt`). It starts no job while `v7_d91_tests2.lock.d`
+exists, then runs four full `test_core` jobs with the same gate, `-singleCompThread`, and the
+same short TEMP `C:\Users\Adi Suliman\d91q\s3\tmp`, in git archive exports under `d91q\s3`
+(each with `D91_SHA.txt`):
+
+| Job | Commit | What it is |
+|---|---|---|
+| `merge` | `686fd11` | the merge candidate: `2cbe559..74ca87c` cherry-picked onto the v7-p3 tip (branch `d91-speed-on-v7-p3`) |
+| `tip` | `29510e7` | the v7-p3 tip |
+| `new` | `74ca87c` | the d91-speed tip |
+| `base` | `2cbe559` | d91-speed's parent |
+
+The candidate was built without a worktree: one `git merge-tree --write-tree --merge-base C^ H C`
+plus `git commit-tree` per d91 commit, each keeping its author and message. Its tree `3460910` equals
+`git merge-tree --write-tree --merge-base 2cbe559 29510e7 74ca87c`, and `git diff --stat 29510e7
+686fd11` equals `git diff --stat 2cbe559 74ca87c` (27 files, +1309/-110). The commits after
+`74ca87c` change `docs/` only.
+
+Each job prints every test of the suite before the run (`V7SUITE`) and every outcome after it
+(`V7RESULT PASS|FAIL|INCOMPLETE`). The summary `v7_d91_tests3_summary.log` compares two pairs by
+test name:
+- `attribution` = `new` vs `base`; `fail-new-only` is a d91 regression;
+- `merge` = `merge` vs `tip`; `fail-new-only` (fails on the merged tree, passes on the tip) is a
+  merge regression, and the only one.
+
+The categories are `fail-both`, `fail-new-only`, `fail-old-only`, `new-test` (absent from the
+older suite, listed when it does not pass, counted when it does), `removed-test` and `not-run`
+(listed but without an outcome). Each MATLAB is bounded by `timeout -k 10m 6h`. rc 124 or 137 is
+written as `V7TIMEOUT` and reported as TIMEOUT, and that pair's outcomes are incomplete. A full run
+takes about 1.5 h (the running `new` job of the first queue was at 103 of 196 tests after 37 min). The limit kills `bin\matlab.exe`; if its `win64\MATLAB.exe` outlives it, the
+gate counts it, and the next job waits.
+
+`test_core` itself now stops with an `ENVIRONMENT, not code` message when its work folder (long
+path name) has more than 150 characters. Stateflow writes build files about 75-110 characters
+below it, and the long scratch TEMP gave 29 false failures (260-character limit).
+
+**Merge only when** the `merge` pair has no `fail-new-only`, `not-run`, failing `new-test` or
+TIMEOUT. A `fail-both` there is the target's own state and is reported, not fixed in d91. The
+`attribution` pair explains any d91 failure but does not replace the merge pair. After the
+cherry-pick, `git rev-parse HEAD^{tree}` in the live tree must equal the tested tree (`3460910`,
+or a tree that differs from it in `docs/` only), so that what was tested is what is pushed. The
+exports run on the target's own `profile.json`, which gives P3 four antennas and P2 two.
+
+For a target other than `29510e7` (a newer v7-p3 tip, or v7-p2), build the candidate the same
+way, outside every live tree, and rerun the `merge`/`tip` pair:
 
 ```
-R="/c/Users/Adi Suliman/uav-gcs-d91-speed"; X=<scratchpad>/d91_target_p3     # _p2 for v7-p2
-git -C "$R" fetch origin
-T=$(git -C "$R" merge-tree --write-tree --merge-base 2cbe559 origin/v7-p3 d91-speed) || echo CONFLICT
-rm -rf "$X" && mkdir -p "$X" && git -C "$R" archive "$T" | tar -x -C "$X"
-cd "$X" && TEMP=<scratchpad>/d91_speed/tmp TMP=<scratchpad>/d91_speed/tmp \
-  "/c/Program Files/MATLAB/R2026a/bin/matlab.exe" -singleCompThread -batch "startup; evalc('init_params'); \
-  maxNumCompThreads(1); r = runtests('code/tests/test_core.m', 'ProcedureName', {'test_fec_twin_configs', \
-  'test_closed_loop_truth', 'test_pool_cell_fec_twins', 'test_pool_schedule', 'test_pool_checkpoint_resume', \
-  'test_m_files_parse'}); fprintf('V7TESTS %d/%d\n', sum([r.Passed]), numel(r))"
+R="/c/Users/Adi Suliman/uav-gcs-d91-speed"; git -C "$R" fetch origin
+H=$(git -C "$R" rev-parse origin/v7-p3)                    # origin/v7-p2 for profile 2
+for c in $(git -C "$R" rev-list --reverse 2cbe559..d91-speed); do
+  T=$(git -C "$R" merge-tree --write-tree --merge-base "$c^" "$H" "$c") || { echo CONFLICT $c; break; }
+  H=$(git -C "$R" commit-tree "$T" -p "$H" -m "$(git -C "$R" log -1 --format=%B $c)")
+done; echo "candidate $H, tree $T"
 ```
 
-Push only on `V7TESTS 6/6`. After the cherry-pick, `git rev-parse HEAD^{tree}` in the live tree
-must equal `$T`, so that what was tested is what is pushed. The export runs on the target's own
-`profile.json`, which gives P3 four antennas and P2 two.
-
-The d91 commits cherry-pick cleanly onto `v7-p3` and onto `v7-dev`. This was checked with
-`git merge-tree --write-tree --merge-base 2cbe559 <target> <d91 commit>`. The result differs from
-the target only in the d91 files. Cherry-pick the d91 commits only (`git cherry-pick 2cbe559..d91-speed`),
-not the whole branch, which also carries d90.
+Then start `v7_d91_tests3.sh` with that tip in place of `TIP` (or a copy with the new SHAs) and
+the candidate. The d91 commits cherry-pick cleanly onto `v7-p3` and onto `v7-dev`; cherry-pick the
+d91 commits only (`git cherry-pick 2cbe559..d91-speed`), not the whole branch, which also carries
+d90.
 
 **Into v7-p3, while profile 3 waits for profile 1's SURV3 (before about 25.10):**
 1. Check that no MATLAB runs in `uav-gcs-v7-p3`. Use a process query, and check `takeover_ml_p3.pid`.
    On 18.10 the side jobs were running elsewhere: `m_all('p3')` in `scratchpad/d91_fuse` and set4 in
    `uav-gcs-set4-p3`. Also check that p3.log's current part has not started C1p. To be safe, write
    `p3_c1p.hold` first.
-2. Run the focused tests on the merged tree for `origin/v7-p3` (above).
+2. Read `v7_d91_tests3_summary.log` (above). If `origin/v7-p3` has moved past `29510e7`, rerun the
+   `merge`/`tip` pair on the new tip first.
 3. In `uav-gcs-v7-p3` on `v7-p3`: `git cherry-pick 2cbe559..d91-speed`, then `git status` (it must
-   be clean), then check that `git rev-parse HEAD^{tree}` equals `$T`, then `git push`.
+   be clean), then check that `git rev-parse HEAD^{tree}` equals the tested tree, then `git push`.
 4. Remove `p3_c1p.hold`. Before C1p the takeover checks the branch, that no merge is in progress and
    that there are no uncommitted changes. It does not check the commit's SHA.
 
@@ -356,8 +399,9 @@ not the whole branch, which also carries d90.
   1. Check that no MATLAB runs in `uav-gcs-v7-p2`: no process whose command line or working folder
      is that tree, and p2.log's current part waiting before C1p. Its B stages (A4v and A5 call
      `extract_closed_loop_frames.m`) must have ended.
-  2. Run the focused tests on the merged tree for `origin/v7-p2`.
-  3. Cherry-pick in `uav-gcs-v7-p2`, check that the status is clean and that the tree equals `$T`,
+  2. Build the candidate for `origin/v7-p2` (above) and run the `merge`/`tip` pair on it.
+  3. Cherry-pick in `uav-gcs-v7-p2`, check that the status is clean and that the tree equals the
+     tested tree,
      then push.
   4. Remove the hold.
 - **The task's alternative: into `v7-dev` after profile 1's SURV3**, so that `v7-p2` inherits it.
