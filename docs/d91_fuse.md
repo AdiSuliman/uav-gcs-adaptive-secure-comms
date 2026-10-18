@@ -19,7 +19,7 @@ not read. Every number below is a fit-set number (out of fold, or nested), never
 | Adoption rule, fixed before the M4 numbers | section 4 |
 | M1-M4 on both profiles | done: adopt 'branch evidence' on both profiles, section 5 |
 | phi against phi = 1 | declared before it ran (section 8, commit 5abf87d); queued, results in section 12 |
-| Deployment tied to the measured pick | `fusion_pick.m`, `select_fusion.m`, section 9 |
+| Deployment tied to the measured pick | `fusion_pick.m` (latch off, as measured), `select_fusion.m`, section 9 |
 | Closed-loop wrap check | queued on the d90 smoke pools, section 10 |
 | Focused tests | 5 of 5 pass (section 6); the new and changed ones queued |
 
@@ -460,11 +460,17 @@ pool). All pass:
    sets by HDF5 (the images in blocks) and fits two variants out of fold: about an hour, not the
    6-10 min of today's B2F. The smoke has no third test set, so the smoke's B2F needs
    `FUSION_FIT` off.
-2. Rerun B3, B3a, B4 and B4s. They are in-sample on the read sets and are kept only as
+2. In the same deploy commit, the fourth set's guard in `eval_detector.m` (d91-set4, B3r) also
+   requires `deployed_pick` in `data/fusion.mat` and
+   `isequal(rmfield(deployed_pick, 'check'), fusion_pick())`. Every pick writes the same
+   `fusion_rev`, so without this a `fusion.mat` from an earlier B2F (before `fusion_pick.m`
+   changes, for example after the phi verdict) would pass on the revision id alone.
+   `fusion_rev_id.m` stays byte-identical to `d91-set4`'s.
+3. Rerun B3, B3a, B4 and B4s. They are in-sample on the read sets and are kept only as
    descriptions.
-3. Read KPI 1 once, on the fourth test set (FRESH_SET = 3, the d91-set4 track).
-4. `rekey_pools` (the columns read only `gant`), then the closed loop from C1d on.
-5. Profile 3 before its C1p, profile 1 after its run, profile 2 from its start, as the
+4. Read KPI 1 once, on the fourth test set (FRESH_SET = 3, the d91-set4 track).
+5. `rekey_pools` (the columns read only `gant`), then the closed loop from C1d on.
+6. Profile 3 before its C1p, profile 1 after its run, profile 2 from its start, as the
    recommendation lays out.
 
 ## 8. phi: the declared comparison (fixed before any phi = 1 number exists)
@@ -523,14 +529,21 @@ B2F now deploys exactly the measured design.
   printed beside. The target is `FM.target_age = N`, the deployed rule. With these, on the
   enlarged set's folds (seed 9101) and bootstrap (seed 9102), it refits the base and the design
   out of fold and checks the rule of section 4 on the target it deploys. If the rule fails, B2F
-  stops with `select_fusion:pick_rule`, which is a no-go. On profiles 1 and 3 this reproduces
-  section 5's 'branch evidence' row, up to the precision of the extracts (their probabilities
-  are single precision; B2F scores in double).
+  stops with `select_fusion:pick_rule`, which is a no-go. On profiles 1 and 3 this is expected
+  to reproduce section 5's 'branch evidence' row, to the precision of the extracts (their
+  probabilities are single precision; B2F scores in double). No deploy B2F log exists yet.
+- **The latch.** m_all measured the fused class with the onset latch off (both logs' header
+  reads 'latch 0'). `fusion_pick.m` records `latch = false`. The pick path sets
+  `FM.latch = PK.latch` instead of choosing it on validation, prints validation's out-of-fold
+  latch comparison beside it and records it in `deployed_pick.check.latch_val`. A pick without
+  a latch state stops B2F (`select_fusion:pick_latch`). Without a pick the latch is chosen on
+  validation as before.
 - **`data/fusion.mat`** also holds:
   - `fusion_rev = fusion_rev_id('enlarged')`, the id the fourth set's B3r requires
     (`docs/d91_set4.md`, step 2; `fusion_rev_id.m` is byte-identical to `d91-set4`'s, so the
     merge has no conflict);
-  - `deployed_pick`, the design with its rule check (`check`, the paired comparison).
+  - `deployed_pick`, the design (with its latch state) and its rule check (`check`, the
+    paired comparison, with `check.latch_val`).
 
   Without `FUSION_REV` the file keeps its old layout, so section 2's bit-identity holds. With
   `FUSION_REV` alone (validation fit, no pick) the d90 selection runs as before and records
@@ -546,8 +559,10 @@ B2F now deploys exactly the measured design.
   first, or deploy only after its test sets exist. Either way the rule check above is its
   guard.
 - **Tests (queued, section 6):**
-  - `test_fusion_pick_deploy` (new) checks the pick, the revision ids, and that select_fusion
-    takes the pick, asserts the rule and never reaches 'choose' when it has a pick;
+  - `test_fusion_pick_deploy` (new) checks the pick (latch off), the revision ids, and that
+    select_fusion takes the pick, asserts the rule, sets the pick's latch before the save,
+    records the latch comparison and never reaches 'choose' when it has a pick; and the deploy
+    guard of section 7, step 2, on a `deployed_pick` built as B2F builds it;
   - `test_branch_evidence_cues` adds phi = 1: the unscaled GLR, the columns without `gl_phi`,
     the held CUSUM step by step equal to the batch run, and the monitor equal to
     `fuse_classes` with phi = 1;
@@ -584,7 +599,8 @@ cycles away. Any monitor that compares the latest cycles with a reference then s
 **The check (queued; d90 smoke pools only, no live data).** `wrap_check.m` runs on a copy of
 `scratchpad/d90_smoke/data` and reports three things:
 - A. The jump in the pools' gains (frame 20 to 1) against consecutive frames, per antenna and
-  for the branch ratio, by speed band.
+  for the branch ratio, by speed band (the speed of each Eb/N0 and geometry,
+  `PP.speed{split}(s, r)`, as `policy_run_set.m` reads it).
 - B. The held CUSUM alone, on the gains as an episode plays them for every k0, with phi as is
   and phi = 1.
 - C. The whole monitor at no_action, on the clean validation episodes the false-alarm readings
@@ -598,32 +614,49 @@ The quantities:
 - the rate within 11 cycles after the jump less the rate before it, over cycles t >= 13 (the
   fusion's window and the held reference full), stratified by t, with a 95% interval of a
   bootstrap over episodes (seed 9161), for hover and faster flights apart;
-- antenna-fault recall within 11 cycles of the jump and elsewhere (seed 4400 episodes).
+- antenna-fault recall within 11 cycles of the jump and elsewhere (seed 4400 episodes), and
+  their difference stratified by the cycles since the onset (Mantel-Haenszel weights, as for
+  the clean rates): the cycles after the jump come later in an episode, so an unstratified
+  difference could not be put on the jump.
 
-The smoke detector is reduced, so C's levels are not results. Its question is whether the jump
-moves the rates at all. A and B depend only on the pools' simulated gains, which the smoke
-builds as the profiles do.
+**Not covered: rolling-in flights.** A rolling-in flight cycles over its last 10 frames past
+its run's end, a jump 9 frames back every 10 cycles during the ramp (`link_env.m` `draw()`).
+C leaves them out (`~R.ev`) and no other part reads them, so the check says nothing about them.
+
+**What the smoke run can show.** It is a mechanism check only. The smoke pools have 2
+geometries per split and few hover flights (`build_policy_pools.m`, smoke settings), and the
+smoke detector is reduced, so C's levels are not results; the question is only whether the
+jump moves the rates at all. A null result on smoke cannot support 'no change needed'. A, B and
+C are rerun on profile 3's pools after its C1p and on profile 1's after its run, before any
+such conclusion; neither profile has `data/policy_pools.mat` yet (C1p builds it). A and B
+depend only on the pools' simulated gains, which the smoke builds as the profiles do.
 
 **If the jump raises alarms: the fix belongs in the environment, not the detector.** None is
 implemented here.
 
 | Option | What it does | Cost | Physically |
 |---|---|---|---|
-| (a) Longer pools, F_SUB >= max(k0) + T + 1 = 50 | every episode reads consecutive frames of one flight | every pool rebuilt (C1p, the clean, check and edge pools) at 2.5 times the frames: days per profile, on the critical path | exact |
-| (b) Ping-pong playback (1..20, 19..1, 2..20, ...) | the gains stay continuous at the turn | `link_env.m` only (and its coded-packet pairing, `obs.pkt`); no pool rebuilt; the closed loop rerun from C1d on, which the deployment reruns anyway (section 7, step 4) | the fading's second-order statistics are time-reversible (an even autocorrelation), so the reversed run is a valid continuation. The slow parts reverse too (attitude in a turn, range drift up to 18 m per 0.4 s at 161 km/h), and hover repeats recent fades. |
+| (a) Longer pools: F_SUB >= 50 with k0 drawn in 0..F_SUB - T (a `link_env.m` change), or F_SUB >= 50 with k0 kept in 0..19 | every episode reads consecutive frames of one flight. Longer pools alone do not do it: `link_env.m` draws k0 in 0..F_SUB - 1, so with F_SUB = 50 every k0 > 20 still wraps within T = 30 | every pool rebuilt (C1p, the clean, check and edge pools) at 2.5 times the frames: days per profile, on the critical path. The k0 rule sets the start diversity per geometry: 0..F_SUB - T gives 21 starts, 0..19 keeps today's 20; the cost is the same | no jump within an episode: exact for the playback. The frames an episode samples change with the k0 rule, so the readings are not bit-comparable with today's |
+| (b) Ping-pong playback (1..20, 19..1, 2..20, ...) | the gains stay continuous at the turn | `link_env.m` only, plus: the coded-packet pairing (`obs.pkt`) and the FEC codeword span (`PP.fec_frames` consecutive frames, `fec_packets.m`) break at every reversal and need their own rule; the rolling-in 10-frame cycling needs the same change. No pool rebuilt; the closed loop rerun from C1d on, which the deployment reruns anyway (section 7, step 5) | each segment is reversible in distribution (an even autocorrelation), but the joined path is not a stationary sample path: at the turn X(t - 1) = X(t + 1) (correlation 1 in place of rho(2 dt)), and an episode revisits only 20 distinct fades, which shrinks the variance any reference sees and can make false-alarm rates look optimistic. The slow parts reverse too (attitude in a turn, range drift up to 18 m per 0.4 s at 161 km/h) |
 | (c) T <= n - k0 | no jump | none | changes the closed loop's protocol (episode length and start diversity); not recommended |
 
 **Bias of the existing closed-loop results, if the jump raises alarms.** All of these read
 T = 30 episodes on 20-frame pools: train_dqn, choose_drop_threshold (monitor_trace),
-evaluate_policies and the edge map. Clean false alarms (KPI 6) would be overstated, which is
-conservative. The drop alarm's threshold, chosen against a false-alarm bound on clean
-episodes, would be set higher than the link needs, so detection delays would be pessimistic.
-Every monitor sees the same jump, so the comparisons stay paired. A monitor that is more
-sensitive to steps, such as the held revision, would pay more. The size comes from C: no
-measurable excess means no change is needed.
+evaluate_policies and the edge map. The bias runs both ways:
+- conservative: clean false alarms (KPI 6) overstated; the drop alarm's threshold, chosen
+  against a false-alarm bound on clean episodes, set higher than the link needs, so detection
+  delays pessimistic;
+- optimistic: in threat episodes an alarm the jump causes after the onset counts as a
+  detection, so recall and delay near the onset can look better than they are;
+- the policy: the DQN is trained and evaluated on the same artefact, and the check runs only at
+  no_action, so the policy's reaction to the jump is not measured.
+
+Every monitor sees the same jump, so the comparisons stay paired, but a monitor more sensitive
+to steps, such as the held revision, is moved more, in either direction. The size comes from
+C on the profiles' pools (see above), not from the smoke.
 
 <!-- WRAP RESULTS -->
-Pending: `wrap_check.txt` of the queue (`C:\Users\Adi Suliman\d91q\wrap\`).
+Pending: `wrap_check.txt` of the queue (`C:\Users\Adi Suliman\d91q\fuse\wrap\wrap_check.txt`).
 <!-- END WRAP -->
 
 ## The queue
@@ -643,6 +676,18 @@ runs (`gate.ps1`, the d91-speed queue's gate). The gate is checked every 10 min,
 given up after 24 h of waiting. Logs: `d91q\fuse\logs` (`queue.log`, one log per job, and
 `summary.log` at the end). The wrap and phi results are written into sections 10 and 12 and
 committed (this file only).
+
+**Edits before the jobs started (18.10, 18:37, recorded in `queue.log`).** While the tests job
+still waited at the gate, the folder `d91q\fuse\eb87297` was replaced by a `git archive` of
+`774a73e` (`D91_SHA.txt` names it; the `eb87297` export is kept as `eb87297_orig`), so the
+tests, the wrap check's pick path and the phi jobs run the code with the latch fix of
+section 9. The pending copies were changed to the text committed in `774a73e`:
+`wrap\wrap_check.m` (the speed read per Eb/N0 and geometry; fault recall stratified by the
+cycles since the onset) and `m_phi.m` (it asserts that the reused 'branch evidence' reading
+reproduces m_all's M4 row before anything uses it, and stops with `m_phi:tests` unless
+`logs\tests.log` reads `D91TESTS n/n` with no `D91FAIL`, so the phi jobs are skipped after a
+failed test run; `phi_both` is then skipped by the queue, as its inputs are missing). The
+summary header still names `eb87297`, the folder's name.
 
 ## 11. Resampling streams
 
@@ -667,6 +712,12 @@ frames as those readings.
 
 The job (`m_phi.m`, verbatim in `docs/d91_fuse_m_phi.m.txt`) appends its log here when it ends.
 The verdict is mechanical from section 8.
+
+**Which reading governs for phi = 1.** phi = 1 is a fixed design, so its out-of-fold check
+against the base, (i) (`af`), is the governing check. The nested reading (ii) is a mixture: in
+an outer fold whose inner reading keeps phi, the predictions are those of 'branch evidence'
+with phi as is, so `an` does not test phi = 1 alone. Rule 2 of section 8 requires both, so the
+nested reading can only make deploying phi = 1 stricter.
 
 <!-- PHI RESULTS -->
 Pending.
