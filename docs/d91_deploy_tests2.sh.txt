@@ -4,7 +4,8 @@
 # candidate (v7-deploy-d91 merged onto the profile's branch tip), and a serial smoke A0..RPT plus
 # the deploy tail and the deploy path end to end (dep_*) on the tip. Differences from
 # v7_d91_deploy_tests.sh (the first queue, left unchanged):
-#   - D91_PROFILE=p3|p1 (default p3) names the candidate in the summary and the verdict;
+#   - D91_PROFILE=p3|p1|p2 (default p3) names the candidate in the summary and the verdict and
+#     picks the proofs' detector (DET_FROM below; D91_DET_FROM overrides it);
 #   - a test_core log counts for a commit whose code tree (code/, startup.m, models/) equals
 #     the log's (SAME-TREE, printed); only another tree is STALE. So the profile 1 candidate,
 #     whose code tree equals the profile 3 candidate's, is paired with the p3core log, and the
@@ -21,9 +22,10 @@
 # launcher or takeover counts a job as a pipeline stage. Each MATLAB writes its own PID first
 # and is bounded (6 h, the smoke 14 h); on rc 124/137 the queue ends that PID only.
 #
-#   [D91_PROFILE=p1] bash v7_d91_deploy_tests2.sh <deploy SHA> <candidate SHA> <target tip SHA> <old SHA> [job ...]
+#   [D91_PROFILE=p1|p2] bash v7_d91_deploy_tests2.sh <deploy SHA> <candidate SHA> <target tip SHA> <old SHA> [job ...]
 #
-# <candidate>: the deploy branch merged onto the target tip (v7-p3 for p3, v7-dev for p1).
+# <candidate>: the deploy branch merged onto the target tip (v7-p3 for p3, v7-dev for p1, v7-p2
+# for p2).
 # <old>: the target tip merged with the deploy branch up to d91-fuse (b4f217a): no d91-speed and
 # no deploy commits, the old side of the proofs; the deploy commits touch no proof dependency.
 # n_rx is the target tip's profile.json (none on v7-dev: 3).
@@ -44,7 +46,7 @@
 # Start detached (PowerShell, hidden):
 #   $si = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ShowWindow=[uint16]0}
 #   Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine='"C:\Program Files\Git\bin\bash.exe" -lc "bash ''/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_deploy_tests2.sh'' <DEPLOY> <CAND> <TIP> <OLD> >> ''/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_deploy_tests2.log'' 2>&1"'; CurrentDirectory='C:\Users\Adi Suliman\uav-gcs-logs'; ProcessStartupInformation=$si}
-#   (profile 1: put D91_PROFILE=p1 before bash inside the -lc string)
+#   (profile 1 or 2: put D91_PROFILE=p1 or p2 before bash inside the -lc string)
 
 DEP=${1:-}
 P3M=${2:-}
@@ -55,7 +57,6 @@ L="/c/Users/Adi Suliman/uav-gcs-logs"
 REPO="/c/Users/Adi Suliman/uav-gcs-v7-deploy"
 Q="/c/Users/Adi Suliman/d91q/deploy"
 QM="C:/Users/Adi Suliman/d91q/deploy"
-DET_FROM="C:/Users/Adi Suliman/uav-gcs-b3m-p3/data"
 MATLAB="/c/Program Files/MATLAB/R2026a/bin/matlab.exe"
 GATE='C:\Users\Adi Suliman\uav-gcs-logs\v7_d91_speed_gate.ps1'
 SMOKE_DRV="$L/d91_smoke_deploy.m"
@@ -66,10 +67,16 @@ WAIT_MAX=$((24 * 3600))
 LOCK="$L/v7_d91_deploy.lock.d"
 ALL=(core pold pnew porder p3core smoke)
 PROF=${D91_PROFILE:-p3}
-case "$PROF" in p1|p3) ;; *) echo "D91_PROFILE must be p1 or p3"; exit 1;; esac
+case "$PROF" in p1|p2|p3) ;; *) echo "D91_PROFILE must be p1, p2 or p3"; exit 1;; esac
+# The proofs compare old and new pools on one fixed detector whose features do not depend on
+# the antenna count (link_features.m), so the profile's own detector is not needed: p3 its B3m
+# detector, p1 profile 1's (as v7_d91_speed_proofs.sh), p2 (none of its own before its chain)
+# profile 1's.
+case "$PROF" in p3) DET_P=p3;; *) DET_P=p1;; esac
+DET_FROM=${D91_DET_FROM:-"C:/Users/Adi Suliman/uav-gcs-b3m-$DET_P/data"}
 
 say() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*"; }
-usage() { say "usage: [D91_PROFILE=p1] bash v7_d91_deploy_tests2.sh <deploy SHA> <candidate SHA> <target tip SHA> <old SHA> [job ...] (jobs: ${ALL[*]})"; exit 1; }
+usage() { say "usage: [D91_PROFILE=p1|p2] bash v7_d91_deploy_tests2.sh <deploy SHA> <candidate SHA> <target tip SHA> <old SHA> [job ...] (jobs: ${ALL[*]})"; exit 1; }
 
 for s in "$DEP" "$P3M" "$P3T" "$P3O"; do [[ "$s" =~ ^[0-9a-f]{7,40}$ ]] || usage; done
 declare -A want=()
@@ -91,7 +98,7 @@ for s in "${!SHA[@]}"; do
 done
 NRX=$(git -C "$REPO" show "${SHA[p3tip]}:profile.json" 2>/dev/null | sed -n 's/.*"n_rx"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
 NRX=${NRX:-3}
-say "d91 deploy tests (second queue, $PROF): jobs ${JOBS[*]}; deploy ${SHA[tip]:0:7}, $PROF candidate ${SHA[p3m]:0:7}, target tip ${SHA[p3tip]:0:7} (n_rx $NRX), old side ${SHA[p3old]:0:7}; exports under $Q"
+say "d91 deploy tests (second queue, $PROF): jobs ${JOBS[*]}; deploy ${SHA[tip]:0:7}, $PROF candidate ${SHA[p3m]:0:7}, target tip ${SHA[p3tip]:0:7} (n_rx $NRX), old side ${SHA[p3old]:0:7}; proof detector $DET_FROM; exports under $Q"
 
 stamp=$(date +%Y%m%d_%H%M%S)
 for j in "${JOBS[@]}"; do
@@ -276,7 +283,7 @@ verdicts() {  # the deploy tests' verdicts, read from the summary body
 }
 
 B="$Q/summary_body.txt"
-{ echo "d91 deploy tests summary (second queue) $(date '+%Y-%m-%d %H:%M:%S'): deploy ${SHA[tip]}, $PROF candidate ${SHA[p3m]} (tree $(git -C "$REPO" rev-parse "${SHA[p3m]}^{tree}")), target tip ${SHA[p3tip]}, old side (no d91-speed) ${SHA[p3old]}, n_rx $NRX, TEMP $TW"
+{ echo "d91 deploy tests summary (second queue) $(date '+%Y-%m-%d %H:%M:%S'): deploy ${SHA[tip]}, $PROF candidate ${SHA[p3m]} (tree $(git -C "$REPO" rev-parse "${SHA[p3m]}^{tree}")), target tip ${SHA[p3tip]}, old side (no d91-speed) ${SHA[p3old]}, n_rx $NRX, proof detector $DET_FROM, TEMP $TW"
   for n in "${ALL[@]}"; do
     f="$L/v7_d91_deploy_tests_$n.log"
     [ -f "$f" ] || { echo "$n: no log"; continue; }

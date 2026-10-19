@@ -338,19 +338,21 @@ else
     fprintf('The monitor''s class is the fused class: the latch is off (FM.latch = false)\n');
 end
 if ~exist('results', 'dir'), mkdir('results'); end
-save('data/fusion.mat', 'FM', 'N', 'lambda', 'NS', 'LAMBDA', 'cv', 'val_probs_oof', 'val_latch_oof', 'val_target', 'q_thr');
+fz_tmp = 'data/fusion_new.mat';                        % the whole record first, then one rename onto fusion.mat
+save(fz_tmp, 'FM', 'N', 'lambda', 'NS', 'LAMBDA', 'cv', 'val_probs_oof', 'val_latch_oof', 'val_target', 'q_thr');
 if REV
     fit_name = 'validation';
     if exist('FUSION_FIT', 'var') && strcmp(FUSION_FIT, 'enlarged'), fit_name = 'enlarged'; end
     fusion_rev = fusion_rev_id(fit_name);                % B3r reads the fourth test set only with fusion_rev_id('enlarged')
-    save('data/fusion.mat', 'cvy', 'cvo', 'fusion_rev', '-append');
+    save(fz_tmp, 'cvy', 'cvo', 'fusion_rev', '-append');
     if ~isempty(PK)
         deployed_pick = PK; deployed_pick.check = GP;
         deployed_pick.check.latch_val = struct('macro_f1_latched', mf_latch, 'macro_f1_fused', mf_fused);   % validation out of fold
         if ~isempty(kept_base), deployed_pick.check.kept = kept_base; end   % the fusion it replaced, the rule's base
-        save('data/fusion.mat', 'deployed_pick', '-append');
+        save(fz_tmp, 'deployed_pick', '-append');
     end
 end
+commit_mat(fz_tmp, 'data/fusion.mat');                  % a cut run leaves the earlier fusion.mat whole
 fusion_nogo('clear');                                    % an earlier no-go record no longer names the fusion on disk
 fprintf('Saved data/fusion.mat\n');
 

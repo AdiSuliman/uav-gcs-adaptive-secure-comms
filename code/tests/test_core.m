@@ -1746,7 +1746,7 @@ verifyTrue(tc, all(hit(5:end, 1)));                                   % no flag:
 % the choice and its readings
 src = fileread(which('select_fusion'));
 verifyNotEmpty(tc, strfind(src, 'FM.latch = mf_latch > mf_fused;'));
-verifyLessThan(tc, strfind(src, 'FM.latch = mf_latch > mf_fused;'), strfind(src, 'save(''data/fusion.mat'''));
+verifyLessThan(tc, strfind(src, 'FM.latch = mf_latch > mf_fused;'), strfind(src, 'save(fz_tmp, ''FM'''));
 src = fileread(which('eval_detector'));
 verifyNotEmpty(tc, strfind(src, 'latch_on = onset_shape(''on'', fus.FM);'));
 verifyNotEmpty(tc, strfind(src, 'pv = fus.val_probs_oof;'));
@@ -6580,7 +6580,7 @@ k1 = strfind(src, 'elseif ENL, PK = fusion_pick(); end'); k2 = strfind(src, '''s
 k3 = strfind(src, 'S = load(''data/splits.mat'');');
 verifyTrue(tc, isscalar(k1) && isscalar(k2) && isscalar(k3) && k1 < k2 && k2 < k3);   % an override of the enlarged fit stops before any data is read
 j1 = strfind(src, 'FM.latch = mf_latch > mf_fused;'); j2 = strfind(src, 'FM.latch = PK.latch;');
-j3 = strfind(src, 'save(''data/fusion.mat'', ''FM''');
+j3 = strfind(src, 'save(fz_tmp, ''FM''');
 verifyTrue(tc, isscalar(j1) && isscalar(j2) && isscalar(j3) && j1 < j2 && j2 < j3);   % the pick's latch replaces validation's choice before the save
 i1 = strfind(src, 'if ~isempty(PK)                                      % the measured design and its rule check');
 i2 = strfind(src, '[pick, bs] = fusion_adopt(''choose'', G);');
@@ -6756,6 +6756,64 @@ catch ex
 end
 end
 
+function test_fusion_atomic_save(tc)
+% select_fusion.m writes its whole record (FM, N, lambda, fusion_rev, deployed_pick) to
+% data/fusion_new.mat and renames it onto data/fusion.mat (commit_mat.m): a B2F cut inside its
+% save leaves the earlier fusion.mat byte for byte, never FM.cues without fusion_rev and
+% deployed_pick (docs/d91_deploy.md D5).
+d = fullfile(tc.TestData.tmp, 'atomic'); mkdir(fullfile(d, 'data'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+src = fileread(which('select_fusion'));
+verifyEmpty(tc, regexp(src, 'save\(''data/fusion\.mat''', 'once'));   % no write to fusion.mat in place
+s1 = strfind(src, 'fz_tmp = ''data/fusion_new.mat'';'); s2 = strfind(src, 'save(fz_tmp, ''deployed_pick'', ''-append'');');
+s3 = strfind(src, 'commit_mat(fz_tmp, ''data/fusion.mat'');'); s4 = strfind(src, 'fusion_nogo(''clear'');');
+verifyTrue(tc, isscalar(s1) && isscalar(s2) && isscalar(s3) && isscalar(s4) && s1 < s2 && s2 < s3 && s3 < s4);
+verifyEqual(tc, numel(strfind(src, 'save(fz_tmp, ')), 3);
+% commit_mat on its own
+x = 1; save('data/a.mat', 'x'); x = 2; save('data/a_new.mat', 'x');
+commit_mat('data/a_new.mat', 'data/a.mat');
+verifyEqual(tc, load('data/a.mat').x, 2); verifyFalse(tc, isfile('data/a_new.mat'));
+h = sha256_of('data/a.mat');
+verifyError(tc, @() commit_mat('data/a_new.mat', 'data/a.mat'), 'commit_mat:tmp');
+verifyEqual(tc, sha256_of('data/a.mat'), h);
+% select_fusion.m's save block, cut after the revision id and before deployed_pick
+N = 12; lambda = 1e-3; FM = struct('latch', false); %#ok<NASGU>
+save('data/fusion.mat', 'FM', 'N', 'lambda');                           % the kept fusion, the old layout
+h = sha256_of('data/fusion.mat');
+ex = b2f_save_tail(d, 1);                                               % a check that is no struct stops it
+verifyFalse(tc, strcmp(ex.identifier, 'test:none'));
+verifyEqual(tc, sha256_of('data/fusion.mat'), h);
+verifyTrue(tc, isfile('data/fusion_new.mat'));                          % the cut record stays aside
+verifyTrue(tc, ismember('fusion_rev', {whos('-file', 'data/fusion_new.mat').name}));
+verifyEqual(tc, ds_of(), 'none');
+ex = b2f_save_tail(d, struct('all', [0 0 0]));                          % the rerun saves the whole record
+verifyEqual(tc, ex.identifier, 'test:none');
+verifyFalse(tc, isfile('data/fusion_new.mat'));
+verifyTrue(tc, all(ismember({'FM', 'N', 'lambda', 'q_thr', 'cvy', 'cvo', 'fusion_rev', 'deployed_pick'}, ...
+    {whos('-file', 'data/fusion.mat').name})));
+verifyEqual(tc, ds_of(), 'deployed');
+end
+
+function ex = b2f_save_tail(d, GP) %#ok<INUSD>
+% Runs select_fusion.m's save block, from its temporary record to its printout, in folder d as
+% the deploy B2F reaches it (enlarged fit, the pick, the kept base) with the rule check GP;
+% ex is the error it stops with (test:none when it ends).
+src = fileread(which('select_fusion'));
+e = 'fprintf(''Saved data/fusion.mat\n'');';
+k1 = strfind(src, 'fz_tmp = ''data/fusion_new.mat'';'); k2 = strfind(src, e);
+f = fullfile(d, 'sf_save_block.m');                      % not the name of this helper
+fid = fopen(f, 'w'); fwrite(fid, src(k1:k2 + numel(e) - 1)); fclose(fid);
+PK = fusion_pick(); FM = struct('latch', false, 'cues', PK.cues); N = 12; lambda = 1e-3; NS = 12; LAMBDA = 1e-3; %#ok<NASGU>
+cv = 0; val_probs_oof = 0; val_latch_oof = 0; val_target = 0; q_thr = 0; cvy = 0; cvo = 0; %#ok<NASGU>
+REV = true; FUSION_FIT = 'enlarged'; mf_latch = 0.9; mf_fused = 0.91; %#ok<NASGU>
+kept_base = struct('N', 12, 'lambda', 1e-3, 'latch', false, 'cues', false); %#ok<NASGU>
+ex = MException('test:none', 'no error');
+try
+    evalc('run(f)');
+catch ex
+end
+end
+
 function test_deploy_state(tc)
 % deploy_state.m, the check before a profile's C1p hold is removed or its chain resumes
 % (docs/d91_deploy.md section 5): 'deployed' only for the enlarged revision of fusion_pick.m with
@@ -6812,10 +6870,10 @@ verifyNotEmpty(tc, strfind(src, 'FM.target_age = TA.target_age; FM.cues = cues;'
 verifyNotEmpty(tc, strfind(src, 'a = find(max(cv, [], 2) >= mx - se, 1);'));
 verifyNotEmpty(tc, strfind(src, 'cm = true(size(y)); lab = ''the per-cycle label'';'));
 verifyNotEmpty(tc, strfind(src, 'if REV, cm = all(YN == y, 2); lab = ''the frames no candidate relabels''; end'));
-verifyNotEmpty(tc, strfind(src, ['save(''data/fusion.mat'', ''FM'', ''N'', ''lambda'', ''NS'', ''LAMBDA'', ''cv'', ''val_probs_oof'', ' ...
+verifyNotEmpty(tc, strfind(src, ['save(fz_tmp, ''FM'', ''N'', ''lambda'', ''NS'', ''LAMBDA'', ''cv'', ''val_probs_oof'', ' ...
     '''val_latch_oof'', ''val_target'', ''q_thr'');']));
 verifyNotEmpty(tc, strfind(src, 'fusion_rev = fusion_rev_id(fit_name);'));
-verifyNotEmpty(tc, strfind(src, 'save(''data/fusion.mat'', ''cvy'', ''cvo'', ''fusion_rev'', ''-append'');'));
+verifyNotEmpty(tc, strfind(src, 'save(fz_tmp, ''cvy'', ''cvo'', ''fusion_rev'', ''-append'');'));
 verifyNotEmpty(tc, strfind(src, 'cvy(a, b) = macro_f1(y(cm), yh(cm), C); cvo(a, b) = macro_f1(yn, yh, C);'));
 verifyNotEmpty(tc, strfind(src, 'REV = exist(''FUSION_REV'', ''var'') && isequal(FUSION_REV, true);'));
 verifyNotEmpty(tc, strfind(src, 'TAa = []; if REV, TAa = struct(''target_age'', NS(a) - 1); end'));

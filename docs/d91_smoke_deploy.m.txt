@@ -100,6 +100,7 @@ switch st
         assert(isfield(L.FM, 'cues') && isfield(L.FM.cues, 'phi1') && L.FM.cues.phi1 && L.FM.latch == P.latch && ...
             L.N == P.N && L.lambda == P.lambda, 'smoke:dep_save', 'the saved fusion is not the pick');
         assert(~isfile('data/fusion_nogo.mat'), 'smoke:dep_save', 'a no-go record names the saved fusion');
+        assert(~isfile('data/fusion_new.mat'), 'smoke:dep_save', 'the temporary record was not renamed onto fusion.mat');
         R = fusion_reading('_fresh2');
         assert(strcmp(R.state, 'deployed revision') && ~isempty(R.sample), 'smoke:dep_save', 'not read as the deployed revision');
         rl = isfield(L.deployed_pick.check, 'rule_logged_only') && L.deployed_pick.check.rule_logged_only;
