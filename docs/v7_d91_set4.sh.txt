@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Fourth test set (B3q, data only) of profiles 1 and 3, one profile at a time, each in its own
+# worktree copy (uav-gcs-set4-p1/-p3: detached checkouts of branch d91-set4 with the profile's
+# params.mat, profile.json and data/splits.mat). A profile starts only with at least NEED_GB of
+# free commit; MATLAB runs on one computational thread. The *fresh3* files then go to
+# set4_out/<profile> (never into the live worktrees; they are merged at the go/no-go).
+# Start (hidden):
+#   $si = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ShowWindow=[uint16]0}
+#   Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine='"C:\Program Files\Git\bin\bash.exe" -lc "bash ''/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_set4.sh''"'; ProcessStartupInformation=$si}
+MATLAB="/c/Program Files/MATLAB/R2026a/bin/matlab.exe"
+H="/c/Users/Adi Suliman"
+L="$H/uav-gcs-logs/v7_d86"
+OUT="$H/uav-gcs-logs/set4_out"
+LOCK="$H/uav-gcs-logs/v7_d91_set4.lock"
+NEED_GB=${SET4_NEED_GB:-35}             # [GB] free commit before a profile starts
+POLL=300                                # [s] between memory checks
+MAX_WAIT_H=48                           # [h] a profile not started by then is given up
+say() { echo "$(date '+%F %T') $1: $2" >> "$L/$1_set4.log"; }
+free_gb() {
+  powershell.exe -NoProfile -Command "\$o = Get-CimInstance Win32_OperatingSystem; [int](\$o.FreeVirtualMemory / 1MB)" 2>/dev/null | tr -dc '0-9'
+}
+
+if [ -f "$LOCK" ] && kill -0 "$(cat "$LOCK")" 2>/dev/null; then
+  echo "$(date '+%F %T') another v7_d91_set4.sh (PID $(cat "$LOCK")) runs; not started" >> "$L/p1_set4.log"; exit 1
+fi
+echo $$ > "$LOCK"
+trap 'rm -f "$LOCK"' EXIT
+
+one() {
+  local g=$1 c="$H/uav-gcs-set4-$1" o="$OUT/$1" rc t0 h
+  say "$g" "fourth test set (B3q) in $c, code $(git -C "$c" rev-parse HEAD)"
+  t0=$(date +%s)
+  until h=$(free_gb); [ "${h:-0}" -ge "$NEED_GB" ]; do
+    if [ $(( $(date +%s) - t0 )) -gt $(( MAX_WAIT_H * 3600 )) ]; then
+      say "$g" "free commit below $NEED_GB GB for $MAX_WAIT_H h; not started"; return 1
+    fi
+    say "$g" "free commit ${h:-?} GB < $NEED_GB GB; waiting"; sleep "$POLL"
+  done
+  say "$g" "free commit $h GB; B3q starts"
+  ( cd "$c" && "$MATLAB" -singleCompThread -batch "set4_build" ) >> "$L/${g}_set4.log" 2>&1; rc=$?
+  say "$g" "B3q ended rc=$rc"
+  [ "$rc" = 0 ] || return "$rc"
+  mkdir -p "$o/data" "$o/results" "$o/logs" || return 1
+  cp "$c"/data/*fresh3* "$o/data/" || return 1
+  if compgen -G "$c/results/*fresh3*" >/dev/null; then cp "$c"/results/*fresh3* "$o/results/" || return 1; fi
+  cp "$c"/logs/stage_*.txt "$o/logs/" 2>/dev/null
+  cp "$c/params.mat" "$o/params_set4.mat"
+  ( cd "$o/data" && sha256sum *fresh3* > "../sha256_fresh3.txt" ) || return 1
+  say "$g" "fresh3 files copied into $o: $(ls "$o/data" | tr '\n' ' ')"
+}
+
+one p1; r1=$?
+one p3; r3=$?
+echo "$(date '+%F %T') set4 done: p1 rc=$r1, p3 rc=$r3" | tee -a "$L/p1_set4.log" >> "$L/p3_set4.log"

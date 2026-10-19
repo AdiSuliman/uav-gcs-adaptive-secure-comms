@@ -1008,6 +1008,10 @@ k = (1:99999)';
 S = [S; 3000000 + k; 4000000 + k; 5000000 + k];         % dataset, unseen Eb/N0 and unseen severity runs
 S = [S; 3500000 + k; 4500000 + k; 5500000 + k];         % the second test set and the second B4 and B4s readings
 S = [S; 6500000 + k];                                   % the third test set (B3m)
+S = [S; 6000000 + k];                                   % the fourth test set (B3q)
+src = fileread(which('run_dataset_sweep'));              % every dataset stream of the sweep is listed above
+s0 = cellfun(@(c) str2double(c{1}), regexp(src, 'SEED0\s*=\s*(\d+);', 'tokens'));
+verifyEqual(tc, sort(s0), [3000000 3500000 6000000 6500000]);
 verifyEqual(tc, numel(unique(S)), numel(S));
 verifyLessThan(tc, max(S), 2^26);
 N = seed_base(S) + off;
@@ -3879,7 +3883,7 @@ ed = fileread(which('eval_detector'));
 verifyNotEmpty(tc, strfind(ed, 'if read_fresh2, tag = ''_fresh2''; end'));
 verifyNotEmpty(tc, strfind(ed, 'Sf = load(''data/splits_fresh2.mat'');'));
 verifyNotEmpty(tc, strfind(fileread(which('measure_all_kpis')), 'F.det = kpi1_file(''eval_detector_metrics'');'));
-verifyNotEmpty(tc, strfind(fileread(which('kpi1_file')), 'f = [''results/'' stem ''_fresh2.mat''];'));
+verifyEqual(tc, kpi1_set(), 'fresh2');
 % B1 on the third set: data/spectrograms_fresh2.mat -> data/splits_fresh2.mat, the training
 % z-score, the second test set's file untouched
 d = fullfile(tc.TestData.tmp, 'fresh2'); mkdir(fullfile(d, 'data'));
@@ -3897,6 +3901,214 @@ verifyTrue(tc, isfile('data/splits_fresh2.mat')); verifyFalse(tc, isfile('data/s
 L = load('data/splits_fresh2.mat');
 verifyEqual(tc, L.splits.test.feats(1, :), [1 1]);
 verifyEqual(tc, L.splits.test.run, [1 1 2 2 3 3]');
+end
+
+function test_fourth_test_set(tc)
+% Stage B3q builds a fourth test set with the third's recipe and seeds of its own (6 000 000 +
+% run id, test_seed_streams_disjoint; its own speed stream), data only; B3r reads it once, and
+% only after kpi1_set.m names it; until then every KPI 1 reader stays on the third test set.
+src = fileread(which('run_dataset_sweep'));
+verifyNotEmpty(tc, strfind(src, 'SET3       = FRESH && exist(''FRESH_SET'', ''var'') && isequal(FRESH_SET, 3);'));
+i2 = strfind(src, 'if SET2'); i0 = strfind(src, 'if SET3'); verifyNumElements(tc, i0, 1);
+verifyGreaterThan(tc, i0, i2);
+e = strfind(src(i0:end), 'end'); seg = src(i0:i0 + e(1) + 1);
+verifyNotEmpty(tc, strfind(seg, 'SEED0 = 6000000; f_out = ''data/dataset_fresh3.mat'';'));
+verifyNotEmpty(tc, strfind(seg, 'rng(2037, ''twister'');'));
+verifyEmpty(tc, strfind(seg, 'N_SUB'));                               % the second and third sets' counts and test fold
+tw = cellfun(@(c) str2double(c{1}), regexp(src, 'rng\((\d+), ''twister''\)', 'tokens'));
+verifyEqual(tc, sort(tw), [2027 2029 2035 2037]);                      % a speed stream per set
+ia = strfind(src, 'assert(run_id < 100000, ''run_dataset_sweep:run_id''');   % run ids inside the seed block
+verifyNumElements(tc, ia, 1);
+verifyGreaterThan(tc, ia, max(strfind(src, 'run_id = run_id + 1;')));
+verifyLessThan(tc, ia, strfind(src, 'save(f_out, ''dataset'', ''-v7.3'');'));
+verifyNotEmpty(tc, strfind(fileread(which('extract_spectrograms')), ...
+    'f_in = ''data/dataset_fresh3.mat''; f_out = ''data/spectrograms_fresh3.mat'';'));
+rs = fileread(which('run_stage'));
+verifyNotEmpty(tc, strfind(rs, '''B3q'', ''build_fresh_test3'''));
+verifyNotEmpty(tc, strfind(rs, '''B3r'', ''read_fresh_test3'''));
+i0 = strfind(rs, 'strcmp(name, ''build_fresh_test3'')'); i1 = strfind(rs, 'strcmp(name, ''read_fresh_test3'')');
+verifyNumElements(tc, i0, 1); verifyNumElements(tc, i1, 1);
+seg = rs(i0:i1);                                                      % B3q builds, never reads
+verifyNotEmpty(tc, strfind(seg, 'FRESH_TEST = true; FRESH_SET = 3;'));
+verifyEmpty(tc, strfind(seg, 'eval_detector')); verifyEmpty(tc, strfind(seg, 'DET_TEST'));
+verifyNotEmpty(tc, strfind(rs(i1:end), 'DET_TEST = ''fresh3'';'));
+% B1 on the fourth set: data/spectrograms_fresh3.mat -> data/splits_fresh3.mat, the training
+% z-score, the other test sets' files untouched
+d = fullfile(tc.TestData.tmp, 'fresh3'); mkdir(fullfile(d, 'data')); mkdir(fullfile(d, 'results'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+classes = {'none'; 'jamming'}; norm = struct('feat_mean', [1 2], 'feat_std', [2 4], 'feat_names', {{'a', 'b'}}); %#ok<NASGU>
+save('data/splits.mat', 'norm', 'classes');
+n = 6;
+spec = struct('X', zeros(8, 8, 1, n, 'single'), 'Y', categorical([1 2 1 2 1 2]', 1:2, classes), 'feats', [3 6; 5 10; 1 2; 3 6; 5 10; 1 2], ...
+    'feat_names', {{'a', 'b'}}, 'fold', 6 * ones(n, 1), 'ebno', zeros(n, 1), 'speed_kmh', ones(n, 1), 'run', [1 1 2 2 3 3]', ...
+    'level', ones(n, 1), 'meta', struct('frames_checked', true)); %#ok<NASGU>
+save('data/spectrograms_fresh3.mat', 'spec');
+FRESH_TEST = true; FRESH_SET = 3; %#ok<NASGU>
+evalc('run(''prepare_data'')');
+verifyTrue(tc, isfile('data/splits_fresh3.mat'));
+verifyFalse(tc, isfile('data/splits_fresh2.mat')); verifyFalse(tc, isfile('data/splits_fresh.mat'));
+L = load('data/splits_fresh3.mat');
+verifyEqual(tc, L.splits.test.feats(1, :), [1 1]);
+verifyEqual(tc, L.splits.test.run, [1 1 2 2 3 3]');
+% KPI 1 stays on the third test set while kpi1_set.m names it, even with a fourth reading on disk,
+% and the fourth set is not read before
+x = 1; save('results/eval_detector_metrics_fresh2.mat', 'x'); save('results/eval_detector_metrics_fresh3.mat', 'x');
+verifyEqual(tc, kpi1_set(), 'fresh2');
+verifyEqual(tc, kpi1_file('eval_detector_metrics'), 'results/eval_detector_metrics_fresh2.mat');
+verifyError(tc, @() run_det_test('fresh3'), 'eval_detector:kpi1_set');
+mk = 'results/fresh3_read_started.txt';
+verifyFalse(tc, isfile(mk));
+% A fusion newer than the readings: the third set's is rerun, the fourth set's cannot be
+pause(1.1); FM = 1; save('data/fusion.mat', 'FM'); %#ok<NASGU>
+S = result_status();
+w2 = status_of(S, 'results/eval_detector_metrics_fresh2.mat'); w3 = status_of(S, 'results/eval_detector_metrics_fresh3.mat');
+verifyTrue(tc, w2.stale); verifyTrue(tc, w3.stale);
+verifySubstring(tc, w2.why, 'rerun its reading, B3 or B3m');
+verifySubstring(tc, w3.why, 'read once with an earlier fusion; cannot be reread, see docs/d91_set4.md');
+verifyEmpty(tc, strfind(w3.why, 'rerun'));
+% A detector trained after the readings: the same, with the fourth set's own reason
+ood = struct('score', 'last', 'win', 3); trained_at = now + 1; %#ok<NASGU>
+save('data/trained_detector.mat', 'ood', 'classes', 'trained_at'); save('data/ood_thresholds.mat', 'ood');
+S = result_status();
+w2 = status_of(S, 'results/eval_detector_metrics_fresh2.mat'); w3 = status_of(S, 'results/eval_detector_metrics_fresh3.mat');
+verifySubstring(tc, w2.why, 'older than the detector''s training'); verifyEmpty(tc, strfind(w2.why, 'earlier detector'));
+verifySubstring(tc, w3.why, 'older than the detector''s training: the fourth set was read once with an earlier detector; cannot be reread');
+delete('data/trained_detector.mat'); delete('data/ood_thresholds.mat');
+% Once kpi1_set.m names the fourth set: KPI 1 is read there (missing shows as missing, no
+% fallback), and B3r reads it once
+fid = fopen('kpi1_set.m', 'w'); fprintf(fid, 'function s = kpi1_set()\ns = ''fresh3'';\nend\n'); fclose(fid);
+rehash; shadow = onCleanup(@() remove_shadow(fullfile(d, 'kpi1_set.m')));
+verifyEqual(tc, kpi1_set(), 'fresh3');
+verifyEqual(tc, kpi1_file('eval_detector_metrics'), 'results/eval_detector_metrics_fresh3.mat');
+verifyEqual(tc, kpi1_file('detector_predictions'), 'results/detector_predictions_fresh3.mat');
+verifyError(tc, @() run_det_test('fresh3'), 'eval_detector:fresh3_read');
+verifyFalse(tc, isfile(mk));
+% The start marker: its call after every check and before both data loads, a line in the log
+% right after it; no outcome printed before the fusion and the latch have run; the predictions
+% saved before the metrics; the code's state read from code, models and startup.m, untracked
+% .m files listed
+es = fileread(which('eval_detector'));
+im = strfind(es, 'fresh3_read_marker(''results/fresh3_read_started.txt'', pid);'); verifyNumElements(tc, im, 1);
+verifyLessThan(tc, im, strfind(es, 'S = load(''data/splits.mat'');'));
+verifyLessThan(tc, im, strfind(es, 'Sf = load(''data/splits_fresh3.mat'');'));
+for id = {'fresh3_fusion_rev', 'fresh3_fusion_old', 'fresh3_rehearsal', 'fresh3_recorded'}
+    verifyGreaterThan(tc, im, max(strfind(es, ['''eval_detector:' id{1} ''''])), id{1});
+end
+il = strfind(es, 'fprintf(''B3r: start marker written (results/fresh3_read_started.txt)\n'');'); verifyNumElements(tc, il, 1);
+verifyEmpty(tc, strtrim(regexprep(es(im:il - 1), 'fresh3_read_marker\([^\n]*\n', '')));
+io = strfind(es, 'fprintf(''%s'', out_fus);'); verifyNumElements(tc, io, 1);
+verifyGreaterThan(tc, io, strfind(es, 'Y_pred_prob = fuse_classes(''apply'', fus.FM, Z)'''));
+verifyGreaterThan(tc, io, strfind(es, '[yt, rk] = fusion_target('));
+verifyGreaterThan(tc, io, strfind(es, '[pm, cz_all] = latch_runs('));
+verifyLessThan(tc, io, strfind(es, 'fprintf(''Overall Accuracy'));
+verifyEmpty(tc, regexp(es(1:io), 'fprintf\([^\n]*(accuracy|macro-F1|Frames judged)', 'once'));
+ip = strfind(es, 'save([''results/detector_predictions'' tag ''.mat''], ''pred'');'); verifyNumElements(tc, ip, 1);
+verifyLessThan(tc, ip, strfind(es, 'save([''results/eval_detector_metrics'' tag ''.mat''], ''metrics'');'));
+verifyNotEmpty(tc, strfind(es, 'status --porcelain --untracked-files=all -- code models startup.m'));
+verifyNotEmpty(tc, strfind(es, 'ls-files -o --exclude-standard -- "*.m"'));
+verifyNotEmpty(tc, strfind(es, 'rev-parse HEAD HEAD:code'));
+% The adopted fusion's id (select_fusion.m stores it as fusion_rev, docs/d91_set4.md step 2)
+verifyEqual(tc, fusion_rev_id('enlarged'), 'd91_branch_evidence_enlarged');
+verifyEqual(tc, fusion_rev_id('validation'), 'd91_branch_evidence_validation');
+verifyError(tc, @() fusion_rev_id('test'), 'fusion_rev_id:fit');
+% Each missing input, a fusion without the monitor's class, a fusion that is not the adopted
+% revision, a fusion older than the detector, no current reading of the third set and a
+% committed record of a reading refuse before the marker
+delete('results/eval_detector_metrics_fresh3.mat');
+trained_at = now - 1; save('data/trained_detector.mat', 'trained_at');
+FM = 1; val_latch_oof = 1; save('data/fusion.mat', 'FM', 'val_latch_oof');
+params = struct('n_rx', 3); save('params.mat', 'params');
+for f = {'data/splits.mat', 'data/trained_detector.mat', 'data/fusion.mat', 'params.mat'}
+    movefile(f{1}, [f{1} '.away']);
+    ex = det_test_error('fresh3');
+    movefile([f{1} '.away'], f{1});
+    verifyEqual(tc, ex.identifier, 'eval_detector:fresh3_input'); verifySubstring(tc, ex.message, f{1});
+    verifyFalse(tc, isfile(mk));
+end
+save('data/fusion.mat', 'FM');
+verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_fusion'); verifyFalse(tc, isfile(mk));
+save('data/fusion.mat', 'FM', 'val_latch_oof');                     % the old layout
+verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_fusion_rev'); verifyFalse(tc, isfile(mk));
+cvy = 1; cvo = 1; fusion_rev = fusion_rev_id('validation'); FM = struct('target_age', 7, 'cues', []); %#ok<NASGU>
+save('data/fusion.mat', 'FM', 'val_latch_oof', 'cvy', 'cvo', 'fusion_rev');     % revised, fitted on validation only
+ex = det_test_error('fresh3');
+verifyEqual(tc, ex.identifier, 'eval_detector:fresh3_fusion_rev'); verifySubstring(tc, ex.message, fusion_rev_id('enlarged'));
+verifyFalse(tc, isfile(mk));
+fusion_rev = fusion_rev_id('enlarged'); FM = 1;
+save('data/fusion.mat', 'FM', 'val_latch_oof', 'cvy', 'cvo', 'fusion_rev');     % the id without the revised fusion
+verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_fusion_rev'); verifyFalse(tc, isfile(mk));
+FM = struct('target_age', 7, 'cues', []);
+save('data/fusion.mat', 'FM', 'val_latch_oof', 'cvy', 'cvo', 'fusion_rev');
+trained_at = now + 1; save('data/trained_detector.mat', 'trained_at');
+verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_fusion_old'); verifyFalse(tc, isfile(mk));
+trained_at = now - 1; save('data/trained_detector.mat', 'trained_at');
+verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_rehearsal'); verifyFalse(tc, isfile(mk));
+movefile('results/eval_detector_metrics_fresh2.mat', 'results/fresh2.away');
+verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_rehearsal'); verifyFalse(tc, isfile(mk));
+movefile('results/fresh2.away', 'results/eval_detector_metrics_fresh2.mat');
+pause(1.1); save('results/eval_detector_metrics_fresh2.mat', 'x');   % the third set reread with this fusion
+pid = params_id(params); mkdir('docs');
+rec = @(f, id) write_text(fullfile('docs', f), sprintf('fourth test set (B3r) reading started\nparams_id %s\n', id));
+rec('d91_fresh3_read_p1.txt', pid);
+ex = det_test_error('fresh3');
+verifyEqual(tc, ex.identifier, 'eval_detector:fresh3_recorded'); verifySubstring(tc, ex.message, pid);
+verifyFalse(tc, isfile(mk));
+delete('docs/d91_fresh3_read_p1.txt');
+rec('d91_fresh3_read_p1_aborted_20261022_1200.txt', pid);           % an aborted reading does not count
+rec('d91_fresh3_read_p3.txt', repmat('0', 1, 32));                   % nor another link model's reading
+% With every input in place the marker is written before any data is loaded (here
+% data/splits.mat holds no splits, so the reading stops right after it); it names the
+% detector and the fusion by hash and blocks every later reading
+ex = det_test_error('fresh3');
+verifyNotEmpty(tc, ex.identifier); verifyFalse(tc, startsWith(ex.identifier, 'eval_detector:'));
+verifyTrue(tc, isfile(mk));
+txt = fileread(mk);
+verifyNotEmpty(tc, regexp(txt, 'time \d{4}-\d\d-\d\d \d\d:\d\d:\d\d', 'once'));
+verifyNotEmpty(tc, regexp(txt, 'commit (\w+|unknown)', 'once'));
+verifyNotEmpty(tc, regexp(txt, 'code_tree (\w+|unknown)', 'once'));
+verifyNotEmpty(tc, strfind(txt, ['params_id ' params_id(params)]));
+verifyNotEmpty(tc, regexp(txt, 'untracked_m [^\n]+\n', 'once'));
+verifyNotEmpty(tc, strfind(txt, ['data/trained_detector.mat sha256 ' sha256_of('data/trained_detector.mat') ' mtime ']));
+verifyNotEmpty(tc, strfind(txt, ['trained_at ' datestr(trained_at, 'yyyy-mm-dd HH:MM:SS')]));
+verifyNotEmpty(tc, strfind(txt, ['data/fusion.mat sha256 ' sha256_of('data/fusion.mat') ' mtime ' ...
+    datestr(dir('data/fusion.mat').datenum, 'yyyy-mm-dd HH:MM:SS')]));
+verifyError(tc, @() run_det_test('fresh3'), 'eval_detector:fresh3_started');
+delete('data/splits_fresh3.mat');
+verifyError(tc, @() run_det_test('fresh3'), 'eval_detector:fresh3');
+clear shadow
+verifyEqual(tc, kpi1_set(), 'fresh2');
+end
+
+function run_det_test(DET_TEST) %#ok<INUSD>
+% eval_detector with DET_TEST set, as run_stage.m runs it.
+evalc('run(''eval_detector'')');
+end
+
+function ex = det_test_error(DET_TEST) %#ok<INUSD>
+% The error eval_detector stops with when run with DET_TEST set (test:none when it does not).
+ex = MException('test:none', 'no error');
+try
+    evalc('run(''eval_detector'')');
+catch ex
+end
+end
+
+function write_text(f, t)
+% Writes text to a file.
+fid = fopen(f, 'w'); fprintf(fid, '%s', t); fclose(fid);
+end
+
+function h = sha256_of(f)
+% SHA-256 of a file's bytes, as sha256sum prints it.
+fid = fopen(f, 'r'); b = fread(fid, inf, '*uint8'); fclose(fid);
+md = java.security.MessageDigest.getInstance('SHA-256');
+h = lower(reshape(dec2hex(typecast(md.digest(b), 'uint8'), 2)', 1, []));
+end
+
+function remove_shadow(f)
+% Removes a stand-in function file and refreshes the path cache.
+if isfile(f), delete(f); end
+rehash;
 end
 
 function [net, M, X, F] = tiny_detector()

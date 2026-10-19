@@ -1,0 +1,8 @@
+% Fourth test set (B3q) of profile 3 in this isolated copy (v7_d91_set4.sh): A0, a check that the
+% link model is the profile's (params_profile.mat, copied from the profile), then B3q.
+run_stage('A0');
+P = load('params.mat'); Q = load('params_profile.mat');
+fprintf('params_id copy %s, profile %s; n_rx %d\n', params_id(P.params), params_id(Q.params), P.params.n_rx);
+assert(strcmp(params_id(P.params), params_id(Q.params)), 'set4:params', 'the link model of this copy is not the profile''s');
+assert(P.params.n_rx == 4, 'set4:n_rx', 'profile 3 has 4 antennas, params.mat %d', P.params.n_rx);
+run_stage('B3q');
