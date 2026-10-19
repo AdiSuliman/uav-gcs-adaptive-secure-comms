@@ -84,7 +84,7 @@ nS = numel(SNR_points);
 v_nom = p0.v_nominal * 3.6;                       % nominal cruise speed [km/h]
 t0 = tic;
 
-NWP = N_WORKERS;
+NWP = N_WORKERS; pl = [];
 if exist('SMOKE', 'var') && SMOKE
     NWP = 0;                                            % reduced chain check: on this process, no parallel turn
 else
@@ -121,20 +121,19 @@ for t = 1:nT
 end
 nJ = size(jobs, 1);
 resB = cell(1, nJ); resF = cell(1, nJ); resS = cell(1, nJ);
-parfor (j = 1:nJ, NWP)
-    t = jobs(j, 1); li = jobs(j, 2);
-    cfg = maps(t);
-    p = p0; p.active_threat = cfg.base; p.(cfg.level_field) = cfg.levels(li);
-    if contains(cfg.base, 'airframe_shadowing'), [~, p.roll_deg] = shadow_roll_band(p.shadow_db, p); end   % a turn that lets the airframe hide an antenna
-    p.gcs_aoa_deg = p.gcs_aoa_deg - rad2deg(9.81 * tand(p.roll_deg) / max(p.v_nominal, p.turn_v_floor)) * (RUN_FRAMES - 1) * p.cycle_s / 2;   % the turn carries the GCS through the beam at mid-run
-    if ~isnan(cfg.aoa), p.int_aoa_deg(1) = p.gcs_aoa_deg + cfg.aoa; end
-    sd = 900000 + 1000*t + 10*li;                         % + s: each Eb/N0 column its own flight (nS < 10)
-    g = arrayfun(@(s) struct('seed', sd + s, 'speed', v_nom, 'run', 1), 1:nS, 'UniformOutput', false);
-    P = pool_cell(p, cfg.base, ACTIONS, SNR_points, g, [], opt);
-    resB{j} = cellfun(@(Q) mean(Q.ber), P(:, :, 1))';            % configurations x Eb/N0
-    resF{j} = cellfun(@(Q) mean(double(Q.fer)), P(:, :, 1))';
-    resS{j} = cellfun(@(Q, a) packet_share(a, Q.fer), P(:, :, 1), repmat(ACTIONS(:)', nS, 1))';   % one loss event of the run
+w = zeros(1, nJ);
+for j = 1:nJ
+    cfg = maps(jobs(j, 1)); p = p0; p.active_threat = cfg.base; p.(cfg.level_field) = cfg.levels(jobs(j, 2));
+    w(j) = pool_cost(p, cfg.base, ACTIONS, nS * RUN_FRAMES, opt);
 end
+ord = pool_schedule(w);                                % the longest job first, one per free worker
+S = struct('jobs', {jobs}, 'maps', {maps}, 'p0', {p0}, 'RUN_FRAMES', {RUN_FRAMES}, 'v_nom', {v_nom}, 'nS', {nS}, ...
+    'ACTIONS', {ACTIONS}, 'SNR_points', {SNR_points}, 'opt', {opt});
+res = pool_lpt(@(S, j) pool_job('surv', S, j), S, ord, pl);
+clear S
+res(ord) = res;                                        % back in job order
+for j = 1:nJ, [resB{j}, resF{j}, resS{j}] = res{j}{:}; end
+clear res
 ber_all = cell(1, nT); fer_all = cell(1, nT); slack_all = cell(1, nT);             % {entry}(level, configuration, snr)
 for t = 1:nT
     nL = numel(maps(t).levels);

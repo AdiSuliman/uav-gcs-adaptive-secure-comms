@@ -14,6 +14,13 @@ tc.TestData.cwd = pwd;
 tc.TestData.tmp = tempname; mkdir(tc.TestData.tmp); cd(tc.TestData.tmp);
 tc.TestData.cfg = Simulink.fileGenControl('getConfig');
 Simulink.fileGenControl('set', 'CacheFolder', tc.TestData.tmp, 'CodeGenFolder', tc.TestData.tmp);
+if ispc
+    % Stateflow build files add up to ~110 characters below the work folder (long names).
+    w = char(java.io.File(tc.TestData.tmp).getCanonicalPath());
+    assertLessThanOrEqual(tc, numel(w), 150, sprintf(['ENVIRONMENT, not code: the test work ' ...
+        'folder %s has %d characters, so Stateflow build files under it pass the Windows limit of ' ...
+        '260. Set TEMP and TMP to a short folder (e.g. C:\\Users\\<name>\\t) and rerun.'], w, numel(w)));
+end
 end
 
 function teardownOnce(tc)
@@ -974,11 +981,44 @@ end
 
 function test_surv3_run_ids(tc)
 % The survivability-options experiment builds its geometries and reads their frames back
-% with one run id per geometry, the pools' numbering in its seed block 13.
+% with one run id per geometry, the pools' numbering in its seed block 13: the stage builds
+% them with surv3_run_id.m, and its job (pool_job.m 'surv3') judges geometry r on the frames
+% of run surv3_run_id(r) only (a pool_cell.m stand-in: odd geometries recoverable, frames of
+% other run ids recoverable everywhere).
 r = 1:99;
 verifyEqual(tc, surv3_run_id(r), 100 * 13 + r);
 txt = fileread(which('experiment_survivability_options'));
-verifyGreaterThanOrEqual(tc, numel(strfind(txt, 'surv3_run_id(')), 2);
+verifyNotEmpty(tc, strfind(txt, '''run'', surv3_run_id(1:N_GEOM)), ...'));
+verifyNotEmpty(tc, strfind(txt, '''geo'', {geo}'));
+d = fullfile(pwd, 'surv3_stub'); mkdir(d);
+fid = fopen(fullfile(d, 'pool_cell.m'), 'w');
+fprintf(fid, '%s\n', 'function P = pool_cell(~, ~, A, EB, geo, ~, ~)', ...
+    'P = cell(numel(EB), numel(A), 1);', 'for s = 1:numel(EB)', '    for a = 1:numel(A)', ...
+    '        run = [repelem(geo{s}.run, 3), 1:numel(geo{s}.run)];', ...
+    '        ok = [repelem(mod(geo{s}.run, 2) == 1 & a > 1, 3), true(1, numel(geo{s}.run))];', ...
+    '        P{s, a, 1} = struct(''run'', run, ''ber'', double(~ok), ''fer'', zeros(size(run)));', ...
+    '    end', 'end', 'end');
+fclose(fid);
+addpath(d, '-begin'); clear pool_cell
+cl = onCleanup(@() stub_off(d)); %#ok<NASGU>
+verifyEqual(tc, which('pool_cell'), fullfile(d, 'pool_cell.m'));
+N = 6; nS = 2; A = {'no_action', 'power_control'};
+S = struct('cases', struct('threat', 'jamming', 'field', '', 'level', NaN), ...
+    'VAR', struct('n_rx', 3, 'gcs', 0, 'loss', 0, 'ref', 1), 'jobs', [1 1], 'p0', struct(), 'ACTIONS', {A}, ...
+    'EBNO', [5 9], 'geo', {repmat({struct('seed', 1:N, 'speed', 50 * ones(1, N), 'run', surv3_run_id(1:N))}, 1, nS)}, ...
+    'opt', [], 'nS', nS, 'N_GEOM', N, 'clean', {{struct('ber', [1e-3 1e-3], 'fer', [0 0])}}, ...
+    'C', struct('ber_floor', 1e-5), 'RATIO', 2);
+out = pool_job('surv3', S, 1);
+odd = repmat(mod(1:N, 2) == 1, nS, 1);
+verifyEqual(tc, out{1}, odd);
+verifyEqual(tc, out{2}(odd), repmat({'power_control'}, nnz(odd), 1));
+verifyTrue(tc, all(cellfun(@isempty, out{2}(~odd))));
+end
+
+function stub_off(d)
+% Removes a stand-in folder from the path and the disk.
+rmpath(d); clear pool_cell
+rmdir(d, 's');
 end
 
 function test_seed_streams_disjoint(tc)
@@ -3075,8 +3115,9 @@ q.yaw_random = false; q.gcs_aoa_random = false; [~, q.roll_deg] = shadow_roll_ba
 d = flight_draws(7, 100, q);
 verifyEqual(tc, d.roll, 28.5 - es, 'AbsTol', 1e-9);
 verifyGreaterThan(tc, d.hidden(1), 0);
-verifyNotEmpty(tc, strfind(fileread(which('map_survivability_boundary')), ['p.gcs_aoa_deg = p.gcs_aoa_deg - ' ...
-    'rad2deg(9.81 * tand(p.roll_deg) / max(p.v_nominal, p.turn_v_floor)) * (RUN_FRAMES - 1) * p.cycle_s / 2;']));
+verifyNotEmpty(tc, strfind(fileread(which('pool_job')), ['p.gcs_aoa_deg = p.gcs_aoa_deg - ' ...
+    'rad2deg(9.81 * tand(p.roll_deg) / max(p.v_nominal, p.turn_v_floor)) * (S.RUN_FRAMES - 1) * p.cycle_s / 2;']));   % the map's job
+verifyNotEmpty(tc, strfind(fileread(which('map_survivability_boundary')), '''RUN_FRAMES'', {RUN_FRAMES}'));
 for L = [6 8 12 15.5 20 22.5 23 25]
     qv = q; qv.shadow_db = L; qv.alt_random = false; qv.cap_frames = 57; [~, qv.roll_deg] = shadow_roll_band(L, qv);
     qv.gcs_aoa_deg = qv.gcs_aoa_deg - rad2deg(9.81 * tand(qv.roll_deg) / max(qv.v_nominal, qv.turn_v_floor)) * 56 * qv.cycle_s / 2;
@@ -4454,13 +4495,17 @@ src = fileread(which('pool_checkpoint'));
 verifyEqual(tc, numel(regexp(src, 'flush_file\(tmp\);\s*\n\s*movefile\(tmp, ')), 2);   % a cell and the output
 src = fileread(which('build_policy_pools'));
 verifyNotEmpty(tc, strfind(src, 'pool_checkpoint(''key'', {MODEL_TAG, DET_ID, runs, cells(c), EBNO, ACTIONS, geoc{c}, opt, ...'));
-verifyNotEmpty(tc, strfind(src, 'parfor (k = 1:numel(todo), NWP)'));
+verifyNotEmpty(tc, strfind(src, 'pool_lpt(@(S, c) pool_job(''c1p'', S, c), S, todo, pl);'));
 verifyNotEmpty(tc, strfind(fileread(which('pool_worker_init')), 'cd(d);'));   % the workers' own folder: the cells' path is absolute
-for f = {'build_policy_pools', 'build_clean_test_pools', 'build_check_pools'}
+job = fileread(which('pool_job'));
+st = struct('build_policy_pools', 'c1p', 'build_clean_test_pools', 'clean', 'build_check_pools', 'c1c');
+for f = fieldnames(st)'
     src = fileread(which(f{1}));
-    for c = {'todo', 'save', 'load', 'commit', 'clear'}
+    for c = {'todo', 'load', 'commit', 'clear'}
         verifyNotEmpty(tc, strfind(src, ['pool_checkpoint(''' c{1} ''''])', [f{1} ' ' c{1}]);
     end
+    b = regexp(job, ['case ''' st.(f{1}) '''(.*?)(\n    case |\n    otherwise)'], 'tokens', 'once');   % its job saves the cell
+    verifyNotEmpty(tc, strfind(b{1}, 'pool_checkpoint(''save'', S.CKD, '), [f{1} ' save']);
     verifyEmpty(tc, regexp(src, 'save\(f_out|save\(''data/policy_pools\.mat''', 'once'), f{1});
     verifyNotEmpty(tc, strfind(src, 'CKD = fullfile(pwd, ''data'', '), f{1});
 end
@@ -4475,6 +4520,146 @@ for c = todo
     if c == stop, error('test:stop', 'stopped after cell %d', c); end
 end
 out = arrayfun(@(c) pool_checkpoint('load', dirn, c), 1:numel(keys), 'UniformOutput', false);
+end
+
+%% ---------- shared runs of the FEC twins and the order of the pool stages ----------
+function test_fec_twin_configs(tc)
+% A configuration that differs from an earlier one in p.fec alone shares its run
+% (pool_configs.m): in every cell at every level and every array, each fec_interleave
+% configuration takes the run of the same configuration without it, whose params are its
+% own less p.fec (the same key) at the same Eb/N0 offset, and every run is flown without
+% p.fec; identical physics still takes the first configuration's frames. Only
+% closed_loop_truth.m reads p.fec (apply_countermeasure.m sets it, pool_configs.m leaves it
+% out of the run's key).
+p0 = base_params(); C = decision_config(); A = policy_actions(); nA = numel(A);
+sg = fieldnames(C.sev)';
+ifec = find(contains(A, 'fec_interleave'));
+for n = [2 3 4]
+    p0.n_rx = n;
+    for t = [{'none'}, sg, C.combos]
+        sv = 1:numel(C.sev_names); if strcmp(t{1}, 'none'), sv = C.nominal; elseif contains(t{1}, '+'), sv = C.combo_sev; end
+        for v = sv
+            [Cf, map, twin] = pool_configs(threat_params(p0, t{1}, v, C), t{1}, A);
+            for a = ifec
+                b = find(strcmp(A, twin_of(A{a})));
+                q = rmfield(Cf(a).p, 'fec');
+                verifyTrue(tc, isequal(q, Cf(b).p) && strcmp(jsonencode(q), jsonencode(Cf(b).p)) && Cf(a).g_db == Cf(b).g_db, ...
+                    sprintf('%s %d %s', t{1}, v, A{a}));
+                verifyEqual(tc, twin(map(a)), map(b), sprintf('%s %d %s', t{1}, v, A{a}));
+            end
+            lead = find(twin == 1:nA);
+            verifyFalse(tc, any(arrayfun(@(a) isfield(Cf(a).p, 'fec'), lead)), t{1});
+            verifyEqual(tc, numel(lead), sum(map == 1:nA) - numel(unique(map(ifec))), t{1});
+        end
+    end
+end
+[~, map] = pool_configs(threat_params(p0, 'path_loss', C.nominal, C), 'path_loss', A);
+verifyEqual(tc, map(strcmp(A, 'channel_switch+fec_interleave')), find(strcmp(A, 'fec_interleave')));
+f = dir(fullfile(tc.TestData.root, 'code', '**', '*.m'));
+f = f(~contains({f.folder}, {[filesep 'legacy'], [filesep 'dev'], [filesep 'tests'], [filesep 'gui']}));
+rd = {};
+for i = 1:numel(f)
+    src = regexprep(fileread(fullfile(f(i).folder, f(i).name)), '%[^\n]*', '');   % code only, no comments
+    if ~isempty(regexp(src, '\.fec\>|''fec''', 'once')), rd{end+1} = f(i).name; end %#ok<AGROW>
+end
+verifyEqual(tc, sort(rd), {'apply_countermeasure.m', 'closed_loop_truth.m', 'pool_configs.m'});
+end
+
+function n = twin_of(a)
+% The configuration a without fec_interleave.
+n = regexprep(a, '\+?fec_interleave$', '');
+if isempty(n), n = 'no_action'; end
+end
+
+function test_closed_loop_truth(tc)
+% p.fec changes only the ground truth and CRC of a run: the frames with and without it are
+% the same apart from ber, fer and crc_fail, the truth inputs are the same, and
+% closed_loop_truth.m on them gives either truth exactly.
+p = base_params(); p.quiet_build = true; p.active_threat = 'jamming';
+mdl = 'UAV_GCS_Threat_Link';
+evalc('build_threat_model(p)');
+set_link_snr(mdl, 8 + 10*log10(p.bits_per_symbol) - 10*log10(p.sps), p);
+link_seed(mdl, 31, 160);
+o = sim(mdl, 'StopTime', num2str(9 * p.frame_duration));
+[F, T] = extract_closed_loop_frames(o, p, 20);
+q = p; q.fec = true;
+[Fc, Tc] = extract_closed_loop_frames(o, q, 20);
+tf = {'ber', 'fer', 'crc_fail'};
+verifyTrue(tc, isequaln(rmfield(F, tf), rmfield(Fc, tf)));
+verifyTrue(tc, isequaln(T, Tc));
+[b, e, c] = closed_loop_truth(T, q);
+verifyTrue(tc, isequaln({b, e, c}, {Fc.ber, Fc.fer, Fc.crc_fail}));
+[b, e, c] = closed_loop_truth(Tc, p);
+verifyTrue(tc, isequaln({b, e, c}, {F.ber, F.fer, F.crc_fail}));
+verifyTrue(tc, all(isnan(Fc.crc_fail(1:2:end))) && ~isnan(F.crc_fail(1)));   % the coded CRC on every second frame only
+close_system(mdl, 0);
+end
+
+function test_pool_cell_fec_twins(tc)
+% pool_cell.m flies a fec_interleave configuration on the run of its twin without it: the
+% frames of every configuration are those it gets when simulated alone, and map and
+% n_unique count the configurations as before.
+p = threat_params(base_params(), 'jamming', 3); p.quiet_build = true;
+opt = struct('F_SUB', 6, 'tw', 10, 'delay_bits', 20);
+geo = {struct('seed', 11, 'speed', 80, 'run', 1)};
+A = {'no_action', 'fec_interleave', 'channel_switch+fec_interleave', 'power_control+fec_interleave'};
+[~, ~, twin] = pool_configs(p, 'jamming', A);
+verifyEqual(tc, twin, [1 1 3 4]);
+[P, info] = pool_cell(p, 'jamming', A, 8, geo, [], opt);
+verifyEqual(tc, info, struct('n_unique', 4, 'map', 1:4));
+for a = 1:numel(A)
+    Pa = pool_cell(p, 'jamming', A(a), 8, geo, [], opt);
+    verifyTrue(tc, isequaln(P{1, a, 1}, Pa{1, 1, 1}), A{a});
+end
+verifyFalse(tc, isequaln(P{1, 1, 1}.crc, P{1, 2, 1}.crc));
+close_system('UAV_GCS_Threat_Link', 0);
+end
+
+function test_pool_schedule(tc)
+% The pool stages run their jobs longest first (equal costs keep their order), one per free
+% worker (pool_lpt.m; on this process in that order without a pool); a job's cost counts a
+% shared run once, its frames and its emitters; every stage's job body (pool_job.m) reads only
+% variables the stage hands it.
+verifyEqual(tc, pool_schedule([3 9 3 1 9]), [2 5 1 3 4]);
+out = pool_lpt(@(S, j) S.f(j), struct('f', @(j) j^2), [4 2 7], []);
+verifyEqual(tc, out, {16, 4, 49});
+M = containers.Map('KeyType', 'double', 'ValueType', 'double');
+pool_lpt(@(S, j) note_job(S, j), M, [3 1 2], []);
+verifyEqual(tc, cell2mat(values(M)), [3 1 2]);
+verifyEqual(tc, pool_lpt(@(S, j) j, [], [], []), cell(1, 0));
+p = base_params(); A = policy_actions(); nA = numel(A);
+pc = threat_params(p, 'none', 3);
+[~, map, twin] = pool_configs(pc, 'none', A);
+verifyLessThan(tc, sum(twin == 1:nA), sum(map == 1:nA));
+g = {struct('seed', [1 2], 'speed', [50 60], 'run', [1 2], 'frames', [NaN 38])};
+verifyEqual(tc, pool_cost(pc, 'none', A, g, struct('F_SUB', 20)), sum(twin == 1:nA) * 58 * 1.75 / 20, 'AbsTol', 1e-9);
+pj = threat_params(p, 'spoofing+noise_burst', 3);
+verifyEqual(tc, pool_cost(pj, 'spoofing+noise_burst', A, 40, []) / pool_cost(pj, 'spoofing+noise_burst', A, 20, []), 2, 'AbsTol', 1e-12);
+[~, ~, tj] = pool_configs(pj, 'spoofing+noise_burst', A);
+verifyEqual(tc, pool_cost(pj, 'spoofing+noise_burst', A, 20, []), sum(tj == 1:nA) * (1.75 + 2 * 1.15), 'AbsTol', 1e-9);
+job = fileread(which('pool_job'));
+st = struct('c1p', 'build_policy_pools', 'c1c', 'build_check_pools', 'clean', 'build_clean_test_pools', ...
+    'surv', 'map_survivability_boundary', 'surv3', 'experiment_survivability_options');
+for f = fieldnames(st)'
+    src = fileread(which(st.(f{1})));
+    verifyEmpty(tc, regexp(src, '\nparfor \(k = 1:(numel\(todo\)|nJ)', 'once'), f{1});
+    jobs = 'todo'; if startsWith(f{1}, 'surv'), jobs = 'ord'; end
+    verifyNotEmpty(tc, regexp(src, ['pool_lpt\(@\(S, [cj]\) pool_job\(''' f{1} ''', S, [cj]\), S, ' jobs ', pl\);'], 'once'), f{1});
+    m = regexp(src, '\nS = struct\((.*?)\);', 'tokens', 'once');
+    have = regexp(m{1}, '''(\w+)'', \{', 'tokens'); have = [have{:}];
+    b = regexp(job, ['case ''' f{1} '''(.*?)(\n    case |\n    otherwise)'], 'tokens', 'once');
+    used = regexp(b{1}, '(?<![\w.])S\.(\w+)', 'tokens'); used = unique([used{:}]);
+    verifyEmpty(tc, setdiff(used, have), f{1});
+    verifyEmpty(tc, setdiff(have, used), f{1});
+end
+for f = {'map_survivability_boundary', 'experiment_survivability_options'}
+    verifyNotEmpty(tc, regexp(fileread(which(f{1})), 'res\(ord\) = res;', 'once'), f{1});   % the results back in job order
+end
+end
+
+function j = note_job(M, j)
+% The order pool_lpt.m runs its jobs in: job j as the next entry of M.
+M(M.Count + 1) = j;
 end
 
 function test_monitor_release_fusion(tc)
