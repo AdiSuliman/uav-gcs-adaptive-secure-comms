@@ -14,7 +14,9 @@ function varargout = link_env(cmd, varargin)
 %         at random among the cell's (K.geo) if absent; optional delay: signalling delay of a configuration
 %         change in cycles (default C.switch_delay); optional comb (1 x NE): the
 %         jammer is on every channel we can use (frequency diversity escapes it no
-%         more than a hop)
+%         more than a hop); optional offset (1 x NE, default Inf): the cycle the threat ends,
+%         from which the episode flies the clean link of the same geometry at the same frame
+%         positions (a threat that ends; no follower after it)
 %   split: 1 = train, 2 = validation, 3 = test, 4 = edge-speed pools, 5 = second
 %         test; rs: RandStream for frame draws
 %
@@ -35,7 +37,7 @@ function varargout = link_env(cmd, varargin)
 %   Every other geometry starts at a random frame (an antenna fault, path loss and every
 %   additive threat are on from their run's first frame: a step at the onset).
 %
-%   Scenario: clean link until the onset cycle, then the cell's threat. A follower
+%   Scenario: clean link until the onset cycle, then the cell's threat (until spec.offset). A follower
 %   jammer (in-channel threats, spec.follow) re-acquires our channel fdelay cycles
 %   after a hop reaches the link: from then on a configuration containing
 %   channel_switch acts as the same configuration without it. A hop is requested
@@ -48,9 +50,10 @@ function varargout = link_env(cmd, varargin)
 %   the onset: such a configuration acts as the same one without it, at its cost.
 %
 %   Reward per cycle (points / 100; weights in decision_config.m), from the true
-%   mean BER m of the configuration in this geometry (training signal only):
-%     q      C.q_restored when m <= C.ratio_ok x clean (the KPI), otherwise up to
-%            C.q_partial, log-linear from the threshold down to 0 at the
+%   mean BER m and packet loss of the configuration in this geometry (training signal only):
+%     q      C.q_restored when m <= C.ratio_ok x clean and the packet loss is restored
+%            (restored_plr below; both, as KPI 4), otherwise up to C.q_partial,
+%            log-linear from the threshold down to 0 at the
 %            unmitigated BER (at least 10x the threshold); clean = max(clean-link
 %            BER, C.ber_floor), the smallest BER the pools resolve: the clean link's
 %            mean over the train split at the same Eb/N0 (training and KPI 4), or with
@@ -58,7 +61,8 @@ function varargout = link_env(cmd, varargin)
 %            geometry; edge_map.m), its packet loss likewise
 %     cost   goodput given up, extra spectrum, transmit power, adaptive combining
 %     switch per configuration change or channel hop
-%     false  per change on a healthy link
+%     false  per change on a healthy link, but a release to no_action after the threat
+%            ended (spec.offset), which is no false alarm
 %   restored: m <= C.ratio_ok x clean; restored_plr: true packet loss <= C.ratio_ok
 %   x the clean link's + one loss event of the geometry (one packet; with fec_interleave
 %   the geometry's longest run of consecutive lost packets, at most the PP.fec_frames / 2
@@ -66,8 +70,8 @@ function varargout = link_env(cmd, varargin)
 %   (a coded configuration reaches the link after an uncoded one) its first coded packet
 %   is decoded on the PP.fec_frames-th coded frame: the PP.fec_frames - 1 frames before
 %   deliver no packet and count as neither restored nor restored_plr (info.fec_gap);
-%   healthy: unmitigated m <=
-%   C.ratio_ok x clean; recoverable: some configuration restores both BER and
+%   healthy: no_action restores both, its m <= C.ratio_ok x clean and its packet loss
+%   restored (KPI 4's test); recoverable: some configuration restores both BER and
 %   packet loss in this geometry (under a comb jammer, one without channel_switch
 %   and freq_diversity); on: the cell's threat is on the air in some frame of this
 %   geometry (pool_cell.m act; airframe shadowing only where the flight's attitude lets
@@ -84,7 +88,8 @@ function varargout = link_env(cmd, varargin)
 %   error, analysis only)
 %   info: per episode q, restored, restored_plr, fec_gap, gput, changed (a change or a hop),
 %   false_switch, healthy, recoverable, sc_eff, cfg_eff, post, hop (requested this
-%   cycle), hop_in (a hop reached the link on this frame), compromised
+%   cycle), hop_in (a hop reached the link on this frame), compromised, ended (the frame is
+%   after the threat's end), released (a change to no_action decided after the end)
 switch cmd
     case 'tables', varargout{1} = tables(varargin{:});
     case 'reset',  [varargout{1}, varargout{2}] = reset_env(varargin{:});
@@ -153,7 +158,8 @@ for sp = 1:nSp
                 bt = C.ratio_ok * BC(s, r); pr = PC(s, r);
                 bu = mean(Pu.ber(ku));
                 bw = max(bu, 10 * bt);
-                K.healthy(sc, s, sp, r) = bu <= bt;
+                K.healthy(sc, s, sp, r) = bu <= bt && ...
+                    mean(double(Pu.fer(ku))) <= C.ratio_ok * pr + packet_share(A{K.na}, Pu.fer(ku), Q);
                 K.on(sc, s, sp, r) = sc ~= K.clean && (~isfield(Pu, 'act') || isempty(Pu.act) || any(Pu.act(ku) > 0) || ...
                     (isfield(Pu, 'act_idle') && ~isempty(Pu.act_idle) && any(Pu.act_idle(ku) > 0)));   % on the air in a frame or an idle time
                 for a = 1:nA
@@ -161,14 +167,15 @@ for sp = 1:nSp
                     k = span(P.run == rid, K.ev{sp}(r));
                     m = mean(P.ber(k)); pl = mean(double(P.fer(k)));
                     rest = m <= bt;
-                    if rest
+                    rp = pl <= C.ratio_ok * pr + packet_share(A{a}, P.fer(k), Q);
+                    if rest && rp
                         q = C.q_restored;
                     else
                         q = C.q_partial * min(1, max(0, 1 - log(max(m, 1e-9) / bt) / log(bw / bt)));
                     end
                     K.q(sc, s, a, sp, r) = q;
                     K.restored(sc, s, a, sp, r) = rest;
-                    K.restored_plr(sc, s, a, sp, r) = pl <= C.ratio_ok * pr + packet_share(A{a}, P.fer(k), Q);
+                    K.restored_plr(sc, s, a, sp, r) = rp;
                     if 1 - pr >= 0.1, K.gput(sc, s, a, sp, r) = PP.gp(a) * (1 - pl) / (1 - pr); end
                 end
                 ok = K.restored(sc, s, :, sp, r) & K.restored_plr(sc, s, :, sp, r);
@@ -214,6 +221,7 @@ E.hop_live = -inf(1, NE);                           % frame from which the chann
 E.crc = false(1, NE);                               % CRC of the frame just received failed
 E.fec_t = -inf(1, NE);                              % frame from which the link runs coded
 if ~isfield(spec, 'comb') || isempty(spec.comb), E.comb = false(1, NE); end
+if ~isfield(spec, 'offset') || isempty(spec.offset), E.offset = inf(1, NE); end
 if ~isfield(spec, 'r') || isempty(spec.r)            % geometry of the episode, one its cell flies
     G = K.geo(E.scn, split);
     if all(cellfun(@(g) isequal(g, G{1}), G))
@@ -242,6 +250,8 @@ end
 function [E, r, obs, info] = step_env(E, PP, K, a)
 a = a(:)';
 prev = E.cfg; prev_link = E.cfg_link;
+if ~isfield(E, 'offset'), E.offset = inf(1, E.NE); end
+rel = a ~= prev & a == K.na & E.t >= E.offset;      % decided on a frame after the threat's end
 pend = any(E.hopq, 1);                              % a hop on its way to the GCS
 hop = K.hasCh(a) & (~K.hasCh(prev) | E.crc) & ~pend;
 changed = a ~= prev;
@@ -264,19 +274,19 @@ idx = sub2ind(size(K.q), sc_eff, E.s, cfg_eff, sp, E.r);
 ih = sub2ind(size(K.healthy), sc_eff, E.s, sp, E.r);
 healthy = K.healthy(ih);
 q = K.q(idx);
-r = (q - K.cost(E.cfg_link) - K.SW * (changed | hop) - K.FA * (changed & healthy)) / 100;
+r = (q - K.cost(E.cfg_link) - K.SW * (changed | hop) - K.FA * (changed & healthy & ~rel)) / 100;
 rec = K.recoverable(ih); rec(E.comb) = K.recoverable_comb(ih(E.comb));
 info = struct('q', q, 'restored', K.restored(idx) & ~gap, 'restored_plr', K.restored_plr(idx) & ~gap, ...
     'fec_gap', gap, 'gput', K.gput(idx), ...
-    'changed', changed | hop, 'false_switch', changed & healthy, 'healthy', healthy, ...
+    'changed', changed | hop, 'false_switch', changed & healthy & ~rel, 'healthy', healthy, ...
     'recoverable', rec, 'sc_eff', sc_eff, 'cfg_eff', cfg_eff, 'post', E.t >= E.onset, ...
-    'hop', hop, 'hop_in', arr, 'compromised', cm);
+    'hop', hop, 'hop_in', arr, 'compromised', cm, 'ended', E.t >= E.offset, 'released', rel);
 end
 
 function [c, cf] = compromised(E, K, cfg)
 % c: a follower has re-acquired the channel in use; cf: a comb jammer holds the second
 % carrier of frequency diversity.
-on = K.followable(E.scn) & E.t >= E.onset;
+on = K.followable(E.scn) & E.t >= E.onset & E.t < E.offset;
 c = on & E.follow & K.hasCh(cfg) & (E.t - E.hop_live) >= E.fdelay;
 cf = on & E.comb & K.hasFd(cfg);
 end
@@ -285,7 +295,7 @@ function [E, obs, sc_eff, cfg_eff, cm] = draw(E, PP, K)
 % Frame of the effective (cell, configuration), same geometry, frame position
 % k0 + t inside the geometry (cyclic; a rolling-in flight beyond its run's end cycles over
 % its last 10 frames).
-sc_eff = E.scn; sc_eff(E.t < E.onset) = K.clean;
+sc_eff = E.scn; sc_eff(E.t < E.onset | E.t >= E.offset) = K.clean;
 cfg_eff = E.cfg_link;
 [cm, cf] = compromised(E, K, E.cfg_link);
 cfg_eff(cm) = K.strip(E.cfg_link(cm));

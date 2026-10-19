@@ -1,0 +1,36 @@
+"""Writes a d91 queue job's results into docs/d91_fuse.md (run from the d91-fuse worktree).
+usage: python -I fill.py wrap|phi <queue folder> <d91_fuse scratch folder>"""
+import os
+import re
+import sys
+
+what, q, fz = sys.argv[1], sys.argv[2], sys.argv[3]
+p = os.path.join('docs', 'd91_fuse.md')
+s = open(p, 'rb').read().decode('utf-8').replace('\r\n', '\n')
+
+
+def block(path):
+    if not os.path.isfile(path):
+        return 'No log was written (%s).\n' % os.path.basename(path)
+    t = open(path, encoding='utf-8', errors='replace').read().replace('\r\n', '\n').strip('\n')
+    return '```\n' + t + '\n```\n'
+
+
+if what == 'wrap':
+    a, b = '<!-- WRAP RESULTS -->', '<!-- END WRAP -->'
+    body = ('The job wrote the log below (smoke data: the levels are not results; the question is whether '
+            'the jump moves the rates). Interpretation follows at review.\n\n' + block(os.path.join(q, 'wrap', 'wrap_check.txt')))
+else:
+    a, b = '<!-- PHI RESULTS -->', '<!-- END PHI -->'
+    v = ''
+    f = os.path.join(fz, 'm_phi_both.txt')
+    if os.path.isfile(f):
+        m = re.findall(r'VERDICT phi \(both profiles[^\n]*', open(f, encoding='utf-8').read())
+        if m:
+            v = '**' + m[-1].strip() + '**\n\n'
+    body = v + ''.join('### %s\n\n%s\n' % (n, block(os.path.join(fz, 'm_phi_%s.txt' % k)))
+                       for n, k in (('Profile 1', 'p1'), ('Profile 3', 'p3'), ('Both profiles', 'both')))
+i, j = s.index(a), s.index(b)
+s = s[:i + len(a)] + '\n' + body + s[j:]
+open(p, 'wb').write(s.replace('\n', '\r\n').encode('utf-8'))
+print('filled', what)

@@ -59,7 +59,7 @@ pc = double(J.probs);
 if ~isempty(PP.fuse)
     S = struct('run', J.run, 'pos', run_pos(J.run), 'gain_ant', J.gant, 'feats_raw', J.feat, 'feat_names', ...
         {link_features('names')}, 'idle', J.idle, 'bch', J.bch);
-    pc = fuse_classes('apply', PP.fuse, fuse_classes('windows', S, pc, PP.fuse_N));
+    pc = fuse_classes('apply', PP.fuse, fuse_classes('windows', S, pc, PP.fuse_N, fuse_classes('cues', PP.fuse)));
 end
 [~, k] = max(pc, [], 2);
 kl = k;                                                  % with the latched cause of a lost branch

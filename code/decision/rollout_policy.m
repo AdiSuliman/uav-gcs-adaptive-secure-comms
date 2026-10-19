@@ -34,6 +34,14 @@ function R = rollout_policy(kind, PP, K, spec, split, agent, opt, seed)
 %                     the threat (a component of a combined one) and to the first
 %                     confirmed alarm, read one cycle later (0: the onset frame itself, as
 %                     eval_detector.m counts; NaN if never; the oracle has no monitor)
+%          after the threat's end (spec.offset; NaN without one): cfg_end, the configuration
+%          requested when the first clean frame arrives; rel_t, cycles from then to the
+%          first request of no_action (0 when cfg_end is no_action, NaN if never); cost_end,
+%          the running cost of the configurations the link runs on after it (link_env.m
+%          K.cost, points per cycle), on_end the share of those cycles not at no_action;
+%          conf_end, the share of the decisions reading a clean frame from the second on
+%          with a confirmed alarm (re-alarms); sw_end, the changes after it that are no
+%          release
 if nargin < 7 || isempty(opt), opt = struct(); end
 rs = RandStream('mt19937ar', 'Seed', seed);
 opt.rs = RandStream('mt19937ar', 'Seed', seed + 1);
@@ -44,7 +52,8 @@ cls_list = [cellstr(string(PP.classes(:)')), {'unknown'}];
 fc = struct('t', zeros(1, NE), 'cls', zeros(1, NE), 'deg', false(1, NE), 'drop', nan(1, NE), 'dal', false(1, NE));
 tr = struct('r', zeros(T, NE), 'q', zeros(T, NE), 'rest', false(T, NE), 'rplr', false(T, NE), 'gput', zeros(T, NE), ...
     'ch', false(T, NE), 'fs', false(T, NE), 'post', false(T, NE), 'esc', false(T, NE), 'cfg', zeros(T, NE), ...
-    'recov', false(T, NE), 'fer', zeros(T, NE), 'cls', false(T, NE), 'conf', false(T, NE), 'gap', false(T, NE));
+    'recov', false(T, NE), 'fer', zeros(T, NE), 'cls', false(T, NE), 'conf', false(T, NE), 'gap', false(T, NE), ...
+    'link', zeros(T, NE), 'ended', false(T, NE), 'rel', false(T, NE));
 comp = cellfun(@(c) strsplit(c, '+'), PP.scen(E.scn), 'UniformOutput', false);
 for t = 1:T
     if strcmp(kind, 'oracle')
@@ -67,6 +76,7 @@ for t = 1:T
     tr.rplr(t, :) = info.restored_plr; tr.recov(t, :) = info.recoverable; tr.fer(t, :) = obs.fer_true;
     tr.gap(t, :) = info.fec_gap;
     tr.ch(t, :) = info.changed; tr.fs(t, :) = info.false_switch; tr.post(t, :) = info.post; tr.cfg(t, :) = E.cfg;
+    tr.link(t, :) = E.cfg_link; tr.ended(t, :) = info.ended; tr.rel(t, :) = info.released;
 end
 post = tr.post; npost = max(sum(post, 1), 1);
 ok = tr.rest & tr.rplr;
@@ -107,6 +117,16 @@ R.cfg_final = E.cfg;
 R.r = E.r;
 R.cfg_trace = tr.cfg;
 R.fc_t = fc.t; R.fc_cls = fc.cls; R.fc_deg = fc.deg; R.fc_drop = fc.drop; R.fc_dal = fc.dal;
+[R.cfg_end, R.rel_t, R.cost_end, R.on_end, R.conf_end, R.sw_end] = deal(nan(1, NE));
+for i = find(any(tr.ended, 1))
+    k0 = find(tr.ended(:, i), 1);                       % the step that drew the first clean frame
+    c0 = K.na; if k0 > 1, c0 = tr.cfg(k0 - 1, i); end
+    R.cfg_end(i) = c0;
+    if c0 == K.na, R.rel_t(i) = 0; else, k = find(tr.cfg(k0:T, i) == K.na, 1); if ~isempty(k), R.rel_t(i) = k - 1; end, end
+    R.cost_end(i) = mean(K.cost(tr.link(k0:T, i))); R.on_end(i) = mean(tr.link(k0:T, i) ~= K.na);
+    if ~strcmp(kind, 'oracle') && k0 + 2 <= T, R.conf_end(i) = mean(tr.conf(k0 + 2:T, i)); end
+    R.sw_end(i) = sum(tr.ch(k0 + 1:T, i) & ~tr.rel(k0 + 1:T, i));
+end
 [R.t_cls, R.t_conf] = deal(nan(1, NE));
 for i = 1:NE
     t0 = find(post(:, i), 1);

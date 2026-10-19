@@ -18,11 +18,11 @@
 close all; clc;
 fprintf('=== Combined threats never trained on: leave-one-combination-out ===\n\n');
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
-Q = load('data/trained_dqn.mat', 'agent', 'H', 'norm_in', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db', 'det_id', 'maha_thr');
+Q = load('data/trained_dqn.mat', 'agent', 'H', 'norm_in', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db', 'det_id', 'maha_thr', ...
+    'dec', 'deployed');
 check_det_id(PP, Q, 'experiment_combo_generalization');
-if isfield(Q, 'maha_thr'), PP.maha_thr = Q.maha_thr; end         % the unknown-threat threshold the agent ran with
-PP.confirm = Q.confirm; PP.alarm_mode = Q.alarm_mode;
-if ~isempty(Q.drop_db), PP.drop_db = Q.drop_db; end
+PP = decision_settings(PP, Q);                       % the agent's monitor and decision-time settings (train_dqn.m)
+DK = 'dqn_esc'; if isfield(Q, 'deployed') && strcmp(Q.deployed, 'dqn'), DK = 'dqn'; end   % the DQN as selected
 K = link_env('tables', PP);
 TEST = 3; NE = 64; REPS = 2;
 H = Q.H; H.gamma = Q.seed_summary.selected_gamma;
@@ -47,8 +47,8 @@ for ci = 1:numel(combos)
     end
     ag = dqn_train_run(H, PPx, Kt, Kx, Q.norm_in, seed, nS, 1, 2);
     specs = test_episodes(c, numel(PP.ebno), K.geo(c, TEST), REPS, NE, H.T, RandStream('mt19937ar', 'Seed', 300 + ci));
-    Ro = dqn_eval_batches('dqn_esc', PP, K, specs, ag, struct(), 7000, TEST);
-    Ri = dqn_eval_batches('dqn_esc', PP, K, specs, Q.agent, struct(), 7000, TEST);
+    Ro = dqn_eval_batches(DK, PP, K, specs, ag, struct(), 7000, TEST);
+    Ri = dqn_eval_batches(DK, PP, K, specs, Q.agent, struct(), 7000, TEST);
     Rr = dqn_eval_batches('rule_esc', PP, K, specs, [], struct(), 7000, TEST);
     Rt = dqn_eval_batches('table', PP, K, specs, [], policy_table(PPx, Kx), 7000, TEST);
     [Ro, Ri, Rr, Rt] = deal(mark(Ro, specs, PP), mark(Ri, specs, PP), mark(Rr, specs, PP), mark(Rt, specs, PP));

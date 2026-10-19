@@ -21,11 +21,11 @@
 close all; clc;
 fprintf('=== Link recovery under a threat never trained on: leave-one-threat-out ===\n\n');
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
-Q = load('data/trained_dqn.mat', 'agent', 'H', 'norm_in', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db', 'det_id', 'maha_thr');
+Q = load('data/trained_dqn.mat', 'agent', 'H', 'norm_in', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db', 'det_id', 'maha_thr', ...
+    'dec', 'deployed');
 check_det_id(PP, Q, 'experiment_unknown_threat');
-if isfield(Q, 'maha_thr'), PP.maha_thr = Q.maha_thr; end         % the unknown-threat threshold the agent ran with
-PP.confirm = Q.confirm; PP.alarm_mode = Q.alarm_mode;
-if ~isempty(Q.drop_db), PP.drop_db = Q.drop_db; end
+PP = decision_settings(PP, Q);                       % the agent's monitor and decision-time settings (train_dqn.m)
+DK = 'dqn_esc'; if isfield(Q, 'deployed') && strcmp(Q.deployed, 'dqn'), DK = 'dqn'; end   % the DQN as selected
 K = link_env('tables', PP);
 TEST = 3; TEST2 = 5; NE = 64; REPS = 2;
 H = Q.H; H.gamma = Q.seed_summary.selected_gamma;
@@ -61,8 +61,8 @@ for ti = 1:numel(threats)
     for sp = SPL
         specs = test_episodes(c, numel(PP.ebno), K.geo(c, sp), REPS, NE, H.T, ...
             RandStream('mt19937ar', 'Seed', 500 + 100 * sp + ti));
-        Ro = cat_struct(Ro, mark(dqn_eval_batches('dqn_esc', PP, K, specs, ag, struct(), 7000, sp), specs, PP, sp));
-        Ri = cat_struct(Ri, mark(dqn_eval_batches('dqn_esc', PP, K, specs, Q.agent, struct(), 7000, sp), specs, PP, sp));
+        Ro = cat_struct(Ro, mark(dqn_eval_batches(DK, PP, K, specs, ag, struct(), 7000, sp), specs, PP, sp));
+        Ri = cat_struct(Ri, mark(dqn_eval_batches(DK, PP, K, specs, Q.agent, struct(), 7000, sp), specs, PP, sp));
         Rr = cat_struct(Rr, mark(dqn_eval_batches('rule_esc', PP, K, specs, [], struct(), 7000, sp), specs, PP, sp));
     end
     EP(end+1) = struct('threat', th, 'out', Ro, 'in', Ri, 'rule', Rr); %#ok<SAGROW>

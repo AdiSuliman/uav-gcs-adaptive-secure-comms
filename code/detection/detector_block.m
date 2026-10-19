@@ -35,7 +35,7 @@ truth = repmat({p.active_threat}, 1, numel(v));
 truth(~threat_active(p.active_threat, F.act(v), v, G.tw, F.act_idle(v))) = {'none'};   % per decision cycle
 if ~isempty(G.FM)
     [~, yi] = ismember(truth, G.classes);
-    truth = G.classes(fusion_target(yi, ones(numel(v), 1), v(:), G.FN, G.classes)');
+    truth = G.classes(fusion_target(yi, ones(numel(v), 1), v(:), G.FN, G.classes, G.FM)');
 end
 sc = sc(:)';
 ebno_rx = received_ebno(p.active_threat, ebno, F.act_comp(:, v), p.path_loss_db);

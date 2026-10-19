@@ -36,8 +36,9 @@ INR = [-30 -10 0 10 20 30 40 60];           % [dB]
 JAM = {'benign_interference', 'jamming', 'tone_jamming', 'sweeping_jammer', 'reactive_jamming', 'noise_burst'};
 
 %% 1. Detector
-if isfile('results/detector_predictions.mat')
-    L = load('results/detector_predictions.mat', 'pred'); pr = L.pred;
+fdp = kpi1_file('detector_predictions');               % the test set KPI 1 is read on
+if isfile(fdp)
+    L = load(fdp, 'pred'); pr = L.pred;
     yt = cellstr(string(pr.y_true(:))); yp = cellstr(string(pr.y_pred(:)));
     ok = strcmp(yt, yp);
     DL = dataset_levels();
@@ -66,6 +67,7 @@ if isfile('results/detector_predictions.mat')
         ona(pr.onset_age < pr.fuse_N) = "in window"; ona(pr.onset_age >= pr.fuse_N) = "after";
     end
     Wd = weak_points(100 * ok, F, pr.run(:), opt);
+    rep{end+1} = sprintf('Detector reading: %s (the test set KPI 1 is read on)', fdp);
     rep = [rep, section('DETECTOR: accuracy per frame, every class', Wd)];
     J.detector = pack(Wd);
     cls = unique(yt, 'stable');

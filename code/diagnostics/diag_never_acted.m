@@ -13,8 +13,8 @@
 
 close all; clc;
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
-Q = load('data/trained_dqn.mat', 'agent', 'H', 'confirm', 'alarm_mode', 'drop_db');
-PP.confirm = Q.confirm; PP.alarm_mode = Q.alarm_mode; PP.drop_db = Q.drop_db;
+Q = load('data/trained_dqn.mat', 'agent', 'H', 'confirm', 'alarm_mode', 'drop_db', 'maha_thr', 'dec');
+PP = decision_settings(PP, Q);                       % the agent's monitor and decision-time settings
 K = link_env('tables', PP);
 VAL = 2; REPS = 2; H = Q.H;
 rep = {sprintf('=== NEVER-ACTED EPISODES OF THE SELECTED DQN, VALIDATION (%s %d/%d, drop %.1f %s) ===', ...
