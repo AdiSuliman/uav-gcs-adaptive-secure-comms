@@ -161,18 +161,40 @@ results in the middle of its reruns. **Needed on `d91-takeover` before profile 1
 Until that is in the live takeover, profile 1 takes plan A (E), where its reruns end before its
 own chain does, so the tracks cannot end first.
 
-### 3.7 The wrap check (pending)
+### 3.7 The wrap check
 
-`uav-gcs-logs\v7_d91_wrap_real.log` (real pools of profile 1's C1p) has not reported its verdict
-yet. If it confirms the frame-20-to-1 jump artefact, a `link_env` playback change is needed
-before profile 1's C1d: the ping-pong option (b), or F_SUB >= 50. In that case:
-1. The change lands as a commit on this branch.
+The check on profile 1's real pools ended on 19.10 at 12:06 (`uav-gcs-logs\v7_d91_wrap_real.log`,
+results in the scratchpad's `wrap_real\wrap_real.txt`). Its player matched `link_env.m` (`PLAYER
+CHECK ... identical over 64 episodes x 30 cycles: 1`).
+
+**The frame-20-to-1 jump is not confirmed on the real pools.**
+- A, 324 own clean flights: the jump's gain step is no larger than a step between consecutive
+  frames. 4.4% of jumps lie above the consecutive steps' p95, about the 5% expected by chance.
+  The lag-1 gain correlation is -0.12, the jump pair's -0.06.
+- C, lost-branch reads (`lb`) within 12 cycles after the jump, less before it:
+  - deployed fusion: -0.02 [-2.05, +2.07] points;
+  - 'branch evidence, phi = 1': +1.22 [-1.64, +3.94];
+  - every alarm setting's interval also holds 0.
+
+  The smoke's +25.8 points (8 clean episodes) is not reproduced.
+- K6, 'the jump adds': every interval holds 0, with negative point estimates.
+
+So no `link_env` change is needed for the jump before profile 1's C1d.
+
+One effect remains for the reading of KPI 6. Rolling-in flights replayed wrapped give fewer K6
+events than played continuously: 'rolling-in wrapped less continuous' is about -1 to -4 points,
+and the interval excludes 0 for several settings, for example class_cusum 72 at 5/5: -3.34
+[-5.07, -1.83]. That is the known upper-bound caveat of K6 method (iii). It is a matter of
+reporting, not of this branch.
+
+If a `link_env` change is decided later:
+1. It lands as a commit on this branch.
 2. Rerun the `core` and `smoke` jobs, then rebuild the candidates and rerun `pold pnew porder
    p3core` (section 4).
 3. The tested trees of steps D3 and E4 become the new candidates.
 
-`link_env.m` is read by C1d, C2, C2e, C2g and C2u, and by none of the stages before them, so
-plan A (E) takes it with no extra rerun.
+`link_env.m` is read by C1d, C2, C2e, C2g and C2u, and by none of the stages before them, so plan
+A (E) would take it with no extra rerun.
 
 ## 4. Tests queued on the tip (19.10)
 
@@ -199,6 +221,12 @@ How the jobs run:
 | `porder` | `p3m` | proof (c): `C_order`, `C_vs_B_nrx4` |
 | `p3core` | `p3m` | full `test_core` on the profile 3 candidate; paired with `v7_d91_tests4_tip.log` (`29510e7`) |
 | `smoke` | `smoke` (this branch) | serial smoke (below) |
+
+The queue (bash PID 8764, started 19.10 12:24) runs on the following commits:
+- this branch at `4f9615f`. Later commits on the branch change `docs/` only;
+- `v7-deploy-d91-on-v7-p3` = `192a546` (tree `98cb443`);
+- `v7-deploy-d91-nospeed-on-v7-p3` = `2a2b525`;
+- the `v7-p3` tip `29510e7`.
 
 - The profile 3 candidate is `v7-deploy-d91-on-v7-p3`: one merge commit with first parent `v7-p3`
   `29510e7` and second parent this branch's tip, built with `git merge-tree` and `git
@@ -262,7 +290,7 @@ General rules for every step below:
 
 Preconditions:
 - the three VERDICT lines read PASS;
-- the wrap check has reported (3.7);
+- the wrap check has reported: done, no change needed (3.7);
 - **the takeover runs**. The old fix script (`v7_d87_p3fix.sh`, bash 49732) does not read
   `p3_c1p.hold` and would start C1p as soon as profile 1 passes SURV3;
 - `origin/v7-p3` is still `29510e7`. If not, rebuild both profile 3 commits as in section 4 and
@@ -420,5 +448,5 @@ the reason line (`why`) and the rule's numbers.
 ## 6. Open items
 
 - The takeover's `final.hold` (3.6), on `d91-takeover`, with a harness scenario.
-- The wrap check's verdict (3.7).
+- KPI 6's rolling-in caveat in the report (3.7).
 - Read `v7_d91_deploy_tests.log` when the queue ends; this note gets its verdict lines.
