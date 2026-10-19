@@ -1,9 +1,11 @@
-function ok = fusion_nogo(action, PK, GP)
+function ok = fusion_nogo(action, PK, GP, why)
 %FUSION_NOGO  The no-go of the deployed fusion design on this profile (docs/d91_deploy.md).
-%   fusion_nogo('write', PK, GP)  B2F (select_fusion.m with FUSION_FIT = 'enlarged'): the
-%       measured design PK failed the adoption rule (check GP) on this profile's enlarged fit
-%       set. B2F stops before its save, so data/fusion.mat stays the kept fusion. Writes
-%       data/fusion_nogo.mat: the design, the check, the time and the kept fusion's SHA-256.
+%   fusion_nogo('write', PK, GP, why)  B2F (select_fusion.m with FUSION_FIT = 'enlarged') stops
+%       before its save, so data/fusion.mat stays the kept fusion. why 'rule': the measured
+%       design PK failed the adoption rule (check GP) on this profile's enlarged fit set;
+%       'base': the kept fusion is not the rule's base (GP: its N, lambda, latch, further
+%       columns), so no valid comparison exists. Writes data/fusion_nogo.mat: the design, the
+%       check, the reason, the time and the kept fusion's SHA-256.
 %   ok = fusion_nogo('check')  true when data/fusion_nogo.mat records a no-go of fusion_pick()
 %       and data/fusion.mat is still the fusion it kept (same SHA-256). B3r then reads the
 %       fourth test set once with the kept fusion.
@@ -14,10 +16,13 @@ switch action
     case 'write'
         assert(isfile(fk), 'fusion_nogo:kept', '%s not found: there is no kept fusion to record', fk);
         h = file_sha256(fk);
-        nogo = struct('pick', PK, 'check', GP, 'time', datestr(now, 'yyyy-mm-dd HH:MM:SS'), ...
-            'kept_sha256', h, 'rule', 'fusion_adopt(''branch'') failed'); %#ok<NASGU>
+        assert(ismember(why, {'rule', 'base'}), 'fusion_nogo:why', 'unknown reason %s', why);
+        txt = struct('rule', 'the measured design fails fusion_adopt(''branch'') on this profile''s enlarged fit set', ...
+            'base', 'the kept fusion is not the rule''s base (N, lambda, latch, no further columns): no valid comparison');
+        nogo = struct('pick', PK, 'check', GP, 'why', why, 'reason', txt.(why), ...
+            'time', datestr(now, 'yyyy-mm-dd HH:MM:SS'), 'kept_sha256', h); %#ok<NASGU>
         save(f, 'nogo');
-        fprintf('No-go recorded in %s: the kept fusion %s stays (SHA-256 %s)\n', f, fk, h);
+        fprintf('No-go recorded in %s (%s): the kept fusion %s stays (SHA-256 %s)\n', f, txt.(why), fk, h);
         ok = true;
     case 'check'
         ok = false;

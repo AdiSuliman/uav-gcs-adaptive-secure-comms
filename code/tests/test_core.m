@@ -4093,11 +4093,11 @@ save('data/fusion.mat', 'FM', 'val_latch_oof');                     % the old la
 verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_fusion_rev'); verifyFalse(tc, isfile(mk));
 % A no-go on this profile (fusion_nogo.m): the kept fusion passes the revision's checks while the
 % record names it (here the next refusal is the rehearsal's), not once it changed or for another design
-evalc('fusion_nogo(''write'', fusion_pick(), struct(''all'', [0 0 0]))');
+evalc('fusion_nogo(''write'', fusion_pick(), struct(''all'', [0 0 0]), ''rule'')');
 verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_rehearsal'); verifyFalse(tc, isfile(mk));
 L = load('data/fusion_nogo.mat'); nogo = L.nogo; nogo.pick.cues.held = false; save('data/fusion_nogo.mat', 'nogo');
 verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_fusion_rev'); verifyFalse(tc, isfile(mk));
-evalc('fusion_nogo(''write'', fusion_pick(), struct(''all'', [0 0 0]))');
+evalc('fusion_nogo(''write'', fusion_pick(), struct(''all'', [0 0 0]), ''rule'')');
 q_thr = 1; save('data/fusion.mat', 'FM', 'val_latch_oof', 'q_thr');    % the kept fusion changed after the record
 verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_fusion_rev'); verifyFalse(tc, isfile(mk));
 delete('data/fusion_nogo.mat');
@@ -6575,14 +6575,17 @@ verifyTrue(tc, isscalar(i1) && isscalar(i2) && i1 < i3 && i3 < i2);   % 'choose'
 % the record of an earlier no-go is set aside after a save; deployed_pick names the kept base
 for t = {'''select_fusion:fit_sets''', '''select_fusion:pick_base''', ...
         'kept_base.N == PK.N && kept_base.lambda == PK.lambda && kept_base.latch == PK.latch && ~kept_base.cues', ...
-        'if ENL && ~fusion_adopt(''branch'', GP), fusion_nogo(''write'', PK, GP); end', ...
+        'if ENL && ~fusion_adopt(''branch'', GP), fusion_nogo(''write'', PK, GP, ''rule''); end', ...
+        'if ~base_ok, fusion_nogo(''write'', PK, kept_base, ''base''); end', '[~, fs_miss] = enlarged_ready();', ...
         'if ~isempty(kept_base), deployed_pick.check.kept = kept_base; end', 'fusion_nogo(''clear'');'}
     verifyNotEmpty(tc, strfind(src, t{1}), t{1});
 end
 b1 = strfind(src, '''select_fusion:fit_sets'''); b2 = strfind(src, '''select_fusion:pick_base''');
 verifyTrue(tc, isscalar(b1) && ~isempty(b2) && b1 < k3 && max(b2) < k3 && k2 < b1);
-n1 = strfind(src, 'fusion_nogo(''write'', PK, GP)'); n2 = strfind(src, 'assert(fusion_adopt(''branch'', GP), ''select_fusion:pick_rule''');
+n1 = strfind(src, 'fusion_nogo(''write'', PK, GP, ''rule'')'); n2 = strfind(src, 'assert(fusion_adopt(''branch'', GP), ''select_fusion:pick_rule''');
 verifyTrue(tc, isscalar(n1) && isscalar(n2) && n1 < n2);
+n1 = strfind(src, 'fusion_nogo(''write'', PK, kept_base, ''base'')'); n2 = strfind(src, 'assert(base_ok, ''select_fusion:pick_base''');
+verifyTrue(tc, isscalar(n1) && isscalar(n2) && n1 < n2 && n2 < k3);
 c1 = strfind(src, 'fusion_nogo(''clear'');'); verifyTrue(tc, isscalar(c1) && c1 > j3);
 % run_stage.m and main.m: B2F with the revision on the enlarged fit set, the smoke on validation
 rs = fileread(which('run_stage'));
@@ -6590,10 +6593,14 @@ r1 = strfind(rs, 'elseif strcmp(name, ''select_fusion'')'); verifyNumElements(tc
 seg = rs(r1:r1 + 200);
 verifyNotEmpty(tc, strfind(seg, 'FUSION_REV = true;'));
 verifyNotEmpty(tc, strfind(seg, 'if ~SMOKE, FUSION_FIT = ''enlarged''; end'));
+seg = rs(r1:r1 + 500);                                                  % a profile's first B2F, before B3n and B3m
+verifyNotEmpty(tc, strfind(seg, 'if ~SMOKE && ~enlarged_ready()'));
+verifyNotEmpty(tc, strfind(seg, 'clear FUSION_REV FUSION_FIT'));
 verifyEmpty(tc, strfind(rs, 'function run_one(name, SMOKE) %#ok<INUSD>'));
 mm = fileread(which('main'));
 verifyNotEmpty(tc, strfind(mm, 'FUSION_REV = true; FUSION_FIT = ''enlarged'';'));
 verifyNotEmpty(tc, strfind(mm, 'run_fusion();'));
+verifyNotEmpty(tc, strfind(mm, 'if ~enlarged_ready(), clear FUSION_REV FUSION_FIT; end'));
 end
 
 function test_fusion_nogo_reading(tc)
@@ -6606,22 +6613,31 @@ c0 = cd(d); back = onCleanup(@() cd(c0));
 R = fusion_reading('_fresh2');
 verifyEmpty(tc, [R.fusion_rev R.state R.sample]);                     % no fusion
 verifyFalse(tc, fusion_nogo('check'));
-verifyError(tc, @() fusion_nogo('write', fusion_pick(), struct()), 'fusion_nogo:kept');
+verifyError(tc, @() fusion_nogo('write', fusion_pick(), struct(), 'rule'), 'fusion_nogo:kept');
 FM = 1; val_latch_oof = 1; save('data/fusion.mat', 'FM', 'val_latch_oof');   % the old layout
 R = fusion_reading('_fresh2'); verifyEmpty(tc, [R.fusion_rev R.state R.sample]);
-evalc('fusion_nogo(''write'', fusion_pick(), struct(''all'', [0 0 0]))');
+evalc('fusion_nogo(''write'', fusion_pick(), struct(''all'', [0 0 0]), ''rule'')');
 verifyTrue(tc, fusion_nogo('check'));
-L = load('data/fusion_nogo.mat'); verifyEqual(tc, L.nogo.kept_sha256, sha256_of('data/fusion.mat'));
+L = load('data/fusion_nogo.mat'); verifyEqual(tc, L.nogo.kept_sha256, sha256_of('data/fusion.mat')); verifyEqual(tc, L.nogo.why, 'rule');
 R = fusion_reading('_fresh3'); verifyEqual(tc, R.state, 'kept fusion after a no-go'); verifyEmpty(tc, R.sample);
 R = fusion_reading('_fresh2'); verifyEmpty(tc, R.sample);              % the kept fusion was not fitted on the test sets
 nogo = L.nogo; nogo.pick.cues.phi1 = false; save('data/fusion_nogo.mat', 'nogo');
 verifyFalse(tc, fusion_nogo('check'));                                 % a no-go of another design
-evalc('fusion_nogo(''write'', fusion_pick(), struct(''all'', [0 0 0]))');
+evalc('fusion_nogo(''write'', fusion_pick(), struct(''all'', [0 0 0]), ''rule'')');
 q_thr = 2; save('data/fusion.mat', 'FM', 'val_latch_oof', 'q_thr');
 verifyFalse(tc, fusion_nogo('check'));                                 % the kept fusion changed
+evalc('fusion_nogo(''write'', fusion_pick(), struct(''N'', 8), ''base'')');   % no valid comparison: also a no-go
+verifyTrue(tc, fusion_nogo('check'));
+L = load('data/fusion_nogo.mat'); verifyEqual(tc, L.nogo.why, 'base'); verifyEqual(tc, L.nogo.check.N, 8);
+verifyError(tc, @() fusion_nogo('write', fusion_pick(), struct(), 'other'), 'fusion_nogo:why');
 [~, ok] = evalc('fusion_nogo(''clear'')'); verifyTrue(tc, ok);
 verifyFalse(tc, isfile('data/fusion_nogo.mat')); verifyNotEmpty(tc, dir('data/fusion_nogo_superseded_*.mat'));
 verifyFalse(tc, fusion_nogo('clear'));
+[ok, miss] = enlarged_ready(); verifyFalse(tc, ok); verifyNumElements(tc, miss, 5);   % a profile's first B2F
+for f = {'data/dataset.mat', 'data/splits_fresh.mat', 'data/dataset_fresh.mat', 'data/splits_fresh2.mat'}, save(f{1}, 'FM'); end
+[ok, miss] = enlarged_ready(); verifyFalse(tc, ok); verifyEqual(tc, miss, {'data/dataset_fresh2.mat'});
+save('data/dataset_fresh2.mat', 'FM'); verifyTrue(tc, enlarged_ready());
+verifyFalse(tc, enlarged_ready(tempname));
 fusion_rev = fusion_rev_id('validation'); save('data/fusion.mat', 'FM', 'val_latch_oof', 'fusion_rev');
 R = fusion_reading(''); verifyEqual(tc, R.fusion_rev, fusion_rev_id('validation')); verifyEmpty(tc, [R.state R.sample]);
 fusion_rev = fusion_rev_id('enlarged'); save('data/fusion.mat', 'FM', 'val_latch_oof', 'fusion_rev');
