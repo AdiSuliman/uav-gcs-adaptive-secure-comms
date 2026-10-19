@@ -1,0 +1,272 @@
+#!/usr/bin/env bash
+# Deploy branch checks (docs/d91_deploy.md): the full test_core on the v7-deploy-d91 tip, the
+# 4-antenna bit-identity proofs and the full test_core on the profile 3 merge candidate
+# (v7-deploy-d91 merged onto the v7-p3 tip), and a serial smoke A0..RPT plus the deploy tail on
+# the tip. Every job runs in a git archive export under C:\Users\Adi Suliman\d91q\deploy (never
+# a live worktree), one single-thread MATLAB at a time, each only when v7_d91_speed_gate.ps1
+# says OK (>= 35 GB commit free, at most one other running non-pipeline MATLAB, no OK from any
+# d91 gate in the last 180 s); gate checked every 10 min, the queue stops after 24 h of waiting
+# for one job. No job opens a parallel pool or takes the parallel turn: test_core opens none,
+# the proofs run on this process, the smoke runs run_stage's smoke mode (NWP = 0). No MATLAB
+# command line holds 'run_stage(' (the smoke calls it inside d91_smoke_deploy.m), so no
+# launcher or takeover counts a job as a pipeline stage. Each MATLAB writes its own PID first
+# and is bounded (6 h, the smoke 14 h); on rc 124/137 the queue ends that PID only.
+#
+#   bash v7_d91_deploy_tests.sh <deploy SHA> <p3 candidate SHA> <p3 tip SHA> <p3 old SHA> [job ...]
+#
+# <p3 old>: v7-p3 merged with the deploy branch without d91-speed (the merge of d91-fuse,
+# b4f217a), so the proofs compare only d91-speed's change on the deployed code, at n_rx 4.
+#
+# Jobs (default all, in this order): core pold pnew porder p3core smoke
+#   core    full test_core on <deploy>; paired by name with v7_d91_tests4_base.log (2cbe559, d90)
+#   pold    proof (b), old side on <p3 old>          (the three proof jobs run together)
+#   pnew    proof (b), new side on <p3 candidate>, B_old_vs_new_nrx<n>
+#   porder  proof (c) on <p3 candidate>: C_order, C_vs_B_nrx<n>
+#   p3core  full test_core on <p3 candidate>; paired by name with v7_d91_tests4_tip.log (29510e7)
+#   smoke   d91_smoke_deploy.m in an export of <deploy>: A0..RPT smoke, then B2F pick, B2F
+#           enlarged, rehearsal, B3r, second B3r refused, KPI, RPT
+# Logs: v7_d91_deploy_tests_<job>.log; progress and the summary with verdicts:
+# v7_d91_deploy_tests.log.
+#
+# Start detached (PowerShell, hidden):
+#   $si = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ShowWindow=[uint16]0}
+#   Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine='"C:\Program Files\Git\bin\bash.exe" -lc "bash ''/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_deploy_tests.sh'' <DEPLOY> <P3M> <P3TIP> >> ''/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_deploy_tests.log'' 2>&1"'; CurrentDirectory='C:\Users\Adi Suliman\uav-gcs-logs'; ProcessStartupInformation=$si}
+
+DEP=${1:-}
+P3M=${2:-}
+P3T=${3:-}
+P3O=${4:-}
+shift 4 2>/dev/null
+L="/c/Users/Adi Suliman/uav-gcs-logs"
+REPO="/c/Users/Adi Suliman/uav-gcs-v7-deploy"
+Q="/c/Users/Adi Suliman/d91q/deploy"
+QM="C:/Users/Adi Suliman/d91q/deploy"
+DET_FROM="C:/Users/Adi Suliman/uav-gcs-b3m-p3/data"
+MATLAB="/c/Program Files/MATLAB/R2026a/bin/matlab.exe"
+GATE='C:\Users\Adi Suliman\uav-gcs-logs\v7_d91_speed_gate.ps1'
+SMOKE_DRV="$L/d91_smoke_deploy.m"
+BASE_LOG="$L/v7_d91_tests4_base.log"
+TIP_LOG="$L/v7_d91_tests4_tip.log"
+POLL=${D91_POLL:-600}
+WAIT_MAX=$((24 * 3600))
+LOCK="$L/v7_d91_deploy.lock.d"
+ALL=(core pold pnew porder p3core smoke)
+
+say() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*"; }
+usage() { say "usage: bash v7_d91_deploy_tests.sh <deploy SHA> <p3 candidate SHA> <p3 tip SHA> <p3 old SHA> [job ...] (jobs: ${ALL[*]})"; exit 1; }
+
+for s in "$DEP" "$P3M" "$P3T" "$P3O"; do [[ "$s" =~ ^[0-9a-f]{7,40}$ ]] || usage; done
+declare -A want=()
+for j in "$@"; do
+  case " ${ALL[*]} " in *" $j "*) want[$j]=1;; *) usage;; esac
+  case "$j" in pold|pnew|porder) want[pold]=1; want[pnew]=1; want[porder]=1;; esac
+done
+[ $# -eq 0 ] && for j in "${ALL[@]}"; do want[$j]=1; done
+JOBS=(); for j in "${ALL[@]}"; do [ -n "${want[$j]:-}" ] && JOBS+=("$j"); done
+
+mkdir "$LOCK" 2>/dev/null || { say "another queue holds $LOCK; not started"; exit 1; }
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+
+declare -A SHA=([tip]=$DEP [p3m]=$P3M [p3tip]=$P3T [p3old]=$P3O [smoke]=$DEP)
+declare -A DIR=([core]=tip [pold]=p3old [pnew]=p3m [porder]=p3m [p3core]=p3m [smoke]=smoke)
+for s in "${!SHA[@]}"; do
+  f=$(git -C "$REPO" rev-parse --verify -q "${SHA[$s]}^{commit}") || { say "$s ${SHA[$s]} is not a commit"; exit 1; }
+  SHA[$s]=$f
+done
+NRX=$(git -C "$REPO" show "${SHA[p3tip]}:profile.json" 2>/dev/null | sed -n 's/.*"n_rx"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
+NRX=${NRX:-3}
+say "d91 deploy tests: jobs ${JOBS[*]}; deploy ${SHA[tip]:0:7}, p3 candidate ${SHA[p3m]:0:7}, p3 tip ${SHA[p3tip]:0:7} (n_rx $NRX), p3 old ${SHA[p3old]:0:7}; exports under $Q"
+
+stamp=$(date +%Y%m%d_%H%M%S)
+for j in "${JOBS[@]}"; do
+  f="$L/v7_d91_deploy_tests_$j.log"; [ -f "$f" ] && mv "$f" "$L/v7_d91_deploy_tests_$j.$stamp.log" && say "earlier $j log moved to v7_d91_deploy_tests_$j.$stamp.log"
+done
+
+mkdir -p "$Q/tmp" "$Q/pid" || exit 1
+declare -A done_dir=()
+for j in "${JOBS[@]}"; do
+  d=${DIR[$j]}; [ -n "${done_dir[$d]:-}" ] && continue; done_dir[$d]=1
+  rm -rf "${Q:?}/$d" && mkdir -p "$Q/$d" || exit 1
+  ( set -o pipefail; git -C "$REPO" archive --format=tar "${SHA[$d]}" | tar -x -C "$Q/$d" ) || { say "export of ${SHA[$d]} failed"; exit 1; }
+  echo "${SHA[$d]}" > "$Q/$d/D91_SHA.txt"
+done
+if [ -n "${want[smoke]:-}" ]; then
+  cp "$SMOKE_DRV" "$Q/smoke/d91_smoke_deploy.m" || { say "smoke driver not copied"; exit 1; }
+  sha256sum "$Q/smoke/d91_smoke_deploy.m" | sed 's/^/smoke driver sha256 /'
+fi
+if [ -n "${want[pold]:-}" ]; then
+  rm -rf "${Q:?}/drv" "${Q:?}/res" "${Q:?}/det" && mkdir -p "$Q/drv" "$Q/res" "$Q/det" || exit 1
+  cp "$Q/p3m/code/dev/"dev_d91_*.m "$Q/drv/" || exit 1     # one driver copy for both sides
+fi
+TW=$(cygpath -w "$Q/tmp")
+say "exports ready; TEMP of the jobs $TW"
+
+SRC="struct('detector', '$QM/det/trained_detector.mat', 'splits', '$QM/det/splits.mat')"
+INIT="startup; evalc('init_params'); maxNumCompThreads(1); fprintf('V7TEMP %s\n', tempdir); q = load('params.mat'); fprintf('V7NRX %d\n', q.params.n_rx);"
+NCHK="assert(q.params.n_rx == $NRX, 'v7:nrx', 'n_rx %d here, %d expected', q.params.n_rx, $NRX); addpath('$QM/drv', '-end');"
+DET="try, D = load('$DET_FROM/trained_detector.mat', 'net', 'classes', 'ood'); save('$QM/det/trained_detector.mat', '-struct', 'D', '-v7.3'); [norm, classes] = split_norm('$DET_FROM/splits.mat'); save('$QM/det/splits.mat', 'norm', 'classes'); clear D norm classes; disp('detector copied'); catch e, disp(['detector not copied: ' e.message]); end;"
+RUN="s = matlab.unittest.TestSuite.fromFile(fullfile(pwd, 'code', 'tests', 'test_core.m')); fprintf('V7SUITE %s\n', s.Name); r = run(s); st = repmat({'FAIL'}, 1, numel(r)); st([r.Passed]) = {'PASS'}; st([r.Incomplete] > [r.Failed]) = {'INCOMPLETE'}; for k = 1:numel(r), fprintf('V7RESULT %s %s\n', st{k}, r(k).Name); end;"
+TESTS="f = {r(~[r.Passed]).Name}; fprintf('V7TESTS %d/%d\n', sum([r.Passed]), numel(r)); if ~isempty(f), fprintf('V7FAIL %s\n', f{:}); end; exit(double(isempty(r) || ~all([r.Passed])))"
+declare -A CMD=(
+  [core]="$INIT $RUN $TESTS"
+  [p3core]="$INIT $RUN $TESTS"
+  [pold]="$INIT $NCHK $DET dev_d91_pool_run('$QM/res/p_old.mat', $SRC);"
+  [pnew]="$INIT $NCHK dev_d91_pool_run('$QM/res/p_new.mat', $SRC); dev_d91_compare('$QM/res/p_old.mat', '$QM/res/p_new.mat', 'B_old_vs_new_nrx$NRX');"
+  [porder]="$INIT $NCHK dev_d91_order('$QM/res', $SRC); dev_d91_compare('$QM/res/p_new.mat', '$QM/res/order_1.mat', 'C_vs_B_nrx$NRX');"
+  [smoke]="fprintf('V7NRX n/a\n'); d91_smoke_deploy"
+)
+declare -A LIM=([core]=6h [p3core]=6h [pold]=6h [pnew]=6h [porder]=6h [smoke]=14h)
+
+gate() { powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$GATE" 2>&1 | tr -d '\r' | tail -1; }
+
+end_own() {   # ends the job's own MATLAB (PID file) if it still runs and started after the job
+  local pf=$1 since=$2 p r
+  p=$(tr -dc 0-9 < "$pf" 2>/dev/null)
+  [ -n "$p" ] || { say "job $n: no PID file; a MATLAB of this job may still run (check by hand)"; return; }
+  r=$(MSYS2_ARG_CONV_EXCL="*" powershell.exe -NoProfile -NonInteractive -Command "\$p = Get-Process -Id $p -ErrorAction SilentlyContinue; if (\$p -and \$p.ProcessName -eq 'MATLAB' -and \$p.StartTime -ge [DateTimeOffset]::FromUnixTimeSeconds($since).LocalDateTime) { taskkill.exe /PID $p /T /F | Out-Null; 'ended' } else { 'not running' }" 2>&1 | tr -d '\r' | tail -1)
+  say "job $n: own MATLAB PID $p $r"
+}
+
+for n in "${JOBS[@]}"; do
+  log="$L/v7_d91_deploy_tests_$n.log"; pf="$Q/pid/$n.pid"; d="$Q/${DIR[$n]}"
+  t0=$(date +%s)
+  while :; do
+    g=$(gate)
+    case "$g" in OK*) say "job $n: $g"; break;; esac
+    if [ $(( $(date +%s) - t0 )) -ge "$WAIT_MAX" ]; then say "job $n: gave up after 24 h of waiting ($g); later jobs not run"; break 2; fi
+    say "job $n waits: ${g:-no answer}"
+    sleep "$POLL"
+  done
+  rm -f "$pf"
+  echo "V7CODE $(cat "$d/D91_SHA.txt") job $n" > "$log"
+  say "job $n starts in $d, code $(cat "$d/D91_SHA.txt") (log $log)"
+  ts=$(( $(date +%s) - 5 ))
+  PIDC="fid = fopen('$QM/pid/$n.pid', 'w'); fprintf(fid, '%d\n', feature('getpid')); fclose(fid); fprintf('V7PID %d\n', feature('getpid'));"
+  ( cd "$d" && TEMP="$TW" TMP="$TW" /usr/bin/timeout -k 10m "${LIM[$n]}" "$MATLAB" -singleCompThread -batch "$PIDC ${CMD[$n]}" ) >> "$log" 2>&1
+  rc=$?
+  case $rc in 124|137) echo "V7TIMEOUT rc=$rc after ${LIM[$n]}" >> "$log"; say "job $n TIMEOUT rc=$rc"; end_own "$pf" "$ts";; esac
+  say "job $n ended rc=$rc ($(( ($(date +%s) - t0) / 60 )) min with the wait)"
+done
+
+side_ok() {  # label log sha: MISSING, STALE, TIMEOUT
+  local f=$2 c r=0
+  [ -f "$f" ] || { echo "$1: $(basename "$f") MISSING (no log)"; return 1; }
+  c=$(grep -a '^V7CODE ' "$f" | tr -d '\r' | awk '{print $2}' | tail -1)
+  case "$c" in "$3"*) ;; *) echo "$1: $(basename "$f") STALE (code ${c:-none}, expected $3)"; r=1;; esac
+  grep -aq '^V7TIMEOUT' "$f" && echo "$1: $(basename "$f") TIMEOUT (outcomes incomplete)"
+  grep -aq '^V7SUITE ' "$f" || { echo "$1: $(basename "$f") MISSING (no suite)"; return 1; }
+  grep -aq '^V7TESTS ' "$f" || echo "$1: $(basename "$f") MISSING (no V7TESTS line)"
+  return $r
+}
+
+pair() {  # label new-log old-log new-sha old-sha: by test name
+  local a=0
+  side_ok "$1" "$2" "$4" || a=1
+  side_ok "$1" "$3" "$5" || a=1
+  [ $a -eq 0 ] || return 0
+  awk -v lab="$1" '
+    { sub(/\r$/, "") }
+    FNR == 1 { side = (FILENAME == ARGV[1]) ? "new" : "old" }
+    /^V7SUITE / { has[side, $2] = 1; names[$2] = 1 }
+    /^V7RESULT / { has[side, $3] = 1; res[side, $3] = $2; names[$3] = 1 }
+    END {
+      for (t in names) {
+        a = (("new", t) in res) ? res["new", t] : "none"
+        b = (("old", t) in res) ? res["old", t] : "none"
+        if (!(("new", t) in has)) c = "removed-test"
+        else if (!(("old", t) in has)) { if (a == "PASS") { n_new++; continue }; c = "new-test" }
+        else if (a == "none" || b == "none") c = "not-run"
+        else if (a != "PASS" && b != "PASS") c = "fail-both"
+        else if (a != "PASS") c = "fail-new-only"
+        else if (b != "PASS") c = "fail-old-only"
+        else continue
+        printf "%s: %s %s (new %s, old %s)\n", lab, c, t, a, b
+      }
+      printf "%s: new-test passing %d\n", lab, n_new + 0
+    }' "$2" "$3" | sort
+}
+
+diags() {  # one line per failing test, export folders, temp names, line numbers and seeds masked
+  awk '
+    { sub(/\r$/, "") }
+    /^(Error occurred in|Verification failed in|Assertion failed in|Assumption failed in) test_core\// {
+      t = $0; sub(/^[^\/]*\//, "", t); sub(/[ .].*$/, "", t); cur = t; next }
+    cur != "" && /^={20,}/ { cur = ""; next }
+    cur != "" { blk[cur] = blk[cur] " " $0 }
+    END {
+      for (t in blk) {
+        s = blk[t]
+        gsub(/d91q[\\\/](s4|deploy)[\\\/](merge|tip|new|base|p3m|p3tip|p3old|smoke)[\\\/]/, "<ROOT>/", s)
+        gsub(/d91q[\\\/](s4|deploy)[\\\/]tmp/, "<TMPROOT>", s)
+        gsub(/[\\\/]tp[0-9a-f_]{20,}/, "/<TMP>", s)
+        gsub(/line [0-9]+/, "line #", s); gsub(/ at [0-9]+/, " at #", s); gsub(/seed [0-9]+/, "seed #", s)
+        gsub(/[ \t]+/, " ", s)
+        print "test_core/" t "\t" s
+      }
+    }' "$1" | sort
+}
+
+both_diag() {  # label body new-log old-log: each fail-both of the pair, same diagnostics or DIFFER
+  local lab=$1 body=$2 a=$3 b=$4 t x y
+  [ -f "$a" ] && [ -f "$b" ] || return 0
+  diags "$a" > "$Q/diag_new_$lab.txt"; diags "$b" > "$Q/diag_old_$lab.txt"
+  grep "^$lab: fail-both " "$body" | awk '{print $3}' | while read -r t; do
+    x=$(awk -F'\t' -v t="$t" '$1 == t { print $2 }' "$Q/diag_new_$lab.txt")
+    y=$(awk -F'\t' -v t="$t" '$1 == t { print $2 }' "$Q/diag_old_$lab.txt")
+    if [ -n "$x" ] && [ "$x" = "$y" ]; then echo "$lab: fail-both-diag $t same"; else echo "$lab: fail-both-diag $t DIFFER (review by hand)"; fi
+  done
+}
+
+verdicts() {  # the deploy tests' verdicts, read from the summary body
+  awk -v nrx="$NRX" -v ms="${SHA[p3m]}" -v tp="${SHA[p3old]}" -v b="B_old_vs_new_nrx$NRX" -v cb="C_vs_B_nrx$NRX" '
+    { sub(/\r$/, "") }
+    function full(s) { return s ~ /\(detector 1, features and scores on every frame 1\)/ }
+    function blk(lab, w) { return $1 == lab ":" && ($2 ~ /^(fail-new-only|not-run|removed-test)$/ || ($2 == "new-test" && $3 != "passing") || $3 ~ /^(MISSING|STALE|TIMEOUT)$/ || ($2 == "fail-both-diag" && $4 == "DIFFER")) }
+    blk("pair-core") { bc[$2 == "fail-both-diag" ? "fail-both with other diagnostics" : ($3 ~ /^(MISSING|STALE|TIMEOUT)$/ ? $3 : $2)]++ }
+    blk("pair-p3") { bp[$2 == "fail-both-diag" ? "fail-both with other diagnostics" : ($3 ~ /^(MISSING|STALE|TIMEOUT)$/ ? $3 : $2)]++ }
+    $1 == "pnew:" && $2 == "D91PROOF" && $3 == b && $4 == "PASS" && full($0) && index(ms, $NF) == 1 { okb = 1 }
+    $1 == "porder:" && $2 == "D91PROOF" && $3 == "C_order" && $4 == "PASS" && full($0) && index(ms, $NF) == 1 { okc = 1 }
+    $1 == "porder:" && $2 == "D91PROOF" && $3 == cb && $4 == "PASS" && full($0) && index(ms, $NF) == 1 { okcb = 1 }
+    $1 == "pold:" && $2 == "D91CODE" && index(tp, $3) == 1 && length($3) >= 7 { okold = 1 }
+    $2 == "V7NRX" && $3 == nrx && ($1 == "pold:" || $1 == "pnew:" || $1 == "porder:") { nr[$1] = 1 }
+    $1 == "smoke:" && $2 == "V7SMOKE" && $4 == "ERROR" { se = se " " $3 }
+    $1 == "smoke:" && $2 == "V7SMOKE" && $3 == "done" { sdone = 1 }
+    $1 == "smoke:" && $2 == "V7SMOKE" && $3 == "POOL" { se = se " POOL" }
+    END {
+      s = ""; for (k in bc) s = s (s == "" ? "" : "; ") k " x" bc[k]
+      print (s == "" ? "VERDICT deploy test_core (against d90 2cbe559 by name): PASS on the logs" : "VERDICT deploy test_core: BLOCKED: " s)
+      if (!okb) bp[b " not PASS with detector 1"]++
+      if (!okc) bp["C_order not PASS with detector 1"]++
+      if (!okcb) bp[cb " not PASS with detector 1"]++
+      if (!okold) bp["pold did not run the p3 old commit"]++
+      if (!(("pold:") in nr) || !(("pnew:") in nr) || !(("porder:") in nr)) bp["a proof job without V7NRX " nrx]++
+      s = ""; for (k in bp) s = s (s == "" ? "" : "; ") k " x" bp[k]
+      print (s == "" ? "VERDICT p3 merge candidate (d91_speed.md 7.1 parts 2-3): PASS on the logs (n_rx " nrx "); part 4 at the merge: the tree equals the candidate tree" : "VERDICT p3 merge candidate: BLOCKED (n_rx " nrx "): " s)
+      if (!sdone) print "VERDICT smoke: INCOMPLETE (no V7SMOKE done line)" (se == "" ? "" : "; errors:" se)
+      else print (se == "" ? "VERDICT smoke: PASS (every step OK or the expected refusal)" : "VERDICT smoke: ERRORS in" se)
+    }' "$1"
+}
+
+B="$Q/summary_body.txt"
+{ echo "d91 deploy tests summary $(date '+%Y-%m-%d %H:%M:%S'): deploy ${SHA[tip]}, p3 candidate ${SHA[p3m]} (tree $(git -C "$REPO" rev-parse "${SHA[p3m]}^{tree}")), p3 tip ${SHA[p3tip]}, p3 old (no d91-speed) ${SHA[p3old]}, n_rx $NRX, TEMP $TW"
+  for n in "${ALL[@]}"; do
+    f="$L/v7_d91_deploy_tests_$n.log"
+    [ -f "$f" ] || { echo "$n: no log"; continue; }
+    grep -ahE '^(V7CODE|V7PID|V7TEMP|V7NRX|V7TESTS|V7FAIL|V7TIMEOUT|V7SMOKE|D91PROOF|D91CODE|detector|after B2Fenl|rehearsal:|B3r:|KPI 1 \(smoke\))' "$f" | tr -d '\r' | sed "s/^/$n: /"
+    awk -v n="$n" '
+      { sub(/\r$/, "") }
+      /^(Error occurred in|Verification failed in|Assertion failed in) test_core\// { t = $0; sub(/ and it did not.*/, "", t); want = 1; next }
+      want && /(Error using|Error in|verify[A-Za-z]+ failed|--> |Build failed|ENVIRONMENT|Undefined|Unable|not found|exceed)/ {
+        line = $0; gsub(/^ +/, "", line); print n ": REASON " t " :: " substr(line, 1, 220); want = 0 }
+    ' "$f"
+  done
+  echo "core (new = deploy tip, old = d90 2cbe559 from v7_d91_tests4_base.log): fail-new-only = deploy regression"
+  pair pair-core "$L/v7_d91_deploy_tests_core.log" "$BASE_LOG" "${SHA[tip]}" 2cbe559
+  echo "p3 (new = p3 merge candidate, old = v7-p3 29510e7 from v7_d91_tests4_tip.log): fail-new-only = merge regression"
+  pair pair-p3 "$L/v7_d91_deploy_tests_p3core.log" "$TIP_LOG" "${SHA[p3m]}" "${SHA[p3tip]}"; } > "$B"
+both_diag pair-core "$B" "$L/v7_d91_deploy_tests_core.log" "$BASE_LOG" >> "$B"
+both_diag pair-p3 "$B" "$L/v7_d91_deploy_tests_p3core.log" "$TIP_LOG" >> "$B"
+echo "===== SUMMARY ====="
+cat "$B"
+verdicts "$B"
+say "queue done"

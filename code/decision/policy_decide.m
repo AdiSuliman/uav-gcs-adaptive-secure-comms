@@ -11,23 +11,31 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %   agent  trained agent (dqn kinds)
 %   opt    fixed (action index, 'fixed'); table (1 x classes action index) and
 %          table_unknown (action for 'unknown'), 'table' kinds; rs (RandStream, 'random');
-%          monitor (alarm_mode, confirm, drop_db): the policy's own monitor in place of PP's
+%          monitor (alarm_mode, confirm, drop_db and any other decision-time setting,
+%          decision_settings.m): the policy's own settings in place of PP's
 %
 %   Link monitor, alarm confirmation and the agent's observation history:
 %   policy_monitor.m (shared). Timing constants: decision_config.m.
 %   rule      detected class, predicted MMSE gain (obs.mmse_pred, mmse_predict.m: from the
 %             frame's known symbols; nulling threshold PP.rule_mmse_db, default
 %             C.rule_mmse_db), quiet-slot interference (alarm
-%             threshold PP.q_thr), the monitor's drop alarm and the link budget (its drop
-%             without the configurations' known gains, the configuration in use and the
-%             gains of power_control, rate_reduce and both, config_gain_db.m) ->
-%             rule_based_policy.m
+%             threshold PP.q_thr; that branch on or off, PP.rule_slot), the monitor's drop
+%             alarm and the link budget (its drop without the configurations' known gains,
+%             the configuration in use and the gains of power_control, rate_reduce and
+%             both, config_gain_db.m) -> rule_based_policy.m
 %   table     detected class -> the configuration with the best mean reward for
 %             that threat on the train pools (policy_table.m); a 'none' or
 %             'unknown' class on a degraded link takes table_unknown
-%   rule and table commit a proposal after C.dwell consecutive cycles, not within
-%   C.hold cycles of the last change reaching the link, and only on a confirmed alarm
-%   (the same confirmation as the DQN shield)
+%   rule and table commit a proposal after C.dwell consecutive cycles (PP.rule_dwell 'run',
+%   the default), not within C.hold cycles of the last change reaching the link, and only
+%   on a confirmed alarm (the same confirmation as the DQN shield). With PP.rule_dwell
+%   'group' (chosen on validation, train_dqn.m) a proposal commits when its group, the
+%   threat-specific elements it holds (channel_switch, freq_diversity, fec_interleave,
+%   spatial_diversity; link-budget configurations one group), was proposed in at least
+%   C.dwell of the last C.dwell_n cycles (M-of-N integration, Barajas et al.; an
+%   intermittent threat alternates its cycles' proposals), unless the configuration in use
+%   already holds its elements and at least its known gain (no regress to a weaker one) or
+%   the escalation tried it in this incident
 %   dqn       argmax of the Q-network over the configurations allowed by the
 %             shield (policy_mask.m); switching costs are part of its reward
 %   *_esc     escalation: move to the next configuration not yet tried in this
@@ -40,7 +48,12 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %               jammer between our packets, a lost branch the other antennas cover)
 %               while it is on
 %             and only on a confirmed alarm, as every change of the rule and the table
-%             and the DQN's shield
+%             and the DQN's shield, and never while the class reads none. With
+%             PP.esc_drop (chosen on validation) a confirmed drop alarm read as none
+%             escalates too: out of no_action, or out of a configuration whose known gain
+%             no longer covers the drop; its first step is the link-budget configuration
+%             with the smallest known gain covering the drop (rule_based_policy.m's budget
+%             match), if not tried yet
 %   blind_esc the rule with escalation without the detector: every cycle reads as
 %             'unknown', so the alarm comes from measured degradation only (what the
 %             detection adds to an adaptive recovery)
@@ -50,9 +63,7 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %   info: q (Q-values, dqn kinds), cls, degraded, confirmed, escalated, ber_avg, drop, drop_alarm
 if nargin < 7, opt = struct(); end
 C = decision_config();
-if isfield(opt, 'monitor')
-    PP.alarm_mode = opt.monitor.alarm_mode; PP.confirm = opt.monitor.confirm; PP.drop_db = opt.monitor.drop_db;
-end
+if isfield(opt, 'monitor'), PP = decision_settings(PP, opt.monitor); end
 NE = numel(cfg); A = PP.actions; nA = numel(A);
 na = find(strcmp(A, 'no_action'));
 if startsWith(kind, 'blind')
@@ -78,17 +89,28 @@ switch base
         gain = obs_mmse_pred(obs, NE); qi = obs.feat(:, feature_index('q_iot'));
         qt = NaN; if isfield(PP, 'q_thr') && ~isempty(PP.q_thr), qt = PP.q_thr; end
         mt = C.rule_mmse_db; if isfield(PP, 'rule_mmse_db') && ~isempty(PP.rule_mmse_db), mt = PP.rule_mmse_db; end
-        gk = config_gain_db(PP);
+        so = true; if isfield(PP, 'rule_slot') && ~isempty(PP.rule_slot), so = PP.rule_slot; end
+        grp = isfield(PP, 'rule_dwell') && strcmp(PP.rule_dwell, 'group');
+        if grp && (~isfield(mem, 'ph') || size(mem.ph, 1) ~= NE), mem.ph = zeros(NE, C.dwell_n); end
+        gk = config_gain_db(PP); [gm, gid] = action_groups(A);
         lb = find(ismember(A, {'power_control', 'rate_reduce', 'rate_reduce+power_control'}));   % link-budget configurations
         bud = struct('drop_db', 0, 'current', '', 'current_db', 0, 'names', {A(lb)}, 'gain_db', gk(lb));
         for i = 1:NE
             if strcmp(base, 'rule')
                 bud.drop_db = M.drop(i); bud.current = A{cfg(i)}; bud.current_db = gk(cfg(i));
-                p = find(strcmp(A, rule_based_policy(M.cls{i}, M.degraded(i), gain(i), qi(i), qt, M.drop_alarm(i), bud, mt)), 1);
+                p = find(strcmp(A, rule_based_policy(M.cls{i}, M.degraded(i), gain(i), qi(i), qt, M.drop_alarm(i), bud, mt, ...
+                    so)), 1);
             else
                 p = table_action(M.cls{i}, M.degraded(i), PP, opt, na);
             end
-            if p == na || p == cfg(i)
+            if grp                                       % m of the last n proposals of one group
+                mem.ph(i, :) = [mem.ph(i, 2:end), gid(p)];
+                held = bitand(gm(p), gm(cfg(i))) == gm(p) && gk(cfg(i)) >= gk(p);   % the configuration in use covers it
+                if p ~= na && p ~= cfg(i) && ~held && ~mem.tried(i, p) && sum(mem.ph(i, :) == gid(p)) >= C.dwell ...
+                        && mem.since(i) >= C.hold && M.confirmed(i)
+                    a(i) = p; mem.ph(i, :) = 0;
+                end
+            elseif p == na || p == cfg(i)
                 mem.cand(i) = 0; mem.cand_n(i) = 0;
             else
                 if p == mem.cand(i), mem.cand_n(i) = mem.cand_n(i) + 1; else, mem.cand(i) = p; mem.cand_n(i) = 1; end
@@ -108,10 +130,19 @@ end
 escalated = false(1, NE);
 if endsWith(kind, '_esc')
     ladder = cellfun(@(x) find(strcmp(A, x)), C.ladder);
+    ed = isfield(PP, 'esc_drop') && ~isempty(PP.esc_drop) && PP.esc_drop;
+    gk = config_gain_db(PP);
+    lb = find(ismember(A, {'power_control', 'rate_reduce', 'rate_reduce+power_control'}));
     for i = 1:NE
         mem.tried(i, cfg(i)) = true;
         if cfg(i) == na, stuck = mem.conf_n(i) >= C.esc; else, stuck = mem.deg_n(i) >= C.esc; end
-        if a(i) == cfg(i) && stuck && mem.since(i) >= C.esc && M.confirmed(i) && ~strcmp(M.cls{i}, 'none')
+        none = strcmp(M.cls{i}, 'none');
+        byd = ed && none && M.drop_alarm(i) && (cfg(i) == na || gk(cfg(i)) < M.drop(i));   % a drop the configuration does not cover
+        if a(i) == cfg(i) && stuck && mem.since(i) >= C.esc && M.confirmed(i) && (~none || byd)
+            if byd                                       % the link-budget match first
+                [g, o] = sort(gk(lb)); j = find(g >= M.drop(i), 1); if isempty(j), j = numel(g); end
+                if ~mem.tried(i, lb(o(j))), a(i) = lb(o(j)); escalated(i) = true; continue; end
+            end
             if ~isempty(q)
                 qi = q(:, i); qi(mem.tried(i, :)) = -inf; qi(na) = -inf;
                 [qm, b] = max(qi);
@@ -127,6 +158,19 @@ end
 mem = policy_monitor('change', mem, a ~= cfg);
 info = struct('q', q, 'cls', {M.cls}, 'degraded', M.degraded, 'confirmed', M.confirmed, ...
     'escalated', escalated, 'ber_avg', M.ber_avg', 'drop', M.drop, 'drop_alarm', M.drop_alarm);
+end
+
+function [gm, gid] = action_groups(A)
+% Per configuration, its threat-specific elements as a bit mask (channel_switch,
+% freq_diversity, fec_interleave, spatial_diversity) and its proposal group (the mask; a
+% link-budget configuration 16; no_action 0).
+el = {'channel_switch', 'freq_diversity', 'fec_interleave', 'spatial_diversity'};
+gm = zeros(1, numel(A));
+for a = 1:numel(A)
+    p = strsplit(A{a}, '+');
+    gm(a) = sum(2 .^ (find(ismember(el, p)) - 1));
+end
+gid = gm; gid(gm == 0) = 16; gid(strcmp(A, 'no_action')) = 0;
 end
 
 function p = table_action(cls, degraded, PP, opt, na)

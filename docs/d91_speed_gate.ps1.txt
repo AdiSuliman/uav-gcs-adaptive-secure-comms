@@ -1,0 +1,47 @@
+# Machine budget of the d91 queues (v7_d91_speed_proofs.sh, v7_d91_tests2/3/4.sh, d91q\fuse\d91q.sh):
+# prints one line, "OK ..." when a single-thread MATLAB job may start, "WAIT ..." otherwise.
+#   - at least 35 GB of commit free (Win32_OperatingSystem.FreeVirtualMemory)
+#   - at most one other running non-pipeline MATLAB, busy or idle: every win64\MATLAB.exe
+#     except the pipeline (command line with run_stage(, PID 42560), the pool workers it
+#     started, and processes that have exited (HasExited, e.g. the zombie 32824)
+#   - no OK from any gate in the last 180 s (shared start stamp), so the MATLAB started on
+#     one OK is running and counted before another queue can start one
+# Process and memory queries only; it writes nothing but the start stamp
+# C:\Users\Adi Suliman\d91q\start.stamp, under the mutex Global\uav_gcs_d91_start.
+# A failed query prints WAIT.
+$stamp = 'C:\Users\Adi Suliman\d91q\start.stamp'
+$hold = 180
+try {
+    $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+    $free = [math]::Round($os.FreeVirtualMemory / 1MB, 1)
+    $ml = @(Get-CimInstance Win32_Process -Filter "Name='MATLAB.exe'" -ErrorAction Stop |
+        Where-Object { $_.ExecutablePath -like '*\win64\MATLAB.exe' })
+    $pipe = @(42560) + @($ml | Where-Object { $_.CommandLine -match 'run_stage\(' } | ForEach-Object { [int]$_.ProcessId })
+    $cand = @($ml | Where-Object {
+        ($pipe -notcontains [int]$_.ProcessId) -and
+        -not (($_.CommandLine -match '-parallelserver') -and ($pipe -contains [int]$_.ParentProcessId)) })
+    $alive = @(); $exited = @()
+    foreach ($p in $cand) {
+        $g = Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue
+        if ($g -and -not $g.HasExited) { $alive += [int]$p.ProcessId } else { $exited += [int]$p.ProcessId }
+    }
+    $s = "free=${free}GB others=$($alive.Count) [$($alive -join ',')] exited=[$($exited -join ',')] pipeline=[$($pipe -join ',')]"
+    if (-not ($free -ge 35 -and $alive.Count -le 1)) { "WAIT $s"; return }
+    $m = New-Object System.Threading.Mutex($false, 'Global\uav_gcs_d91_start')
+    try { $got = $m.WaitOne(60000) } catch [System.Threading.AbandonedMutexException] { $got = $true }
+    if (-not $got) { $m.Dispose(); "WAIT start stamp busy $s"; return }
+    try {
+        $age = 1e9
+        if (Test-Path -LiteralPath $stamp) { $age = ((Get-Date) - (Get-Item -LiteralPath $stamp).LastWriteTime).TotalSeconds }
+        if ($age -ge 0 -and $age -lt $hold) {
+            "WAIT a job started $([int]$age) s ago $s"
+        } else {
+            Set-Content -LiteralPath $stamp -Value "$(Get-Date -Format s) gate PID $PID" -Encoding ascii -ErrorAction Stop
+            "OK $s"
+        }
+    } finally {
+        $m.ReleaseMutex(); $m.Dispose()
+    }
+} catch {
+    "WAIT query failed: $($_.Exception.Message)"
+}

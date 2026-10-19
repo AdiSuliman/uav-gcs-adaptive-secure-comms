@@ -2,8 +2,9 @@ function [kind, ag, opt] = policy_setup(name, Q, sel, fixed_best, fixed_mmse, ta
 %POLICY_SETUP  Policy kind, agent and options of one evaluated policy (rollout_policy.m).
 %   name        policy of evaluate_policies.m: none, random, fixed_mmse, fixed, rule,
 %               rule_esc, blind_esc, table, dqn_g<k> (DQN of discount factor k),
-%               dqn_esc (the selected DQN with escalation), rule_sel (rule + escalation
-%               on the monitor train_dqn.m chose for it, the fallback), oracle
+%               dqn_esc (the selected DQN with escalation), dqn (the selected DQN without
+%               it, when train_dqn.m deployed it so), rule_sel (rule + escalation with the
+%               monitor and settings train_dqn.m chose for it, the fallback), oracle
 %   Q           data/trained_dqn.mat: agent, agents, rule_sel
 %   sel         index of the selected DQN in Q.agents
 %   fixed_best  configuration of the best fixed policy; fixed_mmse that of always-on MMSE

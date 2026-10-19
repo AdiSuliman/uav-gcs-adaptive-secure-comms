@@ -12,7 +12,9 @@
 %   7. Survivability map summary per threat and geometry (deliverable 7)
 %   8. KPI status (results/kpi_summary.mat)
 %
-% Inputs: results/eval_detector_metrics.mat, results/ood_detection.mat,
+% Inputs: the KPI 1 reading (kpi1_file.m on the set of kpi1_set.m: results/eval_detector_metrics_fresh2.mat,
+%         the third test set, when it exists, else results/eval_detector_metrics.mat; _fresh3, the
+%         fourth, once kpi1_set.m names it), results/ood_detection.mat,
 %         results/policy_evaluation.mat, data/survivability_boundary.mat,
 %         results/kpi_summary.mat
 % Output: results/kpi_dashboard.png
@@ -20,7 +22,7 @@
 close all; clc;
 fprintf('=== KPI dashboard ===\n\n');
 ld = @(f, varargin) load_if(f, varargin{:});
-Md = ld('results/eval_detector_metrics.mat', 'metrics');
+Md = ld(kpi1_file('eval_detector_metrics'), 'metrics');
 O  = ld('results/ood_detection.mat', 'R', 'SC', 'sel', 'NEST');
 P  = ld('results/policy_evaluation.mat');
 Sv = ld('data/survivability_boundary.mat', 'grid_data_A', 'grid_data_B');
@@ -36,7 +38,7 @@ if ~isempty(Md)
     imagesc(ax, 100 * C, [0 100]); colormap(ax, flipud(gray)); colorbar(ax);
     cl = strrep(cellstr(string(m.classes)), '_', ' ');
     set(ax, 'XTick', 1:numel(cl), 'XTickLabel', cl, 'YTick', 1:numel(cl), 'YTickLabel', cl, 'FontSize', 7);
-    xtickangle(ax, 45); title(ax, sprintf('Detection, accuracy %.1f%%', m.overall_accuracy_pct));
+    xtickangle(ax, 45); title(ax, {sprintf('Detection, accuracy %.1f%%', m.overall_accuracy_pct), set_txt(m)});
     xlabel(ax, 'predicted'); ylabel(ax, 'true');
 else
     placeholder(ax, 'Confusion matrix', 'eval_detector');
@@ -48,7 +50,7 @@ if ~isempty(Md)
     b = Md.metrics.snr_breakdown;
     plot(ax, [b.snr_db], [b.macro_f1_pct], '-o', 'LineWidth', 1.6); hold(ax, 'on');
     yline(ax, 90, 'r--', '90%'); grid(ax, 'on'); ylim(ax, [50 100]);
-    xlabel(ax, 'E_b/N_0 [dB]'); ylabel(ax, 'macro-F1 [%]'); title(ax, 'KPI 1: detection vs E_b/N_0');
+    xlabel(ax, 'E_b/N_0 [dB]'); ylabel(ax, 'macro-F1 [%]'); title(ax, {'KPI 1: detection vs E_b/N_0', set_txt(Md.metrics)});
 else
     placeholder(ax, 'Macro-F1 vs Eb/N0', 'eval_detector');
 end
@@ -137,6 +139,13 @@ fprintf('Saved results/kpi_dashboard.png\n');
 %% ===================== Local functions =====================
 function S = load_if(f, varargin)
 if isfile(f), S = load(f, varargin{:}); else, S = []; fprintf('  missing %s\n', f); end
+end
+
+function t = set_txt(m)
+% The test set a detector reading was read on (eval_detector.m metrics.test_set), and its
+% in-sample label when the deployed fusion was fitted on it (metrics.sample).
+t = 'test set'; if isfield(m, 'test_set') && ~isempty(m.test_set), t = char(m.test_set); end
+if isfield(m, 'sample') && ~isempty(m.sample), t = [t ', ' char(m.sample)]; end
 end
 
 function placeholder(ax, ttl, src)

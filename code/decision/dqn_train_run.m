@@ -3,7 +3,9 @@ function [agent, curve, loss_hist, best_ep] = dqn_train_run(H, PP, K, Kval, norm
 %   et al.): experience replay, target network, Huber loss, gradient clipping,
 %   epsilon-greedy over the configurations the shield allows (policy_mask.m). K is
 %   the training reward, Kval the standard reward of the validation checkpoints;
-%   the checkpoint with the best validation recovery (then return) is kept.
+%   the checkpoint with the best held validation recovery (dqn_held.m, the edge map's
+%   committed reading; then return) is kept, scored with the escalation (policy_decide.m).
+%   curve: episodes, recovered (KPI 4), held per checkpoint.
 rng(seed, 'twister');
 rs = RandStream('mt19937ar', 'Seed', seed);
 agent = dqn_agent(norm_in, H.hidden);
@@ -68,11 +70,11 @@ for it = 1:n_iter
     if mod(it, max(1, round(n_iter / 25))) == 0 || it == n_iter
         ag = agent; ag.qNetwork = net;
         Re = dqn_eval_batches('dqn_esc', PP, Kval, eval_spec, ag, struct(), seed + 700, split_val);
-        sc = dqn_recovered(Re) + 1e-3 * mean(Re.ret);
-        curve(end+1, :) = [it * NE, dqn_recovered(Re)]; %#ok<AGROW>
+        sc = dqn_held(Re) + 1e-3 * mean(Re.ret);
+        curve(end+1, :) = [it * NE, dqn_recovered(Re), dqn_held(Re)]; %#ok<AGROW>
         if sc > best && nb >= H.warmup, best = sc; best_net = net; best_ep = it * NE; end
-        fprintf('    episode %5d/%d | eps %.2f | lr %.1e | validation recovered %.1f%% return %.3f | updates %d\n', ...
-            it * NE, n_iter * NE, epsg, lr, 100 * dqn_recovered(Re), mean(Re.ret), nupd);
+        fprintf('    episode %5d/%d | eps %.2f | lr %.1e | validation recovered %.1f%% held %.1f%% return %.3f | updates %d\n', ...
+            it * NE, n_iter * NE, epsg, lr, 100 * dqn_recovered(Re), 100 * dqn_held(Re), mean(Re.ret), nupd);
     end
 end
 loss_hist = loss_hist(1:nupd);
