@@ -400,14 +400,23 @@ A `fail-both` with the same diagnostics is the target's own state: report it, do
 
 ### 4.3 The commits the second queue runs
 
-Recorded in the commit after this one (section 4.3 is filled in there): the branch tip, the
-rebuilt profile 3 candidate and its tree. The candidate is built as in 4.1:
+Built on 19.10 as in 4.1 (no worktree, no conflict):
 
-    T=$(git merge-tree --write-tree 29510e7 <tip>)
-    C=$(git commit-tree "$T" -p 29510e7 -p <tip> -m "...")
+    T=$(git merge-tree --write-tree 29510e7 2abd51f)     # 81e3145275e81aaa8f37391f4b552b9cad7248e3
+    C=$(git commit-tree "$T" -p 29510e7 -p 2abd51f -m "...")
     git branch -f v7-deploy-d91-on-v7-p3 "$C"
 
-The first queue's candidate stays reachable as `v7-deploy-d91-on-v7-p3-q1` (`192a546`).
+| Role | Commit | Note |
+|---|---|---|
+| this branch (`<TIP>`) | the tip at the queue's start: `2abd51f` or a later docs-only commit | `core`, `smoke`; a docs-only commit after `2abd51f` has the same code tree |
+| profile 3 candidate (`<P3M>`) | `v7-deploy-d91-on-v7-p3` = `89dede6` | tree `81e3145`; parents `29510e7` and `2abd51f`; its `code/`, `startup.m` and `models/` equal `2abd51f`'s |
+| old side | `v7-deploy-d91-nospeed-on-v7-p3` = `2a2b525` | unchanged (4.1) |
+| target tip | `v7-p3` `29510e7` | n_rx 4 |
+
+The first queue's candidate stays reachable as `v7-deploy-d91-on-v7-p3-q1` (`192a546`). The
+second queue's command of 4.2 with these values:
+`bash v7_d91_deploy_tests2.sh <TIP> 89dede6 29510e7 2a2b525`. Step D3 checks `HEAD^{tree}`
+against `81e3145275e81aaa8f37391f4b552b9cad7248e3`.
 
 ## 5. Procedures
 
