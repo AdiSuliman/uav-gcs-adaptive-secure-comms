@@ -29,6 +29,8 @@ Decisions it carries (recorded elsewhere, not repeated):
 | `4f9615f`, `8749f86` | this note (first version), the wrap check |
 | `8dbb767` | the second review's code fixes (section 3.8) |
 | `3c4e691` | `deploy_state.m`, the check before a hold is removed or a chain resumes (section 5) |
+| `2abd51f`, `d081743` | this note: the second review resolved, procedures, section 7 |
+| `a397ff3` | `test_core`: a helper that `functiontests` ran as a test, renamed (4.3) |
 
 - The three merges had no conflict (the order of `docs/d91_fuse.md` section 7.A).
 - `code/detection/fusion_rev_id.m` is the same blob on `d91-set4`, `d91-fuse` and this branch:
@@ -275,6 +277,7 @@ A (E) would take it with no extra rerun.
 | The fuse and set4 notes still prescribed the old no-go rule | low | pointers in `docs/d91_fuse.md` 7.F, 7.G and `docs/d91_set4.md` step 1 |
 | The speed-rule citation glossed over two deviations | low | 3.5 (part 1's diff and the dependency check); section 4 names the old side exactly |
 | Holds written later than needed | low | 5.0: the holds now, with a deadline for the takeover launch |
+| (found in the first queue) the helper `run_det_test` ran as a test | - | renamed `det_read_run` (`a397ff3`, 4.3) |
 
 ## 4. Tests
 
@@ -400,23 +403,27 @@ A `fail-both` with the same diagnostics is the target's own state: report it, do
 
 ### 4.3 The commits the second queue runs
 
-Built on 19.10 as in 4.1 (no worktree, no conflict):
+Built on 19.10 as in 4.1 (no worktree, no conflict), from `a397ff3`, the last code commit:
 
-    T=$(git merge-tree --write-tree 29510e7 2abd51f)     # 81e3145275e81aaa8f37391f4b552b9cad7248e3
-    C=$(git commit-tree "$T" -p 29510e7 -p 2abd51f -m "...")
+    T=$(git merge-tree --write-tree 29510e7 a397ff3)     # 6c40c2782bebed5cebb9a2d04eb3470312fe6b17
+    C=$(git commit-tree "$T" -p 29510e7 -p a397ff3 -m "...")
     git branch -f v7-deploy-d91-on-v7-p3 "$C"
 
 | Role | Commit | Note |
 |---|---|---|
-| this branch (`<TIP>`) | the tip at the queue's start: `2abd51f` or a later docs-only commit | `core`, `smoke`; a docs-only commit after `2abd51f` has the same code tree |
-| profile 3 candidate (`<P3M>`) | `v7-deploy-d91-on-v7-p3` = `89dede6` | tree `81e3145`; parents `29510e7` and `2abd51f`; its `code/`, `startup.m` and `models/` equal `2abd51f`'s |
+| this branch (`<TIP>`) | the tip at the queue's start (`a397ff3` or a later docs-only commit) | `core`, `smoke`; every commit after `a397ff3` changes `docs/` only, so its code tree is `a397ff3`'s (`code/` tree `7418c19`) |
+| profile 3 candidate (`<P3M>`) | `v7-deploy-d91-on-v7-p3` = `09671af` | tree `6c40c27`; parents `29510e7` and `a397ff3`; its `code/` tree is `7418c19` |
 | old side | `v7-deploy-d91-nospeed-on-v7-p3` = `2a2b525` | unchanged (4.1) |
 | target tip | `v7-p3` `29510e7` | n_rx 4 |
 
-The first queue's candidate stays reachable as `v7-deploy-d91-on-v7-p3-q1` (`192a546`). The
-second queue's command of 4.2 with these values:
-`bash v7_d91_deploy_tests2.sh <TIP> 89dede6 29510e7 2a2b525`. Step D3 checks `HEAD^{tree}`
-against `81e3145275e81aaa8f37391f4b552b9cad7248e3`.
+The first queue's candidate stays reachable as `v7-deploy-d91-on-v7-p3-q1` (`192a546`); an
+intermediate candidate `89dede6` (from `2abd51f`) was replaced before any test ran on it,
+because the first queue's `core` job then showed `V7FAIL test_core/run_det_test`: `functiontests`
+runs every local function whose name ends in 'test', and that helper (from `d91-set4`
+`31ab0de`) ran `eval_detector` with the test case as `DET_TEST`. `a397ff3` renames it
+`det_read_run`. The second queue's command of 4.2 with these values:
+`bash v7_d91_deploy_tests2.sh <TIP> 09671af 29510e7 2a2b525`. Step D3 checks `HEAD^{tree}`
+against `6c40c2782bebed5cebb9a2d04eb3470312fe6b17`.
 
 ## 5. Procedures
 
