@@ -1,0 +1,119 @@
+function d91_smoke_deploy()
+%D91_SMOKE_DEPLOY  Serial smoke of the deploy branch v7-deploy-d91 (docs/d91_deploy.md), run in a
+%   git archive export of the branch tip, never in a live tree. The chain A0..RPT runs in
+%   run_stage's smoke mode on this process: no parallel pool, no parallel turn. Then the
+%   deploy path's tail on the smoke data: B2F with the measured pick on validation, B2F on the
+%   enlarged fit set (the deployed path), the rehearsal on the third set, B3r once, its refusal
+%   of a second reading, KPI and RPT. One line per step: V7SMOKE <step> OK | EXPECTED <id> |
+%   ERROR <id>. Smoke numbers are not results.
+root = fileparts(mfilename('fullpath')); cd(root); startup; cd(root);
+fprintf('V7SMOKE start %s in %s, pool open %d, n_rx %d\n', datestr(now), root, ~isempty(gcp('nocreate')), rx_count());
+chain = {'A0', 'A4v', 'A5', 'A6', 'B1', 'B2', 'B2F', 'B2Fcheck', 'B3n', 'B3', 'B3m', 'B3q', 'B3a', 'B4', 'OOD', 'B4s', ...
+    'B3rguard', 'C1p', 'C1c', 'SURV', 'SURV3', 'C1d', 'C2', 'C2e', 'C2g', 'C2u', 'GAL', 'OHP', 'GCSA', 'EDGE', 'LAT', ...
+    'KPI', 'DASH', 'WEAK', 'RPT'};
+tail = {'B2Fpick', 'B2Fenl', 'REHEARSAL', 'B3r', 'B3ragain', 'KPI', 'RPT', 'KPI1'};
+n_ok = 0; n_err = 0; t0 = tic;
+for s = [chain, strcat('tail_', tail)]
+    st = s{1}; t1 = tic;
+    try
+        out = step(st, root);
+        fprintf('\nV7SMOKE %s %s (%.1f min)\n', st, out, toc(t1) / 60);
+        n_ok = n_ok + 1;
+    catch e
+        fprintf('\nV7SMOKE %s ERROR %s: %s (%.1f min)\n%s\n', st, e.identifier, first_line(e.message), toc(t1) / 60, ...
+            getReport(e, 'extended', 'hyperlinks', 'off'));
+        n_err = n_err + 1;
+    end
+    cd(root);
+    if ~isempty(gcp('nocreate'))                         % the smoke opens no pool; one here is a finding
+        fprintf('V7SMOKE POOL a parallel pool is open after %s: closed\n', st);
+        delete(gcp('nocreate'));
+    end
+end
+fprintf('\nV7SMOKE done %s: %d steps OK or expected, %d errors (%.1f min)\n', datestr(now), n_ok, n_err, toc(t0) / 60);
+exit(double(n_err > 0));
+end
+
+function out = step(st, root)
+% One step; out is 'OK' or 'EXPECTED <id>'.
+out = 'OK';
+mk = 'results/fresh3_read_started.txt';
+switch st
+    case 'B2Fcheck'                                      % the smoke's B2F: the revision on validation, no pick
+        f = {whos('-file', 'data/fusion.mat').name};
+        L = load('data/fusion.mat', 'fusion_rev');
+        assert(strcmp(L.fusion_rev, fusion_rev_id('validation')), 'smoke:b2f', 'fusion_rev %s', L.fusion_rev);
+        assert(~ismember('deployed_pick', f), 'smoke:b2f', 'a deployed_pick in the smoke''s validation fit');
+    case 'B3rguard'                                      % the validation revision is refused before the marker
+        out = expect(@() run_stage('smoke', 'B3r'), {'eval_detector:fresh3_fusion_rev'});
+        assert(~isfile(mk), 'smoke:marker', 'the refused B3r wrote its marker');
+        cd(root);
+    case 'tail_B2Fpick'                                  % the measured design on validation (FUSION_PICK)
+        out = expect(@() b2f_pick(), {'select_fusion:pick_rule'}, true);
+    case 'tail_B2Fenl'                                   % the deployed path: enlarged fit set, the kept base, the rule
+        out = expect(@() b2f_enlarged(), {'select_fusion:pick_rule', 'select_fusion:pick_base'}, true);
+        R = fusion_reading('_fresh2');
+        fprintf('after B2Fenl: fusion_rev ''%s'', state ''%s'', sample of a third-set reading ''%s'', no-go record %d\n', ...
+            R.fusion_rev, R.state, R.sample, isfile('data/fusion_nogo.mat'));
+    case 'tail_REHEARSAL'
+        det_read('fresh2');
+        cd(root);
+        M = load('results/eval_detector_metrics_fresh2.mat', 'metrics');
+        fprintf('rehearsal: test_set %s, fusion_state ''%s'', sample ''%s''\n', M.metrics.test_set, M.metrics.fusion_state, M.metrics.sample);
+    case 'tail_B3r'
+        run_stage('smoke', 'B3r'); cd(root);
+        assert(isfile(mk) && isfile('results/eval_detector_metrics_fresh3.mat'), 'smoke:b3r', 'no marker or no reading');
+        M = load('results/eval_detector_metrics_fresh3.mat', 'metrics');
+        fprintf('B3r: test_set %s, fusion_state ''%s'', sample ''%s''\n', M.metrics.test_set, M.metrics.fusion_state, M.metrics.sample);
+        fprintf('marker:\n%s\n', fileread(mk));
+    case 'tail_B3ragain'
+        out = expect(@() run_stage('smoke', 'B3r'), {'eval_detector:fresh3_read', 'eval_detector:fresh3_started'});
+        cd(root);
+    case 'tail_KPI1'
+        K = load('results/kpi_summary.mat', 'KPI'); k1 = K.KPI([K.KPI.id] == 1);
+        fprintf('KPI 1 (smoke): %s | %s\n', k1.value, strjoin(cellstr(string(k1.detail)), ' | '));
+    otherwise
+        run_stage('smoke', strrep(st, 'tail_', ''));
+end
+end
+
+function out = expect(fn, ids, end_ok)
+% Runs fn: one of the error ids is expected; a normal end passes only with end_ok. Any other
+% error, or one without an identifier, is rethrown.
+if nargin < 3, end_ok = false; end
+try
+    fn();
+catch e
+    if isempty(e.identifier) || ~ismember(e.identifier, ids), rethrow(e); end
+    out = ['EXPECTED ' e.identifier];
+    return;
+end
+assert(end_ok, 'smoke:expected', 'ended normally, expected %s', strjoin(ids, ' or '));
+out = 'OK';
+end
+
+function b2f_pick()
+% select_fusion with the measured design on the validation fit (the smoke has no enlarged set).
+FUSION_REV = true; FUSION_PICK = fusion_pick(); %#ok<NASGU>
+run('select_fusion');
+end
+
+function b2f_enlarged()
+% select_fusion as the deploy runs it (run_stage.m without SMOKE).
+FUSION_REV = true; FUSION_FIT = 'enlarged'; %#ok<NASGU>
+run('select_fusion');
+end
+
+function det_read(DET_TEST) %#ok<INUSD>
+% eval_detector with DET_TEST set, as run_stage.m runs it.
+run('eval_detector');
+end
+
+function n = rx_count()
+n = NaN;
+if isfile('params.mat'), q = load('params.mat'); if isfield(q.params, 'n_rx'), n = q.params.n_rx; end, end
+end
+
+function s = first_line(m)
+s = strtrim(regexprep(m, '\n.*', ''));
+end
