@@ -139,7 +139,8 @@ rep = {'=== DETECTOR ARCHITECTURES ===', sprintf(['Generated: %s | same splits, 
     'test frames %d: %s'], datestr(now), numel(yv), numel(yt), set_name), ''};
 rep{end+1} = '--- Selection basis: the validation split (macro-F1 %) ---';
 if fz
-    rep{end+1} = sprintf('Deployed monitor: %s (select_fusion.m, chosen on validation).', mon);
+    rep{end+1} = sprintf(['Deployed monitor: %s (set by B2F, select_fusion.m: chosen on validation, or the measured ' ...
+        'pick''s state).'], mon);
     rep{end+1} = sprintf(['%-40s %10s %14s %14s   (fusion N = %d cycles, lambda %.0e fixed; out of fold over select_fusion''s ' ...
         '5 folds by sub-run; per-cycle targets; the latch''s threshold chosen on the other folds)'], 'architecture', ...
         'per frame', 'fused (OOF)', latch_col(latch_on), FZ.N, FZ.lambda);

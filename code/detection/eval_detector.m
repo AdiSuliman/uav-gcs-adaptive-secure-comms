@@ -133,7 +133,7 @@ if isfile('data/fusion.mat') && isfield(sp.test, 'pos')
 end
 [~, max_idx] = max(Y_pred_prob, [], 1);
 Y_fused = reshape(categorical(classes(max_idx)', classes), [], 1);   % the fused class alone, beside
-os_thr = 0; latch_on = true;                           % both chosen on validation (select_fusion.m)
+os_thr = 0; latch_on = true;                           % both set by B2F (select_fusion.m)
 if ~isempty(fus), os_thr = onset_shape('threshold', fus.FM); latch_on = onset_shape('on', fus.FM); end
 cz_all = zeros(numel(Y_test), 1);
 if isfield(sp.test, 'gain_ant') && isfield(sp.test, 'pos') && latch_on
@@ -141,7 +141,8 @@ if isfield(sp.test, 'gain_ant') && isfield(sp.test, 'pos') && latch_on
     [~, max_idx] = max(pm, [], 2); clear pm
     fprintf('Decision with the monitor''s latched cause of a lost branch (threshold %+.2f)\n', os_thr);
 elseif ~latch_on
-    fprintf('Decision by the fused class: the latch of a lost branch''s cause is off (chosen on validation)\n');
+    fprintf(['Decision by the fused class: the latch of a lost branch''s cause is off ' ...
+        '(set by B2F: chosen on validation, or the measured pick''s state)\n']);
 end
 fprintf('%s', out_fus); clear out_fus
 

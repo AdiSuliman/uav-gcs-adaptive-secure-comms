@@ -1055,6 +1055,21 @@ verifyEmpty(tc, regexp(src, 'policy_run_set\([^\n]*\* d\)', 'once'));
 hi = b + 1000 * [1 1 1 100];
 verifyTrue(tc, all(hi(1:end-1) <= b(2:end)));
 verifyLessThan(tc, hi(end), seed_base(700001));
+% The fusion selection's resampling streams (select_fusion.m: the folds and the bootstrap over
+% sub-runs, of validation and of the enlarged fit set) are each their own
+src = fileread(which('select_fusion'));
+q = [cellfun(@(x) str2double(x{1}), regexp(src, '''Seed'', (\d+)', 'tokens')), ...
+    cellfun(@(x) str2double(x{1}), regexp(src, 'sb = (\d+)', 'tokens'))];
+verifyEqual(tc, sort(q), [61 62 9101 9102]);
+% The d91 measurement's resampling streams (docs/d91_fuse.md, sections 5 and 8: folds 9101,
+% bootstraps 9102, 9103, 9111-9115 and 9151-9155, trees 9131-9135 and 9141-9145) are each their
+% own, and every one lies below the lowest flight stream
+m = [9101 9102 9103 9111:9115 9131:9135 9141:9145 9151:9155];
+verifyEqual(tc, numel(unique(m)), numel(m));
+for x = {q, m}
+    verifyEmpty(tc, intersect(x{1}, N(:)));
+    verifyLessThan(tc, max(x{1}), min(N(:)));
+end
 end
 
 function test_draws_independent(tc)
@@ -6152,6 +6167,195 @@ verifyNotEmpty(tc, strfind(fileread(which('fused_class')), 'fuse_classes(''windo
 verifyNotEmpty(tc, strfind(fileread(which('det_frames')), 'fuse_classes(''cues'', PP.fuse)'));
 end
 
+function test_branch_evidence_cues(tc)
+% A lost branch's evidence (window_cues.m 'extra'): the linear-power GLR follows the antenna
+% that steps, not the one weakest by its mean (an airframe's static loss); the K and spread
+% cues are taken after its step, and over the whole window on the weakest antenna where no
+% antenna drops (then the base columns); the held reference (branch_ref.m) keeps the level
+% before a step and takes back a passing dip; the monitor builds the same row as fuse_classes.m.
+nF = numel(link_features('names')); nr = 3; n = 8;
+rs = RandStream('mt19937ar', 'Seed', 7);
+G = 0.3 * randn(rs, 1, nr, n); G(1, 2, 5:8) = G(1, 2, 5:8) - 10; G(1, 3, :) = G(1, 3, :) - 12;
+o = struct('glr', true, 'post', true, 'iso', true);
+verifyEqual(tc, window_cues('extra_names', o), {'iso_t', 'iso_db', 'iso_margin', 'iso_agree', 'gl_llr', 'gl_db', ...
+    'gl_age', 'gl_margin', 'gl_phi', 'ps_k_weak', 'ps_k_strong', 'ps_k_contrast', 'ps_sd_weak', 'ps_sd_contrast', 'ps_n'});
+x = window_cues('extra', G, zeros(1, nF, n), [], o);
+P = 10 .^ (reshape(G, nr, n) / 10);
+r = P(2, :) ./ mean(P([1 3], :), 1); m1 = mean(r(1:4)); m2 = mean(r(5:8)); m = mean(r);
+phi = branch_ref('eff', reshape(P, 1, nr, n));
+verifyEqual(tc, x(5), phi * (8 * log(m) - 4 * log(m1) - 4 * log(m2)), 'RelTol', 1e-9);   % antenna 2's split at cycle 5
+verifyEqual(tc, x([6 7 9]), [10 * log10(m1 / m2), 4, phi], 'AbsTol', 1e-9);
+verifyGreaterThan(tc, x(8), 0);
+verifyEqual(tc, x(4), 0);                                        % iso's step is not the weakest antenna by its mean
+K = @(p) min(max(10 * log10(max(sqrt(max(mean(p)^2 - std(p, 1)^2, 0)) / max(mean(p) - sqrt(max(mean(p)^2 - std(p, 1)^2, 0)), eps), 1e-2)), -20), 30);
+ko = mean([K(P(1, 5:8)), K(P(3, 5:8))]);
+g = reshape(G, nr, n); sd = std(g(:, 5:8), 0, 2);
+verifyEqual(tc, x(10:15), [K(P(2, 5:8)), ko, K(P(2, 5:8)) - ko, sd(2), sd(2) - mean(sd([1 3])), 0.5], 'AbsTol', 1e-9);
+G0 = repmat([-1 -4 -2], 1, 1, 6);                                 % no antenna drops: the base columns
+x0 = window_cues('extra', G0, zeros(1, nF, 6), [], struct('post', true, 'glr', true));
+xb = window_cues(G0, zeros(1, nF, 6), []);
+verifyEqual(tc, x0(1:5), [0 0 0 0 1]);
+verifyEqual(tc, x0([7 8 9 10]), xb([1 2 3 4]), 'AbsTol', 1e-12);
+verifyEqual(tc, x0(11), 1);
+% the held reference: a step of 10 dB on antenna 1 at cycle 11 is held out of it, a one-cycle
+% dip at cycle 5 on antenna 3 is taken back
+T = 30; Gs = 0.2 * randn(rs, T, nr); Gs(11:end, 1) = Gs(11:end, 1) - 10; Gs(5, 3) = Gs(5, 3) - 10;
+H = branch_ref('run', Gs);
+verifyEqual(tc, branch_ref('names'), {'br_w', 'br_db', 'br_len', 'br_nref'});
+verifyEqual(tc, H(1:3, :), zeros(3, 4) + [0 0 0 1/10; 0 0 0 2/10; 0 0 0 3/10], 'AbsTol', 1e-12);   % the reference being built
+verifyEqual(tc, H(10, 4), 0.9);                                 % antenna 3's dip at cycle 5 joins no other reference
+verifyGreaterThan(tc, H(14, 1), H(12, 1));
+verifyEqual(tc, H(14:end, 3), (4:T - 10)');                       % the cycles under test since the step
+verifyEqual(tc, H(end, 2), 10, 'AbsTol', 1);
+verifyEqual(tc, H(end, 4), 0.9);
+st = branch_ref('init', 1, nr);
+for t = 1:T, [st, h] = branch_ref('step', st, Gs(t, :)); verifyEqual(tc, h, H(t, :), 'AbsTol', 1e-12); end
+R = reshape(st.R(1, 1, :), 1, []); R = R(~isnan(R));
+verifyLessThan(tc, max(abs(10 * log10(R / mean(R)))), 2);        % antenna 1's reference keeps the level before its step
+st = branch_ref('init', 1, nr);
+for t = 1:8, st = branch_ref('step', st, Gs(t, :)); end
+verifyEqual(tc, sum(~isnan(st.R(1, 3, :))), 8);                  % the dip's cycle joined antenna 3's reference
+verifyLessThan(tc, min(reshape(st.R(1, 3, :), 1, [])), 0.2);
+verifyEqual(tc, branch_ref('eff', ones(1, nr, 3)), 1);
+pv = reshape(repmat(1:10, nr, 1), 1, nr, 10);                    % a slow fade repeats from cycle to cycle
+verifyLessThan(tc, branch_ref('eff', pv), 0.3);
+% phi fixed at 1 (opt.phi1): the GLR unscaled, no gl_phi, the other columns unchanged; the
+% held CUSUM steps unscaled, cycle by cycle as in the batch run
+o1 = o; o1.phi1 = true;
+verifyEqual(tc, window_cues('extra_names', o1), setdiff(window_cues('extra_names', o), {'gl_phi'}, 'stable'));
+x1 = window_cues('extra', G, zeros(1, nF, n), [], o1);
+verifyEqual(tc, x1(5), 8 * log(m) - 4 * log(m1) - 4 * log(m2), 'RelTol', 1e-9);
+verifyEqual(tc, x1([1:4 6 7 9:14]), x([1:4 6 7 10:15]), 'AbsTol', 1e-9);
+Gf = 10 * log10(reshape(repmat((1:30)', 1, nr), 30, nr)); Gf(20:end, 2) = Gf(20:end, 2) - 10;   % a slow fade, then a step
+H0 = branch_ref('run', Gf); H1 = branch_ref('run', Gf, true);
+verifyEqual(tc, branch_ref('run', Gf, false), H0);
+verifyGreaterThan(tc, max(abs(H1(:, 1) - H0(:, 1))), 0);
+st = branch_ref('init', 1, nr, true);
+for t = 1:30, [st, h] = branch_ref('step', st, Gf(t, :)); verifyEqual(tc, h, H1(t, :), 'AbsTol', 1e-12); end
+% the fusion's row with every column, and the monitor's
+nm = idle_summary('names'); ci = @(s) find(strcmp(nm, s));
+n = 14; Nf = 5; cls = {'none', 'antenna_fault', 'airframe_shadowing'}; A = policy_actions(); na = find(strcmp(A, 'no_action'));
+Pm = rand(rs, n, 3); Pm = Pm ./ sum(Pm, 2); Fr = randn(rs, n, nF); I = 2 * rand(rs, n, numel(nm)); I(:, ci('gap_ms')) = 10;
+Gn = randn(rs, n, nr); Gn(8:end, 2) = Gn(8:end, 2) - 9;
+S = struct('run', ones(n, 1), 'pos', (1:n)', 'gain_ant', Gn, 'feats_raw', Fr, 'feat_names', {link_features('names')}, 'idle', I);
+cues = struct('cfar', [1 0.5 0.4], 'iso', true, 'glr', true, 'held', true, 'post', true);
+Zx = fuse_classes('windows', S, Pm, Nf, cues);
+X = fuse_classes('extra', S, Nf, cues);
+verifyEqual(tc, Zx, [fuse_classes('windows', S, Pm, Nf), X]);
+verifyEqual(tc, X(:, end - 3:end), branch_ref('run', Gn));
+nZ = size(Zx, 2);
+FM = struct('W', 0.1 * randn(rs, nZ + 1, 3), 'mu', zeros(1, nZ), 'sd', ones(1, nZ), 'C', 3, 'lambda', 0, 'cues', cues, ...
+    'latch', false);                                             % the monitor's class is the fused class (as deployed)
+pc = fuse_classes('apply', FM, Zx);
+PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0, 'fuse', FM, 'fuse_N', Nf);
+m = policy_monitor('init', 1, numel(A));
+for k = 1:n
+    obs = struct('probs', Pm(k, :), 'unknown', false, 'feat', Fr(k, :), 'cfg_link', na, 'gant', Gn(k, :), 'idle', I(k, :));
+    [m, M] = policy_monitor('update', m, obs, PP, na); m = policy_monitor('change', m, false);
+    verifyEqual(tc, M.probs, pc(k, :), 'AbsTol', 1e-10);
+end
+cues1 = cues; cues1.phi1 = true;                                % the same row with phi fixed at 1
+X1 = fuse_classes('extra', S, Nf, cues1); Zx1 = fuse_classes('windows', S, Pm, Nf, cues1);
+verifyEqual(tc, size(X1, 2), size(X, 2) - 1);
+verifyEqual(tc, X1(:, end - 3:end), branch_ref('run', Gn, true));
+FM1 = FM; FM1.cues = cues1; FM1.W = FM.W([1:nZ - 11, nZ - 9:end], :); FM1.mu = zeros(1, nZ - 1); FM1.sd = ones(1, nZ - 1);
+pc1 = fuse_classes('apply', FM1, Zx1); PP1 = PP; PP1.fuse = FM1;
+m = policy_monitor('init', 1, numel(A));
+for k = 1:n
+    obs = struct('probs', Pm(k, :), 'unknown', false, 'feat', Fr(k, :), 'cfg_link', na, 'gant', Gn(k, :), 'idle', I(k, :));
+    [m, M] = policy_monitor('update', m, obs, PP1, na); m = policy_monitor('change', m, false);
+    verifyEqual(tc, M.probs, pc1(k, :), 'AbsTol', 1e-10);
+end
+verifyTrue(tc, isfield(m.br, 'phi1'));
+verifyError(tc, @() window_cues('extra', G, zeros(1, nF, 8), [], struct('held', true)), ?MException);
+m0 = policy_monitor('init', 1, numel(A));                         % a fusion without the held columns keeps no state
+PP.fuse = rmfield(FM, 'cues'); PP.fuse.W = 0.1 * randn(rs, numel(fuse_classes('windows', S, Pm, Nf)) / n + 1, 3);
+PP.fuse.mu = zeros(1, size(PP.fuse.W, 1) - 1); PP.fuse.sd = ones(1, size(PP.fuse.W, 1) - 1);
+m0 = policy_monitor('update', m0, struct('probs', Pm(1, :), 'unknown', false, 'feat', Fr(1, :), 'cfg_link', na, ...
+    'gant', Gn(1, :), 'idle', I(1, :)), PP, na);
+verifyFalse(tc, isfield(m0, 'br'));
+end
+
+function test_fusion_adopt_rules(tc)
+% The adoption rules of the fusion's further columns (fusion_adopt.m, select_fusion.m): a
+% lost branch's evidence only with antenna_fault and macro-F1 gains (lower bounds > 0), no
+% loss of airframe_shadowing beyond its interval, none at K <= 0 dB, no rise of the clean
+% frames read as a threat or a lost branch; the paired bootstrap reads its own sums.
+z = [0 -1 1];
+d = struct('all', [0.3 0.1 0.5], 'above', [0.3 0.1 0.5], 'cl', z, 'lb', z, 'fault', [2 0.5 3.5], 'shad', z, ...
+    'fault_low', z, 'shad_low', z);
+verifyTrue(tc, fusion_adopt('branch', d));
+for f = {'all', 'above', 'fault'}
+    e = d; e.(f{1}) = [0.3 -0.1 0.5]; verifyFalse(tc, fusion_adopt('branch', e), f{1});
+end
+for f = {'shad', 'fault_low', 'shad_low'}
+    e = d; e.(f{1}) = [-2 -3 -0.5]; verifyFalse(tc, fusion_adopt('branch', e), f{1});
+end
+for f = {'cl', 'lb'}
+    e = d; e.(f{1}) = [0.5 0.1 0.9]; verifyFalse(tc, fusion_adopt('branch', e), f{1});
+end
+c = struct('all', [0.2 0.05 0.4], 'above', [0 -0.05 0.1], 'cl', z);
+verifyTrue(tc, fusion_adopt('cfar', c));
+no = d; no.fault = [0 -1 1];
+G = {[], c, no, d, no, no, no};
+[p, bs] = fusion_adopt('choose', G); verifyEqual(tc, [p bs], [0 4]);
+verifyEqual(tc, fusion_adopt('combo', G, bs, d), 8);             % both rules hold for the combination
+db = d; db.fault = [0.1 -0.2 0.5];
+verifyEqual(tc, fusion_adopt('combo', G, bs, db), 4);            % else the single one with the larger gain
+G{2} = struct('all', [0.2 -0.05 0.4], 'above', [0 0 0], 'cl', z);
+[p, bs] = fusion_adopt('choose', G); verifyEqual(tc, [p bs], [4 4]);
+G{4} = no; verifyEqual(tc, fusion_adopt('choose', G), 1);
+cls = {'none', 'antenna_fault', 'airframe_shadowing'};
+yt = [1 1 2 2 3 3 1 2]'; ya = [1 2 1 2 3 1 1 2]'; run = [1 1 2 2 3 3 4 4]';
+B = fusion_adopt('boot', run, 50, 5);
+r = fusion_adopt('paired', yt, ya, yt, true(8, 1), false(8, 1), cls, B);
+f1 = @(y, c) 2 * sum(y == c & yt == c) / (sum(y == c) + sum(yt == c));
+verifyEqual(tc, r.fault(1), 100 * (1 - f1(ya, 2)), 'AbsTol', 1e-9);
+verifyEqual(tc, r.shad(1), 100 * (1 - f1(ya, 3)), 'AbsTol', 1e-9);
+verifyEqual(tc, r.lb(1), -100 * 1 / 3, 'AbsTol', 1e-9);              % one of the three clean frames was read as a fault
+verifyEqual(tc, r.cl(1), -100 * 1 / 3, 'AbsTol', 1e-9);
+end
+
+function test_fusion_pick_deploy(tc)
+% With FUSION_REV and FUSION_FIT = 'enlarged' select_fusion.m deploys the design the d91
+% measurement adopted (fusion_pick.m) as measured, never choosing again: its N and lambda,
+% the deployed target rule, no cfar, the latch off as measured; it stops unless the adoption
+% rule holds for it on its own fit set, and records the pick and the revision id that B3r
+% checks (fusion_rev_id.m); FUSION_PICK overrides the pick only on the validation fit.
+P = fusion_pick();
+verifyEqual(tc, P.name, 'branch evidence');
+verifyEqual(tc, [P.N P.lambda], [12 1e-3]);
+verifyEqual(tc, P.target_age, 'N');
+verifyEmpty(tc, P.cues.cfar);
+verifyTrue(tc, P.cues.iso && P.cues.glr && P.cues.held && P.cues.post);
+verifyFalse(tc, isfield(P.cues, 'phi1') && P.cues.phi1);
+verifyClass(tc, P.latch, 'logical');
+verifyFalse(tc, P.latch);                                % the measured state (m_all.m, latch 0)
+dp = P; dp.check = struct('all', [0 0 0]); dp.check.latch_val = struct('macro_f1_latched', 0.9, 'macro_f1_fused', 0.91);
+verifyTrue(tc, isequal(rmfield(dp, 'check'), fusion_pick()));   % a deployed_pick built as B2F builds it passes the planned guard (section 7); the guard's own test lands with it
+verifyEqual(tc, fusion_rev_id('enlarged'), 'd91_branch_evidence_enlarged');
+verifyEqual(tc, fusion_rev_id('validation'), 'd91_branch_evidence_validation');
+verifyError(tc, @() fusion_rev_id('test'), 'fusion_rev_id:fit');
+src = fileread(which('select_fusion'));
+for t = {'ENL = REV && exist(''FUSION_FIT'', ''var'') && strcmp(FUSION_FIT, ''enlarged'');', ...
+        'elseif ENL, PK = fusion_pick(); end', 'TA = struct(''target_age'', NS(a));', '''select_fusion:pick_rule''', ...
+        'assert(fusion_adopt(''branch'', GP), ''select_fusion:pick_rule''', 'deployed_pick = PK; deployed_pick.check = GP;', ...
+        '''select_fusion:pick_latch''', 'deployed_pick.check.latch_val = struct(''macro_f1_latched'', mf_latch, ''macro_f1_fused'', mf_fused);', ...
+        'assert(~ENL || isequal(PK, fusion_pick()), ''select_fusion:pick_measured'''}
+    verifyNotEmpty(tc, strfind(src, t{1}), t{1});
+end
+k1 = strfind(src, 'elseif ENL, PK = fusion_pick(); end'); k2 = strfind(src, '''select_fusion:pick_measured''');
+k3 = strfind(src, 'S = load(''data/splits.mat'');');
+verifyTrue(tc, isscalar(k1) && isscalar(k2) && isscalar(k3) && k1 < k2 && k2 < k3);   % an override of the enlarged fit stops before any data is read
+j1 = strfind(src, 'FM.latch = mf_latch > mf_fused;'); j2 = strfind(src, 'FM.latch = PK.latch;');
+j3 = strfind(src, 'save(''data/fusion.mat'', ''FM''');
+verifyTrue(tc, isscalar(j1) && isscalar(j2) && isscalar(j3) && j1 < j2 && j2 < j3);   % the pick's latch replaces validation's choice before the save
+i1 = strfind(src, 'if ~isempty(PK)                                      % the measured design and its rule check');
+i2 = strfind(src, '[pick, bs] = fusion_adopt(''choose'', G);');
+i3 = regexp(src, '\r?\n    else\r?\n', 'once');
+verifyTrue(tc, isscalar(i1) && isscalar(i2) && i1 < i3 && i3 < i2);   % 'choose' only without a pick
+end
+
 function test_fusion_target_age(tc)
 % A path-loss onset is the fused target while the window still holds a cycle before it
 % (pos - onset < N - 1, threat_active.m's rule) for a fusion fitted on that rule
@@ -6172,7 +6376,8 @@ verifyNotEmpty(tc, strfind(src, 'cm = true(size(y)); lab = ''the per-cycle label
 verifyNotEmpty(tc, strfind(src, 'if REV, cm = all(YN == y, 2); lab = ''the frames no candidate relabels''; end'));
 verifyNotEmpty(tc, strfind(src, ['save(''data/fusion.mat'', ''FM'', ''N'', ''lambda'', ''NS'', ''LAMBDA'', ''cv'', ''val_probs_oof'', ' ...
     '''val_latch_oof'', ''val_target'', ''q_thr'');']));
-verifyNotEmpty(tc, strfind(src, 'if REV, save(''data/fusion.mat'', ''cvy'', ''cvo'', ''-append''); end'));
+verifyNotEmpty(tc, strfind(src, 'fusion_rev = fusion_rev_id(fit_name);'));
+verifyNotEmpty(tc, strfind(src, 'save(''data/fusion.mat'', ''cvy'', ''cvo'', ''fusion_rev'', ''-append'');'));
 verifyNotEmpty(tc, strfind(src, 'cvy(a, b) = macro_f1(y(cm), yh(cm), C); cvo(a, b) = macro_f1(yn, yh, C);'));
 verifyNotEmpty(tc, strfind(src, 'REV = exist(''FUSION_REV'', ''var'') && isequal(FUSION_REV, true);'));
 verifyNotEmpty(tc, strfind(src, 'TAa = []; if REV, TAa = struct(''target_age'', NS(a) - 1); end'));

@@ -67,7 +67,8 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   features, unknown scores, and obs.idle, the record of each cycle's idle time,
 %   idle_summary.m, and obs.bch, the record of each cycle's channel estimates per antenna,
 %   branch_record.m, over window_cues('branch_window') cycles: the fusion's row holds
-%   window_cues.m's columns, as fuse_classes.m's). The window's antenna gains are kept
+%   window_cues.m's columns, as fuse_classes.m's), and, for a fusion with the held columns,
+%   the held reference of every branch over the episode's cycles (branch_ref.m, mem.br). The window's antenna gains are kept
 %   less the power step and its SINR less the whole known gain of the configuration each
 %   frame was received with, so the fusion reads no level step at a change of our own
 %   configuration; within one configuration the window's statistics are those of the
@@ -151,7 +152,7 @@ mem.tried(mem.good >= C.heal, :) = false;
 [mem, pf, te, unk] = fusion(mem, obs, PP, gk(link), gw(link));
 % Latched cause of a lost branch (onset_shape.m): read from the shape of its onset, a
 % step (antenna_fault) or a ramp (airframe_shadowing), and kept while the branch stays lost;
-% only while the deployed fusion latches (onset_shape('on', PP.fuse), chosen on validation)
+% only while the deployed fusion latches (onset_shape('on', PP.fuse), set by B2F)
 if ~isfield(mem, 'os'), mem.os = []; end
 FZ = []; if isfield(PP, 'fuse'), FZ = PP.fuse; end
 if isfield(obs, 'gant') && ~isempty(obs.gant) && onset_shape('on', FZ)
@@ -262,6 +263,12 @@ nB = 9 * size(g, 2); bc = nan(NE, nB);
 if isfield(obs, 'bch') && ~isempty(obs.bch), bc = double(obs.bch); nB = size(bc, 2); end
 if ~isfield(mem, 'wb') || isempty(mem.wb) || size(mem.wb, 2) ~= nB, mem.wb = nan(NE, nB, W); end
 mem.wb = cat(3, mem.wb(:, :, 2:end), bc);
+Hx = [];                                                   % the held reference of every branch (branch_ref.m)
+cu = []; if isfield(PP, 'fuse') && ~isempty(PP.fuse), cu = fuse_classes('cues', PP.fuse); end
+if isfield(cu, 'held') && cu.held && size(g, 2) > 1
+    if ~isfield(mem, 'br') || isempty(mem.br), mem.br = branch_ref('init', NE, size(g, 2), isfield(cu, 'phi1') && cu.phi1); end
+    [mem.br, Hx] = branch_ref('step', mem.br, g);
+end
 nC = size(obs.probs, 2);
 pf = obs.probs; te = zeros(NE, numel(temporal_evidence('names', nC)) - nC);
 for n = unique(mem.wn)                                     % episodes with the same filled window length
@@ -272,7 +279,8 @@ for n = unique(mem.wn)                                     % episodes with the s
     if isfield(PP, 'fuse') && ~isempty(PP.fuse)                  % with the current frame's own evidence (fuse_classes.m)
         kb = W - min(n, NB) + 1:W;
         Zc = window_cues(mem.wg(e, :, k), mem.wf(e, :, k), mem.wi(e, :, k), mem.wb(e, :, kb));   % branch, level step, idle time, branch coherence
-        Xe = window_cues('extra', mem.wg(e, :, k), mem.wf(e, :, k), mem.wi(e, :, k), fuse_classes('cues', PP.fuse));
+        h = {}; if ~isempty(Hx), h = {Hx(e, :)}; end
+        Xe = window_cues('extra', mem.wg(e, :, k), mem.wf(e, :, k), mem.wi(e, :, k), cu, h{:});
         pf(e, :) = fuse_classes('apply', PP.fuse, [Z, Zc, log(max(double(mem.wp(e, :, W)), 1e-6)), Xe]);
     end
     ku = W - min(n, Nu) + 1:W;
