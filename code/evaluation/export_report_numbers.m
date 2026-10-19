@@ -14,7 +14,8 @@
 N = struct('generated', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
 RS = result_status();
 st = RS([RS.stale]);
-kin = {'results/eval_detector_metrics.mat', 'results/eval_detector_metrics_fresh2.mat', 'results/ood_detection.mat', 'results/policy_evaluation.mat', ...
+kin = {'results/eval_detector_metrics.mat', 'results/eval_detector_metrics_fresh2.mat', 'results/eval_detector_metrics_fresh3.mat', ...
+    'results/ood_detection.mat', 'results/policy_evaluation.mat', ...
     'results/latency.mat', 'results/edge_map.mat', 'results/phy_validation.txt'};   % files the KPI summary reads
 if isfile('results/kpi_summary.mat')
     old = kin(cellfun(@(f) isfile(f) && dir(f).datenum > dir('results/kpi_summary.mat').datenum, kin));
@@ -27,8 +28,10 @@ N.stale = st;
 for i = 1:numel(st), warning('export_report_numbers:stale', 'STALE %s: %s', st(i).file, st(i).why); end
 N.kpi = take('results/kpi_summary.mat', 'KPI');
 
-for f = {'detector', 'results/eval_detector_metrics.mat'; 'detector_third', 'results/eval_detector_metrics_fresh2.mat'}'
-    M = take(f{2}, 'metrics');                          % detector_third: the third test set (B3m), KPI 1's reading
+N.kpi1_set = kpi1_set();                                % the set KPI 1 is read on: fresh2 the third, fresh3 the fourth
+for f = {'detector', 'results/eval_detector_metrics.mat'; 'detector_third', 'results/eval_detector_metrics_fresh2.mat'; ...
+        'detector_fourth', 'results/eval_detector_metrics_fresh3.mat'}'
+    M = take(f{2}, 'metrics');                          % the third (B3m) and fourth (B3r) test sets
     if ~isempty(M)
         cm = M.conf_mat; rn = 100 * cm ./ max(sum(cm, 2), 1);
         rn(logical(eye(size(rn)))) = 0;
@@ -40,6 +43,7 @@ for f = {'detector', 'results/eval_detector_metrics.mat'; 'detector_third', 'res
     end
     N.(f{1}) = M;
 end
+N.architectures = take('results/architecture_comparison.mat', 'arch');   % B3a: its set, fusion and in-sample label
 
 if isfile('results/ood_detection.mat')
     O = load('results/ood_detection.mat', 'R', 'NEST', 'SC', 'sel', 'K_NEW');
