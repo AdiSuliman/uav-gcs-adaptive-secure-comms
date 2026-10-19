@@ -14,14 +14,19 @@
 #                                    the kids/<pid> lines the query keeps; else 'none')
 #   kids/<pid>                       other children of a process, one "<pid> <name> live|exited" per line;
 #                                    as in the real query, only a live one named MATLAB.exe counts
-#   state/<pid>                      live, exited or other (else: live for a stub win64 child of this
-#                                    sandbox, other for another process of it; else none)
+#   allkids/<pid>                    MATLAB.exe children with exited ones (mlkids; else as mlchild)
+#   state/<pid>                      live, exited or other (else: for a procs/<pid> process live when its
+#                                    command line runs bin\win64\MATLAB.exe, else other; live for a stub
+#                                    win64 child of this sandbox, other for another process of it; else none)
 #   exec_delay                       seconds after its start during which a stub MATLAB still shows the
 #                                    command line of the takeover's subshell (exec not done yet)
 #   fail_<query>, fail_<query>_<pid> that query fails (no output) while the file exists
 #   hang_<query>, hang_<query>_<pid> that query hangs (the takeover's query timeout ends it); its PID goes to hung
 # As the real queries: cmdline and created print 'none' for a missing process, mlchild 'none' for
 # no MATLAB child, and scripts and matlab end with a line 'end'.
+# taskkill /PID <pid> /F stands in for taskkill: its arguments go to taskkill.log ("<ns> <args>"); a
+# procs/<pid> process is removed, a process of this sandbox gets SIGTERM (its exit trap runs);
+# anything else is refused (status 128).
 D=${V7T_SYS_DIR:?}
 { [ -f "$D/fail_$1" ] || { [ -n "${2:-}" ] && [ -f "$D/fail_$1_$2" ]; }; } && exit 0
 { [ -f "$D/hang_$1" ] || { [ -n "${2:-}" ] && [ -f "$D/hang_$1_$2" ]; }; } && { echo $$ >> "$D/hung"; exec sleep 1000; }
@@ -70,8 +75,17 @@ case $1 in
       fi
       if [ "${#out[@]}" -gt 0 ]; then printf '%s\n' "${out[@]}"; else echo none; fi
     fi;;
+  mlkids)
+    if [ -f "$D/allkids/$2" ]; then cat "$D/allkids/$2"; else exec bash "$0" mlchild "$2"; fi;;
+  taskkill)
+    shift; echo "$(date +%s%N) $*" >> "$D/taskkill.log"
+    k=""; while [ $# -gt 0 ]; do [ "$1" = /PID ] && k=${2:-}; shift; done
+    if [ -n "$k" ] && [ -f "$D/procs/$k" ]; then rm -f "$D/procs/$k" "$D/state/$k" "$D/children/$k"; exit 0; fi
+    [ -n "$k" ] && p=$(proc_of "$k") && kill -TERM "${p#/proc/}" 2>/dev/null && exit 0
+    exit 128;;
   state)
     if [ -f "$D/state/$2" ]; then cat "$D/state/$2"
+    elif [ -f "$D/procs/$2" ]; then if grep -qiF 'win64\MATLAB.exe' "$D/procs/$2"; then echo live; else echo other; fi
     elif p=$(proc_of "$2"); then if is_w64 "$p"; then echo live; else echo other; fi
     else echo none; fi;;
   matlab)   sed -e '$a\' "$D/matlab" 2>/dev/null; echo end;;

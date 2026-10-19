@@ -43,6 +43,13 @@
 #                                finished, or given up with its chain stopped
 #   p1.abandon, p3.abandon, p2.abandon         end that track; the final phase skips the profile;
 #                                              final for the run (never removed to bring it back)
+#   final.hold         the final phase starts no MATLAB while it exists
+#   p2_start.hold      profile 2 neither branches v7-p2 nor starts anything while it exists
+#   p1_cut_after.SURV3 profile 1's chain win64 MATLAB ended (taskkill /F, no /T) once its current part
+#                      shows '##### STAGE SURV3 done'; renamed to .used_<time>
+#   p1_hand.busy, p3_hand.busy, p2_hand.busy   a hand-run in that worktree (v7_d91_gated_run.sh): no
+#                      takeover MATLAB starts there while the file exists or a MATLAB of it lives;
+#                      never removed by the takeover
 # Alerts: v7_d86/ALERT_<topic>.txt (delete after handling) and this script's log.
 #
 # Safety: refuses unless cygpath -w "$TEMP" is TEMP_WIN (the parallel turn file lives there),
@@ -112,6 +119,9 @@ QRETRY_S=${V7T_QRETRY_S:-30}               # [s] before an unknown value is read
 Q_TIMEOUT_S=${V7T_Q_TIMEOUT_S:-120}        # [s] a process query not answered by then is ended (unknown)
 UNKNOWN_ALERT_S=${V7T_UNKNOWN_ALERT_S:-3600}  # [s] the same value unknown this long: alert
 STALL_S=${V7T_STALL_S:-$(( 2 * POLL + 600 ))} # [s] a track's beat this old: alert
+HAND_ALERT_S=${V7T_HAND_ALERT_S:-43200}    # [s] a start held this long by a hand-run: alert
+FINAL_HOLD_ALERT_S=${V7T_FINAL_HOLD_ALERT_S:-86400}  # [s] the final phase held this long by final.hold: alert
+P2_HOLD_ALERT_S=${V7T_P2_HOLD_ALERT_S:-172800}       # [s] profile 2 held this long by p2_start.hold: alert
 ALLOW_PIDS=${V7T_ALLOW_PIDS:-}             # profile 1's live chain subshells of the launcher
 ALLOW_WIN_S=${V7T_ALLOW_WIN_S:-900}        # [s] an allowed subshell is created this soon after its part's start
 # exact -batch commands of the worktree copies (B3m builds, fourth test set), not counted as busy
@@ -120,7 +130,7 @@ R="$L/v7_d86"
 LOCK="$R/takeover.lock"
 GATE="$R/takeover_gate.d"                  # one track at a time between a check and its part header
 GO3="$R/p3_brerun.go"
-P1ML="$R/takeover_p1_chain_ml.txt"         # MATLAB processes of profile 1's launcher chain seen in this boot: '<Windows PID> <created>'
+P1ML="$R/takeover_p1_chain_ml.txt"         # MATLAB processes of profile 1's launcher chain seen in this boot: '<Windows PID> <created> <win64|launcher>'
 OLD_SCRIPTS=(v7_d86_launch.sh v7_d87_p3fix.sh v7_d87_redo.sh v7_d87_resume.ps1 v7_d83_launch.sh v7_fix_resume.sh
              v7_d87_b3m.sh v7_wait_c1p_then_fix.sh v7_guard_c1p_fail.sh)
 SCRIPT_RE='(v7_d8(6_launch|7_p3fix|7_redo|3_launch|7_b3m)|v7_fix_resume|v7_wait_c1p_then_fix|v7_guard_c1p_fail)'   # old bash run scripts (without .sh)
@@ -136,6 +146,7 @@ FIN=(LAT KPI DASH WEAK RPT BUNDLE)
 NTAIL=$(( ${#HV[@]} + ${#FIN[@]} ))
 GGEN_RE='^params\.mat$|^models/[^/]*\.slx$|^results/'
 declare -A RAISED=() UNK=() TPID=()
+IN_FINAL=""; ML_HELD=0; P1CUT_NEXT=0; P2H_T=""
 
 say() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*"; }
 wt()  { case $1 in p1) echo "$V7";; p3) echo "$P3";; p2) echo "$P2";; esac; }
@@ -195,7 +206,8 @@ in_list() { local x=$1; shift; local y; for y in "$@"; do [ "$x" = "$y" ] && ret
 # Machine queries: PowerShell, or the stand-in V7T_SYS, each ended after Q_TIMEOUT_S. Empty output
 # means the query failed (unknown): cmdline and created print 'none' for a missing process,
 # mlchild 'none' for no live MATLAB child (by ParentProcessId, which Windows keeps after the parent
-# exits; exited processes not counted), and scripts and matlab end their list with a line 'end'.
+# exits; exited processes not counted), mlkids the same with exited ones counted, and scripts and
+# matlab end their list with a line 'end'.
 # MATLAB means a process named MATLAB.exe (the bin launcher, the win64 process, a pool worker); its
 # helpers MATLABWebUI.exe, MATLABWindow.exe and MathWorksServiceHost.exe never count, as they can
 # outlive an exited MATLAB by days. state is live only for a live bin\win64\MATLAB.exe.
@@ -218,12 +230,13 @@ sysq() {
   local q
   if [ -n "$SYS" ]; then q_run "$SYS" "$@"; return; fi
   case $1 in
-    cmdline|state|created|mlchild) [[ "${2:-}" =~ ^[0-9]+$ ]] || { echo none; return 0; };;
+    cmdline|state|created|mlchild|mlkids) [[ "${2:-}" =~ ^[0-9]+$ ]] || { echo none; return 0; };;
   esac
   case $1 in
     cmdline)  q="\$p = Get-CimInstance Win32_Process -Filter \"ProcessId=$2\"; if (-not \$p) {'none'} elseif (\$p.CommandLine) {\$p.CommandLine} else {'(no command line)'}";;
     created)  q="\$p = Get-CimInstance Win32_Process -Filter \"ProcessId=$2\"; if (\$p) { ([DateTimeOffset]\$p.CreationDate).ToUnixTimeSeconds() } else {'none'}";;
     mlchild)  q="\$c = @(Get-CimInstance Win32_Process -Filter \"ParentProcessId=$2\" | Where-Object { \$_.Name -eq 'MATLAB.exe' } | Where-Object { \$x = Get-Process -Id \$_.ProcessId -ErrorAction SilentlyContinue; \$x -and -not \$x.HasExited }); if (\$c.Count) { \$c | ForEach-Object { \$_.ProcessId } } else {'none'}";;
+    mlkids)   q="\$c = @(Get-CimInstance Win32_Process -Filter \"ParentProcessId=$2\" | Where-Object { \$_.Name -eq 'MATLAB.exe' }); if (\$c.Count) { \$c | ForEach-Object { \$_.ProcessId } } else {'none'}";;
     scripts)  q="Get-CimInstance Win32_Process -Filter \"Name='bash.exe'\" | Where-Object { \$_.CommandLine -like ('*v7_d8' + '*') -or \$_.CommandLine -like ('*v7_fix' + '_resume*') -or \$_.CommandLine -like ('*v7_wait' + '_c1p_then_fix*') -or \$_.CommandLine -like ('*v7_guard' + '_c1p_fail*') } | ForEach-Object { '{0}|{1}|{2}' -f \$_.ProcessId, ([DateTimeOffset]\$_.CreationDate).ToUnixTimeSeconds(), \$_.CommandLine }; 'end'";;
     state)    q="\$p = Get-Process -Id $2 -ErrorAction SilentlyContinue; if (-not \$p) {'none'} elseif (\$p.HasExited) {'exited'} elseif (\$p.Path -like '*\win64\MATLAB.exe') {'live'} else {'other'}";;
     matlab)   q="Get-CimInstance Win32_Process -Filter \"Name='MATLAB.exe'\" | Where-Object { \$_.CommandLine -like '*win64*' } | ForEach-Object { \$p = Get-Process -Id \$_.ProcessId -ErrorAction SilentlyContinue; \$x = if (-not \$p -or \$p.HasExited) {1} else {0}; '{0}|{1}|{2}' -f \$_.ProcessId, \$x, \$_.CommandLine }; 'end'";;
@@ -481,8 +494,8 @@ p1_chain_gone() {   # profile 1's launcher chain: its subshells gone, none has a
   for p in $ALLOW_PIDS; do [ "$(sysq mlchild "$p")" = none ] || return 1; done
   ! p1_ml_left
 }
-p1_ml_note() {   # the MATLAB children of V7T_ALLOW_PIDS and their MATLAB.exe children (bin launcher, win64) added to P1ML; a file from before the boot dropped
-  local p x y ct m c c2
+p1_ml_note() {   # the MATLAB children of V7T_ALLOW_PIDS and their MATLAB.exe children added to P1ML with their role (win64 by the path bin\win64\MATLAB.exe, else launcher); a file from before the boot dropped
+  local p x y ct m c c2 role
   [ -n "$ALLOW_PIDS" ] || return 0
   if [ -f "$P1ML" ]; then m=$(mtime "$P1ML") || return 0; [ "$m" -ge "$BOOT" ] || rm -f "$P1ML"; fi
   for p in $ALLOW_PIDS; do
@@ -494,7 +507,8 @@ p1_ml_note() {   # the MATLAB children of V7T_ALLOW_PIDS and their MATLAB.exe ch
         isnum "$y" || continue
         grep -q "^$y " "$P1ML" 2>/dev/null && continue
         ct=$(sysq created "$y"); isnum "$ct" || continue
-        echo "$y $ct" >> "$P1ML"; say "p1: launcher-chain MATLAB $y recorded ($(basename "$P1ML"))"
+        case $(sysq state "$y") in live) role=win64;; other) role=launcher;; *) continue;; esac
+        echo "$y $ct $role" >> "$P1ML"; say "p1: launcher-chain MATLAB $y ($role) recorded ($(basename "$P1ML"))"
       done
     done
   done
@@ -529,7 +543,8 @@ p1_ml_left() {   # 0 while a MATLAB of profile 1's launcher chain recorded in th
   split_lines S "$x"
   for x in "${S[@]}"; do
     pid=${x%% *}; isnum "$pid" || continue
-    [ "$(pid_busy "$pid" "${x#* }")" = gone ] || return 0
+    x=${x#* }
+    [ "$(pid_busy "$pid" "${x%% *}")" = gone ] || return 0
   done
   return 1
 }
@@ -573,9 +588,7 @@ part_header() {   # profile $1, list index $2, A0 first $3, mode $4, extra heade
 same_r() { local r; r=$(next_idx "$1") && [ "$r" = "$2" ]; }   # first unfinished stage still $2, read again before a part header
 commit_note() { echo "$1 $(br "$1") $(git -C "$(wt "$1")" rev-parse HEAD) $(date '+%Y-%m-%d %H:%M:%S %z') takeover: $2" >> "$R/code_commit.txt"; }
 
-# MATLAB -batch "$2" in profile $1's worktree, output appended to its log; heartbeat while it runs.
-# Its PID file: the subshell's Windows PID and 'msys <pid>' until the exec shows, then the
-# bin\matlab.exe launcher's PID, and 'win64 <pid>' once the launcher's win64\MATLAB.exe child shows.
+# MATLAB processes: what counts as one, and the state of a recorded one
 ml_cmd() {   # command line $1 runs MATLAB.exe (bin launcher or win64), not MATLABWebUI.exe, MATLABWindow.exe or another program
   local c=${1,,} e
   if [[ $c == \"* ]]; then c=${c#\"}; e=${c%%\"*}; else e=${c%%[[:space:]]*}; fi
@@ -606,7 +619,12 @@ ml_state() {   # alive, gone or unknown: the MATLAB recorded in profile $1's PID
       ct=$(sysq created "$op")
       if [ -z "$ct" ]; then s=unknown; elif isnum "$ct" && [ "$ct" -lt "$START_T" ]; then s=alive; fi
     fi
-  elif [ "$c" != none ] && ml_cmd "$c"; then s=alive
+  elif [ "$c" != none ] && ml_cmd "$c"; then   # MATLAB under that PID: alive unless it has exited (its process object lingering)
+    case $(sysq state "$op") in
+      exited|none) s=$(ml_child "$op");;
+      '') s=unknown;;
+      *) s=alive;;
+    esac
   else s=$(ml_child "$op")   # gone, or another program under that PID: alive while a MATLAB.exe child of it lives
   fi
   if [ "$s" != alive ] && [ -n "$w64" ]; then   # the launcher's win64\MATLAB.exe, which can outlive it
@@ -634,40 +652,107 @@ ml_guard() {   # a takeover MATLAB recorded for the worktree, still alive or unk
   known "ml_$g"
   rm -f "$pf"
 }
+pf_put() { local f=$1; shift; printf '%s\n' "$@" > "$f.tmp$BASHPID" && mv -f "$f.tmp$BASHPID" "$f"; }   # PID file $1 replaced in one step: a reader never finds it empty
 ml_pid_try() {   # PID file $2 names MATLAB (ML_WP) once subshell $1 shows it (exec done); status 1 before
   local wp c
   { read -r wp < "/proc/$1/winpid"; } 2>/dev/null && isnum "$wp" || return 1
   c=$(sysq cmdline "$wp")
   [ -n "$c" ] && [ "$c" != none ] && ml_cmd "$c" || return 1
-  printf '%s\n' "$wp" > "$2"; ML_WP=$wp
+  pf_put "$2" "$wp"; ML_WP=$wp
 }
-ml_w64_try() {   # PID file $1 also names launcher ML_WP's win64\MATLAB.exe child once it shows; status 1 before
-  local ch x
-  ch=$(sysq mlchild "$ML_WP"); [ -n "$ch" ] && [ "$ch" != none ] || return 1
+ml_w64_try() {   # PID file $1 also names the win64\MATLAB.exe child of launcher ML_WP (or of PID $2) once it shows, with its creation time; status 1 before
+  local ch x ct p=${2:-$ML_WP}
+  ch=$(sysq mlchild "$p"); [ -n "$ch" ] && [ "$ch" != none ] || return 1
   for x in $ch; do
-    isnum "$x" && [ "$x" != "$ML_WP" ] || continue
-    [ "$(sysq state "$x")" = live ] && { printf '%s\nwin64 %s\n' "$ML_WP" "$x" > "$1"; return 0; }
+    isnum "$x" && [ "$x" != "$p" ] && [ "$x" != "$ML_WP" ] || continue
+    if [ "$(sysq state "$x")" = live ]; then
+      ct=$(sysq created "$x"); isnum "$ct" || ct=""
+      pf_put "$1" "$ML_WP" "win64 $x" ${ct:+"win64_created $ct"}
+      return 0
+    fi
   done
   return 1
 }
+ml_lost() {   # PID file $1 for a launcher that exited before its PID was taken: its subshell's last Windows PID $2, and the win64 MATLAB found under it, also below an exited launcher
+  local k ch
+  pf_put "$1" "$2"; ML_WP=$2
+  ml_w64_try "$1" && return 0
+  ch=$(sysq mlkids "$2"); [ -n "$ch" ] && [ "$ch" != none ] || return 1
+  for k in $ch; do isnum "$k" && [ "$k" != "$2" ] && ml_w64_try "$1" "$k" && return 0; done
+  return 1
+}
+
+# Hand-runs (v7_d91_gated_run.sh): v7_d86/<g>_hand.busy registers one in profile <g>'s worktree
+hand_busy() {   # 0 while profile $1's hand-run file exists, or a win64 MATLAB recorded from it lives (or that is unknown); 1 free
+  local g=$1 f="$R/${1}_hand.busy" rec="$R/takeover_hand_$1.pids" x y m S
+  if [ -e "$f" ]; then   # its 'win64 <pid>' lines recorded with their creation times, in case the file goes before that MATLAB
+    for x in $(awk '$1 == "win64" && $2 ~ /^[0-9]+$/ { print $2 }' "$f" 2>/dev/null | tr -d '\r'); do
+      grep -q "^$x " "$rec" 2>/dev/null && continue
+      y=$(sysq created "$x"); isnum "$y" && echo "$x $y" >> "$rec"
+    done
+    return 0
+  fi
+  [ -f "$rec" ] || return 1
+  m=$(mtime "$rec") || return 0
+  [ "$m" -ge "$BOOT" ] || { rm -f "$rec"; return 1; }
+  x=$(cat "$rec") || return 0
+  split_lines S "$x"
+  for x in "${S[@]}"; do
+    isnum "${x%% *}" || continue
+    [ "$(pid_busy "${x%% *}" "${x#* }")" = gone ] || return 0
+  done
+  rm -f "$rec"; return 1
+}
+hand_wait() {   # profile $1's worktree held by a hand-run: wait (one log line, an alert after HAND_ALERT_S); status 1 when it waited
+  local g=$1 f="$R/${1}_hand.busy" t0 c
+  hand_busy "$g" || return 0
+  t0=$EPOCHSECONDS
+  if [ -e "$f" ]; then c=$(sed -n 's/^cmd //p' "$f" 2>/dev/null | head -1 | tr -d '\r'); say "$g: waits for a hand-run (${g}_hand.busy: ${c:-?})"
+  else say "$g: waits for a hand-run's MATLAB ($(tr '\n' ' ' < "$R/takeover_hand_$g.pids" 2>/dev/null)); ${g}_hand.busy is gone"; fi
+  while hand_busy "$g"; do
+    [ $(( EPOCHSECONDS - t0 )) -lt "$HAND_ALERT_S" ] || \
+      alert "hand_busy_${g}_$(mtime "$f")" "$(wt "$g") has been held by a hand-run for $(( (EPOCHSECONDS - t0) / 3600 )) h; no takeover MATLAB starts there while $f exists or a MATLAB recorded from it ($R/takeover_hand_$g.pids) lives. The file: $(tr '\n' ' ' < "$f" 2>/dev/null). If the hand-run has ended and no MATLAB of it runs (its win64 PID gone), remove the file by hand; the takeover never removes it."
+    nap "$POLL"
+  done
+  say "$g: hand-run over (${g}_hand.busy gone, no MATLAB of it left)"
+  return 1
+}
+start_claim() {   # profile $1's PID file claimed with this bash's Windows PID before the last hand-run check: a hand-run registered after that check sees the claim (v7_d91_gated_state.ps1); status 1, the claim removed, while a hand-run, or final.hold in the final phase, holds the start
+  local g=$1 pf="$R/takeover_ml_$1.pid" me=""
+  { read -r me < "/proc/$BASHPID/winpid"; } 2>/dev/null
+  pf_put "$pf" "${me:-$BASHPID}" "claim $BASHPID"
+  if hand_busy "$g" || { [ -n "$IN_FINAL" ] && [ -e "$R/final.hold" ]; }; then rm -f "$pf"; return 1; fi
+}
+
+# MATLAB -batch "$2" in profile $1's worktree, output appended to its log; heartbeat while it runs.
+# Its PID file: this bash's Windows PID and 'claim' during the last checks, then the subshell's
+# Windows PID and 'msys <pid>' until the exec shows, then the bin\matlab.exe launcher's PID, and
+# 'win64 <pid>' with 'win64_created <time>' once the launcher's win64\MATLAB.exe child shows. In
+# the final phase a start held by final.hold or a hand-run returns 1 with ML_HELD=1, nothing started.
 run_ml() {   # profile $1, command $2, further MATLAB options after them
   local g=$1 cmd=$2 w mp wp lw="" x rc t0 t64=0 pend=1 p64=1 next=0 next64=0 pf="$R/takeover_ml_$1.pid"
   shift 2
-  w=$(wt "$g")
-  ml_guard "$g"
-  scripts_wait
-  hb
+  w=$(wt "$g"); ML_HELD=0
+  while :; do
+    ml_guard "$g"
+    scripts_wait
+    hb
+    start_claim "$g" && break
+    if [ -n "$IN_FINAL" ]; then ML_HELD=1; say "$g: start held (final.hold or ${g}_hand.busy); nothing started"; return 1; fi
+    hand_wait "$g"; headroom_wait "$g" "${ML_NEED:-$NEED_GB}"
+  done
   ( cd "$w" && exec "$MATLAB" "$@" -batch "$cmd" ) >> "$R/$g.log" 2>&1 &
   mp=$!
   wp=$mp; { read -r wp < "/proc/$mp/winpid"; } 2>/dev/null
-  printf '%s\nmsys %s\n' "$wp" "$mp" > "$pf"   # the subshell until MATLAB shows
+  pf_put "$pf" "$wp" "msys $mp"   # the subshell until MATLAB shows
   t0=$EPOCHSECONDS
   while kill -0 "$mp" 2>/dev/null; do
     [ "$pend" = 1 ] && { read -r x < "/proc/$mp/winpid"; } 2>/dev/null && isnum "$x" && lw=$x   # the last Windows PID seen
+    [ "${TRACK:-}" = p1 ] && [ "$g" = p1 ] && p1_cut_check
     if [ "$pend" = 1 ] && [ "$EPOCHSECONDS" -ge "$next" ]; then   # MATLAB's PID once the exec shows, also after the wait
       if ml_pid_try "$mp" "$pf"; then pend=0; t64=$EPOCHSECONDS
       elif [ $(( EPOCHSECONDS - t0 )) -ge "$ML_PID_WAIT_S" ]; then
-        { read -r wp < "/proc/$mp/winpid"; } 2>/dev/null && isnum "$wp" && printf '%s\nmsys %s\n' "$wp" "$mp" > "$pf"
+        { read -r wp < "/proc/$mp/winpid"; } 2>/dev/null && isnum "$wp" && pf_put "$pf" "$wp" "msys $mp"
         alert "ml_pid_${g}_$t0" "MATLAB started in $w did not show as a matlab process within $ML_PID_WAIT_S s (Windows PID $wp, MSYS PID $mp); its PID file holds the subshell's PID, which a restarted takeover treats as alive while it has a MATLAB child. Checked again every $ML_PID_WAIT_S s; the file names MATLAB once it shows."
         next=$(( EPOCHSECONDS + ML_PID_WAIT_S ))
       fi
@@ -681,9 +766,10 @@ run_ml() {   # profile $1, command $2, further MATLAB options after them
   done
   wait "$mp"; rc=$?
   x=""; { read -r x < "$pf"; } 2>/dev/null
-  if [ "$pend" = 1 ] && isnum "$lw" && [ "$lw" != "$x" ]; then   # the launcher exited before its PID was taken: its last Windows PID, alive while a MATLAB child of it lives
-    printf '%s\n' "$lw" > "$pf"; ML_WP=$lw; ml_w64_try "$pf"
-    say "$g: MATLAB exited before its PID was taken; $(basename "$pf") names its last Windows PID $lw"
+  if [ "$pend" = 1 ] && isnum "$lw"; then   # the launcher exited before its PID was taken: its last Windows PID, and a win64 MATLAB under it
+    if ml_lost "$pf" "$lw" || [ "$lw" != "$x" ]; then
+      say "$g: MATLAB exited before its PID was taken; $(basename "$pf") names its last Windows PID $lw$(sed -n 's/^win64 / and win64 /p' "$pf" 2>/dev/null)"
+    fi
   fi
   ml_guard "$g" 60   # a win64\MATLAB.exe that outlives its launcher holds the worktree, and the caller, until it is gone
   return "$rc"
@@ -778,6 +864,79 @@ p1_cut_now() {   # profile 1's launcher part: no end marker, its chain subshells
   m=$(mtime "$R/p1.log") && [ $(( EPOCHSECONDS - m )) -ge "$QUIET_S" ] || return 1
   p1_chain_gone
 }
+end_pid() {   # taskkill /PID $1 /F: that process only, never /T (the stand-in V7T_SYS in tests)
+  if [ -n "$SYS" ]; then "$SYS" taskkill /PID "$1" /F > /dev/null 2>&1; return; fi
+  taskkill //PID "$1" //F > /dev/null 2>&1
+}
+p1_cut_check() {   # p1_cut_after.<stage> (only SURV3 accepted): once profile 1's current part shows '##### STAGE SURV3 done', its chain's win64 MATLAB is ended
+  local f s part x n si st from mode
+  for f in "$R"/p1_cut_after.*; do
+    [ -f "$f" ] || continue
+    s=${f##*/p1_cut_after.}
+    [[ $s == *.* ]] && continue   # used (.used_<time>)
+    if [ "$s" != SURV3 ]; then
+      alert "p1_cut_invalid_${s//[!A-Za-z0-9_]/_}" "$f names '$s', but only p1_cut_after.SURV3 is accepted; nothing is ended. Remove it."
+      continue
+    fi
+    part=$(cur_part p1) && hdr_ok "${part%%$'\n'*}" || continue   # unknown: read again at the next step
+    st=$H_STAMP; from=$H_FROM; mode=$H_MODE
+    x=$(tgrep_end "$part" -c '^##### chain ended') && ge_ok x "$x" && isnum "$x" || continue
+    n=$(tgrep_end "$part" -c '^##### STAGE SURV3 done') && ge_ok n "$n" && isnum "$n" || continue
+    si=$(idx_of p1 SURV3) || continue
+    if [ "$n" -gt 0 ] && [ "$x" = 0 ]; then
+      [ "$EPOCHSECONDS" -ge "$P1CUT_NEXT" ] && p1_cut_do "$f" "$part" "$st" "$mode"
+    elif [ "$from" -gt "$si" ] || [ "$n" -gt 0 ]; then   # the part began after SURV3, or its chain has ended after it: nothing to cut
+      mv "$f" "$f.used_$(date +%Y%m%d_%H%M%S)"
+      alert "p1_cut_past_$st" "$f came when profile 1's current part ($st) was already past SURV3 ($(if [ "$x" -gt 0 ]; then echo 'its chain has ended'; else echo "it began at ${F[$from]:-index $from}"; fi)); nothing was ended, and the file was renamed .used_<time>. If the chain must stop, end its win64 MATLAB by hand (taskkill /PID <pid> /F, no /T)."
+    fi   # else before SURV3 (also a part that ended before it): read again at the next step
+  done
+}
+p1_cut_do() {   # control file $1, profile 1's current part $2 (stamp $3, mode $4) with SURV3 done and no end marker: its chain's win64 MATLAB ended, never anything else
+  local f=$1 part=$2 st=$3 mode=$4 pf="$R/takeover_ml_p1.pid" x pid ct role t why=() ok=() cand=() S s on=0 dn=""
+  x=$(tgrep_end "$part" -o '##### STAGE [A-Za-z0-9]* done') && ge_ok x "$x" || return 0
+  for s in "${HV[@]}"; do   # the stages from C1d on already done in the part
+    [ "$s" = C1d ] && on=1
+    [ "$on" = 1 ] && [[ $'\n'$x$'\n' == *$'\n'"##### STAGE $s done"$'\n'* ]] && dn+=" $s"
+  done
+  if [[ $mode == takeover* ]]; then   # a takeover part: the win64 line of its PID file
+    pid=$(awk '$1 == "win64" { print $2 }' "$pf" 2>/dev/null | tr -d '\r'); ct=$(awk '$1 == "win64_created" { print $2 }' "$pf" 2>/dev/null | tr -d '\r')
+    if isnum "$pid"; then cand=("$pid ${ct:-?}"); else why+=("$(basename "$pf") has no win64 line"); fi
+  else   # the launcher's chain: its recorded win64 MATLAB
+    p1_ml_note
+    x=$(cat "$P1ML" 2>/dev/null); split_lines S "$x"
+    for x in "${S[@]}"; do read -r pid ct role <<< "$x"; isnum "$pid" && [ "${role:-win64}" = win64 ] && cand+=("$pid $ct"); done
+    [ "${#cand[@]}" -gt 0 ] || why+=("$(basename "$P1ML") names no win64 MATLAB")
+  fi
+  for x in "${cand[@]}"; do
+    read -r pid ct <<< "$x"
+    t=$(sysq created "$pid")
+    if ! isnum "$ct"; then why+=("$pid: no recorded creation time")
+    elif [ "$t" != "$ct" ]; then why+=("$pid: created ${t:-unknown}, recorded $ct")
+    else
+      t=$(sysq state "$pid")
+      if [ "$t" = live ]; then ok+=("$pid"); else why+=("$pid: not a live bin\\win64\\MATLAB.exe (${t:-query failed})"); fi
+    fi
+  done
+  if [ "${#ok[@]}" != 1 ]; then
+    [ "${#ok[@]}" -gt 1 ] && why+=("more than one live win64 MATLAB: ${ok[*]}")
+    P1CUT_NEXT=$(( EPOCHSECONDS + POLL ))
+    alert "p1_cut_pid_$st" "$f: profile 1's part $st shows SURV3 done, but no single win64 MATLAB of its chain could be checked, so nothing was ended ($(IFS=';'; echo "${why[*]}")). Checked again every $POLL s. To stop the chain by hand: taskkill /PID <its win64 pid> /F, no /T."
+    return 0
+  fi
+  if ! end_pid "${ok[0]}"; then
+    P1CUT_NEXT=$(( EPOCHSECONDS + POLL ))
+    alert "p1_cut_pid_$st" "$f: taskkill /PID ${ok[0]} /F failed; checked again every $POLL s."
+    return 0
+  fi
+  echo "##### cut after SURV3 on request (p1_cut_after.SURV3) $(date) #####" >> "$R/p1.log"
+  mv "$f" "$f.used_$(date +%Y%m%d_%H%M%S)"
+  say "p1: chain win64 MATLAB ${ok[0]} ended after SURV3 on request (p1_cut_after.SURV3)"
+  alert "p1_cut_on_request_$st" "Profile 1's chain was cut after SURV3 on request: its win64 MATLAB ${ok[0]} was ended (taskkill /F, no /T) once part $st showed '##### STAGE SURV3 done'; its launcher exits by itself. $(if [ -n "$dn" ]; then echo "Stages from C1d on already done in the part:$dn. They ran on the old fusion: C1d is rerun before the resume, and any later one as d91_deploy.md E2 says (E9b by hand, or plan B)."; else echo "No stage from C1d on had finished: the resume starts at C1d."; fi) The chain now ends (ALERT_p1_failed follows); nothing resumes before $R/p1_resume.go."
+}
+p1_nap() {   # nap POLL; a p1_cut_after file is looked for every STEP and acted on at once
+  local end=$(( EPOCHSECONDS + POLL ))
+  while hb; p1_cut_check; [ "$EPOCHSECONDS" -lt "$end" ]; do sleep "$STEP"; done
+}
 p1_run() {   # from its first unfinished stage to RPT in one MATLAB (A0 first inside the B stages)
   local r x nab nch nc1 a0 F list rc said=0
   ml_guard p1; p1_ml_wait || return 0
@@ -792,8 +951,10 @@ p1_run() {   # from its first unfinished stage to RPT in one MATLAB (A0 first in
     fi
     a0=0; [ "$r" -gt 0 ] && [ "$r" -lt "$nab" ] && a0=1
     code_wait p1; headroom_wait p1
+    hand_wait p1 || continue
     gate_enter
     if [ -f "$R/p1.abandon" ]; then gate_leave; say "p1: given up (p1.abandon) during the resume's waits; no resume"; return 0; fi
+    if hand_busy p1; then gate_leave; continue; fi
     if [ "$r" -le "$nc1" ] && p3_rerun_open; then
       gate_leave
       [ "$said" = 1 ] || { say "p1: resume from ${F[$r]} waits until profile 3's B-stage rerun has ended"; said=1; }
@@ -839,7 +1000,7 @@ track_p1() {
     elif m=$(mtime "$R/p1.log") && [ $(( EPOCHSECONDS - m )) -gt "$SILENT_S" ]; then
       alert "p1_silent_$m" "p1.log has not changed for $(( SILENT_S / 3600 )) h; check that profile 1's MATLAB still runs and uses CPU. Alive and busy: nothing to do. Gone: ALERT_p1_cut or ALERT_p1_failed follows. Hanging (alive, no CPU for hours): end its win64\MATLAB.exe process (the MATLAB.exe child of the bin\matlab.exe launcher; recorded in $P1ML) with taskkill /PID <pid> /F (no /T), never only the launcher; the launcher and the chain then end with rc != 0 and ALERT_p1_failed follows."
     fi
-    nap "$POLL"
+    p1_nap
   done
 }
 
@@ -931,6 +1092,7 @@ run_rerun() {   # the version '<id> <list>' of p3_brerun.go that go_state checke
     return 0
   fi
   code_wait p3; headroom_wait p3 "$RERUN_NEED_GB"
+  hand_wait p3 || return 0   # waited: every check of pre_c1p again
   r=$(( nc - 1 ))
   for x in "${!F[@]}"; do in_list "${F[$x]}" "${list[@]}" && { r=$x; break; }; done
   gate_enter
@@ -939,6 +1101,7 @@ run_rerun() {   # the version '<id> <list>' of p3_brerun.go that go_state checke
     return 0
   fi
   if [ -f "$R/p3.abandon" ]; then gate_leave; say "p3: given up (p3.abandon) during the rerun's waits; no rerun"; return 0; fi
+  if hand_busy p3; then gate_leave; return 0; fi
   if ! x=$(go_check) || [ "$x" != "$chk" ] || ! part_header p3 "$r" 1 takeover-rerun " RERUN $(IFS=,; echo "${list[*]}") GO $id"; then   # the list checked again
     gate_leave; say "p3: p3_brerun.go changed or could not be read before the rerun's part header; read again"
     nap "$QRETRY_S"; return 0
@@ -946,7 +1109,7 @@ run_rerun() {   # the version '<id> <list>' of p3_brerun.go that go_state checke
   gate_leave
   commit_note p3 "B-stage rerun ${list[*]} (request $id)"
   say "p3: B-stage rerun A0 ${list[*]} started (request $id)"
-  run_ml p3 "$(stage_cmd A0 "${list[@]}")" -singleCompThread; rc=$?
+  ML_NEED=$RERUN_NEED_GB run_ml p3 "$(stage_cmd A0 "${list[@]}")" -singleCompThread; rc=$?
   echo "##### rerun ended rc=$rc GO $id $(date) #####" >> "$R/p3.log"
   say "p3: B-stage rerun ended rc=$rc"
 }
@@ -957,6 +1120,7 @@ run_ab() {   # B stages from list index $2 (A0 first inside them); end marker on
   load_list "$g" && nab=$(idx_of "$g" C1p) || return 1
   [ "$r" -gt 0 ] && a0=1
   code_wait "$g"; headroom_wait "$g"
+  hand_wait "$g" || return 1
   same_r "$g" "$r" && part_header "$g" "$r" "$a0" takeover || { say "$g: $g.log changed or could not be read before the part header; read again"; return 1; }
   commit_note "$g" "B stages from ${F[$r]}"
   list=(); [ "$a0" = 1 ] && list+=(A0); list+=("${F[@]:r:nab-r}")
@@ -1029,12 +1193,13 @@ pre_c1p() {   # 0 when C1p may start; 1 after a rerun ran or the track was given
     nap "$POLL"
   done
 }
-c1p_still() {   # after run_c's waits, before C1p's part header: pre_c1p's answer still holds (no abandon, hold, rerun to run
-                 # or failed; the other profile past SURV3, or a force file that counts)
+c1p_still() {   # after run_c's waits, before C1p's part header: pre_c1p's answer still holds (no abandon, hold, hand-run,
+                 # rerun to run or failed; the other profile past SURV3, or a force file that counts)
   local g=$1 d st
   d=$(dep "$g")
   [ -f "$R/$g.abandon" ] && return 1
   [ -f "$R/${g}_c1p.hold" ] && return 1
+  hand_busy "$g" && return 1
   if [ "$g" = p3 ]; then
     st=$(go_state) || return 1
     case $st in none|done\ *|ignored\ *) ;; *) return 1;; esac
@@ -1051,8 +1216,9 @@ run_c() {   # C1p onward from list index $2 to RPT; the chain's end marker
     return 0
   fi
   code_wait "$g"; headroom_wait "$g"
-  if [ "$r" -le "$nab" ] && ! c1p_still "$g"; then   # the waits can take hours: hold, abandon and go files read again
-    say "$g: a hold, abandon, force or p3_brerun.go file changed during the waits before C1p (or could not be read); back to the C1p checks"
+  hand_wait "$g" || return 1
+  if [ "$r" -le "$nab" ] && ! c1p_still "$g"; then   # the waits can take hours: hold, abandon, hand-run and go files read again
+    say "$g: a hold, abandon, force, hand-run or p3_brerun.go file changed during the waits before C1p (or could not be read); back to the C1p checks"
     return 1
   fi
   same_r "$g" "$r" && part_header "$g" "$r" 0 takeover || { say "$g: $g.log changed or could not be read before the part header; read again"; return 1; }
@@ -1172,20 +1338,30 @@ p2_ab_new() {   # profile 2's B stages, with the stages of p2_set4.stages after 
   fi
   P2AB_NEW="${AB2_HEAD[*]}${extra[*]:+ ${extra[*]}} ${AB2_TAIL[*]}"
 }
+p2_held() {   # p2_start.hold exists: one log line, an alert after P2_HOLD_ALERT_S
+  local f="$R/p2_start.hold"
+  [ -e "$f" ] || { [ -n "$P2H_T" ] && say "p2: p2_start.hold removed"; P2H_T=""; return 1; }
+  [ -n "$P2H_T" ] || { say "p2: start held (p2_start.hold)"; P2H_T=$EPOCHSECONDS; }
+  [ $(( EPOCHSECONDS - P2H_T )) -lt "$P2_HOLD_ALERT_S" ] || \
+    alert "p2_start_hold_$(mtime "$f")" "$f has held profile 2 for $(( (EPOCHSECONDS - P2H_T) / 3600 )) h: v7-p2 is not branched and nothing starts for it, even after profile 1's chain or on p2_start.go. That may be intended (d91_deploy.md E'). Remove it to let profile 2 branch from v7-dev's tip of that moment."
+}
 track_p2() {
-  local said=0
-  until complete p1 || [ -e "$R/p2.log" ]; do
+  local said=0 go=0 rdy
+  while :; do   # p2_start.hold read in the wait and again right before the branch
     [ -f "$R/p2.abandon" ] && { say "p2: track ended (p2.abandon)"; return 0; }
-    take_go p2 p2_start.go && { say "p2: starts on p2_start.go before profile 1's chain has finished"; break; }
+    rdy=0; { [ "$go" = 1 ] || [ -e "$R/p2.log" ] || complete p1; } && rdy=1
+    if p2_held; then nap "$POLL"; continue; fi
+    [ "$rdy" = 1 ] && break
+    take_go p2 p2_start.go && { say "p2: starts on p2_start.go before profile 1's chain has finished"; go=1; continue; }
     [ -f "$R/p1.abandon" ] && alert p2_wait_p1_abandon "Profile 1 is given up (p1.abandon), so profile 2 does not start by itself; write $R/p2_start.go to start it."
     [ "$said" = 1 ] || { say "p2: waits for profile 1's chain to end with rc=0"; said=1; }
     nap "$POLL"
   done
-  [ -f "$R/p2.abandon" ] && { say "p2: track ended (p2.abandon)"; return 0; }
   until p2_prepare; do
     [ -f "$R/p2.abandon" ] && { say "p2: track ended (p2.abandon)"; return 0; }
     alert p2_prep "Profile 2's worktree $P2 could not be prepared (see $R/merge_$(basename "$P2").log and the takeover log); retried every $POLL s."
     nap "$POLL"
+    while p2_held; do [ -f "$R/p2.abandon" ] && { say "p2: track ended (p2.abandon)"; return 0; }; nap "$POLL"; done
   done
   if [ ! -e "$R/p2.log" ]; then
     until p2_ab_new; do :; done
@@ -1221,38 +1397,72 @@ turn_check() {   # read only: a turn file whose holder has exited blocks every '
     *) [ "$TURN_SAID" = "$op" ] || { say "parallel turn file names PID $op, no live MATLAB ($st): the next take takes it over"; TURN_SAID=$op; };;
   esac
 }
+final_hold_wait() {   # final.hold: the final phase starts nothing while it exists (one log line, an alert after FINAL_HOLD_ALERT_S); status 1 when it waited
+  local f="$R/final.hold" t0
+  [ -e "$f" ] || return 0
+  t0=$EPOCHSECONDS
+  say "final phase waits: final.hold"
+  while [ -e "$f" ]; do
+    [ $(( EPOCHSECONDS - t0 )) -lt "$FINAL_HOLD_ALERT_S" ] || \
+      alert "final_hold_$(mtime "$f")" "$f has held the final phase (LAT, KPI, DASH, WEAK, RPT and the console bundle) for $(( (EPOCHSECONDS - t0) / 3600 )) h. That may be intended (a hand-run after a chain, d91_deploy.md E11 and E'). Remove it to let the final phase go on; its idle wait then starts again."
+    nap "$POLL"
+  done
+  say "final phase: final.hold removed; it goes on"
+  return 1
+}
+final_free() {   # no final.hold and no hand-run in profile $1's worktree; else both waited out and status 1 (read again)
+  local w=0
+  while ! final_hold_wait || ! hand_wait "$1"; do w=1; done
+  return "$w"
+}
 final_phase() {
   local g r F nlat nfull idle ld c
+  IN_FINAL=1
+  final_hold_wait
   for g in p1 p3 p2; do
     [ -f "$R/$g.abandon" ] && { say "$g given up: no LAT"; continue; }
     [ -d "$(wt "$g")" ] || continue
     log_req "$g"; [ $? = 1 ] && continue   # profile 2 never started
-    ml_guard "$g"   # a final MATLAB of an earlier takeover first; the log is read after it
-    [ "$g" = p1 ] && ! p1_ml_wait && { say "p1 given up: no LAT"; continue; }
-    while complete "$g"; c=$?; [ "$c" = 2 ] || ! load_list "$g" || ! r=$(next_idx "$g") || ! nlat=$(idx_of "$g" LAT); do
+    while :; do   # the log read again after every wait, the hold and the hand-run last before the part header
+      ml_guard "$g"   # a final MATLAB of an earlier takeover first; the log is read after it
+      [ "$g" = p1 ] && ! p1_ml_wait && { say "p1 given up: no LAT"; continue 2; }
+      while complete "$g"; c=$?; [ "$c" = 2 ] || ! load_list "$g" || ! r=$(next_idx "$g") || ! nlat=$(idx_of "$g" LAT); do
+        [ -f "$R/$g.abandon" ] && break
+        log_alert "$g"; unknown_wait "${g}final" "$g: $g.log could not be read before the final phase"
+      done
+      known "${g}final"
       [ -f "$R/$g.abandon" ] && break
-      log_alert "$g"; unknown_wait "${g}final" "$g: $g.log could not be read before the final phase"
+      final_free "$g" && break
+      IDLE_END=""
     done
-    known "${g}final"
     [ -f "$R/$g.abandon" ] && { say "$g given up: no LAT"; continue; }
     [ "$c" = 0 ] || { say "$g did not finish (stage ${F[$r]:-end}): no LAT"; continue; }
     nfull=${#F[@]}
     [ "$r" -lt "$nfull" ] || continue
     part_header "$g" "$r" 0 takeover-final || { say "$g: its stage list could not be read for the final part; no LAT"; continue; }
     if [ "$r" -lt $((nfull - 1)) ]; then
-      if wait_idle; then idle="idle"; else idle="not idle after $(( IDLE_MAX_S / 60 )) min"; fi
-      ld="machine before LAT: CPU $(cpu_int) %, live pipeline MATLAB sessions: $(stage_live | wc -w | tr -d ' '), live MATLAB processes in all: $(n_live_matlab) ($idle)"
-      echo "$ld $(date)" >> "$R/$g.log"; say "$g: $ld"
-      commit_note "$g" "final ${F[$r]} to RPT"
-      run_ml "$g" "$(stage_cmd "${F[@]:r:nfull-1-r}")"
+      while :; do   # a hold or a hand-run after the idle wait: the idle wait starts again
+        if wait_idle; then idle="idle"; else idle="not idle after $(( IDLE_MAX_S / 60 )) min"; fi
+        final_free "$g" || { IDLE_END=""; continue; }
+        ld="machine before LAT: CPU $(cpu_int) %, live pipeline MATLAB sessions: $(stage_live | wc -w | tr -d ' '), live MATLAB processes in all: $(n_live_matlab) ($idle)"
+        echo "$ld $(date)" >> "$R/$g.log"; say "$g: $ld"
+        commit_note "$g" "final ${F[$r]} to RPT"
+        run_ml "$g" "$(stage_cmd "${F[@]:r:nfull-1-r}")" || [ "$ML_HELD" = 0 ] || { final_free "$g"; IDLE_END=""; continue; }
+        break
+      done
     fi
     until r=$(next_idx "$g"); do log_alert "$g"; unknown_wait "${g}final" "$g: $g.log could not be read after the final stages"; done
     if [ "$r" -gt $((nlat + 1)) ]; then
-      if run_ml "$g" "startup; export_gui_bundle('$(cygpath -m "$V7")/profiles')"; then
-        echo "##### STAGE BUNDLE done #####" >> "$R/$g.log"; say "$g: console bundle exported"
-      else
-        say "$g: console bundle export failed (see $R/$g.log)"
-      fi
+      while :; do
+        final_free "$g"
+        if run_ml "$g" "startup; export_gui_bundle('$(cygpath -m "$V7")/profiles')"; then
+          echo "##### STAGE BUNDLE done #####" >> "$R/$g.log"; say "$g: console bundle exported"
+        elif [ "$ML_HELD" = 1 ]; then continue
+        else
+          say "$g: console bundle export failed (see $R/$g.log)"
+        fi
+        break
+      done
     else
       say "$g: LAT or KPI failed (see $R/$g.log); no console bundle"
     fi
@@ -1271,10 +1481,10 @@ status() {
     echo "    next ${F[$r]:-end} (index $r); end marker rc=$rc; open stage: $op; past SURV3: $(past_surv3 "$g" && echo yes || echo no); finished: $(complete "$g" && echo yes || echo no); idle part: $(case $pi in 0) echo yes;; 1) echo no;; *) echo unknown;; esac)"
   done
   echo "p3 rerun request: $(go_state || echo unknown)"
-  for f in "$R"/*.go "$R"/*.accept "$R"/*.hold "$R"/*.force "$R"/*.abandon "$R"/p2_set4.stages "$R"/ALERT_*.txt "$R"/takeover_beat_* "$R"/takeover_end_*; do
+  for f in "$R"/*.go "$R"/*.accept "$R"/*.hold "$R"/*.force "$R"/*.abandon "$R"/p2_set4.stages "$R"/p1_cut_after.* "$R"/ALERT_*.txt "$R"/takeover_beat_* "$R"/takeover_end_*; do
     [ -f "$f" ] && echo "file $(basename "$f") ($(date -d @"$(mtime "$f")" '+%F %T'))"
   done
-  for f in "$R"/takeover_ml_*.pid "$P1ML"; do [ -f "$f" ] && echo "file $(basename "$f"): $(tr '\n' ' ' < "$f")"; done
+  for f in "$R"/*_hand.busy "$R"/takeover_hand_*.pids "$R"/takeover_ml_*.pid "$P1ML"; do [ -f "$f" ] && echo "file $(basename "$f"): $(tr '\n' ' ' < "$f")"; done
   for f in "$R/run.lock" "$LOCK"; do [ -f "$f" ] && echo "$(basename "$f") age $(( EPOCHSECONDS - $(mtime "$f") )) s"; done
   echo "launcher $LPID: $(sysq cmdline "$LPID" | cut -c1-120)"
   echo "p3 fix $FPID: $(sysq cmdline "$FPID" | cut -c1-120)"

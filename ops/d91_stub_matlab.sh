@@ -11,6 +11,8 @@
 #                                             win64_pid_<worktree> (its MSYS and Windows PIDs)
 #   win64_quit or win64_quit_<worktree>       the launcher then exits after that many seconds without waiting
 #                                             for its child (the child runs on)
+#   hold_hand or hold_<worktree>_hand         a gate-wrapper hand-run (its command appends 'win64 <pid>' to a
+#                                             *_hand.busy file, done here as MATLAB does) waits until removed
 #   webui or webui_<worktree>                 the win64 child leaves, as it exits, a lingering process object
 #                                             (state 'exited') with live MATLABWebUI.exe, MATLABWindow.exe and
 #                                             MathWorksServiceHost.exe children ($V7T_SYS_DIR kids/<its PID>)
@@ -55,6 +57,11 @@ log call "$cmd"
 mkdir "$C/busy_$w" 2>/dev/null || { log CONCURRENT "$cmd"; exit 3; }
 trap leave EXIT
 pick() { for f in "$C/$1_${w}_$2" "$C/$1_$2"; do [ -f "$f" ] && { echo "$f"; return; }; done; }
+case $cmd in *"_hand.busy', 'a')"*)   # v7_d91_gated_run.sh's preamble: this MATLAB's PID appended to the busy file
+  q="'"; b=${cmd#*fopen($q}; b=${b%%$q*}
+  echo "win64 $(cat /proc/$$/winpid 2>/dev/null || echo $$)" >> "$(cygpath -u "$b")"; log hand "$b"
+  h=$(pick hold hand); while [ -n "$h" ] && [ -f "$h" ]; do sleep 0.2; done;;
+esac
 case $cmd in
   run_stage\(*)
     for s in $(sed "s/^run_stage(//; s/)$//; s/'//g; s/,/ /g" <<< "$cmd"); do
