@@ -29,6 +29,11 @@
 %             reported apart
 %   delay2    the single set with a configuration change arriving two cycles late
 %             instead of one (sensitivity to the signalling assumption), reported apart
+%   offset    the single threats ending 20 cycles after the onset (link_env.m spec.offset:
+%             the same flight's clean link from then on), 50-cycle episodes, reported apart:
+%             the configuration held when the threat ends, the cycles to its release to
+%             no_action, the running cost held after the end, the re-alarms and the changes
+%             after it (a release is no false switch, link_env.m)
 % Every set runs each cell on the geometries it flies (link_env.m K.geo): airframe
 % shadowing, alone and in combinations, on its own flights, which hide an antenna at its
 % level (build_policy_pools.m), with the clean link of the same flight before the onset;
@@ -40,14 +45,18 @@
 % degradation only), class -> configuration table (train pools), the DQN of every
 % discount factor (the selected one also with escalation), one-step oracle.
 % The deployed policy, read by the KPIs, is the one train_dqn.m chose on validation: the
-% selected DQN with escalation when it passed its gate, otherwise the rule with
-% escalation on its own monitor (rule_sel). The agent must come from these pools'
-% detector (check_det_id.m).
+% selected DQN, with or without the escalation, when it passed its gate, otherwise the rule
+% with escalation on its own monitor (rule_sel); every policy runs with the deployed DQN's
+% monitor and decision-time settings (decision_settings.m), the rule fallback with its own.
+% The agent must come from these pools' detector (check_det_id.m).
 % Main metric (proposal KPI 4): RECOVERED episodes -- BER and packet loss back to
 % <= 2x the clean link for 5 consecutive cycles -- among the RECOVERABLE ones
 % (some configuration restores both in that geometry, link_env.m); the rest is
-% the survivability boundary. Also: cycles restored after onset, goodput, cycles
-% to recover, switches and false switches, mean reward. Packet loss allows one loss
+% the survivability boundary. Beside it, the stricter reading on the HARMED episodes only
+% (no response does not restore them: the threat harms the link), per threat, severity and
+% inside an envelope predicted on validation on the harmed episodes alike: an episode no
+% response already restores is not credited to the policy. Also: cycles restored after
+% onset, goodput, cycles to recover, switches and false switches, mean reward. Packet loss allows one loss
 % event above 2x clean (one packet; with fec_interleave the run's longest run of lost
 % packets, at most the two that share a frame, packet_share.m); a coded packet's
 % codeword spans four frames and is decoded after the fourth, so after the link turns
@@ -65,11 +74,9 @@ close all; clc;
 fprintf('=== Decision-layer evaluation on the test pools ===\n\n');
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
 Q = load('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'H', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db', ...
-    'deployed', 'rule_sel', 'det_id', 'maha_thr');
+    'deployed', 'rule_sel', 'det_id', 'maha_thr', 'dec');
 check_det_id(PP, Q, 'evaluate_policies');
-if isfield(Q, 'maha_thr'), PP.maha_thr = Q.maha_thr; end         % the unknown-threat threshold the agent ran with
-PP.confirm = Q.confirm; PP.alarm_mode = Q.alarm_mode;           % same monitor for every policy but the rule fallback
-if ~isempty(Q.drop_db), PP.drop_db = Q.drop_db; end
+PP = decision_settings(PP, Q);                       % the deployed DQN's monitor and settings for every policy but the rule fallback
 K = link_env('tables', PP);
 C = decision_config();
 tab = policy_table(PP, K);
@@ -119,6 +126,10 @@ end
 d2 = policy_episodes(single_cells, nS, G(single_cells, TEST), 1, false, false, NE, T, rs);
 for b = 1:numel(d2), d2{b}.delay = 2 * C.switch_delay; end
 sets(end+1) = struct('name', 'delay2', 'spec', {d2}, 'split', TEST);
+T_OFF = T + 20; OFF_AFTER = 20;                        % threats that end: 20 cycles after the onset, 50-cycle episodes
+so = policy_episodes(single_cells, nS, G(single_cells, TEST), 1, false, false, NE, T_OFF, rs);
+for b = 1:numel(so), so{b}.offset = so{b}.onset + OFF_AFTER; end
+sets(end+1) = struct('name', 'offset', 'spec', {so}, 'split', TEST);
 TEST2 = 5;                                             % the second test split: its clean flights join KPI 6
 if numel(PP.runs) >= TEST2 && ~isempty(PP.cell_geo{clean_cell}{TEST2})
     sets(end+1) = struct('name', 'clean2', 'spec', {policy_episodes(clean_cell, nS, PP.cell_geo{clean_cell}{TEST2}, 1, ...
@@ -158,7 +169,8 @@ if strcmp(Q.deployed, 'rule_sel')                    % the rule fallback on its 
     LBL = [LBL(1:end-1), {sprintf('rule + escalation, own monitor (%s)', Q.rule_sel.alarm)}, LBL(end)];
 end
 iBase = find(strcmp(POL, sprintf('dqn_g%d', sel)));  % selected DQN alone
-iDQN = find(strcmp(POL, Q.deployed));                % deployed policy (train_dqn.m)
+dep = Q.deployed; if strcmp(dep, 'dqn'), dep = POL{iBase}; end
+iDQN = find(strcmp(POL, dep));                       % deployed policy (train_dqn.m)
 LBL{iDQN} = [LBL{iDQN} ' (deployed)'];
 col = @(p) find(strcmp(POL, p));
 
@@ -205,7 +217,7 @@ rep{end+1} = sprintf(['Selected DQN: gamma %.2f, training false-switch penalty %
     'flights in test. ' ...
     'Intervals: 95%% bootstrap over geometries.'], ...
     Q.seed_summary.selected_gamma, Q.seed_summary.selected_fa_pen, PP.alarm_mode, PP.confirm, numel(PP.combos));
-for si = 1:numel(sets)
+for si = find(~strcmp({sets.name}, 'offset'))
     rep{end+1} = ''; %#ok<SAGROW>
     R1 = RES{si, 1};
     rep{end+1} = sprintf('--- %s (%d episodes, %d recoverable) ---', sets(si).name, numel(R1.ret), ...
@@ -259,6 +271,39 @@ end
 kpi4 = PT(:, iK) >= 90;
 rep{end+1} = sprintf(['KPI 4 over every level (deployed policy >= 90%% of the recoverable episodes of every threat): ' ...
     '%d of %d threats | lowest %s %.1f%%'], sum(kpi4), numel(kpi4), threats{find(PT(:, iK) == min(PT(:, iK)), 1)}, min(PT(:, iK)));
+% The same on the harmed episodes only: no response does not restore them (link_env.m
+% tables, no_action), the stricter reading beside KPI 4
+HA = harmed(ALL{1}, K);
+cons = isequal(HA(ALL{1}.threat), ~ALL{col('none')}.recovered(ALL{1}.threat));
+PTh = nan(numel(threats), numel(show)); PThsev = nan(numel(threats), nV, numel(show)); PThci = nan(numel(threats), 2);
+NH = zeros(numel(threats), 1); NHsev = zeros(numel(threats), nV);
+for ti = 1:numel(threats)
+    mr = strcmp(PP.scen(ALL{1}.scn), threats{ti}) & ALL{1}.threat & ALL{1}.recoverable & HA;
+    NH(ti) = sum(mr);
+    if any(mr)
+        [~, PThci(ti, 1), PThci(ti, 2)] = boot_cluster(double(ALL{iDQN}.recovered(mr)), ones(1, sum(mr)), ALL{iDQN}.geom(mr), ...
+            2000, 120 + ti);
+    end
+    for c = 1:numel(show)
+        PTh(ti, c) = 100 * mean(ALL{col(show{c})}.recovered(mr));
+        for v = 1:nV
+            mv = mr & PP.sev(ALL{1}.scn) == v; NHsev(ti, v) = sum(mv);
+            PThsev(ti, v, c) = 100 * mean(ALL{col(show{c})}.recovered(mv));
+        end
+    end
+end
+rep{end+1} = '';
+rep{end+1} = sprintf(['Recovered among the HARMED recoverable episodes (no response does not restore them; %d of %d recoverable ' ...
+    'threat episodes; the stricter reading beside KPI 4, no response %s here by construction%s), per threat, %%:'], ...
+    sum(HA & ALL{1}.threat & ALL{1}.recoverable), sum(ALL{1}.threat & ALL{1}.recoverable), '0%', ...
+    ternary(cons, '', '; WARNING: harmed differs from no response''s recovery'));
+rep{end+1} = sprintf('%-30s %8s%s   deployed [95%%]', 'threat', 'harmed', sprintf('%11s', hdr{:}));
+for ti = 1:numel(threats)
+    rep{end+1} = sprintf('%-30s %8d%s   [%.1f, %.1f]', threats{ti}, NH(ti), sprintf('%11.1f', PTh(ti, :)), 100 * PThci(ti, :)); %#ok<SAGROW>
+end
+kpi4h = PTh(:, iK) >= 90;
+rep{end+1} = sprintf('Deployed policy on the harmed episodes, >= 90%% of every threat: %d of %d threats | lowest %s %.1f%%', ...
+    sum(kpi4h), sum(~isnan(PTh(:, iK))), threats{find(PTh(:, iK) == min(PTh(:, iK)), 1)}, min(PTh(:, iK)));
 SHN = '';                                             % airframe shadowing: conditioned on a geometry that hides an antenna
 if isfield(PP, 'shadow'), SHN = shadow_note(PP.shadow, TEST, PP.ebno); end
 if ~isempty(SHN), rep{end+1} = ['  ' SHN ' (test split)']; end
@@ -298,6 +343,28 @@ rep{end+1} = sprintf(['KPI 4 inside the envelope: %d of %d threats >= 90%% | env
 if any(~has)
     rep{end+1} = sprintf('  threats with no level inside the envelope, outside the reading inside it: %s', strjoin(threats(~has), ', '));
 end
+% The envelope on the harmed episodes, predicted on validation alike (fixed before the test is read)
+HV = harmed(RV, K);
+ENVh = false(numel(threats), nV); ENVvh = nan(numel(threats), nV); PTenvh = nan(numel(threats), 1); PTenvh_ci = nan(numel(threats), 2);
+for ti = 1:numel(threats)
+    mvr = strcmp(PP.scen(RV.scn), threats{ti}) & RV.threat & RV.recoverable & HV;
+    for v = 1:nV
+        mv = mvr & PP.sev(RV.scn) == v;
+        if sum(mv) >= ENV_N, ENVvh(ti, v) = 100 * mean(RV.recovered(mv)); ENVh(ti, v) = ENVvh(ti, v) >= ENV_MIN; end
+    end
+    mt = strcmp(PP.scen(ALL{1}.scn), threats{ti}) & ALL{1}.threat & ALL{1}.recoverable & HA & ...
+        ismember(PP.sev(ALL{1}.scn), find(ENVh(ti, :)));
+    if any(mt)
+        PTenvh(ti) = 100 * mean(ALL{iDQN}.recovered(mt));
+        [~, PTenvh_ci(ti, 1), PTenvh_ci(ti, 2)] = boot_cluster(double(ALL{iDQN}.recovered(mt)), ones(1, sum(mt)), ...
+            ALL{iDQN}.geom(mt), 2000, 160 + ti);
+    end
+end
+hah = any(ENVh, 2);
+rep{end+1} = sprintf(['Envelope on the harmed episodes (predicted on validation alike), test inside it: %s | %d of %d threats ' ...
+    '>= 90%%; a (threat, level) whose validation episodes no response mostly restores has too few harmed ones to enter'], ...
+    strjoin(arrayfun(@(ti) sprintf('%s %s', threats{ti}, ternary(isnan(PTenvh(ti)), '-', sprintf('%.1f%%', PTenvh(ti)))), ...
+    1:numel(threats), 'UniformOutput', false), ', '), sum(PTenvh(hah) >= 90), sum(hah));
 
 % Per Eb/N0 (single set)
 rep{end+1} = '';
@@ -482,6 +549,31 @@ for ti = 1:numel(PP.singles) - 1
         onset(end).conf_p90, onset(end).conf_never_pct); %#ok<SAGROW>
 end
 
+% Threats that end (reported apart): the configuration held when the threat ends, its release
+iO = find(strcmp({sets.name}, 'offset'));
+OFF = struct('policy', {}, 'threat', {}, 'n', {}, 'held_pct', {}, 'rel_median', {}, 'rel_p90', {}, 'rel_never_pct', {}, ...
+    'cost_end', {}, 'on_end_pct', {}, 'conf_end_pct', {}, 'sw_end', {});
+rep{end+1} = '';
+rep{end+1} = sprintf(['Threats that end %d cycles after the onset (%d-cycle episodes, the same flight''s clean link from then ' ...
+    'on; reported apart): episodes holding a configuration at the end %%, cycles to its release to no_action median / p90 ' ...
+    '(never %%), running cost held after the end [points per cycle, link_env.m] and the share of those cycles not at ' ...
+    'no_action, decisions with a confirmed alarm after it %%, changes after it that are no release (per episode)'], OFF_AFTER, T_OFF);
+for pk = unique([iDQN, col('rule_esc'), col('table')], 'stable')
+    Ro = RES{iO, pk}; rep{end+1} = sprintf('  %s', LBL{pk}); %#ok<SAGROW>
+    for ti = 1:numel(PP.singles) - 1
+        m = strcmp(PP.scen(Ro.scn), threats{ti}) & Ro.threat;
+        if ~any(m), continue; end
+        hd = Ro.cfg_end(m) ~= K.na; rt = Ro.rel_t(m & Ro.cfg_end ~= K.na);
+        OFF(end+1) = struct('policy', LBL{pk}, 'threat', threats{ti}, 'n', sum(m), 'held_pct', 100 * mean(hd), ...
+            'rel_median', median(rt, 'omitnan'), 'rel_p90', p90(rt), 'rel_never_pct', 100 * mean(isnan(rt)), ...
+            'cost_end', mean(Ro.cost_end(m), 'omitnan'), 'on_end_pct', 100 * mean(Ro.on_end(m), 'omitnan'), ...
+            'conf_end_pct', 100 * mean(Ro.conf_end(m), 'omitnan'), 'sw_end', mean(Ro.sw_end(m), 'omitnan')); %#ok<SAGROW>
+        o = OFF(end);
+        rep{end+1} = sprintf('    %-22s %5d: held %5.1f%% | release %4.1f / %4.1f (%5.1f%%) | cost %5.2f, %5.1f%% | re-alarm %5.1f%% | changes %.2f', ...
+            o.threat, o.n, o.held_pct, o.rel_median, o.rel_p90, o.rel_never_pct, o.cost_end, o.on_end_pct, o.conf_end_pct, o.sw_end); %#ok<SAGROW>
+    end
+end
+
 fid = fopen('results/policy_evaluation.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('\n%s\n', rep{:});
 set_names = {sets.name};
@@ -494,7 +586,10 @@ KP = struct('per_threat', PT, 'per_threat_sev', PTsev, 'threats', {threats}, 're
     'ebno_thr_src', thr_src, 'per_threat_ci', 100 * PTci, 'per_threat_env_ci', 100 * PTenv_ci, 'speed_spread', 100 * SPR, ...
     'selected_gamma', Q.seed_summary.selected_gamma, 'confirm', PP.confirm, 'alarm_mode', PP.alarm_mode, ...
     'per_speed_out', PS, 'speed_out', PP.speed_out, 'per_delay', PD, 'sev_names', {PP.sev_names}, 'onset', onset, ...
-    'shadow_note', SHN, 'det_id', PP.det_id, 'policy_stamp', policy_stamp(Q));
+    'shadow_note', SHN, 'det_id', PP.det_id, 'policy_stamp', policy_stamp(Q), ...
+    'per_threat_h', PTh, 'per_threat_h_sev', PThsev, 'per_threat_h_ci', 100 * PThci, 'n_harmed', NH, 'n_harmed_sev', NHsev, ...
+    'kpi4_h_met', kpi4h, 'envelope_h', ENVh, 'envelope_val_h', ENVvh, 'per_threat_env_h', PTenvh, ...
+    'per_threat_env_h_ci', 100 * PTenvh_ci, 'harmed_consistent', cons, 'offset', OFF, 'offset_after', OFF_AFTER);
 save('results/policy_evaluation.mat', 'RES', 'RW', 'POL', 'LBL', 'set_names', 'fixed_best', 'tab', 'iDQN', 'KP', ...
     'iThreat', 'ALL', 'top_cfg');
 
@@ -613,6 +708,13 @@ end
 function R = cat_struct(R, Rb)
 f = fieldnames(R);
 for i = 1:numel(f), R.(f{i}) = [R.(f{i}), Rb.(f{i})]; end
+end
+
+function h = harmed(R, K)
+% Per episode: no response does not restore its geometry (link_env.m tables at no_action:
+% BER or packet loss above the restoration test).
+ih = sub2ind(size(K.restored), R.scn, R.s, K.na + 0 * R.s, R.split, R.r);
+h = ~(K.restored(ih) & K.restored_plr(ih));
 end
 
 function s = ci_txt(m, lo, hi, f)

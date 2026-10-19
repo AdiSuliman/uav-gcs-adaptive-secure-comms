@@ -30,25 +30,19 @@ function [P, info] = pool_cell(p, threat, actions, ebno, geo, det, opt)
 %            the air: the per-cycle labels, threat_active.m) and mmse_pred (the predicted
 %            MMSE gain over MRC [dB] from the frame's known symbols, mmse_predict.m: the
 %            policies' nulling input)
-%   info     configurations actually simulated (identical physics is simulated once)
+%   info     configurations actually simulated: n_unique of them, map the one whose frames
+%            each configuration takes (identical physics is simulated once). A configuration
+%            that differs from an earlier one in p.fec alone shares its run and gets its own
+%            ground truth and CRC from it (pool_configs.m, closed_loop_truth.m)
 modelName = 'UAV_GCS_Threat_Link';
 nA = numel(actions); nS = numel(ebno); nSp = numel(geo{1});
 stop_of = @(nf) num2str((nf - 1) * p.frame_duration);   % frames at 0 .. the stop time: nf of them, whole FEC packets
 P = cell(nS, nA, nSp);
-keys = {}; first = zeros(1, 0);
-info = struct('n_unique', 0, 'map', zeros(1, nA));
-for a = 1:nA
-    [p2, g_db] = apply_countermeasure(p, threat, actions{a});
-    p2.seed = [];
-    k = physics_key(p2, g_db);
-    j = find(strcmp(keys, k), 1);
-    if ~isempty(j)                                  % same physics as an earlier configuration
-        P(:, a, :) = P(:, first(j), :);
-        info.map(a) = first(j);
-        continue;
-    end
-    keys{end+1} = k; first(end+1) = a; %#ok<AGROW>
-    info.map(a) = a; info.n_unique = info.n_unique + 1;
+[C, map, twin] = pool_configs(p, threat, actions);
+info = struct('n_unique', sum(map == 1:nA), 'map', map);
+for a = find(twin == 1:nA)
+    tw = find(twin == a);                           % this run's configurations, a first
+    p2 = C(a).p; g_db = C(a).g_db;
     build_threat_model(p2);
     if ~isempty(det), det.nv = thermal_nv(p2); end         % the receiver's thermal floor (spec_image.m)
     for s = 1:nS
@@ -57,7 +51,8 @@ for a = 1:nA
         set_link_snr(modelName, snr_dB + g_db - loss, p2);
         for sp = 1:nSp
             g = geo{s}(sp);
-            if isempty(det), Q = empty_pool(0, 0); else, Q = empty_pool(numel(det.classes), numel(det.mu)); end
+            if isempty(det), Q0 = empty_pool(0, 0); else, Q0 = empty_pool(numel(det.classes), numel(det.mu)); end
+            Q = repmat({Q0}, 1, numel(tw));
             for r = 1:numel(g.seed)
                 seed = g.seed(r);
                 fd = g.speed(r) / 3.6 * p.carrier_freq / p.c_light;
@@ -65,20 +60,21 @@ for a = 1:nA
                 d = link_seed(modelName, seed, fd, struct('ebno', ebno(s), 'alt_m', geo_value(g, 'alt', r), ...
                     'k_sig_db', geo_value(g, 'ksig', r), 'aoa1_deg', geo_value(g, 'aoa1', r), 'rho', geo_value(g, 'rho', r), ...
                     'event_frame', geo_value(g, 'event', r), 'frames', nf));
-                F = extract_closed_loop_frames(sim(modelName, 'StopTime', stop_of(nf)), p2, opt.delay_bits);
+                [F, T] = extract_closed_loop_frames(sim(modelName, 'StopTime', stop_of(nf)), p2, opt.delay_bits);
                 disk_guard;
                 erx = received_ebno(p2.active_threat, ebno(s) + g_db - loss, F.act_comp, p2.path_loss_db);
-                Q = add_run(Q, F, det, opt.tw, g.run(r), d.aoa, erx);
+                for i = 1:numel(tw)
+                    if i > 1, [F.ber, F.fer, F.crc_fail] = closed_loop_truth(T, C(tw(i)).p); end   % the twin's own truth
+                    Q{i} = add_run(Q{i}, F, det, opt.tw, g.run(r), d.aoa, erx);
+                end
             end
-            P{s, a, sp} = Q;
+            P(s, tw, sp) = Q;
         end
     end
 end
+for a = find(map ~= 1:nA)                           % same physics as an earlier configuration
+    P(:, a, :) = P(:, map(a), :);
 end
-
-function k = physics_key(p, g)
-% Everything that changes the simulated link: the params and the Eb/N0 offset.
-k = [jsonencode(p) sprintf('|%.6f', g)];
 end
 
 function Q = empty_pool(nC, nF)
