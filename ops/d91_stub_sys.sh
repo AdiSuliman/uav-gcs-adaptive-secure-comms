@@ -7,8 +7,11 @@
 #   procs/<pid>                      command line of a process (else: a live stub MATLAB of the tests,
 #                                    or a live process of this sandbox, by Windows PID; else 'none')
 #   created/<pid>                    creation time of a procs/<pid> process
-#   children/<pid>                   MATLAB children of a process (default 'none')
-#   state/<pid>                      live, exited or other (default none)
+#   children/<pid>                   MATLAB children of a process (else: live sandbox processes whose
+#                                    $STUB_CTL/ppid_<Windows PID> names it, as Windows keeps ParentProcessId
+#                                    after the parent exits, plus a live stub MATLAB itself; else 'none')
+#   state/<pid>                      live, exited or other (else: live for a stub win64 child of this
+#                                    sandbox, other for another process of it; else none)
 #   exec_delay                       seconds after its start during which a stub MATLAB still shows the
 #                                    command line of the takeover's subshell (exec not done yet)
 #   fail_<query>, fail_<query>_<pid> that query fails (no output) while the file exists
@@ -19,15 +22,16 @@ D=${V7T_SYS_DIR:?}
 { [ -f "$D/fail_$1" ] || { [ -n "${2:-}" ] && [ -f "$D/fail_$1_$2" ]; }; } && exit 0
 { [ -f "$D/hang_$1" ] || { [ -n "${2:-}" ] && [ -f "$D/hang_$1_$2" ]; }; } && { echo $$ >> "$D/hung"; exec sleep 1000; }
 proc_of() {   # MSYS /proc entry of the process of this sandbox with Windows PID $1
-  local p
+  local p w
   for p in /proc/[0-9]*; do
-    [ "$(cat "$p/winpid" 2>/dev/null)" = "$1" ] || continue
+    w=""; { read -r w < "$p/winpid"; } 2>/dev/null; [ "$w" = "$1" ] || continue   # builtin read: no fork per process
     tr '\0' '\n' 2>/dev/null < "$p/environ" | grep -qx "V7T_SYS_DIR=$D" && { echo "$p"; return 0; }
     return 1
   done
   return 1
 }
 is_stub_ml() { tr '\0' ' ' < "$1/cmdline" 2>/dev/null | grep -q d91_stub_matlab; }
+is_w64() { tr '\0' ' ' < "$1/cmdline" 2>/dev/null | grep -q -- 'd91_stub_matlab.sh --win64'; }
 started() { cat "${STUB_CTL:-/nonexistent}/start_$1" 2>/dev/null; }
 case $1 in
   cmdline)
@@ -48,9 +52,19 @@ case $1 in
     else echo none; fi;;
   mlchild)
     if [ -f "$D/children/$2" ]; then cat "$D/children/$2"
-    elif p=$(proc_of "$2") && is_stub_ml "$p"; then echo "$2"
+    else
+      out=()
+      for f in "${STUB_CTL:-/nonexistent}"/ppid_*; do
+        v=""; { read -r v < "$f"; } 2>/dev/null; [ "$v" = "$2" ] || continue
+        k=${f##*/ppid_}; proc_of "$k" > /dev/null && out+=("$k")
+      done
+      p=$(proc_of "$2") && is_stub_ml "$p" && out+=("$2")
+      if [ "${#out[@]}" -gt 0 ]; then printf '%s\n' "${out[@]}"; else echo none; fi
+    fi;;
+  state)
+    if [ -f "$D/state/$2" ]; then cat "$D/state/$2"
+    elif p=$(proc_of "$2"); then if is_w64 "$p"; then echo live; else echo other; fi
     else echo none; fi;;
-  state)    cat "$D/state/$2" 2>/dev/null || echo none;;
   matlab)   sed -e '$a\' "$D/matlab" 2>/dev/null; echo end;;
   scripts)  sed -e '$a\' "$D/scripts" 2>/dev/null
             [ -f "$D/scripts_once" ] && { sed -e '$a\' "$D/scripts_once"; rm -f "$D/scripts_once"; }
