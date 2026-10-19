@@ -31,6 +31,7 @@ Decisions it carries (recorded elsewhere, not repeated):
 | `3c4e691` | `deploy_state.m`, the check before a hold is removed or a chain resumes (section 5) |
 | `2abd51f`, `d081743` | this note: the second review resolved, procedures, section 7 |
 | `a397ff3` | `test_core`: a helper that `functiontests` ran as a test, renamed (4.3) |
+| `f3aee61` | the third review: `select_fusion` saves `fusion.mat` whole (`commit_mat.m`), `test_fusion_atomic_save`; the second queue takes profile 2 (3.9) |
 
 - The three merges had no conflict (the order of `docs/d91_fuse.md` section 7.A).
 - `code/detection/fusion_rev_id.m` is the same blob on `d91-set4`, `d91-fuse` and this branch:
@@ -57,12 +58,12 @@ Decisions it carries (recorded elsewhere, not repeated):
 | `kpi1_set.m` | `'fresh3'` |
 | `run_stage.m` `run_one` | B2F: `FUSION_REV = true`; `FUSION_FIT = 'enlarged'` unless `SMOKE`; a profile's first B2F (neither second nor third test set) fits on validation as before the revision (3.3). The `%#ok<INUSD>` on `SMOKE` is gone |
 | `main.m` | B2F as `run_stage.m` runs it (`run_fusion`) |
-| `select_fusion.m` | before any data is read: `FUSION_REV` without the enlarged fit only in a smoke or dev copy (`select_fusion:rev_fit`), the fit set's files (`select_fusion:fit_sets`) and the kept fusion as the rule's base (`select_fusion:pick_base`); a failed rule or base writes `data/fusion_nogo.mat`; `deployed_pick.check.kept`; an earlier no-go record is set aside after any save |
+| `select_fusion.m` | before any data is read: `FUSION_REV` without the enlarged fit only in a smoke or dev copy (`select_fusion:rev_fit`), the fit set's files (`select_fusion:fit_sets`) and the kept fusion as the rule's base (`select_fusion:pick_base`); a failed rule or base writes `data/fusion_nogo.mat`; `deployed_pick.check.kept`; an earlier no-go record is set aside after any save; the record is written whole to `data/fusion_new.mat` and renamed onto `data/fusion.mat` (`commit_mat.m`), so a cut save leaves the earlier file as it was (3.9) |
 | `eval_detector.m` | B3r guard: `deployed_pick` equal to `fusion_pick()` (`eval_detector:fresh3_pick`), placed after the `FM.target_age`/`FM.cues` check and before `fresh3_fusion_old`; the set's own link model (`eval_detector:fresh3_params`); after a no-go the kept fusion is read (3.2); every reading records `fusion_rev`, `fusion_state` and `sample` |
 | `prepare_data.m` | B3q copies `params.mat` to `data/splits_fresh3_params.mat` |
 | `fusion_nogo.m`, `fusion_reading.m`, `enlarged_ready.m`, `deploy_state.m` | new (3.1-3.3, section 5) |
 | `measure_all_kpis.m`, `build_kpi_dashboard.m`, `compare_architectures.m`, `export_report_numbers.m` | the in-sample label (3.1) |
-| `test_core.m` | `test_third_test_set`, `test_fourth_test_set` (guard cases, no-go cases, the set's link model, the pre-deploy switch by a stand-in), `test_kpi1_file`, `test_fusion_pick_deploy` (phi = 1, the new source lines), new `test_fusion_nogo_reading`, `test_b2f_deploy_guards`, `test_deploy_state` |
+| `test_core.m` | `test_third_test_set`, `test_fourth_test_set` (guard cases, no-go cases, the set's link model, the pre-deploy switch by a stand-in), `test_kpi1_file`, `test_fusion_pick_deploy` (phi = 1, the new source lines), new `test_fusion_nogo_reading`, `test_b2f_deploy_guards`, `test_deploy_state`, `test_fusion_atomic_save` |
 
 Step B5 of the fuse checklist (`d91_bitid/rev.m` must hold `fusion_rev_id('validation')`) is
 covered by the smoke's `B2Fcheck` step (section 4).
@@ -279,6 +280,20 @@ A (E) would take it with no extra rerun.
 | Holds written later than needed | low | 5.0: the holds now, with a deadline for the takeover launch |
 | (found in the first queue) the helper `run_det_test` ran as a test | - | renamed `det_read_run` (`a397ff3`, 4.3) |
 
+### 3.9 The third review (19.10 evening) and what changed
+
+| Finding | Severity | Change |
+|---|---|---|
+| A B2F cut between its save and its revision record left `fusion.mat` with the new cues and no record; the rerun took it as the kept fusion, wrote a false 'base' no-go and spent the fourth set on it | medium | `select_fusion.m` writes the whole record (FM, N, lambda, `fusion_rev`, `deployed_pick`) to `data/fusion_new.mat` and only then renames it onto `data/fusion.mat` (`commit_mat.m`: written through to the disk, one rename). A cut save leaves the earlier `fusion.mat` byte for byte and the part record aside in `fusion_new.mat`, which the next save overwrites. `test_fusion_atomic_save` runs `select_fusion.m`'s own save block, cut after the revision id and then whole; the smoke checks that `fusion_new.mat` is gone after `dep_B2Fsave`. And before any B2F rerun, D5(c), E7 and F3 restore the archived pre-deploy `fusion.mat` and set `fusion_nogo.mat` and `fusion_new.mat` aside (5.0, the restore) |
+| The release check's awk turned `win64 <pid>` into a wrong PID | low | 5.0 item 2 uses the wrapper's own expression (line 1 stripped to digits, the second field of a `win64` line; for p1 the first field of `takeover_p1_chain_ml.txt`) |
+| D4 cited a bare MATLAB command | low | D4 (and E6 through it) gives the params check as a wrapper call at 35 GB with its own log |
+| A stop after `C2 done` left profile 1 stuck at C2e (`check_det_id:mismatch`) | low | E2: any stage after C1d with its done marker in the current part is rerun by hand through the wrapper before E10 (step 9b), or plan B; T2's alert names every such stage |
+| Plan B could not queue profile 2, and the proofs' detector was profile 3's for every profile | low | the second queue takes `D91_PROFILE=p2`; the detector is chosen by profile (4.2) |
+| The wrapper/T3 register-then-check race; the post-chain wrap checks without a hold | low | the protocol is fixed in section 7 (T3: the takeover claims its PID file before it checks the busy file, the wrapper counts a claim as busy or settles; owned by the takeover track); E11 says when `final.hold` is needed |
+
+`f3aee61` adds `commit_mat.m`, called only by `select_fusion.m`, which is one of 3.5's 29 files;
+neither is in the proofs' call closure, so 3.5's argument stands.
+
 ## 4. Tests
 
 ### 4.1 The first queue (19.10 12:24, running)
@@ -308,9 +323,9 @@ How the jobs run (both queues):
 | `p3core` | `p3m` | full `test_core` on the candidate; paired with `v7_d91_tests4_tip.log` (`29510e7`) |
 | `smoke` | `smoke` (this branch) | serial smoke (below) |
 
-- The profile 3 candidate is `v7-deploy-d91-on-v7-p3`: one merge commit with first parent `v7-p3`
-  `29510e7` and second parent this branch's tip, built with `git merge-tree --write-tree` and `git
-  commit-tree`, without a worktree.
+- The profile 3 candidate (4.3 names the current one) is one merge commit with first parent
+  `v7-p3` `29510e7` and second parent this branch's tip, built with `git merge-tree
+  --write-tree` and `git commit-tree`, without a worktree.
 - The old side of its proofs is `v7-deploy-d91-nospeed-on-v7-p3` `2a2b525`: `v7-p3` merged with
   `b4f217a`, that is `v7-p3` plus `d91-set4` and `d91-fuse`, with neither `d91-speed` nor the
   deploy commits. So the proofs compare the candidate against the target without the speedups;
@@ -338,8 +353,14 @@ Script `uav-gcs-logs\v7_d91_deploy_tests2.sh` (copy `docs/d91_deploy_tests2.sh.t
 `v7_d91_deploy_tests2.log`; same jobs, same lock (`v7_d91_deploy.lock.d`), so it cannot start
 before the first queue's `queue done`. It moves the first queue's job logs aside with a time
 stamp. Differences:
-- `D91_PROFILE=p3|p1` names the candidate in the summary and the verdict (`VERDICT <p> merge
-  candidate`);
+- `D91_PROFILE=p3|p1|p2` names the candidate in the summary and the verdict (`VERDICT <p> merge
+  candidate`) and picks the proofs' detector: profile 3's B3m detector (`uav-gcs-b3m-p3\data`)
+  for p3, profile 1's (`uav-gcs-b3m-p1\data`, as `v7_d91_speed_proofs.sh` used at n_rx 3) for p1
+  and p2 (profile 2 has no detector of its own before its chain); `D91_DET_FROM=<data folder>`
+  overrides it. The proofs compare old and new pools on one fixed detector, whose features do
+  not depend on the antenna count (`link_features.m`), so a detector of another profile still
+  gives a valid verdict at the target's n_rx. The start line and the summary print `proof
+  detector <path>`;
 - a `test_core` log counts for a commit whose code tree (`code/`, `startup.m`, `models/`) equals
   the log's commit's: the summary prints `SAME-TREE (code <c>, expected <e> ...)`, which does
   not block; another tree is STALE as before. This is what lets E1 pair the profile 1 candidate
@@ -347,7 +368,7 @@ stamp. Differences:
 - `VERDICT smoke` also needs `V7SMOKE dep_B2Fsave SAVED`.
 
 **Rerun all six jobs** on the commits of this version:
-- `core`, `p3core` and `smoke`: the code changed (3.8);
+- `core`, `p3core` and `smoke`: the code changed (3.8, 3.9);
 - `pold`, `pnew`, `porder`: their code closure did not change (3.5), but the verdict pins the
   proof lines to the candidate's SHA, and the candidate is new.
 
@@ -381,7 +402,8 @@ C2e on smoke pools).
     check passes, the rule is computed and printed, and the fusion is saved even when the rule
     fails on smoke data (`deployed_pick.check.rule_logged_only`). The step checks
     `fusion_rev`, `deployed_pick` equal to `fusion_pick()`, `check.kept` (N 12, 1e-3, off, no
-    columns), `FM.cues.phi1`, no no-go record left, and the in-sample state. It prints
+    columns), `FM.cues.phi1`, no no-go record left, no `data/fusion_new.mat` left (the rename,
+    3.9), and the in-sample state. It prints
     `V7SMOKE dep_B2Fsave SAVED (rule yes|no on smoke data, logged only)`;
   - `dep_REKEY`: `rekey_pools` on the smoke pools; the policy, check and clean pools must carry
     the deployed fusion's det_id;
@@ -403,27 +425,37 @@ A `fail-both` with the same diagnostics is the target's own state: report it, do
 
 ### 4.3 The commits the second queue runs
 
-Built on 19.10 as in 4.1 (no worktree, no conflict), from `a397ff3`, the last code commit:
+Built on 19.10 as in 4.1 (no worktree, no conflict), from `f3aee61`, the last code commit (the
+third review, 3.9):
 
-    T=$(git merge-tree --write-tree 29510e7 a397ff3)     # 6c40c2782bebed5cebb9a2d04eb3470312fe6b17
-    C=$(git commit-tree "$T" -p 29510e7 -p a397ff3 -m "...")
-    git branch -f v7-deploy-d91-on-v7-p3 "$C"
+    T=$(git merge-tree --write-tree 29510e7 f3aee61)     # 0670e150823261c2303a4d8afc67837ae97b90b0
+    C=$(git commit-tree "$T" -p 29510e7 -p f3aee61 -m "...")
+    git branch -f v7-deploy-d91-on-v7-p3-q2 "$C"; git push origin v7-deploy-d91-on-v7-p3-q2
 
 | Role | Commit | Note |
 |---|---|---|
-| this branch (`<TIP>`) | the tip at the queue's start (`a397ff3` or a later docs-only commit) | `core`, `smoke`; every commit after `a397ff3` changes `docs/` only, so its code tree is `a397ff3`'s (`code/` tree `7418c19`) |
-| profile 3 candidate (`<P3M>`) | `v7-deploy-d91-on-v7-p3` = `09671af` | tree `6c40c27`; parents `29510e7` and `a397ff3`; its `code/` tree is `7418c19` |
+| this branch (`<TIP>`) | `f3aee61` (or a later docs-only commit) | `core`, `smoke`; every commit after `f3aee61` changes `docs/` only, so its code tree is `f3aee61`'s (`code/` tree `8fd14cd`) |
+| profile 3 candidate (`<P3M>`) | `v7-deploy-d91-on-v7-p3-q2` = `05e7a7f` | tree `0670e150823261c2303a4d8afc67837ae97b90b0`; parents `29510e7` and `f3aee61`; its `code/` tree is `8fd14cd` |
 | old side | `v7-deploy-d91-nospeed-on-v7-p3` = `2a2b525` | unchanged (4.1) |
 | target tip | `v7-p3` `29510e7` | n_rx 4 |
 
-The first queue's candidate stays reachable as `v7-deploy-d91-on-v7-p3-q1` (`192a546`); an
-intermediate candidate `89dede6` (from `2abd51f`) was replaced before any test ran on it,
-because the first queue's `core` job then showed `V7FAIL test_core/run_det_test`: `functiontests`
-runs every local function whose name ends in 'test', and that helper (from `d91-set4`
-`31ab0de`) ran `eval_detector` with the test case as `DET_TEST`. `a397ff3` renames it
-`det_read_run`. The second queue's command of 4.2 with these values:
-`bash v7_d91_deploy_tests2.sh <TIP> 09671af 29510e7 2a2b525`. Step D3 checks `HEAD^{tree}`
-against `6c40c2782bebed5cebb9a2d04eb3470312fe6b17`.
+Names: each rebuilt candidate gets a new branch, `-q<n>` after the queue that tests it, because
+a forced update of a pushed candidate is not done from here. `v7-deploy-d91-on-v7-p3-q1`
+(`192a546`) is the first queue's. `v7-deploy-d91-on-v7-p3` still points at `09671af` (from
+`a397ff3`), which was replaced before any test ran on it, as `89dede6` (from `2abd51f`) was
+before it; neither is used. `a397ff3` itself renamed the `test_core` helper `run_det_test`
+(`det_read_run`): `functiontests` runs every local function whose name ends in 'test', and the
+first queue's `core` job showed `V7FAIL test_core/run_det_test`.
+
+**The command to run after the first queue ends** (`v7_d91_deploy_tests.log` ends with `queue
+done`; both queues share the lock): all six jobs, with 4.2's hidden launch:
+
+    $si = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ShowWindow=[uint16]0}
+    Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine='"C:\Program Files\Git\bin\bash.exe" -lc "bash ''/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_deploy_tests2.sh'' f3aee61 05e7a7f 29510e7 2a2b525 >> ''/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_deploy_tests2.log'' 2>&1"'; CurrentDirectory='C:\Users\Adi Suliman\uav-gcs-logs'; ProcessStartupInformation=$si}
+
+that is `bash v7_d91_deploy_tests2.sh f3aee61 05e7a7f 29510e7 2a2b525` (`D91_PROFILE` p3, the
+proofs on profile 3's detector). Step D3 merges `origin/v7-deploy-d91-on-v7-p3-q2` and checks
+`HEAD^{tree}` against `0670e150823261c2303a4d8afc67837ae97b90b0`.
 
 ## 5. Procedures
 
@@ -484,15 +516,36 @@ The stage commands (the scripts `run_stage.m` calls, with its variables):
 | re-key | `cd(setup_paths()); rekey_pools` |
 | C1d | `cd(setup_paths()); run('choose_drop_threshold')` |
 | state | `cd(setup_paths()); st = deploy_state(); exit(double(strcmp(st, 'none')))` |
+| fourth set's params check (35 GB) | `cd(setup_paths()); A = load('params.mat'); B = load('data/splits_fresh3_params.mat'); fprintf('%s %s\n', params_id(A.params), params_id(B.params)); assert(strcmp(params_id(A.params), params_id(B.params)) && strcmp(params_id(A.params), '<id>'), 'params_id differs'); assert(max(h5read('data/dataset_fresh3.mat', '/dataset/run')) < 1e5, 'run id out of the seed block')` |
+| C2, C2e, C2g, C2u, EDGE, LAT (45 GB) | `cd(setup_paths()); run('<script>')` with `train_dqn`, `evaluate_policies`, `experiment_combo_generalization`, `experiment_unknown_threat`, `edge_map`, `measure_latency` (`run_stage.m`'s map) |
+| KPI, DASH, WEAK, RPT (35 GB) | `cd(setup_paths()); run('<script>')` with `measure_all_kpis`, `build_kpi_dashboard`, `analyze_weak_points`, `export_report_numbers` |
+
+**The restore before any B2F rerun** (D5(c), E7, F3), when no MATLAB runs in the worktree (the
+release check's items 1 and 2). The rerun's base must be the kept fusion the profile had before
+the deploy, whatever the failed B2F left (with the whole-record save, `fusion.mat` is either
+unchanged or a complete new record; 3.9):
+
+    A="$L/deploy_archive/<p>/pre_deploy_<time>"            # D2, E3 or F2b
+    t=$(date +%Y%m%d_%H%M%S)
+    cp "$A/fusion.mat" "<wt>/data/fusion.mat" && cmp "$A/fusion.mat" "<wt>/data/fusion.mat"
+    for f in fusion_nogo fusion_new; do [ -f "<wt>/data/$f.mat" ] && mv "<wt>/data/$f.mat" "<wt>/data/${f}_aside_$t.mat"; done
+
+Then the state hand-run must print `DEPLOY_STATE none` (the kept fusion without a record), and
+the B2F rerun follows.
 
 **The release check** (before D8, E10 and F4; `<p>`, `<wt>` the profile and its worktree). All
 must hold, else the hold stays:
 1. no `R\<p>_hand.busy`;
-2. in bash, `D91_WT='C:\Users\Adi Suliman\<wt>' D91_PIDS="$(awk 'NR == 1 || $1 == "win64"
-   {gsub(/[^0-9]/, ""); print}' "$L/v7_d86/takeover_ml_<p>.pid" 2>/dev/null)" powershell.exe
-   -NoProfile -ExecutionPolicy Bypass -File 'C:\Users\Adi Suliman\uav-gcs-logs\v7_d91_gated_state.ps1'`
-   prints `FREE ...`: no MATLAB names the worktree in its command line, and no MATLAB recorded
-   by the takeover for it is alive (for p1 add the PIDs of `takeover_p1_chain_ml.txt`);
+2. in bash (`p=<p>`, `wt=<wt>`), the state script prints `FREE ...`: no MATLAB names the
+   worktree in its command line, and no MATLAB recorded by the takeover for it is alive. The PIDs
+   are taken as the wrapper takes them (`pids_of`): line 1 of `takeover_ml_<p>.pid` stripped to
+   its digits, the second field of its `win64 <pid>` line, and for p1 the first field of each
+   line of `takeover_p1_chain_ml.txt`:
+
+       pids=$( { awk 'NR == 1 { gsub(/[^0-9]/, ""); if ($0 != "") print } $1 == "win64" && $2 ~ /^[0-9]+$/ { print $2 }' "$L/v7_d86/takeover_ml_$p.pid"
+                 [ "$p" = p1 ] && awk '$1 ~ /^[0-9]+$/ { print $1 }' "$L/v7_d86/takeover_p1_chain_ml.txt"; } 2>/dev/null | tr -d '\r' | sort -u | tr '\n' ' ')
+       D91_PIDS="$pids" D91_WT="C:\\Users\\Adi Suliman\\$wt" MSYS2_ARG_CONV_EXCL='*' powershell.exe -NoProfile -ExecutionPolicy Bypass -File 'C:\Users\Adi Suliman\uav-gcs-logs\v7_d91_gated_state.ps1'
+
 3. the state hand-run (35 GB) ends with status 0 and its log shows `DEPLOY_STATE deployed: ...`
    or `DEPLOY_STATE nogo: ...`. `none` keeps the hold: the B2F did not finish as either.
 
@@ -510,7 +563,8 @@ Preconditions:
    process, and p3.log's current part has not started C1p.
 2. **Archive** (3.1): `results\` and `data\fusion.mat` to `L\deploy_archive\p3\pre_deploy_<time>\`.
 3. **Code.** In `uav-gcs-v7-p3`: `git fetch` and `git merge --ff-only
-   origin/v7-deploy-d91-on-v7-p3`. The fast-forward makes the tree the tested one.
+   origin/v7-deploy-d91-on-v7-p3-q2` (the candidate of 4.3). The fast-forward makes the tree
+   the tested one.
    - Check that `git rev-parse HEAD^{tree}` equals the candidate tree of 4.3 and of the second
      queue's summary line (`p3 candidate ... (tree <T>)`);
    - check that `git status --short` prints nothing;
@@ -524,7 +578,12 @@ Preconditions:
    - `cp "$L/set4_out/p3/params_set4.mat" uav-gcs-v7-p3/data/splits_fresh3_params.mat`: the link
      model the set was built with; B3r refuses unless its `params_id` equals `params.mat`'s
      (`eval_detector:fresh3_params`), so the check is repeated by B3r itself after D5's A0;
-   - the `params_id` and run-id check of step 3, with `7ecc49e97d0a5639f458997caa6b58c8`.
+   - the `params_id` and run-id check of step 3, through the wrapper (5.0's command with
+     `<id>` = `7ecc49e97d0a5639f458997caa6b58c8`), never as a bare `matlab`:
+
+         bash "$L/v7_d91_gated_run.sh" 35 uav-gcs-v7-p3 logs/set4_params_check_<time>.txt "cd(setup_paths()); A = load('params.mat'); B = load('data/splits_fresh3_params.mat'); fprintf('%s %s\n', params_id(A.params), params_id(B.params)); assert(strcmp(params_id(A.params), params_id(B.params)) && strcmp(params_id(A.params), '7ecc49e97d0a5639f458997caa6b58c8'), 'params_id differs'); assert(max(h5read('data/dataset_fresh3.mat', '/dataset/run')) < 1e5, 'run id out of the seed block')"
+
+     It must end with status 0 and print the id twice.
 5. **B stages by the takeover.** Write `R\p3_brerun.go` holding `B2F B3 B3a B4 B4s`. The takeover
    runs them with A0 first, after profile 1 is past C1c and with 65 GB of commit free, as one
    MATLAB (`run_stage('A0','B2F','B3','B3a','B4','B4s')`). When its part in p3.log has ended,
@@ -541,11 +600,12 @@ Preconditions:
      D6 and D7 (the rehearsal and B3r with the kept fusion), then write `R\p3_rerun.accept`, then
      D8.
    - **(c) Any other failure of B2F**: no `STAGE B2F done` and no `No-go recorded` line (another
-     error, a crash, an out-of-memory end), or the state hand-run gives `none`. This includes a
-     B2F cut between its save and its revision record, which leaves a `fusion.mat` with the new
-     cues but without `fusion_rev` or `deployed_pick`. **Never write `p3_rerun.accept` here**:
-     C1p would build its pools on an unrecorded fusion. Fix the cause and write
-     `R\p3_brerun.go` again (a new version reruns its whole list).
+     error, a crash, an out-of-memory end), or the state hand-run gives `none`. B2F saves its
+     record whole (3.9): a cut inside the save leaves the earlier `fusion.mat` as it was and
+     the part record in `data/fusion_new.mat`. **Never write `p3_rerun.accept` here**: C1p
+     would build its pools on a fusion without a decision. Fix the cause, do the restore of 5.0
+     (D2's archive), check `DEPLOY_STATE none`, and write `R\p3_brerun.go` again (a new version
+     reruns its whole list).
    - **(d) B2F done, a later stage failed** (`STAGE B2F done` present, one of B3, B3a, B4, B4s
      without its done marker). `fusion.mat` is the deployed revision (check the B2F lines as in
      (a) and `DEPLOY_STATE deployed`). Accept only after a review: read the failing stage's
@@ -569,7 +629,8 @@ Preconditions:
 8. **Release.** The release check (5.0) for `p3`, `uav-gcs-v7-p3`; then remove `p3_c1p.hold`.
    C1p builds the pools on the deployed fusion (or the kept one). Check C1c's `det_id` line.
 9. After profile 3's C1p, rerun wrap check A, B and C on its pools (`docs/d91_fuse.md`
-   section 10), through the wrapper (45 GB).
+   section 10), through the wrapper (45 GB). It normally runs while the chains still run; if it
+   would run after all three chains have ended, E11's rule applies.
 
 ### E. Profile 1: plan A (recommended), the swap before C1d
 
@@ -593,7 +654,7 @@ If any condition fails, take plan B.
 
        T=$(git merge-tree --write-tree v7-dev <tip>)
        P1C=$(git commit-tree "$T" -p v7-dev -p <tip> -m "Merge v7-deploy-d91 into v7-dev (profile 1 candidate)")
-       git diff --stat "$P1C" v7-deploy-d91-on-v7-p3 -- code startup.m models     # must print nothing
+       git diff --stat "$P1C" v7-deploy-d91-on-v7-p3-q2 -- code startup.m models     # must print nothing
        TO=$(git merge-tree --write-tree v7-dev b4f217a)
        P1O=$(git commit-tree "$TO" -p v7-dev -p b4f217a -m "Proof baseline: v7-dev merged with v7-deploy-d91 up to d91-fuse")
        git branch -f v7-deploy-d91-on-v7-dev "$P1C"; git branch -f v7-deploy-d91-nospeed-on-v7-dev "$P1O"; git push -f origin v7-deploy-d91-on-v7-dev v7-deploy-d91-nospeed-on-v7-dev
@@ -618,10 +679,22 @@ If any condition fails, take plan B.
      PIDs of `R\takeover_p1_chain_ml.txt` (now `42560`; `Get-Process -Id <pid> | Select
      Path`). The takeover then raises `ALERT_p1_failed_*` and waits for `p1_resume.go`.
 
-   **Interim rule** (until T2 is live): the stop may come at any point during C1d or early C2.
-   Look at p1.log's current part after the stop: whenever `##### STAGE C1d done` is present,
-   C1d is rerun in step 9, whatever the time of the stop; a C2 cut at any point is simply rerun
-   by the resume. Without `C1d done`, the resume starts at C1d.
+   **The rule after the stop** (by hand now; T2's alert names the stages): look at p1.log's
+   current part. Without `##### STAGE C1d done` the resume starts at C1d. Whenever `C1d done`
+   is present, C1d is rerun in step 9, whatever the time of the stop. A stage cut while it runs
+   is simply rerun by the resume. **Any stage after C1d with its done marker** (C2 and later,
+   e.g. a stop noticed only after `##### STAGE C2 done`) ran on the old fusion and the old pool
+   keys: the resume would start after it, and C2e would stop at `check_det_id:mismatch`. Then
+   either:
+   - plan A with step 9b: rerun every such stage by hand through the wrapper, in chain order,
+     before step 10 (GAL, OHP and GCSA read neither the fusion nor the pools and keep their
+     results). With C2 among them that is about two days single-thread (C2 alone is 38-42 h in
+     the chain); or
+   - plan B (E'), if T1 and T4 are live: change nothing in the worktree and write
+     `p1_resume.go`; the chain ends on the old fusion, then E'.
+
+   Decide right after the stop, before step 5: plan B needs the old code for the rest of the
+   chain.
 3. **Archive** (3.1): `results\`, `data\fusion.mat` and `data\trained_dqn.mat`, if present, to
    `L\deploy_archive\p1\pre_deploy_<time>\`.
 4. Check that no MATLAB runs in `uav-gcs-v7` (the release check's items 1 and 2).
@@ -635,7 +708,8 @@ If any condition fails, take plan B.
    - B2F (about 1 h). Check the base line, `rule yes`, and `DEPLOY_STATE deployed` (the state
      hand-run). A stop at `pick_rule` or `pick_base` (`No-go recorded`, `DEPLOY_STATE nogo`) is
      profile 1's no-go: skip the B stages and the re-key (the fusion and the pools keep their
-     keys), go on with step 8. Any other stop: fix and rerun B2F; never go on with `none`;
+     keys), go on with step 8. Any other stop: fix the cause, do the restore of 5.0 (E3's
+     archive), then rerun B2F; never go on with `none`;
    - after `rule yes`: B3 (test split), B3 (second set), B3a, B4, B4s (about 5.5 h; in-sample
      descriptions, 3.1). This is the former step E9, moved here (3.6).
 8. **Rehearsal, B3r, record**: the D6 commands with `uav-gcs-v7`, then the record as in D7,
@@ -645,12 +719,23 @@ If any condition fails, take plan B.
      pools, and backs each one up first. It stops, changing nothing, on an unknown field
      (profile 1's pools have `maha_val` from `9b5c9f1`, which it knows);
    - if `##### STAGE C1d done` is in p1.log's current part (step 2): `choose_drop_threshold`.
+
+   9b. **Stages after C1d already done** (step 2's rule, plan A): rerun each one in chain order
+   with 5.0's commands (C2 to LAT at 45 GB, KPI to RPT at 35 GB), each with its own log under
+   `logs\`. The resume starts at the first stage without its done marker in the current part,
+   so the stages rerun here are not run again: check in p1.log that the first unfinished stage
+   is the one after the last stage rerun.
 10. **Resume.** The release check (5.0) for `p1`, `uav-gcs-v7`. Then write `R\p1_resume.go`,
     newer than p1.log. The takeover resumes profile 1 from its first unfinished stage (C1d, or C2
     after step 9's C1d) to RPT, with the new fusion and pools; its KPI and RPT read the B
     readings of step 7.
 11. **After the chain**: wrap check A, B and C on profile 1's pools through the wrapper (45 GB).
-    It only reads the pools; with T1 live, write `final.hold` first and remove it after.
+    It only reads the pools, but the final phase would compete with it for memory and write
+    results beside it. With T1 live, always write `final.hold` first and remove it after. With
+    T3 live, the wrapper's busy file also holds the final phase in profile 1's worktree.
+    Without either, the wrap check must end before profile 2's chain ends (the final phase
+    starts only after all three tracks), or wait until the final phase has ended. The same
+    applies to D9 if it runs that late.
 
 Cost: about 9-10 h between the stop and the resume (B2F 1 h, the B stages 5.5 h, rehearsal,
 B3r, re-key, C1d if needed). Nothing of the closed loop runs twice.
@@ -710,7 +795,7 @@ Under plan A, `v7-p2` branches from `v7-dev` with this code:
      `v7-p2`);
    - `pick_rule` or `pick_base` (`DEPLOY_STATE nogo`): the no-go record (3.2). Then the rehearsal
      and B3r once with the kept fusion, and the record;
-   - any other stop: fix and rerun B2F.
+   - any other stop: fix the cause, do the restore of 5.0 (F2b's archive), then rerun B2F.
 
    Either way, copy B2F's base and rule lines into `docs/d91_fuse.md` section 5 under a profile 2
    heading, and state in the report when the profiles' fusions differ.
@@ -728,8 +813,10 @@ the reason line (`why`) and the rule's numbers.
 - The takeover features of section 7 on `d91-takeover`, with their harness scenarios: T3 and the
   launch before 25.10 for profile 3; T2 for plan A's stop; T1 and T4 for plan B.
 - The holds of 5.0 (`p3_c1p.hold`, `p2_c1p.hold`), written by Adi or on his word.
-- Read `v7_d91_deploy_tests.log` when the first queue ends, then start the second queue (4.2);
-  this note gets its verdict lines.
+- Read `v7_d91_deploy_tests.log` when the first queue ends, then start the second queue (4.2,
+  the command in 4.3); this note gets its verdict lines.
+- T3's other half: the wrapper or its state script counts a takeover claim as busy, or settles
+  after registering (section 7, T3), with T3, on `d91-takeover`.
 - KPI 6's rolling-in caveat in the report (3.7).
 
 ## 7. Takeover features required (spec for `d91-takeover`)
@@ -763,9 +850,9 @@ has no end marker:
 - the kill is `taskkill /PID <pid> /F`, never `/T`, never the `bin\matlab.exe` launcher alone;
 - after it: the line `##### cut after SURV3 on request (p1_cut_after.SURV3) <date> #####` in
   p1.log, the control file renamed to `.used_<time>`, and `ALERT_p1_cut_on_request_<stamp>`
-  stating whether `##### STAGE C1d done` was already in the part (then C1d must be rerun, E2's
-  rule). The chain's end then follows the existing failed or cut path: nothing resumes before
-  `p1_resume.go`;
+  naming every stage from C1d on whose done marker was already in the part (C1d is then rerun,
+  later ones as E2's rule says). The chain's end then follows the existing failed or cut path:
+  nothing resumes before `p1_resume.go`;
 - if `SURV3 done` is already in the part when the file is first seen, the cut happens at once
   and the alert says so;
 - harness: (a) the file before SURV3: the stub chain is cut at the marker, the win64 stub
@@ -786,6 +873,30 @@ exists, the takeover starts no MATLAB in that profile's worktree:
   clear it (a stale file is removed by Adi after checking that the PID is gone);
 - not chosen: the wrapper writing `takeover_ml_<p>.pid` itself. `ml_guard` removes that file when
   its PIDs are gone and `run_ml` overwrites it, so two writers would race;
+- **the register-then-check race, and the protocol that closes it.** A takeover start that has
+  passed T3's check but whose MATLAB does not show yet is invisible to the wrapper: takeover
+  command lines do not name the worktree, and the state script counts a recorded PID only when
+  it is MATLAB or has a MATLAB child. The protocol, two flags each written before the other is
+  read:
+  1. takeover: write `takeover_ml_<p>.pid` first (a claim: its bash's Windows PID and `claim
+     <pid>`), then check `<p>_hand.busy`; when the file is there, remove the claim and wait. The
+     takeover track's work in progress does exactly this (`start_claim` in `run_ml`, read in the
+     `d91-takeover` worktree on 19.10 at 15:39, uncommitted on `78e7eb4`; it also records the
+     hand-run's `win64` PID in `takeover_hand_<p>.pids`, so a busy file removed too early still
+     holds the worktree while that MATLAB lives);
+  2. wrapper: write `<p>_hand.busy` first (as now), then read the PID file, and count a live
+     PID whose file holds a `claim` or `msys` line as busy even without a MATLAB child; or,
+     equivalently, wait a settle time of at least `2 x STEP + 10` s (30 s with `STEP` 10) after
+     registering before the first check, by which time a start that passed its check shows a
+     MATLAB child. The wrapper and `v7_d91_gated_state.ps1` (13:15) do neither yet: they check
+     at once and count a claiming bash as free;
+  3. then a takeover start always sees the busy file, or the wrapper always sees the start.
+
+  Step 2 is a change to `v7_d91_gated_run.sh` or `v7_d91_gated_state.ps1`, owned by the takeover
+  track with T3 (it changes the wrapper if needed). Until both sides are in, the race is latent:
+  every hand-run of section 5 runs under a hold (`p3_c1p.hold`, profile 1's stop before
+  `p1_resume.go`, `p2_c1p.hold`) under which the takeover starts nothing in that worktree,
+  apart from the wrap checks of D9 and E11 (E11 says how they are held);
 - harness: (a) the file present when a rerun, a resume, C1p or the final phase would start:
   nothing starts until it is removed; (b) written during `code_wait`/`headroom_wait`: no start;
   (c) removed: the start goes ahead; (d) `status` lists it.
