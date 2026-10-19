@@ -43,8 +43,10 @@ if read_fresh3                                          % the fourth test set: o
     fz = {whos('-file', 'data/fusion.mat').name};
     assert(ismember('val_latch_oof', fz), 'eval_detector:fresh3_fusion', ...
         'data/fusion.mat has no out-of-fold monitor''s class (val_latch_oof): run select_fusion (B2F)');
-    if fusion_nogo('check')                             % the design failed its rule here: the kept fusion is read once
-        fprintf('B3r reads the kept fusion: the deployed design failed its adoption rule on this profile (data/fusion_nogo.mat)\n');
+    t_nogo = 0;                                         % the rehearsal must follow a no-go record
+    if fusion_nogo('check')                             % a no-go on this profile: the kept fusion is read once
+        fprintf('B3r reads the kept fusion after this profile''s no-go (data/fusion_nogo.mat)\n');
+        t_nogo = dir('data/fusion_nogo.mat').datenum;
     else
         assert(all(ismember({'cvy', 'cvo', 'fusion_rev'}, fz)), 'eval_detector:fresh3_fusion_rev', ...
             'data/fusion.mat is not the revised selection (no cvy, cvo or fusion_rev): run B2F with the adopted revision (docs/d91_set4.md)');
@@ -65,14 +67,14 @@ if read_fresh3                                          % the fourth test set: o
     assert(isfield(Dt, 'trained_at') && t_fus >= Dt.trained_at, 'eval_detector:fresh3_fusion_old', ...
         'data/fusion.mat is older than the detector''s training: run B2F before B3r');
     r2 = 'results/eval_detector_metrics_fresh2.mat';        % the same path on the third set, run to its end
-    assert(isfile(r2) && dir(r2).datenum >= max(t_fus, Dt.trained_at), 'eval_detector:fresh3_rehearsal', ...
-        '%s is missing or older than this fusion or detector: reread the third test set first (DET_TEST = ''fresh2'', docs/d91_set4.md)', r2);
+    assert(isfile(r2) && dir(r2).datenum >= max([t_fus, Dt.trained_at, t_nogo]), 'eval_detector:fresh3_rehearsal', ...
+        '%s is missing or older than this fusion, detector or no-go record: reread the third test set first (DET_TEST = ''fresh2'', docs/d91_set4.md)', r2);
     pid = params_id(load('params.mat').params);
     assert(~fresh3_recorded(pid), 'eval_detector:fresh3_recorded', ...
         'docs/d91_fresh3_read_*.txt records a reading of the fourth test set with params_id %s: it is read once', pid);
     fresh3_read_marker('results/fresh3_read_started.txt', pid);   % before the set is loaded: a crashed reading counts
     fprintf('B3r: start marker written (results/fresh3_read_started.txt)\n');
-    clear fz Fz Fp Dt t_fus r2 pid f_in
+    clear fz Fz Fp Dt t_fus t_nogo r2 pid f_in
 end
 tag = ''; if has_fresh && read_split, tag = '_split'; end
 if read_fresh2, tag = '_fresh2'; end

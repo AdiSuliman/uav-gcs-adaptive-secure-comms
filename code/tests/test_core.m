@@ -6650,6 +6650,8 @@ ed = fileread(which('eval_detector'));
 verifyNotEmpty(tc, strfind(ed, 'fz_read = fusion_reading(tag);'));
 verifyNotEmpty(tc, strfind(ed, 'metrics.sample = fz_read.sample;'));
 verifyLessThan(tc, strfind(ed, 'fz_read = fusion_reading(tag);'), strfind(ed, 'metrics = struct('));
+verifyNotEmpty(tc, strfind(ed, 't_nogo = dir(''data/fusion_nogo.mat'').datenum;'));   % after a no-go the rehearsal follows the record
+verifyNotEmpty(tc, strfind(ed, 'dir(r2).datenum >= max([t_fus, Dt.trained_at, t_nogo])'));
 mk = fileread(which('measure_all_kpis'));
 verifyNotEmpty(tc, strfind(mk, 'm.kpi1_threshold_db, smp(m))'));
 verifyNumElements(tc, strfind(mk, 'smp(ms), ...'), 3);
