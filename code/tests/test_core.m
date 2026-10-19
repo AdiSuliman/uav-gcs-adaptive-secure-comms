@@ -6756,6 +6756,44 @@ catch ex
 end
 end
 
+function test_deploy_state(tc)
+% deploy_state.m, the check before a profile's C1p hold is removed or its chain resumes
+% (docs/d91_deploy.md section 5): 'deployed' only for the enlarged revision of fusion_pick.m with
+% its rule check and kept base; 'nogo' only while a no-go record names the fusion on disk;
+% 'none' for everything else, among them a save cut short before its revision record.
+d = fullfile(tc.TestData.tmp, 'depstate'); mkdir(fullfile(d, 'data'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+st = ds_of(); verifyEqual(tc, st, 'none');                              % no fusion
+P = fusion_pick(); N = 12; lambda = 1e-3; FM = struct('latch', false); %#ok<NASGU>
+save('data/fusion.mat', 'FM', 'N', 'lambda');                          % the old layout
+verifyEqual(tc, ds_of(), 'none');
+FM.cues = P.cues; save('data/fusion.mat', 'FM', 'N', 'lambda');        % saved, cut before the revision record
+verifyEqual(tc, ds_of(), 'none');
+fusion_rev = fusion_rev_id('enlarged'); deployed_pick = P;
+deployed_pick.check = struct('all', [0 0 0], 'kept', struct('N', 12, 'lambda', 1e-3, 'latch', false, 'cues', false));
+save('data/fusion.mat', 'FM', 'N', 'lambda', 'fusion_rev', 'deployed_pick');
+[st, txt] = ds_of(); verifyEqual(tc, st, 'deployed'); verifySubstring(tc, txt, 'kept base N 12');
+dp = deployed_pick; deployed_pick.check = rmfield(deployed_pick.check, 'kept');   % no kept base recorded
+save('data/fusion.mat', 'FM', 'N', 'lambda', 'fusion_rev', 'deployed_pick');
+verifyEqual(tc, ds_of(), 'none');
+deployed_pick = dp; deployed_pick.check.rule_logged_only = true;      % the smoke's printed-only rule
+save('data/fusion.mat', 'FM', 'N', 'lambda', 'fusion_rev', 'deployed_pick');
+verifyEqual(tc, ds_of(), 'none');
+deployed_pick = dp; fusion_rev = fusion_rev_id('validation');         % the pick on the validation fit
+save('data/fusion.mat', 'FM', 'N', 'lambda', 'fusion_rev', 'deployed_pick');
+verifyEqual(tc, ds_of(), 'none');
+FM = struct('latch', false); save('data/fusion.mat', 'FM', 'N', 'lambda');   % the kept fusion after a no-go
+evalc('fusion_nogo(''write'', fusion_pick(), struct(''all'', [0 0 0]), ''rule'')');
+[st, txt] = ds_of(); verifyEqual(tc, st, 'nogo'); verifySubstring(tc, txt, '(rule, ');
+q_thr = 1; save('data/fusion.mat', 'FM', 'N', 'lambda', 'q_thr');   %#ok<NASGU> the kept fusion changed after the record
+verifyEqual(tc, ds_of(), 'none');
+end
+
+function [st, txt] = ds_of()
+% deploy_state without its printed line.
+[~, st, txt] = evalc('deploy_state()');
+end
+
 function test_fusion_target_age(tc)
 % A path-loss onset is the fused target while the window still holds a cycle before it
 % (pos - onset < N - 1, threat_active.m's rule) for a fusion fitted on that rule
