@@ -4,16 +4,21 @@ function d91_smoke_deploy()
 %   run_stage's smoke mode on this process: no parallel pool, no parallel turn. Then the
 %   deploy path's tail on the smoke data: B2F with the measured pick on validation, B2F on the
 %   enlarged fit set (the deployed path), the rehearsal on the third set, B3r once, its refusal
-%   of a second reading, KPI and RPT. One line per step: V7SMOKE <step> OK | EXPECTED <id> |
-%   ERROR <id>. Smoke numbers are not results.
+%   of a second reading, KPI and RPT. Then the deploy path end to end (dep_*): an old-layout
+%   fusion at the pick's N, lambda and latch kept as the live trees keep it, B2F on the
+%   enlarged fit set that saves the deployed fusion (SMOKE and FUSION_RULE_LOG: a failed rule
+%   is printed, not enforced), its record checked, rekey_pools on the smoke pools, then C1d,
+%   C2, C2e and EDGE on the re-keyed pools, as plan A resumes profile 1. One line per step:
+%   V7SMOKE <step> OK | SAVED | EXPECTED <id> | ERROR <id>. Smoke numbers are not results.
 root = fileparts(mfilename('fullpath')); cd(root); startup; cd(root);
 fprintf('V7SMOKE start %s in %s, pool open %d, n_rx %d\n', datestr(now), root, ~isempty(gcp('nocreate')), rx_count());
 chain = {'A0', 'A4v', 'A5', 'A6', 'B1', 'B2', 'B2F', 'B2Fcheck', 'B3n', 'B3', 'B3m', 'B3q', 'B3a', 'B4', 'OOD', 'B4s', ...
     'B3rguard', 'C1p', 'C1c', 'SURV', 'SURV3', 'C1d', 'C2', 'C2e', 'C2g', 'C2u', 'GAL', 'OHP', 'GCSA', 'EDGE', 'LAT', ...
     'KPI', 'DASH', 'WEAK', 'RPT'};
 tail = {'B2Fpick', 'B2Fenl', 'REHEARSAL', 'B3r', 'B3ragain', 'KPI', 'RPT', 'KPI1'};
+dep = {'B2Fold', 'B2Fsave', 'REKEY', 'C1d', 'C2', 'C2e', 'EDGE'};
 n_ok = 0; n_err = 0; t0 = tic;
-for s = [chain, strcat('tail_', tail)]
+for s = [chain, strcat('tail_', tail), strcat('dep_', dep)]
     st = s{1}; t1 = tic;
     try
         out = step(st, root);
@@ -35,7 +40,7 @@ exit(double(n_err > 0));
 end
 
 function out = step(st, root)
-% One step; out is 'OK' or 'EXPECTED <id>'.
+% One step; out is 'OK', 'SAVED ...' or 'EXPECTED <id>'.
 out = 'OK';
 mk = 'results/fresh3_read_started.txt';
 switch st
@@ -72,8 +77,48 @@ switch st
     case 'tail_KPI1'
         K = load('results/kpi_summary.mat', 'KPI'); k1 = K.KPI([K.KPI.id] == 1);
         fprintf('KPI 1 (smoke): %s | %s\n', k1.value, strjoin(cellstr(string(k1.detail)), ' | '));
+    case 'dep_B2Fold'                                    % the kept fusion as the live trees keep it: old layout, the pick's base
+        b2f_old();
+        P = fusion_pick();
+        K = load('data/fusion.mat', 'FM', 'N', 'lambda');
+        f = {whos('-file', 'data/fusion.mat').name};
+        assert(~any(ismember({'fusion_rev', 'deployed_pick'}, f)) && ~isfield(K.FM, 'cues'), 'smoke:dep_old', 'not the old layout');
+        fprintf('dep: old-layout fusion N %d, lambda %g, latch %d; set to the pick''s N %d, lambda %g, latch %d (the base of profiles 1 and 3)\n', ...
+            K.N, K.lambda, K.FM.latch, P.N, P.lambda, P.latch);
+        FM = K.FM; FM.latch = P.latch; N = P.N; lambda = P.lambda; %#ok<NASGU>
+        save('data/fusion.mat', 'FM', 'N', 'lambda', '-append');
+    case 'dep_B2Fsave'                                   % the deployed path saves: base check, rule, deployed_pick, no-go record set aside
+        b2f_save();
+        P = fusion_pick();
+        f = {whos('-file', 'data/fusion.mat').name};
+        L = load('data/fusion.mat', 'fusion_rev', 'deployed_pick', 'FM', 'N', 'lambda');
+        assert(all(ismember({'fusion_rev', 'deployed_pick', 'cvy', 'cvo'}, f)), 'smoke:dep_save', 'no revision record');
+        assert(strcmp(L.fusion_rev, fusion_rev_id('enlarged')), 'smoke:dep_save', 'fusion_rev %s', L.fusion_rev);
+        assert(isequal(rmfield(L.deployed_pick, 'check'), P), 'smoke:dep_save', 'deployed_pick is not fusion_pick.m''s');
+        kb = L.deployed_pick.check.kept;
+        assert(kb.N == P.N && kb.lambda == P.lambda && kb.latch == P.latch && ~kb.cues, 'smoke:dep_save', 'the kept base is not recorded');
+        assert(isfield(L.FM, 'cues') && isfield(L.FM.cues, 'phi1') && L.FM.cues.phi1 && L.FM.latch == P.latch && ...
+            L.N == P.N && L.lambda == P.lambda, 'smoke:dep_save', 'the saved fusion is not the pick');
+        assert(~isfile('data/fusion_nogo.mat'), 'smoke:dep_save', 'a no-go record names the saved fusion');
+        R = fusion_reading('_fresh2');
+        assert(strcmp(R.state, 'deployed revision') && ~isempty(R.sample), 'smoke:dep_save', 'not read as the deployed revision');
+        rl = isfield(L.deployed_pick.check, 'rule_logged_only') && L.deployed_pick.check.rule_logged_only;
+        out = sprintf('SAVED (rule %s)', ternary(rl, 'no on smoke data, logged only', 'yes'));
+    case 'dep_REKEY'                                     % the smoke pools take the deployed fusion without a rebuild
+        A = load('data/policy_pools.mat', 'PP'); id0 = A.PP.det_id;
+        rekey_pools();
+        D = load('data/trained_detector.mat', 'ood', 'trained_at');
+        id1 = detector_id(D.trained_at, D.ood, fusion_model());
+        A = load('data/policy_pools.mat', 'PP');
+        assert(strcmp(A.PP.det_id, id1) && ~strcmp(id0, id1), 'smoke:rekey', 'policy pools det_id %s, expected %s (was %s)', A.PP.det_id, id1, id0);
+        assert(isequal(A.PP.fuse, fusion_model().FM), 'smoke:rekey', 'the policy pools do not carry the deployed fusion');
+        for c = {'data/clean_val_pools.mat', 'data/clean_test_pools.mat'}
+            if isfile(c{1}), C = load(c{1}, 'CT'); assert(strcmp(C.CT.det_id, id1), 'smoke:rekey', '%s det_id %s', c{1}, C.CT.det_id); end
+        end
+        if isfile('data/check_pools.mat'), C = load('data/check_pools.mat', 'CK'); assert(strcmp(C.CK.det_id, id1), 'smoke:rekey', 'check pools det_id %s', C.CK.det_id); end
+        out = sprintf('OK (det_id %s -> %s)', id0, id1);
     otherwise
-        run_stage('smoke', strrep(st, 'tail_', ''));
+        run_stage('smoke', regexprep(st, '^(tail|dep)_', ''));
 end
 end
 
@@ -94,13 +139,24 @@ end
 
 function b2f_pick()
 % select_fusion with the measured design on the validation fit (the smoke has no enlarged set).
-FUSION_REV = true; FUSION_PICK = fusion_pick(); %#ok<NASGU>
+SMOKE = true; FUSION_REV = true; FUSION_PICK = fusion_pick(); %#ok<NASGU>
 run('select_fusion');
 end
 
 function b2f_enlarged()
 % select_fusion as the deploy runs it (run_stage.m without SMOKE).
 FUSION_REV = true; FUSION_FIT = 'enlarged'; %#ok<NASGU>
+run('select_fusion');
+end
+
+function b2f_old()
+% select_fusion without the revision: the old layout of the live trees' kept fusions.
+run('select_fusion');
+end
+
+function b2f_save()
+% The deployed path with the smoke's rule switch: a failed rule is printed and the fusion saved.
+SMOKE = true; FUSION_REV = true; FUSION_FIT = 'enlarged'; FUSION_RULE_LOG = true; %#ok<NASGU>
 run('select_fusion');
 end
 
@@ -116,4 +172,8 @@ end
 
 function s = first_line(m)
 s = strtrim(regexprep(m, '\n.*', ''));
+end
+
+function v = ternary(c, a, b)
+if c, v = a; else, v = b; end
 end

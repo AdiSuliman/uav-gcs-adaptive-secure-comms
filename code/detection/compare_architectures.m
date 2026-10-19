@@ -34,7 +34,10 @@
 % Eb/N0 on the KPI 1 bins (kpi_ebno.m), the frames received below the grid as the share read
 % right (one class, 'none', holds them), and the fused class with the fusion refitted on
 % each variant's own validation outputs.
-% Output: results/architecture_comparison.txt
+% With the deployed fusion revision the test frames are in its fit set (fusion_reading.m): the
+% set's name then carries 'in-sample (fit set of the deployed fusion)'.
+% Output: results/architecture_comparison.txt; results/architecture_comparison.mat (arch: the
+% set, the fusion it was read with, the in-sample label, the test readings) for the report export
 
 close all; clc;
 fprintf('=== Detector architecture comparison ===\n\n');
@@ -48,6 +51,8 @@ if isfile('data/splits_fresh.mat')
     sp.test = Sf.splits.test; clear Sf
     set_name = 'second test set (data/splits_fresh.mat)';
 end
+rd = fusion_reading('');                                % in-sample when the set is in the deployed fusion's fit set
+if ~isempty(rd.sample), set_name = [set_name ', ' rd.sample]; end
 fz = isfile('data/fusion.mat') && isfield(sp.val, 'pos') && isfield(sp.test, 'pos');
 if fz
     FZ = load('data/fusion.mat', 'FM', 'N', 'lambda');
@@ -184,6 +189,11 @@ for v = 1:nV
 end
 fid = fopen('results/architecture_comparison.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('\n%s\n', rep{:});
+arch = struct('test_set', set_name, 'fusion_rev', rd.fusion_rev, 'fusion_state', rd.state, 'sample', rd.sample, ...
+    'names', {{V.name}}, 'test_acc_macro_f1_pct', cell2mat(cellfun(@(t) t(1:2), TT(:), 'UniformOutput', false)), ...
+    'test_fused_pct', []); %#ok<NASGU>
+if fz, arch.test_fused_pct = FT; end
+save('results/architecture_comparison.mat', 'arch');
 clear sp
 
 function [mf, f1] = fused_oof(va, P, N, lambda, tv, fold, classes, tf, cues)

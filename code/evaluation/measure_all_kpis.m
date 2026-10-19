@@ -139,8 +139,8 @@ if isfile(F.det)
     if isfile(F.arch), det{end+1} = 'architecture comparison: results/architecture_comparison.txt'; end
     if contains(F.det, '_fresh3') && isfile('results/eval_detector_metrics_fresh2.mat')
         Ms = load('results/eval_detector_metrics_fresh2.mat', 'metrics'); ms = Ms.metrics;
-        det{end+1} = sprintf(['read on the %s, read once after the fusion revision''s go/no-go; the %s, read before ' ...
-            'it%s: macro-F1 above the threshold %.2f%%, lowest class %.2f%%, accuracy %.2f%%'], m.test_set, ms.test_set, smp(ms), ...
+        det{end+1} = sprintf(['read on the %s, read once after the fusion revision''s go/no-go; the %s, %s%s: ' ...
+            'macro-F1 above the threshold %.2f%%, lowest class %.2f%%, accuracy %.2f%%'], m.test_set, ms.test_set, when_fresh2(ms), smp(ms), ...
             ms.macro_f1_above_threshold_pct, min(ms.class_f1_above_threshold_pct), ms.overall_accuracy_pct);
     end
     if ~isempty(regexp(F.det, '_fresh[23]\.mat$', 'once')) && isfile('results/eval_detector_metrics.mat')
@@ -536,6 +536,14 @@ function s = smp(m)
 % ', in-sample (fit set of the deployed fusion)' for a reading of a set the deployed fusion was
 % fitted on (eval_detector.m metrics.sample, fusion_reading.m), else ''.
 s = ''; if isfield(m, 'sample') && ~isempty(m.sample), s = [', ' m.sample]; end
+end
+
+function s = when_fresh2(ms)
+% The third test set's reading beside a KPI 1 of the fourth: the rehearsal taken after the
+% deploy when it was read with the deployed revision or the kept fusion after a no-go
+% (metrics.fusion_state, fusion_reading.m); else the reading taken before the go/no-go.
+s = 'read before it';
+if isfield(ms, 'fusion_state') && ~isempty(ms.fusion_state), s = ['the rehearsal after the deploy, read with the ' ms.fusion_state]; end
 end
 
 function s = read_state(m)

@@ -9,7 +9,8 @@
 % go/no-go), and the outputs carry the suffix _fresh3; once its inputs are checked (the
 % adopted fusion revision with fusion_pick.m's design, or the kept fusion after a no-go on the
 % profile (fusion_nogo.m), not older than the detector; a current reading of the third test set
-% with them; no committed record of a reading, docs/d91_fresh3_read_*.txt),
+% with them; no committed record of a reading, docs/d91_fresh3_read_*.txt; the set built with
+% this params.mat, data/splits_fresh3_params.mat),
 % results/fresh3_read_started.txt is written before the set is loaded and blocks any later
 % reading. No outcome is printed before the fusion and the latch have run. The KPI 1 threshold
 % is chosen on the validation split in every case.
@@ -72,9 +73,13 @@ if read_fresh3                                          % the fourth test set: o
     pid = params_id(load('params.mat').params);
     assert(~fresh3_recorded(pid), 'eval_detector:fresh3_recorded', ...
         'docs/d91_fresh3_read_*.txt records a reading of the fourth test set with params_id %s: it is read once', pid);
+    fp3 = 'data/splits_fresh3_params.mat';              % the parameters the set was built with (prepare_data.m; set4_out/<p>/params_set4.mat)
+    assert(isfile(fp3) && ismember('params', {whos('-file', fp3).name}) && strcmp(params_id(load(fp3).params), pid), ...
+        'eval_detector:fresh3_params', ['%s is missing or names another link model than params.mat (params_id %s): ' ...
+        'the fourth test set is read only with the parameters it was built with (docs/d91_deploy.md)'], fp3, pid);
     fresh3_read_marker('results/fresh3_read_started.txt', pid);   % before the set is loaded: a crashed reading counts
     fprintf('B3r: start marker written (results/fresh3_read_started.txt)\n');
-    clear fz Fz Fp Dt t_fus t_nogo r2 pid f_in
+    clear fz Fz Fp Dt t_fus t_nogo r2 pid f_in fp3
 end
 tag = ''; if has_fresh && read_split, tag = '_split'; end
 if read_fresh2, tag = '_fresh2'; end

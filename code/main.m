@@ -417,9 +417,11 @@ end
 function run_fusion()
 % B2F as run_stage.m runs it: the fusion revision as measured on the enlarged fit set
 % (fusion_pick.m, docs/d91_deploy.md), in a workspace of its own; before B3n and B3m have
-% built that set, the fusion fitted on validation as before the revision.
+% built either test set, the fusion fitted on validation as before the revision.
 FUSION_REV = true; FUSION_FIT = 'enlarged'; %#ok<NASGU>
-if ~enlarged_ready(), clear FUSION_REV FUSION_FIT; end
+[~, ~, first] = enlarged_ready();
+if first, clear FUSION_REV FUSION_FIT; end
+clear first
 run('select_fusion');
 end
 

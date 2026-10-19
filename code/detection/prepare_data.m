@@ -14,7 +14,9 @@
 % z-scored with the training statistics of data/splits.mat -> data/splits_fresh.mat
 % (test, norm and classes only); with FRESH_SET = 2 as well (B3m) the third test set,
 % data/spectrograms_fresh2.mat -> data/splits_fresh2.mat; with FRESH_SET = 3 (B3q) the fourth,
-% data/spectrograms_fresh3.mat -> data/splits_fresh3.mat.
+% data/spectrograms_fresh3.mat -> data/splits_fresh3.mat, with params.mat copied to
+% data/splits_fresh3_params.mat (the link model it was built with; B3r reads the set only
+% with the same params_id, eval_detector.m).
 
 close all; clc;
 fprintf('=== B1: Prepare Data (split by sub-run) ===\n\n');
@@ -86,6 +88,7 @@ function prepare_fresh_test(k)
 % The second test set (k = 1; k = 2 the third, B3m; k = 3 the fourth, B3q): every sub-run in
 % the test fold, the training z-score of data/splits.mat.
 sfx = {'', '2', '3'}; sfx = sfx{k}; name = {'second', 'third', 'fourth'}; name = name{k};
+assert(k ~= 3 || isfile('params.mat'), 'prepare_data:params', 'params.mat not found: the fourth test set records its link model');
 S = load(['data/spectrograms_fresh' sfx '.mat']); sp0 = S.spec; clear S
 checked_a6(sp0, ['data/spectrograms_fresh' sfx '.mat'], ['data/dataset_fresh' sfx '.mat']);
 [nm, classes] = split_norm('data/splits.mat');
@@ -111,6 +114,7 @@ for c = 1:numel(classes)
     fprintf('  %-20s %5d\n', classes{c}, sum(sp0.Y == classes{c}));
 end
 save(['data/splits_fresh' sfx '.mat'], 'splits', '-v7.3');
+if k == 3, copyfile('params.mat', 'data/splits_fresh3_params.mat'); end   % the link model of the fourth set, for B3r's check
 fprintf('Saved data/splits_fresh%s.mat\n=== B1 Complete ===\n', sfx);
 end
 

@@ -1,0 +1,29 @@
+# State of a live worktree for v7_d91_gated_run.sh: one line, "FREE free=<GB>" when no recorded or
+# command-line MATLAB of the worktree is alive, "BUSY free=<GB> <why>" otherwise, "UNKNOWN <why>"
+# when a query fails. Reads only: env D91_PIDS (Windows PIDs the takeover recorded for the
+# worktree, space separated) and D91_WT (the worktree's Windows path). Writes nothing.
+try {
+    $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+    $free = [math]::Round($os.FreeVirtualMemory / 1MB, 1)
+    $ml = @(Get-CimInstance Win32_Process -Filter "Name='MATLAB.exe'" -ErrorAction Stop)
+    $why = @()
+    foreach ($p in ("$env:D91_PIDS" -split ' ' | Where-Object { $_ -match '^\d+$' })) {
+        $g = Get-Process -Id ([int]$p) -ErrorAction SilentlyContinue
+        if ($g -and -not $g.HasExited) {
+            if ($g.ProcessName -match '^matlab$') { $why += "recorded MATLAB $p alive" }
+            else {
+                $k = @($ml | Where-Object { $_.ParentProcessId -eq [int]$p })
+                if ($k.Count) { $why += "recorded PID $p has MATLAB child $($k[0].ProcessId)" }
+            }
+        }
+    }
+    if (-not "$env:D91_WT") { throw 'D91_WT not set' }
+    $w1 = ("$env:D91_WT".TrimEnd('\') + '\').ToLower(); $w2 = $w1.Replace('\', '/')
+    foreach ($m in $ml) {
+        $c = "$($m.CommandLine)".ToLower()
+        if ($c.Contains($w1) -or $c.Contains($w2)) { $why += "MATLAB $($m.ProcessId) names the worktree in its command line" }
+    }
+    if ($why.Count) { "BUSY free=$free " + ($why -join '; ') } else { "FREE free=$free" }
+} catch {
+    "UNKNOWN $($_.Exception.Message)"
+}

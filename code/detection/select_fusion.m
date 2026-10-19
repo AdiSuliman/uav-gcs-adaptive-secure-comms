@@ -48,10 +48,14 @@
 % holds for it against the fusion without it, out of fold on the same fit set and folds.
 % Before any data is read, the enlarged fit set's files must exist (select_fusion:fit_sets)
 % and the kept data/fusion.mat, which a no-go keeps, must be that base: the pick's N, lambda
-% and latch, no further columns unless it is this pick deployed before
-% (select_fusion:pick_base). A failed rule, or a kept fusion that is not the base, writes the
-% no-go record data/fusion_nogo.mat (fusion_nogo.m) before B2F stops, so B3r can read the kept
-% fusion once on the fourth set.
+% and latch, no further columns unless it is this pick deployed before on the enlarged fit set
+% (deployed_pick and fusion_rev_id('enlarged'); select_fusion:pick_base). A failed rule, or a
+% kept fusion that is not the base, writes the no-go record data/fusion_nogo.mat (fusion_nogo.m)
+% before B2F stops, so B3r can read the kept fusion once on the fourth set.
+% FUSION_REV without FUSION_FIT = 'enlarged' (a design chosen or fitted on validation only)
+% runs only with SMOKE or FUSION_DEV = true (select_fusion:rev_fit), so a live tree never saves
+% one. In the smoke only, FUSION_RULE_LOG = true prints a failed rule and saves all the same, so
+% the deploy path after B2F (re-key, C1d, C2, C2e, EDGE) runs end to end on smoke data.
 % The quiet-slot interference alarm of the rule (rule_based_policy.m) is set here from
 % the clean validation frames (the sub-runs without a threat), as an AGC jamming monitor
 % sets its threshold from interference-free samples, Th = mu - 3 sigma - 2 dB for a gain
@@ -88,6 +92,11 @@ if exist('FUSION_PICK', 'var') && ~isempty(FUSION_PICK), PK = FUSION_PICK; elsei
 assert(isempty(PK) || REV, 'select_fusion:pick', 'FUSION_PICK needs FUSION_REV');
 assert(~ENL || isequal(PK, fusion_pick()), 'select_fusion:pick_measured', ...
     'with FUSION_FIT = ''enlarged'' only the measured design (fusion_pick.m) is deployed; FUSION_PICK is for the validation fit');
+SMK = exist('SMOKE', 'var') && isequal(SMOKE, true);
+assert(~REV || ENL || SMK || (exist('FUSION_DEV', 'var') && isequal(FUSION_DEV, true)), 'select_fusion:rev_fit', ...
+    ['FUSION_REV without FUSION_FIT = ''enlarged'' saves a design chosen or fitted on validation only: the deploy sets ' ...
+    'FUSION_FIT = ''enlarged''; a smoke or dev copy sets SMOKE or FUSION_DEV = true (docs/d91_deploy.md)']);
+RULE_LOG = ENL && SMK && exist('FUSION_RULE_LOG', 'var') && isequal(FUSION_RULE_LOG, true);   % smoke only: the rule is printed, not enforced
 kept_base = [];                                          % the kept fusion, the rule's base (docs/d91_deploy.md)
 if ENL
     [~, fs_miss] = enlarged_ready();
@@ -100,11 +109,13 @@ if ENL
         'the kept data/fusion.mat names no N, lambda or latch');
     kept_base = struct('N', KB.N, 'lambda', KB.lambda, 'latch', logical(KB.FM.latch), ...
         'cues', isfield(KB.FM, 'cues') && ~isempty(KB.FM.cues));
-    if kept_base.cues                                    % a revision with further columns: only this pick, deployed before
-        KD = whos('-file', 'data/fusion.mat');
-        if ismember('deployed_pick', {KD.name}), KD = load('data/fusion.mat', 'deployed_pick'); else, KD = struct(); end
+    if kept_base.cues                                    % a revision with further columns: only this pick, deployed on the enlarged fit before
+        KN = {whos('-file', 'data/fusion.mat').name}; KD = struct();
+        if ismember('deployed_pick', KN), KD = load('data/fusion.mat', 'deployed_pick'); end
+        if ismember('fusion_rev', KN), KD.fusion_rev = load('data/fusion.mat', 'fusion_rev').fusion_rev; end
         kept_base.cues = ~(isfield(KD, 'deployed_pick') && isfield(KD.deployed_pick, 'check') && ...
-            isequal(rmfield(KD.deployed_pick, 'check'), PK));
+            isequal(rmfield(KD.deployed_pick, 'check'), PK) && isfield(KD, 'fusion_rev') && ...
+            isequal(KD.fusion_rev, fusion_rev_id('enlarged')));
     end
     base_ok = kept_base.N == PK.N && kept_base.lambda == PK.lambda && kept_base.latch == PK.latch && ~kept_base.cues;
     if ~base_ok, fusion_nogo('write', PK, kept_base, 'base'); end   % no valid comparison: the kept fusion stays
@@ -113,7 +124,7 @@ if ENL
         kept_base.N, kept_base.lambda, kept_base.latch, kept_base.cues, PK.N, PK.lambda, PK.latch);
     fprintf('The kept fusion is the rule''s base: N = %d cycles, lambda %.0e, latch %d, no further columns\n', ...
         kept_base.N, kept_base.lambda, kept_base.latch);
-    clear KB KD fs_miss base_ok
+    clear KB KD KN fs_miss base_ok
 end
 S = load('data/splits.mat'); va = S.splits.val; norm = S.splits.norm;
 if ~isfield(va, 'pos')
@@ -222,9 +233,14 @@ if REV
             'clean as a lost branch %+.2f [%+.2f, %+.2f]; F1 antenna_fault %+.2f [%+.2f, %+.2f], airframe_shadowing %+.2f ' ...
             '[%+.2f, %+.2f]; at K <= 0 dB %+.2f [%+.2f, %+.2f], %+.2f [%+.2f, %+.2f] -> rule %s\n'], PK.name, N, lambda, numel(ft), ...
             thr, GP.all, GP.above, GP.cl, GP.lb, GP.fault, GP.shad, GP.fault_low, GP.shad_low, yn_txt(fusion_adopt('branch', GP)));
-        if ENL && ~fusion_adopt('branch', GP), fusion_nogo('write', PK, GP, 'rule'); end   % the kept fusion stays; B3r may read it once
-        assert(fusion_adopt('branch', GP), 'select_fusion:pick_rule', ...
+        rule_ok = fusion_adopt('branch', GP);
+        if ENL && ~RULE_LOG && ~rule_ok, fusion_nogo('write', PK, GP, 'rule'); end   % the kept fusion stays; B3r may read it once
+        assert(RULE_LOG || rule_ok, 'select_fusion:pick_rule', ...
             'the measured design %s fails the adoption rule on this fit set: no-go (docs/d91_fuse.md)', PK.name);
+        if ~rule_ok                                      % the smoke's deploy path only: saved so the stages after it run
+            fprintf('SMOKE (FUSION_RULE_LOG): the rule fails on the smoke data; saved all the same, no no-go record\n');
+            GP.rule_logged_only = true;
+        end
         Zf = [Zf, XP]; clear XP
     else
         OPT = {struct('iso', true), struct('glr', true), struct('held', true), struct('post', true), ...

@@ -43,6 +43,7 @@ for f = {'detector', 'results/eval_detector_metrics.mat'; 'detector_third', 'res
     end
     N.(f{1}) = M;
 end
+N.architectures = take('results/architecture_comparison.mat', 'arch');   % B3a: its set, fusion and in-sample label
 
 if isfile('results/ood_detection.mat')
     O = load('results/ood_detection.mat', 'R', 'NEST', 'SC', 'sel', 'K_NEW');

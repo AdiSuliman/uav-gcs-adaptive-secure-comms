@@ -61,9 +61,10 @@ function run_one(name, SMOKE)
 % test split beside it, the third test set after B3m builds it, and the fourth in B3r; SMOKE
 % switches the reduced problem on. B2F deploys the fusion revision (FUSION_REV) as measured on
 % the enlarged fit set (FUSION_FIT, fusion_pick.m); the smoke has no third test set, so its B2F
-% runs the revision on validation. A profile's first B2F, before B3n and B3m have built the
-% enlarged fit set (enlarged_ready.m), fits the fusion on validation as before the revision:
-% that is the fusion a no-go keeps, and the profile's B2F after B3m decides (docs/d91_deploy.md).
+% runs the revision on validation. A profile's first B2F, before B3n and B3m (neither second nor
+% third test set, enlarged_ready.m), fits the fusion on validation as before the revision: that
+% is the fusion a no-go keeps, and the profile's B2F after B3m decides (docs/d91_deploy.md). With
+% only some of the fit set's files present B2F stops (select_fusion:fit_sets).
 if strcmp(name, 'build_fresh_test')
     FRESH_TEST = true; %#ok<NASGU>
     for scr = {'run_dataset_sweep', 'extract_spectrograms', 'prepare_data'}
@@ -99,10 +100,12 @@ elseif strcmp(name, 'build_clean_test_pools')
 elseif strcmp(name, 'select_fusion')
     FUSION_REV = true; %#ok<NASGU>
     if ~SMOKE, FUSION_FIT = 'enlarged'; end %#ok<NASGU>
-    if ~SMOKE && ~enlarged_ready()                       % no second and third test sets yet
+    [~, ~, first] = enlarged_ready();
+    if ~SMOKE && first                                   % neither the second nor the third test set yet
         clear FUSION_REV FUSION_FIT
         fprintf('B2F: no enlarged fit set yet (B3n, B3m): the fusion is fitted on validation as before the revision\n');
     end
+    clear first
     run(name);
 elseif strcmp(name, 'validate_phy')
     if ~validate_phy(), error('run_stage:phy', 'PHY validation failed'); end
