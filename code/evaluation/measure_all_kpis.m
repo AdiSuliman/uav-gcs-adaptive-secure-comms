@@ -68,6 +68,7 @@ if isfile(F.det)
         num2cell(cl(:)'), 'UniformOutput', false), ', ')), ...
         sprintf('macro-F1 per Eb/N0: %s', strjoin(arrayfun(@(b) sprintf('%g dB %.1f%%', b.snr_db, b.macro_f1_pct), ...
         m.snr_breakdown, 'UniformOutput', false), ' | '))};
+    if ~isempty(read_state(m)), det{end+1} = sprintf('KPI 1 reading: %s', read_state(m)); end
     if isfield(m, 'every_class')                     % the stricter reading, beside KPI 1, never hidden
         ec = m.every_class;
         det{end+1} = sprintf(['beside KPI 1, every class F1 >= 90%% (the stricter reading, its threshold chosen on ' ...
@@ -139,23 +140,23 @@ if isfile(F.det)
     if contains(F.det, '_fresh3') && isfile('results/eval_detector_metrics_fresh2.mat')
         Ms = load('results/eval_detector_metrics_fresh2.mat', 'metrics'); ms = Ms.metrics;
         det{end+1} = sprintf(['read on the %s, read once after the fusion revision''s go/no-go; the %s, read before ' ...
-            'it: macro-F1 above the threshold %.2f%%, lowest class %.2f%%, accuracy %.2f%%'], m.test_set, ms.test_set, ...
+            'it%s: macro-F1 above the threshold %.2f%%, lowest class %.2f%%, accuracy %.2f%%'], m.test_set, ms.test_set, smp(ms), ...
             ms.macro_f1_above_threshold_pct, min(ms.class_f1_above_threshold_pct), ms.overall_accuracy_pct);
     end
     if ~isempty(regexp(F.det, '_fresh[23]\.mat$', 'once')) && isfile('results/eval_detector_metrics.mat')
         Ms = load('results/eval_detector_metrics.mat', 'metrics'); ms = Ms.metrics;
         det{end+1} = sprintf(['read on the %s, built after the monitor''s last validation choice; the %s, first read ' ...
-            'before that choice: macro-F1 above the threshold %.2f%%, lowest class %.2f%%, accuracy %.2f%%'], m.test_set, ms.test_set, ...
+            'before that choice%s: macro-F1 above the threshold %.2f%%, lowest class %.2f%%, accuracy %.2f%%'], m.test_set, ms.test_set, smp(ms), ...
             ms.macro_f1_above_threshold_pct, min(ms.class_f1_above_threshold_pct), ms.overall_accuracy_pct);
     end
     if isfield(m, 'test_set') && isfile('results/eval_detector_metrics_split.mat')
         Ms = load('results/eval_detector_metrics_split.mat', 'metrics'); ms = Ms.metrics;
         det{end+1} = sprintf(['read on the %s; the test split of the dataset, also read before the last detector ' ...
-            'change: macro-F1 above the threshold %.2f%%, lowest class %.2f%%, accuracy %.2f%%'], m.test_set, ...
+            'change%s: macro-F1 above the threshold %.2f%%, lowest class %.2f%%, accuracy %.2f%%'], m.test_set, smp(ms), ...
             ms.macro_f1_above_threshold_pct, min(ms.class_f1_above_threshold_pct), ms.overall_accuracy_pct);
     end
-    KPI(end+1) = kpi(1, 'Detection accuracy vs SNR', sprintf('macro-F1 %.2f%%, lowest class %.2f%%, from %g dB', val, min(cl), ...
-        m.kpi1_threshold_db), 'macro-F1 >= 90% above a threshold chosen on validation', ...
+    KPI(end+1) = kpi(1, 'Detection accuracy vs SNR', sprintf('macro-F1 %.2f%%, lowest class %.2f%%, from %g dB%s', val, min(cl), ...
+        m.kpi1_threshold_db, smp(m)), 'macro-F1 >= 90% above a threshold chosen on validation', ...
         status(isfinite(m.kpi1_threshold_db) && val >= 90, file_time(F.det) < max(t_det, file_time('data/fusion.mat'))), det);
 else
     KPI(end+1) = missing(1, 'Detection accuracy vs SNR', F.det);
@@ -529,6 +530,18 @@ for mk = {'A', 'B'}
         100 * mean(st == 1), 100 * mean(st == 2), 100 * mean(st == 3)); %#ok<AGROW>
 end
 s = strjoin(parts, ' | ');
+end
+
+function s = smp(m)
+% ', in-sample (fit set of the deployed fusion)' for a reading of a set the deployed fusion was
+% fitted on (eval_detector.m metrics.sample, fusion_reading.m), else ''.
+s = ''; if isfield(m, 'sample') && ~isempty(m.sample), s = [', ' m.sample]; end
+end
+
+function s = read_state(m)
+% The fusion a reading was read with, when it is the deployed revision or the kept fusion after a
+% no-go (fusion_reading.m), with its sample label.
+s = ''; if isfield(m, 'fusion_state') && ~isempty(m.fusion_state), s = ['read with the ' m.fusion_state smp(m)]; end
 end
 
 function out = ternary(c, a, b)

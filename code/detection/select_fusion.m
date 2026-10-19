@@ -46,6 +46,11 @@
 % deployed target rule (pos - onset < N, FM.target_age = N) and without cfar, and B2F stops
 % (select_fusion:pick_rule) unless the adoption rule fusion_adopt('branch')
 % holds for it against the fusion without it, out of fold on the same fit set and folds.
+% Before any data is read, the enlarged fit set's files must exist (select_fusion:fit_sets)
+% and the kept data/fusion.mat, which a no-go keeps, must be that base: the pick's N, lambda
+% and latch, no further columns unless it is this pick deployed before
+% (select_fusion:pick_base). A failed rule writes the no-go record data/fusion_nogo.mat
+% (fusion_nogo.m) before B2F stops, so B3r can read the kept fusion once on the fourth set.
 % The quiet-slot interference alarm of the rule (rule_based_policy.m) is set here from
 % the clean validation frames (the sub-runs without a threat), as an AGC jamming monitor
 % sets its threshold from interference-free samples, Th = mu - 3 sigma - 2 dB for a gain
@@ -82,6 +87,33 @@ if exist('FUSION_PICK', 'var') && ~isempty(FUSION_PICK), PK = FUSION_PICK; elsei
 assert(isempty(PK) || REV, 'select_fusion:pick', 'FUSION_PICK needs FUSION_REV');
 assert(~ENL || isequal(PK, fusion_pick()), 'select_fusion:pick_measured', ...
     'with FUSION_FIT = ''enlarged'' only the measured design (fusion_pick.m) is deployed; FUSION_PICK is for the validation fit');
+kept_base = [];                                          % the kept fusion, the rule's base (docs/d91_deploy.md)
+if ENL
+    fs_need = {'data/dataset.mat', 'data/splits_fresh.mat', 'data/dataset_fresh.mat', 'data/splits_fresh2.mat', 'data/dataset_fresh2.mat'};
+    fs_miss = fs_need(~cellfun(@isfile, fs_need));
+    assert(isempty(fs_miss), 'select_fusion:fit_sets', ...
+        'the enlarged fit set needs %s (B3n, B3m first; docs/d91_deploy.md)', strjoin(fs_miss, ', '));
+    assert(isfile('data/fusion.mat'), 'select_fusion:pick_base', ...
+        'no kept fusion (data/fusion.mat): the rule''s base must be the fusion a no-go keeps (docs/d91_deploy.md)');
+    KB = load('data/fusion.mat', 'N', 'lambda', 'FM');
+    assert(all(isfield(KB, {'N', 'lambda', 'FM'})) && isstruct(KB.FM) && isfield(KB.FM, 'latch'), 'select_fusion:pick_base', ...
+        'the kept data/fusion.mat names no N, lambda or latch');
+    kept_base = struct('N', KB.N, 'lambda', KB.lambda, 'latch', logical(KB.FM.latch), ...
+        'cues', isfield(KB.FM, 'cues') && ~isempty(KB.FM.cues));
+    if kept_base.cues                                    % a revision with further columns: only this pick, deployed before
+        KD = whos('-file', 'data/fusion.mat');
+        if ismember('deployed_pick', {KD.name}), KD = load('data/fusion.mat', 'deployed_pick'); else, KD = struct(); end
+        kept_base.cues = ~(isfield(KD, 'deployed_pick') && isfield(KD.deployed_pick, 'check') && ...
+            isequal(rmfield(KD.deployed_pick, 'check'), PK));
+    end
+    assert(kept_base.N == PK.N && kept_base.lambda == PK.lambda && kept_base.latch == PK.latch && ~kept_base.cues, ...
+        'select_fusion:pick_base', ['the kept fusion (N %d, lambda %g, latch %d, further columns %d) is not the rule''s ' ...
+        'base (N %d, lambda %g, latch %d, none): the rule would not compare with the fusion a no-go keeps (docs/d91_deploy.md)'], ...
+        kept_base.N, kept_base.lambda, kept_base.latch, kept_base.cues, PK.N, PK.lambda, PK.latch);
+    fprintf('The kept fusion is the rule''s base: N = %d cycles, lambda %.0e, latch %d, no further columns\n', ...
+        kept_base.N, kept_base.lambda, kept_base.latch);
+    clear KB KD fs_need fs_miss
+end
 S = load('data/splits.mat'); va = S.splits.val; norm = S.splits.norm;
 if ~isfield(va, 'pos')
     error('splits.mat has no frame positions (v6 dataset). Run run_dataset_sweep, extract_spectrograms, prepare_data.');
@@ -189,6 +221,7 @@ if REV
             'clean as a lost branch %+.2f [%+.2f, %+.2f]; F1 antenna_fault %+.2f [%+.2f, %+.2f], airframe_shadowing %+.2f ' ...
             '[%+.2f, %+.2f]; at K <= 0 dB %+.2f [%+.2f, %+.2f], %+.2f [%+.2f, %+.2f] -> rule %s\n'], PK.name, N, lambda, numel(ft), ...
             thr, GP.all, GP.above, GP.cl, GP.lb, GP.fault, GP.shad, GP.fault_low, GP.shad_low, yn_txt(fusion_adopt('branch', GP)));
+        if ENL && ~fusion_adopt('branch', GP), fusion_nogo('write', PK, GP); end   % the kept fusion stays; B3r may read it once
         assert(fusion_adopt('branch', GP), 'select_fusion:pick_rule', ...
             'the measured design %s fails the adoption rule on this fit set: no-go (docs/d91_fuse.md)', PK.name);
         Zf = [Zf, XP]; clear XP
@@ -297,9 +330,11 @@ if REV
     if ~isempty(PK)
         deployed_pick = PK; deployed_pick.check = GP;
         deployed_pick.check.latch_val = struct('macro_f1_latched', mf_latch, 'macro_f1_fused', mf_fused);   % validation out of fold
+        if ~isempty(kept_base), deployed_pick.check.kept = kept_base; end   % the fusion it replaced, the rule's base
         save('data/fusion.mat', 'deployed_pick', '-append');
     end
 end
+fusion_nogo('clear');                                    % an earlier no-go record no longer names the fusion on disk
 fprintf('Saved data/fusion.mat\n');
 
 function c = classes_of(D)

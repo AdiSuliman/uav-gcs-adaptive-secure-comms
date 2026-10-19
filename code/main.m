@@ -108,7 +108,7 @@ RUN.extract_spectrograms        = false;    % A6  : spectrograms + link features
 % ---- Phase B: detection (CNN baseline) ----
 RUN.prepare_data                = false;    % B1  : split by sub-run 4/1/1 (~4 min)
 RUN.train_detector              = false;    % B2  : train CNN+scalar hybrid, unknown-threat models (~20-35 min); a new detector invalidates the pools
-RUN.select_fusion               = false;    % B2F : temporal fusion and the quiet-slot alarm, chosen on validation (~4 min)
+RUN.select_fusion               = false;    % B2F : temporal fusion and the quiet-slot alarm, the measured revision on the enlarged fit set (~1 h)
 RUN.build_fresh_test            = false;    % B3n : a second detector test set (dataset, spectrograms, splits) (~2.8-3.2 h)
 RUN.eval_detector               = false;    % B3  : test eval + confusion/accuracy-vs-SNR + bootstrap CIs; the second test set beside it (~2 min)
 RUN.build_fresh_test2           = false;    % B3m : a third detector test set (new seeds) and its reading, after the monitor's last validation choice (~4.5-5 h)
@@ -214,8 +214,8 @@ if RUN.train_detector
     train_detector;
 end
 if RUN.select_fusion
-    fprintf('  [B2F] Temporal fusion and the quiet-slot alarm (validation)...\n');
-    run_own('select_fusion');
+    fprintf('  [B2F] Temporal fusion and the quiet-slot alarm (the measured revision, enlarged fit set)...\n');
+    run_fusion();
 end
 if RUN.build_fresh_test
     fprintf('  [B3n] A second detector test set...\n');
@@ -412,6 +412,13 @@ function run_own(name, FRESH_TEST, DET_TEST, FRESH_SET) %#ok<INUSD>
 if nargin >= 2 && isempty(FRESH_TEST), clear FRESH_TEST; end
 if nargin >= 3 && isempty(DET_TEST), clear DET_TEST; end
 run(name);
+end
+
+function run_fusion()
+% B2F as run_stage.m runs it: the fusion revision as measured on the enlarged fit set
+% (fusion_pick.m, docs/d91_deploy.md), in a workspace of its own.
+FUSION_REV = true; FUSION_FIT = 'enlarged'; %#ok<NASGU>
+run('select_fusion');
 end
 
 function report_file(path, label, producer)

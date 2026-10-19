@@ -142,8 +142,10 @@ if isfile(f), S = load(f, varargin{:}); else, S = []; fprintf('  missing %s\n', 
 end
 
 function t = set_txt(m)
-% The test set a detector reading was read on (eval_detector.m metrics.test_set).
+% The test set a detector reading was read on (eval_detector.m metrics.test_set), and its
+% in-sample label when the deployed fusion was fitted on it (metrics.sample).
 t = 'test set'; if isfield(m, 'test_set') && ~isempty(m.test_set), t = char(m.test_set); end
+if isfield(m, 'sample') && ~isempty(m.sample), t = [t ', ' char(m.sample)]; end
 end
 
 function placeholder(ax, ttl, src)

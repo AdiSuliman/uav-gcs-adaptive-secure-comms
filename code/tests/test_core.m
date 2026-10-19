@@ -3939,7 +3939,7 @@ ed = fileread(which('eval_detector'));
 verifyNotEmpty(tc, strfind(ed, 'if read_fresh2, tag = ''_fresh2''; end'));
 verifyNotEmpty(tc, strfind(ed, 'Sf = load(''data/splits_fresh2.mat'');'));
 verifyNotEmpty(tc, strfind(fileread(which('measure_all_kpis')), 'F.det = kpi1_file(''eval_detector_metrics'');'));
-verifyEqual(tc, kpi1_set(), 'fresh2');
+verifyEqual(tc, kpi1_set(), 'fresh3');                                % the deploy commit's switch (docs/d91_deploy.md)
 % B1 on the third set: data/spectrograms_fresh2.mat -> data/splits_fresh2.mat, the training
 % z-score, the second test set's file untouched
 d = fullfile(tc.TestData.tmp, 'fresh2'); mkdir(fullfile(d, 'data'));
@@ -4006,14 +4006,20 @@ verifyFalse(tc, isfile('data/splits_fresh2.mat')); verifyFalse(tc, isfile('data/
 L = load('data/splits_fresh3.mat');
 verifyEqual(tc, L.splits.test.feats(1, :), [1 1]);
 verifyEqual(tc, L.splits.test.run, [1 1 2 2 3 3]');
-% KPI 1 stays on the third test set while kpi1_set.m names it, even with a fourth reading on disk,
-% and the fourth set is not read before
+% The deploy commit names the fourth set (docs/d91_deploy.md). With the switch at 'fresh2' (a
+% stand-in: a tree before the deploy) KPI 1 stays on the third test set, even with a fourth
+% reading on disk, and the fourth set is not read
 x = 1; save('results/eval_detector_metrics_fresh2.mat', 'x'); save('results/eval_detector_metrics_fresh3.mat', 'x');
+verifyEqual(tc, kpi1_set(), 'fresh3');
+fid = fopen('kpi1_set.m', 'w'); fprintf(fid, 'function s = kpi1_set()\ns = ''fresh2'';\nend\n'); fclose(fid);
+rehash; shadow2 = onCleanup(@() remove_shadow(fullfile(d, 'kpi1_set.m')));
 verifyEqual(tc, kpi1_set(), 'fresh2');
 verifyEqual(tc, kpi1_file('eval_detector_metrics'), 'results/eval_detector_metrics_fresh2.mat');
 verifyError(tc, @() run_det_test('fresh3'), 'eval_detector:kpi1_set');
 mk = 'results/fresh3_read_started.txt';
 verifyFalse(tc, isfile(mk));
+clear shadow2
+verifyEqual(tc, kpi1_set(), 'fresh3');
 % A fusion newer than the readings: the third set's is rerun, the fourth set's cannot be
 pause(1.1); FM = 1; save('data/fusion.mat', 'FM'); %#ok<NASGU>
 S = result_status();
@@ -4047,7 +4053,7 @@ es = fileread(which('eval_detector'));
 im = strfind(es, 'fresh3_read_marker(''results/fresh3_read_started.txt'', pid);'); verifyNumElements(tc, im, 1);
 verifyLessThan(tc, im, strfind(es, 'S = load(''data/splits.mat'');'));
 verifyLessThan(tc, im, strfind(es, 'Sf = load(''data/splits_fresh3.mat'');'));
-for id = {'fresh3_fusion_rev', 'fresh3_fusion_old', 'fresh3_rehearsal', 'fresh3_recorded'}
+for id = {'fresh3_fusion_rev', 'fresh3_pick', 'fresh3_fusion_old', 'fresh3_rehearsal', 'fresh3_recorded'}
     verifyGreaterThan(tc, im, max(strfind(es, ['''eval_detector:' id{1} ''''])), id{1});
 end
 il = strfind(es, 'fprintf(''B3r: start marker written (results/fresh3_read_started.txt)\n'');'); verifyNumElements(tc, il, 1);
@@ -4085,6 +4091,16 @@ save('data/fusion.mat', 'FM');
 verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_fusion'); verifyFalse(tc, isfile(mk));
 save('data/fusion.mat', 'FM', 'val_latch_oof');                     % the old layout
 verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_fusion_rev'); verifyFalse(tc, isfile(mk));
+% A no-go on this profile (fusion_nogo.m): the kept fusion passes the revision's checks while the
+% record names it (here the next refusal is the rehearsal's), not once it changed or for another design
+evalc('fusion_nogo(''write'', fusion_pick(), struct(''all'', [0 0 0]))');
+verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_rehearsal'); verifyFalse(tc, isfile(mk));
+L = load('data/fusion_nogo.mat'); nogo = L.nogo; nogo.pick.cues.held = false; save('data/fusion_nogo.mat', 'nogo');
+verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_fusion_rev'); verifyFalse(tc, isfile(mk));
+evalc('fusion_nogo(''write'', fusion_pick(), struct(''all'', [0 0 0]))');
+q_thr = 1; save('data/fusion.mat', 'FM', 'val_latch_oof', 'q_thr');    % the kept fusion changed after the record
+verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_fusion_rev'); verifyFalse(tc, isfile(mk));
+delete('data/fusion_nogo.mat');
 cvy = 1; cvo = 1; fusion_rev = fusion_rev_id('validation'); FM = struct('target_age', 7, 'cues', []); %#ok<NASGU>
 save('data/fusion.mat', 'FM', 'val_latch_oof', 'cvy', 'cvo', 'fusion_rev');     % revised, fitted on validation only
 ex = det_test_error('fresh3');
@@ -4094,7 +4110,17 @@ fusion_rev = fusion_rev_id('enlarged'); FM = 1;
 save('data/fusion.mat', 'FM', 'val_latch_oof', 'cvy', 'cvo', 'fusion_rev');     % the id without the revised fusion
 verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_fusion_rev'); verifyFalse(tc, isfile(mk));
 FM = struct('target_age', 7, 'cues', []);
-save('data/fusion.mat', 'FM', 'val_latch_oof', 'cvy', 'cvo', 'fusion_rev');
+save('data/fusion.mat', 'FM', 'val_latch_oof', 'cvy', 'cvo', 'fusion_rev');     % the adopted id, no deployed_pick
+verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_pick'); verifyFalse(tc, isfile(mk));
+deployed_pick = fusion_pick(); deployed_pick.cues.held = false; deployed_pick.check = struct('all', [0 0 0]);
+save('data/fusion.mat', 'FM', 'val_latch_oof', 'cvy', 'cvo', 'fusion_rev', 'deployed_pick');   % another design
+ex = det_test_error('fresh3');
+verifyEqual(tc, ex.identifier, 'eval_detector:fresh3_pick'); verifySubstring(tc, ex.message, 'fusion_pick.m'); verifyFalse(tc, isfile(mk));
+deployed_pick = fusion_pick();                                          % the design without its rule check
+save('data/fusion.mat', 'FM', 'val_latch_oof', 'cvy', 'cvo', 'fusion_rev', 'deployed_pick');
+verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_pick'); verifyFalse(tc, isfile(mk));
+deployed_pick.check = struct('all', [0 0 0]);                           % as B2F records it: this guard passes
+save('data/fusion.mat', 'FM', 'val_latch_oof', 'cvy', 'cvo', 'fusion_rev', 'deployed_pick');
 trained_at = now + 1; save('data/trained_detector.mat', 'trained_at');
 verifyEqual(tc, det_test_error('fresh3').identifier, 'eval_detector:fresh3_fusion_old'); verifyFalse(tc, isfile(mk));
 trained_at = now - 1; save('data/trained_detector.mat', 'trained_at');
@@ -4132,7 +4158,7 @@ verifyError(tc, @() run_det_test('fresh3'), 'eval_detector:fresh3_started');
 delete('data/splits_fresh3.mat');
 verifyError(tc, @() run_det_test('fresh3'), 'eval_detector:fresh3');
 clear shadow
-verifyEqual(tc, kpi1_set(), 'fresh2');
+verifyEqual(tc, kpi1_set(), 'fresh3');
 end
 
 function run_det_test(DET_TEST) %#ok<INUSD>
@@ -6242,10 +6268,15 @@ function test_kpi1_file(tc)
 % dashboard, the console, the GUI bundle and the weak points show the same set.
 d = fullfile(tc.TestData.tmp, 'kpi1file'); mkdir(fullfile(d, 'results'));
 c0 = cd(d); back = onCleanup(@() cd(c0));
+verifyEqual(tc, kpi1_set(), 'fresh3');                                % deployed: the fourth set, missing shows as missing
+verifyEqual(tc, kpi1_file('eval_detector_metrics'), 'results/eval_detector_metrics_fresh3.mat');
+fid = fopen('kpi1_set.m', 'w'); fprintf(fid, 'function s = kpi1_set()\ns = ''fresh2'';\nend\n'); fclose(fid);
+rehash; shadow = onCleanup(@() remove_shadow(fullfile(d, 'kpi1_set.m')));   % before the deploy: the third set
 verifyEqual(tc, kpi1_file('eval_detector_metrics'), 'results/eval_detector_metrics.mat');
 x = 1; save('results/eval_detector_metrics_fresh2.mat', 'x');
 verifyEqual(tc, kpi1_file('eval_detector_metrics'), 'results/eval_detector_metrics_fresh2.mat');
 verifyEqual(tc, kpi1_file('detector_predictions'), 'results/detector_predictions.mat');
+clear shadow
 for f = {'measure_all_kpis', 'build_kpi_dashboard', 'demo_gui'}
     verifyNotEmpty(tc, strfind(fileread(which(f{1})), 'kpi1_file(''eval_detector_metrics'')'), f{1});
 end
@@ -6508,12 +6539,12 @@ function test_fusion_pick_deploy(tc)
 % rule holds for it on its own fit set, and records the pick and the revision id that B3r
 % checks (fusion_rev_id.m); FUSION_PICK overrides the pick only on the validation fit.
 P = fusion_pick();
-verifyEqual(tc, P.name, 'branch evidence');
+verifyEqual(tc, P.name, 'branch evidence, phi = 1');                 % docs/d91_fuse.md section 12
 verifyEqual(tc, [P.N P.lambda], [12 1e-3]);
 verifyEqual(tc, P.target_age, 'N');
 verifyEmpty(tc, P.cues.cfar);
 verifyTrue(tc, P.cues.iso && P.cues.glr && P.cues.held && P.cues.post);
-verifyFalse(tc, isfield(P.cues, 'phi1') && P.cues.phi1);
+verifyTrue(tc, isfield(P.cues, 'phi1') && P.cues.phi1);
 verifyClass(tc, P.latch, 'logical');
 verifyFalse(tc, P.latch);                                % the measured state (m_all.m, latch 0)
 dp = P; dp.check = struct('all', [0 0 0]); dp.check.latch_val = struct('macro_f1_latched', 0.9, 'macro_f1_fused', 0.91);
@@ -6539,6 +6570,75 @@ i1 = strfind(src, 'if ~isempty(PK)                                      % the me
 i2 = strfind(src, '[pick, bs] = fusion_adopt(''choose'', G);');
 i3 = regexp(src, '\r?\n    else\r?\n', 'once');
 verifyTrue(tc, isscalar(i1) && isscalar(i2) && i1 < i3 && i3 < i2);   % 'choose' only without a pick
+% The deploy commit (docs/d91_deploy.md): the fit set's files and the kept fusion as the rule's
+% base are checked before any data is read; a failed rule records the no-go before B2F stops;
+% the record of an earlier no-go is set aside after a save; deployed_pick names the kept base
+for t = {'''select_fusion:fit_sets''', '''select_fusion:pick_base''', ...
+        'kept_base.N == PK.N && kept_base.lambda == PK.lambda && kept_base.latch == PK.latch && ~kept_base.cues', ...
+        'if ENL && ~fusion_adopt(''branch'', GP), fusion_nogo(''write'', PK, GP); end', ...
+        'if ~isempty(kept_base), deployed_pick.check.kept = kept_base; end', 'fusion_nogo(''clear'');'}
+    verifyNotEmpty(tc, strfind(src, t{1}), t{1});
+end
+b1 = strfind(src, '''select_fusion:fit_sets'''); b2 = strfind(src, '''select_fusion:pick_base''');
+verifyTrue(tc, isscalar(b1) && ~isempty(b2) && b1 < k3 && max(b2) < k3 && k2 < b1);
+n1 = strfind(src, 'fusion_nogo(''write'', PK, GP)'); n2 = strfind(src, 'assert(fusion_adopt(''branch'', GP), ''select_fusion:pick_rule''');
+verifyTrue(tc, isscalar(n1) && isscalar(n2) && n1 < n2);
+c1 = strfind(src, 'fusion_nogo(''clear'');'); verifyTrue(tc, isscalar(c1) && c1 > j3);
+% run_stage.m and main.m: B2F with the revision on the enlarged fit set, the smoke on validation
+rs = fileread(which('run_stage'));
+r1 = strfind(rs, 'elseif strcmp(name, ''select_fusion'')'); verifyNumElements(tc, r1, 1);
+seg = rs(r1:r1 + 200);
+verifyNotEmpty(tc, strfind(seg, 'FUSION_REV = true;'));
+verifyNotEmpty(tc, strfind(seg, 'if ~SMOKE, FUSION_FIT = ''enlarged''; end'));
+verifyEmpty(tc, strfind(rs, 'function run_one(name, SMOKE) %#ok<INUSD>'));
+mm = fileread(which('main'));
+verifyNotEmpty(tc, strfind(mm, 'FUSION_REV = true; FUSION_FIT = ''enlarged'';'));
+verifyNotEmpty(tc, strfind(mm, 'run_fusion();'));
+end
+
+function test_fusion_nogo_reading(tc)
+% A no-go record (fusion_nogo.m) names the kept fusion by its SHA-256 and fusion_pick.m's design;
+% fusion_reading.m labels a reading of a set the deployed revision was fitted on as in-sample,
+% the fourth set's not, and a reading with the kept fusion by its state; the KPI readers carry
+% the labels.
+d = fullfile(tc.TestData.tmp, 'nogo'); mkdir(fullfile(d, 'data'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+R = fusion_reading('_fresh2');
+verifyEmpty(tc, [R.fusion_rev R.state R.sample]);                     % no fusion
+verifyFalse(tc, fusion_nogo('check'));
+verifyError(tc, @() fusion_nogo('write', fusion_pick(), struct()), 'fusion_nogo:kept');
+FM = 1; val_latch_oof = 1; save('data/fusion.mat', 'FM', 'val_latch_oof');   % the old layout
+R = fusion_reading('_fresh2'); verifyEmpty(tc, [R.fusion_rev R.state R.sample]);
+evalc('fusion_nogo(''write'', fusion_pick(), struct(''all'', [0 0 0]))');
+verifyTrue(tc, fusion_nogo('check'));
+L = load('data/fusion_nogo.mat'); verifyEqual(tc, L.nogo.kept_sha256, sha256_of('data/fusion.mat'));
+R = fusion_reading('_fresh3'); verifyEqual(tc, R.state, 'kept fusion after a no-go'); verifyEmpty(tc, R.sample);
+R = fusion_reading('_fresh2'); verifyEmpty(tc, R.sample);              % the kept fusion was not fitted on the test sets
+nogo = L.nogo; nogo.pick.cues.phi1 = false; save('data/fusion_nogo.mat', 'nogo');
+verifyFalse(tc, fusion_nogo('check'));                                 % a no-go of another design
+evalc('fusion_nogo(''write'', fusion_pick(), struct(''all'', [0 0 0]))');
+q_thr = 2; save('data/fusion.mat', 'FM', 'val_latch_oof', 'q_thr');
+verifyFalse(tc, fusion_nogo('check'));                                 % the kept fusion changed
+[~, ok] = evalc('fusion_nogo(''clear'')'); verifyTrue(tc, ok);
+verifyFalse(tc, isfile('data/fusion_nogo.mat')); verifyNotEmpty(tc, dir('data/fusion_nogo_superseded_*.mat'));
+verifyFalse(tc, fusion_nogo('clear'));
+fusion_rev = fusion_rev_id('validation'); save('data/fusion.mat', 'FM', 'val_latch_oof', 'fusion_rev');
+R = fusion_reading(''); verifyEqual(tc, R.fusion_rev, fusion_rev_id('validation')); verifyEmpty(tc, [R.state R.sample]);
+fusion_rev = fusion_rev_id('enlarged'); save('data/fusion.mat', 'FM', 'val_latch_oof', 'fusion_rev');
+for t = {'', '_split', '_fresh2'}
+    R = fusion_reading(t{1});
+    verifyEqual(tc, R.sample, 'in-sample (fit set of the deployed fusion)', t{1}); verifyEqual(tc, R.state, 'deployed revision');
+end
+R = fusion_reading('_fresh3'); verifyEmpty(tc, R.sample); verifyEqual(tc, R.state, 'deployed revision');
+ed = fileread(which('eval_detector'));
+verifyNotEmpty(tc, strfind(ed, 'fz_read = fusion_reading(tag);'));
+verifyNotEmpty(tc, strfind(ed, 'metrics.sample = fz_read.sample;'));
+verifyLessThan(tc, strfind(ed, 'fz_read = fusion_reading(tag);'), strfind(ed, 'metrics = struct('));
+mk = fileread(which('measure_all_kpis'));
+verifyNotEmpty(tc, strfind(mk, 'm.kpi1_threshold_db, smp(m))'));
+verifyNumElements(tc, strfind(mk, 'smp(ms), ...'), 3);
+verifyNotEmpty(tc, strfind(mk, 'det{end+1} = sprintf(''KPI 1 reading: %s'', read_state(m));'));
+verifyNotEmpty(tc, strfind(fileread(which('build_kpi_dashboard')), 'if isfield(m, ''sample'') && ~isempty(m.sample), t = [t '', '' char(m.sample)]; end'));
 end
 
 function test_fusion_target_age(tc)

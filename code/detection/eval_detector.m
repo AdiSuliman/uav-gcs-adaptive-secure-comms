@@ -7,7 +7,8 @@
 % the outputs carry the suffix _fresh2. With DET_TEST = 'fresh3' (stage B3r) the fourth test set
 % (data/splits_fresh3.mat, stage B3q) is read once, only when kpi1_set.m names it (its
 % go/no-go), and the outputs carry the suffix _fresh3; once its inputs are checked (the
-% adopted fusion revision, not older than the detector; a current reading of the third test set
+% adopted fusion revision with fusion_pick.m's design, or the kept fusion after a no-go on the
+% profile (fusion_nogo.m), not older than the detector; a current reading of the third test set
 % with them; no committed record of a reading, docs/d91_fresh3_read_*.txt),
 % results/fresh3_read_started.txt is written before the set is loaded and blocks any later
 % reading. No outcome is printed before the fusion and the latch have run. The KPI 1 threshold
@@ -42,13 +43,23 @@ if read_fresh3                                          % the fourth test set: o
     fz = {whos('-file', 'data/fusion.mat').name};
     assert(ismember('val_latch_oof', fz), 'eval_detector:fresh3_fusion', ...
         'data/fusion.mat has no out-of-fold monitor''s class (val_latch_oof): run select_fusion (B2F)');
-    assert(all(ismember({'cvy', 'cvo', 'fusion_rev'}, fz)), 'eval_detector:fresh3_fusion_rev', ...
-        'data/fusion.mat is not the revised selection (no cvy, cvo or fusion_rev): run B2F with the adopted revision (docs/d91_set4.md)');
-    Fz = load('data/fusion.mat', 'fusion_rev', 'FM');
-    assert(ischar(Fz.fusion_rev) && strcmp(Fz.fusion_rev, fusion_rev_id('enlarged')), 'eval_detector:fresh3_fusion_rev', ...
-        'data/fusion.mat is not the adopted revision %s: run B2F with FUSION_REV and FUSION_FIT = ''enlarged''', fusion_rev_id('enlarged'));
-    assert(isstruct(Fz.FM) && all(isfield(Fz.FM, {'target_age', 'cues'})), 'eval_detector:fresh3_fusion_rev', ...
-        'the fusion in data/fusion.mat has no target_age or cues: run B2F with the adopted revision');
+    if fusion_nogo('check')                             % the design failed its rule here: the kept fusion is read once
+        fprintf('B3r reads the kept fusion: the deployed design failed its adoption rule on this profile (data/fusion_nogo.mat)\n');
+    else
+        assert(all(ismember({'cvy', 'cvo', 'fusion_rev'}, fz)), 'eval_detector:fresh3_fusion_rev', ...
+            'data/fusion.mat is not the revised selection (no cvy, cvo or fusion_rev): run B2F with the adopted revision (docs/d91_set4.md)');
+        Fz = load('data/fusion.mat', 'fusion_rev', 'FM');
+        assert(ischar(Fz.fusion_rev) && strcmp(Fz.fusion_rev, fusion_rev_id('enlarged')), 'eval_detector:fresh3_fusion_rev', ...
+            'data/fusion.mat is not the adopted revision %s: run B2F with FUSION_REV and FUSION_FIT = ''enlarged''', fusion_rev_id('enlarged'));
+        assert(isstruct(Fz.FM) && all(isfield(Fz.FM, {'target_age', 'cues'})), 'eval_detector:fresh3_fusion_rev', ...
+            'the fusion in data/fusion.mat has no target_age or cues: run B2F with the adopted revision');
+        assert(ismember('deployed_pick', fz), 'eval_detector:fresh3_pick', ...
+            'data/fusion.mat records no deployed_pick: run B2F with FUSION_REV and FUSION_FIT = ''enlarged''');
+        Fp = load('data/fusion.mat', 'deployed_pick');
+        assert(isstruct(Fp.deployed_pick) && isfield(Fp.deployed_pick, 'check') && ...
+            isequal(rmfield(Fp.deployed_pick, 'check'), fusion_pick()), 'eval_detector:fresh3_pick', ...
+            'the design in data/fusion.mat is not fusion_pick.m''s: rerun B2F (docs/d91_deploy.md)');
+    end
     Dt = load('data/trained_detector.mat', 'trained_at');
     t_fus = dir('data/fusion.mat').datenum;
     assert(isfield(Dt, 'trained_at') && t_fus >= Dt.trained_at, 'eval_detector:fresh3_fusion_old', ...
@@ -61,7 +72,7 @@ if read_fresh3                                          % the fourth test set: o
         'docs/d91_fresh3_read_*.txt records a reading of the fourth test set with params_id %s: it is read once', pid);
     fresh3_read_marker('results/fresh3_read_started.txt', pid);   % before the set is loaded: a crashed reading counts
     fprintf('B3r: start marker written (results/fresh3_read_started.txt)\n');
-    clear fz Fz Dt t_fus r2 pid f_in
+    clear fz Fz Fp Dt t_fus r2 pid f_in
 end
 tag = ''; if has_fresh && read_split, tag = '_split'; end
 if read_fresh2, tag = '_fresh2'; end
@@ -89,6 +100,8 @@ elseif has_fresh && ~read_split
 end
 sp.train = [];                                          % not read here
 fprintf('Test set: %s (%d frames)\n', set_name, numel(sp.test.Y));
+fz_read = fusion_reading(tag);                          % in-sample when the set is in the deployed fusion's fit set
+if ~isempty(fz_read.sample), fprintf('Reading: %s\n', fz_read.sample); end
 Y_test = sp.test.Y;
 
 load('data/trained_detector.mat', 'net', 'classes');
@@ -574,6 +587,9 @@ metrics = struct( ...
     'step after its onset); a path_loss target at the Eb/N0 of its onset']);
 metrics.onset_cue = onset_cue;
 metrics.onset_diag = onset_diag;
+metrics.fusion_rev = fz_read.fusion_rev;                % the fusion it was read with (fusion_reading.m)
+metrics.fusion_state = fz_read.state;
+metrics.sample = fz_read.sample;                        % 'in-sample (fit set of the deployed fusion)' or ''
 metrics.latch = latch_on;                              % the monitor latches a lost branch's cause (select_fusion.m)
 metrics.fused_alone = fused_alone;
 metrics.roll_in_false_alarms = roll_in_fa;
