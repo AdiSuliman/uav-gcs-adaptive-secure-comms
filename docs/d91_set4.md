@@ -99,6 +99,7 @@ Before the build, A0 in each copy gave the same `params_id` as the profile's liv
    - `select_fusion.m` stores the revision's id, which B3r compares with `fusion_rev_id('enlarged')` (patch below; `d91-fuse` is frozen while its measurement runs, so the patch is applied at this merge, not before).
 
    With no-go, the switch stays `'fresh2'`, and the set waits, unread, for the revision that is adopted after the run.
+   **Superseded by `docs/d91_deploy.md` 3.2 and G** (19.10): the switch is `'fresh3'` in the deploy commit on `v7-deploy-d91` (not `d91-deploy`), and after a no-go it stays there; the kept fusion is read once on the fourth set, after the rehearsal. The set's link model is checked by B3r itself (`data/splits_fresh3_params.mat`, `docs/d91_deploy.md` D4).
 
    The patch for `select_fusion.m` (end of the script; today's line `if REV, save('data/fusion.mat', 'cvy', 'cvo', '-append'); end`):
    ```matlab

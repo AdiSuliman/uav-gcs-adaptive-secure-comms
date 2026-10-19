@@ -455,6 +455,8 @@ pool). All pass:
 
 ## 7. Deploy checklist
 
+**Superseded in part (19.10):** the deploy branch is `v7-deploy-d91` (worktree `uav-gcs-v7-deploy`), and its procedures are `docs/d91_deploy.md` section 5. A no-go no longer sets `kpi1_set.m` back to `'fresh2'`: the kept fusion is read once on the fourth set (`docs/d91_deploy.md` 3.2 and G).
+
 This is the whole deployment of the adopted revision, written before the 21.10 go/no-go. It
 covers the merge, the code of the deploy commit, the tests, and each profile in turn. Only G
 applies with a no-go. `docs/d91_set4.md` cites the steps of an earlier, shorter list. Its
@@ -462,9 +464,9 @@ applies with a no-go. `docs/d91_set4.md` cites the steps of an earlier, shorter 
 
 ### A. The deploy branch (outside every live tree)
 
-1. Branch `d91-deploy` from `d90-loop` (`2cbe559`). Merge with `--no-ff`, in this order:
+1. Branch `v7-deploy-d91` from `d90-loop` (`2cbe559`). Merge with `--no-ff`, in this order:
    `d91-set4`, then `d91-fuse`, then `d91-speed`. All three branch from `2cbe559`. Do this in a
-   worktree of its own (for example `uav-gcs-d91-deploy`), never in `uav-gcs-v7`,
+   worktree of its own (for example `uav-gcs-v7-deploy`), never in `uav-gcs-v7`,
    `uav-gcs-v7-p3` or a profile 2 tree.
 2. A trial merge in the object store on 18.10 (`git merge-tree --write-tree`, nothing checked
    out) had no conflict. It used the tips `0e410cf` (set4), `9e7a3fb` (fuse) and `2d93abb`
@@ -475,7 +477,7 @@ applies with a no-go. `docs/d91_set4.md` cites the steps of an earlier, shorter 
    `fusion_pick.m` (name `'branch evidence, phi = 1'`, `cues.phi1 = true`, latch still false)
    and the phi1 expectation in `test_fusion_pick_deploy`.
 
-### B. The deploy commit (one commit on `d91-deploy`, after the merges)
+### B. The deploy commit (one commit on `v7-deploy-d91`, after the merges)
 
 1. `kpi1_set.m`: `s = 'fresh3';`. In `test_core.m`, change the two `kpi1_set()` expectations:
    one in `test_third_test_set`, one in the first part of `test_fourth_test_set`.
@@ -525,14 +527,14 @@ applies with a no-go. `docs/d91_set4.md` cites the steps of an earlier, shorter 
    `-singleCompThread` MATLAB per job, through the gate. Run it as the `merge`/`tip` pair of
    `docs/d91_speed.md` section 7. Each candidate is built with `git merge-tree` and
    `git commit-tree`, outside the live trees:
-   - `d91-deploy` merged onto the `v7-p3` tip, against that tip;
-   - after profile 1's chain, `d91-deploy` merged onto the `v7-dev` tip of that day, against
+   - `v7-deploy-d91` merged onto the `v7-p3` tip, against that tip;
+   - after profile 1's chain, `v7-deploy-d91` merged onto the `v7-dev` tip of that day, against
      that tip;
    - for profile 2, the same against `v7-p2` (F).
 
    Merge only when the pair has no `fail-new-only`, `not-run`, failing `new-test` or TIMEOUT.
    After the merge, `git rev-parse HEAD^{tree}` in the live tree must equal the tested tree.
-2. The d90 smoke chain on `d91-deploy` (`run_stage('smoke', ...)`), in a scratch copy. Its
+2. The d90 smoke chain on `v7-deploy-d91` (`run_stage('smoke', ...)`), in a scratch copy. Its
    B2F runs with `FUSION_FIT` off (B2). It checks the code path only; smoke numbers are not
    results.
 3. The speed preconditions of `docs/d91_speed.md` section 7: every `D91PROOF` PASS with the
@@ -546,7 +548,7 @@ SURV3 before C1p (`ops/v7_d91_takeover.md`, "Fusion revision and the fourth test
 1. Write `uav-gcs-logs\v7_d86\p3_c1p.hold` first. Then check that no MATLAB runs in
    `uav-gcs-v7-p3`: query the processes, check `takeover_ml_p3.pid`, and check that the
    current part of p3.log has not started C1p.
-2. Merge `d91-deploy` into `v7-p3`, using the tree tested in C1. If `d91-speed` was already
+2. Merge `v7-deploy-d91` into `v7-p3`, using the tree tested in C1. If `d91-speed` was already
    cherry-picked into `v7-p3`, both sides of the merge carry the same hunks: check that
    `git merge-tree` is clean and that the tree equals the tested one. `git status` must be
    clean; then push.
@@ -585,7 +587,7 @@ and an idle machine, so the reruns below fit between profile 1's chain end and t
    record from before the revision.
 2. The fourth set goes into `data/`, with the checks of `docs/d91_set4.md` step 3 (P1's
    `params_id` is `add18af2b7532a0bd2f7fbc78f06e526`).
-3. Run the `merge`/`tip` pair on that day's `v7-dev` tip (C1). Then merge `d91-deploy` into
+3. Run the `merge`/`tip` pair on that day's `v7-dev` tip (C1). Then merge `v7-deploy-d91` into
    `v7-dev` and push. Profile 2 has branched by then (F).
 4. In a separate MATLAB logging to its own file (never to p1.log): B2F, the rehearsal, B3,
    B3a, B4, B4s, then B3r once, with the record committed. The checks are those of D3 and D5.
@@ -603,6 +605,8 @@ before they start.
 
 ### F. Profile 2: its own fusion decision (proposed, for Adi at the go/no-go)
 
+**Superseded by `docs/d91_deploy.md` 3.2, 3.3 and F** (19.10): profile 2 builds B3q in its chain under plan A, and its no-go keeps `kpi1_set.m` at `'fresh3'`.
+
 `fusion_pick.m` was measured on profiles 1 and 3. Profile 2's enlarged fit set does not exist
 at its B2F: its chain builds the second and third test sets (B3n, B3m) after B2F. The takeover
 also branches `v7-p2` from `v7-dev` when profile 1's chain ends, which is before E3. So
@@ -614,13 +618,13 @@ before any profile 2 number exists.
    `p2_set4.stages`: B3q is not in `v7-dev` when profile 2 branches, and B3r never goes into
    the chain (`docs/d91_set4.md`, step 7).
 2. Build profile 2's fourth set in a copy, as was done for profiles 1 and 3. B3q reads nothing.
-   - The copy: a detached worktree of `d91-deploy` with profile 2's `params.mat`,
+   - The copy: a detached worktree of `v7-deploy-d91` with profile 2's `params.mat`,
      `profile.json` and `data/splits.mat`, set up after profile 2's B1.
    - The recipe and seeds: the same as profiles 1 and 3 (6.0M + run id, speed stream 2037),
      with profile 2's link model.
    - It can run while profile 2's chain continues, as long as only one side MATLAB runs at a
      time.
-3. At the hold, run profile 2's own `merge`/`tip` pair (C1), then merge `d91-deploy` into
+3. At the hold, run profile 2's own `merge`/`tip` pair (C1), then merge `v7-deploy-d91` into
    `v7-p2`.
 4. **The decision is B2F's rule check.** `run_stage('B2F')` with `FUSION_FIT = 'enlarged'`
    refits the base and the fixed design out of fold on profile 2's enlarged fit set:
@@ -646,6 +650,8 @@ before any profile 2 number exists.
    heading) before C1p starts.
 
 ### G. No-go
+
+**Superseded by `docs/d91_deploy.md` 3.2 and G** (19.10): after a no-go `kpi1_set.m` stays `'fresh3'` and the kept fusion is read once on the fourth set.
 
 With a no-go on 21.10, nothing is merged. `kpi1_set.m` stays `'fresh2'`, each profile's fourth
 set waits unread for a revision adopted later, and the old fusion and its pools stay. If a
