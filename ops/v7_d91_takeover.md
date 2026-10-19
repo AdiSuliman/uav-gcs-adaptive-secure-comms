@@ -109,20 +109,22 @@ It never touches the parallel turn file. If the PID in that file has exited but 
 
 **MATLAB's PID.** A real MATLAB runs as two processes: the `bin\matlab.exe` launcher, and its child `bin\win64\MATLAB.exe`, which does the work (the pool workers are children of that one). The live profile 1 chain shows it: launcher 44984, win64 42560. The win64 process can outlive its launcher, for example when only the launcher is ended. So the PID file names both.
 
-Right after forking a MATLAB, the takeover writes the subshell's Windows PID and an `msys <pid>` line to `takeover_ml_<profile>.pid`. It then checks every second until that subshell shows a process with `matlab` in its command line (the launcher), and replaces the file with the launcher's Windows PID. If that does not happen within 60 s (a heavily paging machine), it raises `ALERT_ml_pid_<profile>_*` and rewrites the file with the subshell's current Windows PID and its `msys` line. It goes on checking every 60 s while MATLAB runs, and the file names the launcher once it shows. Once the launcher's live win64 child shows, the file gets a second line `win64 <pid>` (checked every 5 s for 60 s, then every 60 s).
+In every check below, a MATLAB is a process named `MATLAB.exe`: the launcher, the win64 process or a pool worker. Its helper processes `MATLABWebUI.exe`, `MATLABWindow.exe` and `MathWorksServiceHost.exe` never count, and neither does a command line that only has `matlab` in its path. Those helpers can outlive an exited MATLAB by days. On 19.10 the exited 32824 still had two live `MATLABWebUI.exe` children, three days after it ended, and the live 42560 had six `MATLABWebUI.exe` and one `MATLABWindow.exe` beside its six `MATLAB.exe` pool workers. A process counts as a live win64 MATLAB only when its path ends in `\win64\MATLAB.exe`.
+
+Right after forking a MATLAB, the takeover writes the subshell's Windows PID and an `msys <pid>` line to `takeover_ml_<profile>.pid`. It then checks every second until that subshell shows a process whose command line runs `matlab.exe` (the launcher), and replaces the file with the launcher's Windows PID. If that does not happen within 60 s (a heavily paging machine), it raises `ALERT_ml_pid_<profile>_*` and rewrites the file with the subshell's current Windows PID and its `msys` line. It goes on checking every 60 s while MATLAB runs, and the file names the launcher once it shows. Once the launcher's live win64 child shows, the file gets a second line `win64 <pid>` (checked every 5 s for 60 s, then every 60 s). If the launcher exits before its PID was taken, the file is rewritten with the last Windows PID that subshell showed, plus the `win64` line if a live win64 child of it shows then. A win64 process that outlives such a launcher therefore still holds the worktree.
 
 The worktree counts as busy while either PID, or a live MATLAB child of either, lives. The takeover reads that file (written in this boot) before it starts a MATLAB in a worktree, and again right after each of its MATLAB launchers has exited. When the file has an `msys <pid>` line and MSYS still knows that process (`/proc/<pid>/winpid`, also from a restarted takeover), the Windows process that subshell is now, after its exec, is checked instead of the first line. Then:
 
-- a MATLAB command line on the first line: alive;
+- a command line on the first line that runs `matlab.exe` (launcher or win64): alive;
 - a takeover's command line (the subshell's stub around its exec): alive while it has a MATLAB child, or when it was created before this takeover started;
 - `none` (the process is gone) or another program on the first line: alive while a live MATLAB child of that PID runs. Windows keeps a child's ParentProcessId after its parent exits, so this finds a win64 MATLAB whose launcher was ended before its `win64` line was written;
-- the `win64` PID still a live win64 MATLAB, or a live MATLAB child of it: alive. An exited win64 process whose process object lingers does not count;
+- the `win64` PID still a live win64 MATLAB, or a live MATLAB child of it: alive. An exited win64 process whose process object lingers does not count, even while its `MATLABWebUI.exe` or `MATLABWindow.exe` children live on;
 - all of them gone: gone, and the file is removed;
 - a query failed, or the file reads empty: unknown, it waits and asks again.
 
 While it is alive the takeover waits (`ALERT_ml_alive_<profile>`). After its own MATLAB's launcher has exited, a 60 s grace comes first, so a normal end raises no alert. The wait also holds the chain's end marker: a launcher ended alone writes no `chain ended` line while its win64 MATLAB still runs. So no resume, no force file and no restart can start a second MATLAB beside it.
 
-**Profile 1's chain MATLAB.** Profile 1's launcher chain is not the takeover's, so it has no PID file. While that chain runs, the profile 1 track records its MATLAB processes (at its first pass, then every 30 min) in `v7_d86/takeover_p1_chain_ml.txt`, each as `<Windows PID> <creation time>`: the live MATLAB children of 43428 and 43972 (the launcher 44984), and their MATLAB children (the win64 42560). A recorded process counts as alive while that PID is still the process created at that time. It also counts while it has a live MATLAB child created before any new process under that PID. The file counts only when written in this boot. While any recorded process lives, or its query fails:
+**Profile 1's chain MATLAB.** Profile 1's launcher chain is not the takeover's, so it has no PID file. While that chain runs, the profile 1 track records its MATLAB processes (at its first pass, then every 30 min, and again right before each check whether the chain's subshells are gone) in `v7_d86/takeover_p1_chain_ml.txt`, each as `<Windows PID> <creation time>`: the live MATLAB children of 43428 and 43972 (the launcher 44984), and their MATLAB children (the win64 42560). A recorded process counts as alive while that PID is still the process created at that time. It also counts while it has a live MATLAB child created before any new process under that PID. The file counts only when written in this boot. While any recorded process lives, or its query fails:
 
 - profile 1 is not over for the rerun gate, even after its end marker;
 - profile 1's chain has not stopped, so `p1.abandon` with a force file does not count yet;
@@ -233,7 +235,7 @@ It matches the wrapper, the main bash and its track subshells (MSYS forks keep t
 - A MATLAB the takeover started runs on: its launcher with the takeover's subshell stub as its parent, and the launcher's win64 child. Both PIDs are in `v7_d86\takeover_ml_<profile>.pid` (the launcher on the first line, `win64 <pid>` on the second). A restarted takeover waits until both are gone.
 - Profile 1's launcher chain (43428, 43972) does not match and runs on.
 
-Stopping the takeover stops only its bash processes, never a MATLAB. Leave its MATLAB to finish; the restarted takeover goes on after it. If a takeover MATLAB really must be stopped (it hangs), end its **win64** process, the PID on the file's `win64` line (or the `MATLAB.exe` whose ParentProcessId is the PID on the first line), with `taskkill /PID <pid> /F`, no `/T`. Its launcher and stub then exit by themselves. Never end only the launcher: its win64 child would run on without it. Either way the worktree stays held, and no new MATLAB starts there, until the launcher, the win64 process and every live MATLAB child of them are gone.
+Stopping the takeover stops only its bash processes, never a MATLAB. Leave its MATLAB to finish; the restarted takeover goes on after it. If a takeover MATLAB really must be stopped (it hangs), end its **win64** process, the PID on the file's `win64` line (or the `MATLAB.exe` whose ParentProcessId is the PID on the first line), with `taskkill /PID <pid> /F`, no `/T`. Its launcher and stub then exit by themselves. Never end only the launcher: its win64 child would run on without it. Either way the worktree stays held, and no new MATLAB starts there, until the launcher, the win64 process and every live `MATLAB.exe` child of them are gone. Leftover `MATLABWebUI.exe` or `MATLABWindow.exe` children of an exited MATLAB do not hold the worktree. They can be ended separately (they are not MATLAB), as for `turn_holder`, but the takeover does not wait for that.
 
 Run the same query without the `ForEach-Object` part afterwards: it must list nothing. A stub left beside a running MATLAB is not listed, by design.
 
@@ -291,8 +293,8 @@ Launch it as soon as this review is done (18-19.10). It also covers a profile 1 
 | `takeover_main_gone` | The takeover's main bash died; its tracks stopped. Start it again with the step 4 command. |
 | `code_<g>` | A worktree is on the wrong branch, a merge is in progress, or code is uncommitted. |
 | `headroom_<g>` | More than 1 h below the free-commit gate (45 GB, 65 GB for the rerun). |
-| `ml_alive_<g>` | A takeover MATLAB still runs in that worktree: a PID in `takeover_ml_<g>.pid` (launcher or win64), or a live MATLAB child of one. Nothing starts there, and a chain whose launcher has exited writes no end marker, until all are gone. If it hangs, end its win64 PID (see Stopping the takeover). |
-| `ml_alive_p1_chain` | A MATLAB of profile 1's launcher chain (`takeover_p1_chain_ml.txt`) still runs although its chain has ended or its subshells are gone. The resume and profile 1's final phase wait for it. If it hangs, end its win64 PID with `/F`, no `/T`. |
+| `ml_alive_<g>` | A takeover MATLAB still runs in that worktree: a PID in `takeover_ml_<g>.pid` (launcher or win64), or a live `MATLAB.exe` child of one. Nothing starts there, and a chain whose launcher has exited writes no end marker, until all are gone. Leftover `MATLABWebUI.exe` or `MATLABWindow.exe` children do not count. If it hangs, end its win64 PID (see Stopping the takeover). |
+| `ml_alive_p1_chain` | A MATLAB of profile 1's launcher chain (`takeover_p1_chain_ml.txt`), or a live `MATLAB.exe` child of one, still runs although its chain has ended or its subshells are gone. The resume and profile 1's final phase wait for it. Leftover `MATLABWebUI.exe` or `MATLABWindow.exe` children do not count. If it hangs, end its win64 PID with `/F`, no `/T`. |
 | `ml_pid_<g>` | A started MATLAB did not show its Windows PID within 60 s. The subshell's PID was recorded instead; it is replaced once MATLAB shows. |
 | `stale_<file>` | A go file older than the event it should answer. |
 | `turn_holder_<pid>` | The parallel turn file names an exited MATLAB. |
@@ -345,7 +347,7 @@ A crash without a reboot is handled like this:
 bash ops/d91_takeover_test.sh [sandbox] [scenario ...]
 ```
 
-The default sandbox is `…\scratchpad\d91_takeover_test\`. The default scenarios are `rename status normal p1crash rerun rerunver accept rerungate reboot oldlaunch p1gone p1wait p1orphan orphan mainkill slowexec win64 zombie turn unknown unread nolog mlstub watchdog mainstall overwrite forcegate c1phold p2gate refuse`.
+The default sandbox is `…\scratchpad\d91_takeover_test\`. The default scenarios are `rename status normal p1crash rerun rerunver accept rerungate reboot oldlaunch p1gone p1wait p1orphan orphan mainkill slowexec win64 webui mlquery zombie turn unknown unread nolog mlstub watchdog mainstall overwrite forcegate c1phold p2gate refuse`.
 
 **How it runs.**
 
@@ -399,9 +401,11 @@ The default sandbox is `…\scratchpad\d91_takeover_test\`. The default scenario
 - `unknown`: a hanging command-line query is ended after the query timeout (5 times, each process ended) and the start is refused; a failed process scan or a failed command-line query of 24172 refuses the start (no lock, SRC and scripts untouched); a recorded MATLAB whose query fails holds the worktree, then counts as alive once readable; a failed scan while running holds MATLAB starts.
 - `unread`: a part header without FROM in p3.log, then in p1.log after its chain has ended: each is logged as unread and alerted after the (test) hour; no MATLAB starts, no part header is written, no p1 alert, profile 2 does not start; once p1.log reads again, profile 2 runs its B stages while p3 and p2's C1p still wait; once p3.log reads again, the run finishes in order.
 - `nolog`: p3.log missing: logged at the start, `ALERT_log_missing_p3`, nothing runs for profile 3 and no p3.log is written (no rebuild from A0), the status mode reads it as unknown; once the log is back, profile 3 goes on at C1p.
-- `mlstub`: a PID file with an `msys` line whose stub is gone (`none`) while a MATLAB child lives: alive, nothing starts; once no child is left: gone, the file is removed. The same for a PID file with the launcher alone, gone, while a live MATLAB child of it runs; and for a `win64` line whose process lives while the launcher is gone (gone once it has exited, even while its process object lingers).
+- `mlstub`: a PID file with an `msys` line whose stub is gone (`none`) while a MATLAB child lives: alive, nothing starts; once no child is left: gone, the file is removed. The same for a PID file with the launcher alone, gone, while a live MATLAB child of it runs; and for a `win64` line whose process lives while the launcher is gone (gone once it has exited, even while its process object lingers). Last, as the zombie 32824: a `win64` line whose process has exited, with live `MATLABWebUI.exe`, `MATLABWindow.exe` and `MathWorksServiceHost.exe` children and one live `MATLAB.exe` pool worker: alive; once the worker has exited, gone (the helpers live on), and p3's next MATLAB (C1p) starts.
+- `webui`: every win64 MATLAB leaves, as it exits, a lingering process object with live `MATLABWebUI.exe`, `MATLABWindow.exe` and `MathWorksServiceHost.exe` children. No `ml_alive` alert, p3's C1p part gets its end marker, no PID file is left, and the run ends with every final part. Then (`mlquit`) profile 3's launcher exits after 3 s while its exec still shows as the subshell (6 s), so its PID was never taken: the PID file names the launcher's last Windows PID and its `win64` child, the takeover holds the worktree (alert, no end marker) while the child runs, and the end marker comes once the child has finished.
+- `mlquery` (the script's functions, sourced, with the real PowerShell queries): two copies of `sleep.exe` in the sandbox, named `bin\win64\MATLABWebUI.exe` and `MATLABWindow.exe`, run as live children. The children query of each parent gives `none`, the state query gives `other` (not a live win64 MATLAB), the command-line check does not take them for MATLAB, and a PID file naming the parent with `win64 <MATLABWebUI.exe>`, the MATLABWebUI.exe PID alone, or the parent alone reads as gone. No process named `MATLAB.exe` is created, so the live machine's MATLAB lists are never touched.
 - `win64`: every MATLAB runs as launcher plus win64 child. The PID file names the launcher, then `win64 <pid>`. The launcher of profile 3's C1p is ended alone: the child runs on, the takeover holds the worktree (alert, PID file kept, no end marker). The takeover is killed and restarted: it waits for the child (its launcher's PID gone); C1p runs once; the end marker comes after the child; the run ends with every final part.
-- `p1orphan`: profile 1's chain as in the live tree (43428, 43972, launcher 44984, win64 42560). Both MATLAB processes are recorded with their creation times. The launcher is ended alone, and the chain writes rc=1 while 42560 runs on. The pending rerun does not start, and `p1_resume.go` waits with `ALERT_ml_alive_p1_chain`. Once 42560 has exited, both start. With `p1.abandon` and `p3_c1p.force` instead, profile 3's C1p waits for 42560 too.
+- `p1orphan`: profile 1's chain as in the live tree (43428, 43972, launcher 44984, win64 42560). Both MATLAB processes are recorded with their creation times. The launcher is ended alone, and the chain writes rc=1 while 42560 runs on. The pending rerun does not start, and `p1_resume.go` waits with `ALERT_ml_alive_p1_chain`. Once 42560 has exited, both start, while its lingering process object keeps live `MATLABWebUI.exe` and `MATLABWindow.exe` children. With `p1.abandon` and `p3_c1p.force` instead, profile 3's C1p waits for 42560 too, and starts once it has exited, with the same helpers left.
 - `c1phold`: profile 3 past profile 1's SURV3 waits for free commit before C1p. A hold and a go file written during that wait send it back to the C1p checks: the rerun runs first, and C1p starts only after the hold is removed.
 - `rerunver` (the script's functions, sourced): `go_state` gives the version it checked (`pending <id> <list>`). The file rewritten to `B4s C1p` after the check is refused before the part header, with no MATLAB. An unchanged version runs exactly its checked list.
 - `watchdog`: a track stopped (SIGSTOP) raises `takeover_track_p3_stalled`; a track killed alone raises `takeover_track_p2_died`; the other tracks finish, the final phase is skipped, no `v7 done`, and the lock is removed once no track lives; a restart resumes profile 2 and runs the final phase for all three.
@@ -419,6 +423,30 @@ The default sandbox is `…\scratchpad\d91_takeover_test\`. The default scenario
   - bash commands that only mention the scripts (a grep, `: v7_d86_launch.sh`, a cat) are not counted, and neither is a launcher fork that only one scan lists;
   - two starts at the same moment: exactly one runs;
   - none of the refusals leaves a lock or changes code_commit.txt.
+
+**Result, 19.10 (round 6).** 385 of 385 checks passed in the full run on the committed files, 12:37-14:48 (log `scratchpad\r13_full.log`). An md5 check confirmed that the tested script, harness and stubs are the committed ones. It ran alone and started no MATLAB.
+
+This round changed three things:
+
+- The children query and every MATLAB check now count only processes named `MATLAB.exe`, and a live win64 MATLAB only by its `\win64\MATLAB.exe` path. Before, a lingering `MATLABWebUI.exe` child of an exited win64 process kept a worktree, or profile 1's chain, held for good.
+- A launcher that exits before its PID was taken is followed by its last Windows PID.
+- Profile 1's chain record is taken again right before each check whether the chain has stopped.
+
+New tests cover these: `webui`, `mlquit`, `mlquery`, the fourth `mlstub` case, and helpers left at the end of `p1orphan`. As a control, `mlquery` and `mlquit` were run against the round-5 script (55335d7). Nine checks failed there, as intended (eight below, and one sandbox process still running at the kill):
+
+- the parents' children query listed the two helpers;
+- the state query called them live win64 MATLAB;
+- all three PID files read as alive;
+- the PID file was not kept for the launcher that exited early, so no end marker was held back.
+
+The stub-based `webui`, `mlstub4` and `p1orphan` cases model the query's answer, so they pass on both scripts.
+
+Read-only queries on the live tree with the new queries gave these results:
+
+- the children query gives `none` for the exited zombie 32824, though its two `MATLABWebUI.exe` children still live;
+- it gives 44984 for 43972, 42560 for 44984, and the six `MATLAB.exe` pool workers for 42560;
+- the state query gives `live` for 42560, `other` for the launcher 44984 and for `MATLABWebUI.exe` 11980, and `exited` for 32824;
+- the command-line check takes 44984 and 42560 for MATLAB, but not 11980.
 
 **Result, 19.10 (round 5).** 361 of 361 checks passed in the full run on the committed files, 08:21-10:05 (log `scratchpad\r10_full.log`; an md5 check confirmed the tested script, harness and stubs are the committed ones). It ran alone beside the live profile 1 C1p and the side jobs and started no MATLAB. Earlier full runs of this round found three things, all fixed before this run:
 

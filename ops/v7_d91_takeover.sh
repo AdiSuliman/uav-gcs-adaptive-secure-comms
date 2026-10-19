@@ -66,8 +66,8 @@
 # STALL_S old. When the main bash is gone, each track stops at its next heartbeat
 # (ALERT_takeover_main_gone; a running MATLAB keeps its PID file). One MATLAB per profile worktree
 # at a time: a takeover MATLAB's PID file names the bin\matlab.exe launcher and, once it shows, its
-# win64\MATLAB.exe child ('win64 <pid>'); the worktree stays busy while either PID, or a live matlab
-# child of one, lives. Profile 1's launcher-chain MATLAB processes are recorded the same way
+# win64\MATLAB.exe child ('win64 <pid>'); the worktree stays busy while either PID, or a live
+# MATLAB.exe child of one, lives (MATLABWebUI.exe, MATLABWindow.exe never count). Profile 1's launcher-chain MATLAB processes are recorded the same way
 # (takeover_p1_chain_ml.txt) and hold profile 1's resume, the rerun gate and the force files.
 # Never touches the parallel turn file.
 #
@@ -196,6 +196,9 @@ in_list() { local x=$1; shift; local y; for y in "$@"; do [ "$x" = "$y" ] && ret
 # means the query failed (unknown): cmdline and created print 'none' for a missing process,
 # mlchild 'none' for no live MATLAB child (by ParentProcessId, which Windows keeps after the parent
 # exits; exited processes not counted), and scripts and matlab end their list with a line 'end'.
+# MATLAB means a process named MATLAB.exe (the bin launcher, the win64 process, a pool worker); its
+# helpers MATLABWebUI.exe, MATLABWindow.exe and MathWorksServiceHost.exe never count, as they can
+# outlive an exited MATLAB by days. state is live only for a live bin\win64\MATLAB.exe.
 q_run() {   # "$@" with its output; nothing and status 1 when it has not ended within Q_TIMEOUT_S (its process tree ended)
   local out
   out=$(
@@ -220,9 +223,9 @@ sysq() {
   case $1 in
     cmdline)  q="\$p = Get-CimInstance Win32_Process -Filter \"ProcessId=$2\"; if (-not \$p) {'none'} elseif (\$p.CommandLine) {\$p.CommandLine} else {'(no command line)'}";;
     created)  q="\$p = Get-CimInstance Win32_Process -Filter \"ProcessId=$2\"; if (\$p) { ([DateTimeOffset]\$p.CreationDate).ToUnixTimeSeconds() } else {'none'}";;
-    mlchild)  q="\$c = @(Get-CimInstance Win32_Process -Filter \"ParentProcessId=$2\" | Where-Object { \$_.Name -like 'matlab*' } | Where-Object { \$x = Get-Process -Id \$_.ProcessId -ErrorAction SilentlyContinue; \$x -and -not \$x.HasExited }); if (\$c.Count) { \$c | ForEach-Object { \$_.ProcessId } } else {'none'}";;
+    mlchild)  q="\$c = @(Get-CimInstance Win32_Process -Filter \"ParentProcessId=$2\" | Where-Object { \$_.Name -eq 'MATLAB.exe' } | Where-Object { \$x = Get-Process -Id \$_.ProcessId -ErrorAction SilentlyContinue; \$x -and -not \$x.HasExited }); if (\$c.Count) { \$c | ForEach-Object { \$_.ProcessId } } else {'none'}";;
     scripts)  q="Get-CimInstance Win32_Process -Filter \"Name='bash.exe'\" | Where-Object { \$_.CommandLine -like ('*v7_d8' + '*') -or \$_.CommandLine -like ('*v7_fix' + '_resume*') -or \$_.CommandLine -like ('*v7_wait' + '_c1p_then_fix*') -or \$_.CommandLine -like ('*v7_guard' + '_c1p_fail*') } | ForEach-Object { '{0}|{1}|{2}' -f \$_.ProcessId, ([DateTimeOffset]\$_.CreationDate).ToUnixTimeSeconds(), \$_.CommandLine }; 'end'";;
-    state)    q="\$p = Get-Process -Id $2 -ErrorAction SilentlyContinue; if (-not \$p) {'none'} elseif (\$p.HasExited) {'exited'} elseif (\$p.Path -like '*win64*') {'live'} else {'other'}";;
+    state)    q="\$p = Get-Process -Id $2 -ErrorAction SilentlyContinue; if (-not \$p) {'none'} elseif (\$p.HasExited) {'exited'} elseif (\$p.Path -like '*\win64\MATLAB.exe') {'live'} else {'other'}";;
     matlab)   q="Get-CimInstance Win32_Process -Filter \"Name='MATLAB.exe'\" | Where-Object { \$_.CommandLine -like '*win64*' } | ForEach-Object { \$p = Get-Process -Id \$_.ProcessId -ErrorAction SilentlyContinue; \$x = if (-not \$p -or \$p.HasExited) {1} else {0}; '{0}|{1}|{2}' -f \$_.ProcessId, \$x, \$_.CommandLine }; 'end'";;
     cpu)      q="(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average";;
     boot)     q="([DateTimeOffset](Get-CimInstance Win32_OperatingSystem).LastBootUpTime).ToUnixTimeSeconds()";;
@@ -472,11 +475,13 @@ allowed_alive() {   # alive, none or unknown: is one of V7T_ALLOW_PIDS still a b
 }
 p1_chain_gone() {   # profile 1's launcher chain: its subshells gone, none has a MATLAB child, no recorded chain MATLAB left (explicit answers only)
   local p
-  [ -n "$ALLOW_PIDS" ] && [ "$(allowed_alive)" = none ] || return 1
+  [ -n "$ALLOW_PIDS" ] || return 1
+  p1_ml_note   # the record taken again right before the check
+  [ "$(allowed_alive)" = none ] || return 1
   for p in $ALLOW_PIDS; do [ "$(sysq mlchild "$p")" = none ] || return 1; done
   ! p1_ml_left
 }
-p1_ml_note() {   # the MATLAB children of V7T_ALLOW_PIDS and their matlab children (bin launcher, win64) added to P1ML; a file from before the boot dropped
+p1_ml_note() {   # the MATLAB children of V7T_ALLOW_PIDS and their MATLAB.exe children (bin launcher, win64) added to P1ML; a file from before the boot dropped
   local p x y ct m c c2
   [ -n "$ALLOW_PIDS" ] || return 0
   if [ -f "$P1ML" ]; then m=$(mtime "$P1ML") || return 0; [ "$m" -ge "$BOOT" ] || rm -f "$P1ML"; fi
@@ -494,7 +499,7 @@ p1_ml_note() {   # the MATLAB children of V7T_ALLOW_PIDS and their matlab childr
     done
   done
 }
-pid_busy() {   # alive, gone or unknown: Windows PID $1 still the process created at $2, or a live matlab child of that process
+pid_busy() {   # alive, gone or unknown: Windows PID $1 still the process created at $2, or a live MATLAB.exe child of that process
   local ct ch x cx
   ct=$(sysq created "$1")
   [ -n "$ct" ] || { echo unknown; return; }
@@ -515,7 +520,7 @@ pid_busy() {   # alive, gone or unknown: Windows PID $1 still the process create
   done
   echo gone
 }
-p1_ml_left() {   # 0 while a MATLAB of profile 1's launcher chain recorded in this boot, or a live matlab child of one, lives, or that is unknown; 1 when none
+p1_ml_left() {   # 0 while a MATLAB of profile 1's launcher chain recorded in this boot, or a live MATLAB.exe child of one, lives, or that is unknown; 1 when none
   local x pid m S
   [ -f "$P1ML" ] || return 1
   m=$(mtime "$P1ML") || return 0
@@ -531,7 +536,7 @@ p1_ml_left() {   # 0 while a MATLAB of profile 1's launcher chain recorded in th
 p1_ml_wait() {   # profile 1's worktree: no MATLAB of its launcher chain left before a takeover MATLAB starts there; status 1 on p1.abandon
   while p1_ml_left; do
     [ -f "$R/p1.abandon" ] && return 1
-    alert "ml_alive_p1_chain" "A MATLAB of profile 1's launcher chain ($P1ML: the bin\matlab.exe launcher and its win64\MATLAB.exe), or a live matlab child of one, still runs in $V7 (or its query failed), although the chain has ended or its subshells are gone. No takeover MATLAB starts there until it has exited. If it hangs: end the win64\MATLAB.exe PID with taskkill /PID <pid> /F (no /T)."
+    alert "ml_alive_p1_chain" "A MATLAB of profile 1's launcher chain ($P1ML: the bin\matlab.exe launcher and its win64\MATLAB.exe), or a live MATLAB.exe child of one, still runs in $V7 (or its query failed), although the chain has ended or its subshells are gone. No takeover MATLAB starts there until it has exited. Leftover MATLABWebUI.exe or MATLABWindow.exe children do not count. If it hangs: end the win64\MATLAB.exe PID with taskkill /PID <pid> /F (no /T)."
     nap "$POLL"
   done
 }
@@ -571,11 +576,17 @@ commit_note() { echo "$1 $(br "$1") $(git -C "$(wt "$1")" rev-parse HEAD) $(date
 # MATLAB -batch "$2" in profile $1's worktree, output appended to its log; heartbeat while it runs.
 # Its PID file: the subshell's Windows PID and 'msys <pid>' until the exec shows, then the
 # bin\matlab.exe launcher's PID, and 'win64 <pid>' once the launcher's win64\MATLAB.exe child shows.
-ml_child() {   # alive when Windows PID $1 has a live matlab child (Windows keeps ParentProcessId after the parent exits); gone; unknown
+ml_cmd() {   # command line $1 runs MATLAB.exe (bin launcher or win64), not MATLABWebUI.exe, MATLABWindow.exe or another program
+  local c=${1,,} e
+  if [[ $c == \"* ]]; then c=${c#\"}; e=${c%%\"*}; else e=${c%%[[:space:]]*}; fi
+  e=${e##*\\}; e=${e##*/}
+  [ "$e" = matlab.exe ] || [ "$e" = matlab ]
+}
+ml_child() {   # alive when Windows PID $1 has a live MATLAB.exe child (Windows keeps ParentProcessId after the parent exits); gone; unknown
   local ch; ch=$(sysq mlchild "$1")
   if [ -z "$ch" ]; then echo unknown; elif [ "$ch" = none ]; then echo gone; else echo alive; fi
 }
-ml_state() {   # alive, gone or unknown: the MATLAB recorded in profile $1's PID file (either PID, or a live matlab child of one)
+ml_state() {   # alive, gone or unknown: the MATLAB recorded in profile $1's PID file (either PID, or a live MATLAB.exe child of one)
   local pf="$R/takeover_ml_$1.pid" op="" l2="" w2="" w64="" c s ct m
   [ -f "$pf" ] || { echo gone; return; }
   { read -r op; read -r l2; } < "$pf" 2>/dev/null
@@ -595,8 +606,8 @@ ml_state() {   # alive, gone or unknown: the MATLAB recorded in profile $1's PID
       ct=$(sysq created "$op")
       if [ -z "$ct" ]; then s=unknown; elif isnum "$ct" && [ "$ct" -lt "$START_T" ]; then s=alive; fi
     fi
-  elif [ "$c" != none ] && [[ ${c,,} == *matlab* ]]; then s=alive
-  else s=$(ml_child "$op")   # gone, or another program under that PID: alive while a matlab child of it lives
+  elif [ "$c" != none ] && ml_cmd "$c"; then s=alive
+  else s=$(ml_child "$op")   # gone, or another program under that PID: alive while a MATLAB.exe child of it lives
   fi
   if [ "$s" != alive ] && [ -n "$w64" ]; then   # the launcher's win64\MATLAB.exe, which can outlive it
     case $(sysq state "$w64") in
@@ -615,7 +626,7 @@ ml_guard() {   # a takeover MATLAB recorded for the worktree, still alive or unk
       gone) break;;
       alive) known "ml_$g"
              if [ "$EPOCHSECONDS" -lt "$end" ]; then sleep "$STEP"; hb; continue; fi
-             alert "ml_alive_$g" "A takeover MATLAB in $(wt "$g") is still alive ($pf: $(tr '\n' ' ' < "$pf" 2>/dev/null)), or a live matlab child of a PID in it; no new MATLAB starts there until all of them have exited."
+             alert "ml_alive_$g" "A takeover MATLAB in $(wt "$g") is still alive ($pf: $(tr '\n' ' ' < "$pf" 2>/dev/null)), or a live MATLAB.exe child of a PID in it; no new MATLAB starts there until all of them have exited. Leftover MATLABWebUI.exe or MATLABWindow.exe children do not count."
              nap "$POLL";;
       *) unknown_wait "ml_$g" "$g: the process query for the PIDs in $pf ($(tr '\n' ' ' < "$pf" 2>/dev/null)) failed; no MATLAB starts there until it reads";;
     esac
@@ -627,7 +638,7 @@ ml_pid_try() {   # PID file $2 names MATLAB (ML_WP) once subshell $1 shows it (e
   local wp c
   { read -r wp < "/proc/$1/winpid"; } 2>/dev/null && isnum "$wp" || return 1
   c=$(sysq cmdline "$wp")
-  [ -n "$c" ] && [ "$c" != none ] && [[ ${c,,} == *matlab* ]] || return 1
+  [ -n "$c" ] && [ "$c" != none ] && ml_cmd "$c" || return 1
   printf '%s\n' "$wp" > "$2"; ML_WP=$wp
 }
 ml_w64_try() {   # PID file $1 also names launcher ML_WP's win64\MATLAB.exe child once it shows; status 1 before
@@ -640,7 +651,7 @@ ml_w64_try() {   # PID file $1 also names launcher ML_WP's win64\MATLAB.exe chil
   return 1
 }
 run_ml() {   # profile $1, command $2, further MATLAB options after them
-  local g=$1 cmd=$2 w mp wp rc t0 t64=0 pend=1 p64=1 next=0 next64=0 pf="$R/takeover_ml_$1.pid"
+  local g=$1 cmd=$2 w mp wp lw="" x rc t0 t64=0 pend=1 p64=1 next=0 next64=0 pf="$R/takeover_ml_$1.pid"
   shift 2
   w=$(wt "$g")
   ml_guard "$g"
@@ -652,6 +663,7 @@ run_ml() {   # profile $1, command $2, further MATLAB options after them
   printf '%s\nmsys %s\n' "$wp" "$mp" > "$pf"   # the subshell until MATLAB shows
   t0=$EPOCHSECONDS
   while kill -0 "$mp" 2>/dev/null; do
+    [ "$pend" = 1 ] && { read -r x < "/proc/$mp/winpid"; } 2>/dev/null && isnum "$x" && lw=$x   # the last Windows PID seen
     if [ "$pend" = 1 ] && [ "$EPOCHSECONDS" -ge "$next" ]; then   # MATLAB's PID once the exec shows, also after the wait
       if ml_pid_try "$mp" "$pf"; then pend=0; t64=$EPOCHSECONDS
       elif [ $(( EPOCHSECONDS - t0 )) -ge "$ML_PID_WAIT_S" ]; then
@@ -668,6 +680,11 @@ run_ml() {   # profile $1, command $2, further MATLAB options after them
     if [ "$pend" = 1 ] && [ $(( EPOCHSECONDS - t0 )) -lt "$ML_PID_WAIT_S" ]; then sleep 1; else sleep "$STEP"; fi
   done
   wait "$mp"; rc=$?
+  x=""; { read -r x < "$pf"; } 2>/dev/null
+  if [ "$pend" = 1 ] && isnum "$lw" && [ "$lw" != "$x" ]; then   # the launcher exited before its PID was taken: its last Windows PID, alive while a MATLAB child of it lives
+    printf '%s\n' "$lw" > "$pf"; ML_WP=$lw; ml_w64_try "$pf"
+    say "$g: MATLAB exited before its PID was taken; $(basename "$pf") names its last Windows PID $lw"
+  fi
   ml_guard "$g" 60   # a win64\MATLAB.exe that outlives its launcher holds the worktree, and the caller, until it is gone
   return "$rc"
 }

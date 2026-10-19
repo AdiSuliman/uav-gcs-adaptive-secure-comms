@@ -7,7 +7,7 @@
 #
 #   bash d91_takeover_test.sh [sandbox dir] [scenario ...]
 # Scenarios: rename status normal p1crash rerun rerunver accept rerungate reboot oldlaunch p1gone
-# p1wait p1orphan orphan mainkill slowexec win64 zombie turn unknown unread nolog mlstub watchdog
+# p1wait p1orphan orphan mainkill slowexec win64 webui mlquery zombie turn unknown unread nolog mlstub watchdog
 # mainstall overwrite forcegate c1phold p2gate refuse (default: all). oldlaunch runs a copy of v7_d86_launch.sh (as old_launcher_copy.sh, so that no
 # process scan takes it for the launcher) in the sandbox, with its PowerShell queries replaced by a
 # function and every V7L_* variable in the sandbox.
@@ -15,7 +15,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 TK="$HERE/v7_d91_takeover.sh"
 SB=${1:-"/c/Users/ADISUL~1/AppData/Local/Temp/claude/C--Users-Adi-Suliman-uav-gcs-adaptive-secure-comms/0ff3360f-912b-4701-bfb0-77d6917b5fc3/scratchpad/d91_takeover_test"}
 shift 2>/dev/null
-SCEN=("$@"); [ "${#SCEN[@]}" -gt 0 ] || SCEN=(rename status normal p1crash rerun rerunver accept rerungate reboot oldlaunch p1gone p1wait p1orphan orphan mainkill slowexec win64 zombie turn unknown unread nolog mlstub watchdog mainstall overwrite forcegate c1phold p2gate refuse)
+SCEN=("$@"); [ "${#SCEN[@]}" -gt 0 ] || SCEN=(rename status normal p1crash rerun rerunver accept rerungate reboot oldlaunch p1gone p1wait p1orphan orphan mainkill slowexec win64 webui mlquery zombie turn unknown unread nolog mlstub watchdog mainstall overwrite forcegate c1phold p2gate refuse)
 OLD_SCRIPTS=(v7_d86_launch.sh v7_d87_p3fix.sh v7_d87_redo.sh v7_d87_resume.ps1 v7_d83_launch.sh v7_fix_resume.sh
              v7_d87_b3m.sh v7_wait_c1p_then_fix.sh v7_guard_c1p_fail.sh)
 LIVE_LOGS="/c/Users/Adi Suliman/uav-gcs-logs"
@@ -74,7 +74,7 @@ grep -q "'B3q', 'build_fresh_test3'" "$SB/source/run_stage.m" || { echo "run_sta
 setup() {   # fresh sandbox $SB/$1: logs, git repository with v7-dev and v7-p3 worktrees, origin, stubs
   CUR=$1; S="$SB/$1"; RD="$S/logs/v7_d86"
   echo "== $1"
-  rm -rf "$S"; mkdir -p "$RD" "$S/temp" "$S/sys/procs" "$S/sys/created" "$S/sys/children" "$S/sys/state" "$S/ctl"
+  rm -rf "$S"; mkdir -p "$RD" "$S/temp" "$S/sys/procs" "$S/sys/created" "$S/sys/children" "$S/sys/kids" "$S/sys/state" "$S/ctl"
   cp -p "$SB/source/p1.log" "$SB/source/p3.log" "$SB/source/code_commit.txt" "$RD/"
   for f in "${OLD_SCRIPTS[@]}"; do echo "# stand-in of the old run script $f" > "$S/logs/$f"; done
   echo $(( $(date +%s) - 86400 )) > "$S/sys/boot"; echo 5 > "$S/sys/cpu"; echo 70 > "$S/sys/headroom"; : > "$S/sys/matlab"
@@ -883,6 +883,85 @@ t_mlstub() {   # a recorded subshell whose stub is gone while its MATLAB child l
   until_t 30 test ! -f "$RD/takeover_ml_p3.pid"
   check "the win64 child exited: gone, the PID file removed" test ! -f "$RD/takeover_ml_p3.pid"
   tk_kill
+
+  setup mlstub4 || return   # 'win64 <pid>' exited (its process object lingers) with live helper children, as the zombie 32824
+  printf '%s\nwin64 %s\n' 61140 61141 > "$RD/takeover_ml_p3.pid"
+  echo none > "$S/sys/procs/61140"; echo exited > "$S/sys/state/61141"; mkdir -p "$S/sys/kids"
+  printf '%s\n' "61142 MATLABWebUI.exe live" "61143 MATLABWindow.exe live" "61144 MathWorksServiceHost.exe live" "61145 MATLAB.exe live" > "$S/sys/kids/61141"
+  tk_start
+  until_t 120 alerted ml_alive_p3; check "the exited win64 with a live MATLAB.exe child (a pool worker) beside its helpers: alive" alerted ml_alive_p3
+  sleep 2
+  check "its PID file kept, nothing started in p3" bash -c "[ -f '$RD/takeover_ml_p3.pid' ] && ! grep -q 'uav-gcs-v7-p3 call' '$S/ctl/calls.log'"
+  sed -i 's/^61145 MATLAB.exe live$/61145 MATLAB.exe exited/' "$S/sys/kids/61141"   # the worker gone; MATLABWebUI.exe, MATLABWindow.exe live on
+  until_t 30 test ! -f "$RD/takeover_ml_p3.pid"
+  check "only MATLABWebUI.exe, MATLABWindow.exe and MathWorksServiceHost.exe left: gone, the PID file removed" test ! -f "$RD/takeover_ml_p3.pid"
+  D=0.05 p1_fake   # profile 1 past SURV3: p3's C1p may start
+  until_t 60 grep -q 'uav-gcs-v7-p3 start C1p' "$S/ctl/calls.log"
+  check "the next MATLAB starts in p3" grep -q 'uav-gcs-v7-p3 start C1p' "$S/ctl/calls.log"
+  until_t 30 test -f "$S/ctl/p1_end_at"
+  tk_kill
+}
+
+t_webui() {   # an exited win64 MATLAB whose MATLABWebUI.exe / MATLABWindow.exe children live on frees its worktree; a launcher gone before its PID was taken
+  setup webui || return
+  local pf="$RD/takeover_ml_p3.pid" n cm cw lp
+  touch "$S/ctl/win64" "$S/ctl/webui"   # every MATLAB: launcher and win64 child, which leaves a lingering object with live helpers
+  tk_start; D=0.05 p1_fake
+  tk_wait 300 || bad "takeover did not end in time"
+  n=$(grep -l 'MATLABWebUI.exe live' "$S/sys/kids/"* 2>/dev/null | wc -l)
+  check "every win64 MATLAB left an exited process object with live MATLABWebUI.exe and MATLABWindow.exe children ($n)" bash -c "[ $n -ge 3 ] && [ \$(grep -lx exited '$S/sys/state/'* 2>/dev/null | wc -l) -ge $n ]"
+  check "no ml_alive alert: those children hold no worktree" bash -c "! ls '$RD'/ALERT_ml_alive_* >/dev/null 2>&1"
+  check "p3's C1p part ends with its end marker" bash -c "sed -n '/takeover SRC [0-9a-f]* FROM 13 C1p/,\$p' '$RD/p3.log' | grep -q '^##### chain ended rc=0'"
+  check "no PID file left" bash -c "! ls '$RD'/takeover_ml_*.pid >/dev/null 2>&1"
+  check "v7 done" has "$S/takeover.log" 'v7 done'
+  for g in p1 p3 p2; do check "$g: final part LAT..RPT and the bundle" final_ok "$g"; done
+  check "no two MATLAB in one worktree" bash -c "! grep -q CONCURRENT '$S/ctl/calls.log'"
+
+  setup mlquit || return   # p3's launcher exits after 3 s, its exec still unseen (exec_delay 6 s): its win64 child runs on
+  pf="$RD/takeover_ml_p3.pid"
+  touch "$S/ctl/win64_uav-gcs-v7-p3" "$S/ctl/hold_uav-gcs-v7-p3_C1p"; echo 3 > "$S/ctl/win64_quit_uav-gcs-v7-p3"; echo 6 > "$S/sys/exec_delay"
+  tk_start; D=0.05 p1_fake
+  until_t 60 grep -q 'uav-gcs-v7-p3 start C1p' "$S/ctl/calls.log"
+  until_t 40 grep -q 'p3: MATLAB exited before its PID was taken' "$S/takeover.log"
+  read -r cm cw < "$S/ctl/win64_pid_uav-gcs-v7-p3"; lp=$(cat "$S/ctl/ppid_$cw" 2>/dev/null)
+  check "the launcher gone before its PID was taken: the PID file names its last Windows PID, then its win64 child" bash -c "[ -n '$lp' ] && [ \"\$(head -1 '$pf')\" = '$lp' ] && [ \"\$(sed -n 2p '$pf')\" = 'win64 $cw' ]"
+  until_t 120 alerted ml_alive_p3
+  check "the child runs on: the takeover holds the worktree (alert, PID file kept, no end marker)" bash -c "kill -0 '$cm' && ls '$RD'/ALERT_ml_alive_p3*.txt >/dev/null 2>&1 && [ -f '$pf' ] && [ \$(sed -n '/takeover SRC [0-9a-f]* FROM 13 C1p/,\$p' '$RD/p3.log' | grep -c 'chain ended') = 0 ]"
+  rm -f "$S/ctl/hold_uav-gcs-v7-p3_C1p"
+  until_t 60 bash -c "sed -n '/takeover SRC [0-9a-f]* FROM 13 C1p/,\$p' '$RD/p3.log' | grep -q 'chain ended'"
+  check "the end marker once the child has finished" bash -c "! kill -0 '$cm' 2>/dev/null && sed -n '/takeover SRC [0-9a-f]* FROM 13 C1p/,\$p' '$RD/p3.log' | grep -q 'chain ended'"
+  check "no two MATLAB in one worktree" bash -c "! grep -q CONCURRENT '$S/ctl/calls.log'"
+  tk_kill
+}
+
+t_mlquery() {   # the real PowerShell queries: live MATLABWebUI.exe / MATLABWindow.exe children (copies of sleep.exe in the sandbox) are no MATLAB
+  setup mlquery || return
+  local lib="$S/tk_lib.sh" fd="$S/fake/bin/win64" out
+  head -n -1 "$TK" > "$lib"
+  mkdir -p "$fd"; cp /usr/bin/sleep.exe "$fd/MATLABWebUI.exe"; cp /usr/bin/sleep.exe "$fd/MATLABWindow.exe"
+  out=$(V7T_LIB="$lib" FD="$fd" V7T_SYS= bash -c '
+    source "$V7T_LIB"; BOOT=0; START_T=$EPOCHSECONDS
+    "$FD/MATLABWebUI.exe" 90 & a=$!; "$FD/MATLABWindow.exe" 90 & b=$!
+    sleep 2
+    read -r wa < /proc/$a/winpid; read -r wb < /proc/$b/winpid
+    pp=$(powershell.exe -NoProfile -Command "(Get-CimInstance Win32_Process -Filter \"ProcessId=$wa\").ParentProcessId" | tr -dc 0-9)
+    pb=$(powershell.exe -NoProfile -Command "(Get-CimInstance Win32_Process -Filter \"ProcessId=$wb\").ParentProcessId" | tr -dc 0-9)
+    echo "parents: $pp $pb"
+    echo "mlchild: $(sysq mlchild "$pp") $(sysq mlchild "$pb")"
+    echo "state: $(sysq state "$wa") $(sysq state "$wb")"
+    c=$(sysq cmdline "$wa"); if ml_cmd "$c"; then echo "cmd: matlab"; else echo "cmd: other"; fi
+    printf "%s\nwin64 %s\n" "$pp" "$wa" > "$R/takeover_ml_p3.pid"; echo "pf parent+win64: $(ml_state p3)"
+    printf "%s\n" "$wa" > "$R/takeover_ml_p3.pid"; echo "pf reused by MATLABWebUI.exe: $(ml_state p3)"
+    printf "%s\n" "$pp" > "$R/takeover_ml_p3.pid"; echo "pf parent alone: $(ml_state p3)"
+    kill $a $b 2>/dev/null; wait' 2>&1)
+  echo "$out" | sed 's/^/     | /'
+  check "their parents found" grep -q '^parents: [0-9][0-9]* [0-9][0-9]*$' <<< "$out"
+  check "mlchild of each parent: none (the helpers do not count)" grep -qx 'mlchild: none none' <<< "$out"
+  check "state: other, not a live win64 MATLAB (path bin\\win64\\MATLABWebUI.exe)" grep -qx 'state: other other' <<< "$out"
+  check "its command line is no MATLAB" grep -qx 'cmd: other' <<< "$out"
+  check "a PID file of the parent and 'win64 <MATLABWebUI.exe>': gone" grep -qx 'pf parent+win64: gone' <<< "$out"
+  check "a PID file whose PID a MATLABWebUI.exe now holds: gone" grep -qx 'pf reused by MATLABWebUI.exe: gone' <<< "$out"
+  check "a PID file of the parent alone: gone" grep -qx 'pf parent alone: gone' <<< "$out"
 }
 
 t_win64() {   # a bin\matlab.exe launcher and its win64\MATLAB.exe child: the launcher ended alone, the child runs on: no second MATLAB
@@ -931,7 +1010,11 @@ p1orphan_cut() {   # the launcher 44984 ended alone: the chain writes rc=1 and i
   echo "##### chain ended rc=1 $(date) #####" >> "$RD/p1.log"
   rm -f "$S/sys/procs/43428" "$S/sys/procs/43972"; : > "$S/sys/scripts"
 }
-p1orphan_end() { rm -f "$S/sys/children/44984"; echo exited > "$S/sys/state/42560"; }   # 42560 exited (its process object may linger)
+p1orphan_end() {   # 42560 exited, its process object lingering with live MATLABWebUI.exe and MATLABWindow.exe children (as the zombie 32824)
+  rm -f "$S/sys/children/44984"; echo exited > "$S/sys/state/42560"; mkdir -p "$S/sys/kids"
+  printf '%s\n' "42561 MATLABWebUI.exe live" "42562 MATLABWindow.exe live" "42563 MathWorksServiceHost.exe live" "42564 MATLAB.exe exited" > "$S/sys/kids/42560"
+  printf '%s\n' "42560 MATLAB.exe exited" > "$S/sys/kids/44984"
+}
 t_p1orphan() {   # profile 1's launcher ended alone: its chain ends, its win64 MATLAB runs on: no resume, rerun or forced C1p beside it
   setup p1orphan || return
   local t a b f="$RD/takeover_p1_chain_ml.txt"

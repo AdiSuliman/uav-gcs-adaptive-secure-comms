@@ -4,12 +4,16 @@
 #   matlab                           MATLAB processes, one "pid|exited 0/1|command line" per line
 #   scripts                          bash processes of the old scripts, one "pid|created|command line" per line
 #   scripts_once                     more such lines, listed by one scan only (a short-lived fork)
-#   procs/<pid>                      command line of a process (else: a live stub MATLAB of the tests,
-#                                    or a live process of this sandbox, by Windows PID; else 'none')
+#   procs/<pid>                      command line of a process (else: a live process of this sandbox, by
+#                                    Windows PID, a stub MATLAB under the path of bin\matlab.exe, or of
+#                                    bin\win64\MATLAB.exe for a --win64 child; else 'none')
 #   created/<pid>                    creation time of a procs/<pid> process
-#   children/<pid>                   MATLAB children of a process (else: live sandbox processes whose
-#                                    $STUB_CTL/ppid_<Windows PID> names it, as Windows keeps ParentProcessId
-#                                    after the parent exits, plus a live stub MATLAB itself; else 'none')
+#   children/<pid>                   MATLAB children of a process as the query gives them (else: live sandbox
+#                                    processes whose $STUB_CTL/ppid_<Windows PID> names it, as Windows keeps
+#                                    ParentProcessId after the parent exits, a live stub MATLAB itself, and
+#                                    the kids/<pid> lines the query keeps; else 'none')
+#   kids/<pid>                       other children of a process, one "<pid> <name> live|exited" per line;
+#                                    as in the real query, only a live one named MATLAB.exe counts
 #   state/<pid>                      live, exited or other (else: live for a stub win64 child of this
 #                                    sandbox, other for another process of it; else none)
 #   exec_delay                       seconds after its start during which a stub MATLAB still shows the
@@ -40,6 +44,8 @@ case $1 in
       t=$(started "$2")
       if is_stub_ml "$p" && [ -f "$D/exec_delay" ] && [ -n "$t" ] && [ $(( $(date +%s) - t )) -lt "$(cat "$D/exec_delay")" ]; then
         echo '"C:\Program Files\Git\usr\bin\bash.exe" "/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_takeover.sh" 24172 49732'
+      elif is_w64 "$p"; then echo "\"C:\\Program Files\\MATLAB\\R2026a\\bin\\win64\\MATLAB.exe\" $(tr '\0' ' ' < "$p/cmdline")"
+      elif is_stub_ml "$p"; then echo "\"C:\\Program Files\\MATLAB\\R2026a\\bin\\matlab.exe\" $(tr '\0' ' ' < "$p/cmdline")"
       else
         tr '\0' ' ' < "$p/cmdline"
       fi
@@ -59,6 +65,9 @@ case $1 in
         k=${f##*/ppid_}; proc_of "$k" > /dev/null && out+=("$k")
       done
       p=$(proc_of "$2") && is_stub_ml "$p" && out+=("$2")
+      if [ -f "$D/kids/$2" ]; then
+        while read -r k n st; do [ "${n,,}" = matlab.exe ] && [ "$st" = live ] && out+=("$k"); done < "$D/kids/$2"
+      fi
       if [ "${#out[@]}" -gt 0 ]; then printf '%s\n' "${out[@]}"; else echo none; fi
     fi;;
   state)
