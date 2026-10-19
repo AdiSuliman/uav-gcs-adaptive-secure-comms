@@ -4021,7 +4021,7 @@ fid = fopen('kpi1_set.m', 'w'); fprintf(fid, 'function s = kpi1_set()\ns = ''fre
 rehash; shadow2 = onCleanup(@() remove_shadow(fullfile(d, 'kpi1_set.m')));
 verifyEqual(tc, kpi1_set(), 'fresh2');
 verifyEqual(tc, kpi1_file('eval_detector_metrics'), 'results/eval_detector_metrics_fresh2.mat');
-verifyError(tc, @() run_det_test('fresh3'), 'eval_detector:kpi1_set');
+verifyError(tc, @() det_read_run('fresh3'), 'eval_detector:kpi1_set');
 mk = 'results/fresh3_read_started.txt';
 verifyFalse(tc, isfile(mk));
 clear shadow2
@@ -4049,7 +4049,7 @@ rehash; shadow = onCleanup(@() remove_shadow(fullfile(d, 'kpi1_set.m')));
 verifyEqual(tc, kpi1_set(), 'fresh3');
 verifyEqual(tc, kpi1_file('eval_detector_metrics'), 'results/eval_detector_metrics_fresh3.mat');
 verifyEqual(tc, kpi1_file('detector_predictions'), 'results/detector_predictions_fresh3.mat');
-verifyError(tc, @() run_det_test('fresh3'), 'eval_detector:fresh3_read');
+verifyError(tc, @() det_read_run('fresh3'), 'eval_detector:fresh3_read');
 verifyFalse(tc, isfile(mk));
 % The start marker: its call after every check and before both data loads, a line in the log
 % right after it; no outcome printed before the fusion and the latch have run; the predictions
@@ -4170,14 +4170,14 @@ verifyNotEmpty(tc, strfind(txt, ['data/trained_detector.mat sha256 ' sha256_of('
 verifyNotEmpty(tc, strfind(txt, ['trained_at ' datestr(trained_at, 'yyyy-mm-dd HH:MM:SS')]));
 verifyNotEmpty(tc, strfind(txt, ['data/fusion.mat sha256 ' sha256_of('data/fusion.mat') ' mtime ' ...
     datestr(dir('data/fusion.mat').datenum, 'yyyy-mm-dd HH:MM:SS')]));
-verifyError(tc, @() run_det_test('fresh3'), 'eval_detector:fresh3_started');
+verifyError(tc, @() det_read_run('fresh3'), 'eval_detector:fresh3_started');
 delete('data/splits_fresh3.mat');
-verifyError(tc, @() run_det_test('fresh3'), 'eval_detector:fresh3');
+verifyError(tc, @() det_read_run('fresh3'), 'eval_detector:fresh3');
 clear shadow
 verifyEqual(tc, kpi1_set(), 'fresh3');
 end
 
-function run_det_test(DET_TEST) %#ok<INUSD>
+function det_read_run(DET_TEST) %#ok<INUSD>
 % eval_detector with DET_TEST set, as run_stage.m runs it.
 evalc('run(''eval_detector'')');
 end
