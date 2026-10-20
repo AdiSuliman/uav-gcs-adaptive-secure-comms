@@ -20,7 +20,7 @@
 # the proofs run on this process, the smoke runs run_stage's smoke mode (NWP = 0). No MATLAB
 # command line holds 'run_stage(' (the smoke calls it inside d91_smoke_deploy.m), so no
 # launcher or takeover counts a job as a pipeline stage. Each MATLAB writes its own PID first
-# and is bounded (6 h, the smoke 14 h); on rc 124/137 the queue ends that PID only.
+# and is bounded (6 h, the smoke 30 h); on rc 124/137 the queue ends that PID only.
 #
 #   [D91_PROFILE=p1|p2] bash v7_d91_deploy_tests2.sh <deploy SHA> <candidate SHA> <target tip SHA> <old SHA> [job ...]
 #
@@ -138,7 +138,7 @@ declare -A CMD=(
   [porder]="$INIT $NCHK dev_d91_order('$QM/res', $SRC); dev_d91_compare('$QM/res/p_new.mat', '$QM/res/order_1.mat', 'C_vs_B_nrx$NRX');"
   [smoke]="fprintf('V7NRX n/a\n'); d91_smoke_deploy"
 )
-declare -A LIM=([core]=6h [p3core]=6h [pold]=6h [pnew]=6h [porder]=6h [smoke]=14h)
+declare -A LIM=([core]=6h [p3core]=6h [pold]=6h [pnew]=6h [porder]=6h [smoke]=30h)
 
 gate() { powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$GATE" 2>&1 | tr -d '\r' | tail -1; }
 

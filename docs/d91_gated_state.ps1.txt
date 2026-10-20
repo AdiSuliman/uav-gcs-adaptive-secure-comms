@@ -1,7 +1,9 @@
 # State of a live worktree for v7_d91_gated_run.sh: one line, "FREE free=<GB>" when no recorded or
 # command-line MATLAB of the worktree is alive, "BUSY free=<GB> <why>" otherwise, "UNKNOWN <why>"
-# when a query fails. Reads only: env D91_PIDS (Windows PIDs the takeover recorded for the
-# worktree, space separated) and D91_WT (the worktree's Windows path). Writes nothing.
+# when a query fails. A recorded PID that is a live takeover bash (its command line names
+# v7_d91_takeover) counts as busy: the takeover claims its PID file that way before its last
+# hand-run check, then forks MATLAB from it. Reads only: env D91_PIDS (Windows PIDs the takeover
+# recorded for the worktree, space separated) and D91_WT (the worktree's Windows path). Writes nothing.
 try {
     $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
     $free = [math]::Round($os.FreeVirtualMemory / 1MB, 1)
@@ -14,6 +16,10 @@ try {
             else {
                 $k = @($ml | Where-Object { $_.ParentProcessId -eq [int]$p })
                 if ($k.Count) { $why += "recorded PID $p has MATLAB child $($k[0].ProcessId)" }
+                else {
+                    $c = @(Get-CimInstance Win32_Process -Filter "ProcessId=$p" -ErrorAction Stop)
+                    if ($c.Count -and "$($c[0].CommandLine)" -like '*v7_d91_takeover*') { $why += "recorded PID $p is a takeover bash about to start MATLAB" }
+                }
             }
         }
     }

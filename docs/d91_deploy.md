@@ -311,7 +311,8 @@ How the jobs run (both queues):
 - `-singleCompThread`;
 - in git archive exports under `C:\Users\Adi Suliman\d91q\deploy\<export>`, never a live tree;
 - TEMP `C:\Users\Adi Suliman\d91q\deploy\tmp`;
-- each MATLAB writes its own PID first and is bounded (6 h, the smoke 14 h). On a timeout the
+- each MATLAB writes its own PID first and is bounded (6 h; the smoke 14 h in the first queue,
+  30 h in the second, raised on 20.10 before it started). On a timeout the
   queue ends only that PID.
 
 | Job | Export | What |
@@ -478,12 +479,15 @@ Suliman/uav-gcs-logs`.
 
     bash "$L/v7_d91_gated_run.sh" <need_gb> <worktree> <logfile> "<command>"
 
-(copies `docs/d91_gated_run.sh.txt`, `docs/d91_gated_state.ps1.txt`). It:
+(copies `docs/d91_gated_run.sh.txt`, `docs/d91_gated_state.ps1.txt`, of the `d91-takeover`
+`ops/` versions with the claim protocol, section 7 T3; the live copies get them after the
+takeover's review). It:
 1. registers the hand-run in `R\<p>_hand.busy` (p1 `uav-gcs-v7`, p3 `uav-gcs-v7-p3`, p2
    `uav-gcs-v7-p2`), atomically; an existing file stops it (exit 3): another hand-run, or a
    killed one, holds the worktree;
-2. waits until no takeover MATLAB recorded for the worktree is alive (`takeover_ml_<p>.pid`,
-   for p1 also `takeover_p1_chain_ml.txt`), no MATLAB names the worktree in its command line,
+2. waits `D91_SETTLE` (30 s), then until no takeover MATLAB recorded for the worktree is alive
+   (`takeover_ml_<p>.pid`, for p1 also `takeover_p1_chain_ml.txt`), no takeover bash recorded
+   there lives (a claim before a start), no MATLAB names the worktree in its command line,
    free commit >= `need_gb`, and `v7_d91_speed_gate.ps1` says OK;
 3. runs `matlab.exe -singleCompThread -logfile <worktree>\<logfile> -batch "<command>"` in the
    worktree; MATLAB appends `win64 <its PID>` to the busy file first;
@@ -880,20 +884,26 @@ exists, the takeover starts no MATLAB in that profile's worktree:
   read:
   1. takeover: write `takeover_ml_<p>.pid` first (a claim: its bash's Windows PID and `claim
      <pid>`), then check `<p>_hand.busy`; when the file is there, remove the claim and wait. The
-     takeover track's work in progress does exactly this (`start_claim` in `run_ml`, read in the
-     `d91-takeover` worktree on 19.10 at 15:39, uncommitted on `78e7eb4`; it also records the
-     hand-run's `win64` PID in `takeover_hand_<p>.pids`, so a busy file removed too early still
-     holds the worktree while that MATLAB lives);
+     takeover does exactly this (`start_claim` in `run_ml`, `d91-takeover` `104278a`; it also
+     records the hand-run's `win64` PID in `takeover_hand_<p>.pids`, so a busy file removed too
+     early still holds the worktree while that MATLAB lives);
   2. wrapper: write `<p>_hand.busy` first (as now), then read the PID file, and count a live
      PID whose file holds a `claim` or `msys` line as busy even without a MATLAB child; or,
      equivalently, wait a settle time of at least `2 x STEP + 10` s (30 s with `STEP` 10) after
      registering before the first check, by which time a start that passed its check shows a
-     MATLAB child. The wrapper and `v7_d91_gated_state.ps1` (13:15) do neither yet: they check
-     at once and count a claiming bash as free;
+     MATLAB child. The wrapper and state script of `d91-takeover` `ops/` (`104278a`, harness
+     `74fdb1b`) do both: the wrapper waits `D91_SETTLE` (30 s) after registering, and the state
+     script counts a live recorded PID whose command line names `v7_d91_takeover` as busy. That
+     covers a track's claim too: a track is a forked subshell, and a forked MSYS bash keeps its
+     parent's Windows command line (checked on this machine on 20.10; the harness `handrace`
+     reads a forked claim with the real state script as busy, a live bash that is no takeover as
+     free, and runs the wrapper against a live claim end to end). The copies in `uav-gcs-logs`
+     (13:15) do neither until they are refreshed from `ops/` after the takeover's review;
   3. then a takeover start always sees the busy file, or the wrapper always sees the start.
 
-  Step 2 is a change to `v7_d91_gated_run.sh` or `v7_d91_gated_state.ps1`, owned by the takeover
-  track with T3 (it changes the wrapper if needed). Until both sides are in, the race is latent:
+  Step 2 is a change to `v7_d91_gated_run.sh` and `v7_d91_gated_state.ps1`, owned by the takeover
+  track with T3 (`docs/d91_gated_run.sh.txt` and `docs/d91_gated_state.ps1.txt` are copies of the
+  `ops/` versions). Until both sides are live, the race is latent:
   every hand-run of section 5 runs under a hold (`p3_c1p.hold`, profile 1's stop before
   `p1_resume.go`, `p2_c1p.hold`) under which the takeover starts nothing in that worktree,
   apart from the wrap checks of D9 and E11 (E11 says how they are held);

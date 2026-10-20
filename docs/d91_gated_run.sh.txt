@@ -14,12 +14,14 @@
 # 1. Registers the hand-run before anything else: creates v7_d86/<p>_hand.busy atomically
 #    (noclobber). If the file exists, another hand-run holds the worktree (or one was killed and
 #    left it): the wrapper prints it and stops (exit 3); check by hand, then remove it.
-#    The takeover honours the file before any MATLAB start in that worktree (docs/d91_deploy.md
-#    section 7); until the takeover has that feature, the procedures' holds stand in for it.
-# 2. Waits, checking every D91_POLL s (default 600), until all of these hold:
+#    The takeover (v7_d91_takeover.sh) starts no MATLAB in that worktree while the file exists.
+#    Before each start it claims its PID file (its own bash's PID) and only then reads this file,
+#    so a takeover start that missed the registration is in its PID file by then.
+# 2. Waits D91_SETTLE s (default 30: one takeover STEP and a margin), then, checking every D91_POLL s
+#    (default 600), until all of these hold:
 #    - no takeover MATLAB recorded for the worktree is alive (v7_d86/takeover_ml_<p>.pid: its
-#      first line and its 'win64 <pid>' line; for p1 also takeover_p1_chain_ml.txt), and no
-#      process recorded there has a live MATLAB child;
+#      first line and its 'win64 <pid>' line; for p1 also takeover_p1_chain_ml.txt), no process
+#      recorded there has a live MATLAB child, and none is a live takeover bash (its claim);
 #    - no MATLAB.exe has the worktree's path in its command line (another hand-run's -logfile);
 #    - free commit >= need_gb;
 #    - then v7_d91_speed_gate.ps1 says OK (>= 35 GB, at most one other non-pipeline MATLAB, no
@@ -45,6 +47,7 @@ MATLAB=${V7G_MATLAB:-"/c/Program Files/MATLAB/R2026a/bin/matlab.exe"}
 GATE=${V7G_GATE:-'C:\Users\Adi Suliman\uav-gcs-logs\v7_d91_speed_gate.ps1'}
 STATE_PS=${V7G_STATE:-'C:\Users\Adi Suliman\uav-gcs-logs\v7_d91_gated_state.ps1'}
 POLL=${D91_POLL:-600}
+SETTLE=${D91_SETTLE:-30}
 EV="$L/v7_d91_gated_run.log"
 
 say() { local m; m="$(date '+%Y-%m-%d %H:%M:%S') gated_run[$$] $*"; echo "$m"; echo "$m" >> "$EV" 2>/dev/null; }
@@ -104,6 +107,7 @@ state() {   # FREE free=<gb>, BUSY free=<gb> <why>, or UNKNOWN <why> (v7_d91_gat
 }
 gate() { MSYS2_ARG_CONV_EXCL='*' powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$GATE" 2>&1 | tr -d '\r' | tail -1; }
 
+sleep "$SETTLE" & wait $!   # a takeover start that read no busy file just before the registration shows in its PID file by now
 last=""
 while :; do
   s=$(state)
