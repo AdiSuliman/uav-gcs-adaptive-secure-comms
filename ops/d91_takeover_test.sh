@@ -1491,6 +1491,7 @@ gated_state_stub() {   # stand-in of v7_d91_gated_state.ps1 on the stub queries,
   printf "& '%s' '%s'\n" "$(cygpath -w /usr/bin/bash)" "$ss" > "$S/state_stub.ps1"
   cygpath -w "$S/state_stub.ps1"
 }
+rs_state() { D91_PIDS=$1 D91_WT="$(cygpath -w "$S/uav-gcs-v7-p3")" MSYS2_ARG_CONV_EXCL='*' powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$RS" | tr -d '\r' | tail -1; }   # the real v7_d91_gated_state.ps1 (read only) on PIDs $1 for the sandbox's p3 worktree
 t_handrace() {   # T3 with the gate wrapper itself (ops copy, with a stub gate, MATLAB and state); the claim against the real state script
   setup handrace || return
   local gs="$S/gate_ok.ps1" hp t a b lib="$S/tk_lib.sh" out wpid RS
@@ -1502,7 +1503,7 @@ t_handrace() {   # T3 with the gate wrapper itself (ops copy, with a stub gate, 
   tk_start; HOLD_AT=SURV3 D=0.2 p1_fake
   until_t 60 grep -q "p3: C1p waits for p1's SURV3" "$S/takeover.log"
   bash "$HERE/v7_d91_gated_run.sh" 1 uav-gcs-v7-p3 logs/hand1.txt "disp(1)" > "$S/hand1.out" 2>&1 & hp=$!
-  until_t 120 grep -q '^win64 [0-9]' "$RD/p3_hand.busy"
+  until_t 120 grep -qs '^win64 [0-9]' "$RD/p3_hand.busy"
   check "the wrapper registered, waited its settle time and started its MATLAB (win64 line in p3_hand.busy)" bash -c "grep -q '^cmd disp(1)\$' '$RD/p3_hand.busy' && grep -q 'uav-gcs-v7-p3 hand ' '$S/ctl/calls.log'"
   touch "$S/ctl/p1_release_SURV3"; until_t 40 test -f "$S/ctl/p1_surv3_at"
   until_t 60 grep -q 'p3: waits for a hand-run (p3_hand.busy: disp(1))' "$S/takeover.log"; sleep 3
@@ -1537,6 +1538,39 @@ t_handrace() {   # T3 with the gate wrapper itself (ops copy, with a stub gate, 
   check "no hand-run: the claim stays (this bash's PID, 'claim <pid>')" bash -c "grep -qx 'free: 0' <<< \"\$1\" && grep -q '^claim: claim [0-9]' <<< \"\$1\"" _ "$out"
   check "the wrapper's state reads a live claim as busy (a takeover bash about to start MATLAB)" grep -q '^state: BUSY .*is a takeover bash about to start MATLAB' <<< "$out"
   check "the claimer gone: free" bash -c "D91_PIDS='$wpid' D91_WT='$(cygpath -w "$S/uav-gcs-v7-p3")' MSYS2_ARG_CONV_EXCL='*' powershell.exe -NoProfile -ExecutionPolicy Bypass -File '$RS' | tr -d '\r' | tail -1 | grep -q '^FREE'"
+  # a track's claim: start_claim in a forked subshell of a bash whose command line names the takeover (as start_track forks)
+  local cp np
+  rm -f "$S/sys/claimer" "$S/sys/release" "$RD/takeover_ml_p3.pid"
+  V7T_LIB="$lib" bash -c '
+    source "$V7T_LIB"; BOOT=$(cat "$V7T_SYS_DIR/boot"); START_T=$EPOCHSECONDS
+    ( start_claim p3 && echo "$BASHPID" > "$V7T_SYS_DIR/claimer"; until [ -f "$V7T_SYS_DIR/release" ]; do sleep 0.2; done; : ) &
+    wait' v7_d91_takeover_claim > /dev/null 2>&1 &
+  until_t 30 test -s "$S/sys/claimer"
+  cp=$(cat "$S/sys/claimer" 2>/dev/null); wpid=$(head -1 "$RD/takeover_ml_p3.pid" 2>/dev/null)
+  check "a track's claim from a forked subshell: its own Windows PID and 'claim <its msys pid>'" bash -c "[ -n '$cp' ] && [ \"\$(cat /proc/$cp/winpid)\" = '$wpid' ] && grep -qx 'claim $cp' '$RD/takeover_ml_p3.pid'"
+  check "the real state script reads that forked claim as busy" grep -q "^BUSY .*$wpid is a takeover bash about to start MATLAB" <<< "$(rs_state "$wpid")"
+  bash -c 'sleep 60; :' & np=$!; a=""; until_t 10 test -r "/proc/$np/winpid"; read -r a < "/proc/$np/winpid"
+  check "negative control: a live bash that is no takeover and has no MATLAB child reads as free" grep -q '^FREE' <<< "$(rs_state "$a")"
+  kill "$np" 2>/dev/null
+  # the race end to end: the wrapper (ops copy) with the real state script and no settle time registers while that claim lives
+  V7G_STATE=$RS D91_SETTLE=0 bash "$HERE/v7_d91_gated_run.sh" 1 uav-gcs-v7-p3 logs/hand3.txt "disp(3)" > "$S/hand3.out" 2>&1 & hp=$!
+  until_t 90 grep -q 'waits: worktree busy' "$S/hand3.out"; sleep 3
+  check "a hand-run registered while a claim lives waits on it (worktree busy: the takeover bash), no MATLAB" bash -c "grep -q 'waits: worktree busy: .*$wpid is a takeover bash about to start MATLAB' '$S/hand3.out' && [ \$(grep -c 'uav-gcs-v7-p3 hand ' '$S/ctl/calls.log') = 2 ]"
+  touch "$S/sys/release"; until_t 30 bash -c "[ ! -e /proc/$cp ]"; t=$(date +%s%N)
+  until_t 120 bash -c "! kill -0 $hp 2>/dev/null"
+  b=$(grep ' uav-gcs-v7-p3 hand ' "$S/ctl/calls.log" | sed -n 3p | cut -d' ' -f1)
+  check "the claimer gone (its claim left behind, stale): the hand-run's MATLAB starts after it" lt "$t" "$b"
+  check "that hand-run ends rc 0 and removes its file" bash -c "grep -q 'done rc=0' '$S/hand3.out' && [ ! -e '$RD/p3_hand.busy' ]"
+  # the settle time: the wrapper's first state read comes D91_SETTLE s after its registration
+  printf '%s\n' '#!/usr/bin/env bash' "date +%s%N >> '$S/state_calls'" 'echo "FREE free=70"' > "$S/state_t.sh"
+  printf "& '%s' '%s'\n" "$(cygpath -w /usr/bin/bash)" "$S/state_t.sh" > "$S/state_t.ps1"
+  rm -f "$S/state_calls"
+  V7G_STATE=$(cygpath -w "$S/state_t.ps1") D91_SETTLE=4 bash "$HERE/v7_d91_gated_run.sh" 1 uav-gcs-v7-p3 logs/hand4.txt "disp(4)" > "$S/hand4.out" 2>&1 & hp=$!
+  until_t 10 test -e "$RD/p3_hand.busy"; t=$(date +%s%N)
+  until_t 120 bash -c "! kill -0 $hp 2>/dev/null"
+  a=$(head -1 "$S/state_calls" 2>/dev/null)
+  check "the wrapper's first state read comes after its settle time (4 s)" bash -c "[ -n '$a' ] && [ \$(( ($a - $t) / 1000000 )) -ge 3500 ] && grep -q 'done rc=0' '$S/hand4.out'"
+  rm -f "$RD/takeover_ml_p3.pid"
   unset V7G_LOGS V7G_ROOT V7G_MATLAB V7G_GATE V7G_STATE D91_POLL D91_SETTLE
 }
 
