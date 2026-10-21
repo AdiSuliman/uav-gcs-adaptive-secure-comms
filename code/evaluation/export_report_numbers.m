@@ -44,6 +44,7 @@ for f = {'detector', 'results/eval_detector_metrics.mat'; 'detector_third', 'res
     N.(f{1}) = M;
 end
 N.architectures = take('results/architecture_comparison.mat', 'arch');   % B3a: its set, fusion and in-sample label
+N.core_cnn = take('results/core_cnn.mat', 'core');                 % B3c: the three-state CNN's reading of the fourth test set
 
 if isfile('results/ood_detection.mat')
     O = load('results/ood_detection.mat', 'R', 'NEST', 'SC', 'sel', 'K_NEW');

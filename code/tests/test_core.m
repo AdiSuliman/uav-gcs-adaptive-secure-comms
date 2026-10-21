@@ -7361,6 +7361,20 @@ verifyNotEmpty(tc, strfind(k5, ['rule + escalation (deployed): onset->detection 
     '3/5 (never 0%), T_rec from onset 4/6 (never 17%)']));
 verifyNotEmpty(tc, strfind(k5, 'rule + escalation (deployed) 39286 ['));
 verifyEqual(tc, S.LECT.pol.payload_bps, 5e4);
+verifyNotEmpty(tc, strfind(k1, 'three-state CNN on spectrograms only (deliverable 2): PENDING -> train_core_cnn (B3c)'));
+mt = @(mf, rc, fa) struct('macro_f1', mf, 'recall', rc, 'fa', fa);
+core = struct('test_set', 'data/splits_fresh3.mat', 'N', 5, 'metrics', {{mt(0.9, [0.95 0.9 0.88], 0.05), ...
+    mt(0.93, [0.97 0.92 0.9], 0.03), mt(0.8, [0.9 0.8 0.7], 0.1)}}, 'boot', struct('macro_f1', [0.88 0.91; 0.92 0.94; 0.78 0.82]), ...
+    'verdicts', {{'', '', '', ''; 'met (committed)', 'met (committed)', 'met (not committed)', 'met (committed)'; '', '', '', ''}}); %#ok<NASGU>
+save('results/core_cnn.mat', 'core');
+evalc('measure_all_kpis');
+S = load('results/kpi_summary.mat', 'KPI', 'LECT'); K = S.KPI;
+k1 = strjoin(K([K.id] == 1).detail, newline);
+verifyNotEmpty(tc, strfind(k1, ['three-state CNN on spectrograms only (deliverable 2; data/splits_fresh3.mat, N = 5 cycles; ' ...
+    'results/core_cnn.txt): macro-F1 93.00% [92.00, 94.00] met (committed); recall narrowband 92.00% met (committed), ' ...
+    'wideband 90.00% met (not committed); false alarms 3.00% met (committed); the hybrid on the same frames: macro-F1 ' ...
+    '90.00%, false alarms 5.00%']));
+verifyEqual(tc, S.LECT.core.N, 5);
 end
 
 function test_lect_kpis_pending(tc)
@@ -8173,4 +8187,360 @@ function fixture_off(d, fn)
 if contains(path, d), rmpath(d); end
 clear(fn);
 if isfolder(d), rmdir(d, 's'); end
+end
+
+%% ---------- three-state spectrogram CNN (deliverable 2) ----------
+function test_core_cnn_frames(tc)
+% The three link states are the sub-runs of none, tone_jamming and jamming; a frame whose
+% frame-rule or per-cycle label is not its sub-run's class is left out and counted; clean
+% frames of another threat's sub-run are no state.
+classes = {'none', 'jamming', 'path_loss', 'tone_jamming'};
+cr = [1 1 2 2 4 4 3 3 1]';
+yf = [1 1 2 1 4 4 1 3 1]';
+yc = yf; yc(9) = 2;
+S = struct('class_run', cr, 'Y_frame', categorical(yf, 1:4, classes), 'Y', categorical(yc, 1:4, classes));
+[m, y, info] = core_cnn_frames(S, classes);
+verifyEqual(tc, m', logical([1 1 1 0 1 1 0 0 0]));
+verifyEqual(tc, y', [1 1 3 2 2]);
+verifyEqual(tc, info.n_sub, [3 2 2]);
+verifyEqual(tc, info.n_off, [1 0 1]);
+verifyEqual(tc, core_cnn_config().groups, {'none', 'tone_jamming', 'jamming'});
+verifyError(tc, @() core_cnn_frames(rmfield(S, 'class_run'), classes), 'core_cnn_frames:field');
+verifyError(tc, @() core_cnn_frames(S, classes, {'none', 'spoofing'}), 'core_cnn_frames:class');
+verifyError(tc, @() core_cnn_frames(S, classes([2 1 3 4])), 'core_cnn_frames:classes');
+end
+
+function test_core_cnn_logp_window(tc)
+% The temporal decision: the mean of log(max(p, 1e-6)) over the last N frames of the frame's
+% own sub-run in position order, shorter at the sub-run's start, never across sub-runs.
+P = [0.5 0.3 0.2; 0.1 0.8 0.1; 0.2 0.2 0.6; 0.7 0.2 0.1; 0.3 0.3 0.4];
+run = [1 1 1 2 2]'; pos = [3 1 2 5 4]';
+lp = log(P);
+[L, rk] = core_cnn_eval('logp', P, run, pos, 2);
+verifyEqual(tc, rk', [3 1 2 2 1]);
+verifyEqual(tc, L(2, :), lp(2, :), 'AbsTol', 1e-12);
+verifyEqual(tc, L(3, :), mean(lp([2 3], :)), 'AbsTol', 1e-12);
+verifyEqual(tc, L(1, :), mean(lp([3 1], :)), 'AbsTol', 1e-12);
+verifyEqual(tc, L(5, :), lp(5, :), 'AbsTol', 1e-12);
+verifyEqual(tc, L(4, :), mean(lp([5 4], :)), 'AbsTol', 1e-12);
+L9 = core_cnn_eval('logp', P, run, pos, 9);
+verifyEqual(tc, L9(1, :), mean(lp(1:3, :)), 'AbsTol', 1e-12);
+P(1, 1) = 0;
+L1 = core_cnn_eval('logp', P, run, pos, 1);
+verifyEqual(tc, L1(1, 1), log(1e-6), 'AbsTol', 1e-12);
+verifyEqual(tc, L1(2:end, :), log(P(2:end, :)), 'AbsTol', 1e-12);
+end
+
+function test_core_cnn_metrics(tc)
+% Three-state confusion with an 'other' column (another class is an error, never a hit),
+% recall, precision over the three states' columns, F1 and macro-F1 as three_state_view.m;
+% false alarms: clean frames read as anything else, and the part read as a jamming state.
+y  = [1 1 1 1 2 2 2 3 3 3]';
+yp = [1 1 2 0 2 2 3 3 3 1]';
+M = core_cnn_eval('metrics', y, yp, 3);
+verifyEqual(tc, M.cm, [2 1 0 1; 0 2 1 0; 1 0 2 0]);
+verifyEqual(tc, M.n, [4 3 3]);
+verifyEqual(tc, M.recall, [0.5 2/3 2/3], 'AbsTol', 1e-12);
+verifyEqual(tc, M.precision, [2/3 2/3 2/3], 'AbsTol', 1e-12);
+f1 = 2 * M.precision .* M.recall ./ (M.precision + M.recall);
+verifyEqual(tc, M.f1, f1, 'AbsTol', 1e-12);
+verifyEqual(tc, M.macro_f1, mean(f1), 'AbsTol', 1e-12);
+verifyEqual(tc, M.fa, 0.5, 'AbsTol', 1e-12);
+verifyEqual(tc, M.fa_jam, 0.25, 'AbsTol', 1e-12);
+V = three_state_view([2 1 0 1; 0 2 1 0; 1 0 2 0; 0 0 0 5], {'none', 'tone_jamming', 'jamming', 'spoofing'});
+verifyEqual(tc, V.cm, M.cm);
+verifyEqual(tc, V.macro_f1, M.macro_f1, 'AbsTol', 1e-12);
+M2 = core_cnn_eval('metrics', [1 1 2]', [1 3 2]', 3);           % a state without frames is left out of the mean
+verifyEqual(tc, M2.macro_f1, mean(M2.f1(1:2)), 'AbsTol', 1e-12);
+verifyEqual(tc, M2.f1(3), 0);
+verifyTrue(tc, isnan(core_cnn_eval('metrics', [2 3]', [2 3]', 3).fa));
+end
+
+function test_core_cnn_choose_window(tc)
+% The window N on validation: macro-F1 of the windowed decision on folds of whole sub-runs;
+% the shortest N within one standard error of the best. Every third frame leans to a wrong
+% state: N = 1 errs there, every window from 3 cycles reads all frames right.
+nr = 12; F = 10; P = zeros(nr * F, 3); y = zeros(nr * F, 1); run = y; pos = y;
+for r = 1:nr
+    s = mod(r - 1, 3) + 1; w = mod(s, 3) + 1; o = 6 - s - w;
+    for j = 1:F
+        i = (r - 1) * F + j; y(i) = s; run(i) = 100 + r; pos(i) = j;
+        if mod(j, 3) == 0, P(i, [s w o]) = [0.3 0.6 0.1]; else, P(i, [s w o]) = [0.5 0.25 0.25]; end
+    end
+end
+[N, T] = core_cnn_eval('choose', P, y, run, pos, [1 3 5 8 12], 5, 61);
+verifyEqual(tc, N, 3);
+verifyLessThan(tc, T.cv(1), 1);
+verifyEqual(tc, T.cv(2:end), ones(1, 4), 'AbsTol', 1e-12);
+verifyEqual(tc, size(T.fold), [5 5]);
+verifyEqual(tc, T.best, 3);
+P = 0.25 * ones(size(P)); P(sub2ind(size(P), (1:numel(y))', y)) = 0.5;   % every frame right: the per-frame decision
+verifyEqual(tc, core_cnn_eval('choose', P, y, run, pos, [1 3 5 8 12], 5, 61), 1);
+end
+
+function test_core_cnn_boot(tc)
+% Bootstrap over whole sub-runs: a perfect reader has a point interval, the paired difference
+% of a reader with itself is 0, the intervals hold the point, the Eb/N0 bins are kept, and the
+% stream is fixed by its seed.
+nr = 12; F = 5;
+run = kron((1:nr)', ones(F, 1)); y = mod(run - 1, 3) + 1; eb = 3 * mod(run, 2);
+y2 = y; y2(run <= 2) = 0;
+B = core_cnn_eval('boot', y, [y, y2, y], run, eb, 3, 200, 7);
+verifyEqual(tc, B.macro_f1(1, :), [1 1]);
+verifyEqual(tc, B.diff(1, :), [0 0]);
+verifyEqual(tc, B.diff(3, :), [0 0]);
+verifyLessThan(tc, B.diff(2, 2), 1e-12);
+m2 = core_cnn_eval('metrics', y, y2, 3).macro_f1;
+verifyLessThanOrEqual(tc, B.macro_f1(2, 1), m2); verifyGreaterThanOrEqual(tc, B.macro_f1(2, 2), m2);
+verifyEqual(tc, size(B.recall), [3 3 2]);
+verifyEqual(tc, B.ebno, [0 3]);
+verifyEqual(tc, size(B.macro_f1_ebno), [3 2 2]);
+verifyEqual(tc, B.fa(1, :), [0 0]);
+verifyEqual(tc, core_cnn_eval('boot', y, [y, y2], run, eb, 3, 200, 7).macro_f1, B.macro_f1(1:2, :));
+end
+
+function test_core_cnn_verdict(tc)
+% The lecturer's thresholds: met (committed) when the 95% interval clears the threshold, met
+% (not committed) when only the point does, not met otherwise.
+v = @(p, c, t, d) core_cnn_eval('verdict', p, c, t, d);
+verifyEqual(tc, v(0.9, [0.86 0.93], 0.85, '>='), 'met (committed)');
+verifyEqual(tc, v(0.87, [0.83 0.9], 0.85, '>='), 'met (not committed)');
+verifyEqual(tc, v(0.84, [0.8 0.88], 0.85, '>='), 'not met');
+verifyEqual(tc, v(0.03, [0.02 0.045], 0.05, '<='), 'met (committed)');
+verifyEqual(tc, v(0.04, [0.02 0.06], 0.05, '<='), 'met (not committed)');
+verifyEqual(tc, v(0.06, [0.04 0.08], 0.05, '<='), 'not met');
+verifyEqual(tc, v(0.9, [NaN NaN], 0.85, '>='), 'met (not committed)');
+verifyEqual(tc, v(NaN, [NaN NaN], 0.85, '>='), 'no frames');
+verifyError(tc, @() v(0.9, [0.8 0.9], 0.85, '>'), 'core_cnn_eval:dir');
+verifyEqual(tc, core_cnn_config().thr, struct('macro_f1', 0.85, 'recall', 0.85, 'false_alarm', 0.05));
+end
+
+function test_core_cnn_delay(tc)
+% Detection delay: cycles from a jamming sub-run's first frame to its first frame read as its
+% own state (NaN never); clean sub-runs are not counted.
+y = [2 2 2 2 3 3 3 3 1 1]'; run = [1 1 1 1 2 2 3 3 4 4]'; pos = [4 3 2 1 1 2 1 2 1 2]';
+yp = [2 2 1 0 3 1 2 2 2 2]';                                      % run 1 by position: 0 1 2 2
+D = core_cnn_eval('delay', y, yp, run, pos, [2 3]);
+verifyEqual(tc, D.n, [1 2]);
+verifyEqual(tc, D.median, [2 0]);
+verifyEqual(tc, D.p90, [2 0]);
+verifyEqual(tc, D.never, [0 0.5]);
+verifyEqual(tc, sort(D.state), [2 3 3]);
+end
+
+function test_spec_net_trains(tc)
+% The image-only network trains on 128 x 128 images, keeps its best validation epoch, weights
+% the cross-entropy by the inverse class frequency (mean 1), returns CPU weights and
+% probabilities that sum to 1 per image.
+assumeTrue(tc, license('test', 'Neural_Network_Toolbox') && ~isempty(ver('deeplearning')));
+rng(3, 'twister');
+mk = @(c, n) img_of(c, n);
+X = cat(4, mk(1, 16), mk(2, 8), mk(3, 8)); y = [ones(16, 1); 2 * ones(8, 1); 3 * ones(8, 1)];
+Xv = cat(4, mk(1, 4), mk(2, 4), mk(3, 4)); yv = kron((1:3)', ones(4, 1));
+[net, info] = train_spec_net(X, y, Xv, yv, 3, struct('epochs', 3, 'batch', 8, 'verbose', false));
+verifyEqual(tc, info.numEpochs, 3); verifyNumElements(tc, info.valF1, 3);
+verifyTrue(tc, info.bestEpoch >= 1 && info.bestEpoch <= 3);
+verifyEqual(tc, info.bestValF1, max(info.valF1));
+verifyEqual(tc, info.classWeights, 32 ./ (3 * [16 8 8]), 'AbsTol', 1e-6);
+verifyFalse(tc, isa(extractdata(net.Learnables.Value{1}), 'gpuArray'));
+P = spec_scores(net, Xv);
+verifyEqual(tc, size(P), [12 3]);
+verifyEqual(tc, sum(P, 2), ones(12, 1), 'AbsTol', 1e-5);
+verifyError(tc, @() train_spec_net(X, y + 1, Xv, yv, 3, struct('epochs', 1, 'verbose', false)), 'train_spec_net:labels');
+verifyError(tc, @() train_spec_net(X, y(1:end-1), Xv, yv, 3, struct('epochs', 1, 'verbose', false)), 'train_spec_net:size');
+end
+
+function X = img_of(c, n)
+% Synthetic detector images: thermal noise (clean), one bright frequency row (a tone), the
+% whole band raised (a barrage).
+X = single(0.28 + 0.03 * randn(128, 128, 1, n));
+if c == 2, X(60:62, :, 1, :) = 0.8; end
+if c == 3, X = X + 0.3; end
+end
+
+function test_core_cnn_stage(tc)
+% Stage B3c: in run_stage.m and main.m, not in the chain; its reading checks every input
+% before the marker, writes the marker before the fourth test set is loaded, prints no
+% outcome before every metric is computed, and never writes the hybrid's frozen files.
+verifyNotEmpty(tc, strfind(fileread(which('run_stage')), '''B3c'', ''train_core_cnn'''));
+mn = fileread(which('main'));
+verifyNotEmpty(tc, strfind(mn, 'RUN.train_core_cnn              = false;'));
+verifyNotEmpty(tc, strfind(mn, 'run_own(''train_core_cnn'');'));
+verifyNotEmpty(tc, strfind(fileread(which('export_report_numbers')), 'N.core_cnn = take(''results/core_cnn.mat'', ''core'');'));
+src = fileread(which('train_core_cnn'));
+im = strfind(src, 'cc_marker(CC.marker, pid, CC.model, CC.protocol);'); verifyNumElements(tc, im, 1);
+il = strfind(src, 'Sf = load(CC.test, ''splits'');'); verifyNumElements(tc, il, 1);
+verifyLessThan(tc, im, il);
+for id = {'protocol_changed', 'smoke', 'kpi1_set', 'hybrid', 'fresh3', 'params', 'read', 'started', 'recorded'}
+    k = strfind(src, ['''train_core_cnn:' id{1} '''']);
+    verifyNotEmpty(tc, k, id{1}); verifyLessThan(tc, k(end), im, id{1});
+end
+is = strfind(src, 'save(''results/core_cnn.mat'', ''core'');'); verifyNumElements(tc, is, 1);
+ip = strfind(src, 'save(''results/core_cnn_predictions.mat'', ''cpred'');'); verifyNumElements(tc, ip, 1);
+verifyLessThan(tc, ip, is);
+pr = regexp(src(im:is), 'fprintf\(''([^'']*)', 'tokens');          % lines printed between the marker and the results
+verifyEqual(tc, cellfun(@(c) c{1}, pr, 'UniformOutput', false), {'B3c: start marker written (%s)\n', ...
+    'Loading the fourth test set...\n', 'Running inference on %d frames...\n'});
+verifyEmpty(tc, regexp(src, 'save\([^)]*(trained_detector|fusion|ood_thresholds)', 'once'));
+verifyEmpty(tc, regexp(src, 'commit_mat\([^)]*(trained_detector|fusion|ood_thresholds)', 'once'));
+
+% The guards, in a folder of their own
+d = fullfile(tc.TestData.tmp, 'corecnn'); mkdir(fullfile(d, 'data')); mkdir(fullfile(d, 'results')); mkdir(fullfile(d, 'docs'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+CC = core_cnn_config();
+write_text(CC.protocol, 'protocol');
+x = 1; save('data/splits.mat', 'x');
+protocol_sha = 'other'; save(CC.model, 'protocol_sha');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:protocol_changed');
+protocol_sha = sha256_of(CC.protocol); save(CC.model, 'protocol_sha');
+verifyEqual(tc, core_stage_error(true).identifier, 'test:none');     % training only: the set is not touched
+verifyFalse(tc, isfile(CC.marker));
+if ~strcmp(kpi1_set(), 'fresh3')
+    verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:kpi1_set');
+    return
+end
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:hybrid');
+save(CC.hybrid_metrics, 'x');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:hybrid');
+save(CC.hybrid_pred, 'x');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:fresh3');
+save(CC.test, 'x');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:params');
+params = struct('a', 1); save('params.mat', 'params');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:params');
+params = struct('a', 2); save(CC.test_params, 'params');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:params');
+params = struct('a', 1); save(CC.test_params, 'params');
+pid = params_id(params);
+save('results/core_cnn.mat', 'x');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:read');
+delete('results/core_cnn.mat');
+write_text(CC.marker, 'x');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:started');
+delete(CC.marker);
+write_text('docs/core_cnn_read_p1.txt', sprintf('time x\nparams_id %s\n', pid));
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:recorded');
+verifyFalse(tc, isfile(CC.marker));
+movefile('docs/core_cnn_read_p1.txt', 'docs/core_cnn_read_p1_aborted_20261022_1200.txt');   % an aborted reading does not count
+ex = core_stage_error(false);                                    % passes every guard; the dummy set does not load
+verifyNotEqual(tc, ex.identifier, 'test:none');
+verifyTrue(tc, isfile(CC.marker));
+mk = fileread(CC.marker);
+verifyNotEmpty(tc, strfind(mk, ['params_id ' pid]));
+verifyNotEmpty(tc, strfind(mk, [CC.model ' sha256 ' sha256_of(CC.model)]));
+verifyNotEmpty(tc, strfind(mk, [CC.protocol ' sha256 ' protocol_sha]));
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:started');
+% A model older than the splits is not retrained once a reading started
+f = java.io.File(fullfile(d, CC.model)); f.setLastModified(java.lang.System.currentTimeMillis() - 3600e3);
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:read');
+% Nor once an aborted reading of this link model is recorded, nor over a smoke model
+delete(CC.marker);
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:read');
+smoke = true; save(CC.model, 'protocol_sha', 'smoke');          % newer than the splits, marked smoke
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:read');
+verifyEqual(tc, core_stage_error(false, true).identifier, 'test:none');   % a smoke run never reads
+verifyFalse(tc, isfile(CC.marker));
+end
+
+function ex = core_stage_error(CORE_CNN_TRAIN_ONLY, SMOKE) %#ok<INUSD>
+% The error train_core_cnn stops with (test:none when it runs through); SMOKE as run_stage
+% smoke sets it.
+if ~CORE_CNN_TRAIN_ONLY, clear CORE_CNN_TRAIN_ONLY; end
+if nargin < 2 || ~SMOKE, clear SMOKE; end
+ex = MException('test:none', 'no error');
+try
+    evalc('run(''train_core_cnn'')');
+catch ex
+end
+end
+
+function test_core_cnn_reading(tc)
+% Stage B3c end to end on synthetic splits, in a folder of its own: a smoke run trains and marks
+% a reduced model and never reads; with the mark taken off, the single reading writes every
+% output, its decisions, the hybrid's class on the same frames and the metrics agree with the
+% saved predictions, a frame of another label is left out, and neither a second reading nor
+% a retraining runs.
+assumeTrue(tc, license('test', 'Neural_Network_Toolbox') && ~isempty(ver('deeplearning')));
+assumeTrue(tc, strcmp(kpi1_set(), 'fresh3'));
+d = fullfile(tc.TestData.tmp, 'corecnn_read');
+for s = {'data', 'results', 'docs'}, mkdir(fullfile(d, s{1})); end
+c0 = cd(d); back = onCleanup(@() cd(c0));
+CC = core_cnn_config();
+write_text(CC.protocol, 'protocol');
+classes = {'none', 'jamming', 'path_loss', 'tone_jamming'};
+rng(4, 'twister');
+splits = struct('classes', {classes'}, 'train', core_synth(classes, [6 6 6], 4, 0), ...
+    'val', core_synth(classes, [3 3 3], 4, 1000)); %#ok<NASGU>
+save('data/splits.mat', 'splits');
+ex = core_stage_error(false, true);
+verifyEqual(tc, ex.identifier, 'test:none', ex.message);
+verifyTrue(tc, isfile(CC.model) && isfile('results/core_cnn_validation.txt') && isfile('results/core_cnn_training.png'));
+verifyFalse(tc, isfile(CC.marker));
+Mo = load(CC.model);
+verifyTrue(tc, Mo.smoke); verifyEqual(tc, Mo.schedules, 2); verifyTrue(tc, ismember(Mo.N, CC.NS));
+verifyEqual(tc, Mo.protocol_sha, sha256_of(CC.protocol));
+verifyEqual(tc, Mo.val.n_frames, [12 12 12]);
+smoke = false; save(CC.model, 'smoke', '-append');
+
+te = core_synth(classes, [4 4 4], 5, 5000);
+i = find(te.class_run == 4, 1); te.Y_frame(i) = 'none';          % one narrowband frame of another label
+splits = struct('classes', {classes'}, 'test', te); %#ok<NASGU>
+save(CC.test, 'splits');
+params = struct('a', 1); save('params.mat', 'params'); save(CC.test_params, 'params');
+yp = te.Y; yp(te.run == 5001) = 'path_loss';                      % the hybrid reads the first clean sub-run as path loss
+pred = struct('y_true', te.Y, 'y_pred', yp, 'run', te.run, 'pos', te.pos, 'rank', te.pos); %#ok<NASGU>
+save(CC.hybrid_pred, 'pred');
+metrics = struct('conf_mat', confusionmat(te.Y, yp), 'classes', {classes}, 'fusion_cycles', 2); %#ok<NASGU>
+save(CC.hybrid_metrics, 'metrics');
+
+ex = core_stage_error(false);
+verifyEqual(tc, ex.identifier, 'test:none', ex.message);
+for f = {CC.marker, 'results/core_cnn_predictions.mat', 'results/core_cnn.mat', 'results/core_cnn.txt', ...
+        'results/core_cnn_confusion.png', 'results/core_cnn_confusion_frame.png', 'results/core_cnn_ebno.png', ...
+        'results/core_cnn_jsr.png'}
+    verifyTrue(tc, isfile(f{1}), f{1});
+end
+P = load('results/core_cnn_predictions.mat').cpred; C = load('results/core_cnn.mat').core;
+verifyEqual(tc, accumarray(P.state, 1, [3 1])', [20 19 20]);
+verifyEqual(tc, C.left_out, [0 1 0]); verifyEqual(tc, C.n_runs, [4 4 4]);
+[~, yF] = max(P.probs, [], 2); verifyEqual(tc, P.core_frame, yF);
+[~, yW] = max(core_cnn_eval('logp', P.probs, P.run, P.pos, Mo.N), [], 2); verifyEqual(tc, P.core_window, yW);
+yH = P.state; yH(P.run == 5001) = 0; verifyEqual(tc, P.hybrid, yH);
+YP = [P.hybrid, P.core_window, P.core_frame];
+for r = 1:3
+    verifyEqual(tc, C.metrics{r}.cm, core_cnn_eval('metrics', P.state, YP(:, r), 3).cm);
+end
+verifyEqual(tc, C.metrics{1}.fa, 0.25, 'AbsTol', 1e-12); verifyEqual(tc, C.metrics{1}.fa_jam, 0);
+verifyEqual(tc, C.metrics{1}.recall, [0.75 1 1], 'AbsTol', 1e-12);
+verifyEqual(tc, C.verdicts{1, 4}, 'not met');
+verifyEqual(tc, C.boot.diff(1, :), [0 0]);
+verifyEqual(tc, C.N, Mo.N); verifyEqual(tc, C.hybrid_N, 2); verifyEqual(tc, C.hybrid_label_off, 0);
+verifyEqual(tc, C.ebno, [0 3]); verifyEqual(tc, C.levels{2}, [0 10]);
+txt = fileread('results/core_cnn.txt');
+verifyNotEmpty(tc, strfind(txt, 'macro-F1, three states (>= 85%)'));
+verifyNotEmpty(tc, strfind(txt, 'Paired difference of macro-F1'));
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:read');
+f = java.io.File(fullfile(d, CC.model)); f.setLastModified(java.lang.System.currentTimeMillis() - 3600e3);
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:read');   % never retrained over the reading
+end
+
+function S = core_synth(classes, nr, F, run0)
+% A synthetic split: nr(s) sub-runs of F frames of each state (img_of images; clean none,
+% narrowband tone_jamming, wideband jamming), every sub-run with its positions shuffled,
+% Eb/N0 0 or 3 dB, JSR 0 or 10 dB, and one path-loss sub-run.
+cls = [1 4 2];
+X = zeros(128, 128, 1, 0, 'single'); c = []; run = []; pos = []; eb = []; lv = [];
+k = run0;
+for s = 1:3
+    for r = 1:nr(s)
+        k = k + 1;
+        if s == 1, l = NaN; else, l = 10 * (r > nr(s) / 2); end
+        X = cat(4, X, img_of(s, F)); c = [c; cls(s) * ones(F, 1)]; run = [run; k * ones(F, 1)]; %#ok<AGROW>
+        pos = [pos; randperm(F)']; eb = [eb; 3 * mod(r, 2) * ones(F, 1)]; lv = [lv; l * ones(F, 1)]; %#ok<AGROW>
+    end
+end
+X = cat(4, X, img_of(1, F)); c = [c; 3 * ones(F, 1)]; run = [run; (k + 1) * ones(F, 1)];
+pos = [pos; (1:F)']; eb = [eb; zeros(F, 1)]; lv = [lv; 10 * ones(F, 1)];
+S = struct('X', X, 'Y', categorical(c, 1:4, classes), 'Y_frame', categorical(c, 1:4, classes), 'class_run', c, ...
+    'run', run, 'pos', pos, 'level', lv, 'ebno', eb);
 end
