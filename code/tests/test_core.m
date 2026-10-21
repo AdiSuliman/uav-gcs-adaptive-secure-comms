@@ -7634,3 +7634,105 @@ end
 [~, ~, d] = policy_decide('rule_esc', obs, na, [], PP, [], struct());
 verifyEqual(tc, d.cls, {'jamming'});
 end
+
+%% ---------- bandwidth study (experiment_core_bw.m, docs/core_bw_protocol.md) ----------
+function test_band_plan(tc)
+% The plan: 41 channels 2401-2481 MHz in 2 MHz steps, at least our occupied bandwidth (1.25 MHz
+% from the link params), inside 2400-2483.5 MHz; 2481 MHz (Mekdad et al.) is channel 40.
+B = band_plan(base_params());
+verifyEqual(tc, numel(B.f_mhz), 41);
+verifyEqual(tc, B.f_mhz([1 end]), [2401 2481]);
+verifyEqual(tc, unique(diff(B.f_mhz)), 2);
+verifyEqual(tc, B.b_ch, 1.25, 'AbsTol', 1e-12);
+verifyGreaterThanOrEqual(tc, B.spacing, B.b_ch);
+verifyGreaterThanOrEqual(tc, B.f_mhz(1) - B.b_ch / 2, 2400);
+verifyLessThanOrEqual(tc, B.f_mhz(end) + B.b_ch / 2, 2483.5);
+verifyEqual(tc, B.k(B.f_mhz == 2481), 40);
+verifyEqual(tc, B.f_mhz(B.centre), 2441);
+verifyEqual(tc, band_plan(), B);
+end
+
+function test_jsr_inband(tc)
+% The tone keeps JSR_tot in band; a covering flat jammer loses 10 log10(B_J / 1 MHz); the
+% matched filter's integral agrees; the level never exceeds JSR_tot; 'total' inverts it.
+verifyEqual(tc, jsr_inband(16, 0), 16);
+bj = [4 8 20 70 83.5];
+verifyEqual(tc, jsr_inband(0, bj), [-6.02 -9.03 -13.01 -18.45 -19.22], 'AbsTol', 0.01);
+for b = bj
+    verifyEqual(tc, jsr_inband(10, b, 'numeric'), jsr_inband(10, b), 'AbsTol', 0.05);
+    for t = [4 10 16 23 30]
+        verifyLessThanOrEqual(tc, jsr_inband(t, b), t);
+        verifyEqual(tc, jsr_inband(jsr_inband(t, b), b, 'total'), t, 'AbsTol', 1e-9);
+    end
+end
+verifyEqual(tc, jsr_inband(10, 1.25, 'numeric'), 10 - 10 * log10(1.25), 'AbsTol', 0.01);   % our whole band
+verifyEqual(tc, jsr_inband(10, 0.3125, 'numeric'), 10, 'AbsTol', 0.01);                     % inside its flat part
+verifyEqual(tc, jsr_inband(10, 0, 'numeric'), 10);
+verifyError(tc, @() jsr_inband(10, 4, 'other'), 'jsr_inband:mode');
+end
+
+function test_band_cover(tc)
+% Coverage against each jammer's span from home channel 2441 MHz: the tone covers only it;
+% 4 MHz covers +-2 MHz (partial: counted covered) and leaves +-4; 8 MHz +-4 and +-6; 20 MHz
+% +-10 and +-12; the 70 MHz jammer leaves 2401 MHz (below its 2402 MHz edge) and 2473-2481 MHz;
+% the whole band leaves none. H1's first-hop escape share from the middle and the lowest
+% channel: 1 for CW, 4 and 8 MHz; 30/36 and 35/38 for 20 MHz; 0 for the whole band.
+B = band_plan(); f = B.f_mhz; h = B.centre;
+cells = band_cells();
+J = @(n) cells(strcmp({cells.name}, n)).J;
+at = @(n, hh) band_cover(band_cover('span', J(n), f(hh)), f, B.b_ch);
+verifyEqual(tc, find(at('cw_tot16', h)), h);
+[c, st] = band_cover(band_cover('span', J('cw_tot16'), f(h)), f, B.b_ch);
+verifyEqual(tc, st(h), 1); verifyEqual(tc, nnz(c), 1);
+[c, st] = band_cover(band_cover('span', J('bw4_tot16'), f(h)), f, B.b_ch);
+verifyTrue(tc, all(c(h + (-1:1)))); verifyFalse(tc, any(c(h + [-2 2])));
+verifyEqual(tc, st(h + (-1:1)), [2 1 2]);
+c = at('bw8_tot16', h);
+verifyTrue(tc, all(c(h + (-2:2)))); verifyFalse(tc, any(c(h + [-3 3])));
+[c, st, off] = band_cover(band_cover('span', J('bw20_tot16'), f(h)), f, B.b_ch);
+verifyTrue(tc, all(c(h + (-5:5)))); verifyEqual(tc, st(h + [-5 5]), [2 2]); verifyFalse(tc, any(c(h + [-6 6])));
+verifyEqual(tc, off(h + [0 6]), [0 2], 'AbsTol', 1e-12);
+verifyEqual(tc, B.k(~at('bw70_tot16', h)), [0 36:40]);
+verifyEqual(tc, B.k(~at('bw70_tot16', 1)), [0 36:40]);           % a fixed span: wherever our channel is
+verifyTrue(tc, all(at('bw83.5_tot16', h)));
+want = {'cw_tot16', [1 1]; 'bw4_tot16', [1 1]; 'bw8_tot16', [1 1]; 'bw20_tot16', [30/36 35/38]; 'bw83.5_tot16', [0 0]};
+for i = 1:size(want, 1)
+    e = arrayfun(@(hh) h1_escape(at(want{i, 1}, hh), hh), [h 1]);
+    verifyEqual(tc, e, want{i, 2}, 'AbsTol', 1e-12, want{i, 1});
+end
+end
+
+function e = h1_escape(cv, h)
+% Share of H1's targets from home h (at least 6 MHz, 3 channels away) that cv leaves escaped.
+k = abs((1:numel(cv)) - h) >= 3;
+e = mean(~cv(k));
+end
+
+function test_band_cells(tc)
+% 30 fixed-total cells (6 widths x 5 levels, JSR_tot <= 30 dB) and 4 equal-level cells; every
+% level within the 30 dB in-band cap and in the right field; the equal-level scenarios only
+% where JSR_in + 10 log10(B_J) <= 30 dB; the spans of the sources.
+[cells, scen] = band_cells(base_params());
+verifyEqual(tc, numel(cells), 34); verifyEqual(tc, nnz([cells.slice]), 4);
+verifyEqual(tc, numel(scen), 44); verifyEqual(tc, nnz([scen.slice]), 14);
+fx = cells(~[cells.slice]);
+verifyTrue(tc, all([fx.jsr_tot] <= 30)); verifyTrue(tc, all([cells.level] <= 30));
+verifyEqual(tc, sort(unique([fx.bj])), [0 4 8 20 70 83.5]);
+verifyEqual(tc, unique([fx.jsr_tot]), [4 10 16 23 30]);
+tone = strcmp({cells.threat}, 'tone_jamming');
+verifyEqual(tc, unique({cells(tone).field}), {'tone_jsr_db'}); verifyEqual(tc, unique({cells(~tone).field}), {'jsr_db'});
+verifyEqual(tc, [cells(tone).bj], zeros(1, 5));
+L = @(n) cells(strcmp({cells.name}, n)).level;
+verifyEqual(tc, [L('cw_tot30'), L('bw4_tot4'), L('bw8_tot16'), L('bw70_tot23'), L('bw83.5_tot30')], ...
+    [30 -2.02 6.97 4.55 10.78], 'AbsTol', 0.01);
+sl = scen([scen.slice]);
+pairs = sortrows([[sl.bj]', [sl.jsr_in]']);
+verifyEqual(tc, pairs, sortrows([4 4; 4 10; 4 16; 4 23; 8 4; 8 10; 8 16; 20 4; 20 10; 20 16; 70 4; 70 10; 83.5 4; 83.5 10]));
+verifyTrue(tc, all([sl.jsr_tot] <= 30 + 1e-9));
+verifyEqual(tc, unique({scen([scen.bj] == 0).band}), {'narrowband'}); verifyEqual(tc, unique({scen([scen.bj] > 0).band}), {'wideband'});
+J = @(n) cells(strcmp({cells.name}, n)).J;
+verifyEqual(tc, [J('bw4_tot4').half, J('bw8_tot4').half, J('bw20_tot4').half, J('cw_tot4').half], [2.6 4.5 10 0.3], ...
+    'AbsTol', 1e-12);
+verifyEqual(tc, [J('bw70_tot4').lo, J('bw70_tot4').hi, J('bw83.5_tot4').lo, J('bw83.5_tot4').hi], [2402 2472 2400 2483.5]);
+end
+
