@@ -58,7 +58,7 @@ signalling delay (1 cycle).
 | B_J | State | Source | Span used for coverage |
 |---|---|---|---|
 | CW tone | narrowband | Mekdad CW; Barajas CW; Panitsas tones; `tone_jamming` | the tone's offset range, home +-0.3 MHz |
-| 4 MHz | wideband | Liu et al.: 4 MHz instantaneous bandwidth, raised cosine, roll-off 0.3 | +-2.6 MHz, the occupied edge |
+| 4 MHz | wideband | Liu et al.: 4 MHz instantaneous bandwidth, raised cosine, roll-off 0.3, read as its noise bandwidth (below) | +-2.6 MHz, the occupied edge (1 + 0.3) x 2 MHz |
 | 8 MHz | wideband | Mekdad et al.: Gaussian noise at 10 MS/s, low-pass 4 MHz, 1 MHz transition | +-4.5 MHz, the stopband edge |
 | 20 MHz | wideband | Panitsas et al.: a $20 dongle covering 20 MHz | +-10 MHz |
 | 70 MHz | wideband | Panitsas et al.: AWGN over 802.11 channels 1, 6, 11 (20 MHz each) | fixed 2402-2472 MHz |
@@ -72,6 +72,21 @@ et al. put it and the whole-band one everywhere; they cover whatever channel we 
 receiver's +-2 MHz window flat, so it is the existing barrage `jamming` waveform at its in-band
 level; Liu's raised-cosine edge is kept white. Narrowband noise (0.3125, 1.25 MHz) needs a new
 generator and is not part of this study (Tier 2, not run).
+
+**Liu et al.'s 4 MHz.** The paper gives the user's signal and the jammer as raised-cosine
+waveforms of roll-off 0.3 and their bandwidth as 4 MHz ("the instantaneous bandwidth of the
+jamming is set to be 4MHz"), and never says whether that is the symbol rate (the noise-equivalent
+and -3 dB width; occupied (1 + 0.3) x 4 = 5.2 MHz) or the occupied width (symbol rate
+4 / 1.3 = 3.08 MHz). Its geometry leans to the occupied width (K = 9 positions 2 MHz apart in a
+20 MHz band, so centred 2-18 MHz, and comb signals at 2, 10 and 18 MHz: with 4 MHz occupied the
+edges fall exactly at 0 and 20 MHz) but does not settle it, since a simulation may let the
+roll-off pass the sensing band. Both readings are
+physical, so the study takes the one more severe for our link, the noise bandwidth. At fixed total
+power it puts 1.14 dB less into a covered channel (-6.02 against -4.88 dB), and its occupied edge
+lies 0.6 MHz nearer every hop target, which costs an escaped hop a row of the rejection (section 4):
+H1's 6 MHz hop keeps 4 dB instead of 24, an 8 MHz hop 24 instead of 28, H4's 4 MHz hop none instead
+of 4 dB. For every reading of the study both effects work against the adaptive systems: less harm
+to the static reference and less rejection after a hop.
 
 **JSR (`jsr_inband.m`).** The controlled variable is the total power JSR_tot = P_J / P_S (Liu
 et al.: a 30 dBm jammer against a 0 dBm signal). The model's level is the in-band ratio after the

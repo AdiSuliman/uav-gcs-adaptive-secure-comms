@@ -7991,6 +7991,14 @@ verifyEqual(tc, unique({scen([scen.bj] == 0).band}), {'narrowband'}); verifyEqua
 J = @(n) cells(strcmp({cells.name}, n)).J;
 verifyEqual(tc, [J('bw4_tot4').half, J('bw8_tot4').half, J('bw20_tot4').half, J('cw_tot4').half], [2.6 4.5 10 0.3], ...
     'AbsTol', 1e-12);
+rs = 4; ro = 0.3;                                          % Liu et al.'s 4 MHz as the noise bandwidth (symbol rate)
+verifyEqual(tc, J('bw4_tot4').half, (1 + ro) * rs / 2, 'AbsTol', 1e-12);
+verifyEqual(tc, L('bw4_tot4'), 4 - 10 * log10(rs), 'AbsTol', 1e-12);
+verifyGreaterThan(tc, 4 - 10 * log10(rs / (1 + ro)), L('bw4_tot4'));   % the occupied reading: 1.14 dB more in band
+B = band_plan(); h = B.centre;                             % but its nearer edge costs an escaped hop a row
+Ro = band_reject(B.f_mhz(h) + [-rs rs] / 2, B.f_mhz, B.b_ch);
+Rn = band_reject(band_cover('span', J('bw4_tot4'), B.f_mhz(h)), B.f_mhz, B.b_ch);
+verifyEqual(tc, [Rn(h + [2 3 4]); Ro(h + [2 3 4])], [0 4 24; 4 24 28]);
 verifyEqual(tc, [J('bw70_tot4').lo, J('bw70_tot4').hi, J('bw83.5_tot4').lo, J('bw83.5_tot4').hi], [2402 2472 2400 2483.5]);
 src = fileread(which('experiment_core_bw'));                  % the pools carry the scenarios the episodes read
 verifyNotEmpty(tc, regexp(src, 'function stage_pools\(X\)\r?\n\[p0, cells, scen, EBNO\] = study_cells\(X\);', 'once'));
