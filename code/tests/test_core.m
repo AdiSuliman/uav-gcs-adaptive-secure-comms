@@ -7564,3 +7564,89 @@ if c == 2, X(60:62, :, 1, :) = 0.8; end
 if c == 3, X = X + 0.3; end
 end
 
+function test_core_cnn_stage(tc)
+% Stage B3c: in run_stage.m and main.m, not in the chain; its reading checks every input
+% before the marker, writes the marker before the fourth test set is loaded, prints no
+% outcome before every metric is computed, and never writes the hybrid's frozen files.
+verifyNotEmpty(tc, strfind(fileread(which('run_stage')), '''B3c'', ''train_core_cnn'''));
+mn = fileread(which('main'));
+verifyNotEmpty(tc, strfind(mn, 'RUN.train_core_cnn              = false;'));
+verifyNotEmpty(tc, strfind(mn, 'run_own(''train_core_cnn'');'));
+verifyNotEmpty(tc, strfind(fileread(which('export_report_numbers')), 'N.core_cnn = take(''results/core_cnn.mat'', ''core'');'));
+src = fileread(which('train_core_cnn'));
+im = strfind(src, 'cc_marker(CC.marker, pid, CC.model, CC.protocol);'); verifyNumElements(tc, im, 1);
+il = strfind(src, 'Sf = load(CC.test, ''splits'');'); verifyNumElements(tc, il, 1);
+verifyLessThan(tc, im, il);
+for id = {'protocol_changed', 'kpi1_set', 'hybrid', 'fresh3', 'params', 'read', 'started', 'recorded'}
+    k = strfind(src, ['''train_core_cnn:' id{1} '''']);
+    verifyNotEmpty(tc, k, id{1}); verifyLessThan(tc, k(end), im, id{1});
+end
+is = strfind(src, 'save(''results/core_cnn.mat'', ''core'');'); verifyNumElements(tc, is, 1);
+ip = strfind(src, 'save(''results/core_cnn_predictions.mat'', ''cpred'');'); verifyNumElements(tc, ip, 1);
+verifyLessThan(tc, ip, is);
+pr = regexp(src(im:is), 'fprintf\(''([^'']*)', 'tokens');          % lines printed between the marker and the results
+verifyEqual(tc, cellfun(@(c) c{1}, pr, 'UniformOutput', false), {'B3c: start marker written (%s)\n', ...
+    'Loading the fourth test set...\n', 'Running inference on %d frames...\n'});
+verifyEmpty(tc, regexp(src, 'save\([^)]*(trained_detector|fusion|ood_thresholds)', 'once'));
+verifyEmpty(tc, regexp(src, 'commit_mat\([^)]*(trained_detector|fusion|ood_thresholds)', 'once'));
+
+% The guards, in a folder of their own
+d = fullfile(tc.TestData.tmp, 'corecnn'); mkdir(fullfile(d, 'data')); mkdir(fullfile(d, 'results')); mkdir(fullfile(d, 'docs'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+CC = core_cnn_config();
+write_text(CC.protocol, 'protocol');
+x = 1; save('data/splits.mat', 'x');
+protocol_sha = 'other'; save(CC.model, 'protocol_sha');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:protocol_changed');
+protocol_sha = sha256_of(CC.protocol); save(CC.model, 'protocol_sha');
+verifyEqual(tc, core_stage_error(true).identifier, 'test:none');     % training only: the set is not touched
+verifyFalse(tc, isfile(CC.marker));
+if ~strcmp(kpi1_set(), 'fresh3')
+    verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:kpi1_set');
+    return
+end
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:hybrid');
+save(CC.hybrid_metrics, 'x');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:hybrid');
+save(CC.hybrid_pred, 'x');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:fresh3');
+save(CC.test, 'x');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:params');
+params = struct('a', 1); save('params.mat', 'params');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:params');
+params = struct('a', 2); save(CC.test_params, 'params');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:params');
+params = struct('a', 1); save(CC.test_params, 'params');
+pid = params_id(params);
+save('results/core_cnn.mat', 'x');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:read');
+delete('results/core_cnn.mat');
+write_text(CC.marker, 'x');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:started');
+delete(CC.marker);
+write_text('docs/core_cnn_read_p1.txt', sprintf('time x\nparams_id %s\n', pid));
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:recorded');
+verifyFalse(tc, isfile(CC.marker));
+movefile('docs/core_cnn_read_p1.txt', 'docs/core_cnn_read_p1_aborted_20261022_1200.txt');   % an aborted reading does not count
+ex = core_stage_error(false);                                    % passes every guard; the dummy set does not load
+verifyNotEqual(tc, ex.identifier, 'test:none');
+verifyTrue(tc, isfile(CC.marker));
+mk = fileread(CC.marker);
+verifyNotEmpty(tc, strfind(mk, ['params_id ' pid]));
+verifyNotEmpty(tc, strfind(mk, [CC.model ' sha256 ' sha256_of(CC.model)]));
+verifyNotEmpty(tc, strfind(mk, [CC.protocol ' sha256 ' protocol_sha]));
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:started');
+% A model older than the splits is not retrained once a reading started
+f = java.io.File(fullfile(d, CC.model)); f.setLastModified(java.lang.System.currentTimeMillis() - 3600e3);
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:read');
+end
+
+function ex = core_stage_error(CORE_CNN_TRAIN_ONLY) %#ok<INUSD>
+% The error train_core_cnn stops with (test:none when it runs through).
+if ~CORE_CNN_TRAIN_ONLY, clear CORE_CNN_TRAIN_ONLY; end
+ex = MException('test:none', 'no error');
+try
+    evalc('run(''train_core_cnn'')');
+catch ex
+end
+end
