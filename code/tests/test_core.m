@@ -7267,6 +7267,7 @@ end
 function [ALL, scen] = lect_world(POL)
 % Eight episodes of every policy in POL: jamming (1, 2, 7), tone_jamming (3, 4, 8), path_loss
 % (5, 6); episode 7 not recoverable, episode 8 without its threat on the air.
+% The policies without the detector share one set of readings, every other policy another.
 scen = {'none', 'jamming', 'tone_jamming', 'path_loss'};
 B = struct('scn', [2 2 3 3 4 4 2 3], 'recoverable', logical([1 1 1 1 1 1 0 1]), ...
     'threat', logical([1 1 1 1 1 1 1 0]), 'geom', [1 1 2 2 3 3 4 5], 'ok_post', 0.5 * ones(1, 8));
@@ -7277,7 +7278,7 @@ for k = 1:numel(POL)
         case 'none'
             R.per_post = [0.5 0.5 0.4 0.4 0.6 0.6 0.9 0.2]; R.dlv_post = [0.5 0.5 0.6 0.6 0.4 0.4 0.1 0.8];
             R.t_conf = [1 1 1 1 1 1 NaN NaN]; R.t_rec_det = nan(1, 8); R.t_rec = nan(1, 8);
-        case 'blind_esc'
+        case {'blind_esc', 'blind_core'}
             R.per_post = [0.3 0.3 0.4 0.4 0.3 0.3 0.9 0.2]; R.dlv_post = [0.7 0.7 0.6 0.6 0.7 0.7 0.1 0.8];
             R.t_conf = [2 3 3 2 2 2 NaN NaN]; R.t_rec_det = [5 6 NaN NaN 4 4 NaN NaN]; R.t_rec = [7 9 NaN NaN 6 6 NaN NaN];
         otherwise
@@ -7528,4 +7529,46 @@ src = fileread(which('evaluate_policies'));
 verifyNotEmpty(tc, strfind(src, 'POL = [POL, {''rule_core'', ''blind_core''}];'));
 verifyNotEmpty(tc, strfind(src, ['RES{si, pk} = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, ' ...
     '30000 + 100*si);']));
+end
+
+function test_lect_kpis_core(tc)
+% lect_kpis.m reads the core action set beside the full one: the PER reduction of the core
+% rule with and without the detector vs the same static link, per jamming threat, the CNN's
+% share in PER, goodput and recovery time, recovery and goodput; the full set's readings
+% and lines are those it gives without the core policies.
+POL = {'none', 'random', 'fixed', 'rule_esc', 'blind_esc', 'table', 'dqn_esc', 'oracle'};
+LBL = {'no response', 'random', 'fixed', 'rule + escalation', 'no detector + escalation', 'table', 'DQN + escalation', 'oracle'};
+[ALL, scen] = lect_world(POL);
+[L0, lines0] = lect_kpis(ALL, POL, LBL, 4, scen, 5e4, 20);
+verifyEmpty(tc, L0.core);
+POLc = [POL, {'rule_core', 'blind_core'}];
+LBLc = [LBL, {'core: rule + escalation', 'core: no detector + escalation'}];
+[ALLc, scen] = lect_world(POLc);
+[L, lines] = lect_kpis(ALLc, POLc, LBLc, 4, scen, 5e4, 20);
+for f = {'per', 'per_threat', 'cnn', 'rec', 'gput'}
+    verifyEqual(tc, L.(f{1}), L0.(f{1}));
+end
+verifyEqual(tc, lines(1:numel(lines0)), lines0);
+verifyEqual(tc, lines0{3}, 'Full action set (the 36 configurations):');
+Cc = L.core;
+verifyEqual(tc, Cc.actions, decision_config().core_actions);
+verifyEqual(tc, {Cc.per.policy}, {'rule_core', 'blind_core'});
+verifyEqual(tc, [Cc.per.red_pct], 100 * [1 - 0.6 / 1.8, 1 - 1.4 / 1.8], 'AbsTol', 1e-9);
+verifyEqual(tc, [Cc.per.met], [true false]);
+verifyEqual(tc, {Cc.per_threat.threat}, {'jamming', 'tone_jamming'});
+verifyEqual(tc, Cc.cnn.per_red_pct, 100 * (1 - 0.6 / 1.4), 'AbsTol', 1e-9);
+verifyEqual(tc, Cc.cnn.gput_bps, 1e4, 'AbsTol', 1e-6);
+verifyEqual(tc, [Cc.cnn.det.median; Cc.cnn.det.p90; Cc.cnn.det.never_pct], [1 2.5; 2 3; 25 0]);
+verifyEqual(tc, [Cc.cnn.rec_det.median; Cc.cnn.rec_det.p90; Cc.cnn.rec_det.never_pct], [3 5.5; 4 6; 0 50]);
+verifyEqual(tc, [L.cnn.det.median], [1 2.5]);                                        % the full set's alike
+verifyEqual(tc, unique({Cc.rec.policy}, 'stable'), {'none', 'blind_core', 'rule_core'});
+verifyEqual(tc, {Cc.gput.policy}, {'none', 'blind_core', 'rule_core'});
+g = Cc.gput(strcmp({Cc.gput.policy}, 'rule_core'));
+verifyEqual(tc, [g.bps, g.bps_jam], [5e4 * 5.5 / 7, 42500], 'AbsTol', 1e-6);
+lc = lines(numel(lines0) + 1:end);
+verifyTrue(tc, startsWith(lc{1}, 'Core action set {no_action, channel_switch, rate_reduce, channel_switch+rate_reduce}'));
+verifyTrue(tc, any(contains(lc, 'core: rule + escalation') & contains(lc, '-> MET')));
+verifyTrue(tc, any(startsWith(lc, 'Core action set: Recovery time (lecturer)')));
+verifyTrue(tc, any(startsWith(lc, 'Core action set: Goodput after onset in bit/s')));
+verifyTrue(tc, any(contains(lc, 'CNN contribution (core rule + escalation vs the same core escalation without the detector')));
 end

@@ -12,7 +12,9 @@ function [L, lines] = lect_kpis(ALL, POL, LBL, iDQN, scen, payload_bps, period_m
 %     under no response, paired by episode, 95% bootstrap over flight geometries
 %     (per_reduction.m); target >= 30% for rule + escalation (CNN-based adaptive), also read
 %     for the escalation without the detector (metric-only adaptive) and the deployed policy;
-%     the CNN's share: rule + escalation against the same response without the detector.
+%     the CNN's share: rule + escalation against the same response without the detector, in
+%     PER and goodput (paired) and in recovery time (onset to detection and detection to
+%     restored of each, on the recoverable jamming episodes).
 %   Recovery time (lecturer): cycles from the first confirmed alarm's frame until the packet
 %     loss is restored (<= 2x clean + one loss event) for 5 consecutive cycles (t_rec_det),
 %     beside the onset-to-detection time (t_conf) and the existing T_rec from onset (BER and
@@ -20,6 +22,11 @@ function [L, lines] = lect_kpis(ALL, POL, LBL, iDQN, scen, payload_bps, period_m
 %     they never do.
 %   Goodput: delivered payload after onset in bit/s (payload_bps x dlv_post), mean with a 95%
 %     bootstrap over flight geometries, beside the normalized goodput (gput_post).
+%   These are the full action set's (the 36 configurations). L.core holds the same readings on
+%   the revised proposal's core action set (decision_config.m C.core_actions: channel
+%   switching and rate adaptation), for the rule with escalation with and without the
+%   detector there (rule_core, blind_core; rule_core_policy.m) against the same static link,
+%   the CNN's share rule_core against blind_core; [] when neither ran.
 JAM = {'jamming', 'noise_burst', 'reactive_jamming', 'sweeping_jammer', 'tone_jamming'};
 BAND = {'wideband', '', '', '', 'narrowband'};
 TARGET = 30; N_RUN = 5; B = 2000;
@@ -37,94 +44,141 @@ kp = unique({'rule_esc', 'blind_esc', dep}, 'stable'); kp = kp(cellfun(has, kp))
 kr = unique({'none', 'blind_esc', 'rule_esc', dqk, dep}, 'stable'); kr = kr(cellfun(has, kr));
 kg = unique([kr, {'oracle'}], 'stable'); kg = kg(cellfun(has, kg));
 lab = @(p) LBL{col(p)};
+X = struct('ALL', {ALL}, 'has', has, 'col', col, 'lab', lab, 'R1', R1, 'nm', {nm}, 'mrec', mrec, 'mj', mj, ...
+    'ref', ALL{iN}.per_post, 'JAM', {JAM}, 'BAND', {BAND}, 'TARGET', TARGET, 'N_RUN', N_RUN, 'B', B, ...
+    'payload_bps', payload_bps, 'period_ms', period_ms);
 L = struct('jam', {JAM}, 'target_pct', TARGET, 'run', N_RUN, 'payload_bps', payload_bps, 'period_ms', period_ms);
 lines = {'', sprintf(['--- Revised-proposal KPIs: PER vs the static link, recovery time from detection, goodput in ' ...
     'bit/s (threat sets pooled; jamming threats: %s) ---'], strjoin(JAM, ', '))};
+lines{end+1} = 'Full action set (the 36 configurations):';
 
-% PER reduction vs the static link
-ref = ALL{iN}.per_post;
-lines{end+1} = sprintf(['PER after onset on the recoverable jamming episodes (%d), reduction vs the static link (no response), ' ...
-    'paired by episode, 95%% bootstrap over flight geometries; target >= %d%% for rule + escalation:'], sum(mj), TARGET);
-L.per = struct('policy', {}, 'label', {}, 'n', {}, 'per_ref_pct', {}, 'per_pct', {}, 'red_pct', {}, 'ci', {}, ...
+[P, PT, CN, l] = per_block(X, kp, 'rule_esc', 'blind_esc', '', 'rule + escalation', ...
+    'rule + escalation vs the same escalation without the detector', 200);
+L.per = P; L.per_threat = PT; L.cnn = CN; lines = [lines, l];
+[L.rec, l] = rec_block(X, kr, ''); lines = [lines, l];
+[L.gput, l] = gput_block(X, kg, '', 500); lines = [lines, l];
+
+% The core action set: the same readings, the same episodes and static link
+L.core = [];
+kc = {'rule_core', 'blind_core'}; kc = kc(cellfun(has, kc));
+if isempty(kc), return; end
+C = decision_config();
+pre = 'Core action set: ';
+lines{end+1} = sprintf(['Core action set {%s} (the revised proposal''s predefined actions, channel switching and ' ...
+    'transmission-rate adaptation; escalation %s), the same episodes and static link:'], strjoin(C.core_actions, ', '), ...
+    strjoin(C.ladder_core, ' -> '));
+[P, PT, CN, l] = per_block(X, kc, 'rule_core', 'blind_core', pre, 'core rule + escalation', ...
+    'core rule + escalation vs the same core escalation without the detector', 1200);
+lines = [lines, l];
+kcr = {'none', 'blind_core', 'rule_core'}; kcr = kcr(cellfun(has, kcr));
+[RC, l] = rec_block(X, kcr, pre); lines = [lines, l];
+[GC, l] = gput_block(X, kcr, pre, 1500); lines = [lines, l];
+L.core = struct('actions', {C.core_actions}, 'ladder', {C.ladder_core}, 'per', P, 'per_threat', PT, 'cnn', CN, ...
+    'rec', RC, 'gput', GC);
+end
+
+function [P, PT, CN, lines] = per_block(X, kp, tgt, conv, pre, ttl, cnn_ttl, s0)
+% PER reduction vs the static link of the policies kp on the recoverable jamming episodes,
+% per jamming threat, and the CNN's share: tgt (with the detector) against conv (the same
+% without it); bootstrap seeds from s0.
+ALL = X.ALL; R1 = X.R1; ref = X.ref; mj = X.mj; col = X.col; lab = X.lab; JAM = X.JAM; BAND = X.BAND;
+TARGET = X.TARGET; B = X.B;
+lines = {sprintf([pre 'PER after onset on the recoverable jamming episodes (%d), reduction vs the static link (no ' ...
+    'response), paired by episode, 95%% bootstrap over flight geometries; target >= %d%% for %s:'], sum(mj), TARGET, ttl)};
+P = struct('policy', {}, 'label', {}, 'n', {}, 'per_ref_pct', {}, 'per_pct', {}, 'red_pct', {}, 'ci', {}, ...
     'met', {}, 'ci_above', {});
 for j = 1:numel(kp)
     pol = ALL{col(kp{j})}.per_post;
     ok = mj & isfinite(pol) & isfinite(ref);
-    [r, lo, hi] = per_reduction(pol(ok), ref(ok), R1.geom(ok), B, 200 + j);
-    L.per(j) = struct('policy', kp{j}, 'label', lab(kp{j}), 'n', sum(ok), 'per_ref_pct', 100 * mean(ref(ok)), ...
+    [r, lo, hi] = per_reduction(pol(ok), ref(ok), R1.geom(ok), B, s0 + j);
+    P(j) = struct('policy', kp{j}, 'label', lab(kp{j}), 'n', sum(ok), 'per_ref_pct', 100 * mean(ref(ok)), ...
         'per_pct', 100 * mean(pol(ok)), 'red_pct', 100 * r, 'ci', 100 * [lo hi], 'met', 100 * r >= TARGET, ...
         'ci_above', 100 * lo >= TARGET);
-    q = L.per(j);
+    q = P(j);
     lines{end+1} = sprintf('  %-44s PER %6.2f%% vs %6.2f%% static: reduction %6.1f%% [%.1f, %.1f]%s', q.label, ...
-        q.per_pct, q.per_ref_pct, q.red_pct, q.ci, ternary(strcmp(q.policy, 'rule_esc'), sprintf(' -> %s (interval %s %d%%)', ...
+        q.per_pct, q.per_ref_pct, q.red_pct, q.ci, ternary(strcmp(q.policy, tgt), sprintf(' -> %s (interval %s %d%%)', ...
         ternary(q.met, 'MET', 'NOT MET'), ternary(q.ci_above, 'above', 'not wholly above'), TARGET), '')); %#ok<AGROW>
 end
-L.per_threat = struct('threat', {}, 'band', {}, 'n', {}, 'per_ref_pct', {}, 'red_pct', {}, 'ci', {});
+PT = struct('threat', {}, 'band', {}, 'n', {}, 'per_ref_pct', {}, 'red_pct', {}, 'ci', {});
 lines{end+1} = sprintf('  per jamming threat, reduction %% [95%%] (%s):', strjoin(cellfun(lab, kp, 'UniformOutput', false), ' | '));
 for t = 1:numel(JAM)
-    mt = mj & strcmp(nm, JAM{t});
+    mt = mj & strcmp(X.nm, JAM{t});
     if ~any(mt), continue; end
     rr = nan(1, numel(kp)); cc = nan(numel(kp), 2);
     for j = 1:numel(kp)
         pol = ALL{col(kp{j})}.per_post;
         ok = mt & isfinite(pol) & isfinite(ref);
-        [rr(j), cc(j, 1), cc(j, 2)] = per_reduction(pol(ok), ref(ok), R1.geom(ok), B, 300 + 10 * t + j);
+        [rr(j), cc(j, 1), cc(j, 2)] = per_reduction(pol(ok), ref(ok), R1.geom(ok), B, s0 + 100 + 10 * t + j);
     end
-    L.per_threat(end+1) = struct('threat', JAM{t}, 'band', BAND{t}, 'n', sum(mt), ...
-        'per_ref_pct', 100 * mean(ref(mt), 'omitnan'), 'red_pct', 100 * rr, 'ci', 100 * cc);
+    PT(end+1) = struct('threat', JAM{t}, 'band', BAND{t}, 'n', sum(mt), ...
+        'per_ref_pct', 100 * mean(ref(mt), 'omitnan'), 'red_pct', 100 * rr, 'ci', 100 * cc); %#ok<AGROW>
     lines{end+1} = sprintf('    %-30s %4d, static PER %6.2f%%: %s', strtrim(sprintf('%s %s', JAM{t}, ...
         ternary(isempty(BAND{t}), '', ['(' BAND{t} ')']))), sum(mt), 100 * mean(ref(mt), 'omitnan'), ...
         strjoin(arrayfun(@(j) sprintf('%.1f [%.1f, %.1f]', 100 * rr(j), 100 * cc(j, 1), 100 * cc(j, 2)), 1:numel(kp), ...
         'UniformOutput', false), ' | ')); %#ok<AGROW>
 end
-L.cnn = struct('per_red_pct', NaN, 'per_ci', [NaN NaN], 'gput_bps', NaN, 'gput_ci', [NaN NaN], 'n', 0);
-if has('rule_esc') && has('blind_esc')
-    pr = ALL{col('rule_esc')}.per_post; pb = ALL{col('blind_esc')}.per_post;
+e = [tstat([]), tstat([])];
+CN = struct('per_red_pct', NaN, 'per_ci', [NaN NaN], 'gput_bps', NaN, 'gput_ci', [NaN NaN], 'n', 0, 'det', e, 'rec_det', e);
+if X.has(tgt) && X.has(conv)
+    Rt = ALL{col(tgt)}; Rc = ALL{col(conv)};
+    pr = Rt.per_post; pb = Rc.per_post;
     ok = mj & isfinite(pr) & isfinite(pb);
-    [r, lo, hi] = per_reduction(pr(ok), pb(ok), R1.geom(ok), B, 400);
-    dg = payload_bps * (ALL{col('rule_esc')}.dlv_post - ALL{col('blind_esc')}.dlv_post);
-    [g, gl, gh] = boot_cluster(dg(ok), ones(1, sum(ok)), R1.geom(ok), B, 401);
-    L.cnn = struct('per_red_pct', 100 * r, 'per_ci', 100 * [lo hi], 'gput_bps', g, 'gput_ci', [gl gh], 'n', sum(ok));
-    lines{end+1} = sprintf(['  CNN contribution (rule + escalation vs the same escalation without the detector, the same %d ' ...
-        'episodes): PER reduction %.1f%% [%.1f, %.1f], goodput %+.0f bit/s [%+.0f, %+.0f]'], sum(ok), 100 * r, 100 * lo, ...
-        100 * hi, g, gl, gh);
+    [r, lo, hi] = per_reduction(pr(ok), pb(ok), R1.geom(ok), B, s0 + 200);
+    dg = X.payload_bps * (Rt.dlv_post - Rc.dlv_post);
+    [g, gl, gh] = boot_cluster(dg(ok), ones(1, sum(ok)), R1.geom(ok), B, s0 + 201);
+    det = [tstat(Rt.t_conf(mj)), tstat(Rc.t_conf(mj))];
+    rd = [tstat(Rt.t_rec_det(mj & isfinite(Rt.t_conf))), tstat(Rc.t_rec_det(mj & isfinite(Rc.t_conf)))];
+    CN = struct('per_red_pct', 100 * r, 'per_ci', 100 * [lo hi], 'gput_bps', g, 'gput_ci', [gl gh], 'n', sum(ok), ...
+        'det', det, 'rec_det', rd);
+    lines{end+1} = sprintf(['  CNN contribution (%s, the same %d episodes): PER reduction %.1f%% [%.1f, %.1f], goodput ' ...
+        '%+.0f bit/s [%+.0f, %+.0f]; recovery time on the %d recoverable jamming episodes, with vs without the ' ...
+        'detector: onset -> detection %s vs %s, detection -> PER restored %s vs %s'], cnn_ttl, sum(ok), 100 * r, ...
+        100 * lo, 100 * hi, g, gl, gh, sum(mj), ttxt(det(1), X.period_ms), ttxt(det(2), X.period_ms), ...
+        ttxt(rd(1), X.period_ms), ttxt(rd(2), X.period_ms));
+end
 end
 
-% Recovery time from detection, onset-to-detection, T_rec from onset
-lines{end+1} = sprintf(['Recovery time (lecturer): from the first confirmed alarm''s frame until the packet loss stays <= 2x ' ...
-    'clean for %d consecutive cycles; beside it the onset-to-detection time and T_rec from onset (BER and packet loss); ' ...
-    'median / p90 [cycles of %g ms] (never %%):'], N_RUN, period_ms);
-L.rec = struct('set', {}, 'policy', {}, 'label', {}, 'n', {}, 'det', {}, 'rec_det', {}, 't_rec', {});
-sets = {mrec, mj}; sn = {'recoverable threat episodes', 'recoverable jamming episodes'};
+function [RC, lines] = rec_block(X, kr, pre)
+% Onset to detection, detection to PER restored and T_rec from onset of the policies kr, on
+% the recoverable threat episodes and on the recoverable jamming episodes.
+lines = {sprintf([pre 'Recovery time (lecturer): from the first confirmed alarm''s frame until the packet loss stays ' ...
+    '<= 2x clean for %d consecutive cycles; beside it the onset-to-detection time and T_rec from onset (BER and ' ...
+    'packet loss); median / p90 [cycles of %g ms] (never %%):'], X.N_RUN, X.period_ms)};
+RC = struct('set', {}, 'policy', {}, 'label', {}, 'n', {}, 'det', {}, 'rec_det', {}, 't_rec', {});
+sets = {X.mrec, X.mj}; sn = {'recoverable threat episodes', 'recoverable jamming episodes'};
 for si = 1:2
     m = sets{si};
     lines{end+1} = sprintf('  %s (%d): onset -> detection | detection -> PER restored | T_rec from onset', sn{si}, sum(m)); %#ok<AGROW>
     for j = 1:numel(kr)
-        R = ALL{col(kr{j})};
+        R = X.ALL{X.col(kr{j})};
         d = R.t_conf(m); dt = isfinite(d);
         rd = R.t_rec_det(m); rd = rd(dt);
-        q = struct('set', sn{si}, 'policy', kr{j}, 'label', lab(kr{j}), 'n', sum(m), 'det', tstat(d), ...
+        q = struct('set', sn{si}, 'policy', kr{j}, 'label', X.lab(kr{j}), 'n', sum(m), 'det', tstat(d), ...
             'rec_det', tstat(rd), 't_rec', tstat(R.t_rec(m)));
-        L.rec(end+1) = q;
-        lines{end+1} = sprintf('    %-44s %s | %s | %s', q.label, ttxt(q.det, period_ms), ttxt(q.rec_det, period_ms), ...
-            ttxt(q.t_rec, period_ms)); %#ok<AGROW>
+        RC(end+1) = q; %#ok<AGROW>
+        lines{end+1} = sprintf('    %-44s %s | %s | %s', q.label, ttxt(q.det, X.period_ms), ttxt(q.rec_det, X.period_ms), ...
+            ttxt(q.t_rec, X.period_ms)); %#ok<AGROW>
     end
 end
+end
 
-% Goodput in bit/s beside the normalized goodput
-lines{end+1} = sprintf(['Goodput after onset in bit/s (nominal payload rate %s: payload bits per frame per decision ' ...
+function [GP, lines] = gput_block(X, kg, pre, s0)
+% Goodput after onset in bit/s of the policies kg, on the threat episodes and on the
+% recoverable jamming episodes, beside the normalized goodput; bootstrap seeds from s0.
+R1 = X.R1; mj = X.mj; B = X.B;
+lines = {sprintf([pre 'Goodput after onset in bit/s (nominal payload rate %s: payload bits per frame per decision ' ...
     'cycle; a frame delivers goodput factor x (1 - packet loss), none before a coded link''s first packet), mean ' ...
-    '[95%%] beside the normalized goodput:'], bps_txt(payload_bps));
-L.gput = struct('policy', {}, 'label', {}, 'bps', {}, 'ci', {}, 'bps_jam', {}, 'ci_jam', {}, 'norm', {}, 'norm_jam', {});
+    '[95%%] beside the normalized goodput:'], bps_txt(X.payload_bps))};
+GP = struct('policy', {}, 'label', {}, 'bps', {}, 'ci', {}, 'bps_jam', {}, 'ci_jam', {}, 'norm', {}, 'norm_jam', {});
 mt = R1.threat;
 for j = 1:numel(kg)
-    R = ALL{col(kg{j})};
-    a = payload_bps * R.dlv_post;
-    [g, gl, gh] = boot_cluster(a(mt), ones(1, sum(mt)), R1.geom(mt), B, 500 + j);
-    [gj, gjl, gjh] = boot_cluster(a(mj), ones(1, sum(mj)), R1.geom(mj), B, 600 + j);
-    L.gput(end+1) = struct('policy', kg{j}, 'label', lab(kg{j}), 'bps', g, 'ci', [gl gh], 'bps_jam', gj, ...
-        'ci_jam', [gjl gjh], 'norm', mean(R.gput_post(mt), 'omitnan'), 'norm_jam', mean(R.gput_post(mj), 'omitnan'));
-    q = L.gput(end);
+    R = X.ALL{X.col(kg{j})};
+    a = X.payload_bps * R.dlv_post;
+    [g, gl, gh] = boot_cluster(a(mt), ones(1, sum(mt)), R1.geom(mt), B, s0 + j);
+    [gj, gjl, gjh] = boot_cluster(a(mj), ones(1, sum(mj)), R1.geom(mj), B, s0 + 100 + j);
+    GP(end+1) = struct('policy', kg{j}, 'label', X.lab(kg{j}), 'bps', g, 'ci', [gl gh], 'bps_jam', gj, ...
+        'ci_jam', [gjl gjh], 'norm', mean(R.gput_post(mt), 'omitnan'), 'norm_jam', mean(R.gput_post(mj), 'omitnan')); %#ok<AGROW>
+    q = GP(end);
     lines{end+1} = sprintf(['  %-44s threat episodes (%d) %s [%s, %s], normalized %.3f | recoverable jamming (%d) %s ' ...
         '[%s, %s], normalized %.3f'], q.label, sum(mt), bps_txt(g), bps_txt(gl), bps_txt(gh), q.norm, sum(mj), ...
         bps_txt(gj), bps_txt(gjl), bps_txt(gjh), q.norm_jam); %#ok<AGROW>
