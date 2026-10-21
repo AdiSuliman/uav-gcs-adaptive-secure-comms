@@ -7394,3 +7394,101 @@ verifyEqual(tc, regexp(line, '##### STAGE [A-Za-z0-9]* done', 'match', 'once'), 
 verifyNotEmpty(tc, regexp(line, '^##### STAGE ([A-Za-z0-9]*) done', 'once'));
 end
 
+%% ---------- core action set (revised proposal) ----------
+function test_core_actions_exist(tc)
+% The core action set is four of the 36 configurations under their exact names, and its
+% escalation ladder holds every core configuration but no_action once.
+A = policy_actions(); C = decision_config();
+verifyEqual(tc, C.core_actions, {'no_action', 'channel_switch', 'rate_reduce', 'channel_switch+rate_reduce'});
+verifyTrue(tc, all(ismember(C.core_actions, A)));
+verifyEqual(tc, sort(C.ladder_core), sort(setdiff(C.core_actions, {'no_action'})));
+verifyEqual(tc, C.ladder_core{1}, 'channel_switch+rate_reduce');
+end
+
+function test_rule_core_policy(tc)
+% The rule on the core set: interference on our channel leaves it, a jammer a hop does not
+% escape and a loss of our signal take the processing gain, a degraded link without a known
+% cause both; benign and clean classes on a healthy link do nothing; every answer is core.
+C = decision_config();
+for c = {'jamming', 'reactive_jamming', 'spoofing', 'tone_jamming'}
+    verifyEqual(tc, rule_core_policy(c{1}), 'channel_switch');
+end
+for c = {'sweeping_jammer', 'noise_burst', 'path_loss', 'antenna_fault', 'airframe_shadowing'}
+    verifyEqual(tc, rule_core_policy(c{1}), 'rate_reduce');
+end
+verifyEqual(tc, rule_core_policy('none'), 'no_action');
+verifyEqual(tc, rule_core_policy('benign_interference'), 'no_action');
+verifyEqual(tc, rule_core_policy('unknown'), 'no_action');
+verifyEqual(tc, rule_core_policy('benign_interference', true), 'channel_switch');
+verifyEqual(tc, rule_core_policy('none', true), 'channel_switch+rate_reduce');
+verifyEqual(tc, rule_core_policy('unknown', true), 'channel_switch+rate_reduce');
+verifyEqual(tc, rule_core_policy('none', true, 10, 5), 'channel_switch');                   % interference in the quiet slot
+verifyEqual(tc, rule_core_policy('none', true, 10, 5, false, [], false), 'channel_switch+rate_reduce');   % slot branch off
+verifyEqual(tc, rule_core_policy('none', true, 4, 5), 'channel_switch+rate_reduce');
+verifyEqual(tc, rule_core_policy('none', true, C.q_alarm_db), 'channel_switch');             % default alarm
+verifyEqual(tc, rule_core_policy('none', false, -Inf, 3, true), 'rate_reduce');              % drop alarm, quiet slot
+verifyEqual(tc, rule_core_policy('unknown', true, -Inf, 3, true), 'rate_reduce');
+verifyEqual(tc, rule_core_policy('none', false, 10, 3, true), 'no_action');                  % interference: no drop answer
+verifyEqual(tc, rule_core_policy('benign_interference', false, -Inf, 3, true), 'no_action');
+B = @(d, cur, g) struct('drop_db', d, 'current', cur, 'current_db', g);
+verifyEqual(tc, rule_core_policy('path_loss', false, -Inf, 3, false, B(5, 'no_action', 0)), 'rate_reduce');
+verifyEqual(tc, rule_core_policy('path_loss', false, -Inf, 3, false, B(5, 'channel_switch+rate_reduce', 6)), ...
+    'channel_switch+rate_reduce');                                                           % its gain covers the drop
+verifyEqual(tc, rule_core_policy('path_loss', false, -Inf, 3, false, B(-0.5, 'no_action', 0)), 'no_action');
+verifyEqual(tc, rule_core_policy('none', false, -Inf, 3, true, B(8, 'rate_reduce', 6)), 'rate_reduce');
+cls = {'jamming', 'reactive_jamming', 'spoofing', 'tone_jamming', 'sweeping_jammer', 'noise_burst', 'path_loss', ...
+    'antenna_fault', 'airframe_shadowing', 'benign_interference', 'none', 'unknown'};
+for c = cls
+    for deg = [false true]
+        for q = [-Inf 10]
+            for dr = [false true]
+                verifyTrue(tc, ismember(rule_core_policy(c{1}, deg, q, 5, dr), C.core_actions));
+                verifyTrue(tc, ismember(rule_core_policy(c{1}, deg, q, 5, dr, B(3, 'no_action', 0)), C.core_actions));
+            end
+        end
+    end
+end
+end
+
+function test_core_decide_escalation(tc)
+% Through the decision cycle the core rule applies channel_switch to a jammer it names, and
+% when the link stays degraded escalates along the core ladder, never outside the core set;
+% the full rule escalates along its own ladder. The option is the rule's only.
+C = decision_config(); A = policy_actions();
+cls = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', 'antenna_fault', ...
+    'benign_interference', 'sweeping_jammer', 'tone_jamming', 'airframe_shadowing'};
+PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0);
+na = find(strcmp(A, 'no_action'));
+obs = struct('probs', double(strcmp(cls, 'jamming')), 'unknown', false, 'feat', zeros(1, numel(link_features('names'))));
+obs.feat(feature_index('log_ber')) = -1; obs.feat(feature_index('crc_fail')) = 1;
+runs = {struct('core', true), struct()};
+first = {{'channel_switch', 'channel_switch+rate_reduce'}, {'channel_switch', C.ladder{1}}};
+for k = 1:2
+    mem = []; cfg = na; ch = {}; esc = [];
+    for t = 1:30
+        o = obs; o.cfg_link = cfg;
+        [a, mem, d] = policy_decide('rule_esc', o, cfg, mem, PP, [], runs{k});
+        if a ~= cfg, ch{end+1} = A{a}; esc(end+1) = d.escalated; end %#ok<AGROW>
+        cfg = a;
+    end
+    verifyGreaterThanOrEqual(tc, numel(ch), 2);
+    verifyEqual(tc, ch(1:2), first{k});
+    verifyEqual(tc, double(esc(1:2)), [0 1]);
+    if k == 1, verifyTrue(tc, all(ismember(ch, C.core_actions))); end
+end
+% without the detector: every cycle reads unknown, the alarm from the degradation; the core
+% answer to a degraded link without a known cause holds both core elements
+mem = []; cfg = na; ch = {};
+for t = 1:30
+    o = obs; o.cfg_link = cfg;
+    [a, mem] = policy_decide('blind_esc', o, cfg, mem, PP, [], struct('core', true));
+    if a ~= cfg, ch{end+1} = A{a}; end %#ok<AGROW>
+    cfg = a;
+end
+verifyNotEmpty(tc, ch);
+verifyEqual(tc, ch{1}, 'channel_switch+rate_reduce');
+verifyTrue(tc, all(ismember(ch, C.core_actions)));
+verifyError(tc, @() policy_decide('table_esc', obs, na, [], PP, [], struct('core', true, 'table', na * ones(1, numel(cls)), ...
+    'table_unknown', na)), 'policy_decide:core');
+verifyError(tc, @() policy_decide('dqn', obs, na, [], PP, [], struct('core', true)), 'policy_decide:core');
+end
