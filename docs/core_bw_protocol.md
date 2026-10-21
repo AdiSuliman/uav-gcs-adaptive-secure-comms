@@ -35,7 +35,8 @@ Mekdad et al. jammed, and more than ETSI's 15 channels of an adaptive hopper.
 offset 39), uniform over the channels the cell's jammer covers, the same for every policy.
 
 **Hop rules (`hop_targets.m`).** The k-th hop that reaches the link moves to the k-th channel of
-the episode's sequence; each target is taken from the channel before it.
+the episode's sequence; each target is taken from the channel before it. Against a jammer tuned to
+our channel (section 3) the k-th hop after the onset meets the coverage of the k-th channel.
 
 | Rule | Hop | Source | Role |
 |---|---|---|---|
@@ -63,8 +64,11 @@ signalling delay (1 cycle).
 | 70 MHz | wideband | Panitsas et al.: AWGN over 802.11 channels 1, 6, 11 (20 MHz each) | fixed 2402-2472 MHz |
 | 83.5 MHz | wideband | the whole band, inside the 160 MHz of Panitsas et al.'s radio | 2400-2483.5 MHz |
 
-Noise jammers of 4-20 MHz are centred on our home channel (Mekdad et al. tuned to the target's
-channel); the 70 MHz jammer sits where Panitsas et al. put it. Every B_J >= 4 MHz fills the
+Noise jammers of 4-20 MHz are centred on the channel we use at the onset (Mekdad et al. tuned to
+the target's channel), the tone likewise: our home channel, or the channel a hop made before the
+onset moved us to, so such a hop escapes nothing and the hops after the onset meet the same
+coverage under every policy (`link_env.m` spec.cover_rel). The 70 MHz jammer sits where Panitsas
+et al. put it and the whole-band one everywhere; they cover whatever channel we use. Every B_J >= 4 MHz fills the
 receiver's +-2 MHz window flat, so it is the existing barrage `jamming` waveform at its in-band
 level; Liu's raised-cosine edge is kept white. Narrowband noise (0.3125, 1.25 MHz) needs a new
 generator and is not part of this study (Tier 2, not run).
@@ -229,8 +233,8 @@ Outputs: `data/core_bw/pools.mat`, `data/core_bw/dset.mat`; `results/core_bw/val
 ## 8. Tests
 
 `code/tests/test_core.m`: test_band_plan, test_jsr_inband, test_band_cover, test_hop_targets,
-test_link_env_cover_default, test_link_env_cover_recoverable, test_link_env_residual_layer,
-test_oracle_cover, test_rule_core_wide, test_band_cells, test_band_recoverable_scenarios,
+test_link_env_cover_default, test_link_env_cover_recoverable, test_link_env_cover_relative,
+test_link_env_residual_layer, test_oracle_cover, test_rule_core_wide, test_band_cells, test_band_recoverable_scenarios,
 test_band_seeds_disjoint, test_band_protocol_guard, and the existing test_rule_core_policy,
 test_core_decide_escalation, test_core_policies_rollout, test_per_reduction, test_three_state_view.
 

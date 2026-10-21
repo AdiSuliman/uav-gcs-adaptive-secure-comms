@@ -5,7 +5,7 @@ function [a, ceff, ta] = oracle_action(E, K)
 %   rule of link_env.m: a hop when channel_switch follows a configuration without it, or
 %   is kept after a failed frame, and none while one is on its way; with spec.cover (the
 %   bandwidth study, link_env.m) channel_switch on a channel the static jammer covers acts as
-%   the configuration without it.
+%   the configuration without it (spec.cover_rel: hops counted from the onset).
 %   [a, ceff, ta] = oracle_action(E, K)
 %   E, K   link_env.m state (before the step) and tables
 %   a      the configuration chosen (1 x NE)
@@ -17,6 +17,8 @@ a = E.cfg; ceff = a;
 ta = E.t + 1 + E.D;
 pend = any(E.hopq, 1);
 cov = isfield(E, 'cover') && ~isempty(E.cover);
+rel = false(1, E.NE);                                  % the jammer takes the channel in use at the onset
+if cov && isfield(E, 'cover_rel') && ~isempty(E.cover_rel), rel = logical(E.cover_rel(:)'); end
 for i = 1:E.NE
     sc = E.scn(i); if ta(i) < E.onset(i), sc = K.clean; end
     healthy = K.healthy(sc, E.s(i), E.split, E.r(i));
@@ -33,6 +35,7 @@ for i = 1:E.NE
         if on && E.comb(i) && K.hasFd(c), ce = K.strip_fd(c); end
         if on && cov && K.hasCh(c)                     % the hops that have reached the link by frame ta
             nh = E.nhop(i) + nnz(E.hopq(:, i)) + hop;
+            if rel(i), nh = nh - E.nh_on(i) - (E.t(i) < E.onset(i) && ~isempty(k) && E.t(i) + k < E.onset(i)); end
             if nh == 0 || E.cover(i, min(nh, size(E.cover, 2))), ce = K.strip(c); end
         end
         chg = c ~= E.cfg(i) || hop;

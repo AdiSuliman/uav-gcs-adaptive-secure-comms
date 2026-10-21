@@ -246,6 +246,7 @@ E.fec_t = -inf(1, NE);                              % frame from which the link 
 E.nhop = zeros(1, NE); E.nh_on = E.nhop;            % hops that reached the link, and of them before the onset
 if ~isfield(spec, 'cover'), E.cover = []; end
 if ~isfield(spec, 'acr'), E.acr = []; end
+if ~isfield(spec, 'cover_rel') || isempty(spec.cover_rel), E.cover_rel = false(1, NE); end
 if ~isfield(spec, 'comb') || isempty(spec.comb), E.comb = false(1, NE); end
 if ~isfield(spec, 'offset') || isempty(spec.offset), E.offset = inf(1, NE); end
 if ~isfield(spec, 'r') || isempty(spec.r)            % geometry of the episode, one its cell flies
@@ -342,8 +343,9 @@ end
 
 function [cv, k] = on_channel(E)
 % The jammer covers the channel in use: the home channel before the first hop, else the
-% channel of the k-th hop that reached the link.
-k = E.nhop; cv = true(1, E.NE); h = k > 0;
+% channel of the k-th hop that reached the link (spec.cover_rel: the k-th after the onset,
+% the channel in use at the onset covered).
+k = E.nhop - E.nh_on .* rel_cover(E); cv = true(1, E.NE); h = k > 0;
 if any(k > size(E.cover, 2))
     error('link_env:cover', 'link_env: hop %d reached the link, spec.cover holds %d', max(k), size(E.cover, 2));
 end
@@ -352,14 +354,20 @@ end
 
 function e = reach_escape(E, j)
 % Some hop that can reach the link after the onset escapes the jammer (episodes j).
-H = size(E.cover, 2); ii = find(j);
+H = size(E.cover, 2); ii = find(j); rel = rel_cover(E);
 e = false(1, numel(ii));
 for m = 1:numel(ii)
     i = ii(m);
     n = floor((E.T - E.onset(i) - 1) / (E.D + 1));
-    w = E.nh_on(i) + (1:n); w = w(w <= H);
+    w = E.nh_on(i) * ~rel(i) + (1:n); w = w(w <= H);
     e(m) = any(~E.cover(i, w));
 end
+end
+
+function rel = rel_cover(E)
+% Episodes whose jammer takes the channel in use at the onset (spec.cover_rel).
+rel = false(1, E.NE);
+if isfield(E, 'cover_rel') && ~isempty(E.cover_rel), rel = logical(E.cover_rel(:)'); end
 end
 
 function [E, obs, sc_eff, cfg_eff, cm, lay] = draw(E, PP, K)

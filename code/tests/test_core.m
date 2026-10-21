@@ -7961,6 +7961,62 @@ function info = last_info(PP, K, spec, a)
 for t = 1:spec.T, [E, ~, ~, info] = link_env('step', E, PP, K, a); end
 end
 
+function test_link_env_cover_relative(tc)
+% spec.cover_rel: a jammer tuned to our channel takes the channel in use at the onset, so a hop
+% before the onset escapes nothing and the k-th hop after it reads column k of cover (and of
+% the recoverable rule); without it the hop before the onset counts; cover_rel all false is the
+% path without the field bit for bit; the one-step oracle predicts the link's effective
+% configuration after a hop made before the onset, at every signalling delay.
+[PP, K] = toy_world(true, true);
+ics = find(strcmp(PP.actions, 'channel_switch'));
+T = 30; cov = @(k) ~ismember(1:T, k);
+s = struct('scn', 2, 's', 1, 'onset', 5, 'follow', false, 'fdelay', 0, 'unk', false, 'T', T, 'r', 1, 'cover', cov(1));
+post = (1:T) >= s.onset;
+for rel = [false true]
+    s.cover_rel = rel;
+    [E, ~] = link_env('reset', PP, K, s, 1, RandStream('mt19937ar', 'Seed', 1));
+    eff = zeros(1, T); ok = false(1, T); nh = zeros(1, T);
+    for t = 1:T
+        [E, ~, ~, info] = link_env('step', E, PP, K, ics);
+        eff(t) = info.cfg_eff; ok(t) = info.restored; nh(t) = E.nhop;
+    end
+    verifyEqual(tc, nh(s.onset - 1), 1, sprintf('rel %d: one hop before the onset', rel));
+    verifyEqual(tc, E.nh_on, 1);
+    if rel
+        verifyEqual(tc, eff(post & nh == 1), K.strip(ics) * ones(1, nnz(post & nh == 1)));
+        verifyNotEmpty(tc, find(post & nh == 1));
+        verifyEqual(tc, eff(post & nh == 2), ics * ones(1, nnz(post & nh == 2)));
+        verifyTrue(tc, all(ok(post & nh == 2))); verifyFalse(tc, any(ok(post & nh == 1)));
+        verifyEqual(tc, max(nh), 2);
+    else
+        verifyEqual(tc, eff(post), ics * ones(1, nnz(post)));   % the hop before the onset escaped
+        verifyTrue(tc, all(ok(post))); verifyEqual(tc, max(nh), 1);
+    end
+end
+rec = @(spec) last_info(PP, K, spec, ics).recoverable;
+s.cover = cov(13);
+s.cover_rel = false; verifyTrue(tc, rec(s));             % hops 2..13 after the onset
+s.cover_rel = true; verifyFalse(tc, rec(s));             % hops 1..12 after the onset
+s.cover = cov(12); verifyTrue(tc, rec(s));
+acts = repelem(randi(RandStream('mt19937ar', 'Seed', 5), numel(PP.actions), 10, 1), 3, 1);
+s0 = rmfield(s, 'cover_rel'); s0.cover = cov([2 5 9]); s1 = s0; s1.cover_rel = false;
+verifyTrue(tc, isequaln(env_trace(PP, K, s0, acts), env_trace(PP, K, s1, acts)), 'cover_rel false');
+for D = [0 1 2]
+    spec = struct('scn', 2, 's', 1, 'onset', 9, 'follow', false, 'fdelay', 0, 'unk', false, 'T', T, 'r', 1, ...
+        'delay', D, 'cover', cov(2), 'cover_rel', true);
+    [E, ~] = link_env('reset', PP, K, spec, 1, RandStream('mt19937ar', 'Seed', 1));
+    pred = zeros(1, T); eff = zeros(1, T);
+    for t = 1:T
+        [a, pred(t)] = oracle_action(E, K);
+        if t == 1, a = ics; end                              % a hop before the onset
+        [E, ~, ~, info] = link_env('step', E, PP, K, a);
+        eff(t) = info.cfg_eff;
+    end
+    verifyEqual(tc, E.nh_on, 1, sprintf('D %d: one hop before the onset', D));
+    verifyEqual(tc, pred(2:end - D), eff(2 + D:end), sprintf('oracle, D %d', D));
+end
+end
+
 function test_link_env_residual_layer(tc)
 % spec.acr: on an escaped hop the channel_switch configurations read the residual's layer
 % PP.acr_pools{v - 1} (its frames and its tables), 1 the pools; a covered hop ignores it. The

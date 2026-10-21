@@ -338,7 +338,9 @@ end
 %% ===================== Episodes =====================
 function EP = episodes(X, PP, sp, B)
 % Every (scenario, Eb/N0, geometry, onset) of split sp, the hop channels of every rule from the
-% episode's 'hop' stream (seed_stream.m) and their coverage (band_cover.m).
+% episode's 'hop' stream (seed_stream.m) and their coverage (band_cover.m). A jammer tuned to
+% our channel (tone, centred) takes the channel in use at the onset, so its coverage is that of
+% the hops after it (EP.rel, link_env.m cover_rel); a fixed one covers whatever channel we are on.
 scen = PP.scenarios; nS = numel(PP.ebno); nG = X.NGEO(sp); T = X.T;
 C = decision_config();
 rs = RandStream('mt19937ar', 'Seed', 2030 + sp);
@@ -350,6 +352,7 @@ EP.c = [scen(EP.k).cell] + 1;                          % index into PP.scen (1: 
 EP.onset = ONS(sub2ind(size(ONS), EP.s, EP.r, EP.rep)); EP.fdelay = FD(sub2ind(size(FD), EP.s, EP.r, EP.rep));
 EP.slice = [scen(EP.k).slice]; EP.bj = [scen(EP.k).bj]; EP.tot = [scen(EP.k).jsr_tot]; EP.inb = [scen(EP.k).jsr_in];
 EP.narrow = EP.bj == 0;
+EP.rel = arrayfun(@(i) ~strcmp(scen(i).J.kind, 'fixed'), EP.k);   % tuned to our channel: hops counted from the onset
 EP.home = zeros(1, n);
 for q = 1:numel(X.RULES)
     EP.cover{q} = false(n, T); EP.acr{q} = ones(n, T); EP.part{q} = false(n, T); EP.near{q} = false(n, T);
@@ -385,7 +388,7 @@ specs = cell(1, nb);
 for b = 1:nb
     j = ii((b - 1) * X.NE + (1:X.NE));
     sp = struct('scn', EP.c(j), 's', EP.s(j), 'r', EP.r(j), 'onset', EP.onset(j), 'follow', repmat(follow, 1, X.NE), ...
-        'fdelay', EP.fdelay(j), 'unk', false(1, X.NE), 'T', X.T, 'cover', EP.cover{q}(j, :));
+        'fdelay', EP.fdelay(j), 'unk', false(1, X.NE), 'T', X.T, 'cover', EP.cover{q}(j, :), 'cover_rel', EP.rel(j));
     if acr, sp.acr = EP.acr{q}(j, :); end
     specs{b} = sp;
 end
@@ -490,7 +493,8 @@ end
 function G = g3_check(PP, K, X, EP, B)
 % Gate G3: under channel_switch held from the first cycle, every frame after the onset comes
 % from the pool band_cover.m names for the channel in use (covered: the configuration
-% without channel_switch), on every validation episode of every hop rule; beside it the
+% without channel_switch; a jammer tuned to our channel covers the channel of the hop made
+% before the onset), on every validation episode of every hop rule; beside it the
 % escape share of the first hop, drawn and enumerated (mid-band and band edge homes, and the
 % centred jammers off centre as far as our channel stays covered).
 ics = find(strcmp(PP.actions, 'channel_switch'));
@@ -503,11 +507,14 @@ for q = 1:numel(X.RULES)
     for b = 1:numel(specs)
         sp = specs{b}; nv = X.NE; if isfield(sp, 'n_valid'), nv = sp.n_valid; end
         [E, ~] = link_env('reset', PP, K, sp, 1, RandStream('mt19937ar', 'Seed', 61000 + b));
+        n0 = zeros(1, X.NE);                            % hops before the onset
         for t = 1:X.T
             [E, ~, ~, info] = link_env('step', E, PP, K, ics * ones(1, X.NE));
             m = info.post & E.cfg_link == ics & K.followable(E.scn); m(nv + 1:end) = false;
-            cv = true(1, X.NE); h = E.nhop > 0;
-            cv(h) = sp.cover(sub2ind(size(sp.cover), find(h), E.nhop(h)));
+            pre = E.t < sp.onset; n0(pre) = E.nhop(pre);
+            kh = E.nhop - n0 .* sp.cover_rel;           % a jammer tuned to our channel counts from the onset
+            cv = true(1, X.NE); h = kh > 0;
+            cv(h) = sp.cover(sub2ind(size(sp.cover), find(h), kh(h)));
             want = ics * ones(1, X.NE); want(cv) = K.strip(ics);
             bad = bad + nnz(m & info.cfg_eff ~= want); nf = nf + nnz(m);
         end
