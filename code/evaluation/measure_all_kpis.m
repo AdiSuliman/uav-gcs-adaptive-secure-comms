@@ -67,7 +67,7 @@ end
 RS = result_status();
 rst = @(f) RS(strcmp({RS.file}, f));                   % identity and age of a result file
 KPI = struct('id', {}, 'name', {}, 'value', {}, 'target', {}, 'status', {}, 'detail', {});
-LECT = struct('three', [], 'three_above', [], 'three3', [], 'three3_above', [], 'pol', [], 'core', []);
+LECT = struct('three', [], 'three_above', [], 'three3', [], 'three3_above', [], 'pol', [], 'cnn', []);
 rep = {'=== PROPOSAL KPI SUMMARY (proposal wording) ===', sprintf('Generated: %s | %s', datestr(now), git_stamp()), ''};
 
 %% KPI 1 - detection
@@ -151,7 +151,7 @@ if isfile(F.det)
     if isfile(F.arch), det{end+1} = 'architecture comparison: results/architecture_comparison.txt'; end
     [LECT.three, LECT.three_above, l3] = three_states(m, kpi1_file('detector_predictions'));
     det = [det, l3];
-    [LECT.core, lc] = core_cnn_line('results/core_cnn.mat'); det{end+1} = lc;
+    [LECT.cnn, lc] = core_cnn_line('results/core_cnn.mat'); det{end+1} = lc;
     if ~contains(F.det, '_fresh2') && isfile('results/eval_detector_metrics_fresh2.mat')   % the third test set's beside
         M3 = load('results/eval_detector_metrics_fresh2.mat', 'metrics');
         [LECT.three3, LECT.three3_above, l3] = three_states(M3.metrics, 'results/detector_predictions_fresh2.mat');

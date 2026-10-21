@@ -7374,7 +7374,7 @@ verifyNotEmpty(tc, strfind(k1, ['three-state CNN on spectrograms only (deliverab
     'results/core_cnn.txt): macro-F1 93.00% [92.00, 94.00] met (committed); recall narrowband 92.00% met (committed), ' ...
     'wideband 90.00% met (not committed); false alarms 3.00% met (committed); the hybrid on the same frames: macro-F1 ' ...
     '90.00%, false alarms 5.00%']));
-verifyEqual(tc, S.LECT.core.N, 5);
+verifyEqual(tc, S.LECT.cnn.N, 5);
 end
 
 function test_lect_kpis_pending(tc)
