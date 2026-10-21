@@ -204,7 +204,7 @@ action W (`rule_core_policy.m` wide_action, `PP.core_wide`); every other class k
 (`decision_settings.m`, `data/trained_dqn.mat`), the same episodes and frame draws. Among them
 the proposal dwell, chosen on validation for rule + escalation (`train_dqn.m`): under the
 consecutive dwell ('run') the class answer can commit again after an escalation left it, under
-the group dwell a configuration tried in the incident is not proposed again; `rule_core` and
+the group dwell the rule does not commit a configuration tried in the incident again; `rule_core` and
 `blind_core` run the same dwell. `oracle`
 (cover-aware, `oracle_action.m`) is read as a bound only.
 

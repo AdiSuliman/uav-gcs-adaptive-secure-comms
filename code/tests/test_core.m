@@ -7564,7 +7564,7 @@ end
 
 function test_rule_dwell_tried(tc)
 % On a link that stays degraded (one incident), the consecutive dwell ('run') commits the class
-% answer again after an escalation left it, the group dwell never proposes a configuration
+% answer again after an escalation left it, the group dwell never commits a configuration
 % tried in the incident; alike for rule_esc and blind_esc, full and core. The dwell is a
 % validation choice of train_dqn.m, applied to every reader through decision_settings.m.
 A = policy_actions();
