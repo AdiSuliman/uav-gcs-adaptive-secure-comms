@@ -7708,6 +7708,43 @@ k = abs((1:numel(cv)) - h) >= 3;
 e = mean(~cv(k));
 end
 
+function test_hop_targets(tc)
+% H1: every target at least 6 MHz (3 channels) from the channel before it, uniform over those
+% (chi-square over 10^4 draws, p > 0.01), the same sequence from the same seed; H3: 13 channels
+% toward the middle, inside the plan, coming back across it; H4: 2 channels, reflected at the
+% edge; the home channel only among the ones the jammer covers, each of them drawn.
+B = band_plan(); nC = numel(B.f_mhz);
+c = hop_targets('H1', 5, 500, RandStream('mt19937ar', 'Seed', 4), B);
+verifyTrue(tc, all(abs(diff([5 c])) >= 3));
+verifyTrue(tc, all(c >= 1 & c <= nC));
+verifyEqual(tc, hop_targets('H1', 5, 500, RandStream('mt19937ar', 'Seed', 4), B), c);
+rs = RandStream('mt19937ar', 'Seed', 9);
+x = arrayfun(@(~) hop_targets('H1', 21, 1, rs, B), 1:1e4);
+k = find(abs((1:nC) - 21) >= 3);
+verifyTrue(tc, all(ismember(x, k)));
+n = histcounts(x, [k - 0.5, k(end) + 0.5]); E = numel(x) / numel(k);
+verifyGreaterThan(tc, 1 - chi2cdf(sum((n - E) .^ 2 / E), numel(k) - 1), 0.01);
+for h0 = 1:nC
+    c3 = hop_targets('H3', h0, 40, [], B);
+    verifyTrue(tc, all(c3 >= 1 & c3 <= nC) && all(abs(diff([h0 c3])) == 13), sprintf('H3 from %d', h0));
+    c4 = hop_targets('H4', h0, 60, [], B);
+    verifyTrue(tc, all(c4 >= 1 & c4 <= nC) && all(abs(diff([h0 c4])) == 2), sprintf('H4 from %d', h0));
+end
+verifyEqual(tc, hop_targets('H3', 21, 4, [], B), [34 21 34 21]);
+verifyEqual(tc, hop_targets('H3', 1, 4, [], B), [14 27 14 27]);
+c4 = hop_targets('H4', 3, 21, [], B);
+verifyEqual(tc, c4([1 19 20 21]), [5 41 39 37]);
+verifyEqual(tc, hop_targets('H4', 39, 2, [], B), [37 35]);
+cells = band_cells();
+J = cells(strcmp({cells.name}, 'bw70_tot16')).J;
+can = band_cover(band_cover('span', J, NaN), B.f_mhz, B.b_ch);
+rs = RandStream('mt19937ar', 'Seed', 2);
+hh = arrayfun(@(~) hop_targets('home', can, [], rs), 1:2000);
+verifyTrue(tc, all(can(hh)));
+verifyEqual(tc, unique(hh), find(can));
+verifyError(tc, @() hop_targets('H2', 1, 1, [], B), 'hop_targets:rule');
+end
+
 function test_band_cells(tc)
 % 30 fixed-total cells (6 widths x 5 levels, JSR_tot <= 30 dB) and 4 equal-level cells; every
 % level within the 30 dB in-band cap and in the right field; the equal-level scenarios only
