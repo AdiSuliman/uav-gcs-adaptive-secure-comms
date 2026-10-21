@@ -143,9 +143,13 @@ C/I there (2 Mb/s, our raw rate; Table 8, ETSI EN 300 440-1, measured 0 to +-40 
 steps): +7 dBc co-channel; +3, -17, -21, -40 and -48 dBc at 2, 4, 6, beyond 12 and beyond 36 MHz,
 so 4, 24, 28, 47 and 55 dB, the row at or below the offset (4 dB from 2 MHz, 24 from 4, 28 from 6
 to 12, 47 beyond 12, 55 beyond 36 MHz). At n x 2 f_xtal (32 and 64 MHz, f_xtal 16 MHz) the sheet's
-footnote puts it about 5 dB under the adjacent figures, 42 and 50 dB; they hold strictly between
-the measured points next to them (31-33 and 63-65 MHz: the sheet's 1 MHz steps put the adjacent
-figures at 31 and 33 MHz, and the spur passes what the receiver's 2 MHz bandwidth passes). Below 2 MHz the sheet's
+footnote puts it about 5 dB under the adjacent figures, 42 and 50 dB. The 42 dB holds strictly
+between the measured points next to 32 MHz (31-33 MHz: the sheet's 1 MHz steps put the adjacent
+figures at 31 and 33 MHz, and the spur passes what the receiver's 2 MHz bandwidth passes). The
+sheet measured only to +-40 MHz: 50 dB over 63-65 MHz is the footnote's n x 2 f_xtal rule applied
+past that range with the same +-1 MHz width, and 55 dB beyond 40 MHz is the open "> 36 MHz" row
+applied there; both are the most severe values the sheet states for those offsets (a receiver's
+rejection does not fall farther out). Below 2 MHz the sheet's
 only row is co-channel: such a channel counts as covered. The 2 Mb/s rows are the sheet's most
 severe at every offset from 2 MHz (1 Mb/s: 29, 39, 49, 56 dB; Table 9, a modulated interferer: 7,
 29, 35, 51, 59 dB); at 2 Mb/s the nRF's 20 dB bandwidth is 2 MHz, ours 1.25 MHz. 802.11-2007 is

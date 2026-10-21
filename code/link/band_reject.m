@@ -6,8 +6,10 @@ function [R, d, Rx] = band_reject(J, fj, B)
 %   36 MHz, about 5 dB worse than the adjacent figures at n x 2 f_xtal (32 and 64 MHz, f_xtal
 %   16 MHz). The rejection at an offset is the co-channel C/I minus the offset's, the row at
 %   or below it: 4 dB from 2 MHz, 24 from 4, 28 from 6 to 12, 47 beyond 12, 55 beyond 36; 42
-%   and 50 dB strictly between the measured points next to 32 and 64 MHz; 0 below 2 MHz,
-%   where the sheet's only row is co-channel. These rows are the sheet's most severe at every
+%   dB strictly between the measured points next to 32 MHz (31-33 MHz); past the measured
+%   +-40 MHz the open > 36 MHz row (55 dB) and the footnote's n x 2 f_xtal rule at the same
+%   +-1 MHz width (50 dB over 63-65 MHz); 0 below 2 MHz, where the sheet's only row is
+%   co-channel. These rows are the sheet's most severe at every
 %   offset from 2 MHz: the 1 Mb/s rows give 29, 39, 49 and 56 dB, Table 9 (a modulated
 %   interferer) 7, 29, 35, 51 and 59 dB; at 2 Mb/s the nRF's 20 dB bandwidth is 2 MHz, ours
 %   1.25 MHz.

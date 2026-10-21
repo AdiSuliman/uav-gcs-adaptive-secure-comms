@@ -7886,7 +7886,8 @@ end
 function test_band_reject(tc)
 % The residual's effective rejection (band_reject.m): the nRF24L01+'s 2 Mb/s rows (+7 dBc
 % co-channel; +3, -17, -21, -40, -48 at 2, 4, 6, >12, >36 MHz) as co-channel minus offset, 42
-% and 50 dB strictly between the measured points next to 32 and 64 MHz; a tone at the lowest row
+% dB strictly between the measured points next to 32 MHz, past the measured +-40 MHz the > 36 MHz
+% row and 50 dB over 63-65 MHz (the footnote's n x 2 f_xtal rule); a tone at the lowest row
 % over its offset range (as before); a wide jammer's whole spectrum counted, so a flat one meets
 % less than its nearest row and a raised cosine's thin edge (Liu's 4 MHz, Mekdad's 8 MHz low-pass)
 % more; 0 on covered channels, below
@@ -7897,8 +7898,8 @@ cells = band_cells();
 J = @(n) cells(strcmp({cells.name}, n)).J;
 rj = @(n, fh) band_reject(J(n), fh, B);
 verifyEqual(tc, 7 - [3 -17 -21 -40 -48], [4 24 28 47 55]);
-verifyEqual(tc, band_reject('rows', [0 1.99 2 3.9 4 5.9 6 12 12.01 30.9 31.1 32 32.9 33 36 36.1 63.5 64 65 80]), ...
-    [0 0 4 4 24 24 28 28 47 47 42 42 42 47 47 55 50 50 55 55]);
+verifyEqual(tc, band_reject('rows', [0 1.99 2 3.9 4 5.9 6 12 12.01 30.9 31.1 32 32.9 33 36 36.1 40 41 62.9 63 63.5 64 65 80]), ...
+    [0 0 4 4 24 24 28 28 47 47 42 42 42 47 47 55 55 55 55 55 50 50 55 55]);
 R = rj('cw_tot16', 2401);
 m = [0 1 2 3 4 6 7 15 16 17 18 19 32 40];
 verifyEqual(tc, R(m + 1), [0 0 4 24 28 28 47 47 42 47 47 55 50 55]);
@@ -7947,7 +7948,8 @@ end
 function test_band_reject_eff(tc)
 % R_eff by hand: a flat 20 MHz jammer 14 MHz away (offsets 4-24 MHz: 2 MHz at 24 dB, 6 at 28,
 % 12 at 47) and 12 MHz away (2-22 MHz); the 70 MHz jammer at 2477 MHz (5-75 MHz, 31-33 MHz at
-% 42 dB and 63-65 at 50, the measured points next to n x 2 f_xtal); Liu's raised cosine 6 MHz
+% 42 dB, between the measured points next to 32 MHz, and 63-65 at 50, the footnote's n x 2
+% f_xtal rule past the measured +-40 MHz); Liu's raised cosine 6 MHz
 % away, and Mekdad's 8 MHz low-pass (raised cosine, roll-off 0.125: flat to +-3.5 MHz, half
 % density at the 4 MHz cutoff, none from the 4.5 MHz stopband edge) 8 and 10 MHz away, their
 % spectra integrated numerically; the flat part of a raised cosine holds its in-band density, so
