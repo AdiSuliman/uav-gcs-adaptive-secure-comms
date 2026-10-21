@@ -23,7 +23,8 @@ function varargout = link_env(cmd, varargin)
 %         channel_switch on a covered channel acts as the same configuration without it, as
 %         after a follower's re-acquisition; optional acr (NE x H): on an escaped hop the
 %         channel_switch configurations take their frames from the pools (1) or from the
-%         residual's layer PP.alt{v - 1} (v > 1, the same configurations at another rejection)
+%         residual's layer PP.acr_pools{v - 1} (v > 1, the same configurations at another
+%         rejection; PP.alt is the pools' altitudes, never a layer)
 %   split: 1 = train, 2 = validation, 3 = test, 4 = edge-speed pools, 5 = second
 %         test; rs: RandStream for frame draws
 %
@@ -198,12 +199,12 @@ for sp = 1:nSp
 end
 comp = cellfun(@(x) strsplit(x, '+'), PP.scen, 'UniformOutput', false);
 K.followable = cellfun(@(c) any(ismember(c, {'jamming', 'reactive_jamming', 'spoofing', 'tone_jamming'})), comp);
-K.alt = {};                                         % PP.alt: pools of the residual's layers (spec.acr)
-if isfield(PP, 'alt') && ~isempty(PP.alt)
-    for v = 1:numel(PP.alt)
-        Pv = rmfield(PP, 'alt'); Pv.pools = PP.alt{v};
+K.acr_tabs = {};                                    % PP.acr_pools: pools of the residual's layers (spec.acr)
+if isfield(PP, 'acr_pools') && ~isempty(PP.acr_pools)
+    for v = 1:numel(PP.acr_pools)
+        Pv = rmfield(PP, 'acr_pools'); Pv.pools = PP.acr_pools{v};
         Kv = tables(Pv, ref);
-        K.alt{v} = struct('q', Kv.q, 'restored', Kv.restored, 'restored_plr', Kv.restored_plr, 'gput', Kv.gput);
+        K.acr_tabs{v} = struct('q', Kv.q, 'restored', Kv.restored, 'restored_plr', Kv.restored_plr, 'gput', Kv.gput);
     end
 end
 end
@@ -299,10 +300,11 @@ idx = sub2ind(size(K.q), sc_eff, E.s, cfg_eff, sp, E.r);
 ih = sub2ind(size(K.healthy), sc_eff, E.s, sp, E.r);
 healthy = K.healthy(ih);
 q = K.q(idx); rst = K.restored(idx); rpl = K.restored_plr(idx); gpt = K.gput(idx);
-for v = 1:numel(K.alt)                              % an escaped hop at another rejection
+nL = 0; if isfield(K, 'acr_tabs'), nL = numel(K.acr_tabs); end
+for v = 1:nL                                        % an escaped hop at another rejection
     j = lay == v; if ~any(j), continue; end
-    q(j) = K.alt{v}.q(idx(j)); rst(j) = K.alt{v}.restored(idx(j));
-    rpl(j) = K.alt{v}.restored_plr(idx(j)); gpt(j) = K.alt{v}.gput(idx(j));
+    q(j) = K.acr_tabs{v}.q(idx(j)); rst(j) = K.acr_tabs{v}.restored(idx(j));
+    rpl(j) = K.acr_tabs{v}.restored_plr(idx(j)); gpt(j) = K.acr_tabs{v}.gput(idx(j));
 end
 r = (q - K.cost(E.cfg_link) - K.SW * (changed | hop) - K.FA * (changed & healthy & ~rel)) / 100;
 rec = K.recoverable(ih); rec(E.comb) = K.recoverable_comb(ih(E.comb));
@@ -360,7 +362,7 @@ end
 function [E, obs, sc_eff, cfg_eff, cm, lay] = draw(E, PP, K)
 % Frame of the effective (cell, configuration), same geometry, frame position
 % k0 + t inside the geometry (cyclic; a rolling-in flight beyond its run's end cycles over
-% its last 10 frames); lay > 0 takes it from the residual's layer PP.alt{lay}.
+% its last 10 frames); lay > 0 takes it from the residual's layer PP.acr_pools{lay}.
 sc_eff = E.scn; sc_eff(E.t < E.onset | E.t >= E.offset) = K.clean;
 cfg_eff = E.cfg_link;
 [cm, cf, lay] = compromised(E, K, E.cfg_link);
@@ -376,7 +378,7 @@ obs.idle = nan(E.NE, numel(idle_summary('names')));     % the idle time before t
 obs.bch = [];                                           % every antenna's channel estimates (branch_record.m)
 obs.mmse_pred = nan(E.NE, 1);                           % the predicted MMSE gain over MRC (pools without it: none)
 for i = 1:E.NE
-    if lay(i) > 0, P = PP.alt{lay(i)}{sc_eff(i), E.s(i), cfg_eff(i), E.split};
+    if lay(i) > 0, P = PP.acr_pools{lay(i)}{sc_eff(i), E.s(i), cfg_eff(i), E.split};
     else, P = PP.pools{sc_eff(i), E.s(i), cfg_eff(i), E.split}; end
     rows = find(P.run == PP.runs{E.split}(E.r(i)));
     q = E.k0(i) + E.t(i); n = numel(rows);

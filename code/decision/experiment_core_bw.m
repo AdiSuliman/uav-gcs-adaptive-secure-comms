@@ -244,15 +244,15 @@ f = arrayfun(@(c) mean(c.level - 20 * log10(ca) > p0.inband_cap_db), cells);
 end
 
 function PP = load_pools(X, with_alt)
-% The study's pools; with_alt: the residual's layers as full pool arrays in PP.alt
+% The study's pools; with_alt: the residual's layers as full pool arrays in PP.acr_pools
 % (link_env.m), the configurations they do not hold taken from the pools.
 L = load(X.pools, 'PP'); PP = L.PP;
 if with_alt
-    PP.alt = cell(1, numel(PP.alt_pools));
+    PP.acr_pools = cell(1, numel(PP.alt_pools));
     for v = 1:numel(PP.alt_pools)
         Q = PP.pools; e = ~cellfun(@isempty, PP.alt_pools{v});
         Q(e) = PP.alt_pools{v}(e);
-        PP.alt{v} = Q;
+        PP.acr_pools{v} = Q;
     end
 end
 PP = rmfield(PP, 'alt_pools');

@@ -7960,14 +7960,19 @@ end
 
 function test_link_env_residual_layer(tc)
 % spec.acr: on an escaped hop the channel_switch configurations read the residual's layer
-% PP.alt{v - 1} (its frames and its tables), 1 the pools; a covered hop ignores it.
+% PP.acr_pools{v - 1} (its frames and its tables), 1 the pools; a covered hop ignores it. The
+% pools' altitudes (PP.alt, build_policy_pools.m) are no layer: the tables stay the same.
 [PP, K0] = toy_world(true, true);
 ics = find(strcmp(PP.actions, 'channel_switch'));
+Pa = PP; Pa.alt = {100 * ones(1, 1)};
+Ka = link_env('tables', Pa);
+verifyEmpty(tc, Ka.acr_tabs);
+verifyTrue(tc, isequaln(rmfield(Ka, 'acr_tabs'), rmfield(K0, 'acr_tabs')));
 Q = PP.pools;
 for a = find(contains(PP.actions, 'channel_switch')), Q(2, :, a, 1) = PP.pools(2, :, K0.na, 1); end
-PP.alt = {Q};
+PP.acr_pools = {Q};
 K = link_env('tables', PP);
-verifyTrue(tc, K.restored(2, 1, ics, 1, 1)); verifyFalse(tc, K.alt{1}.restored(2, 1, ics, 1, 1));
+verifyTrue(tc, K.restored(2, 1, ics, 1, 1)); verifyFalse(tc, K.acr_tabs{1}.restored(2, 1, ics, 1, 1));
 s = struct('scn', 2, 's', 1, 'onset', 3, 'follow', false, 'fdelay', 0, 'unk', false, 'T', 12, 'r', 1, ...
     'cover', false(1, 12), 'acr', 2 * ones(1, 12));
 [ok, ber, eff] = hold_trace(PP, K, s, ics);
