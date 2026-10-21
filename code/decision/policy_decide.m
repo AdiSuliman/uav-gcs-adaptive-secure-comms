@@ -15,7 +15,8 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %          decision_settings.m): the policy's own settings in place of PP's; core (rule,
 %          rule_esc, blind_esc): the core action set C.core_actions, the rule from
 %          rule_core_policy.m, the escalation over C.ladder_core and the link-budget match
-%          over rate_reduce alone
+%          over rate_reduce alone; PP.core_wide, when set, the core rule's action for the
+%          class jamming (rule_core_policy.m wide_action)
 %
 %   Link monitor, alarm confirmation and the agent's observation history:
 %   policy_monitor.m (shared). Timing constants: decision_config.m.
@@ -99,6 +100,7 @@ switch base
         qt = NaN; if isfield(PP, 'q_thr') && ~isempty(PP.q_thr), qt = PP.q_thr; end
         mt = C.rule_mmse_db; if isfield(PP, 'rule_mmse_db') && ~isempty(PP.rule_mmse_db), mt = PP.rule_mmse_db; end
         so = true; if isfield(PP, 'rule_slot') && ~isempty(PP.rule_slot), so = PP.rule_slot; end
+        cw = ''; if isfield(PP, 'core_wide') && ~isempty(PP.core_wide), cw = PP.core_wide; end
         grp = isfield(PP, 'rule_dwell') && strcmp(PP.rule_dwell, 'group');
         if grp && (~isfield(mem, 'ph') || size(mem.ph, 1) ~= NE), mem.ph = zeros(NE, C.dwell_n); end
         gk = config_gain_db(PP); [gm, gid] = action_groups(A);
@@ -108,7 +110,7 @@ switch base
         for i = 1:NE
             if core
                 bud.drop_db = M.drop(i); bud.current = A{cfg(i)}; bud.current_db = gk(cfg(i));
-                p = find(strcmp(A, rule_core_policy(M.cls{i}, M.degraded(i), qi(i), qt, M.drop_alarm(i), bud, so)), 1);
+                p = find(strcmp(A, rule_core_policy(M.cls{i}, M.degraded(i), qi(i), qt, M.drop_alarm(i), bud, so, cw)), 1);
             elseif strcmp(base, 'rule')
                 bud.drop_db = M.drop(i); bud.current = A{cfg(i)}; bud.current_db = gk(cfg(i));
                 p = find(strcmp(A, rule_based_policy(M.cls{i}, M.degraded(i), gain(i), qi(i), qt, M.drop_alarm(i), bud, mt, ...

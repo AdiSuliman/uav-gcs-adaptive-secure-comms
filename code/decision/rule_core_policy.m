@@ -1,4 +1,4 @@
-function [action, reason] = rule_core_policy(threat_class, degraded, q_iot_db, q_thr_db, drop, budget, slot_on)
+function [action, reason] = rule_core_policy(threat_class, degraded, q_iot_db, q_thr_db, drop, budget, slot_on, wide_action)
 %RULE_CORE_POLICY  The expert rule on the revised proposal's core action set.
 %   The proposal's predefined recovery actions, channel switching and transmission-rate
 %   adaptation: no_action, channel_switch, rate_reduce and channel_switch+rate_reduce
@@ -18,6 +18,9 @@ function [action, reason] = rule_core_policy(threat_class, degraded, q_iot_db, q
 %   budget   optional, as rule_based_policy.m (drop_db, current, current_db): a loss of our
 %            signal keeps the configuration in use when its known gain covers the drop,
 %            else rate_reduce, the core set's only link-budget gain
+%   wide_action  optional, the core configuration for the class jamming (the wideband
+%            barrage), default channel_switch; the bandwidth study chooses it on validation
+%            (experiment_core_bw.m), every other class keeps its mapping
 %   Outside the core set: spatial_diversity, freq_diversity, power_control, fec_interleave.
 C = decision_config();
 threat_class = char(threat_class);
@@ -27,11 +30,17 @@ if nargin < 4 || isempty(q_thr_db) || isnan(q_thr_db), q_thr_db = C.q_alarm_db; 
 if nargin < 5 || isempty(drop), drop = false; end
 if nargin < 6, budget = []; end
 if nargin < 7 || isempty(slot_on), slot_on = true; end
+if nargin < 8 || isempty(wide_action), wide_action = 'channel_switch'; end
+assert(ismember(wide_action, setdiff(C.core_actions, {'no_action'})), 'rule_core_policy:wide', ...
+    'rule_core_policy: %s is no core recovery action', wide_action);
 slot = q_iot_db >= q_thr_db;
 
 switch threat_class
     case {'jamming', 'reactive_jamming', 'spoofing', 'tone_jamming'}
         action = 'channel_switch';    reason = 'interferer tied to our channel: leave it';
+        if strcmp(threat_class, 'jamming') && ~strcmp(wide_action, 'channel_switch')
+            action = wide_action;     reason = 'wideband jammer: the action chosen on validation';
+        end
     case {'sweeping_jammer', 'noise_burst'}
         action = 'rate_reduce';       reason = 'a hop does not escape it: processing gain';
     case 'path_loss'
