@@ -7534,3 +7534,33 @@ verifyEqual(tc, D.never, [0 0.5]);
 verifyEqual(tc, sort(D.state), [2 3 3]);
 end
 
+function test_spec_net_trains(tc)
+% The image-only network trains on 128 x 128 images, keeps its best validation epoch, weights
+% the cross-entropy by the inverse class frequency (mean 1), returns CPU weights and
+% probabilities that sum to 1 per image.
+assumeTrue(tc, license('test', 'Neural_Network_Toolbox') && ~isempty(ver('deeplearning')));
+rng(3, 'twister');
+mk = @(c, n) img_of(c, n);
+X = cat(4, mk(1, 16), mk(2, 8), mk(3, 8)); y = [ones(16, 1); 2 * ones(8, 1); 3 * ones(8, 1)];
+Xv = cat(4, mk(1, 4), mk(2, 4), mk(3, 4)); yv = kron((1:3)', ones(4, 1));
+[net, info] = train_spec_net(X, y, Xv, yv, 3, struct('epochs', 3, 'batch', 8, 'verbose', false));
+verifyEqual(tc, info.numEpochs, 3); verifyNumElements(tc, info.valF1, 3);
+verifyTrue(tc, info.bestEpoch >= 1 && info.bestEpoch <= 3);
+verifyEqual(tc, info.bestValF1, max(info.valF1));
+verifyEqual(tc, info.classWeights, 32 ./ (3 * [16 8 8]), 'AbsTol', 1e-6);
+verifyFalse(tc, isa(extractdata(net.Learnables.Value{1}), 'gpuArray'));
+P = spec_scores(net, Xv);
+verifyEqual(tc, size(P), [12 3]);
+verifyEqual(tc, sum(P, 2), ones(12, 1), 'AbsTol', 1e-5);
+verifyError(tc, @() train_spec_net(X, y + 1, Xv, yv, 3, struct('epochs', 1, 'verbose', false)), 'train_spec_net:labels');
+verifyError(tc, @() train_spec_net(X, y(1:end-1), Xv, yv, 3, struct('epochs', 1, 'verbose', false)), 'train_spec_net:size');
+end
+
+function X = img_of(c, n)
+% Synthetic detector images: thermal noise (clean), one bright frequency row (a tone), the
+% whole band raised (a barrage).
+X = single(0.28 + 0.03 * randn(128, 128, 1, n));
+if c == 2, X(60:62, :, 1, :) = 0.8; end
+if c == 3, X = X + 0.3; end
+end
+
