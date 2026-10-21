@@ -7360,6 +7360,20 @@ verifyNotEmpty(tc, strfind(k5, ['rule + escalation (deployed): onset->detection 
     '3/5 (never 0%), T_rec from onset 4/6 (never 17%)']));
 verifyNotEmpty(tc, strfind(k5, 'rule + escalation (deployed) 39286 ['));
 verifyEqual(tc, S.LECT.pol.payload_bps, 5e4);
+verifyNotEmpty(tc, strfind(k1, 'three-state CNN on spectrograms only (deliverable 2): PENDING -> train_core_cnn (B3c)'));
+mt = @(mf, rc, fa) struct('macro_f1', mf, 'recall', rc, 'fa', fa);
+core = struct('test_set', 'data/splits_fresh3.mat', 'N', 5, 'metrics', {{mt(0.9, [0.95 0.9 0.88], 0.05), ...
+    mt(0.93, [0.97 0.92 0.9], 0.03), mt(0.8, [0.9 0.8 0.7], 0.1)}}, 'boot', struct('macro_f1', [0.88 0.91; 0.92 0.94; 0.78 0.82]), ...
+    'verdicts', {{'', '', '', ''; 'met (committed)', 'met (committed)', 'met (not committed)', 'met (committed)'; '', '', '', ''}}); %#ok<NASGU>
+save('results/core_cnn.mat', 'core');
+evalc('measure_all_kpis');
+S = load('results/kpi_summary.mat', 'KPI', 'LECT'); K = S.KPI;
+k1 = strjoin(K([K.id] == 1).detail, newline);
+verifyNotEmpty(tc, strfind(k1, ['three-state CNN on spectrograms only (deliverable 2; data/splits_fresh3.mat, N = 5 cycles; ' ...
+    'results/core_cnn.txt): macro-F1 93.00% [92.00, 94.00] met (committed); recall narrowband 92.00% met (committed), ' ...
+    'wideband 90.00% met (not committed); false alarms 3.00% met (committed); the hybrid on the same frames: macro-F1 ' ...
+    '90.00%, false alarms 5.00%']));
+verifyEqual(tc, S.LECT.core.N, 5);
 end
 
 function test_lect_kpis_pending(tc)

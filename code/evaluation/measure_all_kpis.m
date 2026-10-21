@@ -33,6 +33,8 @@
 % macro-F1, also above the KPI 1 threshold from the saved predictions (KPI 1); PER vs the static link (KPI 4);
 % recovery time from detection, onset-to-detection time and goodput in bit/s (KPI 5); from
 % results/policy_evaluation.mat's KP.lect (lect_kpis.m), PENDING while that file predates it.
+% Beside KPI 1, the three-state CNN on spectrograms only (deliverable 2, train_core_cnn.m, stage
+% B3c): its single reading of the fourth test set from results/core_cnn.mat, PENDING until then.
 % With results/edge_map.mat (edge_map.m), the verdicts per point are added as details:
 % detection and detection on harmed flights (KPI 1); the commitment at every signalling
 % delay, the receiver alone, the relative criterion (SYSTEM), the distance edges and the
@@ -63,7 +65,7 @@ end
 RS = result_status();
 rst = @(f) RS(strcmp({RS.file}, f));                   % identity and age of a result file
 KPI = struct('id', {}, 'name', {}, 'value', {}, 'target', {}, 'status', {}, 'detail', {});
-LECT = struct('three', [], 'three_above', [], 'three3', [], 'three3_above', [], 'pol', []);
+LECT = struct('three', [], 'three_above', [], 'three3', [], 'three3_above', [], 'pol', [], 'core', []);
 rep = {'=== PROPOSAL KPI SUMMARY (proposal wording) ===', sprintf('Generated: %s | %s', datestr(now), git_stamp()), ''};
 
 %% KPI 1 - detection
@@ -147,6 +149,7 @@ if isfile(F.det)
     if isfile(F.arch), det{end+1} = 'architecture comparison: results/architecture_comparison.txt'; end
     [LECT.three, LECT.three_above, l3] = three_states(m, kpi1_file('detector_predictions'));
     det = [det, l3];
+    [LECT.core, lc] = core_cnn_line('results/core_cnn.mat'); det{end+1} = lc;
     if ~contains(F.det, '_fresh2') && isfile('results/eval_detector_metrics_fresh2.mat')   % the third test set's beside
         M3 = load('results/eval_detector_metrics_fresh2.mat', 'metrics');
         [LECT.three3, LECT.three3_above, l3] = three_states(M3.metrics, 'results/detector_predictions_fresh2.mat');
@@ -562,6 +565,21 @@ ok = it > 0 & ip > 0; nc = numel(m.classes);
 Va = three_state_view(accumarray([it(ok) ip(ok)], 1, [nc nc]), m.classes);
 lines{2} = sprintf('beside KPI 1, three link states from %g dB (the KPI 1 threshold, saved predictions): %s', ...
     m.kpi1_threshold_db, three_txt(Va));
+end
+
+function [c, line] = core_cnn_line(f)
+% The three-state CNN's reading (train_core_cnn.m): the official windowed decision against the
+% lecturer's thresholds, with the hybrid's monitor class on the same frames.
+c = [];
+line = 'beside KPI 1, three-state CNN on spectrograms only (deliverable 2): PENDING -> train_core_cnn (B3c)';
+if ~isfile(f), return; end
+S = load(f, 'core'); c = S.core;
+M = c.metrics{2}; H = c.metrics{1}; B = c.boot;
+line = sprintf(['beside KPI 1, three-state CNN on spectrograms only (deliverable 2; %s, N = %d cycles; results/core_cnn.txt): ' ...
+    'macro-F1 %.2f%% [%.2f, %.2f] %s; recall narrowband %.2f%% %s, wideband %.2f%% %s; false alarms %.2f%% %s; ' ...
+    'the hybrid on the same frames: macro-F1 %.2f%%, false alarms %.2f%%'], c.test_set, c.N, 100 * M.macro_f1, ...
+    100 * B.macro_f1(2, :), c.verdicts{2, 1}, 100 * M.recall(2), c.verdicts{2, 2}, 100 * M.recall(3), c.verdicts{2, 3}, ...
+    100 * M.fa, c.verdicts{2, 4}, 100 * H.macro_f1, 100 * H.fa);
 end
 
 function s = three_txt(V)
