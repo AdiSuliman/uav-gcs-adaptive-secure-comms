@@ -238,11 +238,14 @@ Harm is judged per scenario, never as a per-episode filter on test. The list is 
 
 **6.5 Readings (test split, read once).** Primary: H1, residual by offset, fixed total power,
 static jammer.
-- **PER reduction >= 30% vs static** (`per_reduction.m`, paired, geometry bootstrap) for
-  `rule_core`, pooled over every test episode of the recoverable scenarios of both jamming types:
-  met (committed) when the 95% lower bound >= 30%; met (not committed) when only the point is;
-  not met otherwise. The same per type (narrowband; wideband pooled over B_J) and for `blind_core`.
-  Beside it the per-episode recoverable reading of `lect_kpis.m`.
+- **PER reduction >= 30% vs static** (`per_reduction.m`, paired, geometry bootstrap), the primary
+  verdict per jamming type, as in C2e (`lect_kpis.m`): `rule_core` on every test episode of the
+  recoverable scenarios of the type, narrowband (the CW cells, the only narrowband state of
+  section 3) and wideband (the 4-83.5 MHz cells pooled over B_J), each MET (committed) when the
+  95% lower bound >= 30%, MET (not committed) when only the point is, NOT MET otherwise (also
+  without episodes; `core_bw_rules.m` 'verdict', 'per_verdicts'). Both types pooled is a second
+  line, labelled so; `blind_core` gets the same three lines as the conventional system's reading.
+  Beside them the per-episode recoverable reading of `lect_kpis.m`.
 - **Recovery time** (lecturer): onset to the first confirmed alarm (t_conf) and detection to the
   packet loss restored for 5 cycles (t_rec_det, `per_metrics.m`): median, p90 and the share never
   reached (censoring within 30 cycles). Measured and compared, no threshold.
@@ -250,7 +253,8 @@ static jammer.
 - **CNN contribution** (analysis): `rule_core` - `blind_core` in PER, goodput and t_rec_det,
   paired, 95% intervals; pooled, per type and per B_J.
 - **Sensitivities** (no verdict): H3, H4, the 30 dB residual (each rule), the equal in-band
-  level, the follower; each says whether it would flip a primary verdict.
+  level, the follower; each says whether it would flip a primary verdict (`rule_core`'s per
+  jamming type).
 - **Detector by bandwidth** (analysis; the KPI verdicts of macro-F1, recall and false alarms stay
   with B3c, `docs/core_cnn_protocol.md`, and with the hybrid's B3 through `three_state_view.m`):
   the hybrid's monitor class and frame argmax on the static test episodes after the onset, as the
@@ -298,7 +302,7 @@ Outputs: `data/core_bw/pools.mat`, `data/core_bw/dset.mat`; `results/core_bw/val
 `code/tests/test_core.m`: test_band_plan, test_jsr_inband, test_band_cover, test_band_reject, test_hop_targets,
 test_link_env_cover_default, test_link_env_cover_recoverable, test_link_env_cover_relative,
 test_link_env_residual_layer, test_link_env_residual_recoverable, test_oracle_cover, test_rule_core_wide,
-test_band_cells, test_band_recoverable_scenarios, test_band_p1_reading,
+test_band_cells, test_band_recoverable_scenarios, test_band_per_verdicts, test_band_p1_reading,
 test_band_seeds_disjoint, test_band_protocol_guard, and the existing test_rule_core_policy,
 test_core_decide_escalation, test_core_policies_rollout, test_per_reduction, test_three_state_view,
 test_rule_dwell_tried.

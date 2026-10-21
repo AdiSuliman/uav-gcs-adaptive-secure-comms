@@ -732,7 +732,8 @@ q1 = X0.RULES{1};
 lines = [lines, blk];
 [blk, KP.by_bj] = bj_lines(get_set(RES, q1, 'primary'), EP, recov(q1) & ~EP.slice, X0);
 lines = [lines, blk];
-lines = [lines, {'', '--- Sensitivities (no verdict of their own; whether any would flip a primary verdict) ---'}];
+lines = [lines, {'', ['--- Sensitivities (no verdict of their own; whether any would flip a primary verdict, rule_core ' ...
+    'per jamming type) ---']}];
 sens = cell(0, 3);
 for q = 1:numel(X0.RULES)
     rl = X0.RULES{q};
@@ -746,7 +747,7 @@ KP.sens = struct('name', {}, 'K', {}, 'flip', {});
 for i = 1:size(sens, 1)
     [blk, Ks] = per_lines(sens{i, 2}, EP, sens{i, 3}, X0, pay, sens{i, 1}, true);
     a = KP.primary.per; b = Ks.per;
-    use = [b.n] > 0 & [a.n] > 0 & strcmp({b.type}, {a.type});
+    use = [a.primary] & [b.n] > 0 & [a.n] > 0 & strcmp({b.type}, {a.type}) & strcmp({b.policy}, {a.policy});
     flip = any(~strcmp({b(use).verdict}, {a(use).verdict}));
     blk{end+1} = sprintf('    flips a primary verdict: %s', ternary(flip, 'YES', 'no')); %#ok<AGROW>
     lines = [lines, blk]; %#ok<AGROW>
@@ -789,25 +790,29 @@ R = S(strcmp({S.policy}, name)).R;
 end
 
 function [lines, Kp] = per_lines(S, EP, mask, X, pay, ttl, brief)
-% PER reduction vs the static link (verdict), recovery time, goodput and the CNN's
-% contribution, pooled and per jamming type, on the episodes of the recoverable scenarios.
+% PER reduction vs the static link (the primary verdict per jamming type, the pooled one its
+% second line), recovery time, goodput and the CNN's contribution, pooled and per jamming type,
+% on the episodes of the recoverable scenarios; brief: a sensitivity, its PER lines only.
 lines = {'', sprintf('--- %s ---', ttl)};
+if ~brief
+    lines{end+1} = sprintf(['  PER reduction >= %g%% vs the static link per jamming type: MET (committed) when the ' ...
+        '95%% lower bound clears it, MET (not committed) when only the point does, NOT MET otherwise'], 100 * X.TARGET);
+end
 Rn = pol(S, 'none'); m0 = mask(Rn.ep);
 types = {'pooled', true(1, EP.n); 'narrowband', EP.narrow; 'wideband', ~EP.narrow};
-Kp = struct('per', struct('policy', {}, 'type', {}, 'n', {}, 'red', {}, 'lo', {}, 'hi', {}, 'per', {}, 'per_ref', {}, ...
-    'verdict', {}), 'rec', struct(), 'gput', struct(), 'cnn', struct());
+Kp = struct('per', struct('policy', {}, 'type', {}, 'n', {}, 'red', {}, 'lo', {}, 'hi', {}, 'per', {}, 'per_ref', {}), ...
+    'rec', struct(), 'gput', struct(), 'cnn', struct());
 for pk = {'rule_core', 'blind_core'}
     R = pol(S, pk{1});
     for t = 1:size(types, 1)
         m = m0 & types{t, 2}(Rn.ep);
         [v, lo, hi] = per_reduction(R.per_post(m), Rn.per_post(m), EP.geom(Rn.ep(m)), X.B, 3);
-        vd = core_bw_rules('verdict', v, lo, X.TARGET, nnz(m));
         Kp.per(end+1) = struct('policy', pk{1}, 'type', types{t, 1}, 'n', nnz(m), 'red', v, 'lo', lo, 'hi', hi, ...
-            'per', mean(R.per_post(m)), 'per_ref', mean(Rn.per_post(m)), 'verdict', vd);
-        lines{end+1} = sprintf('  PER %-10s %-10s n=%5d  %.4f vs %.4f static: reduction %5.1f%% [%5.1f, %5.1f] -> %s', ...
-            pk{1}, types{t, 1}, nnz(m), mean(R.per_post(m)), mean(Rn.per_post(m)), 100 * v, 100 * lo, 100 * hi, vd); %#ok<AGROW>
+            'per', mean(R.per_post(m)), 'per_ref', mean(Rn.per_post(m)));
     end
 end
+[Kp.per, blk] = core_bw_rules('per_verdicts', Kp.per, X.TARGET, ~brief);
+lines = [lines, blk];
 if brief, return; end
 mr = m0 & Rn.recoverable & Rn.threat;                 % beside it: the per-episode reading (lect_kpis.m)
 for pk = {'rule_core', 'blind_core'}

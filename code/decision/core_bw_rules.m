@@ -12,7 +12,14 @@ function varargout = core_bw_rules(cmd, varargin)
 %       bj, tot, cl (1 x n) each episode's width, total JSR and flight geometry; per, gput,
 %       trec (numel(Wn) x n) each candidate's PER after onset, delivered payload and recovery
 %       from detection (NaN never) on the same episodes; B bootstrap resamples
-%   v = core_bw_rules('verdict', m, lo, target, n)   the PER-reduction verdict (6.5)
+%   v = core_bw_rules('verdict', m, lo, target, n)   the PER-reduction verdict (6.5), C2e's
+%       words: MET (committed) when the 95% lower bound lo >= target, MET (not committed) when
+%       only the point m is, NOT MET otherwise and without episodes (n = 0)
+%   [V, lines] = core_bw_rules('per_verdicts', P, target, prim)   the PER lines of a reading:
+%       P (struct array: policy, type 'narrowband' / 'wideband' / 'pooled', n, red, lo, hi, per,
+%       per_ref) gains verdict and primary (rule_core per jamming type, when prim); per policy
+%       the narrowband, then the wideband line (PRIMARY when primary), then the pooled one,
+%       labelled the second line
 %   P = core_bw_rules('p1', tr, tb, near, cl, B)   prediction P1's reading at JSR_tot 30 dB
 %       (section 5): tr, tb (1 x n) rule_core's and blind_core's detection-to-restored times
 %       on the same recoverable CW episodes (NaN never), near the episodes whose first hop
@@ -30,6 +37,7 @@ switch cmd
     case 'recoverable', varargout{1} = recoverable(varargin{:});
     case 'choose_w',    [varargout{1}, varargout{2}] = choose_w(varargin{:});
     case 'verdict',     varargout{1} = verdict(varargin{:});
+    case 'per_verdicts', [varargout{1}, varargout{2}] = per_verdicts(varargin{:});
     case 'p1',          varargout{1} = p1_reading(varargin{:});
     case 'guard',       varargout{1} = guard(varargin{:});
     case 'sha',         varargout{1} = file_sha(varargin{:});
@@ -74,10 +82,35 @@ tab = struct('W', Wn, 'per', num2cell(P'), 'gput', num2cell(G'), 'trec', num2cel
 end
 
 function v = verdict(m, lo, target, n)
-if n == 0, v = 'not read (no episodes)';
-elseif isfinite(lo) && lo >= target, v = 'met (committed)';
-elseif isfinite(m) && m >= target, v = 'met (not committed)';
-else, v = 'not met'; end
+if n > 0 && isfinite(lo) && lo >= target, v = 'MET (committed)';
+elseif n > 0 && isfinite(m) && m >= target, v = 'MET (not committed)';
+else, v = 'NOT MET'; end
+end
+
+function [V, lines] = per_verdicts(P, target, prim)
+V = P; lines = {};
+if isempty(V), V = struct('policy', {}, 'type', {}, 'n', {}, 'red', {}, 'lo', {}, 'hi', {}, 'per', {}, 'per_ref', {}, ...
+        'verdict', {}, 'primary', {}); return; end
+for i = 1:numel(V)
+    V(i).verdict = verdict(V(i).red, V(i).lo, target, V(i).n);
+    V(i).primary = prim && strcmp(V(i).policy, 'rule_core') && ~strcmp(V(i).type, 'pooled');
+end
+name = struct('narrowband', 'narrowband (CW)', 'wideband', 'wideband (4-83.5 MHz)', ...
+    'pooled', 'second line, both types pooled');
+for pk = unique({V.policy}, 'stable')
+    for t = {'narrowband', 'wideband', 'pooled'}
+        i = find(strcmp({V.policy}, pk{1}) & strcmp({V.type}, t{1}), 1);
+        if isempty(i), continue; end
+        v = V(i); tag = name.(t{1});
+        if v.primary, tag = ['PRIMARY ' tag]; end
+        if v.n == 0
+            lines{end+1} = sprintf('  PER %-10s %s: no recoverable episodes -> %s', v.policy, tag, v.verdict); %#ok<AGROW>
+        else
+            lines{end+1} = sprintf('  PER %-10s %s, n=%d: %.4f vs %.4f static, reduction %.1f%% [%.1f, %.1f] -> %s', ...
+                v.policy, tag, v.n, v.per, v.per_ref, 100 * v.red, 100 * v.lo, 100 * v.hi, v.verdict); %#ok<AGROW>
+        end
+    end
+end
 end
 
 function P = p1_reading(tr, tb, near, cl, B)

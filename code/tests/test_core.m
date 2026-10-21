@@ -8419,10 +8419,44 @@ verifyEqual(tc, core_bw_rules('choose_w', Wn, bj, tot, cl, per, gp, tr, 500), 'c
 [W, tab] = core_bw_rules('choose_w', Wn, bj, tot, cl, 0.2 * ones(3, 40), ones(3, 40), ones(3, 40), 500);
 verifyEqual(tc, W, 'channel_switch'); verifyEqual(tc, [tab.tie_per], true(1, 3));
 verifyEqual(tc, core_bw_rules('choose_w', Wn, [], [], [], zeros(3, 0), zeros(3, 0), zeros(3, 0), 500), 'channel_switch');
-verifyEqual(tc, core_bw_rules('verdict', 0.35, 0.31, 0.3, 10), 'met (committed)');
-verifyEqual(tc, core_bw_rules('verdict', 0.35, 0.2, 0.3, 10), 'met (not committed)');
-verifyEqual(tc, core_bw_rules('verdict', 0.2, 0.1, 0.3, 10), 'not met');
-verifyEqual(tc, core_bw_rules('verdict', NaN, NaN, 0.3, 0), 'not read (no episodes)');
+verifyEqual(tc, core_bw_rules('verdict', 0.35, 0.31, 0.3, 10), 'MET (committed)');
+verifyEqual(tc, core_bw_rules('verdict', 0.35, 0.2, 0.3, 10), 'MET (not committed)');
+verifyEqual(tc, core_bw_rules('verdict', 0.2, 0.1, 0.3, 10), 'NOT MET');
+verifyEqual(tc, core_bw_rules('verdict', 0.3, 0.3, 0.3, 10), 'MET (committed)');           % the line itself clears it
+verifyEqual(tc, core_bw_rules('verdict', NaN, NaN, 0.3, 0), 'NOT MET');
+verifyEqual(tc, core_bw_rules('verdict', 0.5, 0.4, 0.3, 0), 'NOT MET');                   % no episodes, as in C2e
+end
+
+function test_band_per_verdicts(tc)
+% The study's primary PER verdict is rule_core's per jamming type (narrowband, then wideband),
+% as in C2e; the pooled line follows, labelled the second line; blind_core and a sensitivity
+% carry no PRIMARY tag; a type without episodes reads NOT MET; the report's flip check reads
+% only the primary entries.
+mk = @(pol, ty, n, r, lo) struct('policy', pol, 'type', ty, 'n', n, 'red', r, 'lo', lo, 'hi', r + 0.1, 'per', 0.1, ...
+    'per_ref', 0.2);
+P = [mk('rule_core', 'pooled', 30, 0.5, 0.2), mk('rule_core', 'narrowband', 10, 0.5, 0.35), ...
+    mk('rule_core', 'wideband', 20, 0.4, 0.1), mk('blind_core', 'pooled', 30, 0.2, 0.1), ...
+    mk('blind_core', 'narrowband', 0, NaN, NaN), mk('blind_core', 'wideband', 20, 0.2, 0.1)];
+[V, L] = core_bw_rules('per_verdicts', P, 0.3, true);
+verifyEqual(tc, {V.verdict}, {'MET (not committed)', 'MET (committed)', 'MET (not committed)', 'NOT MET', 'NOT MET', ...
+    'NOT MET'});
+verifyEqual(tc, [V.primary], [false true true false false false]);
+verifyEqual(tc, numel(L), 6);
+verifyTrue(tc, contains(L{1}, 'rule_core') && contains(L{1}, 'PRIMARY narrowband (CW), n=10') && ...
+    contains(L{1}, '-> MET (committed)'));
+verifyTrue(tc, contains(L{2}, 'rule_core') && contains(L{2}, 'PRIMARY wideband (4-83.5 MHz), n=20') && ...
+    contains(L{2}, '-> MET (not committed)'));
+verifyTrue(tc, contains(L{3}, 'rule_core') && contains(L{3}, 'second line, both types pooled') && ~contains(L{3}, 'PRIMARY'));
+verifyTrue(tc, contains(L{4}, 'blind_core') && contains(L{4}, 'narrowband (CW): no recoverable episodes -> NOT MET'));
+verifyFalse(tc, any(contains(L(4:6), 'PRIMARY')));
+[V, L] = core_bw_rules('per_verdicts', P, 0.3, false);                 % a sensitivity
+verifyFalse(tc, any([V.primary])); verifyFalse(tc, any(contains(L, 'PRIMARY')));
+[V, L] = core_bw_rules('per_verdicts', P([]), 0.3, true);
+verifyEmpty(tc, V); verifyEmpty(tc, L);
+src = fileread(which('experiment_core_bw'));
+verifyNotEmpty(tc, strfind(src, '[Kp.per, blk] = core_bw_rules(''per_verdicts'', Kp.per, X.TARGET, ~brief);'));
+verifyNotEmpty(tc, strfind(src, ['use = [a.primary] & [b.n] > 0 & [a.n] > 0 & strcmp({b.type}, {a.type}) & ' ...
+    'strcmp({b.policy}, {a.policy});']));
 end
 
 function test_band_p1_reading(tc)
