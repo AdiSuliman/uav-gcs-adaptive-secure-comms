@@ -81,13 +81,16 @@ and -3 dB width; occupied (1 + 0.3) x 4 = 5.2 MHz) or the occupied width (symbol
 20 MHz band, so centred 2-18 MHz, and comb signals at 2, 10 and 18 MHz: with 4 MHz occupied the
 edges fall exactly at 0 and 20 MHz) but does not settle it, since a simulation may let the
 roll-off pass the sensing band. Both readings are
-physical. Neither is the more severe throughout: at fixed total power the occupied reading puts
-1.14 dB more into every covered channel (the static link, `rate_reduce` and the frames before a
-hop, -4.88 against -6.02 dB), while the noise reading's occupied edge lies 0.6 MHz nearer every hop
-target and lowers an escaped hop's effective rejection (section 4) at every distance: H1's 6 MHz
-hop keeps 12.7 dB instead of 20.7, an 8 MHz hop 21.8 instead of 23.1, a 14 MHz hop 36.0 instead
-of 42.1, H4's 4 MHz hop none (covered) instead of 2.1 dB. The study takes the noise reading,
-whose hop residual is up to 8 dB more severe, against 1.14 dB in band.
+physical. Neither is the more severe throughout. The link meets the residual, the in-band level
+minus R_eff (section 4), and each reading has its own in-band level. At fixed total power the
+occupied reading puts 1.14 dB more into every covered channel (the static link, `rate_reduce` and
+the frames before a hop, -4.88 against -6.02 dB). The noise reading's occupied edge lies 0.6 MHz
+nearer every hop target, so its escaped-hop residual is up to 6.9 dB more severe: H1's 6 MHz hop
+JSR_tot - 18.7 dB against - 25.6, a 14 MHz hop 5.0 dB more, an 8 MHz hop 0.2 dB, H4's 4 MHz hop
+0.9 dB (covered, - 6.0 against - 7.0 with 2.1 dB of rejection). From 16 MHz on the residuals are
+equal or within 0.63 dB either way; the occupied reading's is the more severe by 0.63 dB at 32 and
+64 MHz and by 0.12 dB at 10 MHz. The study takes the noise reading, whose hop residual is up to
+6.9 dB more severe, against 1.14 dB in band.
 
 **Sensitivity, pre-registered: the occupied reading.** Since neither reading is the more severe
 throughout, the 4 MHz cells are simulated a second time under the occupied reading

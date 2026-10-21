@@ -8116,8 +8116,10 @@ end
 function test_band_liu_occupied(tc)
 % Liu et al.'s 4 MHz as the occupied bandwidth, a pre-registered sensitivity of the 4 MHz cells
 % only: symbol rate 4 / 1.3 MHz, occupied +-2 MHz (0.6 MHz inside the noise reading's +-2.6), in
-% band JSR_tot - 4.88 dB against - 6.02, the five levels; its escaped hops never keep less
-% rejection than the noise reading's (up to 8 dB more), so the readings stay unordered; it has
+% band JSR_tot - 4.88 dB against - 6.02, the five levels; the residual the link meets, the in-band
+% level minus R_eff, is up to 6.87 dB more severe under the noise reading after an escaped hop
+% (H1's 6 MHz hop) and up to 0.63 dB more severe under the occupied one (32 and 64 MHz), besides
+% its 1.14 dB on every covered channel, so the readings stay unordered; it has
 % its own lines and no verdict: out of W, the primary lines, the per-width lines, the other
 % sensitivities, set D and the detector analysis.
 [cells, scen] = band_cells(base_params());
@@ -8137,13 +8139,19 @@ verifyFalse(tc, any([scen([scen.occ]).slice]));
 B = band_plan(); f = B.f_mhz; h = B.centre;
 Ro = band_reject(Jo, f(h), B);
 verifyEqual(tc, Ro(h + [2 3 4 7]), [2.0859 20.6737 23.1188 42.1188], 'AbsTol', 1e-3);
-d = zeros(1, 0);
+a = zeros(1, 0); both = false(1, 0); off = zeros(1, 0);
 for c = 1:numel(f)
     Rn = band_reject(Jn, f(c), B); Ro = band_reject(Jo, f(c), B);
-    verifyTrue(tc, all(Rn <= Ro + 1e-9), sprintf('centre %d', c));
-    d = [d, Ro(Ro > 0) - Rn(Ro > 0)]; %#ok<AGROW>
+    k = Ro > 0 | Rn > 0;                                     % escaped under either reading
+    a = [a, (-10 * log10(4) - Rn(k)) - (-10 * log10(4 / 1.3) - Ro(k))]; %#ok<AGROW>
+    both = [both, Ro(k) > 0 & Rn(k) > 0]; off = [off, abs(f(k) - f(c))]; %#ok<AGROW>
 end
-verifyEqual(tc, max(d), 8.005, 'AbsTol', 0.01);
+verifyEqual(tc, max(a), 6.866, 'AbsTol', 0.01);              % noise reading the more severe
+verifyEqual(tc, unique(off(abs(a - max(a)) < 1e-6)), 6);
+verifyEqual(tc, min(a(both)), -0.629, 'AbsTol', 0.01);      % occupied reading the more severe
+verifyEqual(tc, unique(off(abs(a - min(a(both))) < 1e-6)), [32 64]);
+verifyEqual(tc, a(off == 4 & ~both), 0.946 * ones(1, nnz(off == 4 & ~both)), 'AbsTol', 0.01);   % H4: covered, 2.1 dB
+verifyTrue(tc, any(a > 0.01) && any(a < -0.01));
 src = fileread(which('experiment_core_bw'));
 verifyNotEmpty(tc, strfind(src, 'wide = find(~EP.slice & ~EP.narrow & ~EP.occ);'));
 verifyNotEmpty(tc, strfind(src, 'pm = ~EP.slice & ~EP.occ;'));
