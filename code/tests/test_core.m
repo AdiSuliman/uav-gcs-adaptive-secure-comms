@@ -7884,40 +7884,40 @@ e = mean(~cv(k));
 end
 
 function test_band_reject(tc)
-% The residual's rejection by offset (band_reject.m): the nRF24L01+'s 2 Mb/s C/I (+7 co-channel;
-% +3, -17, -21, -40, -48 dBc at 2, 4, 6, >12, >36 MHz) as co-channel minus offset, the lowest
-% over the offsets the jammer occupies, 5 dB less where it occupies 32 or 64 MHz; 0 on covered
-% channels and below 2 MHz; the layers every jammer needs; H1's first-hop escape share with a
-% sourced rejection left; the study builds the layers on both splits and reads them in validation;
-% the 70 MHz jammer's home only among the channels it covers by geometry (2403-2471 MHz).
-B = band_plan(); f = B.f_mhz;
+% The residual's effective rejection (band_reject.m): the nRF24L01+'s 2 Mb/s rows (+7 dBc
+% co-channel; +3, -17, -21, -40, -48 at 2, 4, 6, >12, >36 MHz) as co-channel minus offset, 42
+% and 50 dB strictly between the measured points next to 32 and 64 MHz; a tone at the lowest row
+% over its offset range (as before); a wide jammer's whole spectrum counted, so a flat one meets
+% less than its nearest row and a raised cosine's thin edge more; 0 on covered channels, below
+% 2 MHz and under 2 dB; H1's first-hop escape share; the study builds each cell's layers on
+% both splits; the 70 MHz jammer's home only among the channels it covers by geometry.
+B = band_plan(); f = B.f_mhz; h = B.centre;
 cells = band_cells();
 J = @(n) cells(strcmp({cells.name}, n)).J;
-rj = @(n, fh) band_reject(band_cover('span', J(n), fh), f, B.b_ch);
-verifyEqual(tc, band_reject('levels'), [4 24 28 42 47 50 55]);
+rj = @(n, fh) band_reject(J(n), fh, B);
 verifyEqual(tc, 7 - [3 -17 -21 -40 -48], [4 24 28 47 55]);
+verifyEqual(tc, band_reject('rows', [0 1.99 2 3.9 4 5.9 6 12 12.01 30.9 31.1 32 32.9 33 36 36.1 63.5 64 65 80]), ...
+    [0 0 4 4 24 24 28 28 47 47 42 42 42 47 47 55 50 50 55 55]);
 R = rj('cw_tot16', 2401);
-m = [0 1 2 3 4 6 7 16 17 18 19 32 40];
-verifyEqual(tc, R(m + 1), [0 0 4 24 28 28 47 42 47 47 55 50 55]);
+m = [0 1 2 3 4 6 7 15 16 17 18 19 32 40];
+verifyEqual(tc, R(m + 1), [0 0 4 24 28 28 47 47 42 47 47 55 50 55]);
 [R, d] = rj('bw4_tot16', 2441);
 [~, ~, off] = band_cover(band_cover('span', J('bw4_tot16'), 2441), f, B.b_ch);
 verifyEqual(tc, d, off);
-h = B.centre;
-verifyEqual(tc, R(h + [1 2 3 4 5 8]), [0 0 4 24 28 47]);       % +-4 MHz: clear of the band, 1.4 MHz off
-verifyEqual(tc, R(h - [1 2 3 4 5 8]), [0 0 4 24 28 47]);
-R = rj('bw20_tot16', 2441);
-verifyEqual(tc, R(h + [5 6 7 8 11 12 17 20 -6 -20]), [0 4 24 28 28 42 42 42 4 42]);
+verifyEqual(tc, R(h + [1 2 3 4 5 8]), [0 0 12.6683 21.8040 22.0979 40.9794], 'AbsTol', 1e-3);   % +-4 MHz: 1.4 MHz off
+verifyEqual(tc, R(h - [1 2 3 4 5 8]), R(h + [1 2 3 4 5 8]), 'AbsTol', 1e-9);
+[R, ~, Rx] = rj('bw20_tot16', 2441);
+verifyEqual(tc, R(h + [5 6 7 8 10 12 20 -7]), [0 0 17.5176 20.0928 24.5236 33.1396 36.0158 17.5176], 'AbsTol', 1e-3);
+verifyEqual(tc, Rx(h + [5 6]), [0 0.8944], 'AbsTol', 1e-3);    % 12 MHz: 2 MHz of it at 4 dB, counted covered
+verifyLessThan(tc, R(h + [7 8 12]), [24 28 42]);               % below its nearest row: the rest of its power counts
+R = rj('bw8_tot16', 2441);
+verifyEqual(tc, R(h + [3 4 5 8]), [0 6.6447 19.3743 30.1681], 'AbsTol', 1e-3);
 R = rj('bw70_tot16', NaN);
 verifyEqual(tc, f(R > 0), [2475 2477 2479 2481]);
-verifyEqual(tc, R(R > 0), [4 24 28 28]);
+verifyEqual(tc, R(R > 0), [3.8062 18.4794 20.6384 22.6205], 'AbsTol', 1e-3);
 verifyEqual(tc, R(ismember(f, [2401 2473])), [0 0]);          % clear of the span by 1 MHz
 verifyTrue(tc, all(rj('bw83.5_tot16', NaN) == 0));
-for n = {'cw_tot4', 'bw4_tot4', 'bw8_tot4', 'bw20_tot4'}
-    verifyEqual(tc, band_reject('layers', J(n{1}), B), band_reject('levels'), n{1});
-end
-verifyEqual(tc, band_reject('layers', J('bw70_tot4'), B), [4 24 28]);
-verifyEmpty(tc, band_reject('layers', J('bw83.5_tot4'), B));
-want = {'cw_tot16', [1 1]; 'bw4_tot16', [1 1]; 'bw8_tot16', [34/36 37/38]; 'bw20_tot16', [30/36 35/38]; ...
+want = {'cw_tot16', [1 1]; 'bw4_tot16', [1 1]; 'bw8_tot16', [34/36 37/38]; 'bw20_tot16', [28/36 34/38]; ...
     'bw83.5_tot16', [0 0]};
 for i = 1:size(want, 1)
     e = arrayfun(@(hh) h1_escape(rj(want{i, 1}, f(hh)) == 0, hh), [h 1]);
@@ -7926,8 +7926,12 @@ end
 verifyEqual(tc, h1_escape(rj('bw70_tot16', NaN) == 0, h), 4 / 36, 'AbsTol', 1e-12);
 verifyError(tc, @() band_reject('other'), 'band_reject:cmd');
 src = fileread(which('experiment_core_bw'));
-verifyNotEmpty(tc, strfind(src, 'X.ACR = band_reject(''levels'');'));
-verifyNotEmpty(tc, strfind(src, '''acr'', X.ACR(v), ''splits'', [1 2], ''actions'', {ACS});'));
+verifyNotEmpty(tc, strfind(src, '[GRID, ACR] = cell_grids(cells, scen, band_plan(p0));'));
+verifyNotEmpty(tc, strfind(src, '''acr'', ACR(v), ''splits'', [1 2], ''actions'', {ACS});'));
+verifyNotEmpty(tc, strfind(src, 'q.cm_acr_db = ACR(v);'));
+verifyNotEmpty(tc, strfind(src, 'G{c} = band_reject(''grid'', band_reject(''values'', {scen([scen.cell] == c).J}, B));'));
+verifyNotEmpty(tc, strfind(src, 'li = band_reject(''layer'', R, g); ce = li == 0;'));
+verifyEmpty(tc, strfind(src, 'X.ACR'));
 verifyEmpty(tc, strfind(src, 'escapable('));
 cv70 = band_cover(band_cover('span', J('bw70_tot16'), NaN), f, B.b_ch);
 verifyEqual(tc, f(cv70), 2403:2:2471);                       % covered under both residuals
@@ -7937,6 +7941,70 @@ verifyNotEmpty(tc, strfind(src, ['if strcmp(J.kind, ''fixed''), can = band_cover
 verifyNotEmpty(tc, strfind(src, 'can = find(band_cover(band_cover(''span'', J, NaN), B.f_mhz, B.b_ch));'));
 verifyEmpty(tc, strfind(src, 'can = band_reject('));
 verifyEmpty(tc, strfind(src, 'can = find(band_reject('));
+end
+
+function test_band_reject_eff(tc)
+% R_eff by hand: a flat 20 MHz jammer 14 MHz away (offsets 4-24 MHz: 2 MHz at 24 dB, 6 at 28,
+% 12 at 47) and 12 MHz away (2-22 MHz); the 70 MHz jammer at 2477 MHz (5-75 MHz, 31-33 MHz at
+% 42 dB and 63-65 at 50, the measured points next to n x 2 f_xtal); Liu's raised cosine 6 MHz
+% away, its spectrum integrated numerically; the flat part of the raised cosine holds its
+% in-band density, so the shape integrates to its symbol rate.
+B = band_plan(); f = B.f_mhz; h = B.centre;
+cells = band_cells(); J = @(n) cells(strcmp({cells.name}, n)).J;
+db = @(s) -10 * log10(s);
+[~, ~, Rx] = band_reject(J('bw20_tot16'), f(h), B);
+verifyEqual(tc, Rx(h + 7), db(2 * 10^-2.4 + 6 * 10^-2.8 + 12 * 10^-4.7), 'AbsTol', 1e-9);
+verifyEqual(tc, Rx(h + 6), db(2 * 10^-0.4 + 2 * 10^-2.4 + 6 * 10^-2.8 + 10 * 10^-4.7), 'AbsTol', 1e-9);
+R70 = band_reject(J('bw70_tot16'), NaN, B);
+verifyEqual(tc, R70(f == 2477), db(10^-2.4 + 6 * 10^-2.8 + 22 * 10^-4.7 + 2 * 10^-4.2 + 37 * 10^-5.5 + 2 * 10^-5), ...
+    'AbsTol', 1e-9);
+verifyEqual(tc, R70(f == 2475), db(10^-0.4 + 2 * 10^-2.4 + 6 * 10^-2.8 + 22 * 10^-4.7 + 2 * 10^-4.2 + 35 * 10^-5.5 + ...
+    2 * 10^-5), 'AbsTol', 1e-9);
+u = linspace(-2.6, 2.6, 2600001); a = abs(u);
+P = double(a <= 1.4); t = a > 1.4; P(t) = 0.5 * (1 + cos(pi / 1.2 * (a(t) - 1.4)));
+verifyEqual(tc, trapz(u, P), 4, 'AbsTol', 1e-6);
+x = 6 - u; r = 4 * (x < 4) + 24 * (x >= 4 & x < 6) + 28 * (x >= 6);
+[~, ~, Rx] = band_reject(J('bw4_tot16'), f(h), B);
+verifyEqual(tc, Rx(h + 3), db(trapz(u, P .* 10 .^ (-r / 10))), 'AbsTol', 1e-3);
+Jt = J('cw_tot16');                                          % a tone: its lowest row over +-0.3 MHz
+[~, ~, Rx] = band_reject(Jt, f(1), B);
+verifyEqual(tc, Rx(1 + [2 3 16 17 32]), [4 24 42 47 50]);
+end
+
+function test_band_reject_layers(tc)
+% The layers: each opened by the first value more than 2 dB above the last, floored to 0.1 dB,
+% so every effective rejection an escaped hop of a cell meets reads the layer at or below it
+% within 2 dB (never a milder one) and every layer is used; the per-cell counts of the protocol
+% (CW 7, 4 MHz 8, 8 MHz 9, 20 MHz 7, 70 MHz 4, the whole band none; the equal-level cells 15,
+% 15, 14 and 8: 227 (cell, layer) pairs), the CW's the sheet's rows as before.
+verifyEqual(tc, band_reject('grid', [4 5.9 6.1 24 27 28 55 1.5]), [4 6.1 24 27 55], 'AbsTol', 1e-12);
+verifyEqual(tc, band_reject('layer', [0 4 5.9 6.1 7 30 1], [4 6.1 24 27 55]), [0 1 1 2 2 4 0]);
+verifyEqual(tc, band_reject('layer', [0; 5], [4 6.1]), [0; 1]);
+verifySize(tc, band_reject('grid', []), [1 0]);
+B = band_plan();
+[cells, scen] = band_cells();
+n = zeros(1, numel(cells)); allg = [];
+for c = 1:numel(cells)
+    v = band_reject('values', {scen([scen.cell] == c).J}, B);
+    g = band_reject('grid', v); n(c) = numel(g); allg = [allg, g]; %#ok<AGROW>
+    i = band_reject('layer', v, g);
+    verifyTrue(tc, all(i > 0), cells(c).name);
+    if isempty(v), continue; end
+    verifyGreaterThanOrEqual(tc, v - g(i), -1e-9, cells(c).name);
+    verifyLessThanOrEqual(tc, v - g(i), 2 + 1e-9, cells(c).name);
+    verifyEqual(tc, unique(i), 1:numel(g), cells(c).name);
+    verifyEqual(tc, g, floor(10 * g + 1e-6) / 10, 'AbsTol', 1e-9, cells(c).name);
+end
+N = @(nm) n(strcmp({cells.name}, nm));
+verifyEqual(tc, [N('cw_tot4'), N('bw4_tot4'), N('bw8_tot4'), N('bw20_tot4'), N('bw70_tot4'), N('bw83.5_tot4')], ...
+    [7 8 9 7 4 0]);
+verifyEqual(tc, [N('inb4'), N('inb10'), N('inb16'), N('inb23')], [15 15 14 8]);
+verifyEqual(tc, sum(n), 227);
+verifyEqual(tc, numel(unique(round(10 * allg))), 38);
+verifyEqual(tc, band_reject('grid', band_reject('values', {cells(strcmp({cells.name}, 'cw_tot4')).J}, B)), ...
+    [4 24 28 42 47 50 55]);
+verifyEqual(tc, band_reject('grid', band_reject('values', {cells(strcmp({cells.name}, 'bw70_tot4')).J}, B)), ...
+    [3.8 18.4 20.6 22.6], 'AbsTol', 1e-9);
 end
 
 function test_hop_targets(tc)
@@ -8005,10 +8073,13 @@ rs = 4; ro = 0.3;                                          % Liu et al.'s 4 MHz 
 verifyEqual(tc, J('bw4_tot4').half, (1 + ro) * rs / 2, 'AbsTol', 1e-12);
 verifyEqual(tc, L('bw4_tot4'), 4 - 10 * log10(rs), 'AbsTol', 1e-12);
 verifyGreaterThan(tc, 4 - 10 * log10(rs / (1 + ro)), L('bw4_tot4'));   % the occupied reading: 1.14 dB more in band
-B = band_plan(); h = B.centre;                             % but its nearer edge costs an escaped hop a row
-Ro = band_reject(B.f_mhz(h) + [-rs rs] / 2, B.f_mhz, B.b_ch);
-Rn = band_reject(band_cover('span', J('bw4_tot4'), B.f_mhz(h)), B.f_mhz, B.b_ch);
-verifyEqual(tc, [Rn(h + [2 3 4]); Ro(h + [2 3 4])], [0 4 24; 4 24 28]);
+B = band_plan(); h = B.centre;                             % but its nearer edge costs an escaped hop rejection
+Jo = struct('kind', 'centred', 'half', rs / 2, 'lo', NaN, 'hi', NaN, 'rs', rs / (1 + ro), 'ro', ro);
+Ro = band_reject(Jo, B.f_mhz(h), B);
+Rn = band_reject(J('bw4_tot4'), B.f_mhz(h), B);
+verifyEqual(tc, [Rn(h + [2 3 4]); Ro(h + [2 3 4])], [0 12.6683 21.8040; 2.0859 20.6737 23.1188], 'AbsTol', 1e-3);
+verifyEqual(tc, [J('bw4_tot4').rs, J('bw4_tot4').ro], [rs ro]);   % Liu's raised cosine; the others flat
+verifyTrue(tc, all(isnan([J('cw_tot4').rs, J('bw8_tot4').rs, J('bw20_tot4').rs, J('bw70_tot4').rs, J('bw83.5_tot4').rs])));
 verifyEqual(tc, [J('bw70_tot4').lo, J('bw70_tot4').hi, J('bw83.5_tot4').lo, J('bw83.5_tot4').hi], [2402 2472 2400 2483.5]);
 src = fileread(which('experiment_core_bw'));                  % the pools carry the scenarios the episodes read
 verifyNotEmpty(tc, regexp(src, 'function stage_pools\(X\)\r?\n\[p0, cells, scen, EBNO\] = study_cells\(X\);', 'once'));
@@ -8467,7 +8538,7 @@ function test_band_p1_reading(tc)
 B = band_plan(); f = B.f_mhz; h = B.centre;
 cells = band_cells();
 J = cells(strcmp({cells.name}, 'cw_tot30')).J;
-R = band_reject(band_cover('span', J, f(h)), f, B.b_ch);
+R = band_reject(J, f(h), B);
 k = abs((1:numel(f)) - h) >= 3;
 verifyEqual(tc, nnz(k), 36); verifyEqual(tc, nnz(R(k) >= 42), 28);
 verifyEqual(tc, unique(R(k & R < 42)), [24 28]);

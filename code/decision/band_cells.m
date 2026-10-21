@@ -6,10 +6,12 @@ function [cells, scen] = band_cells(p)
 %     CW tone   narrowband; offset uniform in +-300 kHz (init_params.m): the tone's range
 %     4 MHz     Liu et al.: jamming of 4 MHz instantaneous bandwidth, raised cosine of
 %               roll-off 0.3, the 4 MHz read as its noise bandwidth (symbol rate; the paper
-%               does not say, and the readings trade 1.14 dB in band against a row of the
-%               hop's rejection, docs/core_bw_protocol.md 3): +-2.6 MHz, its occupied edge
+%               does not say, and the readings trade 1.14 dB in band against up to 8 dB of
+%               the hop's effective rejection, docs/core_bw_protocol.md 3): +-2.6 MHz, its
+%               occupied edge
 %     8 MHz     Mekdad et al.: Gaussian noise at 10 MS/s low-passed at 4 MHz with a 1 MHz
-%               transition: +-4.5 MHz, the stopband edge
+%               transition: +-4.5 MHz, the stopband edge, its transition at the in-band
+%               density (the paper gives no slope: the most severe for an escaped hop)
 %     20 MHz    Panitsas et al.: a $20 dongle covering 20 MHz: +-10 MHz
 %     70 MHz    Panitsas et al.: AWGN over 802.11 channels 1, 6 and 11 (2412, 2437, 2462 MHz,
 %               20 MHz each): fixed 2402-2472 MHz
@@ -24,19 +26,21 @@ function [cells, scen] = band_cells(p)
 %   JSR_in in {4, 10, 16, 23} dB of the barrage, one cell serving every B_J >= 4 MHz, read only
 %   where JSR_in + 10 log10(B_J / 1 MHz) <= 30 dB.
 %   cells  1 x 34: name, threat, field (level field), level [dB], bj [MHz], jsr_tot (NaN on
-%          the equal-level cells), jsr_in, slice (equal-level cell), J (span, band_cover.m)
+%          the equal-level cells), jsr_in, slice (equal-level cell), J (span, band_cover.m;
+%          spectrum, band_reject.m: rs, ro a raised cosine's symbol rate [MHz] and roll-off, NaN
+%          flat over the span)
 %   scen   1 x 44 scenarios: cell (index into cells), bj, jsr_tot, jsr_in, slice, J, band
 %          ('narrowband' or 'wideband')
 if nargin < 1, p = struct(); end
 toff = 0.3; if isfield(p, 'tone_offset_hz'), toff = p.tone_offset_hz / 1e6; end
 cap = 30; if isfield(p, 'inband_cap_db'), cap = p.inband_cap_db; end
 BJ = [0 4 8 20 70 83.5];
-SPAN = {struct('kind', 'tone', 'half', toff, 'lo', NaN, 'hi', NaN), ...
-        struct('kind', 'centred', 'half', 2.6, 'lo', NaN, 'hi', NaN), ...
-        struct('kind', 'centred', 'half', 4.5, 'lo', NaN, 'hi', NaN), ...
-        struct('kind', 'centred', 'half', 10, 'lo', NaN, 'hi', NaN), ...
-        struct('kind', 'fixed', 'half', NaN, 'lo', 2402, 'hi', 2472), ...
-        struct('kind', 'fixed', 'half', NaN, 'lo', 2400, 'hi', 2483.5)};
+SPAN = {struct('kind', 'tone', 'half', toff, 'lo', NaN, 'hi', NaN, 'rs', NaN, 'ro', NaN), ...
+        struct('kind', 'centred', 'half', 2.6, 'lo', NaN, 'hi', NaN, 'rs', 4, 'ro', 0.3), ...
+        struct('kind', 'centred', 'half', 4.5, 'lo', NaN, 'hi', NaN, 'rs', NaN, 'ro', NaN), ...
+        struct('kind', 'centred', 'half', 10, 'lo', NaN, 'hi', NaN, 'rs', NaN, 'ro', NaN), ...
+        struct('kind', 'fixed', 'half', NaN, 'lo', 2402, 'hi', 2472, 'rs', NaN, 'ro', NaN), ...
+        struct('kind', 'fixed', 'half', NaN, 'lo', 2400, 'hi', 2483.5, 'rs', NaN, 'ro', NaN)};
 TOT = [4 10 16 23 30];
 INB = [4 10 16 23];
 cells = struct('name', {}, 'threat', {}, 'field', {}, 'level', {}, 'bj', {}, 'jsr_tot', {}, 'jsr_in', {}, ...
