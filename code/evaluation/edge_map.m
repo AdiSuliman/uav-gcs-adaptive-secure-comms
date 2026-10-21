@@ -228,7 +228,7 @@ end
 U = [];
 if isfile('data/unknown_threat_agents.mat')
     U = load('data/unknown_threat_agents.mat', 'agents_loo', 'threats', 'det_id');
-    check_det_id(PP, U, 'edge_map');
+    check_det_id(PP, U, 'edge_map', 'data/unknown_threat_agents.mat');
 end
 if ~isempty(U) || ~startsWith(dep, 'dqn')
     grp = {single_cells}; ga = 0;
