@@ -16,7 +16,14 @@ function varargout = link_env(cmd, varargin)
 %         jammer is on every channel we can use (frequency diversity escapes it no
 %         more than a hop); optional offset (1 x NE, default Inf): the cycle the threat ends,
 %         from which the episode flies the clean link of the same geometry at the same frame
-%         positions (a threat that ends; no follower after it)
+%         positions (a threat that ends; no follower after it); optional cover (NE x H
+%         logical): the static jammer covers the channel the k-th hop that reaches the link
+%         moves to (the bandwidth study, experiment_core_bw.m; the home channel before the
+%         first hop is covered): while the threat is on, a configuration containing
+%         channel_switch on a covered channel acts as the same configuration without it, as
+%         after a follower's re-acquisition; optional acr (NE x H): on an escaped hop the
+%         channel_switch configurations take their frames from the pools (1) or from the
+%         residual's layer PP.alt{v - 1} (v > 1, the same configurations at another rejection)
 %   split: 1 = train, 2 = validation, 3 = test, 4 = edge-speed pools, 5 = second
 %         test; rs: RandStream for frame draws
 %
@@ -73,7 +80,9 @@ function varargout = link_env(cmd, varargin)
 %   healthy: no_action restores both, its m <= C.ratio_ok x clean and its packet loss
 %   restored (KPI 4's test); recoverable: some configuration restores both BER and
 %   packet loss in this geometry (under a comb jammer, one without channel_switch
-%   and freq_diversity); on: the cell's threat is on the air in some frame of this
+%   and freq_diversity; with spec.cover, one with channel_switch only when a hop that can
+%   reach the link after the onset, floor((T - onset - 1) / (delay + 1)) of them counted
+%   from the hops before it, escapes); on: the cell's threat is on the air in some frame of this
 %   geometry (pool_cell.m act; airframe shadowing only where the flight's attitude lets
 %   the airframe hide an antenna, shadow_hidden.m), so an episode whose threat never is
 %   counts as no threat episode (policy_run_set.m, dqn_eval_batches.m).
@@ -143,6 +152,7 @@ end
 K.q = nan(nSc, nS, nA, nSp, nRm); K.gput = nan(nSc, nS, nA, nSp, nRm);
 K.restored = false(nSc, nS, nA, nSp, nRm); K.restored_plr = false(nSc, nS, nA, nSp, nRm);
 K.healthy = false(nSc, nS, nSp, nRm); K.recoverable = false(nSc, nS, nSp, nRm); K.recoverable_comb = K.recoverable;
+K.rec_noch = K.recoverable; K.rec_ch = K.recoverable;   % some configuration without / with channel_switch restores
 K.on = false(nSc, nS, nSp, nRm);
 stay = ~K.hasCh & ~K.hasFd;                         % configurations a comb jammer leaves as they are
 for sp = 1:nSp
@@ -181,12 +191,21 @@ for sp = 1:nSp
                 ok = K.restored(sc, s, :, sp, r) & K.restored_plr(sc, s, :, sp, r);
                 K.recoverable(sc, s, sp, r) = any(ok);
                 K.recoverable_comb(sc, s, sp, r) = any(ok(stay));
+                K.rec_noch(sc, s, sp, r) = any(ok(~K.hasCh)); K.rec_ch(sc, s, sp, r) = any(ok(K.hasCh));
             end
         end
     end
 end
 comp = cellfun(@(x) strsplit(x, '+'), PP.scen, 'UniformOutput', false);
 K.followable = cellfun(@(c) any(ismember(c, {'jamming', 'reactive_jamming', 'spoofing', 'tone_jamming'})), comp);
+K.alt = {};                                         % PP.alt: pools of the residual's layers (spec.acr)
+if isfield(PP, 'alt') && ~isempty(PP.alt)
+    for v = 1:numel(PP.alt)
+        Pv = rmfield(PP, 'alt'); Pv.pools = PP.alt{v};
+        Kv = tables(Pv, ref);
+        K.alt{v} = struct('q', Kv.q, 'restored', Kv.restored, 'restored_plr', Kv.restored_plr, 'gput', Kv.gput);
+    end
+end
 end
 
 function [BC, PC] = clean_reference(PP, K, sp, ref, C)
@@ -220,6 +239,9 @@ E.last_switch = -inf(1, NE);
 E.hop_live = -inf(1, NE);                           % frame from which the channel in use was taken
 E.crc = false(1, NE);                               % CRC of the frame just received failed
 E.fec_t = -inf(1, NE);                              % frame from which the link runs coded
+E.nhop = zeros(1, NE); E.nh_on = E.nhop;            % hops that reached the link, and of them before the onset
+if ~isfield(spec, 'cover'), E.cover = []; end
+if ~isfield(spec, 'acr'), E.acr = []; end
 if ~isfield(spec, 'comb') || isempty(spec.comb), E.comb = false(1, NE); end
 if ~isfield(spec, 'offset') || isempty(spec.offset), E.offset = inf(1, NE); end
 if ~isfield(spec, 'r') || isempty(spec.r)            % geometry of the episode, one its cell flies
@@ -251,6 +273,7 @@ function [E, r, obs, info] = step_env(E, PP, K, a)
 a = a(:)';
 prev = E.cfg; prev_link = E.cfg_link;
 if ~isfield(E, 'offset'), E.offset = inf(1, E.NE); end
+if ~isfield(E, 'nhop'), E.nhop = zeros(1, E.NE); E.nh_on = E.nhop; E.cover = []; E.acr = []; end
 rel = a ~= prev & a == K.na & E.t >= E.offset;      % decided on a frame after the threat's end
 pend = any(E.hopq, 1);                              % a hop on its way to the GCS
 hop = K.hasCh(a) & (~K.hasCh(prev) | E.crc) & ~pend;
@@ -268,36 +291,79 @@ turn = K.hasFec(E.cfg_link) & ~K.hasFec(prev_link);  % the link runs coded from 
 E.fec_t(turn) = E.t(turn);
 gap = K.hasFec(E.cfg_link) & E.t - E.fec_t < K.Q - 1;   % no coded packet decoded yet
 E.hop_live(arr) = E.t(arr);                         % the new channel is in use from this frame
-[E, obs, sc_eff, cfg_eff, cm] = draw(E, PP, K);
+E.nhop = E.nhop + arr;
+pre = E.t < E.onset; E.nh_on(pre) = E.nhop(pre);
+[E, obs, sc_eff, cfg_eff, cm, lay] = draw(E, PP, K);
 sp = E.split * ones(1, E.NE);
 idx = sub2ind(size(K.q), sc_eff, E.s, cfg_eff, sp, E.r);
 ih = sub2ind(size(K.healthy), sc_eff, E.s, sp, E.r);
 healthy = K.healthy(ih);
-q = K.q(idx);
+q = K.q(idx); rst = K.restored(idx); rpl = K.restored_plr(idx); gpt = K.gput(idx);
+for v = 1:numel(K.alt)                              % an escaped hop at another rejection
+    j = lay == v; if ~any(j), continue; end
+    q(j) = K.alt{v}.q(idx(j)); rst(j) = K.alt{v}.restored(idx(j));
+    rpl(j) = K.alt{v}.restored_plr(idx(j)); gpt(j) = K.alt{v}.gput(idx(j));
+end
 r = (q - K.cost(E.cfg_link) - K.SW * (changed | hop) - K.FA * (changed & healthy & ~rel)) / 100;
 rec = K.recoverable(ih); rec(E.comb) = K.recoverable_comb(ih(E.comb));
-info = struct('q', q, 'restored', K.restored(idx) & ~gap, 'restored_plr', K.restored_plr(idx) & ~gap, ...
-    'fec_gap', gap, 'gput', K.gput(idx), ...
+if ~isempty(E.cover)                                % a channel_switch configuration only through an escaped hop
+    j = ~E.comb;
+    rec(j) = K.rec_noch(ih(j)) | (K.rec_ch(ih(j)) & reach_escape(E, j));
+end
+info = struct('q', q, 'restored', rst & ~gap, 'restored_plr', rpl & ~gap, ...
+    'fec_gap', gap, 'gput', gpt, ...
     'changed', changed | hop, 'false_switch', changed & healthy & ~rel, 'healthy', healthy, ...
     'recoverable', rec, 'sc_eff', sc_eff, 'cfg_eff', cfg_eff, 'post', E.t >= E.onset, ...
     'hop', hop, 'hop_in', arr, 'compromised', cm, 'ended', E.t >= E.offset, 'released', rel);
 end
 
-function [c, cf] = compromised(E, K, cfg)
-% c: a follower has re-acquired the channel in use; cf: a comb jammer holds the second
-% carrier of frequency diversity.
+function [c, cf, lay] = compromised(E, K, cfg)
+% c: a follower has re-acquired the channel in use, or the static jammer covers it
+% (spec.cover); cf: a comb jammer holds the second carrier of frequency diversity; lay: the
+% residual's layer of an escaped hop (spec.acr; 0 the pools).
 on = K.followable(E.scn) & E.t >= E.onset & E.t < E.offset;
 c = on & E.follow & K.hasCh(cfg) & (E.t - E.hop_live) >= E.fdelay;
 cf = on & E.comb & K.hasFd(cfg);
+lay = zeros(1, E.NE);
+if isfield(E, 'cover') && ~isempty(E.cover)
+    [cv, k] = on_channel(E);
+    c = c | (on & K.hasCh(cfg) & cv);
+    if isfield(E, 'acr') && ~isempty(E.acr)
+        j = on & K.hasCh(cfg) & ~c & k > 0;
+        lay(j) = E.acr(sub2ind(size(E.acr), find(j), k(j))) - 1;
+    end
+end
 end
 
-function [E, obs, sc_eff, cfg_eff, cm] = draw(E, PP, K)
+function [cv, k] = on_channel(E)
+% The jammer covers the channel in use: the home channel before the first hop, else the
+% channel of the k-th hop that reached the link.
+k = E.nhop; cv = true(1, E.NE); h = k > 0;
+if any(k > size(E.cover, 2))
+    error('link_env:cover', 'link_env: hop %d reached the link, spec.cover holds %d', max(k), size(E.cover, 2));
+end
+cv(h) = E.cover(sub2ind(size(E.cover), find(h), k(h)));
+end
+
+function e = reach_escape(E, j)
+% Some hop that can reach the link after the onset escapes the jammer (episodes j).
+H = size(E.cover, 2); ii = find(j);
+e = false(1, numel(ii));
+for m = 1:numel(ii)
+    i = ii(m);
+    n = floor((E.T - E.onset(i) - 1) / (E.D + 1));
+    w = E.nh_on(i) + (1:n); w = w(w <= H);
+    e(m) = any(~E.cover(i, w));
+end
+end
+
+function [E, obs, sc_eff, cfg_eff, cm, lay] = draw(E, PP, K)
 % Frame of the effective (cell, configuration), same geometry, frame position
 % k0 + t inside the geometry (cyclic; a rolling-in flight beyond its run's end cycles over
-% its last 10 frames).
+% its last 10 frames); lay > 0 takes it from the residual's layer PP.alt{lay}.
 sc_eff = E.scn; sc_eff(E.t < E.onset | E.t >= E.offset) = K.clean;
 cfg_eff = E.cfg_link;
-[cm, cf] = compromised(E, K, E.cfg_link);
+[cm, cf, lay] = compromised(E, K, E.cfg_link);
 cfg_eff(cm) = K.strip(E.cfg_link(cm));
 cfg_eff(cf) = K.strip_fd(E.cfg_link(cf));
 cm = cm | cf;
@@ -310,7 +376,8 @@ obs.idle = nan(E.NE, numel(idle_summary('names')));     % the idle time before t
 obs.bch = [];                                           % every antenna's channel estimates (branch_record.m)
 obs.mmse_pred = nan(E.NE, 1);                           % the predicted MMSE gain over MRC (pools without it: none)
 for i = 1:E.NE
-    P = PP.pools{sc_eff(i), E.s(i), cfg_eff(i), E.split};
+    if lay(i) > 0, P = PP.alt{lay(i)}{sc_eff(i), E.s(i), cfg_eff(i), E.split};
+    else, P = PP.pools{sc_eff(i), E.s(i), cfg_eff(i), E.split}; end
     rows = find(P.run == PP.runs{E.split}(E.r(i)));
     q = E.k0(i) + E.t(i); n = numel(rows);
     if isfield(E, 'ev') && E.ev(i) && q >= n, q = n - 10 + mod(q - n, 10); end

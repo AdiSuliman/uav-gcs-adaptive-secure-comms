@@ -7829,6 +7829,148 @@ for k = 1:size(runs, 1)
 end
 end
 
+function test_link_env_cover_default(tc)
+% Without the new spec fields link_env.m gives the parent commit's (lect-kpi 394d4da) rewards,
+% observations, info and tables bit for bit, follower, comb jammer and an ending threat
+% included; with cover all false it is the live channel_switch, with cover all true the follower
+% with fdelay 0 (recoverable then only through a configuration without channel_switch).
+spec = struct('scn', [2 2 2 2 1 2], 's', [1 2 1 2 1 1], 'onset', [3 5 4 6 3 8], 'follow', logical([0 1 0 1 0 0]), ...
+    'fdelay', [0 2 1 3 0 0], 'unk', false(1, 6), 'T', 30, 'r', ones(1, 6), 'comb', logical([0 0 1 0 0 0]), ...
+    'offset', [Inf Inf Inf 20 Inf Inf]);
+for hop_only = [false true]
+    [PP, K] = toy_world(true, hop_only);
+    nA = numel(PP.actions);
+    acts = repelem(randi(RandStream('mt19937ar', 'Seed', 7), nA, 10, 6), 3, 1);
+    d = parent_copy(tc, 'code/decision/link_env.m');
+    addpath(d, '-begin'); clear link_env
+    cl0 = onCleanup(@() fixture_off(d, 'link_env')); %#ok<NASGU>
+    verifyEqual(tc, which('link_env'), fullfile(d, 'link_env.m'));
+    Ko = link_env('tables', PP); Oo = env_trace(PP, Ko, spec, acts);
+    fixture_off(d, 'link_env');
+    Kn = link_env('tables', PP); On = env_trace(PP, Kn, spec, acts);
+    verifyTrue(tc, isequaln(Oo, On), sprintf('trace, hop_only %d', hop_only));
+    for f = fieldnames(Ko)'
+        verifyTrue(tc, isequaln(Ko.(f{1}), Kn.(f{1})), sprintf('K.%s, hop_only %d', f{1}, hop_only));
+    end
+    s0 = rmfield(spec, {'comb', 'offset'}); s0.follow(:) = false;
+    O0 = env_trace(PP, Kn, s0, acts);
+    s1 = s0; s1.cover = false(6, 30);
+    verifyTrue(tc, isequaln(O0, env_trace(PP, Kn, s1, acts)), 'cover all false');
+    s2 = s0; s2.cover = true(6, 30);
+    sf = s0; sf.follow(:) = true; sf.fdelay(:) = 0;
+    O2 = env_trace(PP, Kn, s2, acts); Of = env_trace(PP, Kn, sf, acts);
+    verifyTrue(tc, isequaln(Of.r, O2.r) && isequaln(Of.obs, O2.obs), 'cover all true: rewards and frames');
+    for t = 1:30
+        verifyTrue(tc, isequaln(rmfield(Of.info{t}, 'recoverable'), rmfield(O2.info{t}, 'recoverable')));
+        ih = sub2ind(size(Kn.healthy), O2.info{t}.sc_eff, s2.s, ones(1, 6), s2.r);
+        verifyEqual(tc, O2.info{t}.recoverable, Kn.rec_noch(ih));
+    end
+end
+end
+
+function O = env_trace(PP, K, spec, acts)
+% Every output of an episode batch under the actions acts (T x NE), fixed frame draws.
+[E, obs] = link_env('reset', PP, K, spec, 1, RandStream('mt19937ar', 'Seed', 3));
+O = struct('obs0', obs, 'r', zeros(size(acts)), 'info', {cell(1, size(acts, 1))}, 'obs', {cell(1, size(acts, 1))});
+for t = 1:size(acts, 1)
+    [E, r, obs, info] = link_env('step', E, PP, K, acts(t, :));
+    O.r(t, :) = r; O.info{t} = info; O.obs{t} = obs;
+end
+end
+
+function test_link_env_cover_recoverable(tc)
+% With spec.cover an episode counts as recoverable through channel_switch only when a hop that
+% can reach the link after the onset, floor((T - onset - 1) / (delay + 1)) of them counted from
+% the hops before it, escapes; channel_switch on a covered channel runs the frames without it
+% and on an escaped one its own.
+[PP, K] = toy_world(true, true);                         % only channel_switch restores
+ics = find(strcmp(PP.actions, 'channel_switch'));
+T = 30; base = struct('scn', 2, 's', 1, 'follow', false, 'fdelay', 0, 'unk', false, 'T', T, 'r', 1);
+cov = @(k) ~ismember(1:T, k);                            % escaped hops k only
+rec = @(spec, a) last_info(PP, K, spec, a).recoverable;
+s = base; s.onset = 5;
+s.cover = true(1, T); verifyFalse(tc, rec(s, K.na));
+s.cover = cov(3); verifyTrue(tc, rec(s, K.na));
+s.cover = cov(12); verifyTrue(tc, rec(s, K.na));          % floor(24 / 2) = 12 hops can reach the link
+s.cover = cov(13); verifyFalse(tc, rec(s, K.na));
+verifyTrue(tc, rec(s, ics));                             % channel_switch from cycle 1: one hop before the onset
+s.onset = 10; s.cover = cov(9); verifyTrue(tc, rec(s, K.na));
+s.cover = cov(10); verifyFalse(tc, rec(s, K.na));
+s = base; s.onset = 3; s.cover = cov(2);                 % hold channel_switch: the first hop covered, a re-hop escapes
+[E, ~] = link_env('reset', PP, K, s, 1, RandStream('mt19937ar', 'Seed', 1));
+eff = zeros(1, T); ok = false(1, T); nh = zeros(1, T);
+for t = 1:T
+    [E, ~, ~, info] = link_env('step', E, PP, K, ics);
+    eff(t) = info.cfg_eff; ok(t) = info.restored; nh(t) = E.nhop;
+end
+post = (1:T) >= s.onset;
+verifyEqual(tc, eff(post & nh == 1), K.strip(ics) * ones(1, nnz(post & nh == 1)));
+verifyEqual(tc, eff(post & nh == 2), ics * ones(1, nnz(post & nh == 2)));
+verifyTrue(tc, all(ok(post & nh == 2))); verifyFalse(tc, any(ok(post & nh == 1)));
+verifyEqual(tc, max(nh), 2);                             % no re-hop once the frames pass their CRC
+end
+
+function info = last_info(PP, K, spec, a)
+% The info of an episode's last cycle under configuration a held from the first.
+[E, ~] = link_env('reset', PP, K, spec, 1, RandStream('mt19937ar', 'Seed', 1));
+for t = 1:spec.T, [E, ~, ~, info] = link_env('step', E, PP, K, a); end
+end
+
+function test_link_env_residual_layer(tc)
+% spec.acr: on an escaped hop the channel_switch configurations read the residual's layer
+% PP.alt{v - 1} (its frames and its tables), 1 the pools; a covered hop ignores it.
+[PP, K0] = toy_world(true, true);
+ics = find(strcmp(PP.actions, 'channel_switch'));
+Q = PP.pools;
+for a = find(contains(PP.actions, 'channel_switch')), Q(2, :, a, 1) = PP.pools(2, :, K0.na, 1); end
+PP.alt = {Q};
+K = link_env('tables', PP);
+verifyTrue(tc, K.restored(2, 1, ics, 1, 1)); verifyFalse(tc, K.alt{1}.restored(2, 1, ics, 1, 1));
+s = struct('scn', 2, 's', 1, 'onset', 3, 'follow', false, 'fdelay', 0, 'unk', false, 'T', 12, 'r', 1, ...
+    'cover', false(1, 12), 'acr', 2 * ones(1, 12));
+[ok, ber, eff] = hold_trace(PP, K, s, ics);
+verifyFalse(tc, any(ok(3:end))); verifyEqual(tc, ber(3:end), 0.1 * ones(1, 10)); verifyEqual(tc, eff(3:end), ics * ones(1, 10));
+s.acr(:) = 1;
+[ok, ber] = hold_trace(PP, K, s, ics);
+verifyTrue(tc, all(ok(3:end))); verifyEqual(tc, ber(3:end), zeros(1, 10));
+s.cover(:) = true; s.acr(:) = 2;
+[ok, ~, eff] = hold_trace(PP, K, s, ics);
+verifyFalse(tc, any(ok(3:end))); verifyEqual(tc, eff(3:end), K.na * ones(1, 10));
+end
+
+function [ok, ber, eff] = hold_trace(PP, K, spec, a)
+% Restored, true BER and effective configuration of each frame under configuration a held.
+[E, ~] = link_env('reset', PP, K, spec, 1, RandStream('mt19937ar', 'Seed', 1));
+[ok, ber, eff] = deal(zeros(1, spec.T));
+for t = 1:spec.T
+    [E, ~, obs, info] = link_env('step', E, PP, K, a);
+    ok(t) = info.restored; ber(t) = obs.ber_true; eff(t) = info.cfg_eff;
+end
+end
+
+function test_oracle_cover(tc)
+% With spec.cover the one-step oracle predicts the link's effective configuration of the frame
+% its choice reaches (a covered channel strips channel_switch), at every signalling delay; with
+% every channel covered it never runs channel_switch after the onset.
+[PP, K] = toy_world(true, true);
+on = 9;
+for D = [0 1 2]
+    for pat = {[1 2], 3, []}
+        spec = struct('scn', 2, 's', 1, 'onset', on, 'follow', false, 'fdelay', 0, 'unk', false, 'T', 30, 'r', 1, ...
+            'delay', D, 'cover', ismember(1:30, setdiff(1:30, pat{1} + 2)));
+        [~, ~, pred, eff] = oracle_run(PP, K, spec);
+        verifyEqual(tc, pred(1:end-D), eff(1+D:end), sprintf('D %d', D));
+    end
+    spec.cover = true(1, 30);
+    [~, a] = oracle_run(PP, K, spec);
+    verifyEqual(tc, a, K.na * ones(1, 30), sprintf('all covered, D %d', D));   % no hop pays when none escapes
+    spec.cover = false(1, 30);
+    [ok, a] = oracle_run(PP, K, spec);
+    verifyEqual(tc, find(a ~= K.na, 1), on - D, sprintf('none covered, D %d', D));
+    verifyTrue(tc, all(ok(on:end)), sprintf('none covered, D %d', D));
+end
+end
+
 function d = parent_copy(tc, rel)
 % The file rel as this branch's parent commit (lect-kpi 394d4da) holds it, alone in a folder.
 d = tempname; mkdir(d);

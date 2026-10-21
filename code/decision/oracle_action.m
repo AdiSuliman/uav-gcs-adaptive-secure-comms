@@ -3,7 +3,9 @@ function [a, ceff, ta] = oracle_action(E, K)
 %   with the best reward of the frame on which the choice reaches the link (after the
 %   signalling delay), given the truth (scenario, onset, follower, geometry) and the hop
 %   rule of link_env.m: a hop when channel_switch follows a configuration without it, or
-%   is kept after a failed frame, and none while one is on its way.
+%   is kept after a failed frame, and none while one is on its way; with spec.cover (the
+%   bandwidth study, link_env.m) channel_switch on a channel the static jammer covers acts as
+%   the configuration without it.
 %   [a, ceff, ta] = oracle_action(E, K)
 %   E, K   link_env.m state (before the step) and tables
 %   a      the configuration chosen (1 x NE)
@@ -14,6 +16,7 @@ nA = numel(K.cost);
 a = E.cfg; ceff = a;
 ta = E.t + 1 + E.D;
 pend = any(E.hopq, 1);
+cov = isfield(E, 'cover') && ~isempty(E.cover);
 for i = 1:E.NE
     sc = E.scn(i); if ta(i) < E.onset(i), sc = K.clean; end
     healthy = K.healthy(sc, E.s(i), E.split, E.r(i));
@@ -28,6 +31,10 @@ for i = 1:E.NE
         ce = c;
         if on && E.follow(i) && K.hasCh(c) && ta(i) - h >= E.fdelay(i), ce = K.strip(c); end
         if on && E.comb(i) && K.hasFd(c), ce = K.strip_fd(c); end
+        if on && cov && K.hasCh(c)                     % the hops that have reached the link by frame ta
+            nh = E.nhop(i) + nnz(E.hopq(:, i)) + hop;
+            if nh == 0 || E.cover(i, min(nh, size(E.cover, 2))), ce = K.strip(c); end
+        end
         chg = c ~= E.cfg(i) || hop;
         v = K.q(sc, E.s(i), ce, E.split, E.r(i)) - K.cost(c) - K.SW * chg - K.FA * (c ~= E.cfg(i) && healthy);
         if v > best, best = v; a(i) = c; ceff(i) = ce; end
