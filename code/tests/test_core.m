@@ -7591,7 +7591,7 @@ src = fileread(which('train_core_cnn'));
 im = strfind(src, 'cc_marker(CC.marker, pid, CC.model, CC.protocol);'); verifyNumElements(tc, im, 1);
 il = strfind(src, 'Sf = load(CC.test, ''splits'');'); verifyNumElements(tc, il, 1);
 verifyLessThan(tc, im, il);
-for id = {'protocol_changed', 'kpi1_set', 'hybrid', 'fresh3', 'params', 'read', 'started', 'recorded'}
+for id = {'protocol_changed', 'smoke', 'kpi1_set', 'hybrid', 'fresh3', 'params', 'read', 'started', 'recorded'}
     k = strfind(src, ['''train_core_cnn:' id{1} '''']);
     verifyNotEmpty(tc, k, id{1}); verifyLessThan(tc, k(end), im, id{1});
 end
@@ -7653,11 +7653,20 @@ verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:started');
 % A model older than the splits is not retrained once a reading started
 f = java.io.File(fullfile(d, CC.model)); f.setLastModified(java.lang.System.currentTimeMillis() - 3600e3);
 verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:read');
+% Nor once an aborted reading of this link model is recorded, nor over a smoke model
+delete(CC.marker);
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:read');
+smoke = true; save(CC.model, 'protocol_sha', 'smoke');          % newer than the splits, marked smoke
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:read');
+verifyEqual(tc, core_stage_error(false, true).identifier, 'test:none');   % a smoke run never reads
+verifyFalse(tc, isfile(CC.marker));
 end
 
-function ex = core_stage_error(CORE_CNN_TRAIN_ONLY) %#ok<INUSD>
-% The error train_core_cnn stops with (test:none when it runs through).
+function ex = core_stage_error(CORE_CNN_TRAIN_ONLY, SMOKE) %#ok<INUSD>
+% The error train_core_cnn stops with (test:none when it runs through); SMOKE as run_stage
+% smoke sets it.
 if ~CORE_CNN_TRAIN_ONLY, clear CORE_CNN_TRAIN_ONLY; end
+if nargin < 2 || ~SMOKE, clear SMOKE; end
 ex = MException('test:none', 'no error');
 try
     evalc('run(''train_core_cnn'')');

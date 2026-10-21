@@ -9,7 +9,9 @@
 %    macro-F1 (a tie to the shorter); the window N of the temporal decision (the mean
 %    log-probability over the last N cycles of the sub-run, core_cnn_eval 'logp') by the
 %    one-standard-error rule over 5 folds of validation sub-runs. With CORE_CNN_TRAIN_ONLY
-%    true in the calling workspace the stage ends there.
+%    true in the calling workspace the stage ends there; so does a smoke run (SMOKE), whose
+%    2-epoch model is marked smoke, never read and retrained by the next normal run. Once a
+%    reading started or is recorded (aborted records included) the model is not retrained.
 % 2. The single reading of the fourth test set (data/splits_fresh3.mat), after the hybrid's
 %    own reading of it (B3r): the protocol's guards (section 5), then the marker
 %    results/core_cnn_read_started.txt before the set is loaded; the core CNN windowed and
@@ -30,11 +32,14 @@ assert(isfile(CC.protocol), 'train_core_cnn:protocol', '%s not found: the protoc
 psha = cc_sha(CC.protocol);
 assert(isfile('data/splits.mat'), 'train_core_cnn:splits', 'data/splits.mat not found: run B1');
 if ~isfolder('results'), mkdir('results'); end
+SMK = exist('SMOKE', 'var') && isequal(SMOKE, true);   % reduced chain check (run_stage smoke): trains, never reads
 
 %% 1. Training and the choices on validation
-if ~isfile(CC.model) || dir(CC.model).datenum < dir('data/splits.mat').datenum
-    assert(~isfile(CC.marker) && ~isfile('results/core_cnn.mat'), 'train_core_cnn:read', ...
-        'the fourth test set was read with an earlier model (%s): the model is not retrained', CC.marker);
+if ~isfile(CC.model) || dir(CC.model).datenum < dir('data/splits.mat').datenum || (~SMK && cc_smoke(CC.model))
+    pid0 = ''; if isfile('params.mat'), pid0 = params_id(load('params.mat').params); end
+    assert(~isfile(CC.marker) && ~isfile('results/core_cnn.mat') && ~cc_recorded(pid0, true), 'train_core_cnn:read', ...
+        ['the fourth test set was read with an earlier model (%s, results/core_cnn.mat or a docs/core_cnn_read_*.txt ' ...
+        'record, aborted ones included): the model is not retrained'], CC.marker);
     fprintf('Loading data/splits.mat (training and validation)...\n');
     S = load('data/splits.mat', 'splits'); sp = S.splits; clear S
     classes = cellstr(string(sp.classes(:)'));
@@ -49,7 +54,7 @@ if ~isfile(CC.model) || dir(CC.model).datenum < dir('data/splits.mat').datenum
     fprintf('Training frames %s (sub-runs %s), left out %s\n', mat2str(accumarray(yt, 1, [nS 1])'), mat2str(nrt), mat2str(it.n_off));
     fprintf('Validation frames %s (sub-runs %s), left out %s\n', mat2str(accumarray(yv, 1, [nS 1])'), mat2str(nrv), mat2str(iv.n_off));
     ep = CC.epochs;
-    if exist('SMOKE', 'var') && SMOKE, ep = 2; end       % reduced chain check (run_stage smoke)
+    if SMK, ep = 2; end
     nets = cell(1, numel(ep)); infos = cell(1, numel(ep));
     for e = 1:numel(ep)
         rng(CC.seed, 'twister');
@@ -65,10 +70,10 @@ if ~isfile(CC.model) || dir(CC.model).datenum < dir('data/splits.mat').datenum
     [~, yvN] = max(core_cnn_eval('logp', Pv, va.run, va.pos, N), [], 2);
     val = struct('frame', core_cnn_eval('metrics', yv, yv1, nS), 'window', core_cnn_eval('metrics', yv, yvN, nS), ...
         'n_frames', accumarray(yv, 1, [nS 1])', 'n_runs', nrv, 'left_out', iv.n_off, 'window_table', NT);
-    groups = CC.groups; names = CC.names; protocol_sha = psha; trained_at = now; %#ok<NASGU>
+    groups = CC.groups; names = CC.names; protocol_sha = psha; trained_at = now; smoke = SMK; %#ok<NASGU>
     tmp = 'data/core_cnn_model_new.mat';
     save(tmp, 'net', 'info', 'N', 'classes', 'groups', 'names', 'schedules', 'val_best', 'all_info', 'val', ...
-        'protocol_sha', 'trained_at', '-v7.3');
+        'protocol_sha', 'trained_at', 'smoke', '-v7.3');
     commit_mat(tmp, CC.model);
     fprintf('Saved %s\n', CC.model);
     vrep = {'=== THREE-STATE CNN: VALIDATION (every choice of the model) ===', ...
@@ -95,11 +100,16 @@ if ~isfile(CC.model) || dir(CC.model).datenum < dir('data/splits.mat').datenum
     xlabel('Epoch'); ylabel('Validation macro-F1, three states (%)'); legend('Location', 'southeast');
     title('Three-state spectrogram CNN: validation per epoch');
     saveas(fig, 'results/core_cnn_training.png'); close(fig);
-    clear net info all_info Pv yv yv1 yvN va val vrep fig tmp
+    clear net info all_info Pv yv yv1 yvN va val vrep fig tmp smoke pid0
+end
+if SMK
+    fprintf('SMOKE: a reduced model is trained (marked smoke); the fourth test set is not read\n');
+    clear SMK
+    return
 end
 if exist('CORE_CNN_TRAIN_ONLY', 'var') && CORE_CNN_TRAIN_ONLY
     fprintf('CORE_CNN_TRAIN_ONLY: the model is trained; the fourth test set is not read\n');
-    clear CORE_CNN_TRAIN_ONLY
+    clear CORE_CNN_TRAIN_ONLY SMK
     return
 end
 
@@ -107,6 +117,8 @@ end
 Mo = load(CC.model, 'protocol_sha');
 assert(isfield(Mo, 'protocol_sha') && strcmp(Mo.protocol_sha, psha), 'train_core_cnn:protocol_changed', ...
     '%s changed since the model was trained: the protocol is fixed before the reading', CC.protocol);
+assert(~cc_smoke(CC.model), 'train_core_cnn:smoke', ...
+    '%s was trained in a reduced chain check (run_stage smoke): a normal run retrains it', CC.model);
 assert(strcmp(kpi1_set(), 'fresh3'), 'train_core_cnn:kpi1_set', ...
     'the fourth test set is read only once kpi1_set.m names it (docs/d91_set4.md)');
 assert(isfile(CC.hybrid_metrics) && isfile(CC.hybrid_pred), 'train_core_cnn:hybrid', ...
@@ -119,7 +131,7 @@ assert(isfile(CC.test_params) && ismember('params', {whos('-file', CC.test_param
     '%s is missing or names another link model than params.mat (params_id %s)', CC.test_params, pid);
 assert(~isfile('results/core_cnn.mat'), 'train_core_cnn:read', 'the fourth test set was read already (results/core_cnn.mat)');
 assert(~isfile(CC.marker), 'train_core_cnn:started', 'a reading of the fourth test set started already (%s)', CC.marker);
-assert(~cc_recorded(pid), 'train_core_cnn:recorded', ...
+assert(~cc_recorded(pid, false), 'train_core_cnn:recorded', ...
     'docs/core_cnn_read_*.txt records a reading with params_id %s: the set is read once', pid);
 cc_marker(CC.marker, pid, CC.model, CC.protocol);
 fprintf('B3c: start marker written (%s)\n', CC.marker);
@@ -318,14 +330,19 @@ function s = ternary_str(c, a, b)
 if c, s = a; else, s = b; end
 end
 
-function yes = cc_recorded(pid)
+function yes = cc_recorded(pid, aborted)
 % A committed record of this reading with this link model (docs/core_cnn_read_*.txt, the
-% protocol's section 5); records of aborted readings do not count.
+% protocol's section 5); records of aborted readings count only when aborted is true.
 yes = false;
 for r = dir('docs/core_cnn_read_*.txt')'
-    if contains(r.name, '_aborted'), continue; end
+    if ~aborted && contains(r.name, '_aborted'), continue; end
     yes = yes || any(strcmp(strtrim(splitlines(fileread(fullfile(r.folder, r.name)))), ['params_id ' pid]));
 end
+end
+
+function yes = cc_smoke(f)
+% The model was trained in a reduced chain check (run_stage smoke).
+yes = isfile(f) && ismember('smoke', {whos('-file', f).name}) && isequal(load(f, 'smoke').smoke, true);
 end
 
 function cc_marker(f, pid, model, protocol)

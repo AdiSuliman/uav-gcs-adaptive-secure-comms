@@ -117,8 +117,9 @@ trained from scratch.
    changes it.
 3. `data/splits_fresh3.mat` exists, and so does `data/splits_fresh3_params.mat`, with the
    `params_id` of `params.mat`.
-4. `data/core_cnn_model.mat` exists, is newer than `data/splits.mat` and carries this protocol's
-   SHA-256.
+4. `data/core_cnn_model.mat` exists, is newer than `data/splits.mat`, carries this protocol's
+   SHA-256 and was not trained in a smoke run (`run_stage('smoke', ...)`, a 2-epoch model marked
+   `smoke`; a smoke run never reads the set, and the next normal run retrains over its model).
 5. None of these exists yet:
    - `results/core_cnn.mat`;
    - `results/core_cnn_read_started.txt`;
@@ -129,7 +130,9 @@ trained from scratch.
 - `results/core_cnn_read_started.txt` is written before the set is loaded. It records the time,
   the commit and code tree, local changes and untracked `.m` files, the `params_id`, and the
   SHA-256 of the model and of this protocol.
-- From then on the model is never retrained in that checkout.
+- From then on the model is never retrained in that checkout. A committed record of this
+  `params_id`, aborted ones included, also stops a retraining, so a run after an aborted reading
+  reads the same model.
 
 **What the stage never does:** write `data/trained_detector.mat`, `data/fusion.mat` or
 `data/ood_thresholds.mat`. These stay frozen from B3r on (`docs/d91_set4.md`, step 4). The hybrid
