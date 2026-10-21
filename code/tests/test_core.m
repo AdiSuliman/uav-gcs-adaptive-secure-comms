@@ -7608,3 +7608,29 @@ verifyNotEmpty(tc, strfind(k5, ['goodput after onset in bit/s (' tag '; nominal 
 verifyNotEmpty(tc, strfind(k5, 'goodput after onset in bit/s (full action set; nominal payload 50000 bit/s)'));
 verifyEqual(tc, {S.LECT.pol.core.per.policy}, {'rule_core', 'blind_core'});
 end
+
+function test_blind_reads_no_class(tc)
+% Without the detector no class reaches the monitor under either unknown mode chosen on
+% validation: where the zeroed output (or the fusion) names a hostile class it reads unknown,
+% and a healthy link raises no alarm; with the detector the same mode keeps that class.
+A = policy_actions(); na = find(strcmp(A, 'no_action'));
+cls = {'jamming', 'none'};                            % the zeroed output's argmax is hostile
+obs = struct('probs', [1 0], 'unknown', false, 'feat', zeros(1, numel(link_features('names'))));
+obs.feat(feature_index('log_ber')) = -6;
+for md = {'all', 'nonhostile'}
+    PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0, 'unk_mode', md{1});
+    for op = {struct(), struct('core', true)}
+        mem = []; cfg = na;
+        for t = 1:10
+            o = obs; o.cfg_link = cfg;
+            [a, mem, d] = policy_decide('blind_esc', o, cfg, mem, PP, [], op{1});
+            verifyEqual(tc, d.cls, {'unknown'});
+            verifyFalse(tc, d.confirmed);
+            verifyEqual(tc, a, na);
+            cfg = a;
+        end
+    end
+end
+[~, ~, d] = policy_decide('rule_esc', obs, na, [], PP, [], struct());
+verifyEqual(tc, d.cls, {'jamming'});
+end

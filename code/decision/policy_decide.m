@@ -58,8 +58,9 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %             with the smallest known gain covering the drop (rule_based_policy.m's budget
 %             match), if not tried yet
 %   blind_esc the rule with escalation without the detector: every cycle reads as
-%             'unknown', so the alarm comes from measured degradation only (what the
-%             detection adds to an adaptive recovery)
+%             'unknown' whatever PP.unk_mode (the fused class from the receiver cues and
+%             the lost-branch latch included), so the alarm comes from measured
+%             degradation only (what the detection adds to an adaptive recovery)
 %   random, fixed: reference policies, no monitor gating ('fixed' at no_action is
 %   the link that does not respond)
 %
@@ -71,6 +72,7 @@ NE = numel(cfg); A = PP.actions; nA = numel(A);
 na = find(strcmp(A, 'no_action'));
 if startsWith(kind, 'blind')
     obs.probs(:) = 0; obs.unknown(:) = true; obs.maha = -Inf(size(obs.unknown));
+    PP.unk_mode = 'all';                              % no class survives, fused or latched
     kind = strrep(kind, 'blind', 'rule');
 end
 if isempty(mem), mem = policy_monitor('init', NE, nA); end
