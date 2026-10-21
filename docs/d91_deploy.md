@@ -269,7 +269,7 @@ A (E) would take it with no extra rerun.
 | E1's queue would print a spurious BLOCKED | medium | second queue `v7_d91_deploy_tests2.sh`: `D91_PROFILE=p1`, test_core logs accepted by code tree (`SAME-TREE`) (section 4, E1) |
 | Profile 2 had no archive step | medium | F2b |
 | Plan B left profile 2 without a fourth set | medium | plan B holds profile 2's start (T4) so it branches with the deploy code; without T4, B3q in a copy before F3 (E') |
-| The deploy path that saves was never run end to end | medium | smoke `dep_*` steps: old-layout kept fusion at the pick's base, B2F that saves (`FUSION_RULE_LOG`, smoke only), `rekey_pools`, C1d, C2, C2e, EDGE; `VERDICT smoke` needs `V7SMOKE dep_B2Fsave SAVED` (section 4) |
+| The deploy path that saves was never run end to end | medium | smoke `dep_*` steps: old-layout kept fusion at the pick's base, B2F that saves (`FUSION_RULE_LOG`, smoke only), `rekey_pools`, C1d, C2, C2e, EDGE (C2g, C2u and LAT added in 3.10); `VERDICT smoke` needs `V7SMOKE dep_B2Fsave SAVED` (section 4) |
 | The base exemption let a validation-fit pick count as deployed | low | the exemption needs `fusion_rev_id('enlarged')` (3.4; `test_b2f_deploy_guards`) |
 | `FUSION_REV` without the enlarged fit could save on a live tree | low | `select_fusion:rev_fit` unless `SMOKE` or `FUSION_DEV` (3.3) |
 | The fallback to validation was silent on profiles that should deploy | low | fallback only when both second and third test sets are absent, else `select_fusion:fit_sets` (3.3) |
@@ -293,6 +293,29 @@ A (E) would take it with no extra rerun.
 
 `f3aee61` adds `commit_mat.m`, called only by `select_fusion.m`, which is one of 3.5's 29 files;
 neither is in the proofs' call closure, so 3.5's argument stands.
+
+### 3.10 The second queue's smoke (21.10) and what changed
+
+The smoke ended `ERRORS in dep_EDGE`: `check_det_id:mismatch` at `edge_map.m` line 231, after
+`dep_REKEY` (det_id `18b149fa2e20bd67` -> `e19c28133cf267e5`), `dep_C1d`, `dep_C2` and `dep_C2e`
+passed. The smoke's files show the cause: the re-keyed policy, check and clean pools and C2's
+`data/trained_dqn.mat` carry `e19c28133cf267e5`; `data/unknown_threat_agents.mat`, saved by
+the chain's C2u at 08:03, before the re-key, still carries `18b149fa2e20bd67`.
+
+| Finding | Severity | Change |
+|---|---|---|
+| The smoke's deploy path ran C1d, C2, C2e and EDGE but not C2u, so EDGE read the leave-one-out agents of the old fusion. `rekey_pools` rightly leaves them alone: they learned on the old fusion's pools and must be retrained | medium (smoke only) | the `dep_*` steps run every stage that reads the fusion or the pools, in chain order: C1d, C2, C2e, C2g, C2u, EDGE, LAT (4.2) |
+| The message named the wrong file and stage: `edge_map.m` called `check_det_id` on these agents without naming them, so it read "the agent of data/trained_dqn.mat ... rerun C2" (C2 alone is 38-42 h, and would not clear it) | low | `edge_map.m` names `data/unknown_threat_agents.mat`, which `check_det_id.m` maps to C2u; `test_rekey_unknown_agents` builds the smoke's state on synthetic files (re-keyed pools, C2's agent, the old agents), runs `edge_map.m`'s and `experiment_unknown_threat.m`'s own blocks, checks that every three-argument `check_det_id` call is on the agent of `data/trained_dqn.mat`, and that the smoke runs the readers in chain order |
+
+Plan A (E) is not affected: the resume runs C2u before EDGE (C1d C2 C2e C2g C2u GAL OHP GCSA
+EDGE ...), step 9b reruns stages in chain order, E' step 4 lists C2u before EDGE, and profile
+1 has no `data/unknown_threat_agents.mat` before its C2u (its chain is in C1p).
+
+`check_det_id.m` and `edge_map.m` are not in the proofs' call closure (80 and 76 files, as in
+3.5), so 3.5's argument stands. The code tree changes, so the `core` and `smoke` jobs and the
+candidates (4.3, E1) are rebuilt on this branch's tip. Before the smoke runs again, copy
+`docs/d91_smoke_deploy.m.txt` to `uav-gcs-logs\d91_smoke_deploy.m`: the queue exports the live
+driver.
 
 ## 4. Tests
 
@@ -379,8 +402,8 @@ branch tip, `<P3M>` the rebuilt candidate of 4.3):
     $si = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ShowWindow=[uint16]0}
     Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine='"C:\Program Files\Git\bin\bash.exe" -lc "bash ''/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_deploy_tests2.sh'' <TIP> <P3M> 29510e7 2a2b525 >> ''/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_deploy_tests2.log'' 2>&1"'; CurrentDirectory='C:\Users\Adi Suliman\uav-gcs-logs'; ProcessStartupInformation=$si}
 
-Expected about 2 h of tests and proofs plus 6-8 h of smoke (the `dep_*` steps add C2 and
-C2e on smoke pools).
+Expected about 2 h of tests and proofs plus 6-8 h of smoke (the `dep_*` steps add C1d to LAT
+on smoke pools, about 20 min).
 
 **What the smoke runs** (driver `uav-gcs-logs\d91_smoke_deploy.m`, copy
 `docs/d91_smoke_deploy.m.txt`; the queue copies it into its export at its start):
@@ -408,7 +431,9 @@ C2e on smoke pools).
     `V7SMOKE dep_B2Fsave SAVED (rule yes|no on smoke data, logged only)`;
   - `dep_REKEY`: `rekey_pools` on the smoke pools; the policy, check and clean pools must carry
     the deployed fusion's det_id;
-  - `dep_C1d`, `dep_C2`, `dep_C2e`, `dep_EDGE` on the re-keyed pools and the deployed FM
+  - `dep_C1d`, `dep_C2`, `dep_C2e`, `dep_C2g`, `dep_C2u`, `dep_EDGE`, `dep_LAT`: every stage
+    that reads the fusion or the pools, in the order the resume runs them (C2u retrains the
+    leave-one-out agents EDGE reads, 3.10), on the re-keyed pools and the deployed FM
     (`check_det_id` holds throughout).
 
 Smoke numbers are not results.
@@ -721,7 +746,9 @@ If any condition fails, take plan B.
 9. **Re-key, and C1d if needed** (45 GB each):
    - after `rule yes`: `rekey_pools`. It covers the policy, check, clean_val and clean_test
      pools, and backs each one up first. It stops, changing nothing, on an unknown field
-     (profile 1's pools have `maha_val` from `9b5c9f1`, which it knows);
+     (profile 1's pools have `maha_val` from `9b5c9f1`, which it knows). It leaves
+     `data/unknown_threat_agents.mat` alone: C2u retrains those agents in the resume, before
+     EDGE reads them (3.10);
    - if `##### STAGE C1d done` is in p1.log's current part (step 2): `choose_drop_threshold`.
 
    9b. **Stages after C1d already done** (step 2's rule, plan A): rerun each one in chain order
