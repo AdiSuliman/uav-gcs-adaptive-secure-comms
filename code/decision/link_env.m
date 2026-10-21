@@ -24,7 +24,8 @@ function varargout = link_env(cmd, varargin)
 %         after a follower's re-acquisition; optional acr (NE x H): on an escaped hop the
 %         channel_switch configurations take their frames from the pools (1) or from the
 %         residual's layer PP.acr_pools{v - 1} (v > 1, the same configurations at another
-%         rejection; PP.alt is the pools' altitudes, never a layer); optional cover_rel
+%         rejection; PP.alt is the pools' altitudes, never a layer), and the recoverable rule
+%         reads that hop's layer; optional cover_rel
 %         (1 x NE logical, default false): the jammer takes the channel in use at the onset
 %         (a jammer tuned to our channel), so the k-th hop after the onset reads column k of
 %         cover and acr and a hop before the onset escapes nothing
@@ -86,7 +87,8 @@ function varargout = link_env(cmd, varargin)
 %   packet loss in this geometry (under a comb jammer, one without channel_switch
 %   and freq_diversity; with spec.cover, one with channel_switch only when a hop that can
 %   reach the link after the onset, floor((T - onset - 1) / (delay + 1)) of them counted
-%   from the hops before it, or from the first with spec.cover_rel, escapes); recoverable_core: the
+%   from the hops before it, or from the first with spec.cover_rel, escapes and, with
+%   spec.acr, it restores both at that hop's layer); recoverable_core: the
 %   same over the core action set's configurations alone (C.core_actions); on: the cell's threat is on the air in some frame of this
 %   geometry (pool_cell.m act; airframe shadowing only where the flight's attitude lets
 %   the airframe hide an antenna, shadow_hidden.m), so an episode whose threat never is
@@ -213,7 +215,8 @@ if isfield(PP, 'acr_pools') && ~isempty(PP.acr_pools)
     for v = 1:numel(PP.acr_pools)
         Pv = rmfield(PP, 'acr_pools'); Pv.pools = PP.acr_pools{v};
         Kv = tables(Pv, ref);
-        K.acr_tabs{v} = struct('q', Kv.q, 'restored', Kv.restored, 'restored_plr', Kv.restored_plr, 'gput', Kv.gput);
+        K.acr_tabs{v} = struct('q', Kv.q, 'restored', Kv.restored, 'restored_plr', Kv.restored_plr, 'gput', Kv.gput, ...
+            'rec_ch', Kv.rec_ch, 'rec_core_ch', Kv.rec_core_ch);
     end
 end
 end
@@ -321,9 +324,9 @@ rec = K.recoverable(ih); rec(E.comb) = K.recoverable_comb(ih(E.comb));
 rcr = rec;
 if isfield(K, 'rec_core'), rcr = K.rec_core(ih); rcr(E.comb) = K.rec_core_comb(ih(E.comb)); end
 if ~isempty(E.cover)                                % a channel_switch configuration only through an escaped hop
-    j = ~E.comb; esc = reach_escape(E, j);
-    rec(j) = K.rec_noch(ih(j)) | (K.rec_ch(ih(j)) & esc);
-    if isfield(K, 'rec_core'), rcr(j) = K.rec_core_noch(ih(j)) | (K.rec_core_ch(ih(j)) & esc); else, rcr = rec; end
+    j = ~E.comb;
+    rec(j) = K.rec_noch(ih(j)) | reach_escape(E, j, K, ih(j), 'rec_ch');
+    if isfield(K, 'rec_core'), rcr(j) = K.rec_core_noch(ih(j)) | reach_escape(E, j, K, ih(j), 'rec_core_ch'); else, rcr = rec; end
 end
 info = struct('q', q, 'restored', rst & ~gap, 'restored_plr', rpl & ~gap, ...
     'fec_gap', gap, 'gput', gpt, ...
@@ -361,15 +364,24 @@ end
 cv(h) = E.cover(sub2ind(size(E.cover), find(h), k(h)));
 end
 
-function e = reach_escape(E, j)
-% Some hop that can reach the link after the onset escapes the jammer (episodes j).
+function e = reach_escape(E, j, K, ih, fld)
+% Some hop that can reach the link after the onset escapes the jammer and a channel_switch
+% configuration restores the geometry there, K.(fld) at ih (episodes j): with spec.acr at that
+% hop's layer (K.acr_tabs), else the pools'.
 H = size(E.cover, 2); ii = find(j); rel = rel_cover(E);
+lay = isfield(E, 'acr') && ~isempty(E.acr);
 e = false(1, numel(ii));
 for m = 1:numel(ii)
     i = ii(m);
     n = floor((E.T - E.onset(i) - 1) / (E.D + 1));
     w = E.nh_on(i) * ~rel(i) + (1:n); w = w(w <= H);
-    e(m) = any(~E.cover(i, w));
+    w = w(~E.cover(i, w));
+    if isempty(w), continue; end
+    if ~lay, e(m) = K.(fld)(ih(m)); continue; end
+    for v = unique(E.acr(i, w))
+        if v == 1, ok = K.(fld)(ih(m)); else, ok = K.acr_tabs{v - 1}.(fld)(ih(m)); end
+        if ok, e(m) = true; break; end
+    end
 end
 end
 

@@ -9,9 +9,10 @@ function experiment_core_bw(stage, smoke)
 %     'pools'   frame pools of the clean link and the 34 jammer cells (band_cells.m) under the
 %               four core configurations, 12 validation and 36 test geometries per (cell, Eb/N0)
 %               (seed family 6, blocks 5 and 14; nested Latin hypercubes), and the residual's
-%               two layers (channel_switch at 24 and 47 dB, the nRF24L01+'s rejections) on the
-%               test geometries; the in-band cap's binding share per cell and the time per
-%               simulation (gate G2) -> data/core_bw/pools.mat
+%               layers: the channel_switch configurations of each cell at every nRF24L01+
+%               rejection its escaped hops can take (band_reject.m), on the same geometries; the
+%               in-band cap's binding share per cell and the time per simulation (gate G2)
+%               -> data/core_bw/pools.mat
 %     'dset'    the detector-only set D (4 flights per (cell, Eb/N0), 24 clean, block 7):
 %               spectrogram images -> data/core_bw/dset.mat
 %     'val'     validation only: the coverage check (G3), the wideband action W of the CNN
@@ -68,7 +69,7 @@ X.ND = 4; X.ND_CLEAN = 24;       % set D flights per (cell, Eb/N0) and of the cl
 X.LHS_SEED = 7200000;            % permutation stream of a design: + 100 (Eb/N0 index) + split
 X.REPS = 2; X.NE = 64; X.T = 30; % onsets per geometry, episodes per batch, cycles per episode
 X.RULES = {'H1', 'H3', 'H4'};    % H1 primary (hop_targets.m)
-X.ACR = [24 47]; X.ACR_FAR = 12; % residual layers [dB] and the offset [MHz] beyond which the far one holds
+X.ACR = band_reject('levels');   % residual layers [dB]: the rejections an escaped hop can take
 X.ENV_MIN = 90;                  % recoverable scenario: >= 90% of its validation episodes recoverable
 X.TARGET = 0.30; X.N_RUN = 5; X.B = 2000;
 X.W = {'channel_switch', 'channel_switch+rate_reduce', 'rate_reduce'};   % candidates of W, the last tie-break order
@@ -126,9 +127,10 @@ for s = 1:nS
     geo{s} = g;
 end
 runs = arrayfun(@(sp) 100 * X.BLOCK(sp) + (1:X.NGEO(sp)), 1:2, 'UniformOutput', false);
-% Jobs: every cell on both splits, then the residual's layers of the cells a hop can escape
-% (channel_switch configurations only, test geometries)
+% Jobs: every cell on both splits, then the residual's layers: the channel_switch
+% configurations of a cell at each rejection its escaped hops can take, both splits
 ACS = A(contains(A, 'channel_switch'));
+LAY = cell_layers(cells, scen, band_plan(p0), X.ACR);
 jobs = struct('name', 'none', 'threat', 'none', 'cell', 0, 'layer', 'pools', 'acr', NaN, 'splits', [1 2], 'actions', {A});
 P = {cell_params(p0, [])};
 for c = 1:nC
@@ -137,9 +139,9 @@ for c = 1:nC
     P{end+1} = cell_params(p0, cells(c)); %#ok<AGROW>
 end
 for v = 1:numel(X.ACR)
-    for c = find(escapable(cells))
+    for c = find(LAY(:, v))'
         jobs(end+1) = struct('name', cells(c).name, 'threat', cells(c).threat, 'cell', c, 'layer', sprintf('acr%g', X.ACR(v)), ...
-            'acr', X.ACR(v), 'splits', 2, 'actions', {ACS}); %#ok<AGROW>
+            'acr', X.ACR(v), 'splits', [1 2], 'actions', {ACS}); %#ok<AGROW>
         q = cell_params(p0, cells(c)); q.cm_acr_db = X.ACR(v); P{end+1} = q; %#ok<AGROW>
     end
 end
@@ -218,10 +220,26 @@ fprintf('In-band cap (%g dB) binding share of the geometries per cell (G2):\n', 
 for c = 1:nC, fprintf('  %-12s level %6.2f dB  %5.1f%%\n', cells(c).name, cells(c).level, 100 * PP.cap(c)); end
 end
 
-function e = escapable(cells)
-% Cells some hop can escape: every one but the whole-band jammer (the equal-level cells serve
-% widths a hop escapes).
-e = arrayfun(@(c) c.slice || ~(strcmp(c.J.kind, 'fixed') && c.J.lo <= 2400 && c.J.hi >= 2483.5), cells);
+function L = cell_layers(cells, scen, B, acr)
+% L(c, v): some escaped hop of cell c takes the rejection acr(v) (band_reject.m 'layers'), by
+% the spans of the scenarios the cell serves (an equal-level cell serves several widths).
+L = false(numel(cells), numel(acr));
+for c = 1:numel(cells)
+    for J = {scen([scen.cell] == c).J}
+        L(c, :) = L(c, :) | ismember(acr, band_reject('layers', J{1}, B));
+    end
+end
+end
+
+function check_layers(PP, EP)
+% Every escaped hop's rejection has its layer in the pools (cell_layers).
+for q = 1:numel(EP.acr)
+    [i, w] = find(EP.acr{q} > 1);
+    c = EP.c(i); v = EP.acr{q}(sub2ind(size(EP.acr{q}), i, w));
+    ok = PP.acr_have(sub2ind(size(PP.acr_have), c(:), v(:) - 1));
+    assert(all(ok), 'experiment_core_bw:layers', '%d escaped hops of hop rule %d have no residual layer in the pools', ...
+        nnz(~ok), q);
+end
 end
 
 function f = cap_share(p0, cells, geo, EBNO, opt)
@@ -245,14 +263,17 @@ end
 
 function PP = load_pools(X, with_alt)
 % The study's pools; with_alt: the residual's layers as full pool arrays in PP.acr_pools
-% (link_env.m), the configurations they do not hold taken from the pools.
+% (link_env.m), the configurations they do not hold taken from the pools, and PP.acr_have
+% (cells x layers) where a layer was simulated.
 L = load(X.pools, 'PP'); PP = L.PP;
 if with_alt
     PP.acr_pools = cell(1, numel(PP.alt_pools));
+    PP.acr_have = false(size(PP.pools, 1), numel(PP.alt_pools));
     for v = 1:numel(PP.alt_pools)
         Q = PP.pools; e = ~cellfun(@isempty, PP.alt_pools{v});
         Q(e) = PP.alt_pools{v}(e);
         PP.acr_pools{v} = Q;
+        PP.acr_have(:, v) = any(e(:, :), 2);
     end
 end
 PP = rmfield(PP, 'alt_pools');
@@ -338,9 +359,12 @@ end
 %% ===================== Episodes =====================
 function EP = episodes(X, PP, sp, B)
 % Every (scenario, Eb/N0, geometry, onset) of split sp, the hop channels of every rule from the
-% episode's 'hop' stream (seed_stream.m) and their coverage (band_cover.m). A jammer tuned to
-% our channel (tone, centred) takes the channel in use at the onset, so its coverage is that of
-% the hops after it (EP.rel, link_env.m cover_rel); a fixed one covers whatever channel we are on.
+% episode's 'hop' stream (seed_stream.m) and their coverage: EP.cover and EP.acr by the
+% residual's rejection (band_reject.m; no sourced rejection counts as covered, the layer index
+% 1 + its place in X.ACR), EP.cover30 by geometry alone (band_cover.m, the pipeline's
+% cm_acr_db on every channel clear of the jammer). A jammer tuned to our channel (tone,
+% centred) takes the channel in use at the onset, so its coverage is that of the hops after it
+% (EP.rel, link_env.m cover_rel); a fixed one covers whatever channel we are on.
 scen = PP.scenarios; nS = numel(PP.ebno); nG = X.NGEO(sp); T = X.T;
 C = decision_config();
 rs = RandStream('mt19937ar', 'Seed', 2030 + sp);
@@ -355,7 +379,8 @@ EP.narrow = EP.bj == 0;
 EP.rel = arrayfun(@(i) ~strcmp(scen(i).J.kind, 'fixed'), EP.k);   % tuned to our channel: hops counted from the onset
 EP.home = zeros(1, n);
 for q = 1:numel(X.RULES)
-    EP.cover{q} = false(n, T); EP.acr{q} = ones(n, T); EP.part{q} = false(n, T); EP.near{q} = false(n, T);
+    EP.cover{q} = false(n, T); EP.cover30{q} = false(n, T); EP.acr{q} = ones(n, T); EP.part{q} = false(n, T);
+    EP.near{q} = false(n, T);
 end
 for i0 = find(EP.rep == 1)
     J = scen(EP.k(i0)).J;
@@ -363,42 +388,50 @@ for i0 = find(EP.rep == 1)
     for rep = 1:X.REPS
         i = i0 + (rep - 1) * numel(scen) * nS * nG;
         can = true(1, numel(B.f_mhz));
-        if strcmp(J.kind, 'fixed'), can = band_cover(band_cover('span', J, NaN), B.f_mhz, B.b_ch); end
+        if strcmp(J.kind, 'fixed'), can = band_reject(band_cover('span', J, NaN), B.f_mhz, B.b_ch) == 0; end
         h = hop_targets('home', can, [], rsh);
         c1 = hop_targets('H1', h, T, rsh, B);
-        [cv, st, off] = band_cover(band_cover('span', J, B.f_mhz(h)), B.f_mhz, B.b_ch);
+        spn = band_cover('span', J, B.f_mhz(h));
+        [cv, st] = band_cover(spn, B.f_mhz, B.b_ch);
+        R = band_reject(spn, B.f_mhz, B.b_ch); ce = R == 0;
+        [~, lv] = ismember(R, X.ACR);
+        assert(all(lv(~ce) > 0), 'experiment_core_bw:acr', 'a rejection outside X.ACR');
         EP.home(i) = h;
         for q = 1:numel(X.RULES)
             ch = c1; if q > 1, ch = hop_targets(X.RULES{q}, h, T, [], B); end
-            EP.cover{q}(i, :) = cv(ch); EP.part{q}(i, :) = st(ch) == 2;
-            EP.acr{q}(i, :) = 1 + ~cv(ch) .* (1 + (off(ch) > X.ACR_FAR));
-            EP.near{q}(i, :) = ~cv(ch) & off(ch) < 4;
+            EP.cover{q}(i, :) = ce(ch); EP.cover30{q}(i, :) = cv(ch); EP.part{q}(i, :) = st(ch) == 2;
+            EP.acr{q}(i, :) = 1 + lv(ch);
+            EP.near{q}(i, :) = ~cv(ch) & ce(ch);
         end
     end
 end
 EP.geom = 1000 * EP.s + EP.r;
 end
 
-function specs = make_specs(X, EP, idx, q, follow, acr)
+function specs = make_specs(X, EP, idx, q, follow, res)
 % link_env.m specs of the episodes idx under hop rule q, in batches of X.NE (the last padded
-% cyclically, n_valid as policy_episodes.m).
+% cyclically, n_valid as policy_episodes.m); res 'sheet' the residual by rejection (EP.cover,
+% EP.acr: the layers), 'pipe' the pipeline's cm_acr_db wherever the band is clear (EP.cover30,
+% the pools' own channel_switch frames).
 n = numel(idx); nb = ceil(n / X.NE); pad = nb * X.NE - n;
 ii = idx(mod(0:n + pad - 1, n) + 1);
 specs = cell(1, nb);
 for b = 1:nb
     j = ii((b - 1) * X.NE + (1:X.NE));
+    sheet = strcmp(res, 'sheet');
+    if sheet, cv = EP.cover{q}(j, :); else, cv = EP.cover30{q}(j, :); end
     sp = struct('scn', EP.c(j), 's', EP.s(j), 'r', EP.r(j), 'onset', EP.onset(j), 'follow', repmat(follow, 1, X.NE), ...
-        'fdelay', EP.fdelay(j), 'unk', false(1, X.NE), 'T', X.T, 'cover', EP.cover{q}(j, :), 'cover_rel', EP.rel(j));
-    if acr, sp.acr = EP.acr{q}(j, :); end
+        'fdelay', EP.fdelay(j), 'unk', false(1, X.NE), 'T', X.T, 'cover', cv, 'cover_rel', EP.rel(j));
+    if sheet, sp.acr = EP.acr{q}(j, :); end
     specs{b} = sp;
 end
 if nb > 0, specs{end}.n_valid = X.NE - pad; end
 end
 
-function R = run_set(kind, PPx, K, X, EP, idx, q, follow, acr, sp, opt, seed0)
+function R = run_set(kind, PPx, K, X, EP, idx, q, follow, res, sp, opt, seed0)
 % One policy on the episodes idx (policy_run_set.m), with the episodes' indices.
 if isempty(idx), R = struct('ep', zeros(1, 0)); return; end
-R = policy_run_set(kind, PPx, K, make_specs(X, EP, idx, q, follow, acr), sp, [], opt, seed0);
+R = policy_run_set(kind, PPx, K, make_specs(X, EP, idx, q, follow, res), sp, [], opt, seed0);
 R.ep = idx;
 end
 
@@ -422,14 +455,14 @@ function stage_val(X)
 assert(isfile(X.pools), 'experiment_core_bw:pools', '%s not found: run the pools stage', X.pools);
 assert(X.smoke || (~isfile(X.marker) && ~isfile(X.test) && ~recorded(params_id(load('params.mat').params))), ...
     'experiment_core_bw:read', 'the test split was read already: the validation choices stay as frozen');
-PP = load_pools(X, false);
+PP = load_pools(X, true);
 [PP, Q] = decision_inputs(PP);
 if isfield(Q, 'H') && isfield(Q.H, 'T') && Q.H.T ~= X.T
     warning('experiment_core_bw:T', 'the deployed episodes are %d cycles, this study''s %d', Q.H.T, X.T);
 end
 p0 = load('params.mat').params; B = band_plan(p0); C = decision_config();
 K = link_env('tables', PP, 'flight');
-EP = episodes(X, PP, 1, B);
+EP = episodes(X, PP, 1, B); check_layers(PP, EP);
 na = K.na; nR = numel(X.RULES);
 wide = find(~EP.slice & ~EP.narrow);
 fprintf('Validation: %d episodes per hop rule (%d scenarios x %d Eb/N0 x %d geometries x %d onsets)\n', EP.n, ...
@@ -440,7 +473,7 @@ REC = struct('rule', {}, 'k', {}, 's', {}, 'rec_pct', {}, 'harm', {}, 'per', {},
 WCH = struct('rule', {}, 'W', {}, 'table', {});
 for q = 1:nR
     [kn, on] = policy_of('none', na);
-    Rn = run_set(kn, PP, K, X, EP, 1:EP.n, q, false, false, 1, on, 51000 + 100*q);
+    Rn = run_set(kn, PP, K, X, EP, 1:EP.n, q, false, 'sheet', 1, on, 51000 + 100*q);
     nS = numel(PP.ebno);
     key = (EP.k(Rn.ep) - 1) * nS + EP.s(Rn.ep);
     th = thr(sub2ind(size(thr), EP.s(Rn.ep), EP.r(Rn.ep)));
@@ -456,7 +489,7 @@ for q = 1:nR
     for w = 1:numel(X.W)
         [kr, orr] = policy_of('rule_core', na);
         Pw = PP; Pw.core_wide = X.W{w};
-        Rw{w} = run_set(kr, Pw, K, X, EP, iw, q, false, false, 1, orr, 52000 + 100*q);
+        Rw{w} = run_set(kr, Pw, K, X, EP, iw, q, false, 'sheet', 1, orr, 52000 + 100*q);
     end
     pick = @(f) cell2mat(cellfun(@(R) R.(f)(:)', Rw(:), 'UniformOutput', false));
     [pr, gp, tr] = deal(zeros(numel(X.W), 0));
@@ -494,17 +527,18 @@ end
 
 function G = g3_check(PP, K, X, EP, B)
 % Gate G3: under channel_switch held from the first cycle, every frame after the onset comes
-% from the pool band_cover.m names for the channel in use (covered: the configuration
-% without channel_switch; a jammer tuned to our channel covers the channel of the hop made
-% before the onset), on every validation episode of every hop rule; beside it the
+% from the pool the coverage names for the channel in use (covered, by band_reject.m: the
+% configuration without channel_switch; a jammer tuned to our channel covers the channel of the
+% hop made before the onset), on every validation episode of every hop rule; beside it the
 % escape share of the first hop, drawn and enumerated (mid-band and band edge homes, and the
-% centred jammers off centre as far as our channel stays covered).
+% centred jammers off centre as far as our channel stays covered), and the share of hop
+% channels at each rejection.
 ics = find(strcmp(PP.actions, 'channel_switch'));
 G = struct('rule', {}, 'mismatch', {}, 'frames', {}, 'bj', {}, 'drawn', {}, 'mid', {}, 'edge', {}, 'off_centre', {}, ...
-    'partial', {}, 'near', {});
+    'partial', {}, 'near', {}, 'res', {});
 for q = 1:numel(X.RULES)
     idx = find(~EP.slice);
-    specs = make_specs(X, EP, idx, q, false, false);
+    specs = make_specs(X, EP, idx, q, false, 'sheet');
     bad = 0; nf = 0;
     for b = 1:numel(specs)
         sp = specs{b}; nv = X.NE; if isfield(sp, 'n_valid'), nv = sp.n_valid; end
@@ -527,7 +561,8 @@ for q = 1:numel(X.RULES)
         [mid, edge, offc] = enum_share(J, X.RULES{q}, B);
         G(end+1) = struct('rule', X.RULES{q}, 'mismatch', bad, 'frames', nf, 'bj', bj, 'drawn', mean(~EP.cover{q}(m, 1)), ...
             'mid', mid, 'edge', edge, 'off_centre', offc, 'partial', mean(EP.part{q}(m, :), 'all'), ...
-            'near', mean(EP.near{q}(m, :), 'all')); %#ok<AGROW>
+            'near', mean(EP.near{q}(m, :), 'all'), 'res', arrayfun(@(v) mean(EP.acr{q}(m, :) == v + 1, 'all'), ...
+            1:numel(X.ACR))); %#ok<AGROW>
     end
     fprintf('  G3 %s: %d of %d frames off the coverage flags\n', X.RULES{q}, bad, nf);
     assert(bad == 0, 'experiment_core_bw:g3', 'G3: %d frames of hop rule %s disagree with band_cover.m', bad, X.RULES{q});
@@ -541,7 +576,7 @@ function [mid, edge, offc] = enum_share(J, rule, B)
 nC = numel(B.f_mhz);
 sh = @(h, ctr) first_escape(J, rule, h, ctr, B);
 if strcmp(J.kind, 'fixed')
-    can = find(band_cover(band_cover('span', J, NaN), B.f_mhz, B.b_ch));
+    can = find(band_reject(band_cover('span', J, NaN), B.f_mhz, B.b_ch) == 0);
     mid = sh(can(ceil(end / 2)), NaN); edge = sh(can(1), NaN); offc = NaN;
     return
 end
@@ -553,9 +588,10 @@ end
 end
 
 function e = first_escape(J, rule, h, ctr, B)
-% Share of first hops from home h that escape (H1: over its uniform targets).
+% Share of first hops from home h that escape, a sourced rejection left (H1: over its uniform
+% targets).
 if isnan(ctr), sp = band_cover('span', J, NaN); else, sp = band_cover('span', J, B.f_mhz(h) + ctr); end
-cv = band_cover(sp, B.f_mhz, B.b_ch);
+cv = band_reject(sp, B.f_mhz, B.b_ch) == 0;
 if strcmp(rule, 'H1')
     k = find(abs((1:numel(B.f_mhz)) - h) >= 3);
     e = mean(~cv(k));
@@ -611,13 +647,13 @@ assert(isequal({V.WCH.W}, cellfun(@(r) J.w.(r), {V.WCH.rule}, 'UniformOutput', f
 [PP, ~] = decision_inputs(PP);
 p0 = load('params.mat').params; B = band_plan(p0);
 K = link_env('tables', PP, 'flight');
-EP = episodes(X, PP, 2, B);
+EP = episodes(X, PP, 2, B); check_layers(PP, EP);
 na = K.na; fixed = find(~EP.slice);
 RES = struct('rule', {}, 'set', {}, 'policy', {}, 'R', {});
 for q = 1:numel(X.RULES)
     Pw = PP; Pw.core_wide = J.w.(X.RULES{q});
-    sets = {'primary', 1:EP.n, false, false; 'residual', fixed, false, true};
-    if q == 1, sets(end+1, :) = {'follower', fixed, true, false}; end
+    sets = {'primary', 1:EP.n, false, 'sheet'; 'pipe30', fixed, false, 'pipe'};
+    if q == 1, sets(end+1, :) = {'follower', fixed, true, 'sheet'}; end
     for si = 1:size(sets, 1)
         pols = {'none', 'blind_core', 'rule_core'};
         if si == 1, pols{end+1} = 'oracle'; end %#ok<AGROW>
@@ -631,7 +667,7 @@ for q = 1:numel(X.RULES)
 end
 MON = monitor_states(PP, K, X, EP, fixed);
 meta = study_meta(PP);
-EPs = rmfield(EP, {'acr', 'part', 'near'});
+EPs = rmfield(EP, {'acr', 'cover30', 'part', 'near'});
 save(X.test, 'RES', 'EPs', 'MON', 'meta', 'X', '-v7.3');
 fprintf('Saved %s\n', X.test);
 end
@@ -642,7 +678,7 @@ function MON = monitor_states(PP, K, X, EP, idx)
 % class (policy_monitor.m through policy_decide.m) and the frame's own argmax.
 map = zeros(1, numel(PP.classes) + 1);              % the last: unknown or a class outside the detector's
 map(strcmp(PP.classes, 'none')) = 1; map(strcmp(PP.classes, 'tone_jamming')) = 2; map(strcmp(PP.classes, 'jamming')) = 3;
-specs = make_specs(X, EP, idx, 1, false, false);
+specs = make_specs(X, EP, idx, 1, false, 'sheet');
 ym = zeros(numel(idx), 1); yf = ym; n = 0;
 hm = zeros(numel(idx), 1); hf = hm;
 for b = 1:numel(specs)
@@ -691,7 +727,7 @@ end
 KP = struct();
 q1 = X0.RULES{1};
 [blk, KP.primary] = per_lines(get_set(RES, q1, 'primary'), EP, recov(q1) & ~EP.slice, X0, pay, ...
-    'PRIMARY (H1, 30 dB residual, fixed total power, static jammer)', false);
+    'PRIMARY (H1, nRF24L01+ residual by offset, fixed total power, static jammer)', false);
 lines = [lines, blk];
 [blk, KP.by_bj] = bj_lines(get_set(RES, q1, 'primary'), EP, recov(q1) & ~EP.slice, X0);
 lines = [lines, blk];
@@ -700,7 +736,8 @@ sens = cell(0, 3);
 for q = 1:numel(X0.RULES)
     rl = X0.RULES{q};
     if q > 1, sens(end+1, :) = {sprintf('%s hop rule', rl), get_set(RES, rl, 'primary'), recov(rl) & ~EP.slice}; end %#ok<AGROW>
-    sens(end+1, :) = {sprintf('%s, nRF24L01+ residual 24/47 dB', rl), get_set(RES, rl, 'residual'), recov(rl) & ~EP.slice}; %#ok<AGROW>
+    sens(end+1, :) = {sprintf('%s, residual %g dB wherever the band is clear (the pipeline''s cm_acr_db)', rl, ...
+        p0.cm_acr_db), get_set(RES, rl, 'pipe30'), recov(rl) & ~EP.slice}; %#ok<AGROW>
 end
 sens(end+1, :) = {'H1, equal in-band level', get_set(RES, q1, 'primary'), recov(q1) & EP.slice};
 sens(end+1, :) = {'H1, follower jammer (re-acquires after U[0,5] cycles)', get_set(RES, q1, 'follower'), recov(q1) & ~EP.slice};
@@ -909,8 +946,10 @@ for i = find(M.cap > 0)
 end
 for g = G3
     lines{end+1} = sprintf(['  G3 %s B_J %5s: %d frames off the flags; first-hop escape drawn %.3f, enumerated mid-band %.3f, ' ...
-        'edge %.3f, off-centre %.3f; partial hops %.3f, escaped hops within 4 MHz of the jammer %.3f'], g.rule, ...
-        bj_name(g.bj), g.mismatch, g.drawn, g.mid, g.edge, g.off_centre, g.partial, g.near); %#ok<AGROW>
+        'edge %.3f, off-centre %.3f; partial hops %.3f, clear of the jammer by under 2 MHz (counted covered) %.3f; ' ...
+        'hops at %s dB: %s'], g.rule, bj_name(g.bj), g.mismatch, g.drawn, g.mid, g.edge, g.off_centre, g.partial, g.near, ...
+        strjoin(arrayfun(@(v) sprintf('%g', v), band_reject('levels'), 'UniformOutput', false), '/'), ...
+        strjoin(arrayfun(@(x) sprintf('%.3f', x), g.res, 'UniformOutput', false), '/')); %#ok<AGROW>
 end
 end
 

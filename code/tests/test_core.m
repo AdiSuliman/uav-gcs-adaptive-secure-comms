@@ -7882,6 +7882,53 @@ k = abs((1:numel(cv)) - h) >= 3;
 e = mean(~cv(k));
 end
 
+function test_band_reject(tc)
+% The residual's rejection by offset (band_reject.m): the nRF24L01+'s 2 Mb/s C/I (+7 co-channel;
+% +3, -17, -21, -40, -48 dBc at 2, 4, 6, >12, >36 MHz) as co-channel minus offset, the lowest
+% over the offsets the jammer occupies, 5 dB less where it occupies 32 or 64 MHz; 0 on covered
+% channels and below 2 MHz; the layers every jammer needs; H1's first-hop escape share with a
+% sourced rejection left; the study builds the layers on both splits and reads them in validation.
+B = band_plan(); f = B.f_mhz;
+cells = band_cells();
+J = @(n) cells(strcmp({cells.name}, n)).J;
+rj = @(n, fh) band_reject(band_cover('span', J(n), fh), f, B.b_ch);
+verifyEqual(tc, band_reject('levels'), [4 24 28 42 47 50 55]);
+verifyEqual(tc, 7 - [3 -17 -21 -40 -48], [4 24 28 47 55]);
+R = rj('cw_tot16', 2401);
+m = [0 1 2 3 4 6 7 16 17 18 19 32 40];
+verifyEqual(tc, R(m + 1), [0 0 4 24 28 28 47 42 47 47 55 50 55]);
+[R, d] = rj('bw4_tot16', 2441);
+[~, ~, off] = band_cover(band_cover('span', J('bw4_tot16'), 2441), f, B.b_ch);
+verifyEqual(tc, d, off);
+h = B.centre;
+verifyEqual(tc, R(h + [1 2 3 4 5 8]), [0 0 4 24 28 47]);       % +-4 MHz: clear of the band, 1.4 MHz off
+verifyEqual(tc, R(h - [1 2 3 4 5 8]), [0 0 4 24 28 47]);
+R = rj('bw20_tot16', 2441);
+verifyEqual(tc, R(h + [5 6 7 8 11 12 17 20 -6 -20]), [0 4 24 28 28 42 42 42 4 42]);
+R = rj('bw70_tot16', NaN);
+verifyEqual(tc, f(R > 0), [2475 2477 2479 2481]);
+verifyEqual(tc, R(R > 0), [4 24 28 28]);
+verifyEqual(tc, R(ismember(f, [2401 2473])), [0 0]);          % clear of the span by 1 MHz
+verifyTrue(tc, all(rj('bw83.5_tot16', NaN) == 0));
+for n = {'cw_tot4', 'bw4_tot4', 'bw8_tot4', 'bw20_tot4'}
+    verifyEqual(tc, band_reject('layers', J(n{1}), B), band_reject('levels'), n{1});
+end
+verifyEqual(tc, band_reject('layers', J('bw70_tot4'), B), [4 24 28]);
+verifyEmpty(tc, band_reject('layers', J('bw83.5_tot4'), B));
+want = {'cw_tot16', [1 1]; 'bw4_tot16', [1 1]; 'bw8_tot16', [34/36 37/38]; 'bw20_tot16', [30/36 35/38]; ...
+    'bw83.5_tot16', [0 0]};
+for i = 1:size(want, 1)
+    e = arrayfun(@(hh) h1_escape(rj(want{i, 1}, f(hh)) == 0, hh), [h 1]);
+    verifyEqual(tc, e, want{i, 2}, 'AbsTol', 1e-12, want{i, 1});
+end
+verifyEqual(tc, h1_escape(rj('bw70_tot16', NaN) == 0, h), 4 / 36, 'AbsTol', 1e-12);
+verifyError(tc, @() band_reject('other'), 'band_reject:cmd');
+src = fileread(which('experiment_core_bw'));
+verifyNotEmpty(tc, strfind(src, 'X.ACR = band_reject(''levels'');'));
+verifyNotEmpty(tc, strfind(src, '''acr'', X.ACR(v), ''splits'', [1 2], ''actions'', {ACS});'));
+verifyEmpty(tc, strfind(src, 'escapable('));
+end
+
 function test_hop_targets(tc)
 % H1: every target at least 6 MHz (3 channels) from the channel before it, uniform over those
 % (chi-square over 10^4 draws, p > 0.01), the same sequence from the same seed; H3: 13 channels
@@ -8266,6 +8313,40 @@ for t = 1:spec.T
 end
 end
 
+function test_link_env_residual_recoverable(tc)
+% With spec.acr an episode is recoverable through channel_switch only when a reachable escaped
+% hop's layer restores the geometry (recoverable and recoverable_core alike); without spec.acr
+% the pools decide, as before; the one-step oracle reads the layer's reward on an escaped hop.
+[PP, K0] = toy_world(true, true);                         % only channel_switch restores
+Q = PP.pools;
+for a = find(contains(PP.actions, 'channel_switch')), Q(2, :, a, 1) = PP.pools(2, :, K0.na, 1); end
+PP.acr_pools = {Q, PP.pools};                             % layer 2 restores nothing, layer 3 as the pools
+K = link_env('tables', PP);
+verifyFalse(tc, K.acr_tabs{1}.rec_ch(2, 1, 1, 1)); verifyTrue(tc, K.acr_tabs{2}.rec_ch(2, 1, 1, 1));
+verifyFalse(tc, K.acr_tabs{1}.rec_core_ch(2, 1, 1, 1));
+T = 30; cov = @(k) ~ismember(1:T, k);
+s = struct('scn', 2, 's', 1, 'onset', 5, 'follow', false, 'fdelay', 0, 'unk', false, 'T', T, 'r', 1, 'cover', cov(3));
+rec = @(spec) [last_info(PP, K, spec, K.na).recoverable, last_info(PP, K, spec, K.na).recoverable_core];
+verifyEqual(tc, rec(s), [true true]);                     % no layers: the pools
+s.acr = 2 * ones(1, T); verifyEqual(tc, rec(s), [false false]);
+s.acr(3) = 3; verifyEqual(tc, rec(s), [true true]);
+s.acr(3) = 1; verifyEqual(tc, rec(s), [true true]);
+s.acr(:) = 2; s.cover = cov([3 7]); verifyEqual(tc, rec(s), [false false]);
+s.acr(7) = 3; verifyEqual(tc, rec(s), [true true]);
+s.acr(7) = 2; s.acr(4) = 3; verifyEqual(tc, rec(s), [false false]);   % a covered hop's layer is never read
+on = 9;
+for D = [0 1 2]
+    spec = struct('scn', 2, 's', 1, 'onset', on, 'follow', false, 'fdelay', 0, 'unk', false, 'T', T, 'r', 1, ...
+        'delay', D, 'cover', false(1, T), 'acr', 2 * ones(1, T));
+    [~, a] = oracle_run(PP, K, spec);
+    verifyEqual(tc, a, K.na * ones(1, T), sprintf('a layer that restores nothing, D %d', D));
+    spec.acr(:) = 3;
+    [ok, a] = oracle_run(PP, K, spec);
+    verifyEqual(tc, find(a ~= K.na, 1), on - D, sprintf('a layer that restores, D %d', D));
+    verifyTrue(tc, all(ok(on:end)), sprintf('a layer that restores, D %d', D));
+end
+end
+
 function test_oracle_cover(tc)
 % With spec.cover the one-step oracle predicts the link's effective configuration of the frame
 % its choice reaches (a covered channel strips channel_switch), at every signalling delay; with
@@ -8364,7 +8445,7 @@ verifyNotEmpty(tc, regexp(src, 'function stage_test\(X\)\r?\nJ = core_bw_rules\(
 i1 = strfind(src, 'marker(X, J.params_id);'); i2 = strfind(src, 'PP = load_pools(X, true);');
 verifyNotEmpty(tc, i1); verifyGreaterThan(tc, i2(end), i1(1));   % the marker before the test pools are loaded
 v0 = strfind(src, 'function stage_val(X)'); g = strfind(src, 'assert(X.smoke || (~isfile(X.marker) && ~isfile(X.test)');
-l = strfind(src, 'PP = load_pools(X, false);');
+l = strfind(src, 'PP = load_pools(X, true);');
 verifyNumElements(tc, v0, 1); verifyNumElements(tc, g, 1);   % validation refuses once the test was read
 verifyTrue(tc, g > v0 && any(l > g) && min(l(l > v0)) > g);
 r0 = strfind(src, 'function stage_report(X)'); f = strfind(src, '''experiment_core_bw:frozen'', ''%s is no longer the frozen');

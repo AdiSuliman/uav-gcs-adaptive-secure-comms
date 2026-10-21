@@ -93,35 +93,68 @@ from band-wide" is never made.
 ## 4. The actions on each B_J (`band_cover.m`, `link_env.m` spec.cover)
 
 **Coverage of a channel** against the jammer's span: covered when our band lies inside it;
-escaped when our band is clear of it (touching counts as clear); partial otherwise, counted as
-covered (conservative against `channel_switch`; its share is reported).
+escaped when our band is clear of it (touching counts as clear) and the receiver's rejection
+there is sourced (below: 2 MHz or more from the jammer); partial otherwise, counted as covered
+(conservative against `channel_switch`; its share is reported). A channel clear of the jammer by
+under 2 MHz also counts as covered (its share is reported).
 
-- `channel_switch` on an escaped channel: the existing `channel_switch` frames (field - 30 dB).
+- `channel_switch` on an escaped channel: the frames of that channel's residual layer (field - R,
+  below).
 - `channel_switch` on a covered channel: the frames of the same configuration without it, in the
   same geometry (as after a follower's re-acquisition).
 - `rate_reduce`: +6.02 dB processing gain on any B_J, goodput x 1/4.
 - `channel_switch+rate_reduce`: both; covered, the `rate_reduce` frames at a switch's cost.
 
-**Residual after an escape: 30 dB primary** (the pipeline's value; the 802.11 transmit mask's
--30 dBr; inside the nRF24L01+ rejections at H1's distances, 28 dB at 6 MHz and 47 dB beyond
-12 MHz, and 802.11's >= 35 dB at >= 25 MHz). **Sensitivity** (test only, no choice): the
-nRF24L01+'s rejection by the escaped channel's offset from the jammer's nearest frequency, 24 dB
-(its 4 MHz value) up to 12 MHz and 47 dB beyond (its Nth ACS); the share of escaped hops within
-4 MHz of the jammer, where even 24 dB may be optimistic (2 MHz: 4 dB), is reported.
+**Residual after an escape: the nRF24L01+'s rejection by offset (primary, `band_reject.m`).**
+The rejection R of a channel is the sheet's co-channel C/I minus its C/I at the offset (2 Mb/s,
+our raw rate; Table 8, ETSI EN 300 440-1): +7 dBc co-channel; +3, -17, -21, -40 and -48 dBc at 2,
+4, 6, beyond 12 and beyond 36 MHz, so 4, 24, 28, 47 and 55 dB; at the offsets n x 2 f_xtal (32 and
+64 MHz, f_xtal 16 MHz) about 5 dB less, 42 and 50 dB. The geometry the code measures is d, the
+distance from our new carrier to the jammer's nearest frequency (`band_cover.m` off), and the
+offsets the jammer occupies, d to its far edge. Each channel takes the lowest rejection the sheet
+gives over those offsets: the row at or below d (4 dB from 2 MHz, 24 from 4, 28 from 6 to 12, 47
+beyond 12, 55 beyond 36 MHz), and 42 or 50 dB where they hold 32 or 64 MHz. Below 2 MHz the
+sheet's only row is co-channel: such a channel counts as covered. The 2 Mb/s rows are the sheet's
+most severe at every offset from 2 MHz (1 Mb/s: 29, 39, 49, 56 dB; Table 9, a modulated
+interferer: 7, 29, 35, 51, 59 dB); at 2 Mb/s the nRF's 20 dB bandwidth is 2 MHz, ours 1.25 MHz.
+802.11-2007 is milder where it applies: the FH PHY's desensitization of at least 30 dB at 2 MHz
+and 40 dB from 3 MHz (Table 14-19, 1 MHz channels), 35 dB adjacent-channel rejection at 25 MHz and
+more (18.4.8.3); its -30 dBr (15.4.7.4) is a transmit mask, not a receiver's rejection.
+
+| hop from the jammer's centre | 2 | 4 | 6 | 8 | 10 | 12 | 14 | 16 | 20 | 24 | 32 | 40 | 64 MHz |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| CW | c | 4 | 24 | 28 | 28 | 28 | 47 | 47 | 47 | 47 | 42 | 55 | 50 |
+| 4 MHz | cov | c | 4 | 24 | 28 | 28 | 28 | 47 | 47 | 47 | 42 | 55 | 50 |
+| 8 MHz | cov | cov | c | 4 | 24 | 28 | 28 | 28 | 47 | 47 | 42 | 47 | 50 |
+| 20 MHz | cov | cov | cov | cov | cov | 4 | 24 | 28 | 28 | 42 | 42 | 42 | 50 |
+
+(R in dB; cov covered by geometry, c clear by under 2 MHz and counted covered.) The 70 MHz jammer
+leaves 2475 MHz at 4 dB, 2477 at 24, 2479 and 2481 at 28; 2401 and 2473 MHz, 1 MHz off its edges,
+count as covered.
+
+The frames of an escaped hop come from the layer of its rejection: the same cell's
+`channel_switch` configurations simulated with `cm_acr_db` = R (`PP.acr_pools`, `link_env.m`
+spec.acr), on both splits. A cell gets the layers its hops can meet (`band_reject.m` 'layers', the
+jammer centred on any channel): CW, 4, 8 and 20 MHz all seven, 70 MHz 4, 24 and 28 dB, 83.5 MHz
+none; an equal-level cell those of the widths it serves (all seven). The recoverable rule reads the
+same layer (section 6.4). The main pipeline's 30 dB (`cm_acr_db`) stays as it is there.
+
+**Sensitivity** (test only, no choice): 30 dB on every channel clear of the jammer by geometry,
+the pipeline's value (the pools' own `channel_switch` frames, `band_cover.m` alone).
 
 **Fading after a hop** is not redrawn: the same statistics on every channel; keeping it withholds
 from the hop its escape from a deep fade, conservative for every adaptive system.
 
-**H1 escape share of one hop** (centred jammer, the enumeration): CW, 4 and 8 MHz 1; 20 MHz 30/36
-mid-band to 35/38 at the edge; 70 MHz: of the 41 channels, 2401 MHz and 2473-2481 MHz escape (six;
-2401 MHz lies below the span's 2402 MHz edge); 83.5 MHz 0.
+**H1 escape share of one hop** (centred jammer, the enumeration): CW and 4 MHz 1; 8 MHz 34/36
+mid-band to 37/38 at the edge (its 6 MHz hop is 1.5 MHz off the edge); 20 MHz 30/36 to 35/38;
+70 MHz: 2475-2481 MHz escape (four; the home is drawn among the 37 other channels); 83.5 MHz 0.
 
 ## 5. Predictions (written before any run) and their fixed readings
 
 - **P1.** Narrowband: `rule_core` recovers >= 90% of the recoverable CW episodes at JSR_tot
   <= 23 dB; at 30 dB, where recoverable episodes exist, its median detection-to-restored time is
-  longer than `blind_core`'s (one escaped hop leaves about 0 dB per branch; the rule needs the
-  escalation to channel_switch+rate_reduce, which `blind_core` takes first).
+  longer than `blind_core`'s (a first hop 6-12 MHz away leaves 6 or 2 dB in band; the rule needs
+  the escalation to channel_switch+rate_reduce, which `blind_core` takes first).
 - **P2.** Wideband 4-20 MHz under H1: the hop escapes; W chosen on validation is
   `channel_switch` or `channel_switch+rate_reduce`.
 - **P3.** 70 and 83.5 MHz at JSR_tot 30 dB: no scenario point recoverable by the core set.
@@ -137,8 +170,9 @@ Each is reported as holds / does not hold; none changes a KPI verdict.
 **6.1 Grid.** B_J {CW, 4, 8, 20, 70, 83.5} MHz x JSR_tot {4, 10, 16, 23, 30} dB (30 cells) and
 the 4 equal-level cells; Eb/N0 0:3:15 dB per branch; the pools' nested Latin hypercube over speed,
 altitude, K, the first interferer's direction and the receive correlation; hop rule H1 (H3, H4 on
-the same pools); residual 30 dB (24/47 dB on the test geometries); static jammer (the follower
-re-acquiring after U[0, 5] cycles, `C.fdelay`, reported apart). Profile 1 (3 antennas).
+the same pools); residual by offset (section 4, its layers on both splits; the pipeline's 30 dB on
+the test geometries as a sensitivity); static jammer (the follower re-acquiring after U[0, 5]
+cycles, `C.fdelay`, reported apart). Profile 1 (3 antennas).
 
 **6.2 Seeds, geometries, episodes.** Geometry family 6 (`pool_seed.m`): validation block 5,
 test block 14, set D block 7; the smoke 18, 19 and 16. Per (cell, Eb/N0): 12 validation and 36
@@ -173,7 +207,8 @@ report.
 **6.4 Recoverable scenarios, fixed on validation.** Episode: some core configuration held for
 the episode restores BER and packet loss (<= 2x clean + one loss event); a configuration with
 `channel_switch` counts only when a hop of the episode's sequence that can reach the link after
-the onset, floor((T - onset - 1) / 2) of them, escapes. Scenario = (B_J, JSR_tot or JSR_in,
+the onset, floor((T - onset - 1) / 2) of them, escapes and restores it at that hop's residual
+layer. Scenario = (B_J, JSR_tot or JSR_in,
 Eb/N0, hop rule); recoverable when on validation
 1. at least 90% of its episodes are recoverable (ENV_MIN, the envelope rule), and
 2. it is harmful: the static link's pooled PER after onset is above the pooled restoration
@@ -181,7 +216,8 @@ Eb/N0, hop rule); recoverable when on validation
 Harm is judged per scenario, never as a per-episode filter on test. The list is written to
 `results/core_bw/recoverable.txt`; its SHA-256 goes into `protocol.json`.
 
-**6.5 Readings (test split, read once).** Primary: H1, 30 dB, fixed total power, static jammer.
+**6.5 Readings (test split, read once).** Primary: H1, residual by offset, fixed total power,
+static jammer.
 - **PER reduction >= 30% vs static** (`per_reduction.m`, paired, geometry bootstrap) for
   `rule_core`, pooled over every test episode of the recoverable scenarios of both jamming types:
   met (committed) when the 95% lower bound >= 30%; met (not committed) when only the point is;
@@ -193,7 +229,7 @@ Harm is judged per scenario, never as a per-episode filter on test. The list is 
 - **Goodput** in bit/s at the nominal 50 kb/s, geometry bootstrap.
 - **CNN contribution** (analysis): `rule_core` - `blind_core` in PER, goodput and t_rec_det,
   paired, 95% intervals; pooled, per type and per B_J.
-- **Sensitivities** (no verdict): H3, H4, the 24/47 dB residual (each rule), the equal in-band
+- **Sensitivities** (no verdict): H3, H4, the 30 dB residual (each rule), the equal in-band
   level, the follower; each says whether it would flip a primary verdict.
 - **Detector by bandwidth** (analysis; the KPI verdicts of macro-F1, recall and false alarms stay
   with B3c, `docs/core_cnn_protocol.md`, and with the hybrid's B3 through `three_state_view.m`):
@@ -208,9 +244,11 @@ Harm is judged per scenario, never as a per-episode filter on test. The list is 
 - G2: the pools stage reports the time per simulation and, per cell, the share of geometries on
   which the in-band cap binds.
 - G3: under `channel_switch` held from the first cycle, every validation frame after the onset
-  comes from the pool `band_cover.m` names for the channel in use (zero mismatches, else the
-  stage stops); beside it the first-hop escape share drawn and enumerated (mid-band, edge, and
-  the centred jammers off centre while our channel stays covered).
+  comes from the pool the coverage (`band_reject.m`) names for the channel in use (zero
+  mismatches, else the stage stops); every escaped hop's rejection has its layer in the pools
+  (else the stage stops); beside it the first-hop escape share drawn and enumerated (mid-band,
+  edge, and the centred jammers off centre while our channel stays covered), the share of hops
+  clear by under 2 MHz and the share of hop channels at each rejection.
 - G4: `protocol.json` holds W per hop rule, the recoverable list's hash and this file's hash, and
   is committed byte for byte as `docs/core_bw_frozen.json`. The test stage refuses without them,
   on any hash mismatch, with this file or the frozen copy uncommitted, after a marker
@@ -237,9 +275,10 @@ Outputs: `data/core_bw/pools.mat`, `data/core_bw/dset.mat`; `results/core_bw/val
 
 ## 8. Tests
 
-`code/tests/test_core.m`: test_band_plan, test_jsr_inband, test_band_cover, test_hop_targets,
+`code/tests/test_core.m`: test_band_plan, test_jsr_inband, test_band_cover, test_band_reject, test_hop_targets,
 test_link_env_cover_default, test_link_env_cover_recoverable, test_link_env_cover_relative,
-test_link_env_residual_layer, test_oracle_cover, test_rule_core_wide, test_band_cells, test_band_recoverable_scenarios,
+test_link_env_residual_layer, test_link_env_residual_recoverable, test_oracle_cover, test_rule_core_wide,
+test_band_cells, test_band_recoverable_scenarios,
 test_band_seeds_disjoint, test_band_protocol_guard, and the existing test_rule_core_policy,
 test_core_decide_escalation, test_core_policies_rollout, test_per_reduction, test_three_state_view,
 test_rule_dwell_tried.
@@ -247,17 +286,20 @@ test_rule_dwell_tried.
 ## 9. Time and memory (estimate; the smoke measures it)
 
 2.83-3.15 s per 20-frame simulation with one jammer, 6 workers, x 1.35 with the boost off.
-Pools: 34 cells x 4 configurations x 6 Eb/N0 x 48 geometries (fewer where configurations share
-their physics) + the clean link + the residual layers (29 cells x 2 configurations x 2 levels x 6
-x 36): about 65 000 simulations, 8.5-9.5 h (11.5-12.8 h boost off). Set D: 864 runs, 0.2-0.6 h.
-Validation and test rollouts: 1-2 h. Memory: pools about 0.6 GB, set D about 1.1 GB.
+Pools: 34 cells x 4 configurations x 6 Eb/N0 x 48 geometries (39 168, fewer where configurations
+share their physics), the clean link (1 152) and the residual layers: 183 (cell, rejection) pairs
+(CW, 4, 8, 20 MHz: 20 cells x 7; 70 MHz: 5 x 3; equal level: 4 x 7) x 2 configurations x 6 Eb/N0
+x 48 geometries (105 408): about 145 700 simulations, 19.0-21.2 h (25.7-28.6 h boost off). Set D:
+864 runs, 0.2-0.6 h. Validation and test rollouts (seven layers' tables): 1-2.5 h. Total about
+20.5-24 h (27-31.5 h boost off). Memory: pools about 1.2 GB, set D about 1.1 GB.
 
 ## 10. Risks, stated
 
 1. The window hides the width (section 3); reported per B_J. A wide-sensing scan (the AD9361
    opens up to 56 MHz) is future work.
-2. The 30 dB residual is one number for an offset- and skirt-dependent quantity; bounded by the
-   24/47 dB reading. LNA blocking by a strong jammer outside the window is not modelled.
+2. The residual is the nRF24L01+'s selectivity, not a measurement of our receiver, taken at the
+   jammer's nearest frequency: the power a wide jammer holds beyond its first megahertz is not
+   added. LNA blocking by a strong jammer outside the window is not modelled.
 3. Partial cover counted as covered; its share reported.
 4. The 4 MHz raised cosine simulated white over the window.
 5. Below-floor wideband cells are mostly harmless and leave the PER denominator through the
