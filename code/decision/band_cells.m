@@ -6,8 +6,8 @@ function [cells, scen] = band_cells(p)
 %     CW tone   narrowband; offset uniform in +-300 kHz (init_params.m): the tone's range
 %     4 MHz     Liu et al.: jamming of 4 MHz instantaneous bandwidth, raised cosine of
 %               roll-off 0.3, the 4 MHz read as its noise bandwidth (symbol rate; the paper
-%               does not say, and this reading is the more severe for our link,
-%               docs/core_bw_protocol.md 3): +-2.6 MHz, its occupied edge
+%               does not say, and the readings trade 1.14 dB in band against a row of the
+%               hop's rejection, docs/core_bw_protocol.md 3): +-2.6 MHz, its occupied edge
 %     8 MHz     Mekdad et al.: Gaussian noise at 10 MS/s low-passed at 4 MHz with a 1 MHz
 %               transition: +-4.5 MHz, the stopband edge
 %     20 MHz    Panitsas et al.: a $20 dongle covering 20 MHz: +-10 MHz

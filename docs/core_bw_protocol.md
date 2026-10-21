@@ -81,12 +81,12 @@ and -3 dB width; occupied (1 + 0.3) x 4 = 5.2 MHz) or the occupied width (symbol
 20 MHz band, so centred 2-18 MHz, and comb signals at 2, 10 and 18 MHz: with 4 MHz occupied the
 edges fall exactly at 0 and 20 MHz) but does not settle it, since a simulation may let the
 roll-off pass the sensing band. Both readings are
-physical, so the study takes the one more severe for our link, the noise bandwidth. At fixed total
-power it puts 1.14 dB less into a covered channel (-6.02 against -4.88 dB), and its occupied edge
-lies 0.6 MHz nearer every hop target, which costs an escaped hop a row of the rejection (section 4):
-H1's 6 MHz hop keeps 4 dB instead of 24, an 8 MHz hop 24 instead of 28, H4's 4 MHz hop none instead
-of 4 dB. For every reading of the study both effects work against the adaptive systems: less harm
-to the static reference and less rejection after a hop.
+physical. Neither is the more severe throughout: at fixed total power the occupied reading puts
+1.14 dB more into every covered channel (the static link, `rate_reduce` and the frames before a
+hop, -4.88 against -6.02 dB), while the noise reading's occupied edge lies 0.6 MHz nearer every hop
+target and costs an escaped hop a row of the rejection (section 4): H1's 6 MHz hop keeps 4 dB
+instead of 24, an 8 MHz hop 24 instead of 28, H4's 4 MHz hop none instead of 4 dB. The study takes
+the noise reading, whose hop residual is up to 20 dB more severe, against 1.14 dB in band.
 
 **JSR (`jsr_inband.m`).** The controlled variable is the total power JSR_tot = P_J / P_S (Liu
 et al.: a 30 dBm jammer against a 0 dBm signal). The model's level is the in-band ratio after the
@@ -162,14 +162,19 @@ from the hop its escape from a deep fade, conservative for every adaptive system
 
 **H1 escape share of one hop** (centred jammer, the enumeration): CW and 4 MHz 1; 8 MHz 34/36
 mid-band to 37/38 at the edge (its 6 MHz hop is 1.5 MHz off the edge); 20 MHz 30/36 to 35/38;
-70 MHz: 2475-2481 MHz escape (four; the home is drawn among the 37 other channels); 83.5 MHz 0.
+70 MHz: 2475-2481 MHz escape (four; the home is drawn among the 35 channels the span covers;
+2401 and 2473 MHz, clear by 1 MHz and counted covered, are never home); 83.5 MHz 0.
 
 ## 5. Predictions (written before any run) and their fixed readings
 
 - **P1.** Narrowband: `rule_core` recovers >= 90% of the recoverable CW episodes at JSR_tot
-  <= 23 dB; at 30 dB, where recoverable episodes exist, its median detection-to-restored time is
-  longer than `blind_core`'s (a first hop 6-12 MHz away leaves 6 or 2 dB in band; the rule needs
-  the escalation to channel_switch+rate_reduce, which `blind_core` takes first).
+  <= 23 dB; at 30 dB, where recoverable episodes exist, its median detection-to-restored time
+  equals `blind_core`'s within the interval (the 95% interval of the difference of the medians,
+  bootstrap over flight geometries, holds 0; never restored counts as the longest; 28 of H1's 36
+  mid-band first-hop targets lie 14 MHz or more from the tone, at least 42 dB, where
+  `channel_switch` alone restores); on the episodes whose first hop lands 6-12 MHz away (24 or
+  28 dB, 6 or 2 dB left in band) its median is longer, the rule needing the escalation to
+  `channel_switch+rate_reduce`, which `blind_core` takes first (`core_bw_rules.m` 'p1').
 - **P2.** Wideband 4-20 MHz under H1: the hop escapes; W chosen on validation is
   `channel_switch` or `channel_switch+rate_reduce`.
 - **P3.** 70 and 83.5 MHz at JSR_tot 30 dB: no scenario point recoverable by the core set.
@@ -293,7 +298,7 @@ Outputs: `data/core_bw/pools.mat`, `data/core_bw/dset.mat`; `results/core_bw/val
 `code/tests/test_core.m`: test_band_plan, test_jsr_inband, test_band_cover, test_band_reject, test_hop_targets,
 test_link_env_cover_default, test_link_env_cover_recoverable, test_link_env_cover_relative,
 test_link_env_residual_layer, test_link_env_residual_recoverable, test_oracle_cover, test_rule_core_wide,
-test_band_cells, test_band_recoverable_scenarios,
+test_band_cells, test_band_recoverable_scenarios, test_band_p1_reading,
 test_band_seeds_disjoint, test_band_protocol_guard, and the existing test_rule_core_policy,
 test_core_decide_escalation, test_core_policies_rollout, test_per_reduction, test_three_state_view,
 test_rule_dwell_tried.

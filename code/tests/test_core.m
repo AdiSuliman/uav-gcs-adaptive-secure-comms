@@ -7888,7 +7888,8 @@ function test_band_reject(tc)
 % +3, -17, -21, -40, -48 dBc at 2, 4, 6, >12, >36 MHz) as co-channel minus offset, the lowest
 % over the offsets the jammer occupies, 5 dB less where it occupies 32 or 64 MHz; 0 on covered
 % channels and below 2 MHz; the layers every jammer needs; H1's first-hop escape share with a
-% sourced rejection left; the study builds the layers on both splits and reads them in validation.
+% sourced rejection left; the study builds the layers on both splits and reads them in validation;
+% the 70 MHz jammer's home only among the channels it covers by geometry (2403-2471 MHz).
 B = band_plan(); f = B.f_mhz;
 cells = band_cells();
 J = @(n) cells(strcmp({cells.name}, n)).J;
@@ -7928,6 +7929,14 @@ src = fileread(which('experiment_core_bw'));
 verifyNotEmpty(tc, strfind(src, 'X.ACR = band_reject(''levels'');'));
 verifyNotEmpty(tc, strfind(src, '''acr'', X.ACR(v), ''splits'', [1 2], ''actions'', {ACS});'));
 verifyEmpty(tc, strfind(src, 'escapable('));
+cv70 = band_cover(band_cover('span', J('bw70_tot16'), NaN), f, B.b_ch);
+verifyEqual(tc, f(cv70), 2403:2:2471);                       % covered under both residuals
+verifyTrue(tc, all(~cv70(ismember(f, [2401 2473]))));
+verifyNotEmpty(tc, strfind(src, ['if strcmp(J.kind, ''fixed''), can = band_cover(band_cover(''span'', J, NaN), ' ...
+    'B.f_mhz, B.b_ch); end']));
+verifyNotEmpty(tc, strfind(src, 'can = find(band_cover(band_cover(''span'', J, NaN), B.f_mhz, B.b_ch));'));
+verifyEmpty(tc, strfind(src, 'can = band_reject('));
+verifyEmpty(tc, strfind(src, 'can = find(band_reject('));
 end
 
 function test_hop_targets(tc)
@@ -8414,6 +8423,44 @@ verifyEqual(tc, core_bw_rules('verdict', 0.35, 0.31, 0.3, 10), 'met (committed)'
 verifyEqual(tc, core_bw_rules('verdict', 0.35, 0.2, 0.3, 10), 'met (not committed)');
 verifyEqual(tc, core_bw_rules('verdict', 0.2, 0.1, 0.3, 10), 'not met');
 verifyEqual(tc, core_bw_rules('verdict', NaN, NaN, 0.3, 0), 'not read (no episodes)');
+end
+
+function test_band_p1_reading(tc)
+% P1 at JSR_tot 30 dB: from a mid-band home 28 of H1's 36 first-hop targets keep >= 42 dB of
+% the tone, the other 8 (6-12 MHz) 24 or 28 dB; the reading holds when the interval of the
+% median difference holds 0 and the rule's median is the longer on the near episodes; never
+% restored counts as the longest; one geometry reads the point; no episode holds.
+B = band_plan(); f = B.f_mhz; h = B.centre;
+cells = band_cells();
+J = cells(strcmp({cells.name}, 'cw_tot30')).J;
+R = band_reject(band_cover('span', J, f(h)), f, B.b_ch);
+k = abs((1:numel(f)) - h) >= 3;
+verifyEqual(tc, nnz(k), 36); verifyEqual(tc, nnz(R(k) >= 42), 28);
+verifyEqual(tc, unique(R(k & R < 42)), [24 28]);
+verifyEqual(tc, abs(f(k & R < 42) - f(h)), [12 10 8 6 6 8 10 12]);
+cl = 1:20; near = [true(1, 4) false(1, 16)];
+P = core_bw_rules('p1', 3 * ones(1, 20), 3 * ones(1, 20), false(1, 20), cl, 500);
+verifyEqual(tc, [P.med P.ci], [3 3 0 0]); verifyTrue(tc, P.holds);
+tr = 3 * ones(1, 20); tr(near) = 6;
+P = core_bw_rules('p1', tr, 3 * ones(1, 20), near, cl, 500);
+verifyEqual(tc, [P.med P.ci P.near P.n_near], [3 3 0 0 6 3 4]); verifyTrue(tc, P.holds);
+tr(near) = 2;
+verifyFalse(tc, core_bw_rules('p1', tr, 3 * ones(1, 20), near, cl, 500).holds);   % near: not longer
+P = core_bw_rules('p1', 5 * ones(1, 20), 3 * ones(1, 20), false(1, 20), cl, 500);
+verifyEqual(tc, P.ci, [2 2]); verifyFalse(tc, P.holds);
+P = core_bw_rules('p1', NaN(1, 20), NaN(1, 20), false(1, 20), cl, 500);
+verifyEqual(tc, [P.med P.ci], [Inf Inf 0 0]); verifyTrue(tc, P.holds);
+verifyFalse(tc, core_bw_rules('p1', NaN(1, 20), 3 * ones(1, 20), false(1, 20), cl, 500).holds);
+P = core_bw_rules('p1', 4 * ones(1, 20), 3 * ones(1, 20), false(1, 20), ones(1, 20), 500);
+verifyEqual(tc, P.ci, [NaN NaN]); verifyFalse(tc, P.holds);
+verifyTrue(tc, core_bw_rules('p1', 3 * ones(1, 20), 3 * ones(1, 20), false(1, 20), ones(1, 20), 500).holds);
+P = core_bw_rules('p1', zeros(1, 0), zeros(1, 0), false(1, 0), zeros(1, 0), 500);
+verifyEqual(tc, P.n, 0); verifyTrue(tc, P.holds);
+src = fileread(which('experiment_core_bw'));
+verifyNotEmpty(tc, strfind(src, 'EP.home(i) = h; EP.rej1(i) = R(c1(1));'));
+verifyNotEmpty(tc, strfind(src, 'near = EP.rej1(e(m30)) > 0 & EP.rej1(e(m30)) < 42;'));
+verifyNotEmpty(tc, strfind(src, 'core_bw_rules(''p1'', Rr.t_rec_det(m30), Rb.t_rec_det(m30), near, EP.geom(e(m30)), X.B);'));
+verifyEmpty(tc, strfind(src, 't1 > t2'));
 end
 
 function test_band_protocol_guard(tc)

@@ -364,7 +364,8 @@ function EP = episodes(X, PP, sp, B)
 % 1 + its place in X.ACR), EP.cover30 by geometry alone (band_cover.m, the pipeline's
 % cm_acr_db on every channel clear of the jammer). A jammer tuned to our channel (tone,
 % centred) takes the channel in use at the onset, so its coverage is that of the hops after it
-% (EP.rel, link_env.m cover_rel); a fixed one covers whatever channel we are on.
+% (EP.rel, link_env.m cover_rel); a fixed one covers whatever channel we are on, the home drawn
+% among the channels it covers by geometry, covered under both residuals.
 scen = PP.scenarios; nS = numel(PP.ebno); nG = X.NGEO(sp); T = X.T;
 C = decision_config();
 rs = RandStream('mt19937ar', 'Seed', 2030 + sp);
@@ -377,7 +378,7 @@ EP.onset = ONS(sub2ind(size(ONS), EP.s, EP.r, EP.rep)); EP.fdelay = FD(sub2ind(s
 EP.slice = [scen(EP.k).slice]; EP.bj = [scen(EP.k).bj]; EP.tot = [scen(EP.k).jsr_tot]; EP.inb = [scen(EP.k).jsr_in];
 EP.narrow = EP.bj == 0;
 EP.rel = arrayfun(@(i) ~strcmp(scen(i).J.kind, 'fixed'), EP.k);   % tuned to our channel: hops counted from the onset
-EP.home = zeros(1, n);
+EP.home = zeros(1, n); EP.rej1 = zeros(1, n);
 for q = 1:numel(X.RULES)
     EP.cover{q} = false(n, T); EP.cover30{q} = false(n, T); EP.acr{q} = ones(n, T); EP.part{q} = false(n, T);
     EP.near{q} = false(n, T);
@@ -388,7 +389,7 @@ for i0 = find(EP.rep == 1)
     for rep = 1:X.REPS
         i = i0 + (rep - 1) * numel(scen) * nS * nG;
         can = true(1, numel(B.f_mhz));
-        if strcmp(J.kind, 'fixed'), can = band_reject(band_cover('span', J, NaN), B.f_mhz, B.b_ch) == 0; end
+        if strcmp(J.kind, 'fixed'), can = band_cover(band_cover('span', J, NaN), B.f_mhz, B.b_ch); end
         h = hop_targets('home', can, [], rsh);
         c1 = hop_targets('H1', h, T, rsh, B);
         spn = band_cover('span', J, B.f_mhz(h));
@@ -396,7 +397,7 @@ for i0 = find(EP.rep == 1)
         R = band_reject(spn, B.f_mhz, B.b_ch); ce = R == 0;
         [~, lv] = ismember(R, X.ACR);
         assert(all(lv(~ce) > 0), 'experiment_core_bw:acr', 'a rejection outside X.ACR');
-        EP.home(i) = h;
+        EP.home(i) = h; EP.rej1(i) = R(c1(1));
         for q = 1:numel(X.RULES)
             ch = c1; if q > 1, ch = hop_targets(X.RULES{q}, h, T, [], B); end
             EP.cover{q}(i, :) = ce(ch); EP.cover30{q}(i, :) = cv(ch); EP.part{q}(i, :) = st(ch) == 2;
@@ -576,7 +577,7 @@ function [mid, edge, offc] = enum_share(J, rule, B)
 nC = numel(B.f_mhz);
 sh = @(h, ctr) first_escape(J, rule, h, ctr, B);
 if strcmp(J.kind, 'fixed')
-    can = find(band_reject(band_cover('span', J, NaN), B.f_mhz, B.b_ch) == 0);
+    can = find(band_cover(band_cover('span', J, NaN), B.f_mhz, B.b_ch));
     mid = sh(can(ceil(end / 2)), NaN); edge = sh(can(1), NaN); offc = NaN;
     return
 end
@@ -877,12 +878,15 @@ bjk = [sc(REC.k(r1)).bj]; totk = [sc(REC.k(r1)).jsr_tot]; slk = [sc(REC.k(r1)).s
 m = EP.narrow(e) & EP.tot(e) <= 23 & rmask(e);
 p1 = mean(Rr.recovered(m));
 m30 = EP.narrow(e) & EP.tot(e) == 30 & rmask(e);
-t1 = median(fillmissing(Rr.t_rec_det(m30), 'constant', Inf)); t2 = median(fillmissing(Rb.t_rec_det(m30), 'constant', Inf));
-h1 = p1 >= 0.9 && (~any(m30) || t1 > t2);
-P.P1 = struct('recovered_le23', p1, 'n30', nnz(m30), 'trec30_rule', t1, 'trec30_blind', t2, 'holds', h1);
+near = EP.rej1(e(m30)) > 0 & EP.rej1(e(m30)) < 42;     % first hop 6-12 MHz from the tone (24, 28 dB)
+T30 = core_bw_rules('p1', Rr.t_rec_det(m30), Rb.t_rec_det(m30), near, EP.geom(e(m30)), X.B);
+h1 = p1 >= 0.9 && T30.holds;
+P.P1 = struct('recovered_le23', p1, 'n30', nnz(m30), 'trec30_rule', T30.med(1), 'trec30_blind', T30.med(2), ...
+    'diff_ci', T30.ci, 'n_near', T30.n_near, 'near', T30.near, 'holds', h1);
 lines{end+1} = sprintf(['  P1 narrowband: rule_core recovers %.1f%% of the recoverable CW episodes at JSR_tot <= 23 dB ' ...
-    '(>= 90%%); at 30 dB (%d recoverable episodes) median detection->restored %g vs %g cycles blind_core (longer) -> %s'], ...
-    100 * p1, nnz(m30), t1, t2, ternary(h1, 'holds', 'does not hold'));
+    '(>= 90%%); at 30 dB (%d recoverable episodes) median detection->restored %g vs %g cycles blind_core, difference ' ...
+    '[%g, %g] (holds 0); first hop 6-12 MHz away (%d) %g vs %g (longer) -> %s'], 100 * p1, nnz(m30), T30.med, T30.ci, ...
+    T30.n_near, T30.near, ternary(h1, 'holds', 'does not hold'));
 % P2
 w1 = J.w.(X.RULES{1}); g = G3(strcmp({G3.rule}, X.RULES{1}) & ismember([G3.bj], [4 8 20]));
 P.P2 = struct('W', w1, 'escape', [g.drawn], 'holds', ismember(w1, {'channel_switch', 'channel_switch+rate_reduce'}));

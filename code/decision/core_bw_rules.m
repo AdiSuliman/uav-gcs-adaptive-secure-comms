@@ -13,6 +13,14 @@ function varargout = core_bw_rules(cmd, varargin)
 %       trec (numel(Wn) x n) each candidate's PER after onset, delivered payload and recovery
 %       from detection (NaN never) on the same episodes; B bootstrap resamples
 %   v = core_bw_rules('verdict', m, lo, target, n)   the PER-reduction verdict (6.5)
+%   P = core_bw_rules('p1', tr, tb, near, cl, B)   prediction P1's reading at JSR_tot 30 dB
+%       (section 5): tr, tb (1 x n) rule_core's and blind_core's detection-to-restored times
+%       on the same recoverable CW episodes (NaN never), near the episodes whose first hop
+%       lands 6-12 MHz from the tone, cl their flight geometry. P.med [rule blind] medians
+%       (never as the longest); P.ci the 95% interval of their difference over geometries (B
+%       resamples); P.near the medians on the near episodes ([NaN NaN] without one); P.holds
+%       the interval holds 0 (without one, the point is 0) and, where near episodes exist, the
+%       rule's median there is the longer. No episode holds.
 %   J = core_bw_rules('guard', X)   the test stage's refusals (6.6, G4) in order: no frozen
 %       protocol, the protocol or the recoverable list changed, the test read already (the
 %       smoke deletes its own marker and readings instead), the frozen copy missing or not byte
@@ -22,6 +30,7 @@ switch cmd
     case 'recoverable', varargout{1} = recoverable(varargin{:});
     case 'choose_w',    [varargout{1}, varargout{2}] = choose_w(varargin{:});
     case 'verdict',     varargout{1} = verdict(varargin{:});
+    case 'p1',          varargout{1} = p1_reading(varargin{:});
     case 'guard',       varargout{1} = guard(varargin{:});
     case 'sha',         varargout{1} = file_sha(varargin{:});
     otherwise, error('core_bw_rules:cmd', 'core_bw_rules: unknown command %s', cmd);
@@ -69,6 +78,42 @@ if n == 0, v = 'not read (no episodes)';
 elseif isfinite(lo) && lo >= target, v = 'met (committed)';
 elseif isfinite(m) && m >= target, v = 'met (not committed)';
 else, v = 'not met'; end
+end
+
+function P = p1_reading(tr, tb, near, cl, B)
+tr = fillmissing(tr(:)', 'constant', Inf); tb = fillmissing(tb(:)', 'constant', Inf);
+P = struct('n', numel(tr), 'med', [NaN NaN], 'diff', NaN, 'ci', [NaN NaN], 'n_near', nnz(near), ...
+    'near', [NaN NaN], 'holds', true);
+if isempty(tr), return; end
+P.med = [median(tr) median(tb)]; P.diff = med_diff(tr, tb);
+[~, ~, j] = unique(cl(:));
+nU = max(j);
+if nU >= 2
+    g = accumarray(j, (1:numel(tr))', [], @(x) {x});
+    rs = RandStream('mt19937ar', 'Seed', 73);
+    idx = randi(rs, nU, nU, B);
+    d = zeros(1, B);
+    for b = 1:B
+        s = vertcat(g{idx(:, b)});
+        d(b) = med_diff(tr(s), tb(s));
+    end
+    q = sort(d);
+    P.ci = [q(max(1, round(0.025 * B))), q(min(B, round(0.975 * B)))];
+    eq = P.ci(1) <= 0 && P.ci(2) >= 0;
+else
+    eq = P.diff == 0;
+end
+if any(near)
+    P.near = [median(tr(near)) median(tb(near))];
+    eq = eq && P.near(1) > P.near(2);
+end
+P.holds = eq;
+end
+
+function d = med_diff(a, b)
+% Median of a minus median of b; equal medians (never restored alike) differ by 0.
+ma = median(a); mb = median(b);
+if ma == mb, d = 0; else, d = ma - mb; end
 end
 
 function J = guard(X)
