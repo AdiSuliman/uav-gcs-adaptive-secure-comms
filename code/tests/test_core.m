@@ -7187,3 +7187,105 @@ M = per_metrics(fer, false(T, NE), gap, rplr, gpl, [1 1 1 1], 5);
 verifyTrue(tc, all(isnan([M.per_post, M.dlv_post, M.t_rec_det])));
 end
 
+
+function test_rollout_per_fields(tc)
+% rollout_policy.m gives every episode its PER, delivered payload and recovery time from the
+% detection: the static link under a jammer loses every packet, a configuration the jammer
+% cannot reach loses none and delivers its goodput factor; detection time plus the recovery
+% from it is T_rec where BER and packet loss restore together; evaluate_policies.m reports them.
+[PP, K] = toy_world(true);
+fd = find(strcmp(PP.actions, 'freq_diversity'));
+spec = struct('scn', [2 2], 's', [1 1], 'onset', [3 3], 'follow', false(1, 2), 'fdelay', [0 0], 'unk', false(1, 2), ...
+    'T', 20, 'r', [1 1]);
+R = rollout_policy('fixed', PP, K, spec, 1, [], struct('fixed', K.na), 4);
+verifyEqual(tc, [R.per_post, R.dlv_post], [1 1 0 0]);
+verifyTrue(tc, all(isnan(R.t_rec_det)));
+R = rollout_policy('fixed', PP, K, spec, 1, [], struct('fixed', fd), 4);
+verifyEqual(tc, [R.per_post, R.dlv_post], [0 0 1 1]);
+PP.gp(fd) = 0.5; K2 = link_env('tables', PP);
+R = rollout_policy('fixed', PP, K2, spec, 1, [], struct('fixed', fd), 4);
+verifyEqual(tc, R.dlv_post, [0.5 0.5]);
+R = rollout_policy('rule_esc', PP, K, spec, 1, [], struct(), 8);
+d = isfinite(R.t_rec_det);
+verifyTrue(tc, any(d));
+verifyEqual(tc, R.t_conf(d) + R.t_rec_det(d), R.t_rec(d));
+src = fileread(which('evaluate_policies'));
+verifyNotEmpty(tc, strfind(src, '[LK, lines] = lect_kpis(ALL, POL, LBL, iDQN, PP.scen, payload_bps, C.period_ms);'));
+verifyNotEmpty(tc, strfind(src, '''offset_after'', OFF_AFTER, ''lect'', LK);'));
+end
+
+function test_per_reduction(tc)
+% PER reduction vs the static link: 1 - sum(PER policy) / sum(PER static) over the same
+% episodes (paired), the episodes of one flight geometry resampled together; an episode with
+% a NaN under either policy is left out; a reference that loses no packet gives NaN.
+ref = [0.5 0.5 0.4 0.4 0.2 NaN]; pol = [0.1 0.1 0.2 0.2 0.1 0];
+cl = [1 1 2 2 3 4];
+[m, lo, hi] = per_reduction(pol, ref, cl, 500, 3);
+verifyEqual(tc, m, 1 - 0.7 / 2, 'AbsTol', 1e-12);
+verifyLessThanOrEqual(tc, lo, m); verifyGreaterThanOrEqual(tc, hi, m);
+verifyEqual(tc, per_reduction(ref(1:4), ref(1:4), cl(1:4), 100, 1), 0, 'AbsTol', 1e-12);
+verifyTrue(tc, isnan(per_reduction([0 0], [0 0], [1 2], 100, 1)));
+end
+
+function test_lect_kpis_readings(tc)
+% The revised proposal's readings (lect_kpis.m) on the recoverable jamming episodes: the PER
+% reduction of rule + escalation and of the escalation without the detector vs the static
+% link, per jamming threat, the CNN's share; recovery from detection, the onset-to-detection
+% time and T_rec (median, p90, never); goodput in bit/s.
+POL = {'none', 'random', 'fixed', 'rule_esc', 'blind_esc', 'table', 'dqn_esc', 'oracle'};
+LBL = {'no response', 'random', 'fixed', 'rule + escalation', 'no detector + escalation', 'table', 'DQN + escalation', 'oracle'};
+[ALL, scen] = lect_world(POL);
+[L, lines] = lect_kpis(ALL, POL, LBL, 4, scen, 5e4, 20);
+verifyEqual(tc, {L.per.policy}, {'rule_esc', 'blind_esc'});
+verifyEqual(tc, [L.per.n], [4 4]);
+verifyEqual(tc, [L.per.red_pct], 100 * [1 - 0.6 / 1.8, 1 - 1.4 / 1.8], 'AbsTol', 1e-9);
+verifyEqual(tc, [L.per.met], [true false]);
+verifyEqual(tc, L.per(1).per_ref_pct, 45, 'AbsTol', 1e-9);
+verifyEqual(tc, {L.per_threat.threat}, {'jamming', 'tone_jamming'});
+verifyEqual(tc, {L.per_threat.band}, {'wideband', 'narrowband'});
+verifyEqual(tc, [L.per_threat(1).red_pct(1), L.per_threat(2).red_pct(1)], [80 50], 'AbsTol', 1e-9);
+verifyEqual(tc, L.cnn.per_red_pct, 100 * (1 - 0.6 / 1.4), 'AbsTol', 1e-9);
+verifyEqual(tc, L.cnn.gput_bps, 1e4, 'AbsTol', 1e-6);
+sel = @(s, p) L.rec(strcmp({L.rec.set}, s) & strcmp({L.rec.policy}, p));
+verifyEqual(tc, unique({L.rec.policy}, 'stable'), {'none', 'blind_esc', 'rule_esc', 'dqn_esc'});
+r = sel('recoverable threat episodes', 'rule_esc');
+verifyEqual(tc, [r.n, r.det.median, r.det.p90, r.rec_det.median, r.rec_det.p90, r.rec_det.never_pct], [6 1 2 3 5 0]);
+verifyEqual(tc, r.det.never_pct, 100 / 6, 'AbsTol', 1e-9);
+verifyEqual(tc, [r.t_rec.median, r.t_rec.p90], [4 6]);
+r = sel('recoverable jamming episodes', 'rule_esc');
+verifyEqual(tc, [r.n, r.det.median, r.det.p90, r.det.never_pct, r.rec_det.median, r.rec_det.p90], [4 1 2 25 3 4]);
+r = sel('recoverable threat episodes', 'none');
+verifyTrue(tc, isnan(r.rec_det.median)); verifyEqual(tc, r.rec_det.never_pct, 100);
+g = L.gput(strcmp({L.gput.policy}, 'rule_esc'));
+verifyEqual(tc, [g.bps, g.bps_jam], [5e4 * 5.5 / 7, 42500], 'AbsTol', 1e-6);
+verifyTrue(tc, any(strcmp({L.gput.policy}, 'oracle')));
+verifyTrue(tc, any(contains(lines, '-> MET')));
+L2 = lect_kpis(ALL, POL, LBL, 7, scen, 5e4, 20);                   % a deployed DQN is read too
+verifyEqual(tc, {L2.per.policy}, {'rule_esc', 'blind_esc', 'dqn_esc'});
+end
+
+function [ALL, scen] = lect_world(POL)
+% Eight episodes of every policy in POL: jamming (1, 2, 7), tone_jamming (3, 4, 8), path_loss
+% (5, 6); episode 7 not recoverable, episode 8 without its threat on the air.
+scen = {'none', 'jamming', 'tone_jamming', 'path_loss'};
+B = struct('scn', [2 2 3 3 4 4 2 3], 'recoverable', logical([1 1 1 1 1 1 0 1]), ...
+    'threat', logical([1 1 1 1 1 1 1 0]), 'geom', [1 1 2 2 3 3 4 5], 'ok_post', 0.5 * ones(1, 8));
+ALL = cell(1, numel(POL));
+for k = 1:numel(POL)
+    R = B;
+    switch POL{k}
+        case 'none'
+            R.per_post = [0.5 0.5 0.4 0.4 0.6 0.6 0.9 0.2]; R.dlv_post = [0.5 0.5 0.6 0.6 0.4 0.4 0.1 0.8];
+            R.t_conf = [1 1 1 1 1 1 NaN NaN]; R.t_rec_det = nan(1, 8); R.t_rec = nan(1, 8);
+        case 'blind_esc'
+            R.per_post = [0.3 0.3 0.4 0.4 0.3 0.3 0.9 0.2]; R.dlv_post = [0.7 0.7 0.6 0.6 0.7 0.7 0.1 0.8];
+            R.t_conf = [2 3 3 2 2 2 NaN NaN]; R.t_rec_det = [5 6 NaN NaN 4 4 NaN NaN]; R.t_rec = [7 9 NaN NaN 6 6 NaN NaN];
+        otherwise
+            R.per_post = [0.1 0.1 0.2 0.2 0 0 0.9 0.2]; R.dlv_post = [0.9 0.9 0.8 0.8 1 1 0.1 0.8];
+            R.t_conf = [1 2 NaN 0 1 1 NaN NaN]; R.t_rec_det = [3 4 NaN 2 0 5 NaN NaN]; R.t_rec = [4 6 NaN 2 1 6 NaN NaN];
+            if strcmp(POL{k}, 'oracle'), R.t_conf(:) = NaN; R.t_rec_det(:) = NaN; end
+    end
+    R.gput_post = R.dlv_post; R.recovered = isfinite(R.t_rec);
+    ALL{k} = R;
+end
+end
