@@ -7562,6 +7562,50 @@ verifyError(tc, @() policy_decide('table_esc', obs, na, [], PP, [], struct('core
 verifyError(tc, @() policy_decide('dqn', obs, na, [], PP, [], struct('core', true)), 'policy_decide:core');
 end
 
+function test_rule_dwell_tried(tc)
+% On a link that stays degraded (one incident), the consecutive dwell ('run') commits the class
+% answer again after an escalation left it, the group dwell never proposes a configuration
+% tried in the incident; alike for rule_esc and blind_esc, full and core. The dwell is a
+% validation choice of train_dqn.m, applied to every reader through decision_settings.m.
+A = policy_actions();
+cls = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', 'antenna_fault', ...
+    'benign_interference', 'sweeping_jammer', 'tone_jamming', 'airframe_shadowing'};
+na = find(strcmp(A, 'no_action'));
+obs = struct('probs', double(strcmp(cls, 'jamming')), 'unknown', false, 'feat', zeros(1, numel(link_features('names'))));
+obs.feat(feature_index('log_ber')) = -1; obs.feat(feature_index('crc_fail')) = 1;
+runs = {'rule_esc', struct(); 'rule_esc', struct('core', true); 'blind_esc', struct(); 'blind_esc', struct('core', true)};
+for dw = {'run', 'group'}
+    PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0, 'rule_dwell', dw{1});
+    for k = 1:size(runs, 1)
+        mem = []; cfg = na; ch = {}; esc = [];
+        for t = 1:40
+            o = obs; o.cfg_link = cfg;
+            [a, mem, d] = policy_decide(runs{k, 1}, o, cfg, mem, PP, [], runs{k, 2});
+            if a ~= cfg, ch{end+1} = A{a}; esc(end+1) = d.escalated; end %#ok<AGROW>
+            cfg = a;
+        end
+        rep = 0;
+        for j = 2:numel(ch)
+            if any(strcmp(ch(1:j-1), ch{j})), rep = j; break; end
+        end
+        verifyGreaterThanOrEqual(tc, numel(ch), 3);
+        verifyEqual(tc, double(esc(2)), 1);
+        if strcmp(dw{1}, 'run')
+            verifyGreaterThan(tc, rep, 0);
+            if rep > 0, verifyEqual(tc, double([esc(rep), strcmp(ch{rep}, ch{1})]), [0 1]); end
+        else
+            verifyEqual(tc, rep, 0);
+        end
+    end
+end
+src = fileread(which('train_dqn'));
+verifyNotEmpty(tc, strfind(src, ['STEPS(end+1) = struct(''name'', ''proposal dwell'', ''var'', {{struct(''rule_dwell'', ' ...
+    '''run''), struct(''rule_dwell'', ''group'')}});']));
+for f = {'evaluate_policies', 'experiment_core_bw'}
+    verifyNotEmpty(tc, strfind(fileread(which(f{1})), 'PP = decision_settings(PP, Q);'));
+end
+end
+
 function test_core_policies_rollout(tc)
 % rule_core and blind_core (policy_setup.m) run as rule_esc and blind_esc on the core set: on
 % a jammer that a hop escapes both recover; on one no configuration escapes they escalate

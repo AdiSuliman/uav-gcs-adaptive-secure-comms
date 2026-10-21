@@ -152,7 +152,11 @@ geometries (`boot_cluster.m`).
 only): `blind_core`. CNN-based: `rule_core`, with the class `jamming` mapped to the wideband
 action W (`rule_core_policy.m` wide_action, `PP.core_wide`); every other class keeps its mapping,
 `tone_jamming` stays `channel_switch`. All run the deployed decision settings
-(`decision_settings.m`, `data/trained_dqn.mat`), the same episodes and frame draws. `oracle`
+(`decision_settings.m`, `data/trained_dqn.mat`), the same episodes and frame draws. Among them
+the proposal dwell, chosen on validation for rule + escalation (`train_dqn.m`): under the
+consecutive dwell ('run') the class answer can commit again after an escalation left it, under
+the group dwell a configuration tried in the incident is not proposed again; `rule_core` and
+`blind_core` run the same dwell. `oracle`
 (cover-aware, `oracle_action.m`) is read as a bound only.
 
 **The choice of W (validation, per hop rule).** W in {channel_switch,
@@ -237,7 +241,8 @@ Outputs: `data/core_bw/pools.mat`, `data/core_bw/dset.mat`; `results/core_bw/val
 test_link_env_cover_default, test_link_env_cover_recoverable, test_link_env_cover_relative,
 test_link_env_residual_layer, test_oracle_cover, test_rule_core_wide, test_band_cells, test_band_recoverable_scenarios,
 test_band_seeds_disjoint, test_band_protocol_guard, and the existing test_rule_core_policy,
-test_core_decide_escalation, test_core_policies_rollout, test_per_reduction, test_three_state_view.
+test_core_decide_escalation, test_core_policies_rollout, test_per_reduction, test_three_state_view,
+test_rule_dwell_tried.
 
 ## 9. Time and memory (estimate; the smoke measures it)
 

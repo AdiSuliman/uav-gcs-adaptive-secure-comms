@@ -39,7 +39,10 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %   C.dwell of the last C.dwell_n cycles (M-of-N integration, Barajas et al.; an
 %   intermittent threat alternates its cycles' proposals), unless the configuration in use
 %   already holds its elements and at least its known gain (no regress to a weaker one) or
-%   the escalation tried it in this incident
+%   the escalation tried it in this incident. The tried check is the group dwell's: with
+%   'run' the class answer can commit again after an escalation left it, and train_dqn.m
+%   picks between the two dwells on validation (rule + escalation), which every rule kind,
+%   the core and blind ones included, then runs (decision_settings.m)
 %   dqn       argmax of the Q-network over the configurations allowed by the
 %             shield (policy_mask.m); switching costs are part of its reward
 %   *_esc     escalation: move to the next configuration not yet tried in this
