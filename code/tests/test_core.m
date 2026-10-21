@@ -7370,3 +7370,27 @@ verifyNotEmpty(tc, strfind(src, '''beside KPI 4, PER vs the static link (revised
 verifyNotEmpty(tc, strfind(src, 'save(''results/kpi_summary.mat'', ''KPI'', ''LECT'');'));
 end
 
+
+function test_profile_skip_stages(tc)
+% profile.json's optional skip_stages: absent file, field or names skip nothing; one name or a
+% list; a name that is no stage of run_stage.m or a list of other values is an error.
+% run_stage.m prints the skipped stage's done marker as the takeover reads it.
+d = tempname; mkdir(d); f = fullfile(d, 'profile.json'); known = {'A0', 'OHP', 'GCSA', 'KPI'};
+verifyEmpty(tc, profile_skip_stages(f, known));
+w = @(t) write_text(f, t);
+w('{"profile":"profile 3","n_rx":3}'); verifyEmpty(tc, profile_skip_stages(f, known));
+w('{"n_rx":3,"skip_stages":["OHP","GCSA"]}'); verifyEqual(tc, profile_skip_stages(f, known), {'OHP', 'GCSA'});
+w('{"skip_stages":["OHP"]}'); verifyEqual(tc, profile_skip_stages(f, known), {'OHP'});
+w('{"skip_stages":"GCSA"}'); verifyEqual(tc, profile_skip_stages(f, known), {'GCSA'});
+w('{"skip_stages":[]}'); verifyEmpty(tc, profile_skip_stages(f, known));
+w('{"skip_stages":["OHP","SURV4"]}'); verifyError(tc, @() profile_skip_stages(f, known), 'profile_skip_stages:unknown');
+w('{"skip_stages":[1,2]}'); verifyError(tc, @() profile_skip_stages(f, known), 'profile_skip_stages:type');
+src = fileread(which('run_stage'));
+verifyNotEmpty(tc, strfind(src, 'skip = profile_skip_stages(''profile.json'', fieldnames(map));'));
+fmt = '##### STAGE %s done in 0.0 min (skipped by profile.json) #####\n';
+verifyNotEmpty(tc, strfind(src, ['fprintf(''' fmt ''', st);']));
+line = sprintf(fmt, 'GCSA');
+verifyEqual(tc, regexp(line, '##### STAGE [A-Za-z0-9]* done', 'match', 'once'), '##### STAGE GCSA done');
+verifyNotEmpty(tc, regexp(line, '^##### STAGE ([A-Za-z0-9]*) done', 'once'));
+end
+

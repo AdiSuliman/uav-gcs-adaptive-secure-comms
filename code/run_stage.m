@@ -24,6 +24,9 @@ function run_stage(varargin)
 %   run_stage('smoke', ...) runs the listed stages on a reduced problem (few
 %   cells, geometries and episodes) to check the chain in minutes; its outputs
 %   overwrite the normal ones and are not results.
+%   A stage named in the optional skip_stages of the checkout's profile.json
+%   (profile_skip_stages.m) is not run: it prints its start line and its done marker with
+%   the note 'skipped by profile.json', so the chain goes on past it.
 smoke = strcmp(varargin{1}, 'smoke');
 if smoke, varargin = varargin(2:end); end
 root = setup_paths();
@@ -45,9 +48,14 @@ map = struct('A0', 'init_params', 'A4v', 'validate_phy', 'A5', 'run_dataset_swee
     'EDGE', 'edge_map', 'LAT', 'measure_latency', ...
     'KPI', 'measure_all_kpis', ...
     'DASH', 'build_kpi_dashboard', 'WEAK', 'analyze_weak_points', 'RPT', 'export_report_numbers');
+skip = profile_skip_stages('profile.json', fieldnames(map));
 for i = 1:numel(varargin)
     st = varargin{i};
     fprintf('\n##### STAGE %s (%s) %s #####\n', st, map.(st), datestr(now));
+    if ismember(st, skip)
+        fprintf('##### STAGE %s done in 0.0 min (skipped by profile.json) #####\n', st);
+        continue
+    end
     t0 = tic;
     run_one(map.(st), smoke);
     fprintf('##### STAGE %s done in %.1f min #####\n', st, toc(t0) / 60);
