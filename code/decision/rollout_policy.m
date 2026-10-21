@@ -34,6 +34,12 @@ function R = rollout_policy(kind, PP, K, spec, split, agent, opt, seed)
 %                     the threat (a component of a combined one) and to the first
 %                     confirmed alarm, read one cycle later (0: the onset frame itself, as
 %                     eval_detector.m counts; NaN if never; the oracle has no monitor)
+%          per_post   packet error rate after onset: mean true packet loss (CRC) of the
+%                     frames that carry a packet (per_metrics.m)
+%          dlv_post   delivered payload after onset, share of the nominal payload rate
+%                     (goodput factor x (1 - packet loss), 0 in the coded-link gap)
+%          t_rec_det  cycles from the first confirmed alarm's frame (onset + t_conf) until
+%                     the packet loss is restored for 5 consecutive cycles (NaN if never)
 %          after the threat's end (spec.offset; NaN without one): cfg_end, the configuration
 %          requested when the first clean frame arrives; rel_t, cycles from then to the
 %          first request of no_action (0 when cfg_end is no_action, NaN if never); cost_end,
@@ -134,4 +140,6 @@ for i = 1:NE
     k = find(tr.cls(t0+1:T, i), 1); if ~isempty(k), R.t_cls(i) = k - 1; end   % the decision of cycle t reads frame t - 1
     k = find(tr.conf(t0+1:T, i), 1); if ~isempty(k), R.t_conf(i) = k - 1; end
 end
+Mp = per_metrics(tr.fer, post, tr.gap, tr.rplr, reshape(PP.gp(tr.link), T, NE), R.t_conf, 5);
+R.per_post = Mp.per_post; R.dlv_post = Mp.dlv_post; R.t_rec_det = Mp.t_rec_det;
 end

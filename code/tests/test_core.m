@@ -7165,3 +7165,25 @@ verifyNotEmpty(tc, strfind(src, 'for f = fieldnames(Ssel)'', rule_sel.(f{1}) = S
 verifyNotEmpty(tc, strfind(src, '''pools_created'', ''maha_thr'', ''dec'', ''-v7.3'''));
 verifyNotEmpty(tc, strfind(src, 'maha_thr = dec.maha_thr;'));
 end
+
+%% ---------- revised proposal KPIs ----------
+function test_per_metrics_traces(tc)
+% PER after onset over the frames that carry a packet (a coded link's gap left out), the
+% delivered payload (goodput factor x (1 - packet loss), none in the gap) and the recovery
+% time from the detection frame until the packet loss stays restored for the whole window.
+T = 12; NE = 4; post = repmat((1:T)' >= 3, 1, NE);
+fer = zeros(T, NE); gap = false(T, NE); gpl = ones(T, NE);
+fer(3:6, 1) = 1;
+fer(3:4, 2) = 1; gap(5:7, 2) = true; gpl(5:T, 2) = 0.5;
+fer(3:T, 3) = 1;
+rplr = fer == 0 & ~gap;
+M = per_metrics(fer, post, gap, rplr, gpl, [1 NaN 0 2], 5);
+verifyEqual(tc, M.per_post, [0.4, 2/7, 1, 0], 'AbsTol', 1e-12);
+verifyEqual(tc, M.dlv_post, [0.6, 0.25, 0, 1], 'AbsTol', 1e-12);
+verifyEqual(tc, M.t_rec_det, [3 NaN NaN 0]);
+M = per_metrics(fer, post, gap, rplr, gpl, [1 NaN 0 2], 7);      % episode 1 stays restored 6 cycles only
+verifyEqual(tc, M.t_rec_det, [NaN NaN NaN 0]);
+M = per_metrics(fer, false(T, NE), gap, rplr, gpl, [1 1 1 1], 5);
+verifyTrue(tc, all(isnan([M.per_post, M.dlv_post, M.t_rec_det])));
+end
+
