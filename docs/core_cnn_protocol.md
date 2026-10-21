@@ -261,4 +261,8 @@ The `test_core_cnn_*` functions and `test_spec_net_trains` in `code/tests/test_c
 - the verdicts;
 - the detection delay;
 - the network's training on synthetic images;
-- the stage's guards before the set is loaded, and their order.
+- the stage's guards before the set is loaded, and their order;
+- the whole stage on synthetic splits (`test_core_cnn_reading`): a smoke training, then the
+  reading with every output, figure and report line, checked against the saved predictions.
+  The real reading's code after the marker has thus run to its end before the set is loaded,
+  as B3r's rehearsal on the third set does for the hybrid.
