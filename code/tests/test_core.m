@@ -7289,3 +7289,84 @@ for k = 1:numel(POL)
     ALL{k} = R;
 end
 end
+
+function test_three_state_view(tc)
+% The detector's confusion matrix as the three link states: the rows of none, tone_jamming
+% and jamming only; a frame read as another class is an error of its state (column other),
+% precision over the three states' frames.
+classes = {'none', 'jamming', 'path_loss', 'tone_jamming', 'spoofing'};
+cm = [90 2 3 1 4; 5 80 5 10 0; 10 10 70 5 5; 2 3 0 85 10; 1 1 1 1 96];
+V = three_state_view(cm, classes);
+verifyEqual(tc, V.cm, [90 1 2 7; 2 85 3 10; 5 10 80 5]);
+verifyEqual(tc, V.recall, [0.9 0.85 0.8], 'AbsTol', 1e-12);
+p = [90 / 97, 85 / 96, 80 / 85];
+verifyEqual(tc, V.precision, p, 'AbsTol', 1e-12);
+f1 = 2 * p .* V.recall ./ (p + V.recall);
+verifyEqual(tc, V.macro_f1, mean(f1), 'AbsTol', 1e-12);
+verifyEqual(tc, V.n, [100 100 100]);
+verifyError(tc, @() three_state_view(eye(3), {'none', 'jamming', 'path_loss'}), 'three_state_view:class');
+end
+
+function test_lect_kpis_summary(tc)
+% measure_all_kpis.m reports the revised proposal's readings beside the KPIs: the three link
+% states of the KPI 1 reading (every Eb/N0 and from the threshold, the saved predictions) and
+% of the third test set, the PER reduction beside KPI 4, recovery and goodput beside KPI 5;
+% saved as LECT.
+d = fullfile(tc.TestData.tmp, 'lectkpi'); mkdir(fullfile(d, 'results')); mkdir(fullfile(d, 'data'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+classes = {'none', 'jamming', 'path_loss', 'tone_jamming', 'spoofing'};
+cm = [90 2 3 1 4; 5 80 5 10 0; 10 10 70 5 5; 2 3 0 85 10; 1 1 1 1 96];
+metrics = struct('overall_accuracy_pct', 90, 'macro_f1_pct', 88, 'ci95', struct('macro_f1', [86 90]), ...
+    'classes', {classes}, 'class_f1_above_threshold_pct', [90 91 92 93 94]', 'snr_breakdown', ...
+    struct('snr_db', {0, 3}, 'macro_f1_pct', {80, 92}), 'macro_f1_above_threshold_pct', 91, 'kpi1_threshold_db', 3, ...
+    'conf_mat', cm, 'test_set', 'third test set');
+[it, ip] = find(cm > 0); n = cm(cm > 0);
+yt = repelem(it, n); yp = repelem(ip, n);
+pred = struct('y_true', categorical(classes(yt)', classes), 'y_pred', categorical(classes(yp)', classes), ...
+    'ebno', 6 * ones(numel(yt), 1)); %#ok<NASGU>
+save('results/eval_detector_metrics_fresh2.mat', 'metrics');
+save('results/detector_predictions_fresh2.mat', 'pred');
+f = kpi1_file('eval_detector_metrics');
+if ~strcmp(f, 'results/eval_detector_metrics_fresh2.mat')
+    metrics.test_set = 'fourth test set'; save(f, 'metrics');
+    save(kpi1_file('detector_predictions'), 'pred');
+end
+POL = {'none', 'random', 'fixed', 'rule_esc', 'blind_esc', 'table', 'dqn_esc', 'oracle'};
+LBL = {'no response', 'random', 'fixed', 'rule + escalation (deployed)', 'no detector + escalation', 'table', ...
+    'DQN + escalation', 'oracle'};
+[ALL, scen] = lect_world(POL); iDQN = 4; RES = {}; set_names = {'single'}; %#ok<NASGU>
+show = {'none', 'fixed', 'rule_esc', 'blind_esc', 'table', 'dqn_g1', 'dqn_esc', 'oracle'};
+KP = struct('threats', {{'jamming', 'tone_jamming', 'path_loss'}}, 'show', {show}, 'per_threat', 95 * ones(3, 8), ...
+    'recoverable_share', ones(3, 1), 'sev_names', {{'nominal'}}, 'per_threat_sev', 95 * ones(3, 1, 8), ...
+    'far', struct('policy', LBL{4}, 'k', 1, 'n', 700, 'upper', 0.01, 'per_cycle', 1e-4), 'ebno_thr', 3, ...
+    'per_speed', 95 * ones(2, 8), 'speed_bins', [0 80 161], 'lect', lect_kpis(ALL, POL, LBL, iDQN, scen, 5e4, 20)); %#ok<NASGU>
+save('results/policy_evaluation.mat', 'RES', 'POL', 'LBL', 'set_names', 'iDQN', 'KP', 'ALL');
+evalc('measure_all_kpis');
+S = load('results/kpi_summary.mat', 'KPI', 'LECT'); K = S.KPI;
+k1 = strjoin(K([K.id] == 1).detail, newline);
+verifyNotEmpty(tc, strfind(k1, ['three link states (revised proposal; third test set, saved confusion matrix, every ' ...
+    'Eb/N0; frames of none / tone_jamming / jamming, another class read is an error): recall narrowband 85.00%, ' ...
+    'wideband 80.00% (>= 85% each: not met), clean 90.00%']));
+verifyNotEmpty(tc, strfind(k1, 'three link states from 3 dB (the KPI 1 threshold, saved predictions)'));
+verifyEqual(tc, S.LECT.three_above.macro_f1, S.LECT.three.macro_f1, 'AbsTol', 1e-12);   % every frame above the threshold
+verifyEqual(tc, S.LECT.three.recall, [0.9 0.85 0.8], 'AbsTol', 1e-12);
+k4 = strjoin(K([K.id] == 4).detail, newline);
+verifyNotEmpty(tc, strfind(k4, 'recoverable jamming episodes (4)'));
+verifyNotEmpty(tc, strfind(k4, 'reduction 66.7% ['));
+verifyNotEmpty(tc, strfind(k4, '-> MET (target >= 30%'));
+verifyNotEmpty(tc, strfind(k4, 'tone_jamming (narrowband) 50.0%'));
+k5 = strjoin(K([K.id] == 5).detail, newline);
+verifyNotEmpty(tc, strfind(k5, ['rule + escalation (deployed): onset->detection 1/2 (never 17%), detection->restored ' ...
+    '3/5 (never 0%), T_rec from onset 4/6 (never 17%)']));
+verifyNotEmpty(tc, strfind(k5, 'rule + escalation (deployed) 39286 ['));
+verifyEqual(tc, S.LECT.pol.payload_bps, 5e4);
+end
+
+function test_lect_kpis_pending(tc)
+% A policy evaluation saved before the revised proposal's readings shows them as PENDING
+% beside KPI 4 and KPI 5, never as a number.
+src = fileread(which('measure_all_kpis'));
+verifyNotEmpty(tc, strfind(src, '''beside KPI 4, PER vs the static link (revised proposal): PENDING, '''));
+verifyNotEmpty(tc, strfind(src, 'save(''results/kpi_summary.mat'', ''KPI'', ''LECT'');'));
+end
+
