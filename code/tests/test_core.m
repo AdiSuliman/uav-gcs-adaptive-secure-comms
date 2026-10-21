@@ -7773,6 +7773,48 @@ verifyEqual(tc, [J('bw4_tot4').half, J('bw8_tot4').half, J('bw20_tot4').half, J(
 verifyEqual(tc, [J('bw70_tot4').lo, J('bw70_tot4').hi, J('bw83.5_tot4').lo, J('bw83.5_tot4').hi], [2402 2472 2400 2483.5]);
 end
 
+function test_band_seeds_disjoint(tc)
+% Geometry family 6 (validation 5, set D 7, test 14, the smoke's 16, 18, 19) shares no flight
+% seed with any other pool, clean-link, shadowing, survivability or dataset seed, every seed
+% below 2^26; the 'hop' purpose (offset 39) is distinct from every other purpose.
+P = {'channel', 'awgn', 'bits', 'threat', 'aoa', 'ds', 'k', 'yaw', 'corr', 'gcsaoa', 'gcs', 'jam', 'alt', 'speed', ...
+    'body', 'wobble', 'cal', 'roll', 'idle', 'amb', 'hop'};
+off = zeros(1, numel(P));
+for i = 1:numel(P)
+    [~, n] = seed_stream(12345, P{i});
+    off(i) = n - seed_base(12345);
+end
+verifyEqual(tc, off(end), 39);
+verifyEqual(tc, numel(unique(off)), numel(P));
+verifyTrue(tc, all(off >= 0 & off < 64));
+[s, r, b] = ndgrid(1:6, 1:99, 1:19);
+S = arrayfun(@(si, ri, bi) pool_seed(1, si, bi, ri), s(:), r(:), b(:));
+[s, r] = ndgrid(1:6, 1:99);
+S = [S; arrayfun(@(si, ri) pool_seed(2, si, 10, ri), s(:), r(:))];
+[s, b] = ndgrid(1:6, [4 15]);
+S = [S; arrayfun(@(si, bi) pool_seed(1, si, bi, 100), s(:), b(:))];
+[s, r, b, f] = ndgrid(1:6, 1:100, [4 15], [3 5]);
+S = [S; arrayfun(@(si, ri, bi, fi) pool_seed(fi, si, bi, ri), s(:), r(:), b(:), f(:))];
+[t, li, s] = ndgrid(1:20, 1:8, 1:6);
+S = [S; 900000 + 1000*t(:) + 10*li(:) + s(:); 700000 + (1:5)'];
+k = (1:99999)';
+S = [S; 3000000 + k; 4000000 + k; 5000000 + k; 3500000 + k; 4500000 + k; 5500000 + k; 6500000 + k; 6000000 + k];
+[s, r, b] = ndgrid(1:6, 1:99, [5 7 14 16 18 19]);
+S6 = arrayfun(@(si, ri, bi) pool_seed(6, si, bi, ri), s(:), r(:), b(:));
+verifyEqual(tc, numel(unique(S6)), numel(S6));
+verifyEmpty(tc, intersect(S6, S));
+verifyLessThan(tc, max(S6), 2^26);
+lo = min(arrayfun(@(gi, si, bi) shadow_pool_seed(gi, si, bi, 1), 1:8, ones(1, 8), ones(1, 8)));
+verifyLessThan(tc, max(S6), lo);
+N = seed_base([S; S6]) + off;
+verifyEqual(tc, numel(unique(N(:))), numel(N));
+verifyLessThan(tc, max(N(:)), 2^32);
+src = fileread(which('experiment_core_bw'));
+verifyNotEmpty(tc, strfind(src, 'X.FAM = 6;'));
+verifyNotEmpty(tc, strfind(src, 'X.BLOCK = [5 14];'));
+verifyNotEmpty(tc, strfind(src, 'X.BLOCK = [18 19]; X.BLOCK_D = 16;'));
+end
+
 function test_rule_core_wide(tc)
 % The core rule's optional wideband action: without it every answer and reason is the parent
 % commit's (lect-kpi 394d4da); each W changes the class jamming only; a non-core W is refused;
@@ -7969,6 +8011,82 @@ for D = [0 1 2]
     verifyEqual(tc, find(a ~= K.na, 1), on - D, sprintf('none covered, D %d', D));
     verifyTrue(tc, all(ok(on:end)), sprintf('none covered, D %d', D));
 end
+end
+
+function test_band_recoverable_scenarios(tc)
+% The fixed rules: a scenario is recoverable with >= 90% of its validation episodes recoverable
+% and the static link harmed (pooled PER above the pooled threshold); W by the lowest PER with
+% equal weight per (B_J, JSR_tot), a tie (interval holding 0) by goodput, then by the median
+% recovery from detection, then by the candidates' order; the PER-reduction verdict.
+key = [1 1 1 1 2 2 2 2 3 3 3 3];
+rec = logical([1 1 1 1 1 1 1 0 1 1 1 1]);
+per = [0.5 * ones(1, 8), 0.01 * ones(1, 4)]; thr = 0.1 * ones(1, 12);
+T = core_bw_rules('recoverable', key, rec, per, thr, 90);
+verifyEqual(tc, T.key, [1 2 3]); verifyEqual(tc, T.rec_pct, [100 75 100]);
+verifyEqual(tc, T.harm, [true true false]); verifyEqual(tc, T.ok, [true false false]);
+T = core_bw_rules('recoverable', ones(1, 10), [true(1, 9) false], 0.5 * ones(1, 10), 0.1 * ones(1, 10), 90);
+verifyTrue(tc, T.ok);                                    % exactly 90% counts
+Wn = {'channel_switch', 'channel_switch+rate_reduce', 'rate_reduce'};
+bj = [4 * ones(1, 30), 20 * ones(1, 10)]; tot = [10 * ones(1, 30), 16 * ones(1, 10)]; cl = 1:40;
+g1 = bj == 4;
+gp = ones(3, 40); tr = ones(3, 40);
+[~, tab] = core_bw_rules('choose_w', Wn, bj, tot, cl, [0.5 * ~g1; 0.2 * ones(1, 40); 0.9 * ones(1, 40)], gp, tr, 500);
+verifyEqual(tc, [tab.per], [0.25 0.2 0.9], 'AbsTol', 1e-12);   % equal weight per (B_J, JSR_tot); per episode 0.125
+per = [0.4 * ones(1, 40); 0.2 * ones(1, 40); 0.9 * ones(1, 40)];
+verifyEqual(tc, core_bw_rules('choose_w', Wn, bj, tot, cl, per, gp, tr, 500), 'channel_switch+rate_reduce');
+per = [0.2 * ones(2, 40); 0.9 * ones(1, 40)];
+gp = [ones(1, 40); 0.25 * ones(1, 40); ones(1, 40)];
+verifyEqual(tc, core_bw_rules('choose_w', Wn, bj, tot, cl, per, gp, tr, 500), 'channel_switch');
+gp = ones(3, 40); tr = [5 * ones(1, 40); 2 * ones(1, 40); ones(1, 40)];
+verifyEqual(tc, core_bw_rules('choose_w', Wn, bj, tot, cl, per, gp, tr, 500), 'channel_switch+rate_reduce');
+tr(1:2, :) = NaN; tr(2, 1:30) = 3;                         % never recovered counts as the longest
+verifyEqual(tc, core_bw_rules('choose_w', Wn, bj, tot, cl, per, gp, tr, 500), 'channel_switch+rate_reduce');
+[W, tab] = core_bw_rules('choose_w', Wn, bj, tot, cl, 0.2 * ones(3, 40), ones(3, 40), ones(3, 40), 500);
+verifyEqual(tc, W, 'channel_switch'); verifyEqual(tc, [tab.tie_per], true(1, 3));
+verifyEqual(tc, core_bw_rules('choose_w', Wn, [], [], [], zeros(3, 0), zeros(3, 0), zeros(3, 0), 500), 'channel_switch');
+verifyEqual(tc, core_bw_rules('verdict', 0.35, 0.31, 0.3, 10), 'met (committed)');
+verifyEqual(tc, core_bw_rules('verdict', 0.35, 0.2, 0.3, 10), 'met (not committed)');
+verifyEqual(tc, core_bw_rules('verdict', 0.2, 0.1, 0.3, 10), 'not met');
+verifyEqual(tc, core_bw_rules('verdict', NaN, NaN, 0.3, 0), 'not read (no episodes)');
+end
+
+function test_band_protocol_guard(tc)
+% The test stage refuses without the frozen protocol, when the protocol or the recoverable
+% list changed, a second time (marker or readings), without a byte-identical frozen copy, and
+% with files not committed; the smoke removes its own marker and passes.
+d = tempname; mkdir(d);
+X = struct('protocol', fullfile(d, 'proto.md'), 'recov', fullfile(d, 'recoverable.txt'), ...
+    'proto_json', fullfile(d, 'protocol.json'), 'marker', fullfile(d, 'marker.txt'), 'test', fullfile(d, 'test.mat'), ...
+    'frozen', fullfile(d, 'frozen.json'), 'smoke', false);
+write_text(X.protocol, 'protocol'); write_text(X.recov, 'H1 1 1 x 1');
+verifyError(tc, @() core_bw_rules('guard', X), 'experiment_core_bw:protocol');
+J = struct('protocol_sha256', core_bw_rules('sha', X.protocol), 'recoverable_sha256', core_bw_rules('sha', X.recov), ...
+    'w', struct('H1', 'channel_switch'));
+write_text(X.proto_json, jsonencode(J));
+verifyEqual(tc, core_bw_rules('sha', X.protocol), sha256_of(X.protocol));
+write_text(X.protocol, 'protocol changed');
+verifyError(tc, @() core_bw_rules('guard', X), 'experiment_core_bw:protocol_changed');
+write_text(X.protocol, 'protocol'); write_text(X.recov, 'H1 1 1 x 0');
+verifyError(tc, @() core_bw_rules('guard', X), 'experiment_core_bw:recoverable_changed');
+write_text(X.recov, 'H1 1 1 x 1');
+write_text(X.marker, 'started');
+verifyError(tc, @() core_bw_rules('guard', X), 'experiment_core_bw:read');
+delete(X.marker); write_text(X.test, 'x');
+verifyError(tc, @() core_bw_rules('guard', X), 'experiment_core_bw:read');
+delete(X.test);
+verifyError(tc, @() core_bw_rules('guard', X), 'experiment_core_bw:frozen');
+write_text(X.frozen, 'other');
+verifyError(tc, @() core_bw_rules('guard', X), 'experiment_core_bw:frozen');
+copyfile(X.proto_json, X.frozen);
+verifyError(tc, @() core_bw_rules('guard', X), 'experiment_core_bw:uncommitted');   % not in the repository
+X.smoke = true; write_text(X.marker, 'started');
+J2 = core_bw_rules('guard', X);
+verifyEqual(tc, J2.w.H1, 'channel_switch'); verifyFalse(tc, isfile(X.marker));
+rmdir(d, 's');
+src = fileread(which('experiment_core_bw'));
+verifyNotEmpty(tc, regexp(src, 'function stage_test\(X\)\r?\nJ = core_bw_rules\(''guard'', X\);', 'once'));
+i1 = strfind(src, 'marker(X, J.params_id);'); i2 = strfind(src, 'PP = load_pools(X, true);');
+verifyNotEmpty(tc, i1); verifyGreaterThan(tc, i2(end), i1(1));   % the marker before the test pools are loaded
 end
 
 function d = parent_copy(tc, rel)
