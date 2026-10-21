@@ -6,7 +6,7 @@ function experiment_core_bw(stage, smoke)
 %   experiment_core_bw(stage, true)    the reduced chain check: its own seed blocks and its own
 %                                      data/core_bw_smoke and results/core_bw_smoke; never a result
 %   Stages, in order:
-%     'pools'   frame pools of the clean link and the 34 jammer cells (band_cells.m) under the
+%     'pools'   frame pools of the clean link and the 39 jammer cells (band_cells.m) under the
 %               four core configurations, 12 validation and 36 test geometries per (cell, Eb/N0)
 %               (seed family 6, blocks 5 and 14; nested Latin hypercubes), and the residual's
 %               layers: the channel_switch configurations of each cell at the layers of the
@@ -15,7 +15,7 @@ function experiment_core_bw(stage, smoke)
 %               the same geometries; the in-band cap's binding share per cell and the time per
 %               simulation (gate G2)
 %               -> data/core_bw/pools.mat
-%     'dset'    the detector-only set D (4 flights per (cell, Eb/N0), 24 clean, block 7):
+%     'dset'    the detector-only set D (4 flights per (fixed-total cell, Eb/N0), 24 clean, block 7):
 %               spectrogram images -> data/core_bw/dset.mat
 %     'val'     validation only: the coverage check (G3), the wideband action W of the CNN
 %               rule per hop rule, the recoverable scenarios; frozen by hash in
@@ -287,7 +287,7 @@ function stage_dset(X)
 [p0, cells, ~, EBNO] = study_cells(X);
 assert_frame1_onsets(p0);
 nS = numel(EBNO);
-fixed = find(~[cells.slice]);
+fixed = find(~[cells.slice] & ~[cells.occ]);
 jobs = struct('name', 'none', 'cell', 0); P = {cell_params(p0, [])}; G = {};
 vrange = [p0.speed_kmh_min p0.speed_kmh_max];
 G{1} = arrayfun(@(s) pool_geometries(s, X.BLOCK_D, 1:X.ND_CLEAN, vrange, p0, [], X.FAM), 1:nS, 'UniformOutput', false);
@@ -380,6 +380,7 @@ EP = struct('k', k(:)', 's', s(:)', 'r', r(:)', 'rep', e(:)', 'n', n, 'T', T);
 EP.c = [scen(EP.k).cell] + 1;                          % index into PP.scen (1: the clean link)
 EP.onset = ONS(sub2ind(size(ONS), EP.s, EP.r, EP.rep)); EP.fdelay = FD(sub2ind(size(FD), EP.s, EP.r, EP.rep));
 EP.slice = [scen(EP.k).slice]; EP.bj = [scen(EP.k).bj]; EP.tot = [scen(EP.k).jsr_tot]; EP.inb = [scen(EP.k).jsr_in];
+EP.occ = [scen(EP.k).occ];                             % Liu's 4 MHz as the occupied bandwidth (sensitivity)
 EP.narrow = EP.bj == 0;
 EP.rel = arrayfun(@(i) ~strcmp(scen(i).J.kind, 'fixed'), EP.k);   % tuned to our channel: hops counted from the onset
 EP.home = zeros(1, n); EP.rej1 = zeros(1, n);
@@ -472,7 +473,7 @@ p0 = load('params.mat').params; B = band_plan(p0); C = decision_config();
 K = link_env('tables', PP, 'flight');
 EP = episodes(X, PP, 1, B); check_layers(PP, EP);
 na = K.na; nR = numel(X.RULES);
-wide = find(~EP.slice & ~EP.narrow);
+wide = find(~EP.slice & ~EP.narrow & ~EP.occ);
 fprintf('Validation: %d episodes per hop rule (%d scenarios x %d Eb/N0 x %d geometries x %d onsets)\n', EP.n, ...
     numel(PP.scenarios), numel(PP.ebno), X.NGEO(1), X.REPS);
 G3 = g3_check(PP, K, X, EP, B);
@@ -563,17 +564,18 @@ for q = 1:numel(X.RULES)
             bad = bad + nnz(m & info.cfg_eff ~= want); nf = nf + nnz(m);
         end
     end
-    for bj = unique(EP.bj(idx))
-        m = idx(EP.bj(idx) == bj);
-        J = PP.scenarios(find([PP.scenarios.bj] == bj & ~[PP.scenarios.slice], 1)).J;
+    er = EP.err{q}(idx, :); er = er(EP.acr{q}(idx, :) > 1);
+    assert(isempty(er) || max(er) <= 2 + 1e-6, 'experiment_core_bw:layer_err', ...
+        'G3: an escaped hop lies %.2f dB above its layer (at most 2)', max(er));
+    for bj = unique(EP.bj(idx(~EP.occ(idx))))
+        m = idx(EP.bj(idx) == bj & ~EP.occ(idx));
+        J = PP.scenarios(find([PP.scenarios.bj] == bj & ~[PP.scenarios.slice] & ~[PP.scenarios.occ], 1)).J;
         [mid, edge, offc] = enum_share(J, X.RULES{q}, B);
         er = EP.err{q}(m, :); er = double(er(EP.acr{q}(m, :) > 1));
         G(end+1) = struct('rule', X.RULES{q}, 'mismatch', bad, 'frames', nf, 'bj', bj, 'drawn', mean(~EP.cover{q}(m, 1)), ...
             'mid', mid, 'edge', edge, 'off_centre', offc, 'partial', mean(EP.part{q}(m, :), 'all'), ...
             'near', mean(EP.near{q}(m, :), 'all'), 'res', arrayfun(@(v) mean(EP.acr{q}(m, :) == v + 1, 'all'), ...
             1:numel(PP.acr_db)), 'err_max', max([er(:); -Inf]), 'err_mean', mean(er)); %#ok<AGROW>
-        assert(isempty(er) || max(er) <= 2 + 1e-6, 'experiment_core_bw:layer_err', ...
-            'G3: an escaped hop lies %.2f dB above its layer (at most 2)', max(er));
     end
     fprintf('  G3 %s: %d of %d frames off the coverage flags\n', X.RULES{q}, bad, nf);
     assert(bad == 0, 'experiment_core_bw:g3', 'G3: %d frames of hop rule %s disagree with band_cover.m', bad, X.RULES{q});
@@ -659,7 +661,7 @@ assert(isequal({V.WCH.W}, cellfun(@(r) J.w.(r), {V.WCH.rule}, 'UniformOutput', f
 p0 = load('params.mat').params; B = band_plan(p0);
 K = link_env('tables', PP, 'flight');
 EP = episodes(X, PP, 2, B); check_layers(PP, EP);
-na = K.na; fixed = find(~EP.slice);
+na = K.na; fixed = find(~EP.slice & ~EP.occ);
 RES = struct('rule', {}, 'set', {}, 'policy', {}, 'R', {});
 for q = 1:numel(X.RULES)
     Pw = PP; Pw.core_wide = J.w.(X.RULES{q});
@@ -737,22 +739,23 @@ for q = 1:numel(X0.RULES)
 end
 KP = struct();
 q1 = X0.RULES{1};
-[blk, KP.primary] = per_lines(get_set(RES, q1, 'primary'), EP, recov(q1) & ~EP.slice, X0, pay, ...
+pm = ~EP.slice & ~EP.occ;                              % the primary cells: fixed total power, Liu's noise reading
+[blk, KP.primary] = per_lines(get_set(RES, q1, 'primary'), EP, recov(q1) & pm, X0, pay, ...
     'PRIMARY (H1, nRF24L01+ residual by offset, fixed total power, static jammer)', false);
 lines = [lines, blk];
-[blk, KP.by_bj] = bj_lines(get_set(RES, q1, 'primary'), EP, recov(q1) & ~EP.slice, X0);
+[blk, KP.by_bj] = bj_lines(get_set(RES, q1, 'primary'), EP, recov(q1) & pm, X0);
 lines = [lines, blk];
 lines = [lines, {'', ['--- Sensitivities (no verdict of their own; whether any would flip a primary verdict, rule_core ' ...
     'per jamming type) ---']}];
 sens = cell(0, 3);
 for q = 1:numel(X0.RULES)
     rl = X0.RULES{q};
-    if q > 1, sens(end+1, :) = {sprintf('%s hop rule', rl), get_set(RES, rl, 'primary'), recov(rl) & ~EP.slice}; end %#ok<AGROW>
+    if q > 1, sens(end+1, :) = {sprintf('%s hop rule', rl), get_set(RES, rl, 'primary'), recov(rl) & pm}; end %#ok<AGROW>
     sens(end+1, :) = {sprintf('%s, residual %g dB wherever the band is clear (the pipeline''s cm_acr_db)', rl, ...
-        p0.cm_acr_db), get_set(RES, rl, 'pipe30'), recov(rl) & ~EP.slice}; %#ok<AGROW>
+        p0.cm_acr_db), get_set(RES, rl, 'pipe30'), recov(rl) & pm}; %#ok<AGROW>
 end
 sens(end+1, :) = {'H1, equal in-band level', get_set(RES, q1, 'primary'), recov(q1) & EP.slice};
-sens(end+1, :) = {'H1, follower jammer (re-acquires after U[0,5] cycles)', get_set(RES, q1, 'follower'), recov(q1) & ~EP.slice};
+sens(end+1, :) = {'H1, follower jammer (re-acquires after U[0,5] cycles)', get_set(RES, q1, 'follower'), recov(q1) & pm};
 KP.sens = struct('name', {}, 'K', {}, 'flip', {});
 for i = 1:size(sens, 1)
     [blk, Ks] = per_lines(sens{i, 2}, EP, sens{i, 3}, X0, pay, sens{i, 1}, true);
@@ -763,6 +766,8 @@ for i = 1:size(sens, 1)
     lines = [lines, blk]; %#ok<AGROW>
     KP.sens(end+1) = struct('name', sens{i, 1}, 'K', Ks, 'flip', flip);
 end
+[blk, KP.liu] = liu_lines(get_set(RES, q1, 'primary'), EP, recov(q1), X0, pay);
+lines = [lines, blk];
 [blk, KP.pred] = prediction_lines(get_set(RES, q1, 'primary'), EP, REC, recov(q1), X0, M, J, V.G3);
 lines = [lines, blk];
 [blk, KP.det] = monitor_lines(L.MON, EP, M);
@@ -864,12 +869,40 @@ if any(strcmp({S.policy}, 'oracle'))
 end
 end
 
+function [lines, T] = liu_lines(S, EP, rmask, X, pay)
+% Liu et al.'s 4 MHz read as the occupied bandwidth (pre-registered sensitivity, no verdict):
+% its cells beside the primary 4 MHz cells (the noise reading) on their recoverable scenarios,
+% PER reduction vs the static link, goodput and detection to restored, pooled and per JSR_tot.
+lines = {'', ['--- Sensitivity, no verdict: Liu et al.''s 4 MHz as the occupied bandwidth (in band JSR_tot - 4.88 dB ' ...
+    'instead of -6.02, its edge 0.6 MHz farther from every hop) beside the noise reading (primary) ---']};
+Rn = pol(S, 'none'); e = Rn.ep;
+rd = {'noise (primary)', rmask(e) & EP.bj(e) == 4 & ~EP.slice(e) & ~EP.occ(e); 'occupied', rmask(e) & EP.occ(e)};
+T = struct('reading', {}, 'policy', {}, 'tot', {}, 'n', {}, 'red', {}, 'gput', {}, 'rec_det', {});
+for pk = {'rule_core', 'blind_core'}
+    R = pol(S, pk{1});
+    for i = 1:size(rd, 1)
+        for tot = [NaN, unique(EP.tot(e(rd{i, 2})))]
+            m = rd{i, 2}; if ~isnan(tot), m = m & EP.tot(e) == tot; end
+            cl = EP.geom(e(m));
+            [v, lo, hi] = per_reduction(R.per_post(m), Rn.per_post(m), cl, X.B, 3);
+            [g, glo, ghi] = boot_cluster(pay * R.dlv_post(m), ones(1, nnz(m)), cl, X.B, 5);
+            b = qstat(R.t_rec_det(m));
+            T(end+1) = struct('reading', rd{i, 1}, 'policy', pk{1}, 'tot', tot, 'n', nnz(m), 'red', [v lo hi], ...
+                'gput', [g glo ghi], 'rec_det', b); %#ok<AGROW>
+            lines{end+1} = sprintf(['  %-10s %-15s %-14s n=%5d: PER reduction %5.1f%% [%5.1f, %5.1f] | goodput %.0f ' ...
+                '[%.0f, %.0f] bit/s | detection->restored %s'], pk{1}, rd{i, 1}, ternary(isnan(tot), 'all JSR_tot', ...
+                sprintf('JSR_tot %g dB', tot)), nnz(m), 100 * [v lo hi], g, glo, ghi, b.txt); %#ok<AGROW>
+        end
+    end
+end
+end
+
 function [lines, T] = bj_lines(S, EP, mask, X)
 % The PER reduction of both adaptive systems and the CNN's contribution per jammer width.
 lines = {'  per jammer width (recoverable scenarios, every JSR_tot and Eb/N0):'};
 Rn = pol(S, 'none'); Rr = pol(S, 'rule_core'); Rb = pol(S, 'blind_core'); m0 = mask(Rn.ep);
 T = struct('bj', {}, 'n', {}, 'rule', {}, 'blind', {}, 'cnn', {});
-for bj = unique(EP.bj(~EP.slice))
+for bj = unique(EP.bj(~EP.slice & ~EP.occ))
     m = m0 & EP.bj(Rn.ep) == bj; cl = EP.geom(Rn.ep(m));
     [a, alo, ahi] = per_reduction(Rr.per_post(m), Rn.per_post(m), cl, X.B, 3);
     [b, blo, bhi] = per_reduction(Rb.per_post(m), Rn.per_post(m), cl, X.B, 3);

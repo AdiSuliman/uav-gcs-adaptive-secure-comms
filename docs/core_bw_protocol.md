@@ -89,6 +89,17 @@ hop keeps 12.7 dB instead of 20.7, an 8 MHz hop 21.8 instead of 23.1, a 14 MHz h
 of 42.1, H4's 4 MHz hop none (covered) instead of 2.1 dB. The study takes the noise reading,
 whose hop residual is up to 8 dB more severe, against 1.14 dB in band.
 
+**Sensitivity, pre-registered: the occupied reading.** Since neither reading is the more severe
+throughout, the 4 MHz cells are simulated a second time under the occupied reading
+(`band_cells.m` bw4occ_tot4 to bw4occ_tot30, 5 cells): symbol rate 4 / 1.3 = 3.08 MHz, occupied
++-2 MHz, so its edge lies 0.6 MHz farther from every hop; in band JSR_tot - 4.88 dB against
+-6.02; its own residual layers (section 4). Its scenarios get their recoverable status on
+validation with the others (6.4) and stay out of W (6.3), of the primary, per-width and other
+sensitivity lines, of set D and of the detector analysis. The report gives them their own lines
+beside the primary 4 MHz cells (`experiment_core_bw.m` liu_lines: the PER reduction vs the static
+link with its interval, goodput and detection to restored, pooled and per JSR_tot, for
+`rule_core` and `blind_core`), with no verdict.
+
 **JSR (`jsr_inband.m`).** The controlled variable is the total power JSR_tot = P_J / P_S (Liu
 et al.: a 30 dBm jammer against a 0 dBm signal). The model's level is the in-band ratio after the
 matched filter, in which tone and white noise are equal in band: tone `tone_jsr_db` = JSR_tot;
@@ -195,8 +206,10 @@ values a cell meets 0.8-0.9 dB below on average for 4-20 MHz, the CW exact, 70 M
 | equal level 4, 10 dB (4-83.5 MHz) | 3.8, 6.6, 12.6, 17.5, 20.0, 22.0, 24.5, 30.1, 33.1, 35.4, 37.4, 40.1, 43.3, 45.4, 48.3 |
 | equal level 16 dB (4-20 MHz) | the same without 3.8 |
 | equal level 23 dB (4 MHz) | those of 4 MHz |
+| 4 MHz, occupied reading (5, sensitivity, section 3) | 2.0, 20.6, 23.1, 26.0, 38.3, 40.7, 44.4, 48.7 |
 
-227 (cell, layer) pairs, 38 distinct layers. The crystal's 42 and 50 dB stay (the sheet's footnote
+227 (cell, layer) pairs, 38 distinct layers, for the primary and equal-level cells; with the
+occupied reading 267 pairs and 45 layers. The crystal's 42 and 50 dB stay (the sheet's footnote
 states them): the CW cells' own layers, and inside every wide jammer's sum. The recoverable rule
 reads the same layer (section 6.4). The main pipeline's 30 dB (`cm_acr_db`) stays as it is there.
 
@@ -234,8 +247,9 @@ Each is reported as holds / does not hold; none changes a KPI verdict.
 
 ## 6. The experiment
 
-**6.1 Grid.** B_J {CW, 4, 8, 20, 70, 83.5} MHz x JSR_tot {4, 10, 16, 23, 30} dB (30 cells) and
-the 4 equal-level cells; Eb/N0 0:3:15 dB per branch; the pools' nested Latin hypercube over speed,
+**6.1 Grid.** B_J {CW, 4, 8, 20, 70, 83.5} MHz x JSR_tot {4, 10, 16, 23, 30} dB (30 cells), the
+4 equal-level cells and the 5 cells of Liu's occupied reading (section 3); Eb/N0 0:3:15 dB per
+branch; the pools' nested Latin hypercube over speed,
 altitude, K, the first interferer's direction and the receive correlation; hop rule H1 (H3, H4 on
 the same pools); residual R_eff by offset (section 4, each cell's layers on both splits; the
 pipeline's 30 dB on the test geometries as a sensitivity); static jammer (the follower re-acquiring after U[0, 5]
@@ -262,7 +276,7 @@ the group dwell the rule does not commit a configuration tried in the incident a
 
 **The choice of W (validation, per hop rule).** W in {channel_switch,
 channel_switch+rate_reduce, rate_reduce}, on the recoverable validation episodes of the wideband
-fixed-total cells, equal weight per (B_J, JSR_tot):
+fixed-total cells (Liu's 4 MHz as the noise bandwidth only), equal weight per (B_J, JSR_tot):
 1. the lowest pooled PER after onset;
 2. a candidate whose paired 95% bootstrap interval of the PER difference to the best holds 0 ties;
    among the tied, the highest goodput, ties by the same interval rule;
@@ -301,7 +315,8 @@ static jammer.
   paired, 95% intervals; pooled, per type and per B_J.
 - **Sensitivities** (no verdict): H3, H4, the 30 dB residual (each rule), the equal in-band
   level, the follower; each says whether it would flip a primary verdict (`rule_core`'s per
-  jamming type).
+  jamming type). Liu's occupied reading has its own lines beside the primary 4 MHz cells
+  (section 3), without a verdict word.
 - **Detector by bandwidth** (analysis; the KPI verdicts of macro-F1, recall and false alarms stay
   with B3c, `docs/core_cnn_protocol.md`, and with the hybrid's B3 through `three_state_view.m`):
   the hybrid's monitor class and frame argmax on the static test episodes after the onset, as the
@@ -348,7 +363,7 @@ Outputs: `data/core_bw/pools.mat`, `data/core_bw/dset.mat`; `results/core_bw/val
 ## 8. Tests
 
 `code/tests/test_core.m`: test_band_plan, test_jsr_inband, test_band_cover, test_band_reject,
-test_band_reject_eff, test_band_reject_layers, test_hop_targets,
+test_band_reject_eff, test_band_reject_layers, test_band_liu_occupied, test_hop_targets,
 test_link_env_cover_default, test_link_env_cover_recoverable, test_link_env_cover_relative,
 test_link_env_residual_layer, test_link_env_residual_recoverable, test_oracle_cover, test_rule_core_wide,
 test_band_cells, test_band_recoverable_scenarios, test_band_per_verdicts, test_band_p1_reading,
@@ -359,14 +374,16 @@ test_rule_dwell_tried.
 ## 9. Time and memory (estimate; the smoke measures it)
 
 2.83-3.15 s per 20-frame simulation with one jammer, 6 workers, x 1.35 with the boost off.
-Pools: 34 cells x 4 configurations x 6 Eb/N0 x 48 geometries (39 168, fewer where configurations
-share their physics), the clean link (1 152) and the residual's layers: 227 (cell, layer) pairs
-(section 4: CW 5 x 7, 4 MHz 5 x 8, 8 MHz 5 x 9, 20 MHz 5 x 7, 70 MHz 5 x 4, equal level 15 + 15 +
-14 + 8) x 2 configurations x 6 Eb/N0 x 48 geometries (130 752): about 171 100 simulations,
-22.4-25.0 h (30.3-33.7 h boost off). The R_eff layers cost 25 344 simulations more than the sheet's
-rows alone (183 pairs), 3.3-3.7 h (4.5-5.0 h boost off); every run keeps its full length. Set D:
-864 runs, 0.2-0.6 h. Validation and test rollouts (38 layers' tables): 1-2.5 h. Total about
-23.5-28 h (32-38 h boost off). Memory: pools about 1.4 GB, set D about 1.1 GB.
+Pools: 39 cells (34, and the occupied reading's 5) x 4 configurations x 6 Eb/N0 x 48 geometries
+(44 928, fewer where configurations share their physics), the clean link (1 152) and the
+residual's layers: 267 (cell, layer) pairs (section 4: CW 5 x 7, 4 MHz 5 x 8, 8 MHz 5 x 9, 20 MHz
+5 x 7, 70 MHz 5 x 4, equal level 15 + 15 + 14 + 8, the occupied reading 5 x 8) x 2 configurations
+x 6 Eb/N0 x 48 geometries (153 792): about 199 900 simulations, 26.2-29.2 h (35.4-39.4 h boost
+off). Of these, the R_eff layers cost 25 344 simulations more than the sheet's rows alone (183
+pairs), 3.3-3.7 h (4.5-5.0 h boost off), and the occupied reading 28 800 (5 760 in the pools,
+23 040 in its layers), 3.8-4.2 h (5.1-5.7 h boost off). Every run keeps its full length. Set D:
+864 runs, 0.2-0.6 h. Validation and test rollouts (49 scenarios, 45 layers' tables): 1.1-2.8 h.
+Total about 27.5-32.5 h (37-44 h boost off). Memory: pools about 1.7 GB, set D about 1.1 GB.
 
 ## 10. Risks, stated
 

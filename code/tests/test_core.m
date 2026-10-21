@@ -7976,7 +7976,8 @@ function test_band_reject_layers(tc)
 % so every effective rejection an escaped hop of a cell meets reads the layer at or below it
 % within 2 dB (never a milder one) and every layer is used; the per-cell counts of the protocol
 % (CW 7, 4 MHz 8, 8 MHz 9, 20 MHz 7, 70 MHz 4, the whole band none; the equal-level cells 15,
-% 15, 14 and 8: 227 (cell, layer) pairs), the CW's the sheet's rows as before.
+% 15, 14 and 8: 227 (cell, layer) pairs; Liu's occupied reading 8 more per cell, 267 in all,
+% 45 distinct layers), the CW's the sheet's rows as before.
 verifyEqual(tc, band_reject('grid', [4 5.9 6.1 24 27 28 55 1.5]), [4 6.1 24 27 55], 'AbsTol', 1e-12);
 verifyEqual(tc, band_reject('layer', [0 4 5.9 6.1 7 30 1], [4 6.1 24 27 55]), [0 1 1 2 2 4 0]);
 verifyEqual(tc, band_reject('layer', [0; 5], [4 6.1]), [0; 1]);
@@ -7999,8 +8000,12 @@ N = @(nm) n(strcmp({cells.name}, nm));
 verifyEqual(tc, [N('cw_tot4'), N('bw4_tot4'), N('bw8_tot4'), N('bw20_tot4'), N('bw70_tot4'), N('bw83.5_tot4')], ...
     [7 8 9 7 4 0]);
 verifyEqual(tc, [N('inb4'), N('inb10'), N('inb16'), N('inb23')], [15 15 14 8]);
-verifyEqual(tc, sum(n), 227);
-verifyEqual(tc, numel(unique(round(10 * allg))), 38);
+occ = [cells.occ];
+verifyEqual(tc, n(occ), 8 * ones(1, 5));
+verifyEqual(tc, sum(n(~occ)), 227); verifyEqual(tc, sum(n), 267);
+verifyEqual(tc, numel(unique(round(10 * allg))), 45);
+verifyEqual(tc, band_reject('grid', band_reject('values', {cells(find(occ, 1)).J}, B)), ...
+    [2 20.6 23.1 26 38.3 40.7 44.4 48.7], 'AbsTol', 1e-9);
 verifyEqual(tc, band_reject('grid', band_reject('values', {cells(strcmp({cells.name}, 'cw_tot4')).J}, B)), ...
     [4 24 28 42 47 50 55]);
 verifyEqual(tc, band_reject('grid', band_reject('values', {cells(strcmp({cells.name}, 'bw70_tot4')).J}, B)), ...
@@ -8045,12 +8050,13 @@ verifyError(tc, @() hop_targets('H2', 1, 1, [], B), 'hop_targets:rule');
 end
 
 function test_band_cells(tc)
-% 30 fixed-total cells (6 widths x 5 levels, JSR_tot <= 30 dB) and 4 equal-level cells; every
-% level within the 30 dB in-band cap and in the right field; the equal-level scenarios only
-% where JSR_in + 10 log10(B_J) <= 30 dB; the spans of the sources.
+% 30 fixed-total cells (6 widths x 5 levels, JSR_tot <= 30 dB), 4 equal-level cells and 5 of
+% Liu's occupied reading; every level within the 30 dB in-band cap and in the right field; the
+% equal-level scenarios only where JSR_in + 10 log10(B_J) <= 30 dB; the spans of the sources.
 [cells, scen] = band_cells(base_params());
-verifyEqual(tc, numel(cells), 34); verifyEqual(tc, nnz([cells.slice]), 4);
-verifyEqual(tc, numel(scen), 44); verifyEqual(tc, nnz([scen.slice]), 14);
+verifyEqual(tc, numel(cells), 39); verifyEqual(tc, nnz([cells.slice]), 4); verifyEqual(tc, nnz([cells.occ]), 5);
+verifyEqual(tc, numel(scen), 49); verifyEqual(tc, nnz([scen.slice]), 14); verifyEqual(tc, nnz([scen.occ]), 5);
+verifyFalse(tc, any([cells.slice] & [cells.occ]));
 fx = cells(~[cells.slice]);
 verifyTrue(tc, all([fx.jsr_tot] <= 30)); verifyTrue(tc, all([cells.level] <= 30));
 verifyEqual(tc, sort(unique([fx.bj])), [0 4 8 20 70 83.5]);
@@ -8084,6 +8090,52 @@ verifyEqual(tc, [J('bw70_tot4').lo, J('bw70_tot4').hi, J('bw83.5_tot4').lo, J('b
 src = fileread(which('experiment_core_bw'));                  % the pools carry the scenarios the episodes read
 verifyNotEmpty(tc, regexp(src, 'function stage_pools\(X\)\r?\n\[p0, cells, scen, EBNO\] = study_cells\(X\);', 'once'));
 verifyNotEmpty(tc, strfind(src, 'PP.scenarios = scen;'));
+end
+
+function test_band_liu_occupied(tc)
+% Liu et al.'s 4 MHz as the occupied bandwidth, a pre-registered sensitivity of the 4 MHz cells
+% only: symbol rate 4 / 1.3 MHz, occupied +-2 MHz (0.6 MHz inside the noise reading's +-2.6), in
+% band JSR_tot - 4.88 dB against - 6.02, the five levels; its escaped hops never keep less
+% rejection than the noise reading's (up to 8 dB more), so the readings stay unordered; it has
+% its own lines and no verdict: out of W, the primary lines, the per-width lines, the other
+% sensitivities, set D and the detector analysis.
+[cells, scen] = band_cells(base_params());
+occ = cells([cells.occ]);
+verifyEqual(tc, {occ.name}, {'bw4occ_tot4', 'bw4occ_tot10', 'bw4occ_tot16', 'bw4occ_tot23', 'bw4occ_tot30'});
+verifyEqual(tc, [occ.jsr_tot], [4 10 16 23 30]); verifyEqual(tc, [occ.bj], 4 * ones(1, 5));
+verifyEqual(tc, [occ.level], [4 10 16 23 30] - 4.88, 'AbsTol', 0.01);
+nz = cells(strcmp({cells.threat}, 'jamming') & [cells.bj] == 4 & ~[cells.occ]);
+verifyEqual(tc, [occ.level] - [nz.level], 10 * log10(1.3) * ones(1, 5), 'AbsTol', 1e-9);   % 1.14 dB more in band
+verifyEqual(tc, unique({occ.threat}), {'jamming'}); verifyEqual(tc, unique({occ.field}), {'jsr_db'});
+Jo = occ(1).J; Jn = nz(1).J;
+verifyEqual(tc, [Jo.half, Jo.rs, Jo.ro], [2, 4 / 1.3, 0.3], 'AbsTol', 1e-12);
+verifyEqual(tc, (1 + Jo.ro) * Jo.rs / 2, Jo.half, 'AbsTol', 1e-12);
+verifyEqual(tc, Jn.half - Jo.half, 0.6, 'AbsTol', 1e-12);
+verifyEqual(tc, unique({scen([scen.occ]).band}), {'wideband'});
+verifyFalse(tc, any([scen([scen.occ]).slice]));
+B = band_plan(); f = B.f_mhz; h = B.centre;
+Ro = band_reject(Jo, f(h), B);
+verifyEqual(tc, Ro(h + [2 3 4 7]), [2.0859 20.6737 23.1188 42.1188], 'AbsTol', 1e-3);
+d = zeros(1, 0);
+for c = 1:numel(f)
+    Rn = band_reject(Jn, f(c), B); Ro = band_reject(Jo, f(c), B);
+    verifyTrue(tc, all(Rn <= Ro + 1e-9), sprintf('centre %d', c));
+    d = [d, Ro(Ro > 0) - Rn(Ro > 0)]; %#ok<AGROW>
+end
+verifyEqual(tc, max(d), 8.005, 'AbsTol', 0.01);
+src = fileread(which('experiment_core_bw'));
+verifyNotEmpty(tc, strfind(src, 'wide = find(~EP.slice & ~EP.narrow & ~EP.occ);'));
+verifyNotEmpty(tc, strfind(src, 'pm = ~EP.slice & ~EP.occ;'));
+verifyNotEmpty(tc, strfind(src, '[blk, KP.primary] = per_lines(get_set(RES, q1, ''primary''), EP, recov(q1) & pm, X0, pay, ...'));
+verifyNotEmpty(tc, strfind(src, '[blk, KP.by_bj] = bj_lines(get_set(RES, q1, ''primary''), EP, recov(q1) & pm, X0);'));
+verifyNotEmpty(tc, strfind(src, '[blk, KP.liu] = liu_lines(get_set(RES, q1, ''primary''), EP, recov(q1), X0, pay);'));
+verifyNotEmpty(tc, strfind(src, 'na = K.na; fixed = find(~EP.slice & ~EP.occ);'));
+verifyNotEmpty(tc, strfind(src, 'fixed = find(~[cells.slice] & ~[cells.occ]);'));
+verifyEmpty(tc, regexp(src, 'recov\(\w+\) & ~EP\.slice', 'once'));
+i = strfind(src, 'function [lines, T] = liu_lines(');
+verifyNotEmpty(tc, i);
+body = src(i:i + strfind(src(i:end), 'function [lines, T] = bj_lines(') - 2);
+verifyEmpty(tc, strfind(body, 'core_bw_rules('));             % no verdict of its own
 end
 
 function test_band_seeds_disjoint(tc)
