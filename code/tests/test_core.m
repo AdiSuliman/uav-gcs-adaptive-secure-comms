@@ -8151,6 +8151,12 @@ src = fileread(which('experiment_core_bw'));
 verifyNotEmpty(tc, regexp(src, 'function stage_test\(X\)\r?\nJ = core_bw_rules\(''guard'', X\);', 'once'));
 i1 = strfind(src, 'marker(X, J.params_id);'); i2 = strfind(src, 'PP = load_pools(X, true);');
 verifyNotEmpty(tc, i1); verifyGreaterThan(tc, i2(end), i1(1));   % the marker before the test pools are loaded
+v0 = strfind(src, 'function stage_val(X)'); g = strfind(src, 'assert(X.smoke || (~isfile(X.marker) && ~isfile(X.test)');
+l = strfind(src, 'PP = load_pools(X, false);');
+verifyNumElements(tc, v0, 1); verifyNumElements(tc, g, 1);   % validation refuses once the test was read
+verifyTrue(tc, g > v0 && any(l > g) && min(l(l > v0)) > g);
+r0 = strfind(src, 'function stage_report(X)'); f = strfind(src, '''experiment_core_bw:frozen'', ''%s is no longer the frozen');
+verifyNumElements(tc, f, 1); verifyGreaterThan(tc, f, r0);   % the report only under the frozen copy
 end
 
 function d = parent_copy(tc, rel)

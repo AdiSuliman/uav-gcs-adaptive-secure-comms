@@ -420,6 +420,8 @@ end
 %% ===================== Validation =====================
 function stage_val(X)
 assert(isfile(X.pools), 'experiment_core_bw:pools', '%s not found: run the pools stage', X.pools);
+assert(X.smoke || (~isfile(X.marker) && ~isfile(X.test) && ~recorded(params_id(load('params.mat').params))), ...
+    'experiment_core_bw:read', 'the test split was read already: the validation choices stay as frozen');
 PP = load_pools(X, false);
 [PP, Q] = decision_inputs(PP);
 if isfield(Q, 'H') && isfield(Q.H, 'T') && Q.H.T ~= X.T
@@ -671,6 +673,8 @@ EP = L.EPs; M = L.meta; RES = L.RES; X0 = L.X;
 J = jsondecode(fileread(X0.proto_json));
 assert(strcmp(J.recoverable_sha256, core_bw_rules('sha', X0.recov)), 'experiment_core_bw:recoverable_changed', ...
     '%s changed since it was frozen', X0.recov);
+assert(X0.smoke || (isfile(X0.frozen) && strcmp(core_bw_rules('sha', X0.frozen), core_bw_rules('sha', X0.proto_json))), ...
+    'experiment_core_bw:frozen', '%s is no longer the frozen %s the test was read under', X0.proto_json, X0.frozen);
 REC = read_recoverable(X0.recov);
 p0 = load('params.mat').params;
 pay = p0.bits_per_frame / p0.cycle_s;

@@ -212,7 +212,8 @@ Harm is judged per scenario, never as a per-episode filter on test. The list is 
   on any hash mismatch, with this file or the frozen copy uncommitted, after a marker
   (`results/core_bw/test_read_started.txt`) or a committed record `docs/core_bw_read_*.txt` with
   the same `params_id`. After the reading, copy the marker to `docs/core_bw_read_p1.txt` and
-  commit it.
+  commit it. Once the test is read the validation stage refuses to run again, and the report is
+  written only while `protocol.json` is still byte for byte the frozen copy.
 
 ## 7. Running it
 
