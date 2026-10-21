@@ -7773,3 +7773,74 @@ verifyEqual(tc, [J('bw4_tot4').half, J('bw8_tot4').half, J('bw20_tot4').half, J(
 verifyEqual(tc, [J('bw70_tot4').lo, J('bw70_tot4').hi, J('bw83.5_tot4').lo, J('bw83.5_tot4').hi], [2402 2472 2400 2483.5]);
 end
 
+function test_rule_core_wide(tc)
+% The core rule's optional wideband action: without it every answer and reason is the parent
+% commit's (lect-kpi 394d4da); each W changes the class jamming only; a non-core W is refused;
+% the decision cycle passes PP.core_wide to the core rule only.
+d = parent_copy(tc, 'code/decision/rule_core_policy.m');
+cls = {'jamming', 'reactive_jamming', 'spoofing', 'tone_jamming', 'sweeping_jammer', 'noise_burst', 'path_loss', ...
+    'antenna_fault', 'airframe_shadowing', 'benign_interference', 'none', 'unknown'};
+B = struct('drop_db', 3, 'current', 'no_action', 'current_db', 0);
+args = {};
+for c = cls
+    for deg = [false true]
+        for q = [-Inf 10]
+            for dr = [false true]
+                args{end+1} = {c{1}, deg, q, 5, dr, [], true}; %#ok<AGROW>
+                args{end+1} = {c{1}, deg, q, 5, dr, B, false}; %#ok<AGROW>
+            end
+        end
+    end
+end
+addpath(d, '-begin'); clear rule_core_policy
+cl0 = onCleanup(@() fixture_off(d, 'rule_core_policy')); %#ok<NASGU>
+verifyEqual(tc, which('rule_core_policy'), fullfile(d, 'rule_core_policy.m'));
+old = cell(numel(args), 2);
+for i = 1:numel(args), [old{i, 1}, old{i, 2}] = rule_core_policy(args{i}{:}); end
+fixture_off(d, 'rule_core_policy');
+for i = 1:numel(args)
+    [a, r] = rule_core_policy(args{i}{:});
+    verifyEqual(tc, {a, r}, old(i, :), sprintf('default %d', i));
+    [a, r] = rule_core_policy(args{i}{:}, 'channel_switch');
+    verifyEqual(tc, {a, r}, old(i, :), sprintf('channel_switch %d', i));
+    for W = {'rate_reduce', 'channel_switch+rate_reduce'}
+        a = rule_core_policy(args{i}{:}, W{1});
+        if strcmp(args{i}{1}, 'jamming'), verifyEqual(tc, a, W{1}); else, verifyEqual(tc, a, old{i, 1}); end
+    end
+end
+verifyError(tc, @() rule_core_policy('jamming', false, -Inf, 5, false, [], true, 'no_action'), 'rule_core_policy:wide');
+verifyError(tc, @() rule_core_policy('jamming', false, -Inf, 5, false, [], true, 'freq_diversity'), 'rule_core_policy:wide');
+A = policy_actions(); na = find(strcmp(A, 'no_action'));
+cl = {'none', 'jamming', 'tone_jamming'};
+runs = {'jamming', true, 'rate_reduce'; 'tone_jamming', true, 'channel_switch'; 'jamming', false, 'channel_switch'};
+for k = 1:size(runs, 1)
+    obs = struct('probs', double(strcmp(cl, runs{k, 1})), 'unknown', false, 'feat', zeros(1, numel(link_features('names'))));
+    obs.feat(feature_index('log_ber')) = -1; obs.feat(feature_index('crc_fail')) = 1;
+    PP = struct('actions', {A}, 'classes', {cl}, 'sps', 4, 'bps', 2, 'maha_thr', 0, 'core_wide', 'rate_reduce');
+    op = struct(); if runs{k, 2}, op.core = true; end
+    mem = []; cfg = na; first = '';
+    for t = 1:30
+        o = obs; o.cfg_link = cfg;
+        [a, mem] = policy_decide('rule_esc', o, cfg, mem, PP, [], op);
+        if a ~= cfg && isempty(first), first = A{a}; end
+        cfg = a;
+    end
+    verifyEqual(tc, first, runs{k, 3}, sprintf('%s, core %d', runs{k, 1}, runs{k, 2}));
+end
+end
+
+function d = parent_copy(tc, rel)
+% The file rel as this branch's parent commit (lect-kpi 394d4da) holds it, alone in a folder.
+d = tempname; mkdir(d);
+[~, nm, ext] = fileparts(rel);
+[st, out] = system(sprintf('git --no-optional-locks -C "%s" show 394d4da:%s > "%s"', tc.TestData.root, rel, ...
+    fullfile(d, [nm ext])));
+assertEqual(tc, st, 0, sprintf('git show 394d4da:%s failed: %s', rel, out));
+end
+
+function fixture_off(d, fn)
+% Removes a parent-commit folder from the path and the disk (once).
+if contains(path, d), rmpath(d); end
+clear(fn);
+if isfolder(d), rmdir(d, 's'); end
+end
