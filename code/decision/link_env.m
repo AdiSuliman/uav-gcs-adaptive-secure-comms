@@ -86,7 +86,8 @@ function varargout = link_env(cmd, varargin)
 %   packet loss in this geometry (under a comb jammer, one without channel_switch
 %   and freq_diversity; with spec.cover, one with channel_switch only when a hop that can
 %   reach the link after the onset, floor((T - onset - 1) / (delay + 1)) of them counted
-%   from the hops before it, or from the first with spec.cover_rel, escapes); on: the cell's threat is on the air in some frame of this
+%   from the hops before it, or from the first with spec.cover_rel, escapes); recoverable_core: the
+%   same over the core action set's configurations alone (C.core_actions); on: the cell's threat is on the air in some frame of this
 %   geometry (pool_cell.m act; airframe shadowing only where the flight's attitude lets
 %   the airframe hide an antenna, shadow_hidden.m), so an episode whose threat never is
 %   counts as no threat episode (policy_run_set.m, dqn_eval_batches.m).
@@ -100,7 +101,7 @@ function varargout = link_env(cmd, varargin)
 %   positions are, fec_packets.m), ber_true and fer_true (the frame's BER and packet
 %   error, analysis only)
 %   info: per episode q, restored, restored_plr, fec_gap, gput, changed (a change or a hop),
-%   false_switch, healthy, recoverable, sc_eff, cfg_eff, post, hop (requested this
+%   false_switch, healthy, recoverable, recoverable_core, sc_eff, cfg_eff, post, hop (requested this
 %   cycle), hop_in (a hop reached the link on this frame), compromised, ended (the frame is
 %   after the threat's end), released (a change to no_action decided after the end)
 switch cmd
@@ -157,8 +158,11 @@ K.q = nan(nSc, nS, nA, nSp, nRm); K.gput = nan(nSc, nS, nA, nSp, nRm);
 K.restored = false(nSc, nS, nA, nSp, nRm); K.restored_plr = false(nSc, nS, nA, nSp, nRm);
 K.healthy = false(nSc, nS, nSp, nRm); K.recoverable = false(nSc, nS, nSp, nRm); K.recoverable_comb = K.recoverable;
 K.rec_noch = K.recoverable; K.rec_ch = K.recoverable;   % some configuration without / with channel_switch restores
+K.rec_core = K.recoverable; K.rec_core_comb = K.recoverable;   % the same over the core action set
+K.rec_core_noch = K.recoverable; K.rec_core_ch = K.recoverable;
 K.on = false(nSc, nS, nSp, nRm);
 stay = ~K.hasCh & ~K.hasFd;                         % configurations a comb jammer leaves as they are
+core = ismember(A, C.core_actions);                 % the core action set (decision_config.m)
 for sp = 1:nSp
     [BC, PC] = clean_reference(PP, K, sp, ref, C);   % clean BER (floored) and packet loss, Eb/N0 x geometry
     for sc = 1:nSc
@@ -196,6 +200,8 @@ for sp = 1:nSp
                 K.recoverable(sc, s, sp, r) = any(ok);
                 K.recoverable_comb(sc, s, sp, r) = any(ok(stay));
                 K.rec_noch(sc, s, sp, r) = any(ok(~K.hasCh)); K.rec_ch(sc, s, sp, r) = any(ok(K.hasCh));
+                K.rec_core(sc, s, sp, r) = any(ok(core)); K.rec_core_comb(sc, s, sp, r) = any(ok(core & stay));
+                K.rec_core_noch(sc, s, sp, r) = any(ok(core & ~K.hasCh)); K.rec_core_ch(sc, s, sp, r) = any(ok(core & K.hasCh));
             end
         end
     end
@@ -312,14 +318,17 @@ for v = 1:nL                                        % an escaped hop at another 
 end
 r = (q - K.cost(E.cfg_link) - K.SW * (changed | hop) - K.FA * (changed & healthy & ~rel)) / 100;
 rec = K.recoverable(ih); rec(E.comb) = K.recoverable_comb(ih(E.comb));
+rcr = rec;
+if isfield(K, 'rec_core'), rcr = K.rec_core(ih); rcr(E.comb) = K.rec_core_comb(ih(E.comb)); end
 if ~isempty(E.cover)                                % a channel_switch configuration only through an escaped hop
-    j = ~E.comb;
-    rec(j) = K.rec_noch(ih(j)) | (K.rec_ch(ih(j)) & reach_escape(E, j));
+    j = ~E.comb; esc = reach_escape(E, j);
+    rec(j) = K.rec_noch(ih(j)) | (K.rec_ch(ih(j)) & esc);
+    if isfield(K, 'rec_core'), rcr(j) = K.rec_core_noch(ih(j)) | (K.rec_core_ch(ih(j)) & esc); else, rcr = rec; end
 end
 info = struct('q', q, 'restored', rst & ~gap, 'restored_plr', rpl & ~gap, ...
     'fec_gap', gap, 'gput', gpt, ...
     'changed', changed | hop, 'false_switch', changed & healthy & ~rel, 'healthy', healthy, ...
-    'recoverable', rec, 'sc_eff', sc_eff, 'cfg_eff', cfg_eff, 'post', E.t >= E.onset, ...
+    'recoverable', rec, 'recoverable_core', rcr, 'sc_eff', sc_eff, 'cfg_eff', cfg_eff, 'post', E.t >= E.onset, ...
     'hop', hop, 'hop_in', arr, 'compromised', cm, 'ended', E.t >= E.offset, 'released', rel);
 end
 

@@ -7907,7 +7907,8 @@ for hop_only = [false true]
     Ko = link_env('tables', PP); Oo = env_trace(PP, Ko, spec, acts);
     fixture_off(d, 'link_env');
     Kn = link_env('tables', PP); On = env_trace(PP, Kn, spec, acts);
-    verifyTrue(tc, isequaln(Oo, On), sprintf('trace, hop_only %d', hop_only));
+    Ox = On; Ox.info = cellfun(@(i) rmfield(i, 'recoverable_core'), On.info, 'UniformOutput', false);
+    verifyTrue(tc, isequaln(Oo, Ox), sprintf('trace, hop_only %d', hop_only));
     for f = fieldnames(Ko)'
         verifyTrue(tc, isequaln(Ko.(f{1}), Kn.(f{1})), sprintf('K.%s, hop_only %d', f{1}, hop_only));
     end
@@ -7920,9 +7921,11 @@ for hop_only = [false true]
     O2 = env_trace(PP, Kn, s2, acts); Of = env_trace(PP, Kn, sf, acts);
     verifyTrue(tc, isequaln(Of.r, O2.r) && isequaln(Of.obs, O2.obs), 'cover all true: rewards and frames');
     for t = 1:30
-        verifyTrue(tc, isequaln(rmfield(Of.info{t}, 'recoverable'), rmfield(O2.info{t}, 'recoverable')));
+        rc = {'recoverable', 'recoverable_core'};
+        verifyTrue(tc, isequaln(rmfield(Of.info{t}, rc), rmfield(O2.info{t}, rc)));
         ih = sub2ind(size(Kn.healthy), O2.info{t}.sc_eff, s2.s, ones(1, 6), s2.r);
         verifyEqual(tc, O2.info{t}.recoverable, Kn.rec_noch(ih));
+        verifyEqual(tc, O2.info{t}.recoverable_core, Kn.rec_core_noch(ih));
     end
 end
 end
@@ -7973,6 +7976,41 @@ function info = last_info(PP, K, spec, a)
 % The info of an episode's last cycle under configuration a held from the first.
 [E, ~] = link_env('reset', PP, K, spec, 1, RandStream('mt19937ar', 'Seed', 1));
 for t = 1:spec.T, [E, ~, ~, info] = link_env('step', E, PP, K, a); end
+end
+
+function test_link_env_core_recoverable(tc)
+% recoverable_core (link_env.m, rollout_policy.m): some configuration of the core action set
+% restores the geometry; a jammer only freq_diversity escapes is recoverable but not by the
+% core set, one channel_switch escapes is both; under a comb jammer neither; with spec.cover
+% channel_switch counts only through an escaped hop, as for recoverable. Fixed by the pools
+% and the spec: the same under every policy.
+C = decision_config();
+[PP, K] = toy_world(true);                               % channel_switch and freq_diversity escape
+core = ismember(PP.actions, C.core_actions);
+verifyEqual(tc, K.rec_core(2, 1, 1, 1), true); verifyEqual(tc, K.recoverable(2, 1, 1, 1), true);
+verifyEqual(tc, K.rec_core_comb(2, 1, 1, 1), false);
+verifyEqual(tc, K.rec_core_noch(2, 1, 1, 1), false); verifyEqual(tc, K.rec_core_ch(2, 1, 1, 1), true);
+spec = struct('scn', [2 2], 's', [1 1], 'onset', [3 3], 'follow', false(1, 2), 'fdelay', [0 0], 'unk', false(1, 2), ...
+    'T', 20, 'r', [1 1], 'comb', logical([0 1]));
+i0 = last_info(PP, K, spec, K.na * [1 1]);
+verifyEqual(tc, [i0.recoverable; i0.recoverable_core], [true false; true false]);
+Pf = PP;                                                 % only freq_diversity escapes
+for a = find(contains(PP.actions, 'channel_switch')), Pf.pools(2, :, a, 1) = PP.pools(2, :, K.na, 1); end
+Kf = link_env('tables', Pf);
+verifyEqual(tc, [Kf.recoverable(2, 1, 1, 1), Kf.rec_core(2, 1, 1, 1)], [true false]);
+ok = squeeze(Kf.restored(2, 1, :, 1, 1) & Kf.restored_plr(2, 1, :, 1, 1))';
+verifyEqual(tc, Kf.rec_core(2, 1, 1, 1), any(ok(core)));
+s1 = rmfield(spec, 'comb');
+for p = {{'fixed', struct('fixed', K.na)}, {'rule_esc', struct()}}
+    R = rollout_policy(p{1}{1}, Pf, Kf, s1, 1, [], p{1}{2}, 8);
+    verifyEqual(tc, [R.recoverable; R.recoverable_core], [true true; false false]);
+end
+[PP, K] = toy_world(true, true);                         % channel_switch alone escapes
+T = 30; base = struct('scn', 2, 's', 1, 'follow', false, 'fdelay', 0, 'unk', false, 'T', T, 'r', 1, 'onset', 5);
+s = base; s.cover = true(1, T); i1 = last_info(PP, K, s, K.na);
+verifyEqual(tc, [i1.recoverable, i1.recoverable_core], [false false]);
+s.cover = ~ismember(1:T, 3); i1 = last_info(PP, K, s, K.na);
+verifyEqual(tc, [i1.recoverable, i1.recoverable_core], [true true]);
 end
 
 function test_link_env_cover_relative(tc)

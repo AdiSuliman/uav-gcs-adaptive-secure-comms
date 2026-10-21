@@ -26,6 +26,7 @@ function R = rollout_policy(kind, PP, K, spec, split, agent, opt, seed)
 %                     but the frames after the link turns coded that deliver no packet yet
 %                     (link_env.m, fec_gap: never restored, so no run starts in them)
 %          recoverable  some configuration restores this geometry (link_env.m)
+%          recoverable_core  some configuration of the core action set restores it
 %          switches, false_sw (whole episode), esc (escalations), aoa (3 x NE),
 %          cfg_final, r (geometry index), cfg_trace (T x NE); at the first change:
 %          fc_t, fc_cls (index into PP.classes, numel + 1 = unknown), fc_deg, fc_drop,
@@ -58,7 +59,7 @@ cls_list = [cellstr(string(PP.classes(:)')), {'unknown'}];
 fc = struct('t', zeros(1, NE), 'cls', zeros(1, NE), 'deg', false(1, NE), 'drop', nan(1, NE), 'dal', false(1, NE));
 tr = struct('r', zeros(T, NE), 'q', zeros(T, NE), 'rest', false(T, NE), 'rplr', false(T, NE), 'gput', zeros(T, NE), ...
     'ch', false(T, NE), 'fs', false(T, NE), 'post', false(T, NE), 'esc', false(T, NE), 'cfg', zeros(T, NE), ...
-    'recov', false(T, NE), 'fer', zeros(T, NE), 'cls', false(T, NE), 'conf', false(T, NE), 'gap', false(T, NE), ...
+    'recov', false(T, NE), 'recovc', false(T, NE), 'fer', zeros(T, NE), 'cls', false(T, NE), 'conf', false(T, NE), 'gap', false(T, NE), ...
     'link', zeros(T, NE), 'ended', false(T, NE), 'rel', false(T, NE));
 comp = cellfun(@(c) strsplit(c, '+'), PP.scen(E.scn), 'UniformOutput', false);
 for t = 1:T
@@ -80,6 +81,7 @@ for t = 1:T
     end
     tr.r(t, :) = r; tr.q(t, :) = info.q; tr.rest(t, :) = info.restored; tr.gput(t, :) = info.gput;
     tr.rplr(t, :) = info.restored_plr; tr.recov(t, :) = info.recoverable; tr.fer(t, :) = obs.fer_true;
+    tr.recovc(t, :) = info.recoverable_core;
     tr.gap(t, :) = info.fec_gap;
     tr.ch(t, :) = info.changed; tr.fs(t, :) = info.false_switch; tr.post(t, :) = info.post; tr.cfg(t, :) = E.cfg;
     tr.link(t, :) = E.cfg_link; tr.ended(t, :) = info.ended; tr.rel(t, :) = info.released;
@@ -118,6 +120,7 @@ for i = find(R.recovered)
 end
 last = arrayfun(@(i) find(post(:, i), 1, 'last'), 1:NE);
 R.recoverable = tr.recov(sub2ind([T NE], last, 1:NE));
+R.recoverable_core = tr.recovc(sub2ind([T NE], last, 1:NE));
 R.aoa = E.aoa';
 R.cfg_final = E.cfg;
 R.r = E.r;
