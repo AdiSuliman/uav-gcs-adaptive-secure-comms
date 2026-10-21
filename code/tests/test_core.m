@@ -7572,3 +7572,39 @@ verifyTrue(tc, any(startsWith(lc, 'Core action set: Recovery time (lecturer)')))
 verifyTrue(tc, any(startsWith(lc, 'Core action set: Goodput after onset in bit/s')));
 verifyTrue(tc, any(contains(lc, 'CNN contribution (core rule + escalation vs the same core escalation without the detector')));
 end
+
+function test_lect_kpis_summary_core(tc)
+% measure_all_kpis.m reports the core action set's readings beside KPI 4 and KPI 5, each line
+% named by its action set, beside the full set's.
+d = fullfile(tc.TestData.tmp, 'lectkpi_core'); mkdir(fullfile(d, 'results')); mkdir(fullfile(d, 'data'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+POL = {'none', 'random', 'fixed', 'rule_esc', 'blind_esc', 'table', 'dqn_esc', 'oracle', 'rule_core', 'blind_core'};
+LBL = {'no response', 'random', 'fixed', 'rule + escalation (deployed)', 'no detector + escalation', 'table', ...
+    'DQN + escalation', 'oracle', 'core: rule + escalation', 'core: no detector + escalation'};
+[ALL, scen] = lect_world(POL); iDQN = 4; RES = {}; set_names = {'single'}; %#ok<NASGU>
+show = {'none', 'fixed', 'rule_esc', 'blind_esc', 'table', 'dqn_g1', 'dqn_esc', 'oracle'};
+KP = struct('threats', {{'jamming', 'tone_jamming', 'path_loss'}}, 'show', {show}, 'per_threat', 95 * ones(3, 8), ...
+    'recoverable_share', ones(3, 1), 'sev_names', {{'nominal'}}, 'per_threat_sev', 95 * ones(3, 1, 8), ...
+    'far', struct('policy', LBL{4}, 'k', 1, 'n', 700, 'upper', 0.01, 'per_cycle', 1e-4), 'ebno_thr', 3, ...
+    'per_speed', 95 * ones(2, 8), 'speed_bins', [0 80 161], 'lect', lect_kpis(ALL, POL, LBL, iDQN, scen, 5e4, 20)); %#ok<NASGU>
+save('results/policy_evaluation.mat', 'RES', 'POL', 'LBL', 'set_names', 'iDQN', 'KP', 'ALL');
+evalc('measure_all_kpis');
+S = load('results/kpi_summary.mat', 'KPI', 'LECT'); K = S.KPI;
+tag = 'core action set {no_action, channel_switch, rate_reduce, channel_switch+rate_reduce}';
+k4 = strjoin(K([K.id] == 4).detail, newline);
+verifyNotEmpty(tc, strfind(k4, 'PER vs the static link (revised proposal, full action set), recoverable jamming episodes (4)'));
+verifyNotEmpty(tc, strfind(k4, ['PER vs the static link (revised proposal, ' tag '), recoverable jamming episodes (4), ' ...
+    'paired, 95% bootstrap over flight geometries: core: rule + escalation 15.00% vs 45.00% static, reduction 66.7% [']));
+verifyNotEmpty(tc, strfind(k4, ['CNN contribution, ' tag ' (core: rule + escalation vs the same escalation without ' ...
+    'the detector): PER reduction 57.1% [']));
+verifyNotEmpty(tc, strfind(k4, ['onset->detection 1/2 (never 25%) vs 2.5/3 (never 0%), detection->restored 3/4 ' ...
+    '(never 0%) vs 5.5/6 (never 50%)']));
+verifyEmpty(tc, strfind(k4, 'core action set (revised proposal): PENDING'));
+k5 = strjoin(K([K.id] == 5).detail, newline);
+verifyNotEmpty(tc, strfind(k5, ['recovery time (revised proposal, ' tag ': first confirmed alarm']));
+verifyNotEmpty(tc, strfind(k5, ['core: rule + escalation: onset->detection 1/2 (never 17%), detection->restored 3/5 ' ...
+    '(never 0%), T_rec from onset 4/6 (never 17%)']));
+verifyNotEmpty(tc, strfind(k5, ['goodput after onset in bit/s (' tag '; nominal payload 50000 bit/s)']));
+verifyNotEmpty(tc, strfind(k5, 'goodput after onset in bit/s (full action set; nominal payload 50000 bit/s)'));
+verifyEqual(tc, {S.LECT.pol.core.per.policy}, {'rule_core', 'blind_core'});
+end
