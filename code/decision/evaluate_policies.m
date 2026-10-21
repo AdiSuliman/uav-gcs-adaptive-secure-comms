@@ -66,10 +66,13 @@
 % coded its first three frames (60 ms) deliver no packet and are not restored: the
 % cycles to recover count them (link_env.m).
 % Revised proposal (lect_kpis.m): PER after onset vs the static link (no response) on the
-% recoverable jamming episodes, target >= 30% reduction for rule + escalation; the recovery
-% time from the first confirmed alarm until the packet loss stays restored for 5 cycles,
-% beside the onset-to-detection time; goodput in bit/s beside the normalized goodput; each
-% for the full action set (36 configurations) and for the core action set.
+% recoverable jamming episodes, target >= 30% reduction for rule + escalation in each of the
+% lecturer's two scenarios (narrowband tone_jamming, wideband jamming), the five jamming
+% threats pooled beside them; the recovery time from the first confirmed alarm until the
+% packet loss stays restored for 5 cycles, beside the onset-to-detection time; goodput in
+% bit/s beside the normalized goodput; each for the full action set (36 configurations) and
+% for the core action set (on the episodes a core configuration recovers, and on those any
+% of the 36 does).
 % Intervals: 95% percentile bootstrap over flight geometries (boot_cluster.m;
 % episodes of one geometry are resampled together), also for the deployed policy's
 % rate per threat (every level and inside the envelope) and for its spread over the

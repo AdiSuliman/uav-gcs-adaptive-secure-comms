@@ -7260,16 +7260,64 @@ g = L.gput(strcmp({L.gput.policy}, 'rule_esc'));
 verifyEqual(tc, [g.bps, g.bps_jam], [5e4 * 5.5 / 7, 42500], 'AbsTol', 1e-6);
 verifyTrue(tc, any(strcmp({L.gput.policy}, 'oracle')));
 verifyTrue(tc, any(contains(lines, '-> MET')));
+verifyEqual(tc, {L.verdict.scenario}, {'narrowband', 'wideband'});
+verifyEqual(tc, {L.verdict.threat}, {'tone_jamming', 'jamming'});
+verifyEqual(tc, [L.verdict.red_pct], [50 80], 'AbsTol', 1e-9);
+verifyEqual(tc, {L.verdict.verdict}, {'MET (not committed)', 'MET (not committed)'});   % one geometry each: no interval
+verifyEqual(tc, {L.per.verdict}, {'MET (committed)', 'NOT MET'});
+verifyEqual(tc, L.recoverable, 'all36');
 L2 = lect_kpis(ALL, POL, LBL, 7, scen, 5e4, 20);                   % a deployed DQN is read too
 verifyEqual(tc, {L2.per.policy}, {'rule_esc', 'blind_esc', 'dqn_esc'});
 end
 
+function test_lect_kpis_verdict(tc)
+% The primary PER verdict per lecturer scenario (lect_kpis.m L.verdict): narrowband =
+% tone_jamming, wideband = jamming, rule + escalation's reduction vs the static link; MET
+% (committed) when the 95% lower bound clears 30%, MET (not committed) when only the point
+% does, NOT MET otherwise or without episodes; the five threats pooled are the extension.
+POL = {'none', 'rule_esc', 'blind_esc'}; LBL = {'no response', 'rule + escalation', 'no detector + escalation'};
+scen = {'none', 'jamming', 'tone_jamming'};
+B = struct('scn', [3 3 3 3 2 2 2 2], 'recoverable', true(1, 8), 'recoverable_core', true(1, 8), ...
+    'threat', true(1, 8), 'geom', 1:8, 'ok_post', 0.5 * ones(1, 8), 't_conf', ones(1, 8), 't_rec_det', ones(1, 8), ...
+    't_rec', 2 * ones(1, 8), 'dlv_post', 0.5 * ones(1, 8), 'gput_post', 0.5 * ones(1, 8));
+ALL = {B, B, B};
+for k = 1:3, ALL{k}.per_post = 0.5 * ones(1, 8); end
+ALL{2}.per_post = [0 0.5 0.5 0 0.1 0.1 0.1 0.1];        % tone 50%, two of four geometries; jamming 80% on every one
+[L, lines] = lect_kpis(ALL, POL, LBL, 2, scen, 5e4, 20);
+v = L.verdict;
+verifyEqual(tc, {v.scenario}, {'narrowband', 'wideband'});
+verifyEqual(tc, [v.n], [4 4]);
+verifyEqual(tc, [v.red_pct], [50 80], 'AbsTol', 1e-9);
+verifyLessThan(tc, v(1).ci(1), 30);
+verifyGreaterThanOrEqual(tc, v(2).ci(1), 30);
+verifyEqual(tc, {v.verdict}, {'MET (not committed)', 'MET (committed)'});
+verifyEqual(tc, [v.met; v.committed], [true true; false true]);
+verifyEqual(tc, {v.policy}, {'rule_esc', 'rule_esc'});
+verifyTrue(tc, any(startsWith(lines, '  PRIMARY narrowband (tone_jamming), 4 recoverable episodes, static PER 50.00%: rule + escalation reduction 50.0% [') & ...
+    endsWith(lines, '-> MET (not committed)')));
+verifyTrue(tc, any(startsWith(lines, '  PRIMARY wideband (jamming), 4 recoverable episodes') & endsWith(lines, '-> MET (committed)')));
+i = find(startsWith(lines, '  extension, the five jamming threats pooled (8 recoverable episodes; jamming, noise_burst'));
+verifyNumElements(tc, i, 1);
+verifyGreaterThan(tc, i, find(startsWith(lines, '  PRIMARY wideband'), 1));
+verifyEqual(tc, L.per(1).red_pct, 65, 'AbsTol', 1e-9);
+verifyEqual(tc, L.per(1).verdict, ternary_(L.per(1).ci(1) >= 30, 'MET (committed)', 'MET (not committed)'));
+ALL{2}.per_post(5:8) = 0.4;                                % jamming 20%
+ALL = cellfun(@(R) setfield(R, 'threat', [false(1, 4), true(1, 4)]), ALL, 'UniformOutput', false); %#ok<SFLD>
+[L, lines] = lect_kpis(ALL, POL, LBL, 2, scen, 5e4, 20);
+verifyEqual(tc, [L.verdict.n], [0 4]);
+verifyEqual(tc, {L.verdict.verdict}, {'NOT MET', 'NOT MET'});
+verifyTrue(tc, any(strcmp(lines, '  PRIMARY narrowband (tone_jamming): no recoverable episodes -> NOT MET')));
+verifyTrue(tc, any(startsWith(lines, '  PRIMARY wideband (jamming), 4 recoverable episodes') & endsWith(lines, 'reduction 20.0% [20.0, 20.0] -> NOT MET')));
+end
+
 function [ALL, scen] = lect_world(POL)
 % Eight episodes of every policy in POL: jamming (1, 2, 7), tone_jamming (3, 4, 8), path_loss
-% (5, 6); episode 7 not recoverable, episode 8 without its threat on the air.
+% (5, 6); episode 7 not recoverable, episode 8 without its threat on the air; episode 2
+% recoverable only by a configuration outside the core action set.
 % The policies without the detector share one set of readings, every other policy another.
 scen = {'none', 'jamming', 'tone_jamming', 'path_loss'};
 B = struct('scn', [2 2 3 3 4 4 2 3], 'recoverable', logical([1 1 1 1 1 1 0 1]), ...
+    'recoverable_core', logical([1 0 1 1 1 1 0 1]), ...
     'threat', logical([1 1 1 1 1 1 1 0]), 'geom', [1 1 2 2 3 3 4 5], 'ok_post', 0.5 * ones(1, 8));
 ALL = cell(1, numel(POL));
 for k = 1:numel(POL)
@@ -7354,7 +7402,13 @@ verifyEqual(tc, S.LECT.three.recall, [0.9 0.85 0.8], 'AbsTol', 1e-12);
 k4 = strjoin(K([K.id] == 4).detail, newline);
 verifyNotEmpty(tc, strfind(k4, 'recoverable jamming episodes (4)'));
 verifyNotEmpty(tc, strfind(k4, 'reduction 66.7% ['));
-verifyNotEmpty(tc, strfind(k4, '-> MET (target >= 30%'));
+verifyNotEmpty(tc, strfind(k4, '-> MET (committed) (target >= 30%)'));
+verifyNotEmpty(tc, strfind(k4, ['PER vs the static link (revised proposal, full action set), PRIMARY per jamming scenario ' ...
+    '(lecturer: reduction >= 30%; committed when the 95% lower bound clears it), rule + escalation (deployed): narrowband ' ...
+    '(tone_jamming, 2 recoverable episodes) 50.0% [NaN, NaN] -> MET (not committed); wideband (jamming, 2 recoverable ' ...
+    'episodes) 80.0% [NaN, NaN] -> MET (not committed)']));
+verifyNotEmpty(tc, strfind(k4, 'full action set), extension: the five jamming threats pooled, recoverable jamming episodes (4)'));
+verifyLessThan(tc, strfind(k4, 'full action set), PRIMARY'), strfind(k4, 'full action set), extension'));
 verifyNotEmpty(tc, strfind(k4, 'tone_jamming (narrowband) 50.0%'));
 k5 = strjoin(K([K.id] == 5).detail, newline);
 verifyNotEmpty(tc, strfind(k5, ['rule + escalation (deployed): onset->detection 1/2 (never 17%), detection->restored ' ...
@@ -7559,32 +7613,71 @@ POLc = [POL, {'rule_core', 'blind_core'}];
 LBLc = [LBL, {'core: rule + escalation', 'core: no detector + escalation'}];
 [ALLc, scen] = lect_world(POLc);
 [L, lines] = lect_kpis(ALLc, POLc, LBLc, 4, scen, 5e4, 20);
-for f = {'per', 'per_threat', 'cnn', 'rec', 'gput'}
+for f = {'verdict', 'per', 'per_threat', 'cnn', 'rec', 'gput'}
     verifyEqual(tc, L.(f{1}), L0.(f{1}));
 end
 verifyEqual(tc, lines(1:numel(lines0)), lines0);
 verifyEqual(tc, lines0{3}, 'Full action set (the 36 configurations):');
+% Primary: the episodes a core configuration recovers (episode 2 out: jamming 1, tone 3 and 4)
 Cc = L.core;
 verifyEqual(tc, Cc.actions, decision_config().core_actions);
+verifyEqual(tc, Cc.recoverable, 'core');
 verifyEqual(tc, {Cc.per.policy}, {'rule_core', 'blind_core'});
-verifyEqual(tc, [Cc.per.red_pct], 100 * [1 - 0.6 / 1.8, 1 - 1.4 / 1.8], 'AbsTol', 1e-9);
-verifyEqual(tc, [Cc.per.met], [true false]);
+verifyEqual(tc, [Cc.per.n], [3 3]);
+verifyEqual(tc, [Cc.per.red_pct], 100 * [1 - 0.5 / 1.3, 1 - 1.1 / 1.3], 'AbsTol', 1e-9);
+verifyEqual(tc, {Cc.per.verdict}, {'MET (committed)', 'NOT MET'});
 verifyEqual(tc, {Cc.per_threat.threat}, {'jamming', 'tone_jamming'});
-verifyEqual(tc, Cc.cnn.per_red_pct, 100 * (1 - 0.6 / 1.4), 'AbsTol', 1e-9);
+verifyEqual(tc, [Cc.per_threat.n], [1 2]);
+verifyEqual(tc, {Cc.verdict.threat}, {'tone_jamming', 'jamming'});
+verifyEqual(tc, [Cc.verdict.n], [2 1]);
+verifyEqual(tc, [Cc.verdict.red_pct], [50 80], 'AbsTol', 1e-9);
+verifyEqual(tc, {Cc.verdict.policy}, {'rule_core', 'rule_core'});
+verifyEqual(tc, Cc.cnn.per_red_pct, 100 * (1 - 0.5 / 1.1), 'AbsTol', 1e-9);
 verifyEqual(tc, Cc.cnn.gput_bps, 1e4, 'AbsTol', 1e-6);
-verifyEqual(tc, [Cc.cnn.det.median; Cc.cnn.det.p90; Cc.cnn.det.never_pct], [1 2.5; 2 3; 25 0]);
-verifyEqual(tc, [Cc.cnn.rec_det.median; Cc.cnn.rec_det.p90; Cc.cnn.rec_det.never_pct], [3 5.5; 4 6; 0 50]);
-verifyEqual(tc, [L.cnn.det.median], [1 2.5]);                                        % the full set's alike
+verifyEqual(tc, [Cc.cnn.det.median; Cc.cnn.det.p90; Cc.cnn.det.never_pct], [0.5 2; 1 3; 100 / 3 0], 'AbsTol', 1e-9);
+verifyEqual(tc, [Cc.cnn.rec_det.median; Cc.cnn.rec_det.p90; Cc.cnn.rec_det.never_pct], [2.5 5; 3 5; 0 200 / 3], 'AbsTol', 1e-9);
+sel = @(S, s, p) S.rec(strcmp({S.rec.set}, s) & strcmp({S.rec.policy}, p));
+r = sel(Cc, 'recoverable threat episodes', 'rule_core');
+verifyEqual(tc, [r.n, r.det.median, r.det.p90, r.det.never_pct, r.rec_det.median, r.rec_det.p90, r.t_rec.median, r.t_rec.p90], ...
+    [5 1 1 20 2.5 5 3 6]);
+verifyEqual(tc, sel(Cc, 'recoverable jamming episodes', 'rule_core').n, 3);
 verifyEqual(tc, unique({Cc.rec.policy}, 'stable'), {'none', 'blind_core', 'rule_core'});
 verifyEqual(tc, {Cc.gput.policy}, {'none', 'blind_core', 'rule_core'});
 g = Cc.gput(strcmp({Cc.gput.policy}, 'rule_core'));
+verifyEqual(tc, [g.bps, g.bps_jam], [5e4 * 5.5 / 7, 5e4 * 2.5 / 3], 'AbsTol', 1e-6);
+% Conservative: the episodes any of the 36 recovers
+C36 = Cc.all36;
+verifyEqual(tc, C36.recoverable, 'all36');
+verifyEqual(tc, [C36.per.n], [4 4]);
+verifyEqual(tc, [C36.per.red_pct], 100 * [1 - 0.6 / 1.8, 1 - 1.4 / 1.8], 'AbsTol', 1e-9);
+verifyEqual(tc, [C36.per.met], [true false]);
+verifyEqual(tc, {C36.per_threat.threat}, {'jamming', 'tone_jamming'});
+verifyEqual(tc, [C36.verdict.n], [2 2]);
+verifyEqual(tc, C36.cnn.per_red_pct, 100 * (1 - 0.6 / 1.4), 'AbsTol', 1e-9);
+verifyEqual(tc, C36.cnn.gput_bps, 1e4, 'AbsTol', 1e-6);
+verifyEqual(tc, [C36.cnn.det.median; C36.cnn.det.p90; C36.cnn.det.never_pct], [1 2.5; 2 3; 25 0]);
+verifyEqual(tc, [C36.cnn.rec_det.median; C36.cnn.rec_det.p90; C36.cnn.rec_det.never_pct], [3 5.5; 4 6; 0 50]);
+verifyEqual(tc, [L.cnn.det.median], [1 2.5]);                                        % the full set's alike
+g = C36.gput(strcmp({C36.gput.policy}, 'rule_core'));
 verifyEqual(tc, [g.bps, g.bps_jam], [5e4 * 5.5 / 7, 42500], 'AbsTol', 1e-6);
+r = sel(C36, 'recoverable threat episodes', 'rule_core');
+verifyEqual(tc, [r.n, r.det.median, r.rec_det.median, r.t_rec.median], [6 1 3 4]);
 lc = lines(numel(lines0) + 1:end);
 verifyTrue(tc, startsWith(lc{1}, 'Core action set {no_action, channel_switch, rate_reduce, channel_switch+rate_reduce}'));
+verifyTrue(tc, endsWith(lc{1}, 'primary: the episodes a core configuration recovers (5 recoverable threat episodes, 3 jamming):'));
 verifyTrue(tc, any(contains(lc, 'core: rule + escalation') & contains(lc, '-> MET')));
 verifyTrue(tc, any(startsWith(lc, 'Core action set: Recovery time (lecturer)')));
 verifyTrue(tc, any(startsWith(lc, 'Core action set: Goodput after onset in bit/s')));
+verifyTrue(tc, any(startsWith(lc, ['Core action set: PER after onset vs the static link (no response), paired by episode, ' ...
+    '95% bootstrap over flight geometries; recoverable episodes: some configuration of the core action set restores the geometry.'])));
 verifyTrue(tc, any(contains(lc, 'CNN contribution (core rule + escalation vs the same core escalation without the detector')));
+i = find(startsWith(lc, 'Core action set, conservative line: the episodes any of the 36 configurations recovers (6 recoverable threat episodes, 4 jamming'));
+verifyNumElements(tc, i, 1);
+verifyTrue(tc, any(startsWith(lc(i:end), 'Core action set (recoverable by the 36): PER after onset')));
+verifyTrue(tc, any(startsWith(lc(i:end), 'Core action set (recoverable by the 36): Recovery time (lecturer)')));
+verifyTrue(tc, any(startsWith(lc(i:end), 'Core action set (recoverable by the 36): Goodput after onset in bit/s')));
+A = ALLc; A{1} = rmfield(A{1}, 'recoverable_core');                                   % the flags are required
+verifyError(tc, @() lect_kpis(A, POLc, LBLc, 4, scen, 5e4, 20), 'lect_kpis:core_flags');
 end
 
 function test_lect_kpis_summary_core(tc)
@@ -7606,21 +7699,44 @@ evalc('measure_all_kpis');
 S = load('results/kpi_summary.mat', 'KPI', 'LECT'); K = S.KPI;
 tag = 'core action set {no_action, channel_switch, rate_reduce, channel_switch+rate_reduce}';
 k4 = strjoin(K([K.id] == 4).detail, newline);
-verifyNotEmpty(tc, strfind(k4, 'PER vs the static link (revised proposal, full action set), recoverable jamming episodes (4)'));
-verifyNotEmpty(tc, strfind(k4, ['PER vs the static link (revised proposal, ' tag '), recoverable jamming episodes (4), ' ...
-    'paired, 95% bootstrap over flight geometries: core: rule + escalation 15.00% vs 45.00% static, reduction 66.7% [']));
+cons = [tag ', conservative: recoverable by any of the 36 configurations'];
+verifyNotEmpty(tc, strfind(k4, 'PER vs the static link (revised proposal, full action set), extension: the five jamming threats pooled, recoverable jamming episodes (4)'));
+verifyNotEmpty(tc, strfind(k4, ['PER vs the static link (revised proposal, ' tag '), PRIMARY per jamming scenario (lecturer: ' ...
+    'reduction >= 30%; committed when the 95% lower bound clears it), core: rule + escalation: narrowband (tone_jamming, 2 ' ...
+    'recoverable episodes) 50.0% [NaN, NaN] -> MET (not committed); wideband (jamming, 1 recoverable episodes) 80.0% ' ...
+    '[NaN, NaN] -> MET (not committed)']));
+verifyNotEmpty(tc, strfind(k4, ['PER vs the static link (revised proposal, ' tag '), extension: the five jamming threats pooled, ' ...
+    'recoverable jamming episodes (3), paired, 95% bootstrap over flight geometries: core: rule + escalation 16.67% vs ' ...
+    '43.33% static, reduction 61.5% [']));
+verifyNotEmpty(tc, strfind(k4, ['PER vs the static link (revised proposal, ' cons '), extension: the five jamming threats pooled, ' ...
+    'recoverable jamming episodes (4), paired, 95% bootstrap over flight geometries: core: rule + escalation 15.00% vs ' ...
+    '45.00% static, reduction 66.7% [']));
+verifyNotEmpty(tc, strfind(k4, ['PER vs the static link (revised proposal, ' cons '), PRIMARY per jamming scenario']));
 verifyNotEmpty(tc, strfind(k4, ['CNN contribution, ' tag ' (core: rule + escalation vs the same escalation without ' ...
+    'the detector): PER reduction 54.5% [']));
+verifyNotEmpty(tc, strfind(k4, ['onset->detection 0.5/1 (never 33%) vs 2/3 (never 0%), detection->restored 2.5/3 ' ...
+    '(never 0%) vs 5/5 (never 67%)']));
+verifyNotEmpty(tc, strfind(k4, ['CNN contribution, ' cons ' (core: rule + escalation vs the same escalation without ' ...
     'the detector): PER reduction 57.1% [']));
 verifyNotEmpty(tc, strfind(k4, ['onset->detection 1/2 (never 25%) vs 2.5/3 (never 0%), detection->restored 3/4 ' ...
     '(never 0%) vs 5.5/6 (never 50%)']));
 verifyEmpty(tc, strfind(k4, 'core action set (revised proposal): PENDING'));
-k5 = strjoin(K([K.id] == 5).detail, newline);
+d5 = K([K.id] == 5).detail; k5 = strjoin(d5, newline);
 verifyNotEmpty(tc, strfind(k5, ['recovery time (revised proposal, ' tag ': first confirmed alarm']));
-verifyNotEmpty(tc, strfind(k5, ['core: rule + escalation: onset->detection 1/2 (never 17%), detection->restored 3/5 ' ...
+l5 = d5(contains(d5, ['recovery time (revised proposal, ' tag ': first']) & contains(d5, 'recoverable threat episodes (5)'));
+verifyNumElements(tc, l5, 1);
+verifyNotEmpty(tc, strfind(l5{1}, ['core: rule + escalation: onset->detection 1/1 (never 20%), detection->restored 2.5/5 ' ...
+    '(never 0%), T_rec from onset 3/6 (never 20%)']));
+l5 = d5(contains(d5, ['recovery time (revised proposal, ' cons ': first']) & contains(d5, 'recoverable threat episodes (6)'));
+verifyNumElements(tc, l5, 1);
+verifyNotEmpty(tc, strfind(l5{1}, ['core: rule + escalation: onset->detection 1/2 (never 17%), detection->restored 3/5 ' ...
     '(never 0%), T_rec from onset 4/6 (never 17%)']));
 verifyNotEmpty(tc, strfind(k5, ['goodput after onset in bit/s (' tag '; nominal payload 50000 bit/s)']));
+verifyNotEmpty(tc, strfind(k5, ['goodput after onset in bit/s (' cons '; nominal payload 50000 bit/s)']));
 verifyNotEmpty(tc, strfind(k5, 'goodput after onset in bit/s (full action set; nominal payload 50000 bit/s)'));
+verifyNotEmpty(tc, strfind(k5, ' | 41667 ['));
 verifyEqual(tc, {S.LECT.pol.core.per.policy}, {'rule_core', 'blind_core'});
+verifyEqual(tc, S.LECT.pol.core.all36.recoverable, 'all36');
 end
 
 function test_blind_reads_no_class(tc)

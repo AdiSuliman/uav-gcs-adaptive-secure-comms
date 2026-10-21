@@ -33,8 +33,11 @@
 % macro-F1, also above the KPI 1 threshold from the saved predictions (KPI 1); PER vs the static link (KPI 4);
 % recovery time from detection, onset-to-detection time and goodput in bit/s (KPI 5); each for
 % the full action set and for the core action set (channel switching and rate adaptation,
-% rule_core and blind_core); from results/policy_evaluation.mat's KP.lect (lect_kpis.m),
-% PENDING while that file predates it.
+% rule_core and blind_core); the PER verdict per lecturer scenario (narrowband tone_jamming,
+% wideband jamming) first, the five jamming threats pooled as the extension; the core set on
+% the episodes a core configuration recovers, and again on those any of the 36 recovers
+% (conservative); from results/policy_evaluation.mat's KP.lect (lect_kpis.m), PENDING while
+% that file predates it.
 % Beside KPI 1, the three-state CNN on spectrograms only (deliverable 2, train_core_cnn.m, stage
 % B3c): its single reading of the fourth test set from results/core_cnn.mat, PENDING until then.
 % With results/edge_map.mat (edge_map.m), the verdicts per point are added as details:
@@ -278,6 +281,10 @@ if isfile(F.pol)
         det = [det, per_lines(P.KP.lect, P.KP.lect, 'rule_esc', 'full action set')];
         if has_core(P.KP.lect)
             det = [det, per_lines(P.KP.lect, P.KP.lect.core, 'rule_core', core_tag(P.KP.lect.core))];
+            if isfield(P.KP.lect.core, 'all36')
+                det = [det, per_lines(P.KP.lect, P.KP.lect.core.all36, 'rule_core', [core_tag(P.KP.lect.core) ...
+                    ', conservative: recoverable by any of the 36 configurations'])];
+            end
         else
             det{end+1} = ['beside KPI 4, PER vs the static link on the core action set (revised proposal): PENDING, ' ...
                 F.pol ' predates it (rerun C2e)'];
@@ -366,6 +373,10 @@ if isfile(F.pol)
         det = [det, rec_lines(P.KP.lect, P.KP.lect, 'full action set')];
         if has_core(P.KP.lect)
             det = [det, rec_lines(P.KP.lect, P.KP.lect.core, core_tag(P.KP.lect.core))];
+            if isfield(P.KP.lect.core, 'all36')
+                det = [det, rec_lines(P.KP.lect, P.KP.lect.core.all36, [core_tag(P.KP.lect.core) ...
+                    ', conservative: recoverable by any of the 36 configurations'])];
+            end
         else
             det{end+1} = ['beside KPI 5, recovery time from detection and goodput in bit/s on the core action set ' ...
                 '(revised proposal): PENDING, ' F.pol ' predates them (rerun C2e)'];
@@ -603,16 +614,25 @@ s = sprintf(['recall narrowband %.2f%%, wideband %.2f%% (>= 85%% each: %s), clea
 end
 
 function lines = per_lines(Lk, S, tgt, tag)
-% PER vs the static link (lect_kpis.m), beside KPI 4: S the readings of one action set (Lk, or
-% Lk.core), tgt its rule with the detector, tag the set's name.
+% PER vs the static link (lect_kpis.m), beside KPI 4: S the readings of one action set (Lk,
+% Lk.core or Lk.core.all36), tgt its rule with the detector, tag the set's name. The verdict
+% per lecturer scenario first, the five jamming threats pooled as the extension.
 lines = {};
 q = S.per(strcmp({S.per.policy}, tgt));
 if isempty(q), return; end
 o = S.per(~strcmp({S.per.policy}, tgt));
-lines{1} = sprintf(['beside KPI 4, PER vs the static link (revised proposal, %s), recoverable jamming episodes (%d), paired, ' ...
-    '95%% bootstrap over flight geometries: %s %.2f%% vs %.2f%% static, reduction %.1f%% [%.1f, %.1f] -> %s (target >= %d%%; ' ...
-    'interval %s it)%s'], tag, q.n, q.label, q.per_pct, q.per_ref_pct, q.red_pct, q.ci, ternary(q.met, 'MET', 'NOT MET'), ...
-    Lk.target_pct, ternary(q.ci_above, 'wholly above', 'not wholly above'), strjoin(arrayfun(@(x) sprintf('; %s %.1f%% [%.1f, %.1f]', ...
+if isfield(S, 'verdict') && ~isempty(S.verdict)
+    lines{1} = sprintf(['beside KPI 4, PER vs the static link (revised proposal, %s), PRIMARY per jamming scenario ' ...
+        '(lecturer: reduction >= %d%%; committed when the 95%% lower bound clears it), %s: %s'], tag, Lk.target_pct, ...
+        S.verdict(1).label, strjoin(arrayfun(@(v) sprintf('%s (%s, %d recoverable episodes) %.1f%% [%.1f, %.1f] -> %s', ...
+        v.scenario, v.threat, v.n, v.red_pct, v.ci, v.verdict), S.verdict, 'UniformOutput', false), '; '));
+end
+vd = ternary(q.met, 'MET', 'NOT MET');
+if isfield(q, 'verdict'), vd = q.verdict; end
+lines{end+1} = sprintf(['beside KPI 4, PER vs the static link (revised proposal, %s), extension: the five jamming threats ' ...
+    'pooled, recoverable jamming episodes (%d), paired, 95%% bootstrap over flight geometries: %s %.2f%% vs %.2f%% ' ...
+    'static, reduction %.1f%% [%.1f, %.1f] -> %s (target >= %d%%)%s'], tag, q.n, q.label, q.per_pct, q.per_ref_pct, ...
+    q.red_pct, q.ci, vd, Lk.target_pct, strjoin(arrayfun(@(x) sprintf('; %s %.1f%% [%.1f, %.1f]', ...
     x.label, x.red_pct, x.ci), o, 'UniformOutput', false), ''));
 if ~isempty(S.per_threat)
     lines{end+1} = sprintf('beside KPI 4, PER reduction per jamming threat, %s (%s): %s', tag, strjoin({S.per.label}, ' | '), ...
@@ -633,7 +653,7 @@ end
 
 function lines = rec_lines(Lk, S, tag)
 % Recovery time from detection, onset-to-detection time and goodput in bit/s (lect_kpis.m), beside
-% KPI 5: S the readings of one action set (Lk, or Lk.core), tag the set's name.
+% KPI 5: S the readings of one action set (Lk, Lk.core or Lk.core.all36), tag the set's name.
 lines = {};
 for sn = unique({S.rec.set}, 'stable')
     r = S.rec(strcmp({S.rec.set}, sn{1}));
