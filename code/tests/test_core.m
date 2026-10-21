@@ -7492,3 +7492,40 @@ verifyError(tc, @() policy_decide('table_esc', obs, na, [], PP, [], struct('core
     'table_unknown', na)), 'policy_decide:core');
 verifyError(tc, @() policy_decide('dqn', obs, na, [], PP, [], struct('core', true)), 'policy_decide:core');
 end
+
+function test_core_policies_rollout(tc)
+% rule_core and blind_core (policy_setup.m) run as rule_esc and blind_esc on the core set: on
+% a jammer that a hop escapes both recover; on one no configuration escapes they escalate
+% and every configuration they request stays in the core set. evaluate_policies.m runs them
+% after every other policy, on the same episode sets and seeds.
+C = decision_config();
+Q = struct('agent', [], 'agents', {{}}, 'rule_sel', []);
+[kind, ~, opt] = policy_setup('rule_core', Q, 1, 1, 1, [], 1);
+verifyEqual(tc, kind, 'rule_esc'); verifyTrue(tc, opt.core);
+[kind, ~, opt] = policy_setup('blind_core', Q, 1, 1, 1, [], 1);
+verifyEqual(tc, kind, 'blind_esc'); verifyTrue(tc, opt.core);
+[kind, ~, opt] = policy_setup('rule_esc', Q, 1, 1, 1, [], 1);
+verifyEqual(tc, kind, 'rule_esc'); verifyFalse(tc, isfield(opt, 'core'));
+[PP, K] = toy_world(true);
+ic = find(ismember(PP.actions, C.core_actions));
+spec = struct('scn', [2 2], 's', [1 1], 'onset', [3 3], 'follow', false(1, 2), 'fdelay', [0 0], 'unk', false(1, 2), ...
+    'T', 30, 'r', [1 1]);
+for p = {'rule_core', 'blind_core'}
+    [kind, ag, opt] = policy_setup(p{1}, Q, 1, 1, 1, [], K.na);
+    R = rollout_policy(kind, PP, K, spec, 1, ag, opt, 8);
+    verifyTrue(tc, all(R.recovered));
+    verifyTrue(tc, all(ismember(R.cfg_trace(:), ic)));
+end
+for a = 1:numel(PP.actions), PP.pools(2, :, a, 1) = PP.pools(2, :, K.na, 1); end   % no configuration escapes
+K = link_env('tables', PP);
+for p = {'rule_core', 'blind_core'}
+    [kind, ag, opt] = policy_setup(p{1}, Q, 1, 1, 1, [], K.na);
+    R = rollout_policy(kind, PP, K, spec, 1, ag, opt, 8);
+    verifyTrue(tc, all(R.esc >= 1));
+    verifyTrue(tc, all(ismember(R.cfg_trace(:), ic)));
+end
+src = fileread(which('evaluate_policies'));
+verifyNotEmpty(tc, strfind(src, 'POL = [POL, {''rule_core'', ''blind_core''}];'));
+verifyNotEmpty(tc, strfind(src, ['RES{si, pk} = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, ' ...
+    '30000 + 100*si);']));
+end

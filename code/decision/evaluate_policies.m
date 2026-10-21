@@ -43,7 +43,10 @@
 % the best fixed configuration (train pools), expert rule with and without
 % escalation, the rule with escalation without the detector (alarm from measured
 % degradation only), class -> configuration table (train pools), the DQN of every
-% discount factor (the selected one also with escalation), one-step oracle.
+% discount factor (the selected one also with escalation), one-step oracle; and the rule with
+% escalation, with and without the detector, on the revised proposal's core action set
+% (channel switching and rate adaptation: rule_core, blind_core; rule_core_policy.m), on the
+% same episodes and frame draws.
 % The deployed policy, read by the KPIs, is the one train_dqn.m chose on validation: the
 % selected DQN, with or without the escalation, when it passed its gate, otherwise the rule
 % with escalation on its own monitor (rule_sel); every policy runs with the deployed DQN's
@@ -65,7 +68,8 @@
 % Revised proposal (lect_kpis.m): PER after onset vs the static link (no response) on the
 % recoverable jamming episodes, target >= 30% reduction for rule + escalation; the recovery
 % time from the first confirmed alarm until the packet loss stays restored for 5 cycles,
-% beside the onset-to-detection time; goodput in bit/s beside the normalized goodput.
+% beside the onset-to-detection time; goodput in bit/s beside the normalized goodput; each
+% for the full action set (36 configurations) and for the core action set.
 % Intervals: 95% percentile bootstrap over flight geometries (boot_cluster.m;
 % episodes of one geometry are resampled together), also for the deployed policy's
 % rate per threat (every level and inside the envelope) and for its spread over the
@@ -173,6 +177,8 @@ if strcmp(Q.deployed, 'rule_sel')                    % the rule fallback on its 
     POL = [POL(1:end-1), {'rule_sel'}, POL(end)];
     LBL = [LBL(1:end-1), {sprintf('rule + escalation, own monitor (%s)', Q.rule_sel.alarm)}, LBL(end)];
 end
+POL = [POL, {'rule_core', 'blind_core'}];            % the core action set, after every other policy
+LBL = [LBL, {'core: rule + escalation', 'core: no detector + escalation'}];
 iBase = find(strcmp(POL, sprintf('dqn_g%d', sel)));  % selected DQN alone
 dep = Q.deployed; if strcmp(dep, 'dqn'), dep = POL{iBase}; end
 iDQN = find(strcmp(POL, dep));                       % deployed policy (train_dqn.m)
