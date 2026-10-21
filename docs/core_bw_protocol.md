@@ -59,7 +59,7 @@ signalling delay (1 cycle).
 |---|---|---|---|
 | CW tone | narrowband | Mekdad CW; Barajas CW; Panitsas tones; `tone_jamming` | the tone's offset range, home +-0.3 MHz |
 | 4 MHz | wideband | Liu et al.: 4 MHz instantaneous bandwidth, raised cosine, roll-off 0.3, read as its noise bandwidth (below) | +-2.6 MHz, the occupied edge (1 + 0.3) x 2 MHz |
-| 8 MHz | wideband | Mekdad et al.: Gaussian noise at 10 MS/s, low-pass 4 MHz, 1 MHz transition | +-4.5 MHz, the stopband edge |
+| 8 MHz | wideband | Mekdad et al.: Gaussian noise at 10 MS/s, low-pass 4 MHz, 1 MHz transition (GNU Radio) | +-4.5 MHz, the stopband edge; a raised-cosine edge centred on the 4 MHz cutoff (section 4) |
 | 20 MHz | wideband | Panitsas et al.: a $20 dongle covering 20 MHz | +-10 MHz |
 | 70 MHz | wideband | Panitsas et al.: AWGN over 802.11 channels 1, 6, 11 (20 MHz each) | fixed 2402-2472 MHz |
 | 83.5 MHz | wideband | the whole band, inside the 160 MHz of Panitsas et al.'s radio | 2400-2483.5 MHz |
@@ -157,8 +157,13 @@ counts all of it, the effective rejection
 
 in slices no wider than the sheet's 1 MHz step, split where the row changes; P_ref is the power
 the jammer puts in our channel when it covers it (its in-band level, section 3). The flat jammers
-(8, 20, 70, 83.5 MHz) hold their in-band density over their span, the 8 MHz jammer's 1 MHz
-transition included (Mekdad et al. give no slope: the most severe); Liu's 4 MHz jammer follows
+(20, 70, 83.5 MHz) hold their in-band density over their span. Mekdad et al. low-pass their 8 MHz
+jammer in GNU Radio (cutoff 4 MHz, transition 1 MHz), whose cutoff is the transition's centre: the
+transition runs 3.5-4.5 MHz. Its spectrum is a raised cosine of symbol rate 8 MHz and roll-off
+0.125: flat to +-3.5 MHz, half its density at the cutoff, none from the +-4.5 MHz stopband edge,
+so its power is that of B_J = 8 MHz (section 3; full density over the transition would carry 9/8
+of it). A windowed FIR is -6 dB at the cutoff and puts less near the edge, so the raised cosine is
+the more severe for an escaped hop. Liu's 4 MHz jammer follows
 its raised cosine (roll-off 0.3, its flat part the in-band density); a tone holds all its power
 at one unknown offset of its +-0.3 MHz range and takes the lowest rejection over that range, as
 before. d, the distance from our new carrier to the jammer's nearest frequency, decides the
@@ -168,7 +173,7 @@ sourced rows (`band_cover.m` off).
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | CW | c | 4 | 24 | 28 | 28 | 28 | 47 | 47 | 47 | 47 | 42 | 55 | 50 |
 | 4 MHz | cov | c | 12.7 | 21.8 | 22.1 | 24.9 | 36.0 | 41.0 | 41.0 | 41.0 | 37.8 | 49.0 | 45.8 |
-| 8 MHz | cov | cov | c | 6.6 | 19.4 | 21.4 | 23.9 | 30.2 | 37.5 | 37.5 | 35.9 | 44.3 | 43.8 |
+| 8 MHz | cov | cov | c | 12.7 | 20.1 | 21.9 | 24.8 | 35.2 | 38.0 | 38.0 | 36.1 | 45.7 | 44.1 |
 | 20 MHz | cov | cov | cov | cov | cov | 0.9 (cov) | 17.5 | 20.1 | 24.5 | 33.1 | 34.1 | 36.0 | 41.1 |
 
 (R_eff in dB; cov covered by geometry, c clear by under 2 MHz, both counted covered; under 2 dB
@@ -178,11 +183,12 @@ counted covered.) The 70 MHz jammer leaves 2475 MHz at 3.8 dB, 2477 at 18.5, 247
 Against the reading before (the lowest row over the offsets the jammer occupies, for its in-band
 share alone) R_eff is lower, more severe, wherever a flat jammer's power reaches beyond its
 nearest row: by 10 log10(B_J / 1 MHz) where the whole jammer meets one row (up to 13.0 dB for
-20 MHz, 9.5 for 8, 6.0 for 4), 3.5-8.9 dB for 20 MHz 14-64 MHz away, 7.4 dB for the 70 MHz
+20 MHz, 9.0 for 8, 6.0 for 4), 3.5-8.9 dB for 20 MHz 14-64 MHz away, 7.4 dB for the 70 MHz
 jammer at 2479 MHz; and a 20 MHz jammer 12 MHz away, 4 dB before, is now covered (0.9 dB). It is
 higher where only a thin edge of the jammer met the nearer row: Liu's raised cosine 6 MHz away
 (12.7 against 4 dB: its taper puts 0.11 of the in-band share within 4 MHz of our carrier), the
-8 MHz jammer 8 MHz away (6.6 against 4: its 0.5 MHz edge), a jammer whose edge touches a row's
+8 MHz jammer 8 MHz away (12.7 against 4: its raised-cosine edge puts 0.09 of the in-band share
+there), a jammer whose edge touches a row's
 boundary (20 MHz 22 MHz away: 33.5 against 28 at exactly 12 MHz). The spectrum, not its nearest
 point, carries the physics; the tone keeps its rows.
 
@@ -193,23 +199,23 @@ every R_eff its hops can meet (the jammer tuned to any channel of the plan, the 
 they sit; an equal-level cell over the widths it serves): ascending, each opened by the first value
 more than 2 dB above the layer before it and floored to 0.1 dB. Every hop then reads the layer at
 or below its R_eff (more severe, never milder), at most 2 dB below it (G3 checks it; over the
-values a cell meets 0.8-0.9 dB below on average for 4-20 MHz, the CW exact, 70 MHz within 0.1 dB):
+values a cell meets 0.7-0.8 dB below on average for 4-20 MHz, the CW exact, 70 MHz within 0.1 dB):
 
 | cell | layers [dB] |
 |---|---|
 | CW (5 cells) | 4, 24, 28, 42, 47, 50, 55 |
 | 4 MHz (5) | 12.6, 21.8, 24.9, 36.0, 39.1, 43.3, 45.7, 48.3 |
-| 8 MHz (5) | 6.6, 19.3, 21.4, 23.8, 30.1, 35.7, 37.7, 41.5, 43.7 |
+| 8 MHz (5) | 12.7, 20.1, 24.8, 35.2, 37.9, 42.3, 44.9 |
 | 20 MHz (5) | 17.5, 20.0, 24.5, 33.1, 35.4, 37.6, 40.1 |
 | 70 MHz (5) | 3.8, 18.4, 20.6, 22.6 |
 | 83.5 MHz (5) | none |
-| equal level 4, 10 dB (4-83.5 MHz) | 3.8, 6.6, 12.6, 17.5, 20.0, 22.0, 24.5, 30.1, 33.1, 35.4, 37.4, 40.1, 43.3, 45.4, 48.3 |
+| equal level 4, 10 dB (4-83.5 MHz) | 3.8, 12.6, 17.5, 20.0, 22.0, 24.5, 33.1, 35.2, 37.6, 40.1, 42.3, 44.9, 47.1 |
 | equal level 16 dB (4-20 MHz) | the same without 3.8 |
 | equal level 23 dB (4 MHz) | those of 4 MHz |
 | 4 MHz, occupied reading (5, sensitivity, section 3) | 2.0, 20.6, 23.1, 26.0, 38.3, 40.7, 44.4, 48.7 |
 
-227 (cell, layer) pairs, 38 distinct layers, for the primary and equal-level cells; with the
-occupied reading 267 pairs and 45 layers. The crystal's 42 and 50 dB stay (the sheet's footnote
+211 (cell, layer) pairs, 35 distinct layers, for the primary and equal-level cells; with the
+occupied reading 251 pairs and 42 layers. The crystal's 42 and 50 dB stay (the sheet's footnote
 states them): the CW cells' own layers, and inside every wide jammer's sum. The recoverable rule
 reads the same layer (section 6.4). The main pipeline's 30 dB (`cm_acr_db`) stays as it is there.
 
@@ -376,14 +382,14 @@ test_rule_dwell_tried.
 2.83-3.15 s per 20-frame simulation with one jammer, 6 workers, x 1.35 with the boost off.
 Pools: 39 cells (34, and the occupied reading's 5) x 4 configurations x 6 Eb/N0 x 48 geometries
 (44 928, fewer where configurations share their physics), the clean link (1 152) and the
-residual's layers: 267 (cell, layer) pairs (section 4: CW 5 x 7, 4 MHz 5 x 8, 8 MHz 5 x 9, 20 MHz
-5 x 7, 70 MHz 5 x 4, equal level 15 + 15 + 14 + 8, the occupied reading 5 x 8) x 2 configurations
-x 6 Eb/N0 x 48 geometries (153 792): about 199 900 simulations, 26.2-29.2 h (35.4-39.4 h boost
-off). Of these, the R_eff layers cost 25 344 simulations more than the sheet's rows alone (183
-pairs), 3.3-3.7 h (4.5-5.0 h boost off), and the occupied reading 28 800 (5 760 in the pools,
+residual's layers: 251 (cell, layer) pairs (section 4: CW 5 x 7, 4 MHz 5 x 8, 8 MHz 5 x 7, 20 MHz
+5 x 7, 70 MHz 5 x 4, equal level 13 + 13 + 12 + 8, the occupied reading 5 x 8) x 2 configurations
+x 6 Eb/N0 x 48 geometries (144 576): about 190 700 simulations, 25.0-27.8 h (33.7-37.5 h boost
+off). Of these, the R_eff layers cost 16 128 simulations more than the sheet's rows alone (183
+pairs), 2.1-2.4 h (2.8-3.2 h boost off), and the occupied reading 28 800 (5 760 in the pools,
 23 040 in its layers), 3.8-4.2 h (5.1-5.7 h boost off). Every run keeps its full length. Set D:
-864 runs, 0.2-0.6 h. Validation and test rollouts (49 scenarios, 45 layers' tables): 1.1-2.8 h.
-Total about 27.5-32.5 h (37-44 h boost off). Memory: pools about 1.7 GB, set D about 1.1 GB.
+864 runs, 0.2-0.6 h. Validation and test rollouts (49 scenarios, 42 layers' tables): 1.1-2.8 h.
+Total about 26.3-31.2 h (35-42 h boost off). Memory: pools about 1.6 GB, set D about 1.1 GB.
 
 ## 10. Risks, stated
 

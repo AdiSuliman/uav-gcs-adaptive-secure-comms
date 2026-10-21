@@ -9,9 +9,11 @@ function [cells, scen] = band_cells(p)
 %               does not say, and the readings trade 1.14 dB in band against up to 8 dB of
 %               the hop's effective rejection, docs/core_bw_protocol.md 3): +-2.6 MHz, its
 %               occupied edge
-%     8 MHz     Mekdad et al.: Gaussian noise at 10 MS/s low-passed at 4 MHz with a 1 MHz
-%               transition: +-4.5 MHz, the stopband edge, its transition at the in-band
-%               density (the paper gives no slope: the most severe for an escaped hop)
+%     8 MHz     Mekdad et al.: Gaussian noise at 10 MS/s low-passed in GNU Radio at a 4 MHz
+%               cutoff with a 1 MHz transition, the cutoff its centre: a raised cosine of
+%               symbol rate 8 MHz, roll-off 0.125, flat to +-3.5 MHz, -3 dB at the cutoff,
+%               +-4.5 MHz the stopband edge; its power B_J as jsr_inband.m, more near the
+%               edge than a windowed FIR's (-6 dB at the cutoff)
 %     20 MHz    Panitsas et al.: a $20 dongle covering 20 MHz: +-10 MHz
 %     70 MHz    Panitsas et al.: AWGN over 802.11 channels 1, 6 and 11 (2412, 2437, 2462 MHz,
 %               20 MHz each): fixed 2402-2472 MHz
@@ -39,7 +41,7 @@ cap = 30; if isfield(p, 'inband_cap_db'), cap = p.inband_cap_db; end
 BJ = [0 4 8 20 70 83.5];
 SPAN = {struct('kind', 'tone', 'half', toff, 'lo', NaN, 'hi', NaN, 'rs', NaN, 'ro', NaN), ...
         struct('kind', 'centred', 'half', 2.6, 'lo', NaN, 'hi', NaN, 'rs', 4, 'ro', 0.3), ...
-        struct('kind', 'centred', 'half', 4.5, 'lo', NaN, 'hi', NaN, 'rs', NaN, 'ro', NaN), ...
+        struct('kind', 'centred', 'half', 4.5, 'lo', NaN, 'hi', NaN, 'rs', 8, 'ro', 0.125), ...
         struct('kind', 'centred', 'half', 10, 'lo', NaN, 'hi', NaN, 'rs', NaN, 'ro', NaN), ...
         struct('kind', 'fixed', 'half', NaN, 'lo', 2402, 'hi', 2472, 'rs', NaN, 'ro', NaN), ...
         struct('kind', 'fixed', 'half', NaN, 'lo', 2400, 'hi', 2483.5, 'rs', NaN, 'ro', NaN)};
