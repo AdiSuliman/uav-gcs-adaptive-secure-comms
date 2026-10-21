@@ -7715,7 +7715,7 @@ verifyTrue(tc, any(startsWith(lc, 'Core action set: Goodput after onset in bit/s
 verifyTrue(tc, any(startsWith(lc, ['Core action set: PER after onset vs the static link (no response), paired by episode, ' ...
     '95% bootstrap over flight geometries; recoverable episodes: some configuration of the core action set restores the geometry.'])));
 verifyTrue(tc, any(contains(lc, 'CNN contribution (core rule + escalation vs the same core escalation without the detector')));
-i = find(startsWith(lc, 'Core action set, conservative line: the episodes any of the 36 configurations recovers (6 recoverable threat episodes, 4 jamming'));
+i = find(startsWith(lc, 'Core action set, second line: the episodes any of the 36 configurations recovers (6 recoverable threat episodes, 4 jamming'));
 verifyNumElements(tc, i, 1);
 verifyTrue(tc, any(startsWith(lc(i:end), 'Core action set (recoverable by the 36): PER after onset')));
 verifyTrue(tc, any(startsWith(lc(i:end), 'Core action set (recoverable by the 36): Recovery time (lecturer)')));
@@ -7726,7 +7726,7 @@ end
 
 function test_lect_kpis_summary_core(tc)
 % measure_all_kpis.m reports the core action set's readings beside KPI 4 and KPI 5, each line
-% named by its action set, beside the full set's.
+% named by its action set and the episodes it reads, beside the full set's.
 d = fullfile(tc.TestData.tmp, 'lectkpi_core'); mkdir(fullfile(d, 'results')); mkdir(fullfile(d, 'data'));
 c0 = cd(d); back = onCleanup(@() cd(c0));
 POL = {'none', 'random', 'fixed', 'rule_esc', 'blind_esc', 'table', 'dqn_esc', 'oracle', 'rule_core', 'blind_core'};
@@ -7743,20 +7743,21 @@ evalc('measure_all_kpis');
 S = load('results/kpi_summary.mat', 'KPI', 'LECT'); K = S.KPI;
 tag = 'core action set {no_action, channel_switch, rate_reduce, channel_switch+rate_reduce}';
 k4 = strjoin(K([K.id] == 4).detail, newline);
-cons = [tag ', conservative: recoverable by any of the 36 configurations'];
+prim = [tag ', recoverable by a core configuration'];
+cons = [tag ', second line: recoverable by any of the 36 configurations'];
 verifyNotEmpty(tc, strfind(k4, 'PER vs the static link (revised proposal, full action set), extension: the five jamming threats pooled, recoverable jamming episodes (4)'));
-verifyNotEmpty(tc, strfind(k4, ['PER vs the static link (revised proposal, ' tag '), PRIMARY per jamming scenario (lecturer: ' ...
+verifyNotEmpty(tc, strfind(k4, ['PER vs the static link (revised proposal, ' prim '), PRIMARY per jamming scenario (lecturer: ' ...
     'reduction >= 30%; committed when the 95% lower bound clears it), core: rule + escalation: narrowband (tone_jamming, 2 ' ...
     'recoverable episodes) 50.0% [NaN, NaN] -> MET (not committed); wideband (jamming, 1 recoverable episodes) 80.0% ' ...
     '[NaN, NaN] -> MET (not committed)']));
-verifyNotEmpty(tc, strfind(k4, ['PER vs the static link (revised proposal, ' tag '), extension: the five jamming threats pooled, ' ...
+verifyNotEmpty(tc, strfind(k4, ['PER vs the static link (revised proposal, ' prim '), extension: the five jamming threats pooled, ' ...
     'recoverable jamming episodes (3), paired, 95% bootstrap over flight geometries: core: rule + escalation 16.67% vs ' ...
     '43.33% static, reduction 61.5% [']));
 verifyNotEmpty(tc, strfind(k4, ['PER vs the static link (revised proposal, ' cons '), extension: the five jamming threats pooled, ' ...
     'recoverable jamming episodes (4), paired, 95% bootstrap over flight geometries: core: rule + escalation 15.00% vs ' ...
     '45.00% static, reduction 66.7% [']));
 verifyNotEmpty(tc, strfind(k4, ['PER vs the static link (revised proposal, ' cons '), PRIMARY per jamming scenario']));
-verifyNotEmpty(tc, strfind(k4, ['CNN contribution, ' tag ' (core: rule + escalation vs the same escalation without ' ...
+verifyNotEmpty(tc, strfind(k4, ['CNN contribution, ' prim ' (core: rule + escalation vs the same escalation without ' ...
     'the detector): PER reduction 54.5% [']));
 verifyNotEmpty(tc, strfind(k4, ['onset->detection 0.5/1 (never 33%) vs 2/3 (never 0%), detection->restored 2.5/3 ' ...
     '(never 0%) vs 5/5 (never 67%)']));
@@ -7766,8 +7767,8 @@ verifyNotEmpty(tc, strfind(k4, ['onset->detection 1/2 (never 25%) vs 2.5/3 (neve
     '(never 0%) vs 5.5/6 (never 50%)']));
 verifyEmpty(tc, strfind(k4, 'core action set (revised proposal): PENDING'));
 d5 = K([K.id] == 5).detail; k5 = strjoin(d5, newline);
-verifyNotEmpty(tc, strfind(k5, ['recovery time (revised proposal, ' tag ': first confirmed alarm']));
-l5 = d5(contains(d5, ['recovery time (revised proposal, ' tag ': first']) & contains(d5, 'recoverable threat episodes (5)'));
+verifyNotEmpty(tc, strfind(k5, ['recovery time (revised proposal, ' prim ': first confirmed alarm']));
+l5 = d5(contains(d5, ['recovery time (revised proposal, ' prim ': first']) & contains(d5, 'recoverable threat episodes (5)'));
 verifyNumElements(tc, l5, 1);
 verifyNotEmpty(tc, strfind(l5{1}, ['core: rule + escalation: onset->detection 1/1 (never 20%), detection->restored 2.5/5 ' ...
     '(never 0%), T_rec from onset 3/6 (never 20%)']));
@@ -7775,7 +7776,7 @@ l5 = d5(contains(d5, ['recovery time (revised proposal, ' cons ': first']) & con
 verifyNumElements(tc, l5, 1);
 verifyNotEmpty(tc, strfind(l5{1}, ['core: rule + escalation: onset->detection 1/2 (never 17%), detection->restored 3/5 ' ...
     '(never 0%), T_rec from onset 4/6 (never 17%)']));
-verifyNotEmpty(tc, strfind(k5, ['goodput after onset in bit/s (' tag '; nominal payload 50000 bit/s)']));
+verifyNotEmpty(tc, strfind(k5, ['goodput after onset in bit/s (' prim '; nominal payload 50000 bit/s)']));
 verifyNotEmpty(tc, strfind(k5, ['goodput after onset in bit/s (' cons '; nominal payload 50000 bit/s)']));
 verifyNotEmpty(tc, strfind(k5, 'goodput after onset in bit/s (full action set; nominal payload 50000 bit/s)'));
 verifyNotEmpty(tc, strfind(k5, ' | 41667 ['));

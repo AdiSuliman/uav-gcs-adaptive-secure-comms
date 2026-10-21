@@ -35,8 +35,8 @@ function [L, lines] = lect_kpis(ALL, POL, LBL, iDQN, scen, payload_bps, period_m
 %   detector there (rule_core, blind_core; rule_core_policy.m) against the same static link,
 %   the CNN's share rule_core against blind_core; [] when neither ran. Its primary reading
 %   is on the episodes a core configuration recovers (recoverable_core); L.core.all36 holds
-%   the same on the episodes any of the 36 recovers (a second, conservative line: an episode
-%   only a configuration outside the core set restores counts against it).
+%   the same on the episodes any of the 36 recovers (a second line: episodes only a
+%   configuration outside the core set restores are kept in).
 JAM = {'jamming', 'noise_burst', 'reactive_jamming', 'sweeping_jammer', 'tone_jamming'};
 BAND = {'wideband', '', '', '', 'narrowband'};
 TARGET = 30; N_RUN = 5; B = 2000;
@@ -85,9 +85,9 @@ lines{end+1} = sprintf(['Core action set {%s} (the revised proposal''s predefine
     'configuration recovers (%d recoverable threat episodes, %d jamming):'], strjoin(C.core_actions, ', '), ...
     strjoin(C.ladder_core, ' -> '), sum(Xc.mrec), sum(Xc.mj));
 [S, l] = core_reading(Xc, kc, kcr, 'Core action set: ', 1200, 1500); lines = [lines, l];
-lines{end+1} = sprintf(['Core action set, conservative line: the episodes any of the 36 configurations recovers ' ...
-    '(%d recoverable threat episodes, %d jamming; one only a configuration outside the core set restores counts ' ...
-    'against it):'], sum(X.mrec), sum(X.mj));
+lines{end+1} = sprintf(['Core action set, second line: the episodes any of the 36 configurations recovers ' ...
+    '(%d recoverable threat episodes, %d jamming; those only a configuration outside the core set restores kept ' ...
+    'in):'], sum(X.mrec), sum(X.mj));
 [S36, l] = core_reading(X, kc, kcr, 'Core action set (recoverable by the 36): ', 2200, 2500); lines = [lines, l];
 S36.recoverable = 'all36';
 L.core = struct('actions', {C.core_actions}, 'ladder', {C.ladder_core}, 'recoverable', 'core', 'verdict', S.verdict, ...

@@ -36,7 +36,7 @@
 % rule_core and blind_core); the PER verdict per lecturer scenario (narrowband tone_jamming,
 % wideband jamming) first, the five jamming threats pooled as the extension; the core set on
 % the episodes a core configuration recovers, and again on those any of the 36 recovers
-% (conservative); from results/policy_evaluation.mat's KP.lect (lect_kpis.m), PENDING while
+% (second line); from results/policy_evaluation.mat's KP.lect (lect_kpis.m), PENDING while
 % that file predates it.
 % Beside KPI 1, the three-state CNN on spectrograms only (deliverable 2, train_core_cnn.m, stage
 % B3c): its single reading of the fourth test set from results/core_cnn.mat, PENDING until then.
@@ -280,10 +280,11 @@ if isfile(F.pol)
         LECT.pol = P.KP.lect;
         det = [det, per_lines(P.KP.lect, P.KP.lect, 'rule_esc', 'full action set')];
         if has_core(P.KP.lect)
-            det = [det, per_lines(P.KP.lect, P.KP.lect.core, 'rule_core', core_tag(P.KP.lect.core))];
+            det = [det, per_lines(P.KP.lect, P.KP.lect.core, 'rule_core', [core_tag(P.KP.lect.core) ...
+                ', recoverable by a core configuration'])];
             if isfield(P.KP.lect.core, 'all36')
                 det = [det, per_lines(P.KP.lect, P.KP.lect.core.all36, 'rule_core', [core_tag(P.KP.lect.core) ...
-                    ', conservative: recoverable by any of the 36 configurations'])];
+                    ', second line: recoverable by any of the 36 configurations'])];
             end
         else
             det{end+1} = ['beside KPI 4, PER vs the static link on the core action set (revised proposal): PENDING, ' ...
@@ -372,10 +373,11 @@ if isfile(F.pol)
     if isfield(P.KP, 'lect')                          % revised proposal: recovery time from detection, goodput in bit/s
         det = [det, rec_lines(P.KP.lect, P.KP.lect, 'full action set')];
         if has_core(P.KP.lect)
-            det = [det, rec_lines(P.KP.lect, P.KP.lect.core, core_tag(P.KP.lect.core))];
+            det = [det, rec_lines(P.KP.lect, P.KP.lect.core, [core_tag(P.KP.lect.core) ...
+                ', recoverable by a core configuration'])];
             if isfield(P.KP.lect.core, 'all36')
                 det = [det, rec_lines(P.KP.lect, P.KP.lect.core.all36, [core_tag(P.KP.lect.core) ...
-                    ', conservative: recoverable by any of the 36 configurations'])];
+                    ', second line: recoverable by any of the 36 configurations'])];
             end
         else
             det{end+1} = ['beside KPI 5, recovery time from detection and goodput in bit/s on the core action set ' ...
