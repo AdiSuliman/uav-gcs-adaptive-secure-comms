@@ -7394,3 +7394,143 @@ verifyEqual(tc, regexp(line, '##### STAGE [A-Za-z0-9]* done', 'match', 'once'), 
 verifyNotEmpty(tc, regexp(line, '^##### STAGE ([A-Za-z0-9]*) done', 'once'));
 end
 
+
+%% ---------- three-state spectrogram CNN (deliverable 2) ----------
+function test_core_cnn_frames(tc)
+% The three link states are the sub-runs of none, tone_jamming and jamming; a frame whose
+% frame-rule or per-cycle label is not its sub-run's class is left out and counted; clean
+% frames of another threat's sub-run are no state.
+classes = {'none', 'jamming', 'path_loss', 'tone_jamming'};
+cr = [1 1 2 2 4 4 3 3 1]';
+yf = [1 1 2 1 4 4 1 3 1]';
+yc = yf; yc(9) = 2;
+S = struct('class_run', cr, 'Y_frame', categorical(yf, 1:4, classes), 'Y', categorical(yc, 1:4, classes));
+[m, y, info] = core_cnn_frames(S, classes);
+verifyEqual(tc, m', logical([1 1 1 0 1 1 0 0 0]));
+verifyEqual(tc, y', [1 1 3 2 2]);
+verifyEqual(tc, info.n_sub, [3 2 2]);
+verifyEqual(tc, info.n_off, [1 0 1]);
+verifyEqual(tc, core_cnn_config().groups, {'none', 'tone_jamming', 'jamming'});
+verifyError(tc, @() core_cnn_frames(rmfield(S, 'class_run'), classes), 'core_cnn_frames:field');
+verifyError(tc, @() core_cnn_frames(S, classes, {'none', 'spoofing'}), 'core_cnn_frames:class');
+verifyError(tc, @() core_cnn_frames(S, classes([2 1 3 4])), 'core_cnn_frames:classes');
+end
+
+function test_core_cnn_logp_window(tc)
+% The temporal decision: the mean of log(max(p, 1e-6)) over the last N frames of the frame's
+% own sub-run in position order, shorter at the sub-run's start, never across sub-runs.
+P = [0.5 0.3 0.2; 0.1 0.8 0.1; 0.2 0.2 0.6; 0.7 0.2 0.1; 0.3 0.3 0.4];
+run = [1 1 1 2 2]'; pos = [3 1 2 5 4]';
+lp = log(P);
+[L, rk] = core_cnn_eval('logp', P, run, pos, 2);
+verifyEqual(tc, rk', [3 1 2 2 1]);
+verifyEqual(tc, L(2, :), lp(2, :), 'AbsTol', 1e-12);
+verifyEqual(tc, L(3, :), mean(lp([2 3], :)), 'AbsTol', 1e-12);
+verifyEqual(tc, L(1, :), mean(lp([3 1], :)), 'AbsTol', 1e-12);
+verifyEqual(tc, L(5, :), lp(5, :), 'AbsTol', 1e-12);
+verifyEqual(tc, L(4, :), mean(lp([5 4], :)), 'AbsTol', 1e-12);
+L9 = core_cnn_eval('logp', P, run, pos, 9);
+verifyEqual(tc, L9(1, :), mean(lp(1:3, :)), 'AbsTol', 1e-12);
+P(1, 1) = 0;
+L1 = core_cnn_eval('logp', P, run, pos, 1);
+verifyEqual(tc, L1(1, 1), log(1e-6), 'AbsTol', 1e-12);
+verifyEqual(tc, L1(2:end, :), log(P(2:end, :)), 'AbsTol', 1e-12);
+end
+
+function test_core_cnn_metrics(tc)
+% Three-state confusion with an 'other' column (another class is an error, never a hit),
+% recall, precision over the three states' columns, F1 and macro-F1 as three_state_view.m;
+% false alarms: clean frames read as anything else, and the part read as a jamming state.
+y  = [1 1 1 1 2 2 2 3 3 3]';
+yp = [1 1 2 0 2 2 3 3 3 1]';
+M = core_cnn_eval('metrics', y, yp, 3);
+verifyEqual(tc, M.cm, [2 1 0 1; 0 2 1 0; 1 0 2 0]);
+verifyEqual(tc, M.n, [4 3 3]);
+verifyEqual(tc, M.recall, [0.5 2/3 2/3], 'AbsTol', 1e-12);
+verifyEqual(tc, M.precision, [2/3 2/3 2/3], 'AbsTol', 1e-12);
+f1 = 2 * M.precision .* M.recall ./ (M.precision + M.recall);
+verifyEqual(tc, M.f1, f1, 'AbsTol', 1e-12);
+verifyEqual(tc, M.macro_f1, mean(f1), 'AbsTol', 1e-12);
+verifyEqual(tc, M.fa, 0.5, 'AbsTol', 1e-12);
+verifyEqual(tc, M.fa_jam, 0.25, 'AbsTol', 1e-12);
+V = three_state_view([2 1 0 1; 0 2 1 0; 1 0 2 0; 0 0 0 5], {'none', 'tone_jamming', 'jamming', 'spoofing'});
+verifyEqual(tc, V.cm, M.cm);
+verifyEqual(tc, V.macro_f1, M.macro_f1, 'AbsTol', 1e-12);
+M2 = core_cnn_eval('metrics', [1 1 2]', [1 3 2]', 3);           % a state without frames is left out of the mean
+verifyEqual(tc, M2.macro_f1, mean(M2.f1(1:2)), 'AbsTol', 1e-12);
+verifyEqual(tc, M2.f1(3), 0);
+verifyTrue(tc, isnan(core_cnn_eval('metrics', [2 3]', [2 3]', 3).fa));
+end
+
+function test_core_cnn_choose_window(tc)
+% The window N on validation: macro-F1 of the windowed decision on folds of whole sub-runs;
+% the shortest N within one standard error of the best. Every third frame leans to a wrong
+% state: N = 1 errs there, every window from 3 cycles reads all frames right.
+nr = 12; F = 10; P = zeros(nr * F, 3); y = zeros(nr * F, 1); run = y; pos = y;
+for r = 1:nr
+    s = mod(r - 1, 3) + 1; w = mod(s, 3) + 1; o = 6 - s - w;
+    for j = 1:F
+        i = (r - 1) * F + j; y(i) = s; run(i) = 100 + r; pos(i) = j;
+        if mod(j, 3) == 0, P(i, [s w o]) = [0.3 0.6 0.1]; else, P(i, [s w o]) = [0.5 0.25 0.25]; end
+    end
+end
+[N, T] = core_cnn_eval('choose', P, y, run, pos, [1 3 5 8 12], 5, 61);
+verifyEqual(tc, N, 3);
+verifyLessThan(tc, T.cv(1), 1);
+verifyEqual(tc, T.cv(2:end), ones(1, 4), 'AbsTol', 1e-12);
+verifyEqual(tc, size(T.fold), [5 5]);
+verifyEqual(tc, T.best, 3);
+P = 0.25 * ones(size(P)); P(sub2ind(size(P), (1:numel(y))', y)) = 0.5;   % every frame right: the per-frame decision
+verifyEqual(tc, core_cnn_eval('choose', P, y, run, pos, [1 3 5 8 12], 5, 61), 1);
+end
+
+function test_core_cnn_boot(tc)
+% Bootstrap over whole sub-runs: a perfect reader has a point interval, the paired difference
+% of a reader with itself is 0, the intervals hold the point, the Eb/N0 bins are kept, and the
+% stream is fixed by its seed.
+nr = 12; F = 5;
+run = kron((1:nr)', ones(F, 1)); y = mod(run - 1, 3) + 1; eb = 3 * mod(run, 2);
+y2 = y; y2(run <= 2) = 0;
+B = core_cnn_eval('boot', y, [y, y2, y], run, eb, 3, 200, 7);
+verifyEqual(tc, B.macro_f1(1, :), [1 1]);
+verifyEqual(tc, B.diff(1, :), [0 0]);
+verifyEqual(tc, B.diff(3, :), [0 0]);
+verifyLessThan(tc, B.diff(2, 2), 1e-12);
+m2 = core_cnn_eval('metrics', y, y2, 3).macro_f1;
+verifyLessThanOrEqual(tc, B.macro_f1(2, 1), m2); verifyGreaterThanOrEqual(tc, B.macro_f1(2, 2), m2);
+verifyEqual(tc, size(B.recall), [3 3 2]);
+verifyEqual(tc, B.ebno, [0 3]);
+verifyEqual(tc, size(B.macro_f1_ebno), [3 2 2]);
+verifyEqual(tc, B.fa(1, :), [0 0]);
+verifyEqual(tc, core_cnn_eval('boot', y, [y, y2], run, eb, 3, 200, 7).macro_f1, B.macro_f1(1:2, :));
+end
+
+function test_core_cnn_verdict(tc)
+% The lecturer's thresholds: met (committed) when the 95% interval clears the threshold, met
+% (not committed) when only the point does, not met otherwise.
+v = @(p, c, t, d) core_cnn_eval('verdict', p, c, t, d);
+verifyEqual(tc, v(0.9, [0.86 0.93], 0.85, '>='), 'met (committed)');
+verifyEqual(tc, v(0.87, [0.83 0.9], 0.85, '>='), 'met (not committed)');
+verifyEqual(tc, v(0.84, [0.8 0.88], 0.85, '>='), 'not met');
+verifyEqual(tc, v(0.03, [0.02 0.045], 0.05, '<='), 'met (committed)');
+verifyEqual(tc, v(0.04, [0.02 0.06], 0.05, '<='), 'met (not committed)');
+verifyEqual(tc, v(0.06, [0.04 0.08], 0.05, '<='), 'not met');
+verifyEqual(tc, v(0.9, [NaN NaN], 0.85, '>='), 'met (not committed)');
+verifyEqual(tc, v(NaN, [NaN NaN], 0.85, '>='), 'no frames');
+verifyError(tc, @() v(0.9, [0.8 0.9], 0.85, '>'), 'core_cnn_eval:dir');
+verifyEqual(tc, core_cnn_config().thr, struct('macro_f1', 0.85, 'recall', 0.85, 'false_alarm', 0.05));
+end
+
+function test_core_cnn_delay(tc)
+% Detection delay: cycles from a jamming sub-run's first frame to its first frame read as its
+% own state (NaN never); clean sub-runs are not counted.
+y = [2 2 2 2 3 3 3 3 1 1]'; run = [1 1 1 1 2 2 3 3 4 4]'; pos = [4 3 2 1 1 2 1 2 1 2]';
+yp = [2 2 1 0 3 1 2 2 2 2]';                                      % run 1 by position: 0 1 2 2
+D = core_cnn_eval('delay', y, yp, run, pos, [2 3]);
+verifyEqual(tc, D.n, [1 2]);
+verifyEqual(tc, D.median, [2 0]);
+verifyEqual(tc, D.p90, [2 0]);
+verifyEqual(tc, D.never, [0 0.5]);
+verifyEqual(tc, sort(D.state), [2 3 3]);
+end
+
