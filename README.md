@@ -4,7 +4,7 @@
 **Students:** Adi Suliman, Bar Dvir Hassan
 **Supervisor:** Golan Ein-Tzvi
 **Platform:** MATLAB R2026a + Simulink (Communications, DSP System, Signal Processing, Deep Learning, Statistics and Machine Learning, Parallel Computing toolboxes)
-**Status (2026-10-18):** the v7 full run is in progress on code 9b5c9f1 (docs/DECISIONS.md D86-D89, docs/ROADMAP.md). Profiles 1 and 3 have finished their detector stages. KPI 1 (third test set, read once), KPI 2 (nested) and the unseen-Eb/N0 and unseen-severity checks are read ("v7 readings so far" below). Profile 1 is building its frame pools (C1p); the decision-layer KPIs and profile 2 follow. The overview describes v7; the section "Results (v4)" is the v4 final reading of 2026-09-30, kept until the v7 results replace it.
+**Status (2026-10-21):** the v7 full run is in progress on code 9b5c9f1 (docs/DECISIONS.md D86-D92, docs/ROADMAP.md). The lecturer's revised proposal of 2026-10-20 is the official scope (D92); everything else built stays as extensions without commitment. Profile 2 (two antennas) is dropped. Profiles 1 and 3 have finished their detector stages. KPI 1 (third test set, read once), KPI 2 (nested) and the unseen-Eb/N0 and unseen-severity checks are read ("v7 readings so far" below). Profile 1 is building its frame pools (C1p, 44 of 93 cells on 2026-10-21); profile 3 waits for its deployment; the decision-layer results follow. The overview describes v7; the section "Results (v4)" is the v4 final reading of 2026-09-30, kept until the v7 results replace it.
 
 ---
 
@@ -12,7 +12,7 @@
 
 A closed-loop simulation of the command uplink from a ground control station (GCS) to a small UAV under electronic-warfare threats. A Simulink link model, validated against theory, generates its own labeled data; a CNN on the spectrogram plus link measurements detects the threat and flags threats it has never seen; a decision layer (expert rule, a class table and a Double DQN with a safety shield) chooses a countermeasure; and every policy is compared on measured frames of the real link that were never used in training.
 
-- **Link:** GCS → UAV command uplink, QPSK, 1 Msym/s, RRC (roll-off 0.25, span 10, 4 samples/symbol), 1032-bit frames, 2.4 GHz. Each frame has a quiet slot, short and long training and pilot blocks. Rician K drawn per flight (−5 to 20 dB), sum-of-sinusoids Doppler fading for 0–161 km/h on a tapped delay line (RMS delay spread drawn per flight for our signal and every interferer, Rodriguez-Pineiro et al.), hover in wind and banked turns at measured bank angles and yaw rates, the GCS direction drawn per flight. The GCS is an AD9361-class radio on a tracked 12 dBi antenna under the 10.2 dBm licence-exempt e.i.r.p. cap (10 dBm in any 1 MHz); the UAV has two, three or four spatially separated omni antennas (profiles 2, 1, 3), each with its own airframe loss.
+- **Link:** GCS → UAV command uplink, QPSK, 1 Msym/s, RRC (roll-off 0.25, span 10, 4 samples/symbol), 1032-bit frames, 2.4 GHz. Each frame has a quiet slot, short and long training and pilot blocks. Rician K drawn per flight (−5 to 20 dB), sum-of-sinusoids Doppler fading for 0–161 km/h on a tapped delay line (RMS delay spread drawn per flight for our signal and every interferer, Rodriguez-Pineiro et al.), hover in wind and banked turns at measured bank angles and yaw rates, the GCS direction drawn per flight. The GCS is an AD9361-class radio on a tracked 12 dBi antenna under the 10.2 dBm licence-exempt e.i.r.p. cap (10 dBm in any 1 MHz); the UAV has three or four spatially separated omni antennas (profiles 1, 3; profile 2, with two, is dropped, D92), each with its own airframe loss.
 - **Receiver:** a real receiver: timing and frequency synchronization from the training, channel estimation from the training and the pilots, decision-directed passes; MRC combining, adaptive MMSE combining as the spatial countermeasure (nulls an interferer arriving from another direction). The ideal receiver (known timing, frequency and symbols) remains only as the validation reference. Everything the detector and the decision layer see is measured at the receiver: CRC-32 packet check, BER estimated from the combiner output, SINR and envelope correlation against the receiver's own decisions, interference over thermal, the spatial coherence of the quiet slot, the predicted MMSE gain and direction of the interference from the channel estimator, and the deepest dip of each antenna's channel gain. Between our frames (one per 20 ms decision cycle) the receiver is idle and reads each antenna's RSSI there (a sample every 54 us, 128 us average, 1 dB steps, as the CC2420 Grimaldi et al. read; the antenna's ±2 dB calibration error), so it sees what is on the air for the whole cycle: packets, sweeps, bursts and their lengths, timing and levels feed the temporal fusion, and the gated threats (WLAN, sweeping jammer) are labelled per decision cycle, while on the air anywhere in it (D85).
 - **Threats (10 + clean link):** jamming, reactive jamming, sweeping jammer, tone jamming, noise burst, spoofing (a counterfeit GCS), benign interference (WLAN traffic), path loss, antenna fault (open connector), airframe shadowing; eight severity levels in the detector dataset, five in the decision layer; ten pairs and four triples of threats. Every interferer reaches the array from its own direction, drawn per seeded run (flight geometry).
 - **Countermeasures (36 configurations):** one choice per domain (Liu et al.'s combined action): frequency (none, channel switch, frequency diversity) × space (none, spatial diversity with MMSE) × link budget (none, rate reduction, power control, FEC with interleaving, rate + power, power + FEC).
@@ -67,7 +67,7 @@ A closed-loop simulation of the command uplink from a ground control station (GC
 1. MATLAB R2026a with Simulink, Communications, DSP System, Deep Learning and Statistics toolboxes; Parallel Computing for the frame pools.
 2. Open MATLAB in the repository folder: `startup.m` puts `code/` on the path.
 3. Full pipeline: `matlab -batch "main"` from the repository folder. The flags at the top of `code/main.m` choose the stages.
-4. Single stages: `matlab -batch "run_stage('B2','B3')"`; `run_stage('smoke', ...)` runs a reduced version to check the chain. A full run was planned at about 6-7.2 days per profile and 14.4-19.0 days for the three profiles (docs/DECISIONS.md, "Cost and resources, re-derived (2026-10-16)"). Profile 1's C1p runs slower: from its measured rate it is projected at about 155-175 h, against the planned 90-105 h. C2 takes about 22-24 h, not the planned 12 h (docs/DECISIONS.md, the bracket in the cost note). The campaign is now projected to end about 2026-11-10/15 (DECISIONS D91; docs/ROADMAP.md).
+4. Single stages: `matlab -batch "run_stage('B2','B3')"`; `run_stage('smoke', ...)` runs a reduced version to check the chain. A full run was planned at about 6-7.2 days per profile and 14.4-19.0 days for the three profiles (docs/DECISIONS.md, "Cost and resources, re-derived (2026-10-16)"). Profile 1's C1p runs slower: from its measured rate it is projected at about 155-175 h, against the planned 90-105 h. C2 takes about 22-24 h, not the planned 12 h (docs/DECISIONS.md, the bracket in the cost note). Profile 1's decision-layer results are projected for early November and profile 3's for mid November, the final LAT and KPI after that (estimates of 2026-10-21; DECISIONS D92; docs/ROADMAP.md).
 5. Unit tests: `runtests('code/tests')`.
 6. Operator console: `demo_gui` (after the pipeline has produced `data/` and `results/`).
 7. 3D view (Simulink 3D Animation and UAV Toolbox): `v3d_live` for the live console, `v3d_videos` for the defense videos.
@@ -84,7 +84,7 @@ A closed-loop simulation of the command uplink from a ground control station (GC
 | C1c, C1d | clean link on 300 new geometries per Eb/N0 (validation and test sets, KPI 6; D82); path-loss drop threshold | C1c ~11-13 h | - |
 | C2, C2e | DQN training (4 monitors × 2 drop thresholds × 3 false-switch penalties × 3 seeds = 72 runs at γ 0.5, and 2 reward-weight retrains); every policy on the test pools | C2 ~22-24 h for the 72 runs at v6's 18-20 min per run (d90_loop.md sec. 7; D86's 12 h counted 36 runs); about 38-42 h with d90's 108 runs (D90); C2e ~0.5-1.5 h | - |
 | C2g | combined threats never trained on: DQN retrained without each combination | ~3.6 h | - |
-| SURV, SURV3 | survivability map; 2 vs 3 antennas vs relay path | SURV ~2.6-4.2 h, SURV3 ~3.6-6 h | - |
+| SURV, SURV3 | survivability map; the antennas of each profile (the relay path is not reported, D92) | SURV ~2.6-4.2 h, SURV3 ~3.6-6 h | - |
 | LAT, KPI, DASH | latency per decision cycle, proposal KPIs, dashboard | LAT ~1-6 min | - |
 
 ---
@@ -124,7 +124,7 @@ A closed-loop simulation of the command uplink from a ground control station (GC
 - **Combinations never trained on** (`experiment_combo_generalization.m`): the DQN is retrained without one combined threat at a time and tested on it, next to the DQN that trained on it, rule + escalation and the table.
 
 ### Survivability boundary (D30, D46, D59)
-Every threat × severity × Eb/N0 through the 36 configurations on one seeded run shared by all actions (in-band threats up to 28 dB JSR, path loss up to 26 dB): recoverable (BER and packet loss ≤ 2× clean), marginal (≤ 5×) or not, and which configuration achieves it. Map A uses only configurations without goodput loss, Map B any configuration. Directional threats are mapped with the interferer 45° and 10° from the GCS direction. `experiment_survivability_options.m` repeats recoverability for the combined threats and the directional threats at high severity with 2 antennas, 3 antennas and 2 antennas plus a relay path (deliverable 8 of the proposal). The system keeps two antennas; the number of antennas is a parameter (`n_rx`).
+Every threat × severity × Eb/N0 through the 36 configurations on one seeded run shared by all actions (in-band threats up to 28 dB JSR, path loss up to 26 dB): recoverable (BER and packet loss ≤ 2× clean), marginal (≤ 5×) or not, and which configuration achieves it. Map A uses only configurations without goodput loss, Map B any configuration. Directional threats are mapped with the interferer 45° and 10° from the GCS direction. `experiment_survivability_options.m` repeats recoverability for the combined threats and the directional threats at high severity with 2 antennas, 3 antennas and 2 antennas plus a relay path (deliverable 8 of the proposal; the relay path is not reported since D92). The system keeps two antennas; the number of antennas is a parameter (`n_rx`).
 
 ---
 
@@ -143,11 +143,22 @@ Every threat × severity × Eb/N0 through the 36 configurations on one seeded ru
 
 `measure_all_kpis.m` writes the status of each (MET / NOT MET / STALE / MISSING) to `results/kpi_summary.txt`; `build_kpi_dashboard.m` draws `results/kpi_dashboard.png`.
 
+**The lecturer's KPIs (revised proposal of 2026-10-20, D92).** The official scope; the eight KPIs above stay as extensions without commitment. Narrowband = `tone_jamming`, wideband = `jamming`; static link = `none` / `no_action`, conventional adaptive = `blind_esc`, CNN-based adaptive = `rule_esc`.
+
+| KPI | Target | Source |
+|---|---|---|
+| BER model against theory | as KPI 3 | `validate_phy.m` |
+| Macro-F1 on an independent test set | ≥ 85% | `eval_detector.m`; `three_state_view.m` (clean / narrowband / wideband, from the saved confusion matrix) |
+| False alarms in clean states | ≤ 5% | `evaluate_policies.m` (KPI 6) |
+| Recall per jamming type | ≥ 85% | `three_state_view.m` |
+| PER reduction against the static link, recoverable scenarios | ≥ 30% | `per_metrics.m`, `per_reduction.m`, `lect_kpis.m` (branch `lect-kpi`, untested) |
+| Recovery time (from detection; onset to detection apart), goodput, CNN contribution against the conventional mechanism | reported; no target | `lect_kpis.m` |
+
 ---
 
 ## v7 readings so far (2026-10-18; partial)
 
-The v7 full run is in progress on code `9b5c9f1` (docs/ROADMAP.md, "v7 full run: status"). The detector and link stages of profiles 1 and 3 are done. The decision-layer KPIs (4-8) come after C2e, and profile 2 runs after profile 1. Every number below was read on data never used for training or selection. The log lines are in `C:\Users\Adi Suliman\uav-gcs-logs\v7_d86\`, outside the repository; docs/PROJECT_LOG.md, "Official detector readings", gives them in full.
+The v7 full run is in progress on code `9b5c9f1` (docs/ROADMAP.md, "v7 full run: status"). The detector and link stages of profiles 1 and 3 are done. The decision-layer KPIs (4-8) come after C2e. Every number below was read on data never used for training or selection. The log lines are in `C:\Users\Adi Suliman\uav-gcs-logs\v7_d86\`, outside the repository; docs/PROJECT_LOG.md, "Official detector readings", gives them in full.
 
 | # | KPI | Profile 1 (3 antennas) | Profile 3 (4 antennas) | Status |
 |---|---|---|---|---|
@@ -331,7 +342,7 @@ An Unreal Engine view of the closed loop, driven from MATLAB (Simulink 3D Animat
 - An episode replays one flight's 20 frames (0.4 s of channel at the 20 ms cycle) over its 30 cycles (a rolling-in shadowing flight its 38 frames in order from its lead-in, docs/d85_onset.md); pointing, shadowing, tracker and altitude are fixed per flight, and changes over seconds are covered across flights by the bands of the edge map.
 - Reactive jamming is the hardest unknown threat (AUROC 0.641): from the receiver it looks like barrage jamming on a continuous uplink.
 - Latency is measured on a desktop with a GPU detector, not on UAV hardware.
-- N antennas null up to N−1 interferers; one antenna more or fewer and a relay path are evaluated per profile as experiments.
+- N antennas null up to N−1 interferers; one antenna more or fewer is evaluated per profile as an experiment; the relay path is not reported (D92).
 - Hardware validation (SDR); the return link that carries the GCS reconfiguration and command authentication; keyed or randomised training against protocol-aware attacks; online learning.
 
 ---
@@ -358,4 +369,4 @@ Numbered as in the updated project proposal (v2, IEEE):
 
 ---
 
-**Last updated:** 2026-10-18 (D91). **Status:** v7 full run in progress; the detector readings of profiles 1 and 3 are done ("v7 readings so far"); the v4 results above stay until the v7 results replace them. Next: the go/no-go of 2026-10-21 on the fusion revision, the decision layer of every profile, the interim report (due 2026-11-01).
+**Last updated:** 2026-10-21 (D92). **Status:** v7 full run in progress; the detector readings of profiles 1 and 3 are done ("v7 readings so far"); the v4 results above stay until the v7 results replace them. Next: `lect-kpi` merged and the Plan A stop (fusion revision, fourth test set) at the end of profile 1's SURV3, the decision layer of profiles 1 and 3, the interim report (due 2026-11-01).

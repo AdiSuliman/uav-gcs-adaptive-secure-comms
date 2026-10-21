@@ -1,6 +1,6 @@
 # Project Execution Log (Living Document)
 
-**Last updated:** 2026-10-18. The newest entries are at the end of the file (v7, 2026-10-12 to 2026-10-18).
+**Last updated:** 2026-10-21. The newest entries are at the end of the file (v7, 2026-10-12 to 2026-10-21).
 
 *Historical header, as written on 2026-09-23 (Session 12); the headline numbers below are from 2026-09-21 and are kept as they were written:* **Status:** KPI #2 now measured against the no-attack link as the proposal defines it (D27): 95.6%, 37/41 runs restored within 2× clean. Work proceeds item by item through the agreed improvement plan (Session 12). Speed-diverse full re-run (D25) and demo_gui v3 (D26) from Session 11 unchanged.
 
@@ -1042,3 +1042,31 @@ Classes below 90% F1 on the third test set (B3m, read once), with the levers. So
 - **KPI 2** (0.769 / 0.763): an unknown lost-branch threat is close to its known sibling class, so for the action it counts as 'known'; an unknown path loss looks like a weaker clean link.
   - Untried: Outlier Exposure (Hendrycks 2019, not in the library), per-branch and level-step novelty in the score, and an action-aware reading beside KPI 2.
   - The OOD score is part of the detector identity, so any OOD change after C1p means a pool rebuild.
+
+### v7: the lecturer's revised proposal and the scope decision (2026-10-20/21)
+- **2026-10-20, the lecturer's revised proposal.** The user decided it is the official one, unchanged (DECISIONS D92).
+  - Deliverables: the simulation (QPSK, Rician, clean + narrowband and wideband jamming at several JSR levels), a labelled spectrogram dataset and a CNN (clean / narrowband / wideband), rule-based recovery (channel switch, rate adaptation), the closed-loop integration, a comparison of three configurations (static link; conventional adaptive on link metrics only; CNN-based adaptive), the results (graphs, confusion matrix, tables).
+  - KPIs: BER model validation against theory; macro-F1 ≥ 85% on an independent test set; false alarms ≤ 5% in clean states; recall ≥ 85% per jamming type; PER reduction ≥ 30% against the static link in recoverable scenarios; recovery time from detection until the PER stays under a threshold for a fixed window, with the onset-to-detection time measured separately; goodput; the CNN's contribution against the conventional mechanism as an analysis metric, not a promise.
+  - Gantt unchanged except "literature with a focus on Jamming" and "DQN agent - optional".
+  - Mapping: narrowband = `tone_jamming`, wideband = `jamming` (barrage); static = `none` / `no_action`, conventional = `blind_esc`, CNN-based = `rule_esc`.
+- **Everything else built stays as extensions without commitment** (ten threats, 3 and 4 UAV antennas, tracked GCS antenna, real receiver, hybrid network with link features, unknown-threat detection, 36 configurations, DQN, GUI, survivability map, EDGE, C2g, C2u, OHP / GCSA on profile 1). Nothing is rerun to remove any of it.
+- **Dropped (2026-10-21):**
+  - profile 2: `v7_d86/p2.abandon` written 06:49; the takeover ends the profile 2 track and the final phase skips it;
+  - the relay path (the SURV3 what-if) and the altitude axis of the envelope are not reported;
+  - OHP and GCSA are skipped on profile 3 by the new `profile.json` field `skip_stages`, to be set at profile 3's deployment;
+  - Python is dropped from the tools.
+- **New code for the lecturer's KPIs** (worktree `C:\Users\Adi Suliman\uav-gcs-lectkpi`, branch `lect-kpi` off `v7-deploy-d91`; commits `27803c3`, `2562605`, `c8ca607`, `0be0662`):
+  - `per_metrics.m`, `per_reduction.m`, `lect_kpis.m`: PER reduction with a paired geometry-bootstrap interval; recovery time from detection (`t_rec_det`) and onset-to-detection time (`t_conf`); goodput in bit/s at 50 kb/s nominal;
+  - `three_state_view.m`: 3-state recall and macro-F1 from the saved confusion matrix, no new test reading;
+  - `profile_skip_stages.m` and `run_stage.m`.
+  - The tests are written and have not run (the gate is busy). To be tested, reviewed and merged into `v7-deploy-d91` before the Plan A stop, so that profile 1's C2e and KPI report read them.
+- **2026-10-21, morning status.**
+  - Profile 1's C1p: 44 of 93 cells.
+  - Profile 3 waits before C1p (`p3_c1p.hold`) for its deployment.
+  - The processor boost is off since 2026-10-20 12:40; stages run up to about 35% slower.
+  - The user approved the Plan A stop, at the end of profile 1's SURV3 (about 25-26.10): the fusion revision 'branch evidence, phi = 1', the B3-B4s rerun, the rehearsal, one reading of the fourth test set, the re-key, and the resume from C1d.
+  - Updated projections (estimates): profile 1's decision-layer results early November; profile 3 mid November; the final LAT and KPI after that. The table of 2026-10-18 above is superseded.
+- **2026-10-21, results audit.**
+  - All headline numbers were confirmed from the primary files: KPI 1 93.58 / 94.19, KPI 2 0.769 / 0.763, KPI 3 7/7, the dataset, the fusion revision.
+  - 58 wording issues about what a number measures were found in the interim-report draft. Example: the 2.67 / 3.85 ms latency is the detector forward pass plus the score.
+  - The per-class "Acc" in `eval_detector` is recall.
