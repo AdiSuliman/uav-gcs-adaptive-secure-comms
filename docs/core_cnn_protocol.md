@@ -239,8 +239,9 @@ bash "/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_gated_run.sh" 65 uav-gcs-v7 logs/
 - On the CPU alone (`-singleCompThread`, no GPU), training would take about 3-6 h.
 
 **Memory**
-- Peak RAM about 10-12 GB, while `data/splits.mat` is loaded: about 122 000 images x 64 KB = 8 GB,
-  plus the three-state subset of about 0.95 GB.
+- Peak RAM about 10-14 GB, while `data/splits.mat` is loaded: about 122 000 images x 64 KB = 8 GB,
+  the other fields, the reader's buffers, and the three-state subset of about 0.95 GB. (B3a held
+  18.7 GB, but it keeps three masked copies of the splits.)
 - The fourth set: about 6-7 GB.
 - GPU: under 1.5 GB.
 - The gate figure of the B stages (65 GB of free commit, `docs/d91_deploy.md` 5.0) covers it.
