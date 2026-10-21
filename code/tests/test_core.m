@@ -8585,7 +8585,8 @@ function test_band_per_verdicts(tc)
 % The study's primary PER verdict is rule_core's per jamming type (narrowband, then wideband),
 % as in C2e; the pooled line follows, labelled the second line; blind_core and a sensitivity
 % carry no PRIMARY tag; a type without episodes reads NOT MET; the report's flip check reads
-% only the primary entries.
+% only the primary entries, a primary type without episodes among them (NOT MET), against a
+% sensitivity's entry with episodes of its own.
 mk = @(pol, ty, n, r, lo) struct('policy', pol, 'type', ty, 'n', n, 'red', r, 'lo', lo, 'hi', r + 0.1, 'per', 0.1, ...
     'per_ref', 0.2);
 P = [mk('rule_core', 'pooled', 30, 0.5, 0.2), mk('rule_core', 'narrowband', 10, 0.5, 0.35), ...
@@ -8607,10 +8608,36 @@ verifyFalse(tc, any(contains(L(4:6), 'PRIMARY')));
 verifyFalse(tc, any([V.primary])); verifyFalse(tc, any(contains(L, 'PRIMARY')));
 [V, L] = core_bw_rules('per_verdicts', P([]), 0.3, true);
 verifyEmpty(tc, V); verifyEmpty(tc, L);
+A = core_bw_rules('per_verdicts', [mk('rule_core', 'narrowband', 0, NaN, NaN), mk('rule_core', 'wideband', 20, 0.4, ...
+    0.1), mk('rule_core', 'pooled', 20, 0.4, 0.1), mk('blind_core', 'narrowband', 10, 0.5, 0.35)], 0.3, true);
+verifyEqual(tc, {A(1:2).verdict}, {'NOT MET', 'MET (not committed)'});
+S = @(Pn) core_bw_rules('per_verdicts', Pn, 0.3, false);
+verifyTrue(tc, core_bw_rules('flip', A, S([mk('rule_core', 'narrowband', 10, 0.5, 0.35), ...
+    mk('rule_core', 'wideband', 20, 0.4, 0.1)])));                    % no primary episodes, MET in the sensitivity
+verifyFalse(tc, core_bw_rules('flip', A, S([mk('rule_core', 'narrowband', 0, NaN, NaN), ...
+    mk('rule_core', 'wideband', 20, 0.4, 0.1)])));                    % neither has episodes
+verifyFalse(tc, core_bw_rules('flip', A, S(mk('rule_core', 'wideband', 20, 0.35, 0.1))));   % same words, a type missing
+verifyTrue(tc, core_bw_rules('flip', A, S(mk('rule_core', 'wideband', 20, 0.2, 0.1))));
+verifyFalse(tc, core_bw_rules('flip', A, S([mk('rule_core', 'pooled', 20, 0.1, 0.0), ...
+    mk('blind_core', 'narrowband', 10, 0.1, 0.0)])));                 % only primary entries count
+verifyFalse(tc, core_bw_rules('flip', A, S(mk('rule_core', 'wideband', 0, NaN, NaN))));   % no episodes in the sensitivity
 src = fileread(which('experiment_core_bw'));
 verifyNotEmpty(tc, strfind(src, '[Kp.per, blk] = core_bw_rules(''per_verdicts'', Kp.per, X.TARGET, ~brief);'));
-verifyNotEmpty(tc, strfind(src, ['use = [a.primary] & [b.n] > 0 & [a.n] > 0 & strcmp({b.type}, {a.type}) & ' ...
-    'strcmp({b.policy}, {a.policy});']));
+verifyNotEmpty(tc, strfind(src, 'flip = core_bw_rules(''flip'', KP.primary.per, Ks.per);'));
+verifyEmpty(tc, strfind(src, '[a.n] > 0'));
+end
+
+function test_band_g3_gap(tc)
+% G3's report line: the mean and largest distance from an escaped hop's R_eff to its layer, or
+% "no escaped hop" where a cell has none (the whole-band jammer), never NaN or -Inf.
+verifyEqual(tc, core_bw_rules('gap_text', 0.8123, 1.9), 'an escaped hop above its layer by 0.81 dB mean, 1.90 max');
+verifyEqual(tc, core_bw_rules('gap_text', mean(zeros(0, 1)), max([zeros(0, 1); NaN])), 'no escaped hop');
+verifyEqual(tc, max([0.5; 1.2; NaN]), 1.2);
+src = fileread(which('experiment_core_bw'));
+verifyNotEmpty(tc, strfind(src, '''err_max'', max([er(:); NaN]), ''err_mean'', mean(er));'));
+verifyNotEmpty(tc, strfind(src, 'core_bw_rules(''gap_text'', g.err_mean, g.err_max)'));
+verifyEmpty(tc, strfind(src, '-Inf]'));
+verifyError(tc, @() core_bw_rules('other'), 'core_bw_rules:cmd');
 end
 
 function test_band_p1_reading(tc)

@@ -575,7 +575,7 @@ for q = 1:numel(X.RULES)
         G(end+1) = struct('rule', X.RULES{q}, 'mismatch', bad, 'frames', nf, 'bj', bj, 'drawn', mean(~EP.cover{q}(m, 1)), ...
             'mid', mid, 'edge', edge, 'off_centre', offc, 'partial', mean(EP.part{q}(m, :), 'all'), ...
             'near', mean(EP.near{q}(m, :), 'all'), 'res', arrayfun(@(v) mean(EP.acr{q}(m, :) == v + 1, 'all'), ...
-            1:numel(PP.acr_db)), 'err_max', max([er(:); -Inf]), 'err_mean', mean(er)); %#ok<AGROW>
+            1:numel(PP.acr_db)), 'err_max', max([er(:); NaN]), 'err_mean', mean(er)); %#ok<AGROW>
     end
     fprintf('  G3 %s: %d of %d frames off the coverage flags\n', X.RULES{q}, bad, nf);
     assert(bad == 0, 'experiment_core_bw:g3', 'G3: %d frames of hop rule %s disagree with band_cover.m', bad, X.RULES{q});
@@ -759,9 +759,7 @@ sens(end+1, :) = {'H1, follower jammer (re-acquires after U[0,5] cycles)', get_s
 KP.sens = struct('name', {}, 'K', {}, 'flip', {});
 for i = 1:size(sens, 1)
     [blk, Ks] = per_lines(sens{i, 2}, EP, sens{i, 3}, X0, pay, sens{i, 1}, true);
-    a = KP.primary.per; b = Ks.per;
-    use = [a.primary] & [b.n] > 0 & [a.n] > 0 & strcmp({b.type}, {a.type}) & strcmp({b.policy}, {a.policy});
-    flip = any(~strcmp({b(use).verdict}, {a(use).verdict}));
+    flip = core_bw_rules('flip', KP.primary.per, Ks.per);
     blk{end+1} = sprintf('    flips a primary verdict: %s', ternary(flip, 'YES', 'no')); %#ok<AGROW>
     lines = [lines, blk]; %#ok<AGROW>
     KP.sens(end+1) = struct('name', sens{i, 1}, 'K', Ks, 'flip', flip);
@@ -1000,10 +998,10 @@ for g = G3
     k = find(g.res > 0);
     lines{end+1} = sprintf(['  G3 %s B_J %5s: %d frames off the flags; first-hop escape drawn %.3f, enumerated mid-band %.3f, ' ...
         'edge %.3f, off-centre %.3f; partial hops %.3f, clear of the jammer but counted covered (under 2 MHz, or an ' ...
-        'effective rejection under 2 dB) %.3f; hops per layer [dB]: %s; an escaped hop above its layer by %.2f dB mean, ' ...
-        '%.2f max'], g.rule, bj_name(g.bj), g.mismatch, g.drawn, g.mid, g.edge, g.off_centre, g.partial, g.near, ...
+        'effective rejection under 2 dB) %.3f; hops per layer [dB]: %s; %s'], g.rule, bj_name(g.bj), g.mismatch, ...
+        g.drawn, g.mid, g.edge, g.off_centre, g.partial, g.near, ...
         strjoin(arrayfun(@(v) sprintf('%g:%.3f', M.acr_db(v), g.res(v)), k, 'UniformOutput', false), ' '), ...
-        g.err_mean, g.err_max); %#ok<AGROW>
+        core_bw_rules('gap_text', g.err_mean, g.err_max)); %#ok<AGROW>
 end
 end
 

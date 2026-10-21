@@ -328,7 +328,9 @@ static jammer.
   paired, 95% intervals; pooled, per type and per B_J.
 - **Sensitivities** (no verdict): H3, H4, the 30 dB residual (each rule), the equal in-band
   level, the follower; each says whether it would flip a primary verdict (`rule_core`'s per
-  jamming type). Liu's occupied reading has its own lines beside the primary 4 MHz cells
+  jamming type; `core_bw_rules.m` 'flip'): a primary type without episodes reads NOT MET, so a
+  sensitivity that reads it otherwise on episodes of its own flips it; a type the sensitivity
+  has no episodes of flips nothing. Liu's occupied reading has its own lines beside the primary 4 MHz cells
   (section 3), without a verdict word.
 - **Detector by bandwidth** (analysis; the KPI verdicts of macro-F1, recall and false alarms stay
   with B3c, `docs/core_cnn_protocol.md`, and with the hybrid's B3 through `three_state_view.m`):
@@ -348,7 +350,8 @@ static jammer.
   2 dB below its R_eff (else the stage stops); beside it the first-hop escape share drawn and
   enumerated (mid-band, edge, and the centred jammers off centre while our channel stays
   covered), the share of hops clear but counted covered (under 2 MHz, or R_eff under 2 dB), the
-  share of hop channels at each layer and the mean and largest distance from R_eff to its layer.
+  share of hop channels at each layer and the mean and largest distance from R_eff to its layer
+  ("no escaped hop" for a width without one, `core_bw_rules.m` 'gap_text').
 - G4: `protocol.json` holds W per hop rule, the recoverable list's hash and this file's hash, and
   is committed byte for byte as `docs/core_bw_frozen.json`. The test stage refuses without them,
   on any hash mismatch, with this file or the frozen copy uncommitted, after a marker
@@ -379,7 +382,7 @@ Outputs: `data/core_bw/pools.mat`, `data/core_bw/dset.mat`; `results/core_bw/val
 test_band_reject_eff, test_band_reject_layers, test_band_liu_occupied, test_hop_targets,
 test_link_env_cover_default, test_link_env_cover_recoverable, test_link_env_cover_relative,
 test_link_env_residual_layer, test_link_env_residual_recoverable, test_oracle_cover, test_rule_core_wide,
-test_band_cells, test_band_recoverable_scenarios, test_band_per_verdicts, test_band_p1_reading,
+test_band_cells, test_band_recoverable_scenarios, test_band_per_verdicts, test_band_g3_gap, test_band_p1_reading,
 test_band_seeds_disjoint, test_band_protocol_guard, and the existing test_rule_core_policy,
 test_core_decide_escalation, test_core_policies_rollout, test_per_reduction, test_three_state_view,
 test_rule_dwell_tried.

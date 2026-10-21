@@ -20,6 +20,12 @@ function varargout = core_bw_rules(cmd, varargin)
 %       per_ref) gains verdict and primary (rule_core per jamming type, when prim); per policy
 %       the narrowband, then the wideband line (PRIMARY when primary), then the pooled one,
 %       labelled the second line
+%   f = core_bw_rules('flip', A, S)   whether a sensitivity's reading S would flip a primary
+%       verdict of A (both per_verdicts output): some primary entry of A whose policy and type
+%       S reads on episodes of its own with another verdict; a primary type without episodes
+%       reads NOT MET and can flip
+%   s = core_bw_rules('gap_text', m, x)   G3's distance from an escaped hop's R_eff to its
+%       layer, mean m and largest x [dB] (NaN without an escaped hop)
 %   P = core_bw_rules('p1', tr, tb, near, cl, B)   prediction P1's reading at JSR_tot 30 dB
 %       (section 5): tr, tb (1 x n) rule_core's and blind_core's detection-to-restored times
 %       on the same recoverable CW episodes (NaN never), near the episodes whose first hop
@@ -38,6 +44,8 @@ switch cmd
     case 'choose_w',    [varargout{1}, varargout{2}] = choose_w(varargin{:});
     case 'verdict',     varargout{1} = verdict(varargin{:});
     case 'per_verdicts', [varargout{1}, varargout{2}] = per_verdicts(varargin{:});
+    case 'flip',        varargout{1} = flips(varargin{:});
+    case 'gap_text',    varargout{1} = gap_text(varargin{:});
     case 'p1',          varargout{1} = p1_reading(varargin{:});
     case 'guard',       varargout{1} = guard(varargin{:});
     case 'sha',         varargout{1} = file_sha(varargin{:});
@@ -111,6 +119,19 @@ for pk = unique({V.policy}, 'stable')
         end
     end
 end
+end
+
+function f = flips(A, S)
+f = false;
+for i = find([A.primary])
+    j = find(strcmp({S.policy}, A(i).policy) & strcmp({S.type}, A(i).type), 1);
+    if ~isempty(j) && S(j).n > 0 && ~strcmp(S(j).verdict, A(i).verdict), f = true; end
+end
+end
+
+function s = gap_text(m, x)
+if isnan(x), s = 'no escaped hop';
+else, s = sprintf('an escaped hop above its layer by %.2f dB mean, %.2f max', m, x); end
 end
 
 function P = p1_reading(tr, tb, near, cl, B)
