@@ -104,7 +104,7 @@ end
 
 %% ===================== Pools =====================
 function stage_pools(X)
-[p0, cells, ~, EBNO] = study_cells(X);
+[p0, cells, scen, EBNO] = study_cells(X);
 assert_frame1_onsets(p0);
 C = decision_config(); A = C.core_actions; nA = numel(A); nS = numel(EBNO); nC = numel(cells);
 tag = regexp(fileread(which('build_policy_pools')), 'MODEL_TAG\s*=\s*''([^'']+)''', 'tokens', 'once');
@@ -195,7 +195,7 @@ for sp = 1:2
     sd{sp} = cell2mat(arrayfun(@(s) geo{s}(sp).seed, (1:nS)', 'UniformOutput', false));
 end
 PP = struct();
-PP.scen = [{'none'}, {cells.threat}]; PP.cells = cells; PP.level = [NaN, cells.level];
+PP.scen = [{'none'}, {cells.threat}]; PP.cells = cells; PP.scenarios = scen; PP.level = [NaN, cells.level];
 PP.splits = {'val', 'test'}; PP.ebno = EBNO; PP.actions = A; PP.ngeo = X.NGEO; PP.runs = runs;
 PP.speed = spd; PP.seed = sd; PP.speed_range = vrange;
 PP.gp = gp; PP.bw = bw; PP.pw = pw; PP.cfg_gain_db = config_gain_db(A, p0);

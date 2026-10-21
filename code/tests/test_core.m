@@ -7771,6 +7771,9 @@ J = @(n) cells(strcmp({cells.name}, n)).J;
 verifyEqual(tc, [J('bw4_tot4').half, J('bw8_tot4').half, J('bw20_tot4').half, J('cw_tot4').half], [2.6 4.5 10 0.3], ...
     'AbsTol', 1e-12);
 verifyEqual(tc, [J('bw70_tot4').lo, J('bw70_tot4').hi, J('bw83.5_tot4').lo, J('bw83.5_tot4').hi], [2402 2472 2400 2483.5]);
+src = fileread(which('experiment_core_bw'));                  % the pools carry the scenarios the episodes read
+verifyNotEmpty(tc, regexp(src, 'function stage_pools\(X\)\r?\n\[p0, cells, scen, EBNO\] = study_cells\(X\);', 'once'));
+verifyNotEmpty(tc, strfind(src, 'PP.scenarios = scen;'));
 end
 
 function test_band_seeds_disjoint(tc)

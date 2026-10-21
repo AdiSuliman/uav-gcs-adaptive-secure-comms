@@ -24,7 +24,10 @@ function varargout = link_env(cmd, varargin)
 %         after a follower's re-acquisition; optional acr (NE x H): on an escaped hop the
 %         channel_switch configurations take their frames from the pools (1) or from the
 %         residual's layer PP.acr_pools{v - 1} (v > 1, the same configurations at another
-%         rejection; PP.alt is the pools' altitudes, never a layer)
+%         rejection; PP.alt is the pools' altitudes, never a layer); optional cover_rel
+%         (1 x NE logical, default false): the jammer takes the channel in use at the onset
+%         (a jammer tuned to our channel), so the k-th hop after the onset reads column k of
+%         cover and acr and a hop before the onset escapes nothing
 %   split: 1 = train, 2 = validation, 3 = test, 4 = edge-speed pools, 5 = second
 %         test; rs: RandStream for frame draws
 %
@@ -83,7 +86,7 @@ function varargout = link_env(cmd, varargin)
 %   packet loss in this geometry (under a comb jammer, one without channel_switch
 %   and freq_diversity; with spec.cover, one with channel_switch only when a hop that can
 %   reach the link after the onset, floor((T - onset - 1) / (delay + 1)) of them counted
-%   from the hops before it, escapes); on: the cell's threat is on the air in some frame of this
+%   from the hops before it, or from the first with spec.cover_rel, escapes); on: the cell's threat is on the air in some frame of this
 %   geometry (pool_cell.m act; airframe shadowing only where the flight's attitude lets
 %   the airframe hide an antenna, shadow_hidden.m), so an episode whose threat never is
 %   counts as no threat episode (policy_run_set.m, dqn_eval_batches.m).
