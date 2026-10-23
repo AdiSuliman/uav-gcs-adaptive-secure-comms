@@ -1364,3 +1364,23 @@ Channel model: the flat channel fails, the link runs the delay line → PASS; re
 **Open:**
 - `lect-kpi` is untested and unmerged.
 - The 58 wording issues of the interim-report draft are not yet fixed.
+
+## D93 — No Plan A stop for profile 1: it runs its own code to the end; the lecturer's KPIs for profile 1 from isolated runs; profile 3 deploys after profile 1
+**Why (2026-10-23 03:10, the user).** "No reason to stop now"; the user will say if a stop is needed. Profile 1's chain was in C1p (82 of 93 cells at 03:07), with no cut file, no `final.hold` and no alert.
+**Decision.**
+1. *Profile 1 is not stopped.* Plan A (D91, D92: the cut after SURV3, the reboot, the fusion swap, the B3-B4s rerun, the rehearsal, B3r, the re-key and the resume from C1d) is cancelled for now. `p1_cut_after.SURV3` is never written. Profile 1's chain runs its current code to RPT: `uav-gcs-v7`, `v7-dev` `208602b` (code tree `9b5c9f1`), base fusion, latch off, through C1p, C1c, SURV, SURV3, C1d, C2, C2e, C2g, C2u, GAL, OHP, GCSA, EDGE, KPI, DASH, WEAK and RPT.
+2. *The fusion revision 'branch evidence, phi = 1' is validated but not deployed in profile 1.* Its verdict (ADOPT on both profiles by the pre-registered rule, D91) stands and is reported as a validated revision. Profile 1's decision-layer results are those of the base fusion. Profile 3 deploys the revision.
+3. *The lecturer's KPIs for profile 1 come from isolated runs; profile 1's tree is only read.*
+   - PER against the static link (per scenario: narrowband `tone_jamming`, wideband `jamming`), recovery time from detection, goodput, the CNN's contribution, the system false alarms and the three link states: an isolated copy of profile 1's C2e after it finishes (`docs/c2e_lect_protocol.md` on `lect-kpi`, fixed 2026-10-23 before profile 1's C2e; code `lect-p1` `8118281` = `208602b` plus the readers; inputs copied read-only with SHA-256; an exact consistency gate against profile 1's own C2e results, with no tolerance; a reading only after the gate passes; `tools/c2e_lect_isolated.sh`).
+   - Three-state macro-F1, recall per jamming type and the detector's false alarms: B3c in a checkout of its own on profile 1's inputs, reading the fourth test set once, with no B3r before it, under the committed declaration `docs/core_cnn_no_b3r.txt` (`e84a5fd`, params_id `add18af2b7532a0bd2f7fbc78f06e526`). The reading makes no choice for the hybrid.
+   - BER validation: profile 1's A4v (7/7).
+   - CORE_BW: after profile 1's chain, in its own worktree, on copies of profile 1's deployed inputs.
+   - Profile 1's own KPI stage (code `208602b`) reports none of these; its eight proposal KPIs stay extensions.
+4. *No B3r of the hybrid on profile 1.* Profile 1's fourth test set is read only by B3c. KPI 1 for profile 1 stays the third-set reading (B3m).
+5. *Profile 3 waits until profile 1's chain has ended* (`p3_c1p.hold` stays). Reasons: without a reboot the zombies 32824 and 8908 hold about 11 GB of commit and free commit stays at 22-23 GB during profile 1's parallel stages; profile 3's rerun needs 65 GB and its C1p-SURV3 block runs six workers; `uav-gcs-v7-p3` is the only free slot for the lecturer-KPI hand-runs while profile 1 runs. Its deployment then takes the candidate `-q3` (`v7-deploy-d91` with `d91-edgefix` and `lect-kpi`, `skip_stages` OHP and GCSA inside the tested tree), the second deploy queue's six jobs on it (link_env changed, so the smoke runs again), and the B-stage rerun, B3r and the release of the hold as in `d91_deploy.md` D.
+6. The hand-runs keep the gate (28 GB) and the wrapper. `STOP_CHECKLIST` is kept for a future stop only; the order of the steps is the runbook `RUNBOOK_NOSTOP.md` (session scratchpad `interim_report/core/`, not in this repo) (triggers T1-T7).
+**Consequences.** Profile 1 ends about 2026-10-28/29 (estimate). Profile 3 ends about 2026-11-08/11 (estimate), past the Windows Update pause (2026-11-05). The interim report (2026-11-01) takes the gallery figures, B3c's reading and the C2e-lect lines if they exist by about 2026-10-29; it needs no final results.
+**Open.**
+- CORE_BW's code base: `lect-kpi` (its decision layer is d90's monitor, applied with profile 1's settings, stated in a committed declaration) or a port onto `lect-p1`.
+- `lect-kpi` and `lect-p1` are not pushed.
+- A reboot after profile 1's end (zombies, BIOS items) is the user's choice.
