@@ -115,7 +115,9 @@ The script refuses to prepare in these cases:
   `##### STAGE C2e done` line after it;
 - profile 1's reference results are older than that start;
 - any C2e input is newer than that start;
-- this protocol's last commit or the code commit is not older than that start.
+- profile 1's tree is not at `208602b`, its code differs from it, or `code/` holds untracked files;
+- this protocol's last commit, the last commit of `tools/c2e_lect_isolated.sh` or the code commit is not
+  older than that start (the script and the protocol must also be committed unchanged).
 
 Only a committed deviation note `docs/c2e_lect_deviation_*.md` lifts the last refusal; it is
 recorded in the manifest.
