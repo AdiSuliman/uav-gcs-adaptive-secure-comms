@@ -7429,6 +7429,12 @@ verifyNotEmpty(tc, strfind(k1, ['three-state CNN on spectrograms only (deliverab
     'wideband 90.00% met (not committed); false alarms 3.00% met (committed); the hybrid on the same frames: macro-F1 ' ...
     '90.00%, false alarms 5.00%']));
 verifyEqual(tc, S.LECT.cnn.N, 5);
+core.metrics{1} = []; save('results/core_cnn.mat', 'core');              % read without B3r: no hybrid on the same frames
+evalc('measure_all_kpis');
+S = load('results/kpi_summary.mat', 'KPI'); K = S.KPI;
+k1 = strjoin(K([K.id] == 1).detail, newline);
+verifyNotEmpty(tc, strfind(k1, ['false alarms 3.00% met (committed); no hybrid reading of this set before it ' ...
+    '(docs/core_cnn_no_b3r.txt)']));
 end
 
 function test_lect_kpis_pending(tc)
@@ -8847,6 +8853,9 @@ verifyEqual(tc, B.ebno, [0 3]);
 verifyEqual(tc, size(B.macro_f1_ebno), [3 2 2]);
 verifyEqual(tc, B.fa(1, :), [0 0]);
 verifyEqual(tc, core_cnn_eval('boot', y, [y, y2], run, eb, 3, 200, 7).macro_f1, B.macro_f1(1:2, :));
+B2 = core_cnn_eval('boot', y, [y2, y], run, eb, 3, 200, 7);   % without the first reader: the same resamples
+verifyEqual(tc, B2.macro_f1, B.macro_f1(2:3, :)); verifyEqual(tc, B2.recall, B.recall(2:3, :, :));
+verifyEqual(tc, B2.fa, B.fa(2:3, :)); verifyEqual(tc, B2.macro_f1_ebno, B.macro_f1_ebno(2:3, :, :));
 end
 
 function test_core_cnn_verdict(tc)
@@ -8918,10 +8927,10 @@ verifyNotEmpty(tc, strfind(mn, 'RUN.train_core_cnn              = false;'));
 verifyNotEmpty(tc, strfind(mn, 'run_own(''train_core_cnn'');'));
 verifyNotEmpty(tc, strfind(fileread(which('export_report_numbers')), 'N.core_cnn = take(''results/core_cnn.mat'', ''core'');'));
 src = fileread(which('train_core_cnn'));
-im = strfind(src, 'cc_marker(CC.marker, pid, CC.model, CC.protocol);'); verifyNumElements(tc, im, 1);
-il = strfind(src, 'Sf = load(CC.test, ''splits'');'); verifyNumElements(tc, il, 1);
+im = strfind(src, 'cc_marker(CC.marker, pid, CC.model, CC.protocol, IN, nob);'); verifyNumElements(tc, im, 1);
+il = strfind(src, 'Sf = load(IN.test, ''splits'');'); verifyNumElements(tc, il, 1);
 verifyLessThan(tc, im, il);
-for id = {'protocol_changed', 'smoke', 'kpi1_set', 'hybrid', 'fresh3', 'params', 'read', 'started', 'recorded'}
+for id = {'protocol_changed', 'smoke', 'kpi1_set', 'hybrid', 'fresh3', 'params', 'no_b3r', 'read', 'started', 'recorded'}
     k = strfind(src, ['''train_core_cnn:' id{1} '''']);
     verifyNotEmpty(tc, k, id{1}); verifyLessThan(tc, k(end), im, id{1});
 end
@@ -8979,6 +8988,8 @@ mk = fileread(CC.marker);
 verifyNotEmpty(tc, strfind(mk, ['params_id ' pid]));
 verifyNotEmpty(tc, strfind(mk, [CC.model ' sha256 ' sha256_of(CC.model)]));
 verifyNotEmpty(tc, strfind(mk, [CC.protocol ' sha256 ' protocol_sha]));
+verifyNotEmpty(tc, strfind(mk, ['hybrid_reading ' CC.hybrid_pred]));
+verifyNotEmpty(tc, regexp(mk, ['input test ' regexptranslate('escape', CC.test) ' bytes \d+ modified '], 'once'));
 verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:started');
 % A model older than the splits is not retrained once a reading started
 f = java.io.File(fullfile(d, CC.model)); f.setLastModified(java.lang.System.currentTimeMillis() - 3600e3);
@@ -8992,11 +9003,12 @@ verifyEqual(tc, core_stage_error(false, true).identifier, 'test:none');   % a sm
 verifyFalse(tc, isfile(CC.marker));
 end
 
-function ex = core_stage_error(CORE_CNN_TRAIN_ONLY, SMOKE) %#ok<INUSD>
+function ex = core_stage_error(CORE_CNN_TRAIN_ONLY, SMOKE, CORE_CNN_IN) %#ok<INUSD>
 % The error train_core_cnn stops with (test:none when it runs through); SMOKE as run_stage
-% smoke sets it.
+% smoke sets it; CORE_CNN_IN the inputs named elsewhere.
 if ~CORE_CNN_TRAIN_ONLY, clear CORE_CNN_TRAIN_ONLY; end
 if nargin < 2 || ~SMOKE, clear SMOKE; end
+if nargin < 3, clear CORE_CNN_IN; end
 ex = MException('test:none', 'no error');
 try
     evalc('run(''train_core_cnn'')');
@@ -9072,6 +9084,188 @@ verifyNotEmpty(tc, strfind(txt, 'Paired difference of macro-F1'));
 verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:read');
 f = java.io.File(fullfile(d, CC.model)); f.setLastModified(java.lang.System.currentTimeMillis() - 3600e3);
 verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:read');   % never retrained over the reading
+end
+
+function test_core_cnn_no_b3r(tc)
+% Stage B3c without the hybrid's reading: the fourth test set is read only under a committed
+% docs/core_cnn_no_b3r.txt with every line, once, and this link model's params_id; an
+% untracked, changed or incomplete declaration, one of another link model, or a part of B3r's
+% reading beside it stops the stage before the marker. With B3r's reading the declaration is
+% not needed; the marker names the hybrid's reading or the declaration's commit.
+assumeTrue(tc, strcmp(kpi1_set(), 'fresh3'));
+[st, ~] = system('git --version'); assumeEqual(tc, st, 0, 'git is not on the path');
+d = fullfile(tc.TestData.tmp, 'corecnn_nob3r');
+for s = {'data', 'results', 'docs'}, mkdir(fullfile(d, s{1})); end
+c0 = cd(d); back = onCleanup(@() cd(c0));
+g = sprintf('git -C "%s" -c user.name=t -c user.email=t@t -c core.autocrlf=false ', d);
+verifyEqual(tc, system([g 'init -q']), 0);
+verifyEqual(tc, system([g 'config core.autocrlf false']), 0);
+CC = core_cnn_config();
+write_text(CC.protocol, 'protocol');
+x = 1; save('data/splits.mat', 'x');
+protocol_sha = sha256_of(CC.protocol); save(CC.model, 'protocol_sha');
+save(CC.test, 'x');
+params = struct('a', 1); save('params.mat', 'params'); save(CC.test_params, 'params');
+pid = params_id(params);
+dec = @(p) sprintf('no B3r before B3c\nprofile p1\ndate 2026-10-23\nreason profile 1 is not stopped\nparams_id %s\n', p);
+commit = @() system([g 'add -f docs/core_cnn_no_b3r.txt && ' g 'commit -q -m dec']);
+not_read = @(ex) ~any(strcmp(ex.identifier, {'test:none', 'train_core_cnn:hybrid', 'train_core_cnn:no_b3r'}));
+
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:hybrid');          % neither
+write_text(CC.no_b3r, dec(pid));
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:hybrid');          % untracked
+verifyEqual(tc, commit(), 0);
+ex = core_stage_error(false);                                                           % declared: past every guard
+verifyTrue(tc, not_read(ex), ex.identifier);
+verifyTrue(tc, isfile(CC.marker));
+[~, h] = system([g 'log -1 --format=%H -- docs/core_cnn_no_b3r.txt']);
+mk = fileread(CC.marker);
+verifyNotEmpty(tc, strfind(mk, sprintf('hybrid_reading none: %s commit %s sha256 %s date 2026-10-23', CC.no_b3r, ...
+    strtrim(h), sha256_of(CC.no_b3r))));
+verifyNotEmpty(tc, strfind(mk, ['input hybrid_pred ' CC.hybrid_pred ' none']));
+delete(CC.marker);
+write_text(CC.no_b3r, [dec(pid) 'x']);
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:hybrid');          % local change
+write_text(CC.no_b3r, strrep(dec(pid), 'reason profile 1 is not stopped', 'reason '));
+verifyEqual(tc, commit(), 0);
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:hybrid');          % no reason
+write_text(CC.no_b3r, [dec(pid) 'date 2026-10-24' newline]);
+verifyEqual(tc, commit(), 0);
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:hybrid');          % two dates
+write_text(CC.no_b3r, dec(repmat('0', 1, 32)));
+verifyEqual(tc, commit(), 0);
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:no_b3r');          % another link model
+verifyFalse(tc, isfile(CC.marker));
+write_text(CC.no_b3r, dec(pid));
+verifyEqual(tc, commit(), 0);
+save(CC.hybrid_metrics, 'x');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:hybrid');          % a part of B3r's reading
+verifyFalse(tc, isfile(CC.marker));
+save(CC.hybrid_pred, 'x');
+ex = core_stage_error(false);                                                           % B3r's reading: the hybrid is read
+verifyTrue(tc, not_read(ex), ex.identifier);
+verifyNotEmpty(tc, strfind(fileread(CC.marker), ['hybrid_reading ' CC.hybrid_pred newline]));
+delete(CC.marker); delete(CC.no_b3r); verifyEqual(tc, system([g 'commit -q -a -m rm']), 0);
+ex = core_stage_error(false);                                                           % B3r alone, no declaration
+verifyTrue(tc, not_read(ex), ex.identifier);
+verifyTrue(tc, isfile(CC.marker));
+end
+
+function test_core_cnn_inputs(tc)
+% B3c's inputs: the working folder's own by default; CORE_CNN_IN names them elsewhere (relative
+% to the working folder, canonical), and the stage stops when the working folder lies in the
+% tree of such an input: its git checkout, else the folder above data/ or results/.
+CC = core_cnn_config();
+IN = core_cnn_inputs(CC);
+for f = {'splits', 'params', 'test', 'test_params', 'hybrid_pred', 'hybrid_metrics'}
+    verifyEqual(tc, IN.(f{1}), CC.(f{1}), f{1});
+end
+b = fullfile(tc.TestData.tmp, 'corecnn_in');
+src = fullfile(b, 'p1'); mkdir(fullfile(src, '.git')); mkdir(fullfile(src, 'data'));
+x = 1; save(fullfile(src, 'data', 'splits.mat'), 'x');
+out = fullfile(b, 'iso'); mkdir(out);
+cn = @(p) char(java.io.File(p).getCanonicalPath());
+IN = core_cnn_inputs(CC, struct('splits', fullfile(src, 'data', 'splits.mat')), out);
+verifyEqual(tc, IN.splits, cn(fullfile(src, 'data', 'splits.mat')));
+verifyEqual(tc, IN.test, CC.test);
+IN = core_cnn_inputs(CC, struct('params', string(fullfile('..', 'p1', 'params.mat'))), out);   % relative to the working folder
+verifyEqual(tc, IN.params, cn(fullfile(src, 'params.mat')));
+in = struct('splits', fullfile(src, 'data', 'splits.mat'));
+iso = fullfile(src, 'results', 'b3c'); mkdir(iso);
+verifyError(tc, @() core_cnn_inputs(CC, in, iso), 'train_core_cnn:isolation');          % inside the source checkout
+verifyError(tc, @() core_cnn_inputs(CC, in, src), 'train_core_cnn:isolation');
+if ispc, verifyError(tc, @() core_cnn_inputs(CC, in, upper(iso)), 'train_core_cnn:isolation'); end
+s2 = fullfile(b, 'p3'); mkdir(fullfile(s2, 'data')); mkdir(fullfile(s2, 'w'));            % no git: the folder above data/
+verifyError(tc, @() core_cnn_inputs(CC, struct('test', fullfile(s2, 'data', 'splits_fresh3.mat')), fullfile(s2, 'w')), ...
+    'train_core_cnn:isolation');
+IN = core_cnn_inputs(CC, struct('test', fullfile(s2, 'data', 'splits_fresh3.mat')), out);
+verifyEqual(tc, IN.test, cn(fullfile(s2, 'data', 'splits_fresh3.mat')));
+mkdir(fullfile(out, 'in'));                                                              % a copy inside the working folder
+IN = core_cnn_inputs(CC, struct('splits', fullfile(out, 'in', 'splits.mat')), out);
+verifyEqual(tc, IN.splits, cn(fullfile(out, 'in', 'splits.mat')));
+verifyError(tc, @() core_cnn_inputs(CC, struct('split', 'a.mat'), out), 'train_core_cnn:inputs');
+verifyError(tc, @() core_cnn_inputs(CC, struct('splits', 1), out), 'train_core_cnn:inputs');
+verifyError(tc, @() core_cnn_inputs(CC, {'a.mat'}, out), 'train_core_cnn:inputs');
+end
+
+function test_core_cnn_isolated_reading(tc)
+% Stage B3c in a checkout of its own on another tree's inputs, without B3r: it trains and reads
+% from the source files given in CORE_CNN_IN and leaves them untouched; every output lands in
+% the working folder; the hybrid's slot stays empty (no metrics, NaN intervals, no paired
+% difference, no comparison line), the core CNN's figures agree with the saved predictions,
+% and the KPI line says that no hybrid reading came first.
+assumeTrue(tc, license('test', 'Neural_Network_Toolbox') && ~isempty(ver('deeplearning')));
+assumeTrue(tc, strcmp(kpi1_set(), 'fresh3'));
+[st, ~] = system('git --version'); assumeEqual(tc, st, 0, 'git is not on the path');
+b = fullfile(tc.TestData.tmp, 'corecnn_iso');
+src = fullfile(b, 'p1'); set4 = fullfile(b, 'set4'); w = fullfile(b, 'b3c');
+mkdir(fullfile(src, 'data')); mkdir(fullfile(set4, 'data')); mkdir(fullfile(w, 'docs'));
+CC = core_cnn_config();
+classes = {'none', 'jamming', 'path_loss', 'tone_jamming'};
+rng(4, 'twister');
+splits = struct('classes', {classes'}, 'train', core_synth(classes, [6 6 6], 4, 0), ...
+    'val', core_synth(classes, [3 3 3], 4, 1000)); %#ok<NASGU>
+save(fullfile(src, 'data', 'splits.mat'), 'splits');
+params = struct('a', 1); save(fullfile(src, 'params.mat'), 'params'); save(fullfile(set4, 'params.mat'), 'params');
+splits = struct('classes', {classes'}, 'test', core_synth(classes, [4 4 4], 5, 5000)); %#ok<NASGU>
+save(fullfile(set4, 'data', 'splits_fresh3.mat'), 'splits');
+in = struct('splits', fullfile(src, 'data', 'splits.mat'), 'params', fullfile(src, 'params.mat'), ...
+    'test', fullfile(set4, 'data', 'splits_fresh3.mat'), 'test_params', fullfile(set4, 'params.mat'), ...
+    'hybrid_pred', fullfile(src, 'results', 'detector_predictions_fresh3.mat'), ...
+    'hybrid_metrics', fullfile(src, 'results', 'eval_detector_metrics_fresh3.mat'));
+listing = @() cellfun(@(f) sprintf('%s|%d|%.10f', f, dir(f).bytes, dir(f).datenum), ...
+    {in.splits, in.params, in.test, in.test_params}, 'UniformOutput', false);
+before = listing();
+c0 = cd(w); back = onCleanup(@() cd(c0));
+g = sprintf('git -C "%s" -c user.name=t -c user.email=t@t -c core.autocrlf=false ', w);
+verifyEqual(tc, system([g 'init -q']), 0);
+verifyEqual(tc, system([g 'config core.autocrlf false']), 0);
+write_text(CC.protocol, 'protocol');
+write_text(CC.no_b3r, sprintf('no B3r before B3c\ndate 2026-10-23\nreason profile 1 is not stopped\nparams_id %s\n', ...
+    params_id(params)));
+verifyEqual(tc, system([g 'add -f docs && ' g 'commit -q -m dec']), 0);
+
+verifyError(tc, @() core_cnn_inputs(CC, in, fullfile(src, 'data')), 'train_core_cnn:isolation');
+ex = core_stage_error(false, true, in);                                  % smoke: trains on the source's splits
+verifyEqual(tc, ex.identifier, 'test:none', ex.message);
+verifyTrue(tc, isfile(CC.model) && isfile('results/core_cnn_validation.txt'));
+verifyNotEmpty(tc, strfind(fileread('results/core_cnn_validation.txt'), ['validation split of ' core_cnn_inputs(CC, in, w).splits]));
+smoke = false; save(CC.model, 'smoke', '-append');
+ex = core_stage_error(false, false, in);
+verifyEqual(tc, ex.identifier, 'test:none', ex.message);
+for f = {CC.marker, 'results/core_cnn_predictions.mat', 'results/core_cnn.mat', 'results/core_cnn.txt', ...
+        'results/core_cnn_confusion.png', 'results/core_cnn_confusion_frame.png', 'results/core_cnn_ebno.png', ...
+        'results/core_cnn_jsr.png'}
+    verifyTrue(tc, isfile(fullfile(w, f{1})), f{1});
+end
+verifyEqual(tc, listing(), before);                                        % the source files are untouched
+verifyEqual(tc, core_files(src), {'params.mat', 'splits.mat'});        % nothing written there
+verifyEqual(tc, core_files(set4), {'params.mat', 'splits_fresh3.mat'});
+P = load('results/core_cnn_predictions.mat').cpred; C = load('results/core_cnn.mat').core;
+verifyFalse(tc, C.hybrid); verifyEmpty(tc, C.metrics{1}); verifyEmpty(tc, C.hybrid_view_all);
+verifyTrue(tc, all(isnan(C.boot.macro_f1(1, :)))); verifyTrue(tc, all(isnan(C.boot.diff(:))));
+verifyFalse(tc, any(isnan(C.boot.macro_f1(2, :))));
+verifyEqual(tc, C.verdicts(1, :), repmat({'no hybrid reading'}, 1, 4));
+verifyTrue(tc, all(isnan(P.hybrid)));
+verifyEqual(tc, C.metrics{2}.cm, core_cnn_eval('metrics', P.state, P.core_window, 3).cm);
+verifyEqual(tc, C.metrics{3}.cm, core_cnn_eval('metrics', P.state, P.core_frame, 3).cm);
+IN = core_cnn_inputs(CC, in, w);
+verifyEqual(tc, C.test_set, IN.test); verifyEqual(tc, C.inputs, IN);
+verifyEqual(tc, C.no_b3r.date, '2026-10-23');
+txt = fileread('results/core_cnn.txt');
+verifyNotEmpty(tc, strfind(txt, 'Hybrid: no reading of this set before this one (docs/core_cnn_no_b3r.txt, 2026-10-23: profile 1 is not stopped)'));
+verifyEmpty(tc, strfind(txt, 'Paired difference'));
+verifyEmpty(tc, strfind(txt, 'hybrid (monitor class)'));
+mk = fileread(CC.marker);
+verifyNotEmpty(tc, strfind(mk, ['input splits ' IN.splits ' bytes ']));
+verifyNotEmpty(tc, strfind(mk, 'hybrid_reading none: docs/core_cnn_no_b3r.txt commit '));
+verifyEqual(tc, core_stage_error(false, false, in).identifier, 'train_core_cnn:read');
+end
+
+function n = core_files(d)
+% The names of the files under a folder, sorted.
+f = dir(fullfile(d, '**', '*'));
+n = sort({f(~[f.isdir]).name});
 end
 
 function S = core_synth(classes, nr, F, run0)

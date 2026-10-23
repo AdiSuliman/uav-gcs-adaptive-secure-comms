@@ -596,17 +596,21 @@ end
 
 function [c, line] = core_cnn_line(f)
 % The three-state CNN's reading (train_core_cnn.m): the official windowed decision against the
-% lecturer's thresholds, with the hybrid's monitor class on the same frames.
+% lecturer's thresholds, with the hybrid's monitor class on the same frames when B3r read them.
 c = [];
 line = 'beside KPI 1, three-state CNN on spectrograms only (deliverable 2): PENDING -> train_core_cnn (B3c)';
 if ~isfile(f), return; end
 S = load(f, 'core'); c = S.core;
 M = c.metrics{2}; H = c.metrics{1}; B = c.boot;
+if isempty(H)
+    hy = 'no hybrid reading of this set before it (docs/core_cnn_no_b3r.txt)';
+else
+    hy = sprintf('the hybrid on the same frames: macro-F1 %.2f%%, false alarms %.2f%%', 100 * H.macro_f1, 100 * H.fa);
+end
 line = sprintf(['beside KPI 1, three-state CNN on spectrograms only (deliverable 2; %s, N = %d cycles; results/core_cnn.txt): ' ...
-    'macro-F1 %.2f%% [%.2f, %.2f] %s; recall narrowband %.2f%% %s, wideband %.2f%% %s; false alarms %.2f%% %s; ' ...
-    'the hybrid on the same frames: macro-F1 %.2f%%, false alarms %.2f%%'], c.test_set, c.N, 100 * M.macro_f1, ...
-    100 * B.macro_f1(2, :), c.verdicts{2, 1}, 100 * M.recall(2), c.verdicts{2, 2}, 100 * M.recall(3), c.verdicts{2, 3}, ...
-    100 * M.fa, c.verdicts{2, 4}, 100 * H.macro_f1, 100 * H.fa);
+    'macro-F1 %.2f%% [%.2f, %.2f] %s; recall narrowband %.2f%% %s, wideband %.2f%% %s; false alarms %.2f%% %s; %s'], ...
+    c.test_set, c.N, 100 * M.macro_f1, 100 * B.macro_f1(2, :), c.verdicts{2, 1}, 100 * M.recall(2), c.verdicts{2, 2}, ...
+    100 * M.recall(3), c.verdicts{2, 3}, 100 * M.fa, c.verdicts{2, 4}, hy);
 end
 
 function s = three_txt(V)

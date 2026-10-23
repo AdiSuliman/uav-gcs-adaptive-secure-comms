@@ -1,8 +1,10 @@
 # The three-state spectrogram CNN (stage B3c): protocol
 
-Branch `core-cnn` (from `lect-kpi` `0be0662`). This protocol is fixed before any run of the stage.
-`train_core_cnn.m` records its SHA-256 in the model file when it trains and reads the fourth test
-set only while the file is unchanged.
+Branch `core-cnn` (from `lect-kpi` `0be0662`), merged into `lect-kpi`. This protocol is fixed
+before any run of the stage. `train_core_cnn.m` records its SHA-256 in the model file when it
+trains and reads the fourth test set only while the file is unchanged. The last change comes before
+any training of the stage: the reading without B3r (section 5) and the inputs from another tree
+(section 9).
 
 ## 1. What it delivers
 
@@ -112,9 +114,13 @@ trained from scratch.
 
 **Before the set is loaded**, the stage stops unless all of these hold:
 1. `kpi1_set.m` is `'fresh3'`, the go/no-go is done.
-2. The hybrid's own fourth-set reading exists: `results/eval_detector_metrics_fresh3.mat` and
-   `results/detector_predictions_fresh3.mat`. So this reading never comes before B3r and never
-   changes it.
+2. One of these holds:
+   - the hybrid's own fourth-set reading exists: `results/eval_detector_metrics_fresh3.mat` and
+     `results/detector_predictions_fresh3.mat`;
+   - no B3r comes before this reading, and a committed declaration `docs/core_cnn_no_b3r.txt`
+     says so. No file of B3r's reading exists, not even one of the two.
+
+   Any other case stops the stage: neither, or only a part of B3r's reading.
 3. `data/splits_fresh3.mat` exists, and so does `data/splits_fresh3_params.mat`, with the
    `params_id` of `params.mat`.
 4. `data/core_cnn_model.mat` exists, is newer than `data/splits.mat`, carries this protocol's
@@ -126,10 +132,35 @@ trained from scratch.
    - a committed record `docs/core_cnn_read_*.txt` with this `params_id` (records named
      `*_aborted*` do not count).
 
+**The declaration `docs/core_cnn_no_b3r.txt`**
+- It holds these lines, each once:
+  - `no B3r before B3c`;
+  - `date yyyy-mm-dd`, the day of the decision;
+  - `reason <text>`, why no B3r comes first;
+  - `params_id <32 hex digits>`, the link model of the profile it covers.
+- Other lines (for example `profile p1`) are allowed.
+- It is committed: git tracks it, and it has no local change when the stage reads it.
+- After the other guards, its `params_id` must be that of `params.mat` (`train_core_cnn:no_b3r`).
+  So it covers one profile only.
+- Profile 1's declaration (23.10): profile 1 is not stopped, so its run holds no B3r before this
+  reading.
+
+**What a reading without B3r changes**
+- This reading makes no choice for the hybrid. Its numbers do not enter the hybrid's fusion, its
+  thresholds, `kpi1_set.m` or any guard of B3r. The model, N and every other choice of this
+  stage are made on validation before the set is loaded.
+- So a later B3r of the same set reads it as it would have without this reading.
+- The comparison of section 7 is then not part of this reading. Its report says so.
+- The core CNN's intervals do not depend on the hybrid. The bootstrap draws the same resamples of
+  sub-runs with or without the hybrid's column (seed 7).
+
 **The marker**
-- `results/core_cnn_read_started.txt` is written before the set is loaded. It records the time,
-  the commit and code tree, local changes and untracked `.m` files, the `params_id`, and the
-  SHA-256 of the model and of this protocol.
+- `results/core_cnn_read_started.txt` is written before the set is loaded. It records:
+  - the time, the commit and code tree, local changes and untracked `.m` files;
+  - the `params_id`;
+  - the SHA-256 of the model and of this protocol;
+  - every input's path, size and time;
+  - the hybrid's reading, or the declaration's commit, SHA-256 and date.
 - From then on the model is never retrained in that checkout. A committed record of this
   `params_id`, aborted ones included, also stops a retraining, so a run after an aborted reading
   reads the same model.
@@ -185,6 +216,13 @@ is only read from its saved reading, with no new inference.
 
 ## 7. Comparison with the hybrid on the same frames
 
+**When:** only when B3r's reading exists before this one (section 5). Without it the
+hybrid's slot (reader 1) stays empty:
+- no metrics;
+- NaN intervals and paired difference;
+- verdicts `no hybrid reading`;
+- no comparison line in the report.
+
 **Source:** the hybrid's saved fourth-set reading, `results/detector_predictions_fresh3.mat`.
 - It holds the monitor's class after the fusion over N = 12 cycles (`fusion_pick.m`) on the same
   frames, matched by sub-run and position.
@@ -227,6 +265,37 @@ bash "/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_gated_run.sh" 65 uav-gcs-v7 logs/
 - A later run reuses the saved model and reads the set once.
 - `run_stage('B3c')` runs the same script, with its own log, outside the gate only.
 
+**In a checkout of its own, on another tree's inputs**
+
+The stage can run in a checkout of `lect-kpi` of its own, while the profile's own tree keeps
+running its chain.
+- The struct `CORE_CNN_IN` in the calling workspace names inputs elsewhere (`core_cnn_inputs.m`).
+  Its fields are `splits`, `params`, `test`, `test_params`, `hybrid_pred` and `hybrid_metrics`.
+  A field left out stays the working folder's own file.
+- These files are only loaded, never written. Every output goes into the working folder:
+  the model, `results/` and the marker.
+- The stage stops (`train_core_cnn:isolation`) when the working folder lies in the tree of such
+  an input. The tree is the git checkout that holds the input; without one, it is the folder
+  above its `data/` or `results/` folder.
+- Copies of the inputs inside the working folder pass too.
+- The protocol, the declaration and the records `docs/core_cnn_read_*.txt` are those of the
+  working checkout.
+
+Profile 1, without B3r:
+- Training splits and `params.mat`: from `uav-gcs-v7`.
+- The fourth test set and its link model: from `uav-gcs-set4-p1`, which built the set
+  (`data/splits_fresh3.mat`, `params.mat`; same `params_id`).
+
+```
+cd(setup_paths()); P1 = 'C:\Users\Adi Suliman\uav-gcs-v7'; S4 = 'C:\Users\Adi Suliman\uav-gcs-set4-p1'; CORE_CNN_IN = struct('splits', fullfile(P1, 'data', 'splits.mat'), 'params', fullfile(P1, 'params.mat'), 'test', fullfile(S4, 'data', 'splits_fresh3.mat'), 'test_params', fullfile(S4, 'params.mat')); run('train_core_cnn')
+```
+
+- The gate's wrapper takes only the profiles' own worktrees, so this run starts by hand:
+  `matlab.exe -singleCompThread -logfile <checkout>\logs\stage_B3c_<time>.txt -batch "<command>"`.
+- Start it only with the free commit the B stages need (65 GB, `docs/d91_deploy.md` 5.0).
+- After the reading, the marker is copied to `docs/core_cnn_read_p1.txt` and committed on the
+  working checkout's branch.
+
 ## 10. Time and memory (estimate, not measured)
 
 **Time**
@@ -262,6 +331,13 @@ The `test_core_cnn_*` functions and `test_spec_net_trains` in `code/tests/test_c
 - the detection delay;
 - the network's training on synthetic images;
 - the stage's guards before the set is loaded, and their order;
+- the reading without B3r (`test_core_cnn_no_b3r`): only under a committed, complete declaration of
+  this link model, and never beside a part of B3r's reading;
+- the inputs from another tree (`test_core_cnn_inputs`): the paths, and the stop when the working
+  folder lies in an input's tree;
+- the whole stage in a checkout of its own on another tree's inputs, without B3r
+  (`test_core_cnn_isolated_reading`): every output in the working folder, the source files
+  untouched, the hybrid's slot empty;
 - the whole stage on synthetic splits (`test_core_cnn_reading`): a smoke training, then the
   reading with every output, figure and report line, checked against the saved predictions.
   The real reading's code after the marker has thus run to its end before the set is loaded,

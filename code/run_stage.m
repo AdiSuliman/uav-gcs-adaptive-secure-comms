@@ -13,7 +13,7 @@ function run_stage(varargin)
 %   read here) | B3r read_fresh_test3 (eval_detector on the fourth test set, once, after
 %   kpi1_set.m names it at the go/no-go; docs/d91_set4.md) |
 %   B3a compare_architectures | B3c train_core_cnn (the proposal's three-state CNN on spectrograms
-%   only, read once on the fourth test set after B3r; by hand through the gate, never in the
+%   only, read once on the fourth test set after B3r or under docs/core_cnn_no_b3r.txt; by hand, never in the
 %   takeover's chain; docs/core_cnn_protocol.md) |
 %   B4 eval_unseen_snr | OOD eval_ood_detection | B4s eval_unseen_severity | C1p build_policy_pools |
 %   C1c build_clean_test_pools and build_check_pools | C1d choose_drop_threshold | C2 train_dqn |

@@ -7,7 +7,10 @@ function C = core_cnn_config()
 %   NS             window grid [cycles] (select_fusion.m's); K folds by sub-run, fold_seed
 %   n_boot, boot_seed  bootstrap over test sub-runs (eval_detector.m's)
 %   thr            the lecturer's thresholds (fractions)
-%   files          model, marker, protocol, test set and the hybrid's fourth-set reading
+%   files          model, marker, protocol, the declaration that no hybrid reading of the
+%                  fourth set comes first (no_b3r); the inputs, relative to the working folder
+%                  unless CORE_CNN_IN names them elsewhere (core_cnn_inputs.m): training splits,
+%                  params.mat, test set, its link model and the hybrid's fourth-set reading
 C.groups = {'none', 'tone_jamming', 'jamming'};
 C.names = {'clean', 'narrowband jamming', 'wideband jamming'};
 C.epochs = [30 60];
@@ -21,6 +24,9 @@ C.thr = struct('macro_f1', 0.85, 'recall', 0.85, 'false_alarm', 0.05);
 C.model = 'data/core_cnn_model.mat';
 C.marker = 'results/core_cnn_read_started.txt';
 C.protocol = 'docs/core_cnn_protocol.md';
+C.no_b3r = 'docs/core_cnn_no_b3r.txt';
+C.splits = 'data/splits.mat';
+C.params = 'params.mat';
 C.test = 'data/splits_fresh3.mat';
 C.test_params = 'data/splits_fresh3_params.mat';
 C.hybrid_pred = 'results/detector_predictions_fresh3.mat';
