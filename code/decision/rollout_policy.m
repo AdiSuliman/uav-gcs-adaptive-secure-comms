@@ -26,6 +26,7 @@ function R = rollout_policy(kind, PP, K, spec, split, agent, opt, seed)
 %                     but the frames after the link turns coded that deliver no packet yet
 %                     (link_env.m, fec_gap: never restored, so no run starts in them)
 %          recoverable  some configuration restores this geometry (link_env.m)
+%          recoverable_core  some configuration of the core action set restores it
 %          switches, false_sw (whole episode), esc (escalations), aoa (3 x NE),
 %          cfg_final, r (geometry index), cfg_trace (T x NE); at the first change:
 %          fc_t, fc_cls (index into PP.classes, numel + 1 = unknown), fc_deg, fc_drop,
@@ -34,6 +35,12 @@ function R = rollout_policy(kind, PP, K, spec, split, agent, opt, seed)
 %                     the threat (a component of a combined one) and to the first
 %                     confirmed alarm, read one cycle later (0: the onset frame itself, as
 %                     eval_detector.m counts; NaN if never; the oracle has no monitor)
+%          per_post   packet error rate after onset: mean true packet loss (CRC) of the
+%                     frames that carry a packet (per_metrics.m)
+%          dlv_post   delivered payload after onset, share of the nominal payload rate
+%                     (goodput factor x (1 - packet loss), 0 in the coded-link gap)
+%          t_rec_det  cycles from the first confirmed alarm's frame (onset + t_conf) until
+%                     the packet loss is restored for 5 consecutive cycles (NaN if never)
 if nargin < 7 || isempty(opt), opt = struct(); end
 rs = RandStream('mt19937ar', 'Seed', seed);
 opt.rs = RandStream('mt19937ar', 'Seed', seed + 1);
@@ -44,7 +51,8 @@ cls_list = [cellstr(string(PP.classes(:)')), {'unknown'}];
 fc = struct('t', zeros(1, NE), 'cls', zeros(1, NE), 'deg', false(1, NE), 'drop', nan(1, NE), 'dal', false(1, NE));
 tr = struct('r', zeros(T, NE), 'q', zeros(T, NE), 'rest', false(T, NE), 'rplr', false(T, NE), 'gput', zeros(T, NE), ...
     'ch', false(T, NE), 'fs', false(T, NE), 'post', false(T, NE), 'esc', false(T, NE), 'cfg', zeros(T, NE), ...
-    'recov', false(T, NE), 'fer', zeros(T, NE), 'cls', false(T, NE), 'conf', false(T, NE), 'gap', false(T, NE));
+    'recov', false(T, NE), 'recovc', false(T, NE), 'fer', zeros(T, NE), 'cls', false(T, NE), 'conf', false(T, NE), ...
+    'gap', false(T, NE), 'link', zeros(T, NE));
 comp = cellfun(@(c) strsplit(c, '+'), PP.scen(E.scn), 'UniformOutput', false);
 for t = 1:T
     if strcmp(kind, 'oracle')
@@ -65,8 +73,10 @@ for t = 1:T
     end
     tr.r(t, :) = r; tr.q(t, :) = info.q; tr.rest(t, :) = info.restored; tr.gput(t, :) = info.gput;
     tr.rplr(t, :) = info.restored_plr; tr.recov(t, :) = info.recoverable; tr.fer(t, :) = obs.fer_true;
+    tr.recovc(t, :) = info.recoverable_core;
     tr.gap(t, :) = info.fec_gap;
     tr.ch(t, :) = info.changed; tr.fs(t, :) = info.false_switch; tr.post(t, :) = info.post; tr.cfg(t, :) = E.cfg;
+    tr.link(t, :) = E.cfg_link;
 end
 post = tr.post; npost = max(sum(post, 1), 1);
 ok = tr.rest & tr.rplr;
@@ -102,6 +112,7 @@ for i = find(R.recovered)
 end
 last = arrayfun(@(i) find(post(:, i), 1, 'last'), 1:NE);
 R.recoverable = tr.recov(sub2ind([T NE], last, 1:NE));
+R.recoverable_core = tr.recovc(sub2ind([T NE], last, 1:NE));
 R.aoa = E.aoa';
 R.cfg_final = E.cfg;
 R.r = E.r;
@@ -114,4 +125,6 @@ for i = 1:NE
     k = find(tr.cls(t0+1:T, i), 1); if ~isempty(k), R.t_cls(i) = k - 1; end   % the decision of cycle t reads frame t - 1
     k = find(tr.conf(t0+1:T, i), 1); if ~isempty(k), R.t_conf(i) = k - 1; end
 end
+Mp = per_metrics(tr.fer, post, tr.gap, tr.rplr, reshape(PP.gp(tr.link), T, NE), R.t_conf, 5);
+R.per_post = Mp.per_post; R.dlv_post = Mp.dlv_post; R.t_rec_det = Mp.t_rec_det;
 end

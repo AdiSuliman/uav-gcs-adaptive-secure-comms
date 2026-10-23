@@ -69,7 +69,8 @@ function varargout = link_env(cmd, varargin)
 %   healthy: unmitigated m <=
 %   C.ratio_ok x clean; recoverable: some configuration restores both BER and
 %   packet loss in this geometry (under a comb jammer, one without channel_switch
-%   and freq_diversity); on: the cell's threat is on the air in some frame of this
+%   and freq_diversity); recoverable_core: the same over the core action set's
+%   configurations alone (C.core_actions); on: the cell's threat is on the air in some frame of this
 %   geometry (pool_cell.m act; airframe shadowing only where the flight's attitude lets
 %   the airframe hide an antenna, shadow_hidden.m), so an episode whose threat never is
 %   counts as no threat episode (policy_run_set.m, dqn_eval_batches.m).
@@ -83,7 +84,7 @@ function varargout = link_env(cmd, varargin)
 %   positions are, fec_packets.m), ber_true and fer_true (the frame's BER and packet
 %   error, analysis only)
 %   info: per episode q, restored, restored_plr, fec_gap, gput, changed (a change or a hop),
-%   false_switch, healthy, recoverable, sc_eff, cfg_eff, post, hop (requested this
+%   false_switch, healthy, recoverable, recoverable_core, sc_eff, cfg_eff, post, hop (requested this
 %   cycle), hop_in (a hop reached the link on this frame), compromised
 switch cmd
     case 'tables', varargout{1} = tables(varargin{:});
@@ -138,8 +139,10 @@ end
 K.q = nan(nSc, nS, nA, nSp, nRm); K.gput = nan(nSc, nS, nA, nSp, nRm);
 K.restored = false(nSc, nS, nA, nSp, nRm); K.restored_plr = false(nSc, nS, nA, nSp, nRm);
 K.healthy = false(nSc, nS, nSp, nRm); K.recoverable = false(nSc, nS, nSp, nRm); K.recoverable_comb = K.recoverable;
+K.rec_core = K.recoverable; K.rec_core_comb = K.recoverable;   % the same over the core action set
 K.on = false(nSc, nS, nSp, nRm);
 stay = ~K.hasCh & ~K.hasFd;                         % configurations a comb jammer leaves as they are
+core = ismember(A, C.core_actions);                 % the core action set (decision_config.m)
 for sp = 1:nSp
     [BC, PC] = clean_reference(PP, K, sp, ref, C);   % clean BER (floored) and packet loss, Eb/N0 x geometry
     for sc = 1:nSc
@@ -174,6 +177,7 @@ for sp = 1:nSp
                 ok = K.restored(sc, s, :, sp, r) & K.restored_plr(sc, s, :, sp, r);
                 K.recoverable(sc, s, sp, r) = any(ok);
                 K.recoverable_comb(sc, s, sp, r) = any(ok(stay));
+                K.rec_core(sc, s, sp, r) = any(ok(core)); K.rec_core_comb(sc, s, sp, r) = any(ok(core & stay));
             end
         end
     end
@@ -266,10 +270,12 @@ healthy = K.healthy(ih);
 q = K.q(idx);
 r = (q - K.cost(E.cfg_link) - K.SW * (changed | hop) - K.FA * (changed & healthy)) / 100;
 rec = K.recoverable(ih); rec(E.comb) = K.recoverable_comb(ih(E.comb));
+rcr = rec;
+if isfield(K, 'rec_core'), rcr = K.rec_core(ih); rcr(E.comb) = K.rec_core_comb(ih(E.comb)); end
 info = struct('q', q, 'restored', K.restored(idx) & ~gap, 'restored_plr', K.restored_plr(idx) & ~gap, ...
     'fec_gap', gap, 'gput', K.gput(idx), ...
     'changed', changed | hop, 'false_switch', changed & healthy, 'healthy', healthy, ...
-    'recoverable', rec, 'sc_eff', sc_eff, 'cfg_eff', cfg_eff, 'post', E.t >= E.onset, ...
+    'recoverable', rec, 'recoverable_core', rcr, 'sc_eff', sc_eff, 'cfg_eff', cfg_eff, 'post', E.t >= E.onset, ...
     'hop', hop, 'hop_in', arr, 'compromised', cm);
 end
 

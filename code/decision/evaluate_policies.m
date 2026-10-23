@@ -38,7 +38,11 @@
 % the best fixed configuration (train pools), expert rule with and without
 % escalation, the rule with escalation without the detector (alarm from measured
 % degradation only), class -> configuration table (train pools), the DQN of every
-% discount factor (the selected one also with escalation), one-step oracle.
+% discount factor (the selected one also with escalation), one-step oracle; and the rule with
+% escalation, with and without the detector, on the revised proposal's core action set
+% (channel switching and rate adaptation: rule_core, blind_core; rule_core_policy.m), after
+% every other policy, on the same episodes and frame draws: every other policy's numbers stay
+% as without them (c2e_lect.m reads the revised proposal's KPIs from this file).
 % The deployed policy, read by the KPIs, is the one train_dqn.m chose on validation: the
 % selected DQN with escalation when it passed its gate, otherwise the rule with
 % escalation on its own monitor (rule_sel). The agent must come from these pools'
@@ -59,7 +63,8 @@
 % speed bands (KPI 7); differences are paired per episode. Episode sets, runs and
 % policies: policy_episodes.m, policy_run_set.m, policy_setup.m.
 %
-% Output: results/policy_evaluation.{txt,mat,png}, results/policy_breakdown.png
+% Output: results/policy_evaluation.{txt,mat,png}, results/policy_breakdown.png; the .mat also
+% holds lect_in (scenario names, decision period, nominal payload rate in bit/s, det_id)
 
 close all; clc;
 fprintf('=== Decision-layer evaluation on the test pools ===\n\n');
@@ -157,6 +162,8 @@ if strcmp(Q.deployed, 'rule_sel')                    % the rule fallback on its 
     POL = [POL(1:end-1), {'rule_sel'}, POL(end)];
     LBL = [LBL(1:end-1), {sprintf('rule + escalation, own monitor (%s)', Q.rule_sel.alarm)}, LBL(end)];
 end
+POL = [POL, {'rule_core', 'blind_core'}];            % the core action set, after every other policy
+LBL = [LBL, {'core: rule + escalation', 'core: no detector + escalation'}];
 iBase = find(strcmp(POL, sprintf('dqn_g%d', sel)));  % selected DQN alone
 iDQN = find(strcmp(POL, Q.deployed));                % deployed policy (train_dqn.m)
 LBL{iDQN} = [LBL{iDQN} ' (deployed)'];
@@ -495,8 +502,9 @@ KP = struct('per_threat', PT, 'per_threat_sev', PTsev, 'threats', {threats}, 're
     'selected_gamma', Q.seed_summary.selected_gamma, 'confirm', PP.confirm, 'alarm_mode', PP.alarm_mode, ...
     'per_speed_out', PS, 'speed_out', PP.speed_out, 'per_delay', PD, 'sev_names', {PP.sev_names}, 'onset', onset, ...
     'shadow_note', SHN, 'det_id', PP.det_id, 'policy_stamp', policy_stamp(Q));
+lect_in = struct('scen', {PP.scen}, 'period_ms', C.period_ms, 'payload_bps', payload_rate(C), 'det_id', PP.det_id);
 save('results/policy_evaluation.mat', 'RES', 'RW', 'POL', 'LBL', 'set_names', 'fixed_best', 'tab', 'iDQN', 'KP', ...
-    'iThreat', 'ALL', 'top_cfg');
+    'iThreat', 'ALL', 'top_cfg', 'lect_in');
 
 %% 5. Figures
 key = unique({'none', 'fixed', 'rule_esc', 'blind_esc', 'table', 'dqn_esc', POL{iDQN}, 'oracle'}, 'stable');
@@ -540,6 +548,15 @@ saveas(fig, 'results/policy_breakdown.png'); close(fig);
 fprintf('Saved results/policy_evaluation.{txt,mat,png}, results/policy_breakdown.png\n');
 
 %% ===================== Local functions =====================
+function r = payload_rate(C)
+% Nominal payload rate [bit/s]: one frame of payload bits per decision cycle (params.mat).
+r = NaN;
+if ~isfile('params.mat'), warning('evaluate_policies:payload', 'params.mat absent: goodput in bit/s not available'); return; end
+p = load('params.mat').params;
+cyc = C.period_ms / 1000; if isfield(p, 'cycle_s'), cyc = p.cycle_s; end
+r = p.bits_per_frame / cyc;
+end
+
 function [FAR, FD, lines] = far_report(RR, POL, LBL, above, T, iDQN, ebno, cls_list, period_ms)
 % False-alarm counts per policy (episodes with >= 1 change, Clopper-Pearson
 % bound; false changes per cycle and per hour, false_change_rate.m), and for the
