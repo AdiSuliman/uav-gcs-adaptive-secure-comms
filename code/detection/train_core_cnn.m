@@ -21,7 +21,9 @@
 %    sub-run. No outcome line is printed before every metric is computed.
 % Inputs are the working folder's own, or the files CORE_CNN_IN names elsewhere (a struct,
 % core_cnn_inputs.m), only loaded; every output goes into the working folder, which must lie
-% outside the tree of every such input.
+% outside the tree of every such input. Without B3r, no file of B3r's reading exists in the
+% working folder or in any of these trees. The model is read only with the training split it
+% was trained on.
 % It never writes data/trained_detector.mat, data/fusion.mat or data/ood_thresholds.mat.
 % Output: data/core_cnn_model.mat, results/core_cnn_validation.txt, results/core_cnn_training.png;
 % results/core_cnn_predictions.mat, results/core_cnn.mat, results/core_cnn.txt,
@@ -34,7 +36,7 @@ CC = core_cnn_config();
 nS = numel(CC.groups);
 assert(isfile(CC.protocol), 'train_core_cnn:protocol', '%s not found: the protocol is fixed before any run', CC.protocol);
 psha = cc_sha(CC.protocol);
-if exist('CORE_CNN_IN', 'var'), IN = core_cnn_inputs(CC, CORE_CNN_IN, pwd); else, IN = core_cnn_inputs(CC); end
+if exist('CORE_CNN_IN', 'var'), [IN, TREES] = core_cnn_inputs(CC, CORE_CNN_IN, pwd); else, [IN, TREES] = core_cnn_inputs(CC); end
 assert(isfile(IN.splits), 'train_core_cnn:splits', '%s not found: run B1', IN.splits);
 if ~isfolder('data'), mkdir('data'); end
 if ~isfolder('results'), mkdir('results'); end
@@ -77,9 +79,10 @@ if ~isfile(CC.model) || dir(CC.model).datenum < dir(IN.splits).datenum || (~SMK 
     val = struct('frame', core_cnn_eval('metrics', yv, yv1, nS), 'window', core_cnn_eval('metrics', yv, yvN, nS), ...
         'n_frames', accumarray(yv, 1, [nS 1])', 'n_runs', nrv, 'left_out', iv.n_off, 'window_table', NT);
     groups = CC.groups; names = CC.names; protocol_sha = psha; trained_at = now; smoke = SMK; %#ok<NASGU>
+    train_splits = cc_abs(IN.splits); %#ok<NASGU>
     tmp = 'data/core_cnn_model_new.mat';
     save(tmp, 'net', 'info', 'N', 'classes', 'groups', 'names', 'schedules', 'val_best', 'all_info', 'val', ...
-        'protocol_sha', 'trained_at', 'smoke', '-v7.3');
+        'protocol_sha', 'trained_at', 'smoke', 'train_splits', '-v7.3');
     commit_mat(tmp, CC.model);
     fprintf('Saved %s\n', CC.model);
     vrep = {'=== THREE-STATE CNN: VALIDATION (every choice of the model) ===', ...
@@ -106,7 +109,7 @@ if ~isfile(CC.model) || dir(CC.model).datenum < dir(IN.splits).datenum || (~SMK 
     xlabel('Epoch'); ylabel('Validation macro-F1, three states (%)'); legend('Location', 'southeast');
     title('Three-state spectrogram CNN: validation per epoch');
     saveas(fig, 'results/core_cnn_training.png'); close(fig);
-    clear net info all_info Pv yv yv1 yvN va val vrep fig tmp smoke pid0
+    clear net info all_info Pv yv yv1 yvN va val vrep fig tmp smoke pid0 train_splits
 end
 if SMK
     fprintf('SMOKE: a reduced model is trained (marked smoke); the fourth test set is not read\n');
@@ -125,13 +128,23 @@ assert(isfield(Mo, 'protocol_sha') && strcmp(Mo.protocol_sha, psha), 'train_core
     '%s changed since the model was trained: the protocol is fixed before the reading', CC.protocol);
 assert(~cc_smoke(CC.model), 'train_core_cnn:smoke', ...
     '%s was trained in a reduced chain check (run_stage smoke): a normal run retrains it', CC.model);
+if ismember('train_splits', {whos('-file', CC.model).name})
+    ts = load(CC.model, 'train_splits').train_splits;
+    assert(strcmpi(ts, cc_abs(IN.splits)), 'train_core_cnn:train_splits', ...
+        '%s was trained on %s, the inputs name %s: the model is read with its own training split', CC.model, ts, IN.splits);
+    clear ts
+end
 assert(strcmp(kpi1_set(), 'fresh3'), 'train_core_cnn:kpi1_set', ...
     'the fourth test set is read only once kpi1_set.m names it (docs/d91_set4.md)');
 HYB = isfile(IN.hybrid_metrics) && isfile(IN.hybrid_pred);   % B3r's reading of the set exists
 [NOB, nob, why] = cc_no_b3r(CC.no_b3r);
-assert(HYB || (NOB && ~isfile(IN.hybrid_metrics) && ~isfile(IN.hybrid_pred)), 'train_core_cnn:hybrid', ...
+B3F = cc_b3r_files(CC, IN, TREES);                      % any file of B3r's reading, here or in a source tree
+b3f = 'none'; if ~isempty(B3F), b3f = strjoin(reshape(B3F, 1, []), ', '); end
+assert(HYB || (NOB && isempty(B3F)), 'train_core_cnn:hybrid', ...
     ['the hybrid''s fourth-set reading (%s, %s) comes first (run B3r), unless a committed %s declares that no B3r ' ...
-    'comes before this reading and no part of B3r''s reading exists (%s)'], IN.hybrid_metrics, IN.hybrid_pred, CC.no_b3r, why);
+    'comes before this reading and no file of B3r''s reading exists in the working folder or a source tree ' ...
+    '(%s; found: %s; a reading in a source tree is named in CORE_CNN_IN.hybrid_pred and hybrid_metrics)'], ...
+    IN.hybrid_metrics, IN.hybrid_pred, CC.no_b3r, why, b3f);
 assert(isfile(IN.test), 'train_core_cnn:fresh3', '%s not found: run B3q', IN.test);
 assert(isfile(IN.params), 'train_core_cnn:params', '%s not found', IN.params);
 pid = params_id(load(IN.params).params);
@@ -147,7 +160,7 @@ assert(~cc_recorded(pid, false), 'train_core_cnn:recorded', ...
 if HYB, nob = []; end
 cc_marker(CC.marker, pid, CC.model, CC.protocol, IN, nob);
 fprintf('B3c: start marker written (%s)\n', CC.marker);
-clear Mo NOB why
+clear Mo NOB why B3F b3f TREES
 
 fprintf('Loading the fourth test set...\n');
 Mo = load(CC.model, 'net', 'N', 'classes', 'schedules', 'val_best', 'info', 'val');
@@ -383,6 +396,22 @@ for f = {'macro_f1', 'fa', 'fa_jam', 'recall', 'macro_f1_ebno'}
     x = nan(sz); x(act, :, :) = v; B.(f{1}) = x;
 end
 B.diff = nan(R, 2);
+end
+
+function f = cc_b3r_files(CC, IN, trees)
+% The files of B3r's fourth-set reading that exist: the inputs and, in every source tree, the
+% reading's own place.
+c = {IN.hybrid_metrics, IN.hybrid_pred};
+for t = reshape(trees, 1, [])
+    c = [c, {fullfile(t{1}, CC.hybrid_metrics), fullfile(t{1}, CC.hybrid_pred)}]; %#ok<AGROW>
+end
+f = unique(c(cellfun(@isfile, c)), 'stable');
+end
+
+function p = cc_abs(p)
+% Absolute, canonical path (a relative one from the working folder).
+if ~java.io.File(p).isAbsolute(), p = fullfile(pwd, p); end
+p = char(java.io.File(p).getCanonicalPath());
 end
 
 function [ok, D, why] = cc_no_b3r(f)

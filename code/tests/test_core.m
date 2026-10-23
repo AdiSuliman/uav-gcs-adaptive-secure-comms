@@ -8930,7 +8930,7 @@ src = fileread(which('train_core_cnn'));
 im = strfind(src, 'cc_marker(CC.marker, pid, CC.model, CC.protocol, IN, nob);'); verifyNumElements(tc, im, 1);
 il = strfind(src, 'Sf = load(IN.test, ''splits'');'); verifyNumElements(tc, il, 1);
 verifyLessThan(tc, im, il);
-for id = {'protocol_changed', 'smoke', 'kpi1_set', 'hybrid', 'fresh3', 'params', 'no_b3r', 'read', 'started', 'recorded'}
+for id = {'protocol_changed', 'smoke', 'train_splits', 'kpi1_set', 'hybrid', 'fresh3', 'params', 'no_b3r', 'read', 'started', 'recorded'}
     k = strfind(src, ['''train_core_cnn:' id{1} '''']);
     verifyNotEmpty(tc, k, id{1}); verifyLessThan(tc, k(end), im, id{1});
 end
@@ -9154,9 +9154,11 @@ end
 function test_core_cnn_inputs(tc)
 % B3c's inputs: the working folder's own by default; CORE_CNN_IN names them elsewhere (relative
 % to the working folder, canonical), and the stage stops when the working folder lies in the
-% tree of such an input: its git checkout, else the folder above data/ or results/.
+% tree of such an input: its git checkout, else the folder above data/ or results/. The source
+% trees are listed once each; a copy inside the working folder adds none.
 CC = core_cnn_config();
-IN = core_cnn_inputs(CC);
+[IN, T] = core_cnn_inputs(CC);
+verifyEmpty(tc, T);
 for f = {'splits', 'params', 'test', 'test_params', 'hybrid_pred', 'hybrid_metrics'}
     verifyEqual(tc, IN.(f{1}), CC.(f{1}), f{1});
 end
@@ -9180,9 +9182,13 @@ verifyError(tc, @() core_cnn_inputs(CC, struct('test', fullfile(s2, 'data', 'spl
     'train_core_cnn:isolation');
 IN = core_cnn_inputs(CC, struct('test', fullfile(s2, 'data', 'splits_fresh3.mat')), out);
 verifyEqual(tc, IN.test, cn(fullfile(s2, 'data', 'splits_fresh3.mat')));
+[~, T] = core_cnn_inputs(CC, struct('splits', fullfile(src, 'data', 'splits.mat'), 'params', fullfile(src, 'params.mat'), ...
+    'test', fullfile(s2, 'data', 'splits_fresh3.mat')), out);
+verifyEqual(tc, T, {cn(src), cn(s2)});
 mkdir(fullfile(out, 'in'));                                                              % a copy inside the working folder
-IN = core_cnn_inputs(CC, struct('splits', fullfile(out, 'in', 'splits.mat')), out);
+[IN, T] = core_cnn_inputs(CC, struct('splits', fullfile(out, 'in', 'splits.mat')), out);
 verifyEqual(tc, IN.splits, cn(fullfile(out, 'in', 'splits.mat')));
+verifyEmpty(tc, T);
 verifyError(tc, @() core_cnn_inputs(CC, struct('split', 'a.mat'), out), 'train_core_cnn:inputs');
 verifyError(tc, @() core_cnn_inputs(CC, struct('splits', 1), out), 'train_core_cnn:inputs');
 verifyError(tc, @() core_cnn_inputs(CC, {'a.mat'}, out), 'train_core_cnn:inputs');
@@ -9231,6 +9237,19 @@ verifyEqual(tc, ex.identifier, 'test:none', ex.message);
 verifyTrue(tc, isfile(CC.model) && isfile('results/core_cnn_validation.txt'));
 verifyNotEmpty(tc, strfind(fileread('results/core_cnn_validation.txt'), ['validation split of ' core_cnn_inputs(CC, in, w).splits]));
 smoke = false; save(CC.model, 'smoke', '-append');
+verifyEqual(tc, load(CC.model, 'train_splits').train_splits, core_cnn_inputs(CC, in, w).splits);
+% B3r's reading in a source tree, not named in CORE_CNN_IN: no reading without B3r
+in2 = rmfield(in, {'hybrid_pred', 'hybrid_metrics'});
+mkdir(fullfile(src, 'results')); x = 1; save(fullfile(src, 'results', 'eval_detector_metrics_fresh3.mat'), 'x');
+verifyEqual(tc, core_stage_error(false, false, in2).identifier, 'train_core_cnn:hybrid');
+verifyFalse(tc, isfile(CC.marker));
+delete(fullfile(src, 'results', 'eval_detector_metrics_fresh3.mat')); rmdir(fullfile(src, 'results'));
+% Another training split than the model's: not read
+oth = fullfile(b, 'other', 'data'); mkdir(oth); copyfile(in.splits, oth);
+f = java.io.File(fullfile(oth, 'splits.mat')); f.setLastModified(java.lang.System.currentTimeMillis() - 3600e3);
+verifyEqual(tc, core_stage_error(false, false, setfield(in, 'splits', fullfile(oth, 'splits.mat'))).identifier, ...
+    'train_core_cnn:train_splits'); %#ok<SFLD>
+verifyFalse(tc, isfile(CC.marker));
 ex = core_stage_error(false, false, in);
 verifyEqual(tc, ex.identifier, 'test:none', ex.message);
 for f = {CC.marker, 'results/core_cnn_predictions.mat', 'results/core_cnn.mat', 'results/core_cnn.txt', ...

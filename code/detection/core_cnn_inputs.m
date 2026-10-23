@@ -1,4 +1,4 @@
-function IN = core_cnn_inputs(CC, in, out)
+function [IN, trees] = core_cnn_inputs(CC, in, out)
 %CORE_CNN_INPUTS  The files stage B3c reads (train_core_cnn.m), only ever loaded.
 %   IN = core_cnn_inputs(CC) the working folder's own: CC.splits, CC.params, CC.test,
 %   CC.test_params, CC.hybrid_pred and CC.hybrid_metrics (core_cnn_config.m).
@@ -9,7 +9,7 @@ function IN = core_cnn_inputs(CC, in, out)
 %   data/ or results/ folder, else its own folder. So the stage never writes into a source
 %   tree; a copy inside out passes.
 f = {'splits', 'params', 'test', 'test_params', 'hybrid_pred', 'hybrid_metrics'};
-IN = struct();
+IN = struct(); trees = {};
 for k = 1:numel(f), IN.(f{k}) = CC.(f{k}); end
 if nargin < 2 || isempty(in), return; end
 assert(isstruct(in) && isscalar(in), 'train_core_cnn:inputs', 'CORE_CNN_IN is a struct of file paths');
@@ -27,6 +27,7 @@ for k = reshape(fieldnames(in), 1, [])
     t = ci_tree(p);
     assert(~ci_under(o, t), 'train_core_cnn:isolation', ['the working folder %s lies in %s, the tree of ' ...
         'CORE_CNN_IN.%s (%s): run the stage in a checkout of its own, outside every source tree'], o, t, k{1}, p);
+    if ~any(cellfun(@(x) ci_under(t, x) && ci_under(x, t), trees)), trees{end+1} = t; end %#ok<AGROW>
 end
 end
 

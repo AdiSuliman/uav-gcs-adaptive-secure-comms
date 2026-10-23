@@ -118,7 +118,8 @@ trained from scratch.
    - the hybrid's own fourth-set reading exists: `results/eval_detector_metrics_fresh3.mat` and
      `results/detector_predictions_fresh3.mat`;
    - no B3r comes before this reading, and a committed declaration `docs/core_cnn_no_b3r.txt`
-     says so. No file of B3r's reading exists, not even one of the two.
+     says so. No file of B3r's reading exists, not even one of the two: neither in the
+     working folder nor in the tree of any input named elsewhere (section 9).
 
    Any other case stops the stage: neither, or only a part of B3r's reading.
 3. `data/splits_fresh3.mat` exists, and so does `data/splits_fresh3_params.mat`, with the
@@ -126,6 +127,7 @@ trained from scratch.
 4. `data/core_cnn_model.mat` exists, is newer than `data/splits.mat`, carries this protocol's
    SHA-256 and was not trained in a smoke run (`run_stage('smoke', ...)`, a 2-epoch model marked
    `smoke`; a smoke run never reads the set, and the next normal run retrains over its model).
+   It was trained on the training split the reading names (its `train_splits`).
 5. None of these exists yet:
    - `results/core_cnn.mat`;
    - `results/core_cnn_read_started.txt`;
@@ -278,6 +280,11 @@ running its chain.
   an input. The tree is the git checkout that holds the input; without one, it is the folder
   above its `data/` or `results/` folder.
 - Copies of the inputs inside the working folder pass too.
+- Without B3r, the reading's own place in each such tree (`results/eval_detector_metrics_fresh3.mat`,
+  `results/detector_predictions_fresh3.mat`) holds no file either. A B3r reading there is named
+  in `hybrid_pred` and `hybrid_metrics`, and then the comparison of section 7 is made.
+- The model records the training split it was trained on; the reading stops
+  (`train_core_cnn:train_splits`) when `splits` names another one.
 - The protocol, the declaration and the records `docs/core_cnn_read_*.txt` are those of the
   working checkout.
 
