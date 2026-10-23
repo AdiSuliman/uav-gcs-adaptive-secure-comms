@@ -19,7 +19,7 @@ Profile 1's C2e therefore has no `rule_core`/`blind_core` and none of the lectur
 They are read once, after profile 1's C2e has finished, in a separate copy. That copy runs the same
 C2e on the same inputs and adds them. Profile 1's tree is only read.
 
-## 2. The code: profile 1's own, with the readers added (branch `lect-p1`, `cd00a01`)
+## 2. The code: profile 1's own, with the readers added (branch `lect-p1`, `8118281`)
 
 The copy does not run `lect-kpi` or the merged deploy tip. Both carry changes that alter
 numbers profile 1's C2e already produced, so the equality of section 5 could not hold:
@@ -206,7 +206,7 @@ geometry. For the core set, some core configuration does (`recoverable_core`, pr
 
     cd "/c/Users/Adi Suliman/uav-gcs-lectkpi"
     bash tools/c2e_lect_isolated.sh check       # preconditions, no writes
-    bash tools/c2e_lect_isolated.sh prepare     # worktree C:\Users\Adi Suliman\uav-gcs-c2elect-p1 at cd00a01, inputs copied
+    bash tools/c2e_lect_isolated.sh prepare     # worktree C:\Users\Adi Suliman\uav-gcs-c2elect-p1 at 8118281, inputs copied
     bash tools/c2e_lect_isolated.sh run         # the gated MATLAB in the p3 slot, then verify
 
 `run` calls the wrapper with this command (`command` prints it):

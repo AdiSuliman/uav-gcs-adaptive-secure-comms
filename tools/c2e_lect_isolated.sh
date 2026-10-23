@@ -25,7 +25,7 @@ set -u
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 P1=${C2E_P1:-"/c/Users/Adi Suliman/uav-gcs-v7"}
 ISO=${C2E_ISO:-"/c/Users/Adi Suliman/uav-gcs-c2elect-p1"}
-CODE=${C2E_CODE:-cd00a01e339978ebb789f1de79d7245f2fe4236c}
+CODE=${C2E_CODE:-8118281b601d75eeb899e4ceaa2785ee6e2ee54b}
 P1_COMMIT=${C2E_P1_COMMIT:-208602b2fecaf531875354ce9e6e0cf5339522d5}
 READERS_REF=${C2E_READERS_REF:-e84a5fd6200e9763853b8e2a400c005ec9801627}
 WRAP=${C2E_WRAPPER:-"/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_gated_run.sh"}

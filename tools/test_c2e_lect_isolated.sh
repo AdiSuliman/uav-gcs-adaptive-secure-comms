@@ -65,7 +65,8 @@ r=1; cmp -s "$P1T/data/trained_dqn.mat" "$T/iso/data/trained_dqn.mat" && [ ! -w 
   && cmp -s "$P1T/results/policy_evaluation.txt" "$T/iso/ref/p1_policy_evaluation.txt" && [ ! -e "$T/iso/results/policy_evaluation.mat" ] \
   && [ ! -e "$T/iso/data/clean_val_pools.mat" ] && r=0
 res $r 'inputs copied read-only, references in ref/, no stale results of the checkout'
-r=1; [ "$($G -C "$T/iso" rev-parse HEAD)" = "$($G -C "$HERE" rev-parse cd00a01)" ] && r=0
+CODE=$(grep -m1 '^CODE=' "$S" | sed 's/.*:-\([0-9a-f]*\)}.*/\1/')
+r=1; [ -n "$CODE" ] && [ "$($G -C "$T/iso" rev-parse HEAD)" = "$($G -C "$HERE" rev-parse "$CODE")" ] && r=0
 res $r 'the copy is a worktree of the code commit'
 expect 1 'exists' 'prepare refuses an existing copy' -- bash "$S" prepare
 expect 0 "uav-gcs-v7-p3 logs/c2e_lect_p1_" 'command prints the gated call in the p3 slot' -- bash "$S" command
