@@ -109,6 +109,8 @@ rm -f "$LOG"
 expect 1 'has not run' 'check refuses a profile 1 without C2e' -- bash "$S" check
 echo "% x" >> "$P1T/code/decision/link_env.m"
 expect 1 "code differs" 'check refuses a profile 1 tree whose code changed' -- bash "$S" check
+(cd "$P1T" && git checkout -q -- code/decision/link_env.m); echo "% x" > "$P1T/code/decision/stray.m"
+expect 1 "files in code/" 'check refuses untracked code in the profile 1 tree' -- bash "$S" check
 expect 2 'usage' 'an unknown subcommand is a usage error' -- bash "$S" other
 
 echo "C2E_SCRIPT_TESTS $OK/$N"

@@ -96,6 +96,7 @@ check() {
   # protocol committed and unchanged in this checkout
   $G -C "$HERE" ls-files --error-unmatch "$PROTO" >/dev/null 2>&1 || fail "$PROTO is not committed in $HERE"
   $G -C "$HERE" diff --quiet HEAD -- "$PROTO" || fail "$PROTO differs from its commit in $HERE"
+  $G -C "$HERE" diff --quiet HEAD -- tools/c2e_lect_isolated.sh || fail "tools/c2e_lect_isolated.sh differs from its commit in $HERE"
   # the code commit: profile 1's code plus the pre-registered port, the readers lect-kpi's unchanged
   $G -C "$HERE" cat-file -e "$CODE^{commit}" 2>/dev/null || fail "code commit $CODE not found"
   $G -C "$HERE" merge-base --is-ancestor "$P1_COMMIT" "$CODE" || fail "$CODE does not descend from profile 1's $P1_COMMIT"
@@ -117,6 +118,7 @@ check() {
   [ -d "$P1" ] || fail "$P1 not found"
   [ "$($G -C "$P1" rev-parse HEAD)" = "$P1_COMMIT" ] || fail "$P1 is not at $P1_COMMIT"
   $G -C "$P1" diff --quiet HEAD -- code startup.m || fail "$P1's code differs from $P1_COMMIT"
+  [ -z "$($G -C "$P1" status --porcelain --untracked-files=all -- code startup.m)" ] || fail "$P1 holds files in code/ that $P1_COMMIT does not"
   # its C2e finished; its results written after the start, its inputs older than it
   local st; st=$(c2e_start)
   case "$st" in none) fail "no C2e start in $P1/logs/stage_*.txt: profile 1's C2e has not run";;
@@ -131,9 +133,9 @@ check() {
     [ -f "$P1/$f" ] || continue
     [ "$(mtime "$P1/$f")" -lt "$S0" ] || fail "$P1/$f changed after the C2e start: C2e did not read this content"
   done
-  # pre-registration: protocol and code committed before the C2e start
+  # pre-registration: protocol, this script and code committed before the C2e start
   local tp tc
-  tp=$($G -C "$HERE" log -1 --format=%ct -- "$PROTO"); tc=$($G -C "$HERE" log -1 --format=%ct "$CODE")
+  tp=$($G -C "$HERE" log -1 --format=%ct -- "$PROTO" tools/c2e_lect_isolated.sh); tc=$($G -C "$HERE" log -1 --format=%ct "$CODE")
   if [ "$tp" -ge "$S0" ] || [ "$tc" -ge "$S0" ]; then
     [ -n "$DEVIATION" ] || fail "protocol ($(date -d @"$tp")) or code ($(date -d @"$tc")) committed after the C2e start ($(date -d @"$S0")); a deviation note is needed (C2E_DEVIATION)"
     case "$DEVIATION" in docs/c2e_lect_deviation_*.md) ;; *) fail "C2E_DEVIATION must be docs/c2e_lect_deviation_*.md";; esac
