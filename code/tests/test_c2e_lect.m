@@ -67,7 +67,7 @@ function test_gate_text(tc)
 tS{2} = 'Generated: 01-Jan-2027 00:00:00 | other';
 verifyTrue(tc, c2e_lect_gate(P, S, tP, tS).pass);
 verifyEqual(tc, sum(startsWith(strtrim(tS), 'core: ')), 4);
-G = c2e_lect_gate(P, S, tP, tS(1:end-1));
+G = c2e_lect_gate(P, S, tP, tS([1:9, 11:12]));          % a row of profile 1 missing
 verifyFalse(tc, G.pass);
 verifyTrue(tc, any(contains(G.mismatch, 'lines in profile 1')));
 end
