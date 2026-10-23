@@ -1366,6 +1366,7 @@ Channel model: the flat channel fails, the link runs the delay line → PASS; re
 - The 58 wording issues of the interim-report draft are not yet fixed.
 
 ## D93 — No Plan A stop for profile 1: it runs its own code to the end; the lecturer's KPIs for profile 1 from isolated runs; profile 3 deploys after profile 1
+**Revised by D94 (2026-10-23, about 09:00).** Profile 1 is stopped after all, as a software-only stop. D94 supersedes parts 1-4 and the runbook clause of part 6. Part 5 stands, with a shorter queue on `-q3`.
 **Why (2026-10-23 03:10, the user).** "No reason to stop now"; the user will say if a stop is needed. Profile 1's chain was in C1p (82 of 93 cells at 03:07), with no cut file, no `final.hold` and no alert.
 **Decision.**
 1. *Profile 1 is not stopped.* Plan A (D91, D92: the cut after SURV3, the reboot, the fusion swap, the B3-B4s rerun, the rehearsal, B3r, the re-key and the resume from C1d) is cancelled for now. `p1_cut_after.SURV3` is never written. Profile 1's chain runs its current code to RPT: `uav-gcs-v7`, `v7-dev` `208602b` (code tree `9b5c9f1`), base fusion, latch off, through C1p, C1c, SURV, SURV3, C1d, C2, C2e, C2g, C2u, GAL, OHP, GCSA, EDGE, KPI, DASH, WEAK and RPT.
@@ -1384,3 +1385,64 @@ Channel model: the flat channel fails, the link runs the delay line → PASS; re
 - CORE_BW's code base: `lect-kpi` (its decision layer is d90's monitor, applied with profile 1's settings, stated in a committed declaration) or a port onto `lect-p1`.
 - `lect-kpi` and `lect-p1` are not pushed.
 - A reboot after profile 1's end (zombies, BIOS items) is the user's choice.
+
+## D94 — Software-only Plan A stop of profile 1 (revises D93): cut after SURV3, the deploy before C1d, no reboot; profile 3 after profile 1
+**Why (2026-10-23, about 09:00, the user).** If a stop is needed for fixes and improvements, it is to be done. It was approved as a **software-only** stop: no reboot, no BIOS, fan or processor change, and nothing for the user to do.
+- The cut file `v7_d86/p1_cut_after.SURV3` was written 2026-10-23 08:56. The takeover accepted it with no alert.
+- Profile 1 was in C1p, at 87 of 93 cells on 2026-10-23 morning.
+
+**Decision.**
+1. *The cut.* The takeover ends profile 1's chain win64 MATLAB once the current part (`PART 20261017_164205`) shows `##### STAGE SURV3 done`. C1p, C1c, SURV and SURV3 finish first. The chain resumes from C1d through the takeover (`p1_resume.go`).
+2. *What profile 1 takes before C1d.* The source is one merged tip: `v7-deploy-d91` `0f437f3`, then `d91-edgefix` `8fdb09e` (tree `ce4cd2ec`), then `lect-kpi` `5b4b970` (tree `ac8d0d95`). Profile 1's candidate on `v7-dev` `208602b` has tree `579f4baa`. It carries:
+   - *D90's audit fixes:*
+     - the reward with packet loss;
+     - the held-recovery selection;
+     - the DQN deployment rule;
+     - the rule thresholds and the unknown flag, set on validation;
+     - the sweeper's confirmation;
+     - the drop threshold on the whole monitor (C1d);
+     - the harmed/offset readings.
+
+     C2 grows to 108 runs (`C.drop_steps = [-2 0 2]`).
+   - *D91's fusion revision* 'branch evidence, phi = 1' (B2F with the enlarged fit). After it come the B-stage rerun on the deployed fusion (B3, B3a, B4, B4s; in-sample labels), the rehearsal, one B3r reading of the fourth test set, and `rekey_pools`.
+   - *`d91-edgefix`:* `edge_map` names the leave-one-out agents' file and C2u, the smoke's `dep_*` steps run in chain order, and `test_rekey_unknown_agents` is added.
+   - *`lect-kpi`:*
+     - `rule_core` and `blind_core` in C2e;
+     - `lect_kpis` and the lecturer's lines in KPI;
+     - B3c, the three-state CNN;
+     - the CORE_BW code;
+     - `skip_stages`.
+   - *B3c* reads the fourth test set once, after B3r, in profile 1's own tree. The hybrid's comparison is then part of the reading.
+3. *Order and gates.*
+   - Before the code enters profile 1, the merged suite (258 tests), d91-edgefix's focused tests, the proofs at n_rx 3 and the smoke must all pass. The smoke is required because `link_env.m` changed (`d91_deploy.md` 3.7).
+   - The fast-forward of `v7-dev` is the point of no return.
+   - Every hand-run goes through the wrapper and the gate. The gate stays at 28 GB, and the floors stay at 35, 45 and 65 GB.
+   - Test sets are read once.
+4. *No reboot.* The zombie MATLAB processes 32824 and 8908 keep about 11 GB of commit.
+   - Expected free commit after the cut is about 64.6 GB. The wrapper reads its integer part, 64, which is below the 65 GB floor of B2F, the B stages, the rehearsal, B3r and B3c.
+   - If the measurement confirms this, the user chooses: a reboot, a lower floor for these hand-runs, or plan B. The agent lowers no floor.
+5. *Plan B,* until the fast-forward: nothing changes in `uav-gcs-v7`, and profile 1 resumes from C1d on `208602b`. D93's isolated runs then apply again.
+6. *Profile 3 after profile 1.* D93 part 5 stands: `p3_c1p.hold` stays, and profile 3 deploys `-q3` (tree `c1081d1f`) after profile 1's chain has ended. Its queue runs `pold pnew porder p3core` on `-q3`. `core` and the smoke come from profile 1's run on the same tip. Profile 2 stays dropped (D92).
+
+**Supersedes.** D94 supersedes D93 parts 1-4 (no stop, the base fusion in profile 1, the isolated runs, no B3r on profile 1) and the runbook clause of part 6.
+- The isolated runs (C2e-lect, the isolated B3c) are plan B only.
+- The declaration `docs/core_cnn_no_b3r.txt` (`e84a5fd`) no longer describes profile 1 once B3r has read. The code ignores it when B3r's two result files exist, and it stays in the tree.
+- The steps are in `STOP_SOFT.md` (session scratchpad `interim_report/core/`, not in this repo). It replaces `RUNBOOK_NOSTOP.md` as the order of the steps.
+
+**Consequences** (estimates, not measurements):
+- the cut about 2026-10-24/25;
+- the window about 18-39 h if 65 GB is free;
+- the resume about 2026-10-25/26;
+- C2 38-42 h;
+- C2e with the lecturer's lines about 2026-10-28/29;
+- KPI and RPT about 2026-10-30/31;
+- profile 3 after that, about 2026-11-10/13.
+
+The interim report (2026-11-01) needs no final results.
+
+**Open.**
+- Memory for the 65 GB steps without a reboot (point 4).
+- The waiting report-gallery job may start in a gap between profile 1's parallel stages, when the pool is released and the gate opens briefly. The user chooses between accepting this and ending that waiting job, with a relaunch after the cut.
+- A time box for plan B: proposed, if the resume is not possible by 2026-10-27 18:00 and `v7-dev` has not moved.
+- C2 at 108 runs or 72.
+- The wrap check after the chains (`d91_deploy.md` E11, D9): its script for the final pools is not written yet.
