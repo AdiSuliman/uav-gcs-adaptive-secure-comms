@@ -25,12 +25,12 @@ mm = {}; n = 0;
 
 % Variables
 miss = setdiff(fieldnames(P), fieldnames(S));
-if ~isempty(miss), mm{end+1} = sprintf('variables missing in the isolated run: %s', strjoin(miss, ', ')); end
+if ~isempty(miss), mm{end+1} = sprintf('variables missing in the isolated run: %s', jn(miss)); end
 ext = setdiff(setdiff(fieldnames(S), fieldnames(P)), EXTRA_VARS);
-if ~isempty(ext), mm{end+1} = sprintf('variables not allowed in the isolated run: %s', strjoin(ext, ', ')); end
+if ~isempty(ext), mm{end+1} = sprintf('variables not allowed in the isolated run: %s', jn(ext)); end
 miss = setdiff(VARS, fieldnames(P));
 if ~isempty(miss)
-    mm{end+1} = sprintf('profile 1''s file lacks %s', strjoin(miss, ', '));
+    mm{end+1} = sprintf('profile 1''s file lacks %s', jn(miss));
     G = finish(mm, n); return
 end
 if ~all(isfield(S, VARS)), G = finish(mm, n); return; end
@@ -77,7 +77,7 @@ end
 
 % KPI struct
 fp = fieldnames(P.KP); fs = fieldnames(S.KP);
-if ~isempty(setxor(fp, fs)), mm{end+1} = sprintf('KP fields differ: %s', strjoin(setxor(fp, fs), ', ')); end
+if ~isempty(setxor(fp, fs)), mm{end+1} = sprintf('KP fields differ: %s', jn(setxor(fp, fs))); end
 for f = intersect(fp, fs)'
     n = n + 1;
     if ismember(f{1}, FAR_FIELDS)
@@ -113,9 +113,9 @@ function [mm, n] = cmp_struct(a, b, where, extra, mm, n)
 % Every field of a equal in b; b's other fields only among extra.
 if ~isstruct(a) || ~isstruct(b), mm{end+1} = sprintf('%s: not a struct in both', where); return; end
 miss = setdiff(fieldnames(a), fieldnames(b));
-if ~isempty(miss), mm{end+1} = sprintf('%s: fields missing in the isolated run: %s', where, strjoin(miss, ', ')); end
+if ~isempty(miss), mm{end+1} = sprintf('%s: fields missing in the isolated run: %s', where, jn(miss)); end
 ext = setdiff(setdiff(fieldnames(b), fieldnames(a)), extra);
-if ~isempty(ext), mm{end+1} = sprintf('%s: fields not allowed: %s', where, strjoin(ext, ', ')); end
+if ~isempty(ext), mm{end+1} = sprintf('%s: fields not allowed: %s', where, jn(ext)); end
 for f = intersect(fieldnames(a), fieldnames(b))'
     n = n + numel(a.(f{1}));
     if ~isequaln(a.(f{1}), b.(f{1})), mm{end+1} = sprintf('%s.%s differs%s', where, f{1}, diff_txt(a.(f{1}), b.(f{1}))); end %#ok<AGROW>
@@ -140,6 +140,11 @@ L = L(~startsWith(L, 'Generated: '));
 for k = 1:numel(lbl)
     L = L(~startsWith(strtrim(L), [lbl{k} ' ']));
 end
+end
+
+function s = jn(c)
+% A list of names, one line.
+s = strjoin(reshape(cellstr(c), 1, []), ', ');
 end
 
 function s = txt_of(c, k)
