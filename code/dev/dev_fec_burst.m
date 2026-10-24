@@ -16,7 +16,7 @@ function R = dev_fec_burst(stage, out, rev)
 %     1. c per h (0, 1): the smallest on 2:0.1:12 flagging at most 1% of the clean points'
 %        data symbols, against each codeword's floor (q = 0.05); flag_clean its share
 %     2. thr: the smallest on 0.05:0.05:3 whose pilot error flags at most 1% of the frames
-%        with uncoded BER <= 0.2 over every point
+%        with uncoded BER <= 0.2 over every point; none: the frame c variants do not qualify
 %     3. the variants frame (b, c, a) x h (0, 1) x erase_sym (false, true), in that tie
 %        order: qualified when no D78 or clean point loses more than Q/2 packets (one loss
 %        event of the coded link, packet_share.m) more than the D78 decoder; the lowest
@@ -152,6 +152,7 @@ floor_db = 10 * log10(median(fl));
 pe = cell2mat(arrayfun(@(x) x.pe(:), D, 'UniformOutput', false)'); ub = cell2mat(arrayfun(@(x) x.ber(:), D, 'UniformOutput', false)');
 good = ub <= 0.2 & isfinite(pe);
 thr = TG(find(arrayfun(@(t) mean(pe(good) > t), TG) <= 0.01, 1));
+if isempty(thr), thr = NaN; end                       % none on the grid: frame c has no threshold, not qualified
 % 3. variants, in tie order
 V = struct('frame', {}, 'h', {}, 'erase_sym', {});
 for f = {'b', 'c', 'a'}, for h = HS, for es = [false true], V(end+1) = struct('frame', f{1}, 'h', h, 'erase_sym', es); end, end, end %#ok<AGROW>
@@ -167,7 +168,7 @@ for v = 1:nV
     rx{v} = struct('mode', 'jsi', 'rev', rev, 'q', q, 'c', c(hi), 'h', V(v).h, 'erase_sym', V(v).erase_sym, ...
         'frame', V(v).frame, 'thr', NaN, 'flag_clean', NaN);
     if strcmp(V(v).frame, 'c'), rx{v}.thr = thr; rx{v}.flag_clean = fc(hi); end
-    if isnan(c(hi)), lost(v, :) = Inf; continue; end
+    if isnan(c(hi)) || isnan(rx{v}.thr) && strcmp(V(v).frame, 'c'), lost(v, :) = Inf; continue; end
     for i = 1:nP
         qv = D(i).p; qv.fec = true; qv.fec_rx = rx{v}; bb = [];
         for r = 1:numel(D(i).T)

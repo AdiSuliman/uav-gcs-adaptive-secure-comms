@@ -206,7 +206,8 @@ pilot error of every frame, and the D78 decoder's result on the same frames (the
    data symbols against each codeword's floor (q = 0.05). D78's own criterion.
    `flag_clean(h)`: the share flagged at that `c`.
 2. `thr`: the smallest on 0.05:0.05:3 whose pilot error flags at most 1% of the frames with
-   uncoded BER <= 0.2, over every point (bursts included).
+   uncoded BER <= 0.2, over every point (bursts included). If none does, the frame c variants
+   do not qualify.
 3. Variants: frame b, c, a; then h 0, 1; then `erase_sym` false, true. That order is also the
    tie order (simpler first).
    - **Qualified:** at no D78 point and no clean point does the variant lose more than Q/2 = 2
