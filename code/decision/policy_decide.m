@@ -16,7 +16,8 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %          rule_esc, blind_esc): the core action set C.core_actions, the rule from
 %          rule_core_policy.m, the escalation over C.ladder_core and the link-budget match
 %          over rate_reduce alone; PP.core_wide, when set, the core rule's action for the
-%          class jamming (rule_core_policy.m wide_action)
+%          class jamming (rule_core_policy.m wide_action); PP.core_nb, when set, its action for
+%          the class noise_burst (burst_action)
 %
 %   Link monitor, alarm confirmation and the agent's observation history:
 %   policy_monitor.m (shared). Timing constants: decision_config.m.
@@ -26,7 +27,8 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %             threshold PP.q_thr; that branch on or off, PP.rule_slot), the monitor's drop
 %             alarm and the link budget (its drop without the configurations' known gains,
 %             the configuration in use and the gains of power_control, rate_reduce and
-%             both, config_gain_db.m) -> rule_based_policy.m
+%             both, config_gain_db.m) -> rule_based_policy.m; PP.rule_nb, when set, the answer
+%             to the class noise_burst chosen on validation (burst_action, train_dqn.m)
 %   table     detected class -> the configuration with the best mean reward for
 %             that threat on the train pools (policy_table.m); a 'none' or
 %             'unknown' class on a degraded link takes table_unknown
@@ -104,6 +106,8 @@ switch base
         mt = C.rule_mmse_db; if isfield(PP, 'rule_mmse_db') && ~isempty(PP.rule_mmse_db), mt = PP.rule_mmse_db; end
         so = true; if isfield(PP, 'rule_slot') && ~isempty(PP.rule_slot), so = PP.rule_slot; end
         cw = ''; if isfield(PP, 'core_wide') && ~isempty(PP.core_wide), cw = PP.core_wide; end
+        cn = ''; if isfield(PP, 'core_nb') && ~isempty(PP.core_nb), cn = PP.core_nb; end
+        nb = {}; if isfield(PP, 'rule_nb') && ~isempty(PP.rule_nb), nb = PP.rule_nb; end
         grp = isfield(PP, 'rule_dwell') && strcmp(PP.rule_dwell, 'group');
         if grp && (~isfield(mem, 'ph') || size(mem.ph, 1) ~= NE), mem.ph = zeros(NE, C.dwell_n); end
         gk = config_gain_db(PP); [gm, gid] = action_groups(A);
@@ -113,11 +117,11 @@ switch base
         for i = 1:NE
             if core
                 bud.drop_db = M.drop(i); bud.current = A{cfg(i)}; bud.current_db = gk(cfg(i));
-                p = find(strcmp(A, rule_core_policy(M.cls{i}, M.degraded(i), qi(i), qt, M.drop_alarm(i), bud, so, cw)), 1);
+                p = find(strcmp(A, rule_core_policy(M.cls{i}, M.degraded(i), qi(i), qt, M.drop_alarm(i), bud, so, cw, cn)), 1);
             elseif strcmp(base, 'rule')
                 bud.drop_db = M.drop(i); bud.current = A{cfg(i)}; bud.current_db = gk(cfg(i));
                 p = find(strcmp(A, rule_based_policy(M.cls{i}, M.degraded(i), gain(i), qi(i), qt, M.drop_alarm(i), bud, mt, ...
-                    so)), 1);
+                    so, nb)), 1);
             else
                 p = table_action(M.cls{i}, M.degraded(i), PP, opt, na);
             end

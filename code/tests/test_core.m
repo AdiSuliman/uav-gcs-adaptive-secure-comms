@@ -8428,6 +8428,222 @@ for k = 1:size(runs, 1)
 end
 end
 
+function test_rule_noise_burst_setting(tc)
+% The rule's noise-burst answer (burst_action, PP.rule_nb): without it every answer and reason
+% is the parent commit's (lect-kpi 8b396e6) over a grid of classes, degradation, MMSE gain,
+% slot, drop and budget; each pair of candidates changes the class noise_burst's answer only,
+% on its branch; a name outside the 36, no_action or a single name is refused. The candidates
+% are among the 36, cheapest first by the reward's running cost; on D78 pools none is coded,
+% on JSI pools the two coded answers join; the reference is the one-argument class mapping.
+d = parent_copy(tc, 'code/decision/rule_based_policy.m', '8b396e6');
+cls = {'jamming', 'reactive_jamming', 'spoofing', 'tone_jamming', 'sweeping_jammer', 'noise_burst', 'path_loss', ...
+    'antenna_fault', 'airframe_shadowing', 'benign_interference', 'none', 'unknown'};
+B = struct('drop_db', 3, 'current', 'no_action', 'current_db', 0, ...
+    'names', {{'power_control', 'rate_reduce', 'rate_reduce+power_control'}}, 'gain_db', [4 6 10]);
+args = {};
+for c = cls
+    for deg = [false true]
+        for g = [0 10]
+            for q = [-Inf 10]
+                for dr = [false true]
+                    args{end+1} = {c{1}, deg, g, q, 5, dr, [], 6, true}; %#ok<AGROW>
+                    args{end+1} = {c{1}, deg, g, q, 5, dr, B, 6, false}; %#ok<AGROW>
+                end
+            end
+        end
+    end
+end
+addpath(d, '-begin'); clear rule_based_policy
+cl0 = onCleanup(@() fixture_off(d, 'rule_based_policy')); %#ok<NASGU>
+verifyEqual(tc, which('rule_based_policy'), fullfile(d, 'rule_based_policy.m'));
+old = cell(numel(args), 2);
+for i = 1:numel(args), [old{i, 1}, old{i, 2}] = rule_based_policy(args{i}{:}); end
+o1 = cellfun(@(c) rule_based_policy(c), cls, 'UniformOutput', false);
+fixture_off(d, 'rule_based_policy');
+verifyEqual(tc, cellfun(@(c) rule_based_policy(c), cls, 'UniformOutput', false), o1);
+BC = burst_candidates(struct('mode', 'd78'));
+for i = 1:numel(args)
+    [a, r] = rule_based_policy(args{i}{:});
+    verifyEqual(tc, {a, r}, old(i, :), sprintf('default %d', i));
+    [a, r] = rule_based_policy(args{i}{:}, {});
+    verifyEqual(tc, {a, r}, old(i, :), sprintf('empty %d', i));
+    for n = BC.ns
+        for s = BC.sep
+            a = rule_based_policy(args{i}{:}, {n{1}, s{1}});
+            if ~strcmp(args{i}{1}, 'noise_burst')
+                verifyEqual(tc, a, old{i, 1});
+            elseif args{i}{3} >= 6
+                verifyEqual(tc, a, s{1});
+            else
+                verifyEqual(tc, a, n{1});
+            end
+        end
+    end
+end
+[~, r] = rule_based_policy('noise_burst', false, 0, -Inf, 5, false, [], 6, true, BC.start);
+verifyTrue(tc, contains(r, BC.start{1}));
+for bad = {{'no_action', 'spatial_diversity'}, {'power_control'}, {'power_control', 'jam'}, 'power_control'}
+    verifyError(tc, @() rule_based_policy('noise_burst', false, 0, -Inf, 5, false, [], 6, true, bad{1}), ...
+        'rule_based_policy:burst');
+end
+A = policy_actions();
+JC = burst_candidates(struct('mode', 'jsi'));
+verifyFalse(tc, any(contains([BC.ns, BC.sep, BC.core], 'fec_interleave')));
+verifyEqual(tc, setdiff([JC.ns, JC.sep], [BC.ns, BC.sep]), sort(BC.reference));
+verifyEqual(tc, burst_candidates(), BC);
+verifyEqual(tc, BC.reference, {rule_based_policy('noise_burst'), rule_based_policy('noise_burst', false, 10)});
+verifyTrue(tc, all(ismember([JC.ns, JC.sep, JC.core], A)));
+verifyTrue(tc, ismember(BC.start{1}, BC.ns) && ismember(BC.start{2}, BC.sep) && ismember(BC.core_start, BC.core));
+verifyTrue(tc, all(ismember(BC.core, decision_config().core_actions)));
+p = base_params(); C = decision_config();
+for L = {BC.ns, BC.sep, JC.ns, JC.sep}
+    v = cellfun(@(a) run_cost(p, C, a), L{1});
+    verifyTrue(tc, issorted(v), strjoin(L{1}, ', '));
+end
+src = fileread(which('threat_gallery'));
+verifyNotEmpty(tc, strfind(src, 'act = rule_based_policy(th, [], [], [], [], [], [], [], [], NB);'));
+verifyNotEmpty(tc, strfind(src, 'if isfield(dq, ''rule_nb'') && ~isempty(dq.rule_nb), NB = dq.rule_nb; end'));
+end
+
+function test_rule_core_burst(tc)
+% The core rule's noise-burst action (burst_action, PP.core_nb): without it, and at its default
+% rate_reduce, every answer and reason is the parent commit's (lect-kpi 8b396e6), the wideband
+% action included; channel_switch+rate_reduce changes the class noise_burst only
+% (sweeping_jammer keeps rate_reduce); a non-core action is refused.
+d = parent_copy(tc, 'code/decision/rule_core_policy.m', '8b396e6');
+cls = {'jamming', 'reactive_jamming', 'spoofing', 'tone_jamming', 'sweeping_jammer', 'noise_burst', 'path_loss', ...
+    'antenna_fault', 'airframe_shadowing', 'benign_interference', 'none', 'unknown'};
+B = struct('drop_db', 3, 'current', 'no_action', 'current_db', 0);
+args = {};
+for c = cls
+    for deg = [false true]
+        for q = [-Inf 10]
+            for dr = [false true]
+                args{end+1} = {c{1}, deg, q, 5, dr, [], true}; %#ok<AGROW>
+                args{end+1} = {c{1}, deg, q, 5, dr, B, false}; %#ok<AGROW>
+            end
+        end
+    end
+end
+addpath(d, '-begin'); clear rule_core_policy
+cl0 = onCleanup(@() fixture_off(d, 'rule_core_policy')); %#ok<NASGU>
+verifyEqual(tc, which('rule_core_policy'), fullfile(d, 'rule_core_policy.m'));
+old = cell(numel(args), 2); oldw = old;
+for i = 1:numel(args)
+    [old{i, 1}, old{i, 2}] = rule_core_policy(args{i}{:});
+    [oldw{i, 1}, oldw{i, 2}] = rule_core_policy(args{i}{:}, 'rate_reduce');
+end
+fixture_off(d, 'rule_core_policy');
+for i = 1:numel(args)
+    [a, r] = rule_core_policy(args{i}{:});
+    verifyEqual(tc, {a, r}, old(i, :), sprintf('default %d', i));
+    [a, r] = rule_core_policy(args{i}{:}, '', 'rate_reduce');
+    verifyEqual(tc, {a, r}, old(i, :), sprintf('rate_reduce %d', i));
+    [a, r] = rule_core_policy(args{i}{:}, 'rate_reduce', '');
+    verifyEqual(tc, {a, r}, oldw(i, :), sprintf('wide %d', i));
+    a = rule_core_policy(args{i}{:}, '', 'channel_switch+rate_reduce');
+    if strcmp(args{i}{1}, 'noise_burst'), verifyEqual(tc, a, 'channel_switch+rate_reduce'); else, verifyEqual(tc, a, old{i, 1}); end
+end
+verifyEqual(tc, rule_core_policy('sweeping_jammer', false, -Inf, 5, false, [], true, '', 'channel_switch+rate_reduce'), ...
+    'rate_reduce');
+for bad = {'no_action', 'power_control', 'spatial_diversity'}
+    verifyError(tc, @() rule_core_policy('noise_burst', false, -Inf, 5, false, [], true, '', bad{1}), 'rule_core_policy:burst');
+end
+end
+
+function test_settings_noise_burst(tc)
+% The noise-burst answers reach the decision cycle through decision_settings.m: the rule takes
+% PP.rule_nb and the core rule PP.core_nb, each only its own; without them the class mapping
+% acts. The deployed policy's stamp changes with either, and without them it is the parent
+% commit's (lect-kpi 8b396e6).
+X = decision_settings(struct('drop_db', 4), struct('rule_nb', {{'rate_reduce', 'spatial_diversity'}}, ...
+    'core_nb', 'channel_switch+rate_reduce'));
+verifyEqual(tc, {X.rule_nb, X.core_nb, X.drop_db}, {{'rate_reduce', 'spatial_diversity'}, 'channel_switch+rate_reduce', 4});
+A = policy_actions(); na = find(strcmp(A, 'no_action'));
+cl = {'none', 'noise_burst'};
+obs = struct('probs', [0 1], 'unknown', false, 'feat', zeros(1, numel(link_features('names'))));
+obs.feat(feature_index('log_ber')) = -1; obs.feat(feature_index('crc_fail')) = 1;
+P0 = struct('actions', {A}, 'classes', {cl}, 'sps', 4, 'bps', 2, 'maha_thr', 0);
+P1 = P0; P1.rule_nb = {'rate_reduce', 'spatial_diversity'}; P1.core_nb = 'channel_switch+rate_reduce';
+runs = {P0, false, 'power_control+fec_interleave'; P0, true, 'rate_reduce'; P1, false, 'rate_reduce'; ...
+    P1, true, 'channel_switch+rate_reduce'};
+for k = 1:size(runs, 1)
+    op = struct(); if runs{k, 2}, op.core = true; end
+    mem = []; cfg = na; first = '';
+    for t = 1:30
+        o = obs; o.cfg_link = cfg;
+        [a, mem] = policy_decide('rule_esc', o, cfg, mem, runs{k, 1}, [], op);
+        if a ~= cfg && isempty(first), first = A{a}; end
+        cfg = a;
+    end
+    verifyEqual(tc, first, runs{k, 3}, sprintf('run %d', k));
+end
+S = struct('rule_mmse_db', 6, 'rule_slot', true, 'rule_dwell', 'run', 'esc_drop', false, 'unk_mode', 'all', ...
+    'unk_retain', 0.95, 'confirm_sweep', []);
+Q = struct('deployed', 'dqn_esc', 'alarm_mode', 'class_drop', 'confirm', [2 2], 'drop_db', 4, 'det_id', 'x', ...
+    'maha_thr', -1, 'dec', S, 'rule_sel', S);
+d = parent_copy(tc, 'code/decision/policy_stamp.m', '8b396e6');
+addpath(d, '-begin'); clear policy_stamp
+cl0 = onCleanup(@() fixture_off(d, 'policy_stamp')); %#ok<NASGU>
+verifyEqual(tc, which('policy_stamp'), fullfile(d, 'policy_stamp.m'));
+s0 = policy_stamp(Q);
+fixture_off(d, 'policy_stamp');
+verifyEqual(tc, policy_stamp(Q), s0);
+Q1 = Q; Q1.dec.rule_nb = {'rate_reduce', 'spatial_diversity'}; Q1.rule_sel.rule_nb = Q1.dec.rule_nb;
+Q2 = Q1; Q2.dec.rule_nb{1} = 'power_control'; Q2.rule_sel.rule_nb{1} = 'power_control';
+Q3 = Q1; Q3.dec.core_nb = 'channel_switch+rate_reduce';
+verifyEqual(tc, numel(unique({s0, policy_stamp(Q1), policy_stamp(Q2), policy_stamp(Q3)})), 4);
+end
+
+function test_nb_pick(tc)
+% The noise-burst answer's selection (nb_pick.m): the highest held recovery of the noise-burst
+% episodes among the candidates within the false-alarm bound and half a point of the best
+% pooled held; within one point the pooled recovered, the return, then the cheaper (the
+% setting in force has no preference); fewer than 10 noise-burst episodes skip that reading;
+% none within the bound: the three with the lowest bound. C2 runs it on its two steps right
+% after the nulling threshold and on the core rule's step (rule_core); the class mapping's
+% coded answer is evaluated and reported only.
+mk = @(h, r, ret, fa, nb, n) struct('held', h, 'rec', r, 'ret', ret, 'fa_w', fa, 'n_w', 600, 'nb_held', nb, 'nb_n', n);
+X = [mk(0.80, 0.85, 1.0, 0, 0.60, 40), mk(0.80, 0.85, 1.0, 0, 0.70, 40), mk(0.80, 0.85, 1.0, 0, 0.65, 40)];
+verifyEqual(tc, nb_pick(X, 0.05, [1 2 3]), 2);                         % the primary
+X(2).fa_w = 0.2; verifyEqual(tc, nb_pick(X, 0.05, [1 2 3]), 3);        % over the bound
+X(2).fa_w = 0; X(2).held = 0.79; verifyEqual(tc, nb_pick(X, 0.05, [1 2 3]), 3);   % the pooled guard
+X(2).held = 0.796; verifyEqual(tc, nb_pick(X, 0.05, [1 2 3]), 2);      % within half a point
+X(2).fa_w = NaN; verifyEqual(tc, nb_pick(X, 0.05, [1 2 3]), 2);        % not measured: within
+X = [mk(0.8, 0.85, 1.0, 0, 0.700, 40), mk(0.8, 0.86, 0.9, 0, 0.695, 40), mk(0.8, 0.86, 1.1, 0, 0.691, 40)];
+verifyEqual(tc, nb_pick(X, 0.05, [1 2 3]), 3);                         % within one point: recovered, then return
+X(3).ret = 0.9;
+verifyEqual(tc, nb_pick(X, 0.05, [1 2 3]), 2);                         % then the cheaper
+verifyEqual(tc, nb_pick(X, 0.05, [1 3 2]), 3);
+X(1).nb_held = 0.71; verifyEqual(tc, nb_pick(X, 0.05, [3 2 1]), 1);    % the primary before the recovered and the cost
+X = [mk(0.8, 0.85, 1, 0, 0.9, 9), mk(0.8, 0.86, 1, 0, 0.1, 9)];
+verifyEqual(tc, nb_pick(X, 0.05, [1 2]), 2);                           % fewer than 10: the pooled readings
+X = [mk(0.8, 0.8, 1, 0.30, 0.9, 40), mk(0.8, 0.8, 1, 0.20, 0.5, 40), mk(0.8, 0.8, 1, 0.25, 0.6, 40), ...
+    mk(0.8, 0.8, 1, 0.22, 0.7, 40)];
+verifyEqual(tc, nb_pick(X, 0.05, 1:4), 4);                             % none within: the three lowest bounds
+src = fileread(which('train_dqn'));
+i0 = strfind(src, 'STEPS(end+1) = struct(''name'', ''nulling threshold and quiet slot''');
+i1 = strfind(src, 'STEPS(end+1) = struct(''name'', NBS{1}, ''var'', {v});');
+i2 = strfind(src, 'STEPS(end+1) = struct(''name'', NBS{2}, ''var'', {v});');
+i3 = strfind(src, 'STEPS(end+1) = struct(''name'', ''proposal dwell''');
+verifyEqual(tc, [numel(i0) numel(i1) numel(i2) numel(i3)], [1 1 1 1]);
+verifyTrue(tc, i0(1) < i1(1) && i1(1) < i2(1) && i2(1) < i3(1));
+verifyNotEmpty(tc, strfind(src, 'BC = burst_candidates(fec_rx_of(PP));'));
+verifyNotEmpty(tc, strfind(src, 'S0.rule_nb = BC.start; S0.core_nb = BC.core_start;'));
+verifyNotEmpty(tc, strfind(src, 'CSTEP, @(S) ev(''rule_esc'', decision_settings(PPr, S), [], struct(''core'', true))'));
+verifyNotEmpty(tc, strfind(src, 'Sref = Ssel; Sref.rule_nb = {};'));
+verifyNotEmpty(tc, strfind(src, 'b = nb_pick(X, bound, cellfun(PK(j).rank, V));'));
+verifyNotEmpty(tc, strfind(src, 'x.nb_n = sum(nb);'));
+verifyEmpty(tc, regexp(src, 'function \[best, why\] = nb_pick', 'once'));
+end
+
+function k = run_cost(p, C, a)
+% The reward's running cost of configuration a (link_env.m K.cost).
+[~, ~, cm] = apply_countermeasure(p, 'none', a);
+k = C.w_goodput * (1 - cm.goodput_factor) + C.w_spectrum * (cm.bw_factor - 1) + ...
+    C.w_power * log10(cm.power_factor) / log10(4) + C.w_mmse * contains(a, 'spatial_diversity');
+end
+
 function test_link_env_cover_default(tc)
 % Without the new spec fields link_env.m gives the parent commit's (lect-kpi 394d4da) rewards,
 % observations, info and tables bit for bit, follower, comb jammer and an ending threat
@@ -8884,13 +9100,15 @@ r0 = strfind(src, 'function stage_report(X)'); f = strfind(src, '''experiment_co
 verifyNumElements(tc, f, 1); verifyGreaterThan(tc, f, r0);   % the report only under the frozen copy
 end
 
-function d = parent_copy(tc, rel)
-% The file rel as this branch's parent commit (lect-kpi 394d4da) holds it, alone in a folder.
+function d = parent_copy(tc, rel, rev)
+% The file rel as commit rev holds it (default this branch's parent, lect-kpi 394d4da), alone in
+% a folder.
+if nargin < 3, rev = '394d4da'; end
 d = tempname; mkdir(d);
 [~, nm, ext] = fileparts(rel);
-[st, out] = system(sprintf('git --no-optional-locks -C "%s" show 394d4da:%s > "%s"', tc.TestData.root, rel, ...
+[st, out] = system(sprintf('git --no-optional-locks -C "%s" show %s:%s > "%s"', tc.TestData.root, rev, rel, ...
     fullfile(d, [nm ext])));
-assertEqual(tc, st, 0, sprintf('git show 394d4da:%s failed: %s', rel, out));
+assertEqual(tc, st, 0, sprintf('git show %s:%s failed: %s', rev, rel, out));
 end
 
 function fixture_off(d, fn)

@@ -45,6 +45,15 @@
 % retention (0.95, 0.99 of the validation windows, unk_threshold.m) and the classes it
 % overrides ('all', 'nonhostile', policy_monitor.m); the escalation on a drop alarm read as
 % none (esc_drop). The chosen settings run the baselines of every monitor and the grid.
+% The rule's answer to the class noise_burst (rule_nb, burst_candidates.m), after the nulling
+% threshold that decides its branch: the answer when the interferer is not separable, then
+% when it is, each among its candidates, uncoded on pools decoded with the D78 erasure rules;
+% then the core rule's (core_nb, scored as rule_core). These steps pick by the held
+% recovery of the recoverable episodes whose threat holds a noise burst (nb_pick, ten at
+% least, else the ties' chain alone), among the candidates within the false-alarm bound and
+% half a point of the best pooled held recovery; within one point the pooled recovered, the
+% return, then the cheaper. The class mapping's coded answer is reported, not a candidate
+% (docs/noise_burst_protocol.md).
 % After the grid, coordinate steps at the selected monitor, drop threshold and penalty, the
 % same seeds: the discount factor 0 (the bandit), running and switching costs x1, and, when
 % the unknown-threat flag's settings moved from the default, the default for the agent; the
@@ -183,6 +192,8 @@ mp = mp(isfinite(mp));
 U0 = 0.95; if isfield(PP, 'unk_retain') && ~isempty(PP.unk_retain), U0 = PP.unk_retain; end
 S0 = struct('rule_mmse_db', CD.rule_mmse_db, 'rule_slot', true, 'rule_dwell', 'run', 'unk_mode', 'all', ...
     'unk_retain', U0, 'maha_thr', PP.maha_thr, 'esc_drop', false);
+BC = burst_candidates(fec_rx_of(PP));               % the noise-burst answers, uncoded on D78 pools
+S0.rule_nb = BC.start; S0.core_nb = BC.core_start;
 TH = [3 CD.rule_mmse_db 9]; th_txt = {'3 dB', sprintf('%g dB (the earlier constant)', CD.rule_mmse_db), '9 dB'};
 if numel(mp) >= 30
     mu_s = [mean(mp), std(mp)];
@@ -194,6 +205,13 @@ end
 STEPS = struct('name', {}, 'var', {});
 v = {}; for i = 1:numel(TH), for so = [true false], v{end+1} = struct('rule_mmse_db', TH(i), 'rule_slot', so); end, end %#ok<SAGROW>
 STEPS(end+1) = struct('name', 'nulling threshold and quiet slot', 'var', {v});
+NBS = {'noise-burst answer, not separable', 'noise-burst answer, separable', 'noise-burst answer, core rule'};
+v = cellfun(@(a) @(S) with_nb(S, 1, a), BC.ns, 'UniformOutput', false);
+STEPS(end+1) = struct('name', NBS{1}, 'var', {v});
+v = cellfun(@(a) @(S) with_nb(S, 2, a), BC.sep, 'UniformOutput', false);
+STEPS(end+1) = struct('name', NBS{2}, 'var', {v});
+PK = struct('name', NBS, 'rank', {@(S) find(strcmp(BC.ns, S.rule_nb{1})), @(S) find(strcmp(BC.sep, S.rule_nb{2})), ...
+    @(S) find(strcmp(BC.core, S.core_nb))});      % steps nb_pick picks, by their candidates' cost order
 STEPS(end+1) = struct('name', 'proposal dwell', 'var', {{struct('rule_dwell', 'run'), struct('rule_dwell', 'group')}});
 v = {};
 for md = {'all', 'nonhostile'}
@@ -211,7 +229,12 @@ iref = find(strcmp({ENT.alarm}, sprintf('class_drop %d/%d', CD.confirm)), 1);   
 if isempty(iref), iref = 1; end
 jr = find(strcmp({ENT.alarm}, ENT(iref).alarm)); iref = jr(ceil(numel(jr) / 2));
 PPr = with_entry(PP, ENT(iref), DROP_MODE);
-[Ssel, SROWS] = choose_settings(S0, STEPS, @(S) ev('rule_esc', decision_settings(PPr, S), [], struct()), FA_BOUND);
+[Ssel, SROWS] = choose_settings(S0, STEPS, @(S) ev('rule_esc', decision_settings(PPr, S), [], struct()), FA_BOUND, PK);
+CSTEP = struct('name', NBS{3}, 'var', {cellfun(@(a) struct('core_nb', a), BC.core, 'UniformOutput', false)});
+[Ssel, CROWS] = choose_settings(Ssel, CSTEP, @(S) ev('rule_esc', decision_settings(PPr, S), [], struct('core', true)), ...
+    FA_BOUND, PK);
+Sref = Ssel; Sref.rule_nb = {};                     % the class mapping's coded answer: reported only
+xref = ev('rule_esc', decision_settings(PPr, Sref), [], struct());
 fprintf('=== Rule settings at %s, drop %.1f %s: %s\n', mon_txt(ENT(iref).alarm, DROP_MODE), ENT(iref).drop, DU, set_txt(Ssel));
 % 3b. Baselines of every monitor and drop threshold at the chosen settings
 base = struct('alarm', {}, 'drop', {}, 'rule', {}, 'tab', {});
@@ -338,6 +361,12 @@ rep{end+1} = sprintf(['Rule settings on validation, rule + escalation at %s, dro
     'selection rule below, the setting in force first); the predicted MMSE gain of %d clean validation frames: mean %.2f, ' ...
     'std %.2f dB; thresholds %s:'], mon_txt(ENT(iref).alarm, DROP_MODE), ENT(iref).drop, DU, numel(mp), mu_s, strjoin(th_txt, ', '));
 rep = [rep, SROWS];
+rep{end+1} = sprintf('  core rule (rule_core, the same monitor and settings), %s:', NBS{3});
+rep = [rep, CROWS];
+rep{end+1} = sprintf('  %-52s %s', 'reference, not a candidate:', row_txt(Sref, xref));
+rep{end+1} = sprintf(['  noise-burst candidates (%s pools): not separable %s; separable %s; core %s. Pools decoded with ' ...
+    'the D78 erasure rules keep the coded answers out (docs/noise_burst_protocol.md)'], upper(BC.mode), ...
+    strjoin(BC.ns, ', '), strjoin(BC.sep, ', '), strjoin(BC.core, ', '));
 rep{end+1} = sprintf('Chosen: %s', set_txt(Ssel));
 rep{end+1} = '';
 rep{end+1} = sprintf('%-62s %4s %9s %10s %28s %9s %9s %12s %12s', 'run', 'esc', 'held', 'recovered', 'weakest threat (held)', ...
@@ -396,7 +425,8 @@ seed_summary = struct('alarms', {{runs.alarm}}, 'drops', [runs.drop], 'fa_pens',
     'selected_gamma', gamma_sel, 'selected_seed', rb.seed, 'selected_kind', sel_kind, 'selection_rule', sel_rule, ...
     'gate_pass', gate, 'rule_recovered', bsel.rec, 'rule_held', bsel.held, 'rule_return', bsel.ret, ...
     'table_return', base(eb).tab.ret, 'deployed', deployed, 'fa_bound_met', fa_bound_met, 'fa_ebno_thr', EBNO_THR, ...
-    'fa_rate_dqn', FD, 'fa_rate_rule', FR, 'dqn_held', B.held, 'dqn_recovered', B.rec);
+    'fa_rate_dqn', FD, 'fa_rate_rule', FR, 'dqn_held', B.held, 'dqn_recovered', B.rec, ...
+    'nb_reference', rmfield(xref, 'sw_w'), 'nb_candidates', BC);
 H.gamma = gamma_sel; H.fa_pen = fa_pen_sel; H.cost_scale = cs_sel; H.sw_scale = ss_sel;
 action_names = PP.actions;
 gammas = GAM;
@@ -520,11 +550,14 @@ end
 function x = eval_policy(kind, PPc, K, specs, ag, opt, CV, H, ebno_thr, thr)
 % One policy on the validation episodes (common random numbers: every policy the same frame
 % draws) and the clean validation geometries: KPI 4's recovered, held, the weakest threat's
-% held (and recovered), return, restored cycles, switches, false alarms.
+% held (and recovered), return, restored cycles, switches, false alarms; nb_held over nb_n, the
+% held recovery of the recoverable episodes whose threat holds a noise burst.
 V = dqn_eval_batches(kind, PPc, K, specs, ag, opt, 5000, 2);
 [kh, kt] = weakest_threat(V, thr, 'held'); [kr, krt] = weakest_threat(V, thr, 'recovered');
 x = struct('rec', dqn_recovered(V), 'held', dqn_held(V), 'kmin', kh, 'kmin_thr', kt, 'kmin_rec', kr, 'kmin_rec_thr', krt, ...
     'ret', mean(V.ret), 'restored', mean(V.restored_post), 'switches', mean(V.switches), 'fa_w', NaN, 'n_w', 0, 'sw_w', []);
+nb = V.recoverable & V.threat & contains(thr, 'noise_burst');
+x.nb_n = sum(nb); x.nb_held = NaN; if x.nb_n > 0, x.nb_held = mean(V.held(nb)); end
 [x.fa_w, x.n_w, x.sw_w] = eval_clean_wide(kind, PPc, CV, ag, opt, H, ebno_thr);
 end
 
@@ -597,19 +630,37 @@ top = top([X(top).rec] >= max([X(top).rec]));
 [~, j] = max([X(top).ret]); best = top(j);
 end
 
-function [S, rows] = choose_settings(S, STEPS, evalf, bound)
+function S = with_nb(S, k, a)
+% The noise-burst answer of branch k (1 not separable, 2 separable) set to a.
+S.rule_nb{k} = a;
+end
+
+function [S, rows] = choose_settings(S, STEPS, evalf, bound, PK)
 % The rule's settings, one coordinate (STEPS) at a time: every variant of a step against the
-% setting in force (listed first, ties to it), the selection rule (rank_pick) picks.
+% setting in force (listed first, ties to it), the selection rule (rank_pick) picks. A variant
+% is a struct of fields or a function of the settings in force. A step named in PK (name,
+% rank: its candidates' cost order) is picked by nb_pick, without a tie to the setting in force.
+if nargin < 5, PK = struct('name', {}, 'rank', {}); end
 x0 = evalf(S); rows = {sprintf('  %-52s %s', 'in force', row_txt(S, x0))};
 for k = 1:numel(STEPS)
     X = x0; V = {S};
     for v = STEPS(k).var
-        Sv = S; for f = fieldnames(v{1})', Sv.(f{1}) = v{1}.(f{1}); end
+        if isa(v{1}, 'function_handle')
+            Sv = v{1}(S);
+        else
+            Sv = S; for f = fieldnames(v{1})', Sv.(f{1}) = v{1}.(f{1}); end
+        end
         if isequal(Sv, S), continue; end
         X(end+1) = evalf(Sv); V{end+1} = Sv; %#ok<AGROW>
         rows{end+1} = sprintf('  %-52s %s', [STEPS(k).name ':'], row_txt(Sv, X(end))); %#ok<AGROW>
     end
-    b = rank_pick(X, bound); S = V{b}; x0 = X(b);
+    j = find(strcmp({PK.name}, STEPS(k).name), 1);
+    if isempty(j)
+        b = rank_pick(X, bound);
+    else
+        b = nb_pick(X, bound, cellfun(PK(j).rank, V));
+    end
+    S = V{b}; x0 = X(b);
     rows{end+1} = sprintf('  -> %s: %s', STEPS(k).name, set_txt(S)); %#ok<AGROW>
 end
 end
@@ -617,11 +668,18 @@ end
 function t = row_txt(S, x)
 t = sprintf('%s | held %.1f%%, recovered %.1f%%, weakest %s %.1f%%, return %.3f, FA %s', set_txt(S), 100 * x.held, ...
     100 * x.rec, x.kmin_thr, 100 * x.kmin, x.ret, fa_txt(x.fa_w, x.n_w));
+if isfield(x, 'nb_n'), t = sprintf('%s, noise-burst held %.1f%% of %d', t, 100 * x.nb_held, x.nb_n); end
 end
 
 function t = set_txt(S)
 t = sprintf('nulling at %.2f dB, quiet slot %s, dwell %s, unknown flag over %s classes at retention %.2f, escalation on a drop %s', ...
     S.rule_mmse_db, ternary(S.rule_slot, 'on', 'off'), S.rule_dwell, S.unk_mode, S.unk_retain, ternary(S.esc_drop, 'on', 'off'));
+if isfield(S, 'rule_nb') && isempty(S.rule_nb)
+    t = [t, ', noise burst: the class mapping (power_control+fec_interleave / spatial_diversity+fec_interleave)'];
+elseif isfield(S, 'rule_nb')
+    t = sprintf('%s, noise burst %s / %s (separable)', t, S.rule_nb{:});
+end
+if isfield(S, 'core_nb') && ~isempty(S.core_nb), t = sprintf('%s, core rule on a noise burst %s', t, S.core_nb); end
 end
 
 function d = drops_of(mon, MONP, drop_mode, drop_db, THC, steps, floor_db)

@@ -32,6 +32,10 @@ for n = {'confirm_sweep', 'unk_mode', 'unk_retain', 'rule_mmse_db', 'rule_slot',
     x = field_or(S, n{1}); if islogical(x), x = double(x); end
     c{end+1} = x; %#ok<AGROW>
 end
+for n = {'rule_nb', 'core_nb'}                    % the noise-burst answers, when chosen
+    x = field_or(S, n{1});
+    if ~isempty(x), c{end+1} = {n{1}, x}; end %#ok<AGROW>
+end
 end
 
 function v = field_or(S, n)
