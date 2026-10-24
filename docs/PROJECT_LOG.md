@@ -1070,3 +1070,41 @@ Classes below 90% F1 on the third test set (B3m, read once), with the levers. So
   - All headline numbers were confirmed from the primary files: KPI 1 93.58 / 94.19, KPI 2 0.769 / 0.763, KPI 3 7/7, the dataset, the fusion revision.
   - 58 wording issues about what a number measures were found in the interim-report draft. Example: the 2.67 / 3.85 ms latency is the detector forward pass plus the score.
   - The per-class "Acc" in `eval_detector` is recall.
+
+### v7: profile 1 to SURV3, the noise-burst finding, the approved plan and the phase-0 merges (2026-10-24/25)
+The decisions of 2026-10-22/24 are D93-D95 in DECISIONS.
+- **2026-10-24, profile 1's parallel block.**
+  - C1p done in 8692.4 min (p1.log:7918).
+  - C1c started 04:12:14 and ended in 911.3 min (p1.log:11444), against the estimated 11-13 h. Its check pools' clean BER is 2.0e-3 at 9 dB (p1.log:11440).
+  - SURV started 19:23:33 (p1.log:11446).
+- **2026-10-24 08:45:48, the report gallery done** (`v7_report_gallery.log:482`, rc=0; its gate opened at 08:32 with 35.7 GB free). Its noise-burst row: BER 4.39e-01 with no response, 4.95e-01 under the rule's `power_control+fec_interleave` (`:474`).
+- **Interim report draft 3** delivered: 39 pages. It still dates C2e "early November"; draft 4 (about 2026-10-27) takes B3r, B3c and the pre-resume KPI summary (D96 C15).
+- **2026-10-25 01:49, SURV done** in 386.3 min (p1.log:17628), 0 error lines in the stage. 64 gap cells (`:17621`). By threat:
+  - noise burst: 22 at 11.4°, 8 at 42.2°;
+  - path loss 16, airframe shadowing 8;
+  - jamming at 11.4°: 4;
+  - spoofing at 11.4°: 3;
+  - reactive jamming at 11.4°: 2;
+  - WLAN at 11.4°: 1.
+- **2026-10-25 01:49:50, SURV3 started** (p1.log:17630). The cut file `p1_cut_after.SURV3` ends the chain after it, possibly within hours (from about 05:30, expected about 11:00).
+- **2026-10-24/25, the noise-burst finding** (DECISIONS D97). The gallery's worse BER under the rule's coded answer comes from D78's erasure rules:
+  - J4 bursts erase 91% of the symbols;
+  - at duty 0.5 or more nothing is flagged;
+  - under MMSE the symbols the null cleaned are still erased;
+  - burst frames are erased whole.
+
+  The flat 0.495 is a total erasure. Confirmed, with corrections, by two reviews. Physics also limits the code at duty 0.5-0.775 with a perfect decoder.
+  - `lect-kpi` `9122b8d` (01:34): the rule's noise-burst answer is chosen on validation in C2 among uncoded configurations; the coded mapping is a reference row only; protocol `docs/noise_burst_protocol.md`.
+  - `f328e7b` (01:34): the JSI decoder behind `profile.json` `fec_rx`, for profile 3 only, chosen on dev set C before its C1p. Fixes: `c96d801` (build_check_pools' decoder before PTAG), `ad92110` (dev_fec_burst with no pilot-error threshold), `e922d63` (one `write_text` in `test_core`). The `lect-kpi` tip is `e922d63`.
+- **2026-10-25, the end-to-end plan approved** by the user, on condition of a thorough examination with the lecturer's proposal first (DECISIONS D96). The examination (`plan_v2.md`, C1-C17) and the pre-registrations of phase 0 (D98) are recorded.
+- **2026-10-25, phase 0's local git work (STOP_SOFT A2-A4), nothing pushed.**
+  - In `uav-gcs-v7-deploy`, branch `v7-deploy-d91`: merged `d91-edgefix` (`e909209`, tree `ce4cd2ec`, as expected) and `lect-kpi` up to `9122b8d`.
+  - `TIP` = `8b28bdfb8dfc1e4339b6be0d29a27e0552f45769`, tree `677c9bbc` (as expected).
+  - Worktree `X` = `C:\Users\Adi Suliman\uav-gcs-tip`, detached at `TIP`.
+  - Branches:
+    - `v7-deploy-d91-on-v7-dev` = `P1C` `794bf2a34be2094f57fd0b2734f7790e0f13009b` (tree `5fcf342f`);
+    - `v7-deploy-d91-nospeed-on-v7-dev` = `P1O` `2a70d563583da1302fe4b5eefd07087f5f369a4a` (tree `bd07aba8`);
+    - `v7-deploy-d91-on-v7-p3-q3` = `7e905e060fd81899a2e76b3ddc3523dea8ffc961` (tree `34cc19cf`).
+
+    All trees as expected.
+  - The smoke driver `uav-gcs-logs\d91_smoke_deploy.m` replaced by `TIP`'s `docs/d91_smoke_deploy.m.txt` (SHA-256 `b3282e0f...`, as expected; the old file kept as `.bak_<stamp>`).

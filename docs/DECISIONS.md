@@ -1490,3 +1490,132 @@ The interim report (2026-11-01) needs no final results.
 - The two new tests have not run (MATLAB was not run); they first run in the merged-tip suite of D94 point 3.
 - `STOP_SOFT.md` takes the new tree values (its refs line, A2, A3, I2, `-q3` and section 7).
 - `lect-kpi` is not pushed.
+
+## D96 — The end-to-end plan of profile 1's stop and after (phases 0-4), approved on condition of a thorough examination with the lecturer's proposal first; the examination
+**Why (2026-10-25, the user).** The user approved the end-to-end plan on 2026-10-25, on condition that it is examined thoroughly and puts the lecturer's proposal (D92) first. The examination is `plan_v2.md` (session scratchpad `interim_report/core/`, not in this repo): four audits (lecturer first, stop window, timeline, result quality), read-only checks of 2026-10-25 01:30-02:10, and an adversarial review. It changed the plan in 17 points, C1-C17 below. `STOP_SOFT.md` carries them as its V2 section (backup `STOP_SOFT.md.bak_before_v2`).
+- *State at the approval.* SURV done 2026-10-25 01:49 in 386.3 min (p1.log:17628); SURV3 started 01:49:50 (p1.log:17630). The cut can come from about 05:30. The report gallery ended 2026-10-24 08:45:48 rc=0 (`v7_report_gallery.log:482`), so D94's open point on the waiting gallery job is void.
+- *Memory read 2026-10-25 01:40-02:10.* Free commit 29.41 GB; the chain MATLAB 42560 11.15 GB (peak 38.06 GB); six workers 23.4 GB; zombies 8908 6.45 GB (peak 12.73) and 32824 4.63 GB; Chrome and WhatsApp 3.46 GB. Expected free commit after the cut (F0): about 63.9 GB if 42560 exits, about 52.8 GB if it lingers.
+
+**Decision (the user's terms).**
+1. *Phases.* 0: now to the cut (no MATLAB; git work, records, review). 1: the cut and its checks. 2: tests and smoke. 3: the point of no return (I2). 4: the detector readings and the decision-layer inputs (B2F, B stages, rehearsal, B3r once, B3c once, step M, re-key, resume from C1d). Then profile 1's chain, CORE_BW, profile 3.
+2. *Memory floors* (supersede D94 point 4's 65 GB for these steps): 55 GB for B2F, the B stages and the rehearsal; B3r `max(55, rehearsal peak + 10)`; B3c `max(55, train-only peak + 7 + 10)`, with a committed note in `W` (`uav-gcs-v7`) before L. The gate stays at 28 GB; the 35 and 45 GB floors stay.
+3. *Push:* the branches go to GitHub after their tests pass, never `main`.
+4. *Notice:* a 30-minute notice before profile 1's resume; the resume goes ahead if there is no objection.
+5. *Time box:* plan B if I2 has not run by 2026-10-27 18:00 (closes D94's open time box).
+6. *After profile 1:* CORE_BW first, then profile 3.
+
+**The examination (C1-C17, in short).**
+- **C1.** The merged tip `TIP` takes `lect-kpi` up to `9122b8d` only (the rule's noise-burst answer on validation, D97), not `f328e7b` (the JSI decoder: off for profile 1, 13 more code files and 5 tests that would have to pass before the time box). Profile 3 takes the decoder with its own `core` and smoke (D98 d).
+- **C2.** T1b: the noise-burst focused tests from a clean detached worktree `X` at `TIP` (`uav-gcs-tip`), right after T1, before the 14-24 h smoke. A failure or a blocking review selects the fallback tip `8b396e6` once; no fix-forward. Reason: the shared `uav-gcs-lectkpi` tree is edited by other work.
+- **C3.** The floors of point 2. Basis: 65 GB was OOD 36 + the gather 20 + 10 (`v7_d91_takeover.md:52`), and neither runs in the window; 42560's measured peak with B3-B4s inside it is 38.06 GB (+10 = 48 ≤ 55). A read-only peak sampler sets B3r's and B3c's floors; without a reading nothing is rerun and both stay 55 (D98 e).
+- **C4.** F0 is decided right after the cut, before T1/T2: F0 < 55 → close Chrome and WhatsApp → still < 55 → a reboot before T1/T2 (the user). At the same moment the parallel-turn file (it named 42560 at 02:10) goes to the user if it still names a lingering 42560, since every `take`, CORE_BW's `pools` included, would wait on it.
+- **C5.** CORE_BW gets profile 1's clean-reference table and a fair conventional baseline (D98 a). Without the table the alarm runs at the 1e-4 floor; blind_core's fixed `channel_switch+rate_reduce` against the rule's validation-tuned settings would credit a 4x rate cut to the CNN.
+- **C6.** M1 early: the clean-reference `'check'` runs from `X` beside T2's smoke (p3 slot, 35 GB), so a `stop` verdict reaches the user about a day before the resume. M2 stays after L.
+- **C7.** The rehearsal gets a numeric pass before B3r, with limits committed first (D98 e). Rehearsal and B3r become two calls. Reason: until now only exit 0 and a file time protected the read-once set.
+- **C8.** One read-only KPI summary hand-run after L (35 GB, saved files only), copied to `set4_out/p1/read/`: the three-state view, recall per type, detector false alarms and B3c's lines about four days before the chain's KPI.
+- **C9.** Plan B keeps step M (D98 b).
+- **C10.** Time-box rules: one fix and rerun only if its upper bound ends before the deadline, otherwise the user is told at once and plan B follows after 30 min; a smoke running at the deadline finishes; B3c `not met` is a result, and M, N, O go on.
+- **C11.** Notices: a push at I2 (no wait); the 30-minute notice when N1 starts; O2 is written no earlier than 30 min after it and not after an objection; under no-go the notice goes out when M2 starts.
+- **C12.** Nothing runs beside C1d → C2 → C2e. Profile 3's non-smoke jobs start after `##### STAGE C2e done` and after CORE_BW's tests and smoke have passed; profile 3's smoke never overlaps CORE_BW's pools. Reason: C2 is CPU-bound for 51-57 h, and pools beside a tail stage would page on 31.2 GB of RAM.
+- **C13.** Times re-baselined from measured runs: the smoke 1433 min last time (A4v 502.7, C1p 393.9, OHP 283.3 min of it), C1c 911.3 min against the estimated 11-13 h, boost off (×1.35 on single-core C2).
+- **C14.** Stage-review checks added: C1d's whole-monitor false-alarm bound against 20/600, and clean false alarms that differ between monitors (the v4 `clean_world` cache bug); C2 prints the noise-burst choice and the coded reference row; B3c's false alarms split by received Eb/N0; the three-state hybrid caveat.
+- **C15.** Report draft 4: B3r/B3c in place of B3m; C2e dated about 2026-10-29; the lecturer lines' placeholders from the protocols; A4v (7/7 within 0.3 dB, V12c FAIL stated) reconciled with the operating clean BER (about 1e-3 at 9 dB) through the per-flight tail.
+- **C16.** Plan B runs B3c before its resume (D98 c).
+- **C17.** Failure paths: M1 early without a VERDICT line → review, and M1 runs again in `W` after L and decides M2; the KPI summary errors → no retry, the resume does not wait; the sampler gives no reading → C3's fallback; CORE_BW's commit fails → D98 a.
+
+**Rejected:** an early lecturer test read or an earlier C2e (its readings depend on C2's `dec`); C2 at 72 runs (shortening; C2 stays at 108, closing D94's open point); a cut after C2e (the takeover accepts SURV3 only); CORE_BW pools beside C2 or profile 1's tail (paging); `f328e7b` in profile 1's window; M beside L, or anything beside B3r or B3c; B3c before B3r (it loses the hybrid's comparison).
+
+**Expected dates** (estimates, no failure, boost off): the cut 2026-10-25 05:30-16:00 (expected 11:00); I2 2026-10-26 02:00-21:00; B3c recorded 2026-10-26 10:00 to 10-27 09:00; the resume from C1d 2026-10-26 10:00 to 10-27 11:00; C2e 2026-10-28 03:30 to 10-30 03:30 (expected 10-29 06:00-08:00); RPT about 2026-10-29 22:00; CORE_BW about 2026-10-31 midday (worst 11-02); profile 3 about 2026-11-14/16 (worst 11-18). These supersede D94's consequences.
+
+**Supersedes.** D94 point 4's floors (its "the agent lowers no floor" stands: the user set them), D94's open points on memory, the gallery job, the time box and C2's size, and D94 point 6's `core` and smoke clause (D98 d).
+
+**Open.** The decisions left to the user: F0 < 55 (and the turn file) after the cut; `ALERT_p1_cut_pid_*`; boost to 100% during C2 (optional, C2e about 13-17 h earlier); a B3r stopped after a metric line without both files (S-18); a reboot after profile 1 (optional, frees the zombies' 11.1 GB). C1, C5, C9, C10 and C16 go ahead by default; the user may object.
+
+## D97 — Noise bursts: the rule's coded answer worsens the link; profile 1 chooses an uncoded answer on validation in C2, profile 3 gets a JSI decoder chosen on a dev set
+**Why (2026-10-24/25).** The report gallery showed the rule's noise-burst answer `power_control+fec_interleave` (`rule_based_policy.m:67`) making the link worse: BER 4.39e-01 with no response, 4.95e-01 with it (`v7_report_gallery.log:474`). The finding was examined against the code by two reviews (`design_noise_burst.md`, session scratchpad `interim_report/core/`, not in this repo) and is **confirmed, with corrections**.
+- *The defect.* Every coded configuration's BER, FER and CRC, in the pools and the gallery, is the decoded value under D78's erasure rules:
+  - the antenna-1 energy test against the codeword's median, widened over 11 symbols: under J4 (duty 0.2, one-symbol bursts) it erases 1 − 0.8^11 = 91% of the symbols; at duty 0.5 or more the median sits inside the bursts and nothing is flagged;
+  - it reads antenna 1's raw samples (`extract_closed_loop_frames.m:190`), so under `spatial_diversity` it erases symbols the MMSE null has already cleaned;
+  - the pilot-error frame erasure (`pilot_err > 0.80`) was set on dev frames without bursts, so bursts on the pilots erase the whole frame.
+
+  The flat 0.495 is total erasure: every soft value is 0 and the Viterbi output is a fixed tie-break.
+- *Corrections from the reviews:* the widening covers j−7..j+3 around a burst, not j−3..j+7 (`movmax(..., [3 3+tm])`, `fec_packets.m:81`; same width); half the pool flights are J4 at duty 0.2 (`jam_timing.m:14-18`), while the gallery used duty 0.5; `rate_reduce+fec_interleave` is not one of the 36 configurations; the separable branch is broken too (the raw antenna-1 input).
+- *Added:*
+  - the receiver's front end uses the same median reference (robust training LS and pilot-block burst check, `build_threat_model.m:1299-1303, 1903-1905`), so at duty 0.5 or more a burst over the training corrupts the whole frame (`d84_rx.md:71`);
+  - physics limits the code even with a perfect decoder. With ideal interleaving and per-symbol jammer state information, the capacity per coded bit (rate 0.503 needed, Eb/N0 9 dB, one branch) is 0.82 / 0.67 / 0.54 / 0.38 / 0.24 for J4 at 4 / 10 / 16 / 23 / 30 dB, 0.50-0.62 for the random jammer at duty 0.5, and 0.23-0.41 at duty 0.775 (our own calculation from the model's parameters). DuPree (1992) says the same in words. A better decoder therefore does not make FEC the noise-burst answer; it matters for J4 at 4-16 dB, the recoverable denominators and what the DQN, the table and the oracle learn;
+  - the coded noise-burst mapping was reverted once before for the same kind of failure (D39, its rule-baseline note).
+
+**Decision, in two parts.**
+1. *Profile 1: the decision layer only, no pool rebuild* (`lect-kpi` `9122b8d`, in `TIP`; protocol `docs/noise_burst_protocol.md`, pre-registered before C1d and C2).
+   - `rule_based_policy` and `rule_core_policy` take an optional `burst_action`; empty keeps the class mapping, so the detection-equivalence readers (B3, OOD, B4s, EDGE's DET) are unchanged. `policy_decide` passes `PP.rule_nb` and `PP.core_nb`; `decision_settings` and `policy_stamp` carry them.
+   - *Chosen in C2's settings step* (after the nulling threshold and quiet slot), among **uncoded** candidates only, on C2's validation episodes at the reference monitor:
+     - not separable: `power_control`, `rate_reduce`, `rate_reduce+power_control` (in force before the step), `channel_switch+rate_reduce+power_control`;
+     - separable: `spatial_diversity`, `spatial_diversity+power_control` (in force), `spatial_diversity+rate_reduce+power_control`;
+     - core rule: `rate_reduce` (in force), `channel_switch+rate_reduce`.
+
+     Pick (`nb_pick`): false-alarm bound ≤ 5%; pooled held recovery within 0.005 of the best eligible; then the highest held recovery on the recoverable noise-burst episodes (the single threat and its four combinations), within 0.01; ties by pooled recovered, then return, then the cheaper; the setting in force has no preference; with fewer than 10 such episodes the primary is skipped. Cost: 7 validation evaluations plus one reference row (about 1-2 h of C2). Nothing is shortened.
+   - *The class mapping's coded answer* is evaluated once and printed as a **reference row only**, never a candidate.
+   - Tests: `test_rule_noise_burst_setting`, `test_rule_core_burst`, `test_settings_noise_burst`, `test_nb_pick` (T1b and T2).
+2. *Profile 3: the JSI decoder behind `profile.json` `fec_rx`* (`lect-kpi` `f328e7b` with the fixes `c96d801`, `ad92110`, `e922d63`; not in profile 1's window, D96 C1).
+   - Per-symbol residuals on the combiner output (after sync and any MMSE null), a codeword floor (q-quantile start, truncated exponential refinement), per-symbol JSI (Baldi et al. 2013), residual erasures without widening, frame variants a / b / c; no antenna-1 energy test. Without `p.fec_rx` every result is D78's bit for bit, and a full C1p refuses without a stated `fec_rx`. Profile 1 has no `profile.json` and builds no more policy pools, so it is off by construction.
+   - *Chosen on dev set C* (`dev_fec_burst`, link seeds 7801-7860, 60 flights × 20 frames per point, disjoint from every pool, test, check and dev seed) **before profile 3's C1p**, by the protocol's fixed order (section 4.2) and its adoption checks (the floor check; J4 at 4 and 10 dB decodes; random duty 0.775 does not decode at 10-30 dB). The choice, or `"d78"`, is committed in profile 3's `profile.json` before `p3_c1p.hold` is released, with its own DECISIONS entry and dev table. Profile 3's C2 step then adds the two coded candidates.
+   - Tests: `test_fec_rx_switch`, `test_jsi_floor`, `test_jsi_inputs`, `test_fec_packets_jsi`, `test_jsi_tails`, and dev set C's seeds in `test_seed_streams_disjoint`.
+
+**Labels** (`design_noise_burst.md` 1.6; protocol 2.5 and 4.4):
+- Rule baseline: "the rule's noise-burst answer was chosen on validation (C2) among uncoded configurations: <chosen> / <chosen, separable>; core rule <chosen>".
+- Profile 1's coded configurations: "decoded with the D78 erasure rules (pilot-error frame erasure, set on dev frames without bursts; antenna-1 energy test against the codeword's median, widened by 11 symbols). Under intermittent interferers these rules erase symbols the code needs, so the coded entries understate a rate-1/2 code, most of all for J4 bursts at 4-16 dB." The DQN, the table, the oracle and ladder steps 3 and 6 carry this limit.
+- KPI 4 and the envelope for noise bursts: "recoverable under profile 1's link model".
+- B3, OOD, B4s and EDGE's DET keep the class mapping they ran with.
+- Profile 3, when adopted: "FEC decoded with per-symbol JSI and residual erasures". Cross-profile tables show coded configurations and noise-burst rows apart; a difference there is not attributable to the antennas.
+
+**Unchanged:** the pools, the 36 configurations, the DQN and table action set, `C.ladder`, C1d, SURV and SURV3 (already run; they do not read the rule), and the receiver's front end (part B of the design changes the features and belongs only to a rerun from A0).
+
+**Open, optional, for the user:**
+- `rate_reduce+fec_interleave` (overall rate 1/8) as a configuration: not added. It would change the action set, the DQN and the pools, and it still fails the random jammer at duty 0.775 from about 16 dB (capacity about 0.36 < 0.5). Recommended: not now.
+- A profile 1 coded-sensitivity table (re-simulating only the coded configurations of its noise-burst cells after the chain, labelled as a sensitivity, never replacing C2e): compute time. Recommended: not now.
+
+## D98 — Phase-0 pre-registrations, before any of the data they govern exists: CORE_BW's plan-A deviation, plan B's step M and B3c, profile 3's own core and smoke, the B3c floor and the rehearsal limits
+**Why (2026-10-25).** `plan_v2.md` (D96) requires these to be committed in phase 0, before the cut: before CORE_BW's code, inputs or readings exist, before C2e's test reading of `rule_core − blind_core`, before the rehearsal and before B3c's training run.
+
+**a. CORE_BW under plan A: a deviation from T5 and from `core_bw_protocol.md` (D96 C5).**
+- *Base and inputs.* Worktree `uav-gcs-v7-bw`, branch `core-bw-p1` from `W`'s `v7-dev` commit at `##### STAGE C2e done`. Inputs copied from `W` and hashed (`P1_INPUTS.sha256`): T5's six files **plus the post-M `data/policy_pools.mat`** (re-keyed, about 14 GB); `core_cnn_model.mat` and `core_cnn.mat` from `W`. The hashes are checked again before `pools`.
+  - Reason: without the pools file `clean_ber_ref` returns NaN (`clean_ber_ref.m:14-26`) and `policy_monitor.m:141` falls to `C.deg_floor` (1e-4). The degradation alarm then fires on the clean link at low Eb/N0 (clean BER 7.1e-2 at 0 dB, 1.0e-2 at 6 dB, p1.log:7904) for rule_core and blind_core alike. `clean_ref_protocol.md` already names CORE_BW as a reader.
+- *One commit with tests on `core-bw-p1`:*
+  1. an assert in `decision_inputs` (`experiment_core_bw.m:454-461`) that `clean_ber_ref(9, 'ber_est')` is finite; before `val`, the worktree's value must equal `W`'s;
+  2. **blind_core's first response chosen on validation** among `channel_switch`, `channel_switch+rate_reduce` and `rate_reduce`, per hop rule. blind_core reads no class, so its one answer serves both types: it is scored on the recoverable validation episodes of every fixed-total cell (CW and the five wideband widths), equal weight per (B_J, JSR_tot). The rule is protocol 6.3's choice of W, quoted exactly:
+     > 1. the lowest pooled PER after onset;
+     > 2. a candidate whose paired 95% bootstrap interval of the PER difference to the best holds 0 ties;
+     >    among the tied, the highest goodput, ties by the same interval rule;
+     > 3. then the shortest median detection-to-restored time (never recovered counts as longest);
+     > 4. then the order channel_switch, channel_switch+rate_reduce, rate_reduce.
+
+     Reason: an equal tuning budget for the conventional system (past bug 4). Against the rule's validation-tuned W, blind_core's fixed `channel_switch+rate_reduce` first response (`decision_config.m:55`) would credit a 4x rate cut to the CNN;
+  3. the fixed ladder (today's blind_core) kept as a secondary row; protocol 5's prediction on blind_core is read on that row;
+  4. a deviation note `docs/core_bw_v2_note.txt`.
+- *When.* The code is written and reviewed during C2 (no MATLAB), on a branch from `P1C` (`794bf2a`), and moved onto `W`'s `v7-dev` at C2e done (that adds only docs commits). Both happen before `##### STAGE C2e done`, so no CORE_BW choice follows C2e's test reading.
+- *Slot.* The commit's tests (the full `test_core`, 35 GB) and CORE_BW's smoke (45 GB, no pool) run in the **p3 slot** (`V7G_ROOT` with an empty `uav-gcs-v7-p3` stand-in, as T5): the chain holds the p1 slot until RPT. `pools`, `dset`, `val`, `test` and `dread` run as T5, in the p1 slot after profile 1's end, never beside its tail.
+- *Failure.* A failing test or smoke: a fix on `core-bw-p1` with a test, then both rerun. `pools` never start on an untested commit. Profile 3 waits (CORE_BW first, D96 point 6) and the user is told; profile 3 goes first only if the user chooses.
+
+**b. Plan B keeps step M (D96 C9; amends D95 part 3's last bullet and `clean_ref_protocol.md` 5's last line).** `208602b` reads the same fields (`clean_ber_ref.m:19-26`, `link_env.m:190`). Under plan B, before `p1_resume.go`: M1 from `X`, then `clean_ref_rebuild('write', ...)` from `X` with absolute paths to `W`'s `data/clean_val_pools.mat` and `data/policy_pools.mat` (45 GB, p1 slot), with D95's pre-registered verdict rule (on `stop`, no write). Data only; no code change in `W`. Reason: otherwise every plan-B lecturer line rests on C1p's 8-flight table (2.4e-5 at 9 dB against 2.0e-3 on the check pools, p1.log:7904, :11440).
+
+**c. Plan B runs B3c before its resume (D96 C16).** After plan B's step M and before `p1_resume.go`, the isolated B3c (RUNBOOK_NOSTOP T3: train-only run, check, then the single reading) runs alone.
+- No B3r runs, so `docs/core_cnn_no_b3r.txt` (`e84a5fd`) holds.
+- Code: `X`, or a clean worktree at a named commit whose suite passed. Floor as in e.
+- Exception: if a T2 smoke still runs (about 51 < 55 GB free), the resume goes first and B3c runs at profile 1's end ("reading pending" in the report).
+- Reason: T3's old trigger never opens at these floors beside the chain (about 63.9 − 16.7 ≈ 47 < 55 GB). The three-state macro-F1, recall per type and detector false alarms would otherwise come about 2026-10-30.
+
+**d. Profile 3 runs its own `core` and smoke (supersedes D94 point 6's clause "`core` and the smoke come from profile 1's run on the same tip", `caee083`).** Profile 3's tip is `TIP3` = `TIP` + `lect-kpi` `f328e7b` through `e922d63` (D97 part 2). Its trees are recomputed before its deployment (plan_v2's `ca5af7ee` was `TIP` + `f328e7b` alone). It runs paths T2's D78 smoke never exercises, so it needs its own `core` and smoke. Its non-smoke jobs follow D96 C12. Dev set C runs in `uav-gcs-v7-p3` after its merge, before its C1p.
+
+**e. The B3c floor and the rehearsal limits.**
+- *B3c floor* `max(55, train-only peak + 7 + 10)`: the train-only run's measured peak, plus 7 GB for the reading beyond the training (the protocol's 6-7 GB), plus the 10 GB margin of the other floors.
+  - `core_cnn_protocol.md` 9 says 65 GB. Its basis (OOD 36 + gather 20 + 10, `v7_d91_takeover.md:52`) does not run in B3c.
+  - The deviation is committed in `W` as `docs/core_cnn_floor_note.txt` before the train-only run. It is a separate file, because L requires `code` and the protocol clean.
+  - Without a sampler reading, the protocol's 14 GB peak gives 55.
+- *Rehearsal limits*, committed in `W` as `docs/d91_b3r_expect_p1.txt` before the rehearsal, so before B3r. On fresh2 (in the fit set, so not a test read), with the deployed fusion:
+  - fault F1 ≥ 88% (expected 84.35 + 5.80 = 90.15);
+  - macro-F1 above the KPI 1 threshold ≥ 93.9% (expected 94.36 + 0.64 = 95.00);
+  - clean read as a threat ≤ 3.45% (expected 2.79 − 0.29 = 2.50).
+
+  Expected values: `d91_fuse.md`, the M4 out-of-fold block (the base line, the branch-evidence line, set fresh2's fault F1). A miss: no B3r; the deployment is reviewed (B2F log, J2), fixed from the sources and the rehearsal rerun. No set is spent.
+
+**Open.** CORE_BW's commit is not written yet (during C2). `TIP3`'s trees are not recomputed. `docs/core_cnn_floor_note.txt` and `docs/d91_b3r_expect_p1.txt` are written in `W` at their steps.

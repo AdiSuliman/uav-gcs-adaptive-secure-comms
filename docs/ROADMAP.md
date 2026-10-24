@@ -5,7 +5,7 @@
 **Supervisor:** Golan Ein-Tzvi
 **History:** [PROJECT_LOG.md](PROJECT_LOG.md) · **Design decisions:** [DECISIONS.md](DECISIONS.md) · **Results:** [README.md](../README.md)
 
-Last updated: 2026-10-24
+Last updated: 2026-10-25
 
 ---
 
@@ -31,8 +31,8 @@ Last updated: 2026-10-24
 | v4 | Receiver-side measurements, 36 combined configurations, combined threats in training, three severities, per-antenna feature, unknown-threat score selection, new-threat learning, 20 ms decision period | ✅ Full run A0–C2g done; hold in the shield (D63); escalation out of no_action (D64) | D59–D64 |
 | v5 | Ten threats (tone jamming, airframe shadowing), K 0–20 dB per flight, Eb/N0 0–15 dB, eight dataset and five decision levels, ten combined threats, one-cycle signalling delay, speeds outside training, single-core latency | ✅ Superseded by v6 (detector reading led to D72) | D68–D70 |
 | v6 | Evidence over time, quiet slot, levels to the sources' caps, weak-point analysis | ✅ Done, both profiles (summary document 2026-10-06); superseded by v7 | D71, D72 |
-| v7 | Real receiver with training and pilots, hover and turns, source-corrected severities, triples, profile 3 (four antennas), tracked directional GCS antenna under the e.i.r.p. cap; verdict per point (EDGE); fusion with the current frame; second detector test set; RF realism of distance, path loss, antenna fault and airframe shadowing | ⏳ Full run on 9b5c9f1 (D86-D89; launched 2026-10-16, stopped and redone 2026-10-17, resumed 16:42). Profile 1 in C1p since 2026-10-18 03:20 (87 of 93 cells on 2026-10-23 morning); profile 3 done through B4s, waits before C1p (`p3_c1p.hold`) until profile 1's chain has ended; profile 2 dropped (D92). KPI 1 read once on the third test set (B3m), KPI 2 nested, B4, B4s (PROJECT_LOG). Software-only Plan A stop of profile 1 approved 2026-10-23 (D94, revises D93): cut file written 08:56, the cut after SURV3, D90, D91, d91-edgefix and lect-kpi deployed before C1d, the clean reference rebuilt from the validation clean flights (step M, D95), no reboot | D73–D95 |
-| Scope | The lecturer's revised proposal of 2026-10-20 is the official scope: three-state detection, recovery, three configurations, the lecturer's KPIs; everything else built stays as extensions without commitment | ⏳ Code on `lect-kpi` `8b396e6` (tests written, not run: the gate is closed). It enters profile 1 at the software-only stop before C1d (D94): profile 1's own C2e and KPI write the lecturer's lines, and B3c reads its fourth test set once, after B3r. The isolated runs of D93 are plan B only. The same branch holds `clean_ref_rebuild` (D95) | D92–D95 |
+| v7 | Real receiver with training and pilots, hover and turns, source-corrected severities, triples, profile 3 (four antennas), tracked directional GCS antenna under the e.i.r.p. cap; verdict per point (EDGE); fusion with the current frame; second detector test set; RF realism of distance, path loss, antenna fault and airframe shadowing | ⏳ Full run on 9b5c9f1 (D86-D89; launched 2026-10-16, stopped and redone 2026-10-17, resumed 16:42). Profile 1: C1p, C1c and SURV done (SURV 2026-10-25 01:49, 386.3 min, 64 gap cells); SURV3 since 01:49:50, the cut after it. Profile 3 done through B4s, waits before C1p (`p3_c1p.hold`) until profile 1's chain and CORE_BW; profile 2 dropped (D92). KPI 1 read once on the third test set (B3m), KPI 2 nested, B4, B4s (PROJECT_LOG). Software-only Plan A stop of profile 1 (D94): D90, D91, d91-edgefix and lect-kpi up to `9122b8d` deployed before C1d, the clean reference from the validation clean flights (step M, D95), the rule's noise-burst answer chosen on validation in C2 (D97); the end-to-end plan approved 2026-10-25 (D96, floors 55 GB, time box 2026-10-27 18:00), pre-registrations D98; the merged tip built locally, not pushed | D73–D98 |
+| Scope | The lecturer's revised proposal of 2026-10-20 is the official scope: three-state detection, recovery, three configurations, the lecturer's KPIs; everything else built stays as extensions without commitment | ⏳ Code on `lect-kpi` (tip `e922d63`; tests not run: the gate is closed). Up to `9122b8d` it is merged into `v7-deploy-d91` (`TIP` `8b28bdf`) and enters profile 1 at the software-only stop before C1d (D94, D96): profile 1's own C2e and KPI write the lecturer's lines, and B3c reads its fourth test set once, after B3r. The JSI decoder (`f328e7b`-`e922d63`, D97) goes to profile 3 only. CORE_BW after profile 1, with the clean table and a validation-chosen conventional baseline (D98 a). The isolated runs of D93 are plan B only | D92–D98 |
 | Layout | Code into `code/` by stage | ✅ Done | D47, D61 |
 | D1 | Interim report | ⏳ Drafted, results to sync with the final run | — |
 | D2 | Final report | ⏳ | — |
@@ -49,8 +49,8 @@ The lecturer's revised proposal of 2026-10-20 is the official scope (DECISIONS D
 
 | Profile | Worktree, branch | Done (log markers) | Now |
 |---|---|---|---|
-| 1 (3 antennas) | uav-gcs-v7, v7-dev `208602b` | A0-B4s (p1.log:2382), B3m (p1_b3m.log:323) | C1p since 2026-10-18 03:20 (p1.log:2384); 87 of 93 cells on 2026-10-23 morning; the software-only stop cuts it after SURV3 for the deploy before C1d (D94). Runs OHP and GCSA |
-| 3 (4 antennas) | uav-gcs-v7-p3, v7-p3 `29510e7` | A0-B3a, B4 (p3.log:1832), OOD and B4s after the out-of-memory stop (p3.log:2022, :2227), B3m (p3_b3m.log) | waits before C1p (`p3_c1p.hold`) for its deployment; OHP and GCSA skipped by `skip_stages` in its `profile.json`, set at the deployment |
+| 1 (3 antennas) | uav-gcs-v7, v7-dev `208602b` | A0-B4s (p1.log:2382), B3m (p1_b3m.log:323) | C1p done (8692.4 min, p1.log:7918), C1c done (911.3 min, :11444), SURV done 2026-10-25 01:49 (386.3 min, :17628); SURV3 since 01:49:50 (:17630); the software-only stop cuts it after SURV3 for the deploy before C1d (D94, D96). Runs OHP and GCSA |
+| 3 (4 antennas) | uav-gcs-v7-p3, v7-p3 `29510e7` | A0-B3a, B4 (p3.log:1832), OOD and B4s after the out-of-memory stop (p3.log:2022, :2227), B3m (p3_b3m.log) | waits before C1p (`p3_c1p.hold`) for its deployment after profile 1 and CORE_BW: its own `core` and smoke on `TIP3` (D98 d), dev set C chooses `fec_rx` before its C1p (D97); OHP and GCSA skipped by `skip_stages` in its `profile.json`, set at the deployment |
 | 2 (2 antennas) | - | - | dropped: `v7_d86/p2.abandon` written 2026-10-21 06:49; the takeover ends the track and the final phase skips it (D92) |
 
 The processor boost is off since 2026-10-20 12:40; stages run up to about 35% slower.
@@ -61,95 +61,101 @@ The processor boost is off since 2026-10-20 12:40; stages run up to about 35% sl
 - B4: unseen Eb/N0 92.1% and 91.8%. B4s keeps the training levels on both profiles.
 - The decision-layer KPIs (4-8) come after C2e.
 
-**Status 2026-10-23: software-only Plan A stop of profile 1** (DECISIONS D94; revises D93, approved by the user about 09:00):
-- **The cut.** The cut file `v7_d86/p1_cut_after.SURV3` was written at 08:56, and the takeover accepted it. The takeover ends profile 1's chain MATLAB at `##### STAGE SURV3 done`, after C1p, C1c, SURV and SURV3. No reboot, and nothing for the user to do at the machine.
-- **Before C1d,** profile 1 takes one merged tip: `v7-deploy-d91` with `d91-edgefix` and `lect-kpi`, profile 1's candidate tree `d8aa01a2` (`579f4baa` before D95). It carries:
+**Status 2026-10-25: software-only Plan A stop of profile 1, phase 0** (DECISIONS D94; the end-to-end plan approved 2026-10-25, D96; pre-registrations D98):
+- **The cut.** The cut file `v7_d86/p1_cut_after.SURV3` (2026-10-23 08:56) stands. SURV ended 2026-10-25 01:49 (386.3 min, 0 errors, 64 gap cells) and SURV3 runs since 01:49:50. The takeover ends profile 1's chain MATLAB at `##### STAGE SURV3 done`, possibly within hours (from about 05:30, expected about 11:00). No reboot unless F0 < 55 GB after the cut (D96 C4).
+- **Before C1d,** profile 1 takes one merged tip, `TIP` = `v7-deploy-d91` + `d91-edgefix` (`e909209`) + `lect-kpi` up to `9122b8d`: `8b28bdf`, tree `677c9bbc`; profile 1's candidate `P1C` `794bf2a` (tree `5fcf342f`), `-q3` `7e905e0` (tree `34cc19cf`); built locally 2026-10-25 (STOP_SOFT A2-A4), worktree `X` = `uav-gcs-tip`, not pushed. It carries:
   - D90's audit fixes, with C2 at 108 runs;
-  - D91's fusion revision 'branch evidence, phi = 1', with the B-stage rerun, the rehearsal and one B3r reading of the fourth test set;
+  - D91's fusion revision 'branch evidence, phi = 1', with the B-stage rerun, the rehearsal (numeric pass first, D98 e) and one B3r reading of the fourth test set;
   - the EDGE fix;
-  - the lecturer-KPI code.
+  - the lecturer-KPI code and the clean-reference rebuild (D95);
+  - the rule's noise-burst answer chosen on validation in C2 among uncoded configurations (D97); the JSI decoder is for profile 3 only.
 
-  B3c then reads the fourth set once, after B3r. Then comes step M (D95): the decision layer's clean reference is rebuilt by hand from the 300 validation clean flights per Eb/N0 (a 1-minute check with a verdict, then the write; the C1p table rests on 8 train flights). Then come `rekey_pools` and the resume from C1d through the takeover (`p1_resume.go`).
-- **Gates first.** The merged suite (260 since D95), the proofs and the smoke must all pass before the code enters `v7-dev`. Until that fast-forward, plan B is open: resume on `208602b`, with D93's isolated runs.
-- **Memory.** Without a reboot, the zombies 32824 and 8908 keep about 11 GB. Free commit after the cut is expected at about 64.6 GB, below the 65 GB floor of the B stages, B3r and B3c. The user decides if that holds (reboot, lower floor, or plan B).
-- **The gate** stays at 28 GB. The report gallery job waits at it (relaunched 2026-10-23 03:08, 7-day wait).
-- **Profile 3** waits until profile 1's chain has ended (`p3_c1p.hold`). It then deploys `-q3` (tree `672a0bd7`, `c1081d1f` before D95) after `pold pnew porder p3core` on it.
-- **The steps:** `STOP_SOFT.md` (session scratchpad `interim_report/core/`, not in this repo).
+  B3c then reads the fourth set once, after B3r, and a read-only KPI summary follows. Then step M (M1 already run early beside the smoke, D96 C6), `rekey_pools`, a 30-minute notice and the resume from C1d (`p1_resume.go`).
+- **Gates first.** T1 (edgefix), T1b (the noise-burst tests from `X`), then the merged suite, the proofs and the smoke must all pass before the code enters `v7-dev` (I2). Branches are pushed after their tests pass, never `main`. Plan B (resume on `208602b`, with step M and B3c before its resume, D98 b-c) if I2 has not run by 2026-10-27 18:00.
+- **Memory floors** (the user, 2026-10-25): 55 GB for B2F, the B stages and the rehearsal; B3r `max(55, rehearsal peak + 10)`; B3c `max(55, train-only peak + 7 + 10)`. Measured 01:40: free commit 29.41 GB; F0 about 63.9 GB if 42560 exits, about 52.8 GB if it lingers. The gate stays at 28 GB.
+- **The report gallery** ended 2026-10-24 08:45:48 rc=0.
+- **After profile 1:** CORE_BW first (D98 a), then profile 3 on `TIP3` with its own `core` and smoke (D98 d).
+- **The steps:** `STOP_SOFT.md` with its V2 section, and `plan_v2.md` (session scratchpad `interim_report/core/`, not in this repo).
 
-**Branches** (pushed; none is merged into a profile; the status column is as of 2026-10-18 except where D92-D94 change it):
+**Branches** (pushed; none is merged into a profile; the status column is as of 2026-10-18 except where D92-D98 change it):
 
 | Branch, commit | Content | Status |
 |---|---|---|
-| `lect-kpi` (worktree `uav-gcs-lectkpi`, off `v7-deploy-d91`; `27803c3`, `2562605`, `c8ca607`, `0be0662`) | the lecturer's KPIs: `per_metrics.m`, `per_reduction.m`, `lect_kpis.m`, `three_state_view.m`, `profile_skip_stages.m`, `run_stage.m` (DECISIONS D92) | tip `8b396e6` (`5b4b970` adds B3c without B3r, the C2e-lect protocol and script, 257 tests; `2ae5f46`, `503b03a`, `8b396e6` add `clean_ref_rebuild`, its two tests and `docs/clean_ref_protocol.md`, D95; the merged suite is 260) and `lect-p1` `8118281` (profile 1's code plus the readers, plan B only); tests not run (the gate is closed); not pushed; merged with `d91-edgefix` into `v7-deploy-d91` at the stop, then into `v7-dev` before C1d and into profile 3 through `-q3` (D94) |
+| `lect-kpi` (worktree `uav-gcs-lectkpi`, off `v7-deploy-d91`; `27803c3`, `2562605`, `c8ca607`, `0be0662`) | the lecturer's KPIs: `per_metrics.m`, `per_reduction.m`, `lect_kpis.m`, `three_state_view.m`, `profile_skip_stages.m`, `run_stage.m` (DECISIONS D92) | tip `e922d63` (`5b4b970` adds B3c without B3r, the C2e-lect protocol and script, 257 tests; `2ae5f46`, `503b03a`, `8b396e6` add `clean_ref_rebuild`, its two tests and `docs/clean_ref_protocol.md`, D95; `9122b8d` the rule's noise-burst answer on validation and `docs/noise_burst_protocol.md`, 4 tests, D97, merged suite 264; `f328e7b`, `c96d801`, `ad92110`, `e922d63` the JSI decoder for profile 3, D97) and `lect-p1` `8118281` (profile 1's code plus the readers, plan B only); tests not run (the gate is closed); not pushed; up to `9122b8d` merged locally with `d91-edgefix` into `v7-deploy-d91` (`TIP` `8b28bdf`, 2026-10-25), into `v7-dev` at I2 and into profile 3 through `-q3`; the rest goes to profile 3 as `TIP3` (D96 C1, D98 d) |
 | `d90-loop` `2cbe559` | C1d/C2/KPI choices on validation (DECISIONS D90; `docs/d90_loop.md`) | full suite passed inside d91-speed (196/196); in `v7-deploy-d91`; enters profile 1 at the software-only stop before C1d (D94), profile 3 through `-q3` |
 | `d91-fuse` `2ea990a` | branch-evidence fusion revision (DECISIONS D91; `docs/d91_fuse.md`) | verdict ADOPT on both profiles by the pre-registered rule; 'branch evidence, phi = 1' validated; deployed in profile 1 at the software-only stop (B2F, B3-B4s rerun, D94) and in profile 3 at its deployment; deploy checklist in sec. 7 |
 | `d91-set4` `0e410cf` | fourth detector test set B3q and its single reading B3r (`docs/d91_set4.md`) | built for both profiles, unread (`uav-gcs-logs/set4_out/`); profile 1: B3r once at the stop, then B3c once after it (D94); profile 3: B3r at its deployment |
 | `d91-speed` `0069d03`, `d91-speed-on-v7-p3` `686fd11` | value-neutral pool speedups for profile 3 (`docs/d91_speed.md`) | proofs PASS on `70f69f4` (B_old_vs_new, C_order and C_vs_B with the detector applied) and on `686fd11` with 4 antennas (B_old_vs_new_nrx4, C_order, C_vs_B_nrx4); tests2 196/196; tests4 merge job started 21:09:09 on 2026-10-18, VERDICT not recorded here; goes into v7-p3 by `git cherry-pick 2cbe559..d91-speed` (d91_speed.md sec. 7) |
 | `d91-takeover` `7d4d0b6` | takeover of the d86 launcher (`ops/v7_d91_takeover.md`) | not launched on 2026-10-18; review round 3 FIX-NEEDED, round 4 running; it ends the profile 2 track (D92) |
 
-**Timeline** (estimates, not measurements; 2026-10-23, D94):
+**Timeline** (estimates, not measurements; 2026-10-25, D96, `plan_v2.md` section 4; no failure, boost off):
 
-| Milestone | Projected |
-|---|---|
-| Profile 1's C1p ends | 2026-10-23 evening to 10-24 morning |
-| The cut (profile 1's SURV3 ends) | about 2026-10-24/25 |
-| The stop window: tests, smoke (6-24 h), the code into `v7-dev`, B2F, B3-B4s, rehearsal, B3r, B3c, step M (clean reference, D95), re-key | about 18-39 h, if 65 GB is free |
-| Profile 1 resumes from C1d | about 2026-10-25/26 |
-| Profile 1's C2e (lecturer's lines) | about 2026-10-28/29 |
-| Profile 1's chain ends (KPI, RPT) | about 2026-10-30/31 |
-| CORE_BW | after profile 1's chain |
-| Profile 3 (deployment after profile 1, then C1p to RPT) | about 2026-11-10/13 |
-| Final LAT and KPI | after profile 3 |
+| Milestone | Best | Expected | Worst |
+|---|---|---|---|
+| The cut (SURV3 done; started 2026-10-25 01:49:50) | 10-25 05:30 | 10-25 11:00 | 10-25 16:00 (about 19:30 at the v7-smoke ratio) |
+| I2, the point of no return | 10-26 02:00 | 10-26 11:00 | 10-26 21:00 (time box 10-27 18:00) |
+| B3c recorded (three-state macro-F1, recall per type, detector false alarms) | 10-26 10:00 | 10-26 21:00 | 10-27 09:00 |
+| Profile 1 resumes from C1d | 10-26 10:00 | 10-26 22:00 | 10-27 11:00 |
+| Profile 1's C2e (lecturer's lines) | 10-28 03:30 | 10-29 06:00-08:00 | 10-30 03:30 (box: 10-31 00:00) |
+| Profile 1's RPT | 10-28 15:00 | 10-29 22:00 | 10-30 22:00 |
+| CORE_BW | 10-30 night | 10-31 midday | 11-02 |
+| Profile 3 (own core and smoke, dev set C, C1p to RPT) | about 11-12 | about 11-14/16 | about 11-18 |
+| Final LAT and KPI | after profile 3 | | |
 
+- C2e reaches 2026-10-29 only if I2 runs by about 2026-10-26 19:00. With the boost at 100% during C2 (optional, the user), C2e lands about 2026-10-28 evening.
+- The stop window: about 26-43 h from the cut to the resume (the smoke 14-24 h; the B stages 5.5-8.7 h single-thread). C2 at 108 runs plus 8 noise-burst evaluations: 51-57 h with the boost off.
+- The dates of 2026-10-23 (D94: the resume about 10-25/26, C2e about 10-28/29, RPT about 10-30/31, profile 3 about 11-10/13) are superseded.
 - The no-stop projection of D93 (profile 1 about 2026-10-28/29, profile 3 about 2026-11-08/11) is superseded by D94.
 - The projection of 2026-10-18 (DECISIONS D91 part 5) is superseded: profile 1 C1p 2026-10-24 14:00 to 10-25 10:00, profile 1 about 2026-10-27/28, profile 3 about 2026-11-04/06. Profile 2's date (about 2026-11-10/15) is void: the track is dropped.
 - The boost-off slowdown (up to about 35% per stage) is in the new dates.
 - These dates pass the end of the Windows Update pause (2026-11-05 13:38 UTC); the takeover's resume handles a reboot.
-- The d91 speedups could save about 3 days on profile 3.
+- The d91 speedups are in profile 3's new dates.
 - C2: the 72-run grid of 9b5c9f1 takes about 22-24 h per profile, not D86's 12 h; d90's 108 runs about 38-42 h (`C.drop_steps = [-2 0]` keeps 72 runs, about 26 h; d90_loop.md sec. 7).
 - The C1p figure of 2026-10-18 (155-175 h) is a projection from a cost model of the 93 cells (docs/runs/analysis/c1p_slow_model.py; DECISIONS D91 part 5).
 
 ## The lecturer's KPIs (revised proposal of 2026-10-20; DECISIONS D92)
 
-Mapping used in the code: narrowband = `tone_jamming`, wideband = `jamming` (barrage); static link = `none` / `no_action`, conventional adaptive (link metrics only) = `blind_esc`, CNN-based adaptive = `rule_esc`. New code is on `lect-kpi` (tests not run). It enters profile 1 at the software-only stop, so profile 1's own C2e, KPI and B3c give the readings (D94). The isolated runs of D93 are plan B only.
+Mapping used in the code: narrowband = `tone_jamming`, wideband = `jamming` (barrage); static link = `none` / `no_action`, conventional adaptive (link metrics only) = `blind_esc`, CNN-based adaptive = `rule_esc`. New code is on `lect-kpi` (tests not run). It enters profile 1 at the software-only stop, so profile 1's own C2e, KPI and B3c give the readings (D94); a read-only KPI summary after B3c gives the detector lines before the resume (D96 C8). The rule's noise-burst answer is chosen on validation in C2 (D97). CORE_BW (track C, controlled bandwidth) runs after profile 1 with a validation-chosen conventional baseline (D98 a). The isolated runs of D93 are plan B only.
 
 | Lecturer's KPI | Target | Code | State |
 |---|---|---|---|
 | BER model validated against theory | within the 0.3 dB of KPI 3 | `validate_phy.m` (A4v) | read: 7/7 on both profiles |
-| Macro-F1 on an independent test set | ≥ 85% | `eval_detector.m` on B3m (read); B3c, the three-state CNN, on the fourth set (profile 1: one reading, after B3r, D94); `three_state_view.m` for the three states clean / narrowband / wideband, from the saved confusion matrix, no new test reading | KPI 1 read (93.58 / 94.19, eleven classes); three-state view not run |
-| False alarms in clean states | ≤ 5% | KPI 6 in `evaluate_policies.m` (clean-link episodes) | after C2e |
-| Recall per jamming type | ≥ 85% | `three_state_view.m` (narrowband, wideband); per-class recall of `eval_detector.m` for the eleven classes ("Acc" there is recall) | not run |
-| PER reduction against the static link, recoverable scenarios | ≥ 30% | `per_metrics.m`, `per_reduction.m`, `lect_kpis.m`: paired geometry-bootstrap interval | after C2e |
-| Recovery time | reported; no target | `lect_kpis.m`: `t_rec_det` from detection until the PER stays under the threshold for the fixed window; `t_conf`, onset to detection, measured separately | after C2e |
+| Macro-F1 on an independent test set | ≥ 85% | `eval_detector.m` on B3m (read); B3c, the three-state CNN, on the fourth set (profile 1: one reading, after B3r, D94); `three_state_view.m` for the three states clean / narrowband / wideband, from the saved confusion matrix, no new test reading | KPI 1 read (93.58 / 94.19, eleven classes); B3c and the three-state view expected about 2026-10-26 21:00 |
+| False alarms in clean states | ≤ 5% | KPI 6 in `evaluate_policies.m` (clean-link episodes); the detector's in B3c | detector about 2026-10-26 21:00; system after C2e (about 2026-10-29) |
+| Recall per jamming type | ≥ 85% | `three_state_view.m` (narrowband, wideband); per-class recall of `eval_detector.m` for the eleven classes ("Acc" there is recall) | expected about 2026-10-26 21:00 (B3c) |
+| PER reduction against the static link, recoverable scenarios | ≥ 30% | `per_metrics.m`, `per_reduction.m`, `lect_kpis.m`: paired geometry-bootstrap interval | after C2e (about 2026-10-29 06:00-08:00) |
+| Recovery time | reported; no target | `lect_kpis.m`: `t_rec_det` from detection until the PER stays under the threshold for the fixed window; `t_conf`, onset to detection, measured separately | after C2e; onset latency also from B3r |
 | Goodput | reported; no target | `lect_kpis.m`: bit/s at 50 kb/s nominal | after C2e |
-| CNN contribution against the conventional mechanism | analysis metric, not a promise | the same metrics for `rule_esc` against `blind_esc` | after C2e |
+| CNN contribution against the conventional mechanism | analysis metric, not a promise | the same metrics for `rule_esc` against `blind_esc` (C2e, blind's fixed first response, stated); `rule_core` against `blind_core` in CORE_BW with blind_core's first response chosen on validation (D98 a) | C2e about 2026-10-29; CORE_BW about 2026-10-31 |
 
 The eight KPIs of the earlier proposal (README, "Proposal KPIs") stay as extensions without commitment.
 
 ## Remaining work
 
-1. **The software-only stop of profile 1** (DECISIONS D94; steps in `STOP_SOFT.md`, session scratchpad `interim_report/core/`, not in this repo). After the cut at SURV3's end:
-   - merge `d91-edgefix` and `lect-kpi` into `v7-deploy-d91`;
-   - run the edgefix tests (5), and the deploy queue on the merged tip: the suite of 260 tests (258 + the two of D95), the proofs at n_rx 3, and the smoke;
-   - fast-forward `v7-dev` (the point of no return);
+1. **The software-only stop of profile 1** (DECISIONS D94, D96, D98; steps in `STOP_SOFT.md` with its V2 section, session scratchpad `interim_report/core/`, not in this repo). Done in phase 0 (2026-10-25, local, not pushed): the merges into `v7-deploy-d91` (`TIP` `8b28bdf`), `P1C`, `P1O`, `-q3`, worktree `X`, the smoke driver, the records D96-D98. After the cut at SURV3's end:
+   - F0 and the turn file (D96 C4);
+   - the edgefix tests (5), T1b (the noise-burst tests from `X`), then the deploy queue on `TIP`: the suite of 264 tests, the proofs at n_rx 3, and the smoke (14-24 h; M1 early beside it);
+   - push the tested branches (never `main`); fast-forward `v7-dev` (I2, the point of no return; a push notice);
    - copy in the fourth set;
-   - run B2F, B3-B4s, the rehearsal, B3r once and B3c once;
-   - run step M (D95, `clean_ref_rebuild`): M1, a 1-minute `'check'` of the validation clean pools with a pre-registered verdict (`docs/clean_ref_protocol.md` on `lect-kpi`), then M2, the `'write'` of `clean_ref`, `PP.clean` and `PP.clean_fer` (backup first; `policy_pools.mat` stays older than the C1c files). On `stop` there is no write and profile 1 keeps the C1p table. It comes before `rekey_pools` and C1d;
-   - run `rekey_pools`, then resume from C1d.
-   - After the chain: the wrap check (`d91_deploy.md` E11) and CORE_BW.
-   - Plan B (resume on `208602b`, D93's isolated runs) stays open until the fast-forward.
-2. **Profile 3's deployment after profile 1's chain** (D93 part 5, D94). The candidate is `-q3`: `v7-deploy-d91` + `d91-edgefix` + `lect-kpi`, with `skip_stages` OHP and GCSA in the tested tree. The deploy queue runs `pold pnew porder p3core` on it; `core` and the smoke come from profile 1's run. Then `d91_deploy.md` D1-D9.
+   - B2F, B3-B4s and the rehearsal at 55 GB; the rehearsal's numeric pass (`docs/d91_b3r_expect_p1.txt` in `W`); B3r once; B3c once (`docs/core_cnn_floor_note.txt` in `W` first); the read-only KPI summary;
+   - step M2 (D95): the `'write'` of `clean_ref`, `PP.clean` and `PP.clean_fer`; on `stop` no write;
+   - `rekey_pools` with the 30-minute notice, then the resume from C1d.
+   - Plan B (resume on `208602b`, with step M and B3c before the resume, D98 b-c) if I2 has not run by 2026-10-27 18:00.
+   - During C2 (no MATLAB): write and review CORE_BW's commit (D98 a). After the chain: the wrap check (`d91_deploy.md` E11).
+2. **CORE_BW after profile 1's chain** (D98 a): `core-bw-p1` from `W`'s `v7-dev` at C2e done, inputs with the post-M `policy_pools.mat` (hashed), the clean-table assert, blind_core's first response chosen on validation; tests and smoke in the p3 slot; `pools`, `dset`, `val`, test once, report, `dread` at profile 1's end.
+3. **Profile 3's deployment after CORE_BW** (D93 part 5, D94, D96, D98 d). The candidate is `TIP3` = `TIP` + `lect-kpi` `f328e7b`-`e922d63` (trees to recompute), with `skip_stages` OHP and GCSA. It runs its own `core` and smoke, then `pold pnew porder p3core`, its non-smoke jobs only after profile 1's C2e and CORE_BW's smoke. Then `d91_deploy.md` D1-D9.
+   - Dev set C chooses `fec_rx` (the JSI decoder, or `"d78"`) before its C1p, committed in its `profile.json` with its own DECISIONS entry (D97).
    - Profile 3's C1c ends with `clean_ref_rebuild('chain')` (D95): its clean reference comes from its own validation clean flights, with no step M.
    - Profile 3 before its C1p: the B2F rerun (the fusion revision), B3-B4s, the rehearsal and B3r once. The speedups and d90 come with the candidate.
-3. **The takeover** runs since 2026-10-20 11:22; after any reboot only its recovery command (`ops/v7_d91_takeover.md`, "After a reboot or a crash").
-4. **d90 into the profiles:** profile 1 at the software-only stop, before C1d (D94); profile 3 through `-q3`.
-5. **Checks after profile 1's C1p:** `PP.model_tag` in its pools must read `v7-D89` (DECISIONS D89, Adoption), and C1c must pass its detector check.
-6. **KPI 2 below its target** (0.769 / 0.763): the untried options are in PROJECT_LOG, weak-class status. The OOD score is in the detector identity, so a change after C1p means a pool rebuild.
-7. **Classes below 90%** (path loss, WLAN, fault, shadowing): the user accepts at least 85% per class for now and decides with the full results. The candidates are in PROJECT_LOG, weak-class status. For shadowing, M3 of d91-fuse (the coherence columns) meets its note's criterion on the fit set and is a candidate, not yet designed (DECISIONS D91, Evidence).
-8. **Interim report** (due 2026-11-01, writing from about 2026-10-20): a chapter per threat, good and correct figures; it needs no final v7 numbers. The results audit of 2026-10-21 found 58 wording issues about what a number measures in the draft (for example, the 2.67 / 3.85 ms latency is the detector forward pass plus the score); they are to be fixed.
-9. **Operator console and 3D:** screenshots and a live check with the v7 agent after the run. The high-quality 3D view waits until the code, the final proposal and the interim report are done.
-10. **Final report, slides and poster:** last, when the user asks.
-11. **Housekeeping**, with the user's approval:
+4. **The takeover** runs since 2026-10-20 11:22; after any reboot only its recovery command (`ops/v7_d91_takeover.md`, "After a reboot or a crash").
+5. **d90 into the profiles:** profile 1 at the software-only stop, before C1d (D94); profile 3 through `-q3`.
+6. **Checks after profile 1's C1p:** `PP.model_tag` in its pools must read `v7-D89` (DECISIONS D89, Adoption), and C1c must pass its detector check.
+7. **KPI 2 below its target** (0.769 / 0.763): the untried options are in PROJECT_LOG, weak-class status. The OOD score is in the detector identity, so a change after C1p means a pool rebuild.
+8. **Classes below 90%** (path loss, WLAN, fault, shadowing): the user accepts at least 85% per class for now and decides with the full results. The candidates are in PROJECT_LOG, weak-class status. For shadowing, M3 of d91-fuse (the coherence columns) meets its note's criterion on the fit set and is a candidate, not yet designed (DECISIONS D91, Evidence).
+9. **Interim report** (due 2026-11-01, writing from about 2026-10-20): a chapter per threat, good and correct figures; it needs no final v7 numbers. The results audit of 2026-10-21 found 58 wording issues about what a number measures in the draft (for example, the 2.67 / 3.85 ms latency is the detector forward pass plus the score); they are to be fixed. Draft 3 delivered (39 pages). Draft 4 about 2026-10-27: B3r and B3c in place of B3m, the pre-resume KPI summary, C2e dated about 2026-10-29 with the pre-registered lines marked "measurement in progress" if C2e is later, the noise-burst labels of D97 (D96 C15). Review 2026-10-30/31, submission 2026-11-01.
+10. **Operator console and 3D:** screenshots and a live check with the v7 agent after the run. The high-quality 3D view waits until the code, the final proposal and the interim report are done.
+11. **Final report, slides and poster:** last, when the user asks.
+12. **Housekeeping**, with the user's approval:
     - the zombie MATLAB 32824 (only a reboot frees its 4.6 GB);
     - the worktree copies `uav-gcs-b3m-p1/-p3` (their files are already in the profiles: copied 2026-10-17 22:04:19 and 22:51:15, p1_b3m.log:325, p3_b3m.log:325) and `uav-gcs-set4-p1/-p3` (after the fourth set is copied in at deployment, or after a no-go);
     - the stray empty folder `C:\ADISUL~1`;
