@@ -51,8 +51,8 @@ if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (r
     THREATS = THREATS(unique([1 find(strcmp(THREATS, 'airframe_shadowing'))])); N_GEO = 2;
 end
 EGRID = PP.ebno; ACTIONS = PP.actions; opt.F_SUB = PP.F_SUB; vrange = PP.speed_range;
-PTAG = PP.model_tag; PID = ''; if isfield(PP, 'det_id'), PID = PP.det_id; end
 PRX = fec_rx_of(PP); p0 = fec_rx_on(p0, PRX);           % the policy pools' decoder of the coded link
+PTAG = PP.model_tag; PID = ''; if isfield(PP, 'det_id'), PID = PP.det_id; end
 clear PP                                                % the pools' fields read, not their frames (memory)
 EMID = (EGRID(1:end-1) + EGRID(2:end)) / 2;             % between the Eb/N0 points
 EB = unique([EMID, E_LEVEL]);                           % check Eb/N0 points
