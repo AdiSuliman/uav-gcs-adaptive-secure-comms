@@ -2907,10 +2907,6 @@ function J = jsi_for(z, p, R, pe)
 J = jsi_inputs(z, p, R.h); J.rx = R; J.pe = pe;
 end
 
-function write_text(f, t)
-fid = fopen(f, 'w'); fprintf(fid, '%s', t); fclose(fid);
-end
-
 function test_sync_frequency_sign(tc)
 % The space-time synchronization (st_sync on the delay line) reports the frequency offset
 % with its sign: a known offset of +-30 kHz on the transmitted frames (three antennas,
