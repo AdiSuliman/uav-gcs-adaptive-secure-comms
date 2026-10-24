@@ -28,6 +28,7 @@ opt = struct('F_SUB', RUN_FRAMES, 'tw', 10, 'delay_bits', 20);
 C = decision_config();
 evalc('init_params');
 p0 = load('params.mat').params; p0.quiet_build = true; p0.int_aoa_random = true;
+p0 = fec_rx_on(p0, fec_rx_config());           % the profile's decoder of the coded link (profile.json)
 EBNO = p0.EbNo_dB; nS = numel(EBNO);
 ACTIONS = policy_actions();
 vrange = [p0.speed_kmh_min p0.speed_kmh_max];

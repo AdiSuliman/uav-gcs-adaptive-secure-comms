@@ -61,6 +61,10 @@
 % geometries of the same link model (MODEL_TAG) and only the test block differs, only
 % the test, edge-speed and second test splits are simulated. PP.det_id identifies the
 % detector (detector_id.m); pools of another detector are never reused.
+% The coded configurations' truth comes from the decoder profile.json states (fec_rx,
+% fec_rx_config.m; a full build refuses without it): the D78 erasure rules, or the JSI
+% decoder chosen on dev set C (docs/noise_burst_protocol.md), recorded in PP.fec_rx and in
+% PP.model_tag (MODEL_TAG + its decisions entry).
 %
 % Output: data/policy_pools.mat (PP, clean_ref); C1c replaces clean_ref, PP.clean and
 % PP.clean_fer with the table of the clean validation pools (clean_ref_rebuild.m)
@@ -100,6 +104,20 @@ if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (r
     EBNO = [3 12]; NGEO = [2 2 2 2 2]; NCOMB = [0 0 0 0 2]; NHOVER = 1; N_COUNT = 2;
     BLOCK(3:5) = [18 18 19];                            % blocks of its own: its flights are never test flights
 end
+% The coded link's decoder, stated in profile.json (fec_rx_config.m): "d78" keeps the D78
+% erasure rules and the params as they are; the JSI decoder enters the params (so the
+% cells' keys) and the pools' model tag, so pools of another decoder are never reused
+FRX = fec_rx_config();
+if isempty(FRX)
+    if ~(exist('SMOKE', 'var') && SMOKE)
+        error('build_policy_pools:fec_rx', ['profile.json states no decoder of the coded link (fec_rx): "d78" for the ' ...
+            'D78 erasure rules, or the JSI decoder chosen on dev set C (docs/noise_burst_protocol.md)']);
+    end
+    FRX = struct('mode', 'd78');
+end
+p0 = fec_rx_on(p0, FRX);
+TAG = MODEL_TAG; if strcmp(FRX.mode, 'jsi'), TAG = [MODEL_TAG '+' FRX.rev]; end
+if strcmp(FRX.mode, 'jsi'), fprintf('Coded link decoder: JSI (%s)\n', TAG); else, fprintf('Coded link decoder: D78 erasure rules\n'); end
 
 D = load('data/trained_detector.mat', 'net', 'classes', 'ood', 'trained_at');
 nm = split_norm();                                     % the training z-score alone
@@ -175,7 +193,7 @@ runs = arrayfun(@(sp) 100 * BLOCK(sp) + r0(sp) + (1:nG(sp)), 1:nSp, 'UniformOutp
 old = [];
 if isfile('data/policy_pools.mat')
     Lo = load('data/policy_pools.mat', 'PP');
-    if isfield(Lo.PP, 'model_tag') && strcmp(Lo.PP.model_tag, MODEL_TAG) && isfield(Lo.PP, 'det_id') ...
+    if isfield(Lo.PP, 'model_tag') && strcmp(Lo.PP.model_tag, TAG) && isfield(Lo.PP, 'det_id') ...
             && strcmp(Lo.PP.det_id, DET_ID) ...
             && numel(Lo.PP.runs) == nSp && isequal(Lo.PP.runs(1:2), runs(1:2)) && ~isequal(Lo.PP.runs{3}, runs{3}) ...
             && isequal(Lo.PP.scen, {cells.threat}) && isequal(Lo.PP.sev, [cells.sev]) ...
@@ -429,7 +447,7 @@ PP = struct('scen', {{cells.threat}}, 'sev', [cells.sev], 'level', [cells.level]
     'clean', clean_ref.ber, 'clean_fer', clean_ref.fer, 'classes', {det.classes}, 'maha_thr', T.maha, ...
     'maha_val', single(T.maha_val), 'unk_retain', T.retain, ...
     'fuse', FZ.FM, 'fuse_N', FZ.N, 'q_thr', FZ.q_thr, 'unk_win', UW, ...
-    'F_SUB', opt.F_SUB, 'event_frame', {evf}, 'fec_frames', p0.fec_frames, 'runs', {runs}, 'model_tag', MODEL_TAG, ...
+    'F_SUB', opt.F_SUB, 'event_frame', {evf}, 'fec_frames', p0.fec_frames, 'runs', {runs}, 'model_tag', TAG, 'fec_rx', FRX, ...
     'det_id', DET_ID, 'aoa_random', p0.int_aoa_random, 'k_random', p0.k_random, 'sps', p0.sps, 'bps', p0.bits_per_symbol, ...
     'feat_names', {link_features('names')}, 'created', datestr(now));
 pool_checkpoint('commit', 'data/policy_pools.mat', struct('PP', PP, 'clean_ref', clean_ref));

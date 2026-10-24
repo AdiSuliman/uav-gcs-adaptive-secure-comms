@@ -43,6 +43,7 @@ L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
 EBNO = PP.ebno; ACTIONS = PP.actions; opt.F_SUB = PP.F_SUB; vrange = PP.speed_range;
 TAG = ''; if isfield(PP, 'model_tag'), TAG = PP.model_tag; end
 PID = ''; if isfield(PP, 'det_id'), PID = PP.det_id; end
+PRX = fec_rx_of(PP);                                   % the policy pools' decoder of the coded link
 clear PP
 nS = numel(EBNO); nA = numel(ACTIONS);
 runs = 100 * SP + (1:N_GEOM);
@@ -55,13 +56,15 @@ end
 if isfile(f_out) && dir(f_out).datenum > dir('data/policy_pools.mat').datenum
     Cx = load(f_out, 'CT');
     if isequal(Cx.CT.runs, runs) && isequal(Cx.CT.ebno, EBNO) && isequal(Cx.CT.actions, ACTIONS) ...
-            && isfield(Cx.CT, 'cov') && isfield(Cx.CT, 'det_id') && strcmp(Cx.CT.det_id, DET_ID)
+            && isfield(Cx.CT, 'cov') && isfield(Cx.CT, 'det_id') && strcmp(Cx.CT.det_id, DET_ID) ...
+            && isequal(fec_rx_of(Cx.CT), PRX)
         fprintf('%s is up to date (%d geometries per Eb/N0), nothing to do\n', f_out, N_GEOM);
         clear CLEAN_SET; return
     end
 end
 
 S0 = load('params.mat'); p0 = S0.params; p0.quiet_build = true; p0.active_threat = 'none';
+p0 = fec_rx_on(p0, PRX);
 assert_frame1_onsets(p0);                       % every threat on from its run's first frame (init_params.m)
 nm = split_norm();                                     % the training z-score alone
 det = struct('net', D.net, 'ood', D.ood, 'classes', {cellstr(string(D.classes(:)'))}, ...
@@ -121,7 +124,7 @@ sds = cell2mat(arrayfun(@(s) [cell2mat(cellfun(@(g) g.seed, geo(:, s)', 'Uniform
     'UniformOutput', false));                   % seed of every geometry
 V = flight_cov(arrayfun(@(s) struct('seed', sds(s, :), 'speed', spd(s, :)), 1:nS, 'UniformOutput', false), EBNO, p0);
 CT = struct('pools', {pools}, 'runs', runs, 'ebno', EBNO, 'actions', {ACTIONS}, 'n_geom', N_GEOM, ...
-    'speed', spd, 'seed', sds, 'cov', V, 'set', CLEAN_SET, 'det_id', DET_ID, 'model_tag', TAG, 'created', datestr(now));
+    'speed', spd, 'seed', sds, 'cov', V, 'set', CLEAN_SET, 'det_id', DET_ID, 'model_tag', TAG, 'fec_rx', PRX, 'created', datestr(now));
 pool_checkpoint('commit', f_out, struct('CT', CT));
 pool_checkpoint('clear', CKD);
 fprintf('Saved %s (%.1f min)\n', f_out, toc(t0)/60);

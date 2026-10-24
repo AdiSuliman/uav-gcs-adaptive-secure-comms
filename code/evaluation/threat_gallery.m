@@ -9,6 +9,7 @@
 %       pools (top_cfg of results/policy_evaluation.mat; the expert rule's choice
 %       when that file does not exist yet, its noise-burst answer as C2 chose it,
 %       dec.rule_nb of data/trained_dqn.mat, when present)
+% The coded link's decoder is the profile's (profile.json fec_rx, fec_rx_config.m).
 % plus an overview figure with the spectrogram of every threat.
 %
 % Output: results/threat_gallery/<threat>.png, results/threat_gallery/overview.png
@@ -28,6 +29,7 @@ p0.gcs_aoa_random = false;
 p0.jam_timing_random = false;           % the shortest sweep at phase 0: the sweeper on our channel in every frame
 p0.tdl_random = false;                  % the median delay spreads (p0.tdl_ds_ns), with the delay line on
 p0.cap_frames = NF;                     % the in-band cap holds over the whole run
+p0 = fec_rx_on(p0, fec_rx_config());
 fs = p0.symbol_rate * p0.sps;
 fd = V_KMH / 3.6 * p0.carrier_freq / p0.c_light;
 top = struct('threat', {}, 'action', {}, 'share', {});

@@ -1110,6 +1110,13 @@ for x = {q, m}
     verifyEmpty(tc, intersect(x{1}, N(:)));
     verifyLessThan(tc, max(x{1}), min(N(:)));
 end
+% Dev set C (dev_fec_burst.m): link seeds of its own, none of the earlier dev sets' (7001-7060,
+% 7201-7260, 7301-7360, 7401-7415, 7601-7730) nor of the flights above, nor their streams
+DC = (7801:7860)';
+verifyEmpty(tc, intersect(DC, [7001:7060, 7201:7260, 7301:7360, 7401:7415, 7601:7730]'));
+verifyEmpty(tc, intersect(DC, S));
+verifyEmpty(tc, intersect(reshape(seed_base(DC) + off, [], 1), N(:)));
+verifyNotEmpty(tc, strfind(fileread(fullfile(tc.TestData.root, 'code', 'dev', 'dev_fec_burst.m')), 'SEEDS = 7801:7860;'));
 end
 
 function test_draws_independent(tc)
@@ -2672,6 +2679,236 @@ hb = reshape([imag(y(:)) < 0, real(y(:)) < 0]', [], 1);       % first bit from I
 verifyEqual(tc, hb([2*k - 1, 2*k]), logical(b([2*k - 1, 2*k])));
 d = pskdemod(z, 4, pi/4, 'gray', 'OutputType', 'bit');
 verifyEqual(tc, d([2*k - 1, 2*k]), b([2*k - 1, 2*k]));
+end
+
+function test_fec_rx_switch(tc)
+% The decoder switch (profile.json fec_rx, fec_rx_config.m): an absent file or field states
+% none, "d78" the D78 rules, a JSI struct its chosen values (frame c with thr and flag_clean);
+% a struct without a value or with one out of range is refused. The D78 rules and an unstated
+% decoder leave the params as they are, so profile 1's pools, keys and identity stay; the JSI
+% decoder enters the params, the policy pools (PP.fec_rx, the model tag) and, from the policy
+% pools, the check and clean pools. A full C1p refuses without a stated decoder.
+f = [tempname '.json'];
+verifyEmpty(tc, fec_rx_config(f));
+wr = @(t) write_text(f, t);
+wr('{"profile":"profile 3","n_rx":4}'); verifyEmpty(tc, fec_rx_config(f));
+wr('{"n_rx":4,"fec_rx":"d78"}'); verifyEqual(tc, fec_rx_config(f), struct('mode', 'd78'));
+js = ['{"fec_rx":{"mode":"jsi","rev":"D99","q":0.05,"c":4.6,"h":1,"erase_sym":true,"frame":"c","thr":0.85,' ...
+    '"flag_clean":0.009}}'];
+wr(js); R = fec_rx_config(f);
+verifyEqual(tc, R, struct('mode', 'jsi', 'rev', 'D99', 'q', 0.05, 'c', 4.6, 'h', 1, 'erase_sym', true, 'frame', 'c', ...
+    'thr', 0.85, 'flag_clean', 0.009));
+wr(strrep(js, '"frame":"c","thr":0.85,"flag_clean":0.009', '"frame":"b"')); Rb = fec_rx_config(f);
+verifyTrue(tc, isnan(Rb.thr) && isnan(Rb.flag_clean) && strcmp(Rb.frame, 'b'));
+for bad = {strrep(js, '"c":4.6,', ''), strrep(js, '"frame":"c"', '"frame":"d"'), strrep(js, '"h":1', '"h":2'), ...
+        strrep(js, ',"thr":0.85', ''), strrep(js, '"erase_sym":true', '"erase_sym":1'), '{"fec_rx":"jsi"}', ...
+        strrep(js, '"q":0.05', '"q":0.6'), strrep(js, '"rev":"D99",', '')}
+    wr(bad{1}); verifyError(tc, @() fec_rx_config(f), 'fec_rx_config:value', bad{1});
+end
+delete(f);
+p = struct('n_rx', 3, 'fec_frames', 4);
+verifyEqual(tc, fec_rx_on(p, []), p);
+verifyEqual(tc, fec_rx_on(p, struct('mode', 'd78')), p);
+q = fec_rx_on(p, R); verifyEqual(tc, q.fec_rx, R);
+verifyEqual(tc, fec_rx_of(p), struct('mode', 'd78'));
+verifyEqual(tc, fec_rx_of(struct('fec_rx', struct('mode', 'd78'))), struct('mode', 'd78'));
+verifyEqual(tc, fec_rx_of(q), R);
+src = fileread(which('build_policy_pools'));
+verifyNotEmpty(tc, strfind(src, 'MODEL_TAG = ''v7-D89'';'));
+verifyNotEmpty(tc, strfind(src, 'FRX = fec_rx_config();'));
+verifyNotEmpty(tc, strfind(src, 'error(''build_policy_pools:fec_rx'''));
+verifyNotEmpty(tc, strfind(src, 'if ~(exist(''SMOKE'', ''var'') && SMOKE)'));
+verifyNotEmpty(tc, strfind(src, 'TAG = MODEL_TAG; if strcmp(FRX.mode, ''jsi''), TAG = [MODEL_TAG ''+'' FRX.rev]; end'));
+verifyNotEmpty(tc, strfind(src, '''model_tag'', TAG, ''fec_rx'', FRX'));
+verifyNotEmpty(tc, strfind(src, 'strcmp(Lo.PP.model_tag, TAG)'));
+verifyNotEmpty(tc, strfind(src, 'p0 = fec_rx_on(p0, FRX);'));
+for g = {'build_check_pools', 'build_clean_test_pools'}
+    verifyNotEmpty(tc, strfind(fileread(which(g{1})), 'PRX = fec_rx_of(PP);'), g{1});
+end
+verifyNotEmpty(tc, strfind(fileread(which('build_clean_test_pools')), '&& isequal(fec_rx_of(Cx.CT), PRX)'));
+for g = {'map_survivability_boundary', 'experiment_survivability_options', 'threat_gallery'}
+    verifyNotEmpty(tc, strfind(fileread(which(g{1})), 'p0 = fec_rx_on(p0, fec_rx_config());'), g{1});
+end
+verifyNotEmpty(tc, strfind(fileread(which('rekey_pools')), '''fec_frames'', ''fec_rx'''));
+end
+
+function test_jsi_floor(tc)
+% The quiet-symbol floor of a codeword (jsi_floor.m) on exponential residuals of unit variance:
+% clean, under the random jammer at duty 0.5 and 0.775 (30 dB over the floor), under J4 with
+% the RRC leaks of its bursts on their neighbours (0.068, 0.0073, 0.0013 of the burst at 1, 2
+% and 3 symbols), which leave few symbols at the thermal floor, and a continuous interferer,
+% which the floor follows. The q-quantile alone sits about 1/f too high with a share f of
+% clean symbols; the truncated refinement removes that.
+rs = RandStream('mt19937ar', 'Seed', 5); n = 2064; q = 0.05;
+ex = @(v) -log(rand(rs, n, 1)) .* v;
+verifyEqual(tc, jsi_floor(ex(ones(n, 1)), q), 1, 'RelTol', 0.15);
+for d = [0.5 0.775]
+    r = ex(1 + 1000 * (rand(rs, n, 1) < d));
+    verifyEqual(tc, jsi_floor(r, q), 1, 'RelTol', 0.25, sprintf('random %.3f', d));
+    x = sort(r);
+    if d > 0.7, verifyGreaterThan(tc, x(ceil(q * n)) / -log(1 - q), 3.5); end   % the quantile alone
+end
+lk = [0.0013 0.0073 0.068 0.847 0.068 0.0073 0.0013];
+v = 1 + 1000 * conv(double(rand(rs, n + 6, 1) < 0.2), lk', 'valid');
+s0 = jsi_floor(ex(v), q);
+verifyGreaterThan(tc, s0, 0.8); verifyLessThan(tc, s0, 2.5);
+verifyEqual(tc, jsi_floor(ex(50 * ones(n, 1)), q), 50, 'RelTol', 0.15);
+verifyEqual(tc, jsi_floor([NaN; Inf], q), eps);
+end
+
+function test_jsi_inputs(tc)
+% Per-symbol jammer state information (jsi_inputs.m): every data symbol's residual about its
+% block's gain, the median of z conj(s) over the block, twice (one per bit); num the
+% magnitudes of conj(g) z on the two rails; h = 1 averages each residual with its neighbours
+% in the frame. On a clean frame num over the block's mean residual is bit_reliability.m's
+% reliability within the gain estimates' difference; a 30 dB burst on a fifth of the symbols
+% leaves the clean symbols' residuals where they were (a block mean gain would not).
+p = struct('frame_length', 1032); nd = 516; B = 32;
+rs = RandStream('mt19937ar', 'Seed', 7);
+b = randi(rs, [0 1], 2 * p.frame_length, 1);
+s = reshape(pskmod(b, 4, pi/4, 'gray', 'InputType', 'bit'), nd, 2);
+g = 0.8 * exp(1j * 0.3);
+z = g * s + 0.05 * complex(randn(rs, nd, 2), randn(rs, nd, 2));
+J0 = jsi_inputs(z, p, 0); J1 = jsi_inputs(z, p, 1);
+verifyEqual(tc, size(J0.num), [2 * p.frame_length, 1]);
+verifyEqual(tc, J0.res(1:2:end), J0.res(2:2:end));
+r = reshape(J0.res(1:2:end), nd, 2); w = reshape(J0.num, 2, nd, 2);
+nb = floor(nd / B); es = zeros(nd, 2);
+for f = 1:2
+    zs = (sign(real(z(:, f))) + 1j * sign(imag(z(:, f)))) / sqrt(2);
+    for k = 1:nb
+        i = (k-1)*B + 1 : k*B; if k == nb, i = (k-1)*B + 1 : nd; end
+        y = z(i, f) .* conj(zs(i)); gk = complex(median(real(y)), median(imag(y)));
+        verifyEqual(tc, r(i, f), abs(z(i, f) - gk * zs(i)).^2, 'RelTol', 1e-12);
+        v = 2 * sqrt(2) * conj(gk) * z(i, f);
+        verifyEqual(tc, squeeze(w(:, i, f)), [abs(imag(v)), abs(real(v))]', 'RelTol', 1e-12);
+        es(i, f) = mean(r(i, f));
+    end
+end
+verifyEqual(tc, median(J0.num ./ repelem(es(:), 2) ./ bit_reliability(z, p)), 1, 'AbsTol', 0.05);
+verifyEqual(tc, reshape(J1.res_h(1:2:end), nd, 2), movmean(r, 3), 'RelTol', 1e-12);
+hit = rand(rs, nd, 2) < 0.2;
+zb = z; zb(hit) = zb(hit) + 0.8 * sqrt(1000 / 2) * complex(randn(rs, nnz(hit), 1), randn(rs, nnz(hit), 1));
+rb = reshape(jsi_inputs(zb, p, 0).res(1:2:end), nd, 2);
+verifyLessThan(tc, median(rb(~hit)), 2 * median(r(~hit)));
+verifyGreaterThan(tc, mean(rb(hit)), 100 * median(r(:)));
+end
+
+function test_fec_packets_jsi(tc)
+% The JSI decoder (fec_packets.m with J; closed_loop_truth.m with p.fec_rx). A clean run
+% decodes every packet under every variant. J4 bursts (a fifth of the data symbols, 30 dB) in
+% the combiner output (MRC): the JSI decoder decodes every packet, the D78 rules, whose
+% antenna-1 energy test widened by 11 symbols erases about 91% of the bits, lose them. The
+% same bursts on antenna 1 with a combiner output the MMSE null cleaned: the JSI decoder
+% decodes and flags about the clean rate, the D78 rules erase the clean symbols and lose the
+% packets. Whole frames: a confidently wrong frame (a rotated estimate) with a high pilot
+% error costs packets under 'b' and is erased by 'a' and 'c'; the same frame with bursts on
+% 30% of its symbols stays symbol-wise under 'c' (a burst frame) and is erased under 'a'.
+% Without p.fec_rx closed_loop_truth.m gives the D78 result, and fec_packets.m's D78 path is
+% the parent commit's (lect-kpi 8b396e6) bit for bit.
+p = base_params(); Lf = frame_layout(p); bpf = p.frame_length; nd = bpf / 2; nf = 20; d = p.filter_span / 2;
+rs = RandStream('mt19937ar', 'Seed', 11);
+tx = randi(rs, [0 1], nf * bpf, 1);
+s = reshape(pskmod(tx, 4, pi/4, 'gray', 'InputType', 'bit'), nd, nf);
+g = 0.9 * exp(1j * 0.2); sg = abs(g) * sqrt(10^(-12/10) / 2);          % Es/N0 12 dB
+burst = @(m) abs(g) * sqrt(1000 / 2) * complex(randn(rs, m, 1), randn(rs, m, 1));
+zc = g * s + sg * complex(randn(rs, nd, nf), randn(rs, nd, nf));
+hit = rand(rs, nd, nf) < 0.2;
+zb = zc; zb(hit) = zb(hit) + burst(nnz(hit));
+dm = @(z) pskdemod(z(:), 4, pi/4, 'gray', 'OutputType', 'bit');
+iq = ones(Lf.air * p.sps, nf); iqb = iq;                                % antenna 1 with the bursts' energy
+[k, f] = find(hit);
+for i = 1:numel(k)
+    m = Lf.idx_data(k(i)) + d;
+    if m <= Lf.air, iqb((m-1)*p.sps + 1:m*p.sps, f(i)) = sqrt(1000); end
+end
+R0 = struct('mode', 'jsi', 'rev', 'test', 'q', 0.05, 'c', 4.6, 'h', 0, 'erase_sym', true, 'frame', 'b', 'thr', 0.8, ...
+    'flag_clean', 0.02);
+z0 = zeros(1, nf); r0 = dm(zc);
+for fr = {'a', 'b', 'c'}
+    for es = [false true]
+        for h = [0 1]
+            R = R0; R.frame = fr{1}; R.erase_sym = es; R.h = h;
+            verifyEqual(tc, fec_packets(tx, r0, iq, p, nf, false(1, nf), [], jsi_for(zc, p, R, z0)), zeros(1, nf), ...
+                sprintf('clean %s %d %d', fr{1}, es, h));
+        end
+    end
+end
+rb = dm(zb);
+verifyGreaterThan(tc, nnz(rb ~= tx), 0.05 * numel(tx));
+verifyEqual(tc, fec_packets(tx, rb, iq, p, nf, [], [], jsi_for(zb, p, R0, z0)), zeros(1, nf));
+verifyGreaterThan(tc, nnz(fec_packets(tx, rb, iqb, p, nf, [], bit_reliability(zb, p)) > 0), nf / 2);
+J = jsi_for(zc, p, R0, z0);
+verifyEqual(tc, fec_packets(tx, r0, iqb, p, nf, [], [], J), zeros(1, nf));
+verifyLessThan(tc, mean(J.res_h > R0.c * jsi_floor(J.res, R0.q)), 0.03);
+verifyGreaterThan(tc, nnz(fec_packets(tx, r0, iqb, p, nf, [], bit_reliability(zc, p)) > 0), nf / 2);
+zr = zc; zr(:, 7) = -zc(:, 7);                                         % frame 7: confident and wrong
+pe = z0; pe(7) = 2; er7 = false(1, nf); er7(7) = true;
+R = R0; R.frame = 'b';
+verifyGreaterThan(tc, max(fec_packets(tx, dm(zr), iq, p, nf, er7, [], jsi_for(zr, p, R, pe))), 0);
+R.frame = 'a';
+verifyEqual(tc, fec_packets(tx, dm(zr), iq, p, nf, er7, [], jsi_for(zr, p, R, pe)), zeros(1, nf));
+R.frame = 'c';
+verifyEqual(tc, fec_packets(tx, dm(zr), iq, p, nf, [], [], jsi_for(zr, p, R, pe)), zeros(1, nf));
+hq = rand(rs, nd, 1) < 0.3;
+zw = zr; zw(hq, 7) = zw(hq, 7) + burst(nnz(hq));                        % and 30% of it jammed
+verifyGreaterThan(tc, max(fec_packets(tx, dm(zw), iq, p, nf, [], [], jsi_for(zw, p, R, pe))), 0);
+R.frame = 'a';
+verifyEqual(tc, fec_packets(tx, dm(zw), iq, p, nf, er7, [], jsi_for(zw, p, R, pe)), zeros(1, nf));
+T = struct('tx_al', tx, 'rx_al', rb, 'iq', iqb, 'zc', zb, 'delay_bits', 0, 'nf', nf, 'erase', er7, 'pilot_err', pe);
+q = p; q.fec = true;
+[b1, f1, c1] = closed_loop_truth(T, q);
+[b2, f2, c2] = fec_packets(tx, rb, iqb, q, nf, er7, bit_reliability(zb, q));
+verifyTrue(tc, isequaln({b1, f1, c1}, {b2, f2, c2}));
+qj = q; qj.fec_rx = R0; qj.fec_rx.frame = 'a';
+[b5, f5, c5] = closed_loop_truth(T, qj);
+[b6, f6, c6] = fec_packets(tx, rb, iqb, qj, nf, er7, [], jsi_for(zb, qj, qj.fec_rx, pe));
+verifyTrue(tc, isequaln({b5, f5, c5}, {b6, f6, c6}));
+dp = parent_copy(tc, 'code/link/fec_packets.m', '8b396e6');
+addpath(dp, '-begin'); clear fec_packets
+cl0 = onCleanup(@() fixture_off(dp, 'fec_packets')); %#ok<NASGU>
+verifyEqual(tc, which('fec_packets'), fullfile(dp, 'fec_packets.m'));
+[b3, f3, c3] = fec_packets(tx, rb, iqb, q, nf, er7, bit_reliability(zb, q));
+b4 = fec_packets(tx, r0, iqb, q, nf);
+fixture_off(dp, 'fec_packets');
+verifyTrue(tc, isequaln({b1, f1, c1}, {b3, f3, c3}));
+verifyTrue(tc, isequaln(b4, fec_packets(tx, r0, iqb, q, nf)));
+end
+
+function test_jsi_tails(tc)
+% No widening (fec_packets.m JSI): a J4 burst's RRC tails at the matched filter output (shares
+% of its in-band energy at offsets 0 to 4: 0.847, 0.068, 0.0073, 0.0013, 0.0002; roll-off 0.25,
+% span 10) raise its neighbours' residuals by their own leak, so each neighbour is flagged as
+% often as its variance over the floor says, e^(-c floor / variance): at 4 dB the next symbol
+% now and then, at 30 dB the third one as well. Thermal variance 1, Es/N0 12 dB.
+rs = RandStream('mt19937ar', 'Seed', 9); n = 40000; c = 4.6; lk = [0.847 0.068 0.0073 0.0013 0.0002];
+for L = [4 16 30]
+    Jb = 10^(L / 10) * 10^(12 / 10);                      % a burst over the thermal variance
+    b = rand(rs, n + 8, 1) < 0.2;
+    v = 1 + Jb * conv(double(b), [lk(end:-1:2) lk]', 'valid');
+    r = -log(rand(rs, n, 1)) .* v;
+    s0 = jsi_floor(r, 0.05);
+    bc = b(5:end-4);                                     % the bursts aligned with r
+    iso = find(bc & movsum(double(bc), 9) == 1);         % no other burst within 4 symbols
+    iso = iso(iso > 4 & iso <= n - 4);
+    verifyGreaterThan(tc, numel(iso), 500);
+    for m = 1:3
+        got = mean(r(iso + m) > c * s0);
+        want = mean(exp(-c * s0 ./ v(iso + m)));
+        verifyEqual(tc, got, want, 'AbsTol', 0.06, sprintf('%d dB, offset %d', L, m));
+    end
+    if L == 30, verifyGreaterThan(tc, mean(r(iso + 3) > c * s0), 0.3); end
+    if L == 4, verifyLessThan(tc, mean(r(iso + 2) > c * s0), 0.05); end
+end
+end
+
+function J = jsi_for(z, p, R, pe)
+% JSI inputs of a run without delay (closed_loop_truth.m aligns them by delay_bits).
+J = jsi_inputs(z, p, R.h); J.rx = R; J.pe = pe;
+end
+
+function write_text(f, t)
+fid = fopen(f, 'w'); fprintf(fid, '%s', t); fclose(fid);
 end
 
 function test_sync_frequency_sign(tc)

@@ -70,6 +70,7 @@ for t = 1:numel(threat_cfg)
 end
 
 p0 = p_ref;
+p0 = fec_rx_on(p0, fec_rx_config());       % the profile's decoder of the coded link (profile.json)
 p0.int_aoa_random = false; p0.k_random = false; p0.quiet_build = true;
 p0.yaw_random = false;                  % the mapped geometries stay fixed through the run
 p0.corr_random = false;

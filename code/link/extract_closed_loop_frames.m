@@ -186,7 +186,7 @@ if isfield(p, 'erase_pilot_mse'), F.erase = F.pilot_err > p.erase_pilot_mse; end
 
 % Ground truth and CRC: the only part that reads p.fec (closed_loop_truth.m)
 T = struct('tx_al', tx_al, 'rx_al', rx_al, 'iq', reshape(iqa(:, 1, :), ns, nf), 'zc', zc, ...
-    'delay_bits', delay_bits, 'nf', nf, 'erase', F.erase);
+    'delay_bits', delay_bits, 'nf', nf, 'erase', F.erase, 'pilot_err', F.pilot_err);
 [F.ber, F.fer, F.crc_fail] = closed_loop_truth(T, p);
 
 % Decision-directed link quality, channel-estimator spatial measurements

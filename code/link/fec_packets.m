@@ -1,6 +1,6 @@
-function [ber, fer, crcf, map] = fec_packets(tx_al, rx_al, iq, p, nf, ers, rel)
+function [ber, fer, crcf, map] = fec_packets(tx_al, rx_al, iq, p, nf, ers, rel, J)
 %FEC_PACKETS  Decoded result of every frame of a run with fec_interleave.
-%   [ber, fer, crcf, map] = fec_packets(tx_al, rx_al, iq, p, nf, ers, rel)
+%   [ber, fer, crcf, map] = fec_packets(tx_al, rx_al, iq, p, nf, ers, rel, J)
 %   tx_al, rx_al  transmitted and received channel bits, aligned per frame
 %   iq            received samples of one antenna, samples x frames
 %   ers           frames the receiver flags unreliable (1 x nf, logical; default none):
@@ -29,9 +29,22 @@ function [ber, fer, crcf, map] = fec_packets(tx_al, rx_al, iq, p, nf, ers, rel)
 %   number is odd, is NaN.
 %   map  channel bit of the run (index into tx_al) that carries every coded bit of every
 %        packet, coded bits in channel order x packets
+%   J    the JSI decoder instead of the D78 rules above (optional): jsi_inputs.m's num, res
+%        and res_h aligned with rx_al, pe the frames' pilot error (1 x nf) and rx the
+%        decoder (fec_rx_config.m). Per codeword the floor is the quiet symbols' variance
+%        from the residuals of its frames' data symbols (jsi_floor.m); every
+%        symbol's variance is max(floor, res_h), its bits enter with num over it (Baldi et
+%        al. 2013, Sec. V), flagged when it exceeds c x the floor (a symbol more than about
+%        3 standard deviations from the constellation is jammed, Ercan et al. 2023) and then
+%        erased with rx.erase_sym. No energy test on antenna 1's samples: the combiner
+%        output is after sync and any MMSE null. Whole frames: rx.frame 'a' the flags ers,
+%        'b' none, 'c' pilot error > rx.thr in a frame whose flagged share is below
+%        3 x rx.flag_clean (a frame without bursts, where the pilot error measures the
+%        estimate). iq and rel are not read.
 ber = nan(1, nf); fer = nan(1, nf); crcf = nan(1, nf); map = zeros(0, 0);
 if nargin < 6 || isempty(ers), ers = false(1, nf); end
 if nargin < 7 || isempty(rel), rel = ones(size(rx_al(:))); end
+jsi = nargin >= 8 && ~isempty(J);
 rel = rel(:);
 ers = logical(ers(:)');
 bpf = p.frame_length;
@@ -41,17 +54,22 @@ np = floor(nf / 2);                                  % packets: one per frame pa
 if np < Q / 2, return; end
 e = double(tx_al(:) ~= rx_al(:));
 
-sps = p.sps;
-x = iq(:);
-nsym = floor(numel(x) / sps);
-Es = mean(reshape(abs(x(1:nsym*sps)).^2, sps, nsym), 1);
-tm = 0; if isfield(p, 'timing_max_sym'), tm = ceil(p.timing_max_sym); end
 d = p.filter_span / 2;                               % Tx filter delay in symbols
 Lf = frame_layout(p);
-E = nan(Lf.air, nf);                                 % symbol energies of every frame
-for f = 1:nf
-    k = (f-1) * Lf.air + (1:Lf.air);
-    E(k <= nsym, f) = Es(k(k <= nsym));
+if ~jsi
+    sps = p.sps;
+    x = iq(:);
+    nsym = floor(numel(x) / sps);
+    Es = mean(reshape(abs(x(1:nsym*sps)).^2, sps, nsym), 1);
+    tm = 0; if isfield(p, 'timing_max_sym'), tm = ceil(p.timing_max_sym); end
+    E = nan(Lf.air, nf);                             % symbol energies of every frame
+    for f = 1:nf
+        k = (f-1) * Lf.air + (1:Lf.air);
+        E(k <= nsym, f) = Es(k(k <= nsym));
+    end
+else
+    R = J.rx; nj = numel(J.res);
+    pe = nan(1, nf); if isfield(J, 'pe') && ~isempty(J.pe), pe = J.pe(:)'; end
 end
 
 trellis = poly2trellis(7, [171 133]);
@@ -77,11 +95,29 @@ for k = 1:np
     map(:, k) = gi;
     if max(gi) > numel(e), continue; end
     ek = e(gi);
-    Ek = E(:, fr);
-    hot = movmax(double(Ek > 4 * median(Ek(:), 'omitnan')), [3 3 + tm], 1) > 0;   % tolerate filter delay and arrival time
-    er = ers(fr(o))';
-    er(in) = er(in) | hot(sub2ind(size(hot), sym(in), o(in)));
-    soft = (1 - 2*double(xor(tx, ek))) .* rel(gi) .* ~er;
+    if jsi
+        if max(gi) > nj, continue; end
+        ib = (fr - 1) * bpf + (1:bpf)';                  % every bit of the codeword's frames, a column per frame
+        ok = ib <= nj; ib(~ok) = 1;
+        s0 = jsi_floor(J.res(ib(ok)), R.q);
+        sig = max(s0, J.res_h(gi));
+        hit = J.res_h(ib) > R.c * s0 & ok;
+        switch R.frame
+            case 'a', ef = ers(fr);
+            case 'b', ef = false(1, Q);
+            case 'c', ef = pe(fr) > R.thr & sum(hit, 1) ./ max(sum(ok, 1), 1) < 3 * R.flag_clean;
+        end
+        ef = ef(:);
+        er = ef(o);
+        if R.erase_sym, er = er | sig > R.c * s0; end
+        soft = (1 - 2*double(xor(tx, ek))) .* (J.num(gi) ./ sig) .* ~er;
+    else
+        Ek = E(:, fr);
+        hot = movmax(double(Ek > 4 * median(Ek(:), 'omitnan')), [3 3 + tm], 1) > 0;   % tolerate filter delay and arrival time
+        er = ers(fr(o))';
+        er(in) = er(in) | hot(sub2ind(size(hot), sym(in), o(in)));
+        soft = (1 - 2*double(xor(tx, ek))) .* rel(gi) .* ~er;
+    end
     sc = zeros(numel(c), 1);
     sc(keep(perm)) = soft;
     dec = vitdec(sc, trellis, 35, 'term', 'unquant');
