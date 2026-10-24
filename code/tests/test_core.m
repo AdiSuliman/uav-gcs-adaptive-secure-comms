@@ -5029,6 +5029,50 @@ verifyEqual(tc, load('data/clean_test_pools.mat').CT.det_id, 'other');          
 verifyNumElements(tc, dir('data/clean_val_pools_before_rekey_*.mat'), 1);
 end
 
+function test_result_status(tc)
+% A latency, an evaluation or an edge map of another detector or deployed policy, or older
+% than its inputs, is STALE; the policy stamp follows the deployed policy, its
+% monitors and weights; the KPIs read the deployed chain's latency, PENDING without one.
+d = fullfile(tc.TestData.tmp, 'status'); mkdir(fullfile(d, 'data')); mkdir(fullfile(d, 'results'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+ood = struct('score', 'last', 'win', 3); classes = {'none'}; trained_at = 7; %#ok<NASGU>
+save('data/trained_detector.mat', 'ood', 'classes', 'trained_at');
+T = struct('retain', 0.95, 'maha', -2, 'maha_val', [-3; -1], 'win', 3, 'score', 'last'); save('data/ood_thresholds.mat', 'T');
+FM = struct('mu', zeros(1, 3)); N = 4; q_thr = 4; save('data/fusion.mat', 'FM', 'N', 'q_thr');
+id = detector_id(trained_at, ood, fusion_model());
+agent = struct('dense', struct('W', {{1, 2}}, 'b', {{0, 0}})); confirm = [4 5]; alarm_mode = 'class_drop'; drop_db = 5;
+deployed = 'dqn_esc'; rule_sel = struct('alarm_mode', 'class_drop', 'confirm', [5 5], 'drop_db', 6); det_id = id;
+maha_thr = T.maha;
+save('data/trained_dqn.mat', 'agent', 'confirm', 'alarm_mode', 'drop_db', 'deployed', 'rule_sel', 'det_id', 'maha_thr');
+Q = load('data/trained_dqn.mat'); st = policy_stamp(Q);
+Q2 = Q; Q2.deployed = 'rule_sel'; Q3 = Q; Q3.rule_sel.drop_db = 7; Q4 = Q; Q4.agent.dense.W{1} = 3; Q5 = Q; Q5.maha_thr = -3;
+verifyEqual(tc, numel(unique({st, policy_stamp(Q2), policy_stamp(Q3), policy_stamp(Q4), policy_stamp(Q5)})), 5);
+pause(1.1);
+LAT = struct('det_id', id, 'policy_stamp', st); save('results/latency.mat', 'LAT');
+KP = struct('policy_stamp', st); save('results/policy_evaluation.mat', 'KP');
+pause(1.1);
+EM = struct('det_id', id, 'policy_stamp', 'zzz'); save('results/edge_map.mat', 'EM');
+S = result_status();
+verifyFalse(tc, status_of(S, 'results/latency.mat').stale);
+verifyFalse(tc, status_of(S, 'results/policy_evaluation.mat').stale);
+verifyTrue(tc, status_of(S, 'results/edge_map.mat').stale);
+LAT.det_id = 'other'; save('results/latency.mat', 'LAT');
+verifyTrue(tc, status_of(result_status(), 'results/latency.mat').stale);
+LAT = rmfield(LAT, 'det_id'); save('results/latency.mat', 'LAT');
+verifyTrue(tc, status_of(result_status(), 'results/latency.mat').stale);
+verifyFalse(tc, status_of(result_status(), 'results/phy_validation.txt').present);
+src = fileread(which('measure_all_kpis'));
+verifyNotEmpty(tc, strfind(src, 'st7 = ''PENDING'''));
+verifyNotEmpty(tc, strfind(src, 'Lt.total_dep_median_ms < 10 && Lt.total_dep_p95_ms < 20'));
+src = fileread(which('measure_latency'));
+verifyNotEmpty(tc, strfind(src, '[kindP, agP, optP] = policy_setup(dep, Q, sel, [], [], [], na);'));
+end
+
+function e = status_of(S, f)
+% The entry of result_status.m for file f.
+e = S(strcmp({S.file}, f));
+end
+
 function test_clean_ref_rebuild(tc)
 % The decision layer's clean reference comes from the clean validation pools alone: the
 % frame mean of every field over all their flights, a flight-bootstrap interval around it,
@@ -5182,50 +5226,6 @@ clean_ref = struct('ebno', E, 'ber', base, 'fer', min(1, 20 * base), 'ber_est', 
     'plr', double(base > 1e-3), 'plr_fec', zeros(1, 4));
 PP = struct('pools', {{[]}}, 'ebno', E, 'actions', {A}, 'clean', base, 'clean_fer', min(1, 20 * base), ...
     'det_id', 'a', 'model_tag', 'm', 'F_SUB', 2, 'created', 'x');
-end
-
-function test_result_status(tc)
-% A latency, an evaluation or an edge map of another detector or deployed policy, or older
-% than its inputs, is STALE; the policy stamp follows the deployed policy, its
-% monitors and weights; the KPIs read the deployed chain's latency, PENDING without one.
-d = fullfile(tc.TestData.tmp, 'status'); mkdir(fullfile(d, 'data')); mkdir(fullfile(d, 'results'));
-c0 = cd(d); back = onCleanup(@() cd(c0));
-ood = struct('score', 'last', 'win', 3); classes = {'none'}; trained_at = 7; %#ok<NASGU>
-save('data/trained_detector.mat', 'ood', 'classes', 'trained_at');
-T = struct('retain', 0.95, 'maha', -2, 'maha_val', [-3; -1], 'win', 3, 'score', 'last'); save('data/ood_thresholds.mat', 'T');
-FM = struct('mu', zeros(1, 3)); N = 4; q_thr = 4; save('data/fusion.mat', 'FM', 'N', 'q_thr');
-id = detector_id(trained_at, ood, fusion_model());
-agent = struct('dense', struct('W', {{1, 2}}, 'b', {{0, 0}})); confirm = [4 5]; alarm_mode = 'class_drop'; drop_db = 5;
-deployed = 'dqn_esc'; rule_sel = struct('alarm_mode', 'class_drop', 'confirm', [5 5], 'drop_db', 6); det_id = id;
-maha_thr = T.maha;
-save('data/trained_dqn.mat', 'agent', 'confirm', 'alarm_mode', 'drop_db', 'deployed', 'rule_sel', 'det_id', 'maha_thr');
-Q = load('data/trained_dqn.mat'); st = policy_stamp(Q);
-Q2 = Q; Q2.deployed = 'rule_sel'; Q3 = Q; Q3.rule_sel.drop_db = 7; Q4 = Q; Q4.agent.dense.W{1} = 3; Q5 = Q; Q5.maha_thr = -3;
-verifyEqual(tc, numel(unique({st, policy_stamp(Q2), policy_stamp(Q3), policy_stamp(Q4), policy_stamp(Q5)})), 5);
-pause(1.1);
-LAT = struct('det_id', id, 'policy_stamp', st); save('results/latency.mat', 'LAT');
-KP = struct('policy_stamp', st); save('results/policy_evaluation.mat', 'KP');
-pause(1.1);
-EM = struct('det_id', id, 'policy_stamp', 'zzz'); save('results/edge_map.mat', 'EM');
-S = result_status();
-verifyFalse(tc, status_of(S, 'results/latency.mat').stale);
-verifyFalse(tc, status_of(S, 'results/policy_evaluation.mat').stale);
-verifyTrue(tc, status_of(S, 'results/edge_map.mat').stale);
-LAT.det_id = 'other'; save('results/latency.mat', 'LAT');
-verifyTrue(tc, status_of(result_status(), 'results/latency.mat').stale);
-LAT = rmfield(LAT, 'det_id'); save('results/latency.mat', 'LAT');
-verifyTrue(tc, status_of(result_status(), 'results/latency.mat').stale);
-verifyFalse(tc, status_of(result_status(), 'results/phy_validation.txt').present);
-src = fileread(which('measure_all_kpis'));
-verifyNotEmpty(tc, strfind(src, 'st7 = ''PENDING'''));
-verifyNotEmpty(tc, strfind(src, 'Lt.total_dep_median_ms < 10 && Lt.total_dep_p95_ms < 20'));
-src = fileread(which('measure_latency'));
-verifyNotEmpty(tc, strfind(src, '[kindP, agP, optP] = policy_setup(dep, Q, sel, [], [], [], na);'));
-end
-
-function e = status_of(S, f)
-% The entry of result_status.m for file f.
-e = S(strcmp({S.file}, f));
 end
 
 function test_overhead_monitor_drop(tc)
