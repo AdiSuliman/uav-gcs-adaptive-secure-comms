@@ -286,6 +286,7 @@ if RUN.build_clean_test_pools
     CLEAN_SET = 'val';  build_clean_test_pools;
     CLEAN_SET = 'test'; build_clean_test_pools;
     build_check_pools;
+    clean_ref_rebuild('chain');
 end
 if RUN.choose_drop_threshold
     fprintf('  [C1d] Choosing the Eb/N0-drop threshold of the path_loss alarm (train pools)...\n');

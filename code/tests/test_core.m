@@ -5029,6 +5029,161 @@ verifyEqual(tc, load('data/clean_test_pools.mat').CT.det_id, 'other');          
 verifyNumElements(tc, dir('data/clean_val_pools_before_rekey_*.mat'), 1);
 end
 
+function test_clean_ref_rebuild(tc)
+% The decision layer's clean reference comes from the clean validation pools alone: the
+% frame mean of every field over all their flights, a flight-bootstrap interval around it,
+% and the table it replaced kept beside it. 'check' writes nothing. 'write' backs up the
+% pools, changes only clean_ref, PP.clean and PP.clean_fer, keeps the pools older than the
+% files built from them, and clean_ber_ref reads the new table at once. A second write
+% changes nothing. The verdict follows the pre-registered range. Test, check or other-block
+% pools and another detector are refused, the pools unchanged.
+d = fullfile(tc.TestData.tmp, 'cleanref'); mkdir(fullfile(d, 'data'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+[PP, clean_ref, CT, ex] = cleanref_fixture();
+save('data/policy_pools.mat', 'PP', 'clean_ref', '-v7.3');
+save('data/clean_val_pools.mat', 'CT', '-v7.3');
+CK = struct('det_id', 'a'); save('data/check_pools.mat', 'CK', '-v7.3');
+fp = @(f) fullfile(pwd, f);
+getmt = @(f) double(java.io.File(fp(f)).lastModified());
+t0 = getmt('data/clean_val_pools.mat');
+java.io.File(fp('data/policy_pools.mat')).setLastModified(t0 - 3600e3);     % C1p, then C1c an hour later
+java.io.File(fp('data/clean_val_pools.mat')).setLastModified(t0 - 60e3);
+java.io.File(fp('data/check_pools.mat')).setLastModified(t0 - 60e3);
+t_pp = getmt('data/policy_pools.mat'); by = dir('data/policy_pools.mat').bytes;
+opt = struct('expect', struct('ebno', 9, 'range', [1e-3 1e-1]), 'B', 500);
+K = {'ber', 'fer', 'ber_est', 'plr', 'plr_fec'};
+% check: the table and its intervals, nothing written
+[~, R] = evalc('clean_ref_rebuild(''check'', opt)');
+for k = K
+    verifyEqual(tc, R.ref.(k{1}), ex.(k{1}), 'RelTol', 1e-12, k{1});
+    c = R.ref.ci.(k{1});
+    verifyTrue(tc, all(c(1, :) <= R.ref.(k{1}) & R.ref.(k{1}) <= c(2, :)), k{1});
+end
+verifyEqual(tc, R.ref.n_flights, 300 * ones(1, 4));
+verifyGreaterThan(tc, R.ref.ci.ber(2, 4), 1.5 * R.ref.ci.ber(1, 4));       % the heavy flights spread the interval
+verifyTrue(tc, all(isfinite(R.ref.jackknife.ber)));
+verifyEqual(tc, R.verdict, 'confirmed');                                    % 1e-5 replaced, the interval far above it
+verifyEqual(tc, R.train, clean_ref);
+verifyFalse(tc, R.wrote);
+verifyEqual(tc, [getmt('data/policy_pools.mat'), dir('data/policy_pools.mat').bytes], [t_pp, by]);
+verifyEmpty(tc, dir('data/policy_pools_before_cleanref_*.mat'));
+% the replaced value inside the new interval: contradicted
+mkdir('alt'); C2 = clean_ref; C2.ber(4) = ex.ber(4); S = struct('PP', PP, 'clean_ref', C2);
+save('alt/policy_pools.mat', '-struct', 'S', '-v7.3');
+o2 = opt; o2.pp = 'alt/policy_pools.mat';
+[~, R2] = evalc('clean_ref_rebuild(''check'', o2)');
+verifyEqual(tc, R2.verdict, 'contradicted');
+% outside the pre-registered range: stop, nothing written
+o3 = opt; o3.expect.range = [1e-6 1e-5];
+verifyError(tc, @() cleanref_quiet(@() clean_ref_rebuild('write', o3)), 'clean_ref_rebuild:verdict');
+verifyEqual(tc, [getmt('data/policy_pools.mat'), dir('data/policy_pools.mat').bytes], [t_pp, by]);
+verifyEmpty(tc, dir('data/policy_pools_before_cleanref_*.mat'));
+% refused sources and another detector, the pools unchanged
+bad = {setfield(CT, 'set', 'test'), setfield(CT, 'runs', 1500 + (1:300))}; %#ok<SFLD>
+for i = 1:numel(bad)
+    S = struct('CT', bad{i}); save('data/clean_val_pools.mat', '-struct', 'S', '-v7.3');
+    verifyError(tc, @() clean_ref_rebuild('check', opt), 'clean_ref_rebuild:source');
+end
+save('data/clean_val_pools.mat', 'CK', '-v7.3');
+verifyError(tc, @() clean_ref_rebuild('check', opt), 'clean_ref_rebuild:source');
+save('data/clean_test_pools.mat', 'CT', '-v7.3');
+o4 = opt; o4.val = 'data/clean_test_pools.mat';
+verifyError(tc, @() clean_ref_rebuild('check', o4), 'clean_ref_rebuild:source');
+S = struct('CT', setfield(CT, 'det_id', 'b')); save('data/clean_val_pools.mat', '-struct', 'S', '-v7.3'); %#ok<SFLD>
+verifyError(tc, @() cleanref_quiet(@() clean_ref_rebuild('write', opt)), 'check_det_id:mismatch');
+verifyEqual(tc, [getmt('data/policy_pools.mat'), dir('data/policy_pools.mat').bytes], [t_pp, by]);
+save('data/clean_val_pools.mat', 'CT', '-v7.3');
+java.io.File(fp('data/clean_val_pools.mat')).setLastModified(t0 - 60e3);
+java.io.File(fp('data/clean_test_pools.mat')).setLastModified(t0 - 60e3);
+% write
+[~, R] = evalc('clean_ref_rebuild(''write'', opt)');
+verifyTrue(tc, R.wrote);
+b = dir('data/policy_pools_before_cleanref_*.mat');
+verifyNumElements(tc, b, 1);
+B0 = load(fullfile('data', b(1).name));
+verifyEqual(tc, B0.PP, PP); verifyEqual(tc, B0.clean_ref, clean_ref);
+L = load('data/policy_pools.mat');
+verifyEqual(tc, sort(fieldnames(L.PP)), sort(fieldnames(PP)));             % no new field (rekey_pools.m KNOWN)
+verifyEqual(tc, rmfield(L.PP, {'clean', 'clean_fer'}), rmfield(PP, {'clean', 'clean_fer'}));
+verifyEqual(tc, L.PP.clean, ex.ber, 'RelTol', 1e-12);
+verifyEqual(tc, L.PP.clean_fer, ex.fer, 'RelTol', 1e-12);
+for k = K, verifyEqual(tc, L.clean_ref.(k{1}), ex.(k{1}), 'RelTol', 1e-12, k{1}); end
+verifyEqual(tc, L.clean_ref.ebno, clean_ref.ebno);
+verifyEqual(tc, L.clean_ref.train, clean_ref);
+verifyEqual(tc, L.clean_ref.source.set, 'val');
+verifyFalse(tc, isfile('data/policy_pools.tmp.mat'));
+t1 = getmt('data/policy_pools.mat');
+verifyEqual(tc, t1, t_pp + 2000, 'AbsTol', 1000);                            % still older than the C1c files
+verifyLessThan(tc, t1, getmt('data/check_pools.mat'));
+verifyLessThan(tc, t1, getmt('data/clean_val_pools.mat'));
+verifyEqual(tc, clean_ber_ref(9, 'ber_est'), ex.ber_est(4), 'RelTol', 1e-9);   % the monitor reads it at once
+verifyEqual(tc, clean_ber_ref(9, 'plr_fec'), ex.plr_fec(4), 'RelTol', 1e-9);
+verifyTrue(tc, isfile('results/clean_ref.txt'));
+% a second write: already from these pools
+[~, R] = evalc('clean_ref_rebuild(''write'', opt)');
+verifyFalse(tc, R.wrote); verifyTrue(tc, R.already);
+verifyNumElements(tc, dir('data/policy_pools_before_cleanref_*.mat'), 1);
+verifyEqual(tc, getmt('data/policy_pools.mat'), t1);
+% the chain's mode on fresh pools: written without a verdict and without a backup
+S = struct('PP', PP, 'clean_ref', clean_ref); save('data/policy_pools.mat', '-struct', 'S', '-v7.3');
+java.io.File(fp('data/policy_pools.mat')).setLastModified(t0 - 3600e3);
+[~, R] = evalc('clean_ref_rebuild(''chain'', struct(''expect'', struct(''ebno'', 9, ''range'', [1e-6 1e-5])))');
+verifyTrue(tc, R.wrote); verifyEqual(tc, R.verdict, 'n/a');
+verifyEqual(tc, load('data/policy_pools.mat').PP.clean, ex.ber, 'RelTol', 1e-12);
+verifyNumElements(tc, dir('data/policy_pools_before_cleanref_*.mat'), 1);
+end
+
+function test_clean_ref_in_c1c(tc)
+% C1c ends with the clean reference from its validation pools, so C1d and every later
+% reader see it: run_stage.m and main.m alike.
+rs = fileread(which('run_stage'));
+i0 = strfind(rs, 'elseif strcmp(name, ''build_clean_test_pools'')');
+i1 = strfind(rs, 'elseif strcmp(name, ''select_fusion'')');
+verifyNumElements(tc, i0, 1); verifyNumElements(tc, i1, 1);
+seg = rs(i0:i1);
+verifyNotEmpty(tc, regexp(seg, 'run\(''build_check_pools''\);\r?\n\s*clean_ref_rebuild\(''chain''\);', 'once'));
+verifyNumElements(tc, strfind(rs, 'clean_ref_rebuild('), 1);
+m = fileread(which('main'));
+verifyNotEmpty(tc, regexp(m, 'build_check_pools;\r?\n\s*clean_ref_rebuild\(''chain''\);', 'once'));
+end
+
+function cleanref_quiet(f)
+% Runs f with its printed output dropped.
+evalc('f()');
+end
+
+function [PP, clean_ref, CT, ex] = cleanref_fixture()
+% Clean validation pools of 300 flights x 2 frames at four Eb/N0, six heavy flights at
+% 9 dB (two in each geometry family), the frame means they hold (ex) and the pools'
+% 8-flight table they replace.
+E = [0 3 6 9]; A = {'no_action', 'fec_interleave'};
+nF = numel(link_features('names')); jl = feature_index('log_ber');
+runs = 400 + (1:300); base = [5e-2 2e-2 5e-3 1e-5];
+CT = struct('pools', {cell(1, 4, 2)}, 'runs', runs, 'ebno', E, 'actions', {A}, 'n_geom', 300, 'set', 'val', ...
+    'det_id', 'a', 'model_tag', 'm', 'created', '24-Oct-2026 06:17:52');
+for s = 1:4
+    r = repelem(runs(:), 2);
+    b = base(s) * (1 + 0.5 * mod(r, 3));
+    if s == 4, b(ismember(r, [410 455 520 590 630 699])) = 0.2; end
+    for a = 1:2
+        f = zeros(numel(r), nF, 'single'); f(:, jl) = single(log10(1.5 * b));
+        crc = double(b > 1e-3);
+        if a == 2, crc(2:2:end) = NaN; crc(1:2:end) = double(b(1:2:end) > 0.1); end
+        CT.pools{1, s, a} = struct('ber', b, 'fer', min(1, 20 * b), 'crc', crc, 'feat', f, 'run', r);
+    end
+end
+ex = struct();
+for s = 1:4
+    Q = CT.pools{1, s, 1}; Qf = CT.pools{1, s, 2};
+    ex.ber(s) = mean(Q.ber); ex.fer(s) = mean(Q.fer); ex.ber_est(s) = mean(10.^double(Q.feat(:, jl)));
+    ex.plr(s) = mean(Q.crc, 'omitnan'); ex.plr_fec(s) = mean(Qf.crc, 'omitnan');
+end
+clean_ref = struct('ebno', E, 'ber', base, 'fer', min(1, 20 * base), 'ber_est', 1.5 * base, ...
+    'plr', double(base > 1e-3), 'plr_fec', zeros(1, 4));
+PP = struct('pools', {{[]}}, 'ebno', E, 'actions', {A}, 'clean', base, 'clean_fer', min(1, 20 * base), ...
+    'det_id', 'a', 'model_tag', 'm', 'F_SUB', 2, 'created', 'x');
+end
+
 function test_result_status(tc)
 % A latency, an evaluation or an edge map of another detector or deployed policy, or older
 % than its inputs, is STALE; the policy stamp follows the deployed policy, its

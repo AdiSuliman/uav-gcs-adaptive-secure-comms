@@ -16,7 +16,8 @@ function run_stage(varargin)
 %   only, read once on the fourth test set after B3r or under docs/core_cnn_no_b3r.txt; by hand, never in the
 %   takeover's chain; docs/core_cnn_protocol.md) |
 %   B4 eval_unseen_snr | OOD eval_ood_detection | B4s eval_unseen_severity | C1p build_policy_pools |
-%   C1c build_clean_test_pools and build_check_pools | C1d choose_drop_threshold | C2 train_dqn |
+%   C1c build_clean_test_pools and build_check_pools, then the decision layer's clean-link
+%   reference from the validation clean pools (clean_ref_rebuild.m) | C1d choose_drop_threshold | C2 train_dqn |
 %   C2e evaluate_policies | C2g experiment_combo_generalization | C2u experiment_unknown_threat |
 %   GAL threat_gallery |
 %   SURV map_survivability_boundary | SURV3 experiment_survivability_options | OHP overhead_pass | GCSA gcs_antenna_analysis |
@@ -66,7 +67,8 @@ end
 
 function run_one(name, SMOKE)
 % Scripts run in this function's workspace; CLEAN_SET selects the clean-pool set of
-% C1c, which then builds the off-grid check pools; FRESH_TEST makes A5, A6 and B1 build the
+% C1c, which then builds the off-grid check pools and takes the clean reference from the
+% validation set; FRESH_TEST makes A5, A6 and B1 build the
 % second test set, with FRESH_SET = 2 the third, with 3 the fourth; DET_TEST makes B3 read the
 % test split beside it, the third test set after B3m builds it, and the fourth in B3r; SMOKE
 % switches the reduced problem on. B2F deploys the fusion revision (FUSION_REV) as measured on
@@ -107,6 +109,7 @@ elseif strcmp(name, 'build_clean_test_pools')
         run(name);
     end
     run('build_check_pools');
+    clean_ref_rebuild('chain');                         % before C1d: every reader of the clean reference sees it
 elseif strcmp(name, 'select_fusion')
     FUSION_REV = true; %#ok<NASGU>
     if ~SMOKE, FUSION_FIT = 'enlarged'; end %#ok<NASGU>

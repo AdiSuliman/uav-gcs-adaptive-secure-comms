@@ -68,7 +68,8 @@ function varargout = link_env(cmd, varargin)
 %            log-linear from the threshold down to 0 at the
 %            unmitigated BER (at least 10x the threshold); clean = max(clean-link
 %            BER, C.ber_floor), the smallest BER the pools resolve: the clean link's
-%            mean over the train split at the same Eb/N0 (training and KPI 4), or with
+%            mean at the same Eb/N0 (PP.clean: the 300 clean validation flights per
+%            Eb/N0, clean_ref_rebuild.m; training and KPI 4), or with
 %            'flight' the same flight's clean link (the clean cell flies every
 %            geometry; edge_map.m), its packet loss likewise
 %     cost   goodput given up, extra spectrum, transmit power, adaptive combining
@@ -223,7 +224,8 @@ end
 
 function [BC, PC] = clean_reference(PP, K, sp, ref, C)
 % Restoration reference of every (Eb/N0, geometry) of split sp: the clean link's BER,
-% at least C.ber_floor, and its packet loss; 'mean' the train-split mean per Eb/N0,
+% at least C.ber_floor, and its packet loss; 'mean' the table per Eb/N0 (PP.clean,
+% PP.clean_fer: the clean validation flights, clean_ref_rebuild.m),
 % 'flight' the clean cell on the same geometry (the mean where it does not fly it).
 nS = numel(PP.ebno);
 BC = repmat(max(PP.clean(:), C.ber_floor), 1, K.nR(sp)); PC = repmat(PP.clean_fer(:), 1, K.nR(sp));
