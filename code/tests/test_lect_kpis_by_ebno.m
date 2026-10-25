@@ -216,7 +216,7 @@ function test_sha_and_readers_match_tip(tc)
 % files unchanged, and so are the files it copies from.
 f = fullfile(tc.TestData.tmp, 'abc.txt'); fid = fopen(f, 'w'); fwrite(fid, 'abc'); fclose(fid);
 verifyEqual(tc, lect_kpis_by_ebno('sha', f), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
-root = tc.TestData.root; ref = '66ec26734ffcb6d6319650c30141aa22066ed028';
+root = tc.TestData.root; ref = '85484b082598e5d22acd7831e67cb06d1a9d8f35';
 st = system(sprintf('git -C "%s" cat-file -e %s', root, ref));
 assumeEqual(tc, st, 0, 'git or the tip''s commit is not available here');
 for g = {'code/evaluation/lect_kpis.m', 'code/evaluation/per_reduction.m', 'code/evaluation/boot_cluster.m', ...

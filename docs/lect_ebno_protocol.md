@@ -89,7 +89,7 @@ line after seeing results: all lines are always printed, in the order of section
 - `code/evaluation/lect_kpis_by_ebno.m`: the mark, the gate, the readings, the single run.
 - `code/evaluation/core_bw_lect_by_link.m`: the same for CORE_BW (section 7).
 - `code/tests/test_lect_kpis_by_ebno.m`: synthetic, no pools.
-- The readers it calls are profile 1's merged tip's (`TIP` `66ec267`) files unchanged:
+- The readers it calls are profile 1's merged tip's (`TIP` `85484b0`) files unchanged:
   `lect_kpis.m`, `per_reduction.m`, `boot_cluster.m`, `false_change_rate.m`, `per_metrics.m`,
   `three_state_view.m`, `decision_config.m`, `packet_share.m`, `core_bw_rules.m` (the test
   compares them with `TIP`). `TIP3` holds the same blobs of these files.
