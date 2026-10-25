@@ -49,8 +49,8 @@ assert(isfield(F, 'out') && is_abs(F.out) && isfolder(F.out), 'core_bw_lect_by_l
 fk = fullfile(F.out, 'core_bw_low_ebno_mark.txt');
 fo = fullfile(F.out, 'core_bw_lect_by_link.txt'); fm = fullfile(F.out, 'core_bw_lect_by_link.mat');
 assert(~isfile(fo) && ~isfile(fm), 'core_bw_lect_by_link:once', '%s exists: the reading runs once', fo);
-maxNumCompThreads('automatic');
-nthr = maxNumCompThreads;
+try, maxNumCompThreads('automatic'); catch, end   % a -singleCompThread session keeps one thread; the gate decides
+try, nthr = maxNumCompThreads; catch, nthr = 1; end
 ins = {F.pools, F.test, F.recov, F.kpis, F.report, F.params};
 st0 = stamps(ins);
 

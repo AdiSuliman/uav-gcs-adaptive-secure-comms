@@ -118,7 +118,7 @@ line after seeing results: all lines are always printed, in the order of section
 - the copied `far_report` on the full `RU` reproduces `KP.far` and `KP.far_diag`, and its lines
   equal those under the KPI 6 header of the text (the episode length from `KP.far`).
 
-The run sets `maxNumCompThreads('automatic')`, as C2e, and records the count. On a mismatch it
+The run sets `maxNumCompThreads('automatic')`, as C2e, when the session allows it (a `-singleCompThread` session, as the gated wrapper's, keeps one thread), and records the count; the exact gate decides either way. On a mismatch it
 writes `lect_kpis_by_ebno.txt` starting with `GATE FAIL`, lists every mismatch, prints no subset and
 stops. Nothing is adjusted.
 

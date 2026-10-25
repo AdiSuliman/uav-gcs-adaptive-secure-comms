@@ -54,8 +54,8 @@ assert(is_abs(out_dir) && isfolder(out_dir), 'lect_kpis_by_ebno:input', '%s: not
 fk = fullfile(out_dir, 'low_ebno_mark.txt');
 fo = fullfile(out_dir, 'lect_kpis_by_ebno.txt'); fm = fullfile(out_dir, 'lect_kpis_by_ebno.mat');
 assert(~isfile(fo) && ~isfile(fm), 'lect_kpis_by_ebno:once', '%s exists: the reading runs once', fo);
-maxNumCompThreads('automatic');
-nthr = maxNumCompThreads;
+try, maxNumCompThreads('automatic'); catch, end   % a -singleCompThread session keeps one thread; the gate decides
+try, nthr = maxNumCompThreads; catch, nthr = 1; end
 st0 = stamps({pools, eval_mat, eval_txt});
 
 % 1. The mark, from the pools alone
