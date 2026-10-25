@@ -8,7 +8,9 @@ function out = pool_job(stage, S, j)
 %   'clean' build_clean_test_pools.m:  j a chunk of geometries; saves it, out = []
 %   'surv'  map_survivability_boundary.m:       j a job (threat entry, level); out {B, F, S},
 %           configurations x Eb/N0 (x flights under surv_v2, S.NR set)
-%   'surv3' experiment_survivability_options.m: j a job (case, option); out {rec, best}
+%   'surv3' experiment_survivability_options.m: j a job (case, option); out {rec, best}, and
+%           under surv_v2 (S.V2) {rec, best, M}: M the per-geometry metrics (surv3_metrics.m),
+%           the airframe-shadowing combinations on their selected flights (S.geo_sh)
 if isa(S, 'parallel.pool.Constant'), S = S.Value; end
 out = [];
 switch stage
@@ -57,6 +59,13 @@ switch stage
         c = S.cases(S.jobs(j, 1)); v = S.VAR(S.jobs(j, 2));
         p = S.p0; p.n_rx = v.n_rx; p.gcs_aoa_deg = v.gcs; p.link_loss_db = v.loss; p.active_threat = c.threat;
         if ~isempty(c.field), p.(c.field) = c.level; end
+        if isfield(S, 'V2') && S.V2
+            g = S.geo; if contains(c.threat, 'airframe_shadowing'), g = S.geo_sh; end
+            M = surv3_metrics(pool_cell(p, c.threat, S.ACTIONS, S.EBNO, g, [], S.opt), S.ACTIONS, S.N_GEOM);
+            [R, Bc] = surv3_judge(M, S.clean{v.ref}, S.RATIO, S.C.ber_floor, S.ACTIONS);
+            out = {R, Bc, M};
+            return
+        end
         P = pool_cell(p, c.threat, S.ACTIONS, S.EBNO, S.geo, [], S.opt);
         R = false(S.nS, S.N_GEOM); Bc = cell(S.nS, S.N_GEOM);
         for s = 1:S.nS

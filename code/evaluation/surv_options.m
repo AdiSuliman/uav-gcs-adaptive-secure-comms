@@ -7,7 +7,7 @@ function O = surv_options(f)
 %               every level and Eb/N0 (surv_flights.m), noise bursts as two entries
 %               (surv_nb_entries.m), the link-limited, no_action and saturated marks, a
 %               bootstrap interval and a committed verdict per cell (surv_grid.m), two gap
-%               classes (surv_gap_report.m)
+%               classes (surv_gap_report.m); experiment_survivability_options.m runs its section 10
 %   O.NR        flights per cell: 1, or 5 (the clean link's repeats) under surv_v2
 if nargin < 1 || isempty(f), f = 'profile.json'; end
 O = struct('v2', false, 'NR', 1);

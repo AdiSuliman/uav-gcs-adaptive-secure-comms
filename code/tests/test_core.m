@@ -1015,6 +1015,305 @@ verifyEqual(tc, out{2}(odd), repmat({'power_control'}, nnz(odd), 1));
 verifyTrue(tc, all(cellfun(@isempty, out{2}(~odd))));
 end
 
+function test_surv3_v2_job(tc)
+% Under surv_v2 a survivability-options job (pool_job.m 'surv3', S.V2) judges every geometry
+% exactly as without it (the same rec and best on the same frames, surv3_metrics.m and
+% surv3_judge.m), keeps each geometry's BER, packet loss and slack, and from them judges the
+% same job against another clean link (the system's). Odd geometries lose no frame.
+d = fullfile(pwd, 'surv3_v2_stub'); mkdir(d);
+fid = fopen(fullfile(d, 'pool_cell.m'), 'w');
+fprintf(fid, '%s\n', 'function P = pool_cell(~, ~, A, EB, geo, ~, ~)', ...
+    'P = cell(numel(EB), numel(A), 1);', 'for s = 1:numel(EB)', '    for a = 1:numel(A)', ...
+    '        rs = RandStream(''mt19937ar'', ''Seed'', 100 * s + a);', ...
+    '        run = repelem(geo{s}.run, 7); odd = mod(run, 2) == 1;', ...
+    '        b = 0.05 * (1 + rand(rs, size(run))); b(odd) = 1e-3 * (1 + 0.5 * rand(rs, 1, nnz(odd)));', ...
+    '        P{s, a, 1} = struct(''run'', run, ''ber'', b, ''fer'', double(rand(rs, size(run)) < 0.25 & ~odd));', ...
+    '    end', 'end', 'end');
+fclose(fid);
+addpath(d, '-begin'); clear pool_cell
+cl = onCleanup(@() stub_off(d)); %#ok<NASGU>
+N = 6; nS = 3;
+A = {'no_action', 'channel_switch', 'fec_interleave', 'power_control+fec_interleave'};
+geo = repmat({struct('seed', 1:N, 'speed', 50 * ones(1, N), 'run', surv3_run_id(1:N))}, 1, nS);
+own = struct('ber', [2e-3 5e-4 1e-5], 'fer', [0.6 0.1 0]);
+sys = struct('ber', [4e-3 4e-3 4e-3], 'fer', [0.6 0.1 0]);
+S1 = struct('cases', struct('threat', 'jamming', 'field', '', 'level', NaN), ...
+    'VAR', struct('n_rx', 3, 'gcs', 0, 'loss', 0, 'ref', 1), 'jobs', [1 1], 'p0', struct(), 'ACTIONS', {A}, ...
+    'EBNO', [0 6 12], 'geo', {geo}, 'opt', [], 'nS', nS, 'N_GEOM', N, 'clean', {{own, sys}}, ...
+    'C', struct('ber_floor', 1e-4), 'RATIO', 2);
+S2 = S1; S2.V2 = true; S2.geo_sh = [];
+o1 = pool_job('surv3', S1, 1);
+o2 = pool_job('surv3', S2, 1);
+verifyEqual(tc, numel(o1), 2); verifyEqual(tc, numel(o2), 3);
+verifyEqual(tc, o2(1:2), o1);
+odd = mod(1:N, 2) == 1;
+verifyEqual(tc, o1{1}, [odd; false(2, N)]);                 % 1-1.5e-3 within 2x 2e-3, not within 2x 5e-4 or 1e-4
+P = pool_cell(struct(), 'jamming', A, [0 6 12], geo, [], []);
+M = o2{3};
+verifyEqual(tc, size(M.ber), [nS N numel(A)]);
+for s = 1:nS
+    for a = 1:numel(A)
+        Q = P{s, a, 1};
+        for r = 1:N
+            m = Q.run == surv3_run_id(r);
+            verifyEqual(tc, M.ber(s, r, a), mean(Q.ber(m)));
+            verifyEqual(tc, M.fer(s, r, a), mean(Q.fer(m)));
+            verifyEqual(tc, M.slack(s, r, a), packet_share(A{a}, Q.fer(m)));
+        end
+    end
+end
+[Rs, Bs] = surv3_judge(M, sys, 2, 1e-4, A);                 % the system's link: 4e-3 at every Eb/N0
+verifyEqual(tc, Rs, [odd; odd; odd]);
+verifyEqual(tc, Bs(1, odd), o1{2}(1, odd));
+end
+
+function test_surv3_link_limited(tc)
+% The survivability options' report under surv_v2 (surv3_report.m): an Eb/N0 is link-limited
+% (L) for a clean link where 2x its packet loss + 1/20 >= 1, so the packet bound passes 100%;
+% profile 1's clean links (160 frames per Eb/N0) give L at 0-9 dB with two antennas and at
+% 0-3 dB with three. The like-for-like comparison takes the Eb/N0 where neither is L; the n-1
+% column against the system's link is reported beside its own.
+EB = 0:3:15; nS = 6; N = 8;
+VAR = struct('name', {'2 antennas', '3 antennas', 'relay path'}, 'n_rx', {2, 3, 3}, 'gcs', {0, 0, 60}, ...
+    'loss', {0, 0, 3}, 'ref', {1, 2, 2});
+cases = [struct('threat', 'noise_burst+antenna_fault', 'field', '', 'level', NaN), ...
+    struct('threat', 'tone_jamming', 'field', 'tone_jsr_db', 'level', 30)];
+jobs = [kron((1:2)', ones(3, 1)), repmat((1:3)', 2, 1)];
+pat = cell2mat(arrayfun(@(s) (1:N) <= s, (1:nS)', 'UniformOutput', false));   % s of 8 geometries at Eb/N0 s
+rec = repmat({pat}, 1, 6); rec_sys = repmat({false(nS, N)}, 1, 6); rec_sys([2 3 5 6]) = rec([2 3 5 6]);
+clean = {struct('ber', [0.18 0.087 0.037 0.024 3e-3 2e-4], 'fer', [158 150 107 76 31 11] / 160), ...
+    struct('ber', [0.11 0.044 0.018 4.5e-3 2.2e-4 0], 'fer', [157 137 58 43 4 0] / 160)};
+X = struct('cases', {cases}, 'VAR', {VAR}, 'EBNO', {EB}, 'jobs', {jobs}, 'rec', {rec}, 'rec_sys', {rec_sys}, ...
+    'clean', {clean}, 'nCombo', 1, 'N_GEOM', N, 'RUN_FRAMES', 20, 'RATIO', 2, 'RELAY_DEG', 60, 'RELAY_LOSS_DB', 3, ...
+    'floor', 1e-4, 'SH', []);
+[rep, T3, T3s, Lm, okS] = surv3_report(X);
+verifyEqual(tc, Lm, logical([1 1 1 1 0 0; 1 1 0 0 0 0]));
+verifyEqual(tc, okS, logical([0 0 0 0 1 1]));
+verifyEqual(tc, squeeze(T3(1, 1, :))', 100 * (1:nS) / N);
+verifyEqual(tc, squeeze(T3s(1, 1, :))', zeros(1, nS));
+verifyEqual(tc, T3s(:, 2:3, :), T3(:, 2:3, :));
+txt = strjoin(rep, newline);
+verifyNotEmpty(tc, strfind(txt, 'Protocol surv_v2'));
+verifyNotEmpty(tc, strfind(txt, '2 ant/3 ref'));
+verifyNotEmpty(tc, strfind(txt, 'tone_jamming (most severe, 30)'));
+verifyNotEmpty(tc, strfind(txt, 'Like for like, the Eb/N0 where neither clean link is link-limited (12, 15 dB):'));
+verifyNotEmpty(tc, strfind(txt, 'Clean BER, 3 antennas: 1.1e-01 4.4e-02 1.8e-02 4.5e-03 2.2e-04 <1e-4'));
+verifyNotEmpty(tc, strfind(txt, 'Clean packet loss, 2 antennas: 0.988L 0.938L 0.669L 0.475L 0.194 0.069'));
+verifyEmpty(tc, strfind(txt, 'Airframe-shadowing'));
+row = @(db) rep{startsWith(rep, sprintf('  %2g dB  ', db))};
+marks = @(db) cellfun(@(x) x(end) == 'L', strsplit(strtrim(extractAfter(row(db), 'dB')), ' / '));
+verifyEqual(tc, marks(0), true(1, 4));
+verifyEqual(tc, marks(9), [true false false false]);
+verifyEqual(tc, marks(12), false(1, 4));
+end
+
+function test_surv3_levels(tc)
+% Under surv_v2 the survivability options' single threats run at the last level of
+% decision_config.m, each threat's most severe within its sources: 30 dB for the in-band
+% emitters (the in-band cap, Liu et al.) and for the spoofer; profile 1 keeps the 'high' level.
+C = decision_config(); p = base_params();
+verifyEqual(tc, numel(C.sev_names), 5); verifyEqual(tc, C.sev_names{end}, 'very high');
+for t = {'jamming', 'reactive_jamming', 'noise_burst', 'spoofing', 'sweeping_jammer', 'tone_jamming'}
+    L = C.sev.(t{1}).levels;
+    verifyEqual(tc, L(end), max(L), t{1});
+    verifyEqual(tc, L(end), p.inband_cap_db, t{1});
+end
+src = fileread(which('experiment_survivability_options'));
+verifyNotEmpty(tc, strfind(src, 'iHigh = C.nominal + 1;'));
+verifyNotEmpty(tc, strfind(src, 'if SV.v2, iHigh = numel(C.sev_names); end'));
+end
+
+function test_surv3_shadow_flights(tc)
+% The survivability options' airframe-shadowing flights under surv_v2 (surv3_shadow_flights.m)
+% on the real flight draws: the kept candidate is the first of its own seed range whose
+% roll-in, placed just before the first frame, hides an antenna in the run with two and with
+% three antennas (hides_antenna.m); its speed lies at or above the level's speed floor; the
+% run id is the geometry's.
+p = base_params(); p.quiet_build = true; p.int_aoa_random = true; p.gcs_aoa_deg = 0;
+eb = p.EbNo_dB(end); vr = [p.speed_kmh_min p.speed_kmh_max];
+[g, SH] = surv3_shadow_flights(p, eb, 1, vr, [2 3], 20);
+g = g{1};
+verifyEqual(tc, g.seed, surv3_shadow_seed(1, SH.tried));
+verifyEqual(tc, [g.run g.frames g.event], [surv3_run_id(1) 20 1]);
+verifyGreaterThanOrEqual(tc, g.speed, SH.v_kmh(1)); verifyLessThanOrEqual(tc, g.speed, vr(2));
+verifyEqual(tc, SH.v_kmh(1), max(vr(1), shadow_speed_floor(shadow_roll_band(p.shadow_db, p), p)));
+geo = struct('ebno', eb, 'event_frame', 1, 'frames', 20);
+for n = [2 3]
+    q = p; q.n_rx = n; q.active_threat = 'airframe_shadowing';
+    d = flight_draws(g.seed, g.speed / 3.6 * q.carrier_freq / q.c_light, q, geo);
+    verifyTrue(tc, any(d.hidden > 0), sprintf('%d antennas', n));
+    verifyEqual(tc, d.onset_frame, 1);
+    verifyLessThan(tc, d.roll_in(1), 0);                   % the roll-in starts before the first frame
+end
+q = p; q.active_threat = 'airframe_shadowing';
+for j = 1:min(SH.tried - 1, 20)                             % the candidates before it fail for some antenna count
+    [sd, v] = surv3_shadow_seed(1, j, SH.v_kmh);
+    h = false(1, 2);
+    for n = [2 3]
+        q.n_rx = n; h(n - 1) = hides_antenna(sd, v, q, geo);
+    end
+    verifyFalse(tc, all(h), sprintf('candidate %d', j));
+end
+end
+
+function test_surv3_profile1_identity(tc)
+% The whole survivability-options script (experiment_survivability_options.m, smoke) on a
+% stand-in pool_cell.m and hides_antenna.m, once without profile.json (profile 1) and once
+% with "surv_v2": true. Profile 1: the geometries of seed block 13, the 'high' level, each
+% receiver against its own clean link, the saved variables and the text as before. surv_v2:
+% the shadowing combination on its selected flights (rolling in before frame 1), the single
+% threat at the most severe level, the system's reference beside the own, the L marks, the
+% per-geometry values saved; outside the smoke it refuses to start without fec_rx.
+d = surv3_stub_dir(); cl = onCleanup(@() surv3_stub_off(d)); %#ok<NASGU>
+global SURV3_STUB_LOG SURV3_HIDE_LOG %#ok<GVMIS>
+here = pwd; back = onCleanup(@() cd(here)); %#ok<NASGU>
+w1 = fullfile(here, 'surv3_p1'); mkdir(w1); cd(w1); mkdir('results'); mkdir('data');
+SURV3_STUB_LOG = {}; SURV3_HIDE_LOG = {};
+evalc('surv3_script_run(true)');
+F = load(fullfile('data', 'survivability_options.mat'));
+nS = numel(F.EBNO); A = policy_actions();
+verifyEqual(tc, sort(fieldnames(F)), sort({'cases'; 'VAR'; 'EBNO'; 'rec'; 'best'; 'jobs'; 'clean'; 'T3'; 'N_GEOM'; ...
+    'RELAY_DEG'; 'RELAY_LOSS_DB'}));
+verifyEqual(tc, {F.cases.threat}, {'jamming+path_loss', 'tone_jamming'});
+verifyEqual(tc, F.cases(2).level, 23);
+verifyEqual(tc, {F.VAR.name}, {'2 antennas', '3 antennas', 'relay path'});
+L = [SURV3_STUB_LOG{:}];
+verifyEqual(tc, numel(L), (2 + 2 * 3) * nS);
+for x = L
+    verifyEqual(tc, x.seed, arrayfun(@(r) pool_seed(1, x.s, 13, r), 1:2));
+    verifyEqual(tc, x.run, surv3_run_id(1:2));
+    verifyEmpty(tc, x.frames); verifyEmpty(tc, x.event);
+end
+verifyEqual(tc, sort([L(strcmp({L.threat}, 'none')).n_rx]), sort(repmat([2 3], 1, nS)));
+verifyEqual(tc, unique([L(strcmp({L.threat}, 'tone_jamming')).tone]), 23);
+verifyEqual(tc, sort([L(~strcmp({L.threat}, 'none')).gcs]), sort(repmat([0 0 60], 1, 2 * nS)));
+verifyEmpty(tc, SURV3_HIDE_LOG);
+verifyEqual(tc, fieldnames(F.clean{1}), {'ber'; 'fer'});
+verifyEqual(tc, F.clean{1}.ber, [4e-3 * ones(1, nS - 1), 0], 'AbsTol', 1e-15);
+verifyEqual(tc, F.clean{2}.fer, [1, zeros(1, nS - 1)]);
+for j = 1:numel(F.rec)
+    verifyEqual(tc, F.rec{j}, repmat([true false], nS, 1));
+    verifyEqual(tc, F.best{j}(:, 1), repmat(A(2), nS, 1));
+end
+verifyEqual(tc, F.T3, 50 * ones(2, 3, nS));
+txt = fileread(fullfile('results', 'survivability_options.txt'));
+verifyNotEmpty(tc, strfind(txt, 'tone_jamming (high, 23)'));
+verifyNotEmpty(tc, strfind(txt, 'Clean BER, 2 antennas: 4.0e-03 '));
+verifyNotEmpty(tc, strfind(txt, '0.0e+00'));
+verifyEmpty(tc, strfind(txt, 'surv_v2')); verifyEmpty(tc, strfind(txt, 'link-limited')); verifyEmpty(tc, strfind(txt, '<1e-4'));
+cd(here);
+w2 = fullfile(here, 'surv3_v2'); mkdir(w2); cd(w2); mkdir('results'); mkdir('data');
+write_text('profile.json', '{"surv_v2":true}');
+SURV3_STUB_LOG = {}; SURV3_HIDE_LOG = {};
+evalc('surv3_script_run(true)');
+F = load(fullfile('data', 'survivability_options.mat'));
+for f = {'rec_sys', 'best_sys', 'met', 'T3s', 'Lm', 'okS', 'clean_sh', 'geo', 'geo_sh', 'SH', 'SV', 'iHigh', 'RUN_FRAMES', ...
+        'RATIO', 'ACTIONS'}
+    verifyTrue(tc, isfield(F, f{1}), f{1});
+end
+verifyTrue(tc, F.SV.v2); verifyEqual(tc, F.iHigh, 5);
+verifyEqual(tc, {F.cases.threat}, {'jamming+path_loss', 'jamming+airframe_shadowing', 'tone_jamming'});
+verifyEqual(tc, F.cases(3).level, 30);
+L = [SURV3_STUB_LOG{:}];
+verifyEqual(tc, numel(L), (4 + 3 * 3) * nS);
+H = [SURV3_HIDE_LOG{:}];
+verifyEqual(tc, unique([H.n_rx]), [2 3]);
+verifyTrue(tc, all([H.event] == 1 & [H.frames] == 20)); verifyTrue(tc, all(strcmp({H.threat}, 'airframe_shadowing')));
+for s = 1:nS
+    c = surv3_shadow_seed(s, 1:30); k = find(mod(c, 3) == 0, 2);   % the stand-in hides an antenna on seeds divisible by 3
+    verifyEqual(tc, F.geo_sh{s}.seed, c(k)); verifyEqual(tc, F.SH.tried(s), k(2));
+    verifyGreaterThanOrEqual(tc, F.geo_sh{s}.speed, F.SH.v_kmh(1));
+    sh = L([L.s] == s & strcmp({L.threat}, 'jamming+airframe_shadowing'));
+    verifyEqual(tc, numel(sh), 3);
+    for x = sh
+        verifyEqual(tc, x.seed, c(k)); verifyEqual(tc, x.event, [1 1]); verifyEqual(tc, x.frames, [20 20]);
+        verifyEqual(tc, x.run, surv3_run_id(1:2));
+    end
+    verifyEqual(tc, nnz([L.s] == s & strcmp({L.threat}, 'none') & cellfun(@isempty, {L.event})), 2);
+    verifyEqual(tc, nnz([L.s] == s & strcmp({L.threat}, 'none') & ~cellfun(@isempty, {L.event})), 2);
+end
+for x = L(cellfun(@isempty, {L.event}))
+    verifyEqual(tc, x.seed, arrayfun(@(r) pool_seed(1, x.s, 13, r), 1:2));
+end
+verifyEqual(tc, unique([L(strcmp({L.threat}, 'tone_jamming')).tone]), 30);
+verifyEqual(tc, F.Lm, [true(2, 1), false(2, nS - 1)]);
+verifyEqual(tc, F.okS, [false, true(1, nS - 1)]);
+verifyEqual(tc, size(F.clean{1}.ber_geo), [nS 2]); verifyEqual(tc, numel(F.clean_sh), 2);
+for j = 1:numel(F.rec)
+    k = F.jobs(j, 2);
+    verifyEqual(tc, F.rec{j}, repmat([true false], nS, 1));
+    verifyEqual(tc, size(F.met{j}.ber), [nS 2 numel(A)]);
+    verifyEqual(tc, F.met{j}.ber(1, 1, 1), 0.2);
+    verifyEqual(tc, surv3_judge(F.met{j}, F.clean{F.VAR(k).ref}, 2, 1e-4, F.ACTIONS), F.rec{j});
+    if k == 1                                            % 3e-3 within 2x of 4e-3, not of 1e-3
+        verifyEqual(tc, F.rec_sys{j}, [false(nS - 1, 2); true false]);
+    else
+        verifyEqual(tc, F.rec_sys{j}, F.rec{j});
+    end
+end
+txt = fileread(fullfile('results', 'survivability_options.txt'));
+verifyNotEmpty(tc, strfind(txt, 'Protocol surv_v2'));
+verifyNotEmpty(tc, strfind(txt, 'tone_jamming (most severe, 30)'));
+verifyNotEmpty(tc, strfind(txt, '2 ant/3 ref'));
+verifyNotEmpty(tc, strfind(txt, 'Airframe-shadowing combinations:'));
+verifyNotEmpty(tc, strfind(txt, 'Like for like, the Eb/N0 where neither clean link is link-limited (3, 6, 9, 12, 15 dB):'));
+verifyNotEmpty(tc, strfind(txt, 'Clean packet loss, 2 antennas: 1.000L 0.000 '));
+verifyNotEmpty(tc, strfind(txt, '<1e-4'));
+cd(here);
+w3 = fullfile(here, 'surv3_v2_full'); mkdir(w3); cd(w3);
+write_text('profile.json', '{"surv_v2":true}');
+verifyError(tc, @() surv3_script_run(false), 'experiment_survivability_options:fec_rx');
+cd(here);
+end
+
+function surv3_script_run(SMOKE) %#ok<INUSD>
+% The survivability-options script in a workspace of its own, with run_stage's SMOKE.
+experiment_survivability_options;
+end
+
+function d = surv3_stub_dir()
+% Stand-ins for the survivability options, first on the path. pool_cell.m logs every call per
+% Eb/N0 (global SURV3_STUB_LOG) and returns frames whose BER and loss follow
+% surv3_stub_value.m: the clean link at 4e-3 with two antennas and 1e-3 with more, 0 at the
+% last Eb/N0, every packet lost at the first; under any threat no_action at 0.2, the other
+% configurations at 0.75x the clean BER on odd geometries and lost on even ones.
+% hides_antenna.m logs its calls (global SURV3_HIDE_LOG) and hides an antenna on seeds
+% divisible by 3.
+d = fullfile(tempname); mkdir(d);
+fid = fopen(fullfile(d, 'pool_cell.m'), 'w');
+fprintf(fid, '%s\n', 'function [P, info] = pool_cell(p, threat, A, EB, geo, ~, opt)', 'global SURV3_STUB_LOG', ...
+    'P = cell(numel(EB), numel(A), 1);', 'tone = NaN; if isfield(p, ''tone_jsr_db''), tone = p.tone_jsr_db; end', ...
+    'for s = 1:numel(EB)', '    g = geo{s};', ...
+    ['    SURV3_STUB_LOG{end+1} = struct(''threat'', threat, ''s'', s, ''n_rx'', p.n_rx, ''gcs'', p.gcs_aoa_deg, ' ...
+    '''tone'', tone, ''seed'', g.seed, ''run'', g.run, ''speed'', g.speed, ''frames'', {gf(g, ''frames'')}, ' ...
+    '''event'', {gf(g, ''event'')});'], ...
+    '    for a = 1:numel(A)', '        run = repelem(g.run(:), opt.F_SUB);', ...
+    '        [b, f] = surv3_stub_value(threat, p, A{a}, s, numel(EB), run);', ...
+    '        P{s, a, 1} = struct(''run'', run, ''ber'', b, ''fer'', f);', '    end', 'end', ...
+    'info = struct(''n_unique'', numel(A), ''map'', 1:numel(A));', 'end', '', ...
+    'function v = gf(g, f)', 'v = []; if isfield(g, f), v = g.(f); end', 'end');
+fclose(fid);
+fid = fopen(fullfile(d, 'surv3_stub_value.m'), 'w');
+fprintf(fid, '%s\n', 'function [b, f] = surv3_stub_value(threat, p, a, s, nS, run)', ...
+    'n = numel(run); b = zeros(n, 1); f = zeros(n, 1);', 'w = 1e-3 * (1 + 3 * (p.n_rx < 3));', ...
+    'if s == nS, w = 0; end', 'if strcmp(threat, ''none'')', '    b(:) = w; if s == 1, f(:) = 1; end', '    return', ...
+    'end', 'if strcmp(a, ''no_action''), b(:) = 0.2; f(:) = 1; return; end', 'odd = mod(run, 2) == 1;', ...
+    'b(odd) = 0.75 * w; b(~odd) = 0.05; f(~odd) = 1;', 'end');
+fclose(fid);
+fid = fopen(fullfile(d, 'hides_antenna.m'), 'w');
+fprintf(fid, '%s\n', 'function h = hides_antenna(seed, ~, p, geo)', 'global SURV3_HIDE_LOG', ...
+    ['SURV3_HIDE_LOG{end+1} = struct(''seed'', seed, ''n_rx'', p.n_rx, ''event'', geo.event_frame, ' ...
+    '''frames'', geo.frames, ''threat'', p.active_threat);'], 'h = mod(seed, 3) == 0;', 'end');
+fclose(fid);
+addpath(d, '-begin'); clear pool_cell surv3_stub_value hides_antenna
+end
+
+function surv3_stub_off(d)
+% Removes the survivability options' stand-ins from the path and the disk.
+rmpath(d); clear pool_cell surv3_stub_value hides_antenna
+rmdir(d, 's');
+end
+
 function test_surv_options(tc)
 % The survivability map's protocol switch (profile.json surv_v2, surv_options.m): no file, no
 % field (profile 3's file before step 7a) or false run the one-flight map; true runs surv_v2
@@ -1409,6 +1708,17 @@ verifyLessThan(tc, hi(end), 2^26);
 verifyLessThan(tc, seed_base(hi(end)) + 63, 2^32);
 verifyError(tc, @() shadow_pool_seed(1, 1, 4, 1), ?MException);       % the clean pools' blocks hold none
 verifyError(tc, @() shadow_pool_seed(1, 1, 17, 100000), ?MException);
+% The candidates of the survivability options' shadowing flights under surv_v2
+% (surv3_shadow_seed.m): a range of their own per Eb/N0, above the pools' candidates, the largest
+% below 2^26 and its streams below 2^32
+lo3 = arrayfun(@(si) surv3_shadow_seed(si, 1), 1:8); hi3 = arrayfun(@(si) surv3_shadow_seed(si, 99999), 1:8);
+verifyEqual(tc, hi3 - lo3, 99998 * ones(1, 8));
+verifyTrue(tc, all(hi3(1:end-1) < lo3(2:end)));
+verifyGreaterThan(tc, lo3(1), hi(end));
+verifyLessThan(tc, hi3(end), 2^26);
+verifyLessThan(tc, seed_base(hi3(end)) + 63, 2^32);
+verifyError(tc, @() surv3_shadow_seed(9, 1), ?MException);
+verifyError(tc, @() surv3_shadow_seed(1, 100000), ?MException);
 for f = {{'eval_unseen_snr', 'SEED_SHD  = SEED0 + 50000;'}, {'eval_unseen_severity', 'SEED_SHD = SEED0 + 50000;'}}
     src = fileread(which(f{1}{1}));
     verifyNotEmpty(tc, strfind(src, f{1}{2}), f{1}{1});
