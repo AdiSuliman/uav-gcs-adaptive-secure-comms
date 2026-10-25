@@ -1756,3 +1756,15 @@ What the pass confirmed (profile 1, 11 combinations without the shadowing ones):
 **Rejected.** A rerun of profile 1's SURV3 (nothing reads it; about 10 h on a machine whose stop window is reserved for the lecturer's items). Dropping the shadowing combinations from profile 3's cases (the review's fallback if the selected flights were not ready; they are, with their seed range and the disjointness test). Keeping the shared flights' clean link for the shadowing rows (amended: it mixes the selected flights' geometry into the threat's effect). Quoting 6-15 dB as the comparison (the two-antenna packet test is still vacuous at 6-9 dB; 12-15 dB is the only range where both tests are informative).
 
 **Sources.** Liu et al. 2018 (the in-band level cap, 30 dB). Winters, Salz & Gitlin 1994 (N antennas null N - 1 interferers). Xu et al. 2005 (the noise-burst duty range, D100). The reviews: session scratchpad `interim_report/core/surv3_review.md` and `surv_review.md`, not in this repo.
+
+## D102 — Profile 1's deploy queue: the five git-dependent tests that fail on the queue's export are read from the git worktree of the same tip
+
+**Why (2026-10-25, the stop window).** The queue's `core` job ran the merged suite on its export of `85484b0` (`d91q/deploy2/tip`, made by `git archive`): 259/264, rc=1. The five failures are `test_rule_core_wide`, `test_rule_noise_burst_setting`, `test_rule_core_burst`, `test_settings_noise_burst` and `test_link_env_cover_default`. Each calls the test helper `parent_copy`, which runs `git show <rev>:<file>` in the test root to compare with an older commit. The export has no `.git`, so every one stops with `fatal: not a git repository`. The code they test is the same in the export and in the worktree.
+
+**Evidence.** On worktree `X` (`uav-gcs-tip`, a git worktree detached at `85484b0`, the same tree `553658e4`) the same five pass: 5/5 on 25.10 (`uav-gcs-v7-p3/logs/hand_tip_git5_*`). They also passed in T0, the full suite on `X` at `66ec267` (the commit before, which differs only in `core_cnn_inputs.m` and three test assumptions). With the queue's 259 that is 264/264 on this tree.
+
+**Decision.** The queue's `core` verdict, which reads BLOCKED because new tests are not passing, is taken as passed for these five tests only, on the evidence above. Any other failing test still blocks. `p3core` (the suite on the `P1C` export) is read the same way. No gate is lowered and no test is changed for profile 1.
+
+**For profile 3.** `lect-kpi` `899e1c6`: in an export without `.git`, `parent_copy` reads the old commit from the repository that `V7_GIT_REPO` names. Profile 3's queue command sets `V7_GIT_REPO` to the deploy checkout (STOP_SOFT section 7), so its `core` runs every test on the export.
+
+**Rejected.** Restarting profile 1's queue on a new tip that carries `899e1c6`: it changes only a test helper, and the restart would cost the core job, the proofs and the smoke, about a day, inside the time box.
