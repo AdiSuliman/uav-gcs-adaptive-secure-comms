@@ -60,7 +60,10 @@ function test_subset_keeps_pairing(tc)
 % Episode i stays episode i under every policy, every per-episode field (a 3 x NE one too)
 % cut alike; a field that is not one per episode stops the subset.
 ALL = ebno_world();
-for k = 1:numel(ALL), ALL{k}.id = (1:numel(ALL{k}.s)) + 100 * k; end
+for k = 1:numel(ALL)
+    ALL{k}.id = (1:numel(ALL{k}.s)) + 100 * k;
+    ALL{k}.aoa = reshape(1:3 * numel(ALL{k}.s), 3, []) + 1000 * k;
+end
 keep = mod(1:numel(ALL{1}.s), 3) ~= 0;
 A = lect_kpis_by_ebno('subset', ALL, keep);
 for k = 1:numel(A)
