@@ -1,4 +1,4 @@
-# Literature check (2026-09-28, updated 2026-09-29; sources of D85-D91 added 2026-10-15 and 2026-10-18)
+# Literature check (2026-09-28, updated 2026-09-29; sources of D85-D91 added 2026-10-15 and 2026-10-18, B2 and C1 added 2026-10-25)
 
 Every source of the three proposal documents was read again before the v4 changes: the lecturer's
 original proposal (seven recommended papers), the approved proposal form (six references) and the
@@ -126,6 +126,15 @@ The files are in the project's source folder (`מקורות`). The "Where" colum
 How D91 uses the two Xie papers (d91_fuse.md sec. 1, "What the sources support"): the glr columns are adapted from Xie 2021, eq. 20 and Xie, Moustakides & Xie 2022, eq. 9, not taken from them, because both means are estimated in the window while the sources assume a known pre-change density. b = abs(log alpha) is the sources' asymptotic threshold for a false-alarm rate alpha = 1/ARL; D91 applies it to a frame share, an analogy. The cap W <= 2b and the exponential (Rayleigh) likelihood have no source.
 
 Also cited, listed above: Norouzi 2006 (the sweeper's 2-of-6 confirmation, D90 sec. 2), Barajas et al. 2026, Winters, Salz & Gitlin 1994 (the MMSE predictor on known symbols, D88-D89).
+
+## Fetched 2026-10-25 with approval, read in full (interim report checks)
+
+The text files are in the session's `interim_report/facts/full` folder, not in this repo. The "Where" column gives the decision or note that uses the source.
+
+| Paper | Access and licence | Text file | What it supports | Where |
+|---|---|---|---|---|
+| R. J. McEliece, W. E. Stark, "Channels with block interference," IEEE Trans. Inform. Theory, IT-30(1), Jan. 1984 | Published version from the Caltech repository (https://authors.library.caltech.edu/records/ym0xf-yte49, MCEieeetit84.pdf, 1.6 MB); Caltech terms, no commercial reproduction; DOI not printed in the text | B2_McEliece_Stark1984_Channels_Block_Interference.txt | Capacity with side information is the average capacity of the states and does not depend on the memory (3.7); without it capacity stays below that value (3.4, 3.8); interleaving adds no capacity (Sec. V, footnote 1); a pulsed jammer is the block-interference example (Sec. II, Example 2); an erasure channel with erased share e has capacity 1 - e (5.1); cutoff rate R0(1) (4.9); capacity is preferred to R0 except under tight delay or interleaver limits (Sec. VII); state estimation from known symbols works for long memory only (Sec. VI, Table II). It backs the capacity table and the "a better decoder does not make FEC the answer" argument, narrows the wording (duty 0.5 and four-antenna MRC cases), and shows that the J4 10 dB gate on capacity alone is too optimistic for the fixed K = 7 code | D97 (`design_noise_burst.md`, `noise_burst_protocol.md` sec. 1, 4.2, 4.3, 5) |
+| C. Morales Ferre, A. de la Fuente, E. S. Lohan, "Jammer classification in GNSS bands via machine learning algorithms," Sensors 19(22), 4841, 2019, DOI 10.3390/s19224841 (PMC6891345) | Europe PMC full-text XML, CC BY 4.0 | C1_MoralesFerre2019_Jammer_Classification_GNSS_ML_Sensors.txt | A spectrogram image classifier for GNSS L1 jammers (six classes): mean accuracy SVM 94.90%, CNN 91.36%; presence detection above 98% (SVM), clean images read as jammed under 2%; one-convolution CNN on 6,000 training images. A sanity anchor for B3c's presence detection, scale and architecture, and for tone recall through the paper's AM single-tone class (its NB class is band-limited noise). Not comparable: band, random C/N0 25-50 dBHz and JSR 40-80 dB against our fixed levels, no wideband class, no per-level curves, accuracy against macro-F1, per-image against windowed decisions. It does not fill the missing per-JNR recall source | B3c (`core_cnn_protocol.md`), `quality_checklist.md` 2.5 |
 
 ## Not in the library (stated where used)
 
