@@ -3,7 +3,9 @@
 Written 25.10.2026, before profile 3's SURV has run and before any of its data exist. It fixes
 the rules of profile 3's survivability map (`code/evaluation/map_survivability_boundary.m`)
 from the refutation pass over profile 1's map (session review `surv_review.md`, items 1-6, 10,
-11, N1, N2). Code on `lect-kpi`; tests in `code/tests/test_core.m` (section 8).
+11, N1, N2). Amended the same day, still before any data: a coded configuration's BER bound
+from its lost packets (section 6, review item 5) and N on R and L cells only (section 5). Code
+on `lect-kpi`; tests in `code/tests/test_core.m` (section 8).
 
 ## 1. Switch and scope
 
@@ -69,7 +71,9 @@ reference (review N1); that front end is not changed here (it belongs to a chain
   There the packet-loss bound passes 1 and BER alone decides. Shown as L, counted apart from
   R; the overall line also gives R + L (the rule's R).
 - **N:** `no_action` alone passes the R test (the link is not degraded). Shown in place of the
-  configuration's letters; the status stays the rule's.
+  configuration's letters on R and L cells; M and X cells keep their best configuration's
+  letters (both maps exclude `no_action`). The status stays the rule's; the N count covers
+  every cell.
 - **none:** an X cell with every configuration at BER >= 0.45 (saturated): no letters, since
   the best of 35 noise-level results names no configuration.
 - **0 err:** a ratio of zero is written "0 err" (gap file and figures), not "0.00x" or "<0.1".
@@ -84,6 +88,15 @@ reference (review N1); that front end is not changed here (it belongs to a chain
   loss, widened to hold the mean. When no flight has an error (a lost packet), the upper bound
   is at least the Clopper-Pearson bound of no event in all the flights' bits (frames, or packets
   of the coded link).
+- Coded configurations (`fec_interleave`): the decoder's errors come in whole lost packets, not
+  in independent bits, so their BER upper bound is at least the one-sided 95% Clopper-Pearson
+  upper bound of the packet loss over the cell's packets (5 x 28) x 0.5, the BER of a lost
+  packet (a failed Viterbi packet is at most at chance level; D97's total erasure measured
+  0.495). With errors this floors the bootstrap bound; with none it is the bound: 0.5 x 2.1% =
+  1.06e-2 at no lost packet, above 5x any reference from the floor 1e-4 up to 2.1e-3. A cell
+  that only a coded configuration recovers will therefore usually be not committed with five
+  flights: five flights cannot show its BER within 2x the reference, and the map says so.
+  Uncoded configurations keep the bit-level bound.
 - `status_lo`: the rule with every configuration at the low end of its intervals; `status_hi`:
   at the high end. The slack and the clean reference stay at their means.
 - **Committed** when `status_lo == status_hi`; otherwise the cell is marked `?`. The text and
@@ -105,7 +118,8 @@ reference (review N1); that front end is not changed here (it belongs to a chain
   one-flight seeds; `surv_runs` per flight.
 - `test_surv_nb_entries`: the two entries, their duties and names, the gate the model reads.
 - `test_surv_grid_marks`: the rule equals the one-flight map's on random cells; L, N, none;
-  the interval, the Clopper-Pearson floor and the committed verdict.
+  the interval, the Clopper-Pearson floor, the coded link's bound from its lost packets and
+  the committed verdict.
 - `test_surv_cell_label`, `test_surv_gap_report`: labels, the two classes, "0 err".
 - `test_surv_map_profile1_identity`: the whole map script on a stand-in `pool_cell.m`, without
   and with `surv_v2`: without it the seeds, statuses, saved variables and texts are the

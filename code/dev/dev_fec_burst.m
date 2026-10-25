@@ -25,9 +25,10 @@ function R = dev_fec_burst(stage, out, rev)
 %     4. adopted only when (dev_fec_gates.m): the clean floor at 9 dB matches the mean
 %        residual within 1 dB (median over the codewords); J4 at 4 dB under no_action
 %        decodes, packet loss <= 2 x that of the clean link at 9 dB (its loss floored at one
-%        packet); J4 at 10 dB under no_action loses more than Q/2 packets fewer than the D78
-%        decoder (the cutoff rate R0(1) there is at the edge of the K = 7 code, so its loss is
-%        reported beside capacity and R0(1), McEliece and Stark 1984, Sec. IV and VII); the
+%        packet); J4 at 10 dB under no_action within that bound or more than Q/2 packets
+%        fewer lost than the D78 decoder (the cutoff rate R0(1) there is at the edge of the
+%        K = 7 code, so its loss is reported beside capacity and R0(1), McEliece and Stark
+%        1984, Sec. IV and VII); the
 %        random jammer at duty 0.775 under no_action does not decode at 10 dB or more
 %        (capacity below rate 1/2 there; at 4 dB MRC can lift it above, so it is reported only)
 %   rev names the decisions entry. R: the readings, the choice (rx, the profile.json value)
@@ -225,7 +226,7 @@ if ~isempty(best)
         end
     end
 end
-fprintf(['\nchecks: floor %s, J4 4 dB decodes %s, J4 10 dB loses more than Q/2 packets fewer than D78 %s, ' ...
+fprintf(['\nchecks: floor %s, J4 4 dB decodes %s, J4 10 dB within the clean bound or more than Q/2 packets fewer lost than D78 %s, ' ...
     'random 0.775 >= 10 dB does not decode %s -> %s\n'], pf(ok_floor), pf(ok_j4), pf(ok_j4_10), pf(~dec775), ...
     ternary(adopt, 'ADOPT', 'NOT ADOPTED: profile.json fec_rx "d78"'));
 if dec775, fprintf('STOP: the random jammer at duty 0.775 decodes where capacity is below the rate; look before anything else\n'); end

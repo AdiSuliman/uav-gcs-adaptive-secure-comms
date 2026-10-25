@@ -3,8 +3,9 @@
 Written 25.10.2026, before profile 1's C1d and C2 have run, before dev set C exists and before
 any reading of the readings below. Amended the same day, still before dev set C runs, after the
 check against McEliece and Stark 1984 (D97): the J4 gate at 10 dB (4.2), the cutoff rate beside
-the capacity (1, 4.2), the narrowed capacity wording (1, 4.3). Code on `lect-kpi`; tests in
-`code/tests/test_core.m` (section 6).
+the capacity (1, 4.2), the narrowed capacity wording (1, 4.3); and again, still before any
+data, so that the J4 gate at 10 dB also passes within the clean bound (4.2). Code on
+`lect-kpi`; tests in `code/tests/test_core.m` (section 6).
 
 ## 1. The defect
 
@@ -247,9 +248,11 @@ pilot error of every frame, and the D78 decoder's result on the same frames (the
    - **J4 decodes at 4 dB.** J4 at 4 dB under no_action (MRC) has packet loss <= 2 x the clean
      link's at 9 dB. The clean loss is floored at one packet of the point's packets. R0(1) with
      ideal JSI is about 0.87 in-band there (about -2 dB after four-antenna MRC).
-   - **J4 improves at 10 dB.** J4 at 10 dB under no_action loses more than Q/2 packets fewer
-     than the D78 decoder (one loss event of the coded link). Its loss is reported beside C and
-     R0(1). At about 4 dB in-band after MRC, R0(1) is 0.73 with ideal JSI and 0.51 for a
+   - **J4 at 10 dB.** J4 at 10 dB under no_action has packet loss <= the clean bound above
+     (2 x the clean link's at 9 dB), or loses more than Q/2 packets fewer than the D78 decoder
+     (one loss event of the coded link). Either suffices: a gain over D78 alone would reject a
+     perfect decoder at a point where D78 happens to do well too. Its loss is reported beside C
+     and R0(1). At about 4 dB in-band after MRC, R0(1) is 0.73 with ideal JSI and 0.51 for a
      per-symbol estimate, the edge of the K = 7 code at this loss level. A gate on the clean
      link's loss there would test the code and the antenna geometry, not the decoder (McEliece
      and Stark 1984, Sec. IV and VII). The checks are `dev_fec_gates.m`.
@@ -331,5 +334,6 @@ are our own calculations from the model's parameters, not quoted results:
   `8b396e6`'s bit for bit.
 - `test_seed_streams_disjoint`: dev set C's seeds.
 - `test_dev_fec_gates`: the adoption checks of 4.2 step 4 (J4 at 4 dB against the clean bound,
-  J4 at 10 dB against D78 by more than Q/2, random 0.775 from 10 dB) and the select step's use.
+  J4 at 10 dB within the clean bound or against D78 by more than Q/2, random 0.775 from 10 dB)
+  and the select step's use.
 - `test_nb_cutoff_rate`: R0(1) of the table in section 1, its limits and Jensen's bound.

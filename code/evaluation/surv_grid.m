@@ -22,12 +22,16 @@ function G = surv_grid(ber_all, fer_all, slack_all, ber_run, fer_run, maps, ACTI
 %     ber_lo, ber_hi, fer_lo, fer_hi  the intervals of the cell's configuration
 %   Interval: 95% percentile bootstrap over the flights (boot_cluster.m, fixed seed), widened
 %   to hold the mean; with no error (no lost packet) in any flight the upper bound is at least
-%   the Clopper-Pearson bound of no event in all the flights' bits (packets).
+%   the Clopper-Pearson bound of no event in all the flights' bits (packets). A coded
+%   configuration's decoded errors come in whole lost packets, so its BER upper bound is at
+%   least the one-sided 95% Clopper-Pearson bound of its packet loss over the cell's packets
+%   x 0.5, the BER of a lost packet (a failed Viterbi packet is at most at chance level).
 nS = numel(ber_ref);
 cols = find(ismember(ACTIONS, act_set));
 ina = find(strcmp(ACTIONS, 'no_action'), 1);
 coded = contains(ACTIONS, 'fec_interleave');
 units = Z.frames * ones(1, numel(ACTIONS)); units(coded) = floor(Z.frames / 2);   % frames, or packets of the coded link
+LOST_BER = 0.5;                                     % BER of a lost coded packet (D97's total erasure: 0.495)
 G = struct('threat', {}, 'base', {}, 'aoa', {}, 'levels', {}, 'ber_best', {}, 'ratio', {}, 'status', {}, ...
     'ber_attacked', {}, 'best_action', {}, 'link_limited', {}, 'no_action_ok', {}, 'saturated', {}, ...
     'status_lo', {}, 'status_hi', {}, 'committed', {}, 'ber_lo', {}, 'ber_hi', {}, 'fer_lo', {}, 'fer_hi', {});
@@ -49,9 +53,14 @@ for t = 1:numel(maps)
             ratio(li, s) = ber_best(li, s) / ref;
             n = numel(cols); bl = zeros(1, n); bh = bl; fl = bl; fh = bl;
             for k = 1:n
-                a = cols(k);
-                [bl(k), bh(k)] = ival(squeeze(Br(li, a, s, :)), B(li, a, s), nr * units(a) * Z.bits, Z.B);
-                [fl(k), fh(k)] = ival(squeeze(Fr(li, a, s, :)), Fe(li, a, s), nr * units(a), Z.B);
+                a = cols(k); np = nr * units(a); fx = squeeze(Fr(li, a, s, :));
+                if coded(a)
+                    [bl(k), bh(k)] = ival(squeeze(Br(li, a, s, :)), B(li, a, s), [], Z.B);
+                    bh(k) = max(bh(k), LOST_BER * cp_up(round(sum(fx) * units(a)), np));
+                else
+                    [bl(k), bh(k)] = ival(squeeze(Br(li, a, s, :)), B(li, a, s), np * Z.bits, Z.B);
+                end
+                [fl(k), fh(k)] = ival(fx, Fe(li, a, s), np, Z.B);
             end
             slo(li, s) = rule(bl, fl, sv, ref, fc, Z, cols);
             shi(li, s) = rule(bh, fh, sv, ref, fc, Z, cols);
@@ -83,10 +92,15 @@ end
 
 function [lo, hi] = ival(x, m, n, B)
 % 95% interval of a mean over the flights x, holding the mean m; at no event in n units the
-% upper bound reaches the Clopper-Pearson bound.
+% upper bound reaches the Clopper-Pearson bound (none for empty n).
 x = x(:);
 [~, lo, hi] = boot_cluster(x, ones(size(x)), (1:numel(x))', B, 74);
 if isnan(lo), lo = m; hi = m; end
 lo = min(lo, m); hi = max(hi, m);
-if all(x == 0), hi = max(hi, 1 - 0.025 ^ (1 / n)); end
+if all(x == 0) && ~isempty(n), hi = max(hi, 1 - 0.025 ^ (1 / n)); end
+end
+
+function u = cp_up(k, n)
+% One-sided 95% Clopper-Pearson upper bound of k events in n trials.
+if k >= n, u = 1; else, u = betaincinv(0.95, k + 1, n - k); end
 end

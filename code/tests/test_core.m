@@ -1129,7 +1129,8 @@ function test_surv_grid_marks(tc)
 % The surv_v2 map's cells (surv_grid.m): the status rule on the flights' means is the
 % one-flight map's (build_map in map_survivability_boundary.m) on random cells; the marks L
 % (an R cell where the clean link loses half of its packets or more), N (no_action passes)
-% and saturated; the interval over the flights, its Clopper-Pearson floor at no event, and
+% and saturated; the interval over the flights, its Clopper-Pearson floor at no event, the
+% coded link's BER bound from its lost packets (one-sided 95% Clopper-Pearson x 0.5), and
 % the committed verdict (the status at both ends of the intervals).
 A = {'no_action', 'power_control', 'rate_reduce', 'power_control+fec_interleave'};
 Z = struct('ok', 2, 'marg', 5, 'sat', 0.45, 'lim', 0.5, 'frames', 57, 'bits', 1032, 'B', 4000);
@@ -1153,7 +1154,7 @@ for as = {A(2:4), A(2)}
             end
             verifyEqual(tc, G.status(li, s), st); verifyEqual(tc, G.best_action{li, s}, A{kc});
             verifyEqual(tc, G.ber_best(li, s), bb); verifyEqual(tc, G.ratio(li, s), bb / ref(s));
-            verifyTrue(tc, G.committed(li, s));                         % identical flights: no spread
+            if ~any(cols == 4), verifyTrue(tc, G.committed(li, s)); end % identical uncoded flights: no spread
         end
     end
     verifyEqual(tc, G.link_limited, G.status == 1 & fc >= 0.5);
@@ -1179,20 +1180,29 @@ verifyEqual(tc, G.ber_hi(1, 2), 1 - 0.025 ^ (1 / (5 * 57 * 1032)), 'RelTol', 1e-
 verifyEqual(tc, G.fer_hi(1, 2), 1 - 0.025 ^ (1 / (5 * 57)), 'RelTol', 1e-12);
 verifyEqual(tc, G.ber_lo(3, 1), 0.47); verifyEqual(tc, G.ber_hi(3, 1), 0.47);
 G = surv_grid({mean(Br, 4)}, {mean(Fr, 4)}, {Sl}, {Br}, {Fr}, mp, A, A(4), ref, fc, Z);
-verifyEqual(tc, G.ber_hi(1, 2), 1 - 0.025 ^ (1 / (5 * 28 * 1032)), 'RelTol', 1e-12);   % the coded link: packets
+cp0 = 1 - 0.05 ^ (1 / (5 * 28));                                        % no lost packet in 5 x 28
+verifyEqual(tc, G.ber_hi(1, 2), 0.5 * cp0, 'RelTol', 1e-9);           % the coded link: lost packets, not bits
 verifyEqual(tc, G.fer_hi(1, 2), 1 - 0.025 ^ (1 / (5 * 28)), 'RelTol', 1e-12);
-verifyTrue(tc, G.committed(1, 2));                                      % 2.6% < one event in 28 packets
+verifyEqual(tc, G.status(1, :), [1 1]); verifyEqual(tc, G.status_hi(1, :), [3 3]);
+verifyFalse(tc, G.committed(1, 2));                                     % coded alone, 5 flights: not committed
+verifyEqual(tc, G.ber_hi(2, 2), 0.5 * cp0, 'RelTol', 1e-9);           % errors (0.01), no lost packet: the floor
+verifyEqual(tc, G.ber_hi(3, 2), 0.5);                                   % every packet lost
+Fr(2, 4, 2, 1) = 2 / 28;                                                % two lost packets in one flight
+G = surv_grid({mean(Br, 4)}, {mean(Fr, 4)}, {Sl}, {Br}, {Fr}, mp, A, A(4), ref, fc, Z);
+verifyEqual(tc, G.ber_hi(2, 2), 0.5 * betaincinv(0.95, 3, 5 * 28 - 2), 'RelTol', 1e-12);
+verifyEqual(tc, G.ber_lo(2, 2), 0.01, 'RelTol', 1e-12);
 end
 
 function test_surv_cell_label(tc)
 % A cell of the surv_v2 map's text (surv_cell_label.m): status letter (L for a link-limited
-% R), the configuration's letters, N in their place when no_action passes, none for a
+% R), the configuration's letters, N in their place on R and L when no_action passes, none for a
 % saturated X, ? when not committed.
 verifyEqual(tc, surv_cell_label(1, 'SP', false, false, false, true), 'RSP');
 verifyEqual(tc, surv_cell_label(1, 'SP', true, false, false, true), 'RN');
 verifyEqual(tc, surv_cell_label(1, 'SP', true, true, false, false), 'LN?');
 verifyEqual(tc, surv_cell_label(1, 'SP', false, true, false, true), 'LSP');
 verifyEqual(tc, surv_cell_label(2, 'P', false, true, false, false), 'MP?');    % L marks R cells only
+verifyEqual(tc, surv_cell_label(2, 'P', true, false, false, true), 'MP');       % so does N
 verifyEqual(tc, surv_cell_label(3, 'E', false, false, true, true), 'Xnone');
 verifyEqual(tc, surv_cell_label(3, 'E', false, false, false, true), 'XE');
 verifyEqual(tc, surv_cell_label(0, '', false, false, false, true), '.');
@@ -3231,8 +3241,8 @@ end
 function test_dev_fec_gates(tc)
 % The adoption checks of dev set C (dev_fec_gates.m, dev_fec_burst.m select step 4): J4 at
 % 4 dB under no_action within 2 x the clean link's loss at 9 dB, floored at one packet; J4
-% at 10 dB under no_action more than Q/2 packets below the D78 decoder's loss, not held to
-% the clean link; the random jammer at duty 0.775 under no_action flagged when it decodes at
+% at 10 dB under no_action within that bound or more than Q/2 packets below the D78
+% decoder's loss; the random jammer at duty 0.775 under no_action flagged when it decodes at
 % 10 dB or more, never at 4 dB. The select step adopts only with every check.
 nm = {'clean_no_action', 'clean_no_action', 'nb_j4_04_no_action', 'nb_j4_04_power_control', 'nb_j4_10_no_action', ...
     'nb_r775_04_no_action', 'nb_r775_10_no_action', 'nb_r775_30_no_action', 'd78_j16_mmse'};
@@ -3252,7 +3262,9 @@ x = lost; x(1) = 0; x(2) = 6; x(3) = 12; G = g(x, rl);              % the clean 
 verifyEqual(tc, G.lim, 12 / 600, 'AbsTol', 1e-15); verifyTrue(tc, G.j4);
 x = lost; x(5) = 41; verifyFalse(tc, g(x, rl).j4_10);               % exactly Q/2 fewer than D78: not more
 x = lost; x(5) = 38; verifyTrue(tc, g(x, rl).j4_10);
-x = lost; x(5) = 1; r = rl; r(5) = 2; verifyFalse(tc, g(x, r).j4_10);   % within the clean bound, but no gain over D78
+x = lost; x(5) = 2; r = rl; r(5) = 2; verifyTrue(tc, g(x, r).j4_10);    % within the clean bound, no gain over D78
+x = lost; x(5) = 3; r = rl; r(5) = 3; verifyFalse(tc, g(x, r).j4_10);   % above the bound, no gain over D78
+x = lost; x(5) = 0; r = rl; r(5) = 0; verifyTrue(tc, g(x, r).j4_10);    % a perfect decoder where D78 is perfect too
 x = lost; x(7) = 1; verifyTrue(tc, g(x, rl).dec775);                % decodes at 10 dB
 x = lost; x(8) = 0; verifyTrue(tc, g(x, rl).dec775);                % or at 30 dB
 verifyFalse(tc, g(lost, rl).dec775);                                % at 4 dB it is reported only
