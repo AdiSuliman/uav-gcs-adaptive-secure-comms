@@ -7,7 +7,8 @@ function [IN, trees] = core_cnn_inputs(CC, in, out)
 %   every output goes. A relative path is taken from out. An input outside out must lie in a
 %   tree that does not hold out: the git checkout holding the input, else the folder above its
 %   data/ or results/ folder, else its own folder. So the stage never writes into a source
-%   tree; a copy inside out passes.
+%   tree. A copy inside out passes when its tree lies strictly inside out (for example out/in/);
+%   an input whose tree is out itself, or holds out, stops the stage.
 f = {'splits', 'params', 'test', 'test_params', 'hybrid_pred', 'hybrid_metrics'};
 IN = struct(); trees = {};
 for k = 1:numel(f), IN.(f{k}) = CC.(f{k}); end
@@ -23,8 +24,8 @@ for k = reshape(fieldnames(in), 1, [])
         'CORE_CNN_IN.%s is not a file path', k{1});
     p = ci_abs(char(p), o);
     IN.(k{1}) = p;
-    if ci_under(p, o), continue; end
     t = ci_tree(p);
+    if ci_under(t, o) && ~ci_under(o, t), continue; end   % a copy inside the working folder
     assert(~ci_under(o, t), 'train_core_cnn:isolation', ['the working folder %s lies in %s, the tree of ' ...
         'CORE_CNN_IN.%s (%s): run the stage in a checkout of its own, outside every source tree'], o, t, k{1}, p);
     if ~any(cellfun(@(x) ci_under(t, x) && ci_under(x, t), trees)), trees{end+1} = t; end %#ok<AGROW>

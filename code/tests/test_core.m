@@ -9342,7 +9342,7 @@ function test_spec_net_trains(tc)
 % The image-only network trains on 128 x 128 images, keeps its best validation epoch, weights
 % the cross-entropy by the inverse class frequency (mean 1), returns CPU weights and
 % probabilities that sum to 1 per image.
-assumeTrue(tc, license('test', 'Neural_Network_Toolbox') && ~isempty(ver('deeplearning')));
+assumeTrue(tc, license('test', 'Neural_Network_Toolbox') && ~isempty(ver('nnet')));
 rng(3, 'twister');
 mk = @(c, n) img_of(c, n);
 X = cat(4, mk(1, 16), mk(2, 8), mk(3, 8)); y = [ones(16, 1); 2 * ones(8, 1); 3 * ones(8, 1)];
@@ -9473,7 +9473,7 @@ function test_core_cnn_reading(tc)
 % output, its decisions, the hybrid's class on the same frames and the metrics agree with the
 % saved predictions, a frame of another label is left out, and neither a second reading nor
 % a retraining runs.
-assumeTrue(tc, license('test', 'Neural_Network_Toolbox') && ~isempty(ver('deeplearning')));
+assumeTrue(tc, license('test', 'Neural_Network_Toolbox') && ~isempty(ver('nnet')));
 assumeTrue(tc, strcmp(kpi1_set(), 'fresh3'));
 d = fullfile(tc.TestData.tmp, 'corecnn_read');
 for s = {'data', 'results', 'docs'}, mkdir(fullfile(d, s{1})); end
@@ -9651,7 +9651,7 @@ function test_core_cnn_isolated_reading(tc)
 % the working folder; the hybrid's slot stays empty (no metrics, NaN intervals, no paired
 % difference, no comparison line), the core CNN's figures agree with the saved predictions,
 % and the KPI line says that no hybrid reading came first.
-assumeTrue(tc, license('test', 'Neural_Network_Toolbox') && ~isempty(ver('deeplearning')));
+assumeTrue(tc, license('test', 'Neural_Network_Toolbox') && ~isempty(ver('nnet')));
 assumeTrue(tc, strcmp(kpi1_set(), 'fresh3'));
 [st, ~] = system('git --version'); assumeEqual(tc, st, 0, 'git is not on the path');
 b = fullfile(tc.TestData.tmp, 'corecnn_iso');
