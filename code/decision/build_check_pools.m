@@ -181,7 +181,7 @@ for c = 1:nC
 end
 
 %% 2. Simulation, one parallel job per cell
-NWP = N_WORKERS;
+NWP = N_WORKERS; pl = [];
 if exist('SMOKE', 'var') && SMOKE
     NWP = 0;
 else
@@ -201,17 +201,20 @@ CKD = fullfile(pwd, 'data', 'c1c_check_cells');        % finished cells (pool_ch
 keys = arrayfun(@(c) pool_checkpoint('key', {PTAG, DET_ID, runs, cells(c), fld{c}, EB, ACTIONS, geoc{c}, opt, p0}), ...
     1:nC, 'UniformOutput', false);
 todo = pool_checkpoint('todo', CKD, keys);
+w = zeros(size(todo));
+for k = 1:numel(todo)
+    ce = cells(todo(k)); p = p0; p.active_threat = ce.threat;
+    if ~isempty(fld{todo(k)}), p.(fld{todo(k)}) = ce.level; end
+    w(k) = pool_cost(p, ce.threat, ACTIONS, geoc{todo(k)}, opt);
+end
+todo = todo(pool_schedule(w));                         % the longest cell first, one cell per free worker
 t0 = tic;
 fprintf('%d cells x %d configurations, %d flights per point, on %d workers; %d cells kept from an earlier start (%s)\n', ...
     nC, nA, N_GEO, N_WORKERS, nC - numel(todo), CKD);
-parfor (k = 1:numel(todo), NWP)
-    c = todo(k); ce = cells(c);
-    p = p0; p.active_threat = ce.threat;
-    if ~isempty(fld{c}), p.(fld{c}) = ce.level; end
-    [Ps, pinfo] = pool_cell(p, ce.threat, ACTIONS, EB, geoc{c}, det, opt);
-    pool_checkpoint('save', CKD, c, keys{c}, Ps);
-    fprintf('  cell %2d/%d %-22s %-6s %6.2f  %2d unique configurations\n', c, nC, ce.threat, ce.kind, ce.level, pinfo.n_unique);
-end
+S = struct('cells', {cells}, 'p0', {p0}, 'fld', {fld}, 'ACTIONS', {ACTIONS}, 'EB', {EB}, 'geoc', {geoc}, 'det', {det}, ...
+    'opt', {opt}, 'CKD', {CKD}, 'keys', {keys}, 'nC', {nC});
+pool_lpt(@(S, c) pool_job('c1c', S, c), S, todo, pl);
+clear S
 fprintf('Simulated in %.1f min\n', toc(t0) / 60);
 
 %% 3. Package

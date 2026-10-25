@@ -27,7 +27,9 @@ if isfile(sp) && (~isfile(nc) || dir(nc).datenum < dir(sp).datenum)
 end
 need = {'params.mat', 'data/trained_detector.mat', 'data/trained_dqn.mat', 'data/gui_norm_stats.mat', 'data/ood_thresholds.mat'};
 opt = {'data/fusion.mat', 'data/drop_threshold.mat', 'data/survivability_boundary.mat', ...
-    'results/eval_detector_metrics.mat', 'results/policy_evaluation.mat', 'results/latency.mat', 'results/kpi_summary.mat'};
+    'results/eval_detector_metrics.mat', 'results/eval_detector_metrics_fresh2.mat', 'results/eval_detector_metrics_fresh3.mat', ...
+    'results/policy_evaluation.mat', ...
+    'results/latency.mat', 'results/kpi_summary.mat'};
 for f = need
     src = fullfile(root, f{1});
     if ~isfile(src), error('export_gui_bundle:missing', 'missing %s: run the pipeline first', f{1}); end

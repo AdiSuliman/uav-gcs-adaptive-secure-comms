@@ -8,8 +8,8 @@
 % at three severities (C.combo_sev), in the train, validation and test splits (a
 % combination never trained on is measured by experiment_combo_generalization.m).
 % Configurations: the 36 of policy_actions.m, applied by apply_countermeasure.m;
-% configurations with identical physics for a threat are simulated once
-% (pool_cell.m). Eb/N0: the grid of init_params.
+% configurations with identical physics for a threat are simulated once, and one that
+% differs in p.fec alone shares its run (pool_cell.m). Eb/N0: the grid of init_params.
 % Splits, geometries per (cell, Eb/N0): train 8, validation 6, test 12; edge speeds
 % 24 at hover for the clean link and the single threats at every severity, and 12 at
 % 161 km/h (the limit of small UAVs, Khawaja et al.) for the clean link and the
@@ -52,7 +52,7 @@
 % features of link_features.m (receiver measurements only), and the true BER and
 % frame error (reward and evaluation only).
 % The cells run in parallel, each worker in its own folder with its own copy of
-% the model. Every finished cell is kept on disk (data/c1p_cells, pool_checkpoint.m) under a
+% the model, the longest first and one per hand-out (pool_schedule.m). Every finished cell is kept on disk (data/c1p_cells, pool_checkpoint.m) under a
 % key of everything its frames depend on (link model MODEL_TAG, detector DET_ID, the
 % geometry ids of every split, the cell, the Eb/N0 grid, the configurations, its
 % geometries' draws, the frame options and its params), so a build stopped at any point
@@ -62,7 +62,8 @@
 % the test, edge-speed and second test splits are simulated. PP.det_id identifies the
 % detector (detector_id.m); pools of another detector are never reused.
 %
-% Output: data/policy_pools.mat (PP, clean_ref)
+% Output: data/policy_pools.mat (PP, clean_ref); C1c replaces clean_ref, PP.clean and
+% PP.clean_fer with the table of the clean validation pools (clean_ref_rebuild.m)
 
 close all; clc;
 warning('off', 'Simulink:cgxe:LeakedJITEngine');
@@ -334,7 +335,7 @@ for c = 1:nC
 end
 
 %% 2. Simulation, one parallel job per cell
-NWP = N_WORKERS;
+NWP = N_WORKERS; pl = [];
 if exist('SMOKE', 'var') && SMOKE
     NWP = 0;                                            % reduced chain check: on this process, no parallel turn
 else
@@ -352,18 +353,15 @@ CKD = fullfile(pwd, 'data', 'c1p_cells');               % finished cells (pool_c
 keys = arrayfun(@(c) pool_checkpoint('key', {MODEL_TAG, DET_ID, runs, cells(c), EBNO, ACTIONS, geoc{c}, opt, ...
     threat_params(p0, cells(c).threat, cells(c).sev, C)}), 1:nC, 'UniformOutput', false);
 todo = pool_checkpoint('todo', CKD, keys);
+w = arrayfun(@(c) pool_cost(threat_params(p0, cells(c).threat, cells(c).sev, C), cells(c).threat, ACTIONS, geoc{c}, opt), todo);
+todo = todo(pool_schedule(w));                         % the longest cell first, one cell per free worker
 t0 = tic;
 fprintf('%d cells x %d configurations x %d Eb/N0 on %d workers; %d cells kept from an earlier start (%s)\n', ...
     nC, nA, nS, N_WORKERS, nC - numel(todo), CKD);
-parfor (k = 1:numel(todo), NWP)
-    c = todo(k); ce = cells(c);
-    p = threat_params(p0, ce.threat, ce.sev, C);
-    [Ps, pinfo] = pool_cell(p, ce.threat, ACTIONS, EBNO, geoc{c}, det, opt);
-    Pc = cell(nS, nA, nSp);
-    Pc(:, :, ce.splits) = Ps;
-    pool_checkpoint('save', CKD, c, keys{c}, struct('Pc', {Pc}, 'nuniq', pinfo.n_unique));
-    fprintf('  cell %2d/%d %-28s %-8s %2d unique configurations\n', c, nC, ce.threat, C.sev_names{ce.sev}, pinfo.n_unique);
-end
+S = struct('cells', {cells}, 'p0', {p0}, 'C', {C}, 'ACTIONS', {ACTIONS}, 'EBNO', {EBNO}, 'geoc', {geoc}, 'det', {det}, ...
+    'opt', {opt}, 'nS', {nS}, 'nA', {nA}, 'nSp', {nSp}, 'CKD', {CKD}, 'keys', {keys}, 'nC', {nC});
+pool_lpt(@(S, c) pool_job('c1p', S, c), S, todo, pl);
+clear S
 fprintf('Simulated in %.1f min\n', toc(t0) / 60);
 
 %% 3. Package

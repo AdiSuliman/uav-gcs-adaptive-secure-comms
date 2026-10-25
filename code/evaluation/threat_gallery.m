@@ -7,7 +7,8 @@
 %   (c) BER per frame: clean link, the threat with no response, and the threat
 %       under the configuration the selected DQN ends with most often on the test
 %       pools (top_cfg of results/policy_evaluation.mat; the expert rule's choice
-%       when that file does not exist yet)
+%       when that file does not exist yet, its noise-burst answer as C2 chose it,
+%       dec.rule_nb of data/trained_dqn.mat, when present)
 % plus an overview figure with the spectrogram of every threat.
 %
 % Output: results/threat_gallery/<threat>.png, results/threat_gallery/overview.png
@@ -33,6 +34,11 @@ top = struct('threat', {}, 'action', {}, 'share', {});
 if isfile('results/policy_evaluation.mat') && any(strcmp({whos('-file', 'results/policy_evaluation.mat').name}, 'top_cfg'))
     top = load('results/policy_evaluation.mat', 'top_cfg').top_cfg;
 end
+NB = {};                                        % the rule's noise-burst answer chosen in C2 (train_dqn.m)
+if isfile('data/trained_dqn.mat') && ismember('dec', who('-file', 'data/trained_dqn.mat'))
+    dq = load('data/trained_dqn.mat', 'dec').dec;
+    if isfield(dq, 'rule_nb') && ~isempty(dq.rule_nb), NB = dq.rule_nb; end
+end
 
 clean = run_link(p0, 'none', 'no_action', EBNO, SEED, fd, NF);
 ov = figure('Position', [40 40 1500 700], 'Color', 'w', 'Visible', 'off');
@@ -40,7 +46,7 @@ tlo = tiledlayout(ov, 2, 5, 'TileSpacing', 'compact', 'Padding', 'compact');
 for t = 1:numel(THREATS)
     th = THREATS{t};
     k = find(strcmp({top.threat}, th), 1);
-    if isempty(k), act = rule_based_policy(th); src = 'expert rule';
+    if isempty(k), act = rule_based_policy(th, [], [], [], [], [], [], [], [], NB); src = 'expert rule';
     else, act = top(k).action; src = sprintf('DQN, %.0f%% of test episodes', 100 * top(k).share); end
     base = run_link(p0, th, 'no_action', EBNO, SEED, fd, NF);
     resp = run_link(p0, th, act, EBNO, SEED, fd, NF);

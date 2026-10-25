@@ -20,7 +20,7 @@
 % monitor's reference, alone (drop_alarm_seq.m), read through the monitor's m-of-n
 % confirmation, since only a confirmed alarm lets a policy change the configuration
 % (policy_mask.m, policy_decide.m): confirmed by any confirmation of C2's monitors
-% (C.confirm and CFG.monitors, confirm_alarm.m; of C2's grid the 2/2 one, since 3/3, 4/5 and
+% (C.confirm and C.monitors, confirm_alarm.m; of C2's grid the 2/2 one, since 3/3, 4/5 and
 % 5/5 confirm only after two consecutive alarms), so a threshold admissible here is admissible
 % under every monitor of the grid. False alarms: the independent clean validation geometries
 % (data/clean_val_pools.mat), one 30-cycle episode per geometry and Eb/N0 from the KPI 1
@@ -33,15 +33,32 @@
 % detected when the alarm is confirmed at or after the onset. Each form at its most
 % sensitive admissible threshold; the form that detects more, within one point the one with
 % the shorter mean delay; the median window on a tie, when the CUSUM has no admissible
-% threshold, or without clean validation flights. The chosen form is deployed at the
-% threshold it was compared at (drop_alarm_form.m; C2 tries it and more sensitive ones), the
-% median window at the train-pool threshold when it has no admissible one. The CUSUM's
+% threshold, or without clean validation flights. The median window's reference holds the
+% cycles of a drop above half the smallest path-loss level until it ends, as the CUSUM's
+% does (drop_ref.m), so the two forms differ in their statistic only. The CUSUM's
 % thresholds are counted in cycles of a step of the smallest path-loss level at the
 % statistic's full drift (D^2 / 2 per cycle, drop_cusum.m).
+% The whole monitor, per confirmation of C2's monitors (C.monitors): a policy changes the
+% configuration only on a confirmed alarm (policy_mask.m), so up to its first change every
+% policy flies the no_action episode, and the share of clean episodes whose no_action monitor
+% confirms an alarm bounds every policy's false-alarm share on the same episodes exactly. The
+% monitor runs once at no_action (monitor_trace.m) over the clean validation episodes
+% train_dqn.m reads its false alarms on (clean_wide_specs.m) and over every single threat of
+% the validation split; per monitor and threshold of the chosen form the alarm is rebuilt:
+% the drop alarm, its reference free of every alarm cycle, or any other path (a hostile
+% class but path_loss, degradation), confirmed by the monitor's m of n (monitor_confirm.m).
+% Each monitor takes the most sensitive threshold whose bound is admissible (KPI 6's 5%);
+% when the other paths alone break the bound no threshold can meet it, which is reported,
+% and the monitor takes the least sensitive one. C2 tries each monitor's threshold and the
+% steps C.drop_steps around it (train_dqn.m). The sweeping jammer's own confirmation
+% (C.confirm_sweep, policy_monitor.m) is adopted when, with every monitor at its own pick, no
+% monitor loses an admissible threshold or needs a less sensitive one and no single threat's
+% never-confirmed share or 90th-percentile delay grows; both readings are printed.
 %
-% Output: data/drop_threshold.mat (drop_db, the median window's deployed threshold, and
+% Output: data/drop_threshold.mat (drop_db, the median window's threshold alone, and
 % drop_db_train, drop_from; drop_alarm, cusum_db, the confirmations CF and the validation
-% readings VAL), results/drop_threshold.txt
+% readings VAL; MONP, each monitor's threshold and readings; confirm_sweep, the sweeper's
+% confirmation adopted, [] when not), results/drop_threshold.txt
 
 clc;
 fprintf('=== Eb/N0-drop threshold of the drop alarm ===\n\n');
@@ -134,10 +151,10 @@ VA = 2; T = 30; REPS = 4; FA_BOUND = 0.05;
 D1 = decision_config().sev.path_loss.levels(1);
 THC = D1^2 / 2 * (1:0.5:10);                                % CUSUM thresholds: cycles of a D1 step at full drift
 CF = decision_config().confirm;                             % every confirmation of C2's monitors
-if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'monitors')
-    for mn = CFG.monitors(:)'
-        tk = strsplit(mn{1}); CF(end+1, :) = sscanf(tk{2}, '%d/%d')'; %#ok<SAGROW>
-    end
+MN = decision_config().monitors;
+if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'monitors'), MN = CFG.monitors; end
+for mn = MN(:)'
+    tk = strsplit(mn{1}); CF(end+1, :) = sscanf(tk{2}, '%d/%d')'; %#ok<SAGROW>
 end
 CF = unique(CF, 'rows');
 EBNO_THR = PP.ebno(1);                                      % false alarms from the KPI 1 threshold up (KPI 6)
@@ -198,8 +215,82 @@ else
 end
 fid = fopen('results/drop_threshold.txt', 'a'); fprintf(fid, '%s\n', rv{:}); fclose(fid);
 fprintf('%s\n', rv{:});
+
+%% 5. The whole monitor per confirmation: each monitor's threshold, the sweeper's confirmation
+MON = MN;
+fm = find(strcmp(FM, drop_alarm)); GF = GR{fm}; CS = decision_config().confirm_sweep;
+MONP = struct('monitor', MON, 'cf', [], 'pick', NaN, 'j', NaN, 'admissible', false, 'k', NaN, 'n', 0, ...
+    'k_other', NaN, 'lat', []);
+confirm_sweep = [];
+rw = {'', sprintf(['The whole monitor at no_action per confirmation (%s, %s): false alarms on the clean validation ' ...
+    'episodes train_dqn.m reads (an exact bound for every policy on them), the drop alarm of the form %s or any other ' ...
+    'path; delays on the single threats of the validation split, cycles from the onset to the first confirmed alarm ' ...
+    '(the decision reading the threat''s first frame is 0)'], strjoin(MON, ', '), drop_alarm, drop_alarm)};
+if isempty(CV)
+    rw{end+1} = 'No clean validation flights: every monitor at the form''s threshold above, the sweeper''s confirmation not adopted.';
+    for m = 1:numel(MON)
+        tk = strsplit(MON{m}); MONP(m).cf = sscanf(tk{2}, '%d/%d')';
+        MONP(m).pick = thr_val; if ~isfinite(thr_val), MONP(m).pick = drop_db; end
+    end
+else
+    PPm = PP; PPm.alarm_mode = drop_alarm;
+    [PPw, Kw] = clean_world(PPm, CV);
+    [spc, ncl] = clean_wide_specs(PPm, CV, EBNO_THR, T);
+    Tc = monitor_trace(PPw, Kw, spc, VA, 41000);
+    Tc = trim_trace(Tc, ncl);
+    PPv = PPm; PPv.pools(:, :, :, setdiff(1:numel(PP.runs), VA)) = {[]};   % the validation split only
+    Kv = link_env('tables', PPv);
+    sgl = find(ismember(PP.scen, PP.singles) & ~strcmp(PP.scen, 'none'));
+    spv = policy_episodes(sgl, nS, Kv.geo(sgl, VA), 1, false, false, 64, T, RandStream('mt19937ar', 'Seed', 4400));
+    Tv = monitor_trace(PPv, Kv, spv, VA, 4500);
+    onv = Kv.on(sub2ind(size(Kv.on), Tv.scn, Tv.s, VA + 0 * Tv.s, Tv.r));
+    thv = PP.scen(Tv.scn); thn = unique(thv(onv), 'stable');
+    R = cell(1, 2);                                          % the sweeper's confirmation off, on
+    for sw = 1:2
+        cs = []; if sw == 2, cs = CS; end
+        for m = 1:numel(MON)
+            tk = strsplit(MON{m}); cf = sscanf(tk{2}, '%d/%d')';
+            k = arrayfun(@(t) sum(any(monitor_confirm(Tc, drop_alarm, t, cf, cs), 2)), [GF, Inf]);
+            up = arrayfun(@(x) cp_upper(x, ncl), k);
+            j = find(up(1:end-1) <= FA_BOUND, 1);
+            adm = ~isempty(j); if ~adm, j = numel(GF); end
+            cv = monitor_confirm(Tv, drop_alarm, GF(j), cf, cs);
+            R{sw} = [R{sw}, struct('cf', cf, 'j', j, 'pick', GF(j), 'admissible', adm, 'k', k(j), 'k_other', k(end), ...
+                'lat', delays(cv, Tv.onset, thv, onv, thn))];
+        end
+    end
+    ok = arrayfun(@(m) (~R{1}(m).admissible || R{2}(m).admissible) && R{2}(m).j <= R{1}(m).j && ...
+        all(R{2}(m).lat.never <= R{1}(m).lat.never) && all(fill_inf(R{2}(m).lat.p90) <= fill_inf(R{1}(m).lat.p90)), 1:numel(MON));
+    sw = 1 + all(ok); if sw == 2, confirm_sweep = CS; end
+    for m = 1:numel(MON)
+        MONP(m).cf = R{sw}(m).cf; MONP(m).j = R{sw}(m).j; MONP(m).pick = R{sw}(m).pick; MONP(m).admissible = R{sw}(m).admissible;
+        MONP(m).k = R{sw}(m).k; MONP(m).n = ncl; MONP(m).k_other = R{sw}(m).k_other; MONP(m).lat = R{sw}(m).lat;
+    end
+    for s = 1:2
+        rw{end+1} = sprintf('  sweeper''s own confirmation %s:', ternary(s == 1, 'off', sprintf('on, %d of %d cycles', CS))); %#ok<SAGROW>
+        for m = 1:numel(MON)
+            x = R{s}(m);
+            rw{end+1} = sprintf(['    %-15s threshold %6.1f %-4s %s, false alarms %d/%d (bound %.2f%%); other paths alone ' ...
+                '%d/%d (bound %.2f%%)'], MON{m}, x.pick, drop_unit(drop_alarm), ternary(x.admissible, 'admissible', ...
+                'NONE ADMISSIBLE: the least sensitive'), x.k, ncl, 100 * cp_upper(x.k, ncl), x.k_other, ncl, ...
+                100 * cp_upper(x.k_other, ncl)); %#ok<SAGROW>
+            if ~x.admissible && cp_upper(x.k_other, ncl) > FA_BOUND
+                rw{end+1} = sprintf(['      the other paths alone break the %.0f%% bound under %s: no drop threshold can meet ' ...
+                    'KPI 6 with this monitor'], 100 * FA_BOUND, MON{m}); %#ok<SAGROW>
+            end
+            rw{end+1} = sprintf('      delays median / p90 / never: %s', strjoin(cellfun(@(n, a, b, c) sprintf('%s %g/%g/%.1f%%', ...
+                n, a, b, c), x.lat.threat, num2cell(x.lat.median), num2cell(x.lat.p90), num2cell(100 * x.lat.never), ...
+                'UniformOutput', false), ', ')); %#ok<SAGROW>
+        end
+    end
+    rw{end+1} = sprintf(['Sweeper''s own confirmation: %s (no monitor loses an admissible threshold or needs a less ' ...
+        'sensitive one, no single threat''s never share or p90 delay grows: %s)'], ternary(sw == 2, 'ADOPTED', 'not adopted'), ...
+        strjoin(arrayfun(@(m) sprintf('%s %s', MON{m}, ternary(ok(m), 'yes', 'no')), 1:numel(MON), 'UniformOutput', false), ', '));
+end
+fid = fopen('results/drop_threshold.txt', 'a'); fprintf(fid, '%s\n', rw{:}); fclose(fid);
+fprintf('%s\n', rw{:});
 save('data/drop_threshold.mat', 'drop_db', 'drop_db_train', 'drop_from', 'separable', 'THR', 'kept', 'leak', 'leak_all', ...
-    'p95_mis', 'p99_cl', 'p05_pl', 'floor_db', 'drop_alarm', 'cusum_db', 'THC', 'VAL', 'CF', 'EBNO_THR');
+    'p95_mis', 'p99_cl', 'p05_pl', 'floor_db', 'drop_alarm', 'cusum_db', 'THC', 'VAL', 'CF', 'EBNO_THR', 'MONP', 'confirm_sweep');
 fprintf('\nSaved data/drop_threshold.mat, results/drop_threshold.txt\n');
 
 %% ===================== Local functions =====================
@@ -249,6 +340,35 @@ for v = iPL
         end
     end
 end
+end
+
+function T = trim_trace(T, n)
+% The first n episodes of a monitor trace (the padding of the last batch dropped).
+for f = fieldnames(T)'
+    if size(T.(f{1}), 1) > 1, T.(f{1}) = T.(f{1})(1:n, :); else, T.(f{1}) = T.(f{1})(1:n); end
+end
+end
+
+function L = delays(c, onset, thr, on, names)
+% Per threat (severities pooled, episodes with the threat on the air): the cycles from the
+% onset to the first confirmed alarm, the decision of cycle onset + 1 reading the threat's
+% first frame (0); median, p90 (nearest rank) and the never-confirmed share.
+L = struct('threat', {names}, 'n', zeros(1, numel(names)), 'median', nan(1, numel(names)), ...
+    'p90', nan(1, numel(names)), 'never', zeros(1, numel(names)));
+d = nan(size(c, 1), 1);
+for i = 1:size(c, 1)
+    k = find(c(i, onset(i) + 1:end), 1);
+    if ~isempty(k), d(i) = k - 1; end
+end
+for q = 1:numel(names)
+    m = on(:) & strcmp(thr(:), names{q}); x = sort(d(m & ~isnan(d)));
+    L.n(q) = sum(m); L.never(q) = mean(isnan(d(m)));
+    if ~isempty(x), L.median(q) = median(x); L.p90(q) = x(min(numel(x), max(1, round(0.9 * numel(x))))); end
+end
+end
+
+function x = fill_inf(x)
+x(isnan(x)) = Inf;
 end
 
 function u = cp_upper(k, n)
