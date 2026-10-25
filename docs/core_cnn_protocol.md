@@ -279,7 +279,9 @@ running its chain.
 - The stage stops (`train_core_cnn:isolation`) when the working folder lies in the tree of such
   an input. The tree is the git checkout that holds the input; without one, it is the folder
   above its `data/` or `results/` folder.
-- Copies of the inputs inside the working folder pass too.
+- Copies of the inputs inside the working folder pass when their tree lies strictly inside it
+  (for example `in/`). An input whose tree is the working folder itself, such as the source
+  checkout's own `data/`, stops the stage like any other.
 - Without B3r, the reading's own place in each such tree (`results/eval_detector_metrics_fresh3.mat`,
   `results/detector_predictions_fresh3.mat`) holds no file either. A B3r reading there is named
   in `hybrid_pred` and `hybrid_metrics`, and then the comparison of section 7 is made.
