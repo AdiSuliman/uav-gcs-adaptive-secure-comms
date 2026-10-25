@@ -1,1 +1,1 @@
-{"profile":"profile 3: four antennas","n_rx":4}
+{"profile":"profile 3: four antennas","n_rx":4,"skip_stages":["OHP","GCSA"]}
