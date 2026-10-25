@@ -5079,7 +5079,7 @@ m = m(~contains({m.folder}, [filesep 'legacy']));
 for i = 1:numel(m)
     v = regexp(fileread(fullfile(m(i).folder, m(i).name)), 'check_det_id\(PP, (\w+), ''\w+''\)', 'tokens');
     v = [v{:}];
-    verifyTrue(tc, all(strcmp(v, 'Q')), m(i).name);
+    verifyTrue(tc, isempty(v) || all(strcmp(v, 'Q')), m(i).name);
 end
 % the deploy smoke: after the re-key, every stage that reads the fusion or the pools, in chain order
 f = fullfile(tc.TestData.root, 'docs', 'd91_smoke_deploy.m.txt');
