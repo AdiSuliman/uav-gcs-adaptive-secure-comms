@@ -2,7 +2,9 @@ function [rep, T3, T3s, Lm, okS] = surv3_report(X)
 %SURV3_REPORT  The text of experiment_survivability_options.m under surv_v2
 %   (docs/surv_p3_protocol.md section 10).
 %   X: cases, VAR, EBNO, jobs, rec (each variant against its own clean link), rec_sys
-%      (against the system's, VAR(2)), clean (the clean links of VAR(1:2)), nCombo (the
+%      (against the system's, VAR(2)), clean (the clean links of VAR(1:2)), clean_sh (the
+%      clean links of VAR(1:2) on the shadowing flights, the shadowing combinations'
+%      references; {} without them), nCombo (the
 %      first nCombo cases are the combined threats), N_GEOM, RUN_FRAMES, RATIO, RELAY_DEG,
 %      RELAY_LOSS_DB, floor (the reference BER floor), SH (the shadowing flights'
 %      selection, surv3_shadow_flights.m; [] without them)
@@ -10,8 +12,8 @@ function [rep, T3, T3s, Lm, okS] = surv3_report(X)
 %            system's clean link
 %   Lm       2 x Eb/N0: the clean link of VAR(k) is link-limited, RATIO x its packet loss +
 %            1/RUN_FRAMES >= 1 (the packet bound passes 100% for every configuration, BER
-%            alone decides)
-%   okS      the Eb/N0 where neither clean link is link-limited (the like-for-like comparison)
+%            alone decides); rows 3-4 the same on the shadowing flights (clean_sh)
+%   okS      the Eb/N0 where no clean link is link-limited (the like-for-like comparison)
 % Columns: VAR(1) against its own and against the system's link, then VAR(2:end) against
 % their own (the relay's own is the system's).
 nC = numel(X.cases); nV = numel(X.VAR); nS = numel(X.EBNO);
@@ -23,8 +25,9 @@ for i = 1:nC
         T3s(i, k, :) = 100 * mean(X.rec_sys{j}, 2);
     end
 end
-Lm = false(2, nS);
-for k = 1:2, Lm(k, :) = X.RATIO * X.clean{k}.fer + 1 / X.RUN_FRAMES >= 1; end
+CL = [X.clean, X.clean_sh];
+Lm = false(numel(CL), nS);
+for k = 1:numel(CL), Lm(k, :) = X.RATIO * CL{k}.fer + 1 / X.RUN_FRAMES >= 1; end
 okS = ~any(Lm, 1);
 TC = cat(2, T3(:, 1, :), T3s(:, 1, :), T3(:, 2:end, :));
 ref = [X.VAR.ref];
@@ -45,12 +48,12 @@ rep = {sprintf('=== SURVIVABILITY OPTIONS: %s, %s, RELAY PATH ===', upper(X.VAR(
 if ~isempty(X.SH)
     rep{end+1} = sprintf(['Airframe-shadowing combinations: flights of their own (surv3_shadow_flights.m), each ' ...
         'hiding an antenna at %g dB with %s antennas from a roll-in just before the first frame (rolls %.1f-%.1f deg, ' ...
-        '%.1f-%.1f km/h): %d kept of %d candidates'], X.SH.level, strjoin(compose('%d', X.SH.n_rx), ' and '), ...
-        X.SH.band, X.SH.v_kmh, sum(X.SH.kept), sum(X.SH.tried));
+        '%.1f-%.1f km/h): %d kept of %d candidates; judged against the clean link of the same flights'], X.SH.level, ...
+        strjoin(compose('%d', X.SH.n_rx), ' and '), X.SH.band, X.SH.v_kmh, sum(X.SH.kept), sum(X.SH.tried));
 end
 rep = [rep, {'', 'All Eb/N0:'}, share_rows(TC, X.cases, true(1, nS), names, ic, is), {''}];
 if any(okS)
-    rep = [rep, {sprintf('Like for like, the Eb/N0 where neither clean link is link-limited (%s dB):', ...
+    rep = [rep, {sprintf('Like for like, the Eb/N0 where no clean link is link-limited (%s dB):', ...
         strjoin(compose('%g', X.EBNO(okS)), ', '))}, share_rows(TC, X.cases, okS, names, ic, is)];
 else
     rep{end+1} = 'Like for like: none, every Eb/N0 is link-limited for some clean link';
@@ -61,12 +64,13 @@ for s = 1:nS
     rep{end+1} = sprintf('  %2g dB  %s', X.EBNO(s), strjoin(arrayfun(@(c) sprintf('%6.1f%s', mean(TC(ic, c, s)), ...
         mk{1 + LC(c, s)}), 1:nK, 'UniformOutput', false), ' / ')); %#ok<AGROW>
 end
-for k = 1:2
-    b = X.clean{k}.ber;
-    rep{end+1} = sprintf('Clean BER, %s: %s', X.VAR(k).name, strjoin(arrayfun(@(x) ber_text(x, X.floor, fl), b, ...
+for k = 1:numel(CL)
+    b = CL{k}.ber; nm = X.VAR(1 + mod(k - 1, 2)).name;
+    if k > 2, nm = [nm ', shadowing flights']; end
+    rep{end+1} = sprintf('Clean BER, %s: %s', nm, strjoin(arrayfun(@(x) ber_text(x, X.floor, fl), b, ...
         'UniformOutput', false), ' ')); %#ok<AGROW>
-    rep{end+1} = sprintf('Clean packet loss, %s: %s', X.VAR(k).name, strjoin(arrayfun(@(f, l) sprintf('%.3f%s', f, ...
-        mk{1 + l}), X.clean{k}.fer, Lm(k, :), 'UniformOutput', false), ' ')); %#ok<AGROW>
+    rep{end+1} = sprintf('Clean packet loss, %s: %s', nm, strjoin(arrayfun(@(f, l) sprintf('%.3f%s', f, ...
+        mk{1 + l}), CL{k}.fer, Lm(k, :), 'UniformOutput', false), ' ')); %#ok<AGROW>
 end
 rep{end+1} = sprintf('(<%s: below the reference floor; the rule judges against %s)', fl, fl);
 end

@@ -1084,11 +1084,15 @@ rec = repmat({pat}, 1, 6); rec_sys = repmat({false(nS, N)}, 1, 6); rec_sys([2 3 
 clean = {struct('ber', [0.18 0.087 0.037 0.024 3e-3 2e-4], 'fer', [158 150 107 76 31 11] / 160), ...
     struct('ber', [0.11 0.044 0.018 4.5e-3 2.2e-4 0], 'fer', [157 137 58 43 4 0] / 160)};
 X = struct('cases', {cases}, 'VAR', {VAR}, 'EBNO', {EB}, 'jobs', {jobs}, 'rec', {rec}, 'rec_sys', {rec_sys}, ...
-    'clean', {clean}, 'nCombo', 1, 'N_GEOM', N, 'RUN_FRAMES', 20, 'RATIO', 2, 'RELAY_DEG', 60, 'RELAY_LOSS_DB', 3, ...
-    'floor', 1e-4, 'SH', []);
+    'clean', {clean}, 'clean_sh', {{}}, 'nCombo', 1, 'N_GEOM', N, 'RUN_FRAMES', 20, 'RATIO', 2, 'RELAY_DEG', 60, ...
+    'RELAY_LOSS_DB', 3, 'floor', 1e-4, 'SH', []);
 [rep, T3, T3s, Lm, okS] = surv3_report(X);
 verifyEqual(tc, Lm, logical([1 1 1 1 0 0; 1 1 0 0 0 0]));
 verifyEqual(tc, okS, logical([0 0 0 0 1 1]));
+X.clean_sh = {clean{2}, struct('ber', clean{2}.ber, 'fer', [157 137 58 43 4 76] / 160)};   % a shadowing reference L at 15 dB
+[~, ~, ~, Lsh, okSh] = surv3_report(X);
+verifyEqual(tc, Lsh, logical([1 1 1 1 0 0; 1 1 0 0 0 0; 1 1 0 0 0 0; 1 1 0 0 0 1]));
+verifyEqual(tc, okSh, logical([0 0 0 0 1 0]));
 verifyEqual(tc, squeeze(T3(1, 1, :))', 100 * (1:nS) / N);
 verifyEqual(tc, squeeze(T3s(1, 1, :))', zeros(1, nS));
 verifyEqual(tc, T3s(:, 2:3, :), T3(:, 2:3, :));
@@ -1096,7 +1100,7 @@ txt = strjoin(rep, newline);
 verifyNotEmpty(tc, strfind(txt, 'Protocol surv_v2'));
 verifyNotEmpty(tc, strfind(txt, '2 ant/3 ref'));
 verifyNotEmpty(tc, strfind(txt, 'tone_jamming (most severe, 30)'));
-verifyNotEmpty(tc, strfind(txt, 'Like for like, the Eb/N0 where neither clean link is link-limited (12, 15 dB):'));
+verifyNotEmpty(tc, strfind(txt, 'Like for like, the Eb/N0 where no clean link is link-limited (12, 15 dB):'));
 verifyNotEmpty(tc, strfind(txt, 'Clean BER, 3 antennas: 1.1e-01 4.4e-02 1.8e-02 4.5e-03 2.2e-04 <1e-4'));
 verifyNotEmpty(tc, strfind(txt, 'Clean packet loss, 2 antennas: 0.988L 0.938L 0.669L 0.475L 0.194 0.069'));
 verifyEmpty(tc, strfind(txt, 'Airframe-shadowing'));
@@ -1236,16 +1240,22 @@ for x = L(cellfun(@isempty, {L.event}))
     verifyEqual(tc, x.seed, arrayfun(@(r) pool_seed(1, x.s, 13, r), 1:2));
 end
 verifyEqual(tc, unique([L(strcmp({L.threat}, 'tone_jamming')).tone]), 30);
-verifyEqual(tc, F.Lm, [true(2, 1), false(2, nS - 1)]);
+verifyEqual(tc, F.Lm, [true(4, 1), false(4, nS - 1)]);
 verifyEqual(tc, F.okS, [false, true(1, nS - 1)]);
 verifyEqual(tc, size(F.clean{1}.ber_geo), [nS 2]); verifyEqual(tc, numel(F.clean_sh), 2);
+verifyEqual(tc, F.clean_sh{1}.ber, 4 * F.clean{1}.ber, 'AbsTol', 1e-15);
 for j = 1:numel(F.rec)
     k = F.jobs(j, 2);
     verifyEqual(tc, F.rec{j}, repmat([true false], nS, 1));
     verifyEqual(tc, size(F.met{j}.ber), [nS 2 numel(A)]);
     verifyEqual(tc, F.met{j}.ber(1, 1, 1), 0.2);
-    verifyEqual(tc, surv3_judge(F.met{j}, F.clean{F.VAR(k).ref}, 2, 1e-4, F.ACTIONS), F.rec{j});
-    if k == 1                                            % 3e-3 within 2x of 4e-3, not of 1e-3
+    if contains(F.cases(F.jobs(j, 1)).threat, 'airframe_shadowing')   % against the clean link of its own flights
+        verifyEqual(tc, surv3_judge(F.met{j}, F.clean_sh{F.VAR(k).ref}, 2, 1e-4, F.ACTIONS), F.rec{j});
+        verifyEqual(tc, surv3_judge(F.met{j}, F.clean{F.VAR(k).ref}, 2, 1e-4, F.ACTIONS), [false(nS - 1, 2); true false]);
+    else
+        verifyEqual(tc, surv3_judge(F.met{j}, F.clean{F.VAR(k).ref}, 2, 1e-4, F.ACTIONS), F.rec{j});
+    end
+    if k == 1                                            % 0.75 x 4e-3 within 2x of 4e-3, not of 1e-3 (x4 on the shadowing flights)
         verifyEqual(tc, F.rec_sys{j}, [false(nS - 1, 2); true false]);
     else
         verifyEqual(tc, F.rec_sys{j}, F.rec{j});
@@ -1256,7 +1266,9 @@ verifyNotEmpty(tc, strfind(txt, 'Protocol surv_v2'));
 verifyNotEmpty(tc, strfind(txt, 'tone_jamming (most severe, 30)'));
 verifyNotEmpty(tc, strfind(txt, '2 ant/3 ref'));
 verifyNotEmpty(tc, strfind(txt, 'Airframe-shadowing combinations:'));
-verifyNotEmpty(tc, strfind(txt, 'Like for like, the Eb/N0 where neither clean link is link-limited (3, 6, 9, 12, 15 dB):'));
+verifyNotEmpty(tc, strfind(txt, 'Like for like, the Eb/N0 where no clean link is link-limited (3, 6, 9, 12, 15 dB):'));
+verifyNotEmpty(tc, strfind(txt, 'Clean BER, 2 antennas, shadowing flights: 1.6e-02 '));
+verifyNotEmpty(tc, strfind(txt, 'judged against the clean link of the same flights'));
 verifyNotEmpty(tc, strfind(txt, 'Clean packet loss, 2 antennas: 1.000L 0.000 '));
 verifyNotEmpty(tc, strfind(txt, '<1e-4'));
 cd(here);
@@ -1276,7 +1288,8 @@ function d = surv3_stub_dir()
 % Eb/N0 (global SURV3_STUB_LOG) and returns frames whose BER and loss follow
 % surv3_stub_value.m: the clean link at 4e-3 with two antennas and 1e-3 with more, 0 at the
 % last Eb/N0, every packet lost at the first; under any threat no_action at 0.2, the other
-% configurations at 0.75x the clean BER on odd geometries and lost on even ones.
+% configurations at 0.75x the clean BER on odd geometries and lost on even ones; on flights
+% with an event (the shadowing flights) every BER x4, so only their own clean link passes them.
 % hides_antenna.m logs its calls (global SURV3_HIDE_LOG) and hides an antenna on seeds
 % divisible by 3.
 d = fullfile(tempname); mkdir(d);
@@ -1288,14 +1301,14 @@ fprintf(fid, '%s\n', 'function [P, info] = pool_cell(p, threat, A, EB, geo, ~, o
     '''tone'', tone, ''seed'', g.seed, ''run'', g.run, ''speed'', g.speed, ''frames'', {gf(g, ''frames'')}, ' ...
     '''event'', {gf(g, ''event'')});'], ...
     '    for a = 1:numel(A)', '        run = repelem(g.run(:), opt.F_SUB);', ...
-    '        [b, f] = surv3_stub_value(threat, p, A{a}, s, numel(EB), run);', ...
+    '        [b, f] = surv3_stub_value(threat, p, A{a}, s, numel(EB), run, isfield(g, ''event''));', ...
     '        P{s, a, 1} = struct(''run'', run, ''ber'', b, ''fer'', f);', '    end', 'end', ...
     'info = struct(''n_unique'', numel(A), ''map'', 1:numel(A));', 'end', '', ...
     'function v = gf(g, f)', 'v = []; if isfield(g, f), v = g.(f); end', 'end');
 fclose(fid);
 fid = fopen(fullfile(d, 'surv3_stub_value.m'), 'w');
-fprintf(fid, '%s\n', 'function [b, f] = surv3_stub_value(threat, p, a, s, nS, run)', ...
-    'n = numel(run); b = zeros(n, 1); f = zeros(n, 1);', 'w = 1e-3 * (1 + 3 * (p.n_rx < 3));', ...
+fprintf(fid, '%s\n', 'function [b, f] = surv3_stub_value(threat, p, a, s, nS, run, ev)', ...
+    'n = numel(run); b = zeros(n, 1); f = zeros(n, 1);', 'w = 1e-3 * (1 + 3 * (p.n_rx < 3)) * (1 + 3 * ev);', ...
     'if s == nS, w = 0; end', 'if strcmp(threat, ''none'')', '    b(:) = w; if s == 1, f(:) = 1; end', '    return', ...
     'end', 'if strcmp(a, ''no_action''), b(:) = 0.2; f(:) = 1; return; end', 'odd = mod(run, 2) == 1;', ...
     'b(odd) = 0.75 * w; b(~odd) = 0.05; f(~odd) = 1;', 'end');

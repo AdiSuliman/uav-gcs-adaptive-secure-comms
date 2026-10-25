@@ -24,8 +24,9 @@
 % packet bound passes 100% is marked link-limited (L) and the comparison is repeated on the
 % Eb/N0 without L (surv3_report.m); the single threats run at the sources' most severe level;
 % the airframe-shadowing combinations fly flights selected so that the roll-in hides an
-% antenna (surv3_shadow_flights.m); every geometry's BER, packet loss and slack are saved
-% (surv3_metrics.m). Without it (profile 1) the experiment is as described above.
+% antenna (surv3_shadow_flights.m), judged against the clean link of those flights; every
+% geometry's BER, packet loss and slack are saved (surv3_metrics.m). Without it (profile 1)
+% the experiment is as described above.
 %
 % Output: results/survivability_options.txt, data/survivability_options.mat
 
@@ -99,7 +100,7 @@ if ~SV.v2
         P = pool_cell(p, 'none', {'no_action'}, EBNO, geo, [], opt);
         clean{k} = struct('ber', cellfun(@(Q) mean(Q.ber), P(:, 1, 1))', 'fer', cellfun(@(Q) mean(double(Q.fer)), P(:, 1, 1))');
     end
-else                                                   % per geometry too; also on the shadowing flights (saved, not the reference)
+else                                                   % per geometry too; also on the shadowing flights (their reference)
     CG = {geo, geo}; KN = [1 2];
     if ~isempty(geo_sh), CG = [CG, {geo_sh, geo_sh}]; KN = [KN, 1 2]; end
     cl = cell(1, numel(KN));
@@ -125,7 +126,7 @@ end
 ord = pool_schedule(w);                                % the longest job first, one per free worker
 S = struct('cases', {cases}, 'VAR', {VAR}, 'jobs', {jobs}, 'p0', {p0}, 'ACTIONS', {ACTIONS}, 'EBNO', {EBNO}, ...
     'geo', {geo}, 'opt', {opt}, 'nS', {nS}, 'N_GEOM', {N_GEOM}, 'clean', {clean}, 'C', {C}, 'RATIO', {RATIO});
-if SV.v2, S.V2 = true; S.geo_sh = geo_sh; end
+if SV.v2, S.V2 = true; S.geo_sh = geo_sh; S.clean_sh = clean_sh; end
 res = pool_lpt(@(S, j) pool_job('surv3', S, j), S, ord, pl);
 clear S
 res(ord) = res;                                        % back in job order
@@ -140,10 +141,14 @@ clear res
 if SV.v2
     % Every variant also against the system's clean link; the report with the L marks
     rec_sys = cell(1, nJ); best_sys = cell(1, nJ);
-    for j = 1:nJ, [rec_sys{j}, best_sys{j}] = surv3_judge(met{j}, clean{2}, RATIO, C.ber_floor, ACTIONS); end
+    for j = 1:nJ
+        cs = clean{2}; if contains(cases(jobs(j, 1)).threat, 'airframe_shadowing'), cs = clean_sh{2}; end
+        [rec_sys{j}, best_sys{j}] = surv3_judge(met{j}, cs, RATIO, C.ber_floor, ACTIONS);
+    end
     X = struct('cases', {cases}, 'VAR', {VAR}, 'EBNO', {EBNO}, 'jobs', {jobs}, 'rec', {rec}, 'rec_sys', {rec_sys}, ...
-        'clean', {clean}, 'nCombo', {numel(COMBOS)}, 'N_GEOM', {N_GEOM}, 'RUN_FRAMES', {RUN_FRAMES}, 'RATIO', {RATIO}, ...
-        'RELAY_DEG', {RELAY_DEG}, 'RELAY_LOSS_DB', {RELAY_LOSS_DB}, 'floor', {C.ber_floor}, 'SH', {SH});
+        'clean', {clean}, 'clean_sh', {clean_sh}, 'nCombo', {numel(COMBOS)}, 'N_GEOM', {N_GEOM}, ...
+        'RUN_FRAMES', {RUN_FRAMES}, 'RATIO', {RATIO}, 'RELAY_DEG', {RELAY_DEG}, 'RELAY_LOSS_DB', {RELAY_LOSS_DB}, ...
+        'floor', {C.ber_floor}, 'SH', {SH});
     [rep, T3, T3s, Lm, okS] = surv3_report(X);
     clear X
     fid = fopen('results/survivability_options.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);

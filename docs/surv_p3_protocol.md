@@ -145,7 +145,9 @@ N2; profile 1's run of 25.10, code 208602b). The same switch: with `surv_v2` tru
 below apply; without it every seed, number, text and saved variable is profile 1's
 (`test_surv3_profile1_identity`). Only the n - 1 antennas comparison is reported (profile 3:
 3 against 4 antennas); the relay path runs as before and changes only as below. Item 5 (the
-erasure flag read on antenna 1) belongs to design Part A, not to this section.
+erasure flag read on antenna 1) belongs to design Part A, not to this section. Amended the
+same day, still before any profile 3 SURV3 data: the shadowing combinations' reference is the
+clean link of their own flights (10.4).
 
 ### 10.1 Unchanged
 
@@ -155,7 +157,7 @@ erasure flag read on antenna 1) belongs to design Part A, not to this section.
 - The rule per geometry (KPI 4): some configuration with BER <= 2x max(clean, 1e-4) and packet
   loss <= 2x the clean link's + one loss event of the run (`packet_share.m`).
 - The clean reference: the mean over the same 8 geometries per Eb/N0 (the KPI 4 population
-  reference).
+  reference); for the shadowing combinations, their own 8 flights (10.4).
 
 ### 10.2 Link-limited mark (review item 1)
 
@@ -165,8 +167,8 @@ erasure flag read on antenna 1) belongs to design Part A, not to this section.
   (0.475) is L.
 - Each column of the per-Eb/N0 table carries L where its reference is L; the clean packet loss
   is printed with the marks. L points stay in the rule's count; they are marked, not removed.
-- **Like for like:** the shares are also given over the Eb/N0 where neither clean link is L
-  (profile 1: 12-15 dB), beside the shares over all Eb/N0.
+- **Like for like:** the shares are also given over the Eb/N0 where no clean link is L, the
+  shadowing flights' included (profile 1: 12-15 dB), beside the shares over all Eb/N0.
 
 ### 10.3 Both references (review item 2)
 
@@ -203,15 +205,21 @@ erasure flag read on antenna 1) belongs to design Part A, not to this section.
 - The same 8 flights per Eb/N0 serve all three combinations and all three variants (common
   random numbers); run ids 1301-1308 as the other geometries. The relay flies them too: its
   signal from 60 deg off may not be hidden, which is the relay's physics.
-- The reference stays the population clean link of 10.1. The clean link of the selected
-  flights is measured as well and saved (`clean_sh`); the rule does not use it.
+- Their reference is the clean link of the same selected flights (`clean_sh`, per receiver,
+  the mean over those 8 flights per Eb/N0 as in 10.1), as the pools' shadowing cells are
+  restored against the clean link of their own flights (`build_policy_pools.m`, `PP.ref_geo`).
+  The selected flights differ from the shared ones in speed (from the floor) and attitude
+  (a roll-in), so the shared flights' link would mix that geometry into the threat's
+  effect. The system's reference of 10.3 is likewise the n-antenna link of these flights.
+  Their clean links carry L marks of their own (rows 3-4 of `Lm`) and are printed.
 - The candidates tried per Eb/N0 are printed and saved (`SH`). The shadowing rows are
   conditioned on a flight that hides an antenna, as the pools' shadowing points are.
 
 ### 10.5 Single threats at the sources' most severe level (review N1)
 
 - Level 5 of `decision_config.m` ("very high"): 30 dB for jamming, reactive jamming, noise
-  bursts, the sweeper and the tone (the in-band cap, Liu et al.), spoofing at SIR 30 dB.
+  bursts, the sweeper and the tone (the in-band cap, Liu et al.), the spoofer 30 dB over our
+  signal (`spoof_sir_db`, spoof-to-signal ratio).
   Profile 1 ran level 4 (23 dB; spoofing 12 dB). Same jobs, same cost.
 - Expected, stated now: channel switching leaves 30 - 30 = 0 dB (`cm_acr_db`), so nulling
   decides and the shares fall for both arrays. One emitter needs one null, which both arrays
@@ -242,9 +250,10 @@ erasure flag read on antenna 1) belongs to design Part A, not to this section.
   `hides_antenna.m`, without and with `surv_v2`. Without it: the geometries of block 13, the
   level 23 dB, each receiver against its own link, the saved variables and the text as
   before. With it: the shadowing combination on the selected flights (event 1, 20 frames, the
-  candidates' seeds, both antenna counts asked), the level 30 dB, the system's reference, the
-  L marks and the like-for-like line, the saved per-geometry values; outside the smoke the
-  refusal without `fec_rx`.
+  candidates' seeds, both antenna counts asked) judged against the clean link of those
+  flights and not the shared one, the level 30 dB, the system's reference, the L marks and the
+  like-for-like line, the saved per-geometry values; outside the smoke the refusal without
+  `fec_rx`.
 - `test_surv3_v2_job`: a job under `surv_v2` gives the same `rec` and `best` as without it on
   the same frames; the saved values; the judgment against another clean link.
 - `test_surv3_link_limited`: the L marks on profile 1's clean links (two antennas L at 0-9 dB,
