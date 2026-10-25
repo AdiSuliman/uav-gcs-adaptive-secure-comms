@@ -1015,6 +1015,330 @@ verifyEqual(tc, out{2}(odd), repmat({'power_control'}, nnz(odd), 1));
 verifyTrue(tc, all(cellfun(@isempty, out{2}(~odd))));
 end
 
+function test_surv_options(tc)
+% The survivability map's protocol switch (profile.json surv_v2, surv_options.m): no file, no
+% field (profile 3's file before step 7a) or false run the one-flight map; true runs surv_v2
+% with five flights per cell; any other value is refused.
+f = [tempname '.json'];
+one = struct('v2', false, 'NR', 1);
+verifyEqual(tc, surv_options(f), one);
+wr = @(t) write_text(f, t);
+wr('{"profile":"profile 3: four antennas","n_rx":4}'); verifyEqual(tc, surv_options(f), one);
+wr('{"n_rx":4,"surv_v2":false}'); verifyEqual(tc, surv_options(f), one);
+wr('{"n_rx":4,"fec_rx":"d78","surv_v2":true}'); verifyEqual(tc, surv_options(f), struct('v2', true, 'NR', 5));
+for bad = {'{"surv_v2":1}', '{"surv_v2":"true"}', '{"surv_v2":[true,false]}'}
+    wr(bad{1}); verifyError(tc, @() surv_options(f), 'surv_options:value', bad{1});
+end
+delete(f);
+end
+
+function test_surv_flights_crn(tc)
+% Common random numbers of the surv_v2 map (surv_flights.m, pool_job.m 'surv'): every cell of
+% an entry flies the same NR flights, seeds 900000 + 1000 t + (1:NR), at every level and every
+% Eb/N0; the one-flight map keeps its seed per level and Eb/N0 (900000 + 1000 t + 10 li + s,
+% one run). The two families are disjoint. The entry's pattern (pset) reaches the job's params.
+% surv_runs keeps each flight's BER, packet loss and slack.
+g = surv_flights(3, 5, 72);
+verifyEqual(tc, g.seed, 903001:903005); verifyEqual(tc, g.run, 1:5); verifyEqual(tc, g.speed, 72 * ones(1, 5));
+verifyError(tc, @() surv_flights(1, 11, 72), 'surv_flights:nr');
+verifyError(tc, @() surv_flights(1, 0, 72), 'surv_flights:nr');
+[t, li, s] = ndgrid(1:20, 1:10, 1:9);
+[t2, r] = ndgrid(1:20, 1:10);
+verifyEmpty(tc, intersect(900000 + 1000*t(:) + 10*li(:) + s(:), 900000 + 1000*t2(:) + r(:)));
+d = surv_stub_dir(); cl = onCleanup(@() stub_off(d)); %#ok<NASGU>
+global SURV_STUB_LOG %#ok<GVMIS>
+p = base_params(); p.jam_timing_random = false;           % as the map sets it
+mp = struct('name', 'noise_burst random 0.775', 'level_field', 'jsr_db', 'levels', [4 16], 'aoa', NaN, ...
+    'base', 'noise_burst', 'pset', struct('burst_duty', 0.775));
+A = {'no_action', 'power_control'}; EB = [0 3 6];
+S = struct('jobs', [1 1; 1 2], 'maps', mp, 'p0', p, 'RUN_FRAMES', 20, 'v_nom', 72, 'nS', 3, 'ACTIONS', {A}, ...
+    'SNR_points', EB, 'opt', struct('F_SUB', 20, 'tw', 10, 'delay_bits', 20), 'NR', 5);
+SURV_STUB_LOG = {};
+o1 = pool_job('surv', S, 1); o2 = pool_job('surv', S, 2);
+L = [SURV_STUB_LOG{:}];
+verifyEqual(tc, numel(L), 6);
+for k = 1:6
+    verifyEqual(tc, L(k).seed, 901001:901005); verifyEqual(tc, L(k).run, 1:5);
+    verifyEqual(tc, L(k).duty, 0.775); verifyFalse(tc, L(k).timing);
+end
+verifyEqual(tc, size(o1{1}), [2 3 5]);                                  % configurations x Eb/N0 x flights
+verifyEqual(tc, size(o2{3}), [2 3 5]);
+verifyEqual(tc, squeeze(o1{1}(1, 1, :))', 0.3 * ones(1, 5));            % the stand-in at duty 0.775: every flight hit
+verifyEqual(tc, squeeze(o1{3}(1, 1, :))', ones(1, 5) / 20);             % one frame of a flight's 20
+S.NR = []; S.maps.pset = struct();
+SURV_STUB_LOG = {};
+o = pool_job('surv', S, 2);
+L = [SURV_STUB_LOG{:}];
+verifyEqual(tc, [L.seed], 900000 + 1000 + 20 + (1:3));                  % profile 1's: per level and Eb/N0
+verifyEqual(tc, [L.run], ones(1, 3));
+verifyEqual(tc, [L.duty], p.burst_duty * ones(1, 3));
+verifyEqual(tc, size(o{1}), [2 3]);
+verifyEqual(tc, o{1}, [0.3 0.3 0.3; 0 0 0]);                              % duty 0.5: no_action hit, its run's mean
+% surv_runs on a stand-in pool: two flights of four frames
+Q = struct('run', [1 1 1 1 2 2 2 2]', 'ber', [0 0.1 0 0.1 0 0 0 0.4]', 'fer', [0 1 0 1 0 0 0 1]');
+[rB, rF, rS] = surv_runs({Q, Q}, {'no_action', 'fec_interleave'}, 2);
+verifyEqual(tc, squeeze(rB(1, 1, :))', [0.05 0.1], 'AbsTol', 1e-15);
+verifyEqual(tc, squeeze(rF(2, 1, :))', [0.5 0.25]);
+verifyEqual(tc, squeeze(rS(1, 1, :))', [0.25 0.25]);
+verifyEqual(tc, squeeze(rS(2, 1, :))', [packet_share('fec_interleave', [0 1 0 1]) packet_share('fec_interleave', [0 0 0 1])]);
+end
+
+function test_surv_nb_entries(tc)
+% The noise-burst entries of the surv_v2 map (surv_nb_entries.m): each geometry's noise_burst
+% entry becomes Xu et al.'s random jammer at the most severe duty of their range (0.775) and
+% Marti et al.'s J4 (0.2), in place; every other entry is kept with an empty pattern. With
+% jam_timing_random off the model's gate takes the entry's duty (flight_draws.m).
+p = base_params();
+DL = dataset_levels();
+tcfg = struct('name', {DL.name}, 'level_field', {DL.param}, 'levels', {DL.levels});
+maps = struct('name', {}, 'level_field', {}, 'levels', {}, 'aoa', {}, 'base', {});
+for t = 1:numel(tcfg)
+    if ismember(tcfg(t).name, {'path_loss', 'antenna_fault', 'airframe_shadowing'}), ga = NaN; else, ga = p.geom_aoa_deg; end
+    for g = ga
+        e = tcfg(t); e.aoa = g; e.base = e.name;
+        if ~isnan(g), e.name = sprintf('%s @ %g deg', e.base, g); end
+        maps(end+1) = e; %#ok<AGROW>
+    end
+end
+M = surv_nb_entries(maps, p);
+verifyEqual(tc, numel(M), numel(maps) + 2);
+nb = find(strcmp({M.base}, 'noise_burst'));
+verifyEqual(tc, numel(nb), 4);
+verifyEqual(tc, arrayfun(@(e) e.pset.burst_duty, M(nb)), [0.775 0.2 0.775 0.2]);
+verifyEqual(tc, {M(nb).name}, {sprintf('noise_burst random 0.775 @ %g deg', p.geom_aoa_deg(1)), ...
+    sprintf('noise_burst J4 0.2 @ %g deg', p.geom_aoa_deg(1)), sprintf('noise_burst random 0.775 @ %g deg', p.geom_aoa_deg(2)), ...
+    sprintf('noise_burst J4 0.2 @ %g deg', p.geom_aoa_deg(2))});
+verifyEqual(tc, numel(unique({M.name})), numel(M));
+other = M(~strcmp({M.base}, 'noise_burst'));
+verifyTrue(tc, all(arrayfun(@(e) isempty(fieldnames(e.pset)), other)));
+verifyEqual(tc, rmfield(other, 'pset'), maps(~strcmp({maps.base}, 'noise_burst')));
+L0 = maps(find(strcmp({maps.base}, 'noise_burst'), 1)).levels;
+verifyEqual(tc, [M(nb(1)).levels; M(nb(2)).levels], [L0; L0]);
+q = p; q.jam_timing_random = false;
+for k = nb(1:2)
+    q.burst_duty = M(k).pset.burst_duty;
+    d = flight_draws(17, 100, q);
+    verifyEqual(tc, d.jam(4), M(k).pset.burst_duty);
+end
+verifyLessThan(tc, M(nb(2)).pset.burst_duty, p.burst_duty_range(1));    % J4's one-symbol slots (build_threat_model.m)
+q = p; q.burst_j4 = [0.6 0.5];
+verifyError(tc, @() surv_nb_entries(maps, q), 'surv_nb_entries:j4');
+end
+
+function test_surv_grid_marks(tc)
+% The surv_v2 map's cells (surv_grid.m): the status rule on the flights' means is the
+% one-flight map's (build_map in map_survivability_boundary.m) on random cells; the marks L
+% (an R cell where the clean link loses half of its packets or more), N (no_action passes)
+% and saturated; the interval over the flights, its Clopper-Pearson floor at no event, and
+% the committed verdict (the status at both ends of the intervals).
+A = {'no_action', 'power_control', 'rate_reduce', 'power_control+fec_interleave'};
+Z = struct('ok', 2, 'marg', 5, 'sat', 0.45, 'lim', 0.5, 'frames', 57, 'bits', 1032, 'B', 4000);
+% the rule on random cells, against the one-flight map's
+rs = RandStream('mt19937ar', 'Seed', 3);
+nL = 6; nS = 4;
+B = 10 .^ (-6 + 5 * rand(rs, nL, 4, nS)); Fe = rand(rs, nL, 4, nS) .^ 3; Sl = 0.05 * rand(rs, nL, 4, nS);
+ref = max(10 .^ (-5 + 2 * rand(rs, 1, nS)), 1e-4); fc = rand(rs, 1, nS) .^ 2;
+mp = struct('name', 'x', 'base', 'jamming', 'aoa', 11.4, 'levels', 1:nL);
+for as = {A(2:4), A(2)}
+    G = surv_grid({B}, {Fe}, {Sl}, {cat(4, B, B)}, {cat(4, Fe, Fe)}, mp, A, as{1}, ref, fc, Z);
+    cols = find(ismember(A, as{1}));
+    for li = 1:nL
+        for s = 1:nS
+            okc = B(li, cols, s) <= 2 * ref(s) & Fe(li, cols, s) <= 2 * fc(s) + Sl(li, cols, s);
+            if any(okc)
+                cand = cols(okc); [bb, k] = min(B(li, cand, s)); kc = cand(k); st = 1;
+            else
+                [bb, k] = min(B(li, cols, s)); kc = cols(k);
+                if bb / ref(s) <= 5, st = 2; else, st = 3; end
+            end
+            verifyEqual(tc, G.status(li, s), st); verifyEqual(tc, G.best_action{li, s}, A{kc});
+            verifyEqual(tc, G.ber_best(li, s), bb); verifyEqual(tc, G.ratio(li, s), bb / ref(s));
+            verifyTrue(tc, G.committed(li, s));                         % identical flights: no spread
+        end
+    end
+    verifyEqual(tc, G.link_limited, G.status == 1 & fc >= 0.5);
+    verifyEqual(tc, G.ber_attacked, squeeze(B(:, 1, :)));
+end
+% three levels, five flights, two Eb/N0 (the clean link loses 60% of its packets at the first)
+ref = [1e-4 1e-4]; fc = [0.6 0];
+Br = zeros(3, 4, 2, 5); Fr = Br; Sl = repmat([1 1 1 2] / 57, [3 1 2]); Sl(:, 4, :) = 1 / 28;
+Br(2, 1, :, :) = 0.02; Fr(2, 1, :, :) = 1; Br(2, 3:4, :, :) = 0.01;   % level 2: no_action and the rest hit,
+Br(2, 2, :, 1) = 6e-4;                                                % power_control on one flight of five
+Br(3, :, :, :) = 0.47; Br(3, 1, :, :) = 0.5; Fr(3, :, :, :) = 1;        % level 3: saturated
+mp = struct('name', 'x', 'base', 'jamming', 'aoa', 11.4, 'levels', [4 16 30]);
+G = surv_grid({mean(Br, 4)}, {mean(Fr, 4)}, {Sl}, {Br}, {Fr}, mp, A, A(2:4), ref, fc, Z);
+verifyEqual(tc, G.status, [1 1; 1 1; 3 3]);
+verifyEqual(tc, G.link_limited, logical([1 0; 1 0; 0 0]));
+verifyEqual(tc, G.no_action_ok, logical([1 1; 0 0; 0 0]));
+verifyEqual(tc, G.saturated, logical([0 0; 0 0; 1 1]));
+verifyEqual(tc, G.best_action(2, :), {'power_control', 'power_control'});
+verifyEqual(tc, G.committed, logical([1 1; 0 0; 1 1]));                % mean 1.2e-4 within 2x, its interval not
+verifyEqual(tc, G.status_hi(2, :), [2 2]);
+verifyGreaterThan(tc, G.ber_hi(2, 2), 2e-4); verifyEqual(tc, G.ber_lo(2, 2), 0);
+verifyEqual(tc, G.ber_hi(1, 2), 1 - 0.025 ^ (1 / (5 * 57 * 1032)), 'RelTol', 1e-12);   % no error in five flights
+verifyEqual(tc, G.fer_hi(1, 2), 1 - 0.025 ^ (1 / (5 * 57)), 'RelTol', 1e-12);
+verifyEqual(tc, G.ber_lo(3, 1), 0.47); verifyEqual(tc, G.ber_hi(3, 1), 0.47);
+G = surv_grid({mean(Br, 4)}, {mean(Fr, 4)}, {Sl}, {Br}, {Fr}, mp, A, A(4), ref, fc, Z);
+verifyEqual(tc, G.ber_hi(1, 2), 1 - 0.025 ^ (1 / (5 * 28 * 1032)), 'RelTol', 1e-12);   % the coded link: packets
+verifyEqual(tc, G.fer_hi(1, 2), 1 - 0.025 ^ (1 / (5 * 28)), 'RelTol', 1e-12);
+verifyTrue(tc, G.committed(1, 2));                                      % 2.6% < one event in 28 packets
+end
+
+function test_surv_cell_label(tc)
+% A cell of the surv_v2 map's text (surv_cell_label.m): status letter (L for a link-limited
+% R), the configuration's letters, N in their place when no_action passes, none for a
+% saturated X, ? when not committed.
+verifyEqual(tc, surv_cell_label(1, 'SP', false, false, false, true), 'RSP');
+verifyEqual(tc, surv_cell_label(1, 'SP', true, false, false, true), 'RN');
+verifyEqual(tc, surv_cell_label(1, 'SP', true, true, false, false), 'LN?');
+verifyEqual(tc, surv_cell_label(1, 'SP', false, true, false, true), 'LSP');
+verifyEqual(tc, surv_cell_label(2, 'P', false, true, false, false), 'MP?');    % L marks R cells only
+verifyEqual(tc, surv_cell_label(3, 'E', false, false, true, true), 'Xnone');
+verifyEqual(tc, surv_cell_label(3, 'E', false, false, false, true), 'XE');
+verifyEqual(tc, surv_cell_label(0, '', false, false, false, true), '.');
+end
+
+function test_surv_gap_report(tc)
+% The surv_v2 gap analysis (surv_gap_report.m): class 1 Map A X to Map B R or M, class 2
+% Map A M to Map B R; no other change counts; a zero ratio reads "0 err"; L and ? marks.
+ba = repmat({'power_control'}, 2, 3); bb = repmat({'rate_reduce'}, 2, 3);
+GA = struct('threat', 'x', 'levels', [4 16], 'status', [3 3 2; 2 1 3], 'ratio', [100 50 3; 4 1 9], ...
+    'best_action', {ba}, 'link_limited', false(2, 3), 'committed', true(2, 3));
+GB = struct('threat', 'x', 'levels', [4 16], 'status', [1 2 1; 2 1 3], 'ratio', [0 4 1.5; 4 1 9], ...
+    'best_action', {bb}, 'link_limited', logical([1 0 0; 0 0 0]), 'committed', logical([1 1 0; 1 1 1]));
+[rep, M] = surv_gap_report(GA, GB, [0 3 6]);
+verifyEqual(tc, M.g1, logical([1 1 0; 0 0 0]));
+verifyEqual(tc, M.g2, logical([0 0 1; 0 0 0]));
+txt = strjoin(rep, newline);
+verifyNotEmpty(tc, strfind(txt, 'class 1 level=4, Eb/N0=0dB: Map A 100.00x (power_control) | Map B 0 err (rate_reduce) L'));
+verifyNotEmpty(tc, strfind(txt, 'class 2 level=4, Eb/N0=6dB: Map A 3.00x (power_control) | Map B 1.50x (rate_reduce) ?'));
+verifyNotEmpty(tc, strfind(txt, 'Total gap cells: 2 class 1, 1 class 2'));
+end
+
+function test_surv_map_profile1_identity(tc)
+% The whole survivability map script (map_survivability_boundary.m, smoke) on a stand-in
+% pool_cell.m, once without profile.json (profile 1) and once with "surv_v2": true.
+% Profile 1: seeds per level and Eb/N0, one run each; the one-flight statuses; the saved
+% variables, the header and the gap file as before (no marks, "%.2fx"). surv_v2: the same
+% flights at every level and Eb/N0 of an entry, the noise-burst entries at duties 0.775 and
+% 0.2, the means of the flights in the rule, the L, N and none marks, the committed verdict,
+% the two gap classes and the per-flight values saved.
+d = surv_stub_dir(); cl = onCleanup(@() stub_off(d)); %#ok<NASGU>
+global SURV_STUB_LOG %#ok<GVMIS>
+here = pwd; back = onCleanup(@() cd(here)); %#ok<NASGU>
+w1 = fullfile(here, 'surv_p1'); mkdir(w1); cd(w1);
+SURV_STUB_LOG = {};
+evalc('surv_script_run(true)');
+L = [SURV_STUB_LOG{:}]; L = L(~strcmp({L.threat}, 'none'));
+[t, li, s] = ndgrid(1:3, 1:2, 1:6);
+verifyEqual(tc, sort([L.seed]), sort(900000 + 1000*t(:)' + 10*li(:)' + s(:)'));
+verifyEqual(tc, [L.run], ones(1, 36));
+F = load(fullfile('data', 'survivability_boundary.mat'));
+verifyEqual(tc, sort(fieldnames(F)), sort({'grid_data_A'; 'grid_data_B'; 'ber_clean'; 'ber_ref'; 'fer_clean'; 'BER_FLOOR'; ...
+    'SNR_points'; 'RATIO_RECOVERABLE'; 'RATIO_MARGINAL'; 'MECH_A'; 'MECH_B'; 'ber_all'; 'fer_all'; 'slack_all'; ...
+    'threat_cfg'; 'maps'; 'GEOM_AOA'; 'RUN_FRAMES'; 'ACTIONS'}));
+verifyEqual(tc, sort(fieldnames(F.grid_data_A)), sort({'threat'; 'base'; 'aoa'; 'levels'; 'ber_best'; 'ratio'; 'status'; ...
+    'ber_attacked'; 'best_action'}));
+verifyEqual(tc, {F.maps.name}, {sprintf('jamming @ %g deg', F.GEOM_AOA(1)), sprintf('jamming @ %g deg', F.GEOM_AOA(2)), 'path_loss'});
+for k = 1:2
+    verifyEqual(tc, F.grid_data_A(k).status, [2 * ones(1, 6); 3 * ones(1, 6)]);
+    verifyEqual(tc, F.grid_data_B(k).status, [2 * ones(1, 6); 3 * ones(1, 6)]);   % one flight: 3e-4, 3x
+end
+verifyEqual(tc, F.grid_data_A(3).status, [ones(1, 6); 3 * ones(1, 6)]);
+verifyEqual(tc, F.grid_data_B(3).status, ones(2, 6));
+verifyEqual(tc, F.fer_clean, [1 0 0 0 0 0]);
+txt = fileread(fullfile('results', 'survivability_boundary_mapA.txt'));
+verifyNotEmpty(tc, strfind(txt, 'Clean-link reference BER per Eb/N0 (measured, floor 1e-4 = resolution of a cell):'));
+verifyEmpty(tc, strfind(txt, 'LINK-LIMITED'));
+verifyEmpty(tc, strfind(txt, 'surv_v2'));
+gap = fileread(fullfile('results', 'survivability_gap_analysis.txt'));
+verifyNotEmpty(tc, strfind(gap, 'Total gap cells: 6'));
+verifyNotEmpty(tc, strfind(gap, '| Map B 0.00x ('));
+cd(here);
+w2 = fullfile(here, 'surv_v2'); mkdir(w2); cd(w2);
+write_text('profile.json', '{"surv_v2":true}');
+SURV_STUB_LOG = {};
+evalc('surv_script_run(true)');
+L = [SURV_STUB_LOG{:}]; L = L(~strcmp({L.threat}, 'none'));
+verifyEqual(tc, numel(L), 7 * 2 * 6);
+k = arrayfun(@(x) (x.seed(1) - 900001) / 1000, L);
+for e = 1:7
+    verifyEqual(tc, nnz(k == e), 12, sprintf('entry %d', e));
+    for x = L(k == e), verifyEqual(tc, x.seed, 900000 + 1000 * e + (1:2)); verifyEqual(tc, x.run, 1:2); end
+end
+nb = L(strcmp({L.threat}, 'noise_burst'));
+verifyEqual(tc, sort(unique([nb.duty])), [0.2 0.775]);
+verifyEqual(tc, nnz([nb.duty] == 0.775), 24);
+verifyFalse(tc, any([L.timing]));
+F = load(fullfile('data', 'survivability_boundary.mat'));
+verifyEqual(tc, F.NR, 2); verifyTrue(tc, F.SV.v2);
+nA = numel(F.ACTIONS);
+verifyEqual(tc, size(F.ber_run{1}), [2 nA 6 2]);
+verifyEqual(tc, F.ber_all{1}, mean(F.ber_run{1}, 4));
+verifyEqual(tc, numel(F.maps), 7);
+verifyEqual(tc, {F.maps([3 4]).name}, {sprintf('noise_burst random 0.775 @ %g deg', F.GEOM_AOA(1)), ...
+    sprintf('noise_burst J4 0.2 @ %g deg', F.GEOM_AOA(1))});
+A1 = F.grid_data_A(1); B1 = F.grid_data_B(1);
+verifyEqual(tc, A1.status, [2 * ones(1, 6); 3 * ones(1, 6)]);
+verifyTrue(tc, all(A1.committed(:)));
+verifyEqual(tc, B1.status, [ones(1, 6); 3 * ones(1, 6)]);                % two flights: 1.5e-4 within 2x
+verifyEqual(tc, B1.link_limited, logical([1 0 0 0 0 0; zeros(1, 6)]));
+verifyEqual(tc, B1.committed, logical([zeros(1, 6); ones(1, 6)]));
+verifyTrue(tc, all(B1.saturated(2, :)));
+verifyEqual(tc, F.grid_data_B(3).status, 3 * ones(2, 6));               % random 0.775: every configuration hit
+verifyEqual(tc, F.grid_data_B(4).status, ones(2, 6));                   % J4
+P7 = F.grid_data_B(7);
+verifyTrue(tc, all(P7.no_action_ok(1, :))); verifyEqual(tc, P7.link_limited(1, :), [true false(1, 5)]);
+verifyTrue(tc, all(F.gap_cls(7).g1(2, :))); verifyTrue(tc, all(F.gap_cls(1).g2(1, :)));
+txt = fileread(fullfile('results', 'survivability_boundary_mapB.txt'));
+verifyNotEmpty(tc, strfind(txt, 'Protocol surv_v2'));
+verifyNotEmpty(tc, strfind(txt, 'the decision layer''s reference floor; cell resolution'));
+verifyNotEmpty(tc, strfind(txt, 'Xnone')); verifyNotEmpty(tc, regexp(txt, '\sLN\s', 'once'));
+gap = fileread(fullfile('results', 'survivability_gap_analysis.txt'));
+verifyNotEmpty(tc, strfind(gap, '| Map B 0 err ('));
+verifyNotEmpty(tc, strfind(gap, 'Total gap cells: 6 class 1, 12 class 2'));
+cd(here);
+end
+
+function surv_script_run(SMOKE) %#ok<INUSD>
+% The survivability map script in a workspace of its own, with run_stage's SMOKE.
+map_survivability_boundary;
+end
+
+function d = surv_stub_dir()
+% A stand-in pool_cell.m for the survivability map, first on the path: per Eb/N0 it logs the
+% flights and the duty it was given (global SURV_STUB_LOG) and returns frames whose BER and
+% loss follow surv_stub_value.m: the clean link loses every packet at the first Eb/N0;
+% jamming at 16 dB saturates every configuration; jamming at 4 dB leaves goodput-free
+% configurations at 3e-4 and the others at 3e-4 on flight 1 only; path loss of 16 dB hits the
+% goodput-free configurations; noise bursts above duty 0.5, and no_action under any threat
+% but path loss, are hit.
+d = fullfile(tempname); mkdir(d);
+fid = fopen(fullfile(d, 'pool_cell.m'), 'w');
+fprintf(fid, '%s\n', 'function [P, info] = pool_cell(p, threat, A, EB, geo, ~, opt)', 'global SURV_STUB_LOG', ...
+    'P = cell(numel(EB), numel(A), 1);', 'for s = 1:numel(EB)', '    g = geo{s};', ...
+    ['    SURV_STUB_LOG{end+1} = struct(''threat'', threat, ''duty'', p.burst_duty, ''timing'', ' ...
+    'p.jam_timing_random, ''seed'', g.seed, ''run'', g.run);'], ...
+    '    for a = 1:numel(A)', '        run = repelem(g.run(:), opt.F_SUB);', ...
+    '        [b, f] = surv_stub_value(threat, p, A{a}, s, run);', ...
+    '        P{s, a, 1} = struct(''run'', run, ''ber'', b, ''fer'', f);', '    end', 'end', ...
+    'info = struct(''n_unique'', numel(A), ''map'', 1:numel(A));', 'end');
+fclose(fid);
+fid = fopen(fullfile(d, 'surv_stub_value.m'), 'w');
+fprintf(fid, '%s\n', 'function [b, f] = surv_stub_value(threat, p, a, s, run)', ...
+    'n = numel(run); b = zeros(n, 1); f = zeros(n, 1);', ...
+    'gl = contains(a, ''rate_reduce'') || contains(a, ''fec_interleave'');', 'switch threat', ...
+    '    case ''none''', '        if s == 1, f(:) = 1; end', '    case ''jamming''', ...
+    '        if p.jsr_db == 16, b(:) = 0.48; f(:) = 1;', ...
+    '        elseif strcmp(a, ''no_action''), b(:) = 0.02; f(:) = 1;', '        elseif ~gl, b(:) = 3e-4;', ...
+    '        else, b(run == 1) = 3e-4;', '        end', '    case ''path_loss''', ...
+    '        if p.path_loss_db == 16 && ~gl, b(:) = 0.01; f(:) = 1; end', '    case ''noise_burst''', ...
+    '        if p.burst_duty > 0.5 || strcmp(a, ''no_action''), b(run == 1) = 0.3; f(run == 1) = 1; end', ...
+    '        if p.burst_duty > 0.5, b(:) = 0.3; f(:) = 1; end', 'end', 'end');
+fclose(fid);
+addpath(d, '-begin'); clear pool_cell surv_stub_value
+end
+
 function stub_off(d)
 % Removes a stand-in folder from the path and the disk.
 rmpath(d); clear pool_cell
@@ -1044,6 +1368,8 @@ S = [S; arrayfun(@(si, bi) pool_seed(1, si, bi, 100), s(:), b(:))];
 S = [S; arrayfun(@(si, ri, bi, fi) pool_seed(fi, si, bi, ri), s(:), r(:), b(:), f(:))];
 [t, li, s] = ndgrid(1:20, 1:8, 1:6);                    % survivability map: entries, levels, Eb/N0
 S = [S; 900000 + 1000*t(:) + 10*li(:) + s(:); 700000 + (1:5)'];
+[t, r] = ndgrid(1:20, 1:5);                             % the surv_v2 map: entries, flights (surv_flights.m)
+S = [S; 900000 + 1000*t(:) + r(:)];
 k = (1:99999)';
 S = [S; 3000000 + k; 4000000 + k; 5000000 + k];         % dataset, unseen Eb/N0 and unseen severity runs
 S = [S; 3500000 + k; 4500000 + k; 5500000 + k];         % the second test set and the second B4 and B4s readings
@@ -8644,6 +8970,8 @@ S = [S; arrayfun(@(si, bi) pool_seed(1, si, bi, 100), s(:), b(:))];
 S = [S; arrayfun(@(si, ri, bi, fi) pool_seed(fi, si, bi, ri), s(:), r(:), b(:), f(:))];
 [t, li, s] = ndgrid(1:20, 1:8, 1:6);
 S = [S; 900000 + 1000*t(:) + 10*li(:) + s(:); 700000 + (1:5)'];
+[t, r] = ndgrid(1:20, 1:5);
+S = [S; 900000 + 1000*t(:) + r(:)];
 k = (1:99999)';
 S = [S; 3000000 + k; 4000000 + k; 5000000 + k; 3500000 + k; 4500000 + k; 5500000 + k; 6500000 + k; 6000000 + k];
 [s, r, b] = ndgrid(1:6, 1:99, [5 7 14 16 18 19]);
