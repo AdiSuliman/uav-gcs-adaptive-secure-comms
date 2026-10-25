@@ -5029,6 +5029,84 @@ verifyEqual(tc, load('data/clean_test_pools.mat').CT.det_id, 'other');          
 verifyNumElements(tc, dir('data/clean_val_pools_before_rekey_*.mat'), 1);
 end
 
+function test_rekey_unknown_agents(tc)
+% After a fusion re-key, the leave-one-out agents of data/unknown_threat_agents.mat keep the
+% old det_id until C2u retrains them on the re-keyed pools: edge_map stops on them with a
+% message that names that file and C2u (not trained_dqn.mat and C2), and reads them once
+% C2u has saved. The deploy smoke runs C2u after the re-key and before EDGE, in chain order.
+d = fullfile(tc.TestData.tmp, 'rekey_unk'); mkdir(fullfile(d, 'data'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+ood = struct('score', 'last', 'win', 3); classes = {'none', 'jamming'}; trained_at = 7;
+save('data/trained_detector.mat', 'ood', 'classes', 'trained_at');
+T = struct('retain', 0.95, 'maha', -2, 'maha_val', [-3; -1], 'win', 3, 'score', 'last'); save('data/ood_thresholds.mat', 'T');
+F0 = struct('FM', struct('mu', zeros(1, 11)), 'N', 1, 'q_thr', 4);
+old = detector_id(trained_at, ood, F0);
+Q = struct('probs', single([0.9 0.1]), 'maha', single(0), 'feat', single([1 2]), 'ber', 0, 'run', 1);
+PP = struct('pools', {{Q, []}}, 'classes', {classes}, 'maha_thr', -2, 'unk_win', 3, 'fuse', F0.FM, 'fuse_N', 1, ...
+    'q_thr', 4, 'det_id', old, 'created', 'x');
+save('data/policy_pools.mat', 'PP', '-v7.3');
+agents_loo = {1}; threats = {'jamming'}; det_id = old; H = struct('T', 1); seed = 1; %#ok<NASGU>
+save('data/unknown_threat_agents.mat', 'agents_loo', 'threats', 'det_id', 'H', 'seed', '-v7.3');   % C2u before the swap
+FM = struct('mu', zeros(1, 13)); N = 12; q_thr = 4.5; save('data/fusion.mat', 'FM', 'N', 'q_thr');   % the deployed fusion
+evalc('rekey_pools({''data/policy_pools.mat''})');
+PP = load('data/policy_pools.mat').PP;
+new = detector_id(trained_at, ood, struct('FM', FM, 'N', N, 'q_thr', q_thr));
+assertEqual(tc, PP.det_id, new);
+% C2 on the re-keyed pools: its agent carries their det_id, so edge_map's agent check holds
+verifyNotEmpty(tc, strfind(fileread(which('train_dqn')), 'det_id = PP.det_id;'));
+check_det_id(PP, struct('det_id', PP.det_id), 'edge_map');
+% edge_map's own read of the agents, C2u not rerun (the smoke's dep_EDGE)
+[U, ex] = edge_unknown_block(d, PP);
+verifyEqual(tc, ex.identifier, 'check_det_id:mismatch');
+verifySubstring(tc, ex.message, 'data/unknown_threat_agents.mat');
+verifySubstring(tc, ex.message, 'rerun C2u');
+verifyEmpty(tc, strfind(ex.message, 'trained_dqn'));
+verifyEqual(tc, U.det_id, old);
+% C2u's own save on the re-keyed pools, then the read holds
+src = fileread(which('experiment_unknown_threat'));
+e = 'save(''data/unknown_threat_agents.mat'', ''agents_loo'', ''threats'', ''det_id'', ''H'', ''seed'', ''-v7.3'');';
+k1 = strfind(src, 'det_id = PP.det_id;'); k2 = strfind(src, e);
+assertTrue(tc, isscalar(k1) && isscalar(k2) && k1 < k2);
+f = fullfile(d, 'c2u_save_block.m');
+fid = fopen(f, 'w'); fwrite(fid, src(k1:k2 + numel(e) - 1)); fclose(fid);
+run(f);
+[U, ex] = edge_unknown_block(d, PP);
+verifyEqual(tc, ex.identifier, 'test:none');
+verifyEqual(tc, U.det_id, new);
+% a check on anything but the agent Q of data/trained_dqn.mat names the file it reads
+m = dir(fullfile(tc.TestData.root, 'code', '**', '*.m'));
+m = m(~contains({m.folder}, [filesep 'legacy']));
+for i = 1:numel(m)
+    v = regexp(fileread(fullfile(m(i).folder, m(i).name)), 'check_det_id\(PP, (\w+), ''\w+''\)', 'tokens');
+    v = [v{:}];
+    verifyTrue(tc, isempty(v) || all(strcmp(v, 'Q')), m(i).name);
+end
+% the deploy smoke: after the re-key, every stage that reads the fusion or the pools, in chain order
+f = fullfile(tc.TestData.root, 'docs', 'd91_smoke_deploy.m.txt');
+assertTrue(tc, isfile(f), f);
+dep = regexp(fileread(f), 'dep = \{([^}]*)\}', 'tokens', 'once');
+assertNotEmpty(tc, dep);
+dep = regexp(dep{1}, '''(\w+)''', 'tokens'); dep = [dep{:}];
+[ok, at] = ismember({'C1d', 'C2', 'C2e', 'C2g', 'C2u', 'EDGE', 'LAT'}, dep);
+k = find(strcmp(dep, 'REKEY'));
+verifyTrue(tc, isscalar(k) && all(ok) && all(at > k) && all(diff(at) > 0), strjoin(dep, ' '));
+end
+
+function [U, ex] = edge_unknown_block(d, PP) %#ok<INUSD>
+% Runs edge_map.m's read of data/unknown_threat_agents.mat in folder d on the pools PP; ex is
+% the error it stops with (test:none when it ends).
+src = fileread(which('edge_map'));
+k1 = strfind(src, 'U = [];'); k2 = strfind(src, 'if ~isempty(U) || ~startsWith(dep, ''dqn'')');
+assert(isscalar(k1) && isscalar(k2) && k1 < k2, 'test:block', 'edge_map''s read of the agents not found');
+f = fullfile(d, 'em_unknown_block.m');
+fid = fopen(f, 'w'); fwrite(fid, src(k1:k2 - 1)); fclose(fid);
+U = []; ex = MException('test:none', 'no error');
+try
+    run(f);
+catch ex
+end
+end
+
 function test_result_status(tc)
 % A latency, an evaluation or an edge map of another detector or deployed policy, or older
 % than its inputs, is STALE; the policy stamp follows the deployed policy, its

@@ -7,8 +7,9 @@ function d91_smoke_deploy()
 %   of a second reading, KPI and RPT. Then the deploy path end to end (dep_*): an old-layout
 %   fusion at the pick's N, lambda and latch kept as the live trees keep it, B2F on the
 %   enlarged fit set that saves the deployed fusion (SMOKE and FUSION_RULE_LOG: a failed rule
-%   is printed, not enforced), its record checked, rekey_pools on the smoke pools, then C1d,
-%   C2, C2e and EDGE on the re-keyed pools, as plan A resumes profile 1. One line per step:
+%   is printed, not enforced), its record checked, rekey_pools on the smoke pools, then every
+%   stage that reads the fusion or the pools, in the order plan A resumes profile 1: C1d, C2,
+%   C2e, C2g, C2u (it rewrites the leave-one-out agents EDGE reads), EDGE, LAT. One line per step:
 %   V7SMOKE <step> OK | SAVED | EXPECTED <id> | ERROR <id>. Smoke numbers are not results.
 root = fileparts(mfilename('fullpath')); cd(root); startup; cd(root);
 fprintf('V7SMOKE start %s in %s, pool open %d, n_rx %d\n', datestr(now), root, ~isempty(gcp('nocreate')), rx_count());
@@ -16,7 +17,7 @@ chain = {'A0', 'A4v', 'A5', 'A6', 'B1', 'B2', 'B2F', 'B2Fcheck', 'B3n', 'B3', 'B
     'B3rguard', 'C1p', 'C1c', 'SURV', 'SURV3', 'C1d', 'C2', 'C2e', 'C2g', 'C2u', 'GAL', 'OHP', 'GCSA', 'EDGE', 'LAT', ...
     'KPI', 'DASH', 'WEAK', 'RPT'};
 tail = {'B2Fpick', 'B2Fenl', 'REHEARSAL', 'B3r', 'B3ragain', 'KPI', 'RPT', 'KPI1'};
-dep = {'B2Fold', 'B2Fsave', 'REKEY', 'C1d', 'C2', 'C2e', 'EDGE'};
+dep = {'B2Fold', 'B2Fsave', 'REKEY', 'C1d', 'C2', 'C2e', 'C2g', 'C2u', 'EDGE', 'LAT'};
 n_ok = 0; n_err = 0; t0 = tic;
 for s = [chain, strcat('tail_', tail), strcat('dep_', dep)]
     st = s{1}; t1 = tic;
