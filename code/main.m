@@ -115,6 +115,7 @@ RUN.build_fresh_test2           = false;    % B3m : a third detector test set (n
 RUN.build_fresh_test3           = false;    % B3q : a fourth detector test set (new seeds), data only (~6-7 h)
 RUN.read_fresh_test3            = false;    % B3r : the fourth test set's single reading, once kpi1_set.m names it (~3 min)
 RUN.compare_architectures       = false;    % B3a : hybrid vs spectrogram-only vs features-only (~45-75 min)
+RUN.train_core_cnn              = false;    % B3c : the proposal's three-state CNN on spectrograms, read once on the fourth test set after B3r or under docs/core_cnn_no_b3r.txt (~25-45 min)
 RUN.eval_unseen_snr             = false;    % B4  : detector at Eb/N0 never seen in training, midpoints of the grid (~40-50 min)
 RUN.eval_ood_detection          = false;    % OOD : leave-one-threat-out, retrains the detector 10 times; selects the production unknown-threat score (~3.7-4 h)
 RUN.eval_unseen_severity        = false;    % B4s : detector at severities never seen in training, between and above the levels (~20-35 min)
@@ -246,6 +247,10 @@ if RUN.compare_architectures
     fprintf('  [B3a] Detector architectures on the same splits...\n');
     compare_architectures;
 end
+if RUN.train_core_cnn
+    fprintf('  [B3c] The three-state CNN on spectrograms (docs/core_cnn_protocol.md)...\n');
+    run_own('train_core_cnn');
+end
 if RUN.eval_unseen_snr
     fprintf('  [B4] Detector generalization to unseen Eb/N0...\n');
     eval_unseen_snr;
@@ -265,6 +270,7 @@ report_file('data/splits.mat',            '      splits.mat           ', 'prepar
 report_file('data/trained_detector.mat',  '      trained_detector.mat ', 'train_detector');
 report_file('results/confusion_matrix.png','      B3 eval results      ', 'eval_detector');
 report_file('results/ood_detection.txt',   '      OOD report           ', 'eval_ood_detection');
+report_file('results/core_cnn.txt',        '      B3c three-state CNN  ', 'train_core_cnn');
 fprintf('\n');
 
 %% ========== PHASE C: DECISION LAYER ==========
@@ -280,6 +286,7 @@ if RUN.build_clean_test_pools
     CLEAN_SET = 'val';  build_clean_test_pools;
     CLEAN_SET = 'test'; build_clean_test_pools;
     build_check_pools;
+    clean_ref_rebuild('chain');
 end
 if RUN.choose_drop_threshold
     fprintf('  [C1d] Choosing the Eb/N0-drop threshold of the path_loss alarm (train pools)...\n');

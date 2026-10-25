@@ -4,7 +4,9 @@ function [kind, ag, opt] = policy_setup(name, Q, sel, fixed_best, fixed_mmse, ta
 %               rule_esc, blind_esc, table, dqn_g<k> (DQN of discount factor k),
 %               dqn_esc (the selected DQN with escalation), dqn (the selected DQN without
 %               it, when train_dqn.m deployed it so), rule_sel (rule + escalation with the
-%               monitor and settings train_dqn.m chose for it, the fallback), oracle
+%               monitor and settings train_dqn.m chose for it, the fallback), rule_core and
+%               blind_core (rule_esc and blind_esc on the core action set, opt.core,
+%               rule_core_policy.m), oracle
 %   Q           data/trained_dqn.mat: agent, agents, rule_sel
 %   sel         index of the selected DQN in Q.agents
 %   fixed_best  configuration of the best fixed policy; fixed_mmse that of always-on MMSE
@@ -18,6 +20,8 @@ switch name
     case 'table',      opt = tab;
     case 'dqn_esc',    ag = Q.agents{sel};
     case 'rule_sel',   kind = 'rule_esc'; opt.monitor = Q.rule_sel;
+    case 'rule_core',  kind = 'rule_esc'; opt.core = true;
+    case 'blind_core', kind = 'blind_esc'; opt.core = true;
 end
 if startsWith(name, 'dqn_g'), ag = Q.agents{sscanf(name, 'dqn_g%d')}; kind = 'dqn'; end
 end

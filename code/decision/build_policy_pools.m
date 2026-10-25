@@ -62,7 +62,8 @@
 % the test, edge-speed and second test splits are simulated. PP.det_id identifies the
 % detector (detector_id.m); pools of another detector are never reused.
 %
-% Output: data/policy_pools.mat (PP, clean_ref)
+% Output: data/policy_pools.mat (PP, clean_ref); C1c replaces clean_ref, PP.clean and
+% PP.clean_fer with the table of the clean validation pools (clean_ref_rebuild.m)
 
 close all; clc;
 warning('off', 'Simulink:cgxe:LeakedJITEngine');

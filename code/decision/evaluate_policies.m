@@ -43,7 +43,10 @@
 % the best fixed configuration (train pools), expert rule with and without
 % escalation, the rule with escalation without the detector (alarm from measured
 % degradation only), class -> configuration table (train pools), the DQN of every
-% discount factor (the selected one also with escalation), one-step oracle.
+% discount factor (the selected one also with escalation), one-step oracle; and the rule with
+% escalation, with and without the detector, on the revised proposal's core action set
+% (channel switching and rate adaptation: rule_core, blind_core; rule_core_policy.m), on the
+% same episodes and frame draws.
 % The deployed policy, read by the KPIs, is the one train_dqn.m chose on validation: the
 % selected DQN, with or without the escalation, when it passed its gate, otherwise the rule
 % with escalation on its own monitor (rule_sel); every policy runs with the deployed DQN's
@@ -62,6 +65,14 @@
 % codeword spans four frames and is decoded after the fourth, so after the link turns
 % coded its first three frames (60 ms) deliver no packet and are not restored: the
 % cycles to recover count them (link_env.m).
+% Revised proposal (lect_kpis.m): PER after onset vs the static link (no response) on the
+% recoverable jamming episodes, target >= 30% reduction for rule + escalation in each of the
+% lecturer's two scenarios (narrowband tone_jamming, wideband jamming), the five jamming
+% threats pooled beside them; the recovery time from the first confirmed alarm until the
+% packet loss stays restored for 5 cycles, beside the onset-to-detection time; goodput in
+% bit/s beside the normalized goodput; each for the full action set (36 configurations) and
+% for the core action set (on the episodes a core configuration recovers, and on those any
+% of the 36 does).
 % Intervals: 95% percentile bootstrap over flight geometries (boot_cluster.m;
 % episodes of one geometry are resampled together), also for the deployed policy's
 % rate per threat (every level and inside the envelope) and for its spread over the
@@ -99,6 +110,7 @@ if isfile('results/eval_detector_metrics.mat')
     end
 end
 if ~startsWith(thr_src, 'the'), warning('evaluate_policies:kpi1', 'KPI 6 from %g dB: %s', ebno_thr, thr_src); end
+payload_bps = payload_rate(C);                        % nominal payload rate [bit/s], goodput in bit/s
 
 %% 1. Episode sets
 foll = single_cells(K.followable(single_cells));
@@ -168,6 +180,8 @@ if strcmp(Q.deployed, 'rule_sel')                    % the rule fallback on its 
     POL = [POL(1:end-1), {'rule_sel'}, POL(end)];
     LBL = [LBL(1:end-1), {sprintf('rule + escalation, own monitor (%s)', Q.rule_sel.alarm)}, LBL(end)];
 end
+POL = [POL, {'rule_core', 'blind_core'}];            % the core action set, after every other policy
+LBL = [LBL, {'core: rule + escalation', 'core: no detector + escalation'}];
 iBase = find(strcmp(POL, sprintf('dqn_g%d', sel)));  % selected DQN alone
 dep = Q.deployed; if strcmp(dep, 'dqn'), dep = POL{iBase}; end
 iDQN = find(strcmp(POL, dep));                       % deployed policy (train_dqn.m)
@@ -365,6 +379,10 @@ rep{end+1} = sprintf(['Envelope on the harmed episodes (predicted on validation 
     '>= 90%%; a (threat, level) whose validation episodes no response mostly restores has too few harmed ones to enter'], ...
     strjoin(arrayfun(@(ti) sprintf('%s %s', threats{ti}, ternary(isnan(PTenvh(ti)), '-', sprintf('%.1f%%', PTenvh(ti)))), ...
     1:numel(threats), 'UniformOutput', false), ', '), sum(PTenvh(hah) >= 90), sum(hah));
+
+% Revised proposal: PER vs the static link, recovery time from detection, goodput in bit/s
+[LK, lines] = lect_kpis(ALL, POL, LBL, iDQN, PP.scen, payload_bps, C.period_ms);
+rep = [rep, lines];
 
 % Per Eb/N0 (single set)
 rep{end+1} = '';
@@ -589,7 +607,7 @@ KP = struct('per_threat', PT, 'per_threat_sev', PTsev, 'threats', {threats}, 're
     'shadow_note', SHN, 'det_id', PP.det_id, 'policy_stamp', policy_stamp(Q), ...
     'per_threat_h', PTh, 'per_threat_h_sev', PThsev, 'per_threat_h_ci', 100 * PThci, 'n_harmed', NH, 'n_harmed_sev', NHsev, ...
     'kpi4_h_met', kpi4h, 'envelope_h', ENVh, 'envelope_val_h', ENVvh, 'per_threat_env_h', PTenvh, ...
-    'per_threat_env_h_ci', 100 * PTenvh_ci, 'harmed_consistent', cons, 'offset', OFF, 'offset_after', OFF_AFTER);
+    'per_threat_env_h_ci', 100 * PTenvh_ci, 'harmed_consistent', cons, 'offset', OFF, 'offset_after', OFF_AFTER, 'lect', LK);
 save('results/policy_evaluation.mat', 'RES', 'RW', 'POL', 'LBL', 'set_names', 'fixed_best', 'tab', 'iDQN', 'KP', ...
     'iThreat', 'ALL', 'top_cfg');
 
@@ -635,6 +653,15 @@ saveas(fig, 'results/policy_breakdown.png'); close(fig);
 fprintf('Saved results/policy_evaluation.{txt,mat,png}, results/policy_breakdown.png\n');
 
 %% ===================== Local functions =====================
+function r = payload_rate(C)
+% Nominal payload rate [bit/s]: one frame of payload bits per decision cycle (params.mat).
+r = NaN;
+if ~isfile('params.mat'), warning('evaluate_policies:payload', 'params.mat absent: goodput in bit/s not available'); return; end
+p = load('params.mat').params;
+cyc = C.period_ms / 1000; if isfield(p, 'cycle_s'), cyc = p.cycle_s; end
+r = p.bits_per_frame / cyc;
+end
+
 function [FAR, FD, lines] = far_report(RR, POL, LBL, above, T, iDQN, ebno, cls_list, period_ms)
 % False-alarm counts per policy (episodes with >= 1 change, Clopper-Pearson
 % bound; false changes per cycle and per hour, false_change_rate.m), and for the

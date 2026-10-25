@@ -5151,6 +5151,161 @@ function e = status_of(S, f)
 e = S(strcmp({S.file}, f));
 end
 
+function test_clean_ref_rebuild(tc)
+% The decision layer's clean reference comes from the clean validation pools alone: the
+% frame mean of every field over all their flights, a flight-bootstrap interval around it,
+% and the table it replaced kept beside it. 'check' writes nothing. 'write' backs up the
+% pools, changes only clean_ref, PP.clean and PP.clean_fer, keeps the pools older than the
+% files built from them, and clean_ber_ref reads the new table at once. A second write
+% changes nothing. The verdict follows the pre-registered range. Test, check or other-block
+% pools and another detector are refused, the pools unchanged.
+d = fullfile(tc.TestData.tmp, 'cleanref'); mkdir(fullfile(d, 'data'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+[PP, clean_ref, CT, ex] = cleanref_fixture();
+save('data/policy_pools.mat', 'PP', 'clean_ref', '-v7.3');
+save('data/clean_val_pools.mat', 'CT', '-v7.3');
+CK = struct('det_id', 'a'); save('data/check_pools.mat', 'CK', '-v7.3');
+fp = @(f) fullfile(pwd, f);
+getmt = @(f) double(java.io.File(fp(f)).lastModified());
+t0 = getmt('data/clean_val_pools.mat');
+java.io.File(fp('data/policy_pools.mat')).setLastModified(t0 - 3600e3);     % C1p, then C1c an hour later
+java.io.File(fp('data/clean_val_pools.mat')).setLastModified(t0 - 60e3);
+java.io.File(fp('data/check_pools.mat')).setLastModified(t0 - 60e3);
+t_pp = getmt('data/policy_pools.mat'); by = dir('data/policy_pools.mat').bytes;
+opt = struct('expect', struct('ebno', 9, 'range', [1e-3 1e-1]), 'B', 500);
+K = {'ber', 'fer', 'ber_est', 'plr', 'plr_fec'};
+% check: the table and its intervals, nothing written
+[~, R] = evalc('clean_ref_rebuild(''check'', opt)');
+for k = K
+    verifyEqual(tc, R.ref.(k{1}), ex.(k{1}), 'RelTol', 1e-12, k{1});
+    c = R.ref.ci.(k{1});
+    verifyTrue(tc, all(c(1, :) <= R.ref.(k{1}) & R.ref.(k{1}) <= c(2, :)), k{1});
+end
+verifyEqual(tc, R.ref.n_flights, 300 * ones(1, 4));
+verifyGreaterThan(tc, R.ref.ci.ber(2, 4), 1.5 * R.ref.ci.ber(1, 4));       % the heavy flights spread the interval
+verifyTrue(tc, all(isfinite(R.ref.jackknife.ber)));
+verifyEqual(tc, R.verdict, 'confirmed');                                    % 1e-5 replaced, the interval far above it
+verifyEqual(tc, R.train, clean_ref);
+verifyFalse(tc, R.wrote);
+verifyEqual(tc, [getmt('data/policy_pools.mat'), dir('data/policy_pools.mat').bytes], [t_pp, by]);
+verifyEmpty(tc, dir('data/policy_pools_before_cleanref_*.mat'));
+% the replaced value inside the new interval: contradicted
+mkdir('alt'); C2 = clean_ref; C2.ber(4) = ex.ber(4); S = struct('PP', PP, 'clean_ref', C2);
+save('alt/policy_pools.mat', '-struct', 'S', '-v7.3');
+o2 = opt; o2.pp = 'alt/policy_pools.mat';
+[~, R2] = evalc('clean_ref_rebuild(''check'', o2)');
+verifyEqual(tc, R2.verdict, 'contradicted');
+% outside the pre-registered range: stop, nothing written
+o3 = opt; o3.expect.range = [1e-6 1e-5];
+verifyError(tc, @() cleanref_quiet(@() clean_ref_rebuild('write', o3)), 'clean_ref_rebuild:verdict');
+verifyEqual(tc, [getmt('data/policy_pools.mat'), dir('data/policy_pools.mat').bytes], [t_pp, by]);
+verifyEmpty(tc, dir('data/policy_pools_before_cleanref_*.mat'));
+% refused sources and another detector, the pools unchanged
+bad = {setfield(CT, 'set', 'test'), setfield(CT, 'runs', 1500 + (1:300))}; %#ok<SFLD>
+for i = 1:numel(bad)
+    S = struct('CT', bad{i}); save('data/clean_val_pools.mat', '-struct', 'S', '-v7.3');
+    verifyError(tc, @() clean_ref_rebuild('check', opt), 'clean_ref_rebuild:source');
+end
+save('data/clean_val_pools.mat', 'CK', '-v7.3');
+verifyError(tc, @() clean_ref_rebuild('check', opt), 'clean_ref_rebuild:source');
+save('data/clean_test_pools.mat', 'CT', '-v7.3');
+o4 = opt; o4.val = 'data/clean_test_pools.mat';
+verifyError(tc, @() clean_ref_rebuild('check', o4), 'clean_ref_rebuild:source');
+S = struct('CT', setfield(CT, 'det_id', 'b')); save('data/clean_val_pools.mat', '-struct', 'S', '-v7.3'); %#ok<SFLD>
+verifyError(tc, @() cleanref_quiet(@() clean_ref_rebuild('write', opt)), 'check_det_id:mismatch');
+verifyEqual(tc, [getmt('data/policy_pools.mat'), dir('data/policy_pools.mat').bytes], [t_pp, by]);
+save('data/clean_val_pools.mat', 'CT', '-v7.3');
+java.io.File(fp('data/clean_val_pools.mat')).setLastModified(t0 - 60e3);
+java.io.File(fp('data/clean_test_pools.mat')).setLastModified(t0 - 60e3);
+% write
+[~, R] = evalc('clean_ref_rebuild(''write'', opt)');
+verifyTrue(tc, R.wrote);
+b = dir('data/policy_pools_before_cleanref_*.mat');
+verifyNumElements(tc, b, 1);
+B0 = load(fullfile('data', b(1).name));
+verifyEqual(tc, B0.PP, PP); verifyEqual(tc, B0.clean_ref, clean_ref);
+L = load('data/policy_pools.mat');
+verifyEqual(tc, sort(fieldnames(L.PP)), sort(fieldnames(PP)));             % no new field (rekey_pools.m KNOWN)
+verifyEqual(tc, rmfield(L.PP, {'clean', 'clean_fer'}), rmfield(PP, {'clean', 'clean_fer'}));
+verifyEqual(tc, L.PP.clean, ex.ber, 'RelTol', 1e-12);
+verifyEqual(tc, L.PP.clean_fer, ex.fer, 'RelTol', 1e-12);
+for k = K, verifyEqual(tc, L.clean_ref.(k{1}), ex.(k{1}), 'RelTol', 1e-12, k{1}); end
+verifyEqual(tc, L.clean_ref.ebno, clean_ref.ebno);
+verifyEqual(tc, L.clean_ref.train, clean_ref);
+verifyEqual(tc, L.clean_ref.source.set, 'val');
+verifyFalse(tc, isfile('data/policy_pools.tmp.mat'));
+t1 = getmt('data/policy_pools.mat');
+verifyEqual(tc, t1, t_pp + 2000, 'AbsTol', 1000);                            % still older than the C1c files
+verifyLessThan(tc, t1, getmt('data/check_pools.mat'));
+verifyLessThan(tc, t1, getmt('data/clean_val_pools.mat'));
+verifyEqual(tc, clean_ber_ref(9, 'ber_est'), ex.ber_est(4), 'RelTol', 1e-9);   % the monitor reads it at once
+verifyEqual(tc, clean_ber_ref(9, 'plr_fec'), ex.plr_fec(4), 'RelTol', 1e-9);
+verifyTrue(tc, isfile('results/clean_ref.txt'));
+% a second write: already from these pools
+[~, R] = evalc('clean_ref_rebuild(''write'', opt)');
+verifyFalse(tc, R.wrote); verifyTrue(tc, R.already);
+verifyNumElements(tc, dir('data/policy_pools_before_cleanref_*.mat'), 1);
+verifyEqual(tc, getmt('data/policy_pools.mat'), t1);
+% the chain's mode on fresh pools: written without a verdict and without a backup
+S = struct('PP', PP, 'clean_ref', clean_ref); save('data/policy_pools.mat', '-struct', 'S', '-v7.3');
+java.io.File(fp('data/policy_pools.mat')).setLastModified(t0 - 3600e3);
+[~, R] = evalc('clean_ref_rebuild(''chain'', struct(''expect'', struct(''ebno'', 9, ''range'', [1e-6 1e-5])))');
+verifyTrue(tc, R.wrote); verifyEqual(tc, R.verdict, 'n/a');
+verifyEqual(tc, load('data/policy_pools.mat').PP.clean, ex.ber, 'RelTol', 1e-12);
+verifyNumElements(tc, dir('data/policy_pools_before_cleanref_*.mat'), 1);
+end
+
+function test_clean_ref_in_c1c(tc)
+% C1c ends with the clean reference from its validation pools, so C1d and every later
+% reader see it: run_stage.m and main.m alike.
+rs = fileread(which('run_stage'));
+i0 = strfind(rs, 'elseif strcmp(name, ''build_clean_test_pools'')');
+i1 = strfind(rs, 'elseif strcmp(name, ''select_fusion'')');
+verifyNumElements(tc, i0, 1); verifyNumElements(tc, i1, 1);
+seg = rs(i0:i1);
+verifyNotEmpty(tc, regexp(seg, 'run\(''build_check_pools''\);\r?\n\s*clean_ref_rebuild\(''chain''\);', 'once'));
+verifyNumElements(tc, strfind(rs, 'clean_ref_rebuild('), 1);
+m = fileread(which('main'));
+verifyNotEmpty(tc, regexp(m, 'build_check_pools;\r?\n\s*clean_ref_rebuild\(''chain''\);', 'once'));
+end
+
+function cleanref_quiet(f)
+% Runs f with its printed output dropped.
+evalc('f()');
+end
+
+function [PP, clean_ref, CT, ex] = cleanref_fixture()
+% Clean validation pools of 300 flights x 2 frames at four Eb/N0, six heavy flights at
+% 9 dB (two in each geometry family), the frame means they hold (ex) and the pools'
+% 8-flight table they replace.
+E = [0 3 6 9]; A = {'no_action', 'fec_interleave'};
+nF = numel(link_features('names')); jl = feature_index('log_ber');
+runs = 400 + (1:300); base = [5e-2 2e-2 5e-3 1e-5];
+CT = struct('pools', {cell(1, 4, 2)}, 'runs', runs, 'ebno', E, 'actions', {A}, 'n_geom', 300, 'set', 'val', ...
+    'det_id', 'a', 'model_tag', 'm', 'created', '24-Oct-2026 06:17:52');
+for s = 1:4
+    r = repelem(runs(:), 2);
+    b = base(s) * (1 + 0.5 * mod(r, 3));
+    if s == 4, b(ismember(r, [410 455 520 590 630 699])) = 0.2; end
+    for a = 1:2
+        f = zeros(numel(r), nF, 'single'); f(:, jl) = single(log10(1.5 * b));
+        crc = double(b > 1e-3);
+        if a == 2, crc(2:2:end) = NaN; crc(1:2:end) = double(b(1:2:end) > 0.1); end
+        CT.pools{1, s, a} = struct('ber', b, 'fer', min(1, 20 * b), 'crc', crc, 'feat', f, 'run', r);
+    end
+end
+ex = struct();
+for s = 1:4
+    Q = CT.pools{1, s, 1}; Qf = CT.pools{1, s, 2};
+    ex.ber(s) = mean(Q.ber); ex.fer(s) = mean(Q.fer); ex.ber_est(s) = mean(10.^double(Q.feat(:, jl)));
+    ex.plr(s) = mean(Q.crc, 'omitnan'); ex.plr_fec(s) = mean(Qf.crc, 'omitnan');
+end
+clean_ref = struct('ebno', E, 'ber', base, 'fer', min(1, 20 * base), 'ber_est', 1.5 * base, ...
+    'plr', double(base > 1e-3), 'plr_fec', zeros(1, 4));
+PP = struct('pools', {{[]}}, 'ebno', E, 'actions', {A}, 'clean', base, 'clean_fer', min(1, 20 * base), ...
+    'det_id', 'a', 'model_tag', 'm', 'F_SUB', 2, 'created', 'x');
+end
+
 function test_overhead_monitor_drop(tc)
 % The pass over the GCS is a ramp: the monitor reads a drop as its 10-cycle
 % reference minus its 3-cycle median, the same as monitor_window_drop.m; a step reads in
@@ -7242,4 +7397,2364 @@ verifyNotEmpty(tc, strfind(src, 'v{end+1} = struct(''unk_mode'', md{1}, ''unk_re
 verifyNotEmpty(tc, strfind(src, 'for f = fieldnames(Ssel)'', rule_sel.(f{1}) = Ssel.(f{1}); end'));
 verifyNotEmpty(tc, strfind(src, '''pools_created'', ''maha_thr'', ''dec'', ''-v7.3'''));
 verifyNotEmpty(tc, strfind(src, 'maha_thr = dec.maha_thr;'));
+end
+
+%% ---------- revised proposal KPIs ----------
+function test_per_metrics_traces(tc)
+% PER after onset over the frames that carry a packet (a coded link's gap left out), the
+% delivered payload (goodput factor x (1 - packet loss), none in the gap) and the recovery
+% time from the detection frame until the packet loss stays restored for the whole window.
+T = 12; NE = 4; post = repmat((1:T)' >= 3, 1, NE);
+fer = zeros(T, NE); gap = false(T, NE); gpl = ones(T, NE);
+fer(3:6, 1) = 1;
+fer(3:4, 2) = 1; gap(5:7, 2) = true; gpl(5:T, 2) = 0.5;
+fer(3:T, 3) = 1;
+rplr = fer == 0 & ~gap;
+M = per_metrics(fer, post, gap, rplr, gpl, [1 NaN 0 2], 5);
+verifyEqual(tc, M.per_post, [0.4, 2/7, 1, 0], 'AbsTol', 1e-12);
+verifyEqual(tc, M.dlv_post, [0.6, 0.25, 0, 1], 'AbsTol', 1e-12);
+verifyEqual(tc, M.t_rec_det, [3 NaN NaN 0]);
+M = per_metrics(fer, post, gap, rplr, gpl, [1 NaN 0 2], 7);      % episode 1 stays restored 6 cycles only
+verifyEqual(tc, M.t_rec_det, [NaN NaN NaN 0]);
+M = per_metrics(fer, false(T, NE), gap, rplr, gpl, [1 1 1 1], 5);
+verifyTrue(tc, all(isnan([M.per_post, M.dlv_post, M.t_rec_det])));
+end
+
+
+function test_rollout_per_fields(tc)
+% rollout_policy.m gives every episode its PER, delivered payload and recovery time from the
+% detection: the static link under a jammer loses every packet, a configuration the jammer
+% cannot reach loses none and delivers its goodput factor; detection time plus the recovery
+% from it is T_rec where BER and packet loss restore together; evaluate_policies.m reports them.
+[PP, K] = toy_world(true);
+fd = find(strcmp(PP.actions, 'freq_diversity'));
+spec = struct('scn', [2 2], 's', [1 1], 'onset', [3 3], 'follow', false(1, 2), 'fdelay', [0 0], 'unk', false(1, 2), ...
+    'T', 20, 'r', [1 1]);
+R = rollout_policy('fixed', PP, K, spec, 1, [], struct('fixed', K.na), 4);
+verifyEqual(tc, [R.per_post, R.dlv_post], [1 1 0 0]);
+verifyTrue(tc, all(isnan(R.t_rec_det)));
+R = rollout_policy('fixed', PP, K, spec, 1, [], struct('fixed', fd), 4);
+verifyEqual(tc, [R.per_post, R.dlv_post], [0 0 1 1]);
+PP.gp(fd) = 0.5; K2 = link_env('tables', PP);
+R = rollout_policy('fixed', PP, K2, spec, 1, [], struct('fixed', fd), 4);
+verifyEqual(tc, R.dlv_post, [0.5 0.5]);
+R = rollout_policy('rule_esc', PP, K, spec, 1, [], struct(), 8);
+d = isfinite(R.t_rec_det);
+verifyTrue(tc, any(d));
+verifyEqual(tc, R.t_conf(d) + R.t_rec_det(d), R.t_rec(d));
+src = fileread(which('evaluate_policies'));
+verifyNotEmpty(tc, strfind(src, '[LK, lines] = lect_kpis(ALL, POL, LBL, iDQN, PP.scen, payload_bps, C.period_ms);'));
+verifyNotEmpty(tc, strfind(src, '''offset_after'', OFF_AFTER, ''lect'', LK);'));
+end
+
+function test_per_reduction(tc)
+% PER reduction vs the static link: 1 - sum(PER policy) / sum(PER static) over the same
+% episodes (paired), the episodes of one flight geometry resampled together; an episode with
+% a NaN under either policy is left out; a reference that loses no packet gives NaN.
+ref = [0.5 0.5 0.4 0.4 0.2 NaN]; pol = [0.1 0.1 0.2 0.2 0.1 0];
+cl = [1 1 2 2 3 4];
+[m, lo, hi] = per_reduction(pol, ref, cl, 500, 3);
+verifyEqual(tc, m, 1 - 0.7 / 2, 'AbsTol', 1e-12);
+verifyLessThanOrEqual(tc, lo, m); verifyGreaterThanOrEqual(tc, hi, m);
+verifyEqual(tc, per_reduction(ref(1:4), ref(1:4), cl(1:4), 100, 1), 0, 'AbsTol', 1e-12);
+verifyTrue(tc, isnan(per_reduction([0 0], [0 0], [1 2], 100, 1)));
+end
+
+function test_lect_kpis_readings(tc)
+% The revised proposal's readings (lect_kpis.m) on the recoverable jamming episodes: the PER
+% reduction of rule + escalation and of the escalation without the detector vs the static
+% link, per jamming threat, the CNN's share; recovery from detection, the onset-to-detection
+% time and T_rec (median, p90, never); goodput in bit/s.
+POL = {'none', 'random', 'fixed', 'rule_esc', 'blind_esc', 'table', 'dqn_esc', 'oracle'};
+LBL = {'no response', 'random', 'fixed', 'rule + escalation', 'no detector + escalation', 'table', 'DQN + escalation', 'oracle'};
+[ALL, scen] = lect_world(POL);
+[L, lines] = lect_kpis(ALL, POL, LBL, 4, scen, 5e4, 20);
+verifyEqual(tc, {L.per.policy}, {'rule_esc', 'blind_esc'});
+verifyEqual(tc, [L.per.n], [4 4]);
+verifyEqual(tc, [L.per.red_pct], 100 * [1 - 0.6 / 1.8, 1 - 1.4 / 1.8], 'AbsTol', 1e-9);
+verifyEqual(tc, [L.per.met], [true false]);
+verifyEqual(tc, L.per(1).per_ref_pct, 45, 'AbsTol', 1e-9);
+verifyEqual(tc, {L.per_threat.threat}, {'jamming', 'tone_jamming'});
+verifyEqual(tc, {L.per_threat.band}, {'wideband', 'narrowband'});
+verifyEqual(tc, [L.per_threat(1).red_pct(1), L.per_threat(2).red_pct(1)], [80 50], 'AbsTol', 1e-9);
+verifyEqual(tc, L.cnn.per_red_pct, 100 * (1 - 0.6 / 1.4), 'AbsTol', 1e-9);
+verifyEqual(tc, L.cnn.gput_bps, 1e4, 'AbsTol', 1e-6);
+sel = @(s, p) L.rec(strcmp({L.rec.set}, s) & strcmp({L.rec.policy}, p));
+verifyEqual(tc, unique({L.rec.policy}, 'stable'), {'none', 'blind_esc', 'rule_esc', 'dqn_esc'});
+r = sel('recoverable threat episodes', 'rule_esc');
+verifyEqual(tc, [r.n, r.det.median, r.det.p90, r.rec_det.median, r.rec_det.p90, r.rec_det.never_pct], [6 1 2 3 5 0]);
+verifyEqual(tc, r.det.never_pct, 100 / 6, 'AbsTol', 1e-9);
+verifyEqual(tc, [r.t_rec.median, r.t_rec.p90], [4 6]);
+r = sel('recoverable jamming episodes', 'rule_esc');
+verifyEqual(tc, [r.n, r.det.median, r.det.p90, r.det.never_pct, r.rec_det.median, r.rec_det.p90], [4 1 2 25 3 4]);
+r = sel('recoverable threat episodes', 'none');
+verifyTrue(tc, isnan(r.rec_det.median)); verifyEqual(tc, r.rec_det.never_pct, 100);
+g = L.gput(strcmp({L.gput.policy}, 'rule_esc'));
+verifyEqual(tc, [g.bps, g.bps_jam], [5e4 * 5.5 / 7, 42500], 'AbsTol', 1e-6);
+verifyTrue(tc, any(strcmp({L.gput.policy}, 'oracle')));
+verifyTrue(tc, any(contains(lines, '-> MET')));
+verifyEqual(tc, {L.verdict.scenario}, {'narrowband', 'wideband'});
+verifyEqual(tc, {L.verdict.threat}, {'tone_jamming', 'jamming'});
+verifyEqual(tc, [L.verdict.red_pct], [50 80], 'AbsTol', 1e-9);
+verifyEqual(tc, {L.verdict.verdict}, {'MET (not committed)', 'MET (not committed)'});   % one geometry each: no interval
+verifyEqual(tc, {L.per.verdict}, {'MET (committed)', 'NOT MET'});
+verifyEqual(tc, L.recoverable, 'all36');
+L2 = lect_kpis(ALL, POL, LBL, 7, scen, 5e4, 20);                   % a deployed DQN is read too
+verifyEqual(tc, {L2.per.policy}, {'rule_esc', 'blind_esc', 'dqn_esc'});
+end
+
+function test_lect_kpis_verdict(tc)
+% The primary PER verdict per lecturer scenario (lect_kpis.m L.verdict): narrowband =
+% tone_jamming, wideband = jamming, rule + escalation's reduction vs the static link; MET
+% (committed) when the 95% lower bound clears 30%, MET (not committed) when only the point
+% does, NOT MET otherwise or without episodes; the five threats pooled are the extension.
+POL = {'none', 'rule_esc', 'blind_esc'}; LBL = {'no response', 'rule + escalation', 'no detector + escalation'};
+scen = {'none', 'jamming', 'tone_jamming'};
+B = struct('scn', [3 3 3 3 2 2 2 2], 'recoverable', true(1, 8), 'recoverable_core', true(1, 8), ...
+    'threat', true(1, 8), 'geom', 1:8, 'ok_post', 0.5 * ones(1, 8), 't_conf', ones(1, 8), 't_rec_det', ones(1, 8), ...
+    't_rec', 2 * ones(1, 8), 'dlv_post', 0.5 * ones(1, 8), 'gput_post', 0.5 * ones(1, 8));
+ALL = {B, B, B};
+for k = 1:3, ALL{k}.per_post = 0.5 * ones(1, 8); end
+ALL{2}.per_post = [0 0.5 0.5 0 0.1 0.1 0.1 0.1];        % tone 50%, two of four geometries; jamming 80% on every one
+[L, lines] = lect_kpis(ALL, POL, LBL, 2, scen, 5e4, 20);
+v = L.verdict;
+verifyEqual(tc, {v.scenario}, {'narrowband', 'wideband'});
+verifyEqual(tc, [v.n], [4 4]);
+verifyEqual(tc, [v.red_pct], [50 80], 'AbsTol', 1e-9);
+verifyLessThan(tc, v(1).ci(1), 30);
+verifyGreaterThanOrEqual(tc, v(2).ci(1), 30);
+verifyEqual(tc, {v.verdict}, {'MET (not committed)', 'MET (committed)'});
+verifyEqual(tc, [v.met; v.committed], [true true; false true]);
+verifyEqual(tc, {v.policy}, {'rule_esc', 'rule_esc'});
+verifyTrue(tc, any(startsWith(lines, '  PRIMARY narrowband (tone_jamming), 4 recoverable episodes, static PER 50.00%: rule + escalation reduction 50.0% [') & ...
+    endsWith(lines, '-> MET (not committed)')));
+verifyTrue(tc, any(startsWith(lines, '  PRIMARY wideband (jamming), 4 recoverable episodes') & endsWith(lines, '-> MET (committed)')));
+i = find(startsWith(lines, '  extension, the five jamming threats pooled (8 recoverable episodes; jamming, noise_burst'));
+verifyNumElements(tc, i, 1);
+verifyGreaterThan(tc, i, find(startsWith(lines, '  PRIMARY wideband'), 1));
+verifyEqual(tc, L.per(1).red_pct, 65, 'AbsTol', 1e-9);
+verifyEqual(tc, L.per(1).verdict, ternary_(L.per(1).ci(1) >= 30, 'MET (committed)', 'MET (not committed)'));
+ALL{2}.per_post(5:8) = 0.4;                                % jamming 20%
+ALL = cellfun(@(R) setfield(R, 'threat', [false(1, 4), true(1, 4)]), ALL, 'UniformOutput', false); %#ok<SFLD>
+[L, lines] = lect_kpis(ALL, POL, LBL, 2, scen, 5e4, 20);
+verifyEqual(tc, [L.verdict.n], [0 4]);
+verifyEqual(tc, {L.verdict.verdict}, {'NOT MET', 'NOT MET'});
+verifyTrue(tc, any(strcmp(lines, '  PRIMARY narrowband (tone_jamming): no recoverable episodes -> NOT MET')));
+verifyTrue(tc, any(startsWith(lines, '  PRIMARY wideband (jamming), 4 recoverable episodes') & endsWith(lines, 'reduction 20.0% [20.0, 20.0] -> NOT MET')));
+end
+
+function [ALL, scen] = lect_world(POL)
+% Eight episodes of every policy in POL: jamming (1, 2, 7), tone_jamming (3, 4, 8), path_loss
+% (5, 6); episode 7 not recoverable, episode 8 without its threat on the air; episode 2
+% recoverable only by a configuration outside the core action set.
+% The policies without the detector share one set of readings, every other policy another.
+scen = {'none', 'jamming', 'tone_jamming', 'path_loss'};
+B = struct('scn', [2 2 3 3 4 4 2 3], 'recoverable', logical([1 1 1 1 1 1 0 1]), ...
+    'recoverable_core', logical([1 0 1 1 1 1 0 1]), ...
+    'threat', logical([1 1 1 1 1 1 1 0]), 'geom', [1 1 2 2 3 3 4 5], 'ok_post', 0.5 * ones(1, 8));
+ALL = cell(1, numel(POL));
+for k = 1:numel(POL)
+    R = B;
+    switch POL{k}
+        case 'none'
+            R.per_post = [0.5 0.5 0.4 0.4 0.6 0.6 0.9 0.2]; R.dlv_post = [0.5 0.5 0.6 0.6 0.4 0.4 0.1 0.8];
+            R.t_conf = [1 1 1 1 1 1 NaN NaN]; R.t_rec_det = nan(1, 8); R.t_rec = nan(1, 8);
+        case {'blind_esc', 'blind_core'}
+            R.per_post = [0.3 0.3 0.4 0.4 0.3 0.3 0.9 0.2]; R.dlv_post = [0.7 0.7 0.6 0.6 0.7 0.7 0.1 0.8];
+            R.t_conf = [2 3 3 2 2 2 NaN NaN]; R.t_rec_det = [5 6 NaN NaN 4 4 NaN NaN]; R.t_rec = [7 9 NaN NaN 6 6 NaN NaN];
+        otherwise
+            R.per_post = [0.1 0.1 0.2 0.2 0 0 0.9 0.2]; R.dlv_post = [0.9 0.9 0.8 0.8 1 1 0.1 0.8];
+            R.t_conf = [1 2 NaN 0 1 1 NaN NaN]; R.t_rec_det = [3 4 NaN 2 0 5 NaN NaN]; R.t_rec = [4 6 NaN 2 1 6 NaN NaN];
+            if strcmp(POL{k}, 'oracle'), R.t_conf(:) = NaN; R.t_rec_det(:) = NaN; end
+    end
+    R.gput_post = R.dlv_post; R.recovered = isfinite(R.t_rec);
+    ALL{k} = R;
+end
+end
+
+function test_three_state_view(tc)
+% The detector's confusion matrix as the three link states: the rows of none, tone_jamming
+% and jamming only; a frame read as another class is an error of its state (column other),
+% precision over the three states' frames.
+classes = {'none', 'jamming', 'path_loss', 'tone_jamming', 'spoofing'};
+cm = [90 2 3 1 4; 5 80 5 10 0; 10 10 70 5 5; 2 3 0 85 10; 1 1 1 1 96];
+V = three_state_view(cm, classes);
+verifyEqual(tc, V.cm, [90 1 2 7; 2 85 3 10; 5 10 80 5]);
+verifyEqual(tc, V.recall, [0.9 0.85 0.8], 'AbsTol', 1e-12);
+p = [90 / 97, 85 / 96, 80 / 85];
+verifyEqual(tc, V.precision, p, 'AbsTol', 1e-12);
+f1 = 2 * p .* V.recall ./ (p + V.recall);
+verifyEqual(tc, V.macro_f1, mean(f1), 'AbsTol', 1e-12);
+verifyEqual(tc, V.n, [100 100 100]);
+verifyError(tc, @() three_state_view(eye(3), {'none', 'jamming', 'path_loss'}), 'three_state_view:class');
+end
+
+function test_lect_kpis_summary(tc)
+% measure_all_kpis.m reports the revised proposal's readings beside the KPIs: the three link
+% states of the KPI 1 reading (every Eb/N0 and from the threshold, the saved predictions) and
+% of the third test set, the PER reduction beside KPI 4, recovery and goodput beside KPI 5;
+% saved as LECT.
+d = fullfile(tc.TestData.tmp, 'lectkpi'); mkdir(fullfile(d, 'results')); mkdir(fullfile(d, 'data'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+classes = {'none', 'jamming', 'path_loss', 'tone_jamming', 'spoofing'};
+cm = [90 2 3 1 4; 5 80 5 10 0; 10 10 70 5 5; 2 3 0 85 10; 1 1 1 1 96];
+metrics = struct('overall_accuracy_pct', 90, 'macro_f1_pct', 88, 'ci95', struct('macro_f1', [86 90]), ...
+    'classes', {classes}, 'class_f1_above_threshold_pct', [90 91 92 93 94]', 'snr_breakdown', ...
+    struct('snr_db', {0, 3}, 'macro_f1_pct', {80, 92}), 'macro_f1_above_threshold_pct', 91, 'kpi1_threshold_db', 3, ...
+    'conf_mat', cm, 'test_set', 'third test set');
+[it, ip] = find(cm > 0); n = cm(cm > 0);
+yt = repelem(it, n); yp = repelem(ip, n);
+pred = struct('y_true', categorical(classes(yt)', classes), 'y_pred', categorical(classes(yp)', classes), ...
+    'ebno', 6 * ones(numel(yt), 1)); %#ok<NASGU>
+save('results/eval_detector_metrics_fresh2.mat', 'metrics');
+save('results/detector_predictions_fresh2.mat', 'pred');
+f = kpi1_file('eval_detector_metrics');
+if ~strcmp(f, 'results/eval_detector_metrics_fresh2.mat')
+    metrics.test_set = 'fourth test set'; save(f, 'metrics');
+    save(kpi1_file('detector_predictions'), 'pred');
+end
+POL = {'none', 'random', 'fixed', 'rule_esc', 'blind_esc', 'table', 'dqn_esc', 'oracle'};
+LBL = {'no response', 'random', 'fixed', 'rule + escalation (deployed)', 'no detector + escalation', 'table', ...
+    'DQN + escalation', 'oracle'};
+[ALL, scen] = lect_world(POL); iDQN = 4; RES = {}; set_names = {'single'}; %#ok<NASGU>
+show = {'none', 'fixed', 'rule_esc', 'blind_esc', 'table', 'dqn_g1', 'dqn_esc', 'oracle'};
+KP = struct('threats', {{'jamming', 'tone_jamming', 'path_loss'}}, 'show', {show}, 'per_threat', 95 * ones(3, 8), ...
+    'recoverable_share', ones(3, 1), 'sev_names', {{'nominal'}}, 'per_threat_sev', 95 * ones(3, 1, 8), ...
+    'far', struct('policy', LBL{4}, 'k', 1, 'n', 700, 'upper', 0.01, 'per_cycle', 1e-4), 'ebno_thr', 3, ...
+    'per_speed', 95 * ones(2, 8), 'speed_bins', [0 80 161], 'lect', lect_kpis(ALL, POL, LBL, iDQN, scen, 5e4, 20)); %#ok<NASGU>
+save('results/policy_evaluation.mat', 'RES', 'POL', 'LBL', 'set_names', 'iDQN', 'KP', 'ALL');
+evalc('measure_all_kpis');
+S = load('results/kpi_summary.mat', 'KPI', 'LECT'); K = S.KPI;
+k1 = strjoin(K([K.id] == 1).detail, newline);
+verifyNotEmpty(tc, strfind(k1, ['three link states (revised proposal; third test set, saved confusion matrix, every ' ...
+    'Eb/N0; frames of none / tone_jamming / jamming, another class read is an error): recall narrowband 85.00%, ' ...
+    'wideband 80.00% (>= 85% each: not met), clean 90.00%']));
+verifyNotEmpty(tc, strfind(k1, 'three link states from 3 dB (the KPI 1 threshold, saved predictions)'));
+verifyEqual(tc, S.LECT.three_above.macro_f1, S.LECT.three.macro_f1, 'AbsTol', 1e-12);   % every frame above the threshold
+verifyEqual(tc, S.LECT.three.recall, [0.9 0.85 0.8], 'AbsTol', 1e-12);
+k4 = strjoin(K([K.id] == 4).detail, newline);
+verifyNotEmpty(tc, strfind(k4, 'recoverable jamming episodes (4)'));
+verifyNotEmpty(tc, strfind(k4, 'reduction 66.7% ['));
+verifyNotEmpty(tc, strfind(k4, '-> MET (committed) (target >= 30%)'));
+verifyNotEmpty(tc, strfind(k4, ['PER vs the static link (revised proposal, full action set), PRIMARY per jamming scenario ' ...
+    '(lecturer: reduction >= 30%; committed when the 95% lower bound clears it), rule + escalation (deployed): narrowband ' ...
+    '(tone_jamming, 2 recoverable episodes) 50.0% [NaN, NaN] -> MET (not committed); wideband (jamming, 2 recoverable ' ...
+    'episodes) 80.0% [NaN, NaN] -> MET (not committed)']));
+verifyNotEmpty(tc, strfind(k4, 'full action set), extension: the five jamming threats pooled, recoverable jamming episodes (4)'));
+verifyLessThan(tc, strfind(k4, 'full action set), PRIMARY'), strfind(k4, 'full action set), extension'));
+verifyNotEmpty(tc, strfind(k4, 'tone_jamming (narrowband) 50.0%'));
+k5 = strjoin(K([K.id] == 5).detail, newline);
+verifyNotEmpty(tc, strfind(k5, ['rule + escalation (deployed): onset->detection 1/2 (never 17%), detection->restored ' ...
+    '3/5 (never 0%), T_rec from onset 4/6 (never 17%)']));
+verifyNotEmpty(tc, strfind(k5, 'rule + escalation (deployed) 39286 ['));
+verifyEqual(tc, S.LECT.pol.payload_bps, 5e4);
+verifyNotEmpty(tc, strfind(k1, 'three-state CNN on spectrograms only (deliverable 2): PENDING -> train_core_cnn (B3c)'));
+mt = @(mf, rc, fa) struct('macro_f1', mf, 'recall', rc, 'fa', fa);
+core = struct('test_set', 'data/splits_fresh3.mat', 'N', 5, 'metrics', {{mt(0.9, [0.95 0.9 0.88], 0.05), ...
+    mt(0.93, [0.97 0.92 0.9], 0.03), mt(0.8, [0.9 0.8 0.7], 0.1)}}, 'boot', struct('macro_f1', [0.88 0.91; 0.92 0.94; 0.78 0.82]), ...
+    'verdicts', {{'', '', '', ''; 'met (committed)', 'met (committed)', 'met (not committed)', 'met (committed)'; '', '', '', ''}}); %#ok<NASGU>
+save('results/core_cnn.mat', 'core');
+evalc('measure_all_kpis');
+S = load('results/kpi_summary.mat', 'KPI', 'LECT'); K = S.KPI;
+k1 = strjoin(K([K.id] == 1).detail, newline);
+verifyNotEmpty(tc, strfind(k1, ['three-state CNN on spectrograms only (deliverable 2; data/splits_fresh3.mat, N = 5 cycles; ' ...
+    'results/core_cnn.txt): macro-F1 93.00% [92.00, 94.00] met (committed); recall narrowband 92.00% met (committed), ' ...
+    'wideband 90.00% met (not committed); false alarms 3.00% met (committed); the hybrid on the same frames: macro-F1 ' ...
+    '90.00%, false alarms 5.00%']));
+verifyEqual(tc, S.LECT.cnn.N, 5);
+core.metrics{1} = []; save('results/core_cnn.mat', 'core');              % read without B3r: no hybrid on the same frames
+evalc('measure_all_kpis');
+S = load('results/kpi_summary.mat', 'KPI'); K = S.KPI;
+k1 = strjoin(K([K.id] == 1).detail, newline);
+verifyNotEmpty(tc, strfind(k1, ['false alarms 3.00% met (committed); no hybrid reading of this set before it ' ...
+    '(docs/core_cnn_no_b3r.txt)']));
+end
+
+function test_lect_kpis_pending(tc)
+% A policy evaluation saved before the revised proposal's readings shows them as PENDING
+% beside KPI 4 and KPI 5, never as a number.
+src = fileread(which('measure_all_kpis'));
+verifyNotEmpty(tc, strfind(src, '''beside KPI 4, PER vs the static link (revised proposal): PENDING, '''));
+verifyNotEmpty(tc, strfind(src, 'save(''results/kpi_summary.mat'', ''KPI'', ''LECT'');'));
+end
+
+
+function test_profile_skip_stages(tc)
+% profile.json's optional skip_stages: absent file, field or names skip nothing; one name or a
+% list; a name that is no stage of run_stage.m or a list of other values is an error.
+% run_stage.m prints the skipped stage's done marker as the takeover reads it.
+d = tempname; mkdir(d); f = fullfile(d, 'profile.json'); known = {'A0', 'OHP', 'GCSA', 'KPI'};
+verifyEmpty(tc, profile_skip_stages(f, known));
+w = @(t) write_text(f, t);
+w('{"profile":"profile 3","n_rx":3}'); verifyEmpty(tc, profile_skip_stages(f, known));
+w('{"n_rx":3,"skip_stages":["OHP","GCSA"]}'); verifyEqual(tc, profile_skip_stages(f, known), {'OHP', 'GCSA'});
+w('{"skip_stages":["OHP"]}'); verifyEqual(tc, profile_skip_stages(f, known), {'OHP'});
+w('{"skip_stages":"GCSA"}'); verifyEqual(tc, profile_skip_stages(f, known), {'GCSA'});
+w('{"skip_stages":[]}'); verifyEmpty(tc, profile_skip_stages(f, known));
+w('{"skip_stages":["OHP","SURV4"]}'); verifyError(tc, @() profile_skip_stages(f, known), 'profile_skip_stages:unknown');
+w('{"skip_stages":[1,2]}'); verifyError(tc, @() profile_skip_stages(f, known), 'profile_skip_stages:type');
+src = fileread(which('run_stage'));
+verifyNotEmpty(tc, strfind(src, 'skip = profile_skip_stages(''profile.json'', fieldnames(map));'));
+fmt = '##### STAGE %s done in 0.0 min (skipped by profile.json) #####\n';
+verifyNotEmpty(tc, strfind(src, ['fprintf(''' fmt ''', st);']));
+line = sprintf(fmt, 'GCSA');
+verifyEqual(tc, regexp(line, '##### STAGE [A-Za-z0-9]* done', 'match', 'once'), '##### STAGE GCSA done');
+verifyNotEmpty(tc, regexp(line, '^##### STAGE ([A-Za-z0-9]*) done', 'once'));
+end
+
+%% ---------- core action set (revised proposal) ----------
+function test_core_actions_exist(tc)
+% The core action set is four of the 36 configurations under their exact names, and its
+% escalation ladder holds every core configuration but no_action once.
+A = policy_actions(); C = decision_config();
+verifyEqual(tc, C.core_actions, {'no_action', 'channel_switch', 'rate_reduce', 'channel_switch+rate_reduce'});
+verifyTrue(tc, all(ismember(C.core_actions, A)));
+verifyEqual(tc, sort(C.ladder_core), sort(setdiff(C.core_actions, {'no_action'})));
+verifyEqual(tc, C.ladder_core{1}, 'channel_switch+rate_reduce');
+end
+
+function test_rule_core_policy(tc)
+% The rule on the core set: interference on our channel leaves it, a jammer a hop does not
+% escape and a loss of our signal take the processing gain, a degraded link without a known
+% cause both; benign and clean classes on a healthy link do nothing; every answer is core.
+C = decision_config();
+for c = {'jamming', 'reactive_jamming', 'spoofing', 'tone_jamming'}
+    verifyEqual(tc, rule_core_policy(c{1}), 'channel_switch');
+end
+for c = {'sweeping_jammer', 'noise_burst', 'path_loss', 'antenna_fault', 'airframe_shadowing'}
+    verifyEqual(tc, rule_core_policy(c{1}), 'rate_reduce');
+end
+verifyEqual(tc, rule_core_policy('none'), 'no_action');
+verifyEqual(tc, rule_core_policy('benign_interference'), 'no_action');
+verifyEqual(tc, rule_core_policy('unknown'), 'no_action');
+verifyEqual(tc, rule_core_policy('benign_interference', true), 'channel_switch');
+verifyEqual(tc, rule_core_policy('none', true), 'channel_switch+rate_reduce');
+verifyEqual(tc, rule_core_policy('unknown', true), 'channel_switch+rate_reduce');
+verifyEqual(tc, rule_core_policy('none', true, 10, 5), 'channel_switch');                   % interference in the quiet slot
+verifyEqual(tc, rule_core_policy('none', true, 10, 5, false, [], false), 'channel_switch+rate_reduce');   % slot branch off
+verifyEqual(tc, rule_core_policy('none', true, 4, 5), 'channel_switch+rate_reduce');
+verifyEqual(tc, rule_core_policy('none', true, C.q_alarm_db), 'channel_switch');             % default alarm
+verifyEqual(tc, rule_core_policy('none', false, -Inf, 3, true), 'rate_reduce');              % drop alarm, quiet slot
+verifyEqual(tc, rule_core_policy('unknown', true, -Inf, 3, true), 'rate_reduce');
+verifyEqual(tc, rule_core_policy('none', false, 10, 3, true), 'no_action');                  % interference: no drop answer
+verifyEqual(tc, rule_core_policy('benign_interference', false, -Inf, 3, true), 'no_action');
+B = @(d, cur, g) struct('drop_db', d, 'current', cur, 'current_db', g);
+verifyEqual(tc, rule_core_policy('path_loss', false, -Inf, 3, false, B(5, 'no_action', 0)), 'rate_reduce');
+verifyEqual(tc, rule_core_policy('path_loss', false, -Inf, 3, false, B(5, 'channel_switch+rate_reduce', 6)), ...
+    'channel_switch+rate_reduce');                                                           % its gain covers the drop
+verifyEqual(tc, rule_core_policy('path_loss', false, -Inf, 3, false, B(-0.5, 'no_action', 0)), 'no_action');
+verifyEqual(tc, rule_core_policy('none', false, -Inf, 3, true, B(8, 'rate_reduce', 6)), 'rate_reduce');
+cls = {'jamming', 'reactive_jamming', 'spoofing', 'tone_jamming', 'sweeping_jammer', 'noise_burst', 'path_loss', ...
+    'antenna_fault', 'airframe_shadowing', 'benign_interference', 'none', 'unknown'};
+for c = cls
+    for deg = [false true]
+        for q = [-Inf 10]
+            for dr = [false true]
+                verifyTrue(tc, ismember(rule_core_policy(c{1}, deg, q, 5, dr), C.core_actions));
+                verifyTrue(tc, ismember(rule_core_policy(c{1}, deg, q, 5, dr, B(3, 'no_action', 0)), C.core_actions));
+            end
+        end
+    end
+end
+end
+
+function test_core_decide_escalation(tc)
+% Through the decision cycle the core rule applies channel_switch to a jammer it names, and
+% when the link stays degraded escalates along the core ladder, never outside the core set;
+% the full rule escalates along its own ladder. The option is the rule's only.
+C = decision_config(); A = policy_actions();
+cls = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', 'antenna_fault', ...
+    'benign_interference', 'sweeping_jammer', 'tone_jamming', 'airframe_shadowing'};
+PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0);
+na = find(strcmp(A, 'no_action'));
+obs = struct('probs', double(strcmp(cls, 'jamming')), 'unknown', false, 'feat', zeros(1, numel(link_features('names'))));
+obs.feat(feature_index('log_ber')) = -1; obs.feat(feature_index('crc_fail')) = 1;
+runs = {struct('core', true), struct()};
+first = {{'channel_switch', 'channel_switch+rate_reduce'}, {'channel_switch', C.ladder{1}}};
+for k = 1:2
+    mem = []; cfg = na; ch = {}; esc = [];
+    for t = 1:30
+        o = obs; o.cfg_link = cfg;
+        [a, mem, d] = policy_decide('rule_esc', o, cfg, mem, PP, [], runs{k});
+        if a ~= cfg, ch{end+1} = A{a}; esc(end+1) = d.escalated; end %#ok<AGROW>
+        cfg = a;
+    end
+    verifyGreaterThanOrEqual(tc, numel(ch), 2);
+    verifyEqual(tc, ch(1:2), first{k});
+    verifyEqual(tc, double(esc(1:2)), [0 1]);
+    if k == 1, verifyTrue(tc, all(ismember(ch, C.core_actions))); end
+end
+% without the detector: every cycle reads unknown, the alarm from the degradation; the core
+% answer to a degraded link without a known cause holds both core elements
+mem = []; cfg = na; ch = {};
+for t = 1:30
+    o = obs; o.cfg_link = cfg;
+    [a, mem] = policy_decide('blind_esc', o, cfg, mem, PP, [], struct('core', true));
+    if a ~= cfg, ch{end+1} = A{a}; end %#ok<AGROW>
+    cfg = a;
+end
+verifyNotEmpty(tc, ch);
+verifyEqual(tc, ch{1}, 'channel_switch+rate_reduce');
+verifyTrue(tc, all(ismember(ch, C.core_actions)));
+verifyError(tc, @() policy_decide('table_esc', obs, na, [], PP, [], struct('core', true, 'table', na * ones(1, numel(cls)), ...
+    'table_unknown', na)), 'policy_decide:core');
+verifyError(tc, @() policy_decide('dqn', obs, na, [], PP, [], struct('core', true)), 'policy_decide:core');
+end
+
+function test_rule_dwell_tried(tc)
+% On a link that stays degraded (one incident), the consecutive dwell ('run') commits the class
+% answer again after an escalation left it, the group dwell never commits a configuration
+% tried in the incident; alike for rule_esc and blind_esc, full and core. The dwell is a
+% validation choice of train_dqn.m, applied to every reader through decision_settings.m.
+A = policy_actions();
+cls = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', 'antenna_fault', ...
+    'benign_interference', 'sweeping_jammer', 'tone_jamming', 'airframe_shadowing'};
+na = find(strcmp(A, 'no_action'));
+obs = struct('probs', double(strcmp(cls, 'jamming')), 'unknown', false, 'feat', zeros(1, numel(link_features('names'))));
+obs.feat(feature_index('log_ber')) = -1; obs.feat(feature_index('crc_fail')) = 1;
+runs = {'rule_esc', struct(); 'rule_esc', struct('core', true); 'blind_esc', struct(); 'blind_esc', struct('core', true)};
+for dw = {'run', 'group'}
+    PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0, 'rule_dwell', dw{1});
+    for k = 1:size(runs, 1)
+        mem = []; cfg = na; ch = {}; esc = [];
+        for t = 1:40
+            o = obs; o.cfg_link = cfg;
+            [a, mem, d] = policy_decide(runs{k, 1}, o, cfg, mem, PP, [], runs{k, 2});
+            if a ~= cfg, ch{end+1} = A{a}; esc(end+1) = d.escalated; end %#ok<AGROW>
+            cfg = a;
+        end
+        rep = 0;
+        for j = 2:numel(ch)
+            if any(strcmp(ch(1:j-1), ch{j})), rep = j; break; end
+        end
+        verifyGreaterThanOrEqual(tc, numel(ch), 3);
+        verifyEqual(tc, double(esc(2)), 1);
+        if strcmp(dw{1}, 'run')
+            verifyGreaterThan(tc, rep, 0);
+            if rep > 0, verifyEqual(tc, double([esc(rep), strcmp(ch{rep}, ch{1})]), [0 1]); end
+        else
+            verifyEqual(tc, rep, 0);
+        end
+    end
+end
+src = fileread(which('train_dqn'));
+verifyNotEmpty(tc, strfind(src, ['STEPS(end+1) = struct(''name'', ''proposal dwell'', ''var'', {{struct(''rule_dwell'', ' ...
+    '''run''), struct(''rule_dwell'', ''group'')}});']));
+for f = {'evaluate_policies', 'experiment_core_bw'}
+    verifyNotEmpty(tc, strfind(fileread(which(f{1})), 'PP = decision_settings(PP, Q);'));
+end
+end
+
+function test_core_policies_rollout(tc)
+% rule_core and blind_core (policy_setup.m) run as rule_esc and blind_esc on the core set: on
+% a jammer that a hop escapes both recover; on one no configuration escapes they escalate
+% and every configuration they request stays in the core set. evaluate_policies.m runs them
+% after every other policy, on the same episode sets and seeds.
+C = decision_config();
+Q = struct('agent', [], 'agents', {{}}, 'rule_sel', []);
+[kind, ~, opt] = policy_setup('rule_core', Q, 1, 1, 1, [], 1);
+verifyEqual(tc, kind, 'rule_esc'); verifyTrue(tc, opt.core);
+[kind, ~, opt] = policy_setup('blind_core', Q, 1, 1, 1, [], 1);
+verifyEqual(tc, kind, 'blind_esc'); verifyTrue(tc, opt.core);
+[kind, ~, opt] = policy_setup('rule_esc', Q, 1, 1, 1, [], 1);
+verifyEqual(tc, kind, 'rule_esc'); verifyFalse(tc, isfield(opt, 'core'));
+[PP, K] = toy_world(true);
+ic = find(ismember(PP.actions, C.core_actions));
+spec = struct('scn', [2 2], 's', [1 1], 'onset', [3 3], 'follow', false(1, 2), 'fdelay', [0 0], 'unk', false(1, 2), ...
+    'T', 30, 'r', [1 1]);
+for p = {'rule_core', 'blind_core'}
+    [kind, ag, opt] = policy_setup(p{1}, Q, 1, 1, 1, [], K.na);
+    R = rollout_policy(kind, PP, K, spec, 1, ag, opt, 8);
+    verifyTrue(tc, all(R.recovered));
+    verifyTrue(tc, all(ismember(R.cfg_trace(:), ic)));
+end
+for a = 1:numel(PP.actions), PP.pools(2, :, a, 1) = PP.pools(2, :, K.na, 1); end   % no configuration escapes
+K = link_env('tables', PP);
+for p = {'rule_core', 'blind_core'}
+    [kind, ag, opt] = policy_setup(p{1}, Q, 1, 1, 1, [], K.na);
+    R = rollout_policy(kind, PP, K, spec, 1, ag, opt, 8);
+    verifyTrue(tc, all(R.esc >= 1));
+    verifyTrue(tc, all(ismember(R.cfg_trace(:), ic)));
+end
+src = fileread(which('evaluate_policies'));
+verifyNotEmpty(tc, strfind(src, 'POL = [POL, {''rule_core'', ''blind_core''}];'));
+verifyNotEmpty(tc, strfind(src, ['RES{si, pk} = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, ' ...
+    '30000 + 100*si);']));
+end
+
+function test_lect_kpis_core(tc)
+% lect_kpis.m reads the core action set beside the full one: the PER reduction of the core
+% rule with and without the detector vs the same static link, per jamming threat, the CNN's
+% share in PER, goodput and recovery time, recovery and goodput; the full set's readings
+% and lines are those it gives without the core policies.
+POL = {'none', 'random', 'fixed', 'rule_esc', 'blind_esc', 'table', 'dqn_esc', 'oracle'};
+LBL = {'no response', 'random', 'fixed', 'rule + escalation', 'no detector + escalation', 'table', 'DQN + escalation', 'oracle'};
+[ALL, scen] = lect_world(POL);
+[L0, lines0] = lect_kpis(ALL, POL, LBL, 4, scen, 5e4, 20);
+verifyEmpty(tc, L0.core);
+POLc = [POL, {'rule_core', 'blind_core'}];
+LBLc = [LBL, {'core: rule + escalation', 'core: no detector + escalation'}];
+[ALLc, scen] = lect_world(POLc);
+[L, lines] = lect_kpis(ALLc, POLc, LBLc, 4, scen, 5e4, 20);
+for f = {'verdict', 'per', 'per_threat', 'cnn', 'rec', 'gput'}
+    verifyEqual(tc, L.(f{1}), L0.(f{1}));
+end
+verifyEqual(tc, lines(1:numel(lines0)), lines0);
+verifyEqual(tc, lines0{3}, 'Full action set (the 36 configurations):');
+% Primary: the episodes a core configuration recovers (episode 2 out: jamming 1, tone 3 and 4)
+Cc = L.core;
+verifyEqual(tc, Cc.actions, decision_config().core_actions);
+verifyEqual(tc, Cc.recoverable, 'core');
+verifyEqual(tc, {Cc.per.policy}, {'rule_core', 'blind_core'});
+verifyEqual(tc, [Cc.per.n], [3 3]);
+verifyEqual(tc, [Cc.per.red_pct], 100 * [1 - 0.5 / 1.3, 1 - 1.1 / 1.3], 'AbsTol', 1e-9);
+verifyEqual(tc, {Cc.per.verdict}, {'MET (committed)', 'NOT MET'});
+verifyEqual(tc, {Cc.per_threat.threat}, {'jamming', 'tone_jamming'});
+verifyEqual(tc, [Cc.per_threat.n], [1 2]);
+verifyEqual(tc, {Cc.verdict.threat}, {'tone_jamming', 'jamming'});
+verifyEqual(tc, [Cc.verdict.n], [2 1]);
+verifyEqual(tc, [Cc.verdict.red_pct], [50 80], 'AbsTol', 1e-9);
+verifyEqual(tc, {Cc.verdict.policy}, {'rule_core', 'rule_core'});
+verifyEqual(tc, Cc.cnn.per_red_pct, 100 * (1 - 0.5 / 1.1), 'AbsTol', 1e-9);
+verifyEqual(tc, Cc.cnn.gput_bps, 1e4, 'AbsTol', 1e-6);
+verifyEqual(tc, [Cc.cnn.det.median; Cc.cnn.det.p90; Cc.cnn.det.never_pct], [0.5 2; 1 3; 100 / 3 0], 'AbsTol', 1e-9);
+verifyEqual(tc, [Cc.cnn.rec_det.median; Cc.cnn.rec_det.p90; Cc.cnn.rec_det.never_pct], [2.5 5; 3 5; 0 200 / 3], 'AbsTol', 1e-9);
+sel = @(S, s, p) S.rec(strcmp({S.rec.set}, s) & strcmp({S.rec.policy}, p));
+r = sel(Cc, 'recoverable threat episodes', 'rule_core');
+verifyEqual(tc, [r.n, r.det.median, r.det.p90, r.det.never_pct, r.rec_det.median, r.rec_det.p90, r.t_rec.median, r.t_rec.p90], ...
+    [5 1 1 20 2.5 5 3 6]);
+verifyEqual(tc, sel(Cc, 'recoverable jamming episodes', 'rule_core').n, 3);
+verifyEqual(tc, unique({Cc.rec.policy}, 'stable'), {'none', 'blind_core', 'rule_core'});
+verifyEqual(tc, {Cc.gput.policy}, {'none', 'blind_core', 'rule_core'});
+g = Cc.gput(strcmp({Cc.gput.policy}, 'rule_core'));
+verifyEqual(tc, [g.bps, g.bps_jam], [5e4 * 5.5 / 7, 5e4 * 2.5 / 3], 'AbsTol', 1e-6);
+% Conservative: the episodes any of the 36 recovers
+C36 = Cc.all36;
+verifyEqual(tc, C36.recoverable, 'all36');
+verifyEqual(tc, [C36.per.n], [4 4]);
+verifyEqual(tc, [C36.per.red_pct], 100 * [1 - 0.6 / 1.8, 1 - 1.4 / 1.8], 'AbsTol', 1e-9);
+verifyEqual(tc, [C36.per.met], [true false]);
+verifyEqual(tc, {C36.per_threat.threat}, {'jamming', 'tone_jamming'});
+verifyEqual(tc, [C36.verdict.n], [2 2]);
+verifyEqual(tc, C36.cnn.per_red_pct, 100 * (1 - 0.6 / 1.4), 'AbsTol', 1e-9);
+verifyEqual(tc, C36.cnn.gput_bps, 1e4, 'AbsTol', 1e-6);
+verifyEqual(tc, [C36.cnn.det.median; C36.cnn.det.p90; C36.cnn.det.never_pct], [1 2.5; 2 3; 25 0]);
+verifyEqual(tc, [C36.cnn.rec_det.median; C36.cnn.rec_det.p90; C36.cnn.rec_det.never_pct], [3 5.5; 4 6; 0 50]);
+verifyEqual(tc, [L.cnn.det.median], [1 2.5]);                                        % the full set's alike
+g = C36.gput(strcmp({C36.gput.policy}, 'rule_core'));
+verifyEqual(tc, [g.bps, g.bps_jam], [5e4 * 5.5 / 7, 42500], 'AbsTol', 1e-6);
+r = sel(C36, 'recoverable threat episodes', 'rule_core');
+verifyEqual(tc, [r.n, r.det.median, r.rec_det.median, r.t_rec.median], [6 1 3 4]);
+lc = lines(numel(lines0) + 1:end);
+verifyTrue(tc, startsWith(lc{1}, 'Core action set {no_action, channel_switch, rate_reduce, channel_switch+rate_reduce}'));
+verifyTrue(tc, endsWith(lc{1}, 'primary: the episodes a core configuration recovers (5 recoverable threat episodes, 3 jamming):'));
+verifyTrue(tc, any(contains(lc, 'core: rule + escalation') & contains(lc, '-> MET')));
+verifyTrue(tc, any(startsWith(lc, 'Core action set: Recovery time (lecturer)')));
+verifyTrue(tc, any(startsWith(lc, 'Core action set: Goodput after onset in bit/s')));
+verifyTrue(tc, any(startsWith(lc, ['Core action set: PER after onset vs the static link (no response), paired by episode, ' ...
+    '95% bootstrap over flight geometries; recoverable episodes: some configuration of the core action set restores the geometry.'])));
+verifyTrue(tc, any(contains(lc, 'CNN contribution (core rule + escalation vs the same core escalation without the detector')));
+i = find(startsWith(lc, 'Core action set, second line: the episodes any of the 36 configurations recovers (6 recoverable threat episodes, 4 jamming'));
+verifyNumElements(tc, i, 1);
+verifyTrue(tc, any(startsWith(lc(i:end), 'Core action set (recoverable by the 36): PER after onset')));
+verifyTrue(tc, any(startsWith(lc(i:end), 'Core action set (recoverable by the 36): Recovery time (lecturer)')));
+verifyTrue(tc, any(startsWith(lc(i:end), 'Core action set (recoverable by the 36): Goodput after onset in bit/s')));
+A = ALLc; A{1} = rmfield(A{1}, 'recoverable_core');                                   % the flags are required
+verifyError(tc, @() lect_kpis(A, POLc, LBLc, 4, scen, 5e4, 20), 'lect_kpis:core_flags');
+end
+
+function test_lect_kpis_summary_core(tc)
+% measure_all_kpis.m reports the core action set's readings beside KPI 4 and KPI 5, each line
+% named by its action set and the episodes it reads, beside the full set's.
+d = fullfile(tc.TestData.tmp, 'lectkpi_core'); mkdir(fullfile(d, 'results')); mkdir(fullfile(d, 'data'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+POL = {'none', 'random', 'fixed', 'rule_esc', 'blind_esc', 'table', 'dqn_esc', 'oracle', 'rule_core', 'blind_core'};
+LBL = {'no response', 'random', 'fixed', 'rule + escalation (deployed)', 'no detector + escalation', 'table', ...
+    'DQN + escalation', 'oracle', 'core: rule + escalation', 'core: no detector + escalation'};
+[ALL, scen] = lect_world(POL); iDQN = 4; RES = {}; set_names = {'single'}; %#ok<NASGU>
+show = {'none', 'fixed', 'rule_esc', 'blind_esc', 'table', 'dqn_g1', 'dqn_esc', 'oracle'};
+KP = struct('threats', {{'jamming', 'tone_jamming', 'path_loss'}}, 'show', {show}, 'per_threat', 95 * ones(3, 8), ...
+    'recoverable_share', ones(3, 1), 'sev_names', {{'nominal'}}, 'per_threat_sev', 95 * ones(3, 1, 8), ...
+    'far', struct('policy', LBL{4}, 'k', 1, 'n', 700, 'upper', 0.01, 'per_cycle', 1e-4), 'ebno_thr', 3, ...
+    'per_speed', 95 * ones(2, 8), 'speed_bins', [0 80 161], 'lect', lect_kpis(ALL, POL, LBL, iDQN, scen, 5e4, 20)); %#ok<NASGU>
+save('results/policy_evaluation.mat', 'RES', 'POL', 'LBL', 'set_names', 'iDQN', 'KP', 'ALL');
+evalc('measure_all_kpis');
+S = load('results/kpi_summary.mat', 'KPI', 'LECT'); K = S.KPI;
+tag = 'core action set {no_action, channel_switch, rate_reduce, channel_switch+rate_reduce}';
+k4 = strjoin(K([K.id] == 4).detail, newline);
+prim = [tag ', recoverable by a core configuration'];
+cons = [tag ', second line: recoverable by any of the 36 configurations'];
+verifyNotEmpty(tc, strfind(k4, 'PER vs the static link (revised proposal, full action set), extension: the five jamming threats pooled, recoverable jamming episodes (4)'));
+verifyNotEmpty(tc, strfind(k4, ['PER vs the static link (revised proposal, ' prim '), PRIMARY per jamming scenario (lecturer: ' ...
+    'reduction >= 30%; committed when the 95% lower bound clears it), core: rule + escalation: narrowband (tone_jamming, 2 ' ...
+    'recoverable episodes) 50.0% [NaN, NaN] -> MET (not committed); wideband (jamming, 1 recoverable episodes) 80.0% ' ...
+    '[NaN, NaN] -> MET (not committed)']));
+verifyNotEmpty(tc, strfind(k4, ['PER vs the static link (revised proposal, ' prim '), extension: the five jamming threats pooled, ' ...
+    'recoverable jamming episodes (3), paired, 95% bootstrap over flight geometries: core: rule + escalation 16.67% vs ' ...
+    '43.33% static, reduction 61.5% [']));
+verifyNotEmpty(tc, strfind(k4, ['PER vs the static link (revised proposal, ' cons '), extension: the five jamming threats pooled, ' ...
+    'recoverable jamming episodes (4), paired, 95% bootstrap over flight geometries: core: rule + escalation 15.00% vs ' ...
+    '45.00% static, reduction 66.7% [']));
+verifyNotEmpty(tc, strfind(k4, ['PER vs the static link (revised proposal, ' cons '), PRIMARY per jamming scenario']));
+verifyNotEmpty(tc, strfind(k4, ['CNN contribution, ' prim ' (core: rule + escalation vs the same escalation without ' ...
+    'the detector): PER reduction 54.5% [']));
+verifyNotEmpty(tc, strfind(k4, ['onset->detection 0.5/1 (never 33%) vs 2/3 (never 0%), detection->restored 2.5/3 ' ...
+    '(never 0%) vs 5/5 (never 67%)']));
+verifyNotEmpty(tc, strfind(k4, ['CNN contribution, ' cons ' (core: rule + escalation vs the same escalation without ' ...
+    'the detector): PER reduction 57.1% [']));
+verifyNotEmpty(tc, strfind(k4, ['onset->detection 1/2 (never 25%) vs 2.5/3 (never 0%), detection->restored 3/4 ' ...
+    '(never 0%) vs 5.5/6 (never 50%)']));
+verifyEmpty(tc, strfind(k4, 'core action set (revised proposal): PENDING'));
+d5 = K([K.id] == 5).detail; k5 = strjoin(d5, newline);
+verifyNotEmpty(tc, strfind(k5, ['recovery time (revised proposal, ' prim ': first confirmed alarm']));
+l5 = d5(contains(d5, ['recovery time (revised proposal, ' prim ': first']) & contains(d5, 'recoverable threat episodes (5)'));
+verifyNumElements(tc, l5, 1);
+verifyNotEmpty(tc, strfind(l5{1}, ['core: rule + escalation: onset->detection 1/1 (never 20%), detection->restored 2.5/5 ' ...
+    '(never 0%), T_rec from onset 3/6 (never 20%)']));
+l5 = d5(contains(d5, ['recovery time (revised proposal, ' cons ': first']) & contains(d5, 'recoverable threat episodes (6)'));
+verifyNumElements(tc, l5, 1);
+verifyNotEmpty(tc, strfind(l5{1}, ['core: rule + escalation: onset->detection 1/2 (never 17%), detection->restored 3/5 ' ...
+    '(never 0%), T_rec from onset 4/6 (never 17%)']));
+verifyNotEmpty(tc, strfind(k5, ['goodput after onset in bit/s (' prim '; nominal payload 50000 bit/s)']));
+verifyNotEmpty(tc, strfind(k5, ['goodput after onset in bit/s (' cons '; nominal payload 50000 bit/s)']));
+verifyNotEmpty(tc, strfind(k5, 'goodput after onset in bit/s (full action set; nominal payload 50000 bit/s)'));
+verifyNotEmpty(tc, strfind(k5, ' | 41667 ['));
+verifyEqual(tc, {S.LECT.pol.core.per.policy}, {'rule_core', 'blind_core'});
+verifyEqual(tc, S.LECT.pol.core.all36.recoverable, 'all36');
+end
+
+function test_blind_reads_no_class(tc)
+% Without the detector no class reaches the monitor under either unknown mode chosen on
+% validation: where the zeroed output (or the fusion) names a hostile class it reads unknown,
+% and a healthy link raises no alarm; with the detector the same mode keeps that class.
+A = policy_actions(); na = find(strcmp(A, 'no_action'));
+cls = {'jamming', 'none'};                            % the zeroed output's argmax is hostile
+obs = struct('probs', [1 0], 'unknown', false, 'feat', zeros(1, numel(link_features('names'))));
+obs.feat(feature_index('log_ber')) = -6;
+for md = {'all', 'nonhostile'}
+    PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0, 'unk_mode', md{1});
+    for op = {struct(), struct('core', true)}
+        mem = []; cfg = na;
+        for t = 1:10
+            o = obs; o.cfg_link = cfg;
+            [a, mem, d] = policy_decide('blind_esc', o, cfg, mem, PP, [], op{1});
+            verifyEqual(tc, d.cls, {'unknown'});
+            verifyFalse(tc, d.confirmed);
+            verifyEqual(tc, a, na);
+            cfg = a;
+        end
+    end
+end
+[~, ~, d] = policy_decide('rule_esc', obs, na, [], PP, [], struct());
+verifyEqual(tc, d.cls, {'jamming'});
+end
+
+%% ---------- bandwidth study (experiment_core_bw.m, docs/core_bw_protocol.md) ----------
+function test_band_plan(tc)
+% The plan: 41 channels 2401-2481 MHz in 2 MHz steps, at least our occupied bandwidth (1.25 MHz
+% from the link params), inside 2400-2483.5 MHz; 2481 MHz (Mekdad et al.) is channel 40.
+B = band_plan(base_params());
+verifyEqual(tc, numel(B.f_mhz), 41);
+verifyEqual(tc, B.f_mhz([1 end]), [2401 2481]);
+verifyEqual(tc, unique(diff(B.f_mhz)), 2);
+verifyEqual(tc, B.b_ch, 1.25, 'AbsTol', 1e-12);
+verifyGreaterThanOrEqual(tc, B.spacing, B.b_ch);
+verifyGreaterThanOrEqual(tc, B.f_mhz(1) - B.b_ch / 2, 2400);
+verifyLessThanOrEqual(tc, B.f_mhz(end) + B.b_ch / 2, 2483.5);
+verifyEqual(tc, B.k(B.f_mhz == 2481), 40);
+verifyEqual(tc, B.f_mhz(B.centre), 2441);
+verifyEqual(tc, band_plan(), B);
+end
+
+function test_jsr_inband(tc)
+% The tone keeps JSR_tot in band; a covering flat jammer loses 10 log10(B_J / 1 MHz); the
+% matched filter's integral agrees; the level never exceeds JSR_tot; 'total' inverts it.
+verifyEqual(tc, jsr_inband(16, 0), 16);
+bj = [4 8 20 70 83.5];
+verifyEqual(tc, jsr_inband(0, bj), [-6.02 -9.03 -13.01 -18.45 -19.22], 'AbsTol', 0.01);
+for b = bj
+    verifyEqual(tc, jsr_inband(10, b, 'numeric'), jsr_inband(10, b), 'AbsTol', 0.05);
+    for t = [4 10 16 23 30]
+        verifyLessThanOrEqual(tc, jsr_inband(t, b), t);
+        verifyEqual(tc, jsr_inband(jsr_inband(t, b), b, 'total'), t, 'AbsTol', 1e-9);
+    end
+end
+verifyEqual(tc, jsr_inband(10, 1.25, 'numeric'), 10 - 10 * log10(1.25), 'AbsTol', 0.01);   % our whole band
+verifyEqual(tc, jsr_inband(10, 0.3125, 'numeric'), 10, 'AbsTol', 0.01);                     % inside its flat part
+verifyEqual(tc, jsr_inband(10, 0, 'numeric'), 10);
+verifyError(tc, @() jsr_inband(10, 4, 'other'), 'jsr_inband:mode');
+end
+
+function test_band_cover(tc)
+% Coverage against each jammer's span from home channel 2441 MHz: the tone covers only it;
+% 4 MHz covers +-2 MHz (partial: counted covered) and leaves +-4; 8 MHz +-4 and +-6; 20 MHz
+% +-10 and +-12; the 70 MHz jammer leaves 2401 MHz (below its 2402 MHz edge) and 2473-2481 MHz;
+% the whole band leaves none. H1's first-hop escape share from the middle and the lowest
+% channel: 1 for CW, 4 and 8 MHz; 30/36 and 35/38 for 20 MHz; 0 for the whole band.
+B = band_plan(); f = B.f_mhz; h = B.centre;
+cells = band_cells();
+J = @(n) cells(strcmp({cells.name}, n)).J;
+at = @(n, hh) band_cover(band_cover('span', J(n), f(hh)), f, B.b_ch);
+verifyEqual(tc, find(at('cw_tot16', h)), h);
+[c, st] = band_cover(band_cover('span', J('cw_tot16'), f(h)), f, B.b_ch);
+verifyEqual(tc, st(h), 1); verifyEqual(tc, nnz(c), 1);
+[c, st] = band_cover(band_cover('span', J('bw4_tot16'), f(h)), f, B.b_ch);
+verifyTrue(tc, all(c(h + (-1:1)))); verifyFalse(tc, any(c(h + [-2 2])));
+verifyEqual(tc, st(h + (-1:1)), [2 1 2]);
+c = at('bw8_tot16', h);
+verifyTrue(tc, all(c(h + (-2:2)))); verifyFalse(tc, any(c(h + [-3 3])));
+[c, st, off] = band_cover(band_cover('span', J('bw20_tot16'), f(h)), f, B.b_ch);
+verifyTrue(tc, all(c(h + (-5:5)))); verifyEqual(tc, st(h + [-5 5]), [2 2]); verifyFalse(tc, any(c(h + [-6 6])));
+verifyEqual(tc, off(h + [0 6]), [0 2], 'AbsTol', 1e-12);
+verifyEqual(tc, B.k(~at('bw70_tot16', h)), [0 36:40]);
+verifyEqual(tc, B.k(~at('bw70_tot16', 1)), [0 36:40]);           % a fixed span: wherever our channel is
+verifyTrue(tc, all(at('bw83.5_tot16', h)));
+want = {'cw_tot16', [1 1]; 'bw4_tot16', [1 1]; 'bw8_tot16', [1 1]; 'bw20_tot16', [30/36 35/38]; 'bw83.5_tot16', [0 0]};
+for i = 1:size(want, 1)
+    e = arrayfun(@(hh) h1_escape(at(want{i, 1}, hh), hh), [h 1]);
+    verifyEqual(tc, e, want{i, 2}, 'AbsTol', 1e-12, want{i, 1});
+end
+end
+
+function e = h1_escape(cv, h)
+% Share of H1's targets from home h (at least 6 MHz, 3 channels away) that cv leaves escaped.
+k = abs((1:numel(cv)) - h) >= 3;
+e = mean(~cv(k));
+end
+
+function test_band_reject(tc)
+% The residual's effective rejection (band_reject.m): the nRF24L01+'s 2 Mb/s rows (+7 dBc
+% co-channel; +3, -17, -21, -40, -48 at 2, 4, 6, >12, >36 MHz) as co-channel minus offset, 42
+% dB strictly between the measured points next to 32 MHz, past the measured +-40 MHz the > 36 MHz
+% row and 50 dB over 63-65 MHz (the footnote's n x 2 f_xtal rule); a tone at the lowest row
+% over its offset range (as before); a wide jammer's whole spectrum counted, so a flat one meets
+% less than its nearest row and a raised cosine's thin edge (Liu's 4 MHz, Mekdad's 8 MHz low-pass)
+% more; 0 on covered channels, below
+% 2 MHz and under 2 dB; H1's first-hop escape share; the study builds each cell's layers on
+% both splits; the 70 MHz jammer's home only among the channels it covers by geometry.
+B = band_plan(); f = B.f_mhz; h = B.centre;
+cells = band_cells();
+J = @(n) cells(strcmp({cells.name}, n)).J;
+rj = @(n, fh) band_reject(J(n), fh, B);
+verifyEqual(tc, 7 - [3 -17 -21 -40 -48], [4 24 28 47 55]);
+verifyEqual(tc, band_reject('rows', [0 1.99 2 3.9 4 5.9 6 12 12.01 30.9 31.1 32 32.9 33 36 36.1 40 41 62.9 63 63.5 64 65 80]), ...
+    [0 0 4 4 24 24 28 28 47 47 42 42 42 47 47 55 55 55 55 55 50 50 55 55]);
+R = rj('cw_tot16', 2401);
+m = [0 1 2 3 4 6 7 15 16 17 18 19 32 40];
+verifyEqual(tc, R(m + 1), [0 0 4 24 28 28 47 47 42 47 47 55 50 55]);
+[R, d] = rj('bw4_tot16', 2441);
+[~, ~, off] = band_cover(band_cover('span', J('bw4_tot16'), 2441), f, B.b_ch);
+verifyEqual(tc, d, off);
+verifyEqual(tc, R(h + [1 2 3 4 5 8]), [0 0 12.6683 21.8040 22.0979 40.9794], 'AbsTol', 1e-3);   % +-4 MHz: 1.4 MHz off
+verifyEqual(tc, R(h - [1 2 3 4 5 8]), R(h + [1 2 3 4 5 8]), 'AbsTol', 1e-9);
+[R, ~, Rx] = rj('bw20_tot16', 2441);
+verifyEqual(tc, R(h + [5 6 7 8 10 12 20 -7]), [0 0 17.5176 20.0928 24.5236 33.1396 36.0158 17.5176], 'AbsTol', 1e-3);
+verifyEqual(tc, Rx(h + [5 6]), [0 0.8944], 'AbsTol', 1e-3);    % 12 MHz: 2 MHz of it at 4 dB, counted covered
+verifyLessThan(tc, R(h + [7 8 12]), [24 28 42]);               % below its nearest row: the rest of its power counts
+R = rj('bw8_tot16', 2441);
+verifyEqual(tc, R(h + [3 4 5 8]), [0 12.7463 20.1024 35.2030], 'AbsTol', 1e-3);
+R = rj('bw70_tot16', NaN);
+verifyEqual(tc, f(R > 0), [2475 2477 2479 2481]);
+verifyEqual(tc, R(R > 0), [3.8062 18.4794 20.6384 22.6205], 'AbsTol', 1e-3);
+verifyEqual(tc, R(ismember(f, [2401 2473])), [0 0]);          % clear of the span by 1 MHz
+verifyTrue(tc, all(rj('bw83.5_tot16', NaN) == 0));
+want = {'cw_tot16', [1 1]; 'bw4_tot16', [1 1]; 'bw8_tot16', [34/36 37/38]; 'bw20_tot16', [28/36 34/38]; ...
+    'bw83.5_tot16', [0 0]};
+for i = 1:size(want, 1)
+    e = arrayfun(@(hh) h1_escape(rj(want{i, 1}, f(hh)) == 0, hh), [h 1]);
+    verifyEqual(tc, e, want{i, 2}, 'AbsTol', 1e-12, want{i, 1});
+end
+verifyEqual(tc, h1_escape(rj('bw70_tot16', NaN) == 0, h), 4 / 36, 'AbsTol', 1e-12);
+verifyError(tc, @() band_reject('other'), 'band_reject:cmd');
+src = fileread(which('experiment_core_bw'));
+verifyNotEmpty(tc, strfind(src, '[GRID, ACR] = cell_grids(cells, scen, band_plan(p0));'));
+verifyNotEmpty(tc, strfind(src, '''acr'', ACR(v), ''splits'', [1 2], ''actions'', {ACS});'));
+verifyNotEmpty(tc, strfind(src, 'q.cm_acr_db = ACR(v);'));
+verifyNotEmpty(tc, strfind(src, 'G{c} = band_reject(''grid'', band_reject(''values'', {scen([scen.cell] == c).J}, B));'));
+verifyNotEmpty(tc, strfind(src, 'li = band_reject(''layer'', R, g); ce = li == 0;'));
+verifyEmpty(tc, strfind(src, 'X.ACR'));
+verifyEmpty(tc, strfind(src, 'escapable('));
+cv70 = band_cover(band_cover('span', J('bw70_tot16'), NaN), f, B.b_ch);
+verifyEqual(tc, f(cv70), 2403:2:2471);                       % covered under both residuals
+verifyTrue(tc, all(~cv70(ismember(f, [2401 2473]))));
+verifyNotEmpty(tc, strfind(src, ['if strcmp(J.kind, ''fixed''), can = band_cover(band_cover(''span'', J, NaN), ' ...
+    'B.f_mhz, B.b_ch); end']));
+verifyNotEmpty(tc, strfind(src, 'can = find(band_cover(band_cover(''span'', J, NaN), B.f_mhz, B.b_ch));'));
+verifyEmpty(tc, strfind(src, 'can = band_reject('));
+verifyEmpty(tc, strfind(src, 'can = find(band_reject('));
+end
+
+function test_band_reject_eff(tc)
+% R_eff by hand: a flat 20 MHz jammer 14 MHz away (offsets 4-24 MHz: 2 MHz at 24 dB, 6 at 28,
+% 12 at 47) and 12 MHz away (2-22 MHz); the 70 MHz jammer at 2477 MHz (5-75 MHz, 31-33 MHz at
+% 42 dB, between the measured points next to 32 MHz, and 63-65 at 50, the footnote's n x 2
+% f_xtal rule past the measured +-40 MHz); Liu's raised cosine 6 MHz
+% away, and Mekdad's 8 MHz low-pass (raised cosine, roll-off 0.125: flat to +-3.5 MHz, half
+% density at the 4 MHz cutoff, none from the 4.5 MHz stopband edge) 8 and 10 MHz away, their
+% spectra integrated numerically; the flat part of a raised cosine holds its in-band density, so
+% the shape integrates to its symbol rate, the B_J of jsr_inband.m.
+B = band_plan(); f = B.f_mhz; h = B.centre;
+cells = band_cells(); J = @(n) cells(strcmp({cells.name}, n)).J;
+db = @(s) -10 * log10(s);
+[~, ~, Rx] = band_reject(J('bw20_tot16'), f(h), B);
+verifyEqual(tc, Rx(h + 7), db(2 * 10^-2.4 + 6 * 10^-2.8 + 12 * 10^-4.7), 'AbsTol', 1e-9);
+verifyEqual(tc, Rx(h + 6), db(2 * 10^-0.4 + 2 * 10^-2.4 + 6 * 10^-2.8 + 10 * 10^-4.7), 'AbsTol', 1e-9);
+R70 = band_reject(J('bw70_tot16'), NaN, B);
+verifyEqual(tc, R70(f == 2477), db(10^-2.4 + 6 * 10^-2.8 + 22 * 10^-4.7 + 2 * 10^-4.2 + 37 * 10^-5.5 + 2 * 10^-5), ...
+    'AbsTol', 1e-9);
+verifyEqual(tc, R70(f == 2475), db(10^-0.4 + 2 * 10^-2.4 + 6 * 10^-2.8 + 22 * 10^-4.7 + 2 * 10^-4.2 + 35 * 10^-5.5 + ...
+    2 * 10^-5), 'AbsTol', 1e-9);
+u = linspace(-2.6, 2.6, 2600001); a = abs(u);
+P = double(a <= 1.4); t = a > 1.4; P(t) = 0.5 * (1 + cos(pi / 1.2 * (a(t) - 1.4)));
+verifyEqual(tc, trapz(u, P), 4, 'AbsTol', 1e-6);
+x = 6 - u; r = 4 * (x < 4) + 24 * (x >= 4 & x < 6) + 28 * (x >= 6);
+[~, ~, Rx] = band_reject(J('bw4_tot16'), f(h), B);
+verifyEqual(tc, Rx(h + 3), db(trapz(u, P .* 10 .^ (-r / 10))), 'AbsTol', 1e-3);
+J8 = J('bw8_tot16');
+verifyEqual(tc, [J8.half, J8.rs, J8.ro], [4.5, 8, 0.125]);
+u = linspace(-4.5, 4.5, 2700001); a = abs(u);
+P = double(a <= 3.5); t = a > 3.5; P(t) = 0.5 * (1 + cos(pi * (a(t) - 3.5)));
+verifyEqual(tc, trapz(u, P), 8, 'AbsTol', 1e-6);
+verifyEqual(tc, interp1(u, P, [3.5 4 4.5]), [1 0.5 0], 'AbsTol', 1e-6);
+[~, ~, Rx] = band_reject(J8, f(h), B);
+for k = [4 5]
+    x = 2 * k - u; r = 4 * (x < 4) + 24 * (x >= 4 & x < 6) + 28 * (x >= 6 & x <= 12) + 47 * (x > 12);
+    verifyEqual(tc, Rx(h + k), db(trapz(u, P .* 10 .^ (-r / 10))), 'AbsTol', 1e-3);
+end
+verifyEqual(tc, Rx(h + [4 5]), [12.7463 20.1024], 'AbsTol', 1e-3);
+Jt = J('cw_tot16');                                          % a tone: its lowest row over +-0.3 MHz
+[~, ~, Rx] = band_reject(Jt, f(1), B);
+verifyEqual(tc, Rx(1 + [2 3 16 17 32]), [4 24 42 47 50]);
+end
+
+function test_band_reject_layers(tc)
+% The layers: each opened by the first value more than 2 dB above the last, floored to 0.1 dB,
+% so every effective rejection an escaped hop of a cell meets reads the layer at or below it
+% within 2 dB (never a milder one) and every layer is used; the per-cell counts of the protocol
+% (CW 7, 4 MHz 8, 8 MHz 7, 20 MHz 7, 70 MHz 4, the whole band none; the equal-level cells 13,
+% 13, 12 and 8: 211 (cell, layer) pairs, 35 distinct layers; Liu's occupied reading 8 more per
+% cell, 251 in all, 42 distinct layers), the CW's the sheet's rows as before.
+verifyEqual(tc, band_reject('grid', [4 5.9 6.1 24 27 28 55 1.5]), [4 6.1 24 27 55], 'AbsTol', 1e-12);
+verifyEqual(tc, band_reject('layer', [0 4 5.9 6.1 7 30 1], [4 6.1 24 27 55]), [0 1 1 2 2 4 0]);
+verifyEqual(tc, band_reject('layer', [0; 5], [4 6.1]), [0; 1]);
+verifySize(tc, band_reject('grid', []), [1 0]);
+B = band_plan();
+[cells, scen] = band_cells();
+n = zeros(1, numel(cells)); allg = []; G = cell(1, numel(cells));
+for c = 1:numel(cells)
+    v = band_reject('values', {scen([scen.cell] == c).J}, B);
+    g = band_reject('grid', v); n(c) = numel(g); allg = [allg, g]; G{c} = g; %#ok<AGROW>
+    i = band_reject('layer', v, g);
+    verifyTrue(tc, all(i > 0), cells(c).name);
+    if isempty(v), continue; end
+    verifyGreaterThanOrEqual(tc, v - g(i), -1e-9, cells(c).name);
+    verifyLessThanOrEqual(tc, v - g(i), 2 + 1e-9, cells(c).name);
+    verifyEqual(tc, unique(i), 1:numel(g), cells(c).name);
+    verifyEqual(tc, g, floor(10 * g + 1e-6) / 10, 'AbsTol', 1e-9, cells(c).name);
+end
+N = @(nm) n(strcmp({cells.name}, nm));
+verifyEqual(tc, [N('cw_tot4'), N('bw4_tot4'), N('bw8_tot4'), N('bw20_tot4'), N('bw70_tot4'), N('bw83.5_tot4')], ...
+    [7 8 7 7 4 0]);
+verifyEqual(tc, [N('inb4'), N('inb10'), N('inb16'), N('inb23')], [13 13 12 8]);
+occ = [cells.occ];
+verifyEqual(tc, n(occ), 8 * ones(1, 5));
+verifyEqual(tc, sum(n(~occ)), 211); verifyEqual(tc, sum(n), 251);
+verifyEqual(tc, numel(unique(round(10 * allg))), 42);
+verifyEqual(tc, numel(unique(round(10 * [G{~occ}]))), 35);
+verifyEqual(tc, band_reject('grid', band_reject('values', {cells(strcmp({cells.name}, 'bw8_tot4')).J}, B)), ...
+    [12.7 20.1 24.8 35.2 37.9 42.3 44.9], 'AbsTol', 1e-9);
+verifyEqual(tc, band_reject('grid', band_reject('values', {cells(find(occ, 1)).J}, B)), ...
+    [2 20.6 23.1 26 38.3 40.7 44.4 48.7], 'AbsTol', 1e-9);
+verifyEqual(tc, band_reject('grid', band_reject('values', {cells(strcmp({cells.name}, 'cw_tot4')).J}, B)), ...
+    [4 24 28 42 47 50 55]);
+verifyEqual(tc, band_reject('grid', band_reject('values', {cells(strcmp({cells.name}, 'bw70_tot4')).J}, B)), ...
+    [3.8 18.4 20.6 22.6], 'AbsTol', 1e-9);
+end
+
+function test_hop_targets(tc)
+% H1: every target at least 6 MHz (3 channels) from the channel before it, uniform over those
+% (chi-square over 10^4 draws, p > 0.01), the same sequence from the same seed; H3: 13 channels
+% toward the middle, inside the plan, coming back across it; H4: 2 channels, reflected at the
+% edge; the home channel only among the ones the jammer covers, each of them drawn.
+B = band_plan(); nC = numel(B.f_mhz);
+c = hop_targets('H1', 5, 500, RandStream('mt19937ar', 'Seed', 4), B);
+verifyTrue(tc, all(abs(diff([5 c])) >= 3));
+verifyTrue(tc, all(c >= 1 & c <= nC));
+verifyEqual(tc, hop_targets('H1', 5, 500, RandStream('mt19937ar', 'Seed', 4), B), c);
+rs = RandStream('mt19937ar', 'Seed', 9);
+x = arrayfun(@(~) hop_targets('H1', 21, 1, rs, B), 1:1e4);
+k = find(abs((1:nC) - 21) >= 3);
+verifyTrue(tc, all(ismember(x, k)));
+n = histcounts(x, [k - 0.5, k(end) + 0.5]); E = numel(x) / numel(k);
+verifyGreaterThan(tc, 1 - chi2cdf(sum((n - E) .^ 2 / E), numel(k) - 1), 0.01);
+for h0 = 1:nC
+    c3 = hop_targets('H3', h0, 40, [], B);
+    verifyTrue(tc, all(c3 >= 1 & c3 <= nC) && all(abs(diff([h0 c3])) == 13), sprintf('H3 from %d', h0));
+    c4 = hop_targets('H4', h0, 60, [], B);
+    verifyTrue(tc, all(c4 >= 1 & c4 <= nC) && all(abs(diff([h0 c4])) == 2), sprintf('H4 from %d', h0));
+end
+verifyEqual(tc, hop_targets('H3', 21, 4, [], B), [34 21 34 21]);
+verifyEqual(tc, hop_targets('H3', 1, 4, [], B), [14 27 14 27]);
+c4 = hop_targets('H4', 3, 21, [], B);
+verifyEqual(tc, c4([1 19 20 21]), [5 41 39 37]);
+verifyEqual(tc, hop_targets('H4', 39, 2, [], B), [37 35]);
+cells = band_cells();
+J = cells(strcmp({cells.name}, 'bw70_tot16')).J;
+can = band_cover(band_cover('span', J, NaN), B.f_mhz, B.b_ch);
+rs = RandStream('mt19937ar', 'Seed', 2);
+hh = arrayfun(@(~) hop_targets('home', can, [], rs), 1:2000);
+verifyTrue(tc, all(can(hh)));
+verifyEqual(tc, unique(hh), find(can));
+verifyError(tc, @() hop_targets('H2', 1, 1, [], B), 'hop_targets:rule');
+end
+
+function test_band_cells(tc)
+% 30 fixed-total cells (6 widths x 5 levels, JSR_tot <= 30 dB), 4 equal-level cells and 5 of
+% Liu's occupied reading; every level within the 30 dB in-band cap and in the right field; the
+% equal-level scenarios only where JSR_in + 10 log10(B_J) <= 30 dB; the spans of the sources.
+[cells, scen] = band_cells(base_params());
+verifyEqual(tc, numel(cells), 39); verifyEqual(tc, nnz([cells.slice]), 4); verifyEqual(tc, nnz([cells.occ]), 5);
+verifyEqual(tc, numel(scen), 49); verifyEqual(tc, nnz([scen.slice]), 14); verifyEqual(tc, nnz([scen.occ]), 5);
+verifyFalse(tc, any([cells.slice] & [cells.occ]));
+fx = cells(~[cells.slice]);
+verifyTrue(tc, all([fx.jsr_tot] <= 30)); verifyTrue(tc, all([cells.level] <= 30));
+verifyEqual(tc, sort(unique([fx.bj])), [0 4 8 20 70 83.5]);
+verifyEqual(tc, unique([fx.jsr_tot]), [4 10 16 23 30]);
+tone = strcmp({cells.threat}, 'tone_jamming');
+verifyEqual(tc, unique({cells(tone).field}), {'tone_jsr_db'}); verifyEqual(tc, unique({cells(~tone).field}), {'jsr_db'});
+verifyEqual(tc, [cells(tone).bj], zeros(1, 5));
+L = @(n) cells(strcmp({cells.name}, n)).level;
+verifyEqual(tc, [L('cw_tot30'), L('bw4_tot4'), L('bw8_tot16'), L('bw70_tot23'), L('bw83.5_tot30')], ...
+    [30 -2.02 6.97 4.55 10.78], 'AbsTol', 0.01);
+sl = scen([scen.slice]);
+pairs = sortrows([[sl.bj]', [sl.jsr_in]']);
+verifyEqual(tc, pairs, sortrows([4 4; 4 10; 4 16; 4 23; 8 4; 8 10; 8 16; 20 4; 20 10; 20 16; 70 4; 70 10; 83.5 4; 83.5 10]));
+verifyTrue(tc, all([sl.jsr_tot] <= 30 + 1e-9));
+verifyEqual(tc, unique({scen([scen.bj] == 0).band}), {'narrowband'}); verifyEqual(tc, unique({scen([scen.bj] > 0).band}), {'wideband'});
+J = @(n) cells(strcmp({cells.name}, n)).J;
+verifyEqual(tc, [J('bw4_tot4').half, J('bw8_tot4').half, J('bw20_tot4').half, J('cw_tot4').half], [2.6 4.5 10 0.3], ...
+    'AbsTol', 1e-12);
+rs = 4; ro = 0.3;                                          % Liu et al.'s 4 MHz as the noise bandwidth (symbol rate)
+verifyEqual(tc, J('bw4_tot4').half, (1 + ro) * rs / 2, 'AbsTol', 1e-12);
+verifyEqual(tc, L('bw4_tot4'), 4 - 10 * log10(rs), 'AbsTol', 1e-12);
+verifyGreaterThan(tc, 4 - 10 * log10(rs / (1 + ro)), L('bw4_tot4'));   % the occupied reading: 1.14 dB more in band
+B = band_plan(); h = B.centre;                             % but its nearer edge costs an escaped hop rejection
+Jo = struct('kind', 'centred', 'half', rs / 2, 'lo', NaN, 'hi', NaN, 'rs', rs / (1 + ro), 'ro', ro);
+Ro = band_reject(Jo, B.f_mhz(h), B);
+Rn = band_reject(J('bw4_tot4'), B.f_mhz(h), B);
+verifyEqual(tc, [Rn(h + [2 3 4]); Ro(h + [2 3 4])], [0 12.6683 21.8040; 2.0859 20.6737 23.1188], 'AbsTol', 1e-3);
+verifyEqual(tc, [J('bw4_tot4').rs, J('bw4_tot4').ro], [rs ro]);   % Liu's raised cosine
+verifyEqual(tc, [J('bw8_tot4').rs, J('bw8_tot4').ro], [8 0.125]);  % Mekdad's low-pass: -3 dB at the 4 MHz cutoff
+verifyEqual(tc, (1 + 0.125) * 8 / 2, J('bw8_tot4').half, 'AbsTol', 1e-12);
+verifyEqual(tc, L('bw8_tot16'), 16 - 10 * log10(J('bw8_tot4').rs), 'AbsTol', 1e-12);   % its power B_J
+verifyTrue(tc, all(isnan([J('cw_tot4').rs, J('bw20_tot4').rs, J('bw70_tot4').rs, J('bw83.5_tot4').rs])));   % flat
+verifyEqual(tc, [J('bw70_tot4').lo, J('bw70_tot4').hi, J('bw83.5_tot4').lo, J('bw83.5_tot4').hi], [2402 2472 2400 2483.5]);
+src = fileread(which('experiment_core_bw'));                  % the pools carry the scenarios the episodes read
+verifyNotEmpty(tc, regexp(src, 'function stage_pools\(X\)\r?\n\[p0, cells, scen, EBNO\] = study_cells\(X\);', 'once'));
+verifyNotEmpty(tc, strfind(src, 'PP.scenarios = scen;'));
+end
+
+function test_band_liu_occupied(tc)
+% Liu et al.'s 4 MHz as the occupied bandwidth, a pre-registered sensitivity of the 4 MHz cells
+% only: symbol rate 4 / 1.3 MHz, occupied +-2 MHz (0.6 MHz inside the noise reading's +-2.6), in
+% band JSR_tot - 4.88 dB against - 6.02, the five levels; the residual the link meets, the in-band
+% level minus R_eff, is up to 6.87 dB more severe under the noise reading after an escaped hop
+% (H1's 6 MHz hop) and up to 0.63 dB more severe under the occupied one (32 and 64 MHz), besides
+% its 1.14 dB on every covered channel, so the readings stay unordered; it has
+% its own lines and no verdict: out of W, the primary lines, the per-width lines, the other
+% sensitivities, set D and the detector analysis.
+[cells, scen] = band_cells(base_params());
+occ = cells([cells.occ]);
+verifyEqual(tc, {occ.name}, {'bw4occ_tot4', 'bw4occ_tot10', 'bw4occ_tot16', 'bw4occ_tot23', 'bw4occ_tot30'});
+verifyEqual(tc, [occ.jsr_tot], [4 10 16 23 30]); verifyEqual(tc, [occ.bj], 4 * ones(1, 5));
+verifyEqual(tc, [occ.level], [4 10 16 23 30] - 4.88, 'AbsTol', 0.01);
+nz = cells(strcmp({cells.threat}, 'jamming') & [cells.bj] == 4 & ~[cells.occ]);
+verifyEqual(tc, [occ.level] - [nz.level], 10 * log10(1.3) * ones(1, 5), 'AbsTol', 1e-9);   % 1.14 dB more in band
+verifyEqual(tc, unique({occ.threat}), {'jamming'}); verifyEqual(tc, unique({occ.field}), {'jsr_db'});
+Jo = occ(1).J; Jn = nz(1).J;
+verifyEqual(tc, [Jo.half, Jo.rs, Jo.ro], [2, 4 / 1.3, 0.3], 'AbsTol', 1e-12);
+verifyEqual(tc, (1 + Jo.ro) * Jo.rs / 2, Jo.half, 'AbsTol', 1e-12);
+verifyEqual(tc, Jn.half - Jo.half, 0.6, 'AbsTol', 1e-12);
+verifyEqual(tc, unique({scen([scen.occ]).band}), {'wideband'});
+verifyFalse(tc, any([scen([scen.occ]).slice]));
+B = band_plan(); f = B.f_mhz; h = B.centre;
+Ro = band_reject(Jo, f(h), B);
+verifyEqual(tc, Ro(h + [2 3 4 7]), [2.0859 20.6737 23.1188 42.1188], 'AbsTol', 1e-3);
+a = zeros(1, 0); both = false(1, 0); off = zeros(1, 0);
+for c = 1:numel(f)
+    Rn = band_reject(Jn, f(c), B); Ro = band_reject(Jo, f(c), B);
+    k = Ro > 0 | Rn > 0;                                     % escaped under either reading
+    a = [a, (-10 * log10(4) - Rn(k)) - (-10 * log10(4 / 1.3) - Ro(k))]; %#ok<AGROW>
+    both = [both, Ro(k) > 0 & Rn(k) > 0]; off = [off, abs(f(k) - f(c))]; %#ok<AGROW>
+end
+verifyEqual(tc, max(a), 6.866, 'AbsTol', 0.01);              % noise reading the more severe
+verifyEqual(tc, unique(off(abs(a - max(a)) < 1e-6)), 6);
+verifyEqual(tc, min(a(both)), -0.629, 'AbsTol', 0.01);      % occupied reading the more severe
+verifyEqual(tc, unique(off(abs(a - min(a(both))) < 1e-6)), [32 64]);
+verifyEqual(tc, a(off == 4 & ~both), 0.946 * ones(1, nnz(off == 4 & ~both)), 'AbsTol', 0.01);   % H4: covered, 2.1 dB
+verifyTrue(tc, any(a > 0.01) && any(a < -0.01));
+src = fileread(which('experiment_core_bw'));
+verifyNotEmpty(tc, strfind(src, 'wide = find(~EP.slice & ~EP.narrow & ~EP.occ);'));
+verifyNotEmpty(tc, strfind(src, 'pm = ~EP.slice & ~EP.occ;'));
+verifyNotEmpty(tc, strfind(src, '[blk, KP.primary] = per_lines(get_set(RES, q1, ''primary''), EP, recov(q1) & pm, X0, pay, ...'));
+verifyNotEmpty(tc, strfind(src, '[blk, KP.by_bj] = bj_lines(get_set(RES, q1, ''primary''), EP, recov(q1) & pm, X0);'));
+verifyNotEmpty(tc, strfind(src, '[blk, KP.liu] = liu_lines(get_set(RES, q1, ''primary''), EP, recov(q1), X0, pay);'));
+verifyNotEmpty(tc, strfind(src, 'na = K.na; fixed = find(~EP.slice & ~EP.occ);'));
+verifyNotEmpty(tc, strfind(src, 'fixed = find(~[cells.slice] & ~[cells.occ]);'));
+verifyEmpty(tc, regexp(src, 'recov\(\w+\) & ~EP\.slice', 'once'));
+i = strfind(src, 'function [lines, T] = liu_lines(');
+verifyNotEmpty(tc, i);
+body = src(i:i + strfind(src(i:end), 'function [lines, T] = bj_lines(') - 2);
+verifyEmpty(tc, strfind(body, 'core_bw_rules('));             % no verdict of its own
+end
+
+function test_band_seeds_disjoint(tc)
+% Geometry family 6 (validation 5, set D 7, test 14, the smoke's 16, 18, 19) shares no flight
+% seed with any other pool, clean-link, shadowing, survivability or dataset seed, every seed
+% below 2^26; the 'hop' purpose (offset 39) is distinct from every other purpose.
+P = {'channel', 'awgn', 'bits', 'threat', 'aoa', 'ds', 'k', 'yaw', 'corr', 'gcsaoa', 'gcs', 'jam', 'alt', 'speed', ...
+    'body', 'wobble', 'cal', 'roll', 'idle', 'amb', 'hop'};
+off = zeros(1, numel(P));
+for i = 1:numel(P)
+    [~, n] = seed_stream(12345, P{i});
+    off(i) = n - seed_base(12345);
+end
+verifyEqual(tc, off(end), 39);
+verifyEqual(tc, numel(unique(off)), numel(P));
+verifyTrue(tc, all(off >= 0 & off < 64));
+[s, r, b] = ndgrid(1:6, 1:99, 1:19);
+S = arrayfun(@(si, ri, bi) pool_seed(1, si, bi, ri), s(:), r(:), b(:));
+[s, r] = ndgrid(1:6, 1:99);
+S = [S; arrayfun(@(si, ri) pool_seed(2, si, 10, ri), s(:), r(:))];
+[s, b] = ndgrid(1:6, [4 15]);
+S = [S; arrayfun(@(si, bi) pool_seed(1, si, bi, 100), s(:), b(:))];
+[s, r, b, f] = ndgrid(1:6, 1:100, [4 15], [3 5]);
+S = [S; arrayfun(@(si, ri, bi, fi) pool_seed(fi, si, bi, ri), s(:), r(:), b(:), f(:))];
+[t, li, s] = ndgrid(1:20, 1:8, 1:6);
+S = [S; 900000 + 1000*t(:) + 10*li(:) + s(:); 700000 + (1:5)'];
+k = (1:99999)';
+S = [S; 3000000 + k; 4000000 + k; 5000000 + k; 3500000 + k; 4500000 + k; 5500000 + k; 6500000 + k; 6000000 + k];
+[s, r, b] = ndgrid(1:6, 1:99, [5 7 14 16 18 19]);
+S6 = arrayfun(@(si, ri, bi) pool_seed(6, si, bi, ri), s(:), r(:), b(:));
+verifyEqual(tc, numel(unique(S6)), numel(S6));
+verifyEmpty(tc, intersect(S6, S));
+verifyLessThan(tc, max(S6), 2^26);
+lo = min(arrayfun(@(gi, si, bi) shadow_pool_seed(gi, si, bi, 1), 1:8, ones(1, 8), ones(1, 8)));
+verifyLessThan(tc, max(S6), lo);
+N = seed_base([S; S6]) + off;
+verifyEqual(tc, numel(unique(N(:))), numel(N));
+verifyLessThan(tc, max(N(:)), 2^32);
+src = fileread(which('experiment_core_bw'));
+verifyNotEmpty(tc, strfind(src, 'X.FAM = 6;'));
+verifyNotEmpty(tc, strfind(src, 'X.BLOCK = [5 14];'));
+verifyNotEmpty(tc, strfind(src, 'X.BLOCK = [18 19]; X.BLOCK_D = 16;'));
+end
+
+function test_rule_core_wide(tc)
+% The core rule's optional wideband action: without it every answer and reason is the parent
+% commit's (lect-kpi 394d4da); each W changes the class jamming only; a non-core W is refused;
+% the decision cycle passes PP.core_wide to the core rule only.
+d = parent_copy(tc, 'code/decision/rule_core_policy.m');
+cls = {'jamming', 'reactive_jamming', 'spoofing', 'tone_jamming', 'sweeping_jammer', 'noise_burst', 'path_loss', ...
+    'antenna_fault', 'airframe_shadowing', 'benign_interference', 'none', 'unknown'};
+B = struct('drop_db', 3, 'current', 'no_action', 'current_db', 0);
+args = {};
+for c = cls
+    for deg = [false true]
+        for q = [-Inf 10]
+            for dr = [false true]
+                args{end+1} = {c{1}, deg, q, 5, dr, [], true}; %#ok<AGROW>
+                args{end+1} = {c{1}, deg, q, 5, dr, B, false}; %#ok<AGROW>
+            end
+        end
+    end
+end
+addpath(d, '-begin'); clear rule_core_policy
+cl0 = onCleanup(@() fixture_off(d, 'rule_core_policy')); %#ok<NASGU>
+verifyEqual(tc, which('rule_core_policy'), fullfile(d, 'rule_core_policy.m'));
+old = cell(numel(args), 2);
+for i = 1:numel(args), [old{i, 1}, old{i, 2}] = rule_core_policy(args{i}{:}); end
+fixture_off(d, 'rule_core_policy');
+for i = 1:numel(args)
+    [a, r] = rule_core_policy(args{i}{:});
+    verifyEqual(tc, {a, r}, old(i, :), sprintf('default %d', i));
+    [a, r] = rule_core_policy(args{i}{:}, 'channel_switch');
+    verifyEqual(tc, {a, r}, old(i, :), sprintf('channel_switch %d', i));
+    for W = {'rate_reduce', 'channel_switch+rate_reduce'}
+        a = rule_core_policy(args{i}{:}, W{1});
+        if strcmp(args{i}{1}, 'jamming'), verifyEqual(tc, a, W{1}); else, verifyEqual(tc, a, old{i, 1}); end
+    end
+end
+verifyError(tc, @() rule_core_policy('jamming', false, -Inf, 5, false, [], true, 'no_action'), 'rule_core_policy:wide');
+verifyError(tc, @() rule_core_policy('jamming', false, -Inf, 5, false, [], true, 'freq_diversity'), 'rule_core_policy:wide');
+A = policy_actions(); na = find(strcmp(A, 'no_action'));
+cl = {'none', 'jamming', 'tone_jamming'};
+runs = {'jamming', true, 'rate_reduce'; 'tone_jamming', true, 'channel_switch'; 'jamming', false, 'channel_switch'};
+for k = 1:size(runs, 1)
+    obs = struct('probs', double(strcmp(cl, runs{k, 1})), 'unknown', false, 'feat', zeros(1, numel(link_features('names'))));
+    obs.feat(feature_index('log_ber')) = -1; obs.feat(feature_index('crc_fail')) = 1;
+    PP = struct('actions', {A}, 'classes', {cl}, 'sps', 4, 'bps', 2, 'maha_thr', 0, 'core_wide', 'rate_reduce');
+    op = struct(); if runs{k, 2}, op.core = true; end
+    mem = []; cfg = na; first = '';
+    for t = 1:30
+        o = obs; o.cfg_link = cfg;
+        [a, mem] = policy_decide('rule_esc', o, cfg, mem, PP, [], op);
+        if a ~= cfg && isempty(first), first = A{a}; end
+        cfg = a;
+    end
+    verifyEqual(tc, first, runs{k, 3}, sprintf('%s, core %d', runs{k, 1}, runs{k, 2}));
+end
+end
+
+function test_rule_noise_burst_setting(tc)
+% The rule's noise-burst answer (burst_action, PP.rule_nb): without it every answer and reason
+% is the parent commit's (lect-kpi 8b396e6) over a grid of classes, degradation, MMSE gain,
+% slot, drop and budget; each pair of candidates changes the class noise_burst's answer only,
+% on its branch; a name outside the 36, no_action or a single name is refused. The candidates
+% are among the 36, cheapest first by the reward's running cost; on D78 pools none is coded,
+% on JSI pools the two coded answers join; the reference is the one-argument class mapping.
+d = parent_copy(tc, 'code/decision/rule_based_policy.m', '8b396e6');
+cls = {'jamming', 'reactive_jamming', 'spoofing', 'tone_jamming', 'sweeping_jammer', 'noise_burst', 'path_loss', ...
+    'antenna_fault', 'airframe_shadowing', 'benign_interference', 'none', 'unknown'};
+B = struct('drop_db', 3, 'current', 'no_action', 'current_db', 0, ...
+    'names', {{'power_control', 'rate_reduce', 'rate_reduce+power_control'}}, 'gain_db', [4 6 10]);
+args = {};
+for c = cls
+    for deg = [false true]
+        for g = [0 10]
+            for q = [-Inf 10]
+                for dr = [false true]
+                    args{end+1} = {c{1}, deg, g, q, 5, dr, [], 6, true}; %#ok<AGROW>
+                    args{end+1} = {c{1}, deg, g, q, 5, dr, B, 6, false}; %#ok<AGROW>
+                end
+            end
+        end
+    end
+end
+addpath(d, '-begin'); clear rule_based_policy
+cl0 = onCleanup(@() fixture_off(d, 'rule_based_policy')); %#ok<NASGU>
+verifyEqual(tc, which('rule_based_policy'), fullfile(d, 'rule_based_policy.m'));
+old = cell(numel(args), 2);
+for i = 1:numel(args), [old{i, 1}, old{i, 2}] = rule_based_policy(args{i}{:}); end
+o1 = cellfun(@(c) rule_based_policy(c), cls, 'UniformOutput', false);
+fixture_off(d, 'rule_based_policy');
+verifyEqual(tc, cellfun(@(c) rule_based_policy(c), cls, 'UniformOutput', false), o1);
+BC = burst_candidates(struct('mode', 'd78'));
+for i = 1:numel(args)
+    [a, r] = rule_based_policy(args{i}{:});
+    verifyEqual(tc, {a, r}, old(i, :), sprintf('default %d', i));
+    [a, r] = rule_based_policy(args{i}{:}, {});
+    verifyEqual(tc, {a, r}, old(i, :), sprintf('empty %d', i));
+    for n = BC.ns
+        for s = BC.sep
+            a = rule_based_policy(args{i}{:}, {n{1}, s{1}});
+            if ~strcmp(args{i}{1}, 'noise_burst')
+                verifyEqual(tc, a, old{i, 1});
+            elseif args{i}{3} >= 6
+                verifyEqual(tc, a, s{1});
+            else
+                verifyEqual(tc, a, n{1});
+            end
+        end
+    end
+end
+[~, r] = rule_based_policy('noise_burst', false, 0, -Inf, 5, false, [], 6, true, BC.start);
+verifyTrue(tc, contains(r, BC.start{1}));
+for bad = {{'no_action', 'spatial_diversity'}, {'power_control'}, {'power_control', 'jam'}, 'power_control'}
+    verifyError(tc, @() rule_based_policy('noise_burst', false, 0, -Inf, 5, false, [], 6, true, bad{1}), ...
+        'rule_based_policy:burst');
+end
+A = policy_actions();
+JC = burst_candidates(struct('mode', 'jsi'));
+verifyFalse(tc, any(contains([BC.ns, BC.sep, BC.core], 'fec_interleave')));
+verifyEqual(tc, setdiff([JC.ns, JC.sep], [BC.ns, BC.sep]), sort(BC.reference));
+verifyEqual(tc, burst_candidates(), BC);
+verifyEqual(tc, BC.reference, {rule_based_policy('noise_burst'), rule_based_policy('noise_burst', false, 10)});
+verifyTrue(tc, all(ismember([JC.ns, JC.sep, JC.core], A)));
+verifyTrue(tc, ismember(BC.start{1}, BC.ns) && ismember(BC.start{2}, BC.sep) && ismember(BC.core_start, BC.core));
+verifyTrue(tc, all(ismember(BC.core, decision_config().core_actions)));
+p = base_params(); C = decision_config();
+for L = {BC.ns, BC.sep, JC.ns, JC.sep}
+    v = cellfun(@(a) run_cost(p, C, a), L{1});
+    verifyTrue(tc, issorted(v), strjoin(L{1}, ', '));
+end
+src = fileread(which('threat_gallery'));
+verifyNotEmpty(tc, strfind(src, 'act = rule_based_policy(th, [], [], [], [], [], [], [], [], NB);'));
+verifyNotEmpty(tc, strfind(src, 'if isfield(dq, ''rule_nb'') && ~isempty(dq.rule_nb), NB = dq.rule_nb; end'));
+end
+
+function test_rule_core_burst(tc)
+% The core rule's noise-burst action (burst_action, PP.core_nb): without it, and at its default
+% rate_reduce, every answer and reason is the parent commit's (lect-kpi 8b396e6), the wideband
+% action included; channel_switch+rate_reduce changes the class noise_burst only
+% (sweeping_jammer keeps rate_reduce); a non-core action is refused.
+d = parent_copy(tc, 'code/decision/rule_core_policy.m', '8b396e6');
+cls = {'jamming', 'reactive_jamming', 'spoofing', 'tone_jamming', 'sweeping_jammer', 'noise_burst', 'path_loss', ...
+    'antenna_fault', 'airframe_shadowing', 'benign_interference', 'none', 'unknown'};
+B = struct('drop_db', 3, 'current', 'no_action', 'current_db', 0);
+args = {};
+for c = cls
+    for deg = [false true]
+        for q = [-Inf 10]
+            for dr = [false true]
+                args{end+1} = {c{1}, deg, q, 5, dr, [], true}; %#ok<AGROW>
+                args{end+1} = {c{1}, deg, q, 5, dr, B, false}; %#ok<AGROW>
+            end
+        end
+    end
+end
+addpath(d, '-begin'); clear rule_core_policy
+cl0 = onCleanup(@() fixture_off(d, 'rule_core_policy')); %#ok<NASGU>
+verifyEqual(tc, which('rule_core_policy'), fullfile(d, 'rule_core_policy.m'));
+old = cell(numel(args), 2); oldw = old;
+for i = 1:numel(args)
+    [old{i, 1}, old{i, 2}] = rule_core_policy(args{i}{:});
+    [oldw{i, 1}, oldw{i, 2}] = rule_core_policy(args{i}{:}, 'rate_reduce');
+end
+fixture_off(d, 'rule_core_policy');
+for i = 1:numel(args)
+    [a, r] = rule_core_policy(args{i}{:});
+    verifyEqual(tc, {a, r}, old(i, :), sprintf('default %d', i));
+    [a, r] = rule_core_policy(args{i}{:}, '', 'rate_reduce');
+    verifyEqual(tc, {a, r}, old(i, :), sprintf('rate_reduce %d', i));
+    [a, r] = rule_core_policy(args{i}{:}, 'rate_reduce', '');
+    verifyEqual(tc, {a, r}, oldw(i, :), sprintf('wide %d', i));
+    a = rule_core_policy(args{i}{:}, '', 'channel_switch+rate_reduce');
+    if strcmp(args{i}{1}, 'noise_burst'), verifyEqual(tc, a, 'channel_switch+rate_reduce'); else, verifyEqual(tc, a, old{i, 1}); end
+end
+verifyEqual(tc, rule_core_policy('sweeping_jammer', false, -Inf, 5, false, [], true, '', 'channel_switch+rate_reduce'), ...
+    'rate_reduce');
+for bad = {'no_action', 'power_control', 'spatial_diversity'}
+    verifyError(tc, @() rule_core_policy('noise_burst', false, -Inf, 5, false, [], true, '', bad{1}), 'rule_core_policy:burst');
+end
+end
+
+function test_settings_noise_burst(tc)
+% The noise-burst answers reach the decision cycle through decision_settings.m: the rule takes
+% PP.rule_nb and the core rule PP.core_nb, each only its own; without them the class mapping
+% acts. The deployed policy's stamp changes with either, and without them it is the parent
+% commit's (lect-kpi 8b396e6).
+X = decision_settings(struct('drop_db', 4), struct('rule_nb', {{'rate_reduce', 'spatial_diversity'}}, ...
+    'core_nb', 'channel_switch+rate_reduce'));
+verifyEqual(tc, {X.rule_nb, X.core_nb, X.drop_db}, {{'rate_reduce', 'spatial_diversity'}, 'channel_switch+rate_reduce', 4});
+A = policy_actions(); na = find(strcmp(A, 'no_action'));
+cl = {'none', 'noise_burst'};
+obs = struct('probs', [0 1], 'unknown', false, 'feat', zeros(1, numel(link_features('names'))));
+obs.feat(feature_index('log_ber')) = -1; obs.feat(feature_index('crc_fail')) = 1;
+P0 = struct('actions', {A}, 'classes', {cl}, 'sps', 4, 'bps', 2, 'maha_thr', 0);
+P1 = P0; P1.rule_nb = {'rate_reduce', 'spatial_diversity'}; P1.core_nb = 'channel_switch+rate_reduce';
+runs = {P0, false, 'power_control+fec_interleave'; P0, true, 'rate_reduce'; P1, false, 'rate_reduce'; ...
+    P1, true, 'channel_switch+rate_reduce'};
+for k = 1:size(runs, 1)
+    op = struct(); if runs{k, 2}, op.core = true; end
+    mem = []; cfg = na; first = '';
+    for t = 1:30
+        o = obs; o.cfg_link = cfg;
+        [a, mem] = policy_decide('rule_esc', o, cfg, mem, runs{k, 1}, [], op);
+        if a ~= cfg && isempty(first), first = A{a}; end
+        cfg = a;
+    end
+    verifyEqual(tc, first, runs{k, 3}, sprintf('run %d', k));
+end
+S = struct('rule_mmse_db', 6, 'rule_slot', true, 'rule_dwell', 'run', 'esc_drop', false, 'unk_mode', 'all', ...
+    'unk_retain', 0.95, 'confirm_sweep', []);
+Q = struct('deployed', 'dqn_esc', 'alarm_mode', 'class_drop', 'confirm', [2 2], 'drop_db', 4, 'det_id', 'x', ...
+    'maha_thr', -1, 'dec', S, 'rule_sel', S);
+d = parent_copy(tc, 'code/decision/policy_stamp.m', '8b396e6');
+addpath(d, '-begin'); clear policy_stamp
+cl0 = onCleanup(@() fixture_off(d, 'policy_stamp')); %#ok<NASGU>
+verifyEqual(tc, which('policy_stamp'), fullfile(d, 'policy_stamp.m'));
+s0 = policy_stamp(Q);
+fixture_off(d, 'policy_stamp');
+verifyEqual(tc, policy_stamp(Q), s0);
+Q1 = Q; Q1.dec.rule_nb = {'rate_reduce', 'spatial_diversity'}; Q1.rule_sel.rule_nb = Q1.dec.rule_nb;
+Q2 = Q1; Q2.dec.rule_nb{1} = 'power_control'; Q2.rule_sel.rule_nb{1} = 'power_control';
+Q3 = Q1; Q3.dec.core_nb = 'channel_switch+rate_reduce';
+verifyEqual(tc, numel(unique({s0, policy_stamp(Q1), policy_stamp(Q2), policy_stamp(Q3)})), 4);
+end
+
+function test_nb_pick(tc)
+% The noise-burst answer's selection (nb_pick.m): the highest held recovery of the noise-burst
+% episodes among the candidates within the false-alarm bound and half a point of the best
+% pooled held; within one point the pooled recovered, the return, then the cheaper (the
+% setting in force has no preference); fewer than 10 noise-burst episodes skip that reading;
+% none within the bound: the three with the lowest bound. C2 runs it on its two steps right
+% after the nulling threshold and on the core rule's step (rule_core); the class mapping's
+% coded answer is evaluated and reported only.
+mk = @(h, r, ret, fa, nb, n) struct('held', h, 'rec', r, 'ret', ret, 'fa_w', fa, 'n_w', 600, 'nb_held', nb, 'nb_n', n);
+X = [mk(0.80, 0.85, 1.0, 0, 0.60, 40), mk(0.80, 0.85, 1.0, 0, 0.70, 40), mk(0.80, 0.85, 1.0, 0, 0.65, 40)];
+verifyEqual(tc, nb_pick(X, 0.05, [1 2 3]), 2);                         % the primary
+X(2).fa_w = 0.2; verifyEqual(tc, nb_pick(X, 0.05, [1 2 3]), 3);        % over the bound
+X(2).fa_w = 0; X(2).held = 0.79; verifyEqual(tc, nb_pick(X, 0.05, [1 2 3]), 3);   % the pooled guard
+X(2).held = 0.796; verifyEqual(tc, nb_pick(X, 0.05, [1 2 3]), 2);      % within half a point
+X(2).fa_w = NaN; verifyEqual(tc, nb_pick(X, 0.05, [1 2 3]), 2);        % not measured: within
+X = [mk(0.8, 0.85, 1.0, 0, 0.700, 40), mk(0.8, 0.86, 0.9, 0, 0.695, 40), mk(0.8, 0.86, 1.1, 0, 0.691, 40)];
+verifyEqual(tc, nb_pick(X, 0.05, [1 2 3]), 3);                         % within one point: recovered, then return
+X(3).ret = 0.9;
+verifyEqual(tc, nb_pick(X, 0.05, [1 2 3]), 2);                         % then the cheaper
+verifyEqual(tc, nb_pick(X, 0.05, [1 3 2]), 3);
+X(1).nb_held = 0.71; verifyEqual(tc, nb_pick(X, 0.05, [3 2 1]), 1);    % the primary before the recovered and the cost
+X = [mk(0.8, 0.85, 1, 0, 0.9, 9), mk(0.8, 0.86, 1, 0, 0.1, 9)];
+verifyEqual(tc, nb_pick(X, 0.05, [1 2]), 2);                           % fewer than 10: the pooled readings
+X = [mk(0.8, 0.8, 1, 0.30, 0.9, 40), mk(0.8, 0.8, 1, 0.20, 0.5, 40), mk(0.8, 0.8, 1, 0.25, 0.6, 40), ...
+    mk(0.8, 0.8, 1, 0.22, 0.7, 40)];
+verifyEqual(tc, nb_pick(X, 0.05, 1:4), 4);                             % none within: the three lowest bounds
+src = fileread(which('train_dqn'));
+i0 = strfind(src, 'STEPS(end+1) = struct(''name'', ''nulling threshold and quiet slot''');
+i1 = strfind(src, 'STEPS(end+1) = struct(''name'', NBS{1}, ''var'', {v});');
+i2 = strfind(src, 'STEPS(end+1) = struct(''name'', NBS{2}, ''var'', {v});');
+i3 = strfind(src, 'STEPS(end+1) = struct(''name'', ''proposal dwell''');
+verifyEqual(tc, [numel(i0) numel(i1) numel(i2) numel(i3)], [1 1 1 1]);
+verifyTrue(tc, i0(1) < i1(1) && i1(1) < i2(1) && i2(1) < i3(1));
+verifyNotEmpty(tc, strfind(src, 'BC = burst_candidates(fec_rx_of(PP));'));
+verifyNotEmpty(tc, strfind(src, 'S0.rule_nb = BC.start; S0.core_nb = BC.core_start;'));
+verifyNotEmpty(tc, strfind(src, 'CSTEP, @(S) ev(''rule_esc'', decision_settings(PPr, S), [], struct(''core'', true))'));
+verifyNotEmpty(tc, strfind(src, 'Sref = Ssel; Sref.rule_nb = {};'));
+verifyNotEmpty(tc, strfind(src, 'b = nb_pick(X, bound, cellfun(PK(j).rank, V));'));
+verifyNotEmpty(tc, strfind(src, 'x.nb_n = sum(nb);'));
+verifyEmpty(tc, regexp(src, 'function \[best, why\] = nb_pick', 'once'));
+end
+
+function k = run_cost(p, C, a)
+% The reward's running cost of configuration a (link_env.m K.cost).
+[~, ~, cm] = apply_countermeasure(p, 'none', a);
+k = C.w_goodput * (1 - cm.goodput_factor) + C.w_spectrum * (cm.bw_factor - 1) + ...
+    C.w_power * log10(cm.power_factor) / log10(4) + C.w_mmse * contains(a, 'spatial_diversity');
+end
+
+function test_link_env_cover_default(tc)
+% Without the new spec fields link_env.m gives the parent commit's (lect-kpi 394d4da) rewards,
+% observations, info and tables bit for bit, follower, comb jammer and an ending threat
+% included; with cover all false it is the live channel_switch, with cover all true the follower
+% with fdelay 0 (recoverable then only through a configuration without channel_switch).
+spec = struct('scn', [2 2 2 2 1 2], 's', [1 2 1 2 1 1], 'onset', [3 5 4 6 3 8], 'follow', logical([0 1 0 1 0 0]), ...
+    'fdelay', [0 2 1 3 0 0], 'unk', false(1, 6), 'T', 30, 'r', ones(1, 6), 'comb', logical([0 0 1 0 0 0]), ...
+    'offset', [Inf Inf Inf 20 Inf Inf]);
+for hop_only = [false true]
+    [PP, K] = toy_world(true, hop_only);
+    nA = numel(PP.actions);
+    acts = repelem(randi(RandStream('mt19937ar', 'Seed', 7), nA, 10, 6), 3, 1);
+    d = parent_copy(tc, 'code/decision/link_env.m');
+    addpath(d, '-begin'); clear link_env
+    cl0 = onCleanup(@() fixture_off(d, 'link_env')); %#ok<NASGU>
+    verifyEqual(tc, which('link_env'), fullfile(d, 'link_env.m'));
+    Ko = link_env('tables', PP); Oo = env_trace(PP, Ko, spec, acts);
+    fixture_off(d, 'link_env');
+    Kn = link_env('tables', PP); On = env_trace(PP, Kn, spec, acts);
+    Ox = On; Ox.info = cellfun(@(i) rmfield(i, 'recoverable_core'), On.info, 'UniformOutput', false);
+    verifyTrue(tc, isequaln(Oo, Ox), sprintf('trace, hop_only %d', hop_only));
+    for f = fieldnames(Ko)'
+        verifyTrue(tc, isequaln(Ko.(f{1}), Kn.(f{1})), sprintf('K.%s, hop_only %d', f{1}, hop_only));
+    end
+    s0 = rmfield(spec, {'comb', 'offset'}); s0.follow(:) = false;
+    O0 = env_trace(PP, Kn, s0, acts);
+    s1 = s0; s1.cover = false(6, 30);
+    verifyTrue(tc, isequaln(O0, env_trace(PP, Kn, s1, acts)), 'cover all false');
+    s2 = s0; s2.cover = true(6, 30);
+    sf = s0; sf.follow(:) = true; sf.fdelay(:) = 0;
+    O2 = env_trace(PP, Kn, s2, acts); Of = env_trace(PP, Kn, sf, acts);
+    verifyTrue(tc, isequaln(Of.r, O2.r) && isequaln(Of.obs, O2.obs), 'cover all true: rewards and frames');
+    for t = 1:30
+        rc = {'recoverable', 'recoverable_core'};
+        verifyTrue(tc, isequaln(rmfield(Of.info{t}, rc), rmfield(O2.info{t}, rc)));
+        ih = sub2ind(size(Kn.healthy), O2.info{t}.sc_eff, s2.s, ones(1, 6), s2.r);
+        verifyEqual(tc, O2.info{t}.recoverable, Kn.rec_noch(ih));
+        verifyEqual(tc, O2.info{t}.recoverable_core, Kn.rec_core_noch(ih));
+    end
+end
+end
+
+function O = env_trace(PP, K, spec, acts)
+% Every output of an episode batch under the actions acts (T x NE), fixed frame draws.
+[E, obs] = link_env('reset', PP, K, spec, 1, RandStream('mt19937ar', 'Seed', 3));
+O = struct('obs0', obs, 'r', zeros(size(acts)), 'info', {cell(1, size(acts, 1))}, 'obs', {cell(1, size(acts, 1))});
+for t = 1:size(acts, 1)
+    [E, r, obs, info] = link_env('step', E, PP, K, acts(t, :));
+    O.r(t, :) = r; O.info{t} = info; O.obs{t} = obs;
+end
+end
+
+function test_link_env_cover_recoverable(tc)
+% With spec.cover an episode counts as recoverable through channel_switch only when a hop that
+% can reach the link after the onset, floor((T - onset - 1) / (delay + 1)) of them counted from
+% the hops before it, escapes; channel_switch on a covered channel runs the frames without it
+% and on an escaped one its own.
+[PP, K] = toy_world(true, true);                         % only channel_switch restores
+ics = find(strcmp(PP.actions, 'channel_switch'));
+T = 30; base = struct('scn', 2, 's', 1, 'follow', false, 'fdelay', 0, 'unk', false, 'T', T, 'r', 1);
+cov = @(k) ~ismember(1:T, k);                            % escaped hops k only
+rec = @(spec, a) last_info(PP, K, spec, a).recoverable;
+s = base; s.onset = 5;
+s.cover = true(1, T); verifyFalse(tc, rec(s, K.na));
+s.cover = cov(3); verifyTrue(tc, rec(s, K.na));
+s.cover = cov(12); verifyTrue(tc, rec(s, K.na));          % floor(24 / 2) = 12 hops can reach the link
+s.cover = cov(13); verifyFalse(tc, rec(s, K.na));
+verifyTrue(tc, rec(s, ics));                             % channel_switch from cycle 1: one hop before the onset
+s.onset = 10; s.cover = cov(9); verifyTrue(tc, rec(s, K.na));
+s.cover = cov(10); verifyFalse(tc, rec(s, K.na));
+s = base; s.onset = 3; s.cover = cov(2);                 % hold channel_switch: the first hop covered, a re-hop escapes
+[E, ~] = link_env('reset', PP, K, s, 1, RandStream('mt19937ar', 'Seed', 1));
+eff = zeros(1, T); ok = false(1, T); nh = zeros(1, T);
+for t = 1:T
+    [E, ~, ~, info] = link_env('step', E, PP, K, ics);
+    eff(t) = info.cfg_eff; ok(t) = info.restored; nh(t) = E.nhop;
+end
+post = (1:T) >= s.onset;
+verifyEqual(tc, eff(post & nh == 1), K.strip(ics) * ones(1, nnz(post & nh == 1)));
+verifyEqual(tc, eff(post & nh == 2), ics * ones(1, nnz(post & nh == 2)));
+verifyTrue(tc, all(ok(post & nh == 2))); verifyFalse(tc, any(ok(post & nh == 1)));
+verifyEqual(tc, max(nh), 2);                             % no re-hop once the frames pass their CRC
+end
+
+function info = last_info(PP, K, spec, a)
+% The info of an episode's last cycle under configuration a held from the first.
+[E, ~] = link_env('reset', PP, K, spec, 1, RandStream('mt19937ar', 'Seed', 1));
+for t = 1:spec.T, [E, ~, ~, info] = link_env('step', E, PP, K, a); end
+end
+
+function test_link_env_core_recoverable(tc)
+% recoverable_core (link_env.m, rollout_policy.m): some configuration of the core action set
+% restores the geometry; a jammer only freq_diversity escapes is recoverable but not by the
+% core set, one channel_switch escapes is both; under a comb jammer neither; with spec.cover
+% channel_switch counts only through an escaped hop, as for recoverable. Fixed by the pools
+% and the spec: the same under every policy.
+C = decision_config();
+[PP, K] = toy_world(true);                               % channel_switch and freq_diversity escape
+core = ismember(PP.actions, C.core_actions);
+verifyEqual(tc, K.rec_core(2, 1, 1, 1), true); verifyEqual(tc, K.recoverable(2, 1, 1, 1), true);
+verifyEqual(tc, K.rec_core_comb(2, 1, 1, 1), false);
+verifyEqual(tc, K.rec_core_noch(2, 1, 1, 1), false); verifyEqual(tc, K.rec_core_ch(2, 1, 1, 1), true);
+spec = struct('scn', [2 2], 's', [1 1], 'onset', [3 3], 'follow', false(1, 2), 'fdelay', [0 0], 'unk', false(1, 2), ...
+    'T', 20, 'r', [1 1], 'comb', logical([0 1]));
+i0 = last_info(PP, K, spec, K.na * [1 1]);
+verifyEqual(tc, [i0.recoverable; i0.recoverable_core], [true false; true false]);
+Pf = PP;                                                 % only freq_diversity escapes
+for a = find(contains(PP.actions, 'channel_switch')), Pf.pools(2, :, a, 1) = PP.pools(2, :, K.na, 1); end
+Kf = link_env('tables', Pf);
+verifyEqual(tc, [Kf.recoverable(2, 1, 1, 1), Kf.rec_core(2, 1, 1, 1)], [true false]);
+ok = squeeze(Kf.restored(2, 1, :, 1, 1) & Kf.restored_plr(2, 1, :, 1, 1))';
+verifyEqual(tc, Kf.rec_core(2, 1, 1, 1), any(ok(core)));
+s1 = rmfield(spec, 'comb');
+for p = {{'fixed', struct('fixed', K.na)}, {'rule_esc', struct()}}
+    R = rollout_policy(p{1}{1}, Pf, Kf, s1, 1, [], p{1}{2}, 8);
+    verifyEqual(tc, [R.recoverable; R.recoverable_core], [true true; false false]);
+end
+[PP, K] = toy_world(true, true);                         % channel_switch alone escapes
+T = 30; base = struct('scn', 2, 's', 1, 'follow', false, 'fdelay', 0, 'unk', false, 'T', T, 'r', 1, 'onset', 5);
+s = base; s.cover = true(1, T); i1 = last_info(PP, K, s, K.na);
+verifyEqual(tc, [i1.recoverable, i1.recoverable_core], [false false]);
+s.cover = ~ismember(1:T, 3); i1 = last_info(PP, K, s, K.na);
+verifyEqual(tc, [i1.recoverable, i1.recoverable_core], [true true]);
+end
+
+function test_link_env_cover_relative(tc)
+% spec.cover_rel: a jammer tuned to our channel takes the channel in use at the onset, so a hop
+% before the onset escapes nothing and the k-th hop after it reads column k of cover (and of
+% the recoverable rule); without it the hop before the onset counts; cover_rel all false is the
+% path without the field bit for bit; the one-step oracle predicts the link's effective
+% configuration after a hop made before the onset, at every signalling delay.
+[PP, K] = toy_world(true, true);
+ics = find(strcmp(PP.actions, 'channel_switch'));
+T = 30; cov = @(k) ~ismember(1:T, k);
+s = struct('scn', 2, 's', 1, 'onset', 5, 'follow', false, 'fdelay', 0, 'unk', false, 'T', T, 'r', 1, 'cover', cov(1));
+post = (1:T) >= s.onset;
+for rel = [false true]
+    s.cover_rel = rel;
+    [E, ~] = link_env('reset', PP, K, s, 1, RandStream('mt19937ar', 'Seed', 1));
+    eff = zeros(1, T); ok = false(1, T); nh = zeros(1, T);
+    for t = 1:T
+        [E, ~, ~, info] = link_env('step', E, PP, K, ics);
+        eff(t) = info.cfg_eff; ok(t) = info.restored; nh(t) = E.nhop;
+    end
+    verifyEqual(tc, nh(s.onset - 1), 1, sprintf('rel %d: one hop before the onset', rel));
+    verifyEqual(tc, E.nh_on, 1);
+    if rel
+        verifyEqual(tc, eff(post & nh == 1), K.strip(ics) * ones(1, nnz(post & nh == 1)));
+        verifyNotEmpty(tc, find(post & nh == 1));
+        verifyEqual(tc, eff(post & nh == 2), ics * ones(1, nnz(post & nh == 2)));
+        verifyTrue(tc, all(ok(post & nh == 2))); verifyFalse(tc, any(ok(post & nh == 1)));
+        verifyEqual(tc, max(nh), 2);
+    else
+        verifyEqual(tc, eff(post), ics * ones(1, nnz(post)));   % the hop before the onset escaped
+        verifyTrue(tc, all(ok(post))); verifyEqual(tc, max(nh), 1);
+    end
+end
+rec = @(spec) last_info(PP, K, spec, ics).recoverable;
+s.cover = cov(13);
+s.cover_rel = false; verifyTrue(tc, rec(s));             % hops 2..13 after the onset
+s.cover_rel = true; verifyFalse(tc, rec(s));             % hops 1..12 after the onset
+s.cover = cov(12); verifyTrue(tc, rec(s));
+acts = repelem(randi(RandStream('mt19937ar', 'Seed', 5), numel(PP.actions), 10, 1), 3, 1);
+s0 = rmfield(s, 'cover_rel'); s0.cover = cov([2 5 9]); s1 = s0; s1.cover_rel = false;
+verifyTrue(tc, isequaln(env_trace(PP, K, s0, acts), env_trace(PP, K, s1, acts)), 'cover_rel false');
+for D = [0 1 2]
+    spec = struct('scn', 2, 's', 1, 'onset', 9, 'follow', false, 'fdelay', 0, 'unk', false, 'T', T, 'r', 1, ...
+        'delay', D, 'cover', cov(2), 'cover_rel', true);
+    [E, ~] = link_env('reset', PP, K, spec, 1, RandStream('mt19937ar', 'Seed', 1));
+    pred = zeros(1, T); eff = zeros(1, T);
+    for t = 1:T
+        [a, pred(t)] = oracle_action(E, K);
+        if t == 1, a = ics; end                              % a hop before the onset
+        [E, ~, ~, info] = link_env('step', E, PP, K, a);
+        eff(t) = info.cfg_eff;
+    end
+    verifyEqual(tc, E.nh_on, 1, sprintf('D %d: one hop before the onset', D));
+    verifyEqual(tc, pred(2:end - D), eff(2 + D:end), sprintf('oracle, D %d', D));
+end
+end
+
+function test_link_env_residual_layer(tc)
+% spec.acr: on an escaped hop the channel_switch configurations read the residual's layer
+% PP.acr_pools{v - 1} (its frames and its tables), 1 the pools; a covered hop ignores it. The
+% pools' altitudes (PP.alt, build_policy_pools.m) are no layer: the tables stay the same.
+[PP, K0] = toy_world(true, true);
+ics = find(strcmp(PP.actions, 'channel_switch'));
+Pa = PP; Pa.alt = {100 * ones(1, 1)};
+Ka = link_env('tables', Pa);
+verifyEmpty(tc, Ka.acr_tabs);
+verifyTrue(tc, isequaln(rmfield(Ka, 'acr_tabs'), rmfield(K0, 'acr_tabs')));
+Q = PP.pools;
+for a = find(contains(PP.actions, 'channel_switch')), Q(2, :, a, 1) = PP.pools(2, :, K0.na, 1); end
+PP.acr_pools = {Q};
+K = link_env('tables', PP);
+verifyTrue(tc, K.restored(2, 1, ics, 1, 1)); verifyFalse(tc, K.acr_tabs{1}.restored(2, 1, ics, 1, 1));
+s = struct('scn', 2, 's', 1, 'onset', 3, 'follow', false, 'fdelay', 0, 'unk', false, 'T', 12, 'r', 1, ...
+    'cover', false(1, 12), 'acr', 2 * ones(1, 12));
+[ok, ber, eff] = hold_trace(PP, K, s, ics);
+verifyFalse(tc, any(ok(3:end))); verifyEqual(tc, ber(3:end), 0.1 * ones(1, 10)); verifyEqual(tc, eff(3:end), ics * ones(1, 10));
+s.acr(:) = 1;
+[ok, ber] = hold_trace(PP, K, s, ics);
+verifyTrue(tc, all(ok(3:end))); verifyEqual(tc, ber(3:end), zeros(1, 10));
+s.cover(:) = true; s.acr(:) = 2;
+[ok, ~, eff] = hold_trace(PP, K, s, ics);
+verifyFalse(tc, any(ok(3:end))); verifyEqual(tc, eff(3:end), K.na * ones(1, 10));
+end
+
+function [ok, ber, eff] = hold_trace(PP, K, spec, a)
+% Restored, true BER and effective configuration of each frame under configuration a held.
+[E, ~] = link_env('reset', PP, K, spec, 1, RandStream('mt19937ar', 'Seed', 1));
+[ok, ber, eff] = deal(zeros(1, spec.T));
+for t = 1:spec.T
+    [E, ~, obs, info] = link_env('step', E, PP, K, a);
+    ok(t) = info.restored; ber(t) = obs.ber_true; eff(t) = info.cfg_eff;
+end
+end
+
+function test_link_env_residual_recoverable(tc)
+% With spec.acr an episode is recoverable through channel_switch only when a reachable escaped
+% hop's layer restores the geometry (recoverable and recoverable_core alike); without spec.acr
+% the pools decide, as before; the one-step oracle reads the layer's reward on an escaped hop.
+[PP, K0] = toy_world(true, true);                         % only channel_switch restores
+Q = PP.pools;
+for a = find(contains(PP.actions, 'channel_switch')), Q(2, :, a, 1) = PP.pools(2, :, K0.na, 1); end
+PP.acr_pools = {Q, PP.pools};                             % layer 2 restores nothing, layer 3 as the pools
+K = link_env('tables', PP);
+verifyFalse(tc, K.acr_tabs{1}.rec_ch(2, 1, 1, 1)); verifyTrue(tc, K.acr_tabs{2}.rec_ch(2, 1, 1, 1));
+verifyFalse(tc, K.acr_tabs{1}.rec_core_ch(2, 1, 1, 1));
+T = 30; cov = @(k) ~ismember(1:T, k);
+s = struct('scn', 2, 's', 1, 'onset', 5, 'follow', false, 'fdelay', 0, 'unk', false, 'T', T, 'r', 1, 'cover', cov(3));
+rec = @(spec) [last_info(PP, K, spec, K.na).recoverable, last_info(PP, K, spec, K.na).recoverable_core];
+verifyEqual(tc, rec(s), [true true]);                     % no layers: the pools
+s.acr = 2 * ones(1, T); verifyEqual(tc, rec(s), [false false]);
+s.acr(3) = 3; verifyEqual(tc, rec(s), [true true]);
+s.acr(3) = 1; verifyEqual(tc, rec(s), [true true]);
+s.acr(:) = 2; s.cover = cov([3 7]); verifyEqual(tc, rec(s), [false false]);
+s.acr(7) = 3; verifyEqual(tc, rec(s), [true true]);
+s.acr(7) = 2; s.acr(4) = 3; verifyEqual(tc, rec(s), [false false]);   % a covered hop's layer is never read
+on = 9;
+for D = [0 1 2]
+    spec = struct('scn', 2, 's', 1, 'onset', on, 'follow', false, 'fdelay', 0, 'unk', false, 'T', T, 'r', 1, ...
+        'delay', D, 'cover', false(1, T), 'acr', 2 * ones(1, T));
+    [~, a] = oracle_run(PP, K, spec);
+    verifyEqual(tc, a, K.na * ones(1, T), sprintf('a layer that restores nothing, D %d', D));
+    spec.acr(:) = 3;
+    [ok, a] = oracle_run(PP, K, spec);
+    verifyEqual(tc, find(a ~= K.na, 1), on - D, sprintf('a layer that restores, D %d', D));
+    verifyTrue(tc, all(ok(on:end)), sprintf('a layer that restores, D %d', D));
+end
+end
+
+function test_oracle_cover(tc)
+% With spec.cover the one-step oracle predicts the link's effective configuration of the frame
+% its choice reaches (a covered channel strips channel_switch), at every signalling delay; with
+% every channel covered it never runs channel_switch after the onset.
+[PP, K] = toy_world(true, true);
+on = 9;
+for D = [0 1 2]
+    for pat = {[1 2], 3, []}
+        spec = struct('scn', 2, 's', 1, 'onset', on, 'follow', false, 'fdelay', 0, 'unk', false, 'T', 30, 'r', 1, ...
+            'delay', D, 'cover', ismember(1:30, setdiff(1:30, pat{1} + 2)));
+        [~, ~, pred, eff] = oracle_run(PP, K, spec);
+        verifyEqual(tc, pred(1:end-D), eff(1+D:end), sprintf('D %d', D));
+    end
+    spec.cover = true(1, 30);
+    [~, a] = oracle_run(PP, K, spec);
+    verifyEqual(tc, a, K.na * ones(1, 30), sprintf('all covered, D %d', D));   % no hop pays when none escapes
+    spec.cover = false(1, 30);
+    [ok, a] = oracle_run(PP, K, spec);
+    verifyEqual(tc, find(a ~= K.na, 1), on - D, sprintf('none covered, D %d', D));
+    verifyTrue(tc, all(ok(on:end)), sprintf('none covered, D %d', D));
+end
+end
+
+function test_band_recoverable_scenarios(tc)
+% The fixed rules: a scenario is recoverable with >= 90% of its validation episodes recoverable
+% and the static link harmed (pooled PER above the pooled threshold); W by the lowest PER with
+% equal weight per (B_J, JSR_tot), a tie (interval holding 0) by goodput, then by the median
+% recovery from detection, then by the candidates' order; the PER-reduction verdict.
+key = [1 1 1 1 2 2 2 2 3 3 3 3];
+rec = logical([1 1 1 1 1 1 1 0 1 1 1 1]);
+per = [0.5 * ones(1, 8), 0.01 * ones(1, 4)]; thr = 0.1 * ones(1, 12);
+T = core_bw_rules('recoverable', key, rec, per, thr, 90);
+verifyEqual(tc, T.key, [1 2 3]); verifyEqual(tc, T.rec_pct, [100 75 100]);
+verifyEqual(tc, T.harm, [true true false]); verifyEqual(tc, T.ok, [true false false]);
+T = core_bw_rules('recoverable', ones(1, 10), [true(1, 9) false], 0.5 * ones(1, 10), 0.1 * ones(1, 10), 90);
+verifyTrue(tc, T.ok);                                    % exactly 90% counts
+Wn = {'channel_switch', 'channel_switch+rate_reduce', 'rate_reduce'};
+bj = [4 * ones(1, 30), 20 * ones(1, 10)]; tot = [10 * ones(1, 30), 16 * ones(1, 10)]; cl = 1:40;
+g1 = bj == 4;
+gp = ones(3, 40); tr = ones(3, 40);
+[~, tab] = core_bw_rules('choose_w', Wn, bj, tot, cl, [0.5 * ~g1; 0.2 * ones(1, 40); 0.9 * ones(1, 40)], gp, tr, 500);
+verifyEqual(tc, [tab.per], [0.25 0.2 0.9], 'AbsTol', 1e-12);   % equal weight per (B_J, JSR_tot); per episode 0.125
+per = [0.4 * ones(1, 40); 0.2 * ones(1, 40); 0.9 * ones(1, 40)];
+verifyEqual(tc, core_bw_rules('choose_w', Wn, bj, tot, cl, per, gp, tr, 500), 'channel_switch+rate_reduce');
+per = [0.2 * ones(2, 40); 0.9 * ones(1, 40)];
+gp = [ones(1, 40); 0.25 * ones(1, 40); ones(1, 40)];
+verifyEqual(tc, core_bw_rules('choose_w', Wn, bj, tot, cl, per, gp, tr, 500), 'channel_switch');
+gp = ones(3, 40); tr = [5 * ones(1, 40); 2 * ones(1, 40); ones(1, 40)];
+verifyEqual(tc, core_bw_rules('choose_w', Wn, bj, tot, cl, per, gp, tr, 500), 'channel_switch+rate_reduce');
+tr(1:2, :) = NaN; tr(2, 1:30) = 3;                         % never recovered counts as the longest
+verifyEqual(tc, core_bw_rules('choose_w', Wn, bj, tot, cl, per, gp, tr, 500), 'channel_switch+rate_reduce');
+[W, tab] = core_bw_rules('choose_w', Wn, bj, tot, cl, 0.2 * ones(3, 40), ones(3, 40), ones(3, 40), 500);
+verifyEqual(tc, W, 'channel_switch'); verifyEqual(tc, [tab.tie_per], true(1, 3));
+verifyEqual(tc, core_bw_rules('choose_w', Wn, [], [], [], zeros(3, 0), zeros(3, 0), zeros(3, 0), 500), 'channel_switch');
+verifyEqual(tc, core_bw_rules('verdict', 0.35, 0.31, 0.3, 10), 'MET (committed)');
+verifyEqual(tc, core_bw_rules('verdict', 0.35, 0.2, 0.3, 10), 'MET (not committed)');
+verifyEqual(tc, core_bw_rules('verdict', 0.2, 0.1, 0.3, 10), 'NOT MET');
+verifyEqual(tc, core_bw_rules('verdict', 0.3, 0.3, 0.3, 10), 'MET (committed)');           % the line itself clears it
+verifyEqual(tc, core_bw_rules('verdict', NaN, NaN, 0.3, 0), 'NOT MET');
+verifyEqual(tc, core_bw_rules('verdict', 0.5, 0.4, 0.3, 0), 'NOT MET');                   % no episodes, as in C2e
+end
+
+function test_band_per_verdicts(tc)
+% The study's primary PER verdict is rule_core's per jamming type (narrowband, then wideband),
+% as in C2e; the pooled line follows, labelled the second line; blind_core and a sensitivity
+% carry no PRIMARY tag; a type without episodes reads NOT MET; the report's flip check reads
+% only the primary entries, a primary type without episodes among them (NOT MET), against a
+% sensitivity's entry with episodes of its own.
+mk = @(pol, ty, n, r, lo) struct('policy', pol, 'type', ty, 'n', n, 'red', r, 'lo', lo, 'hi', r + 0.1, 'per', 0.1, ...
+    'per_ref', 0.2);
+P = [mk('rule_core', 'pooled', 30, 0.5, 0.2), mk('rule_core', 'narrowband', 10, 0.5, 0.35), ...
+    mk('rule_core', 'wideband', 20, 0.4, 0.1), mk('blind_core', 'pooled', 30, 0.2, 0.1), ...
+    mk('blind_core', 'narrowband', 0, NaN, NaN), mk('blind_core', 'wideband', 20, 0.2, 0.1)];
+[V, L] = core_bw_rules('per_verdicts', P, 0.3, true);
+verifyEqual(tc, {V.verdict}, {'MET (not committed)', 'MET (committed)', 'MET (not committed)', 'NOT MET', 'NOT MET', ...
+    'NOT MET'});
+verifyEqual(tc, [V.primary], [false true true false false false]);
+verifyEqual(tc, numel(L), 6);
+verifyTrue(tc, contains(L{1}, 'rule_core') && contains(L{1}, 'PRIMARY narrowband (CW), n=10') && ...
+    contains(L{1}, '-> MET (committed)'));
+verifyTrue(tc, contains(L{2}, 'rule_core') && contains(L{2}, 'PRIMARY wideband (4-83.5 MHz), n=20') && ...
+    contains(L{2}, '-> MET (not committed)'));
+verifyTrue(tc, contains(L{3}, 'rule_core') && contains(L{3}, 'second line, both types pooled') && ~contains(L{3}, 'PRIMARY'));
+verifyTrue(tc, contains(L{4}, 'blind_core') && contains(L{4}, 'narrowband (CW): no recoverable episodes -> NOT MET'));
+verifyFalse(tc, any(contains(L(4:6), 'PRIMARY')));
+[V, L] = core_bw_rules('per_verdicts', P, 0.3, false);                 % a sensitivity
+verifyFalse(tc, any([V.primary])); verifyFalse(tc, any(contains(L, 'PRIMARY')));
+[V, L] = core_bw_rules('per_verdicts', P([]), 0.3, true);
+verifyEmpty(tc, V); verifyEmpty(tc, L);
+A = core_bw_rules('per_verdicts', [mk('rule_core', 'narrowband', 0, NaN, NaN), mk('rule_core', 'wideband', 20, 0.4, ...
+    0.1), mk('rule_core', 'pooled', 20, 0.4, 0.1), mk('blind_core', 'narrowband', 10, 0.5, 0.35)], 0.3, true);
+verifyEqual(tc, {A(1:2).verdict}, {'NOT MET', 'MET (not committed)'});
+S = @(Pn) core_bw_rules('per_verdicts', Pn, 0.3, false);
+verifyTrue(tc, core_bw_rules('flip', A, S([mk('rule_core', 'narrowband', 10, 0.5, 0.35), ...
+    mk('rule_core', 'wideband', 20, 0.4, 0.1)])));                    % no primary episodes, MET in the sensitivity
+verifyFalse(tc, core_bw_rules('flip', A, S([mk('rule_core', 'narrowband', 0, NaN, NaN), ...
+    mk('rule_core', 'wideband', 20, 0.4, 0.1)])));                    % neither has episodes
+verifyFalse(tc, core_bw_rules('flip', A, S(mk('rule_core', 'wideband', 20, 0.35, 0.1))));   % same words, a type missing
+verifyTrue(tc, core_bw_rules('flip', A, S(mk('rule_core', 'wideband', 20, 0.2, 0.1))));
+verifyFalse(tc, core_bw_rules('flip', A, S([mk('rule_core', 'pooled', 20, 0.1, 0.0), ...
+    mk('blind_core', 'narrowband', 10, 0.1, 0.0)])));                 % only primary entries count
+verifyFalse(tc, core_bw_rules('flip', A, S(mk('rule_core', 'wideband', 0, NaN, NaN))));   % no episodes in the sensitivity
+src = fileread(which('experiment_core_bw'));
+verifyNotEmpty(tc, strfind(src, '[Kp.per, blk] = core_bw_rules(''per_verdicts'', Kp.per, X.TARGET, ~brief);'));
+verifyNotEmpty(tc, strfind(src, 'flip = core_bw_rules(''flip'', KP.primary.per, Ks.per);'));
+verifyEmpty(tc, strfind(src, '[a.n] > 0'));
+end
+
+function test_band_g3_gap(tc)
+% G3's report line: the mean and largest distance from an escaped hop's R_eff to its layer, or
+% "no escaped hop" where a cell has none (the whole-band jammer), never NaN or -Inf.
+verifyEqual(tc, core_bw_rules('gap_text', 0.8123, 1.9), 'an escaped hop above its layer by 0.81 dB mean, 1.90 max');
+verifyEqual(tc, core_bw_rules('gap_text', mean(zeros(0, 1)), max([zeros(0, 1); NaN])), 'no escaped hop');
+verifyEqual(tc, max([0.5; 1.2; NaN]), 1.2);
+src = fileread(which('experiment_core_bw'));
+verifyNotEmpty(tc, strfind(src, '''err_max'', max([er(:); NaN]), ''err_mean'', mean(er));'));
+verifyNotEmpty(tc, strfind(src, 'core_bw_rules(''gap_text'', g.err_mean, g.err_max)'));
+verifyEmpty(tc, strfind(src, '-Inf]'));
+verifyError(tc, @() core_bw_rules('other'), 'core_bw_rules:cmd');
+end
+
+function test_band_p1_reading(tc)
+% P1 at JSR_tot 30 dB: from a mid-band home 28 of H1's 36 first-hop targets keep >= 42 dB of
+% the tone, the other 8 (6-12 MHz) 24 or 28 dB; the reading holds when the interval of the
+% median difference holds 0 and the rule's median is the longer on the near episodes; never
+% restored counts as the longest; one geometry reads the point; no episode holds.
+B = band_plan(); f = B.f_mhz; h = B.centre;
+cells = band_cells();
+J = cells(strcmp({cells.name}, 'cw_tot30')).J;
+R = band_reject(J, f(h), B);
+k = abs((1:numel(f)) - h) >= 3;
+verifyEqual(tc, nnz(k), 36); verifyEqual(tc, nnz(R(k) >= 42), 28);
+verifyEqual(tc, unique(R(k & R < 42)), [24 28]);
+verifyEqual(tc, abs(f(k & R < 42) - f(h)), [12 10 8 6 6 8 10 12]);
+cl = 1:20; near = [true(1, 4) false(1, 16)];
+P = core_bw_rules('p1', 3 * ones(1, 20), 3 * ones(1, 20), false(1, 20), cl, 500);
+verifyEqual(tc, [P.med P.ci], [3 3 0 0]); verifyTrue(tc, P.holds);
+tr = 3 * ones(1, 20); tr(near) = 6;
+P = core_bw_rules('p1', tr, 3 * ones(1, 20), near, cl, 500);
+verifyEqual(tc, [P.med P.ci P.near P.n_near], [3 3 0 0 6 3 4]); verifyTrue(tc, P.holds);
+tr(near) = 2;
+verifyFalse(tc, core_bw_rules('p1', tr, 3 * ones(1, 20), near, cl, 500).holds);   % near: not longer
+P = core_bw_rules('p1', 5 * ones(1, 20), 3 * ones(1, 20), false(1, 20), cl, 500);
+verifyEqual(tc, P.ci, [2 2]); verifyFalse(tc, P.holds);
+P = core_bw_rules('p1', NaN(1, 20), NaN(1, 20), false(1, 20), cl, 500);
+verifyEqual(tc, [P.med P.ci], [Inf Inf 0 0]); verifyTrue(tc, P.holds);
+verifyFalse(tc, core_bw_rules('p1', NaN(1, 20), 3 * ones(1, 20), false(1, 20), cl, 500).holds);
+P = core_bw_rules('p1', 4 * ones(1, 20), 3 * ones(1, 20), false(1, 20), ones(1, 20), 500);
+verifyEqual(tc, P.ci, [NaN NaN]); verifyFalse(tc, P.holds);
+verifyTrue(tc, core_bw_rules('p1', 3 * ones(1, 20), 3 * ones(1, 20), false(1, 20), ones(1, 20), 500).holds);
+P = core_bw_rules('p1', zeros(1, 0), zeros(1, 0), false(1, 0), zeros(1, 0), 500);
+verifyEqual(tc, P.n, 0); verifyTrue(tc, P.holds);
+src = fileread(which('experiment_core_bw'));
+verifyNotEmpty(tc, strfind(src, 'EP.home(i) = h; EP.rej1(i) = R(c1(1));'));
+verifyNotEmpty(tc, strfind(src, 'near = EP.rej1(e(m30)) > 0 & EP.rej1(e(m30)) < 42;'));
+verifyNotEmpty(tc, strfind(src, 'core_bw_rules(''p1'', Rr.t_rec_det(m30), Rb.t_rec_det(m30), near, EP.geom(e(m30)), X.B);'));
+verifyEmpty(tc, strfind(src, 't1 > t2'));
+end
+
+function test_band_protocol_guard(tc)
+% The test stage refuses without the frozen protocol, when the protocol or the recoverable
+% list changed, a second time (marker or readings), without a byte-identical frozen copy, and
+% with files not committed; the smoke removes its own marker and passes.
+d = tempname; mkdir(d);
+X = struct('protocol', fullfile(d, 'proto.md'), 'recov', fullfile(d, 'recoverable.txt'), ...
+    'proto_json', fullfile(d, 'protocol.json'), 'marker', fullfile(d, 'marker.txt'), 'test', fullfile(d, 'test.mat'), ...
+    'frozen', fullfile(d, 'frozen.json'), 'smoke', false);
+write_text(X.protocol, 'protocol'); write_text(X.recov, 'H1 1 1 x 1');
+verifyError(tc, @() core_bw_rules('guard', X), 'experiment_core_bw:protocol');
+J = struct('protocol_sha256', core_bw_rules('sha', X.protocol), 'recoverable_sha256', core_bw_rules('sha', X.recov), ...
+    'w', struct('H1', 'channel_switch'));
+write_text(X.proto_json, jsonencode(J));
+verifyEqual(tc, core_bw_rules('sha', X.protocol), sha256_of(X.protocol));
+write_text(X.protocol, 'protocol changed');
+verifyError(tc, @() core_bw_rules('guard', X), 'experiment_core_bw:protocol_changed');
+write_text(X.protocol, 'protocol'); write_text(X.recov, 'H1 1 1 x 0');
+verifyError(tc, @() core_bw_rules('guard', X), 'experiment_core_bw:recoverable_changed');
+write_text(X.recov, 'H1 1 1 x 1');
+write_text(X.marker, 'started');
+verifyError(tc, @() core_bw_rules('guard', X), 'experiment_core_bw:read');
+delete(X.marker); write_text(X.test, 'x');
+verifyError(tc, @() core_bw_rules('guard', X), 'experiment_core_bw:read');
+delete(X.test);
+verifyError(tc, @() core_bw_rules('guard', X), 'experiment_core_bw:frozen');
+write_text(X.frozen, 'other');
+verifyError(tc, @() core_bw_rules('guard', X), 'experiment_core_bw:frozen');
+copyfile(X.proto_json, X.frozen);
+verifyError(tc, @() core_bw_rules('guard', X), 'experiment_core_bw:uncommitted');   % not in the repository
+X.smoke = true; write_text(X.marker, 'started');
+J2 = core_bw_rules('guard', X);
+verifyEqual(tc, J2.w.H1, 'channel_switch'); verifyFalse(tc, isfile(X.marker));
+rmdir(d, 's');
+src = fileread(which('experiment_core_bw'));
+verifyNotEmpty(tc, regexp(src, 'function stage_test\(X\)\r?\nJ = core_bw_rules\(''guard'', X\);', 'once'));
+i1 = strfind(src, 'marker(X, J.params_id);'); i2 = strfind(src, 'PP = load_pools(X, true);');
+verifyNotEmpty(tc, i1); verifyGreaterThan(tc, i2(end), i1(1));   % the marker before the test pools are loaded
+v0 = strfind(src, 'function stage_val(X)'); g = strfind(src, 'assert(X.smoke || (~isfile(X.marker) && ~isfile(X.test)');
+l = strfind(src, 'PP = load_pools(X, true);');
+verifyNumElements(tc, v0, 1); verifyNumElements(tc, g, 1);   % validation refuses once the test was read
+verifyTrue(tc, g > v0 && any(l > g) && min(l(l > v0)) > g);
+r0 = strfind(src, 'function stage_report(X)'); f = strfind(src, '''experiment_core_bw:frozen'', ''%s is no longer the frozen');
+verifyNumElements(tc, f, 1); verifyGreaterThan(tc, f, r0);   % the report only under the frozen copy
+end
+
+function d = parent_copy(tc, rel, rev)
+% The file rel as commit rev holds it (default this branch's parent, lect-kpi 394d4da), alone in
+% a folder.
+if nargin < 3, rev = '394d4da'; end
+d = tempname; mkdir(d);
+[~, nm, ext] = fileparts(rel);
+[st, out] = system(sprintf('git --no-optional-locks -C "%s" show %s:%s > "%s"', tc.TestData.root, rev, rel, ...
+    fullfile(d, [nm ext])));
+assertEqual(tc, st, 0, sprintf('git show %s:%s failed: %s', rev, rel, out));
+end
+
+function fixture_off(d, fn)
+% Removes a parent-commit folder from the path and the disk (once).
+if contains(path, d), rmpath(d); end
+clear(fn);
+if isfolder(d), rmdir(d, 's'); end
+end
+
+%% ---------- three-state spectrogram CNN (deliverable 2) ----------
+function test_core_cnn_frames(tc)
+% The three link states are the sub-runs of none, tone_jamming and jamming; a frame whose
+% frame-rule or per-cycle label is not its sub-run's class is left out and counted; clean
+% frames of another threat's sub-run are no state.
+classes = {'none', 'jamming', 'path_loss', 'tone_jamming'};
+cr = [1 1 2 2 4 4 3 3 1]';
+yf = [1 1 2 1 4 4 1 3 1]';
+yc = yf; yc(9) = 2;
+S = struct('class_run', cr, 'Y_frame', categorical(yf, 1:4, classes), 'Y', categorical(yc, 1:4, classes));
+[m, y, info] = core_cnn_frames(S, classes);
+verifyEqual(tc, m', logical([1 1 1 0 1 1 0 0 0]));
+verifyEqual(tc, y', [1 1 3 2 2]);
+verifyEqual(tc, info.n_sub, [3 2 2]);
+verifyEqual(tc, info.n_off, [1 0 1]);
+verifyEqual(tc, core_cnn_config().groups, {'none', 'tone_jamming', 'jamming'});
+verifyError(tc, @() core_cnn_frames(rmfield(S, 'class_run'), classes), 'core_cnn_frames:field');
+verifyError(tc, @() core_cnn_frames(S, classes, {'none', 'spoofing'}), 'core_cnn_frames:class');
+verifyError(tc, @() core_cnn_frames(S, classes([2 1 3 4])), 'core_cnn_frames:classes');
+end
+
+function test_core_cnn_logp_window(tc)
+% The temporal decision: the mean of log(max(p, 1e-6)) over the last N frames of the frame's
+% own sub-run in position order, shorter at the sub-run's start, never across sub-runs.
+P = [0.5 0.3 0.2; 0.1 0.8 0.1; 0.2 0.2 0.6; 0.7 0.2 0.1; 0.3 0.3 0.4];
+run = [1 1 1 2 2]'; pos = [3 1 2 5 4]';
+lp = log(P);
+[L, rk] = core_cnn_eval('logp', P, run, pos, 2);
+verifyEqual(tc, rk', [3 1 2 2 1]);
+verifyEqual(tc, L(2, :), lp(2, :), 'AbsTol', 1e-12);
+verifyEqual(tc, L(3, :), mean(lp([2 3], :)), 'AbsTol', 1e-12);
+verifyEqual(tc, L(1, :), mean(lp([3 1], :)), 'AbsTol', 1e-12);
+verifyEqual(tc, L(5, :), lp(5, :), 'AbsTol', 1e-12);
+verifyEqual(tc, L(4, :), mean(lp([5 4], :)), 'AbsTol', 1e-12);
+L9 = core_cnn_eval('logp', P, run, pos, 9);
+verifyEqual(tc, L9(1, :), mean(lp(1:3, :)), 'AbsTol', 1e-12);
+P(1, 1) = 0;
+L1 = core_cnn_eval('logp', P, run, pos, 1);
+verifyEqual(tc, L1(1, 1), log(1e-6), 'AbsTol', 1e-12);
+verifyEqual(tc, L1(2:end, :), log(P(2:end, :)), 'AbsTol', 1e-12);
+end
+
+function test_core_cnn_metrics(tc)
+% Three-state confusion with an 'other' column (another class is an error, never a hit),
+% recall, precision over the three states' columns, F1 and macro-F1 as three_state_view.m;
+% false alarms: clean frames read as anything else, and the part read as a jamming state.
+y  = [1 1 1 1 2 2 2 3 3 3]';
+yp = [1 1 2 0 2 2 3 3 3 1]';
+M = core_cnn_eval('metrics', y, yp, 3);
+verifyEqual(tc, M.cm, [2 1 0 1; 0 2 1 0; 1 0 2 0]);
+verifyEqual(tc, M.n, [4 3 3]);
+verifyEqual(tc, M.recall, [0.5 2/3 2/3], 'AbsTol', 1e-12);
+verifyEqual(tc, M.precision, [2/3 2/3 2/3], 'AbsTol', 1e-12);
+f1 = 2 * M.precision .* M.recall ./ (M.precision + M.recall);
+verifyEqual(tc, M.f1, f1, 'AbsTol', 1e-12);
+verifyEqual(tc, M.macro_f1, mean(f1), 'AbsTol', 1e-12);
+verifyEqual(tc, M.fa, 0.5, 'AbsTol', 1e-12);
+verifyEqual(tc, M.fa_jam, 0.25, 'AbsTol', 1e-12);
+V = three_state_view([2 1 0 1; 0 2 1 0; 1 0 2 0; 0 0 0 5], {'none', 'tone_jamming', 'jamming', 'spoofing'});
+verifyEqual(tc, V.cm, M.cm);
+verifyEqual(tc, V.macro_f1, M.macro_f1, 'AbsTol', 1e-12);
+M2 = core_cnn_eval('metrics', [1 1 2]', [1 3 2]', 3);           % a state without frames is left out of the mean
+verifyEqual(tc, M2.macro_f1, mean(M2.f1(1:2)), 'AbsTol', 1e-12);
+verifyEqual(tc, M2.f1(3), 0);
+verifyTrue(tc, isnan(core_cnn_eval('metrics', [2 3]', [2 3]', 3).fa));
+end
+
+function test_core_cnn_choose_window(tc)
+% The window N on validation: macro-F1 of the windowed decision on folds of whole sub-runs;
+% the shortest N within one standard error of the best. Every third frame leans to a wrong
+% state: N = 1 errs there, every window from 3 cycles reads all frames right.
+nr = 12; F = 10; P = zeros(nr * F, 3); y = zeros(nr * F, 1); run = y; pos = y;
+for r = 1:nr
+    s = mod(r - 1, 3) + 1; w = mod(s, 3) + 1; o = 6 - s - w;
+    for j = 1:F
+        i = (r - 1) * F + j; y(i) = s; run(i) = 100 + r; pos(i) = j;
+        if mod(j, 3) == 0, P(i, [s w o]) = [0.3 0.6 0.1]; else, P(i, [s w o]) = [0.5 0.25 0.25]; end
+    end
+end
+[N, T] = core_cnn_eval('choose', P, y, run, pos, [1 3 5 8 12], 5, 61);
+verifyEqual(tc, N, 3);
+verifyLessThan(tc, T.cv(1), 1);
+verifyEqual(tc, T.cv(2:end), ones(1, 4), 'AbsTol', 1e-12);
+verifyEqual(tc, size(T.fold), [5 5]);
+verifyEqual(tc, T.best, 3);
+P = 0.25 * ones(size(P)); P(sub2ind(size(P), (1:numel(y))', y)) = 0.5;   % every frame right: the per-frame decision
+verifyEqual(tc, core_cnn_eval('choose', P, y, run, pos, [1 3 5 8 12], 5, 61), 1);
+end
+
+function test_core_cnn_boot(tc)
+% Bootstrap over whole sub-runs: a perfect reader has a point interval, the paired difference
+% of a reader with itself is 0, the intervals hold the point, the Eb/N0 bins are kept, and the
+% stream is fixed by its seed.
+nr = 12; F = 5;
+run = kron((1:nr)', ones(F, 1)); y = mod(run - 1, 3) + 1; eb = 3 * mod(run, 2);
+y2 = y; y2(run <= 2) = 0;
+B = core_cnn_eval('boot', y, [y, y2, y], run, eb, 3, 200, 7);
+verifyEqual(tc, B.macro_f1(1, :), [1 1]);
+verifyEqual(tc, B.diff(1, :), [0 0]);
+verifyEqual(tc, B.diff(3, :), [0 0]);
+verifyLessThan(tc, B.diff(2, 2), 1e-12);
+m2 = core_cnn_eval('metrics', y, y2, 3).macro_f1;
+verifyLessThanOrEqual(tc, B.macro_f1(2, 1), m2); verifyGreaterThanOrEqual(tc, B.macro_f1(2, 2), m2);
+verifyEqual(tc, size(B.recall), [3 3 2]);
+verifyEqual(tc, B.ebno, [0 3]);
+verifyEqual(tc, size(B.macro_f1_ebno), [3 2 2]);
+verifyEqual(tc, B.fa(1, :), [0 0]);
+verifyEqual(tc, core_cnn_eval('boot', y, [y, y2], run, eb, 3, 200, 7).macro_f1, B.macro_f1(1:2, :));
+B2 = core_cnn_eval('boot', y, [y2, y], run, eb, 3, 200, 7);   % without the first reader: the same resamples
+verifyEqual(tc, B2.macro_f1, B.macro_f1(2:3, :)); verifyEqual(tc, B2.recall, B.recall(2:3, :, :));
+verifyEqual(tc, B2.fa, B.fa(2:3, :)); verifyEqual(tc, B2.macro_f1_ebno, B.macro_f1_ebno(2:3, :, :));
+end
+
+function test_core_cnn_verdict(tc)
+% The lecturer's thresholds: met (committed) when the 95% interval clears the threshold, met
+% (not committed) when only the point does, not met otherwise.
+v = @(p, c, t, d) core_cnn_eval('verdict', p, c, t, d);
+verifyEqual(tc, v(0.9, [0.86 0.93], 0.85, '>='), 'met (committed)');
+verifyEqual(tc, v(0.87, [0.83 0.9], 0.85, '>='), 'met (not committed)');
+verifyEqual(tc, v(0.84, [0.8 0.88], 0.85, '>='), 'not met');
+verifyEqual(tc, v(0.03, [0.02 0.045], 0.05, '<='), 'met (committed)');
+verifyEqual(tc, v(0.04, [0.02 0.06], 0.05, '<='), 'met (not committed)');
+verifyEqual(tc, v(0.06, [0.04 0.08], 0.05, '<='), 'not met');
+verifyEqual(tc, v(0.9, [NaN NaN], 0.85, '>='), 'met (not committed)');
+verifyEqual(tc, v(NaN, [NaN NaN], 0.85, '>='), 'no frames');
+verifyError(tc, @() v(0.9, [0.8 0.9], 0.85, '>'), 'core_cnn_eval:dir');
+verifyEqual(tc, core_cnn_config().thr, struct('macro_f1', 0.85, 'recall', 0.85, 'false_alarm', 0.05));
+end
+
+function test_core_cnn_delay(tc)
+% Detection delay: cycles from a jamming sub-run's first frame to its first frame read as its
+% own state (NaN never); clean sub-runs are not counted.
+y = [2 2 2 2 3 3 3 3 1 1]'; run = [1 1 1 1 2 2 3 3 4 4]'; pos = [4 3 2 1 1 2 1 2 1 2]';
+yp = [2 2 1 0 3 1 2 2 2 2]';                                      % run 1 by position: 0 1 2 2
+D = core_cnn_eval('delay', y, yp, run, pos, [2 3]);
+verifyEqual(tc, D.n, [1 2]);
+verifyEqual(tc, D.median, [2 0]);
+verifyEqual(tc, D.p90, [2 0]);
+verifyEqual(tc, D.never, [0 0.5]);
+verifyEqual(tc, sort(D.state), [2 3 3]);
+end
+
+function test_spec_net_trains(tc)
+% The image-only network trains on 128 x 128 images, keeps its best validation epoch, weights
+% the cross-entropy by the inverse class frequency (mean 1), returns CPU weights and
+% probabilities that sum to 1 per image.
+assumeTrue(tc, license('test', 'Neural_Network_Toolbox') && ~isempty(ver('deeplearning')));
+rng(3, 'twister');
+mk = @(c, n) img_of(c, n);
+X = cat(4, mk(1, 16), mk(2, 8), mk(3, 8)); y = [ones(16, 1); 2 * ones(8, 1); 3 * ones(8, 1)];
+Xv = cat(4, mk(1, 4), mk(2, 4), mk(3, 4)); yv = kron((1:3)', ones(4, 1));
+[net, info] = train_spec_net(X, y, Xv, yv, 3, struct('epochs', 3, 'batch', 8, 'verbose', false));
+verifyEqual(tc, info.numEpochs, 3); verifyNumElements(tc, info.valF1, 3);
+verifyTrue(tc, info.bestEpoch >= 1 && info.bestEpoch <= 3);
+verifyEqual(tc, info.bestValF1, max(info.valF1));
+verifyEqual(tc, info.classWeights, 32 ./ (3 * [16 8 8]), 'AbsTol', 1e-6);
+verifyFalse(tc, isa(extractdata(net.Learnables.Value{1}), 'gpuArray'));
+P = spec_scores(net, Xv);
+verifyEqual(tc, size(P), [12 3]);
+verifyEqual(tc, sum(P, 2), ones(12, 1), 'AbsTol', 1e-5);
+verifyError(tc, @() train_spec_net(X, y + 1, Xv, yv, 3, struct('epochs', 1, 'verbose', false)), 'train_spec_net:labels');
+verifyError(tc, @() train_spec_net(X, y(1:end-1), Xv, yv, 3, struct('epochs', 1, 'verbose', false)), 'train_spec_net:size');
+end
+
+function X = img_of(c, n)
+% Synthetic detector images: thermal noise (clean), one bright frequency row (a tone), the
+% whole band raised (a barrage).
+X = single(0.28 + 0.03 * randn(128, 128, 1, n));
+if c == 2, X(60:62, :, 1, :) = 0.8; end
+if c == 3, X = X + 0.3; end
+end
+
+function test_core_cnn_stage(tc)
+% Stage B3c: in run_stage.m and main.m, not in the chain; its reading checks every input
+% before the marker, writes the marker before the fourth test set is loaded, prints no
+% outcome before every metric is computed, and never writes the hybrid's frozen files.
+verifyNotEmpty(tc, strfind(fileread(which('run_stage')), '''B3c'', ''train_core_cnn'''));
+mn = fileread(which('main'));
+verifyNotEmpty(tc, strfind(mn, 'RUN.train_core_cnn              = false;'));
+verifyNotEmpty(tc, strfind(mn, 'run_own(''train_core_cnn'');'));
+verifyNotEmpty(tc, strfind(fileread(which('export_report_numbers')), 'N.core_cnn = take(''results/core_cnn.mat'', ''core'');'));
+src = fileread(which('train_core_cnn'));
+im = strfind(src, 'cc_marker(CC.marker, pid, CC.model, CC.protocol, IN, nob);'); verifyNumElements(tc, im, 1);
+il = strfind(src, 'Sf = load(IN.test, ''splits'');'); verifyNumElements(tc, il, 1);
+verifyLessThan(tc, im, il);
+for id = {'protocol_changed', 'smoke', 'train_splits', 'kpi1_set', 'hybrid', 'fresh3', 'params', 'no_b3r', 'read', 'started', 'recorded'}
+    k = strfind(src, ['''train_core_cnn:' id{1} '''']);
+    verifyNotEmpty(tc, k, id{1}); verifyLessThan(tc, k(end), im, id{1});
+end
+is = strfind(src, 'save(''results/core_cnn.mat'', ''core'');'); verifyNumElements(tc, is, 1);
+ip = strfind(src, 'save(''results/core_cnn_predictions.mat'', ''cpred'');'); verifyNumElements(tc, ip, 1);
+verifyLessThan(tc, ip, is);
+pr = regexp(src(im:is), 'fprintf\(''([^'']*)', 'tokens');          % lines printed between the marker and the results
+verifyEqual(tc, cellfun(@(c) c{1}, pr, 'UniformOutput', false), {'B3c: start marker written (%s)\n', ...
+    'Loading the fourth test set...\n', 'Running inference on %d frames...\n'});
+verifyEmpty(tc, regexp(src, 'save\([^)]*(trained_detector|fusion|ood_thresholds)', 'once'));
+verifyEmpty(tc, regexp(src, 'commit_mat\([^)]*(trained_detector|fusion|ood_thresholds)', 'once'));
+
+% The guards, in a folder of their own
+d = fullfile(tc.TestData.tmp, 'corecnn'); mkdir(fullfile(d, 'data')); mkdir(fullfile(d, 'results')); mkdir(fullfile(d, 'docs'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+CC = core_cnn_config();
+write_text(CC.protocol, 'protocol');
+x = 1; save('data/splits.mat', 'x');
+protocol_sha = 'other'; save(CC.model, 'protocol_sha');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:protocol_changed');
+protocol_sha = sha256_of(CC.protocol); save(CC.model, 'protocol_sha');
+verifyEqual(tc, core_stage_error(true).identifier, 'test:none');     % training only: the set is not touched
+verifyFalse(tc, isfile(CC.marker));
+if ~strcmp(kpi1_set(), 'fresh3')
+    verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:kpi1_set');
+    return
+end
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:hybrid');
+save(CC.hybrid_metrics, 'x');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:hybrid');
+save(CC.hybrid_pred, 'x');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:fresh3');
+save(CC.test, 'x');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:params');
+params = struct('a', 1); save('params.mat', 'params');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:params');
+params = struct('a', 2); save(CC.test_params, 'params');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:params');
+params = struct('a', 1); save(CC.test_params, 'params');
+pid = params_id(params);
+save('results/core_cnn.mat', 'x');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:read');
+delete('results/core_cnn.mat');
+write_text(CC.marker, 'x');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:started');
+delete(CC.marker);
+write_text('docs/core_cnn_read_p1.txt', sprintf('time x\nparams_id %s\n', pid));
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:recorded');
+verifyFalse(tc, isfile(CC.marker));
+movefile('docs/core_cnn_read_p1.txt', 'docs/core_cnn_read_p1_aborted_20261022_1200.txt');   % an aborted reading does not count
+ex = core_stage_error(false);                                    % passes every guard; the dummy set does not load
+verifyNotEqual(tc, ex.identifier, 'test:none');
+verifyTrue(tc, isfile(CC.marker));
+mk = fileread(CC.marker);
+verifyNotEmpty(tc, strfind(mk, ['params_id ' pid]));
+verifyNotEmpty(tc, strfind(mk, [CC.model ' sha256 ' sha256_of(CC.model)]));
+verifyNotEmpty(tc, strfind(mk, [CC.protocol ' sha256 ' protocol_sha]));
+verifyNotEmpty(tc, strfind(mk, ['hybrid_reading ' CC.hybrid_pred]));
+verifyNotEmpty(tc, regexp(mk, ['input test ' regexptranslate('escape', CC.test) ' bytes \d+ modified '], 'once'));
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:started');
+% A model older than the splits is not retrained once a reading started
+f = java.io.File(fullfile(d, CC.model)); f.setLastModified(java.lang.System.currentTimeMillis() - 3600e3);
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:read');
+% Nor once an aborted reading of this link model is recorded, nor over a smoke model
+delete(CC.marker);
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:read');
+smoke = true; save(CC.model, 'protocol_sha', 'smoke');          % newer than the splits, marked smoke
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:read');
+verifyEqual(tc, core_stage_error(false, true).identifier, 'test:none');   % a smoke run never reads
+verifyFalse(tc, isfile(CC.marker));
+end
+
+function ex = core_stage_error(CORE_CNN_TRAIN_ONLY, SMOKE, CORE_CNN_IN) %#ok<INUSD>
+% The error train_core_cnn stops with (test:none when it runs through); SMOKE as run_stage
+% smoke sets it; CORE_CNN_IN the inputs named elsewhere.
+if ~CORE_CNN_TRAIN_ONLY, clear CORE_CNN_TRAIN_ONLY; end
+if nargin < 2 || ~SMOKE, clear SMOKE; end
+if nargin < 3, clear CORE_CNN_IN; end
+ex = MException('test:none', 'no error');
+try
+    evalc('run(''train_core_cnn'')');
+catch ex
+end
+end
+
+function test_core_cnn_reading(tc)
+% Stage B3c end to end on synthetic splits, in a folder of its own: a smoke run trains and marks
+% a reduced model and never reads; with the mark taken off, the single reading writes every
+% output, its decisions, the hybrid's class on the same frames and the metrics agree with the
+% saved predictions, a frame of another label is left out, and neither a second reading nor
+% a retraining runs.
+assumeTrue(tc, license('test', 'Neural_Network_Toolbox') && ~isempty(ver('deeplearning')));
+assumeTrue(tc, strcmp(kpi1_set(), 'fresh3'));
+d = fullfile(tc.TestData.tmp, 'corecnn_read');
+for s = {'data', 'results', 'docs'}, mkdir(fullfile(d, s{1})); end
+c0 = cd(d); back = onCleanup(@() cd(c0));
+CC = core_cnn_config();
+write_text(CC.protocol, 'protocol');
+classes = {'none', 'jamming', 'path_loss', 'tone_jamming'};
+rng(4, 'twister');
+splits = struct('classes', {classes'}, 'train', core_synth(classes, [6 6 6], 4, 0), ...
+    'val', core_synth(classes, [3 3 3], 4, 1000)); %#ok<NASGU>
+save('data/splits.mat', 'splits');
+ex = core_stage_error(false, true);
+verifyEqual(tc, ex.identifier, 'test:none', ex.message);
+verifyTrue(tc, isfile(CC.model) && isfile('results/core_cnn_validation.txt') && isfile('results/core_cnn_training.png'));
+verifyFalse(tc, isfile(CC.marker));
+Mo = load(CC.model);
+verifyTrue(tc, Mo.smoke); verifyEqual(tc, Mo.schedules, 2); verifyTrue(tc, ismember(Mo.N, CC.NS));
+verifyEqual(tc, Mo.protocol_sha, sha256_of(CC.protocol));
+verifyEqual(tc, Mo.val.n_frames, [12 12 12]);
+smoke = false; save(CC.model, 'smoke', '-append');
+
+te = core_synth(classes, [4 4 4], 5, 5000);
+i = find(te.class_run == 4, 1); te.Y_frame(i) = 'none';          % one narrowband frame of another label
+splits = struct('classes', {classes'}, 'test', te); %#ok<NASGU>
+save(CC.test, 'splits');
+params = struct('a', 1); save('params.mat', 'params'); save(CC.test_params, 'params');
+yp = te.Y; yp(te.run == 5001) = 'path_loss';                      % the hybrid reads the first clean sub-run as path loss
+pred = struct('y_true', te.Y, 'y_pred', yp, 'run', te.run, 'pos', te.pos, 'rank', te.pos); %#ok<NASGU>
+save(CC.hybrid_pred, 'pred');
+metrics = struct('conf_mat', confusionmat(te.Y, yp), 'classes', {classes}, 'fusion_cycles', 2); %#ok<NASGU>
+save(CC.hybrid_metrics, 'metrics');
+
+ex = core_stage_error(false);
+verifyEqual(tc, ex.identifier, 'test:none', ex.message);
+for f = {CC.marker, 'results/core_cnn_predictions.mat', 'results/core_cnn.mat', 'results/core_cnn.txt', ...
+        'results/core_cnn_confusion.png', 'results/core_cnn_confusion_frame.png', 'results/core_cnn_ebno.png', ...
+        'results/core_cnn_jsr.png'}
+    verifyTrue(tc, isfile(f{1}), f{1});
+end
+P = load('results/core_cnn_predictions.mat').cpred; C = load('results/core_cnn.mat').core;
+verifyEqual(tc, accumarray(P.state, 1, [3 1])', [20 19 20]);
+verifyEqual(tc, C.left_out, [0 1 0]); verifyEqual(tc, C.n_runs, [4 4 4]);
+[~, yF] = max(P.probs, [], 2); verifyEqual(tc, P.core_frame, yF);
+[~, yW] = max(core_cnn_eval('logp', P.probs, P.run, P.pos, Mo.N), [], 2); verifyEqual(tc, P.core_window, yW);
+yH = P.state; yH(P.run == 5001) = 0; verifyEqual(tc, P.hybrid, yH);
+YP = [P.hybrid, P.core_window, P.core_frame];
+for r = 1:3
+    verifyEqual(tc, C.metrics{r}.cm, core_cnn_eval('metrics', P.state, YP(:, r), 3).cm);
+end
+verifyEqual(tc, C.metrics{1}.fa, 0.25, 'AbsTol', 1e-12); verifyEqual(tc, C.metrics{1}.fa_jam, 0);
+verifyEqual(tc, C.metrics{1}.recall, [0.75 1 1], 'AbsTol', 1e-12);
+verifyEqual(tc, C.verdicts{1, 4}, 'not met');
+verifyEqual(tc, C.boot.diff(1, :), [0 0]);
+verifyEqual(tc, C.N, Mo.N); verifyEqual(tc, C.hybrid_N, 2); verifyEqual(tc, C.hybrid_label_off, 0);
+verifyEqual(tc, C.ebno, [0 3]); verifyEqual(tc, C.levels{2}, [0 10]);
+txt = fileread('results/core_cnn.txt');
+verifyNotEmpty(tc, strfind(txt, 'macro-F1, three states (>= 85%)'));
+verifyNotEmpty(tc, strfind(txt, 'Paired difference of macro-F1'));
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:read');
+f = java.io.File(fullfile(d, CC.model)); f.setLastModified(java.lang.System.currentTimeMillis() - 3600e3);
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:read');   % never retrained over the reading
+end
+
+function test_core_cnn_no_b3r(tc)
+% Stage B3c without the hybrid's reading: the fourth test set is read only under a committed
+% docs/core_cnn_no_b3r.txt with every line, once, and this link model's params_id; an
+% untracked, changed or incomplete declaration, one of another link model, or a part of B3r's
+% reading beside it stops the stage before the marker. With B3r's reading the declaration is
+% not needed; the marker names the hybrid's reading or the declaration's commit.
+assumeTrue(tc, strcmp(kpi1_set(), 'fresh3'));
+[st, ~] = system('git --version'); assumeEqual(tc, st, 0, 'git is not on the path');
+d = fullfile(tc.TestData.tmp, 'corecnn_nob3r');
+for s = {'data', 'results', 'docs'}, mkdir(fullfile(d, s{1})); end
+c0 = cd(d); back = onCleanup(@() cd(c0));
+g = sprintf('git -C "%s" -c user.name=t -c user.email=t@t -c core.autocrlf=false ', d);
+verifyEqual(tc, system([g 'init -q']), 0);
+verifyEqual(tc, system([g 'config core.autocrlf false']), 0);
+CC = core_cnn_config();
+write_text(CC.protocol, 'protocol');
+x = 1; save('data/splits.mat', 'x');
+protocol_sha = sha256_of(CC.protocol); save(CC.model, 'protocol_sha');
+save(CC.test, 'x');
+params = struct('a', 1); save('params.mat', 'params'); save(CC.test_params, 'params');
+pid = params_id(params);
+dec = @(p) sprintf('no B3r before B3c\nprofile p1\ndate 2026-10-23\nreason profile 1 is not stopped\nparams_id %s\n', p);
+commit = @() system([g 'add -f docs/core_cnn_no_b3r.txt && ' g 'commit -q -m dec']);
+not_read = @(ex) ~any(strcmp(ex.identifier, {'test:none', 'train_core_cnn:hybrid', 'train_core_cnn:no_b3r'}));
+
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:hybrid');          % neither
+write_text(CC.no_b3r, dec(pid));
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:hybrid');          % untracked
+verifyEqual(tc, commit(), 0);
+ex = core_stage_error(false);                                                           % declared: past every guard
+verifyTrue(tc, not_read(ex), ex.identifier);
+verifyTrue(tc, isfile(CC.marker));
+[~, h] = system([g 'log -1 --format=%H -- docs/core_cnn_no_b3r.txt']);
+mk = fileread(CC.marker);
+verifyNotEmpty(tc, strfind(mk, sprintf('hybrid_reading none: %s commit %s sha256 %s date 2026-10-23', CC.no_b3r, ...
+    strtrim(h), sha256_of(CC.no_b3r))));
+verifyNotEmpty(tc, strfind(mk, ['input hybrid_pred ' CC.hybrid_pred ' none']));
+delete(CC.marker);
+write_text(CC.no_b3r, [dec(pid) 'x']);
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:hybrid');          % local change
+write_text(CC.no_b3r, strrep(dec(pid), 'reason profile 1 is not stopped', 'reason '));
+verifyEqual(tc, commit(), 0);
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:hybrid');          % no reason
+write_text(CC.no_b3r, [dec(pid) 'date 2026-10-24' newline]);
+verifyEqual(tc, commit(), 0);
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:hybrid');          % two dates
+write_text(CC.no_b3r, dec(repmat('0', 1, 32)));
+verifyEqual(tc, commit(), 0);
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:no_b3r');          % another link model
+verifyFalse(tc, isfile(CC.marker));
+write_text(CC.no_b3r, dec(pid));
+verifyEqual(tc, commit(), 0);
+save(CC.hybrid_metrics, 'x');
+verifyEqual(tc, core_stage_error(false).identifier, 'train_core_cnn:hybrid');          % a part of B3r's reading
+verifyFalse(tc, isfile(CC.marker));
+save(CC.hybrid_pred, 'x');
+ex = core_stage_error(false);                                                           % B3r's reading: the hybrid is read
+verifyTrue(tc, not_read(ex), ex.identifier);
+verifyNotEmpty(tc, strfind(fileread(CC.marker), ['hybrid_reading ' CC.hybrid_pred newline]));
+delete(CC.marker); delete(CC.no_b3r); verifyEqual(tc, system([g 'commit -q -a -m rm']), 0);
+ex = core_stage_error(false);                                                           % B3r alone, no declaration
+verifyTrue(tc, not_read(ex), ex.identifier);
+verifyTrue(tc, isfile(CC.marker));
+end
+
+function test_core_cnn_inputs(tc)
+% B3c's inputs: the working folder's own by default; CORE_CNN_IN names them elsewhere (relative
+% to the working folder, canonical), and the stage stops when the working folder lies in the
+% tree of such an input: its git checkout, else the folder above data/ or results/. The source
+% trees are listed once each; a copy inside the working folder adds none.
+CC = core_cnn_config();
+[IN, T] = core_cnn_inputs(CC);
+verifyEmpty(tc, T);
+for f = {'splits', 'params', 'test', 'test_params', 'hybrid_pred', 'hybrid_metrics'}
+    verifyEqual(tc, IN.(f{1}), CC.(f{1}), f{1});
+end
+b = fullfile(tc.TestData.tmp, 'corecnn_in');
+src = fullfile(b, 'p1'); mkdir(fullfile(src, '.git')); mkdir(fullfile(src, 'data'));
+x = 1; save(fullfile(src, 'data', 'splits.mat'), 'x');
+out = fullfile(b, 'iso'); mkdir(out);
+cn = @(p) char(java.io.File(p).getCanonicalPath());
+IN = core_cnn_inputs(CC, struct('splits', fullfile(src, 'data', 'splits.mat')), out);
+verifyEqual(tc, IN.splits, cn(fullfile(src, 'data', 'splits.mat')));
+verifyEqual(tc, IN.test, CC.test);
+IN = core_cnn_inputs(CC, struct('params', string(fullfile('..', 'p1', 'params.mat'))), out);   % relative to the working folder
+verifyEqual(tc, IN.params, cn(fullfile(src, 'params.mat')));
+in = struct('splits', fullfile(src, 'data', 'splits.mat'));
+iso = fullfile(src, 'results', 'b3c'); mkdir(iso);
+verifyError(tc, @() core_cnn_inputs(CC, in, iso), 'train_core_cnn:isolation');          % inside the source checkout
+verifyError(tc, @() core_cnn_inputs(CC, in, src), 'train_core_cnn:isolation');
+if ispc, verifyError(tc, @() core_cnn_inputs(CC, in, upper(iso)), 'train_core_cnn:isolation'); end
+s2 = fullfile(b, 'p3'); mkdir(fullfile(s2, 'data')); mkdir(fullfile(s2, 'w'));            % no git: the folder above data/
+verifyError(tc, @() core_cnn_inputs(CC, struct('test', fullfile(s2, 'data', 'splits_fresh3.mat')), fullfile(s2, 'w')), ...
+    'train_core_cnn:isolation');
+IN = core_cnn_inputs(CC, struct('test', fullfile(s2, 'data', 'splits_fresh3.mat')), out);
+verifyEqual(tc, IN.test, cn(fullfile(s2, 'data', 'splits_fresh3.mat')));
+[~, T] = core_cnn_inputs(CC, struct('splits', fullfile(src, 'data', 'splits.mat'), 'params', fullfile(src, 'params.mat'), ...
+    'test', fullfile(s2, 'data', 'splits_fresh3.mat')), out);
+verifyEqual(tc, T, {cn(src), cn(s2)});
+mkdir(fullfile(out, 'in'));                                                              % a copy inside the working folder
+[IN, T] = core_cnn_inputs(CC, struct('splits', fullfile(out, 'in', 'splits.mat')), out);
+verifyEqual(tc, IN.splits, cn(fullfile(out, 'in', 'splits.mat')));
+verifyEmpty(tc, T);
+verifyError(tc, @() core_cnn_inputs(CC, struct('split', 'a.mat'), out), 'train_core_cnn:inputs');
+verifyError(tc, @() core_cnn_inputs(CC, struct('splits', 1), out), 'train_core_cnn:inputs');
+verifyError(tc, @() core_cnn_inputs(CC, {'a.mat'}, out), 'train_core_cnn:inputs');
+end
+
+function test_core_cnn_isolated_reading(tc)
+% Stage B3c in a checkout of its own on another tree's inputs, without B3r: it trains and reads
+% from the source files given in CORE_CNN_IN and leaves them untouched; every output lands in
+% the working folder; the hybrid's slot stays empty (no metrics, NaN intervals, no paired
+% difference, no comparison line), the core CNN's figures agree with the saved predictions,
+% and the KPI line says that no hybrid reading came first.
+assumeTrue(tc, license('test', 'Neural_Network_Toolbox') && ~isempty(ver('deeplearning')));
+assumeTrue(tc, strcmp(kpi1_set(), 'fresh3'));
+[st, ~] = system('git --version'); assumeEqual(tc, st, 0, 'git is not on the path');
+b = fullfile(tc.TestData.tmp, 'corecnn_iso');
+src = fullfile(b, 'p1'); set4 = fullfile(b, 'set4'); w = fullfile(b, 'b3c');
+mkdir(fullfile(src, 'data')); mkdir(fullfile(set4, 'data')); mkdir(fullfile(w, 'docs'));
+CC = core_cnn_config();
+classes = {'none', 'jamming', 'path_loss', 'tone_jamming'};
+rng(4, 'twister');
+splits = struct('classes', {classes'}, 'train', core_synth(classes, [6 6 6], 4, 0), ...
+    'val', core_synth(classes, [3 3 3], 4, 1000)); %#ok<NASGU>
+save(fullfile(src, 'data', 'splits.mat'), 'splits');
+params = struct('a', 1); save(fullfile(src, 'params.mat'), 'params'); save(fullfile(set4, 'params.mat'), 'params');
+splits = struct('classes', {classes'}, 'test', core_synth(classes, [4 4 4], 5, 5000)); %#ok<NASGU>
+save(fullfile(set4, 'data', 'splits_fresh3.mat'), 'splits');
+in = struct('splits', fullfile(src, 'data', 'splits.mat'), 'params', fullfile(src, 'params.mat'), ...
+    'test', fullfile(set4, 'data', 'splits_fresh3.mat'), 'test_params', fullfile(set4, 'params.mat'), ...
+    'hybrid_pred', fullfile(src, 'results', 'detector_predictions_fresh3.mat'), ...
+    'hybrid_metrics', fullfile(src, 'results', 'eval_detector_metrics_fresh3.mat'));
+listing = @() cellfun(@(f) sprintf('%s|%d|%.10f', f, dir(f).bytes, dir(f).datenum), ...
+    {in.splits, in.params, in.test, in.test_params}, 'UniformOutput', false);
+before = listing();
+c0 = cd(w); back = onCleanup(@() cd(c0));
+g = sprintf('git -C "%s" -c user.name=t -c user.email=t@t -c core.autocrlf=false ', w);
+verifyEqual(tc, system([g 'init -q']), 0);
+verifyEqual(tc, system([g 'config core.autocrlf false']), 0);
+write_text(CC.protocol, 'protocol');
+write_text(CC.no_b3r, sprintf('no B3r before B3c\ndate 2026-10-23\nreason profile 1 is not stopped\nparams_id %s\n', ...
+    params_id(params)));
+verifyEqual(tc, system([g 'add -f docs && ' g 'commit -q -m dec']), 0);
+
+verifyError(tc, @() core_cnn_inputs(CC, in, fullfile(src, 'data')), 'train_core_cnn:isolation');
+ex = core_stage_error(false, true, in);                                  % smoke: trains on the source's splits
+verifyEqual(tc, ex.identifier, 'test:none', ex.message);
+verifyTrue(tc, isfile(CC.model) && isfile('results/core_cnn_validation.txt'));
+verifyNotEmpty(tc, strfind(fileread('results/core_cnn_validation.txt'), ['validation split of ' core_cnn_inputs(CC, in, w).splits]));
+smoke = false; save(CC.model, 'smoke', '-append');
+verifyEqual(tc, load(CC.model, 'train_splits').train_splits, core_cnn_inputs(CC, in, w).splits);
+% B3r's reading in a source tree, not named in CORE_CNN_IN: no reading without B3r
+in2 = rmfield(in, {'hybrid_pred', 'hybrid_metrics'});
+mkdir(fullfile(src, 'results')); x = 1; save(fullfile(src, 'results', 'eval_detector_metrics_fresh3.mat'), 'x');
+verifyEqual(tc, core_stage_error(false, false, in2).identifier, 'train_core_cnn:hybrid');
+verifyFalse(tc, isfile(CC.marker));
+delete(fullfile(src, 'results', 'eval_detector_metrics_fresh3.mat')); rmdir(fullfile(src, 'results'));
+% Another training split than the model's: not read
+oth = fullfile(b, 'other', 'data'); mkdir(oth); copyfile(in.splits, oth);
+f = java.io.File(fullfile(oth, 'splits.mat')); f.setLastModified(java.lang.System.currentTimeMillis() - 3600e3);
+verifyEqual(tc, core_stage_error(false, false, setfield(in, 'splits', fullfile(oth, 'splits.mat'))).identifier, ...
+    'train_core_cnn:train_splits'); %#ok<SFLD>
+verifyFalse(tc, isfile(CC.marker));
+ex = core_stage_error(false, false, in);
+verifyEqual(tc, ex.identifier, 'test:none', ex.message);
+for f = {CC.marker, 'results/core_cnn_predictions.mat', 'results/core_cnn.mat', 'results/core_cnn.txt', ...
+        'results/core_cnn_confusion.png', 'results/core_cnn_confusion_frame.png', 'results/core_cnn_ebno.png', ...
+        'results/core_cnn_jsr.png'}
+    verifyTrue(tc, isfile(fullfile(w, f{1})), f{1});
+end
+verifyEqual(tc, listing(), before);                                        % the source files are untouched
+verifyEqual(tc, core_files(src), {'params.mat', 'splits.mat'});        % nothing written there
+verifyEqual(tc, core_files(set4), {'params.mat', 'splits_fresh3.mat'});
+P = load('results/core_cnn_predictions.mat').cpred; C = load('results/core_cnn.mat').core;
+verifyFalse(tc, C.hybrid); verifyEmpty(tc, C.metrics{1}); verifyEmpty(tc, C.hybrid_view_all);
+verifyTrue(tc, all(isnan(C.boot.macro_f1(1, :)))); verifyTrue(tc, all(isnan(C.boot.diff(:))));
+verifyFalse(tc, any(isnan(C.boot.macro_f1(2, :))));
+verifyEqual(tc, C.verdicts(1, :), repmat({'no hybrid reading'}, 1, 4));
+verifyTrue(tc, all(isnan(P.hybrid)));
+verifyEqual(tc, C.metrics{2}.cm, core_cnn_eval('metrics', P.state, P.core_window, 3).cm);
+verifyEqual(tc, C.metrics{3}.cm, core_cnn_eval('metrics', P.state, P.core_frame, 3).cm);
+IN = core_cnn_inputs(CC, in, w);
+verifyEqual(tc, C.test_set, IN.test); verifyEqual(tc, C.inputs, IN);
+verifyEqual(tc, C.no_b3r.date, '2026-10-23');
+txt = fileread('results/core_cnn.txt');
+verifyNotEmpty(tc, strfind(txt, 'Hybrid: no reading of this set before this one (docs/core_cnn_no_b3r.txt, 2026-10-23: profile 1 is not stopped)'));
+verifyEmpty(tc, strfind(txt, 'Paired difference'));
+verifyEmpty(tc, strfind(txt, 'hybrid (monitor class)'));
+mk = fileread(CC.marker);
+verifyNotEmpty(tc, strfind(mk, ['input splits ' IN.splits ' bytes ']));
+verifyNotEmpty(tc, strfind(mk, 'hybrid_reading none: docs/core_cnn_no_b3r.txt commit '));
+verifyEqual(tc, core_stage_error(false, false, in).identifier, 'train_core_cnn:read');
+end
+
+function n = core_files(d)
+% The names of the files under a folder, sorted.
+f = dir(fullfile(d, '**', '*'));
+n = sort({f(~[f.isdir]).name});
+end
+
+function S = core_synth(classes, nr, F, run0)
+% A synthetic split: nr(s) sub-runs of F frames of each state (img_of images; clean none,
+% narrowband tone_jamming, wideband jamming), every sub-run with its positions shuffled,
+% Eb/N0 0 or 3 dB, JSR 0 or 10 dB, and one path-loss sub-run.
+cls = [1 4 2];
+X = zeros(128, 128, 1, 0, 'single'); c = []; run = []; pos = []; eb = []; lv = [];
+k = run0;
+for s = 1:3
+    for r = 1:nr(s)
+        k = k + 1;
+        if s == 1, l = NaN; else, l = 10 * (r > nr(s) / 2); end
+        X = cat(4, X, img_of(s, F)); c = [c; cls(s) * ones(F, 1)]; run = [run; k * ones(F, 1)]; %#ok<AGROW>
+        pos = [pos; randperm(F)']; eb = [eb; 3 * mod(r, 2) * ones(F, 1)]; lv = [lv; l * ones(F, 1)]; %#ok<AGROW>
+    end
+end
+X = cat(4, X, img_of(1, F)); c = [c; 3 * ones(F, 1)]; run = [run; (k + 1) * ones(F, 1)];
+pos = [pos; (1:F)']; eb = [eb; zeros(F, 1)]; lv = [lv; 10 * ones(F, 1)];
+S = struct('X', X, 'Y', categorical(c, 1:4, classes), 'Y_frame', categorical(c, 1:4, classes), 'class_run', c, ...
+    'run', run, 'pos', pos, 'level', lv, 'ebno', eb);
 end

@@ -12,7 +12,12 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %   opt    fixed (action index, 'fixed'); table (1 x classes action index) and
 %          table_unknown (action for 'unknown'), 'table' kinds; rs (RandStream, 'random');
 %          monitor (alarm_mode, confirm, drop_db and any other decision-time setting,
-%          decision_settings.m): the policy's own settings in place of PP's
+%          decision_settings.m): the policy's own settings in place of PP's; core (rule,
+%          rule_esc, blind_esc): the core action set C.core_actions, the rule from
+%          rule_core_policy.m, the escalation over C.ladder_core and the link-budget match
+%          over rate_reduce alone; PP.core_wide, when set, the core rule's action for the
+%          class jamming (rule_core_policy.m wide_action); PP.core_nb, when set, its action for
+%          the class noise_burst (burst_action)
 %
 %   Link monitor, alarm confirmation and the agent's observation history:
 %   policy_monitor.m (shared). Timing constants: decision_config.m.
@@ -22,7 +27,8 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %             threshold PP.q_thr; that branch on or off, PP.rule_slot), the monitor's drop
 %             alarm and the link budget (its drop without the configurations' known gains,
 %             the configuration in use and the gains of power_control, rate_reduce and
-%             both, config_gain_db.m) -> rule_based_policy.m
+%             both, config_gain_db.m) -> rule_based_policy.m; PP.rule_nb, when set, the answer
+%             to the class noise_burst chosen on validation (burst_action, train_dqn.m)
 %   table     detected class -> the configuration with the best mean reward for
 %             that threat on the train pools (policy_table.m); a 'none' or
 %             'unknown' class on a degraded link takes table_unknown
@@ -35,7 +41,10 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %   C.dwell of the last C.dwell_n cycles (M-of-N integration, Barajas et al.; an
 %   intermittent threat alternates its cycles' proposals), unless the configuration in use
 %   already holds its elements and at least its known gain (no regress to a weaker one) or
-%   the escalation tried it in this incident
+%   the escalation tried it in this incident. The tried check is the group dwell's: with
+%   'run' the class answer can commit again after an escalation left it, and train_dqn.m
+%   picks between the two dwells on validation (rule + escalation), which every rule kind,
+%   the core and blind ones included, then runs (decision_settings.m)
 %   dqn       argmax of the Q-network over the configurations allowed by the
 %             shield (policy_mask.m); switching costs are part of its reward
 %   *_esc     escalation: move to the next configuration not yet tried in this
@@ -55,8 +64,9 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %             with the smallest known gain covering the drop (rule_based_policy.m's budget
 %             match), if not tried yet
 %   blind_esc the rule with escalation without the detector: every cycle reads as
-%             'unknown', so the alarm comes from measured degradation only (what the
-%             detection adds to an adaptive recovery)
+%             'unknown' whatever PP.unk_mode (the fused class from the receiver cues and
+%             the lost-branch latch included), so the alarm comes from measured
+%             degradation only (what the detection adds to an adaptive recovery)
 %   random, fixed: reference policies, no monitor gating ('fixed' at no_action is
 %   the link that does not respond)
 %
@@ -68,11 +78,16 @@ NE = numel(cfg); A = PP.actions; nA = numel(A);
 na = find(strcmp(A, 'no_action'));
 if startsWith(kind, 'blind')
     obs.probs(:) = 0; obs.unknown(:) = true; obs.maha = -Inf(size(obs.unknown));
+    PP.unk_mode = 'all';                              % no class survives, fused or latched
     kind = strrep(kind, 'blind', 'rule');
 end
 if isempty(mem), mem = policy_monitor('init', NE, nA); end
 [mem, M] = policy_monitor('update', mem, obs, PP, cfg);
 base = erase(kind, '_esc');
+core = isfield(opt, 'core') && opt.core;
+if core && ~strcmp(base, 'rule')
+    error('policy_decide:core', 'policy_decide: the core action set is a rule option, not of %s', kind);
+end
 q = [];
 switch base
     case 'dqn'
@@ -90,16 +105,23 @@ switch base
         qt = NaN; if isfield(PP, 'q_thr') && ~isempty(PP.q_thr), qt = PP.q_thr; end
         mt = C.rule_mmse_db; if isfield(PP, 'rule_mmse_db') && ~isempty(PP.rule_mmse_db), mt = PP.rule_mmse_db; end
         so = true; if isfield(PP, 'rule_slot') && ~isempty(PP.rule_slot), so = PP.rule_slot; end
+        cw = ''; if isfield(PP, 'core_wide') && ~isempty(PP.core_wide), cw = PP.core_wide; end
+        cn = ''; if isfield(PP, 'core_nb') && ~isempty(PP.core_nb), cn = PP.core_nb; end
+        nb = {}; if isfield(PP, 'rule_nb') && ~isempty(PP.rule_nb), nb = PP.rule_nb; end
         grp = isfield(PP, 'rule_dwell') && strcmp(PP.rule_dwell, 'group');
         if grp && (~isfield(mem, 'ph') || size(mem.ph, 1) ~= NE), mem.ph = zeros(NE, C.dwell_n); end
         gk = config_gain_db(PP); [gm, gid] = action_groups(A);
         lb = find(ismember(A, {'power_control', 'rate_reduce', 'rate_reduce+power_control'}));   % link-budget configurations
+        if core, lb = find(strcmp(A, 'rate_reduce')); end
         bud = struct('drop_db', 0, 'current', '', 'current_db', 0, 'names', {A(lb)}, 'gain_db', gk(lb));
         for i = 1:NE
-            if strcmp(base, 'rule')
+            if core
+                bud.drop_db = M.drop(i); bud.current = A{cfg(i)}; bud.current_db = gk(cfg(i));
+                p = find(strcmp(A, rule_core_policy(M.cls{i}, M.degraded(i), qi(i), qt, M.drop_alarm(i), bud, so, cw, cn)), 1);
+            elseif strcmp(base, 'rule')
                 bud.drop_db = M.drop(i); bud.current = A{cfg(i)}; bud.current_db = gk(cfg(i));
                 p = find(strcmp(A, rule_based_policy(M.cls{i}, M.degraded(i), gain(i), qi(i), qt, M.drop_alarm(i), bud, mt, ...
-                    so)), 1);
+                    so, nb)), 1);
             else
                 p = table_action(M.cls{i}, M.degraded(i), PP, opt, na);
             end
@@ -133,6 +155,7 @@ if endsWith(kind, '_esc')
     ed = isfield(PP, 'esc_drop') && ~isempty(PP.esc_drop) && PP.esc_drop;
     gk = config_gain_db(PP);
     lb = find(ismember(A, {'power_control', 'rate_reduce', 'rate_reduce+power_control'}));
+    if core, ladder = cellfun(@(x) find(strcmp(A, x)), C.ladder_core); lb = find(strcmp(A, 'rate_reduce')); end
     for i = 1:NE
         mem.tried(i, cfg(i)) = true;
         if cfg(i) == na, stuck = mem.conf_n(i) >= C.esc; else, stuck = mem.deg_n(i) >= C.esc; end

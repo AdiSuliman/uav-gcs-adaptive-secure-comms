@@ -6,7 +6,8 @@ function PP = decision_settings(PP, S)
 %               unknown-threat threshold and its validation retention), unk_mode ('all',
 %               'nonhostile': the classes the unknown-threat flag overrides)
 %   rule, table rule_mmse_db (the nulling threshold), rule_slot (the quiet-slot branch),
-%               rule_dwell ('run', 'group': policy_decide.m)
+%               rule_dwell ('run', 'group': policy_decide.m), rule_nb (the rule's answer to a
+%               noise burst, {not separable, separable}), core_nb (the core rule's)
 %   escalation  esc_drop (an escalation on a confirmed drop alarm read as none)
 %   S: any struct with some of these fields (a field absent keeps PP's; an empty drop_db,
 %   maha_thr, alarm_mode or confirm keeps PP's), or data/trained_dqn.mat loaded: its
@@ -15,7 +16,7 @@ function PP = decision_settings(PP, S)
 if isfield(S, 'dec') && isstruct(S.dec), S = S.dec; end
 keep = {'alarm_mode', 'confirm', 'drop_db', 'maha_thr'};
 for f = {'alarm_mode', 'confirm', 'drop_db', 'confirm_sweep', 'maha_thr', 'unk_retain', 'unk_mode', ...
-        'rule_mmse_db', 'rule_slot', 'rule_dwell', 'esc_drop'}
+        'rule_mmse_db', 'rule_slot', 'rule_dwell', 'esc_drop', 'rule_nb', 'core_nb'}
     if ~isfield(S, f{1}) || (isempty(S.(f{1})) && ismember(f{1}, keep)), continue; end
     PP.(f{1}) = S.(f{1});
 end

@@ -47,6 +47,12 @@ C.ladder = {'spatial_diversity+power_control', 'channel_switch+spatial_diversity
             'freq_diversity+power_control+fec_interleave', 'channel_switch+rate_reduce+power_control', ...
             'spatial_diversity+rate_reduce+power_control', ...
             'freq_diversity+spatial_diversity+power_control+fec_interleave'};   % rule escalation, in order
+% Core action set of the revised proposal (its predefined actions: channel switching and
+% transmission-rate adaptation; rule_core_policy.m) and its escalation: first the
+% configuration that holds both core elements, so a failed one gains the element it lacks,
+% then the remaining ones
+C.core_actions = {'no_action', 'channel_switch', 'rate_reduce', 'channel_switch+rate_reduce'};
+C.ladder_core  = {'channel_switch+rate_reduce', 'rate_reduce', 'channel_switch'};
 
 % Follower jammer (link_env.m): cycles it needs to re-acquire the channel after a
 % hop, drawn per training and validation episode; 0 = a single-channel follower on
