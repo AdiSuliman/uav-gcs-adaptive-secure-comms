@@ -22,11 +22,14 @@ function R = dev_fec_burst(stage, out, rev)
 %        event of the coded link, packet_share.m) more than the D78 decoder; the lowest
 %        packet loss pooled over the intermittent points (noise bursts, sweeping, reactive,
 %        WLAN), ties to the earlier
-%     4. adopted only when: the clean floor at 9 dB matches the mean residual within 1 dB
-%        (median over the codewords); J4 at 4 and 10 dB under no_action decodes, packet loss
-%        <= 2 x that of the clean link at 9 dB (its loss floored at one packet); the random
-%        jammer at duty 0.775 under no_action does not decode at 10 dB or more (capacity
-%        below rate 1/2 there; at 4 dB MRC can lift it above, so it is reported only)
+%     4. adopted only when (dev_fec_gates.m): the clean floor at 9 dB matches the mean
+%        residual within 1 dB (median over the codewords); J4 at 4 dB under no_action
+%        decodes, packet loss <= 2 x that of the clean link at 9 dB (its loss floored at one
+%        packet); J4 at 10 dB under no_action loses more than Q/2 packets fewer than the D78
+%        decoder (the cutoff rate R0(1) there is at the edge of the K = 7 code, so its loss is
+%        reported beside capacity and R0(1), McEliece and Stark 1984, Sec. IV and VII); the
+%        random jammer at duty 0.775 under no_action does not decode at 10 dB or more
+%        (capacity below rate 1/2 there; at 4 dB MRC can lift it above, so it is reported only)
 %   rev names the decisions entry. R: the readings, the choice (rx, the profile.json value)
 %   and adopt; saves <out>/dev_C_select.mat and prints the JSON of profile.json's fec_rx
 %   ("d78" when not adopted).
@@ -187,17 +190,13 @@ best = [];
 if ~isempty(cand), [~, j] = min(tot(cand)); best = cand(j); end   % min takes the first of equals: the tie order
 % 4. physics checks on the chosen variant
 nm = {D.name}; noact = strcmp({D.config}, 'no_action');
-i9 = find(strcmp(nm, 'clean_no_action') & [D.ebno] == 9, 1);
 ok_floor = abs(floor_db) <= 1;
-ok_j4 = false; dec775 = false;
+ok_j4 = false; ok_j4_10 = false; dec775 = false;
 if ~isempty(best)
-    lim = 2 * max(lost(best, i9) / npk(i9), 1 / npk(i9));
-    ij4 = find(noact & startsWith(nm, 'nb_j4_') & ismember([D.level], [4 10]));
-    ok_j4 = all(lost(best, ij4) ./ npk(ij4) <= lim);
-    i775 = find(noact & startsWith(nm, 'nb_r775_') & [D.level] >= 10);
-    dec775 = any(lost(best, i775) ./ npk(i775) <= lim);
+    G = dev_fec_gates(lost(best, :), rlost, npk, nm, [D.level], {D.config}, [D.ebno], Q);
+    ok_j4 = G.j4; ok_j4_10 = G.j4_10; dec775 = G.dec775;
 end
-adopt = ~isempty(best) && ok_floor && ok_j4 && ~dec775;
+adopt = ~isempty(best) && ok_floor && ok_j4 && ok_j4_10 && ~dec775;
 % report
 fprintf('dev set C: %d points, %d flights each\n', nP, numel(D(1).T));
 fprintf('c (h 0, 1): %s, clean flagged share %s; thr %.2f; clean floor / mean residual at 9 dB %+.2f dB\n', ...
@@ -214,24 +213,28 @@ if ~isempty(best)
         fprintf('%-34s %3d %8d %8d %10.2e %10.2e\n', nm{i}, D(i).ebno, rlost(i), lost(best, i), rber(i), dber(best, i));
     end
     CAP = {'j4', [0.82 0.67 0.54 0.38 0.24]; 'r50', [0.62 0.53 0.51 0.50 0.50]; 'r775', [0.41 0.28 0.24 0.23 0.23]};
-    fprintf('\nno_action, decoded BER beside the capacity per coded bit (single branch, ideal interleaving and JSI; rate 0.503)\n');
+    LV = [4 10 16 23 30];
+    fprintf(['\nno_action, packets lost and decoded BER beside the capacity (3.7) and the cutoff rate R0(1) (4.9) per\n' ...
+        'coded bit (McEliece and Stark 1984; single branch in-band, ideal interleaving and JSI; rate 0.503)\n']);
     for k = 1:size(CAP, 1)
-        for Lv = [4 10 16 23 30]
+        R0 = nb_cutoff_rate(CAP{k, 1}, LV);
+        for Lv = LV
             i = find(noact & strcmp(nm, sprintf('nb_%s_%02d_no_action', CAP{k, 1}, Lv)), 1);
-            fprintf('  %-5s %2d dB: capacity %.2f | BER D78 %.2e, JSI %.2e\n', CAP{k, 1}, Lv, CAP{k, 2}(Lv == [4 10 16 23 30]), ...
-                rber(i), dber(best, i));
+            fprintf('  %-5s %2d dB: capacity %.2f, R0 %.2f | lost D78 %3d, JSI %3d of %3d | BER D78 %.2e, JSI %.2e\n', ...
+                CAP{k, 1}, Lv, CAP{k, 2}(Lv == LV), R0(Lv == LV), rlost(i), lost(best, i), npk(i), rber(i), dber(best, i));
         end
     end
 end
-fprintf('\nchecks: floor %s, J4 4-10 dB decodes %s, random 0.775 >= 10 dB does not decode %s -> %s\n', ...
-    pf(ok_floor), pf(ok_j4), pf(~dec775), ternary(adopt, 'ADOPT', 'NOT ADOPTED: profile.json fec_rx "d78"'));
+fprintf(['\nchecks: floor %s, J4 4 dB decodes %s, J4 10 dB loses more than Q/2 packets fewer than D78 %s, ' ...
+    'random 0.775 >= 10 dB does not decode %s -> %s\n'], pf(ok_floor), pf(ok_j4), pf(ok_j4_10), pf(~dec775), ...
+    ternary(adopt, 'ADOPT', 'NOT ADOPTED: profile.json fec_rx "d78"'));
 if dec775, fprintf('STOP: the random jammer at duty 0.775 decodes where capacity is below the rate; look before anything else\n'); end
 choice = 'd78';
 if adopt, choice = rx{best}; if ~strcmp(choice.frame, 'c'), choice = rmfield(choice, {'thr', 'flag_clean'}); end, end
 js = jsonencode(struct('fec_rx', choice));
 fprintf('profile.json: %s\n', js);
 R = struct('V', V, 'lost', lost, 'npk', npk, 'dber', dber, 'rlost', rlost, 'rber', rber, 'qual', qual, 'tot', tot, ...
-    'c', c, 'flag_clean', fc, 'thr', thr, 'floor_db', floor_db, 'best', best, 'ok_floor', ok_floor, 'ok_j4', ok_j4, ...
+    'c', c, 'flag_clean', fc, 'thr', thr, 'floor_db', floor_db, 'best', best, 'ok_floor', ok_floor, 'ok_j4', ok_j4, 'ok_j4_10', ok_j4_10, ...
     'dec775', dec775, 'adopt', adopt, 'json', js, 'names', {nm}, 'created', datestr(now));
 R.choice = choice;
 save(fullfile(out, 'dev_C_select.mat'), 'R');

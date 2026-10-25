@@ -2902,6 +2902,63 @@ for L = [4 16 30]
 end
 end
 
+function test_dev_fec_gates(tc)
+% The adoption checks of dev set C (dev_fec_gates.m, dev_fec_burst.m select step 4): J4 at
+% 4 dB under no_action within 2 x the clean link's loss at 9 dB, floored at one packet; J4
+% at 10 dB under no_action more than Q/2 packets below the D78 decoder's loss, not held to
+% the clean link; the random jammer at duty 0.775 under no_action flagged when it decodes at
+% 10 dB or more, never at 4 dB. The select step adopts only with every check.
+nm = {'clean_no_action', 'clean_no_action', 'nb_j4_04_no_action', 'nb_j4_04_power_control', 'nb_j4_10_no_action', ...
+    'nb_r775_04_no_action', 'nb_r775_10_no_action', 'nb_r775_30_no_action', 'd78_j16_mmse'};
+lv = [0 0 4 4 10 4 10 30 16];
+cf = {'no_action', 'no_action', 'no_action', 'power_control', 'no_action', 'no_action', 'no_action', 'no_action', ''};
+eb = [3 9 9 9 9 9 9 9 6];
+npk = 600 * ones(1, 9); Q = 4;
+lost = [300 0 2 50 40 0 600 600 0];
+rl = [300 0 30 50 43 0 600 600 0];
+g = @(x, r) dev_fec_gates(x, r, npk, nm, lv, cf, eb, Q);
+G = g(lost, rl);
+verifyEqual(tc, G.lim, 2 / 600, 'AbsTol', 1e-15);                 % no clean loss at 9 dB: one packet, x 2
+verifyTrue(tc, G.j4); verifyTrue(tc, G.j4_10); verifyFalse(tc, G.dec775);
+x = lost; x(3) = 3; verifyFalse(tc, g(x, rl).j4);                   % 3 of 600 above the 2 allowed
+x = lost; x(4) = 600; verifyTrue(tc, g(x, rl).j4);                  % only no_action counts
+x = lost; x(1) = 0; x(2) = 6; x(3) = 12; G = g(x, rl);              % the clean link at 9 dB, not at 3 dB
+verifyEqual(tc, G.lim, 12 / 600, 'AbsTol', 1e-15); verifyTrue(tc, G.j4);
+x = lost; x(5) = 41; verifyFalse(tc, g(x, rl).j4_10);               % exactly Q/2 fewer than D78: not more
+x = lost; x(5) = 38; verifyTrue(tc, g(x, rl).j4_10);
+x = lost; x(5) = 1; r = rl; r(5) = 2; verifyFalse(tc, g(x, r).j4_10);   % within the clean bound, but no gain over D78
+x = lost; x(7) = 1; verifyTrue(tc, g(x, rl).dec775);                % decodes at 10 dB
+x = lost; x(8) = 0; verifyTrue(tc, g(x, rl).dec775);                % or at 30 dB
+verifyFalse(tc, g(lost, rl).dec775);                                % at 4 dB it is reported only
+src = fileread(which('dev_fec_burst'));
+verifyNotEmpty(tc, strfind(src, 'G = dev_fec_gates(lost(best, :), rlost, npk, nm, [D.level], {D.config}, [D.ebno], Q);'));
+verifyNotEmpty(tc, strfind(src, 'adopt = ~isempty(best) && ok_floor && ok_j4 && ok_j4_10 && ~dec775;'));
+verifyNotEmpty(tc, strfind(src, 'R0 = nb_cutoff_rate(CAP{k, 1}, LV);'));
+verifyNotEmpty(tc, strfind(src, 'rlost(i), lost(best, i), npk(i), rber(i), dber(best, i)'));   % the loss beside C and R0
+end
+
+function test_nb_cutoff_rate(tc)
+% The cutoff rate R0(1) with ideal per-symbol state information in the dev set C table
+% (nb_cutoff_rate.m): R0(1) = -log2 E{2^-R0_s} (McEliece and Stark 1984, (4.9)), BPSK rails
+% at Eb/N0 9 dB: the values of the protocol's section 1, our own calculation from the
+% model's parameters; without a jammer the rail's own R0; never above the states' mean R0
+% (Jensen); falling with the level; an unknown pattern refused.
+LV = [4 10 16 23 30];
+verifyEqual(tc, nb_cutoff_rate('j4', LV), [0.733066 0.563443 0.417538 0.280687 0.186495], 'AbsTol', 1e-5);
+verifyEqual(tc, nb_cutoff_rate('r50', LV), [0.502324 0.438361 0.420868 0.416067 0.415104], 'AbsTol', 1e-5);
+verifyEqual(tc, nb_cutoff_rate('r775', LV), [0.287797 0.202974 0.179985 0.173692 0.172430], 'AbsTol', 1e-5);
+r0 = 1 - log2(1 + exp(-10^1.2 / 2));
+for k = {'j4', 'r50', 'r775'}
+    verifyEqual(tc, nb_cutoff_rate(k{1}, -200), r0, 'AbsTol', 1e-12, k{1});
+    R = nb_cutoff_rate(k{1}, 0:2:40);
+    verifyTrue(tc, all(diff(R) < 0), k{1});
+end
+J = 10;                                                              % 10 dB, random jammer at duty 0.775
+r0s = @(v) 1 - log2(1 + exp(-1 ./ (2 * v)));
+verifyLessThanOrEqual(tc, nb_cutoff_rate('r775', 10), 0.225 * r0s(10^-1.2) + 0.775 * r0s(10^-1.2 + J));
+verifyError(tc, @() nb_cutoff_rate('r60', 10), 'nb_cutoff_rate:pattern');
+end
+
 function J = jsi_for(z, p, R, pe)
 % JSI inputs of a run without delay (closed_loop_truth.m aligns them by delay_bits).
 J = jsi_inputs(z, p, R.h); J.rx = R; J.pe = pe;
