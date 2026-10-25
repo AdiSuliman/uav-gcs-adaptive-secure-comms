@@ -10055,11 +10055,15 @@ end
 
 function d = parent_copy(tc, rel, rev)
 % The file rel as commit rev holds it (default this branch's parent, lect-kpi 394d4da), alone in
-% a folder.
+% a folder. An export without .git (the deploy queue's) reads the commit from the repository named
+% by V7_GIT_REPO.
 if nargin < 3, rev = '394d4da'; end
 d = tempname; mkdir(d);
 [~, nm, ext] = fileparts(rel);
-[st, out] = system(sprintf('git --no-optional-locks -C "%s" show %s:%s > "%s"', tc.TestData.root, rev, rel, ...
+repo = tc.TestData.root;
+[sg, ~] = system(sprintf('git --no-optional-locks -C "%s" rev-parse --git-dir', repo));
+if sg ~= 0 && ~isempty(getenv('V7_GIT_REPO')), repo = getenv('V7_GIT_REPO'); end
+[st, out] = system(sprintf('git --no-optional-locks -C "%s" show %s:%s > "%s"', repo, rev, rel, ...
     fullfile(d, [nm ext])));
 assertEqual(tc, st, 0, sprintf('git show %s:%s failed: %s', rev, rel, out));
 end
