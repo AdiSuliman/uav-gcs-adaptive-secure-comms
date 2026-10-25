@@ -12,6 +12,14 @@ C.win        = 5;           % frames of the estimated-BER and packet-loss window
 C.deg_floor  = 1e-4;        % smallest clean reference of the estimated BER
 C.heal       = 5;           % healthy cycles that close an incident (tried list reset)
 C.confirm    = [2 2];       % alarm confirmation m-of-n (consecutive detections, Barajas et al.)
+C.monitors   = {'class_drop 3/3', 'class_drop 2/2', 'class_drop 4/5', 'class_drop 5/5'};   % C2's monitor grid (alarm, m/n),
+                            % each with its own drop threshold from choose_drop_threshold.m
+C.drop_steps = [-2 0 2];    % C2's drop thresholds around each monitor's [dB; the CUSUM: one grid step each way]
+C.confirm_sweep = [2 6];    % the sweeping jammer's own confirmation, k of the last n cycles read as it: two passes
+                            % lie at most ceil(83.5 / 20) = 5 cycles apart (its period up to 83.5 ms, Liu et al.'s
+                            % sweep rate over the 2.4 GHz band, init_params.m; 20 ms cycles), so n = 6 holds two
+                            % (k-out-of-n detection of a swept jammer, Norouzi et al. 2006); adopted on
+                            % validation (choose_drop_threshold.m)
 C.drop_db    = 4;           % default Eb/N0-estimate drop that confirms path_loss; the deployed value comes from choose_drop_threshold.m
 C.cusum_win  = 3;           % cycles of the window-limited CUSUM's post-change estimate (drop_cusum.m): the monitor's 3-cycle window
 C.fec_frames = 4;           % frames of a coded packet's codeword when the pools do not record it (init_params.m fec_frames);
@@ -26,7 +34,9 @@ C.period_ms = 20;
 
 % Rule and table policies (policy_decide.m, rule_based_policy.m); the hold binds
 % the DQN too, through the shield (policy_mask.m)
-C.dwell = 2;                % consecutive cycles a proposal must persist
+C.dwell = 2;                % consecutive cycles a proposal must persist ('group' dwell: proposals of
+                            % its group among the last C.dwell_n, PP.rule_dwell, policy_decide.m)
+C.dwell_n = 4;
 C.hold  = 3;                % cycles after a change before the next one
 C.esc   = 3;                % escalation: degraded cycles in an applied configuration, or confirmed-alarm cycles at no_action
 C.rule_mmse_db = 6;         % predicted MMSE gain (mmse_predict.m) from which the rule also nulls the interferer;
@@ -37,6 +47,12 @@ C.ladder = {'spatial_diversity+power_control', 'channel_switch+spatial_diversity
             'freq_diversity+power_control+fec_interleave', 'channel_switch+rate_reduce+power_control', ...
             'spatial_diversity+rate_reduce+power_control', ...
             'freq_diversity+spatial_diversity+power_control+fec_interleave'};   % rule escalation, in order
+% Core action set of the revised proposal (its predefined actions: channel switching and
+% transmission-rate adaptation; rule_core_policy.m) and its escalation: first the
+% configuration that holds both core elements, so a failed one gains the element it lacks,
+% then the remaining ones
+C.core_actions = {'no_action', 'channel_switch', 'rate_reduce', 'channel_switch+rate_reduce'};
+C.ladder_core  = {'channel_switch+rate_reduce', 'rate_reduce', 'channel_switch'};
 
 % Follower jammer (link_env.m): cycles it needs to re-acquire the channel after a
 % hop, drawn per training and validation episode; 0 = a single-channel follower on
@@ -55,7 +71,7 @@ C.w_power    = 10;          % per +6 dB of transmit power
 C.w_mmse     = 2;           % adaptive combining (processing, pilots)
 C.w_switch   = 5;           % per configuration change or channel hop
 C.w_false    = 20;          % per change on a healthy link
-C.q_restored = 100;         % link restored (<= 2x clean)
+C.q_restored = 100;         % link restored: BER and packet loss <= 2x clean (+ one loss event)
 C.q_partial  = 40;          % best quality below restoration (log-linear to 0 at 10x the threshold or the unmitigated BER);
                             % below 100 minus the largest running cost (39.5), so a restoring configuration
                             % always earns more than a non-restoring one in the same geometry

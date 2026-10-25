@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# d91-speed attribution and merge check: four full test_core runs in a short path, one
+# single-thread MATLAB job at a time, each only when v7_d91_speed_gate.ps1 says OK (>= 35 GB
+# commit free, at most one other running non-pipeline MATLAB); gate checked every 10 min, a
+# job given up after 24 h of waiting, each MATLAB bounded by 6 h (rc 124 = TIMEOUT).
+#
+#   bash v7_d91_tests3.sh <new SHA> <merge SHA>
+#
+# Starts its jobs only after v7_d91_tests2.sh has ended (its lock folder is gone).
+# Jobs, all with the same short TEMP:
+#   merge  the merge candidate (2cbe559..<new> cherry-picked onto the v7-p3 tip)
+#   tip    the v7-p3 tip 29510e7
+#   new    the d91-speed tip <new>
+#   base   2cbe559, d91-speed's parent (the baseline for attribution)
+# Pairs in the summary, by test name: new vs base (what d91 changed) and merge vs tip
+# (fail-new-only there = merge regression). Works only in git archive exports under
+# C:\Users\Adi Suliman\d91q\s3, never in a live worktree. Takes no parallel turn, opens no
+# pool, signals only its own MATLAB (the time limit).
+# Logs: v7_d91_tests3_<job>.log; queue: v7_d91_tests3_queue.log; summary:
+# v7_d91_tests3_summary.log.
+#
+# Start detached (PowerShell):
+#   Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine='"C:\Program Files\Git\bin\bash.exe" -lc "bash ''/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_tests3.sh'' <NEW> <MERGE> >> ''/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_tests3_queue.log'' 2>&1"'; CurrentDirectory='C:\Users\Adi Suliman\uav-gcs-logs'}
+
+NEW=${1:-}
+MERGE=${2:-}
+BASE=2cbe559
+TIP=29510e7
+L="/c/Users/Adi Suliman/uav-gcs-logs"
+REPO="/c/Users/Adi Suliman/uav-gcs-d91-speed"
+Q="/c/Users/Adi Suliman/d91q/s3"
+MATLAB="/c/Program Files/MATLAB/R2026a/bin/matlab.exe"
+GATE='C:\Users\Adi Suliman\uav-gcs-logs\v7_d91_speed_gate.ps1'
+POLL=600
+WAIT_MAX=$((24 * 3600))
+PREV_MAX=$((72 * 3600))
+JOB_MAX=6h
+PREV="$L/v7_d91_tests2.lock.d"
+LOCK="$L/v7_d91_tests3.lock.d"
+
+say() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*"; }
+
+for s in "$NEW" "$MERGE"; do
+  [[ "$s" =~ ^[0-9a-f]{7,40}$ ]] || { say "usage: bash v7_d91_tests3.sh <new SHA> <merge SHA>"; exit 1; }
+done
+mkdir "$LOCK" 2>/dev/null || { say "another queue holds $LOCK; not started"; exit 1; }
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+
+NAMES=(merge tip new base)
+SHAS=("$MERGE" "$TIP" "$NEW" "$BASE")
+say "d91 tests3: merge $MERGE, tip $TIP, new $NEW, base $BASE, working copies under $Q"
+rm -rf "$Q" && mkdir -p "$Q/tmp" || exit 1
+for i in "${!NAMES[@]}"; do
+  d="$Q/${NAMES[$i]}"; mkdir -p "$d"
+  ( set -o pipefail; git -C "$REPO" archive --format=tar "${SHAS[$i]}" | tar -x -C "$d" ) || { say "export of ${SHAS[$i]} failed"; exit 1; }
+  git -C "$REPO" rev-parse "${SHAS[$i]}^{commit}" > "$d/D91_SHA.txt"
+done
+TW=$(cygpath -w "$Q/tmp")                              # the jobs' own short TEMP
+say "exports ready; TEMP of the jobs $TW"
+
+t0=$(date +%s)
+while [ -d "$PREV" ]; do
+  if [ $(( $(date +%s) - t0 )) -ge "$PREV_MAX" ]; then say "v7_d91_tests2 still holds its lock after 72 h; not started"; exit 1; fi
+  say "waits for v7_d91_tests2 (lock $PREV)"
+  sleep "$POLL"
+done
+say "v7_d91_tests2 has ended"
+
+INIT="startup; evalc('init_params'); maxNumCompThreads(1); fprintf('V7TEMP %s\n', tempdir);"
+# Every test's name before the run (V7SUITE) and its outcome after it (V7RESULT)
+RUN="s = matlab.unittest.TestSuite.fromFile(fullfile(pwd, 'code', 'tests', 'test_core.m')); fprintf('V7SUITE %s\n', s.Name); r = run(s); st = repmat({'FAIL'}, 1, numel(r)); st([r.Passed]) = {'PASS'}; st([r.Incomplete] > [r.Failed]) = {'INCOMPLETE'}; for k = 1:numel(r), fprintf('V7RESULT %s %s\n', st{k}, r(k).Name); end;"
+TESTS="f = {r(~[r.Passed]).Name}; fprintf('V7TESTS %d/%d\n', sum([r.Passed]), numel(r)); if ~isempty(f), fprintf('V7FAIL %s\n', f{:}); end; exit(double(isempty(r) || ~all([r.Passed])))"
+
+for i in "${!NAMES[@]}"; do
+  n=${NAMES[$i]}; log="$L/v7_d91_tests3_$n.log"
+  : > "$log"
+  t0=$(date +%s)
+  while :; do
+    g=$(powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$GATE" 2>&1 | tr -d '\r' | tail -1)
+    case "$g" in OK*) say "job $n: $g"; break;; esac
+    if [ $(( $(date +%s) - t0 )) -ge "$WAIT_MAX" ]; then say "job $n: gave up after 24 h of waiting ($g)"; break 2; fi
+    say "job $n waits: ${g:-no answer}"
+    sleep "$POLL"
+  done
+  say "job $n starts in $Q/$n, code $(cat "$Q/$n/D91_SHA.txt") (log $log)"
+  ( cd "$Q/$n" && TEMP="$TW" TMP="$TW" /usr/bin/timeout -k 10m "$JOB_MAX" "$MATLAB" -singleCompThread -batch "$INIT $RUN $TESTS" ) >> "$log" 2>&1
+  rc=$?
+  case $rc in 124|137) echo "V7TIMEOUT rc=$rc after $JOB_MAX" >> "$log"; say "job $n TIMEOUT rc=$rc";; esac
+  say "job $n ended rc=$rc ($(( ($(date +%s) - t0) / 60 )) min with the wait)"
+done
+
+# One pair, by test name: fail-both, fail-new-only, fail-old-only, new-test (absent in the
+# old run's suite), removed-test, and tests listed but without an outcome (not-run).
+pair() {
+  awk -v lab="$1" -v nn="$2" -v on="$3" '
+    { sub(/\r$/, "") }
+    FNR == 1 { side = (FILENAME == ARGV[1]) ? "new" : "old" }
+    /^V7SUITE / { has[side, $2] = 1; names[$2] = 1 }
+    /^V7RESULT / { has[side, $3] = 1; res[side, $3] = $2; names[$3] = 1 }
+    /^V7TIMEOUT/ { tmo[side] = 1 }
+    END {
+      if (tmo["new"]) print lab ": " nn " TIMEOUT (outcomes incomplete)"
+      if (tmo["old"]) print lab ": " on " TIMEOUT (outcomes incomplete)"
+      for (t in names) {
+        a = (("new", t) in res) ? res["new", t] : "none"
+        b = (("old", t) in res) ? res["old", t] : "none"
+        if (!(("new", t) in has)) c = "removed-test"
+        else if (!(("old", t) in has)) { if (a == "PASS") { n_new++; continue }; c = "new-test" }
+        else if (a == "none" || b == "none") c = "not-run"
+        else if (a != "PASS" && b != "PASS") c = "fail-both"
+        else if (a != "PASS") c = "fail-new-only"
+        else if (b != "PASS") c = "fail-old-only"
+        else continue
+        printf "%s: %s %s (%s %s, %s %s)\n", lab, c, t, nn, a, on, b
+      }
+      printf "%s: new-test passing %d\n", lab, n_new + 0
+    }' "$L/v7_d91_tests3_$2.log" "$L/v7_d91_tests3_$3.log" | sort
+}
+
+{ echo "d91 tests3 summary $(date '+%Y-%m-%d %H:%M:%S'), merge $MERGE, tip $TIP, new $NEW, base $BASE, TEMP $TW"
+  for n in "${NAMES[@]}"; do
+    f="$L/v7_d91_tests3_$n.log"
+    [ -f "$f" ] || continue
+    grep -hE 'V7TEMP|V7TESTS|V7FAIL|V7TIMEOUT' "$f" | sed "s/^/$n: /"
+    awk -v n="$n" '
+      /^(Error occurred in|Verification failed in|Assertion failed in) test_core\// { t = $0; sub(/ and it did not.*/, "", t); want = 1; next }
+      want && /(Error using|Error in|verify[A-Za-z]+ failed|--> |Build failed|ENVIRONMENT|Undefined|Unable|not found|exceed)/ {
+        line = $0; gsub(/^ +/, "", line); print n ": REASON " t " :: " substr(line, 1, 220); want = 0 }
+    ' "$f"
+  done
+  echo "attribution (new = d91-speed tip, old = 2cbe559): fail-new-only = d91 regression"
+  pair attribution new base
+  echo "merge (new = merge candidate, old = v7-p3 tip): fail-new-only = merge regression"
+  pair merge merge tip; } > "$L/v7_d91_tests3_summary.log"
+say "queue done; summary in $L/v7_d91_tests3_summary.log"

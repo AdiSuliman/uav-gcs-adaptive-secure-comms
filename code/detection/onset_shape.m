@@ -55,7 +55,8 @@ function varargout = onset_shape(G, varargin)
 %   thr = onset_shape('threshold', FM)   FM.os_thr of the deployed fusion (select_fusion.m),
 %       0 without one: the model that fits better
 %   on = onset_shape('on', FM)   whether the monitor latches the cause at all: FM.latch of the
-%       deployed fusion, chosen on validation (select_fusion.m); true without it (a fusion
+%       deployed fusion, set by B2F (select_fusion.m: chosen on validation, or the measured
+%       pick's state, fusion_pick.m); true without it (a fusion
 %       fitted before that choice, or no fusion). Off, the monitor's class is the fused class.
 %   names = onset_shape('names')
 C_LOST = 5; K_DIAG = 3; N_HIST = 20;

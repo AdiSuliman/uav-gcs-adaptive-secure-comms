@@ -78,7 +78,7 @@ for j = 1:nJ
         geo{j, s} = struct('seed', sd_, 'speed', v_, 'run', runs(r));
     end
 end
-NWP = N_WORKERS;
+NWP = N_WORKERS; pl = [];
 if exist('SMOKE', 'var') && SMOKE
     NWP = 0;                                            % reduced chain check: on this process, no parallel turn
 else
@@ -98,11 +98,10 @@ keys = arrayfun(@(j) pool_checkpoint('key', {TAG, DET_ID, runs, EBNO, ACTIONS, g
 todo = pool_checkpoint('todo', CKD, keys);
 fprintf('%d chunks of geometries; %d kept from an earlier start (%s)\n', nJ, nJ - numel(todo), CKD);
 t0 = tic;
-parfor (k = 1:numel(todo), NWP)
-    j = todo(k);
-    pool_checkpoint('save', CKD, j, keys{j}, pool_cell(p0, 'none', ACTIONS, EBNO, geo(j, :), det, opt));
-    fprintf('  geometries chunk %d/%d done\n', j, nJ);
-end
+S = struct('p0', {p0}, 'ACTIONS', {ACTIONS}, 'EBNO', {EBNO}, 'geo', {geo}, 'det', {det}, 'opt', {opt}, ...
+    'CKD', {CKD}, 'keys', {keys}, 'nJ', {nJ});
+pool_lpt(@(S, j) pool_job('clean', S, j), S, todo, pl);   % equal chunks, one per free worker, in their order
+clear S
 res = arrayfun(@(j) pool_checkpoint('load', CKD, j), 1:nJ, 'UniformOutput', false);
 pools = cell(1, nS, nA);
 f = fieldnames(res{1}{1, 1, 1});
