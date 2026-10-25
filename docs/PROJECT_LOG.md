@@ -1108,3 +1108,4 @@ The decisions of 2026-10-22/24 are D93-D95 in DECISIONS.
 
     All trees as expected.
   - The smoke driver `uav-gcs-logs\d91_smoke_deploy.m` replaced by `TIP`'s `docs/d91_smoke_deploy.m.txt` (SHA-256 `b3282e0f...`, as expected; the old file kept as `.bak_<stamp>`).
+- **2026-10-25, D99: the lecturer's readings at link-limited Eb/N0 points**, decided before any of them exists. The pooled readings stay the verdict; a reporting-only script (`lect_kpis_by_ebno.m`, and `core_bw_lect_by_link.m` for CORE_BW) adds the non-L line and per-Eb/N0 rows after a gate that reproduces `KP.lect` and `KP.far` exactly. Branch `lect-ebno` `9d5bfc8` (from `lect-kpi` `9122b8d`), protocol `docs/lect_ebno_protocol.md`; tests not run yet (stop window, p3 slot); run once after profile 1's `STAGE C2e done`. Nothing pushed.

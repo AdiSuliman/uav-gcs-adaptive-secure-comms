@@ -1619,3 +1619,66 @@ The interim report (2026-11-01) needs no final results.
   Expected values: `d91_fuse.md`, the M4 out-of-fold block (the base line, the branch-evidence line, set fresh2's fault F1). A miss: no B3r; the deployment is reviewed (B2F log, J2), fixed from the sources and the rehearsal rerun. No set is spent.
 
 **Open.** CORE_BW's commit is not written yet (during C2). `TIP3` is not built as a branch yet (its trees are known). `docs/core_cnn_floor_note.txt` and `docs/d91_b3r_expect_p1.txt` are written in `W` at their steps.
+
+## D99 — Lecturer readings at link-limited Eb/N0 points: pooled verdict unchanged, a pre-registered non-L line and per-Eb/N0 rows; recovery time undefined where the restoration test cannot fail
+
+**Why (2026-10-25, SURV review finding 3).** The packet-loss half of "restored" (link_env.m:191,
+pl <= 2 x clean + one loss event) cannot fail where the clean link loses half its packets or
+more: in profile 1's pools 0.99 / 0.84 / 0.62 at 0 / 3 / 6 dB (p1.log:7904). There
+"recoverable" is BER-only. Recovery time from detection (per_metrics.m, on restored_plr) is 0 by
+construction for every detected episode, under every policy including no response, which is
+about half the recoverable jamming episodes. T_rec from onset and KPI 4 are BER-only there.
+PER reduction and the CNN's share can move either way: an answer without link budget is diluted
+there, while rate_reduce (+6 dB) also cures the clean link's own loss. Both weigh heavily because
+the reduction is a ratio of sums and the static PER there is near 1. Goodput in bit/s is unbiased;
+the normalized goodput already leaves out the points with clean loss > 0.9. Every lecturer reading pools all
+six Eb/N0 points (policy_episodes.m; ebno_thr gates only KPI 6). No test data of these readings
+had been read when this was decided.
+
+**Decision.**
+1. Mark: grid point s is link-limited (L) when C.ratio_ok x PP.clean_fer(s) >= 1, from the post-M
+   clean table (D95), computed once and hashed before results/policy_evaluation.mat is opened.
+   Descriptive tag beside it: working point (J) when clean_fer < 0.1 (IEEE 802.11a-1999
+   sensitivity, PER < 10%), marginal (M) otherwise.
+2. The lecturer's KPIs and the pooled all-points readings of lect_kpis.m (KP.lect) are unchanged
+   and remain the verdict lines.
+3. Reporting-only addition, always printed in this order: Line A (all points, the verdict), Line B
+   (non-L points, labelled second line, same verdict words), per-Eb/N0 rows with tag and counts
+   (their verdict words labelled descriptive). lect_kpis.m is called unchanged on subsets of the
+   saved ALL. When Lines A and B differ in verdict words, the result sentence names both; Line A
+   stays the verdict.
+4. Recovery time from detection is undefined at L points (the lecturer's "below a defined
+   threshold" has no threshold at >= 100%). The headline recovery time is Line B. Line A is shown
+   with the count of its episodes set by construction (0, or never when detected in the last 4
+   cycles). t_conf is reported everywhere. T_rec and KPI 4 rows at L points are tagged BER-only.
+5. KPI 6 (system false alarms): verdict unchanged; per-Eb/N0 rows and the non-L line added,
+   descriptive, from the same union RU the verdict reads (RES clean, clean2 and RW).
+6. No code change in profile 1's tip (8b28bdf) or TIP3. A new script lect_kpis_by_ebno.m with its
+   test, reviewed and tested before P1's STAGE C2e done, run once after it. Gate: on the full ALL
+   it must reproduce KP.lect exactly, and its byte copy of far_report must reproduce KP.far on the
+   full RU, or no subset is printed. Profile 3: the same rules on its own post-M table.
+7. CORE_BW: verdicts and code unchanged. It reads against the same flight's clean link and judges
+   harm on pooled means, so the post-M mark does not apply to it. Its mark is per episode: the
+   flight's own threshold (2 x its clean loss + 1/n, exact for the core configurations) >= 1,
+   from its pools' test-split clean cell, hashed before its test results are opened. The same
+   rules R2-R3 apply, read from the saved RES/EPs.
+
+**Code.** Branch `lect-ebno` (from `lect-kpi` `9122b8d`; not pushed), commit `9d5bfc8`:
+`code/evaluation/lect_kpis_by_ebno.m`, `code/evaluation/core_bw_lect_by_link.m` (CORE_BW, a separate
+function: its readings are `experiment_core_bw.m`'s `per_lines`, not `lect_kpis.m`),
+`code/tests/test_lect_kpis_by_ebno.m` (the seven tests of the decision plus the single run, the
+copies and the readers against `TIP`, and CORE_BW), the protocol `docs/lect_ebno_protocol.md`, and
+pointer lines in `c2e_lect_protocol.md` 6 and `core_bw_protocol.md` 6.5. The readers it calls are
+`TIP`'s blobs; `far_report`, `cp_upper` and `experiment_core_bw.m`'s seven readers are byte copies.
+Tests not run yet: they run once in the stop window during T2's smoke, in the p3 slot.
+
+**Rejected.** No change (t_rec_det wrong by construction). Non-L as the verdict (the pooled line
+was pre-registered; the direction of the L points' effect is not known before the reading). A
+guard in link_env.m (changes rewards, training and every reader; untestable before T2). A capped
+absolute recovery threshold (a new KPI parameter; a P1 code change; measures recovery from outage,
+not from jamming).
+
+**Sources.** Xu et al. 2005 (lecturer ref [8]): poor link quality and jamming are separate causes
+of low PDR. IEEE 802.11a-1999: sensitivity at PER < 10%; interference rejection tested 3 dB above
+sensitivity. Baldi 2013: jamming varied at a fixed working Eb/N0 = 10 dB. Lecturer 20.10: recovery
+time until PER falls below a defined threshold and stays below it.
