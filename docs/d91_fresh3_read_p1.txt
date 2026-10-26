@@ -1,0 +1,8 @@
+fourth test set (B3r) reading started
+time 2026-10-26 14:35:48
+commit cc7368e02c97a7bf277f06a926000f8b666b40c2
+code_tree 6b1c9714ff1690100e66cca981f905ae016c9470
+params_id add18af2b7532a0bd2f7fbc78f06e526
+untracked_m none
+data/trained_detector.mat sha256 9ba09b8d97471f40d0f5756536a3d43b8d298ac9bd3a91fd45a373d97af4c65e mtime 2026-10-18 02:46:35 trained_at 2026-10-17 15:42:37
+data/fusion.mat sha256 bd72b3d4096c3f29eedbef09186a1b84a2e4c2242f3e27c20604e649c5425ecc mtime 2026-10-26 11:08:39
