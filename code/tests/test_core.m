@@ -1042,6 +1042,11 @@ S = [S; arrayfun(@(si, ri) pool_seed(2, si, 10, ri), s(:), r(:))];
 S = [S; arrayfun(@(si, bi) pool_seed(1, si, bi, 100), s(:), b(:))];
 [s, r, b, f] = ndgrid(1:6, 1:100, [4 15], [3 5]);       % clean-link geometries 101-300 (families 3 and 5)
 S = [S; arrayfun(@(si, ri, bi, fi) pool_seed(fi, si, bi, ri), s(:), r(:), b(:), f(:))];
+[s, r, f] = ndgrid(1:6, 1:100, [7 8 9]);                % the fresh clean test set (block 15, P1R)
+SF = arrayfun(@(si, ri, fi) pool_seed(fi, si, 15, ri), s(:), r(:), f(:));
+verifyLessThan(tc, max(SF), 2000000);                   % pool seeds stay below 2 000 000 (shadow_pool_seed.m)
+verifyEqual(tc, [min(SF) max(SF)], [1941501 1986600]);
+S = [S; SF];
 [t, li, s] = ndgrid(1:20, 1:8, 1:6);                    % survivability map: entries, levels, Eb/N0
 S = [S; 900000 + 1000*t(:) + 10*li(:) + s(:); 700000 + (1:5)'];
 k = (1:99999)';
@@ -4953,6 +4958,26 @@ for k = [1 100 101 200 201 300]
 end
 verifyError(tc, @() pool_seed(1, 1, 15, 101), ?MException);
 verifyError(tc, @() pool_seed(1, 1, 15, 0), ?MException);
+for k = [1 100 101 200 201 300]                         % the fresh set: families 7, 8, 9
+    verifyEqual(tc, clean_pool_seed(2, 15, k, [], [7 8 9]), pool_seed(7 + floor((k - 1) / 100), 2, 15, mod(k - 1, 100) + 1));
+end
+verifyError(tc, @() clean_pool_seed(1, 15, 301), ?MException);
+verifyError(tc, @() clean_pool_seed(1, 15, 0), ?MException);
+verifyError(tc, @() clean_pool_seed(1, 15, 301, [], [7 8 9]), ?MException);
+% 'test' and 'val' keep the parent commit's (lect-kpi fcdc199) seeds and speeds, every geometry
+[s, k, b] = ndgrid(1:6, 1:300, [4 15]);
+vr = [29 161];
+N1 = arrayfun(@(si, ki, bi) clean_pool_seed(si, bi, ki), s(:), k(:), b(:));
+[N2, V2] = arrayfun(@(si, ki, bi) clean_pool_seed(si, bi, ki, vr, [1 3 5]), s(:), k(:), b(:));
+d = parent_copy(tc, 'code/decision/clean_pool_seed.m', 'fcdc199');
+addpath(d, '-begin'); clear clean_pool_seed
+cl0 = onCleanup(@() fixture_off(d, 'clean_pool_seed')); %#ok<NASGU>
+verifyEqual(tc, which('clean_pool_seed'), fullfile(d, 'clean_pool_seed.m'));
+O1 = arrayfun(@(si, ki, bi) clean_pool_seed(si, bi, ki), s(:), k(:), b(:));
+[O2, W2] = arrayfun(@(si, ki, bi) clean_pool_seed(si, bi, ki, vr), s(:), k(:), b(:));
+fixture_off(d, 'clean_pool_seed');
+verifyEqual(tc, N1, O1); verifyEqual(tc, N2, O2); verifyEqual(tc, V2, W2);
+verifyEqual(tc, numel(unique(N1)), 2 * 6 * 300);
 p = base_params();
 s = arrayfun(@(k) clean_pool_seed(1, 4, k), [5 150 250]);
 V = flight_cov({struct('seed', s, 'speed', [30 60 90])}, 6, p);
@@ -4967,6 +4992,82 @@ verifyEmpty(tc, strfind(src, 'pool_seed(1, s_(q), blk, r_(q))'));
 verifyNotEmpty(tc, strfind(src, 'V = CT.cov;'));
 src = fileread(which('build_clean_test_pools'));
 verifyNotEmpty(tc, regexp(src, '''seed'', sds, ''cov'', V', 'once'));
+verifyNotEmpty(tc, strfind(src, 'clean_pool_seed(s, SP, k, vrange, FAMS)'));
+end
+
+function test_clean_fresh_guard(tc)
+% P1R's fresh clean test set (docs/p1r_protocol.md): its own families 7, 8, 9 of block 15, a
+% layout that stops on a pair another set owns, and a build only after C1d adopted a test (no
+% 'ratio' kept, no forced mark; the smoke skips the check). 'test' and 'val' keep their layout,
+% the chain's C1c never builds the fresh set, and only the fresh set saves CT.fams.
+[sp, fm, fo] = clean_set_layout('test'); verifyEqual(tc, {sp, fm, fo}, {15, [1 3 5], 'data/clean_test_pools.mat'});
+[sp, fm, fo] = clean_set_layout('val'); verifyEqual(tc, {sp, fm, fo}, {4, [1 3 5], 'data/clean_val_pools.mat'});
+[sp, fm, fo] = clean_set_layout('fresh'); verifyEqual(tc, {sp, fm, fo}, {15, [7 8 9], 'data/clean_fresh_pools.mat'});
+verifyError(tc, @() clean_set_layout('bogus'), 'clean_set_layout:set');
+own = {1, 15, 'pools'; 1, 4, 'pools'; 1, 17, 'pools'; 2, 10, 'check'; 3, 15, 'clean'; 5, 4, 'clean'; ...
+    6, 14, 'core_bw'; 6, 19, 'core_bw'; 7, 15, 'fresh'; 9, 15, 'fresh'; 7, 4, ''; 4, 15, ''; 3, 10, ''};
+for i = 1:size(own, 1)
+    verifyEqual(tc, pool_seed_owner(own{i, 1}, own{i, 2}), own{i, 3}, sprintf('family %d block %d', own{i, 1}, own{i, 2}));
+end
+for b = [4 15]                                           % every family the clean sets fly is another set's
+    verifyTrue(tc, all(arrayfun(@(f) ~isempty(pool_seed_owner(f, b)) && ~strcmp(pool_seed_owner(f, b), 'fresh'), [1 3 5])));
+end
+dq = tempname; mkdir(dq);                                % an owner table where block 15's family 7 is taken
+fid = fopen(fullfile(dq, 'pool_seed_owner.m'), 'w');
+fprintf(fid, 'function own = pool_seed_owner(fam, block)\nown = ''clean'';\nend\n'); fclose(fid);
+addpath(dq, '-begin'); clear pool_seed_owner
+cl0 = onCleanup(@() fixture_off(dq, 'pool_seed_owner')); %#ok<NASGU>
+verifyError(tc, @() clean_set_layout('fresh'), 'clean_set_layout:reuse');
+fixture_off(dq, 'pool_seed_owner');
+verifyEqual(tc, clean_set_layout('fresh'), 15);
+% The guard on C1d's file, in a folder of its own
+w = tempname; mkdir(w); mkdir(fullfile(w, 'data')); here = pwd; cd(w);
+cl1 = onCleanup(@() cd(here)); %#ok<NASGU>
+f = 'data/drop_threshold.mat';
+verifyError(tc, @() clean_fresh_guard(f, false), 'clean_fresh_guard:none');
+verifyEmpty(tc, clean_fresh_guard(f, true));             % the smoke
+drop_db = 4; save(f, 'drop_db');
+verifyError(tc, @() clean_fresh_guard(f, false), 'clean_fresh_guard:none');
+DEG = struct('mode', 'ratio', 'ber_q', [], 'note', 'no clean validation flights: not chosen'); save(f, 'drop_db', 'DEG');
+verifyError(tc, @() clean_fresh_guard(f, false), 'clean_fresh_guard:none');
+DEG = struct('mode', 'ratio', 'ber_q', [], 'name', 'ratio', 'pick', 0); save(f, 'drop_db', 'DEG');
+verifyError(tc, @() clean_fresh_guard(f, false), 'clean_fresh_guard:ratio');
+DEG = struct('mode', 'win', 'ber_q', [], 'name', 'F1 win', 'pick', 1, 'rule_pick', 'F1 win', 'forced', 'win');
+save(f, 'drop_db', 'DEG');
+verifyError(tc, @() clean_fresh_guard(f, false), 'clean_fresh_guard:forced');
+DEG = struct('mode', 'win', 'ber_q', [], 'name', 'F1 win', 'pick', 1); save(f, 'drop_db', 'DEG');
+verifyEqual(tc, clean_fresh_guard(f, false), DEG);
+% The builder: an unknown set and the fresh set without an adoption stop before any load; with
+% one the layout and guard pass and the build goes on to read the pools (absent here)
+verifyError(tc, @() clean_build_run('bogus'), 'clean_set_layout:set');
+delete(f);
+verifyError(tc, @() clean_build_run('fresh'), 'clean_fresh_guard:none');
+save(f, 'drop_db', 'DEG');
+try
+    clean_build_run('fresh'); verifyFail(tc, 'the build should stop on the absent pools');
+catch e
+    verifyFalse(tc, startsWith(e.identifier, {'clean_set_layout', 'clean_fresh_guard'}), e.identifier);
+    verifyNotEmpty(tc, strfind(e.message, 'policy_pools'), e.message);
+end
+cd(here);
+src = fileread(which('build_clean_test_pools'));
+verifyNotEmpty(tc, strfind(src, '[SP, FAMS, f_out] = clean_set_layout(CLEAN_SET);'));
+verifyNotEmpty(tc, regexp(src, ['clean_set_layout\(CLEAN_SET\);\r?\nif strcmp\(CLEAN_SET, ''fresh''\), clean_fresh_guard\(' ...
+    '''data/drop_threshold\.mat'', exist\(''SMOKE'', ''var''\) && SMOKE\); end'], 'once'));
+verifyNotEmpty(tc, strfind(src, 'if strcmp(CLEAN_SET, ''fresh''), CT.fams = FAMS; end'));
+verifyNumElements(tc, strfind(src, 'CT.fams = '), 1);
+rs = fileread(which('run_stage'));
+i0 = strfind(rs, 'elseif strcmp(name, ''build_clean_test_pools'')'); i1 = strfind(rs, 'elseif strcmp(name, ''select_fusion'')');
+seg = rs(i0:i1);
+verifyNotEmpty(tc, strfind(seg, 'for CLEAN_SET = {''val'', ''test''}'));
+verifyEmpty(tc, strfind(seg, 'fresh'));
+verifyEmpty(tc, strfind(fileread(which('main')), 'CLEAN_SET = ''fresh'''));
+end
+
+function clean_build_run(set)
+% build_clean_test_pools.m with CLEAN_SET = set, in this function's workspace.
+CLEAN_SET = set; %#ok<NASGU>
+build_clean_test_pools;
 end
 
 function test_surv_on_air(tc)
@@ -8430,6 +8531,8 @@ S = [S; arrayfun(@(si, ri) pool_seed(2, si, 10, ri), s(:), r(:))];
 S = [S; arrayfun(@(si, bi) pool_seed(1, si, bi, 100), s(:), b(:))];
 [s, r, b, f] = ndgrid(1:6, 1:100, [4 15], [3 5]);
 S = [S; arrayfun(@(si, ri, bi, fi) pool_seed(fi, si, bi, ri), s(:), r(:), b(:), f(:))];
+[s, r, f] = ndgrid(1:6, 1:100, [7 8 9]);                % the fresh clean test set (block 15, P1R)
+S = [S; arrayfun(@(si, ri, fi) pool_seed(fi, si, 15, ri), s(:), r(:), f(:))];
 [t, li, s] = ndgrid(1:20, 1:8, 1:6);
 S = [S; 900000 + 1000*t(:) + 10*li(:) + s(:); 700000 + (1:5)'];
 k = (1:99999)';
