@@ -75,6 +75,12 @@
 
 clc;
 fprintf('=== Eb/N0-drop threshold of the drop alarm ===\n\n');
+DGon = deg_options().on; if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'deg_select'), DGon = CFG.deg_select; end
+DGf = deg_options().force; if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'deg_force'), DGf = deg_force('check', CFG.deg_force, 'CFG'); end
+deg_force('smoke', DGf, exist('SMOKE', 'var') && SMOKE, 'choose_drop_threshold');   % before any output is written
+if ~isempty(DGf) && ~(DGon && isfile('data/clean_val_pools.mat'))
+    error('choose_drop_threshold:force', 'deg_force %s needs deg_select and clean validation flights', DGf);
+end
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
 na = find(strcmp(PP.actions, 'no_action'));
 iPL = find(strcmp(PP.scen, 'path_loss'));                  % the three severities
@@ -233,12 +239,6 @@ fprintf('%s\n', rv{:});
 MON = MN;
 fm = find(strcmp(FM, drop_alarm)); GF = GR{fm}; CS = decision_config().confirm_sweep;
 DEG = [];                                                  % the degradation test chosen here (deg_options.m)
-DGon = deg_options().on; if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'deg_select'), DGon = CFG.deg_select; end
-DGf = deg_options().force; if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'deg_force'), DGf = deg_force('check', CFG.deg_force, 'CFG'); end
-deg_force('smoke', DGf, exist('SMOKE', 'var') && SMOKE, 'choose_drop_threshold');
-if ~isempty(DGf) && ~(DGon && ~isempty(CV))
-    error('choose_drop_threshold:force', 'deg_force %s needs deg_select and clean validation flights', DGf);
-end
 if DGon && isempty(CV)
     DEG = struct('mode', 'ratio', 'ber_q', [], 'note', 'no clean validation flights: not chosen');
     rd = {'', 'Degradation test: no clean validation flights, ''ratio'' kept (not chosen).'};

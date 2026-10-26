@@ -400,16 +400,32 @@ end
 
 function test_force_needs_smoke(tc)
 % A forced test stops C1d, C2 and C2e outside the smoke; C1d also needs deg_select and clean
-% validation flights. Every refusal goes through deg_force('smoke'), before any reading.
+% validation flights. Every refusal goes through deg_force('smoke'); C1d's come before it
+% reads or writes anything.
 verifyError(tc, @() deg_force('smoke', 'win', false, 'x'), 'deg_force:smoke');
 deg_force('smoke', 'win', true, 'x');                                % the smoke: allowed
 deg_force('smoke', '', false, 'x');                                  % nothing forced: allowed
 src = fileread(which('choose_drop_threshold'));
 verifyNotEmpty(tc, strfind(src, 'deg_force(''smoke'', DGf, exist(''SMOKE'', ''var'') && SMOKE, ''choose_drop_threshold'');'));
-verifyNotEmpty(tc, strfind(src, 'if ~isempty(DGf) && ~(DGon && ~isempty(CV))'));
+verifyNotEmpty(tc, strfind(src, 'if ~isempty(DGf) && ~(DGon && isfile(''data/clean_val_pools.mat''))'));
 verifyNotEmpty(tc, strfind(src, 'DGf = deg_force(''check'', CFG.deg_force, ''CFG'');'));
 i0 = strfind(src, 'deg_force(''smoke'', DGf'); i1 = strfind(src, 'if DGon && isempty(CV)');
 verifyNumElements(tc, i0, 1); verifyNumElements(tc, i1, 1); verifyLessThan(tc, i0, i1);
+verifyLessThan(tc, i0, min([strfind(src, 'load('), strfind(src, 'fopen(')]));
+% C1d in an empty folder: the refusals stop it before the pools are read
+w = tempname; mkdir(w); here = pwd; cd(w);
+cl = onCleanup(@() cd(here)); %#ok<NASGU>
+verifyError(tc, @() c1d_run(struct('deg_select', true, 'deg_force', 'win'), false), 'deg_force:smoke');
+verifyError(tc, @() c1d_run(struct('deg_force', 'win'), true), 'choose_drop_threshold:force');
+verifyError(tc, @() c1d_run(struct('deg_select', true, 'deg_force', 'win'), true), 'choose_drop_threshold:force');
+verifyError(tc, @() c1d_run(struct('deg_select', true, 'deg_force', 'F1'), true), 'deg_force:value');
+verifyFalse(tc, isfolder('results'));                                % nothing written
+try
+    c1d_run(struct('deg_select', false), false); verifyFail(tc, 'C1d should stop on the absent pools');
+catch e
+    verifyNotEmpty(tc, strfind(e.message, 'policy_pools'), e.message);   % no force: on to the pools
+end
+cd(here);
 src = fileread(which('train_dqn'));
 verifyNotEmpty(tc, regexp(src, ['if isfield\(Dd, ''DEG''\) && isfield\(Dd\.DEG, ''forced''\)[^\n]*\r?\n\s*' ...
     'deg_force\(''smoke'', Dd\.DEG\.forced, exist\(''SMOKE'', ''var''\) && SMOKE, ''train_dqn''\);'], 'once'));
@@ -452,6 +468,12 @@ verifyFalse(tc, isfield(D0, 'forced') || isfield(D0, 'rule_pick'));   % an adopt
 end
 
 %% ---------- helpers ----------
+function c1d_run(cfg, smoke)
+% choose_drop_threshold.m with CFG = cfg and SMOKE = smoke, in this function's workspace.
+CFG = cfg; SMOKE = smoke; %#ok<NASGU>
+choose_drop_threshold;
+end
+
 function PP = mon_pp()
 % Monitor settings of the tests: the pools' configurations and classes, known gains.
 A = policy_actions();
