@@ -1868,3 +1868,107 @@ Each reads saved data once. None can move a verdict.
 **Rejected.** P1R in W itself, or the fix merged into `v7-dev` and run in W: P1R's stages write `data/drop_threshold.mat`, `data/trained_dqn.mat` and `results/policy_evaluation.*`, which the final phase's KPI summary, EDGE, report numbers, weak-point analysis, dashboard, latency and `result_status` read; the code of record would change under the final phase, C2g, C2u, EDGE and LAT would stay stamped to a DQN that no longer exists, and the first reading would survive only as copies. A whole `lect-kpi` merge into P1R (the JSI decoder `f328e7b` and `surv_v2` come with it, so P1R would differ from profile 1 by more than the monitor). KPI 6 on the already-read union as P1R's verdict (read by profile 1's first C2e; not a fresh reading). Building the fresh set before the adoption, or leaving it built when `'ratio'` is kept (it stays unread for F4). Rerunning EDGE in P1R. Judging F0 by a share above 4/30 alone. A forced candidate outside the smoke. Shortening any run.
 
 **Sources.** As D103: Thulin 2014 (Clopper-Pearson; the 74 of 1800 is exact); Xie 2021 (FAR = 1/ARL, D103 3d; the F0 test's reference is a constant per-cycle hazard, the stationary first-passage law). `lect-kpi`: `docs/p1r_protocol.md` (`e170c8e`, up to `316230d`), `docs/deg_fix_protocol.md` (`c7fe8f9`), `docs/system_fa_protocol.md` (`4beefb7`). The design: session scratchpad `interim_report/core/p1r_design.md`, not in this repo.
+
+## D105 — The lecturer's verdict pairs: rule_core against none and blind_core on the core action set; rule_esc and blind_esc an extension; C2e's blind_core a secondary, weakened baseline; KPI 8's headline from CORE_BW; the PER verdict on Line A; written before C2e's test reading
+
+**Why (2026-10-26, 21:50 +02:00; gap audit M4 and M3).** Profile 1's C2e evaluates two CNN / conventional pairs:
+- `rule_esc` / `blind_esc` on the 36 configurations;
+- `rule_core` / `blind_core` on the core action set.
+
+Three documents name the pairs differently:
+- D92 and the README map conventional = `blind_esc` and CNN-based = `rule_esc`;
+- `c2e_lect_protocol.md` 6 lists both pairs;
+- `lect_kpis.m` prints the word "PRIMARY" in both blocks (`L.verdict` and `L.core.verdict`).
+
+The baseline also differs in tuning budget. In C2e, `blind_core`'s first response is fixed. In CORE_BW (D98 a), it is chosen on validation. This entry fixes, before any C2e test reading exists, which pair carries each lecturer verdict and what is secondary.
+
+*State when written.* `uav-gcs-logs/v7_d86/p1.log` (20 939 lines, last written 2026-10-26 21:46 +02:00) last shows `##### STAGE C2 (train_dqn) 26-Oct-2026 16:03:02`, with no done line. C2 is training (episode 50048/50048 of one run). There is no `STAGE C2e` line after it. `W/results` holds no `policy_evaluation.*`. **STAGE C2e has not started; no C2e reading exists.**
+
+**Facts from the code (read only).** W is `v7-dev` `d4623ed`. `uav-gcs-lectkpi` is `lect-kpi` `316230d`.
+1. *`lect_kpis.m`* is the same in both trees, apart from line endings. The lecturer KPIs below are numbered in D92's list order: 5 PER, 6 recovery time, 7 goodput, 8 the CNN's contribution. The project's own KPI 6 (system false alarms, D103/D104) is a different item.
+   - **Full action set.** `L.verdict` holds the PER-reduction verdict against the static link (`none`) for `rule_esc`. It is read per lecturer scenario: narrowband = `tone_jamming`, wideband = `jamming`. The episodes are those where some configuration of the 36 restores the geometry.
+     - `L.per`: the five jamming threats pooled, an extension.
+     - `L.cnn`: `rule_esc` against `blind_esc`.
+     - `L.rec`: recovery times for `none`, `blind_esc`, `rule_esc` and the DQN.
+     - `L.gput`: goodput in bit/s for the same policies.
+   - **Core action set.** `L.core` holds the same readings for `rule_core` and `blind_core` against the same `none`.
+     - The mask is `recoverable_core`, the episodes some core configuration restores.
+     - `L.core.all36` is the second line, on the 36-configuration mask.
+     - The CNN's share is `rule_core` against `blind_core`.
+2. *`evaluate_policies.m` (C2e, line 173-183)* runs `none`, `random`, `fixed_mmse`, `fixed`, `rule`, `rule_esc`, `blind_esc`, `table`, the DQNs `dqn_g*`, `dqn_esc`, (`rule_sel`) and `oracle`. It then appends `rule_core` and `blind_core` on the same episodes. It calls `lect_kpis` once (line 384) and saves `KP.lect`.
+3. *`rule_core`* is `rule_esc` with `opt.core` set (`policy_setup.m:23`). It does **not** read B3c's three-state CNN. Its class is the policy monitor's class (`policy_monitor.m:160-167`): the hybrid detector's 11 classes from `data/trained_detector.mat` (10 threats and `none`), temporally fused, with the unknown-threat flag. `rule_core_policy.m` maps that class, together with link metrics, onto `C.core_actions` (`decision_config.m:54`). The link metrics are degradation, the drop alarm, the quiet-slot interference and the link budget.
+   - `tone_jamming`, `jamming`, `reactive_jamming` and `spoofing` map to `channel_switch`.
+   - `sweeping_jammer`, `noise_burst`, `path_loss`, `antenna_fault` and `airframe_shadowing` map to `rate_reduce`.
+   - A degraded link without a known cause maps to `channel_switch+rate_reduce`.
+   - Escalation runs over `C.ladder_core` = `channel_switch+rate_reduce` → `rate_reduce` → `channel_switch` (`decision_config.m:55`).
+   - In C2e, `PP.core_wide` is not set, so the class `jamming` keeps `channel_switch`.
+   - `PP.core_nb` (the class `noise_burst`) is chosen on validation in C2 (`train_dqn.m:196-233`).
+   - No decision-layer file in W, `uav-gcs-lectkpi`, `uav-gcs-v7-bw` or `uav-gcs-v7-p3` calls the three-state CNN. It is read only by B3c (`train_core_cnn.m`, `results/core_cnn.*`) and by CORE_BW's analysis stage `dread` on set D (`experiment_core_bw.m:337-355`). CORE_BW's own `rule_core` also reads the hybrid (`experiment_core_bw.m` `stage_pools` loads `data/trained_detector.mat`).
+4. *`blind_core`* is `blind_esc` with `opt.core` set (`policy_setup.m:24`). `policy_decide.m:79-82` zeroes the class probabilities, sets the unknown flag and sets `unk_mode = 'all'`, so every cycle reads `unknown`. Its alarm therefore comes from measured degradation only. For `unknown` on a degraded link, `rule_core_policy.m:74` gives `channel_switch+rate_reduce`. A confirmed drop alarm with a quiet slot gives `rate_reduce`. The escalation ladder also starts at `channel_switch+rate_reduce`.
+   - Its first response is therefore fixed: a 4x rate cut on every incident, with no validation choice.
+   - It runs the same deployed decision settings as `rule_core` (dwell, monitor, `esc_drop`).
+   - On `core-bw-p1` (`ac55080`, `0e0cc7a`, `79286f5`; D98 a), CORE_BW chooses `blind_core`'s first response on validation per hop rule. The candidates are `channel_switch`, `channel_switch+rate_reduce` and `rate_reduce`, under protocol 6.3's rule, the same rule as the rule's W. The fixed ladder stays there as the secondary row `blind_core_fixed`.
+
+**Decision.**
+1. **The lecturer's verdict pairs are on the core action set.** The proposal maps:
+   - static = no action;
+   - conventional adaptive = link metrics only;
+   - CNN-based adaptive = the CNN's class plus rule-based channel switching and rate adaptation.
+
+   The pairs follow that mapping as closely as the code allows:
+
+   | Lecturer KPI | Carried by | Reading |
+   |---|---|---|
+   | 5, PER reduction ≥ 30% vs static | `rule_core` against `none` | `KP.lect.core.verdict`: narrowband (`tone_jamming`) and wideband (`jamming`), each on its own, on `recoverable_core`; MET (committed) / MET (not committed) / NOT MET as `lect_kpis.m` words it |
+   | 6, recovery time (detection → restored; onset → detection apart) | `rule_core`, with `blind_core` and `none` beside it | `KP.lect.core.rec`, measured and compared, no target |
+   | 7, goodput | `rule_core`, with `blind_core` and `none` beside it | `KP.lect.core.gput` in bit/s, measured, no target |
+   | 8, the CNN's contribution | `rule_core` against `blind_core` | analysis, no promise; headline from CORE_BW (point 2) |
+
+   - **Extension rows, never in the verdict's place:**
+     - `rule_esc` / `blind_esc` on the 36 configurations (`KP.lect.verdict`, `.per`, `.cnn`, `.rec`, `.gput`): the full action set the proposal does not ask for;
+     - the five jamming threats pooled;
+     - the core set on the 36-configuration mask (`KP.lect.core.all36`, second line);
+     - the DQN.
+   - `lect_kpis.m` is not changed, and it still prints "PRIMARY" in the full-set block. The report and the result sentences label that block "extension (full action set)".
+   - This supersedes D92's mapping clause (conventional = `blind_esc`, CNN-based = `rule_esc`) for the verdicts. Those two remain the extension pair.
+2. **The conventional baseline: C2e's `blind_core` is a secondary, weakened baseline.**
+   - C2e's `blind_core` has no tuning budget. Its first response is the fixed `channel_switch+rate_reduce`. The rule side, in contrast, has its noise-burst answer and the deployed settings chosen on validation (past bug 4, unfair baselines).
+   - Its rows in C2e, and in P1R and profile 3 where the same code runs, are labelled "secondary, weakened baseline (fixed first response channel_switch+rate_reduce, no validation choice)". KPI 7 and KPI 8 readings against it are reported only with that label. Part of a goodput gain over it is the baseline's 4x rate cut, not the classification.
+   - **The headline KPI 8** is CORE_BW's `rule_core` against its validation-tuned `blind_core` (D98 a, `core-bw-p1`): equal tuning budget, read under `core_bw_protocol.md` 6.5. CORE_BW's `blind_core_fixed` row is secondary there too.
+   - CORE_BW's own per-type PER verdicts (`rule_core` against `none` on its controlled cells) stay its own (protocol 6.5) and are reported beside C2e's KPI 5 verdict as the controlled-bandwidth reading. Neither replaces the other.
+   - If CORE_BW has not been read when a report is written, KPI 8's headline is "pending (CORE_BW)", and C2e's reading appears only with the secondary label.
+   - The tuned first response is not ported into pre-registered trees (`p1r`, `TIP3`) unless Adi registers it there before their data.
+3. **The PER verdict stays Line A (D99, decided 2026-10-25).**
+   - KPI 5's verdict words come from `lect_kpis.m` on all six Eb/N0 points pooled. Within that, the verdict is per lecturer scenario, as in point 1.
+   - Line B (the non-link-limited points) and the per-Eb/N0 rows (`lect_kpis_by_ebno.m`, D99 point 3) are printed beside it, in D99's order, for the core pair and the extension alike. When Lines A and B differ in verdict words, the result sentence names both, and Line A stays the verdict.
+   - The report states that Line A pools link-limited points.
+     - By D99 point 1 on the post-M clean table (D99 update: clean loss 0.99 / 0.79 / 0.42 at 0 / 3 / 6 dB), the link-limited points are 0 and 3 dB. 6 dB and 9 dB are marginal (M).
+     - The gap audit's "0 / 3 / 6 dB" uses the old table (0.99 / 0.84 / 0.62). The mark computed and hashed before `policy_evaluation.mat` is opened decides, and the report uses that mark's words.
+   - Recovery time from detection keeps D99 point 4: its headline is Line B, and Line A is shown with the count of episodes set by construction. Goodput is read on Line A (D99: unbiased).
+4. **Timing.** This entry is committed before any C2e test reading exists (state above). Nothing in it depends on a C2e, CORE_BW, P1R or profile 3 result.
+
+**What C2e can and cannot deliver.**
+- *It can deliver:* the lecturer's KPI 5-7 on the proposal's core action set (channel switching and rate adaptation), and a KPI 8 reading against a link-metrics-only baseline. The rule acts on a detector class and link metrics, as the proposal's rule does ("from the class and the link metrics", D92).
+- *It cannot deliver:*
+  - **a closed loop driven by the three-state CNN.** "CNN-based adaptive" in C2e (and in CORE_BW) is the hybrid detector: the spectrogram CNN with link features, 11 classes, temporal fusion and the unknown-threat flag. `rule_core_policy.m` maps its classes onto the core actions. In the two lecturer scenarios, the classes `tone_jamming` and `jamming` get what a three-state rule would give (`channel_switch`, or W in CORE_BW). The two differ when the hybrid names another class, for example `noise_burst` or `sweeping_jammer` → `rate_reduce`, or `unknown` on a degraded link → `channel_switch+rate_reduce`.
+  - **a fair KPI 8 against a tuned conventional baseline** (point 2).
+- *Where the lecturer-faithful readings come from:*
+  - the three-state CNN's own detection KPIs (macro-F1, recall per jamming type, clean false alarms): B3c (`results/core_cnn.*`, its single reading of the fourth test set);
+  - the hybrid seen as three states: `three_state_view.m` on the saved KPI 1 reading;
+  - the CNN's contribution with an equal tuning budget: CORE_BW.
+
+  No run puts the three-state CNN in the decision loop. The report says KPI 5-8 are read with the hybrid detector's classes on the core action set, and it does not attribute them to the three-state CNN.
+
+**Rejected.**
+- `rule_esc` / `blind_esc` as the lecturer pair: the 36 configurations go beyond the proposal's two actions.
+- C2e's fixed-ladder `blind_core` as KPI 8's headline: unequal tuning budget.
+- Re-registering the PER verdict on Line B: D99 pre-registered Line A, and the direction of the link-limited points' effect is not known before the reading.
+- Changing `lect_kpis.m`'s labels in W: W is frozen while the chain runs, and the labels are fixed in the report instead.
+- Calling KPI 5-8 the three-state CNN's: no code path supports that.
+
+**Open.**
+- README lines 44-45 (the configuration table) and 101 still map conventional = `blind_esc`, CNN-based = `rule_esc`. They are to be aligned with point 1.
+- A closed-loop row driven by the three-state CNN does not exist. Adding one is new work: code, tests, a registration before its data and a test-read rule. It is for Adi to decide; nothing here schedules it.
+- CORE_BW's pools, validation and test run after profile 1's end (D98 a).
+
+**Sources.** Lecturer's revised proposal of 2026-10-20 (D92): the three configurations, KPIs 5-8, and the CNN's contribution as an analysis metric. D98 a. D99. `plan_v2.md` risk 8 ("The fair comparison is CORE_BW's"). `quality_checklist.md` finding 5 and PC4. Gap audit M3 and M4 (session scratchpad `interim_report/core/gap_audit.md`, not in this repo). Code: W `d4623ed`: `lect_kpis.m`, `evaluate_policies.m`, `policy_decide.m`, `policy_setup.m`, `policy_monitor.m`, `decision_config.m`, `rule_core_policy.m`, `experiment_core_bw.m`. `core-bw-p1` `ac55080`.
