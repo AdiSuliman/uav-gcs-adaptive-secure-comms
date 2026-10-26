@@ -1693,6 +1693,10 @@ SF = arrayfun(@(si, ri, fi) pool_seed(fi, si, 15, ri), s(:), r(:), f(:));
 verifyLessThan(tc, max(SF), 2000000);                   % pool seeds stay below 2 000 000 (shadow_pool_seed.m)
 verifyEqual(tc, [min(SF) max(SF)], [1941501 1986600]);
 S = [S; SF];
+[s, r, f] = ndgrid(1:6, 1:100, [7 8 9]);                % the fresh set's smoke build (block 18)
+SF = arrayfun(@(si, ri, fi) pool_seed(fi, si, 18, ri), s(:), r(:), f(:));
+verifyLessThan(tc, max(SF), 2000000);
+S = [S; SF];
 [t, li, s] = ndgrid(1:20, 1:10, 1:6);                   % survivability map: entries, levels (path loss 10), Eb/N0
 S = [S; 900000 + 1000*t(:) + 10*li(:) + s(:); 700000 + (1:5)'];
 [t, r] = ndgrid(1:20, 1:5);                             % the surv_v2 map: entries, flights (surv_flights.m)
@@ -5954,9 +5958,15 @@ function test_clean_fresh_guard(tc)
 [sp, fm, fo] = clean_set_layout('test'); verifyEqual(tc, {sp, fm, fo}, {15, [1 3 5], 'data/clean_test_pools.mat'});
 [sp, fm, fo] = clean_set_layout('val'); verifyEqual(tc, {sp, fm, fo}, {4, [1 3 5], 'data/clean_val_pools.mat'});
 [sp, fm, fo] = clean_set_layout('fresh'); verifyEqual(tc, {sp, fm, fo}, {15, [7 8 9], 'data/clean_fresh_pools.mat'});
+[sp, fm, fo] = clean_set_layout('fresh', true); verifyEqual(tc, {sp, fm, fo}, {18, [7 8 9], 'data/clean_fresh_pools.mat'});
+for c = {'test', 'val'}                                  % the smoke flag moves the fresh set only
+    [s0, f0, o0] = clean_set_layout(c{1}); [s1, f1, o1] = clean_set_layout(c{1}, true);
+    verifyEqual(tc, {s1, f1, o1}, {s0, f0, o0}, c{1});
+end
 verifyError(tc, @() clean_set_layout('bogus'), 'clean_set_layout:set');
 own = {1, 15, 'pools'; 1, 4, 'pools'; 1, 17, 'pools'; 2, 10, 'check'; 3, 15, 'clean'; 5, 4, 'clean'; ...
-    6, 14, 'core_bw'; 6, 19, 'core_bw'; 7, 15, 'fresh'; 9, 15, 'fresh'; 7, 4, ''; 4, 15, ''; 3, 10, ''};
+    6, 14, 'core_bw'; 6, 19, 'core_bw'; 7, 15, 'fresh'; 9, 15, 'fresh'; 8, 18, 'fresh'; 7, 4, ''; 7, 19, ''; ...
+    4, 15, ''; 3, 10, ''};
 for i = 1:size(own, 1)
     verifyEqual(tc, pool_seed_owner(own{i, 1}, own{i, 2}), own{i, 3}, sprintf('family %d block %d', own{i, 1}, own{i, 2}));
 end
@@ -6002,9 +6012,10 @@ catch e
 end
 cd(here);
 src = fileread(which('build_clean_test_pools'));
-verifyNotEmpty(tc, strfind(src, '[SP, FAMS, f_out] = clean_set_layout(CLEAN_SET);'));
-verifyNotEmpty(tc, regexp(src, ['clean_set_layout\(CLEAN_SET\);\r?\nif strcmp\(CLEAN_SET, ''fresh''\), clean_fresh_guard\(' ...
-    '''data/drop_threshold\.mat'', exist\(''SMOKE'', ''var''\) && SMOKE\); end'], 'once'));
+verifyNotEmpty(tc, strfind(src, '[SP, FAMS, f_out] = clean_set_layout(CLEAN_SET, exist(''SMOKE'', ''var'') && SMOKE);'));
+verifyNotEmpty(tc, regexp(src, ['clean_set_layout\(CLEAN_SET, exist\(''SMOKE'', ''var''\) && SMOKE\);[^\n]*\r?\n' ...
+    'if strcmp\(CLEAN_SET, ''fresh''\), clean_fresh_guard\(''data/drop_threshold\.mat'', exist\(''SMOKE'', ''var''\) ' ...
+    '&& SMOKE\); end'], 'once'));
 verifyNotEmpty(tc, strfind(src, 'if strcmp(CLEAN_SET, ''fresh''), CT.fams = FAMS; end'));
 verifyNumElements(tc, strfind(src, 'CT.fams = '), 1);
 rs = fileread(which('run_stage'));
@@ -9404,8 +9415,8 @@ S = [S; arrayfun(@(si, ri) pool_seed(2, si, 10, ri), s(:), r(:))];
 S = [S; arrayfun(@(si, bi) pool_seed(1, si, bi, 100), s(:), b(:))];
 [s, r, b, f] = ndgrid(1:6, 1:100, [4 15], [3 5]);
 S = [S; arrayfun(@(si, ri, bi, fi) pool_seed(fi, si, bi, ri), s(:), r(:), b(:), f(:))];
-[s, r, f] = ndgrid(1:6, 1:100, [7 8 9]);                % the fresh clean test set (block 15, P1R)
-S = [S; arrayfun(@(si, ri, fi) pool_seed(fi, si, 15, ri), s(:), r(:), f(:))];
+[s, r, f, b] = ndgrid(1:6, 1:100, [7 8 9], [15 18]);    % the fresh clean test set (block 15, P1R) and its smoke build
+S = [S; arrayfun(@(si, ri, fi, bi) pool_seed(fi, si, bi, ri), s(:), r(:), f(:), b(:))];
 [t, li, s] = ndgrid(1:20, 1:10, 1:6);
 S = [S; 900000 + 1000*t(:) + 10*li(:) + s(:); 700000 + (1:5)'];
 [t, r] = ndgrid(1:20, 1:5);
