@@ -297,6 +297,9 @@ for k = 1:numel(keys)
     if isfield(q, 'rate') && isstruct(q.rate) && isfield(q.rate, 'per_hour')
         ph = sprintf('; %.0f false changes per hour', q.rate.per_hour);
     end
+    if q.n < 600                                     % measure_all_kpis.m: the project's KPI 6 also needs 600 episodes
+        ph = sprintf('%s; fewer than 600 episodes, so the project''s own KPI 6 (kpi_summary) does not pass on these counts', ph);
+    end
     [net, role] = pol_role(keys{k}, ternary(any(strcmp(keys{k}, {'rule_core', 'none'})), 'system', 'extension'));
     R{end+1} = row('kpi', 3, 'reading', 'system false alarms: episodes with a change on clean flights', 'network', net, ...
         'policy', keys{k}, 'pair_set', pair_text(pair_kind(keys{k})), 'action_set', action_text(keys{k}), ...
