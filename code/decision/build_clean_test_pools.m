@@ -3,7 +3,7 @@
 % link ('none') on 300 new geometries per Eb/N0 (seeds never used before), under
 % every configuration (common random numbers, as in build_policy_pools.m), with
 % the same detector, frames per geometry and features (pool_cell.m, in parallel).
-% Two sets, chosen by CLEAN_SET (default 'test'):
+% Three sets, chosen by CLEAN_SET (default 'test'; clean_set_layout.m):
 %   'test'  seed block 15 -> data/clean_test_pools.mat: evaluate_policies.m runs
 %           one clean episode per geometry and KPI 6 is computed over them with the
 %           clean episodes of the test pools (one per geometry), from the KPI 1
@@ -11,16 +11,20 @@
 %           as two Eb/N0 points are above it
 %   'val'   seed block 4 -> data/clean_val_pools.mat: train_dqn.m checks the false
 %           alarms of every run on it, so the test set is used once
-% Geometry k takes clean_pool_seed.m's seed (families 1, 3 and 5 of the block); every
-% per-flight draw is kept as the pools keep theirs (CT.cov, flight_cov.m), so readers never
-% re-derive them. The detector must be that of data/policy_pools.mat: CT.det_id and
+%   'fresh' seed block 15, families 7, 8, 9 -> data/clean_fresh_pools.mat: P1R's KPI 6 set
+%           (docs/p1r_protocol.md), seeds no earlier set flew; built only after C1d adopted a
+%           degradation test (clean_fresh_guard.m), never by the chain's C1c
+% Geometry k takes clean_pool_seed.m's seed (families 1, 3 and 5 of the block; the fresh set
+% 7, 8 and 9); every per-flight draw is kept as the pools keep theirs (CT.cov, flight_cov.m),
+% so readers never re-derive them. The detector must be that of data/policy_pools.mat: CT.det_id and
 % CT.model_tag carry it and the link model, and every reader checks them (check_det_id.m).
 % Every finished chunk of geometries is kept on disk (data/c1c_<set>_chunks,
 % pool_checkpoint.m) under a key of everything its frames depend on, so a build stopped at
 % any point simulates only the chunks it does not hold when started again; the output is
 % written once complete and the chunks removed after.
 %
-% Output: data/clean_test_pools.mat or data/clean_val_pools.mat (struct CT)
+% Output: data/clean_test_pools.mat, data/clean_val_pools.mat or data/clean_fresh_pools.mat
+% (struct CT; the fresh set adds CT.fams)
 
 close all; clc;
 warning('off', 'Simulink:cgxe:LeakedJITEngine');
@@ -28,12 +32,9 @@ fprintf('=== Clean-link pools over many geometries ===\n\n');
 
 %% 1. Configuration
 if ~exist('CLEAN_SET', 'var'), CLEAN_SET = 'test'; end
-switch CLEAN_SET
-    case 'test', SP = 15; f_out = 'data/clean_test_pools.mat';
-    case 'val',  SP = 4; f_out = 'data/clean_val_pools.mat';
-    otherwise, error('build_clean_test_pools: CLEAN_SET must be ''test'' or ''val''');
-end
-N_GEOM = 300;                                 % geometries per Eb/N0: 100 per geometry family 1, 3, 5 (pool_seed.m)
+[SP, FAMS, f_out] = clean_set_layout(CLEAN_SET);
+if strcmp(CLEAN_SET, 'fresh'), clean_fresh_guard('data/drop_threshold.mat', exist('SMOKE', 'var') && SMOKE); end
+N_GEOM = 300;                                 % geometries per Eb/N0: 100 per geometry family FAMS (pool_seed.m)
 CHUNK = 10;                                   % geometries per parallel job
 N_WORKERS = 6;
 opt = struct('F_SUB', 20, 'tw', 10, 'delay_bits', 20);
@@ -57,7 +58,8 @@ if isfile(f_out) && dir(f_out).datenum > dir('data/policy_pools.mat').datenum
     Cx = load(f_out, 'CT');
     if isequal(Cx.CT.runs, runs) && isequal(Cx.CT.ebno, EBNO) && isequal(Cx.CT.actions, ACTIONS) ...
             && isfield(Cx.CT, 'cov') && isfield(Cx.CT, 'det_id') && strcmp(Cx.CT.det_id, DET_ID) ...
-            && isequal(fec_rx_of(Cx.CT), PRX)
+            && isequal(fec_rx_of(Cx.CT), PRX) ...
+            && (isfield(Cx.CT, 'fams') && isequal(Cx.CT.fams, FAMS) || ~isfield(Cx.CT, 'fams') && isequal(FAMS, [1 3 5]))
         fprintf('%s is up to date (%d geometries per Eb/N0), nothing to do\n', f_out, N_GEOM);
         clear CLEAN_SET; return
     end
@@ -77,7 +79,7 @@ geo = cell(nJ, nS);
 for j = 1:nJ
     r = (j-1)*CHUNK + 1 : min(j*CHUNK, N_GEOM);
     for s = 1:nS
-        [sd_, v_] = arrayfun(@(k) clean_pool_seed(s, SP, k, vrange), r);
+        [sd_, v_] = arrayfun(@(k) clean_pool_seed(s, SP, k, vrange, FAMS), r);
         geo{j, s} = struct('seed', sd_, 'speed', v_, 'run', runs(r));
     end
 end
@@ -125,6 +127,7 @@ sds = cell2mat(arrayfun(@(s) [cell2mat(cellfun(@(g) g.seed, geo(:, s)', 'Uniform
 V = flight_cov(arrayfun(@(s) struct('seed', sds(s, :), 'speed', spd(s, :)), 1:nS, 'UniformOutput', false), EBNO, p0);
 CT = struct('pools', {pools}, 'runs', runs, 'ebno', EBNO, 'actions', {ACTIONS}, 'n_geom', N_GEOM, ...
     'speed', spd, 'seed', sds, 'cov', V, 'set', CLEAN_SET, 'det_id', DET_ID, 'model_tag', TAG, 'fec_rx', PRX, 'created', datestr(now));
+if strcmp(CLEAN_SET, 'fresh'), CT.fams = FAMS; end      % the test and val sets keep their fields
 pool_checkpoint('commit', f_out, struct('CT', CT));
 pool_checkpoint('clear', CKD);
 fprintf('Saved %s (%.1f min)\n', f_out, toc(t0)/60);
