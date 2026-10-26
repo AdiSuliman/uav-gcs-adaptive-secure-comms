@@ -49,6 +49,8 @@ function R = rollout_policy(kind, PP, K, spec, split, agent, opt, seed)
 %          conf_end, the share of the decisions reading a clean frame from the second on
 %          with a confirmed alarm (re-alarms); sw_end, the changes after it that are no
 %          release
+%          deg_quiet  with the monitor's deg_mode 'win_q_gate' only: the cycles degraded
+%                     without quiet-slot interference (logged, no alarm; whole episode)
 if nargin < 7 || isempty(opt), opt = struct(); end
 rs = RandStream('mt19937ar', 'Seed', seed);
 opt.rs = RandStream('mt19937ar', 'Seed', seed + 1);
@@ -61,6 +63,7 @@ tr = struct('r', zeros(T, NE), 'q', zeros(T, NE), 'rest', false(T, NE), 'rplr', 
     'ch', false(T, NE), 'fs', false(T, NE), 'post', false(T, NE), 'esc', false(T, NE), 'cfg', zeros(T, NE), ...
     'recov', false(T, NE), 'recovc', false(T, NE), 'fer', zeros(T, NE), 'cls', false(T, NE), 'conf', false(T, NE), 'gap', false(T, NE), ...
     'link', zeros(T, NE), 'ended', false(T, NE), 'rel', false(T, NE));
+dq = [];                                                % degraded, no RF evidence (deg_mode 'win_q_gate')
 comp = cellfun(@(c) strsplit(c, '+'), PP.scen(E.scn), 'UniformOutput', false);
 for t = 1:T
     if strcmp(kind, 'oracle')
@@ -70,6 +73,10 @@ for t = 1:T
         tr.esc(t, :) = dinf.escalated;
         tr.cls(t, :) = cellfun(@(c, q) ismember(c, q), dinf.cls, comp);
         tr.conf(t, :) = dinf.confirmed;
+        if isfield(dinf, 'deg_quiet')
+            if isempty(dq), dq = zeros(1, NE); end
+            dq = dq + dinf.deg_quiet;
+        end
     end
     [E, r, obs, info] = link_env('step', E, PP, K, a);
     nw = info.changed & fc.t == 0;
@@ -126,6 +133,7 @@ R.cfg_final = E.cfg;
 R.r = E.r;
 R.cfg_trace = tr.cfg;
 R.fc_t = fc.t; R.fc_cls = fc.cls; R.fc_deg = fc.deg; R.fc_drop = fc.drop; R.fc_dal = fc.dal;
+if ~isempty(dq), R.deg_quiet = dq; end
 [R.cfg_end, R.rel_t, R.cost_end, R.on_end, R.conf_end, R.sw_end] = deal(nan(1, NE));
 for i = find(any(tr.ended, 1))
     k0 = find(tr.ended(:, i), 1);                       % the step that drew the first clean frame

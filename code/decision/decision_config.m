@@ -24,6 +24,14 @@ C.drop_db    = 4;           % default Eb/N0-estimate drop that confirms path_los
 C.cusum_win  = 3;           % cycles of the window-limited CUSUM's post-change estimate (drop_cusum.m): the monitor's 3-cycle window
 C.fec_frames = 4;           % frames of a coded packet's codeword when the pools do not record it (init_params.m fec_frames);
                             % the coded packet loss is read over 2 x win frames (win packets)
+C.deg_mode   = 'ratio';     % degradation test (policy_monitor.m, docs/deg_fix_protocol.md): 'ratio' ratio_ok x the
+                            % clean mean at the frame's Eb/N0; 'win' at the window's median Eb/N0; 'win_q' the
+                            % clean (1 - alpha) quantile PP.ber_q as threshold; 'win_q_gate' as 'win_q', an alarm
+                            % only with quiet-slot interference in the window. PP.deg_mode, when set, is deployed
+C.deg_alpha  = [1e-2 1e-3]; % per-cycle false-alarm rates of the quantile candidates, in the adoption order
+C.deg_bin_db = 1;           % width of the quantile's initial bins of the windowed Eb/N0 [dB]
+C.deg_kmin   = 10;          % a bin holds at least deg_kmin / alpha clean cycles ...
+C.deg_fmin   = 30;          % ... from at least deg_fmin flights, else it merges with a neighbour
 
 % Decision period: one cycle decides on one received frame; with the decision
 % latency (median < 10 ms, p95 < 20 ms target) a deployed loop decides every 20 ms.

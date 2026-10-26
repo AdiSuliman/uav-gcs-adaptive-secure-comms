@@ -70,7 +70,8 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %   random, fixed: reference policies, no monitor gating ('fixed' at no_action is
 %   the link that does not respond)
 %
-%   info: q (Q-values, dqn kinds), cls, degraded, confirmed, escalated, ber_avg, drop, drop_alarm
+%   info: q (Q-values, dqn kinds), cls, degraded, confirmed, escalated, ber_avg, drop, drop_alarm;
+%   deg_quiet with the monitor's deg_mode 'win_q_gate'
 if nargin < 7, opt = struct(); end
 C = decision_config();
 if isfield(opt, 'monitor'), PP = decision_settings(PP, opt.monitor); end
@@ -181,6 +182,7 @@ end
 mem = policy_monitor('change', mem, a ~= cfg);
 info = struct('q', q, 'cls', {M.cls}, 'degraded', M.degraded, 'confirmed', M.confirmed, ...
     'escalated', escalated, 'ber_avg', M.ber_avg', 'drop', M.drop, 'drop_alarm', M.drop_alarm);
+if isfield(M, 'deg_quiet'), info.deg_quiet = M.deg_quiet; end   % degraded, no RF evidence (deg_mode 'win_q_gate')
 end
 
 function [gm, gid] = action_groups(A)
