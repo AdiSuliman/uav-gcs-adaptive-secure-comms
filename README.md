@@ -106,7 +106,7 @@ Notes:
 - The false-alarm KPI is read at detector level, as pre-registered. The whole-monitor false alarm on clean flights (an extension KPI) is not at 5% yet: 12.5-29.9% of 1,800 clean validation episodes depending on the monitor setting. The fix is registered in D103 and D104.
 - The CNN contribution is also measured in the controlled-bandwidth study CORE_BW (`rule_core` vs `blind_core`), estimated 30.10-31.10.2026.
 
-Next dates (estimates): DQN training and the policy evaluation end 28.10.2026; profile 1's chain ends 28.10 evening to 29.10 early morning; CORE_BW 30.10-31.10; the profile-1 rerun (P1R) 2.11-3.11; profile 3 18.11-21.11.2026. Current numbers and logs are in [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/PROJECT_LOG.md](docs/PROJECT_LOG.md).
+Next dates (estimates): DQN training ends 28.10.2026 about 11:30-18:30 and the policy evaluation about 13:00-20:00; profile 1's chain ends (RPT) 29.10 about 05:00-15:00; a PC restart follows; CORE_BW 30.10-1.11; the profile-1 rerun (P1R) 2.11-5.11; profile 3 about 20.11-25.11.2026. Current numbers and logs are in [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/PROJECT_LOG.md](docs/PROJECT_LOG.md).
 
 ## Operator console
 
@@ -122,7 +122,7 @@ Next dates (estimates): DQN training and the policy evaluation end 28.10.2026; p
 
 Start with `demo_gui` in MATLAB from the repository folder. The Live and Episode tabs need `data/trained_dqn.mat` (written when C2 ends); the KPI tab needs `results/policy_evaluation.mat` (C2e); the latency plot needs LAT. A bundle exported by `export_gui_bundle` lets the console run from a copy outside the pipeline folder.
 
-State: the antenna count, the threat list, temporal fusion and the decision settings follow the current pipeline. The three-state core view and the core action set are being added to the console; a live check with the final agent follows the end of C2.
+State: the antenna count, the threat list, temporal fusion and the decision settings follow the current pipeline. The three-state core view and the core action set are planned on branch `gui-core`; a live check with the final agent from an exported bundle follows RPT.
 
 ## Quick start
 

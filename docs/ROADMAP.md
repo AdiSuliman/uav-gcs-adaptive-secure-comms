@@ -29,15 +29,16 @@ Rows and months are exactly those of the proposal (months 1-8). The interim repo
 
 | Milestone | Expected (estimate, boost off) |
 |---|---|
-| DQN training (C2) ends | 28.10.2026, about 06:00-12:00 |
-| Policy evaluation (C2e): the lecturer's open KPIs are read | 28.10.2026, about 07:00-14:00 |
-| Operator console with the v7 agent (Live and Episode tabs) | from the end of C2 |
-| Profile 1 chain ends (RPT): KPI table, dashboard, report numbers | 28.10.2026 evening to 29.10.2026 early morning |
-| Controlled-bandwidth study (CORE_BW) | 30.10-31.10.2026 |
-| Profile-1 rerun with the fixed monitor (P1R) | 2.11-3.11.2026 |
-| Profile 3 ends (last extension) | 18.11-21.11.2026 |
+| DQN training (C2) ends | 28.10.2026, about 11:30-18:30 |
+| Policy evaluation (C2e): the lecturer's open KPIs are read | 28.10.2026, about 13:00-20:00 |
+| Operator console with the v7 agent (Live and Episode tabs) | live check after RPT, from a bundle outside the pipeline folder, with Adi present |
+| Profile 1 chain ends (RPT): KPI table, dashboard, report numbers | 29.10.2026, about 05:00-15:00 |
+| PC restart window (frees memory held by exited MATLAB entries) | right after RPT |
+| Controlled-bandwidth study (CORE_BW) | 30.10-1.11.2026 |
+| Profile-1 rerun with the fixed monitor (P1R) | 2.11-5.11.2026 |
+| Profile 3 ends (last extension) | about 20.11-25.11.2026 (step 7a, the detector-set run for profile 3's decoder, is not yet timed) |
 
-Profile 1 = three UAV antennas, branch `v7-dev`. Each stage starts when the previous one ends; the dates come from the measured C2 pace (about 34 min per run, run 10 of 72 started 26.10.2026 21:11) and the stage durations below.
+Profile 1 = three UAV antennas, branch `v7-dev`. Each stage starts when the previous one ends; the dates come from the measured C2 pace (about 34 min per run; C2 is 81-83 runs; run 10 started 26.10.2026 21:11) and the stage durations below.
 
 **Done (measured):**
 
@@ -50,37 +51,37 @@ Profile 1 = three UAV antennas, branch `v7-dev`. Each stage starts when the prev
 | Antenna options (SURV3) | 599.9 min |
 | Drop-threshold choice (C1d) | 3.9 min; threshold 4.5 dB |
 
-**Now:** DQN training (C2) started 26.10.2026 16:03: 72 runs of 50,048 episodes (4 monitors x 2 drop settings x 3 false-switch penalties x 3 seeds). Nine runs were finished at 21:11, at about 34 min per run, so about 41 h in all.
+**Now:** DQN training (C2) started 26.10.2026 16:03: 81-83 runs of 50,048 episodes (the 72-run grid of 4 monitors x 2 drop settings x 3 false-switch penalties x 3 seeds, plus the coordinate steps for gamma, costs, the unknown-threat flag and the reward scales). Nine runs were finished at 21:11, at about 34 min per run, so about 47 h in all, plus 0.5-1.4 h of noise-burst evaluations.
 
 **Stages left, in order** (durations are estimates from smoke runs and the earlier full runs; no full-scale v7 run exists yet for these stages):
 
 | # | Stage | What it does | Expected duration | Start |
 |---|---|---|---|---|
-| 1 | C2 train_dqn | Double DQN grid, choice on validation | about 36 h left, plus 0.5-1.4 h noise-burst evaluations | running |
+| 1 | C2 train_dqn | Double DQN grid and coordinate steps (81-83 runs), choice on validation | until 28.10 about 11:30-18:30, including 0.5-1.4 h noise-burst evaluations | running |
 | 2 | C2e evaluate_policies | Every policy on test pools; the lecturer's PER, recovery-time, goodput and CNN-contribution lines | 1-2 h | after C2 |
-| 3 | C2g experiment_combo_generalization | DQN retrained without each combination | 3.6-4.5 h | after C2e |
-| 4 | C2u experiment_unknown_threat | Response to a threat never trained on | 2.5-3.5 h | after C2g |
+| 3 | C2g experiment_combo_generalization | DQN retrained without each of 14 combinations (one full training each) | 7-8.5 h | after C2e |
+| 4 | C2u experiment_unknown_threat | DQN retrained without each of 10 single threats; response to a threat never trained on | 5-6 h | after C2g |
 | 5 | GAL threat_gallery | One figure per threat | 5-10 min | after C2u |
 | 6 | OHP overhead_pass | UAV flying over the GCS (dipole null) | 3.8-4.7 h | after GAL |
 | 7 | GCSA gcs_antenna_analysis | What the tracked directional GCS antenna gives | under 1 min | after OHP |
 | 8 | EDGE edge_map | Committed / not committed verdict at every envelope point | 0.5-2 h | after GCSA |
 | 9 | KPI, DASH, WEAK, RPT | KPI summary, dashboard, weak-point analysis, numbers export | about 1 min each | after EDGE |
-| 10 | LAT measure_latency | Decision latency per cycle, on an idle machine | 1-6 min | after RPT |
+| 10 | LAT measure_latency | Decision latency per cycle, on an idle machine | 1-6 min | after profile 3 ends, in the takeover's final phase (LAT is not part of the profile 1 chain); it can be hand-run after RPT on the idle machine, then KPI, DASH, WEAK and RPT are rerun |
 
-From 26.10.2026 evening to the end of RPT: about 48-55 h. The OHP figure comes from smoke runs that shared the machine. The processor boost is off (99%), which slows the stages.
+From C2e's end to RPT: about 16-19 h (the arithmetic of the rows gives up to 21 h if every run takes 36 min). From 26.10.2026 evening to RPT: about 55-65 h. The OHP figure comes from smoke runs that shared the machine. The processor boost is off (99%), which slows the stages.
 
 ## After profile 1
 
-Order: controlled-bandwidth study, profile-1 rerun, profile 3. Calendar dates are in the milestone table above.
+Order: PC restart window, controlled-bandwidth study, profile-1 rerun, profile 3. Calendar dates are in the milestone table above.
 
 | Step | What | Expected duration | Start |
 |---|---|---|---|
 | CORE_BW | Controlled-bandwidth study: 41 channels at 2401 + 2k MHz, jammer widths tone to 83.5 MHz, `rule_core` vs `blind_core`; branch `core-bw-p1` | about 1.5-2 days (planning estimate) | after RPT of profile 1 |
-| P1R | Profile-1 rerun of C1d, C2 and C2e with a fixed monitor, in an isolated worktree; stops after C1d if the old threshold form is kept (D104) | 44-49 h at 72 runs | after CORE_BW |
-| Profile 3 deployment | Tests, fusion rerun, detector stages, rehearsal, fourth test set read once | not estimated | after P1R |
+| P1R | Profile-1 rerun of C1d, C2 and C2e with a fixed monitor, in an isolated worktree; stops after C1d if the old threshold form is kept (D104) | about 51-53 h before the single-thread factor, which is unmeasured (C2 alone is 81-83 runs, about 46-47 h; plus the fresh clean test set 2.0-2.3 h, C1d, noise-burst evaluations and C2e); window 2.11-5.11 | after CORE_BW |
+| Profile 3 deployment | Tests, fusion rerun, detector stages, rehearsal, fourth test set read once; step 7a (detector set for the JSI decoder, not yet timed) | not estimated | after P1R |
 | Profile 3 pools | C1p (4 antennas) | 90-105 h (estimate) | after deployment |
 | Profile 3 maps | SURV map v2 (D100); SURV3 v2 (D101) | 44-50 h; 690-786 min | after C1c |
-| Profile 3 decision layer | C1c, C1d, C2, C2e, C2g, C2u, GAL, EDGE, KPI, DASH, WEAK, RPT, then LAT | profile 1's durations as a guide | after the maps |
+| Profile 3 decision layer | C1c, C1d, C2, C2e, C2g, C2u, GAL, EDGE, KPI, DASH, WEAK, RPT, then LAT (the takeover's final phase) | profile 1's durations as a guide | after the maps |
 
 Profile 3 = four antennas. OHP and GCSA are skipped on it. Profile 2 (two antennas) was dropped on 21.10.2026.
 
@@ -90,8 +91,8 @@ Profile 3 = four antennas. OHP and GCSA are skipped on it. Profile 2 (two antenn
 
 1. Finish DQN training (C2) and run the policy evaluation (C2e).
 2. Read the lecturer's four open KPIs at the policy evaluation (C2e): PER reduction (target at least 30% vs the static link), recovery time, goodput, CNN contribution vs the conventional adaptive mechanism.
-3. Finish profile 1's chain to RPT: the KPI table (KPI), the dashboard (DASH) and the report numbers (RPT) are proposal deliverables; latency (LAT) on an idle machine after it.
-4. Operator console: add the three-state CNN view and the core action set, then a live check with the v7 agent from a copy outside the pipeline folder, and screenshots.
+3. Finish profile 1's chain to RPT: the KPI table (KPI), the dashboard (DASH) and the report numbers (RPT) are proposal deliverables; latency (LAT) on an idle machine: with the profile 1 finals, hand-run after RPT if Adi decides so, otherwise at the end of profile 3 in the takeover's final phase.
+4. Operator console: the three-state CNN view and the core action set are planned on branch `gui-core`; then a live check with the v7 agent from a bundle outside the pipeline folder, after RPT with Adi present, and screenshots.
 5. Submit the interim report on 01.11.2026 (draft 5 follows the proposal Gantt).
 
 **Extensions (no commitment)**
@@ -106,8 +107,8 @@ Profile 3 = four antennas. OHP and GCSA are skipped on it. Profile 2 (two antenn
 **Report, book and defense**
 
 12. Project book (final report) with the lecturer's KPI table first, extensions in their own section.
-13. Defense: 20 + 10 min, English, at most 12 slides.
-14. Poster (5% of the grade).
+13. Defense: 20-30 min in all including the examiners' questions; a 15-20 minute presentation of at most 12 slides, no literature review or theory slides; Hebrew by default (English only on a written request, and then the defense is in English too). Date set by the faculty coordinators.
+14. Poster: not a grade line. A digital poster is made only if the project is selected for the faculty's projects exposure day (about 15 of about 100 projects), on the examiners' and supervisor's recommendation.
 
 ## Deviations from the original plan
 
@@ -130,6 +131,6 @@ Profile 3 = four antennas. OHP and GCSA are skipped on it. Profile 2 (two antenn
 | PER target meaningless at 0 and 3 dB (clean packet loss 0.99 and 0.79) | Pre-registered rule: verdict on pooled readings; low-Eb/N0 points reported separately (D99) |
 | Noise-burst response worsens the link (BER 0.495 vs 0.439 with no response) | Uncoded answer chosen on validation for profile 1; JSI decoder for profile 3; reported as a weakness (D97) |
 | CNN contribution small against the conventional mechanism | Defined as an analysis metric, not a promise; CORE_BW gives hops a frequency geometry (D98) |
-| Long run times (C2 about 41 h; chain 48-55 h) | Pre-built frame pools, parallel workers, checkpoints, fixed stage order, takeover recovery after a reboot |
+| Long run times (C2 about 47 h; chain 55-65 h from 26.10 evening) | Pre-built frame pools, parallel workers, checkpoints, fixed stage order, takeover recovery after a reboot |
 | Weak classes and unknown-threat score below target | Choices made on validation only; test sets read once; shortfalls reported, not hidden |
 | Interim report depends on unfinished results | Report covers the Gantt rows due by month 4; later items only as ahead of schedule |

@@ -15,10 +15,10 @@ Scope: the lecturer's revised proposal of 20.10.2026 (D92) is the official scope
 |---|---|
 | Lecturer KPIs 1-4 (BER model, macro-F1, false alarms, recall) | Measured on data never used for training or selection: all met (details in v7) |
 | Lecturer KPIs 5-8 (PER reduction, recovery time, goodput, CNN contribution) | Pending: they come from stage C2e |
-| Profile 1 (3 UAV antennas) | Stage C2 (decision-layer training) running since 26.10 16:03; 9 of 72 runs finished at 21:11 |
+| Profile 1 (3 UAV antennas) | Stage C2 (decision-layer training) running since 26.10 16:03; 9 of 81-83 runs finished at 21:11 (about 34 min per run) |
 | Next on profile 1 | C2e (first PER, recovery-time, goodput and CNN-contribution lines), then the rest of the chain, a controlled-bandwidth study, a rerun with a corrected monitor, then profile 3 |
 | Profile 3 (4 UAV antennas) | Detector stages done; decision layer waits for profile 1 |
-| Estimates | C2e 28.10; profile 1 chain ends 28.10 evening to 29.10 early morning; profile 3 about 18-21.11 (D104) |
+| Estimates | C2 ends 28.10 about 11:30-18:30; C2e 28.10 about 13:00-20:00; profile 1 chain ends (RPT) 29.10 about 05:00-15:00; PC restart window right after; CORE_BW 30.10-1.11; P1R 2.11-5.11; profile 3 about 20.11-25.11 (step 7a not yet timed) |
 | Interim report | Draft 4 delivered 26.10; draft 5 structure approved |
 
 ## Version overview
