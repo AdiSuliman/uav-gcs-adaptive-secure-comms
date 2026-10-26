@@ -25,7 +25,8 @@
 % own threshold from the whole monitor's false-alarm bound (choose_drop_threshold.m MONP) and
 % the steps C.drop_steps around it (the median window: dB, above the moving-away floor it
 % records; the CUSUM: one grid step per step), the sweeping jammer's own confirmation as
-% choose_drop_threshold.m adopted it (PP.confirm_sweep)
+% choose_drop_threshold.m adopted it (PP.confirm_sweep), and its degradation test when it chose one
+% (PP.deg_mode, PP.ber_q; every policy, the rule fallback's own monitor included)
 % x false-switch penalty of the TRAINING reward (CFG.fa_penalty_grid) x
 % CFG.dqn_gammas x CFG.dqn_seeds. Every run keeps the checkpoint with the best held
 % recovery on its own validation episodes (scored with the escalation). All runs are then
@@ -134,6 +135,7 @@ if isfile('data/drop_threshold.mat')
     end
     if isfield(Dd, 'MONP'), MONP = Dd.MONP; end
     if isfield(Dd, 'confirm_sweep'), PP.confirm_sweep = Dd.confirm_sweep; end   % the sweeper's own confirmation
+    if isfield(Dd, 'deg_mode'), PP.deg_mode = Dd.deg_mode; PP.ber_q = Dd.ber_q; end   % the degradation test chosen at C1d
     clear Dd
 end
 if ~isempty(DROP_DB), PP.drop_db = DROP_DB; end
@@ -323,6 +325,7 @@ rule_sel = struct('alarm', base(ir).alarm, 'drop', base(ir).drop, 'rec', base(ir
 if ~isnan(base(ir).drop), rule_sel.drop_db = base(ir).drop; end
 for f = fieldnames(Ssel)', rule_sel.(f{1}) = Ssel.(f{1}); end
 rule_sel.confirm_sweep = []; if isfield(PP, 'confirm_sweep'), rule_sel.confirm_sweep = PP.confirm_sweep; end
+if isfield(PP, 'deg_mode'), rule_sel.deg_mode = PP.deg_mode; rule_sel.ber_q = PP.ber_q; end
 FD = false_change_rate(B.sw_w, H.T, 1:numel(B.sw_w), CD.period_ms);
 FR = false_change_rate(base(ir).rule.sw_w, H.T, 1:numel(base(ir).rule.sw_w), CD.period_ms);
 rep = {};
@@ -356,6 +359,9 @@ rep{end+1} = sprintf(['Each monitor''s drop thresholds (its own on the whole mon
 rep{end+1} = sprintf('The sweeping jammer''s own confirmation: %s (choose_drop_threshold.m, on validation)', ...
     ternary(isfield(PP, 'confirm_sweep') && ~isempty(PP.confirm_sweep), sprintf('%d of the last %d cycles', ...
     PP.confirm_sweep), 'not adopted'));
+if isfield(PP, 'deg_mode')
+    rep{end+1} = sprintf('The degradation test: %s (choose_drop_threshold.m, on validation, docs/deg_fix_protocol.md)', PP.deg_mode);
+end
 rep{end+1} = '';
 rep{end+1} = sprintf(['Rule settings on validation, rule + escalation at %s, drop %.1f %s, one coordinate at a time (the ' ...
     'selection rule below, the setting in force first); the predicted MMSE gain of %d clean validation frames: mean %.2f, ' ...
@@ -434,6 +440,7 @@ gammas = GAM;
 drop_db = drop_sel; if isnan(drop_db), drop_db = DROP_DB; end
 dec = Sdep; dec.alarm_mode = alarm_mode; dec.confirm = confirm; dec.drop_db = drop_db;
 dec.confirm_sweep = []; if isfield(PP, 'confirm_sweep'), dec.confirm_sweep = PP.confirm_sweep; end
+if isfield(PP, 'deg_mode'), dec.deg_mode = PP.deg_mode; dec.ber_q = PP.ber_q; end
 agent = dqn_dense(agent);                          % matrix form for deployment
 for gi = find(~cellfun(@isempty, agents)), agents{gi} = dqn_dense(agents{gi}); end
 det_id = PP.det_id; pools_created = PP.created;    % the pools (and their detector) the agent learned on

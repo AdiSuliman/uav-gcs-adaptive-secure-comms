@@ -25,6 +25,14 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   window than C.ratio_ok x the clean coded link's loss over its packets plus one loss
 %   event, the Q/2 packets whose codewords share a frame the decoder cannot repair (the
 %   slack of restored_plr, packet_share.m).
+%   PP.deg_mode (default C.deg_mode 'ratio', the test above; docs/deg_fix_protocol.md): 'win'
+%   reads the clean reference at the median measured Eb/N0 estimate of the BER window's frames
+%   (M.ebno_win, a window that restarts with the BER window); 'win_q' compares with the clean
+%   (1 - alpha) quantile of the window BER at that Eb/N0 (PP.ber_q, deg_quantile.m) instead of
+%   C.ratio_ok x the mean; 'win_q_gate' as 'win_q', degraded only with quiet-slot interference
+%   (q_iot at least PP.q_thr, default C.q_alarm_db) in a frame of the window, else M.deg_quiet
+%   (degraded, no RF evidence: no alarm). The coded test is the same in every mode; the gate
+%   applies to it too.
 %   Detected class: from the temporal fusion of the last PP.fuse_N cycles and the
 %   current one (temporal_evidence.m, fuse_classes.m) when PP.fuse is set, otherwise
 %   the frame's own detector output; 'unknown' when the unknown-threat score, averaged
@@ -79,7 +87,8 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   M: ber_avg, plr (NE x 1), ebno_est (as measured), drop (dB, without the configurations'
 %      known gains), drop_alarm, degraded, cls, alarm, confirmed (1 x NE),
 %      probs (NE x classes, fused), te (NE x 9, persistence measurements of the window,
-%      temporal_evidence.m)
+%      temporal_evidence.m); with a deg_mode other than 'ratio' also ebno_win and deg_thr
+%      (NE x 1), and with 'win_q_gate' deg_quiet (1 x NE)
 C = decision_config();
 switch cmd
     case 'init'
@@ -138,12 +147,23 @@ e3 = median(mem.ebno, 2, 'omitnan');
 ref = median(mem.ref, 2, 'omitnan');
 ref(isnan(ref)) = e3(isnan(ref));
 M.drop = (ref - e3)';
-bc = max(clean_ber_ref(M.ebno_est, 'ber_est'), C.deg_floor);
-deg = M.ber_avg > C.ratio_ok * bc;
+dm = C.deg_mode; if isfield(PP, 'deg_mode') && ~isempty(PP.deg_mode), dm = PP.deg_mode; end
+if strcmp(dm, 'ratio')
+    bc = max(clean_ber_ref(M.ebno_est, 'ber_est'), C.deg_floor);
+    deg = M.ber_avg > C.ratio_ok * bc;
+else
+    [mem, M, bc, deg] = deg_window(C, mem, M, PP, dm, arr, fi('q_iot'));
+end
 if any(coded)
     pc = clean_ber_ref(M.ebno_est(coded), 'plr_fec');
     pc(isnan(pc)) = 0;
     deg(coded) = lost(coded) > C.ratio_ok * pc .* npk(coded) + Q / 2;
+end
+if strcmp(dm, 'win_q_gate')                                     % degraded with a quiet slot: a poor link, logged, no alarm
+    qt = C.q_alarm_db; if isfield(PP, 'q_thr') && ~isempty(PP.q_thr) && ~isnan(PP.q_thr), qt = PP.q_thr; end
+    ev = any(mem.qi >= qt, 2);
+    M.deg_quiet = (deg(:) & ~ev)';
+    deg = deg(:) & ev;
 end
 M.degraded = deg(:)';
 mem.good(~M.degraded) = mem.good(~M.degraded) + 1; mem.good(M.degraded) = 0;
@@ -288,6 +308,29 @@ for n = unique(mem.wn)                                     % episodes with the s
 end
 unk = obs.unknown(:)';                                     % the monitor's own threshold PP.maha_thr wherever a score is read
 if ~all(isnan(mh)), unk = mem.unk_now(:)' | (obs.unknown(:)' & isinf(mh(:)')); end
+end
+
+function [mem, M, bc, deg] = deg_window(C, mem, M, PP, dm, arr, qi)
+% Degradation test of deg_mode dm on the BER window's own frames: the clean reference at the
+% median of their measured Eb/N0 estimates; 'win' ratio_ok x that reference, 'win_q*' the clean
+% (1 - alpha) quantile PP.ber_q at it (deg_quantile.m), never below ratio_ok x deg_floor. The
+% Eb/N0 and quiet-slot windows restart with mem.ber at a change's arrival.
+NE = numel(M.ber_avg);
+if ~isfield(mem, 'eb') || isempty(mem.eb), mem.eb = nan(NE, C.win); mem.qi = nan(NE, C.win); end
+mem.eb = [mem.eb(:, 2:end), M.ebno_est(:)]; mem.qi = [mem.qi(:, 2:end), qi(:)];
+mem.eb(arr, 1:end-1) = NaN; mem.qi(arr, 1:end-1) = NaN;
+M.ebno_win = median(mem.eb, 2, 'omitnan');
+bc = max(clean_ber_ref(M.ebno_win, 'ber_est'), C.deg_floor);
+switch dm
+    case 'win'
+        M.deg_thr = C.ratio_ok * bc;
+    case {'win_q', 'win_q_gate'}
+        assert(isfield(PP, 'ber_q') && ~isempty(PP.ber_q), 'policy_monitor: deg_mode %s needs the clean quantile PP.ber_q', dm);
+        M.deg_thr = max(deg_quantile('lookup', PP.ber_q, M.ebno_win), C.ratio_ok * C.deg_floor);
+    otherwise
+        error('policy_monitor: unknown deg_mode %s', dm);
+end
+deg = M.ber_avg > M.deg_thr;
 end
 
 function [n, lost] = packets(crc)
