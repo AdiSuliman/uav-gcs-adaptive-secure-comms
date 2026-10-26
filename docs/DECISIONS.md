@@ -1768,3 +1768,64 @@ What the pass confirmed (profile 1, 11 combinations without the shadowing ones):
 **For profile 3.** `lect-kpi` `899e1c6`: in an export without `.git`, `parent_copy` reads the old commit from the repository that `V7_GIT_REPO` names. Profile 3's queue command sets `V7_GIT_REPO` to the deploy checkout (STOP_SOFT section 7), so its `core` runs every test on the export.
 
 **Rejected.** Restarting profile 1's queue on a new tip that carries `899e1c6`: it changes only a test helper, and the restart would cost the core job, the proofs and the smoke, about a day, inside the time box.
+
+## D103 — Profile 1's system-level clean false alarm: reporting, breakdown and a pre-onset sensitivity line, registered before C2e; the degradation path's fix registered for profile 3 and a profile 1 rerun
+
+**Why (26.10, C1d).** The whole monitor at no_action breaks the 5% bound under every confirmation: 2/2 505/1800 (29.85%), 3/3 368 (22.07%), 4/5 329 (19.84%), 5/5 201 (12.46%). The other paths alone also break it: 484, 338, 297, 161 (`results/drop_threshold.txt:79-106`). The drop path adds 21-40 episodes, the sweeper path none. The lecturer's FAR KPI is read on the detector (B3c, B3r; `design_final.md` 6.5) and is unaffected. No C2 or C2e result had been read when this was decided.
+
+**Decision for profile 1 (no code change in profile 1's tip):**
+1. **Naming.** The system-level clean-episode false alarm is our KPI 6 (an extension). It is never called lecturer KPI 3. The lecturer's KPI 3 verdict lives with B3c (core CNN) and the hybrid's three-state view (`design_final.md` 6.5), with B3r beside them. The hybrid's 11-class share of clean frames read as any threat (5.36%, none as a jamming state) is printed beside the verdict, because it feeds the class path of KPI 6.
+2. **KPI 6 verdict unchanged.** `KP.far` is read on the pre-registered union of clean test sets: Clopper-Pearson one-sided 95% upper bound ≤ 5%, every configuration, at least 600 flights, Eb/N0 ≥ the KPI 1 threshold. The per-Eb/N0 rows and the non-L line stay descriptive (D99 point 5).
+3. **Breakdown (descriptive, saved files only).** Per policy (none, rule_esc, blind_esc, rule_core, blind_core, the deployed DQN), on the same clean episodes as `KP.far`:
+   - (a) false-alarm episodes per Eb/N0 grid point: D99 point 5's rows from the same union RU, extended from `far_report`'s two policies to all six (one table, not a second definition);
+   - (b) the path at the first change: hostile class, degradation with class none/benign/unknown, or drop. From `fc_cls`, `fc_deg` and `fc_dal` (the monitor's drop alarm, saved by `rollout_policy.m:128`). These are the change cycle's flags; an m-of-n confirmation built from mixed paths is attributed to that cycle's flags, and the row says so;
+   - (c) the Xu split: false-alarm episodes with `false_sw > 0` (a change on a flight whose clean link passes the 2× test at no_action over the whole flight, `K.healthy`, `link_env.m:182`; a per-flight flag, not per cycle) against those with `switches > 0` and `false_sw = 0` (flights whose clean link itself fails it). The verdict line counts both; the split is descriptive;
+   - (d) false changes per cycle and per hour (`far_report`'s existing line), beside the per-episode share (Xie 2021: FAR = 1/ARL);
+   - (e) the cycle of the first false change (`fc_t`) as a histogram, with the share inside the first `C.win` − 1 cycles, where the BER window is not yet full (`policy_monitor.m:88, 131`: a 1-4 frame mean). A start-up transient is a simulation artefact of episode starts, not a property of a link that runs continuously, so it is reported as such and handled in section 4, never removed from this reading.
+4. **Pre-onset sensitivity of the lecturer readings (descriptive, labelled "sensitivity").** On the recoverable jamming episodes of every lecturer set:
+   - (a) per policy, the share with a first change before the onset;
+   - (b) the lecturer readings (PER reduction vs static, t_conf, t_rec_det, goodput, both CNN-contribution pairs), recomputed with `lect_kpis.m` unchanged on the subset S0 of episodes with no change before the onset under any of the compared policies. Report S0's size and its Eb/N0 composition beside it.
+   - (c) S0's readings also per Eb/N0 point and on D99's Line B (non-L points), beside the same rows of the full set, so S0's better-link mix is not read as bias.
+   - The pooled Line A of D99 stays the verdict. If S0 and Line A differ in verdict words, the result sentence names both.
+   - Episodes are excluded only on pre-onset behaviour, which no threat can affect. So S0 is not selected on the threat response, but it is selected on link quality, hence (c).
+   - (d) Mechanism D, from C2's log (validation, read before C2e): for every step whose pick fell back to "the three with the lowest bound", the chosen variant against the variant with the highest weakest-threat held recovery without the FA filter, with their held recovery for jamming and tone_jamming and their FA, and whether the pick was decided by an FA tie. Descriptive; it names which lecturer readings were read on FA-constrained settings.
+5. **Carried-over alarms.** Per policy, the count of episodes whose `t_conf` is below m−1 cycles (m of the deployed confirmation), where the confirmation did not come from the sweeper's own path. t_conf is also reported without them. Descriptive.
+6. **Gate.** All of 3-5 except 4(d) (read from C2's log) come from a new script `system_fa_breakdown.m` that calls the readers unchanged. On the full sets it must reproduce `KP.far` and `KP.lect` exactly, or nothing of 3-5 is printed (as D99 point 6). It is written, reviewed and tested on the smoke's saved `policy_evaluation.mat` before it is run once on profile 1's.
+7. **Report wording, fixed now.**
+   - If KPI 6 is not met: "System-level false alarms on clean flights (extension, our KPI 6): NOT MET, X% [upper Y%]", with the breakdown as the cause.
+   - Then: "the degradation path's fix (D103 part 2) is chosen on validation and read on a fresh clean test set in profile 3 and in the profile 1 rerun".
+   - No sentence calls the miss acceptable or out of scope.
+8. **EDGE.** If `fa_bound_met` is false, EDGE commits no point at system level. That is the pre-registered rule and is reported as it is, without a patch.
+
+
+**Part 2: the degradation path's fix (profile 3 and the profile 1 rerun P1R).** Root cause, from the code: the degradation test looks up its reference with one noisy frame's Eb/N0 estimate while the BER is a 5-frame mean, and its threshold is 2x a population mean, keyed on the nominal Eb/N0 but read at the measured one. Low BER alone is not evidence of an RF threat (Xu 2005); the quiet-slot measurement that separates the two exists per frame and the monitor does not use it. Candidates, each behind `C.deg_mode` (default `'ratio'` = the current code, bit-identical):
+- **F1 `'win'`:** the lookup uses the median of the measured per-frame Eb/N0 estimates over the BER window's frames (a new `C.win`-frame memory, reset with `mem.ber` at a change's arrival).
+- **F2 `'win_q'`:** F1, and the threshold is the (1-alpha) quantile of the clean 5-frame-mean `ber_est`, binned on the measured windowed Eb/N0 (new clean-table field `ber_q`), with `deg_floor` kept; alpha in {1e-2, 1e-3}. A bin merges with its neighbour until it holds at least 10/alpha clean cycles from at least 30 flights; what that leaves is reported, not worked around.
+- **F3 `'win_q_gate'`:** F2, and the degradation flag raises an alarm only if `q_iot_db >= C.q_alarm_db` in at least one frame of the window; otherwise the state is "degraded link, no RF evidence": logged, no alarm. The class and drop paths are unchanged.
+- **F0 (conditional):** if point 3(e) shows the false changes front-loaded in the first `C.win` - 1 cycles, F0 goes ahead of F1: the degradation test only on a full window at an episode's start, with the frames before cycle 1 simulated so the window is full. F4 (confirmation over n > `C.win` or non-overlapping windows) is not a candidate unless F1-F3 all fail the threat rule.
+
+**Adoption rule.** In the order F0 (if added), F1, F2 (each alpha), F3 (each alpha), C1d's whole-monitor analysis runs on the validation episodes, every monitor, the drop threshold re-chosen as now. A candidate is admissible if, against `'ratio'` under the same monitor: (a) for jamming and tone_jamming, median and p90 delay and the never share do not grow; (b) for every other threat, the never share grows by at most 1 point and p90 by at most 1 cycle. Adopt the first admissible candidate whose bound is <= 5% for at least one monitor; if none reaches 5%, adopt the admissible candidate with the lowest bound, and KPI 6 is read and reported as it falls. The rule reads alarm delays only; F3's cost in recovery (a quiet-slot degraded link no longer gets `freq_diversity+power_control`) is read in C2's validation rows and reported beside the adoption, and does not reopen the choice.
+
+**Fit/check split.** The 300 validation clean geometries are split by geometry hash into a fit half (150) and a check half (150). `ber_q` and its bins come from the fit half only; adoption is decided on the check half (900 clean episodes: a bound <= 5% needs about 34 or fewer false-alarm episodes). C2 reads its own FA filter on all 300 geometries, mildly optimistic for C2's selection only. KPI 6 is read on a fresh clean test set (a new seed family, generated after adoption, at least 600 flights).
+
+**Tests, committed before any data they govern.** Bit-identity of `'ratio'` on a recorded no_action trace; F1 (window median on a trace with one +3 dB frame, measured axis under a known gain, reset with `mem.ber`); F2 (quantile reproduces alpha on synthetic Gaussian log-BER, small bins merge, fit and check halves disjoint by a hash assert); F3 (quiet-slot interference alarms, a quiet slot does not; class and drop alarms unchanged by `deg_mode`); one smoke cell per candidate (2 h cap). The DQN's false-switch penalty definition (`healthy` geometries only) is not changed: a reward redesign without a source.
+
+**Where the fix goes.** Profile 3: a commit on top of TIP3 before profile 3's queue starts, counted as its tested tip; the choice is made at profile 3's own C1d on its validation flights and read in its C2e on clean test pools no earlier step has read. P1R: a profile 1 decision-layer rerun after CORE_BW (C1d, C2, C2e with the fixed monitor, on a fresh clean test set); its lecturer readings are reported only as "with the fixed monitor, second reading, descriptive", and C2e's stay the verdicts. The order of P1R and profile 3 is to be confirmed by Adi (default: P1R first). Not in CORE_BW (it keeps profile 1's monitor, so CORE_BW and C2e stay on one monitor) and not in the running profile 1. Optional cheap evidence before profile 3 freezes (PC8, about 1 h, validation only): C1d's whole-monitor analysis with F1-F3 on profile 1's validation episodes, reported as a design check.
+
+**Rejected.** Stopping C2 to fix and rerun C1d-C2e (about 2-3 days, a monitor changed under time pressure, no effect on the lecturer's FAR verdict already met on the detector); rerunning only C2e with a new monitor (the DQN is trained on the old one); reporting KPI 6 without 0 and 3 dB or redefining "false alarm" after reading (gaming; D99 points 2 and 5 keep the pooled verdict); bringing the fix into CORE_BW (a protocol change after C2e's comparison is known).
+
+**Why these lines and not more.** They answer the three questions the report must answer:
+- Is the lecturer verdict biased, by the pre-onset changes or by FA-constrained rule settings? (point 4)
+- What drives KPI 6? (point 3)
+- Is the miss a threat-detection miss or a link-quality response? (point 3c)
+
+Each reads saved data once. None can move a verdict.
+
+**Sources.**
+- Xu et al. 2005: consistency of delivery ratio with signal strength or interference.
+- Kazim 2026: power plus quality, threshold from interference-free samples.
+- López-Benítez 2016 and Grimaldi 2019: CFAR from the noise power alone.
+- Norouzi 2006: k-of-n under independent samples.
+- Xie 2021 and 2022: ARL, window-limited CUSUM with a known pre-change law.
+- Barajas 2026: false triggers inflate recovery; band-specific thresholds.
+- Thulin 2014: Clopper-Pearson.
