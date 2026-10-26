@@ -1,7 +1,10 @@
 # The lecturer's readings at link-limited Eb/N0 points (protocol)
 
 Fixed on 25.10.2026, before any test data of these readings exists: C2e has not run in profile 1,
-CORE_BW or profile 3 (DECISIONS D99). Nothing in this protocol has been run.
+CORE_BW or profile 3 (DECISIONS D99). Nothing in this protocol has been run. The gate-failure
+behaviour and the launch of section 6 (and its CORE_BW use in sections 7-8) were fixed on
+26.10.2026, still before C2e ran, after the first gated test run failed on the thread-count call
+(25.10) and before any real reading.
 
 ## 1. Why
 
@@ -118,15 +121,43 @@ line after seeing results: all lines are always printed, in the order of section
 - the copied `far_report` on the full `RU` reproduces `KP.far` and `KP.far_diag`, and its lines
   equal those under the KPI 6 header of the text (the episode length from `KP.far`).
 
-The run sets `maxNumCompThreads('automatic')`, as C2e, when the session allows it (a `-singleCompThread` session, as the gated wrapper's, keeps one thread), and records the count; the exact gate decides either way. On a mismatch it
-writes `lect_kpis_by_ebno.txt` starting with `GATE FAIL`, lists every mismatch, prints no subset and
-stops. Nothing is adjusted.
+The run sets `maxNumCompThreads('automatic')` when the session allows it (a `-singleCompThread`
+session, as the gated wrapper's, refuses and keeps one thread) and writes the count the session
+really has into the header (`threads N (how)`, never "as C2e"); the exact gate decides either way.
 
-**Output** in `out_dir`: `low_ebno_mark.txt` (first), `lect_kpis_by_ebno.txt` and `.mat`: the
-inputs' SHA-256, the thread count, the gate line, the mark, Line A with the normalized-goodput
-note, Line B, the verdict-word comparison, the recovery-time summary (core sets too), the
-per-Eb/N0 rows, the KPI 4/5 table with the mark, KPI 6's Line A, non-L line and per-Eb/N0 rows.
-The run refuses when these outputs exist (once), and checks that no input changed during it.
+**A failed gate does not spend the reading.** On a mismatch the run writes
+`lect_kpis_by_ebno.gatefail.txt` and `.gatefail.mat` (the first line `GATE FAIL`, the header with
+the inputs' SHA-256 and the thread count, every mismatch and, for a field that differs, the leaves
+that differ with their count, the largest absolute difference and the first pair at full
+precision), prints no subset, creates neither `lect_kpis_by_ebno.txt` nor `.mat`, and stops with
+the error `lect_kpis_by_ebno:gate`. The reading stays open:
+- a later run into the same `out_dir` is allowed; an earlier attempt's diagnostics stay there under
+  their own time; `low_ebno_mark.txt`, written from the pools alone, is the same on every attempt
+  (the run stops if it is not);
+- the once-guard covers the outputs of a PASS only: no second run after `lect_kpis_by_ebno.txt` or
+  `.mat` exists;
+- nothing is adjusted: no tolerance, no threshold, no line of sections 2-4. A defect in the script
+  that the diagnostics expose is fixed in a commit with its test and entered in DECISIONS before
+  the next attempt; the gate stays exact.
+
+**Launch.** The first attempt is the gated wrapper (section 8), one thread. Evidence of 26.10.2026,
+on a scratch copy of the smoke's `policy_evaluation.mat`/`.txt` and pools: the exact gate passes in
+the wrapper (`lect_kpis_by_ebno` and `system_fa_breakdown`). It proves little about the chain: the
+smoke's C2e ran under `-singleCompThread` (`v7_d91_deploy_tests2.sh`), the chain's C2e does not
+(`v7_d91_takeover.sh`, `run_ml p1`), and it is small (a few hundred episodes), so it cannot show a
+thread-count effect that appears only on larger reductions. If the first attempt's gate fails, the fallback is the same
+script with the same arguments and inputs in a session with the thread count C2e had (`automatic`):
+the wrapper copy `sed 's/ -singleCompThread//' v7_d91_gated_run.sh > <scratch>/v7_d91_gated_run_mt.sh`
+keeps the busy file, the memory gate and the speed gate, and the script itself sets `automatic`.
+If that attempt fails as well, the reading stays open and stops: a DECISIONS entry names the
+field and the cause before anything else is tried; a tolerance is never one of the options.
+
+**Output** in `out_dir`: `low_ebno_mark.txt` (first), `lect_kpis_by_ebno.txt` and `.mat`, written
+only after the gate passed: the inputs' SHA-256, the thread count, the gate line, the mark,
+Line A with the normalized-goodput note, Line B, the verdict-word comparison, the recovery-time
+summary (core sets too), the per-Eb/N0 rows, the KPI 4/5 table with the mark, KPI 6's Line A,
+non-L line and per-Eb/N0 rows. The run refuses when these outputs exist (once), and checks that
+no input changed during it.
 
 ## 7. CORE_BW
 
@@ -148,7 +179,11 @@ mark does not apply to it.
   policy and type; the number of L episodes and of scenario points holding an L episode or only
   L episodes.
 - `core_bw_lect_by_link('run', F)` with `F.pools`, `F.test`, `F.recov`, `F.kpis`, `F.report`,
-  `F.params` and `F.out`, absolute paths; outputs `core_bw_lect_by_link.{txt,mat}`.
+  `F.params` and `F.out`, absolute paths; outputs `core_bw_lect_by_link.{txt,mat}`, only after the
+  gate passed. A failed gate, the thread count and the launch are as in section 6: the diagnostics
+  go to `core_bw_lect_by_link.gatefail.{txt,mat}`, the reading stays open, `core_bw_low_ebno_mark.txt`
+  is the same on every attempt, the first attempt is the gated wrapper, and the fallback of
+  section 6 applies whatever thread count the test stage had (the study's report does not record it).
 - Before its run, the seven copies are compared with the `experiment_core_bw.m` of the commit its
   test stage ran (its marker's `commit` line). If they differ, they are taken again from that file
   byte for byte, with the test passing, in a commit on `lect-ebno`; the rules here stay as they are.
@@ -166,7 +201,8 @@ A failing test is fixed on `lect-ebno` before the run, with the rules of section
 1. Copy profile 1's `results/policy_evaluation.mat` and `.txt` into
    `C:\Users\Adi Suliman\uav-gcs-lectebno-read\p1\results` and set them read-only. The post-M
    `data/policy_pools.mat` is read in place (only `load` and the hash read it).
-2. Run, through the same wrapper and slot (45 GB: the pools are loaded once):
+2. Run, through the same wrapper and slot (45 GB: the pools are loaded once); a failed gate:
+   section 6 (the diagnostics, then the fallback launch):
 
        bash "/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_gated_run.sh" 45 uav-gcs-v7-p3 logs/lectebno_p1_<time>.txt "restoredefaultpath; cd('C:\Users\Adi Suliman\uav-gcs-lectebno'); startup; lect_kpis_by_ebno('run', '<P1 tree>\data\policy_pools.mat', 'C:\Users\Adi Suliman\uav-gcs-lectebno-read\p1\results\policy_evaluation.mat', 'C:\Users\Adi Suliman\uav-gcs-lectebno-read\p1\results\policy_evaluation.txt', 'C:\Users\Adi Suliman\uav-gcs-lectebno-read\p1\results')"
 
@@ -185,6 +221,7 @@ place and `F.out` = `...\uav-gcs-lectebno-read\core_bw`.
 
 ## 9. Never
 
-- No subset before the gate passes; no second run of a reading copy.
+- No subset before the gate passes; no second run of a reading copy after a PASS (a failed gate
+  leaves the reading open, section 6).
 - No change to a verdict, a threshold or a KPI definition from the mark.
 - No line chosen or dropped after seeing a result.

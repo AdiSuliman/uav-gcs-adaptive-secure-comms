@@ -342,7 +342,9 @@ static jammer.
 - **Link-limited flights (D99, reporting only).** `docs/lect_ebno_protocol.md` section 7 (branch
   `lect-ebno`, `core_bw_lect_by_link.m`) gives the primary readings again on the episodes whose
   flight's own restoration threshold is below 1, with recovery time from detection on those as
-  the headline, once after the test stage. The verdicts above are unchanged.
+  the headline, once after the test stage. The verdicts above are unchanged. A failed gate of that
+  reading writes `core_bw_lect_by_link.gatefail.{txt,mat}` and does not spend it (once means after
+  a PASS); its first attempt is the gated wrapper, the fallback is `lect_ebno_protocol.md` section 6.
 
 **6.6 Gates before the test reading.**
 - G1: every test of section 8 passes.

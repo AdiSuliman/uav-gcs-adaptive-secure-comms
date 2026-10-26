@@ -12,7 +12,10 @@ function varargout = core_bw_lect_by_link(cmd, varargin)
 %       and F.out (the reading copy's folder). The inputs are only read. In this order: the mark
 %       from the pools' clean cell on the test split, written with the pools' SHA-256 to
 %       F.out/core_bw_low_ebno_mark.txt before F.test is opened; the gate; only on a pass the
-%       readings -> F.out/core_bw_lect_by_link.{txt,mat}. Once: refused when they exist.
+%       readings -> F.out/core_bw_lect_by_link.{txt,mat}. Once: refused when they exist. A failed
+%       gate writes F.out/core_bw_lect_by_link.gatefail.{txt,mat} (the diagnostics) and stops with
+%       core_bw_lect_by_link:gate; it creates no reading output, so the reading stays open. The
+%       header names the thread count the session really has.
 %   thr = core_bw_lect_by_link('mark', PP)
 %       the restoration threshold of every (Eb/N0, test geometry), as plr_threshold
 %   G = core_bw_lect_by_link('gate', T, REC, KPc, report, P, pay)
@@ -48,9 +51,9 @@ end
 assert(isfield(F, 'out') && is_abs(F.out) && isfolder(F.out), 'core_bw_lect_by_link:input', 'F.out: not an absolute path of a folder');
 fk = fullfile(F.out, 'core_bw_low_ebno_mark.txt');
 fo = fullfile(F.out, 'core_bw_lect_by_link.txt'); fm = fullfile(F.out, 'core_bw_lect_by_link.mat');
+ff = fullfile(F.out, 'core_bw_lect_by_link.gatefail.txt'); fg = fullfile(F.out, 'core_bw_lect_by_link.gatefail.mat');
 assert(~isfile(fo) && ~isfile(fm), 'core_bw_lect_by_link:once', '%s exists: the reading runs once', fo);
-try, maxNumCompThreads('automatic'); catch, end   % a -singleCompThread session keeps one thread; the gate decides
-try, nthr = maxNumCompThreads; catch, nthr = 1; end
+[nthr, thr_how] = thread_info();
 ins = {F.pools, F.test, F.recov, F.kpis, F.report, F.params};
 st0 = stamps(ins);
 
@@ -89,21 +92,23 @@ pay = p0.bits_per_frame / p0.cycle_s;
 head = [{'=== The bandwidth study''s lecturer readings where the restoration test is defined (docs/lect_ebno_protocol.md, CORE_BW): reporting only, the verdicts are Line A''s ===', ...
     sprintf('pools %s sha256 %s', F.pools, h_pools), sprintf('mark %s sha256 %s (written before the test readings were opened)', fk, h_mark)}, ...
     cellfun(@(f, x) sprintf('input %s sha256 %s', f, x), ins(2:end), h, 'UniformOutput', false), ...
-    {sprintf('threads %d (maxNumCompThreads automatic)', nthr)}];
+    {sprintf('threads %d (%s)', nthr, thr_how)}];
 G = gate(T, REC, KPc, rep, P, pay);
 if ~G.pass
-    lines = [{sprintf('GATE FAIL (%d mismatches): no subset is read', numel(G.mismatch))}, head, G.mismatch];
-    write_lines(fo, lines);
-    save(fm, 'thr', 'G', 'lines', 'h_pools', 'h', 'h_mark', 'nthr', 'F');
+    lines = [{sprintf('GATE FAIL (%d mismatches): no subset is read; no reading output was written, the reading stays open', ...
+        numel(G.mismatch))}, head, G.mismatch];
+    keep_old(ff); keep_old(fg);
+    write_lines(ff, lines);
+    save(fg, 'thr', 'G', 'lines', 'h_pools', 'h', 'h_mark', 'nthr', 'thr_how', 'F');
     fprintf('%s\n', lines{:});
-    error('core_bw_lect_by_link:gate', 'the gate failed: %s', fo);
+    error('core_bw_lect_by_link:gate', 'the gate failed: %s', ff);
 end
 Lep = ep_mark(thr, T.EPs);
 [S, body] = readings(T, G, Lep, pay);
 assert(isequal(st0, stamps(ins)), 'core_bw_lect_by_link:inputs', 'an input changed during the reading');
 lines = [{'GATE PASS: per_lines reproduces the report''s KP.primary and its lines exactly'}, head, body];
 write_lines(fo, lines);
-save(fm, 'thr', 'Lep', 'G', 'S', 'lines', 'h_pools', 'h', 'h_mark', 'nthr', 'F');
+save(fm, 'thr', 'Lep', 'G', 'S', 'lines', 'h_pools', 'h', 'h_mark', 'nthr', 'thr_how', 'F');
 fprintf('%s\n', lines{:});
 fprintf('Saved %s, %s\n', fo, fm);
 end
@@ -153,7 +158,7 @@ G = struct('pass', isempty(mm), 'mismatch', {mm}, 'primary', Kp, 'lines', {blk},
 end
 
 function d = differs(a, b, name)
-% The fields of a and b that are not equal (isequaln), one line each.
+% The fields of a and b that are not equal (isequaln), one line each, then the leaves that differ.
 d = {};
 if isequaln(a, b), return; end
 if isstruct(a) && isstruct(b) && isequal(size(a), size(b)) && isempty(setxor(fieldnames(a), fieldnames(b)))
@@ -162,6 +167,59 @@ if isstruct(a) && isstruct(b) && isequal(size(a), size(b)) && isempty(setxor(fie
     end
 end
 if isempty(d), d = {sprintf('%s: differs (size or fields)', name)}; end
+try
+    d = [d, leaf_diff(a, b, '    leaf', 12)];
+catch ME                                            % the diagnostics never replace the gate's own answer
+    d{end+1} = sprintf('    leaf: the diagnostics failed: %s', ME.message);
+end
+end
+
+function d = leaf_diff(a, b, p, maxn)
+% Where a and b differ, down to the numbers: the count, the largest absolute difference and the
+% first pair at full precision (diagnostics only; the gate stays exact).
+d = {};
+if isequaln(a, b) || maxn <= 0, return; end
+if ~strcmp(class(a), class(b)), d = {sprintf('%s: class %s vs %s', p, class(a), class(b))}; return; end
+if ~isequal(size(a), size(b)), d = {sprintf('%s: size [%s] vs [%s]', p, num2str(size(a)), num2str(size(b)))}; return; end
+if isstruct(a)
+    fa = fieldnames(a);
+    if ~isempty(setxor(fa, fieldnames(b))), d = {sprintf('%s: fields differ', p)}; return; end
+    for i = 1:numel(a)
+        for k = 1:numel(fa)
+            q = [p '.' fa{k}];
+            if numel(a) > 1, q = sprintf('%s(%d).%s', p, i, fa{k}); end
+            d = [d, leaf_diff(a(i).(fa{k}), b(i).(fa{k}), q, maxn - numel(d))]; %#ok<AGROW>
+            if numel(d) >= maxn, return; end
+        end
+    end
+elseif iscell(a)
+    for i = 1:numel(a)
+        d = [d, leaf_diff(a{i}, b{i}, sprintf('%s{%d}', p, i), maxn - numel(d))]; %#ok<AGROW>
+        if numel(d) >= maxn, return; end
+    end
+elseif isnumeric(a) || islogical(a)
+    ne = ~(a == b | (isnan(a) & isnan(b)));
+    i = find(ne, 1);
+    d = {sprintf('%s: %d of %d elements differ, max |d| %.3g, first at %d: %.17g vs %.17g', p, nnz(ne), numel(a), ...
+        max(abs(double(a(ne)) - double(b(ne)))), i, double(a(i)), double(b(i)))};
+else
+    d = {sprintf('%s: differs (%s)', p, class(a))};
+end
+end
+
+function [nthr, how] = thread_info()
+% The thread count this session really has; maxNumCompThreads('automatic') is refused under
+% -singleCompThread (the gated wrapper's), which keeps one.
+how = 'maxNumCompThreads set to automatic';
+try, maxNumCompThreads('automatic'); catch, how = 'not changeable in this session: -singleCompThread'; end
+try, nthr = maxNumCompThreads; catch, nthr = NaN; how = [how '; the count is not readable']; end
+end
+
+function keep_old(f)
+% A diagnostics file of an earlier failed attempt stays, under its own time.
+if ~isfile(f), return; end
+d = dir(f); [p, n, e] = fileparts(f);
+movefile(f, fullfile(p, [n '_' datestr(d.datenum, 'yyyymmdd_HHMMSS') e]));
 end
 
 function d = block_diff(txt, blk, i0, name)

@@ -46,6 +46,9 @@ verifyTrue(tc, G.pass, strjoin(G.mismatch, newline));
 verifyEqual(tc, G.T, 30);
 X = E; X.KP.lect.per(1).red_pct = X.KP.lect.per(1).red_pct + eps(X.KP.lect.per(1).red_pct);
 gate_fails(tc, X, PP, txt, 'KP.lect: .per differs');
+G = lect_kpis_by_ebno('gate', X, PP, txt);
+verifyTrue(tc, any(contains(G.mismatch, 'leaf.per(1).red_pct: 1 of ')) && any(contains(G.mismatch, 'max |d| ')), ...
+    'the diagnostics name the leaf, the count and the size of the difference');
 t = txt; i = find(startsWith(t, '  PRIMARY narrowband'), 1); t{i} = [t{i} ' '];
 gate_fails(tc, E, PP, t, 'lect_kpis''s lines: first difference');
 X = E; X.ALL{3}.s([1 7]) = X.ALL{3}.s([7 1]);
@@ -199,9 +202,24 @@ t = txt; i = find(startsWith(t, '  extension, the five jamming threats pooled'),
 ft2 = fullfile(d, 'policy_evaluation_changed.txt'); write_text(ft2, t);
 out2 = fullfile(d, 'read2'); mkdir(out2);
 verifyError(tc, @() lect_kpis_by_ebno('run', fp, fe, ft2, out2), 'lect_kpis_by_ebno:gate');
-o2 = read_text(fullfile(out2, 'lect_kpis_by_ebno.txt'));
+o2 = read_text(fullfile(out2, 'lect_kpis_by_ebno.gatefail.txt'));
 verifyTrue(tc, startsWith(o2{1}, 'GATE FAIL'));
 verifyFalse(tc, any(startsWith(o2, '=== Line')));
+% a failed gate spends nothing: no reading output, the diagnostics beside, the thread count real
+verifyFalse(tc, isfile(fullfile(out2, 'lect_kpis_by_ebno.txt')) || isfile(fullfile(out2, 'lect_kpis_by_ebno.mat')));
+Fg = load(fullfile(out2, 'lect_kpis_by_ebno.gatefail.mat'));
+verifyFalse(tc, Fg.G.pass);
+verifyTrue(tc, any(startsWith(o2, sprintf('threads %d (', Fg.nthr))) && ~any(contains(o2, 'as C2e')));
+verifyEqual(tc, Fg.nthr, maxNumCompThreads);
+% the reading is still open: a second failure keeps the first diagnostics, the right inputs then pass once
+verifyError(tc, @() lect_kpis_by_ebno('run', fp, fe, ft2, out2), 'lect_kpis_by_ebno:gate');
+verifyEqual(tc, numel(dir(fullfile(out2, 'lect_kpis_by_ebno.gatefail*.txt'))), 2);
+verifyEqual(tc, numel(dir(fullfile(out2, 'lect_kpis_by_ebno.gatefail*.mat'))), 2);
+lect_kpis_by_ebno('run', fp, fe, ft, out2);
+o3 = read_text(fullfile(out2, 'lect_kpis_by_ebno.txt'));
+verifyTrue(tc, startsWith(o3{1}, 'GATE PASS'));
+verifyError(tc, @() lect_kpis_by_ebno('run', fp, fe, ft, out2), 'lect_kpis_by_ebno:once');
+verifyError(tc, @() lect_kpis_by_ebno('run', fp, fe, ft2, out2), 'lect_kpis_by_ebno:once');
 fb = fullfile(d, 'not_a_mat.mat'); write_text(fb, {'not a MAT-file'});
 out3 = fullfile(d, 'read3'); mkdir(out3);
 threw = false;
@@ -289,6 +307,21 @@ copyfile(fullfile(tc.TestData.tmp, 'core_bw_world', 'recoverable.txt'), F.recov)
 KP = KPc.KP; lines = KPc.lines; save(F.kpis, 'KP', 'lines'); %#ok<NASGU>
 write_text(F.report, rep);
 params = struct('bits_per_frame', 1000, 'cycle_s', 0.02); save(F.params, 'params');
+% a failed gate spends nothing: the diagnostics beside, no reading output, the real thread count
+F2 = F; F2.out = fullfile(d, 'read_fail'); mkdir(F2.out);
+t = rep; i = find(contains(t, 'PRIMARY'), 1); t{i} = [t{i} 'x'];
+F2.report = fullfile(d, 'core_bw_report_changed.txt'); write_text(F2.report, t);
+verifyError(tc, @() core_bw_lect_by_link('run', F2), 'core_bw_lect_by_link:gate');
+verifyFalse(tc, isfile(fullfile(F2.out, 'core_bw_lect_by_link.txt')) || isfile(fullfile(F2.out, 'core_bw_lect_by_link.mat')));
+o2 = read_text(fullfile(F2.out, 'core_bw_lect_by_link.gatefail.txt'));
+verifyTrue(tc, startsWith(o2{1}, 'GATE FAIL') && ~any(startsWith(o2, '=== Line')));
+Fg = load(fullfile(F2.out, 'core_bw_lect_by_link.gatefail.mat'));
+verifyTrue(tc, ~Fg.G.pass && Fg.nthr == maxNumCompThreads && any(startsWith(o2, sprintf('threads %d (', Fg.nthr))) && ~any(contains(o2, 'as C2e')));
+F2.report = F.report;
+core_bw_lect_by_link('run', F2);
+o3 = read_text(fullfile(F2.out, 'core_bw_lect_by_link.txt'));
+verifyTrue(tc, startsWith(o3{1}, 'GATE PASS'));
+verifyError(tc, @() core_bw_lect_by_link('run', F2), 'core_bw_lect_by_link:once');
 core_bw_lect_by_link('run', F);
 mk = read_text(fullfile(F.out, 'core_bw_low_ebno_mark.txt'));
 verifyTrue(tc, any(strcmp(mk, ['pools_sha256 ' lect_kpis_by_ebno('sha', F.pools)])));
