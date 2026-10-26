@@ -203,8 +203,10 @@ assert(git_clean([{X.frozen, X.protocol}, note]), 'experiment_core_bw:uncommitte
 end
 
 function v = clean_ref(v)
-assert(isscalar(v) && isfinite(v), 'experiment_core_bw:clean_ref', ['clean_ber_ref(9, ''ber_est'') is %g: ' ...
-    'data/policy_pools.mat with its clean_ref must be in this tree, else the monitor falls to C.deg_floor'], v);
+if ~(isnumeric(v) && isscalar(v) && isfinite(v))
+    error('experiment_core_bw:clean_ref', ['clean_ber_ref(9, ''ber_est'') is %s: ' ...
+        'data/policy_pools.mat with its clean_ref must be in this tree, else the monitor falls to C.deg_floor'], mat2str(v));
+end
 end
 
 function ok = git_clean(files)
