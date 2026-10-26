@@ -1,0 +1,15 @@
+three-state CNN (B3c) reading of the fourth test set started
+time 2026-10-26 14:52:21
+commit afd1a95476388a211e14c3fa33d4d24a440be633
+code_tree 6b1c9714ff1690100e66cca981f905ae016c9470
+params_id add18af2b7532a0bd2f7fbc78f06e526
+untracked_m none
+data/core_cnn_model.mat sha256 7c9cccbfe9b7fa000ca462e04812a008584990b3478c60086ea2713a50b41689
+docs/core_cnn_protocol.md sha256 bbb11ea77c3bbe22b82976b36cc7f08ea5aae6e5b33e55133c872d3fe613cb56
+input splits data/splits.mat bytes 6989072961 modified 2026-10-17 14:58:07
+input params params.mat bytes 2426 modified 2026-10-25 01:49:51
+input test data/splits_fresh3.mat bytes 4793849379 modified 2026-10-26 10:14:10
+input test_params data/splits_fresh3_params.mat bytes 2426 modified 2026-10-26 10:14:42
+input hybrid_pred results/detector_predictions_fresh3.mat bytes 675688 modified 2026-10-26 14:40:31
+input hybrid_metrics results/eval_detector_metrics_fresh3.mat bytes 5023 modified 2026-10-26 14:40:31
+hybrid_reading results/detector_predictions_fresh3.mat
