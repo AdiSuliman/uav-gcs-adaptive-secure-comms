@@ -87,6 +87,9 @@ L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
 Q = load('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'H', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db', ...
     'deployed', 'rule_sel', 'det_id', 'maha_thr', 'dec');
 check_det_id(PP, Q, 'evaluate_policies');
+if isfield(Q, 'dec') && isstruct(Q.dec) && isfield(Q.dec, 'deg_forced')      % the smoke's forced test (deg_force.m)
+    deg_force('smoke', Q.dec.deg_forced, exist('SMOKE', 'var') && SMOKE, 'evaluate_policies');
+end
 PP = decision_settings(PP, Q);                       % the deployed DQN's monitor and settings for every policy but the rule fallback
 K = link_env('tables', PP);
 C = decision_config();
