@@ -677,20 +677,22 @@ if ~X.smoke
     assert(~recorded(J.params_id), 'experiment_core_bw:recorded', ...
         'docs/core_bw_read_*.txt records a test reading with params_id %s: the test is read once', J.params_id);
 end
-marker(X, J.params_id);
-fprintf('Test reading started (%s)\n', X.marker);
-PP = load_pools(X, true);
-assert(strcmp(J.params_id, PP.params_id) && strcmp(J.det_id, PP.det_id), 'experiment_core_bw:pools_changed', ...
-    'the pools are not those the protocol was frozen on');
+% Checks that need no test data come before the marker, so a refusal leaves the reading unspent.
 V = load(X.val, 'WCH', 'BCH');
 assert(isequal({V.WCH.W}, cellfun(@(r) J.w.(r), {V.WCH.rule}, 'UniformOutput', false)), 'experiment_core_bw:w', ...
     'the validation file''s W differ from the frozen protocol''s');
 assert(isfield(J, 'blind_first') && isequal({V.BCH.B}, cellfun(@(r) J.blind_first.(r), {V.BCH.rule}, ...
     'UniformOutput', false)), 'experiment_core_bw:blind', ...
     'the validation file''s blind_core first responses differ from the frozen protocol''s');
-[PP, ~, cref] = decision_inputs(PP);
-assert(strcmp(J.clean_ber_est_9db, sprintf('%.17g', cref)), 'experiment_core_bw:clean_ref_changed', ...
-    'the clean reference at 9 dB is %.17g, validation read %s', cref, J.clean_ber_est_9db);
+cref = core_bw_rules('clean_ref', clean_ber_ref(9, 'ber_est'));
+assert(isfield(J, 'clean_ber_est_9db') && strcmp(J.clean_ber_est_9db, sprintf('%.17g', cref)), ...
+    'experiment_core_bw:clean_ref_changed', 'the clean reference at 9 dB is %.17g, not the one validation froze', cref);
+marker(X, J.params_id);
+fprintf('Test reading started (%s)\n', X.marker);
+PP = load_pools(X, true);
+assert(strcmp(J.params_id, PP.params_id) && strcmp(J.det_id, PP.det_id), 'experiment_core_bw:pools_changed', ...
+    'the pools are not those the protocol was frozen on');
+[PP, ~] = decision_inputs(PP);
 p0 = load('params.mat').params; B = band_plan(p0);
 K = link_env('tables', PP, 'flight');
 EP = episodes(X, PP, 2, B); check_layers(PP, EP);

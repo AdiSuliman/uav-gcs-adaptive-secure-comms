@@ -9181,7 +9181,8 @@ end
 function test_band_clean_ref_assert(tc)
 % The study never runs its monitor on C.deg_floor: decision_inputs (val and test) refuses a clean
 % reference at 9 dB that is not finite, as clean_ber_ref gives without data/policy_pools.mat;
-% the val stage freezes the value it read and the test stage refuses another.
+% the val stage freezes the value it read and the test stage refuses another before its marker,
+% as it refuses validation choices that differ from the frozen ones.
 for v = {NaN, Inf, -Inf, [], [1e-5 2e-5]}
     verifyError(tc, @() core_bw_rules('clean_ref', v{1}), 'experiment_core_bw:clean_ref');
 end
@@ -9197,13 +9198,24 @@ verifyNotEmpty(tc, regexp(src, ['function \[PP, Q, cref\] = decision_inputs\(PP\
     'cref = core_bw_rules\(''clean_ref'', clean_ber_ref\(9, ''ber_est''\)\);'], 'once'));
 verifyNumElements(tc, strfind(src, 'decision_inputs(PP)'), 3);   % its definition, val and test
 v0 = strfind(src, 'function stage_val(X)'); t0 = strfind(src, 'function stage_test(X)');
-iv = strfind(src, '[PP, Q, cref] = decision_inputs(PP);'); it = strfind(src, '[PP, ~, cref] = decision_inputs(PP);');
+iv = strfind(src, '[PP, Q, cref] = decision_inputs(PP);'); it = strfind(src, '[PP, ~] = decision_inputs(PP);');
 verifyNumElements(tc, iv, 1); verifyNumElements(tc, it, 1);
 verifyTrue(tc, iv > v0 && iv < strfind(src, 'G3 = g3_check(PP, K, X, EP, B);'));
 verifyTrue(tc, it > t0 && it < strfind(src, 'MON = monitor_states(PP, K, X, EP, fixed);'));
 verifyNotEmpty(tc, strfind(src, '''clean_ber_est_9db'', sprintf(''%.17g'', cref)'));
-verifyNotEmpty(tc, strfind(src, ['assert(strcmp(J.clean_ber_est_9db, sprintf(''%.17g'', cref)), ' ...
-    '''experiment_core_bw:clean_ref_changed''']));
+verifyNotEmpty(tc, strfind(src, ['assert(isfield(J, ''clean_ber_est_9db'') && strcmp(J.clean_ber_est_9db, ' ...
+    'sprintf(''%.17g'', cref)), ...']));
+% a refusal must not spend the single reading: every one of these lies between the guard and the marker
+g0 = strfind(src, 'J = core_bw_rules(''guard'', X);'); mk = strfind(src, 'marker(X, J.params_id);');
+verifyNumElements(tc, g0, 1); verifyNumElements(tc, mk, 1);
+c = strfind(src, 'cref = core_bw_rules(''clean_ref'', clean_ber_ref(9, ''ber_est''));');
+verifyEqual(tc, nnz(c > g0 & c < mk), 1);
+for k = {'V = load(X.val, ''WCH'', ''BCH'');', '''experiment_core_bw:w''', '''experiment_core_bw:blind''', ...
+        '''experiment_core_bw:clean_ref_changed'''}
+    i = strfind(src, k{1});
+    verifyNumElements(tc, i, 1, k{1});
+    verifyTrue(tc, all(i > g0 & i < mk), k{1});
+end
 end
 
 function test_band_blind_first(tc)
