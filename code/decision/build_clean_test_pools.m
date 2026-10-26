@@ -13,7 +13,8 @@
 %           alarms of every run on it, so the test set is used once
 %   'fresh' seed block 15, families 7, 8, 9 -> data/clean_fresh_pools.mat: P1R's KPI 6 set
 %           (docs/p1r_protocol.md), seeds no earlier set flew; built only after C1d adopted a
-%           degradation test (clean_fresh_guard.m), never by the chain's C1c
+%           degradation test (clean_fresh_guard.m), never by the chain's C1c; the smoke's
+%           fresh build flies block 18 instead, never the set's own flights
 % Geometry k takes clean_pool_seed.m's seed (families 1, 3 and 5 of the block; the fresh set
 % 7, 8 and 9); every per-flight draw is kept as the pools keep theirs (CT.cov, flight_cov.m),
 % so readers never re-derive them. The detector must be that of data/policy_pools.mat: CT.det_id and
@@ -32,7 +33,7 @@ fprintf('=== Clean-link pools over many geometries ===\n\n');
 
 %% 1. Configuration
 if ~exist('CLEAN_SET', 'var'), CLEAN_SET = 'test'; end
-[SP, FAMS, f_out] = clean_set_layout(CLEAN_SET);
+[SP, FAMS, f_out] = clean_set_layout(CLEAN_SET, exist('SMOKE', 'var') && SMOKE);   % the smoke's fresh set: its own block
 if strcmp(CLEAN_SET, 'fresh'), clean_fresh_guard('data/drop_threshold.mat', exist('SMOKE', 'var') && SMOKE); end
 N_GEOM = 300;                                 % geometries per Eb/N0: 100 per geometry family FAMS (pool_seed.m)
 CHUNK = 10;                                   % geometries per parallel job

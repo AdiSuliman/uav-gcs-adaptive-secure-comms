@@ -86,7 +86,10 @@ No run is shortened to save time (`no-training-shortcuts`).
 - **Generated after adoption.** The build stops unless `data/drop_threshold.mat` holds C1d's
   `DEG` with a candidate adopted (`pick > 0`) and no forced mark (`clean_fresh_guard.m`). The
   smoke skips this check.
-- **Read once,** in P1R's C2e. No earlier step and no smoke on profile 1's data reads it.
+- **The smoke flies other seeds.** Under `SMOKE` the fresh build takes families 7-9 of block
+  18, the smoke's own block (runs 1801-1804), so no smoke ever flies a fresh-set flight. The
+  KPI 6 code of `evaluate_policies.m` therefore never assumes block 15 from `CT.runs`.
+- **Read once,** in P1R's C2e. No earlier step and no smoke reads it.
 
 ## 5. KPI 6 and the labels of P1R's readings
 
@@ -148,7 +151,7 @@ No run is shortened to save time (`no-training-shortcuts`).
 
 | Cell | Steps | Checks |
 |---|---|---|
-| A, default | C1d (adoption), the fresh build (4 geometries), C2, C2e with `kpi6_set` fresh, `system_fa_breakdown` | six candidate readings in `drop_threshold.txt`; `CT.set` fresh and `CT.fams`; `KP.far_set`; the breakdown's gate passes on the fresh definition |
+| A, default | C1d (adoption), the fresh build (4 geometries, block 18), C2, C2e with `kpi6_set` fresh, `system_fa_breakdown` | six candidate readings in `drop_threshold.txt`; `CT.set` fresh and `CT.fams`; `KP.far_set`; the breakdown's gate passes on the fresh definition |
 | F1, F2 at 1e-2 and 1e-3, F3 at 1e-2 and 1e-3 | C1d forced, C2, C2e | the FORCED line; `dec.deg_mode` and `ber_q` are the forced candidate's; a distinct stamp per cell; F3: `R.deg_quiet` and C1d's quiet line; C2e ends |
 | Refusals | the same commands without `SMOKE`, on a scratch copy | C1d forced, C2 on a forced file, the fresh build without an adoption, `kpi6_set` without the fresh file: each stops |
 
@@ -188,10 +191,10 @@ are unchanged bit for bit (tests below).
 
 | Test | What it checks |
 |---|---|
-| `test_core/test_seed_streams_disjoint` | The fresh seeds 1 941 501-1 986 600, below 2 000 000, unique, disjoint from every other seed, streams unique |
+| `test_core/test_seed_streams_disjoint` | The fresh seeds 1 941 501-1 986 600 and their smoke build's (block 18), below 2 000 000, unique, disjoint from every other seed, streams unique |
 | `test_core/test_band_seeds_disjoint` | Family 6 against the fresh set as well |
 | `test_core/test_clean_pool_draws` | The families argument; 'test' and 'val' give the parent commit's (`fcdc199`) seeds and speeds for every geometry of blocks 4 and 15; geometries outside 1-300 stop |
-| `test_core/test_clean_fresh_guard` | The three layouts; the owner table; a fresh layout on a taken pair stops; the guard (no file, no `DEG`, not chosen, `'ratio'` kept, forced, adopted, the smoke); the builder stops before any load without an adoption and goes on with one; only the fresh set saves `CT.fams`; C1c never builds it |
+| `test_core/test_clean_fresh_guard` | The three layouts, and the smoke's fresh block 18 ('test' and 'val' unmoved); the owner table; a fresh layout on a taken pair stops; the guard (no file, no `DEG`, not chosen, `'ratio'` kept, forced, adopted, the smoke); the builder stops before any load without an adoption and goes on with one; only the fresh set saves `CT.fams`; C1c never builds it |
 | `test_deg_mode/test_force_values` | The six names; other values stop, from `profile.json` or `CFG` |
 | `test_deg_mode/test_force_needs_smoke` | The refusals of C1d, C2 and C2e outside the smoke, before any reading |
 | `test_deg_mode/test_force_sets_mode` | Mode, name, table, `forced`, `rule_pick` and the report line for every name |
