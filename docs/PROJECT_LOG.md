@@ -192,8 +192,9 @@ The lecturer's false-alarm KPI is read at detector level; the system-level figur
 
 - 16:02, C1d (drop-alarm threshold): drop threshold 4.5 dB, monitor form class_cusum. The whole monitor at no_action false-alarms on 12.5 to 29.9% of 1,800 clean validation episodes (2/2 29.85%, 3/3 22.07%, 4/5 19.84%, 5/5 12.46%); all above 5%. The cause is the degradation (BER) path at 0-6 dB (D103).
 - Reporting rule fixed before any result: "System-level false alarms on clean flights (extension, our KPI 6): NOT MET, X%" with a breakdown. A corrected monitor is registered for profile 3 and a profile 1 rerun (D103-D104).
-- 16:03, C2 (Double DQN grid): 4 monitors x 2 drop settings x 3 false-switch penalties x 3 seeds = 72 runs of 50,048 episodes each. About 34 minutes per run; 9 of 72 finished at 21:11. Finished runs recover 94.5 to 97.5% of episodes on validation.
+- 16:03, C2 (Double DQN grid): 4 monitors x 2 drop settings x 3 false-switch penalties x 3 seeds = 72 grid runs of 50,048 episodes each, then the coordinate steps (gamma, costs, the unknown-threat flag, reward scales), 81-83 runs in all. About 34 minutes per run; 9 finished at 21:11. Finished runs recover 94.5 to 97.5% of episodes on validation.
 - 18:14: order registered (D104): profile 1 chain, controlled-bandwidth study, profile 1 rerun with the corrected monitor on a fresh clean test set (at most 74 false-alarm episodes of 1,800 for the 5% bound), then profile 3.
+- 21:50: D105 registered before any C2e reading: the lecturer's verdict pairs are `rule_core` against `none` (KPI 5-7) and against `blind_core` (KPI 8) on the core action set; `rule_esc`/`blind_esc` are the extension; C2e's `blind_core` is a secondary, weakened baseline and KPI 8's headline comes from CORE_BW; the PER verdict stays on Line A (D99). KPI 5-8 are read with the hybrid detector's classes, not the three-state CNN. The README's configuration table follows D105.
 
 ## Status of the lecturer's KPIs (profile 1, 26.10.2026)
 
