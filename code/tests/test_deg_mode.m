@@ -1,6 +1,7 @@
 function tests = test_deg_mode
 %TEST_DEG_MODE  Unit tests of the degradation test's candidates (policy_monitor.m deg_mode,
-%   deg_quantile.m, clean_halves.m, clean_ber_q.m, deg_adopt.m; docs/deg_fix_protocol.md), on
+%   deg_quantile.m, clean_halves.m, clean_ber_q.m, deg_adopt.m; docs/deg_fix_protocol.md) and of
+%   the smoke's forced candidate (deg_force.m; docs/p1r_protocol.md), on
 %   synthetic frames and a clean-link table written in a temporary folder; no pools. Run from
 %   the repository root:
 %   results = runtests('code/tests/test_deg_mode.m')
@@ -320,6 +321,8 @@ f = [tempname '.json'];
 write_text(f, '{"deg_select": true}'); verifyTrue(tc, deg_options(f).on);
 write_text(f, '{"surv_v2": true}'); verifyFalse(tc, deg_options(f).on);
 write_text(f, '{"deg_select": 1}'); verifyError(tc, @() deg_options(f), 'deg_options:value');
+write_text(f, '{"deg_select": true}'); verifyEqual(tc, deg_options(f).force, '');   % no force without the field
+verifyEqual(tc, deg_options('none.json').force, '');
 delete(f);
 src = fileread(which('choose_drop_threshold'));
 verifyNotEmpty(tc, strfind(src, ['SV = {''drop_db'', ''drop_db_train'', ''drop_from'', ''separable'', ''THR'', ''kept'', ' ...
@@ -329,6 +332,9 @@ verifyNotEmpty(tc, strfind(src, ['''p95_mis'', ''p99_cl'', ''p05_pl'', ''floor_d
 i0 = strfind(src, 'DEG = [];'); i1 = strfind(src, 'if ~isempty(DEG)'); i2 = strfind(src, 'elseif DGon');
 verifyNumElements(tc, i0, 1); verifyNumElements(tc, i1, 1); verifyNumElements(tc, i2, 1);
 verifyNotEmpty(tc, strfind(src, 'PP.deg_mode = DEG.mode; PP.ber_q = DEG.ber_q;'));
+i3 = strfind(src, 'if ~isempty(force)'); verifyNumElements(tc, i3, 1);         % deg_force only when set
+i4 = strfind(src, 'deg_force(''apply'''); verifyNumElements(tc, i4, 1);
+verifyGreaterThan(tc, i4, i3);
 PP = struct('scen', {{'none', 'jamming'}}, 'ebno', [0 3 6]); CT = struct('n_geom', 5);
 [s1, n1] = clean_wide_specs(PP, CT, 3, 30);
 [s2, n2] = clean_wide_specs(PP, CT, 3, 30, 1:5);
@@ -339,6 +345,9 @@ src = fileread(which('train_dqn'));
 verifyNotEmpty(tc, strfind(src, 'if isfield(Dd, ''deg_mode''), PP.deg_mode = Dd.deg_mode; PP.ber_q = Dd.ber_q; end'));
 verifyNotEmpty(tc, strfind(src, 'if isfield(PP, ''deg_mode''), dec.deg_mode = PP.deg_mode; dec.ber_q = PP.ber_q; end'));
 verifyNotEmpty(tc, strfind(src, 'if isfield(PP, ''deg_mode''), rule_sel.deg_mode = PP.deg_mode; rule_sel.ber_q = PP.ber_q; end'));
+verifyNotEmpty(tc, strfind(src, 'if isfield(Dd, ''DEG'') && isfield(Dd.DEG, ''forced'')'));   % deg_forced only from a forced file
+verifyNotEmpty(tc, strfind(src, 'if isfield(PP, ''deg_forced''), dec.deg_forced = PP.deg_forced; end'));
+verifyNumElements(tc, strfind(src, 'PP.deg_forced = '), 1);
 end
 
 function test_settings_and_stamp(tc)
@@ -362,7 +371,84 @@ verifyEqual(tc, s1, s0);
 Q.dec.deg_mode = 'win'; Q.dec.ber_q = [];
 s2 = policy_stamp(Q); verifyNotEqual(tc, s2, s1);
 Q.dec.deg_mode = 'win_q'; Q.dec.ber_q = struct('lo', 0, 'q', 1e-3);
-verifyNotEqual(tc, policy_stamp(Q), s2);
+s3 = policy_stamp(Q); verifyNotEqual(tc, s3, s2);
+Q.dec.deg_forced = 'win_q:0.001';                                    % the smoke's forced mark
+verifyNotEqual(tc, policy_stamp(Q), s3);
+end
+
+%% ---------- the smoke's forced candidate (deg_force.m, docs/p1r_protocol.md) ----------
+function test_force_values(tc)
+% The six names are deg_select's candidates; any other value, from profile.json or CFG, stops.
+nm = {'ratio', 'win', 'win_q:0.01', 'win_q:0.001', 'win_q_gate:0.01', 'win_q_gate:0.001'};
+verifyEqual(tc, decision_config().deg_alpha, [1e-2 1e-3]);
+verifyEqual(tc, deg_force('names'), nm);
+for i = 1:numel(nm)
+    verifyEqual(tc, deg_force('check', nm{i}), nm{i});
+end
+verifyEqual(tc, deg_force('check', "win"), 'win');
+verifyEqual(tc, deg_force('check', ''), '');
+verifyEqual(tc, deg_force('check', []), '');
+for v = {'win_q', 'win_q:0.1', 'F1 win', 'WIN', 1}
+    verifyError(tc, @() deg_force('check', v{1}), 'deg_force:value');
+end
+f = [tempname '.json'];
+write_text(f, '{"deg_select": true, "deg_force": "win_q_gate:0.001"}');
+O = deg_options(f); verifyTrue(tc, O.on); verifyEqual(tc, O.force, 'win_q_gate:0.001');
+write_text(f, '{"deg_select": true, "deg_force": "F3"}'); verifyError(tc, @() deg_options(f), 'deg_force:value');
+delete(f);
+end
+
+function test_force_needs_smoke(tc)
+% A forced test stops C1d, C2 and C2e outside the smoke; C1d also needs deg_select and clean
+% validation flights. Every refusal goes through deg_force('smoke'), before any reading.
+verifyError(tc, @() deg_force('smoke', 'win', false, 'x'), 'deg_force:smoke');
+deg_force('smoke', 'win', true, 'x');                                % the smoke: allowed
+deg_force('smoke', '', false, 'x');                                  % nothing forced: allowed
+src = fileread(which('choose_drop_threshold'));
+verifyNotEmpty(tc, strfind(src, 'deg_force(''smoke'', DGf, exist(''SMOKE'', ''var'') && SMOKE, ''choose_drop_threshold'');'));
+verifyNotEmpty(tc, strfind(src, 'if ~isempty(DGf) && ~(DGon && ~isempty(CV))'));
+verifyNotEmpty(tc, strfind(src, 'DGf = deg_force(''check'', CFG.deg_force, ''CFG'');'));
+i0 = strfind(src, 'deg_force(''smoke'', DGf'); i1 = strfind(src, 'if DGon && isempty(CV)');
+verifyNumElements(tc, i0, 1); verifyNumElements(tc, i1, 1); verifyLessThan(tc, i0, i1);
+src = fileread(which('train_dqn'));
+verifyNotEmpty(tc, regexp(src, ['if isfield\(Dd, ''DEG''\) && isfield\(Dd\.DEG, ''forced''\)[^\n]*\r?\n\s*' ...
+    'deg_force\(''smoke'', Dd\.DEG\.forced, exist\(''SMOKE'', ''var''\) && SMOKE, ''train_dqn''\);'], 'once'));
+src = fileread(which('evaluate_policies'));
+verifyNotEmpty(tc, regexp(src, ['isfield\(Q\.dec, ''deg_forced''\)[^\n]*\r?\n\s*deg_force\(''smoke'', ' ...
+    'Q\.dec\.deg_forced, exist\(''SMOKE'', ''var''\) && SMOKE, ''evaluate_policies''\);'], 'once'));
+end
+
+function test_force_sets_mode(tc)
+% After the adoption the forced candidate's mode, name and table are deployed, marked forced
+% beside the rule's own pick (kept in pick and rule_pick); the report line says so.
+src = fileread(which('choose_drop_threshold'));               % deg_select's candidate list, as below
+verifyNotEmpty(tc, strfind(src, 'K = struct(''name'', {''ratio'', ''F1 win''}, ''mode'', {''ratio'', ''win''}, ''q'', {0, 0});'));
+verifyNotEmpty(tc, strfind(src, ['K(end+1) = struct(''name'', sprintf(''F2 win_q, alpha %g'', C.deg_alpha(a)), ' ...
+    '''mode'', ''win_q'', ''q'', a);']));
+verifyNotEmpty(tc, strfind(src, ['K(end+1) = struct(''name'', sprintf(''F3 win_q_gate, alpha %g'', C.deg_alpha(a)), ' ...
+    '''mode'', ''win_q_gate'', ''q'', a);']));
+C = decision_config();
+K = struct('name', {'ratio', 'F1 win'}, 'mode', {'ratio', 'win'}, 'q', {0, 0});
+for a = 1:numel(C.deg_alpha), K(end+1) = struct('name', sprintf('F2 win_q, alpha %g', C.deg_alpha(a)), 'mode', 'win_q', 'q', a); end %#ok<AGROW>
+for a = 1:numel(C.deg_alpha), K(end+1) = struct('name', sprintf('F3 win_q_gate, alpha %g', C.deg_alpha(a)), 'mode', 'win_q_gate', 'q', a); end %#ok<AGROW>
+BQ = struct('alpha', num2cell(C.deg_alpha), 'q', {1e-2, 1e-3});
+D0 = struct('mode', 'win_q', 'ber_q', BQ(1), 'name', 'F2 win_q, alpha 0.01', 'pick', 2);
+nm = deg_force('names');
+md = {'ratio', 'win', 'win_q', 'win_q', 'win_q_gate', 'win_q_gate'};
+qi = [0 0 1 2 1 2];
+for i = 1:numel(nm)
+    [D, ln] = deg_force('apply', D0, nm{i}, K, BQ);
+    verifyEqual(tc, D.mode, md{i}, nm{i});
+    verifyEqual(tc, D.name, K(i).name, nm{i});
+    if qi(i) > 0, verifyEqual(tc, D.ber_q, BQ(qi(i)), nm{i}); else, verifyEmpty(tc, D.ber_q, nm{i}); end
+    verifyEqual(tc, D.forced, nm{i});
+    verifyEqual(tc, D.rule_pick, 'F2 win_q, alpha 0.01');
+    verifyEqual(tc, D.pick, 2);
+    verifyEqual(tc, ln, sprintf('Degradation test FORCED (smoke only, not an adoption): %s; the rule would adopt %s', ...
+        K(i).name, 'F2 win_q, alpha 0.01'));
+end
+verifyError(tc, @() deg_force('apply', D0, 'win_q:0.1', K, BQ), 'deg_force:value');
+verifyFalse(tc, isfield(D0, 'forced') || isfield(D0, 'rule_pick'));   % an adoption carries neither
 end
 
 %% ---------- helpers ----------

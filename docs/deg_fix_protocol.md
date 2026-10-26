@@ -168,7 +168,8 @@ Definitions fixed now:
 | `test_settings_and_stamp` | `decision_settings` and the stamp |
 
 Smoke: profile 3's own smoke exercises the default. One smoke cell per candidate (2 h cap)
-before P3's queue.
+before P3's queue, each cell's candidate forced by the smoke-only switch `deg_force`
+(`docs/p1r_protocol.md` section 6).
 
 ## 9. Sources
 

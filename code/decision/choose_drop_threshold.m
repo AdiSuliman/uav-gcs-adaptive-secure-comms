@@ -63,7 +63,9 @@
 % half's clean episodes and the validation split's single threats, each monitor at its own most
 % sensitive admissible threshold, beside 'ratio' on the same episodes; adopted by deg_adopt.m.
 % The whole monitor's reading below then runs with the adopted test. Without the switch nothing
-% of this runs and the outputs are those of before.
+% of this runs and the outputs are those of before. In the smoke only (SMOKE), deg_force
+% (profile.json or CFG.deg_force, deg_force.m) deploys one named candidate after the adoption,
+% marked DEG.forced beside the rule's pick DEG.rule_pick (docs/p1r_protocol.md); refused otherwise.
 %
 % Output: data/drop_threshold.mat (drop_db, the median window's threshold alone, and
 % drop_db_train, drop_from; drop_alarm, cusum_db, the confirmations CF and the validation
@@ -232,11 +234,16 @@ MON = MN;
 fm = find(strcmp(FM, drop_alarm)); GF = GR{fm}; CS = decision_config().confirm_sweep;
 DEG = [];                                                  % the degradation test chosen here (deg_options.m)
 DGon = deg_options().on; if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'deg_select'), DGon = CFG.deg_select; end
+DGf = deg_options().force; if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'deg_force'), DGf = deg_force('check', CFG.deg_force, 'CFG'); end
+deg_force('smoke', DGf, exist('SMOKE', 'var') && SMOKE, 'choose_drop_threshold');
+if ~isempty(DGf) && ~(DGon && ~isempty(CV))
+    error('choose_drop_threshold:force', 'deg_force %s needs deg_select and clean validation flights', DGf);
+end
 if DGon && isempty(CV)
     DEG = struct('mode', 'ratio', 'ber_q', [], 'note', 'no clean validation flights: not chosen');
     rd = {'', 'Degradation test: no clean validation flights, ''ratio'' kept (not chosen).'};
 elseif DGon
-    [DEG, rd] = deg_select(PP, CV, drop_alarm, GF, MON, CS, EBNO_THR, T, VA, FA_BOUND);
+    [DEG, rd] = deg_select(PP, CV, drop_alarm, GF, MON, CS, EBNO_THR, T, VA, FA_BOUND, DGf);
     PP.deg_mode = DEG.mode; PP.ber_q = DEG.ber_q;           % the monitor of the reading below and of C2
 end
 if DGon
@@ -412,11 +419,12 @@ function out = ternary(c, a, b)
 if c, out = a; else, out = b; end
 end
 
-function [DEG, rw] = deg_select(PP, CV, drop_alarm, GF, MON, CS, thr, T, VA, FA)
+function [DEG, rw] = deg_select(PP, CV, drop_alarm, GF, MON, CS, thr, T, VA, FA, force)
 % The degradation test chosen on validation (docs/deg_fix_protocol.md): the quantile tables
 % from the fit half of the clean validation geometries; per candidate, 'ratio' first, the
 % reading of section 5 on the check half's clean episodes and the validation split's single
-% threats, the same episodes and frames for every candidate; adopted by deg_adopt.m.
+% threats, the same episodes and frames for every candidate; adopted by deg_adopt.m. force
+% (smoke only, deg_force.m): the candidate deployed instead, '' for the adoption.
 C = decision_config(); nS = numel(PP.ebno);
 [fit, chk] = clean_halves(CV.runs);
 assert(~any(fit & chk) && all(fit | chk), 'choose_drop_threshold: the fit and check halves overlap');
@@ -493,6 +501,9 @@ if pick > 0
     rw{end+1} = sprintf('Degradation test ADOPTED: %s (%s; lowest bound %.2f%%)', DEG.name, how, 100 * best(pick));
 else
     rw{end+1} = 'Degradation test: no candidate admissible, ''ratio'' kept (F4 is the registered next step).';
+end
+if ~isempty(force)
+    [DEG, ln] = deg_force('apply', DEG, force, K, BQ); rw{end+1} = ln;
 end
 end
 

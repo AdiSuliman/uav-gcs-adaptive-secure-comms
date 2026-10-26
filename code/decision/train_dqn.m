@@ -136,6 +136,10 @@ if isfile('data/drop_threshold.mat')
     if isfield(Dd, 'MONP'), MONP = Dd.MONP; end
     if isfield(Dd, 'confirm_sweep'), PP.confirm_sweep = Dd.confirm_sweep; end   % the sweeper's own confirmation
     if isfield(Dd, 'deg_mode'), PP.deg_mode = Dd.deg_mode; PP.ber_q = Dd.ber_q; end   % the degradation test chosen at C1d
+    if isfield(Dd, 'DEG') && isfield(Dd.DEG, 'forced')       % a forced test (deg_force.m): the smoke only
+        deg_force('smoke', Dd.DEG.forced, exist('SMOKE', 'var') && SMOKE, 'train_dqn');
+        PP.deg_forced = Dd.DEG.forced;
+    end
     clear Dd
 end
 if ~isempty(DROP_DB), PP.drop_db = DROP_DB; end
@@ -362,6 +366,9 @@ rep{end+1} = sprintf('The sweeping jammer''s own confirmation: %s (choose_drop_t
 if isfield(PP, 'deg_mode')
     rep{end+1} = sprintf('The degradation test: %s (choose_drop_threshold.m, on validation, docs/deg_fix_protocol.md)', PP.deg_mode);
 end
+if isfield(PP, 'deg_forced')
+    rep{end+1} = sprintf('  FORCED for the smoke (deg_force %s), not an adoption (docs/p1r_protocol.md)', PP.deg_forced);
+end
 rep{end+1} = '';
 rep{end+1} = sprintf(['Rule settings on validation, rule + escalation at %s, drop %.1f %s, one coordinate at a time (the ' ...
     'selection rule below, the setting in force first); the predicted MMSE gain of %d clean validation frames: mean %.2f, ' ...
@@ -441,6 +448,7 @@ drop_db = drop_sel; if isnan(drop_db), drop_db = DROP_DB; end
 dec = Sdep; dec.alarm_mode = alarm_mode; dec.confirm = confirm; dec.drop_db = drop_db;
 dec.confirm_sweep = []; if isfield(PP, 'confirm_sweep'), dec.confirm_sweep = PP.confirm_sweep; end
 if isfield(PP, 'deg_mode'), dec.deg_mode = PP.deg_mode; dec.ber_q = PP.ber_q; end
+if isfield(PP, 'deg_forced'), dec.deg_forced = PP.deg_forced; end   % the smoke's forced test, in the stamp
 agent = dqn_dense(agent);                          % matrix form for deployment
 for gi = find(~cellfun(@isempty, agents)), agents{gi} = dqn_dense(agents{gi}); end
 det_id = PP.det_id; pools_created = PP.created;    % the pools (and their detector) the agent learned on
