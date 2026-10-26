@@ -1,7 +1,9 @@
 # System-level clean false alarms: breakdown and pre-onset sensitivity (protocol)
 
 Fixed on 26.10.2026, during C2 of profile 1, before `STAGE C2e done`: no C2 or C2e result exists.
-Nothing in this protocol has been run. It implements DECISIONS D103 points 3-6 (decision note
+Nothing in this protocol has been run (the gate-failure behaviour and the launch of sections 2 and
+5 were fixed the same day, before C2e, after a dry run of the gate on a scratch copy of the smoke).
+It implements DECISIONS D103 points 3-6 (decision note
 `system_fa_decision.md`, option A+). The verdicts stay as pre-registered:
 - **Lecturer KPI 3 (FAR <= 5%)** is read on the detector (B3c, B3r; `design_final.md` 6.5).
 - **Our KPI 6 (system level, an extension)** is `KP.far`, read in C2e on the union of clean test
@@ -46,8 +48,23 @@ Exact (`isequaln`, no tolerance), before anything of points 3-5 is read:
   the clean pools' `RW` as split 6, from the KPI 1 threshold) reproduces `KP.far` and
   `KP.far_diag`, and its lines equal those under KPI 6's header of the text.
 
-On a mismatch the output starts with `GATE FAIL`, lists every mismatch, holds none of points 3-5
-and the run stops. Nothing is adjusted.
+On a mismatch the run writes `system_fa_breakdown.gatefail.txt` and `.gatefail.mat` (the first
+line `GATE FAIL`, the header with the inputs' SHA-256 and the thread count, every mismatch and, for
+a field that differs, the leaves that differ with their count, the largest absolute difference and
+the first pair at full precision), holds none of points 3-5, creates neither
+`system_fa_breakdown.txt` nor `.mat`, and stops with the error `system_fa_breakdown:gate`.
+**A failed gate does not spend the reading:**
+- a later run into the same `out_dir` is allowed; an earlier attempt's diagnostics stay there under
+  their own time;
+- the once-guard covers the outputs of a PASS only: no second run after `system_fa_breakdown.txt`
+  or `.mat` exists;
+- nothing is adjusted: no tolerance, no threshold, no point of section 3. A defect in the script
+  that the diagnostics expose is fixed in a commit with its test and entered in DECISIONS before
+  the next attempt; the gate stays exact.
+
+The header names the thread count the session really has (`threads N (how)`, never "as C2e"): the
+run sets `maxNumCompThreads('automatic')` where the session allows it, and a `-singleCompThread`
+session, as the gated wrapper's, refuses and keeps one thread.
 
 ## 3. Readings and their order
 
@@ -122,21 +139,33 @@ use:
 
     bash "/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_gated_run.sh" 35 uav-gcs-v7-p3 logs/hand_sysfa_tests_<time>.txt "restoredefaultpath; cd('C:\Users\Adi Suliman\uav-gcs-sysfa'); startup; r = [runtests('code/tests/test_system_fa_breakdown.m'), runtests('code/tests/test_core.m', 'ProcedureName', 'test_m_files_parse')]; for k = 1:numel(r), fprintf('V7RESULT %d %s\n', r(k).Passed, r(k).Name); end; fprintf('V7TESTS %d/%d\n', sum([r.Passed]), numel(r)); exit(double(isempty(r) || ~all([r.Passed])))"
 
-Where the plan allows, the script is also run once on the smoke's saved
-`policy_evaluation.mat` (its own pools and `trained_dqn.mat`, into a scratch folder) to exercise
-the exact gate on real fields. A failing test is fixed on `sysfa` with the rules of section 3
-unchanged.
+The script was also run on a scratch copy of the smoke's saved `policy_evaluation.mat`/`.txt`
+(its own pools and `trained_dqn.mat`) through the gated wrapper on 26.10.2026: the exact gate
+passes there, one thread. That proves little about the chain: the smoke's C2e ran under
+`-singleCompThread` (`v7_d91_deploy_tests2.sh`), the chain's C2e does not (`v7_d91_takeover.sh`,
+`run_ml p1`), and the smoke is small (a few hundred episodes), so it cannot show a thread-count
+effect that appears only on larger reductions. A failing test is fixed on `sysfa` with the rules of
+section 3 unchanged.
 
 **Profile 1, once, after its `##### STAGE C2e done`:**
 1. Copy profile 1's `results/policy_evaluation.mat`, `.txt` and `data/trained_dqn.mat` into
    `C:\Users\Adi Suliman\uav-gcs-sysfa-read\p1\results` and set them read-only. The post-M
    `data/policy_pools.mat` is read in place (only `load` and the hash read it).
-2. Run, through the same wrapper and slot (45 GB: the pools are loaded once):
+2. Run, through the same wrapper and slot (45 GB: the pools are loaded once). This first attempt is
+   the canonical launch: one thread, every gate of the wrapper:
 
        bash "/c/Users/Adi Suliman/uav-gcs-logs/v7_d91_gated_run.sh" 45 uav-gcs-v7-p3 logs/sysfa_p1_<time>.txt "restoredefaultpath; cd('C:\Users\Adi Suliman\uav-gcs-sysfa'); startup; system_fa_breakdown('run', '<P1 tree>\data\policy_pools.mat', 'C:\Users\Adi Suliman\uav-gcs-sysfa-read\p1\results\policy_evaluation.mat', 'C:\Users\Adi Suliman\uav-gcs-sysfa-read\p1\results\policy_evaluation.txt', 'C:\Users\Adi Suliman\uav-gcs-sysfa-read\p1\results\trained_dqn.mat', 'C:\Users\Adi Suliman\uav-gcs-sysfa-read\p1\results')"
 
    `<P1 tree>` is the tree whose chain ran that C2e.
-3. If the script and its tests are not ready by `STAGE C2e done`, they still run once
+3. **If the gate fails** (section 2: the reading is still open): the same script with the same
+   arguments and inputs runs again in a session with the thread count C2e had (`automatic`; the
+   chain's MATLAB is started without `-singleCompThread`). The launcher is the wrapper copy
+   `sed 's/ -singleCompThread//' v7_d91_gated_run.sh > <scratch>/v7_d91_gated_run_mt.sh`, which
+   keeps the busy file, the memory gate and the speed gate; the script itself sets `automatic`,
+   and the header names the count. If that attempt fails as well, the reading stays open and
+   stops: a DECISIONS entry names the field and the cause (the `.gatefail.txt` leaves) before
+   anything else is tried; a tolerance is never one of the options.
+4. If the script and its tests are not ready by `STAGE C2e done`, they still run once
    afterwards; the delay goes on record. No rule here depends on a result.
 
 **Writes:** the reading copy's `system_fa_breakdown.{txt,mat}` and the wrapper's log. Nothing in a
@@ -155,7 +184,8 @@ profile's tree. The run refuses when its outputs exist and checks that no input 
 
 ## 7. Never
 
-- Nothing of points 3-5 before the gate passes; no second run of a reading copy.
+- Nothing of points 3-5 before the gate passes; no second run of a reading copy after a PASS (a
+  failed gate leaves the reading open, section 2).
 - No change to a verdict, a threshold or a KPI definition from these readings.
 - No episode excluded on anything but pre-onset behaviour; no line chosen or dropped after a
   result is seen.

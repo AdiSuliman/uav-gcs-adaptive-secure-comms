@@ -30,6 +30,9 @@ verifyEqual(tc, G.T, 30);
 verifyEqual(tc, numel(G.aboveU), 24); verifyEqual(tc, sum(G.aboveU), 16);
 X = E; X.KP.lect.per(1).red_pct = X.KP.lect.per(1).red_pct + eps(X.KP.lect.per(1).red_pct);
 gate_fails(tc, X, PP, Q, txt, 'KP.lect: .per differs');
+G = system_fa_breakdown('gate', X, PP, Q, txt);
+verifyTrue(tc, any(contains(G.mismatch, 'leaf.per(1).red_pct: 1 of ')) && any(contains(G.mismatch, 'max |d| ')), ...
+    'the diagnostics name the leaf, the count and the size of the difference');
 X = E; X.KP.far(2).k = 99;
 gate_fails(tc, X, PP, Q, txt, 'KP.far: .k differs');
 t = txt; i = find(startsWith(t, '  PRIMARY narrowband'), 1); t{i} = [t{i} ' '];
@@ -250,9 +253,24 @@ verifyError(tc, @() system_fa_breakdown('run', fp, fe, ft, fq, out), 'system_fa_
 Q2 = Q; Q2.confirm = [2 2]; fq2 = fullfile(d, 'trained_dqn_other.mat'); save(fq2, '-struct', 'Q2');
 out2 = fullfile(d, 'read2'); mkdir(out2);
 verifyError(tc, @() system_fa_breakdown('run', fp, fe, ft, fq2, out2), 'system_fa_breakdown:gate');
-o2 = read_text(fullfile(out2, 'system_fa_breakdown.txt'));
+o2 = read_text(fullfile(out2, 'system_fa_breakdown.gatefail.txt'));
 verifyTrue(tc, startsWith(o2{1}, 'GATE FAIL'));
 verifyFalse(tc, any(startsWith(o2, '=== D103')));
+% a failed gate spends nothing: no reading output, the diagnostics beside, the thread count real
+verifyFalse(tc, isfile(fullfile(out2, 'system_fa_breakdown.txt')) || isfile(fullfile(out2, 'system_fa_breakdown.mat')));
+Fg = load(fullfile(out2, 'system_fa_breakdown.gatefail.mat'));
+verifyFalse(tc, Fg.G.pass);
+verifyTrue(tc, any(startsWith(o2, sprintf('threads %d (', Fg.nthr))) && ~any(contains(o2, 'as C2e')));
+verifyEqual(tc, Fg.nthr, maxNumCompThreads);
+% the reading is still open: a second failure keeps the first diagnostics, the right inputs then pass once
+verifyError(tc, @() system_fa_breakdown('run', fp, fe, ft, fq2, out2), 'system_fa_breakdown:gate');
+verifyEqual(tc, numel(dir(fullfile(out2, 'system_fa_breakdown.gatefail*.txt'))), 2);
+verifyEqual(tc, numel(dir(fullfile(out2, 'system_fa_breakdown.gatefail*.mat'))), 2);
+system_fa_breakdown('run', fp, fe, ft, fq, out2);
+o3 = read_text(fullfile(out2, 'system_fa_breakdown.txt'));
+verifyTrue(tc, startsWith(o3{1}, 'GATE PASS'));
+verifyError(tc, @() system_fa_breakdown('run', fp, fe, ft, fq, out2), 'system_fa_breakdown:once');
+verifyError(tc, @() system_fa_breakdown('run', fp, fe, ft, fq2, out2), 'system_fa_breakdown:once');
 verifyError(tc, @() system_fa_breakdown('run', 'policy_pools.mat', fe, ft, fq, out2), 'system_fa_breakdown:input');
 end
 
