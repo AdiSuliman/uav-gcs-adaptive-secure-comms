@@ -1,0 +1,18 @@
+Profile 1, stage B3c (train_core_cnn): memory floor of the two hand-runs (deviation from
+core_cnn_protocol.md 9, which names 65 GB). Written before the train-only run.
+
+Rule (approved by Adi on 25.10.2026; DECISIONS D96, D98 e):
+  train-only run:  55 GB
+  reading run:     max(55, train-only peak + 7 + 10) GB
+
+  train-only peak: the highest commit of the train-only run's MATLAB process, sampled every 30 s
+                   (STOP_SOFT 3 C6); without a reading, the protocol's upper estimate of 14 GB
+                   (core_cnn_protocol.md 10, peak RAM about 10-14 GB).
+  + 7 GB:          the fourth set the reading loads on top of training (about 6-7 GB,
+                   core_cnn_protocol.md 10).
+  + 10 GB:         the margin of every read-once step.
+
+Basis of the 65 GB it replaces: OOD's 36 GB peak on profile 3 plus about 20 GB of profile 1's pool
+gather plus 10 (v7_d91_takeover.md:52). Neither runs in the stop window. Profile 1's chain MATLAB
+42560 peaked at 38.06 GB over B3, B3a, B4, OOD, B4s, C1p, C1c and SURV; 38.1 + 10 = 48 <= 55.
+The floor is never lowered below 55.

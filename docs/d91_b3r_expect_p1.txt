@@ -1,0 +1,18 @@
+Profile 1, stop window of 25-26.10.2026: numeric pass of the fresh2 rehearsal before B3r
+(STOP_SOFT K, plan_v2 C7, DECISIONS D98 e). Written before the rehearsal runs.
+
+The rehearsal reads the second test set (fresh2) with the deployed fusion. fresh2 is in the fit set
+of the enlarged fusion, so this is no test reading and spends no set. B3r reads the fourth set only
+if all three limits hold:
+
+  fault (antenna_fault) F1                     >= 88%
+  macro-F1 above the KPI 1 threshold           >= 93.9%
+  clean frames read as a threat                <= 3.45%
+
+Basis (docs/d91_fuse.md, M4 out of fold, KPI 1 threshold of the base reading 0 dB):
+  set fresh2 fault F1: base 84.35%, branch evidence +5.80 -> about 90.2%
+  base macro-F1 above the threshold 94.36%; branch evidence +0.64 [+0.52, +0.77]
+  base clean read as a threat 2.79%; branch evidence -0.29 [-0.43, -0.15]
+
+A miss: no B3r. Review the deployment (B2F log, deploy_state), fix from the sources, rerun the
+rehearsal.
