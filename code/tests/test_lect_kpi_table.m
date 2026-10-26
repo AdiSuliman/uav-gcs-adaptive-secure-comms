@@ -128,6 +128,23 @@ verifyTrue(tc, any(contains(lines, 'link-limited (L) 0 dB, 3 dB | marginal (M) 6
 verifyFalse(tc, any(contains(lines, 'pending (CORE_BW)')));
 end
 
+function test_far_note_under_600(tc)
+% The protocol word stays as section 6 words it; with fewer than 600 episodes the row says the
+% project's own KPI 6 (measure_all_kpis.m) does not pass on the same counts.
+d = new_dir(tc);
+write_inputs(d, false, false);
+T = lect_kpi_table(d);
+r = T.rows([T.rows.kpi] == 3 & strcmp({T.rows.policy}, 'rule_core'));
+verifyNumElements(tc, r, 1); verifyFalse(tc, contains(r.note, 'fewer than 600'));
+S = load(fullfile(d, 'policy_evaluation.mat'));
+for j = 1:numel(S.KP.far), S.KP.far(j).n = 300; S.KP.far(j).p = S.KP.far(j).k / 300; end
+save(fullfile(d, 'policy_evaluation.mat'), '-struct', 'S');
+T = lect_kpi_table(d);
+r = T.rows([T.rows.kpi] == 3 & strcmp({T.rows.policy}, 'rule_core'));
+verifyNumElements(tc, r, 1); verifyTrue(tc, contains(r.note, 'fewer than 600'));
+verifyEqual(tc, r.n, 300);
+end
+
 function test_verdict_words_are_copied(tc)
 % A saved verdict word is shown as saved, even when the numbers beside it would give another one.
 d = new_dir(tc);
