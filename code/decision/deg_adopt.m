@@ -1,6 +1,6 @@
 function [pick, adm, best, fail] = deg_adopt(R, R0, fa_bound, lect)
-%DEG_ADOPT  The adoption rule of the degradation test (docs/deg_fix_protocol.md, section 4 of the
-%   decision of 26.10; the form of the sweeper's rule, choose_drop_threshold.m).
+%DEG_ADOPT  The adoption rule of the degradation test (docs/deg_fix_protocol.md, section 3; the
+%   form of the sweeper's rule, choose_drop_threshold.m).
 %   R    candidates in the adoption order (F1, F2 per alpha, F3 per alpha), each with lat (1 x
 %        monitors, choose_drop_threshold.m's delays: threat, median, p90, never) and bound (1 x
 %        monitors, the clean check half's one-sided 95% bound at the monitor's own threshold)

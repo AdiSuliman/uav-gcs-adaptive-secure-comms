@@ -3,8 +3,10 @@ function BQ = clean_ber_q(CV, PP, fit, alpha)
 %   (default C.deg_alpha), from the fit half of the clean validation geometries (clean_halves.m):
 %   every Eb/N0 point of CV at no_action, every full window of C.win frames of each flight as
 %   policy_monitor.m reads it there (the mean BER estimate and the median measured Eb/N0
-%   estimate of the same frames; no configuration gain at no_action). A geometry is one flight
-%   at every Eb/N0 point. Only the clean validation set is read (docs/deg_fix_protocol.md).
+%   estimate of the same frames; no configuration gain at no_action). A geometry counts as one
+%   flight over every Eb/N0 point, though each point flies it with its own seed
+%   (clean_pool_seed.m): the conservative count. Only the clean validation set is read
+%   (docs/deg_fix_protocol.md).
 %   CV   the clean validation pools (data/clean_val_pools.mat CT, set 'val')
 %   PP   the policy pools' settings (sps, bps)
 %   fit  logical over CV.runs
