@@ -185,13 +185,16 @@ Full tables: `results/kpi_summary.txt`, `results/policy_evaluation.txt`, `result
 ## Operator console (`demo_gui.m`)
 
 - **Live operations:** a queue of threat × Eb/N0 cells at a chosen UAV speed and severity. Each run is a real Simulink run; every frame passes through the detector, the Mahalanobis unknown-threat score (slider: retention level) and `policy_decide.m`; the configuration at the end of the run is simulated again to measure the result. Shows spectrogram, constellation, BER/RSSI timeline, class probabilities, DQN Q-values with the rule's choice, BER before / DQN / rule and a verdict on the survivability thresholds.
-- **Continuous episode:** one link cycle by cycle, clean cycles then a threat onset, DQN and rule on identical frames; every configuration is simulated on the same seeds. T_detect, T_act, T_recover, switches, goodput; CSV and screenshot export.
-- **KPI & results:** KPI cards and plots from `results/`.
+- **Link state and core rule:** beside the 11-class detector, a panel shows the proposal's three link states (clean, narrowband jamming, wideband jamming) read by the B3c CNN (`data/core_cnn_model.mat`) on the run's spectrogram over its window (N = 3 frames); the decision panel adds the core rule (`rule_core`: channel switching and rate reduction) next to the DQN and the rule. `console_core.m` holds this part apart from the figure.
+- **Continuous episode:** one link cycle by cycle, clean cycles then a threat onset, DQN and rule (and, as a choice, the core rule) on identical frames; every configuration is simulated on the same seeds. A strip shows the three-state reading per cycle. T_detect, T_act, T_recover, switches, goodput; CSV and screenshot export.
+- **KPI & results:** KPI cards and plots from `results/`, and the lecturer's KPI lines as the pipeline wrote them (read only).
 - **Survivability map:** Map A / B per threat and geometry, with the last live run marked.
 - **Session log:** run history, export to CSV / MAT.
 - **3D VIEW** (continuous episode tab): replays the last episode in the Unreal 3D view (`v3d_live('replay', file)`).
 
 The file has no nested functions (D24): static state lives in `fig.UserData`, changing state in appdata; `params.mat` is restored after every run.
+
+`export_gui_bundle.m` copies what the console needs into `profiles/rx<n>`, including a small `data/policy_pools.mat` that holds the clean-link reference alone (the link monitor reads it; the export and the console's start both stop when it is not finite) and, when present, the three-state model and `results/core_cnn.txt`. `code/tests/test_gui.m` tests the exporter, `console_core.m` and the decision cycle headless on a bundle exported from a smoke tree.
 
 ---
 

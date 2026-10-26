@@ -94,6 +94,8 @@ function test_gui_bundle_drops_stale(tc)
 root = fullfile(tc.TestData.tmp, 'bundle_root'); tgt = fullfile(tc.TestData.tmp, 'bundle_target');
 mkdir(fullfile(root, 'data')); mkdir(fullfile(root, 'results'));
 params = struct('n_rx', 3); save(fullfile(root, 'params.mat'), 'params');
+clean_ref = struct('ebno', [0 3 6 9 12], 'ber', 10.^-(1:5), 'ber_est', 10.^-(1:5), 'plr_fec', 10.^-(1:5));
+save(fullfile(root, 'data', 'policy_pools.mat'), 'clean_ref');                % the export reads the clean reference
 x = 1;
 for f = {'trained_detector', 'trained_dqn', 'gui_norm_stats', 'ood_thresholds', 'fusion'}
     save(fullfile(root, 'data', [f{1} '.mat']), 'x');

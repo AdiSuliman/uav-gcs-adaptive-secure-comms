@@ -8,11 +8,18 @@ function b = clean_ber_ref(ebno, kind)
 %                    compares like with like, so the estimator's bias cancels
 %         'plr_fec'  CRC packet loss of the clean link with fec_interleave
 %   The table is cached; the pools file is checked for a newer version at most
-%   every 30 s, so a decision cycle does not wait on the file system.
-persistent R stamp checked
+%   every 30 s, so a decision cycle does not wait on the file system. The file is
+%   the working folder's: another folder reads its own. clean_ber_ref('reset') drops
+%   the cache (a file written in the folder just read, within the 30 s).
+persistent R stamp checked where
+if nargin >= 1 && ischar(ebno) && strcmp(ebno, 'reset')
+    R = []; stamp = []; checked = []; where = ''; b = [];
+    return
+end
 if nargin < 2, kind = 'ber'; end
 f = 'data/policy_pools.mat';
-if isempty(checked) || toc(checked) > 30
+if isempty(checked) || toc(checked) > 30 || ~strcmp(where, pwd)
+    if ~strcmp(where, pwd), stamp = []; where = pwd; end
     if isfile(f), d = dir(f); now_stamp = d.datenum; else, now_stamp = NaN; end
     if isempty(stamp) || ~isequaln(stamp, now_stamp)
         R = [];
