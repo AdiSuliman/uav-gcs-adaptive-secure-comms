@@ -9180,13 +9180,38 @@ end
 
 function test_band_clean_ref_assert(tc)
 % The study never runs its monitor on C.deg_floor: decision_inputs (val and test) refuses a clean
-% reference at 9 dB that is not finite, as clean_ber_ref gives without data/policy_pools.mat;
-% the val stage freezes the value it read and the test stage refuses another before its marker,
-% as it refuses validation choices that differ from the frozen ones.
+% reference at 9 dB that is not finite, as clean_ber_ref gives without data/policy_pools.mat, and
+% a true clean BER there outside clean_ref_rebuild.m's pre-registered range 3e-4 to 6e-3 (a
+% finite but stale pools file, the C1p flights' 2.4e-5); the val stage freezes the value it read
+% and the test stage refuses another before its marker, as it refuses validation choices that
+% differ from the frozen ones.
 for v = {NaN, Inf, -Inf, [], [1e-5 2e-5]}
     verifyError(tc, @() core_bw_rules('clean_ref', v{1}), 'experiment_core_bw:clean_ref');
 end
 verifyEqual(tc, core_bw_rules('clean_ref', 2.5e-5), 2.5e-5);
+verifyEqual(tc, core_bw_rules('clean_ref', 7.4e-4, 1.45e-3), 7.4e-4);   % profile 1's validation clean pools (results/clean_ref.txt)
+for b = [3e-4 6e-3]                                          % the range is closed, as clean_ref_rebuild's verdict
+    verifyEqual(tc, core_bw_rules('clean_ref', 7.4e-4, b), 7.4e-4);
+end
+for b = {2.4e-5, 2.99e-4, 6.01e-3, 0.071, 0, NaN, Inf, [], [1e-3 2e-3], 'x'}
+    verifyError(tc, @() core_bw_rules('clean_ref', 7.4e-4, b{1}), 'experiment_core_bw:clean_ref');
+end
+verifyError(tc, @() core_bw_rules('clean_ref', NaN, 1e-3), 'experiment_core_bw:clean_ref');
+% the range is the one clean_ref_rebuild.m pre-registers, not a second copy that can drift
+rr = regexp(fileread(which('clean_ref_rebuild')), '''range'', (\[[^\]]*\])', 'tokens', 'once');
+rc = regexp(fileread(which('core_bw_rules')), 'RANGE = (\[[^\]]*\]);', 'tokens', 'once');
+verifyNotEmpty(tc, rr); verifyEqual(tc, rc, rr);
+% a finite but stale pools file: clean_ref of the C1p flights (BER 2.4e-5 at 9 dB) passes the finite test only
+d = tempname; mkdir(fullfile(d, 'data')); c0 = cd(d);
+clear clean_ber_ref
+S = struct('ebno', [0 3 6 9 12 15], 'ber', [7.1e-2 1.9e-2 1.0e-2 2.4e-5 1.2e-5 0], ...
+    'ber_est', [2.5e-2 9.3e-3 5.0e-3 3.4e-5 5.6e-6 5.1e-6]);
+clean_ref = S; save('data/policy_pools.mat', 'clean_ref');
+vb = clean_ber_ref(9, 'ber'); ve = clean_ber_ref(9, 'ber_est');
+cd(c0); clear clean_ber_ref; rmdir(d, 's');
+verifyEqual(tc, vb, 2.4e-5, 'RelTol', 1e-9);
+verifyEqual(tc, core_bw_rules('clean_ref', ve), ve);
+verifyError(tc, @() core_bw_rules('clean_ref', ve, vb), 'experiment_core_bw:clean_ref');
 d = tempname; mkdir(d); c0 = cd(d);
 clear clean_ber_ref
 v = clean_ber_ref(9, 'ber_est');                             % no pools in this folder
@@ -9195,7 +9220,7 @@ verifyTrue(tc, isnan(v));
 verifyError(tc, @() core_bw_rules('clean_ref', v), 'experiment_core_bw:clean_ref');
 src = fileread(which('experiment_core_bw'));
 verifyNotEmpty(tc, regexp(src, ['function \[PP, Q, cref\] = decision_inputs\(PP\)\r?\n(%[^\n]*\n)*' ...
-    'cref = core_bw_rules\(''clean_ref'', clean_ber_ref\(9, ''ber_est''\)\);'], 'once'));
+    'cref = core_bw_rules\(''clean_ref'', clean_ber_ref\(9, ''ber_est''\), clean_ber_ref\(9, ''ber''\)\);'], 'once'));
 verifyNumElements(tc, strfind(src, 'decision_inputs(PP)'), 3);   % its definition, val and test
 v0 = strfind(src, 'function stage_val(X)'); t0 = strfind(src, 'function stage_test(X)');
 iv = strfind(src, '[PP, Q, cref] = decision_inputs(PP);'); it = strfind(src, '[PP, ~] = decision_inputs(PP);');
@@ -9208,7 +9233,7 @@ verifyNotEmpty(tc, strfind(src, ['assert(isfield(J, ''clean_ber_est_9db'') && st
 % a refusal must not spend the single reading: every one of these lies between the guard and the marker
 g0 = strfind(src, 'J = core_bw_rules(''guard'', X);'); mk = strfind(src, 'marker(X, J.params_id);');
 verifyNumElements(tc, g0, 1); verifyNumElements(tc, mk, 1);
-c = strfind(src, 'cref = core_bw_rules(''clean_ref'', clean_ber_ref(9, ''ber_est''));');
+c = strfind(src, 'cref = core_bw_rules(''clean_ref'', clean_ber_ref(9, ''ber_est''), clean_ber_ref(9, ''ber''));');
 verifyEqual(tc, nnz(c > g0 & c < mk), 1);
 for k = {'V = load(X.val, ''WCH'', ''BCH'');', '''experiment_core_bw:w''', '''experiment_core_bw:blind''', ...
         '''experiment_core_bw:clean_ref_changed'''}
@@ -9372,20 +9397,22 @@ end
 end
 
 function test_band_protocol_pointer(tc)
-% The protocol carries the link-limited pointer of 6.5 (lect-ebno 9d5bfc8) before any val stage
+% The protocol carries the link-limited pointer of 6.5 (lect-ebno eb7ac10) before any val stage
 % hashes it, and is that commit's file; the test stage refuses a changed deviation note.
 pr = strrep(fileread(fullfile(tc.TestData.root, 'docs', 'core_bw_protocol.md')), sprintf('\r'), '');
 ptr = strjoin({'- **Link-limited flights (D99, reporting only).** `docs/lect_ebno_protocol.md` section 7 (branch', ...
     '  `lect-ebno`, `core_bw_lect_by_link.m`) gives the primary readings again on the episodes whose', ...
     '  flight''s own restoration threshold is below 1, with recovery time from detection on those as', ...
-    '  the headline, once after the test stage. The verdicts above are unchanged.'}, newline);
+    '  the headline, once after the test stage. The verdicts above are unchanged. A failed gate of that', ...
+    '  reading writes `core_bw_lect_by_link.gatefail.{txt,mat}` and does not spend it (once means after', ...
+    '  a PASS); its first attempt is the gated wrapper, the fallback is `lect_ebno_protocol.md` section 6.'}, newline);
 i = strfind(pr, ptr);
 verifyNumElements(tc, i, 1);
 verifyTrue(tc, i > strfind(pr, '**6.5 Readings (test split, read once).**') && ...
     i < strfind(pr, '**6.6 Gates before the test reading.**'));
-st = system(sprintf('git --no-optional-locks -C "%s" cat-file -e 9d5bfc8', tc.TestData.root));
+st = system(sprintf('git --no-optional-locks -C "%s" cat-file -e eb7ac10', tc.TestData.root));
 if st == 0
-    [~, ref] = system(sprintf('git --no-optional-locks -C "%s" show 9d5bfc8:docs/core_bw_protocol.md', tc.TestData.root));
+    [~, ref] = system(sprintf('git --no-optional-locks -C "%s" show eb7ac10:docs/core_bw_protocol.md', tc.TestData.root));
     verifyEqual(tc, pr, strrep(ref, sprintf('\r'), ''));
 end
 d = tempname; mkdir(d);

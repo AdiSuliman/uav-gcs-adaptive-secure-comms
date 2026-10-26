@@ -456,8 +456,9 @@ end
 
 function [PP, Q, cref] = decision_inputs(PP)
 % The deployed decision settings (data/trained_dqn.mat), as evaluate_policies.m reads them, and
-% the clean reference the monitor reads at 9 dB, refused unless finite.
-cref = core_bw_rules('clean_ref', clean_ber_ref(9, 'ber_est'));
+% the clean reference the monitor reads at 9 dB, refused unless finite, and the true clean BER
+% there, refused outside clean_ref_rebuild.m's pre-registered range.
+cref = core_bw_rules('clean_ref', clean_ber_ref(9, 'ber_est'), clean_ber_ref(9, 'ber'));
 f = 'data/trained_dqn.mat';
 v = intersect(who('-file', f), {'det_id', 'dec', 'confirm', 'alarm_mode', 'drop_db', 'maha_thr', 'H', 'model_tag'});
 Q = load(f, v{:});
@@ -684,7 +685,7 @@ assert(isequal({V.WCH.W}, cellfun(@(r) J.w.(r), {V.WCH.rule}, 'UniformOutput', f
 assert(isfield(J, 'blind_first') && isequal({V.BCH.B}, cellfun(@(r) J.blind_first.(r), {V.BCH.rule}, ...
     'UniformOutput', false)), 'experiment_core_bw:blind', ...
     'the validation file''s blind_core first responses differ from the frozen protocol''s');
-cref = core_bw_rules('clean_ref', clean_ber_ref(9, 'ber_est'));
+cref = core_bw_rules('clean_ref', clean_ber_ref(9, 'ber_est'), clean_ber_ref(9, 'ber'));
 assert(isfield(J, 'clean_ber_est_9db') && strcmp(J.clean_ber_est_9db, sprintf('%.17g', cref)), ...
     'experiment_core_bw:clean_ref_changed', 'the clean reference at 9 dB is %.17g, not the one validation froze', cref);
 marker(X, J.params_id);

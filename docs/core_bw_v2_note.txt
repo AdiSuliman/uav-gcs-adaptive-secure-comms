@@ -23,6 +23,13 @@ the test stage refuses a changed or uncommitted note (core_bw_rules 'guard').
    to protocol.json (clean_ber_est_9db); the test stage refuses another value
    (experiment_core_bw:clean_ref_changed). Before val the value in this tree must equal the one
    profile 1's tree gives.
+   The true clean BER at 9 dB (clean_ber_ref(9, 'ber')) is asserted too: it must lie inside
+   clean_ref_rebuild.m's pre-registered range 3e-4 to 6e-3 (closed, the range of its VERDICT), else
+   the same error stops the stage, so a finite but stale pools file (the C1p flights' 2.4e-5) cannot
+   pass. The range is the one clean_ref_rebuild.m already pre-registers and is not widened (a test
+   compares the two sources); the estimated BER the monitor
+   reads is checked for finiteness only, because the pre-registered range is the true BER's
+   (profile 1's validation pools: BER 1.45e-3, estimated BER 7.4e-4).
 
 3. blind_core's first response is chosen on validation
    Candidates, in this order: channel_switch, channel_switch+rate_reduce, rate_reduce (X.BLIND).

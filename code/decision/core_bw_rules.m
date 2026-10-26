@@ -40,9 +40,12 @@ function varargout = core_bw_rules(cmd, varargin)
 %       changed, the test read already (the smoke deletes its own marker and readings instead),
 %       the frozen copy missing or not byte for byte, the protocol, the note or the copy not
 %       committed; J the frozen choices
-%   v = core_bw_rules('clean_ref', v)   the clean reference the monitor reads at 9 dB
+%   v = core_bw_rules('clean_ref', v, ber)   the clean reference the monitor reads at 9 dB
 %       (clean_ber_ref.m 'ber_est'), refused unless finite: without data/policy_pools.mat
-%       policy_monitor.m falls to C.deg_floor and the alarm fires on the clean link
+%       policy_monitor.m falls to C.deg_floor and the alarm fires on the clean link. ber, the
+%       true clean BER at 9 dB (clean_ber_ref.m 'ber'), is refused unless finite and inside
+%       clean_ref_rebuild.m's pre-registered range 3e-4 to 6e-3, so a finite but stale pools
+%       file (the C1p flights' 2.4e-5) stops the stage too
 %   h = core_bw_rules('sha', f)     SHA-256 of a file, as sha256sum prints it
 switch cmd
     case 'recoverable', varargout{1} = recoverable(varargin{:});
@@ -202,10 +205,15 @@ assert(git_clean([{X.frozen, X.protocol}, note]), 'experiment_core_bw:uncommitte
     '%s must be committed without local changes before the test reading', strjoin([{X.frozen, X.protocol}, note], ', '));
 end
 
-function v = clean_ref(v)
+function v = clean_ref(v, ber)
+RANGE = [3e-4 6e-3];                                % clean_ref_rebuild.m: the mean clean BER at 9 dB
 if ~(isnumeric(v) && isscalar(v) && isfinite(v))
     error('experiment_core_bw:clean_ref', ['clean_ber_ref(9, ''ber_est'') is %s: ' ...
         'data/policy_pools.mat with its clean_ref must be in this tree, else the monitor falls to C.deg_floor'], mat2str(v));
+end
+if nargin > 1 && ~(isnumeric(ber) && isscalar(ber) && isfinite(ber) && ber >= RANGE(1) && ber <= RANGE(2))
+    error('experiment_core_bw:clean_ref', ['clean_ber_ref(9, ''ber'') is %s, not inside the pre-registered range %.0e to %.0e ' ...
+        'of the mean clean BER at 9 dB (clean_ref_rebuild.m): the pools in this tree are stale or wrong'], mat2str(ber), RANGE(1), RANGE(2));
 end
 end
 
