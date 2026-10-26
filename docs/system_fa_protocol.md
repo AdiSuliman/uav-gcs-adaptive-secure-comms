@@ -94,7 +94,8 @@ rule_esc, blind_esc, rule_core, blind_core and the deployed policy (`POL{iDQN}`)
 
 **D103 5, carried-over alarms**, per compared policy, on the recoverable threat (36), recoverable
 jamming (36) and recoverable jamming (core) episodes, with each policy's own monitor (m-of-n, the
-sweeper's k-of-n):
+sweeper's k-of-n; the blind policies read every cycle as unknown, `policy_decide.m`, so they have
+no sweeper path):
 - carried over: `t_conf < min(m, k) - 1`, which needs an alarm cycle before the onset;
 - the sweeper's path or carried over: `min(m, k) - 1 <= t_conf < m - 1`, not separable from the
   saved fields (no per-cycle class is saved);

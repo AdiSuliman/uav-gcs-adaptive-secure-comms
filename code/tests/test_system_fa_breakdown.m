@@ -216,6 +216,13 @@ q = sel('no detector + escalation', 'recoverable jamming episodes (core)');
 verifyEqual(tc, [q.n q.carried q.sweep_or_carried], [12 0 0]);
 verifyTrue(tc, any(contains(lines, 'monitor class_drop, 3 of 3, sweeper 2 of 6')));
 verifyFalse(tc, any(contains(lines, 'oracle')));
+% the blind policies read every cycle as unknown: no sweeper path, t_conf 1 is carried over
+verifyTrue(tc, any(startsWith(lines, '  no detector + escalation (monitor class_drop, 3 of 3, no sweeper path)')));
+X = E; X.ALL{4}.t_conf(1) = 1;
+CO = system_fa_breakdown('carried', X, PP, G);
+q = CO(strcmp({CO.policy}, 'no detector + escalation') & strcmp({CO.set}, 'recoverable jamming episodes (36)'));
+verifyEqual(tc, [q.carried q.sweep_or_carried], [1 0]);
+verifyEmpty(tc, q.sweep);
 end
 
 %% ---------- the single run ----------

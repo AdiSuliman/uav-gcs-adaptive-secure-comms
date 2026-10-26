@@ -522,6 +522,7 @@ CO = struct('policy', {}, 'confirm', {}, 'sweep', {}, 'set', {}, 'n', {}, 'detec
     't_conf', {}, 't_conf_wo', {}, 't_conf_wo_both', {});
 for pk = G.cmp
     mon = G.mon(pk); R = ALL{pk};
+    if startsWith(E.POL{pk}, 'blind'), mon.confirm_sweep = []; end   % every cycle reads unknown (policy_decide.m): no sweeper class
     sw = 'no sweeper path';
     if ~isempty(mon.confirm_sweep) && ~strcmp(mon.alarm_mode, 'degraded'), sw = sprintf('sweeper %d of %d', mon.confirm_sweep); end
     lines{end+1} = sprintf('  %s (monitor %s, %d of %d, %s):', LBL{pk}, mon.alarm_mode, mon.confirm, sw); %#ok<AGROW>
