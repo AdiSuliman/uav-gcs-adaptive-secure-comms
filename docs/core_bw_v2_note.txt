@@ -1,0 +1,69 @@
+CORE_BW (experiment_core_bw.m), profile 1, plan A: deviation from T5 and from core_bw_protocol.md
+Written 2026-10-26 on branch core-bw-p1 (from v7-dev d4623ed), before the smoke and before any
+CORE_BW pools, validation or test data exist. DECISIONS D98 (a) and D99 point 7.
+The validation stage writes this file's SHA-256 into results/core_bw/protocol.json (note_sha256);
+the test stage refuses a changed or uncommitted note (core_bw_rules 'guard').
+
+1. Inputs
+   Copied from profile 1's tree (uav-gcs-v7) and listed with their SHA-256 in P1_INPUTS.sha256;
+   the hashes are checked again before the pools stage:
+     T5's six files: params.mat, data/trained_detector.mat, data/fusion.mat,
+       data/ood_thresholds.mat (with its time stamp), data/splits.mat, data/trained_dqn.mat;
+     plus data/policy_pools.mat, post-M and re-keyed (about 14 GB): its clean_ref is the clean
+       reference the monitor reads (clean_ber_ref.m, policy_monitor.m:141);
+     data/core_cnn_model.mat and results/core_cnn.mat for 'dread'.
+   Reason: without the pools file clean_ber_ref returns NaN and the monitor falls to C.deg_floor
+   (1e-4), so the degradation alarm fires on the clean link at low Eb/N0 (clean BER 7.1e-2 at
+   0 dB, 1.0e-2 at 6 dB) for rule_core and blind_core alike.
+
+2. The clean reference is asserted
+   decision_inputs (val and test) calls core_bw_rules('clean_ref', clean_ber_ref(9, 'ber_est')):
+   a value that is not finite stops the stage (error experiment_core_bw:clean_ref), so the study
+   never runs its monitor on the 1e-4 floor. The val stage prints the value (%.17g) and writes it
+   to protocol.json (clean_ber_est_9db); the test stage refuses another value
+   (experiment_core_bw:clean_ref_changed). Before val the value in this tree must equal the one
+   profile 1's tree gives.
+
+3. blind_core's first response is chosen on validation
+   Candidates, in this order: channel_switch, channel_switch+rate_reduce, rate_reduce (X.BLIND).
+   Per hop rule, on the recoverable validation episodes of every fixed-total cell (CW and the
+   five wideband widths 4, 8, 20, 70, 83.5 MHz; Liu's occupied reading and the equal-level cells
+   out), equal weight per (B_J, JSR_tot). blind_core reads no class, so its one answer serves
+   both jamming types. The rule is protocol 6.3's choice of W (core_bw_rules 'choose_w'), quoted
+   exactly:
+1. the lowest pooled PER after onset;
+2. a candidate whose paired 95% bootstrap interval of the PER difference to the best holds 0 ties;
+   among the tied, the highest goodput, ties by the same interval rule;
+3. then the shortest median detection-to-restored time (never recovered counts as longest);
+4. then the order channel_switch, channel_switch+rate_reduce, rate_reduce.
+   The chosen response is blind_core's answer to a degraded link without a known cause
+   (rule_core_policy unknown_action, policy_decide PP.core_blind) and the head of its escalation
+   ladder; C.ladder_core's other configurations follow in their order. rule_core is unchanged.
+   Stored per hop rule in results/core_bw/validation.mat (BCH) and protocol.json (blind_first),
+   frozen with W and the recoverable list in docs/core_bw_frozen.json; the test stage refuses a
+   validation file whose choices differ (experiment_core_bw:blind).
+   Reason: an equal tuning budget for the conventional system. Against the rule's
+   validation-tuned W, blind_core's fixed channel_switch+rate_reduce first response would credit
+   a 4x rate cut to the CNN.
+
+4. The fixed ladder stays as a secondary row
+   blind_core_fixed: blind_core without PP.core_blind (first response channel_switch+rate_reduce,
+   ladder C.ladder_core), run on the primary set of every hop rule with the same episodes and
+   seeds. The report prints it after the per-width lines (ladder_lines), its PER words
+   descriptive, with the chosen blind_core minus it. Protocol section 5's predictions on
+   blind_core (P1, P5) are read on this row. The verdict lines, the CNN contribution, the
+   per-width and Liu lines and the sensitivities read the chosen blind_core.
+
+5. Link-limited mark per episode (D99)
+   The verdicts and per_lines stay as they are. Once after the test stage,
+   core_bw_lect_by_link('run', F) runs from branch lect-ebno (docs/lect_ebno_protocol.md 7-8): an
+   episode is link-limited when its flight's own restoration threshold, C.ratio_ok x the flight's
+   clean packet loss + one loss event (plr_threshold), is 1 or more, from the pools' test-split
+   clean cell, written with the pools' SHA-256 before test_readings.mat is opened. Line A (every
+   episode) stays the verdict; Line B (non-L episodes) is the second line and the headline of
+   recovery time from detection. Its seven readers are byte copies of this branch's
+   experiment_core_bw.m (unchanged by this deviation); the pointer is in protocol 6.5.
+
+6. Tests (code/tests/test_core.m)
+   test_band_clean_ref_assert, test_band_blind_first, test_band_blind_fixed_row,
+   test_band_protocol_pointer; the full test_core and the smoke run before the pools stage.

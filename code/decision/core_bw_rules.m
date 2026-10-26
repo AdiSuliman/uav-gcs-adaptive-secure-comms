@@ -11,7 +11,8 @@ function varargout = core_bw_rules(cmd, varargin)
 %       the choice of the wideband action (6.3): Wn candidate names in their tie-break order;
 %       bj, tot, cl (1 x n) each episode's width, total JSR and flight geometry; per, gput,
 %       trec (numel(Wn) x n) each candidate's PER after onset, delivered payload and recovery
-%       from detection (NaN never) on the same episodes; B bootstrap resamples
+%       from detection (NaN never) on the same episodes; B bootstrap resamples. The same rule
+%       chooses blind_core's first response (docs/core_bw_v2_note.txt)
 %   v = core_bw_rules('verdict', m, lo, target, n)   the PER-reduction verdict (6.5), C2e's
 %       words: MET (committed) when the 95% lower bound lo >= target, MET (not committed) when
 %       only the point m is, NOT MET otherwise and without episodes (n = 0)
@@ -35,9 +36,13 @@ function varargout = core_bw_rules(cmd, varargin)
 %       the interval holds 0 (without one, the point is 0) and, where near episodes exist, the
 %       rule's median there is the longer. No episode holds.
 %   J = core_bw_rules('guard', X)   the test stage's refusals (6.6, G4) in order: no frozen
-%       protocol, the protocol or the recoverable list changed, the test read already (the
-%       smoke deletes its own marker and readings instead), the frozen copy missing or not byte
-%       for byte, the protocol or the copy not committed; J the frozen choices
+%       protocol, the protocol, the recoverable list or the deviation note (X.note, when set)
+%       changed, the test read already (the smoke deletes its own marker and readings instead),
+%       the frozen copy missing or not byte for byte, the protocol, the note or the copy not
+%       committed; J the frozen choices
+%   v = core_bw_rules('clean_ref', v)   the clean reference the monitor reads at 9 dB
+%       (clean_ber_ref.m 'ber_est'), refused unless finite: without data/policy_pools.mat
+%       policy_monitor.m falls to C.deg_floor and the alarm fires on the clean link
 %   h = core_bw_rules('sha', f)     SHA-256 of a file, as sha256sum prints it
 switch cmd
     case 'recoverable', varargout{1} = recoverable(varargin{:});
@@ -48,6 +53,7 @@ switch cmd
     case 'gap_text',    varargout{1} = gap_text(varargin{:});
     case 'p1',          varargout{1} = p1_reading(varargin{:});
     case 'guard',       varargout{1} = guard(varargin{:});
+    case 'clean_ref',   varargout{1} = clean_ref(varargin{:});
     case 'sha',         varargout{1} = file_sha(varargin{:});
     otherwise, error('core_bw_rules:cmd', 'core_bw_rules: unknown command %s', cmd);
 end
@@ -178,6 +184,12 @@ assert(strcmp(J.protocol_sha256, file_sha(X.protocol)), 'experiment_core_bw:prot
     '%s changed since the validation choices were frozen', X.protocol);
 assert(strcmp(J.recoverable_sha256, file_sha(X.recov)), 'experiment_core_bw:recoverable_changed', ...
     '%s changed since it was frozen', X.recov);
+note = {};
+if isfield(X, 'note')
+    assert(isfield(J, 'note_sha256') && strcmp(J.note_sha256, file_sha(X.note)), 'experiment_core_bw:note_changed', ...
+        '%s changed since the validation choices were frozen', X.note);
+    note = {X.note};
+end
 if X.smoke                                          % the chain check reads its own flights again
     for f = {X.marker, X.test}, if isfile(f{1}), delete(f{1}); end, end
     return
@@ -186,8 +198,13 @@ assert(~isfile(X.marker) && ~isfile(X.test), 'experiment_core_bw:read', ...
     'the test split was read already (%s or %s): it is read once', X.marker, X.test);
 assert(isfile(X.frozen) && strcmp(file_sha(X.frozen), file_sha(X.proto_json)), 'experiment_core_bw:frozen', ...
     'the frozen protocol must be committed as %s, byte for byte %s', X.frozen, X.proto_json);
-assert(git_clean({X.frozen, X.protocol}), 'experiment_core_bw:uncommitted', ...
-    '%s and %s must be committed without local changes before the test reading', X.frozen, X.protocol);
+assert(git_clean([{X.frozen, X.protocol}, note]), 'experiment_core_bw:uncommitted', ...
+    '%s must be committed without local changes before the test reading', strjoin([{X.frozen, X.protocol}, note], ', '));
+end
+
+function v = clean_ref(v)
+assert(isscalar(v) && isfinite(v), 'experiment_core_bw:clean_ref', ['clean_ber_ref(9, ''ber_est'') is %g: ' ...
+    'data/policy_pools.mat with its clean_ref must be in this tree, else the monitor falls to C.deg_floor'], v);
 end
 
 function ok = git_clean(files)

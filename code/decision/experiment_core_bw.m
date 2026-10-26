@@ -18,17 +18,18 @@ function experiment_core_bw(stage, smoke)
 %     'dset'    the detector-only set D (4 flights per (fixed-total cell, Eb/N0), 24 clean, block 7):
 %               spectrogram images -> data/core_bw/dset.mat
 %     'val'     validation only: the coverage check (G3), the wideband action W of the CNN
-%               rule per hop rule, the recoverable scenarios; frozen by hash in
-%               results/core_bw/protocol.json
+%               rule and blind_core's first response (docs/core_bw_v2_note.txt) per hop rule,
+%               the recoverable scenarios; frozen by hash in results/core_bw/protocol.json
 %     'test'    the single test reading (refused without the frozen protocol, or a second
-%               time), then 'report'
+%               time; blind_core with the fixed ladder as a secondary row), then 'report'
 %     'report'  the KPI lines, sensitivities, predictions and the detector analysis ->
 %               results/core_bw/core_bw_report.txt, core_bw_kpis.mat
 %     'dread'   the frozen three-state CNN (branch core-cnn, after its B3c reading) on set D
 %     'smoke'   every stage but 'dread' on the reduced problem
 %   Inputs (read only, copies of the profile's deployed files): params.mat,
 %   data/trained_detector.mat, data/fusion.mat, data/ood_thresholds.mat, data/splits.mat (its
-%   norm and classes) and data/trained_dqn.mat (the deployed decision settings).
+%   norm and classes), data/trained_dqn.mat (the deployed decision settings) and
+%   data/policy_pools.mat (the clean reference the monitor reads, clean_ber_ref.m).
 %   Not a run_stage stage: neither the takeover nor the chain runs it.
 if nargin < 2 || isempty(smoke), smoke = false; end
 root = setup_paths(); c0 = cd(root); back = onCleanup(@() cd(c0)); %#ok<NASGU>
@@ -57,7 +58,7 @@ function X = study_config(smoke)
 X.smoke = smoke;
 sfx = ''; if smoke, sfx = '_smoke'; end
 X.D = ['data/core_bw' sfx]; X.R = ['results/core_bw' sfx];
-X.protocol = 'docs/core_bw_protocol.md'; X.frozen = 'docs/core_bw_frozen.json';
+X.protocol = 'docs/core_bw_protocol.md'; X.frozen = 'docs/core_bw_frozen.json'; X.note = 'docs/core_bw_v2_note.txt';
 X.pools = fullfile(X.D, 'pools.mat'); X.dset = fullfile(X.D, 'dset.mat');
 X.val = fullfile(X.R, 'validation.mat'); X.recov = fullfile(X.R, 'recoverable.txt');
 X.proto_json = fullfile(X.R, 'protocol.json'); X.marker = fullfile(X.R, 'test_read_started.txt');
@@ -74,6 +75,7 @@ X.RULES = {'H1', 'H3', 'H4'};    % H1 primary (hop_targets.m)
 X.ENV_MIN = 90;                  % recoverable scenario: >= 90% of its validation episodes recoverable
 X.TARGET = 0.30; X.N_RUN = 5; X.B = 2000;
 X.W = {'channel_switch', 'channel_switch+rate_reduce', 'rate_reduce'};   % candidates of W, the last tie-break order
+X.BLIND = {'channel_switch', 'channel_switch+rate_reduce', 'rate_reduce'};   % blind_core's first response, the same order
 X.N_WORKERS = 6;
 X.opt = struct('F_SUB', 20, 'tw', 10, 'delay_bits', 20);
 X.pick = {}; X.EBNO = [];
@@ -445,13 +447,17 @@ R.ep = idx;
 end
 
 function [kind, opt] = policy_of(name, na)
+% blind_core_fixed: blind_core run without PP.core_blind, the fixed ladder of decision_config.m.
 Qs = struct('agent', [], 'agents', {{}}, 'rule_sel', []);
 if strcmp(name, 'oracle'), kind = 'oracle'; opt = struct(); return; end
+if strcmp(name, 'blind_core_fixed'), name = 'blind_core'; end
 [kind, ~, opt] = policy_setup(name, Qs, 1, 1, 1, [], na);
 end
 
-function [PP, Q] = decision_inputs(PP)
-% The deployed decision settings (data/trained_dqn.mat), as evaluate_policies.m reads them.
+function [PP, Q, cref] = decision_inputs(PP)
+% The deployed decision settings (data/trained_dqn.mat), as evaluate_policies.m reads them, and
+% the clean reference the monitor reads at 9 dB, refused unless finite.
+cref = core_bw_rules('clean_ref', clean_ber_ref(9, 'ber_est'));
 f = 'data/trained_dqn.mat';
 v = intersect(who('-file', f), {'det_id', 'dec', 'confirm', 'alarm_mode', 'drop_db', 'maha_thr', 'H', 'model_tag'});
 Q = load(f, v{:});
@@ -465,7 +471,8 @@ assert(isfile(X.pools), 'experiment_core_bw:pools', '%s not found: run the pools
 assert(X.smoke || (~isfile(X.marker) && ~isfile(X.test) && ~recorded(params_id(load('params.mat').params))), ...
     'experiment_core_bw:read', 'the test split was read already: the validation choices stay as frozen');
 PP = load_pools(X, true);
-[PP, Q] = decision_inputs(PP);
+[PP, Q, cref] = decision_inputs(PP);
+fprintf('Clean reference at 9 dB (clean_ber_ref ber_est): %.17g\n', cref);
 if isfield(Q, 'H') && isfield(Q.H, 'T') && Q.H.T ~= X.T
     warning('experiment_core_bw:T', 'the deployed episodes are %d cycles, this study''s %d', Q.H.T, X.T);
 end
@@ -474,12 +481,14 @@ K = link_env('tables', PP, 'flight');
 EP = episodes(X, PP, 1, B); check_layers(PP, EP);
 na = K.na; nR = numel(X.RULES);
 wide = find(~EP.slice & ~EP.narrow & ~EP.occ);
+fixed = find(~EP.slice & ~EP.occ);                     % the fixed-total cells, CW included
 fprintf('Validation: %d episodes per hop rule (%d scenarios x %d Eb/N0 x %d geometries x %d onsets)\n', EP.n, ...
     numel(PP.scenarios), numel(PP.ebno), X.NGEO(1), X.REPS);
 G3 = g3_check(PP, K, X, EP, B);
 thr = plr_threshold(PP, K, 1, C);
 REC = struct('rule', {}, 'k', {}, 's', {}, 'rec_pct', {}, 'harm', {}, 'per', {}, 'thr', {}, 'ok', {});
 WCH = struct('rule', {}, 'W', {}, 'table', {});
+BCH = struct('rule', {}, 'B', {}, 'table', {});
 for q = 1:nR
     [kn, on] = policy_of('none', na);
     Rn = run_set(kn, PP, K, X, EP, 1:EP.n, q, false, 'sheet', 1, on, 51000 + 100*q);
@@ -506,18 +515,37 @@ for q = 1:nR
     [W, tab] = core_bw_rules('choose_w', X.W, EP.bj(iw), EP.tot(iw), EP.geom(iw), pr, gp, tr, X.B);
     WCH(end+1) = struct('rule', X.RULES{q}, 'W', W, 'table', tab); %#ok<AGROW>
     fprintf('  %s: W = %s (%d recoverable wideband episodes)\n', X.RULES{q}, W, numel(iw));
+    % blind_core's first response: the same rule on the recoverable episodes of every
+    % fixed-total cell (it reads no class, so one answer serves both types)
+    rec = Rn.recoverable(ismember(Rn.ep, fixed));
+    ib = fixed(rec);
+    Rb = cell(1, numel(X.BLIND));
+    for w = 1:numel(X.BLIND)
+        [kb, ob] = policy_of('blind_core', na);
+        Pb = PP; Pb.core_blind = X.BLIND{w};
+        Rb{w} = run_set(kb, Pb, K, X, EP, ib, q, false, 'sheet', 1, ob, 53000 + 100*q);
+    end
+    pickb = @(f) cell2mat(cellfun(@(R) R.(f)(:)', Rb(:), 'UniformOutput', false));
+    [pr, gp, tr] = deal(zeros(numel(X.BLIND), 0));
+    if ~isempty(ib), pr = pickb('per_post'); gp = pickb('dlv_post'); tr = pickb('t_rec_det'); end
+    [Bf, tab] = core_bw_rules('choose_w', X.BLIND, EP.bj(ib), EP.tot(ib), EP.geom(ib), pr, gp, tr, X.B);
+    BCH(end+1) = struct('rule', X.RULES{q}, 'B', Bf, 'table', tab); %#ok<AGROW>
+    fprintf('  %s: blind_core first response = %s (%d recoverable fixed-total episodes)\n', X.RULES{q}, Bf, numel(ib));
 end
 lines = recoverable_lines(X, PP, REC);
 write_lines(X.recov, lines);
 meta = study_meta(PP);
-save(X.val, 'REC', 'WCH', 'G3', 'meta', 'X');
+save(X.val, 'REC', 'WCH', 'BCH', 'G3', 'meta', 'X');
 J = struct('study', 'core_bw', 'smoke', X.smoke, 'params_id', PP.params_id, 'det_id', PP.det_id, ...
     'protocol', X.protocol, 'protocol_sha256', core_bw_rules('sha', X.protocol), 'recoverable', X.recov, ...
     'recoverable_sha256', core_bw_rules('sha', X.recov), 'n_recoverable', nnz([REC.ok]), ...
-    'w', cell2struct({WCH.W}', {WCH.rule}', 1), 'created', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
+    'w', cell2struct({WCH.W}', {WCH.rule}', 1), 'blind_first', cell2struct({BCH.B}', {BCH.rule}', 1), ...
+    'note', X.note, 'note_sha256', core_bw_rules('sha', X.note), 'clean_ber_est_9db', sprintf('%.17g', cref), ...
+    'created', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
 write_lines(X.proto_json, {jsonencode(J, 'PrettyPrint', true)});
-fprintf('Frozen: %s (W %s; %d of %d scenarios recoverable). Copy it to %s and commit before the test stage.\n', ...
-    X.proto_json, strjoin(strcat({WCH.rule}, '=', {WCH.W}), ', '), nnz([REC.ok]), numel(REC), X.frozen);
+fprintf(['Frozen: %s (W %s; blind_core first response %s; %d of %d scenarios recoverable). Copy it to %s and commit ' ...
+    'before the test stage.\n'], X.proto_json, strjoin(strcat({WCH.rule}, '=', {WCH.W}), ', '), ...
+    strjoin(strcat({BCH.rule}, '=', {BCH.B}), ', '), nnz([REC.ok]), numel(REC), X.frozen);
 end
 
 function thr = plr_threshold(PP, K, sp, C)
@@ -654,25 +682,31 @@ fprintf('Test reading started (%s)\n', X.marker);
 PP = load_pools(X, true);
 assert(strcmp(J.params_id, PP.params_id) && strcmp(J.det_id, PP.det_id), 'experiment_core_bw:pools_changed', ...
     'the pools are not those the protocol was frozen on');
-V = load(X.val, 'WCH');
+V = load(X.val, 'WCH', 'BCH');
 assert(isequal({V.WCH.W}, cellfun(@(r) J.w.(r), {V.WCH.rule}, 'UniformOutput', false)), 'experiment_core_bw:w', ...
     'the validation file''s W differ from the frozen protocol''s');
-[PP, ~] = decision_inputs(PP);
+assert(isfield(J, 'blind_first') && isequal({V.BCH.B}, cellfun(@(r) J.blind_first.(r), {V.BCH.rule}, ...
+    'UniformOutput', false)), 'experiment_core_bw:blind', ...
+    'the validation file''s blind_core first responses differ from the frozen protocol''s');
+[PP, ~, cref] = decision_inputs(PP);
+assert(strcmp(J.clean_ber_est_9db, sprintf('%.17g', cref)), 'experiment_core_bw:clean_ref_changed', ...
+    'the clean reference at 9 dB is %.17g, validation read %s', cref, J.clean_ber_est_9db);
 p0 = load('params.mat').params; B = band_plan(p0);
 K = link_env('tables', PP, 'flight');
 EP = episodes(X, PP, 2, B); check_layers(PP, EP);
 na = K.na; fixed = find(~EP.slice & ~EP.occ);
 RES = struct('rule', {}, 'set', {}, 'policy', {}, 'R', {});
 for q = 1:numel(X.RULES)
-    Pw = PP; Pw.core_wide = J.w.(X.RULES{q});
+    Pw = PP; Pw.core_wide = J.w.(X.RULES{q}); Pw.core_blind = J.blind_first.(X.RULES{q});
     sets = {'primary', 1:EP.n, false, 'sheet'; 'pipe30', fixed, false, 'pipe'};
     if q == 1, sets(end+1, :) = {'follower', fixed, true, 'sheet'}; end
     for si = 1:size(sets, 1)
         pols = {'none', 'blind_core', 'rule_core'};
-        if si == 1, pols{end+1} = 'oracle'; end %#ok<AGROW>
+        if si == 1, pols = [pols, {'blind_core_fixed', 'oracle'}]; end
         for pk = 1:numel(pols)
             [kind, opt] = policy_of(pols{pk}, na);
-            R = run_set(kind, Pw, K, X, EP, sets{si, 2}, q, sets{si, 3}, sets{si, 4}, 2, opt, 81000 + 1000*q + 100*si);
+            Pp = Pw; if strcmp(pols{pk}, 'blind_core_fixed'), Pp.core_blind = ''; end
+            R = run_set(kind, Pp, K, X, EP, sets{si, 2}, q, sets{si, 3}, sets{si, 4}, 2, opt, 81000 + 1000*q + 100*si);
             RES(end+1) = struct('rule', X.RULES{q}, 'set', sets{si, 1}, 'policy', pols{pk}, 'R', R); %#ok<AGROW>
         end
         fprintf('  %s %-9s %d episodes x %d policies\n', X.RULES{q}, sets{si, 1}, numel(sets{si, 2}), numel(pols));
@@ -731,7 +765,9 @@ lines = {sprintf('=== Bandwidth study (docs/core_bw_protocol.md)%s ===', ternary
     sprintf('params_id %s | det_id %s | test geometries %d per (cell, Eb/N0) x %d onsets | payload %g bit/s', ...
     M.params_id, M.det_id, X0.NGEO(2), X0.REPS, pay), ...
     sprintf('W (validation, frozen): %s', strjoin(cellfun(@(r) sprintf('%s -> %s', r, J.w.(r)), X0.RULES, ...
-    'UniformOutput', false), ', '))};
+    'UniformOutput', false), ', ')), ...
+    sprintf('blind_core first response (validation, frozen; docs/core_bw_v2_note.txt): %s', strjoin(cellfun(@(r) ...
+    sprintf('%s -> %s', r, J.blind_first.(r)), X0.RULES, 'UniformOutput', false), ', '))};
 recov = @(rule) recoverable_mask(REC, rule, EP);
 for q = 1:numel(X0.RULES)
     lines{end+1} = sprintf('  %s: %d recoverable scenario points (of %d)', X0.RULES{q}, ...
@@ -744,6 +780,8 @@ pm = ~EP.slice & ~EP.occ;                              % the primary cells: fixe
     'PRIMARY (H1, nRF24L01+ residual by offset, fixed total power, static jammer)', false);
 lines = [lines, blk];
 [blk, KP.by_bj] = bj_lines(get_set(RES, q1, 'primary'), EP, recov(q1) & pm, X0);
+lines = [lines, blk];
+[blk, KP.fixed] = ladder_lines(get_set(RES, q1, 'primary'), EP, recov(q1) & pm, X0, pay);
 lines = [lines, blk];
 lines = [lines, {'', ['--- Sensitivities (no verdict of their own; whether any would flip a primary verdict, rule_core ' ...
     'per jamming type) ---']}];
@@ -911,11 +949,38 @@ for bj = unique(EP.bj(~EP.slice & ~EP.occ))
 end
 end
 
+function [lines, T] = ladder_lines(S, EP, mask, X, pay)
+% The secondary row: blind_core with decision_config.m's fixed first response and ladder
+% (channel_switch+rate_reduce first) beside the blind_core whose first response validation
+% chose; PER reduction vs the static link per jamming type (its words descriptive), recovery
+% time, goodput and the chosen one minus it. Predictions P1 and P5 read this row.
+lines = {'', ['--- Secondary row, no verdict: blind_core with the fixed ladder (first response channel_switch+rate_reduce, ' ...
+    'decision_config.m), beside blind_core with its first response chosen on validation ---']};
+Rn = pol(S, 'none'); Rf = pol(S, 'blind_core_fixed'); Rb = pol(S, 'blind_core'); m0 = mask(Rn.ep);
+types = {'pooled', true(1, EP.n); 'narrowband', EP.narrow; 'wideband', ~EP.narrow};
+T = struct('type', {}, 'n', {}, 'red', {}, 'words', {}, 'rec_det', {}, 'gput', {}, 'per_diff', {}, 'gput_diff', {});
+for t = 1:size(types, 1)
+    m = m0 & types{t, 2}(Rn.ep); cl = EP.geom(Rn.ep(m));
+    [v, lo, hi] = per_reduction(Rf.per_post(m), Rn.per_post(m), cl, X.B, 3);
+    vw = core_bw_rules('verdict', v, lo, X.TARGET, nnz(m));
+    b = qstat(Rf.t_rec_det(m));
+    [g, glo, ghi] = boot_cluster(pay * Rf.dlv_post(m), ones(1, nnz(m)), cl, X.B, 5);
+    [d, dlo, dhi] = boot_cluster(Rb.per_post(m) - Rf.per_post(m), ones(1, nnz(m)), cl, X.B, 6);
+    [dg, dglo, dghi] = boot_cluster(pay * (Rb.dlv_post(m) - Rf.dlv_post(m)), ones(1, nnz(m)), cl, X.B, 8);
+    lines{end+1} = sprintf(['  blind_core fixed ladder %-10s n=%d: PER reduction %5.1f%% [%5.1f, %5.1f] (%s, descriptive) | ' ...
+        'detection->restored %s | goodput %.0f [%.0f, %.0f] bit/s | chosen - fixed: PER %+.4f [%+.4f, %+.4f], goodput ' ...
+        '%+.0f [%+.0f, %+.0f] bit/s'], types{t, 1}, nnz(m), 100 * [v lo hi], vw, b.txt, g, glo, ghi, d, dlo, dhi, dg, dglo, ...
+        dghi); %#ok<AGROW>
+    T(end+1) = struct('type', types{t, 1}, 'n', nnz(m), 'red', [v lo hi], 'words', vw, 'rec_det', b, 'gput', [g glo ghi], ...
+        'per_diff', [d dlo dhi], 'gput_diff', [dg dglo dghi]); %#ok<AGROW>
+end
+end
+
 function [lines, P] = prediction_lines(S, EP, REC, rmask, X, M, J, G3)
 % The pre-registered predictions P1-P5 with their fixed readings (docs/core_bw_protocol.md
-% section 5).
+% section 5); blind_core in P1 and P5 is the secondary row, the fixed ladder they were written for.
 lines = {'', '--- Predictions (written before any run) ---'};
-Rn = pol(S, 'none'); Rr = pol(S, 'rule_core'); Rb = pol(S, 'blind_core');
+Rn = pol(S, 'none'); Rr = pol(S, 'rule_core'); Rb = pol(S, 'blind_core_fixed');
 e = Rn.ep; P = struct();
 sc = M.scenarios;
 r1 = find(strcmp(REC.rule, X.RULES{1}));
@@ -930,9 +995,9 @@ h1 = p1 >= 0.9 && T30.holds;
 P.P1 = struct('recovered_le23', p1, 'n30', nnz(m30), 'trec30_rule', T30.med(1), 'trec30_blind', T30.med(2), ...
     'diff_ci', T30.ci, 'n_near', T30.n_near, 'near', T30.near, 'holds', h1);
 lines{end+1} = sprintf(['  P1 narrowband: rule_core recovers %.1f%% of the recoverable CW episodes at JSR_tot <= 23 dB ' ...
-    '(>= 90%%); at 30 dB (%d recoverable episodes) median detection->restored %g vs %g cycles blind_core, difference ' ...
-    '[%g, %g] (holds 0); first hop 6-12 MHz away (%d) %g vs %g (longer) -> %s'], 100 * p1, nnz(m30), T30.med, T30.ci, ...
-    T30.n_near, T30.near, ternary(h1, 'holds', 'does not hold'));
+    '(>= 90%%); at 30 dB (%d recoverable episodes) median detection->restored %g vs %g cycles blind_core (fixed ' ...
+    'ladder), difference [%g, %g] (holds 0); first hop 6-12 MHz away (%d) %g vs %g (longer) -> %s'], 100 * p1, ...
+    nnz(m30), T30.med, T30.ci, T30.n_near, T30.near, ternary(h1, 'holds', 'does not hold'));
 % P2
 w1 = J.w.(X.RULES{1}); g = G3(strcmp({G3.rule}, X.RULES{1}) & ismember([G3.bj], [4 8 20]));
 P.P2 = struct('W', w1, 'escape', [g.drawn], 'holds', ismember(w1, {'channel_switch', 'channel_switch+rate_reduce'}));
@@ -956,9 +1021,9 @@ m = EP.narrow(e) & rmask(e) & Rr.recovered & Rb.recovered; cl = EP.geom(e(m));
 gr = mean(Rr.dlv_post(m)) / max(mean(Rb.dlv_post(m)), eps);
 h5 = glo > 0 && plo <= 0 && phi >= 0;
 P.P5 = struct('n', nnz(m), 'gput_ratio', gr, 'gput_diff', dg, 'gput_lo', glo, 'per_ci', [plo phi], 'holds', h5);
-lines{end+1} = sprintf(['  P5 narrowband CNN contribution where both recover (%d episodes): goodput x%.2f (difference %.3f, ' ...
-    'lower bound %.3f > 0), PER difference [%+.4f, %+.4f] holds 0 -> %s'], nnz(m), gr, dg, glo, plo, phi, ...
-    ternary(h5, 'holds', 'does not hold'));
+lines{end+1} = sprintf(['  P5 narrowband CNN contribution against blind_core (fixed ladder) where both recover ' ...
+    '(%d episodes): goodput x%.2f (difference %.3f, lower bound %.3f > 0), PER difference [%+.4f, %+.4f] holds 0 ' ...
+    '-> %s'], nnz(m), gr, dg, glo, plo, phi, ternary(h5, 'holds', 'does not hold'));
 end
 
 function [lines, T] = monitor_lines(MON, EP, M)
@@ -1052,14 +1117,14 @@ function marker(X, pid)
 root = fileparts(fileparts(fileparts(which('experiment_core_bw'))));
 g = sprintf('git --no-optional-locks -C "%s" ', root);
 [st, o] = system([g 'rev-parse HEAD HEAD:code']);
-[sd, d] = system([g 'status --porcelain --untracked-files=all -- code docs/core_bw_protocol.md']);
+[sd, d] = system([g 'status --porcelain --untracked-files=all -- code docs/core_bw_protocol.md ' X.note]);
 o = strsplit(strtrim(o)); cm = 'unknown'; tr = 'unknown';
 if st == 0 && numel(o) == 2, cm = o{1}; tr = o{2}; end
 if st == 0 && (sd ~= 0 || ~isempty(strtrim(d))), cm = [cm ' + local changes']; end
 if ~isfolder(X.R), mkdir(X.R); end
 write_lines(X.marker, {'bandwidth study (core_bw) test reading started', ['time ' datestr(now, 'yyyy-mm-dd HH:MM:SS')], ...
     ['commit ' cm], ['code_tree ' tr], ['params_id ' pid], [X.protocol ' sha256 ' core_bw_rules('sha', X.protocol)], ...
-    [X.proto_json ' sha256 ' core_bw_rules('sha', X.proto_json)]});
+    [X.note ' sha256 ' core_bw_rules('sha', X.note)], [X.proto_json ' sha256 ' core_bw_rules('sha', X.proto_json)]});
 end
 
 function write_lines(f, lines)

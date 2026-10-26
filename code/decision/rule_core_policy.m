@@ -1,4 +1,4 @@
-function [action, reason] = rule_core_policy(threat_class, degraded, q_iot_db, q_thr_db, drop, budget, slot_on, wide_action, burst_action)
+function [action, reason] = rule_core_policy(threat_class, degraded, q_iot_db, q_thr_db, drop, budget, slot_on, wide_action, burst_action, unknown_action)
 %RULE_CORE_POLICY  The expert rule on the revised proposal's core action set.
 %   The proposal's predefined recovery actions, channel switching and transmission-rate
 %   adaptation: no_action, channel_switch, rate_reduce and channel_switch+rate_reduce
@@ -23,6 +23,9 @@ function [action, reason] = rule_core_policy(threat_class, degraded, q_iot_db, q
 %            (experiment_core_bw.m), every other class keeps its mapping
 %   burst_action  optional, the core configuration for the class noise_burst, default
 %            rate_reduce; chosen on validation (train_dqn.m, PP.core_nb)
+%   unknown_action  optional, the core configuration for a degraded link without a known
+%            cause, default channel_switch+rate_reduce; blind_core's first response, chosen
+%            on validation in the bandwidth study (policy_decide.m, PP.core_blind)
 %   Outside the core set: spatial_diversity, freq_diversity, power_control, fec_interleave.
 C = decision_config();
 threat_class = char(threat_class);
@@ -34,10 +37,13 @@ if nargin < 6, budget = []; end
 if nargin < 7 || isempty(slot_on), slot_on = true; end
 if nargin < 8 || isempty(wide_action), wide_action = 'channel_switch'; end
 if nargin < 9 || isempty(burst_action), burst_action = 'rate_reduce'; end
+if nargin < 10 || isempty(unknown_action), unknown_action = 'channel_switch+rate_reduce'; end
 assert(ismember(wide_action, setdiff(C.core_actions, {'no_action'})), 'rule_core_policy:wide', ...
     'rule_core_policy: %s is no core recovery action', wide_action);
 assert(ismember(burst_action, setdiff(C.core_actions, {'no_action'})), 'rule_core_policy:burst', ...
     'rule_core_policy: %s is no core recovery action', burst_action);
+assert(ismember(unknown_action, setdiff(C.core_actions, {'no_action'})), 'rule_core_policy:unknown', ...
+    'rule_core_policy: %s is no core recovery action', unknown_action);
 slot = q_iot_db >= q_thr_db;
 
 switch threat_class
@@ -72,6 +78,9 @@ elseif strcmp(action, 'no_action') && degraded
         action = 'channel_switch'; reason = 'degraded link with interference in the quiet slot: leave the channel';
     else
         action = 'channel_switch+rate_reduce'; reason = 'link degraded without a known cause: both core actions';
+        if ~strcmp(unknown_action, 'channel_switch+rate_reduce')
+            action = unknown_action;  reason = 'link degraded without a known cause: the first response chosen on validation';
+        end
     end
 end
 end

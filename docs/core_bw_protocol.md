@@ -339,6 +339,10 @@ static jammer.
   (fixed-total cell, Eb/N0), 24 clean; the no_action link of the pools' flights) only after B3c's
   own reading. Detectability floor, fixed now: in-band I/N >= 0 dB, JSR_in + Eb/N0 + 3.01 >= 0;
   recall is shown above and below it, no frame dropped. False alarms are not read here.
+- **Link-limited flights (D99, reporting only).** `docs/lect_ebno_protocol.md` section 7 (branch
+  `lect-ebno`, `core_bw_lect_by_link.m`) gives the primary readings again on the episodes whose
+  flight's own restoration threshold is below 1, with recovery time from detection on those as
+  the headline, once after the test stage. The verdicts above are unchanged.
 
 **6.6 Gates before the test reading.**
 - G1: every test of section 8 passes.

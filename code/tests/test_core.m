@@ -9178,6 +9178,224 @@ r0 = strfind(src, 'function stage_report(X)'); f = strfind(src, '''experiment_co
 verifyNumElements(tc, f, 1); verifyGreaterThan(tc, f, r0);   % the report only under the frozen copy
 end
 
+function test_band_clean_ref_assert(tc)
+% The study never runs its monitor on C.deg_floor: decision_inputs (val and test) refuses a clean
+% reference at 9 dB that is not finite, as clean_ber_ref gives without data/policy_pools.mat;
+% the val stage freezes the value it read and the test stage refuses another.
+for v = {NaN, Inf, -Inf, [], [1e-5 2e-5]}
+    verifyError(tc, @() core_bw_rules('clean_ref', v{1}), 'experiment_core_bw:clean_ref');
+end
+verifyEqual(tc, core_bw_rules('clean_ref', 2.5e-5), 2.5e-5);
+d = tempname; mkdir(d); c0 = cd(d);
+clear clean_ber_ref
+v = clean_ber_ref(9, 'ber_est');                             % no pools in this folder
+cd(c0); clear clean_ber_ref; rmdir(d, 's');
+verifyTrue(tc, isnan(v));
+verifyError(tc, @() core_bw_rules('clean_ref', v), 'experiment_core_bw:clean_ref');
+src = fileread(which('experiment_core_bw'));
+verifyNotEmpty(tc, regexp(src, ['function \[PP, Q, cref\] = decision_inputs\(PP\)\r?\n(%[^\n]*\n)*' ...
+    'cref = core_bw_rules\(''clean_ref'', clean_ber_ref\(9, ''ber_est''\)\);'], 'once'));
+verifyNumElements(tc, strfind(src, 'decision_inputs(PP)'), 3);   % its definition, val and test
+v0 = strfind(src, 'function stage_val(X)'); t0 = strfind(src, 'function stage_test(X)');
+iv = strfind(src, '[PP, Q, cref] = decision_inputs(PP);'); it = strfind(src, '[PP, ~, cref] = decision_inputs(PP);');
+verifyNumElements(tc, iv, 1); verifyNumElements(tc, it, 1);
+verifyTrue(tc, iv > v0 && iv < strfind(src, 'G3 = g3_check(PP, K, X, EP, B);'));
+verifyTrue(tc, it > t0 && it < strfind(src, 'MON = monitor_states(PP, K, X, EP, fixed);'));
+verifyNotEmpty(tc, strfind(src, '''clean_ber_est_9db'', sprintf(''%.17g'', cref)'));
+verifyNotEmpty(tc, strfind(src, ['assert(strcmp(J.clean_ber_est_9db, sprintf(''%.17g'', cref)), ' ...
+    '''experiment_core_bw:clean_ref_changed''']));
+end
+
+function test_band_blind_first(tc)
+% blind_core's first response (docs/core_bw_v2_note.txt): among the three core recovery actions
+% in W's order, by W's rule (protocol 6.3, quoted exactly in the note), on the recoverable
+% validation episodes of every fixed-total cell, CW included, equal weight per (B_J, JSR_tot);
+% frozen with W. Through the decision cycle it is blind_esc's answer to a degraded link and the
+% head of its ladder, C.ladder_core's others following; rule_esc and the default are unchanged.
+src = fileread(which('experiment_core_bw'));
+Bn = {'channel_switch', 'channel_switch+rate_reduce', 'rate_reduce'};
+verifyNotEmpty(tc, strfind(src, 'X.BLIND = {''channel_switch'', ''channel_switch+rate_reduce'', ''rate_reduce''};'));
+verifyNotEmpty(tc, strfind(src, 'X.W = {''channel_switch'', ''channel_switch+rate_reduce'', ''rate_reduce''};'));
+% the rule: CW is a (B_J, JSR_tot) group of its own, weighted as each wideband one
+bj = [zeros(1, 10), 4 * ones(1, 30)]; tot = [16 * ones(1, 10), 10 * ones(1, 30)]; cl = 1:40; cw = bj == 0;
+o = ones(1, 40);
+[~, tab] = core_bw_rules('choose_w', Bn, bj, tot, cl, [0.8 * cw; 0.25 * o; 0.2 * cw + 0.6 * ~cw], o([1 1 1], :), ...
+    o([1 1 1], :), 500);
+verifyEqual(tc, [tab.per], [0.4 0.25 0.4], 'AbsTol', 1e-12);
+pick = @(per, gp, tr) core_bw_rules('choose_w', Bn, bj, tot, cl, per, gp, tr, 500);
+verifyEqual(tc, pick([0.4; 0.2; 0.3] * o, o([1 1 1], :), o([1 1 1], :)), 'channel_switch+rate_reduce');
+verifyEqual(tc, pick([0.4; 0.3; 0.2] * o, o([1 1 1], :), o([1 1 1], :)), 'rate_reduce');
+verifyEqual(tc, pick(0.2 * o([1 1 1], :), [1; 0.25; 0.25] * o, o([1 1 1], :)), 'channel_switch');   % PER tie: goodput
+verifyEqual(tc, pick(0.2 * o([1 1 1], :), o([1 1 1], :), [5; 2; 1] * o), 'rate_reduce');            % then recovery time
+verifyEqual(tc, pick(0.2 * o([1 1 1], :), o([1 1 1], :), [NaN; 2; NaN] * o), 'channel_switch+rate_reduce');   % never: longest
+verifyEqual(tc, pick(0.2 * o([1 1 1], :), o([1 1 1], :), o([1 1 1], :)), 'channel_switch');          % then the order
+% the note quotes protocol 6.3's rule exactly
+pr = strrep(fileread(fullfile(tc.TestData.root, 'docs', 'core_bw_protocol.md')), sprintf('\r'), '');
+nt = strrep(fileread(fullfile(tc.TestData.root, 'docs', 'core_bw_v2_note.txt')), sprintf('\r'), '');
+i1 = strfind(pr, '1. the lowest pooled PER after onset;'); i4 = strfind(pr, '4. then the order channel_switch');
+verifyNumElements(tc, i1, 1); verifyNumElements(tc, i4, 1);
+e = find(pr(i4:end) == newline, 1);
+rule = pr(i1:i4 + e - 2);
+verifyEqual(tc, numel(strsplit(rule, newline)), 5);
+verifyNotEmpty(tc, strfind(nt, [newline rule newline]));
+for k = {'P1_INPUTS.sha256', 'data/policy_pools.mat', 'experiment_core_bw:clean_ref', 'blind_core_fixed', ...
+        'core_bw_lect_by_link', 'equal weight per (B_J, JSR_tot)', 'CW and the'}
+    verifyNotEmpty(tc, strfind(nt, k{1}), k{1});
+end
+% validation only, every fixed-total cell, frozen with W
+v0 = strfind(src, 'function stage_val(X)'); v1 = strfind(src, 'function thr = plr_threshold(');
+val = src(v0:v1);
+for k = {'fixed = find(~EP.slice & ~EP.occ);', 'rec = Rn.recoverable(ismember(Rn.ep, fixed));', 'ib = fixed(rec);', ...
+        'Pb = PP; Pb.core_blind = X.BLIND{w};', ...
+        'Rb{w} = run_set(kb, Pb, K, X, EP, ib, q, false, ''sheet'', 1, ob, 53000 + 100*q);', ...
+        '[Bf, tab] = core_bw_rules(''choose_w'', X.BLIND, EP.bj(ib), EP.tot(ib), EP.geom(ib), pr, gp, tr, X.B);', ...
+        'save(X.val, ''REC'', ''WCH'', ''BCH'', ''G3'', ''meta'', ''X'');', ...
+        '''blind_first'', cell2struct({BCH.B}'', {BCH.rule}'', 1)', '''note_sha256'', core_bw_rules(''sha'', X.note)'}
+    verifyNotEmpty(tc, strfind(val, k{1}), k{1});
+end
+verifyEmpty(tc, regexp(val, 'run_set\([^\n]*, 2, ', 'once'));                 % never the test split
+verifyNotEmpty(tc, strfind(src, '''experiment_core_bw:blind'''));
+verifyNotEmpty(tc, strfind(src, 'Pw.core_blind = J.blind_first.(X.RULES{q});'));
+verifyNotEmpty(tc, strfind(src, 'X.note = ''docs/core_bw_v2_note.txt'';'));
+% the decision cycle
+C = decision_config(); A = policy_actions(); na = find(strcmp(A, 'no_action'));
+cls = {'none', 'jamming', 'tone_jamming'};
+obs = struct('probs', double(strcmp(cls, 'jamming')), 'unknown', false, 'feat', zeros(1, numel(link_features('names'))));
+obs.feat(feature_index('log_ber')) = -1; obs.feat(feature_index('crc_fail')) = 1;
+for b = [{''}, Bn]
+    PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0, 'core_blind', b{1});
+    want = b{1}; if isempty(want), want = 'channel_switch+rate_reduce'; end
+    nxt = setdiff(C.ladder_core, {want}, 'stable');
+    for kind = {'blind_esc', 'rule_esc'}
+        mem = []; cfg = na; ch = {}; esc = [];
+        for t = 1:30
+            o1 = obs; o1.cfg_link = cfg;
+            [a, mem, d] = policy_decide(kind{1}, o1, cfg, mem, PP, [], struct('core', true));
+            if a ~= cfg, ch{end+1} = A{a}; esc(end+1) = d.escalated; end %#ok<AGROW>
+            cfg = a;
+        end
+        verifyGreaterThanOrEqual(tc, numel(ch), 2);
+        verifyTrue(tc, all(ismember(ch, C.core_actions)));
+        if strcmp(kind{1}, 'blind_esc')
+            verifyEqual(tc, ch(1:2), {want, nxt{1}}, sprintf('blind, %s', want));
+            verifyEqual(tc, double(esc(2)), 1);                    % the ladder's next after it
+        else
+            verifyEqual(tc, ch(1:2), {'channel_switch', 'channel_switch+rate_reduce'}, sprintf('rule, %s', want));
+        end
+    end
+end
+% the rule's answer: unchanged by default and at channel_switch+rate_reduce; another response
+% changes only the degraded link without a known cause
+d = parent_copy(tc, 'code/decision/rule_core_policy.m', 'd4623ed');
+cl3 = {'jamming', 'reactive_jamming', 'spoofing', 'tone_jamming', 'sweeping_jammer', 'noise_burst', 'path_loss', ...
+    'antenna_fault', 'airframe_shadowing', 'benign_interference', 'none', 'unknown'};
+Bd = struct('drop_db', 3, 'current', 'no_action', 'current_db', 0);
+args = {};
+for c = cl3
+    for deg = [false true]
+        for q = [-Inf 10]
+            for dr = [false true]
+                args{end+1} = {c{1}, deg, q, 5, dr, [], true}; %#ok<AGROW>
+                args{end+1} = {c{1}, deg, q, 5, dr, Bd, false}; %#ok<AGROW>
+            end
+        end
+    end
+end
+addpath(d, '-begin'); clear rule_core_policy
+cl0 = onCleanup(@() fixture_off(d, 'rule_core_policy')); %#ok<NASGU>
+verifyEqual(tc, which('rule_core_policy'), fullfile(d, 'rule_core_policy.m'));
+old = cell(numel(args), 2);
+for i = 1:numel(args), [old{i, 1}, old{i, 2}] = rule_core_policy(args{i}{:}); end
+fixture_off(d, 'rule_core_policy');
+nk = 0;
+for i = 1:numel(args)
+    [a, r] = rule_core_policy(args{i}{:});
+    verifyEqual(tc, {a, r}, old(i, :), sprintf('default %d', i));
+    [a, r] = rule_core_policy(args{i}{:}, [], [], 'channel_switch+rate_reduce');
+    verifyEqual(tc, {a, r}, old(i, :), sprintf('channel_switch+rate_reduce %d', i));
+    unk = strcmp(old{i, 2}, 'link degraded without a known cause: both core actions');
+    nk = nk + unk;
+    for U = {'channel_switch', 'rate_reduce'}
+        a = rule_core_policy(args{i}{:}, [], [], U{1});
+        if unk, verifyEqual(tc, a, U{1}); else, verifyEqual(tc, a, old{i, 1}); end
+    end
+end
+verifyGreaterThan(tc, nk, 0);
+verifyError(tc, @() rule_core_policy('unknown', true, -Inf, 5, false, [], true, [], [], 'no_action'), ...
+    'rule_core_policy:unknown');
+verifyError(tc, @() rule_core_policy('unknown', true, -Inf, 5, false, [], true, [], [], 'freq_diversity'), ...
+    'rule_core_policy:unknown');
+end
+
+function test_band_blind_fixed_row(tc)
+% The fixed ladder stays as a secondary row: blind_core without PP.core_blind on the primary set
+% of every hop rule, same episodes and seeds; the report prints it after the per-width lines;
+% predictions P1 and P5 read it; the readers core_bw_lect_by_link.m copies are the parent
+% commit's byte for byte, so its gate reads this branch's reports.
+src = fileread(which('experiment_core_bw'));
+verifyNotEmpty(tc, strfind(src, 'if si == 1, pols = [pols, {''blind_core_fixed'', ''oracle''}]; end'));
+verifyNotEmpty(tc, strfind(src, 'Pp = Pw; if strcmp(pols{pk}, ''blind_core_fixed''), Pp.core_blind = ''''; end'));
+verifyNotEmpty(tc, strfind(src, ['R = run_set(kind, Pp, K, X, EP, sets{si, 2}, q, sets{si, 3}, sets{si, 4}, 2, opt, ' ...
+    '81000 + 1000*q + 100*si);']));
+verifyNotEmpty(tc, strfind(src, 'if strcmp(name, ''blind_core_fixed''), name = ''blind_core''; end'));
+i1 = strfind(src, '[blk, KP.by_bj] = bj_lines(');
+i2 = strfind(src, '[blk, KP.fixed] = ladder_lines(get_set(RES, q1, ''primary''), EP, recov(q1) & pm, X0, pay);');
+verifyNumElements(tc, i2, 1); verifyGreaterThan(tc, i2, i1);
+lad = strjoin(fn_text(src, 'ladder_lines'), newline);
+verifyNotEmpty(tc, strfind(lad, 'Rf = pol(S, ''blind_core_fixed''); Rb = pol(S, ''blind_core'');'));
+verifyNotEmpty(tc, strfind(lad, 'descriptive'));
+pl = strjoin(fn_text(src, 'prediction_lines'), newline);
+verifyNotEmpty(tc, strfind(pl, 'Rb = pol(S, ''blind_core_fixed'');'));
+verifyEmpty(tc, strfind(pl, 'pol(S, ''blind_core'')'));
+Q = struct('agent', [], 'agents', {{}}, 'rule_sel', []);
+[kind, ~, opt] = policy_setup('blind_core', Q, 1, 1, 1, [], 1);
+verifyEqual(tc, kind, 'blind_esc'); verifyTrue(tc, opt.core);
+st = system(sprintf('git --no-optional-locks -C "%s" cat-file -e d4623ed', tc.TestData.root));
+assumeEqual(tc, st, 0, 'git or the parent commit is not available here');
+[~, old] = system(sprintf('git --no-optional-locks -C "%s" show d4623ed:code/decision/experiment_core_bw.m', tc.TestData.root));
+for f = {'plr_threshold', 'read_recoverable', 'recoverable_mask', 'get_set', 'pol', 'per_lines', 'qstat'}
+    verifyNotEmpty(tc, fn_text(src, f{1}), f{1});
+    verifyEqual(tc, fn_text(src, f{1}), fn_text(old, f{1}), f{1});
+end
+end
+
+function test_band_protocol_pointer(tc)
+% The protocol carries the link-limited pointer of 6.5 (lect-ebno 9d5bfc8) before any val stage
+% hashes it, and is that commit's file; the test stage refuses a changed deviation note.
+pr = strrep(fileread(fullfile(tc.TestData.root, 'docs', 'core_bw_protocol.md')), sprintf('\r'), '');
+ptr = strjoin({'- **Link-limited flights (D99, reporting only).** `docs/lect_ebno_protocol.md` section 7 (branch', ...
+    '  `lect-ebno`, `core_bw_lect_by_link.m`) gives the primary readings again on the episodes whose', ...
+    '  flight''s own restoration threshold is below 1, with recovery time from detection on those as', ...
+    '  the headline, once after the test stage. The verdicts above are unchanged.'}, newline);
+i = strfind(pr, ptr);
+verifyNumElements(tc, i, 1);
+verifyTrue(tc, i > strfind(pr, '**6.5 Readings (test split, read once).**') && ...
+    i < strfind(pr, '**6.6 Gates before the test reading.**'));
+st = system(sprintf('git --no-optional-locks -C "%s" cat-file -e 9d5bfc8', tc.TestData.root));
+if st == 0
+    [~, ref] = system(sprintf('git --no-optional-locks -C "%s" show 9d5bfc8:docs/core_bw_protocol.md', tc.TestData.root));
+    verifyEqual(tc, pr, strrep(ref, sprintf('\r'), ''));
+end
+d = tempname; mkdir(d);
+X = struct('protocol', fullfile(d, 'proto.md'), 'recov', fullfile(d, 'recoverable.txt'), ...
+    'proto_json', fullfile(d, 'protocol.json'), 'marker', fullfile(d, 'marker.txt'), 'test', fullfile(d, 'test.mat'), ...
+    'frozen', fullfile(d, 'frozen.json'), 'note', fullfile(d, 'note.txt'), 'smoke', true);
+write_text(X.protocol, 'protocol'); write_text(X.recov, 'H1 1 1 x 1'); write_text(X.note, 'note');
+J = struct('protocol_sha256', core_bw_rules('sha', X.protocol), 'recoverable_sha256', core_bw_rules('sha', X.recov), ...
+    'w', struct('H1', 'channel_switch'), 'blind_first', struct('H1', 'rate_reduce'));
+write_text(X.proto_json, jsonencode(J));
+verifyError(tc, @() core_bw_rules('guard', X), 'experiment_core_bw:note_changed');   % no note hash frozen
+J.note_sha256 = core_bw_rules('sha', X.note);
+write_text(X.proto_json, jsonencode(J));
+J2 = core_bw_rules('guard', X);
+verifyEqual(tc, J2.blind_first.H1, 'rate_reduce');
+write_text(X.note, 'note changed');
+verifyError(tc, @() core_bw_rules('guard', X), 'experiment_core_bw:note_changed');
+rmdir(d, 's');
+src = fileread(which('experiment_core_bw'));
+verifyNotEmpty(tc, strfind(src, '[X.note '' sha256 '' core_bw_rules(''sha'', X.note)]'));   % the marker records it
+end
+
 function d = parent_copy(tc, rel, rev)
 % The file rel as commit rev holds it (default this branch's parent, lect-kpi 394d4da), alone in
 % a folder.
@@ -9194,6 +9412,18 @@ function fixture_off(d, fn)
 if contains(path, d), rmpath(d); end
 clear(fn);
 if isfolder(d), rmdir(d, 's'); end
+end
+
+function b = fn_text(txt, name)
+% The lines of local function name, up to the next function, without trailing empty lines and
+% section headers (core_bw_lect_by_link.m's copies are compared so).
+L = splitlines(strrep(txt, sprintf('\r'), ''));
+s = find(~cellfun(@isempty, regexp(L, ['^function .*\<' name '\('], 'once')), 1);
+if isempty(s), b = {}; return; end
+e = find(startsWith(L(s + 1:end), 'function '), 1);
+if isempty(e), e = numel(L) - s + 1; end
+b = L(s:s + e - 1);
+while ~isempty(b) && (isempty(strtrim(b{end})) || startsWith(b{end}, '%%')), b(end) = []; end
 end
 
 %% ---------- three-state spectrogram CNN (deliverable 2) ----------

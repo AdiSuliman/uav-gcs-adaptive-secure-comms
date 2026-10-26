@@ -17,7 +17,9 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %          rule_core_policy.m, the escalation over C.ladder_core and the link-budget match
 %          over rate_reduce alone; PP.core_wide, when set, the core rule's action for the
 %          class jamming (rule_core_policy.m wide_action); PP.core_nb, when set, its action for
-%          the class noise_burst (burst_action)
+%          the class noise_burst (burst_action); PP.core_blind, when set, blind_esc's first
+%          response on the core set: its answer to a degraded link without a known cause
+%          (unknown_action) and the head of its ladder, C.ladder_core's others following in order
 %
 %   Link monitor, alarm confirmation and the agent's observation history:
 %   policy_monitor.m (shared). Timing constants: decision_config.m.
@@ -76,7 +78,8 @@ C = decision_config();
 if isfield(opt, 'monitor'), PP = decision_settings(PP, opt.monitor); end
 NE = numel(cfg); A = PP.actions; nA = numel(A);
 na = find(strcmp(A, 'no_action'));
-if startsWith(kind, 'blind')
+blind = startsWith(kind, 'blind');
+if blind
     obs.probs(:) = 0; obs.unknown(:) = true; obs.maha = -Inf(size(obs.unknown));
     PP.unk_mode = 'all';                              % no class survives, fused or latched
     kind = strrep(kind, 'blind', 'rule');
@@ -88,6 +91,7 @@ core = isfield(opt, 'core') && opt.core;
 if core && ~strcmp(base, 'rule')
     error('policy_decide:core', 'policy_decide: the core action set is a rule option, not of %s', kind);
 end
+cb = ''; if blind && core && isfield(PP, 'core_blind') && ~isempty(PP.core_blind), cb = PP.core_blind; end
 q = [];
 switch base
     case 'dqn'
@@ -117,7 +121,7 @@ switch base
         for i = 1:NE
             if core
                 bud.drop_db = M.drop(i); bud.current = A{cfg(i)}; bud.current_db = gk(cfg(i));
-                p = find(strcmp(A, rule_core_policy(M.cls{i}, M.degraded(i), qi(i), qt, M.drop_alarm(i), bud, so, cw, cn)), 1);
+                p = find(strcmp(A, rule_core_policy(M.cls{i}, M.degraded(i), qi(i), qt, M.drop_alarm(i), bud, so, cw, cn, cb)), 1);
             elseif strcmp(base, 'rule')
                 bud.drop_db = M.drop(i); bud.current = A{cfg(i)}; bud.current_db = gk(cfg(i));
                 p = find(strcmp(A, rule_based_policy(M.cls{i}, M.degraded(i), gain(i), qi(i), qt, M.drop_alarm(i), bud, mt, ...
@@ -155,7 +159,10 @@ if endsWith(kind, '_esc')
     ed = isfield(PP, 'esc_drop') && ~isempty(PP.esc_drop) && PP.esc_drop;
     gk = config_gain_db(PP);
     lb = find(ismember(A, {'power_control', 'rate_reduce', 'rate_reduce+power_control'}));
-    if core, ladder = cellfun(@(x) find(strcmp(A, x)), C.ladder_core); lb = find(strcmp(A, 'rate_reduce')); end
+    if core
+        lc = C.ladder_core; if ~isempty(cb), lc = [{cb}, setdiff(lc, {cb}, 'stable')]; end
+        ladder = cellfun(@(x) find(strcmp(A, x)), lc); lb = find(strcmp(A, 'rate_reduce'));
+    end
     for i = 1:NE
         mem.tried(i, cfg(i)) = true;
         if cfg(i) == na, stuck = mem.conf_n(i) >= C.esc; else, stuck = mem.deg_n(i) >= C.esc; end
