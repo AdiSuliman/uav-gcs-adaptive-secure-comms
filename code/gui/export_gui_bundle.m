@@ -17,7 +17,8 @@ function export_gui_bundle(target, root)
 %   (results/core_cnn.txt) come along when present. A result of another detector or deployed
 %   policy, or older than its inputs (result_status.m), is not exported, and a KPI summary
 %   older than the evaluation or the latency it reads neither; an optional file not exported
-%   is removed from the bundle as well: the console shows no stale number.
+%   is removed from the bundle as well: the console shows no stale number. The checkout at
+%   root is only read: statistics newer than its cache are written into the bundle alone.
 if nargin < 2 || isempty(root), root = project_root(); end
 if nargin < 1 || isempty(target), target = fullfile(root, 'profiles'); end
 S = load(fullfile(root, 'params.mat')); n = S.params.n_rx;
@@ -26,12 +27,14 @@ for d = {'', 'data', 'results'}
     if ~isfolder(fullfile(dst, d{1})), mkdir(fullfile(dst, d{1})); end
 end
 nc = fullfile(root, 'data', 'gui_norm_stats.mat'); sp = fullfile(root, 'data', 'splits.mat');
-if isfile(sp) && (~isfile(nc) || dir(nc).datenum < dir(sp).datenum)
+norm_new = isfile(sp) && (~isfile(nc) || dir(nc).datenum < dir(sp).datenum);
+if norm_new                                              % into the bundle only: the checkout is read, never written
     nm = split_norm(sp);
     feat_mean = nm.feat_mean; feat_std = nm.feat_std; %#ok<NASGU>
-    save(nc, 'feat_mean', 'feat_std');
+    save(fullfile(dst, 'data', 'gui_norm_stats.mat'), 'feat_mean', 'feat_std');
 end
-need = {'params.mat', 'data/trained_detector.mat', 'data/trained_dqn.mat', 'data/gui_norm_stats.mat', 'data/ood_thresholds.mat'};
+need = {'params.mat', 'data/trained_detector.mat', 'data/trained_dqn.mat', 'data/ood_thresholds.mat'};
+if ~norm_new, need{end+1} = 'data/gui_norm_stats.mat'; end
 opt = {'data/fusion.mat', 'data/drop_threshold.mat', 'data/survivability_boundary.mat', ...
     'results/eval_detector_metrics.mat', 'results/eval_detector_metrics_fresh2.mat', 'results/eval_detector_metrics_fresh3.mat', ...
     'results/policy_evaluation.mat', ...

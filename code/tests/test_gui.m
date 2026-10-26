@@ -107,6 +107,7 @@ save(fullfile(root, 'data', 'splits.mat'), 'norm', 'classes');
 export_quiet(tgt, root);
 L = load(fullfile(tgt, 'rx3', 'data', 'gui_norm_stats.mat'));
 verifyEqual(tc, L.feat_mean, [1 2 3]); verifyEqual(tc, L.feat_std, [4 5 6]);
+verifyFalse(tc, isfile(fullfile(root, 'data', 'gui_norm_stats.mat')), 'the checkout is only read: no cache written there');
 for f = {'demo_gui', 'export_gui_bundle'}
     src = fileread(which(f{1}));
     verifyEmpty(tc, strfind(src, 'load(sp, ''splits'')'), f{1});
@@ -199,6 +200,18 @@ if ~isempty(err)
     verifyEqual(tc, err.identifier, 'demo_gui:clean_ref');
     verifySubstring(tc, err.message, 'Re-export the bundle');
 end
+% a NaN away from 9 dB: clean_ber_ref floors it, so the 9 dB value is finite, but the console stops
+e = fullfile(tc.TestData.tmp, 'start_nan_ref'); mkdir(fullfile(e, 'data'));
+cr.clean_ref.ber_est(end) = NaN; save(fullfile(e, 'data', 'policy_pools.mat'), '-struct', 'cr');
+cd(e); clean_ber_ref('reset'); verifyTrue(tc, isfinite(clean_ber_ref(9, 'ber_est')));
+err = [];
+try
+    demo_gui();
+catch ME
+    err = ME;
+end
+verifyNotEmpty(tc, err);
+if ~isempty(err), verifyEqual(tc, err.identifier, 'demo_gui:clean_ref'); end
 clear back
 end
 

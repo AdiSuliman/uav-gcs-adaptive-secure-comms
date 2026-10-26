@@ -59,8 +59,8 @@ else
     profile = '';
 end
 clean_ber_ref('reset');                         % no table of another folder
-if ~isfinite(clean_ber_ref(9, 'ber_est'))
-    error('demo_gui:clean_ref', ['no clean-link reference in %s (data/policy_pools.mat with clean_ref): the link monitor ' ...
+if ~isfinite(clean_ber_ref(9, 'ber_est')) || ~cleanTableFinite()
+    error('demo_gui:clean_ref', ['no finite clean-link reference in %s (data/policy_pools.mat with clean_ref): the link monitor ' ...
         'would raise degraded alarms on a clean link. Re-export the bundle with export_gui_bundle.'], pwd);
 end
 
@@ -816,6 +816,19 @@ function switchProfile(src, current)
     if strcmp(v, current), return; end
     close(ancestor(src, 'figure'));                % closeApp: video writer and log closed
     if isempty(v), cd(project_root()); demo_gui(); else, demo_gui(v); end
+end
+
+function ok = cleanTableFinite()
+    % Every Eb/N0 of the clean reference is finite: clean_ber_ref.m floors a NaN in the table,
+    % so the 9 dB value alone does not show it.
+    f = 'data/policy_pools.mat'; ok = false;
+    if ~isfile(f) || ~ismember('clean_ref', who('-file', f)), return; end
+    L = load(f, 'clean_ref'); R = L.clean_ref;
+    if ~isstruct(R) || ~all(isfield(R, {'ebno', 'ber_est'})), return; end
+    ok = true;
+    for k = {'ebno', 'ber', 'ber_est', 'plr_fec'}         % the exporter's list
+        if isfield(R, k{1}), ok = ok && all(isfinite(R.(k{1})(:))); end
+    end
 end
 
 function [mu, sd] = loadNormStats()
