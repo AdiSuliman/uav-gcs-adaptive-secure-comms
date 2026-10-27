@@ -42,7 +42,7 @@ Status as of 26.10.2026. Every "met" verdict is on data never used for training 
 |---|---|
 | Static link | `none` / `no_action` |
 | Conventional adaptive (link metrics only) | `blind_core` on the core action set (channel switching, rate reduction); `blind_esc` on the 36 configurations is an extension (D105) |
-| CNN-based adaptive | `rule_core` on the core action set; `rule_esc` on the 36 configurations is an extension (D105) |
+| CNN-based adaptive | `rule_core3`: the proposal's three-state CNN drives the rule on the core action set, in the controlled-bandwidth study CORE_BW (the lecturer's verdict row, D106). `rule_core` reads the hybrid detector (C2e, secondary); `rule_esc` on the 36 configurations is an extension (D105) |
 
 **Platform (profile 1).** One trained system for UAVs up to the close-range class of Tlili et al. (up to 50 km), three omnidirectional antennas on a 1.2 m aperture, speeds 29-161 km/h, one tracked directional antenna at the GCS. Profile 2 (two antennas) was dropped on 21.10.2026. Profile 3 (four antennas) is an extension.
 
@@ -98,15 +98,15 @@ Profile 1, fourth test set (4,032 frames per state, 576 sub-runs), read once on 
 | PER reduction vs static link | >= 30% | not yet measured | Pending, C2e: 28.10.2026 (estimate) |
 | Recovery time | reported | onset-to-detection median 0 cycles; closed-loop part pending | Pending, C2e |
 | Goodput | reported | pending | Pending, C2e |
-| CNN contribution (`rule_core` vs `blind_core`) | reported | pending | Pending: C2e (secondary, fixed-response baseline); headline CORE_BW (D105) |
+| CNN contribution (`rule_core3` vs a validation-tuned `blind_core`) | reported | pending | Pending: headline CORE_BW (D106); C2e's `rule_core` vs fixed-response `blind_core` is secondary (D105) |
 
 Notes:
 
 - Weakest point of the detector: wideband at JSR 0 dB, 97.82% recall (95.44% per frame). Never-detected episodes: 0.0%.
 - The false-alarm KPI is read at detector level, as pre-registered. The whole-monitor false alarm on clean flights (an extension KPI) is not at 5% yet: 12.5-29.9% of 1,800 clean validation episodes depending on the monitor setting. The fix is registered in D103 and D104.
-- The CNN contribution's headline comes from the controlled-bandwidth study CORE_BW (`rule_core` vs a `blind_core` tuned on validation, D105), estimated 30.10-1.11.2026. KPI 5-8 are read with the hybrid detector's classes driving the rule, not with the three-state CNN (D105).
+- KPI 5-8 for the proposal's own system come from the controlled-bandwidth study CORE_BW, where the three-state CNN drives the rule (`rule_core3`) against a `blind_core` tuned on validation (D106), estimated 30.10-2.11.2026. In C2e the rule reads the hybrid detector's classes; those readings are the profile-wide secondary lines (D105).
 
-Next dates (estimates): DQN training ends 28.10.2026 about 11:30-18:30 and the policy evaluation about 13:00-20:00; profile 1's chain ends (RPT) 29.10 about 05:00-15:00; a PC restart follows; CORE_BW 30.10-1.11; the profile-1 rerun (P1R) 2.11-5.11; profile 3 about 20.11-25.11.2026. Current numbers and logs are in [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/PROJECT_LOG.md](docs/PROJECT_LOG.md).
+Next dates (estimates): DQN training ends 28.10.2026 about 05:00-11:00, then a PC restart, then the policy evaluation; profile 1's chain ends (RPT) about 29.10; CORE_BW 30.10-2.11; the profile-1 rerun (P1R) 2.11-5.11; profile 3 about 20.11-25.11.2026. Current numbers and logs are in [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/PROJECT_LOG.md](docs/PROJECT_LOG.md).
 
 ## Operator console
 
