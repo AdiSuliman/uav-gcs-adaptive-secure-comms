@@ -10751,3 +10751,363 @@ pos = [pos; (1:F)']; eb = [eb; zeros(F, 1)]; lv = [lv; 10 * ones(F, 1)];
 S = struct('X', X, 'Y', categorical(c, 1:4, classes), 'Y_frame', categorical(c, 1:4, classes), 'class_run', c, ...
     'run', run, 'pos', pos, 'level', lv, 'ebno', eb);
 end
+
+%% ---------- run-level resume and P1R's prerequisites (docs/p1r_protocol.md) ----------
+function test_run_cache_restart(tc)
+% A stage started again after a stop reads the runs it finished and computes only the rest,
+% with the results of an uninterrupted stage; another key (a setting, a seed) computes again;
+% a cut-off write (temporary file), an unreadable file or another key's file never counts as
+% finished; off ('' folder) nothing is kept.
+d = tempname; mkdir(d); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+dirn = fullfile(d, 'C2'); n = 5;
+keys = arrayfun(@(i) run_cache('key', {'train_one', 'class_drop 4/5', 80, 0.5, i, 42 + i}), 1:n, 'UniformOutput', false);
+verifyEqual(tc, numel(unique(keys)), n);
+verifyMatches(tc, keys{1}, '^[0-9a-f]{16}$');
+verifyEqual(tc, run_cache('key', {'train_one', 'class_drop 4/5', 80, 0.5, 1, 43}), keys{1});
+cnt = containers.Map({'n'}, {0});
+work = @(i) rc_work(i, cnt);
+full = cell(1, n);
+for i = 1:n, [full{i}, hit] = run_cache('run', '', keys{i}, @() work(i)); verifyFalse(tc, hit); end
+verifyFalse(tc, isfolder(dirn));                       % off: nothing kept
+verifyEqual(tc, cnt('n'), n);
+cnt('n') = 0;
+for i = 1:3, run_cache('run', dirn, keys{i}, @() work(i)); end          % a first start, stopped after three runs
+verifyEqual(tc, cnt('n'), 3);
+verifyEqual(tc, numel(dir(fullfile(dirn, '*.mat'))), 3);
+fid = fopen(fullfile(dirn, [keys{4} '.tmp.mat']), 'w'); fwrite(fid, uint8(1:10)); fclose(fid);   % a write cut off
+cnt('n') = 0; again = cell(1, n); hits = false(1, n);
+for i = 1:n, [again{i}, hits(i)] = run_cache('run', dirn, keys{i}, @() work(i)); end              % started again
+verifyEqual(tc, hits, [true true true false false]);
+verifyEqual(tc, cnt('n'), 2, 'only the runs not finished are computed');
+verifyTrue(tc, isequaln(again, full), 'the results of an uninterrupted stage');
+fid = fopen(fullfile(dirn, [keys{5} '.mat']), 'w'); fwrite(fid, uint8(1:10)); fclose(fid);       % unreadable
+key = keys{2}; res = 'another run'; save(fullfile(dirn, [keys{3} '.mat']), 'key', 'res');          % another key's
+cnt('n') = 0;
+[r5, h5] = run_cache('run', dirn, keys{5}, @() work(5)); [r3, h3] = run_cache('run', dirn, keys{3}, @() work(3));
+verifyEqual(tc, [h5 h3], [false false]); verifyEqual(tc, cnt('n'), 2);
+verifyTrue(tc, isequaln({r5, r3}, full([5 3])));
+[~, h] = run_cache('run', dirn, keys{5}, @() work(5)); verifyTrue(tc, h);
+k6 = run_cache('key', {'train_one', 'class_drop 4/5', 80, 0.5, 1, 99});                            % another seed
+[~, h] = run_cache('run', dirn, k6, @() work(1)); verifyFalse(tc, h);
+end
+
+function r = rc_work(i, cnt)
+% A run whose result depends only on its inputs, counted.
+cnt('n') = cnt('n') + 1;
+r = struct('seed', 42 + i, 'agent', {{magic(3) * i}}, 'curve', (1:4)' * i, ...
+    'loss', rand(RandStream('mt19937ar', 'Seed', i), 1, 7), 'step', 'grid');
+end
+
+function r = rc_entity(i, cnt, bad)
+% An entity of C2g / C2u that stops when it is in bad.
+if ismember(i, bad), error('test:entity', 'entity %d out of memory', i); end
+r = rc_work(i, cnt);
+end
+
+function test_run_cache_entities(tc)
+% C2g / C2u: every entity kept as it finishes; one that stops is reported, the others still
+% run and are kept, and the stage then stops naming it; started again, only it is computed and
+% the results are those of an uninterrupted run. Off, the first error stops at once with the
+% entity's name and no later entity runs.
+d = tempname; mkdir(d); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+dirn = fullfile(d, 'C2g'); names = {'jamming+path_loss', 'tone_jamming+path_loss', 'jamming+airframe_shadowing', 'spoofing+jamming'};
+keys = cellfun(@(c) run_cache('key', {'C2g', c}), names, 'UniformOutput', false);
+cnt = containers.Map({'n'}, {0});
+full = run_cache('each', '', keys, @(i) rc_entity(i, cnt, []), names);
+verifyEqual(tc, cnt('n'), 4);
+cnt('n') = 0; err = [];
+try, run_cache('each', dirn, keys, @(i) rc_entity(i, cnt, 2), names); catch err, end
+assertNotEmpty(tc, err);
+verifyEqual(tc, err.identifier, 'run_cache:failed');
+verifyEqual(tc, cnt('n'), 3, 'the entities after the failed one still run');
+verifyNotEmpty(tc, strfind(err.message, 'tone_jamming+path_loss (entity 2 out of memory)'));
+verifyEmpty(tc, strfind(err.message, 'jamming+airframe_shadowing'));
+verifyEqual(tc, sort({dir(fullfile(dirn, '*.mat')).name}), sort(strcat(keys([1 3 4]), '.mat')));
+cnt('n') = 0;
+again = run_cache('each', dirn, keys, @(i) rc_entity(i, cnt, []), names);
+verifyEqual(tc, cnt('n'), 1, 'started again: only the failed entity');
+verifyTrue(tc, isequaln(again, full));
+cnt('n') = 0;
+try, run_cache('each', '', keys, @(i) rc_entity(i, cnt, 2), names); catch err, end
+verifyEqual(tc, err.identifier, 'run_cache:entity');
+verifyNotEmpty(tc, strfind(err.message, 'entity 2 (tone_jamming+path_loss) stopped: entity 2 out of memory'));
+verifyEqual(tc, cnt('n'), 1, 'off: no entity after the error runs');
+end
+
+function test_run_cache_switch(tc)
+% Off without profile.json or its field; "run_cache": true turns it on, CFG.run_cache before
+% the file; any other value stops. The inputs' identity follows every file's bytes and tells
+% an absent file from an empty one.
+d = tempname; mkdir(d); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+f = fullfile(d, 'profile.json');
+verifyFalse(tc, run_cache('on', [], f));
+write_json(f, '{"profile": "x"}'); verifyFalse(tc, run_cache('on', [], f));
+write_json(f, '{"run_cache": true}'); verifyTrue(tc, run_cache('on', [], f));
+verifyFalse(tc, run_cache('on', struct('run_cache', false), f));
+verifyTrue(tc, run_cache('on', struct('run_cache', true), fullfile(d, 'none.json')));
+verifyTrue(tc, run_cache('on', struct('dqn_seeds', 3), f));
+write_json(f, '{"run_cache": "yes"}'); verifyError(tc, @() run_cache('on', [], f), 'run_cache:value');
+verifyError(tc, @() run_cache('on', struct('run_cache', 1), f), 'run_cache:value');
+verifyEqual(tc, run_cache('dir', true, 'C2'), fullfile('data', 'run_cache', 'C2'));
+verifyEqual(tc, run_cache('dir', false, 'C2'), '');
+a = fullfile(d, 'a.mat'); b = fullfile(d, 'b.mat');
+fid = fopen(a, 'w'); fwrite(fid, uint8(1:100)); fclose(fid);
+i1 = run_cache('inputs', {a, b});
+verifyEqual(tc, run_cache('inputs', {a, b}), i1);
+fid = fopen(b, 'w'); fclose(fid);
+i2 = run_cache('inputs', {a, b}); verifyNotEqual(tc, i2, i1, 'absent and empty differ');
+fid = fopen(a, 'w'); fwrite(fid, uint8([1:99 7])); fclose(fid);
+verifyNotEqual(tc, run_cache('inputs', {a, b}), i2, 'one byte changed');
+verifyMatches(tc, i1, '^[0-9a-f]{16}$');
+end
+
+function write_json(f, s)
+fid = fopen(f, 'w'); fprintf(fid, '%s', s); fclose(fid);
+end
+
+function test_run_cache_wiring(tc)
+% train_dqn.m keeps every training run (grid and coordinate steps) and the reward-sensitivity
+% retrains through the run cache, keyed by the inputs (code, pools, C1d's file, the clean
+% validation flights, the KPI 1 threshold), the hyperparameters and the run's settings and
+% seed; C2g and C2u keep every entity through run_cache 'each'; nothing calls the training
+% outside it. Off by default: no profile.json field, no CFG field.
+src = fileread(which('train_dqn'));
+verifyEmpty(tc, regexp(src, 'runs\(end\+1\) = train_one\(', 'once'));
+verifyNumElements(tc, strfind(src, 'runs(end+1) = cached(RC, {''train_one'''), 2);
+verifyNumElements(tc, strfind(src, '@() train_one(H, PPc, K, norm_in, nS,'), 2);
+verifyNotEmpty(tc, strfind(src, 'ag = cached(RC, {''sens'', f, Hs, fa_pen_sel, cs_sel, ss_sel, alarm_sel, drop_sel, Sdep, rb.seed'));
+verifyEmpty(tc, regexp(src, '\n\s*ag = dqn_train_run\(', 'once'));
+verifyNotEmpty(tc, strfind(src, 'RC = struct(''dir'', run_cache(''dir'', run_cache(''on'', cfgc), ''C2''), ''id'', '''');'));
+verifyNotEmpty(tc, regexp(src, ['run_cache\(''inputs'', \{''data/policy_pools\.mat'', ''data/drop_threshold\.mat'', \.\.\.\r?\n\s*' ...
+    '''data/clean_val_pools\.mat'', ''results/eval_detector_metrics\.mat''\}\)'], 'once'));
+i0 = strfind(src, 'val_spec = full_val_spec('); i1 = strfind(src, 'RC.id = run_cache(''key''');
+verifyTrue(tc, ~isempty(i0) && ~isempty(i1) && i1(1) > i0(1));
+verifyNotEmpty(tc, strfind(src, 'key = run_cache(''key'', [{RC.id}, parts, {pool_settings(PPc, PP)}]);'));
+verifyNotEmpty(tc, strfind(src, 'for fn = setdiff(fieldnames(PPc)'', {''pools''})'));
+for f = {'experiment_combo_generalization', 'experiment_unknown_threat'}
+    s = fileread(which(f{1}));
+    verifyNumElements(tc, strfind(s, 'dqn_train_run('), 1, f{1});
+    verifyNotEmpty(tc, regexp(s, 'out = run_cache\(''each'', CDIR, keys, @\(\w+\) one_\w+\(', 'once'), f{1});
+    verifyNotEmpty(tc, strfind(s, 'run_cache(''inputs'', {''data/policy_pools.mat'', ''data/trained_dqn.mat''})'), f{1});
+    verifyNotEmpty(tc, regexp(s, 'run_cache\(''dir'', run_cache\(''on'', cfgc\), ''C2[gu]''\)', 'once'), f{1});
+    verifyEmpty(tc, regexp(s, '(?m)^for (ci|ti) = 1:numel\((combos|threats)\)\s*$\s*(c|th) = ', 'once'), f{1});
+end
+s = fileread(which('experiment_unknown_threat'));
+verifyNotEmpty(tc, strfind(s, 'EP(end+1) = out{ti}.EP; res(end+1) = out{ti}.res; agents_loo{ti} = out{ti}.agent;'));
+verifyNotEmpty(tc, strfind(s, 'save(''data/unknown_threat_agents.mat'', ''agents_loo'''));
+verifyNotEmpty(tc, strfind(fileread(which('experiment_combo_generalization')), 'for ci = 1:numel(combos), res(end+1) = out{ci}; end'));
+verifyFalse(tc, run_cache('on', struct(), fullfile(tempdir, 'no_profile_here.json')));
+end
+
+function test_kpi6_set_values(tc)
+% 'union' (profile 1, profile 3) without profile.json or its field; "kpi6_set": "fresh" (P1R);
+% CFG.kpi6_set before the file; any other value stops.
+d = tempname; mkdir(d); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+f = fullfile(d, 'profile.json');
+verifyEqual(tc, kpi6_set([], f), 'union');
+write_json(f, '{"deg_select": true}'); verifyEqual(tc, kpi6_set([], f), 'union');
+write_json(f, '{"kpi6_set": "fresh"}'); verifyEqual(tc, kpi6_set([], f), 'fresh');
+write_json(f, '{"kpi6_set": "union"}'); verifyEqual(tc, kpi6_set([], f), 'union');
+verifyEqual(tc, kpi6_set(struct('kpi6_set', 'fresh'), f), 'fresh');
+verifyEqual(tc, kpi6_set(struct('dqn_seeds', 3), f), 'union');
+write_json(f, '{"kpi6_set": "test"}'); verifyError(tc, @() kpi6_set([], f), 'kpi6_set:value');
+write_json(f, '{"kpi6_set": true}'); verifyError(tc, @() kpi6_set([], f), 'kpi6_set:value');
+verifyError(tc, @() kpi6_set(struct('kpi6_set', 'Fresh'), f), 'kpi6_set:value');
+end
+
+function test_kpi6_fresh_marker(tc)
+% The fresh clean test set is read once: the marker is written before its first flight with
+% the pools' SHA-256, the code and the decision layer; a second start is refused unless the
+% marker's last event is a crash before any KPI 6 line of the same pools file; once the KPI 6
+% line is reached ("KPI 6 read") every start is refused; a stop that records nothing (a killed
+% MATLAB) is refused too.
+d = tempname; mkdir(d); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+p = fullfile(d, 'clean_fresh_pools.mat'); CT = struct('set', 'fresh', 'fams', [7 8 9]); save(p, 'CT');
+m = fullfile(d, 'results', 'kpi6_fresh_read_started.txt');
+sha = kpi6_fresh_marker('sha', p);
+verifyMatches(tc, sha, '^[0-9a-f]{64}$');
+if ispc, [st, o] = system(sprintf('certutil -hashfile "%s" SHA256', p)); else, [st, o] = system(sprintf('sha256sum "%s"', p)); end
+if st == 0, verifyNotEmpty(tc, strfind(lower(regexprep(o, '\s', '')), sha), 'as sha256sum prints it'); end
+verifyEqual(tc, kpi6_fresh_marker('check', m, sha), 'new');
+verifyEqual(tc, kpi6_fresh_marker('start', m, sha, struct('pools', 'data/clean_fresh_pools.mat', 'deg_mode', 'win_q', ...
+    'deg_adopted', 'win_q:0.01 (candidate 2)', 'det_id', 'abc', 'policy_stamp', 'ffff', 'smoke', false)), 'new');
+L = strtrim(regexp(fileread(m), '\r?\n', 'split'));
+verifyTrue(tc, startsWith(L{1}, 'P1R: KPI 6 reading of the fresh clean test set started'));
+for k = {['pools sha256 ' sha], 'pools data/clean_fresh_pools.mat', 'deg_mode win_q', 'deg_adopted win_q:0.01 (candidate 2)', ...
+        'det_id abc', 'policy_stamp ffff', 'smoke false'}
+    verifyTrue(tc, any(strcmp(L, k{1})), k{1});
+end
+verifyTrue(tc, any(startsWith(L, 'commit ')) && any(startsWith(L, 'code_tree ')) && any(startsWith(L, 'time ')));
+verifyError(tc, @() kpi6_fresh_marker('check', m, sha), 'kpi6_fresh_marker:started');   % stopped, no crash recorded
+kpi6_fresh_marker('crash', m, MException('a:b', 'out of memory in\npolicy_run_set'));
+verifyError(tc, @() kpi6_fresh_marker('check', m, repmat('0', 1, 64)), 'kpi6_fresh_marker:pools');
+verifyEqual(tc, kpi6_fresh_marker('check', m, sha), 'restart');
+verifyEqual(tc, kpi6_fresh_marker('start', m, sha, struct()), 'restart');
+verifyError(tc, @() kpi6_fresh_marker('check', m, sha), 'kpi6_fresh_marker:started');   % restarted, then killed
+kpi6_fresh_marker('crash', m, MException('a:b', 'again'));
+verifyEqual(tc, kpi6_fresh_marker('check', m, sha), 'restart');
+kpi6_fresh_marker('start', m, sha, struct());
+kpi6_fresh_marker('read', m);
+verifyError(tc, @() kpi6_fresh_marker('check', m, sha), 'kpi6_fresh_marker:read');
+kpi6_fresh_marker('crash', m, MException('a:b', 'after the line'));
+verifyError(tc, @() kpi6_fresh_marker('check', m, sha), 'kpi6_fresh_marker:read');
+L = strtrim(regexp(fileread(m), '\r?\n', 'split'));
+verifyEqual(tc, sum(startsWith(L, 'crash before any KPI 6 line')), 3);
+verifyEqual(tc, sum(startsWith(L, 'restart ')), 2);
+verifyTrue(tc, any(contains(L, 'out of memory in\npolicy_run_set')) || any(contains(L, 'out of memory in')));
+end
+
+function err = eval_policies_err(cfg) %#ok<INUSD>
+% evaluate_policies.m in the current folder, CFG = cfg when cfg is a struct; the error it stops on.
+if isstruct(cfg), CFG = cfg; end %#ok<NASGU>
+err = [];
+w = warning('off', 'MATLAB:load:variableNotFound'); cw = onCleanup(@() warning(w)); %#ok<NASGU>
+try
+    evalc('evaluate_policies');
+catch err
+end
+end
+
+function test_evaluate_fresh_checks(tc)
+% C2e with "kpi6_set": "fresh" runs every check that needs no fresh flight before any episode
+% is flown and before the marker is written: the fresh pools file present (never the union
+% instead), the agent trained with C1d's degradation test, the fresh pools of these pools'
+% detector and built as the fresh set, the marker absent or recording a crash before any KPI 6
+% line of the same file. Without the key none of it runs.
+d = tempname; mkdir(d); here = pwd; cl = onCleanup(@() cd(here)); cd(d); mkdir('data'); mkdir('results');
+cl2 = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+PP = struct('det_id', 'a'); save('data/policy_pools.mat', 'PP');
+det_id = 'a'; dec = struct('deg_mode', 'win_q', 'ber_q', 0.01, 'alarm_mode', 'class_drop', 'confirm', [4 5]); deployed = 'dqn';
+save('data/trained_dqn.mat', 'det_id', 'dec', 'deployed');
+mk = 'results/kpi6_fresh_read_started.txt'; fr = struct('kpi6_set', 'fresh');
+e = eval_policies_err([]);                                  % without the key: past every fresh check
+verifyNotEmpty(tc, e); verifyFalse(tc, startsWith(e.identifier, {'evaluate_policies:fresh', 'kpi6_fresh_marker'}));
+e = eval_policies_err(fr);
+verifyEqual(tc, e.identifier, 'evaluate_policies:fresh'); verifyNotEmpty(tc, strfind(e.message, 'never on the union'));
+CT = struct('det_id', 'b', 'set', 'fresh', 'fams', [7 8 9], 'n_geom', 2); save('data/clean_fresh_pools.mat', 'CT');
+e = eval_policies_err(fr); verifyEqual(tc, e.identifier, 'check_det_id:mismatch');
+CT.det_id = 'a'; CT.set = 'test'; save('data/clean_fresh_pools.mat', 'CT');
+e = eval_policies_err(fr); verifyEqual(tc, e.identifier, 'evaluate_policies:fresh');
+CT.set = 'fresh'; save('data/clean_fresh_pools.mat', 'CT');
+dec0 = dec; dec = rmfield(dec, {'deg_mode', 'ber_q'}); save('data/trained_dqn.mat', 'det_id', 'dec', 'deployed'); dec = dec0;
+e = eval_policies_err(fr); verifyEqual(tc, e.identifier, 'evaluate_policies:fresh');
+verifyNotEmpty(tc, strfind(e.message, 'degradation test'));
+save('data/trained_dqn.mat', 'det_id', 'dec', 'deployed');
+e = eval_policies_err(fr);                                  % every check passes: stops later (no pools here)
+verifyFalse(tc, startsWith(e.identifier, {'evaluate_policies:fresh', 'kpi6_fresh_marker', 'check_det_id'}), e.identifier);
+verifyFalse(tc, isfile(mk), 'no marker before the first fresh flight');
+sha = kpi6_fresh_marker('sha', 'data/clean_fresh_pools.mat');
+kpi6_fresh_marker('start', mk, sha, struct());
+e = eval_policies_err(fr); verifyEqual(tc, e.identifier, 'kpi6_fresh_marker:started');
+kpi6_fresh_marker('crash', mk, MException('a:b', 'crash'));
+e = eval_policies_err(fr);
+verifyFalse(tc, startsWith(e.identifier, {'evaluate_policies:fresh', 'kpi6_fresh_marker'}), e.identifier);
+kpi6_fresh_marker('read', mk);
+e = eval_policies_err(fr); verifyEqual(tc, e.identifier, 'kpi6_fresh_marker:read');
+e = eval_policies_err([]);                                  % without the key the marker is not read
+verifyFalse(tc, startsWith(e.identifier, {'evaluate_policies:fresh', 'kpi6_fresh_marker'}));
+end
+
+function test_evaluate_fresh_wiring(tc)
+% The fresh set is flown after the union, behind the marker: 'start' before the first fresh
+% flight, a crash before the KPI 6 line recorded, 'read' before far_report on the fresh flights
+% alone; RWf (split id 7) saved and KP.far / KP.far_diag from it, the union kept as
+% KP.far_union; the lecturer lines labelled. Without the key every line of the parent commit
+% (lect-kpi 316230d) is there in order, the union's heading reads as before (-> KPI 6), and
+% the save list and KP fields are the parent's.
+src = fileread(which('evaluate_policies'));
+pos = @(s) strfind(src, s);
+a = pos('if FRESH, F6 = fresh_checks(PP, Q, exist(''SMOKE'', ''var'') && SMOKE); end');
+b = pos('%% 1. Episode sets');
+s1 = pos('kpi6_fresh_marker(''start'', F6.marker, F6.sha,');
+f1 = pos('RWf = fly_clean_set(PP, F6.CT, TEST, NE, T, clean_cell, nS, POL, Q, sel, fixed_best, fixed_mmse, tab, K.na, 40000);');
+c1 = pos('kpi6_fresh_marker(''crash'', F6.marker, err);');
+r1 = pos('kpi6_fresh_marker(''read'', F6.marker);');
+fr = pos('[FAR, FD, lines] = far_report(RWf, POL, LBL, aboveF, T, iDQN, PP.ebno, cls_list, C.period_ms);');
+u1 = pos('[FAR, FD, lines] = far_report(RU, POL, LBL, aboveU, T, iDQN, PP.ebno, cls_list, C.period_ms);');
+for x = {a, b, s1, f1, c1, r1, fr, u1}, verifyNumElements(tc, x{1}, 1); end
+verifyTrue(tc, a < b && u1 < s1 && s1 < f1 && f1 < c1 && c1 < r1 && r1 < fr);
+verifyNotEmpty(tc, pos('for pk = 1:numel(POL), RWf{pk}.split(:) = 7; end'));
+verifyNotEmpty(tc, pos('if FRESH, save(''results/policy_evaluation.mat'', ''RWf'', ''-append''); end'));
+verifyNotEmpty(tc, pos(['KP.far_set = ''fresh''; KP.reading = ''P1R''; KP.far_union = FAR_u; KP.far_diag_union = FD_u; ' ...
+    'KP.far_src_union = far_src_u;']));
+verifyNotEmpty(tc, pos('if FRESH, lines = p1r_label(lines); end'));
+verifyNotEmpty(tc, pos('ternary(FRESH, '': already read in profile 1''''s C2e, second reading, descriptive'', '' -> KPI 6'')'));
+verifyNotEmpty(tc, pos('F6.state = kpi6_fresh_marker(''check'', F6.marker, F6.sha);'));
+d = parent_copy(tc, 'code/decision/evaluate_policies.m', '316230d');
+cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+old = regexp(fileread(fullfile(d, 'evaluate_policies.m')), '\r?\n', 'split');
+new = regexp(src, '\r?\n', 'split');
+hd = find(contains(old, '%d episodes x %d cycles -> KPI 6'', ...'));
+verifyNumElements(tc, hd, 1);
+verifyEqual(tc, strtrim(old{hd + 1}), 'far_src, sum(aboveU), T);');
+old([hd hd + 1]) = [];                                      % the union's heading: the ternary above
+j = 1; miss = {};
+for i = 1:numel(old)
+    k = find(strcmp(new(j:end), old{i}), 1);
+    if isempty(k), miss{end+1} = old{i}; else, j = j + k; end %#ok<AGROW>
+end
+verifyEmpty(tc, miss, strjoin(miss, newline));
+L = p1r_label_copy({'', '  PRIMARY narrowband: MET'});
+verifyEqual(tc, L{1}, '');
+verifyEqual(tc, L{2}, '  PRIMARY narrowband: MET [P1R: with the fixed monitor, second reading, descriptive]');
+end
+
+function L = p1r_label_copy(L)
+% evaluate_policies.m's p1r_label (a local function of the script), read from its source.
+src = fileread(which('evaluate_policies'));
+i0 = strfind(src, 'function L = p1r_label(L)');
+lab = regexp(src(i0:end), '\[L\{i\} ''([^'']+)''\]', 'tokens', 'once');
+for i = 1:numel(L)
+    if ~isempty(strtrim(L{i})), L{i} = [L{i} lab{1}]; end
+end
+end
+
+function test_p1r_profile(tc)
+% P1R's profile.json (tools/p1r/profile.json, the p1r tree's root profile.json): profile 1
+% with C1d's degradation test chosen on validation, KPI 6 on the fresh set, finished runs kept;
+% no antenna count (init_params keeps n_rx 3) and no decoder of the coded link (P1R builds no
+% pools).
+f = fullfile(tc.TestData.root, 'tools', 'p1r', 'profile.json');
+P = jsondecode(fileread(f));
+verifyEqual(tc, sort(fieldnames(P))', sort({'profile', 'deg_select', 'kpi6_set', 'run_cache'}));
+verifyEqual(tc, P.profile, 'profile 1, P1R');
+O = deg_options(f); verifyTrue(tc, O.on); verifyEqual(tc, O.force, '');
+verifyEqual(tc, kpi6_set([], f), 'fresh');
+verifyTrue(tc, run_cache('on', [], f));
+verifyEmpty(tc, fec_rx_config(f));
+verifyFalse(tc, isfield(P, 'n_rx'));
+verifyFalse(tc, isfield(P, 'deg_force'), 'never forced outside the smoke');
+end
+
+function test_deg_mode_suite(tc)
+% test_deg_mode.m (the degradation test's candidates, the adoption rule and the smoke's forced
+% candidate) runs inside this suite, so the queue's count of test_core includes it: every one
+% of its tests ran and passed.
+f = fullfile(tc.TestData.root, 'code', 'tests', 'test_deg_mode.m');
+n = numel(regexp(fileread(f), '(?m)^function test_\w+\(tc\)', 'match'));
+here = pwd; cl = onCleanup(@() cd(here)); %#ok<NASGU>
+r = runtests(f);
+verifyGreaterThanOrEqual(tc, n, 17);
+verifyEqual(tc, numel(r), n, 'every test of test_deg_mode.m ran');
+bad = {r(~[r.Passed]).Name};
+verifyEmpty(tc, bad, strjoin(bad, ', '));
+end
+
+function test_smoke_all_entities(tc)
+% C2g and C2u's smoke runs the first entity unless CFG.smoke_all_entities is true: then every
+% combination / threat runs, with the smoke's reduced training and one repetition; outside the
+% smoke the switch does nothing.
+for f = {{'experiment_combo_generalization', 'combos'}, {'experiment_unknown_threat', 'threats'}}
+    src = fileread(which(f{1}{1}));
+    v = f{1}{2};
+    i0 = strfind(src, 'if exist(''SMOKE'', ''var'') && SMOKE                       % reduced chain check (run_stage smoke)');
+    verifyNumElements(tc, i0, 1, f{1}{1});
+    j = strfind(src(i0:end), 'H.n_eval = 1;'); blk = src(i0:i0 + j(1) + 12);
+    verifyNotEmpty(tc, strfind(blk, ['if ~(exist(''CFG'', ''var'') && isstruct(CFG) && isfield(CFG, ''smoke_all_entities'') ' ...
+        '&& isequal(CFG.smoke_all_entities, true))']), f{1}{1});
+    verifyNotEmpty(tc, strfind(blk, sprintf('%s = %s(1);', v, v)), f{1}{1});
+    verifyNotEmpty(tc, regexp(blk, 'end\r?\n\s+REPS = 1; H\.episodes = 1280;', 'once'), f{1}{1});
+    verifyNumElements(tc, strfind(src, 'smoke_all_entities'), 4, f{1}{1});     % the guard twice, the comments twice
+end
+end
