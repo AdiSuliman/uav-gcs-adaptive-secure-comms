@@ -57,6 +57,10 @@ function varargout = core_bw_rules(cmd, varargin)
 %   core_bw_rules('core3_frozen', J, V, X)   the test stage's rule_core3 refusals before its
 %       marker: the frozen protocol J holds W3 per hop rule equal to the validation file's
 %       (V.WCH3), and the model's SHA-256 and N equal to the registered X.CORE3_SHA, X.CORE3_N
+%   core_bw_rules('core3_file', f, sha, N)   the pools file f names that model in its own small
+%       variable core3_id, read without loading the pools (the test stage, before its marker)
+%   core_bw_rules('core3_switch', J, on)   rule_core3 is on (X.CORE3, or its rows in the test
+%       file) exactly when the frozen protocol J holds W3: never switched after validation
 switch cmd
     case 'recoverable', varargout{1} = recoverable(varargin{:});
     case 'choose_w',    [varargout{1}, varargout{2}] = choose_w(varargin{:});
@@ -71,6 +75,8 @@ switch cmd
     case 'core3_model', varargout{1} = core3_model(varargin{:});
     case 'core3_pools', core3_pools(varargin{:});
     case 'core3_frozen', core3_frozen(varargin{:});
+    case 'core3_file',  core3_file(varargin{:});
+    case 'core3_switch', core3_switch(varargin{:});
     otherwise, error('core_bw_rules:cmd', 'core_bw_rules: unknown command %s', cmd);
 end
 end
@@ -281,6 +287,26 @@ assert(isfield(J, 'w3') && isfield(V, 'WCH3') && isequal({V.WCH3.W}, cellfun(@(r
 assert(isfield(J, 'core3_sha256') && strcmp(J.core3_sha256, X.CORE3_SHA) && isfield(J, 'core3_N') && ...
     isequal(J.core3_N, X.CORE3_N), 'experiment_core_bw:core3_changed', ...
     'the frozen three-state model (SHA-256, N) differs from the registered one');
+end
+
+function core3_file(f, sha, N)
+id = sprintf('core3 %s N%d', sha, N);
+ok = isfile(f);
+if ok, v = whos('-file', f); ok = ismember('core3_id', {v.name}); end
+if ok, L = load(f, 'core3_id'); ok = ischar(L.core3_id) && strcmp(L.core3_id, id); end
+assert(ok, 'experiment_core_bw:core3_pools', ...
+    '%s was not made with rule_core3''s registered model (%s): run the pools stage again', f, id);
+end
+
+function core3_switch(J, on)
+w3 = isfield(J, 'w3');
+assert(isequal(logical(on), w3), 'experiment_core_bw:core3_switch', ['rule_core3 is %s here but the frozen ' ...
+    'protocol %s W3: the switch is set before the smoke and never changed after validation'], ...
+    ternary(on, 'on', 'off'), ternary(w3, 'holds', 'holds no'));
+end
+
+function s = ternary(c, a, b)
+if c, s = a; else, s = b; end
 end
 
 function h = file_sha(f)

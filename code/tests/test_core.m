@@ -9889,6 +9889,43 @@ verifyTrue(tc, isfield(Tm, 'core3'));
 verifyEqual(tc, numel(regexp(Lm{4}, '\d+\.\d%', 'match')), 3);
 end
 
+function test_band_core3_switch_file(tc)
+% rule_core3 cannot be switched after validation: the test stage (before its marker) and the
+% report refuse when it is on without W3 in the frozen protocol, or off with it. A pools file
+% not made with the registered model is refused before the marker, from its small core3_id
+% variable, so a stale pools file never spends the single reading.
+J = struct('w', struct('H1', 'channel_switch'), 'w3', struct('H1', 'rate_reduce'));
+core_bw_rules('core3_switch', J, true);
+core_bw_rules('core3_switch', rmfield(J, 'w3'), false);
+verifyError(tc, @() core_bw_rules('core3_switch', J, false), 'experiment_core_bw:core3_switch');
+verifyError(tc, @() core_bw_rules('core3_switch', rmfield(J, 'w3'), true), 'experiment_core_bw:core3_switch');
+d = tempname; mkdir(d); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+sha = repmat('e', 1, 64); f = fullfile(d, 'pools.mat');
+verifyError(tc, @() core_bw_rules('core3_file', f, sha, 3), 'experiment_core_bw:core3_pools');   % no file
+PP = struct('pools', {{struct('ber', zeros(2, 1))}});
+pool_checkpoint('commit', f, struct('PP', PP));                     % a stale file: no core3_id
+verifyError(tc, @() core_bw_rules('core3_file', f, sha, 3), 'experiment_core_bw:core3_pools');
+pool_checkpoint('commit', f, struct('PP', PP, 'core3_id', sprintf('core3 %s N%d', sha, 3)));
+core_bw_rules('core3_file', f, sha, 3);
+verifyError(tc, @() core_bw_rules('core3_file', f, repmat('f', 1, 64), 3), 'experiment_core_bw:core3_pools');
+verifyError(tc, @() core_bw_rules('core3_file', f, sha, 4), 'experiment_core_bw:core3_pools');
+L = load(f, 'PP'); verifyTrue(tc, isequal(L.PP, PP));
+src = fileread(which('experiment_core_bw'));
+verifyNumElements(tc, strfind(src, 'C3 = {sprintf(''core3 %s N%d'', X.CORE3_SHA, X.CORE3_N)};'), 1);   % the id's one format
+verifyNotEmpty(tc, strfind(fileread(which('core_bw_rules')), 'id = sprintf(''core3 %s N%d'', sha, N);'));
+verifyNumElements(tc, strfind(src, 'SP = struct(''PP'', PP); if X.CORE3, SP.core3_id = C3{1}; end'), 1);
+verifyNumElements(tc, strfind(src, 'pool_checkpoint(''commit'', X.pools, SP);'), 1);
+g0 = strfind(src, 'J = core_bw_rules(''guard'', X);'); mk = strfind(src, 'marker(X, J.params_id);');
+for k = {'core_bw_rules(''core3_switch'', J, X.CORE3);', ...
+        'if X.CORE3, core_bw_rules(''core3_file'', X.pools, J.core3_sha256, J.core3_N); end'}
+    i = strfind(src, k{1});
+    verifyNumElements(tc, i, 1, k{1}); verifyTrue(tc, all(i > g0 & i < mk), k{1});
+end
+r0 = strfind(src, 'function stage_report(X)'); r1 = strfind(src, 'function REC = read_recoverable(f)');
+i = strfind(src, 'core_bw_rules(''core3_switch'', J, c3);');
+verifyNumElements(tc, i, 1); verifyTrue(tc, i > r0 && i < r1);
+end
+
 %% ---------- rule_core3 test helpers ----------
 function [A, cls, PP] = core3_world(varargin)
 % Actions, the hybrid's classes and a decision-time PP with the three-state window N = 3;

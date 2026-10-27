@@ -234,7 +234,8 @@ PP.timing = struct('sims', nsim, 'sims_run', nnow, 'wall_min', wall / 60, 'worke
     's_per_sim', wall * max(1, X.N_WORKERS * ~X.smoke) / max(nnow, 1), 'jobs_run', numel(todo));
 PP.smoke = X.smoke; PP.created = datestr(now);
 if X.CORE3, PP.core3_sha256 = X.CORE3_SHA; PP.core3_N = X.CORE3_N; PP.core3_id = C3{1}; end
-pool_checkpoint('commit', X.pools, struct('PP', PP));
+SP = struct('PP', PP); if X.CORE3, SP.core3_id = C3{1}; end      % readable without loading the pools
+pool_checkpoint('commit', X.pools, SP);
 pool_checkpoint('clear', CKD);
 fprintf('Saved %s: %d simulations, %d of them now in %.1f min (%.2f s per simulation per worker)\n', X.pools, nsim, ...
     nnow, wall / 60, PP.timing.s_per_sim);
@@ -734,7 +735,9 @@ assert(isfield(J, 'blind_first') && isequal({V.BCH.B}, cellfun(@(r) J.blind_firs
 cref = core_bw_rules('clean_ref', clean_ber_ref(9, 'ber_est'), clean_ber_ref(9, 'ber'));
 assert(isfield(J, 'clean_ber_est_9db') && strcmp(J.clean_ber_est_9db, sprintf('%.17g', cref)), ...
     'experiment_core_bw:clean_ref_changed', 'the clean reference at 9 dB is %.17g, not the one validation froze', cref);
+core_bw_rules('core3_switch', J, X.CORE3);
 if X.CORE3, core_bw_rules('core3_frozen', J, load(X.val, 'WCH3'), X); end
+if X.CORE3, core_bw_rules('core3_file', X.pools, J.core3_sha256, J.core3_N); end
 marker(X, J.params_id);
 fprintf('Test reading started (%s)\n', X.marker);
 PP = load_pools(X, true);
@@ -829,6 +832,7 @@ lines = {sprintf('=== Bandwidth study (docs/core_bw_protocol.md)%s ===', ternary
     sprintf('blind_core first response (validation, frozen; docs/core_bw_v2_note.txt): %s', strjoin(cellfun(@(r) ...
     sprintf('%s -> %s', r, J.blind_first.(r)), X0.RULES, 'UniformOutput', false), ', '))};
 c3 = any(strcmp({RES.policy}, 'rule_core3'));          % rule_core3 carries the verdicts
+core_bw_rules('core3_switch', J, c3);
 if c3
     lines{end+1} = sprintf(['W3 of rule_core3, the three-state CNN in the loop (validation, frozen; ' ...
         'docs/core_bw_core3_note.txt): %s; model SHA-256 %s, window N = %d; rule_core is the hybrid''s secondary row'], ...
