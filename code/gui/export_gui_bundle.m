@@ -11,8 +11,9 @@ function export_gui_bundle(target, root)
 %   data/gui_norm_stats.mat, and the clean-link reference of the decision layer as a small
 %   data/policy_pools.mat holding clean_ref alone (clean_ber_ref.m reads nothing else): the
 %   export stops when the pools hold none, its table has a missing or non-finite value, or
-%   the bundle's reference is not finite, because the link monitor would fall back to its
-%   floor and alarm on a clean link. The three-state
+%   the bundle's reference is not finite or its 9 dB value is outside 3e-4 to 6e-3
+%   (console_ref_range.m), because the link monitor would fall back to its floor and alarm on
+%   a clean link. The three-state
 %   CNN (data/core_cnn_model.mat, not a reduced chain check) and its report
 %   (results/core_cnn.txt) come along when present. A result of another detector or deployed
 %   policy, or older than its inputs (result_status.m), is not exported, and a KPI summary
@@ -97,8 +98,13 @@ clean_ber_ref('reset');
 b = clean_ber_ref(9, 'ber_est');
 clean_ber_ref('reset');
 clear back
+r = console_ref_range();
 if ~isfinite(b)
     delete(out);
     error('export_gui_bundle:clean_ref', 'the clean reference in %s is not finite at 9 dB: not exported', pp);
+elseif b < r(1) || b > r(2)
+    delete(out);
+    error('export_gui_bundle:clean_ref', ['the clean reference in %s is %.2e at 9 dB, outside %.0e to %.0e ' ...
+        '(docs/clean_ref_protocol.md): not exported'], pp, b, r(1), r(2));
 end
 end

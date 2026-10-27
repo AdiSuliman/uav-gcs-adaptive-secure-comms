@@ -65,7 +65,7 @@ A closed-loop simulation of the command uplink from a ground control station (GC
 3. Full pipeline: `matlab -batch "main"` from the repository folder. The flags at the top of `code/main.m` choose the stages.
 4. Single stages: `matlab -batch "run_stage('B2','B3')"`; `run_stage('smoke', ...)` runs a reduced version to check the chain. A full run takes about 6-7.2 days per profile, about 14.4-19.0 days for the three profiles (docs/DECISIONS.md, "Cost and resources, re-derived (2026-10-16)").
 5. Unit tests: `runtests('code/tests')`.
-6. Operator console: `demo_gui` (after the pipeline has produced `data/` and `results/`).
+6. Operator console: start from an exported bundle: `export_gui_bundle` after the pipeline, then `demo_gui('rx<n>')` (the profile's bundle in `profiles/`).
 7. 3D view (Simulink 3D Animation and UAV Toolbox): `v3d_live` for the live console, `v3d_videos` for the defense videos.
 8. Every run writes its console output to `logs/`. `disk_guard` stops a run before the drive falls below 150 GB free.
 
@@ -194,7 +194,9 @@ Full tables: `results/kpi_summary.txt`, `results/policy_evaluation.txt`, `result
 
 The file has no nested functions (D24): static state lives in `fig.UserData`, changing state in appdata; `params.mat` is restored after every run.
 
-`export_gui_bundle.m` copies what the console needs into `profiles/rx<n>`, including a small `data/policy_pools.mat` that holds the clean-link reference alone (the link monitor reads it; the export and the console's start both stop when it is not finite) and, when present, the three-state model and `results/core_cnn.txt`. `code/tests/test_gui.m` tests the exporter, `console_core.m` and the decision cycle headless on a bundle exported from a smoke tree.
+The console runs the policy that training deployed, read from `data/trained_dqn.mat` (`console_policy.m`): the selected DQN with or without the escalation, or the rule fallback with its own monitor when the DQN did not pass validation. The escalation checkbox of the episode tab starts at the deployed setting and says so; the Live tab always runs the deployed policy.
+
+`export_gui_bundle.m` copies what the console needs into `profiles/rx<n>`, including a small `data/policy_pools.mat` that holds the clean-link reference alone (the link monitor reads it; the export and the console's start both stop when it is not finite or its 9 dB value is outside 3e-4 to 6e-3) and, when present, the three-state model and `results/core_cnn.txt`. `code/tests/test_gui.m` tests the exporter, `console_core.m`, `console_policy.m` (stubs for the DQN with and without escalation and for the rule fallback) and the decision cycle headless on a bundle exported from a smoke tree.
 
 ---
 
