@@ -239,7 +239,7 @@ st = system(sprintf('git -C "%s" cat-file -e %s', root, ref));
 assumeEqual(tc, st, 0, 'git or the tip''s commit is not available here');
 for g = {'code/evaluation/lect_kpis.m', 'code/evaluation/per_reduction.m', 'code/evaluation/boot_cluster.m', ...
         'code/evaluation/false_change_rate.m', 'code/evaluation/three_state_view.m', 'code/decision/per_metrics.m', ...
-        'code/decision/decision_config.m', 'code/decision/packet_share.m', 'code/decision/core_bw_rules.m', ...
+        'code/decision/decision_config.m', 'code/decision/packet_share.m', ...
         'code/decision/evaluate_policies.m', 'code/decision/experiment_core_bw.m'}
     [~, theirs] = system(sprintf('git -C "%s" show %s:%s', root, ref, g{1}));
     verifyEqual(tc, strrep(fileread(fullfile(root, g{1})), sprintf('\r'), ''), strrep(theirs, sprintf('\r'), ''), g{1});
@@ -248,13 +248,21 @@ end
 
 %% ---------- CORE_BW: core_bw_lect_by_link.m ----------
 function test_core_bw_copies_match(tc)
-% The readers are experiment_core_bw.m's word for word.
+% The readers are experiment_core_bw.m's of core-bw-p1 f01a51f (the commit its test stage runs
+% on: D106, rule_core3) byte for byte, and core_bw_rules.m, which per_lines calls, is that
+% commit's blob.
+root = tc.TestData.root; ref = 'f01a51fed4f311b25265574fc17bf7913b17df10';
+st = system(sprintf('git -C "%s" cat-file -e %s', root, ref));
+assumeEqual(tc, st, 0, 'git or core-bw-p1 f01a51f is not available here');
+[~, ex] = system(sprintf('git -C "%s" show %s:code/decision/experiment_core_bw.m', root, ref));
 mine = fileread(which('core_bw_lect_by_link'));
-ex = fileread(which('experiment_core_bw'));
 for f = {'plr_threshold', 'read_recoverable', 'recoverable_mask', 'get_set', 'pol', 'per_lines', 'qstat'}
     verifyNotEmpty(tc, fn_block(mine, f{1}), f{1});
     verifyEqual(tc, fn_block(mine, f{1}), fn_block(ex, f{1}), f{1});
 end
+g = 'code/decision/core_bw_rules.m';
+[~, theirs] = system(sprintf('git -C "%s" show %s:%s', root, ref, g));
+verifyEqual(tc, strrep(fileread(fullfile(root, g)), sprintf('\r'), ''), strrep(theirs, sprintf('\r'), ''), g);
 end
 
 function test_core_bw_mark_and_reading(tc)
@@ -290,6 +298,37 @@ verifyTrue(tc, isscalar(iA) && isscalar(iB) && iA < iB);
 b = lines(iB + 1:end);
 verifyTrue(tc, all(endsWith(b(contains(b, '-> MET') | contains(b, '-> NOT MET')), ' [second line, not the verdict]')));
 verifyTrue(tc, any(contains(lines, 'includes N = 4 L episodes where t_rec_det is set by construction (3 at 0, 0 later, 1 never)')));
+end
+
+function test_core_bw_rule_core3(tc)
+% With rule_core3 in the study's sets (D106): the gate reproduces the report's lines with
+% rule_core3 carrying the verdicts (PRIMARY) and rule_core's rows labelled hybrid, secondary;
+% the recovery-time reading lists rule_core3 beside the other policies, with its own N; a
+% study without rule_core3 reads as before.
+[T, REC, KPc, rep, PP, pay] = core_bw_world(tc, true);
+thr = core_bw_lect_by_link('mark', PP);
+EP = T.EPs; Lep = thr(sub2ind(size(thr), EP.s, EP.r)) >= 1;
+P = struct('ebno', PP.ebno, 'runs', {PP.runs}, 'params_id', PP.params_id, 'det_id', PP.det_id);
+G = core_bw_lect_by_link('gate', T, REC, KPc, rep, P, pay);
+verifyTrue(tc, G.pass, strjoin(G.mismatch, newline));
+prim = G.primary.per([G.primary.per.primary]);
+verifyEqual(tc, unique({prim.policy}), {'rule_core3'});
+verifyTrue(tc, any(contains(G.lines, 'PRIMARY narrowband')) && any(contains(G.lines, '(hybrid, secondary)')));
+verifyTrue(tc, isfield(G.primary.rec, 'rule_core3') && isfield(G.primary, 'cnn_hybrid') && isfield(G.primary, 'cnn_3vs'));
+X = KPc; X.KP.primary.per(1).red = X.KP.primary.per(1).red + eps(X.KP.primary.per(1).red);
+verifyFalse(tc, core_bw_lect_by_link('gate', T, REC, X, rep, P, pay).pass);
+[S, lines] = core_bw_lect_by_link('readings', T, G, Lep, pay);
+for pk = {'none', 'blind_core', 'rule_core', 'rule_core3'}
+    verifyEqual(tc, nnz(strcmp({S.n_rec.policy}, pk{1})), 3, pk{1});
+end
+q = S.n_rec(strcmp({S.n_rec.policy}, 'rule_core3') & strcmp({S.n_rec.type}, 'pooled'));
+verifyEqual(tc, [q.n q.zero q.later q.never], [4 4 0 0]);
+q = S.n_rec(strcmp({S.n_rec.policy}, 'rule_core') & strcmp({S.n_rec.type}, 'pooled'));
+verifyEqual(tc, [q.n q.zero q.later q.never], [4 3 0 1]);
+verifyTrue(tc, any(startsWith(lines, '  rule_core3 pooled     Line A, every episode, includes N = 4 L episodes')));
+verifyTrue(tc, any(contains(lines, 'CNN contribution pooled     rule_core3 - rule_core')));
+iB = find(startsWith(lines, '=== Line B'));
+verifyTrue(tc, any(contains(lines(iB:end), 'PER rule_core3 PRIMARY narrowband')));
 end
 
 function test_core_bw_run(tc)
@@ -411,7 +450,7 @@ txt = [{'=== Decision-layer evaluation on the test pools ===', 'Generated: synth
     {hdr}, lf, {'', 'Configuration at the end of the episode, deployed policy (single set): most frequent two per threat'}];
 end
 
-function [T, REC, KPc, rep, PP, pay] = core_bw_world(tc)
+function [T, REC, KPc, rep, PP, pay] = core_bw_world(tc, core3)
 % Two scenarios (a CW tone k = 1 and a 20 MHz jammer k = 2) at two Eb/N0 points, two test
 % flights, two onsets: 16 episodes. The clean link of flight 1 at 0 dB loses 60% of its packets
 % (threshold 2 x 0.6 + 1/10 >= 1: link-limited), flight 2 30%, none at 3 dB. Recoverable:
@@ -438,7 +477,12 @@ Rn = ep(0.8 + 0.05 * EP.narrow + 0.01 * EP.r, ones(1, n), rdn);
 Rb = ep(0.5 + 0.02 * EP.r, 2 * ones(1, n), rdb);
 Rr = ep(0.2 - 0.1 * EP.narrow + 0.01 * EP.r, ones(1, n), rdr);
 Ro = ep(0.05 * ones(1, n), nan(1, n), nan(1, n));
-RES = struct('rule', 'H1', 'set', 'primary', 'policy', {'none', 'blind_core', 'rule_core', 'oracle'}, 'R', {Rn, Rb, Rr, Ro});
+pols = {'none', 'blind_core', 'rule_core', 'oracle'}; Rs = {Rn, Rb, Rr, Ro};
+if nargin > 1 && core3                              % rule_core3: better than the hybrid, restores every L episode at once
+    rd3 = 2 * ones(1, n); rd3(L) = 0;
+    pols{end+1} = 'rule_core3'; Rs{end+1} = ep(0.15 - 0.1 * EP.narrow + 0.01 * EP.r, ones(1, n), rd3);
+end
+RES = struct('rule', 'H1', 'set', 'primary', 'policy', pols, 'R', Rs);
 X0 = struct('RULES', {{'H1', 'H3', 'H4'}}, 'B', 200, 'TARGET', 0.3, 'N_RUN', 5);
 meta = struct('runs', {PP.runs}, 'params_id', 'p1', 'det_id', 'd1');
 T = struct('RES', RES, 'EPs', EP, 'X', X0, 'meta', meta);

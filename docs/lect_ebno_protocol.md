@@ -94,8 +94,9 @@ line after seeing results: all lines are always printed, in the order of section
 - `code/tests/test_lect_kpis_by_ebno.m`: synthetic, no pools.
 - The readers it calls are profile 1's merged tip's (`TIP` `85484b0`) files unchanged:
   `lect_kpis.m`, `per_reduction.m`, `boot_cluster.m`, `false_change_rate.m`, `per_metrics.m`,
-  `three_state_view.m`, `decision_config.m`, `packet_share.m`, `core_bw_rules.m` (the test
-  compares them with `TIP`). `TIP3` holds the same blobs of these files.
+  `three_state_view.m`, `decision_config.m`, `packet_share.m` (the test compares them with
+  `TIP`). `TIP3` holds the same blobs of these files. `core_bw_rules.m` is the blob of `core-bw-p1`
+  `f01a51f` (section 7, D106 retake).
 - Carried byte for byte (local functions that cannot be called):
   `evaluate_policies.m`'s `far_report` and `cp_upper`; `experiment_core_bw.m`'s `per_lines`,
   `qstat`, `plr_threshold`, `read_recoverable`, `recoverable_mask`, `get_set` and `pol` (the test
@@ -187,6 +188,21 @@ mark does not apply to it.
 - Before its run, the seven copies are compared with the `experiment_core_bw.m` of the commit its
   test stage ran (its marker's `commit` line). If they differ, they are taken again from that file
   byte for byte, with the test passing, in a commit on `lect-ebno`; the rules here stay as they are.
+
+**D106 retake (27.10.2026, before any CORE_BW data and before the test stage).** The study's test
+stage runs on `core-bw-p1` `f01a51f` (rule_core3, D106), so the copies were retaken from that
+commit's `experiment_core_bw.m`: only `per_lines` differs from the earlier copy (with rule_core3
+in the sets it carries the verdicts and the CNN contribution; rule_core's lines are labelled
+hybrid, secondary; rule_core3 - rule_core is descriptive), the other six are the same blocks. Two
+consequences, both reporting only, none changes a rule of sections 2-4 or 7:
+- `core_bw_rules.m`, which `per_lines` calls (`per_verdicts`), is that commit's blob on this
+  branch (it is no longer the `TIP` blob; `lect_kpis_by_ebno.m` does not call it);
+- the recovery-time reading of section 7 lists rule_core3 beside none, blind_core and rule_core
+  when the sets hold it, Line A with its N and Line B as for the others.
+`test_core_bw_copies_match` compares the seven blocks and the `core_bw_rules.m` blob with
+`f01a51f` word for word, `test_core_bw_rule_core3` reads a synthetic study with rule_core3.
+If the test stage runs on a later commit, the copies are compared with that commit's file first
+(the rule of the bullet above).
 
 ## 8. When it runs
 

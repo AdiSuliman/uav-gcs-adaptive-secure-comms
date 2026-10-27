@@ -30,7 +30,8 @@ function varargout = core_bw_lect_by_link(cmd, varargin)
 %       t_rec_det is set by construction)
 %   [lines, Kp] = core_bw_lect_by_link('per_lines', S, EP, mask, X, pay, ttl, brief)
 %       experiment_core_bw.m's per_lines; it and read_recoverable, recoverable_mask, get_set,
-%       pol, qstat and plr_threshold are carried byte for byte
+%       pol, qstat and plr_threshold are carried byte for byte from core-bw-p1 f01a51f (with
+%       rule_core3 in S, its rows carry the verdicts and rule_core's are the hybrid, secondary)
 switch cmd
     case 'run',       run_reading(varargin{:});
     case 'mark',      varargout{1} = mark(varargin{:});
@@ -283,7 +284,8 @@ lines = [lines, {'', sprintf(['Recovery time from detection (lecturer): Line A, 
     'episodes, where t_rec_det is set by construction; Line B, the non-L episodes, is the headline; median/p90 ' ...
     '(never %%): onset->detection | detection->restored (%d cycles)'], X0.N_RUN)}];
 N = struct('policy', {}, 'type', {}, 'n', {}, 'zero', {}, 'later', {}, 'never', {});
-for pk = {'none', 'blind_core', 'rule_core'}
+pr = {'none', 'blind_core', 'rule_core'}; if any(strcmp({Sp.policy}, 'rule_core3')), pr{end+1} = 'rule_core3'; end
+for pk = pr
     R = pol(Sp, pk{1});
     for t = 1:size(types, 1)
         m = m0 & types{t, 2}(e) & Le & isfinite(R.t_conf);
@@ -350,7 +352,10 @@ end
 function [lines, Kp] = per_lines(S, EP, mask, X, pay, ttl, brief)
 % PER reduction vs the static link (the primary verdict per jamming type, the pooled one its
 % second line), recovery time, goodput and the CNN's contribution, pooled and per jamming type,
-% on the episodes of the recoverable scenarios; brief: a sensitivity, its PER lines only.
+% on the episodes of the recoverable scenarios; brief: a sensitivity, its PER lines only. With
+% rule_core3 in S it carries the verdicts and the contribution (Kp.cnn), rule_core's lines are
+% labelled hybrid, secondary (Kp.cnn_hybrid), and rule_core3 - rule_core is descriptive
+% (Kp.cnn_3vs).
 lines = {'', sprintf('--- %s ---', ttl)};
 if ~brief
     lines{end+1} = sprintf(['  PER reduction >= %g%% vs the static link per jamming type: MET (committed) when the ' ...
@@ -358,9 +363,13 @@ if ~brief
 end
 Rn = pol(S, 'none'); m0 = mask(Rn.ep);
 types = {'pooled', true(1, EP.n); 'narrowband', EP.narrow; 'wideband', ~EP.narrow};
+c3 = any(strcmp({S.policy}, 'rule_core3'));
+pv = {'rule_core', 'blind_core'}; if c3, pv = [{'rule_core3'}, pv]; end
+sec = ''; if c3, sec = ' (hybrid, secondary)'; end
+tg = @(p) repmat(sec, 1, double(strcmp(p, 'rule_core')));
 Kp = struct('per', struct('policy', {}, 'type', {}, 'n', {}, 'red', {}, 'lo', {}, 'hi', {}, 'per', {}, 'per_ref', {}), ...
     'rec', struct(), 'gput', struct(), 'cnn', struct());
-for pk = {'rule_core', 'blind_core'}
+for pk = pv
     R = pol(S, pk{1});
     for t = 1:size(types, 1)
         m = m0 & types{t, 2}(Rn.ep);
@@ -373,37 +382,46 @@ end
 lines = [lines, blk];
 if brief, return; end
 mr = m0 & Rn.recoverable & Rn.threat;                 % beside it: the per-episode reading (lect_kpis.m)
-for pk = {'rule_core', 'blind_core'}
+for pk = pv
     R = pol(S, pk{1});
     [v, lo, hi] = per_reduction(R.per_post(mr), Rn.per_post(mr), EP.geom(Rn.ep(mr)), X.B, 3);
-    lines{end+1} = sprintf('  PER %-10s pooled, recoverable episodes only (n=%d): reduction %5.1f%% [%5.1f, %5.1f]', ...
-        pk{1}, nnz(mr), 100 * v, 100 * lo, 100 * hi); %#ok<AGROW>
+    lines{end+1} = sprintf('  PER %-10s pooled, recoverable episodes only (n=%d): reduction %5.1f%% [%5.1f, %5.1f]%s', ...
+        pk{1}, nnz(mr), 100 * v, 100 * lo, 100 * hi, tg(pk{1})); %#ok<AGROW>
 end
-for pk = {'none', 'blind_core', 'rule_core'}
+pr = {'none', 'blind_core', 'rule_core'}; if c3, pr{end+1} = 'rule_core3'; end
+for pk = pr
     R = pol(S, pk{1});
     for t = 1:size(types, 1)
         m = m0 & types{t, 2}(Rn.ep);
         a = qstat(R.t_conf(m)); b = qstat(R.t_rec_det(m));
         [g, glo, ghi] = boot_cluster(pay * R.dlv_post(m), ones(1, nnz(m)), EP.geom(Rn.ep(m)), X.B, 5);
         lines{end+1} = sprintf(['  %-10s %-10s onset->detection %s | detection->restored (%d cycles) %s | goodput ' ...
-            '%.0f [%.0f, %.0f] bit/s'], pk{1}, types{t, 1}, a.txt, X.N_RUN, b.txt, g, glo, ghi); %#ok<AGROW>
+            '%.0f [%.0f, %.0f] bit/s%s'], pk{1}, types{t, 1}, a.txt, X.N_RUN, b.txt, g, glo, ghi, tg(pk{1})); %#ok<AGROW>
         Kp.rec.(pk{1}).(types{t, 1}) = struct('det', a, 'rec_det', b); Kp.gput.(pk{1}).(types{t, 1}) = [g glo ghi];
     end
 end
-Rr = pol(S, 'rule_core'); Rb = pol(S, 'blind_core');
-for t = 1:size(types, 1)
-    m = m0 & types{t, 2}(Rn.ep); cl = EP.geom(Rn.ep(m));
-    [dp, dlo, dhi] = boot_cluster(Rr.per_post(m) - Rb.per_post(m), ones(1, nnz(m)), cl, X.B, 6);
-    [rr, rlo, rhi] = per_reduction(Rr.per_post(m), Rb.per_post(m), cl, X.B, 7);
-    [dg, glo, ghi] = boot_cluster(pay * (Rr.dlv_post(m) - Rb.dlv_post(m)), ones(1, nnz(m)), cl, X.B, 8);
-    f = m & isfinite(Rr.t_rec_det) & isfinite(Rb.t_rec_det);
-    [dt, tlo, thi] = boot_cluster(Rr.t_rec_det(f) - Rb.t_rec_det(f), ones(1, nnz(f)), EP.geom(Rn.ep(f)), X.B, 9);
-    lines{end+1} = sprintf(['  CNN contribution %-10s rule_core - blind_core: PER %+.4f [%+.4f, %+.4f] (reduction %5.1f%% ' ...
-        '[%5.1f, %5.1f]) | goodput %+.0f [%+.0f, %+.0f] bit/s | detection->restored %+.2f [%+.2f, %+.2f] cycles on the %d ' ...
-        'episodes both recover in (never %.0f%% vs %.0f%%)'], types{t, 1}, dp, dlo, dhi, 100 * rr, 100 * rlo, 100 * rhi, dg, ...
-        glo, ghi, dt, tlo, thi, nnz(f), 100 * mean(~isfinite(Rr.t_rec_det(m))), 100 * mean(~isfinite(Rb.t_rec_det(m)))); %#ok<AGROW>
-    Kp.cnn.(types{t, 1}) = struct('per', [dp dlo dhi], 'per_red', [rr rlo rhi], 'gput', [dg glo ghi], 'trec', [dt tlo thi], ...
-        'n_both', nnz(f));
+cp = {'rule_core', 'blind_core', 'cnn', ''};
+if c3
+    cp = {'rule_core3', 'blind_core', 'cnn', ''; 'rule_core', 'blind_core', 'cnn_hybrid', sec; 'rule_core3', 'rule_core', ...
+        'cnn_3vs', ' (one decision layer, the class source alone differs: descriptive, no verdict)'};
+end
+for c = 1:size(cp, 1)
+    Rr = pol(S, cp{c, 1}); Rb = pol(S, cp{c, 2});
+    for t = 1:size(types, 1)
+        m = m0 & types{t, 2}(Rn.ep); cl = EP.geom(Rn.ep(m));
+        [dp, dlo, dhi] = boot_cluster(Rr.per_post(m) - Rb.per_post(m), ones(1, nnz(m)), cl, X.B, 6);
+        [rr, rlo, rhi] = per_reduction(Rr.per_post(m), Rb.per_post(m), cl, X.B, 7);
+        [dg, glo, ghi] = boot_cluster(pay * (Rr.dlv_post(m) - Rb.dlv_post(m)), ones(1, nnz(m)), cl, X.B, 8);
+        f = m & isfinite(Rr.t_rec_det) & isfinite(Rb.t_rec_det);
+        [dt, tlo, thi] = boot_cluster(Rr.t_rec_det(f) - Rb.t_rec_det(f), ones(1, nnz(f)), EP.geom(Rn.ep(f)), X.B, 9);
+        lines{end+1} = sprintf(['  CNN contribution %-10s %s - %s: PER %+.4f [%+.4f, %+.4f] (reduction %5.1f%% ' ...
+            '[%5.1f, %5.1f]) | goodput %+.0f [%+.0f, %+.0f] bit/s | detection->restored %+.2f [%+.2f, %+.2f] cycles on the %d ' ...
+            'episodes both recover in (never %.0f%% vs %.0f%%)%s'], types{t, 1}, cp{c, 1}, cp{c, 2}, dp, dlo, dhi, 100 * rr, ...
+            100 * rlo, 100 * rhi, dg, glo, ghi, dt, tlo, thi, nnz(f), 100 * mean(~isfinite(Rr.t_rec_det(m))), ...
+            100 * mean(~isfinite(Rb.t_rec_det(m))), cp{c, 4}); %#ok<AGROW>
+        Kp.(cp{c, 3}).(types{t, 1}) = struct('per', [dp dlo dhi], 'per_red', [rr rlo rhi], 'gput', [dg glo ghi], ...
+            'trec', [dt tlo thi], 'n_both', nnz(f));
+    end
 end
 if any(strcmp({S.policy}, 'oracle'))
     Ro = pol(S, 'oracle');

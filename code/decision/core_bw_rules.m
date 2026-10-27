@@ -11,15 +11,17 @@ function varargout = core_bw_rules(cmd, varargin)
 %       the choice of the wideband action (6.3): Wn candidate names in their tie-break order;
 %       bj, tot, cl (1 x n) each episode's width, total JSR and flight geometry; per, gput,
 %       trec (numel(Wn) x n) each candidate's PER after onset, delivered payload and recovery
-%       from detection (NaN never) on the same episodes; B bootstrap resamples
+%       from detection (NaN never) on the same episodes; B bootstrap resamples. The same rule
+%       chooses blind_core's first response (docs/core_bw_v2_note.txt)
 %   v = core_bw_rules('verdict', m, lo, target, n)   the PER-reduction verdict (6.5), C2e's
 %       words: MET (committed) when the 95% lower bound lo >= target, MET (not committed) when
 %       only the point m is, NOT MET otherwise and without episodes (n = 0)
 %   [V, lines] = core_bw_rules('per_verdicts', P, target, prim)   the PER lines of a reading:
 %       P (struct array: policy, type 'narrowband' / 'wideband' / 'pooled', n, red, lo, hi, per,
-%       per_ref) gains verdict and primary (rule_core per jamming type, when prim); per policy
-%       the narrowband, then the wideband line (PRIMARY when primary), then the pooled one,
-%       labelled the second line
+%       per_ref) gains verdict and primary (per jamming type, when prim: rule_core3's when P
+%       holds it, else rule_core's); per policy the narrowband, then the wideband line
+%       (PRIMARY when primary), then the pooled one, labelled the second line; beside
+%       rule_core3, rule_core's lines are labelled "hybrid, secondary"
 %   f = core_bw_rules('flip', A, S)   whether a sensitivity's reading S would flip a primary
 %       verdict of A (both per_verdicts output): some primary entry of A whose policy and type
 %       S reads on episodes of its own with another verdict; a primary type without episodes
@@ -35,10 +37,30 @@ function varargout = core_bw_rules(cmd, varargin)
 %       the interval holds 0 (without one, the point is 0) and, where near episodes exist, the
 %       rule's median there is the longer. No episode holds.
 %   J = core_bw_rules('guard', X)   the test stage's refusals (6.6, G4) in order: no frozen
-%       protocol, the protocol or the recoverable list changed, the test read already (the
-%       smoke deletes its own marker and readings instead), the frozen copy missing or not byte
-%       for byte, the protocol or the copy not committed; J the frozen choices
+%       protocol, the protocol, the recoverable list or the deviation notes (X.note, X.note3,
+%       when set) changed, the test read already (the smoke deletes its own marker and readings instead),
+%       the frozen copy missing or not byte for byte, the protocol, the note or the copy not
+%       committed; J the frozen choices
+%   v = core_bw_rules('clean_ref', v, ber)   the clean reference the monitor reads at 9 dB
+%       (clean_ber_ref.m 'ber_est'), refused unless finite: without data/policy_pools.mat
+%       policy_monitor.m falls to C.deg_floor and the alarm fires on the clean link. ber, the
+%       true clean BER at 9 dB (clean_ber_ref.m 'ber'), is refused unless finite and inside
+%       clean_ref_rebuild.m's pre-registered range 3e-4 to 6e-3, so a finite but stale pools
+%       file (the C1p flights' 2.4e-5) stops the stage too
 %   h = core_bw_rules('sha', f)     SHA-256 of a file, as sha256sum prints it
+%   M = core_bw_rules('core3_model', f, sha, N)   the three-state CNN of rule_core3
+%       (docs/core_bw_core3_note.txt): the model file f loaded (net, N, groups), refused unless
+%       its SHA-256 is sha, its window N and its states none, tone_jamming, jamming in order
+%   core_bw_rules('core3_pools', PP, sha, N)   the pools hold the three-state scores of that
+%       model: PP.core3_sha256 and PP.core3_N as registered, probs3 (frames x 3) in every pool
+%       and residual layer beside its frames
+%   core_bw_rules('core3_frozen', J, V, X)   the test stage's rule_core3 refusals before its
+%       marker: the frozen protocol J holds W3 per hop rule equal to the validation file's
+%       (V.WCH3), and the model's SHA-256 and N equal to the registered X.CORE3_SHA, X.CORE3_N
+%   core_bw_rules('core3_file', f, sha, N)   the pools file f names that model in its own small
+%       variable core3_id, read without loading the pools (the test stage, before its marker)
+%   core_bw_rules('core3_switch', J, on)   rule_core3 is on (X.CORE3, or its rows in the test
+%       file) exactly when the frozen protocol J holds W3: never switched after validation
 switch cmd
     case 'recoverable', varargout{1} = recoverable(varargin{:});
     case 'choose_w',    [varargout{1}, varargout{2}] = choose_w(varargin{:});
@@ -48,7 +70,13 @@ switch cmd
     case 'gap_text',    varargout{1} = gap_text(varargin{:});
     case 'p1',          varargout{1} = p1_reading(varargin{:});
     case 'guard',       varargout{1} = guard(varargin{:});
+    case 'clean_ref',   varargout{1} = clean_ref(varargin{:});
     case 'sha',         varargout{1} = file_sha(varargin{:});
+    case 'core3_model', varargout{1} = core3_model(varargin{:});
+    case 'core3_pools', core3_pools(varargin{:});
+    case 'core3_frozen', core3_frozen(varargin{:});
+    case 'core3_file',  core3_file(varargin{:});
+    case 'core3_switch', core3_switch(varargin{:});
     otherwise, error('core_bw_rules:cmd', 'core_bw_rules: unknown command %s', cmd);
 end
 end
@@ -99,9 +127,11 @@ function [V, lines] = per_verdicts(P, target, prim)
 V = P; lines = {};
 if isempty(V), V = struct('policy', {}, 'type', {}, 'n', {}, 'red', {}, 'lo', {}, 'hi', {}, 'per', {}, 'per_ref', {}, ...
         'verdict', {}, 'primary', {}); return; end
+c3 = any(strcmp({V.policy}, 'rule_core3'));
+pp = 'rule_core'; if c3, pp = 'rule_core3'; end
 for i = 1:numel(V)
     V(i).verdict = verdict(V(i).red, V(i).lo, target, V(i).n);
-    V(i).primary = prim && strcmp(V(i).policy, 'rule_core') && ~strcmp(V(i).type, 'pooled');
+    V(i).primary = prim && strcmp(V(i).policy, pp) && ~strcmp(V(i).type, 'pooled');
 end
 name = struct('narrowband', 'narrowband (CW)', 'wideband', 'wideband (4-83.5 MHz)', ...
     'pooled', 'second line, both types pooled');
@@ -111,6 +141,7 @@ for pk = unique({V.policy}, 'stable')
         if isempty(i), continue; end
         v = V(i); tag = name.(t{1});
         if v.primary, tag = ['PRIMARY ' tag]; end
+        if c3 && strcmp(v.policy, 'rule_core'), tag = [tag ' (hybrid, secondary)']; end
         if v.n == 0
             lines{end+1} = sprintf('  PER %-10s %s: no recoverable episodes -> %s', v.policy, tag, v.verdict); %#ok<AGROW>
         else
@@ -178,6 +209,17 @@ assert(strcmp(J.protocol_sha256, file_sha(X.protocol)), 'experiment_core_bw:prot
     '%s changed since the validation choices were frozen', X.protocol);
 assert(strcmp(J.recoverable_sha256, file_sha(X.recov)), 'experiment_core_bw:recoverable_changed', ...
     '%s changed since it was frozen', X.recov);
+note = {};
+if isfield(X, 'note')
+    assert(isfield(J, 'note_sha256') && strcmp(J.note_sha256, file_sha(X.note)), 'experiment_core_bw:note_changed', ...
+        '%s changed since the validation choices were frozen', X.note);
+    note = {X.note};
+end
+if isfield(X, 'note3')
+    assert(isfield(J, 'note3_sha256') && strcmp(J.note3_sha256, file_sha(X.note3)), 'experiment_core_bw:note3_changed', ...
+        '%s changed since the validation choices were frozen', X.note3);
+    note{end+1} = X.note3;
+end
 if X.smoke                                          % the chain check reads its own flights again
     for f = {X.marker, X.test}, if isfile(f{1}), delete(f{1}); end, end
     return
@@ -186,8 +228,20 @@ assert(~isfile(X.marker) && ~isfile(X.test), 'experiment_core_bw:read', ...
     'the test split was read already (%s or %s): it is read once', X.marker, X.test);
 assert(isfile(X.frozen) && strcmp(file_sha(X.frozen), file_sha(X.proto_json)), 'experiment_core_bw:frozen', ...
     'the frozen protocol must be committed as %s, byte for byte %s', X.frozen, X.proto_json);
-assert(git_clean({X.frozen, X.protocol}), 'experiment_core_bw:uncommitted', ...
-    '%s and %s must be committed without local changes before the test reading', X.frozen, X.protocol);
+assert(git_clean([{X.frozen, X.protocol}, note]), 'experiment_core_bw:uncommitted', ...
+    '%s must be committed without local changes before the test reading', strjoin([{X.frozen, X.protocol}, note], ', '));
+end
+
+function v = clean_ref(v, ber)
+RANGE = [3e-4 6e-3];                                % clean_ref_rebuild.m: the mean clean BER at 9 dB
+if ~(isnumeric(v) && isscalar(v) && isfinite(v))
+    error('experiment_core_bw:clean_ref', ['clean_ber_ref(9, ''ber_est'') is %s: ' ...
+        'data/policy_pools.mat with its clean_ref must be in this tree, else the monitor falls to C.deg_floor'], mat2str(v));
+end
+if nargin > 1 && ~(isnumeric(ber) && isscalar(ber) && isfinite(ber) && ber >= RANGE(1) && ber <= RANGE(2))
+    error('experiment_core_bw:clean_ref', ['clean_ber_ref(9, ''ber'') is %s, not inside the pre-registered range %.0e to %.0e ' ...
+        'of the mean clean BER at 9 dB (clean_ref_rebuild.m): the pools in this tree are stale or wrong'], mat2str(ber), RANGE(1), RANGE(2));
+end
 end
 
 function ok = git_clean(files)
@@ -200,6 +254,59 @@ for f = files
     [s2, d] = system([g 'status --porcelain -- "' f{1} '"']);
     ok = ok && s1 == 0 && s2 == 0 && isempty(strtrim(d));
 end
+end
+
+function M = core3_model(f, sha, N)
+assert(isfile(f), 'experiment_core_bw:core3_model', '%s not found: rule_core3''s model is an input of the pools stage', f);
+h = file_sha(f);
+assert(strcmp(h, sha), 'experiment_core_bw:core3_model', '%s has SHA-256 %s, not the registered %s', f, h, sha);
+M = load(f, 'net', 'N', 'groups');
+assert(isfield(M, 'N') && isequal(double(M.N), N), 'experiment_core_bw:core3_N', ...
+    '%s holds the window %s, not the registered N = %d', f, mat2str(M.N), N);
+assert(isfield(M, 'groups') && isequal(cellstr(string(M.groups(:)')), {'none', 'tone_jamming', 'jamming'}), ...
+    'experiment_core_bw:core3_states', '%s does not hold the states clean, narrowband, wideband in order', f);
+end
+
+function core3_pools(PP, sha, N)
+assert(isfield(PP, 'core3_sha256') && strcmp(PP.core3_sha256, sha) && isfield(PP, 'core3_N') && ...
+    isequal(PP.core3_N, N), 'experiment_core_bw:core3_pools', ...
+    'the pools were not scored by rule_core3''s registered model (SHA-256 %s, N = %d)', sha, N);
+A = {PP.pools}; if isfield(PP, 'acr_pools'), A = [A, PP.acr_pools]; end
+for k = 1:numel(A)
+    for i = find(~cellfun(@isempty, A{k}(:)))'
+        Q = A{k}{i};
+        assert(isfield(Q, 'probs3') && size(Q.probs3, 2) == 3 && size(Q.probs3, 1) == numel(Q.ber) && ...
+            ~any(isnan(Q.probs3(:))), 'experiment_core_bw:core3_pools', 'a pool holds no three-state scores (probs3)');
+    end
+end
+end
+
+function core3_frozen(J, V, X)
+assert(isfield(J, 'w3') && isfield(V, 'WCH3') && isequal({V.WCH3.W}, cellfun(@(r) J.w3.(r), {V.WCH3.rule}, ...
+    'UniformOutput', false)), 'experiment_core_bw:w3', 'the validation file''s W3 differ from the frozen protocol''s');
+assert(isfield(J, 'core3_sha256') && strcmp(J.core3_sha256, X.CORE3_SHA) && isfield(J, 'core3_N') && ...
+    isequal(J.core3_N, X.CORE3_N), 'experiment_core_bw:core3_changed', ...
+    'the frozen three-state model (SHA-256, N) differs from the registered one');
+end
+
+function core3_file(f, sha, N)
+id = sprintf('core3 %s N%d', sha, N);
+ok = isfile(f);
+if ok, v = whos('-file', f); ok = ismember('core3_id', {v.name}); end
+if ok, L = load(f, 'core3_id'); ok = ischar(L.core3_id) && strcmp(L.core3_id, id); end
+assert(ok, 'experiment_core_bw:core3_pools', ...
+    '%s was not made with rule_core3''s registered model (%s): run the pools stage again', f, id);
+end
+
+function core3_switch(J, on)
+w3 = isfield(J, 'w3');
+assert(isequal(logical(on), w3), 'experiment_core_bw:core3_switch', ['rule_core3 is %s here but the frozen ' ...
+    'protocol %s W3: the switch is set before the smoke and never changed after validation'], ...
+    ternary(on, 'on', 'off'), ternary(w3, 'holds', 'holds no'));
+end
+
+function s = ternary(c, a, b)
+if c, s = a; else, s = b; end
 end
 
 function h = file_sha(f)
