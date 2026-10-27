@@ -106,7 +106,7 @@ Notes:
 - The false-alarm KPI is read at detector level, as pre-registered. The whole-monitor false alarm on clean flights (an extension KPI) is not at 5% yet: 12.5-29.9% of 1,800 clean validation episodes depending on the monitor setting. The fix is registered in D103 and D104.
 - KPI 5-8 for the proposal's own system come from the controlled-bandwidth study CORE_BW, where the three-state CNN drives the rule (`rule_core3`) against a `blind_core` tuned on validation (D106), estimated 30.10-2.11.2026. In C2e the rule reads the hybrid detector's classes; those readings are the profile-wide secondary lines (D105).
 
-Next dates (estimates): DQN training (C2) is at run 50 of 81 and ends 28.10.2026 about 07:00-09:30; a PC restart follows right after C2 is done, before the policy evaluation (C2e) starts (fallback: at the start of C2g); C2e and the rest of the chain follow, ending at RPT about 29.10; CORE_BW 30.10-2.11 (`rule_core3` against the validation-tuned `blind_core` is the lecturer row); the profile-1 rerun (P1R) 2.11-5.11; profile 3 about 20-25.11.2026 (step 7a is being timed). Windows Update is paused until 30.11.2026. Current numbers and logs are in [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/PROJECT_LOG.md](docs/PROJECT_LOG.md).
+Next dates (estimates): DQN training (C2) is at run 50 of 81 and ends 28.10.2026 about 07:00-09:30; a PC restart follows right after C2 is done, before the policy evaluation (C2e) starts (fallback: at the start of C2g); C2e and the rest of the chain follow, ending at RPT about 29.10; CORE_BW 30.10-2.11 (`rule_core3` against the validation-tuned `blind_core` is the lecturer row); the profile-1 rerun (P1R) 2.11-5.11; profile 3 about 18-21.11.2026 (worst about 22-23.11; step 7a, timed on 27.10, takes about 5-7 h). Windows Update is paused until 30.11.2026. Current numbers and logs are in [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/PROJECT_LOG.md](docs/PROJECT_LOG.md).
 
 ## Operator console
 
@@ -122,7 +122,7 @@ Next dates (estimates): DQN training (C2) is at run 50 of 81 and ends 28.10.2026
 
 Start `demo_gui` from a bundle exported by `export_gui_bundle`, not from the pipeline folder. The Live and Episode tabs need `data/trained_dqn.mat` (written when C2 ends); the KPI tab needs `results/policy_evaluation.mat` (C2e); the latency plot needs LAT. The bundle runs from a copy outside the pipeline folder, so a running pipeline is never touched.
 
-State: the antenna count, the threat list, temporal fusion and the decision settings follow the current pipeline. The three-state core view, the core action set and the deployed policy kind from `trained_dqn.mat` are planned on branch `gui-core`; a live check with the final agent from an exported bundle follows RPT.
+State: the antenna count, the threat list, temporal fusion and the decision settings follow the current pipeline. The three-state core view, the core action set and the deployed policy kind from `trained_dqn.mat` are on branch `gui-core` (tested 27.10, not merged); a live check with the final agent from an exported bundle follows RPT.
 
 ## Quick start
 

@@ -18,7 +18,7 @@ Scope: the lecturer's revised proposal of 20.10.2026 (D92) is the official scope
 | Profile 1 (3 UAV antennas) | Stage C2 (decision-layer training) running since 26.10 16:03; 50 of 81 runs finished at 27.10 15:42 (about 29 min per run), then the escalation re-evaluation, the save and 2 sensitivity retrains |
 | Next on profile 1 | PC restart right after C2 is done (fallback: at the start of C2g), then C2e (first PER, recovery-time, goodput and CNN-contribution lines), the rest of the chain, a controlled-bandwidth study (CORE_BW), a rerun with a corrected monitor (P1R), then profile 3 |
 | Profile 3 (4 UAV antennas) | Detector stages done; decision layer waits for profile 1 |
-| Estimates | C2 done 28.10 about 07:00-09:30; PC restart right after it; C2e 28.10 about 08:30-12:30; profile 1 chain ends (RPT) 29.10 about 01:00-10:00; CORE_BW 30.10-2.11 (`rule_core3` against the validation-tuned `blind_core` is the lecturer row, D106); P1R 2.11-5.11; profile 3 about 20-25.11 (step 7a being timed) |
+| Estimates | C2 done 28.10 about 07:00-09:30; PC restart right after it; C2e 28.10 about 08:00-12:45; profile 1 chain ends (RPT) 29.10 about 02:00-10:00; CORE_BW 30.10-2.11 (`rule_core3` against the validation-tuned `blind_core` is the lecturer row, D106); P1R 2.11-5.11; profile 3 about 18-21.11, worst about 22-23.11 (step 7a timed 27.10: about 5-7 h) |
 | Windows Update | Paused until 30.11.2026 |
 | Interim report | Draft 6 delivered 27.10, being shortened; due 01.11 |
 

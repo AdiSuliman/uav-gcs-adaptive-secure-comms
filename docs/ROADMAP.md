@@ -31,12 +31,12 @@ Rows and months are exactly those of the proposal (months 1-8). The interim repo
 |---|---|
 | DQN training (C2) done | 28.10.2026, about 07:00-09:30 |
 | PC restart (frees memory held by exited MATLAB entries) | right after C2 is done, before C2e starts; fallback: at the start of C2g |
-| Policy evaluation (C2e): the lecturer's open KPIs are read | 28.10.2026, about 08:30-12:30 (after the restart) |
+| Policy evaluation (C2e): the lecturer's open KPIs are read | 28.10.2026, about 08:00-12:45 (after the restart) |
 | Operator console with the v7 agent (Live and Episode tabs) | live check after RPT, from a bundle outside the pipeline folder, with Adi present |
-| Profile 1 chain ends (RPT): KPI table, dashboard, report numbers | 29.10.2026, about 01:00-10:00 |
+| Profile 1 chain ends (RPT): KPI table, dashboard, report numbers | 29.10.2026, about 02:00-10:00 |
 | Controlled-bandwidth study (CORE_BW): `rule_core3` against the validation-tuned `blind_core` is the lecturer row (D106) | 30.10-2.11.2026 |
 | Profile-1 rerun with the fixed monitor (P1R) | 2.11-5.11.2026 |
-| Profile 3 ends (last extension) | about 20-25.11.2026 (step 7a, the detector-set run for profile 3's decoder, is being timed) |
+| Profile 3 ends (last extension) | about 18-21.11.2026, worst about 22-23.11 (step 7a, the detector-set run for profile 3's decoder, timed on 27.10 at about 5-7 h) |
 | Windows Update | paused until 30.11.2026 (registry `PauseUpdatesExpiryTime`); a forced reboot is covered by the resume mode |
 
 Profile 1 = three UAV antennas, branch `v7-dev`. Each stage starts when the previous one ends; the dates come from the measured C2 pace (about 29 min per run; C2 is 81 runs plus 2 sensitivity retrains; run 50 was finished on 27.10.2026 at 15:42) and the stage durations below.
@@ -79,7 +79,7 @@ Order: controlled-bandwidth study, profile-1 rerun, profile 3 (the PC restart co
 |---|---|---|---|
 | CORE_BW | Controlled-bandwidth study: 41 channels at 2401 + 2k MHz, jammer widths tone to 83.5 MHz; the lecturer row is `rule_core3` (the three-state CNN in the loop) against the validation-tuned `blind_core`, `rule_core` (the hybrid) is secondary (D106); branch `core-bw-p1`. Needs `core_cnn_model.mat`, the post-C2 `trained_dqn.mat` and the re-keyed `policy_pools.mat` copied into its data folder after C2 is done. The pools hold the profile-3 hand-run slot | 30.10-2.11 (pools about 25-28 h, then the test stage and readings) | after RPT of profile 1 |
 | P1R | Profile-1 rerun of C1d, C2 and C2e with a fixed monitor, in an isolated worktree; stops after C1d if the old threshold form is kept (D104) | about 51-53 h before the single-thread factor, which is unmeasured (C2 alone is 81 runs plus 2 retrains, about 46 h; plus the fresh clean test set 2.0-2.3 h, C1d, noise-burst evaluations and C2e); window 2.11-5.11 | after CORE_BW |
-| Profile 3 deployment | Tests, fusion rerun, detector stages, rehearsal, fourth test set read once; step 7a (detector set for the JSI decoder, being timed) | not estimated; profile 3 as a whole ends about 20-25.11 | after P1R |
+| Profile 3 deployment | Tests, fusion rerun, detector stages, rehearsal, fourth test set read once; step 7a (detector set for the JSI decoder, about 5-7 h, timed 27.10) | profile 3 as a whole ends about 18-21.11 (worst about 22-23.11) | after P1R |
 | Profile 3 pools | C1p (4 antennas) | 90-105 h (estimate) | after deployment |
 | Profile 3 maps | SURV map v2 (D100); SURV3 v2 (D101) | 44-50 h; 690-786 min | after C1c |
 | Profile 3 decision layer | C1c, C1d, C2, C2e, C2g, C2u, GAL, EDGE, KPI, DASH, WEAK, RPT, then LAT (the takeover's final phase) | profile 1's durations as a guide | after the maps |
@@ -93,7 +93,7 @@ Profile 3 = four antennas. OHP and GCSA are skipped on it. Profile 2 (two antenn
 1. Finish DQN training (C2), restart the PC, and run the policy evaluation (C2e).
 2. Read the lecturer's four open KPIs at the policy evaluation (C2e): PER reduction (target at least 30% vs the static link), recovery time, goodput, CNN contribution vs the conventional adaptive mechanism.
 3. Finish profile 1's chain to RPT: the KPI table (KPI), the dashboard (DASH) and the report numbers (RPT) are proposal deliverables; latency (LAT) on an idle machine: with the profile 1 finals, hand-run after RPT if Adi decides so, otherwise at the end of profile 3 in the takeover's final phase.
-4. Operator console: the three-state CNN view, the core action set and the deployed policy kind (read from `trained_dqn.mat`) are planned on branch `gui-core`; the console starts from an exported bundle outside the pipeline folder; then a live check with the v7 agent after RPT with Adi present, and screenshots.
+4. Operator console: the three-state CNN view, the core action set and the deployed policy kind (read from `trained_dqn.mat`) are on branch `gui-core` (tested 27.10, not merged); the console starts from an exported bundle outside the pipeline folder; then a live check with the v7 agent after RPT with Adi present, and screenshots.
 5. Submit the interim report on 01.11.2026 (draft 6 delivered 27.10.2026 and being shortened; it follows the proposal Gantt).
 
 **Extensions (no commitment)**
