@@ -1,6 +1,6 @@
 # Project Log
 
-History of the UAV-GCS adaptive communications project, from the first link model (20.08.2026) to the current run (26.10.2026), one section per version.
+History of the UAV-GCS adaptive communications project, from the first link model (20.08.2026) to the current run (27.10.2026), one section per version.
 
 - Why each design choice was made: [DECISIONS.md](DECISIONS.md) (D-numbers are cited below).
 - What each source contributes: [LITERATURE.md](LITERATURE.md).
@@ -9,17 +9,18 @@ History of the UAV-GCS adaptive communications project, from the first link mode
 
 Scope: the lecturer's revised proposal of 20.10.2026 (D92) is the official scope. Everything built beyond it is an extension without commitment and is labelled so. Dates are DD.MM.YYYY, local time. Clocks went back on 25.10.2026 at 02:00.
 
-## Where we are (26.10.2026)
+## Where we are (27.10.2026)
 
 | Item | State |
 |---|---|
 | Lecturer KPIs 1-4 (BER model, macro-F1, false alarms, recall) | Measured on data never used for training or selection: all met (details in v7) |
 | Lecturer KPIs 5-8 (PER reduction, recovery time, goodput, CNN contribution) | Pending: they come from stage C2e |
-| Profile 1 (3 UAV antennas) | Stage C2 (decision-layer training) running since 26.10 16:03; 9 of 81-83 runs finished at 21:11 (about 34 min per run) |
-| Next on profile 1 | C2e (first PER, recovery-time, goodput and CNN-contribution lines), then the rest of the chain, a controlled-bandwidth study, a rerun with a corrected monitor, then profile 3 |
+| Profile 1 (3 UAV antennas) | Stage C2 (decision-layer training) running since 26.10 16:03; 50 of 81 runs finished at 27.10 15:42 (about 29 min per run), then the escalation re-evaluation, the save and 2 sensitivity retrains |
+| Next on profile 1 | PC restart right after C2 is done (fallback: at the start of C2g), then C2e (first PER, recovery-time, goodput and CNN-contribution lines), the rest of the chain, a controlled-bandwidth study (CORE_BW), a rerun with a corrected monitor (P1R), then profile 3 |
 | Profile 3 (4 UAV antennas) | Detector stages done; decision layer waits for profile 1 |
-| Estimates | C2 ends 28.10 about 11:30-18:30; C2e 28.10 about 13:00-20:00; profile 1 chain ends (RPT) 29.10 about 05:00-15:00; PC restart window right after; CORE_BW 30.10-1.11; P1R 2.11-5.11; profile 3 about 20.11-25.11 (step 7a not yet timed) |
-| Interim report | Draft 4 delivered 26.10; draft 5 structure approved |
+| Estimates | C2 done 28.10 about 07:00-09:30; PC restart right after it; C2e 28.10 about 08:30-12:30; profile 1 chain ends (RPT) 29.10 about 01:00-10:00; CORE_BW 30.10-2.11 (`rule_core3` against the validation-tuned `blind_core` is the lecturer row, D106); P1R 2.11-5.11; profile 3 about 20-25.11 (step 7a being timed) |
+| Windows Update | Paused until 30.11.2026 |
+| Interim report | Draft 6 delivered 27.10, being shortened; due 01.11 |
 
 ## Version overview
 
@@ -114,7 +115,7 @@ Result: profiles 1 and 2 ran to the end as the ideal-receiver reference for v7 (
 
 Goal: a realistic receiver and flight dynamics, so the system's weak points show up before a real test. Inputs are RF measurements only (no IMU, no GNSS); flight conditions are simulated through their RF effect.
 
-Main changes (D73-D104)
+Main changes (D73-D106)
 - Real receiver with training blocks and pilots (synchronisation, frequency offset, MVDR passes), hover and turns, speed 0-161 km/h, source-corrected severities, four triple threats, profile 3 with four antennas, tracked 12 dBi GCS antenna under the 10.2 dBm e.i.r.p. cap (D73).
 - Verdict COMMITTED / NOT COMMITTED / UNDETERMINED at every envelope point (stage EDGE, D74).
 - Link, detector, receiver and coded-packet gap fixes (D75-D79); fast isolation-forest scorer for unknown threats (D80).
@@ -192,13 +193,21 @@ The lecturer's false-alarm KPI is read at detector level; the system-level figur
 
 - 16:02, C1d (drop-alarm threshold): drop threshold 4.5 dB, monitor form class_cusum. The whole monitor at no_action false-alarms on 12.5 to 29.9% of 1,800 clean validation episodes (2/2 29.85%, 3/3 22.07%, 4/5 19.84%, 5/5 12.46%); all above 5%. The cause is the degradation (BER) path at 0-6 dB (D103).
 - Reporting rule fixed before any result: "System-level false alarms on clean flights (extension, our KPI 6): NOT MET, X%" with a breakdown. A corrected monitor is registered for profile 3 and a profile 1 rerun (D103-D104).
-- 16:03, C2 (Double DQN grid): 4 monitors x 2 drop settings x 3 false-switch penalties x 3 seeds = 72 grid runs of 50,048 episodes each, then the coordinate steps (gamma, costs, the unknown-threat flag, reward scales), 81-83 runs in all. About 34 minutes per run; 9 finished at 21:11. Finished runs recover 94.5 to 97.5% of episodes on validation.
+- 16:03, C2 (Double DQN grid): 4 monitors x 2 drop settings x 3 false-switch penalties x 3 seeds = 72 grid runs of 50,048 episodes each, then the coordinate steps (gamma, costs, the unknown-threat flag), 81 runs in all, then 2 reward-sensitivity retrains. 9 finished at 21:11; the pace settled at about 29 minutes per run. Finished runs recover 94.5 to 97.5% of episodes on validation.
 - 18:14: order registered (D104): profile 1 chain, controlled-bandwidth study, profile 1 rerun with the corrected monitor on a fresh clean test set (at most 74 false-alarm episodes of 1,800 for the 5% bound), then profile 3.
 - 21:50: D105 registered before any C2e reading: the lecturer's verdict pairs are `rule_core` against `none` (KPI 5-7) and against `blind_core` (KPI 8) on the core action set; `rule_esc`/`blind_esc` are the extension; C2e's `blind_core` is a secondary, weakened baseline and KPI 8's headline comes from CORE_BW; the PER verdict stays on Line A (D99). KPI 5-8 are read with the hybrid detector's classes, not the three-state CNN. The README's configuration table follows D105.
 
+### Dual audit and schedule (27.10.2026)
+
+- 15:42: C2 at run 50 of 81 at about 29 min per run. The grid and coordinate runs end about 28.10 06:30; the stage is done at 07:00-09:30. No evaluation defect in C2: the rule baseline and every DQN are scored on one validation set with common random numbers.
+- Restart: the PC is restarted right after `##### STAGE C2 done`, before C2e shows a result line (a kill earlier loses about 40 h of C2: there is no run-level resume and `trained_dqn.mat` is saved before the two sensitivity retrains). Fallback: let C2e finish and restart in the first hour of C2g.
+- Memory on 27.10: about 1 GB RAM available, 37.5 GB free commit; the restart clears it. Windows Update is paused until 30.11.2026.
+- The operator console starts from an exported bundle; it is to follow the deployed policy kind stored in `trained_dqn.mat` (branch `gui-core`), not always the escalation variant.
+- Reporting rule for C2: the deployed agent is the one chosen by the registered selection on validation (false alarms at most 5%); numbers carry a slight optimistic selection bias until C2e reads them on test pools.
+
 ### CORE_BW registration (27.10.2026)
 
-- D106 registered before the smoke and any CORE_BW data (Adi approved): `rule_core3`, the core rule driven by the three-state CNN (B3c's model, window of 3 cycles; clean, narrowband and wideband mapped to no action, channel switch and the wideband action W3 chosen on validation), carries CORE_BW's lecturer KPI 5-8 readings; KPI 8's headline is `rule_core3` against the validation-tuned `blind_core`; the hybrid's `rule_core` stays as a secondary row. Protocol amended on `core-bw-p1` (`5d7847f`, `7c5ad4c`); code and tests before the runbook's row 18, else the registered fallback.
+- D106 registered before the smoke and any CORE_BW data (Adi approved): `rule_core3`, the core rule driven by the three-state CNN (B3c's model, window of 3 cycles; clean, narrowband and wideband mapped to no action, channel switch and the wideband action W3 chosen on validation), carries CORE_BW's lecturer KPI 5-8 readings; KPI 8's headline is `rule_core3` against the validation-tuned `blind_core`; the hybrid's `rule_core` stays as a secondary row. Protocol amended on `core-bw-p1` (`5d7847f`, `7c5ad4c`); code and tests before the runbook's row 18, else the registered fallback. Code and tests done the same day (`2a4da56`, `f01a51f`); open: the `lect-ebno` commit, the data copies into the CORE_BW folder after C2 is done, and a full `test_core` run on the tip.
 
 ## Status of the lecturer's KPIs (profile 1, 26.10.2026)
 
