@@ -9397,8 +9397,9 @@ end
 end
 
 function test_band_protocol_pointer(tc)
-% The protocol carries the link-limited pointer of 6.5 (lect-ebno eb7ac10) before any val stage
-% hashes it, and is that commit's file; the test stage refuses a changed deviation note.
+% The protocol carries the link-limited pointer of 6.5 (lect-ebno eb7ac10) and the rule_core3
+% amendment (docs/core_bw_core3_note.txt) before any val stage hashes it, and is the amendment
+% commit's file; the test stage refuses a changed deviation note.
 pr = strrep(fileread(fullfile(tc.TestData.root, 'docs', 'core_bw_protocol.md')), sprintf('\r'), '');
 ptr = strjoin({'- **Link-limited flights (D99, reporting only).** `docs/lect_ebno_protocol.md` section 7 (branch', ...
     '  `lect-ebno`, `core_bw_lect_by_link.m`) gives the primary readings again on the episodes whose', ...
@@ -9410,9 +9411,12 @@ i = strfind(pr, ptr);
 verifyNumElements(tc, i, 1);
 verifyTrue(tc, i > strfind(pr, '**6.5 Readings (test split, read once).**') && ...
     i < strfind(pr, '**6.6 Gates before the test reading.**'));
-st = system(sprintf('git --no-optional-locks -C "%s" cat-file -e eb7ac10', tc.TestData.root));
+verifyNotEmpty(tc, strfind(pr, 'verdict per jamming type, as in C2e (`lect_kpis.m`): `rule_core3` on every test episode'));
+verifyNotEmpty(tc, strfind(pr, '7c9cccbfe9b7fa000ca462e04812a008584990b3478c60086ea2713a50b41689'));
+verifyTrue(tc, isfile(fullfile(tc.TestData.root, 'docs', 'core_bw_core3_note.txt')));
+st = system(sprintf('git --no-optional-locks -C "%s" cat-file -e 5d7847fcfc47', tc.TestData.root));
 if st == 0
-    [~, ref] = system(sprintf('git --no-optional-locks -C "%s" show eb7ac10:docs/core_bw_protocol.md', tc.TestData.root));
+    [~, ref] = system(sprintf('git --no-optional-locks -C "%s" show 5d7847fcfc47:docs/core_bw_protocol.md', tc.TestData.root));
     verifyEqual(tc, pr, strrep(ref, sprintf('\r'), ''));
 end
 d = tempname; mkdir(d);
