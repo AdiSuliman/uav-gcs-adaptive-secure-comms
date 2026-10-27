@@ -15,7 +15,10 @@ function [P, info] = pool_cell(p, threat, actions, ebno, geo, det, opt)
 %            one entry per geometry (sub-run); the same geometries under every
 %            configuration (common random numbers)
 %   det      detector: net, ood, classes, mu, sd (feature normalization), fs; [] = no
-%            detector (link measurements and ground truth only: survivability maps)
+%            detector (link measurements and ground truth only: survivability maps);
+%            optional core3.net, the three-state CNN (core_cnn_config.m): its probabilities
+%            of every frame's image, on the CPU, in probs3 (frames x 3, clean, narrowband,
+%            wideband); without it the pools hold no probs3 field
 %   opt      F_SUB (frames per sub-run), tw (temporal window), delay_bits
 %   P        {nS, nA, nSplit} pools; per frame: probs (classes x ... stored N x C),
 %            maha, feat (link_features.m), gant (mean channel gain of every antenna),
@@ -51,7 +54,7 @@ for a = find(twin == 1:nA)
         set_link_snr(modelName, snr_dB + g_db - loss, p2);
         for sp = 1:nSp
             g = geo{s}(sp);
-            if isempty(det), Q0 = empty_pool(0, 0); else, Q0 = empty_pool(numel(det.classes), numel(det.mu)); end
+            if isempty(det), Q0 = empty_pool(0, 0); else, Q0 = empty_pool(numel(det.classes), numel(det.mu), core3_on(det)); end
             Q = repmat({Q0}, 1, numel(tw));
             for r = 1:numel(g.seed)
                 seed = g.seed(r);
@@ -77,13 +80,19 @@ for a = find(map ~= 1:nA)                           % same physics as an earlier
 end
 end
 
-function Q = empty_pool(nC, nF)
+function Q = empty_pool(nC, nF, c3)
 Q = struct('probs', zeros(0, nC, 'single'), 'maha', zeros(0, 1, 'single'), 'feat', zeros(0, nF, 'single'), ...
     'gant', zeros(0, 0, 'single'), 'ber', zeros(0, 1), 'fer', zeros(0, 1, 'single'), 'crc', zeros(0, 1, 'single'), ...
     'run', zeros(0, 1), ...
     'aoa', zeros(0, 3, 'single'), 'act', zeros(0, 1, 'single'), 'act_comp', zeros(0, 3, 'single'), ...
     'ebno_rx', zeros(0, 1, 'single'), 'idle', zeros(0, numel(idle_summary('names')), 'single'), ...
     'act_idle', zeros(0, 1, 'single'), 'bch', zeros(0, 0, 'single'), 'mmse_pred', zeros(0, 1, 'single'));
+if nargin > 2 && c3, Q.probs3 = zeros(0, 3, 'single'); end
+end
+
+function on = core3_on(det)
+% The three-state CNN scores the frames too.
+on = isfield(det, 'core3') && ~isempty(det.core3);
 end
 
 function v = geo_value(g, f, r)
@@ -104,6 +113,7 @@ if ~isempty(det)
     end
     [probs, maha] = detect_scores(det.net, det.ood, X, ((Fr - det.mu) ./ det.sd)', 'cpu');
     Q.probs = [Q.probs; single(probs')]; Q.maha = [Q.maha; single(maha(:))]; Q.feat = [Q.feat; single(Fr)];
+    if core3_on(det), Q.probs3 = [Q.probs3; single(spec_scores(det.core3.net, X, 'cpu'))]; end
 end
 if isfield(F, 'gain_ant'), Q.gant = [Q.gant; single(F.gain_ant(:, v)')]; end
 Q.ber = [Q.ber; F.ber(v)']; Q.fer = [Q.fer; single(F.fer(v)')]; Q.crc = [Q.crc; single(F.crc_fail(v)')];

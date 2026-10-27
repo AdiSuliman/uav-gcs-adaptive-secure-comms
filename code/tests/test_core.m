@@ -9368,7 +9368,8 @@ function test_band_blind_fixed_row(tc)
 % The fixed ladder stays as a secondary row: blind_core without PP.core_blind on the primary set
 % of every hop rule, same episodes and seeds; the report prints it after the per-width lines;
 % predictions P1 and P5 read it; the readers core_bw_lect_by_link.m copies are the parent
-% commit's byte for byte, so its gate reads this branch's reports.
+% commit's byte for byte but per_lines, which gives the parent's lines and readings without
+% rule_core3 (lect-ebno takes it again before the test stage, docs/core_bw_core3_note.txt 5).
 src = fileread(which('experiment_core_bw'));
 verifyNotEmpty(tc, strfind(src, 'if si == 1, pols = [pols, {''blind_core_fixed'', ''oracle''}]; end'));
 verifyNotEmpty(tc, strfind(src, 'Pp = Pw; if strcmp(pols{pk}, ''blind_core_fixed''), Pp.core_blind = ''''; end'));
@@ -9390,9 +9391,18 @@ verifyEqual(tc, kind, 'blind_esc'); verifyTrue(tc, opt.core);
 st = system(sprintf('git --no-optional-locks -C "%s" cat-file -e d4623ed', tc.TestData.root));
 assumeEqual(tc, st, 0, 'git or the parent commit is not available here');
 [~, old] = system(sprintf('git --no-optional-locks -C "%s" show d4623ed:code/decision/experiment_core_bw.m', tc.TestData.root));
-for f = {'plr_threshold', 'read_recoverable', 'recoverable_mask', 'get_set', 'pol', 'per_lines', 'qstat'}
+for f = {'plr_threshold', 'read_recoverable', 'recoverable_mask', 'get_set', 'pol', 'qstat'}
     verifyNotEmpty(tc, fn_text(src, f{1}), f{1});
     verifyEqual(tc, fn_text(src, f{1}), fn_text(old, f{1}), f{1});
+end
+f0 = core3_fns(tc, old, 'old', {'per_lines'}); f1 = core3_fns(tc, src, 'new', {'per_lines'});
+cl = onCleanup(@() core3_fns_off({f0, f1})); %#ok<NASGU>
+[S, EP, X] = core3_report_world({'none', 'blind_core', 'rule_core', 'blind_core_fixed', 'oracle'});
+for brief = [false true]
+    [L1, K1] = per_lines_new(S, EP, true(1, EP.n), X, 5e4, 'PRIMARY', brief);
+    [L0, K0] = per_lines_old(S, EP, true(1, EP.n), X, 5e4, 'PRIMARY', brief);
+    verifyEqual(tc, L1, L0); verifyTrue(tc, isequaln(K1, K0));
+    if ~brief, verifyGreaterThan(tc, numel(L1), 20); end
 end
 end
 
@@ -9437,6 +9447,596 @@ verifyError(tc, @() core_bw_rules('guard', X), 'experiment_core_bw:note_changed'
 rmdir(d, 's');
 src = fileread(which('experiment_core_bw'));
 verifyNotEmpty(tc, strfind(src, '[X.note '' sha256 '' core_bw_rules(''sha'', X.note)]'));   % the marker records it
+end
+
+function test_band_core3_off_identical(tc)
+% Without the three-state switch everything is bit for bit as on core-bw-p1 7c5ad4c (before
+% rule_core3): pool_cell.m's pools of one simulated flight, the rollouts of link_env.m,
+% policy_decide.m and policy_monitor.m (none, blind_core, blind_core_fixed, rule_core and the
+% full rule), the monitor's memory and outputs over random cycles, and the report's per-width,
+% Liu and detector lines; with probs3 in the pools and the observations every one of them is
+% unchanged.
+REV = '7c5ad4c';
+st = system(sprintf('git --no-optional-locks -C "%s" cat-file -e %s', tc.TestData.root, REV));
+assumeEqual(tc, st, 0, 'git or the parent commit is not available here');
+fns = {'pool_cell', 'link_env', 'policy_monitor', 'policy_decide'};
+old = core3_parent(tc, fns, REV);
+cl0 = onCleanup(@() core3_off(old, fns)); %#ok<NASGU>
+ds = core3_stub();
+cl1 = onCleanup(@() core3_off(ds, {'detect_scores'})); %#ok<NASGU>
+% pool_cell.m on one flight
+p = threat_params(base_params(), 'jamming', 3); p.quiet_build = true;
+opt = struct('F_SUB', 6, 'tw', 10, 'delay_bits', 20); geo = {struct('seed', 11, 'speed', 80, 'run', 1)};
+nF = numel(link_features('names'));
+det = struct('net', [], 'ood', [], 'classes', {{'none', 'jamming'}}, 'mu', zeros(1, nF), 'sd', ones(1, nF), ...
+    'fs', p.symbol_rate * p.sps);
+addpath(old, '-begin'); clear(fns{:});
+verifyEqual(tc, which('pool_cell'), fullfile(old, 'pool_cell.m'));
+P0 = pool_cell(p, 'jamming', {'no_action'}, 8, geo, det, opt);
+rmpath(old); clear(fns{:});
+P1 = pool_cell(p, 'jamming', {'no_action'}, 8, geo, det, opt);
+close_system('UAV_GCS_Threat_Link', 0);
+verifyGreaterThan(tc, numel(P1{1}.ber), 0);
+verifyTrue(tc, isequaln(P1, P0));
+verifyFalse(tc, isfield(P1{1}, 'probs3'));
+% the decision cycle on the toy world: every policy as before, and unchanged with probs3
+Q = struct('agent', [], 'agents', {{}}, 'rule_sel', []);
+spec = struct('scn', [2 2 1 2], 's', [1 2 1 1], 'onset', [3 5 2 1], 'follow', [false true false false], ...
+    'fdelay', [0 2 0 0], 'unk', [false false false true], 'T', 25, 'r', [1 1 1 1]);
+pols = {'none', {}; 'blind_core', {'core_blind', 'rate_reduce'}; 'blind_core', {}; 'rule_core', {'core_wide', 'rate_reduce'}; ...
+    'rule_core', {}; 'rule_esc', {}};
+R = cell(3, size(pols, 1));
+for v = 1:3
+    if v == 1, addpath(old, '-begin'); end
+    clear(fns{:});
+    [PP, K] = toy_world(true);
+    if v == 3
+        rs = RandStream('mt19937ar', 'Seed', 3);
+        for i = find(~cellfun(@isempty, PP.pools(:)))'
+            x = rand(rs, numel(PP.pools{i}.ber), 3); PP.pools{i}.probs3 = single(x ./ sum(x, 2));
+        end
+        verifyTrue(tc, isequaln(link_env('tables', PP), K));
+    end
+    for k = 1:size(pols, 1)
+        [kind, ag, op] = policy_setup(pols{k, 1}, Q, 1, 1, 1, [], K.na);
+        Pk = PP; for j = 1:2:numel(pols{k, 2}), Pk.(pols{k, 2}{j}) = pols{k, 2}{j + 1}; end
+        R{v, k} = rollout_policy(kind, Pk, K, spec, 1, ag, op, 8);
+    end
+    if v == 1, rmpath(old); clear(fns{:}); end
+end
+for k = 1:size(pols, 1)
+    verifyTrue(tc, isequaln(R{2, k}, R{1, k}), sprintf('%s as before', pols{k, 1}));
+    verifyTrue(tc, isequaln(R{3, k}, R{2, k}), sprintf('%s with probs3', pols{k, 1}));
+end
+% the monitor over random cycles: memory and outputs as before, and unchanged with probs3
+A = policy_actions(); na = find(strcmp(A, 'no_action')); ic = find(ismember(A, decision_config().core_actions));
+cls = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', 'antenna_fault', ...
+    'benign_interference', 'sweeping_jammer', 'tone_jamming', 'airframe_shadowing'};
+PPm = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0.2, 'alarm_mode', 'class_cusum', ...
+    'drop_db', 3, 'confirm_sweep', [2 8], 'unk_mode', 'nonhostile', 'unk_win', 3, 'fuse_N', 3);
+NE = 4; T = 30; rs = RandStream('mt19937ar', 'Seed', 11);
+obs = cell(1, T); cfg = cell(1, T); c = na * ones(1, NE);
+for t = 1:T
+    x = rand(rs, NE, numel(cls)); o = struct('probs', x ./ sum(x, 2), 'maha', rand(rs, NE, 1));
+    o.unknown = o.maha < 0.2;
+    o.feat = randn(rs, NE, nF); o.feat(:, feature_index('log_ber')) = -6 + 5 * (rand(rs, NE, 1) < 0.3);
+    o.feat(:, feature_index('crc_fail')) = rand(rs, NE, 1) < 0.3;
+    o.feat(:, feature_index('sinr')) = 12 - 10 * (t > 15) + randn(rs, NE, 1);
+    o.gant = -10 + randn(rs, NE, 3); if t > 10, o.gant(:, 2) = o.gant(:, 2) - 20; end
+    o.cfg_link = c(:);
+    if t > 8 && mod(t, 6) == 0, c = ic(randi(rs, numel(ic), 1, NE)); end
+    obs{t} = o; cfg{t} = c;
+end
+M = cell(3, T); mem = cell(1, 3);
+for v = 1:3
+    if v == 1, addpath(old, '-begin'); end
+    clear(fns{:});
+    m = policy_monitor('init', NE, numel(A)); prev = na * ones(1, NE);
+    for t = 1:T
+        o = obs{t}; if v == 3, x = rand(rs, NE, 3); o.probs3 = x ./ sum(x, 2); end
+        [m, M{v, t}] = policy_monitor('update', m, o, PPm, prev);
+        m = policy_monitor('change', m, cfg{t} ~= prev); prev = cfg{t};
+    end
+    mem{v} = m;
+    if v == 1, rmpath(old); clear(fns{:}); end
+end
+verifyTrue(tc, isequaln(M(2, :), M(1, :))); verifyTrue(tc, isequaln(mem{2}, mem{1}));
+verifyTrue(tc, isequaln(M(3, :), M(2, :))); verifyTrue(tc, isequaln(mem{3}, mem{2}));
+mc = cellfun(@(x) x.cls, M(2, :), 'UniformOutput', false); verifyGreaterThan(tc, numel(unique([mc{:}])), 2);
+% the report's per-width, Liu and detector lines without rule_core3
+[~, src0] = system(sprintf('git --no-optional-locks -C "%s" show %s:code/decision/experiment_core_bw.m', tc.TestData.root, REV));
+f0 = core3_fns(tc, src0, 'old'); f1 = core3_fns(tc, fileread(which('experiment_core_bw')), 'new');
+cl2 = onCleanup(@() core3_fns_off({f0, f1})); %#ok<NASGU>
+[S, EP, X] = core3_report_world({'none', 'blind_core', 'rule_core', 'blind_core_fixed', 'oracle'});
+verifyTrue(tc, isequaln(nthout(1:2, @bj_lines_new, S, EP, true(1, EP.n), X), nthout(1:2, @bj_lines_old, S, EP, true(1, EP.n), X)));
+verifyTrue(tc, isequaln(nthout(1:2, @liu_lines_new, S, EP, true(1, EP.n), X, 5e4), ...
+    nthout(1:2, @liu_lines_old, S, EP, true(1, EP.n), X, 5e4)));
+MON = core3_mon(EP, false);
+verifyTrue(tc, isequaln(nthout(1:2, @monitor_lines_new, MON, EP, struct('ebno', [3 9])), ...
+    nthout(1:2, @monitor_lines_old, MON, EP, struct('ebno', [3 9]))));
+end
+
+function test_band_core3_probs3(tc)
+% The pools stage's three-state scores: pool_cell.m with det.core3 stores probs3 (frames x 3),
+% exactly the CPU scores (spec_scores.m 'cpu') of the same images the hybrid reads; every other
+% field as without it; the stage loads the model through the registered refusals, puts it in
+% the checkpoint key and the pools, and its time per simulation (G2) holds the inference.
+ds = core3_stub();
+cl1 = onCleanup(@() core3_off(ds, {'detect_scores'})); %#ok<NASGU>
+p = threat_params(base_params(), 'jamming', 3); p.quiet_build = true;
+opt = struct('F_SUB', 6, 'tw', 10, 'delay_bits', 20); geo = {struct('seed', 11, 'speed', 80, 'run', 1)};
+nF = numel(link_features('names'));
+det = struct('net', [], 'ood', [], 'classes', {{'none', 'jamming'}}, 'mu', zeros(1, nF), 'sd', ones(1, nF), ...
+    'fs', p.symbol_rate * p.sps);
+net = core3_net(4);
+P1 = pool_cell(p, 'jamming', {'no_action'}, 8, geo, det, opt);
+setappdata(0, 'core3_stub_X', []);
+det.core3 = struct('net', net);
+P2 = pool_cell(p, 'jamming', {'no_action'}, 8, geo, det, opt);
+X = getappdata(0, 'core3_stub_X'); setappdata(0, 'core3_stub_X', []);
+close_system('UAV_GCS_Threat_Link', 0);
+n = numel(P2{1}.ber);
+verifyGreaterThan(tc, n, 0);
+verifyEqual(tc, size(X, 4), n);
+verifyEqual(tc, class(P2{1}.probs3), 'single');
+verifyEqual(tc, P2{1}.probs3, single(spec_scores(net, X, 'cpu')));
+verifyEqual(tc, sum(double(P2{1}.probs3), 2), ones(n, 1), 'AbsTol', 1e-5);
+verifyTrue(tc, isequaln(rmfield(P2{1}, 'probs3'), P1{1}));
+s = fileread(which('spec_scores'));                     % the CPU path never asks for a GPU
+verifyNotEmpty(tc, regexp(s, 'gpu = false;\r?\nif nargin < 3 \|\| ~strcmp\(device, ''cpu''\)', 'once'));
+src = fileread(which('pool_cell'));
+verifyNotEmpty(tc, strfind(src, 'Q.probs3 = [Q.probs3; single(spec_scores(det.core3.net, X, ''cpu''))];'));
+src = fileread(which('experiment_core_bw'));
+for k = {'Mo = core_bw_rules(''core3_model'', X.core3_model, X.CORE3_SHA, X.CORE3_N);', ...
+        'det.core3 = struct(''net'', Mo.net);', 'C3 = {sprintf(''core3 %s N%d'', X.CORE3_SHA, X.CORE3_N)};', ...
+        '[{MODEL_TAG, DET_ID, runs, jobs(j), EBNO, geoj(j), X.opt, P{j}}, C3]', ...
+        'if X.CORE3, PP.core3_sha256 = X.CORE3_SHA; PP.core3_N = X.CORE3_N; PP.core3_id = C3{1}; end'}
+    verifyNumElements(tc, strfind(src, k{1}), 1, k{1});
+end
+i0 = strfind(src, 'det.core3 = struct(''net'', Mo.net);'); t0 = strfind(src, 'pool_lpt(@(S, j) core_bw_job(''pools'', S, j), S, todo, pl);');
+w = strfind(src, 'wall = toc(t0); clear S');
+verifyNumElements(tc, t0, 1); verifyTrue(tc, i0 < t0 && w > t0);   % G2's time holds the CNN's inference
+verifyEqual(tc, regexp(src, 'X.CORE3_SHA = ''([0-9a-f]{64})''', 'tokens', 'once'), ...
+    {'7c9cccbfe9b7fa000ca462e04812a008584990b3478c60086ea2713a50b41689'});
+verifyNotEmpty(tc, strfind(src, 'X.CORE3_N = 3;'));
+nt = fileread(fullfile(tc.TestData.root, 'docs', 'core_bw_core3_note.txt'));
+verifyNotEmpty(tc, strfind(nt, 'SHA-256 7c9cccbfe9b7fa000ca462e04812a008584990b3478c60086ea2713a50b41689'));
+verifyNotEmpty(tc, strfind(nt, 'N = 3'));
+end
+
+function test_band_core3_window(tc)
+% rule_core3's class is the argmax of core_cnn_eval 'logp' with N = 3 over the episode's cycles
+% in order, its window values equal, fewer cycles at the start; the window does not restart
+% when the configuration changes, only with the episode; the hybrid's output takes no part.
+[A, cls, PP] = core3_world();
+NE = 5; T = 12; rs = RandStream('mt19937ar', 'Seed', 5);
+P = rand(rs, T, NE, 3); P = P ./ sum(P, 3);
+na = find(strcmp(A, 'no_action')); cs = find(strcmp(A, 'channel_switch'));
+mem = []; L = zeros(T, NE, 3); got = cell(T, NE);
+for t = 1:T
+    cfg = na * ones(1, NE); if t > 6, cfg(:) = cs; end           % a change reaches the link at cycle 7
+    o = core3_obs(cls, NE, 'sweeping_jammer', reshape(P(t, :, :), NE, 3), false);
+    o.cfg_link = cfg(:);
+    [~, mem, d] = policy_decide('rule_esc', o, cfg, mem, PP, [], struct('core', true, 'core3', true));
+    L(t, :, :) = reshape(d.l3, 1, NE, 3); got(t, :) = d.cls;
+end
+run = kron((1:NE)', ones(T, 1)); pos = repmat((1:T)', NE, 1);
+Lr = core_cnn_eval('logp', reshape(P, T * NE, 3), run, pos, PP.core3_N);
+verifyEqual(tc, reshape(L, T * NE, 3), Lr, 'AbsTol', 1e-12);
+[~, k] = max(Lr, [], 2); s3 = {'none', 'tone_jamming', 'jamming'};
+verifyEqual(tc, reshape(got, [], 1), s3(k)');
+verifyGreaterThan(tc, numel(unique(got(:))), 1);
+verifyEqual(tc, squeeze(L(1, :, :)), log(squeeze(P(1, :, :))), 'AbsTol', 1e-12);      % one cycle at the start
+verifyEqual(tc, squeeze(L(2, :, :)), squeeze(mean(log(P(1:2, :, :)), 1)), 'AbsTol', 1e-12);
+verifyEqual(tc, squeeze(L(8, :, :)), squeeze(mean(log(P(6:8, :, :)), 1)), 'AbsTol', 1e-12);   % across the change
+x = [1e-9 0.5 0.5; 0.2 0.3 0.5];                                  % a new episode starts a new window
+o = core3_obs(cls, 2, 'none', x, false); o.cfg_link = cs * ones(2, 1);
+[~, ~, d] = policy_decide('rule_esc', o, cs * ones(1, 2), [], PP, [], struct('core', true, 'core3', true));
+verifyEqual(tc, d.l3, log(max(x, 1e-6)), 'AbsTol', 1e-12);
+src = fileread(which('policy_monitor'));
+verifyNotEmpty(tc, strfind(src, 'lp = log(max(double(p3), 1e-6));'));
+verifyNotEmpty(tc, strfind(src, 'mem.l3 = cat(3, mem.l3(:, :, 2:end), lp); mem.n3 = min(mem.n3 + 1, N);'));
+verifyEmpty(tc, regexp(src, 'mem\.(l3|n3)\([^)]*arr', 'once'));    % never restarted on arrival
+end
+
+function test_band_core3_inert(tc)
+% In the three-state mode the unknown-threat flag, the lost-branch latch, the fusion model and
+% the sweeper's confirmation take no part: an unknown score and a lost branch that turn
+% rule_core's class to unknown and start its latch leave rule_core3's class as the CNN reads
+% it, its latch memory empty, and its outputs the same with or without a fusion model or a
+% sweeper window.
+[A, cls] = core3_world();
+na = find(strcmp(A, 'no_action')); NE = 2; T = 16;
+p3 = [0.9 0.05 0.05; 0.05 0.9 0.05];
+mk = @(t) core3_inert_obs(cls, NE, p3, t);
+run = @(PP, op) core3_trace(PP, mk, op, T, na * ones(1, NE));
+[~, ~, PP] = core3_world('confirm_sweep', [1 8]);
+[c0, m0] = run(PP, struct('core', true));
+verifyTrue(tc, all(strcmp(c0(:), 'unknown')));
+verifyNotEmpty(tc, m0.os);
+[c1, m1, D1] = run(PP, struct('core', true, 'core3', true));
+verifyEqual(tc, c1, repmat({'none', 'tone_jamming'}, T, 1));
+verifyEmpty(tc, m1.os);
+verifyFalse(tc, any(m1.sw(:)));
+[~, ~, P2] = core3_world('fuse', struct('bogus', 1));
+[c2, ~, D2] = run(P2, struct('core', true, 'core3', true));
+verifyEqual(tc, c2, c1); verifyTrue(tc, isequaln(D2, D1));
+[~, ~, P3] = core3_world();
+[c3, ~, D3] = run(P3, struct('core', true, 'core3', true));
+verifyEqual(tc, c3, c1); verifyTrue(tc, isequaln(D3, D1));
+end
+
+function test_band_core3_mapping(tc)
+% rule_core3 shares rule_core's decision layer: clean -> no_action, narrowband ->
+% channel_switch, wideband -> W3 (each candidate), the degradation with interference in the
+% quiet slot -> channel_switch, without it -> channel_switch+rate_reduce, a drop alarm ->
+% rate_reduce; every change sequence equals rule_core's on the hybrid class of the same
+% state; no escalation while the class reads clean, and one on a jammer the configuration in
+% use does not cure.
+A = policy_actions(); na = find(strcmp(A, 'no_action'));
+cls = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', 'antenna_fault', ...
+    'benign_interference', 'sweeping_jammer', 'tone_jamming', 'airframe_shadowing'};
+I3 = eye(3); s3 = {'none', 'tone_jamming', 'jamming'};
+cases = {1, 0, -10, {}, ''; 2, 1, -10, {}, 'channel_switch'; 1, 1, 10, {}, 'channel_switch'; ...
+    1, 1, -10, {}, 'channel_switch+rate_reduce'; 3, 1, -10, {}, 'channel_switch'};
+for W = {'channel_switch', 'rate_reduce', 'channel_switch+rate_reduce'}
+    cases(end+1, :) = {3, 1, -10, {'core_wide', W{1}}, W{1}}; %#ok<AGROW>
+end
+cases(end+1, :) = {1, 2, -10, {'alarm_mode', 'class_drop', 'drop_db', 3}, 'rate_reduce'};
+for i = 1:size(cases, 1)
+    [~, ~, PP] = core3_world('q_thr', 5, cases{i, 4}{:});
+    mk = @(hyb, t) core3_map_obs(cls, hyb, I3(cases{i, 1}, :), cases{i, 2}, cases{i, 3}, t);
+    [c3, e3] = core3_drive(PP, @(t) mk('sweeping_jammer', t), struct('core', true, 'core3', true), 30, na, true);
+    P0 = rmfield(PP, 'core3_N');
+    [c0, e0] = core3_drive(P0, @(t) rmfield(mk(s3{cases{i, 1}}, t), 'probs3'), struct('core', true), 30, na, true);
+    verifyEqual(tc, c3, c0, sprintf('case %d', i)); verifyEqual(tc, e3, e0, sprintf('case %d', i));
+    if isempty(cases{i, 5})
+        verifyEmpty(tc, c3, sprintf('case %d', i));
+    else
+        verifyNotEmpty(tc, c3, sprintf('case %d', i));
+        if ~isempty(c3), verifyEqual(tc, c3{1}, cases{i, 5}, sprintf('case %d', i)); end
+    end
+end
+% escalation: none while the class reads clean, on a degraded link the rule's answer holds
+[~, ~, PP] = core3_world('q_thr', 5);
+cb = find(strcmp(A, 'channel_switch+rate_reduce')); cs = find(strcmp(A, 'channel_switch'));
+[c, e] = core3_drive(PP, @(t) core3_map_obs(cls, 'sweeping_jammer', I3(1, :), 1, -10, t), ...
+    struct('core', true, 'core3', true), 30, cb, false);
+verifyEmpty(tc, c); verifyFalse(tc, any(e));
+[c, e] = core3_drive(PP, @(t) core3_map_obs(cls, 'sweeping_jammer', I3(2, :), 1, -10, t), ...
+    struct('core', true, 'core3', true), 30, cs, false);
+verifyNotEmpty(tc, c); verifyTrue(tc, any(e));
+verifyTrue(tc, all(ismember(c, decision_config().core_actions)));
+end
+
+function test_band_core3_refusals(tc)
+% rule_core3 refuses rather than fall back to the hybrid: no probs3, a NaN or a wrong width;
+% the three-state option on a blind, DQN or table policy or without the core set; no window N;
+% a model file with another SHA-256, window or states; pools without the registered model's
+% scores; the stages call the refusals.
+[A, cls, PP] = core3_world();
+na = find(strcmp(A, 'no_action'));
+o = core3_obs(cls, 2, 'none', [0.8 0.1 0.1; 0.1 0.1 0.8], false); o.cfg_link = na * ones(2, 1);
+c3 = struct('core', true, 'core3', true); cfg = na * ones(1, 2);
+[~, ~, d] = policy_decide('rule_esc', o, cfg, [], PP, [], c3);
+verifyEqual(tc, d.cls, {'none', 'jamming'});
+verifyError(tc, @() policy_decide('rule_esc', rmfield(o, 'probs3'), cfg, [], PP, [], c3), 'policy_decide:core3_probs3');
+b = o; b.probs3(2, 1) = NaN;
+verifyError(tc, @() policy_decide('rule_esc', b, cfg, [], PP, [], c3), 'policy_decide:core3_probs3');
+b = o; b.probs3 = b.probs3(:, 1:2);
+verifyError(tc, @() policy_decide('rule_esc', b, cfg, [], PP, [], c3), 'policy_decide:core3_probs3');
+b = o; b.probs3 = b.probs3(1, :);
+verifyError(tc, @() policy_decide('rule_esc', b, cfg, [], PP, [], c3), 'policy_decide:core3_probs3');
+verifyError(tc, @() policy_decide('blind_esc', o, cfg, [], PP, [], c3), 'policy_decide:core3');
+verifyError(tc, @() policy_decide('dqn', o, cfg, [], PP, [], c3), 'policy_decide:core3');
+verifyError(tc, @() policy_decide('dqn_esc', o, cfg, [], PP, [], c3), 'policy_decide:core3');
+verifyError(tc, @() policy_decide('table_esc', o, cfg, [], PP, [], struct('core', true, 'core3', true, ...
+    'table', na * ones(1, numel(cls)), 'table_unknown', na)), 'policy_decide:core3');
+verifyError(tc, @() policy_decide('rule_esc', o, cfg, [], PP, [], struct('core3', true)), 'policy_decide:core3');
+verifyError(tc, @() policy_decide('rule_esc', o, cfg, [], rmfield(PP, 'core3_N'), [], c3), 'policy_decide:core3_N');
+Q = struct('agent', [], 'agents', {{}}, 'rule_sel', []);
+[kind, ~, op] = policy_setup('rule_core3', Q, 1, 1, 1, [], na);
+verifyEqual(tc, kind, 'rule_esc'); verifyTrue(tc, op.core && op.core3);
+% the model file
+d = tempname; mkdir(d); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+f = fullfile(d, 'core_cnn_model.mat');
+verifyError(tc, @() core_bw_rules('core3_model', f, 'x', 3), 'experiment_core_bw:core3_model');
+net = core3_net(2); N = 3; groups = {'none', 'tone_jamming', 'jamming'}; %#ok<NASGU>
+save(f, 'net', 'N', 'groups');
+h = core_bw_rules('sha', f);
+M = core_bw_rules('core3_model', f, h, 3);
+verifyEqual(tc, double(M.N), 3); verifyClass(tc, M.net, 'dlnetwork');
+verifyError(tc, @() core_bw_rules('core3_model', f, repmat('0', 1, 64), 3), 'experiment_core_bw:core3_model');
+verifyError(tc, @() core_bw_rules('core3_model', f, h, 5), 'experiment_core_bw:core3_N');
+groups = {'none', 'jamming', 'tone_jamming'}; save(f, 'net', 'N', 'groups'); %#ok<NASGU>
+verifyError(tc, @() core_bw_rules('core3_model', f, core_bw_rules('sha', f), 3), 'experiment_core_bw:core3_states');
+% the pools
+sha = repmat('a', 1, 64);
+Pq = struct('ber', zeros(4, 1), 'probs3', single(repmat([0.2 0.3 0.5], 4, 1)));
+PQ = struct('core3_sha256', sha, 'core3_N', 3, 'pools', {{Pq, []; Pq, Pq}}, 'acr_pools', {{{Pq, []}}});
+core_bw_rules('core3_pools', PQ, sha, 3);
+verifyError(tc, @() core_bw_rules('core3_pools', PQ, repmat('b', 1, 64), 3), 'experiment_core_bw:core3_pools');
+verifyError(tc, @() core_bw_rules('core3_pools', PQ, sha, 4), 'experiment_core_bw:core3_pools');
+verifyError(tc, @() core_bw_rules('core3_pools', rmfield(PQ, 'core3_sha256'), sha, 3), 'experiment_core_bw:core3_pools');
+B = PQ; B.pools{2, 1} = rmfield(Pq, 'probs3');
+verifyError(tc, @() core_bw_rules('core3_pools', B, sha, 3), 'experiment_core_bw:core3_pools');
+B = PQ; B.acr_pools{1}{1}.probs3(2, 2) = NaN;
+verifyError(tc, @() core_bw_rules('core3_pools', B, sha, 3), 'experiment_core_bw:core3_pools');
+B = PQ; B.pools{1, 1}.probs3 = B.pools{1, 1}.probs3(1:3, :);
+verifyError(tc, @() core_bw_rules('core3_pools', B, sha, 3), 'experiment_core_bw:core3_pools');
+src = fileread(which('experiment_core_bw'));
+v0 = strfind(src, 'function stage_val(X)'); t0 = strfind(src, 'function stage_test(X)');
+iv = strfind(src, 'if X.CORE3, core_bw_rules(''core3_pools'', PP, X.CORE3_SHA, X.CORE3_N); end');
+it = strfind(src, 'if X.CORE3, core_bw_rules(''core3_pools'', PP, J.core3_sha256, J.core3_N); end');
+verifyNumElements(tc, iv, 1); verifyNumElements(tc, it, 1);
+verifyTrue(tc, iv > v0 && iv < t0 && it > t0);
+end
+
+function test_band_core3_freeze(tc)
+% W3 is chosen on validation by protocol 6.3's rule (core_bw_rules choose_w over X.W) on
+% rule_core3's own runs of W's episodes and frame draws, frozen in protocol.json with the model's
+% SHA-256, N and the note's hash; the guard refuses a changed or unfrozen note, and the test
+% stage, before its marker, refuses a W3, model hash or N other than validation's.
+J = struct('w3', struct('H1', 'rate_reduce', 'H3', 'channel_switch'), 'core3_sha256', repmat('c', 1, 64), 'core3_N', 3);
+V = struct('WCH3', struct('rule', {'H1', 'H3'}, 'W', {'rate_reduce', 'channel_switch'}, 'table', []));
+X = struct('CORE3_SHA', repmat('c', 1, 64), 'CORE3_N', 3);
+core_bw_rules('core3_frozen', J, V, X);
+V2 = V; V2.WCH3(2).W = 'rate_reduce';
+verifyError(tc, @() core_bw_rules('core3_frozen', J, V2, X), 'experiment_core_bw:w3');
+verifyError(tc, @() core_bw_rules('core3_frozen', rmfield(J, 'w3'), V, X), 'experiment_core_bw:w3');
+verifyError(tc, @() core_bw_rules('core3_frozen', J, struct(), X), 'experiment_core_bw:w3');
+X2 = X; X2.CORE3_SHA = repmat('d', 1, 64);
+verifyError(tc, @() core_bw_rules('core3_frozen', J, V, X2), 'experiment_core_bw:core3_changed');
+X2 = X; X2.CORE3_N = 5;
+verifyError(tc, @() core_bw_rules('core3_frozen', J, V, X2), 'experiment_core_bw:core3_changed');
+verifyError(tc, @() core_bw_rules('core3_frozen', rmfield(J, 'core3_N'), V, X), 'experiment_core_bw:core3_changed');
+% the guard and the note
+d = tempname; mkdir(d); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+G = struct('protocol', fullfile(d, 'proto.md'), 'recov', fullfile(d, 'recoverable.txt'), ...
+    'proto_json', fullfile(d, 'protocol.json'), 'marker', fullfile(d, 'marker.txt'), 'test', fullfile(d, 'test.mat'), ...
+    'frozen', fullfile(d, 'frozen.json'), 'note', fullfile(d, 'note.txt'), 'note3', fullfile(d, 'note3.txt'), 'smoke', true);
+write_text(G.protocol, 'protocol'); write_text(G.recov, 'H1 1 1 x 1'); write_text(G.note, 'note'); write_text(G.note3, 'note3');
+P = struct('protocol_sha256', core_bw_rules('sha', G.protocol), 'recoverable_sha256', core_bw_rules('sha', G.recov), ...
+    'note_sha256', core_bw_rules('sha', G.note), 'w', struct('H1', 'channel_switch'), 'w3', struct('H1', 'rate_reduce'));
+write_text(G.proto_json, jsonencode(P));
+verifyError(tc, @() core_bw_rules('guard', G), 'experiment_core_bw:note3_changed');   % no note hash frozen
+P.note3_sha256 = core_bw_rules('sha', G.note3); write_text(G.proto_json, jsonencode(P));
+Jg = core_bw_rules('guard', G);
+verifyEqual(tc, Jg.w3.H1, 'rate_reduce');
+write_text(G.note3, 'note3 changed');
+verifyError(tc, @() core_bw_rules('guard', G), 'experiment_core_bw:note3_changed');
+% the stages
+src = fileread(which('experiment_core_bw'));
+v0 = strfind(src, 'function stage_val(X)'); v1 = strfind(src, 'function thr = plr_threshold(');
+val = src(v0:v1);
+for k = {'[kr3, or3] = policy_of(''rule_core3'', na);', 'Pw3 = PP; Pw3.core_wide = X.W{w};', ...
+        'Rw3{w} = run_set(kr3, Pw3, K, X, EP, iw, q, false, ''sheet'', 1, or3, 52000 + 100*q);', ...
+        'Rw{w} = run_set(kr, Pw, K, X, EP, iw, q, false, ''sheet'', 1, orr, 52000 + 100*q);', ...
+        '[W3, tab] = core_bw_rules(''choose_w'', X.W, EP.bj(iw), EP.tot(iw), EP.geom(iw), pr, gp, tr, X.B);', ...
+        'if X.CORE3, save(X.val, ''WCH3'', ''-append''); end', 'J.w3 = cell2struct({WCH3.W}'', {WCH3.rule}'', 1);', ...
+        'J.core3_sha256 = PP.core3_sha256; J.core3_N = PP.core3_N;', 'J.note3_sha256 = core_bw_rules(''sha'', X.note3);'}
+    verifyNumElements(tc, strfind(val, k{1}), 1, k{1});
+end
+verifyEmpty(tc, regexp(val, 'run_set\([^\n]*, 2, ', 'once'));                 % never the test split
+verifyNotEmpty(tc, strfind(src, 'X.note3 = ''docs/core_bw_core3_note.txt'';'));
+verifyNotEmpty(tc, strfind(src, 'X.CORE3 = true;'));
+g0 = strfind(src, 'J = core_bw_rules(''guard'', X);'); mk = strfind(src, 'marker(X, J.params_id);');
+i = strfind(src, 'if X.CORE3, core_bw_rules(''core3_frozen'', J, load(X.val, ''WCH3''), X); end');
+verifyNumElements(tc, i, 1); verifyTrue(tc, i > g0 && i < mk);
+verifyNotEmpty(tc, strfind(src, 'L3 = {[X.note3 '' sha256 '' core_bw_rules(''sha'', X.note3)]}'));   % the marker records it
+end
+
+function test_band_core3_rows(tc)
+% rule_core3 runs wherever rule_core runs in the test stage (the primary, pipe30 and follower
+% sets of every hop rule, the same episodes and seeds) with W3 as its wideband action, and in the
+% detector analysis; the report gives it the primary PER verdicts per jamming type, the
+% recovery time, goodput and the CNN contribution against blind_core, rule_core's lines labelled
+% hybrid, secondary, rule_core3 - rule_core descriptive, and its lines in the per-width, Liu and
+% detector readings; the sensitivities' flip reads rule_core3's verdicts.
+src = fileread(which('experiment_core_bw'));
+t0 = strfind(src, 'function stage_test(X)'); t1 = strfind(src, 'function MON = monitor_states(');
+tst = src(t0:t1);
+f = strfind(tst, 'for si = 1:size(sets, 1)'); i3 = strfind(tst, 'if X.CORE3, pols{end+1} = ''rule_core3''; end');
+i1 = strfind(tst, 'if si == 1, pols = [pols, {''blind_core_fixed'', ''oracle''}]; end');
+verifyNumElements(tc, i3, 1); verifyTrue(tc, f < i3 && i3 < i1);         % every set, before the primary-only rows
+verifyNumElements(tc, strfind(tst, 'if strcmp(pols{pk}, ''rule_core3''), Pp.core_wide = J.w3.(X.RULES{q}); end'), 1);
+verifyNotEmpty(tc, strfind(tst, 'R = run_set(kind, Pp, K, X, EP, sets{si, 2}, q, sets{si, 3}, sets{si, 4}, 2, opt, 81000 + 1000*q + 100*si);'));
+mon = strjoin(fn_text(src, 'monitor_states'), newline);
+verifyNotEmpty(tc, strfind(mon, 'policy_decide(''rule_esc'', obs, E.cfg, mem3, PP, [], struct(''core'', true, ''core3'', true));'));
+verifyNotEmpty(tc, strfind(mon, 'if X.CORE3, MON.right_core3 = h3''; end'));
+verifyNotEmpty(tc, strfind(src, 'ternary(c3, ''rule_core3'', ''rule_core'') '' per jamming type) ---'''));
+f1 = core3_fns(tc, src, 'new');
+cl = onCleanup(@() core3_fns_off({f1})); %#ok<NASGU>
+[S, EP, X] = core3_report_world({'none', 'blind_core', 'rule_core', 'rule_core3', 'blind_core_fixed', 'oracle'});
+[L, K] = per_lines_new(S, EP, true(1, EP.n), X, 5e4, 'PRIMARY', false);
+P = K.per;
+verifyEqual(tc, unique({P([P.primary]).policy}), {'rule_core3'});
+verifyEqual(tc, sort({P([P.primary]).type}), {'narrowband', 'wideband'});
+verifyEqual(tc, unique({P.policy}, 'stable'), {'rule_core3', 'rule_core', 'blind_core'});
+pl = L(startsWith(L, '  PER '));
+verifyTrue(tc, all(contains(pl(contains(pl, 'PRIMARY')), 'rule_core3')));
+verifyTrue(tc, all(contains(pl(startsWith(pl, '  PER rule_core ')), '(hybrid, secondary)')));
+verifyFalse(tc, any(contains(pl(startsWith(pl, '  PER rule_core3')), 'hybrid')));
+c = L(startsWith(L, '  CNN contribution'));
+verifyNumElements(tc, c, 9);
+verifyEqual(tc, nnz(contains(c, ' rule_core3 - blind_core: ')), 3);
+verifyEqual(tc, nnz(contains(c, ' rule_core - blind_core: ') & endsWith(c, '(hybrid, secondary)')), 3);
+verifyEqual(tc, nnz(contains(c, ' rule_core3 - rule_core: ') & contains(c, 'descriptive, no verdict')), 3);
+verifyTrue(tc, all(isfield(K, {'cnn', 'cnn_hybrid', 'cnn_3vs'})));
+verifyTrue(tc, all(isfield(K.rec, {'none', 'blind_core', 'rule_core', 'rule_core3'})));
+verifyTrue(tc, all(isfield(K.gput, {'none', 'blind_core', 'rule_core', 'rule_core3'})));
+r3 = S(strcmp({S.policy}, 'rule_core3')).R; rb = S(strcmp({S.policy}, 'blind_core')).R;
+m = EP.narrow;
+verifyEqual(tc, K.cnn.narrowband.per(1), mean(r3.per_post(m) - rb.per_post(m)), 'AbsTol', 1e-12);   % KPI 8: rule_core3 - blind_core
+verifyTrue(tc, any(contains(L, 'rule_core3 pooled, recoverable episodes only')));
+verifyTrue(tc, any(startsWith(L, '  rule_core3 narrowband onset->detection')));
+verifyTrue(tc, any(startsWith(L, '  rule_core  wideband   onset->detection') & endsWith(L, '(hybrid, secondary)')));
+[~, Ks] = per_lines_new(S, EP, true(1, EP.n), X, 5e4, 'sens', true);           % the flip reads rule_core3's
+verifyFalse(tc, core_bw_rules('flip', K.per, Ks.per));
+Ks.per(strcmp({Ks.per.policy}, 'rule_core') & strcmp({Ks.per.type}, 'wideband')).verdict = 'other';
+verifyFalse(tc, core_bw_rules('flip', K.per, Ks.per));
+Ks.per(strcmp({Ks.per.policy}, 'rule_core3') & strcmp({Ks.per.type}, 'wideband')).verdict = 'other';
+verifyTrue(tc, core_bw_rules('flip', K.per, Ks.per));
+[Lb, Tb] = bj_lines_new(S, EP, true(1, EP.n), X);
+verifyTrue(tc, all(contains(Lb(2:end), 'rule_core3') & contains(Lb(2:end), 'rule_core (hybrid, secondary)')));
+verifyTrue(tc, all(isfield(Tb, {'rule3', 'cnn3'})));
+[Ll, Tl] = liu_lines_new(S, EP, true(1, EP.n), X, 5e4);
+verifyEqual(tc, unique({Tl.policy}, 'stable'), {'rule_core3', 'rule_core', 'blind_core'});
+verifyTrue(tc, all(endsWith(Ll(startsWith(Ll, '  rule_core ')), '(hybrid, secondary)')));
+[Lm, Tm] = monitor_lines_new(core3_mon(EP, true), EP, struct('ebno', [3 9]));
+verifyTrue(tc, endsWith(Lm{3}, ' | rule_core3''s three-state class (the CNN''s window in the loop)'));
+verifyTrue(tc, isfield(Tm, 'core3'));
+verifyEqual(tc, numel(regexp(Lm{4}, '\d+\.\d%', 'match')), 3);
+end
+
+%% ---------- rule_core3 test helpers ----------
+function [A, cls, PP] = core3_world(varargin)
+% Actions, the hybrid's classes and a decision-time PP with the three-state window N = 3;
+% name/value pairs set further PP fields.
+A = policy_actions();
+cls = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', 'antenna_fault', ...
+    'benign_interference', 'sweeping_jammer', 'tone_jamming', 'airframe_shadowing'};
+PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0, 'core3_N', 3);
+for k = 1:2:numel(varargin), PP.(varargin{k}) = varargin{k + 1}; end
+end
+
+function o = core3_obs(cls, NE, hyb, p3, deg)
+% One cycle's observation: the hybrid's one-hot class hyb, the three-state scores p3 (NE x 3),
+% a degraded link (BER 0.1, CRC failed) or a healthy one.
+o = struct('probs', repmat(double(strcmp(cls, hyb)), NE, 1), 'unknown', false(NE, 1), ...
+    'feat', zeros(NE, numel(link_features('names'))));
+o.feat(:, feature_index('log_ber')) = -6 + 5 * deg; o.feat(:, feature_index('crc_fail')) = deg;
+o.probs3 = p3;
+end
+
+function o = core3_inert_obs(cls, NE, p3, t)
+% A healthy link whose hybrid reads sweeping_jammer with an unknown score (-Inf) and whose
+% second antenna is lost from cycle 6 on.
+o = core3_obs(cls, NE, 'sweeping_jammer', p3, false);
+o.unknown(:) = true; o.maha = -Inf(NE, 1);
+o.gant = repmat([-10 -11 -12], NE, 1) + 0.01 * t; if t >= 6, o.gant(:, 2) = o.gant(:, 2) - 25; end
+end
+
+function o = core3_map_obs(cls, hyb, p3, deg, qiot, t)
+% One episode's cycle for the mapping test: deg 0 healthy, 1 degraded, 2 healthy with our
+% signal 15 dB lower over thermal noise from cycle 11 on; qiot the quiet-slot interference [dB].
+o = core3_obs(cls, 1, hyb, p3, deg == 1);
+o.feat(feature_index('sinr')) = 20 - 15 * (deg == 2 && t > 10);
+o.feat(feature_index('q_iot')) = qiot;
+end
+
+function [c, mem, D] = core3_trace(PP, mk, op, T, cfg)
+% The monitor class of every cycle (T x NE) of rule_esc on the core set at a held configuration,
+% the final memory and the decisions (alarm, confirmation, action) of every cycle.
+mem = []; c = cell(T, numel(cfg)); D = cell(T, 1);
+for t = 1:T
+    o = mk(t); o.cfg_link = cfg(:);
+    [a, mem, d] = policy_decide('rule_esc', o, cfg, mem, PP, [], op);
+    c(t, :) = d.cls; D{t} = {a, d.confirmed, d.degraded, d.escalated};
+end
+end
+
+function [ch, esc] = core3_drive(PP, mk, op, T, cfg0, follow)
+% The configuration changes and their escalation flags of one episode of rule_esc on the core
+% set; follow: the configuration follows each decision, else it is held at cfg0.
+A = PP.actions; mem = []; cfg = cfg0; ch = {}; esc = [];
+for t = 1:T
+    o = mk(t); o.cfg_link = cfg;
+    [a, mem, d] = policy_decide('rule_esc', o, cfg, mem, PP, [], op);
+    if a ~= cfg, ch{end+1} = A{a}; esc(end+1) = d.escalated; end %#ok<AGROW>
+    if follow, cfg = a; end
+end
+end
+
+function net = core3_net(seed)
+% A small three-state network on the detector's 128 x 128 images.
+s0 = rng; rng(seed, 'twister'); c = onCleanup(@() rng(s0)); %#ok<NASGU>
+net = dlnetwork([imageInputLayer([128 128 1], 'Normalization', 'none'); convolution2dLayer(8, 2, 'Stride', 8); ...
+    reluLayer; fullyConnectedLayer(3); softmaxLayer]);
+end
+
+function d = core3_stub()
+% A detect_scores.m stand-in (no hybrid network): scores from the images' means, every image
+% kept in the appdata core3_stub_X.
+d = tempname; mkdir(d);
+write_text(fullfile(d, 'detect_scores.m'), strjoin({'function [probs, maha] = detect_scores(~, ~, X, ~, ~)', ...
+    'mx = reshape(mean(X, [1 2 3]), 1, []);', 'probs = [0.3 + mx; 0.7 + 0 * mx]; probs = probs ./ sum(probs, 1);', ...
+    'maha = double(mx);', 'setappdata(0, ''core3_stub_X'', cat(4, getappdata(0, ''core3_stub_X''), X));', 'end'}, newline));
+setappdata(0, 'core3_stub_X', []);
+addpath(d, '-begin'); clear detect_scores
+end
+
+function d = core3_parent(tc, fns, rev)
+% The decision files fns as commit rev holds them, in one folder (not on the path).
+d = tempname; mkdir(d);
+for f = fns
+    w = which(f{1}); rel = strrep(w(numel(tc.TestData.root) + 2:end), filesep, '/');
+    [st, out] = system(sprintf('git --no-optional-locks -C "%s" show %s:%s > "%s"', tc.TestData.root, rev, rel, ...
+        fullfile(d, [f{1} '.m'])));
+    assertEqual(tc, st, 0, sprintf('git show %s:%s failed: %s', rev, rel, out));
+end
+end
+
+function core3_off(d, fns)
+% Removes a stand-in folder from the path and the disk.
+if contains(path, d), rmpath(d); end
+clear(fns{:});
+if isfolder(d), rmdir(d, 's'); end
+setappdata(0, 'core3_stub_X', []);
+end
+
+function d = core3_fns(tc, src, tag, readers)
+% The report readers of experiment_core_bw.m's source text src (default per_lines, bj_lines,
+% liu_lines, monitor_lines) as function files <reader>_<tag>.m, with the local functions they
+% call, in a new folder on the path.
+d = tempname; mkdir(d);
+sets = {'per_lines', {'pol', 'qstat'}; 'bj_lines', {'pol', 'bj_name'}; 'liu_lines', {'pol', 'qstat', 'ternary'}; ...
+    'monitor_lines', {'bj_name', 'ternary'}};
+if nargin > 3, sets = sets(ismember(sets(:, 1), readers), :); end
+for i = 1:size(sets, 1)
+    b = fn_text(src, sets{i, 1});
+    assertNotEmpty(tc, b, sets{i, 1});
+    b{1} = regexprep(b{1}, ['\<' sets{i, 1} '\('], [sets{i, 1} '_' tag '('], 'once');
+    for f = sets{i, 2}, b = [b; {''}; fn_text(src, f{1})]; end %#ok<AGROW>
+    write_text(fullfile(d, [sets{i, 1} '_' tag '.m']), strjoin(b, newline));
+end
+addpath(d, '-begin');
+end
+
+function core3_fns_off(D)
+% Removes the readers' folders.
+for i = 1:numel(D)
+    if contains(path, D{i}), rmpath(D{i}); end
+    if isfolder(D{i}), rmdir(D{i}, 's'); end
+end
+clear per_lines_old per_lines_new bj_lines_old bj_lines_new liu_lines_old liu_lines_new monitor_lines_old monitor_lines_new
+end
+
+function [S, EP, X] = core3_report_world(pols)
+% Readings of the given policies on 48 episodes (16 CW, 16 at 4 MHz of which 8 Liu's occupied
+% reading, 16 at 20 MHz; 12 geometries) for the report's readers.
+rs = RandStream('mt19937ar', 'Seed', 17);
+n = 48;
+EP = struct('n', n, 'narrow', [true(1, 16), false(1, 32)], 'geom', repelem(1:12, 4), ...
+    'bj', [zeros(1, 16), 4 * ones(1, 16), 20 * ones(1, 16)], 'slice', false(1, n), 'occ', [false(1, 24), true(1, 8), false(1, 16)], ...
+    'tot', repmat([10 23], 1, 24), 'inb', repmat([-5 8], 1, 24), 's', repmat([1 1 2 2], 1, 12));
+S = struct('policy', {}, 'R', {});
+for k = 1:numel(pols)
+    lvl = 0.15; if strcmp(pols{k}, 'none'), lvl = 0.6; end
+    R = struct('ep', 1:n, 'per_post', lvl * rand(rs, 1, n), 'dlv_post', rand(rs, 1, n), 't_conf', floor(4 * rand(rs, 1, n)), ...
+        't_rec_det', floor(8 * rand(rs, 1, n)), 'recoverable', rand(rs, 1, n) > 0.2, 'threat', true(1, n));
+    R.t_rec_det(rand(rs, 1, n) < 0.15) = NaN; R.t_conf(rand(rs, 1, n) < 0.1) = NaN;
+    S(end+1) = struct('policy', pols{k}, 'R', R); %#ok<AGROW>
+end
+X = struct('TARGET', 0.3, 'B', 200, 'N_RUN', 5);
+end
+
+function MON = core3_mon(EP, c3)
+% Monitor-state counts of the report world's episodes (10 frames each), with rule_core3's when c3.
+rs = RandStream('mt19937ar', 'Seed', 23);
+MON = struct('ep', 1:EP.n, 'right_monitor', randi(rs, 10, 1, EP.n), 'right_frame', randi(rs, 10, 1, EP.n), ...
+    'frames', 10 * ones(1, EP.n));
+if c3, MON.right_core3 = randi(rs, 10, 1, EP.n); end
 end
 
 function d = parent_copy(tc, rel, rev)

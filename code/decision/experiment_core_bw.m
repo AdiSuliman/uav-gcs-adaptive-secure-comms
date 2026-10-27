@@ -19,9 +19,11 @@ function experiment_core_bw(stage, smoke)
 %               spectrogram images -> data/core_bw/dset.mat
 %     'val'     validation only: the coverage check (G3), the wideband action W of the CNN
 %               rule and blind_core's first response (docs/core_bw_v2_note.txt) per hop rule,
-%               the recoverable scenarios; frozen by hash in results/core_bw/protocol.json
+%               W3 of rule_core3 (docs/core_bw_core3_note.txt), the recoverable scenarios;
+%               frozen by hash in results/core_bw/protocol.json
 %     'test'    the single test reading (refused without the frozen protocol, or a second
-%               time; blind_core with the fixed ladder as a secondary row), then 'report'
+%               time; rule_core3 carries the verdicts, rule_core the hybrid's secondary row,
+%               blind_core with the fixed ladder a secondary row), then 'report'
 %     'report'  the KPI lines, sensitivities, predictions and the detector analysis ->
 %               results/core_bw/core_bw_report.txt, core_bw_kpis.mat
 %     'dread'   the frozen three-state CNN (branch core-cnn, after its B3c reading) on set D
@@ -29,7 +31,9 @@ function experiment_core_bw(stage, smoke)
 %   Inputs (read only, copies of the profile's deployed files): params.mat,
 %   data/trained_detector.mat, data/fusion.mat, data/ood_thresholds.mat, data/splits.mat (its
 %   norm and classes), data/trained_dqn.mat (the deployed decision settings) and
-%   data/policy_pools.mat (the clean reference the monitor reads, clean_ber_ref.m).
+%   data/policy_pools.mat (the clean reference the monitor reads, clean_ber_ref.m); with
+%   X.CORE3 (rule_core3) also data/core_cnn_model.mat, B3c's frozen three-state CNN,
+%   refused unless its SHA-256 and window are the registered ones; it scores every pooled frame.
 %   Not a run_stage stage: neither the takeover nor the chain runs it.
 if nargin < 2 || isempty(smoke), smoke = false; end
 root = setup_paths(); c0 = cd(root); back = onCleanup(@() cd(c0)); %#ok<NASGU>
@@ -77,6 +81,11 @@ X.TARGET = 0.30; X.N_RUN = 5; X.B = 2000;
 X.W = {'channel_switch', 'channel_switch+rate_reduce', 'rate_reduce'};   % candidates of W, the last tie-break order
 X.BLIND = {'channel_switch', 'channel_switch+rate_reduce', 'rate_reduce'};   % blind_core's first response, the same order
 X.N_WORKERS = 6;
+X.CORE3 = true;                  % rule_core3 (docs/core_bw_core3_note.txt); false: the fallback of its section 7
+if X.CORE3
+    X.note3 = 'docs/core_bw_core3_note.txt'; X.core3_model = 'data/core_cnn_model.mat';
+    X.CORE3_SHA = '7c9cccbfe9b7fa000ca462e04812a008584990b3478c60086ea2713a50b41689'; X.CORE3_N = 3;
+end
 X.opt = struct('F_SUB', 20, 'tw', 10, 'delay_bits', 20);
 X.pick = {}; X.EBNO = [];
 if smoke
@@ -121,6 +130,13 @@ T = ood_thresholds(0.95); FZ = fusion_model();
 UW = 1; if isfield(D.ood, 'win'), UW = D.ood.win; end
 DET_ID = detector_id(D.trained_at, D.ood, FZ);
 clear D nm
+C3 = {};                                             % rule_core3's model, in the checkpoint key
+if X.CORE3
+    Mo = core_bw_rules('core3_model', X.core3_model, X.CORE3_SHA, X.CORE3_N);
+    det.core3 = struct('net', Mo.net);
+    C3 = {sprintf('core3 %s N%d', X.CORE3_SHA, X.CORE3_N)};
+    clear Mo
+end
 vrange = [p0.speed_kmh_min p0.speed_kmh_max];
 geo = cell(1, nS);
 for s = 1:nS
@@ -152,8 +168,8 @@ for v = 1:numel(ACR)
 end
 nJ = numel(jobs);
 geoj = @(j) cellfun(@(x) x(jobs(j).splits), geo, 'UniformOutput', false);
-keys = arrayfun(@(j) pool_checkpoint('key', {MODEL_TAG, DET_ID, runs, jobs(j), EBNO, geoj(j), X.opt, P{j}}), 1:nJ, ...
-    'UniformOutput', false);
+keys = arrayfun(@(j) pool_checkpoint('key', [{MODEL_TAG, DET_ID, runs, jobs(j), EBNO, geoj(j), X.opt, P{j}}, C3]), ...
+    1:nJ, 'UniformOutput', false);
 CKD = fullfile(pwd, X.D, 'cells');
 todo = pool_checkpoint('todo', CKD, keys);
 w = arrayfun(@(j) pool_cost(P{j}, jobs(j).threat, jobs(j).actions, geoj(j), X.opt), todo);
@@ -217,10 +233,14 @@ PP.cap = cap_share(p0, cells, geo, EBNO, X.opt);
 PP.timing = struct('sims', nsim, 'sims_run', nnow, 'wall_min', wall / 60, 'workers', max(1, X.N_WORKERS * ~X.smoke), ...
     's_per_sim', wall * max(1, X.N_WORKERS * ~X.smoke) / max(nnow, 1), 'jobs_run', numel(todo));
 PP.smoke = X.smoke; PP.created = datestr(now);
+if X.CORE3, PP.core3_sha256 = X.CORE3_SHA; PP.core3_N = X.CORE3_N; PP.core3_id = C3{1}; end
 pool_checkpoint('commit', X.pools, struct('PP', PP));
 pool_checkpoint('clear', CKD);
 fprintf('Saved %s: %d simulations, %d of them now in %.1f min (%.2f s per simulation per worker)\n', X.pools, nsim, ...
     nnow, wall / 60, PP.timing.s_per_sim);
+if X.CORE3
+    fprintf('Every pooled frame also scored by the three-state CNN (rule_core3), inside that time: %s\n', C3{1});
+end
 fprintf('In-band cap (%g dB) binding share of the geometries per cell (G2):\n', p0.inband_cap_db);
 for c = 1:nC, fprintf('  %-12s level %6.2f dB  %5.1f%%\n', cells(c).name, cells(c).level, 100 * PP.cap(c)); end
 end
@@ -473,6 +493,7 @@ assert(X.smoke || (~isfile(X.marker) && ~isfile(X.test) && ~recorded(params_id(l
     'experiment_core_bw:read', 'the test split was read already: the validation choices stay as frozen');
 PP = load_pools(X, true);
 [PP, Q, cref] = decision_inputs(PP);
+if X.CORE3, core_bw_rules('core3_pools', PP, X.CORE3_SHA, X.CORE3_N); end
 fprintf('Clean reference at 9 dB (clean_ber_ref ber_est): %.17g\n', cref);
 if isfield(Q, 'H') && isfield(Q.H, 'T') && Q.H.T ~= X.T
     warning('experiment_core_bw:T', 'the deployed episodes are %d cycles, this study''s %d', Q.H.T, X.T);
@@ -489,6 +510,7 @@ G3 = g3_check(PP, K, X, EP, B);
 thr = plr_threshold(PP, K, 1, C);
 REC = struct('rule', {}, 'k', {}, 's', {}, 'rec_pct', {}, 'harm', {}, 'per', {}, 'thr', {}, 'ok', {});
 WCH = struct('rule', {}, 'W', {}, 'table', {});
+WCH3 = WCH;
 BCH = struct('rule', {}, 'B', {}, 'table', {});
 for q = 1:nR
     [kn, on] = policy_of('none', na);
@@ -516,6 +538,21 @@ for q = 1:nR
     [W, tab] = core_bw_rules('choose_w', X.W, EP.bj(iw), EP.tot(iw), EP.geom(iw), pr, gp, tr, X.B);
     WCH(end+1) = struct('rule', X.RULES{q}, 'W', W, 'table', tab); %#ok<AGROW>
     fprintf('  %s: W = %s (%d recoverable wideband episodes)\n', X.RULES{q}, W, numel(iw));
+    % W3: the same rule on rule_core3's own runs of the same episodes and frame draws
+    if X.CORE3
+        Rw3 = cell(1, numel(X.W));
+        for w = 1:numel(X.W)
+            [kr3, or3] = policy_of('rule_core3', na);
+            Pw3 = PP; Pw3.core_wide = X.W{w};
+            Rw3{w} = run_set(kr3, Pw3, K, X, EP, iw, q, false, 'sheet', 1, or3, 52000 + 100*q);
+        end
+        pick3 = @(f) cell2mat(cellfun(@(R) R.(f)(:)', Rw3(:), 'UniformOutput', false));
+        [pr, gp, tr] = deal(zeros(numel(X.W), 0));
+        if ~isempty(iw), pr = pick3('per_post'); gp = pick3('dlv_post'); tr = pick3('t_rec_det'); end
+        [W3, tab] = core_bw_rules('choose_w', X.W, EP.bj(iw), EP.tot(iw), EP.geom(iw), pr, gp, tr, X.B);
+        WCH3(end+1) = struct('rule', X.RULES{q}, 'W', W3, 'table', tab); %#ok<AGROW>
+        fprintf('  %s: W3 = %s (rule_core3, the same episodes)\n', X.RULES{q}, W3);
+    end
     % blind_core's first response: the same rule on the recoverable episodes of every
     % fixed-total cell (it reads no class, so one answer serves both types)
     rec = Rn.recoverable(ismember(Rn.ep, fixed));
@@ -537,16 +574,24 @@ lines = recoverable_lines(X, PP, REC);
 write_lines(X.recov, lines);
 meta = study_meta(PP);
 save(X.val, 'REC', 'WCH', 'BCH', 'G3', 'meta', 'X');
+if X.CORE3, save(X.val, 'WCH3', '-append'); end
 J = struct('study', 'core_bw', 'smoke', X.smoke, 'params_id', PP.params_id, 'det_id', PP.det_id, ...
     'protocol', X.protocol, 'protocol_sha256', core_bw_rules('sha', X.protocol), 'recoverable', X.recov, ...
     'recoverable_sha256', core_bw_rules('sha', X.recov), 'n_recoverable', nnz([REC.ok]), ...
     'w', cell2struct({WCH.W}', {WCH.rule}', 1), 'blind_first', cell2struct({BCH.B}', {BCH.rule}', 1), ...
     'note', X.note, 'note_sha256', core_bw_rules('sha', X.note), 'clean_ber_est_9db', sprintf('%.17g', cref), ...
     'created', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
+if X.CORE3                                           % rule_core3: W3, the model and its note (G4)
+    J.w3 = cell2struct({WCH3.W}', {WCH3.rule}', 1); J.core3_model = X.core3_model;
+    J.core3_sha256 = PP.core3_sha256; J.core3_N = PP.core3_N;
+    J.note3 = X.note3; J.note3_sha256 = core_bw_rules('sha', X.note3);
+    J = orderfields(J, [setdiff(fieldnames(J), {'created'}, 'stable'); {'created'}]);
+end
 write_lines(X.proto_json, {jsonencode(J, 'PrettyPrint', true)});
 fprintf(['Frozen: %s (W %s; blind_core first response %s; %d of %d scenarios recoverable). Copy it to %s and commit ' ...
     'before the test stage.\n'], X.proto_json, strjoin(strcat({WCH.rule}, '=', {WCH.W}), ', '), ...
     strjoin(strcat({BCH.rule}, '=', {BCH.B}), ', '), nnz([REC.ok]), numel(REC), X.frozen);
+if X.CORE3, fprintf('  with W3 %s (rule_core3)\n', strjoin(strcat({WCH3.rule}, '=', {WCH3.W}), ', ')); end
 end
 
 function thr = plr_threshold(PP, K, sp, C)
@@ -666,6 +711,7 @@ function M = study_meta(PP)
 M = struct('scenarios', {PP.scenarios}, 'cells', {PP.cells}, 'ebno', PP.ebno, 'actions', {PP.actions}, ...
     'params_id', PP.params_id, 'det_id', PP.det_id, 'cap', PP.cap, 'timing', PP.timing, 'classes', {PP.classes}, ...
     'runs', {PP.runs}, 'smoke', PP.smoke, 'acr_db', PP.acr_db);
+if isfield(PP, 'core3_sha256'), M.core3_sha256 = PP.core3_sha256; M.core3_N = PP.core3_N; end
 end
 
 %% ===================== Test (read once) =====================
@@ -688,11 +734,13 @@ assert(isfield(J, 'blind_first') && isequal({V.BCH.B}, cellfun(@(r) J.blind_firs
 cref = core_bw_rules('clean_ref', clean_ber_ref(9, 'ber_est'), clean_ber_ref(9, 'ber'));
 assert(isfield(J, 'clean_ber_est_9db') && strcmp(J.clean_ber_est_9db, sprintf('%.17g', cref)), ...
     'experiment_core_bw:clean_ref_changed', 'the clean reference at 9 dB is %.17g, not the one validation froze', cref);
+if X.CORE3, core_bw_rules('core3_frozen', J, load(X.val, 'WCH3'), X); end
 marker(X, J.params_id);
 fprintf('Test reading started (%s)\n', X.marker);
 PP = load_pools(X, true);
 assert(strcmp(J.params_id, PP.params_id) && strcmp(J.det_id, PP.det_id), 'experiment_core_bw:pools_changed', ...
     'the pools are not those the protocol was frozen on');
+if X.CORE3, core_bw_rules('core3_pools', PP, J.core3_sha256, J.core3_N); end
 [PP, ~] = decision_inputs(PP);
 p0 = load('params.mat').params; B = band_plan(p0);
 K = link_env('tables', PP, 'flight');
@@ -705,10 +753,12 @@ for q = 1:numel(X.RULES)
     if q == 1, sets(end+1, :) = {'follower', fixed, true, 'sheet'}; end
     for si = 1:size(sets, 1)
         pols = {'none', 'blind_core', 'rule_core'};
+        if X.CORE3, pols{end+1} = 'rule_core3'; end %#ok<AGROW>
         if si == 1, pols = [pols, {'blind_core_fixed', 'oracle'}]; end
         for pk = 1:numel(pols)
             [kind, opt] = policy_of(pols{pk}, na);
             Pp = Pw; if strcmp(pols{pk}, 'blind_core_fixed'), Pp.core_blind = ''; end
+            if strcmp(pols{pk}, 'rule_core3'), Pp.core_wide = J.w3.(X.RULES{q}); end
             R = run_set(kind, Pp, K, X, EP, sets{si, 2}, q, sets{si, 3}, sets{si, 4}, 2, opt, 81000 + 1000*q + 100*si);
             RES(end+1) = struct('rule', X.RULES{q}, 'set', sets{si, 1}, 'policy', pols{pk}, 'R', R); %#ok<AGROW>
         end
@@ -725,16 +775,17 @@ end
 function MON = monitor_states(PP, K, X, EP, idx)
 % The hybrid detector on the static link after the onset, as three states (clean,
 % narrowband, wideband; any other class or unknown an error): the decision cycle's monitor
-% class (policy_monitor.m through policy_decide.m) and the frame's own argmax.
+% class (policy_monitor.m through policy_decide.m) and the frame's own argmax; with X.CORE3
+% beside them rule_core3's windowed three-state class on the same frames (right_core3).
 map = zeros(1, numel(PP.classes) + 1);              % the last: unknown or a class outside the detector's
 map(strcmp(PP.classes, 'none')) = 1; map(strcmp(PP.classes, 'tone_jamming')) = 2; map(strcmp(PP.classes, 'jamming')) = 3;
 specs = make_specs(X, EP, idx, 1, false, 'sheet');
 ym = zeros(numel(idx), 1); yf = ym; n = 0;
-hm = zeros(numel(idx), 1); hf = hm;
+hm = zeros(numel(idx), 1); hf = hm; h3 = hm;
 for b = 1:numel(specs)
     sp = specs{b}; nv = X.NE; if isfield(sp, 'n_valid'), nv = sp.n_valid; end
     [E, obs] = link_env('reset', PP, K, sp, 2, RandStream('mt19937ar', 'Seed', 91000 + b));
-    mem = []; okm = zeros(1, X.NE); okf = okm; nn = okm;
+    mem = []; mem3 = []; okm = zeros(1, X.NE); okf = okm; nn = okm; ok3 = okm;
     want = 2 + strcmp(PP.scen(sp.scn), 'jamming');
     for t = 1:X.T
         pf = E.t >= E.onset;
@@ -742,13 +793,19 @@ for b = 1:numel(specs)
         [~, ix] = ismember(d.cls, PP.classes); ix(ix == 0) = numel(map); sm = map(ix);
         [~, am] = max(obs.probs, [], 2); sf = map(am(:)');
         okm = okm + pf .* (sm == want); okf = okf + pf .* (sf == want); nn = nn + pf;
+        if X.CORE3
+            [~, mem3, d3] = policy_decide('rule_esc', obs, E.cfg, mem3, PP, [], struct('core', true, 'core3', true));
+            [~, i3] = ismember(d3.cls, PP.classes); i3(i3 == 0) = numel(map);
+            ok3 = ok3 + pf .* (map(i3) == want);
+        end
         [E, ~, obs] = link_env('step', E, PP, K, K.na * ones(1, X.NE));
     end
     j = n + (1:nv);
-    hm(j) = okm(1:nv); hf(j) = okf(1:nv); ym(j) = nn(1:nv);
+    hm(j) = okm(1:nv); hf(j) = okf(1:nv); ym(j) = nn(1:nv); h3(j) = ok3(1:nv);
     n = n + nv;
 end
 MON = struct('ep', idx, 'right_monitor', hm', 'right_frame', hf', 'frames', ym');
+if X.CORE3, MON.right_core3 = h3'; end
 end
 
 %% ===================== Report =====================
@@ -771,6 +828,13 @@ lines = {sprintf('=== Bandwidth study (docs/core_bw_protocol.md)%s ===', ternary
     'UniformOutput', false), ', ')), ...
     sprintf('blind_core first response (validation, frozen; docs/core_bw_v2_note.txt): %s', strjoin(cellfun(@(r) ...
     sprintf('%s -> %s', r, J.blind_first.(r)), X0.RULES, 'UniformOutput', false), ', '))};
+c3 = any(strcmp({RES.policy}, 'rule_core3'));          % rule_core3 carries the verdicts
+if c3
+    lines{end+1} = sprintf(['W3 of rule_core3, the three-state CNN in the loop (validation, frozen; ' ...
+        'docs/core_bw_core3_note.txt): %s; model SHA-256 %s, window N = %d; rule_core is the hybrid''s secondary row'], ...
+        strjoin(cellfun(@(r) sprintf('%s -> %s', r, J.w3.(r)), X0.RULES, 'UniformOutput', false), ', '), ...
+        J.core3_sha256, J.core3_N);
+end
 recov = @(rule) recoverable_mask(REC, rule, EP);
 for q = 1:numel(X0.RULES)
     lines{end+1} = sprintf('  %s: %d recoverable scenario points (of %d)', X0.RULES{q}, ...
@@ -786,8 +850,8 @@ lines = [lines, blk];
 lines = [lines, blk];
 [blk, KP.fixed] = ladder_lines(get_set(RES, q1, 'primary'), EP, recov(q1) & pm, X0, pay);
 lines = [lines, blk];
-lines = [lines, {'', ['--- Sensitivities (no verdict of their own; whether any would flip a primary verdict, rule_core ' ...
-    'per jamming type) ---']}];
+lines = [lines, {'', ['--- Sensitivities (no verdict of their own; whether any would flip a primary verdict, ' ...
+    ternary(c3, 'rule_core3', 'rule_core') ' per jamming type) ---']}];
 sens = cell(0, 3);
 for q = 1:numel(X0.RULES)
     rl = X0.RULES{q};
@@ -846,7 +910,10 @@ end
 function [lines, Kp] = per_lines(S, EP, mask, X, pay, ttl, brief)
 % PER reduction vs the static link (the primary verdict per jamming type, the pooled one its
 % second line), recovery time, goodput and the CNN's contribution, pooled and per jamming type,
-% on the episodes of the recoverable scenarios; brief: a sensitivity, its PER lines only.
+% on the episodes of the recoverable scenarios; brief: a sensitivity, its PER lines only. With
+% rule_core3 in S it carries the verdicts and the contribution (Kp.cnn), rule_core's lines are
+% labelled hybrid, secondary (Kp.cnn_hybrid), and rule_core3 - rule_core is descriptive
+% (Kp.cnn_3vs).
 lines = {'', sprintf('--- %s ---', ttl)};
 if ~brief
     lines{end+1} = sprintf(['  PER reduction >= %g%% vs the static link per jamming type: MET (committed) when the ' ...
@@ -854,9 +921,13 @@ if ~brief
 end
 Rn = pol(S, 'none'); m0 = mask(Rn.ep);
 types = {'pooled', true(1, EP.n); 'narrowband', EP.narrow; 'wideband', ~EP.narrow};
+c3 = any(strcmp({S.policy}, 'rule_core3'));
+pv = {'rule_core', 'blind_core'}; if c3, pv = [{'rule_core3'}, pv]; end
+sec = ''; if c3, sec = ' (hybrid, secondary)'; end
+tg = @(p) repmat(sec, 1, double(strcmp(p, 'rule_core')));
 Kp = struct('per', struct('policy', {}, 'type', {}, 'n', {}, 'red', {}, 'lo', {}, 'hi', {}, 'per', {}, 'per_ref', {}), ...
     'rec', struct(), 'gput', struct(), 'cnn', struct());
-for pk = {'rule_core', 'blind_core'}
+for pk = pv
     R = pol(S, pk{1});
     for t = 1:size(types, 1)
         m = m0 & types{t, 2}(Rn.ep);
@@ -869,37 +940,46 @@ end
 lines = [lines, blk];
 if brief, return; end
 mr = m0 & Rn.recoverable & Rn.threat;                 % beside it: the per-episode reading (lect_kpis.m)
-for pk = {'rule_core', 'blind_core'}
+for pk = pv
     R = pol(S, pk{1});
     [v, lo, hi] = per_reduction(R.per_post(mr), Rn.per_post(mr), EP.geom(Rn.ep(mr)), X.B, 3);
-    lines{end+1} = sprintf('  PER %-10s pooled, recoverable episodes only (n=%d): reduction %5.1f%% [%5.1f, %5.1f]', ...
-        pk{1}, nnz(mr), 100 * v, 100 * lo, 100 * hi); %#ok<AGROW>
+    lines{end+1} = sprintf('  PER %-10s pooled, recoverable episodes only (n=%d): reduction %5.1f%% [%5.1f, %5.1f]%s', ...
+        pk{1}, nnz(mr), 100 * v, 100 * lo, 100 * hi, tg(pk{1})); %#ok<AGROW>
 end
-for pk = {'none', 'blind_core', 'rule_core'}
+pr = {'none', 'blind_core', 'rule_core'}; if c3, pr{end+1} = 'rule_core3'; end
+for pk = pr
     R = pol(S, pk{1});
     for t = 1:size(types, 1)
         m = m0 & types{t, 2}(Rn.ep);
         a = qstat(R.t_conf(m)); b = qstat(R.t_rec_det(m));
         [g, glo, ghi] = boot_cluster(pay * R.dlv_post(m), ones(1, nnz(m)), EP.geom(Rn.ep(m)), X.B, 5);
         lines{end+1} = sprintf(['  %-10s %-10s onset->detection %s | detection->restored (%d cycles) %s | goodput ' ...
-            '%.0f [%.0f, %.0f] bit/s'], pk{1}, types{t, 1}, a.txt, X.N_RUN, b.txt, g, glo, ghi); %#ok<AGROW>
+            '%.0f [%.0f, %.0f] bit/s%s'], pk{1}, types{t, 1}, a.txt, X.N_RUN, b.txt, g, glo, ghi, tg(pk{1})); %#ok<AGROW>
         Kp.rec.(pk{1}).(types{t, 1}) = struct('det', a, 'rec_det', b); Kp.gput.(pk{1}).(types{t, 1}) = [g glo ghi];
     end
 end
-Rr = pol(S, 'rule_core'); Rb = pol(S, 'blind_core');
-for t = 1:size(types, 1)
-    m = m0 & types{t, 2}(Rn.ep); cl = EP.geom(Rn.ep(m));
-    [dp, dlo, dhi] = boot_cluster(Rr.per_post(m) - Rb.per_post(m), ones(1, nnz(m)), cl, X.B, 6);
-    [rr, rlo, rhi] = per_reduction(Rr.per_post(m), Rb.per_post(m), cl, X.B, 7);
-    [dg, glo, ghi] = boot_cluster(pay * (Rr.dlv_post(m) - Rb.dlv_post(m)), ones(1, nnz(m)), cl, X.B, 8);
-    f = m & isfinite(Rr.t_rec_det) & isfinite(Rb.t_rec_det);
-    [dt, tlo, thi] = boot_cluster(Rr.t_rec_det(f) - Rb.t_rec_det(f), ones(1, nnz(f)), EP.geom(Rn.ep(f)), X.B, 9);
-    lines{end+1} = sprintf(['  CNN contribution %-10s rule_core - blind_core: PER %+.4f [%+.4f, %+.4f] (reduction %5.1f%% ' ...
-        '[%5.1f, %5.1f]) | goodput %+.0f [%+.0f, %+.0f] bit/s | detection->restored %+.2f [%+.2f, %+.2f] cycles on the %d ' ...
-        'episodes both recover in (never %.0f%% vs %.0f%%)'], types{t, 1}, dp, dlo, dhi, 100 * rr, 100 * rlo, 100 * rhi, dg, ...
-        glo, ghi, dt, tlo, thi, nnz(f), 100 * mean(~isfinite(Rr.t_rec_det(m))), 100 * mean(~isfinite(Rb.t_rec_det(m)))); %#ok<AGROW>
-    Kp.cnn.(types{t, 1}) = struct('per', [dp dlo dhi], 'per_red', [rr rlo rhi], 'gput', [dg glo ghi], 'trec', [dt tlo thi], ...
-        'n_both', nnz(f));
+cp = {'rule_core', 'blind_core', 'cnn', ''};
+if c3
+    cp = {'rule_core3', 'blind_core', 'cnn', ''; 'rule_core', 'blind_core', 'cnn_hybrid', sec; 'rule_core3', 'rule_core', ...
+        'cnn_3vs', ' (one decision layer, the class source alone differs: descriptive, no verdict)'};
+end
+for c = 1:size(cp, 1)
+    Rr = pol(S, cp{c, 1}); Rb = pol(S, cp{c, 2});
+    for t = 1:size(types, 1)
+        m = m0 & types{t, 2}(Rn.ep); cl = EP.geom(Rn.ep(m));
+        [dp, dlo, dhi] = boot_cluster(Rr.per_post(m) - Rb.per_post(m), ones(1, nnz(m)), cl, X.B, 6);
+        [rr, rlo, rhi] = per_reduction(Rr.per_post(m), Rb.per_post(m), cl, X.B, 7);
+        [dg, glo, ghi] = boot_cluster(pay * (Rr.dlv_post(m) - Rb.dlv_post(m)), ones(1, nnz(m)), cl, X.B, 8);
+        f = m & isfinite(Rr.t_rec_det) & isfinite(Rb.t_rec_det);
+        [dt, tlo, thi] = boot_cluster(Rr.t_rec_det(f) - Rb.t_rec_det(f), ones(1, nnz(f)), EP.geom(Rn.ep(f)), X.B, 9);
+        lines{end+1} = sprintf(['  CNN contribution %-10s %s - %s: PER %+.4f [%+.4f, %+.4f] (reduction %5.1f%% ' ...
+            '[%5.1f, %5.1f]) | goodput %+.0f [%+.0f, %+.0f] bit/s | detection->restored %+.2f [%+.2f, %+.2f] cycles on the %d ' ...
+            'episodes both recover in (never %.0f%% vs %.0f%%)%s'], types{t, 1}, cp{c, 1}, cp{c, 2}, dp, dlo, dhi, 100 * rr, ...
+            100 * rlo, 100 * rhi, dg, glo, ghi, dt, tlo, thi, nnz(f), 100 * mean(~isfinite(Rr.t_rec_det(m))), ...
+            100 * mean(~isfinite(Rb.t_rec_det(m))), cp{c, 4}); %#ok<AGROW>
+        Kp.(cp{c, 3}).(types{t, 1}) = struct('per', [dp dlo dhi], 'per_red', [rr rlo rhi], 'gput', [dg glo ghi], ...
+            'trec', [dt tlo thi], 'n_both', nnz(f));
+    end
 end
 if any(strcmp({S.policy}, 'oracle'))
     Ro = pol(S, 'oracle');
@@ -911,14 +991,18 @@ end
 function [lines, T] = liu_lines(S, EP, rmask, X, pay)
 % Liu et al.'s 4 MHz read as the occupied bandwidth (pre-registered sensitivity, no verdict):
 % its cells beside the primary 4 MHz cells (the noise reading) on their recoverable scenarios,
-% PER reduction vs the static link, goodput and detection to restored, pooled and per JSR_tot.
+% PER reduction vs the static link, goodput and detection to restored, pooled and per JSR_tot;
+% rule_core3 first when S holds it, rule_core then labelled hybrid, secondary.
 lines = {'', ['--- Sensitivity, no verdict: Liu et al.''s 4 MHz as the occupied bandwidth (in band JSR_tot - 4.88 dB ' ...
     'instead of -6.02, its edge 0.6 MHz farther from every hop) beside the noise reading (primary) ---']};
 Rn = pol(S, 'none'); e = Rn.ep;
 rd = {'noise (primary)', rmask(e) & EP.bj(e) == 4 & ~EP.slice(e) & ~EP.occ(e); 'occupied', rmask(e) & EP.occ(e)};
 T = struct('reading', {}, 'policy', {}, 'tot', {}, 'n', {}, 'red', {}, 'gput', {}, 'rec_det', {});
-for pk = {'rule_core', 'blind_core'}
+c3 = any(strcmp({S.policy}, 'rule_core3'));
+pv = {'rule_core', 'blind_core'}; if c3, pv = [{'rule_core3'}, pv]; end
+for pk = pv
     R = pol(S, pk{1});
+    sec = ''; if c3 && strcmp(pk{1}, 'rule_core'), sec = ' (hybrid, secondary)'; end
     for i = 1:size(rd, 1)
         for tot = [NaN, unique(EP.tot(e(rd{i, 2})))]
             m = rd{i, 2}; if ~isnan(tot), m = m & EP.tot(e) == tot; end
@@ -929,26 +1013,40 @@ for pk = {'rule_core', 'blind_core'}
             T(end+1) = struct('reading', rd{i, 1}, 'policy', pk{1}, 'tot', tot, 'n', nnz(m), 'red', [v lo hi], ...
                 'gput', [g glo ghi], 'rec_det', b); %#ok<AGROW>
             lines{end+1} = sprintf(['  %-10s %-15s %-14s n=%5d: PER reduction %5.1f%% [%5.1f, %5.1f] | goodput %.0f ' ...
-                '[%.0f, %.0f] bit/s | detection->restored %s'], pk{1}, rd{i, 1}, ternary(isnan(tot), 'all JSR_tot', ...
-                sprintf('JSR_tot %g dB', tot)), nnz(m), 100 * [v lo hi], g, glo, ghi, b.txt); %#ok<AGROW>
+                '[%.0f, %.0f] bit/s | detection->restored %s%s'], pk{1}, rd{i, 1}, ternary(isnan(tot), 'all JSR_tot', ...
+                sprintf('JSR_tot %g dB', tot)), nnz(m), 100 * [v lo hi], g, glo, ghi, b.txt, sec); %#ok<AGROW>
         end
     end
 end
 end
 
 function [lines, T] = bj_lines(S, EP, mask, X)
-% The PER reduction of both adaptive systems and the CNN's contribution per jammer width.
+% The PER reduction of both adaptive systems and the CNN's contribution per jammer width; with
+% rule_core3 in S its reduction and rule_core3 - blind_core lead, rule_core's follow labelled
+% hybrid, secondary.
 lines = {'  per jammer width (recoverable scenarios, every JSR_tot and Eb/N0):'};
 Rn = pol(S, 'none'); Rr = pol(S, 'rule_core'); Rb = pol(S, 'blind_core'); m0 = mask(Rn.ep);
+c3 = any(strcmp({S.policy}, 'rule_core3'));
 T = struct('bj', {}, 'n', {}, 'rule', {}, 'blind', {}, 'cnn', {});
+if c3, R3 = pol(S, 'rule_core3'); T = struct('bj', {}, 'n', {}, 'rule', {}, 'blind', {}, 'cnn', {}, 'rule3', {}, 'cnn3', {}); end
 for bj = unique(EP.bj(~EP.slice & ~EP.occ))
     m = m0 & EP.bj(Rn.ep) == bj; cl = EP.geom(Rn.ep(m));
     [a, alo, ahi] = per_reduction(Rr.per_post(m), Rn.per_post(m), cl, X.B, 3);
     [b, blo, bhi] = per_reduction(Rb.per_post(m), Rn.per_post(m), cl, X.B, 3);
     [d, dlo, dhi] = boot_cluster(Rr.per_post(m) - Rb.per_post(m), ones(1, nnz(m)), cl, X.B, 6);
-    lines{end+1} = sprintf('    B_J %5s n=%5d  rule_core %5.1f%% [%5.1f, %5.1f] | blind_core %5.1f%% [%5.1f, %5.1f] | PER diff %+.4f [%+.4f, %+.4f]', ...
-        bj_name(bj), nnz(m), 100 * [a alo ahi], 100 * [b blo bhi], d, dlo, dhi); %#ok<AGROW>
-    T(end+1) = struct('bj', bj, 'n', nnz(m), 'rule', [a alo ahi], 'blind', [b blo bhi], 'cnn', [d dlo dhi]); %#ok<AGROW>
+    if ~c3
+        lines{end+1} = sprintf('    B_J %5s n=%5d  rule_core %5.1f%% [%5.1f, %5.1f] | blind_core %5.1f%% [%5.1f, %5.1f] | PER diff %+.4f [%+.4f, %+.4f]', ...
+            bj_name(bj), nnz(m), 100 * [a alo ahi], 100 * [b blo bhi], d, dlo, dhi); %#ok<AGROW>
+        T(end+1) = struct('bj', bj, 'n', nnz(m), 'rule', [a alo ahi], 'blind', [b blo bhi], 'cnn', [d dlo dhi]); %#ok<AGROW>
+        continue
+    end
+    [a3, a3lo, a3hi] = per_reduction(R3.per_post(m), Rn.per_post(m), cl, X.B, 3);
+    [d3, d3lo, d3hi] = boot_cluster(R3.per_post(m) - Rb.per_post(m), ones(1, nnz(m)), cl, X.B, 6);
+    lines{end+1} = sprintf(['    B_J %5s n=%5d  rule_core3 %5.1f%% [%5.1f, %5.1f] | blind_core %5.1f%% [%5.1f, %5.1f] | PER diff ' ...
+        '%+.4f [%+.4f, %+.4f] | rule_core (hybrid, secondary) %5.1f%% [%5.1f, %5.1f], PER diff %+.4f [%+.4f, %+.4f]'], ...
+        bj_name(bj), nnz(m), 100 * [a3 a3lo a3hi], 100 * [b blo bhi], d3, d3lo, d3hi, 100 * [a alo ahi], d, dlo, dhi); %#ok<AGROW>
+    T(end+1) = struct('bj', bj, 'n', nnz(m), 'rule', [a alo ahi], 'blind', [b blo bhi], 'cnn', [d dlo dhi], ...
+        'rule3', [a3 a3lo a3hi], 'cnn3', [d3 d3lo d3hi]); %#ok<AGROW>
 end
 end
 
@@ -1031,9 +1129,12 @@ end
 
 function [lines, T] = monitor_lines(MON, EP, M)
 % The hybrid's three-state recall per (B_J, JSR_tot, Eb/N0), above and below the detectability
-% floor (in-band I/N >= 0 dB: JSR_in + Eb/N0 + 10 log10(bits per symbol) >= 0), no frame dropped.
+% floor (in-band I/N >= 0 dB: JSR_in + Eb/N0 + 10 log10(bits per symbol) >= 0), no frame dropped;
+% with MON.right_core3 beside them rule_core3's windowed three-state class on the same frames.
+c3 = isfield(MON, 'right_core3');
 lines = {'', '--- Detector by bandwidth (analysis; the KPI verdicts are B3c''s and B3''s) ---', ...
     '  hybrid on the static link after the onset, right state of the frames: monitor class | frame argmax'};
+if c3, lines{end} = [lines{end} ' | rule_core3''s three-state class (the CNN''s window in the loop)']; end
 e = MON.ep; T = struct('bj', {}, 'tot', {}, 'ebno', {}, 'monitor', {}, 'frame', {}, 'above', {});
 fl = EP.inb(e) + M.ebno(EP.s(e)) + 10 * log10(2) >= 0;
 for bj = unique(EP.bj(e))
@@ -1041,8 +1142,10 @@ for bj = unique(EP.bj(e))
         for s = 1:numel(M.ebno)
             m = EP.bj(e) == bj & EP.tot(e) == tot & EP.s(e) == s;
             if ~any(m), continue; end
-            T(end+1) = struct('bj', bj, 'tot', tot, 'ebno', M.ebno(s), 'monitor', sum(MON.right_monitor(m)) / sum(MON.frames(m)), ...
-                'frame', sum(MON.right_frame(m)) / sum(MON.frames(m)), 'above', all(fl(m))); %#ok<AGROW>
+            r = struct('bj', bj, 'tot', tot, 'ebno', M.ebno(s), 'monitor', sum(MON.right_monitor(m)) / sum(MON.frames(m)), ...
+                'frame', sum(MON.right_frame(m)) / sum(MON.frames(m)), 'above', all(fl(m)));
+            if c3, r.core3 = sum(MON.right_core3(m)) / sum(MON.frames(m)); end
+            if isempty(T), T = r; else, T(end+1) = r; end %#ok<AGROW>
         end
     end
 end
@@ -1052,6 +1155,7 @@ for bj = unique([T.bj])
         if ~any(m), continue; end
         lines{end+1} = sprintf('  B_J %5s %s the floor: %.1f%% | %.1f%% over %d (JSR_tot, Eb/N0) points', bj_name(bj), ...
             ternary(ab, 'above', 'below'), 100 * mean([T(m).monitor]), 100 * mean([T(m).frame]), nnz(m)); %#ok<AGROW>
+        if c3, lines{end} = strrep(lines{end}, ' over ', sprintf(' | %.1f%% over ', 100 * mean([T(m).core3]))); end
     end
 end
 end
@@ -1120,14 +1224,16 @@ function marker(X, pid)
 root = fileparts(fileparts(fileparts(which('experiment_core_bw'))));
 g = sprintf('git --no-optional-locks -C "%s" ', root);
 [st, o] = system([g 'rev-parse HEAD HEAD:code']);
-[sd, d] = system([g 'status --porcelain --untracked-files=all -- code docs/core_bw_protocol.md ' X.note]);
+n3 = ''; if isfield(X, 'note3'), n3 = [' ' X.note3]; end
+[sd, d] = system([g 'status --porcelain --untracked-files=all -- code docs/core_bw_protocol.md ' X.note n3]);
 o = strsplit(strtrim(o)); cm = 'unknown'; tr = 'unknown';
 if st == 0 && numel(o) == 2, cm = o{1}; tr = o{2}; end
 if st == 0 && (sd ~= 0 || ~isempty(strtrim(d))), cm = [cm ' + local changes']; end
 if ~isfolder(X.R), mkdir(X.R); end
-write_lines(X.marker, {'bandwidth study (core_bw) test reading started', ['time ' datestr(now, 'yyyy-mm-dd HH:MM:SS')], ...
+L3 = {}; if isfield(X, 'note3'), L3 = {[X.note3 ' sha256 ' core_bw_rules('sha', X.note3)]}; end
+write_lines(X.marker, [{'bandwidth study (core_bw) test reading started', ['time ' datestr(now, 'yyyy-mm-dd HH:MM:SS')], ...
     ['commit ' cm], ['code_tree ' tr], ['params_id ' pid], [X.protocol ' sha256 ' core_bw_rules('sha', X.protocol)], ...
-    [X.note ' sha256 ' core_bw_rules('sha', X.note)], [X.proto_json ' sha256 ' core_bw_rules('sha', X.proto_json)]});
+    [X.note ' sha256 ' core_bw_rules('sha', X.note)], [X.proto_json ' sha256 ' core_bw_rules('sha', X.proto_json)]}, L3]);
 end
 
 function write_lines(f, lines)

@@ -32,6 +32,12 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   PP.unk_mode 'all' (the default), only a class that raises no alarm (none,
 %   benign_interference) with 'nonhostile', so a hostile class read keeps its alarm (the mode
 %   and the threshold's retention are chosen on validation, train_dqn.m).
+%   Three-state mode (PP.core3_on, set by policy_decide.m for opt.core3): the class is the
+%   argmax of the mean log-probability log(max(p, 1e-6)) of the three-state CNN (obs.probs3:
+%   clean, narrowband, wideband -> none, tone_jamming, jamming) over the last PP.core3_N
+%   cycles, fewer at the episode's start (core_cnn_eval.m 'logp'); the window restarts only
+%   with the episode, not at a configuration change, as the fusion's. No fusion model, no
+%   unknown-threat flag, no lost-branch latch, no sweeper confirmation in this mode.
 %   Alarm, PP.alarm_mode 'class' (default): a hostile threat class, or degradation;
 %   'none', 'benign_interference' (non-hostile, D9) and 'unknown' raise it only
 %   through degradation. 'class_drop': as 'class', but the class path_loss
@@ -79,7 +85,8 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   M: ber_avg, plr (NE x 1), ebno_est (as measured), drop (dB, without the configurations'
 %      known gains), drop_alarm, degraded, cls, alarm, confirmed (1 x NE),
 %      probs (NE x classes, fused), te (NE x 9, persistence measurements of the window,
-%      temporal_evidence.m)
+%      temporal_evidence.m); l3 (NE x 3, the three-state window's mean log-probabilities)
+%      in the three-state mode
 C = decision_config();
 switch cmd
     case 'init'
@@ -149,18 +156,28 @@ M.degraded = deg(:)';
 mem.good(~M.degraded) = mem.good(~M.degraded) + 1; mem.good(M.degraded) = 0;
 mem.deg_n(M.degraded) = mem.deg_n(M.degraded) + 1; mem.deg_n(~M.degraded) = 0;
 mem.tried(mem.good >= C.heal, :) = false;
+c3 = isfield(PP, 'core3_on') && PP.core3_on;
+if c3, PP.fuse = []; end                                         % no fusion model in the three-state mode
 [mem, pf, te, unk] = fusion(mem, obs, PP, gk(link), gw(link));
 % Latched cause of a lost branch (onset_shape.m): read from the shape of its onset, a
 % step (antenna_fault) or a ramp (airframe_shadowing), and kept while the branch stays lost;
 % only while the deployed fusion latches (onset_shape('on', PP.fuse), set by B2F)
 if ~isfield(mem, 'os'), mem.os = []; end
 FZ = []; if isfield(PP, 'fuse'), FZ = PP.fuse; end
-if isfield(obs, 'gant') && ~isempty(obs.gant) && onset_shape('on', FZ)
+if ~c3 && isfield(obs, 'gant') && ~isempty(obs.gant) && onset_shape('on', FZ)
     [mem.os, pf] = onset_shape('latch', mem.os, obs.gant, pf, PP.classes, C.heal, onset_shape('threshold', FZ));
 end
 M.probs = pf; M.te = te;
-[~, k] = max(pf, [], 2);
-cls = PP.classes(k); cls = cls(:)';
+if c3
+    unk = false(size(unk));
+    [mem, M.l3] = core3_window(mem, obs.probs3, PP.core3_N);
+    [~, k] = max(M.l3, [], 2);
+    s3 = {'none', 'tone_jamming', 'jamming'};
+    cls = s3(k); cls = cls(:)';
+else
+    [~, k] = max(pf, [], 2);
+    cls = PP.classes(k); cls = cls(:)';
+end
 ov = unk;                                                       % the class the unknown-threat flag overrides
 if isfield(PP, 'unk_mode') && strcmp(PP.unk_mode, 'nonhostile'), ov = unk & ismember(cls, {'none', 'benign_interference'}); end
 cls(ov) = {'unknown'};
@@ -199,7 +216,7 @@ assert(cf(2) <= size(mem.alarm, 2), 'policy_monitor: confirmation over %d cycles
 M.confirmed = sum(mem.alarm(:, end-cf(2)+1:end), 2)' >= cf(1);
 if ~isfield(mem, 'sw'), mem.sw = false(size(mem.alarm)); end
 mem.sw = [mem.sw(:, 2:end), strcmp(M.cls(:), 'sweeping_jammer')];
-cs = []; if isfield(PP, 'confirm_sweep'), cs = PP.confirm_sweep; end
+cs = []; if isfield(PP, 'confirm_sweep') && ~c3, cs = PP.confirm_sweep; end
 if ~isempty(cs) && ~strcmp(mode, 'degraded')                    % the sweeper's own revisit window
     assert(cs(2) <= size(mem.sw, 2), 'policy_monitor: the sweeper''s confirmation over %d cycles exceeds the alarm memory', cs(2));
     M.confirmed = M.confirmed | sum(mem.sw(:, end-cs(2)+1:end), 2)' >= cs(1);
@@ -288,6 +305,21 @@ for n = unique(mem.wn)                                     % episodes with the s
 end
 unk = obs.unknown(:)';                                     % the monitor's own threshold PP.maha_thr wherever a score is read
 if ~all(isnan(mh)), unk = mem.unk_now(:)' | (obs.unknown(:)' & isinf(mh(:)')); end
+end
+
+function [mem, L] = core3_window(mem, p3, N)
+% Mean log-probability of the three states over the last N cycles of the episode (fewer
+% before N cycles have passed), as core_cnn_eval.m 'logp' over one sub-run.
+lp = log(max(double(p3), 1e-6));
+if ~isfield(mem, 'l3') || isempty(mem.l3)
+    mem.l3 = zeros(size(lp, 1), size(lp, 2), N); mem.n3 = zeros(1, size(lp, 1));
+end
+mem.l3 = cat(3, mem.l3(:, :, 2:end), lp); mem.n3 = min(mem.n3 + 1, N);
+L = zeros(size(lp));
+for n = unique(mem.n3)
+    e = find(mem.n3 == n);
+    L(e, :) = mean(mem.l3(e, :, N - n + 1:N), 3);
+end
 end
 
 function [n, lost] = packets(crc)

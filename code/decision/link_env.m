@@ -102,7 +102,8 @@ function varargout = link_env(cmd, varargin)
 %   frames 2k-1 and 2k of the geometry, the receiver's framing; its codeword spans the
 %   PP.fec_frames frames up to them, cyclic over the geometry's frames as the frame
 %   positions are, fec_packets.m), ber_true and fer_true (the frame's BER and packet
-%   error, analysis only)
+%   error, analysis only); probs3 (NE x 3, the three-state CNN's probabilities, pool_cell.m),
+%   only when the pools hold them, NaN where the frame's pool has none
 %   info: per episode q, restored, restored_plr, fec_gap, gput, changed (a change or a hop),
 %   false_switch, healthy, recoverable, recoverable_core, sc_eff, cfg_eff, post, hop (requested this
 %   cycle), hop_in (a hop reached the link on this frame), compromised, ended (the frame is
@@ -419,6 +420,10 @@ for i = 1:E.NE
     if isfield(E, 'ev') && E.ev(i) && q >= n, q = n - 10 + mod(q - n, 10); end
     j = rows(mod(q, n) + 1);
     obs.probs(i, :) = P.probs(j, :);
+    if isfield(P, 'probs3')
+        if ~isfield(obs, 'probs3'), obs.probs3 = nan(E.NE, size(P.probs3, 2)); end
+        obs.probs3(i, :) = P.probs3(j, :);
+    end
     obs.unknown(i) = P.maha(j) < PP.maha_thr;
     obs.maha(i) = P.maha(j);
     obs.feat(i, :) = P.feat(j, :);
