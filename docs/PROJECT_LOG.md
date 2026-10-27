@@ -196,6 +196,10 @@ The lecturer's false-alarm KPI is read at detector level; the system-level figur
 - 18:14: order registered (D104): profile 1 chain, controlled-bandwidth study, profile 1 rerun with the corrected monitor on a fresh clean test set (at most 74 false-alarm episodes of 1,800 for the 5% bound), then profile 3.
 - 21:50: D105 registered before any C2e reading: the lecturer's verdict pairs are `rule_core` against `none` (KPI 5-7) and against `blind_core` (KPI 8) on the core action set; `rule_esc`/`blind_esc` are the extension; C2e's `blind_core` is a secondary, weakened baseline and KPI 8's headline comes from CORE_BW; the PER verdict stays on Line A (D99). KPI 5-8 are read with the hybrid detector's classes, not the three-state CNN. The README's configuration table follows D105.
 
+### CORE_BW registration (27.10.2026)
+
+- D106 registered before the smoke and any CORE_BW data (Adi approved): `rule_core3`, the core rule driven by the three-state CNN (B3c's model, window of 3 cycles; clean, narrowband and wideband mapped to no action, channel switch and the wideband action W3 chosen on validation), carries CORE_BW's lecturer KPI 5-8 readings; KPI 8's headline is `rule_core3` against the validation-tuned `blind_core`; the hybrid's `rule_core` stays as a secondary row. Protocol amended on `core-bw-p1` (`5d7847f`, `7c5ad4c`); code and tests before the runbook's row 18, else the registered fallback.
+
 ## Status of the lecturer's KPIs (profile 1, 26.10.2026)
 
 | KPI | Value | Status |

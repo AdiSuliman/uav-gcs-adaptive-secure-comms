@@ -1972,3 +1972,77 @@ The baseline also differs in tuning budget. In C2e, `blind_core`'s first respons
 - CORE_BW's pools, validation and test run after profile 1's end (D98 a).
 
 **Sources.** Lecturer's revised proposal of 2026-10-20 (D92): the three configurations, KPIs 5-8, and the CNN's contribution as an analysis metric. D98 a. D99. `plan_v2.md` risk 8 ("The fair comparison is CORE_BW's"). `quality_checklist.md` finding 5 and PC4. Gap audit M3 and M4 (session scratchpad `interim_report/core/gap_audit.md`, not in this repo). Code: W `d4623ed`: `lect_kpis.m`, `evaluate_policies.m`, `policy_decide.m`, `policy_setup.m`, `policy_monitor.m`, `decision_config.m`, `rule_core_policy.m`, `experiment_core_bw.m`. `core-bw-p1` `ac55080`.
+
+## D106 — rule_core3: the proposal's three-state CNN drives the core rule in CORE_BW and carries its lecturer verdicts; rule_core (the hybrid) a secondary row; KPI 8's headline amended from rule_core to rule_core3; registered before the smoke and any CORE_BW data
+
+**Why (2026-10-27; Adi approved on 27.10).** D105 left a closed-loop row driven by the three-state CNN open, as new work for Adi to decide. In every closed-loop study so far the core rule reads the hybrid detector's 11 classes; B3c's three-state CNN (spectrogram; clean, narrowband, wideband) was read only open-loop. The proposal's CNN-based system is that CNN plus rules. CORE_BW's threat set is exactly the lecturer's two states (CW and 4-83.5 MHz, `core_bw_protocol.md` section 3), its conventional row is validation-tuned (D98 a), and none of its data exists. It can therefore carry the literal system now, at small cost: about 1-1.5 code days and 2-4 more run hours. Analysis: session scratchpad `interim_report/core/core_cnn_loop_decision.md` (read only; not in this repo).
+
+*State when written.* `core-bw-p1` was at `6ef3693`, clean. `uav-gcs-v7-bw` holds no `results/core_bw`, no `results/core_bw_smoke` and no `data` folder, so no CORE_BW pools, smoke output, `protocol.json` or test marker exists. No log of a CORE_BW stage (smoke, pools, dset, val, test) exists in `uav-gcs-logs` or in the p3 slot's logs; the only CORE_BW logs there are `test_core` runs. Profile 1's `p1.log` shows `STAGE C2 (train_dqn)` running and no `STAGE C2e` line. **No CORE_BW data exists.**
+
+**Facts from the code (read only; W `d4623ed`, `core-bw-p1` `6ef3693`).**
+- The pools keep no spectrogram or IQ. `pool_cell.m` `add_run` builds the image with `spec_image`, scores it with the hybrid (`detect_scores`) and stores `probs`, `maha` and `feat`; the loop sees only these (`link_env.m`: `obs.probs`, `obs.unknown`). CORE_BW's pools load `data/trained_detector.mat` only. Its test runs `none`, `blind_core` and `rule_core`, with `blind_core_fixed` and `oracle` in the primary set.
+- `rule_core` is `rule_esc` with `opt.core` (`policy_setup.m:23`). Its class is the monitor's argmax over the hybrid's classes, with the unknown override (`policy_monitor.m:162-167`).
+- The monitor's window (`mem.wn`) only grows within an episode. Only the BER and CRC windows restart on a new configuration (`policy_monitor.m:127`, `:255`).
+- `onset_shape('on', [])` returns true, so a three-state mode must switch the latch off explicitly. `spec_scores` uses a GPU when one exists, so pool-time scores must be forced to the CPU.
+- B3c's model is W `data/core_cnn_model.mat` (686 584 bytes, 26.10 14:50), **SHA-256 `7c9cccbfe9b7fa000ca462e04812a008584990b3478c60086ea2713a50b41689`**. Its states, in order, are clean, narrowband and wideband (`core_cnn_config.m` groups `none`, `tone_jamming`, `jamming`). Its window is **N = 3**: the mean log-probability log(max(p, 1e-6)) over the last N frames (`core_cnn_eval.m` 'logp'). `results/core_cnn_validation.txt` gives N = 3 as the shortest N within one standard error of the best.
+
+**Decision.**
+1. **The policy `rule_core3`.** `kind = 'rule_esc'`, `opt.core`, `opt.core3`. It shares `rule_core`'s decision layer; only the class source differs.
+   - *Scores.* The pools stage stores `probs3` (frames × 3) per frame, computed on the CPU from the same spectrogram image the hybrid reads. The model's SHA-256 is recorded and must equal the one above.
+   - *Class per cycle.* The argmax of the mean log-probability over the last 3 cycles (equal to `core_cnn_eval 'logp'`), over fewer cycles at the episode's start. **The window is not reset at a configuration change**, only at the episode's start, as the hybrid's window in the loop. The two rows then differ only in the class source. B3c's per-sub-run window was a device for the open-loop reading.
+   - *Mapping.* clean → `no_action`; narrowband → `channel_switch`; wideband → **W3**.
+   - *Off.* No fusion model, no unknown-threat flag, the lost-branch latch off, the sweeper's k-of-n path dormant.
+   - *Shared with `rule_core`.*
+     - the alarm: a jamming class, the degradation test, the drop/CUSUM alarm;
+     - M-of-N confirmation, dwell and hold;
+     - escalation over `C.ladder_core`, none while the class reads clean unless `esc_drop` is set;
+     - `rule_core_policy.m`'s degradation, quiet-slot and drop branches with their defaults. `PP.core_blind` stays `blind_core`'s only.
+   - *Settings.* The decision settings of `data/trained_dqn.mat` as they are, not tuned again.
+   - *Refusals.* The stage stops when the pools hold no `probs3` (never a fallback to the hybrid), when the model's hash is another, and when `core3` is set on a blind or DQN policy.
+2. **W3, chosen on validation.** Per hop rule, among `channel_switch`, `channel_switch+rate_reduce` and `rate_reduce`. It is chosen on `rule_core3`'s own validation runs of the recoverable episodes of the wideband fixed-total cells, with equal weight per (B_J, JSR_tot), by protocol 6.3's rule. That is the rule of `rule_core`'s W and of `blind_core`'s first response (D98 a), so the tuning budget is equal. `protocol.json` freezes W3 together with W, the model's SHA-256, N and the D106 note's hash. The test stage refuses if any of them changed.
+3. **The verdict pairs in CORE_BW** (numbered as in D105):
+
+   | Lecturer KPI | Carried by | Reading |
+   |---|---|---|
+   | 5, PER reduction ≥ 30% vs static | `rule_core3` against `none` | per jamming type (narrowband = the CW cells, wideband = 4-83.5 MHz pooled), in protocol 6.5's verdict words; pooled is a second line |
+   | 6, recovery time (onset → detection; detection → restored) | `rule_core3`, with `none` and `blind_core` beside it | median, p90 and the share never restored; no target |
+   | 7, goodput | `rule_core3`, with `none` and `blind_core` beside it | bit/s, geometry bootstrap; no target |
+   | 8, the CNN's contribution | `rule_core3` − the validation-tuned `blind_core` | PER, goodput and t_rec_det, paired 95% intervals, pooled, per type and per B_J; analysis, no promise |
+
+   - `rule_core` (the hybrid) gets the same lines, labelled "hybrid, secondary".
+   - `rule_core3` − `rule_core` is descriptive only, with no verdict word. The decision layer is the same; only the class source differs.
+   - The sensitivities' flip reads `rule_core3`'s primary verdicts.
+   - Liu's occupied-reading lines carry `rule_core3` too.
+   - Predictions P1-P5 stay on `rule_core`, as written.
+   - The detector-by-bandwidth analysis adds `rule_core3`'s windowed class beside the hybrid's.
+   - `rule_core3` runs wherever `rule_core` runs in the test stage: the primary set of every hop rule, the 30 dB residual set and the follower set, with the same episodes and frame draws.
+4. **D105 amended.** D105 point 2 named CORE_BW's `rule_core` against its validation-tuned `blind_core` as the headline KPI 8. It now reads **`rule_core3` against the validation-tuned `blind_core`**, and CORE_BW's own per-type PER verdicts are `rule_core3`'s. This is allowed because no CORE_BW data exists (state above): there is no output in `uav-gcs-v7-bw/results` and there are no pools. Nothing else in D105 changes. C2e's rows stay as registered and are described as the hybrid's. C2e's KPI 5 verdict and CORE_BW's controlled-bandwidth verdict are reported side by side; neither replaces the other.
+5. **Read once,** in CORE_BW's own single test reading (geometry family 6, test block 14; marker and record as in protocol 6.6 G4). It is never read on the fourth test set (spent by B3c), in C2e or in P1R (D104 point 2 unchanged). The interim report (1.11) does not depend on it.
+6. **Link-limited lines (D99; `core_bw_lect_by_link.m` on `lect-ebno`): `rule_core3` gets them,** as the verdict's row:
+   - Line A and Line B per jamming type, with the verdict-word comparison;
+   - recovery time from detection, with Line B the headline and Line A with N;
+   - goodput.
+
+   `rule_core` keeps its lines as the secondary row, and Line A stays the verdict. The seven readers are retaken byte for byte from the `experiment_core_bw.m` of the test stage's commit (`lect_ebno_protocol.md` section 7, unchanged). The recovery-time loop in `readings` (`{'none', 'blind_core', 'rule_core'}`) is extended to `rule_core3`. Both go into a tested commit on `lect-ebno` before CORE_BW's test stage.
+7. **Where it is written.** Both commits come before any code that produces CORE_BW data.
+   - `core-bw-p1` `5d7847f` amends `docs/core_bw_protocol.md` in sections 3, 5, 6.3, 6.5, 6.6 and 7-10. It adds `docs/core_bw_core3_note.txt`, which holds the definition, W3, the rows, the link-limited lines, the tests and the fallback. The val stage writes the note's SHA-256 into `protocol.json`.
+   - `core-bw-p1` `7c5ad4c` makes `test_band_protocol_pointer` pin the protocol to `5d7847f`'s file.
+8. **Tests** (`test_core`, run at the runbook's row 18 before the smoke, about +15-20 min):
+   - `test_band_core3_off_identical`: with the switch off, `pool_cell`, `link_env` and the monitor are bit for bit as before, and `none`, `blind_core`, `blind_core_fixed` and `rule_core` are unchanged with `probs3` present;
+   - `test_band_core3_probs3`, `test_band_core3_window`, `test_band_core3_inert`, `test_band_core3_mapping`, `test_band_core3_refusals`, `test_band_core3_freeze`, `test_band_core3_rows`;
+   - the smoke's G2 timing includes the extra inference.
+9. **Fallback.** If the code and its tests are not green at the runbook's row 18 (CORE_BW tests and smoke), `rule_core3` is not run. A dated line in `docs/core_bw_core3_note.txt` says so before the smoke, and `rule_core` carries the verdicts as D105 registered them. The report then says: "The closed-loop KPIs were measured with the hybrid detector. The three-state CNN was evaluated open-loop (fourth test set, set D per bandwidth). Putting it in the loop is a registered next step, read on profile 3's own C2e and registered before that study's pools."
+
+**Rejected.**
+- Rebuilding C2e's pools with `probs3` and reading them after C2e. It would be a second use of C2e's test flights, whose other rows are read on 28.10. The bitwise reproduction of the C1p frames is not assured. It costs 1.5-2 code days plus 4-6 h of the 6-worker slot.
+- Keeping CORE_BW as registered, with only an honest statement: CORE_BW is unread and can be amended cheaply now.
+- Resetting the three-state window at each configuration change: the hybrid's window in the loop is not reset, so the two rows would differ in more than the class source.
+- Re-tuning the decision settings for `rule_core3`: `rule_core` and `blind_core` run `trained_dqn.mat`'s settings as they are. W3 is `rule_core3`'s only choice, with the same budget as W and `blind_core`'s first response.
+- Falling back to the hybrid's class when `probs3` is absent: the row would silently become `rule_core`.
+
+**Open.**
+- The code and the tests of point 8, on `core-bw-p1`, 27-29.10, before row 18: `pool_cell.m`; `experiment_core_bw.m` (pools, val, test, report); `link_env.m`; `policy_setup.m`; `policy_decide.m` and `policy_monitor.m`.
+- The `lect-ebno` commit of point 6.
+- README lines 44-45, 101 and 107 name `rule_core` as CORE_BW's CNN-based row. They are to be aligned with point 3.
+
+**Sources.** Lecturer's revised proposal of 2026-10-20 (D92): CNN classification plus rule-based recovery, KPIs 5-8. D98 a, D99, D104, D105. B3c: `docs/core_cnn_protocol.md`, `results/core_cnn_validation.txt`, `docs/core_cnn_read_p1.txt` (W `d4623ed`). Code: W `d4623ed` (`pool_cell.m`, `link_env.m`, `policy_setup.m`, `policy_monitor.m`, `policy_decide.m`, `rule_core_policy.m`, `onset_shape.m`, `spec_scores.m`, `core_cnn_eval.m`, `core_cnn_config.m`); `core-bw-p1` `6ef3693` (`experiment_core_bw.m`); `lect-ebno` `eb7ac10` (`core_bw_lect_by_link.m`, `docs/lect_ebno_protocol.md`).
