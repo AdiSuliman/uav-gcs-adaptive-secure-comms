@@ -545,7 +545,8 @@ end
 
 function m = rule_stub(PP)
 % A fallback monitor on the bundle's own settings, the confirmation one cycle longer.
-m = struct('alarm_mode', PP.alarm_mode, 'confirm', PP.confirm + [1 1], 'drop_db', PP.drop_db);
+m = struct('alarm_mode', PP.alarm_mode, 'confirm', PP.confirm + [1 1]);
+if isfield(PP, 'drop_db'), m.drop_db = PP.drop_db; end
 end
 
 function cr = clean_ref_table()
