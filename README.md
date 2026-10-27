@@ -196,7 +196,7 @@ The file has no nested functions (D24): static state lives in `fig.UserData`, ch
 
 The console runs the policy that training deployed, read from `data/trained_dqn.mat` (`console_policy.m`): the selected DQN with or without the escalation, or the rule fallback with its own monitor when the DQN did not pass validation. The escalation checkbox of the episode tab starts at the deployed setting and says so; the Live tab always runs the deployed policy.
 
-`export_gui_bundle.m` copies what the console needs into `profiles/rx<n>`, including a small `data/policy_pools.mat` that holds the clean-link reference alone (the link monitor reads it; the export and the console's start both stop when it is not finite or its 9 dB value is outside 3e-4 to 6e-3) and, when present, the three-state model and `results/core_cnn.txt`. `code/tests/test_gui.m` tests the exporter, `console_core.m`, `console_policy.m` (stubs for the DQN with and without escalation and for the rule fallback) and the decision cycle headless on a bundle exported from a smoke tree.
+`export_gui_bundle.m` copies what the console needs into `profiles/rx<n>`, including a small `data/policy_pools.mat` that holds the clean-link reference alone (the link monitor reads it; the export and the console's start both stop when it is not finite or its mean clean BER at 9 dB, `clean_ref.ber`, is outside the pre-registered 3e-4 to 6e-3) and, when present, the three-state model and `results/core_cnn.txt`. `code/tests/test_gui.m` tests the exporter, `console_core.m`, `console_policy.m` (stubs for the DQN with and without escalation and for the rule fallback) and the decision cycle headless on a bundle exported from a smoke tree.
 
 ---
 

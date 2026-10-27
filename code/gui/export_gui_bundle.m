@@ -11,9 +11,9 @@ function export_gui_bundle(target, root)
 %   data/gui_norm_stats.mat, and the clean-link reference of the decision layer as a small
 %   data/policy_pools.mat holding clean_ref alone (clean_ber_ref.m reads nothing else): the
 %   export stops when the pools hold none, its table has a missing or non-finite value, or
-%   the bundle's reference is not finite or its 9 dB value is outside 3e-4 to 6e-3
-%   (console_ref_range.m), because the link monitor would fall back to its floor and alarm on
-%   a clean link. The three-state
+%   the bundle's reference is not finite, or its mean clean BER at 9 dB (clean_ref.ber) is
+%   outside 3e-4 to 6e-3 (console_ref_range.m), because the link monitor would fall back to its
+%   floor and alarm on a clean link, or judge the link on a stale table. The three-state
 %   CNN (data/core_cnn_model.mat, not a reduced chain check) and its report
 %   (results/core_cnn.txt) come along when present. A result of another detector or deployed
 %   policy, or older than its inputs (result_status.m), is not exported, and a KPI summary
@@ -84,27 +84,28 @@ if ~isfile(pp) || ~ismember('clean_ref', who('-file', pp))
         'the console cannot judge a link without the clean reference'], pp);
 end
 L = load(pp, 'clean_ref'); clean_ref = L.clean_ref;
-ok = all(isfield(clean_ref, {'ebno', 'ber_est'})) && numel(clean_ref.ebno) >= 2;
+ok = all(isfield(clean_ref, {'ebno', 'ber', 'ber_est'})) && numel(clean_ref.ebno) >= 2;
 for f = {'ebno', 'ber', 'ber_est', 'plr_fec'}               % clean_ber_ref.m floors a NaN in the table, so it is checked here
     if ok && isfield(clean_ref, f{1}), ok = all(isfinite(clean_ref.(f{1})(:))); end
 end
 if ~ok
-    error('export_gui_bundle:clean_ref', 'the clean_ref in %s lacks ebno or ber_est, or holds a value that is not finite: not exported', pp);
+    error('export_gui_bundle:clean_ref', 'the clean_ref in %s lacks ebno, ber or ber_est, or holds a value that is not finite: not exported', pp);
 end
 out = fullfile(dst, 'data', 'policy_pools.mat');
 save(out, 'clean_ref');
 c0 = cd(dst); back = onCleanup(@() cd(c0));
 clean_ber_ref('reset');
 b = clean_ber_ref(9, 'ber_est');
+t = clean_ber_ref(9, 'ber');                                 % the mean clean BER, the pre-registered value
 clean_ber_ref('reset');
 clear back
 r = console_ref_range();
 if ~isfinite(b)
     delete(out);
     error('export_gui_bundle:clean_ref', 'the clean reference in %s is not finite at 9 dB: not exported', pp);
-elseif b < r(1) || b > r(2)
+elseif ~(t >= r(1) && t <= r(2))
     delete(out);
-    error('export_gui_bundle:clean_ref', ['the clean reference in %s is %.2e at 9 dB, outside %.0e to %.0e ' ...
-        '(docs/clean_ref_protocol.md): not exported'], pp, b, r(1), r(2));
+    error('export_gui_bundle:clean_ref', ['the clean reference in %s has a mean BER of %.2e at 9 dB, outside %.0e to %.0e ' ...
+        '(docs/clean_ref_protocol.md): not exported'], pp, t, r(1), r(2));
 end
 end

@@ -58,22 +58,35 @@ clear back
 end
 
 function test_exporter_refuses_reference_out_of_range(tc)
-% The 9 dB value must lie in 3e-4 to 6e-3 (the pre-registered range of the rebuilt reference):
-% a table below or above it is not exported, and none is left behind; values just inside the limits pass.
+% The mean clean BER at 9 dB (clean_ref.ber) must lie in 3e-4 to 6e-3 (the pre-registered range
+% of the rebuilt reference, docs/clean_ref_protocol.md section 4; core_bw_rules('clean_ref')):
+% a table below or above it is not exported, and none is left behind; values just inside the
+% limits pass. The range is on the mean BER, not on the monitor's estimate: an estimate outside
+% it with the mean BER inside passes, a mean BER outside it with the estimate inside does not,
+% and a table without ber is refused.
 verifyEqual(tc, console_ref_range(), [3e-4 6e-3]);
 [root, tgt] = bundle_root(tc, 'ref_range');
 for b9 = [2.9e-4 6.1e-3 1e-4 1e-2]
-    cr = clean_ref_table(); cr.clean_ref.ber_est(4) = b9; cr.clean_ref.ber(4) = b9;
+    cr = clean_ref_table(); cr.clean_ref.ber(4) = b9;                  % ber_est stays 1e-3, inside
     save(fullfile(root, 'data', 'policy_pools.mat'), '-struct', 'cr');
     verifyError(tc, @() export_quiet(tgt, root), 'export_gui_bundle:clean_ref', sprintf('%g', b9));
     verifyFalse(tc, isfile(fullfile(tgt, 'rx3', 'data', 'policy_pools.mat')), sprintf('%g', b9));
 end
 for b9 = [3.01e-4 5.99e-3]
-    cr = clean_ref_table(); cr.clean_ref.ber_est(4) = b9; cr.clean_ref.ber(4) = b9;
+    cr = clean_ref_table(); cr.clean_ref.ber(4) = b9;
     save(fullfile(root, 'data', 'policy_pools.mat'), '-struct', 'cr');
     export_quiet(tgt, root);
     verifyTrue(tc, isfile(fullfile(tgt, 'rx3', 'data', 'policy_pools.mat')), sprintf('%g', b9));
 end
+for e9 = [1e-4 1e-2]                                                    % the estimate outside, the mean BER inside
+    cr = clean_ref_table(); cr.clean_ref.ber_est(4) = e9;
+    save(fullfile(root, 'data', 'policy_pools.mat'), '-struct', 'cr');
+    export_quiet(tgt, root);
+    verifyTrue(tc, isfile(fullfile(tgt, 'rx3', 'data', 'policy_pools.mat')), sprintf('ber_est %g', e9));
+end
+cr = clean_ref_table(); cr.clean_ref = rmfield(cr.clean_ref, 'ber');
+save(fullfile(root, 'data', 'policy_pools.mat'), '-struct', 'cr');
+verifyError(tc, @() export_quiet(tgt, root), 'export_gui_bundle:clean_ref', 'no ber');
 end
 
 function test_exporter_refuses_missing_or_nan_reference(tc)
@@ -236,11 +249,27 @@ clear back
 end
 
 function test_console_refuses_reference_out_of_range(tc)
-% A finite reference whose 9 dB value is outside 3e-4 to 6e-3 stops the console's start with the
-% re-export message, before any model is loaded.
+% A finite reference whose mean clean BER at 9 dB is outside 3e-4 to 6e-3 stops the console's
+% start with the re-export message, before any model is loaded; the monitor's estimate alone
+% outside it does not (the start then goes on to the models, which this folder lacks).
+d = fullfile(tc.TestData.tmp, 'start_range_est'); mkdir(fullfile(d, 'data'));
+cr = clean_ref_table(); cr.clean_ref.ber_est(4) = 1e-4;
+save(fullfile(d, 'data', 'policy_pools.mat'), '-struct', 'cr');
+c0 = cd(d); back = onCleanup(@() cd(c0));
+clean_ber_ref('reset');
+err = [];
+try
+    demo_gui();
+catch ME
+    err = ME;
+end
+verifyNotEmpty(tc, err);
+if ~isempty(err), verifyNotEqual(tc, err.identifier, 'demo_gui:clean_ref'); end
+clear back
+close all force
 for b9 = [1e-4 1e-2]
     d = fullfile(tc.TestData.tmp, sprintf('start_range_%g', b9)); mkdir(fullfile(d, 'data'));
-    cr = clean_ref_table(); cr.clean_ref.ber_est(4) = b9; cr.clean_ref.ber(4) = b9;
+    cr = clean_ref_table(); cr.clean_ref.ber(4) = b9;                  % ber_est stays 1e-3, inside
     save(fullfile(d, 'data', 'policy_pools.mat'), '-struct', 'cr');
     c0 = cd(d); back = onCleanup(@() cd(c0));
     clean_ber_ref('reset');
