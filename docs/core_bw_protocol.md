@@ -5,6 +5,11 @@ validation stage writes its SHA-256 into `results/core_bw/protocol.json`; the te
 test split only while this file is unchanged, committed, and the frozen choices are committed as
 `docs/core_bw_frozen.json`.
 
+Amended by D106 (27.10.2026), before the smoke and before any CORE_BW data: the proposal's
+three-state CNN drives the core rule as `rule_core3` and carries the lecturer's verdicts;
+`rule_core` (the hybrid detector) stays as a secondary row (sections 3, 5, 6.3, 6.5, 6.6, 7-10;
+`docs/core_bw_core3_note.txt`).
+
 ## 1. What it answers
 
 The revised proposal (D92) asks for jamming "of different bandwidths, which affect how the
@@ -101,7 +106,7 @@ validation with the others (6.4) and stay out of W (6.3), of the primary, per-wi
 sensitivity lines, of set D and of the detector analysis. The report gives them their own lines
 beside the primary 4 MHz cells (`experiment_core_bw.m` liu_lines: the PER reduction vs the static
 link with its interval, goodput and detection to restored, pooled and per JSR_tot, for
-`rule_core` and `blind_core`), with no verdict.
+`rule_core3`, `rule_core` (hybrid, secondary) and `blind_core`), with no verdict.
 
 **JSR (`jsr_inband.m`).** The controlled variable is the total power JSR_tot = P_J / P_S (Liu
 et al.: a 30 dBm jammer against a 0 dBm signal). The model's level is the in-band ratio after the
@@ -256,7 +261,9 @@ covered, are never home); 83.5 MHz 0.
   recover, the goodput difference `rule_core` - `blind_core` has a 95% lower bound above 0 and the
   PER difference's interval holds 0.
 
-Each is reported as holds / does not hold; none changes a KPI verdict.
+Each is reported as holds / does not hold; none changes a KPI verdict. They were written for
+`rule_core` and stay on it (P1 and P5 against `blind_core_fixed`, `docs/core_bw_v2_note.txt`);
+no prediction is written for `rule_core3`.
 
 ## 6. The experiment
 
@@ -277,18 +284,58 @@ two onsets per geometry (72 test episodes per (cell, Eb/N0)). Bootstrap: 2000 re
 geometries (`boot_cluster.m`).
 
 **6.3 The three systems on the core action set.** Static: `none`. Conventional (link metrics
-only): `blind_core`. CNN-based: `rule_core`, with the class `jamming` mapped to the wideband
-action W (`rule_core_policy.m` wide_action, `PP.core_wide`); every other class keeps its mapping,
-`tone_jamming` stays `channel_switch`. All run the deployed decision settings
+only): `blind_core`. CNN-based: `rule_core3`, the core rule driven by the proposal's three-state
+CNN (below); it carries the lecturer's verdicts. Beside it, labelled "hybrid, secondary":
+`rule_core`, the core rule on the hybrid detector's class, with the class `jamming` mapped to the
+wideband action W (`rule_core_policy.m` wide_action, `PP.core_wide`); every other class keeps its
+mapping, `tone_jamming` stays `channel_switch`. All run the deployed decision settings
 (`decision_settings.m`, `data/trained_dqn.mat`), the same episodes and frame draws. Among them
 the proposal dwell, chosen on validation for rule + escalation (`train_dqn.m`): under the
 consecutive dwell ('run') the class answer can commit again after an escalation left it, under
-the group dwell the rule does not commit a configuration tried in the incident again; `rule_core` and
-`blind_core` run the same dwell. `oracle`
+the group dwell the rule does not commit a configuration tried in the incident again; `rule_core3`,
+`rule_core` and `blind_core` run the same dwell. `oracle`
 (cover-aware, `oracle_action.m`) is read as a bound only.
 
-**The choice of W (validation, per hop rule).** W in {channel_switch,
-channel_switch+rate_reduce, rate_reduce}, on the recoverable validation episodes of the wideband
+**`rule_core3` (D106, `docs/core_bw_core3_note.txt`).** The class source is B3c's frozen
+three-state CNN, `data/core_cnn_model.mat` (SHA-256
+7c9cccbfe9b7fa000ca462e04812a008584990b3478c60086ea2713a50b41689, 686 584 bytes); every other
+part of the decision layer is `rule_core`'s.
+- *Scores.* The pools stage stores per frame the model's three probabilities (`probs3`, in the
+  order clean, narrowband, wideband: B3c's groups `none`, `tone_jamming`, `jamming`), computed on
+  the CPU from the same spectrogram image the hybrid reads (`pool_cell.m` `spec_image`).
+- *Class per cycle.* The argmax of the mean log-probability, log(max(p, 1e-6)), over the last
+  N = 3 cycles (`core_cnn_eval.m` 'logp'; N is B3c's, chosen on its validation and read from its
+  files), over fewer cycles at the episode's start. The window is reset only at the episode's
+  start, not at a configuration change, as the hybrid's window in the loop (`policy_monitor.m`).
+- *Mapping.* clean -> `none` -> `no_action`; narrowband -> `tone_jamming` -> `channel_switch`;
+  wideband -> `jamming` -> W3 (below).
+- *Off in this mode.* No fusion model, no unknown-threat flag, the lost-branch latch off, the
+  sweeper's k-of-n path dormant.
+- *As `rule_core`.* The alarm (a jamming class, the degradation test, the drop/CUSUM alarm), the
+  M-of-N confirmation, dwell, hold, the escalation over `C.ladder_core` (none while the class
+  reads clean unless `esc_drop`), and `rule_core_policy.m`'s degradation, quiet-slot and drop
+  branches: clean on a degraded link with interference in the quiet slot -> `channel_switch`;
+  clean on a degraded link otherwise -> `channel_switch+rate_reduce` (the default; `PP.core_blind`
+  is `blind_core`'s only); a drop alarm without quiet-slot interference -> `rate_reduce`, or the
+  configuration in use when the link budget covers the drop.
+- *Settings.* The decision settings of `data/trained_dqn.mat` as they are, not tuned again; W3 is
+  `rule_core3`'s only choice.
+- *Refusals.* The stages stop when the pools hold no `probs3` (never a fallback to the hybrid),
+  when the model's SHA-256 differs from the one above, and when the three-state mode is asked of
+  a blind or DQN policy.
+- *Read once,* in this study's single test reading (family 6, block 14). Never on the fourth test
+  set (B3c's, spent), in C2e (D105's rows stay as registered, described as the hybrid) or in P1R
+  (D104 point 2).
+- *If not ready.* If `rule_core3`'s code and tests are not green at the runbook's row 18 (CORE_BW
+  tests and smoke), it is not run: a dated line in `docs/core_bw_core3_note.txt` says so before
+  the smoke, `rule_core` carries the verdicts as D105 registered them, and the report states that
+  the closed-loop KPIs were measured with the hybrid detector, that the three-state CNN was
+  evaluated open-loop (the fourth test set, set D per bandwidth), and that putting it in the loop
+  is a registered next step, read on profile 3's own C2e and registered before that study's pools.
+
+**The choice of W and W3 (validation, per hop rule).** W for `rule_core` and W3 for `rule_core3`,
+each in {channel_switch, channel_switch+rate_reduce, rate_reduce} and each on its own policy's
+validation runs, on the recoverable validation episodes of the wideband
 fixed-total cells (Liu's 4 MHz as the noise bandwidth only), equal weight per (B_J, JSR_tot):
 1. the lowest pooled PER after onset;
 2. a candidate whose paired 95% bootstrap interval of the PER difference to the best holds 0 ties;
@@ -296,7 +343,8 @@ fixed-total cells (Liu's 4 MHz as the noise bandwidth only), equal weight per (B
 3. then the shortest median detection-to-restored time (never recovered counts as longest);
 4. then the order channel_switch, channel_switch+rate_reduce, rate_reduce.
 The equal weights over B_J are the prior the CNN cannot see past (section 3), stated in the
-report.
+report. W, W3 and `blind_core`'s first response (`docs/core_bw_v2_note.txt`) are chosen by this
+one rule on validation: an equal tuning budget.
 
 **6.4 Recoverable scenarios, fixed on validation.** Episode: some core configuration held for
 the episode restores BER and packet loss (<= 2x clean + one loss event); a configuration with
@@ -313,21 +361,26 @@ Harm is judged per scenario, never as a per-episode filter on test. The list is 
 **6.5 Readings (test split, read once).** Primary: H1, residual by offset, fixed total power,
 static jammer.
 - **PER reduction >= 30% vs static** (`per_reduction.m`, paired, geometry bootstrap), the primary
-  verdict per jamming type, as in C2e (`lect_kpis.m`): `rule_core` on every test episode of the
+  verdict per jamming type, as in C2e (`lect_kpis.m`): `rule_core3` on every test episode of the
   recoverable scenarios of the type, narrowband (the CW cells, the only narrowband state of
   section 3) and wideband (the 4-83.5 MHz cells pooled over B_J), each MET (committed) when the
   95% lower bound >= 30%, MET (not committed) when only the point is, NOT MET otherwise (also
   without episodes; `core_bw_rules.m` 'verdict', 'per_verdicts'). Both types pooled is a second
-  line, labelled so; `blind_core` gets the same three lines as the conventional system's reading.
+  line, labelled so; `blind_core` gets the same three lines as the conventional system's reading,
+  and `rule_core` as the hybrid's, labelled "hybrid, secondary".
   Beside them the per-episode recoverable reading of `lect_kpis.m`.
 - **Recovery time** (lecturer): onset to the first confirmed alarm (t_conf) and detection to the
   packet loss restored for 5 cycles (t_rec_det, `per_metrics.m`): median, p90 and the share never
-  reached (censoring within 30 cycles). Measured and compared, no threshold.
-- **Goodput** in bit/s at the nominal 50 kb/s, geometry bootstrap.
-- **CNN contribution** (analysis): `rule_core` - `blind_core` in PER, goodput and t_rec_det,
-  paired, 95% intervals; pooled, per type and per B_J.
+  reached (censoring within 30 cycles). Measured and compared, no threshold. For `none`,
+  `blind_core`, `rule_core3` and `rule_core` (hybrid, secondary).
+- **Goodput** in bit/s at the nominal 50 kb/s, geometry bootstrap; the same four policies.
+- **CNN contribution** (analysis): `rule_core3` - `blind_core` in PER, goodput and t_rec_det,
+  paired, 95% intervals; pooled, per type and per B_J; the lecturer's KPI 8 headline (D105 point 2
+  as amended by D106). `rule_core` - `blind_core` the same, labelled "hybrid, secondary".
+  `rule_core3` - `rule_core` (one decision layer, the class source alone differs): descriptive
+  only, no verdict word.
 - **Sensitivities** (no verdict): H3, H4, the 30 dB residual (each rule), the equal in-band
-  level, the follower; each says whether it would flip a primary verdict (`rule_core`'s per
+  level, the follower; each says whether it would flip a primary verdict (`rule_core3`'s per
   jamming type; `core_bw_rules.m` 'flip'): a primary type without episodes reads NOT MET, so a
   sensitivity that reads it otherwise on episodes of its own flips it; a type the sensitivity
   has no episodes of flips nothing. Liu's occupied reading has its own lines beside the primary 4 MHz cells
@@ -335,7 +388,8 @@ static jammer.
 - **Detector by bandwidth** (analysis; the KPI verdicts of macro-F1, recall and false alarms stay
   with B3c, `docs/core_cnn_protocol.md`, and with the hybrid's B3 through `three_state_view.m`):
   the hybrid's monitor class and frame argmax on the static test episodes after the onset, as the
-  three states, per (B_J, JSR_tot, Eb/N0); the frozen three-state CNN on set D (4 flights per
+  three states, per (B_J, JSR_tot, Eb/N0), and beside them `rule_core3`'s windowed three-state
+  class (section 6.3) on the same frames; the frozen three-state CNN on set D (4 flights per
   (fixed-total cell, Eb/N0), 24 clean; the no_action link of the pools' flights) only after B3c's
   own reading. Detectability floor, fixed now: in-band I/N >= 0 dB, JSR_in + Eb/N0 + 3.01 >= 0;
   recall is shown above and below it, no frame dropped. False alarms are not read here.
@@ -345,10 +399,18 @@ static jammer.
   the headline, once after the test stage. The verdicts above are unchanged. A failed gate of that
   reading writes `core_bw_lect_by_link.gatefail.{txt,mat}` and does not spend it (once means after
   a PASS); its first attempt is the gated wrapper, the fallback is `lect_ebno_protocol.md` section 6.
+- **Link-limited lines of `rule_core3` (D106).** `rule_core3` gets them as the verdict's row:
+  Line A and Line B per jamming type with their verdict words and their comparison, recovery time
+  from detection (Line B the headline, Line A with N) and goodput; `rule_core` keeps its lines,
+  labelled "hybrid, secondary". They come from the readers copied byte for byte from the
+  `experiment_core_bw.m` of the test stage's commit (`lect_ebno_protocol.md` section 7) and from
+  `core_bw_lect_by_link.m`'s recovery-time loop extended to `rule_core3`, committed and tested on
+  `lect-ebno` before the test stage; that protocol's rules are unchanged.
 
 **6.6 Gates before the test reading.**
 - G1: every test of section 8 passes.
-- G2: the pools stage reports the time per simulation and, per cell, the share of geometries on
+- G2: the pools stage reports the time per simulation (the three-state CNN's inference
+  included) and, per cell, the share of geometries on
   which the in-band cap binds.
 - G3: under `channel_switch` held from the first cycle, every validation frame after the onset
   comes from the pool the coverage (`band_reject.m`) names for the channel in use (zero
@@ -358,9 +420,11 @@ static jammer.
   covered), the share of hops clear but counted covered (under 2 MHz, or R_eff under 2 dB), the
   share of hop channels at each layer and the mean and largest distance from R_eff to its layer
   ("no escaped hop" for a width without one, `core_bw_rules.m` 'gap_text').
-- G4: `protocol.json` holds W per hop rule, the recoverable list's hash and this file's hash, and
-  is committed byte for byte as `docs/core_bw_frozen.json`. The test stage refuses without them,
-  on any hash mismatch, with this file or the frozen copy uncommitted, after a marker
+- G4: `protocol.json` holds W and W3 per hop rule, the recoverable list's hash, this file's hash,
+  the three-state model's SHA-256 and N and the hash of `docs/core_bw_core3_note.txt`, and is
+  committed byte for byte as `docs/core_bw_frozen.json`. The test stage refuses without them,
+  on any hash mismatch, when W3, the model's SHA-256 or N differ from validation's, with this
+  file, the note or the frozen copy uncommitted, after a marker
   (`results/core_bw/test_read_started.txt`) or a committed record `docs/core_bw_read_*.txt` with
   the same `params_id`. After the reading, copy the marker to `docs/core_bw_read_p1.txt` and
   commit it. Once the test is read the validation stage refuses to run again, and the report is
@@ -370,7 +434,9 @@ static jammer.
 
 Inputs (read-only copies of the profile's deployed files, after the final detector is deployed):
 `params.mat`, `data/trained_detector.mat`, `data/fusion.mat`, `data/ood_thresholds.mat` (copied
-with its time stamp), `data/splits.mat` (its norm and classes) and `data/trained_dqn.mat`. Never
+with its time stamp), `data/splits.mat` (its norm and classes) and `data/trained_dqn.mat`; for
+`rule_core3` also `data/core_cnn_model.mat`, read at the pools stage, its SHA-256 checked against
+section 6.3's. Never
 beside C1p: the pools stage takes the machine's parallel turn (`parallel_turn.m`).
 
 Stages, in order: `experiment_core_bw('smoke')`, then `'pools'`, `'dset'`, `'val'`, commit the
@@ -393,6 +459,11 @@ test_band_seeds_disjoint, test_band_protocol_guard, and the existing test_rule_c
 test_core_decide_escalation, test_core_policies_rollout, test_per_reduction, test_three_state_view,
 test_rule_dwell_tried.
 
+For `rule_core3` (D106; listed with what each checks in `docs/core_bw_core3_note.txt`):
+test_band_core3_off_identical, test_band_core3_probs3, test_band_core3_window,
+test_band_core3_inert, test_band_core3_mapping, test_band_core3_refusals, test_band_core3_freeze,
+test_band_core3_rows; and test_band_protocol_pointer pins this file to the amendment's commit.
+
 ## 9. Time and memory (estimate; the smoke measures it)
 
 2.83-3.15 s per 20-frame simulation with one jammer, 6 workers, x 1.35 with the boost off.
@@ -406,6 +477,9 @@ pairs), 2.1-2.4 h (2.8-3.2 h boost off), and the occupied reading 28 800 (5 760 
 23 040 in its layers), 3.8-4.2 h (5.1-5.7 h boost off). Every run keeps its full length. Set D:
 864 runs, 0.2-0.6 h. Validation and test rollouts (49 scenarios, 42 layers' tables): 1.1-2.8 h.
 Total about 26.3-31.2 h (35-42 h boost off). Memory: pools about 1.6 GB, set D about 1.1 GB.
+`rule_core3` adds one forward pass of the 0.7 MB three-state CNN per pooled frame, on an image
+already built (about 1-2 h on the pools), and its own validation and test rollouts (0.3-1 h):
+total about 27-33 h; the smoke's G2 measures it.
 
 ## 10. Risks, stated
 
@@ -426,3 +500,8 @@ Total about 26.3-31.2 h (35-42 h boost off). Memory: pools about 1.6 GB, set D a
 9. W and the recoverable list are the only choices, both on validation, frozen by hash; the test
    is read once.
 10. The return link carrying the hop command is assumed, as in the main loop.
+11. `rule_core3` reads three states only. Every threat of this study's cells is one of them (CW,
+    4-83.5 MHz), so the hybrid's other classes take no part in its verdicts; `rule_core` keeps
+    them.
+12. B3c chose N = 3 on open-loop sub-runs; in the loop the window spans configuration changes
+    (section 6.3), as the hybrid's does.

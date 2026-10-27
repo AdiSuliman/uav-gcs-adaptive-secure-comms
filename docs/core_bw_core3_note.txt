@@ -1,0 +1,100 @@
+CORE_BW (experiment_core_bw.m), profile 1: rule_core3, the proposal's three-state CNN in the loop
+Written 2026-10-27 on branch core-bw-p1, before the smoke and before any CORE_BW pools, validation
+or test data exist (this tree holds no results/core_bw, no results/core_bw_smoke and no data
+folder). DECISIONS D106; it amends D105's KPI 8 headline and the row carrying CORE_BW's lecturer
+verdicts. Protocol sections 3, 5, 6.3, 6.5, 6.6 and 7-10 carry the amendment.
+The validation stage writes this file's SHA-256 into results/core_bw/protocol.json; the test
+stage refuses a changed or uncommitted note.
+
+1. Model
+   data/core_cnn_model.mat, B3c's frozen three-state CNN (profile 1, written 26.10.2026 14:50),
+   copied from profile 1's tree (uav-gcs-v7, only read), never trained again:
+     SHA-256 7c9cccbfe9b7fa000ca462e04812a008584990b3478c60086ea2713a50b41689, 686584 bytes.
+   States in the model's order: clean, narrowband, wideband (B3c's groups none, tone_jamming,
+   jamming; core_cnn_config.m).
+   N = 3 (results/core_cnn_validation.txt: the shortest N within one standard error of the best).
+   The pools, val and test stages refuse another hash; protocol.json records the hash and N; the
+   test stage refuses values that differ from validation's.
+
+2. The policy rule_core3
+   policy_setup: kind rule_esc, opt.core, opt.core3. One decision layer with rule_core; only the
+   class source differs.
+   Scores: probs3 (frames x 3) stored by the pools stage per frame, from the same spectrogram
+     image the hybrid reads (pool_cell.m spec_image), on the CPU; the loop's observation carries
+     them beside the hybrid's probs.
+   Class per cycle: argmax of the mean of log(max(p, 1e-6)) over the last 3 cycles
+     (core_cnn_eval 'logp'), fewer at the episode's start. The window is reset only at the
+     episode's start, not at a configuration change, as the hybrid's window in the loop
+     (policy_monitor.m: its window only grows; only the BER and CRC windows restart on a new
+     configuration).
+   Mapping: clean -> none -> no_action; narrowband -> tone_jamming -> channel_switch;
+     wideband -> jamming -> W3.
+   Off: the fusion model, the unknown-threat flag, the lost-branch latch (switched off explicitly:
+     onset_shape('on', []) returns true), the sweeper's k-of-n path.
+   As rule_core: the alarm (a jamming class, the degradation test, the drop/CUSUM alarm), M-of-N
+     confirmation, dwell, hold, escalation over C.ladder_core (none while the class reads clean
+     unless esc_drop), and rule_core_policy's degradation, quiet-slot and drop branches with
+     their defaults (PP.core_blind is blind_core's only).
+   Settings: data/trained_dqn.mat's decision settings as they are, not tuned again.
+   Refusals: no probs3 in the pools (no fallback to the hybrid); a model hash other than section
+     1's; opt.core3 with a blind or DQN policy.
+
+3. W3, chosen on validation
+   Per hop rule, among channel_switch, channel_switch+rate_reduce, rate_reduce, on rule_core3's own
+   validation runs of the recoverable episodes of the wideband fixed-total cells (Liu's 4 MHz as
+   the noise bandwidth only), equal weight per (B_J, JSR_tot), by protocol 6.3's rule: the rule
+   of rule_core's W and of blind_core's first response (docs/core_bw_v2_note.txt), an equal
+   tuning budget. Written to protocol.json with W, frozen in docs/core_bw_frozen.json; the test
+   stage refuses another value.
+
+4. Rows and readings (test split, read once)
+   rule_core3 runs wherever rule_core runs: the primary set of every hop rule, the 30 dB residual
+   set and the follower set, with the same episodes and frame draws.
+   KPI 5, PER reduction >= 30% vs static per jamming type (narrowband, wideband): rule_core3
+     against none, the verdict words of protocol 6.5.
+   KPI 6, recovery time (onset -> detection, detection -> restored): rule_core3, with none and
+     blind_core beside it.
+   KPI 7, goodput in bit/s: rule_core3, with none and blind_core beside it.
+   KPI 8, the CNN's contribution: rule_core3 minus the validation-tuned blind_core, paired, 95%
+     intervals, pooled, per type and per B_J (analysis, no promise).
+   rule_core (the hybrid): the same lines, labelled "hybrid, secondary". rule_core3 minus
+     rule_core: descriptive only, no verdict word.
+   The sensitivities' flip reads rule_core3's primary verdicts. Liu's occupied-reading lines
+     carry rule_core3 too. Predictions P1-P5 stay on rule_core as written.
+   Detector by bandwidth: rule_core3's windowed three-state class on the static test episodes
+     after the onset, beside the hybrid's.
+   Read once, in CORE_BW's own single test reading (family 6, test block 14). Never on the
+     fourth test set, in C2e or in P1R.
+
+5. Link-limited lines (D99, core_bw_lect_by_link.m on lect-ebno)
+   rule_core3 gets them: Line A and Line B per type with the verdict-word comparison, recovery
+   time from detection (Line B the headline, Line A with N) and goodput. The seven readers are
+   retaken byte for byte from the experiment_core_bw.m of the test stage's commit
+   (lect_ebno_protocol.md section 7), and the recovery-time loop of its readings is extended to
+   rule_core3, in a tested commit on lect-ebno before the test stage. That protocol's rules are
+   unchanged.
+
+6. Tests (code/tests/test_core.m), before the smoke
+   test_band_core3_off_identical  without core3, pool_cell, link_env and the monitor are bit for
+                                  bit as before; none, blind_core, blind_core_fixed and rule_core
+                                  are unchanged when probs3 is present
+   test_band_core3_probs3         probs3 equals the CPU scores of the same image
+   test_band_core3_window         the core3 class equals the argmax of core_cnn_eval 'logp' (N = 3)
+                                  on a synthetic trace, across a configuration change
+   test_band_core3_inert          unknown flag, latch and sweeper path inert in core3 mode
+   test_band_core3_mapping        the three states, the degradation, quiet-slot and drop branches,
+                                  no escalation while the class reads clean
+   test_band_core3_refusals       no probs3, another model hash, core3 with blind or dqn
+   test_band_core3_freeze         W3 chosen by protocol 6.3's rule, frozen; the guard refuses a
+                                  changed W3, model hash, N or note
+   test_band_core3_rows           rule_core3 rows in all three sets; the report's labels
+   test_band_protocol_pointer     the protocol is the amendment commit's file
+   The smoke's G2 timing includes the extra inference.
+
+7. If not ready by the runbook's row 18
+   If the code and tests are not green at row 18 (CORE_BW tests and smoke), rule_core3 is not
+   run. A dated line below says so before the smoke; rule_core carries the verdicts as D105
+   registered them, and the report says: "The closed-loop KPIs were measured with the hybrid
+   detector. The three-state CNN was evaluated open-loop (fourth test set, set D per bandwidth).
+   Putting it in the loop is a registered next step, read on profile 3's own C2e and registered
+   before that study's pools."
