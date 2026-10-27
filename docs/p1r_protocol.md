@@ -207,3 +207,53 @@ About 44-49 h at C2's 72 runs, or 57-64 h at 108 runs (108 when the fixed monito
 CUSUM pick off the top of its grid), plus an unmeasured factor from the wrapper's single-thread
 MATLAB, measured on C2's first two runs. The fresh build takes about 2.0-2.3 h. Profile 3 then
 ends about 18-21.11 (worst about 22-23.11).
+
+## 11. Amendments (dated; each written before any P1R data)
+
+- **27.10.2026, paths only.** Under Adi's folder rule the P1R worktree is
+  `C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\worktrees\p1r` (section 3 said
+  `C:\Users\Adi Suliman\uav-gcs-v7-p1r`) and the smoke worktree is `...\worktrees\p1r-smoke`
+  (section 6 said `uav-gcs-p1r-smoke`). Nothing else changes with the paths.
+- **27.10.2026, where the KPI 6 code lives.** `kpi6_set.m`, `kpi6_fresh_marker.m` and the
+  `"kpi6_set": "fresh"` path of `evaluate_policies.m` are written on `lect-kpi` with their tests
+  and reach `p1r` by cherry-pick, like the other P1R commits (section 8 said "written on `p1r`").
+  Without the key `evaluate_policies.m` keeps every line of the parent commit in order and the
+  union's heading reads as before; `KP` gains no field and the save list is unchanged.
+- **27.10.2026, read once, enforced.** With `"kpi6_set": "fresh"` C2e first runs every check that
+  needs no fresh flight: the fresh pools file present, of these pools' detector, built as the
+  fresh set (`CT.set`, `CT.fams`); the agent trained with C1d's degradation test; the marker. It
+  then writes `results/kpi6_fresh_read_started.txt` before the first fresh flight: time, commit
+  and code tree, the fresh pools' SHA-256, the deployed degradation test and C1d's adopted
+  candidate, `det_id`, the policy stamp. An error before the KPI 6 line appends "crash before any
+  KPI 6 line" with the error; "KPI 6 read" is appended once the fresh flights are flown, before
+  the KPI 6 line is computed. A second start is refused unless the marker's last event is such a
+  crash on the same pools file. A MATLAB stopped from outside records no crash, so its restart is
+  refused and Adi decides.
+- **27.10.2026, run-level resume.** P1R's `profile.json` adds `"run_cache": true`
+  (`run_cache.m`). C2 then keeps every finished training run and reward-sensitivity retrain in
+  `data/run_cache/C2`, keyed by the code, the input files (the pools, C1d's file, the clean
+  validation flights, the KPI 1 threshold), the MATLAB release and thread count, the
+  hyperparameters, and the run's settings and seed. A C2 started again after a stop reads the
+  finished runs and trains only the rest; its results are those of an uninterrupted C2 run with
+  the same thread count. No run is shortened. The file is
+  `{"profile": "profile 1, P1R", "deg_select": true, "kpi6_set": "fresh", "run_cache": true}`,
+  kept on `lect-kpi` as `tools/p1r/profile.json` (`lect-kpi` has no root `profile.json`) and
+  committed as the root `profile.json` of `p1r`. A C2 stop in P1R is resumed by running C2 again
+  with the same command.
+- **27.10.2026, the breakdown.** `evaluate_policies.m` with the key saves `RWf` (split id 7) and
+  sets `KP.far_set = 'fresh'`, `KP.far` and `KP.far_diag` from `RWf` alone and `KP.far_union`,
+  `KP.far_diag_union`, `KP.far_src_union` from the union. `system_fa_breakdown.m`'s reader of
+  `KP.far_set` (P4) is still to be written on `sysfa` / `p1r` after D103's reading of profile 1.
+  Until then, its exact gate on the union does not reproduce P1R's `KP.far`: it stops and never
+  misreads.
+- **27.10.2026, tests.** Added to section 9:
+
+  | Test | What it checks |
+  |---|---|
+  | `test_core/test_deg_mode_suite` | `test_deg_mode.m` runs inside `test_core`: every one of its tests ran and passed |
+  | `test_core/test_kpi6_set_values` | `'union'` by default; `"fresh"` from `profile.json` or `CFG`; other values stop |
+  | `test_core/test_kpi6_fresh_marker` | The marker's lines; a second start refused without a recorded crash, after "KPI 6 read", or on another pools file; allowed after a crash before the KPI 6 line |
+  | `test_core/test_evaluate_fresh_checks` | C2e with the key stops on each failed check before any flight and before the marker; without the key none of it runs |
+  | `test_core/test_evaluate_fresh_wiring` | Marker, flight, crash record, "KPI 6 read" and the fresh `far_report` in that order; `RWf`, `KP.far_set` and the labels; without the key every parent line in order |
+  | `test_core/test_run_cache_*` | A restart skips the finished runs and gives the uninterrupted results; cut-off, unreadable or other-key files are computed again; the entities of C2g and C2u; the switch; the wiring of C2, C2g and C2u |
+  | `test_core/test_p1r_profile` | `tools/p1r/profile.json`: `deg_select`, `kpi6_set` `fresh`, `run_cache`, no `n_rx`, no `fec_rx`, no `deg_force` |
