@@ -14,6 +14,12 @@
 % agent is kept, so the edge map can read it later. Evidence only: no rate is committed
 % for an emitter outside the modelled classes. The trained agent and the pools come from
 % the same detector (check_det_id.m), whose identity the kept agents carry.
+% Every threat is one entity (run_cache.m 'each'): with "run_cache": true in profile.json or
+% CFG.run_cache each is kept in data/run_cache/C2u as it finishes (its results, episodes and
+% agent), an entity that stops is reported while the others still run, and the stage then
+% stops naming it; started again, only the entities not kept are computed. Without it the
+% first error stops at once, naming its threat. The smoke runs the first threat only, or every
+% one (still reduced) with CFG.smoke_all_entities = true.
 %
 % Output: results/unknown_threat_policy.{txt,mat} (res, and every episode: EP),
 % data/unknown_threat_agents.mat (agents_loo, threats, det_id)
@@ -33,7 +39,10 @@ seed = Q.seed_summary.selected_seed;
 nA = numel(PP.actions); nS = policy_state_size(nA, numel(PP.classes));
 threats = setdiff(PP.singles, {'none'}, 'stable');
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
-    threats = threats(1); REPS = 1; H.episodes = 1280; H.buffer = 20000; H.warmup = 2000; H.n_eval = 1;
+    if ~(exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'smoke_all_entities') && isequal(CFG.smoke_all_entities, true))
+        threats = threats(1);               % CFG.smoke_all_entities: every entity, still reduced
+    end
+    REPS = 1; H.episodes = 1280; H.buffer = 20000; H.warmup = 2000; H.n_eval = 1;
 end
 
 res = struct('threat', {}, 'n', {}, 'dqn_out', {}, 'dqn_in', {}, 'rule', {}, 'ci_out', {}, 'ci_in', {});
@@ -42,37 +51,14 @@ agents_loo = cell(1, numel(threats));
 SPL = TEST; if numel(PP.runs) >= TEST2, SPL = [TEST TEST2]; end
 c1 = find(strcmp(PP.scen, threats{1}), 1);
 nfl = sum(arrayfun(@(sp) numel(PP.cell_geo{c1}{sp}), SPL));       % flights per (cell, Eb/N0)
+cfgc = []; if exist('CFG', 'var'), cfgc = CFG; end
+CDIR = run_cache('dir', run_cache('on', cfgc), 'C2u'); CID = '';     % every threat kept as it finishes (run_cache.m)
+if ~isempty(CDIR), CID = run_cache('inputs', {'data/policy_pools.mat', 'data/trained_dqn.mat'}); end
+keys = cellfun(@(th) run_cache('key', {CID, 'C2u', th, H, seed, REPS, NE, SPL, DK}), threats, 'UniformOutput', false);
 t0 = tic;
+out = run_cache('each', CDIR, keys, @(ti) one_threat(ti, threats, PP, K, Q, H, seed, nS, SPL, REPS, NE, DK, t0), threats);
 for ti = 1:numel(threats)
-    th = threats{ti};
-    hit = cellfun(@(s) any(strcmp(strsplit(s, '+'), th)), PP.scen);
-    c = find(strcmp(PP.scen, th));
-    fprintf('[%d/%d] %s left out of training and validation (%d cells)\n', ti, numel(threats), th, sum(hit));
-    PPx = PP;
-    PPx.pools(hit, :, :, 1:2) = {[]};
-    Kx = link_env('tables', PPx);
-    Kt = Kx; Kt.FA = Q.seed_summary.selected_fa_pen;
-    if isfield(Q.seed_summary, 'selected_cost_scale')          % training reward variant
-        Kt.cost = Q.seed_summary.selected_cost_scale * Kx.cost; Kt.SW = Q.seed_summary.selected_sw_scale * Kx.SW;
-    end
-    ag = dqn_train_run(H, PPx, Kt, Kx, Q.norm_in, seed, nS, 1, 2);
-    agents_loo{ti} = dqn_dense(ag);
-    [Ro, Ri, Rr] = deal([]);
-    for sp = SPL
-        specs = test_episodes(c, numel(PP.ebno), K.geo(c, sp), REPS, NE, H.T, ...
-            RandStream('mt19937ar', 'Seed', 500 + 100 * sp + ti));
-        Ro = cat_struct(Ro, mark(dqn_eval_batches(DK, PP, K, specs, ag, struct(), 7000, sp), specs, PP, sp));
-        Ri = cat_struct(Ri, mark(dqn_eval_batches(DK, PP, K, specs, Q.agent, struct(), 7000, sp), specs, PP, sp));
-        Rr = cat_struct(Rr, mark(dqn_eval_batches('rule_esc', PP, K, specs, [], struct(), 7000, sp), specs, PP, sp));
-    end
-    EP(end+1) = struct('threat', th, 'out', Ro, 'in', Ri, 'rule', Rr); %#ok<SAGROW>
-    m = Ro.recoverable & Ro.threat;
-    [~, lo1, hi1] = boot_cluster(double(Ro.recovered(m)), ones(1, sum(m)), Ro.geom(m), 2000, 1);
-    [~, lo2, hi2] = boot_cluster(double(Ri.recovered(m)), ones(1, sum(m)), Ri.geom(m), 2000, 2);
-    res(end+1) = struct('threat', th, 'n', sum(m), 'dqn_out', mean(Ro.recovered(m)), 'dqn_in', mean(Ri.recovered(m)), ...
-        'rule', mean(Rr.recovered(m)), 'ci_out', [lo1 hi1], 'ci_in', [lo2 hi2]); %#ok<SAGROW>
-    fprintf('    recovered among %d recoverable: never trained %.1f%% | trained %.1f%% | rule+esc %.1f%% (%.1f min)\n\n', ...
-        sum(m), 100*res(end).dqn_out, 100*res(end).dqn_in, 100*res(end).rule, toc(t0)/60);
+    EP(end+1) = out{ti}.EP; res(end+1) = out{ti}.res; agents_loo{ti} = out{ti}.agent; %#ok<SAGROW>
 end
 
 rep = {'=== LINK RECOVERY UNDER A THREAT NEVER TRAINED ON: LEAVE-ONE-THREAT-OUT ==='};
@@ -100,6 +86,41 @@ save('data/unknown_threat_agents.mat', 'agents_loo', 'threats', 'det_id', 'H', '
 fprintf('\nSaved results/unknown_threat_policy.{txt,mat}, data/unknown_threat_agents.mat (%.1f min)\n', toc(t0)/60);
 
 %% ===================== Local functions =====================
+function o = one_threat(ti, threats, PP, K, Q, H, seed, nS, SPL, REPS, NE, DK, t0)
+% Threat ti left out of training and validation (its single and combined cells): the retrained
+% DQN (o.agent, matrix form), the selected one and rule + escalation on its test flights (o.EP,
+% o.res).
+th = threats{ti};
+hit = cellfun(@(s) any(strcmp(strsplit(s, '+'), th)), PP.scen);
+c = find(strcmp(PP.scen, th));
+fprintf('[%d/%d] %s left out of training and validation (%d cells)\n', ti, numel(threats), th, sum(hit));
+PPx = PP;
+PPx.pools(hit, :, :, 1:2) = {[]};
+Kx = link_env('tables', PPx);
+Kt = Kx; Kt.FA = Q.seed_summary.selected_fa_pen;
+if isfield(Q.seed_summary, 'selected_cost_scale')          % training reward variant
+    Kt.cost = Q.seed_summary.selected_cost_scale * Kx.cost; Kt.SW = Q.seed_summary.selected_sw_scale * Kx.SW;
+end
+ag = dqn_train_run(H, PPx, Kt, Kx, Q.norm_in, seed, nS, 1, 2);
+[Ro, Ri, Rr] = deal([]);
+for sp = SPL
+    specs = test_episodes(c, numel(PP.ebno), K.geo(c, sp), REPS, NE, H.T, ...
+        RandStream('mt19937ar', 'Seed', 500 + 100 * sp + ti));
+    Ro = cat_struct(Ro, mark(dqn_eval_batches(DK, PP, K, specs, ag, struct(), 7000, sp), specs, PP, sp));
+    Ri = cat_struct(Ri, mark(dqn_eval_batches(DK, PP, K, specs, Q.agent, struct(), 7000, sp), specs, PP, sp));
+    Rr = cat_struct(Rr, mark(dqn_eval_batches('rule_esc', PP, K, specs, [], struct(), 7000, sp), specs, PP, sp));
+end
+m = Ro.recoverable & Ro.threat;
+[~, lo1, hi1] = boot_cluster(double(Ro.recovered(m)), ones(1, sum(m)), Ro.geom(m), 2000, 1);
+[~, lo2, hi2] = boot_cluster(double(Ri.recovered(m)), ones(1, sum(m)), Ri.geom(m), 2000, 2);
+o.EP = struct('threat', th, 'out', Ro, 'in', Ri, 'rule', Rr);
+o.res = struct('threat', th, 'n', sum(m), 'dqn_out', mean(Ro.recovered(m)), 'dqn_in', mean(Ri.recovered(m)), ...
+    'rule', mean(Rr.recovered(m)), 'ci_out', [lo1 hi1], 'ci_in', [lo2 hi2]);
+o.agent = dqn_dense(ag);
+fprintf('    recovered among %d recoverable: never trained %.1f%% | trained %.1f%% | rule+esc %.1f%% (%.1f min)\n\n', ...
+    sum(m), 100*o.res.dqn_out, 100*o.res.dqn_in, 100*o.res.rule, toc(t0)/60);
+end
+
 function specs = test_episodes(c, nS, rr, reps, NE, T, rs)
 % Every (cell, Eb/N0, geometry of the split the cell flies: rr, one list per cell) of the
 % cells c (the severities of one threat) `reps` times, in batches of NE (cyclic padding of
