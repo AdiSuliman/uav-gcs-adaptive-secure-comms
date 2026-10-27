@@ -7,10 +7,12 @@ function [T, lines] = lect_kpi_table(res_dir)
 %     core_cnn.mat, core_cnn.txt   the three-state CNN's single reading (train_core_cnn.m, B3c)
 %     phy_validation.txt      the BER model against theory
 %     low_ebno_mark.txt, lect_kpis_by_ebno.mat   the link-limited mark and Line B (D99)
-%     core_bw/core_bw_kpis.mat   CORE_BW's controlled-bandwidth reading (headline of KPI 8)
+%     core_bw/core_bw_kpis.mat   CORE_BW's controlled-bandwidth reading (headline of KPI 5 and 8, D106)
 %   Verdict words and intervals are copied from the saved structs (lect_kpis.m, train_core_cnn.m,
-%   the phy report); the one word not in a saved struct, the system false-alarm verdict, follows
-%   docs/c2e_lect_protocol.md section 6. A missing input gives rows that read 'pending (...)'.
+%   the phy report, experiment_core_bw.m); the one word not in a saved struct, the system
+%   false-alarm word, follows the one-sided 95% bound (D103): 'MET (bound <= 5%)' when the bound
+%   is at most 5%, 'point estimate only' when only the point is, 'NOT MET' otherwise. A missing
+%   input gives rows that read 'pending (...)'.
 %   Writes in res_dir:
 %     lect_kpi_table.txt, lect_kpi_table.csv   the table in the proposal's numbering
 %     lect_kpi_per.png        PER after onset and PER reduction vs the static link, 95% intervals
@@ -19,11 +21,16 @@ function [T, lines] = lect_kpi_table(res_dir)
 %   Proposal numbering (D92, D105): 1 BER model vs theory, 2 macro-F1 >= 85%, 3 false alarms
 %   <= 5% in clean states, 4 recall >= 85% per jamming type, 5 PER reduction >= 30% vs the static
 %   link, 6 recovery time, 7 goodput, 8 the CNN's contribution.
-%   Each row names the network that produced it and the policy pair (D105): KPI 5-8 are read
-%   with the hybrid detector's classes on the core action set (rule_core against none and
-%   blind_core), never with the three-state CNN, which only produces KPI 2-4 (B3c).
-%   T.rows is the struct array behind the csv, T.files the files written, T.pending the rows
-%   that read 'pending'; lines is the text file's content.
+%   Each row names the network that produced it and the policy pair. KPI 2-4 come from the
+%   three-state CNN (B3c). KPI 5-8 of C2e are read with the hybrid detector's classes on the core
+%   action set (rule_core against none and blind_core, D105). CORE_BW puts the three-state CNN in
+%   the loop (rule_core3, D106): its rows are the headline of KPI 5 and 8 against the
+%   validation-tuned blind_core, rule_core there is labelled 'hybrid, secondary', and
+%   rule_core3 - rule_core is descriptive, with no verdict word. Without rule_core3 in the file
+%   (the fallback of D106 point 9) rule_core carries the CORE_BW rows as D105 registered them.
+%   The system false alarms (KP.far) are not proposal KPI 3: they are listed apart as 'extension:
+%   system FA (project KPI 6, D103)'. T.rows is the struct array behind the csv, T.files the
+%   files written, T.pending the rows that read 'pending'; lines is the text file's content.
 if nargin < 1 || isempty(res_dir), res_dir = 'results'; end
 res_dir = char(res_dir);
 if ~isfolder(res_dir), error('lect_kpi_table:folder', 'lect_kpi_table: %s is not a folder', res_dir); end
@@ -80,7 +87,7 @@ rows = rows(ix);
 %% Files
 nm = {'', 'BER model vs theory', 'Macro-F1, three link states', 'False alarm rate in clean states', ...
     'Recall per jamming type', 'PER reduction vs the static link', 'Recovery time from detection', 'Goodput', ...
-    'CNN contribution vs the conventional adaptive link'};
+    'CNN contribution vs the conventional adaptive link', 'extension: system FA (project KPI 6, D103)'};
 lines = text_lines(rows, nm, res_abs, P, F, mk, Cn, lect);
 T = struct('rows', {rows}, 'files', {{}}, 'pending', {find(strncmp({rows.verdict}, 'pending', 7))});
 f_txt = pth('lect_kpi_table.txt'); f_csv = pth('lect_kpi_table.csv');
@@ -176,6 +183,7 @@ switch role
     case 'beside', k = 3;
     case 'second_line', k = 4;
     case {'secondary', 'extension'}, k = 5;
+    case 'descriptive', k = 6;
     otherwise, k = 7;
 end
 end
@@ -186,6 +194,8 @@ switch k
     case 'HYB_FRAMES', s = 'hybrid detector, 11 classes (monitor class), on the same frames as B3c';
     case 'HYB_LOOP', s = ['hybrid detector, 11 classes (trained_detector.mat, temporally fused) driving the rule; ' ...
             'not the three-state CNN (D105)'];
+    case 'CNN3_LOOP', s = ['three-state CNN (B3c model, mean log-probability over N = 3 cycles) driving the same rule in the loop; ' ...
+            'rule_core3, CORE_BW only (D106)'];
     case 'LINK', s = 'link metrics only (no detector: every cycle reads unknown), same decision layer';
     case 'NONE', s = 'none (static link, no response)';
     case 'PHY', s = 'physical-layer BER model (no network)';
@@ -196,6 +206,7 @@ end
 function s = pair_text(kind)
 switch kind
     case 'core', s = 'core pair (D105): rule_core, blind_core, static none';
+    case 'core3', s = 'core3 pair, CORE_BW (D106): rule_core3, blind_core (validation-tuned), static none';
     case 'full', s = 'extension pair (D105): rule_esc, blind_esc, static none';
     otherwise, s = '';
 end
@@ -263,8 +274,8 @@ for r = [2 3 1]
         'note', sprintf('target >= %g%%; frames %s', 100 * thr.macro_f1, mat2str(M.n))); %#ok<AGROW>
     R{end+1} = row(base{:}, 'kpi', 3, 'reading', 'false alarms, clean frames read as another state', 'value', 100 * M.fa, ...
         'lo', 100 * B.fa(r, 1), 'hi', 100 * B.fa(r, 2), 'verdict', V{r, 4}, 'n', M.n(1), ...
-        'note', sprintf('target <= %g%%; read as a jamming state %.2f%% [%.2f, %.2f]', 100 * thr.false_alarm, ...
-        100 * M.fa_jam, 100 * B.fa_jam(r, 1), 100 * B.fa_jam(r, 2))); %#ok<AGROW>
+        'note', sprintf('target <= %g%%; read as a jamming state %s%% [%s, %s]', 100 * thr.false_alarm, ...
+        nf('%.2f', 100 * M.fa_jam), nf('%.2f', 100 * B.fa_jam(r, 1)), nf('%.2f', 100 * B.fa_jam(r, 2)))); %#ok<AGROW>
     for s = 2:3
         R{end+1} = row(base{:}, 'kpi', 4, 'reading', sprintf('recall, %s', C.states{s}), 'value', 100 * M.recall(s), ...
             'lo', 100 * B.recall(r, s, 1), 'hi', 100 * B.recall(r, s, 2), 'verdict', V{r, s}, 'n', M.n(s), ...
@@ -274,11 +285,13 @@ end
 end
 
 function R = far_rows(P, name)
-% System false alarms (KP.far): episodes with a change on the clean flights of KPI 6, one-sided
-% 95% Clopper-Pearson bound. The word follows docs/c2e_lect_protocol.md section 6.
+% System false alarms (KP.far): episodes with a change on the clean flights of the project's KPI 6,
+% one-sided 95% Clopper-Pearson bound. An extension label of its own (D103), never proposal KPI 3.
+% The word follows the bound: at most 5% -> met; only the point estimate at most 5% -> 'point
+% estimate only'; otherwise not met.
 R = {};
 if ~P.ok || ~isfield(P.KP, 'far') || isempty(P.KP.far) || isempty(P.POL) || isempty(P.LBL)
-    R = {row('kpi', 3, 'reading', 'system false alarms on clean flights (KP.far)', 'network', 'HYB_LOOP', 'verdict', ...
+    R = {row('kpi', kpi_fa(), 'reading', 'system false alarms on clean flights (KP.far)', 'network', 'HYB_LOOP', 'verdict', ...
         pend_why(P, name, 'KP.far'), 'role', 'pending', 'source', name)};
     return;
 end
@@ -292,62 +305,100 @@ for k = 1:numel(keys)
     if isempty(q), continue; end
     q = q(1);
     w = 'NOT MET';
-    if q.upper <= 0.05, w = 'MET (committed)'; elseif q.p <= 0.05, w = 'MET (not committed)'; end
+    if q.upper <= 0.05, w = 'MET (bound <= 5%)'; elseif q.p <= 0.05, w = 'point estimate only'; end
     ph = '';
     if isfield(q, 'rate') && isstruct(q.rate) && isfield(q.rate, 'per_hour')
-        ph = sprintf('; %.0f false changes per hour', q.rate.per_hour);
+        ph = sprintf('; %s false changes per hour', nf('%.0f', q.rate.per_hour));
     end
     if q.n < 600                                     % measure_all_kpis.m: the project's KPI 6 also needs 600 episodes
         ph = sprintf('%s; fewer than 600 episodes, so the project''s own KPI 6 (kpi_summary) does not pass on these counts', ph);
     end
-    [net, role] = pol_role(keys{k}, ternary(any(strcmp(keys{k}, {'rule_core', 'none'})), 'system', 'extension'));
-    R{end+1} = row('kpi', 3, 'reading', 'system false alarms: episodes with a change on clean flights', 'network', net, ...
+    net = pol_net(keys{k});
+    R{end+1} = row('kpi', kpi_fa(), 'reading', 'system false alarms: episodes with a change on clean flights', 'network', net, ...
         'policy', keys{k}, 'pair_set', pair_text(pair_kind(keys{k})), 'action_set', action_text(keys{k}), ...
         'episodes', 'independent clean flights of KPI 6 above the KPI 1 Eb/N0 threshold', 'n', q.n, 'value', 100 * q.p, ...
-        'hi', 100 * q.upper, 'unit', '%', 'verdict', w, 'role', role, 'source', name, ...
-        'note', sprintf('%d/%d episodes; hi = one-sided 95%% Clopper-Pearson upper bound; target <= 5%%; word by the protocol rule%s%s', ...
+        'hi', 100 * q.upper, 'unit', '%', 'verdict', w, 'role', 'extension', 'source', name, ...
+        'note', sprintf('%d/%d episodes; hi = one-sided 95%% Clopper-Pearson upper bound; target <= 5%%; the word follows the bound%s%s', ...
         q.k, q.n, ph, sec_note(keys{k}))); %#ok<AGROW>
 end
 end
 
 function R = bw_rows(Bw, name)
-% CORE_BW's reading: the headline of KPI 8 (equal tuning budget, D105) and its PER verdicts beside KPI 5.
+% CORE_BW's reading: the headline of KPI 5 and 8 (equal tuning budget, D105/D106) and its PER verdicts.
+% With rule_core3 in the saved struct (D106) it carries the headline against the validation-tuned
+% blind_core, rule_core is 'hybrid, secondary' and rule_core3 - rule_core is descriptive. Without it
+% (D106 point 9, the fallback) rule_core carries them as D105 registered.
 if ~Bw.ok || ~isfield(Bw, 'primary')
-    R = {row('kpi', 8, 'reading', 'CNN contribution, rule_core against the validation-tuned blind_core (CORE_BW)', ...
-        'network', 'HYB_LOOP', 'policy', 'rule_core', 'versus', 'blind_core', 'pair_set', 'core pair, CORE_BW (D105 headline)', ...
+    R = {row('kpi', 8, 'reading', 'CNN contribution, rule_core3 against the validation-tuned blind_core (CORE_BW)', ...
+        'network', 'CNN3_LOOP', 'policy', 'rule_core3', 'versus', 'blind_core', 'pair_set', pair_text('core3'), ...
         'verdict', 'pending (CORE_BW)', 'role', 'pending', 'source', name, ...
-        'note', 'CORE_BW runs after profile 1; C2e reading below carries the secondary label')};
+        'note', 'CORE_BW runs after profile 1; C2e rows carry the hybrid label')};
     return;
 end
 K = Bw.primary; R = {};
 src = [name ' (KP.primary)'];
+c3 = isfield(K, 'per') && isstruct(K.per) && ~isempty(K.per) && any(strcmp({K.per.policy}, 'rule_core3'));
+if c3
+    hp = 'rule_core3'; hnet = 'CNN3_LOOP'; hpair = pair_text('core3');
+else
+    hp = 'rule_core'; hnet = 'HYB_LOOP'; hpair = 'core pair, CORE_BW (D105 headline), equal tuning budget';
+end
+sec = ' (hybrid, secondary)';
 if isfield(K, 'cnn') && isstruct(K.cnn)
-    for t = {'pooled', 'narrowband', 'wideband'}
-        if ~isfield(K.cnn, t{1}), continue; end
-        c = K.cnn.(t{1});
-        b = {'kpi', 8, 'network', 'HYB_LOOP', 'policy', 'rule_core', 'versus', 'blind_core', ...
-            'pair_set', 'core pair, CORE_BW (D105 headline), equal tuning budget', 'line', 'A', ...
-            'episodes', sprintf('CORE_BW recoverable scenarios, %s', t{1}), 'role', 'headline', 'source', src};
-        R{end+1} = row(b{:}, 'reading', sprintf('PER reduction of rule_core against blind_core, %s', t{1}), 'value', 100 * c.per_red(1), ...
-            'lo', 100 * c.per_red(2), 'hi', 100 * c.per_red(3), 'unit', '%', 'verdict', 'analysis, no target'); %#ok<AGROW>
-        R{end+1} = row(b{:}, 'reading', sprintf('goodput difference rule_core - blind_core, %s', t{1}), 'value', c.gput(1), ...
-            'lo', c.gput(2), 'hi', c.gput(3), 'unit', 'bit/s', 'verdict', 'analysis, no target'); %#ok<AGROW>
-        R{end+1} = row(b{:}, 'reading', sprintf('detection -> restored difference rule_core - blind_core, %s', t{1}), ...
-            'value', c.trec(1), 'lo', c.trec(2), 'hi', c.trec(3), 'unit', 'cycles', 'n', c.n_both, ...
-            'verdict', 'analysis, no target'); %#ok<AGROW>
+    R = [R, bw_contrib(K.cnn, hp, 'blind_core', hnet, hpair, 'headline', '', 'analysis, no target', src)];
+end
+if c3
+    if isfield(K, 'cnn_hybrid') && isstruct(K.cnn_hybrid)
+        R = [R, bw_contrib(K.cnn_hybrid, 'rule_core', 'blind_core', 'HYB_LOOP', 'core pair, CORE_BW, hybrid detector', ...
+            'secondary', sec, 'analysis, no target', src)];
+    end
+    if isfield(K, 'cnn_3vs') && isstruct(K.cnn_3vs)
+        R = [R, bw_contrib(K.cnn_3vs, 'rule_core3', 'rule_core', 'CNN3_LOOP', ...
+            'rule_core3 against rule_core: one decision layer, only the class source differs', 'descriptive', '', ...
+            'descriptive, no verdict word', src)];
     end
 end
 if isfield(K, 'per') && isstruct(K.per) && isfield(K.per, 'verdict')
-    for q = K.per(strcmp({K.per.policy}, 'rule_core') & ~strcmp({K.per.type}, 'pooled'))
-        R{end+1} = row('kpi', 5, 'reading', sprintf('PER reduction vs the static link, %s (CORE_BW controlled cells)', q.type), ...
-            'network', 'HYB_LOOP', 'policy', 'rule_core', 'versus', 'none', 'pair_set', 'core pair, CORE_BW', ...
-            'line', 'A', 'episodes', 'CORE_BW recoverable scenarios', 'n', q.n, 'value', 100 * q.red, 'lo', 100 * q.lo, ...
-            'hi', 100 * q.hi, 'unit', '%', 'verdict', q.verdict, 'role', 'beside', 'source', src, ...
-            'note', 'controlled-bandwidth reading; neither it nor C2e replaces the other (D105)'); %#ok<AGROW>
+    pols = {'rule_core'};
+    if c3, pols = {'rule_core3', 'rule_core'}; end
+    for i = 1:numel(pols)
+        pl = pols{i};
+        isHyb = c3 && strcmp(pl, 'rule_core');
+        net = hnet; pr = hpair; tag = '';
+        if isHyb, net = 'HYB_LOOP'; pr = 'core pair, CORE_BW, hybrid detector'; tag = sec; end
+        for q = K.per(strcmp({K.per.policy}, pl))
+            if strcmp(q.type, 'pooled') && ~c3, continue; end     % D105's rows: the two jamming types only
+            role = 'beside';
+            if strcmp(q.type, 'pooled'), role = 'second_line'; end
+            if isHyb, role = 'secondary'; end
+            R{end+1} = row('kpi', 5, 'reading', sprintf('PER reduction vs the static link, %s (CORE_BW controlled cells)%s', q.type, tag), ...
+                'network', net, 'policy', pl, 'versus', 'none', 'pair_set', pr, ...
+                'line', 'A', 'episodes', 'CORE_BW recoverable scenarios', 'n', q.n, 'value', 100 * q.red, 'lo', 100 * q.lo, ...
+                'hi', 100 * q.hi, 'unit', '%', 'verdict', q.verdict, 'role', role, 'source', src, ...
+                'note', 'controlled-bandwidth reading; neither it nor C2e replaces the other (D105, D106)'); %#ok<AGROW>
+        end
     end
 end
 if isempty(R), R = {row('kpi', 8, 'reading', 'CORE_BW reading', 'network', 'HYB_LOOP', 'verdict', ...
         sprintf('pending (%s has no KP.primary.cnn)', name), 'role', 'pending', 'source', name)}; end
+end
+
+function R = bw_contrib(C, pol, vs, net, pair, role, tag, word, src)
+% KPI 8 rows of one CORE_BW contribution struct (pooled, narrowband, wideband): PER reduction of pol
+% against vs, the goodput difference and the detection -> restored difference, with 95% intervals.
+R = {};
+for t = {'pooled', 'narrowband', 'wideband'}
+    if ~isfield(C, t{1}), continue; end
+    c = C.(t{1});
+    b = {'kpi', 8, 'network', net, 'policy', pol, 'versus', vs, 'pair_set', pair, 'line', 'A', ...
+        'episodes', sprintf('CORE_BW recoverable scenarios, %s', t{1}), 'role', role, 'source', src};
+    R{end+1} = row(b{:}, 'reading', sprintf('PER reduction of %s against %s, %s%s', pol, vs, t{1}, tag), 'value', 100 * c.per_red(1), ...
+        'lo', 100 * c.per_red(2), 'hi', 100 * c.per_red(3), 'unit', '%', 'verdict', word); %#ok<AGROW>
+    R{end+1} = row(b{:}, 'reading', sprintf('goodput difference %s - %s, %s%s', pol, vs, t{1}, tag), 'value', c.gput(1), ...
+        'lo', c.gput(2), 'hi', c.gput(3), 'unit', 'bit/s', 'verdict', word); %#ok<AGROW>
+    R{end+1} = row(b{:}, 'reading', sprintf('detection -> restored difference %s - %s, %s%s', pol, vs, t{1}, tag), ...
+        'value', c.trec(1), 'lo', c.trec(2), 'hi', c.trec(3), 'unit', 'cycles', 'n', c.n_both, 'verdict', word); %#ok<AGROW>
+end
 end
 
 function c = ctx_of(L, kind, line, src)
@@ -434,7 +485,7 @@ for q = S.rec
             'action_set', c.aset, 'line', c.line, 'episodes', [q.set ': ' c.rec], 'n', q.n, 'value', s.median * pm, ...
             'p90', s.p90 * pm, 'never_pct', s.never_pct, 'unit', 'ms', 'verdict', '-', ...
             'role', pol_role_of(q.policy, role), 'source', c.src, ...
-            'note', sprintf('median %g / p90 %g cycles of %g ms; no target%s%s', s.median, s.p90, pm, role_note(c, q.policy), ...
+            'note', sprintf('median %s / p90 %s cycles of %g ms; no target%s%s', nf('%g', s.median), nf('%g', s.p90), pm, role_note(c, q.policy), ...
             ternary(i == 2, lineA, ''))); %#ok<AGROW>
     end
 end
@@ -448,10 +499,10 @@ for q = S.gput
     b = {'kpi', 7, 'network', net, 'policy', q.policy, 'pair_set', c.pair, 'action_set', c.aset, 'line', c.line, ...
         'unit', 'bit/s', 'verdict', '-', 'role', pol_role_of(q.policy, role), 'source', c.src};
     R{end+1} = row(b{:}, 'reading', 'goodput after onset, threat episodes', 'episodes', 'all threat episodes', 'value', q.bps, ...
-        'lo', q.ci(1), 'hi', q.ci(2), 'note', sprintf('normalized %.3f; no target; nominal payload %g bit/s%s', q.norm, ...
+        'lo', q.ci(1), 'hi', q.ci(2), 'note', sprintf('normalized %s; no target; nominal payload %g bit/s%s', nf('%.3f', q.norm), ...
         c.payload, role_note(c, q.policy))); %#ok<AGROW>
     R{end+1} = row(b{:}, 'reading', 'goodput after onset, recoverable jamming episodes', 'episodes', ['recoverable jamming episodes: ' c.rec], ...
-        'value', q.bps_jam, 'lo', q.ci_jam(1), 'hi', q.ci_jam(2), 'note', sprintf('normalized %.3f; no target%s', q.norm_jam, ...
+        'value', q.bps_jam, 'lo', q.ci_jam(1), 'hi', q.ci_jam(2), 'note', sprintf('normalized %s; no target%s', nf('%.3f', q.norm_jam), ...
         role_note(c, q.policy))); %#ok<AGROW>
 end
 end
@@ -464,7 +515,7 @@ b = {'kpi', 8, 'network', 'HYB_LOOP', 'policy', c.tgt, 'versus', c.conv, 'pair_s
     'line', c.line, 'episodes', ['recoverable jamming episodes: ' c.rec], 'n', k.n, 'role', role, 'source', c.src};
 sec = '';
 if strcmp(c.tgt, 'rule_core')
-    sec = ' Secondary, weakened baseline: blind_core has a fixed first response (channel_switch+rate_reduce), no validation choice; the headline is CORE_BW (D105).';
+    sec = ' Secondary, weakened baseline: blind_core has a fixed first response (channel_switch+rate_reduce), no validation choice; the headline is CORE_BW''s rule_core3 against the validation-tuned blind_core (D106).';
 end
 if k.n == 0
     R{end+1} = row(b{:}, 'reading', 'CNN contribution', 'verdict', 'no recoverable jamming episodes', 'note', strtrim(sec));
@@ -481,7 +532,7 @@ for i = 1:2
         t = {'with the detector', 'without the detector'};
         R{end+1} = row(b{:}, 'reading', sprintf('%s, %s', nm{i, 1}, t{w}), 'value', s.median * pm, 'p90', s.p90 * pm, ...
             'never_pct', s.never_pct, 'unit', 'ms', 'verdict', 'analysis, no target', ...
-            'note', strtrim(sprintf('median %g / p90 %g cycles of %g ms.%s', s.median, s.p90, pm, sec))); %#ok<AGROW>
+            'note', strtrim(sprintf('median %s / p90 %s cycles of %g ms.%s', nf('%g', s.median), nf('%g', s.p90), pm, sec))); %#ok<AGROW>
     end
 end
 end
@@ -548,13 +599,16 @@ if P.ok && isfield(P.KP, 'det_id') && isfield(P.KP, 'policy_stamp')
     lines{end+1} = sprintf('  policy_evaluation.mat: det_id %s, policy_stamp %s', tostr(P.KP.det_id), tostr(P.KP.policy_stamp));
 end
 lines = [lines, {'', 'Networks:'}];
-for k = {'CNN3', 'HYB_FRAMES', 'HYB_LOOP', 'LINK', 'NONE', 'PHY'}
+for k = {'CNN3', 'CNN3_LOOP', 'HYB_FRAMES', 'HYB_LOOP', 'LINK', 'NONE', 'PHY'}
     lines{end+1} = sprintf('  %-10s %s', k{1}, net_text(k{1})); %#ok<AGROW>
 end
-lines = [lines, {'', ['Which network produced which KPI (D105): KPI 2-4 detection from the three-state CNN (B3c); KPI 5-8 from the hybrid ' ...
-    'detector''s classes on the core action set (rule_core against none and blind_core). No run puts the three-state CNN in the ' ...
-    'decision loop, so KPI 5-8 are not attributed to it. Extension rows (36 configurations, pooled threats, the 36-mask) are ' ...
-    'never in the verdict''s place; blind_core rows are a secondary, weakened baseline.'], ''}];
+lines = [lines, {'', ['Which network produced which KPI (D105, D106): KPI 2-4 detection from the three-state CNN (B3c). KPI 5-8 of C2e from the ' ...
+    'hybrid detector''s classes on the core action set (rule_core against none and blind_core); those rows are the hybrid''s. ' ...
+    'CORE_BW alone puts the three-state CNN in the decision loop (rule_core3): its rows are the headline of KPI 5 and 8 against the ' ...
+    'validation-tuned blind_core, rule_core there is labelled hybrid, secondary, and rule_core3 - rule_core is descriptive, with no ' ...
+    'verdict word. C2e''s and CORE_BW''s verdicts are side by side; neither replaces the other. Extension rows (36 configurations, ' ...
+    'pooled threats, the 36-mask) are never in the verdict''s place; blind_core rows are a secondary, weakened baseline. The system ' ...
+    'false alarms of the whole policy are listed apart as an extension (project KPI 6, D103), never as proposal KPI 3.'], ''}];
 if mk.ok
     L = strcmp(mk.tag, 'L'); M = strcmp(mk.tag, 'M'); J = strcmp(mk.tag, 'J');
     lines{end+1} = sprintf(['Link-limited points (D99, mark %s, written before policy_evaluation.mat was opened): link-limited (L) %s | ' ...
@@ -563,10 +617,14 @@ else
     lines{end+1} = 'Link-limited points (D99): pending (no mark file low_ebno_mark.txt, no lect_kpis_by_ebno.mat). Line A pools all points.';
 end
 lines{end+1} = '';
-for k = 1:8
+for k = [1:8 kpi_fa()]
     ix = find([rows.kpi] == k);
     if isempty(ix), continue; end
-    lines{end+1} = sprintf('KPI %d  %s   (target: %s)', k, nm{k + 1}, target_of(k, Cn)); %#ok<AGROW>
+    if k == kpi_fa()
+        lines{end+1} = sprintf('EXTENSION, not a proposal KPI: %s   (target: %s)', nm{k + 1}, target_of(k, Cn)); %#ok<AGROW>
+    else
+        lines{end+1} = sprintf('KPI %d  %s   (target: %s)', k, nm{k + 1}, target_of(k, Cn)); %#ok<AGROW>
+    end
     for i = ix, lines{end+1} = row_text(rows(i)); end %#ok<AGROW>
     lines{end+1} = ''; %#ok<AGROW>
 end
@@ -597,6 +655,7 @@ switch k
     case 5, s = '>= 30% lower than the static link in recoverable scenarios';
     case 6, s = 'measured, no target: from detection until the PER stays below a threshold for a fixed window';
     case 7, s = 'measured, no target';
+    case kpi_fa(), s = 'one-sided 95% upper bound <= 5% on independent clean flights (the project''s KPI 6; word: bound <= 5% or point estimate only)';
     otherwise, s = 'analysis metric, not a promise';
 end
 end
@@ -668,6 +727,16 @@ fprintf(fid, '%s\n', lines{:});
 fclose(fid);
 end
 
+function k = kpi_fa()
+% The row number of the system false-alarm extension (after the proposal's KPI 1-8).
+k = 9;
+end
+
+function s = nf(fmt, x)
+% A number as text; n/a when it is not finite (never a printed NaN).
+if isfinite(x), s = sprintf(fmt, x); else, s = 'n/a'; end
+end
+
 function out = ternary(c, a, b)
 if c, out = a; else, out = b; end
 end
@@ -693,7 +762,7 @@ for i = 1:numel(keys), hb.CData(i, :) = pcolor(keys{i}); end
 set(ax, 'XTick', 1:numel(keys), 'XTickLabel', keys, 'TickLabelInterpreter', 'none'); grid(ax, 'on');
 ylabel(ax, 'PER after onset [%]');
 title(ax, 'PER after onset, five jamming threats pooled (point values)', 'FontSize', 10); ylim(ax, [0 1.15 * max(100, max(val))]);
-for i = 1:numel(val), text(ax, i, val(i), sprintf('%.1f', val(i)), 'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom'); end
+for i = 1:numel(val), text(ax, i, val(i), nf('%.1f', val(i)), 'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom'); end
 % Panel B: reduction vs the static link, 95% intervals
 ax = nexttile(tl);
 grp = {'narrowband', 'wideband', 'pooled'};
@@ -757,7 +826,7 @@ for k = 1:2
     hb(k).FaceColor = cols(k, :);
     errorbar(ax, hb(k).XEndPoints, Y(:, k), zeros(numel(q), 1), U(:, k), 'k', 'LineStyle', 'none', 'CapSize', 6);
     for i = 1:numel(q)
-        txt = sprintf('never %.0f%%', NV(i, k));
+        txt = ['never ' nf('%.0f', NV(i, k)) '%'];
         if isfinite(Y(i, k)), y = Y(i, k) + max(U(i, k), 0); else, y = 0; end
         text(ax, hb(k).XEndPoints(i), y, txt, 'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', 'FontSize', 7);
     end

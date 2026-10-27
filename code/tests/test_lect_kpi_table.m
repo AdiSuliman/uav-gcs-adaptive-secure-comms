@@ -28,7 +28,7 @@ d = new_dir(tc);
 verifyTrue(tc, isfile(fullfile(d, 'lect_kpi_table.txt')) && isfile(fullfile(d, 'lect_kpi_table.csv')));
 verifyFalse(tc, any(cellfun(@(f) isfile(fullfile(d, f)), {'lect_kpi_per.png', 'lect_kpi_recovery.png', 'lect_kpi_goodput.png'})));
 verifyTrue(tc, all(strncmp({T.rows.verdict}, 'pending', 7)));
-verifyEqual(tc, sort(unique([T.rows.kpi])), 1:8);
+verifyEqual(tc, sort(unique([T.rows.kpi])), 1:9);              % 9: the system false-alarm extension
 verifyTrue(tc, any(contains(lines, 'pending (CORE_BW)')));
 verifyTrue(tc, any(contains(lines, 'Link-limited points (D99): pending')));
 verifyEqual(tc, numel(T.files), 2);
@@ -54,7 +54,7 @@ Z = readtable(fullfile(d, 'lect_kpi_table.csv'), 'TextType', 'string', 'Variable
 verifyEqual(tc, height(Z), numel(T.rows));
 verifyEqual(tc, string(Z.Properties.VariableNames), ["kpi" "kpi_name" "target" "reading" "network" "policy" "versus" "pair_set" ...
     "action_set" "line" "episodes" "n" "value" "lo" "hi" "unit" "p90" "never_pct" "verdict" "role" "source" "note"]);
-verifyEqual(tc, sort(unique(Z.kpi))', 1:8);
+verifyEqual(tc, sort(unique(Z.kpi))', 1:9);
 % KPI 5: the saved verdict words and intervals
 v = L.core.verdict;
 for i = 1:numel(v)
@@ -69,7 +69,7 @@ end
 % extension and secondary rows are labelled, never verdict rows
 e = Z(Z.kpi == 5 & Z.policy == "rule_esc", :);
 verifyNotEmpty(tc, e); verifyTrue(tc, all(e.role == "extension"));
-b = Z(Z.kpi >= 3 & Z.policy == "blind_core", :);
+b = Z(Z.kpi >= 3 & Z.kpi <= 8 & Z.policy == "blind_core", :);
 verifyNotEmpty(tc, b);
 verifyTrue(tc, all(b.role == "secondary"));
 verifyTrue(tc, all(contains(b.note, "weakened baseline")));
@@ -95,10 +95,12 @@ verifyTrue(tc, all(startsWith(hy.verdict, "pending")));
 p1 = Z(Z.kpi == 1, :);
 verifyEqual(tc, p1.verdict(p1.role == "verdict"), "PASS (2/2)");
 verifyEqual(tc, sort(p1.value(p1.role == "measured"))', [0.03 0.08], 'AbsTol', 1e-12);
-% KPI 3 system: the protocol's word from the saved counts
-s = Z(Z.kpi == 3 & Z.role == "system" & Z.policy == "rule_core", :);
+% system false alarms: an extension label of their own, none of them under proposal KPI 3
+s = Z(Z.kpi == 9 & Z.policy == "rule_core", :);
 verifyEqual(tc, height(s), 1);
-verifyEqual(tc, Z.role(Z.kpi == 3 & Z.policy == "blind_esc"), "extension");
+verifyEqual(tc, Z.role(Z.kpi == 9 & Z.policy == "blind_esc"), "extension");
+verifyTrue(tc, all(Z.kpi_name(Z.kpi == 9) == "extension: system FA (project KPI 6, D103)"));
+verifyFalse(tc, any(Z.kpi == 3 & contains(Z.reading, "system false alarms")));
 fr = KP.far(strcmp({KP.far.policy}, 'core: rule + escalation'));
 verifyEqual(tc, s.value, 100 * fr.p, 'RelTol', 1e-8);
 verifyEqual(tc, s.hi, 100 * fr.upper, 'RelTol', 1e-8);
@@ -128,19 +130,104 @@ verifyTrue(tc, any(contains(lines, 'link-limited (L) 0 dB, 3 dB | marginal (M) 6
 verifyFalse(tc, any(contains(lines, 'pending (CORE_BW)')));
 end
 
+function test_far_words_follow_the_bound(tc)
+% The system false-alarm word follows the one-sided 95% bound: at most 5% -> met, only the point
+% estimate at most 5% -> 'point estimate only', otherwise not met. Nothing is filed under KPI 3.
+d = new_dir(tc);
+write_inputs(d, false, false);
+S = load(fullfile(d, 'policy_evaluation.mat'));
+up = [0.04 0.049 0.065 0.08 0.2]; pp = [0.02 0.03 0.05 0.07 0.15];
+for j = 1:numel(S.KP.far), S.KP.far(j).p = pp(j); S.KP.far(j).upper = up(j); S.KP.far(j).k = round(pp(j) * 600); end
+save(fullfile(d, 'policy_evaluation.mat'), '-struct', 'S');
+[T, lines] = lect_kpi_table(d);
+E = T.rows([T.rows.kpi] == 9);
+verifyNumElements(tc, E, 5);
+verifyTrue(tc, all(strcmp({E.role}, 'extension')));
+w = containers.Map({E.policy}, {E.verdict});
+verifyEqual(tc, w('none'), 'MET (bound <= 5%)');
+verifyEqual(tc, w('rule_esc'), 'MET (bound <= 5%)');
+verifyEqual(tc, w('blind_esc'), 'point estimate only');
+verifyEqual(tc, w('rule_core'), 'NOT MET');
+verifyEqual(tc, w('blind_core'), 'NOT MET');
+verifyEmpty(tc, T.rows([T.rows.kpi] == 3 & strcmp({T.rows.role}, 'system')));
+verifyTrue(tc, any(startsWith(lines, 'EXTENSION, not a proposal KPI: extension: system FA (project KPI 6, D103)')));
+end
+
+function test_core3_rows_headline(tc)
+% CORE_BW with rule_core3 (D106): it is the headline of KPI 5 and 8 against the validation-tuned
+% blind_core, rule_core is 'hybrid, secondary', rule_core3 - rule_core is descriptive.
+d = new_dir(tc);
+write_inputs(d, true, true);
+write_bw(d, true);
+[T, lines] = lect_kpi_table(d);
+R = T.rows;
+h = R([R.kpi] == 8 & strcmp({R.role}, 'headline'));
+verifyNumElements(tc, h, 9);
+verifyTrue(tc, all(strcmp({h.policy}, 'rule_core3') & strcmp({h.versus}, 'blind_core') & strcmp({h.network}, 'CNN3_LOOP')));
+verifyTrue(tc, all(contains({h.pair_set}, 'validation-tuned')));
+pr = h(contains({h.reading}, 'PER reduction') & contains({h.reading}, 'pooled'));
+verifyEqual(tc, [pr.value pr.lo pr.hi], [12.5 7.5 17.5], 'AbsTol', 1e-9);
+hy = R([R.kpi] == 8 & strcmp({R.policy}, 'rule_core') & contains({R.pair_set}, 'hybrid detector'));
+verifyNumElements(tc, hy, 9);
+verifyTrue(tc, all(strcmp({hy.role}, 'secondary') & contains({hy.reading}, 'hybrid, secondary') & strcmp({hy.network}, 'HYB_LOOP')));
+pr = hy(contains({hy.reading}, 'PER reduction') & contains({hy.reading}, 'narrowband'));
+verifyEqual(tc, pr.value, 30, 'AbsTol', 1e-9);
+df = R([R.kpi] == 8 & strcmp({R.versus}, 'rule_core') & strcmp({R.policy}, 'rule_core3'));
+verifyNumElements(tc, df, 9);
+verifyTrue(tc, all(strcmp({df.role}, 'descriptive') & strcmp({df.verdict}, 'descriptive, no verdict word')));
+verifyTrue(tc, all(contains({df.pair_set}, 'only the class source differs')));
+% KPI 5: rule_core3's per-type verdicts beside C2e's; pooled a second line; rule_core secondary
+b5 = R([R.kpi] == 5 & contains({R.source}, 'KP.primary'));
+c3 = b5(strcmp({b5.policy}, 'rule_core3'));
+verifyEqual(tc, sort({c3.role}), {'beside', 'beside', 'second_line'});
+w = c3(strcmp({c3.role}, 'beside'));
+verifyEqual(tc, {w.verdict}, {'MET (committed)', 'NOT MET'});
+verifyTrue(tc, all(strcmp({w.network}, 'CNN3_LOOP')));
+hb = b5(strcmp({b5.policy}, 'rule_core'));
+verifyTrue(tc, all(strcmp({hb.role}, 'secondary') & contains({hb.reading}, 'hybrid, secondary')));
+verifyFalse(tc, any(strcmp({R.verdict}, 'pending (CORE_BW)')));
+% the headline sorts before the secondary rows of its KPI
+roles = {R([R.kpi] == 8).role};
+verifyLessThan(tc, find(strcmp(roles, 'headline'), 1, 'last'), find(strcmp(roles, 'secondary'), 1, 'first'));
+txt = strjoin(lines, newline);
+verifyTrue(tc, contains(txt, 'rule_core3 - rule_core is descriptive'));
+verifyTrue(tc, contains(txt, 'CNN3_LOOP'));
+end
+
+function test_nan_is_not_printed_as_a_number(tc)
+% A NaN in a saved struct reads 'n/a' in the text and is empty in the csv (S7 pattern).
+d = new_dir(tc);
+write_inputs(d, true, true);
+S = load(fullfile(d, 'policy_evaluation.mat'));
+S.KP.lect.core.rec(1).det.median = NaN; S.KP.lect.core.rec(1).det.p90 = NaN;
+S.KP.lect.core.gput(1).norm = NaN; S.KP.lect.core.gput(1).norm_jam = NaN;
+S.KP.lect.core.cnn.det(1).median = NaN; S.KP.lect.core.cnn.det(1).p90 = NaN;
+for j = 1:numel(S.KP.far), S.KP.far(j).rate.per_hour = NaN; end
+save(fullfile(d, 'policy_evaluation.mat'), '-struct', 'S');
+C = load(fullfile(d, 'core_cnn.mat'));
+C.core.metrics{2}.fa_jam = NaN; C.core.boot.fa_jam(2, :) = NaN;
+save(fullfile(d, 'core_cnn.mat'), '-struct', 'C');
+[T, lines] = lect_kpi_table(d);
+body = lines(~startsWith(lines, 'Generated:') & ~startsWith(lines, 'Saved'));
+verifyFalse(tc, any(contains(body, 'NaN')), strjoin(body(contains(body, 'NaN')), newline));
+verifyFalse(tc, contains(fileread(fullfile(d, 'lect_kpi_table.csv')), 'NaN'));
+verifyTrue(tc, any(contains(lines, 'n/a')));
+verifyNotEmpty(tc, T.rows);
+end
+
 function test_far_note_under_600(tc)
-% The protocol word stays as section 6 words it; with fewer than 600 episodes the row says the
+% The word follows the bound; with fewer than 600 episodes the row says the
 % project's own KPI 6 (measure_all_kpis.m) does not pass on the same counts.
 d = new_dir(tc);
 write_inputs(d, false, false);
 T = lect_kpi_table(d);
-r = T.rows([T.rows.kpi] == 3 & strcmp({T.rows.policy}, 'rule_core'));
+r = T.rows([T.rows.kpi] == 9 & strcmp({T.rows.policy}, 'rule_core'));
 verifyNumElements(tc, r, 1); verifyFalse(tc, contains(r.note, 'fewer than 600'));
 S = load(fullfile(d, 'policy_evaluation.mat'));
 for j = 1:numel(S.KP.far), S.KP.far(j).n = 300; S.KP.far(j).p = S.KP.far(j).k / 300; end
 save(fullfile(d, 'policy_evaluation.mat'), '-struct', 'S');
 T = lect_kpi_table(d);
-r = T.rows([T.rows.kpi] == 3 & strcmp({T.rows.policy}, 'rule_core'));
+r = T.rows([T.rows.kpi] == 9 & strcmp({T.rows.policy}, 'rule_core'));
 verifyNumElements(tc, r, 1); verifyTrue(tc, contains(r.note, 'fewer than 600'));
 verifyEqual(tc, r.n, 300);
 end
@@ -283,16 +370,31 @@ if with_d99
         'ebno_db clean_fer ratio_ok_x_clean_fer link_limited tag', '0 0.99 1.98 1 L', '3 0.79 1.58 1 L', '6 0.42 0.84 0 M', ...
         '9 0.14 0.28 0 M', '12 0.044 0.088 0 J', '15 0.018 0.036 0 J');
     fclose(fid);
-    mkdir(fullfile(d, 'core_bw'));
-    pr = struct('pooled', cnn_bw(12.5), 'narrowband', cnn_bw(20), 'wideband', cnn_bw(5));
-    per = struct('policy', {'rule_core', 'rule_core', 'rule_core', 'blind_core'}, 'type', {'narrowband', 'wideband', 'pooled', 'narrowband'}, ...
-        'n', 40, 'red', {0.5, 0.2, 0.3, 0.1}, 'lo', {0.4, 0.1, 0.2, 0.0}, 'hi', {0.6, 0.3, 0.4, 0.2}, 'per', 0.1, 'per_ref', 0.2, ...
-        'verdict', {'MET (committed)', 'NOT MET', 'MET (not committed)', 'NOT MET'}, 'primary', {true, true, false, false});
-    KPb = struct('primary', struct('cnn', pr, 'per', per)); %#ok<NASGU>
-    KP = KPb; %#ok<NASGU>
-    save(fullfile(d, 'core_bw', 'core_bw_kpis.mat'), 'KP');
+    write_bw(d, false);
     KP = load(fullfile(d, 'policy_evaluation.mat'), 'KP').KP;
 end
+end
+
+function write_bw(d, core3)
+% CORE_BW's saved reading as experiment_core_bw.m writes it: the registered fallback (rule_core carries the
+% verdicts) or, with core3, D106's (rule_core3 carries them, rule_core is the hybrid's secondary row).
+if ~isfolder(fullfile(d, 'core_bw')), mkdir(fullfile(d, 'core_bw')); end
+pr = struct('pooled', cnn_bw(12.5), 'narrowband', cnn_bw(20), 'wideband', cnn_bw(5));
+per = struct('policy', {'rule_core', 'rule_core', 'rule_core', 'blind_core'}, 'type', {'narrowband', 'wideband', 'pooled', 'narrowband'}, ...
+    'n', 40, 'red', {0.5, 0.2, 0.3, 0.1}, 'lo', {0.4, 0.1, 0.2, 0.0}, 'hi', {0.6, 0.3, 0.4, 0.2}, 'per', 0.1, 'per_ref', 0.2, ...
+    'verdict', {'MET (committed)', 'NOT MET', 'MET (not committed)', 'NOT MET'}, 'primary', {true, true, false, false});
+P = struct('cnn', pr, 'per', per);
+if core3
+    p3 = per(1:3); [p3.policy] = deal('rule_core3');
+    [p3.red] = deal(0.55, 0.45, 0.5); [p3.lo] = deal(0.45, 0.35, 0.4); [p3.hi] = deal(0.65, 0.55, 0.6);
+    [p3.verdict] = deal('MET (committed)', 'NOT MET', 'MET (committed)'); [p3.primary] = deal(true, true, false);
+    hy = per(1:3); [hy.primary] = deal(false, false, false);
+    P.per = [p3, hy, per(4)];
+    P.cnn_hybrid = struct('pooled', cnn_bw(8), 'narrowband', cnn_bw(30), 'wideband', cnn_bw(2));
+    P.cnn_3vs = struct('pooled', cnn_bw(4), 'narrowband', cnn_bw(-3), 'wideband', cnn_bw(1));
+end
+KP = struct('primary', P); %#ok<NASGU>
+save(fullfile(d, 'core_bw', 'core_bw_kpis.mat'), 'KP');
 end
 
 function c = cnn_bw(red)
