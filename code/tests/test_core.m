@@ -7801,6 +7801,38 @@ verifyError(tc, @() policy_decide('table_esc', obs, na, [], PP, [], struct('core
 verifyError(tc, @() policy_decide('dqn', obs, na, [], PP, [], struct('core', true)), 'policy_decide:core');
 end
 
+function test_core_decide_core_pools(tc)
+% On pools that hold only the core action set (CORE_BW's pools), the core rule and blind_core
+% escalate without the full ladder's configurations, and choose by name what they choose on
+% the full set; the full rule still refuses pools without its ladder.
+C = decision_config(); AF = policy_actions(); AC = C.core_actions;
+cls = {'none', 'jamming', 'noise_burst', 'reactive_jamming', 'path_loss', 'spoofing', 'antenna_fault', ...
+    'benign_interference', 'sweeping_jammer', 'tone_jamming', 'airframe_shadowing'};
+obs = struct('probs', double(strcmp(cls, 'jamming')), 'unknown', false, 'feat', zeros(1, numel(link_features('names'))));
+obs.feat(feature_index('log_ber')) = -1; obs.feat(feature_index('crc_fail')) = 1;
+for kind = {'rule_esc', 'blind_esc'}
+    ch = cell(1, 2); esc = cell(1, 2);
+    for s = 1:2
+        A = {AF, AC}; A = A{s};
+        PP = struct('actions', {A}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0);
+        na = find(strcmp(A, 'no_action')); mem = []; cfg = na;
+        for t = 1:30
+            o = obs; o.cfg_link = cfg;
+            [a, mem, d] = policy_decide(kind{1}, o, cfg, mem, PP, [], struct('core', true));
+            if a ~= cfg, ch{s}{end+1} = A{a}; esc{s}(end+1) = d.escalated; end
+            cfg = a;
+        end
+    end
+    verifyGreaterThanOrEqual(tc, numel(ch{2}), 2);
+    verifyEqual(tc, ch{2}, ch{1});
+    verifyEqual(tc, esc{2}, esc{1});
+    verifyTrue(tc, any(esc{2}));
+end
+PP = struct('actions', {AC}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', 0);
+na = find(strcmp(AC, 'no_action'));
+verifyError(tc, @() policy_decide('rule_esc', obs, na, [], PP, [], struct()), ?MException);
+end
+
 function test_rule_dwell_tried(tc)
 % On a link that stays degraded (one incident), the consecutive dwell ('run') commits the class
 % answer again after an escalation left it, the group dwell never commits a configuration

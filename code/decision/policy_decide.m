@@ -173,13 +173,14 @@ end
 
 escalated = false(1, NE);
 if endsWith(kind, '_esc')
-    ladder = cellfun(@(x) find(strcmp(A, x)), C.ladder);
     ed = isfield(PP, 'esc_drop') && ~isempty(PP.esc_drop) && PP.esc_drop;
     gk = config_gain_db(PP);
-    lb = find(ismember(A, {'power_control', 'rate_reduce', 'rate_reduce+power_control'}));
-    if core
+    if core                                          % the core set alone: pools may hold only C.core_actions
         lc = C.ladder_core; if ~isempty(cb), lc = [{cb}, setdiff(lc, {cb}, 'stable')]; end
         ladder = cellfun(@(x) find(strcmp(A, x)), lc); lb = find(strcmp(A, 'rate_reduce'));
+    else
+        ladder = cellfun(@(x) find(strcmp(A, x)), C.ladder);
+        lb = find(ismember(A, {'power_control', 'rate_reduce', 'rate_reduce+power_control'}));
     end
     for i = 1:NE
         mem.tried(i, cfg(i)) = true;
