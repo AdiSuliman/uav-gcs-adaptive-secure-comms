@@ -16,9 +16,9 @@ Status as of 28.10.2026. Every "met" verdict is on data never used for training 
 |---|---|
 | 1. Simulation environment, validated BER model | Done |
 | 2. Labelled spectrogram dataset and trained CNN | Done |
-| 3. Rule-based adaptive recovery | Built; evaluation pending (stage C2e) |
-| 4. Closed-loop integration | Built; evaluation pending (stage C2e) |
-| 5. Static vs conventional adaptive vs CNN-based adaptive | Pending; the evaluation (C2e) is running since the training stage (C2) ended on 28.10.2026 |
+| 3. Rule-based adaptive recovery | Built; evaluated in C2e (28.10.2026) |
+| 4. Closed-loop integration | Built; evaluated in C2e (28.10.2026) |
+| 5. Static vs conventional adaptive vs CNN-based adaptive | Static and CNN-based read in C2e; the fair CNN-versus-conventional comparison comes from CORE_BW |
 | 6. Graphs, confusion matrix, comparison tables, summary report | After the evaluation |
 
 | Lecturer KPI | Status |
@@ -27,8 +27,8 @@ Status as of 28.10.2026. Every "met" verdict is on data never used for training 
 | Macro-F1 >= 85% | Met |
 | False alarms in clean states <= 5% | Met (detector level) |
 | Recall >= 85% per jamming type | Met |
-| PER reduction >= 30% against the static link | Pending |
-| Recovery time, goodput, CNN contribution | Pending (reported, no target) |
+| PER reduction >= 30% against the static link | Met (committed), both scenarios |
+| Recovery time, goodput, CNN contribution | Measured (no target); headlines pending (Line B, CORE_BW) |
 
 ## Scope
 
@@ -97,20 +97,24 @@ Profile 1, fourth test set (4,032 frames per state, 576 sub-runs), read once on 
 | False alarms, clean states | <= 5% | 0.17% [0.00, 0.53] (per frame 0.67%) | Met (detector level) |
 | Recall, narrowband | >= 85% | 99.95% [99.87, 100.00] | Met |
 | Recall, wideband | >= 85% | 99.73% [99.28, 100.00] | Met |
-| PER reduction vs static link | >= 30% | not yet measured | Pending, C2e: 28.10.2026 (estimate) |
-| Recovery time | reported | onset-to-detection median 0 cycles; closed-loop part pending | Pending, C2e |
-| Goodput | reported | pending | Pending, C2e |
-| CNN contribution (`rule_core3` vs a validation-tuned `blind_core`) | reported | pending | Pending: headline CORE_BW (D106); C2e's `rule_core` vs fixed-response `blind_core` is secondary (D105) |
+| PER reduction vs static link, narrowband (`tone_jamming`) | >= 30% | 38.9% [34.6, 42.9] (C2e, 1,304 episodes, D105 pair) | Met (committed) |
+| PER reduction vs static link, wideband (`jamming`) | >= 30% | 43.3% [39.7, 46.8] (C2e, 1,252 episodes, D105 pair) | Met (committed) |
+| Recovery time | reported | onset-to-detection median 1 cycle (20 ms), never detected 0.0%; onset to restored 8 cycles (160 ms) | Measured; detection-to-restored headline pending (Line B, D99) |
+| Goodput | reported | 9.45 kb/s with the rule, 1.31 kb/s with no response (recoverable jamming) | Measured |
+| CNN contribution (`rule_core3` vs a validation-tuned `blind_core`) | reported | C2e, secondary (fixed-response `blind_core`): PER -3.2% [-5.3, -1.5] (adverse), detection 20 vs 80 ms, goodput +2.56 kb/s | Measured against the weakened baseline; headline pending: CORE_BW (D106) |
 
 Notes:
 
 - Weakest point of the detector: wideband at JSR 0 dB, 97.82% recall (95.44% per frame). Never-detected episodes: 0.0%.
+- Line A pools all six Eb/N0 points, including the link-limited 0 and 3 dB; the per-Eb/N0 line (Line B, D99) is read after the restart and, if its words differ, both are named.
 - The false-alarm KPI is read at detector level, as pre-registered. The whole-monitor false alarm on clean flights (an extension KPI) is not at 5% yet: 12.5-29.9% of 1,800 clean validation episodes depending on the monitor setting. The fix is registered in D103 and D104.
 - KPI 5-8 for the proposal's own system come from the controlled-bandwidth study CORE_BW, where the three-state CNN drives the rule (`rule_core3`) against a `blind_core` tuned on validation (D106), estimated 30.10-2.11.2026. In C2e the rule reads the hybrid detector's classes; those readings are the profile-wide secondary lines (D105).
 
-DQN training (C2) ended on 28.10.2026. The registered selection on validation deployed the DQN without escalation: held recovery 82.6% and recovered 95.1%, against 60.3% and 71.3% for the best rule setting; its false-change bound on clean flights is met on validation. These are validation numbers; the test reading comes from C2e.
+DQN (extension). Selected on validation (held recovery 82.6%, recovered 95.1%, against 60.3% and 71.3% for the best rule setting) and read once on the test pools in C2e: the deployed DQN, without escalation, recovered 94.1% [92.7, 95.4] of recoverable episodes (rule with escalation 66.8%, table 77.7%). Our KPI 6, the system false alarm on clean flights (extension): 2.40% (57 of 2,376 flights), upper bound 2.98% against 5%, MET (committed), for the deployed DQN only; the CNN-based rule (11.11%), the table (6.36%) and the DQN with escalation (7.41%) do not meet it. Unseen combinations (C2g): 90.6% recovered on average when a combination is left out of training, against 95.0% when trained; path-loss pairs are the weakest (sweeping jammer + path loss 75.0%).
 
-Next dates (estimates): the policy evaluation (C2e) runs before the PC restart, which comes at the first stage boundary after Adi returns; the chain ends at RPT about 29.10; CORE_BW 30.10-2.11 (`rule_core3` against the validation-tuned `blind_core` is the lecturer row); the profile-1 rerun (P1R) 2.11-5.11; profile 3 about 18-21.11.2026 (worst about 22-23.11; step 7a, timed on 27.10, takes about 5-7 h). Windows Update is paused until 30.11.2026. Current numbers and logs are in [docs/ROADMAP.md](https://github.com/AdiSuliman/uav-gcs-adaptive-secure-comms/blob/v7-docs-d91/docs/ROADMAP.md) and [docs/PROJECT_LOG.md](https://github.com/AdiSuliman/uav-gcs-adaptive-secure-comms/blob/v7-docs-d91/docs/PROJECT_LOG.md).
+Weak points of the DQN, as measured: antenna fault 79.9% and path loss 81.4% recovered; on harmed episodes antenna fault 46.3% and airframe shadowing 21.7% (n = 46), below the simpler policies; at 161 km/h 88.7%; the validation envelope's antenna-fault cell (at least 90%) reads 78.9% [70.1, 87.0] on test. The fixes are chosen on validation only.
+
+Next dates (estimates): the PC restarts at the C2u to GAL boundary (about 19:45 on 28.10); the chain ends at RPT about 29.10 (morning); CORE_BW 30.10-2.11 (`rule_core3` against the validation-tuned `blind_core` is the lecturer row); the profile-1 rerun (P1R) 2.11-5.11; profile 3 about 18-21.11.2026 (worst about 22-23.11; step 7a, timed on 27.10, takes about 5-7 h). Windows Update is paused until 30.11.2026. Current numbers and logs are in [docs/ROADMAP.md](https://github.com/AdiSuliman/uav-gcs-adaptive-secure-comms/blob/v7-docs-d91/docs/ROADMAP.md) and [docs/PROJECT_LOG.md](https://github.com/AdiSuliman/uav-gcs-adaptive-secure-comms/blob/v7-docs-d91/docs/PROJECT_LOG.md).
 
 ## Operator console
 
@@ -187,7 +191,8 @@ The previous full version of this README is in git at commit `b648c7b`.
 
 ## Known limitations
 
-- **Pending KPIs.** PER reduction, recovery time, goodput and CNN contribution await the closed-loop evaluation (C2e).
+- **Pending headlines.** Recovery time from detection (Line B, which excludes the link-limited points) and the CNN contribution against an equally tuned baseline (CORE_BW) are not final. Against the weakened baseline in C2e the CNN's PER reduction is 3.2 points lower.
+- **DQN weak points.** Antenna fault and airframe shadowing on harmed episodes (46.3% and 21.7%), and the antenna-fault envelope cell on test (78.9%).
 - **Whole-monitor false alarms.** On clean flights the full monitor false-alarms in 12.5-29.9% of validation episodes. The lecturer's false-alarm KPI is met at detector level only. A fix is registered (D103, D104) and is read on a fresh clean test set.
 - **Noise burst.** The coded answer worsens the link in the gallery (BER 0.495 against 0.439 with no response). Profile 1 uses an uncoded answer chosen on validation; profile 3 gets a decoder.
 - **Weak detector classes (extension).** Airframe shadowing 84.5% F1; unknown-threat AUROC 0.769 is below 0.8.
