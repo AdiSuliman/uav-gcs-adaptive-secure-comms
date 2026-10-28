@@ -1,7 +1,9 @@
-function v0_diag(pools_file, clean_file, agent_file, manifest_file, out_dir)
+function v0_diag(pools_file, clean_file, agent_file, manifest_file, out_dir, resume)
 %V0_DIAG  Validation-only diagnostic of the deployed DQN on lost-branch threats (profile 1).
 %   v0_diag(pools_file, clean_file, agent_file, manifest_file)
 %   v0_diag(..., out_dir)        out_dir under <repo>/results (default <repo>/results)
+%   v0_diag(..., out_dir, true)  reuse the runs in <out_dir>/v0_runs.mat when they were made with
+%                                the same agent, pools and code (readings only)
 %   pools_file     data/policy_pools.mat; its splits after validation are emptied on load
 %   clean_file     data/clean_val_pools.mat (the independent clean validation geometries)
 %   agent_file     the archived trained_dqn.mat; its sha256 must match its line in manifest_file
@@ -38,12 +40,13 @@ function v0_diag(pools_file, clean_file, agent_file, manifest_file, out_dir)
 %   Gate (fixed before the run): a form fails as the degradation evidence when (a) < 0.5 or
 %   (b) > 2% (read at k = 3); the design stands as written only if some form reaches (c) >= 0.6
 %   with (b) <= 2% on the harmed S episodes. V0 chooses nothing.
-%   Output: <out_dir>/v0_diag.txt and v0_diag.mat
+%   Output: <out_dir>/v0_diag.txt and v0_diag.mat; the runs alone in <out_dir>/v0_runs.mat
 t_all = tic;
 root = project_root();
 if nargin < 5 || isempty(out_dir), out_dir = fullfile(root, 'results'); end
 out_dir = v0_guard('out', out_dir, root);
-cellfun(@(f) v0_guard('input', f), {pools_file, clean_file, agent_file});
+for f = {pools_file, clean_file, agent_file}, v0_guard('input', f{1}); end
+if nargin < 6 || isempty(resume), resume = false; end
 for f = {pools_file, clean_file, agent_file, manifest_file}
     if ~isfile(f{1}), error('v0_diag:input', 'v0_diag: %s not found', f{1}); end
 end
@@ -98,14 +101,34 @@ fprintf('%s\n', rep{end});
 POL = {'none', 'dqn', 'dqn_esc', 'rule_esc', 'blind_esc', 'table', 'fixed'};
 LBL = {'no response', 'DQN (deployed)', 'DQN + escalation', 'rule + escalation', 'no detector + escalation', 'table', ...
     'fixed cs+sd+pc'};
-RV = cell(1, numel(POL)); XV = RV; RC = RV; XC = RV;
-for p = 1:numel(POL)
-    [kind, a_, opt] = setup(POL{p}, ag, tab, na, fx);
-    t1 = tic;
-    [RV{p}, XV{p}] = run_set(kind, PP, K, vspecs, a_, opt, 5000, []);
-    if ~strcmp(POL{p}, 'none'), [RC{p}, XC{p}] = run_set(kind, PPw, Kw, cspecs, a_, opt, 41000, ncl); end
-    fprintf('  %-26s %d validation + %d clean episodes, identity with rollout_policy.m checked (%.1f min)\n', LBL{p}, ...
-        numel(RV{p}.ret), ncl * ~strcmp(POL{p}, 'none'), toc(t1) / 60);
+runs_file = fullfile(out_dir, 'v0_runs.mat');
+run_key = struct('agent_sha256', h_agent, 'clean_sha256', h_clean, 'pools_bytes', dp.bytes, 'pools_date', dp.date, ...
+    'code', {cellfun(@(f) sha256_file(which(f)), {'v0_trace_rollout.m', 'rollout_policy.m', 'policy_decide.m', ...
+    'policy_monitor.m', 'link_env.m'}, 'UniformOutput', false)}, 'policies', {POL});
+done = false;
+if resume && isfile(runs_file)
+    Lr = load(runs_file, 'run_key', 'RV', 'XV', 'RC', 'XC');
+    if isequal(Lr.run_key, run_key)
+        RV = Lr.RV; XV = Lr.XV; RC = Lr.RC; XC = Lr.XC; done = true;
+        rep{end+1} = sprintf('Runs reused from %s (same agent, pools and code)', runs_file);
+        fprintf('%s\n', rep{end});
+    else
+        fprintf('  %s was made with other inputs or code; running again\n', runs_file);
+    end
+    clear Lr
+end
+if ~done
+    RV = cell(1, numel(POL)); XV = RV; RC = RV; XC = RV;
+    for p = 1:numel(POL)
+        [kind, a_, opt] = setup(POL{p}, ag, tab, na, fx);
+        t1 = tic;
+        [RV{p}, XV{p}] = run_set(kind, PP, K, vspecs, a_, opt, 5000, []);
+        if ~strcmp(POL{p}, 'none'), [RC{p}, XC{p}] = run_set(kind, PPw, Kw, cspecs, a_, opt, 41000, ncl); end
+        fprintf('  %-26s %d validation + %d clean episodes, identity with rollout_policy.m checked (%.1f min)\n', LBL{p}, ...
+            numel(RV{p}.ret), ncl * ~strcmp(POL{p}, 'none'), toc(t1) / 60);
+    end
+    save(runs_file, 'run_key', 'RV', 'XV', 'RC', 'XC', '-v7.3');
+    fprintf('  runs saved to %s\n', runs_file);
 end
 col = @(n) find(strcmp(POL, n));
 

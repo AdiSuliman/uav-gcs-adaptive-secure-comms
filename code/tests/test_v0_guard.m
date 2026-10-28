@@ -62,6 +62,9 @@ tc.verifyError(@() v0_diag('C:\nowhere\clean_test_pools.mat', 'C:\nowhere\clean_
     'C:\nowhere\trained_dqn.mat', 'C:\nowhere\MANIFEST.sha256'), 'v0_guard:input');
 tc.verifyError(@() v0_diag('C:\nowhere\policy_pools.mat', 'C:\nowhere\clean_val_pools.mat', ...
     'C:\nowhere\trained_dqn.mat', 'C:\nowhere\MANIFEST.sha256', fullfile(r, 'data')), 'v0_guard:out');
+% Allowed inputs pass the guard and stop only at the missing file.
+tc.verifyError(@() v0_diag('C:\nowhere\policy_pools.mat', 'C:\nowhere\clean_val_pools.mat', ...
+    'C:\nowhere\trained_dqn.mat', 'C:\nowhere\MANIFEST.sha256'), 'v0_diag:input');
 end
 
 function test_v0_files_parse(tc)
