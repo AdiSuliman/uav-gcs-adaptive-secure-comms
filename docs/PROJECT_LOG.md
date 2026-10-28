@@ -218,7 +218,19 @@ The lecturer's false-alarm KPI is read at detector level; the system-level figur
 
 - D106 registered before the smoke and any CORE_BW data (Adi approved): `rule_core3`, the core rule driven by the three-state CNN (B3c's model, window of 3 cycles; clean, narrowband and wideband mapped to no action, channel switch and the wideband action W3 chosen on validation), carries CORE_BW's lecturer KPI 5-8 readings; KPI 8's headline is `rule_core3` against the validation-tuned `blind_core`; the hybrid's `rule_core` stays as a secondary row. Protocol amended on `core-bw-p1` (`5d7847f`, `7c5ad4c`); code and tests before the runbook's row 18, else the registered fallback. Code and tests done the same day (`2a4da56`, `f01a51f`); open: the `lect-ebno` commit, the data copies into the CORE_BW folder after C2 is done, and a full `test_core` run on the tip.
 
-## Status of the lecturer's KPIs (profile 1, 26.10.2026)
+### C2e and C2g (28.10.2026)
+
+- C2e (policy evaluation on the test pools, read once) ran 07:22-09:02 (99.8 min); the outputs match the archived hashes, the log equals `policy_evaluation.txt`, no errors. C2g ran 09:02-14:56 (354 min). C2u started 14:56.
+- Lecturer KPI 5, PER reduction against the static link (core action set, CNN-based rule against no action, all six Eb/N0 points pooled; the D105 pair): narrowband (tone jamming, 1,304 episodes) 38.9% [34.6, 42.9], MET (committed); wideband (barrage, 1,252 episodes) 43.3% [39.7, 46.8], MET (committed). The pooled line includes the link-limited points 0 and 3 dB; the per-Eb/N0 line (Line B, D99) is not printed yet and, if it differs, both are named.
+- Lecturer KPI 6 (recovery time) and KPI 7 (goodput) are measured: onset to detection median 1 cycle (20 ms), never detected 0.0%; onset to restored 8 cycles (160 ms) with the rule, 28.9% never; goodput on recoverable jamming 9.45 kb/s against 1.31 kb/s with no response. The detection-to-restored headline is Line B (pending, D99): at 0 and 3 dB the packet-loss test cannot fail, so the pooled median of 0 is not quoted as a result.
+- Lecturer KPI 8 (CNN contribution), in C2e only against the secondary, weakened baseline (fixed first response, no validation choice): the CNN detects sooner (median 20 against 80 ms, never 0% against 11%) and delivers more goodput (+2.56 kb/s [+1.92, +3.21], partly that baseline's rate cut), but its PER reduction is slightly lower, -3.2% [-5.3, -1.5], adverse and significant. On the full set of 36 configurations the PER difference is null (-1.4% [-5.3, 2.4]) and goodput is lower (-1.53 kb/s [-2.66, -0.52]). The headline is CORE_BW (`rule_core3` against a validation-tuned `blind_core`).
+- Deployed DQN (no escalation) on all test threat pools: recovered 94.1% [92.7, 95.4] of recoverable episodes, against 66.8% for the rule with escalation and 77.7% for the table; validation read 95.1%. Pooled PER reduction 64.3% [59.9, 68.6] (extension). Our KPI 6 (system false alarm on clean flights, extension): deployed DQN 57 of 2,376 flights = 2.40%, upper bound 2.98% against 5%, MET (committed). The CNN-based rule 11.11% (upper 12.23%), the table 6.36% and the DQN with escalation 7.41% are NOT MET; the DQN meets it because it does not act on many of the monitor's alarms, the monitor itself is not fixed.
+- Weak points, stated as measured: antenna fault 79.9% and path loss 81.4% recovered (the per-threat 90% recovery target of the extension holds for 20 of 24 threats); on harmed episodes antenna fault 46.3% and airframe shadowing 21.7% (n = 46), below the simpler policies; the validation envelope predicted at least 90% for antenna fault at high severity and the test reads 78.9% [70.1, 87.0], a miss; 161 km/h 88.7%, 9 dB 88.1%. The always-on configuration (channel switch, spatial diversity, power control) has higher return and goodput than the DQN, at 100% clean false alarms, and leads on the unknown set (-4.2 points [-8.5, -0.2]). The fixes are chosen on validation only (P1R's fixed monitor is the registered second reading).
+- C2g (retrained without each of 14 combinations, test flights of the combination): never-trained DQN 90.6% recovered on average against 95.0% when trained, rule 44.1%, table 44.6%. Weakest: sweeping jammer + path loss 75.0% [69.0, 81.2], tone jamming + path loss 80.1%, reactive jamming + path loss 83.9%, jamming + path loss 85.3%; path-loss pairs are the generalisation gap.
+- Process: the D104 archive of C2e's outputs (`p1_first`) was missing at the stage's end and is made before P1R's C1d; the per-Eb/N0 reading (Line B) and the clean false-alarm breakdown run after the restart.
+- Schedule: the PC restart moved to the C2u to GAL boundary (about 19:45 on 28.10); the chain is stopped as GAL starts and resumed from it.
+
+## Status of the lecturer's KPIs (profile 1, 28.10.2026)
 
 | KPI | Value | Status |
 |---|---|---|
@@ -226,14 +238,14 @@ The lecturer's false-alarm KPI is read at detector level; the system-level figur
 | 2 Macro-F1 at least 85% | 99.83% | Met |
 | 3 False alarms at most 5% in clean states | 0.17% (detector level) | Met |
 | 4 Recall at least 85% per jamming type | 99.95% / 99.73% | Met |
-| 5 PER reduction at least 30% against static | not measured | Pending (C2e) |
-| 6 Recovery time, onset-to-detection reported separately | detection median 0 cycles; closed loop pending | Pending (C2e) |
-| 7 Goodput | pending | Pending (C2e) |
-| 8 CNN contribution against the conventional mechanism | pending | Pending (C2e, controlled-bandwidth study) |
+| 5 PER reduction at least 30% against static | narrowband 38.9% [34.6, 42.9]; wideband 43.3% [39.7, 46.8] | Met (committed), C2e, D105 pair |
+| 6 Recovery time, onset-to-detection reported separately | detection median 1 cycle (20 ms); onset to restored 8 cycles (160 ms) | Measured; detection-to-restored headline pending (Line B, D99) |
+| 7 Goodput | 9.45 kb/s with the rule, 1.31 kb/s without (recoverable jamming) | Measured |
+| 8 CNN contribution against the conventional mechanism | C2e secondary: PER -3.2% [-5.3, -1.5] (adverse), detection 20 vs 80 ms, goodput +2.56 kb/s | Measured against the weakened baseline; headline pending (CORE_BW) |
 
 Known caveat for KPI 5: at 0 and 3 dB the clean packet loss (0.99 and 0.79) makes the 2x packet bound vacuous, so those points are reported separately (D99).
 
-Extension readings (no commitment): the earlier proposal's unknown-threat KPI is 0.769 (target 0.8, not met); the system-level clean false alarm is not at 5% (above).
+Extension readings (no commitment): the earlier proposal's unknown-threat KPI is 0.769 (target 0.8, not met); the system-level clean false alarm (our KPI 6) is MET (committed) for the deployed DQN, 2.40% [upper 2.98%], and NOT MET for the CNN-based rule, the table and the DQN with escalation (above).
 
 ## Lessons learned
 

@@ -1,6 +1,6 @@
 # Roadmap
 
-Plan, status and remaining work of the UAV-GCS jamming detection and mitigation project, as of 28.10.2026. The scope is the lecturer's revised proposal of 20.10.2026 (D92); everything beyond it is an extension without commitment.
+Plan, status and remaining work of the UAV-GCS jamming detection and mitigation project, as of 28.10.2026 (evening). The scope is the lecturer's revised proposal of 20.10.2026 (D92); everything beyond it is an extension without commitment.
 
 Related files: [README](../README.md) | [PROJECT_LOG.md](PROJECT_LOG.md) (execution history) | [DECISIONS.md](DECISIONS.md) (design record) | [LITERATURE.md](LITERATURE.md)
 
@@ -18,10 +18,10 @@ Rows and months are exactly those of the proposal (months 1-8). The interim repo
 | Detection layer (CNN): training, threat classification, unknown-threat detection | 3-4 | Done | Core CNN macro-F1 99.83% on a fourth, never-trained test set; unknown-threat detection built, AUROC 0.769 against our own 0.8 target (not met) |
 | Interim report | 2-4 | In progress | Draft 6 delivered 27.10.2026 and being shortened; due 01.11.2026 |
 | Decision layer: rule-based policy (baseline) | 4-5 | Ahead of schedule | Built and in use; its readings come with the policy evaluation |
-| Decision layer: DQN agent (optional) | 5-7 | Ahead of schedule | Trained; chosen on validation: held recovery 82.6%, recovered 95.1% against 60.3% and 71.3% for the best rule setting; test reading at C2e |
+| Decision layer: DQN agent (optional) | 5-7 | Ahead of schedule | Trained; chosen on validation: held recovery 82.6%, recovered 95.1% against 60.3% and 71.3% for the best rule setting; test reading (C2e): recovered 94.1% [92.7, 95.4] |
 | Adaptive Link Recovery and closed-loop integration | 5-7 | Ahead of schedule | Closed loop built; frame pools and survivability runs done on profile 1 |
 | Dashboard (GUI) | 6-7 | Ahead of schedule | Operator console built; live check with the v7 agent from an exported bundle after RPT |
-| Evaluation on the test set and KPI table | 7-8 | In progress | Detector KPIs read; PER, recovery time, goodput and CNN contribution at the policy evaluation |
+| Evaluation on the test set and KPI table | 7-8 | In progress | Detector KPIs read; policy evaluation read 28.10: PER reduction MET (committed) narrowband 38.9% and wideband 43.3%; recovery time and goodput measured; headlines pending (Line B, CORE_BW) |
 | Survivability map and complementary experiments | 7-8 | Ahead of schedule | Profile 1: Map A 81.8%, Map B 91.8%; edge map still to run |
 | Project book and presentation | 5-8 | Not started | Final report, defense and poster are last |
 
@@ -30,10 +30,12 @@ Rows and months are exactly those of the proposal (months 1-8). The interim repo
 | Milestone | Expected (estimate, boost off) |
 |---|---|
 | DQN training (C2) done | 28.10.2026, 07:22 (measured; 2,359 min) |
-| PC restart (frees memory held by exited MATLAB entries) | at the first stage boundary after Adi returns on 28.10 (he is away in the morning); C2e runs before it |
-| Policy evaluation (C2e): the lecturer's open KPIs are read | 28.10.2026, started 07:22; about 08:30-09:30 (1-2 h) |
+| PC restart (frees memory held by exited MATLAB entries) | at the C2u to GAL boundary, about 19:45 on 28.10 (the chain is stopped as GAL starts and resumed from it) |
+| Policy evaluation (C2e): the lecturer's open KPIs are read | 28.10.2026, 07:22-09:02 (measured; 99.8 min) |
+| Combination generalisation (C2g) | 28.10.2026, 09:02-14:56 (measured; 354 min) |
+| Unknown-threat generalisation (C2u) | started 28.10.2026, 14:56; ends about 19:45 |
 | Operator console with the v7 agent (Live and Episode tabs) | live check after RPT, from a bundle outside the pipeline folder, with Adi present |
-| Profile 1 chain ends (RPT): KPI table, dashboard, report numbers | 29.10.2026, about 02:00-10:00 |
+| Profile 1 chain ends (RPT): KPI table, dashboard, report numbers | 29.10.2026, morning |
 | Controlled-bandwidth study (CORE_BW): `rule_core3` against the validation-tuned `blind_core` is the lecturer row (D106) | 30.10-2.11.2026 |
 | Profile-1 rerun with the fixed monitor (P1R) | 2.11-5.11.2026 |
 | Profile 3 ends (last extension) | about 18-21.11.2026, worst about 22-23.11 (step 7a, the detector-set run for profile 3's decoder, timed on 27.10 at about 5-7 h) |
@@ -53,15 +55,15 @@ Profile 1 = three UAV antennas, branch `v7-dev`. Each stage starts when the prev
 | Drop-threshold choice (C1d) | 3.9 min; threshold 4.5 dB |
 | DQN training (C2) | 26.10 16:03 to 28.10 07:22; 81 runs and 2 sensitivity retrains. Deployed: the DQN without escalation (`class_drop` 5/5, 171 dB², penalty 120, costs x0.5, gamma 0.5, seed 44); validation held recovery 82.6%, recovered 95.1% (best rule setting 60.3% and 71.3%); 94 false changes in 54,000 clean cycles, bound met on validation. Reward sensitivity: held 80.1% (costs x0.5) and 80.6% (x2.0), at least the rule's and the table's at every scale |
 
-**Now:** policy evaluation (C2e), started 28.10 at 07:22 when C2 ended. Adi is away on the morning of 28.10, so the PC restart moves from C2's end to the first stage boundary after he returns: the chain is stopped as that stage starts and resumed from it.
+**Now:** unknown-threat generalisation (C2u), started 28.10 at 14:56. The PC restart is at the C2u to GAL boundary (about 19:45): the chain is stopped as GAL starts and resumed from it.
 
 **Stages left, in order** (durations are estimates from smoke runs and the earlier full runs; no full-scale v7 run exists yet for these stages):
 
 | # | Stage | What it does | Expected duration | Start |
 |---|---|---|---|---|
-| 1 | C2e evaluate_policies | Every policy on test pools; the lecturer's PER, recovery-time, goodput and CNN-contribution lines | 1-2 h | running (no restart before it) |
-| 2 | C2g experiment_combo_generalization | DQN retrained without each of 14 combinations (one full training each) | 7-8.5 h | after C2e |
-| 3 | C2u experiment_unknown_threat | DQN retrained without each of 10 single threats; response to a threat never trained on | 5-6 h | after C2g |
+| 1 | C2e evaluate_policies | Every policy on test pools; the lecturer's PER, recovery-time, goodput and CNN-contribution lines | 1-2 h | done 28.10 (99.8 min) |
+| 2 | C2g experiment_combo_generalization | DQN retrained without each of 14 combinations (one full training each) | 7-8.5 h | done 28.10 (354 min) |
+| 3 | C2u experiment_unknown_threat | DQN retrained without each of 10 single threats; response to a threat never trained on | 5-6 h | running since 28.10 14:56 |
 | 4 | GAL threat_gallery | One figure per threat | 5-10 min | after C2u |
 | 5 | OHP overhead_pass | UAV flying over the GCS (dipole null) | 3.8-4.7 h | after GAL |
 | 6 | GCSA gcs_antenna_analysis | What the tracked directional GCS antenna gives | under 1 min | after OHP |
@@ -69,7 +71,7 @@ Profile 1 = three UAV antennas, branch `v7-dev`. Each stage starts when the prev
 | 8 | KPI, DASH, WEAK, RPT | KPI summary, dashboard, weak-point analysis, numbers export | about 1 min each | after EDGE |
 | 9 | LAT measure_latency | Decision latency per cycle, on an idle machine | 1-6 min | after profile 3 ends, in the takeover's final phase (LAT is not part of the profile 1 chain); it can be hand-run after RPT on the idle machine, then KPI, DASH, WEAK and RPT are rerun |
 
-From C2e's end to RPT: about 16-19 h (the arithmetic of the rows gives up to 21 h), plus the restart. The OHP figure comes from smoke runs that shared the machine. The processor boost is off (99%), which slows the stages.
+From C2u's start to RPT: about 15-19 h, plus the restart. The OHP figure comes from smoke runs that shared the machine. The processor boost is off (99%), which slows the stages.
 
 ## After profile 1
 
@@ -90,8 +92,8 @@ Profile 3 = four antennas. OHP and GCSA are skipped on it. Profile 2 (two antenn
 
 **Lecturer's scope**
 
-1. Run the policy evaluation (C2e) with the DQN chosen in C2, and restart the PC at the first stage boundary after Adi returns.
-2. Read the lecturer's four open KPIs at the policy evaluation (C2e): PER reduction (target at least 30% vs the static link), recovery time, goodput, CNN contribution vs the conventional adaptive mechanism.
+1. Restart the PC at the C2u to GAL boundary (about 19:45 on 28.10) and resume the chain from GAL. Policy evaluation (C2e) is done.
+2. Lecturer KPIs 5-8 are read in C2e: PER reduction MET (committed) in both scenarios. Open: the recovery-time headline from the per-Eb/N0 line (Line B, D99, after the restart) and the CNN contribution against an equally tuned baseline (CORE_BW).
 3. Finish profile 1's chain to RPT: the KPI table (KPI), the dashboard (DASH) and the report numbers (RPT) are proposal deliverables; latency (LAT) on an idle machine: with the profile 1 finals, hand-run after RPT if Adi decides so, otherwise at the end of profile 3 in the takeover's final phase.
 4. Operator console: the three-state CNN view, the core action set and the deployed policy kind (read from `trained_dqn.mat`) are on branch `gui-core` (tested 27.10, not merged); the console starts from an exported bundle outside the pipeline folder; then a live check with the v7 agent after RPT with Adi present, and screenshots.
 5. Submit the interim report on 01.11.2026 (draft 6 delivered 27.10.2026 and being shortened; it follows the proposal Gantt).
