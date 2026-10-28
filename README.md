@@ -10,7 +10,7 @@ The scope is the lecturer's revised proposal of 20.10.2026. Everything else in t
 
 ## Status at a glance
 
-Status as of 26.10.2026. Every "met" verdict is on data never used for training or selection, read once. Intervals are 95% bootstrap.
+Status as of 28.10.2026. Every "met" verdict is on data never used for training or selection, read once. Intervals are 95% bootstrap.
 
 | Proposal deliverable | Status |
 |---|---|
@@ -18,7 +18,7 @@ Status as of 26.10.2026. Every "met" verdict is on data never used for training 
 | 2. Labelled spectrogram dataset and trained CNN | Done |
 | 3. Rule-based adaptive recovery | Built; evaluation pending (stage C2e) |
 | 4. Closed-loop integration | Built; evaluation pending (stage C2e) |
-| 5. Static vs conventional adaptive vs CNN-based adaptive | Pending; the preceding training stage is running, results expected 28.10.2026 (estimate) |
+| 5. Static vs conventional adaptive vs CNN-based adaptive | Pending; the evaluation (C2e) is running since the training stage (C2) ended on 28.10.2026 |
 | 6. Graphs, confusion matrix, comparison tables, summary report | After the evaluation |
 
 | Lecturer KPI | Status |
@@ -108,7 +108,9 @@ Notes:
 - The false-alarm KPI is read at detector level, as pre-registered. The whole-monitor false alarm on clean flights (an extension KPI) is not at 5% yet: 12.5-29.9% of 1,800 clean validation episodes depending on the monitor setting. The fix is registered in D103 and D104.
 - KPI 5-8 for the proposal's own system come from the controlled-bandwidth study CORE_BW, where the three-state CNN drives the rule (`rule_core3`) against a `blind_core` tuned on validation (D106), estimated 30.10-2.11.2026. In C2e the rule reads the hybrid detector's classes; those readings are the profile-wide secondary lines (D105).
 
-Next dates (estimates): DQN training ends 28.10.2026 about 05:00-11:00, then a PC restart, then the policy evaluation; profile 1's chain ends (RPT) about 29.10; CORE_BW 30.10-2.11; the profile-1 rerun (P1R) 2.11-5.11; profile 3 about 20.11-25.11.2026. Current numbers and logs are in [docs/ROADMAP.md](https://github.com/AdiSuliman/uav-gcs-adaptive-secure-comms/blob/v7-docs-d91/docs/ROADMAP.md) and [docs/PROJECT_LOG.md](https://github.com/AdiSuliman/uav-gcs-adaptive-secure-comms/blob/v7-docs-d91/docs/PROJECT_LOG.md).
+DQN training (C2) ended on 28.10.2026. The registered selection on validation deployed the DQN without escalation: held recovery 82.6% and recovered 95.1%, against 60.3% and 71.3% for the best rule setting; its false-change bound on clean flights is met on validation. These are validation numbers; the test reading comes from C2e.
+
+Next dates (estimates): the policy evaluation (C2e) runs before the PC restart, which comes at the first stage boundary after Adi returns; the chain ends at RPT about 29.10; CORE_BW 30.10-2.11 (`rule_core3` against the validation-tuned `blind_core` is the lecturer row); the profile-1 rerun (P1R) 2.11-5.11; profile 3 about 18-21.11.2026 (worst about 22-23.11; step 7a, timed on 27.10, takes about 5-7 h). Windows Update is paused until 30.11.2026. Current numbers and logs are in [docs/ROADMAP.md](https://github.com/AdiSuliman/uav-gcs-adaptive-secure-comms/blob/v7-docs-d91/docs/ROADMAP.md) and [docs/PROJECT_LOG.md](https://github.com/AdiSuliman/uav-gcs-adaptive-secure-comms/blob/v7-docs-d91/docs/PROJECT_LOG.md).
 
 ## Operator console
 
@@ -122,9 +124,9 @@ Next dates (estimates): DQN training ends 28.10.2026 about 05:00-11:00, then a P
 | Survivability map | Map A / B |
 | Session log | Run history |
 
-Start with `demo_gui` in MATLAB from the repository folder. The Live and Episode tabs need `data/trained_dqn.mat` (written when C2 ends); the KPI tab needs `results/policy_evaluation.mat` (C2e); the latency plot needs LAT. A bundle exported by `export_gui_bundle` lets the console run from a copy outside the pipeline folder.
+Start `demo_gui` from a bundle exported by `export_gui_bundle`, not from the pipeline folder. The Live and Episode tabs need `data/trained_dqn.mat` (written when C2 ends); the KPI tab needs `results/policy_evaluation.mat` (C2e); the latency plot needs LAT. The bundle runs from a copy outside the pipeline folder, so a running pipeline is never touched.
 
-State: the antenna count, the threat list, temporal fusion and the decision settings follow the current pipeline. The three-state core view and the core action set are planned on branch `gui-core`; a live check with the final agent from an exported bundle follows RPT.
+State: the antenna count, the threat list, temporal fusion and the decision settings follow the current pipeline. The three-state core view, the core action set and the deployed policy kind from `trained_dqn.mat` are on branch `gui-core` (tested 27.10, not merged); a live check with the final agent from an exported bundle follows RPT.
 
 ## Quick start
 
@@ -165,14 +167,14 @@ Built and measured, but outside the proposal. They are reported separately and a
 - **Double DQN** (optional in the proposal's plan) with a safety shield and escalation, and the full set of earlier KPIs (restoration, false alarms of the whole monitor, latency).
 - **Survivability maps and EDGE**: Map A (no goodput loss) 81.8% and Map B (any configuration) 91.8% of the profile 1 envelope; three antennas against two: single threats 93.1% vs 91.3%, combined threats 67.6% vs 58.2%.
 - **Profile 3** (four antennas): detector stages done; decision layer pending.
-- **CORE_BW**: controlled-bandwidth study with 41 channels, hop >= 6 MHz and jammer widths from tone to 83.5 MHz; `rule_core` against `blind_core`.
+- **CORE_BW**: controlled-bandwidth study with 41 channels, hop >= 6 MHz and jammer widths from tone to 83.5 MHz; `rule_core3` (the three-state CNN in the loop) against a validation-tuned `blind_core`; `rule_core` (the hybrid) is the secondary row (D106).
 - **Operator console and 3D view**: console built; the 3D view is parked until the code, the final proposal and the interim report are done.
 
 ## Documentation map
 
 | File | Content |
 |---|---|
-| [docs/DECISIONS.md](https://github.com/AdiSuliman/uav-gcs-adaptive-secure-comms/blob/v7-docs-d91/docs/DECISIONS.md) | Decision record D1-D104: why each design choice was made. The lecturer's scope is D92 |
+| [docs/DECISIONS.md](https://github.com/AdiSuliman/uav-gcs-adaptive-secure-comms/blob/v7-docs-d91/docs/DECISIONS.md) | Decision record D1-D106: why each design choice was made. The lecturer's scope is D92 |
 | [docs/LITERATURE.md](https://github.com/AdiSuliman/uav-gcs-adaptive-secure-comms/blob/v7-docs-d91/docs/LITERATURE.md) | What each source contributes, and what is missing from the library |
 | [docs/ROADMAP.md](https://github.com/AdiSuliman/uav-gcs-adaptive-secure-comms/blob/v7-docs-d91/docs/ROADMAP.md) | Plan, run status and remaining work |
 | [docs/PROJECT_LOG.md](https://github.com/AdiSuliman/uav-gcs-adaptive-secure-comms/blob/v7-docs-d91/docs/PROJECT_LOG.md) | Execution log, newest last |
@@ -197,4 +199,4 @@ The previous full version of this README is in git at commit `b648c7b`.
 
 Adi Suliman and Bar Dvir Hassan; supervisor Golan Ein-Tzvi. Course 50076 (HIT), semester 2026-27 A. Repository: https://github.com/AdiSuliman/uav-gcs-adaptive-secure-comms
 
-Last updated 26.10.2026.
+Last updated 28.10.2026.
