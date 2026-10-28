@@ -1,6 +1,6 @@
 # Project Log
 
-History of the UAV-GCS adaptive communications project, from the first link model (20.08.2026) to the current run (27.10.2026), one section per version.
+History of the UAV-GCS adaptive communications project, from the first link model (20.08.2026) to the current run (28.10.2026), one section per version.
 
 - Why each design choice was made: [DECISIONS.md](DECISIONS.md) (D-numbers are cited below).
 - What each source contributes: [LITERATURE.md](LITERATURE.md).
@@ -9,16 +9,16 @@ History of the UAV-GCS adaptive communications project, from the first link mode
 
 Scope: the lecturer's revised proposal of 20.10.2026 (D92) is the official scope. Everything built beyond it is an extension without commitment and is labelled so. Dates are DD.MM.YYYY, local time. Clocks went back on 25.10.2026 at 02:00.
 
-## Where we are (27.10.2026)
+## Where we are (28.10.2026)
 
 | Item | State |
 |---|---|
 | Lecturer KPIs 1-4 (BER model, macro-F1, false alarms, recall) | Measured on data never used for training or selection: all met (details in v7) |
-| Lecturer KPIs 5-8 (PER reduction, recovery time, goodput, CNN contribution) | Pending: they come from stage C2e |
-| Profile 1 (3 UAV antennas) | Stage C2 (decision-layer training) running since 26.10 16:03; 50 of 81 runs finished at 27.10 15:42 (about 29 min per run), then the escalation re-evaluation, the save and 2 sensitivity retrains |
-| Next on profile 1 | PC restart right after C2 is done (fallback: at the start of C2g), then C2e (first PER, recovery-time, goodput and CNN-contribution lines), the rest of the chain, a controlled-bandwidth study (CORE_BW), a rerun with a corrected monitor (P1R), then profile 3 |
+| Lecturer KPIs 5-8 (PER reduction, recovery time, goodput, CNN contribution) | Pending: they come from stage C2e (running since C2 ended on 28.10) |
+| Profile 1 (3 UAV antennas) | C2 (decision-layer training) done 28.10 07:22. Chosen on validation: the DQN without escalation, held recovery 82.6% and recovered 95.1% against 60.3% and 71.3% for the best rule setting; the false-change bound is met on validation. C2e (policy evaluation on test pools) follows |
+| Next on profile 1 | C2e (first PER, recovery-time, goodput and CNN-contribution lines) runs before the PC restart: Adi is away on the morning of 28.10, so the restart comes at the next stage boundary after he returns. Then the rest of the chain, a controlled-bandwidth study (CORE_BW), a rerun with a corrected monitor (P1R), then profile 3 |
 | Profile 3 (4 UAV antennas) | Detector stages done; decision layer waits for profile 1 |
-| Estimates | C2 done 28.10 about 07:00-09:30; PC restart right after it; C2e 28.10 about 08:00-12:45; profile 1 chain ends (RPT) 29.10 about 02:00-10:00; CORE_BW 30.10-2.11 (`rule_core3` against the validation-tuned `blind_core` is the lecturer row, D106); P1R 2.11-5.11; profile 3 about 18-21.11, worst about 22-23.11 (step 7a timed 27.10: about 5-7 h) |
+| Estimates | C2e started 28.10 07:22, ends about 08:30-09:30; PC restart at the first stage boundary after Adi returns; profile 1 chain ends (RPT) 29.10 about 02:00-10:00; CORE_BW 30.10-2.11 (`rule_core3` against the validation-tuned `blind_core` is the lecturer row, D106); P1R 2.11-5.11; profile 3 about 18-21.11, worst about 22-23.11 (step 7a timed 27.10: about 5-7 h) |
 | Windows Update | Paused until 30.11.2026 |
 | Interim report | Draft 6 delivered 27.10, being shortened; due 01.11 |
 
@@ -30,7 +30,7 @@ Scope: the lecturer's revised proposal of 20.10.2026 (D92) is the official scope
 | v4 | 28.09 - 30.09.2026 | Receiver-side measurements, 36 configurations, stricter evaluation | Final reading 30.09: 7 of 8 KPIs met |
 | v5 | 30.09.2026 | Wider realism, spatially separated antennas, sourced platform profile | Superseded by v6 before any test reading |
 | v6 | 01.10 - 06.10.2026 | Temporal fusion, quiet slot, levels to the sources' caps | Ideal-receiver reference |
-| v7 | 01.10.2026 onward | Real receiver, flight dynamics, triples, profile 3, per-point verdicts | Detector readings done; C2 running |
+| v7 | 01.10.2026 onward | Real receiver, flight dynamics, triples, profile 3, per-point verdicts | Detector readings done; DQN chosen on validation (C2) |
 
 Stage names used below: A = link and dataset, B = detector, C1 = frame pools, C1d = drop-alarm threshold, C2 = decision-layer training, C2e = evaluation of every policy, SURV and SURV3 = survivability maps, C2g = decision layer retrained without each threat combination, C2u = response to a threat never trained on, OHP = overhead pass of the UAV, GCSA = gain of the tracked GCS antenna, EDGE = verdict per envelope point, LAT = latency, RPT = report numbers.
 
@@ -204,6 +204,15 @@ The lecturer's false-alarm KPI is read at detector level; the system-level figur
 - Memory on 27.10: about 1 GB RAM available, 37.5 GB free commit; the restart clears it. Windows Update is paused until 30.11.2026.
 - The operator console starts from an exported bundle; it is to follow the deployed policy kind stored in `trained_dqn.mat` (branch `gui-core`), not always the escalation variant.
 - Reporting rule for C2: the deployed agent is the one chosen by the registered selection on validation (false alarms at most 5%); numbers carry a slight optimistic selection bias until C2e reads them on test pools.
+
+### C2 result (28.10.2026)
+
+- C2 done 07:22 (2,359 min, 81 runs and 2 sensitivity retrains). The registered selection on validation (highest held recovery of the weakest threat among settings whose one-sided 95% false-alarm bound is at most 5%) chose the DQN without escalation: monitor `class_drop` 5/5, drop threshold 171 dB², false-switch penalty 120, running costs x0.5, gamma 0.5, seed 44. Gate passed.
+- Validation: held recovery 82.6%, recovered 95.1%. The best rule setting (rule + escalation, `class_drop` 5/5, 180 dB²) holds 60.3% and recovers 71.3%; no rule setting meets the 5% false-alarm bound (best 198 of 1,800 clean episodes, bound 12.3%).
+- False changes on the clean link (validation, Eb/N0 at least 0 dB): the DQN makes 94 in 54,000 cycles, 0.0017 per cycle against a bound of 0.0024 (one every 11.5 s). Met on validation. `trained_dqn.mat` is saved.
+- Reward sensitivity (every cost term scaled, DQN retrained, seed 44, validation): x0.5 holds 80.1% and recovers 96.7%; x2.0 holds 80.6% and recovers 91.9%. At every scale the DQN holds at least as much as the rule (60.3%) and the table policy.
+- These are validation numbers chosen over many runs, so they carry a slight optimistic bias; C2e reads the deployed policy on the test pools.
+- Schedule: Adi is away on the morning of 28.10, so the PC is not restarted at C2's end. C2e runs before the restart; the restart comes at the next stage boundary after he returns (the chain is stopped as the new stage starts and resumed from it).
 
 ### CORE_BW registration (27.10.2026)
 

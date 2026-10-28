@@ -8,7 +8,7 @@ The scope is the lecturer's revised proposal of 20.10.2026. Everything else in t
 
 ## Status at a glance
 
-Status as of 27.10.2026. Every "met" verdict is on data never used for training or selection, read once. Intervals are 95% bootstrap.
+Status as of 28.10.2026. Every "met" verdict is on data never used for training or selection, read once. Intervals are 95% bootstrap.
 
 | Proposal deliverable | Status |
 |---|---|
@@ -16,7 +16,7 @@ Status as of 27.10.2026. Every "met" verdict is on data never used for training 
 | 2. Labelled spectrogram dataset and trained CNN | Done |
 | 3. Rule-based adaptive recovery | Built; evaluation pending (stage C2e) |
 | 4. Closed-loop integration | Built; evaluation pending (stage C2e) |
-| 5. Static vs conventional adaptive vs CNN-based adaptive | Pending; the preceding training stage (C2) is running and ends about 07:00-09:30 on 28.10.2026 (estimate); the evaluation follows it |
+| 5. Static vs conventional adaptive vs CNN-based adaptive | Pending; the evaluation (C2e) is running since the training stage (C2) ended on 28.10.2026 |
 | 6. Graphs, confusion matrix, comparison tables, summary report | After the evaluation |
 
 | Lecturer KPI | Status |
@@ -106,7 +106,9 @@ Notes:
 - The false-alarm KPI is read at detector level, as pre-registered. The whole-monitor false alarm on clean flights (an extension KPI) is not at 5% yet: 12.5-29.9% of 1,800 clean validation episodes depending on the monitor setting. The fix is registered in D103 and D104.
 - KPI 5-8 for the proposal's own system come from the controlled-bandwidth study CORE_BW, where the three-state CNN drives the rule (`rule_core3`) against a `blind_core` tuned on validation (D106), estimated 30.10-2.11.2026. In C2e the rule reads the hybrid detector's classes; those readings are the profile-wide secondary lines (D105).
 
-Next dates (estimates): DQN training (C2) is at run 50 of 81 and ends 28.10.2026 about 07:00-09:30; a PC restart follows right after C2 is done, before the policy evaluation (C2e) starts (fallback: at the start of C2g); C2e and the rest of the chain follow, ending at RPT about 29.10; CORE_BW 30.10-2.11 (`rule_core3` against the validation-tuned `blind_core` is the lecturer row); the profile-1 rerun (P1R) 2.11-5.11; profile 3 about 18-21.11.2026 (worst about 22-23.11; step 7a, timed on 27.10, takes about 5-7 h). Windows Update is paused until 30.11.2026. Current numbers and logs are in [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/PROJECT_LOG.md](docs/PROJECT_LOG.md).
+DQN training (C2) ended on 28.10.2026. The registered selection on validation deployed the DQN without escalation: held recovery 82.6% and recovered 95.1%, against 60.3% and 71.3% for the best rule setting; its false-change bound on clean flights is met on validation. These are validation numbers; the test reading comes from C2e.
+
+Next dates (estimates): the policy evaluation (C2e) runs before the PC restart, which comes at the first stage boundary after Adi returns; the chain ends at RPT about 29.10; CORE_BW 30.10-2.11 (`rule_core3` against the validation-tuned `blind_core` is the lecturer row); the profile-1 rerun (P1R) 2.11-5.11; profile 3 about 18-21.11.2026 (worst about 22-23.11; step 7a, timed on 27.10, takes about 5-7 h). Windows Update is paused until 30.11.2026. Current numbers and logs are in [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/PROJECT_LOG.md](docs/PROJECT_LOG.md).
 
 ## Operator console
 
@@ -195,4 +197,4 @@ The previous full version of this README is in git at commit `b648c7b`.
 
 Adi Suliman and Bar Dvir Hassan; supervisor Golan Ein-Tzvi. Course 50076 (HIT), semester 2026-27 A. Repository: https://github.com/AdiSuliman/uav-gcs-adaptive-secure-comms
 
-Last updated 27.10.2026.
+Last updated 28.10.2026.
