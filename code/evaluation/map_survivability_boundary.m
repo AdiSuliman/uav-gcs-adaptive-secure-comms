@@ -200,7 +200,7 @@ else
 end
 
 %% ========== 4. Reports ==========
-if ~exist('results','dir'), mkdir('results'); end
+if ~isfolder('results'), mkdir('results'); end   % exist(...,'dir') also finds toolbox folders on the path
 if SV.v2
     report_A = surv_report(grid_data_A, ber_ref, fer_clean, SNR_points, 'MAP A — WITHOUT GOODPUT LOSS', MECH_A, ACT_CODE, Z);
 else
@@ -248,7 +248,7 @@ if SV.v2, [gap_report, gap_cls] = surv_gap_report(grid_data_A, grid_data_B, SNR_
 write_report(gap_report, 'results/survivability_gap_analysis.txt');
 fprintf('\n--- GAP ANALYSIS ---\n'); fprintf('%s\n', gap_report{:});
 
-if ~exist('data','dir'), mkdir('data'); end
+if ~isfolder('data'), mkdir('data'); end
 save('data/survivability_boundary.mat','grid_data_A','grid_data_B','ber_clean','ber_ref','fer_clean','BER_FLOOR', ...
     'SNR_points','RATIO_RECOVERABLE','RATIO_MARGINAL','MECH_A','MECH_B','ber_all','fer_all','slack_all','threat_cfg','maps', ...
     'GEOM_AOA','RUN_FRAMES','ACTIONS');

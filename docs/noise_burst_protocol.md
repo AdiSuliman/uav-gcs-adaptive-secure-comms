@@ -4,7 +4,9 @@ Written 25.10.2026, before profile 1's C1d and C2 have run, before dev set C exi
 any reading of the readings below. Amended the same day, still before dev set C runs, after the
 check against McEliece and Stark 1984 (D97): the J4 gate at 10 dB (4.2), the cutoff rate beside
 the capacity (1, 4.2), the narrowed capacity wording (1, 4.3); and again, still before any
-data, so that the J4 gate at 10 dB also passes within the clean bound (4.2). Code on
+data, so that the J4 gate at 10 dB also passes within the clean bound (4.2). Amended on
+28.10.2026, before dev set C runs (the 27.10 timing run measured time only, no choice was
+read): the floor's bound is 1.5 x its start, not the start (3.2). Code on
 `lect-kpi`; tests in `code/tests/test_core.m` (section 6).
 
 ## 1. The defect
@@ -184,7 +186,15 @@ study builds only the four core configurations: no coded truth, no change.
 - **Floor per codeword** (2064 data symbols). Start from the q-quantile over -ln(1-q). With a
   share f of clean symbols this start is about 1/f too high (x5 at duty 0.775). So eight passes
   of the truncated exponential's maximum likelihood follow, below 3 x the current floor, never
-  above the start. With our own simulation of exponential residuals:
+  above 1.5 x the start. The bound is not the start itself: the block median gain passes
+  through a few of the block's own symbols, whose residuals sit near zero, so on a clean
+  codeword the q-quantile reads about 0.75-0.8 of the thermal variance. A floor held at the
+  start sits 0.8-1.3 dB low (Es/N0 6-12 dB, our own simulation of the median-gain residuals),
+  outside the floor check of 4.2, and flags 2-3.5% of clean symbols at c = 4.6 instead of
+  about 1%. At 1.5 x the floor reads 0.95-1.0 of the mean residual there. The bound still
+  stops the passes climbing into weak bursts at high duty (duty 0.775 at 10 dB: 5.2 x the
+  thermal variance, 3.5 x when held at the start, about 6 x without a bound).
+  With our own simulation of exponential residuals:
   - random duty 0.5 and 0.775 at 30 dB: 1.00-1.02 x the thermal variance (the start: 2.2 and 5.4 x);
   - J4: 1.6-1.9 x, because the RRC leaks raise most symbols.
 - **Per-symbol variance:** `max(floor, mean r over k-h..k+h)`. Each bit enters with

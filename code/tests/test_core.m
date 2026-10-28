@@ -1102,7 +1102,7 @@ verifyNotEmpty(tc, strfind(txt, '2 ant/3 ref'));
 verifyNotEmpty(tc, strfind(txt, 'tone_jamming (most severe, 30)'));
 verifyNotEmpty(tc, strfind(txt, 'Like for like, the Eb/N0 where no clean link is link-limited (12, 15 dB):'));
 verifyNotEmpty(tc, strfind(txt, 'Clean BER, 3 antennas: 1.1e-01 4.4e-02 1.8e-02 4.5e-03 2.2e-04 <1e-4'));
-verifyNotEmpty(tc, strfind(txt, 'Clean packet loss, 2 antennas: 0.988L 0.938L 0.669L 0.475L 0.194 0.069'));
+verifyNotEmpty(tc, strfind(txt, 'Clean packet loss, 2 antennas: 0.988L 0.938L 0.669L 0.475L 0.194  0.069 '));   % a blank in place of L keeps the columns
 verifyEmpty(tc, strfind(txt, 'Airframe-shadowing'));
 row = @(db) rep{startsWith(rep, sprintf('  %2g dB  ', db))};
 marks = @(db) cellfun(@(x) x(end) == 'L', strsplit(strtrim(extractAfter(row(db), 'dB')), ' / '));
@@ -1248,7 +1248,7 @@ for j = 1:numel(F.rec)
     k = F.jobs(j, 2);
     verifyEqual(tc, F.rec{j}, repmat([true false], nS, 1));
     verifyEqual(tc, size(F.met{j}.ber), [nS 2 numel(A)]);
-    verifyEqual(tc, F.met{j}.ber(1, 1, 1), 0.2);
+    verifyEqual(tc, F.met{j}.ber(1, 1, 1), 0.2, 'AbsTol', 1e-15);   % a mean over the flight's frames
     if contains(F.cases(F.jobs(j, 1)).threat, 'airframe_shadowing')   % against the clean link of its own flights
         verifyEqual(tc, surv3_judge(F.met{j}, F.clean_sh{F.VAR(k).ref}, 2, 1e-4, F.ACTIONS), F.rec{j});
         verifyEqual(tc, surv3_judge(F.met{j}, F.clean{F.VAR(k).ref}, 2, 1e-4, F.ACTIONS), [false(nS - 1, 2); true false]);
@@ -1375,7 +1375,7 @@ for k = 1:6
 end
 verifyEqual(tc, size(o1{1}), [2 3 5]);                                  % configurations x Eb/N0 x flights
 verifyEqual(tc, size(o2{3}), [2 3 5]);
-verifyEqual(tc, squeeze(o1{1}(1, 1, :))', 0.3 * ones(1, 5));            % the stand-in at duty 0.775: every flight hit
+verifyEqual(tc, squeeze(o1{1}(1, 1, :))', 0.3 * ones(1, 5), 'AbsTol', 1e-15);   % the stand-in at duty 0.775: every flight hit
 verifyEqual(tc, squeeze(o1{3}(1, 1, :))', ones(1, 5) / 20);             % one frame of a flight's 20
 S.NR = []; S.maps.pset = struct();
 SURV_STUB_LOG = {};
@@ -1385,7 +1385,7 @@ verifyEqual(tc, [L.seed], 900000 + 1000 + 20 + (1:3));                  % profil
 verifyEqual(tc, [L.run], ones(1, 3));
 verifyEqual(tc, [L.duty], p.burst_duty * ones(1, 3));
 verifyEqual(tc, size(o{1}), [2 3]);
-verifyEqual(tc, o{1}, [0.3 0.3 0.3; 0 0 0]);                              % duty 0.5: no_action hit, its run's mean
+verifyEqual(tc, o{1}, [0.3 0.3 0.3; 0 0 0], 'AbsTol', 1e-15);             % duty 0.5: no_action hit, its run's mean
 % surv_runs on a stand-in pool: two flights of four frames
 Q = struct('run', [1 1 1 1 2 2 2 2]', 'ber', [0 0.1 0 0.1 0 0 0 0.4]', 'fer', [0 1 0 1 0 0 0 1]');
 [rB, rF, rS] = surv_runs({Q, Q}, {'no_action', 'fec_interleave'}, 2);
@@ -1490,7 +1490,7 @@ verifyEqual(tc, G.status_hi(2, :), [2 2]);
 verifyGreaterThan(tc, G.ber_hi(2, 2), 2e-4); verifyEqual(tc, G.ber_lo(2, 2), 0);
 verifyEqual(tc, G.ber_hi(1, 2), 1 - 0.025 ^ (1 / (5 * 57 * 1032)), 'RelTol', 1e-12);   % no error in five flights
 verifyEqual(tc, G.fer_hi(1, 2), 1 - 0.025 ^ (1 / (5 * 57)), 'RelTol', 1e-12);
-verifyEqual(tc, G.ber_lo(3, 1), 0.47); verifyEqual(tc, G.ber_hi(3, 1), 0.47);
+verifyEqual(tc, G.ber_lo(3, 1), 0.47, 'AbsTol', 1e-15); verifyEqual(tc, G.ber_hi(3, 1), 0.47, 'AbsTol', 1e-15);
 G = surv_grid({mean(Br, 4)}, {mean(Fr, 4)}, {Sl}, {Br}, {Fr}, mp, A, A(4), ref, fc, Z);
 cp0 = 1 - 0.05 ^ (1 / (5 * 28));                                        % no lost packet in 5 x 28
 verifyEqual(tc, G.ber_hi(1, 2), 0.5 * cp0, 'RelTol', 1e-9);           % the coded link: lost packets, not bits
@@ -3576,6 +3576,7 @@ function test_dev_fec_gates(tc)
 % at 10 dB under no_action within that bound or more than Q/2 packets below the D78
 % decoder's loss; the random jammer at duty 0.775 under no_action flagged when it decodes at
 % 10 dB or more, never at 4 dB. The select step adopts only with every check.
+cl = dev_path(tc); %#ok<NASGU>
 nm = {'clean_no_action', 'clean_no_action', 'nb_j4_04_no_action', 'nb_j4_04_power_control', 'nb_j4_10_no_action', ...
     'nb_r775_04_no_action', 'nb_r775_10_no_action', 'nb_r775_30_no_action', 'd78_j16_mmse'};
 lv = [0 0 4 4 10 4 10 30 16];
@@ -3613,6 +3614,7 @@ function test_nb_cutoff_rate(tc)
 % at Eb/N0 9 dB: the values of the protocol's section 1, our own calculation from the
 % model's parameters; without a jammer the rail's own R0; never above the states' mean R0
 % (Jensen); falling with the level; an unknown pattern refused.
+cl = dev_path(tc); %#ok<NASGU>
 LV = [4 10 16 23 30];
 verifyEqual(tc, nb_cutoff_rate('j4', LV), [0.733066 0.563443 0.417538 0.280687 0.186495], 'AbsTol', 1e-5);
 verifyEqual(tc, nb_cutoff_rate('r50', LV), [0.502324 0.438361 0.420868 0.416067 0.415104], 'AbsTol', 1e-5);
@@ -3627,6 +3629,13 @@ J = 10;                                                              % 10 dB, ra
 r0s = @(v) 1 - log2(1 + exp(-1 ./ (2 * v)));
 verifyLessThanOrEqual(tc, nb_cutoff_rate('r775', 10), 0.225 * r0s(10^-1.2) + 0.775 * r0s(10^-1.2 + J));
 verifyError(tc, @() nb_cutoff_rate('r60', 10), 'nb_cutoff_rate:pattern');
+end
+
+function cl = dev_path(tc)
+% code/dev on the path for one test (startup.m and setup_paths.m leave it off).
+d = fullfile(tc.TestData.root, 'code', 'dev');
+if any(strcmpi(strsplit(path, pathsep), d)), cl = onCleanup(@() []); return; end
+addpath(d); cl = onCleanup(@() rmpath(d));
 end
 
 function J = jsi_for(z, p, R, pe)
@@ -5649,6 +5658,7 @@ for f = fieldnames(st)'
     verifyNotEmpty(tc, regexp(src, ['pool_lpt\(@\(S, [cj]\) pool_job\(''' f{1} ''', S, [cj]\), S, ' jobs ', pl\);'], 'once'), f{1});
     m = regexp(src, '\nS = struct\((.*?)\);', 'tokens', 'once');
     have = regexp(m{1}, '''(\w+)'', \{', 'tokens'); have = [have{:}];
+    more = regexp(src, '(?<![\w.])S\.(\w+) = ', 'tokens'); have = unique([have, more{:}]);   % fields set after the struct (surv3's surv_v2)
     b = regexp(job, ['case ''' f{1} '''(.*?)(\n    case |\n    otherwise)'], 'tokens', 'once');
     used = regexp(b{1}, '(?<![\w.])S\.(\w+)', 'tokens'); used = unique([used{:}]);
     verifyEmpty(tc, setdiff(used, have), f{1});
