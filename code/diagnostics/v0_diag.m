@@ -66,6 +66,9 @@ dp = dir(pools_file);
 rep{end+1} = sprintf('Agent %s sha256 %s (matches %s)', agent_file, h_agent, manifest_file);
 rep{end+1} = sprintf('Clean validation pools %s sha256 %s', clean_file, h_clean);
 rep{end+1} = sprintf('Pools %s, %d bytes, modified %s; splits after validation emptied on load', pools_file, dp.bytes, dp.date);
+ref_file = v0_guard('ref', pools_file, root);
+rep{end+1} = sprintf(['Monitor clean reference (clean_ber_ref.m): clean_ref of the pools copied alone to %s, current ' ...
+    'folder %s, reference checked'], ref_file, pwd);
 fprintf('%s\n', rep{:});
 
 L = load(pools_file, 'PP'); PP = L.PP; clear L
@@ -104,7 +107,8 @@ LBL = {'no response', 'DQN (deployed)', 'DQN + escalation', 'rule + escalation',
 runs_file = fullfile(out_dir, 'v0_runs.mat');
 run_key = struct('agent_sha256', h_agent, 'clean_sha256', h_clean, 'pools_bytes', dp.bytes, 'pools_date', dp.date, ...
     'code', {cellfun(@(f) sha256_file(which(f)), {'v0_trace_rollout.m', 'rollout_policy.m', 'policy_decide.m', ...
-    'policy_monitor.m', 'link_env.m'}, 'UniformOutput', false)}, 'policies', {POL});
+    'policy_monitor.m', 'link_env.m', 'clean_ber_ref.m'}, 'UniformOutput', false)}, 'policies', {POL}, ...
+    'ref_sha256', sha256_file(ref_file));
 done = false;
 if resume && isfile(runs_file)
     Lr = load(runs_file, 'run_key', 'RV', 'XV', 'RC', 'XC');
@@ -149,8 +153,11 @@ rep{end+1} = sprintf(['Validation: %d episodes, %d threat episodes, %d recoverab
 ss = Q.seed_summary;
 if strcmp(ss.selected_kind, 'dqn')
     Rd = RV{col('dqn')};
+    hv = mean(Rd.held(rec)); rv = mean(Rd.recovered(rec));
+    same = abs(hv - ss.dqn_held) < 1e-9 && abs(rv - ss.dqn_recovered) < 1e-9;
     rep{end+1} = sprintf(['C2 reproduction, selected agent without escalation: held %.2f%% (C2 %.2f%%), recovered %.2f%% ' ...
-        '(C2 %.2f%%)'], 100 * mean(Rd.held(rec)), 100 * ss.dqn_held, 100 * mean(Rd.recovered(rec)), 100 * ss.dqn_recovered);
+        '(C2 %.2f%%), clean false alarms %d of %d -> %s'], 100 * hv, 100 * ss.dqn_held, 100 * rv, 100 * ss.dqn_recovered, ...
+        sum(RC{col('dqn')}.switches > 0), ncl, ternary(same, 'exact', 'NOT REPRODUCED'));
 end
 
 %% 1. Harmed and covered episodes per threat

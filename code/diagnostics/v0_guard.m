@@ -8,7 +8,14 @@ function out = v0_guard(cmd, varargin)
 %                                 (policy_pools.mat, clean_val_pools.mat, trained_dqn.mat)
 %   d = v0_guard('out', d, root)  error unless d is root/results or a folder below it; d as a
 %                                 full path
-%   Errors carry the ids v0_guard:test_split, v0_guard:input and v0_guard:out.
+%   f = v0_guard('ref', pools_file, root)
+%                                 the monitor's clean reference as the pipeline reads it:
+%                                 clean_ber_ref.m loads clean_ref from data/policy_pools.mat of
+%                                 MATLAB's current folder, so clean_ref of pools_file alone is
+%                                 saved to root/data/policy_pools.mat, the current folder is set
+%                                 to root and the reference is checked against pools_file's;
+%                                 f is the file written
+%   Errors carry the ids v0_guard:test_split, v0_guard:input, v0_guard:out and v0_guard:ref.
 VAL = 2;
 out = [];
 switch cmd
@@ -45,6 +52,33 @@ switch cmd
             error('v0_guard:out', 'v0_guard: output folder %s refused; outputs go under %s', d, res);
         end
         out = d;
+    case 'ref'
+        src = canon(varargin{1}); root = canon(varargin{2});
+        [~, rn] = fileparts(root);
+        if ismember(lower(rn), {'uav-gcs-v7', 'uav-gcs-v7-p3', 'uav-gcs-v7-p2', 'uav-gcs-logs'})
+            error('v0_guard:ref', 'v0_guard: %s is a pipeline folder; the reference copy goes to the V0 worktree', root);
+        end
+        dst = canon(fullfile(root, 'data', 'policy_pools.mat'));
+        if strcmpi(src, dst), error('v0_guard:ref', 'v0_guard: %s is its own reference copy', src); end
+        S = load(src, 'clean_ref');
+        if ~isfield(S, 'clean_ref') || ~isfield(S.clean_ref, 'ber_est')
+            error('v0_guard:ref', 'v0_guard: %s holds no clean_ref with ber_est', src);
+        end
+        clean_ref = S.clean_ref;
+        if ~isfolder(fileparts(dst)), mkdir(fileparts(dst)); end
+        same = false;
+        if isfile(dst)
+            D = load(dst, 'clean_ref'); same = isfield(D, 'clean_ref') && isequaln(D.clean_ref, clean_ref);
+        end
+        if ~same, save(dst, 'clean_ref'); end
+        cd(root);
+        clear('clean_ber_ref');
+        x = clean_ref.ebno(:)'; y = log10(max(clean_ref.ber_est(:)', 1e-7));
+        b = clean_ber_ref(x, 'ber_est');
+        if any(~isfinite(b)) || max(abs(log10(b) - y)) > 1e-9
+            error('v0_guard:ref', 'v0_guard: clean_ber_ref does not read the clean reference of %s', src);
+        end
+        out = dst;
     otherwise
         error('v0_guard: unknown command %s', cmd);
 end

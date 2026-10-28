@@ -67,6 +67,27 @@ tc.verifyError(@() v0_diag('C:\nowhere\policy_pools.mat', 'C:\nowhere\clean_val_
     'C:\nowhere\trained_dqn.mat', 'C:\nowhere\MANIFEST.sha256'), 'v0_diag:input');
 end
 
+function test_clean_reference(tc)
+% The monitor's clean reference is read from the copy in the V0 worktree's data folder.
+import matlab.unittest.fixtures.TemporaryFolderFixture
+import matlab.unittest.fixtures.CurrentFolderFixture
+tc.applyFixture(CurrentFolderFixture(pwd));
+tc.addTeardown(@() clear('clean_ber_ref'));
+src = tc.applyFixture(TemporaryFolderFixture).Folder;
+dst = tc.applyFixture(TemporaryFolderFixture).Folder;
+clean_ref = struct('ebno', [0 3 6], 'ber_est', [1e-2 1e-3 1e-4], 'ber', [1e-2 1e-3 1e-4]);
+save(fullfile(src, 'policy_pools.mat'), 'clean_ref');
+f = v0_guard('ref', fullfile(src, 'policy_pools.mat'), dst);
+tc.verifyTrue(isfile(f));
+tc.verifyEqual(lower(pwd), lower(char(java.io.File(dst).getCanonicalPath())));
+tc.verifyEqual(clean_ber_ref(3, 'ber_est'), 1e-3, 'RelTol', 1e-9);
+tc.verifyEqual(clean_ber_ref(1.5, 'ber_est'), 10^-2.5, 'RelTol', 1e-9);
+x = 1; save(fullfile(src, 'other_pools.mat'), 'x');
+tc.verifyError(@() v0_guard('ref', fullfile(src, 'other_pools.mat'), dst), 'v0_guard:ref');
+tc.verifyError(@() v0_guard('ref', f, dst), 'v0_guard:ref');
+tc.verifyError(@() v0_guard('ref', fullfile(src, 'policy_pools.mat'), fullfile(dst, 'uav-gcs-v7')), 'v0_guard:ref');
+end
+
 function test_v0_files_parse(tc)
 for f = {'v0_diag.m', 'v0_guard.m', 'v0_trace_rollout.m'}
     t = mtree(fileread(which(f{1})));
