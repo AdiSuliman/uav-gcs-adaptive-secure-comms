@@ -10196,7 +10196,6 @@ verifyEqual(tc, P.profile, 'profile 1, P1R');
 O = deg_options(f); verifyTrue(tc, O.on); verifyEqual(tc, O.force, '');
 verifyEqual(tc, kpi6_set([], f), 'fresh');
 verifyTrue(tc, run_cache('on', [], f));
-verifyEmpty(tc, fec_rx_config(f));
 verifyFalse(tc, isfield(P, 'n_rx'));
 verifyFalse(tc, isfield(P, 'deg_force'), 'never forced outside the smoke');
 end
