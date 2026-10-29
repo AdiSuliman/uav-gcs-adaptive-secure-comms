@@ -10078,6 +10078,117 @@ verifyEqual(tc, sum(startsWith(L, 'restart ')), 2);
 verifyTrue(tc, any(contains(L, 'out of memory in\npolicy_run_set')) || any(contains(L, 'out of memory in')));
 end
 
+function test_link_fresh_flights(tc)
+% LINK on the fresh set sums the frames of each flight at no_action exactly as edge_map.m
+% sums the clean-link pools (the same statements, the same flight ids), and reads them with
+% edge_map.m's verdict call; another configuration's frames are not counted; pools without
+% a single no_action stop.
+ebno = [0 3 6]; runs = 101:104;
+rs = RandStream('mt19937ar', 'Seed', 3);
+CT = struct('ebno', ebno, 'n_geom', 4, 'runs', runs, 'actions', {{'rate_reduce', 'no_action'}});
+CT.pools = cell(1, 3, 2);
+for s = 1:3
+    rr = runs(randperm(rs, 4));
+    CT.pools{1, s, 2} = struct('run', repelem(rr, 5)', 'fer', double(rand(rs, 20, 1) < 0.3));   % frames as columns, as the pools hold them
+    CT.pools{1, s, 1} = struct('run', repelem(rr, 5)', 'fer', ones(20, 1));
+end
+F = link_fresh('flights', CT);
+verifyEqual(tc, numel(F.s), 12);
+for s = 1:3
+    P = CT.pools{1, s, 2};
+    for g = 1:4
+        k = F.s == s & F.r == g;
+        verifyEqual(tc, [F.link_k(k), F.link_n(k), F.geo(k)], [sum(P.fer(P.run == runs(g))), 5, 6e6 + 1000 * s + g]);
+    end
+end
+src = fileread(which('edge_map')); lf = fileread(which('link_fresh'));
+for q = {'[~, r] = ismember(P.run, CT.runs);', 'i = sub2ind([nS CT.n_geom], s + 0 * r, r);', ...
+        'CW.link_k = CW.link_k + accumarray(i, double(P.fer), [n 1]);', 'CW.link_n = CW.link_n + accumarray(i, 1, [n 1]);'}
+    verifyNotEmpty(tc, strfind(src, q{1}), q{1});
+    verifyNotEmpty(tc, strfind(lf, strrep(q{1}, 'CW.', 'F.')), q{1});
+end
+verifyNotEmpty(tc, strfind(src, 'CW.geo = 6e6 + 1000 * s_ + r_;'));
+verifyNotEmpty(tc, strfind(lf, '''geo'', 6e6 + 1000 * s_ + r_'));
+verifyNotEmpty(tc, strfind(src, 'P = CT.pools{1, s, K.na};'));
+verifyNotEmpty(tc, strfind(lf, 'P = CT.pools{1, s, na};'));
+verifyNotEmpty(tc, strfind(src, 'edge_verdict(F.link_k, F.link_n, F.geo, TGT.link, ''le'', false, B);'));
+verifyNotEmpty(tc, strfind(lf, 'edge_verdict(F.link_k(m), F.link_n(m), F.geo(m), T.link, ''le'', false, B);'));
+C2 = CT; C2.actions = {'rate_reduce', 'fec_interleave'};
+verifyError(tc, @() link_fresh('flights', C2), 'link_fresh:actions');
+end
+
+function test_link_fresh_verdicts(tc)
+% The verdicts per Eb/N0 on 172 flights of 20 frames: 2% loss commits at 5.7% and is NOT
+% COMMITTED at 1.4% on the same interval, 9% is NOT COMMITTED at both, 12% too; the tag is
+% J below 10% and M above; each verdict is edge_verdict.m's at the target.
+n = 172; [s_, r_] = ndgrid(1:3, 1:n); s_ = s_(:); r_ = r_(:);
+k = zeros(3, n); k(1, 1:69) = 1; k(2, 1:155) = 2; k(3, 1:138) = 3;
+F = struct('s', s_, 'r', r_, 'geo', 6e6 + 1000 * s_ + r_, 'link_k', reshape(k, [], 1), 'link_n', 20 * ones(3 * n, 1));
+L = link_fresh('verdicts', F, [9 12 15], 400);
+verifyEqual(tc, [L.targets.link, L.targets.link_pre, L.targets.tag_j], [0.057 0.014 0.10]);
+verifyEqual(tc, [L.link.verdict; L.link_pre.verdict], [1 -1 -1; -1 -1 -1]);
+verifyEqual(tc, L.tag, {'J', 'J', 'M'});
+verifyEqual(tc, [L.link.lo; L.link.hi], [L.link_pre.lo; L.link_pre.hi]);
+verifyEqual(tc, [L.link.value], [69 310 414] / 3440, 'AbsTol', 1e-12);
+m = F.s == 1;
+verifyEqual(tc, L.link(1), edge_verdict(F.link_k(m), F.link_n(m), F.geo(m), 0.057, 'le', false, 400));
+verifyEqual(tc, [L.link.n], [n n n]);
+end
+
+function test_link_fresh_run(tc)
+% The single LINK reading after C2e: it stops before reading the pools without the KPI 6
+% marker's "KPI 6 read", on another pools file, on another detector and on a set that is not
+% the fresh one; then it writes its outputs and marker, refuses a second reading, and the
+% smoke cell A check passes and catches a changed output. The KPI 6 marker is never written.
+d = fullfile(tc.TestData.tmp, 'link_fresh_run'); mkdir(d);
+c0 = cd(d); back = onCleanup(@() cd(c0));
+evalc('init_params'); mkdir('data'); mkdir('results');
+CT = struct('set', 'fresh', 'fams', [7 8 9], 'det_id', 'abc', 'ebno', [0 3], 'n_geom', 36, 'runs', 1:36, ...
+    'actions', {{'no_action'}});
+CT.pools = reshape({struct('run', repelem(1:36, 20)', 'fer', double(mod(1:720, 25) == 0)'), ...
+    struct('run', repelem(1:36, 20)', 'fer', double(mod(1:720, 4) == 0)')}, 1, 2, 1);
+save('data/clean_fresh_pools.mat', 'CT');
+sha = kpi6_fresh_marker('sha', 'data/clean_fresh_pools.mat');
+k6 = 'results/kpi6_fresh_read_started.txt';
+verifyError(tc, @() link_fresh('run', true), 'link_fresh:order');
+write_k6(k6, sha, 'abc', false);
+verifyError(tc, @() link_fresh('run', true), 'link_fresh:order');
+write_k6(k6, repmat('0', 1, 64), 'abc', true);
+verifyError(tc, @() link_fresh('run', true), 'link_fresh:pools');
+write_k6(k6, sha, 'xyz', true);
+verifyError(tc, @() link_fresh('run', true), 'link_fresh:detector');
+C0 = CT; CT.set = 'test'; save('data/clean_fresh_pools.mat', 'CT');
+write_k6(k6, kpi6_fresh_marker('sha', 'data/clean_fresh_pools.mat'), 'abc', true);
+verifyError(tc, @() link_fresh('run', true), 'link_fresh:pools');
+verifyFalse(tc, isfile('results/link_fresh_read.txt') || isfile('results/link_fresh.mat'));
+CT = C0; save('data/clean_fresh_pools.mat', 'CT');
+sha = kpi6_fresh_marker('sha', 'data/clean_fresh_pools.mat');
+write_k6(k6, sha, 'abc', true); k6txt = fileread(k6);
+evalc('link_fresh(''run'', true)');
+S = load('results/link_fresh.mat', 'LF');
+verifyEqual(tc, [S.LF.B, S.LF.n_geom, [S.LF.link.n]], [400 36 36 36]);
+verifyEqual(tc, [S.LF.link.value], [28 180] / 720, 'AbsTol', 1e-12);
+verifyEqual(tc, S.LF.sha, sha);
+t = fileread('results/link_fresh.txt');
+verifyTrue(tc, contains(t, 'D108, fresh set, first reading') && contains(t, 'receiver as built (r1)') && contains(t, 'SMOKE'));
+m = fileread('results/link_fresh_read.txt');
+verifyTrue(tc, contains(m, ['pools sha256 ' sha]) && contains(m, 'LINK read'));
+verifyError(tc, @() link_fresh('run', true), 'link_fresh:read');
+o = evalc('link_fresh(''check'', true)');
+verifyNotEmpty(tc, strfind(o, 'LINKFRESH CHECK PASS'));
+verifyEqual(tc, fileread(k6), k6txt);
+LF = S.LF; LF.link(1).verdict = 2; save('results/link_fresh.mat', 'LF');
+verifyError(tc, @() evalc('link_fresh(''check'', true)'), 'link_fresh:check');
+end
+
+function write_k6(f, sha, det, rd)
+% A KPI 6 marker as kpi6_fresh_marker.m writes it, with or without its "KPI 6 read" line.
+L = {'P1R: KPI 6 reading of the fresh clean test set started (docs/p1r_protocol.md section 5)', ...
+    'time 2026-11-03 10:00:00', ['pools sha256 ' sha], 'pools data/clean_fresh_pools.mat', ['det_id ' det]};
+if rd, L{end+1} = 'KPI 6 read 2026-11-03 10:20:00'; end
+fid = fopen(f, 'w'); fprintf(fid, '%s\n', L{:}); fclose(fid);
+end
+
 function err = eval_policies_err(cfg) %#ok<INUSD>
 % evaluate_policies.m in the current folder, CFG = cfg when cfg is a struct; the error it stops on.
 if isstruct(cfg), CFG = cfg; end %#ok<NASGU>
