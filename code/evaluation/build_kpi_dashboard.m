@@ -96,7 +96,7 @@ if ~isempty(P)
     cols = kpi_print_text('palette', size(P.KP.per_ebno, 2));
     hp = plot(ax, P.KP.ebno, P.KP.per_ebno, '-o', 'LineWidth', 1.3); grid(ax, 'on'); ylim(ax, [0 105]);
     for q = 1:numel(hp), hp(q).Color = cols(q, :); end
-    legend(ax, P.KP.show_lbl, 'Location', 'southeast', 'FontSize', 7);
+    legend(ax, P.KP.show_lbl, 'Location', 'southoutside', 'NumColumns', 4, 'FontSize', 7);
     Ll = kpi_print_text('edge_limited', Em, P.KP.ebno, decision_config().ratio_ok);
     set(ax, 'XTick', P.KP.ebno, 'XTickLabel', kpi_print_text('ebno_ticks', P.KP.ebno, Ll));
     xl = {'E_b/N_0 [dB]'}; if any(Ll), xl{2} = 'L: link-limited (2 x the clean packet loss >= 1)'; end
@@ -140,7 +140,7 @@ if ~isempty(Kp)
     for k = 1:numel(Kp.KPI)
         q = Kp.KPI(k);
         hd{k} = kpi_print_text('wrap', sprintf('%d  %s  [%s]', q.id, q.name, q.status), 44);
-        vl{k} = kpi_print_text('wrap', q.value, 58);
+        vl{k} = kpi_print_text('wrap', q.value, 52);
     end
     uh = 0.035; uv = 0.031; gap = 0.012; top = 0.055;            % one line of a head, of a value, a gap, the title: axes units
     tot = top + sum(cellfun(@numel, hd)) * uh + sum(cellfun(@numel, vl)) * uv + numel(hd) * gap;
