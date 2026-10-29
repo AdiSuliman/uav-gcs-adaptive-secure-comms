@@ -291,3 +291,17 @@ ends about 18-21.11 (worst about 22-23.11).
   | `test_system_fa_breakdown/test_gate_fresh` | With `'fresh'` the gate passes on P1R's C2e and reads KPI 6 on `RWf` alone with P1R's labelled lecturer lines; each missing or mislabelled piece, another `far_set` and P1R's outputs read as the union stop it; the label and the KPI 6 header are `evaluate_policies.m`'s |
   | `test_system_fa_breakdown/test_breakdown_fresh` | D103 3's tables count the fresh flights; D103 4 and 5 equal the union's readings apart from P1R's line |
   | `test_system_fa_breakdown/test_run_fresh` | The single run: `RWf` from the file, the fresh gate line and header, D103 3-5 in order, `far_set` saved, once; without `RWf` only the gatefail files, with `far_set` |
+- **29.10.2026, the readers' test on `p1r` (status only).**
+  `test_system_fa_breakdown/test_copies_and_readers_match_tip` compared all twelve files the
+  breakdown relies on with `d4623ed`, so on `p1r` it failed on the six that P1R changes by design:
+  `decision_config.m`, `decision_settings.m`, `policy_stamp.m`, `evaluate_policies.m`,
+  `rollout_policy.m` and `policy_monitor.m`. On `p1r` it now compares those six with `p1r`
+  `b37e8a3` and the other six (`lect_kpis.m`, `per_reduction.m`, `boot_cluster.m`,
+  `false_change_rate.m`, `per_metrics.m`, `policy_run_set.m`) with `d4623ed`, still byte for byte
+  apart from line ends.
+  - **Why `b37e8a3`.** It is the code P1R's C2e runs. P1R runs in this worktree at the tested
+    `p1r` tip (section 3 and the 27.10 path amendment; the smoke at the same tip, section 6), and
+    the commits after `b37e8a3` change only this test and the docs. The six files are the same at
+    `67f933a`, `b37e8a3` and the tip. A later change to one of them fails the test until the pin
+    names the commit that holds it.
+  - `sysfa`'s test is unchanged: there all twelve stay compared with `d4623ed`.
