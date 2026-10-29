@@ -551,8 +551,9 @@ end
 function test_copies_and_readers_match_tip(tc)
 % far_report and cp_upper are evaluate_policies.m's, tstat lect_kpis.m's, word for word; the
 % mark is D99's (lect_kpis_by_ebno.m, when on the path); the readers P1R leaves unchanged are
-% profile 1's tip's (d4623ed), the six it changes are those of p1r b37e8a3, the code P1R's C2e
-% runs (docs/p1r_protocol.md section 11).
+% profile 1's tip's (d4623ed), five it changes are those of p1r b37e8a3, and evaluate_policies.m
+% with its A' reader aprime_fresh.m those of a107 c62a5b7, the code P1R's C2e runs
+% (docs/p1r_protocol.md section 11).
 mine = fileread(which('system_fa_breakdown'));
 src = {'evaluate_policies', 'far_report'; 'evaluate_policies', 'cp_upper'; 'lect_kpis', 'tstat'};
 for i = 1:size(src, 1)
@@ -568,16 +569,17 @@ verifyEqual(tc, M.tag, {'L', 'L', 'M', 'M', 'J'});
 if ~isempty(which('lect_kpis_by_ebno'))
     verifyEqual(tc, M, lect_kpis_by_ebno('mark', [0.99 0.5 0.45 0.1 0.0999], 2));
 end
-root = tc.TestData.root; tip = 'd4623ed'; p1r = 'b37e8a3';
-for ref = {tip, p1r}
+root = tc.TestData.root; tip = 'd4623ed'; p1r = 'b37e8a3'; fr = 'c62a5b7';
+for ref = {tip, p1r, fr}
     st = system(sprintf('git -C "%s" cat-file -e %s', root, ref{1}));
     assumeEqual(tc, st, 0, sprintf('git or commit %s is not available here', ref{1}));
 end
 same = {'code/evaluation/lect_kpis.m', 'code/evaluation/per_reduction.m', 'code/evaluation/boot_cluster.m', ...
     'code/evaluation/false_change_rate.m', 'code/decision/per_metrics.m', 'code/decision/policy_run_set.m'};
 changed = {'code/decision/decision_config.m', 'code/decision/decision_settings.m', 'code/decision/policy_stamp.m', ...
-    'code/decision/evaluate_policies.m', 'code/decision/rollout_policy.m', 'code/decision/policy_monitor.m'};
-G = [same, changed; repmat({tip}, size(same)), repmat({p1r}, size(changed))];
+    'code/decision/rollout_policy.m', 'code/decision/policy_monitor.m'};
+fresh = {'code/decision/evaluate_policies.m', 'code/decision/aprime_fresh.m'};
+G = [same, changed, fresh; repmat({tip}, size(same)), repmat({p1r}, size(changed)), repmat({fr}, size(fresh))];
 for g = G
     [~, theirs] = system(sprintf('git -C "%s" show %s:%s', root, g{2}, g{1}));
     verifyEqual(tc, strrep(fileread(fullfile(root, g{1})), sprintf('\r'), ''), strrep(theirs, sprintf('\r'), ''), ...

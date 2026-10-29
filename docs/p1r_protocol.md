@@ -418,3 +418,79 @@ ends about 18-21.11 (worst about 22-23.11).
     `test_fa_nothreat_training_only`, `test_p1r_profile`, `test_run_cache_wiring`,
     `test_m_files_parse`, `test_dqn_deployment_kinds`, `test_held_selection`,
     `test_link_env_cover_default`, `test_reward_needs_plr`.
+- **29.10.2026, the fresh-set A′ row (D104 point 6, D107 point 6; written before any P1R data).**
+  This is the commit the stop rule under "Not part of this commit" names, on `a107` as `c62a5b7`
+  (code and tests) with this text and the reader pin in the next commit. The tests are written
+  and not yet run (no MATLAB while CORE_BW's pools run). The merge conditions above are
+  unchanged: tests passed, G0 passed.
+  - **C2e** (`evaluate_policies.m` with `"kpi6_set": "fresh"`; the reader is `aprime_fresh.m`):
+    - With the other fresh checks, before any episode and before the marker, `aprime_fresh('load')`
+      reads `data/aprime_agents.mat`.
+    - Without the file and with C2's switch off it returns nothing. C2e is then the code before
+      this commit, output for output.
+    - It stops before the marker in three cases:
+      - the file without the switch (`aprime_fresh:switch`);
+      - the switch without the file (`aprime_fresh:absent`): the A′ row could never be added
+        after the one reading;
+      - a file that is not this trained policy's C2 (`aprime_fresh:file`): another monitor, drop
+        threshold or false-alarm threshold than `seed_summary`, another label or form, no
+        settings, or an agent not in matrix form.
+    - The marker gains the line `aprime_agents_sha256` after the fields it had.
+  - **One reading.**
+    - The A′ runs fly inside the same marker window as every policy: after `'start'`, before
+      `'read'`, in `fly_clean_set`'s one world (one `clean_split`, one `link_env` table set), on
+      the same episodes and the same frame-draw seed (40000), after every policy.
+    - Each run flies as trained and scored on validation: plain `dqn` without the escalation, with
+      the deployed DQN's monitor (the selected monitor and drop threshold) and the grid's settings
+      (`aprime.S`) on top, on the standard reward (no training form).
+    - A run or a flight missing there stops as a crash before any KPI 6 line
+      (`aprime_fresh:row`), so the marker allows a restart.
+    - Nothing else reads the fresh set.
+  - **KPI 6.**
+    - One `far_report` call over every policy, then the A′ runs. `KP.far` holds every policy's
+      rows as before, then one row per A′ run, labelled "A′ penalty λ, gamma γ, seed s
+      (pre-registered candidate (D107), validation-scored, not deployed, descriptive)".
+    - The lines follow the policies' lines. After the block, one line names the file and its
+      SHA-256, and one line per λ and γ gives the seed mean with its one-sided 95% Clopper-Pearson
+      bound, as `train_dqn.m` reports them.
+    - `KP.far_diag`, the deployed index and every verdict are unchanged.
+    - After the rows, C2e stops if `data/aprime_agents.mat` exists and KPI 6 lacks one of its rows
+      (`aprime_fresh:row`).
+    - Saved: `RWa` (one fresh set per run, split id 7) and `KP.far_aprime` (the runs' names,
+      labels, λ, γ, seeds, settings, file and SHA-256, without the agents).
+  - **The breakdown's exact gate (retested).**
+    - With `KP.far_aprime`, `system_fa_breakdown` reads `RWa` from the evaluation file and checks
+      it: one set per run, split id 7, the episodes of `RWf`, every field.
+    - It then reproduces the new `KP.far`, `KP.far_diag`, their lines and the A′ block exactly
+      (`isequaln`).
+    - The gate fails on `RWa` without `KP.far_aprime`, on `KP.far` without the A′ rows, or on a
+      changed row or line.
+    - D103 3 reads the policies' flights only. The header names the A′ rows.
+    - Without them the gate, the readings, the text and every saved variable are those of
+      `b37e8a3`. The union path (profile 1) is untouched.
+  - **Pin.** `test_copies_and_readers_match_tip` now compares `evaluate_policies.m` and
+    `aprime_fresh.m` with `c62a5b7`. The other five P1R readers stay compared with `b37e8a3`, and
+    the six unchanged readers with `d4623ed`.
+  - **Tests** (written, not yet run):
+
+  | Test | What it checks |
+  |---|---|
+  | `test_core/test_aprime_fresh_load` | Nothing without the file and with the switch off; the file without the switch and the switch without the file stop; another C2's file, label, form, settings or agent stops; else the A′ agents (not the plain pairs), settings, names, labels and SHA-256; the switch from `CFG`, else `profile.json` |
+  | `test_core/test_aprime_fresh_rows` | The stop rule: with the file, a run or a flight not flown, or KPI 6 without an A′ row, stops; without the file and the runs nothing is checked; the block's lines and the seed-mean bound |
+  | `test_core/test_aprime_fresh_fly` | Each run with the world's tables, episodes, split and seed, kind `dqn` without the escalation, the world's monitor with the grid's settings on top, no training form, padding dropped, in the file's order (recorder in place of `policy_run_set.m`) |
+  | `test_core/test_evaluate_fresh_aprime_wiring` | Load before any episode and the marker; flights, the check and the split inside the single reading in one world; one `far_report` call with the A′ rows, then their block, then the stop rule; `KP.far_aprime` and `RWa` only with them; never in `POL` or the deployed index; every line of `4bb20cc` in order but the six rewritten |
+  | `test_core/test_evaluate_fresh_aprime_stops` | C2e on fixtures: no file and switch off runs as before; the switch without the file, the file without the switch and another C2's file stop before the marker; both pass; the union path never reads the file |
+  | `test_core/test_evaluate_fresh_wiring` | The fresh-set call pin updated to `[RWf, RWa] = fly_clean_set(...)` |
+  | `test_system_fa_breakdown/test_gate_fresh_aprime` | The gate reproduces the new `KP.far` with the A′ rows (the policies' rows and `KP.far_diag` as without them); D103 3 unchanged; each broken piece fails it |
+  | `test_system_fa_breakdown/test_run_fresh_aprime` | The single run reads `RWa`, passes, names the rows in the header; without `RWa` the gate fails |
+  | `test_system_fa_breakdown/test_fresh_path_unchanged` | Without the A′ rows, the gate, the readings, the text and the saved variables equal `b37e8a3`'s, on a pass and a failed gate |
+  | `test_system_fa_breakdown/test_copies_and_readers_match_tip` | The pin above |
+
+  - **Counts.** `test_core` on `a107` has 285 tests (280 + 5). After the merge with `d108-p1r`
+    it has 288. `test_system_fa_breakdown` has 18 (15 + 3).
+  - **Targeted run** (gated wrapper, after CORE_BW's pools; 37 tests):
+    - all of `test_system_fa_breakdown`;
+    - in `test_core`: the five new tests, `test_evaluate_fresh_wiring`,
+      `test_evaluate_fresh_checks`, `test_kpi6_fresh_marker`, and the eleven targeted tests
+      listed above.
+    - Then the full `test_core` and `test_system_fa_breakdown`.
