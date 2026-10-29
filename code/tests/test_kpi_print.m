@@ -283,14 +283,9 @@ res = struct('threat', {'jamming', 'path_loss'}, 'n', {10, 20}, 'dqn_out', {0.9,
     'rule', {0.7, 0.8}, 'ci_out', {[0.8 1], [0.1 0.3]}, 'ci_in', {[0.8 1], [0.7 0.9]});
 EP = struct('x', 1); %#ok<NASGU>
 save('results/unknown_threat_policy.mat', 'res', 'EP');
-ws = warning('off', 'MATLAB:load:variableNotFound');          % the reduced policy fixture lacks top_cfg
-tc.addTeardown(@() warning(ws));
-lastwarn('');
-evalc('export_report_numbers');
-[msg, id] = lastwarn;
-verifyEqual(tc, id, 'export_report_numbers:stale');
-verifyTrue(tc, contains(msg, 'results/unknown_threat_policy.mat'));
+verifyWarning(tc, @run_export, 'export_report_numbers:stale');
 J = jsondecode(fileread('results/report_numbers.json'));
+verifyTrue(tc, any(contains({J.stale.why}, 'results/unknown_threat_policy.mat')));
 verifyEqual(tc, {J.unknown_policy.threat}, {'jamming', 'path_loss'});
 verifyEqual(tc, [J.unknown_policy.dqn_out], [0.9 0.2], 'AbsTol', 1e-12);
 verifyFalse(tc, isfield(J, 'EP'));
@@ -354,6 +349,10 @@ verifyEmpty(tc, strfind(db, '''r--'', ''90%'')'));
 end
 
 %% ---------- fixtures ----------
+function run_export()
+evalc('export_report_numbers');
+end
+
 function d = work_dir(tc)
 % A temporary working folder with results/ and data/, entered; left and removed at the test's end.
 d = tempname; mkdir(fullfile(d, 'results')); mkdir(fullfile(d, 'data'));
