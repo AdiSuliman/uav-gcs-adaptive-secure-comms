@@ -26,6 +26,8 @@ function V = edge_verdict(num, den, cl, target, sense, binary, B)
 %   otherwise. N_MIN = 36, the smallest n whose all-success lower bound reaches 0.90
 %   (0.9026; 35 gives 0.89997).
 %   V: value, lo, hi, n (flights), k (successful flights, binary), verdict, n_min
+%   value is the share of units (episodes); with several units per flight a binary interval and
+%   verdict are those of the flights, k / n, so a table prints k / n beside value (edge_map.m).
 N_MIN = 36;
 if nargin < 7 || isempty(B), B = 4000; end
 V = struct('value', NaN, 'lo', NaN, 'hi', NaN, 'n', 0, 'k', NaN, 'verdict', 0, 'n_min', N_MIN);

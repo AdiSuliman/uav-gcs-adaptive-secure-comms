@@ -945,13 +945,17 @@ ttl = {'DET: fused detection on the threat-active frames at no_action', 'DET_h: 
     'SURV: flights some configuration recovers', 'REC: held recovery among recoverable flights, deployed policy', ...
     'PROT: held recovery among all threat flights, deployed policy', ...
     'LINK_T: packet loss after recovery, deployed policy (target max(2x clean, 1.4%))'};
+FLN = ['    value = held episodes; fl = fully held flights, % of the flights: the share the interval and the verdict are built ' ...
+    'on (edge_verdict.m), printed where it differs from the value'];
 for f = 1:6
     rep{end+1} = ''; %#ok<SAGROW>
     rep{end+1} = sprintf('--- %s, %% [95%% interval] flights verdict ---', ttl{f}); %#ok<SAGROW>
+    if f == 4 || f == 5, rep{end+1} = FLN; end %#ok<SAGROW>
     rep{end+1} = sprintf('%-49s %s', '', sprintf('%-29s', hdr_e{:})); %#ok<SAGROW>
     fmt = '%5.1f'; if f == 6, fmt = '%5.2f'; end
+    fl = f == 4 || f == 5;                            % REC and PROT: held recovery over the onsets of a flight
     for i = 1:nT
-        rep{end+1} = sprintf('%s %s', rowl{i}, strjoin(arrayfun(@(s) cell_txt(PT.(LAY{f})(i, s), fmt), 1:nS, ...
+        rep{end+1} = sprintf('%s %s', rowl{i}, strjoin(arrayfun(@(s) cell_txt(PT.(LAY{f})(i, s), fmt, fl), 1:nS, ...
             'UniformOutput', false), ' ')); %#ok<SAGROW>
     end
 end
@@ -960,9 +964,10 @@ for q = {'rec_h', 'REC_h: held recovery among the HARMED recoverable flights (no
     rep{end+1} = ''; %#ok<SAGROW>
     rep{end+1} = sprintf(['--- %s; beside REC and PROT, no target of its own: %% [95%% interval] flights verdict against the ' ...
         '90%% target (below 36 flights UNDETERMINED) ---'], q{2}); %#ok<SAGROW>
+    rep{end+1} = FLN; %#ok<SAGROW>
     rep{end+1} = sprintf('%-49s %s', '', sprintf('%-29s', hdr_e{:})); %#ok<SAGROW>
     for i = 1:nT
-        rep{end+1} = sprintf('%s %s', rowl{i}, strjoin(arrayfun(@(s) cell_txt(PT.(q{1})(i, s), '%5.1f'), 1:nS, ...
+        rep{end+1} = sprintf('%s %s', rowl{i}, strjoin(arrayfun(@(s) cell_txt(PT.(q{1})(i, s), '%5.1f', true), 1:nS, ...
             'UniformOutput', false), ' ')); %#ok<SAGROW>
     end
 end
@@ -1597,11 +1602,13 @@ function s = vsym_nan(v)
 if isnan(v), s = '-'; else, s = vsym(v); end
 end
 
-function s = cell_txt(V, f)
-% value [lo, hi] n verdict, in %.
+function s = cell_txt(V, f, fl)
+% value [lo, hi] n verdict, in %. fl true (REC, PROT): the share of fully held flights beside it
+% where it differs from the episode share.
 if V.n == 0, s = sprintf('%-28s', '-'); return; end
 s = sprintf('%s [%s, %s] %3d %s', sprintf(f, 100 * V.value), sprintf(f, 100 * V.lo), sprintf(f, 100 * V.hi), V.n, ...
     vsym(V.verdict));
+if nargin > 2 && fl, s = [s kpi_print_text('edge_flight', V, f)]; end
 end
 
 function s = evid_txt(V)
