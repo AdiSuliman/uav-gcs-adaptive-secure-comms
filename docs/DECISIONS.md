@@ -2050,3 +2050,22 @@ The baseline also differs in tuning budget. In C2e, `blind_core`'s first respons
 **D106 status (2026-10-27, after registration).** The code and its tests are done on `core-bw-p1`: `2a4da56` (rule_core3, nine `test_band_core3_*` tests, full `test_core` 276/276) and `f01a51f` (review fixes: the test stage checks the pools' `core3_id` and the frozen `core3` switch before its marker; 70/70 targeted tests). Still open before CORE_BW's test stage: the `lect-ebno` commit that retakes the readers and adds `rule_core3` to the D99 recovery-time loop. Nothing in the registration above changed.
 
 **D106 status (2026-10-27, later).** README lines 44-45, 101 and 107 now name `rule_core3` as CORE_BW's CNN-based row (`cc6a4d1`). Still open: the `lect-ebno` commit; copying `core_cnn_model.mat`, the post-C2 `trained_dqn.mat` and the re-keyed `policy_pools.mat` into the CORE_BW data folder after C2 is done; a full `test_core` run on the branch tip (276 tests plus the core3 tests; `f01a51f` ran 70 targeted tests).
+
+## D109 — Delay-line receiver defect: found on validation, D1 diagnosis result, receiver per run (29.10.2026)
+
+**Found (validation only, after profile 1's test readings).**
+- On the 27 validation flights (`link_floor_partA/partB.mat`, runs 411-698 at 9, 12 and 15 dB) three frames collapse in the delay-line (`NE > 1`) receiver at 12 dB: 420/5, 452/10, 459/16, with BER 0.30, 0.29, 0.16. Their true post-MRC Es/N0 is 11.9, 8.5 and 9.7 dB, so they are not noise-limited, and the flat receiver decodes the same flights.
+- The fault is in the first estimation pass of the `NE > 1` branch: with the decision-directed passes off, no frame of the four improves and FER rises from 0.3648 to 0.4593. The unwrapped-slope frequency step is a confirmed contributor in code and partly in effect, and is not the whole cause.
+- Size on the clean validation link as stated by the ruling: clean FER at most 0.25 pp at 12 dB (at most 15 of 6000 frames); CREF mean BER 20-34% higher at 12 dB. The rate under interference is unmeasured.
+
+**D1 (diagnostic run, 29.10).**
+- Valid: `RXD GUARDS G1 PASS G2 PASS G3 PASS G4 PASS -> D1 valid`.
+- 11 isolated arms and a correctly run flat shadow receiver: none recovers any of the three frames (0 of 3 each, recovered = frame BER <= 0.05). The rule's last bullet of reading point 3 sends to D2 (ruling 3.4). No candidate is named and nothing is adopted. Fresh held-out frames: n = 0.
+
+**Receiver per run.**
+- CORE_BW, P1 and P1R use the current receiver r1 (receiver blob `40dc1f9`, as built at `d4623ed`). The fix branch is not merged into `-bw`.
+- Profile 3 takes a fix (r2) only if one passes the pre-set adoption rule (`rx-ne-fix\docs\rx_fix_rule2.md`, ruling sections 3.5-3.6) before its deployment; otherwise it runs on r1 with the defect disclosed with its measured size (ruling 4.4 timebox, 3.7).
+- Every result names its receiver. Size is from validation only; no test number shows a fix's effect; profile 1's test sets are not re-read.
+- A candidate born after D2 is read under a new pre-set rule with new fresh frames (ruling 3.7, last bullet; reading open point 4).
+
+**Sources.** `rx_fix_ruling.md` (final ruling, sections 2, 3.4-3.7, 4.2-4.4, 4.7); `rx_diag_reading.md` with `rx_diag_reading_1.md` and `rx_diag_reading_2.md` (D1 official reading, sections 0, 2, 6); `rx_fix_rule2.md` on branch `rx-ne-fix` (commit `0d2d1f8`). Numbering: D107 and D108 are held by unregistered drafts (`d107_after_v0.md`, `d108_link_rec.md`).

@@ -245,6 +245,10 @@ The lecturer's false-alarm KPI is read at detector level; the system-level figur
 - Process: four hand-runs (`hand_v0diag`, `hand_lk9a1_testcore`, `hand_p1r67f_tests`, `hand_guismoke`, 00:10-02:17) ran in other folders while EDGE ran (00:04 to about 03:13), against the rule that nothing runs beside GAL, EDGE or WEAK. Free memory stayed at or above 81.9 GB, EDGE has fixed seeds and ended rc=0, so the numbers are unaffected and nothing is redone. The stage-line check stays before every dispatch.
 - Open for Adi: the wording of the empty map and whether to register a LINK/REC redefinition on validation with a fresh test (P1R or profile 3); the policy route for antenna fault and shadowing; the shadowing detector F1 of 84.5% (below the 85% floor); the archive of the OHP and GCSA outputs; a multithreaded G0 reproduction; the GUI live check and the LAT go-ahead.
 
+### Delay-line receiver defect (29.10.2026)
+
+- Found on validation: three frames at 12 dB (420/5, 452/10, 459/16) collapse in the delay-line receiver at true post-MRC Es/N0 of 8.5-11.9 dB where a flat receiver decodes. D1 (valid, 11 arms and a flat shadow receiver) recovers none of the three and sends to D2; nothing is adopted. CORE_BW, P1 and P1R run on the current receiver r1; profile 3 takes a fix only if one passes the pre-set rule, else r1 with disclosure (D109; `rx_fix_ruling.md`, `rx_diag_reading.md`).
+
 ## Status of the lecturer's KPIs (profile 1, 28.10.2026)
 
 | KPI | Value | Status |
