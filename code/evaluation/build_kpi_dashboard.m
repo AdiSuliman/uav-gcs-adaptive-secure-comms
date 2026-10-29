@@ -11,12 +11,16 @@
 %   6. Recovered episodes vs interferer direction (geometry)
 %   7. Survivability map summary per threat and geometry (deliverable 7)
 %   8. KPI status (results/kpi_summary.mat)
+% Every policy keeps one color in panels 5 and 6 (kpi_print_text.m 'palette'); the targets of
+% panels 2, 3 and 4 are in the legends, not on the bars; KPI 5's Eb/N0 points are tagged L
+% where the clean link is limited (2 x its packet loss >= 1, from results/edge_map.mat); the
+% status text is wrapped to the panel.
 %
 % Inputs: the KPI 1 reading (kpi1_file.m on the set of kpi1_set.m: results/eval_detector_metrics_fresh2.mat,
 %         the third test set, when it exists, else results/eval_detector_metrics.mat; _fresh3, the
 %         fourth, once kpi1_set.m names it), results/ood_detection.mat,
 %         results/policy_evaluation.mat, data/survivability_boundary.mat,
-%         results/kpi_summary.mat
+%         results/kpi_summary.mat, results/edge_map.mat (optional: the L tags of panel 5)
 % Output: results/kpi_dashboard.png
 
 close all; clc;
@@ -27,6 +31,7 @@ O  = ld('results/ood_detection.mat', 'R', 'SC', 'sel', 'NEST');
 P  = ld('results/policy_evaluation.mat');
 Sv = ld('data/survivability_boundary.mat', 'grid_data_A', 'grid_data_B');
 Kp = ld('results/kpi_summary.mat', 'KPI');
+Em = ld('results/edge_map.mat', 'EM');
 
 fig = figure('Position', [30 30 1800 950], 'Color', 'w', 'Name', 'UAV-GCS KPI dashboard');
 tl = tiledlayout(fig, 2, 4, 'TileSpacing', 'compact', 'Padding', 'compact');
@@ -59,10 +64,15 @@ end
 ax = nexttile(tl);
 if ~isempty(O)
     j = strcmp(O.SC, O.sel); A = vertcat(O.R.auroc);
-    bar(ax, [A(:, j), O.NEST.auroc(:)]); hold(ax, 'on'); grid(ax, 'on'); ylim(ax, [0.4 1]);
-    if ~isempty(Kp), k2 = Kp.KPI([Kp.KPI.id] == 2); yline(ax, sscanf(k2.target, '>= %f'), 'r--', k2.target); end
+    hb = bar(ax, [A(:, j), O.NEST.auroc(:)]); hold(ax, 'on'); grid(ax, 'on'); ylim(ax, [0.4 1]);
+    names = {strrep(O.sel, '_', ' '), 'nested'}; ht = gobjects(0);
+    if ~isempty(Kp) && any([Kp.KPI.id] == 2)
+        k2 = Kp.KPI([Kp.KPI.id] == 2);
+        ht = yline(ax, sscanf(k2.target, '>= %f'), 'r--'); ht.LineWidth = 1;
+        names{end+1} = ['target ' k2.target];
+    end
     set(ax, 'XTickLabel', strrep({O.R.held_out}, '_', ' '), 'FontSize', 7); xtickangle(ax, 40);
-    legend(ax, {strrep(O.sel, '_', ' '), 'nested'}, 'Location', 'southwest', 'FontSize', 7);
+    legend(ax, [hb, ht], names, 'Location', 'southoutside', 'NumColumns', 3, 'FontSize', 7);
     ylabel(ax, 'AUROC'); title(ax, sprintf('KPI 2: unknown threats (LOTO), nested mean %.3f', mean(O.NEST.auroc)));
 else
     placeholder(ax, 'Unknown-threat AUROC', 'eval_ood_detection');
@@ -73,20 +83,29 @@ if ~isempty(P)
     col = @(p) find(strcmp(P.POL, p));
     ax = nexttile(tl);
     sh = P.KP.show; cD = strcmp(sh, P.POL{P.iDQN}); cR = strcmp(sh, 'rule_esc'); cO = strcmp(sh, 'oracle');
-    barh(ax, P.KP.per_threat(:, [find(cD) find(cR) find(cO)])); hold(ax, 'on'); xline(ax, 90, 'r--', '90%');
+    hb = barh(ax, P.KP.per_threat(:, [find(cD) find(cR) find(cO)])); hold(ax, 'on');
+    hx = xline(ax, 90, 'r--'); hx.LineWidth = 1;
     set(ax, 'YTick', 1:numel(P.KP.threats), 'YTickLabel', strrep(P.KP.threats, '_', ' '), 'FontSize', 7, 'YDir', 'reverse');
     xlim(ax, [0 105]); grid(ax, 'on'); xlabel(ax, 'recovered among recoverable [%]');
-    legend(ax, {erase(P.LBL{P.iDQN}, ' (deployed)'), 'rule + esc.', 'oracle'}, 'Location', 'southoutside', 'NumColumns', 3, 'FontSize', 7);
+    legend(ax, [hb, hx], {erase(P.LBL{P.iDQN}, ' (deployed)'), 'rule + esc.', 'oracle', '90% target'}, 'Location', 'southoutside', ...
+        'NumColumns', 2, 'FontSize', 7);
     title(ax, 'KPI 4: recovery per threat (test pools)');
 
     ax = nexttile(tl);
-    plot(ax, P.KP.ebno, P.KP.per_ebno, '-o', 'LineWidth', 1.3); grid(ax, 'on'); ylim(ax, [0 105]);
+    cols = kpi_print_text('palette', size(P.KP.per_ebno, 2));
+    hp = plot(ax, P.KP.ebno, P.KP.per_ebno, '-o', 'LineWidth', 1.3); grid(ax, 'on'); ylim(ax, [0 105]);
+    for q = 1:numel(hp), hp(q).Color = cols(q, :); end
     legend(ax, P.KP.show_lbl, 'Location', 'southeast', 'FontSize', 7);
-    xlabel(ax, 'E_b/N_0 [dB]'); ylabel(ax, 'recovered among recoverable [%]'); title(ax, 'KPI 5: single threats vs E_b/N_0');
+    Ll = kpi_print_text('edge_limited', Em, P.KP.ebno, decision_config().ratio_ok);
+    set(ax, 'XTick', P.KP.ebno, 'XTickLabel', kpi_print_text('ebno_ticks', P.KP.ebno, Ll));
+    xl = {'E_b/N_0 [dB]'}; if any(Ll), xl{2} = 'L: link-limited (2 x the clean packet loss >= 1)'; end
+    xlabel(ax, xl, 'FontSize', 8); ylabel(ax, 'recovered among recoverable [%]'); title(ax, 'KPI 5: single threats vs E_b/N_0');
 
     ax = nexttile(tl);
     if ~isempty(P.KP.per_aoa)
-        bar(ax, P.KP.per_aoa); grid(ax, 'on'); ylim(ax, [0 105]);
+        hA = bar(ax, P.KP.per_aoa); grid(ax, 'on'); ylim(ax, [0 105]);
+        for q = 1:min(numel(hA), size(cols, 1)), hA(q).FaceColor = cols(q, :); end
+        legend(ax, hA, P.KP.show_lbl, 'Location', 'southoutside', 'NumColumns', 4, 'FontSize', 6);
         b = P.KP.aoa_bins;
         set(ax, 'XTickLabel', arrayfun(@(i) sprintf('%d-%d', b(i), b(i+1)), 1:numel(b) - 1, 'UniformOutput', false));
         xlabel(ax, '|interferer - GCS direction| [deg]'); ylabel(ax, 'recovered [%]');
@@ -116,17 +135,28 @@ end
 % 8. KPI status
 ax = nexttile(tl); axis(ax, 'off');
 if ~isempty(Kp)
-    y = 0.97;
-    text(ax, 0, y, 'KPI status (proposal wording)', 'FontWeight', 'bold', 'FontSize', 10);
+    hd = cell(1, numel(Kp.KPI)); vl = hd;
     for k = 1:numel(Kp.KPI)
-        q = Kp.KPI(k); y = y - 0.115;
+        q = Kp.KPI(k);
+        hd{k} = kpi_print_text('wrap', sprintf('%d  %s  [%s]', q.id, q.name, q.status), 44);
+        vl{k} = kpi_print_text('wrap', q.value, 58);
+    end
+    uh = 0.035; uv = 0.031; gap = 0.012; top = 0.055;            % one line of a head, of a value, a gap, the title: axes units
+    tot = top + sum(cellfun(@numel, hd)) * uh + sum(cellfun(@numel, vl)) * uv + numel(hd) * gap;
+    sc = min(1, 0.95 / tot);                                     % everything shrinks together when it would not fit
+    text(ax, 0, 1, 'KPI status (proposal wording)', 'FontWeight', 'bold', 'FontSize', 10 * max(sc, 0.8), 'VerticalAlignment', 'top');
+    y = 1 - top * sc;
+    for k = 1:numel(Kp.KPI)
+        q = Kp.KPI(k);
         switch q.status
             case 'MET', c = [0.10 0.55 0.20];
             case {'NOT MET', 'MISSING'}, c = [0.75 0.15 0.15];
             otherwise, c = [0.80 0.50 0.05];
         end
-        text(ax, 0, y, sprintf('%d  %s  [%s]', q.id, q.name, q.status), 'Color', c, 'FontSize', 8.5, 'FontWeight', 'bold');
-        text(ax, 0.04, y - 0.045, q.value, 'FontSize', 7.5, 'Interpreter', 'none');
+        text(ax, 0, y, hd{k}, 'Color', c, 'FontSize', 8.5 * sc, 'FontWeight', 'bold', 'VerticalAlignment', 'top', 'Interpreter', 'none');
+        y = y - numel(hd{k}) * uh * sc;
+        text(ax, 0.04, y, vl{k}, 'FontSize', 7.5 * sc, 'VerticalAlignment', 'top', 'Interpreter', 'none');
+        y = y - (numel(vl{k}) * uv + gap) * sc;
     end
 else
     text(ax, 0, 0.5, 'results/kpi_summary.mat missing (measure_all_kpis)');
