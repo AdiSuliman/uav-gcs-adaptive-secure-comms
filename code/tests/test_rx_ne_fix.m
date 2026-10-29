@@ -86,7 +86,13 @@ for ddi = [0 2]
     verifyTrue(tc, all(s(8, :) > 0), sprintf('flat ddi %d', ddi));
     p = dl_params(); p.rx_dd_iter = ddi; p.rx_combiner = 'mmse';
     [~, s] = run_frames(p);
-    verifyTrue(tc, all(s(8, :) > 0), sprintf('space-time ddi %d', ddi));
+    if ddi > 0
+        verifyTrue(tc, all(s(8, :) > 0), sprintf('space-time ddi %d', ddi));
+    else
+        % space-time path, unchanged here: st_dd returns error 0 without passes, so sy(8) = 0
+        % and the frame always keeps the space-time output
+        verifyEqual(tc, s(8, :), zeros(1, size(s, 2)), 'space-time ddi 0');
+    end
 end
 p = dl_params(); p.rx_dd_iter = 0;
 [~, s] = run_frames(p);
