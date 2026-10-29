@@ -206,6 +206,8 @@ If the test stage runs on a later commit, the copies are compared with that comm
 
 ## 8. When it runs
 
+Amendment 2026-10-27 (path only, Adi's folder rule): `C:\Users\Adi Suliman\uav-gcs-lectebno-read` is now `C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\worktrees\lectebno-read`; no other word of this protocol changes.
+
 **Tests, once, in the stop window during T2's smoke, in the p3 slot,** from a clean worktree of
 `lect-ebno` (`git status` empty):
 
