@@ -305,3 +305,47 @@ ends about 18-21.11 (worst about 22-23.11).
     `67f933a`, `b37e8a3` and the tip. A later change to one of them fails the test until the pin
     names the commit that holds it.
   - `sysfa`'s test is unchanged: there all twelve stay compared with `d4623ed`.
+- **29.10.2026, one LINK reading on the fresh set (D108, approved by Adi on 29.10, before any P1R
+  data).** The fresh clean test set also carries the edge commitment's clean-link criterion LINK,
+  read once. Sections 1, 2, 4 and 5 change as follows; nothing else changes.
+  - **What is read.** The clean no_action packet loss per Eb/N0 point of
+    `data/clean_fresh_pools.mat`: every frame of every fresh flight, summed per flight with the
+    statements `edge_map.m` uses on the clean-link pools and read by its verdict call
+    (`edge_verdict.m`, 4000 resamples, bootstrap over flights and Clopper-Pearson on the
+    effective sample size, COMMITTED from 36 flights). Target 5.7% (802.11a's PER < 10% at a
+    1000-byte PSDU carried to the 1032-bit frame through the simulated block fading). Beside it,
+    reported only: the verdict at 1.4% on the same interval (the definition registered before
+    D108) and the tag J (loss < 10%, D99, descriptive), with the TR 36.777 C&C reference line
+    (up to 1e-3 packet error loss rate, a service requirement after the link layer; not
+    modelled, not claimed). Every line names the receiver: as built (r1).
+  - **Label.** "D108, fresh set, first reading". Profile 1's EDGE and its LINK reading on its
+    test pools stay as reported; P1R does not rerun EDGE (section 5 unchanged on that point).
+  - **Where and when (section 2, step 3).** A new step between 6 (C2e) and 7 (the breakdown):
+    `link_fresh('run')` (`code/evaluation/link_fresh.m`) once, in this tree, through the gated
+    wrapper. It flies nothing: the no_action frames are those the fresh build stored.
+    `evaluate_policies.m` is unchanged, so section 5's KPI 6 path and its marker stay as they are.
+  - **Read once (section 4, "Read once").** The fresh set is read for KPI 6 in C2e and for LINK
+    once right after it, in the same single P1R pass. `link_fresh` stops before it loads the
+    pools unless `results/kpi6_fresh_read_started.txt` holds "KPI 6 read" and the SHA-256 of the
+    same pools file; after loading and before any frame is summed or anything is written, it
+    stops unless the pools are the fresh set (`CT.set`, `CT.fams`) of the detector C2e read
+    (`det_id`). It writes `results/link_fresh_read.txt` before its reading and
+    appends "LINK read" after it; a second reading is refused. It never writes the KPI 6
+    marker. Outputs: `results/link_fresh.{txt,mat}`.
+  - **Section 5's "KPI 6 only"** reads "KPI 6 and one LINK reading"; section 1's two kinds of
+    reading gain the third: LINK on the fresh set, P1R's first reading under D108.
+  - **The smoke (section 6, cell A).** After C2e with `kpi6_set` fresh and before the breakdown:
+    `link_fresh('run', true); link_fresh('check', true)` (400 resamples under the smoke). Check:
+    the line `LINKFRESH CHECK PASS` (outputs against a recomputation from the pools, the targets
+    0.057 / 0.014 / 0.10, the smoke's 4 geometries per Eb/N0, the labels, the marker, a second
+    reading refused). Under one minute; the smoke's cap is unchanged.
+  - **Tests** added to section 9: `test_core/test_link_fresh_flights` (the per-flight sums equal
+    `edge_map.m`'s statements and flight ids; another configuration is not counted; no single
+    no_action stops), `test_core/test_link_fresh_verdicts` (2% commits at 5.7% and is NOT
+    COMMITTED at 1.4% on the same interval; 9% and 12% NOT COMMITTED; tags J, J, M; each verdict
+    `edge_verdict.m`'s), `test_core/test_link_fresh_run` (the refusals before the pools are loaded: no
+    "KPI 6 read", another pools file; after loading and before any frame is summed or anything
+    is written: another detector, not the fresh set; the outputs, the marker, the
+    second reading refused, the cell A check passing and catching a changed output, the KPI 6
+    marker untouched).
+  - **Time.** About +10 min of P1R (the fresh pools file loaded and hashed once more).
