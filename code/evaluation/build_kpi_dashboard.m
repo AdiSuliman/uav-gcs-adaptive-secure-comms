@@ -53,8 +53,9 @@ end
 ax = nexttile(tl);
 if ~isempty(Md)
     b = Md.metrics.snr_breakdown;
-    plot(ax, [b.snr_db], [b.macro_f1_pct], '-o', 'LineWidth', 1.6); hold(ax, 'on');
-    yline(ax, 90, 'r--', '90%'); grid(ax, 'on'); ylim(ax, [50 100]);
+    hf = plot(ax, [b.snr_db], [b.macro_f1_pct], '-o', 'LineWidth', 1.6); hold(ax, 'on');
+    hy = yline(ax, 90, 'r--'); hy.LineWidth = 1; grid(ax, 'on'); ylim(ax, [50 100]);
+    legend(ax, [hf, hy], {'macro-F1', '90% target'}, 'Location', 'southeast', 'FontSize', 7);
     xlabel(ax, 'E_b/N_0 [dB]'); ylabel(ax, 'macro-F1 [%]'); title(ax, {'KPI 1: detection vs E_b/N_0', set_txt(Md.metrics)});
 else
     placeholder(ax, 'Macro-F1 vs Eb/N0', 'eval_detector');
