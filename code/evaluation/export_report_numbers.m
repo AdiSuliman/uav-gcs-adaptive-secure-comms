@@ -5,7 +5,9 @@
 % latency, unseen Eb/N0, unseen combined threats, the edge map's verdicts, the commitment
 % at every signalling delay and its edges)
 % so no number is copied by hand. Large arrays are left out. Run from the repository
-% root after the KPI stage.
+% root after the KPI stage. The leave-one-threat-out policy test (C2u, N.unknown_policy: res,
+% not its episodes EP) and the GCS antenna report (GCSA, N.gcs_antenna: the lines of the text
+% report, which has no .mat) are collected beside the combined-threat test (N.combo).
 % A result of another detector or deployed policy, or older than its inputs
 % (result_status.m), and a KPI summary older than a file it reads are flagged in
 % N.stale and printed as a warning; the numbers stay, marked, for the reader to see.
@@ -16,7 +18,8 @@ RS = result_status();
 st = RS([RS.stale]);
 kin = {'results/eval_detector_metrics.mat', 'results/eval_detector_metrics_fresh2.mat', 'results/eval_detector_metrics_fresh3.mat', ...
     'results/ood_detection.mat', 'results/policy_evaluation.mat', ...
-    'results/latency.mat', 'results/edge_map.mat', 'results/phy_validation.txt'};   % files the KPI summary reads
+    'results/latency.mat', 'results/edge_map.mat', 'results/phy_validation.txt', 'results/combo_generalization.mat', ...
+    'results/unknown_threat_policy.mat', 'results/gcs_antenna.txt'};   % files the KPI summary reads
 if isfile('results/kpi_summary.mat')
     old = kin(cellfun(@(f) isfile(f) && dir(f).datenum > dir('results/kpi_summary.mat').datenum, kin));
     if ~isempty(old)
@@ -58,6 +61,8 @@ if isfile('results/unseen_snr.mat')
     N.unseen_snr = load('results/unseen_snr.mat', 'EBNO_ALL', 'EBNO_SEEN', 'acc', 'f1', 'gap', 'summary');
 end
 N.combo = take('results/combo_generalization.mat', 'res');
+N.unknown_policy = take('results/unknown_threat_policy.mat', 'res');   % C2u: res only, not the episodes EP
+N.gcs_antenna = take_lines('results/gcs_antenna.txt');                  % GCSA: the report's lines
 N.edge = take('results/edge_map.mat', 'EDGE_NUM');                 % verdict counts, commitment, edges, clean link, overhead pass
 
 N = clean(N);
@@ -68,6 +73,11 @@ fprintf('Saved results/report_numbers.json\n');
 function v = take(f, name)
 v = [];
 if isfile(f), S = load(f, name); if isfield(S, name), v = S.(name); end, end
+end
+
+function v = take_lines(f)
+v = [];
+if isfile(f), v = splitlines(strtrim(fileread(f))); end
 end
 
 function x = clean(x)
