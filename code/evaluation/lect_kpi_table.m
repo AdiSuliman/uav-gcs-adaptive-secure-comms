@@ -907,7 +907,7 @@ hy = yline(ax, L.target_pct, '--k');
 set(ax, 'XTick', 1:3, 'XTickLabel', {'narrowband (tone jamming)', 'wideband (jamming)', 'five threats pooled'}); grid(ax, 'on');
 ylabel(ax, 'PER reduction vs the static link [%]');
 legend(ax, [hb(:); hy], [names(:); {sprintf('target %g%%', L.target_pct)}], 'Interpreter', 'none', 'Location', 'southoutside', ...
-    'Orientation', 'horizontal');
+    'NumColumns', 3);
 title(ax, 'PER reduction, 95% bootstrap over flight geometries', 'FontSize', 10);
 title(tl, 'KPI 5: PER by configuration (core pair rule_core / blind_core; rule_esc / blind_esc extension)', 'Interpreter', 'none');
 exportgraphics(fig, f, 'Resolution', 150);
