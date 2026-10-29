@@ -152,8 +152,8 @@ function build_threat_model(p)
 %           frequency, and the lags moved by whole symbols to where they hold the most of
 %           it. Its first pass takes the channel of every lag by LS on the training, its
 %           phase at every pilot block from the pilots' share of the block's samples.
-%           p.rx_ne_fix ('off' default; 'freq', 'keep', 'both': rx_ne_fix_code below)
-%           changes its frequency step and adds the antennas-alone alternative.
+%           p.rx_ne_fix (absent or 'off' default; tokens joined by '+': rx_ne_fix_code
+%           below) changes steps of its first pass or adds per-frame diagnostic prints.
 %           MMSE over space-time vectors, every antenna's samples half a
 %           symbol apart around each symbol. Its synchronization: frequency first from
 %           the space-time coherence of the training (loaded with the noise floor, the
@@ -2009,23 +2009,51 @@ s = sprintf('%s\n', c{:});
 end
 
 function c = rx_ne_fix_code(c, p)
-% Delay-line (NE > 1) receiver options of p.rx_ne_fix; 'off' (default, or field absent)
-% leaves the script text unchanged.
-%   'freq'  residual frequency of the first pass from the angle of the summed products of
-%           consecutive pilot blocks' correlations (weighted phase increments, no unwrapping:
-%           Kay 1989; Fitz 1994; Luise & Reggiannini 1995) instead of the LS slope of the
-%           unwrapped block phases, whose one cycle slip on a faded block moves the estimate by
-%           0.7-2.4 kHz (threshold behaviour: Rife & Boorstyn 1974)
-%   'keep'  the antennas-alone output (the flat path's first pass and DD passes) on the same
-%           samples; the frame keeps the output with the lower pilot error under weights
-%           from the data decisions (pilot_mse), as the space-time path does
-%   'both'  both
+% Delay-line (NE > 1) receiver options of p.rx_ne_fix, tokens joined by '+'; field absent or
+% 'off' leaves the script text unchanged. Every changed line sits in the NE > 1 branch, in
+% eq_train or in functions only that branch calls.
+%   'freq'    residual frequency of the first pass from the angle of the summed products of
+%             consecutive pilot blocks' correlations (weighted phase increments, no unwrapping:
+%             Kay 1989; Fitz 1994; Luise & Reggiannini 1995) instead of the LS slope of the
+%             unwrapped block phases, whose one cycle slip on a faded block moves the estimate by
+%             0.7-2.4 kHz (threshold behaviour: Rife & Boorstyn 1974)
+%   'freqa'   as 'freq' with the products taken per antenna (every antenna's block correlation
+%             against its known symbols' share), summed over the antennas
+%   'freqf'   the flat path's estimator instead of the slope: one-tap channel of every antenna
+%             at every pilot block on the whitened samples, phase of the summed products of
+%             consecutive blocks (diagnostic)
+%   'keep'    the antennas-alone output (the flat path's first pass and DD passes) on the same
+%             samples; the frame keeps the output with the lower pilot error under weights
+%             from the data decisions (pilot_mse), as the space-time path does
+%   'both'    'freq' and 'keep'
+%   'noburst' every block keeps its measured gains, whatever its residual (diagnostic)
+%   'burstn'  a block is a burst when the residual of its pilot rows exceeds 4 times its
+%             expectation: the noise and the unknown symbols' share of the lag model at the
+%             block's own gains
+%   'hsel1'   synchronization on the quiet slot's whitening only (diagnostic)
+%   'deq0'    the equalizer's lags stay at the arrival (diagnostic)
+%   'shadow'  the flat path's receiver on copies of the samples before the frequency passes,
+%             printed only, never the output (diagnostic)
+%   'log'     per-frame prints of the first pass (RX* lines); every other line unchanged
 m = 'off';
 if isfield(p, 'rx_ne_fix') && ~isempty(p.rx_ne_fix), m = lower(char(p.rx_ne_fix)); end
-if ~any(strcmp(m, {'off', 'freq', 'keep', 'both'}))
+tk = strsplit(m, '+');
+known = {'off', 'freq', 'keep', 'both', 'freqa', 'freqf', 'noburst', 'burstn', 'hsel1', 'deq0', ...
+    'shadow', 'log'};
+if ~all(ismember(tk, known)) || (numel(tk) > 1 && any(strcmp(tk, 'off')))
     error('build_threat_model: unknown rx_ne_fix ''%s''', m);
 end
-if any(strcmp(m, {'freq', 'both'}))
+if strcmp(m, 'off'), return; end
+if any(strcmp(tk, 'both')), tk = [tk(~strcmp(tk, 'both')), {'freq', 'keep'}]; end
+tk = unique(tk, 'stable');
+on = @(t) any(strcmp(tk, t));
+if on('freq') + on('freqa') + on('freqf') > 1 || (on('noburst') && on('burstn'))
+    error('build_threat_model: rx_ne_fix ''%s'' sets one step twice', m);
+end
+fprintf('Rx NE>1 options: %s\n', strjoin(tk, '+'));
+
+% residual frequency of the two first-pass passes
+if on('freq')
     c = swap(c, '            [~, ~, pq, tq] = eq_train(ywx, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB);', ...
         {'            [~, ~, pq, tq, cq] = eq_train(ywx, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB);'});
     c = swap(c, '                bf = sxy / max(sxx, 1e-30);', {
@@ -2044,10 +2072,99 @@ if any(strcmp(m, {'freq', 'both'}))
         'cq = complex(zeros(NB + 1, 1));'});
     c = swap(c, '    tq(b + 1) = PC(b); pq(b + 1) = pu;', {
         '    tq(b + 1) = PC(b); pq(b + 1) = pu; cq(b + 1) = cb;'});
+elseif on('freqa')
+    c = swap(c, '            [~, ~, pq, tq] = eq_train(ywx, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB);', ...
+        {'            [~, ~, pq, tq, Ca] = eq_train(ywx, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB);'});
+    c = swap(c, '                bf = sxy / max(sxx, 1e-30);', {
+        '                % per-antenna products of pilot blocks one spacing apart, summed'
+        '                cc = complex(0); DP = PC(2) - PC(1);'
+        '                for b = 1:NB - 1'
+        '                    if PC(b + 1) - PC(b) == DP'
+        '                        cc = cc + Ca(:, b)'' * Ca(:, b + 1);'
+        '                    end'
+        '                end'
+        '                bf = angle(cc) / DP;'});
+    c = swap(c, 'function [G, s2, pq, tq] = eq_train(yx, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB)', ...
+        {'function [G, s2, pq, tq, Ca] = eq_train(yx, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB)'});
+    c = swap(c, 'tq = zeros(NB + 1, 1); pq = zeros(NB + 1, 1); tq(1) = (1 + RQ + NPRE - RP) / 2; pu = 0;', {
+        'tq = zeros(NB + 1, 1); pq = zeros(NB + 1, 1); tq(1) = (1 + RQ + NPRE - RP) / 2; pu = 0;'
+        'Ca = complex(zeros(NR, NB));'});
+    c = swap(c, '        cb = cb + eq_known(G, SK, KN, n, RP)'' * yx(n + XO, :).'';', {
+        '        cb = cb + eq_known(G, SK, KN, n, RP)'' * yx(n + XO, :).'';'
+        '        Ca(:, b) = Ca(:, b) + conj(eq_known(G, SK, KN, n, RP)) .* yx(n + XO, :).'';'});
+elseif on('freqf')
+    c = swap(c, '                bf = sxy / max(sxx, 1e-30);', {
+        '                % the flat path''s estimator: one-tap channel of every antenna at every'
+        '                % pilot block on the whitened samples, phase steps between consecutive blocks'
+        '                Hf = complex(zeros(NR, NB));'
+        '                for b = 1:NB'
+        '                    for kf = 1:PB'
+        '                        Hf(:, b) = Hf(:, b) + yw(IDXP((b-1)*PB + kf), :).'' * conj(PIL((b-1)*PB + kf));'
+        '                    end'
+        '                end'
+        '                gf = complex(0);'
+        '                for b = 1:NB - 1'
+        '                    gf = gf + Hf(:, b + 1)'' * Hf(:, b);'
+        '                end'
+        '                bf = -angle(gf) / (PC(2) - PC(1));'});
 end
+
+% burst rule of the per-block gains
+if on('noburst') || on('burstn')
+    k = find(strcmp(c, '            if rb(b) > 4 * mr'));
+    assert(numel(k) == 1 && strcmp(c{k - 1}, '        for b = 1:NB') && strcmp(c{k + 1}, ...
+        '                ga(:, b + 1) = complex(ones(NR, 1)) * exp(1j * pq(b + 1));') && ...
+        strcmp(c{k + 2}, '            end') && strcmp(c{k + 3}, '        end'), 'build_threat_model: rx_ne_fix anchor burst');
+    new = cell(0, 1);
+    if on('burstn')
+        new = {
+            '        % a block is a burst when its pilot rows'' residual exceeds 4 times its expectation:'
+            '        % the noise and the unknown symbols'' share of the lag model at its own gains'
+            '        rn = zeros(NB, 1); en = zeros(NB, 1);'
+            '        for b = 1:NB'
+            '            for jn = 1:PB'
+            '                n = IDXP((b-1)*PB + jn);'
+            '                ev = yx(n + XO, :).'' - ga(:, b + 1) .* eq_known(Gt, SK, KN, n, RP);'
+            '                rn(b) = rn(b) + real(ev'' * ev);'
+            '                en(b) = en(b) + NR * s2;'
+            '                for l = 1:NRK'
+            '                    kl = n - (l - 1 - RP);'
+            '                    if kl >= 1 && kl <= NS && ~KN(kl)'
+            '                        en(b) = en(b) + sum(abs(ga(:, b + 1)).^2 .* abs(Gt(:, l)).^2);'
+            '                    end'
+            '                end'
+            '            end'
+            '        end'
+            '        for b = 1:NB'
+            '            if rn(b) > 4 * en(b)'
+            '                ga(:, b + 1) = complex(ones(NR, 1)) * exp(1j * pq(b + 1));'
+            '            end'
+            '        end'};
+    end
+    c = [c(1:k - 2); new; c(k + 4:end)];
+end
+
+% synchronization
+if on('hsel1')
+    k = find(strcmp(c, '        NHYP = 0;'));
+    assert(numel(k) == 1 && strcmp(c{k + 1}, '    end'), 'build_threat_model: rx_ne_fix anchor hsel1');
+    c = [c(1:k + 1); {
+        '    if NE > 1'
+        '        % the quiet slot''s whitening only'
+        '        NHYP = 1;'
+        '    end'}; c(k + 2:end)];
+end
+if on('deq0')
+    k = find(strcmp(c, '            deq = d + jb*SPS;'));
+    assert(numel(k) == 1 && strcmp(c{k - 1}, '        if Ew(d + 1) < 0.99 * eb') && strcmp(c{k + 1}, '        end'), ...
+        'build_threat_model: rx_ne_fix anchor deq0');
+    c = [c(1:k - 2); c(k + 2:end)];
+end
+
+% the antennas-alone alternative
 k = find(strcmp(c, '        sy(8) = ep / numel(IDXP);'));
 assert(numel(k) == 1 && strcmp(c{k + 1}, '        end'), 'build_threat_model: rx_ne_fix anchor');
-if any(strcmp(m, {'keep', 'both'}))
+if on('keep')
     add = {
         '        % the antennas alone on the same samples; the frame keeps the output whose pilots'
         '        % the weights from its data decisions reproduce better'
@@ -2111,12 +2228,202 @@ if any(strcmp(m, {'keep', 'both'}))
         '    end'
         'end'
         'end'}];
-elseif strcmp(m, 'freq')
+elseif on('freq')
     c = [c(1:k + 1); {
         '        if DDI == 0'
         '            sy(8) = pilot_mse(y, z, IDXD, IDXP, PIL, B);'
         '        end'}; c(k + 2:end)];
 end
+
+% the flat path's receiver beside the first pass, printed only
+if on('shadow')
+    k = find(strcmp(c, '        tq = zeros(NB + 1, 1); pq = zeros(NB + 1, 1);'));
+    assert(numel(k) == 1, 'build_threat_model: rx_ne_fix anchor shadow');
+    c = [c(1:k - 1); {
+        '        % the flat path''s receiver on copies of these samples, printed only'
+        '        vsh = rxd_shadow(y, yw, Hp, tp, Wi, PIL, IDXD, IDXP, PC, B, DDI, SR, txbits);'
+        '        fprintf(''RXH %.0f %.4e %.1f %.1f\n'', vsh(1), vsh(2), vsh(3), vsh(4));'}; c(k:end)];
+    c = [c; {
+        ''
+        'function v = rxd_shadow(y, yw, Hp, tp, Wi, PIL, IDXD, IDXP, PC, B, DDI, SR, txbits)'
+        '% The flat path''s receiver on the given samples: two residual-frequency passes from the'
+        '% pilot blocks'' phase steps, [1 2 1]/4 smoothing over the blocks, interpolation, MRC and'
+        '% DDI decision-directed passes. v = [bit errors against txbits; pilot error; frequency'
+        '% of the two passes [Hz]].'
+        'NR = size(y, 2); NS = size(y, 1); NB = numel(PC); ND = numel(IDXD);'
+        'v = zeros(4, 1);'
+        'for it = 1:2'
+        '    G = complex(0);'
+        '    for b = 2:NB'
+        '        G = G + Hp(:, b+1)'' * Hp(:, b);'
+        '    end'
+        '    df = -angle(G) / (2*pi*(PC(2) - PC(1))/SR);'
+        '    v(2 + it) = df;'
+        '    ph3 = exp(-1j*2*pi*df*(0:NS-1).''/SR);'
+        '    for a = 1:NR'
+        '        y(:, a) = y(:, a) .* ph3;'
+        '        yw(:, a) = yw(:, a) .* ph3;'
+        '    end'
+        '    for b = 1:NB+1'
+        '        Hp(:, b) = Hp(:, b) * exp(-1j*2*pi*df*(tp(b) - 1)/SR);'
+        '    end'
+        'end'
+        'Hs = Hp;'
+        'for b = 2:NB+1'
+        '    if b == 2'
+        '        Hs(:, b) = (2*Hp(:, b) + Hp(:, b+1)) / 3;'
+        '    elseif b == NB+1'
+        '        Hs(:, b) = (Hp(:, b-1) + 2*Hp(:, b)) / 3;'
+        '    else'
+        '        Hs(:, b) = (Hp(:, b-1) + 2*Hp(:, b) + Hp(:, b+1)) / 4;'
+        '    end'
+        'end'
+        'z = complex(zeros(ND, 1));'
+        'j = 1;'
+        'for m = 1:ND'
+        '    k = IDXD(m);'
+        '    if k <= tp(1)'
+        '        hw = Hs(:, 1);'
+        '    elseif k >= tp(NB+1)'
+        '        hw = Hs(:, NB+1);'
+        '    else'
+        '        while k >= tp(j+1)'
+        '            j = j + 1;'
+        '        end'
+        '        g = (k - tp(j)) / (tp(j+1) - tp(j));'
+        '        hw = (1 - g) * Hs(:, j) + g * Hs(:, j+1);'
+        '    end'
+        '    h = Wi * hw;'
+        '    g = real(h'' * h);'
+        '    if g > 1e-12'
+        '        z(m) = (h'' * y(k, :).'') / g;'
+        '    end'
+        'end'
+        'z = dd_mvdr(y, z, IDXD, B, false, DDI);'
+        'v(2) = pilot_mse(y, z, IDXD, IDXP, PIL, B);'
+        'bits = pskdemod(z, 4, pi/4, ''gray'', ''OutputType'', ''bit'');'
+        'v(1) = sum(double(bits(:)) ~= double(txbits(:)));'
+        'end'}];
+end
+
+% prints: fprintf lines only, and the print-only function rxd_freq appended last
+if on('log')
+    c = rx_ne_log(c, p, tk);
+end
+end
+
+function c = rx_ne_log(c, p, tk)
+% The per-frame prints of p.rx_ne_fix 'log'. Lines: RXY sync (hsel, d, deq - d, fc, ff, the
+% best lag move jb and the arrival's share of its energy); RXP per frequency pass (pass, the
+% applied estimate, then slope, (b), per-antenna and flat-path estimates [Hz], the largest
+% wrapped residual of the block phases around the slope's line [rad]); RXT training (s2 [dB],
+% every antenna's template power against the antennas' mean [dB]); RXB per pilot block
+% (block, residual over the median, the as-built flag, every antenna's |ga|^2 [dB]); RXG every
+% antenna's largest and smallest |ga|^2 [dB]; RXF the flags applied; RXN (burstn) residual over
+% its expectation; RXS the frame's sy(2), sy(8), pilot_mse(y, z) and bit errors against txbits.
+Lf = frame_layout(p); NR = p.n_rx; NB = numel(Lf.pil_center);
+on = @(t) any(strcmp(tk, t));
+db = @(x) sprintf('10*log10(max(%s, 1e-30))', x);
+
+k = find(strcmp(c, '    deq = d;'));
+assert(numel(k) == 1 && strcmp(c{k + 1}, '    if NE > 1'), 'build_threat_model: rx_ne_fix anchor log sync');
+e = k + 1 + find(strcmp(c(k + 2:end), '    end'), 1);
+c = [c(1:e - 1); {['        fprintf(''RXY %.0f %.0f %.0f %.1f %.1f %.0f %.4f\n'', hsel, d, deq - d, fc, ff, jb, ' ...
+    'Ew(d + 1) / max(eb, 1e-30));']}; c(e:end)];
+
+k = find(strcmp(c, '                for k = 1 - XO : NS + XO'));
+assert(numel(k) == 1, 'build_threat_model: rx_ne_fix anchor log pass');
+A = 'ywx, yw, PRE, SK, KN, IDXP, PC, PIL, NRK, RP, RQ, XO, PB';
+w = arrayfun(@(i) sprintf('rxd_freq(%d, %s) * SR / (2*pi)', i, A), 1:4, 'UniformOutput', false);
+c = [c(1:k - 1); {['                fprintf(''RXP %.0f %.1f %.1f %.1f %.1f %.1f %.3f\n'', itf, bf * SR / (2*pi), ' ...
+    strjoin(w, ', ') sprintf(', rxd_freq(5, %s));', A)]}; c(k:end)];
+
+k = find(strcmp(c, '        [Gt, s2] = eq_train(yx, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB);'));
+assert(numel(k) == 1, 'build_threat_model: rx_ne_fix anchor log template');
+g = arrayfun(@(a) sprintf('10*log10(max(sum(abs(Gt(%d, :)).^2), 1e-30) / max(mean(sum(abs(Gt).^2, 2)), 1e-30))', a), ...
+    1:NR, 'UniformOutput', false);
+c = [c(1:k); {['        fprintf(''RXT' repmat(' %.2f', 1, NR + 1) '\n'', ' db('s2') ', ' strjoin(g, ', ') ');']}; c(k + 1:end)];
+
+k = find(strcmp(c, '        mr = median(rb);'));
+assert(numel(k) == 1, 'build_threat_model: rx_ne_fix anchor log blocks');
+L = cell(NB + 1, 1);
+for b = 1:NB
+    ga = arrayfun(@(a) db(sprintf('abs(ga(%d, %d))^2', a, b + 1)), 1:NR, 'UniformOutput', false);
+    L{b} = sprintf('        fprintf(''RXB %%.0f %%.3f %%.0f%s\\n'', %d, rb(%d) / max(mr, 1e-30), double(rb(%d) > 4 * mr), %s);', ...
+        repmat(' %.2f', 1, NR), b, b, b, strjoin(ga, ', '));
+end
+gx = arrayfun(@(a) [db(sprintf('max(abs(ga(%d, 2:end)).^2)', a)) ', ' db(sprintf('min(abs(ga(%d, 2:end)).^2)', a))], ...
+    1:NR, 'UniformOutput', false);
+L{NB + 1} = ['        fprintf(''RXG' repmat(' %.2f', 1, 2 * NR) '\n'', ' strjoin(gx, ', ') ');'];
+c = [c(1:k); L; c(k + 1:end)];
+
+k = find(strcmp(c, '        gs = ga;'));
+assert(numel(k) == 1, 'build_threat_model: rx_ne_fix anchor log flags');
+if on('noburst')
+    L = {['        fprintf(''RXF' repmat(' 0', 1, NB) '\n'');']};
+elseif on('burstn')
+    L = {['        fprintf(''RXF' repmat(' %.0f', 1, NB) '\n'', ' ...
+        strjoin(arrayfun(@(b) sprintf('double(rn(%d) > 4 * en(%d))', b, b), 1:NB, 'UniformOutput', false), ', ') ');']
+        ['        fprintf(''RXN' repmat(' %.3f', 1, NB) '\n'', ' ...
+        strjoin(arrayfun(@(b) sprintf('rn(%d) / max(en(%d), 1e-30)', b, b), 1:NB, 'UniformOutput', false), ', ') ');']};
+else
+    L = {['        fprintf(''RXF' repmat(' %.0f', 1, NB) '\n'', ' ...
+        strjoin(arrayfun(@(b) sprintf('double(rb(%d) > 4 * mr)', b), 1:NB, 'UniformOutput', false), ', ') ');']};
+end
+c = [c(1:k - 1); L; c(k:end)];
+
+k = find(strcmp(c, '        sy(8) = ep / numel(IDXP);'));
+e = k + find(strcmp(c(k + 1:end), '    else'), 1);
+c = [c(1:e - 1); {['        fprintf(''RXS %.1f %.4e %.4e %.0f\n'', sy(2), sy(8), pilot_mse(y, z, IDXD, IDXP, PIL, B), ' ...
+    'sum(double(pskdemod(z, 4, pi/4, ''gray'', ''OutputType'', ''bit'')) ~= double(txbits(:))));']}; c(e:end)];
+
+c = [c; {
+    ''
+    'function v = rxd_freq(k, ywx, yw, PRE, SK, KN, IDXP, PC, PIL, NRK, RP, RQ, XO, PB)'
+    '% Printed only: element k of the residual-frequency estimates of one pass on these samples'
+    '% [rad per symbol]: 1 the LS slope of the unwrapped block phases, 2 the angle of the summed'
+    '% products of consecutive blocks'' correlations, 3 the same per antenna, 4 the flat path''s'
+    '% estimator on yw; 5 the largest wrapped residual of the block phases around line 1 [rad].'
+    'NR = size(ywx, 2); NB = numel(PC); DP = PC(2) - PC(1);'
+    '[G, ~, pq, tq] = eq_train(ywx, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB);'
+    'cs = complex(zeros(NB, 1)); Ca = complex(zeros(NR, NB));'
+    'for b = 1:NB'
+    '    for n = IDXP((b-1)*PB + 1) - RP : IDXP(b*PB) + RQ'
+    '        kn = eq_known(G, SK, KN, n, RP);'
+    '        cs(b) = cs(b) + kn'' * ywx(n + XO, :).'';'
+    '        Ca(:, b) = Ca(:, b) + conj(kn) .* ywx(n + XO, :).'';'
+    '    end'
+    'end'
+    'w = zeros(5, 1);'
+    'tm = mean(tq); pm = mean(pq); sxx = 0; sxy = 0;'
+    'for b = 1:NB + 1'
+    '    sxx = sxx + (tq(b) - tm)^2; sxy = sxy + (tq(b) - tm) * (pq(b) - pm);'
+    'end'
+    'w(1) = sxy / max(sxx, 1e-30);'
+    'cb = complex(0); ca = complex(0);'
+    'for b = 1:NB - 1'
+    '    if PC(b + 1) - PC(b) == DP'
+    '        cb = cb + cs(b + 1) * conj(cs(b));'
+    '        ca = ca + Ca(:, b)'' * Ca(:, b + 1);'
+    '    end'
+    'end'
+    'w(2) = angle(cb) / DP; w(3) = angle(ca) / DP;'
+    'Hf = complex(zeros(NR, NB));'
+    'for b = 1:NB'
+    '    for j = 1:PB'
+    '        Hf(:, b) = Hf(:, b) + yw(IDXP((b-1)*PB + j), :).'' * conj(PIL((b-1)*PB + j));'
+    '    end'
+    'end'
+    'gf = complex(0);'
+    'for b = 1:NB - 1'
+    '    gf = gf + Hf(:, b + 1)'' * Hf(:, b);'
+    'end'
+    'w(4) = -angle(gf) / DP;'
+    'for b = 1:NB + 1'
+    '    w(5) = max(w(5), abs(angle(exp(1j * (pq(b) - pm - w(1) * (tq(b) - tm))))));'
+    'end'
+    'v = w(k);'
+    'end'}];
 end
 
 function c = swap(c, old, new)
