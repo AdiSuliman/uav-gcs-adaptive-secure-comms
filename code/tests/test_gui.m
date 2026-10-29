@@ -10,6 +10,9 @@ function tests = test_gui
 %     GUI_SMOKE_TREE  a smoke tree's folder (params.mat, data/, results/ of the deploy queue's smoke)
 %     GUI_CORE_DIR    a folder with a full-run three-state model (data/core_cnn_model.mat,
 %                     results/core_cnn.txt); read only, copied into the scratch root
+%   GUI_BUNDLE (optional, with GUI_SMOKE_TREE) is an already exported bundle (the rx<n> folder): the
+%   tests run on it as it is, no scratch copy and no export; GUI_SMOKE_TREE then only supplies the
+%   pools the test frames are drawn from, and GUI_CORE_DIR is not used.
 %   GUI_BUILD_FIGURE=1 also builds the whole console on a hidden figure (test_console_builds_hidden).
 tests = functiontests(localfunctions);
 end
@@ -22,10 +25,10 @@ tc.TestData.cwd = pwd;
 tc.TestData.tmp = tempname; mkdir(tc.TestData.tmp); cd(tc.TestData.tmp);
 tc.TestData.warn = warning('off', 'MATLAB:load:variableNotFound');         % placeholder files in the exporter tests
 tc.TestData.fx = []; tc.TestData.fx_err = '';
-sm = getenv('GUI_SMOKE_TREE'); cm = getenv('GUI_CORE_DIR');
+sm = getenv('GUI_SMOKE_TREE'); cm = getenv('GUI_CORE_DIR'); gb = getenv('GUI_BUNDLE');
 if ~isempty(sm) && isfolder(sm)
     try
-        tc.TestData.fx = smoke_fixture(sm, cm, tc.TestData.tmp);
+        tc.TestData.fx = smoke_fixture(sm, cm, tc.TestData.tmp, gb);
     catch ME
         tc.TestData.fx_err = getReport(ME);
     end
@@ -595,9 +598,15 @@ verifyEmpty(tc, tc.TestData.fx_err, ['the bundle could not be exported from the 
 assumeNotEmpty(tc, fx, 'set GUI_SMOKE_TREE (and GUI_CORE_DIR) for the tests on a smoke tree');
 end
 
-function fx = smoke_fixture(sm, cm, tmp)
+function fx = smoke_fixture(sm, cm, tmp, gb)
 % A scratch copy of what the smoke tree holds that the console needs, then the bundle
 % exported from it (the clean reference as a small pools file, as the exporter reads it).
+% With gb, an already exported bundle is used as it is.
+if ~isempty(gb)
+    assert(isfolder(gb) && isfile(fullfile(gb, 'params.mat')), 'test_gui: GUI_BUNDLE %s is no exported bundle', gb);
+    fx = struct('root', sm, 'bundle', gb, 'core', isfile(fullfile(gb, 'data', 'core_cnn_model.mat')), 'cells', pool_cells(sm));
+    return
+end
 R = fullfile(tmp, 'smoke_copy'); mkdir(fullfile(R, 'data')); mkdir(fullfile(R, 'results'));
 copy_if(fullfile(sm, 'params.mat'), fullfile(R, 'params.mat'));
 for f = {'trained_detector', 'trained_dqn', 'ood_thresholds', 'fusion', 'drop_threshold', 'survivability_boundary', 'gui_norm_stats'}
