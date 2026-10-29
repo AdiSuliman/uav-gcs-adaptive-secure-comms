@@ -133,6 +133,8 @@ no sweeper path):
 
 ## 5. When it runs
 
+Amendment 2026-10-27 (path only, Adi's folder rule): `C:\Users\Adi Suliman\uav-gcs-sysfa-read` is now `C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\worktrees\sysfa-read`; no other word of this protocol changes.
+
 **Tests, once, before the run,** in a stop window of a short MATLAB job (no pools), from a clean
 worktree of `sysfa` (`git status` empty), through the gated wrapper and slot the other readings
 use:

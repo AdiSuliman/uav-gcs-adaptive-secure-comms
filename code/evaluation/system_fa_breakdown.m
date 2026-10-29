@@ -14,6 +14,9 @@ function varargout = system_fa_breakdown(cmd, varargin)
 %       out_dir/system_fa_breakdown.gatefail.{txt,mat} (the diagnostics) and stops with
 %       system_fa_breakdown:gate; it creates no reading output, so the reading stays open. The
 %       header names the thread count the session really has.
+%       KPI 6's flights follow KP.far_set: without it the union of C2e's clean flights (profile
+%       1); 'fresh' the fresh clean test set RWf alone (P1R's C2e, evaluate_policies.m with
+%       kpi6_set fresh, KP.reading 'P1R', the lecturer lines carrying P1R's label).
 %   G = system_fa_breakdown('gate', E, PP, Q, txt)
 %       E the variables of eval_mat, Q those of dqn_mat, txt eval_txt one cell per line. G.pass
 %       when lect_kpis.m on every episode gives KP.lect and its lines of txt, far_report on
@@ -86,12 +89,25 @@ w = warning('off', 'MATLAB:load:variableNotFound');
 Q = load(dqn_mat, qv{:});
 warning(w);
 E = load(eval_mat, 'ALL', 'POL', 'LBL', 'iDQN', 'KP', 'RES', 'RW', 'set_names');
+fresh = isfield(E, 'KP') && far_def(E.KP);
+if fresh                                             % P1R: KPI 6's flights are RWf
+    w = warning('off', 'MATLAB:load:variableNotFound');
+    Lf = load(eval_mat, 'RWf');
+    warning(w);
+    if isfield(Lf, 'RWf'), E.RWf = Lf.RWf; end
+    clear Lf
+end
 txt = read_lines(eval_txt);
 head = {['=== System-level false alarms (our KPI 6) broken down, and the pre-onset sensitivity of the lecturer''s ' ...
     'readings (D103 3-6, docs/system_fa_protocol.md): reporting only, no verdict changes ==='], ...
     sprintf('pools %s sha256 %s', pools, h_pools), sprintf('evaluation %s sha256 %s', eval_mat, h_mat), ...
     sprintf('text %s sha256 %s', eval_txt, h_txt), sprintf('trained policy %s sha256 %s', dqn_mat, h_dqn), ...
     sprintf('threads %d (%s)', nthr, thr_how)};
+if fresh
+    head{end+1} = sprintf(['P1R (KP.reading P1R, KP.far_set fresh): KPI 6''s flights are %s; D103 3 reads them, ' ...
+        'D103 4 and 5 read test pools already read in profile 1''s C2e (second reading, descriptive)'], ...
+        char(string(field_or(E.KP, 'far_src', '?'))));
+end
 G = gate(E, PP, Q, txt);
 if ~G.pass
     lines = [{sprintf('GATE FAIL (%d mismatches): nothing of D103 3-5 is read; no reading output was written, the reading stays open', ...
@@ -100,18 +116,28 @@ if ~G.pass
     write_lines(ff, lines);
     G = rmfield(G, 'RU');
     save(fg, 'M', 'G', 'lines', 'h_pools', 'h_mat', 'h_txt', 'h_dqn', 'nthr', 'thr_how', 'pools', 'eval_mat', 'eval_txt', 'dqn_mat');
+    if fresh, far_set = 'fresh'; save(fg, 'far_set', '-append'); end
     fprintf('%s\n', lines{:});
     error('system_fa_breakdown:gate', 'the gate failed: %s', ff);
 end
 [R, body] = readings(E, PP, M, G);
 assert(isequal(st0, stamps(inp)), 'system_fa_breakdown:inputs', 'an input changed during the reading');
-lines = [{['GATE PASS: lect_kpis.m reproduces KP.lect, far_report reproduces KP.far and KP.far_diag, the ' ...
-    'trained policy is KP.policy_stamp, exactly']}, head, body];
+lines = [{gate_pass_line(fresh)}, head, body];
 write_lines(fo, lines);
 G = rmfield(G, 'RU');
 save(fm, 'M', 'G', 'R', 'lines', 'h_pools', 'h_mat', 'h_txt', 'h_dqn', 'nthr', 'thr_how', 'pools', 'eval_mat', 'eval_txt', 'dqn_mat');
+if fresh, far_set = 'fresh'; save(fm, 'far_set', '-append'); end
 fprintf('%s\n', lines{:});
 fprintf('Saved %s, %s\n', fo, fm);
+end
+
+function s = gate_pass_line(fresh)
+s = ['GATE PASS: lect_kpis.m reproduces KP.lect, far_report reproduces KP.far and KP.far_diag, the ' ...
+    'trained policy is KP.policy_stamp, exactly'];
+if fresh
+    s = ['GATE PASS: lect_kpis.m reproduces KP.lect and its lines with P1R''s label, far_report on the fresh clean ' ...
+        'test set (RWf, KP.far_set fresh) reproduces KP.far and KP.far_diag, the trained policy is KP.policy_stamp, exactly'];
+end
 end
 
 %% ===================== Gate =====================
@@ -126,7 +152,8 @@ KP = E.KP;
 need = {'lect', 'far', 'far_diag', 'far_src', 'ebno', 'ebno_thr', 'cls_list', 'confirm', 'alarm_mode', 'policy_stamp'};
 miss = need(~isfield(KP, need));
 if ~isempty(miss), G.mismatch = {sprintf('KP lacks %s', strjoin(miss, ', '))}; return; end
-mm = {};
+[fresh, mm] = far_def(KP);
+if ~isempty(mm), G.mismatch = mm; return; end
 if ~isequal(double(KP.ebno), double(PP.ebno)), mm{end+1} = 'KP.ebno is not the pools'' Eb/N0 grid'; end
 if isfield(KP, 'det_id') && ~isequal(KP.det_id, PP.det_id)
     mm{end+1} = sprintf('KP.det_id %s is not the pools'' %s', char(string(KP.det_id)), char(string(PP.det_id)));
@@ -149,6 +176,7 @@ if ~isempty(mm), G.mismatch = mm; return; end
 % lect_kpis.m on every episode: KP.lect and its lines
 [Lf, lf] = lect_kpis(E.ALL, E.POL, E.LBL, E.iDQN, PP.scen, KP.lect.payload_bps, KP.lect.period_ms);
 lf = norm_lines(lf);
+if fresh, lf = p1r_label(lf); end
 mm = [mm, differs(Lf, KP.lect, 'lect_kpis on every episode vs KP.lect')];
 i = find(strcmp(txt, lf{2}));
 if numel(i) ~= 1
@@ -158,7 +186,12 @@ else
 end
 
 % far_report on KPI 6's clean flights: KP.far, KP.far_diag and their lines
-[RU, aU, m2] = union_ru(E, PP, KP); mm = [mm, m2];
+if fresh
+    [RU, aU, m2] = fresh_ru(E, PP, KP);
+else
+    [RU, aU, m2] = union_ru(E, PP, KP);
+end
+mm = [mm, m2];
 if isempty(m2), m2 = pairing(RU, E.POL, {'s', 'geom', 'split'}, 'RU'); mm = [mm, m2]; end
 T = 0; n = [KP.far.n]; j = find(n > 0, 1);
 if ~isempty(j), T = KP.far(j).rate.cycles / n(j); end
@@ -169,6 +202,10 @@ if isempty(m2)
         differs(FDf, KP.far_diag, 'far_report on KPI 6''s clean flights vs KP.far_diag')];
     hdr = sprintf('False alarms on the clean link, every independent clean flight: %s, %d episodes x %d cycles -> KPI 6', ...
         KP.far_src, sum(aU), T);
+    if fresh
+        hdr = sprintf('False alarms on the clean link, the fresh clean test set (P1R, read once): %s, %d episodes x %d cycles -> KPI 6', ...
+            KP.far_src, sum(aU), T);
+    end
     i = find(strcmp(txt, hdr));
     if numel(i) ~= 1
         mm{end+1} = sprintf('the text holds KPI 6''s header %d times, not once: %s', numel(i), hdr);
@@ -271,6 +308,52 @@ end
 aU = reshape(aU, 1, []);
 end
 
+function [RU, aU, mm] = fresh_ru(E, PP, KP)
+% KPI 6's clean flights in P1R's C2e: the fresh clean test set alone (RWf, split id 7), from the
+% KPI 1 threshold up.
+RU = {}; aU = []; mm = {};
+if ~isfield(E, 'RWf') || ~iscell(E.RWf) || numel(E.RWf) ~= numel(E.POL)
+    mm = {'the evaluation lacks RWf, one fresh clean set per policy (KP.far_set fresh)'}; return
+end
+iC = find(strcmp(E.set_names, 'clean'));
+if numel(iC) ~= 1, mm = {'set_names holds no single clean set'}; return; end
+need = {'s', 'geom', 'split', 'switches', 'false_sw', 'fc_t', 'fc_cls', 'fc_deg', 'fc_dal', 'fc_drop'};
+mm = has_fields(E.RWf, E.POL, need, 'RWf');
+for pk = 1:numel(E.POL)
+    if isstruct(E.RWf{pk}) && ~isempty(setdiff(fieldnames(E.RES{iC, pk}), fieldnames(E.RWf{pk})))
+        mm{end+1} = sprintf('RWf{%d} lacks fields of the clean set', pk); %#ok<AGROW>
+    end
+end
+if ~isempty(mm), return; end
+for pk = 1:numel(E.POL)
+    if ~all(E.RWf{pk}.split == 7), mm{end+1} = sprintf('RWf{%d} (%s) is not split id 7 throughout', pk, E.POL{pk}); end %#ok<AGROW>
+end
+if ~isempty(mm), return; end
+RU = E.RWf;
+aU = reshape(PP.ebno(RU{1}.s) >= KP.ebno_thr, 1, []);
+end
+
+function [fresh, mm] = far_def(KP)
+% KPI 6's definition in KP: the union without KP.far_set; the fresh clean test set with
+% KP.far_set 'fresh', which comes with KP.reading 'P1R'.
+fresh = false; mm = {};
+if ~isfield(KP, 'far_set'), return; end
+fs = char(string(KP.far_set));
+fresh = strcmp(fs, 'fresh');
+if ~fresh
+    mm = {sprintf('KP.far_set %s: this reader knows the union (no KP.far_set) and fresh only', fs)};
+elseif ~(isfield(KP, 'reading') && strcmp(char(string(KP.reading)), 'P1R'))
+    mm = {'KP.far_set fresh without KP.reading P1R'};
+end
+end
+
+function L = p1r_label(L)
+% P1R's lecturer lines: a second reading of test pools profile 1's C2e has read.
+for i = 1:numel(L)
+    if ~isempty(strtrim(L{i})), L{i} = [L{i} ' [P1R: with the fixed monitor, second reading, descriptive]']; end
+end
+end
+
 function d = differs(a, b, name)
 % The fields of a and b that are not equal (isequaln), one line each, then the leaves that differ.
 d = {};
@@ -351,14 +434,21 @@ RU = G.RU; aU = G.aboveU; sU = RU{1}.s; nS = numel(PP.ebno); T = G.T; p6 = G.p6;
 lines = {'', sprintf(['=== D103 3: system-level false alarms on clean flights (our KPI 6, an extension; never ' ...
     'lecturer KPI 3), %d clean flights x %d cycles from the KPI 1 threshold (%g dB); descriptive ==='], n, T, KP.ebno_thr), ...
     'KPI 6 as C2e printed it (reproduced by the gate; the verdict is read there, and counts every false-alarm episode):'};
+fresh = far_def(KP);
+src = 'same union as KPI 6 (D99 point 5''s rows, every policy)';
+if fresh
+    lines = [lines(1:2), {['P1R: KPI 6''s flights are the fresh clean test set (KP.far_set fresh, RWf, split id 7), ' ...
+        'read once in P1R''s C2e']}, lines(3)];
+    src = 'fresh clean test set, as KPI 6 (P1R, every policy)';
+end
 lines = [lines, G.far_lines];
 
 % (a) per Eb/N0, one table for all six policies
 nE = arrayfun(@(k) sum(aU & sU == k), 1:nS);
 byE = zeros(numel(p6), nS);
 hd = arrayfun(@(k) sprintf('%g dB', PP.ebno(k)), 1:nS, 'UniformOutput', false);
-lines = [lines, {'', ['(a) False-alarm episodes per Eb/N0 (episodes with >= 1 change / clean flights), from the same ' ...
-    'union as KPI 6 (D99 point 5''s rows, every policy):'], sprintf('  %-46s%s%14s', 'policy', sprintf('%14s', hd{:}), 'all')}];
+lines = [lines, {'', ['(a) False-alarm episodes per Eb/N0 (episodes with >= 1 change / clean flights), from the ' ...
+    src ':'], sprintf('  %-46s%s%14s', 'policy', sprintf('%14s', hd{:}), 'all')}];
 for j = 1:numel(p6)
     R = RU{p6(j)}; fe = aU & R.switches > 0;
     byE(j, :) = arrayfun(@(k) sum(fe & sU == k), 1:nS);
@@ -451,6 +541,11 @@ if any(strcmp(mode, {'class_drop', 'class_cusum'})), h = h & ~(strcmp(nm, 'path_
 if strcmp(mode, 'degraded'), h(:) = false; end
 end
 
+function s = p1r_test_note()
+s = ['P1R: with the fixed monitor, second reading, descriptive: these episodes are test pools profile 1''s C2e ' ...
+    'has read'];
+end
+
 function p = pre_onset(R)
 % First change decided on clean frames only: the decision of cycle t reads frame t - 1, and
 % frame t - 1 is clean while t - 1 < onset (link_env.m, rollout_policy.m).
@@ -477,6 +572,7 @@ lines = {'', ['=== D103 4: pre-onset sensitivity of the lecturer''s readings (se
     'lect_kpis.m reads, the oracle aside): %s.'], strjoin(LBL(cmp), ', ')), ...
     sprintf('Mark (D99 R1, from the pools): %s', strjoin(arrayfun(@(k) sprintf('%g dB %s (clean loss %.3f)', ...
     PP.ebno(k), M.tag{k}, M.clean_fer(k)), 1:nS, 'UniformOutput', false), ', '))};
+if far_def(E.KP), lines = [lines(1:2), {p1r_test_note()}, lines(3:end)]; end
 
 % (a) the share with a first change before the onset
 sets = {mj}; sn = {'recoverable jamming (36)'};
@@ -561,6 +657,7 @@ lines = {'', ['=== D103 5: confirmed alarms carried across the onset (descriptiv
     't_conf < m - 1 needs an alarm cycle before the onset; with the sweeper''s own k-of-n path, t_conf < k - 1 does. ' ...
     'Carried over: t_conf < min(m, k) - 1. Sweeper path or carried over: min(m, k) - 1 <= t_conf < m - 1, not separable ' ...
     'from the saved fields. t_conf median / p90 [cycles] (never %) with and without them ===']};
+if far_def(E.KP), lines{end+1} = p1r_test_note(); end
 CO = struct('policy', {}, 'confirm', {}, 'sweep', {}, 'set', {}, 'n', {}, 'detected', {}, 'carried', {}, 'sweep_or_carried', {}, ...
     't_conf', {}, 't_conf_wo', {}, 't_conf_wo_both', {});
 for pk = G.cmp
