@@ -25,7 +25,8 @@
 % own threshold from the whole monitor's false-alarm bound (choose_drop_threshold.m MONP) and
 % the steps C.drop_steps around it (the median window: dB, above the moving-away floor it
 % records; the CUSUM: one grid step per step), the sweeping jammer's own confirmation as
-% choose_drop_threshold.m adopted it (PP.confirm_sweep)
+% choose_drop_threshold.m adopted it (PP.confirm_sweep), and its degradation test when it chose one
+% (PP.deg_mode, PP.ber_q; every policy, the rule fallback's own monitor included)
 % x false-switch penalty of the TRAINING reward (CFG.fa_penalty_grid) x
 % CFG.dqn_gammas x CFG.dqn_seeds. Every run keeps the checkpoint with the best held
 % recovery on its own validation episodes (scored with the escalation). All runs are then
@@ -73,6 +74,12 @@
 % threshold, penalty and settings is kept as an ablation. Reward-weight sensitivity:
 % proposal mitigation 2.
 %
+% Finished runs (every training run and the reward-sensitivity retrains) are kept in
+% data/run_cache/C2 when profile.json says "run_cache": true or CFG.run_cache is true
+% (run_cache.m): keyed by the code, the input files, the run's settings and seed, so a C2
+% started again after a stop reads them instead of training them and its results are those of
+% an uninterrupted C2. Off by default: nothing is kept.
+%
 % Output: data/trained_dqn.mat (also deployed, rule_sel, fa_bound_met, the pools' det_id and
 % created, dec: the deployed DQN's decision-time settings, decision_settings.m, and maha_thr),
 % results/dqn_training.txt, results/dqn_training_curves.png
@@ -114,6 +121,8 @@ if exist('CFG', 'var') && isstruct(CFG)
     if isfield(CFG, 'dqn_coordinate'), COORD = CFG.dqn_coordinate; end
 end
 VAL_REPS = 2;                            % validation: every (cell, Eb/N0, geometry) of the split, twice
+cfgc = []; if exist('CFG', 'var'), cfgc = CFG; end
+RC = struct('dir', run_cache('dir', run_cache('on', cfgc), 'C2'), 'id', '');   % finished runs kept on disk (run_cache.m)
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
     N_SEEDS = 1; GAMMAS = 0.5; FA_PEN = 80; COST_SCALE = 1; SW_SCALE = 1; ALARMS = {'class_drop 4/5'}; SENS_SCALES = 2; VAL_REPS = 1;
     DROP_STEPS = [0 2]; H.episodes = 1280; H.buffer = 20000; H.warmup = 2000; H.n_eval = 1;
@@ -134,6 +143,11 @@ if isfile('data/drop_threshold.mat')
     end
     if isfield(Dd, 'MONP'), MONP = Dd.MONP; end
     if isfield(Dd, 'confirm_sweep'), PP.confirm_sweep = Dd.confirm_sweep; end   % the sweeper's own confirmation
+    if isfield(Dd, 'deg_mode'), PP.deg_mode = Dd.deg_mode; PP.ber_q = Dd.ber_q; end   % the degradation test chosen at C1d
+    if isfield(Dd, 'DEG') && isfield(Dd.DEG, 'forced')       % a forced test (deg_force.m): the smoke only
+        deg_force('smoke', Dd.DEG.forced, exist('SMOKE', 'var') && SMOKE, 'train_dqn');
+        PP.deg_forced = Dd.DEG.forced;
+    end
     clear Dd
 end
 if ~isempty(DROP_DB), PP.drop_db = DROP_DB; end
@@ -172,6 +186,12 @@ norm_in.sd(cont) = max(std(S_all(cont, :), 0, 2), 1e-3);
 
 %% 3. Validation episodes, the rule's settings and the baselines
 val_spec = full_val_spec(PP, K, H, SPLIT_VAL, VAL_REPS, RandStream('mt19937ar', 'Seed', 99));
+if ~isempty(RC.dir)                      % the identity of every run's inputs: code, files, hyperparameters
+    RC.id = run_cache('key', {run_cache('inputs', {'data/policy_pools.mat', 'data/drop_threshold.mat', ...
+        'data/clean_val_pools.mat', 'results/eval_detector_metrics.mat'}), H, norm_in, VAL_REPS, EBNO_THR, val_spec, ...
+        exist('SMOKE', 'var') && SMOKE});
+    fprintf('Finished runs kept in %s (inputs %s): a run finished before a restart is read, not trained\n', RC.dir, RC.id);
+end
 val_thr = threat_of(PP, val_spec);                   % threat name per validation episode (severities pooled)
 DU = drop_unit(DROP_MODE);               % unit of the drop thresholds
 tab = policy_table(PP, K);
@@ -255,8 +275,10 @@ for e = 1:numel(ENT)
     for fi = 1:numel(FA_PEN)
         for g = GAMMAS
             for k = 1:N_SEEDS
-                runs(end+1) = train_one(H, PPc, K, norm_in, nS, ENT(e), FA_PEN(fi), COST_SCALE(fi), SW_SCALE(fi), g, ...
-                    SEEDS(k), Ssel, 'grid', ev, DROP_MODE, DU, SPLIT_TRAIN, SPLIT_VAL); %#ok<SAGROW>
+                runs(end+1) = cached(RC, {'train_one', ENT(e), FA_PEN(fi), COST_SCALE(fi), SW_SCALE(fi), g, SEEDS(k), ...
+                    Ssel, 'grid', DROP_MODE}, PPc, PP, @() train_one(H, PPc, K, norm_in, nS, ENT(e), FA_PEN(fi), ...
+                    COST_SCALE(fi), SW_SCALE(fi), g, SEEDS(k), Ssel, 'grid', ev, DROP_MODE, DU, SPLIT_TRAIN, SPLIT_VAL), ...
+                    @(r) run_lines(r, DROP_MODE, DU, RC.dir)); %#ok<SAGROW>
             end
         end
     end
@@ -276,8 +298,10 @@ if COORD
     for c = 1:size(CO, 1)
         PPc = decision_settings(PPs, CO{c, 5});
         for k = 1:N_SEEDS
-            runs(end+1) = train_one(H, PPc, K, norm_in, nS, e0, r0.fa_pen, CO{c, 3}, CO{c, 4}, CO{c, 2}, SEEDS(k), ...
-                CO{c, 5}, CO{c, 1}, ev, DROP_MODE, DU, SPLIT_TRAIN, SPLIT_VAL); %#ok<SAGROW>
+            runs(end+1) = cached(RC, {'train_one', e0, r0.fa_pen, CO{c, 3}, CO{c, 4}, CO{c, 2}, SEEDS(k), CO{c, 5}, ...
+                CO{c, 1}, DROP_MODE}, PPc, PP, @() train_one(H, PPc, K, norm_in, nS, e0, r0.fa_pen, CO{c, 3}, CO{c, 4}, ...
+                CO{c, 2}, SEEDS(k), CO{c, 5}, CO{c, 1}, ev, DROP_MODE, DU, SPLIT_TRAIN, SPLIT_VAL), ...
+                @(r) run_lines(r, DROP_MODE, DU, RC.dir)); %#ok<SAGROW>
         end
     end
     % the escalation on a drop alarm, both ways on the agent selected so far
@@ -323,6 +347,7 @@ rule_sel = struct('alarm', base(ir).alarm, 'drop', base(ir).drop, 'rec', base(ir
 if ~isnan(base(ir).drop), rule_sel.drop_db = base(ir).drop; end
 for f = fieldnames(Ssel)', rule_sel.(f{1}) = Ssel.(f{1}); end
 rule_sel.confirm_sweep = []; if isfield(PP, 'confirm_sweep'), rule_sel.confirm_sweep = PP.confirm_sweep; end
+if isfield(PP, 'deg_mode'), rule_sel.deg_mode = PP.deg_mode; rule_sel.ber_q = PP.ber_q; end
 FD = false_change_rate(B.sw_w, H.T, 1:numel(B.sw_w), CD.period_ms);
 FR = false_change_rate(base(ir).rule.sw_w, H.T, 1:numel(base(ir).rule.sw_w), CD.period_ms);
 rep = {};
@@ -356,6 +381,12 @@ rep{end+1} = sprintf(['Each monitor''s drop thresholds (its own on the whole mon
 rep{end+1} = sprintf('The sweeping jammer''s own confirmation: %s (choose_drop_threshold.m, on validation)', ...
     ternary(isfield(PP, 'confirm_sweep') && ~isempty(PP.confirm_sweep), sprintf('%d of the last %d cycles', ...
     PP.confirm_sweep), 'not adopted'));
+if isfield(PP, 'deg_mode')
+    rep{end+1} = sprintf('The degradation test: %s (choose_drop_threshold.m, on validation, docs/deg_fix_protocol.md)', PP.deg_mode);
+end
+if isfield(PP, 'deg_forced')
+    rep{end+1} = sprintf('  FORCED for the smoke (deg_force %s), not an adoption (docs/p1r_protocol.md)', PP.deg_forced);
+end
 rep{end+1} = '';
 rep{end+1} = sprintf(['Rule settings on validation, rule + escalation at %s, drop %.1f %s, one coordinate at a time (the ' ...
     'selection rule below, the setting in force first); the predicted MMSE gain of %d clean validation frames: mean %.2f, ' ...
@@ -434,6 +465,8 @@ gammas = GAM;
 drop_db = drop_sel; if isnan(drop_db), drop_db = DROP_DB; end
 dec = Sdep; dec.alarm_mode = alarm_mode; dec.confirm = confirm; dec.drop_db = drop_db;
 dec.confirm_sweep = []; if isfield(PP, 'confirm_sweep'), dec.confirm_sweep = PP.confirm_sweep; end
+if isfield(PP, 'deg_mode'), dec.deg_mode = PP.deg_mode; dec.ber_q = PP.ber_q; end
+if isfield(PP, 'deg_forced'), dec.deg_forced = PP.deg_forced; end   % the smoke's forced test, in the stamp
 agent = dqn_dense(agent);                          % matrix form for deployment
 for gi = find(~cellfun(@isempty, agents)), agents{gi} = dqn_dense(agents{gi}); end
 det_id = PP.det_id; pools_created = PP.created;    % the pools (and their detector) the agent learned on
@@ -483,7 +516,9 @@ for f = [1, SENS_SCALES]
         fprintf('--- reward sensitivity: costs x %.1f ---\n', f);
         Hs = H; Hs.gamma = gamma_sel;
         Kft = Kf; Kft.FA = f * fa_pen_sel; Kft.cost = f * cs_sel * K.cost; Kft.SW = f * ss_sel * K.SW;
-        ag = dqn_train_run(Hs, PPc, Kft, Kf, norm_in, rb.seed, nS, SPLIT_TRAIN, SPLIT_VAL);
+        ag = cached(RC, {'sens', f, Hs, fa_pen_sel, cs_sel, ss_sel, alarm_sel, drop_sel, Sdep, rb.seed, DROP_MODE}, PPc, PP, ...
+            @() dqn_train_run(Hs, PPc, Kft, Kf, norm_in, rb.seed, nS, SPLIT_TRAIN, SPLIT_VAL), ...
+            @(a) fprintf('    retrained agent read from %s (finished before a restart)\n', RC.dir));
     end
     Vd = dqn_eval_batches(sel_kind, PPc, Kf, val_spec, ag, struct(), 5000, SPLIT_VAL);
     Vr = dqn_eval_batches('rule_esc', PPc, Kf, val_spec, [], struct(), 5000, SPLIT_VAL);
@@ -591,6 +626,36 @@ fprintf(['    checkpoint %d | validation with / without the escalation: held %.1
     100*xn.rec, xe.kmin_thr, 100*xe.kmin, xe.ret, xn.ret, fa_txt(xe.fa_w, xe.n_w), fa_txt(xn.fa_w, xn.n_w));
 r = struct('alarm', en.alarm, 'drop', en.drop, 'fa_pen', fp, 'cost_scale', cs, 'sw_scale', ss, 'gamma', g, 'seed', seed, ...
     'S', S, 'step', step, 'agent', ag, 'curve', curve, 'loss', lossc, 'best_ep', best_ep, 'esc', xe, 'noesc', xn);
+end
+
+function r = cached(RC, parts, PPc, PP, f, onhit)
+% A run through the run cache (run_cache.m): keyed by the stage's inputs (RC.id), the run's
+% settings and seed (parts) and the pools' settings it runs with (every field of PPc but the
+% pools that PP lacks or holds otherwise). Started again, a finished run is read, not trained,
+% and onhit prints its lines.
+if isempty(RC.dir), r = f(); return; end
+key = run_cache('key', [{RC.id}, parts, {pool_settings(PPc, PP)}]);
+[r, hit] = run_cache('run', RC.dir, key, f);
+if hit, onhit(r); end
+end
+
+function d = pool_settings(PPc, PP)
+% The fields of PPc, the pools excepted, that PP lacks or holds with another value.
+d = struct();
+for fn = setdiff(fieldnames(PPc)', {'pools'})
+    if ~isfield(PP, fn{1}) || ~isequaln(PPc.(fn{1}), PP.(fn{1})), d.(fn{1}) = PPc.(fn{1}); end
+end
+end
+
+function run_lines(r, drop_mode, du, dirn)
+% train_one's lines for a run read from the run cache.
+fprintf(['--- monitor %s, drop %.1f %s, false-switch penalty %d, costs x%.1f, switch x%.1f, gamma %.2f, seed %d%s ' ...
+    '(read from %s: finished before a restart) ---\n'], mon_txt(r.alarm, drop_mode), r.drop, du, r.fa_pen, r.cost_scale, ...
+    r.sw_scale, r.gamma, r.seed, ternary(strcmp(r.step, 'grid'), '', [' (' r.step ')']), dirn);
+xe = r.esc; xn = r.noesc;
+fprintf(['    checkpoint %d | validation with / without the escalation: held %.1f / %.1f%% | recovered %.1f / %.1f%% | ' ...
+    'weakest threat %s %.1f%% | return %.3f / %.3f | FA %s / %s\n'], r.best_ep, 100*xe.held, 100*xn.held, 100*xe.rec, ...
+    100*xn.rec, xe.kmin_thr, 100*xe.kmin, xe.ret, xn.ret, fa_txt(xe.fa_w, xe.n_w), fa_txt(xn.fa_w, xn.n_w));
 end
 
 function [cand, best, why] = select_run(runs, bound)

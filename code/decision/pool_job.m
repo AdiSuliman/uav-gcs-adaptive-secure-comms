@@ -6,8 +6,12 @@ function out = pool_job(stage, S, j)
 %   'c1p'   build_policy_pools.m:      j a cell; saves it (pool_checkpoint.m), out = []
 %   'c1c'   build_check_pools.m:       j a cell; saves it, out = []
 %   'clean' build_clean_test_pools.m:  j a chunk of geometries; saves it, out = []
-%   'surv'  map_survivability_boundary.m:       j a job (threat entry, level); out {B, F, S}
-%   'surv3' experiment_survivability_options.m: j a job (case, option); out {rec, best}
+%   'surv'  map_survivability_boundary.m:       j a job (threat entry, level); out {B, F, S},
+%           configurations x Eb/N0 (x flights under surv_v2, S.NR set)
+%   'surv3' experiment_survivability_options.m: j a job (case, option); out {rec, best}, and
+%           under surv_v2 (S.V2) {rec, best, M}: M the per-geometry metrics (surv3_metrics.m),
+%           the airframe-shadowing combinations on their selected flights (S.geo_sh), judged
+%           against the clean link of those flights (S.clean_sh)
 if isa(S, 'parallel.pool.Constant'), S = S.Value; end
 out = [];
 switch stage
@@ -33,20 +37,37 @@ switch stage
         t = S.jobs(j, 1); li = S.jobs(j, 2);
         cfg = S.maps(t);
         p = S.p0; p.active_threat = cfg.base; p.(cfg.level_field) = cfg.levels(li);
+        if isfield(cfg, 'pset'), for f = fieldnames(cfg.pset)', p.(f{1}) = cfg.pset.(f{1}); end, end   % the entry's own pattern (surv_nb_entries.m)
         if contains(cfg.base, 'airframe_shadowing'), [~, p.roll_deg] = shadow_roll_band(p.shadow_db, p); end   % a turn that lets the airframe hide an antenna
         p.gcs_aoa_deg = p.gcs_aoa_deg - rad2deg(9.81 * tand(p.roll_deg) / max(p.v_nominal, p.turn_v_floor)) * (S.RUN_FRAMES - 1) * p.cycle_s / 2;   % the turn carries the GCS through the beam at mid-run
         if ~isnan(cfg.aoa), p.int_aoa_deg(1) = p.gcs_aoa_deg + cfg.aoa; end
-        sd = 900000 + 1000*t + 10*li;                         % + s: each Eb/N0 column its own flight (nS < 10)
-        g = arrayfun(@(s) struct('seed', sd + s, 'speed', S.v_nom, 'run', 1), 1:S.nS, 'UniformOutput', false);
+        if isempty(S.NR)
+            sd = 900000 + 1000*t + 10*li;                         % + s: each Eb/N0 column its own flight (nS < 10)
+            g = arrayfun(@(s) struct('seed', sd + s, 'speed', S.v_nom, 'run', 1), 1:S.nS, 'UniformOutput', false);
+        else
+            g = repmat({surv_flights(t, S.NR, S.v_nom)}, 1, S.nS);   % the entry's flights at every level and Eb/N0
+        end
         P = pool_cell(p, cfg.base, S.ACTIONS, S.SNR_points, g, [], S.opt);
-        rB = cellfun(@(Q) mean(Q.ber), P(:, :, 1))';            % configurations x Eb/N0
-        rF = cellfun(@(Q) mean(double(Q.fer)), P(:, :, 1))';
-        rS = cellfun(@(Q, a) packet_share(a, Q.fer), P(:, :, 1), repmat(S.ACTIONS(:)', S.nS, 1))';   % one loss event of the run
+        if isempty(S.NR)
+            rB = cellfun(@(Q) mean(Q.ber), P(:, :, 1))';            % configurations x Eb/N0
+            rF = cellfun(@(Q) mean(double(Q.fer)), P(:, :, 1))';
+            rS = cellfun(@(Q, a) packet_share(a, Q.fer), P(:, :, 1), repmat(S.ACTIONS(:)', S.nS, 1))';   % one loss event of the run
+        else
+            [rB, rF, rS] = surv_runs(P, S.ACTIONS, S.NR);            % configurations x Eb/N0 x flights
+        end
         out = {rB, rF, rS};
     case 'surv3'
         c = S.cases(S.jobs(j, 1)); v = S.VAR(S.jobs(j, 2));
         p = S.p0; p.n_rx = v.n_rx; p.gcs_aoa_deg = v.gcs; p.link_loss_db = v.loss; p.active_threat = c.threat;
         if ~isempty(c.field), p.(c.field) = c.level; end
+        if isfield(S, 'V2') && S.V2
+            g = S.geo; cr = S.clean;
+            if contains(c.threat, 'airframe_shadowing'), g = S.geo_sh; cr = S.clean_sh; end
+            M = surv3_metrics(pool_cell(p, c.threat, S.ACTIONS, S.EBNO, g, [], S.opt), S.ACTIONS, S.N_GEOM);
+            [R, Bc] = surv3_judge(M, cr{v.ref}, S.RATIO, S.C.ber_floor, S.ACTIONS);
+            out = {R, Bc, M};
+            return
+        end
         P = pool_cell(p, c.threat, S.ACTIONS, S.EBNO, S.geo, [], S.opt);
         R = false(S.nS, S.N_GEOM); Bc = cell(S.nS, S.N_GEOM);
         for s = 1:S.nS

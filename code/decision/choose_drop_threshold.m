@@ -55,13 +55,32 @@
 % monitor loses an admissible threshold or needs a less sensitive one and no single threat's
 % never-confirmed share or 90th-percentile delay grows; both readings are printed.
 %
+% The degradation test, only with "deg_select": true in profile.json (deg_options.m; CFG.deg_select
+% overrides it), before the whole monitor's reading (docs/deg_fix_protocol.md): the clean
+% validation geometries split by hash into a fit half and a check half (clean_halves.m); the
+% clean quantile tables from the fit half (clean_ber_q.m); per candidate in the order F1 'win',
+% F2 'win_q' and F3 'win_q_gate' per alpha (C.deg_alpha), the reading of section 5 on the check
+% half's clean episodes and the validation split's single threats, each monitor at its own most
+% sensitive admissible threshold, beside 'ratio' on the same episodes; adopted by deg_adopt.m.
+% The whole monitor's reading below then runs with the adopted test. Without the switch nothing
+% of this runs and the outputs are those of before. In the smoke only (SMOKE), deg_force
+% (profile.json or CFG.deg_force, deg_force.m) deploys one named candidate after the adoption,
+% marked DEG.forced beside the rule's pick DEG.rule_pick (docs/p1r_protocol.md); refused otherwise.
+%
 % Output: data/drop_threshold.mat (drop_db, the median window's threshold alone, and
 % drop_db_train, drop_from; drop_alarm, cusum_db, the confirmations CF and the validation
 % readings VAL; MONP, each monitor's threshold and readings; confirm_sweep, the sweeper's
-% confirmation adopted, [] when not), results/drop_threshold.txt
+% confirmation adopted, [] when not; with deg_select deg_mode, ber_q, the adopted test and its
+% quantile table ([] without one), and DEG, its readings), results/drop_threshold.txt
 
 clc;
 fprintf('=== Eb/N0-drop threshold of the drop alarm ===\n\n');
+DGon = deg_options().on; if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'deg_select'), DGon = CFG.deg_select; end
+DGf = deg_options().force; if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'deg_force'), DGf = deg_force('check', CFG.deg_force, 'CFG'); end
+deg_force('smoke', DGf, exist('SMOKE', 'var') && SMOKE, 'choose_drop_threshold');   % before any output is written
+if ~isempty(DGf) && ~(DGon && isfile('data/clean_val_pools.mat'))
+    error('choose_drop_threshold:force', 'deg_force %s needs deg_select and clean validation flights', DGf);
+end
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
 na = find(strcmp(PP.actions, 'no_action'));
 iPL = find(strcmp(PP.scen, 'path_loss'));                  % the three severities
@@ -219,6 +238,18 @@ fprintf('%s\n', rv{:});
 %% 5. The whole monitor per confirmation: each monitor's threshold, the sweeper's confirmation
 MON = MN;
 fm = find(strcmp(FM, drop_alarm)); GF = GR{fm}; CS = decision_config().confirm_sweep;
+DEG = [];                                                  % the degradation test chosen here (deg_options.m)
+if DGon && isempty(CV)
+    DEG = struct('mode', 'ratio', 'ber_q', [], 'note', 'no clean validation flights: not chosen');
+    rd = {'', 'Degradation test: no clean validation flights, ''ratio'' kept (not chosen).'};
+elseif DGon
+    [DEG, rd] = deg_select(PP, CV, drop_alarm, GF, MON, CS, EBNO_THR, T, VA, FA_BOUND, DGf);
+    PP.deg_mode = DEG.mode; PP.ber_q = DEG.ber_q;           % the monitor of the reading below and of C2
+end
+if DGon
+    fid = fopen('results/drop_threshold.txt', 'a'); fprintf(fid, '%s\n', rd{:}); fclose(fid);
+    fprintf('%s\n', rd{:});
+end
 MONP = struct('monitor', MON, 'cf', [], 'pick', NaN, 'j', NaN, 'admissible', false, 'k', NaN, 'n', 0, ...
     'k_other', NaN, 'lat', []);
 confirm_sweep = [];
@@ -289,8 +320,12 @@ else
 end
 fid = fopen('results/drop_threshold.txt', 'a'); fprintf(fid, '%s\n', rw{:}); fclose(fid);
 fprintf('%s\n', rw{:});
-save('data/drop_threshold.mat', 'drop_db', 'drop_db_train', 'drop_from', 'separable', 'THR', 'kept', 'leak', 'leak_all', ...
-    'p95_mis', 'p99_cl', 'p05_pl', 'floor_db', 'drop_alarm', 'cusum_db', 'THC', 'VAL', 'CF', 'EBNO_THR', 'MONP', 'confirm_sweep');
+SV = {'drop_db', 'drop_db_train', 'drop_from', 'separable', 'THR', 'kept', 'leak', 'leak_all', ...
+    'p95_mis', 'p99_cl', 'p05_pl', 'floor_db', 'drop_alarm', 'cusum_db', 'THC', 'VAL', 'CF', 'EBNO_THR', 'MONP', 'confirm_sweep'};
+if ~isempty(DEG)                                           % deployed by train_dqn.m (PP.deg_mode, PP.ber_q)
+    deg_mode = DEG.mode; ber_q = DEG.ber_q; SV = [SV, {'deg_mode', 'ber_q', 'DEG'}];
+end
+save('data/drop_threshold.mat', SV{:});
 fprintf('\nSaved data/drop_threshold.mat, results/drop_threshold.txt\n');
 
 %% ===================== Local functions =====================
@@ -382,4 +417,117 @@ end
 
 function out = ternary(c, a, b)
 if c, out = a; else, out = b; end
+end
+
+function [DEG, rw] = deg_select(PP, CV, drop_alarm, GF, MON, CS, thr, T, VA, FA, force)
+% The degradation test chosen on validation (docs/deg_fix_protocol.md): the quantile tables
+% from the fit half of the clean validation geometries; per candidate, 'ratio' first, the
+% reading of section 5 on the check half's clean episodes and the validation split's single
+% threats, the same episodes and frames for every candidate; adopted by deg_adopt.m. force
+% (smoke only, deg_force.m): the candidate deployed instead, '' for the adoption.
+C = decision_config(); nS = numel(PP.ebno);
+[fit, chk] = clean_halves(CV.runs);
+assert(~any(fit & chk) && all(fit | chk), 'choose_drop_threshold: the fit and check halves overlap');
+BQ = clean_ber_q(CV, PP, fit);
+K = struct('name', {'ratio', 'F1 win'}, 'mode', {'ratio', 'win'}, 'q', {0, 0});
+for a = 1:numel(C.deg_alpha), K(end+1) = struct('name', sprintf('F2 win_q, alpha %g', C.deg_alpha(a)), 'mode', 'win_q', 'q', a); end %#ok<AGROW>
+for a = 1:numel(C.deg_alpha), K(end+1) = struct('name', sprintf('F3 win_q_gate, alpha %g', C.deg_alpha(a)), 'mode', 'win_q_gate', 'q', a); end %#ok<AGROW>
+PPm = PP; PPm.alarm_mode = drop_alarm;
+[spc, ncl] = clean_wide_specs(PPm, CV, thr, T, find(chk));
+PPv = PPm; PPv.pools(:, :, :, setdiff(1:numel(PP.runs), VA)) = {[]};   % the validation split only
+Kv = link_env('tables', PPv);
+sgl = find(ismember(PP.scen, PP.singles) & ~strcmp(PP.scen, 'none'));
+spv = policy_episodes(sgl, nS, Kv.geo(sgl, VA), 1, false, false, 64, T, RandStream('mt19937ar', 'Seed', 4400));
+X = cell(1, numel(K));
+for c = 1:numel(K)
+    bq = []; if K(c).q > 0, bq = BQ(K(c).q); end
+    Pc = PPm; Pc.deg_mode = K(c).mode; Pc.ber_q = bq;
+    [PPw, Kw] = clean_world(Pc, CV);
+    Tc = trim_trace(monitor_trace(PPw, Kw, spc, VA, 41000), ncl);
+    Pv = PPv; Pv.deg_mode = K(c).mode; Pv.ber_q = bq;
+    Tv = monitor_trace(Pv, Kv, spv, VA, 4500);
+    onv = Kv.on(sub2ind(size(Kv.on), Tv.scn, Tv.s, VA + 0 * Tv.s, Tv.r));
+    thv = PP.scen(Tv.scn); thn = unique(thv(onv), 'stable');
+    X{c} = whole_monitor(Tc, Tv, ncl, onv, thv, thn, drop_alarm, GF, MON, CS, FA);
+    X{c}.quiet_clean = sum(any(Tc.quiet, 2));             % clean episodes with a cycle degraded without RF evidence
+    X{c}.quiet_threat = mean(any(Tv.quiet(onv, :), 2));
+end
+R0 = struct('lat', [X{1}.R.lat], 'monitor', {MON});
+RC = struct('lat', {}, 'bound', {});
+for c = 2:numel(K), RC(end+1) = struct('lat', [X{c}.R.lat], 'bound', [X{c}.R.bound]); end %#ok<AGROW>
+[pick, adm, best, fail] = deg_adopt(RC, R0, FA);
+DEG = struct('mode', 'ratio', 'ber_q', [], 'name', 'ratio', 'pick', pick);
+if pick > 0
+    DEG.mode = K(pick + 1).mode; DEG.name = K(pick + 1).name;
+    if K(pick + 1).q > 0, DEG.ber_q = BQ(K(pick + 1).q); end
+end
+DEG.cand = {K.name}; DEG.adm = adm; DEG.best = best; DEG.fail = fail; DEG.readings = X; DEG.BQ = BQ;
+DEG.fit_runs = double(CV.runs(fit)); DEG.check_runs = double(CV.runs(chk)); DEG.n_check = ncl; DEG.monitors = MON;
+% Report
+rw = {'', sprintf(['Degradation test on validation (docs/deg_fix_protocol.md): quantile tables from the fit half (%d ' ...
+    'clean geometries, every Eb/N0, every %d-frame window at no_action); candidates read on the check half (%d ' ...
+    'geometries, %d clean episodes, Eb/N0 >= %g dB) and on the validation split''s single threats, each monitor at ' ...
+    'its own most sensitive admissible threshold'], sum(fit), C.win, sum(chk), ncl, thr)};
+for a = 1:numel(BQ)
+    Q = BQ(a);
+    rw{end+1} = sprintf('  quantile table, alpha %g (bins of >= %d cycles from >= %d flights)%s:', Q.alpha, Q.need, Q.fmin, ...
+        ternary(Q.short, ' -- TOO FEW CYCLES: one bin short of the rule', '')); %#ok<AGROW>
+    for i = 1:numel(Q.q)
+        rw{end+1} = sprintf('    Eb/N0 [%5.1f, %5.1f) dB: %6d cycles, %3d flights, threshold %.2e', Q.lo(i), Q.hi(i), Q.n(i), ...
+            Q.nf(i), Q.q(i)); %#ok<AGROW>
+    end
+end
+for c = 1:numel(K)
+    x = X{c};
+    v = 'reference'; if c > 1, v = ternary(adm(c - 1), 'ADMISSIBLE', ['not admissible (' fail{c - 1} ')']); end
+    rw{end+1} = sprintf('  %s: %s; sweeper''s own confirmation %s', K(c).name, v, ternary(x.sweep, 'on', 'off')); %#ok<AGROW>
+    for m = 1:numel(MON)
+        r = x.R(m);
+        rw{end+1} = sprintf('    %-15s threshold %6.1f %-4s %s, false alarms %d/%d (bound %.2f%%); other paths alone %d/%d', ...
+            MON{m}, r.pick, drop_unit(drop_alarm), ternary(r.admissible, 'admissible', 'none admissible'), r.k, ncl, ...
+            100 * r.bound, r.k_other, ncl); %#ok<AGROW>
+        rw{end+1} = sprintf('      delays median / p90 / never: %s', strjoin(cellfun(@(n, a, b, d) sprintf('%s %g/%g/%.1f%%', ...
+            n, a, b, d), r.lat.threat, num2cell(r.lat.median), num2cell(r.lat.p90), num2cell(100 * r.lat.never), ...
+            'UniformOutput', false), ', ')); %#ok<AGROW>
+    end
+    if strcmp(K(c).mode, 'win_q_gate')
+        rw{end+1} = sprintf(['    degraded, no RF evidence (logged, no alarm): %d of %d clean episodes; %.1f%% of the ' ...
+            'threat episodes'], x.quiet_clean, ncl, 100 * x.quiet_threat); %#ok<AGROW>
+    end
+end
+if pick > 0
+    how = ternary(best(pick) <= FA, sprintf('the first admissible with a bound <= %.0f%% under some monitor', 100 * FA), ...
+        sprintf('no admissible candidate reaches %.0f%%: the admissible one with the lowest bound', 100 * FA));
+    rw{end+1} = sprintf('Degradation test ADOPTED: %s (%s; lowest bound %.2f%%)', DEG.name, how, 100 * best(pick));
+else
+    rw{end+1} = 'Degradation test: no candidate admissible, ''ratio'' kept (F4 is the registered next step).';
+end
+if ~isempty(force)
+    [DEG, ln] = deg_force('apply', DEG, force, K, BQ); rw{end+1} = ln;
+end
+end
+
+function W = whole_monitor(Tc, Tv, ncl, onv, thv, thn, drop_alarm, GF, MON, CS, FA)
+% Section 5's reading of one candidate: per monitor its most sensitive admissible threshold
+% on the clean episodes Tc and the delays on the threats Tv, the sweeper's own confirmation
+% adopted as there.
+R = cell(1, 2);
+for sw = 1:2
+    cs = []; if sw == 2, cs = CS; end
+    for m = 1:numel(MON)
+        tk = strsplit(MON{m}); cf = sscanf(tk{2}, '%d/%d')';
+        k = arrayfun(@(t) sum(any(monitor_confirm(Tc, drop_alarm, t, cf, cs), 2)), [GF, Inf]);
+        up = arrayfun(@(x) cp_upper(x, ncl), k);
+        j = find(up(1:end-1) <= FA, 1);
+        adm = ~isempty(j); if ~adm, j = numel(GF); end
+        cv = monitor_confirm(Tv, drop_alarm, GF(j), cf, cs);
+        R{sw} = [R{sw}, struct('cf', cf, 'j', j, 'pick', GF(j), 'admissible', adm, 'k', k(j), 'k_other', k(end), ...
+            'bound', up(j), 'lat', delays(cv, Tv.onset, thv, onv, thn))];
+    end
+end
+ok = arrayfun(@(m) (~R{1}(m).admissible || R{2}(m).admissible) && R{2}(m).j <= R{1}(m).j && ...
+    all(R{2}(m).lat.never <= R{1}(m).lat.never) && all(fill_inf(R{2}(m).lat.p90) <= fill_inf(R{1}(m).lat.p90)), 1:numel(MON));
+sw = 1 + all(ok);
+W = struct('sweep', sw == 2);
+W.R = R{sw};
 end

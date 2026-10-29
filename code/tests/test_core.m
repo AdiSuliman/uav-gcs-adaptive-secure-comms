@@ -1015,6 +1015,652 @@ verifyEqual(tc, out{2}(odd), repmat({'power_control'}, nnz(odd), 1));
 verifyTrue(tc, all(cellfun(@isempty, out{2}(~odd))));
 end
 
+function test_surv3_v2_job(tc)
+% Under surv_v2 a survivability-options job (pool_job.m 'surv3', S.V2) judges every geometry
+% exactly as without it (the same rec and best on the same frames, surv3_metrics.m and
+% surv3_judge.m), keeps each geometry's BER, packet loss and slack, and from them judges the
+% same job against another clean link (the system's). Odd geometries lose no frame.
+d = fullfile(pwd, 'surv3_v2_stub'); mkdir(d);
+fid = fopen(fullfile(d, 'pool_cell.m'), 'w');
+fprintf(fid, '%s\n', 'function P = pool_cell(~, ~, A, EB, geo, ~, ~)', ...
+    'P = cell(numel(EB), numel(A), 1);', 'for s = 1:numel(EB)', '    for a = 1:numel(A)', ...
+    '        rs = RandStream(''mt19937ar'', ''Seed'', 100 * s + a);', ...
+    '        run = repelem(geo{s}.run, 7); odd = mod(run, 2) == 1;', ...
+    '        b = 0.05 * (1 + rand(rs, size(run))); b(odd) = 1e-3 * (1 + 0.5 * rand(rs, 1, nnz(odd)));', ...
+    '        P{s, a, 1} = struct(''run'', run, ''ber'', b, ''fer'', double(rand(rs, size(run)) < 0.25 & ~odd));', ...
+    '    end', 'end', 'end');
+fclose(fid);
+addpath(d, '-begin'); clear pool_cell
+cl = onCleanup(@() stub_off(d)); %#ok<NASGU>
+N = 6; nS = 3;
+A = {'no_action', 'channel_switch', 'fec_interleave', 'power_control+fec_interleave'};
+geo = repmat({struct('seed', 1:N, 'speed', 50 * ones(1, N), 'run', surv3_run_id(1:N))}, 1, nS);
+own = struct('ber', [2e-3 5e-4 1e-5], 'fer', [0.6 0.1 0]);
+sys = struct('ber', [4e-3 4e-3 4e-3], 'fer', [0.6 0.1 0]);
+S1 = struct('cases', struct('threat', 'jamming', 'field', '', 'level', NaN), ...
+    'VAR', struct('n_rx', 3, 'gcs', 0, 'loss', 0, 'ref', 1), 'jobs', [1 1], 'p0', struct(), 'ACTIONS', {A}, ...
+    'EBNO', [0 6 12], 'geo', {geo}, 'opt', [], 'nS', nS, 'N_GEOM', N, 'clean', {{own, sys}}, ...
+    'C', struct('ber_floor', 1e-4), 'RATIO', 2);
+S2 = S1; S2.V2 = true; S2.geo_sh = [];
+o1 = pool_job('surv3', S1, 1);
+o2 = pool_job('surv3', S2, 1);
+verifyEqual(tc, numel(o1), 2); verifyEqual(tc, numel(o2), 3);
+verifyEqual(tc, o2(1:2), o1);
+odd = mod(1:N, 2) == 1;
+verifyEqual(tc, o1{1}, [odd; false(2, N)]);                 % 1-1.5e-3 within 2x 2e-3, not within 2x 5e-4 or 1e-4
+P = pool_cell(struct(), 'jamming', A, [0 6 12], geo, [], []);
+M = o2{3};
+verifyEqual(tc, size(M.ber), [nS N numel(A)]);
+for s = 1:nS
+    for a = 1:numel(A)
+        Q = P{s, a, 1};
+        for r = 1:N
+            m = Q.run == surv3_run_id(r);
+            verifyEqual(tc, M.ber(s, r, a), mean(Q.ber(m)));
+            verifyEqual(tc, M.fer(s, r, a), mean(Q.fer(m)));
+            verifyEqual(tc, M.slack(s, r, a), packet_share(A{a}, Q.fer(m)));
+        end
+    end
+end
+[Rs, Bs] = surv3_judge(M, sys, 2, 1e-4, A);                 % the system's link: 4e-3 at every Eb/N0
+verifyEqual(tc, Rs, [odd; odd; odd]);
+verifyEqual(tc, Bs(1, odd), o1{2}(1, odd));
+end
+
+function test_surv3_link_limited(tc)
+% The survivability options' report under surv_v2 (surv3_report.m): an Eb/N0 is link-limited
+% (L) for a clean link where 2x its packet loss + 1/20 >= 1, so the packet bound passes 100%;
+% profile 1's clean links (160 frames per Eb/N0) give L at 0-9 dB with two antennas and at
+% 0-3 dB with three. The like-for-like comparison takes the Eb/N0 where neither is L; the n-1
+% column against the system's link is reported beside its own.
+EB = 0:3:15; nS = 6; N = 8;
+VAR = struct('name', {'2 antennas', '3 antennas', 'relay path'}, 'n_rx', {2, 3, 3}, 'gcs', {0, 0, 60}, ...
+    'loss', {0, 0, 3}, 'ref', {1, 2, 2});
+cases = [struct('threat', 'noise_burst+antenna_fault', 'field', '', 'level', NaN), ...
+    struct('threat', 'tone_jamming', 'field', 'tone_jsr_db', 'level', 30)];
+jobs = [kron((1:2)', ones(3, 1)), repmat((1:3)', 2, 1)];
+pat = cell2mat(arrayfun(@(s) (1:N) <= s, (1:nS)', 'UniformOutput', false));   % s of 8 geometries at Eb/N0 s
+rec = repmat({pat}, 1, 6); rec_sys = repmat({false(nS, N)}, 1, 6); rec_sys([2 3 5 6]) = rec([2 3 5 6]);
+clean = {struct('ber', [0.18 0.087 0.037 0.024 3e-3 2e-4], 'fer', [158 150 107 76 31 11] / 160), ...
+    struct('ber', [0.11 0.044 0.018 4.5e-3 2.2e-4 0], 'fer', [157 137 58 43 4 0] / 160)};
+X = struct('cases', {cases}, 'VAR', {VAR}, 'EBNO', {EB}, 'jobs', {jobs}, 'rec', {rec}, 'rec_sys', {rec_sys}, ...
+    'clean', {clean}, 'clean_sh', {{}}, 'nCombo', 1, 'N_GEOM', N, 'RUN_FRAMES', 20, 'RATIO', 2, 'RELAY_DEG', 60, ...
+    'RELAY_LOSS_DB', 3, 'floor', 1e-4, 'SH', []);
+[rep, T3, T3s, Lm, okS] = surv3_report(X);
+verifyEqual(tc, Lm, logical([1 1 1 1 0 0; 1 1 0 0 0 0]));
+verifyEqual(tc, okS, logical([0 0 0 0 1 1]));
+X.clean_sh = {clean{2}, struct('ber', clean{2}.ber, 'fer', [157 137 58 43 4 76] / 160)};   % a shadowing reference L at 15 dB
+[~, ~, ~, Lsh, okSh] = surv3_report(X);
+verifyEqual(tc, Lsh, logical([1 1 1 1 0 0; 1 1 0 0 0 0; 1 1 0 0 0 0; 1 1 0 0 0 1]));
+verifyEqual(tc, okSh, logical([0 0 0 0 1 0]));
+verifyEqual(tc, squeeze(T3(1, 1, :))', 100 * (1:nS) / N);
+verifyEqual(tc, squeeze(T3s(1, 1, :))', zeros(1, nS));
+verifyEqual(tc, T3s(:, 2:3, :), T3(:, 2:3, :));
+txt = strjoin(rep, newline);
+verifyNotEmpty(tc, strfind(txt, 'Protocol surv_v2'));
+verifyNotEmpty(tc, strfind(txt, '2 ant/3 ref'));
+verifyNotEmpty(tc, strfind(txt, 'tone_jamming (most severe, 30)'));
+verifyNotEmpty(tc, strfind(txt, 'Like for like, the Eb/N0 where no clean link is link-limited (12, 15 dB):'));
+verifyNotEmpty(tc, strfind(txt, 'Clean BER, 3 antennas: 1.1e-01 4.4e-02 1.8e-02 4.5e-03 2.2e-04 <1e-4'));
+verifyNotEmpty(tc, strfind(txt, 'Clean packet loss, 2 antennas: 0.988L 0.938L 0.669L 0.475L 0.194  0.069 '));   % a blank in place of L keeps the columns
+verifyEmpty(tc, strfind(txt, 'Airframe-shadowing'));
+row = @(db) rep{startsWith(rep, sprintf('  %2g dB  ', db))};
+marks = @(db) cellfun(@(x) x(end) == 'L', strsplit(strtrim(extractAfter(row(db), 'dB')), ' / '));
+verifyEqual(tc, marks(0), true(1, 4));
+verifyEqual(tc, marks(9), [true false false false]);
+verifyEqual(tc, marks(12), false(1, 4));
+end
+
+function test_surv3_levels(tc)
+% Under surv_v2 the survivability options' single threats run at the last level of
+% decision_config.m, each threat's most severe within its sources: 30 dB for the in-band
+% emitters (the in-band cap, Liu et al.) and for the spoofer; profile 1 keeps the 'high' level.
+C = decision_config(); p = base_params();
+verifyEqual(tc, numel(C.sev_names), 5); verifyEqual(tc, C.sev_names{end}, 'very high');
+for t = {'jamming', 'reactive_jamming', 'noise_burst', 'spoofing', 'sweeping_jammer', 'tone_jamming'}
+    L = C.sev.(t{1}).levels;
+    verifyEqual(tc, L(end), max(L), t{1});
+    verifyEqual(tc, L(end), p.inband_cap_db, t{1});
+end
+src = fileread(which('experiment_survivability_options'));
+verifyNotEmpty(tc, strfind(src, 'iHigh = C.nominal + 1;'));
+verifyNotEmpty(tc, strfind(src, 'if SV.v2, iHigh = numel(C.sev_names); end'));
+end
+
+function test_surv3_shadow_flights(tc)
+% The survivability options' airframe-shadowing flights under surv_v2 (surv3_shadow_flights.m)
+% on the real flight draws: the kept candidate is the first of its own seed range whose
+% roll-in, placed just before the first frame, hides an antenna in the run with two and with
+% three antennas (hides_antenna.m); its speed lies at or above the level's speed floor; the
+% run id is the geometry's.
+p = base_params(); p.quiet_build = true; p.int_aoa_random = true; p.gcs_aoa_deg = 0;
+eb = p.EbNo_dB(end); vr = [p.speed_kmh_min p.speed_kmh_max];
+[g, SH] = surv3_shadow_flights(p, eb, 1, vr, [2 3], 20);
+g = g{1};
+verifyEqual(tc, g.seed, surv3_shadow_seed(1, SH.tried));
+verifyEqual(tc, [g.run g.frames g.event], [surv3_run_id(1) 20 1]);
+verifyGreaterThanOrEqual(tc, g.speed, SH.v_kmh(1)); verifyLessThanOrEqual(tc, g.speed, vr(2));
+verifyEqual(tc, SH.v_kmh(1), max(vr(1), shadow_speed_floor(shadow_roll_band(p.shadow_db, p), p)));
+geo = struct('ebno', eb, 'event_frame', 1, 'frames', 20);
+for n = [2 3]
+    q = p; q.n_rx = n; q.active_threat = 'airframe_shadowing';
+    d = flight_draws(g.seed, g.speed / 3.6 * q.carrier_freq / q.c_light, q, geo);
+    verifyTrue(tc, any(d.hidden > 0), sprintf('%d antennas', n));
+    verifyEqual(tc, d.onset_frame, 1);
+    verifyLessThan(tc, d.roll_in(1), 0);                   % the roll-in starts before the first frame
+end
+q = p; q.active_threat = 'airframe_shadowing';
+for j = 1:min(SH.tried - 1, 20)                             % the candidates before it fail for some antenna count
+    [sd, v] = surv3_shadow_seed(1, j, SH.v_kmh);
+    h = false(1, 2);
+    for n = [2 3]
+        q.n_rx = n; h(n - 1) = hides_antenna(sd, v, q, geo);
+    end
+    verifyFalse(tc, all(h), sprintf('candidate %d', j));
+end
+end
+
+function test_surv3_profile1_identity(tc)
+% The whole survivability-options script (experiment_survivability_options.m, smoke) on a
+% stand-in pool_cell.m and hides_antenna.m, once without profile.json (profile 1) and once
+% with "surv_v2": true. Profile 1: the geometries of seed block 13, the 'high' level, each
+% receiver against its own clean link, the saved variables and the text as before. surv_v2:
+% the shadowing combination on its selected flights (rolling in before frame 1), the single
+% threat at the most severe level, the system's reference beside the own, the L marks, the
+% per-geometry values saved; outside the smoke it refuses to start without fec_rx.
+d = surv3_stub_dir(); cl = onCleanup(@() surv3_stub_off(d)); %#ok<NASGU>
+global SURV3_STUB_LOG SURV3_HIDE_LOG %#ok<GVMIS>
+here = pwd; back = onCleanup(@() cd(here)); %#ok<NASGU>
+w1 = fullfile(here, 'surv3_p1'); mkdir(w1); cd(w1); mkdir('results'); mkdir('data');
+SURV3_STUB_LOG = {}; SURV3_HIDE_LOG = {};
+evalc('surv3_script_run(true)');
+F = load(fullfile('data', 'survivability_options.mat'));
+nS = numel(F.EBNO); A = policy_actions();
+verifyEqual(tc, sort(fieldnames(F)), sort({'cases'; 'VAR'; 'EBNO'; 'rec'; 'best'; 'jobs'; 'clean'; 'T3'; 'N_GEOM'; ...
+    'RELAY_DEG'; 'RELAY_LOSS_DB'}));
+verifyEqual(tc, {F.cases.threat}, {'jamming+path_loss', 'tone_jamming'});
+verifyEqual(tc, F.cases(2).level, 23);
+verifyEqual(tc, {F.VAR.name}, {'2 antennas', '3 antennas', 'relay path'});
+L = [SURV3_STUB_LOG{:}];
+verifyEqual(tc, numel(L), (2 + 2 * 3) * nS);
+for x = L
+    verifyEqual(tc, x.seed, arrayfun(@(r) pool_seed(1, x.s, 13, r), 1:2));
+    verifyEqual(tc, x.run, surv3_run_id(1:2));
+    verifyEmpty(tc, x.frames); verifyEmpty(tc, x.event);
+end
+verifyEqual(tc, sort([L(strcmp({L.threat}, 'none')).n_rx]), sort(repmat([2 3], 1, nS)));
+verifyEqual(tc, unique([L(strcmp({L.threat}, 'tone_jamming')).tone]), 23);
+verifyEqual(tc, sort([L(~strcmp({L.threat}, 'none')).gcs]), sort(repmat([0 0 60], 1, 2 * nS)));
+verifyEmpty(tc, SURV3_HIDE_LOG);
+verifyEqual(tc, fieldnames(F.clean{1}), {'ber'; 'fer'});
+verifyEqual(tc, F.clean{1}.ber, [4e-3 * ones(1, nS - 1), 0], 'AbsTol', 1e-15);
+verifyEqual(tc, F.clean{2}.fer, [1, zeros(1, nS - 1)]);
+for j = 1:numel(F.rec)
+    verifyEqual(tc, F.rec{j}, repmat([true false], nS, 1));
+    verifyEqual(tc, F.best{j}(:, 1), repmat(A(2), nS, 1));
+end
+verifyEqual(tc, F.T3, 50 * ones(2, 3, nS));
+txt = fileread(fullfile('results', 'survivability_options.txt'));
+verifyNotEmpty(tc, strfind(txt, 'tone_jamming (high, 23)'));
+verifyNotEmpty(tc, strfind(txt, 'Clean BER, 2 antennas: 4.0e-03 '));
+verifyNotEmpty(tc, strfind(txt, '0.0e+00'));
+verifyEmpty(tc, strfind(txt, 'surv_v2')); verifyEmpty(tc, strfind(txt, 'link-limited')); verifyEmpty(tc, strfind(txt, '<1e-4'));
+cd(here);
+w2 = fullfile(here, 'surv3_v2'); mkdir(w2); cd(w2); mkdir('results'); mkdir('data');
+write_text('profile.json', '{"surv_v2":true}');
+SURV3_STUB_LOG = {}; SURV3_HIDE_LOG = {};
+evalc('surv3_script_run(true)');
+F = load(fullfile('data', 'survivability_options.mat'));
+for f = {'rec_sys', 'best_sys', 'met', 'T3s', 'Lm', 'okS', 'clean_sh', 'geo', 'geo_sh', 'SH', 'SV', 'iHigh', 'RUN_FRAMES', ...
+        'RATIO', 'ACTIONS'}
+    verifyTrue(tc, isfield(F, f{1}), f{1});
+end
+verifyTrue(tc, F.SV.v2); verifyEqual(tc, F.iHigh, 5);
+verifyEqual(tc, {F.cases.threat}, {'jamming+path_loss', 'jamming+airframe_shadowing', 'tone_jamming'});
+verifyEqual(tc, F.cases(3).level, 30);
+L = [SURV3_STUB_LOG{:}];
+verifyEqual(tc, numel(L), (4 + 3 * 3) * nS);
+H = [SURV3_HIDE_LOG{:}];
+verifyEqual(tc, unique([H.n_rx]), [2 3]);
+verifyTrue(tc, all([H.event] == 1 & [H.frames] == 20)); verifyTrue(tc, all(strcmp({H.threat}, 'airframe_shadowing')));
+for s = 1:nS
+    c = surv3_shadow_seed(s, 1:30); k = find(mod(c, 3) == 0, 2);   % the stand-in hides an antenna on seeds divisible by 3
+    verifyEqual(tc, F.geo_sh{s}.seed, c(k)); verifyEqual(tc, F.SH.tried(s), k(2));
+    verifyGreaterThanOrEqual(tc, F.geo_sh{s}.speed, F.SH.v_kmh(1));
+    sh = L([L.s] == s & strcmp({L.threat}, 'jamming+airframe_shadowing'));
+    verifyEqual(tc, numel(sh), 3);
+    for x = sh
+        verifyEqual(tc, x.seed, c(k)); verifyEqual(tc, x.event, [1 1]); verifyEqual(tc, x.frames, [20 20]);
+        verifyEqual(tc, x.run, surv3_run_id(1:2));
+    end
+    verifyEqual(tc, nnz([L.s] == s & strcmp({L.threat}, 'none') & cellfun(@isempty, {L.event})), 2);
+    verifyEqual(tc, nnz([L.s] == s & strcmp({L.threat}, 'none') & ~cellfun(@isempty, {L.event})), 2);
+end
+for x = L(cellfun(@isempty, {L.event}))
+    verifyEqual(tc, x.seed, arrayfun(@(r) pool_seed(1, x.s, 13, r), 1:2));
+end
+verifyEqual(tc, unique([L(strcmp({L.threat}, 'tone_jamming')).tone]), 30);
+verifyEqual(tc, F.Lm, [true(4, 1), false(4, nS - 1)]);
+verifyEqual(tc, F.okS, [false, true(1, nS - 1)]);
+verifyEqual(tc, size(F.clean{1}.ber_geo), [nS 2]); verifyEqual(tc, numel(F.clean_sh), 2);
+verifyEqual(tc, F.clean_sh{1}.ber, 4 * F.clean{1}.ber, 'AbsTol', 1e-15);
+for j = 1:numel(F.rec)
+    k = F.jobs(j, 2);
+    verifyEqual(tc, F.rec{j}, repmat([true false], nS, 1));
+    verifyEqual(tc, size(F.met{j}.ber), [nS 2 numel(A)]);
+    verifyEqual(tc, F.met{j}.ber(1, 1, 1), 0.2, 'AbsTol', 1e-15);   % a mean over the flight's frames
+    if contains(F.cases(F.jobs(j, 1)).threat, 'airframe_shadowing')   % against the clean link of its own flights
+        verifyEqual(tc, surv3_judge(F.met{j}, F.clean_sh{F.VAR(k).ref}, 2, 1e-4, F.ACTIONS), F.rec{j});
+        verifyEqual(tc, surv3_judge(F.met{j}, F.clean{F.VAR(k).ref}, 2, 1e-4, F.ACTIONS), [false(nS - 1, 2); true false]);
+    else
+        verifyEqual(tc, surv3_judge(F.met{j}, F.clean{F.VAR(k).ref}, 2, 1e-4, F.ACTIONS), F.rec{j});
+    end
+    if k == 1                                            % 0.75 x 4e-3 within 2x of 4e-3, not of 1e-3 (x4 on the shadowing flights)
+        verifyEqual(tc, F.rec_sys{j}, [false(nS - 1, 2); true false]);
+    else
+        verifyEqual(tc, F.rec_sys{j}, F.rec{j});
+    end
+end
+txt = fileread(fullfile('results', 'survivability_options.txt'));
+verifyNotEmpty(tc, strfind(txt, 'Protocol surv_v2'));
+verifyNotEmpty(tc, strfind(txt, 'tone_jamming (most severe, 30)'));
+verifyNotEmpty(tc, strfind(txt, '2 ant/3 ref'));
+verifyNotEmpty(tc, strfind(txt, 'Airframe-shadowing combinations:'));
+verifyNotEmpty(tc, strfind(txt, 'Like for like, the Eb/N0 where no clean link is link-limited (3, 6, 9, 12, 15 dB):'));
+verifyNotEmpty(tc, strfind(txt, 'Clean BER, 2 antennas, shadowing flights: 1.6e-02 '));
+verifyNotEmpty(tc, strfind(txt, 'judged against the clean link of the same flights'));
+verifyNotEmpty(tc, strfind(txt, 'Clean packet loss, 2 antennas: 1.000L 0.000 '));
+verifyNotEmpty(tc, strfind(txt, '<1e-4'));
+cd(here);
+w3 = fullfile(here, 'surv3_v2_full'); mkdir(w3); cd(w3);
+write_text('profile.json', '{"surv_v2":true}');
+verifyError(tc, @() surv3_script_run(false), 'experiment_survivability_options:fec_rx');
+cd(here);
+end
+
+function surv3_script_run(SMOKE) %#ok<INUSD>
+% The survivability-options script in a workspace of its own, with run_stage's SMOKE.
+experiment_survivability_options;
+end
+
+function d = surv3_stub_dir()
+% Stand-ins for the survivability options, first on the path. pool_cell.m logs every call per
+% Eb/N0 (global SURV3_STUB_LOG) and returns frames whose BER and loss follow
+% surv3_stub_value.m: the clean link at 4e-3 with two antennas and 1e-3 with more, 0 at the
+% last Eb/N0, every packet lost at the first; under any threat no_action at 0.2, the other
+% configurations at 0.75x the clean BER on odd geometries and lost on even ones; on flights
+% with an event (the shadowing flights) every BER x4, so only their own clean link passes them.
+% hides_antenna.m logs its calls (global SURV3_HIDE_LOG) and hides an antenna on seeds
+% divisible by 3.
+d = fullfile(tempname); mkdir(d);
+fid = fopen(fullfile(d, 'pool_cell.m'), 'w');
+fprintf(fid, '%s\n', 'function [P, info] = pool_cell(p, threat, A, EB, geo, ~, opt)', 'global SURV3_STUB_LOG', ...
+    'P = cell(numel(EB), numel(A), 1);', 'tone = NaN; if isfield(p, ''tone_jsr_db''), tone = p.tone_jsr_db; end', ...
+    'for s = 1:numel(EB)', '    g = geo{s};', ...
+    ['    SURV3_STUB_LOG{end+1} = struct(''threat'', threat, ''s'', s, ''n_rx'', p.n_rx, ''gcs'', p.gcs_aoa_deg, ' ...
+    '''tone'', tone, ''seed'', g.seed, ''run'', g.run, ''speed'', g.speed, ''frames'', {gf(g, ''frames'')}, ' ...
+    '''event'', {gf(g, ''event'')});'], ...
+    '    for a = 1:numel(A)', '        run = repelem(g.run(:), opt.F_SUB);', ...
+    '        [b, f] = surv3_stub_value(threat, p, A{a}, s, numel(EB), run, isfield(g, ''event''));', ...
+    '        P{s, a, 1} = struct(''run'', run, ''ber'', b, ''fer'', f);', '    end', 'end', ...
+    'info = struct(''n_unique'', numel(A), ''map'', 1:numel(A));', 'end', '', ...
+    'function v = gf(g, f)', 'v = []; if isfield(g, f), v = g.(f); end', 'end');
+fclose(fid);
+fid = fopen(fullfile(d, 'surv3_stub_value.m'), 'w');
+fprintf(fid, '%s\n', 'function [b, f] = surv3_stub_value(threat, p, a, s, nS, run, ev)', ...
+    'n = numel(run); b = zeros(n, 1); f = zeros(n, 1);', 'w = 1e-3 * (1 + 3 * (p.n_rx < 3)) * (1 + 3 * ev);', ...
+    'if s == nS, w = 0; end', 'if strcmp(threat, ''none'')', '    b(:) = w; if s == 1, f(:) = 1; end', '    return', ...
+    'end', 'if strcmp(a, ''no_action''), b(:) = 0.2; f(:) = 1; return; end', 'odd = mod(run, 2) == 1;', ...
+    'b(odd) = 0.75 * w; b(~odd) = 0.05; f(~odd) = 1;', 'end');
+fclose(fid);
+fid = fopen(fullfile(d, 'hides_antenna.m'), 'w');
+fprintf(fid, '%s\n', 'function h = hides_antenna(seed, ~, p, geo)', 'global SURV3_HIDE_LOG', ...
+    ['SURV3_HIDE_LOG{end+1} = struct(''seed'', seed, ''n_rx'', p.n_rx, ''event'', geo.event_frame, ' ...
+    '''frames'', geo.frames, ''threat'', p.active_threat);'], 'h = mod(seed, 3) == 0;', 'end');
+fclose(fid);
+addpath(d, '-begin'); clear pool_cell surv3_stub_value hides_antenna
+end
+
+function surv3_stub_off(d)
+% Removes the survivability options' stand-ins from the path and the disk.
+rmpath(d); clear pool_cell surv3_stub_value hides_antenna
+rmdir(d, 's');
+end
+
+function test_surv_options(tc)
+% The survivability map's protocol switch (profile.json surv_v2, surv_options.m): no file, no
+% field (profile 3's file before step 7a) or false run the one-flight map; true runs surv_v2
+% with five flights per cell; any other value is refused.
+f = [tempname '.json'];
+one = struct('v2', false, 'NR', 1);
+verifyEqual(tc, surv_options(f), one);
+wr = @(t) write_text(f, t);
+wr('{"profile":"profile 3: four antennas","n_rx":4}'); verifyEqual(tc, surv_options(f), one);
+wr('{"n_rx":4,"surv_v2":false}'); verifyEqual(tc, surv_options(f), one);
+wr('{"n_rx":4,"fec_rx":"d78","surv_v2":true}'); verifyEqual(tc, surv_options(f), struct('v2', true, 'NR', 5));
+for bad = {'{"surv_v2":1}', '{"surv_v2":"true"}', '{"surv_v2":[true,false]}'}
+    wr(bad{1}); verifyError(tc, @() surv_options(f), 'surv_options:value', bad{1});
+end
+delete(f);
+end
+
+function test_surv_flights_crn(tc)
+% Common random numbers of the surv_v2 map (surv_flights.m, pool_job.m 'surv'): every cell of
+% an entry flies the same NR flights, seeds 900000 + 1000 t + (1:NR), at every level and every
+% Eb/N0; the one-flight map keeps its seed per level and Eb/N0 (900000 + 1000 t + 10 li + s,
+% one run). The two families are disjoint. The entry's pattern (pset) reaches the job's params.
+% surv_runs keeps each flight's BER, packet loss and slack.
+g = surv_flights(3, 5, 72);
+verifyEqual(tc, g.seed, 903001:903005); verifyEqual(tc, g.run, 1:5); verifyEqual(tc, g.speed, 72 * ones(1, 5));
+verifyError(tc, @() surv_flights(1, 11, 72), 'surv_flights:nr');
+verifyError(tc, @() surv_flights(1, 0, 72), 'surv_flights:nr');
+[t, li, s] = ndgrid(1:20, 1:10, 1:9);
+[t2, r] = ndgrid(1:20, 1:10);
+verifyEmpty(tc, intersect(900000 + 1000*t(:) + 10*li(:) + s(:), 900000 + 1000*t2(:) + r(:)));
+d = surv_stub_dir(); cl = onCleanup(@() stub_off(d)); %#ok<NASGU>
+global SURV_STUB_LOG %#ok<GVMIS>
+p = base_params(); p.jam_timing_random = false;           % as the map sets it
+mp = struct('name', 'noise_burst random 0.775', 'level_field', 'jsr_db', 'levels', [4 16], 'aoa', NaN, ...
+    'base', 'noise_burst', 'pset', struct('burst_duty', 0.775));
+A = {'no_action', 'power_control'}; EB = [0 3 6];
+S = struct('jobs', [1 1; 1 2], 'maps', mp, 'p0', p, 'RUN_FRAMES', 20, 'v_nom', 72, 'nS', 3, 'ACTIONS', {A}, ...
+    'SNR_points', EB, 'opt', struct('F_SUB', 20, 'tw', 10, 'delay_bits', 20), 'NR', 5);
+SURV_STUB_LOG = {};
+o1 = pool_job('surv', S, 1); o2 = pool_job('surv', S, 2);
+L = [SURV_STUB_LOG{:}];
+verifyEqual(tc, numel(L), 6);
+for k = 1:6
+    verifyEqual(tc, L(k).seed, 901001:901005); verifyEqual(tc, L(k).run, 1:5);
+    verifyEqual(tc, L(k).duty, 0.775); verifyFalse(tc, L(k).timing);
+end
+verifyEqual(tc, size(o1{1}), [2 3 5]);                                  % configurations x Eb/N0 x flights
+verifyEqual(tc, size(o2{3}), [2 3 5]);
+verifyEqual(tc, squeeze(o1{1}(1, 1, :))', 0.3 * ones(1, 5), 'AbsTol', 1e-15);   % the stand-in at duty 0.775: every flight hit
+verifyEqual(tc, squeeze(o1{3}(1, 1, :))', ones(1, 5) / 20);             % one frame of a flight's 20
+S.NR = []; S.maps.pset = struct();
+SURV_STUB_LOG = {};
+o = pool_job('surv', S, 2);
+L = [SURV_STUB_LOG{:}];
+verifyEqual(tc, [L.seed], 900000 + 1000 + 20 + (1:3));                  % profile 1's: per level and Eb/N0
+verifyEqual(tc, [L.run], ones(1, 3));
+verifyEqual(tc, [L.duty], p.burst_duty * ones(1, 3));
+verifyEqual(tc, size(o{1}), [2 3]);
+verifyEqual(tc, o{1}, [0.3 0.3 0.3; 0 0 0], 'AbsTol', 1e-15);             % duty 0.5: no_action hit, its run's mean
+% surv_runs on a stand-in pool: two flights of four frames
+Q = struct('run', [1 1 1 1 2 2 2 2]', 'ber', [0 0.1 0 0.1 0 0 0 0.4]', 'fer', [0 1 0 1 0 0 0 1]');
+[rB, rF, rS] = surv_runs({Q, Q}, {'no_action', 'fec_interleave'}, 2);
+verifyEqual(tc, squeeze(rB(1, 1, :))', [0.05 0.1], 'AbsTol', 1e-15);
+verifyEqual(tc, squeeze(rF(2, 1, :))', [0.5 0.25]);
+verifyEqual(tc, squeeze(rS(1, 1, :))', [0.25 0.25]);
+verifyEqual(tc, squeeze(rS(2, 1, :))', [packet_share('fec_interleave', [0 1 0 1]) packet_share('fec_interleave', [0 0 0 1])]);
+end
+
+function test_surv_nb_entries(tc)
+% The noise-burst entries of the surv_v2 map (surv_nb_entries.m): each geometry's noise_burst
+% entry becomes Xu et al.'s random jammer at the most severe duty of their range (0.775) and
+% Marti et al.'s J4 (0.2), in place; every other entry is kept with an empty pattern. With
+% jam_timing_random off the model's gate takes the entry's duty (flight_draws.m).
+p = base_params();
+DL = dataset_levels();
+tcfg = struct('name', {DL.name}, 'level_field', {DL.param}, 'levels', {DL.levels});
+maps = struct('name', {}, 'level_field', {}, 'levels', {}, 'aoa', {}, 'base', {});
+for t = 1:numel(tcfg)
+    if ismember(tcfg(t).name, {'path_loss', 'antenna_fault', 'airframe_shadowing'}), ga = NaN; else, ga = p.geom_aoa_deg; end
+    for g = ga
+        e = tcfg(t); e.aoa = g; e.base = e.name;
+        if ~isnan(g), e.name = sprintf('%s @ %g deg', e.base, g); end
+        maps(end+1) = e; %#ok<AGROW>
+    end
+end
+M = surv_nb_entries(maps, p);
+verifyEqual(tc, numel(M), numel(maps) + 2);
+nb = find(strcmp({M.base}, 'noise_burst'));
+verifyEqual(tc, numel(nb), 4);
+verifyEqual(tc, arrayfun(@(e) e.pset.burst_duty, M(nb)), [0.775 0.2 0.775 0.2]);
+verifyEqual(tc, {M(nb).name}, {sprintf('noise_burst random 0.775 @ %g deg', p.geom_aoa_deg(1)), ...
+    sprintf('noise_burst J4 0.2 @ %g deg', p.geom_aoa_deg(1)), sprintf('noise_burst random 0.775 @ %g deg', p.geom_aoa_deg(2)), ...
+    sprintf('noise_burst J4 0.2 @ %g deg', p.geom_aoa_deg(2))});
+verifyEqual(tc, numel(unique({M.name})), numel(M));
+other = M(~strcmp({M.base}, 'noise_burst'));
+verifyTrue(tc, all(arrayfun(@(e) isempty(fieldnames(e.pset)), other)));
+verifyEqual(tc, rmfield(other, 'pset'), maps(~strcmp({maps.base}, 'noise_burst')));
+L0 = maps(find(strcmp({maps.base}, 'noise_burst'), 1)).levels;
+verifyEqual(tc, [M(nb(1)).levels; M(nb(2)).levels], [L0; L0]);
+q = p; q.jam_timing_random = false;
+for k = nb(1:2)
+    q.burst_duty = M(k).pset.burst_duty;
+    d = flight_draws(17, 100, q);
+    verifyEqual(tc, d.jam(4), M(k).pset.burst_duty);
+end
+verifyLessThan(tc, M(nb(2)).pset.burst_duty, p.burst_duty_range(1));    % J4's one-symbol slots (build_threat_model.m)
+q = p; q.burst_j4 = [0.6 0.5];
+verifyError(tc, @() surv_nb_entries(maps, q), 'surv_nb_entries:j4');
+end
+
+function test_surv_grid_marks(tc)
+% The surv_v2 map's cells (surv_grid.m): the status rule on the flights' means is the
+% one-flight map's (build_map in map_survivability_boundary.m) on random cells; the marks L
+% (an R cell where the clean link loses half of its packets or more), N (no_action passes)
+% and saturated; the interval over the flights, its Clopper-Pearson floor at no event, the
+% coded link's BER bound from its lost packets (one-sided 95% Clopper-Pearson x 0.5), and
+% the committed verdict (the status at both ends of the intervals).
+A = {'no_action', 'power_control', 'rate_reduce', 'power_control+fec_interleave'};
+Z = struct('ok', 2, 'marg', 5, 'sat', 0.45, 'lim', 0.5, 'frames', 57, 'bits', 1032, 'B', 4000);
+% the rule on random cells, against the one-flight map's
+rs = RandStream('mt19937ar', 'Seed', 3);
+nL = 6; nS = 4;
+B = 10 .^ (-6 + 5 * rand(rs, nL, 4, nS)); Fe = rand(rs, nL, 4, nS) .^ 3; Sl = 0.05 * rand(rs, nL, 4, nS);
+ref = max(10 .^ (-5 + 2 * rand(rs, 1, nS)), 1e-4); fc = rand(rs, 1, nS) .^ 2;
+mp = struct('name', 'x', 'base', 'jamming', 'aoa', 11.4, 'levels', 1:nL);
+for as = {A(2:4), A(2)}
+    G = surv_grid({B}, {Fe}, {Sl}, {cat(4, B, B)}, {cat(4, Fe, Fe)}, mp, A, as{1}, ref, fc, Z);
+    cols = find(ismember(A, as{1}));
+    for li = 1:nL
+        for s = 1:nS
+            okc = B(li, cols, s) <= 2 * ref(s) & Fe(li, cols, s) <= 2 * fc(s) + Sl(li, cols, s);
+            if any(okc)
+                cand = cols(okc); [bb, k] = min(B(li, cand, s)); kc = cand(k); st = 1;
+            else
+                [bb, k] = min(B(li, cols, s)); kc = cols(k);
+                if bb / ref(s) <= 5, st = 2; else, st = 3; end
+            end
+            verifyEqual(tc, G.status(li, s), st); verifyEqual(tc, G.best_action{li, s}, A{kc});
+            verifyEqual(tc, G.ber_best(li, s), bb); verifyEqual(tc, G.ratio(li, s), bb / ref(s));
+            if ~any(cols == 4), verifyTrue(tc, G.committed(li, s)); end % identical uncoded flights: no spread
+        end
+    end
+    verifyEqual(tc, G.link_limited, G.status == 1 & fc >= 0.5);
+    verifyEqual(tc, G.ber_attacked, squeeze(B(:, 1, :)));
+end
+% three levels, five flights, two Eb/N0 (the clean link loses 60% of its packets at the first)
+ref = [1e-4 1e-4]; fc = [0.6 0];
+Br = zeros(3, 4, 2, 5); Fr = Br; Sl = repmat([1 1 1 2] / 57, [3 1 2]); Sl(:, 4, :) = 1 / 28;
+Br(2, 1, :, :) = 0.02; Fr(2, 1, :, :) = 1; Br(2, 3:4, :, :) = 0.01;   % level 2: no_action and the rest hit,
+Br(2, 2, :, 1) = 6e-4;                                                % power_control on one flight of five
+Br(3, :, :, :) = 0.47; Br(3, 1, :, :) = 0.5; Fr(3, :, :, :) = 1;        % level 3: saturated
+mp = struct('name', 'x', 'base', 'jamming', 'aoa', 11.4, 'levels', [4 16 30]);
+G = surv_grid({mean(Br, 4)}, {mean(Fr, 4)}, {Sl}, {Br}, {Fr}, mp, A, A(2:4), ref, fc, Z);
+verifyEqual(tc, G.status, [1 1; 1 1; 3 3]);
+verifyEqual(tc, G.link_limited, logical([1 0; 1 0; 0 0]));
+verifyEqual(tc, G.no_action_ok, logical([1 1; 0 0; 0 0]));
+verifyEqual(tc, G.saturated, logical([0 0; 0 0; 1 1]));
+verifyEqual(tc, G.best_action(2, :), {'power_control', 'power_control'});
+verifyEqual(tc, G.committed, logical([1 1; 0 0; 1 1]));                % mean 1.2e-4 within 2x, its interval not
+verifyEqual(tc, G.status_hi(2, :), [2 2]);
+verifyGreaterThan(tc, G.ber_hi(2, 2), 2e-4); verifyEqual(tc, G.ber_lo(2, 2), 0);
+verifyEqual(tc, G.ber_hi(1, 2), 1 - 0.025 ^ (1 / (5 * 57 * 1032)), 'RelTol', 1e-12);   % no error in five flights
+verifyEqual(tc, G.fer_hi(1, 2), 1 - 0.025 ^ (1 / (5 * 57)), 'RelTol', 1e-12);
+verifyEqual(tc, G.ber_lo(3, 1), 0.47, 'AbsTol', 1e-15); verifyEqual(tc, G.ber_hi(3, 1), 0.47, 'AbsTol', 1e-15);
+G = surv_grid({mean(Br, 4)}, {mean(Fr, 4)}, {Sl}, {Br}, {Fr}, mp, A, A(4), ref, fc, Z);
+cp0 = 1 - 0.05 ^ (1 / (5 * 28));                                        % no lost packet in 5 x 28
+verifyEqual(tc, G.ber_hi(1, 2), 0.5 * cp0, 'RelTol', 1e-9);           % the coded link: lost packets, not bits
+verifyEqual(tc, G.fer_hi(1, 2), 1 - 0.025 ^ (1 / (5 * 28)), 'RelTol', 1e-12);
+verifyEqual(tc, G.status(1, :), [1 1]); verifyEqual(tc, G.status_hi(1, :), [3 3]);
+verifyFalse(tc, G.committed(1, 2));                                     % coded alone, 5 flights: not committed
+verifyEqual(tc, G.ber_hi(2, 2), 0.5 * cp0, 'RelTol', 1e-9);           % errors (0.01), no lost packet: the floor
+verifyEqual(tc, G.ber_hi(3, 2), 0.5);                                   % every packet lost
+Fr(2, 4, 2, 1) = 2 / 28;                                                % two lost packets in one flight
+G = surv_grid({mean(Br, 4)}, {mean(Fr, 4)}, {Sl}, {Br}, {Fr}, mp, A, A(4), ref, fc, Z);
+verifyEqual(tc, G.ber_hi(2, 2), 0.5 * betaincinv(0.95, 3, 5 * 28 - 2), 'RelTol', 1e-12);
+verifyEqual(tc, G.ber_lo(2, 2), 0.01, 'RelTol', 1e-12);
+end
+
+function test_surv_cell_label(tc)
+% A cell of the surv_v2 map's text (surv_cell_label.m): status letter (L for a link-limited
+% R), the configuration's letters, N in their place on R and L when no_action passes, none for a
+% saturated X, ? when not committed.
+verifyEqual(tc, surv_cell_label(1, 'SP', false, false, false, true), 'RSP');
+verifyEqual(tc, surv_cell_label(1, 'SP', true, false, false, true), 'RN');
+verifyEqual(tc, surv_cell_label(1, 'SP', true, true, false, false), 'LN?');
+verifyEqual(tc, surv_cell_label(1, 'SP', false, true, false, true), 'LSP');
+verifyEqual(tc, surv_cell_label(2, 'P', false, true, false, false), 'MP?');    % L marks R cells only
+verifyEqual(tc, surv_cell_label(2, 'P', true, false, false, true), 'MP');       % so does N
+verifyEqual(tc, surv_cell_label(3, 'E', false, false, true, true), 'Xnone');
+verifyEqual(tc, surv_cell_label(3, 'E', false, false, false, true), 'XE');
+verifyEqual(tc, surv_cell_label(0, '', false, false, false, true), '.');
+end
+
+function test_surv_gap_report(tc)
+% The surv_v2 gap analysis (surv_gap_report.m): class 1 Map A X to Map B R or M, class 2
+% Map A M to Map B R; no other change counts; a zero ratio reads "0 err"; L and ? marks.
+ba = repmat({'power_control'}, 2, 3); bb = repmat({'rate_reduce'}, 2, 3);
+GA = struct('threat', 'x', 'levels', [4 16], 'status', [3 3 2; 2 1 3], 'ratio', [100 50 3; 4 1 9], ...
+    'best_action', {ba}, 'link_limited', false(2, 3), 'committed', true(2, 3));
+GB = struct('threat', 'x', 'levels', [4 16], 'status', [1 2 1; 2 1 3], 'ratio', [0 4 1.5; 4 1 9], ...
+    'best_action', {bb}, 'link_limited', logical([1 0 0; 0 0 0]), 'committed', logical([1 1 0; 1 1 1]));
+[rep, M] = surv_gap_report(GA, GB, [0 3 6]);
+verifyEqual(tc, M.g1, logical([1 1 0; 0 0 0]));
+verifyEqual(tc, M.g2, logical([0 0 1; 0 0 0]));
+txt = strjoin(rep, newline);
+verifyNotEmpty(tc, strfind(txt, 'class 1 level=4, Eb/N0=0dB: Map A 100.00x (power_control) | Map B 0 err (rate_reduce) L'));
+verifyNotEmpty(tc, strfind(txt, 'class 2 level=4, Eb/N0=6dB: Map A 3.00x (power_control) | Map B 1.50x (rate_reduce) ?'));
+verifyNotEmpty(tc, strfind(txt, 'Total gap cells: 2 class 1, 1 class 2'));
+end
+
+function test_surv_map_profile1_identity(tc)
+% The whole survivability map script (map_survivability_boundary.m, smoke) on a stand-in
+% pool_cell.m, once without profile.json (profile 1) and once with "surv_v2": true.
+% Profile 1: seeds per level and Eb/N0, one run each; the one-flight statuses; the saved
+% variables, the header and the gap file as before (no marks, "%.2fx"). surv_v2: the same
+% flights at every level and Eb/N0 of an entry, the noise-burst entries at duties 0.775 and
+% 0.2, the means of the flights in the rule, the L, N and none marks, the committed verdict,
+% the two gap classes and the per-flight values saved.
+d = surv_stub_dir(); cl = onCleanup(@() stub_off(d)); %#ok<NASGU>
+global SURV_STUB_LOG %#ok<GVMIS>
+here = pwd; back = onCleanup(@() cd(here)); %#ok<NASGU>
+w1 = fullfile(here, 'surv_p1'); mkdir(w1); cd(w1);
+SURV_STUB_LOG = {};
+evalc('surv_script_run(true)');
+L = [SURV_STUB_LOG{:}]; L = L(~strcmp({L.threat}, 'none'));
+[t, li, s] = ndgrid(1:3, 1:2, 1:6);
+verifyEqual(tc, sort([L.seed]), sort(900000 + 1000*t(:)' + 10*li(:)' + s(:)'));
+verifyEqual(tc, [L.run], ones(1, 36));
+F = load(fullfile('data', 'survivability_boundary.mat'));
+verifyEqual(tc, sort(fieldnames(F)), sort({'grid_data_A'; 'grid_data_B'; 'ber_clean'; 'ber_ref'; 'fer_clean'; 'BER_FLOOR'; ...
+    'SNR_points'; 'RATIO_RECOVERABLE'; 'RATIO_MARGINAL'; 'MECH_A'; 'MECH_B'; 'ber_all'; 'fer_all'; 'slack_all'; ...
+    'threat_cfg'; 'maps'; 'GEOM_AOA'; 'RUN_FRAMES'; 'ACTIONS'}));
+verifyEqual(tc, sort(fieldnames(F.grid_data_A)), sort({'threat'; 'base'; 'aoa'; 'levels'; 'ber_best'; 'ratio'; 'status'; ...
+    'ber_attacked'; 'best_action'}));
+verifyEqual(tc, {F.maps.name}, {sprintf('jamming @ %g deg', F.GEOM_AOA(1)), sprintf('jamming @ %g deg', F.GEOM_AOA(2)), 'path_loss'});
+for k = 1:2
+    verifyEqual(tc, F.grid_data_A(k).status, [2 * ones(1, 6); 3 * ones(1, 6)]);
+    verifyEqual(tc, F.grid_data_B(k).status, [2 * ones(1, 6); 3 * ones(1, 6)]);   % one flight: 3e-4, 3x
+end
+verifyEqual(tc, F.grid_data_A(3).status, [ones(1, 6); 3 * ones(1, 6)]);
+verifyEqual(tc, F.grid_data_B(3).status, ones(2, 6));
+verifyEqual(tc, F.fer_clean, [1 0 0 0 0 0]);
+txt = fileread(fullfile('results', 'survivability_boundary_mapA.txt'));
+verifyNotEmpty(tc, strfind(txt, 'Clean-link reference BER per Eb/N0 (measured, floor 1e-4 = resolution of a cell):'));
+verifyEmpty(tc, strfind(txt, 'LINK-LIMITED'));
+verifyEmpty(tc, strfind(txt, 'surv_v2'));
+gap = fileread(fullfile('results', 'survivability_gap_analysis.txt'));
+verifyNotEmpty(tc, strfind(gap, 'Total gap cells: 6'));
+verifyNotEmpty(tc, strfind(gap, '| Map B 0.00x ('));
+cd(here);
+w2 = fullfile(here, 'surv_v2'); mkdir(w2); cd(w2);
+write_text('profile.json', '{"surv_v2":true}');
+SURV_STUB_LOG = {};
+evalc('surv_script_run(true)');
+L = [SURV_STUB_LOG{:}]; L = L(~strcmp({L.threat}, 'none'));
+verifyEqual(tc, numel(L), 7 * 2 * 6);
+k = arrayfun(@(x) (x.seed(1) - 900001) / 1000, L);
+for e = 1:7
+    verifyEqual(tc, nnz(k == e), 12, sprintf('entry %d', e));
+    for x = L(k == e), verifyEqual(tc, x.seed, 900000 + 1000 * e + (1:2)); verifyEqual(tc, x.run, 1:2); end
+end
+nb = L(strcmp({L.threat}, 'noise_burst'));
+verifyEqual(tc, sort(unique([nb.duty])), [0.2 0.775]);
+verifyEqual(tc, nnz([nb.duty] == 0.775), 24);
+verifyFalse(tc, any([L.timing]));
+F = load(fullfile('data', 'survivability_boundary.mat'));
+verifyEqual(tc, F.NR, 2); verifyTrue(tc, F.SV.v2);
+nA = numel(F.ACTIONS);
+verifyEqual(tc, size(F.ber_run{1}), [2 nA 6 2]);
+verifyEqual(tc, F.ber_all{1}, mean(F.ber_run{1}, 4));
+verifyEqual(tc, numel(F.maps), 7);
+verifyEqual(tc, {F.maps([3 4]).name}, {sprintf('noise_burst random 0.775 @ %g deg', F.GEOM_AOA(1)), ...
+    sprintf('noise_burst J4 0.2 @ %g deg', F.GEOM_AOA(1))});
+A1 = F.grid_data_A(1); B1 = F.grid_data_B(1);
+verifyEqual(tc, A1.status, [2 * ones(1, 6); 3 * ones(1, 6)]);
+verifyTrue(tc, all(A1.committed(:)));
+verifyEqual(tc, B1.status, [ones(1, 6); 3 * ones(1, 6)]);                % two flights: 1.5e-4 within 2x
+verifyEqual(tc, B1.link_limited, logical([1 0 0 0 0 0; zeros(1, 6)]));
+verifyEqual(tc, B1.committed, logical([zeros(1, 6); ones(1, 6)]));
+verifyTrue(tc, all(B1.saturated(2, :)));
+verifyEqual(tc, F.grid_data_B(3).status, 3 * ones(2, 6));               % random 0.775: every configuration hit
+verifyEqual(tc, F.grid_data_B(4).status, ones(2, 6));                   % J4
+P7 = F.grid_data_B(7);
+verifyTrue(tc, all(P7.no_action_ok(1, :))); verifyEqual(tc, P7.link_limited(1, :), [true false(1, 5)]);
+verifyTrue(tc, all(F.gap_cls(7).g1(2, :))); verifyTrue(tc, all(F.gap_cls(1).g2(1, :)));
+txt = fileread(fullfile('results', 'survivability_boundary_mapB.txt'));
+verifyNotEmpty(tc, strfind(txt, 'Protocol surv_v2'));
+verifyNotEmpty(tc, strfind(txt, 'the decision layer''s reference floor; cell resolution'));
+verifyNotEmpty(tc, strfind(txt, 'Xnone')); verifyNotEmpty(tc, regexp(txt, '\sLN\s', 'once'));
+gap = fileread(fullfile('results', 'survivability_gap_analysis.txt'));
+verifyNotEmpty(tc, strfind(gap, '| Map B 0 err ('));
+verifyNotEmpty(tc, strfind(gap, 'Total gap cells: 6 class 1, 12 class 2'));
+cd(here);
+end
+
+function surv_script_run(SMOKE) %#ok<INUSD>
+% The survivability map script in a workspace of its own, with run_stage's SMOKE.
+map_survivability_boundary;
+end
+
+function d = surv_stub_dir()
+% A stand-in pool_cell.m for the survivability map, first on the path: per Eb/N0 it logs the
+% flights and the duty it was given (global SURV_STUB_LOG) and returns frames whose BER and
+% loss follow surv_stub_value.m: the clean link loses every packet at the first Eb/N0;
+% jamming at 16 dB saturates every configuration; jamming at 4 dB leaves goodput-free
+% configurations at 3e-4 and the others at 3e-4 on flight 1 only; path loss of 16 dB hits the
+% goodput-free configurations; noise bursts above duty 0.5, and no_action under any threat
+% but path loss, are hit.
+d = fullfile(tempname); mkdir(d);
+fid = fopen(fullfile(d, 'pool_cell.m'), 'w');
+fprintf(fid, '%s\n', 'function [P, info] = pool_cell(p, threat, A, EB, geo, ~, opt)', 'global SURV_STUB_LOG', ...
+    'P = cell(numel(EB), numel(A), 1);', 'for s = 1:numel(EB)', '    g = geo{s};', ...
+    ['    SURV_STUB_LOG{end+1} = struct(''threat'', threat, ''duty'', p.burst_duty, ''timing'', ' ...
+    'p.jam_timing_random, ''seed'', g.seed, ''run'', g.run);'], ...
+    '    for a = 1:numel(A)', '        run = repelem(g.run(:), opt.F_SUB);', ...
+    '        [b, f] = surv_stub_value(threat, p, A{a}, s, run);', ...
+    '        P{s, a, 1} = struct(''run'', run, ''ber'', b, ''fer'', f);', '    end', 'end', ...
+    'info = struct(''n_unique'', numel(A), ''map'', 1:numel(A));', 'end');
+fclose(fid);
+fid = fopen(fullfile(d, 'surv_stub_value.m'), 'w');
+fprintf(fid, '%s\n', 'function [b, f] = surv_stub_value(threat, p, a, s, run)', ...
+    'n = numel(run); b = zeros(n, 1); f = zeros(n, 1);', ...
+    'gl = contains(a, ''rate_reduce'') || contains(a, ''fec_interleave'');', 'switch threat', ...
+    '    case ''none''', '        if s == 1, f(:) = 1; end', '    case ''jamming''', ...
+    '        if p.jsr_db == 16, b(:) = 0.48; f(:) = 1;', ...
+    '        elseif strcmp(a, ''no_action''), b(:) = 0.02; f(:) = 1;', '        elseif ~gl, b(:) = 3e-4;', ...
+    '        else, b(run == 1) = 3e-4;', '        end', '    case ''path_loss''', ...
+    '        if p.path_loss_db == 16 && ~gl, b(:) = 0.01; f(:) = 1; end', '    case ''noise_burst''', ...
+    '        if p.burst_duty > 0.5 || strcmp(a, ''no_action''), b(run == 1) = 0.3; f(run == 1) = 1; end', ...
+    '        if p.burst_duty > 0.5, b(:) = 0.3; f(:) = 1; end', 'end', 'end');
+fclose(fid);
+addpath(d, '-begin'); clear pool_cell surv_stub_value
+end
+
 function stub_off(d)
 % Removes a stand-in folder from the path and the disk.
 rmpath(d); clear pool_cell
@@ -1042,8 +1688,19 @@ S = [S; arrayfun(@(si, ri) pool_seed(2, si, 10, ri), s(:), r(:))];
 S = [S; arrayfun(@(si, bi) pool_seed(1, si, bi, 100), s(:), b(:))];
 [s, r, b, f] = ndgrid(1:6, 1:100, [4 15], [3 5]);       % clean-link geometries 101-300 (families 3 and 5)
 S = [S; arrayfun(@(si, ri, bi, fi) pool_seed(fi, si, bi, ri), s(:), r(:), b(:), f(:))];
-[t, li, s] = ndgrid(1:20, 1:8, 1:6);                    % survivability map: entries, levels, Eb/N0
+[s, r, f] = ndgrid(1:6, 1:100, [7 8 9]);                % the fresh clean test set (block 15, P1R)
+SF = arrayfun(@(si, ri, fi) pool_seed(fi, si, 15, ri), s(:), r(:), f(:));
+verifyLessThan(tc, max(SF), 2000000);                   % pool seeds stay below 2 000 000 (shadow_pool_seed.m)
+verifyEqual(tc, [min(SF) max(SF)], [1941501 1986600]);
+S = [S; SF];
+[s, r, f] = ndgrid(1:6, 1:100, [7 8 9]);                % the fresh set's smoke build (block 18)
+SF = arrayfun(@(si, ri, fi) pool_seed(fi, si, 18, ri), s(:), r(:), f(:));
+verifyLessThan(tc, max(SF), 2000000);
+S = [S; SF];
+[t, li, s] = ndgrid(1:20, 1:10, 1:6);                   % survivability map: entries, levels (path loss 10), Eb/N0
 S = [S; 900000 + 1000*t(:) + 10*li(:) + s(:); 700000 + (1:5)'];
+[t, r] = ndgrid(1:20, 1:5);                             % the surv_v2 map: entries, flights (surv_flights.m)
+S = [S; 900000 + 1000*t(:) + r(:)];
 k = (1:99999)';
 S = [S; 3000000 + k; 4000000 + k; 5000000 + k];         % dataset, unseen Eb/N0 and unseen severity runs
 S = [S; 3500000 + k; 4500000 + k; 5500000 + k];         % the second test set and the second B4 and B4s readings
@@ -1073,6 +1730,17 @@ verifyLessThan(tc, hi(end), 2^26);
 verifyLessThan(tc, seed_base(hi(end)) + 63, 2^32);
 verifyError(tc, @() shadow_pool_seed(1, 1, 4, 1), ?MException);       % the clean pools' blocks hold none
 verifyError(tc, @() shadow_pool_seed(1, 1, 17, 100000), ?MException);
+% The candidates of the survivability options' shadowing flights under surv_v2
+% (surv3_shadow_seed.m): a range of their own per Eb/N0, above the pools' candidates, the largest
+% below 2^26 and its streams below 2^32
+lo3 = arrayfun(@(si) surv3_shadow_seed(si, 1), 1:8); hi3 = arrayfun(@(si) surv3_shadow_seed(si, 99999), 1:8);
+verifyEqual(tc, hi3 - lo3, 99998 * ones(1, 8));
+verifyTrue(tc, all(hi3(1:end-1) < lo3(2:end)));
+verifyGreaterThan(tc, lo3(1), hi(end));
+verifyLessThan(tc, hi3(end), 2^26);
+verifyLessThan(tc, seed_base(hi3(end)) + 63, 2^32);
+verifyError(tc, @() surv3_shadow_seed(9, 1), ?MException);
+verifyError(tc, @() surv3_shadow_seed(1, 100000), ?MException);
 for f = {{'eval_unseen_snr', 'SEED_SHD  = SEED0 + 50000;'}, {'eval_unseen_severity', 'SEED_SHD = SEED0 + 50000;'}}
     src = fileread(which(f{1}{1}));
     verifyNotEmpty(tc, strfind(src, f{1}{2}), f{1}{1});
@@ -1110,6 +1778,13 @@ for x = {q, m}
     verifyEmpty(tc, intersect(x{1}, N(:)));
     verifyLessThan(tc, max(x{1}), min(N(:)));
 end
+% Dev set C (dev_fec_burst.m): link seeds of its own, none of the earlier dev sets' (7001-7060,
+% 7201-7260, 7301-7360, 7401-7415, 7601-7730) nor of the flights above, nor their streams
+DC = (7801:7860)';
+verifyEmpty(tc, intersect(DC, [7001:7060, 7201:7260, 7301:7360, 7401:7415, 7601:7730]'));
+verifyEmpty(tc, intersect(DC, S));
+verifyEmpty(tc, intersect(reshape(seed_base(DC) + off, [], 1), N(:)));
+verifyNotEmpty(tc, strfind(fileread(fullfile(tc.TestData.root, 'code', 'dev', 'dev_fec_burst.m')), 'SEEDS = 7801:7860;'));
 end
 
 function test_draws_independent(tc)
@@ -2672,6 +3347,300 @@ hb = reshape([imag(y(:)) < 0, real(y(:)) < 0]', [], 1);       % first bit from I
 verifyEqual(tc, hb([2*k - 1, 2*k]), logical(b([2*k - 1, 2*k])));
 d = pskdemod(z, 4, pi/4, 'gray', 'OutputType', 'bit');
 verifyEqual(tc, d([2*k - 1, 2*k]), b([2*k - 1, 2*k]));
+end
+
+function test_fec_rx_switch(tc)
+% The decoder switch (profile.json fec_rx, fec_rx_config.m): an absent file or field states
+% none, "d78" the D78 rules, a JSI struct its chosen values (frame c with thr and flag_clean);
+% a struct without a value or with one out of range is refused. The D78 rules and an unstated
+% decoder leave the params as they are, so profile 1's pools, keys and identity stay; the JSI
+% decoder enters the params, the policy pools (PP.fec_rx, the model tag) and, from the policy
+% pools, the check and clean pools. A full C1p refuses without a stated decoder.
+f = [tempname '.json'];
+verifyEmpty(tc, fec_rx_config(f));
+wr = @(t) write_text(f, t);
+wr('{"profile":"profile 3","n_rx":4}'); verifyEmpty(tc, fec_rx_config(f));
+wr('{"n_rx":4,"fec_rx":"d78"}'); verifyEqual(tc, fec_rx_config(f), struct('mode', 'd78'));
+js = ['{"fec_rx":{"mode":"jsi","rev":"D99","q":0.05,"c":4.6,"h":1,"erase_sym":true,"frame":"c","thr":0.85,' ...
+    '"flag_clean":0.009}}'];
+wr(js); R = fec_rx_config(f);
+verifyEqual(tc, R, struct('mode', 'jsi', 'rev', 'D99', 'q', 0.05, 'c', 4.6, 'h', 1, 'erase_sym', true, 'frame', 'c', ...
+    'thr', 0.85, 'flag_clean', 0.009));
+wr(strrep(js, '"frame":"c","thr":0.85,"flag_clean":0.009', '"frame":"b"')); Rb = fec_rx_config(f);
+verifyTrue(tc, isnan(Rb.thr) && isnan(Rb.flag_clean) && strcmp(Rb.frame, 'b'));
+for bad = {strrep(js, '"c":4.6,', ''), strrep(js, '"frame":"c"', '"frame":"d"'), strrep(js, '"h":1', '"h":2'), ...
+        strrep(js, ',"thr":0.85', ''), strrep(js, '"erase_sym":true', '"erase_sym":1'), '{"fec_rx":"jsi"}', ...
+        strrep(js, '"q":0.05', '"q":0.6'), strrep(js, '"rev":"D99",', '')}
+    wr(bad{1}); verifyError(tc, @() fec_rx_config(f), 'fec_rx_config:value', bad{1});
+end
+delete(f);
+p = struct('n_rx', 3, 'fec_frames', 4);
+verifyEqual(tc, fec_rx_on(p, []), p);
+verifyEqual(tc, fec_rx_on(p, struct('mode', 'd78')), p);
+q = fec_rx_on(p, R); verifyEqual(tc, q.fec_rx, R);
+verifyEqual(tc, fec_rx_of(p), struct('mode', 'd78'));
+verifyEqual(tc, fec_rx_of(struct('fec_rx', struct('mode', 'd78'))), struct('mode', 'd78'));
+verifyEqual(tc, fec_rx_of(q), R);
+src = fileread(which('build_policy_pools'));
+verifyNotEmpty(tc, strfind(src, 'MODEL_TAG = ''v7-D89'';'));
+verifyNotEmpty(tc, strfind(src, 'FRX = fec_rx_config();'));
+verifyNotEmpty(tc, strfind(src, 'error(''build_policy_pools:fec_rx'''));
+verifyNotEmpty(tc, strfind(src, 'if ~(exist(''SMOKE'', ''var'') && SMOKE)'));
+verifyNotEmpty(tc, strfind(src, 'TAG = MODEL_TAG; if strcmp(FRX.mode, ''jsi''), TAG = [MODEL_TAG ''+'' FRX.rev]; end'));
+verifyNotEmpty(tc, strfind(src, '''model_tag'', TAG, ''fec_rx'', FRX'));
+verifyNotEmpty(tc, strfind(src, 'strcmp(Lo.PP.model_tag, TAG)'));
+verifyNotEmpty(tc, strfind(src, 'p0 = fec_rx_on(p0, FRX);'));
+for g = {'build_check_pools', 'build_clean_test_pools'}
+    verifyNotEmpty(tc, strfind(fileread(which(g{1})), 'PRX = fec_rx_of(PP);'), g{1});
+end
+verifyNotEmpty(tc, strfind(fileread(which('build_clean_test_pools')), '&& isequal(fec_rx_of(Cx.CT), PRX)'));
+for g = {'map_survivability_boundary', 'experiment_survivability_options', 'threat_gallery'}
+    verifyNotEmpty(tc, strfind(fileread(which(g{1})), 'p0 = fec_rx_on(p0, fec_rx_config());'), g{1});
+end
+verifyNotEmpty(tc, strfind(fileread(which('rekey_pools')), '''fec_frames'', ''fec_rx'''));
+end
+
+function test_jsi_floor(tc)
+% The quiet-symbol floor of a codeword (jsi_floor.m) on exponential residuals of unit variance:
+% clean, under the random jammer at duty 0.5 and 0.775 (30 dB over the floor), under J4 with
+% the RRC leaks of its bursts on their neighbours (0.068, 0.0073, 0.0013 of the burst at 1, 2
+% and 3 symbols), which leave few symbols at the thermal floor, and a continuous interferer,
+% which the floor follows. The q-quantile alone sits about 1/f too high with a share f of
+% clean symbols; the truncated refinement removes that.
+rs = RandStream('mt19937ar', 'Seed', 5); n = 2064; q = 0.05;
+ex = @(v) -log(rand(rs, n, 1)) .* v;
+verifyEqual(tc, jsi_floor(ex(ones(n, 1)), q), 1, 'RelTol', 0.15);
+for d = [0.5 0.775]
+    r = ex(1 + 1000 * (rand(rs, n, 1) < d));
+    verifyEqual(tc, jsi_floor(r, q), 1, 'RelTol', 0.25, sprintf('random %.3f', d));
+    x = sort(r);
+    if d > 0.7, verifyGreaterThan(tc, x(ceil(q * n)) / -log(1 - q), 3.5); end   % the quantile alone
+end
+lk = [0.0013 0.0073 0.068 0.847 0.068 0.0073 0.0013];
+v = 1 + 1000 * conv(double(rand(rs, n + 6, 1) < 0.2), lk', 'valid');
+s0 = jsi_floor(ex(v), q);
+verifyGreaterThan(tc, s0, 0.8); verifyLessThan(tc, s0, 2.5);
+verifyEqual(tc, jsi_floor(ex(50 * ones(n, 1)), q), 50, 'RelTol', 0.15);
+verifyEqual(tc, jsi_floor([NaN; Inf], q), eps);
+end
+
+function test_jsi_inputs(tc)
+% Per-symbol jammer state information (jsi_inputs.m): every data symbol's residual about its
+% block's gain, the median of z conj(s) over the block, twice (one per bit); num the
+% magnitudes of conj(g) z on the two rails; h = 1 averages each residual with its neighbours
+% in the frame. On a clean frame num over the block's mean residual is bit_reliability.m's
+% reliability within the gain estimates' difference; a 30 dB burst on a fifth of the symbols
+% leaves the clean symbols' residuals where they were (a block mean gain would not).
+p = struct('frame_length', 1032); nd = 516; B = 32;
+rs = RandStream('mt19937ar', 'Seed', 7);
+b = randi(rs, [0 1], 2 * p.frame_length, 1);
+s = reshape(pskmod(b, 4, pi/4, 'gray', 'InputType', 'bit'), nd, 2);
+g = 0.8 * exp(1j * 0.3);
+z = g * s + 0.05 * complex(randn(rs, nd, 2), randn(rs, nd, 2));
+J0 = jsi_inputs(z, p, 0); J1 = jsi_inputs(z, p, 1);
+verifyEqual(tc, size(J0.num), [2 * p.frame_length, 1]);
+verifyEqual(tc, J0.res(1:2:end), J0.res(2:2:end));
+r = reshape(J0.res(1:2:end), nd, 2); w = reshape(J0.num, 2, nd, 2);
+nb = floor(nd / B); es = zeros(nd, 2);
+for f = 1:2
+    zs = (sign(real(z(:, f))) + 1j * sign(imag(z(:, f)))) / sqrt(2);
+    for k = 1:nb
+        i = (k-1)*B + 1 : k*B; if k == nb, i = (k-1)*B + 1 : nd; end
+        y = z(i, f) .* conj(zs(i)); gk = complex(median(real(y)), median(imag(y)));
+        verifyEqual(tc, r(i, f), abs(z(i, f) - gk * zs(i)).^2, 'RelTol', 1e-12);
+        v = 2 * sqrt(2) * conj(gk) * z(i, f);
+        verifyEqual(tc, squeeze(w(:, i, f)), [abs(imag(v)), abs(real(v))]', 'RelTol', 1e-12);
+        es(i, f) = mean(r(i, f));
+    end
+end
+verifyEqual(tc, median(J0.num ./ repelem(es(:), 2) ./ bit_reliability(z, p)), 1, 'AbsTol', 0.05);
+verifyEqual(tc, reshape(J1.res_h(1:2:end), nd, 2), movmean(r, 3), 'RelTol', 1e-12);
+hit = rand(rs, nd, 2) < 0.2;
+zb = z; zb(hit) = zb(hit) + 0.8 * sqrt(1000 / 2) * complex(randn(rs, nnz(hit), 1), randn(rs, nnz(hit), 1));
+rb = reshape(jsi_inputs(zb, p, 0).res(1:2:end), nd, 2);
+verifyLessThan(tc, median(rb(~hit)), 2 * median(r(~hit)));
+verifyGreaterThan(tc, mean(rb(hit)), 100 * median(r(:)));
+end
+
+function test_fec_packets_jsi(tc)
+% The JSI decoder (fec_packets.m with J; closed_loop_truth.m with p.fec_rx). A clean run
+% decodes every packet under every variant. J4 bursts (a fifth of the data symbols, 30 dB) in
+% the combiner output (MRC): the JSI decoder decodes every packet, the D78 rules, whose
+% antenna-1 energy test widened by 11 symbols erases about 91% of the bits, lose them. The
+% same bursts on antenna 1 with a combiner output the MMSE null cleaned: the JSI decoder
+% decodes and flags about the clean rate, the D78 rules erase the clean symbols and lose the
+% packets. Whole frames: a confidently wrong frame (a rotated estimate) with a high pilot
+% error costs packets under 'b' and is erased by 'a' and 'c'; the same frame with bursts on
+% 30% of its symbols stays symbol-wise under 'c' (a burst frame) and is erased under 'a'.
+% Without p.fec_rx closed_loop_truth.m gives the D78 result, and fec_packets.m's D78 path is
+% the parent commit's (lect-kpi 8b396e6) bit for bit.
+p = base_params(); Lf = frame_layout(p); bpf = p.frame_length; nd = bpf / 2; nf = 20; d = p.filter_span / 2;
+rs = RandStream('mt19937ar', 'Seed', 11);
+tx = randi(rs, [0 1], nf * bpf, 1);
+s = reshape(pskmod(tx, 4, pi/4, 'gray', 'InputType', 'bit'), nd, nf);
+g = 0.9 * exp(1j * 0.2); sg = abs(g) * sqrt(10^(-12/10) / 2);          % Es/N0 12 dB
+burst = @(m) abs(g) * sqrt(1000 / 2) * complex(randn(rs, m, 1), randn(rs, m, 1));
+zc = g * s + sg * complex(randn(rs, nd, nf), randn(rs, nd, nf));
+hit = rand(rs, nd, nf) < 0.2;
+zb = zc; zb(hit) = zb(hit) + burst(nnz(hit));
+dm = @(z) pskdemod(z(:), 4, pi/4, 'gray', 'OutputType', 'bit');
+iq = ones(Lf.air * p.sps, nf); iqb = iq;                                % antenna 1 with the bursts' energy
+[k, f] = find(hit);
+for i = 1:numel(k)
+    m = Lf.idx_data(k(i)) + d;
+    if m <= Lf.air, iqb((m-1)*p.sps + 1:m*p.sps, f(i)) = sqrt(1000); end
+end
+R0 = struct('mode', 'jsi', 'rev', 'test', 'q', 0.05, 'c', 4.6, 'h', 0, 'erase_sym', true, 'frame', 'b', 'thr', 0.8, ...
+    'flag_clean', 0.02);
+z0 = zeros(1, nf); r0 = dm(zc);
+for fr = {'a', 'b', 'c'}
+    for es = [false true]
+        for h = [0 1]
+            R = R0; R.frame = fr{1}; R.erase_sym = es; R.h = h;
+            verifyEqual(tc, fec_packets(tx, r0, iq, p, nf, false(1, nf), [], jsi_for(zc, p, R, z0)), zeros(1, nf), ...
+                sprintf('clean %s %d %d', fr{1}, es, h));
+        end
+    end
+end
+rb = dm(zb);
+verifyGreaterThan(tc, nnz(rb ~= tx), 0.05 * numel(tx));
+verifyEqual(tc, fec_packets(tx, rb, iq, p, nf, [], [], jsi_for(zb, p, R0, z0)), zeros(1, nf));
+verifyGreaterThan(tc, nnz(fec_packets(tx, rb, iqb, p, nf, [], bit_reliability(zb, p)) > 0), nf / 2);
+J = jsi_for(zc, p, R0, z0);
+verifyEqual(tc, fec_packets(tx, r0, iqb, p, nf, [], [], J), zeros(1, nf));
+verifyLessThan(tc, mean(J.res_h > R0.c * jsi_floor(J.res, R0.q)), 0.03);
+verifyGreaterThan(tc, nnz(fec_packets(tx, r0, iqb, p, nf, [], bit_reliability(zc, p)) > 0), nf / 2);
+zr = zc; zr(:, 7) = -zc(:, 7);                                         % frame 7: confident and wrong
+pe = z0; pe(7) = 2; er7 = false(1, nf); er7(7) = true;
+R = R0; R.frame = 'b';
+verifyGreaterThan(tc, max(fec_packets(tx, dm(zr), iq, p, nf, er7, [], jsi_for(zr, p, R, pe))), 0);
+R.frame = 'a';
+verifyEqual(tc, fec_packets(tx, dm(zr), iq, p, nf, er7, [], jsi_for(zr, p, R, pe)), zeros(1, nf));
+R.frame = 'c';
+verifyEqual(tc, fec_packets(tx, dm(zr), iq, p, nf, [], [], jsi_for(zr, p, R, pe)), zeros(1, nf));
+hq = rand(rs, nd, 1) < 0.3;
+zw = zr; zw(hq, 7) = zw(hq, 7) + burst(nnz(hq));                        % and 30% of it jammed
+verifyGreaterThan(tc, max(fec_packets(tx, dm(zw), iq, p, nf, [], [], jsi_for(zw, p, R, pe))), 0);
+R.frame = 'a';
+verifyEqual(tc, fec_packets(tx, dm(zw), iq, p, nf, er7, [], jsi_for(zw, p, R, pe)), zeros(1, nf));
+T = struct('tx_al', tx, 'rx_al', rb, 'iq', iqb, 'zc', zb, 'delay_bits', 0, 'nf', nf, 'erase', er7, 'pilot_err', pe);
+q = p; q.fec = true;
+[b1, f1, c1] = closed_loop_truth(T, q);
+[b2, f2, c2] = fec_packets(tx, rb, iqb, q, nf, er7, bit_reliability(zb, q));
+verifyTrue(tc, isequaln({b1, f1, c1}, {b2, f2, c2}));
+qj = q; qj.fec_rx = R0; qj.fec_rx.frame = 'a';
+[b5, f5, c5] = closed_loop_truth(T, qj);
+[b6, f6, c6] = fec_packets(tx, rb, iqb, qj, nf, er7, [], jsi_for(zb, qj, qj.fec_rx, pe));
+verifyTrue(tc, isequaln({b5, f5, c5}, {b6, f6, c6}));
+dp = parent_copy(tc, 'code/link/fec_packets.m', '8b396e6');
+addpath(dp, '-begin'); clear fec_packets
+cl0 = onCleanup(@() fixture_off(dp, 'fec_packets')); %#ok<NASGU>
+verifyEqual(tc, which('fec_packets'), fullfile(dp, 'fec_packets.m'));
+[b3, f3, c3] = fec_packets(tx, rb, iqb, q, nf, er7, bit_reliability(zb, q));
+b4 = fec_packets(tx, r0, iqb, q, nf);
+fixture_off(dp, 'fec_packets');
+verifyTrue(tc, isequaln({b1, f1, c1}, {b3, f3, c3}));
+verifyTrue(tc, isequaln(b4, fec_packets(tx, r0, iqb, q, nf)));
+end
+
+function test_jsi_tails(tc)
+% No widening (fec_packets.m JSI): a J4 burst's RRC tails at the matched filter output (shares
+% of its in-band energy at offsets 0 to 4: 0.847, 0.068, 0.0073, 0.0013, 0.0002; roll-off 0.25,
+% span 10) raise its neighbours' residuals by their own leak, so each neighbour is flagged as
+% often as its variance over the floor says, e^(-c floor / variance): at 4 dB the next symbol
+% now and then, at 30 dB the third one as well. Thermal variance 1, Es/N0 12 dB.
+rs = RandStream('mt19937ar', 'Seed', 9); n = 40000; c = 4.6; lk = [0.847 0.068 0.0073 0.0013 0.0002];
+for L = [4 16 30]
+    Jb = 10^(L / 10) * 10^(12 / 10);                      % a burst over the thermal variance
+    b = rand(rs, n + 8, 1) < 0.2;
+    v = 1 + Jb * conv(double(b), [lk(end:-1:2) lk]', 'valid');
+    r = -log(rand(rs, n, 1)) .* v;
+    s0 = jsi_floor(r, 0.05);
+    bc = b(5:end-4);                                     % the bursts aligned with r
+    iso = find(bc & movsum(double(bc), 9) == 1);         % no other burst within 4 symbols
+    iso = iso(iso > 4 & iso <= n - 4);
+    verifyGreaterThan(tc, numel(iso), 500);
+    for m = 1:3
+        got = mean(r(iso + m) > c * s0);
+        want = mean(exp(-c * s0 ./ v(iso + m)));
+        verifyEqual(tc, got, want, 'AbsTol', 0.06, sprintf('%d dB, offset %d', L, m));
+    end
+    if L == 30, verifyGreaterThan(tc, mean(r(iso + 3) > c * s0), 0.3); end
+    if L == 4, verifyLessThan(tc, mean(r(iso + 2) > c * s0), 0.05); end
+end
+end
+
+function test_dev_fec_gates(tc)
+% The adoption checks of dev set C (dev_fec_gates.m, dev_fec_burst.m select step 4): J4 at
+% 4 dB under no_action within 2 x the clean link's loss at 9 dB, floored at one packet; J4
+% at 10 dB under no_action within that bound or more than Q/2 packets below the D78
+% decoder's loss; the random jammer at duty 0.775 under no_action flagged when it decodes at
+% 10 dB or more, never at 4 dB. The select step adopts only with every check.
+cl = dev_path(tc); %#ok<NASGU>
+nm = {'clean_no_action', 'clean_no_action', 'nb_j4_04_no_action', 'nb_j4_04_power_control', 'nb_j4_10_no_action', ...
+    'nb_r775_04_no_action', 'nb_r775_10_no_action', 'nb_r775_30_no_action', 'd78_j16_mmse'};
+lv = [0 0 4 4 10 4 10 30 16];
+cf = {'no_action', 'no_action', 'no_action', 'power_control', 'no_action', 'no_action', 'no_action', 'no_action', ''};
+eb = [3 9 9 9 9 9 9 9 6];
+npk = 600 * ones(1, 9); Q = 4;
+lost = [300 0 2 50 40 0 600 600 0];
+rl = [300 0 30 50 43 0 600 600 0];
+g = @(x, r) dev_fec_gates(x, r, npk, nm, lv, cf, eb, Q);
+G = g(lost, rl);
+verifyEqual(tc, G.lim, 2 / 600, 'AbsTol', 1e-15);                 % no clean loss at 9 dB: one packet, x 2
+verifyTrue(tc, G.j4); verifyTrue(tc, G.j4_10); verifyFalse(tc, G.dec775);
+x = lost; x(3) = 3; verifyFalse(tc, g(x, rl).j4);                   % 3 of 600 above the 2 allowed
+x = lost; x(4) = 600; verifyTrue(tc, g(x, rl).j4);                  % only no_action counts
+x = lost; x(1) = 0; x(2) = 6; x(3) = 12; G = g(x, rl);              % the clean link at 9 dB, not at 3 dB
+verifyEqual(tc, G.lim, 12 / 600, 'AbsTol', 1e-15); verifyTrue(tc, G.j4);
+x = lost; x(5) = 41; verifyFalse(tc, g(x, rl).j4_10);               % exactly Q/2 fewer than D78: not more
+x = lost; x(5) = 38; verifyTrue(tc, g(x, rl).j4_10);
+x = lost; x(5) = 2; r = rl; r(5) = 2; verifyTrue(tc, g(x, r).j4_10);    % within the clean bound, no gain over D78
+x = lost; x(5) = 3; r = rl; r(5) = 3; verifyFalse(tc, g(x, r).j4_10);   % above the bound, no gain over D78
+x = lost; x(5) = 0; r = rl; r(5) = 0; verifyTrue(tc, g(x, r).j4_10);    % a perfect decoder where D78 is perfect too
+x = lost; x(7) = 1; verifyTrue(tc, g(x, rl).dec775);                % decodes at 10 dB
+x = lost; x(8) = 0; verifyTrue(tc, g(x, rl).dec775);                % or at 30 dB
+verifyFalse(tc, g(lost, rl).dec775);                                % at 4 dB it is reported only
+src = fileread(which('dev_fec_burst'));
+verifyNotEmpty(tc, strfind(src, 'G = dev_fec_gates(lost(best, :), rlost, npk, nm, [D.level], {D.config}, [D.ebno], Q);'));
+verifyNotEmpty(tc, strfind(src, 'adopt = ~isempty(best) && ok_floor && ok_j4 && ok_j4_10 && ~dec775;'));
+verifyNotEmpty(tc, strfind(src, 'R0 = nb_cutoff_rate(CAP{k, 1}, LV);'));
+verifyNotEmpty(tc, strfind(src, 'rlost(i), lost(best, i), npk(i), rber(i), dber(best, i)'));   % the loss beside C and R0
+end
+
+function test_nb_cutoff_rate(tc)
+% The cutoff rate R0(1) with ideal per-symbol state information in the dev set C table
+% (nb_cutoff_rate.m): R0(1) = -log2 E{2^-R0_s} (McEliece and Stark 1984, (4.9)), BPSK rails
+% at Eb/N0 9 dB: the values of the protocol's section 1, our own calculation from the
+% model's parameters; without a jammer the rail's own R0; never above the states' mean R0
+% (Jensen); falling with the level; an unknown pattern refused.
+cl = dev_path(tc); %#ok<NASGU>
+LV = [4 10 16 23 30];
+verifyEqual(tc, nb_cutoff_rate('j4', LV), [0.733066 0.563443 0.417538 0.280687 0.186495], 'AbsTol', 1e-5);
+verifyEqual(tc, nb_cutoff_rate('r50', LV), [0.502324 0.438361 0.420868 0.416067 0.415104], 'AbsTol', 1e-5);
+verifyEqual(tc, nb_cutoff_rate('r775', LV), [0.287797 0.202974 0.179985 0.173692 0.172430], 'AbsTol', 1e-5);
+r0 = 1 - log2(1 + exp(-10^1.2 / 2));
+for k = {'j4', 'r50', 'r775'}
+    verifyEqual(tc, nb_cutoff_rate(k{1}, -200), r0, 'AbsTol', 1e-12, k{1});
+    R = nb_cutoff_rate(k{1}, 0:2:40);
+    verifyTrue(tc, all(diff(R) < 0), k{1});
+end
+J = 10;                                                              % 10 dB, random jammer at duty 0.775
+r0s = @(v) 1 - log2(1 + exp(-1 ./ (2 * v)));
+verifyLessThanOrEqual(tc, nb_cutoff_rate('r775', 10), 0.225 * r0s(10^-1.2) + 0.775 * r0s(10^-1.2 + J));
+verifyError(tc, @() nb_cutoff_rate('r60', 10), 'nb_cutoff_rate:pattern');
+end
+
+function cl = dev_path(tc)
+% code/dev on the path for one test (startup.m and setup_paths.m leave it off).
+d = fullfile(tc.TestData.root, 'code', 'dev');
+if any(strcmpi(strsplit(path, pathsep), d)), cl = onCleanup(@() []); return; end
+addpath(d); cl = onCleanup(@() rmpath(d));
+end
+
+function J = jsi_for(z, p, R, pe)
+% JSI inputs of a run without delay (closed_loop_truth.m aligns them by delay_bits).
+J = jsi_inputs(z, p, R.h); J.rx = R; J.pe = pe;
 end
 
 function test_sync_frequency_sign(tc)
@@ -4689,6 +5658,7 @@ for f = fieldnames(st)'
     verifyNotEmpty(tc, regexp(src, ['pool_lpt\(@\(S, [cj]\) pool_job\(''' f{1} ''', S, [cj]\), S, ' jobs ', pl\);'], 'once'), f{1});
     m = regexp(src, '\nS = struct\((.*?)\);', 'tokens', 'once');
     have = regexp(m{1}, '''(\w+)'', \{', 'tokens'); have = [have{:}];
+    more = regexp(src, '(?<![\w.])S\.(\w+) = ', 'tokens'); have = unique([have, more{:}]);   % fields set after the struct (surv3's surv_v2)
     b = regexp(job, ['case ''' f{1} '''(.*?)(\n    case |\n    otherwise)'], 'tokens', 'once');
     used = regexp(b{1}, '(?<![\w.])S\.(\w+)', 'tokens'); used = unique([used{:}]);
     verifyEmpty(tc, setdiff(used, have), f{1});
@@ -4953,6 +5923,26 @@ for k = [1 100 101 200 201 300]
 end
 verifyError(tc, @() pool_seed(1, 1, 15, 101), ?MException);
 verifyError(tc, @() pool_seed(1, 1, 15, 0), ?MException);
+for k = [1 100 101 200 201 300]                         % the fresh set: families 7, 8, 9
+    verifyEqual(tc, clean_pool_seed(2, 15, k, [], [7 8 9]), pool_seed(7 + floor((k - 1) / 100), 2, 15, mod(k - 1, 100) + 1));
+end
+verifyError(tc, @() clean_pool_seed(1, 15, 301), ?MException);
+verifyError(tc, @() clean_pool_seed(1, 15, 0), ?MException);
+verifyError(tc, @() clean_pool_seed(1, 15, 301, [], [7 8 9]), ?MException);
+% 'test' and 'val' keep the parent commit's (lect-kpi fcdc199) seeds and speeds, every geometry
+[s, k, b] = ndgrid(1:6, 1:300, [4 15]);
+vr = [29 161];
+N1 = arrayfun(@(si, ki, bi) clean_pool_seed(si, bi, ki), s(:), k(:), b(:));
+[N2, V2] = arrayfun(@(si, ki, bi) clean_pool_seed(si, bi, ki, vr, [1 3 5]), s(:), k(:), b(:));
+d = parent_copy(tc, 'code/decision/clean_pool_seed.m', 'fcdc199');
+addpath(d, '-begin'); clear clean_pool_seed
+cl0 = onCleanup(@() fixture_off(d, 'clean_pool_seed')); %#ok<NASGU>
+verifyEqual(tc, which('clean_pool_seed'), fullfile(d, 'clean_pool_seed.m'));
+O1 = arrayfun(@(si, ki, bi) clean_pool_seed(si, bi, ki), s(:), k(:), b(:));
+[O2, W2] = arrayfun(@(si, ki, bi) clean_pool_seed(si, bi, ki, vr), s(:), k(:), b(:));
+fixture_off(d, 'clean_pool_seed');
+verifyEqual(tc, N1, O1); verifyEqual(tc, N2, O2); verifyEqual(tc, V2, W2);
+verifyEqual(tc, numel(unique(N1)), 2 * 6 * 300);
 p = base_params();
 s = arrayfun(@(k) clean_pool_seed(1, 4, k), [5 150 250]);
 V = flight_cov({struct('seed', s, 'speed', [30 60 90])}, 6, p);
@@ -4967,6 +5957,89 @@ verifyEmpty(tc, strfind(src, 'pool_seed(1, s_(q), blk, r_(q))'));
 verifyNotEmpty(tc, strfind(src, 'V = CT.cov;'));
 src = fileread(which('build_clean_test_pools'));
 verifyNotEmpty(tc, regexp(src, '''seed'', sds, ''cov'', V', 'once'));
+verifyNotEmpty(tc, strfind(src, 'clean_pool_seed(s, SP, k, vrange, FAMS)'));
+end
+
+function test_clean_fresh_guard(tc)
+% P1R's fresh clean test set (docs/p1r_protocol.md): its own families 7, 8, 9 of block 15, a
+% layout that stops on a pair another set owns, and a build only after C1d adopted a test (no
+% 'ratio' kept, no forced mark; the smoke skips the check). 'test' and 'val' keep their layout,
+% the chain's C1c never builds the fresh set, and only the fresh set saves CT.fams.
+[sp, fm, fo] = clean_set_layout('test'); verifyEqual(tc, {sp, fm, fo}, {15, [1 3 5], 'data/clean_test_pools.mat'});
+[sp, fm, fo] = clean_set_layout('val'); verifyEqual(tc, {sp, fm, fo}, {4, [1 3 5], 'data/clean_val_pools.mat'});
+[sp, fm, fo] = clean_set_layout('fresh'); verifyEqual(tc, {sp, fm, fo}, {15, [7 8 9], 'data/clean_fresh_pools.mat'});
+[sp, fm, fo] = clean_set_layout('fresh', true); verifyEqual(tc, {sp, fm, fo}, {18, [7 8 9], 'data/clean_fresh_pools.mat'});
+for c = {'test', 'val'}                                  % the smoke flag moves the fresh set only
+    [s0, f0, o0] = clean_set_layout(c{1}); [s1, f1, o1] = clean_set_layout(c{1}, true);
+    verifyEqual(tc, {s1, f1, o1}, {s0, f0, o0}, c{1});
+end
+verifyError(tc, @() clean_set_layout('bogus'), 'clean_set_layout:set');
+own = {1, 15, 'pools'; 1, 4, 'pools'; 1, 17, 'pools'; 2, 10, 'check'; 3, 15, 'clean'; 5, 4, 'clean'; ...
+    6, 14, 'core_bw'; 6, 19, 'core_bw'; 7, 15, 'fresh'; 9, 15, 'fresh'; 8, 18, 'fresh'; 7, 4, ''; 7, 19, ''; ...
+    4, 15, ''; 3, 10, ''};
+for i = 1:size(own, 1)
+    verifyEqual(tc, pool_seed_owner(own{i, 1}, own{i, 2}), own{i, 3}, sprintf('family %d block %d', own{i, 1}, own{i, 2}));
+end
+for b = [4 15]                                           % every family the clean sets fly is another set's
+    verifyTrue(tc, all(arrayfun(@(f) ~isempty(pool_seed_owner(f, b)) && ~strcmp(pool_seed_owner(f, b), 'fresh'), [1 3 5])));
+end
+dq = tempname; mkdir(dq);                                % an owner table where block 15's family 7 is taken
+fid = fopen(fullfile(dq, 'pool_seed_owner.m'), 'w');
+fprintf(fid, 'function own = pool_seed_owner(fam, block)\nown = ''clean'';\nend\n'); fclose(fid);
+addpath(dq, '-begin'); clear pool_seed_owner
+cl0 = onCleanup(@() fixture_off(dq, 'pool_seed_owner')); %#ok<NASGU>
+verifyError(tc, @() clean_set_layout('fresh'), 'clean_set_layout:reuse');
+fixture_off(dq, 'pool_seed_owner');
+verifyEqual(tc, clean_set_layout('fresh'), 15);
+% The guard on C1d's file, in a folder of its own
+w = tempname; mkdir(w); mkdir(fullfile(w, 'data')); here = pwd; cd(w);
+cl1 = onCleanup(@() cd(here)); %#ok<NASGU>
+f = 'data/drop_threshold.mat';
+verifyError(tc, @() clean_fresh_guard(f, false), 'clean_fresh_guard:none');
+verifyEmpty(tc, clean_fresh_guard(f, true));             % the smoke
+drop_db = 4; save(f, 'drop_db');
+verifyError(tc, @() clean_fresh_guard(f, false), 'clean_fresh_guard:none');
+DEG = struct('mode', 'ratio', 'ber_q', [], 'note', 'no clean validation flights: not chosen'); save(f, 'drop_db', 'DEG');
+verifyError(tc, @() clean_fresh_guard(f, false), 'clean_fresh_guard:none');
+DEG = struct('mode', 'ratio', 'ber_q', [], 'name', 'ratio', 'pick', 0); save(f, 'drop_db', 'DEG');
+verifyError(tc, @() clean_fresh_guard(f, false), 'clean_fresh_guard:ratio');
+DEG = struct('mode', 'win', 'ber_q', [], 'name', 'F1 win', 'pick', 1, 'rule_pick', 'F1 win', 'forced', 'win');
+save(f, 'drop_db', 'DEG');
+verifyError(tc, @() clean_fresh_guard(f, false), 'clean_fresh_guard:forced');
+DEG = struct('mode', 'win', 'ber_q', [], 'name', 'F1 win', 'pick', 1); save(f, 'drop_db', 'DEG');
+verifyEqual(tc, clean_fresh_guard(f, false), DEG);
+% The builder: an unknown set and the fresh set without an adoption stop before any load; with
+% one the layout and guard pass and the build goes on to read the pools (absent here)
+verifyError(tc, @() clean_build_run('bogus'), 'clean_set_layout:set');
+delete(f);
+verifyError(tc, @() clean_build_run('fresh'), 'clean_fresh_guard:none');
+save(f, 'drop_db', 'DEG');
+try
+    clean_build_run('fresh'); verifyFail(tc, 'the build should stop on the absent pools');
+catch e
+    verifyFalse(tc, startsWith(e.identifier, {'clean_set_layout', 'clean_fresh_guard'}), e.identifier);
+    verifyNotEmpty(tc, strfind(e.message, 'policy_pools'), e.message);
+end
+cd(here);
+src = fileread(which('build_clean_test_pools'));
+verifyNotEmpty(tc, strfind(src, '[SP, FAMS, f_out] = clean_set_layout(CLEAN_SET, exist(''SMOKE'', ''var'') && SMOKE);'));
+verifyNotEmpty(tc, regexp(src, ['clean_set_layout\(CLEAN_SET, exist\(''SMOKE'', ''var''\) && SMOKE\);[^\n]*\r?\n' ...
+    'if strcmp\(CLEAN_SET, ''fresh''\), clean_fresh_guard\(''data/drop_threshold\.mat'', exist\(''SMOKE'', ''var''\) ' ...
+    '&& SMOKE\); end'], 'once'));
+verifyNotEmpty(tc, strfind(src, 'if strcmp(CLEAN_SET, ''fresh''), CT.fams = FAMS; end'));
+verifyNumElements(tc, strfind(src, 'CT.fams = '), 1);
+rs = fileread(which('run_stage'));
+i0 = strfind(rs, 'elseif strcmp(name, ''build_clean_test_pools'')'); i1 = strfind(rs, 'elseif strcmp(name, ''select_fusion'')');
+seg = rs(i0:i1);
+verifyNotEmpty(tc, strfind(seg, 'for CLEAN_SET = {''val'', ''test''}'));
+verifyEmpty(tc, strfind(seg, 'fresh'));
+verifyEmpty(tc, strfind(fileread(which('main')), 'CLEAN_SET = ''fresh'''));
+end
+
+function clean_build_run(set)
+% build_clean_test_pools.m with CLEAN_SET = set, in this function's workspace.
+CLEAN_SET = set; %#ok<NASGU>
+build_clean_test_pools;
 end
 
 function test_surv_on_air(tc)
@@ -8430,8 +9503,12 @@ S = [S; arrayfun(@(si, ri) pool_seed(2, si, 10, ri), s(:), r(:))];
 S = [S; arrayfun(@(si, bi) pool_seed(1, si, bi, 100), s(:), b(:))];
 [s, r, b, f] = ndgrid(1:6, 1:100, [4 15], [3 5]);
 S = [S; arrayfun(@(si, ri, bi, fi) pool_seed(fi, si, bi, ri), s(:), r(:), b(:), f(:))];
-[t, li, s] = ndgrid(1:20, 1:8, 1:6);
+[s, r, f, b] = ndgrid(1:6, 1:100, [7 8 9], [15 18]);    % the fresh clean test set (block 15, P1R) and its smoke build
+S = [S; arrayfun(@(si, ri, fi, bi) pool_seed(fi, si, bi, ri), s(:), r(:), f(:), b(:))];
+[t, li, s] = ndgrid(1:20, 1:10, 1:6);
 S = [S; 900000 + 1000*t(:) + 10*li(:) + s(:); 700000 + (1:5)'];
+[t, r] = ndgrid(1:20, 1:5);
+S = [S; 900000 + 1000*t(:) + r(:)];
 k = (1:99999)';
 S = [S; 3000000 + k; 4000000 + k; 5000000 + k; 3500000 + k; 4500000 + k; 5500000 + k; 6500000 + k; 6000000 + k];
 [s, r, b] = ndgrid(1:6, 1:99, [5 7 14 16 18 19]);
@@ -9180,11 +10257,15 @@ end
 
 function d = parent_copy(tc, rel, rev)
 % The file rel as commit rev holds it (default this branch's parent, lect-kpi 394d4da), alone in
-% a folder.
+% a folder. An export without .git (the deploy queue's) reads the commit from the repository named
+% by V7_GIT_REPO.
 if nargin < 3, rev = '394d4da'; end
 d = tempname; mkdir(d);
 [~, nm, ext] = fileparts(rel);
-[st, out] = system(sprintf('git --no-optional-locks -C "%s" show %s:%s > "%s"', tc.TestData.root, rev, rel, ...
+repo = tc.TestData.root;
+[sg, ~] = system(sprintf('git --no-optional-locks -C "%s" rev-parse --git-dir', repo));
+if sg ~= 0 && ~isempty(getenv('V7_GIT_REPO')), repo = getenv('V7_GIT_REPO'); end
+[st, out] = system(sprintf('git --no-optional-locks -C "%s" show %s:%s > "%s"', repo, rev, rel, ...
     fullfile(d, [nm ext])));
 assertEqual(tc, st, 0, sprintf('git show %s:%s failed: %s', rev, rel, out));
 end
@@ -9757,4 +10838,364 @@ X = cat(4, X, img_of(1, F)); c = [c; 3 * ones(F, 1)]; run = [run; (k + 1) * ones
 pos = [pos; (1:F)']; eb = [eb; zeros(F, 1)]; lv = [lv; 10 * ones(F, 1)];
 S = struct('X', X, 'Y', categorical(c, 1:4, classes), 'Y_frame', categorical(c, 1:4, classes), 'class_run', c, ...
     'run', run, 'pos', pos, 'level', lv, 'ebno', eb);
+end
+
+%% ---------- run-level resume and P1R's prerequisites (docs/p1r_protocol.md) ----------
+function test_run_cache_restart(tc)
+% A stage started again after a stop reads the runs it finished and computes only the rest,
+% with the results of an uninterrupted stage; another key (a setting, a seed) computes again;
+% a cut-off write (temporary file), an unreadable file or another key's file never counts as
+% finished; off ('' folder) nothing is kept.
+d = tempname; mkdir(d); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+dirn = fullfile(d, 'C2'); n = 5;
+keys = arrayfun(@(i) run_cache('key', {'train_one', 'class_drop 4/5', 80, 0.5, i, 42 + i}), 1:n, 'UniformOutput', false);
+verifyEqual(tc, numel(unique(keys)), n);
+verifyMatches(tc, keys{1}, '^[0-9a-f]{16}$');
+verifyEqual(tc, run_cache('key', {'train_one', 'class_drop 4/5', 80, 0.5, 1, 43}), keys{1});
+cnt = containers.Map({'n'}, {0});
+work = @(i) rc_work(i, cnt);
+full = cell(1, n);
+for i = 1:n, [full{i}, hit] = run_cache('run', '', keys{i}, @() work(i)); verifyFalse(tc, hit); end
+verifyFalse(tc, isfolder(dirn));                       % off: nothing kept
+verifyEqual(tc, cnt('n'), n);
+cnt('n') = 0;
+for i = 1:3, run_cache('run', dirn, keys{i}, @() work(i)); end          % a first start, stopped after three runs
+verifyEqual(tc, cnt('n'), 3);
+verifyEqual(tc, numel(dir(fullfile(dirn, '*.mat'))), 3);
+fid = fopen(fullfile(dirn, [keys{4} '.tmp.mat']), 'w'); fwrite(fid, uint8(1:10)); fclose(fid);   % a write cut off
+cnt('n') = 0; again = cell(1, n); hits = false(1, n);
+for i = 1:n, [again{i}, hits(i)] = run_cache('run', dirn, keys{i}, @() work(i)); end              % started again
+verifyEqual(tc, hits, [true true true false false]);
+verifyEqual(tc, cnt('n'), 2, 'only the runs not finished are computed');
+verifyTrue(tc, isequaln(again, full), 'the results of an uninterrupted stage');
+fid = fopen(fullfile(dirn, [keys{5} '.mat']), 'w'); fwrite(fid, uint8(1:10)); fclose(fid);       % unreadable
+key = keys{2}; res = 'another run'; save(fullfile(dirn, [keys{3} '.mat']), 'key', 'res');          % another key's
+cnt('n') = 0;
+[r5, h5] = run_cache('run', dirn, keys{5}, @() work(5)); [r3, h3] = run_cache('run', dirn, keys{3}, @() work(3));
+verifyEqual(tc, [h5 h3], [false false]); verifyEqual(tc, cnt('n'), 2);
+verifyTrue(tc, isequaln({r5, r3}, full([5 3])));
+[~, h] = run_cache('run', dirn, keys{5}, @() work(5)); verifyTrue(tc, h);
+k6 = run_cache('key', {'train_one', 'class_drop 4/5', 80, 0.5, 1, 99});                            % another seed
+[~, h] = run_cache('run', dirn, k6, @() work(1)); verifyFalse(tc, h);
+end
+
+function r = rc_work(i, cnt)
+% A run whose result depends only on its inputs, counted.
+cnt('n') = cnt('n') + 1;
+r = struct('seed', 42 + i, 'agent', {{magic(3) * i}}, 'curve', (1:4)' * i, ...
+    'loss', rand(RandStream('mt19937ar', 'Seed', i), 1, 7), 'step', 'grid');
+end
+
+function r = rc_entity(i, cnt, bad)
+% An entity of C2g / C2u that stops when it is in bad.
+if ismember(i, bad), error('test:entity', 'entity %d out of memory', i); end
+r = rc_work(i, cnt);
+end
+
+function test_run_cache_entities(tc)
+% C2g / C2u: every entity kept as it finishes; one that stops is reported, the others still
+% run and are kept, and the stage then stops naming it; started again, only it is computed and
+% the results are those of an uninterrupted run. Off, the first error stops at once with the
+% entity's name and no later entity runs.
+d = tempname; mkdir(d); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+dirn = fullfile(d, 'C2g'); names = {'jamming+path_loss', 'tone_jamming+path_loss', 'jamming+airframe_shadowing', 'spoofing+jamming'};
+keys = cellfun(@(c) run_cache('key', {'C2g', c}), names, 'UniformOutput', false);
+cnt = containers.Map({'n'}, {0});
+full = run_cache('each', '', keys, @(i) rc_entity(i, cnt, []), names);
+verifyEqual(tc, cnt('n'), 4);
+cnt('n') = 0; err = [];
+try, run_cache('each', dirn, keys, @(i) rc_entity(i, cnt, 2), names); catch err, end
+assertNotEmpty(tc, err);
+verifyEqual(tc, err.identifier, 'run_cache:failed');
+verifyEqual(tc, cnt('n'), 3, 'the entities after the failed one still run');
+verifyNotEmpty(tc, strfind(err.message, 'tone_jamming+path_loss (entity 2 out of memory)'));
+verifyEmpty(tc, strfind(err.message, 'jamming+airframe_shadowing'));
+verifyEqual(tc, sort({dir(fullfile(dirn, '*.mat')).name}), sort(strcat(keys([1 3 4]), '.mat')));
+cnt('n') = 0;
+again = run_cache('each', dirn, keys, @(i) rc_entity(i, cnt, []), names);
+verifyEqual(tc, cnt('n'), 1, 'started again: only the failed entity');
+verifyTrue(tc, isequaln(again, full));
+cnt('n') = 0;
+try, run_cache('each', '', keys, @(i) rc_entity(i, cnt, 2), names); catch err, end
+verifyEqual(tc, err.identifier, 'run_cache:entity');
+verifyNotEmpty(tc, strfind(err.message, 'entity 2 (tone_jamming+path_loss) stopped: entity 2 out of memory'));
+verifyEqual(tc, cnt('n'), 1, 'off: no entity after the error runs');
+end
+
+function test_run_cache_switch(tc)
+% Off without profile.json or its field; "run_cache": true turns it on, CFG.run_cache before
+% the file; any other value stops. The inputs' identity follows every file's bytes and tells
+% an absent file from an empty one.
+d = tempname; mkdir(d); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+f = fullfile(d, 'profile.json');
+verifyFalse(tc, run_cache('on', [], f));
+write_json(f, '{"profile": "x"}'); verifyFalse(tc, run_cache('on', [], f));
+write_json(f, '{"run_cache": true}'); verifyTrue(tc, run_cache('on', [], f));
+verifyFalse(tc, run_cache('on', struct('run_cache', false), f));
+verifyTrue(tc, run_cache('on', struct('run_cache', true), fullfile(d, 'none.json')));
+verifyTrue(tc, run_cache('on', struct('dqn_seeds', 3), f));
+write_json(f, '{"run_cache": "yes"}'); verifyError(tc, @() run_cache('on', [], f), 'run_cache:value');
+verifyError(tc, @() run_cache('on', struct('run_cache', 1), f), 'run_cache:value');
+verifyEqual(tc, run_cache('dir', true, 'C2'), fullfile('data', 'run_cache', 'C2'));
+verifyEqual(tc, run_cache('dir', false, 'C2'), '');
+a = fullfile(d, 'a.mat'); b = fullfile(d, 'b.mat');
+fid = fopen(a, 'w'); fwrite(fid, uint8(1:100)); fclose(fid);
+i1 = run_cache('inputs', {a, b});
+verifyEqual(tc, run_cache('inputs', {a, b}), i1);
+fid = fopen(b, 'w'); fclose(fid);
+i2 = run_cache('inputs', {a, b}); verifyNotEqual(tc, i2, i1, 'absent and empty differ');
+fid = fopen(a, 'w'); fwrite(fid, uint8([1:99 7])); fclose(fid);
+verifyNotEqual(tc, run_cache('inputs', {a, b}), i2, 'one byte changed');
+verifyMatches(tc, i1, '^[0-9a-f]{16}$');
+end
+
+function write_json(f, s)
+fid = fopen(f, 'w'); fprintf(fid, '%s', s); fclose(fid);
+end
+
+function test_run_cache_wiring(tc)
+% train_dqn.m keeps every training run (grid and coordinate steps) and the reward-sensitivity
+% retrains through the run cache, keyed by the inputs (code, pools, C1d's file, the clean
+% validation flights, the KPI 1 threshold), the hyperparameters and the run's settings and
+% seed; C2g and C2u keep every entity through run_cache 'each'; nothing calls the training
+% outside it. Off by default: no profile.json field, no CFG field.
+src = fileread(which('train_dqn'));
+verifyEmpty(tc, regexp(src, 'runs\(end\+1\) = train_one\(', 'once'));
+verifyNumElements(tc, strfind(src, 'runs(end+1) = cached(RC, {''train_one'''), 2);
+verifyNumElements(tc, strfind(src, '@() train_one(H, PPc, K, norm_in, nS,'), 2);
+verifyNotEmpty(tc, strfind(src, 'ag = cached(RC, {''sens'', f, Hs, fa_pen_sel, cs_sel, ss_sel, alarm_sel, drop_sel, Sdep, rb.seed'));
+verifyEmpty(tc, regexp(src, '\n\s*ag = dqn_train_run\(', 'once'));
+verifyNotEmpty(tc, strfind(src, 'RC = struct(''dir'', run_cache(''dir'', run_cache(''on'', cfgc), ''C2''), ''id'', '''');'));
+verifyNotEmpty(tc, regexp(src, ['run_cache\(''inputs'', \{''data/policy_pools\.mat'', ''data/drop_threshold\.mat'', \.\.\.\r?\n\s*' ...
+    '''data/clean_val_pools\.mat'', ''results/eval_detector_metrics\.mat''\}\)'], 'once'));
+i0 = strfind(src, 'val_spec = full_val_spec('); i1 = strfind(src, 'RC.id = run_cache(''key''');
+verifyTrue(tc, ~isempty(i0) && ~isempty(i1) && i1(1) > i0(1));
+verifyNotEmpty(tc, strfind(src, 'key = run_cache(''key'', [{RC.id}, parts, {pool_settings(PPc, PP)}]);'));
+verifyNotEmpty(tc, strfind(src, 'for fn = setdiff(fieldnames(PPc)'', {''pools''})'));
+for f = {'experiment_combo_generalization', 'experiment_unknown_threat'}
+    s = fileread(which(f{1}));
+    verifyNumElements(tc, strfind(s, 'dqn_train_run('), 1, f{1});
+    verifyNotEmpty(tc, regexp(s, 'out = run_cache\(''each'', CDIR, keys, @\(\w+\) one_\w+\(', 'once'), f{1});
+    verifyNotEmpty(tc, strfind(s, 'run_cache(''inputs'', {''data/policy_pools.mat'', ''data/trained_dqn.mat''})'), f{1});
+    verifyNotEmpty(tc, regexp(s, 'run_cache\(''dir'', run_cache\(''on'', cfgc\), ''C2[gu]''\)', 'once'), f{1});
+    verifyEmpty(tc, regexp(s, '(?m)^for (ci|ti) = 1:numel\((combos|threats)\)\s*$\s*(c|th) = ', 'once'), f{1});
+end
+s = fileread(which('experiment_unknown_threat'));
+verifyNotEmpty(tc, strfind(s, 'EP(end+1) = out{ti}.EP; res(end+1) = out{ti}.res; agents_loo{ti} = out{ti}.agent;'));
+verifyNotEmpty(tc, strfind(s, 'save(''data/unknown_threat_agents.mat'', ''agents_loo'''));
+verifyNotEmpty(tc, strfind(fileread(which('experiment_combo_generalization')), 'for ci = 1:numel(combos), res(end+1) = out{ci}; end'));
+verifyFalse(tc, run_cache('on', struct(), fullfile(tempdir, 'no_profile_here.json')));
+end
+
+function test_kpi6_set_values(tc)
+% 'union' (profile 1, profile 3) without profile.json or its field; "kpi6_set": "fresh" (P1R);
+% CFG.kpi6_set before the file; any other value stops.
+d = tempname; mkdir(d); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+f = fullfile(d, 'profile.json');
+verifyEqual(tc, kpi6_set([], f), 'union');
+write_json(f, '{"deg_select": true}'); verifyEqual(tc, kpi6_set([], f), 'union');
+write_json(f, '{"kpi6_set": "fresh"}'); verifyEqual(tc, kpi6_set([], f), 'fresh');
+write_json(f, '{"kpi6_set": "union"}'); verifyEqual(tc, kpi6_set([], f), 'union');
+verifyEqual(tc, kpi6_set(struct('kpi6_set', 'fresh'), f), 'fresh');
+verifyEqual(tc, kpi6_set(struct('dqn_seeds', 3), f), 'union');
+write_json(f, '{"kpi6_set": "test"}'); verifyError(tc, @() kpi6_set([], f), 'kpi6_set:value');
+write_json(f, '{"kpi6_set": true}'); verifyError(tc, @() kpi6_set([], f), 'kpi6_set:value');
+verifyError(tc, @() kpi6_set(struct('kpi6_set', 'Fresh'), f), 'kpi6_set:value');
+end
+
+function test_kpi6_fresh_marker(tc)
+% The fresh clean test set is read once: the marker is written before its first flight with
+% the pools' SHA-256, the code and the decision layer; a second start is refused unless the
+% marker's last event is a crash before any KPI 6 line of the same pools file; once the KPI 6
+% line is reached ("KPI 6 read") every start is refused; a stop that records nothing (a killed
+% MATLAB) is refused too.
+d = tempname; mkdir(d); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+p = fullfile(d, 'clean_fresh_pools.mat'); CT = struct('set', 'fresh', 'fams', [7 8 9]); save(p, 'CT');
+m = fullfile(d, 'results', 'kpi6_fresh_read_started.txt');
+sha = kpi6_fresh_marker('sha', p);
+verifyMatches(tc, sha, '^[0-9a-f]{64}$');
+if ispc, [st, o] = system(sprintf('certutil -hashfile "%s" SHA256', p)); else, [st, o] = system(sprintf('sha256sum "%s"', p)); end
+if st == 0, verifyNotEmpty(tc, strfind(lower(regexprep(o, '\s', '')), sha), 'as sha256sum prints it'); end
+verifyEqual(tc, kpi6_fresh_marker('check', m, sha), 'new');
+verifyEqual(tc, kpi6_fresh_marker('start', m, sha, struct('pools', 'data/clean_fresh_pools.mat', 'deg_mode', 'win_q', ...
+    'deg_adopted', 'win_q:0.01 (candidate 2)', 'det_id', 'abc', 'policy_stamp', 'ffff', 'smoke', false)), 'new');
+L = strtrim(regexp(fileread(m), '\r?\n', 'split'));
+verifyTrue(tc, startsWith(L{1}, 'P1R: KPI 6 reading of the fresh clean test set started'));
+for k = {['pools sha256 ' sha], 'pools data/clean_fresh_pools.mat', 'deg_mode win_q', 'deg_adopted win_q:0.01 (candidate 2)', ...
+        'det_id abc', 'policy_stamp ffff', 'smoke false'}
+    verifyTrue(tc, any(strcmp(L, k{1})), k{1});
+end
+verifyTrue(tc, any(startsWith(L, 'commit ')) && any(startsWith(L, 'code_tree ')) && any(startsWith(L, 'time ')));
+verifyError(tc, @() kpi6_fresh_marker('check', m, sha), 'kpi6_fresh_marker:started');   % stopped, no crash recorded
+kpi6_fresh_marker('crash', m, MException('a:b', 'out of memory in\npolicy_run_set'));
+verifyError(tc, @() kpi6_fresh_marker('check', m, repmat('0', 1, 64)), 'kpi6_fresh_marker:pools');
+verifyEqual(tc, kpi6_fresh_marker('check', m, sha), 'restart');
+verifyEqual(tc, kpi6_fresh_marker('start', m, sha, struct()), 'restart');
+verifyError(tc, @() kpi6_fresh_marker('check', m, sha), 'kpi6_fresh_marker:started');   % restarted, then killed
+kpi6_fresh_marker('crash', m, MException('a:b', 'again'));
+verifyEqual(tc, kpi6_fresh_marker('check', m, sha), 'restart');
+kpi6_fresh_marker('start', m, sha, struct());
+kpi6_fresh_marker('read', m);
+verifyError(tc, @() kpi6_fresh_marker('check', m, sha), 'kpi6_fresh_marker:read');
+kpi6_fresh_marker('crash', m, MException('a:b', 'after the line'));
+verifyError(tc, @() kpi6_fresh_marker('check', m, sha), 'kpi6_fresh_marker:read');
+L = strtrim(regexp(fileread(m), '\r?\n', 'split'));
+verifyEqual(tc, sum(startsWith(L, 'crash before any KPI 6 line')), 3);
+verifyEqual(tc, sum(startsWith(L, 'restart ')), 2);
+verifyTrue(tc, any(contains(L, 'out of memory in\npolicy_run_set')) || any(contains(L, 'out of memory in')));
+end
+
+function err = eval_policies_err(cfg) %#ok<INUSD>
+% evaluate_policies.m in the current folder, CFG = cfg when cfg is a struct; the error it stops on.
+if isstruct(cfg), CFG = cfg; end %#ok<NASGU>
+err = [];
+w = warning('off', 'MATLAB:load:variableNotFound'); cw = onCleanup(@() warning(w)); %#ok<NASGU>
+try
+    evalc('evaluate_policies');
+catch err
+end
+end
+
+function test_evaluate_fresh_checks(tc)
+% C2e with "kpi6_set": "fresh" runs every check that needs no fresh flight before any episode
+% is flown and before the marker is written: the fresh pools file present (never the union
+% instead), the agent trained with C1d's degradation test, the fresh pools of these pools'
+% detector and built as the fresh set, the marker absent or recording a crash before any KPI 6
+% line of the same file. Without the key none of it runs.
+d = tempname; mkdir(d); here = pwd; cl = onCleanup(@() cd(here)); cd(d); mkdir('data'); mkdir('results');
+cl2 = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+PP = struct('det_id', 'a'); save('data/policy_pools.mat', 'PP');
+det_id = 'a'; dec = struct('deg_mode', 'win_q', 'ber_q', 0.01, 'alarm_mode', 'class_drop', 'confirm', [4 5]); deployed = 'dqn';
+save('data/trained_dqn.mat', 'det_id', 'dec', 'deployed');
+mk = 'results/kpi6_fresh_read_started.txt'; fr = struct('kpi6_set', 'fresh');
+e = eval_policies_err([]);                                  % without the key: past every fresh check
+verifyNotEmpty(tc, e); verifyFalse(tc, startsWith(e.identifier, {'evaluate_policies:fresh', 'kpi6_fresh_marker'}));
+e = eval_policies_err(fr);
+verifyEqual(tc, e.identifier, 'evaluate_policies:fresh'); verifyNotEmpty(tc, strfind(e.message, 'never on the union'));
+CT = struct('det_id', 'b', 'set', 'fresh', 'fams', [7 8 9], 'n_geom', 2); save('data/clean_fresh_pools.mat', 'CT');
+e = eval_policies_err(fr); verifyEqual(tc, e.identifier, 'check_det_id:mismatch');
+CT.det_id = 'a'; CT.set = 'test'; save('data/clean_fresh_pools.mat', 'CT');
+e = eval_policies_err(fr); verifyEqual(tc, e.identifier, 'evaluate_policies:fresh');
+CT.set = 'fresh'; save('data/clean_fresh_pools.mat', 'CT');
+dec0 = dec; dec = rmfield(dec, {'deg_mode', 'ber_q'}); save('data/trained_dqn.mat', 'det_id', 'dec', 'deployed'); dec = dec0;
+e = eval_policies_err(fr); verifyEqual(tc, e.identifier, 'evaluate_policies:fresh');
+verifyNotEmpty(tc, strfind(e.message, 'degradation test'));
+save('data/trained_dqn.mat', 'det_id', 'dec', 'deployed');
+e = eval_policies_err(fr);                                  % every check passes: stops later (no pools here)
+verifyFalse(tc, startsWith(e.identifier, {'evaluate_policies:fresh', 'kpi6_fresh_marker', 'check_det_id'}), e.identifier);
+verifyFalse(tc, isfile(mk), 'no marker before the first fresh flight');
+sha = kpi6_fresh_marker('sha', 'data/clean_fresh_pools.mat');
+kpi6_fresh_marker('start', mk, sha, struct());
+e = eval_policies_err(fr); verifyEqual(tc, e.identifier, 'kpi6_fresh_marker:started');
+kpi6_fresh_marker('crash', mk, MException('a:b', 'crash'));
+e = eval_policies_err(fr);
+verifyFalse(tc, startsWith(e.identifier, {'evaluate_policies:fresh', 'kpi6_fresh_marker'}), e.identifier);
+kpi6_fresh_marker('read', mk);
+e = eval_policies_err(fr); verifyEqual(tc, e.identifier, 'kpi6_fresh_marker:read');
+e = eval_policies_err([]);                                  % without the key the marker is not read
+verifyFalse(tc, startsWith(e.identifier, {'evaluate_policies:fresh', 'kpi6_fresh_marker'}));
+end
+
+function test_evaluate_fresh_wiring(tc)
+% The fresh set is flown after the union, behind the marker: 'start' before the first fresh
+% flight, a crash before the KPI 6 line recorded, 'read' before far_report on the fresh flights
+% alone; RWf (split id 7) saved and KP.far / KP.far_diag from it, the union kept as
+% KP.far_union; the lecturer lines labelled. Without the key every line of the parent commit
+% (lect-kpi 316230d) is there in order, the union's heading reads as before (-> KPI 6), and
+% the save list and KP fields are the parent's.
+src = fileread(which('evaluate_policies'));
+pos = @(s) strfind(src, s);
+a = pos('if FRESH, F6 = fresh_checks(PP, Q, exist(''SMOKE'', ''var'') && SMOKE); end');
+b = pos('%% 1. Episode sets');
+s1 = pos('kpi6_fresh_marker(''start'', F6.marker, F6.sha,');
+f1 = pos('RWf = fly_clean_set(PP, F6.CT, TEST, NE, T, clean_cell, nS, POL, Q, sel, fixed_best, fixed_mmse, tab, K.na, 40000);');
+c1 = pos('kpi6_fresh_marker(''crash'', F6.marker, err);');
+r1 = pos('kpi6_fresh_marker(''read'', F6.marker);');
+fr = pos('[FAR, FD, lines] = far_report(RWf, POL, LBL, aboveF, T, iDQN, PP.ebno, cls_list, C.period_ms);');
+u1 = pos('[FAR, FD, lines] = far_report(RU, POL, LBL, aboveU, T, iDQN, PP.ebno, cls_list, C.period_ms);');
+for x = {a, b, s1, f1, c1, r1, fr, u1}, verifyNumElements(tc, x{1}, 1); end
+verifyTrue(tc, a < b && u1 < s1 && s1 < f1 && f1 < c1 && c1 < r1 && r1 < fr);
+verifyNotEmpty(tc, pos('for pk = 1:numel(POL), RWf{pk}.split(:) = 7; end'));
+verifyNotEmpty(tc, pos('if FRESH, save(''results/policy_evaluation.mat'', ''RWf'', ''-append''); end'));
+verifyNotEmpty(tc, pos(['KP.far_set = ''fresh''; KP.reading = ''P1R''; KP.far_union = FAR_u; KP.far_diag_union = FD_u; ' ...
+    'KP.far_src_union = far_src_u;']));
+verifyNotEmpty(tc, pos('if FRESH, lines = p1r_label(lines); end'));
+verifyNotEmpty(tc, pos('ternary(FRESH, '': already read in profile 1''''s C2e, second reading, descriptive'', '' -> KPI 6'')'));
+verifyNotEmpty(tc, pos('F6.state = kpi6_fresh_marker(''check'', F6.marker, F6.sha);'));
+d = parent_copy(tc, 'code/decision/evaluate_policies.m', '316230d');
+cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+old = regexp(fileread(fullfile(d, 'evaluate_policies.m')), '\r?\n', 'split');
+new = regexp(src, '\r?\n', 'split');
+hd = find(contains(old, '%d episodes x %d cycles -> KPI 6'', ...'));
+verifyNumElements(tc, hd, 1);
+verifyEqual(tc, strtrim(old{hd + 1}), 'far_src, sum(aboveU), T);');
+old([hd hd + 1]) = [];                                      % the union's heading: the ternary above
+j = 1; miss = {};
+for i = 1:numel(old)
+    k = find(strcmp(new(j:end), old{i}), 1);
+    if isempty(k), miss{end+1} = old{i}; else, j = j + k; end %#ok<AGROW>
+end
+verifyEmpty(tc, miss, strjoin(miss, newline));
+L = p1r_label_copy({'', '  PRIMARY narrowband: MET'});
+verifyEqual(tc, L{1}, '');
+verifyEqual(tc, L{2}, '  PRIMARY narrowband: MET [P1R: with the fixed monitor, second reading, descriptive]');
+end
+
+function L = p1r_label_copy(L)
+% evaluate_policies.m's p1r_label (a local function of the script), read from its source.
+src = fileread(which('evaluate_policies'));
+i0 = strfind(src, 'function L = p1r_label(L)');
+lab = regexp(src(i0:end), '\[L\{i\} ''([^'']+)''\]', 'tokens', 'once');
+for i = 1:numel(L)
+    if ~isempty(strtrim(L{i})), L{i} = [L{i} lab{1}]; end
+end
+end
+
+function test_p1r_profile(tc)
+% P1R's profile.json (tools/p1r/profile.json, the p1r tree's root profile.json): profile 1
+% with C1d's degradation test chosen on validation, KPI 6 on the fresh set, finished runs kept;
+% no antenna count (init_params keeps n_rx 3) and no decoder of the coded link (P1R builds no
+% pools).
+f = fullfile(tc.TestData.root, 'tools', 'p1r', 'profile.json');
+P = jsondecode(fileread(f));
+verifyEqual(tc, sort(fieldnames(P))', sort({'profile', 'deg_select', 'kpi6_set', 'run_cache'}));
+verifyEqual(tc, P.profile, 'profile 1, P1R');
+O = deg_options(f); verifyTrue(tc, O.on); verifyEqual(tc, O.force, '');
+verifyEqual(tc, kpi6_set([], f), 'fresh');
+verifyTrue(tc, run_cache('on', [], f));
+verifyEmpty(tc, fec_rx_config(f));
+verifyFalse(tc, isfield(P, 'n_rx'));
+verifyFalse(tc, isfield(P, 'deg_force'), 'never forced outside the smoke');
+end
+
+function test_deg_mode_suite(tc)
+% test_deg_mode.m (the degradation test's candidates, the adoption rule and the smoke's forced
+% candidate) runs inside this suite, so the queue's count of test_core includes it: every one
+% of its tests ran and passed.
+f = fullfile(tc.TestData.root, 'code', 'tests', 'test_deg_mode.m');
+n = numel(regexp(fileread(f), '(?m)^function test_\w+\(tc\)', 'match'));
+here = pwd; cl = onCleanup(@() cd(here)); %#ok<NASGU>
+r = runtests(f);
+verifyGreaterThanOrEqual(tc, n, 17);
+verifyEqual(tc, numel(r), n, 'every test of test_deg_mode.m ran');
+bad = {r(~[r.Passed]).Name};
+verifyEmpty(tc, bad, strjoin(bad, ', '));
+end
+
+function test_smoke_all_entities(tc)
+% C2g and C2u's smoke runs the first entity unless CFG.smoke_all_entities is true: then every
+% combination / threat runs, with the smoke's reduced training and one repetition; outside the
+% smoke the switch does nothing.
+for f = {{'experiment_combo_generalization', 'combos'}, {'experiment_unknown_threat', 'threats'}}
+    src = fileread(which(f{1}{1}));
+    v = f{1}{2};
+    i0 = strfind(src, 'if exist(''SMOKE'', ''var'') && SMOKE                       % reduced chain check (run_stage smoke)');
+    verifyNumElements(tc, i0, 1, f{1}{1});
+    j = strfind(src(i0:end), 'H.n_eval = 1;'); blk = src(i0:i0 + j(1) + 12);
+    verifyNotEmpty(tc, strfind(blk, ['if ~(exist(''CFG'', ''var'') && isstruct(CFG) && isfield(CFG, ''smoke_all_entities'') ' ...
+        '&& isequal(CFG.smoke_all_entities, true))']), f{1}{1});
+    verifyNotEmpty(tc, strfind(blk, sprintf('%s = %s(1);', v, v)), f{1}{1});
+    verifyNotEmpty(tc, regexp(blk, 'end\r?\n\s+REPS = 1; H\.episodes = 1280;', 'once'), f{1}{1});
+    verifyNumElements(tc, strfind(src, 'smoke_all_entities'), 4, f{1}{1});     % the guard twice, the comments twice
+end
 end

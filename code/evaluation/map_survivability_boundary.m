@@ -26,6 +26,14 @@
 % Output: results/survivability_boundary_mapA.txt, results/survivability_boundary_mapB.txt,
 %         results/survivability_gap_analysis.txt, results/survivability_map_neutralization.png (Map A),
 %         results/survivability_map_link.png (Map B), data/survivability_boundary.mat
+%
+% With "surv_v2": true in profile.json (surv_options.m, docs/surv_p3_protocol.md) every cell
+% flies NR = 5 flights, the same at every level and Eb/N0 of an entry (surv_flights.m); noise
+% bursts are two entries, Xu et al.'s random jammer at its most severe measured duty and
+% Marti et al.'s J4 (surv_nb_entries.m); the status rule runs on the flights' means and each
+% cell gets the link-limited (L), no_action (N) and saturated marks, a bootstrap interval and
+% a committed verdict (surv_grid.m); the gap cells come in two classes (surv_gap_report.m).
+% Without it (profile 1) the map is as described above.
 
 close all; clc;
 fprintf('=== Survivability boundary map (real configuration set) ===\n\n');
@@ -38,6 +46,8 @@ RATIO_MARGINAL     = 5;
 BER_FLOOR          = 1e-4;    % clean reference floor, as the decision layer
 N_WORKERS          = 6;
 opt = struct('F_SUB', RUN_FRAMES, 'tw', 10, 'delay_bits', 20);
+SV = surv_options();                      % the map's protocol (profile.json surv_v2; none for profile 1)
+NR = []; if SV.v2, NR = SV.NR; end        % flights per cell under surv_v2
 
 ACTIONS = policy_actions();
 p_ref = load_params_quiet();
@@ -47,14 +57,19 @@ MECH_A = MECH_B(cellfun(@(a) no_goodput_loss(p_ref, a), MECH_B));
 ACT_CODE = containers.Map(MECH_B, cellfun(@act_code, MECH_B, 'UniformOutput', false));
 
 % Severity levels per threat: those of the detector dataset (dataset_levels.m), in-band
-% interferers up to 28 dB over our signal (the 30 dB jammer of Liu et al.)
+% interferers up to 30 dB over our signal (the in-band cap, Liu et al.)
 clear threat_cfg                                  % scripts share the base workspace
 DL = dataset_levels();
 threat_cfg = struct('name', {DL.name}, 'level_field', {DL.param}, 'levels', {DL.levels});
 ip = strcmp({threat_cfg.name}, 'path_loss');            % up to the measured building loss (Simunek et al. 2011,
 threat_cfg(ip).levels = [threat_cfg(ip).levels, 33 42]; % 33-42 dB, Figs. 6 and 11), beyond the training levels
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
-    threat_cfg = threat_cfg([1 4]); threat_cfg(1).levels = [4 16]; threat_cfg(2).levels = [7 16];
+    if SV.v2                                            % the noise-burst entries too, two flights per cell
+        threat_cfg = threat_cfg([1 2 4]); threat_cfg(1).levels = [4 16]; threat_cfg(2).levels = [4 16];
+        threat_cfg(3).levels = [7 16]; NR = 2;
+    else
+        threat_cfg = threat_cfg([1 4]); threat_cfg(1).levels = [4 16]; threat_cfg(2).levels = [7 16];
+    end
     RUN_FRAMES = 20; opt.F_SUB = RUN_FRAMES;
 end
 
@@ -68,8 +83,14 @@ for t = 1:numel(threat_cfg)
         if exist('maps', 'var'), maps(end+1) = e; else, maps = e; end %#ok<AGROW>
     end
 end
+if SV.v2, maps = surv_nb_entries(maps, p_ref); end      % noise bursts: the random jammer at its most severe duty, and J4
 
 p0 = p_ref;
+p0 = fec_rx_on(p0, fec_rx_config());       % the profile's decoder of the coded link (profile.json)
+if SV.v2 && isempty(fec_rx_config()) && ~(exist('SMOKE', 'var') && SMOKE)
+    error('map_survivability_boundary:fec_rx', ['surv_v2 maps the coded link with the decoder profile.json ' ...
+        'states (fec_rx): "d78" or the choice of dev set C']);
+end
 p0.int_aoa_random = false; p0.k_random = false; p0.quiet_build = true;
 p0.yaw_random = false;                  % the mapped geometries stay fixed through the run
 p0.corr_random = false;
@@ -128,12 +149,18 @@ for j = 1:nJ
 end
 ord = pool_schedule(w);                                % the longest job first, one per free worker
 S = struct('jobs', {jobs}, 'maps', {maps}, 'p0', {p0}, 'RUN_FRAMES', {RUN_FRAMES}, 'v_nom', {v_nom}, 'nS', {nS}, ...
-    'ACTIONS', {ACTIONS}, 'SNR_points', {SNR_points}, 'opt', {opt});
+    'ACTIONS', {ACTIONS}, 'SNR_points', {SNR_points}, 'opt', {opt}, 'NR', {NR});
 res = pool_lpt(@(S, j) pool_job('surv', S, j), S, ord, pl);
 clear S
 res(ord) = res;                                        % back in job order
 for j = 1:nJ, [resB{j}, resF{j}, resS{j}] = res{j}{:}; end
 clear res
+if SV.v2                                               % each flight's values; their means enter the rule
+    runB = resB; runF = resF;
+    resB = cellfun(@(x) mean(x, 3), resB, 'UniformOutput', false);
+    resF = cellfun(@(x) mean(x, 3), resF, 'UniformOutput', false);
+    resS = cellfun(@(x) mean(x, 3), resS, 'UniformOutput', false);
+end
 ber_all = cell(1, nT); fer_all = cell(1, nT); slack_all = cell(1, nT);             % {entry}(level, configuration, snr)
 for t = 1:nT
     nL = numel(maps(t).levels);
@@ -145,21 +172,49 @@ for t = 1:nT
     end
     ber_all{t} = B; fer_all{t} = Fe; slack_all{t} = Sl;
 end
+if SV.v2
+    ber_run = cell(1, nT); fer_run = cell(1, nT);                                  % {entry}(level, configuration, snr, flight)
+    for t = 1:nT
+        nL = numel(maps(t).levels); Br = nan(nL, nAct, nS, NR); Fr = Br;
+        for li = 1:nL
+            j = find(jobs(:, 1) == t & jobs(:, 2) == li);
+            Br(li, :, :, :) = reshape(runB{j}, [1 nAct nS NR]); Fr(li, :, :, :) = reshape(runF{j}, [1 nAct nS NR]);
+        end
+        ber_run{t} = Br; fer_run{t} = Fr;
+    end
+    clear runB runF
+end
 fprintf('Mapped %d entries x levels in %.1f min\n\n', nJ, toc(t0)/60);
 
 %% ========== 3. Build both maps ==========
 fprintf('Classifying (ratio to clean link): recoverable <= %gx (BER and packet loss), marginal <= %gx\n\n', ...
     RATIO_RECOVERABLE, RATIO_MARGINAL);
-grid_data_A = build_map(ber_all, fer_all, maps, ACTIONS, MECH_A, ber_ref, fer_clean, slack_all, RATIO_RECOVERABLE, RATIO_MARGINAL);
-grid_data_B = build_map(ber_all, fer_all, maps, ACTIONS, MECH_B, ber_ref, fer_clean, slack_all, RATIO_RECOVERABLE, RATIO_MARGINAL);
+if SV.v2
+    Z = struct('ok', RATIO_RECOVERABLE, 'marg', RATIO_MARGINAL, 'sat', 0.45, 'lim', 0.5, 'frames', RUN_FRAMES, ...
+        'bits', p0.frame_length, 'B', 4000, 'NR', NR, 'floor', BER_FLOOR);
+    grid_data_A = surv_grid(ber_all, fer_all, slack_all, ber_run, fer_run, maps, ACTIONS, MECH_A, ber_ref, fer_clean, Z);
+    grid_data_B = surv_grid(ber_all, fer_all, slack_all, ber_run, fer_run, maps, ACTIONS, MECH_B, ber_ref, fer_clean, Z);
+else
+    grid_data_A = build_map(ber_all, fer_all, maps, ACTIONS, MECH_A, ber_ref, fer_clean, slack_all, RATIO_RECOVERABLE, RATIO_MARGINAL);
+    grid_data_B = build_map(ber_all, fer_all, maps, ACTIONS, MECH_B, ber_ref, fer_clean, slack_all, RATIO_RECOVERABLE, RATIO_MARGINAL);
+end
 
 %% ========== 4. Reports ==========
-if ~exist('results','dir'), mkdir('results'); end
-report_A = build_report(grid_data_A, ber_ref, SNR_points, RATIO_RECOVERABLE, RATIO_MARGINAL, ...
-    'MAP A — WITHOUT GOODPUT LOSS', MECH_A, ACT_CODE);
+if ~isfolder('results'), mkdir('results'); end   % exist(...,'dir') also finds toolbox folders on the path
+if SV.v2
+    report_A = surv_report(grid_data_A, ber_ref, fer_clean, SNR_points, 'MAP A — WITHOUT GOODPUT LOSS', MECH_A, ACT_CODE, Z);
+else
+    report_A = build_report(grid_data_A, ber_ref, SNR_points, RATIO_RECOVERABLE, RATIO_MARGINAL, ...
+        'MAP A — WITHOUT GOODPUT LOSS', MECH_A, ACT_CODE);
+end
 write_report(report_A, 'results/survivability_boundary_mapA.txt');
-report_B = build_report(grid_data_B, ber_ref, SNR_points, RATIO_RECOVERABLE, RATIO_MARGINAL, ...
-    'MAP B — ANY CONFIGURATION (incl. rate reduction and FEC)', MECH_B, ACT_CODE);
+if SV.v2
+    report_B = surv_report(grid_data_B, ber_ref, fer_clean, SNR_points, ...
+        'MAP B — ANY CONFIGURATION (incl. rate reduction and FEC)', MECH_B, ACT_CODE, Z);
+else
+    report_B = build_report(grid_data_B, ber_ref, SNR_points, RATIO_RECOVERABLE, RATIO_MARGINAL, ...
+        'MAP B — ANY CONFIGURATION (incl. rate reduction and FEC)', MECH_B, ACT_CODE);
+end
 write_report(report_B, 'results/survivability_boundary_mapB.txt');
 fprintf('\n--- MAP A (without goodput loss) ---\n');  fprintf('%s\n', report_A{:});
 fprintf('\n--- MAP B (any configuration) ---\n');      fprintf('%s\n', report_B{:});
@@ -189,19 +244,21 @@ for t = 1:nT
 end
 gap_report{end+1} = '';
 gap_report{end+1} = sprintf('Total gap cells: %d', n_gap_total);
+if SV.v2, [gap_report, gap_cls] = surv_gap_report(grid_data_A, grid_data_B, SNR_points); end   % two classes
 write_report(gap_report, 'results/survivability_gap_analysis.txt');
 fprintf('\n--- GAP ANALYSIS ---\n'); fprintf('%s\n', gap_report{:});
 
-if ~exist('data','dir'), mkdir('data'); end
+if ~isfolder('data'), mkdir('data'); end
 save('data/survivability_boundary.mat','grid_data_A','grid_data_B','ber_clean','ber_ref','fer_clean','BER_FLOOR', ...
     'SNR_points','RATIO_RECOVERABLE','RATIO_MARGINAL','MECH_A','MECH_B','ber_all','fer_all','slack_all','threat_cfg','maps', ...
     'GEOM_AOA','RUN_FRAMES','ACTIONS');
+if SV.v2, save('data/survivability_boundary.mat', 'SV', 'NR', 'Z', 'ber_run', 'fer_run', 'gap_cls', '-append'); end
 
 %% ========== 6. Figures ==========
 draw_map(grid_data_A, SNR_points, 'Map A: without goodput loss (C, F, S, power control and their combinations)', ...
-    'results/survivability_map_neutralization.png');
+    'results/survivability_map_neutralization.png', SV.v2);
 draw_map(grid_data_B, SNR_points, 'Map B: any configuration (incl. rate reduction and FEC)', ...
-    'results/survivability_map_link.png');
+    'results/survivability_map_link.png', SV.v2);
 fprintf('\nSaved results/survivability_boundary_mapA.txt, mapB.txt, gap_analysis.txt, two PNG maps\n');
 fprintf('Saved data/survivability_boundary.mat (%.1f min)\n\n=== Survivability Mapping Complete ===\n', toc(t0)/60);
 
@@ -338,17 +395,22 @@ function write_report(report, path)
     fclose(fid);
 end
 
-function draw_map(grid_data, SNR_points, sup_title, out_path)
+function draw_map(grid_data, SNR_points, sup_title, out_path, v2)
+    % v2 (surv_v2): link-limited cells in blue, "0 err" for no error, ? on cells not committed
+    if nargin < 5, v2 = false; end
     nT = numel(grid_data);
     nS = numel(SNR_points);
     fig = figure('Position',[30 30 1900 780],'Color','w');
     cmap = [0.20 0.65 0.25;
             0.95 0.75 0.15;
             0.80 0.20 0.20];
+    if v2, cmap = [cmap; 0.25 0.45 0.80]; end
     for t = 1:nT
         g = grid_data(t);
         subplot(2, ceil(nT/2), t);
-        imagesc(g.status, [1 3]);
+        st = g.status;
+        if v2, st(g.link_limited) = 4; end
+        imagesc(st, [1 size(cmap, 1)]);
         colormap(gca, cmap);
         set(gca,'XTick',1:nS,'XTickLabel',compose('%g',SNR_points), ...
                 'YTick',1:numel(g.levels),'YTickLabel',compose('%g',g.levels));
@@ -357,15 +419,22 @@ function draw_map(grid_data, SNR_points, sup_title, out_path)
         for li = 1:numel(g.levels)
             for s = 1:nS
                 if ~isnan(g.ratio(li,s))
-                    text(s, li, ratio_txt(g.ratio(li,s)), ...
+                    c = ratio_txt(g.ratio(li,s));
+                    if v2 && g.ratio(li,s) == 0, c = '0 err'; end
+                    if v2 && ~g.committed(li,s), c = [c '?']; end
+                    text(s, li, c, ...
                         'HorizontalAlignment','center','FontSize',7,'Color','w');
                 end
             end
         end
     end
-    sgtitle({sup_title, ['Cell: BER of the best configuration / clean-link BER at the same E_b/N_0.  ' ...
-        'Green: recoverable (BER and packet loss <= 2x clean), yellow: marginal (BER <= 5x), red: non-recoverable']}, ...
-        'Interpreter','tex', 'FontSize', 11);
+    sub = ['Cell: BER of the best configuration / clean-link BER at the same E_b/N_0.  ' ...
+        'Green: recoverable (BER and packet loss <= 2x clean), yellow: marginal (BER <= 5x), red: non-recoverable'];
+    if v2
+        sub = {sub, ['Means over the flights of a cell.  Blue: link-limited (clean packet loss >= 50%, BER alone decides); ' ...
+            '0 err: no bit error; ?: not committed']};
+    end
+    sgtitle([{sup_title}, sub], 'Interpreter','tex', 'FontSize', 11);
     saveas(fig, out_path);
     close(fig);
 end

@@ -12,6 +12,12 @@
 % the recoverable episodes (as evaluate_policies.m). 95% intervals by bootstrap
 % over geometries. The trained agent and the pools come from the same detector
 % (check_det_id.m).
+% Every combination is one entity (run_cache.m 'each'): with "run_cache": true in profile.json
+% or CFG.run_cache each is kept in data/run_cache/C2g as it finishes, an entity that stops is
+% reported while the others still run, and the stage then stops naming it; started again, only
+% the entities not kept are computed. Without it the first error stops at once, naming its
+% combination. The smoke runs the first combination only, or every one (still reduced) with
+% CFG.smoke_all_entities = true.
 %
 % Output: results/combo_generalization.{txt,mat}
 
@@ -30,36 +36,20 @@ seed = Q.seed_summary.selected_seed;
 nA = numel(PP.actions); nS = policy_state_size(nA, numel(PP.classes));
 combos = PP.combos;
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
-    combos = combos(1); REPS = 1; H.episodes = 1280; H.buffer = 20000; H.warmup = 2000; H.n_eval = 1;
+    if ~(exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'smoke_all_entities') && isequal(CFG.smoke_all_entities, true))
+        combos = combos(1);               % CFG.smoke_all_entities: every entity, still reduced
+    end
+    REPS = 1; H.episodes = 1280; H.buffer = 20000; H.warmup = 2000; H.n_eval = 1;
 end
 
 res = struct('combo', {}, 'n', {}, 'dqn_out', {}, 'dqn_in', {}, 'rule', {}, 'table', {}, 'ci_out', {}, 'ci_in', {});
+cfgc = []; if exist('CFG', 'var'), cfgc = CFG; end
+CDIR = run_cache('dir', run_cache('on', cfgc), 'C2g'); CID = '';     % every combination kept as it finishes (run_cache.m)
+if ~isempty(CDIR), CID = run_cache('inputs', {'data/policy_pools.mat', 'data/trained_dqn.mat'}); end
+keys = cellfun(@(cn) run_cache('key', {CID, 'C2g', cn, H, seed, REPS, NE, TEST, DK}), combos, 'UniformOutput', false);
 t0 = tic;
-for ci = 1:numel(combos)
-    c = find(strcmp(PP.scen, combos{ci}));
-    fprintf('[%d/%d] %s left out of training and validation\n', ci, numel(combos), combos{ci});
-    PPx = PP;
-    PPx.pools(c, :, :, 1:2) = {[]};
-    Kx = link_env('tables', PPx);
-    Kt = Kx; Kt.FA = Q.seed_summary.selected_fa_pen;
-    if isfield(Q.seed_summary, 'selected_cost_scale')          % training reward variant
-        Kt.cost = Q.seed_summary.selected_cost_scale * Kx.cost; Kt.SW = Q.seed_summary.selected_sw_scale * Kx.SW;
-    end
-    ag = dqn_train_run(H, PPx, Kt, Kx, Q.norm_in, seed, nS, 1, 2);
-    specs = test_episodes(c, numel(PP.ebno), K.geo(c, TEST), REPS, NE, H.T, RandStream('mt19937ar', 'Seed', 300 + ci));
-    Ro = dqn_eval_batches(DK, PP, K, specs, ag, struct(), 7000, TEST);
-    Ri = dqn_eval_batches(DK, PP, K, specs, Q.agent, struct(), 7000, TEST);
-    Rr = dqn_eval_batches('rule_esc', PP, K, specs, [], struct(), 7000, TEST);
-    Rt = dqn_eval_batches('table', PP, K, specs, [], policy_table(PPx, Kx), 7000, TEST);
-    [Ro, Ri, Rr, Rt] = deal(mark(Ro, specs, PP), mark(Ri, specs, PP), mark(Rr, specs, PP), mark(Rt, specs, PP));
-    m = Ro.recoverable & Ro.threat;
-    [~, lo1, hi1] = boot_cluster(double(Ro.recovered(m)), ones(1, sum(m)), Ro.geom(m), 2000, 1);
-    [~, lo2, hi2] = boot_cluster(double(Ri.recovered(m)), ones(1, sum(m)), Ri.geom(m), 2000, 2);
-    res(end+1) = struct('combo', combos{ci}, 'n', sum(m), 'dqn_out', mean(Ro.recovered(m)), 'dqn_in', mean(Ri.recovered(m)), ...
-        'rule', mean(Rr.recovered(m)), 'table', mean(Rt.recovered(m)), 'ci_out', [lo1 hi1], 'ci_in', [lo2 hi2]); %#ok<SAGROW>
-    fprintf('    recovered among %d recoverable: never trained %.1f%% | trained %.1f%% | rule+esc %.1f%% | table %.1f%% (%.1f min)\n\n', ...
-        sum(m), 100*res(end).dqn_out, 100*res(end).dqn_in, 100*res(end).rule, 100*res(end).table, toc(t0)/60);
-end
+out = run_cache('each', CDIR, keys, @(ci) one_combo(ci, combos, PP, K, Q, H, seed, nS, TEST, REPS, NE, DK, t0), combos);
+for ci = 1:numel(combos), res(end+1) = out{ci}; end %#ok<SAGROW>
 
 rep = {'=== COMBINED THREATS NEVER TRAINED ON: LEAVE-ONE-COMBINATION-OUT ==='};
 rep{end+1} = sprintf(['Generated: %s | DQN retrained without the combination (train and validation pools removed), ' ...
@@ -82,6 +72,34 @@ save('results/combo_generalization.mat', 'res');
 fprintf('\nSaved results/combo_generalization.{txt,mat} (%.1f min)\n', toc(t0)/60);
 
 %% ===================== Local functions =====================
+function r = one_combo(ci, combos, PP, K, Q, H, seed, nS, TEST, REPS, NE, DK, t0)
+% Combination ci left out of training and validation: the retrained DQN, the selected one, rule +
+% escalation and the class table on its test flights.
+c = find(strcmp(PP.scen, combos{ci}));
+fprintf('[%d/%d] %s left out of training and validation\n', ci, numel(combos), combos{ci});
+PPx = PP;
+PPx.pools(c, :, :, 1:2) = {[]};
+Kx = link_env('tables', PPx);
+Kt = Kx; Kt.FA = Q.seed_summary.selected_fa_pen;
+if isfield(Q.seed_summary, 'selected_cost_scale')          % training reward variant
+    Kt.cost = Q.seed_summary.selected_cost_scale * Kx.cost; Kt.SW = Q.seed_summary.selected_sw_scale * Kx.SW;
+end
+ag = dqn_train_run(H, PPx, Kt, Kx, Q.norm_in, seed, nS, 1, 2);
+specs = test_episodes(c, numel(PP.ebno), K.geo(c, TEST), REPS, NE, H.T, RandStream('mt19937ar', 'Seed', 300 + ci));
+Ro = dqn_eval_batches(DK, PP, K, specs, ag, struct(), 7000, TEST);
+Ri = dqn_eval_batches(DK, PP, K, specs, Q.agent, struct(), 7000, TEST);
+Rr = dqn_eval_batches('rule_esc', PP, K, specs, [], struct(), 7000, TEST);
+Rt = dqn_eval_batches('table', PP, K, specs, [], policy_table(PPx, Kx), 7000, TEST);
+[Ro, Ri, Rr, Rt] = deal(mark(Ro, specs, PP), mark(Ri, specs, PP), mark(Rr, specs, PP), mark(Rt, specs, PP));
+m = Ro.recoverable & Ro.threat;
+[~, lo1, hi1] = boot_cluster(double(Ro.recovered(m)), ones(1, sum(m)), Ro.geom(m), 2000, 1);
+[~, lo2, hi2] = boot_cluster(double(Ri.recovered(m)), ones(1, sum(m)), Ri.geom(m), 2000, 2);
+r = struct('combo', combos{ci}, 'n', sum(m), 'dqn_out', mean(Ro.recovered(m)), 'dqn_in', mean(Ri.recovered(m)), ...
+    'rule', mean(Rr.recovered(m)), 'table', mean(Rt.recovered(m)), 'ci_out', [lo1 hi1], 'ci_in', [lo2 hi2]);
+fprintf('    recovered among %d recoverable: never trained %.1f%% | trained %.1f%% | rule+esc %.1f%% | table %.1f%% (%.1f min)\n\n', ...
+    sum(m), 100*r.dqn_out, 100*r.dqn_in, 100*r.rule, 100*r.table, toc(t0)/60);
+end
+
 function specs = test_episodes(c, nS, rr, reps, NE, T, rs)
 % Every (cell, Eb/N0, test geometry the cell flies: rr, one list per cell) of the cells c
 % (the severities of one combination) `reps` times, in batches of NE (cyclic padding of the

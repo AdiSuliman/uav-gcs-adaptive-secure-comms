@@ -18,6 +18,12 @@
 %             cycle, per hour of flight and the mean time between them
 %             (false_change_rate.m); the test split and the clean pools are also
 %             reported alone
+%             P1R ("kpi6_set": "fresh" in profile.json or CFG.kpi6_set,
+%             kpi6_set.m; docs/p1r_protocol.md section 5): KPI 6 on the fresh clean test
+%             set alone (data/clean_fresh_pools.mat, RWf, split id 7), read once behind
+%             the marker results/kpi6_fresh_read_started.txt (kpi6_fresh_marker.m); the
+%             union above is printed beside it as a second reading, descriptive, and every
+%             lecturer line is labelled as one
 %   comb      jamming / reactive_jamming on every channel we can use: the jammer is
 %             on the new channel at the hop itself and on frequency diversity's
 %             second carrier, so only space and link budget can help (assumed: no
@@ -87,7 +93,13 @@ L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
 Q = load('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'H', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db', ...
     'deployed', 'rule_sel', 'det_id', 'maha_thr', 'dec');
 check_det_id(PP, Q, 'evaluate_policies');
+if isfield(Q, 'dec') && isstruct(Q.dec) && isfield(Q.dec, 'deg_forced')      % the smoke's forced test (deg_force.m)
+    deg_force('smoke', Q.dec.deg_forced, exist('SMOKE', 'var') && SMOKE, 'evaluate_policies');
+end
 PP = decision_settings(PP, Q);                       % the deployed DQN's monitor and settings for every policy but the rule fallback
+cfg6 = []; if exist('CFG', 'var'), cfg6 = CFG; end
+FRESH = strcmp(kpi6_set(cfg6), 'fresh');             % P1R: KPI 6 on the fresh clean test set (kpi6_set.m)
+if FRESH, F6 = fresh_checks(PP, Q, exist('SMOKE', 'var') && SMOKE); end   % every check before any fresh flight
 K = link_env('tables', PP);
 C = decision_config();
 tab = policy_table(PP, K);
@@ -216,6 +228,12 @@ fprintf('  envelope (validation) %d episodes (%.1f min)\n', numel(RV.ret), toc(t
 %% 4. Report
 rep = {};
 rep{end+1} = '=== DECISION-LAYER EVALUATION, TEST POOLS ===';
+if FRESH
+    rep{end+1} = sprintf(['P1R: profile 1''s decision layer with the degradation test adopted at C1d (%s). The lecturer ' ...
+        'readings and every test-split line are with the fixed monitor, second reading, descriptive; profile 1''s C2e ' ...
+        'keeps the verdicts. KPI 6 (our extension): verdict on the fresh clean test set (families %s, block %d), read ' ...
+        'once.'], Q.dec.deg_mode, F6.fam_txt, F6.block);
+end
 rep{end+1} = sprintf(['Generated: %s | %d-cycle episodes, onset at cycle 3-10 | %d test geometries per (cell, Eb/N0), ' ...
     'never used in training or validation | interferer AoA %s'], datestr(now), T, nG, ...
     ternary(PP.aoa_random, 'random per geometry', 'fixed'));
@@ -382,6 +400,7 @@ rep{end+1} = sprintf(['Envelope on the harmed episodes (predicted on validation 
 
 % Revised proposal: PER vs the static link, recovery time from detection, goodput in bit/s
 [LK, lines] = lect_kpis(ALL, POL, LBL, iDQN, PP.scen, payload_bps, C.period_ms);
+if FRESH, lines = p1r_label(lines); end
 rep = [rep, lines];
 
 % Per Eb/N0 (single set)
@@ -528,10 +547,33 @@ if ~isempty(RW)
 end
 far_src = sprintf('%s geometries per Eb/N0, one episode each, Eb/N0 >= %g dB (%s)', strjoin(src, ' + '), ebno_thr, thr_src);
 rep{end+1} = '';
-rep{end+1} = sprintf('False alarms on the clean link, every independent clean flight: %s, %d episodes x %d cycles -> KPI 6', ...
-    far_src, sum(aboveU), T);
+rep{end+1} = sprintf('False alarms on the clean link, every independent clean flight: %s, %d episodes x %d cycles%s', ...
+    far_src, sum(aboveU), T, ternary(FRESH, ': already read in profile 1''s C2e, second reading, descriptive', ' -> KPI 6'));
 [FAR, FD, lines] = far_report(RU, POL, LBL, aboveU, T, iDQN, PP.ebno, cls_list, C.period_ms);
 rep = [rep, lines];
+if FRESH
+    % P1R's KPI 6 on the fresh clean test set alone, read once: the marker before its first
+    % flight, a crash before the KPI 6 line recorded in it, "KPI 6 read" before the line
+    FAR_u = FAR; FD_u = FD; far_src_u = far_src;
+    kpi6_fresh_marker('start', F6.marker, F6.sha, struct('pools', F6.file, 'deg_mode', Q.dec.deg_mode, ...
+        'deg_adopted', F6.deg_txt, 'det_id', PP.det_id, 'policy_stamp', policy_stamp(Q), 'smoke', F6.smoke));
+    try
+        RWf = fly_clean_set(PP, F6.CT, TEST, NE, T, clean_cell, nS, POL, Q, sel, fixed_best, fixed_mmse, tab, K.na, 40000);
+        for pk = 1:numel(POL), RWf{pk}.split(:) = 7; end
+        aboveF = PP.ebno(RWf{1}.s) >= ebno_thr;
+    catch err
+        kpi6_fresh_marker('crash', F6.marker, err);
+        rethrow(err);
+    end
+    kpi6_fresh_marker('read', F6.marker);
+    far_src = sprintf(['%d data/clean_fresh_pools.mat geometries per Eb/N0 (the fresh clean test set, families %s, ' ...
+        'block %d), one episode each, Eb/N0 >= %g dB (%s)'], F6.CT.n_geom, F6.fam_txt, F6.block, ebno_thr, thr_src);
+    rep{end+1} = '';
+    rep{end+1} = sprintf('False alarms on the clean link, the fresh clean test set (P1R, read once): %s, %d episodes x %d cycles -> KPI 6', ...
+        far_src, sum(aboveF), T);
+    [FAR, FD, lines] = far_report(RWf, POL, LBL, aboveF, T, iDQN, PP.ebno, cls_list, C.period_ms);
+    rep = [rep, lines];
+end
 
 % Final configuration of the deployed policy per threat (single set)
 rep{end+1} = '';
@@ -608,8 +650,13 @@ KP = struct('per_threat', PT, 'per_threat_sev', PTsev, 'threats', {threats}, 're
     'per_threat_h', PTh, 'per_threat_h_sev', PThsev, 'per_threat_h_ci', 100 * PThci, 'n_harmed', NH, 'n_harmed_sev', NHsev, ...
     'kpi4_h_met', kpi4h, 'envelope_h', ENVh, 'envelope_val_h', ENVvh, 'per_threat_env_h', PTenvh, ...
     'per_threat_env_h_ci', 100 * PTenvh_ci, 'harmed_consistent', cons, 'offset', OFF, 'offset_after', OFF_AFTER, 'lect', LK);
+if FRESH                                              % P1R: KP.far is the fresh set's; the union beside it
+    KP.far_set = 'fresh'; KP.reading = 'P1R'; KP.far_union = FAR_u; KP.far_diag_union = FD_u; KP.far_src_union = far_src_u;
+    KP.far_geoms_fresh = F6.CT.n_geom; KP.far_fresh_sha256 = F6.sha;
+end
 save('results/policy_evaluation.mat', 'RES', 'RW', 'POL', 'LBL', 'set_names', 'fixed_best', 'tab', 'iDQN', 'KP', ...
     'iThreat', 'ALL', 'top_cfg');
+if FRESH, save('results/policy_evaluation.mat', 'RWf', '-append'); end
 
 %% 5. Figures
 key = unique({'none', 'fixed', 'rule_esc', 'blind_esc', 'table', 'dqn_esc', POL{iDQN}, 'oracle'}, 'stable');
@@ -653,6 +700,66 @@ saveas(fig, 'results/policy_breakdown.png'); close(fig);
 fprintf('Saved results/policy_evaluation.{txt,mat,png}, results/policy_breakdown.png\n');
 
 %% ===================== Local functions =====================
+function F6 = fresh_checks(PP, Q, smoke)
+% P1R's checks that need no fresh flight, before any is flown (docs/p1r_protocol.md section 5):
+% the fresh pools file present (KPI 6 never falls back to the already-read union), of these
+% pools' detector, built as the fresh set; the agent trained with C1d's degradation test; the
+% marker absent, or recording a crash before any KPI 6 line on the same file.
+F6 = struct('file', 'data/clean_fresh_pools.mat', 'marker', 'results/kpi6_fresh_read_started.txt', 'smoke', smoke);
+if ~isfile(F6.file)
+    error('evaluate_policies:fresh', ['kpi6_set fresh: %s absent; KPI 6 is read on the fresh clean test set only, never ' ...
+        'on the union (docs/p1r_protocol.md section 5)'], F6.file);
+end
+if ~(isfield(Q, 'dec') && isstruct(Q.dec) && isfield(Q.dec, 'deg_mode'))
+    error('evaluate_policies:fresh', 'kpi6_set fresh: data/trained_dqn.mat holds no degradation test chosen at C1d (deg_select)');
+end
+Cf = load(F6.file, 'CT'); F6.CT = Cf.CT;
+check_det_id(PP, F6.CT, 'evaluate_policies', F6.file);
+if ~(isfield(F6.CT, 'set') && strcmp(F6.CT.set, 'fresh') && isfield(F6.CT, 'fams'))
+    error('evaluate_policies:fresh', 'kpi6_set fresh: %s is not the fresh clean test set (CT.set, CT.fams)', F6.file);
+end
+F6.block = clean_set_layout('fresh', smoke);
+F6.fam_txt = sprintf('%d-%d', min(F6.CT.fams), max(F6.CT.fams));
+F6.deg_txt = 'no data/drop_threshold.mat DEG';
+if isfile('data/drop_threshold.mat') && any(strcmp({whos('-file', 'data/drop_threshold.mat').name}, 'DEG'))
+    D = load('data/drop_threshold.mat', 'DEG'); D = D.DEG;
+    if isfield(D, 'pick') && isfield(D, 'name'), F6.deg_txt = sprintf('%s (candidate %d)', D.name, D.pick); end
+end
+F6.sha = kpi6_fresh_marker('sha', F6.file);
+F6.state = kpi6_fresh_marker('check', F6.marker, F6.sha);
+end
+
+function RR = fly_clean_set(PP, CT, TEST, NE, T, clean_cell, nS, POL, Q, sel, fixed_best, fixed_mmse, tab, na, seed)
+% Every policy on one 30-cycle clean episode per geometry and Eb/N0 of a clean set CT, in its
+% own world (clean_split.m), as data/clean_test_pools.mat is flown above.
+PPw = clean_split(PP, CT, TEST);
+Kw = link_env('tables', PPw);
+[ss, rr] = ndgrid(1:nS, 1:CT.n_geom); ss = ss(:)'; rr = rr(:)';
+n = numel(ss); nb = ceil(n / NE); pad = nb * NE - n;
+k_ = mod(0:n + pad - 1, n) + 1; ss = ss(k_); rr = rr(k_);                     % cyclic padding of the last batch
+specs = cell(1, nb);
+for b = 1:nb
+    i = (b-1)*NE + (1:NE);
+    specs{b} = struct('scn', clean_cell * ones(1, NE), 's', ss(i), 'onset', 3 * ones(1, NE), 'follow', false(1, NE), ...
+        'fdelay', 2 * ones(1, NE), 'unk', false(1, NE), 'T', T, 'r', rr(i));
+end
+RR = cell(1, numel(POL));
+for pk = 1:numel(POL)
+    [kind, ag, opt] = policy_setup(POL{pk}, Q, sel, fixed_best, fixed_mmse, tab, na);
+    R = policy_run_set(kind, PPw, Kw, specs, TEST, ag, opt, seed);
+    f = fieldnames(R);
+    for j = 1:numel(f), R.(f{j}) = R.(f{j})(:, 1:n); end                    % drop the padding
+    RR{pk} = R;
+end
+end
+
+function L = p1r_label(L)
+% P1R's lecturer lines: a second reading of test pools profile 1's C2e has read.
+for i = 1:numel(L)
+    if ~isempty(strtrim(L{i})), L{i} = [L{i} ' [P1R: with the fixed monitor, second reading, descriptive]']; end
+end
+end
+
 function r = payload_rate(C)
 % Nominal payload rate [bit/s]: one frame of payload bits per decision cycle (params.mat).
 r = NaN;

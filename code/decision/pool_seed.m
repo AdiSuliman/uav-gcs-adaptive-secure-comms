@@ -5,7 +5,9 @@ function [seed, v_kmh] = pool_seed(sc, s, sp, r, vrange)
 %       onset come from one flight); 2 the off-grid check flights
 %       (build_check_pools.m, block 10); 3 and 5 the clean-link geometries 101-200
 %       and 201-300 of build_clean_test_pools.m (blocks 4 and 15, clean_pool_seed.m)
-%       6 the bandwidth study (experiment_core_bw.m: blocks 5 and 14, its smoke 18 and 19)
+%       6 the bandwidth study (experiment_core_bw.m: blocks 5 and 14, its smoke 18 and 19);
+%       7, 8 and 9 the fresh clean test set of block 15 (P1R, clean_set_layout.m; its smoke
+%       build block 18); the owner of every pair: pool_seed_owner.m
 %   s   Eb/N0 index
 %   sp  seed block: 1 train, 5 validation, 14 test, 16 edge-speed and 17 second test
 %       pools (build_policy_pools.m); 4 clean validation and 15 clean test geometries
