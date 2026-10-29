@@ -612,7 +612,7 @@ function ui = buildEpisodeTab(tab, env, c)
 
     pr = mkPanel(g, 'CONTINUOUS EPISODE  (one cycle = one received frame; decision every cycle)', c);
     pr.Layout.Column = 2;
-    gr = uigridlayout(pr, [2 1]); gr.RowHeight = {'1x', 24};
+    gr = uigridlayout(pr, [2 1]); gr.RowHeight = {'1x', 72};
     gr.Padding = [8 4 8 6]; gr.RowSpacing = 6; gr.BackgroundColor = c.panelBg;
     % one tiled layout, so the three time axes share their plot-box edges
     pa = uipanel(gr, 'BackgroundColor', c.panelBg, 'BorderType', 'none'); pa.Layout.Row = 1;
@@ -622,7 +622,7 @@ function ui = buildEpisodeTab(tab, env, c)
     epStateAx = nexttile(tl, 8, [2 1]); styleAx(epStateAx, c);
     epActAx = nexttile(tl, 10, [3 1]); styleAx(epActAx, c);
     linkaxes([epBerAx epDetAx epStateAx epActAx], 'x');
-    epCycleLbl = place(mkLabel(gr, 'Idle.', c, 'FontName', c.mono, 'FontSize', 11), 2, 1);
+    epCycleLbl = place(mkLabel(gr, 'Idle.', c, 'FontName', c.mono, 'FontSize', 11, 'VerticalAlignment', 'top'), 2, 1);   % one line per policy
 
     ui = struct('epThreatDD',epThreatDD,'epSnrDD',epSnrDD,'epSevDD',epSevDD,'epSpeedSpin',epSpeedSpin, ...
         'epPolicyDD',epPolicyDD,'epPreSpin',epPreSpin,'epPostSpin',epPostSpin,'epHystChk',epHystChk, ...
@@ -745,8 +745,9 @@ function ui = buildLogTab(tab, env, c)
     hdrNames = {'#','Threat','Eb/N0','Speed','Severity','Detected','Conf',[dn ' action'],'Rule action', ...
                 ['Rec ' dn],'Rec Rule','Verdict','Lat (ms)'};
     histTbl = uitable(g, 'Data', cell(0, numel(hdrNames)), 'ColumnName', hdrNames, ...
-        'ColumnWidth', {40, 150, 60, 80, 130, 150, 60, 130, 130, 70, 70, 210, 70}, 'RowName', [], ...
-        'FontSize', 11, 'FontName', c.font, 'BackgroundColor', [c.termBg; c.axBg], 'ForegroundColor', c.txt);
+        'ColumnWidth', {40, 140, 60, 70, 100, 190, 60, 340, 340, 70, 70, 440, 70}, 'RowName', [], ...
+        'FontSize', 11, 'FontName', c.font, 'RowStriping', 'off', 'BackgroundColor', c.termBg, 'ForegroundColor', c.txt);
+    g.SizeChangedFcn = @(~, ~) fitHistCols(histTbl);
     histTbl.Layout.Row = 1;
     histTbl.Tooltip = {'One row per finished run: what attacked, what was detected, what each', ...
         'policy did and how much of the damage it undid. EXPORT saves CSV + MAT.'};
@@ -762,6 +763,17 @@ function ui = buildLogTab(tab, env, c)
     place(clearBtn, 1, 3);
 
     ui = struct('histTbl',histTbl,'sessionLbl',sessionLbl,'exportBtn',exportBtn,'clearBtn',clearBtn);
+end
+
+function fitHistCols(tbl)
+    % The verdict column takes the width the other columns leave, so no empty strip is left at the right.
+    try
+        w = tbl.ColumnWidth; k = numel(w) - 1;
+        rest = sum(cell2mat(w([1:k-1, k+1:end])));
+        w{k} = max(440, floor(tbl.Position(3)) - rest - 24);
+        tbl.ColumnWidth = w;
+    catch
+    end
 end
 
 %% =====================================================================
@@ -1224,8 +1236,8 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     iq_before = iq_frames{i_last};
     z_before = combinerSymbols(out, i_last, p);
     ber_before_mean = mean(ber_f(f0:end), 'omitnan');
-    appLog(fig, sprintf('Channel: BER %.2e (mean of %d frames) | RSSI %.2f dB | packets lost (CRC) %.0f%% | %s', ...
-        ber_before_mean, nf, rssi_f(i_last), 100 * plr_win, bitsTxt(ber_before_mean)));
+    appLog(fig, sprintf('Channel: BER %s (mean of %d frames) | RSSI %.2f dB | packets lost (CRC) %.0f%% | %s', ...
+        console_fmt(ber_before_mean, '%.2e'), nf, rssi_f(i_last), 100 * plr_win, bitsTxt(ber_before_mean)));
 
     % Pre-mitigation views (drawn BEFORE the timed decision block)
     drawIQ(fig, z_before, c.red, 'Receiver symbols - before  (4 tight clusters = clean QPSK)');
@@ -1459,12 +1471,12 @@ function z = combinerSymbols(out, f, p)
 end
 
 function s = pctStr(x)
-    if isnan(x), s = 'N/A'; else, s = sprintf('%.1f%%', x); end
+    s = console_fmt(x, '%.1f%%');
 end
 
 function s = outLine(lbl, ber, rec)
-    if isnan(rec), s = sprintf('%s: %.2e', lbl, ber);
-    else,          s = sprintf('%s: %.2e   (%.1f%% recovered)', lbl, ber, rec); end
+    if isnan(rec), s = sprintf('%s: %s', lbl, console_fmt(ber, '%.2e'));
+    else,          s = sprintf('%s: %s   (%s recovered)', lbl, console_fmt(ber, '%.2e'), console_fmt(rec, '%.1f%%')); end
 end
 
 function R = applyMitigation(env, p, threat, action_name, snr_dB, fl)
@@ -1639,7 +1651,8 @@ end
 
 function t = bitsTxt(ber)
     % Plain meaning of a BER for the operator.
-    if ber <= 0, t = 'no command-bit errors measured';
+    if ~isfinite(ber), t = 'BER not measured';
+    elseif ber <= 0, t = 'no command-bit errors measured';
     elseif ber >= 0.01, t = sprintf('~%.0f%% of command bits corrupted', 100 * ber);
     elseif ber >= 1e-4, t = sprintf('~%.2f%% of command bits corrupted', 100 * ber);
     else, t = 'almost no command-bit errors'; end
@@ -2102,21 +2115,8 @@ function smartPause(fig, secs, tSeq)
 end
 
 function updateSessionSummary(fig)
-    ui = fig.UserData.ui; dn = upper(fig.UserData.env.dep.name);
-    H = getappdata(fig, 'history');
-    if isempty(H), ui.sessionLbl.Text = {'No runs yet.'}; return; end
-    n = numel(H);
-    corr = cellfun(@(h) h.cnn_correct, H); unk = cellfun(@(h) h.unknown, H);
-    recD = cellfun(@(h) h.rec_dqn, H);     recR = cellfun(@(h) h.rec_rule, H);
-    lat  = cellfun(@(h) h.decision_latency_ms, H);
-    both = ~isnan(recD) & ~isnan(recR);
-    better = sum(recD(both) > recR(both) + 1); worse = sum(recD(both) < recR(both) - 1);
-    same = sum(both) - better - worse;
-    ui.sessionLbl.Text = { ...
-        sprintf('RUNS %d | detection %d/%d (%.1f%%) | unknown %d | mean latency %.2f ms', ...
-            n, sum(corr), n, 100*mean(corr), sum(unk), mean(lat)), ...
-        sprintf('mean recovery: %s %.1f%% | RULE %.1f%% | %s better/equal/worse than RULE: %d / %d / %d', ...
-            dn, mean(recD, 'omitnan'), mean(recR, 'omitnan'), dn, better, same, worse)};
+    ui = fig.UserData.ui;
+    ui.sessionLbl.Text = console_session_summary(getappdata(fig, 'history'), fig.UserData.env.dep.name);
 end
 
 %% =====================================================================
@@ -2266,7 +2266,7 @@ function runEpisode(btn, ~)
         epUpdatePlots(H, T, k, env.ber_floor, env.action_names);
         msg = sprintf('cycle %3d/%d  %s', k, N, ternaryStr(onset, sprintf('(onset + %d)', k - N_PRE), '(clean)'));
         for i = 1:nP
-            msg = sprintf('%s  |  %s: %s -> %s', msg, polNames(env, policies{i}), niceName(env.class_list{T.det(i, k)}), ...
+            msg = sprintf('%s\n%s: %s -> %s', msg, polNames(env, policies{i}), niceName(env.class_list{T.det(i, k)}), ...
                 niceName(env.action_names{T.cfg(i, k)}));
             if isfinite(T.st(i, k)), msg = sprintf('%s [%s]', msg, env.core.names{T.st(i, k)}); end
         end
@@ -2286,8 +2286,8 @@ function runEpisode(btn, ~)
         S = epSummary(T, i, N_PRE, kDone, bc, gp_act, env.action_names);
         lines{end+1} = sprintf('%s: T_detect %s | T_act %s | T_recover %s (%s)', polNames(env, policies{i}), ...
             cycTxt(S.T_detect), cycTxt(S.T_act), cycTxt(S.T_recover), S.status); %#ok<AGROW>
-        lines{end+1} = sprintf('   switches %d before onset, %d after | final BER %.2fx clean | goodput %.2f', ...
-            S.sw_pre, S.sw_post, S.final_ratio, S.goodput); %#ok<AGROW>
+        lines{end+1} = sprintf('   switches %d before onset, %d after | final BER %s clean | goodput %s', ...
+            S.sw_pre, S.sw_post, console_fmt(S.final_ratio, '%.2fx'), console_fmt(S.goodput, '%.2f')); %#ok<AGROW>
         lines{end+1} = ['   committed: ' S.committed]; %#ok<AGROW>
         if ~isempty(env.core) && kDone > 0
             r = T.st(i, 1:kDone) == stTruth(1:kDone);
@@ -2299,9 +2299,9 @@ function runEpisode(btn, ~)
                     100 * mean(r(1:min(N_PRE, kDone)))); %#ok<AGROW>
             end
         end
-        appLog(fig, sprintf('EPISODE %s: T_detect %s, T_act %s, T_recover %s (%s), switches %d/%d, final %.2fx clean, goodput %.2f', ...
+        appLog(fig, sprintf('EPISODE %s: T_detect %s, T_act %s, T_recover %s (%s), switches %d/%d, final %s clean, goodput %s', ...
             polNames(env, policies{i}), cycTxt(S.T_detect), cycTxt(S.T_act), cycTxt(S.T_recover), S.status, ...
-            S.sw_pre, S.sw_post, S.final_ratio, S.goodput));
+            S.sw_pre, S.sw_post, console_fmt(S.final_ratio, '%.2fx'), console_fmt(S.goodput, '%.2f')));
         for k = 1:kDone
             stn = '-'; if isfinite(T.st(i, k)), stn = env.core.names{T.st(i, k)}; end
             rows(end+1, :) = {k, k - N_PRE, policies{i}, truthName{k}, env.class_list{T.det(i, k)}, ...

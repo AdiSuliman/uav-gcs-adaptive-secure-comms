@@ -528,6 +528,34 @@ end
 clear back
 end
 
+%% ---------- the session summary ----------
+function test_session_summary_na_without_recovery(tc)
+% Runs on a clean link carry no recovery (rec_dqn and rec_rule are NaN): the summary reads N/A there,
+% never NaN; with a finite recovery it prints the mean.
+mk = @(c, r1, r2) struct('cnn_correct', c, 'unknown', false, 'rec_dqn', r1, 'rec_rule', r2, 'decision_latency_ms', 7);
+clean = {mk(true, NaN, NaN), mk(false, NaN, NaN)};
+L = console_session_summary(clean, 'dqn');
+t = strjoin(L, ' ');
+verifyNumElements(tc, L, 2);
+verifySubstring(tc, L{2}, 'mean recovery: DQN N/A | RULE N/A');
+verifyEmpty(tc, regexpi(t, 'nan|inf', 'once'));
+verifySubstring(tc, L{1}, 'RUNS 2 | detection 1/2 (50.0%)');
+mixed = [clean, {mk(true, 100, 80)}];
+L = console_session_summary(mixed, 'dqn');
+verifySubstring(tc, L{2}, 'mean recovery: DQN 100.0% | RULE 80.0%');
+verifySubstring(tc, L{2}, '1 / 0 / 0');
+verifyEmpty(tc, regexpi(strjoin(L, ' '), 'nan|inf', 'once'));
+verifyEqual(tc, console_session_summary({}, 'dqn'), {'No runs yet.'});
+end
+
+function test_console_fmt_never_prints_nan(tc)
+verifyEqual(tc, console_fmt(NaN, '%.1f%%'), 'N/A');
+verifyEqual(tc, console_fmt(Inf, '%.2e'), 'N/A');
+verifyEqual(tc, console_fmt([], '%d'), 'N/A');
+verifyEqual(tc, console_fmt(12.345, '%.1f%%'), '12.3%');
+verifyEqual(tc, console_fmt(0, '%.2fx'), '0.00x');
+end
+
 function test_console_builds_hidden(tc)
 % The console builds from the exported bundle on a hidden figure: the three-state panel, the
 % core-rule line and the lecturer's KPI lines are there. (The live run itself needs Simulink.)
