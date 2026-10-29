@@ -824,6 +824,122 @@ X = edge_commit(Lc, none);
 verifyEqual(tc, [X.v; X.fa], [1 -1 0 1; 1 -1 0 1]); verifyEqual(tc, X.lim(2:3), {'A', 'A'});
 end
 
+function test_edge_rec_rate(tc)
+% REC and PROT per onset (held_verdict.m, as edge_map.m calls it: held onsets and onsets
+% per flight). With 72 flights of 2 onsets the value is the share of held onsets and its
+% interval brackets it; at a true 0.90 the rate rule commits at most 3% of 5000
+% replicates whatever the correlation of a flight's two onsets (0, 0.5, 1); at a true
+% 0.97 with independent onsets at least 85% of 500; the flight-level reading printed
+% beside is edge_verdict.m's per-flight outcome bit for bit. edge_map.m reads every held
+% recovery through held_verdict with TGT.held_flight false, and TGT0's true.
+n = 72; ep = 2 * ones(1, n); B = 400;
+rs = RandStream('mt19937ar', 'Seed', 72);
+h = held_pairs(rs, n, 0.9, 0.5);
+V = held_verdict(h, ep, 1:n, 0.9, false, B);
+verifyEqual(tc, V.value, sum(h) / sum(ep), 'AbsTol', 1e-12);
+verifyLessThanOrEqual(tc, V.lo, V.value); verifyGreaterThanOrEqual(tc, V.hi, V.value);
+verifyTrue(tc, isnan(V.k));
+Vf = held_verdict(h, ep, 1:n, 0.9, true, B);
+verifyEqual(tc, Vf, edge_verdict(h, ep, 1:n, 0.9, 'ge', true, B));
+verifyEqual(tc, [Vf.value, Vf.k], [V.value, sum(h == 2)], 'AbsTol', 1e-12);
+rho = [0 0.5 1]; cr = zeros(size(rho));
+for j = 1:numel(rho)
+    for r = 1:5000
+        cr(j) = cr(j) + (held_verdict(held_pairs(rs, n, 0.9, rho(j)), ep, 1:n, 0.9, false, B).verdict == 1);
+    end
+end
+verifyLessThanOrEqual(tc, cr / 5000, 0.03 * [1 1 1]);
+pw = 0;
+for r = 1:500
+    pw = pw + (held_verdict(held_pairs(rs, n, 0.97, 0), ep, 1:n, 0.9, false, B).verdict == 1);
+end
+verifyGreaterThanOrEqual(tc, pw / 500, 0.85);
+src = fileread(which('edge_map'));
+verifyNotEmpty(tc, strfind(src, '''link'', 0.057, ''linkt_floor'', 0.014, ...'));
+verifyNotEmpty(tc, strfind(src, '''held_flight'', false);'));
+verifyNotEmpty(tc, strfind(src, 'TGT0 = TGT; TGT0.link = 0.014; TGT0.held_flight = true;'));
+verifyEqual(tc, numel(strfind(src, 'held_verdict(')), 7);
+verifyEmpty(tc, strfind(src, '''ge'', true'));
+verifyNotEmpty(tc, strfind(src, 'P.prot = held_verdict(F.held_k(:, v), F.ep_n(:, v), F.geo, TGT.prot, hf, B);'));
+end
+
+function h = held_pairs(rs, n, p, rho)
+% Held onsets of n flights with two onsets each, both held with probability p; with
+% probability rho the second repeats the first (within-flight correlation rho).
+a = rand(rs, 1, n) < p; b = rand(rs, 1, n) < p; c = rand(rs, 1, n) < rho;
+b(c) = a(c);
+h = double(a) + double(b);
+end
+
+function test_edge_link_gate(tc)
+% LINK of edge_map.m at 5.7% on 172 clean flights of 20 frames: 2% loss (69 flights with one
+% lost frame) commits, 9% (155 flights with two) is NOT COMMITTED, 5% held by 9 flights (19
+% lost frames each) is UNDETERMINED. The verdict at 1.4% printed beside reads the same
+% interval: 2% is NOT COMMITTED there. The targets and the lines beside in edge_map.m.
+n = 172; den = 20 * ones(1, n);
+lk = @(num, t) edge_verdict(num, den, 1:n, t, 'le', false);
+a = double((1:n) <= 69); b = 2 * double((1:n) <= 155); c = 19 * double((1:n) <= 9);
+A = lk(a, 0.057); Bv = lk(b, 0.057); Cv = lk(c, 0.057);
+verifyEqual(tc, [A.verdict, Bv.verdict, Cv.verdict], [1 -1 0]);
+verifyEqual(tc, [A.value, Bv.value, Cv.value], [69 310 171] / 3440, 'AbsTol', 1e-12);
+A0 = lk(a, 0.014);
+verifyEqual(tc, A0.verdict, -1);
+verifyEqual(tc, [A0.lo, A0.hi], [A.lo, A.hi]);
+verifyEqual(tc, lk(zeros(1, n), 0.014).verdict, 1);
+src = fileread(which('edge_map'));
+verifyNotEmpty(tc, strfind(src, 'CL.link(s) = edge_verdict(F.link_k, F.link_n, F.geo, TGT.link, ''le'', false, B);'));
+verifyNotEmpty(tc, strfind(src, 'CL.link_pre(s) = edge_verdict(F.link_k, F.link_n, F.geo, TGT0.link, ''le'', false, B);'));
+verifyNotEmpty(tc, strfind(src, 'CB.link_pre(b) = edge_verdict(F.link_k, F.link_n, F.geo, TGT0.link, ''le'', false, B);'));
+verifyNotEmpty(tc, strfind(src, 'lk0 = edge_verdict(Fb.link_k, Fb.link_n, Fb.geo, TGT0.link, ''le'', false, B);'));
+verifyNotEmpty(tc, strfind(src, 'LINK_J = 0.10;'));
+verifyNotEmpty(tc, strfind(src, 'up to 1e-3 packet error loss rate (3GPP TR 36.777, Table 5.1-1)'));
+verifyNotEmpty(tc, strfind(src, '''link_verdict_pre'', [CL.link_pre.verdict]'));
+verifyNotEmpty(tc, strfind(fileread(which('measure_all_kpis')), 'lt = en.link_target;'));
+end
+
+function test_edge_linkt_unchanged(tc)
+% LINK_T's target and verdict do not move with LINK: edge_map.m's pol_layers is run beside
+% its text before the change on synthetic flights where the 1.4% floor binds and where twice
+% the clean link does. Under TGT0 (the definitions printed beside) every output equals the
+% earlier one, REC and PROT per flight included; under TGT only REC and PROT change.
+old = {'function P = pol_layers_old(F, v, sk, TGT, B)', 's = F.(sk); h = F.harm;', ...
+    'P.rec = edge_verdict(F.held_k(s, v), F.ep_n(s, v), F.geo(s), TGT.rec, ''ge'', true, B);', ...
+    'P.prot = edge_verdict(F.held_k(:, v), F.ep_n(:, v), F.geo, TGT.prot, ''ge'', true, B);', ...
+    'P.rec_h = edge_verdict(F.held_k(s & h, v), F.ep_n(s & h, v), F.geo(s & h), TGT.rec, ''ge'', true, B);', ...
+    'P.prot_h = edge_verdict(F.held_k(h, v), F.ep_n(h, v), F.geo(h), TGT.prot, ''ge'', true, B);', ...
+    'P.tgt = max(2 * sum(F.cl_k, ''omitnan'') / max(sum(F.cl_n, ''omitnan''), 1), TGT.link);', ...
+    'P.linkt = edge_verdict(F.lt_k(:, v), F.lt_n(:, v), F.geo, P.tgt, ''le'', false, B);', 'end'};
+src = fileread(which('edge_map'));
+i0 = strfind(src, 'function P = pol_layers(');
+verifyNumElements(tc, i0, 1);
+i1 = regexp(src(i0:end), '\r?\nend\r?\n', 'end', 'once');
+new = strrep(src(i0:i0 + i1 - 1), 'function P = pol_layers(', 'function P = pol_layers_new(');
+d = fullfile(tc.TestData.tmp, 'linkt_unchanged'); mkdir(d);
+fid = fopen(fullfile(d, 'pol_layers_old.m'), 'w'); fprintf(fid, '%s\n', old{:}); fclose(fid);
+fid = fopen(fullfile(d, 'pol_layers_new.m'), 'w'); fwrite(fid, new); fclose(fid);
+addpath(d); back = onCleanup(@() rmpath(d));
+rs = RandStream('mt19937ar', 'Seed', 14);
+nF = 80; held = double(rand(rs, nF, 2) < 0.85) + double(rand(rs, nF, 2) < 0.85);
+To = struct('rec', 0.9, 'prot', 0.9, 'link', 0.014);
+Tn = struct('rec', 0.9, 'prot', 0.9, 'link', 0.057, 'linkt_floor', 0.014, 'held_flight', false);
+Tp = Tn; Tp.link = 0.014; Tp.held_flight = true;
+for cl = [0 3]                                         % clean frames lost per flight: the floor binds, then 2x clean
+    F = struct('surv', (1:nF)' <= 60, 'harm', mod((1:nF)', 3) == 0, 'held_k', held, 'ep_n', 2 * ones(nF, 2), ...
+        'geo', (1:nF)', 'cl_k', cl * double(mod((1:nF)', 2) == 0), 'cl_n', 20 * ones(nF, 1), ...
+        'lt_k', floor(4 * rand(rs, nF, 2)), 'lt_n', 40 * ones(nF, 2));
+    Po = pol_layers_old(F, 2, 'surv', To, 400);
+    Pn = pol_layers_new(F, 2, 'surv', Tn, 400);
+    Pp = pol_layers_new(F, 2, 'surv', Tp, 400);
+    verifyEqual(tc, Pp, Po);
+    verifyEqual(tc, {Pn.tgt, Pn.linkt}, {Po.tgt, Po.linkt});
+    verifyEqual(tc, Pn.rec.value, Po.rec.value);
+    verifyTrue(tc, isnan(Pn.rec.k) && ~isnan(Po.rec.k));
+end
+verifyEqual(tc, Po.tgt, 2 * 120 / 1600, 'AbsTol', 1e-12);
+verifyNotEmpty(tc, strfind(src, 'tl = max(2 * sum(Fb.cl_k, ''omitnan'') / max(sum(Fb.cl_n, ''omitnan''), 1), TGT.linkt_floor);'));
+verifyEmpty(tc, regexp(src, '1\), TGT\.link\);', 'once'));
+end
+
 %% ---------- features and state ----------
 function test_features(tc)
 n = 12;
@@ -8437,7 +8553,7 @@ verifyNotEmpty(tc, strfind(src, '''per_threat_h'', PTh'));
 verifyNotEmpty(tc, strfind(fileread(which('measure_all_kpis')), ...
     'ph = P.KP.per_threat_h(:, strcmp(P.KP.show, P.POL{iD})); n_ok = sum(ph >= 50);'));
 src = fileread(which('edge_map'));
-verifyNotEmpty(tc, strfind(src, 'P.prot_h = edge_verdict(F.held_k(h, v), F.ep_n(h, v), F.geo(h), TGT.prot, ''ge'', true, B);'));
+verifyNotEmpty(tc, strfind(src, 'P.prot_h = held_verdict(F.held_k(h, v), F.ep_n(h, v), F.geo(h), TGT.prot, hf, B);'));
 verifyNotEmpty(tc, strfind(src, 'X.nresp(q, s) = Vn.verdict;'));
 end
 
