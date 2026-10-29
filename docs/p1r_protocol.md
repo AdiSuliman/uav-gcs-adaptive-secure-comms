@@ -257,3 +257,37 @@ ends about 18-21.11 (worst about 22-23.11).
   | `test_core/test_evaluate_fresh_wiring` | Marker, flight, crash record, "KPI 6 read" and the fresh `far_report` in that order; `RWf`, `KP.far_set` and the labels; without the key every parent line in order |
   | `test_core/test_run_cache_*` | A restart skips the finished runs and gives the uninterrupted results; cut-off, unreadable or other-key files are computed again; the entities of C2g and C2u; the switch; the wiring of C2, C2g and C2u |
   | `test_core/test_p1r_profile` | `tools/p1r/profile.json`: `deg_select`, `kpi6_set` `fresh`, `run_cache`, no `n_rx`, no `fec_rx`, no `deg_force` |
+- **29.10.2026, the breakdown's reader is written (status and paths only).** The reader of
+  `KP.far_set` that the 27.10 amendment "the breakdown" still owed now exists: `sysfa` `649717b`,
+  written after profile 1's D103 reading, merged into `p1r` at `b37e8a3`.
+  `docs/system_fa_protocol.md` section 8 describes it. Section 5's definition is unchanged:
+  - without `KP.far_set` the breakdown reads the union as before. Profile 1's path keeps the gate,
+    the readings, the text and every saved variable of `3c9f7ea`, the code of profile 1's reading;
+  - with `KP.far_set = 'fresh'` and `KP.reading = 'P1R'` it loads `RWf` from the evaluation file,
+    and KPI 6's flights are `RWf` alone (split id 7) from the KPI 1 threshold. The exact gate
+    reproduces `KP.far` and `KP.far_diag` with `far_report` on `RWf`, and finds in the text KPI 6's
+    fresh header ("the fresh clean test set (P1R, read once)") and the lecturer lines with P1R's
+    label. The gate line and the header name the fresh definition. D103 3 reads `RWf`; D103 4 and
+    5 read the test episodes as before, labelled as P1R's second reading. `far_set` is saved with
+    the outputs, also with a failed gate's;
+  - the gate fails on any other `KP.far_set` value, on `'fresh'` without `KP.reading` `'P1R'`,
+    without `RWf` (one set per policy with the clean set's fields) and on `RWf` outside split id 7.
+    Read as the union (without these two fields), P1R's outputs fail the gate as well, so the
+    union's reader never misreads them.
+  - **Where it runs.** P1R's breakdown runs with the code of this tree
+    (`C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\worktrees\p1r`), the smoke's with that
+    of `...\worktrees\p1r-smoke` at the tested `p1r` tip, never from the `sysfa` tree
+    (`uav-gcs-sysfa`): there `policy_stamp.m` and `decision_settings.m` are profile 1's, without the
+    degradation test, so the gate would stop on P1R's policy stamp. Its inputs are copied read-only
+    into `...\worktrees\sysfa-read\p1r\results` and its outputs are written there
+    (`system_fa_protocol.md` section 5). The smoke worktree is at `67f933a`, which holds the union's
+    reader only; it moves to the tested `p1r` tip before smoke cell A, whose check is the
+    breakdown's gate on the fresh definition.
+  - Tests added to section 9 (`code/tests/test_system_fa_breakdown.m`):
+
+  | Test | What it checks |
+  |---|---|
+  | `test_system_fa_breakdown/test_old_path_unchanged` | Without `KP.far_set`: the gate, the readings, the text byte for byte and every saved variable equal those of `sysfa` `3c9f7ea`'s code, on a pass and on a failed gate |
+  | `test_system_fa_breakdown/test_gate_fresh` | With `'fresh'` the gate passes on P1R's C2e and reads KPI 6 on `RWf` alone with P1R's labelled lecturer lines; each missing or mislabelled piece, another `far_set` and P1R's outputs read as the union stop it; the label and the KPI 6 header are `evaluate_policies.m`'s |
+  | `test_system_fa_breakdown/test_breakdown_fresh` | D103 3's tables count the fresh flights; D103 4 and 5 equal the union's readings apart from P1R's line |
+  | `test_system_fa_breakdown/test_run_fresh` | The single run: `RWf` from the file, the fresh gate line and header, D103 3-5 in order, `far_set` saved, once; without `RWf` only the gatefail files, with `far_set` |
