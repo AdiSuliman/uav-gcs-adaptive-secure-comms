@@ -152,6 +152,8 @@ function build_threat_model(p)
 %           frequency, and the lags moved by whole symbols to where they hold the most of
 %           it. Its first pass takes the channel of every lag by LS on the training, its
 %           phase at every pilot block from the pilots' share of the block's samples.
+%           p.rx_ne_fix ('off' default; 'freq', 'keep', 'both': rx_ne_fix_code below)
+%           changes its frequency step and adds the antennas-alone alternative.
 %           MMSE over space-time vectors, every antenna's samples half a
 %           symbol apart around each symbol. Its synchronization: frequency first from
 %           the space-time coherence of the training (loaded with the noise floor, the
@@ -2002,7 +2004,126 @@ c = {
     's(imag(s) == 0) = s(imag(s) == 0) + 1j / sqrt(2);'
     'end'
     };
+c = rx_ne_fix_code(c, p);
 s = sprintf('%s\n', c{:});
+end
+
+function c = rx_ne_fix_code(c, p)
+% Delay-line (NE > 1) receiver options of p.rx_ne_fix; 'off' (default, or field absent)
+% leaves the script text unchanged.
+%   'freq'  residual frequency of the first pass from the angle of the summed products of
+%           consecutive pilot blocks' correlations (weighted phase increments, no unwrapping:
+%           Kay 1989; Fitz 1994; Luise & Reggiannini 1995) instead of the LS slope of the
+%           unwrapped block phases, whose one cycle slip on a faded block moves the estimate by
+%           0.7-2.4 kHz (threshold behaviour: Rife & Boorstyn 1974)
+%   'keep'  the antennas-alone output (the flat path's first pass and DD passes) on the same
+%           samples; the frame keeps the output with the lower pilot error under weights
+%           from the data decisions (pilot_mse), as the space-time path does
+%   'both'  both
+m = 'off';
+if isfield(p, 'rx_ne_fix') && ~isempty(p.rx_ne_fix), m = lower(char(p.rx_ne_fix)); end
+if ~any(strcmp(m, {'off', 'freq', 'keep', 'both'}))
+    error('build_threat_model: unknown rx_ne_fix ''%s''', m);
+end
+if any(strcmp(m, {'freq', 'both'}))
+    c = swap(c, '            [~, ~, pq, tq] = eq_train(ywx, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB);', ...
+        {'            [~, ~, pq, tq, cq] = eq_train(ywx, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB);'});
+    c = swap(c, '                bf = sxy / max(sxx, 1e-30);', {
+        '                % weighted phase increment between pilot blocks one spacing apart'
+        '                cc = complex(0); DP = PC(2) - PC(1);'
+        '                for b = 1:NB - 1'
+        '                    if PC(b + 1) - PC(b) == DP'
+        '                        cc = cc + cq(b + 2) * conj(cq(b + 1));'
+        '                    end'
+        '                end'
+        '                bf = angle(cc) / DP;'});
+    c = swap(c, 'function [G, s2, pq, tq] = eq_train(yx, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB)', ...
+        {'function [G, s2, pq, tq, cq] = eq_train(yx, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB)'});
+    c = swap(c, 'tq = zeros(NB + 1, 1); pq = zeros(NB + 1, 1); tq(1) = (1 + RQ + NPRE - RP) / 2; pu = 0;', {
+        'tq = zeros(NB + 1, 1); pq = zeros(NB + 1, 1); tq(1) = (1 + RQ + NPRE - RP) / 2; pu = 0;'
+        'cq = complex(zeros(NB + 1, 1));'});
+    c = swap(c, '    tq(b + 1) = PC(b); pq(b + 1) = pu;', {
+        '    tq(b + 1) = PC(b); pq(b + 1) = pu; cq(b + 1) = cb;'});
+end
+k = find(strcmp(c, '        sy(8) = ep / numel(IDXP);'));
+assert(numel(k) == 1 && strcmp(c{k + 1}, '        end'), 'build_threat_model: rx_ne_fix anchor');
+if any(strcmp(m, {'keep', 'both'}))
+    add = {
+        '        % the antennas alone on the same samples; the frame keeps the output whose pilots'
+        '        % the weights from its data decisions reproduce better'
+        '        za = flat_first(y, yw, Wi, LTF, PIL, IDXD, IDXP, PC, LC, NSTF, PB);'
+        '        za = dd_mvdr(y, za, IDXD, B, false, DDI);'
+        '        ea = pilot_mse(y, za, IDXD, IDXP, PIL, B);'
+        '        ee = pilot_mse(y, z, IDXD, IDXP, PIL, B);'
+        '        if ea < ee'
+        '            z(:) = za;'
+        '        end'
+        '        sy(8) = min(ea, ee);'};
+    c = [c(1:k + 1); add; c(k + 2:end)];
+    c = [c; {
+        ''
+        'function za = flat_first(y, yw, Wi, LTF, PIL, IDXD, IDXP, PC, LC, NSTF, PB)'
+        '% First pass of the antennas alone (the flat path''s MRC): the channel at the long'
+        '% training and at every pilot block on the whitened samples yw, smoothed [1 2 1]/4 over'
+        '% the blocks, interpolated, unwhitened by Wi; MRC per data symbol on y.'
+        'NR = size(y, 2); NS = size(y, 1); NB = numel(PC); NLTF = numel(LTF); ND = numel(IDXD);'
+        'Hp = complex(zeros(NR, NB + 1)); tp = zeros(NB + 1, 1);'
+        'for k = 1:NLTF'
+        '    Hp(:, 1) = Hp(:, 1) + yw(NSTF + k, :).'' * conj(LTF(k));'
+        'end'
+        'Hp(:, 1) = Hp(:, 1) / NLTF; tp(1) = LC;'
+        'for b = 1:NB'
+        '    for j = 1:PB'
+        '        q = (b-1)*PB + j;'
+        '        Hp(:, b+1) = Hp(:, b+1) + yw(IDXP(q), :).'' * conj(PIL(q));'
+        '    end'
+        '    Hp(:, b+1) = Hp(:, b+1) / PB; tp(b+1) = PC(b);'
+        'end'
+        'Hs = Hp;'
+        'for b = 2:NB+1'
+        '    if b == 2'
+        '        Hs(:, b) = (2*Hp(:, b) + Hp(:, b+1)) / 3;'
+        '    elseif b == NB+1'
+        '        Hs(:, b) = (Hp(:, b-1) + 2*Hp(:, b)) / 3;'
+        '    else'
+        '        Hs(:, b) = (Hp(:, b-1) + 2*Hp(:, b) + Hp(:, b+1)) / 4;'
+        '    end'
+        'end'
+        'za = complex(zeros(ND, 1));'
+        'j = 1;'
+        'for m = 1:ND'
+        '    k = IDXD(m);'
+        '    if k <= tp(1)'
+        '        hw = Hs(:, 1);'
+        '    elseif k >= tp(NB+1)'
+        '        hw = Hs(:, NB+1);'
+        '    else'
+        '        while k >= tp(j+1)'
+        '            j = j + 1;'
+        '        end'
+        '        g = (k - tp(j)) / (tp(j+1) - tp(j));'
+        '        hw = (1 - g) * Hs(:, j) + g * Hs(:, j+1);'
+        '    end'
+        '    h = Wi * hw;'
+        '    g = real(h'' * h);'
+        '    if g > 1e-12'
+        '        za(m) = (h'' * y(k, :).'') / g;'
+        '    end'
+        'end'
+        'end'}];
+elseif strcmp(m, 'freq')
+    c = [c(1:k + 1); {
+        '        if DDI == 0'
+        '            sy(8) = pilot_mse(y, z, IDXD, IDXP, PIL, B);'
+        '        end'}; c(k + 2:end)];
+end
+end
+
+function c = swap(c, old, new)
+% Replace the one line equal to old by the lines new.
+k = find(strcmp(c, old));
+assert(numel(k) == 1, 'build_threat_model: rx_ne_fix anchor ''%s''', strtrim(old));
+c = [c(1:k - 1); new(:); c(k + 1:end)];
 end
 
 %% ===================== Helpers =====================
