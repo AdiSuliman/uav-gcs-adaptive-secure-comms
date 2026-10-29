@@ -75,7 +75,9 @@ function varargout = link_env(cmd, varargin)
 %     cost   goodput given up, extra spectrum, transmit power, adaptive combining
 %     switch per configuration change or channel hop
 %     false  per change on a healthy link, but a release to no_action after the threat
-%            ended (spec.offset), which is no false alarm
+%            ended (spec.offset), which is no false alarm; K.FA on every such cycle, or with
+%            K.fa_form 'nothreat' (training only, fa_form_train.m) K.FA on the cycles with no
+%            threat on the air (the effective cell clean) and K.FA_threat on the others
 %   restored: m <= C.ratio_ok x clean; restored_plr: true packet loss <= C.ratio_ok
 %   x the clean link's + one loss event of the geometry (one packet; with fec_interleave
 %   the geometry's longest run of consecutive lost packets, at most the PP.fec_frames / 2
@@ -321,7 +323,11 @@ for v = 1:nL                                        % an escaped hop at another 
     q(j) = K.acr_tabs{v}.q(idx(j)); rst(j) = K.acr_tabs{v}.restored(idx(j));
     rpl(j) = K.acr_tabs{v}.restored_plr(idx(j)); gpt(j) = K.acr_tabs{v}.gput(idx(j));
 end
-r = (q - K.cost(E.cfg_link) - K.SW * (changed | hop) - K.FA * (changed & healthy & ~rel)) / 100;
+if isfield(K, 'fa_form') && ~strcmp(K.fa_form, 'all')
+    r = (q - K.cost(E.cfg_link) - K.SW * (changed | hop) - fa_nothreat(K, sc_eff) .* (changed & healthy & ~rel)) / 100;
+else
+    r = (q - K.cost(E.cfg_link) - K.SW * (changed | hop) - K.FA * (changed & healthy & ~rel)) / 100;
+end
 rec = K.recoverable(ih); rec(E.comb) = K.recoverable_comb(ih(E.comb));
 rcr = rec;
 if isfield(K, 'rec_core'), rcr = K.rec_core(ih); rcr(E.comb) = K.rec_core_comb(ih(E.comb)); end
@@ -335,6 +341,15 @@ info = struct('q', q, 'restored', rst & ~gap, 'restored_plr', rpl & ~gap, ...
     'changed', changed | hop, 'false_switch', changed & healthy & ~rel, 'healthy', healthy, ...
     'recoverable', rec, 'recoverable_core', rcr, 'sc_eff', sc_eff, 'cfg_eff', cfg_eff, 'post', E.t >= E.onset, ...
     'hop', hop, 'hop_in', arr, 'compromised', cm, 'ended', E.t >= E.offset, 'released', rel);
+end
+
+function w = fa_nothreat(K, sc_eff)
+% The false-switch penalty per episode under K.fa_form 'nothreat': K.FA where no threat is on
+% the air (the effective cell is the clean link), K.FA_threat elsewhere.
+if ~strcmp(K.fa_form, 'nothreat') || ~isfield(K, 'FA_threat')
+    error('link_env:fa_form', 'link_env: K.fa_form must be ''all'' or ''nothreat'' (with K.FA_threat)');
+end
+w = K.FA_threat + (K.FA - K.FA_threat) .* (sc_eff == K.clean);
 end
 
 function [c, cf, lay] = compromised(E, K, cfg)

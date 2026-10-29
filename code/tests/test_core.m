@@ -10186,18 +10186,210 @@ end
 
 function test_p1r_profile(tc)
 % P1R's profile.json (tools/p1r/profile.json, the p1r tree's root profile.json): profile 1
-% with C1d's degradation test chosen on validation, KPI 6 on the fresh set, finished runs kept;
+% with C1d's degradation test chosen on validation, KPI 6 on the fresh set, finished runs kept,
+% the no-threat penalty form scored in C2;
 % no antenna count (init_params keeps n_rx 3) and no decoder of the coded link (P1R builds no
 % pools).
 f = fullfile(tc.TestData.root, 'tools', 'p1r', 'profile.json');
 P = jsondecode(fileread(f));
-verifyEqual(tc, sort(fieldnames(P))', sort({'profile', 'deg_select', 'kpi6_set', 'run_cache'}));
+verifyEqual(tc, sort(fieldnames(P))', sort({'profile', 'deg_select', 'kpi6_set', 'run_cache', 'fa_nothreat'}));
 verifyEqual(tc, P.profile, 'profile 1, P1R');
 O = deg_options(f); verifyTrue(tc, O.on); verifyEqual(tc, O.force, '');
 verifyEqual(tc, kpi6_set([], f), 'fresh');
 verifyTrue(tc, run_cache('on', [], f));
+verifyTrue(tc, fa_nothreat_on([], f));
 verifyFalse(tc, isfield(P, 'n_rx'));
 verifyFalse(tc, isfield(P, 'deg_force'), 'never forced outside the smoke');
+end
+
+%% ---------- no-threat form of the false-switch penalty (training only) ----------
+function test_fa_form_off_identical(tc)
+% Without K.fa_form, or with 'all', the environment is the parent commit's (p1r 198f82f) bit for
+% bit: tables, rewards, observations, info and state on episodes with clean, jammed and covered
+% links, onsets and ends, at the standard and at a training penalty; fa_form_train leaves a reward
+% unchanged for 'all', '' and a seed_summary without selected_fa_form, and train_one's default
+% form is 'all'.
+[PP, K] = covered_world();
+spec = fa_spec();
+Kall = K; Kall.fa_form = 'all';
+Kt = K; Kt.FA = 120;
+[r1, I1, E1] = fa_episode(PP, K, spec, 11);
+[r2, I2, E2] = fa_episode(PP, Kall, spec, 11);
+[r3, I3] = fa_episode(PP, Kt, spec, 11);
+d = parent_copy(tc, 'code/decision/link_env.m', '198f82f');
+addpath(d, '-begin'); clear link_env
+cl0 = onCleanup(@() fixture_off(d, 'link_env')); %#ok<NASGU>
+verifyEqual(tc, which('link_env'), fullfile(d, 'link_env.m'));
+K0 = link_env('tables', PP);
+[r0, I0, E0] = fa_episode(PP, K0, spec, 11);
+K0t = K0; K0t.FA = 120;
+[r0t, I0t] = fa_episode(PP, K0t, spec, 11);
+fixture_off(d, 'link_env');
+verifyTrue(tc, isequaln(K0, K));
+verifyTrue(tc, isequaln(r1, r0) && isequaln(r2, r0));
+verifyTrue(tc, isequaln(I1, I0) && isequaln(I2, I0));
+verifyTrue(tc, isequaln(rmfield(E1, 'rs'), rmfield(E0, 'rs')) && isequaln(rmfield(E2, 'rs'), rmfield(E0, 'rs')));
+verifyTrue(tc, isequaln(r3, r0t) && isequaln(I3, I0t));            % a training penalty without the form
+verifyTrue(tc, any(cellfun(@(x) any(x.info.false_switch), I0)));     % the episodes hold false switches
+for f = {{}, {'all'}, {''}, {[]}, {struct('selected_fa_pen', 120)}, {struct('selected_fa_form', 'all')}}
+    verifyTrue(tc, isequaln(fa_form_train(Kt, K, f{1}{:}), Kt));
+end
+src = fileread(which('train_dqn'));
+verifyNotEmpty(tc, strfind(src, 'if nargin < 19, form = ''all''; end'));
+verifyNotEmpty(tc, regexp(src, ['Kt = K; Kt\.FA = fp; Kt\.cost = cs \* K\.cost; Kt\.SW = ss \* K\.SW;   % training reward only' ...
+    '\r?\nKt = fa_form_train\(Kt, K, form\);\r?\nHg = H; Hg\.gamma = g;'], 'once'));
+end
+
+function test_fa_form_nothreat_split(tc)
+% Under 'nothreat' the penalty is split per cycle: the full penalty on a change on a healthy
+% link with no threat on the air (before the onset, on the clean flight, after the end), the
+% standard w_false on one with a threat on the air (a covered link), none on a release after the
+% end; the rest of the reward, the state and the observations are those of the plain training
+% reward. Other forms stop.
+[PP, K] = covered_world();
+C = decision_config(); lam = 120;
+verifyEqual(tc, K.FA, C.w_false);
+Kp = K; Kp.FA = lam;
+Ka = fa_form_train(Kp, K, 'nothreat');
+verifyEqual(tc, {Ka.fa_form, Ka.FA_threat, Ka.FA}, {'nothreat', C.w_false, lam});
+verifyTrue(tc, isequaln(fa_form_train(Kp, K, struct('selected_fa_form', 'nothreat')), Ka));
+verifyTrue(tc, isequaln(fa_form_train(Kp, K, "nothreat"), Ka));
+spec = fa_spec();
+[ra, Ia, ~, CLa] = fa_episode(PP, Ka, spec, 21);
+[rp, Ip] = fa_episode(PP, Kp, spec, 21);
+verifyTrue(tc, isequaln(Ia, Ip));                                    % the reward changes nothing else
+pay = zeros(size(ra)); [cl, fs, ch, rl, pre, en, cf] = deal(false(size(ra)));
+for t = 1:spec.T
+    x = Ia{t}.info;
+    pay(t, :) = x.q - reshape(K.cost(CLa(t, :)), 1, []) - K.SW * x.changed - 100 * ra(t, :);   % the false-switch term paid
+    cl(t, :) = x.sc_eff == K.clean; fs(t, :) = x.false_switch; ch(t, :) = x.changed; rl(t, :) = x.released;
+    pre(t, :) = ~x.post; en(t, :) = x.ended; cf(t, :) = spec.scn == K.clean;
+end
+thr = ~cf;                                                           % threat episodes
+verifyEqual(tc, ra(cl), rp(cl));                                     % no threat on the air: the full penalty
+verifyEqual(tc, ra(~fs), rp(~fs));
+verifyEqual(tc, ra(~cl & fs) - rp(~cl & fs), (lam - C.w_false) / 100 * ones(sum(~cl(:) & fs(:)), 1), 'AbsTol', 1e-12);
+cases = {fs & thr & pre, lam, 'a change before the onset'; fs & ~cl, C.w_false, 'a change on a covered link'; ...
+    ch & rl, 0, 'a release after the end'; fs & thr & en, lam, 'another change after the end'; fs & cf, lam, ...
+    'a change on the clean flight'; ch & ~fs, 0, 'a change on an unhealthy link or a release'};
+for k = 1:size(cases, 1)
+    m = cases{k, 1};
+    verifyTrue(tc, any(m(:)), ['the episodes hold ' cases{k, 3}]);
+    verifyEqual(tc, pay(m), cases{k, 2} * ones(sum(m(:)), 1), 'AbsTol', 1e-9, cases{k, 3});
+end
+verifyTrue(tc, all(cl(fs & thr & pre)) && ~any(cl(fs & thr & ~pre & ~en)));
+verifyError(tc, @() fa_form_train(Kp, K, 'Nothreat'), 'fa_form_train:value');
+verifyError(tc, @() fa_form_train(Kp, K, 1), 'fa_form_train:value');
+verifyError(tc, @() fa_form_train(Kp, K, struct('selected_fa_form', 'clean')), 'fa_form_train:value');
+Kb = Kp; Kb.fa_form = 'clean';
+verifyError(tc, @() fa_episode(PP, Kb, spec, 21), 'link_env:fa_form');
+Kb = Kp; Kb.fa_form = 'nothreat';                                    % without FA_threat
+verifyError(tc, @() fa_episode(PP, Kb, spec, 21), 'link_env:fa_form');
+end
+
+function test_fa_nothreat_switch(tc)
+% The switch: off without profile.json or its field; "fa_nothreat": true or false from the
+% file; CFG.fa_nothreat before the file; any other value stops. P1R's profile sets it; C2 reads
+% it after the smoke's grid, the smoke's no-threat penalties are its grid's.
+d = tempname; mkdir(d); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+f = fullfile(d, 'profile.json');
+verifyFalse(tc, fa_nothreat_on([], f));
+verifyFalse(tc, fa_nothreat_on(struct('dqn_seeds', 3), f));
+write_json(f, '{"deg_select": true, "kpi6_set": "fresh"}'); verifyFalse(tc, fa_nothreat_on([], f));
+write_json(f, '{"fa_nothreat": true}'); verifyTrue(tc, fa_nothreat_on([], f));
+verifyFalse(tc, fa_nothreat_on(struct('fa_nothreat', false), f));
+write_json(f, '{"fa_nothreat": false}'); verifyFalse(tc, fa_nothreat_on([], f));
+verifyTrue(tc, fa_nothreat_on(struct('fa_nothreat', true), f));
+write_json(f, '{"fa_nothreat": "yes"}'); verifyError(tc, @() fa_nothreat_on([], f), 'fa_nothreat_on:value');
+write_json(f, '{"fa_nothreat": 1}'); verifyError(tc, @() fa_nothreat_on([], f), 'fa_nothreat_on:value');
+verifyError(tc, @() fa_nothreat_on(struct('fa_nothreat', [true true]), f), 'fa_nothreat_on:value');
+verifyTrue(tc, fa_nothreat_on([], fullfile(tc.TestData.root, 'tools', 'p1r', 'profile.json')));
+src = fileread(which('train_dqn'));
+verifyNotEmpty(tc, strfind(src, 'FA_NT = struct(''on'', fa_nothreat_on(cfgc), ''pen'', [120 160]);'));
+verifyNotEmpty(tc, strfind(src, 'if exist(''SMOKE'', ''var'') && SMOKE, FA_NT.pen = FA_PEN; end'));
+i0 = strfind(src, 'cfgc = []; if exist(''CFG'', ''var''), cfgc = CFG; end'); i1 = strfind(src, 'FA_NT = struct(');
+i2 = strfind(src, 'N_SEEDS = 1; GAMMAS = 0.5; FA_PEN = 80;');
+verifyTrue(tc, isscalar(i0) && isscalar(i1) && isscalar(i2) && i1 > i0 && i1 > i2);
+end
+
+function test_fa_nothreat_training_only(tc)
+% The form is a training reward only: the tables C2, C2e and every reader evaluate with carry
+% no form; no evaluation file reads it; C2 validates on the standard reward; its no-threat runs
+% (section 7) go through the run cache with the form in the key, run after the deployed agent and
+% the sensitivity are saved, and never enter the selection, the gate or the deployed policy; the
+% selected form enters seed_summary only with the switch; C2g, C2u and the sensitivity retrain
+% carry it.
+[PP, K] = covered_world();
+verifyFalse(tc, isfield(K, 'fa_form') || isfield(K, 'FA_threat'));
+verifyFalse(tc, isfield(link_env('tables', PP, 'flight'), 'fa_form'));
+ev = dir(fullfile(tc.TestData.root, 'code', 'evaluation', '*.m'));
+files = [{'evaluate_policies', 'rollout_policy', 'dqn_eval_batches', 'policy_decide', 'policy_stamp', ...
+    'policy_run_set', 'decision_settings', 'dqn_held', 'dqn_recovered', 'dqn_train_run'}, erase({ev.name}, '.m')];
+for f = files
+    verifyEmpty(tc, regexp(fileread(which(f{1})), 'fa_form|FA_threat|fa_nothreat|FA_NT', 'once'), f{1});
+end
+verifyNotEmpty(tc, strfind(fileread(which('dqn_train_run')), ...
+    'Re = dqn_eval_batches(''dqn_esc'', PP, Kval, eval_spec, ag, struct(), seed + 700, split_val);'));
+src = fileread(which('train_dqn'));
+verifyNotEmpty(tc, strfind(src, 'ev = @(kind, PPc, ag, opt) eval_policy(kind, PPc, K, val_spec, ag, opt, CV, H, EBNO_THR, val_thr);'));
+verifyNotEmpty(tc, strfind(src, '[ag, curve, lossc, best_ep] = dqn_train_run(Hg, PPc, Kt, K, norm_in, seed, nS, sp_tr, sp_val);'));
+verifyNumElements(tc, strfind(src, 'AR(end+1) = cached(RC, {''train_one'', ea, fp,'), 1);
+verifyNotEmpty(tc, regexp(src, '''penalty form nothreat'', DROP_MODE, ''nothreat''\}, PPa, PP, @\(\) train_one\(Hn, PPa, K,', 'once'));
+verifyNotEmpty(tc, strfind(src, 'SPLIT_TRAIN, SPLIT_VAL, ''nothreat''), @(r) run_lines(r, DROP_MODE, DU, RC.dir));'));
+verifyNotEmpty(tc, strfind(src, 'Hn = rmfield(H, {''fa_pen'', ''cost_scale'', ''sw_scale''});'));
+c = regexp(src, 'select_run\((\w+)', 'tokens');
+verifyNotEmpty(tc, c);
+verifyTrue(tc, all(cellfun(@(x) strcmp(x{1}, 'runs'), c)), 'select_run reads the plain runs only');
+verifyEmpty(tc, regexp(src, '(choose_deployed|rank_pick)\([^\n]*AR', 'once'));
+k7 = regexp(src, 'if FA_NT\.on\r?\n\s*ea = struct\(', 'once');
+ks = strfind(src, 'save(''data/trained_dqn.mat''');
+verifyNotEmpty(tc, k7); verifyGreaterThan(tc, k7, ks(end));       % after every save of the deployed agent
+verifyNumElements(tc, strfind(src, 'seed_summary.selected_fa_form'), 1);
+verifyNotEmpty(tc, strfind(src, 'if FA_NT.on, seed_summary.selected_fa_form = fa_form_sel; end'));
+verifyNumElements(tc, regexp(src, 'fa_form_sel = ', 'match'), 1);
+verifyNotEmpty(tc, strfind(src, 'fa_form_sel = ''all'';'));
+i1 = strfind(src, 'Kft = fa_form_train(Kft, Kf, fa_form_sel);'); i2 = strfind(src, 'ag = cached(RC, {''sens''');
+verifyTrue(tc, isscalar(i1) && isscalar(i2) && i2 > i1);
+verifyNotEmpty(tc, regexp(src, 'rb\.seed, DROP_MODE, \.\.\.\r?\n\s*fa_form_sel\}, PPc, PP,', 'once'));
+for f = {'experiment_combo_generalization', 'experiment_unknown_threat'}
+    s = fileread(which(f{1}));
+    a = strfind(s, 'Kt = Kx; Kt.FA = Q.seed_summary.selected_fa_pen;');
+    b = strfind(s, 'Kt = fa_form_train(Kt, Kx, Q.seed_summary);');
+    e = strfind(s, 'ag = dqn_train_run(H, PPx, Kt, Kx, Q.norm_in, seed, nS, 1, 2);');
+    verifyTrue(tc, isscalar(a) && isscalar(b) && isscalar(e) && a < b && b < e, f{1});
+end
+end
+
+function [PP, K] = covered_world()
+% toy_world with a third cell whose threat is on the air while no response keeps the link
+% restored (a covered link): its pools are the clean link's.
+[PP, ~] = toy_world(true);
+PP.scen{3} = 'antenna_fault';
+PP.pools(3, :, :, 1) = PP.pools(1, :, :, 1);
+K = link_env('tables', PP);
+end
+
+function spec = fa_spec()
+% 60 episodes over the clean, jammed and covered cells, onsets 3-8, some threats ending.
+n = 60; rs = RandStream('mt19937ar', 'Seed', 5);
+scn = repmat([1 2 3], 1, n / 3); on = randi(rs, [3 8], 1, n);
+off = inf(1, n); e = scn > 1 & rand(rs, 1, n) < 0.6; off(e) = on(e) + randi(rs, [3 6], 1, sum(e));
+spec = struct('scn', scn, 's', randi(rs, 2, 1, n), 'onset', on, 'follow', false(1, n), 'fdelay', zeros(1, n), ...
+    'unk', false(1, n), 'T', 18, 'r', ones(1, n), 'delay', 1, 'offset', off);
+end
+
+function [rr, I, E, CL] = fa_episode(PP, K, spec, seed)
+% One batch of episodes under random choices (half of them no_action): reward, observations
+% and info per cycle, the final state, and the configuration the link ran each cycle.
+rs = RandStream('mt19937ar', 'Seed', seed); ra = RandStream('mt19937ar', 'Seed', seed + 1);
+[E, ~] = link_env('reset', PP, K, spec, 1, rs);
+NE = numel(spec.scn); nA = numel(PP.actions);
+rr = zeros(spec.T, NE); CL = rr; I = cell(1, spec.T);
+for t = 1:spec.T
+    a = randi(ra, nA, 1, NE); a(rand(ra, 1, NE) < 0.5) = K.na;
+    [E, r, obs, info] = link_env('step', E, PP, K, a);
+    rr(t, :) = r; CL(t, :) = E.cfg_link; I{t} = struct('obs', obs, 'info', info);
+end
 end
 
 function test_deg_mode_suite(tc)
