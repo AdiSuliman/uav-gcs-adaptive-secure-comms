@@ -16,7 +16,9 @@ function varargout = system_fa_breakdown(cmd, varargin)
 %       header names the thread count the session really has.
 %       KPI 6's flights follow KP.far_set: without it the union of C2e's clean flights (profile
 %       1); 'fresh' the fresh clean test set RWf alone (P1R's C2e, evaluate_policies.m with
-%       kpi6_set fresh, KP.reading 'P1R', the lecturer lines carrying P1R's label).
+%       kpi6_set fresh, KP.reading 'P1R', the lecturer lines carrying P1R's label). With
+%       KP.far_aprime the no-threat form's runs (RWa, aprime_fresh.m) follow every policy as
+%       KPI 6's last rows, on the same fresh flights; the gate reproduces them with the others.
 %   G = system_fa_breakdown('gate', E, PP, Q, txt)
 %       E the variables of eval_mat, Q those of dqn_mat, txt eval_txt one cell per line. G.pass
 %       when lect_kpis.m on every episode gives KP.lect and its lines of txt, far_report on
@@ -92,9 +94,10 @@ E = load(eval_mat, 'ALL', 'POL', 'LBL', 'iDQN', 'KP', 'RES', 'RW', 'set_names');
 fresh = isfield(E, 'KP') && far_def(E.KP);
 if fresh                                             % P1R: KPI 6's flights are RWf
     w = warning('off', 'MATLAB:load:variableNotFound');
-    Lf = load(eval_mat, 'RWf');
+    Lf = load(eval_mat, 'RWf', 'RWa');
     warning(w);
     if isfield(Lf, 'RWf'), E.RWf = Lf.RWf; end
+    if isfield(Lf, 'RWa'), E.RWa = Lf.RWa; end
     clear Lf
 end
 txt = read_lines(eval_txt);
@@ -107,6 +110,11 @@ if fresh
     head{end+1} = sprintf(['P1R (KP.reading P1R, KP.far_set fresh): KPI 6''s flights are %s; D103 3 reads them, ' ...
         'D103 4 and 5 read test pools already read in profile 1''s C2e (second reading, descriptive)'], ...
         char(string(field_or(E.KP, 'far_src', '?'))));
+    if isfield(E.KP, 'far_aprime') && isstruct(E.KP.far_aprime) && all(isfield(E.KP.far_aprime, {'pol', 'file', 'sha256', 'label'}))
+        A = E.KP.far_aprime;
+        head{end+1} = sprintf('KPI 6''s last %d rows: the no-threat penalty form''s runs (%s, sha256 %s), %s', ...
+            numel(A.pol), A.file, A.sha256, A.label);
+    end
 end
 G = gate(E, PP, Q, txt);
 if ~G.pass
@@ -186,8 +194,10 @@ else
 end
 
 % far_report on KPI 6's clean flights: KP.far, KP.far_diag and their lines
+RA = {}; AP = [];
 if fresh
     [RU, aU, m2] = fresh_ru(E, PP, KP);
+    if isempty(m2), [RA, AP, m2] = aprime_ru(E, KP, RU); end
 else
     [RU, aU, m2] = union_ru(E, PP, KP);
 end
@@ -196,8 +206,14 @@ if isempty(m2), m2 = pairing(RU, E.POL, {'s', 'geom', 'split'}, 'RU'); mm = [mm,
 T = 0; n = [KP.far.n]; j = find(n > 0, 1);
 if ~isempty(j), T = KP.far(j).rate.cycles / n(j); end
 if T ~= round(T), mm{end+1} = sprintf('KP.far gives %g cycles per episode', T); end
-if isempty(m2)
+if isempty(m2) && isempty(AP)
     [Ff, FDf, lfar] = far_report(RU, E.POL, E.LBL, aU, T, E.iDQN, PP.ebno, KP.cls_list, KP.lect.period_ms);
+elseif isempty(m2)                                   % the A' rows after every policy's, as C2e adds them
+    [Ff, FDf, lfar] = far_report([RU, RA], [E.POL, AP.pol], [E.LBL, AP.lbl], aU, T, E.iDQN, PP.ebno, KP.cls_list, ...
+        KP.lect.period_ms);
+    lfar = [lfar, aprime_fresh('lines', AP, Ff(end - numel(AP.pol) + 1:end))];
+end
+if isempty(m2)
     mm = [mm, differs(Ff, KP.far, 'far_report on KPI 6''s clean flights vs KP.far'), ...
         differs(FDf, KP.far_diag, 'far_report on KPI 6''s clean flights vs KP.far_diag')];
     hdr = sprintf('False alarms on the clean link, every independent clean flight: %s, %d episodes x %d cycles -> KPI 6', ...
@@ -331,6 +347,37 @@ end
 if ~isempty(mm), return; end
 RU = E.RWf;
 aU = reshape(PP.ebno(RU{1}.s) >= KP.ebno_thr, 1, []);
+end
+
+function [RA, AP, mm] = aprime_ru(E, KP, RU)
+% The no-threat form's runs on the fresh clean test set (KP.far_aprime, RWa): one fresh set per
+% run, split id 7, the episodes of RWf; none without KP.far_aprime, which then admits no RWa.
+RA = {}; AP = []; mm = {};
+if ~isfield(KP, 'far_aprime')
+    if isfield(E, 'RWa'), mm = {'the evaluation holds RWa but KP has no far_aprime'}; end
+    return
+end
+AP = KP.far_aprime;
+if ~(isstruct(AP) && all(isfield(AP, {'pol', 'lbl', 'pen', 'gamma', 'seed', 'label', 'file', 'sha256'})) && ...
+        iscell(AP.pol) && ~isempty(AP.pol) && all(cellfun(@numel, {AP.lbl, AP.pen, AP.gamma, AP.seed}) == numel(AP.pol)))
+    mm = {'KP.far_aprime is not the no-threat form''s runs (pol, lbl, pen, gamma, seed, label, file, sha256)'}; return
+end
+if ~isfield(E, 'RWa') || ~iscell(E.RWa) || numel(E.RWa) ~= numel(AP.pol)
+    mm = {'the evaluation lacks RWa, one fresh clean set per A'' run (KP.far_aprime)'}; return
+end
+need = {'s', 'geom', 'split', 'switches', 'false_sw', 'fc_t', 'fc_cls', 'fc_deg', 'fc_dal', 'fc_drop'};
+mm = has_fields(E.RWa, AP.pol, need, 'RWa');
+for k = 1:numel(E.RWa)
+    if isstruct(E.RWa{k}) && ~isempty(setdiff(fieldnames(RU{1}), fieldnames(E.RWa{k})))
+        mm{end+1} = sprintf('RWa{%d} lacks fields of RWf', k); %#ok<AGROW>
+    end
+end
+if ~isempty(mm), return; end
+for k = 1:numel(E.RWa)
+    if ~all(E.RWa{k}.split == 7), mm{end+1} = sprintf('RWa{%d} (%s) is not split id 7 throughout', k, AP.pol{k}); end %#ok<AGROW>
+end
+if isempty(mm), mm = pairing([RU(1), E.RWa], [E.POL(1), AP.pol], {'s', 'geom', 'split'}, 'RWf{1} + RWa'); end
+if isempty(mm), RA = E.RWa; end
 end
 
 function [fresh, mm] = far_def(KP)

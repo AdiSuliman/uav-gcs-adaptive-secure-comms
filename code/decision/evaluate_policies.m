@@ -23,7 +23,11 @@
 %             set alone (data/clean_fresh_pools.mat, RWf, split id 7), read once behind
 %             the marker results/kpi6_fresh_read_started.txt (kpi6_fresh_marker.m); the
 %             union above is printed beside it as a second reading, descriptive, and every
-%             lecturer line is labelled as one
+%             lecturer line is labelled as one. With data/aprime_agents.mat (C2's no-threat
+%             penalty form, train_dqn.m section 7) its runs fly the same fresh flights in the same
+%             reading and follow every policy as KPI 6 rows, descriptive, never the deployed
+%             policy's (aprime_fresh.m); the file without C2's switch, or the switch without the
+%             file, stops before any fresh flight
 %   comb      jamming / reactive_jamming on every channel we can use: the jammer is
 %             on the new channel at the hop itself and on frequency diversity's
 %             second carrier, so only space and link budget can help (assumed: no
@@ -100,6 +104,7 @@ PP = decision_settings(PP, Q);                       % the deployed DQN's monito
 cfg6 = []; if exist('CFG', 'var'), cfg6 = CFG; end
 FRESH = strcmp(kpi6_set(cfg6), 'fresh');             % P1R: KPI 6 on the fresh clean test set (kpi6_set.m)
 if FRESH, F6 = fresh_checks(PP, Q, exist('SMOKE', 'var') && SMOKE); end   % every check before any fresh flight
+if FRESH, F6.ap = aprime_fresh('load', Q, cfg6); end   % the no-threat form's runs (A'), [] without them
 K = link_env('tables', PP);
 C = decision_config();
 tab = policy_table(PP, K);
@@ -555,12 +560,17 @@ if FRESH
     % P1R's KPI 6 on the fresh clean test set alone, read once: the marker before its first
     % flight, a crash before the KPI 6 line recorded in it, "KPI 6 read" before the line
     FAR_u = FAR; FD_u = FD; far_src_u = far_src;
-    kpi6_fresh_marker('start', F6.marker, F6.sha, struct('pools', F6.file, 'deg_mode', Q.dec.deg_mode, ...
-        'deg_adopted', F6.deg_txt, 'det_id', PP.det_id, 'policy_stamp', policy_stamp(Q), 'smoke', F6.smoke));
+    mk6 = struct('pools', F6.file, 'deg_mode', Q.dec.deg_mode, 'deg_adopted', F6.deg_txt, 'det_id', PP.det_id, ...
+        'policy_stamp', policy_stamp(Q), 'smoke', F6.smoke);
+    if ~isempty(F6.ap), mk6.aprime_agents_sha256 = F6.ap.sha256; end
+    kpi6_fresh_marker('start', F6.marker, F6.sha, mk6);
     try
-        RWf = fly_clean_set(PP, F6.CT, TEST, NE, T, clean_cell, nS, POL, Q, sel, fixed_best, fixed_mmse, tab, K.na, 40000);
+        [RWf, RWa] = fly_clean_set(PP, F6.CT, TEST, NE, T, clean_cell, nS, POL, Q, sel, fixed_best, fixed_mmse, tab, ...
+            K.na, 40000, F6.ap);
         for pk = 1:numel(POL), RWf{pk}.split(:) = 7; end
+        for pk = 1:numel(RWa), RWa{pk}.split(:) = 7; end
         aboveF = PP.ebno(RWf{1}.s) >= ebno_thr;
+        aprime_fresh('flown', F6.ap, RWa, numel(RWf{1}.s));
     catch err
         kpi6_fresh_marker('crash', F6.marker, err);
         rethrow(err);
@@ -571,7 +581,14 @@ if FRESH
     rep{end+1} = '';
     rep{end+1} = sprintf('False alarms on the clean link, the fresh clean test set (P1R, read once): %s, %d episodes x %d cycles -> KPI 6', ...
         far_src, sum(aboveF), T);
-    [FAR, FD, lines] = far_report(RWf, POL, LBL, aboveF, T, iDQN, PP.ebno, cls_list, C.period_ms);
+    if isempty(F6.ap)
+        [FAR, FD, lines] = far_report(RWf, POL, LBL, aboveF, T, iDQN, PP.ebno, cls_list, C.period_ms);
+    else                                               % the A' rows after every policy's, on the same flights
+        [FAR, FD, lines] = far_report([RWf, RWa], [POL, F6.ap.pol], [LBL, F6.ap.lbl], aboveF, T, iDQN, PP.ebno, ...
+            cls_list, C.period_ms);
+        lines = [lines, aprime_fresh('lines', F6.ap, FAR(end - numel(F6.ap.pol) + 1:end))];
+    end
+    aprime_fresh('done', F6.ap, FAR);
     rep = [rep, lines];
 end
 
@@ -653,10 +670,12 @@ KP = struct('per_threat', PT, 'per_threat_sev', PTsev, 'threats', {threats}, 're
 if FRESH                                              % P1R: KP.far is the fresh set's; the union beside it
     KP.far_set = 'fresh'; KP.reading = 'P1R'; KP.far_union = FAR_u; KP.far_diag_union = FD_u; KP.far_src_union = far_src_u;
     KP.far_geoms_fresh = F6.CT.n_geom; KP.far_fresh_sha256 = F6.sha;
+    if ~isempty(F6.ap), KP.far_aprime = rmfield(F6.ap, 'agents'); end   % KP.far's last rows
 end
 save('results/policy_evaluation.mat', 'RES', 'RW', 'POL', 'LBL', 'set_names', 'fixed_best', 'tab', 'iDQN', 'KP', ...
     'iThreat', 'ALL', 'top_cfg');
 if FRESH, save('results/policy_evaluation.mat', 'RWf', '-append'); end
+if FRESH && ~isempty(F6.ap), save('results/policy_evaluation.mat', 'RWa', '-append'); end
 
 %% 5. Figures
 key = unique({'none', 'fixed', 'rule_esc', 'blind_esc', 'table', 'dqn_esc', POL{iDQN}, 'oracle'}, 'stable');
@@ -729,9 +748,11 @@ F6.sha = kpi6_fresh_marker('sha', F6.file);
 F6.state = kpi6_fresh_marker('check', F6.marker, F6.sha);
 end
 
-function RR = fly_clean_set(PP, CT, TEST, NE, T, clean_cell, nS, POL, Q, sel, fixed_best, fixed_mmse, tab, na, seed)
+function [RR, RA] = fly_clean_set(PP, CT, TEST, NE, T, clean_cell, nS, POL, Q, sel, fixed_best, fixed_mmse, tab, na, ...
+    seed, ap)
 % Every policy on one 30-cycle clean episode per geometry and Eb/N0 of a clean set CT, in its
-% own world (clean_split.m), as data/clean_test_pools.mat is flown above.
+% own world (clean_split.m), as data/clean_test_pools.mat is flown above; RA: the A' runs of ap
+% (aprime_fresh.m) in the same world, on the same episodes and draws ({} without them).
 PPw = clean_split(PP, CT, TEST);
 Kw = link_env('tables', PPw);
 [ss, rr] = ndgrid(1:nS, 1:CT.n_geom); ss = ss(:)'; rr = rr(:)';
@@ -751,6 +772,8 @@ for pk = 1:numel(POL)
     for j = 1:numel(f), R.(f{j}) = R.(f{j})(:, 1:n); end                    % drop the padding
     RR{pk} = R;
 end
+RA = cell(1, 0);
+if nargin >= 16 && ~isempty(ap), RA = aprime_fresh('fly', ap, PPw, Kw, specs, TEST, seed, n); end
 end
 
 function L = p1r_label(L)

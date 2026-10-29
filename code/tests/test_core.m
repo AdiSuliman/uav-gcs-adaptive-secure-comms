@@ -10141,7 +10141,7 @@ pos = @(s) strfind(src, s);
 a = pos('if FRESH, F6 = fresh_checks(PP, Q, exist(''SMOKE'', ''var'') && SMOKE); end');
 b = pos('%% 1. Episode sets');
 s1 = pos('kpi6_fresh_marker(''start'', F6.marker, F6.sha,');
-f1 = pos('RWf = fly_clean_set(PP, F6.CT, TEST, NE, T, clean_cell, nS, POL, Q, sel, fixed_best, fixed_mmse, tab, K.na, 40000);');
+f1 = pos('[RWf, RWa] = fly_clean_set(PP, F6.CT, TEST, NE, T, clean_cell, nS, POL, Q, sel, fixed_best, fixed_mmse, tab, ...');
 c1 = pos('kpi6_fresh_marker(''crash'', F6.marker, err);');
 r1 = pos('kpi6_fresh_marker(''read'', F6.marker);');
 fr = pos('[FAR, FD, lines] = far_report(RWf, POL, LBL, aboveF, T, iDQN, PP.ebno, cls_list, C.period_ms);');
@@ -10391,6 +10391,239 @@ for t = 1:spec.T
     [E, r, obs, info] = link_env('step', E, PP, K, a);
     rr(t, :) = r; CL(t, :) = E.cfg_link; I{t} = struct('obs', obs, 'info', info);
 end
+end
+
+function [Q, aprime] = aprime_world()
+% data/trained_dqn.mat's seed_summary and a data/aprime_agents.mat as train_dqn.m section 7 saves
+% it: three no-threat runs (penalties 120, 120, 160; seeds 42, 43, 42), each agent in matrix form
+% beside its plain pair, and the grid's settings.
+Q = struct('seed_summary', struct('selected_alarm', 'class_drop 3/3', 'selected_drop', NaN, 'fa_ebno_thr', 3));
+ag = @(w) struct('dense', struct('W', {{single(w)}}, 'b', {{single(0)}}), 'norm', struct('mu', 0, 'sd', 1));
+mkrun = @(p, s, w) struct('pen', p, 'gamma', 0.5, 'seed', s, 'nothreat', struct('agent', ag(w)), ...
+    'plain', struct('agent', ag(-w)));
+runs = [mkrun(120, 42, 1), mkrun(120, 43, 2), mkrun(160, 42, 3)];
+aprime = struct('label', 'pre-registered candidate (D107), validation-scored, not deployed, descriptive', ...
+    'form', 'nothreat', 'w_false', 20, 'alarm', 'class_drop 3/3', 'drop', NaN, 'S', struct('maha_thr', -7, 'esc_drop', false), ...
+    'pen', [120 160], 'gammas', 0.5, 'seeds', [42 43], 'fa_ebno_thr', 3, 'fa_bound', 0.05, 'episodes', struct(), 'runs', {runs});
+end
+
+function test_aprime_fresh_load(tc)
+% The no-threat form's runs for P1R's fresh set (aprime_fresh.m 'load', before any fresh flight):
+% [] without data/aprime_agents.mat and with C2's switch off, so C2e is as before; the file without
+% the switch, or the switch without the file, stops; a file of another C2 (monitor, drop
+% threshold, false-alarm threshold), label, form, settings or an agent not in matrix form stops;
+% else the runs' agents as trained (not their plain pairs), the grid's settings, names, labels
+% and the file's SHA-256. The switch is CFG's, else this checkout's profile.json.
+d = tempname; mkdir(d); here = pwd; c2 = onCleanup(@() cd(here)); %#ok<NASGU>
+cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+f = fullfile(d, 'aprime_agents.mat');
+on = struct('fa_nothreat', true); off = struct('fa_nothreat', false);
+[Q, A0] = aprime_world();
+verifyEqual(tc, aprime_fresh('load', Q, off, f), []);
+verifyError(tc, @() aprime_fresh('load', Q, on, f), 'aprime_fresh:absent');
+aprime = A0; save(f, 'aprime');
+verifyError(tc, @() aprime_fresh('load', Q, off, f), 'aprime_fresh:switch');
+ap = aprime_fresh('load', Q, on, f);
+lab = 'pre-registered candidate (D107), validation-scored, not deployed, descriptive';
+verifyEqual(tc, sort(fieldnames(ap))', sort({'file', 'sha256', 'label', 'S', 'pen', 'gamma', 'seed', 'pol', 'lbl', 'agents'}));
+verifyEqual(tc, ap.pol, {'aprime_1', 'aprime_2', 'aprime_3'});
+verifyEqual(tc, ap.lbl, {['A'' penalty 120, gamma 0.50, seed 42 (' lab ')'], ['A'' penalty 120, gamma 0.50, seed 43 (' lab ')'], ...
+    ['A'' penalty 160, gamma 0.50, seed 42 (' lab ')']});
+verifyEqual(tc, ap.agents, {A0.runs(1).nothreat.agent, A0.runs(2).nothreat.agent, A0.runs(3).nothreat.agent});
+verifyEqual(tc, [ap.pen; ap.gamma; ap.seed], [120 120 160; 0.5 0.5 0.5; 42 43 42]);
+verifyEqual(tc, ap.S, A0.S); verifyEqual(tc, ap.label, lab); verifyEqual(tc, ap.file, f);
+verifyEqual(tc, ap.sha256, kpi6_fresh_marker('sha', f));
+bad = {@(A) setfield(A, 'alarm', 'class'), @(A) setfield(A, 'drop', 3), @(A) setfield(A, 'fa_ebno_thr', 0), ...
+    @(A) setfield(A, 'label', 'descriptive'), @(A) setfield(A, 'form', 'all'), @(A) rmfield(A, 'S'), ...
+    @(A) setfield(A, 'runs', A.runs([])), @(A) setfield(A, 'S', 1)};
+for i = 1:numel(bad)
+    aprime = bad{i}(A0); save(f, 'aprime');
+    verifyError(tc, @() aprime_fresh('load', Q, on, f), 'aprime_fresh:file', sprintf('case %d', i));
+end
+aprime = A0; aprime.runs(2).nothreat.agent = rmfield(aprime.runs(2).nothreat.agent, 'dense'); save(f, 'aprime');
+verifyError(tc, @() aprime_fresh('load', Q, on, f), 'aprime_fresh:file');
+cd(d); mkdir('data');
+verifyEqual(tc, aprime_fresh('load', Q, []), [], 'no profile.json, no data/aprime_agents.mat');
+write_json('profile.json', '{"fa_nothreat": true}');
+verifyError(tc, @() aprime_fresh('load', Q, []), 'aprime_fresh:absent');
+aprime = A0; save(fullfile('data', 'aprime_agents.mat'), 'aprime');
+ap = aprime_fresh('load', Q, []);
+verifyEqual(tc, ap.file, 'data/aprime_agents.mat');
+verifyError(tc, @() aprime_fresh('load', Q, off), 'aprime_fresh:switch');
+write_json('profile.json', '{"fa_nothreat": false}');
+verifyError(tc, @() aprime_fresh('load', Q, []), 'aprime_fresh:switch');
+end
+
+function test_aprime_fresh_rows(tc)
+% The stop rule: with data/aprime_agents.mat present C2e stops when its runs were not flown on
+% every fresh flight (inside the reading, so the marker records a crash) or when KPI 6 lacks an
+% A' row; without the file and the runs nothing is checked. The block after KPI 6's lines names
+% the rows and gives the seed mean per penalty and discount factor with its one-sided 95%
+% Clopper-Pearson bound (the mean count rounded).
+d = tempname; mkdir(d); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+f = fullfile(d, 'aprime_agents.mat');
+[Q, aprime] = aprime_world();
+none = struct('policy', {});
+aprime_fresh('flown', [], {}, 12, f); aprime_fresh('done', [], none, f);
+save(f, 'aprime');
+verifyError(tc, @() aprime_fresh('flown', [], {}, 12, f), 'aprime_fresh:row');
+verifyError(tc, @() aprime_fresh('done', [], struct('policy', {'rule + escalation'}), f), 'aprime_fresh:row');
+ap = aprime_fresh('load', Q, struct('fa_nothreat', true), f);
+R = struct('s', 1:12);
+aprime_fresh('flown', ap, {R, R, R}, 12, f);
+verifyError(tc, @() aprime_fresh('flown', ap, {R, R}, 12, f), 'aprime_fresh:row');
+verifyError(tc, @() aprime_fresh('flown', ap, {R, R, struct('s', 1:11)}, 12, f), 'aprime_fresh:row');
+verifyError(tc, @() aprime_fresh('flown', ap, {}, 12, f), 'aprime_fresh:row');
+F = struct('policy', [{'rule + escalation'}, ap.lbl], 'k', {3, 1, 2, 4}, 'n', 8);
+aprime_fresh('done', ap, F, f);
+verifyError(tc, @() aprime_fresh('done', ap, F(1:3), f), 'aprime_fresh:row');
+verifyError(tc, @() aprime_fresh('done', ap, none, f), 'aprime_fresh:row');
+L = aprime_fresh('lines', ap, F(2:4));
+verifyNumElements(tc, L, 3);
+verifyTrue(tc, startsWith(L{1}, '  The A'' rows above: the no-threat penalty form''s runs ('));
+verifyTrue(tc, contains(L{1}, ap.sha256) && contains(L{1}, ap.label) && endsWith(L{1}, 'never the deployed policy''s KPI 6'));
+verifyEqual(tc, L{2}, sprintf('  A'' penalty 120, gamma 0.50, mean of 2 seeds: 1.5 of 8 episodes with >= 1 change, bound %.2f%%', ...
+    100 * betaincinv(0.95, 3, 6)));
+verifyEqual(tc, L{3}, sprintf('  A'' penalty 160, gamma 0.50, mean of 1 seeds: 4.0 of 8 episodes with >= 1 change, bound %.2f%%', ...
+    100 * betaincinv(0.95, 5, 4)));
+end
+
+function test_aprime_fresh_fly(tc)
+% Every A' run flies the clean set's world, episodes and frame-draw seed (fly_clean_set's), as
+% every policy does there: the kind dqn without the escalation, the world's monitor with the
+% grid's settings on top, the world's tables untouched (no training form), the padding of the
+% last batch dropped, the runs in the file's order (policy_run_set.m replaced by a recorder).
+d = tempname; mkdir(d);
+f = fullfile(d, 'aprime_agents.mat');
+[Q, aprime] = aprime_world(); save(f, 'aprime');
+ap = aprime_fresh('load', Q, struct('fa_nothreat', true), f);
+s = fullfile(d, 'stub'); mkdir(s);
+fid = fopen(fullfile(s, 'policy_run_set.m'), 'w');
+fprintf(fid, '%s\n', 'function R = policy_run_set(kind, PP, K, specs, split, ag, opt, seed)', 'global APRIME_FLY', ...
+    ['APRIME_FLY{end+1} = struct(''kind'', kind, ''PP'', PP, ''K'', K, ''specs'', {specs}, ''split'', split, ' ...
+    '''ag'', ag, ''opt'', opt, ''seed'', seed);'], 'n = 64 * numel(specs);', ...
+    'R = struct(''s'', 1:n, ''geom'', 1000 + (1:n));', 'end');
+fclose(fid);
+global APRIME_FLY %#ok<GVMIS>
+APRIME_FLY = {};
+addpath(s); cl = onCleanup(@() stub_off(s, d)); %#ok<NASGU>
+PPw = struct('alarm_mode', 'class_drop', 'confirm', [3 3], 'drop_db', 4, 'maha_thr', -3, 'unk_mode', 'all');
+Kw = struct('na', 1, 'world', 'fresh');
+specs = {struct('r', 1:64), struct('r', 65:128)};
+R = aprime_fresh('fly', ap, PPw, Kw, specs, 3, 40000, 100);
+verifyNumElements(tc, R, 3); verifyNumElements(tc, APRIME_FLY, 3);
+for i = 1:3
+    c = APRIME_FLY{i};
+    verifyEqual(tc, {c.kind, c.opt, c.K, c.specs, c.split, c.seed}, {'dqn', struct(), Kw, specs, 3, 40000});
+    verifyEqual(tc, c.ag, aprime.runs(i).nothreat.agent);
+    verifyEqual(tc, c.PP, decision_settings(PPw, aprime.S));
+    verifyEqual(tc, {c.PP.alarm_mode, c.PP.confirm, c.PP.drop_db, c.PP.maha_thr, c.PP.esc_drop}, {'class_drop', [3 3], 4, -7, false});
+    verifyFalse(tc, isfield(c.K, 'fa_form') || isfield(c.K, 'FA_threat'));
+    verifyEqual(tc, R{i}.s, 1:100); verifyEqual(tc, R{i}.geom, 1000 + (1:100));
+end
+end
+
+function stub_off(s, d)
+% Removes the recorder from the path, then its folder.
+rmpath(s); clear('policy_run_set'); clear('global', 'APRIME_FLY');
+rmdir(d, 's');
+end
+
+function test_evaluate_fresh_aprime_wiring(tc)
+% C2e's A' rows (evaluate_policies.m with kpi6_set fresh): the file is read with the other checks,
+% before any episode and before the marker, which records its SHA-256 after the fields it had;
+% the runs fly inside the single reading, in fly_clean_set's one world, on the same episodes and
+% draws, and are checked there (a crash is recorded); KPI 6's rows are every policy's, then
+% theirs, in one far_report call, then their block, then the stop rule; KP.far_aprime and RWa
+% only with them; they never join POL or the deployed index. Without them every line of
+% a107 4bb20cc's evaluate_policies.m is there in order (trimmed) but the six this commit rewrites.
+src = fileread(which('evaluate_policies'));
+pos = @(s) strfind(src, s);
+a = pos('if FRESH, F6 = fresh_checks(PP, Q, exist(''SMOKE'', ''var'') && SMOKE); end');
+l = pos('if FRESH, F6.ap = aprime_fresh(''load'', Q, cfg6); end');
+b = pos('%% 1. Episode sets');
+m1 = pos(['mk6 = struct(''pools'', F6.file, ''deg_mode'', Q.dec.deg_mode, ''deg_adopted'', F6.deg_txt, ''det_id'', PP.det_id, ...' ...
+    newline_of(src) '        ''policy_stamp'', policy_stamp(Q), ''smoke'', F6.smoke);']);
+m2 = pos('if ~isempty(F6.ap), mk6.aprime_agents_sha256 = F6.ap.sha256; end');
+s1 = pos('kpi6_fresh_marker(''start'', F6.marker, F6.sha, mk6);');
+f1 = pos('[RWf, RWa] = fly_clean_set(PP, F6.CT, TEST, NE, T, clean_cell, nS, POL, Q, sel, fixed_best, fixed_mmse, tab, ...');
+k1 = pos('K.na, 40000, F6.ap);');
+sp = pos('for pk = 1:numel(RWa), RWa{pk}.split(:) = 7; end');
+fl = pos('aprime_fresh(''flown'', F6.ap, RWa, numel(RWf{1}.s));');
+c1 = pos('kpi6_fresh_marker(''crash'', F6.marker, err);');
+r1 = pos('kpi6_fresh_marker(''read'', F6.marker);');
+f0 = pos('[FAR, FD, lines] = far_report(RWf, POL, LBL, aboveF, T, iDQN, PP.ebno, cls_list, C.period_ms);');
+fa = pos('[FAR, FD, lines] = far_report([RWf, RWa], [POL, F6.ap.pol], [LBL, F6.ap.lbl], aboveF, T, iDQN, PP.ebno, ...');
+la = pos('lines = [lines, aprime_fresh(''lines'', F6.ap, FAR(end - numel(F6.ap.pol) + 1:end))];');
+dn = pos('aprime_fresh(''done'', F6.ap, FAR);');
+kp = pos('if ~isempty(F6.ap), KP.far_aprime = rmfield(F6.ap, ''agents''); end');
+sv = pos('if FRESH && ~isempty(F6.ap), save(''results/policy_evaluation.mat'', ''RWa'', ''-append''); end');
+x = {a, l, b, m1, m2, s1, f1, k1, sp, fl, c1, r1, f0, fa, la, dn, kp, sv};
+for i = 1:numel(x), verifyNumElements(tc, x{i}, 1, sprintf('pin %d', i)); end
+verifyTrue(tc, a < l && l < b && b < m1 && m1 < m2 && m2 < s1 && s1 < f1 && f1 < k1 && k1 < sp && sp < fl && fl < c1 && ...
+    c1 < r1 && r1 < f0 && f0 < fa && fa < la && la < dn && dn < kp && kp < sv);
+verifyNumElements(tc, pos('fly_clean_set('), 2);                       % the call and the definition
+verifyNumElements(tc, pos('aprime_fresh('), 5);                        % load, fly, flown, lines, done
+i0 = pos('function [RR, RA] = fly_clean_set(PP, CT, TEST, NE, T, clean_cell, nS, POL, Q, sel, fixed_best, fixed_mmse, tab, na, ...');
+verifyNumElements(tc, i0, 1);
+body = src(i0:end); e = regexp(body, '\nfunction ', 'once'); body = body(1:e);
+w1 = strfind(body, 'PPw = clean_split(PP, CT, TEST);'); w2 = strfind(body, 'Kw = link_env(''tables'', PPw);');
+p1 = strfind(body, 'R = policy_run_set(kind, PPw, Kw, specs, TEST, ag, opt, seed);'); q1 = strfind(body, 'RR{pk} = R;');
+y1 = strfind(body, 'if nargin >= 16 && ~isempty(ap), RA = aprime_fresh(''fly'', ap, PPw, Kw, specs, TEST, seed, n); end');
+for z = {w1, w2, p1, q1, y1}, verifyNumElements(tc, z{1}, 1); end
+verifyTrue(tc, w1 < w2 && w2 < p1 && p1 < q1 && q1 < y1, 'one world, the policies first, then the A'' runs');
+verifyNumElements(tc, strfind(body, 'clean_split('), 1);
+verifyEmpty(tc, regexp(src, '(POL|LBL)\s*=\s*\[[^\n]*(F6\.ap|RWa)', 'once'), 'the A'' runs never join POL');
+verifyEmpty(tc, regexp(src, '(iDQN|iBase|dep)\s*=[^\n]*(F6\.ap|aprime)', 'once'), 'nor the deployed index');
+verifyEmpty(tc, regexp(src, 'policy_setup\([^\n]*(F6\.ap|RWa)', 'once'));
+d = parent_copy(tc, 'code/decision/evaluate_policies.m', '4bb20cc');
+cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+old = strtrim(regexp(fileread(fullfile(d, 'evaluate_policies.m')), '\r?\n', 'split'));
+new = strtrim(regexp(src, '\r?\n', 'split'));
+j = 1; miss = {};
+for i = 1:numel(old)
+    k = find(strcmp(new(j:end), old{i}), 1);
+    if isempty(k), miss{end+1} = old{i}; else, j = j + k; end %#ok<AGROW>
+end
+verifyEqual(tc, miss, {'%             lecturer line is labelled as one', ...
+    'kpi6_fresh_marker(''start'', F6.marker, F6.sha, struct(''pools'', F6.file, ''deg_mode'', Q.dec.deg_mode, ...', ...
+    '''deg_adopted'', F6.deg_txt, ''det_id'', PP.det_id, ''policy_stamp'', policy_stamp(Q), ''smoke'', F6.smoke));', ...
+    'RWf = fly_clean_set(PP, F6.CT, TEST, NE, T, clean_cell, nS, POL, Q, sel, fixed_best, fixed_mmse, tab, K.na, 40000);', ...
+    'function RR = fly_clean_set(PP, CT, TEST, NE, T, clean_cell, nS, POL, Q, sel, fixed_best, fixed_mmse, tab, na, seed)', ...
+    '% own world (clean_split.m), as data/clean_test_pools.mat is flown above.'});
+end
+
+function nl = newline_of(src)
+% The line end of a source file as read (CRLF in a Windows checkout).
+if contains(src, sprintf('\r\n')), nl = sprintf('\r\n'); else, nl = newline; end
+end
+
+function test_evaluate_fresh_aprime_stops(tc)
+% C2e with "kpi6_set": "fresh" (as test_evaluate_fresh_checks): C2's no-threat switch on without
+% data/aprime_agents.mat stops, the file without the switch stops, both pass the check; each
+% before the marker and before any fresh flight. The union path never reads the file.
+d = tempname; mkdir(d); here = pwd; cl = onCleanup(@() cd(here)); cd(d); mkdir('data'); mkdir('results');
+cl2 = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+PP = struct('det_id', 'a'); save('data/policy_pools.mat', 'PP');
+[Q, aprime] = aprime_world(); seed_summary = Q.seed_summary;
+det_id = 'a'; dec = struct('deg_mode', 'win_q', 'ber_q', 0.01, 'alarm_mode', 'class_drop', 'confirm', [4 5]); deployed = 'dqn';
+save('data/trained_dqn.mat', 'det_id', 'dec', 'deployed', 'seed_summary');
+CT = struct('det_id', 'a', 'set', 'fresh', 'fams', [7 8 9], 'n_geom', 2); save('data/clean_fresh_pools.mat', 'CT');
+mk = 'results/kpi6_fresh_read_started.txt';
+fr = struct('kpi6_set', 'fresh'); fon = struct('kpi6_set', 'fresh', 'fa_nothreat', true);
+late = {'evaluate_policies:fresh', 'kpi6_fresh_marker', 'check_det_id', 'aprime_fresh'};
+e = eval_policies_err(fr);                                  % no file, switch off: as before
+verifyFalse(tc, startsWith(e.identifier, late), e.identifier);
+e = eval_policies_err(fon); verifyEqual(tc, e.identifier, 'aprime_fresh:absent');
+save('data/aprime_agents.mat', 'aprime');
+e = eval_policies_err(fr); verifyEqual(tc, e.identifier, 'aprime_fresh:switch');
+e = eval_policies_err(fon);                                 % both: past the check, stops later (no pools here)
+verifyFalse(tc, startsWith(e.identifier, late), e.identifier);
+e = eval_policies_err([]);                                  % the union path
+verifyFalse(tc, startsWith(e.identifier, late), e.identifier);
+aprime.alarm = 'class'; save('data/aprime_agents.mat', 'aprime');
+e = eval_policies_err(fon); verifyEqual(tc, e.identifier, 'aprime_fresh:file');
+verifyFalse(tc, isfile(mk), 'no marker before the first fresh flight');
 end
 
 function test_deg_mode_suite(tc)
