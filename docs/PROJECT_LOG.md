@@ -247,7 +247,7 @@ The lecturer's false-alarm KPI is read at detector level; the system-level figur
 
 ### Delay-line receiver defect (29.10.2026)
 
-- Found on validation: three frames at 12 dB (420/5, 452/10, 459/16) collapse in the delay-line receiver at true post-MRC Es/N0 of 8.5-11.9 dB where a flat receiver decodes. D1 (valid, 11 arms and a flat shadow receiver) recovers none of the three and sends to D2; nothing is adopted. CORE_BW, P1 and P1R run on the current receiver r1; profile 3 takes a fix only if one passes the pre-set rule, else r1 with disclosure (D109; `rx_fix_ruling.md`, `rx_diag_reading.md`).
+- Found on validation: three frames at 12 dB (420/5, 452/10, 459/16) collapse in the delay-line receiver at true post-MRC Es/N0 of 8.5-11.9 dB. The first pass fits one channel profile on the training only; on 420/5 and 452/10 the training sits in a within-frame fade and the frames fail even at +30 dB. D1 (valid, 11 arms and a flat shadow receiver) recovers none of the three and sends to D2; nothing is adopted. CORE_BW, P1 and P1R run on the current receiver r1; profile 3 takes a fix only if one passes the pre-set rule, else r1 with disclosure (D109; `rx_fix_ruling.md`, `rx_diag_reading.md`).
 
 ## Status of the lecturer's KPIs (profile 1, 28.10.2026)
 

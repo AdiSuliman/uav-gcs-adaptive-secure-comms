@@ -2054,7 +2054,7 @@ The baseline also differs in tuning budget. In C2e, `blind_core`'s first respons
 ## D109 — Delay-line receiver defect: found on validation, D1 diagnosis result, receiver per run (29.10.2026)
 
 **Found (validation only, after profile 1's test readings).**
-- On the 27 validation flights (`link_floor_partA/partB.mat`, runs 411-698 at 9, 12 and 15 dB) three frames collapse in the delay-line (`NE > 1`) receiver at 12 dB: 420/5, 452/10, 459/16, with BER 0.30, 0.29, 0.16. Their true post-MRC Es/N0 is 11.9, 8.5 and 9.7 dB, so they are not noise-limited, and the flat receiver decodes the same flights.
+- On the 27 validation flights (`link_floor_partA/partB.mat`, runs 411-698 at 9, 12 and 15 dB) three frames collapse in the delay-line (`NE > 1`) receiver at 12 dB: 420/5, 452/10, 459/16, with BER 0.30, 0.29, 0.16. Their true post-MRC Es/N0 is 11.9, 8.5 and 9.7 dB, so they are not noise-limited. A flat-channel re-simulation of the same flights (a different fading realization) decodes them, but a correctly run flat receiver on the same samples does not (D1 below). At +30 dB, 420/5 and 452/10 still fail: the first pass fits one channel profile on the training only, and on these frames the training sits in a within-frame fade.
 - The fault is in the first estimation pass of the `NE > 1` branch: with the decision-directed passes off, no frame of the four improves and FER rises from 0.3648 to 0.4593. The unwrapped-slope frequency step is a confirmed contributor in code and partly in effect, and is not the whole cause.
 - Size on the clean validation link as stated by the ruling: clean FER at most 0.25 pp at 12 dB (at most 15 of 6000 frames); CREF mean BER 20-34% higher at 12 dB. The rate under interference is unmeasured.
 
