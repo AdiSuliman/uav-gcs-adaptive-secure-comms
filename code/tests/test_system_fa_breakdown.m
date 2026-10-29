@@ -462,7 +462,7 @@ gate_fails(tc, rmfield(E, 'RWa'), PP, Q, txt, 'the evaluation lacks RWa');
 X = E; X.RWa{2}.split(3) = 6;
 gate_fails(tc, X, PP, Q, txt, 'RWa{2} (aprime_2) is not split id 7');
 X = E; X.RWa{1}.geom(1) = X.RWa{1}.geom(1) + 1;
-gate_fails(tc, X, PP, Q, txt, 'does not hold the episodes');
+gate_fails(tc, X, PP, Q, txt, 'RWa{1} (aprime_1) does not hold the episodes of RWf{1}');
 X = E; X.RWa{1} = rmfield(X.RWa{1}, 'fc_dal');
 gate_fails(tc, X, PP, Q, txt, 'RWa{1} (aprime_1) lacks fc_dal');
 X = E; X.KP = rmfield(X.KP, 'far_aprime');

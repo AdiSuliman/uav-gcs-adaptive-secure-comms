@@ -376,7 +376,14 @@ if ~isempty(mm), return; end
 for k = 1:numel(E.RWa)
     if ~all(E.RWa{k}.split == 7), mm{end+1} = sprintf('RWa{%d} (%s) is not split id 7 throughout', k, AP.pol{k}); end %#ok<AGROW>
 end
-if isempty(mm), mm = pairing([RU(1), E.RWa], [E.POL(1), AP.pol], {'s', 'geom', 'split'}, 'RWf{1} + RWa'); end
+if isempty(mm)                                     % each run against RWf{1}
+    f = {'s', 'geom', 'split'};
+    for k = 1:numel(E.RWa)
+        if ~all(cellfun(@(x) isequal(E.RWa{k}.(x), RU{1}.(x)), f))
+            mm{end+1} = sprintf('RWa{%d} (%s) does not hold the episodes of RWf{1} (%s)', k, AP.pol{k}, strjoin(f, ', ')); %#ok<AGROW>
+        end
+    end
+end
 if isempty(mm), RA = E.RWa; end
 end
 

@@ -27,7 +27,8 @@
 %             penalty form, train_dqn.m section 7) its runs fly the same fresh flights in the same
 %             reading and follow every policy as KPI 6 rows, descriptive, never the deployed
 %             policy's (aprime_fresh.m); the file without C2's switch, or the switch without the
-%             file, stops before any fresh flight
+%             file, stops before any fresh flight, and so does a restart whose A' file (or its
+%             absence) is not the one the marker's first start recorded
 %   comb      jamming / reactive_jamming on every channel we can use: the jammer is
 %             on the new channel at the hop itself and on frequency diversity's
 %             second carrier, so only space and link budget can help (assumed: no
@@ -105,6 +106,7 @@ cfg6 = []; if exist('CFG', 'var'), cfg6 = CFG; end
 FRESH = strcmp(kpi6_set(cfg6), 'fresh');             % P1R: KPI 6 on the fresh clean test set (kpi6_set.m)
 if FRESH, F6 = fresh_checks(PP, Q, exist('SMOKE', 'var') && SMOKE); end   % every check before any fresh flight
 if FRESH, F6.ap = aprime_fresh('load', Q, cfg6); end   % the no-threat form's runs (A'), [] without them
+if FRESH, aprime_fresh('restart', F6.ap, F6.marker, F6.state); end   % a restart flies the A' file the marker records
 K = link_env('tables', PP);
 C = decision_config();
 tab = policy_table(PP, K);

@@ -10534,13 +10534,15 @@ function test_evaluate_fresh_aprime_wiring(tc)
 % before any episode and before the marker, which records its SHA-256 after the fields it had;
 % the runs fly inside the single reading, in fly_clean_set's one world, on the same episodes and
 % draws, and are checked there (a crash is recorded); KPI 6's rows are every policy's, then
-% theirs, in one far_report call, then their block, then the stop rule; KP.far_aprime and RWa
+% theirs, in one far_report call, then their block, then the stop rule; a restart checks the
+% A' file against the marker's right after the load; KP.far_aprime and RWa
 % only with them; they never join POL or the deployed index. Without them every line of
 % a107 4bb20cc's evaluate_policies.m is there in order (trimmed) but the six this commit rewrites.
 src = fileread(which('evaluate_policies'));
 pos = @(s) strfind(src, s);
 a = pos('if FRESH, F6 = fresh_checks(PP, Q, exist(''SMOKE'', ''var'') && SMOKE); end');
 l = pos('if FRESH, F6.ap = aprime_fresh(''load'', Q, cfg6); end');
+rs = pos('if FRESH, aprime_fresh(''restart'', F6.ap, F6.marker, F6.state); end');
 b = pos('%% 1. Episode sets');
 m1 = pos(['mk6 = struct(''pools'', F6.file, ''deg_mode'', Q.dec.deg_mode, ''deg_adopted'', F6.deg_txt, ''det_id'', PP.det_id, ...' ...
     newline_of(src) '        ''policy_stamp'', policy_stamp(Q), ''smoke'', F6.smoke);']);
@@ -10558,12 +10560,12 @@ la = pos('lines = [lines, aprime_fresh(''lines'', F6.ap, FAR(end - numel(F6.ap.p
 dn = pos('aprime_fresh(''done'', F6.ap, FAR);');
 kp = pos('if ~isempty(F6.ap), KP.far_aprime = rmfield(F6.ap, ''agents''); end');
 sv = pos('if FRESH && ~isempty(F6.ap), save(''results/policy_evaluation.mat'', ''RWa'', ''-append''); end');
-x = {a, l, b, m1, m2, s1, f1, k1, sp, fl, c1, r1, f0, fa, la, dn, kp, sv};
+x = {a, l, rs, b, m1, m2, s1, f1, k1, sp, fl, c1, r1, f0, fa, la, dn, kp, sv};
 for i = 1:numel(x), verifyNumElements(tc, x{i}, 1, sprintf('pin %d', i)); end
-verifyTrue(tc, a < l && l < b && b < m1 && m1 < m2 && m2 < s1 && s1 < f1 && f1 < k1 && k1 < sp && sp < fl && fl < c1 && ...
+verifyTrue(tc, a < l && l < rs && rs < b && b < m1 && m1 < m2 && m2 < s1 && s1 < f1 && f1 < k1 && k1 < sp && sp < fl && fl < c1 && ...
     c1 < r1 && r1 < f0 && f0 < fa && fa < la && la < dn && dn < kp && kp < sv);
 verifyNumElements(tc, pos('fly_clean_set('), 2);                       % the call and the definition
-verifyNumElements(tc, pos('aprime_fresh('), 5);                        % load, fly, flown, lines, done
+verifyNumElements(tc, pos('aprime_fresh('), 6);                        % load, restart, fly, flown, lines, done
 i0 = pos('function [RR, RA] = fly_clean_set(PP, CT, TEST, NE, T, clean_cell, nS, POL, Q, sel, fixed_best, fixed_mmse, tab, na, ...');
 verifyNumElements(tc, i0, 1);
 body = src(i0:end); e = regexp(body, '\nfunction ', 'once'); body = body(1:e);
@@ -10624,6 +10626,67 @@ verifyFalse(tc, startsWith(e.identifier, late), e.identifier);
 aprime.alarm = 'class'; save('data/aprime_agents.mat', 'aprime');
 e = eval_policies_err(fon); verifyEqual(tc, e.identifier, 'aprime_fresh:file');
 verifyFalse(tc, isfile(mk), 'no marker before the first fresh flight');
+end
+
+function [aprime, mk] = aprime_restart_world(rec)
+% test_evaluate_fresh_aprime_stops' fixture in the current folder, with a marker whose first
+% start recorded data/aprime_agents.mat (rec true, the file saved) or no A' file (rec false),
+% then a crash before any KPI 6 line.
+mkdir('data'); mkdir('results');
+PP = struct('det_id', 'a'); save('data/policy_pools.mat', 'PP');
+[Q, aprime] = aprime_world(); seed_summary = Q.seed_summary;
+det_id = 'a'; dec = struct('deg_mode', 'win_q', 'ber_q', 0.01, 'alarm_mode', 'class_drop', 'confirm', [4 5]); deployed = 'dqn';
+save('data/trained_dqn.mat', 'det_id', 'dec', 'deployed', 'seed_summary');
+CT = struct('det_id', 'a', 'set', 'fresh', 'fams', [7 8 9], 'n_geom', 2); save('data/clean_fresh_pools.mat', 'CT');
+mk = 'results/kpi6_fresh_read_started.txt';
+info = struct();
+if rec
+    save('data/aprime_agents.mat', 'aprime');
+    info.aprime_agents_sha256 = kpi6_fresh_marker('sha', 'data/aprime_agents.mat');
+end
+kpi6_fresh_marker('start', mk, kpi6_fresh_marker('sha', 'data/clean_fresh_pools.mat'), info);
+kpi6_fresh_marker('crash', mk, MException('a:b', 'crash'));
+end
+
+function test_evaluate_fresh_aprime_restart_recorded(tc)
+% A restart of C2e's fresh reading after a crash, the marker's first start having recorded
+% data/aprime_agents.mat: the same file passes the check; another file, or none with C2's
+% switch off, stops (aprime_fresh:restart) before the marker's 'start' and any fresh flight.
+d = tempname; mkdir(d); here = pwd; cl = onCleanup(@() cd(here)); cd(d);
+cl2 = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+[aprime, mk] = aprime_restart_world(true);
+fr = struct('kpi6_set', 'fresh'); fon = struct('kpi6_set', 'fresh', 'fa_nothreat', true);
+late = {'evaluate_policies:fresh', 'kpi6_fresh_marker', 'check_det_id', 'aprime_fresh'};
+m0 = fileread(mk);
+verifyNotEmpty(tc, strfind(m0, ['aprime_agents_sha256 ' kpi6_fresh_marker('sha', 'data/aprime_agents.mat')]));
+e = eval_policies_err(fon);                                 % the recorded file: past the check
+verifyFalse(tc, startsWith(e.identifier, late), e.identifier);
+aprime.runs = aprime.runs(1:2); save('data/aprime_agents.mat', 'aprime');
+e = eval_policies_err(fon); verifyEqual(tc, e.identifier, 'aprime_fresh:restart');
+verifyNotEmpty(tc, strfind(e.message, ['is now sha256 ' kpi6_fresh_marker('sha', 'data/aprime_agents.mat')]));
+delete('data/aprime_agents.mat');
+e = eval_policies_err(fr); verifyEqual(tc, e.identifier, 'aprime_fresh:restart');
+verifyNotEmpty(tc, strfind(e.message, 'is now no A'' file'));
+verifyEqual(tc, fileread(mk), m0, 'the marker as the crash left it');
+end
+
+function test_evaluate_fresh_aprime_restart_unrecorded(tc)
+% A restart of C2e's fresh reading after a crash, the marker's first start having recorded no
+% A' file: none with C2's switch off passes the check; data/aprime_agents.mat now present (with
+% the switch) stops (aprime_fresh:restart) before the marker's 'start' and any fresh flight.
+d = tempname; mkdir(d); here = pwd; cl = onCleanup(@() cd(here)); cd(d);
+cl2 = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+[aprime, mk] = aprime_restart_world(false);
+fr = struct('kpi6_set', 'fresh'); fon = struct('kpi6_set', 'fresh', 'fa_nothreat', true);
+late = {'evaluate_policies:fresh', 'kpi6_fresh_marker', 'check_det_id', 'aprime_fresh'};
+m0 = fileread(mk);
+verifyEmpty(tc, strfind(m0, 'aprime_agents_sha256'));
+e = eval_policies_err(fr);                                  % still no file: past the check
+verifyFalse(tc, startsWith(e.identifier, late), e.identifier);
+save('data/aprime_agents.mat', 'aprime');
+e = eval_policies_err(fon); verifyEqual(tc, e.identifier, 'aprime_fresh:restart');
+verifyNotEmpty(tc, strfind(e.message, 'records no A'' file'));
+verifyEqual(tc, fileread(mk), m0, 'the marker as the crash left it');
 end
 
 function test_deg_mode_suite(tc)

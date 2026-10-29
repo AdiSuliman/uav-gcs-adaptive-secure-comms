@@ -10,6 +10,9 @@ function out = aprime_fresh(cmd, varargin)
 %       settings, names, labels and the file's SHA-256. Stops when only one of the two holds, or
 %       when f is not the file of this trained policy's C2 (monitor, drop threshold, false-alarm
 %       threshold, label, form).
+%   aprime_fresh('restart', ap, marker, state)   before the marker's 'start': when state is
+%       'restart' (kpi6_fresh_marker 'check'), stops unless the marker's aprime_agents_sha256
+%       line equals ap.sha256, or the marker holds no such line and ap is []
 %   R = aprime_fresh('fly', ap, PPw, Kw, specs, split, seed, n)   every run on the clean set's
 %       world, episodes and frame-draw seed (fly_clean_set in evaluate_policies.m), with the
 %       selected monitor and the grid's settings (ap.S on top of the deployed DQN's), the padding
@@ -27,6 +30,10 @@ switch cmd
         if numel(varargin) >= 2, cfg = varargin{2}; end
         if numel(varargin) >= 3 && ~isempty(varargin{3}), f = varargin{3}; end
         out = load_runs(Q, cfg, f, LABEL);
+    case 'restart'
+        [ap, mk, st] = varargin{1:3};
+        if ~strcmp(st, 'restart'), return; end
+        same_runs(ap, mk, FILE);
     case 'fly'
         [ap, PPw, Kw, specs, split, seed, n] = varargin{:};
         PPa = decision_settings(PPw, ap.S);
@@ -105,6 +112,21 @@ lbl = arrayfun(@(i) sprintf('A'' penalty %d, gamma %.2f, seed %d (%s)', pen(i), 
     'UniformOutput', false);
 ap = struct('file', f, 'sha256', kpi6_fresh_marker('sha', f), 'label', LABEL, 'S', A.S, 'pen', pen, 'gamma', gam, ...
     'seed', sd, 'pol', {pol}, 'lbl', {lbl}, 'agents', {ag});
+end
+
+function same_runs(ap, mk, FILE)
+% The A' file of a restart against the one the marker's first start recorded (or none).
+L = strtrim(regexp(fileread(mk), '\r?\n', 'split'));
+rec = regexprep(L(startsWith(L, 'aprime_agents_sha256 ')), '^aprime_agents_sha256 ', '');
+if isempty(ap), now_sha = {}; f = FILE; else, now_sha = {ap.sha256}; f = ap.file; end
+if isequal(rec, now_sha), return; end
+error('aprime_fresh:restart', ['kpi6_set fresh: %s records %s as the first start''s A'' file and %s is now %s; ' ...
+    'a restart after a crash flies the A'' runs the marker records, as the fresh set is read once: ' ...
+    'restore that state first'], mk, runs_txt(rec), f, runs_txt(now_sha));
+end
+
+function t = runs_txt(c)
+if isempty(c), t = 'no A'' file'; else, t = ['sha256 ' strjoin(c, ', ')]; end
 end
 
 function L = block_lines(ap, F)
