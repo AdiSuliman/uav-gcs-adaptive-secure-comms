@@ -197,15 +197,15 @@ function test_summary_decision_lines(tc)
 % T9, T8, T4, T5 in the summary, for a deployed DQN without and with the escalation: the label of
 % the DQN the leave-one-out experiments fly, C2u and the GCS antenna report in the summary, the
 % lower-bound count and the committed word of the speed spread; the registered values stay.
-for dep = {'dqn_g1', 'dqn_esc'}
+for dkey = {'dqn_g1', 'dqn_esc'}               % not dep: measure_all_kpis.m sets its own variables in this workspace
     work_dir(tc);
-    write_policy(dep{1});
+    write_policy(dkey{1});
     write_leave_out_files();
     evalc('measure_all_kpis');
     S = load('results/kpi_summary.mat', 'KPI'); K = S.KPI;
     d4 = K([K.id] == 4).detail; d7 = K([K.id] == 7).detail;
     lab = 'DQN + escalation';
-    if strcmp(dep{1}, 'dqn_g1'), lab = 'DQN gamma=0.50 (selected), deployed, no escalation'; end
+    if strcmp(dkey{1}, 'dqn_g1'), lab = 'DQN gamma=0.50 (selected), deployed, no escalation'; end
     ic = find(startsWith(d4, 'combined threats never trained on (leave-one-combination-out)'));
     verifyNumElements(tc, ic, 1);
     verifyTrue(tc, startsWith(d4{ic}, ['combined threats never trained on (leave-one-combination-out), ' lab ': 60.0% of the ' ...
@@ -240,13 +240,13 @@ metrics = metrics_fixture(true); %#ok<NASGU>
 save(kpi1_file('eval_detector_metrics'), 'metrics');
 write_policy('dqn_g1');
 write_leave_out_files();
-b = base_copy(tc, 'code/evaluation/measure_all_kpis.m', tc.TestData.base);
-addpath(b, '-begin'); clear measure_all_kpis
-cl = onCleanup(@() fixture_off(b, 'measure_all_kpis')); %#ok<NASGU>
+bdir = base_copy(tc, 'code/evaluation/measure_all_kpis.m', tc.TestData.base);
+addpath(bdir, '-begin'); clear measure_all_kpis
+off_base = onCleanup(@() fixture_off(bdir, 'measure_all_kpis')); %#ok<NASGU>
 verifyFalse(tc, startsWith(which('measure_all_kpis'), fullfile(tc.TestData.root, 'code')));
 evalc('measure_all_kpis');
 S0 = load('results/kpi_summary.mat', 'KPI', 'LECT');
-fixture_off(b, 'measure_all_kpis');
+fixture_off(bdir, 'measure_all_kpis');
 verifyTrue(tc, startsWith(which('measure_all_kpis'), fullfile(tc.TestData.root, 'code')));
 evalc('measure_all_kpis');
 S1 = load('results/kpi_summary.mat', 'KPI', 'LECT');
