@@ -191,3 +191,77 @@ profile's tree. The run refuses when its outputs exist and checks that no input 
 - No change to a verdict, a threshold or a KPI definition from these readings.
 - No episode excluded on anything but pre-onset behaviour; no line chosen or dropped after a
   result is seen.
+
+## 8. KPI 6's flights from `KP.far_set` (P1R)
+
+Added 29.10.2026, after profile 1's reading of section 5 (`GATE PASS`, log
+`sysfa_p1_20261029_033327.txt`, code `3c9f7ea`) and before any P1R data. It describes `sysfa`
+`649717b` (`system_fa_breakdown.m`: `far_def`, `fresh_ru`, `p1r_label`, `p1r_test_note`).
+Sections 2, 5, 6 and 7 hold for both definitions: the exact gate, a failed gate that leaves the
+reading open, the once-guard, the reading copy.
+
+**The definition** (`far_def`), read from the evaluation's `KP`:
+- **No `KP.far_set`:** the union of section 2 (`union_ru`), profile 1's definition. Nothing of
+  this section runs. The gate, the readings, the text and every saved variable are those of
+  `3c9f7ea`, on a pass and on a failed gate (`test_old_path_unchanged`).
+- **`KP.far_set = 'fresh'` with `KP.reading = 'P1R'`:** P1R's C2e (`docs/p1r_protocol.md`
+  section 5, `evaluate_policies.m` with `"kpi6_set": "fresh"`). KPI 6's flights are the fresh
+  clean test set `RWf` alone (`fresh_ru`), from the KPI 1 threshold (`PP.ebno(s) >= KP.ebno_thr`).
+  The run loads `RWf` from the evaluation file beside the variables of section 1.
+- **Anything else** (another `KP.far_set` value, or `'fresh'` without `KP.reading` `'P1R'`): the
+  gate fails right after its field checks, before the Eb/N0 grid, the stamp and the readings.
+
+**The gate under `'fresh'`.** Exact, as section 2. Two checks change:
+- `RWf` holds one set per policy. Each has `s`, `geom`, `split`, `switches`, `false_sw`, `fc_t`,
+  `fc_cls`, `fc_deg`, `fc_dal`, `fc_drop` and every field of the evaluation's clean set (`RES` of
+  `set_names` `'clean'`), split id 7 throughout, and the same episodes under every policy (`s`,
+  `geom`, `split`). The copied `far_report` on `RWf` reproduces `KP.far` and `KP.far_diag`, and
+  its lines equal those under the header "False alarms on the clean link, the fresh clean test set
+  (P1R, read once): `<KP.far_src>`, `<n>` episodes x `<T>` cycles -> KPI 6", which the text holds
+  once.
+- `lect_kpis.m` on every episode reproduces `KP.lect`, and its lines equal those of the text with
+  P1R's label: every non-empty line ends in " [P1R: with the fixed monitor, second reading,
+  descriptive]".
+
+The union that P1R's C2e prints as already read (`KP.far_union`) is not checked by the gate.
+P1R's outputs read as the union (their `KP` without `far_set` and `reading`) fail the gate: P1R's
+`KP.far` is not the union's, its lecturer lines carry the label, and its union header ends in
+": already read in profile 1's C2e, second reading, descriptive", not "-> KPI 6". The union's
+reader never misreads them.
+
+**Labels in the output under `'fresh'`:**
+- the gate line: "GATE PASS: lect_kpis.m reproduces KP.lect and its lines with P1R's label,
+  far_report on the fresh clean test set (RWf, KP.far_set fresh) reproduces KP.far and
+  KP.far_diag, the trained policy is KP.policy_stamp, exactly";
+- the header, also in a failed gate's text: "P1R (KP.reading P1R, KP.far_set fresh): KPI 6's
+  flights are `<KP.far_src>`; D103 3 reads them, D103 4 and 5 read test pools already read in
+  profile 1's C2e (second reading, descriptive)";
+- D103 3 reads `RWf`. It opens with "P1R: KPI 6's flights are the fresh clean test set (KP.far_set
+  fresh, RWf, split id 7), read once in P1R's C2e", and table (a) is "from the fresh clean test
+  set, as KPI 6 (P1R, every policy)";
+- D103 4 and 5 read the same episodes as without the key (`ALL`), with the line "P1R: with the
+  fixed monitor, second reading, descriptive: these episodes are test pools profile 1's C2e has
+  read".
+
+**Saved:** `far_set = 'fresh'` beside the other variables, in `system_fa_breakdown.mat` and in
+`system_fa_breakdown.gatefail.mat`.
+
+**Where P1R's reading runs.** With the code of the `p1r` tree
+(`C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\worktrees\p1r`; the smoke's in
+`...\worktrees\p1r-smoke` at the tested `p1r` tip), not from this tree. Here `policy_stamp.m` and
+`decision_settings.m` are profile 1's, without the degradation test, so the gate would stop on
+P1R's policy stamp. Its inputs are copied read-only into
+`C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\worktrees\sysfa-read\p1r\results`, and its
+outputs are written there, as in section 5.
+
+**Tests** (`code/tests/test_system_fa_breakdown.m`; 16 of 16 on `sysfa` at `649717b`):
+
+| Test | What it checks |
+|---|---|
+| `test_old_path_unchanged` | Without `KP.far_set`: the gate, the readings, the text byte for byte and every saved variable equal those of `3c9f7ea`'s code, on a pass and on a failed gate |
+| `test_gate_fresh` | The gate passes on P1R's C2e and reads KPI 6 on `RWf` alone, split id 7, with P1R's labelled lecturer lines; it stops without `far_set` and `reading` (the union's reader), without `RWf`, on `RWf` outside split id 7 or without a field, on another `far_set`, on `'fresh'` without `KP.reading`, on the union's `KP.far`, on unlabelled lecturer lines, on another KPI 6 header and on a changed line; where `evaluate_policies.m` holds P1R's code (`p1r`), the label and the KPI 6 header are its own |
+| `test_breakdown_fresh` | D103 3's tables count the fresh flights and carry the fresh source; D103 4 and 5 equal the union's readings apart from P1R's line |
+| `test_run_fresh` | The single run: `RWf` read from the file, the gate line and the header name the fresh definition, D103 3-5 in order, `far_set` saved, once; a P1R file without `RWf` fails the gate and writes only the gatefail files, with `far_set` |
+
+On `p1r`, `test_copies_and_readers_match_tip` compares the six readers P1R changes with `p1r`
+`b37e8a3` (`docs/p1r_protocol.md` section 11). Here all twelve stay compared with `d4623ed`.
