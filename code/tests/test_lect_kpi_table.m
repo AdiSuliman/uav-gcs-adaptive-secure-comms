@@ -420,7 +420,8 @@ gone = setdiff(n0, n1); added = setdiff(n1, n0);
 withnote = added(contains(added, '(mean omitnan:'));
 verifyEqual(tc, numel(added), numel(withnote) + 1);
 verifyEqual(tc, sum(startsWith(added, 'Normalized goodput (KPI 7)')), 1);
-verifyEqual(tc, sort(unique(regexprep(withnote, note, '')))', sort(gone(:))');
+stripped = unique(regexprep(withnote, note, ''));
+verifyEqual(tc, sort(stripped(:)), sort(gone(:)));
 verifyEqual(tc, regexprep(fileread(fullfile(d1, 'lect_kpi_table.csv')), note, ''), fileread(fullfile(d0, 'lect_kpi_table.csv')));
 end
 
