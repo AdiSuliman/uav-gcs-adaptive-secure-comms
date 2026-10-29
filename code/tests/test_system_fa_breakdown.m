@@ -274,6 +274,158 @@ verifyError(tc, @() system_fa_breakdown('run', fp, fe, ft, fq2, out2), 'system_f
 verifyError(tc, @() system_fa_breakdown('run', 'policy_pools.mat', fe, ft, fq, out2), 'system_fa_breakdown:input');
 end
 
+%% ---------- KPI 6's definition: KP.far_set ----------
+function test_old_path_unchanged(tc)
+% Without KP.far_set the gate, the readings, the text and every saved variable are those of the
+% code of profile 1's D103 reading (sysfa 3c9f7ea), on a pass and on a failed gate.
+root = tc.TestData.root; ref = '3c9f7ea';
+[st, old] = system(sprintf('git -C "%s" show %s:code/evaluation/system_fa_breakdown.m', root, ref));
+assumeEqual(tc, st, 0, 'git or the reading''s commit is not available here');
+d = fullfile(tc.TestData.tmp, 'old_path'); mkdir(d);
+old = regexprep(old, '^function varargout = system_fa_breakdown\(', 'function varargout = sfb_ref(', 'once');
+verifyTrue(tc, startsWith(old, 'function varargout = sfb_ref(cmd, varargin)'));
+fid = fopen(fullfile(d, 'sfb_ref.m'), 'w'); fwrite(fid, old); fclose(fid);
+addpath(d); c = onCleanup(@() rmpath(d));
+[E, PP, txt, Q] = eval_world();
+verifyFalse(tc, isfield(E.KP, 'far_set'));
+G0 = sfb_ref('gate', E, PP, Q, txt); G1 = system_fa_breakdown('gate', E, PP, Q, txt);
+verifyTrue(tc, G1.pass, strjoin(G1.mismatch, newline));
+verifyTrue(tc, isequaln(G0, G1), 'gate');
+M = system_fa_breakdown('mark', PP.clean_fer, 2);
+[R0, l0] = sfb_ref('readings', E, PP, M, G0); [R1, l1] = system_fa_breakdown('readings', E, PP, M, G1);
+verifyTrue(tc, isequaln(R0, R1), 'readings');
+verifyEqual(tc, l1, l0);
+X = E; X.KP.far(2).k = 99;
+verifyTrue(tc, isequaln(sfb_ref('gate', X, PP, Q, txt), system_fa_breakdown('gate', X, PP, Q, txt)), 'failed gate');
+% the single run: the text byte for byte, the same saved variables
+w = fullfile(d, 'run'); mkdir(w);
+fp = fullfile(w, 'policy_pools.mat'); save(fp, 'PP');
+fe = fullfile(w, 'policy_evaluation.mat'); save(fe, '-struct', 'E');
+ft = fullfile(w, 'policy_evaluation.txt'); write_text(ft, txt);
+fq = fullfile(w, 'trained_dqn.mat'); save(fq, '-struct', 'Q');
+Q2 = Q; Q2.confirm = [2 2]; fq2 = fullfile(w, 'trained_dqn_other.mat'); save(fq2, '-struct', 'Q2');
+o = cellfun(@(n) fullfile(w, n), {'old', 'new', 'old_fail', 'new_fail'}, 'UniformOutput', false);
+for i = 1:4, mkdir(o{i}); end
+sfb_ref('run', fp, fe, ft, fq, o{1});
+system_fa_breakdown('run', fp, fe, ft, fq, o{2});
+same_outputs(tc, o{1}, o{2}, 'system_fa_breakdown');
+t = read_text(fullfile(o{2}, 'system_fa_breakdown.txt'));
+verifyEqual(tc, t{1}, ['GATE PASS: lect_kpis.m reproduces KP.lect, far_report reproduces KP.far and KP.far_diag, ' ...
+    'the trained policy is KP.policy_stamp, exactly']);
+verifyFalse(tc, any(contains(t, 'P1R')));
+verifyError(tc, @() sfb_ref('run', fp, fe, ft, fq2, o{3}), 'system_fa_breakdown:gate');
+verifyError(tc, @() system_fa_breakdown('run', fp, fe, ft, fq2, o{4}), 'system_fa_breakdown:gate');
+same_outputs(tc, o{3}, o{4}, 'system_fa_breakdown.gatefail');
+end
+
+function test_gate_fresh(tc)
+% With KP.far_set fresh the gate reads KPI 6 on RWf alone and P1R's labelled lecturer lines, and
+% passes on P1R's C2e; the union's reader on the same outputs stops (it never misreads); a
+% missing or mislabelled piece stops it.
+[E, PP, txt, Q] = eval_world_fresh();
+G = system_fa_breakdown('gate', E, PP, Q, txt);
+verifyTrue(tc, G.pass, strjoin(G.mismatch, newline));
+verifyEqual(tc, G.T, 30);
+verifyEqual(tc, numel(G.aboveU), 12); verifyEqual(tc, sum(G.aboveU), 8);
+verifyTrue(tc, isequaln(G.far, E.KP.far) && isequaln(G.far_diag, E.KP.far_diag));
+verifyEqual(tc, [G.far(2).k G.far(2).n E.KP.far_union(2).k E.KP.far_union(2).n], [2 8 6 16]);
+verifyTrue(tc, all(cellfun(@(R) all(R.split == 7), G.RU)));
+verifyTrue(tc, all(endsWith(G.lect_lines(~cellfun(@isempty, strtrim(G.lect_lines))), ...
+    ' [P1R: with the fixed monitor, second reading, descriptive]')));
+X = E; X.KP = rmfield(X.KP, {'far_set', 'reading'});
+gate_fails(tc, X, PP, Q, txt, 'far_report on KPI 6''s clean flights vs KP.far');
+gate_fails(tc, X, PP, Q, txt, 'lect_kpis''s header 0 times');
+gate_fails(tc, rmfield(E, 'RWf'), PP, Q, txt, 'the evaluation lacks RWf');
+X = E; X.RWf{3}.split(2) = 6;
+gate_fails(tc, X, PP, Q, txt, 'RWf{3} (rule_esc) is not split id 7');
+X = E; X.RWf{4} = rmfield(X.RWf{4}, 'fc_dal');
+gate_fails(tc, X, PP, Q, txt, 'RWf{4} (blind_esc) lacks fc_dal');
+X = E; X.KP.far_set = 'union';
+gate_fails(tc, X, PP, Q, txt, 'KP.far_set union: this reader knows');
+X = E; X.KP = rmfield(X.KP, 'reading');
+gate_fails(tc, X, PP, Q, txt, 'KP.far_set fresh without KP.reading P1R');
+X = E; X.KP.far = X.KP.far_union; X.KP.far_diag = X.KP.far_diag_union;
+gate_fails(tc, X, PP, Q, txt, 'far_report on KPI 6''s clean flights vs KP.far');
+t = strrep(txt, ' [P1R: with the fixed monitor, second reading, descriptive]', '');
+gate_fails(tc, E, PP, Q, t, 'lect_kpis''s header 0 times');
+t = strrep(txt, '(P1R, read once)', '(P1R)');
+gate_fails(tc, E, PP, Q, t, 'KPI 6''s header 0 times');
+t = txt; i = find(startsWith(t, '  rule + escalation') & contains(t, 'upper'), 1, 'last'); t{i} = strrep(t{i}, 'upper', 'Upper');
+gate_fails(tc, E, PP, Q, t, 'far_report''s lines');
+% P1R's own code where it is here: the label and the KPI 6 header are evaluate_policies.m's
+ev = fileread(which('evaluate_policies'));
+if contains(ev, 'function L = p1r_label(')
+    verifyEqual(tc, fn_block(fileread(which('system_fa_breakdown')), 'p1r_label'), fn_block(ev, 'p1r_label'));
+    verifyTrue(tc, contains(ev, ['''False alarms on the clean link, the fresh clean test set (P1R, read once): %s, ' ...
+        '%d episodes x %d cycles -> KPI 6''']));
+end
+end
+
+function test_breakdown_fresh(tc)
+% D103 3 on the fresh clean test set (RWf): the tables count its flights; D103 4 and 5 read the
+% same episodes as without the key, labelled as P1R's second reading.
+[E, PP, txt, Q] = eval_world_fresh();
+G = system_fa_breakdown('gate', E, PP, Q, txt);
+[B, lines] = system_fa_breakdown('breakdown', E, PP, G);
+verifyEqual(tc, B.n_ebno, [0 4 4]);
+verifyEqual(tc, B.by_ebno, [0 0 0; 0 1 1; 0 0 0; 0 0 0; 0 0 0; 0 1 0]);
+r = B.path(2);
+verifyEqual(tc, [r.n r.cls r.deg r.drop r.noflag r.unrec], [2 1 1 0 0 0]);
+verifyEqual(tc, r.deg_by, [1 0 0 0]);
+verifyEqual(tc, [B.path(6).n B.path(6).cls B.path(6).drop], [1 0 1]);
+verifyEqual(tc, [B.xu(2).healthy B.xu(2).unhealthy], [1 1]);
+verifyEqual(tc, [B.rate(2).changes B.rate(2).cycles B.rate(2).k B.rate(2).n], [3 240 2 8]);
+verifyEqual(tc, [B.first(2).n B.first(2).early], [2 1]);
+verifyEqual(tc, find(B.first(2).hist), [2 9]);
+verifyTrue(tc, any(startsWith(lines, 'P1R: KPI 6''s flights are the fresh clean test set')));
+verifyTrue(tc, any(contains(lines, 'from the fresh clean test set, as KPI 6 (P1R, every policy):')));
+verifyFalse(tc, any(contains(lines, 'same union')));
+[Eu, ~, tu] = eval_world();
+Gu = system_fa_breakdown('gate', Eu, PP, Q, tu);
+M = system_fa_breakdown('mark', PP.clean_fer, 2);
+note = 'P1R: with the fixed monitor, second reading, descriptive: these episodes are test pools profile 1''s C2e has read';
+[S, ls] = system_fa_breakdown('sensitivity', E, PP, M, G); [Su, lsu] = system_fa_breakdown('sensitivity', Eu, PP, M, Gu);
+verifyTrue(tc, isequaln(S, Su));
+verifyEqual(tc, ls{3}, note); verifyEqual(tc, ls([1:2, 4:end]), lsu);
+[CO, lc] = system_fa_breakdown('carried', E, PP, G); [COu, lcu] = system_fa_breakdown('carried', Eu, PP, Gu);
+verifyTrue(tc, isequaln(CO, COu));
+verifyEqual(tc, lc{3}, note); verifyEqual(tc, lc([1:2, 4:end]), lcu);
+end
+
+function test_run_fresh(tc)
+% The single run on P1R's outputs: RWf read from the evaluation file, the gate line and the
+% header name the fresh definition, far_set saved; a P1R file without RWf fails the gate.
+[E, PP, txt, Q] = eval_world_fresh();
+d = fullfile(tc.TestData.tmp, 'run_fresh'); mkdir(d);
+fp = fullfile(d, 'policy_pools.mat'); save(fp, 'PP');
+fe = fullfile(d, 'policy_evaluation.mat'); save(fe, '-struct', 'E');
+ft = fullfile(d, 'policy_evaluation.txt'); write_text(ft, txt);
+fq = fullfile(d, 'trained_dqn.mat'); save(fq, '-struct', 'Q');
+out = fullfile(d, 'read1'); mkdir(out);
+system_fa_breakdown('run', fp, fe, ft, fq, out);
+o = read_text(fullfile(out, 'system_fa_breakdown.txt'));
+verifyTrue(tc, startsWith(o{1}, 'GATE PASS: ') && endsWith(o{1}, ', exactly'));
+verifyTrue(tc, contains(o{1}, 'far_report on the fresh clean test set (RWf, KP.far_set fresh) reproduces KP.far'));
+verifyTrue(tc, any(strcmp(o, sprintf(['P1R (KP.reading P1R, KP.far_set fresh): KPI 6''s flights are %s; D103 3 reads ' ...
+    'them, D103 4 and 5 read test pools already read in profile 1''s C2e (second reading, descriptive)'], E.KP.far_src))));
+h = cellfun(@(p) find(startsWith(o, p)), {'=== D103 3', 'P1R: KPI 6''s flights', '(a) ', '=== D103 4', '=== D103 5', '4(d)'}, ...
+    'UniformOutput', false);
+verifyTrue(tc, all(cellfun(@numel, h) >= 1));
+verifyTrue(tc, issorted(cellfun(@(x) x(1), h)));
+R = load(fullfile(out, 'system_fa_breakdown.mat'));
+verifyEqual(tc, R.far_set, 'fresh');
+verifyTrue(tc, R.G.pass && isequaln(R.G.far, E.KP.far));
+verifyError(tc, @() system_fa_breakdown('run', fp, fe, ft, fq, out), 'system_fa_breakdown:once');
+E2 = rmfield(E, 'RWf'); fe2 = fullfile(d, 'policy_evaluation_norwf.mat'); save(fe2, '-struct', 'E2');
+out2 = fullfile(d, 'read2'); mkdir(out2);
+verifyError(tc, @() system_fa_breakdown('run', fp, fe2, ft, fq, out2), 'system_fa_breakdown:gate');
+o2 = read_text(fullfile(out2, 'system_fa_breakdown.gatefail.txt'));
+verifyTrue(tc, startsWith(o2{1}, 'GATE FAIL') && any(contains(o2, 'the evaluation lacks RWf')));
+verifyFalse(tc, isfile(fullfile(out2, 'system_fa_breakdown.txt')));
+Fg = load(fullfile(out2, 'system_fa_breakdown.gatefail.mat'));
+verifyEqual(tc, Fg.far_set, 'fresh');
+end
+
 %% ---------- copies and readers ----------
 function test_copies_and_readers_match_tip(tc)
 % far_report and cp_upper are evaluate_policies.m's, tstat lect_kpis.m's, word for word; the
@@ -431,7 +583,68 @@ txt = [{'=== Decision-layer evaluation on the test pools ===', 'Generated: synth
     {'', 'Configuration at the end of the episode, deployed policy (single set): most frequent two per threat'}];
 end
 
+function [SW, FS, FT, FC, FG, FL] = fresh_flags(p)
+% Fresh clean flights 1..12 (4 per Eb/N0). rule + escalation: false alarms on 3 (0 dB, below the
+% KPI 1 threshold), 6 (jamming, healthy, first cycle 2) and 11 (none, degraded, 2 changes, first
+% cycle 9); the deployed DQN on 8 (unknown, drop alarm, first cycle 1); random everywhere.
+SW = zeros(1, 12); FS = SW; FT = SW; FC = SW; FG = false(1, 12); FL = FG;
+switch p
+    case 'rule_esc'
+        i = [3 6 11]; SW(i) = [1 1 2]; FT(i) = [1 2 9]; FC(i) = [2 2 1]; FS(6) = 1; FG(11) = true;
+    case 'dqn_g1'
+        SW(8) = 1; FT(8) = 1; FC(8) = 6; FL(8) = true;
+    case 'random'
+        SW(:) = 3; FT(:) = 1; FC(:) = 1;
+end
+end
+
+function [E, PP, txt, Q] = eval_world_fresh()
+% P1R's C2e (evaluate_policies.m with kpi6_set fresh) on sysfa_world: KPI 6 on the fresh clean
+% test set alone (RWf, split id 7, KPI 6 from 3 dB), the union beside it as KP.far_union and
+% printed as already read, the lecturer lines with P1R's label, KP.far_set fresh, KP.reading P1R.
+[E, PP, txt0, Q] = eval_world();
+POL = E.POL; KP = E.KP; T = 30; per_ms = 20;
+lbl = ' [P1R: with the fixed monitor, second reading, descriptive]';
+s12 = kron(1:3, ones(1, 4)); r12 = repmat(1:4, 1, 3);
+RWf = cell(1, numel(POL));
+for k = 1:numel(POL)
+    [SW, FS, FT, FC, FG, FL] = fresh_flags(POL{k});
+    RWf{k} = struct('s', s12, 'r', r12 + 20, 'geom', 1000 * s12 + r12 + 20, 'split', 7 * ones(1, 12), ...
+        'onset', 3 * ones(1, 12), 'switches', SW, 'false_sw', FS, 'fc_t', FT, 'fc_cls', FC, 'fc_deg', FG, ...
+        'fc_dal', FL, 'fc_drop', 2 * (SW > 0));
+end
+aF = PP.ebno(RWf{1}.s) >= KP.ebno_thr;
+[FAR, FD, lf] = system_fa_breakdown('far', RWf, POL, E.LBL, aF, T, E.iDQN, PP.ebno, KP.cls_list, per_ms);
+src = ['4 data/clean_fresh_pools.mat geometries per Eb/N0 (the fresh clean test set, families 7-9, block 15), one ' ...
+    'episode each, Eb/N0 >= 3 dB (synthetic)'];
+KP.far_union = KP.far; KP.far_diag_union = KP.far_diag; KP.far_src_union = KP.far_src;
+KP.far = FAR; KP.far_diag = FD; KP.far_src = src; KP.far_set = 'fresh'; KP.reading = 'P1R';
+E.KP = KP; E.RWf = RWf;
+[~, ll] = lect_kpis(E.ALL, POL, E.LBL, E.iDQN, PP.scen, 5e4, per_ms);
+for i = 1:numel(ll)
+    if ~isempty(ll{i}) && ~isempty(strtrim(ll{i})), ll{i} = [ll{i} lbl]; end
+end
+iu = find(startsWith(txt0, 'False alarms on the clean link, every independent clean flight: '));
+lu = txt0(iu + 1:end - 2);
+hu = strrep(txt0{iu}, ' -> KPI 6', ': already read in profile 1''s C2e, second reading, descriptive');
+hf = sprintf('False alarms on the clean link, the fresh clean test set (P1R, read once): %s, %d episodes x %d cycles -> KPI 6', ...
+    src, sum(aF), T);
+txt = [{'=== Decision-layer evaluation on the test pools ===', 'P1R: synthetic', 'Generated: synthetic'}, ll, ...
+    {'', 'False alarms on the clean link, test pools', ''}, {hu}, lu, {''}, {hf}, lf, ...
+    {'', 'Configuration at the end of the episode, deployed policy (single set): most frequent two per threat'}];
+end
+
 %% ---------- helpers ----------
+function same_outputs(tc, a, b, base)
+% The text of two runs byte for byte and their saved variables equal (isequaln).
+verifyEqual(tc, fileread(fullfile(b, [base '.txt'])), fileread(fullfile(a, [base '.txt'])));
+A = load(fullfile(a, [base '.mat'])); B = load(fullfile(b, [base '.mat']));
+verifyEqual(tc, sort(fieldnames(B)), sort(fieldnames(A)));
+for f = fieldnames(A)'
+    if isfield(B, f{1}), verifyTrue(tc, isequaln(A.(f{1}), B.(f{1})), f{1}); end
+end
+end
+
 function gate_fails(tc, E, PP, Q, txt, pat)
 G = system_fa_breakdown('gate', E, PP, Q, txt);
 verifyFalse(tc, G.pass, pat);
