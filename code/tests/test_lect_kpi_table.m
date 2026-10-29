@@ -386,6 +386,44 @@ verifyTrue(tc, all(isnan(T.omitted.thr)));
 verifyEqual(tc, [T.omitted.full; T.omitted.core], [4 24; 4 20]);
 end
 
+function test_output_only_against_base(tc)
+% Against the base commit's lect_kpi_table on the same inputs: every field of every row, the pending rows and
+% the files are equal, except the notes of Line A's goodput rows, which gain the omitted-episode count; the text
+% and the csv gain that note and one line, nothing else.
+d0 = new_dir(tc); d1 = new_dir(tc);
+write_inputs(d0, true, true); write_inputs(d1, true, true);
+bdir = base_copy(tc, 'code/evaluation/lect_kpi_table.m', 'aae8047');
+addpath(bdir, '-begin'); clear lect_kpi_table
+off_base = onCleanup(@() base_off(bdir)); %#ok<NASGU>
+verifyFalse(tc, startsWith(which('lect_kpi_table'), fullfile(tc.TestData.root, 'code')));
+[T0, lines0] = lect_kpi_table(d0);
+base_off(bdir);
+verifyTrue(tc, startsWith(which('lect_kpi_table'), fullfile(tc.TestData.root, 'code')));
+[T1, lines1] = lect_kpi_table(d1);
+note = ' \(mean omitnan: [^)]*\)';
+verifyEqual(tc, numel(T1.rows), numel(T0.rows));
+verifyEqual(tc, T1.pending, T0.pending);
+verifyEqual(tc, numel(T1.files), numel(T0.files));
+f = fieldnames(T0.rows)';
+verifyEqual(tc, fieldnames(T1.rows)', f);
+bad = {};
+for i = 1:numel(T0.rows)
+    for j = 1:numel(f)
+        a = T0.rows(i).(f{j}); b = T1.rows(i).(f{j});
+        if strcmp(f{j}, 'note') && T0.rows(i).kpi == 7 && strcmp(T0.rows(i).line, 'A'), b = regexprep(b, note, ''); end
+        if ~isequaln(a, b), bad{end+1} = sprintf('row %d, %s', i, f{j}); end %#ok<AGROW>
+    end
+end
+verifyEmpty(tc, bad);
+n0 = norm_lines(lines0); n1 = norm_lines(lines1);
+gone = setdiff(n0, n1); added = setdiff(n1, n0);
+withnote = added(contains(added, '(mean omitnan:'));
+verifyEqual(tc, numel(added), numel(withnote) + 1);
+verifyEqual(tc, sum(startsWith(added, 'Normalized goodput (KPI 7)')), 1);
+verifyEqual(tc, sort(unique(regexprep(withnote, note, '')))', sort(gone(:))');
+verifyEqual(tc, regexprep(fileread(fullfile(d1, 'lect_kpi_table.csv')), note, ''), fileread(fullfile(d0, 'lect_kpi_table.csv')));
+end
+
 %% ---------- helpers ----------
 function [L, KP] = write_inputs(d, with_cnn, with_d99, mod)
 % Synthetic inputs in folder d: policy_evaluation.mat (lect_kpis.m on a small world), the phy report, and
@@ -439,6 +477,31 @@ if with_d99
     write_bw(d, false);
     KP = load(fullfile(d, 'policy_evaluation.mat'), 'KP').KP;
 end
+end
+
+function l = norm_lines(lines)
+% The text lines without the time stamps and the generation line (two runs differ in them only).
+l = lines(~startsWith(lines, 'Generated:'));
+l = regexprep(l, ' \(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2}:\d{2}\)', '');
+end
+
+function d = base_copy(tc, rel, rev)
+% The file rel as commit rev holds it, alone in a folder (an export without .git reads the commit from the repository
+% named by V7_GIT_REPO). The test is filtered when the commit cannot be read.
+d = tempname; mkdir(d);
+tc.addTeardown(@() rmdir(d, 's'));
+[~, nm, ext] = fileparts(rel);
+repo = tc.TestData.root;
+[sg, ~] = system(sprintf('git --no-optional-locks -C "%s" rev-parse --git-dir', repo));
+if sg ~= 0 && ~isempty(getenv('V7_GIT_REPO')), repo = getenv('V7_GIT_REPO'); end
+[st, out] = system(sprintf('git --no-optional-locks -C "%s" show %s:%s > "%s"', repo, rev, rel, fullfile(d, [nm ext])));
+assumeEqual(tc, st, 0, sprintf('git show %s:%s failed: %s', rev, rel, out));
+end
+
+function base_off(d)
+% Removes a base-commit folder from the path (once).
+if contains(path, d), rmpath(d); end
+clear lect_kpi_table
 end
 
 function R = omit_rows(ALL)
