@@ -141,9 +141,25 @@ Vr = edge_verdict(20 * double((1:72) <= 66), 20 * ones(1, 72), 1:72, 0.9, 'ge', 
 verifyTrue(tc, isnan(Vr.k));
 verifyEmpty(tc, kpi_print_text('edge_flight', Vr, '%5.1f'));
 verifyEmpty(tc, kpi_print_text('edge_flight', struct('value', 0.5, 'n', 3), '%5.1f'));
-% the share the interval is built on: its lower bound is the exact interval's hull with the bootstrap's
-lo = betaincinv(0.025, 62, 11);
+% two onsets per flight: the hull of the episodes' bootstrap over flights and the flights' exact
+% interval (62 of 72), so it holds the exact interval at both ends
+lo = betaincinv(0.025, 62, 11); hi = betaincinv(0.975, 63, 10);
 verifyLessThanOrEqual(tc, V.lo, lo + 1e-9);
+verifyGreaterThanOrEqual(tc, V.hi, hi - 1e-9);
+% one onset per flight: the exact interval alone (66 of 72)
+verifyEqual(tc, [V1.lo V1.hi], [betaincinv(0.025, 66, 7), betaincinv(0.975, 67, 6)], 'AbsTol', 1e-12);
+% the edge map's layout (one row per flight: held onsets of its onsets, held_verdict.m): per flight
+% the same share, k of n and hull; as a rate (REC and PROT) k is NaN and no fl share is printed
+Vf = held_verdict(sum(held, 1), 2 * ones(1, 72), 1:72, 0.9, true, 4000);
+verifyEqual(tc, Vf.value, 134 / 144, 'AbsTol', 1e-12);
+verifyEqual(tc, [Vf.k, Vf.n], [62 72]);
+verifyEqual(tc, kpi_print_text('edge_flight', Vf, '%5.1f'), ' fl  86.1');
+verifyLessThanOrEqual(tc, Vf.lo, lo + 1e-9);
+verifyGreaterThanOrEqual(tc, Vf.hi, hi - 1e-9);
+Vq = held_verdict(sum(held, 1), 2 * ones(1, 72), 1:72, 0.9, false, 4000);
+verifyTrue(tc, isnan(Vq.k));
+verifyEqual(tc, Vq.value, Vf.value, 'AbsTol', 1e-12);
+verifyEmpty(tc, kpi_print_text('edge_flight', Vq, '%5.1f'));
 end
 
 function test_text_helpers(tc)
@@ -332,10 +348,26 @@ verifyEmpty(tc, strfind(mk, 'edge_km('));
 verifyNotEmpty(tc, strfind(mk, 'status(any(he) && all(pe(he) >= 90), stale), det);'));
 verifyNotEmpty(tc, strfind(mk, 'st7 = status(lat_ok && max(pv) - min(pv) <= 10, stale);'));
 em = fileread(which('edge_map'));
-verifyNotEmpty(tc, strfind(em, 'cell_txt(PT.(LAY{f})(i, s), fmt, fl)'));
-verifyNotEmpty(tc, strfind(em, 'cell_txt(PT.(q{1})(i, s), ''%5.1f'', true)'));
+% REC, PROT, REC_h and PROT_h are per-onset rates (no k of n): their cells print no fl share
+verifyNotEmpty(tc, strfind(em, 'cell_txt(PT.(LAY{f})(i, s), fmt), 1:nS'));
+verifyEmpty(tc, strfind(em, 'cell_txt(PT.(LAY{f})(i, s), fmt, fl)'));
+verifyEmpty(tc, strfind(em, 'fl = f == 4 || f == 5;'));
+verifyNotEmpty(tc, strfind(em, 'cell_txt(PT.(q{1})(i, s), ''%5.1f''), 1:nS'));
+% REC and PROT per flight: the fl share, cells padded to one width under a header of that width plus one
+ih = strfind(em, 'for q = {''rec_h'''); ifl = strfind(em, 'for q = {''rec_fl'', ''REC''; ''prot_fl'', ''PROT''}''');
+it = strfind(em, 'cell_txt(PT.(q{1})(i, s), ''%5.1f'', true)');
+verifyNumElements(tc, ih, 1); verifyNumElements(tc, ifl, 1); verifyNumElements(tc, it, 1);
+verifyGreaterThan(tc, ifl, ih);
+verifyGreaterThan(tc, it, ifl);
 verifyNotEmpty(tc, strfind(em, 'kpi_print_text(''edge_flight'', V, f)'));
-verifyNotEmpty(tc, strfind(em, 'fl = f == 4 || f == 5;'));
+verifyNotEmpty(tc, strfind(em, 'FLC = ''%-35s''; FLH = ''%-36s'';'));
+verifyNotEmpty(tc, strfind(em, 'sprintf(FLC, cell_txt(PT.(q{1})(i, s), ''%5.1f'', true))'));
+verifyNumElements(tc, strfind(em, 'sprintf(FLH, hdr_e{:})'), 1);
+% the legend states the hull the per-flight interval and verdict are read on
+verifyNotEmpty(tc, strfind(em, 'When a flight has more than one onset the interval is the hull of the '));
+verifyNotEmpty(tc, strfind(em, 'needs both lower bounds at the target and >= %d flights, NOT COMMITTED both upper bounds below it'));
+verifyEmpty(tc, strfind(em, 'the share the interval and the verdict are built'));
+verifyEmpty(tc, strfind(em, 'value = held episodes'));
 ex = fileread(which('export_report_numbers'));
 verifyNotEmpty(tc, strfind(ex, 'N.unknown_policy = take(''results/unknown_threat_policy.mat'', ''res'');'));
 verifyNotEmpty(tc, strfind(ex, 'N.gcs_antenna = take_lines(''results/gcs_antenna.txt'');'));

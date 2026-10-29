@@ -1005,8 +1005,11 @@ for q = {'rec_h', 'REC_h: held recovery among the HARMED recoverable flights (no
             'UniformOutput', false), ' ')); %#ok<SAGROW>
     end
 end
-FLN = ['    fl = the flights whose every onset is held, % of the flights (k of n), printed where it differs from the ' ...
-    'value (the share of held onsets)'];
+FLN = sprintf(['    fl = the flights whose every onset is held, %% of the flights (k of n), printed where it differs ' ...
+    'from the value (the share of held onsets). When a flight has more than one onset the interval is the hull of the ' ...
+    'onset share''s bootstrap over flights and the Clopper-Pearson interval of k in n (edge_verdict.m), so COMMITTED ' ...
+    'needs both lower bounds at the target and >= %d flights, NOT COMMITTED both upper bounds below it'], N_MIN);
+FLC = '%-35s'; FLH = '%-36s';                         % REC and PROT per flight: a cell with ' fl xxx.x', its header
 for q = {'rec_fl', 'REC'; 'prot_fl', 'PROT'}'
     rep{end+1} = ''; %#ok<SAGROW>
     rep{end+1} = sprintf(['--- %s per flight (registered before D108, reported only): the share of held onsets %% ' ...
@@ -1014,10 +1017,10 @@ for q = {'rec_fl', 'REC'; 'prot_fl', 'PROT'}'
         'every onset is held] flights verdict against the %g%% target (a flight succeeds when every onset is held) ---'], ...
         q{2}, 100 * TGT.rec); %#ok<SAGROW>
     rep{end+1} = FLN; %#ok<SAGROW>
-    rep{end+1} = sprintf('%-49s %s', '', sprintf('%-29s', hdr_e{:})); %#ok<SAGROW>
+    rep{end+1} = sprintf('%-49s %s', '', sprintf(FLH, hdr_e{:})); %#ok<SAGROW>
     for i = 1:nT
-        rep{end+1} = sprintf('%s %s', rowl{i}, strjoin(arrayfun(@(s) cell_txt(PT.(q{1})(i, s), '%5.1f', true), 1:nS, ...
-            'UniformOutput', false), ' ')); %#ok<SAGROW>
+        rep{end+1} = sprintf('%s %s', rowl{i}, strjoin(arrayfun(@(s) sprintf(FLC, cell_txt(PT.(q{1})(i, s), '%5.1f', true)), ...
+            1:nS, 'UniformOutput', false), ' ')); %#ok<SAGROW>
     end
 end
 rep{end+1} = '';
