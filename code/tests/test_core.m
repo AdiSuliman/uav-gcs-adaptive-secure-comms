@@ -10089,7 +10089,7 @@ CT = struct('ebno', ebno, 'n_geom', 4, 'runs', runs, 'actions', {{'rate_reduce',
 CT.pools = cell(1, 3, 2);
 for s = 1:3
     rr = runs(randperm(rs, 4));
-    CT.pools{1, s, 2} = struct('run', repelem(rr, 5)', 'fer', double(rand(rs, 20, 1) < 0.3));   % frames as columns, as the pools hold them
+    CT.pools{1, s, 2} = struct('run', repelem(rr, 5)', 'fer', double(rand(rs, 20, 1) < 0.3));   % one frame per row, as the pools hold them
     CT.pools{1, s, 1} = struct('run', repelem(rr, 5)', 'fer', ones(20, 1));
 end
 F = link_fresh('flights', CT);
@@ -10136,10 +10136,11 @@ verifyEqual(tc, [L.link.n], [n n n]);
 end
 
 function test_link_fresh_run(tc)
-% The single LINK reading after C2e: it stops before reading the pools without the KPI 6
-% marker's "KPI 6 read", on another pools file, on another detector and on a set that is not
-% the fresh one; then it writes its outputs and marker, refuses a second reading, and the
-% smoke cell A check passes and catches a changed output. The KPI 6 marker is never written.
+% The single LINK reading after C2e: it stops before it loads the pools without the KPI 6
+% marker's "KPI 6 read" or on another pools file, and after loading but before any frame is
+% summed or anything is written on another detector or on a set that is not the fresh one;
+% then it writes its outputs and marker, refuses a second reading, and the smoke cell A
+% check passes and catches a changed output. The KPI 6 marker is never written.
 d = fullfile(tc.TestData.tmp, 'link_fresh_run'); mkdir(d);
 c0 = cd(d); back = onCleanup(@() cd(c0));
 evalc('init_params'); mkdir('data'); mkdir('results');

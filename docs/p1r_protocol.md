@@ -327,8 +327,9 @@ ends about 18-21.11 (worst about 22-23.11).
   - **Read once (section 4, "Read once").** The fresh set is read for KPI 6 in C2e and for LINK
     once right after it, in the same single P1R pass. `link_fresh` stops before it loads the
     pools unless `results/kpi6_fresh_read_started.txt` holds "KPI 6 read" and the SHA-256 of the
-    same pools file, and unless the pools are the fresh set (`CT.set`, `CT.fams`) of the
-    detector C2e read (`det_id`). It writes `results/link_fresh_read.txt` before its reading and
+    same pools file; after loading and before any frame is summed or anything is written, it
+    stops unless the pools are the fresh set (`CT.set`, `CT.fams`) of the detector C2e read
+    (`det_id`). It writes `results/link_fresh_read.txt` before its reading and
     appends "LINK read" after it; a second reading is refused. It never writes the KPI 6
     marker. Outputs: `results/link_fresh.{txt,mat}`.
   - **Section 5's "KPI 6 only"** reads "KPI 6 and one LINK reading"; section 1's two kinds of
@@ -342,8 +343,9 @@ ends about 18-21.11 (worst about 22-23.11).
     `edge_map.m`'s statements and flight ids; another configuration is not counted; no single
     no_action stops), `test_core/test_link_fresh_verdicts` (2% commits at 5.7% and is NOT
     COMMITTED at 1.4% on the same interval; 9% and 12% NOT COMMITTED; tags J, J, M; each verdict
-    `edge_verdict.m`'s), `test_core/test_link_fresh_run` (the refusals before any load: no "KPI 6
-    read", another pools file, another detector, not the fresh set; the outputs, the marker, the
+    `edge_verdict.m`'s), `test_core/test_link_fresh_run` (the refusals before the pools are loaded: no
+    "KPI 6 read", another pools file; after loading and before any frame is summed or anything
+    is written: another detector, not the fresh set; the outputs, the marker, the
     second reading refused, the cell A check passing and catching a changed output, the KPI 6
     marker untouched).
   - **Time.** About +10 min of P1R (the fresh pools file loaded and hashed once more).

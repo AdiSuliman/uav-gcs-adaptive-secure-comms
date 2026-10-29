@@ -6,9 +6,11 @@ function out = link_fresh(cmd, varargin)
 %   only, the verdict at 1.4% on the same interval and the operating-point tag J (loss < 10%).
 %   link_fresh('run', smoke)   in the P1R tree: reads data/clean_fresh_pools.mat, writes
 %       results/link_fresh.{txt,mat} and the marker results/link_fresh_read.txt. It stops
-%       before reading the pools unless C2e has read them for KPI 6 (the KPI 6 marker holds
+%       before it loads the pools unless C2e has read them for KPI 6 (the KPI 6 marker holds
 %       "KPI 6 read" and the same file's SHA-256), and on a second reading (the marker holds
-%       "LINK read"). smoke true: 400 resamples, as edge_map.m under SMOKE
+%       "LINK read"); after loading and before any frame is summed or anything is written,
+%       unless the pools are the fresh set (CT.set, CT.fams) of the detector C2e read
+%       (det_id). smoke true: 400 resamples, as edge_map.m under SMOKE
 %   link_fresh('check', smoke)   smoke cell A: the outputs against a recomputation from the
 %       pools, the targets, the flights per Eb/N0, the labels, and a second run refused
 %   F = link_fresh('flights', CT)   per-flight clean frames lost and flown at no_action
