@@ -305,3 +305,103 @@ ends about 18-21.11 (worst about 22-23.11).
     `67f933a`, `b37e8a3` and the tip. A later change to one of them fails the test until the pin
     names the commit that holds it.
   - `sysfa`'s test is unchanged: there all twelve stay compared with `d4623ed`.
+- **29.10.2026, the no-threat penalty form in C2 (D107, approved by Adi on 29.10.2026; written
+  before any P1R data).** Basis: `core/d107_after_v0.md` sections 3.3 and 3.5 and its draft D107
+  (section 4); the final text is `core/d107_final.md`. Code on branch `a107` from `p1r` `198f82f`
+  (`C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\worktrees\a107`). It reaches `p1r` after its
+  tests pass; they run after CORE_BW's pools end.
+  - **What P1R now changes.** P1R's C2 also trains the no-threat form of the false-switch
+    penalty (A′), training only:
+    - the switch is `"fa_nothreat": true` in `profile.json` (or `CFG.fa_nothreat`,
+      `fa_nothreat_on.m`). Without the field it is off, and C2 is the code before this amendment bit
+      for bit. P1R's root `profile.json` and `tools/p1r/profile.json` are now
+      `{"profile": "profile 1, P1R", "deg_select": true, "kpi6_set": "fresh", "run_cache": true, "fa_nothreat": true}`;
+    - the form (`fa_form_train.m`, `link_env.m` `K.fa_form = 'nothreat'`): a change on a healthy
+      link costs the training penalty λ on a cycle with no threat on the air (`sc_eff == clean`:
+      the clean flight, the cycles before the onset and after the end) and the standard
+      `w_false` = 20 on every other cycle. A release after the end costs nothing, as before. The
+      validation and test reward, `w_false`, `healthy`, the KPIs and every evaluation file are
+      unchanged;
+    - `train_dqn.m` section 7 runs after the deployed agent and the sensitivity are saved: at the
+      selected monitor and drop threshold, with the grid's settings, cost scales and discount
+      factor, λ in {120, 160} x seeds 42-44 (6 runs, through the run cache with the form in the
+      key). Each run is scored with and without the escalation, and beside its paired grid run
+      (same monitor, drop, λ, discount factor and seed), on the same validation episodes and the
+      clean validation flights. Both are also read without the escalation with the harmed and the
+      covered episodes apart (harmed: no response does not restore the geometry);
+    - the 6 A′ agents, their 6 paired plain agents and every per-episode reading are saved to
+      `data/aprime_agents.mat`. `results/dqn_training.txt` gains the block "No-threat penalty form
+      (pre-registered candidate (D107), validation-scored, not deployed, descriptive)", with the
+      line "grid readings reproduced" for each run;
+    - A′ never enters `select_run`, the gate, `choose_deployed` or the deployed policy. The only
+      change to `data/trained_dqn.mat` is `seed_summary.selected_fa_form = 'all'`. C2g, C2u and the
+      reward-sensitivity retrains read the form from it, so they retrain the plain form. The
+      deployed policy, its stamp and every C2e reading of profile 1's line stay as without the
+      switch. "P1R differs from profile 1 in the monitor and in the KPI 6 reading only" stays
+      true for the deployed policy;
+    - section 10: C2 takes about 4 h more (6 runs of about 34 min and 12 validation readings);
+    - smoke cell A runs with the switch on: section 7 at the smoke's grid (penalty 80, one seed).
+      Added checks: the block in `dqn_training.txt`, `data/aprime_agents.mat` with one run,
+      and "grid readings reproduced: yes / yes". This stays inside the 2 h cap;
+    - stop rule: if C1d keeps `'ratio'`, P1R ends after C1d and A′ goes to profile 3 only
+      (D107 point 6).
+  - **Not part of this commit.**
+    - The A′ row on the fresh clean test set (D107 point 6, D104 point 6) needs a C2e reader of
+      `data/aprime_agents.mat` and a retest of the breakdown's exact gate with the extra row. It is
+      written with its tests in a separate commit before the smoke. Until then C2e reads no A′
+      row.
+    - The stamp carrying the form, the profile flag that lets the admissible A′ runs join
+      `select_run`, and the reader of the admissibility test are for profile 3, where A′ can be
+      deployed: a commit on TIP3 with tests and a smoke cell before profile 3's queue.
+  - **Precondition G0** (D107 point 4). A validation-only reproduction, before D107 is registered
+    in DECISIONS, run multithreaded after CORE_BW's pools end (Adi, 29.10.2026). If the
+    validation slice differs, D107 is not registered and the finding goes to Adi first.
+  - **The admissibility test**, fixed before any A′ data, verbatim from `core/d107_after_v0.md`
+    section 3.5. Line references there are to profile 1's code of record `d4623ed` and to that
+    note's abbreviations. In P1R it is not a gate: A′'s rows are descriptive. It decides profile
+    3 only.
+
+  > ### 3.5 Admissibility test (fixed now, validation only, before any A′ data)
+  >
+  > **Precondition G0** (a few minutes, gated, validation only, before D107 is registered).
+  > - Compare `K.*(:,:,:,2,:)` before and after the test strip, or reproduce C2's validation row exactly. This settles V0's "NOT REPRODUCED" (V0:9; PRR:25).
+  > - If the validation slice differs, C2's selection depended on test-split content. A′ is then not registered, and the finding goes to Adi first.
+  >
+  > **Candidates and comparators.**
+  > - Candidates: 6 A′ runs (λ ∈ {120, 160} × seeds 42-44), deployed form plain `dqn` (no escalation).
+  > - Comparators: the paired plain grid runs with the same monitor, drop threshold, λ and seed.
+  > - Everything is scored on the same validation episodes (common random numbers) and on the 1800 clean validation flights.
+  >
+  > **A value of λ is admissible only if all of (a) to (c) hold.**
+  > - **(a) False alarms.** For every run of that λ, and for the seed mean, the one-sided 95% Clopper-Pearson upper bound is at most 5%, that is at most 74 of 1800 (code `train_dqn.m:122`; DEC D104 point 5).
+  > - **(b) Gain.** Harmed S1 recovered, A′ minus plain:
+  >   - per-episode seed means, paired;
+  >   - cluster bootstrap over (geometry, Eb/N0) cells, 10,000 resamples;
+  >   - Holm across the two λ values (the smaller p at a one-sided 97.5% lower bound, the other at 95%);
+  >   - the lower bound must be above 0;
+  >   - **and (b′)** none of antenna_fault's 6 harmed geometries shows a negative seed-mean paired difference. This guards against correlation within a geometry, since 6 clusters are too few for a bootstrap alone. Taken from the detection designer.
+  > - **(c) Guards** (seed means against the paired plain runs):
+  >   - no threat's held recovery over its recoverable episodes falls by more than 1 point;
+  >   - pooled held falls by at most 0.5 point;
+  >   - covered S1 held falls by at most 3 points.
+  >
+  > **Reported, never gating.**
+  > - (d) Mechanism: the harmed and clean Q-gap medians at the first 1-degraded fire, against −0.482 and −0.685 (V0:72), from the saved agents through the V0 reader. If the harmed gap does not move, the state cannot carry the evidence, and B-H becomes the documented next candidate.
+  > - (e) antenna_fault and shadowing apart, with intervals; exact McNemar on the deployed-seed pairs.
+  > - (f) 161 km/h and 9 dB per threat, as in V0 section 5.
+  > - (g) The share of pre-onset changes on recoverable jamming episodes, D103 point 4(a).
+  >
+  > **Decision.**
+  > - **Profile 3:** the admissible A′ runs join `select_run`, and the registered `rank_pick` (code `train_dqn.m:616-631`) decides with no new key. An admissible run can still lose on the weakest-threat key; that is accepted. If neither λ is admissible, the plain choice stands, reported as it falls. The verdict is profile 3's unread test pools.
+  > - **P1R:** A′ never enters `select_run`. Its rows are "pre-registered candidate (D107), validation-scored, not deployed, descriptive". Its KPI 6 on the fresh clean set is read once with the other rows.
+  > - No threshold, λ or form changes after any of these numbers exist.
+
+  - Tests added to section 9 (`code/tests/test_core.m`; written, not yet run):
+
+  | Test | What it checks |
+  |---|---|
+  | `test_core/test_fa_form_off_identical` | Without `K.fa_form`, or with `'all'`, `link_env` gives the tables, rewards, observations, info and state of `p1r` `198f82f`'s `link_env.m` bit for bit, at the standard and at a training penalty; `fa_form_train` leaves a reward unchanged for `'all'`, `''` and a `seed_summary` without the field; `train_one`'s default form is `'all'` |
+  | `test_core/test_fa_form_nothreat_split` | Per cycle under `'nothreat'`: λ for a change before the onset, on the clean flight and after the end; `w_false` for a change on a covered link; nothing for a release after the end or a change on an unhealthy link; everything but the reward unchanged; other forms stop |
+  | `test_core/test_fa_nothreat_switch` | Off without the file or the field; true or false from `profile.json`; `CFG` first; other values stop; P1R's profile sets it; read after the smoke's grid |
+  | `test_core/test_fa_nothreat_training_only` | No evaluation file reads the form; validation and checkpoints read the standard reward; section 7 goes through the run cache with the form in the key, runs after the last save of `trained_dqn.mat`, and never reaches `select_run`, `rank_pick` or `choose_deployed`; `selected_fa_form` only with the switch; C2g, C2u and the sensitivity retrain carry it |
+  | `test_core/test_p1r_profile` | `fa_nothreat` added to P1R's profile fields and read as true |
