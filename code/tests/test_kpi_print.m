@@ -283,6 +283,8 @@ res = struct('threat', {'jamming', 'path_loss'}, 'n', {10, 20}, 'dqn_out', {0.9,
     'rule', {0.7, 0.8}, 'ci_out', {[0.8 1], [0.1 0.3]}, 'ci_in', {[0.8 1], [0.7 0.9]});
 EP = struct('x', 1); %#ok<NASGU>
 save('results/unknown_threat_policy.mat', 'res', 'EP');
+ws = warning('off', 'MATLAB:load:variableNotFound');          % the reduced policy fixture lacks top_cfg
+tc.addTeardown(@() warning(ws));
 lastwarn('');
 evalc('export_report_numbers');
 [msg, id] = lastwarn;
@@ -345,7 +347,7 @@ verifyNotEmpty(tc, strfind(ex, 'N.gcs_antenna = take_lines(''results/gcs_antenna
 db = fileread(which('build_kpi_dashboard'));
 for t = {'kpi_print_text(''palette'', size(P.KP.per_ebno, 2))', 'kpi_print_text(''ebno_ticks'', P.KP.ebno, Ll)', ...
         'kpi_print_text(''edge_limited'', Em, P.KP.ebno, decision_config().ratio_ok)', 'kpi_print_text(''wrap'', q.value, 58)', ...
-        'legend(ax, hA, P.KP.show_lbl', 'legend(ax, [hb, hx]', 'legend(ax, [hb, ht], names'}
+        'legend(ax, hA, P.KP.show_lbl', 'legend(ax, [hb, hx]', 'legend(ax, [hb, ht], names', 'legend(ax, [hf, hy]'}
     verifyNotEmpty(tc, strfind(db, t{1}), t{1});
 end
 verifyEmpty(tc, strfind(db, '''r--'', ''90%'')'));
