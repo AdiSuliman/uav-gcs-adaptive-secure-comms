@@ -31,6 +31,11 @@ function [T, lines] = lect_kpi_table(res_dir)
 %   The system false alarms (KP.far) are not proposal KPI 3: they are listed apart as 'extension:
 %   system FA (project KPI 6, D103)'. T.rows is the struct array behind the csv, T.files the
 %   files written, T.pending the rows that read 'pending'; lines is the text file's content.
+%   Line A's normalized goodput leaves out the episodes at the Eb/N0 points where the clean link
+%   loses more than 90% of its packets (mean 'omitnan', lect_ebno_protocol.md 3): every normalized
+%   value in the table, and a line of its own, says how many episodes of its set that is
+%   (lect_kpis_by_ebno.mat: the per-Eb/N0 readings S.rows and D99's printed note); T.omitted holds
+%   the counts, n/a for a count the file does not hold.
 if nargin < 1 || isempty(res_dir), res_dir = 'results'; end
 res_dir = char(res_dir);
 if ~isfolder(res_dir), error('lect_kpi_table:folder', 'lect_kpi_table: %s is not a folder', res_dir); end
@@ -47,6 +52,7 @@ Bw = read_mat(pth(F.bw), 'KP');
 mk = read_mark(pth(F.mark), D, P);
 lect = P.ok && isfield(P.KP, 'lect') && isstruct(P.KP.lect) && ~isempty(P.KP.lect);
 lineB = D.ok && isfield(D.S, 'line_b') && isstruct(D.S.line_b);
+O = omitted_counts(D, mk, P, pth(F.d99));
 
 %% Rows
 rows = {};
@@ -62,10 +68,10 @@ if lect
                 'role', 'pending', 'source', F.pol); %#ok<AGROW>
         end
     end
-    rows = [rows, lect_rows(L, ctx_of(L, 'core', 'A', F.pol))];
+    rows = [rows, lect_rows(L, ctx_of(L, 'core', 'A', F.pol, O))];
     if lineB, rows = [rows, lect_rows(D.S.line_b, ctx_of(L, 'core', 'B', F.d99))]; end
-    rows = [rows, lect_rows(L, ctx_of(L, 'core36', 'A', F.pol))];
-    rows = [rows, lect_rows(L, ctx_of(L, 'full', 'A', F.pol))];
+    rows = [rows, lect_rows(L, ctx_of(L, 'core36', 'A', F.pol, O))];
+    rows = [rows, lect_rows(L, ctx_of(L, 'full', 'A', F.pol, O))];
     if lineB, rows = [rows, lect_rows(D.S.line_b, ctx_of(L, 'full', 'B', F.d99))]; end
 else
     why = pend_why(P, F.pol, 'KP.lect (lect_kpis.m)');
@@ -88,8 +94,8 @@ rows = rows(ix);
 nm = {'', 'BER model vs theory', 'Macro-F1, three link states', 'False alarm rate in clean states', ...
     'Recall per jamming type', 'PER reduction vs the static link', 'Recovery time from detection', 'Goodput', ...
     'CNN contribution vs the conventional adaptive link', 'extension: system FA (project KPI 6, D103)'};
-lines = text_lines(rows, nm, res_abs, P, F, mk, Cn, lect);
-T = struct('rows', {rows}, 'files', {{}}, 'pending', {find(strncmp({rows.verdict}, 'pending', 7))});
+lines = text_lines(rows, nm, res_abs, P, F, mk, Cn, lect, O);
+T = struct('rows', {rows}, 'files', {{}}, 'pending', {find(strncmp({rows.verdict}, 'pending', 7))}, 'omitted', {O});
 f_txt = pth('lect_kpi_table.txt'); f_csv = pth('lect_kpi_table.csv');
 write_lines(f_txt, lines);
 write_csv(f_csv, rows, nm, Cn);
@@ -158,6 +164,116 @@ elseif D.ok && isfield(D, 'M') && isfield(D.M, 'tag') && P.ok && isfield(P.KP, '
     mk.ebno = P.KP.ebno(:)'; mk.tag = D.M.tag(:)'; mk.clean_fer = D.M.clean_fer(:)'; mk.ok = true;
     mk.src = 'lect_kpis_by_ebno.mat';
 end
+end
+
+function O = omitted_counts(D, mk, P, f_d99)
+% The episodes Line A's normalized goodput leaves out (mean 'omitnan'): those at the Eb/N0 points where the
+% clean link loses more than 90% of its packets (link_env.m: 1 - clean packet loss < 0.1, the mark's
+% clean_fer). Counts [left out, all] from lect_kpis_by_ebno.mat: the recoverable jamming episodes of each mask
+% from the per-Eb/N0 readings (S.rows), the threat episodes (and the 36-configuration mask when S.rows is
+% absent) from D99's printed note ('lines'). A count the file does not hold is NaN and prints n/a.
+nan2 = [NaN NaN];
+O = struct('ok', false, 'why', '', 'nn', [], 'points', '', 'thr', nan2, 'full', nan2, 'core', nan2, 'core36', nan2);
+if ~D.ok || ~isfield(D, 'M') || ~isfield(D.M, 'clean_fer')
+    why = 'no lect_kpis_by_ebno.mat';
+    if ~D.ok, why = sprintf('lect_kpis_by_ebno.mat: %s', D.why); end
+    O.why = why;
+    return;
+end
+cf = D.M.clean_fer(:)';
+O.ok = true;
+O.nn = find(1 - cf < 0.1);
+eb = [];
+if mk.ok, eb = mk.ebno(:)'; elseif P.ok && isfield(P.KP, 'ebno'), eb = P.KP.ebno(:)'; end
+if ~isempty(O.nn)
+    if numel(eb) == numel(cf), O.points = pts(eb(O.nn)); else, O.points = strjoin(compose('point %d', O.nn), ', '); end
+end
+t = threat_note(f_d99);
+O.thr = t(1:2);
+O.full = t(3:4);
+if isfield(D.S, 'rows') && iscell(D.S.rows) && numel(D.S.rows) == numel(cf)
+    O.full = jam_count(D.S.rows, O.nn, @(x) x);
+    O.core = jam_count(D.S.rows, O.nn, @core_of);
+    O.core36 = jam_count(D.S.rows, O.nn, @all36_of);
+end
+if isnan(O.core36(1)), O.core36 = O.full; end
+end
+
+function c = core_of(x)
+c = [];
+if isfield(x, 'core') && ~isempty(x.core), c = x.core; end
+end
+
+function c = all36_of(x)
+c = core_of(x);
+if ~isempty(c) && isfield(c, 'all36') && ~isempty(c.all36), c = c.all36; else, c = []; end
+end
+
+function c = jam_count(rows, nn, sel)
+% [left out, all] recoverable jamming episodes over the per-Eb/N0 readings rows, nn the points left out; NaN when
+% a reading lacks the block.
+c = [0 0];
+for p = 1:numel(rows)
+    x = sel(rows{p});
+    if isempty(x) || ~isstruct(x) || ~isfield(x, 'rec') || isempty(x.rec), c = [NaN NaN]; return; end
+    q = x.rec(strcmp({x.rec.set}, 'recoverable jamming episodes'));
+    if isempty(q), c = [NaN NaN]; return; end
+    c(2) = c(2) + q(1).n;
+    if ismember(p, nn), c(1) = c(1) + q(1).n; end
+end
+end
+
+function t = threat_note(f)
+% [threat left out, threat all, recoverable jamming left out, all] from D99's printed note, NaN when it is absent.
+t = nan(1, 4);
+if ~isfile(f), return; end
+try
+    if ~any(strcmp(who('-file', f), 'lines')), return; end
+    S = load(f, 'lines');
+    tk = regexp(S.lines, 'leave out those (\d+) of (\d+) threat episodes \((\d+) of (\d+) recoverable jamming\)', 'tokens', 'once');
+    tk = tk(~cellfun(@isempty, tk));
+    if ~isempty(tk), t = str2double(tk{1}); end
+catch
+end
+end
+
+function c = omit_for(O, kind)
+% The omitted counts that belong to one reading context (kind core, core36 or full) of Line A.
+c = struct('ok', O.ok, 'why', O.why, 'points', O.points, 'thr', O.thr, 'jam', O.(kind));
+end
+
+function s = omit_text(om, which)
+% The note beside a normalized goodput value of Line A.
+if isempty(om), s = ''; return; end
+if ~om.ok
+    s = sprintf(' (mean omitnan: episodes where the clean link loses more than 90%% of its packets are left out; count pending, %s)', om.why);
+elseif isempty(om.points)
+    s = ' (mean omitnan: no Eb/N0 point where the clean link loses more than 90% of its packets, none left out)';
+else
+    s = sprintf(' (mean omitnan: leaves out %s of %s episodes at %s, where the clean link loses more than 90%% of its packets)', ...
+        cnt_txt(om.(which)(1)), cnt_txt(om.(which)(2)), om.points);
+end
+end
+
+function s = omit_header(O)
+% The line of the text file that states the omitted counts of every set.
+if ~O.ok
+    s = ['Normalized goodput (KPI 7) is not defined where the clean link loses more than 90% of its packets (link_env.m); ' ...
+        'Line A''s normalized means leave those episodes out (mean ''omitnan''). Count pending (' O.why ').'];
+elseif isempty(O.nn)
+    s = 'Normalized goodput (KPI 7): no Eb/N0 point where the clean link loses more than 90% of its packets, nothing left out.';
+else
+    s = sprintf(['Normalized goodput (KPI 7) is not defined where the clean link loses more than 90%% of its packets (link_env.m; ' ...
+        'here %s): Line A''s normalized means leave out (mean ''omitnan''), of the episodes of each row, threat episodes %s of %s; ' ...
+        'recoverable jamming episodes %s of %s on the full action set, %s of %s on the core action set, %s of %s on the core ' ...
+        'set recoverable by the 36. Goodput in bit/s keeps them; Line B has none.'], O.points, cnt_txt(O.thr(1)), cnt_txt(O.thr(2)), ...
+        cnt_txt(O.full(1)), cnt_txt(O.full(2)), cnt_txt(O.core(1)), cnt_txt(O.core(2)), cnt_txt(O.core36(1)), cnt_txt(O.core36(2)));
+end
+end
+
+function s = cnt_txt(x)
+% A count as text; n/a when it is not known.
+if isfinite(x), s = sprintf('%d', x); else, s = 'n/a'; end
 end
 
 function s = pend_why(S, f, what)
@@ -401,10 +517,12 @@ for t = {'pooled', 'narrowband', 'wideband'}
 end
 end
 
-function c = ctx_of(L, kind, line, src)
-% The reading context of one lect_kpis.m output block.
+function c = ctx_of(L, kind, line, src, O)
+% The reading context of one lect_kpis.m output block; with O (omitted_counts) a Line A block also carries the
+% counts its normalized goodput leaves out.
 c = struct('kind', kind, 'line', line, 'src', [src ' (KP.lect' ternary(strcmp(src, 'lect_kpis_by_ebno.mat'), ' on Line B', '') ')'], ...
-    'period_ms', L.period_ms, 'target', L.target_pct, 'payload', L.payload_bps, 'actions', '');
+    'period_ms', L.period_ms, 'target', L.target_pct, 'payload', L.payload_bps, 'actions', '', 'omit', []);
+if nargin > 4 && strcmp(line, 'A'), c.omit = omit_for(O, kind); end
 if isfield(L, 'core') && ~isempty(L.core), c.actions = strjoin(L.core.actions, ', '); end
 end
 
@@ -499,11 +617,11 @@ for q = S.gput
     b = {'kpi', 7, 'network', net, 'policy', q.policy, 'pair_set', c.pair, 'action_set', c.aset, 'line', c.line, ...
         'unit', 'bit/s', 'verdict', '-', 'role', pol_role_of(q.policy, role), 'source', c.src};
     R{end+1} = row(b{:}, 'reading', 'goodput after onset, threat episodes', 'episodes', 'all threat episodes', 'value', q.bps, ...
-        'lo', q.ci(1), 'hi', q.ci(2), 'note', sprintf('normalized %s; no target; nominal payload %g bit/s%s', nf('%.3f', q.norm), ...
-        c.payload, role_note(c, q.policy))); %#ok<AGROW>
+        'lo', q.ci(1), 'hi', q.ci(2), 'note', sprintf('normalized %s%s; no target; nominal payload %g bit/s%s', nf('%.3f', q.norm), ...
+        omit_text(c.omit, 'thr'), c.payload, role_note(c, q.policy))); %#ok<AGROW>
     R{end+1} = row(b{:}, 'reading', 'goodput after onset, recoverable jamming episodes', 'episodes', ['recoverable jamming episodes: ' c.rec], ...
-        'value', q.bps_jam, 'lo', q.ci_jam(1), 'hi', q.ci_jam(2), 'note', sprintf('normalized %s; no target%s', nf('%.3f', q.norm_jam), ...
-        role_note(c, q.policy))); %#ok<AGROW>
+        'value', q.bps_jam, 'lo', q.ci_jam(1), 'hi', q.ci_jam(2), 'note', sprintf('normalized %s%s; no target%s', nf('%.3f', q.norm_jam), ...
+        omit_text(c.omit, 'jam'), role_note(c, q.policy))); %#ok<AGROW>
 end
 end
 
@@ -586,7 +704,7 @@ if endsWith(p, '_core'), s = 'core action set'; elseif endsWith(p, '_esc'), s = 
 end
 
 %% ===================== Text and csv =====================
-function lines = text_lines(rows, nm, res_abs, P, F, mk, Cn, lect)
+function lines = text_lines(rows, nm, res_abs, P, F, mk, Cn, lect, O)
 lines = {'=== LECTURER KPI TABLE (proposal numbering KPI 1-8) ===', ...
     sprintf('Generated: %s | results folder %s', datestr(now), res_abs), ''};
 lines{end+1} = 'Sources read (saved outputs only; nothing recomputed, no test-set data opened):';
@@ -616,6 +734,7 @@ if mk.ok
 else
     lines{end+1} = 'Link-limited points (D99): pending (no mark file low_ebno_mark.txt, no lect_kpis_by_ebno.mat). Line A pools all points.';
 end
+lines{end+1} = omit_header(O);
 lines{end+1} = '';
 for k = [1:8 kpi_fa()]
     ix = find([rows.kpi] == k);
@@ -784,10 +903,11 @@ for j = 1:numel(hb)
     hb(j).FaceColor = cols(j, :);
     errorbar(ax, hb(j).XEndPoints, Y(:, j), Y(:, j) - LO(:, j), HI(:, j) - Y(:, j), 'k', 'LineStyle', 'none', 'CapSize', 6);
 end
-yline(ax, L.target_pct, '--k', sprintf('target %g%%', L.target_pct), 'LabelHorizontalAlignment', 'left');
+hy = yline(ax, L.target_pct, '--k');
 set(ax, 'XTick', 1:3, 'XTickLabel', {'narrowband (tone jamming)', 'wideband (jamming)', 'five threats pooled'}); grid(ax, 'on');
 ylabel(ax, 'PER reduction vs the static link [%]');
-legend(ax, hb, names, 'Interpreter', 'none', 'Location', 'southoutside', 'Orientation', 'horizontal');
+legend(ax, [hb(:); hy], [names(:); {sprintf('target %g%%', L.target_pct)}], 'Interpreter', 'none', 'Location', 'southoutside', ...
+    'Orientation', 'horizontal');
 title(ax, 'PER reduction, 95% bootstrap over flight geometries', 'FontSize', 10);
 title(tl, 'KPI 5: PER by configuration (core pair rule_core / blind_core; rule_esc / blind_esc extension)', 'Interpreter', 'none');
 exportgraphics(fig, f, 'Resolution', 150);
@@ -826,15 +946,15 @@ for k = 1:2
     hb(k).FaceColor = cols(k, :);
     errorbar(ax, hb(k).XEndPoints, Y(:, k), zeros(numel(q), 1), U(:, k), 'k', 'LineStyle', 'none', 'CapSize', 6);
     for i = 1:numel(q)
-        txt = ['never ' nf('%.0f', NV(i, k)) '%'];
+        txt = {'never'; [nf('%.0f', NV(i, k)) '%']};
         if isfinite(Y(i, k)), y = Y(i, k) + max(U(i, k), 0); else, y = 0; end
         text(ax, hb(k).XEndPoints(i), y, txt, 'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', 'FontSize', 7);
     end
 end
 set(ax, 'XTick', 1:numel(q), 'XTickLabel', {q.policy}, 'TickLabelInterpreter', 'none'); grid(ax, 'on');
 ylabel(ax, 'time [ms]');
-legend(ax, hb, {'onset -> detection', 'detection -> PER restored'}, 'Location', 'northwest');
-title(ax, ttl, 'FontSize', 8, 'Interpreter', 'none'); ylim(ax, [0 1.15 * max(1, max(Y(:) + max(U(:), 0), [], 'omitnan'))]);
+legend(ax, hb, {'onset -> detection', 'detection -> PER restored'}, 'Location', 'southoutside', 'Orientation', 'horizontal');
+title(ax, ttl, 'FontSize', 8, 'Interpreter', 'none'); ylim(ax, [0 1.4 * max(1, max(Y(:) + max(U(:), 0), [], 'omitnan'))]);
 end
 
 function f = fig_gput(L, f)
