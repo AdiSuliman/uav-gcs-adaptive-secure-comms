@@ -828,7 +828,7 @@ function test_edge_rec_rate(tc)
 % REC and PROT per onset (held_verdict.m, as edge_map.m calls it: held onsets and onsets
 % per flight). With 72 flights of 2 onsets the value is the share of held onsets and its
 % interval brackets it; at a true 0.90 the rate rule commits at most 3% of 5000
-% replicates whatever the correlation of a flight's two onsets (0, 0.5, 1); at a true
+% replicates at each correlation of a flight's two onsets (0, 0.5, 1); at a true
 % 0.97 with independent onsets at least 85% of 500; the flight-level reading printed
 % beside is edge_verdict.m's per-flight outcome bit for bit. edge_map.m reads every held
 % recovery through held_verdict with TGT.held_flight false, and TGT0's true.
@@ -861,6 +861,12 @@ verifyNotEmpty(tc, strfind(src, 'TGT0 = TGT; TGT0.link = 0.014; TGT0.held_flight
 verifyEqual(tc, numel(strfind(src, 'held_verdict(')), 7);
 verifyEmpty(tc, strfind(src, '''ge'', true'));
 verifyNotEmpty(tc, strfind(src, 'P.prot = held_verdict(F.held_k(:, v), F.ep_n(:, v), F.geo, TGT.prot, hf, B);'));
+verifyNotEmpty(tc, strfind(src, 'about 1-2.5%% for a per-onset rate at a true 0.90, depending on the within-flight'));
+verifyEmpty(tc, strfind(src, 'whatever the correlation'));
+verifyNotEmpty(tc, strfind(src, 'X10.rec(i, s).verdict, FAV], ''DSRF'');'));
+verifyNotEmpty(tc, strfind(src, 'PT.sysl_pre(i, s) = all_of([PT.sys_pre(i, s), CL.link_pre(s).verdict], ''SL'');'));
+verifyNotEmpty(tc, strfind(src, '''counts_sysl_pre'', [cnt_of(VD.sysl_pre, isg); cnt_of(VD.sysl_pre, ~isg)]'));
+verifyNotEmpty(tc, strfind(fileread(which('measure_all_kpis')), 'cnt(en.commit_pre_combined(k, :))'));
 end
 
 function h = held_pairs(rs, n, p, rho)
