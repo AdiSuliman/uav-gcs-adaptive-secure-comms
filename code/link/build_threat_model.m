@@ -94,6 +94,8 @@ function build_threat_model(p)
 %           (after the path-loss step, a faulty connector and the chain errors), logged as
 %           Thr_sig: the receiver-side emulation of the chip-rate field its level
 %           measurements read (extract_closed_loop_frames.m), never a decision input.
+%           A twin token of p.rx_ne_fix also feeds it, at the received level (gain
+%           'LevelTw' = 'Level'), to the receiver's third input (diagnostic only).
 %           The gated jammers run with the timing of the Constant block 'Gate'
 %           (jam_timing.m): the sweeping jammer is on our channel while
 %           mod(t + p0, T) of the channel clock lies in sweep_window_s.m, and the
@@ -266,6 +268,8 @@ add_block('simulink/Sinks/To Workspace', [modelName '/Rx_S'],    'Position', [87
 add_block('simulink/Sinks/To Workspace', [modelName '/Thr_comp'], 'Position', [580 -10 660 20]);
 add_block('simulink/Sinks/To Workspace', [modelName '/Cal_db'],  'Position', [300 670 380 690]);
 if own_output(p), add_block('simulink/Sinks/To Workspace', [modelName '/Thr_sig'], 'Position', [580 -50 660 -20]); end
+twin = rx_twin(p);
+if twin, add_block('simulink/Math Operations/Gain', [modelName '/LevelTw'], 'Position', [560 -90 590 -60]); end
 
 sf_root = sfroot;
 chart_tx = sf_root.find('-isa', 'Stateflow.EMChart', 'Path', [modelName '/Tx']);
@@ -285,6 +289,7 @@ set_param([modelName '/BitSource'], ...
 
 set_param([modelName '/AWGN'], 'NoiseMethod', 'Variance', 'VarianceSource', 'Parameter', 'Variance', sprintf('%.12g', thermal_nv(p)));
 set_link_snr(modelName, p.EbNo_dB(1) + 10*log10(p.bits_per_symbol) - 10*log10(sps), p);
+if twin, set_param([modelName '/LevelTw'], 'Gain', get_param([modelName '/Level'], 'Gain')); end
 
 set_param([modelName '/tx_sink'], 'VariableName', 'tx_bits_out', 'SaveFormat', 'Array');
 set_param([modelName '/rx_sink'], 'VariableName', 'rx_bits_out', 'SaveFormat', 'Array');
@@ -342,6 +347,10 @@ add_line(modelName, 'Rx/3',        'Rx_Z/1',    'autorouting', 'on');
 add_line(modelName, 'Rx/4',        'Rx_H/1',    'autorouting', 'on');
 add_line(modelName, 'Rx/5',        'Rx_R/1',    'autorouting', 'on');
 add_line(modelName, 'Rx/6',        'Rx_S/1',    'autorouting', 'on');
+if twin                                    % our own component alone at the received level: the receiver's twin input
+    add_line(modelName, 'Threat/4',    'LevelTw/1', 'autorouting', 'on');
+    add_line(modelName, 'LevelTw/1',   'Rx/3',      'autorouting', 'on');
+end
 
 set_param(modelName, 'SolverType', 'Fixed-step', 'Solver', 'FixedStepDiscrete', 'StopTime', '0.01');
 set_param([modelName '/AoA'], 'Value', mat2str(p.int_aoa_deg(:)', 8));
@@ -2011,7 +2020,8 @@ end
 function c = rx_ne_fix_code(c, p)
 % Delay-line (NE > 1) receiver options of p.rx_ne_fix, tokens joined by '+'; field absent or
 % 'off' leaves the script text unchanged. Every changed line sits in the NE > 1 branch, in
-% eq_train or in functions only that branch calls.
+% eq_train or in functions only that branch calls; a twin token also adds the twin's input,
+% filter and copies of the sync's frequency and whitening, which only that branch reads.
 %   'freq'    residual frequency of the first pass from the angle of the summed products of
 %             consecutive pilot blocks' correlations (weighted phase increments, no unwrapping:
 %             Kay 1989; Fitz 1994; Luise & Reggiannini 1995) instead of the LS slope of the
@@ -2035,22 +2045,45 @@ function c = rx_ne_fix_code(c, p)
 %   'shadow'  the flat path's receiver on copies of the samples before the frequency passes,
 %             printed only, never the output (diagnostic)
 %   'log'     per-frame prints of the first pass (RX* lines); every other line unchanged
+%   'twinf'   the frequency of both first-pass passes from the noise-free twin: our own
+%             component alone (third input, rx_twin) through its own receive filter, the
+%             samples' timing, frequency and whitening; every antenna's products of pilot
+%             blocks one spacing apart (twin_freq; diagnostic)
+%   'twing'   the lag model Gt, and with it the known symbols' share of the block gains, from
+%             eq_train on the twin's training; s2 stays the samples' own (diagnostic)
+%   'twin'    'twinf' and 'twing'
+%   With a twin token, 'log' also prints RXL: the twin's lag profile at the training and at
+%   every pilot block with every symbol known (rxd_true).
+% Diagnostic-only tokens are printed as such; p.rx_release = true refuses them.
 m = 'off';
 if isfield(p, 'rx_ne_fix') && ~isempty(p.rx_ne_fix), m = lower(char(p.rx_ne_fix)); end
 tk = strsplit(m, '+');
 known = {'off', 'freq', 'keep', 'both', 'freqa', 'freqf', 'noburst', 'burstn', 'hsel1', 'deq0', ...
-    'shadow', 'log'};
+    'shadow', 'log', 'twin', 'twinf', 'twing'};
+diagonly = {'log', 'freq', 'freqf', 'noburst', 'hsel1', 'deq0', 'shadow', 'twinf', 'twing'};
 if ~all(ismember(tk, known)) || (numel(tk) > 1 && any(strcmp(tk, 'off')))
     error('build_threat_model: unknown rx_ne_fix ''%s''', m);
 end
 if strcmp(m, 'off'), return; end
 if any(strcmp(tk, 'both')), tk = [tk(~strcmp(tk, 'both')), {'freq', 'keep'}]; end
+if any(strcmp(tk, 'twin')), tk = [tk(~strcmp(tk, 'twin')), {'twinf', 'twing'}]; end
 tk = unique(tk, 'stable');
 on = @(t) any(strcmp(tk, t));
-if on('freq') + on('freqa') + on('freqf') > 1 || (on('noburst') && on('burstn'))
+if on('freq') + on('freqa') + on('freqf') + on('twinf') > 1 || (on('noburst') && on('burstn'))
     error('build_threat_model: rx_ne_fix ''%s'' sets one step twice', m);
 end
+if (on('twinf') || on('twing')) && ~own_output(p)
+    error('build_threat_model: rx_ne_fix ''%s'' needs the own component (p.own_out)', m);
+end
 fprintf('Rx NE>1 options: %s\n', strjoin(tk, '+'));
+dg = tk(ismember(tk, diagonly));
+if ~isempty(dg)
+    fprintf('Rx NE>1 diagnostic-only: %s\n', strjoin(dg, '+'));
+    if isfield(p, 'rx_release') && ~isempty(p.rx_release) && p.rx_release
+        error('build_threat_model: rx_ne_fix ''%s'' holds diagnostic-only tokens (%s); a release build refuses them', ...
+            m, strjoin(dg, '+'));
+    end
+end
 
 % residual frequency of the two first-pass passes
 if on('freq')
@@ -2159,6 +2192,80 @@ if on('deq0')
     assert(numel(k) == 1 && strcmp(c{k - 1}, '        if Ew(d + 1) < 0.99 * eb') && strcmp(c{k + 1}, '        end'), ...
         'build_threat_model: rx_ne_fix anchor deq0');
     c = [c(1:k - 2); c(k + 2:end)];
+end
+
+% the noise-free twin: its own receive filter and state, the samples' timing, frequency and whitening
+if on('twinf') || on('twing')
+    c = swap(c, 'function [bits, iqa, z, Hq, Rq, sy] = fcn(u, txbits)', {'function [bits, iqa, z, Hq, Rq, sy] = fcn(u, txbits, ut)'});
+    c = swap(c, 'persistent rxf', {'persistent rxf rxt'});
+    k = find(strcmp(c, 'if isempty(rxf)'));
+    assert(numel(k) == 1 && strcmp(c{k + 2}, 'end'), 'build_threat_model: rx_ne_fix anchor twin filter');
+    c = [c(1:k + 2); {
+        '% the twin: our own component alone, through its own receive filter'
+        'if isempty(rxt)'
+        strrep(c{k + 1}, 'rxf = ', 'rxt = ')
+        'end'}; c(k + 3:end)];
+    c = ins(c, 'rf = rxf(ua);', {'rft = rxt(ut);'});
+    c = ins(c, ['Rq0 = complex(zeros(NR, NR)); rw = complex(zeros(Ns, NR)); d = 0; deq = 0; fa = 0; dst = 0; s2 = 1; ' ...
+        'Rqs = complex(eye(NV)); nq = 0;'], {'rwt = complex(zeros(Ns, NR)); rwst = complex(zeros(Ns, NR));'});
+    c = ins(c, '        rwh(:, :) = rf;', {'        rwht = complex(zeros(Ns, NR));'; '        rwht(:, :) = rft;'});
+    c = ins(c, '                rwh(m, :) = rf(m, :) * Wh.'';', {'                rwht(m, :) = rft(m, :) * Wh.'';'});
+    c = ins(c, '            W = Wh; Wi = Vh * diag(sqrt(lh)) * Vh''; rws(:, :) = rwh; hsel = hyp;', {'            rwst(:, :) = rwht;'});
+    k = find(strcmp(c, '        rw(:, :) = rf * W.'';'));
+    assert(numel(k) == 1 && strcmp(c{k + 1}, '    end'), 'build_threat_model: rx_ne_fix anchor twin whitening');
+    c = [c(1:k + 1); {
+        '    % the twin: the same frequency and whitening'
+        '    for a = 1:NR'
+        '        rft(:, a) = rft(:, a) .* ph;'
+        '    end'
+        '    if hsel == 3'
+        '        rwt(:, :) = rwst;'
+        '        for a = 1:NR'
+        '            rwt(:, a) = rwt(:, a) .* ph;'
+        '        end'
+        '    else'
+        '        rwt(:, :) = rft * W.'';'
+        '    end'}; c(k + 2:end)];
+    c = ins(c, '        yx = complex(zeros(NS + 2*XO, NR)); ywx = complex(zeros(NS + 2*XO, NR));', ...
+        {'        yxt = complex(zeros(NS + 2*XO, NR)); ywxt = complex(zeros(NS + 2*XO, NR));'});
+    c = ins(c, '                ywx(k + XO, :) = rw(base + deq + tk + 1, :) * phk;', {
+        '                yxt(k + XO, :) = rft(base + deq + tk + 1, :) * phk;'
+        '                ywxt(k + XO, :) = rwt(base + deq + tk + 1, :) * phk;'});
+    c = ins(c, '                    ywx(k + XO, :) = ywx(k + XO, :) * exp(-1j * bf * (k - 1));', {
+        '                    yxt(k + XO, :) = yxt(k + XO, :) * exp(-1j * bf * (k - 1));'
+        '                    ywxt(k + XO, :) = ywxt(k + XO, :) * exp(-1j * bf * (k - 1));'});
+end
+if on('twinf')
+    c = swap(c, '                bf = sxy / max(sxx, 1e-30);', {
+        '                % the twin''s frequency: every antenna''s products of pilot blocks one spacing apart'
+        '                bf = twin_freq(ywxt, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB);'});
+    c = [c; {
+        ''
+        'function bf = twin_freq(yx, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB)'
+        '% Residual frequency [rad per symbol] of the noise-free twin yx: every antenna''s'
+        '% correlation of each pilot block''s rows with the known symbols'' share of the twin''s'
+        '% own lag model (eq_train), the angle of the summed products of blocks one spacing apart.'
+        'NR = size(yx, 2); NB = numel(PC); DP = PC(2) - PC(1);'
+        'G = eq_train(yx, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB);'
+        'Ca = complex(zeros(NR, NB));'
+        'for b = 1:NB'
+        '    for n = IDXP((b-1)*PB + 1) - RP : IDXP(b*PB) + RQ'
+        '        Ca(:, b) = Ca(:, b) + conj(eq_known(G, SK, KN, n, RP)) .* yx(n + XO, :).'';'
+        '    end'
+        'end'
+        'cc = complex(0);'
+        'for b = 1:NB - 1'
+        '    if PC(b + 1) - PC(b) == DP'
+        '        cc = cc + Ca(:, b)'' * Ca(:, b + 1);'
+        '    end'
+        'end'
+        'bf = angle(cc) / DP;'
+        'end'}];
+end
+if on('twing')
+    c = ins(c, '        [Gt, s2] = eq_train(yx, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB);', {
+        '        % the twin''s training gives the lag model; s2 stays the samples'' own'
+        '        Gt = eq_train(yxt, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB);'});
 end
 
 % the antennas-alone alternative
@@ -2320,7 +2427,9 @@ function c = rx_ne_log(c, p, tk)
 % every antenna's template power against the antennas' mean [dB]); RXB per pilot block
 % (block, residual over the median, the as-built flag, every antenna's |ga|^2 [dB]); RXG every
 % antenna's largest and smallest |ga|^2 [dB]; RXF the flags applied; RXN (burstn) residual over
-% its expectation; RXS the frame's sy(2), sy(8), pilot_mse(y, z) and bit errors against txbits.
+% its expectation; RXS the frame's sy(2), sy(8), pilot_mse(y, z) and bit errors against txbits;
+% with a twin token RXL per block (0: the training) and antenna: the twin's lag profile against
+% the template the receiver uses (rxd_true).
 Lf = frame_layout(p); NR = p.n_rx; NB = numel(Lf.pil_center);
 on = @(t) any(strcmp(tk, t));
 db = @(x) sprintf('10*log10(max(%s, 1e-30))', x);
@@ -2340,6 +2449,11 @@ c = [c(1:k - 1); {['                fprintf(''RXP %.0f %.1f %.1f %.1f %.1f %.1f 
 
 k = find(strcmp(c, '        [Gt, s2] = eq_train(yx, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB);'));
 assert(numel(k) == 1, 'build_threat_model: rx_ne_fix anchor log template');
+if on('twing')                            % the template the receiver uses: the twin's
+    k = k + 2;
+    assert(strcmp(c{k}, '        Gt = eq_train(yxt, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB);'), ...
+        'build_threat_model: rx_ne_fix anchor log twin template');
+end
 g = arrayfun(@(a) sprintf('10*log10(max(sum(abs(Gt(%d, :)).^2), 1e-30) / max(mean(sum(abs(Gt).^2, 2)), 1e-30))', a), ...
     1:NR, 'UniformOutput', false);
 c = [c(1:k); {['        fprintf(''RXT' repmat(' %.2f', 1, NR + 1) '\n'', ' db('s2') ', ' strjoin(g, ', ') ');']}; c(k + 1:end)];
@@ -2355,6 +2469,18 @@ end
 gx = arrayfun(@(a) [db(sprintf('max(abs(ga(%d, 2:end)).^2)', a)) ', ' db(sprintf('min(abs(ga(%d, 2:end)).^2)', a))], ...
     1:NR, 'UniformOutput', false);
 L{NB + 1} = ['        fprintf(''RXG' repmat(' %.2f', 1, 2 * NR) '\n'', ' strjoin(gx, ', ') ');'];
+if on('twinf') || on('twing')
+    A = 'yxt, Gt, SK, IDXD, IDXP, PB, NRK, RP, RQ, XO, NPRE, txbits';
+    rk = [0 0];                           % the script's lags (rx_script: the delay line only)
+    if strcmpi(p.rx_sync, 'real') && strcmpi(p.rx_combiner, 'mrc'), rk = rx_taps(p).lags; end
+    nv = 3 + sum(rk) + 1;
+    for b = 0:NB
+        for a = 1:NR
+            w = arrayfun(@(i) sprintf('rxd_true(%d, %d, %d, %s)', i, b, a, A), 1:nv, 'UniformOutput', false);
+            L{end + 1} = sprintf('        fprintf(''RXL %d %d%s\\n'', %s);', b, a, repmat(' %.3f', 1, nv), strjoin(w, ', '));
+        end
+    end
+end
 c = [c(1:k); L; c(k + 1:end)];
 
 k = find(strcmp(c, '        gs = ga;'));
@@ -2424,6 +2550,46 @@ c = [c; {
     'end'
     'v = w(k);'
     'end'}];
+if on('twinf') || on('twing')
+    c = [c; {
+        ''
+        'function v = rxd_true(k, b, a, yxt, Gt, SK, IDXD, IDXP, PB, NRK, RP, RQ, XO, NPRE, txbits)'
+        '% Printed only: the twin''s lag profile g on antenna a by LS with every symbol known (the'
+        '% data from txbits), on the rows the block gain of pilot block b uses (b = 0: the'
+        '% training''s rows). k = 1: |c|^2 [dB] and 2: angle(c) [rad] of c, the multiple of the'
+        '% template Gt(a, :) closest to g; 3: the share of g it leaves [dB]; 3 + l: |g(l)|^2 [dB].'
+        'NS = numel(SK); v = 0;'
+        'sf = SK; sf(IDXD) = pskmod(txbits, 4, pi/4, ''gray'', ''InputType'', ''bit'');'
+        'n0 = 1 + RQ; n1 = NPRE - RP;'
+        'if b > 0'
+        '    n0 = IDXP((b-1)*PB + 1) - RP; n1 = IDXP(b*PB) + RQ;'
+        'end'
+        'A = complex(zeros(NRK, NRK)); C = complex(zeros(1, NRK));'
+        'for n = n0:n1'
+        '    sv = complex(zeros(NRK, 1));'
+        '    for l = 1:NRK'
+        '        kl = n - (l - 1 - RP);'
+        '        if kl >= 1 && kl <= NS'
+        '            sv(l) = sf(kl);'
+        '        end'
+        '    end'
+        '    A = A + sv * sv''; C = C + yxt(n + XO, a) * sv'';'
+        'end'
+        'A = A + 1e-9 * real(trace(A)) / NRK * eye(NRK);'
+        'g = C / A; h = Gt(a, :);'
+        'c = (g * h'') / max(real(h * h''), 1e-30);'
+        'r = g - c * h;'
+        'if k == 1'
+        '    v = 10*log10(max(abs(c)^2, 1e-30));'
+        'elseif k == 2'
+        '    v = angle(c);'
+        'elseif k == 3'
+        '    v = 10*log10(max(real(r * r'') / max(real(g * g''), 1e-30), 1e-30));'
+        'elseif k - 3 <= NRK'
+        '    v = 10*log10(max(abs(g(k - 3))^2, 1e-30));'
+        'end'
+        'end'}];
+end
 end
 
 function c = swap(c, old, new)
@@ -2431,6 +2597,21 @@ function c = swap(c, old, new)
 k = find(strcmp(c, old));
 assert(numel(k) == 1, 'build_threat_model: rx_ne_fix anchor ''%s''', strtrim(old));
 c = [c(1:k - 1); new(:); c(k + 1:end)];
+end
+
+function c = ins(c, old, new)
+% Insert the lines new after the one line equal to old.
+k = find(strcmp(c, old));
+assert(numel(k) == 1, 'build_threat_model: rx_ne_fix anchor ''%s''', strtrim(old));
+c = [c(1:k); new(:); c(k + 1:end)];
+end
+
+function on = rx_twin(p)
+% True when p.rx_ne_fix holds a twin token (rx_ne_fix_code): output 4 of the threat block
+% then feeds the receiver's third input through the gain 'LevelTw'.
+on = false;
+if ~isfield(p, 'rx_ne_fix') || isempty(p.rx_ne_fix), return; end
+on = any(ismember(strsplit(lower(char(p.rx_ne_fix)), '+'), {'twin', 'twinf', 'twing'})) && own_output(p);
 end
 
 %% ===================== Helpers =====================
