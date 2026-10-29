@@ -341,8 +341,8 @@ verifyNotEmpty(tc, strfind(ex, 'N.unknown_policy = take(''results/unknown_threat
 verifyNotEmpty(tc, strfind(ex, 'N.gcs_antenna = take_lines(''results/gcs_antenna.txt'');'));
 db = fileread(which('build_kpi_dashboard'));
 for t = {'kpi_print_text(''palette'', size(P.KP.per_ebno, 2))', 'kpi_print_text(''ebno_ticks'', P.KP.ebno, Ll)', ...
-        'kpi_print_text(''edge_limited'', Em, P.KP.ebno, decision_config().ratio_ok)', 'kpi_print_text(''wrap'', q.value, 58)', ...
-        'legend(ax, hA, P.KP.show_lbl', 'legend(ax, [hb, hx]', 'legend(ax, [hb, ht], names', 'legend(ax, [hf, hy]'}
+        'kpi_print_text(''edge_limited'', Em, P.KP.ebno, decision_config().ratio_ok)', 'kpi_print_text(''wrap'', q.value, 52)', ...
+        'legend(ax, hA, P.KP.show_lbl', 'legend(ax, [hb, hx]', 'legend(ax, [hb, ht], names', 'legend(ax, [hf, hy]', 'legend(ax, P.KP.show_lbl, ''Location'', ''southoutside'', ''NumColumns'', 4'}
     verifyNotEmpty(tc, strfind(db, t{1}), t{1});
 end
 verifyEmpty(tc, strfind(db, '''r--'', ''90%'')'));
