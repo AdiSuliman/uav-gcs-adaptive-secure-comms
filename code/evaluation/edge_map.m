@@ -1005,15 +1005,18 @@ for q = {'rec_h', 'REC_h: held recovery among the HARMED recoverable flights (no
             'UniformOutput', false), ' ')); %#ok<SAGROW>
     end
 end
+FLN = ['    fl = the flights whose every onset is held, % of the flights (k of n), printed where it differs from the ' ...
+    'value (the share of held onsets)'];
 for q = {'rec_fl', 'REC'; 'prot_fl', 'PROT'}'
     rep{end+1} = ''; %#ok<SAGROW>
     rep{end+1} = sprintf(['--- %s per flight (registered before D108, reported only): the share of held onsets %% ' ...
         '[95%% interval: the hull of its bootstrap over flights and the Clopper-Pearson interval of the flights whose ' ...
         'every onset is held] flights verdict against the %g%% target (a flight succeeds when every onset is held) ---'], ...
         q{2}, 100 * TGT.rec); %#ok<SAGROW>
+    rep{end+1} = FLN; %#ok<SAGROW>
     rep{end+1} = sprintf('%-49s %s', '', sprintf('%-29s', hdr_e{:})); %#ok<SAGROW>
     for i = 1:nT
-        rep{end+1} = sprintf('%s %s', rowl{i}, strjoin(arrayfun(@(s) cell_txt(PT.(q{1})(i, s), '%5.1f'), 1:nS, ...
+        rep{end+1} = sprintf('%s %s', rowl{i}, strjoin(arrayfun(@(s) cell_txt(PT.(q{1})(i, s), '%5.1f', true), 1:nS, ...
             'UniformOutput', false), ' ')); %#ok<SAGROW>
     end
 end
@@ -1704,11 +1707,13 @@ function s = vsym_nan(v)
 if isnan(v), s = '-'; else, s = vsym(v); end
 end
 
-function s = cell_txt(V, f)
-% value [lo, hi] n verdict, in %.
+function s = cell_txt(V, f, fl)
+% value [lo, hi] n verdict, in %. fl true (REC and PROT per flight): the share of the flights whose
+% every onset is held beside it, where it differs from the share of held onsets.
 if V.n == 0, s = sprintf('%-28s', '-'); return; end
 s = sprintf('%s [%s, %s] %3d %s', sprintf(f, 100 * V.value), sprintf(f, 100 * V.lo), sprintf(f, 100 * V.hi), V.n, ...
     vsym(V.verdict));
+if nargin > 2 && fl, s = [s kpi_print_text('edge_flight', V, f)]; end
 end
 
 function s = evid_txt(V)
