@@ -321,6 +321,71 @@ verifyNumElements(tc, w, 2);                                       % write_csv a
 verifyEmpty(tc, regexp(code, '[^\x00-\x7F]', 'once'));
 end
 
+function test_omitted_goodput_counts(tc)
+% R4: every normalized goodput value of Line A says how many episodes of its set the mean leaves out
+% (the episodes at 0 dB, where the clean link loses more than 90% of its packets), as D99 prints it.
+d = new_dir(tc);
+write_inputs(d, true, true);
+[T, lines] = lect_kpi_table(d);
+O = T.omitted;
+verifyTrue(tc, O.ok);
+verifyEqual(tc, O.points, '0 dB');
+verifyEqual(tc, [O.thr; O.full; O.core; O.core36], [4 24; 4 24; 4 20; 4 24]);
+verifyTrue(tc, any(strcmp(lines, ['Normalized goodput (KPI 7) is not defined where the clean link loses more than 90% of its packets ' ...
+    '(link_env.m; here 0 dB): Line A''s normalized means leave out (mean ''omitnan''), of the episodes of each row, threat episodes 4 of 24; ' ...
+    'recoverable jamming episodes 4 of 24 on the full action set, 4 of 20 on the core action set, 4 of 24 on the core set recoverable ' ...
+    'by the 36. Goodput in bit/s keeps them; Line B has none.'])));
+g = T.rows([T.rows.kpi] == 7 & strcmp({T.rows.line}, 'A'));
+verifyNotEmpty(tc, g);
+for i = 1:numel(g)
+    if contains(g(i).reading, 'threat episodes')
+        want = 'leaves out 4 of 24 episodes at 0 dB';
+    elseif startsWith(g(i).action_set, 'core') && ~contains(g(i).pair_set, '36-configuration mask')
+        want = 'leaves out 4 of 20 episodes at 0 dB';
+    else
+        want = 'leaves out 4 of 24 episodes at 0 dB';
+    end
+    verifyTrue(tc, contains(g(i).note, ['(mean omitnan: ' want ', where the clean link loses more than 90% of its packets)']), g(i).note);
+end
+verifyTrue(tc, any(strcmp({g.action_set}, '36 configurations')) && any(startsWith({g.action_set}, 'core')));
+verifyTrue(tc, contains(fileread(fullfile(d, 'lect_kpi_table.csv')), 'leaves out 4 of 20 episodes at 0 dB'));
+body = lines(~startsWith(lines, 'Generated:') & ~startsWith(lines, 'Saved'));
+verifyFalse(tc, any(contains(body, 'NaN')));
+end
+
+function test_omitted_goodput_counts_pending_and_n_a(tc)
+% Without D99 the counts are pending; without the per-Eb/N0 readings or D99's printed note the counts
+% they carry read n/a, never NaN.
+d = new_dir(tc);
+write_inputs(d, false, false);
+[T, lines] = lect_kpi_table(d);
+verifyFalse(tc, T.omitted.ok);
+verifyTrue(tc, any(contains(lines, 'Count pending (lect_kpis_by_ebno.mat: missing)')));
+g = T.rows([T.rows.kpi] == 7 & strcmp({T.rows.line}, 'A'));
+verifyNotEmpty(tc, g);
+verifyTrue(tc, all(contains({g.note}, 'count pending, lect_kpis_by_ebno.mat: missing')));
+% D99 without the per-Eb/N0 readings: the full mask from the printed note, the core set n/a
+d = new_dir(tc);
+write_inputs(d, true, true);
+S = load(fullfile(d, 'lect_kpis_by_ebno.mat')); S.S = rmfield(S.S, 'rows');
+save(fullfile(d, 'lect_kpis_by_ebno.mat'), '-struct', 'S');
+[T, lines] = lect_kpi_table(d);
+verifyEqual(tc, [T.omitted.thr; T.omitted.full; T.omitted.core36], [4 24; 4 24; 4 24]);
+verifyTrue(tc, all(isnan(T.omitted.core)));
+verifyTrue(tc, any(contains(lines, ['4 of 24 on the full action set, n/a of n/a on the core action set, 4 of 24 on the core set ' ...
+    'recoverable by the 36'])));
+body = lines(~startsWith(lines, 'Generated:') & ~startsWith(lines, 'Saved'));
+verifyFalse(tc, any(contains(body, 'NaN')));
+% D99 without the printed note: the threat counts n/a, the recoverable jamming counts from the readings
+d = new_dir(tc);
+write_inputs(d, true, true);
+S = load(fullfile(d, 'lect_kpis_by_ebno.mat')); S = rmfield(S, 'lines');
+save(fullfile(d, 'lect_kpis_by_ebno.mat'), '-struct', 'S');
+T = lect_kpi_table(d);
+verifyTrue(tc, all(isnan(T.omitted.thr)));
+verifyEqual(tc, [T.omitted.full; T.omitted.core], [4 24; 4 20]);
+end
+
 %% ---------- helpers ----------
 function [L, KP] = write_inputs(d, with_cnn, with_d99, mod)
 % Synthetic inputs in folder d: policy_evaluation.mat (lect_kpis.m on a small world), the phy report, and
@@ -363,8 +428,9 @@ if with_d99
         'tag', {{'L', 'L', 'M', 'M', 'J', 'J'}}); %#ok<NASGU>
     keep = ALL{1}.geom <= 3;
     LB = lect_kpis(subset(ALL, keep), POL, LBL, 2, scen, 5e4, 20);
-    S = struct('mark', M, 'line_b', LB); %#ok<NASGU>
-    save(fullfile(d, 'lect_kpis_by_ebno.mat'), 'M', 'S');
+    S = struct('mark', M, 'line_b', LB, 'rows', {omit_rows(ALL)}); %#ok<NASGU>
+    lines = omit_note_lines(ALL); %#ok<NASGU>
+    save(fullfile(d, 'lect_kpis_by_ebno.mat'), 'M', 'S', 'lines');
     fid = fopen(fullfile(d, 'low_ebno_mark.txt'), 'w');
     fprintf(fid, '%s\n', '# Link-limited Eb/N0 points', 'pools x', 'pools_sha256 abc', 'ratio_ok 2', ...
         'ebno_db clean_fer ratio_ok_x_clean_fer link_limited tag', '0 0.99 1.98 1 L', '3 0.79 1.58 1 L', '6 0.42 0.84 0 M', ...
@@ -373,6 +439,29 @@ if with_d99
     write_bw(d, false);
     KP = load(fullfile(d, 'policy_evaluation.mat'), 'KP').KP;
 end
+end
+
+function R = omit_rows(ALL)
+% The per-Eb/N0 readings of lect_kpis_by_ebno.mat (S.rows), reduced to the recoverable episode counts of each
+% mask that lect_kpi_table.m sums.
+R1 = ALL{1};
+R = cell(1, 6);
+rc = @(n) struct('set', {'recoverable threat episodes', 'recoverable jamming episodes'}, 'n', {n, n});
+for k = 1:6
+    nfull = nnz(R1.s == k & R1.recoverable & R1.threat);
+    ncore = nnz(R1.s == k & R1.recoverable_core & R1.threat);
+    R{k} = struct('rec', rc(nfull), 'core', struct('rec', rc(ncore), 'all36', struct('rec', rc(nfull))));
+end
+end
+
+function lines = omit_note_lines(ALL)
+% The note lect_kpis_by_ebno.m prints beside Line A's normalized goodput (gput_note), as the file's lines hold it.
+R1 = ALL{1};
+mt = R1.threat; mj = R1.recoverable & R1.threat; at0 = R1.s == 1;
+lines = {'=== The lecturer''s readings by Eb/N0 ===', sprintf(['  Normalized goodput is not defined where the clean link loses ' ...
+    'more than 90%% of its packets (link_env.m; here 0 dB): Line A''s normalized means leave out those %d of %d threat episodes ' ...
+    '(%d of %d recoverable jamming) of the static link (mean ''omitnan''); goodput in bit/s keeps them.'], nnz(mt & at0), nnz(mt), ...
+    nnz(mj & at0), nnz(mj))};
 end
 
 function write_bw(d, core3)
