@@ -445,7 +445,10 @@ ends about 18-21.11 (worst about 22-23.11).
       (`aprime.S`) on top, on the standard reward (no training form).
     - A run or a flight missing there stops as a crash before any KPI 6 line
       (`aprime_fresh:row`), so the marker allows a restart.
-    - Nothing else reads the fresh set.
+    - Nothing else in C2e reads the fresh set. D108's LINK reading (`link_fresh.m`, after
+      'KPI 6 read') stays the one other registered reading. The added marker line does not
+      change what `link_fresh` checks: the exact `pools sha256` line, the `det_id` line and
+      'KPI 6 read'.
   - **KPI 6.**
     - One `far_report` call over every policy, then the A′ runs. `KP.far` holds every policy's
       rows as before, then one row per A′ run, labelled "A′ penalty λ, gamma γ, seed s
@@ -456,6 +459,9 @@ ends about 18-21.11 (worst about 22-23.11).
     - `KP.far_diag`, the deployed index and every verdict are unchanged.
     - After the rows, C2e stops if `data/aprime_agents.mat` exists and KPI 6 lacks one of its rows
       (`aprime_fresh:row`).
+      This is a post-read assertion: it comes after 'KPI 6 read', so a stop there spends the
+      reading. The check inside the reading (`'flown'`) already stops on a run or flight not
+      produced, so it is not expected to fire.
     - Saved: `RWa` (one fresh set per run, split id 7) and `KP.far_aprime` (the runs' names,
       labels, λ, γ, seeds, settings, file and SHA-256, without the agents).
   - **The breakdown's exact gate (retested).**
@@ -486,6 +492,10 @@ ends about 18-21.11 (worst about 22-23.11).
   | `test_system_fa_breakdown/test_fresh_path_unchanged` | Without the A′ rows, the gate, the readings, the text and the saved variables equal `b37e8a3`'s, on a pass and a failed gate |
   | `test_system_fa_breakdown/test_copies_and_readers_match_tip` | The pin above |
 
+  - **Merge with `d108-p1r`.** Both dated blocks stay, in approval order (D108's, then this one).
+    D108's sentence that `evaluate_policies.m` is unchanged describes D108's own commit. With
+    `a107`, C2e's KPI 6 reading also carries the A′ rows (this block), and the marker gains
+    `aprime_agents_sha256`. The merge resolution adds this line under D108's block.
   - **Counts.** `test_core` on `a107` has 285 tests (280 + 5). After the merge with `d108-p1r`
     it has 288. `test_system_fa_breakdown` has 18 (15 + 3).
   - **Targeted run** (gated wrapper, after CORE_BW's pools; 37 tests):
