@@ -322,7 +322,7 @@ verifyEmpty(tc, regexp(code, '[^\x00-\x7F]', 'once'));
 end
 
 function test_omitted_goodput_counts(tc)
-% R4: every normalized goodput value of Line A says how many episodes of its set the mean leaves out
+% Every normalized goodput value of Line A says how many episodes of its set the mean leaves out
 % (the episodes at 0 dB, where the clean link loses more than 90% of its packets), as D99 prints it.
 d = new_dir(tc);
 write_inputs(d, true, true);
