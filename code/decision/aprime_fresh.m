@@ -117,8 +117,8 @@ end
 function same_runs(ap, mk, FILE)
 % The A' file of a restart against the one the marker's first start recorded (or none).
 L = strtrim(regexp(fileread(mk), '\r?\n', 'split'));
-rec = regexprep(L(startsWith(L, 'aprime_agents_sha256 ')), '^aprime_agents_sha256 ', '');
-if isempty(ap), now_sha = {}; f = FILE; else, now_sha = {ap.sha256}; f = ap.file; end
+rec = reshape(regexprep(L(startsWith(L, 'aprime_agents_sha256 ')), '^aprime_agents_sha256 ', ''), 1, []);
+if isempty(ap), now_sha = cell(1, 0); f = FILE; else, now_sha = {ap.sha256}; f = ap.file; end
 if isequal(rec, now_sha), return; end
 error('aprime_fresh:restart', ['kpi6_set fresh: %s records %s as the first start''s A'' file and %s is now %s; ' ...
     'a restart after a crash flies the A'' runs the marker records, as the fresh set is read once: ' ...
