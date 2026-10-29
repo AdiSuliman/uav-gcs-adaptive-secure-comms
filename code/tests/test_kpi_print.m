@@ -22,7 +22,7 @@ end
 
 %% ---------- text builders ----------
 function test_leave_out_weighted_and_labelled(tc)
-% T9: the label of the DQN that flew, the share weighted by episode beside the plain average.
+% The label of the DQN that flew, the share weighted by episode beside the plain average.
 res = struct('combo', {'jamming+path_loss', 'tone_jamming+path_loss'}, 'n', {100, 300}, 'dqn_out', {0.90, 0.50}, ...
     'dqn_in', {0.96, 0.90}, 'rule', {0.40, 0.20}, 'table', {0.3, 0.3});
 what = 'combined threats never trained on (leave-one-combination-out)';
@@ -59,7 +59,7 @@ verifyFalse(tc, contains(s, 'NaN'));
 end
 
 function test_kpi1_lines_text(tc)
-% T15: the all-frames reading and the headline each with their own interval; the stricter reading
+% The all-frames reading and the headline each with their own interval; the stricter reading
 % says 'not reached' where no threshold gives every class 90%.
 m = metrics_fixture(true);
 s = kpi_print_text('kpi1_all', m);
@@ -82,7 +82,7 @@ verifyTrue(tc, contains(kpi_print_text('kpi1_every', m), 'from 9 dB, macro-F1 96
 end
 
 function test_kpi4_lower_bound_count(tc)
-% T4: the count by the 95% lower bound beside the point estimates; the threats below 90 named.
+% The count by the 95% lower bound beside the point estimates; the threats below 90 named.
 names = {'a', 'b', 'c'};
 s = kpi_print_text('kpi4_lower', names, [95 92 91], [91 97; 85 96; 90 93]);
 verifyTrue(tc, contains(s, ['(the status above counts the point estimates, as registered): 2 of 3 threats have a lower bound ' ...
@@ -96,7 +96,7 @@ verifyEmpty(tc, kpi_print_text('kpi4_lower', {}, [], zeros(0, 2)));
 end
 
 function test_kpi7_spread_committed_word(tc)
-% T5: committed when the interval's upper bound is within the target.
+% Committed when the interval's upper bound is within the target.
 s = kpi_print_text('kpi7_spread', [6.3 3.5 11.8], 10);
 verifyTrue(tc, contains(s, 'point estimate 6.3 points, 95% interval upper bound 11.8, target <= 10 -> not committed (upper bound > 10)'));
 verifyTrue(tc, contains(s, 'the status above counts the point estimate (within the target)'));
@@ -108,7 +108,7 @@ verifyTrue(tc, contains(kpi_print_text('kpi7_spread', [6 NaN NaN], 10), 'not com
 end
 
 function test_edge_distance_text(tc)
-% T18: the threat's nominal level is not read as an Eb/N0.
+% The threat's nominal level is not read as an Eb/N0.
 en = struct('ebno', 0:3:15, 'km', [1.57 1.11 0.79 0.56 0.40 0.28], 'delays', [1 2 7], ...
     'cells', {{'jamming 16 dB', 'path_loss 14 dB', 'spoofing nominal'}}, 'edge_commit_db', [NaN 6 NaN; 0 3 9], ...
     'edge_commit_km', [NaN 0.79 NaN; 1.57 1.11 0.56]);
@@ -125,7 +125,7 @@ verifyFalse(tc, contains(s, 'jamming 16 dB'));
 end
 
 function test_edge_flight_share(tc)
-% T3: a held-recovery verdict with two onsets per flight prints the fully held flights beside the
+% A held-recovery verdict with two onsets per flight prints the fully held flights beside the
 % episode share; one onset per flight and a rate print nothing more. The
 % verdict, value and interval are edge_verdict.m's, unchanged.
 held = zeros(2, 72); held(:, 1:62) = 1; held(1, 63:72) = 1;     % 62 flights hold both onsets, 10 hold one
@@ -178,7 +178,7 @@ end
 
 %% ---------- the KPI summary ----------
 function test_summary_kpi1_headline_interval(tc)
-% T15 in the summary: the KPI's value, target and status are the registered ones.
+% KPI 1 in the summary: the KPI's value, target and status are the registered ones.
 work_dir(tc);
 metrics = metrics_fixture(true); %#ok<NASGU>
 save(kpi1_file('eval_detector_metrics'), 'metrics');
@@ -194,7 +194,7 @@ verifyFalse(tc, any(contains(d, 'NaN')));
 end
 
 function test_summary_decision_lines(tc)
-% T9, T8, T4, T5 in the summary, for a deployed DQN without and with the escalation: the label of
+% KPI 4 and 7 in the summary, for a deployed DQN without and with the escalation: the label of
 % the DQN the leave-one-out experiments fly, C2u and the GCS antenna report in the summary, the
 % lower-bound count and the committed word of the speed spread; the registered values stay.
 for dkey = {'dqn_g1', 'dqn_esc'}               % not dep: measure_all_kpis.m sets its own variables in this workspace
@@ -272,7 +272,7 @@ end
 
 %% ---------- the report export ----------
 function test_export_c2u_and_gcsa(tc)
-% T8: the leave-one-threat-out policy test (not its episodes) and the GCS antenna report's lines are
+% The leave-one-threat-out policy test (not its episodes) and the GCS antenna report's lines are
 % in report_numbers.json; the KPI summary is flagged old against them.
 work_dir(tc);
 write_policy('dqn_esc');
@@ -299,7 +299,7 @@ end
 
 %% ---------- the dashboard ----------
 function test_dashboard_runs_with_fixes(tc)
-% T17: the dashboard draws from synthetic results; the edge map's clean link tags KPI 5's points.
+% The dashboard draws from synthetic results; the edge map's clean link tags KPI 5's points.
 work_dir(tc);
 old = get(0, 'DefaultFigureVisible'); set(0, 'DefaultFigureVisible', 'off');
 tc.addTeardown(@() set(0, 'DefaultFigureVisible', old));
