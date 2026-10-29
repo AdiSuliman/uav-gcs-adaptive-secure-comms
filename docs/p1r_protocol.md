@@ -308,8 +308,9 @@ ends about 18-21.11 (worst about 22-23.11).
 - **29.10.2026, the no-threat penalty form in C2 (D107, approved by Adi on 29.10.2026; written
   before any P1R data).** Basis: `core/d107_after_v0.md` sections 3.3 and 3.5 and its draft D107
   (section 4); the final text is `core/d107_final.md`. Code on branch `a107` from `p1r` `198f82f`
-  (`C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\worktrees\a107`). It reaches `p1r` after its
-  tests pass; they run after CORE_BW's pools end.
+  (`C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\worktrees\a107`). It reaches `p1r` only
+  when all of these hold: its tests pass (they run after CORE_BW's pools end), G0 passes, and the
+  fresh-set A′ row's commit is on `a107` with its tests passed (see "Not part of this commit").
   - **What P1R now changes.** P1R's C2 also trains the no-threat form of the false-switch
     penalty (A′), training only:
     - the switch is `"fa_nothreat": true` in `profile.json` (or `CFG.fa_nothreat`,
@@ -348,14 +349,20 @@ ends about 18-21.11 (worst about 22-23.11).
   - **Not part of this commit.**
     - The A′ row on the fresh clean test set (D107 point 6, D104 point 6) needs a C2e reader of
       `data/aprime_agents.mat` and a retest of the breakdown's exact gate with the extra row. It is
-      written with its tests in a separate commit before the smoke. Until then C2e reads no A′
-      row.
+      written with its tests in a separate commit on `a107`. Stop rule: D104 point 6 allows one
+      reading of the fresh set, so `a107` reaches `p1r` only together with that commit, its tests
+      passed, and no P1R smoke and no C2e runs before then.
     - The stamp carrying the form, the profile flag that lets the admissible A′ runs join
       `select_run`, and the reader of the admissibility test are for profile 3, where A′ can be
       deployed: a commit on TIP3 with tests and a smoke cell before profile 3's queue.
   - **Precondition G0** (D107 point 4). A validation-only reproduction, before D107 is registered
     in DECISIONS, run multithreaded after CORE_BW's pools end (Adi, 29.10.2026). If the
     validation slice differs, D107 is not registered and the finding goes to Adi first.
+    `a107` is merged into `p1r` only after G0 passes. If G0 fails, `p1r` stays without `a107` (the
+    switch absent) until Adi rules.
+  - **Merge with `d108-p1r`.** Both branches add a dated block here; the merge keeps both, in
+    approval order. `code/tests/test_core.m` merges cleanly. After both merges `test_core` has 283
+    tests (276 + 4 + 3); `a107` alone has 280.
   - **The admissibility test**, fixed before any A′ data, verbatim from `core/d107_after_v0.md`
     section 3.5. Line references there are to profile 1's code of record `d4623ed` and to that
     note's abbreviations. In P1R it is not a gate: A′'s rows are descriptive. It decides profile
@@ -405,3 +412,9 @@ ends about 18-21.11 (worst about 22-23.11).
   | `test_core/test_fa_nothreat_switch` | Off without the file or the field; true or false from `profile.json`; `CFG` first; other values stop; P1R's profile sets it; read after the smoke's grid |
   | `test_core/test_fa_nothreat_training_only` | No evaluation file reads the form; validation and checkpoints read the standard reward; section 7 goes through the run cache with the form in the key, runs after the last save of `trained_dqn.mat`, and never reaches `select_run`, `rank_pick` or `choose_deployed`; `selected_fa_form` only with the switch; C2g, C2u and the sensitivity retrain carry it |
   | `test_core/test_p1r_profile` | `fa_nothreat` added to P1R's profile fields and read as true |
+
+  - Targeted run (gated wrapper, after CORE_BW's pools), then the full `test_core`:
+    `test_fa_form_off_identical`, `test_fa_form_nothreat_split`, `test_fa_nothreat_switch`,
+    `test_fa_nothreat_training_only`, `test_p1r_profile`, `test_run_cache_wiring`,
+    `test_m_files_parse`, `test_dqn_deployment_kinds`, `test_held_selection`,
+    `test_link_env_cover_default`, `test_reward_needs_plr`.

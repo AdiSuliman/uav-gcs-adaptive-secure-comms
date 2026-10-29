@@ -10341,6 +10341,7 @@ c = regexp(src, 'select_run\((\w+)', 'tokens');
 verifyNotEmpty(tc, c);
 verifyTrue(tc, all(cellfun(@(x) strcmp(x{1}, 'runs'), c)), 'select_run reads the plain runs only');
 verifyEmpty(tc, regexp(src, '(choose_deployed|rank_pick)\([^\n]*AR', 'once'));
+verifyEmpty(tc, regexp(src, 'runs\s*=\s*\[[^\]]*AR|runs\(end\+1\)\s*=\s*AR', 'once'), 'the A'' runs never join the plain runs');
 k7 = regexp(src, 'if FA_NT\.on\r?\n\s*ea = struct\(', 'once');
 ks = strfind(src, 'save(''data/trained_dqn.mat''');
 verifyNotEmpty(tc, k7); verifyGreaterThan(tc, k7, ks(end));       % after every save of the deployed agent
