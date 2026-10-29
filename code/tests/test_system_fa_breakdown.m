@@ -552,7 +552,7 @@ function test_copies_and_readers_match_tip(tc)
 % far_report and cp_upper are evaluate_policies.m's, tstat lect_kpis.m's, word for word; the
 % mark is D99's (lect_kpis_by_ebno.m, when on the path); the readers P1R leaves unchanged are
 % profile 1's tip's (d4623ed), five it changes are those of p1r b37e8a3, and evaluate_policies.m
-% with its A' reader aprime_fresh.m those of a107 a508956, the code P1R's C2e runs
+% with its A' reader aprime_fresh.m those of a107 e265ef9, the code P1R's C2e runs
 % (docs/p1r_protocol.md section 11).
 mine = fileread(which('system_fa_breakdown'));
 src = {'evaluate_policies', 'far_report'; 'evaluate_policies', 'cp_upper'; 'lect_kpis', 'tstat'};
@@ -569,7 +569,7 @@ verifyEqual(tc, M.tag, {'L', 'L', 'M', 'M', 'J'});
 if ~isempty(which('lect_kpis_by_ebno'))
     verifyEqual(tc, M, lect_kpis_by_ebno('mark', [0.99 0.5 0.45 0.1 0.0999], 2));
 end
-root = tc.TestData.root; tip = 'd4623ed'; p1r = 'b37e8a3'; fr = 'a508956';
+root = tc.TestData.root; tip = 'd4623ed'; p1r = 'b37e8a3'; fr = 'e265ef9';
 for ref = {tip, p1r, fr}
     st = system(sprintf('git -C "%s" cat-file -e %s', root, ref{1}));
     assumeEqual(tc, st, 0, sprintf('git or commit %s is not available here', ref{1}));

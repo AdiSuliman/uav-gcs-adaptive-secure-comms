@@ -435,7 +435,7 @@ ends about 18-21.11 (worst about 22-23.11).
       - a file that is not this trained policy's C2 (`aprime_fresh:file`): another monitor, drop
         threshold or false-alarm threshold than `seed_summary`, another label or form, no
         settings, or an agent not in matrix form.
-    - On a restart after a crash (`a508956`), right after the load, `aprime_fresh('restart')`
+    - On a restart after a crash (`a508956`, fixed in `e265ef9`), right after the load, `aprime_fresh('restart')`
       compares the A′ file with the marker. The marker's `aprime_agents_sha256` line must equal
       the file's SHA-256, or the marker holds no such line and there is no file. Otherwise C2e
       stops before `'start'` (`aprime_fresh:restart`): a changed or removed file, or a file
@@ -481,7 +481,7 @@ ends about 18-21.11 (worst about 22-23.11).
     - Without them the gate, the readings, the text and every saved variable are those of
       `b37e8a3`. The union path (profile 1) is untouched.
   - **Pin.** `test_copies_and_readers_match_tip` now compares `evaluate_policies.m` and
-    `aprime_fresh.m` with `a508956` (the restart check on top of `c62a5b7`). The other five P1R
+    `aprime_fresh.m` with `e265ef9` (the restart check on top of `c62a5b7`). The other five P1R
     readers stay compared with `b37e8a3`, and the six unchanged readers with `d4623ed`.
   - **Tests** (written, not yet run):
 
