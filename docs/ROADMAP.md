@@ -35,7 +35,7 @@ Rows and months are exactly those of the proposal (months 1-8). The interim repo
 | Combination generalisation (C2g) | 28.10.2026, 09:02-14:56 (measured; 354 min) |
 | Unknown-threat generalisation (C2u) | started 28.10.2026, 14:56; ends about 19:45 |
 | Operator console with the v7 agent (Live and Episode tabs) | live check after RPT, from a bundle outside the pipeline folder, with Adi present |
-| Profile 1 chain ends (RPT): KPI table, dashboard, report numbers | 29.10.2026, morning |
+| Profile 1 chain ends (RPT): KPI table, dashboard, report numbers | done 29.10.2026, 03:19:55 (rc=0); second archive, D99, D103, G0, clean_ref, GUI clean check and the final lecturer table done the same night |
 | Controlled-bandwidth study (CORE_BW): `rule_core3` against the validation-tuned `blind_core` is the lecturer row (D106) | 30.10-2.11.2026 |
 | Profile-1 rerun with the fixed monitor (P1R) | 2.11-5.11.2026 |
 | Profile 3 ends (last extension) | about 18-21.11.2026, worst about 22-23.11 (step 7a, the detector-set run for profile 3's decoder, timed on 27.10 at about 5-7 h) |
@@ -55,20 +55,20 @@ Profile 1 = three UAV antennas, branch `v7-dev`. Each stage starts when the prev
 | Drop-threshold choice (C1d) | 3.9 min; threshold 4.5 dB |
 | DQN training (C2) | 26.10 16:03 to 28.10 07:22; 81 runs and 2 sensitivity retrains. Deployed: the DQN without escalation (`class_drop` 5/5, 171 dB², penalty 120, costs x0.5, gamma 0.5, seed 44); validation held recovery 82.6%, recovered 95.1% (best rule setting 60.3% and 71.3%); 94 false changes in 54,000 clean cycles, bound met on validation. Reward sensitivity: held 80.1% (costs x0.5) and 80.6% (x2.0), at least the rule's and the table's at every scale |
 
-**Now:** unknown-threat generalisation (C2u), started 28.10 at 14:56. The PC restart is at the C2u to GAL boundary (about 19:45): the chain is stopped as GAL starts and resumed from it.
+**Now:** profile 1's chain is done (29.10 03:19:55, rc=0). Next, in order: CORE_BW (after Adi's live check of the operator console), P1R, profile 3.
 
-**Stages left, in order** (durations are estimates from smoke runs and the earlier full runs; no full-scale v7 run exists yet for these stages):
+**Chain stages** (all done 29.10; durations are estimates from smoke runs and the earlier full runs; no full-scale v7 run exists yet for these stages):
 
 | # | Stage | What it does | Expected duration | Start |
 |---|---|---|---|---|
 | 1 | C2e evaluate_policies | Every policy on test pools; the lecturer's PER, recovery-time, goodput and CNN-contribution lines | 1-2 h | done 28.10 (99.8 min) |
 | 2 | C2g experiment_combo_generalization | DQN retrained without each of 14 combinations (one full training each) | 7-8.5 h | done 28.10 (354 min) |
-| 3 | C2u experiment_unknown_threat | DQN retrained without each of 10 single threats; response to a threat never trained on | 5-6 h | running since 28.10 14:56 |
-| 4 | GAL threat_gallery | One figure per threat | 5-10 min | after C2u |
-| 5 | OHP overhead_pass | UAV flying over the GCS (dipole null) | 3.8-4.7 h | after GAL |
-| 6 | GCSA gcs_antenna_analysis | What the tracked directional GCS antenna gives | under 1 min | after OHP |
-| 7 | EDGE edge_map | Committed / not committed verdict at every envelope point | 0.5-2 h | after GCSA |
-| 8 | KPI, DASH, WEAK, RPT | KPI summary, dashboard, weak-point analysis, numbers export | about 1 min each | after EDGE |
+| 3 | C2u experiment_unknown_threat | DQN retrained without each of 10 single threats; response to a threat never trained on | 5-6 h | done (chain finished 29.10 03:19:55) |
+| 4 | GAL threat_gallery | One figure per threat | 5-10 min | done (chain finished 29.10 03:19:55) |
+| 5 | OHP overhead_pass | UAV flying over the GCS (dipole null) | 3.8-4.7 h | done (chain finished 29.10 03:19:55) |
+| 6 | GCSA gcs_antenna_analysis | What the tracked directional GCS antenna gives | under 1 min | done (chain finished 29.10 03:19:55) |
+| 7 | EDGE edge_map | Committed / not committed verdict at every envelope point | 0.5-2 h | done (chain finished 29.10 03:19:55) |
+| 8 | KPI, DASH, WEAK, RPT | KPI summary, dashboard, weak-point analysis, numbers export | about 1 min each | done (chain finished 29.10 03:19:55) |
 | 9 | LAT measure_latency | Decision latency per cycle, on an idle machine | 1-6 min | after profile 3 ends, in the takeover's final phase (LAT is not part of the profile 1 chain); it can be hand-run after RPT on the idle machine, then KPI, DASH, WEAK and RPT are rerun |
 
 From C2u's start to RPT: about 15-19 h, plus the restart. The OHP figure comes from smoke runs that shared the machine. The processor boost is off (99%), which slows the stages.
