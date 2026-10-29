@@ -141,9 +141,13 @@ Vr = edge_verdict(20 * double((1:72) <= 66), 20 * ones(1, 72), 1:72, 0.9, 'ge', 
 verifyTrue(tc, isnan(Vr.k));
 verifyEmpty(tc, kpi_print_text('edge_flight', Vr, '%5.1f'));
 verifyEmpty(tc, kpi_print_text('edge_flight', struct('value', 0.5, 'n', 3), '%5.1f'));
-% the share the interval is built on: its lower bound is the exact interval's hull with the bootstrap's
-lo = betaincinv(0.025, 62, 11);
+% two onsets per flight: the hull of the episodes' bootstrap over flights and the flights' exact
+% interval (62 of 72), so it holds the exact interval at both ends
+lo = betaincinv(0.025, 62, 11); hi = betaincinv(0.975, 63, 10);
 verifyLessThanOrEqual(tc, V.lo, lo + 1e-9);
+verifyGreaterThanOrEqual(tc, V.hi, hi - 1e-9);
+% one onset per flight: the exact interval alone (66 of 72)
+verifyEqual(tc, [V1.lo V1.hi], [betaincinv(0.025, 66, 7), betaincinv(0.975, 67, 6)], 'AbsTol', 1e-12);
 end
 
 function test_text_helpers(tc)
@@ -336,6 +340,15 @@ verifyNotEmpty(tc, strfind(em, 'cell_txt(PT.(LAY{f})(i, s), fmt, fl)'));
 verifyNotEmpty(tc, strfind(em, 'cell_txt(PT.(q{1})(i, s), ''%5.1f'', true)'));
 verifyNotEmpty(tc, strfind(em, 'kpi_print_text(''edge_flight'', V, f)'));
 verifyNotEmpty(tc, strfind(em, 'fl = f == 4 || f == 5;'));
+% REC, PROT, REC_h and PROT_h: cells padded to one width under a header of that width plus one
+verifyNotEmpty(tc, strfind(em, 'FLC = ''%-35s''; FLH = ''%-36s'';'));
+verifyNotEmpty(tc, strfind(em, 'sprintf(cf, cell_txt(PT.(LAY{f})(i, s), fmt, fl))'));
+verifyNotEmpty(tc, strfind(em, 'sprintf(FLC, cell_txt(PT.(q{1})(i, s), ''%5.1f'', true))'));
+verifyNotEmpty(tc, strfind(em, 'sprintf(FLH, hdr_e{:})'));
+% the legend states the hull the interval and the verdict are read on
+verifyNotEmpty(tc, strfind(em, 'several episodes per flight the interval is the hull of the episodes'));
+verifyNotEmpty(tc, strfind(em, 'so COMMITTED needs both lower bounds at the target'));
+verifyEmpty(tc, strfind(em, 'the share the interval and the verdict are built'));
 ex = fileread(which('export_report_numbers'));
 verifyNotEmpty(tc, strfind(ex, 'N.unknown_policy = take(''results/unknown_threat_policy.mat'', ''res'');'));
 verifyNotEmpty(tc, strfind(ex, 'N.gcs_antenna = take_lines(''results/gcs_antenna.txt'');'));
