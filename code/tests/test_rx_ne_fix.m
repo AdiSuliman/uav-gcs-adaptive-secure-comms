@@ -235,12 +235,15 @@ verifyNumElements(tc, k, 1);
 verifyTrue(tc, strcmp(sf{k - 1}, '') && strcmp(sf{end - 1}, 'end') && strcmp(sf{end - 2}, 'bf = angle(cc) / DP;'));
 verifyEqual(tc, msdiff(s0, sf), sort({sig0; per0; bf0}));
 verifyEqual(tc, msdiff(sf(1:k - 2), s0), sort([W; F]));
+s0wf = s0w(~strcmp(s0w, bf0));
+verifyTrue(tc, is_subseq(s0wf, sf(1:k - 1)));
 p.rx_ne_fix = 'twin';
 st = splitlines(rx_text(p));
 kt = find(strcmp(st, 'function bf = twin_freq(yx, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB)'));
 verifyEqual(tc, st(kt:end), sf(k:end));
 verifyEqual(tc, msdiff(s0, st), sort({sig0; per0; bf0}));
 verifyEqual(tc, msdiff(st(1:kt - 2), s0), sort([W; F; G]));
+verifyTrue(tc, is_subseq(s0wf, st(1:kt - 1)));
 for s = {sg, sf, st}
     verifyEmpty(tc, find(contains(s{1}, 'fprintf('), 1));
 end
@@ -311,19 +314,28 @@ end
 
 function test_twin_runs_on_delay_line(tc)
 % the delay line with 'twin+log': one RXS line and (NB + 1) NR RXL lines per frame; on the
-% training the twin's own template is its lag profile (the multiple near 1)
+% training the twin's own template is its lag profile (the multiple near 1); with
+% 'twinf+log' the template is the main samples', so the multiple on the training checks the
+% twin's level (|c|^2), timing and rotations (angle c) against the main samples
 p = dl_params(); p.own_out = true; p.rx_ne_fix = 'twin+log';
 [z, s, ~, txt] = run_frames(p);
 nf = size(s, 2);
 verifyTrue(tc, all(isfinite(z(:))));
 verifyEqual(tc, numel(strfind(txt, 'RXS ')), nf);
 L = frame_layout(p); NB = numel(L.pil_center);
-ln = splitlines(txt); ln = strtrim(ln(startsWith(strtrim(ln), 'RXL ')));
-verifyEqual(tc, numel(ln), nf * (NB + 1) * p.n_rx);
-v = cell2mat(cellfun(@(x) str2double(strsplit(x(5:end))), ln, 'UniformOutput', false));
-t0 = v(v(:, 1) == 0, :);
+ln = splitlines(txt);
+verifyEqual(tc, nnz(startsWith(strtrim(ln), 'RXL ')), nf * (NB + 1) * p.n_rx);
+t0 = rxl_training(txt);
 verifyLessThan(tc, median(abs(t0(:, 3))), 1);             % |c|^2 [dB] on the training
 verifyLessThan(tc, median(t0(:, 5)), -10);                % the share the template leaves [dB]
+p.rx_ne_fix = 'twinf+log';
+[z, s, ~, txt] = run_frames(p);
+nf = size(s, 2);
+verifyTrue(tc, all(isfinite(z(:))));
+t0 = rxl_training(txt);
+verifyEqual(tc, size(t0, 1), nf * p.n_rx, 'twinf+log');
+verifyLessThan(tc, median(abs(t0(:, 3))), 1, 'twinf+log');     % |c|^2 [dB]
+verifyLessThan(tc, median(abs(t0(:, 4))), 0.2, 'twinf+log');   % angle(c) [rad]
 end
 
 function test_pilot_error_on_every_path(tc)
@@ -381,6 +393,13 @@ link_seed(mdl, 11, 160);
 txt = evalc('out = sim(mdl, ''StopTime'', num2str(3 * p.frame_duration));');
 z = out.get('Rx_Z'); s = reshape(out.get('Rx_S'), 8, []); b = out.get('rx_bits_out');
 close_system(mdl, 0);
+end
+
+function t0 = rxl_training(txt)
+% the RXL lines of the training (block 0): [b, a, |c|^2 dB, angle c, share left dB, lags]
+ln = splitlines(txt); ln = strtrim(ln(startsWith(strtrim(ln), 'RXL ')));
+v = cell2mat(cellfun(@(x) str2double(strsplit(x(5:end))), ln, 'UniformOutput', false));
+if isempty(v), t0 = zeros(0, 5); else, t0 = v(v(:, 1) == 0, :); end
 end
 
 function s = strip_prints(s)
