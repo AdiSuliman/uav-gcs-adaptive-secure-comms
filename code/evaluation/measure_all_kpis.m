@@ -59,7 +59,8 @@ F = struct('det', 'results/eval_detector_metrics.mat', 'unseen', 'results/unseen
     'ood', 'results/ood_detection.mat', 'phy', 'results/phy_validation.txt', ...
     'pol', 'results/policy_evaluation.mat', 'lat', 'results/latency.mat', ...
     'surv', 'data/survivability_boundary.mat', 'dqn', 'data/trained_dqn.mat', 'arch', 'results/architecture_comparison.txt', ...
-    'ant3', 'results/survivability_options.txt', 'combo', 'results/combo_generalization.mat', 'edge', 'results/edge_map.mat');
+    'ant3', 'results/survivability_options.txt', 'combo', 'results/combo_generalization.mat', 'edge', 'results/edge_map.mat', ...
+    'unk', 'results/unknown_threat_policy.mat', 'gcsa', 'results/gcs_antenna.txt');
 F.det = kpi1_file('eval_detector_metrics');            % the set of kpi1_set.m
 KPI2_TARGET = 0.8;                                 % mean AUROC (the submitted proposal's target, kept in the update)
 t_det = file_time('data/trained_detector.mat'); t_dqn = file_time(F.dqn);
@@ -77,19 +78,14 @@ rep = {'=== PROPOSAL KPI SUMMARY (proposal wording) ===', sprintf('Generated: %s
 if isfile(F.det)
     M = load(F.det, 'metrics'); m = M.metrics;
     val = m.macro_f1_above_threshold_pct; cl = m.class_f1_above_threshold_pct;
-    det = {sprintf('accuracy %.2f%%, macro-F1 %.2f%% [%.2f, %.2f] (bootstrap over sub-runs)', ...
-        m.overall_accuracy_pct, m.macro_f1_pct, m.ci95.macro_f1), ...
+    det = {kpi_print_text('kpi1_all', m), ...
         sprintf('class F1 above the threshold: %s', strjoin(cellfun(@(c, v) sprintf('%s %.1f%%', c, v), m.classes(:)', ...
         num2cell(cl(:)'), 'UniformOutput', false), ', ')), ...
         sprintf('macro-F1 per Eb/N0: %s', strjoin(arrayfun(@(b) sprintf('%g dB %.1f%%', b.snr_db, b.macro_f1_pct), ...
         m.snr_breakdown, 'UniformOutput', false), ' | '))};
     if ~isempty(read_state(m)), det{end+1} = sprintf('KPI 1 reading: %s', read_state(m)); end
     if isfield(m, 'every_class')                     % the stricter reading, beside KPI 1, never hidden
-        ec = m.every_class;
-        det{end+1} = sprintf(['beside KPI 1, every class F1 >= 90%% (the stricter reading, its threshold chosen on ' ...
-            'validation): from %g dB, macro-F1 %.2f%%, lowest class %.2f%% (%s)'], ec.threshold_db, ...
-            ec.macro_f1_above_threshold_pct, min(ec.class_f1_above_threshold_pct), ...
-            ternary(isfinite(ec.threshold_db) && all(ec.class_f1_above_threshold_pct >= 90), 'met', 'not met'));
+        det{end+1} = kpi_print_text('kpi1_every', m);
     end
     if isfield(m, 'steady')                          % beside KPI 1, never in its place
         s1 = m.steady;
@@ -309,12 +305,19 @@ if isfile(F.pol)
         det{end+1} = sprintf('survivability map (threat x severity x Eb/N0 x geometry): %s', surv_txt(S));
     end
     if isfile(F.ant3), det{end+1} = 'survivability options (antenna count, relay path): results/survivability_options.txt'; end
+    cg_label = 'DQN + escalation';                    % the DQN the leave-one-out experiments fly (experiment_combo_generalization.m)
+    if startsWith(P.POL{iD}, 'dqn') && ~strcmp(P.POL{iD}, 'dqn_esc'), cg_label = [dep ', deployed, no escalation']; end
     if isfile(F.combo)
         Cg = load(F.combo, 'res');
-        det{end+1} = sprintf(['combined threats never trained on (leave-one-combination-out): DQN + escalation %.1f%% of the ' ...
-            'recoverable episodes (trained on them: %.1f%%, rule + escalation %.1f%%)'], 100 * mean([Cg.res.dqn_out]), ...
-            100 * mean([Cg.res.dqn_in]), 100 * mean([Cg.res.rule]));
+        det{end+1} = kpi_print_text('leave_out', Cg.res, 'combined threats never trained on (leave-one-combination-out)', ...
+            cg_label, 'combinations');
     end
+    if isfile(F.unk)
+        Cu = load(F.unk, 'res');
+        det{end+1} = kpi_print_text('leave_out', Cu.res, 'single threats never trained on (leave-one-threat-out, evidence only)', ...
+            cg_label, 'threats');
+    end
+    if isfile(F.gcsa), det{end+1} = kpi_print_text('gcsa', splitlines(fileread(F.gcsa))); end
     if isfield(P.KP, 'envelope')
         % inside the envelope predicted on validation; the full result stays in the details
         pe = P.KP.per_threat_env(:)'; he = ~isnan(pe);
@@ -333,6 +336,8 @@ if isfile(F.pol)
             det = [det(1), {sprintf('inside the envelope, per threat: %s', strjoin(cellfun(@(n, v, a, b) ...
                 sprintf('%s %.1f%% [%.1f, %.1f]', n, v, a, b), te, num2cell(pe(he)), num2cell(eci(he, 1)'), ...
                 num2cell(eci(he, 2)'), 'UniformOutput', false), ', '))}, det(2:end)];
+            lb4 = kpi_print_text('kpi4_lower', te, pe(he), eci(he, :));
+            if ~isempty(lb4), det = [det(1:2), {lb4}, det(3:end)]; end
             val4 = sprintf('inside the envelope predicted on validation: lowest threat %s %.1f%%, %d of %d threats >= 90%%', ...
                 te{ile}, loe, sum(pe(he) >= 90), sum(he));
         else
@@ -444,6 +449,7 @@ if isfile(F.pol)
     if isfield(P.KP, 'speed_spread')
         det{end+1} = sprintf(['spread over the speed bands %.1f points [%.1f, %.1f] (95%% bootstrap over flight ' ...
             'geometries; target <= 10)'], P.KP.speed_spread);
+        det{end+1} = kpi_print_text('kpi7_spread', P.KP.speed_spread, 10);
     end
     if isfield(P.KP, 'per_speed_out') && ~isempty(P.KP.per_speed_out)
         po = P.KP.per_speed_out(:, strcmp(P.KP.show, P.POL{iD}));
@@ -516,10 +522,7 @@ if isfile(F.edge)
         en.commit_inside(d), en.commit_not_attributable(d)), 1:numel(en.delays), 'UniformOutput', false);
     det{end+1} = sprintf('edge map, without signalling (the receiver alone): single threats %s | combined threats %s', ...
         cnt(en.floor_single), cnt(en.floor_combined));
-    det = [det, {pts(ly('SYSTEM')), pts(ly('SYSTEM+LINK')), sprintf(['edge map, COMMITTED distance edge at the nominal ' ...
-        'level, delay %d (Eb/N0 from 15 dB down to the last COMMITTED point): %s'], en.delays(1), ...
-        strjoin(arrayfun(@(i) sprintf('%s %s', en.cells{i}, edge_km(en.edge_commit_db(1, i), en.edge_commit_km(1, i))), ...
-        inom, 'UniformOutput', false), ', ')), ...
+    det = [det, {pts(ly('SYSTEM')), pts(ly('SYSTEM+LINK')), kpi_print_text('edge_distance', en, inom), ...
         sprintf('edge map, overhead pass (altitude x distance): %s', cnt(arrayfun(@(v) sum(en.ohp_verdict(:) == v), [1 -1 0])))}];
     k = find([KPI.id] == 4, 1); KPI(k).detail = [KPI(k).detail, det];
     k = find([KPI.id] == 6, 1);
@@ -737,10 +740,6 @@ end
 function s = vsym(v)
 % Verdict of edge_verdict.m as a letter: C COMMITTED, N NOT COMMITTED, U UNDETERMINED.
 if isnan(v), s = '-'; else, s = 'NUC'; s = s(v + 2); end
-end
-
-function s = edge_km(e, d)
-if isnan(e), s = 'none'; else, s = sprintf('%g dB (%.2f km)', e, d); end
 end
 
 function s = lat_class(ms)
