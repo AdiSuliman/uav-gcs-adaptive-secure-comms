@@ -41,14 +41,14 @@ function test_mismatched_episode_sets_refused(tc)
 RES = synth(false);
 i = find(strcmp({RES.policy}, 'rule_core'), 1);
 RES(i).R.ep(end) = 99;
-verifyError(tc, @() evalc('core_bw_switches(struct(''RES'', RES), 50, 5);'), 'core_bw_switches:episodes');
+verifyError(tc, @() core_bw_switches(struct('RES', RES), 50, 5), 'core_bw_switches:episodes');
 end
 
 function test_geometry_mismatch_refused(tc)
 RES = synth(false);
 i = find(strcmp({RES.policy}, 'rule_core'), 1);
 RES(i).R.geom(1) = RES(i).R.geom(1) + 1;
-verifyError(tc, @() evalc('core_bw_switches(struct(''RES'', RES), 50, 5);'), 'core_bw_switches:geometry');
+verifyError(tc, @() core_bw_switches(struct('RES', RES), 50, 5), 'core_bw_switches:geometry');
 end
 
 function test_fixed_seed_and_file_input(tc)
