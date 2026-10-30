@@ -304,6 +304,36 @@ L = speed_edge_lines(R, m, logical(lo), false(size(hi)), logical(shd));
 verifyTrue(tc, contains(L{3}, 'no episode') && contains(L{4}, 'no episode'));
 end
 
+function test_band_table_numbers(tc)
+edges = [29 62 95 128 161]; ebno = [0 12];
+thr   = {'antenna_fault', 'antenna_fault', 'jamming', 'jamming', 'antenna_fault', 'airframe_shadowing', 'jamming', 'antenna_fault'};
+speed = [30 30 50 50 140 150 150 100];
+s     = [1 2 1 2 1 2 1 2];
+rec   = [1 0 1 1 0 1 1 1];
+harm  = [0 1 0 0 1 1 0 0];
+[L, T] = speed_band_table(rec, harm, thr, s, speed, ebno, edges);
+verifyEqual(tc, T.threats, {'antenna_fault', 'jamming', 'airframe_shadowing'});
+verifyTrue(tc, same(T.rec_band, [0.5 NaN 1 0; 1 NaN NaN 1; NaN NaN NaN 1]));
+verifyEqual(tc, T.n_band, [2 0 1 1; 2 0 0 1; 0 0 0 1]);
+verifyTrue(tc, same(T.rec_ebno, [0.5 0.5; 1 1; NaN 1]));
+verifyEqual(tc, T.n_ebno, [2 2; 2 1; 0 1]);
+verifyTrue(tc, same(T.pooled_band, [0.75 NaN 1 2/3]));
+verifyEqual(tc, T.pooled_n, [4 0 1 3]);
+verifyEqual(tc, T.lb_n, [1 0 0 2]);
+verifyTrue(tc, same(T.lb_rec, [0 NaN NaN 0.5]));
+verifyTrue(tc, same(T.lb_share, [0.5 NaN 0 1]));
+verifyTrue(tc, same(T.deficit, [25 NaN 0 100 / 3]));
+verifyTrue(tc, same(T.deficit_lb, [25 NaN 0 100 / 3]));
+verifyNumElements(tc, L, 11);
+verifyTrue(tc, contains(L{1}, 'reported only, nothing is selected on it'));
+verifyTrue(tc, contains(L{2}, 'speed bands 29-62, 62-95, 95-128, 128-161 km/h || Eb/N0 0, 12 dB'));
+verifyTrue(tc, contains(L{end}, '128-161 km/h: 2 harmed, recovered 50.0%, harmed share 100.0% | deficit 33.3 points, 33.3 on them (100.0% of it)'));
+verifyTrue(tc, contains(L{end-3}, '29-62 km/h: 1 harmed, recovered 0.0%, harmed share 50.0% | deficit 25.0 points, 25.0 on them (100.0% of it)'));
+% other lost-branch classes
+[~, T2] = speed_band_table(rec, harm, thr, s, speed, ebno, edges, {'jamming'});
+verifyEqual(tc, T2.lb_n, [0 0 0 0]);
+end
+
 function test_wiring_evaluate_policies(tc)
 % Without the switches evaluate_policies.m runs the parent's lines alone: every added block sits
 % between two lines the parent holds side by side and is guarded by a switch.
@@ -336,6 +366,26 @@ i = [strfind(src, 'spec2 = policy_episodes('), strfind(src, 'RES{si, pk} = polic
     strfind(src, 'RS2 = policy_run_set('), strfind(src, 'SPR = spread_boot('), strfind(src, '[SU, spd_lines] = speed_reading(')];
 verifyNumElements(tc, i, 5);
 verifyTrue(tc, issorted(i, 'strictascending'));
+end
+
+function test_wiring_train_dqn(tc)
+% The band table is read after the selection and the report, on the raw agent, and nothing is
+% saved with the agent from it.
+check_inserts(tc, 'code/decision/train_dqn.m', { ...
+    {'if ~gate, warning(''train_dqn:gate'''}, ...
+    {'SPO = speed_options(cfgc);', 'if SPO.band_table', 'PPb = decision_settings(', 'Vb = dqn_eval_batches(sel_kind, PPb, K, val_spec, agent, struct(), 5000, SPLIT_VAL);', ...
+     'sb = cell2mat(', 'cb = cell2mat(', 'ih = sub2ind(', 'hb = ~(K.restored(ih)', 'vb = PP.speed{SPLIT_VAL}', 'kb = Vb.recoverable & Vb.threat;', ...
+     '[bt_lines, SB] = speed_band_table(', 'linspace(PP.speed_range(1), PP.speed_range(2), 5));', 'bt_lines{end+1} = sprintf(', ...
+     'ternary(abs(dqn_recovered(Vb) - B.rec)', 'fid = fopen(''results/dqn_training.txt'', ''a'');', 'fprintf(''\n%s\n'', bt_lines{:});', ...
+     'save(''results/dqn_speed_bands.mat'', ''SB'');', 'end'}, ...
+    {'ES = [runs.esc];'}});
+td = fileread(which('train_dqn'));
+i = strfind(td, 'if SPO.band_table');
+verifyNumElements(tc, i, 1);
+verifyLessThan(tc, i, min(strfind(td, 'agent = dqn_dense(agent);')));           % the raw agent, before the deployment form
+verifyLessThan(tc, i, min(strfind(td, 'save(''data/trained_dqn.mat''')));          % nothing saved with the agent
+blk = td(i:i + strfind(td(i:end), 'save(''results/dqn_speed_bands.mat'', ''SB'');') - 1);
+verifyEmpty(tc, strfind(blk, 'trained_dqn'));
 end
 
 function test_wiring_measure_all_kpis(tc)

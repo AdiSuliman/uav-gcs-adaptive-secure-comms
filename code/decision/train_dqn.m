@@ -447,6 +447,27 @@ fid = fopen('results/dqn_training.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclo
 fprintf('\n%s\n', rep{:});
 if ~gate, warning('train_dqn:gate', 'DQN validation gate FAILED -- see results/dqn_training.txt'); end
 
+% The selected agent per speed band on the validation flights ("speed_band_table" in profile.json,
+% speed_options.m): reported only, nothing in the saved agent or the selection reads it
+SPO = speed_options(cfgc);
+if SPO.band_table
+    PPb = decision_settings(with_entry(PP, struct('alarm', alarm_sel, 'drop', drop_sel), DROP_MODE), Sdep);
+    Vb = dqn_eval_batches(sel_kind, PPb, K, val_spec, agent, struct(), 5000, SPLIT_VAL);
+    sb = cell2mat(cellfun(@(sp) sp.s, val_spec, 'UniformOutput', false));
+    cb = cell2mat(cellfun(@(sp) sp.scn, val_spec, 'UniformOutput', false));
+    ih = sub2ind(size(K.restored), cb, sb, K.na + 0 * sb, SPLIT_VAL + 0 * sb, Vb.r);
+    hb = ~(K.restored(ih) & K.restored_plr(ih));                       % no response does not restore the geometry
+    vb = PP.speed{SPLIT_VAL}(sub2ind(size(PP.speed{SPLIT_VAL}), sb, Vb.r));
+    kb = Vb.recoverable & Vb.threat;
+    [bt_lines, SB] = speed_band_table(Vb.recovered(kb), hb(kb), PP.scen(cb(kb)), sb(kb), vb(kb), PP.ebno, ...
+        linspace(PP.speed_range(1), PP.speed_range(2), 5));
+    bt_lines{end+1} = sprintf('  the selection reading reproduced: recovered %.4f against %.4f (%s)', dqn_recovered(Vb), B.rec, ...
+        ternary(abs(dqn_recovered(Vb) - B.rec) < 1e-9, 'exact', 'NOT REPRODUCED'));
+    fid = fopen('results/dqn_training.txt', 'a'); fprintf(fid, '%s\n', bt_lines{:}); fclose(fid);
+    fprintf('\n%s\n', bt_lines{:});
+    save('results/dqn_speed_bands.mat', 'SB');
+end
+
 ES = [runs.esc];
 seed_summary = struct('alarms', {{runs.alarm}}, 'drops', [runs.drop], 'fa_pens', [runs.fa_pen], 'cost_scales', [runs.cost_scale], ...
     'sw_scales', [runs.sw_scale], 'gammas', [runs.gamma], 'seeds', [runs.seed], 'steps', {{runs.step}}, ...
