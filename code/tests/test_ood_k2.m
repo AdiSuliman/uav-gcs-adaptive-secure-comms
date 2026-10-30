@@ -93,6 +93,167 @@ s = ood_cue('if', F1, qx);
 verifyLessThan(tc, s(3), s(2));
 end
 
+%% ---------- the statistic U ----------
+function test_unk_stat_pvalues(tc)
+% Marginal conformal p-values (1 + #{calibration <= s}) / (n + 1): -Inf the lowest, NaN NaN;
+% U = min(p0, p_cue), p_cue = 1 where the cue window is not full; C3 the cue alone; every
+% window scored alone gives the batch's values; the per-frame flag reads p0 only; the model's
+% checks.
+s = [3; 1; 2; 2; NaN; 5];
+C = unk_stat('cal', s);
+verifyEqual(tc, [C.n, C.u', C.c'], [5, 1 2 3 5, 1 3 4 5]);
+q = [0; 1; 2; 2.5; 5; 9; -Inf; NaN];
+p = unk_stat('p', C, q);
+k = arrayfun(@(x) sum(s(~isnan(s)) <= x), q(1:7));
+verifyEqual(tc, p(1:7), (1 + k) / 6, 'AbsTol', 1e-15);
+verifyTrue(tc, isnan(p(8)));
+verifyEqual(tc, p(7), 1 / 6, 'AbsTol', 1e-15);
+verifyError(tc, @() unk_stat('cal', [1; Inf]), 'unk_stat:cal');
+U = struct('use0', true, 'cal0', unk_stat('cal', (1:9)'), 'cal1', unk_stat('cal', -(1:4)'), ...
+    'scale', struct('med', 0, 'iqr', 1, 'clip', 10), 'cue', 'maha', 'model', struct('mu', 0, 'P', 1));
+X = [0; 1; 2; 3]; s0 = [5; 0; 9; 1]; full = [true; true; true; false];
+u = unk_stat('U', U, s0, X, full);
+verifyEqual(tc, u, [0.6; 0.1; 0.4; 0.2], 'AbsTol', 1e-12);
+verifyEqual(tc, unk_stat('U', U, s0, X, full, true), u);
+verifyEqual(tc, unk_stat('U', U, s0, X, false), [0.6; 0.1; 1.0; 0.2], 'AbsTol', 1e-12);
+verifyTrue(tc, isnan(unk_stat('U', U, NaN, 0, true)));
+U3 = U; U3.use0 = false;
+verifyEqual(tc, unk_stat('U', U3, s0, X, full), [1; 1; 0.4; 1], 'AbsTol', 1e-12);
+f1 = unk_stat('frame', U, [5; -Inf; NaN]);
+verifyEqual(tc, f1(1:2), [0.6; 0.1], 'AbsTol', 1e-12); verifyTrue(tc, isnan(f1(3)));
+f3 = unk_stat('frame', U3, [5; -Inf; NaN]);
+verifyEqual(tc, f3(1:2), [1; 1]); verifyTrue(tc, isnan(f3(3)));
+verifyFalse(tc, unk_stat('on', struct()));
+verifyFalse(tc, unk_stat('on', struct('fuse', [])));
+verifyFalse(tc, unk_stat('on', struct('fuse', struct('W', 1))));
+verifyTrue(tc, unk_stat('on', struct('fuse', struct('W', 1, 'unk', U))));
+S = struct('cand', 'C1', 'use0', true, 'cue', 'maha', 'scale', U.scale, 'model', U.model, 'cal0', U.cal0, ...
+    'cal1', U.cal1, 'val', [0.1; 0.2; 0.3], 'nw', 12, 'step_n', 0, 'N', 12, 'score', 'last_or_if', 'win', 1);
+M = unk_stat('model', S);
+verifyEqual(tc, M.val, [0.1; 0.2; 0.3]); verifyTrue(tc, M.use0);
+verifyError(tc, @() unk_stat('model', setfield(S, 'val', [0.3; 0.1])), 'unk_stat:model'); %#ok<SFLD>
+verifyError(tc, @() unk_stat('model', setfield(S, 'cand', 'C2')), 'unk_stat:model'); %#ok<SFLD>
+verifyError(tc, @() unk_stat('model', setfield(S, 'use0', false)), 'unk_stat:model'); %#ok<SFLD>
+verifyError(tc, @() unk_stat('model', setfield(S, 'nw', 9)), 'unk_stat:model'); %#ok<SFLD>
+verifyError(tc, @() unk_stat('model', rmfield(S, 'cal1')), 'unk_stat:model');
+end
+
+function test_monitor_off_bit_identical(tc)
+% Without FM.unk the monitor (with a temporal fusion, idle-time and branch records) gives the
+% parent commit's M and memory bit for bit, and no M.unk; unk_threshold.m on a sorted
+% statistic is the parent's.
+[S, P, s0, y] = toy_split(3, 21);
+PP = mon_pp(toy_fusion(S, P, y), 12);
+d = parent_copy(tc, 'code/decision/policy_monitor.m', base_rev());
+addpath(d, '-begin'); clear policy_monitor
+cl = onCleanup(@() fixture_off(d, 'policy_monitor')); %#ok<NASGU>
+verifyEqual(tc, which('policy_monitor'), fullfile(d, 'policy_monitor.m'));
+Oo = replay(PP, S, P, s0);
+fixture_off(d, 'policy_monitor');
+verifyNotEqual(tc, which('policy_monitor'), fullfile(d, 'policy_monitor.m'));
+On = replay(PP, S, P, s0);
+verifyTrue(tc, isequaln(Oo, On));
+verifyFalse(tc, isfield(On.M{1}, 'unk'));
+verifyTrue(tc, any(strcmp(On.cls, 'unknown')) && any(~strcmp(On.cls, 'unknown')));
+v = sort(randn(RandStream('mt19937ar', 'Seed', 5), 500, 1));
+d2 = parent_copy(tc, 'code/decision/unk_threshold.m', base_rev());
+addpath(d2, '-begin'); clear unk_threshold
+cl2 = onCleanup(@() fixture_off(d2, 'unk_threshold')); %#ok<NASGU>
+t0 = [unk_threshold(v, 0.95), unk_threshold(v, 0.99)];
+fixture_off(d2, 'unk_threshold');
+verifyEqual(tc, [unk_threshold(v, 0.95), unk_threshold(v, 0.99)], t0);
+end
+
+function test_monitor_parity(tc)
+% D111 (d): the monitor's U (policy_monitor.m, sub-runs replayed from their first frame) equals
+% the offline U (ood_cue.m 'split', unk_stat.m, every window scored alone) on every frame, for
+% C1, C2 and C3 and for a fusion window of 12 and of 4 (the level step over 10 frames); the
+% flag is U below unk_threshold and overrides the class; the fused class probabilities are
+% those without FM.unk.
+[S, P, s0, y] = toy_split(3, 22);
+FM = toy_fusion(S, P, y);
+fn = link_features('names');
+O0 = replay(mon_pp(FM, 12), S, P, s0);
+for N = [12 4]
+    Ns = ood_cue('step_n', N); NW = max([N, 1, window_cues('branch_window'), Ns]);
+    X = ood_cue('split', S, fn, 3, N);
+    full = ood_cue('fill', S.run, S.pos) >= NW;
+    verifyTrue(tc, any(full) && any(~full));
+    for cand = {'C1', 'C2', 'C3'}
+        [Um, u] = toy_model(S, X, full, s0, y, cand{1}, N, Ns, NW);
+        FMu = FM; FMu.unk = Um;
+        PP = mon_pp(FMu, N);
+        O = replay(PP, S, P, s0);
+        tag = sprintf('%s, N %d', cand{1}, N);
+        verifyEqual(tc, O.u, u, tag);
+        verifyEqual(tc, O.unk, u < unk_threshold(PP), tag);
+        if strcmp(cand{1}, 'C1'), verifyTrue(tc, any(O.unk) && any(~O.unk), tag); end
+        verifyTrue(tc, all(strcmp(O.cls(O.unk), 'unknown')), tag);
+        if N == 12, verifyEqual(tc, O.probs, O0.probs, tag); end
+    end
+end
+end
+
+function test_forced_unknown(tc)
+% The withheld detector (probabilities 0, flag set, maha -Inf: C2e's and C2u's forced-unknown
+% episodes) stays unknown under U: p0 its lowest value (C1), and with the cue alone (C3) the
+% frame's own flag.
+[S, P, s0, y] = toy_split(3, 23);
+FM = toy_fusion(S, P, y);
+X = ood_cue('split', S, link_features('names'), 3, 12);
+full = ood_cue('fill', S.run, S.pos) >= 12;
+for cand = {'C1', 'C3'}
+    Um = toy_model(S, X, full, s0, y, cand{1}, 12, 0, 12);
+    FMu = FM; FMu.unk = Um;
+    O = replay(mon_pp(FMu, 12), S, zeros(size(P)), -Inf(size(s0)), true);
+    verifyTrue(tc, all(O.unk), cand{1});
+    verifyTrue(tc, all(strcmp(O.cls, 'unknown')), cand{1});
+    if strcmp(cand{1}, 'C1')
+        verifyEqual(tc, O.u, repmat(1 / (Um.cal0.n + 1), numel(s0), 1));
+        verifyTrue(tc, all(unk_stat('frame', Um, -Inf(size(s0))) < unk_threshold(mon_pp(FMu, 12))));
+    end
+end
+end
+
+function test_retention_threshold(tc)
+% U's threshold keeps a share of FM.unk.val (U on the selection half's known windows): the
+% retention step of C2 (0.95 / 0.99) moves it, the deployed retention travels as unk_retain
+% (decision_settings.m), and train_dqn.m reads it whenever FM.unk exists.
+v = sort(rand(RandStream('mt19937ar', 'Seed', 8), 400, 1));
+PP = struct('fuse', struct('W', 1, 'unk', struct('val', v)));
+verifyEqual(tc, unk_threshold(PP, 0.95), v(ceil((1 - 0.95) * 400)));
+verifyEqual(tc, unk_threshold(PP, 0.99), v(ceil((1 - 0.99) * 400)));
+verifyLessThan(tc, unk_threshold(PP, 0.99), unk_threshold(PP, 0.95));
+verifyEqual(tc, unk_threshold(PP), unk_threshold(PP, 0.95));
+P2 = decision_settings(PP, struct('unk_retain', 0.99, 'maha_thr', unk_threshold(PP, 0.99)));
+verifyEqual(tc, unk_threshold(P2), v(ceil((1 - 0.99) * 400)));
+verifyError(tc, @() unk_threshold(struct('fuse', struct('W', 1)), 0.95), 'unk_threshold:unk');
+src = fileread(which('train_dqn'));
+verifyNotEmpty(tc, strfind(src, 'if unk_stat(''on'', PP), S0.maha_thr = unk_threshold(PP, U0); end'));
+i1 = strfind(src, '''maha_thr'', unk_threshold(PP, rt));');
+i2 = strfind(src, '''maha_thr'', unk_threshold(PP.maha_val, rt));');
+verifyTrue(tc, isscalar(i1) && isscalar(i2) && i1 < i2);
+end
+
+function test_sites_follow_u(tc)
+% Every unknown-flag site reads U when FM.unk exists and its old line otherwise: link_env.m
+% (the frame's flag, before the withheld detector's mask), policy_monitor.m (the window's
+% flag), episode_cycle.m (the frame's flag and the window's in info), policy_decide.m (info.unk).
+le = fileread(which('link_env'));
+i1 = strfind(le, 'if unk_stat(''on'', PP), obs.unknown = unk_stat(''frame'', PP.fuse.unk, obs.maha) < unk_threshold(PP); end');
+i2 = strfind(le, 'obs.probs(mask, :) = 0; obs.unknown(mask) = true; obs.maha(mask) = -Inf;');
+verifyTrue(tc, isscalar(i1) && isscalar(i2) && i1 < i2);
+verifyNotEmpty(tc, strfind(le, 'obs.unknown(i) = P.maha(j) < PP.maha_thr;'));
+pm = fileread(which('policy_monitor'));
+verifyNotEmpty(tc, strfind(pm, 'mem.unk_u(e) = unk_stat(''U'', PP.fuse.unk, mean(mem.wu(e, ku), 2), x, n >= W);'));
+verifyNotEmpty(tc, strfind(pm, 'mem.unk_now(e) = mean(mem.wu(e, ku), 2) < PP.maha_thr;'));
+verifyNotEmpty(tc, strfind(pm, 'if unk_stat(''on'', PP), M.unk = unk; M.unk_u = mem.unk_u; end'));
+ec = fileread(which('episode_cycle'));
+verifyNotEmpty(tc, strfind(ec, 'if unk_stat(''on'', ctx.PP), uk = unk_stat(''frame'', ctx.PP.fuse.unk, maha) < unk_threshold(ctx.PP); end'));
+verifyNotEmpty(tc, strfind(ec, 'if isfield(d, ''unk''), info.unknown = d.unk; end'));
+verifyNotEmpty(tc, strfind(fileread(which('policy_decide')), 'if isfield(M, ''unk''), info.unk = M.unk; end'));
+end
+
 %% ---------- rules, K2-1 and the OOD run ----------
 function test_rules(tc)
 % Gate K2-1 (>= 0.80 on at least 2 of the four named threats and >= 0.70 on their mean); the

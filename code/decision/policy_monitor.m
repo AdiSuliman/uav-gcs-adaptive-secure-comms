@@ -39,7 +39,11 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   over the last PP.unk_win cycles, is below its threshold PP.maha_thr: every class with
 %   PP.unk_mode 'all' (the default), only a class that raises no alarm (none,
 %   benign_interference) with 'nonhostile', so a hostile class read keeps its alarm (the mode
-%   and the threshold's retention are chosen on validation, train_dqn.m).
+%   and the threshold's retention are chosen on validation, train_dqn.m). With FM.unk in
+%   PP.fuse (D111) the statistic is U (unk_stat.m) of that mean and the window's physics row
+%   (ood_cue.m: temporal_evidence.m's persistence columns and window_cues.m's), p_cue = 1
+%   while the window is not full, below unk_threshold(PP) (FM.unk.val at PP.unk_retain);
+%   M.unk and M.unk_u hold the flag and U.
 %   Alarm, PP.alarm_mode 'class' (default): a hostile threat class, or degradation;
 %   'none', 'benign_interference' (non-hostile, D9) and 'unknown' raise it only
 %   through degradation. 'class_drop': as 'class', but the class path_loss
@@ -170,6 +174,7 @@ mem.good(~M.degraded) = mem.good(~M.degraded) + 1; mem.good(M.degraded) = 0;
 mem.deg_n(M.degraded) = mem.deg_n(M.degraded) + 1; mem.deg_n(~M.degraded) = 0;
 mem.tried(mem.good >= C.heal, :) = false;
 [mem, pf, te, unk] = fusion(mem, obs, PP, gk(link), gw(link));
+if unk_stat('on', PP), M.unk = unk; M.unk_u = mem.unk_u; end
 % Latched cause of a lost branch (onset_shape.m): read from the shape of its onset, a
 % step (antenna_fault) or a ramp (airframe_shadowing), and kept while the branch stays lost;
 % only while the deployed fusion latches (onset_shape('on', PP.fuse), set by B2F)
@@ -262,6 +267,7 @@ N = 1; if isfield(PP, 'fuse_N') && ~isempty(PP.fuse_N), N = PP.fuse_N; end
 Nu = 1; if isfield(PP, 'unk_win') && ~isempty(PP.unk_win), Nu = PP.unk_win; end
 NB = 1; if isfield(PP, 'fuse') && ~isempty(PP.fuse), NB = window_cues('branch_window'); end
 W = max([N, Nu, NB]);
+ou = unk_stat('on', PP); if ou, W = max(W, PP.fuse.unk.nw); end
 g = zeros(NE, 1); if isfield(obs, 'gant') && ~isempty(obs.gant), g = obs.gant - reshape(gp, [], 1); end
 f = obs.feat; is = feature_index('sinr');
 f(:, is) = f(:, is) - reshape(gl, [], 1);
@@ -291,6 +297,10 @@ if isfield(cu, 'held') && cu.held && size(g, 2) > 1
 end
 nC = size(obs.probs, 2);
 pf = obs.probs; te = zeros(NE, numel(temporal_evidence('names', nC)) - nC);
+if ou
+    ut = unk_threshold(PP);
+    if ~isfield(mem, 'unk_u') || numel(mem.unk_u) ~= NE, mem.unk_u = nan(1, NE); end
+end
 for n = unique(mem.wn)                                     % episodes with the same filled window length
     e = find(mem.wn == n);
     k = W - min(n, N) + 1:W;
@@ -304,7 +314,17 @@ for n = unique(mem.wn)                                     % episodes with the s
         pf(e, :) = fuse_classes('apply', PP.fuse, [Z, Zc, log(max(double(mem.wp(e, :, W)), 1e-6)), Xe]);
     end
     ku = W - min(n, Nu) + 1:W;
-    mem.unk_now(e) = mean(mem.wu(e, ku), 2) < PP.maha_thr;
+    if ou                                                      % U of the window (unk_stat.m), its cue window full at W
+        x = [te(e, :), Zc];
+        if PP.fuse.unk.step_n > 0
+            ks = W - min(n, PP.fuse.unk.step_n) + 1:W;
+            x = ood_cue('step', x, window_cues(mem.wg(e, :, ks), mem.wf(e, :, ks), mem.wi(e, :, ks), []));
+        end
+        mem.unk_u(e) = unk_stat('U', PP.fuse.unk, mean(mem.wu(e, ku), 2), x, n >= W);
+        mem.unk_now(e) = mem.unk_u(e) < ut;
+    else
+        mem.unk_now(e) = mean(mem.wu(e, ku), 2) < PP.maha_thr;
+    end
 end
 unk = obs.unknown(:)';                                     % the monitor's own threshold PP.maha_thr wherever a score is read
 if ~all(isnan(mh)), unk = mem.unk_now(:)' | (obs.unknown(:)' & isinf(mh(:)')); end

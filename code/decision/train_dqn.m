@@ -212,6 +212,7 @@ mp = mp(isfinite(mp));
 U0 = 0.95; if isfield(PP, 'unk_retain') && ~isempty(PP.unk_retain), U0 = PP.unk_retain; end
 S0 = struct('rule_mmse_db', CD.rule_mmse_db, 'rule_slot', true, 'rule_dwell', 'run', 'unk_mode', 'all', ...
     'unk_retain', U0, 'maha_thr', PP.maha_thr, 'esc_drop', false);
+if unk_stat('on', PP), S0.maha_thr = unk_threshold(PP, U0); end   % D111: U's threshold (FM.unk.val)
 BC = burst_candidates(fec_rx_of(PP));               % the noise-burst answers, uncoded on D78 pools
 S0.rule_nb = BC.start; S0.core_nb = BC.core_start;
 TH = [3 CD.rule_mmse_db 9]; th_txt = {'3 dB', sprintf('%g dB (the earlier constant)', CD.rule_mmse_db), '9 dB'};
@@ -236,7 +237,9 @@ STEPS(end+1) = struct('name', 'proposal dwell', 'var', {{struct('rule_dwell', 'r
 v = {};
 for md = {'all', 'nonhostile'}
     for rt = [0.95 0.99]
-        if isfield(PP, 'maha_val') && ~isempty(PP.maha_val)
+        if unk_stat('on', PP)                           % D111: U's sorted validation array FM.unk.val
+            v{end+1} = struct('unk_mode', md{1}, 'unk_retain', rt, 'maha_thr', unk_threshold(PP, rt)); %#ok<SAGROW>
+        elseif isfield(PP, 'maha_val') && ~isempty(PP.maha_val)
             v{end+1} = struct('unk_mode', md{1}, 'unk_retain', rt, 'maha_thr', unk_threshold(PP.maha_val, rt)); %#ok<SAGROW>
         elseif rt == U0
             v{end+1} = struct('unk_mode', md{1}, 'unk_retain', rt, 'maha_thr', PP.maha_thr); %#ok<SAGROW>
