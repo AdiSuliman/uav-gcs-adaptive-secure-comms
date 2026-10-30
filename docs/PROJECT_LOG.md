@@ -248,6 +248,7 @@ The lecturer's false-alarm KPI is read at detector level; the system-level figur
 ### Delay-line receiver defect (29.10.2026)
 
 - Found on validation: three frames at 12 dB (420/5, 452/10, 459/16) collapse in the delay-line receiver at true post-MRC Es/N0 of 8.5-11.9 dB. The first pass fits one channel profile on the training only; on 420/5 and 452/10 the training sits in a within-frame fade and the frames fail even at +30 dB. D1 (valid, 11 arms and a flat shadow receiver) recovers none of the three and sends to D2; nothing is adopted. CORE_BW, P1 and P1R run on the current receiver r1; profile 3 takes a fix only if one passes the pre-set rule, else r1 with disclosure (D109; `rx_fix_ruling.md`, `rx_diag_reading.md`).
+- D2 (30.10, valid, `hand_rx_d2_20261030_1846.txt`): no twin rung recovers any of the three frames, so by the pre-set rule the cause lies after the estimates; an exact noise-free training template changes nothing, and the twin truth shows the true lag shape changing within the frame, also without a training fade (459/16). The census wins 0 frames in every cell and is not a bound (blind to the defect, jammed cells saturated); the rate under interference stays unmeasured. Next: `rx_fix_rule3.md` with a per-block genie (D3) and new fresh frames, a candidate coded during P1R and read before profile 3's timebox; CORE_BW and P1R on r1 (D109; `rx_d2_reading.md`).
 
 ### Approvals of 29.10.2026: A′ (D107), D108, the archive addendum, a multithreaded G0
 
