@@ -542,15 +542,15 @@ set_link_snr(mdl, 12 + 10*log10(q.bits_per_symbol) - 10*log10(q.sps) + g_db, q);
 set_param([mdl '/LevelTw'], 'Gain', get_param([mdl '/Level'], 'Gain'));
 Lf = frame_layout(q); NB = numel(Lf.pil_center); NR = q.n_rx;
 dc = []; dp = []; nfr = 0;
-for run = [420 452 459]
-    j = find(T.run == run, 1);
-    assertNotEmpty(tc, j, sprintf('run %d not in the 12 dB part', run));
+for rn = [420 452 459]
+    j = find(T.run == rn, 1);
+    assertNotEmpty(tc, j, sprintf('run %d not in the 12 dB part', rn));
     fd = T.speed(j) / 3.6 * q.carrier_freq / q.c_light;
     link_seed(mdl, double(T.seed(j)), fd, struct('ebno', 12, 'alt_m', NaN, 'k_sig_db', NaN, 'aoa1_deg', NaN, ...
         'rho', NaN, 'event_frame', NaN, 'frames', 20));
-    txt = evalc('sim(mdl, ''StopTime'', num2str(19 * q.frame_duration));');
+    txt = evalc('so = sim(mdl, ''StopTime'', num2str(19 * q.frame_duration));'); %#ok<NASGU>
     D = rx_blocks(txt, NR, NB);
-    verifyNotEmpty(tc, D, sprintf('run %d: no frame printed', run));
+    verifyNotEmpty(tc, D, sprintf('run %d: no frame printed', rn));
     for f = 1:numel(D)
         if ~(D(f).nbit / q.frame_length < 1e-3), continue; end
         nfr = nfr + 1;
