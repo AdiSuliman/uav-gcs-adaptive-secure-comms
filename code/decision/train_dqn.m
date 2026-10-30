@@ -122,6 +122,7 @@ if exist('CFG', 'var') && isstruct(CFG)
 end
 VAL_REPS = 2;                            % validation: every (cell, Eb/N0, geometry) of the split, twice
 cfgc = []; if exist('CFG', 'var'), cfgc = CFG; end
+SPO = speed_options(cfgc);             % speed readings (speed_options.m); a wrong profile.json field stops before the training
 RC = struct('dir', run_cache('dir', run_cache('on', cfgc), 'C2'), 'id', '');   % finished runs kept on disk (run_cache.m)
 if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (run_stage smoke)
     N_SEEDS = 1; GAMMAS = 0.5; FA_PEN = 80; COST_SCALE = 1; SW_SCALE = 1; ALARMS = {'class_drop 4/5'}; SENS_SCALES = 2; VAL_REPS = 1;
@@ -449,7 +450,6 @@ if ~gate, warning('train_dqn:gate', 'DQN validation gate FAILED -- see results/d
 
 % The selected agent per speed band on the validation flights ("speed_band_table" in profile.json,
 % speed_options.m): reported only, nothing in the saved agent or the selection reads it
-SPO = speed_options(cfgc);
 if SPO.band_table
     PPb = decision_settings(with_entry(PP, struct('alarm', alarm_sel, 'drop', drop_sel), DROP_MODE), Sdep);
     Vb = dqn_eval_batches(sel_kind, PPb, K, val_spec, agent, struct(), 5000, SPLIT_VAL);

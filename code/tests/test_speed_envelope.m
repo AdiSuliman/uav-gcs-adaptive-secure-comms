@@ -196,9 +196,11 @@ verifyEqual(tc, SU.union.nU, 4 * (12 + 36));
 verifyTrue(tc, SU.reproduced);
 txt = strjoin(lines, newline);
 verifyTrue(tc, contains(txt, 'KPI 7 speed part on the union of the test and second-test single sets'));
-verifyTrue(tc, contains(txt, 'criterion (D117 point 1): MET (committed) iff U <= 10 points; MET (not committed) iff the point <= 10 < U; NOT MET iff the point > 10 -> MET (committed)'));
+verifyTrue(tc, contains(txt, 'criterion (D117 point 1): MET (committed) iff U <= 10 points; MET (not committed) iff the point <= 10 < U; NOT MET iff the point > 10 -> MET (committed) (descriptive)'));
 verifyTrue(tc, contains(txt, 'continuity line with profile 1, the test single set alone under the registered rule'));
-verifyTrue(tc, contains(txt, 'result, KPI 7 speed part: union MET (committed) (spread 0.0 points, U 0.0); test single set alone MET (spread 0.0 points)'));
+verifyTrue(tc, endsWith(lines{find(contains(lines, 'continuity line with profile 1'), 1)}, '-> MET (the verdict)'));
+verifyTrue(tc, contains(txt, 'result, KPI 7 speed part: test single set alone, the registered rule and the verdict, MET (spread 0.0 points); union, descriptive, MET (committed) (spread 0.0 points, U 0.0)'));
+verifyFalse(tc, contains(txt, 'result, KPI 7 speed part: union'));
 verifyFalse(tc, contains(txt, 'THE TWO READINGS DIFFER'));
 verifyFalse(tc, contains(txt, 'NOT REPRODUCED'));
 % the Hall & Miller bound is written out
@@ -242,6 +244,11 @@ verifyFalse(tc, SU.met, 'descriptive: the verdict is the test-only line');
 verifyTrue(tc, contains(txt, 'DESCRIPTIVE ONLY, Adi''s approval of D117 point 1 is not recorded: the verdict stays the test-only line'));
 verifyFalse(tc, contains(txt, 'VERDICT LINE'));
 verifyTrue(tc, contains(txt, 'THE TWO READINGS DIFFER'));
+verifyTrue(tc, contains(txt, 'result, KPI 7 speed part: test single set alone, the registered rule and the verdict, NOT MET (spread '));
+verifyTrue(tc, contains(txt, '); union, descriptive, MET'));
+verifyFalse(tc, contains(txt, 'result, KPI 7 speed part: union'));         % the union is never the result line's first reading
+verifyTrue(tc, endsWith(lines{find(contains(lines, 'criterion (D117 point 1)'), 1)}, ' (descriptive)'));
+verifyTrue(tc, endsWith(lines{find(contains(lines, 'continuity line with profile 1'), 1)}, '-> NOT MET (the verdict)'));
 verifyEqual(tc, SU.point_test, 100 * SPR(1), 'AbsTol', 1e-9);
 verifyTrue(tc, any(contains(SU.kpi_lines, 'DESCRIPTIVE')) && any(contains(SU.kpi_lines, 'THE TWO READINGS DIFFER')));
 O.union = 'verdict'; O.yes = '30.10.2026 21:30';
@@ -251,6 +258,9 @@ verifyEqual(tc, SV.mode, 'verdict');
 verifyTrue(tc, SV.met, 'verdict: the union decides');
 verifyTrue(tc, contains(txt, 'VERDICT LINE, approved by Adi on 30.10.2026 21:30'));
 verifyFalse(tc, contains(txt, 'DESCRIPTIVE ONLY'));
+verifyTrue(tc, contains(txt, 'result, KPI 7 speed part: union MET'));
+verifyTrue(tc, contains(txt, '; test single set alone NOT MET (spread '));
+verifyFalse(tc, contains(txt, '(descriptive)') || contains(txt, '(the verdict)') || contains(txt, 'and the verdict,'));
 verifyTrue(tc, any(contains(SV.kpi_lines, 'VERDICT, approved by Adi on 30.10.2026 21:30')));
 verifyEqual(tc, SV.word_union, SU.word_union); verifyEqual(tc, SV.U_union, SU.U_union);   % the numbers do not move with the mode
 % inference lines on the test set alone, no union
@@ -340,7 +350,7 @@ function test_edge161_geometries_prefix(tc)
 % are the same flights bit for bit, and so is every other split's list (its seed block and its
 % positions do not depend on the edge-speed split's size). The lists are drawn as
 % build_policy_pools.m draws them.
-p = base_params();
+p = base_params(4); verifyEqual(tc, p.n_rx, 4);
 G36 = pool_lists(p, 36); G48 = pool_lists(p, 48);
 for s = 1:numel(p.EbNo_dB)
     for sp = [1 2 3 5]
@@ -367,7 +377,7 @@ function test_edge161_layout(tc)
 % pool_layout.m with 48: the edge-speed split holds 24 flights at hover and 24 at 161 km/h for the
 % clean link and the nominal severity, 24 at hover for the other severities, and the shadowing
 % group of the nominal level flies 24 of its own; every other split's positions are unchanged.
-p = base_params(); C = decision_config();
+p = base_params(4); C = decision_config(); verifyEqual(tc, p.n_rx, 4);
 NCOMB = [0 0 0 0 24]; NHOVER = 24; iSpd = 4;
 th = {}; sev = [];
 for t = {'none', 'jamming', 'airframe_shadowing'}
@@ -420,7 +430,7 @@ function test_edge161_shadow_candidates(tc)
 % candidate limit with 24 of them, and its first 12 are the flights it finds with 12 (the
 % candidates are tried in order): at every Eb/N0, every flight hides an antenna at the group's
 % lowest level.
-p = base_params(); C = decision_config();
+p = base_params(4); C = decision_config(); verifyEqual(tc, p.n_rx, 4);
 J_MAX = 99999; BLOCK = 16;
 S = pool_cells(p, C);
 gi = S.grp(find(strcmp(S.th, 'airframe_shadowing') & S.sev == C.nominal, 1));
@@ -449,7 +459,7 @@ function test_edge161_cost(tc)
 % cells out (pool_layout.m) and the frames each flight flies (20; the shadowing groups' flights
 % C.event_run), weighted by the runs and emitters of each cell (pool_cost.m): only the edge-speed
 % split's work grows, and the growth is at most 3 h of the 105 h planned for profile 3's C1p.
-p = base_params(); C = decision_config(); A = policy_actions();
+p = base_params(4); C = decision_config(); A = policy_actions(); verifyEqual(tc, p.n_rx, 4);
 S = pool_cells(p, C);
 nC = numel(S.th); nS = numel(p.EbNo_dB); F_SUB = 20; NHOVER = 24; iSpd = 4; NG4 = [36 48];
 unit = zeros(1, nC);                                    % work of one frame in every configuration's run
@@ -521,17 +531,21 @@ verifyTrue(tc, issorted(i, 'strictascending'));
 end
 
 function test_wiring_train_dqn(tc)
-% The band table is read after the selection and the report, on the raw agent, and nothing is
+% The switches are read before the training, so a wrong profile.json field stops at the start;
+% the band table is read after the selection and the report, on the raw agent, and nothing is
 % saved with the agent from it.
 check_inserts(tc, 'code/decision/train_dqn.m', { ...
+    {'cfgc = [];'}, {'SPO = speed_options(cfgc);'}, {'RC = struct(''dir'', run_cache('}; ...
     {'if ~gate, warning(''train_dqn:gate'''}, ...
-    {'SPO = speed_options(cfgc);', 'if SPO.band_table', 'PPb = decision_settings(', 'Vb = dqn_eval_batches(sel_kind, PPb, K, val_spec, agent, struct(), 5000, SPLIT_VAL);', ...
+    {'if SPO.band_table', 'PPb = decision_settings(', 'Vb = dqn_eval_batches(sel_kind, PPb, K, val_spec, agent, struct(), 5000, SPLIT_VAL);', ...
      'sb = cell2mat(', 'cb = cell2mat(', 'ih = sub2ind(', 'hb = ~(K.restored(ih)', 'vb = PP.speed{SPLIT_VAL}', 'kb = Vb.recoverable & Vb.threat;', ...
      '[bt_lines, SB] = speed_band_table(', 'linspace(PP.speed_range(1), PP.speed_range(2), 5));', 'bt_lines{end+1} = sprintf(', ...
      'ternary(abs(dqn_recovered(Vb) - B.rec)', 'fid = fopen(''results/dqn_training.txt'', ''a'');', 'fprintf(''\n%s\n'', bt_lines{:});', ...
      'save(''results/dqn_speed_bands.mat'', ''SB'');', 'end'}, ...
     {'ES = [runs.esc];'}});
 td = fileread(which('train_dqn'));
+verifyNumElements(tc, strfind(td, 'SPO = speed_options(cfgc);'), 1);
+verifyLessThan(tc, strfind(td, 'SPO = speed_options(cfgc);'), min(strfind(td, 'RC.id = run_cache(''key'''))));   % before the first run
 i = strfind(td, 'if SPO.band_table');
 verifyNumElements(tc, i, 1);
 verifyLessThan(tc, i, min(strfind(td, 'agent = dqn_dense(agent);')));           % the raw agent, before the deployment form
@@ -573,7 +587,14 @@ function write_json(f, s)
 fid = fopen(f, 'w'); fprintf(fid, '%s', s); fclose(fid);
 end
 
-function p = base_params()
+function p = base_params(nrx)
+% The default params of this checkout (init_params.m) with nrx receive antennas as profile.json
+% states them (profile 3: 4); without the argument the test folder holds no profile.json.
+if nargin > 0
+    f = fullfile(pwd, 'profile.json');
+    write_json(f, sprintf('{"n_rx": %d}', nrx));
+    cl = onCleanup(@() delete(f)); %#ok<NASGU>
+end
 evalc('init_params');
 p = load('params.mat').params;
 end
