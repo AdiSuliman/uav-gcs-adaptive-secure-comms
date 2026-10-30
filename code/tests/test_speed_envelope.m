@@ -75,6 +75,113 @@ for i = 1:size(bad, 1)
 end
 end
 
+%% ---------- the statistics ----------
+function test_inference_hand_example(tc)
+% Three bands, two strata, seven flights; the episode of band 0 is not counted.
+x    = [1 1  1 0  0 0 1  1  1 1 1 0  0 0  1];
+band = [1 1  1 1  2 2 2  3  2 2 2 2  3 3  0];
+cl   = [1 1  2 2  3 3 3  4  5 5 5 5  6 6  7];
+st   = [1 1  1 1  1 1 1  2  2 2 2 2  2 2  1];
+pg   = zeros(size(x));
+S = speed_inference(x, band, cl, st, pg, 3, 400, [5 6]);
+verifyEqual(tc, S.n, [4 7 3]);
+verifyEqual(tc, S.nf, [2 2 2]);
+verifyEqual(tc, S.m, [3/4 4/7 1/3], 'AbsTol', 1e-12);
+verifyEqual(tc, S.point, 3/4 - 1/3, 'AbsTol', 1e-12);
+verifyEqual(tc, S.pair, [1 3]);
+verifyEqual(tc, S.nU, 6);
+verifyGreaterThanOrEqual(tc, S.q, 0);
+verifyEqual(tc, S.U, S.point + S.q, 'AbsTol', 1e-12);
+verifyTrue(tc, all(S.lo <= S.hi));
+verifyGreaterThan(tc, S.p, 0); verifyLessThanOrEqual(tc, S.p, 1);
+S2 = speed_inference(x, band, cl, st, pg, 3, 400, [5 6]);
+verifyTrue(tc, isequaln(S, S2), 'the same streams, the same result');
+Sb = speed_inference(x, band, cl, st, pg, 3, 400, [5 6], 'boot');
+verifyTrue(tc, isnan(Sb.p) && isnan(Sb.perm_mean) && Sb.q == S.q);
+Sp = speed_inference(x, band, cl, st, pg, 3, 400, [5 6], 'perm');
+verifyTrue(tc, isnan(Sp.q) && isnan(Sp.U) && Sp.p == S.p && Sp.perm_mean == S.perm_mean);
+% a flight in two bands, strata or groups stops
+verifyError(tc, @() speed_inference([1 0], [1 2], [1 1], [1 1], [0 0], 2, 50, 1), 'speed_inference:cluster');
+verifyError(tc, @() speed_inference([1 0], [1 1], [1 1], [1 2], [0 0], 2, 50, 1), 'speed_inference:cluster');
+verifyError(tc, @() speed_inference([1 0], [1 1], [1 1], [1 1], [0 1], 2, 50, 1), 'speed_inference:cluster');
+% nothing to count
+E = speed_inference([1 0], [0 0], [1 2], [1 1], [0 0], 2, 50, 1);
+verifyTrue(tc, isnan(E.point) && isnan(E.p) && isnan(E.U));
+end
+
+function test_inference_identical_flights(tc)
+% Flights alike inside every band and stratum: every resample is the sample, so the interval is
+% the mean, q is 0 and U is the point.
+[x, band, cl, st, pg] = flat_flights(RandStream('mt19937ar', 'Seed', 3), 3, 12);
+x(:) = 0.75;
+S = speed_inference(x, band, cl, st, pg, 4, 300, [1 2]);
+verifyEqual(tc, S.q, 0); verifyEqual(tc, S.U, S.point, 'AbsTol', 1e-12);
+verifyEqual(tc, S.lo, S.m, 'AbsTol', 1e-12); verifyEqual(tc, S.hi, S.m, 'AbsTol', 1e-12);
+verifyEqual(tc, S.point, 0, 'AbsTol', 1e-12);
+end
+
+function test_inference_matches_reference(tc)
+% The vectorized resampling against plain loops on other streams: the same band intervals, the
+% same q (the Hall & Miller quantile) and the same permutation p and noise-only spread, up to
+% the sampling error of 2000 resamples; groups' own flights are permuted among themselves.
+rs = RandStream('mt19937ar', 'Seed', 11);
+[x, band, cl, st, pg] = banded_flights(rs, [0.95 0.9 0.88 0.82], 3, 12);
+B = 2000;
+S = speed_inference(x, band, cl, st, pg, 4, B, [21 22]);
+[q, lo, hi, p, pm] = reference_inference(x, band, cl, st, pg, 4, B, [31 32]);
+verifyEqual(tc, S.q, q, 'RelTol', 0.2);
+verifyEqual(tc, S.lo, lo, 'AbsTol', 0.02);
+verifyEqual(tc, S.hi, hi, 'AbsTol', 0.02);
+verifyEqual(tc, S.p, p, 'AbsTol', 0.05);
+verifyEqual(tc, S.perm_mean, pm, 'RelTol', 0.06);
+verifyLessThan(tc, S.p, 0.2);                           % the bands differ by construction
+verifyGreaterThan(tc, S.perm_mean, 0);
+verifyGreaterThan(tc, S.U, S.point);
+end
+
+function test_permutation_p_uniform_on_flat_set(tc)
+% Bands unrelated to the rates: the permutation p is uniform (exact under exchangeability,
+% Ernst 2004). 500 flat sets, 199 permutations each.
+rs = RandStream('mt19937ar', 'Seed', 2024);
+R = 500; P = zeros(1, R);
+for i = 1:R
+    [x, band, cl, st, pg] = flat_flights(rs, 3, 30);
+    S = speed_inference(x, band, cl, st, pg, 4, 199, [i i + 1], 'perm');
+    P(i) = S.p;
+end
+P = sort(P);
+D = max(max(abs((1:R) / R - P), abs((0:R-1) / R - P)));   % Kolmogorov-Smirnov distance to the uniform
+verifyLessThan(tc, D, 0.1);
+verifyEqual(tc, mean(P), 0.5, 'AbsTol', 0.07);
+verifyEqual(tc, mean(P <= 0.05), 0.05, 'AbsTol', 0.04);
+verifyGreaterThanOrEqual(tc, min(P), 1 / 200);
+% power: a clear band effect is found
+[x, band, cl, st, pg] = banded_flights(rs, [0.98 0.9 0.8 0.7], 3, 12);
+S = speed_inference(x, band, cl, st, pg, 4, 999, [7 8], 'perm');
+verifyLessThan(tc, S.p, 0.01);
+end
+
+function test_permutation_stays_in_groups(tc)
+% Flights of a shadowing group are permuted among themselves only. Group 1 flies band 4 alone
+% at a rate far below the shared flights' (bands 1-3, equal rates): permuted within the group the
+% gap to band 4 stays whatever the shared flights' bands are, so noise alone gives a spread as
+% large as the observed one; permuted over all flights the gap is spread over the bands and
+% noise alone gives a small spread, against which the observed one is highly significant.
+rs = RandStream('mt19937ar', 'Seed', 5);
+nsh = 24; nsd = 60;
+band = [4 * ones(1, nsh), randi(rs, 3, 1, nsd)];
+cl = 1:(nsh + nsd);
+pg = [ones(1, nsh), zeros(1, nsd)];
+st = [mod(0:nsh-1, 3) + 1, mod(0:nsd-1, 3) + 1];
+x = [0.5 + 0.02 * rand(rs, 1, nsh), 0.9 + 0.02 * rand(rs, 1, nsd)];
+Sg = speed_inference(x, band, cl, st, pg, 4, 999, [1 2], 'perm');
+Su = speed_inference(x, band, cl, st, zeros(size(pg)), 4, 999, [1 2], 'perm');
+verifyGreaterThan(tc, Sg.point, 0.35);
+verifyGreaterThan(tc, Sg.perm_mean, 0.35);
+verifyLessThan(tc, Su.perm_mean, 0.2);
+verifyLessThan(tc, Su.p, 0.01);
+end
+
 %% ---------- helpers ----------
 function write_json(f, s)
 fid = fopen(f, 'w'); fprintf(fid, '%s', s); fclose(fid);
