@@ -1896,7 +1896,19 @@ verifyEqual(tc, sort(q), [61 62 9101 9102]);
 % own, and every one lies below the lowest flight stream
 m = [9101 9102 9103 9111:9115 9131:9135 9141:9145 9151:9155];
 verifyEqual(tc, numel(unique(m)), numel(m));
-for x = {q, m}
+% D110's streams (m_head.m, fuse_head.m): the heads' trees, 9400 + the mask of the folds left out
+% for LBH and 9500 + it for LBH+CFAR, and the inner folds' bootstraps 9161-9165; R1's bootstrap
+% of the unseen Eb/N0 gap (eval_unseen_snr.m, 4251): each its own and none of the d91 streams
+h = [9400:9431, 9500:9531, 9161:9165, 4251];
+verifyEqual(tc, numel(unique([h, m, q])), numel([h, m, q]));
+verifyEqual(tc, arrayfun(@(e) fuse_head('seed', 'LBH', find(bitget(e, 1:5))), 0:31), 9400:9431);
+verifyEqual(tc, arrayfun(@(e) fuse_head('seed', 'LBH+CFAR', find(bitget(e, 1:5))), 0:31), 9500:9531);
+src = fileread(fullfile(tc.TestData.root, 'code', 'dev', 'm_head.m'));
+verifyEqual(tc, cellfun(@(x) str2double(x{1}), regexp(src, '''Seed'', (\d+)', 'tokens')), 9101);
+verifyNotEmpty(tc, strfind(src, 'fusion_adopt(''boot'', fit.run, 1000, 9102)'));
+verifyNotEmpty(tc, strfind(src, 'fusion_adopt(''boot'', fit.run(tr), 1000, 9160 + k)'));
+verifyNotEmpty(tc, strfind(fileread(which('eval_unseen_snr')), 'boot_cluster([b.correct], [b.n], 1:numel(b), 2000, 4251, double(un))'));
+for x = {q, m, h}
     verifyEmpty(tc, intersect(x{1}, N(:)));
     verifyLessThan(tc, max(x{1}), min(N(:)));
 end
