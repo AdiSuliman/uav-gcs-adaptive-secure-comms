@@ -196,7 +196,7 @@ ur = NaN; if isfield(PP, 'unk_retain') && ~isempty(PP.unk_retain), ur = PP.unk_r
 rep{end+1} = sprintf(['Deployed settings (data/trained_dqn.mat): kind %s, monitor %s %d/%d, drop threshold %g %s, esc_drop %s ' ...
     '(registered: on), unknown retention %g (registered: 0.99), unknown threshold %g'], DK, PP.alarm_mode, PP.confirm(1), ...
     PP.confirm(2), PP.drop_db, drop_unit(PP.alarm_mode), ternary(ed, 'on', 'OFF'), ur, PP.maha_thr);
-if ~ed || abs(ur - 0.99) > 1e-12
+if ~ed || ~(abs(ur - 0.99) <= 1e-12)
     rep{end+1} = 'NOTE: the deployed settings differ from the registered description; the screen ran the settings of the file.';
 end
 rep{end+1} = '';
