@@ -9,6 +9,8 @@ function PP = decision_settings(PP, S)
 %               rule_dwell ('run', 'group': policy_decide.m), rule_nb (the rule's answer to a
 %               noise burst, {not separable, separable}), core_nb (the core rule's)
 %   escalation  esc_drop (an escalation on a confirmed drop alarm read as none)
+%   dqn         lb_complete (the link-budget completion of the DQN's action, lb_complete.m;
+%               absent or false: off)
 %   S: any struct with some of these fields (a field absent keeps PP's; an empty drop_db,
 %   maha_thr, alarm_mode or confirm keeps PP's), or data/trained_dqn.mat loaded: its
 %   deployed DQN's settings (dec), else the monitor it saved (confirm, alarm_mode, drop_db,
@@ -16,7 +18,7 @@ function PP = decision_settings(PP, S)
 if isfield(S, 'dec') && isstruct(S.dec), S = S.dec; end
 keep = {'alarm_mode', 'confirm', 'drop_db', 'maha_thr'};
 for f = {'alarm_mode', 'confirm', 'drop_db', 'confirm_sweep', 'maha_thr', 'unk_retain', 'unk_mode', ...
-        'rule_mmse_db', 'rule_slot', 'rule_dwell', 'esc_drop', 'rule_nb', 'core_nb'}
+        'rule_mmse_db', 'rule_slot', 'rule_dwell', 'esc_drop', 'rule_nb', 'core_nb', 'lb_complete'}
     if ~isfield(S, f{1}) || (isempty(S.(f{1})) && ismember(f{1}, keep)), continue; end
     PP.(f{1}) = S.(f{1});
 end

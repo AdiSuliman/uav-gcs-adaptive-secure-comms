@@ -36,6 +36,8 @@ for n = {'rule_nb', 'core_nb'}                    % the noise-burst answers, whe
     x = field_or(S, n{1});
     if ~isempty(x), c{end+1} = {n{1}, x}; end %#ok<AGROW>
 end
+x = field_or(S, 'lb_complete');                   % the link-budget completion, when on
+if ~isempty(x) && x(1), c{end+1} = {'lb_complete', true}; end
 end
 
 function v = field_or(S, n)

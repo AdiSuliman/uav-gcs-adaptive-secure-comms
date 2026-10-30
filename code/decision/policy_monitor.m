@@ -75,11 +75,13 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   frames as measured (each is unchanged by a common shift or scale).
 %   mem.since starts saturated (10): the policies never see the episode clock.
 %   mem.deg_n / mem.conf_n: consecutive degraded / confirmed-alarm cycles; mem.pend:
-%   a requested change not yet received.
+%   a requested change not yet received. With PP.lb_complete the memory of the link-budget
+%   completion (lb_complete.m): mem.drop_n, mem.gc, mem.gref, mem.grp, mem.grx.
 %   M: ber_avg, plr (NE x 1), ebno_est (as measured), drop (dB, without the configurations'
 %      known gains), drop_alarm, degraded, cls, alarm, confirmed (1 x NE),
 %      probs (NE x classes, fused), te (NE x 9, persistence measurements of the window,
-%      temporal_evidence.m)
+%      temporal_evidence.m), and with PP.lb_complete dcomb (1 x NE), the drop of the combined
+%      channel gain of all antennas (lb_complete.m)
 C = decision_config();
 switch cmd
     case 'init'
@@ -187,6 +189,7 @@ switch mode
         M.alarm = hostile | M.degraded;
 end
 q = ~M.alarm;
+ex = [];                                                        % the excursion measure of the drop reference (drop alarms only)
 if any(strcmp(mode, {'class_drop', 'class_cusum'}))            % the reference before a change building up
     if ~isfield(mem, 'rp'), mem.rp = nan(size(mem.ref)); mem.rx = false(numel(eg), 1); end
     ex = mem.cs; if strcmp(mode, 'class_drop'), ex = double(M.drop(:) >= C.sev.path_loss.levels(1) / 2); end
@@ -205,6 +208,9 @@ if ~isempty(cs) && ~strcmp(mode, 'degraded')                    % the sweeper's 
     M.confirmed = M.confirmed | sum(mem.sw(:, end-cs(2)+1:end), 2)' >= cs(1);
 end
 mem.conf_n(M.confirmed) = mem.conf_n(M.confirmed) + 1; mem.conf_n(~M.confirmed) = 0;
+if lb_complete('on', PP)                                        % the memory of the link-budget completion
+    [mem, M.dcomb] = lb_complete('track', mem, obs, gw(link), q(:), ex, M);
+end
 % Observation of this cycle for the agent's state (policy_state.m), newest first
 o = policy_obs(obs, M, bc, unk);
 if isempty(mem.hist), mem.hist = repmat(o, 1, 1, C.hist); end

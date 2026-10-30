@@ -27,7 +27,8 @@ function R = rollout_policy(kind, PP, K, spec, split, agent, opt, seed)
 %                     (link_env.m, fec_gap: never restored, so no run starts in them)
 %          recoverable  some configuration restores this geometry (link_env.m)
 %          recoverable_core  some configuration of the core action set restores it
-%          switches, false_sw (whole episode), esc (escalations), aoa (3 x NE),
+%          switches, false_sw (whole episode), esc (escalations), lb (proposals the link-budget
+%          completion changed, lb_complete.m; only with PP.lb_complete), aoa (3 x NE),
 %          cfg_final, r (geometry index), cfg_trace (T x NE); at the first change:
 %          fc_t, fc_cls (index into PP.classes, numel + 1 = unknown), fc_deg, fc_drop,
 %          fc_dal (the monitor's drop alarm)
@@ -55,6 +56,7 @@ opt.rs = RandStream('mt19937ar', 'Seed', seed + 1);
 [E, obs] = link_env('reset', PP, K, spec, split, rs);
 NE = E.NE; T = spec.T;
 mem = [];
+lb_n = [];
 cls_list = [cellstr(string(PP.classes(:)')), {'unknown'}];
 fc = struct('t', zeros(1, NE), 'cls', zeros(1, NE), 'deg', false(1, NE), 'drop', nan(1, NE), 'dal', false(1, NE));
 tr = struct('r', zeros(T, NE), 'q', zeros(T, NE), 'rest', false(T, NE), 'rplr', false(T, NE), 'gput', zeros(T, NE), ...
@@ -68,6 +70,7 @@ for t = 1:T
     else
         [a, mem, dinf] = policy_decide(kind, obs, E.cfg, mem, PP, agent, opt);
         tr.esc(t, :) = dinf.escalated;
+        if isfield(dinf, 'lb'), if isempty(lb_n), lb_n = zeros(1, NE); end, lb_n = lb_n + dinf.lb; end
         tr.cls(t, :) = cellfun(@(c, q) ismember(c, q), dinf.cls, comp);
         tr.conf(t, :) = dinf.confirmed;
     end
@@ -98,6 +101,7 @@ R.gput_post = mean(g, 1, 'omitnan');
 R.switches = sum(tr.ch, 1);
 R.false_sw = sum(tr.fs, 1);
 R.esc = sum(tr.esc, 1);
+if ~isempty(lb_n), R.lb = lb_n; end
 R.t_rec = nan(1, NE);
 for i = 1:NE
     t0 = find(post(:, i), 1);

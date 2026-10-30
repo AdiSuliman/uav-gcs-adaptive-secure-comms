@@ -46,7 +46,9 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %   picks between the two dwells on validation (rule + escalation), which every rule kind,
 %   the core and blind ones included, then runs (decision_settings.m)
 %   dqn       argmax of the Q-network over the configurations allowed by the
-%             shield (policy_mask.m); switching costs are part of its reward
+%             shield (policy_mask.m); switching costs are part of its reward. With
+%             PP.lb_complete (decision_settings.m) its link-budget factor is then completed
+%             to cover the combined channel-gain drop (lb_complete.m)
 %   *_esc     escalation: move to the next configuration not yet tried in this
 %             incident (DQN: next-highest Q; rule and table: the fixed ladder C.ladder)
 %             when the base policy keeps
@@ -70,7 +72,8 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %   random, fixed: reference policies, no monitor gating ('fixed' at no_action is
 %   the link that does not respond)
 %
-%   info: q (Q-values, dqn kinds), cls, degraded, confirmed, escalated, ber_avg, drop, drop_alarm
+%   info: q (Q-values, dqn kinds), cls, degraded, confirmed, escalated, ber_avg, drop, drop_alarm;
+%   with PP.lb_complete lb (proposals the completion changed)
 if nargin < 7, opt = struct(); end
 C = decision_config();
 if isfield(opt, 'monitor'), PP = decision_settings(PP, opt.monitor); end
@@ -89,6 +92,7 @@ if core && ~strcmp(base, 'rule')
     error('policy_decide:core', 'policy_decide: the core action set is a rule option, not of %s', kind);
 end
 q = [];
+lbn = false(1, NE);
 switch base
     case 'dqn'
         st = policy_state(mem, cfg, M.confirmed, nA);
@@ -99,6 +103,7 @@ switch base
         end
         q(~policy_mask(cfg, M.confirmed, mem.since, nA, na)) = -inf;
         [~, a] = max(q, [], 1);
+        if lb_complete('on', PP), [a, lbn] = lb_complete('apply', a, cfg, M, mem, PP); end
     case {'rule', 'table'}
         a = cfg;
         gain = obs_mmse_pred(obs, NE); qi = obs.feat(:, feature_index('q_iot'));
@@ -181,6 +186,7 @@ end
 mem = policy_monitor('change', mem, a ~= cfg);
 info = struct('q', q, 'cls', {M.cls}, 'degraded', M.degraded, 'confirmed', M.confirmed, ...
     'escalated', escalated, 'ber_avg', M.ber_avg', 'drop', M.drop, 'drop_alarm', M.drop_alarm);
+if lb_complete('on', PP), info.lb = lbn; end
 end
 
 function [gm, gid] = action_groups(A)
