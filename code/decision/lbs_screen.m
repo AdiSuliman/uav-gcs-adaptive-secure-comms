@@ -4,15 +4,18 @@ function out = lbs_screen(src, varargin)
 %   out = lbs_screen(src, 'registered_by', hash, 'smoke', true)
 %   src            profile 1's folder, only read: data/policy_pools.mat, data/unknown_threat_agents.mat,
 %                  data/trained_dqn.mat, data/clean_val_pools.mat, results/eval_detector_metrics.mat
-%   registered_by  the hash of the commit that registers the screen (printed in the log)
+%   registered_by  the hash of the commit that registers the screen, resolved in the docs
+%                  repository (lbs_inputs.m 'registered'); its full hash is printed in the log
+%   docs           that repository (default: uav-gcs-v7-docs beside src)
 %   smoke          path_loss and one other threat, one repetition, two clean batches: no verdict
 %   reps, boot     repetitions of every flight (default 2, as experiment_unknown_threat.m) and
 %                  bootstrap resamples (default 2000)
 %
-%   Runs from the repository folder that holds this code (the current folder), not from src: the
-%   clean reference is read from data/policy_pools.mat of the current folder (clean_ber_ref.m), so
-%   the four inputs are copied there with SHA-256 (lbs_inputs.m) unless a verified copy is in place,
-%   and the clean reference is asserted finite before any run.
+%   Runs from the repository folder that holds this code (the current folder), not from src or from
+%   any other folder: it writes data/ and results/ there. The clean reference is read from
+%   data/policy_pools.mat of the current folder (clean_ber_ref.m), so the four inputs are copied
+%   there with SHA-256 (lbs_inputs.m, which never overwrites a different file) unless a verified
+%   copy is in place, and the clean reference is asserted finite before any run.
 %
 %   Every run is on the validation split, with profile 1's deployed decision-time settings from
 %   data/trained_dqn.mat (decision_settings.m), and with the completion off and on over the same
@@ -27,6 +30,7 @@ function out = lbs_screen(src, varargin)
 %   The go rule is lbs_verdict.m. Output: results/lbs_screen.txt, results/lbs_screen.mat (out).
 ip = inputParser;
 addParameter(ip, 'registered_by', '');
+addParameter(ip, 'docs', '');
 addParameter(ip, 'smoke', false);
 addParameter(ip, 'reps', 2);
 addParameter(ip, 'boot', 2000);
@@ -38,6 +42,16 @@ if ~ischar(o.registered_by) || isempty(regexp(o.registered_by, '^[0-9a-f]{7,40}$
 end
 if strcmpi(char(java.io.File(src).getCanonicalPath()), char(java.io.File(pwd).getCanonicalPath()))
     error('lbs_screen:folder', 'lbs_screen: run it from the worktree of the screen, not from its source folder %s', src);
+end
+if ~strcmpi(char(java.io.File(project_root()).getCanonicalPath()), char(java.io.File(pwd).getCanonicalPath()))
+    error('lbs_screen:folder', ['lbs_screen: run it from %s, the folder that holds this code; ' ...
+        'it writes data/ and results/ in the current folder'], project_root());
+end
+if isempty(o.docs), o.docs = fullfile(fileparts(char(java.io.File(src).getCanonicalPath())), 'uav-gcs-v7-docs'); end
+try
+    o.registered_by = lbs_inputs('registered', o.docs, o.registered_by);
+catch e
+    error('lbs_screen:registration', 'lbs_screen: no run starts before its registering commit is found: %s', e.message);
 end
 SPLIT = 2; NE = 64; SEED0 = 7000; SEED_B = 1150; SEED_C = 41000; N_CLEAN = 1800;
 t0 = tic;
@@ -145,11 +159,12 @@ fprintf('Clean validation flights: %d episodes, changes %.2f%% -> %.2f%% (%+.2f 
 %% 4. Verdict and report
 V = lbs_verdict(rows, clean);
 [cm, tr, dirty] = code_state();
-rule_sha = {lbs_inputs('hash', which('lbs_verdict')), lbs_inputs('hash', which('lb_complete'))};
+rule_files = {'lbs_verdict', 'lbs_boot', 'lb_complete', 'lbs_screen'};
+rule_sha = cellfun(@(f) sprintf('%s.m %s', f, lbs_inputs('hash', which(f))), rule_files, 'UniformOutput', false);
 rep = report_lines(PP, DK, o, rows, clean, V, inp, cm, tr, dirty, rule_sha, ebno_thr, thr_from, nS, toc(t0) / 60);
 if ~exist('results', 'dir'), mkdir('results'); end
-fid = fopen('results/lbs_screen.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
-fprintf('%s\n', rep{:});
+fid = fopen('results/lbs_screen.txt', 'w'); fprintf(fid, '%s\n', strjoin(rep, newline)); fclose(fid);
+fprintf('%s\n', strjoin(rep, newline));
 out = struct('rows', rows, 'clean', clean, 'verdict', V, 'inputs', inp, 'commit', cm, 'tree', tr, 'registered_by', o.registered_by, ...
     'smoke', o.smoke, 'minutes', toc(t0) / 60, 'EP', EP);
 save('results/lbs_screen.mat', 'out', '-v7.3');
@@ -189,7 +204,7 @@ function rep = report_lines(PP, DK, o, rows, clean, V, inp, cm, tr, dirty, rule_
 rep = {'=== LB-S: LINK-BUDGET COMPLETION ON PROFILE 1''S KEPT AGENTS (VALIDATION SCREEN) ==='};
 rep{end+1} = sprintf('Generated: %s | code commit %s, code tree %s%s | registered by %s | %.1f min', datestr(now), cm, tr, ...
     ternary(dirty, ' + local changes in code/', ''), o.registered_by, minutes);
-rep{end+1} = sprintf('Rule code SHA-256: lbs_verdict.m %s, lb_complete.m %s', rule_sha{:});
+rep{end+1} = ['Rule code SHA-256: ' strjoin(rule_sha, ', ')];
 rep{end+1} = 'Inputs, copies in data/ with the SHA-256 of the source:';
 for i = 1:numel(inp.files), rep{end+1} = sprintf('  %s  %s', inp.sha256{i}, inp.files{i}); end %#ok<AGROW>
 ed = isfield(PP, 'esc_drop') && ~isempty(PP.esc_drop) && PP.esc_drop;

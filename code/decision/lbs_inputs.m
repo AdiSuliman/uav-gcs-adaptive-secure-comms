@@ -3,12 +3,16 @@ function out = lbs_inputs(cmd, varargin)
 %   out = lbs_inputs('copy', src, dst)    copies policy_pools.mat, unknown_threat_agents.mat,
 %       trained_dqn.mat and clean_val_pools.mat from the folder src to the folder dst, hashes the
 %       source and the copy, and writes dst/lbs_inputs.sha256 (sha256sum format). out.files,
-%       out.sha256. src is only read.
+%       out.sha256. src is only read. A file already in dst is never overwritten: one with the
+%       source's hash is kept, one with another hash stops the copy before anything is written
 %   out = lbs_inputs('verify', dst)       hashes the files of dst against dst/lbs_inputs.sha256
 %   h = lbs_inputs('hash', file)          SHA-256 of one file, lower-case hex
 %   r = lbs_inputs('clean_ref', ebno)     stops unless the clean reference read from
 %       data/policy_pools.mat of the current folder (clean_ber_ref.m) is finite at ebno [dB]: a
 %       folder without that file reads NaN and every cycle then reads as degraded
+%   h = lbs_inputs('registered', docs, hash)   the full hash of the commit hash in the git
+%       repository docs; stops unless docs/DECISIONS.md of that commit holds, as headings, the
+%       entries that register the screen and its run guards
 switch cmd
     case 'hash'
         out = sha256_file(varargin{1});
@@ -18,6 +22,8 @@ switch cmd
         out = verify_inputs(varargin{:});
     case 'clean_ref'
         out = clean_ref_check(varargin{:});
+    case 'registered'
+        out = registered_commit(varargin{:});
     otherwise
         error('lbs_inputs: unknown command %s', cmd);
 end
@@ -32,18 +38,27 @@ files = input_files();
 if ~isfolder(src), error('lbs_inputs:source', 'lbs_inputs: %s is not a folder', src); end
 if ~isfolder(dst), mkdir(dst); end
 if strcmpi(canon(src), canon(dst)), error('lbs_inputs:same', 'lbs_inputs: the copy would land on its source %s', src); end
-need = 0;
+need = 0; have = false(1, numel(files));
 for i = 1:numel(files)
     f = fullfile(src, files{i});
     if ~isfile(f), error('lbs_inputs:missing', 'lbs_inputs: %s is missing', f); end
-    d = dir(f); need = need + d.bytes;
+    have(i) = isfile(fullfile(dst, files{i}));
+    d = dir(f);
+    if ~have(i), need = need + d.bytes; end
 end
-free = double(java.io.File(dst).getUsableSpace());
+free = double(java.io.File(canon(dst)).getUsableSpace());
 if free < need + 2^30
     error('lbs_inputs:space', 'lbs_inputs: %.1f GB free in %s, %.1f GB needed', free / 2^30, dst, (need + 2^30) / 2^30);
 end
 h = cell(1, numel(files));
-for i = 1:numel(files)
+for i = find(have)                                       % a file already in dst stays, if it is the source's
+    h{i} = sha256_file(fullfile(src, files{i}));
+    if ~strcmp(sha256_file(fullfile(dst, files{i})), h{i})
+        error('lbs_inputs:exists', 'lbs_inputs: %s exists and differs from %s; it is not overwritten', ...
+            fullfile(dst, files{i}), fullfile(src, files{i}));
+    end
+end
+for i = find(~have)
     fs = fullfile(src, files{i}); fd = fullfile(dst, files{i}); part = [fd '.part'];
     h{i} = sha256_file(fs);
     copyfile(fs, part);
@@ -103,6 +118,29 @@ b = clean_ber_ref(ebno, 'plr_fec');
 r.plr_fec = all(isfinite(b(:)));
 if ~r.plr_fec && any(isfinite(b(:)))
     error('lbs_inputs:clean_ref', 'lbs_inputs: the coded-link clean reference (plr_fec) is finite at some Eb/N0 only');
+end
+end
+
+function h = registered_commit(docs, hash)
+need = {'D115', 'D118'};                                 % the screen, and the order and run guards
+if ~ischar(hash) || isempty(regexp(hash, '^[0-9a-f]{7,40}$', 'once'))
+    error('lbs_inputs:registration', 'lbs_inputs: the registering commit must be given as a git hash (7-40 hex digits)');
+end
+if ~isfolder(docs), error('lbs_inputs:registration', 'lbs_inputs: the docs repository %s is not a folder', docs); end
+g = sprintf('git --no-optional-locks -C "%s" ', docs);
+[s, o] = system([g 'rev-parse --verify --quiet "' hash '^{commit}"']);
+h = regexp(o, '(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])', 'match', 'once');
+if s ~= 0 || isempty(h)
+    error('lbs_inputs:registration', 'lbs_inputs: %s is no commit of the docs repository %s (or git did not run)', hash, docs);
+end
+[s, txt] = system([g 'show "' h ':docs/DECISIONS.md"']);
+if s ~= 0
+    error('lbs_inputs:registration', 'lbs_inputs: commit %s of %s holds no docs/DECISIONS.md', h, docs);
+end
+for i = 1:numel(need)
+    if isempty(regexp(txt, ['^## ' need{i} '\s'], 'once', 'lineanchors'))
+        error('lbs_inputs:registration', 'lbs_inputs: docs/DECISIONS.md of commit %s has no %s heading', h, need{i});
+    end
 end
 end
 

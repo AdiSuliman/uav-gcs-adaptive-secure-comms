@@ -77,8 +77,49 @@ end
 end
 
 function drop_base(tmp)
-rmpath(tmp); clear policy_decide_base policy_monitor_base
+rmpath(tmp); clear policy_decide_base policy_monitor_base rollout_policy_base
 try, rmdir(tmp, 's'); catch, end
+end
+
+function test_rollout_off_matches_the_base_commit(tc)
+% rollout_policy.m with the switch off (absent or false) returns what the file of the base
+% commit returns, on a toy world, for a rule kind and a DQN kind; with it on the same fields
+% plus lb, which counts nothing where the pools hold no antenna gains.
+root = tc.TestData.root;
+[s, ~] = system(sprintf('git -C "%s" cat-file -e d4623ed', root));
+assumeTrue(tc, s == 0, 'git or the base commit is not available');
+[s, txt] = system(sprintf('git -C "%s" show d4623ed:code/decision/rollout_policy.m', root));
+assumeTrue(tc, s == 0, 'the base file could not be read from git');
+txt = strrep(txt, 'function R = rollout_policy(', 'function R = rollout_policy_base(');
+verifyTrue(tc, contains(txt, 'function R = rollout_policy_base('));
+tmp = tempname; mkdir(tmp);
+cl = onCleanup(@() drop_base(tmp));
+fid = fopen(fullfile(tmp, 'rollout_policy_base.m'), 'w'); fwrite(fid, txt); fclose(fid);
+addpath(tmp); clear rollout_policy_base
+[PP, K] = toy_world();
+ag = dense_agent(PP.actions, 'channel_switch', 2);
+spec = struct('scn', [2 2], 's', [1 1], 'onset', [3 3], 'follow', false(1, 2), 'fdelay', [0 0], 'unk', false(1, 2), ...
+    'T', 30, 'r', [1 1]);
+for k = {'rule_esc', 'dqn_esc'}
+    R0 = rollout_policy_base(k{1}, PP, K, spec, 1, ag, struct(), 4);
+    verifyFalse(tc, isfield(R0, 'lb'));
+    verifyTrue(tc, isequaln(R0, rollout_policy(k{1}, PP, K, spec, 1, ag, struct(), 4)), k{1});
+    P = PP; P.lb_complete = false;
+    verifyTrue(tc, isequaln(R0, rollout_policy(k{1}, P, K, spec, 1, ag, struct(), 4)), k{1});
+    P.lb_complete = true;
+    R1 = rollout_policy(k{1}, P, K, spec, 1, ag, struct(), 4);
+    verifyEqual(tc, R1.lb, zeros(1, 2), k{1});
+    verifyTrue(tc, isequaln(R0, rmfield(R1, 'lb')), k{1});
+end
+end
+
+function test_rollout_counts_the_completion_only_when_it_ran(tc)
+% rollout_policy.m writes R.lb once, from the decision cycle's info.lb only, and only when the
+% decision cycle reported it (static; the parity run is test_rollout_off_matches_the_base_commit).
+code = regexprep(fileread(which('rollout_policy')), '%[^\n]*', '');
+verifyNumElements(tc, regexp(code, '\<R\.lb\>', 'match'), 1);
+verifyNotEmpty(tc, strfind(code, 'if isfield(dinf, ''lb'')'));
+verifyNotEmpty(tc, strfind(code, 'if ~isempty(lb_n), R.lb = lb_n; end'));
 end
 
 function test_switch_is_stored_with_the_agent(tc)
@@ -268,10 +309,14 @@ cs = find(strcmp(A, 'channel_switch'));
 [a, acted] = apply_direct(PP, {'channel_switch'}, 10);
 verifyEqual(tc, a, ref); verifyTrue(tc, acted);
 blocked = {'drop_n', (C.esc - 1); 'since', (C.hold - 1); 'pend', true; 'confirmed', false};
-for i = 1:size(blocked, 1)
+for i = 1:size(blocked, 1)                                                              % the shield also holds the last two
     [a, acted] = apply_direct(PP, {'channel_switch'}, 10, blocked{i, :});
     verifyEqual(tc, a, cs, blocked{i, 1}); verifyFalse(tc, acted, blocked{i, 1});
 end
+[a, acted] = apply_direct(PP, {'channel_switch'}, 10, 'since', C.hold - 1, 'cfg', ref);  % the shield allows the target: the hold term alone blocks
+verifyEqual(tc, a, cs); verifyFalse(tc, acted);
+[a, acted] = apply_direct(PP, {'channel_switch'}, 10, 'since', C.hold, 'cfg', ref);
+verifyEqual(tc, a, ref); verifyTrue(tc, acted);
 for dc = [NaN 2.99 0 -5]
     [a, acted] = apply_direct(PP, {'channel_switch'}, dc);
     verifyEqual(tc, a, cs); verifyFalse(tc, acted);
@@ -285,6 +330,21 @@ verifyEqual(tc, a, ref); verifyFalse(tc, acted);
     'drop_n', [5 1 5 5], 'since', [10 10 10 1]);
 verifyEqual(tc, acted, [true false true false]);
 verifyEqual(tc, A(a), {'channel_switch+rate_reduce+power_control', 'channel_switch', 'power_control', 'channel_switch'});
+end
+
+function test_drop_counter_counts_consecutive_confirmed_alarm_cycles(tc)
+% mem.drop_n counts the consecutive cycles of a confirmed drop alarm: an alarm without its
+% confirmation, or a confirmation without the drop alarm, starts the count again.
+A = policy_actions();
+mem = policy_monitor('init', 1, numel(A));
+conf = [1 1 1 0 1 1 1 0]; alarm = [1 1 0 1 1 1 1 0];
+dn = zeros(1, numel(conf));
+for t = 1:numel(conf)
+    M = struct('confirmed', logical(conf(t)), 'drop_alarm', logical(alarm(t)));
+    mem = lb_complete('track', mem, struct('gant', zeros(1, 3)), 0, true, [], M);
+    dn(t) = mem.drop_n;
+end
+verifyEqual(tc, dn, [1 2 0 0 1 2 3 0]);
 end
 
 function test_reads_receiver_measurements_only(tc)
@@ -395,6 +455,27 @@ fid = fopen(f, 'r+'); b = fread(fid, 1, '*uint8'); fseek(fid, 0, 'bof'); fwrite(
 verifyError(tc, @() lbs_inputs('verify', dst), 'lbs_inputs:hash');
 end
 
+function test_inputs_copy_never_overwrites_a_different_file(tc)
+% A file of the destination with another hash stops the copy before anything is written; the
+% source's own copy already there is kept and the copy completes.
+tmp = tempname; mkdir(tmp);
+cl = onCleanup(@() rmdir_quiet(tmp));
+src = fullfile(tmp, 'src'); dst = fullfile(tmp, 'dst'); mkdir(src); mkdir(dst);
+make_inputs(src);
+f = fullfile(dst, 'trained_dqn.mat');
+put_text(f, 'another file');
+h0 = lbs_inputs('hash', f);
+verifyError(tc, @() lbs_inputs('copy', src, dst), 'lbs_inputs:exists');
+verifyEqual(tc, lbs_inputs('hash', f), h0);                                % untouched
+verifyFalse(tc, isfile(fullfile(dst, 'policy_pools.mat')));                % nothing else was written
+verifyFalse(tc, isfile(fullfile(dst, 'lbs_inputs.sha256')));
+delete(f); copyfile(fullfile(src, 'trained_dqn.mat'), f);
+c = lbs_inputs('copy', src, dst);
+v = lbs_inputs('verify', dst);
+verifyEqual(tc, v.sha256, c.sha256);
+verifyEqual(tc, c.sha256{3}, lbs_inputs('hash', fullfile(src, 'trained_dqn.mat')));
+end
+
 function test_clean_reference_must_be_finite(tc)
 % A folder without data/policy_pools.mat reads NaN and every cycle then reads as degraded; the
 % check stops it, and stops a table with a gap.
@@ -422,7 +503,91 @@ verifyError(tc, @() lbs_screen(pwd, 'registered_by', 'XYZ'), 'lbs_screen:registr
 verifyError(tc, @() lbs_screen(pwd, 'registered_by', 'abcdef1'), 'lbs_screen:folder');
 end
 
+function test_screen_runs_only_from_the_folder_that_holds_the_code(tc)
+% It writes data/ and results/ in the current folder: from any other folder it stops before
+% anything is written there.
+tmp = tempname; mkdir(tmp);
+cwd = pwd; cl = onCleanup(@() back(cwd, tmp));
+cd(tmp);
+verifyError(tc, @() lbs_screen(tc.TestData.root, 'registered_by', 'abcdef1'), 'lbs_screen:folder');
+verifyEmpty(tc, setdiff({dir(tmp).name}, {'.', '..'}));
+end
+
+function test_screen_stops_unless_the_docs_repository_registers_the_hash(tc)
+tmp = tempname; mkdir(tmp);
+cwd = pwd; cl = onCleanup(@() back(cwd, tmp));
+cd(tc.TestData.root);
+src = fullfile(tmp, 'src'); mkdir(src);
+verifyError(tc, @() lbs_screen(src, 'registered_by', 'abcdef1', 'docs', fullfile(tmp, 'no_docs')), 'lbs_screen:registration');
+code = fileread(which('lbs_screen'));
+verifyNotEmpty(tc, strfind(code, 'rule_files = {''lbs_verdict'', ''lbs_boot'', ''lb_complete'', ''lbs_screen''};'));
+end
+
+function test_registered_hash_is_resolved_in_the_docs_repository(tc)
+% The registering commit must exist in the docs repository and hold the entries of the screen
+% and of its run guards as headings of docs/DECISIONS.md.
+[s, ~] = system('git --version');
+assumeTrue(tc, s == 0, 'git is not available');
+tmp = tempname; mkdir(tmp);
+cl = onCleanup(@() rmdir_quiet(tmp));
+docs = fullfile(tmp, 'docs_repo'); mkdir(fullfile(docs, 'docs'));
+gg = @(c) system(sprintf('git -C "%s" -c user.name=lbs -c user.email=lbs@example.invalid -c commit.gpgsign=false %s', docs, c));
+[s, ~] = gg('init -q');
+assumeTrue(tc, s == 0, 'git init failed');
+f = fullfile(docs, 'docs', 'DECISIONS.md');
+h = cell(1, 3);
+txt = {sprintf('# Decisions\n\n## D115 - the screen\n\n## D118 - the guards\n'), ...
+    sprintf('# Decisions\n\n## D115 - the screen\n'), ...
+    sprintf('# Decisions\n\n## D115 - the screen\n\nsee ## D118 - the guards, later\n')};
+for i = 1:3
+    put_text(f, txt{i});
+    gg('add docs/DECISIONS.md'); gg('commit -q -m c');
+    [~, o] = gg('rev-parse HEAD');
+    h{i} = regexp(o, '[0-9a-f]{40}', 'match', 'once');
+    assumeNotEmpty(tc, h{i});
+end
+verifyEqual(tc, lbs_inputs('registered', docs, h{1}), h{1});
+verifyEqual(tc, lbs_inputs('registered', docs, h{1}(1:7)), h{1});                          % an abbreviation is resolved
+verifyError(tc, @() lbs_inputs('registered', docs, h{2}), 'lbs_inputs:registration');       % no heading of the run guards
+verifyError(tc, @() lbs_inputs('registered', docs, h{3}), 'lbs_inputs:registration');       % mentioned, not a heading
+verifyError(tc, @() lbs_inputs('registered', docs, 'abcdef1'), 'lbs_inputs:registration');  % no such commit
+verifyError(tc, @() lbs_inputs('registered', docs, 'XYZ'), 'lbs_inputs:registration');
+verifyError(tc, @() lbs_inputs('registered', fullfile(tmp, 'none'), h{1}), 'lbs_inputs:registration');
+end
+
 %% ---------- helpers ----------
+function make_inputs(src)
+% The four input files of the screen as small files of known content.
+names = {'policy_pools.mat', 'unknown_threat_agents.mat', 'trained_dqn.mat', 'clean_val_pools.mat'};
+for i = 1:numel(names)
+    fid = fopen(fullfile(src, names{i}), 'w'); fwrite(fid, uint8(mod((1:5000) * i, 251))); fclose(fid);
+end
+end
+
+function put_text(f, txt)
+fid = fopen(f, 'w'); fwrite(fid, txt); fclose(fid);
+end
+
+function [PP, K] = toy_world()
+% Frame pools of one flight: the clean link, and a jammer that channel_switch and
+% freq_diversity escape; no antenna gains in the pools.
+A = policy_actions(); nA = numel(A); names = link_features('names');
+PP = struct('actions', {A}, 'scen', {{'none', 'jamming'}}, 'ebno', [10 12], 'runs', {{101}}, 'F_SUB', 20, ...
+    'classes', {{'none', 'jamming'}}, 'feat_names', {names}, 'maha_thr', 0, 'clean', [1e-6 1e-6], 'clean_fer', [0 0], ...
+    'gp', ones(1, nA), 'bw', 1 + contains(A, 'freq_diversity'), 'pw', ones(1, nA), 'sps', 4, 'bps', 2);
+PP.pools = cell(2, 2, nA, 1);
+for sc = 1:2
+    for a = 1:nA
+        good = sc == 1 || contains(A{a}, 'channel_switch') || contains(A{a}, 'freq_diversity');
+        F = zeros(20, numel(names)); F(:, feature_index('crc_fail')) = ~good;
+        F(:, feature_index('log_ber')) = log10(max(0.1 * ~good, 1e-6));
+        PP.pools(sc, :, a, 1) = {struct('ber', repmat(0.1 * ~good, 20, 1), 'fer', repmat(single(~good), 20, 1), ...
+            'run', 101 * ones(20, 1), 'probs', repmat(double([sc == 1, sc == 2]), 20, 1), 'maha', ones(20, 1), 'feat', F)};
+    end
+end
+K = link_env('tables', PP);
+end
+
 function back(cwd, tmp)
 cd(cwd); clear clean_ber_ref
 rmdir_quiet(tmp);
