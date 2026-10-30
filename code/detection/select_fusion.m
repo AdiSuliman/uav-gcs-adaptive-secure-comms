@@ -56,6 +56,15 @@
 % runs only with SMOKE or FUSION_DEV = true (select_fusion:rev_fit), so a live tree never saves
 % one. In the smoke only, FUSION_RULE_LOG = true prints a failed rule and saves all the same, so
 % the deploy path after B2F (re-key, C1d, C2, C2e, EDGE) runs end to end on smoke data.
+% When fusion_pick.m names a candidate over the design (P.ext, m_head.m's verdict; D110: the
+% lost-branch head, the gated coherence columns and/or the idle time against each gap's floor),
+% B2F re-checks the candidate's rule against the design out of fold on this fit set and folds
+% (fusion_recheck.m, fusion_adopt.m 'cand'; with the head also its single-row cost and its
+% projected cost on the stages that run the fusion every cycle, head_cost.m with HEAD_STAGES)
+% and deploys it when the rule holds, else the design alone, recorded as the fallback
+% (deployed_pick.check.ext; fusion_rev names the candidate either way). The design alone is
+% saved beside as base_fm, which eval_detector.m reads beside KPI 1. In the smoke only
+% (FUSION_RULE_LOG), FUSION_EXT_FORCE names a candidate to run this path.
 % The quiet-slot interference alarm of the rule (rule_based_policy.m) is set here from
 % the clean validation frames (the sub-runs without a threat), as an AGC jamming monitor
 % sets its threshold from interference-free samples, Th = mu - 3 sigma - 2 dB for a gain
@@ -79,7 +88,8 @@
 % Output: data/fusion.mat (FM with os_thr and latch, N, lambda, cv table, out-of-fold
 % probabilities (fused, and with the latch) and their targets, q_thr; with FUSION_REV also
 % FM.cues, FM.target_age, the cvy, cvo tables and fusion_rev (fusion_rev_id.m); with a pick
-% also deployed_pick, the design, its rule check and the latch comparison). Without
+% also deployed_pick, the design, its rule check and the latch comparison; with a candidate
+% over the pick also base_fm and the re-check in deployed_pick.check.ext). Without
 % FUSION_REV the fusion and its file are those of the selection by the own targets alone.
 
 close all; clc;
@@ -97,6 +107,10 @@ assert(~REV || ENL || SMK || (exist('FUSION_DEV', 'var') && isequal(FUSION_DEV, 
     ['FUSION_REV without FUSION_FIT = ''enlarged'' saves a design chosen or fitted on validation only: the deploy sets ' ...
     'FUSION_FIT = ''enlarged''; a smoke or dev copy sets SMOKE or FUSION_DEV = true (docs/d91_deploy.md)']);
 RULE_LOG = ENL && SMK && exist('FUSION_RULE_LOG', 'var') && isequal(FUSION_RULE_LOG, true);   % smoke only: the rule is printed, not enforced
+if RULE_LOG && exist('FUSION_EXT_FORCE', 'var') && ~isempty(FUSION_EXT_FORCE), PK = fusion_pick(FUSION_EXT_FORCE); end   % smoke only: a candidate's deploy path
+HST = []; if exist('HEAD_STAGES', 'var'), HST = HEAD_STAGES; end
+assert(isempty(PK) || ~isfield(PK, 'ext') || ~contains(PK.ext.pick, 'LBH') || ~isempty(HST), 'select_fusion:head_stages', ...
+    'a pick with the head needs HEAD_STAGES, the stages that run the fusion every cycle (head_cost.m)');
 kept_base = [];                                          % the kept fusion, the rule's base (docs/d91_deploy.md)
 if ENL
     [~, fs_miss] = enlarged_ready();
@@ -241,6 +255,9 @@ if REV
             fprintf('SMOKE (FUSION_RULE_LOG): the rule fails on the smoke data; saved all the same, no no-go record\n');
             GP.rule_logged_only = true;
         end
+        if isfield(PK, 'ext')                            % the candidate over the pick, re-checked against it out of fold
+            RX = fusion_recheck(PK, fit, Zf, XP, ft, foldf, C, lambda, N, classes, B, bin, low, PV{1}, HST, RULE_LOG);
+        end
         Zf = [Zf, XP]; clear XP
     else
         OPT = {struct('iso', true), struct('glr', true), struct('held', true), struct('post', true), ...
@@ -285,6 +302,11 @@ if REV
 end
 val_probs_oof = PV{pick};
 FM = fuse_classes('fit', Zf, ft, C, lambda);
+base_fm = [];
+if ~isempty(PK) && isfield(PK, 'ext')                    % the d91 pick alone, kept beside and read beside the KPI
+    base_fm = FM;
+    if RX.adopted, FM = RX.FM; cues = RX.cues; val_probs_oof = RX.pv(vr, :); end
+end
 if REV, FM.target_age = TA.target_age; FM.cues = cues; end
 [~, y1] = max(P, [], 2);
 yfr = y; if isfield(va, 'Y_frame'), yfr = double(va.Y_frame(:)); end   % the per-frame network's own labels
@@ -337,19 +359,25 @@ if FM.latch
 else
     fprintf('The monitor''s class is the fused class: the latch is off (FM.latch = false)\n');
 end
+if ~isempty(base_fm)
+    base_fm.target_age = FM.target_age; base_fm.cues = PK.cues; base_fm.os_thr = FM.os_thr; base_fm.latch = FM.latch;
+end
 if ~exist('results', 'dir'), mkdir('results'); end
 fz_tmp = 'data/fusion_new.mat';                        % the whole record first, then one rename onto fusion.mat
 save(fz_tmp, 'FM', 'N', 'lambda', 'NS', 'LAMBDA', 'cv', 'val_probs_oof', 'val_latch_oof', 'val_target', 'q_thr');
 if REV
     fit_name = 'validation';
     if exist('FUSION_FIT', 'var') && strcmp(FUSION_FIT, 'enlarged'), fit_name = 'enlarged'; end
-    fusion_rev = fusion_rev_id(fit_name);                % B3r reads the fourth test set only with fusion_rev_id('enlarged')
+    PKr = struct(); if ~isempty(PK), PKr = PK; end       % the id names the candidate B2F ran over the pick, adopted or not
+    fusion_rev = fusion_rev_id(fit_name, PKr);           % B3r reads the fourth test set only with fusion_rev_id('enlarged')
     save(fz_tmp, 'cvy', 'cvo', 'fusion_rev', '-append');
     if ~isempty(PK)
         deployed_pick = PK; deployed_pick.check = GP;
         deployed_pick.check.latch_val = struct('macro_f1_latched', mf_latch, 'macro_f1_fused', mf_fused);   % validation out of fold
         if ~isempty(kept_base), deployed_pick.check.kept = kept_base; end   % the fusion it replaced, the rule's base
+        if isfield(PK, 'ext'), deployed_pick.check.ext = rmfield(RX, {'FM', 'pv'}); end   % the re-check, adopted or the fallback to the pick alone
         save(fz_tmp, 'deployed_pick', '-append');
+        if ~isempty(base_fm), save(fz_tmp, 'base_fm', '-append'); end
     end
 end
 commit_mat(fz_tmp, 'data/fusion.mat');                  % a cut run leaves the earlier fusion.mat whole
