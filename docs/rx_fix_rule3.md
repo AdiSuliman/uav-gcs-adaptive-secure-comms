@@ -266,7 +266,7 @@ A failed guard voids D2c: nothing is read, the harness is fixed, and D2c is reru
 - **Measured times.**
   - The tests: D2's six took 23.7 min in the D2 log (51 + 4 + 9 + 16 + 969 + 372 s), and section 1.1's six add about 15-22 min, so about 38-46 min.
   - The fresh pool: about 7-12 min per batch.
-  - D3 (the G2 builds, the five arms on the 27 flights, the three flat runs): about 15-25 min. D2's harness, with four arms, two flat runs and its census, took 18.1 min.
+  - D3 (the G2 builds, the five arms on the 27 flights, the four flat runs of G4): about 15-25 min. D2's harness, with four arms, two flat runs and its census, took 18.1 min.
 - **One gated dispatch** after CORE_BW's report: the gated wrapper with floor 45, the p3 slot, one MATLAB, in the background with one completion notice and no polling (past bug #8). Two clocks: the dispatch's, from the command's first statement, and the harness's, from the first statement of `rx_d3` (after the tests).
   1. The tests: D2's six and those of section 1.1, in one `runtests`. A failure stops the dispatch.
   2. The fresh pool: batch 1 (and batch 2 if n < 3), the list, its hash and its commit. It starts only if the dispatch has used at most 55 min. Once started, it runs to its list's commit, because a list closes whole.
