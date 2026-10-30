@@ -70,6 +70,13 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   = [k n] (chosen on validation, choose_drop_threshold.m), when at least k of the last n
 %   cycles read sweeping_jammer: a sweep revisits our channel once per period, up to 83.5 ms,
 %   so it is on isolated cycles (k-out-of-n detection of a swept jammer, Norouzi et al. 2006).
+%   With PP.confirm_drop = [k n] (chosen per monitor on validation, choose_drop_threshold.m) the drop
+%   alarm confirms by itself too: at least k of the last n cycles carried it.
+%   With PP.s1_gate the monitor adds M.harm: evidence of harm in at least one of the last n cycles of
+%   the confirmation (degraded, degraded without RF evidence, or the drop alarm). With PP.release_m it
+%   adds M.quiet: the cycle carries no alarm, no degradation, no drop alarm, the quiet slot is under
+%   PP.q_thr (default C.q_alarm_db) and no bin of the cycle's idle gap is busy (idle_summary.m occ); the
+%   last 8 cycles' bits are kept for policy_decide.m. The bits are kept by hist_bits, their only writer.
 %   The monitor also keeps the last C.hist observation vectors of policy_state.m,
 %   and the window of the temporal fusion (probabilities, antenna gains, link
 %   features, unknown scores, and obs.idle, the record of each cycle's idle time,
@@ -224,7 +231,22 @@ if ~isempty(cs) && ~strcmp(mode, 'degraded')                    % the sweeper's 
     assert(cs(2) <= size(mem.sw, 2), 'policy_monitor: the sweeper''s confirmation over %d cycles exceeds the alarm memory', cs(2));
     M.confirmed = M.confirmed | sum(mem.sw(:, end-cs(2)+1:end), 2)' >= cs(1);
 end
+cdr = []; if isfield(PP, 'confirm_drop'), cdr = PP.confirm_drop; end
+if ~isempty(cdr) && ~strcmp(mode, 'degraded')                   % the drop alarm's own confirmation: its crossing confirms
+    assert(cdr(2) <= size(mem.alarm, 2), 'policy_monitor: the drop alarm''s confirmation over %d cycles exceeds the alarm memory', cdr(2));
+    mem = hist_bits(mem, 'dal', M.drop_alarm);
+    M.confirmed = M.confirmed | sum(mem.dal(:, end-cdr(2)+1:end), 2)' >= cdr(1);
+end
 mem.conf_n(M.confirmed) = mem.conf_n(M.confirmed) + 1; mem.conf_n(~M.confirmed) = 0;
+if isfield(PP, 's1_gate') && ~isempty(PP.s1_gate) && PP.s1_gate    % evidence that a lost branch harms the link, over the confirmation's cycles
+    dqm = false(1, numel(M.degraded)); if isfield(M, 'deg_quiet'), dqm = M.deg_quiet; end
+    mem = hist_bits(mem, 'hm', M.degraded | dqm | M.drop_alarm);
+    M.harm = any(mem.hm(:, end-cf(2)+1:end), 2)';
+end
+if isfield(PP, 'release_m') && ~isempty(PP.release_m) && PP.release_m   % a cycle with no evidence of a threat or of a degraded link
+    M.quiet = quiet_cycle(C, mem, obs, M, PP);
+    mem = hist_bits(mem, 'qt', M.quiet);
+end
 % Observation of this cycle for the agent's state (policy_state.m), newest first
 o = policy_obs(obs, M, bc, unk);
 if isempty(mem.hist), mem.hist = repmat(o, 1, 1, C.hist); end
@@ -339,4 +361,22 @@ function [n, lost] = packets(crc)
 k = ~isnan(crc);
 n = sum(k, 2);
 lost = sum(k & crc > 0, 2);
+end
+
+function mem = hist_bits(mem, name, bits)
+% The last cycles' bits of one monitor field (episodes x the alarm memory's cycles, oldest first), created
+% on first use. This is the only writer of mem.dal, mem.hm and mem.qt.
+if ~isfield(mem, name) || size(mem.(name), 1) ~= numel(bits), mem.(name) = false(numel(bits), size(mem.alarm, 2)); end
+mem.(name) = [mem.(name)(:, 2:end), reshape(bits, [], 1)];
+end
+
+function q = quiet_cycle(C, mem, obs, M, PP)
+% A cycle with no evidence of a threat or of a degraded link: no alarm, no degradation (with or without
+% RF evidence), no drop alarm, the quiet slot under its threshold and no busy bin in the idle gap
+% (idle_summary.m occ; a cycle without an idle record is not quiet).
+qt = C.q_alarm_db; if isfield(PP, 'q_thr') && ~isempty(PP.q_thr) && ~isnan(PP.q_thr), qt = PP.q_thr; end
+qi = obs.feat(:, feature_index('q_iot'));
+occ = reshape(mem.wi(:, strcmp(idle_summary('names'), 'occ'), end), 1, []);
+dq = false(size(M.alarm)); if isfield(M, 'deg_quiet'), dq = M.deg_quiet; end
+q = ~M.alarm & ~M.degraded & ~dq & ~M.drop_alarm & reshape(qi, 1, []) < qt & occ == 0;
 end

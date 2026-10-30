@@ -20,6 +20,9 @@ C.confirm_sweep = [2 6];    % the sweeping jammer's own confirmation, k of the l
                             % sweep rate over the 2.4 GHz band, init_params.m; 20 ms cycles), so n = 6 holds two
                             % (k-out-of-n detection of a swept jammer, Norouzi et al. 2006); adopted on
                             % validation (choose_drop_threshold.m)
+C.confirm_drop_cand = [2 2; 1 1];   % the drop alarm's own confirmation (PP.confirm_drop, policy_monitor.m): the candidates
+                            % C1d tries per monitor, k of the last n cycles carrying the drop alarm, in this order
+C.confirm_drop_ext  = [1.25 1.5 2];   % ... and the factors of the CUSUM grid's top by which a candidate may raise its threshold
 C.drop_db    = 4;           % default Eb/N0-estimate drop that confirms path_loss; the deployed value comes from choose_drop_threshold.m
 C.cusum_win  = 3;           % cycles of the window-limited CUSUM's post-change estimate (drop_cusum.m): the monitor's 3-cycle window
 C.fec_frames = 4;           % frames of a coded packet's codeword when the pools do not record it (init_params.m fec_frames);

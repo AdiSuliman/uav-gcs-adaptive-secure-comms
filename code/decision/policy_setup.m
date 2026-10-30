@@ -7,11 +7,18 @@ function [kind, ag, opt] = policy_setup(name, Q, sel, fixed_best, fixed_mmse, ta
 %               monitor and settings train_dqn.m chose for it, the fallback), rule_core and
 %               blind_core (rule_esc and blind_esc on the core action set, opt.core,
 %               rule_core_policy.m), oracle
+%               Any of them with the suffix _norelm or _nos1g is the same policy with the release on
+%               evidence (release_m) or the rule's lost-branch gate (s1_gate) switched off: the
+%               descriptive row beside the deployed setting.
 %   Q           data/trained_dqn.mat: agent, agents, rule_sel
 %   sel         index of the selected DQN in Q.agents
 %   fixed_best  configuration of the best fixed policy; fixed_mmse that of always-on MMSE
 %   tab         class -> configuration table (policy_table.m)
 %   na          index of no_action
+sfx = '';
+for t = {'_norelm', '_nos1g'}
+    if endsWith(name, t{1}), sfx = t{1}; name = erase(name, t{1}); end
+end
 kind = name; ag = Q.agent; opt = struct();
 switch name
     case 'none',       kind = 'fixed'; opt.fixed = na;
@@ -24,4 +31,9 @@ switch name
     case 'blind_core', kind = 'blind_esc'; opt.core = true;
 end
 if startsWith(name, 'dqn_g'), ag = Q.agents{sscanf(name, 'dqn_g%d')}; kind = 'dqn'; end
+if ~isempty(sfx)
+    fld = 's1_gate'; if strcmp(sfx, '_norelm'), fld = 'release_m'; end
+    if ~isfield(opt, 'monitor') || ~isstruct(opt.monitor), opt.monitor = struct(); end
+    opt.monitor.(fld) = false;
+end
 end
