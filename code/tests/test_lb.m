@@ -499,6 +499,181 @@ verifyNotEmpty(tc, lit);
 verifyEmpty(tc, intersect([own, batches(:)'], lit));
 end
 
+%% ---------- the gate reads the deployed agent ----------
+function test_c2_gate_reads_the_deployed_switch(tc)
+% With the completion adopted (or forced) the gate and choose_deployed read the DQN as deployed: one
+% more evaluation with the switch on, inside the step, after the adoption and before the gate;
+% without the switch nothing is read.
+src = fileread(which('train_dqn'));
+i2 = strfind(src, 'if LBo.on'); i3 = strfind(src, '%% 5. Gate, deployed policy and report');
+i5 = strfind(src, 'gate = B.held >= bsel.held && B.fa_ok;');
+verifyNumElements(tc, i2, 1); verifyNumElements(tc, i3, 1); verifyNumElements(tc, i5, 1);
+body = src(i2:i3);
+j = strfind(body, 'if LBon ');
+verifyNumElements(tc, j, 1);
+verifyTrue(tc, i2 + j - 1 < i3 && i3 < i5);
+blk = body(j:end);
+verifyNotEmpty(tc, strfind(blk, 'xl = ev(sel_kind, decision_settings(PPl, struct(''lb_complete'', true)), agent, struct());'));
+verifyNotEmpty(tc, strfind(blk, '[B.rec, B.held, B.kmin, B.ret] = deal(xl.rec, xl.held, xl.kmin, xl.ret);'));
+verifyNotEmpty(tc, strfind(blk, ['[B.fa_w, B.n_w, B.sw_w, B.fa_ok] = deal(xl.fa_w, xl.n_w, xl.sw_w, ' ...
+    'isnan(up) || up <= FA_BOUND);']));
+verifyNumElements(tc, strfind(src, 'xl = ev('), 1);
+verifyLessThan(tc, strfind(body, 'LBon = true; LBforced = true;'), j);        % after the forced mark
+verifyLessThan(tc, strfind(body, 'lb_adopt(LBX, FA_BOUND, LBok)'), j);        % after the adoption
+% the fields it sets are the ones the gate, choose_deployed and the report read from the selected run
+decl = regexp(src, 'cand = struct\(''run''.*?\{\}\);', 'match', 'once');
+verifyNotEmpty(tc, decl);
+for n = {'rec', 'held', 'kmin', 'ret', 'fa_w', 'n_w', 'sw_w', 'fa_ok'}
+    verifyNotEmpty(tc, strfind(decl, ['''' n{1} '''']), n{1});
+end
+end
+
+%% ---------- the readers' two columns (lb_columns.m, evaluate_policies.m, C2g, C2u, KPI 5) ----------
+function test_columns_report(tc)
+% Four sets of 10 flights of 4 episodes: without the completion 50%, with it 75% (single, combined),
+% 100% (follower), 50% (unknown); rule + escalation 25%. The path-loss family is the last two episodes
+% of a flight, pooled over single, combined and unknown (the follower set's flags are not read); the
+% KPI line pools the threat sets single, follower and combined.
+names = {'single', 'follower', 'combined', 'unknown'};
+g = repelem(1:10, 4); x0 = repmat([1 1 0 0], 1, 10); xr = repmat([1 0 0 0], 1, 10); fam = repmat([false false true true], 1, 10);
+x1 = {repmat([1 1 1 0], 1, 10), ones(1, 40), repmat([1 1 1 0], 1, 10), x0};
+X = struct('x0', {}, 'x1', {}, 'xr', {}, 'g', {}, 'fam', {});
+for k = 1:4, X(k) = struct('x0', x0, 'x1', x1{k}, 'xr', xr, 'g', g, 'fam', fam | (k == 2)); end
+L = lb_columns('dqn_esc', 'on', names, X, [12 15 1800], 3);
+verifyEqual(tc, {L.sets(1:4).set}, names);
+verifyEqual(tc, [L.sets(1:4).n], 40 * ones(1, 4));
+verifyEqual(tc, [L.sets(1:4).off], 0.5 * ones(1, 4), 'AbsTol', 1e-12);
+verifyEqual(tc, [L.sets(1:4).on], [0.75 1 0.75 0.5], 'AbsTol', 1e-12);
+verifyEqual(tc, [L.sets(1:4).delta], [0.25 0.5 0.25 0], 'AbsTol', 1e-12);
+verifyEqual(tc, [L.sets(1:4).rule], 0.25 * ones(1, 4), 'AbsTol', 1e-12);
+verifyEqual(tc, L.sets(2).ci, [0.5 0.5], 'AbsTol', 1e-12);                     % every flight gains the same
+verifyTrue(tc, all(arrayfun(@(s) s.ci(1) <= s.delta + 1e-12 && s.delta - 1e-12 <= s.ci(2), L.sets(1:4))));
+F = L.sets(5);                                                                  % the family: 3 sets x 20 episodes
+verifyEqual(tc, F.set, 'path-loss family');
+verifyEqual(tc, F.n, 60);
+verifyEqual(tc, [F.off F.on F.delta F.rule], [0 1/3 1/3 0], 'AbsTol', 1e-12);
+verifyNumElements(tc, L.lines, 7);                                              % heading, 4 sets, family, clean link
+verifyTrue(tc, contains(L.lines{1}, 'dqn_esc') && contains(L.lines{1}, 'deployed switch is on'));
+verifyTrue(tc, all(contains(L.lines(2:6), 'DQN + link-budget completion (hybrid)')));
+verifyTrue(tc, contains(L.lines{6}, 'path-loss family') && contains(L.lines{6}, '60:'));
+verifyTrue(tc, contains(L.lines{7}, '12/1800 without') && contains(L.lines{7}, '15/1800 with') && contains(L.lines{7}, '>= 3 dB'));
+verifyNumElements(tc, L.kpi, 1);
+verifyTrue(tc, startsWith(L.kpi{1}, 'beside KPI 5'));
+verifyTrue(tc, contains(L.kpi{1}, '50.0%') && contains(L.kpi{1}, '83.3%') && contains(L.kpi{1}, '25.0%'));
+verifyTrue(tc, endsWith(L.kpi{1}, 'deployed switch on'));
+verifyTrue(tc, L.deployed); verifyEqual(tc, L.clean, [12 15 1800]);
+Lo = lb_columns('dqn_g3', 'off', names, X, [12 15 1800], 3);                    % the switch deployed off: the same pair
+verifyFalse(tc, Lo.deployed);
+verifyTrue(tc, endsWith(Lo.kpi{1}, 'deployed switch off') && contains(Lo.lines{1}, 'deployed switch is off'));
+verifyEqual(tc, [Lo.sets.delta], [L.sets.delta]);
+verifyTrue(tc, isequaln(L, lb_columns('dqn_esc', 'on', names, X, [12 15 1800], 3)));   % fixed seeds
+% a single flight has no interval; the report still prints
+X(1).g(:) = 1;
+L1 = lb_columns('dqn_esc', 'on', names, X, [0 0 10], 3);
+verifyTrue(tc, all(isnan(L1.sets(1).ci)) && L1.sets(1).delta == 0.25);
+verifyTrue(tc, contains(L1.lines{2}, 'NaN'));
+end
+
+function test_columns_seeds(tc)
+% The columns' bootstraps are distinct from the adoption's, the step's other streams and the stages'
+% literal seeds, and are not literals in lb_columns.m.
+S = lb_seeds();
+verifyEqual(tc, numel(S.cols), 5);
+own = [S.specs, S.frames + 100 * (1:4), S.boot, S.cols];
+verifyEqual(tc, numel(unique(own)), numel(own));
+batches = S.frames + 100 * (1:4)' + (1:60);
+verifyEmpty(tc, intersect(S.cols, [S.specs, S.boot, batches(:)']));
+verifyEmpty(tc, intersect(S.cols, [7 99 11 5000 41000 7000 2027 2028 900 30000 70000 40000]));
+ln = splitlines(fileread(which('lb_columns')));
+b = ln(contains(ln, 'boot_cluster('));
+verifyNumElements(tc, b, 2);
+verifyTrue(tc, all(contains(b, 'S.cols(')));
+end
+
+function test_c2e_columns_wiring(tc)
+% C2e prints the two columns only when C2 stored the switch (train_dqn.m step 4b): after the policy
+% loop, before the envelope; the report and the saved file grow only then; the selected DQN runs
+% without and with the completion on the main runs' frame draws; the forced mark stops outside the smoke.
+src = fileread(which('evaluate_policies'));
+pos = @(s) strfind(src, s);
+a = pos('LBC = [];'); b = pos('if isfield(Q, ''dec'') && isstruct(Q.dec) && isfield(Q.dec, ''lb_complete'')');
+c = pos('LBC = lb_flights(PP, K, Q, sets, RES, POL, sel, fixed_best, fixed_mmse, tab, ebno_thr);');
+d = pos('%% 3b. Envelope predicted on the VALIDATION split'); e = pos('for si = 1:numel(sets)');
+for x = {a, b, c, d}, verifyNumElements(tc, x{1}, 1); end
+verifyTrue(tc, e(1) < a && a < b && b < c && c < d);
+verifyNotEmpty(tc, pos('if ~isempty(LBC), rep = [rep, {''''}, LBC.lines]; end'));
+verifyNotEmpty(tc, pos('if ~isempty(LBC), save(''results/policy_evaluation.mat'', ''LBC'', ''-append''); end'));
+verifyNotEmpty(tc, pos(['save(''results/policy_evaluation.mat'', ''RES'', ''RW'', ''POL'', ''LBL'', ''set_names'', ''fixed_best'', ' ...
+    '''tab'', ''iDQN'', ''KP'', ...']));
+fl = src(strfind(src, 'function L = lb_flights('):end);
+fl = fl(1:strfind(fl, 'function F6 = fresh_checks') - 1);
+verifyNotEmpty(tc, strfind(fl, 'o0 = opt; o0.monitor = struct(''lb_complete'', false);'));
+verifyNotEmpty(tc, strfind(fl, 'o1 = opt; o1.monitor = struct(''lb_complete'', true);'));
+verifyNumElements(tc, strfind(fl, '30000 + 100 * si'), 4);                     % the main runs' draws, a pair the same
+verifyNotEmpty(tc, strfind(fl, 'L = lb_columns(nm, ternary(Q.dec.lb_complete, ''on'', ''off''), names, X, cl, ebno_thr);'));
+verifyNotEmpty(tc, strfind(fl, 'nm = ''dqn_esc''; if strcmp(Q.deployed, ''dqn''), nm = sprintf(''dqn_g%d'', sel); end'));
+verifyNotEmpty(tc, pos('error(''evaluate_policies:lb_forced'''));
+verifyNotEmpty(tc, pos('isfield(Q.dec, ''lb_forced'') && Q.dec.lb_forced && ~(exist(''SMOKE'', ''var'') && SMOKE)'));
+% KPI 5 prints the line only with the columns
+k = fileread(which('measure_all_kpis'));
+verifyNotEmpty(tc, strfind(k, 'if isfield(P, ''LBC'') && ~isempty(P.LBC), det = [det, P.LBC.kpi]; end'));
+end
+
+function test_readers_off_is_the_parent(tc)
+% Without the stored switch the readers are the parent commit's (f6f6e03): every parent line is in the
+% copy, in order, but the ones named here (the cache key, the entity call and header and the options of
+% the evaluations of C2g and C2u, whose opt0 is struct() without the switch); the main readers, the
+% step and the layer only add lines.
+for f = {'code/decision/evaluate_policies.m', 'code/evaluation/measure_all_kpis.m', 'code/decision/train_dqn.m', ...
+        'code/decision/policy_monitor.m'}
+    verifyEmpty(tc, parent_lines_missing(tc, 'f6f6e03', f{1}), f{1});
+end
+verifyEqual(tc, parent_lines_missing(tc, 'f6f6e03', 'code/decision/decision_settings.m'), ...
+    {'        ''rule_mmse_db'', ''rule_slot'', ''rule_dwell'', ''esc_drop'', ''rule_nb'', ''core_nb'', ''deg_mode'', ''ber_q''}'});
+verifyNumElements(tc, parent_lines_missing(tc, 'f6f6e03', 'code/decision/policy_decide.m'), 1);   % a comment line
+verifyNumElements(tc, parent_lines_missing(tc, 'f6f6e03', 'code/decision/policy_stamp.m'), 1);    % a comment line
+miss = parent_lines_missing(tc, 'f6f6e03', 'code/decision/experiment_combo_generalization.m');
+verifyEqual(tc, miss, {'keys = cellfun(@(cn) run_cache(''key'', {CID, ''C2g'', cn, H, seed, REPS, NE, TEST, DK}), combos, ''UniformOutput'', false);', ...
+    'out = run_cache(''each'', CDIR, keys, @(ci) one_combo(ci, combos, PP, K, Q, H, seed, nS, TEST, REPS, NE, DK, t0), combos);', ...
+    'function r = one_combo(ci, combos, PP, K, Q, H, seed, nS, TEST, REPS, NE, DK, t0)', ...
+    '% escalation and the class table on its test flights.', ...
+    'Ro = dqn_eval_batches(DK, PP, K, specs, ag, struct(), 7000, TEST);', ...
+    'Ri = dqn_eval_batches(DK, PP, K, specs, Q.agent, struct(), 7000, TEST);'});
+miss = parent_lines_missing(tc, 'f6f6e03', 'code/decision/experiment_unknown_threat.m');
+verifyEqual(tc, miss, {'keys = cellfun(@(th) run_cache(''key'', {CID, ''C2u'', th, H, seed, REPS, NE, SPL, DK}), threats, ''UniformOutput'', false);', ...
+    'out = run_cache(''each'', CDIR, keys, @(ti) one_threat(ti, threats, PP, K, Q, H, seed, nS, SPL, REPS, NE, DK, t0), threats);', ...
+    'function o = one_threat(ti, threats, PP, K, Q, H, seed, nS, SPL, REPS, NE, DK, t0)', ...
+    '% o.res).', '[Ro, Ri, Rr] = deal([]);', ...
+    '    Ro = cat_struct(Ro, mark(dqn_eval_batches(DK, PP, K, specs, ag, struct(), 7000, sp), specs, PP, sp));', ...
+    '    Ri = cat_struct(Ri, mark(dqn_eval_batches(DK, PP, K, specs, Q.agent, struct(), 7000, sp), specs, PP, sp));'});
+end
+
+function test_c2g_c2u_columns_wiring(tc)
+% C2g and C2u: the headline columns (dqn_out, dqn_in, the learner's own result) run with the completion
+% off; the hybrid columns (_lb) with it on, on the same episodes and draws; the cache key and the option
+% structs are the parent's without the stored switch; the retrained learner trains and keeps its
+% checkpoint without the completion; the rule and the table never see the switch.
+for f = {'experiment_combo_generalization', 'experiment_unknown_threat'}
+    src = fileread(which(f{1}));
+    verifyNotEmpty(tc, strfind(src, 'LBC = isfield(Q, ''dec'') && isstruct(Q.dec) && isfield(Q.dec, ''lb_complete'');'), f{1});
+    verifyNotEmpty(tc, strfind(src, 'lbkey = {}; if LBC, lbkey = {''lb_columns''}; end'), f{1});
+    verifyNotEmpty(tc, strfind(src, ', DK}, lbkey]), '), f{1});
+    verifyNotEmpty(tc, strfind(src, 'opt0 = struct();'), f{1});
+    verifyNotEmpty(tc, strfind(src, 'if LBC, opt0 = struct(''monitor'', struct(''lb_complete'', false)); end'), f{1});
+    verifyNotEmpty(tc, strfind(src, 'opt1 = struct(''monitor'', struct(''lb_complete'', true));'), f{1});
+    verifyNumElements(tc, strfind(src, 'PPx.lb_complete = false'), 1, f{1});
+    verifyNumElements(tc, strfind(src, 'dqn_train_run('), 1, f{1});
+    verifyLessThan(tc, strfind(src, 'PPx.lb_complete = false'), strfind(src, 'dqn_train_run('), f{1});
+    verifyNotEmpty(tc, regexp(src, 'Ro = [^\n]*, ag, opt0,', 'once'), f{1});
+    verifyNotEmpty(tc, regexp(src, 'Ri = [^\n]*, Q\.agent, opt0,', 'once'), f{1});
+    verifyNotEmpty(tc, regexp(src, 'Ro1 = [^\n]*, ag, opt1,', 'once'), f{1});
+    verifyNotEmpty(tc, regexp(src, 'Ri1 = [^\n]*, Q\.agent, opt1,', 'once'), f{1});
+    verifyNotEmpty(tc, regexp(src, 'Rr = [^\n]*''rule_esc'', PP, K, specs, \[\], struct\(\)', 'once'), f{1});
+    verifyNotEmpty(tc, strfind(src, 'DQN + LB, never trained'), f{1});
+    verifyNotEmpty(tc, strfind(src, 'DQN + link-budget completion (hybrid, not learned)'), f{1});
+end
+end
+
 %% ---------- helpers ----------
 function X = adopt_input()
 % lb_adopt.m's readings: four sets of 40 flights of 5 episodes, 3 recovered without the completion
@@ -647,6 +822,20 @@ for k = 1:numel(rels)
     [st, out] = system(sprintf('git --no-optional-locks -C "%s" show %s:%s > "%s"', repo, rev, rels{k}, ...
         fullfile(d, [nm ext])));
     assertEqual(tc, st, 0, sprintf('git show %s:%s failed: %s', rev, rels{k}, out));
+end
+end
+
+function missing = parent_lines_missing(tc, rev, rel)
+% The lines of file rel as commit rev holds it that the copy in this checkout lacks, matched in order
+% ({} when the copy only adds lines).
+d = parent_dir(tc, rev, {rel}); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+[~, nm, ext] = fileparts(rel);
+old = regexp(fileread(fullfile(d, [nm ext])), '\r?\n', 'split');
+new = regexp(fileread(fullfile(tc.TestData.root, rel)), '\r?\n', 'split');
+j = 1; missing = {};
+for i = 1:numel(old)
+    k = find(strcmp(new(j:end), old{i}), 1);
+    if isempty(k), missing{end+1} = old{i}; else, j = j + k; end %#ok<AGROW>
 end
 end
 
