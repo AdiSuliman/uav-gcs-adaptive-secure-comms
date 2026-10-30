@@ -74,6 +74,12 @@
 % threshold, penalty and settings is kept as an ablation. Reward-weight sensitivity:
 % proposal mitigation 2.
 %
+% With "lb_select": true in profile.json (lb_options.m) the link-budget completion of the DQN's
+% action (lb_complete.m) is scored on the selected agent alone, off against on, on the validation
+% split's single, follower, combined and unknown episodes and its clean flights, and adopted or
+% not by lb_adopt.m (one comparison, nothing tuned); the switch is stored in dec (dec.lb_complete),
+% the readings in lb. Without the field none of it runs.
+%
 % Finished runs (every training run and the reward-sensitivity retrains) are kept in
 % data/run_cache/C2 when profile.json says "run_cache": true or CFG.run_cache is true
 % (run_cache.m): keyed by the code, the input files, the run's settings and seed, so a C2
@@ -330,6 +336,30 @@ for gi = 1:numel(GAM)
 end
 agents{find(GAM == gamma_sel, 1)} = agent;
 
+%% 4b. Link-budget completion on the selected agent, off against on (lb_complete.m, lb_adopt.m)
+% Only with "lb_select": true in profile.json (lb_options.m, or CFG.lb_select): judged on the agent
+% selected above alone, on the validation split, nothing tuned, and stored with it (dec.lb_complete);
+% without it nothing here runs and no switch is stored.
+LBo = lb_options(); LBon = false; LBforced = false; LBR = []; LBlines = {};
+if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'lb_select'), LBo.on = CFG.lb_select; end
+if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'lb_force'), LBo.force = CFG.lb_force; end
+if LBo.force && ~(LBo.on && exist('SMOKE', 'var') && SMOKE)
+    error('train_dqn:lb_force', 'train_dqn: lb_force needs lb_select and the smoke (a forced link-budget completion is no adoption)');
+end
+if LBo.on
+    PPl = decision_settings(with_entry(PP, struct('alarm', alarm_sel, 'drop', drop_sel), DROP_MODE), Sdep);
+    LBX = lb_readings(sel_kind, PPl, K, agent, CV, H, EBNO_THR, VAL_REPS);
+    [LBok, LBmsg] = lb_selfcheck();
+    [LBon, LBR, LBlines] = lb_adopt(LBX, FA_BOUND, LBok);
+    if ~LBok, LBlines{end+1} = ['  static or parity check failed: ' strjoin(LBmsg, '; ')]; end
+    if LBo.force
+        LBlines{end+1} = sprintf(['  FORCED for the smoke (lb_force): the completion is on, not an adoption; the rule above ' ...
+            'reads %s'], ternary(LBon, 'on', 'off'));
+        LBon = true; LBforced = true;
+    end
+    fprintf('%s\n', LBlines{:});
+end
+
 %% 5. Gate, deployed policy and report
 eb = find(strcmp({base.alarm}, alarm_sel) & arrayfun(@(b) isequaln(b.drop, drop_sel), base), 1);
 bsel = base(eb).rule;
@@ -442,6 +472,7 @@ rep{end+1} = sprintf('Deployed: %s | false-alarm bound met on validation: %s%s',
     ' (not measured: no clean validation flights)', '') ' -- the edge map commits no point']));
 rep{end+1} = sprintf(['False changes on the clean link (validation, Eb/N0 >= %g dB, %d ms per cycle): DQN %s | ' ...
     'rule fallback %s'], EBNO_THR, CD.period_ms, rate_txt(FD), rate_txt(FR));
+if ~isempty(LBR), rep = [rep, {''}, LBlines]; end
 if ~exist('results', 'dir'), mkdir('results'); end
 fid = fopen('results/dqn_training.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('\n%s\n', rep{:});
@@ -467,6 +498,7 @@ dec = Sdep; dec.alarm_mode = alarm_mode; dec.confirm = confirm; dec.drop_db = dr
 dec.confirm_sweep = []; if isfield(PP, 'confirm_sweep'), dec.confirm_sweep = PP.confirm_sweep; end
 if isfield(PP, 'deg_mode'), dec.deg_mode = PP.deg_mode; dec.ber_q = PP.ber_q; end
 if isfield(PP, 'deg_forced'), dec.deg_forced = PP.deg_forced; end   % the smoke's forced test, in the stamp
+if ~isempty(LBR), dec.lb_complete = LBon; if LBforced, dec.lb_forced = true; end, end   % step 4b, only with lb_select
 agent = dqn_dense(agent);                          % matrix form for deployment
 for gi = find(~cellfun(@isempty, agents)), agents{gi} = dqn_dense(agents{gi}); end
 det_id = PP.det_id; pools_created = PP.created;    % the pools (and their detector) the agent learned on
@@ -474,6 +506,9 @@ maha_thr = dec.maha_thr;                           % the unknown-threat threshol
 save('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'confirm', 'alarm_mode', 'drop_db', 'H', ...
     'norm_in', 'seed_summary', 'action_names', 'tab', 'deployed', 'rule_sel', 'fa_bound_met', 'det_id', ...
     'pools_created', 'maha_thr', 'dec', '-v7.3');
+if ~isempty(LBR)                                   % the completion's readings, beside the switch in dec
+    lb = struct('on', LBon, 'forced', LBforced, 'readings', LBR); save('data/trained_dqn.mat', 'lb', '-append');
+end
 fprintf('Saved data/trained_dqn.mat\n');
 
 fig = figure('Position', [100 100 1000 430], 'Color', 'w');
@@ -594,6 +629,40 @@ x = struct('rec', dqn_recovered(V), 'held', dqn_held(V), 'kmin', kh, 'kmin_thr',
 nb = V.recoverable & V.threat & contains(thr, 'noise_burst');
 x.nb_n = sum(nb); x.nb_held = NaN; if x.nb_n > 0, x.nb_held = mean(V.held(nb)); end
 [x.fa_w, x.n_w, x.sw_w] = eval_clean_wide(kind, PPc, CV, ag, opt, H, ebno_thr);
+end
+
+function X = lb_readings(kind, PPc, K, agent, CV, H, ebno_thr, reps)
+% lb_adopt.m's paired readings of the agent without and with the link-budget completion (opt.monitor,
+% policy_decide.m): the validation split's single, follower, combined and unknown episodes (the sets of
+% evaluate_policies.m, new onsets from lb_seeds) and the clean validation flights (eval_clean_wide). The
+% frame draws of a pair are the same (rollout_policy.m seed).
+S = lb_seeds(); nS = numel(PPc.ebno); VAL = 2;
+rs = RandStream('mt19937ar', 'Seed', S.specs);
+sg = find(ismember(PPc.scen, PPc.singles) & ~strcmp(PPc.scen, 'none'));
+cb = find(ismember(PPc.scen, PPc.combos));
+fl = sg(K.followable(sg));
+G = @(c) K.geo(c, VAL);
+spec = {policy_episodes(sg, nS, G(sg), reps, false, false, H.NE, H.T, rs), ...
+    policy_episodes(fl, nS, G(fl), reps, true, false, H.NE, H.T, rs), ...
+    policy_episodes(cb, nS, G(cb), reps, false, false, H.NE, H.T, rs), ...
+    policy_episodes(sg, nS, G(sg), 1, false, true, H.NE, H.T, rs)};
+nm = {'single', 'follower', 'combined', 'unknown'};
+off = struct('monitor', struct('lb_complete', false)); on = struct('monitor', struct('lb_complete', true));
+X = struct('sets', struct('name', {}, 'x_off', {}, 'x_on', {}, 'cl', {}, 'fam', {}), 'clean', []);
+for k = 1:numel(spec)
+    if isempty(spec{k})                                   % no such episodes: the set is not read
+        X.sets(end+1) = struct('name', nm{k}, 'x_off', [], 'x_on', [], 'cl', [], 'fam', false(1, 0)); continue
+    end
+    r0 = policy_run_set(kind, PPc, K, spec{k}, VAL, agent, off, S.frames + 100 * k);
+    r1 = policy_run_set(kind, PPc, K, spec{k}, VAL, agent, on, S.frames + 100 * k);
+    m = r0.recoverable & r0.threat;
+    fam = cellfun(@(s) any(strcmp(strsplit(s, '+'), 'path_loss')), PPc.scen(r0.scn));
+    X.sets(end+1) = struct('name', nm{k}, 'x_off', double(r0.recovered(m)), 'x_on', double(r1.recovered(m)), ...
+        'cl', r0.geom(m), 'fam', fam(m));
+end
+[~, ~, sw0] = eval_clean_wide(kind, PPc, CV, agent, off, H, ebno_thr);
+[~, ~, sw1] = eval_clean_wide(kind, PPc, CV, agent, on, H, ebno_thr);
+X.clean = struct('sw_off', sw0, 'sw_on', sw1);
 end
 
 function [fa, n, sw] = eval_clean_wide(kind, PP, CT, agent, opt, H, ebno_thr)

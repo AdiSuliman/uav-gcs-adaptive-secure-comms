@@ -344,7 +344,180 @@ verifyNotEqual(tc, which('policy_decide'), fullfile(d, 'policy_decide.m'));
 verifyTrue(tc, any(moved));
 end
 
+%% ---------- the stored switch ----------
+function test_settings_and_stamp(tc)
+% The switch reaches every reader through decision_settings.m (an absent one keeps the pools'); the
+% deployed policy's stamp is the parent commit's (f6f6e03) without it and with it false, and
+% changes with it on and with the smoke's forced mark.
+PP = struct('x', 1);
+verifyFalse(tc, isfield(decision_settings(PP, struct('alarm_mode', 'class_drop')), 'lb_complete'));
+verifyTrue(tc, decision_settings(PP, struct('lb_complete', true)).lb_complete);
+verifyTrue(tc, decision_settings(PP, struct('dec', struct('lb_complete', true))).lb_complete);   % data/trained_dqn.mat
+verifyFalse(tc, decision_settings(struct('lb_complete', true), struct('lb_complete', false)).lb_complete);   % opt.monitor
+verifyTrue(tc, decision_settings(struct('lb_complete', true), struct('alarm_mode', 'class')).lb_complete);
+S = struct('alarm_mode', 'class_drop', 'confirm', [3 3], 'drop_db', 4, 'maha_thr', -2, 'rule_mmse_db', 7.5, ...
+    'confirm_sweep', [2 6], 'rule_nb', {{'a', 'b'}});
+Q = struct('deployed', 'dqn_esc', 'alarm_mode', 'class_drop', 'confirm', [2 2], 'drop_db', 4, 'det_id', 'x', ...
+    'maha_thr', -1, 'dec', S, 'rule_sel', S);
+s1 = policy_stamp(Q);
+d = parent_dir(tc, 'f6f6e03', {'code/decision/policy_stamp.m'});
+addpath(d, '-begin'); clear policy_stamp
+cl0 = onCleanup(@() fixture_off(d, {'policy_stamp'})); %#ok<NASGU>
+s0 = policy_stamp(Q);
+fixture_off(d, {'policy_stamp'});
+verifyEqual(tc, s1, s0);
+Q.dec.lb_complete = false; verifyEqual(tc, policy_stamp(Q), s1);
+Q.dec.lb_complete = true; s2 = policy_stamp(Q); verifyNotEqual(tc, s2, s1);
+Q.dec.lb_forced = true; verifyNotEqual(tc, policy_stamp(Q), s2);
+end
+
+function test_options(tc)
+% C2 scores the completion only with "lb_select": true in profile.json; "lb_force" is the smoke's
+% forced cell; both must be true or false.
+off = struct('on', false, 'force', false);
+verifyEqual(tc, lb_options('none.json'), off);
+f = [tempname '.json'];
+write_text(f, '{"lb_select": true}'); verifyEqual(tc, lb_options(f), struct('on', true, 'force', false));
+write_text(f, '{"lb_select": true, "lb_force": true}'); verifyEqual(tc, lb_options(f), struct('on', true, 'force', true));
+write_text(f, '{"deg_select": true, "surv_v2": true}'); verifyEqual(tc, lb_options(f), off);
+write_text(f, '{"lb_select": 1}'); verifyError(tc, @() lb_options(f), 'lb_options:value');
+write_text(f, '{"lb_select": true, "lb_force": "yes"}'); verifyError(tc, @() lb_options(f), 'lb_options:value');
+delete(f);
+end
+
+function test_c2_step_only_with_the_switch(tc)
+% Without "lb_select" train_dqn.m runs nothing new and saves the same variables in the same
+% order; the step sits after the agent pick and before the gate, runs only under the switch, and
+% the stored switch has one writer.
+src = fileread(which('train_dqn'));
+i0 = strfind(src, 'agents{find(GAM == gamma_sel, 1)} = agent;');
+i1 = strfind(src, 'LBo = lb_options();');
+i2 = strfind(src, 'if LBo.on');
+i3 = strfind(src, '%% 5. Gate, deployed policy and report');
+verifyNumElements(tc, i0, 1); verifyNumElements(tc, i1, 1); verifyNumElements(tc, i2, 1); verifyNumElements(tc, i3, 1);
+verifyTrue(tc, i0 < i1 && i1 < i2 && i2 < i3);
+body = src(i2:i3);
+for s = {'lb_readings(', 'lb_selfcheck()', 'lb_adopt(LBX, FA_BOUND, LBok)'}
+    verifyNotEmpty(tc, strfind(body, s{1}), s{1});
+    verifyEmpty(tc, strfind(src(1:i2), s{1}), s{1});
+end
+verifyNumElements(tc, strfind(src, 'dec.lb_complete = '), 1);
+verifyNotEmpty(tc, strfind(src, 'if ~isempty(LBR), dec.lb_complete = LBon; if LBforced, dec.lb_forced = true; end, end'));
+verifyNotEmpty(tc, strfind(src, ['''pools_created'', ''maha_thr'', ''dec'', ''-v7.3'');']));   % the save as before
+verifyNotEmpty(tc, strfind(src, 'if ~isempty(LBR), rep = [rep, {''''}, LBlines]; end'));
+% a forced completion stops outside the smoke and without the switch, before anything is computed
+i4 = strfind(src, 'error(''train_dqn:lb_force''');
+verifyNumElements(tc, i4, 1); verifyTrue(tc, i4 > i1 && i4 < i2);
+verifyNotEmpty(tc, strfind(src, 'if LBo.force && ~(LBo.on && exist(''SMOKE'', ''var'') && SMOKE)'));
+end
+
+%% ---------- the adoption rule (lb_adopt.m) ----------
+function test_adopt_rule(tc)
+% Adopted only if (a) no set loses (paired difference >= -0.5 point, one-sided 95% lower bound >=
+% -1 point), (b) the path-loss family gains (difference and lower bound above 0), (c) the clean
+% flights' false changes stay within the 5% bound and 1 point of those without, (d) the checks pass.
+% A reading that is absent fails its condition.
+[on, R, lines] = lb_adopt(adopt_input(), 0.05, true);
+verifyTrue(tc, on); verifyTrue(tc, R.a && R.b && R.c && R.d);
+verifyEqual(tc, [R.sets.delta], 0.2 * ones(1, 4), 'AbsTol', 1e-12);
+verifyEqual(tc, R.fam.delta, 0.5, 'AbsTol', 1e-12);
+verifyTrue(tc, iscellstr(lines) && contains(lines{end}, 'ADOPTED'));
+[on, R] = lb_adopt(adopt_input(), 0.05, false);                      % (d)
+verifyFalse(tc, on); verifyFalse(tc, R.d);
+for k = 1:4                                                           % (a): one set loses 20 points
+    X = adopt_input(); X.sets(k).x_on = repmat([1 1 0 0 0], 1, 40);
+    [on, R] = lb_adopt(X, 0.05, true);
+    verifyFalse(tc, on, X.sets(k).name); verifyFalse(tc, R.a); verifyFalse(tc, R.sets(k).ok);
+    verifyEqual(tc, sum([R.sets.ok]), 3);
+end
+X = adopt_input();                                                    % (a): a mean of zero that flights of +1 and -1 make uncertain
+up = mod(X.sets(2).cl, 2) == 0;
+X.sets(2).x_off = double(~up); X.sets(2).x_on = double(up);
+[~, R] = lb_adopt(X, 0.05, true);
+verifyEqual(tc, R.sets(2).delta, 0, 'AbsTol', 1e-12);
+verifyLessThan(tc, R.sets(2).lo, -0.01); verifyFalse(tc, R.sets(2).ok);
+X = adopt_input();                                                    % (b): no gain on the family
+for k = 1:4, X.sets(k).x_on = X.sets(k).x_off; end
+[on, R] = lb_adopt(X, 0.05, true);
+verifyFalse(tc, on); verifyFalse(tc, R.b); verifyTrue(tc, R.a);
+X = adopt_input();                                                    % (b): a gain on average, not by its lower bound
+for k = 1:4
+    f = X.sets(k).fam; up = mod(X.sets(k).cl, 7) < 4;                 % 23 flights gain, 17 lose
+    X.sets(k).x_off = double(~f | ~up); X.sets(k).x_on = double(~f | up);
+end
+[~, R] = lb_adopt(X, 0.05, true);
+verifyEqual(tc, R.fam.delta, 6 / 40, 'AbsTol', 1e-12); verifyLessThan(tc, R.fam.lo, 0); verifyFalse(tc, R.b);
+for c = {[20 38 1], [20 39 0], [20 100 0], [0 0 1], [150 140 0]}    % (c): changes without, with; verdict
+    X = adopt_input(); n = 1800;
+    X.clean.sw_off = [ones(1, c{1}(1)), zeros(1, n - c{1}(1))];
+    X.clean.sw_on = [2 * ones(1, c{1}(2)), zeros(1, n - c{1}(2))];
+    [~, R] = lb_adopt(X, 0.05, true);
+    verifyEqual(tc, R.c, logical(c{1}(3)), mat2str(c{1}));
+end
+X = adopt_input(); X.clean = struct('sw_off', [], 'sw_on', []);       % (c): not measured
+[on, R] = lb_adopt(X, 0.05, true); verifyFalse(tc, on); verifyFalse(tc, R.c);
+X = adopt_input(); X.sets(3) = struct('name', 'combined', 'x_off', [], 'x_on', [], 'cl', [], 'fam', false(1, 0));
+[on, R] = lb_adopt(X, 0.05, true);                                    % a set not read
+verifyFalse(tc, on); verifyFalse(tc, R.sets(3).ok);
+X = adopt_input(); X.sets(1).cl(:) = 1;                               % one flight only: no interval
+[on, R] = lb_adopt(X, 0.05, true);
+verifyFalse(tc, on); verifyTrue(tc, isnan(R.sets(1).lo));
+[~, R1] = lb_adopt(adopt_input(), 0.05, true); [~, R2] = lb_adopt(adopt_input(), 0.05, true);
+verifyTrue(tc, isequaln(R1, R2));                                     % the same input, the same answer
+end
+
+function test_adopt_bound_is_one_sided_cluster_percentile(tc)
+% The lower bound is the 5th percentile of the resampled means of whole flights: for 100 flights
+% that gain 1 and 0 in turn it is near 0.5 - 1.645 x 0.5 / sqrt(100); the episodes of a flight are
+% not independent draws: three copies of each flight's episodes give the bound of one episode per flight.
+n = 100; up = mod(1:n, 2) == 1;
+X = adopt_input();
+X.sets(1) = struct('name', 'single', 'x_off', zeros(1, 3 * n), 'x_on', repelem(double(up), 3), 'cl', repelem(1:n, 3), ...
+    'fam', false(1, 3 * n));
+[~, R] = lb_adopt(X, 0.05, true);
+verifyEqual(tc, R.sets(1).delta, 0.5, 'AbsTol', 1e-12);
+verifyEqual(tc, R.sets(1).lo, 0.5 - 1.645 * 0.05, 'AbsTol', 0.02);
+X.sets(1) = struct('name', 'single', 'x_off', zeros(1, n), 'x_on', double(up), 'cl', 1:n, 'fam', false(1, n));
+[~, R1] = lb_adopt(X, 0.05, true);
+verifyEqual(tc, R1.sets(1).lo, R.sets(1).lo, 'AbsTol', 1e-12);
+end
+
+function test_seeds_disjoint(tc)
+% The step's streams are distinct from each other and from the other literal seeds of the stages
+% it reads (train_dqn.m, evaluate_policies.m): the frame draws of a pair are + 100 x set + batch.
+S = lb_seeds();
+own = [S.specs, S.frames + 100 * (1:4), S.boot];
+verifyEqual(tc, numel(unique(own)), numel(own));
+verifyEqual(tc, numel(S.boot), 5);
+other = [7 99 11 5000 41000 7000 2027 2028 900 30000 70000 40000];
+verifyEmpty(tc, intersect(own, other));
+batches = S.frames + 100 * (1:4)' + (1:60);                        % 60 batches per set stay inside their 100
+verifyEmpty(tc, intersect(batches(:)', [own, other]));
+src = [fileread(which('train_dqn')) fileread(which('evaluate_policies'))];
+lit = cellfun(@(c) str2double(c{1}), regexp(src, '''Seed'',\s*(\d+)', 'tokens'));
+verifyNotEmpty(tc, lit);
+verifyEmpty(tc, intersect([own, batches(:)'], lit));
+end
+
 %% ---------- helpers ----------
+function X = adopt_input()
+% lb_adopt.m's readings: four sets of 40 flights of 5 episodes, 3 recovered without the completion
+% and the fourth with it (a gain of 20 points), the last two episodes of a flight holding a path
+% loss; 1800 clean flights, 20 changed without it and 20 with it.
+cl = repelem(1:40, 5); fam = repmat([false false false true true], 1, 40);
+nm = {'single', 'follower', 'combined', 'unknown'};
+X = struct('sets', struct('name', {}, 'x_off', {}, 'x_on', {}, 'cl', {}, 'fam', {}), 'clean', []);
+for k = 1:4
+    X.sets(end+1) = struct('name', nm{k}, 'x_off', repmat([1 1 1 0 0], 1, 40), 'x_on', repmat([1 1 1 1 0], 1, 40), ...
+        'cl', cl, 'fam', fam);
+end
+X.clean = struct('sw_off', [ones(1, 20), zeros(1, 1780)], 'sw_on', [ones(1, 20), zeros(1, 1780)]);
+end
+
+function write_text(f, s)
+fid = fopen(f, 'w'); fprintf(fid, '%s', s); fclose(fid);
+end
+
 function PP = lb_world(mode, drop_db)
 % The pools' settings of the tests: two classes, known gains of 6.5 dB for power_control (the
 % power step in the received field) and 3.5 dB for rate_reduce (processing gain), the
