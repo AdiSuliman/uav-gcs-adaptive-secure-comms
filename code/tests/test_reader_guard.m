@@ -54,6 +54,37 @@ verifyTrue(tc, all(cellfun(@(c) ~isempty(c), V.pools(:, :, :, 2)), 'all'));
 verifyError(tc, @() reader_guard('strip', PP, 6), 'reader_guard:split');
 end
 
+function test_clean_reference_copy(tc)
+% The monitor's clean reference reaches the reading tree alone and is read as the pipeline reads it
+% (clean_ber_ref.m, MATLAB's current folder); a pools file is never overwritten.
+c0 = pwd;
+a = tempname; b = tempname; d = tempname;
+mkdir(a); mkdir(b); mkdir(d);
+tc.addTeardown(@() drop_dirs({a, b, d}));
+tc.addTeardown(@() back_to(c0));
+clean_ref = struct('ebno', [0 3 6 9], 'ber_est', [0.2 0.05 0.004 1e-4], 'ber', [0.2 0.05 0.004 1e-4], 'fer', [1 0.8 0.1 0]);
+src = fullfile(a, 'policy_pools.mat');
+save(src, 'clean_ref');
+dst = reader_guard('ref', src, b);
+verifyEqual(tc, char(java.io.File(pwd).getCanonicalPath()), char(java.io.File(b).getCanonicalPath()));
+verifyTrue(tc, isfile(dst));
+verifyEqual(tc, who('-file', dst), {'clean_ref'});
+verifyEqual(tc, clean_ber_ref([3 9], 'ber_est'), [0.05 1e-4], 'RelTol', 1e-9);
+verifyEqual(tc, reader_guard('ref', src, b), dst);                       % the same copy again
+verifyError(tc, @() reader_guard('ref', dst, b), 'reader_guard:ref');    % a copy is not its own source
+clean_ref = struct('ebno', [0 3], 'ber', [0.2 0.05]); %#ok<NASGU>
+save(fullfile(a, 'no_estimate.mat'), 'clean_ref');
+verifyError(tc, @() reader_guard('ref', fullfile(a, 'no_estimate.mat'), b), 'reader_guard:ref');
+% a tree that holds a pools file keeps it
+mkdir(fullfile(d, 'data'));
+f = fullfile(d, 'data', 'policy_pools.mat');
+PP = struct('x', 1); %#ok<NASGU>
+clean_ref = struct('ebno', [0 3 6 9], 'ber_est', [0.2 0.05 0.004 1e-4]); %#ok<NASGU>
+save(f, 'PP', 'clean_ref');
+verifyError(tc, @() reader_guard('ref', src, d), 'reader_guard:ref');
+verifyEqual(tc, sort(who('-file', f)), {'PP'; 'clean_ref'});
+end
+
 function test_registration_commit(tc)
 verifyEqual(tc, reader_guard('registration', 'abc1234', ''), 'abc1234');
 verifyEqual(tc, reader_guard('registration', repmat('a1', 1, 20), ''), repmat('a1', 1, 20));
@@ -201,4 +232,15 @@ lo = run0 + 1000; hi = run0 + 2000 + 999;
 verifyGreaterThan(tc, lo, 299000);
 verifyLessThan(tc, hi, seed_base(700001));
 verifyFalse(tc, any(ismember(ep0 + [1 2], [2027 2028 2074])));
+end
+
+function drop_dirs(items)
+for k = 1:numel(items)
+    if isfolder(items{k}), [~, ~] = rmdir(items{k}, 's'); end
+end
+end
+
+function back_to(c0)
+cd(c0);
+clear('clean_ber_ref');
 end

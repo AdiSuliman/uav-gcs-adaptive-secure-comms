@@ -10,8 +10,10 @@ function out = reader_guard(cmd, varargin)
 %                                          the monitor's clean reference as the pipeline reads it:
 %                                          clean_ber_ref.m loads clean_ref from data/policy_pools.mat
 %                                          of MATLAB's current folder, so clean_ref of pools_file
-%                                          alone is saved to root/data/policy_pools.mat, the current
-%                                          folder is set to root and the reference is checked finite
+%                                          alone is saved to root/data/policy_pools.mat (refused when
+%                                          that file holds anything else: a pools file is never
+%                                          overwritten), the current folder is set to root and the
+%                                          reference is checked finite
 %   reader_guard('registration', hash, docs_repo)
 %                                          error unless hash is a commit id; with docs_repo, that the
 %                                          commit exists there and its docs/DECISIONS.md holds D116
@@ -58,10 +60,6 @@ switch cmd
         out = d;
     case 'ref'
         src = canon(varargin{1}); root = canon(varargin{2});
-        [~, rn] = fileparts(root);
-        if ismember(lower(rn), {'uav-gcs-v7', 'uav-gcs-v7-p3', 'uav-gcs-v7-p2', 'uav-gcs-v7-bw', 'uav-gcs-v7-docs', 'uav-gcs-logs'})
-            error('reader_guard:ref', 'reader_guard: %s is a pipeline folder; the reference copy goes to a reading tree', root);
-        end
         dst = canon(fullfile(root, 'data', 'policy_pools.mat'));
         if strcmpi(src, dst), error('reader_guard:ref', 'reader_guard: %s is its own reference copy', src); end
         S = load(src, 'clean_ref');
@@ -72,6 +70,9 @@ switch cmd
         if ~isfolder(fileparts(dst)), mkdir(fileparts(dst)); end
         same = false;
         if isfile(dst)
+            if ~isempty(setdiff(who('-file', dst), {'clean_ref'}))
+                error('reader_guard:ref', 'reader_guard: %s holds more than a clean reference (a pools file); it is not overwritten', dst);
+            end
             D = load(dst, 'clean_ref'); same = isfield(D, 'clean_ref') && isequaln(D.clean_ref, clean_ref);
         end
         if ~same, save(dst, 'clean_ref'); end
