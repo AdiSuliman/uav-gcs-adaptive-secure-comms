@@ -365,6 +365,7 @@ if isfile(F.pol)
             'which runs with the layer, as rule + escalation and the table do): DQN %.1f%% vs rule + escalation %.1f%% recovered, paired ' ...
             '%+.1f points [%+.1f, %+.1f]'], 100 * mean(ALL{kn}.recovered(m4)), 100 * mean(ALL{kr0}.recovered(m4)), 100*dn, 100*dnl, 100*dnh);
     end
+    if isfield(P.KP, 's1g_lines'), det = [det, P.KP.s1g_lines]; end   % the lost-branch classes against the rule without the gate (the reference there)
     k_b = col('blind_esc');
     if ~isempty(k_b)
         [db, dbl, dbh] = boot_cluster(double(ALL{k_r}.recovered(m4)) - double(ALL{k_b}.recovered(m4)), ones(1, sum(m4)), ...

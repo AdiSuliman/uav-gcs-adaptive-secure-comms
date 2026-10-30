@@ -499,6 +499,14 @@ verifyNumElements(tc, strfind(src, 'hist_bits(mem, ''qt'''), 1);
 src = strrep(fileread(which('policy_decide')), char(13), '');
 verifyNotEmpty(tc, strfind(src, 's1g = ~core && ~blind && strcmp(base, ''rule'')'));
 verifyNotEmpty(tc, strfind(src, '&& ~lbn'));
+src = fileread(which('evaluate_policies'));                                % the reference rows beside the DQN
+verifyNotEmpty(tc, strfind(src, 'POL = [POL, {''rule_esc_nos1g''}]; LBL = [LBL, {''rule + escalation, without the lost-branch gate (the reference)''}];'));
+verifyNotEmpty(tc, strfind(src, 'if s1_on, KP.s1g_lines = s1gl; end'));
+verifyNotEmpty(tc, strfind(fileread(which('measure_all_kpis')), 'det = [det, P.KP.s1g_lines];'));
+src = fileread(which('train_dqn'));                                        % chosen first, kept for every later step
+verifyNotEmpty(tc, strfind(src, '[Sg, GROWS] = s1g_step(S0, S1STEP, evr, FA_BOUND, PK, PPr, K, val_spec, val_thr, H, CV, EBNO_THR);'));
+verifyNotEmpty(tc, strfind(src, '[Ssel, SROWS] = choose_settings(Sg, STEPS, evr, FA_BOUND, PK);'));
+verifyNotEmpty(tc, strfind(src, 'A = s1g_adopt(V0, V1, thr, s, sw0, sw1);'));
 end
 
 function test_s1g_adopt(tc)

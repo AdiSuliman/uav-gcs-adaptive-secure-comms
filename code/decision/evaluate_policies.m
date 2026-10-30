@@ -363,17 +363,17 @@ rep{end+1} = sprintf('Deployed policy on the harmed episodes, >= 90%% of every t
     sum(kpi4h), sum(~isnan(PTh(:, iK))), threats{find(PTh(:, iK) == min(PTh(:, iK)), 1)}, min(PTh(:, iK)));
 if s1_on                                              % rule + escalation with and without the gate on the lost-branch classes
     ks = col('rule_esc_nos1g');
-    rep{end+1} = '';
-    rep{end+1} = ['Lost-branch classes and their combinations, harmed recoverable episodes, recovered, 95% bootstrap over flight geometries: ' ...
-        'rule + escalation with the gate, without it (the reference for the comparison with the DQN: same settings, paired) and the deployed policy'];
+    s1gl = {['Lost-branch classes and their combinations, harmed recoverable episodes, recovered, 95% bootstrap over flight geometries: ' ...
+        'rule + escalation with the gate, without it (the reference for the comparison with the DQN: same settings, paired) and the deployed policy']};
     for ti = find(contains(threats, 'antenna_fault') | contains(threats, 'airframe_shadowing'))
         mr = strcmp(PP.scen(ALL{1}.scn), threats{ti}) & ALL{1}.threat & ALL{1}.recoverable & HA;
         if ~any(mr), continue; end
         [dd, dl, dh] = boot_cluster(double(ALL{iDQN}.recovered(mr)) - double(ALL{ks}.recovered(mr)), ones(1, sum(mr)), ALL{iDQN}.geom(mr), 2000, 130 + ti);
-        rep{end+1} = sprintf('  %-34s harmed %4d: with the gate %s | without it %s | deployed %s | deployed less the reference %+.1f [%+.1f, %+.1f] points', ...
+        s1gl{end+1} = sprintf('  %-34s harmed %4d: with the gate %s | without it %s | deployed %s | deployed less the reference %+.1f [%+.1f, %+.1f] points', ...
             threats{ti}, sum(mr), ci_one(ALL{col('rule_esc')}.recovered(mr), ALL{col('rule_esc')}.geom(mr)), ...
             ci_one(ALL{ks}.recovered(mr), ALL{ks}.geom(mr)), ci_one(ALL{iDQN}.recovered(mr), ALL{iDQN}.geom(mr)), 100*dd, 100*dl, 100*dh); %#ok<AGROW>
     end
+    rep = [rep, {''}, s1gl]; %#ok<AGROW>
 end
 SHN = '';                                             % airframe shadowing: conditioned on a geometry that hides an antenna
 if isfield(PP, 'shadow'), SHN = shadow_note(PP.shadow, TEST, PP.ebno); end
@@ -707,6 +707,7 @@ if FRESH                                              % P1R: KP.far is the fresh
 end
 if WF.r9, KP.ebno_rows = R9ROWS; KP.ebno_lines = r9l; end
 if rm_on, KP.release_m = true; end
+if s1_on, KP.s1g_lines = s1gl; end
 save('results/policy_evaluation.mat', 'RES', 'RW', 'POL', 'LBL', 'set_names', 'fixed_best', 'tab', 'iDQN', 'KP', ...
     'iThreat', 'ALL', 'top_cfg');
 if FRESH, save('results/policy_evaluation.mat', 'RWf', '-append'); end
