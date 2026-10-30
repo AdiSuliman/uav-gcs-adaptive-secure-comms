@@ -466,6 +466,45 @@ verifyNotEmpty(tc, strfind(ks, 'assert(~contains(f, ''splits_fresh''), ''k2_1_sc
 verifyNumElements(tc, regexp(ks, '\<load\(', 'match'), 4);        % the splits through load_split, N, ood, the 18.10 file
 end
 
+function test_ood_run_guards(tc)
+% The OOD run refuses before it reads or writes anything: without a phase; with a forced
+% candidate outside the smoke; without the registration commit; the read phase without its
+% committed select record (no set-4 marker written); an s0 other than (last_or_if, 1). The
+% detector and its thresholds stay byte-identical; the run writes data/ only through
+% unk_write.m, never the detector or its thresholds, and its select phase loads no test set.
+d = fullfile(tc.TestData.tmp, 'oodrun'); mkdir(fullfile(d, 'data')); mkdir(fullfile(d, 'results'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+net = []; classes = {'none', 'jamming'}; trained_at = 1; %#ok<NASGU>
+ood = struct('score', 'last_or_if', 'win', 1, 'candidates', {{'last', 'last_or_if'}}, 'forest_pack', struct('x', 1));
+save('data/trained_detector.mat', 'net', 'ood', 'classes', 'trained_at');
+T = struct('retain', 0.95); save('data/ood_thresholds.mat', 'T');
+FM = struct('W', 1); N = 12; save('data/fusion.mat', 'FM', 'N');
+params = struct('a', 1); save('params.mat', 'params');
+FZ = {'data/trained_detector.mat', 'data/ood_thresholds.mat', 'data/fusion.mat'};
+h0 = cellfun(@(f) kpi6_fresh_marker('sha', f), FZ, 'UniformOutput', false);
+verifyError(tc, @() ood_run(struct()), 'ood_k2_run:phase');
+verifyError(tc, @() ood_run(struct('OOD_PHASE', 'read', 'OOD_FORCE', 'C1')), 'ood_k2_run:force');
+verifyError(tc, @() ood_run(struct('OOD_PHASE', 'select', 'REG_COMMIT', 'zz', 'DOCS_REPO', d)), 'ood_k2_rules:registration');
+verifyError(tc, @() ood_run(struct('OOD_PHASE', 'read', 'SMOKE', true)), 'ood_k2_rules:select_record');
+verifyFalse(tc, isfile('results/ood_k2_read_started.txt'));
+verifyEqual(tc, cellfun(@(f) kpi6_fresh_marker('sha', f), FZ, 'UniformOutput', false), h0);
+ood.score = 'last'; save('data/trained_detector.mat', 'net', 'ood', 'classes', 'trained_at');
+verifyError(tc, @() ood_run(struct('OOD_PHASE', 'select', 'SMOKE', true)), 'ood_k2_run:s0');
+src = fileread(which('ood_k2_run'));
+verifyEmpty(tc, regexp(src, 'save\(''data/(trained_detector|ood_thresholds)', 'once'));
+verifyEmpty(tc, regexp(src, '\<(delete|ood_thresholds)\(', 'once'));
+verifyEqual(tc, regexp(src, '''data/[a-z_0-9]+\.mat''', 'match'), {'''data/trained_detector.mat''', ...
+    '''data/ood_thresholds.mat''', '''data/trained_detector.mat''', '''data/splits.mat''', '''data/fusion.mat''', ...
+    '''data/splits_fresh3.mat''', '''data/splits.mat''', '''data/splits_fresh3.mat'''});
+i0 = strfind(src, 'if strcmp(OOD_PHASE, ''select'')'); i1 = strfind(src, '%% R1. Guards');
+verifyTrue(tc, isscalar(i0) && isscalar(i1) && i0 < i1);
+verifyEmpty(tc, strfind(src(i0:i1), 'splits_fresh'));
+im = strfind(src, 'fid = fopen(RD_MARK, ''w'');'); il = strfind(src, 'S4 = load(''data/splits_fresh3.mat'', ''splits'');');
+verifyTrue(tc, isscalar(im) && isscalar(il) && im < il);
+verifyEmpty(tc, strfind(src(i1:end), 'St.probs'));                % no class read of set 4
+verifyNotEmpty(tc, strfind(src, 'assert(isequal(sha0, sha1), ''ood_k2_run:frozen'''));
+end
+
 %% ---------- D116 reading 3 and the KPI print ----------
 function test_k2_0_lines(tc)
 % K2-0, descriptive and never KPI 2: bounds max(1 - FPR, s) .. min(1, 1 - FPR + s) with s 0
@@ -508,8 +547,10 @@ write_text(f, '{"k2_0": 1}'); verifyError(tc, @() unk_options(f), 'unk_options:v
 end
 
 function test_kpi2_print(tc)
-% KPI 2's summary: without profile.json and with "k2_0": false it is the parent commit's bit
-% for bit; "k2_0": true adds the K2-0 bounds.
+% KPI 2's summary: without profile.json, with "k2_0": false and without D111's reading it is
+% the parent commit's bit for bit; "k2_0": true adds the K2-0 bounds; D111's set-4 reading is
+% KPI 2 while data/fusion.mat holds FM.unk, the earlier reading beside it; without FM.unk the
+% earlier reading stays and the set-4 line is descriptive, not deployed.
 d = fullfile(tc.TestData.tmp, 'kpi2'); mkdir(fullfile(d, 'results')); mkdir(fullfile(d, 'data'));
 c0 = cd(d); back = onCleanup(@() cd(c0));
 SC = {'msp', 'energy', 'iforest', 'last', 'raw'}; WIN = [2 5 8]; RETAIN = 0.95; sel = 'last'; sel_win = 5; %#ok<NASGU>
@@ -536,6 +577,24 @@ verifyEqual(tc, K.value, K0.value); verifyEqual(tc, K.status, K0.status);
 verifyEqual(tc, K.detail(1:numel(K0.detail)), K0.detail);
 verifyEqual(tc, K.detail{numel(K0.detail) + 1}, 'K2-0 on the second test set (results/ood_detection.mat)');
 verifyNotEmpty(tc, strfind(K.detail{end}, 'jamming 69.0-69.0 (flagged 69.0, same countermeasure 0.0)'));
+delete('profile.json');
+kpi2 = 0.812; fpr2 = 0.3; gain = 0.031; gain_ci = [0.01 0.05]; held_out = {'jamming', 'tone_jamming'}; Aad = [0.8 0.824]; %#ok<NASGU>
+TEST_SET = 'fourth test set (data/splits_fresh3.mat)'; %#ok<NASGU>
+save('results/ood_k2_read.mat', 'kpi2', 'fpr2', 'gain', 'gain_ci', 'held_out', 'Aad', 'TEST_SET');
+FM = struct('W', 1, 'unk', struct('val', (1:3)')); N = 12; save('data/fusion.mat', 'FM', 'N');
+K = kpi2_of(run_kpis());
+verifyEqual(tc, K.value, 'mean AUROC 0.812, FPR95 0.30 (nested, D111, fourth test set (data/splits_fresh3.mat))');
+verifyEqual(tc, K.status, 'MET');
+verifyNotEmpty(tc, strfind(K.detail{1}, ['D111''s statistic on the fourth test set (data/splits_fresh3.mat): the ' ...
+    'adopted procedure''s nested mean AUROC 0.812, FPR95 0.30; against the 18.10 procedure on the same set +0.031 ' ...
+    '[+0.010, +0.050]']));
+verifyEqual(tc, K.detail{2}, 'beside it: mean AUROC 0.850 read on the second test set (the earlier statistic)');
+verifyEqual(tc, K.detail(3:end), K0.detail);
+FM = struct('W', 1); save('data/fusion.mat', 'FM', 'N');
+K = kpi2_of(run_kpis());
+verifyEqual(tc, K.value, K0.value); verifyEqual(tc, K.status, K0.status);
+verifyEqual(tc, K.detail(1:end - 1), K0.detail);
+verifyTrue(tc, startsWith(K.detail{end}, 'descriptive, not deployed (FM.unk is not in data/fusion.mat): D111''s statistic'));
 end
 
 %% ---------- helpers ----------

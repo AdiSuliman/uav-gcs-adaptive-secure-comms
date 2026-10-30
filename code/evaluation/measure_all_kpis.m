@@ -11,7 +11,10 @@
 %   KPI 2  unknown threats: leave-one-threat-out mean AUROC >= KPI2_TARGET, FPR at 95%
 %          of known frames kept (eval_ood_detection; the nested estimate of the
 %          selected production score); with "k2_0": true in profile.json (unk_options.m),
-%          D116 reading 3 beside it (k2_0_lines.m, descriptive, never KPI 2)
+%          D116 reading 3 beside it (k2_0_lines.m, descriptive, never KPI 2); with D111's
+%          set-4 reading (results/ood_k2_read.mat) its nested mean while data/fusion.mat
+%          holds FM.unk, the earlier reading beside it; without FM.unk (guard (e)) the earlier
+%          reading stays and the set-4 line is descriptive, labelled not deployed
 %   KPI 3  physical validation: BER vs theory within 0.3 dB (validate_phy)
 %   KPI 4  restoration: BER and packet loss back to <= 2x clean on >= 90% of the
 %          recoverable episodes of EVERY threat, combined threats included, over
@@ -220,9 +223,22 @@ if isfile(F.ood)
             1:numel(O.LC.cand), 'UniformOutput', false), ', '));
     end
     if unk_options().k2_0, det = [det, k2_0_lines('kpi', O)]; end   % D116 reading 3 (descriptive, not KPI 2)
-    KPI(end+1) = kpi(2, 'Unknown threat (LOTO)', sprintf('mean AUROC %.3f, FPR95 %.2f (nested)', val, fn), ...
-        sprintf('>= %.1f', KPI2_TARGET), ...
-        status(val >= KPI2_TARGET, file_time(F.ood) < t_det), det);
+    vt = sprintf('mean AUROC %.3f, FPR95 %.2f (nested)', val, fn); old = file_time(F.ood) < t_det;
+    if isfile('results/ood_k2_read.mat')               % D111's set-4 reading (ood_k2_run.m)
+        K2 = load('results/ood_k2_read.mat', 'kpi2', 'fpr2', 'gain', 'gain_ci', 'held_out', 'Aad', 'TEST_SET');
+        l2 = sprintf(['D111''s statistic on the %s: the adopted procedure''s nested mean AUROC %.3f, FPR95 %.2f; against ' ...
+            'the 18.10 procedure on the same set %+.3f [%+.3f, %+.3f] (95%%); per held-out threat %s'], K2.TEST_SET, K2.kpi2, ...
+            K2.fpr2, K2.gain, K2.gain_ci, strjoin(arrayfun(@(i) sprintf('%s %.3f', K2.held_out{i}, K2.Aad(i)), ...
+            1:numel(K2.Aad), 'UniformOutput', false), ', '));
+        if unk_stat('on', struct('fuse', fusion_model().FM))   % deployed: KPI 2 is its nested set-4 mean
+            det = [{l2, sprintf('beside it: mean AUROC %.3f read on the %s (the earlier statistic)', val, rd)}, det];
+            val = K2.kpi2; vt = sprintf('mean AUROC %.3f, FPR95 %.2f (nested, D111, %s)', val, K2.fpr2, K2.TEST_SET);
+            old = file_time('results/ood_k2_read.mat') < t_det;
+        else                                            % FM.unk removed (guard (e)): KPI 2 stays the earlier reading
+            det{end+1} = ['descriptive, not deployed (FM.unk is not in data/fusion.mat): ' l2];
+        end
+    end
+    KPI(end+1) = kpi(2, 'Unknown threat (LOTO)', vt, sprintf('>= %.1f', KPI2_TARGET), status(val >= KPI2_TARGET, old), det);
 else
     KPI(end+1) = missing(2, 'Unknown threat (LOTO)', F.ood);
 end
