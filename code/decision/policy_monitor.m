@@ -84,6 +84,11 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   mem.since starts saturated (10): the policies never see the episode clock.
 %   mem.deg_n / mem.conf_n: consecutive degraded / confirmed-alarm cycles; mem.pend:
 %   a requested change not yet received.
+%   With a drop alarm ('class_drop', 'class_cusum') and PP.lb_complete the memory also holds the
+%   link-budget completion's reading (lb_complete.m), written by lb_track alone: mem.lb_dc, the
+%   drop of the combined antenna gain against its own held reference [dB] (1 x NE, NaN without
+%   antenna gains), mem.drop_n, the consecutive cycles of a confirmed drop alarm, and the
+%   reference's state (lb_ref, lb_rp, lb_rx, lb_e). Without PP.lb_complete none of it exists.
 %   M: ber_avg, plr (NE x 1), ebno_est (as measured), drop (dB, without the configurations'
 %      known gains), drop_alarm, degraded, cls, alarm, confirmed (1 x NE),
 %      probs (NE x classes, fused), te (NE x 9, persistence measurements of the window,
@@ -207,6 +212,7 @@ switch mode
         M.alarm = hostile | M.degraded;
 end
 q = ~M.alarm;
+ex = [];                                                        % the drop statistic's excursion (drop_ref.m), with a drop alarm
 if any(strcmp(mode, {'class_drop', 'class_cusum'}))            % the reference before a change building up
     if ~isfield(mem, 'rp'), mem.rp = nan(size(mem.ref)); mem.rx = false(numel(eg), 1); end
     ex = mem.cs; if strcmp(mode, 'class_drop'), ex = double(M.drop(:) >= C.sev.path_loss.levels(1) / 2); end
@@ -225,10 +231,39 @@ if ~isempty(cs) && ~strcmp(mode, 'degraded')                    % the sweeper's 
     M.confirmed = M.confirmed | sum(mem.sw(:, end-cs(2)+1:end), 2)' >= cs(1);
 end
 mem.conf_n(M.confirmed) = mem.conf_n(M.confirmed) + 1; mem.conf_n(~M.confirmed) = 0;
+if ~isempty(ex) && isfield(PP, 'lb_complete') && ~isempty(PP.lb_complete) && PP.lb_complete   % lb_complete.m's reading
+    mem = lb_track(mem, obs, gw(link), q(:), ex, M);
+end
 % Observation of this cycle for the agent's state (policy_state.m), newest first
 o = policy_obs(obs, M, bc, unk);
 if isempty(mem.hist), mem.hist = repmat(o, 1, 1, C.hist); end
 mem.hist = cat(3, o, mem.hist(:, :, 1:end-1));
+end
+
+function mem = lb_track(mem, obs, gw, q, ex, M)
+% The link-budget completion's reading (lb_complete.m), with a drop alarm and PP.lb_complete only:
+% the combined channel gain of all antennas (obs.gant, dB; maximum-ratio combining adds the
+% branches' powers, Brennan 1959) less the power step of the configuration the frame was
+% received with, a reference of it held as the drop's is (drop_ref.m, a state of its own, the
+% same excursion and alarm), mem.lb_dc the deficit against it (the median of the last cycles
+% against the reference, as M.drop), and mem.drop_n the consecutive cycles of a confirmed drop
+% alarm. No antenna gains: the deficit stays NaN, the completion never acts.
+NE = numel(M.confirmed);
+if ~isfield(mem, 'lb_ref')
+    mem.lb_ref = nan(NE, size(mem.ref, 2)); mem.lb_rp = nan(NE, size(mem.ref, 2)); mem.lb_rx = false(NE, 1);
+    mem.lb_e = nan(NE, size(mem.ebno, 2)); mem.lb_dc = nan(1, NE); mem.drop_n = zeros(1, NE);
+end
+c = M.confirmed & M.drop_alarm;
+mem.drop_n(c) = mem.drop_n(c) + 1; mem.drop_n(~c) = 0;
+e = nan(NE, 1);
+if isfield(obs, 'gant') && ~isempty(obs.gant)
+    e = 10 * log10(sum(10 .^ (double(obs.gant) / 10), 2)) - reshape(gw, [], 1);
+end
+mem.lb_e = [mem.lb_e(:, 2:end), e];
+e3 = median(mem.lb_e, 2, 'omitnan');
+r = median(mem.lb_ref, 2, 'omitnan'); r(isnan(r)) = e3(isnan(r));
+mem.lb_dc = (r - e3)';
+[mem.lb_ref, mem.lb_rp, mem.lb_rx] = drop_ref(mem.lb_ref, mem.lb_rp, mem.lb_rx, e, q, ex, M.drop_alarm(:));
 end
 
 function o = policy_obs(obs, M, bc, unk)

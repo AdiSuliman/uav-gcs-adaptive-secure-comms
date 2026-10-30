@@ -46,7 +46,12 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %   picks between the two dwells on validation (rule + escalation), which every rule kind,
 %   the core and blind ones included, then runs (decision_settings.m)
 %   dqn       argmax of the Q-network over the configurations allowed by the
-%             shield (policy_mask.m); switching costs are part of its reward
+%             shield (policy_mask.m); switching costs are part of its reward. With
+%             PP.lb_complete (stored with the agent, decision_settings.m; default off) the
+%             argmax is completed by the link budget, before the escalation (lb_complete.m):
+%             a confirmed loss of our own signal that the proposal's known gain does not cover
+%             gets the link-budget configuration that does, the proposal's frequency and
+%             space choice kept (info.lb marks the episodes it changed)
 %   *_esc     escalation: move to the next configuration not yet tried in this
 %             incident (DQN: next-highest Q; rule and table: the fixed ladder C.ladder)
 %             when the base policy keeps
@@ -150,6 +155,10 @@ switch base
         error('policy_decide: unknown policy %s', kind);
 end
 
+lbc = false(1, NE);
+lbon = strcmp(base, 'dqn') && isfield(PP, 'lb_complete') && ~isempty(PP.lb_complete) && PP.lb_complete;
+if lbon, [a, lbc] = lb_complete(a, cfg, M, mem, PP); end   % after the argmax, before the escalation
+
 escalated = false(1, NE);
 if endsWith(kind, '_esc')
     ladder = cellfun(@(x) find(strcmp(A, x)), C.ladder);
@@ -183,6 +192,7 @@ mem = policy_monitor('change', mem, a ~= cfg);
 info = struct('q', q, 'cls', {M.cls}, 'degraded', M.degraded, 'confirmed', M.confirmed, ...
     'escalated', escalated, 'ber_avg', M.ber_avg', 'drop', M.drop, 'drop_alarm', M.drop_alarm);
 if isfield(M, 'deg_quiet'), info.deg_quiet = M.deg_quiet; end   % degraded, no RF evidence (deg_mode 'win_q_gate')
+if lbon, info.lb = lbc; end                                      % changed by the link-budget completion
 end
 
 function [gm, gid] = action_groups(A)

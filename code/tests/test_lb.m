@@ -1,0 +1,485 @@
+function tests = test_lb
+%TEST_LB  Unit tests of the link-budget completion of the DQN's action (lb_complete.m,
+%   policy_monitor.m lb_track, policy_decide.m PP.lb_complete), of its stored switch
+%   (decision_settings.m, policy_stamp.m), of C2's adoption step (lb_options.m, lb_adopt.m,
+%   lb_selfcheck.m, train_dqn.m) and of the readers' two columns, on synthetic frames and a
+%   clean-link table written in a temporary folder; no pools. Run from the repository root:
+%   results = runtests('code/tests/test_lb.m')
+tests = functiontests(localfunctions);
+end
+
+function setupOnce(tc)
+tc.TestData.root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
+addpath(fullfile(tc.TestData.root, 'code'));
+setup_paths;
+tc.TestData.cwd = pwd;
+tc.TestData.tmp = tempname; mkdir(tc.TestData.tmp); cd(tc.TestData.tmp);
+mkdir('data');
+clean_ref = struct('ebno', 0:3:15, 'ber_est', [4e-2 1.2e-2 3e-3 8e-4 2e-4 5e-5], ...
+    'plr_fec', [0.3 0.1 0.03 0.01 0.003 0.001]);                 % the clean-link table clean_ber_ref.m reads
+save('data/policy_pools.mat', 'clean_ref');
+clear('clean_ber_ref');
+end
+
+function teardownOnce(tc)
+clear('clean_ber_ref');
+cd(tc.TestData.cwd);
+end
+
+%% ---------- the layer (lb_complete.m) ----------
+function test_layer_threshold_in_db(tc)
+% The threshold is half the smallest path-loss level, in dB, whatever the pools' drop threshold
+% (a CUSUM level in dB^2 under class_cusum): 2.9 dB passes nothing, 3 dB acts.
+PP = lb_world('class_cusum', 153);
+na = find(strcmp(PP.actions, 'no_action'));
+verifyEqual(tc, decision_config().sev.path_loss.levels(1) / 2, 3);
+for dd = [0.5 4 153 1e4]
+    PP.drop_db = dd;
+    [m, M] = lb_state(2.9, 3, 10, false, true, true);
+    [~, acted] = lb_complete(na, na, M, m, PP);
+    verifyFalse(tc, acted, sprintf('2.9 dB, drop_db %g', dd));
+    m.lb_dc = 3;
+    [a, acted] = lb_complete(na, na, M, m, PP);
+    verifyTrue(tc, acted, sprintf('3 dB, drop_db %g', dd));
+    verifyEqual(tc, PP.actions{a}, 'rate_reduce');
+end
+end
+
+function test_layer_guards(tc)
+% Every condition is needed: a confirmed drop alarm for C.esc cycles, C.hold cycles since the
+% last change, none pending, a deficit of D_min or more, a known gain of the proposal below it.
+PP = lb_world('class_drop', 4); C = decision_config();
+na = find(strcmp(PP.actions, 'no_action'));
+[m, M] = lb_state(10, C.esc, C.hold, false, true, true);
+[~, acted] = lb_complete(na, na, M, m, PP); verifyTrue(tc, acted, 'all hold');
+bad = struct('drop_n', C.esc - 1, 'since', C.hold - 1, 'pend', true, 'lb_dc', 2.99, 'lb_dc2', NaN);
+for f = {'drop_n', 'since', 'pend', 'lb_dc', 'lb_dc2'}
+    mm = m; mm.(strrep(f{1}, 'lb_dc2', 'lb_dc')) = bad.(f{1});
+    [~, acted] = lb_complete(na, na, M, mm, PP);
+    verifyFalse(tc, acted, f{1});
+end
+for f = {'confirmed', 'drop_alarm'}
+    Mx = M; Mx.(f{1}) = false;
+    [~, acted] = lb_complete(na, na, Mx, m, PP);
+    verifyFalse(tc, acted, f{1});
+end
+rp = find(strcmp(PP.actions, 'rate_reduce+power_control'));       % known gain 10 dB
+m.lb_dc = 9.5; [a, acted] = lb_complete(rp, rp, M, m, PP);
+verifyFalse(tc, acted); verifyEqual(tc, a, rp);                   % covers it: left alone
+m.lb_dc = 12; [a, acted] = lb_complete(rp, rp, M, m, PP);
+verifyFalse(tc, acted); verifyEqual(tc, a, rp);                   % the largest is the proposal already
+mm = rmfield(m, 'lb_dc'); [a, acted] = lb_complete(na, na, M, mm, PP);
+verifyFalse(tc, acted); verifyEqual(tc, a, na);                   % a monitor without the reading
+end
+
+function test_layer_keeps_other_factors(tc)
+% The frequency and space choices of the proposal stay; its link-budget factor is the smallest
+% of rate_reduce (3.5 dB), power_control (6.5) and both (10) that covers the deficit, the
+% largest when none does; fec_interleave proposals are untouched.
+PP = lb_world('class_drop', 4); A = PP.actions; na = find(strcmp(A, 'no_action'));
+at = @(n) find(strcmp(A, n));
+cases = {'channel_switch', 10, 'channel_switch+rate_reduce+power_control'; ...
+    'freq_diversity+spatial_diversity', 5, 'freq_diversity+spatial_diversity+power_control'; ...
+    'spatial_diversity+rate_reduce', 5, 'spatial_diversity+power_control'; ...
+    'no_action', 3.2, 'rate_reduce'; 'no_action', 6.5, 'power_control'; 'no_action', 6.6, 'rate_reduce+power_control'; ...
+    'channel_switch+rate_reduce', 4, 'channel_switch+power_control'; 'power_control', 8, 'rate_reduce+power_control'};
+for k = 1:size(cases, 1)
+    [m, M] = lb_state(cases{k, 2}, 5, 10, false, true, true);
+    [a, acted] = lb_complete(at(cases{k, 1}), na, M, m, PP);
+    verifyTrue(tc, acted, cases{k, 1}); verifyEqual(tc, A{a}, cases{k, 3}, cases{k, 1});
+end
+for n = {'fec_interleave', 'power_control+fec_interleave', 'channel_switch+fec_interleave', ...
+        'spatial_diversity+rate_reduce+power_control+fec_interleave'}
+    if ~any(strcmp(A, n{1})), continue; end
+    [m, M] = lb_state(20, 5, 10, false, true, true);
+    [a, acted] = lb_complete(at(n{1}), na, M, m, PP);
+    verifyFalse(tc, acted, n{1}); verifyEqual(tc, a, at(n{1}), n{1});
+end
+% several episodes at once: each decided on its own deficit
+mem = struct('lb_dc', [10 2 5], 'drop_n', [5 5 5], 'since', [10 10 10], 'pend', [false false false]);
+M = struct('confirmed', [true true true], 'drop_alarm', [true true true]);
+[a, acted] = lb_complete([na na at('channel_switch')], [na na na], M, mem, PP);
+verifyEqual(tc, acted, [true false true]);
+verifyEqual(tc, A(a), {'rate_reduce+power_control', 'no_action', 'channel_switch+power_control'});
+end
+
+function test_layer_parity_with_budget_match(tc)
+% For every deficit from D_min to 25 dB the factor that replaces a no_action proposal is the
+% smallest of the three whose known gain covers it, else the largest, and is rule_based_policy.m's
+% link-budget match; the same checks are C2's (lb_selfcheck.m).
+PP = lb_world('class_drop', 4); A = PP.actions; na = find(strcmp(A, 'no_action'));
+names = {'rate_reduce', 'power_control', 'rate_reduce+power_control'}; gains = [3.5 6.5 10];
+bud = struct('drop_db', 0, 'current', 'no_action', 'current_db', 0, 'names', {names}, 'gain_db', gains);
+for D = 3:0.125:25
+    [m, M] = lb_state(D, 3, 10, false, true, true);
+    [a, acted] = lb_complete(na, na, M, m, PP);
+    j = find(gains >= D, 1); if isempty(j), j = 3; end
+    bud.drop_db = D;
+    verifyTrue(tc, acted); verifyEqual(tc, A{a}, names{j}, sprintf('%g dB', D));
+    verifyEqual(tc, A{a}, rule_based_policy('path_loss', false, 0, -Inf, NaN, true, bud), sprintf('%g dB', D));
+end
+[ok, msg] = lb_selfcheck();
+verifyTrue(tc, ok, strjoin(msg, '; '));
+end
+
+function test_layer_reads_no_class_no_truth(tc)
+% Static: the layer and the monitor's reading read no class, no unknown-threat score, no truth
+% field of the episode, and never PP.drop_db; the layer re-checks the shield.
+src = fileread(which('lb_complete'));
+code = regexprep(src, '%[^\n]*', '');
+bad = '\<(cls|probs|unknown|maha|sc_eff|ended|healthy|scn|truth)\>|PP\s*\.\s*drop_db|PP\s*,\s*''drop_db''';
+verifyEmpty(tc, regexp(code, bad, 'match'));
+verifyNotEmpty(tc, strfind(code, 'policy_mask('));
+verifyNotEmpty(tc, strfind(code, 'rule_based_policy('));
+trk = function_text(fileread(which('policy_monitor')), 'lb_track');
+verifyNotEmpty(tc, trk);
+verifyEmpty(tc, regexp(regexprep(trk, '%[^\n]*', ''), bad, 'match'));
+% what lb_complete.m takes from M, mem and PP
+verifyEqual(tc, fields_read(code, 'M'), {'confirmed', 'drop_alarm'});
+verifyEqual(tc, fields_read(code, 'mem'), {'drop_n', 'lb_dc', 'pend', 'since'});
+verifyEqual(tc, fields_read(code, 'PP'), {'actions'});
+end
+
+%% ---------- the monitor's reading (policy_monitor.m lb_track) ----------
+function test_monitor_single_writer(tc)
+% Past bug 1: each new monitor field has one writer, lb_track, called once per update, and no
+% name collides with a field the monitor already holds.
+f = {'drop_n', 'lb_ref', 'lb_rp', 'lb_rx', 'lb_e', 'lb_dc'};
+d = dir(fullfile(tc.TestData.root, 'code', '**', '*.m'));
+d = d(~contains({d.folder}, [filesep 'legacy']) & ~contains({d.folder}, [filesep 'tests']));
+src = cell(1, numel(d));
+for i = 1:numel(d), src{i} = fileread(fullfile(d(i).folder, d(i).name)); end
+pm = fileread(which('policy_monitor'));
+trk = function_text(pm, 'lb_track');
+for k = 1:numel(f)
+    w = cellfun(@(s) field_writes(s, f{k}), src);
+    verifyEqual(tc, {d(w > 0).name}, {'policy_monitor.m'}, f{k});   % one file writes it
+    verifyEqual(tc, sum(w), field_writes(trk, f{k}), f{k});       % in one function
+    verifyGreaterThan(tc, field_writes(trk, f{k}), 0, f{k});
+end
+verifyNumElements(tc, strfind(pm, 'lb_track('), 2);               % its call and its header
+mem0 = policy_monitor('init', 2, 36);
+verifyEmpty(tc, intersect(fieldnames(mem0), [f, {'lb_complete'}]));
+verifyEqual(tc, field_writes(fileread(which('lb_complete')), 'drop_n'), 0);
+verifyEqual(tc, field_writes(fileread(which('policy_decide')), 'lb_dc'), 0);
+end
+
+function test_monitor_deficit_common_mode_and_branch(tc)
+% The deficit is the drop of the combined gain: a common-mode step of x dB reads x dB, a single
+% branch lost by 31 dB on equal branches 10 log10(N / (N - 1)): 1.76 dB on 3 antennas, 1.25 dB
+% on 4; the power step of the configuration received with is taken out.
+for mode = {'class_drop', 'class_cusum'}
+    PP = lb_world(mode{1}, ternary_t(strcmp(mode{1}, 'class_cusum'), 153, 4));
+    for nr = [3 4]
+        O = lb_run(PP, 'dqn', const_agent(PP, 'channel_switch'), 24, @(t) 31 * (t > 12) * [1 zeros(1, nr - 1)]);
+        verifyEqual(tc, O.dc(end), 10 * log10(nr / (nr - 1)), 'AbsTol', 0.01, sprintf('%s %d antennas', mode{1}, nr));
+        verifyEqual(tc, O.dc(1:12), zeros(1, 12), 'AbsTol', 1e-9);
+    end
+    O = lb_run(PP, 'dqn', const_agent(PP, 'channel_switch'), 24, @(t) 6 * (t > 12) * [1 1 1]);
+    verifyEqual(tc, O.dc(end), 6, 'AbsTol', 1e-9, mode{1});
+end
+end
+
+function test_monitor_reference_held_while_alarm(tc)
+% The reference keeps the level from before the loss while the alarm is on: the deficit of a
+% persistent step does not decay over 60 cycles; without the switch no field exists.
+PP = lb_world('class_drop', 4);
+O = lb_run(PP, 'dqn', const_agent(PP, 'no_action'), 60, @(t) 10 * (t > 12) * [1 1 1]);
+verifyEqual(tc, O.dc(20:60), 10 * ones(1, 41), 'AbsTol', 1e-9);
+verifyGreaterThanOrEqual(tc, O.dn(60), 40);
+PP.lb_complete = false;
+O = lb_run(PP, 'dqn', const_agent(PP, 'no_action'), 20, @(t) 10 * (t > 12) * [1 1 1]);
+verifyFalse(tc, O.has_fields);
+% no antenna gains: nothing to read, the layer never acts
+PP.lb_complete = true;
+O = lb_run(PP, 'dqn', const_agent(PP, 'channel_switch'), 30, @(t) 10 * (t > 12) * [1 1 1], false);
+verifyTrue(tc, all(isnan(O.dc)));
+verifyFalse(tc, any(O.lb));
+end
+
+%% ---------- the decision (policy_decide.m) ----------
+function test_decide_common_mode_steps(tc)
+% A 10 dB common-mode step: the layer adds rate_reduce+power_control (the smallest gain that
+% covers 10 dB does not exist: the largest) to the DQN's channel_switch, once the alarm has been
+% confirmed for C.esc cycles and the hold has passed, never on the cycle the escalation moves;
+% a 6 dB step (the smallest decision level) is answered by power_control alone; off, the DQN's
+% channel_switch stays. Both drop alarms, both DQN kinds.
+C = decision_config(); A = policy_actions();
+for mode = {'class_drop', 'class_cusum'}
+    dd = ternary_t(strcmp(mode{1}, 'class_cusum'), 153, 4);
+    for kind = {'dqn', 'dqn_esc'}
+        for st = [10 6]
+            PP = lb_world(mode{1}, dd);
+            want = ternary_t(st == 10, 'channel_switch+rate_reduce+power_control', 'channel_switch+power_control');
+            ag = const_agent(PP, 'channel_switch');
+            O = lb_run(PP, kind{1}, ag, 40, @(t) st * (t > 12) * [1 1 1]);
+            tag = sprintf('%s %s %d dB', mode{1}, kind{1}, st);
+            t1 = find(O.lb, 1);
+            verifyNotEmpty(tc, t1, tag);
+            verifyEqual(tc, A{O.a(t1)}, want, tag);
+            verifyEqual(tc, A{O.a(t1 - 1)}, 'channel_switch', tag);          % the DQN's own choice, kept
+            verifyGreaterThanOrEqual(tc, O.dn(t1), C.esc, tag);
+            verifyEqual(tc, O.dc(t1), st, 'AbsTol', 1e-9, tag);
+            verifyFalse(tc, O.esc(t1), tag);
+            verifyTrue(tc, all(strcmp(A(O.a(t1:end)), want)), tag);          % held to the end
+            PP.lb_complete = false;
+            Of = lb_run(PP, kind{1}, ag, 40, @(t) st * (t > 12) * [1 1 1]);
+            verifyFalse(tc, any(Of.lb), tag);
+            verifyTrue(tc, all(strcmp(A(Of.a(t1:end)), 'channel_switch')), tag);   % without it the DQN keeps its pick
+            verifyEqual(tc, Of.a(1:t1 - 1), O.a(1:t1 - 1), tag);                 % identical before the layer acts
+        end
+    end
+end
+end
+
+function test_decide_single_branch_loss_not_answered(tc)
+% A single branch lost by 31 dB on equal mean branches leaves D_c = 1.76 dB (3 antennas) or
+% 1.25 dB (4), below D_min: the drop alarm fires on the reference antenna and is confirmed for
+% many cycles, the layer stays out and the DQN's decisions are those without it.
+C = decision_config();
+for mode = {'class_drop', 'class_cusum'}
+    dd = ternary_t(strcmp(mode{1}, 'class_cusum'), 153, 4);
+    for nr = [3 4]
+        PP = lb_world(mode{1}, dd); ag = const_agent(PP, 'channel_switch');
+        loss = @(t) 31 * (t > 12) * [1 zeros(1, nr - 1)];
+        O = lb_run(PP, 'dqn_esc', ag, 40, loss);
+        PP.lb_complete = false;
+        Of = lb_run(PP, 'dqn_esc', ag, 40, loss);
+        tag = sprintf('%s %d antennas', mode{1}, nr);
+        verifyGreaterThanOrEqual(tc, max(O.dn), 3 * C.esc, tag);             % the alarm is up and confirmed
+        verifyLessThan(tc, max(O.dc), decision_config().sev.path_loss.levels(1) / 2, tag);
+        verifyFalse(tc, any(O.lb), tag);
+        verifyEqual(tc, O.a, Of.a, tag);
+    end
+end
+end
+
+function test_decide_clean_roll_in(tc)
+% A clean roll-in, one branch rolling into shadow over 5 cycles (a ramp on the reference antenna,
+% then on another antenna): no common-mode loss, so no layer, whatever the drop alarm does.
+for ant = [1 2]
+    for mode = {'class_drop', 'class_cusum'}
+        dd = ternary_t(strcmp(mode{1}, 'class_cusum'), 153, 4);
+        PP = lb_world(mode{1}, dd); ag = const_agent(PP, 'channel_switch');
+        loss = @(t) min(15, max(0, 3 * (t - 12))) * (1:3 == ant);
+        O = lb_run(PP, 'dqn_esc', ag, 40, loss);
+        PP.lb_complete = false;
+        Of = lb_run(PP, 'dqn_esc', ag, 40, loss);
+        tag = sprintf('antenna %d, %s', ant, mode{1});
+        verifyFalse(tc, any(O.lb), tag);
+        verifyEqual(tc, O.a, Of.a, tag);
+        verifyLessThan(tc, max(O.dc), 3, tag);
+    end
+end
+end
+
+function test_decide_fec_interleave_untouched(tc)
+% A DQN whose proposal holds fec_interleave (the coding answer to bursts) keeps it under a
+% 10 dB common-mode step, and the layer stays out.
+A = policy_actions();
+for n = {'power_control+fec_interleave', 'channel_switch+fec_interleave'}
+    PP = lb_world('class_drop', 4); ag = const_agent(PP, n{1});
+    O = lb_run(PP, 'dqn', ag, 40, @(t) 10 * (t > 12) * [1 1 1]);
+    verifyFalse(tc, any(O.lb), n{1});
+    verifyTrue(tc, all(strcmp(A(O.a(end - 5:end)), n{1})), n{1});
+end
+end
+
+function test_decide_only_dqn_kinds(tc)
+% The rule and the table kinds, and a monitor without a drop alarm, decide as without the
+% switch; only the DQN kinds carry info.lb.
+rs = RandStream('mt19937ar', 'Seed', 5);
+for kind = {'rule_esc', 'table_esc', 'rule', 'blind_esc'}
+    for mode = {'class_drop', 'class_cusum'}
+        PP = lb_world(mode{1}, ternary_t(strcmp(mode{1}, 'class_cusum'), 153, 4));
+        P0 = PP; P0.lb_complete = false;
+        X = random_trace(PP, 4, 30, rs);
+        [a1, i1] = trace_decide(PP, kind{1}, [], X);
+        [a0, i0] = trace_decide(P0, kind{1}, [], X);
+        verifyEqual(tc, a1, a0, [kind{1} ' ' mode{1}]);
+        verifyEqual(tc, i1, i0, [kind{1} ' ' mode{1}]);
+        verifyFalse(tc, any(cellfun(@(i) isfield(i, 'lb'), i1)));
+    end
+end
+PP = lb_world('class', 4); P0 = PP; P0.lb_complete = false;           % no drop alarm in this monitor
+X = random_trace(PP, 4, 30, rs); ag = random_agent(PP, rs);
+[a1, ~, m1] = trace_decide(PP, 'dqn_esc', ag, X);
+[a0, ~, m0] = trace_decide(P0, 'dqn_esc', ag, X);
+verifyEqual(tc, a1, a0);
+verifyTrue(tc, isequaln(m1, m0));
+end
+
+%% ---------- off is the parent commit's code, bit for bit ----------
+function test_off_bit_identical_to_parent(tc)
+% Without PP.lb_complete, and with it false, policy_monitor.m and policy_decide.m give the
+% parent commit's (f6f6e03) actions, information and memory bit for bit, on random traces with
+% antenna gains in every drop-alarm mode, for the DQN kinds and the rule.
+d = parent_dir(tc, 'f6f6e03', {'code/decision/policy_monitor.m', 'code/decision/policy_decide.m'});
+rs = RandStream('mt19937ar', 'Seed', 17);
+C = struct('tag', {}, 'PP', {}, 'X', {}, 'ag', {}, 'kind', {}, 'field_absent', {}, 'field_false', {});
+for mode = {'class_drop', 'class_cusum', 'class'}
+    PP = lb_world(mode{1}, ternary_t(strcmp(mode{1}, 'class_cusum'), 153, 4));
+    PP = rmfield(PP, 'lb_complete');
+    X = random_trace(PP, 4, 40, rs); ag = random_agent(PP, rs);
+    P0 = PP; P0.lb_complete = false;
+    for kind = {'dqn', 'dqn_esc', 'rule_esc'}
+        c = struct('tag', [mode{1} ' ' kind{1}], 'PP', PP, 'X', {X}, 'ag', ag, 'kind', kind{1}, 'field_absent', [], 'field_false', []);
+        [r.a, r.i, r.m] = trace_decide(PP, kind{1}, ag, X); c.field_absent = r;
+        [r.a, r.i, r.m] = trace_decide(P0, kind{1}, ag, X); c.field_false = r;
+        C(end+1) = c; %#ok<AGROW>
+    end
+end
+addpath(d, '-begin'); clear policy_monitor policy_decide
+cl0 = onCleanup(@() fixture_off(d, {'policy_monitor', 'policy_decide'})); %#ok<NASGU>
+verifyEqual(tc, which('policy_decide'), fullfile(d, 'policy_decide.m'));
+moved = false(1, numel(C));
+for k = 1:numel(C)
+    [r.a, r.i, r.m] = trace_decide(C(k).PP, C(k).kind, C(k).ag, C(k).X);
+    verifyTrue(tc, isequaln(C(k).field_absent, r), [C(k).tag ': field absent']);
+    verifyTrue(tc, isequaln(C(k).field_false, r), [C(k).tag ': false']);
+    moved(k) = numel(unique(r.a(:))) > 1;                              % the trace moves the configuration
+end
+fixture_off(d, {'policy_monitor', 'policy_decide'});
+verifyNotEqual(tc, which('policy_decide'), fullfile(d, 'policy_decide.m'));
+verifyTrue(tc, any(moved));
+end
+
+%% ---------- helpers ----------
+function PP = lb_world(mode, drop_db)
+% The pools' settings of the tests: two classes, known gains of 6.5 dB for power_control (the
+% power step in the received field) and 3.5 dB for rate_reduce (processing gain), the
+% completion on.
+A = policy_actions();
+g = 6.5 * contains(A, 'power_control') + 3.5 * contains(A, 'rate_reduce');
+w = 6.5 * contains(A, 'power_control');
+PP = struct('actions', {A}, 'classes', {{'none', 'path_loss'}}, 'sps', 4, 'bps', 2, 'maha_thr', -Inf, 'confirm', [2 2], ...
+    'alarm_mode', mode, 'drop_db', drop_db, 'cfg_gain_db', g, 'pw', 10 .^ (w / 10), 'lb_complete', true);
+end
+
+function ag = const_agent(PP, name)
+% A DQN whose Q-values are 1 for configuration `name` and 0 for the others, whatever the state.
+nA = numel(PP.actions); nS = policy_state_size(nA, numel(PP.classes));
+q = zeros(nA, 1); q(strcmp(PP.actions, name)) = 1;
+ag = struct('dense', struct('mu', zeros(nS, 1), 'sd', ones(nS, 1), 'W', {{zeros(2, nS), zeros(nA, 2)}}, 'b', {{zeros(2, 1), q}}));
+end
+
+function ag = random_agent(PP, rs)
+% A DQN with random weights (a state-dependent policy).
+nA = numel(PP.actions); nS = policy_state_size(nA, numel(PP.classes));
+ag = struct('dense', struct('mu', zeros(nS, 1), 'sd', ones(nS, 1), 'W', {{0.3 * randn(rs, 16, nS), randn(rs, nA, 16)}}, ...
+    'b', {{randn(rs, 16, 1), randn(rs, nA, 1)}}));
+end
+
+function [m, M] = lb_state(dc, dn, since, pend, conf, dal)
+% The monitor's reading and memory of one episode as lb_complete.m takes them.
+m = struct('lb_dc', dc, 'drop_n', dn, 'since', since, 'pend', pend);
+M = struct('confirmed', conf, 'drop_alarm', dal);
+end
+
+function O = lb_run(PP, kind, ag, T, loss, gant)
+% policy_decide over T cycles of one episode; loss(t) the losses [dB] of the antennas (1 x nr,
+% antenna 1 the reference: the estimate of Eb/N0 follows it), a change reaching the link at
+% once. The frame carries the power step of the configuration it was received with. gant
+% false: no antenna gains.
+if nargin < 6, gant = true; end
+A = PP.actions; na = find(strcmp(A, 'no_action')); nF = numel(link_features('names'));
+[gk, gw] = config_gain_db(PP);
+O = struct('a', zeros(1, T), 'lb', false(1, T), 'dc', nan(1, T), 'dn', zeros(1, T), 'esc', false(1, T), ...
+    'has_fields', false);
+a = na; m = [];
+for t = 1:T
+    L = loss(t);
+    o = struct('probs', [1 0], 'unknown', false, 'feat', zeros(1, nF), 'cfg_link', a);
+    o.feat(feature_index('log_ber')) = -6;
+    o.feat(feature_index('sinr')) = 12 - L(1) + gk(a) - 10*log10(4) + 10*log10(2);
+    if gant, o.gant = 2 - L + gw(a); end
+    [a, m, info] = policy_decide(kind, o, a, m, PP, ag);
+    O.a(t) = a; O.esc(t) = info.escalated;
+    if isfield(info, 'lb'), O.lb(t) = info.lb; end
+    if isfield(m, 'lb_dc'), O.dc(t) = m.lb_dc; end
+    if isfield(m, 'drop_n'), O.dn(t) = m.drop_n; end
+    O.has_fields = O.has_fields || isfield(m, 'lb_dc') || isfield(m, 'drop_n');
+end
+end
+
+function X = random_trace(PP, NE, T, rs)
+% NE episodes of T cycles: random class probabilities, BER, SINR with steps, quiet slot, CRC and
+% three antennas' gains with a drop on one or all of them.
+nC = numel(PP.classes); nF = numel(link_features('names'));
+X = cell(1, T); step = 6 * randi(rs, [0 2], NE, 1); k0 = randi(rs, [8 20], NE, 1); on = randi(rs, [0 1], NE, 3);
+for t = 1:T
+    p = rand(rs, NE, nC) .^ 4; p(:, 1) = p(:, 1) + 0.7 * (rand(rs, NE, 1) < 0.8); p = p ./ sum(p, 2);
+    o = struct('probs', p, 'unknown', false(NE, 1), 'feat', zeros(NE, nF));
+    d = step .* (t >= k0);
+    o.feat(:, feature_index('log_ber')) = -5 + 3 * rand(rs, NE, 1);
+    o.feat(:, feature_index('sinr')) = 6 + randn(rs, NE, 1) - d;
+    o.feat(:, feature_index('q_iot')) = 6 * rand(rs, NE, 1) - 1;
+    o.feat(:, feature_index('crc_fail')) = rand(rs, NE, 1) < 0.2;
+    o.gant = 1 + randn(rs, NE, 3) - d .* (1 + on) / 2;
+    X{t} = o;
+end
+end
+
+function [A, I, M] = trace_decide(PP, kind, ag, X)
+% policy_decide over the trace X from no_action (cfg_link follows the request); the actions
+% (T x NE), every cycle's information and the last memory.
+NE = size(X{1}.feat, 1); T = numel(X);
+na = find(strcmp(PP.actions, 'no_action'));
+cfg = na * ones(1, NE); mem = [];
+A = zeros(T, NE); I = cell(1, T);
+opt = struct('table', na * ones(1, numel(PP.classes)), 'table_unknown', find(strcmp(PP.actions, 'freq_diversity')));
+for t = 1:T
+    o = X{t}; o.cfg_link = cfg;
+    [cfg, mem, I{t}] = policy_decide(kind, o, cfg, mem, PP, ag, opt);
+    A(t, :) = cfg;
+end
+M = mem;
+end
+
+function n = field_writes(src, f)
+% The writes of mem.f in src: mem.f = ..., mem.f(...) = ..., or among the outputs [..., mem.f, ...] = ....
+n = numel(regexp(src, ['(?<![\w.])mem\.' f '(\([^)]*\))?\s*=(?!=)'], 'match')) + ...
+    numel(regexp(src, ['\[[^\]=]*(?<![\w.])mem\.' f '\>[^\]=]*\]\s*=(?!=)'], 'match'));
+end
+
+function f = fields_read(code, v)
+% The sorted names of the fields of variable v that code accesses (v.name).
+t = regexp(code, ['(?<![\w.])' v '\.(\w+)'], 'tokens');
+f = unique(cellfun(@(c) c{1}, t, 'UniformOutput', false));
+f = f(:)';
+end
+
+function t = function_text(src, name)
+% The text of the local function `name` of src: its header up to the next function's.
+i = regexp(src, ['\nfunction [^\n]*\<' name '\>'], 'once');
+if isempty(i), t = ''; return; end
+r = src(i+1:end);
+j = regexp(r(2:end), '\nfunction ', 'once');
+if isempty(j), t = r; else, t = r(1:j); end
+end
+
+function x = ternary_t(c, a, b)
+if c, x = a; else, x = b; end
+end
+
+function d = parent_dir(tc, rev, rels)
+% The files rels as commit rev holds them, together in one folder. An export without .git (the
+% deploy queue's) reads the commit from the repository named by V7_GIT_REPO.
+d = tempname; mkdir(d);
+repo = tc.TestData.root;
+[sg, ~] = system(sprintf('git --no-optional-locks -C "%s" rev-parse --git-dir', repo));
+if sg ~= 0 && ~isempty(getenv('V7_GIT_REPO')), repo = getenv('V7_GIT_REPO'); end
+for k = 1:numel(rels)
+    [~, nm, ext] = fileparts(rels{k});
+    [st, out] = system(sprintf('git --no-optional-locks -C "%s" show %s:%s > "%s"', repo, rev, rels{k}, ...
+        fullfile(d, [nm ext])));
+    assertEqual(tc, st, 0, sprintf('git show %s:%s failed: %s', rev, rels{k}, out));
+end
+end
+
+function fixture_off(d, fns)
+% Removes a parent-commit folder from the path and the disk (once).
+if contains(path, d), rmpath(d); end
+for k = 1:numel(fns), clear(fns{k}); end
+if isfolder(d), rmdir(d, 's'); end
+end

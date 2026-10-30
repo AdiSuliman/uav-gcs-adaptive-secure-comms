@@ -4,7 +4,8 @@ function s = policy_stamp(Q)
 %   threshold), the rule fallback's own monitor and settings, the selected agent's weights
 %   (dqn_dense.m), the det_id of the pools it learned on, the unknown-threat threshold it ran
 %   with and its decision-time settings (dec, decision_settings.m; the degradation test only when C1d
-%   chose one, and the smoke's forced mark deg_forced, so earlier stamps stay). Results that
+%   chose one, and the smoke's forced mark deg_forced, so earlier stamps stay; the link-budget
+%   completion lb_complete and its forced mark lb_forced only when true). Results that
 %   depend on the deployed policy store it (evaluate_policies.m, measure_latency.m, edge_map.m),
 %   and the readers flag a result whose stamp is not the current one (result_status.m).
 f = @(n) field_or(Q, n);
@@ -36,6 +37,9 @@ end
 for n = {'rule_nb', 'core_nb', 'deg_mode', 'ber_q', 'deg_forced'}   % the noise-burst answers and the degradation test, when set
     x = field_or(S, n{1});
     if ~isempty(x), c{end+1} = {n{1}, x}; end %#ok<AGROW>
+end
+for n = {'lb_complete', 'lb_forced'}                  % the link-budget completion and the smoke's forced mark, when on
+    if isequal(field_or(S, n{1}), true), c{end+1} = {n{1}, true}; end %#ok<AGROW>
 end
 end
 
