@@ -283,6 +283,27 @@ verifyTrue(tc, any(contains(lines, 'NOT REPRODUCED')));
 verifyTrue(tc, startsWith(SN.word_union, 'MET'));
 end
 
+function test_edge_lines_like_for_like(tc)
+% Hover 95% and 161 km/h 60% with the shadowing flights (all failed), 90% without them.
+g = []; rec = []; shd = []; lo = []; hi = [];
+for f = 1:20, g = [g f f]; rec = [rec 1 1 - (f <= 2)]; shd = [shd false false]; lo = [lo true true]; hi = [hi false false]; end %#ok<AGROW>
+for f = 21:30, g = [g f f]; rec = [rec 1 1 - (f <= 22)]; shd = [shd false false]; lo = [lo false false]; hi = [hi true true]; end %#ok<AGROW>
+for f = 31:35, g = [g f f]; rec = [rec 0 0]; shd = [shd true true]; lo = [lo false false]; hi = [hi true true]; end %#ok<AGROW>
+R = struct('recovered', rec, 'geom', g);
+m = true(size(rec));
+L = speed_edge_lines(R, m, logical(lo), logical(hi), logical(shd));
+verifyNumElements(tc, L, 4);
+verifyTrue(tc, startsWith(L{2}, '  hover: 95.0% ['));
+verifyTrue(tc, contains(L{2}, '(40 episodes, 20 flights)'));
+verifyTrue(tc, startsWith(L{3}, '  161 km/h, the registered line (airframe shadowing included): 60.0% ['));
+verifyTrue(tc, contains(L{3}, '(30 episodes, 15 flights)'));
+verifyTrue(tc, contains(L{4}, 'like-for-like with hover (beside the registered line, never in its place): 90.0% ['));
+verifyTrue(tc, contains(L{4}, '(20 episodes, 10 flights)'));
+% an empty row says so
+L = speed_edge_lines(R, m, logical(lo), false(size(hi)), logical(shd));
+verifyTrue(tc, contains(L{3}, 'no episode') && contains(L{4}, 'no episode'));
+end
+
 function test_wiring_evaluate_policies(tc)
 % Without the switches evaluate_policies.m runs the parent's lines alone: every added block sits
 % between two lines the parent holds side by side and is guarded by a switch.
@@ -300,6 +321,9 @@ check_inserts(tc, 'code/decision/evaluate_policies.m', { ...
     {'SU = [];', 'if SPO.inference || ~strcmp(SPO.union, ''off'')', 'cg = [];', ...
      '[SU, spd_lines] = speed_reading(RES{1, iDQN}, mrec, RS2, cg, bins_v, SPR, SPO);', 'rep = [rep, spd_lines];', 'end'}, ...
     {'PS = []; PD = [];'}; ...
+    {'rep{end+1} = sprintf(''%-18s%s'', sprintf(''%s (%d)'', band_txt(PP.speed_out(2, :)), sum(ms & hi))'}, ...
+    {'if SPO.inference', 'rep = [rep, {''''}, speed_edge_lines(RES{iS, iDQN}, ms, lo, hi, strcmp(PP.scen(Rs.scn), ''airframe_shadowing''))];', 'end'}, ...
+    {'end', 'iD2 = find(strcmp({sets.name}, ''delay2''));'}; ...
     {'KP.far_geoms_fresh = F6.CT.n_geom;', 'end'}, {'if ~isempty(SU), KP.speed_union = SU; end'}, ...
     {'save(''results/policy_evaluation.mat'', ''RES'''}; ...
     {'if FRESH, save(''results/policy_evaluation.mat'', ''RWf'', ''-append''); end'}, ...
@@ -325,6 +349,21 @@ check_inserts(tc, 'code/evaluation/measure_all_kpis.m', { ...
     {'if isfield(P.KP, ''speed_union'') && ~isempty(P.KP.speed_union) && strcmp(P.KP.speed_union.mode, ''verdict'')', ...
      'st7 = status(lat_ok && P.KP.speed_union.met, stale);', 'end'}, ...
     {'if (lat_pending || sl.stale) && ~stale'}});
+end
+
+function test_resampling_seeds_are_their_own(tc)
+% The speed readings' streams: bootstrap and permutation of the test and the union reading, and
+% the edge lines' bootstrap, each their own and none one of evaluate_policies.m's boot_cluster seeds.
+s = fileread(which('speed_reading'));
+v = str2double(regexp(regexprep(regexp(s, 'SEEDS = struct\([^\n]*', 'match', 'once'), '[^\d ]', ''), '\s+', 'split'));
+v = v(~isnan(v));
+verifyEqual(tc, v, [81 82 83 84]);
+e = fileread(which('speed_edge_lines'));
+w = cellfun(@(x) str2double(x{1}), regexp(e, ', (9\d)\}?[;,]', 'tokens'));
+verifyEqual(tc, sort(w), [91 92 93]);
+ep = fileread(which('evaluate_policies'));
+other = cellfun(@(x) str2double(x{1}), regexp(ep, 'boot_cluster\([^\n]*?, (\d+)\);', 'tokens'));
+verifyEmpty(tc, intersect(other, [v w]));
 end
 
 %% ---------- helpers ----------

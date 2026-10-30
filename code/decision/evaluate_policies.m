@@ -492,6 +492,9 @@ if ~isempty(iS)
     rep{end+1} = sprintf('%-18s%s', 'speed [km/h]', sprintf('%11s', hdr{:}));
     rep{end+1} = sprintf('%-18s%s', sprintf('%s (%d)', band_txt(PP.speed_out(1, :)), sum(ms & lo)), sprintf('%11.1f', PS(1, :)));
     rep{end+1} = sprintf('%-18s%s', sprintf('%s (%d)', band_txt(PP.speed_out(2, :)), sum(ms & hi)), sprintf('%11.1f', PS(2, :)));
+    if SPO.inference
+        rep = [rep, {''}, speed_edge_lines(RES{iS, iDQN}, ms, lo, hi, strcmp(PP.scen(Rs.scn), 'airframe_shadowing'))];
+    end
 end
 iD2 = find(strcmp({sets.name}, 'delay2'));
 Rd2 = RES{iD2, 1}; md2 = Rd2.recoverable & Rd2.threat;
