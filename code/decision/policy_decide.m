@@ -69,6 +69,16 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %             degradation only (what the detection adds to an adaptive recovery)
 %   random, fixed: reference policies, no monitor gating ('fixed' at no_action is
 %   the link that does not respond)
+%   PP.s1_gate (rule and rule + escalation without the core option): a lost-branch class
+%   (antenna_fault, airframe_shadowing) is answered, and counts as stuck at no_action for the
+%   escalation, only with harm evidence in the last n cycles of the confirmation (M.harm); else
+%   no_action, the other branches carry the link. The DQN kinds, the core rule and blind_esc are
+%   unchanged.
+%   PP.release_m (dqn, rule and table kinds, not the core rule and not blind_esc): last, after the
+%   shield-masked argmax and the escalation, a configuration that keeps our channel in view (no
+%   channel_switch or freq_diversity element) is released to no_action when the last
+%   max(n, C.confirm_sweep(2)) cycles were quiet (M.quiet); info.relm marks the releases the policy did
+%   not make itself.
 %
 %   info: q (Q-values, dqn kinds), cls, degraded, confirmed, escalated, ber_avg, drop, drop_alarm;
 %   deg_quiet with the monitor's deg_mode 'win_q_gate'
@@ -77,7 +87,8 @@ C = decision_config();
 if isfield(opt, 'monitor'), PP = decision_settings(PP, opt.monitor); end
 NE = numel(cfg); A = PP.actions; nA = numel(A);
 na = find(strcmp(A, 'no_action'));
-if startsWith(kind, 'blind')
+blind = startsWith(kind, 'blind');
+if blind
     obs.probs(:) = 0; obs.unknown(:) = true; obs.maha = -Inf(size(obs.unknown));
     PP.unk_mode = 'all';                              % no class survives, fused or latched
     kind = strrep(kind, 'blind', 'rule');
@@ -89,6 +100,7 @@ core = isfield(opt, 'core') && opt.core;
 if core && ~strcmp(base, 'rule')
     error('policy_decide:core', 'policy_decide: the core action set is a rule option, not of %s', kind);
 end
+s1g = ~core && ~blind && strcmp(base, 'rule') && isfield(PP, 's1_gate') && ~isempty(PP.s1_gate) && PP.s1_gate;   % lost-branch gate
 q = [];
 switch base
     case 'dqn'
@@ -121,8 +133,9 @@ switch base
                 p = find(strcmp(A, rule_core_policy(M.cls{i}, M.degraded(i), qi(i), qt, M.drop_alarm(i), bud, so, cw, cn)), 1);
             elseif strcmp(base, 'rule')
                 bud.drop_db = M.drop(i); bud.current = A{cfg(i)}; bud.current_db = gk(cfg(i));
+                hm = []; if s1g, hm = M.harm(i); end
                 p = find(strcmp(A, rule_based_policy(M.cls{i}, M.degraded(i), gain(i), qi(i), qt, M.drop_alarm(i), bud, mt, ...
-                    so, nb)), 1);
+                    so, nb, hm)), 1);
             else
                 p = table_action(M.cls{i}, M.degraded(i), PP, opt, na);
             end
@@ -162,7 +175,8 @@ if endsWith(kind, '_esc')
         if cfg(i) == na, stuck = mem.conf_n(i) >= C.esc; else, stuck = mem.deg_n(i) >= C.esc; end
         none = strcmp(M.cls{i}, 'none');
         byd = ed && none && M.drop_alarm(i) && (cfg(i) == na || gk(cfg(i)) < M.drop(i));   % a drop the configuration does not cover
-        if a(i) == cfg(i) && stuck && mem.since(i) >= C.esc && M.confirmed(i) && (~none || byd)
+        lbn = s1g && cfg(i) == na && ismember(M.cls{i}, {'antenna_fault', 'airframe_shadowing'}) && ~M.harm(i);   % a lost branch without harm is not stuck
+        if a(i) == cfg(i) && stuck && mem.since(i) >= C.esc && M.confirmed(i) && (~none || byd) && ~lbn
             if byd                                       % the link-budget match first
                 [g, o] = sort(gk(lb)); j = find(g >= M.drop(i), 1); if isempty(j), j = numel(g); end
                 if ~mem.tried(i, lb(o(j))), a(i) = lb(o(j)); escalated(i) = true; continue; end
@@ -179,10 +193,31 @@ if endsWith(kind, '_esc')
     end
 end
 
+rm_on = isfield(PP, 'release_m') && ~isempty(PP.release_m) && PP.release_m;
+relm = false(1, NE);
+if rm_on && ~core && ~blind && any(strcmp(base, {'dqn', 'rule', 'table'}))
+    rl = release_on_evidence(cfg, mem, PP, C, A, na);
+    relm = rl & a(:)' ~= na;
+    a(rl) = na;
+end
+
 mem = policy_monitor('change', mem, a ~= cfg);
 info = struct('q', q, 'cls', {M.cls}, 'degraded', M.degraded, 'confirmed', M.confirmed, ...
     'escalated', escalated, 'ber_avg', M.ber_avg', 'drop', M.drop, 'drop_alarm', M.drop_alarm);
 if isfield(M, 'deg_quiet'), info.deg_quiet = M.deg_quiet; end   % degraded, no RF evidence (deg_mode 'win_q_gate')
+if rm_on, info.relm = relm; end                  % released on evidence this cycle
+end
+
+function r = release_on_evidence(cfg, mem, PP, C, A, na)
+% Release to no_action on evidence: the configuration in use keeps our channel in view (no
+% channel_switch or freq_diversity element) and the last max(n, C.confirm_sweep(2)) cycles were quiet
+% (policy_monitor.m M.quiet), n the confirmation's length, the sweeper's revisit window the other bound.
+cf = C.confirm; if isfield(PP, 'confirm') && ~isempty(PP.confirm), cf = PP.confirm; end
+L = max(cf(2), C.confirm_sweep(2));
+assert(L <= size(mem.qt, 2), 'policy_decide: the release over %d cycles exceeds the monitor''s memory', L);
+keep = ~contains(A, 'channel_switch') & ~contains(A, 'freq_diversity'); keep(na) = false;
+keep = keep(:)'; cfg = cfg(:)';
+r = keep(cfg) & all(mem.qt(:, end-L+1:end), 2)';
 end
 
 function [gm, gid] = action_groups(A)

@@ -51,6 +51,8 @@ function R = rollout_policy(kind, PP, K, spec, split, agent, opt, seed)
 %          release
 %          deg_quiet  with the monitor's deg_mode 'win_q_gate' only: the cycles degraded
 %                     without quiet-slot interference (logged, no alarm; whole episode)
+%          rel_on     with opt.rel_on only: the requests of no_action that replace a configuration
+%                     while the threat is on the air (after its onset, before its end)
 if nargin < 7 || isempty(opt), opt = struct(); end
 rs = RandStream('mt19937ar', 'Seed', seed);
 opt.rs = RandStream('mt19937ar', 'Seed', seed + 1);
@@ -143,6 +145,10 @@ for i = find(any(tr.ended, 1))
     R.cost_end(i) = mean(K.cost(tr.link(k0:T, i))); R.on_end(i) = mean(tr.link(k0:T, i) ~= K.na);
     if ~strcmp(kind, 'oracle') && k0 + 2 <= T, R.conf_end(i) = mean(tr.conf(k0 + 2:T, i)); end
     R.sw_end(i) = sum(tr.ch(k0 + 1:T, i) & ~tr.rel(k0 + 1:T, i));
+end
+if isfield(opt, 'rel_on') && opt.rel_on                 % releases to no_action while the threat is on the air
+    prev = [K.na * ones(1, NE); tr.cfg(1:T-1, :)];
+    R.rel_on = sum(tr.cfg == K.na & prev ~= K.na & tr.post & ~tr.ended, 1);
 end
 [R.t_cls, R.t_conf] = deal(nan(1, NE));
 for i = 1:NE
