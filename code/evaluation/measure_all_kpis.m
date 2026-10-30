@@ -10,7 +10,8 @@
 %          third and second beside it
 %   KPI 2  unknown threats: leave-one-threat-out mean AUROC >= KPI2_TARGET, FPR at 95%
 %          of known frames kept (eval_ood_detection; the nested estimate of the
-%          selected production score)
+%          selected production score); with "k2_0": true in profile.json (unk_options.m),
+%          D116 reading 3 beside it (k2_0_lines.m, descriptive, never KPI 2)
 %   KPI 3  physical validation: BER vs theory within 0.3 dB (validate_phy)
 %   KPI 4  restoration: BER and packet loss back to <= 2x clean on >= 90% of the
 %          recoverable episodes of EVERY threat, combined threats included, over
@@ -214,6 +215,7 @@ if isfile(F.ood)
             O.LC.med(c), O.LC.p95(c), upper(O.LC.dev{c}), ternary(O.LC.ok(c), '', ' excluded')), ...
             1:numel(O.LC.cand), 'UniformOutput', false), ', '));
     end
+    if unk_options().k2_0, det = [det, k2_0_lines('kpi', O)]; end   % D116 reading 3 (descriptive, not KPI 2)
     KPI(end+1) = kpi(2, 'Unknown threat (LOTO)', sprintf('mean AUROC %.3f, FPR95 %.2f (nested)', val, fn), ...
         sprintf('>= %.1f', KPI2_TARGET), ...
         status(val >= KPI2_TARGET, file_time(F.ood) < t_det), det);

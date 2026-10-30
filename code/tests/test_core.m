@@ -11304,6 +11304,19 @@ bad = {r(~[r.Passed]).Name};
 verifyEmpty(tc, bad, strjoin(bad, ', '));
 end
 
+function test_ood_k2_suite(tc)
+% test_ood_k2.m (D111's statistic, its guards and K2-1; D116 reading 3) runs inside this suite,
+% so the queue's count of test_core includes it: every one of its tests ran and passed.
+f = fullfile(tc.TestData.root, 'code', 'tests', 'test_ood_k2.m');
+n = numel(regexp(fileread(f), '(?m)^function test_\w+\(tc\)', 'match'));
+here = pwd; cl = onCleanup(@() cd(here)); %#ok<NASGU>
+r = runtests(f);
+verifyGreaterThanOrEqual(tc, n, 3);
+verifyEqual(tc, numel(r), n, 'every test of test_ood_k2.m ran');
+bad = {r(~[r.Passed]).Name};
+verifyEmpty(tc, bad, strjoin(bad, ', '));
+end
+
 function test_smoke_all_entities(tc)
 % C2g and C2u's smoke runs the first entity unless CFG.smoke_all_entities is true: then every
 % combination / threat runs, with the smoke's reduced training and one repetition; outside the
