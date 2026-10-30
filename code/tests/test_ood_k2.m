@@ -21,6 +21,172 @@ function teardownOnce(tc)
 cd(tc.TestData.cwd);
 end
 
+%% ---------- folds and cue rows ----------
+function test_loto_split_unchanged(tc)
+% ood_loto_split.m's folds are the parent commit's bit for bit; its masks are the fold's
+% frames; without a reading set it gives the same folds and no te.
+[sp, fresh] = loto_world();
+d = parent_copy(tc, 'code/detection/ood_loto_split.m', base_rev());
+addpath(d, '-begin'); clear ood_loto_split
+cl = onCleanup(@() fixture_off(d, 'ood_loto_split')); %#ok<NASGU>
+verifyEqual(tc, which('ood_loto_split'), fullfile(d, 'ood_loto_split.m'));
+O = cell(1, 5); [O{:}] = ood_loto_split(sp, fresh, 'jamming');
+fixture_off(d, 'ood_loto_split');
+verifyNotEqual(tc, which('ood_loto_split'), fullfile(d, 'ood_loto_split.m'));
+N = cell(1, 5); [N{:}] = ood_loto_split(sp, fresh, 'jamming');
+verifyTrue(tc, isequaln(O, N));
+E = cell(1, 5); [E{:}] = ood_loto_split(sp, [], 'jamming');
+verifyTrue(tc, isequaln(E(1:4), N(1:4)));
+verifyEmpty(tc, E{5});
+F = ood_loto_split('masks', sp, 'jamming');
+va = N{3}; yv = cellstr(string(va.Y));
+verifyEqual(tc, F.kn, ismember(yv, F.known) & va.sel & ~va.own);
+verifyEqual(tc, F.un, strcmp(yv, 'jamming'));
+verifyEqual(tc, F.sel, va.sel); verifyEqual(tc, F.own, va.own);
+verifyEqual(tc, sp.train.run(F.tr), N{1}.run);
+verifyEqual(tc, sp.val.run(F.vfit), N{2}.run);
+A = ood_loto_split('masks', sp, '');
+verifyEqual(tc, A.known, cellstr(string(sp.classes(:)')));
+verifyFalse(tc, any(A.un)); verifyFalse(tc, any(A.own));
+verifyEqual(tc, A.kn, A.sel);
+end
+
+function test_cue_rows(tc)
+% The cue row: temporal_evidence.m's 11 persistence columns and window_cues.m's 52, no
+% probability, label or truth column, at their place in fuse_classes('windows') rows; the
+% level step over TW = 10 frames when the fusion window is shorter; median/IQR scaling clipped
+% at +-10; lower scores more novel; the forest seeded, the global stream untouched.
+C = 3; n = ood_cue('names', C); te = temporal_evidence('names', C);
+verifyNumElements(tc, n, 63);
+verifyEqual(tc, n, [te(C + 1:end), window_cues('names')]);
+verifyTrue(tc, ood_k2_rules('static', n));
+for bad = {'logp_2', 'k_db', 'level', 'class_run', 'ebno'}
+    verifyFalse(tc, ood_k2_rules('static', [n, bad]), bad{1});
+end
+verifyEqual(tc, ood_cue('cols', C), C + (1:63));
+Z = reshape(1:5 * (2 * C + 63), 5, []);
+verifyEqual(tc, ood_cue('rows', Z, C), Z(:, C + (1:63)));
+X = ood_cue('rows', Z, C, -Z);
+js = 11 + find(ismember(window_cues('names'), {'stp_t', 'stp_db', 'stp_age', 'stp_t_mon', 'stp_db_mon'}));
+verifyNumElements(tc, js, 5);
+verifyEqual(tc, X(:, js), -Z(:, C + js));
+o = setdiff(1:63, js); verifyEqual(tc, X(:, o), Z(:, C + o));
+verifyEqual(tc, arrayfun(@(N) ood_cue('step_n', N), [12 10 9 4]), [0 0 10 10]);
+verifyEqual(tc, ood_cue('fill', [7; 5; 7; 5; 7], [3; 9; 1; 2; 2]), [3; 2; 1; 1; 2]);
+x = (1:5)';
+S = ood_cue('scale_fit', [x, zeros(5, 1)]);
+q = prctile(x, [25 50 75]);
+verifyEqual(tc, S.med, [q(2) 0]); verifyEqual(tc, S.iqr, [q(3) - q(1), 1]);
+verifyEqual(tc, ood_cue('scale', S, [q(2) + 100 * S.iqr(1), 7; NaN, -3; q(2), Inf]), [10 7; 0 -3; 0 0]);
+rs = RandStream('mt19937ar', 'Seed', 3);
+X = [randn(rs, 200, 4); randn(rs, 200, 4) + 3]; y = [repmat({'a'}, 200, 1); repmat({'b'}, 200, 1)];
+M = ood_cue('maha_fit', X, y);
+s = ood_cue('maha', M, [0 0 0 0; 3 3 3 3; 20 20 20 20]);
+verifyLessThan(tc, s(3), min(s(1:2)));
+verifyLessThanOrEqual(tc, s, 0);
+g0 = rng;
+F1 = ood_cue('if_fit', X, 7); F2 = ood_cue('if_fit', X, 7);
+verifyEqual(tc, rng, g0);
+qx = [0 0 0 0; 1.5 1.5 1.5 1.5; 20 20 20 20];
+verifyEqual(tc, ood_cue('if', F1, qx), ood_cue('if', F2, qx));
+s = ood_cue('if', F1, qx);
+verifyLessThan(tc, s(3), s(2));
+end
+
+%% ---------- rules, K2-1 and the OOD run ----------
+function test_rules(tc)
+% Gate K2-1 (>= 0.80 on at least 2 of the four named threats and >= 0.70 on their mean); the
+% adoption rule of items 5-6 ((a) +0.010 and the 5th percentile of the mean paired difference
+% > 0, (b) no threat below C0 - 0.03, (c) no known class flagged above twice C0's or 10%, (d)
+% and latency through ok; the highest eligible mean, else C0), on all threats and on the other
+% threats only; the AUROC with ties; the seeded cluster bootstrap.
+nm = {'jamming', 'spoofing', 'path_loss', 'antenna_fault', 'airframe_shadowing'};
+[go, L] = ood_k2_rules('k21_go', nm, [0.81 0.99 0.85 0.60 0.55]);
+verifyTrue(tc, go); verifyNotEmpty(tc, strfind(L, 'GO (K2-2 is built)'));
+[go, L] = ood_k2_rules('k21_go', nm, [0.81 0.99 0.79 0.60 0.55]);
+verifyFalse(tc, go); verifyNotEmpty(tc, strfind(L, 'NO-GO'));
+verifyFalse(tc, ood_k2_rules('k21_go', nm, [0.81 0.99 0.85 0.50 0.50]));
+verifyError(tc, @() ood_k2_rules('k21_go', nm(1:4), [0.9 0.9 0.9 0.9]), 'ood_k2_rules:k21');
+A = [0.70 0.75 0.74 0.72; 0.80 0.82 0.70 0.81; 0.60 0.64 0.66 0.65; 0.90 0.90 0.91 0.88];
+rs = RandStream('mt19937ar', 'Seed', 6);
+B = repmat(reshape(A, 1, 4, 4), 200, 1, 1) + repmat(0.01 * randn(rs, 200, 4), 1, 1, 4);
+F = repmat(reshape([5 8 5 12], 1, 1, 4), 4, 3, 1); N = 100 * ones(4, 3);
+D = ood_k2_rules('decide', A, B, F, N, true(1, 4), 1:4);
+verifyEqual(tc, [D.a; D.b; D.c], logical([0 1 0 1; 0 1 0 1; 0 1 1 0]));
+verifyEqual(tc, D.eligible, logical([0 1 0 0]));
+verifyEqual(tc, D.pick, 2);
+verifyEqual(tc, D.lb(2), prctile(mean(B(:, :, 2) - B(:, :, 1), 2), 5));
+verifyEqual(tc, ood_k2_rules('decide', A, B, F, N, [true false true true], 1:4).pick, 1);
+verifyEqual(tc, ood_k2_rules('decide', A, B, F, N, true(1, 4), [1 3 4]).pick, 3);   % C2's loss on threat 2 left out
+F(:, :, 4) = 5;
+D = ood_k2_rules('decide', A, B, F, N, true(1, 4), 1:4);
+verifyEqual(tc, D.eligible, logical([0 1 0 1]));
+verifyEqual(tc, D.pick, 2);                                      % the higher mean of the eligible
+p = round(2 * randn(rs, 50, 1)) / 2; q = round(2 * randn(rs, 40, 1)) / 2 - 0.5;
+r = tiedrank([p; q]);
+verifyEqual(tc, ood_k2_rules('auroc', p, q), (sum(r(1:50)) - 50 * 51 / 2) / (50 * 40), 'AbsTol', 1e-12);
+Sx = [[p; q], 2 * [p; q] + 1]; kn = [true(50, 1); false(40, 1)];
+run = [repelem((1:10)', 5); repelem((11:18)', 5)];
+g0 = rng;
+B1 = ood_k2_rules('boot_auroc', Sx, kn, ~kn, run, 30, 9);
+verifyEqual(tc, rng, g0);
+verifyEqual(tc, ood_k2_rules('boot_auroc', Sx, kn, ~kn, run, 30, 9), B1);
+verifySize(tc, B1, [30 2]);
+verifyEqual(tc, B1(:, 2), B1(:, 1), 'AbsTol', 1e-12);
+verifyNotEqual(tc, ood_k2_rules('boot_auroc', Sx, kn, ~kn, run, 30, 10), B1);
+end
+
+function test_registration_check(tc)
+% The governed runs start only on the docs commit whose DECISIONS.md holds D111: an earlier
+% commit, a name that is no hash, or no commit at all stop them.
+repo = fullfile(tc.TestData.tmp, 'docsrepo'); mkdir(fullfile(repo, 'docs'));
+[h1, h2] = docs_repo(repo);
+verifyError(tc, @() ood_k2_rules('registered', repo, h1), 'ood_k2_rules:registration');
+[h, L] = ood_k2_rules('registered', repo, h2(1:9));
+verifyEqual(tc, h, h2); verifyNotEmpty(tc, strfind(L, h2));
+verifyError(tc, @() ood_k2_rules('registered', repo, 'zz'), 'ood_k2_rules:registration');
+verifyError(tc, @() ood_k2_rules('registered', repo, ''), 'ood_k2_rules:registration');
+verifyError(tc, @() ood_k2_rules('registered', repo, repmat('a', 1, 40)), 'ood_k2_rules:registration');
+end
+
+function test_k21_screen_end_to_end(tc)
+% K2-1 on synthetic splits read in place from another folder: it prints the registration
+% commit, the rule code's and inputs' SHA-256, the margin basis and the gate; its cue-Maha
+% AUROC is the fold's (ood_loto_split.m masks, ood_cue.m); it writes results/k2_1_screen.* in
+% the current folder only and changes no input; it never loads a splits_fresh file.
+src = fullfile(tc.TestData.tmp, 'k21src'); k21_world(src);
+repo = fullfile(tc.TestData.tmp, 'k21docs'); mkdir(fullfile(repo, 'docs'));
+[~, h2] = docs_repo(repo);
+d = fullfile(tc.TestData.tmp, 'k21run'); mkdir(d);
+c0 = cd(d); back = onCleanup(@() cd(c0));
+IN = {fullfile(src, 'data', 'splits.mat'), fullfile(src, 'data', 'fusion.mat'), ...
+    fullfile(src, 'data', 'trained_detector.mat'), fullfile(src, 'results', 'ood_detection.mat')};
+h0 = cellfun(@(f) kpi6_fresh_marker('sha', f), IN, 'UniformOutput', false);
+evalc('run_k21(src, repo, h2)');
+verifyEqual(tc, cellfun(@(f) kpi6_fresh_marker('sha', f), IN, 'UniformOutput', false), h0);
+verifyFalse(tc, isfolder('data'));
+R = load('results/k2_1_screen.mat');
+verifyEqual(tc, R.held, {'path_loss', 'jamming', 'antenna_fault', 'airframe_shadowing'});
+verifyEqual(tc, R.go, ood_k2_rules('k21_go', R.held, R.a));
+verifyEqual(tc, [R.N, R.Ns, R.NW], [12 0 12]);
+verifyEqual(tc, R.reg, h2);
+S = load(IN{1}); sp = S.splits; fn = link_features('names');
+F = ood_loto_split('masks', sp, 'jamming');
+Xtr = ood_cue('split', sp.train, fn, 5, 12); Xva = ood_cue('split', sp.val, fn, 5, 12);
+Sc = ood_cue('scale_fit', Xtr(F.tr, :));
+M = ood_cue('maha_fit', ood_cue('scale', Sc, Xtr(F.tr, :)), F.ytr(F.tr));
+s = ood_cue('maha', M, ood_cue('scale', Sc, Xva));
+verifyEqual(tc, R.a(2), ood_k2_rules('auroc', s(F.kn), s(F.un)), 'AbsTol', 1e-12);
+txt = fileread('results/k2_1_screen.txt');
+for k = {['registration commit ' h2], 'rule_sha256 k2_1_screen.m ', 'rule_sha256 ood_cue.m ', ['input ' IN{1} ' sha256 '], ...
+        'Margin basis (D111 item 6)', 'Disclosed:', 'Gate K2-1 (D111 item 1)'}
+    verifyNotEmpty(tc, strfind(txt, k{1}), k{1});
+end
+ks = fileread(which('k2_1_screen'));
+verifyNotEmpty(tc, strfind(ks, 'assert(~contains(f, ''splits_fresh''), ''k2_1_screen:fresh'''));
+verifyNumElements(tc, regexp(ks, '\<load\(', 'match'), 4);        % the splits through load_split, N, ood, the 18.10 file
+end
+
 %% ---------- D116 reading 3 and the KPI print ----------
 function test_k2_0_lines(tc)
 % K2-0, descriptive and never KPI 2: bounds max(1 - FPR, s) .. min(1, 1 - FPR + s) with s 0

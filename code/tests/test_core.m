@@ -11311,7 +11311,7 @@ f = fullfile(tc.TestData.root, 'code', 'tests', 'test_ood_k2.m');
 n = numel(regexp(fileread(f), '(?m)^function test_\w+\(tc\)', 'match'));
 here = pwd; cl = onCleanup(@() cd(here)); %#ok<NASGU>
 r = runtests(f);
-verifyGreaterThanOrEqual(tc, n, 3);
+verifyGreaterThanOrEqual(tc, n, 8);
 verifyEqual(tc, numel(r), n, 'every test of test_ood_k2.m ran');
 bad = {r(~[r.Passed]).Name};
 verifyEmpty(tc, bad, strjoin(bad, ', '));
