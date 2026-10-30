@@ -9,6 +9,8 @@ function varargout = p1r_post_hoc(cmd, varargin)
 %       eval_mat   a copy of results/policy_evaluation.mat
 %       out_dir    under <repo>/results: p1r_post_hoc.{txt,mat}, written once; a failed gate writes
 %                  p1r_post_hoc.gatefail.txt and stops with p1r_post_hoc:gate
+%       reg_commit the commit that registers these readings (hex); docs_repo, if given, is checked for it
+%                  (without it the log says the commit is unverified)
 %       The gate first reproduces the saved KP.per_ebno and KP.per_speed of the deployed policy from the
 %       saved episodes; the rows are read only when it passes. The label follows KP.reading: 'P1R,
 %       descriptive', otherwise 'post hoc, added after the reading, descriptive'.
@@ -51,7 +53,7 @@ for f = {pools, eval_mat}
     if ~isfile(f{1}), error('p1r_post_hoc:input', 'p1r_post_hoc: %s not found', f{1}); end
 end
 if ~isfolder(out_dir), mkdir(out_dir); end
-code = {'p1r_post_hoc.m', 'cluster_contrast.m', 'reader_guard.m'};
+code = {'p1r_post_hoc.m', 'cluster_contrast.m', 'boot_cluster.m', 'reader_guard.m'};
 h_code = cellfun(@(f) reader_guard('sha', which(f)), code, 'UniformOutput', false);
 h_pools = reader_guard('sha', pools); h_eval = reader_guard('sha', eval_mat);
 st0 = stamps({pools, eval_mat});

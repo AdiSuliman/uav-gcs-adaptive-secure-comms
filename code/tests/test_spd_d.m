@@ -188,6 +188,7 @@ E.recovered(m) = false; E.nR(m) = 2; E.r_only(m) = true; E.r_sc(m) = false; E.cf
 T = spd_d_tables('tables', E, clean_link(0), C);
 r = T.route;
 verifyEqual(tc, r.coverage.small, 1); verifyEqual(tc, r.coverage.only_sc, 1);
+verifyEqual(tc, [r.coverage.n_t5 r.coverage.nested], [12 1]);
 verifyTrue(tc, r.coverage.met);
 verifyFalse(tc, r.policy.met); verifyFalse(tc, r.doppler.met); verifyFalse(tc, r.bank_only.met);
 verifyEqual(tc, r.met, {'coverage'});
@@ -207,6 +208,42 @@ E.cfg_end(m) = 2; E.nR(m) = 9;
 T = spd_d_tables('tables', E, clean_link(0), C);
 verifyFalse(tc, T.route.coverage.met);
 verifyEqual(tc, T.route.coverage.small, 0);
+end
+
+function test_coverage_reads_the_t5_population(tc)
+% The ending condition is read on T5's failures (from 112 km/h up), not only on the top-band failures with |R| <= 3.
+C = tc.TestData.C;
+ftop = @(E) E.sbi == 4 & E.bbi == 2 & E.th == 1;            % 12 failures at 140 km/h, in the top band
+fmid = @(E) E.sbi == 3 & E.bbi >= 2 & E.th == 1;            % 24 failures at 115 km/h: from 112 km/h up, below the top band
+% the top-band failures meet the condition among themselves, the failures below the top band do not
+E = base();
+m = ftop(E); E.recovered(m) = false; E.nR(m) = 2; E.r_only(m) = true; E.cfg_end(m) = 2;
+k = fmid(E); E.speed(k) = 115; E.recovered(k) = false; E.nR(k) = 9; E.r_only(k) = false; E.cfg_end(k) = 1;
+T = spd_d_tables('tables', E, clean_link(0), C);
+r = T.route;
+verifyEqual(tc, [r.coverage.n_small r.coverage.n_t5], [12 36]);
+verifyEqual(tc, [r.coverage.small r.coverage.nested], [1 1]);
+verifyEqual(tc, r.coverage.only_sc, 1/3, 'AbsTol', 1e-12);
+verifyFalse(tc, r.coverage.met);
+verifyFalse(tc, ismember('coverage', r.met));
+lines = spd_d_tables('lines', T, C);
+verifyTrue(tc, any(contains(lines, 'of the 36 failures from 112 km/h up (T5)') & contains(lines, '33.3% (needs 50%)') & ...
+    contains(lines, 'the same share is 100.0%')));
+% the reverse: among the top-band failures with |R| <= 3 R holds a spatial/channel part, on T5's failures it does not
+E = base();
+m = ftop(E); E.recovered(m) = false; E.nR(m) = 2; E.r_only(m) = false; E.cfg_end(m) = 2;
+k = fmid(E); E.speed(k) = 115; E.recovered(k) = false; E.nR(k) = 9; E.r_only(k) = true; E.cfg_end(k) = 2;
+T = spd_d_tables('tables', E, clean_link(0), C);
+r = T.route;
+verifyEqual(tc, [r.coverage.small r.coverage.nested], [1 0]);
+verifyEqual(tc, r.coverage.only_sc, 2/3, 'AbsTol', 1e-12);
+verifyTrue(tc, r.coverage.met);
+verifyTrue(tc, ismember('coverage', r.met));
+% no failure from 112 km/h up: no reading, no branch
+E = base();
+T = spd_d_tables('tables', E, clean_link(0), C);
+verifyEqual(tc, T.route.coverage.n_t5, 0);
+verifyFalse(tc, T.route.coverage.met);
 end
 
 function test_benign_rows_and_labels(tc)

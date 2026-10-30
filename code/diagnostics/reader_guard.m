@@ -4,7 +4,7 @@ function out = reader_guard(cmd, varargin)
 %   PP = reader_guard('strip', PP, keep)   empties every pool of the splits not in keep, checks it
 %   reader_guard('check', PP, keep)        error if a pool of a split not in keep holds data
 %   reader_guard('input', f, allowed)      error unless the file name is in the cell array allowed and the file
-%                                          does not lie in a live pipeline tree (uav-gcs-v7, -p3, -p2, -bw)
+%                                          does not lie in a live pipeline tree (uav-gcs-v7, -p3, -p2, -p1r, -bw)
 %   d = reader_guard('out', d, root)       error unless d is root/results or a folder below it
 %   f = reader_guard('ref', pools_file, root)
 %                                          the monitor's clean reference as the pipeline reads it:
@@ -16,7 +16,9 @@ function out = reader_guard(cmd, varargin)
 %                                          reference is checked finite
 %   reader_guard('registration', hash, docs_repo)
 %                                          error unless hash is a commit id; with docs_repo, that the
-%                                          commit exists there and its docs/DECISIONS.md holds D116
+%                                          commit exists there and its docs/DECISIONS.md holds D116;
+%                                          without docs_repo the returned text ends in
+%                                          '(unverified: no docs repo)'
 %   reader_guard('once', files)            error when one of the files (a cell array) exists
 %   h = reader_guard('sha', f)             SHA-256 of a file, as sha256sum prints it
 %   h = reader_guard('manifest', f, name)  the sha256 of the manifest line that names the file
@@ -48,7 +50,7 @@ switch cmd
         if ~ismember(lower([n e]), lower(ok))
             error('reader_guard:input', 'reader_guard: input %s refused; allowed: %s', [n e], strjoin(ok, ', '));
         end
-        live = {'uav-gcs-v7', 'uav-gcs-v7-p3', 'uav-gcs-v7-p2', 'uav-gcs-v7-bw'};
+        live = {'uav-gcs-v7', 'uav-gcs-v7-p3', 'uav-gcs-v7-p2', 'uav-gcs-v7-p1r', 'uav-gcs-v7-bw'};
         if any(ismember(lower(regexp(f, '[\\/]', 'split')), live))
             error('reader_guard:input', 'reader_guard: input %s lies in a live pipeline tree; the readers read copies', f);
         end
@@ -98,8 +100,10 @@ switch cmd
             if st ~= 0 || isempty(strfind(txt, '## D116 ')) %#ok<STREMP>
                 error('reader_guard:registration', 'reader_guard: docs/DECISIONS.md at %s holds no D116', h);
             end
+            out = h;
+        else
+            out = [h ' (unverified: no docs repo)'];
         end
-        out = h;
     case 'once'
         for f = varargin{1}(:)'
             if isfile(f{1}), error('reader_guard:once', 'reader_guard: %s exists; the reading runs once', f{1}); end

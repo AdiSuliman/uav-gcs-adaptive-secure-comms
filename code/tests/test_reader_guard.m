@@ -33,7 +33,7 @@ t = tempname;
 f = fullfile(t, 'policy_pools.mat');
 reader_guard('input', f, {'policy_pools.mat'});
 verifyError(tc, @() reader_guard('input', fullfile(t, 'other.mat'), {'policy_pools.mat'}), 'reader_guard:input');
-for live = {'uav-gcs-v7', 'uav-gcs-v7-p3', 'uav-gcs-v7-p2', 'uav-gcs-v7-bw'}
+for live = {'uav-gcs-v7', 'uav-gcs-v7-p3', 'uav-gcs-v7-p2', 'uav-gcs-v7-p1r', 'uav-gcs-v7-bw'}
     g = fullfile(t, live{1}, 'data', 'policy_pools.mat');
     verifyError(tc, @() reader_guard('input', g, {'policy_pools.mat'}), 'reader_guard:input');
 end
@@ -86,8 +86,10 @@ verifyEqual(tc, sort(who('-file', f)), {'PP'; 'clean_ref'});
 end
 
 function test_registration_commit(tc)
-verifyEqual(tc, reader_guard('registration', 'abc1234', ''), 'abc1234');
-verifyEqual(tc, reader_guard('registration', repmat('a1', 1, 20), ''), repmat('a1', 1, 20));
+% Without a docs repository the commit is not checked, and the text that reaches the log says so.
+verifyEqual(tc, reader_guard('registration', 'abc1234', ''), 'abc1234 (unverified: no docs repo)');
+verifyEqual(tc, reader_guard('registration', 'abc1234'), 'abc1234 (unverified: no docs repo)');
+verifyEqual(tc, reader_guard('registration', repmat('a1', 1, 20), ''), [repmat('a1', 1, 20) ' (unverified: no docs repo)']);
 verifyError(tc, @() reader_guard('registration', '', ''), 'reader_guard:registration');
 verifyError(tc, @() reader_guard('registration', 'XYZ1234', ''), 'reader_guard:registration');
 verifyError(tc, @() reader_guard('registration', 'abc12', ''), 'reader_guard:registration');
@@ -99,7 +101,7 @@ function test_registration_commit_in_a_repository(tc)
 assumeEqual(tc, st, 0);
 t = tempname; mkdir(t); mkdir(fullfile(t, 'docs'));
 fid = fopen(fullfile(t, 'docs', 'DECISIONS.md'), 'w'); fprintf(fid, '# Decisions\n\n## D116 - x\n'); fclose(fid);
-g = @(c) system(sprintf('git -C "%s" -c user.name=t -c user.email=t@t.t %s', t, c));
+g = @(c) system(sprintf('git -C "%s" -c user.name=t -c user.email=t@t.t -c commit.gpgsign=false %s', t, c));
 [a, ~] = g('init -q'); assumeEqual(tc, a, 0);
 [a, ~] = g('add docs/DECISIONS.md'); assumeEqual(tc, a, 0);
 [a, ~] = g('commit -q -m one'); assumeEqual(tc, a, 0);
@@ -112,6 +114,27 @@ fid = fopen(fullfile(t, 'docs', 'DECISIONS.md'), 'w'); fprintf(fid, '# Decisions
 [a, h2] = system(sprintf('git -C "%s" rev-parse HEAD', t)); assumeEqual(tc, a, 0);
 verifyError(tc, @() reader_guard('registration', strtrim(h2), t), 'reader_guard:registration');
 [~, ~] = rmdir(t, 's');
+end
+
+function test_rule_code_hash_lists_cover_the_files_the_numbers_come_from(tc)
+% The log prints the SHA-256 of the rule code: every interval comes from boot_cluster.m, R5's registered hit from det_frames.m.
+root = tc.TestData.root;
+req = struct('file', {'diagnostics/spd_d_diag.m', 'diagnostics/combo_miss_diag.m', 'evaluation/p1r_post_hoc.m'}, ...
+    'names', {{'spd_d_tables.m', 'spd_d_diag.m', 'cluster_contrast.m', 'boot_cluster.m', 'reader_guard.m'}, ...
+    {'combo_miss_tables.m', 'combo_miss_diag.m', 'det_frames.m', 'boot_cluster.m', 'reader_guard.m'}, ...
+    {'p1r_post_hoc.m', 'cluster_contrast.m', 'boot_cluster.m', 'reader_guard.m'}});
+for k = 1:numel(req)
+    txt = fileread(fullfile(root, 'code', strrep(req(k).file, '/', filesep)));
+    tok = regexp(txt, 'code = \{([^}]*)\};', 'tokens', 'once');
+    verifyNotEmpty(tc, tok, req(k).file);
+    if isempty(tok), continue; end
+    listed = regexp(tok{1}, '''([^'']+)''', 'tokens');
+    listed = cellfun(@(c) c{1}, listed, 'UniformOutput', false);
+    verifyEmpty(tc, setdiff(req(k).names, listed), req(k).file);
+    for q = req(k).names
+        verifyNotEmpty(tc, which(q{1}), q{1});
+    end
+end
 end
 
 function test_reading_runs_once(tc)

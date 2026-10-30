@@ -8,6 +8,7 @@ function spd_d_diag(pools_file, agent_file, manifest_file, out_dir, reg_commit, 
 %   agent_file     the archived trained_dqn.mat; its sha256 must match its line in manifest_file
 %   out_dir        under <repo>/results (default <repo>/results): spd_d.txt and spd_d.mat, written once
 %   reg_commit     the commit that registers these readings (hex); docs_repo, if given, is checked for it
+%                  (without it the log says the commit is unverified)
 %   Episodes: the single threats of the pools, as evaluate_policies.m flies its single set, on the train and
 %   the validation split, two onsets per flight; the deployed DQN and no response on the same episodes and
 %   frame draws. The train split is in sample for the DQN and the validation split chose it; the profile has
@@ -41,7 +42,7 @@ h_man = reader_guard('manifest', manifest_file, 'trained_dqn.mat');
 if ~strcmpi(h_agent, h_man)
     error('spd_d_diag:sha', 'spd_d_diag: %s sha256 %s differs from the manifest (%s)', agent_file, h_agent, h_man);
 end
-code = {'spd_d_tables.m', 'spd_d_diag.m', 'cluster_contrast.m', 'reader_guard.m'};
+code = {'spd_d_tables.m', 'spd_d_diag.m', 'cluster_contrast.m', 'boot_cluster.m', 'reader_guard.m'};
 h_code = cellfun(@(f) reader_guard('sha', which(f)), code, 'UniformOutput', false);
 dp = dir(pools_file);
 h_pools = reader_guard('sha', pools_file);

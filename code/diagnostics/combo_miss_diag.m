@@ -10,6 +10,7 @@ function combo_miss_diag(pools_file, agent_file, manifest_file, out_dir, reg_com
 %                  its line in manifest_file
 %   out_dir        under <repo>/results (default <repo>/results): combo_miss.txt and combo_miss.mat, once
 %   reg_commit     the commit that registers these readings (hex); docs_repo, if given, is checked for it
+%                  (without it the log says the commit is unverified)
 %   dry            true: a pair the pools do not hold is left out (a dry run on the deploy smoke's pools, which hold
 %                  two of the five); default false, then a missing pair stops the run
 %   Pairs: jamming+path_loss, tone_jamming+path_loss, jamming+antenna_fault, noise_burst+antenna_fault,
@@ -47,7 +48,7 @@ h_man = reader_guard('manifest', manifest_file, 'trained_dqn.mat');
 if ~strcmpi(h_agent, h_man)
     error('combo_miss_diag:sha', 'combo_miss_diag: %s sha256 %s differs from the manifest (%s)', agent_file, h_agent, h_man);
 end
-code = {'combo_miss_tables.m', 'combo_miss_diag.m', 'reader_guard.m'};
+code = {'combo_miss_tables.m', 'combo_miss_diag.m', 'det_frames.m', 'boot_cluster.m', 'reader_guard.m'};
 h_code = cellfun(@(f) reader_guard('sha', which(f)), code, 'UniformOutput', false);
 dp = dir(pools_file);
 h_pools = reader_guard('sha', pools_file);
