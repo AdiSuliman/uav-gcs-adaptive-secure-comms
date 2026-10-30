@@ -2051,6 +2051,14 @@ The baseline also differs in tuning budget. In C2e, `blind_core`'s first respons
 
 **D106 status (2026-10-27, later).** README lines 44-45, 101 and 107 now name `rule_core3` as CORE_BW's CNN-based row (`cc6a4d1`). Still open: the `lect-ebno` commit; copying `core_cnn_model.mat`, the post-C2 `trained_dqn.mat` and the re-keyed `policy_pools.mat` into the CORE_BW data folder after C2 is done; a full `test_core` run on the branch tip (276 tests plus the core3 tests; `f01a51f` ran 70 targeted tests).
 
+
+**30.10.2026 - mitigation 15 (descriptive row, registered before the CORE_BW test reading).** Proposal mitigation 15 asks that the CNN contribution also compares the number of configuration changes. One descriptive row is added to the CORE_BW report, registered here before `results/core_bw/test_readings.mat` is written or read.
+
+- *Computed.* From the saved test readings, per hop rule and per set (primary, pipe30, follower) and per policy: the mean number of configuration changes per episode (`R.switches`, whole episode) and of false changes (`R.false_sw`), each with a 95% cluster-bootstrap interval (clusters `R.geom`, `boot_cluster.m`, B = 2000, fixed seed 91). The paired differences `rule_core3` minus `rule_core` and `rule_core3` minus `blind_core`, paired by episode index `R.ep` (seed 92, same clusters), for both metrics. Policies on different episode sets or geometries are refused.
+- *Reader.* `code/decision/core_bw_switches.m` on branch `core-bw-sw` (commit `206b439`, branched from `core-bw-p1` at `f84384c`), with its synthetic test `code/tests/test_core_bw_switches.m`. It is a separate reader: the frozen CORE_BW code in `core-bw-p1` is not changed.
+- *No verdict.* The row carries no threshold and no pass/fail, and does not change KPI 8, the D106 verdicts, W3, the protocol or any frozen choice. Printed lines are labelled `descriptive, mitigation 15, no verdict`.
+- *When.* Once, after the CORE_BW test stage and its record step, on the saved `test_readings.mat`. It reads no new data and is not rerun with other settings.
+
 ## D109 — Delay-line receiver defect: found on validation, D1 diagnosis result, receiver per run (29.10.2026)
 
 **Found (validation only, after profile 1's test readings).**
