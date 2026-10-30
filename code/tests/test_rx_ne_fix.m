@@ -455,7 +455,8 @@ for m = {'twinb+eqt', 'twinb', 'twinb+twinf'; se, sb, sf}
     verifyNotEmpty(tc, find(startsWith(pr, 'fprintf(''RXS '), 1), m{1});
     kr = find(startsWith(sl, 'function v = rxd_'), 1);
     body = sl(1:kr - 1);
-    verifyTrue(tc, all(startsWith(strtrim(body(contains(body, 'rxd_'))), 'fprintf(')), m{1});
+    use = body(contains(body, 'rxd_') & ~startsWith(strtrim(body), '%'));   % code lines; twin_blocks' comment names rxd_true
+    verifyTrue(tc, all(startsWith(strtrim(use), 'fprintf(')), m{1});
 end
 bdclose('all');
 end
