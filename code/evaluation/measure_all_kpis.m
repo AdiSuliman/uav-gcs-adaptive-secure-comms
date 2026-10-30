@@ -276,6 +276,7 @@ if isfile(F.pol)
                 '%d threats >= 90%%'], sum(pe(~isnan(pe)) >= 90), sum(~isnan(pe)));
         end
     end
+    if isfield(P.KP, 'ebno_lines'), det = [det, P.KP.ebno_lines]; end   % per Eb/N0 point, descriptive (ebno_rows.m)
     if isfield(P.KP, 'lect')                          % revised proposal: PER vs the static link
         LECT.pol = P.KP.lect;
         det = [det, per_lines(P.KP.lect, P.KP.lect, 'rule_esc', 'full action set')];
@@ -357,6 +358,13 @@ if isfile(F.pol)
         sprintf('%s: median T_rec %s cycles (%s ms at the %d ms decision period) | cycles restored %.1f%% | goodput %.3f', ...
         nq, num_txt(median(ALL{iQ}.t_rec(rec))), num_txt(median(ALL{iQ}.t_rec(rec)) * CDk.period_ms), CDk.period_ms, ...
         100 * mean(ALL{iQ}.ok_post), mean(ALL{iQ}.gput_post, 'omitnan'))};
+    kn = find(strcmp(P.POL, [P.POL{iQ} '_norelm']), 1); kr0 = col('rule_esc_norelm');
+    if ~isempty(kn) && ~isempty(kr0)                  % deployed with the release on evidence: the rows without it beside the verdict
+        [dn, dnl, dnh] = boot_cluster(double(ALL{kn}.recovered(m4)) - double(ALL{kr0}.recovered(m4)), ones(1, sum(m4)), ALL{kn}.geom(m4), 2000, 6);
+        det{end+1} = sprintf(['beside KPI 5, without the release on evidence on either side (descriptive; the verdict is the deployed row, ' ...
+            'which runs with the layer, as rule + escalation and the table do): DQN %.1f%% vs rule + escalation %.1f%% recovered, paired ' ...
+            '%+.1f points [%+.1f, %+.1f]'], 100 * mean(ALL{kn}.recovered(m4)), 100 * mean(ALL{kr0}.recovered(m4)), 100*dn, 100*dnl, 100*dnh);
+    end
     k_b = col('blind_esc');
     if ~isempty(k_b)
         [db, dbl, dbh] = boot_cluster(double(ALL{k_r}.recovered(m4)) - double(ALL{k_b}.recovered(m4)), ones(1, sum(m4)), ...
