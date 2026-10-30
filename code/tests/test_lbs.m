@@ -153,6 +153,26 @@ verifyNotEmpty(tc, strfind(code, 'struct(''drop_db'', dc(i)'));
 verifyEmpty(tc, strfind(code, 'PP.drop_db'));
 end
 
+function test_single_precision_gains_keep_the_memory_double(tc)
+% The pools carry the antennas' gains in single precision: the completion's window and
+% reference stay double, and the deficit is the double one.
+[PP, A] = world('class_drop', 4);
+PP.lb_complete = true;
+na = find(strcmp(A, 'no_action'));
+[dl, gl] = step_loss(30, 12, 10, 3);
+m1 = policy_monitor('init', 1, numel(A)); m2 = m1;
+for t = 1:numel(dl)
+    o = lb_obs(PP, na, 12, dl(t), gl(t, :), zeros(1, 3));
+    [m1, M1] = policy_monitor('update', m1, o, PP, na); m1 = policy_monitor('change', m1, false);
+    o.gant = single(o.gant);
+    [m2, M2] = policy_monitor('update', m2, o, PP, na); m2 = policy_monitor('change', m2, false);
+end
+verifyClass(tc, M2.dcomb, 'double');
+verifyClass(tc, m2.gc, 'double');
+verifyClass(tc, m2.gref, 'double');
+verifyEqual(tc, M2.dcomb, M1.dcomb, 'AbsTol', 1e-5);
+end
+
 function test_single_branch_loss_is_below_the_threshold(tc)
 % One branch lost by 31 dB on equal branches costs 10 log10(n) - 10 log10(n - 1 + 10^-3.1)
 % of the combined gain: 1.76 dB on 3 antennas, 1.25 dB on 4, below the 3 dB threshold. The

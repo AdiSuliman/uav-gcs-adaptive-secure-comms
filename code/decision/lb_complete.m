@@ -59,7 +59,7 @@ if ~isfield(mem, 'drop_n')
 end
 gc = nan(NE, 1);                                                % combined gain of all antennas [dB]
 if isfield(obs, 'gant') && ~isempty(obs.gant)
-    g = obs.gant - reshape(gp, [], 1);
+    g = double(obs.gant) - reshape(gp, [], 1);
     gc = 10 * log10(sum(10 .^ (g / 10), 2, 'omitnan'));
     gc(all(isnan(g), 2)) = NaN;
 end
