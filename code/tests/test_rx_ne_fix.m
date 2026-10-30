@@ -10,6 +10,11 @@ function tests = test_rx_ne_fix
 %   The twin tests: 'ProcedureName', {'test_off_is_unchanged', 'test_log_is_prints_only',
 %   'test_twin_tokens_change_only_their_lines', 'test_twin_wiring',
 %   'test_twin_other_paths_bit_identical', 'test_twin_runs_on_delay_line'}
+%   The per-block twin tests: 'ProcedureName', {'test_twinb_tokens_refused',
+%   'test_twinb_tokens_change_only_their_lines', 'test_twinb_wiring',
+%   'test_twinb_other_paths_bit_identical', 'test_twinb_runs_on_delay_line',
+%   'test_twinb_profiles_at_receiver_level'}; the last flies three validation flights of the
+%   link-floor folder (RX_LINK_FLOOR, else the worktree beside this one)
 tests = functiontests(localfunctions);
 end
 
@@ -338,6 +343,234 @@ verifyLessThan(tc, median(abs(t0(:, 3))), 1, 'twinf+log');     % |c|^2 [dB]
 verifyLessThan(tc, median(abs(t0(:, 4))), 0.2, 'twinf+log');   % angle(c) [rad]
 end
 
+function test_twinb_tokens_refused(tc)
+% 'twinb' and 'eqt' need the own component; 'twinb' combines only with 'twinf', 'eqt' and
+% 'log', 'eqt' only with 'twinb'; every build prints its options and its diagnostic-only
+% tokens, and a release build refuses them
+p = dl_params();
+s0 = rx_text(p);
+for m = {'twinb', 'twinb+log', 'twinb+eqt', 'twinb+twinf+log'}
+    p.rx_ne_fix = m{1};
+    verifyError(tc, @() rx_text(p), ?MException, m{1});   % without the own component
+end
+p.own_out = true;
+p.rx_ne_fix = 'off';
+verifyEqual(tc, rx_text(p), s0);
+for m = {'eqt', 'eqt+log', 'eqt+twinf', 'eqt+twing', 'twinb+twing', 'twinb+twin', 'twinb+freq', 'twinb+freqa', ...
+        'twinb+freqf', 'twinb+keep', 'twinb+both', 'twinb+noburst', 'twinb+burstn', 'twinb+hsel1', 'twinb+deq0', ...
+        'twinb+shadow', 'twinb+eqt+freqa', 'twinb+off', 'twinb+'}
+    p.rx_ne_fix = m{1};
+    verifyError(tc, @() rx_text(p), ?MException, m{1});
+end
+p.rx_ne_fix = 'twinb+eqt+log';
+txt = evalc('build_threat_model(p)');
+close_system('UAV_GCS_Threat_Link', 0);
+verifyNotEmpty(tc, strfind(txt, 'Rx NE>1 options: twinb+eqt+log'));
+verifyNotEmpty(tc, strfind(txt, 'Rx NE>1 diagnostic-only: twinb+eqt+log'));
+p.rx_release = true;
+for m = {'twinb', 'twinb+eqt', 'twinb+twinf+log', 'twinb+eqt+log'}
+    p.rx_ne_fix = m{1};
+    verifyError(tc, @() rx_text(p), ?MException, m{1});   % a release build refuses diagnostic tokens
+end
+bdclose('all');
+end
+
+function test_twinb_tokens_change_only_their_lines(tc)
+% 'twinb': the twin's input, filter and copies of the frequency and whitening (the lines of
+% every twin token), the twin's block profiles (twin_blocks) in the MRC and every block's
+% equalizer for the data symbols of its segment; 'eqt' keeps the training's equalizer; 'twinf'
+% adds its frequency line and twin_freq; 'log' adds prints only, RXL per block and antenna and
+% RXA per pilot block among them
+p = dl_params(); p.own_out = true;
+s0 = splitlines(rx_text(p));
+sig0 = 'function [bits, iqa, z, Hq, Rq, sy] = fcn(u, txbits)'; per0 = 'persistent rxf';
+sig1 = 'function [bits, iqa, z, Hq, Rq, sy] = fcn(u, txbits, ut)'; per1 = 'persistent rxf rxt';
+bf0 = '                bf = sxy / max(sxx, 1e-30);';
+rr0 = '                rr(k + E0) = rr(k + E0) + (gk .* Gt(:, l))'' * yx(k + l - 1 - RP + XO, :).'';';
+z0 = '            z(m) = fe'' * rr(IDXD(m) : IDXD(m) + NE - 1);';
+G = {'        % the twin''s training gives the lag model; s2 stays the samples'' own'
+    '        Gt = eq_train(yxt, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB);'};
+F = {'                % the twin''s frequency: every antenna''s products of pilot blocks one spacing apart'
+    '                bf = twin_freq(ywxt, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB);'};
+B = {'        % the twin''s lag profile at the training and at every pilot block, every symbol known;'
+    '        % every MRC output symbol takes the profile of the nearest block centre (ties: the earlier)'
+    '        Gb = twin_blocks(yxt, SK, IDXD, IDXP, PC, PB, NRK, RP, RQ, XO, NPRE, txbits);'
+    '            [~, ib] = min(abs(kc - tq));'
+    '                rr(k + E0) = rr(k + E0) + Gb(:, l, ib)'' * yx(k + l - 1 - RP + XO, :).'';'};
+E = {'        % the equalizer of every block''s profile, for the data symbols of its segment'
+    '        Fb = complex(zeros(NE, NB + 1));'
+    '        for b = 1:NB + 1'
+    '            Fb(:, b) = le_taps(Gb(:, :, b), s2, NE);'
+    '        end'
+    '            [~, ib] = min(abs(IDXD(m) - tq));'
+    '            z(m) = Fb(:, ib)'' * rr(IDXD(m) : IDXD(m) + NE - 1);'};
+fb = 'function G = twin_blocks(yxt, SK, IDXD, IDXP, PC, PB, NRK, RP, RQ, XO, NPRE, txbits)';
+ff = 'function bf = twin_freq(yx, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB)';
+p.rx_ne_fix = 'twing';
+W = msdiff(msdiff(splitlines(rx_text(p)), s0), G);   % the lines every twin token adds
+verifyNotEmpty(tc, find(strcmp(W, sig1), 1));
+s0w = s0; s0w{strcmp(s0w, sig0)} = sig1; s0w{strcmp(s0w, per0)} = per1;
+% 'twinb+eqt': the block profiles in the MRC only
+p.rx_ne_fix = 'twinb+eqt';
+se = splitlines(rx_text(p));
+k = find(strcmp(se, fb));
+verifyNumElements(tc, k, 1);
+verifyTrue(tc, strcmp(se{k - 1}, '') && strcmp(se{end - 1}, 'end') && strcmp(se{end - 2}, 'end'));
+verifyEqual(tc, msdiff(s0, se), sort({sig0; per0; rr0}));
+verifyEqual(tc, msdiff(se(1:k - 2), s0), sort([W; B]));
+verifyTrue(tc, is_subseq(s0w(~strcmp(s0w, rr0)), se(1:k - 1)));
+TB = se(k:end);
+% 'twinb': and every block's equalizer
+p.rx_ne_fix = 'twinb';
+sb = splitlines(rx_text(p));
+kb = find(strcmp(sb, fb));
+verifyNumElements(tc, kb, 1);
+verifyEqual(tc, sb(kb:end), TB);
+verifyEqual(tc, msdiff(s0, sb), sort({sig0; per0; rr0; z0}));
+verifyEqual(tc, msdiff(sb(1:kb - 2), s0), sort([W; B; E]));
+verifyTrue(tc, is_subseq(s0w(~ismember(s0w, {rr0; z0})), sb(1:kb - 1)));
+% 'twinb+twinf': and the twin's frequency
+p.rx_ne_fix = 'twinb+twinf';
+sf = splitlines(rx_text(p));
+kf = find(strcmp(sf, ff)); kb = find(strcmp(sf, fb));
+verifyNumElements(tc, kf, 1);
+verifyNumElements(tc, kb, 1);
+verifyLessThan(tc, kf, kb);
+verifyEqual(tc, sf(kb:end), TB);
+verifyEqual(tc, msdiff(s0, sf), sort({sig0; per0; bf0; rr0; z0}));
+verifyEqual(tc, msdiff(sf(1:kf - 2), s0), sort([W; F; B; E]));
+verifyTrue(tc, is_subseq(s0w(~ismember(s0w, {bf0; rr0; z0})), sf(1:kf - 1)));
+for s = {se, sb, sf}
+    verifyEmpty(tc, find(contains(s{1}, 'fprintf('), 1));
+end
+% with 'log': prints only; RXL per block (0: the training) and antenna, RXA per pilot block
+L = frame_layout(p); NB = numel(L.pil_center);
+for m = {'twinb+eqt', 'twinb', 'twinb+twinf'; se, sb, sf}
+    p.rx_ne_fix = [m{1} '+log'];
+    sl = splitlines(rx_text(p));
+    verifyEqual(tc, strip_prints(sl), m{2}, m{1});
+    pr = strtrim(sl(startsWith(strtrim(sl), 'fprintf(')));
+    verifyEqual(tc, nnz(startsWith(pr, 'fprintf(''RXL ')), (NB + 1) * p.n_rx, m{1});
+    verifyEqual(tc, nnz(startsWith(pr, 'fprintf(''RXA ')), NB, m{1});
+    verifyNotEmpty(tc, find(startsWith(pr, 'fprintf(''RXS '), 1), m{1});
+    kr = find(startsWith(sl, 'function v = rxd_'), 1);
+    body = sl(1:kr - 1);
+    verifyTrue(tc, all(startsWith(strtrim(body(contains(body, 'rxd_'))), 'fprintf(')), m{1});
+end
+bdclose('all');
+end
+
+function test_twinb_wiring(tc)
+% every 'twinb' arm: output 4 of the threat block through 'LevelTw' (the gain of 'Level') to
+% the receiver's third input
+mdl = 'UAV_GCS_Threat_Link';
+p = dl_params(); p.own_out = true;
+for m = {'twinb', 'twinb+eqt+log', 'twinb+twinf+log'}
+    q = p; q.rx_ne_fix = m{1};
+    evalc('build_threat_model(q)');
+    verifyNotEqual(tc, getSimulinkBlockHandle([mdl '/LevelTw']), -1, m{1});
+    verifyEqual(tc, get_param([mdl '/LevelTw'], 'Gain'), get_param([mdl '/Level'], 'Gain'), m{1});
+    pt = get_param([mdl '/Rx'], 'Ports');
+    verifyEqual(tc, pt(1), 3, m{1});
+    ph = get_param([mdl '/Rx'], 'PortHandles');
+    ln = get_param(ph.Inport(3), 'Line');
+    verifyEqual(tc, get_param(get_param(ln, 'SrcBlockHandle'), 'Name'), 'LevelTw', m{1});
+    ph = get_param([mdl '/LevelTw'], 'PortHandles');
+    ln = get_param(ph.Inport(1), 'Line');
+    verifyEqual(tc, get_param(get_param(ln, 'SrcBlockHandle'), 'Name'), 'Threat', m{1});
+    verifyEqual(tc, get_param(get_param(ln, 'SrcPortHandle'), 'PortNumber'), 4, m{1});
+    close_system(mdl, 0);
+end
+end
+
+function test_twinb_other_paths_bit_identical(tc)
+% the flat path (NE == 1) and the space-time path (NT > 1) with 'twinb+twinf' and 'twinb+eqt'
+% (and their prints)
+for path = {'flat', 'space-time'}
+    p = dl_params(); p.own_out = true;
+    if strcmp(path{1}, 'flat'), p.tdl = false; p.tdl_random = false; else, p.rx_combiner = 'mmse'; end
+    [z0, s0, b0] = run_frames(p);
+    for m = {'twinb+twinf+log', 'twinb+eqt+log'}
+        p.rx_ne_fix = m{1};
+        [z1, s1, b1, txt] = run_frames(p);
+        verifyEqual(tc, max(abs(z1(:) - z0(:))), 0, [path{1} ' ' m{1}]);
+        verifyEqual(tc, max(abs(s1(:) - s0(:))), 0, [path{1} ' ' m{1}]);
+        verifyEqual(tc, b1, b0, [path{1} ' ' m{1}]);
+        verifyEmpty(tc, strfind(txt, 'RXS '), [path{1} ' ' m{1}]);
+        verifyEmpty(tc, strfind(txt, 'RXL '), [path{1} ' ' m{1}]);
+        verifyEmpty(tc, strfind(txt, 'RXA '), [path{1} ' ' m{1}]);
+    end
+end
+end
+
+function test_twinb_runs_on_delay_line(tc)
+% the delay line with 'twinb+twinf+log' and 'twinb+eqt+log': finite outputs, one RXS line,
+% (NB + 1) NR RXL lines and NB RXA lines per frame
+p = dl_params(); p.own_out = true;
+L = frame_layout(p); NB = numel(L.pil_center);
+for m = {'twinb+twinf+log', 'twinb+eqt+log'}
+    p.rx_ne_fix = m{1};
+    [z, s, ~, txt] = run_frames(p);
+    nf = size(s, 2);
+    verifyTrue(tc, all(isfinite(z(:))), m{1});
+    verifyEqual(tc, numel(strfind(txt, 'RXS ')), nf, m{1});
+    ln = strtrim(splitlines(txt));
+    verifyEqual(tc, nnz(startsWith(ln, 'RXL ')), nf * (NB + 1) * p.n_rx, m{1});
+    verifyEqual(tc, nnz(startsWith(ln, 'RXA ')), nf * NB, m{1});
+end
+end
+
+function test_twinb_profiles_at_receiver_level(tc)
+% (f3b): 'twinb+log' on the flights of the three frames at 12 dB (runs 420, 452 and 459 of the
+% clean validation pool, link_floor_partA.mat, with the link-floor params). On the antenna-blocks
+% of their clean frames (BER < 1e-3) where the receiver's template fits the twin (misfit
+% <= -10 dB), the multiple c_b of Gt(a, :) closest to the twin's profile G_b(a, :) sits at the
+% measured gain ga(a, b): median |10 log10(|c_b|^2 / |ga|^2)| < 1 dB (level) and median
+% |angle(c_b / ga)| < 0.2 rad (timing and rotations). The frame BER is the chart's (RXS).
+lf = getenv('RX_LINK_FLOOR');
+if isempty(lf), lf = fullfile(fileparts(tc.TestData.root), 'link-floor'); end
+fa = fullfile(lf, 'results', 'link_floor_partA.mat'); fp = fullfile(lf, 'data', 'params.mat');
+assertTrue(tc, isfile(fa) && isfile(fp), sprintf('link-floor data not found under %s', lf));
+p0 = load(fp).params; p0.quiet_build = true; p0.active_threat = 'none';
+[C, ~, ~] = pool_configs(p0, 'none', {'no_action'}); q = C(1).p; g_db = C(1).g_db;
+q.own_out = true; q.rx_ne_fix = 'twinb+log';
+A = load(fa).A;
+T = A(find([A.e] == 12, 1)).T;
+mdl = 'UAV_GCS_Threat_Link';
+evalc('build_threat_model(q)');
+set_link_snr(mdl, 12 + 10*log10(q.bits_per_symbol) - 10*log10(q.sps) + g_db, q);
+set_param([mdl '/LevelTw'], 'Gain', get_param([mdl '/Level'], 'Gain'));
+Lf = frame_layout(q); NB = numel(Lf.pil_center); NR = q.n_rx;
+dc = []; dp = []; nfr = 0;
+for run = [420 452 459]
+    j = find(T.run == run, 1);
+    assertNotEmpty(tc, j, sprintf('run %d not in the 12 dB part', run));
+    fd = T.speed(j) / 3.6 * q.carrier_freq / q.c_light;
+    link_seed(mdl, double(T.seed(j)), fd, struct('ebno', 12, 'alt_m', NaN, 'k_sig_db', NaN, 'aoa1_deg', NaN, ...
+        'rho', NaN, 'event_frame', NaN, 'frames', 20));
+    txt = evalc('sim(mdl, ''StopTime'', num2str(19 * q.frame_duration));');
+    D = rx_blocks(txt, NR, NB);
+    verifyNotEmpty(tc, D, sprintf('run %d: no frame printed', run));
+    for f = 1:numel(D)
+        if ~(D(f).nbit / q.frame_length < 1e-3), continue; end
+        nfr = nfr + 1;
+        for b = 1:NB
+            for a = 1:NR
+                if ~(D(f).l(b + 1, a, 3) <= -10), continue; end
+                dc(end + 1) = D(f).l(b + 1, a, 1) - D(f).ga2(b, a); %#ok<AGROW>
+                dp(end + 1) = angle(exp(1j * (D(f).l(b + 1, a, 2) - D(f).gph(b, a)))); %#ok<AGROW>
+            end
+        end
+    end
+end
+close_system(mdl, 0);
+fprintf('(f3b) %d clean frames, %d antenna-blocks: median |c2/ga2| %.2f dB, median |angle(c/ga)| %.3f rad\n', ...
+    nfr, numel(dc), median(abs(dc)), median(abs(dp)));
+assertGreaterThan(tc, numel(dc), 0);
+verifyLessThan(tc, median(abs(dc)), 1);
+verifyLessThan(tc, median(abs(dp)), 0.2);
+end
+
 function test_pilot_error_on_every_path(tc)
 % sy(8) on every real receiver path, decision-directed passes on or off; 'off' leaves the
 % delay line's gap at rx_dd_iter = 0 as it was
@@ -400,6 +633,35 @@ function t0 = rxl_training(txt)
 ln = splitlines(txt); ln = strtrim(ln(startsWith(strtrim(ln), 'RXL ')));
 v = cell2mat(cellfun(@(x) str2double(strsplit(x(5:end))), ln, 'UniformOutput', false));
 if isempty(v), t0 = zeros(0, 5); else, t0 = v(v(:, 1) == 0, :); end
+end
+
+function D = rx_blocks(txt, NR, NB)
+% Per printed frame (an RXS line closes it): the chart's bit errors (RXS), every antenna's
+% |ga|^2 [dB] (RXB) and angle(ga) [rad] (RXA) per pilot block, and the twin's |c|^2 [dB],
+% angle c [rad] and misfit [dB] per block (0: the training) and antenna (RXL)
+D = struct('nbit', {}, 'ga2', {}, 'gph', {}, 'l', {});
+cur = blank_blocks(NR, NB);
+for s = strtrim(splitlines(txt))'
+    x = s{1};
+    if numel(x) < 5 || x(4) ~= ' ', continue; end
+    v = str2double(strsplit(strtrim(x(5:end))));
+    switch x(1:3)
+        case 'RXB'
+            if numel(v) >= 3 + NR && v(1) >= 1 && v(1) <= NB, cur.ga2(v(1), :) = v(4:3 + NR); end
+        case 'RXA'
+            if numel(v) >= 1 + NR && v(1) >= 1 && v(1) <= NB, cur.gph(v(1), :) = v(2:1 + NR); end
+        case 'RXL'
+            if numel(v) >= 5 && v(1) >= 0 && v(1) <= NB && v(2) >= 1 && v(2) <= NR, cur.l(v(1) + 1, v(2), :) = v(3:5); end
+        case 'RXS'
+            if numel(v) >= 4, cur.nbit = v(4); end
+            D(end + 1) = cur; %#ok<AGROW>
+            cur = blank_blocks(NR, NB);
+    end
+end
+end
+
+function x = blank_blocks(NR, NB)
+x = struct('nbit', NaN, 'ga2', nan(NB, NR), 'gph', nan(NB, NR), 'l', nan(NB + 1, NR, 3));
 end
 
 function s = strip_prints(s)

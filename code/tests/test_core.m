@@ -1042,6 +1042,10 @@ S = [S; arrayfun(@(si, ri) pool_seed(2, si, 10, ri), s(:), r(:))];
 S = [S; arrayfun(@(si, bi) pool_seed(1, si, bi, 100), s(:), b(:))];
 [s, r, b, f] = ndgrid(1:6, 1:100, [4 15], [3 5]);       % clean-link geometries 101-300 (families 3 and 5)
 S = [S; arrayfun(@(si, ri, bi, fi) pool_seed(fi, si, bi, ri), s(:), r(:), b(:), f(:))];
+[s, r, b] = ndgrid(1:6, 1:99, [5 7 14 16 18 19]);       % the bandwidth study (family 6)
+S = [S; arrayfun(@(si, ri, bi) pool_seed(6, si, bi, ri), s(:), r(:), b(:))];
+[s, r, b, f] = ndgrid(1:6, 1:100, [15 18], [7 8 9]);    % P1R's fresh clean test set and its smoke build
+S = [S; arrayfun(@(si, ri, bi, fi) pool_seed(fi, si, bi, ri), s(:), r(:), b(:), f(:))];
 [t, li, s] = ndgrid(1:20, 1:8, 1:6);                    % survivability map: entries, levels, Eb/N0
 S = [S; 900000 + 1000*t(:) + 10*li(:) + s(:); 700000 + (1:5)'];
 k = (1:99999)';
@@ -1049,6 +1053,14 @@ S = [S; 3000000 + k; 4000000 + k; 5000000 + k];         % dataset, unseen Eb/N0 
 S = [S; 3500000 + k; 4500000 + k; 5500000 + k];         % the second test set and the second B4 and B4s readings
 S = [S; 6500000 + k];                                   % the third test set (B3m)
 S = [S; 6000000 + k];                                   % the fourth test set (B3q)
+% the delay-line receiver's fresh flights (docs/rx_fix_rule3.md 2.1): above every pool seed,
+% below the lowest dataset seed, and out of reach of every pool_seed family at Eb/N0 index 1-19
+SR = 2400000 + (1:300)';
+verifyGreaterThan(tc, min(SR), max(S(S < 3000000)));
+verifyLessThan(tc, max(SR), min(S(S >= 3000000)));
+[f, s, b] = ndgrid(1:100, 1:19, 1:19);
+verifyFalse(tc, any(arrayfun(@(fi, si, bi) any(ismember(pool_seed(fi, si, bi, 1:100), SR)), f(:), s(:), b(:))));
+S = [S; SR];
 src = fileread(which('run_dataset_sweep'));              % every dataset stream of the sweep is listed above
 s0 = cellfun(@(c) str2double(c{1}), regexp(src, 'SEED0\s*=\s*(\d+);', 'tokens'));
 verifyEqual(tc, sort(s0), [3000000 3500000 6000000 6500000]);

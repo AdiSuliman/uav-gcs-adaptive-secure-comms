@@ -2052,15 +2052,21 @@ function c = rx_ne_fix_code(c, p)
 %   'twing'   the lag model Gt, and with it the known symbols' share of the block gains, from
 %             eq_train on the twin's training; s2 stays the samples' own (diagnostic)
 %   'twin'    'twinf' and 'twing'
+%   'twinb'   the twin's lag profile of every antenna at the training and at every pilot
+%             block by LS with every symbol known (twin_blocks): every MRC output symbol takes
+%             the profile of the nearest block centre (ties: the earlier), held over its
+%             segment, in place of the gain times the template, and every data symbol the
+%             equalizer of that profile; only with 'twinf', 'eqt' and 'log' (diagnostic)
+%   'eqt'     with 'twinb': the equalizer designed once from the training, as built (diagnostic)
 %   With a twin token, 'log' also prints RXL: the twin's lag profile at the training and at
-%   every pilot block with every symbol known (rxd_true).
+%   every pilot block with every symbol known (rxd_true); with 'twinb' also RXA.
 % Diagnostic-only tokens are printed as such; p.rx_release = true refuses them.
 m = 'off';
 if isfield(p, 'rx_ne_fix') && ~isempty(p.rx_ne_fix), m = lower(char(p.rx_ne_fix)); end
 tk = strsplit(m, '+');
 known = {'off', 'freq', 'keep', 'both', 'freqa', 'freqf', 'noburst', 'burstn', 'hsel1', 'deq0', ...
-    'shadow', 'log', 'twin', 'twinf', 'twing'};
-diagonly = {'log', 'freq', 'freqf', 'noburst', 'hsel1', 'deq0', 'shadow', 'twinf', 'twing'};
+    'shadow', 'log', 'twin', 'twinf', 'twing', 'twinb', 'eqt'};
+diagonly = {'log', 'freq', 'freqf', 'noburst', 'hsel1', 'deq0', 'shadow', 'twinf', 'twing', 'twinb', 'eqt'};
 if ~all(ismember(tk, known)) || (numel(tk) > 1 && any(strcmp(tk, 'off')))
     error('build_threat_model: unknown rx_ne_fix ''%s''', m);
 end
@@ -2072,7 +2078,13 @@ on = @(t) any(strcmp(tk, t));
 if on('freq') + on('freqa') + on('freqf') + on('twinf') > 1 || (on('noburst') && on('burstn'))
     error('build_threat_model: rx_ne_fix ''%s'' sets one step twice', m);
 end
-if (on('twinf') || on('twing')) && ~own_output(p)
+if on('twinb') && ~all(ismember(tk, {'twinb', 'twinf', 'eqt', 'log'}))
+    error('build_threat_model: rx_ne_fix ''%s'': ''twinb'' combines only with ''twinf'', ''eqt'' and ''log''', m);
+end
+if on('eqt') && ~on('twinb')
+    error('build_threat_model: rx_ne_fix ''%s'': ''eqt'' needs ''twinb''', m);
+end
+if (on('twinf') || on('twing') || on('twinb')) && ~own_output(p)
     error('build_threat_model: rx_ne_fix ''%s'' needs the own component (p.own_out)', m);
 end
 fprintf('Rx NE>1 options: %s\n', strjoin(tk, '+'));
@@ -2195,7 +2207,7 @@ if on('deq0')
 end
 
 % the noise-free twin: its own receive filter and state, the samples' timing, frequency and whitening
-if on('twinf') || on('twing')
+if on('twinf') || on('twing') || on('twinb')
     c = swap(c, 'function [bits, iqa, z, Hq, Rq, sy] = fcn(u, txbits)', {'function [bits, iqa, z, Hq, Rq, sy] = fcn(u, txbits, ut)'});
     c = swap(c, 'persistent rxf', {'persistent rxf rxt'});
     k = find(strcmp(c, 'if isempty(rxf)'));
@@ -2266,6 +2278,57 @@ if on('twing')
     c = ins(c, '        [Gt, s2] = eq_train(yx, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB);', {
         '        % the twin''s training gives the lag model; s2 stays the samples'' own'
         '        Gt = eq_train(yxt, PRE, SK, KN, IDXP, PC, NRK, RP, RQ, XO, PB);'});
+end
+% the twin's per-block lag profile in the MRC and, unless 'eqt', in the equalizer design
+if on('twinb')
+    c = swap(c, '        rr = complex(zeros(NS + 2*E0, 1));', {
+        '        % the twin''s lag profile at the training and at every pilot block, every symbol known;'
+        '        % every MRC output symbol takes the profile of the nearest block centre (ties: the earlier)'
+        '        Gb = twin_blocks(yxt, SK, IDXD, IDXP, PC, PB, NRK, RP, RQ, XO, NPRE, txbits);'
+        '        rr = complex(zeros(NS + 2*E0, 1));'});
+    c = ins(c, '            kc = min(max(k, 1), NS); gk = gs(:, 1);', {'            [~, ib] = min(abs(kc - tq));'});
+    c = swap(c, '                rr(k + E0) = rr(k + E0) + (gk .* Gt(:, l))'' * yx(k + l - 1 - RP + XO, :).'';', ...
+        {'                rr(k + E0) = rr(k + E0) + Gb(:, l, ib)'' * yx(k + l - 1 - RP + XO, :).'';'});
+    if ~on('eqt')
+        c = ins(c, '        fe = le_taps(Gt, s2, NE);', {
+            '        % the equalizer of every block''s profile, for the data symbols of its segment'
+            '        Fb = complex(zeros(NE, NB + 1));'
+            '        for b = 1:NB + 1'
+            '            Fb(:, b) = le_taps(Gb(:, :, b), s2, NE);'
+            '        end'});
+        c = swap(c, '            z(m) = fe'' * rr(IDXD(m) : IDXD(m) + NE - 1);', {
+            '            [~, ib] = min(abs(IDXD(m) - tq));'
+            '            z(m) = Fb(:, ib)'' * rr(IDXD(m) : IDXD(m) + NE - 1);'});
+    end
+    c = [c; {
+        ''
+        'function G = twin_blocks(yxt, SK, IDXD, IDXP, PC, PB, NRK, RP, RQ, XO, NPRE, txbits)'
+        '% The twin''s lag profile of every antenna by LS with every symbol known (the data from'
+        '% txbits), on the rows rxd_true fits: page 1 the training''s rows, page b + 1 the rows of'
+        '% pilot block b and the lags around them.'
+        'NR = size(yxt, 2); NS = numel(SK); NB = numel(PC);'
+        'G = complex(zeros(NR, NRK, NB + 1));'
+        'sf = SK; sf(IDXD) = pskmod(txbits, 4, pi/4, ''gray'', ''InputType'', ''bit'');'
+        'for b = 0:NB'
+        '    n0 = 1 + RQ; n1 = NPRE - RP;'
+        '    if b > 0'
+        '        n0 = IDXP((b-1)*PB + 1) - RP; n1 = IDXP(b*PB) + RQ;'
+        '    end'
+        '    A = complex(zeros(NRK, NRK)); C = complex(zeros(NR, NRK));'
+        '    for n = n0:n1'
+        '        sv = complex(zeros(NRK, 1));'
+        '        for l = 1:NRK'
+        '            kl = n - (l - 1 - RP);'
+        '            if kl >= 1 && kl <= NS'
+        '                sv(l) = sf(kl);'
+        '            end'
+        '        end'
+        '        A = A + sv * sv''; C = C + yxt(n + XO, :).'' * sv'';'
+        '    end'
+        '    A = A + 1e-9 * real(trace(A)) / NRK * eye(NRK);'
+        '    G(:, :, b + 1) = C / A;'
+        'end'
+        'end'}];
 end
 
 % the antennas-alone alternative
@@ -2429,7 +2492,8 @@ function c = rx_ne_log(c, p, tk)
 % antenna's largest and smallest |ga|^2 [dB]; RXF the flags applied; RXN (burstn) residual over
 % its expectation; RXS the frame's sy(2), sy(8), pilot_mse(y, z) and bit errors against txbits;
 % with a twin token RXL per block (0: the training) and antenna: the twin's lag profile against
-% the template the receiver uses (rxd_true).
+% the template the receiver uses (rxd_true); with 'twinb' RXA per pilot block: every antenna's
+% angle(ga) [rad].
 Lf = frame_layout(p); NR = p.n_rx; NB = numel(Lf.pil_center);
 on = @(t) any(strcmp(tk, t));
 db = @(x) sprintf('10*log10(max(%s, 1e-30))', x);
@@ -2469,7 +2533,7 @@ end
 gx = arrayfun(@(a) [db(sprintf('max(abs(ga(%d, 2:end)).^2)', a)) ', ' db(sprintf('min(abs(ga(%d, 2:end)).^2)', a))], ...
     1:NR, 'UniformOutput', false);
 L{NB + 1} = ['        fprintf(''RXG' repmat(' %.2f', 1, 2 * NR) '\n'', ' strjoin(gx, ', ') ');'];
-if on('twinf') || on('twing')
+if on('twinf') || on('twing') || on('twinb')
     A = 'yxt, Gt, SK, IDXD, IDXP, PB, NRK, RP, RQ, XO, NPRE, txbits';
     rk = [0 0];                           % the script's lags (rx_script: the delay line only)
     if strcmpi(p.rx_sync, 'real') && strcmpi(p.rx_combiner, 'mrc'), rk = rx_taps(p).lags; end
@@ -2479,6 +2543,12 @@ if on('twinf') || on('twing')
             w = arrayfun(@(i) sprintf('rxd_true(%d, %d, %d, %s)', i, b, a, A), 1:nv, 'UniformOutput', false);
             L{end + 1} = sprintf('        fprintf(''RXL %d %d%s\\n'', %s);', b, a, repmat(' %.3f', 1, nv), strjoin(w, ', '));
         end
+    end
+end
+if on('twinb')                            % the measured gains' phases beside the twin's multiples
+    for b = 1:NB
+        w = arrayfun(@(a) sprintf('angle(ga(%d, %d))', a, b + 1), 1:NR, 'UniformOutput', false);
+        L{end + 1} = sprintf('        fprintf(''RXA %d%s\\n'', %s);', b, repmat(' %.4f', 1, NR), strjoin(w, ', '));
     end
 end
 c = [c(1:k); L; c(k + 1:end)];
@@ -2550,7 +2620,7 @@ c = [c; {
     'end'
     'v = w(k);'
     'end'}];
-if on('twinf') || on('twing')
+if on('twinf') || on('twing') || on('twinb')
     c = [c; {
         ''
         'function v = rxd_true(k, b, a, yxt, Gt, SK, IDXD, IDXP, PB, NRK, RP, RQ, XO, NPRE, txbits)'
@@ -2611,7 +2681,7 @@ function on = rx_twin(p)
 % then feeds the receiver's third input through the gain 'LevelTw'.
 on = false;
 if ~isfield(p, 'rx_ne_fix') || isempty(p.rx_ne_fix), return; end
-on = any(ismember(strsplit(lower(char(p.rx_ne_fix)), '+'), {'twin', 'twinf', 'twing'})) && own_output(p);
+on = any(ismember(strsplit(lower(char(p.rx_ne_fix)), '+'), {'twin', 'twinf', 'twing', 'twinb'})) && own_output(p);
 end
 
 %% ===================== Helpers =====================
