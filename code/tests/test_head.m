@@ -411,10 +411,10 @@ function test_b3r_guards_accept_the_pick(tc)
 % B3r's fresh3_pick and fresh3_fusion_rev in their form, which is the parent commit's; so does
 % select_fusion's pick_measured.
 src = fileread(which('fusion_pick'));
-verifyNumElements(tc, strfind(src, 'EXT = '''';'), 1);
+verifyNumElements(tc, regexp(src, 'EXT = ''[A-Z+]*'';'), 1);       % D110's verdict, '' or a candidate
 d = tempname; mkdir(d);
 c0 = onCleanup(@() fixture_off(d, 'fusion_pick')); %#ok<NASGU>
-fid = fopen(fullfile(d, 'fusion_pick.m'), 'w'); fwrite(fid, strrep(src, 'EXT = '''';', 'EXT = ''GCC'';')); fclose(fid);
+fid = fopen(fullfile(d, 'fusion_pick.m'), 'w'); fwrite(fid, regexprep(src, 'EXT = ''[A-Z+]*'';', 'EXT = ''GCC'';', 'once')); fclose(fid);
 addpath(d, '-begin'); clear fusion_pick
 verifyEqual(tc, fusion_pick().ext.pick, 'GCC');
 PK = fusion_pick();
