@@ -197,6 +197,9 @@ if strcmp(Q.deployed, 'rule_sel')                    % the rule fallback on its 
 end
 POL = [POL, {'rule_core', 'blind_core'}];            % the core action set, after every other policy
 LBL = [LBL, {'core: rule + escalation', 'core: no detector + escalation'}];
+if isfield(Q, 'dec') && isstruct(Q.dec) && isfield(Q.dec, 'lb_complete') && Q.dec.lb_complete   % the DQN rows run with the deployed switch
+    for pk = find(startsWith(POL, 'dqn_')), LBL{pk} = [LBL{pk} ' + link-budget completion (hybrid)']; end
+end
 iBase = find(strcmp(POL, sprintf('dqn_g%d', sel)));  % selected DQN alone
 dep = Q.deployed; if strcmp(dep, 'dqn'), dep = POL{iBase}; end
 iDQN = find(strcmp(POL, dep));                       % deployed policy (train_dqn.m)

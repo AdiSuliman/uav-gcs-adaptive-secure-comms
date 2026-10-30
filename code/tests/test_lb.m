@@ -193,6 +193,7 @@ verifyFalse(tc, O.has_fields);
 % no antenna gains: nothing to read, the layer never acts
 PP.lb_complete = true;
 O = lb_run(PP, 'dqn', const_agent(PP, 'channel_switch'), 30, @(t) 10 * (t > 12) * [1 1 1], false);
+verifyTrue(tc, O.has_fields);
 verifyTrue(tc, all(isnan(O.dc)));
 verifyFalse(tc, any(O.lb));
 end
@@ -387,15 +388,16 @@ end
 
 function test_c2_step_only_with_the_switch(tc)
 % Without "lb_select" train_dqn.m runs nothing new and saves the same variables in the same
-% order; the step sits after the agent pick and before the gate, runs only under the switch, and
-% the stored switch has one writer.
+% order; the switches are read, and a forced mark refused, before anything is trained; the step sits
+% after the agent pick and before the gate, runs only under the switch, and the stored switch has
+% one writer.
 src = fileread(which('train_dqn'));
 i0 = strfind(src, 'agents{find(GAM == gamma_sel, 1)} = agent;');
 i1 = strfind(src, 'LBo = lb_options();');
 i2 = strfind(src, 'if LBo.on');
 i3 = strfind(src, '%% 5. Gate, deployed policy and report');
 verifyNumElements(tc, i0, 1); verifyNumElements(tc, i1, 1); verifyNumElements(tc, i2, 1); verifyNumElements(tc, i3, 1);
-verifyTrue(tc, i0 < i1 && i1 < i2 && i2 < i3);
+verifyTrue(tc, i1 < i0 && i0 < i2 && i2 < i3);
 body = src(i2:i3);
 for s = {'lb_readings(', 'lb_selfcheck()', 'lb_adopt(LBX, FA_BOUND, LBok)'}
     verifyNotEmpty(tc, strfind(body, s{1}), s{1});
@@ -405,9 +407,9 @@ verifyNumElements(tc, strfind(src, 'dec.lb_complete = '), 1);
 verifyNotEmpty(tc, strfind(src, 'if ~isempty(LBR), dec.lb_complete = LBon; if LBforced, dec.lb_forced = true; end, end'));
 verifyNotEmpty(tc, strfind(src, ['''pools_created'', ''maha_thr'', ''dec'', ''-v7.3'');']));   % the save as before
 verifyNotEmpty(tc, strfind(src, 'if ~isempty(LBR), rep = [rep, {''''}, LBlines]; end'));
-% a forced completion stops outside the smoke and without the switch, before anything is computed
+% a forced completion stops outside the smoke and without the switch, before anything is trained
 i4 = strfind(src, 'error(''train_dqn:lb_force''');
-verifyNumElements(tc, i4, 1); verifyTrue(tc, i4 > i1 && i4 < i2);
+verifyNumElements(tc, i4, 1); verifyTrue(tc, i4 > i1 && i4 < strfind(src, 'FA_BOUND = 0.05;'));
 verifyNotEmpty(tc, strfind(src, 'if LBo.force && ~(LBo.on && exist(''SMOKE'', ''var'') && SMOKE)'));
 end
 
@@ -499,33 +501,19 @@ verifyNotEmpty(tc, lit);
 verifyEmpty(tc, intersect([own, batches(:)'], lit));
 end
 
-%% ---------- the gate reads the deployed agent ----------
-function test_c2_gate_reads_the_deployed_switch(tc)
-% With the completion adopted (or forced) the gate and choose_deployed read the DQN as deployed: one
-% more evaluation with the switch on, inside the step, after the adoption and before the gate;
-% without the switch nothing is read.
+%% ---------- the gate reads the selected agent as selected ----------
+function test_c2_gate_reads_the_selected_agent(tc)
+% D115 point 3 uses validation once more for one comparison and nothing else: the step reads no
+% further evaluation, and neither the gate nor choose_deployed sees the completion's reading.
 src = fileread(which('train_dqn'));
 i2 = strfind(src, 'if LBo.on'); i3 = strfind(src, '%% 5. Gate, deployed policy and report');
-i5 = strfind(src, 'gate = B.held >= bsel.held && B.fa_ok;');
-verifyNumElements(tc, i2, 1); verifyNumElements(tc, i3, 1); verifyNumElements(tc, i5, 1);
+verifyNumElements(tc, i2, 1); verifyNumElements(tc, i3, 1);
 body = src(i2:i3);
-j = strfind(body, 'if LBon ');
-verifyNumElements(tc, j, 1);
-verifyTrue(tc, i2 + j - 1 < i3 && i3 < i5);
-blk = body(j:end);
-verifyNotEmpty(tc, strfind(blk, 'xl = ev(sel_kind, decision_settings(PPl, struct(''lb_complete'', true)), agent, struct());'));
-verifyNotEmpty(tc, strfind(blk, '[B.rec, B.held, B.kmin, B.ret] = deal(xl.rec, xl.held, xl.kmin, xl.ret);'));
-verifyNotEmpty(tc, strfind(blk, ['[B.fa_w, B.n_w, B.sw_w, B.fa_ok] = deal(xl.fa_w, xl.n_w, xl.sw_w, ' ...
-    'isnan(up) || up <= FA_BOUND);']));
-verifyNumElements(tc, strfind(src, 'xl = ev('), 1);
-verifyLessThan(tc, strfind(body, 'LBon = true; LBforced = true;'), j);        % after the forced mark
-verifyLessThan(tc, strfind(body, 'lb_adopt(LBX, FA_BOUND, LBok)'), j);        % after the adoption
-% the fields it sets are the ones the gate, choose_deployed and the report read from the selected run
-decl = regexp(src, 'cand = struct\(''run''.*?\{\}\);', 'match', 'once');
-verifyNotEmpty(tc, decl);
-for n = {'rec', 'held', 'kmin', 'ret', 'fa_w', 'n_w', 'sw_w', 'fa_ok'}
-    verifyNotEmpty(tc, strfind(decl, ['''' n{1} '''']), n{1});
-end
+verifyEmpty(tc, regexp(body, '(^|\W)ev\(', 'once'));                      % no evaluation of the selected run
+verifyEmpty(tc, regexp(body, '\<B\.\w+\s*=|\[B\.|\<deal\(', 'once'));   % the selected run's fields are not replaced
+verifyNotEmpty(tc, strfind(body, 'read the DQN as selected, without the completion'));   % the report says so
+verifyNotEmpty(tc, strfind(src, 'gate = B.held >= bsel.held && B.fa_ok;'));
+verifyNotEmpty(tc, strfind(src, '[deployed, fa_bound_met, ir] = choose_deployed(gate, fa_up(B.fa_w, B.n_w), rr, rb_up, FA_BOUND, B.held, sel_kind);'));
 end
 
 %% ---------- the readers' two columns (lb_columns.m, evaluate_policies.m, C2g, C2u, KPI 5) ----------
@@ -619,6 +607,39 @@ k = fileread(which('measure_all_kpis'));
 verifyNotEmpty(tc, strfind(k, 'if isfield(P, ''LBC'') && ~isempty(P.LBC), det = [det, P.LBC.kpi]; end'));
 end
 
+function test_deployed_row_label(tc)
+% With the switch stored on, the DQN rows of C2e's tables, the deployed one among them, are named as the
+% hybrid they are (D115 point 4), the deployed suffix last; with it off or absent the labels are the
+% parent's. Runs evaluate_policies.m's naming block on a small Q.
+hy = ' + link-budget completion (hybrid)';
+Q = struct('gammas', [0.3 0.5], 'seed_summary', struct('selected_gamma', 0.5), 'deployed', 'dqn');
+parent = {'no response', 'random', 'always-on MMSE', 'fixed: channel_switch', 'rule', 'rule + escalation', ...
+    'no detector + escalation', 'table (train pools)', 'DQN gamma=0.30', 'DQN gamma=0.50 (selected)', ...
+    'DQN + escalation', 'oracle (one-step)', 'core: rule + escalation', 'core: no detector + escalation'};
+[POL, L, iD] = policy_labels(tc, Q);                                     % a Q without dec: an agent from before
+verifyEqual(tc, POL{iD}, 'dqn_g2');
+off = parent; off{iD} = [parent{iD} ' (deployed)'];
+verifyEqual(tc, L, off);
+Q.dec = struct('lb_complete', false);
+[~, L, ~] = policy_labels(tc, Q);
+verifyEqual(tc, L, off);
+Q.dec.lb_complete = true;
+[POL, L, iD] = policy_labels(tc, Q);
+isq = startsWith(POL, 'dqn_');
+verifyEqual(tc, find(isq), [9 10 11]);
+on = parent; on(isq) = cellfun(@(s) [s hy], parent(isq), 'UniformOutput', false); on{iD} = [on{iD} ' (deployed)'];
+verifyEqual(tc, L, on);
+verifyEqual(tc, L{iD}, ['DQN gamma=0.50 (selected)' hy ' (deployed)']);
+verifyEqual(tc, erase(L{iD}, ' (deployed)'), ['DQN gamma=0.50 (selected)' hy]);
+Q.deployed = 'dqn_esc';
+[~, L, iD] = policy_labels(tc, Q);
+verifyEqual(tc, L{iD}, ['DQN + escalation' hy ' (deployed)']);
+Q.deployed = 'rule_sel'; Q.rule_sel = struct('alarm', 'class_drop 4/5');       % the fallback deployed: no hybrid label on it
+[POL, L, iD] = policy_labels(tc, Q);
+verifyEqual(tc, L{iD}, 'rule + escalation, own monitor (class_drop 4/5) (deployed)');
+verifyTrue(tc, all(endsWith(L(startsWith(POL, 'dqn_')), hy)));
+end
+
 function test_readers_off_is_the_parent(tc)
 % Without the stored switch the readers are the parent commit's (f6f6e03): every parent line is in the
 % copy, in order, but the ones named here (the cache key, the entity call and header and the options of
@@ -687,6 +708,22 @@ for k = 1:4
         'cl', cl, 'fam', fam);
 end
 X.clean = struct('sw_off', [ones(1, 20), zeros(1, 1780)], 'sw_on', [ones(1, 20), zeros(1, 1780)]);
+end
+
+function [POL, LBL, iDQN] = policy_labels(tc, Q)
+% evaluate_policies.m's naming of the policies, from nGam to the deployed row, run on Q (the actions
+% of the test world; the best fixed configuration is the second).
+src = fileread(which('evaluate_policies'));
+i0 = strfind(src, 'nGam = numel(Q.gammas);'); i1 = strfind(src, 'col = @(p) find(strcmp(POL, p));');
+assertNumElements(tc, i0, 1); assertNumElements(tc, i1, 1);
+PP = struct('actions', {{'no_action', 'channel_switch', 'rate_reduce'}}); fixed_best = 2; %#ok<NASGU>
+POL = []; LBL = []; iDQN = [];
+d = fullfile(tc.TestData.tmp, 'names_block'); mkdir(d);        % the script's local function ternary is not on the path
+cl = onCleanup(@() fixture_off(d, {'ternary', 'policy_names_block'})); %#ok<NASGU>
+write_text(fullfile(d, 'ternary.m'), sprintf('function out = ternary(c, a, b)\nif c, out = a; else, out = b; end\nend\n'));
+write_text(fullfile(d, 'policy_names_block.m'), strrep(src(i0:i1 - 1), sprintf('\r'), ''));
+addpath(d);
+run(fullfile(d, 'policy_names_block.m'));
 end
 
 function write_text(f, s)

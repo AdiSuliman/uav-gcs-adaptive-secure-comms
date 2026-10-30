@@ -133,6 +133,12 @@ if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (r
     N_SEEDS = 1; GAMMAS = 0.5; FA_PEN = 80; COST_SCALE = 1; SW_SCALE = 1; ALARMS = {'class_drop 4/5'}; SENS_SCALES = 2; VAL_REPS = 1;
     DROP_STEPS = [0 2]; H.episodes = 1280; H.buffer = 20000; H.warmup = 2000; H.n_eval = 1;
 end
+LBo = lb_options();                      % the link-budget completion's switches (step 4b)
+if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'lb_select'), LBo.on = CFG.lb_select; end
+if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'lb_force'), LBo.force = CFG.lb_force; end
+if LBo.force && ~(LBo.on && exist('SMOKE', 'var') && SMOKE)       % a forced completion is the smoke's only, refused before any training
+    error('train_dqn:lb_force', 'train_dqn: lb_force needs lb_select and the smoke (a forced link-budget completion is no adoption)');
+end
 SEEDS = 42 + (0:N_SEEDS-1);
 FA_BOUND = 0.05;                         % one-sided 95% bound of the clean-link false alarms (KPI 6)
 DROP_DB = [];                            % drop alarm threshold of 'class_drop'
@@ -340,12 +346,7 @@ agents{find(GAM == gamma_sel, 1)} = agent;
 % Only with "lb_select": true in profile.json (lb_options.m, or CFG.lb_select): judged on the agent
 % selected above alone, on the validation split, nothing tuned, and stored with it (dec.lb_complete);
 % without it nothing here runs and no switch is stored.
-LBo = lb_options(); LBon = false; LBforced = false; LBR = []; LBlines = {};
-if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'lb_select'), LBo.on = CFG.lb_select; end
-if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'lb_force'), LBo.force = CFG.lb_force; end
-if LBo.force && ~(LBo.on && exist('SMOKE', 'var') && SMOKE)
-    error('train_dqn:lb_force', 'train_dqn: lb_force needs lb_select and the smoke (a forced link-budget completion is no adoption)');
-end
+LBon = false; LBforced = false; LBR = []; LBlines = {};
 if LBo.on
     PPl = decision_settings(with_entry(PP, struct('alarm', alarm_sel, 'drop', drop_sel), DROP_MODE), Sdep);
     LBX = lb_readings(sel_kind, PPl, K, agent, CV, H, EBNO_THR, VAL_REPS);
@@ -357,14 +358,7 @@ if LBo.on
             'reads %s'], ternary(LBon, 'on', 'off'));
         LBon = true; LBforced = true;
     end
-    if LBon                                           % the gate and the deployment choice read the agent as it is deployed
-        xl = ev(sel_kind, decision_settings(PPl, struct('lb_complete', true)), agent, struct());
-        up = NaN; if ~isnan(xl.fa_w), up = cp_upper(round(xl.fa_w * xl.n_w), xl.n_w); end
-        [B.rec, B.held, B.kmin, B.ret] = deal(xl.rec, xl.held, xl.kmin, xl.ret);
-        [B.fa_w, B.n_w, B.sw_w, B.fa_ok] = deal(xl.fa_w, xl.n_w, xl.sw_w, isnan(up) || up <= FA_BOUND);
-        LBlines{end+1} = sprintf(['  the gate and choose_deployed read the DQN with the completion on: held %.1f%%, recovered ' ...
-            '%.1f%%, false alarms %s'], 100 * xl.held, 100 * xl.rec, fa_txt(xl.fa_w, xl.n_w));
-    end
+    LBlines{end+1} = '  the gate, choose_deployed and the false-change line above read the DQN as selected, without the completion';
     fprintf('%s\n', LBlines{:});
 end
 
