@@ -179,9 +179,13 @@ if isfile(F.det)
             'change%s: macro-F1 above the threshold %.2f%%, lowest class %.2f%%, accuracy %.2f%%'], m.test_set, smp(ms), ...
             ms.macro_f1_above_threshold_pct, min(ms.class_f1_above_threshold_pct), ms.overall_accuracy_pct);
     end
+    tf1 = file_time('data/fusion.mat');
+    if contains(F.det, '_fresh3') && file_time(F.det) < tf1 && unk_write('base_ok', 'data/fusion.mat', 'results/fresh3_read_started.txt')
+        tf1 = -inf;                                    % newer only by D111's FM.unk: the class B3r read is unchanged
+    end
     KPI(end+1) = kpi(1, 'Detection accuracy vs SNR', sprintf('macro-F1 %.2f%%, lowest class %.2f%%, from %g dB%s', val, min(cl), ...
         m.kpi1_threshold_db, smp(m)), 'macro-F1 >= 90% above a threshold chosen on validation', ...
-        status(isfinite(m.kpi1_threshold_db) && val >= 90, file_time(F.det) < max(t_det, file_time('data/fusion.mat'))), det);
+        status(isfinite(m.kpi1_threshold_db) && val >= 90, file_time(F.det) < max(t_det, tf1)), det);
 else
     KPI(end+1) = missing(1, 'Detection accuracy vs SNR', F.det);
 end

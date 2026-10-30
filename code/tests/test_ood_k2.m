@@ -254,6 +254,124 @@ verifyNotEmpty(tc, strfind(ec, 'if isfield(d, ''unk''), info.unknown = d.unk; en
 verifyNotEmpty(tc, strfind(fileread(which('policy_decide')), 'if isfield(M, ''unk''), info.unk = M.unk; end'));
 end
 
+%% ---------- FM.unk in data/fusion.mat ----------
+function test_unk_write_and_provenance(tc)
+% FM.unk is added to data/fusion.mat with every other variable and field as it was and the
+% file's SHA-256 before it; the fourth set's reading (B3r's marker) stays current while the
+% fusion differs from the one it read only by FM.unk, before and after guard (e) removes it;
+% any other change, or another fusion read by B3r, makes it stale.
+d = fullfile(tc.TestData.tmp, 'unkw'); mkdir(fullfile(d, 'data')); mkdir(fullfile(d, 'results'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+FM = struct('W', ones(3, 2), 'mu', zeros(1, 5), 'latch', false); N = 12; q_thr = 4.5; val_latch_oof = [1 2 3]; %#ok<NASGU>
+save('data/fusion.mat', 'FM', 'N', 'q_thr', 'val_latch_oof', '-v7.3');
+ood = struct('score', 'last_or_if', 'win', 1); classes = {'none', 'jamming'}; trained_at = 1; %#ok<NASGU>
+save('data/trained_detector.mat', 'ood', 'classes', 'trained_at');
+T = struct('retain', 0.95); save('data/ood_thresholds.mat', 'T');
+write_text('results/fresh3_read_started.txt', sprintf(['fourth test set (B3r) reading started\ndata/fusion.mat ' ...
+    'sha256 %s mtime x\n'], kpi6_fresh_marker('sha', 'data/fusion.mat')));
+metrics = struct('x', 1); save('results/eval_detector_metrics_fresh3.mat', 'metrics');
+L0 = load('data/fusion.mat');
+[ok, why] = unk_write('base_ok', 'data/fusion.mat', 'results/fresh3_read_started.txt');
+verifyFalse(tc, ok); verifyEqual(tc, why, 'no FM.unk base');
+pause(1.1);
+U = struct('cand', 'C1', 'val', (1:5)');
+unk_write('add', U, 'data/fusion.mat');
+L1 = load('data/fusion.mat');
+verifyEqual(tc, rmfield(L1.FM, 'unk'), L0.FM);
+verifyEqual(tc, rmfield(L1, 'FM'), rmfield(L0, 'FM'));
+verifyEqual(tc, rmfield(L1.FM.unk, 'base'), U);
+verifyEqual(tc, unk_write('rest_id', L1), unk_write('rest_id', L0));
+verifyTrue(tc, mat73('data/fusion.mat'));
+verifyTrue(tc, unk_write('base_ok', 'data/fusion.mat', 'results/fresh3_read_started.txt'));
+verifyFalse(tc, stale3());
+verifyError(tc, @() unk_write('add', U, 'data/fusion.mat'), 'unk_write:exists');
+q_thr = 5; save('data/fusion.mat', 'q_thr', '-append');
+[ok, why] = unk_write('base_ok', 'data/fusion.mat', 'results/fresh3_read_started.txt');
+verifyFalse(tc, ok); verifyEqual(tc, why, 'the fusion differs from the one B3r read beyond FM.unk');
+verifyTrue(tc, stale3());
+q_thr = 4.5; save('data/fusion.mat', 'q_thr', '-append'); %#ok<NASGU>
+verifyTrue(tc, unk_write('base_ok', 'data/fusion.mat', 'results/fresh3_read_started.txt'));
+unk_write('remove', 'test reason', 'data/fusion.mat');
+L2 = load('data/fusion.mat');
+verifyEqual(tc, L2.FM, L0.FM); verifyEqual(tc, rmfield(L2, 'FM'), rmfield(L0, 'FM'));
+R = load('data/fusion_unk_removed.mat');
+verifyEqual(tc, R.R.reason, 'test reason'); verifyEqual(tc, R.R.unk.cand, 'C1');
+verifyNumElements(tc, dir('data/fusion_before_unk_removal_*.mat'), 1);
+verifyTrue(tc, unk_write('base_ok', 'data/fusion.mat', 'results/fresh3_read_started.txt'));
+verifyFalse(tc, stale3());
+verifyError(tc, @() unk_write('remove', 'again', 'data/fusion.mat'), 'unk_write:none');
+write_text('results/fresh3_read_started.txt', sprintf('data/fusion.mat sha256 %s mtime x\n', repmat('0', 1, 64)));
+verifyFalse(tc, unk_write('base_ok', 'data/fusion.mat', 'results/fresh3_read_started.txt'));
+verifyTrue(tc, stale3());
+end
+
+function test_rekey_and_class_unchanged(tc)
+% rekey_pools.m takes a fusion that carries FM.unk (pools of the same detector: only the keys
+% change, the new det_id includes FM.unk); the monitor's class and the KPI 1 reading's class
+% (fused_class.m, fuse_classes.m) are the same with and without FM.unk.
+d = fullfile(tc.TestData.tmp, 'rekeyunk'); mkdir(fullfile(d, 'data'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+[PP, FMu, D] = unk_world();
+L = load('data/policy_pools.mat');
+verifyEqual(tc, L.PP.fuse, rmfield(FMu, 'unk'));
+FM = FMu; N = D.N; q_thr = D.q_thr; %#ok<NASGU>
+save('data/fusion.mat', 'FM', 'N', 'q_thr');
+evalc('rekey_pools({''data/policy_pools.mat''})');
+L = load('data/policy_pools.mat');
+verifyEqual(tc, L.PP.fuse, FMu);
+verifyTrue(tc, unk_stat('on', L.PP));
+verifyEqual(tc, L.PP.det_id, detector_id(D.trained_at, D.ood, struct('FM', FMu, 'N', D.N, 'q_thr', D.q_thr)));
+verifyNotEqual(tc, L.PP.det_id, PP.det_id);
+verifyEqual(tc, rmfield(L.PP, {'fuse', 'det_id'}), rmfield(PP, {'fuse', 'det_id'}));
+[S, P, ~, y] = toy_split(3, 24);
+F0 = toy_fusion(S, P, y); F1 = F0; F1.unk = struct('val', (1:3)');
+cls = {'none', 'jamming', 'path_loss'};
+[k0, kf0] = fused_class(P, S, F0, 12, cls); [k1, kf1] = fused_class(P, S, F1, 12, cls);
+verifyEqual(tc, [k1, kf1], [k0, kf0]);
+S.feat_names = link_features('names');
+Z = fuse_classes('windows', S, P, 12, fuse_classes('cues', F0));
+verifyEqual(tc, fuse_classes('apply', F1, Z), fuse_classes('apply', F0, Z));
+end
+
+function test_unk_guard(tc)
+% Guard (e) at C1d: at the reference monitor with unk_mode 'all', U's clean false-change share
+% at retention 0.95 and 0.99 against s0's (each statistic at its own threshold of that
+% retention); within 1.0 point at both FM.unk stays and nothing is written; more at either and
+% FM.unk is removed from data/fusion.mat, the pools re-keyed and reloaded, the reason written.
+d = fullfile(tc.TestData.tmp, 'guard'); mkdir(fullfile(d, 'data')); mkdir(fullfile(d, 'results'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+[PP, FMu, D] = unk_world();
+FM = FMu; N = D.N; q_thr = D.q_thr; %#ok<NASGU>
+save('data/fusion.mat', 'FM', 'N', 'q_thr');
+evalc('rekey_pools({''data/policy_pools.mat''})');
+L = load('data/policy_pools.mat'); PP = L.PP;
+h0 = cellfun(@(f) kpi6_fresh_marker('sha', f), {'data/fusion.mat', 'data/policy_pools.mat'}, 'UniformOutput', false);
+cnt = struct('n', 200, 'f', @(P) guard_count(P, FMu.unk.val, PP.maha_val, 0));
+[G, P1, ~, rep] = unk_guard(PP, [], 'class_drop', 4, 0, 30, 2, cnt);
+verifyTrue(tc, G.pass); verifyFalse(tc, G.removed);
+verifyEqual(tc, [G.k_u, G.k_s0, G.n], [10 10 10 10 200]);
+verifyTrue(tc, unk_stat('on', P1));
+verifyEqual(tc, cellfun(@(f) kpi6_fresh_marker('sha', f), {'data/fusion.mat', 'data/policy_pools.mat'}, ...
+    'UniformOutput', false), h0);
+verifyFalse(tc, isfile('results/unk_guard.txt'));
+verifyNotEmpty(tc, strfind(strjoin(rep, ' '), 'Guard (e) passed'));
+cnt.f = @(P) guard_count(P, FMu.unk.val, PP.maha_val, 3);   % +1.5 points at 0.99 only
+[G, P2] = evalc_guard(PP, cnt);
+verifyFalse(tc, G.pass); verifyTrue(tc, G.removed);
+verifyEqual(tc, G.k_u, [10 13]);
+verifyFalse(tc, unk_stat('on', P2));
+L = load('data/fusion.mat'); verifyFalse(tc, isfield(L.FM, 'unk'));
+L = load('data/policy_pools.mat'); verifyFalse(tc, unk_stat('on', L.PP));
+verifyTrue(tc, isfile('data/fusion_unk_removed.mat'));
+verifyNotEmpty(tc, strfind(fileread('results/unk_guard.txt'), 'Guard (e) FAILED'));
+src = fileread(which('choose_drop_threshold'));
+i4 = strfind(src, '%% 4b. D111 guard (e)'); i5 = strfind(src, '%% 5. The whole monitor per confirmation');
+iF = strfind(src, '[DEG, rd] = deg_select(');
+verifyTrue(tc, isscalar(i4) && isscalar(i5) && isscalar(iF) && i4 < i5 && i5 < iF);
+verifyNotEmpty(tc, strfind(src, 'if unk_stat(''on'', PP)'));
+verifyNotEmpty(tc, strfind(src, 'if ~isempty(UG), SV = [SV, {''UG''}]; end'));
+end
+
 %% ---------- rules, K2-1 and the OOD run ----------
 function test_rules(tc)
 % Gate K2-1 (>= 0.80 on at least 2 of the four named threats and >= 0.70 on their mean); the
