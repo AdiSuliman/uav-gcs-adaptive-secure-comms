@@ -1,0 +1,35 @@
+{
+  "study": "core_bw",
+  "smoke": false,
+  "params_id": "add18af2b7532a0bd2f7fbc78f06e526",
+  "det_id": "53d7d6d84bc36b6c",
+  "protocol": "docs/core_bw_protocol.md",
+  "protocol_sha256": "b588f4dfeadaa76e6df3c4faf99d1c350f57897cd5d057c5e81eaa9a4aa2988a",
+  "recoverable": "results\\core_bw\\recoverable.txt",
+  "recoverable_sha256": "e94cec1acde8bdad811e608219bcaf9bb5cb3ef2226358d8fd11b4ab33644e7e",
+  "n_recoverable": 433,
+  "w": {
+    "H1": "channel_switch+rate_reduce",
+    "H3": "channel_switch+rate_reduce",
+    "H4": "channel_switch+rate_reduce"
+  },
+  "blind_first": {
+    "H1": "channel_switch+rate_reduce",
+    "H3": "channel_switch+rate_reduce",
+    "H4": "channel_switch"
+  },
+  "note": "docs/core_bw_v2_note.txt",
+  "note_sha256": "61b4a80806c4e74537287f41dadfe24da53cc94d9b579e6d20b7d0931915b964",
+  "clean_ber_est_9db": "0.00073522890946338469",
+  "w3": {
+    "H1": "channel_switch+rate_reduce",
+    "H3": "channel_switch+rate_reduce",
+    "H4": "channel_switch+rate_reduce"
+  },
+  "core3_model": "data/core_cnn_model.mat",
+  "core3_sha256": "7c9cccbfe9b7fa000ca462e04812a008584990b3478c60086ea2713a50b41689",
+  "core3_N": 3,
+  "note3": "docs/core_bw_core3_note.txt",
+  "note3_sha256": "d483908b6184dd77c955e66cfb5e7bf5cb9285e0c8b56858695b484145c6019d",
+  "created": "2026-10-30 20:18:13"
+}
