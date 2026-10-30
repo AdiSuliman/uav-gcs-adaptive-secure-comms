@@ -725,7 +725,7 @@ verifyNotEmpty(tc, strfind(src, 'so = sp; for b = 1:numel(so), so{b}.offset = so
 src = fileread(which('evaluate_policies'));
 verifyNotEmpty(tc, strfind(src, 'if rm_on && startsWith(dep, ''dqn''), LBL{iDQN} = [LBL{iDQN} '', with the release on evidence'']; end'));
 verifyNotEmpty(tc, strfind(src, 'xr = {''rule_esc_norelm'', ''table_norelm''};'));
-verifyNotEmpty(tc, strfind(src, 'if rm_on, pko = [pko, find(endsWith(POL, ''_norelm''))]; end'));
+verifyNotEmpty(tc, strfind(src, 'for pk = find(endsWith(POL, ''_norelm''))'));
 src = fileread(which('rollout_policy'));
 verifyNotEmpty(tc, strfind(src, 'if isfield(opt, ''rel_on'') && opt.rel_on'));
 verifyNotEmpty(tc, strfind(src, 'R.rel_on = sum(tr.cfg == K.na & prev ~= K.na & tr.post & ~tr.ended, 1);'));

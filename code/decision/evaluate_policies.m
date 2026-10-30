@@ -665,9 +665,7 @@ rep{end+1} = sprintf(['Threats that end %d cycles after the onset (%d-cycle epis
     'on; reported apart): episodes holding a configuration at the end %%, cycles to its release to no_action median / p90 ' ...
     '(never %%), running cost held after the end [points per cycle, link_env.m] and the share of those cycles not at ' ...
     'no_action, decisions with a confirmed alarm after it %%, changes after it that are no release (per episode)'], OFF_AFTER, T_OFF);
-pko = [iDQN, col('rule_esc'), col('table')];
-if rm_on, pko = [pko, find(endsWith(POL, '_norelm'))]; end   % the rows without the release on evidence, descriptive
-for pk = unique(pko, 'stable')
+for pk = unique([iDQN, col('rule_esc'), col('table')], 'stable')
     Ro = RES{iO, pk}; rep{end+1} = sprintf('  %s', LBL{pk}); %#ok<SAGROW>
     for ti = 1:numel(PP.singles) - 1
         m = strcmp(PP.scen(Ro.scn), threats{ti}) & Ro.threat;
@@ -681,6 +679,10 @@ for pk = unique(pko, 'stable')
         rep{end+1} = sprintf('    %-22s %5d: held %5.1f%% | release %4.1f / %4.1f (%5.1f%%) | cost %5.2f, %5.1f%% | re-alarm %5.1f%% | changes %.2f', ...
             o.threat, o.n, o.held_pct, o.rel_median, o.rel_p90, o.rel_never_pct, o.cost_end, o.on_end_pct, o.conf_end_pct, o.sw_end); %#ok<SAGROW>
     end
+end
+for pk = find(endsWith(POL, '_norelm'))               % the same rows without the release on evidence, descriptive
+    [rl, OFF] = offset_rows(RES{iO, pk}, LBL{pk}, PP, K, threats, OFF);
+    rep = [rep, rl]; %#ok<AGROW>
 end
 
 fid = fopen('results/policy_evaluation.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
@@ -918,6 +920,24 @@ end
 
 function out = ternary(c, a, b)
 if c, out = a; else, out = b; end
+end
+
+function [rep, OFF] = offset_rows(Ro, name, PP, K, threats, OFF)
+% The offset set's rows of one policy per threat, as the report's loop prints them: episodes holding a
+% configuration at the end, the release to no_action, the cost held after it, the re-alarms and the changes.
+rep = {sprintf('  %s', name)};
+for ti = 1:numel(PP.singles) - 1
+    m = strcmp(PP.scen(Ro.scn), threats{ti}) & Ro.threat;
+    if ~any(m), continue; end
+    hd = Ro.cfg_end(m) ~= K.na; rt = Ro.rel_t(m & Ro.cfg_end ~= K.na);
+    OFF(end+1) = struct('policy', name, 'threat', threats{ti}, 'n', sum(m), 'held_pct', 100 * mean(hd), ...
+        'rel_median', median(rt, 'omitnan'), 'rel_p90', p90(rt), 'rel_never_pct', 100 * mean(isnan(rt)), ...
+        'cost_end', mean(Ro.cost_end(m), 'omitnan'), 'on_end_pct', 100 * mean(Ro.on_end(m), 'omitnan'), ...
+        'conf_end_pct', 100 * mean(Ro.conf_end(m), 'omitnan'), 'sw_end', mean(Ro.sw_end(m), 'omitnan')); %#ok<AGROW>
+    o = OFF(end);
+    rep{end+1} = sprintf('    %-22s %5d: held %5.1f%% | release %4.1f / %4.1f (%5.1f%%) | cost %5.2f, %5.1f%% | re-alarm %5.1f%% | changes %.2f', ...
+        o.threat, o.n, o.held_pct, o.rel_median, o.rel_p90, o.rel_never_pct, o.cost_end, o.on_end_pct, o.conf_end_pct, o.sw_end); %#ok<AGROW>
+end
 end
 
 function t = ci_one(v, g)
