@@ -55,6 +55,16 @@
 % monitor loses an admissible threshold or needs a less sensitive one and no single threat's
 % never-confirmed share or 90th-percentile delay grows; both readings are printed.
 %
+% The drop alarm's own confirmation, only with "dconf_select": true in profile.json (wf_options.m; CFG.dconf_select
+% overrides it), after the degradation test and the whole monitor's reading, with the CUSUM form (dconf_step.m): per
+% monitor the candidates of C.confirm_drop_cand in order, each at a threshold re-chosen on the fit half of the clean
+% validation geometries from the CUSUM grid extended upward (C.confirm_drop_ext), judged against the monitor without it
+% on the check half and the validation split's single threats. An adopted candidate is saved in MONP.confirm_drop with
+% the monitor's new threshold (pick) and its grid, and THC becomes the extended grid; a monitor without one keeps its
+% threshold and the grid as they were. Without the switch nothing of this runs and the outputs are those of before.
+% In the smoke only, dconf_force (profile.json or CFG.dconf_force, wf_force.m) deploys one named candidate for every
+% monitor instead, marked DCONF(m).forced beside the rule's pick DCONF(m).rule_pick; refused otherwise.
+%
 % The degradation test, only with "deg_select": true in profile.json (deg_options.m; CFG.deg_select
 % overrides it), before the whole monitor's reading (docs/deg_fix_protocol.md): the clean
 % validation geometries split by hash into a fit half and a check half (clean_halves.m); the
@@ -77,9 +87,16 @@ clc;
 fprintf('=== Eb/N0-drop threshold of the drop alarm ===\n\n');
 DGon = deg_options().on; if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'deg_select'), DGon = CFG.deg_select; end
 DGf = deg_options().force; if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'deg_force'), DGf = deg_force('check', CFG.deg_force, 'CFG'); end
+cfg_ = []; if exist('CFG', 'var'), cfg_ = CFG; end
+WFo = wf_options(cfg_);
+DCx = WFo.dconf; DCf = WFo.force.dconf;                     % the drop alarm's own confirmation per monitor (dconf_step.m), a forced one (smoke)
 deg_force('smoke', DGf, exist('SMOKE', 'var') && SMOKE, 'choose_drop_threshold');   % before any output is written
+wf_force('smoke', WFo.force, exist('SMOKE', 'var') && SMOKE, 'choose_drop_threshold');
 if ~isempty(DGf) && ~(DGon && isfile('data/clean_val_pools.mat'))
     error('choose_drop_threshold:force', 'deg_force %s needs deg_select and clean validation flights', DGf);
+end
+if ~isempty(DCf) && ~(DCx && isfile('data/clean_val_pools.mat'))
+    error('choose_drop_threshold:force', 'dconf_force [%d %d] needs dconf_select and clean validation flights', DCf);
 end
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
 na = find(strcmp(PP.actions, 'no_action'));
@@ -317,6 +334,24 @@ else
     rw{end+1} = sprintf(['Sweeper''s own confirmation: %s (no monitor loses an admissible threshold or needs a less ' ...
         'sensitive one, no single threat''s never share or p90 delay grows: %s)'], ternary(sw == 2, 'ADOPTED', 'not adopted'), ...
         strjoin(arrayfun(@(m) sprintf('%s %s', MON{m}, ternary(ok(m), 'yes', 'no')), 1:numel(MON), 'UniformOutput', false), ', '));
+    if DCx && strcmp(drop_alarm, 'class_cusum')
+        [fitg, chkg] = clean_halves(CV.runs);
+        [DCONF, rd] = dconf_step(drop_alarm, GF, MON, MONP, confirm_sweep, Tc, ismember(Tc.r, find(fitg)), ...
+            ismember(Tc.r, find(chkg)), Tv, onv, thv, thn, PP.sev(Tv.scn) == 1, FA_BOUND, DCf);
+        rw = [rw, rd];
+        for m = 1:numel(MON)
+            MONP(m).confirm_drop = DCONF(m).cand; MONP(m).grid = DCONF(m).grid;
+            if ~isempty(DCONF(m).cand), MONP(m).pick = DCONF(m).pick; MONP(m).j = DCONF(m).j; end
+        end
+        ia = find(arrayfun(@(d) ~isempty(d.cand), DCONF), 1);
+        if ~isempty(ia), THC = DCONF(ia).grid; end            % the grid C2 builds an adopted monitor's thresholds on
+    elseif DCx
+        if ~isempty(DCf), error('choose_drop_threshold:force', 'dconf_force [%d %d] needs the CUSUM form of the drop alarm, the median window is deployed', DCf); end
+        rw{end+1} = 'Drop alarm''s own confirmation: not run, the median window is the deployed form (the grid it extends is the CUSUM''s).';
+    end
+end
+if DCx && isempty(CV)
+    rw{end+1} = 'Drop alarm''s own confirmation: not run, no clean validation flights.';
 end
 fid = fopen('results/drop_threshold.txt', 'a'); fprintf(fid, '%s\n', rw{:}); fclose(fid);
 fprintf('%s\n', rw{:});
@@ -325,6 +360,7 @@ SV = {'drop_db', 'drop_db_train', 'drop_from', 'separable', 'THR', 'kept', 'leak
 if ~isempty(DEG)                                           % deployed by train_dqn.m (PP.deg_mode, PP.ber_q)
     deg_mode = DEG.mode; ber_q = DEG.ber_q; SV = [SV, {'deg_mode', 'ber_q', 'DEG'}];
 end
+if exist('DCONF', 'var'), SV = [SV, {'DCONF'}]; end        % the drop alarm's own confirmation per monitor (MONP.confirm_drop)
 save('data/drop_threshold.mat', SV{:});
 fprintf('\nSaved data/drop_threshold.mat, results/drop_threshold.txt\n');
 
