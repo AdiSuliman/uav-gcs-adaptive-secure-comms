@@ -55,6 +55,17 @@
 % half a point of the best pooled held recovery; within one point the pooled recovered, the
 % return, then the cheaper. The class mapping's coded answer is reported, not a candidate
 % (docs/noise_burst_protocol.md).
+% With "s1g_select": true in profile.json (wf_options.m), the rule's lost-branch gate (s1_gate,
+% policy_decide.m) is the first of the rule settings: off or on by the same selection rule, and on is
+% kept only if s1g_adopt.m passes it; every later step runs with the setting kept.
+% With "relm_select": true, the release on evidence (release_m) is scored on the agent selected, with
+% and without it on the same episodes (relm_score, relm_adopt.m), and adopted into the deployed
+% settings only if relm_adopt.m passes it; the rule fallback keeps running without it.
+% With "r9_print": true, the selected agent's recovered share per Eb/N0 point is listed with its
+% intervals and the deficit by threat (ebno_rows.m).
+% In the smoke only, s1g_force and relm_force (profile.json or CFG, wf_force.m) deploy the gate or the
+% layer whatever the selection says, and a drop_threshold.mat with a forced confirmation is read; the cells
+% forced are marked in dec.wf_forced, which enters the policy stamp. Refused outside SMOKE.
 % After the grid, coordinate steps at the selected monitor, drop threshold and penalty, the
 % same seeds: the discount factor 0 (the bandit), running and switching costs x1, and, when
 % the unknown-threat flag's settings moved from the default, the default for the agent; the
@@ -80,6 +91,11 @@
 % started again after a stop reads them instead of training them and its results are those of
 % an uninterrupted C2. Off by default: nothing is kept.
 %
+% The drop alarm's own confirmation of a monitor (PP.confirm_drop, policy_monitor.m) comes from
+% data/drop_threshold.mat when C1d chose one (MONP.confirm_drop, choose_drop_threshold.m): every run of that
+% monitor carries it, C2's drop thresholds of an adopted monitor are built on the grid it was chosen on
+% (MONP.grid), and the deployed settings (dec) and the rule fallback (rule_sel) hold the selected monitor's.
+%
 % Output: data/trained_dqn.mat (also deployed, rule_sel, fa_bound_met, the pools' det_id and
 % created, dec: the deployed DQN's decision-time settings, decision_settings.m, and maha_thr),
 % results/dqn_training.txt, results/dqn_training_curves.png
@@ -93,6 +109,13 @@ nA = numel(PP.actions);
 [nS, cont] = policy_state_size(nA, numel(PP.classes));
 SPLIT_TRAIN = 1; SPLIT_VAL = 2;
 CD = decision_config();
+cfg_ = []; if exist('CFG', 'var'), cfg_ = CFG; end
+WF = wf_options(cfg_);                   % which steps of the decision-layer additions run (wf_options.m), all off by default
+wf_force('smoke', WF.force, exist('SMOKE', 'var') && SMOKE, 'train_dqn');   % a forced cell is the smoke's only
+if (WF.force.s1g && ~WF.s1g) || (WF.force.relm && ~WF.relm)
+    error('train_dqn:force', 'train_dqn: s1g_force needs s1g_select and relm_force needs relm_select');
+end
+WFF = {};                                % the forced cells this agent carries (dec.wf_forced)
 
 %% 1. Hyperparameters
 H = struct('gamma', 0.9, 'NE', 64, 'T', 30, 'episodes', 50000, 'buffer', 200000, 'warmup', 8000, ...
@@ -142,6 +165,13 @@ if isfile('data/drop_threshold.mat')
         DROP_MODE = Dd.drop_alarm; DROP_DB = Dd.cusum_db; THC = Dd.THC;
     end
     if isfield(Dd, 'MONP'), MONP = Dd.MONP; end
+    if isfield(Dd, 'MONP') && isfield(Dd.MONP, 'confirm_drop')      % the drop alarm's own confirmation, per monitor
+        PP.dconf = struct('monitor', {Dd.MONP.monitor}, 'cd', {Dd.MONP.confirm_drop});
+    end
+    if isfield(Dd, 'DCONF') && isfield(Dd.DCONF, 'forced') && any(arrayfun(@(d) ~isempty(d.forced), Dd.DCONF))   % a forced cell
+        wf_force('mark', {'confirm_drop'}, exist('SMOKE', 'var') && SMOKE, 'train_dqn');
+        WFF{end+1} = 'confirm_drop';
+    end
     if isfield(Dd, 'confirm_sweep'), PP.confirm_sweep = Dd.confirm_sweep; end   % the sweeper's own confirmation
     if isfield(Dd, 'deg_mode'), PP.deg_mode = Dd.deg_mode; PP.ber_q = Dd.ber_q; end   % the degradation test chosen at C1d
     if isfield(Dd, 'DEG') && isfield(Dd.DEG, 'forced')       % a forced test (deg_force.m): the smoke only
@@ -249,7 +279,21 @@ iref = find(strcmp({ENT.alarm}, sprintf('class_drop %d/%d', CD.confirm)), 1);   
 if isempty(iref), iref = 1; end
 jr = find(strcmp({ENT.alarm}, ENT(iref).alarm)); iref = jr(ceil(numel(jr) / 2));
 PPr = with_entry(PP, ENT(iref), DROP_MODE);
-[Ssel, SROWS] = choose_settings(S0, STEPS, @(S) ev('rule_esc', decision_settings(PPr, S), [], struct()), FA_BOUND, PK);
+if WF.s1g                                           % the rule's lost-branch gate first among the rule settings
+    S0.s1_gate = false;
+    S1STEP = struct('name', 'rule gate on a lost-branch class', 'var', {{struct('s1_gate', false), struct('s1_gate', true)}});
+    evr = @(S) ev('rule_esc', decision_settings(PPr, S), [], struct());
+    [Sg, GROWS] = s1g_step(S0, S1STEP, evr, FA_BOUND, PK, PPr, K, val_spec, val_thr, H, CV, EBNO_THR);
+    if WF.force.s1g                                 % the smoke's forced cell, not an adoption (wf_force.m)
+        GROWS{end+1} = sprintf('  the rule''s lost-branch gate FORCED on (smoke only, not an adoption); the rule would keep it %s', ...
+            ternary(Sg.s1_gate, 'on', 'off')); %#ok<SAGROW>
+        Sg.s1_gate = true; WFF{end+1} = 's1_gate';
+    end
+    [Ssel, SROWS] = choose_settings(Sg, STEPS, evr, FA_BOUND, PK);
+    SROWS = [GROWS, SROWS];
+else
+    [Ssel, SROWS] = choose_settings(S0, STEPS, @(S) ev('rule_esc', decision_settings(PPr, S), [], struct()), FA_BOUND, PK);
+end
 CSTEP = struct('name', NBS{3}, 'var', {cellfun(@(a) struct('core_nb', a), BC.core, 'UniformOutput', false)});
 [Ssel, CROWS] = choose_settings(Ssel, CSTEP, @(S) ev('rule_esc', decision_settings(PPr, S), [], struct('core', true)), ...
     FA_BOUND, PK);
@@ -329,6 +373,26 @@ for gi = 1:numel(GAM)
     agents{gi} = runs(m(cm(jj).run)).agent;
 end
 agents{find(GAM == gamma_sel, 1)} = agent;
+RELM = struct('adopt', false); RLINES = {}; R9LINES = {};
+if WF.relm || WF.r9
+    PPsel = decision_settings(with_entry(PP, struct('alarm', alarm_sel, 'drop', drop_sel), DROP_MODE), Sdep);   % the selected agent's monitor and settings
+end
+if WF.relm                                           % the release on evidence, scored on the selected agent
+    [RELM, RLINES] = relm_score(PPsel, K, H, agent, sel_kind, val_spec, val_thr, CV, EBNO_THR, SPLIT_VAL);
+    if WF.force.relm                                 % the smoke's forced cell, not an adoption (wf_force.m)
+        RLINES{end+1} = sprintf('  release on evidence FORCED (smoke only, not an adoption); the rule would %s it', ...
+            ternary(RELM.adopt, 'adopt', 'not adopt'));
+        RELM.adopt = true; RELM.forced = true; WFF{end+1} = 'release_m';
+    end
+end
+if WF.r9                                             % the recovered share per Eb/N0 point of the selected agent as deployed
+    Pd = PPsel; if RELM.adopt, Pd.release_m = true; end
+    Vr = dqn_eval_batches(sel_kind, Pd, K, val_spec, agent, struct(), 5000, SPLIT_VAL);
+    sv = cell2mat(cellfun(@(sp) sp.s(:)', val_spec, 'UniformOutput', false));
+    mr = Vr.recoverable & Vr.threat;
+    [R9ROWS, R9LINES] = ebno_rows(Vr.recovered(mr), sv(mr), 1000 * sv(mr) + Vr.r(mr), val_thr(mr), PP.ebno, ...
+        PP.clean_fer(:)', CD.ratio_ok, 'Validation, the selected agent');
+end
 
 %% 5. Gate, deployed policy and report
 eb = find(strcmp({base.alarm}, alarm_sel) & arrayfun(@(b) isequaln(b.drop, drop_sel), base), 1);
@@ -347,6 +411,8 @@ rule_sel = struct('alarm', base(ir).alarm, 'drop', base(ir).drop, 'rec', base(ir
 if ~isnan(base(ir).drop), rule_sel.drop_db = base(ir).drop; end
 for f = fieldnames(Ssel)', rule_sel.(f{1}) = Ssel.(f{1}); end
 rule_sel.confirm_sweep = []; if isfield(PP, 'confirm_sweep'), rule_sel.confirm_sweep = PP.confirm_sweep; end
+if WF.relm, rule_sel.release_m = false; end          % the rule fallback was not scored with the release
+if isfield(PP, 'dconf'), rule_sel.confirm_drop = confirm_drop_of(PP, base(ir).alarm); end
 if isfield(PP, 'deg_mode'), rule_sel.deg_mode = PP.deg_mode; rule_sel.ber_q = PP.ber_q; end
 FD = false_change_rate(B.sw_w, H.T, 1:numel(B.sw_w), CD.period_ms);
 FR = false_change_rate(base(ir).rule.sw_w, H.T, 1:numel(base(ir).rule.sw_w), CD.period_ms);
@@ -383,6 +449,11 @@ rep{end+1} = sprintf('The sweeping jammer''s own confirmation: %s (choose_drop_t
     PP.confirm_sweep), 'not adopted'));
 if isfield(PP, 'deg_mode')
     rep{end+1} = sprintf('The degradation test: %s (choose_drop_threshold.m, on validation, docs/deg_fix_protocol.md)', PP.deg_mode);
+end
+if isfield(PP, 'dconf')
+    rep{end+1} = sprintf('The drop alarm''s own confirmation (choose_drop_threshold.m, on validation): %s', strjoin(arrayfun(@(d) ...
+        sprintf('%s %s', d.monitor, ternary(isempty(d.cd), 'none', sprintf('%d of the last %d cycles', d.cd))), PP.dconf, ...
+        'UniformOutput', false), ', '));
 end
 if isfield(PP, 'deg_forced')
     rep{end+1} = sprintf('  FORCED for the smoke (deg_force %s), not an adoption (docs/p1r_protocol.md)', PP.deg_forced);
@@ -442,6 +513,7 @@ rep{end+1} = sprintf('Deployed: %s | false-alarm bound met on validation: %s%s',
     ' (not measured: no clean validation flights)', '') ' -- the edge map commits no point']));
 rep{end+1} = sprintf(['False changes on the clean link (validation, Eb/N0 >= %g dB, %d ms per cycle): DQN %s | ' ...
     'rule fallback %s'], EBNO_THR, CD.period_ms, rate_txt(FD), rate_txt(FR));
+rep = [rep, RLINES, R9LINES];
 if ~exist('results', 'dir'), mkdir('results'); end
 fid = fopen('results/dqn_training.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('\n%s\n', rep{:});
@@ -465,6 +537,9 @@ gammas = GAM;
 drop_db = drop_sel; if isnan(drop_db), drop_db = DROP_DB; end
 dec = Sdep; dec.alarm_mode = alarm_mode; dec.confirm = confirm; dec.drop_db = drop_db;
 dec.confirm_sweep = []; if isfield(PP, 'confirm_sweep'), dec.confirm_sweep = PP.confirm_sweep; end
+if WF.relm, dec.release_m = RELM.adopt; end         % the release on evidence, adopted or not
+if ~isempty(WFF), dec.wf_forced = WFF; end          % the smoke's forced cells, in the stamp
+if isfield(PP, 'dconf'), dec.confirm_drop = confirm_drop_of(PP, alarm_sel); end   % the selected monitor's own confirmation of the drop alarm
 if isfield(PP, 'deg_mode'), dec.deg_mode = PP.deg_mode; dec.ber_q = PP.ber_q; end
 if isfield(PP, 'deg_forced'), dec.deg_forced = PP.deg_forced; end   % the smoke's forced test, in the stamp
 agent = dqn_dense(agent);                          % matrix form for deployment
@@ -474,6 +549,8 @@ maha_thr = dec.maha_thr;                           % the unknown-threat threshol
 save('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'confirm', 'alarm_mode', 'drop_db', 'H', ...
     'norm_in', 'seed_summary', 'action_names', 'tab', 'deployed', 'rule_sel', 'fa_bound_met', 'det_id', ...
     'pools_created', 'maha_thr', 'dec', '-v7.3');
+if WF.relm, save('data/trained_dqn.mat', 'RELM', '-append'); end
+if WF.r9, save('data/trained_dqn.mat', 'R9ROWS', '-append'); end
 fprintf('Saved data/trained_dqn.mat\n');
 
 fig = figure('Position', [100 100 1000 430], 'Color', 'w');
@@ -745,31 +822,21 @@ elseif isfield(S, 'rule_nb')
     t = sprintf('%s, noise burst %s / %s (separable)', t, S.rule_nb{:});
 end
 if isfield(S, 'core_nb') && ~isempty(S.core_nb), t = sprintf('%s, core rule on a noise burst %s', t, S.core_nb); end
-end
-
-function d = drops_of(mon, MONP, drop_mode, drop_db, THC, steps, floor_db)
-% C2's drop thresholds of one monitor: its own from choose_drop_threshold.m (MONP; the form's
-% alone when the file has none) and the steps around it: the median window that less the
-% steps [dB] above the moving-away floor, the CUSUM one grid step per step's sign.
-b = drop_db;
-if ~isempty(MONP)
-    k = find(strcmp({MONP.monitor}, mon), 1);
-    if ~isempty(k) && isfinite(MONP(k).pick), b = MONP(k).pick; end
-end
-if isempty(b), d = NaN; return; end
-if strcmp(drop_mode, 'class_cusum')
-    [~, j] = min(abs(THC - b));
-    d = unique(THC(min(max(j - sign(steps), 1), numel(THC))), 'stable');
-else
-    d = b - steps; d = d(d > floor_db);
-end
-if isempty(d), d = NaN; end
+if isfield(S, 's1_gate') && S.s1_gate, t = [t ', lost-branch gate on']; end
 end
 
 function PPc = with_entry(PP, en, drop_mode)
 % The pools' settings with monitor and drop threshold en.
 PPc = PP; [PPc.alarm_mode, PPc.confirm] = monitor(en.alarm, drop_mode);
 if ~isnan(en.drop), PPc.drop_db = en.drop; end
+if isfield(PP, 'dconf'), PPc.confirm_drop = confirm_drop_of(PP, en.alarm); end
+end
+
+function c = confirm_drop_of(PP, name)
+% The drop alarm's own confirmation [k n] chosen for monitor name at C1d ([] none).
+c = [];
+k = find(strcmp({PP.dconf.monitor}, name), 1);
+if ~isempty(k), c = PP.dconf(k).cd; end
 end
 
 function u = cp_upper(k, n)
@@ -807,6 +874,64 @@ end
 
 function out = ternary(c, a, b)
 if c, out = a; else, out = b; end
+end
+
+function [A, lines] = relm_score(PPs, K, H, agent, kind, specs, thr, CV, ebno_thr, split)
+% The release on evidence (PP.release_m) on the agent selected, with it and without it on the same
+% episodes and frame draws (relm_adopt.m decides): the standard validation episodes, the single
+% threats of the split ending 20 cycles after the onset and persisting, 50-cycle episodes on the same
+% geometries (rollout_policy.m opt.rel_on counts the releases while the threat is on), and the clean
+% validation flights. The agent was selected on this split; the episodes of the two single-threat sets
+% are new specifications over the same geometries.
+C = decision_config();
+P0 = PPs; P0.release_m = false; P1 = PPs; P1.release_m = true;
+lines = {sprintf('Release on evidence (release_m) on the selected agent (%s), validation, flown without and with it:', kind)};
+A = struct('adopt', false);
+if isempty(CV)
+    lines{end+1} = '  no clean validation flights: the false-change rate is not measured, not adopted';
+    return
+end
+nS = numel(PPs.ebno);
+cells = find(ismember(PPs.scen, PPs.singles) & ~strcmp(PPs.scen, 'none'));
+sp = policy_episodes(cells, nS, K.geo(cells, split), 1, false, false, 64, H.T + 20, RandStream('mt19937ar', 'Seed', 114));
+so = sp; for b = 1:numel(so), so{b}.offset = so{b}.onset + 20; end
+op = struct('rel_on', true);
+Off0 = policy_run_set(kind, P0, K, so, split, agent, op, 114000); Off1 = policy_run_set(kind, P1, K, so, split, agent, op, 114000);
+Per0 = policy_run_set(kind, P0, K, sp, split, agent, op, 115000); Per1 = policy_run_set(kind, P1, K, sp, split, agent, op, 115000);
+V0 = dqn_eval_batches(kind, P0, K, specs, agent, struct(), 5000, split);
+V1 = dqn_eval_batches(kind, P1, K, specs, agent, struct(), 5000, split);
+s = cell2mat(cellfun(@(q) q.s(:)', specs, 'UniformOutput', false));
+[~, ~, sw0] = eval_clean_wide(kind, P0, CV, agent, struct(), H, ebno_thr);
+[~, ~, sw1] = eval_clean_wide(kind, P1, CV, agent, struct(), H, ebno_thr);
+Std = struct('off', V0, 'on', V1, 'thr', {thr}, 'cl', 1000 * s + V0.r);
+Off = struct('off', Off0, 'on', Off1, 'thr', {PPs.scen(Off0.scn)}, 'cl', Off0.geom);
+Per = struct('off', Per0, 'on', Per1, 'thr', {PPs.scen(Per0.scn)}, 'cl', Per0.geom);
+Cln = struct('sw_off', sw0, 'sw_on', sw1, 'T', H.T, 'period_ms', C.period_ms);
+A = relm_adopt(Std, Off, Per, Cln);
+lines = [lines, A.lines, {sprintf('  release on evidence %s', ternary(A.adopt, 'ADOPTED', 'not adopted'))}];
+end
+
+function [S, rows] = s1g_step(S0, STEP, evalf, bound, PK, PPr, K, specs, thr, H, CV, ebno_thr)
+% The rule's lost-branch gate, placed first among the rule settings: the selection rule (rank_pick)
+% picks off or on; on stays only if it also passes s1g_adopt.m on the same validation episodes and
+% the clean validation flights, else the setting in force (off) is kept. Both readings are listed.
+[S, rows] = choose_settings(S0, STEP, evalf, bound, PK);
+if ~S.s1_gate, return; end
+Soff = S; Soff.s1_gate = false;
+P0 = decision_settings(PPr, Soff); P1 = decision_settings(PPr, S);
+V0 = dqn_eval_batches('rule_esc', P0, K, specs, [], struct(), 5000, 2);
+V1 = dqn_eval_batches('rule_esc', P1, K, specs, [], struct(), 5000, 2);
+s = cell2mat(cellfun(@(sp) sp.s(:)', specs, 'UniformOutput', false));
+sw0 = []; sw1 = [];
+if ~isempty(CV)
+    [~, ~, sw0] = eval_clean_wide('rule_esc', P0, CV, [], struct(), H, ebno_thr);
+    [~, ~, sw1] = eval_clean_wide('rule_esc', P1, CV, [], struct(), H, ebno_thr);
+end
+A = s1g_adopt(V0, V1, thr, s, sw0, sw1);
+rows = [rows, {sprintf(['  the gate on was picked by the selection rule; it stays only if every other threat loses at most 1.0 point ' ...
+    '(lower bound -2.0) and the clean validation flights with a change fall (exact McNemar, p < 0.05): %s'], ...
+    ternary(A.keep, 'KEPT', 'not kept, the gate stays off'))}, A.rows, {'  lost-branch threats under both settings (reported, not a condition):'}, A.lost];
+if ~A.keep, S.s1_gate = false; end
 end
 
 function t = mon_txt(name, drop_mode)
