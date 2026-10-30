@@ -21,7 +21,14 @@ function varargout = fuse_classes(cmd, varargin)
 %                                                each sub-run's cycles from its first)
 %   opt = fuse_classes('cues', FM)                the further columns of fusion FM ([] for none)
 %   FM = fuse_classes('fit', Z, y, C, lambda)     y class index per frame
-%   [pc, k] = fuse_classes('apply', FM, Z)        pc frames x C, k predicted class
+%   [pc, k] = fuse_classes('apply', FM, Z)        pc frames x C, k predicted class. With FM.gcc
+%       the gated coherence columns are appended to Z first (fitted on them); with FM.head the
+%       lost-branch and level head reshares the four level-family classes (fuse_head.m)
+%   names = fuse_classes('names', C, opt)         the names of the row's columns
+%   g = fuse_classes('gcc', C, opt)               the columns of the gated coherence columns:
+%       coh_contrast, los_contrast, los_k, coh_weak, k_contrast, ps_k_contrast, each times
+%       1[gl_db >= 3 dB], the drop at which branch_coherence reads a branch's step
+%   X = fuse_classes('gcc_x', Z, g)               those six columns of the rows Z
 %   The fusion is fitted on the validation split (the detector's outputs on its own
 %   training frames are overconfident), N and lambda by cross-validation over the
 %   validation sub-runs (select_fusion.m); the test split is never used.
@@ -31,6 +38,9 @@ switch cmd
     case 'cues',    varargout{1} = cues(varargin{:});
     case 'fit',     varargout{1} = fit(varargin{:});
     case 'apply',   [varargout{1}, varargout{2}] = apply(varargin{:});
+    case 'names',   varargout{1} = names(varargin{:});
+    case 'gcc',     varargout{1} = gcc(varargin{:});
+    case 'gcc_x',   varargout{1} = gcc_x(varargin{:});
     otherwise, error('fuse_classes: unknown command %s', cmd);
 end
 end
@@ -110,11 +120,34 @@ FM = struct('W', W, 'mu', mu, 'sd', sd, 'C', C, 'lambda', lambda);
 end
 
 function [pc, k] = apply(FM, Z)
+if isfield(FM, 'gcc') && ~isempty(FM.gcc), Z = [Z, gcc_x(Z, FM.gcc)]; end
 assert(size(Z, 2) == numel(FM.mu), 'fuse_classes:columns', 'fuse_classes: %d evidence columns, the fusion was fitted on %d (rerun select_fusion)', ...
     size(Z, 2), numel(FM.mu));
 X = [(Z - FM.mu) ./ FM.sd, ones(size(Z, 1), 1)];
 pc = softmax_rows(X * FM.W);
+if isfield(FM, 'head') && ~isempty(FM.head), pc = fuse_head('apply', FM.head, pc, Z); end
 [~, k] = max(pc, [], 2);
+end
+
+function n = names(C, opt)
+% The row's columns: temporal_evidence.m's, window_cues.m's, the frame's own log-probabilities
+% (now_c), the further columns of opt.
+if nargin < 2, opt = []; end
+n = [temporal_evidence('names', C), window_cues('names'), arrayfun(@(c) sprintf('now_%d', c), 1:C, 'UniformOutput', false), ...
+    window_cues('extra_names', opt)];
+end
+
+function g = gcc(C, opt)
+n = names(C, opt);
+at = @(s) find(strcmp(n, s));
+c = cellfun(at, {'coh_contrast', 'los_contrast', 'los_k', 'coh_weak', 'k_contrast', 'ps_k_contrast'}, 'UniformOutput', false);
+assert(all(cellfun(@isscalar, c)) && isscalar(at('gl_db')), 'fuse_classes:gcc', ...
+    'the gated coherence columns need the coherence columns and the glr and post further columns');
+g = struct('gate', at('gl_db'), 'cols', [c{:}]);
+end
+
+function X = gcc_x(Z, g)
+X = double(Z(:, g.gate) >= 3) .* Z(:, g.cols);
 end
 
 function P = softmax_rows(A)
