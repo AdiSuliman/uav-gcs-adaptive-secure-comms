@@ -545,7 +545,7 @@ check_inserts(tc, 'code/decision/train_dqn.m', { ...
     {'ES = [runs.esc];'}});
 td = fileread(which('train_dqn'));
 verifyNumElements(tc, strfind(td, 'SPO = speed_options(cfgc);'), 1);
-verifyLessThan(tc, strfind(td, 'SPO = speed_options(cfgc);'), min(strfind(td, 'RC.id = run_cache(''key'''))));   % before the first run
+verifyLessThan(tc, strfind(td, 'SPO = speed_options(cfgc);'), min(strfind(td, 'RC.id = run_cache(''key''')));   % before the first run
 i = strfind(td, 'if SPO.band_table');
 verifyNumElements(tc, i, 1);
 verifyLessThan(tc, i, min(strfind(td, 'agent = dqn_dense(agent);')));           % the raw agent, before the deployment form
