@@ -32,6 +32,7 @@ Q = load('data/trained_dqn.mat', 'agent', 'H', 'norm_in', 'seed_summary', 'confi
 check_det_id(PP, Q, 'experiment_unknown_threat');
 PP = decision_settings(PP, Q);                       % the agent's monitor and decision-time settings (train_dqn.m)
 DK = 'dqn_esc'; if isfield(Q, 'deployed') && strcmp(Q.deployed, 'dqn'), DK = 'dqn'; end   % the DQN as selected
+LBC = isfield(Q, 'dec') && isstruct(Q.dec) && isfield(Q.dec, 'lb_complete');   % C2 stored the link-budget completion's switch (train_dqn.m)
 K = link_env('tables', PP);
 TEST = 3; TEST2 = 5; NE = 64; REPS = 2;
 H = Q.H; H.gamma = Q.seed_summary.selected_gamma;
@@ -47,6 +48,11 @@ end
 
 res = struct('threat', {}, 'n', {}, 'dqn_out', {}, 'dqn_in', {}, 'rule', {}, 'ci_out', {}, 'ci_in', {});
 EP = struct('threat', {}, 'out', {}, 'in', {}, 'rule', {});
+if LBC
+    res = struct('threat', {}, 'n', {}, 'dqn_out', {}, 'dqn_in', {}, 'rule', {}, 'ci_out', {}, 'ci_in', {}, ...
+        'dqn_out_lb', {}, 'dqn_in_lb', {}, 'ci_out_lb', {}, 'ci_in_lb', {});
+    EP = struct('threat', {}, 'out', {}, 'in', {}, 'rule', {}, 'out_lb', {}, 'in_lb', {});
+end
 agents_loo = cell(1, numel(threats));
 SPL = TEST; if numel(PP.runs) >= TEST2, SPL = [TEST TEST2]; end
 c1 = find(strcmp(PP.scen, threats{1}), 1);
@@ -54,9 +60,10 @@ nfl = sum(arrayfun(@(sp) numel(PP.cell_geo{c1}{sp}), SPL));       % flights per 
 cfgc = []; if exist('CFG', 'var'), cfgc = CFG; end
 CDIR = run_cache('dir', run_cache('on', cfgc), 'C2u'); CID = '';     % every threat kept as it finishes (run_cache.m)
 if ~isempty(CDIR), CID = run_cache('inputs', {'data/policy_pools.mat', 'data/trained_dqn.mat'}); end
-keys = cellfun(@(th) run_cache('key', {CID, 'C2u', th, H, seed, REPS, NE, SPL, DK}), threats, 'UniformOutput', false);
+lbkey = {}; if LBC, lbkey = {'lb_columns'}; end          % the entities' results hold the completion's columns
+keys = cellfun(@(th) run_cache('key', [{CID, 'C2u', th, H, seed, REPS, NE, SPL, DK}, lbkey]), threats, 'UniformOutput', false);
 t0 = tic;
-out = run_cache('each', CDIR, keys, @(ti) one_threat(ti, threats, PP, K, Q, H, seed, nS, SPL, REPS, NE, DK, t0), threats);
+out = run_cache('each', CDIR, keys, @(ti) one_threat(ti, threats, PP, K, Q, H, seed, nS, SPL, REPS, NE, DK, t0, LBC), threats);
 for ti = 1:numel(threats)
     EP(end+1) = out{ti}.EP; res(end+1) = out{ti}.res; agents_loo{ti} = out{ti}.agent; %#ok<SAGROW>
 end
@@ -77,6 +84,19 @@ for i = 1:numel(res)
 end
 rep{end+1} = sprintf('%-22s %6d %9.1f%% %14s %9.1f%% %14s %9.1f%%', 'mean', sum([res.n]), 100*mean([res.dqn_out]), '', ...
     100*mean([res.dqn_in]), '', 100*mean([res.rule]));
+if LBC
+    rep{end+1} = '';
+    rep{end+1} = ['The columns above are the learner''s generalisation, the link-budget completion off (lb_complete.m). ' ...
+        'Beside them, the same agents on the same episodes with the completion on: DQN + link-budget completion (hybrid, not learned).'];
+    rep{end+1} = sprintf('%-22s %6s %24s %24s %10s', 'threat', 'n', 'DQN + LB, never trained', 'DQN + LB, trained', 'rule+esc');
+    for i = 1:numel(res)
+        r = res(i);
+        rep{end+1} = sprintf('%-22s %6d %9.1f%% [%4.1f, %4.1f] %9.1f%% [%4.1f, %4.1f] %9.1f%%', r.threat, r.n, ...
+            100*r.dqn_out_lb, 100*r.ci_out_lb, 100*r.dqn_in_lb, 100*r.ci_in_lb, 100*r.rule); %#ok<SAGROW>
+    end
+    rep{end+1} = sprintf('%-22s %6d %9.1f%% %14s %9.1f%% %14s %9.1f%%', 'mean', sum([res.n]), 100*mean([res.dqn_out_lb]), '', ...
+        100*mean([res.dqn_in_lb]), '', 100*mean([res.rule]));
+end
 if ~exist('results', 'dir'), mkdir('results'); end
 fid = fopen('results/unknown_threat_policy.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('%s\n', rep{:});
@@ -86,15 +106,17 @@ save('data/unknown_threat_agents.mat', 'agents_loo', 'threats', 'det_id', 'H', '
 fprintf('\nSaved results/unknown_threat_policy.{txt,mat}, data/unknown_threat_agents.mat (%.1f min)\n', toc(t0)/60);
 
 %% ===================== Local functions =====================
-function o = one_threat(ti, threats, PP, K, Q, H, seed, nS, SPL, REPS, NE, DK, t0)
+function o = one_threat(ti, threats, PP, K, Q, H, seed, nS, SPL, REPS, NE, DK, t0, LBC)
 % Threat ti left out of training and validation (its single and combined cells): the retrained
 % DQN (o.agent, matrix form), the selected one and rule + escalation on its test flights (o.EP,
-% o.res).
+% o.res). With LBC (C2 stored the link-budget completion's switch) the DQNs run with the
+% completion off, the learner's own result, and again with it on, the hybrid (_lb fields).
 th = threats{ti};
 hit = cellfun(@(s) any(strcmp(strsplit(s, '+'), th)), PP.scen);
 c = find(strcmp(PP.scen, th));
 fprintf('[%d/%d] %s left out of training and validation (%d cells)\n', ti, numel(threats), th, sum(hit));
 PPx = PP;
+if isfield(PPx, 'lb_complete'), PPx.lb_complete = false; end   % the retrained learner trains and keeps its checkpoint without the completion
 PPx.pools(hit, :, :, 1:2) = {[]};
 Kx = link_env('tables', PPx);
 Kt = Kx; Kt.FA = Q.seed_summary.selected_fa_pen;
@@ -102,13 +124,19 @@ if isfield(Q.seed_summary, 'selected_cost_scale')          % training reward var
     Kt.cost = Q.seed_summary.selected_cost_scale * Kx.cost; Kt.SW = Q.seed_summary.selected_sw_scale * Kx.SW;
 end
 ag = dqn_train_run(H, PPx, Kt, Kx, Q.norm_in, seed, nS, 1, 2);
-[Ro, Ri, Rr] = deal([]);
+[Ro, Ri, Rr, Ro1, Ri1] = deal([]);
+opt0 = struct(); opt1 = struct('monitor', struct('lb_complete', true));
+if LBC, opt0 = struct('monitor', struct('lb_complete', false)); end
 for sp = SPL
     specs = test_episodes(c, numel(PP.ebno), K.geo(c, sp), REPS, NE, H.T, ...
         RandStream('mt19937ar', 'Seed', 500 + 100 * sp + ti));
-    Ro = cat_struct(Ro, mark(dqn_eval_batches(DK, PP, K, specs, ag, struct(), 7000, sp), specs, PP, sp));
-    Ri = cat_struct(Ri, mark(dqn_eval_batches(DK, PP, K, specs, Q.agent, struct(), 7000, sp), specs, PP, sp));
+    Ro = cat_struct(Ro, mark(dqn_eval_batches(DK, PP, K, specs, ag, opt0, 7000, sp), specs, PP, sp));
+    Ri = cat_struct(Ri, mark(dqn_eval_batches(DK, PP, K, specs, Q.agent, opt0, 7000, sp), specs, PP, sp));
     Rr = cat_struct(Rr, mark(dqn_eval_batches('rule_esc', PP, K, specs, [], struct(), 7000, sp), specs, PP, sp));
+    if LBC
+        Ro1 = cat_struct(Ro1, mark(dqn_eval_batches(DK, PP, K, specs, ag, opt1, 7000, sp), specs, PP, sp));
+        Ri1 = cat_struct(Ri1, mark(dqn_eval_batches(DK, PP, K, specs, Q.agent, opt1, 7000, sp), specs, PP, sp));
+    end
 end
 m = Ro.recoverable & Ro.threat;
 [~, lo1, hi1] = boot_cluster(double(Ro.recovered(m)), ones(1, sum(m)), Ro.geom(m), 2000, 1);
@@ -116,6 +144,13 @@ m = Ro.recoverable & Ro.threat;
 o.EP = struct('threat', th, 'out', Ro, 'in', Ri, 'rule', Rr);
 o.res = struct('threat', th, 'n', sum(m), 'dqn_out', mean(Ro.recovered(m)), 'dqn_in', mean(Ri.recovered(m)), ...
     'rule', mean(Rr.recovered(m)), 'ci_out', [lo1 hi1], 'ci_in', [lo2 hi2]);
+if LBC
+    [~, lo3, hi3] = boot_cluster(double(Ro1.recovered(m)), ones(1, sum(m)), Ro1.geom(m), 2000, 3);
+    [~, lo4, hi4] = boot_cluster(double(Ri1.recovered(m)), ones(1, sum(m)), Ri1.geom(m), 2000, 4);
+    o.EP.out_lb = Ro1; o.EP.in_lb = Ri1;
+    o.res.dqn_out_lb = mean(Ro1.recovered(m)); o.res.dqn_in_lb = mean(Ri1.recovered(m));
+    o.res.ci_out_lb = [lo3 hi3]; o.res.ci_in_lb = [lo4 hi4];
+end
 o.agent = dqn_dense(ag);
 fprintf('    recovered among %d recoverable: never trained %.1f%% | trained %.1f%% | rule+esc %.1f%% (%.1f min)\n\n', ...
     sum(m), 100*o.res.dqn_out, 100*o.res.dqn_in, 100*o.res.rule, toc(t0)/60);
