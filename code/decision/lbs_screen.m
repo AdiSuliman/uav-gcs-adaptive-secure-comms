@@ -80,7 +80,8 @@ mf = fullfile(src, 'results', 'eval_detector_metrics.mat');
 if isfile(mf)
     Md = load(mf, 'metrics');
     if isfield(Md.metrics, 'kpi1_threshold_db') && isfinite(Md.metrics.kpi1_threshold_db)
-        ebno_thr = Md.metrics.kpi1_threshold_db; thr_from = 'the KPI 1 threshold';
+        ebno_thr = Md.metrics.kpi1_threshold_db;
+        thr_from = ['the KPI 1 threshold of results/eval_detector_metrics.mat, SHA-256 ' lbs_inputs('hash', mf)];
     end
     clear Md
 end
