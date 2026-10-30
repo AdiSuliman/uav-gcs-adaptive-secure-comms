@@ -96,6 +96,9 @@ check_det_id(PP, Q, 'evaluate_policies');
 if isfield(Q, 'dec') && isstruct(Q.dec) && isfield(Q.dec, 'deg_forced')      % the smoke's forced test (deg_force.m)
     deg_force('smoke', Q.dec.deg_forced, exist('SMOKE', 'var') && SMOKE, 'evaluate_policies');
 end
+if isfield(Q, 'dec') && isstruct(Q.dec) && isfield(Q.dec, 'lb_forced') && Q.dec.lb_forced && ~(exist('SMOKE', 'var') && SMOKE)
+    error('evaluate_policies:lb_forced', 'evaluate_policies: a forced link-budget completion (lb_force) outside the smoke');
+end
 PP = decision_settings(PP, Q);                       % the deployed DQN's monitor and settings for every policy but the rule fallback
 cfg6 = []; if exist('CFG', 'var'), cfg6 = CFG; end
 FRESH = strcmp(kpi6_set(cfg6), 'fresh');             % P1R: KPI 6 on the fresh clean test set (kpi6_set.m)
@@ -209,6 +212,13 @@ for si = 1:numel(sets)
     end
     fprintf('  set %-9s %5d episodes x %d policies (%.1f min)\n', sets(si).name, numel(RES{si, 1}.ret), ...
         numel(POL), toc(t0)/60);
+end
+
+%% 3a. Link-budget completion beside the deployed row, only when C2 stored its switch (train_dqn.m step 4b)
+LBC = [];
+if isfield(Q, 'dec') && isstruct(Q.dec) && isfield(Q.dec, 'lb_complete')
+    LBC = lb_flights(PP, K, Q, sets, RES, POL, sel, fixed_best, fixed_mmse, tab, ebno_thr);
+    fprintf('  link-budget completion off and on (%.1f min)\n', toc(t0)/60);
 end
 
 %% 3b. Envelope predicted on the VALIDATION split, fixed before the test is read
@@ -634,6 +644,7 @@ for pk = unique([iDQN, col('rule_esc'), col('table')], 'stable')
     end
 end
 
+if ~isempty(LBC), rep = [rep, {''}, LBC.lines]; end
 fid = fopen('results/policy_evaluation.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('\n%s\n', rep{:});
 set_names = {sets.name};
@@ -657,6 +668,7 @@ end
 save('results/policy_evaluation.mat', 'RES', 'RW', 'POL', 'LBL', 'set_names', 'fixed_best', 'tab', 'iDQN', 'KP', ...
     'iThreat', 'ALL', 'top_cfg');
 if FRESH, save('results/policy_evaluation.mat', 'RWf', '-append'); end
+if ~isempty(LBC), save('results/policy_evaluation.mat', 'LBC', '-append'); end
 
 %% 5. Figures
 key = unique({'none', 'fixed', 'rule_esc', 'blind_esc', 'table', 'dqn_esc', POL{iDQN}, 'oracle'}, 'stable');
@@ -700,6 +712,35 @@ saveas(fig, 'results/policy_breakdown.png'); close(fig);
 fprintf('Saved results/policy_evaluation.{txt,mat,png}, results/policy_breakdown.png\n');
 
 %% ===================== Local functions =====================
+function L = lb_flights(PP, K, Q, sets, RES, POL, sel, fixed_best, fixed_mmse, tab, ebno_thr)
+% The selected DQN without and with the link-budget completion (policy_decide.m opt.monitor) on the
+% test threat sets and the clean set, with the frame draws of the main runs (30000 + 100 x set), so
+% a pair differs only by the completion; the policy tables above hold the deployed switch
+% (Q.dec.lb_complete). The readings go to lb_columns.m, which makes the columns.
+nm = 'dqn_esc'; if strcmp(Q.deployed, 'dqn'), nm = sprintf('dqn_g%d', sel); end
+[kind, ag, opt] = policy_setup(nm, Q, sel, fixed_best, fixed_mmse, tab, K.na);
+o0 = opt; o0.monitor = struct('lb_complete', false);
+o1 = opt; o1.monitor = struct('lb_complete', true);
+ir = find(strcmp(POL, 'rule_esc'));
+names = {'single', 'follower', 'combined', 'unknown'};
+X = struct('x0', {}, 'x1', {}, 'xr', {}, 'g', {}, 'fam', {});
+for k = 1:numel(names)
+    si = find(strcmp({sets.name}, names{k}), 1);
+    R0 = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, o0, 30000 + 100 * si);
+    R1 = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, o1, 30000 + 100 * si);
+    m = R0.recoverable & R0.threat;
+    fam = cellfun(@(s) any(strcmp(strsplit(s, '+'), 'path_loss')), PP.scen(R0.scn));
+    X(end+1) = struct('x0', double(R0.recovered(m)), 'x1', double(R1.recovered(m)), 'xr', double(RES{si, ir}.recovered(m)), ...
+        'g', R0.geom(m), 'fam', fam(m)); %#ok<AGROW>
+end
+si = find(strcmp({sets.name}, 'clean'), 1);
+R0 = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, o0, 30000 + 100 * si);
+R1 = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, o1, 30000 + 100 * si);
+up = PP.ebno(R0.s) >= ebno_thr;
+cl = [sum(R0.switches(up) > 0), sum(R1.switches(up) > 0), sum(up)];
+L = lb_columns(nm, ternary(Q.dec.lb_complete, 'on', 'off'), names, X, cl, ebno_thr);
+end
+
 function F6 = fresh_checks(PP, Q, smoke)
 % P1R's checks that need no fresh flight, before any is flown (docs/p1r_protocol.md section 5):
 % the fresh pools file present (KPI 6 never falls back to the already-read union), of these

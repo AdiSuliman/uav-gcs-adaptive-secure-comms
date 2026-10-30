@@ -370,6 +370,7 @@ if isfile(F.pol)
             P.set_names{si}, nq, 100*mean(R{iQ}.recovered(mm)), 100*mean(R{k_r}.recovered(mm)), 100*mean(R{col('table')}.recovered(mm)), ...
             100*mean(R{col('fixed')}.recovered(mm)), 100*mean(R{iO}.recovered(mm))); %#ok<SAGROW>
     end
+    if isfield(P, 'LBC') && ~isempty(P.LBC), det = [det, P.LBC.kpi]; end   % the DQN with the link-budget completion off, beside the deployed row
     if isfield(P.KP, 'lect')                          % revised proposal: recovery time from detection, goodput in bit/s
         det = [det, rec_lines(P.KP.lect, P.KP.lect, 'full action set')];
         if has_core(P.KP.lect)
