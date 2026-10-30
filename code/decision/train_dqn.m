@@ -357,6 +357,14 @@ if LBo.on
             'reads %s'], ternary(LBon, 'on', 'off'));
         LBon = true; LBforced = true;
     end
+    if LBon                                           % the gate and the deployment choice read the agent as it is deployed
+        xl = ev(sel_kind, decision_settings(PPl, struct('lb_complete', true)), agent, struct());
+        up = NaN; if ~isnan(xl.fa_w), up = cp_upper(round(xl.fa_w * xl.n_w), xl.n_w); end
+        [B.rec, B.held, B.kmin, B.ret] = deal(xl.rec, xl.held, xl.kmin, xl.ret);
+        [B.fa_w, B.n_w, B.sw_w, B.fa_ok] = deal(xl.fa_w, xl.n_w, xl.sw_w, isnan(up) || up <= FA_BOUND);
+        LBlines{end+1} = sprintf(['  the gate and choose_deployed read the DQN with the completion on: held %.1f%%, recovered ' ...
+            '%.1f%%, false alarms %s'], 100 * xl.held, 100 * xl.rec, fa_txt(xl.fa_w, xl.n_w));
+    end
     fprintf('%s\n', LBlines{:});
 end
 
