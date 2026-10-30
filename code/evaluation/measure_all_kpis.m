@@ -445,6 +445,9 @@ if isfile(F.pol)
         det{end+1} = sprintf(['spread over the speed bands %.1f points [%.1f, %.1f] (95%% bootstrap over flight ' ...
             'geometries; target <= 10)'], P.KP.speed_spread);
     end
+    if isfield(P.KP, 'speed_union') && ~isempty(P.KP.speed_union)      % speed_reading.m: the union reading and the inference
+        det = [det, P.KP.speed_union.kpi_lines(:)'];
+    end
     if isfield(P.KP, 'per_speed_out') && ~isempty(P.KP.per_speed_out)
         po = P.KP.per_speed_out(:, strcmp(P.KP.show, P.POL{iD}));
         det{end+1} = sprintf('ends of the speed envelope (nominal severity): %s km/h %.1f%%, %s km/h %.1f%%', ...
@@ -456,6 +459,9 @@ if isfile(F.pol)
             CDk.switch_delay, pd(1), 2 * CDk.switch_delay, pd(2));
     end
     st7 = status(lat_ok && max(pv) - min(pv) <= 10, stale);
+    if isfield(P.KP, 'speed_union') && ~isempty(P.KP.speed_union) && strcmp(P.KP.speed_union.mode, 'verdict')
+        st7 = status(lat_ok && P.KP.speed_union.met, stale);          % the union line is the speed verdict (speed_options.m)
+    end
     if (lat_pending || sl.stale) && ~stale, st7 = 'PENDING'; end   % the deployed chain not timed yet
     KPI(end+1) = kpi(7, 'Decision time and robustness', latv, 'median < 10 ms, p95 < 20 ms; spread <= 10 points over the speed envelope', ...
         st7, det);

@@ -1885,6 +1885,21 @@ verifyEmpty(tc, regexp(src, 'policy_run_set\([^\n]*\* d\)', 'once'));
 hi = b + 1000 * [1 1 1 100];
 verifyTrue(tc, all(hi(1:end-1) <= b(2:end)));
 verifyLessThan(tc, hi(end), seed_base(700001));
+% The second test split's single set (evaluate_policies.m single2, kpi7_union): an episode stream
+% (Seed 2075, used nowhere else in the code) and a frame-draw base (50 000 + batch below 10 000)
+% of its own, none of the other sets', all below the first flight stream
+src = fileread(which('evaluate_policies'));
+q = cellfun(@(x) str2double(x{1}), regexp(src, 'RandStream\(''mt19937ar'', ''Seed'', (\d+)\)', 'tokens'));
+verifyEqual(tc, numel(unique(q)), numel(q));
+verifyEqual(tc, sum(q == 2075), 1);
+f = dir(fullfile(tc.TestData.root, 'code', '**', '*.m'));
+f = f(~contains({f.folder}, [filesep 'tests']) & ~strcmp({f.name}, 'evaluate_policies.m'));
+verifyEmpty(tc, f(cellfun(@(n, d) ~isempty(regexp(fileread(fullfile(d, n)), '(Seed''|rng\()\s*,?\s*2075\b', 'once')), ...
+    {f.name}, {f.folder})), 'Seed 2075');
+b = cellfun(@(x) str2double(x{1}), regexp(src, 'policy_run_set\([^\n]*opt, (\d{5})', 'tokens'));
+verifyEqual(tc, sum(b == 50000), 1);
+verifyTrue(tc, all(abs(b(b ~= 50000) - 50000) >= 10000));
+verifyLessThan(tc, 50000 + 10000, seed_base(700001));
 % The fusion selection's resampling streams (select_fusion.m: the folds and the bootstrap over
 % sub-runs, of validation and of the enlarged fit set) are each their own
 src = fileread(which('select_fusion'));

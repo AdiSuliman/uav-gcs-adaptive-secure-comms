@@ -182,6 +182,151 @@ verifyLessThan(tc, Su.perm_mean, 0.2);
 verifyLessThan(tc, Su.p, 0.01);
 end
 
+%% ---------- the readings ----------
+function test_reading_modes_and_criterion(tc)
+edges = [29 62 95 128 161]; cg = [0 1];
+O = struct('inference', false, 'union', 'descriptive', 'yes', '', 'band_table', false, 'edge161_n', 36);
+% flights alike: spread 0 on both readings, the bound 0 -> committed
+R1 = make_run(3, 12, [0 0 0 0], [1 1 1 0], [1 1 1 0], false);
+R2 = make_run(5, 36, [0 0 0 0], [1 1 1 0], [1 1 1 0], false);
+[SU, lines] = speed_reading(R1, R1.recoverable & R1.threat, R2, cg, edges, registered_spread(R1, edges), O);
+verifyEqual(tc, SU.word_union, 'MET (committed)'); verifyEqual(tc, SU.word_test, 'MET');
+verifyEqual(tc, SU.U_union, 0); verifyEqual(tc, SU.point_union, 0);
+verifyEqual(tc, SU.union.nU, 4 * (12 + 36));
+verifyTrue(tc, SU.reproduced);
+txt = strjoin(lines, newline);
+verifyTrue(tc, contains(txt, 'KPI 7 speed part on the union of the test and second-test single sets'));
+verifyTrue(tc, contains(txt, 'criterion (D117 point 1): MET (committed) iff U <= 10 points; MET (not committed) iff the point <= 10 < U; NOT MET iff the point > 10 -> MET (committed)'));
+verifyTrue(tc, contains(txt, 'continuity line with profile 1, the test single set alone under the registered rule'));
+verifyTrue(tc, contains(txt, 'result, KPI 7 speed part: union MET (committed) (spread 0.0 points, U 0.0); test single set alone MET (spread 0.0 points)'));
+verifyFalse(tc, contains(txt, 'THE TWO READINGS DIFFER'));
+verifyFalse(tc, contains(txt, 'NOT REPRODUCED'));
+% the Hall & Miller bound is written out
+verifyTrue(tc, contains(txt, 'Hall & Miller 2010, joint-centred cluster bootstrap, one-sided 95%'));
+verifyTrue(tc, contains(txt, 'U = max over a ~= b of (m_a - m_b) + q = 0.0 + 0.0 = 0.0 points'));
+verifyTrue(tc, contains(txt, 'the 95% quantile over 9999 replicates of max over a ~= b of [(m*_a - m*_b) - (m_a - m_b)]'));
+verifyTrue(tc, contains(txt, 'permutation test of association (whole flights'' bands permuted within Eb/N0 strata'));
+% the point within the target, a wide bound -> not committed; the test-only line alone says MET
+R1 = make_run(3, 10, [2 3 3 3], [1 1 1 1], [1 1 0 0], false);
+R2 = make_run(5, 10, [2 3 3 3], [1 1 1 1], [1 1 0 0], false);
+SU = speed_reading(R1, R1.recoverable & R1.threat, R2, cg, edges, registered_spread(R1, edges), O);
+verifyEqual(tc, SU.word_union, 'MET (not committed)'); verifyEqual(tc, SU.word_test, 'MET');
+verifyEqual(tc, SU.point_union, 5, 'AbsTol', 1e-9);
+verifyGreaterThan(tc, SU.U_union, 10);
+% a spread above the target -> NOT MET on both
+R1 = make_run(3, 10, [0 0 10 10], [1 1 1 1], [1 1 0 0], false);
+R2 = make_run(5, 10, [0 0 10 10], [1 1 1 1], [1 1 0 0], false);
+SU = speed_reading(R1, R1.recoverable & R1.threat, R2, cg, edges, registered_spread(R1, edges), O);
+verifyEqual(tc, SU.word_union, 'NOT MET'); verifyEqual(tc, SU.word_test, 'NOT MET');
+% the shadowing group's own flights in the data: the same estimand
+R1 = make_run(3, 10, [2 3 3 3], [1 1 1 1], [1 1 0 0], true);
+R2 = make_run(5, 10, [2 3 3 3], [1 1 1 1], [1 1 0 0], true);
+SU = speed_reading(R1, R1.recoverable & R1.threat, R2, cg, edges, registered_spread(R1, edges), O);
+verifyEqual(tc, SU.point_union, 5, 'AbsTol', 1e-9);
+end
+
+function test_reading_descriptive_unless_approved(tc)
+% The two readings disagree (the small test set spreads 50 points, the union 3): without the
+% approval the verdict stays the test-only line and says so; with it the union is the verdict.
+edges = [29 62 95 128 161]; cg = [0 1];
+R1 = make_run(3, 4, [0 0 2 4], [1 1 1 1], [1 1 0 0], false);
+R2 = make_run(5, 60, [0 0 0 0], [1 1 1 0], [1 1 1 0], false);
+m1 = R1.recoverable & R1.threat; SPR = registered_spread(R1, edges);
+O = struct('inference', false, 'union', 'descriptive', 'yes', '', 'band_table', false, 'edge161_n', 36);
+[SU, lines] = speed_reading(R1, m1, R2, cg, edges, SPR, O);
+txt = strjoin(lines, newline);
+verifyEqual(tc, SU.mode, 'descriptive');
+verifyEqual(tc, SU.word_test, 'NOT MET');
+verifyTrue(tc, startsWith(SU.word_union, 'MET'));
+verifyFalse(tc, SU.met, 'descriptive: the verdict is the test-only line');
+verifyTrue(tc, contains(txt, 'DESCRIPTIVE ONLY, Adi''s approval of D117 point 1 is not recorded: the verdict stays the test-only line'));
+verifyFalse(tc, contains(txt, 'VERDICT LINE'));
+verifyTrue(tc, contains(txt, 'THE TWO READINGS DIFFER'));
+verifyEqual(tc, SU.point_test, 100 * SPR(1), 'AbsTol', 1e-9);
+verifyTrue(tc, any(contains(SU.kpi_lines, 'DESCRIPTIVE')) && any(contains(SU.kpi_lines, 'THE TWO READINGS DIFFER')));
+O.union = 'verdict'; O.yes = '30.10.2026 21:30';
+[SV, lines] = speed_reading(R1, m1, R2, cg, edges, SPR, O);
+txt = strjoin(lines, newline);
+verifyEqual(tc, SV.mode, 'verdict');
+verifyTrue(tc, SV.met, 'verdict: the union decides');
+verifyTrue(tc, contains(txt, 'VERDICT LINE, approved by Adi on 30.10.2026 21:30'));
+verifyFalse(tc, contains(txt, 'DESCRIPTIVE ONLY'));
+verifyTrue(tc, any(contains(SV.kpi_lines, 'VERDICT, approved by Adi on 30.10.2026 21:30')));
+verifyEqual(tc, SV.word_union, SU.word_union); verifyEqual(tc, SV.U_union, SU.U_union);   % the numbers do not move with the mode
+% inference lines on the test set alone, no union
+O = struct('inference', true, 'union', 'off', 'yes', '', 'band_table', false, 'edge161_n', 36);
+[SI, lines] = speed_reading(R1, m1, [], cg, edges, SPR, O);
+txt = strjoin(lines, newline);
+verifyEqual(tc, SI.mode, 'lines'); verifyEmpty(tc, SI.union); verifyEqual(tc, SI.word_union, '');
+verifyTrue(tc, contains(txt, 'Speed inference, test single set (D116 item 5; descriptive, nothing is selected on it)'));
+verifyTrue(tc, contains(txt, 'recovered per band'));
+verifyFalse(tc, contains(txt, 'criterion (D117 point 1)'));
+verifyNumElements(tc, SI.kpi_lines, 1);
+% a union without its second-test set stops
+O.union = 'descriptive';
+verifyError(tc, @() speed_reading(R1, m1, [], cg, edges, SPR, O), 'speed_reading:single2');
+end
+
+function test_reading_spread_not_reproduced(tc)
+% A test single set whose spread is not the registered one is printed and warned about, and the
+% reading goes on (a stop would lose the whole evaluation).
+edges = [29 62 95 128 161]; cg = [0 1];
+R1 = make_run(3, 4, [0 0 2 4], [1 1 1 1], [1 1 0 0], false);
+R2 = make_run(5, 60, [0 0 0 0], [1 1 1 0], [1 1 1 0], false);
+m1 = R1.recoverable & R1.threat; SPR = registered_spread(R1, edges);
+O = struct('inference', false, 'union', 'descriptive', 'yes', '', 'band_table', false, 'edge161_n', 36);
+verifyWarning(tc, @() speed_reading(R1, m1, R2, cg, edges, SPR + [0.01 0 0], O), 'speed_reading:point');
+w = warning('off', 'speed_reading:point'); cl = onCleanup(@() warning(w)); %#ok<NASGU>
+[SN, lines] = speed_reading(R1, m1, R2, cg, edges, SPR + [0.01 0 0], O);
+verifyFalse(tc, SN.reproduced);
+verifyTrue(tc, any(contains(lines, 'NOT REPRODUCED')));
+verifyTrue(tc, startsWith(SN.word_union, 'MET'));
+end
+
+function test_wiring_evaluate_policies(tc)
+% Without the switches evaluate_policies.m runs the parent's lines alone: every added block sits
+% between two lines the parent holds side by side and is guarded by a switch.
+check_inserts(tc, 'code/decision/evaluate_policies.m', { ...
+    {'if FRESH, F6 = fresh_checks('}, {'SPO = speed_options(cfg6);'}, {'K = link_env(''tables'', PP);'}; ...
+    {'false, false, NE, T, RandStream(''mt19937ar'', ''Seed'', 2028))}, ''split'', TEST2);', 'end'}, ...
+    {'spec2 = {};', 'if ~strcmp(SPO.union, ''off'')', 'if numel(PP.runs) < TEST2 ||', 'error(''evaluate_policies:single2''', 'end', ...
+     'spec2 = policy_episodes(single_cells, nS, G(single_cells, TEST2), REPS, false, false, NE, T, RandStream(''mt19937ar'', ''Seed'', 2075));', 'end'}, ...
+    {'iThreat = 1:3;'}; ...
+    {'numel(POL), toc(t0)/60);', 'end'}, ...
+    {'RS2 = [];', 'if ~isempty(spec2)', '[kind, ag, opt] = policy_setup(POL{iDQN}, Q, sel, fixed_best, fixed_mmse, tab, K.na);', ...
+     'RS2 = policy_run_set(kind, PP, K, spec2, TEST2, ag, opt, 50000);', 'fprintf(''  set %-9s %5d episodes x 1 policy', 'end'}, ...
+    {'foll_cells = single_cells(K.followable(single_cells));'}; ...
+    {'''[%.1f, %.1f] (95%% bootstrap over flight geometries)''], 100 * SPR(1), 100 * SPR(2), 100 * SPR(3));'}, ...
+    {'SU = [];', 'if SPO.inference || ~strcmp(SPO.union, ''off'')', 'cg = [];', ...
+     '[SU, spd_lines] = speed_reading(RES{1, iDQN}, mrec, RS2, cg, bins_v, SPR, SPO);', 'rep = [rep, spd_lines];', 'end'}, ...
+    {'PS = []; PD = [];'}; ...
+    {'KP.far_geoms_fresh = F6.CT.n_geom;', 'end'}, {'if ~isempty(SU), KP.speed_union = SU; end'}, ...
+    {'save(''results/policy_evaluation.mat'', ''RES'''}; ...
+    {'if FRESH, save(''results/policy_evaluation.mat'', ''RWf'', ''-append''); end'}, ...
+    {'if ~isempty(RS2), save(''results/policy_evaluation.mat'', ''RS2'', ''-append''); end'}, ...
+    {'key = unique({''none'''}});
+% single2 is flown after the registered sets and before the spread it is read beside; its episode
+% spec is the single set's (REPS, no follower, no unknown threat) on the second test split's flights
+src = fileread(which('evaluate_policies'));
+i = [strfind(src, 'spec2 = policy_episodes('), strfind(src, 'RES{si, pk} = policy_run_set('), ...
+    strfind(src, 'RS2 = policy_run_set('), strfind(src, 'SPR = spread_boot('), strfind(src, '[SU, spd_lines] = speed_reading(')];
+verifyNumElements(tc, i, 5);
+verifyTrue(tc, issorted(i, 'strictascending'));
+end
+
+function test_wiring_measure_all_kpis(tc)
+% The union reading enters the KPI 7 lines only when the file holds it, and decides the speed
+% status only in the verdict mode.
+check_inserts(tc, 'code/evaluation/measure_all_kpis.m', { ...
+    {'''geometries; target <= 10)''], P.KP.speed_spread);', 'end'}, ...
+    {'if isfield(P.KP, ''speed_union'') && ~isempty(P.KP.speed_union)', 'det = [det, P.KP.speed_union.kpi_lines(:)''];', 'end'}, ...
+    {'if isfield(P.KP, ''per_speed_out'')'}; ...
+    {'st7 = status(lat_ok && max(pv) - min(pv) <= 10, stale);'}, ...
+    {'if isfield(P.KP, ''speed_union'') && ~isempty(P.KP.speed_union) && strcmp(P.KP.speed_union.mode, ''verdict'')', ...
+     'st7 = status(lat_ok && P.KP.speed_union.met, stale);', 'end'}, ...
+    {'if (lat_pending || sl.stale) && ~stale'}});
+end
+
 %% ---------- helpers ----------
 function write_json(f, s)
 fid = fopen(f, 'w'); fprintf(fid, '%s', s); fclose(fid);

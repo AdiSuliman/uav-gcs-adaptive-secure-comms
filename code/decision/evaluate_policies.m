@@ -33,6 +33,10 @@
 %   speed     single threats at nominal severity on dedicated flights at the two ends
 %             of the speed envelope (hover and 161 km/h, the fourth pool split),
 %             reported apart
+%   single2   the single threats on the second test split's flights, for the deployed policy
+%             alone ("kpi7_union" in profile.json, speed_options.m): KPI 7's speed spread is
+%             also read on the union of the test and second-test single sets (speed_reading.m);
+%             "speed_inference" prints the inference lines beside the registered spread
 %   delay2    the single set with a configuration change arriving two cycles late
 %             instead of one (sensitivity to the signalling assumption), reported apart
 %   offset    the single threats ending 20 cycles after the onset (link_env.m spec.offset:
@@ -100,6 +104,7 @@ PP = decision_settings(PP, Q);                       % the deployed DQN's monito
 cfg6 = []; if exist('CFG', 'var'), cfg6 = CFG; end
 FRESH = strcmp(kpi6_set(cfg6), 'fresh');             % P1R: KPI 6 on the fresh clean test set (kpi6_set.m)
 if FRESH, F6 = fresh_checks(PP, Q, exist('SMOKE', 'var') && SMOKE); end   % every check before any fresh flight
+SPO = speed_options(cfg6);                           % the speed readings (speed_options.m), off without profile.json's fields
 K = link_env('tables', PP);
 C = decision_config();
 tab = policy_table(PP, K);
@@ -159,6 +164,13 @@ if numel(PP.runs) >= TEST2 && ~isempty(PP.cell_geo{clean_cell}{TEST2})
     sets(end+1) = struct('name', 'clean2', 'spec', {policy_episodes(clean_cell, nS, PP.cell_geo{clean_cell}{TEST2}, 1, ...
         false, false, NE, T, RandStream('mt19937ar', 'Seed', 2028))}, 'split', TEST2);
 end
+spec2 = {};                                            % the second test split's single set, flown for the deployed policy alone (kpi7_union)
+if ~strcmp(SPO.union, 'off')
+    if numel(PP.runs) < TEST2 || all(cellfun(@isempty, G(single_cells, TEST2)))
+        error('evaluate_policies:single2', 'kpi7_union %s: the pools hold no second-test single flights', SPO.union);
+    end
+    spec2 = policy_episodes(single_cells, nS, G(single_cells, TEST2), REPS, false, false, NE, T, RandStream('mt19937ar', 'Seed', 2075));
+end
 iThreat = 1:3;                                         % sets pooled as "threat sets"
 
 %% 2. Best fixed configuration, chosen on the train pools
@@ -209,6 +221,12 @@ for si = 1:numel(sets)
     end
     fprintf('  set %-9s %5d episodes x %d policies (%.1f min)\n', sets(si).name, numel(RES{si, 1}.ret), ...
         numel(POL), toc(t0)/60);
+end
+RS2 = [];
+if ~isempty(spec2)
+    [kind, ag, opt] = policy_setup(POL{iDQN}, Q, sel, fixed_best, fixed_mmse, tab, K.na);
+    RS2 = policy_run_set(kind, PP, K, spec2, TEST2, ag, opt, 50000);
+    fprintf('  set %-9s %5d episodes x 1 policy, the deployed (%.1f min)\n', 'single2', numel(RS2.ret), toc(t0)/60);
 end
 
 %% 3b. Envelope predicted on the VALIDATION split, fixed before the test is read
@@ -449,6 +467,12 @@ end
 SPR = spread_boot(double(RES{1, iDQN}.recovered), vb, R1.geom, numel(bins_v) - 1, 2000, 80);   % KPI 7: spread over the bands
 rep{end+1} = sprintf(['  deployed policy, spread over the speed bands (largest minus smallest band): %.1f points ' ...
     '[%.1f, %.1f] (95%% bootstrap over flight geometries)'], 100 * SPR(1), 100 * SPR(2), 100 * SPR(3));
+SU = [];                                               % speed inference and the union reading (speed_reading.m)
+if SPO.inference || ~strcmp(SPO.union, 'off')
+    cg = []; if isfield(PP, 'shadow') && isfield(PP.shadow, 'cell_group'), cg = PP.shadow.cell_group; end
+    [SU, spd_lines] = speed_reading(RES{1, iDQN}, mrec, RS2, cg, bins_v, SPR, SPO);
+    rep = [rep, spd_lines];
+end
 
 % Edge speeds and signalling-delay sensitivity (reported apart from KPI 4)
 PS = []; PD = [];
@@ -654,9 +678,11 @@ if FRESH                                              % P1R: KP.far is the fresh
     KP.far_set = 'fresh'; KP.reading = 'P1R'; KP.far_union = FAR_u; KP.far_diag_union = FD_u; KP.far_src_union = far_src_u;
     KP.far_geoms_fresh = F6.CT.n_geom; KP.far_fresh_sha256 = F6.sha;
 end
+if ~isempty(SU), KP.speed_union = SU; end
 save('results/policy_evaluation.mat', 'RES', 'RW', 'POL', 'LBL', 'set_names', 'fixed_best', 'tab', 'iDQN', 'KP', ...
     'iThreat', 'ALL', 'top_cfg');
 if FRESH, save('results/policy_evaluation.mat', 'RWf', '-append'); end
+if ~isempty(RS2), save('results/policy_evaluation.mat', 'RS2', '-append'); end
 
 %% 5. Figures
 key = unique({'none', 'fixed', 'rule_esc', 'blind_esc', 'table', 'dqn_esc', POL{iDQN}, 'oracle'}, 'stable');
