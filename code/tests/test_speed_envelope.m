@@ -334,6 +334,158 @@ verifyTrue(tc, contains(L{end-3}, '29-62 km/h: 1 harmed, recovered 0.0%, harmed 
 verifyEqual(tc, T2.lb_n, [0 0 0 0]);
 end
 
+%% ---------- the edge-speed split ----------
+function test_edge161_geometries_prefix(tc)
+% 48 geometries per Eb/N0 add 12 flights at 161 km/h after the 36 of today's pools: the first 36
+% are the same flights bit for bit, and so is every other split's list (its seed block and its
+% positions do not depend on the edge-speed split's size). The lists are drawn as
+% build_policy_pools.m draws them.
+p = base_params();
+G36 = pool_lists(p, 36); G48 = pool_lists(p, 48);
+for s = 1:numel(p.EbNo_dB)
+    for sp = [1 2 3 5]
+        verifyTrue(tc, isequaln(G48{s, sp}, G36{s, sp}), sprintf('Eb/N0 %d, split %d', s, sp));
+    end
+    for f = fieldnames(G36{s, 4})'
+        verifyTrue(tc, isequaln(G48{s, 4}.(f{1})(1:36), G36{s, 4}.(f{1})), sprintf('Eb/N0 %d, field %s', s, f{1}));
+    end
+    g = G48{s, 4};
+    verifyEqual(tc, g.speed, [zeros(1, 24), 161 * ones(1, 24)]);
+    verifyEqual(tc, g.run, 1600 + (1:48));
+    verifyEqual(tc, numel(unique(g.seed)), 48);
+    verifyEmpty(tc, intersect(g.seed(37:48), G36{s, 4}.seed));
+end
+src = fileread(which('build_policy_pools'));
+verifyNotEmpty(tc, strfind(src, 'r = r0(sp) + (1:NGEO(sp));'));
+verifyNotEmpty(tc, strfind(src, 'r0 = arrayfun(@(sp) sum(nG(1:sp-1) .* (BLOCK(1:sp-1) == BLOCK(sp))), 1:nSp);'));
+verifyNotEmpty(tc, strfind(src, 'NGEO   = [8 6 12 36 60];'));
+verifyNotEmpty(tc, strfind(src, 'NGEO(4) = SPO.edge161_n;'));
+verifyNotEmpty(tc, strfind(src, 'SPO = speed_options();'));
+end
+
+function test_edge161_layout(tc)
+% pool_layout.m with 48: the edge-speed split holds 24 flights at hover and 24 at 161 km/h for the
+% clean link and the nominal severity, 24 at hover for the other severities, and the shadowing
+% group of the nominal level flies 24 of its own; every other split's positions are unchanged.
+p = base_params(); C = decision_config();
+NCOMB = [0 0 0 0 24]; NHOVER = 24; iSpd = 4;
+th = {}; sev = [];
+for t = {'none', 'jamming', 'airframe_shadowing'}
+    v = 1:numel(C.sev_names); if strcmp(t{1}, 'none'), v = C.nominal; end
+    th = [th, repmat(t, 1, numel(v))]; sev = [sev, v]; %#ok<AGROW>
+end
+for t = {'jamming+path_loss', 'jamming+airframe_shadowing', 'tone_jamming+spoofing+airframe_shadowing'}
+    th = [th, repmat(t, 1, numel(C.combo_sev))]; sev = [sev, C.combo_sev]; %#ok<AGROW>
+end
+lv = nan(1, numel(th));
+for c = find(contains(th, 'airframe_shadowing')), lv(c) = threat_params(p, th{c}, sev(c), C).shadow_db; end
+grp = shadow_groups(lv, p);
+kind = 1 + contains(th, '+'); kind(strcmp(th, 'none')) = 0;
+[g36, r36, n36, q36] = pool_layout(kind, grp, sev, C.nominal, [8 6 12 36 60], NCOMB, NHOVER, iSpd);
+[g48, r48, n48, q48] = pool_layout(kind, grp, sev, C.nominal, [8 6 12 48 60], NCOMB, NHOVER, iSpd);
+verifyEqual(tc, n36, [40 30 60 48 372]);
+verifyEqual(tc, n48, [40 30 60 72 372]);
+for c = 1:numel(th)
+    for sp = [1 2 3 5]
+        verifyEqual(tc, g48{c}{sp}, g36{c}{sp});
+    end
+end
+for sp = [1 2 3 5], verifyEqual(tc, r48{sp}, r36{sp}); end
+n = @(g, c) cellfun(@numel, g{c});
+ij = find(strcmp(th, 'jamming')); ish = find(strcmp(th, 'airframe_shadowing'));
+verifyEqual(tc, n(g36, 1), [8 6 12 36 84]); verifyEqual(tc, n(g48, 1), [8 6 12 48 84]);   % the clean link
+verifyEqual(tc, g48{1}{4}, 1:48);
+verifyEqual(tc, n(g48, ij(1)), [8 6 12 24 60]);                                          % other severities: hover only
+verifyEqual(tc, g48{ij(1)}{4}, 1:24);
+verifyEqual(tc, n(g48, ij(C.nominal)), [8 6 12 48 60]);                                  % the nominal severity: 24 + 24
+verifyEqual(tc, g48{ij(C.nominal)}{4}, 1:48);
+verifyEqual(tc, g36{ish(C.nominal)}{4}, 36 + (1:12));
+verifyEqual(tc, g48{ish(C.nominal)}{4}, 48 + (1:24));                                    % its own flights at 161 km/h
+for c = ish(ish ~= ish(C.nominal)), verifyEmpty(tc, g48{c}{4}); end
+verifyEqual(tc, sort([g48{1}{4}, r48{4}]), 1:n48(4));                                    % the clean link flies every geometry
+verifyEmpty(tc, intersect(r48{4}, g48{1}{4}));
+verifyEqual(tc, sort([q48([q48.split] == 4).pos]), 48 + (1:24));
+verifyEqual(tc, [q36([q36.split] == 4).pos], 36 + (1:12));
+% the reduced chain check with one flight more at 161 km/h
+[g, ~, nG] = pool_layout(kind, grp, sev, C.nominal, [2 2 2 2 2], [0 0 0 0 2], 1, iSpd);
+[h, ~, nH] = pool_layout(kind, grp, sev, C.nominal, [2 2 2 3 2], [0 0 0 0 2], 1, iSpd);
+verifyEqual(tc, nG, [10 10 10 3 16]); verifyEqual(tc, nH, [10 10 10 5 16]);
+verifyEqual(tc, cellfun(@numel, g{ish(C.nominal)}), [2 2 2 1 2]);
+verifyEqual(tc, cellfun(@numel, h{ish(C.nominal)}), [2 2 2 2 2]);
+verifyEqual(tc, cellfun(@numel, h{1}), [2 2 2 3 4]);
+end
+
+function test_edge161_shadow_candidates(tc)
+% The shadowing group of the nominal level still finds its flights at 161 km/h within the
+% candidate limit with 24 of them, and its first 12 are the flights it finds with 12 (the
+% candidates are tried in order): at every Eb/N0, every flight hides an antenna at the group's
+% lowest level.
+p = base_params(); C = decision_config();
+J_MAX = 99999; BLOCK = 16;
+S = pool_cells(p, C);
+gi = S.grp(find(strcmp(S.th, 'airframe_shadowing') & S.sev == C.nominal, 1));
+verifyGreaterThan(tc, gi, 0);
+ps = p; ps.active_threat = 'airframe_shadowing'; ps.shadow_db = min(S.level(S.grp == gi));
+for s = 1:numel(p.EbNo_dB)
+    eb = p.EbNo_dB(s);
+    keep = @(sd, v, a, kk, o, c) hides_antenna(sd, v, ps, struct('ebno', eb, 'alt_m', a, 'k_sig_db', kk, ...
+        'aoa1_deg', o, 'rho', c, 'event_frame', C.event_frame, 'frames', C.event_count));
+    sel = struct('seed', @(j, v) shadow_pool_seed(gi, s, BLOCK, j, v), 'j0', 0, 'jmax', J_MAX, ...
+        'floor', @(a) shadow_alt_floor(a, eb, ps), 'keep', keep);
+    [g12, i12] = pool_geometries(s, BLOCK, 36 + (1:12), repmat([161 161], 12, 1), p, [], 1, sel);
+    [g24, i24] = pool_geometries(s, BLOCK, 48 + (1:24), repmat([161 161], 24, 1), p, [], 1, sel);
+    verifyLessThan(tc, i24.j, J_MAX, sprintf('Eb/N0 %d: candidates tried', s));
+    verifyGreaterThanOrEqual(tc, i24.j, i12.j);
+    verifyEqual(tc, g24.seed(1:12), g12.seed, sprintf('Eb/N0 %d: the first 12 flights', s));
+    verifyEqual(tc, numel(unique(g24.seed)), 24);
+    verifyEqual(tc, g24.speed, 161 * ones(1, 24));
+    verifyEqual(tc, g24.run, 100 * BLOCK + 48 + (1:24));
+    verifyTrue(tc, all(arrayfun(@(i) keep(g24.seed(i), g24.speed(i), NaN, NaN, NaN, NaN), 1:24)));
+end
+end
+
+function test_edge161_cost(tc)
+% The simulation work 48 adds to C1p, from the per-cell counts as build_policy_pools.m lays the
+% cells out (pool_layout.m) and the frames each flight flies (20; the shadowing groups' flights
+% C.event_run), weighted by the runs and emitters of each cell (pool_cost.m): only the edge-speed
+% split's work grows, and the growth is at most 3 h of the 105 h planned for profile 3's C1p.
+p = base_params(); C = decision_config(); A = policy_actions();
+S = pool_cells(p, C);
+nC = numel(S.th); nS = numel(p.EbNo_dB); F_SUB = 20; NHOVER = 24; iSpd = 4; NG4 = [36 48];
+unit = zeros(1, nC);                                    % work of one frame in every configuration's run
+for c = 1:nC
+    unit(c) = pool_cost(threat_params(p, S.th{c}, S.sev(c), C), S.th{c}, A, 1, struct('F_SUB', F_SUB));
+end
+verifyTrue(tc, all(unit > 0));
+fr = zeros(2, nC, 5);                                   % frames per cell and split, over the Eb/N0 points
+for k = 1:2
+    [geo, ref] = pool_layout(S.kind, S.grp, S.sev, C.nominal, [8 6 12 NG4(k) 60], [0 0 0 0 24], NHOVER, iSpd);
+    for c = 1:nC
+        for sp = 1:5
+            j = geo{c}{sp}; if S.kind(c) == 0, j = [j, ref{sp}]; end %#ok<AGROW>
+            f = F_SUB * ones(size(j)); f(ismember(j, ref{sp})) = C.event_run;
+            fr(k, c, sp) = nS * sum(f);
+        end
+    end
+end
+verifyEqual(tc, fr(2, :, [1 2 3 5]), fr(1, :, [1 2 3 5]));
+verifyGreaterThan(tc, sum(fr(2, :, 4)), sum(fr(1, :, 4)));
+w = sum(fr, 3) * unit';                                 % work [s] with 36 and with 48 geometries
+share = (w(2) - w(1)) / w(1);
+fprintf('\nedge161_n 48: +%.2f%% of C1p work, %.1f h of 90 h and %.1f h of 105 h\n', 100 * share, 0.9 * 100 * share, 1.05 * 100 * share);
+verifyGreaterThan(tc, share, 0);
+verifyLessThanOrEqual(tc, 105 * share, 3);
+end
+
+%% ---------- the scripts' wiring ----------
+function test_wiring_build_policy_pools(tc)
+% Without edge161_n nothing of build_policy_pools.m changes: the added lines sit between two lines
+% the parent commit (f6f6e03) holds side by side, and NGEO(4) is the parent's 36.
+check_inserts(tc, 'code/decision/build_policy_pools.m', { ...
+    {'NGEO   = [8 6 12 36 60];'}, {'SPO = speed_options();', 'NGEO(4) = SPO.edge161_n;'}, {'NHOVER = 24;'}; ...
+    {'BLOCK(3:5) = [18 18 19];'}, {'if SPO.edge161_n > 36, NGEO(4) = NGEO(4) + 1; end'}, {'end', 'FRX = fec_rx_config();'}});
+end
+
 function test_wiring_evaluate_policies(tc)
 % Without the switches evaluate_policies.m runs the parent's lines alone: every added block sits
 % between two lines the parent holds side by side and is guarded by a switch.
