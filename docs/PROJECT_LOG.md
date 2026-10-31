@@ -275,6 +275,10 @@ The lecturer's false-alarm KPI is read at detector level; the system-level figur
 
 - Smoke PASS at `p1r` `2a4d19b` (every cell, A' forced, LINKFRESH CHECK PASS, five refusals). P1R's C1d (08:44-08:52) kept `'ratio'`: no degradation-test candidate admissible, because the monitor's other paths alone (mostly the class path) already break KPI 6's 5% bound on the clean validation episodes (161-484 of 1800 by confirmation). By D104 point 4 P1R ended after C1d; the fresh set stays unbuilt and unread for F4; A' moves to profile 3 only; profile 3 starts about two days earlier. Profile 3's answer to the class path is D113 (S1G).
 
+### Audit of 31.10.2026
+
+- Two audits (`audit31/ext_audit.md`, `audit31/base_audit.md`; read only, no MATLAB) found the class path the only uncalibrated alarm path behind KPI 6 (97.5% lost-branch classes on unharmed flights, flat across Eb/N0) and a drop-threshold fallback that slows path_loss detection for every policy. Adi approved all their new proposals at about 10:00 on two conditions: nothing may contradict the lecturer's 20.10 proposal, and anything that only makes a measurement stricter is printed as a side reading beside the registered one. Registered as D121 with dated lines on D64, D90, D103, D105, D106, D111, D112, D113, D116 and D118: CLT (a calibrated lost-branch acceptance at the monitor, chosen at C1d by fixed-sequence scanning against 1.5% of the 5% budget), P-A (D113's harm gate on rule_core behind its own switch), a per-path budget that replaces the fallback, D112's threshold by its own drop path, a Fisher candidate in D111 before K2-1, C2g-D in idle windows, D118's order and tiers; side readings (KPI 8 receiver-robust against U_s, a 3.5% calibration) and descriptive lines (non-emitter speed, onset-referenced paired recovery, near/far OOD). None contradicts the lecturer's proposal; all are profile 3 (P1-v2 via D119), registered before C1p, K2-1 and D2c data.
+
 ## Status of the lecturer's KPIs (profile 1, 28.10.2026)
 
 | KPI | Value | Status |

@@ -549,6 +549,7 @@ while giving deterministic mathematical control under the hood.
 - *Monitor against the KPI.* The monitor's 'degraded' flag was on in 8–52% of the cycles in which the applied configuration truly restored BER and packet loss (power_control 40.5%, rate_reduce + power_control 51.8%), and 61–90% of the escalations left a restoring configuration; escalation still recovered 52 episodes the DQN lost, against 15 the other way. A reference at the pre-incident Eb/N0 estimate (the KPI's own reference) cut the false flags (power_control 20.5%) but lowered the follower threats (jamming and reactive jamming −3.5 points each) and was not adopted (rule set before the run: no threat lower by more than 2 episodes). A 5-frame window cannot resolve a 2× BER ratio near the pools' BER floor: a stated limitation.
 **Decision:**
 - *Escalation* (`policy_decide.m`, every *_esc policy): out of a configuration the policy applied, as before (degraded for `C.esc` cycles); out of no_action, only when the alarm has stayed confirmed for `C.esc` cycles (`mem.conf_n`, `policy_monitor.m`). Validation, D63 agent: pooled 93.3% → 94.1%, antenna fault 91.7% → 100%, clean false alarms 23 → 18 of 600 (bound 4.42%), no threat lower. The count is the existing constant `C.esc` = 3; 5 gave the same. *[Amended 30.10.2026 by D113 (registered under decide-after-30min, Adi silent since 30.10.2026 19:37; profile 3 only): with `dec.s1_gate` on, the escalation of the kinds rule and rule_esc out of no_action on a lost-branch class requires harm evidence. DQN kinds, the core rule (`opt.core`: rule_core, rule_core3, blind_core) and the default are unchanged.]*
+  - *[Amended 31.10.2026 by D121 (approved by Adi, 31.10.2026; profile 3 only): with `PP.s1_gate_core` on (D121 item 2, P-A), the core rule's escalation out of no_action on a lost-branch class (`lbn`, `policy_decide.m:178`) requires harm evidence, as D113 gates rule and rule_esc. blind_core and the default are unchanged; rule_core3 holds no lost-branch class.]*
 - *Deployed policy: DQN + escalation.* KPIs, evaluation, dashboard, latency and the operator console use it; `train_dqn.m` scores checkpoints, runs, clean false alarms and the reward sensitivity with it.
 - *Follower delay 0–5 cycles* (`C.fdelay`) in training and validation: the immediate follower (Liu et al.'s comb jammer) was never in training. Test protocol unchanged: follower set 2–5 cycles, comb set 0.
 - *Grid and selection rule* unchanged (2 monitors × 2 drop thresholds × 2 discount factors × 3 seeds, penalty 80).
@@ -1164,6 +1165,7 @@ Channel model: the flat channel fails, the link runs the delay line → PASS; re
 **Decision** (d90_loop.md, Summary and secs. 1-6):
 1. *SWEEP*: the sweeping jammer gets its own k-of-n confirmation, 2 of 6 (Norouzi 2006), adopted at C1d only if it passes there (sec. 2).
 2. *DROP*: each monitor's drop threshold is chosen on the whole monitor; the median window's reference is held through an excursion (Xie et al. 2021, eqs. 2-3) (sec. 3).
+   - *[Amended 31.10.2026 by D121 (approved by Adi, 31.10.2026; profile 3 only); profile 1 and P1R stay as run: where the whole-monitor rule finds no admissible threshold, the drop threshold is chosen on the drop path's own budget share of 2.0% (D121 item 4) instead of falling back to the least sensitive grid value; where it finds one, it stands.]*
 3. *C2*:
    - the reward counts BER and packet loss (loop-reward-plr);
    - the selection uses held recovery (loop-select-held);
@@ -1810,6 +1812,7 @@ What the pass confirmed (profile 1, 11 combinations without the shadowing ones):
 **Adoption rule.** In the order F0 (if added), F1, F2 (each alpha), F3 (each alpha), C1d's whole-monitor analysis runs on the validation episodes, every monitor, the drop threshold re-chosen as now. A candidate is admissible if, against `'ratio'` under the same monitor: (a) for jamming and tone_jamming, median and p90 delay and the never share do not grow; (b) for every other threat, the never share grows by at most 1 point and p90 by at most 1 cycle. Adopt the first admissible candidate whose bound is <= 5% for at least one monitor; if none reaches 5%, adopt the admissible candidate with the lowest bound, and KPI 6 is read and reported as it falls. The rule reads alarm delays only; F3's cost in recovery (a quiet-slot degraded link no longer gets `freq_diversity+power_control`) is read in C2's validation rows and reported beside the adoption, and does not reopen the choice.
 
 **Fit/check split.** The 300 validation clean geometries are split by geometry hash into a fit half (150) and a check half (150). `ber_q` and its bins come from the fit half only; adoption is decided on the check half (900 clean episodes: a bound <= 5% needs about 34 or fewer false-alarm episodes). C2 reads its own FA filter on all 300 geometries, mildly optimistic for C2's selection only. KPI 6 is read on a fresh clean test set (a new seed family, generated after adoption, at least 600 flights). *[Amended 30.10.2026 by D112 (registered under decide-after-30min, Adi silent since 30.10.2026 19:37; profile 3 only): after the F choice the check half is read a second time, for D112's DCONF coordinate step under D112 point 4.]*
+*[Amended 31.10.2026 by D121 (approved by Adi, 31.10.2026; profile 3 only): after the F choice the check half is read for CLT's τ_hi scan (D121 item 1), so D112's DCONF step is its third use (disclosed, the D90 and D112 precedent); the drop threshold's re-choice after CLT follows D121 item 4.]*
 
 **Tests, committed before any data they govern.** Bit-identity of `'ratio'` on a recorded no_action trace; F1 (window median on a trace with one +3 dB frame, measured axis under a known gain, reset with `mem.ber`); F2 (quantile reproduces alpha on synthetic Gaussian log-BER, small bins merge, fit and check halves disjoint by a hash assert); F3 (quiet-slot interference alarms, a quiet slot does not; class and drop alarms unchanged by `deg_mode`); one smoke cell per candidate (2 h cap). The DQN's false-switch penalty definition (`healthy` geometries only) is not changed: a reward redesign without a source. *[Amended 29.10.2026 by D107 (approved by Adi): the default penalty form is unchanged; a second form restricts the penalty's excess over w_false to no-threat cycles, sourced as the Lagrangian of the KPI 6 constraint (Altman 1999; Paternain et al. 2019; Tessler et al. 2019); scored in P1R, a candidate in profile 3. The reason "a reward redesign without a source" is answered by the citation.]*
 
@@ -1928,6 +1931,7 @@ The baseline also differs in tuning budget. In C2e, `blind_core`'s first respons
    | 8, the CNN's contribution | `rule_core` against `blind_core` | analysis, no promise; headline from CORE_BW (point 2) |
 
    - **Extension rows, never in the verdict's place:**
+     - *[Amended 31.10.2026 by D121 (approved by Adi, 31.10.2026; profile 3 only); also P1-v2: a paired onset-referenced recovery difference (t_conf + t_rec_det) in `lect_kpis.m`'s CN block, descriptive (D121 item 10, P-C); KPI 6's registered reading is unchanged.]*
      - `rule_esc` / `blind_esc` on the 36 configurations (`KP.lect.verdict`, `.per`, `.cnn`, `.rec`, `.gput`): the full action set the proposal does not ask for;
      - the five jamming threats pooled;
      - the core set on the 36-configuration mask (`KP.lect.core.all36`, second line);
@@ -2084,6 +2088,7 @@ The baseline also differs in tuning budget. In C2e, `blind_core`'s first respons
   - None is a profile 3 candidate under the registered rules: CORE_BW runs on profile 1 only; D113 keeps `rule_core_policy.m` unchanged in profile 3; D105 point 2 keeps blind_core's fixed first response in TIP3; profile 3's `lect_kpis.m` already prints recovery from the onset.
 - *Open for Adi.*
   - (a) Before D2c's data: how U_s applies to KPI 8's paired differences. Rule 4.6 covers only the KPI 5 words. Proposed: a sign is receiver-robust when its 95% interval clears 0 by more than U_s.
+    - *[Answered 31.10.2026 by D121 item 3 (approved by Adi, before any D2c data): a side column "receiver-robust (U_s)" beside KPI 8's registered paired differences; KPI 8's reading and words stay as registered.]*
   - (b) The recoverable-scope counts (433 of 882; 85 of 112) wait with the results unless Adi decides otherwise.
   - (c) A tuned narrowband answer is not studied in profile 3 under D113; any change needs Adi's own registration before profile 3 decision-layer data.
 
@@ -2319,6 +2324,7 @@ The baseline also differs in tuning budget. In C2e, `blind_core`'s first respons
    - So if profile 3's fusion window N (fixed at B2F) is below TW = 10 frames, the cue row's level-step statistics are computed over 10 frames (the same class-free statistic), and every labelled path-loss frame's step is inside the window.
    - Under `FUSION_FIT = 'enlarged'` the deployed N is the measured 12 (`fusion_pick.m:14`; `select_fusion.m:93`), so this applies only if B deploys a validation-chosen N.
 5. **Candidates, fixed.** C0 = s0; C1 = min-p(C0, cue-Maha); C2 = min-p(C0, cue-IF); C3 = cue-Maha alone. Nothing is added after any reading.
+   - *[Amended 31.10.2026 by D121 (approved by Adi, 31.10.2026; profile 3 only); registered before K2-1 runs: C4 = Fisher(p0, p_cue-Maha) is added (D121 item 5), under items 5-8 unchanged.]*
    - Eligible means passing item 6 (a)-(d) and D80's latency admission (`kpi7_admit.m`).
    - The production statistic is the eligible candidate with the highest mean validation AUROC over the 10 held-out threats (`ood_select.m:9-10`), on windows labelled by their newest frame. If none is eligible, C0 stays.
 6. **Adoption of C1, C2 or C3 over C0: all of (a)-(d) must hold, else C0.**
@@ -2388,12 +2394,14 @@ The baseline also differs in tuning budget. In C2e, `blind_core`'s first respons
 1. **Candidate.** `PP.confirm_drop = [k n]`, built like `PP.confirm_sweep` (`policy_monitor.m:220-226`): `M.confirmed |= sum(drop_alarm over the last n) ≥ k`. Candidates in order: [2 2], then [1 1]. Default (field absent): today's code, bit for bit.
 2. **Threshold.**
    - For each candidate, the drop threshold is re-chosen by `choose_drop_threshold.m` on D103's fit half. The grid is THC extended upward (today's top × {1.25, 1.5, 2}) **for the candidates only**. The reference monitor keeps today's THC, so the default chain is unchanged.
+   - *[Amended 31.10.2026 by D121 (approved by Adi, 31.10.2026; profile 3 only): the candidate's threshold is the most sensitive value of its extended grid whose drop-first-path clean count is ≤ the reference's (its own (c′)), not by whole-monitor admissibility (D121 item 6); point 4 is unchanged.]*
    - When a candidate is adopted, `drop_threshold.mat` saves the candidate's extended grid as `THC` (`choose_drop_threshold.m:171, :324`). C2's grid (`train_dqn.m:750-767`, `drops_of`: the THC value nearest the C1d pick, ± one step) is then built around the adopted threshold. Without adoption, `THC` is today's grid and the file is as now.
    - The extended THC costs delay at 6 dB: about +2, +4.3 and +8.5 cycles for ×1.25, ×1.5 and ×2, as much as the confirmation it removes. Item 4 (d′) guards this.
 3. **Order at C1d.**
    1. D111's guard (e).
    2. D103's F choice, unchanged (D104 point 4 as applied to profile 3).
    3. DCONF, as a coordinate step for each monitor of C1d's grid (`CD.monitors`) against the same monitor without the field, under the adopted `deg_mode`, judged on D103's check half.
+   - *[Amended 31.10.2026 by D121 (approved by Adi, 31.10.2026; profile 3 only): the order is D111 (e) → D103 F → CLT → the drop threshold's re-choice under D121 item 4 → DCONF; DCONF's reference is the monitor they leave (D121 items 1, 4, 9).]*
    - The check half is used a second time after the F choice (the D90 precedent).
    - **Dated line on D103's fit/check split (DEC:1809):** "Amended 30.10.2026 by D112 (registered under decide-after-30min, Adi silent since 30.10.2026 19:37; profile 3 only): after the F choice the check half is read a second time, for D112's DCONF coordinate step under D112 point 4."
 4. **Admissible for a monitor only if all of these hold for it** (check half, validation threats):
@@ -2452,6 +2460,7 @@ The baseline also differs in tuning budget. In C2e, `blind_core`'s first respons
    - **Dated line on D64:** "Amended 30.10.2026 by D113 (registered under decide-after-30min, Adi silent since 30.10.2026 19:37; profile 3 only): with `dec.s1_gate` on, the escalation of the kinds rule and rule_esc out of no_action on a lost-branch class requires harm evidence. DQN kinds, the core rule (`opt.core`: rule_core, rule_core3, blind_core) and the default are unchanged."
    - Unchanged: the monitor, its confirmed alarm, the DQN's shield and escalation, and A′.
    - `rule_core_policy.m` (rule_core, rule_core3) is **not** changed, and the core option's escalation is not gated: those are lecturer-verdict baselines (D105, D106).
+   - *[Amended 31.10.2026 by D121 (approved by Adi, 31.10.2026; profile 3 only), before any profile 3 decision-layer data: behind its own switch `PP.s1_gate_core` (default off, bit-identical), the core option's answer to a lost-branch class and its escalation out of no_action on it require this harm field, chosen on validation by point 3's rule (D121 item 2, P-A). `rule_core_policy.m` stays byte-identical; the gate sits in `policy_decide.m`.]*
 2. **Physics and its limit, stated.**
    - Under MRC the branch SNRs add (Brennan 1959), so losing one of three equal branches costs 1.76 dB of mean post-combining SNR (1.25 dB of four). That is the whole cost only on a strong line of sight (K ≥ 10 dB). At low link K the diversity order also falls (3 → 2, 4 → 3), so a lost branch can push the BER past the KPI's 2× of clean with a mean loss under 2 dB.
    - Whether the link stays within 2× of clean is therefore measured, not guaranteed: 76 of the 264 flights fail the 2× test on their own clean link (SFA:47).
@@ -2655,6 +2664,7 @@ Item 7 is the one exception. Its routing may switch on D117 point 3, a training 
    - The mechanism with the largest share of missed frames is named.
    - 82.2% is always quoted as read; the explanation stands beside it.
 3. **Beside KPI 2 (A1; profile 3 at KPI; profile 1 bounds).** Per held-out threat:
+   - *[Amended 31.10.2026 by D121 item 11 (approved by Adi): near-OOD (antenna_fault, airframe_shadowing) and far-OOD (the other eight) mean AUROC beside KPI 2's 10-threat mean, descriptive.]*
    - the flagged share (detection);
    - among unflagged windows, the share whose top known class has the threat's countermeasure "under the rule's mapping" (`rule_based_policy(c)`, not no_action) (response).
 
@@ -2670,6 +2680,7 @@ Item 7 is the one exception. Its routing may switch on D117 point 3, a training 
 
    No attribution leans on the Rayleigh high-SNR BER ratio.
 5. **Speed inference (B6, A11; profile 3's C2e; profile 1 post hoc).**
+   - *[Amended 31.10.2026 by D121 item 8 (approved by Adi): the 161 km/h line and the spread on non-emitter threats (path_loss, antenna_fault, airframe_shadowing) and the clean link, descriptive, never in the registered line's place.]*
    - Per speed band, with cluster intervals.
    - A permutation test of association: whole flights' bands permuted within Eb/N0 strata and within the shadowing group's own flights; B = 9999; fixed seed; statistic max − min (Ernst 2004).
    - The joint-centred bootstrap conservative upper bound of Hall & Miller 2010 for the spread (D117 point 1's formula).
@@ -2694,6 +2705,7 @@ Item 7 is the one exception. Its routing may switch on D117 point 3, a training 
    - Side runs (SPD-D, R5, K2-0's profile 1 bounds) never extend a window on the path to P1R or profile 3 (D118 point 2b). Without a window, SPD-D's routing and C-LHS are dropped, and R5 moves to the final phase. If SPD-D cannot run before deployment step 3, C-LHS is dropped.
 8. **P1R post-hoc rows.** Item 4's rows on P1R's saved `policy_evaluation.mat`, and item 6's table if P1R's saved rows carry the speed band. They run from a read-only copy after P1R's breakdown and are labelled "P1R, descriptive". P1R's code is not changed.
 9. **C2g-D (optional, after profile 3's KPI).** C2G §7.1: sweeping_jammer+path_loss and jamming+path_loss never-trained, seeds 42-44, and the control jamming+airframe_shadowing, seed 44. It runs on validation flights of the withheld combination, LB off and on, with seed streams disjoint from C2g's (bug 9). It revises nothing in D115 after the fact.
+   - *[Amended 31.10.2026 by D121 item 7 (approved by Adi): C2g-D may run earlier, in any machine-idle window under D118 point 2, never lengthening a window; otherwise after profile 3's KPI as registered.]*
 
 **Sources.**
 - Cluster bootstrap: Davison & Hinkley 1997, *Bootstrap Methods*, §3.8; Field & Welsh 2007, JRSS B 69(3).
@@ -2785,6 +2797,7 @@ Item 7 is the one exception. Its routing may switch on D117 point 3, a training 
    5. Deployment: B2F with D110; B3r; D111's OOD run after B3r.
    6. C1p.
    7. C1d: D111 (e), then D103, then D112.
+      - *[Amended 31.10.2026 by D121 item 9 (approved by Adi): C1d: D111 (e), then D103, then CLT, then the drop threshold's re-choice under D121 item 4, then D112.]*
    8. C2: D107; `rank_pick` with D113 first among the rule steps; D115; D114.
    9. C2e, then KPI.
 
@@ -2801,6 +2814,7 @@ Item 7 is the one exception. Its routing may switch on D117 point 3, a training 
    - Profile 3's deployment step 3 starts when D104 point 1 releases it (P1R's C2e and its review). It waits for the r2 timebox only while an r2 candidate is under its pre-set rule (`rx_fix_ruling.md` 4.4).
    - Branches not green and merged by then are dropped for profile 3 in reverse tier order: tier 3, then tier 2, then D111 to its fallback. D110 falls back to B (D110 point 7).
    - Tier 1 = D110, D112, D113, D116's R9/R1/K2-0 prints, D117 R2. Tier 2 = D115, D114, D111, D116's A′ table and SPD-D. Tier 3 = D117 R3, C-LHS, R5.
+   - *[Amended 31.10.2026 by D121 item 9 (approved by Adi): tier 1 also holds CLT, D121 item 4's budget and side calibration, item 6, P-A (with D113) and the prints of items 8, 10 and 11; D111's C4 is tier 2 with D111; C2g-D runs only in idle windows.]*
    - A hold for code is made only on Adi's word, and its days are added to the projected end.
 
    2b. **Side runs never lengthen a window** on the path to P1R or profile 3. Without a window:
@@ -2816,6 +2830,7 @@ Item 7 is the one exception. Its routing may switch on D117 point 3, a training 
      3. D114's scoring (−0.5-1 h);
      4. D115's scoring (−1.5-2.75 h).
    - Never shed: D110 at B2F (+0.5 h; its own timebox is D110 point 7), D112, D113, D116's prints. D110's head is shed by its own cost gate (D110 point 6), not here.
+   - *[Amended 31.10.2026 by D121 item 9 (approved by Adi): CLT is never shed (minutes at C1d).]*
    - A projected-end check reads only measured durations, dates and the r2 status, never a result of an item it may shed. An item whose governing data has been read is no longer sheddable.
    - The check's inputs and projected dates are written down before anything is shed. A shed item is recorded with the projected dates that triggered it.
 4. **If the end still passes 24.11 after shedding** (for example, a C1p as slow as profile 1's 144.9 h), Adi is told the numbers. Nothing is shortened (no-training-shortcuts).
@@ -2897,4 +2912,95 @@ Line references in points 1-10 are to profile 1's code of record `d4623ed` and t
 3. **Sweeper period and phase (after profile 3).** Estimated from the idle record to shorten the hold after a threat ends; it changes D114's rule, so it is a candidate after profile 3.
 4. **Limits stated.** A single fade cannot be forecast one decision cycle ahead (coherence time about 1.2 ms at 161 km/h against 20 ms cycles); only its statistics can. Antenna faults are steps in the threat model, so no fault prognosis is claimed.
 5. **Citations** (Stueber equation numbers, Vovk 2003, Volkhonskiy 2017, Brueninghaus 2005) are checked in full text before the book.
+
+## D121 - The 31.10 audits' proposals: CLT, a calibrated lost-branch acceptance at the monitor; P-A, the harm gate on rule_core; a per-path false-alarm budget; D112's threshold by its own drop path; a Fisher candidate for KPI 2; side readings (receiver-robust KPI 8, a 3.5% calibration); descriptive lines (non-emitter speed, onset-referenced recovery, near/far OOD); C2g-D earlier; D118's order (approved by Adi, 31.10.2026)
+
+**D121 (2026-10-31, approved by Adi on 31.10.2026 ~10:00).** Adi approved every new proposal of the 31.10 audits (`worktrees/session_notes_0ff3/audit31/ext_audit.md`, `base_audit.md`) on two conditions, in his words:
+- **Condition 1:** "as long as it does not contradict our final proposal": the lecturer's proposal of 20.10.2026 (`src/lecturer_20-10.txt`): three link states (clean, narrowband, wideband), a CNN classifier, rule-based recovery from the classification and the link metrics, the DQN optional, the comparison static / metric-only adaptive / CNN-based adaptive under identical conditions, and his KPI table with its two clarifications. Each item below carries a line "Consistency with the lecturer's proposal". An item that would change his states, his three configurations or his KPI definitions is not adopted.
+- **Condition 2:** "no hardening without reason that ends up hurting us": anything that only makes a measurement stricter is an additional side reading printed beside the registered one, so the two can be compared. It never replaces a registered verdict, threshold or selection. Items 3 and 4's 3.5% calibration are side readings under this condition. A fix that changes the system (items 1, 2, 4's per-path budget, 6) is not a hardening.
+
+**Common rules.**
+- Profile 3 only, unless an item says otherwise. Profile 1's readings, CORE_BW and P1R stay as run and read. P1-v2 (D119) re-selects each adopted fix on profile 1's own validation by the same rule.
+- Registered before profile 3's C1p (about 5-8.11) and before any profile 3 decision-layer data, any K2-1 data and any D2c data; per the 31.10 audits none of these has run.
+- Every rule is fixed here, before the data it governs: grids, shares, guards, partitions and orders are not changed after any reading. Choices on validation only; profile 3's test pools are read once. Every switch's default (field absent) is today's code, bit for bit.
+- Code on TIP3's lineage with its tests and a review, merged never under a running stage (past bug 13); harm evidence keeps D113's single writer (past bug 1); every on/off is chosen on validation (past bug 2). No truth field is read by any new decision path (static test).
+
+1. **CLT: a calibrated lost-branch acceptance at the monitor, every policy (ext_audit section 3).**
+   - *Why.* On profile 1's test the rule family's clean false changes are flat across Eb/N0 (44/51/49/35/43/42 of 396, 0-15 dB), and 97.5% of the class path is lost-branch classes on unharmed flights (median Eb/N0 drop −0.4 dB shadowing, 0.1 dB fault; `system_fa_breakdown.txt`). The class path is the only alarm path without a calibrated threshold: the class is the argmax, and m-of-n runs over 12-cycle overlapping fused windows, so its bits are highly correlated (2/2 to 5/5 cuts false changes only 2.5×). The class path alone is about 7.5% at 5/5 on profile 1's check half; it breaks the 5% bound by itself.
+   - *What.* In `policy_monitor.m`, behind `PP.lb_accept`, a cycle whose class is antenna_fault or airframe_shadowing counts as hostile only if (i) p_LB ≥ τ_hi, with p_LB = p(antenna_fault) + p(airframe_shadowing) from the fused posterior the monitor already computes (`fuse_classes('apply')`, after D110's head if adopted), or (ii) harm evidence (`M.degraded`, `M.deg_quiet` or `M.drop_alarm`) was present in at least one of the last n cycles of the deployed confirmation: D113's harm field, one writer. Otherwise that cycle is not hostile and is logged "lost branch, not accepted". The m-of-n confirmation and every other class are unchanged. C1p is not touched.
+   - *Grid, fixed now.* Per monitor, τ_hi ∈ {∞ (harm only), q99, q95, q90, q75, q50}: quantiles of p_LB over the clean fit-half frames whose class is a lost-branch class.
+   - *Choice at C1d (Learn then Test, fixed sequence).* Per monitor, scan from ∞ toward q50 on D103's check half (900 clean episodes). A value passes if the clean episodes whose first confirming path is a lost-branch class have a one-sided 95% Clopper-Pearson upper bound ≤ 1.5% (≤ 7 of 900). Stop at the first failure; τ_hi is the last passing value. If ∞ fails, τ_hi = ∞ and the miss is printed. This controls P(true rate > 1.5%) ≤ 0.05 (Angelopoulos et al. 2025).
+   - *Budget (union bound, fixed now).* Lost-branch class path 1.5%, drop path 2.0% (item 4), degradation path and the other classes 1.5%; the sum is KPI 6's 5%. Each path's first-confirming count is printed with its bound, and "union bound met" only if all three meet.
+   - *Delay guards (check half, validation threats, against the same monitor without the field).* antenna_fault and airframe_shadowing on harmed episodes: the never share grows by at most 5 points and the p90 confirmed delay by at most 3 cycles. Every other threat: the confirmed-alarm series is bit-identical (checked). If the guards fail at the chosen τ_hi, CLT is not adopted for that monitor (delay is monotone in τ_hi, so no more sensitive value is certified). The cost on unharmed lost-branch alarms is printed.
+   - *Scope and reading.* The monitor is shared, so the choice applies to every policy (the D103 F and D112 point 5 precedent); profile 3's lecturer lines are read under the adopted monitor and say so. Test: profile 3's fresh clean test pools (KPI 6) and C2e pools (KPI 4), once. CLT is not d87's rejected per-class logit offsets: it changes neither the detector nor KPI 1; it is a decision-layer acceptance under a delay guard.
+   - *Tests.* Bit-identity off; a synthetic high p_LB without harm is accepted only at ≥ τ_hi; harm in the last n cycles accepts at the argmax; single writer; static no-truth test; one forced smoke cell.
+   - *Expected (estimate, never a gate).* Whole-monitor 5/5 about 201/1800 → 75-95/1800 with D103 F3; the monitor bound admissible with about 50-65%; no adoption about 35-45%, mostly from the delay guard.
+   - Consistency with the lecturer's proposal: CLT touches only the lost-branch classes, which are outside the lecturer's three states; the tone_jamming and jamming alarms are bit-identical by its guard, the three-state CNN (rule_core3) has no lost-branch class, the M-of-N confirmation of his mitigation 7 is unchanged, his KPI 3 (the classifier's FAR) and every KPI definition stay as defined, and his three comparison rows are read under the shared monitor and labelled.
+
+2. **P-A: D113's harm gate also on rule_core, behind its own switch (base_audit section 4).**
+   - *What.* A switch `PP.s1_gate_core`, default off (bit-identical), saved with the chosen settings like `dec.s1_gate`. With it on, in `policy_decide.m` for the core option and not blind: a lost-branch class (antenna_fault, airframe_shadowing) gets rule_core's answer only if D113's harm field is set, and the escalation out of no_action on that class (`lbn`, `policy_decide.m:178`) requires it too. `rule_core_policy.m` stays byte-identical. blind_core has no class path, so nothing is gated there (past bug 4). rule_core3's three states hold no lost-branch class, so the gate never acts on it.
+   - *Choice (validation, D113 point 3's rule).* A two-option step in C2's settings, directly after D113's `dec.s1_gate` step, decided by the registered `rank_pick`; "on" is kept only if (g1) rule_core's recovered on every threat other than antenna_fault, airframe_shadowing and their combinations has a paired point ≥ −1.0 and a one-sided 95% lower bound ≥ −2.0 (cluster bootstrap over flights, 2000 draws, fixed seed), and (g2) the paired clean false-alarm episodes fall by an exact one-sided McNemar test on the 1800 clean validation flights, p < 0.05. Otherwise off.
+   - *Reporting.* Profile 3's C2e prints rule_core with the gate off beside the selected variant as a descriptive row (D113 point 4 precedent); the lecturer rows say which variant they carry.
+   - *Tests.* Bit-identity off; a gated answer and a gated escalation on a synthetic no-harm trace; the answer with harm in the last n cycles; `rule_core_policy.m` byte-identical; blind_core and the tone_jamming and jamming answers bit-identical; static no-truth test; one forced smoke cell.
+   - *Expected (estimate).* The CNN row's clean system false alarms about 11% → 3.6-5.8% (profile 1 composition); harmed lost-branch answers partly silenced (timely harm evidence on 38.8% of harmed S1 episodes), which moves our KPI 4, not a lecturer KPI.
+   - Consistency with the lecturer's proposal: the gate keeps the proposal's own definition of the CNN-based configuration (recovery chosen from the classification together with the link metrics); it acts only on the lost-branch classes, outside his three states, and (g1) protects every other answer; the static and metric-only rows are untouched, and his KPI definitions stay as defined.
+
+3. **Receiver-robust side column for KPI 8 (base_audit W4, its "R5"; named here KPI8-RR so it is not confused with the side run R5 of D116 item 7 and D118).**
+   - Beside each registered KPI 8 paired difference (rule_core3 or rule_core minus blind_core; PER, goodput, t_rec_det; per type and pooled), a column "receiver-robust (U_s)": yes iff its 95% interval clears 0 by more than D2c's U_s (lower bound > U_s, or upper bound < −U_s), in the units D2c gives U_s in; a difference whose units U_s does not cover prints "n/a".
+   - KPI 8's reading and words stay as registered (analysis, no promise; D105, D106). The column is a side reading under condition 2 and never replaces them. It answers D106's open point (a) before any D2c data.
+   - Consistency with the lecturer's proposal: KPI 8 stays his "analysis, not a promise" with the same pairs and differences; the column is printed beside it and changes nothing in it.
+
+4. **A per-path false-alarm budget for the drop threshold, and a 3.5% side calibration (ext_audit sections 3.8 and 4.1).**
+   - *Why.* When the other paths (the class path plus degradation) break the whole-monitor bound, `choose_drop_threshold.m` sets the drop threshold to the least sensitive grid value ("NONE ADMISSIBLE: the least sensitive", 180 against 153 dB² admissible for the drop alarm alone on P1R's C1d). That slows path_loss detection for every policy and brings no policy into compliance.
+   - *Fix (profile 3's TIP3 lineage only; profile 1 and P1R stay as run).* Where the registered whole-monitor rule finds an admissible threshold, it stands. Where it finds none, the drop threshold is the most sensitive grid value whose clean episodes with the drop alarm as first confirming path have a one-sided 95% Clopper-Pearson bound ≤ 2.0% (≤ 10 of 900), scanned from the conservative end and stopped at the first failure, on the episodes the registered rule reads (D112 point 2: D103's fit half). If none passes, the least sensitive value (its own path's fallback). The shares are item 1's. This removes the fallback caused by other paths; it is not stricter.
+   - *Wording.* CDT's line "no drop threshold can meet KPI 6 with this monitor" reads "the monitor's no_action bound cannot meet 5%"; the class path is quoted alone (about 7.5% at 5/5 on profile 1's check half), not with the degradation path.
+   - *3.5% side calibration (condition 2).* Selection keeps the registered 5% bound and the shares above. Beside it, C1d computes by the same scans a side calibration with the shares scaled by 0.7 (1.05% / 1.4% / 1.05%; ≤ 4 / 6 / 4 of 900) for CLT's τ_hi and the drop threshold, and prints for both calibrations: the whole-monitor clean false-alarm point and bound on the check half, the exact-binomial probability of passing KPI 6's test reading at its flight count if that point were the true rate, and per threat the median, p90 and never share of the confirmed delay. Descriptive; no adoption effect.
+   - Consistency with the lecturer's proposal: the system-level clean false alarm is our KPI 6 (D103 point 1, never his KPI 3); its 5% bound and Clopper-Pearson verdict stay as registered, his classifier FAR is untouched, the drop path concerns path_loss, outside his three states, and the 3.5% figure is only a side reading.
+
+5. **A Fisher-combination candidate in D111, before K2-1 runs (ext_audit section 2).**
+   - C4 = Fisher(p0, p_cue-Maha): F = −2(ln p0 + ln p_cue), with the same marginal conformal p-values as C1, oriented so that lower means more novel (score −F). The two p-values share calibration windows and are dependent, so F's χ² level is not used: its threshold is set empirically on the selection half's known windows, as U's is (D111 item 3).
+   - C4 enters D111 items 5-8 unchanged: eligibility (a)-(d), D80's latency admission, the highest mean validation AUROC among eligible candidates, guard (e) at C1d, the monitor and parity tests, and the nested set-4 reading. K2-1's gate is unchanged. Nothing else is added.
+   - Why: no single combination wins everywhere; min-p is strongest when one score carries the novelty (path_loss), Fisher when both carry part of it (shadowing, jamming) (Haroush et al. 2022; Magesh et al. 2023).
+   - Consistency with the lecturer's proposal: KPI 2 is ours, not in his table (D111); his mitigation 8 (Mahalanobis against isolation forest) stays delivered and printed, and C4 combines Mahalanobis scores; no state, configuration or KPI of his changes.
+
+6. **D112's candidate threshold by its own drop-path count (ext_audit section 2, D112 row).**
+   - For each DCONF candidate, the drop threshold is the most sensitive value of its extended grid whose clean episodes with the drop alarm as first confirming path are ≤ the reference monitor's count (its own (c′)), not whole-monitor admissibility. D112 point 4 ((a)-(d′)) is unchanged and still decides adoption; the reference is the monitor that CLT and item 4 leave.
+   - Why: under the old rule the candidate's threshold goes to the top of the ×2 grid (360 dB²) while the class path breaks the bound, so (d′) fails for a mechanical reason.
+   - Consistency with the lecturer's proposal: it concerns the drop path (path_loss), outside his three states; D112 (a) keeps the jamming and tone_jamming delays from growing; his rows are read under the adopted shared monitor and labelled (D112 point 5); his KPIs are unchanged.
+
+7. **C2g-D earlier (ext_audit section 2, D115 row).**
+   - D116 item 9's C2g-D (about 1.5 h, design unchanged) may run in any machine-idle window under D118 point 2 (gated wrapper, one hand-run, never beside a stage) and never lengthens a window on the path to profile 3 (D118 point 2b). Without such a window it runs after profile 3's KPI, as registered.
+   - Its result is descriptive. D115's gates, LB-S and C2g's selection are not changed on it; any change would need its own registration before the data it governs.
+   - Consistency with the lecturer's proposal: it concerns the DQN's generalization, an extension (the DQN is optional in his proposal); no lecturer row or KPI is touched.
+
+8. **A descriptive speed line on non-emitter threats (ext_audit section 4.3).**
+   - Beside D116 item 5's speed lines (profile 3's C2e; profile 1 post hoc, labelled as there): the 161 km/h line and the speed spread with D117's interval on non-emitter threats only (path_loss, antenna_fault, airframe_shadowing) and the clean link's LINK reading per speed band. Descriptive; never quoted in place of the registered speed verdict (D117).
+   - Stated with it: the attitude loss is applied to our signal only, never to the jammer received by the same tilted dipoles, so under emitter threats in a bank the simulated JSR is too high by an unmeasured amount. This is a model simplification. The physics fix (`uav_attitude_db` on the interferer path with the emitter's bearing and elevation) changes the detector's training frames, so it is a candidate after profile 3, under its own registration.
+   - Consistency with the lecturer's proposal: the speed envelope is our KPI 7's speed part, an extension (his KPI 7, goodput, is untouched); the line is descriptive and follows his mitigation 3 (results broken down by speed range).
+
+9. **D118 updated (ext_audit section 2, D118 row).**
+   - C1d's order: D111 (e) → D103 F → CLT → the drop threshold's re-choice under item 4 → D112 (with item 6).
+   - Tier 1 (never shed; minutes at C1d): CLT, item 4's budget and side calibration, item 6, P-A (with D113), and the prints of items 8, 10 and 11. C4 (item 5) is tier 2 with D111. C2g-D (item 7) runs only in idle windows.
+   - Consistency with the lecturer's proposal: scheduling only; no state, configuration or KPI changes.
+
+10. **P-C: a paired onset-referenced recovery line in `lect_kpis.m`'s CN block (base_audit section 4).**
+    - Per episode, onset → restored = t_conf + t_rec_det. Paired difference CNN row minus blind_core on the episodes both rows recover in: median and mean with a 95% cluster bootstrap over geometries (2000 draws, fixed seed), and beside it the shares recovered by one row only and the never shares, since the pairing conditions on both recovering. Profile 3's C2e and P1-v2; reporting only, it selects nothing.
+    - Consistency with the lecturer's proposal: his recovery time (from detection until PER stays below the threshold for a fixed window, with onset to detection measured apart) stays as defined and reported; the line adds the onset reference his second clarification asks for, so the CNN's delays are not hidden.
+
+11. **Near-OOD and far-OOD lines beside KPI 2's mean (ext_audit section 4.4).**
+    - Partition, fixed now by the physics, before any data: near-OOD = antenna_fault and airframe_shadowing (each has a known sibling with the same RF signature, and the rule maps both to the same answer, `rule_based_policy.m:85-87`); far-OOD = the other eight held-out threats. The mean AUROC over each group is printed beside the 10-threat mean wherever KPI 2 is printed, labelled "descriptive, not KPI 2" (the near/far split of OpenOOD v1.5). The 10-threat mean stays the verdict.
+    - Consistency with the lecturer's proposal: KPI 2 is ours, not in his table; its verdict and definition are unchanged and the lines are descriptive.
+
+**Not adopted under condition 1:** none. No item changes the lecturer's three states, his three configurations, or his KPI definitions and targets.
+
+**Dated lines (31.10.2026)** on D64 (escalation), D90 point 2, D103's fit/check split, D105's extension rows, D106's open point (a), D111 item 5, D112 points 2 and 3, D113 point 1, D116 items 3, 5 and 9, D118 points 1, 2a and 3.
+
+**Sources.**
+- Angelopoulos, Bates, Candès, Jordan & Lei, "Learn then Test", Ann. Appl. Stat. 19(2):1641-1662, 2025; arXiv 2110.01052 (fixed-sequence testing).
+- Clopper & Pearson 1934, Biometrika 26(4); Chow 1970, IEEE Trans. Inf. Theory 16(1) (reject option); Neyman & Pearson 1933.
+- Brennan 1959, Proc. IRE 47 (MRC); McNemar 1947, Psychometrika 12(2).
+- Haroush, Frostig, Heller & Soudry, ICLR 2022, arXiv 2102.12967; Magesh, Veeravalli, Roy & Jha, JMLR 24(378), 2023; Fisher, *Statistical Methods for Research Workers*, 4th ed., 1932.
+- Zhang et al., OpenOOD v1.5, arXiv 2306.09301.
+- Page 1954; Lorden 1971; Moustakides 1986 (as in D112).
+- Audits: `audit31/ext_audit.md` sections 0-5, `audit31/base_audit.md` sections 0-4.
 
