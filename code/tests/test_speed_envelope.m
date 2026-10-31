@@ -527,7 +527,7 @@ src = fileread(which('evaluate_policies'));
 i = [strfind(src, 'spec2 = policy_episodes('), strfind(src, 'RES{si, pk} = policy_run_set('), ...
     strfind(src, 'RS2 = policy_run_set('), strfind(src, 'SPR = spread_boot('), strfind(src, '[SU, spd_lines] = speed_reading(')];
 verifyNumElements(tc, i, 5);
-verifyTrue(tc, issorted(i, 'strictascending'));
+verifyTrue(tc, issorted(i, 'strictascend'));
 end
 
 function test_wiring_train_dqn(tc)
