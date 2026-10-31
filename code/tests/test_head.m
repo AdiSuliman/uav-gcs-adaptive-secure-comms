@@ -436,7 +436,7 @@ verifyError(tc, @() fusion_pick('XYZ'), 'fusion_pick:ext');
 ed = fileread(which('eval_detector'));
 for t = {'isequal(rmfield(Fp.deployed_pick, ''check''), fusion_pick())', 'strcmp(Fz.fusion_rev, fusion_rev_id(''enlarged''))', ...
         'd91 alone, descriptive, never the KPI 1 value', 'if ismember(''base_fm'', {whos(''-file'', ''data/fusion.mat'').name})', ...
-        'if ~isempty(base_alone), metrics.base_alone = base_alone; end', '''%.2f%%; F1 above it %s\n''']
+        'if ~isempty(base_alone), metrics.base_alone = base_alone; end', '''%.2f%%; F1 above it %s\n'''}
     verifyNotEmpty(tc, strfind(ed, t{1}), t{1});
 end
 sf = fileread(which('select_fusion'));
