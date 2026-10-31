@@ -10506,7 +10506,7 @@ fprintf(fid, '%s\n', 'function R = policy_run_set(kind, PP, K, specs, split, ag,
 fclose(fid);
 global APRIME_FLY %#ok<GVMIS>
 APRIME_FLY = {};
-addpath(s); cl = onCleanup(@() stub_off(s, d)); %#ok<NASGU>
+addpath(s); cl = onCleanup(@() recorder_off(s, d)); %#ok<NASGU>
 PPw = struct('alarm_mode', 'class_drop', 'confirm', [3 3], 'drop_db', 4, 'maha_thr', -3, 'unk_mode', 'all');
 Kw = struct('na', 1, 'world', 'fresh');
 specs = {struct('r', 1:64), struct('r', 65:128)};
@@ -10523,7 +10523,7 @@ for i = 1:3
 end
 end
 
-function stub_off(s, d)
+function recorder_off(s, d)
 % Removes the recorder from the path, then its folder.
 rmpath(s); clear('policy_run_set'); clear('global', 'APRIME_FLY');
 rmdir(d, 's');
