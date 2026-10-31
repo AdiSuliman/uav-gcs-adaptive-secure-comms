@@ -72,8 +72,9 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %   PP.s1_gate (rule and rule + escalation without the core option): a lost-branch class
 %   (antenna_fault, airframe_shadowing) is answered, and counts as stuck at no_action for the
 %   escalation, only with harm evidence in the last n cycles of the confirmation (M.harm); else
-%   no_action, the other branches carry the link. The DQN kinds, the core rule and blind_esc are
-%   unchanged.
+%   no_action, the other branches carry the link. PP.s1_gate_core: the same gate applied to the
+%   core rule's answer at the call site (D121 item 2, P-A); rule_core_policy.m itself is
+%   untouched, and off by default (bit-identical). The DQN kinds and blind_esc are unchanged.
 %   PP.release_m (dqn, rule and table kinds, not the core rule and not blind_esc): last, after the
 %   shield-masked argmax and the escalation, a configuration that keeps our channel in view (no
 %   channel_switch or freq_diversity element) is released to no_action when the last
@@ -101,6 +102,7 @@ if core && ~strcmp(base, 'rule')
     error('policy_decide:core', 'policy_decide: the core action set is a rule option, not of %s', kind);
 end
 s1g = ~core && ~blind && strcmp(base, 'rule') && isfield(PP, 's1_gate') && ~isempty(PP.s1_gate) && PP.s1_gate;   % lost-branch gate
+s1gc = core && ~blind && strcmp(base, 'rule') && isfield(PP, 's1_gate_core') && ~isempty(PP.s1_gate_core) && PP.s1_gate_core;   % the same gate, rule_core (D121 item 2, P-A)
 q = [];
 switch base
     case 'dqn'
@@ -131,6 +133,9 @@ switch base
             if core
                 bud.drop_db = M.drop(i); bud.current = A{cfg(i)}; bud.current_db = gk(cfg(i));
                 p = find(strcmp(A, rule_core_policy(M.cls{i}, M.degraded(i), qi(i), qt, M.drop_alarm(i), bud, so, cw, cn)), 1);
+                if s1gc && ismember(M.cls{i}, {'antenna_fault', 'airframe_shadowing'}) && ~M.harm(i)
+                    p = na;   % lost branch, no harm evidence: the gate withholds the class answer (rule_core_policy.m untouched)
+                end
             elseif strcmp(base, 'rule')
                 bud.drop_db = M.drop(i); bud.current = A{cfg(i)}; bud.current_db = gk(cfg(i));
                 hm = []; if s1g, hm = M.harm(i); end
@@ -175,7 +180,7 @@ if endsWith(kind, '_esc')
         if cfg(i) == na, stuck = mem.conf_n(i) >= C.esc; else, stuck = mem.deg_n(i) >= C.esc; end
         none = strcmp(M.cls{i}, 'none');
         byd = ed && none && M.drop_alarm(i) && (cfg(i) == na || gk(cfg(i)) < M.drop(i));   % a drop the configuration does not cover
-        lbn = s1g && cfg(i) == na && ismember(M.cls{i}, {'antenna_fault', 'airframe_shadowing'}) && ~M.harm(i);   % a lost branch without harm is not stuck
+        lbn = (s1g || s1gc) && cfg(i) == na && ismember(M.cls{i}, {'antenna_fault', 'airframe_shadowing'}) && ~M.harm(i);   % a lost branch without harm is not stuck
         if a(i) == cfg(i) && stuck && mem.since(i) >= C.esc && M.confirmed(i) && (~none || byd) && ~lbn
             if byd                                       % the link-budget match first
                 [g, o] = sort(gk(lb)); j = find(g >= M.drop(i), 1); if isempty(j), j = numel(g); end

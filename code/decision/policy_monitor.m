@@ -218,7 +218,8 @@ switch mode
     otherwise
         M.alarm = hostile | M.degraded;
 end
-needHarm = (isfield(PP, 's1_gate') && ~isempty(PP.s1_gate) && PP.s1_gate) || (isfield(PP, 'lb_accept') && ~isempty(PP.lb_accept));
+needHarm = (isfield(PP, 's1_gate') && ~isempty(PP.s1_gate) && PP.s1_gate) || ...
+    (isfield(PP, 's1_gate_core') && ~isempty(PP.s1_gate_core) && PP.s1_gate_core) || (isfield(PP, 'lb_accept') && ~isempty(PP.lb_accept));
 if needHarm                                                     % evidence that a lost branch harms the link, over the confirmation's cycles
     dqm0 = false(1, numel(M.degraded)); if isfield(M, 'deg_quiet'), dqm0 = M.deg_quiet; end
     mem = hist_bits(mem, 'hm', M.degraded | dqm0 | M.drop_alarm);
