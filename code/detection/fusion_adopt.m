@@ -49,8 +49,8 @@ function varargout = fusion_adopt(cmd, varargin)
 %       folds above T1 and above T2 (d.exc, percent) at most 1%; W5 the benign gain in each
 %       component set (points >= 0)
 %   [ok, s] = fusion_adopt('cand', name, d, t)  'LBH', 'GCC', 'CFAR', 'LBH+CFAR', 'GCC+CFAR':
-%       rule S for LBH, GCC and the head part of a combination (S7 for a head), rule W for the
-%       CFAR part
+%       rule S for LBH, GCC and the head part of a combination (S7 for a head; a head without
+%       t fails it), rule W for the CFAR part
 %   [k, ok] = fusion_adopt('pick', names, G, t)  of the candidates passing their rules, the one
 %       with the largest macro-F1 gain over every frame (k index into names, 0 none: B)
 %   [ok, s] = fusion_adopt('nested', picks, d, t)  the nested reading d (each outer fold's
@@ -212,13 +212,18 @@ if nargin < 3, t = []; end
 [hs, hw, hh] = parts(name);
 ok = true; s = struct();
 if hs
-    th = []; if hh, th = t; end
+    th = []; if hh, th = head_t(t); end
     [a, s1] = rule_s(d, th); ok = ok && a; s = s1;
 end
 if hw
     [a, s2] = rule_w(d); ok = ok && a;
     for f = fieldnames(s2)', s.(f{1}) = s2.(f{1}); end
 end
+end
+
+function t = head_t(t)
+% A head's timing for S7; a head judged without one fails it.
+if isempty(t), t = struct('median_ms', NaN, 'p95_ms', NaN, 'det_median_ms', NaN, 'det_p95_ms', NaN); end
 end
 
 function [hs, hw, hh] = parts(name)
@@ -244,7 +249,7 @@ if isempty(p), ok = false; return; end
 [hs, hw, hh] = cellfun(@parts, p);
 ok = true;
 if any(hs)
-    th = []; if any(hh), th = t; end
+    th = []; if any(hh), th = head_t(t); end
     [a, s1] = rule_s(d, th); ok = ok && a; s = s1;
 end
 if any(hw)

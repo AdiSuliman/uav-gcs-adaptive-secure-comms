@@ -11,10 +11,11 @@ function R = m_head(data_dir, out_dir, opt)
 %   3. the nested reading against B: rule S if any outer fold picked a head or the gated
 %      columns, rule W if any picked the idle columns. Step 1's pick is adopted only then.
 %   Read-only copies of the d91 extracts, one thread. Nothing read from a result is printed
-%   before the verdict line, which comes first; a run stopped by its timebox prints none and
-%   voids its fits. Before loading, the inputs must be the recorded extracts (SHA-256) and no
-%   path or file of the fourth test set may be in reach; after loading and before any use, no
-%   row may come from it (sub-run seeds 6 000 000 + run id).
+%   before the verdict line, which comes first; a run that reaches its timebox before the
+%   verdict line, the readings included, prints none and voids its fits. Before loading, the
+%   inputs must be the recorded extracts (SHA-256) and no path or file of the fourth test set
+%   may be in reach; after loading and before any use, no row may come from it (sub-run seeds
+%   6 000 000 + run id).
 %   R = m_head(data_dir, out_dir, opt)
 %   data_dir  copies of sets.mat and ck_p3.mat, checked by their SHA-256 before loading
 %   out_dir   the log m_head_<tag>.txt, the result m_head_<tag>.mat and the fits (ck_<tag>/, a
@@ -33,7 +34,7 @@ function R = m_head(data_dir, out_dir, opt)
 SETS_SHA = '75b7a9cd75b37364248bf35cf9aac50eca23f91cb8ff75442e9f03ee1cbf2c6b';
 CK_SHA = '0ae49158fb9cf01368d7e4aa91405c54b032f17f3c1ebcbc2a935917f2d018b8';
 REG_COMMIT = 'b6628caa64e681e7f9714a30cdbbe8185079620d';   % uav-gcs-v7-docs, the registration of the rule
-RULE_SHA = '5371cec1c5168cad43f55ebd922e3b281abf8fd41e36d9d5efe8f1335a051076';   % fusion_adopt.m, line ends LF
+RULE_SHA = '96cc3549e7a85efc9e428ffb8bb1bc42d98773a0b9060b09febcf77e4cc186c7';   % fusion_adopt.m, line ends LF
 if ischar(data_dir) && strcmp(data_dir, 'candidates'), R = candidates(defaults(out_dir)); return; end
 if ischar(data_dir) && strcmp(data_dir, 'guard'), guard(out_dir, opt, SETS_SHA, CK_SHA); R = true; return; end
 if ischar(data_dir) && strcmp(data_dir, 'set4'), set4(out_dir); R = true; return; end
@@ -157,6 +158,7 @@ Gn = fusion_adopt('paired_cls', yt, yB, yo, above, low, st, classes, B);
 kc = find(contains(picks, 'CFAR'));
 if ~isempty(kc), Gn.exc = exc_pct(D, [], kc); end
 [okn, sn] = fusion_adopt('nested', picks, Gn, t);
+if stopped(opt, ckd, out), R = []; return; end         % the readings past the timebox: no verdict
 pick = ''; if k1 > 0, pick = C{k1}; end
 if opt.quick
     out('\nQUICK code check on every 20th sub-run: every step ran; no reading printed or saved, no verdict (%.1f h)\n', ...
