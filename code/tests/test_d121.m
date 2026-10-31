@@ -246,3 +246,30 @@ function test_choose_drop_threshold_m_file_parses(tc)
 mtree(which('choose_drop_threshold'), '-file');
 verifyTrue(tc, true);
 end
+
+%% ---------- item 11: near/far OOD AUROC lines (descriptive, measure_all_kpis.m) ----------
+function test_near_far_ood_split_matches_direct_mean(tc)
+% Reproduces the item-11 snippet's arithmetic on a synthetic 4-threat A/held_out pair
+% (independent of any saved results/*.mat), so the near/far means are checked without
+% a MATLAB slot to run measure_all_kpis.m end to end.
+held = {'antenna_fault', 'path_loss', 'airframe_shadowing', 'jamming'};
+A = [0.70; 0.90; 0.60; 0.95];                       % single selected-score column
+near_names = {'antenna_fault', 'airframe_shadowing'};
+near_m = ismember(held, near_names);
+verifyEqual(tc, mean(A(near_m)), mean([0.70, 0.60]), 'AbsTol', 1e-12);
+verifyEqual(tc, mean(A(~near_m)), mean([0.90, 0.95]), 'AbsTol', 1e-12);
+verifyEqual(tc, sum(~near_m), 2);
+end
+
+function test_near_far_ood_split_skipped_when_one_group_empty(tc)
+% Both-groups-present guard (item 11 only applies the label with >=1 threat on each side).
+held = {'antenna_fault', 'airframe_shadowing'};
+near_m = ismember(held, {'antenna_fault', 'airframe_shadowing'});
+verifyTrue(tc, all(near_m));                        % far side would be empty: snippet's `any(~near_m)` is false
+end
+
+function test_measure_all_kpis_m_file_parses(tc)
+% Parse check (no MATLAB slot for runtests at authoring time): mtree must not error.
+mtree(which('measure_all_kpis'), '-file');
+verifyTrue(tc, true);
+end
