@@ -247,7 +247,7 @@ for k = reader_files()
     if startsWith(k{1}, 'tests/'), continue; end
     txt = fileread(fullfile(root, 'code', strrep(k{1}, '/', filesep)));
     verifyEmpty(tc, regexp(txt, '(?<![\w.])(rand|randn|randperm|rng|randsample)\s*\(', 'once'), k{1});
-    verifyEmpty(tc, regexp(txt, '(?<![\w.])randi\s*\((?!rs\b)', 'once'), k{1});
+    verifyEmpty(tc, regexp(txt, '(?<![\w.])randi\s*\((?!rs\s*,)', 'once'), k{1});
 end
 end
 
