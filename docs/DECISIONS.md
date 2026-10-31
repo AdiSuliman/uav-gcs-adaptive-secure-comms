@@ -2794,7 +2794,7 @@ Item 7 is the one exception. Its routing may switch on D117 point 3, a training 
    - Named exceptions:
      - beside P1R's C2, the jobs of D110 point 8's D104 amendment, under its guards;
      - beside deployment step 7a, D111's OOD run (7a under 6 GB, the OOD run at 45 GB) when the gate passes.
-   - Nothing else runs beside another MATLAB.
+   - Nothing else runs beside another MATLAB. *[Amended 31.10.2026 (registered under decide-after-30min, Adi silent since 30.10.2026 19:37): also named, rx_fix_rule3.md's D3 dispatch beside P1R's C2 only, under D104 point 1's dated line of 31.10.2026 (see D109, D3 placement).]*
    - One background completion notice per run; no polling agents (bug 8).
 
    2a. **Deployment is not held for this plan's code.**
