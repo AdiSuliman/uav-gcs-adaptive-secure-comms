@@ -584,7 +584,8 @@ function test_c2e_columns_wiring(tc)
 % without and with the completion on the main runs' frame draws; the forced mark stops outside the smoke.
 src = fileread(which('evaluate_policies'));
 pos = @(s) strfind(src, s);
-a = pos('LBC = [];'); b = pos('if isfield(Q, ''dec'') && isstruct(Q.dec) && isfield(Q.dec, ''lb_complete'')');
+a = pos('LBC = [];');
+b = regexp(src, 'if isfield\(Q, ''dec''\) && isstruct\(Q\.dec\) && isfield\(Q\.dec, ''lb_complete''\)[ \t]*\r?\n', 'start');   % the guard, not the label block
 c = pos('LBC = lb_flights(PP, K, Q, sets, RES, POL, sel, fixed_best, fixed_mmse, tab, ebno_thr);');
 d = pos('%% 3b. Envelope predicted on the VALIDATION split'); e = pos('for si = 1:numel(sets)');
 for x = {a, b, c, d}, verifyNumElements(tc, x{1}, 1); end
