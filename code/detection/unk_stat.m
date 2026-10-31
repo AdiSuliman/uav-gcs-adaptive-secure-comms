@@ -17,14 +17,16 @@ function varargout = unk_stat(cmd, varargin)
 %                                      never moves a window's rank against its own calibration)
 %   u = unk_stat('U', U, s0, X, full)  U of windows (column): s0 their s0 statistic, X their cue
 %                                      rows, full false where the cue window is not full
-%                                      (p_cue = 1 there, so U = p0); U.use0 false (C3, the cue
-%                                      alone): U = p_cue; a NaN s0 gives NaN (never flagged)
+%                                      (p_cue = 1 there, so U = p0 for every candidate: the first
+%                                      cycles behave as today, D111 item 7); U.use0 false (C3,
+%                                      the cue alone): U = p_cue where the cue window is full; a
+%                                      NaN s0 gives NaN (never flagged)
 %   u = unk_stat('U', U, s0, X, full, true)  the same, every row scored alone
-%   u = unk_stat('frame', U, s0)       U of frames without their window (p_cue = 1): the
+%   u = unk_stat('frame', U, s0)       U of frames without their window (p_cue = 1, so p0): the
 %                                      per-frame flag of link_env.m and episode_cycle.m
 %   U = unk_stat('model', S)           FM.unk from the fields of S, checked: cand ('C1', 'C2',
-%                                      'C3'), use0, cue ('maha', 'if'), scale, model, cal0 (with
-%                                      use0), cal1, val (U on the selection half's known windows),
+%                                      'C3'), use0, cue ('maha', 'if'), scale, model, cal0, cal1,
+%                                      val (U on the selection half's known windows),
 %                                      nw (the cue window, cycles), step_n (ood_cue.m), N (the
 %                                      fusion window), score and win (s0's)
 switch cmd
@@ -45,18 +47,14 @@ switch cmd
         alone = numel(varargin) >= 5 && varargin{5};
         s0 = double(s0(:)); n = numel(s0);
         if isscalar(full), full = repmat(logical(full), n, 1); else, full = logical(full(:)); end
-        pc = ones(n, 1);
+        p0 = pval(U.cal0, s0); pc = ones(n, 1);
         if any(full), pc(full) = pval(U.cal1, cue_score(U, X(full, :), alone)); end
-        u = pc;
-        if U.use0
-            u = min(pval(U.cal0, s0), pc);
-            u(isnan(s0)) = NaN;
-        end
+        if U.use0, u = min(p0, pc); else, u = pc; u(~full) = p0(~full); end
+        u(isnan(s0)) = NaN;
         varargout{1} = u;
     case 'frame'
         [U, s0] = varargin{:};
-        if U.use0, u = pval(U.cal0, s0); else, u = ones(size(s0)); u(isnan(s0)) = NaN; end
-        varargout{1} = u;
+        varargout{1} = pval(U.cal0, s0);
     case 'model'
         varargout{1} = model(varargin{1});
     otherwise
@@ -92,14 +90,14 @@ end
 end
 
 function U = model(S)
-need = {'cand', 'use0', 'cue', 'scale', 'model', 'cal1', 'val', 'nw', 'step_n', 'N', 'score', 'win'};
+need = {'cand', 'use0', 'cue', 'scale', 'model', 'cal0', 'cal1', 'val', 'nw', 'step_n', 'N', 'score', 'win'};
 miss = need(~isfield(S, need));
 assert(isempty(miss), 'unk_stat:model', 'unk_stat: FM.unk lacks %s', strjoin(miss, ', '));
 assert(ismember(S.cand, {'C1', 'C2', 'C3'}) && ismember(S.cue, {'maha', 'if'}), 'unk_stat:model', ...
     'unk_stat: FM.unk is candidate %s with cue score %s', S.cand, S.cue);
 assert(S.use0 == ~strcmp(S.cand, 'C3') && strcmp(S.cue, 'if') == strcmp(S.cand, 'C2'), 'unk_stat:model', ...
     'unk_stat: candidate %s with use0 %d and cue score %s', S.cand, S.use0, S.cue);
-if S.use0, assert(isfield(S, 'cal0') && isstruct(S.cal0), 'unk_stat:model', 'unk_stat: FM.unk lacks cal0'); end
+assert(isstruct(S.cal0) && isstruct(S.cal1), 'unk_stat:model', 'unk_stat: FM.unk lacks a calibration');
 v = double(S.val(:));
 assert(~isempty(v) && all(isfinite(v)) && issorted(v), 'unk_stat:model', 'unk_stat: FM.unk.val must be sorted and finite');
 assert(S.nw >= max([S.N, S.step_n, S.win, window_cues('branch_window')]), 'unk_stat:model', ...

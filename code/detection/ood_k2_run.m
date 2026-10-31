@@ -11,18 +11,21 @@
 % scored alone, as the monitor scores it). The rule of items 5-6 (ood_k2_rules.m 'decide') reads
 % the validation AUROC, its paired bootstrap (sub-runs within each threat, 2000 draws, fixed
 % seeds), each known class's flagged share at the threshold keeping 95% of the selection half's
-% known windows, the static and parity checks (a replay of validation sub-runs through
-% policy_monitor.m against the offline U) and D80's latency admission (kpi7_admit.m on s0's
-% detector cost of the 18.10 run plus U's own).
-% Its global verdict goes to docs/d111_ood_select_p3.txt with the SHA-256 of the rule code; on
-% C1, C2 or C3 the production FM.unk (the cue model on every training window, s0 and the cue
-% calibrated on the validation fit half, FM.unk.val U on the selection half's known windows) is
-% added to data/fusion.mat (unk_write.m 'add'). Fold models and validation values go to
-% results/ood_k2/.
-% read: only with the select record committed and adopting C1-C3, its rule code unchanged, B3r's
-% committed record of this params_id, FM.unk in data/fusion.mat and no OOD set-4 marker
-% (results/ood_k2_read_started.txt), written before data/splits_fresh3.mat is loaded; a second
-% reading is refused. For each held-out threat the fold's models read set 4: the candidate the rule
+% known windows, and per candidate the static and parity checks (validation sub-runs replayed
+% through policy_decide.m, the window's U and flag and the frame sites' U against the offline U,
+% ood_k2_rules.m 'parity') and D80's latency admission (kpi7_admit.m on s0's detector cost of the
+% 18.10 run plus U's own, 'latency'). It starts only after B3r's committed record of this
+% params_id (D118 point 1).
+% Its global verdict goes to docs/d111_ood_select_p3.txt with the SHA-256 of the rule code and of
+% the outputs the read phase loads (results/ood_k2_select.mat, every fold file); on C1, C2 or C3
+% the production FM.unk (the cue model on every training window, s0 and the cue calibrated on the
+% validation fit half, FM.unk.val U on the selection half's known windows) is added to
+% data/fusion.mat (unk_write.m 'add'). Fold models and validation values go to results/ood_k2/.
+% read: only with the select record committed and adopting C1-C3, its rule code and the outputs
+% it names unchanged (their verdict the record's, every threat held out), B3r's committed record
+% of this params_id, the adopted candidate's unforced FM.unk in data/fusion.mat and no OOD set-4
+% marker (results/ood_k2_read_started.txt), written before data/splits_fresh3.mat is loaded; a
+% second reading is refused. For each held-out threat the fold's models read set 4: the candidate the rule
 % picks on the other nine threats' validation ((a)-(c); C0 where none passes), the 18.10 procedure
 % (the nested pick over the original pairs within the 18.10 KPI 7 admission, ood_select.m: the
 % like-for-like replication of 0.763) and C0. AUROC and FPR95 per held-out threat only (D91's
@@ -32,11 +35,13 @@
 % Both phases: the docs commit registering D111 printed (REG_COMMIT, DOCS_REPO or profile.json);
 % s0's (score, window) must be (last_or_if, 1); data/trained_detector.mat and
 % data/ood_thresholds.mat are never written (their SHA-256 equal at the end); eval_ood_detection.m's
-% save step is not part of this run. SMOKE: two threats, 3 epochs, 50 draws, no registration check,
-% the select record in results/; OOD_FORCE (smoke only) deploys the named candidate whatever the
-% verdict, marked FM.unk.forced.
+% save step is not part of this run. SMOKE: two threats, 3 epochs, 50 draws, no registration or
+% B3r check, its select record, select files and fold files under their own names in results/;
+% OOD_FORCE (smoke only) deploys the named candidate whatever the verdict, marked FM.unk.forced.
 % Output: select: docs/d111_ood_select_p3.txt, results/ood_k2_select.{txt,mat},
-% results/ood_k2/fold_<i>.mat, FM.unk in data/fusion.mat on adoption; read:
+% results/ood_k2/fold_<i>.mat, FM.unk in data/fusion.mat on adoption (smoke:
+% results/d111_ood_select_smoke.txt, results/ood_k2_smoke_select.{txt,mat},
+% results/ood_k2_smoke/fold_<i>.mat); read:
 % results/ood_k2_read_started.txt, results/ood_k2_read.{txt,mat}
 
 close all; clc;
@@ -54,7 +59,9 @@ if ~SMK, [reg, reg_txt] = ood_k2_rules('registered', DOCS_REPO, REG_COMMIT); end
 [cm, tr] = ood_k2_rules('commit');
 RULE = {'ood_k2_run.m', 'ood_k2_rules.m', 'ood_cue.m', 'unk_stat.m', 'unk_write.m', 'ood_loto_split.m'};
 SEL_REC = 'docs/d111_ood_select_p3.txt'; if SMK, SEL_REC = 'results/d111_ood_select_smoke.txt'; end
-RD_MARK = 'results/ood_k2_read_started.txt'; FOLD_DIR = 'results/ood_k2';
+RD_MARK = 'results/ood_k2_read_started.txt'; FOLD_DIR = 'results/ood_k2'; SEL_OUT = 'results/ood_k2_select';
+if SMK, FOLD_DIR = 'results/ood_k2_smoke'; SEL_OUT = 'results/ood_k2_smoke_select'; end
+SEL_MAT = [SEL_OUT '.mat']; ffile = @(h) sprintf('%s/fold_%d.mat', FOLD_DIR, h);
 FROZEN = {'data/trained_detector.mat', 'data/ood_thresholds.mat'};
 sha0 = cellfun(@frozen_sha, FROZEN, 'UniformOutput', false);
 D0 = load('data/trained_detector.mat', 'net', 'ood', 'classes');
@@ -78,6 +85,8 @@ t0 = tic;
 
 if strcmp(OOD_PHASE, 'select')
     %% S1. Data and the cue rows (no test set is read)
+    assert(SMK || ood_k2_rules('b3r_recorded', pid), 'ood_k2_run:b3r', ...
+        'no committed B3r record of params_id %s (docs/d91_fresh3_read_*.txt): the OOD run comes after B3r', pid);
     assert(~isfile(SEL_REC), 'ood_k2_run:selected', '%s exists: the select phase runs once', SEL_REC);
     Lr = load('results/ood_detection.mat', 'LC', 'SC');  % the 18.10 run: its KPI 7 admission of the original candidates
     assert(isequal(Lr.SC, SC), 'ood_k2_run:candidates', 'the 18.10 run scored other candidates');
@@ -126,7 +135,8 @@ if strcmp(OOD_PHASE, 'select')
             'UniformOutput', false), '  '));
         if h == 1, MpV = nan(T, numel(SC) * numel(WALL)); end
         MpV(h, :) = reshape(Q.val', 1, []);             % (candidate, window) pairs, candidate-major
-        save(fullfile(FOLD_DIR, sprintf('fold_%d.mat', h)), 'k', 'known', 'net', 'M', 'U', 'Sv', 'V', 'Wv', 'F', '-v7.3');
+        F = rmfield(F, {'ytr', 'yv'});
+        save(ffile(h), 'k', 'known', 'net', 'M', 'U', 'Sv', 'V', 'Wv', 'F', '-v7.3');
         clear net M Sv va V Q U Wv F
     end
     [pw, pj] = ndgrid(WALL, 1:numel(SC)); pj = pj(:)'; pw = pw(:)';
@@ -138,9 +148,12 @@ if strcmp(OOD_PHASE, 'select')
     s0p = ood_window(D0v.maha, sp.val.run, sp.val.pos, W0);
     Fp = ood_loto_split('masks', sp, '');              % every class known: the fit and selection halves
     [Up, Wp] = fold_models(Xtr, Xva, Fp, s0p, fva, N, Ns, NW, W0, 9399);
-    par = parity(Up, FZ, D0v, sp.val, fn, all_classes, Wp, N_PAR);
-    lat = latency(Up, Xva(fva, :), s0p(fva), N_LAT, Lr.LC, CAND);
-    ok = [true, static_ok & par.ok & lat.ok];
+    p0 = load('params.mat').params;
+    PP0 = struct('actions', {policy_actions()}, 'classes', {all_classes}, 'sps', p0.sps, 'bps', p0.bits_per_symbol, ...
+        'maha_thr', 0, 'fuse_N', FZ.N, 'unk_retain', 0.95);
+    par = ood_k2_rules('parity', Up, FZ.FM, PP0, D0v, sp.val, fn, Wp, s0p, N_PAR);
+    lat = ood_k2_rules('latency', Up, Xva(fva, :), s0p(fva), N_LAT, Lr.LC, sp.val, fn);
+    ok = [true, static_ok & par.ok & lat.ok];          % one flag per candidate
     D = ood_k2_rules('decide', A, Bd, Fk, Nk, ok, 1:T);
     verdict = CN{D.pick};
 
@@ -153,10 +166,12 @@ if strcmp(OOD_PHASE, 'select')
     end
     rs{end+1} = sprintf('%-20s %s', 'mean', sprintf(' %8.3f', D.mean));
     rs{end+1} = sprintf(['Checks per candidate (a) mean >= C0 + 0.010 and 5th percentile of the mean paired difference > 0 ' ...
-        '(lb), (b) no threat loses > 0.03, (c) no known class flagged > 2x C0 or > 10%%, (d) static %s, parity %s ' ...
-        '(max |U monitor - U offline| %.2g over %d sub-runs), latency %s (U median / p95 %.3f / %.3f ms on s0''s %.2f / %.2f): %s'], ...
-        tf(static_ok), tf(par.ok), par.err, par.n, tf(lat.ok), lat.med, lat.p95, lat.med0, lat.p950, ...
-        strjoin(arrayfun(@(j) sprintf('%s a %s (lb %.4f) b %s c %s -> %s', CN{j}, tf(D.a(j)), D.lb(j), tf(D.b(j)), tf(D.c(j)), ...
+        '(lb), (b) no threat loses > 0.03, (c) no known class flagged > 2x C0 or > 10%%, (d) static %s and parity over %d ' ...
+        'sub-runs (max |U monitor - U offline| of the window, of the frame sites, flags differing), latency (U median / p95 ' ...
+        'ms on s0''s %.2f / %.2f): %s'], tf(static_ok), par.n, lat.med0, lat.p950, ...
+        strjoin(arrayfun(@(j) sprintf(['%s a %s (lb %.4f) b %s c %s parity %s (%.2g, %.2g, %d) latency %s (%.3f / %.3f) ' ...
+        '-> %s'], CN{j}, tf(D.a(j)), D.lb(j), tf(D.b(j)), tf(D.c(j)), tf(par.ok(j - 1)), par.err(j - 1), ...
+        par.err_frame(j - 1), par.flag(j - 1), tf(lat.ok(j - 1)), lat.med(j - 1), lat.p95(j - 1), ...
         ternary(D.eligible(j), 'eligible', 'not eligible')), 2:J, 'UniformOutput', false), '; '));
     rs{end+1} = sprintf(['The 18.10 procedure on these folds: %s over %d cycles, validation mean %.3f (pairs within the 18.10 ' ...
         'KPI 7 admission).'], SC{pj(b18)}, pw(b18), mean(MpV(:, b18)));
@@ -164,9 +179,12 @@ if strcmp(OOD_PHASE, 'select')
     rs{end+1} = sprintf('Global verdict (D111 items 5-6, all ten held-out threats; it decides deployment only): %s. %s', ...
         verdict, ternary(D.pick > 1, 'FM.unk is added to data/fusion.mat; the read phase may run after B3r.', ...
         'C0 stays: set 4 gets no OOD reader and KPI 2 stays 0.763.'));
+    save(SEL_MAT, 'held_out', 'CN', 'A', 'Bd', 'Fk', 'Nk', 'ok', 'D', 'verdict', 'MpV', 'pj', 'pw', ...
+        'okp', 'b18', 'nb18', 'SC', 'WALL', 'static_ok', 'par', 'lat', 'Up', 'NB', 'NW', 'N', 'Ns', 'reg', 'cm', 'tr', '-v7.3');
+    rs = [rs, ood_k2_rules('inputs', [{SEL_MAT}, arrayfun(ffile, 1:T, 'UniformOutput', false)])];   % what the read phase loads
     if ~isempty(fileparts(SEL_REC)) && ~isfolder(fileparts(SEL_REC)), mkdir(fileparts(SEL_REC)); end
     fid = fopen(SEL_REC, 'w'); fprintf(fid, '%s\n', rs{:}); fclose(fid);
-    fid = fopen('results/ood_k2_select.txt', 'w'); fprintf(fid, '%s\n', rs{:}); fclose(fid);
+    fid = fopen([SEL_OUT '.txt'], 'w'); fprintf(fid, '%s\n', rs{:}); fclose(fid);
     fprintf('%s\n', rs{numel(rep) + 1:end});
     fprintf('Select record %s, SHA-256 %s: commit it before the read phase\n', SEL_REC, kpi6_fresh_marker('sha', SEL_REC));
     dep = '';
@@ -178,11 +196,9 @@ if strcmp(OOD_PHASE, 'select')
         unk_write('add', Ud, 'data/fusion.mat');
         fprintf('FM.unk (%s) added to data/fusion.mat\n', dep);
     end
-    save('results/ood_k2_select.mat', 'held_out', 'CN', 'A', 'Bd', 'Fk', 'Nk', 'ok', 'D', 'verdict', 'MpV', 'pj', 'pw', ...
-        'okp', 'b18', 'nb18', 'SC', 'WALL', 'static_ok', 'par', 'lat', 'Up', 'NB', 'NW', 'N', 'Ns', 'reg', 'cm', 'tr', '-v7.3');
 else
     %% R1. Guards, then the set-4 marker before any of its data
-    [verdict, shas] = ood_k2_rules('select_record', SEL_REC);
+    [verdict, shas, ins] = ood_k2_rules('select_record', SEL_REC);
     assert(ismember(verdict, {'C1', 'C2', 'C3'}), 'ood_k2_run:not_adopted', ...
         'the select verdict is %s: set 4 gets no OOD reader and KPI 2 stays 0.763', verdict);
     assert(isequal(sort(shas(:)), sort(ood_k2_rules('sha', RULE)')), 'ood_k2_run:rule_changed', ...
@@ -190,9 +206,24 @@ else
     assert(ood_k2_rules('b3r_recorded', pid), 'ood_k2_run:b3r', ...
         'no committed B3r record of params_id %s (docs/d91_fresh3_read_*.txt): the OOD reading comes strictly after B3r', pid);
     assert(unk_stat('on', struct('fuse', FZ.FM)), 'ood_k2_run:unk', 'data/fusion.mat holds no FM.unk');
+    assert(strcmp(FZ.FM.unk.cand, verdict) && ~isfield(FZ.FM.unk, 'forced'), 'ood_k2_run:unk_cand', ...
+        'data/fusion.mat holds FM.unk of %s%s, not the adopted %s', FZ.FM.unk.cand, ...
+        ternary(isfield(FZ.FM.unk, 'forced'), ' (forced in a smoke)', ''), verdict);
     assert(~isfile(RD_MARK), 'ood_k2_run:read_started', '%s exists: the OOD run reads set 4 once', RD_MARK);
     assert(isfile('data/splits_fresh3.mat'), 'ood_k2_run:fresh3', 'data/splits_fresh3.mat not found');
-    Sel = load('results/ood_k2_select.mat');
+    nm = cellfun(@(x) x{1}, regexp(ins, '^input_sha256 (\S+) ', 'tokens', 'once'), 'UniformOutput', false);
+    assert(~isempty(ins) && isequal(sort(ins(:)), sort(ood_k2_rules('inputs', nm(:)))), 'ood_k2_run:inputs', ...
+        'the select phase''s outputs are not the ones its record names (changed, missing or a smoke''s)');
+    Sel = load(SEL_MAT);
+    T = numel(Sel.held_out);
+    assert(isequal(sort(nm(:)), sort([{SEL_MAT}, arrayfun(ffile, 1:T, 'UniformOutput', false)]')), 'ood_k2_run:inputs', ...
+        'the select record names other files than %s and its %d fold files', SEL_MAT, T);
+    hc = setdiff(cellstr(string(D0.classes(:)')), {'none'});
+    assert(isequal(sort(Sel.held_out(:)), sort(hc(:))), 'ood_k2_run:held_out', ...
+        'the select phase held out %d threats, not every threat but none (%d)', T, numel(hc));
+    Ds = ood_k2_rules('decide', Sel.A, Sel.Bd, Sel.Fk, Sel.Nk, Sel.ok, 1:T);
+    assert(strcmp(Sel.verdict, verdict) && strcmp(CN{Ds.pick}, verdict), 'ood_k2_run:select_mat', ...
+        'the select outputs give the verdict %s (rule %s), not the record''s %s', Sel.verdict, CN{Ds.pick}, verdict);
     fid = fopen(RD_MARK, 'w'); assert(fid > 0, 'ood_k2_run:marker', 'cannot write %s', RD_MARK);
     fprintf(fid, ['D111 OOD set-4 reading started\ntime %s\ncommit %s\ncode_tree %s\nparams_id %s\n%s\nselect record %s ' ...
         'sha256 %s\nverdict %s\n'], datestr(now, 'yyyy-mm-dd HH:MM:SS'), cm, tr, pid, reg_txt, SEL_REC, ...
@@ -208,11 +239,11 @@ else
     C = numel(sp.classes);
     X4 = ood_cue('split', fresh, sp.norm.feat_names, C, N);
     f4 = ood_cue('fill', fresh.run, fresh.pos) >= NW;
-    T = numel(Sel.held_out); J = numel(CN);
+    J = numel(CN);
     [A4, FP4] = deal(nan(T, J)); [Aad, A18, FPad, FP18, pick] = deal(nan(1, T));
     Bg = nan(NB, T, 2);
     for h = 1:T
-        Fd = load(fullfile(FOLD_DIR, sprintf('fold_%d.mat', h)));
+        Fd = load(ffile(h));
         k = Fd.k; known = Fd.known;
         [~, ~, ~, ~, te] = ood_loto_split(sp, fresh, k);
         St = all_scores(Fd.net, Fd.M, te);
@@ -294,57 +325,6 @@ for j = 1:3
     S.val = sort(Wv(F.kn, j));
     U{j} = unk_stat('model', S);
 end
-end
-
-function o = par_obs(sp, fn, D0v, f)
-% The monitor's observation of validation frame f (policy_monitor.m): link features in
-% link_features.m's order.
-[~, jf] = ismember(link_features('names'), fn);
-o = struct('probs', D0v.probs(:, f)', 'unknown', false, 'maha', D0v.maha(f), 'feat', double(sp.feats_raw(f, jf)), ...
-    'gant', double(sp.gain_ant(f, :)));
-if isfield(sp, 'idle') && ~isempty(sp.idle), o.idle = double(sp.idle(f, :)); end
-if isfield(sp, 'bch') && ~isempty(sp.bch), o.bch = double(sp.bch(f, :)); end
-end
-
-function R = parity(U, FZ, D0v, sp, fn, classes, Wp, nPar)
-% D111 (d): U of the monitor on replayed validation sub-runs equals the offline U, for every
-% candidate model (unk_stat.m through policy_monitor.m, PP.fuse = the deployed fusion with it).
-runs = unique(sp.run, 'stable'); runs = runs(round(linspace(1, numel(runs), min(nPar, numel(runs)))));
-A = policy_actions(); na = find(strcmp(A, 'no_action'));
-p0 = load('params.mat').params;
-err = 0;
-for j = 1:numel(U)
-    FM = FZ.FM; FM.unk = U{j};
-    PP = struct('actions', {A}, 'classes', {classes}, 'sps', p0.sps, 'bps', p0.bits_per_symbol, 'maha_thr', 0, ...
-        'fuse', FM, 'fuse_N', FZ.N, 'unk_win', U{j}.win, 'unk_retain', 0.95);
-    for r = runs(:)'
-        ix = find(sp.run == r); [~, o] = sort(sp.pos(ix)); ix = ix(o);
-        mem = policy_monitor('init', 1, numel(A));
-        for i = ix(:)'
-            [mem, M] = policy_monitor('update', mem, par_obs(sp, fn, D0v, i), PP, na);
-            mem = policy_monitor('change', mem, false);
-            err = max(err, abs(M.unk_u - Wp(i, j)));
-        end
-    end
-end
-R = struct('ok', err == 0, 'err', err, 'n', numel(runs));
-end
-
-function L = latency(U, X, s0, n, LC, CAND)
-% U's own cost per decision (one window: scaling, the cue score, the two p-values), median and
-% p95 [ms] over n calls after 10 warm-up calls, added to s0's detector cost of the 18.10 run on
-% its device (ood_latency.m); admitted when the sum fits kpi7_admit.m.
-j0 = strcmp(CAND, 'last_or_if');
-t = zeros(numel(U), 10 + n);
-for j = 1:numel(U)
-    for r = 1:10 + n
-        i = mod(r - 1, size(X, 1)) + 1;
-        c = tic; unk_stat('U', U{j}, s0(i), X(i, :), true); t(j, r) = 1000 * toc(c);
-    end
-end
-t = sort(t(:, 11:end), 2);
-L = struct('med', max(median(t, 2)), 'p95', max(t(:, ceil(0.95 * n))), 'med0', LC.med(j0), 'p950', LC.p95(j0));
-L.ok = kpi7_admit(L.med0 + L.med, L.p950 + L.p95);
 end
 
 function S = all_scores(net, M, P)

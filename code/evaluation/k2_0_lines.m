@@ -17,8 +17,9 @@ function L = k2_0_lines(cmd, varargin)
 %       FPR_k the nested pick's FPR95 (NEST.fpr95; else the production score sel's per frame),
 %       s_k R.same_action, over all its mapped frames (eval_ood_detection.m), 0 for a threat
 %       whose countermeasure is no_action; at 95% only (the file holds no other retention)
-%   L = k2_0_lines('kpi', O)  measure_all_kpis.m's lines: 'bounds' on its KPI 2 file O, the
-%       reading set named. Neither OOD run keeps per-window values with a class read: D111's
+%   L = k2_0_lines('kpi', O, u)  measure_all_kpis.m's lines: 'bounds' on its KPI 2 file O, the
+%       reading set named; u true while D111's FM.unk is deployed: the bounds then describe the
+%       earlier statistic s0. Neither OOD run keeps per-window values with a class read: D111's
 %       set-4 reading prints AUROC and FPR95 per held-out threat only (D91's dated line)
 %   L = k2_0_lines('file', f, out)  'bounds' on the file f (a read-only copy), printed and
 %       written to out (profile 1's bound reader)
@@ -26,14 +27,16 @@ switch cmd
     case 'windows', L = win_lines(varargin{:});
     case 'bounds',  L = bound_lines(varargin{:});
     case 'kpi'
-        O = varargin{1};
+        O = varargin{1}; u = numel(varargin) >= 2 && varargin{2};
         rd = 'reading set not recorded'; if isfield(O, 'TEST_SET'), rd = O.TEST_SET; end
-        L = [{sprintf('K2-0 on the %s (results/ood_detection.mat)', rd)}, bound_lines(O.R, O.NEST, O.sel, O.SC)];
+        h = sprintf('K2-0 on the %s (results/ood_detection.mat), descriptive, not KPI 2', rd);
+        if u, h = [h '; the bounds describe the earlier statistic s0, not D111''s deployed U']; end
+        L = [{h}, bound_lines(O.R, O.NEST, O.sel, O.SC)];
     case 'file'
         [f, out] = varargin{:};
         O = load(f, 'R', 'NEST', 'sel', 'SC', 'TEST_SET');
         rd = 'reading set not recorded'; if isfield(O, 'TEST_SET'), rd = O.TEST_SET; end
-        L = [{sprintf('K2-0 bounds of %s (%s), %s', f, rd, datestr(now, 'yyyy-mm-dd HH:MM:SS'))}, ...
+        L = [{sprintf('K2-0 bounds of %s (%s), %s, descriptive, not KPI 2', f, rd, datestr(now, 'yyyy-mm-dd HH:MM:SS'))}, ...
             bound_lines(O.R, O.NEST, O.sel, O.SC)];
         fid = fopen(out, 'w'); assert(fid > 0, 'k2_0_lines:write', 'cannot write %s', out);
         fprintf(fid, '%s\n', L{:}); fclose(fid);

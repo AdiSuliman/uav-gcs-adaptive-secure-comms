@@ -12,7 +12,8 @@ function varargout = ood_k2_rules(cmd, varargin)
 %       F    threats x classes x candidates, the known validation windows (selection half) of each
 %            class flagged unknown at the threshold keeping 95% of them; N threats x classes their
 %            number
-%       ok   1 x candidates, (d) (the static and parity tests) and D80's latency admission
+%       ok   1 x candidates, (d) (the static and parity tests) and D80's latency admission, one
+%            flag per candidate (C0's true)
 %       (a) mean AUROC >= C0's + 0.010 and the 5th percentile of the draws' mean paired difference
 %       > 0; (b) no threat loses more than 0.03; (c) no class flagged more than twice as often as
 %       under C0, nor above 10%; D.eligible, D.pick (1 = C0: none eligible; else the eligible
@@ -22,6 +23,22 @@ function varargout = ood_k2_rules(cmd, varargin)
 %       sub-runs resampled with replacement within each group, one fixed-seed stream
 %   a = ood_k2_rules('auroc', p, q)  P(known p > held-out q) + half the ties (ood_fold_metrics.m)
 %   tf = ood_k2_rules('static', names)  no class probability, label or truth field in a cue row
+%   R = ood_k2_rules('parity', U, FM, PP0, D, sp, fn, Wp, s0, nPar)  (d) per candidate model U{j}
+%       on nPar validation sub-runs of sp replayed from their first frame (D: the production
+%       detector's probs, classes x frames, and maha per frame; PP0 the monitor's settings; FM
+%       the deployed fusion): at every site of item 7 U equals the offline U, the window's
+%       (policy_monitor.m through policy_decide.m, its flag info.unk, which episode_cycle.m
+%       shows) against Wp(:, j), the frame's (link_env.m, episode_cycle.m: unk_stat 'frame' of
+%       the frame's score, the flag the observation carries) against the offline U of the
+%       frame's window with p_cue = 1 (s0 the windows' s0 statistic); R.ok, R.err, R.err_frame,
+%       R.flag (1 x candidates), R.n
+%   L = ood_k2_rules('latency', U, X, s0, n, LC, sp, fn)  D80's admission per candidate: U's
+%       own cost per decision (the step window's window_cues.m call when U.step_n > 0, the
+%       scaling, the cue score, the two p-values) on the windows X, s0, median and p95 [ms]
+%       over n calls after 10 warm-up calls, added to s0's detector cost of the 18.10 run (LC,
+%       ood_latency.m); L.ok where the sum fits kpi7_admit.m, L.med, L.p95 (1 x candidates)
+%   L = ood_k2_rules('inputs', files)  'input_sha256 <file> <SHA-256>' of each file ('absent'
+%       without it): the select phase's outputs the read phase loads
 %   [h, L] = ood_k2_rules('registered', repo, commit)  the docs repository's commit that registers
 %       D110-D118 (its DECISIONS.md holds D111's heading): its full hash, or an error; an empty
 %       commit or repo is read from profile.json (registration_commit, docs_repo), the repo else
@@ -29,8 +46,8 @@ function varargout = ood_k2_rules(cmd, varargin)
 %   L = ood_k2_rules('sha', files)  'rule_sha256 <file> <SHA-256>' of each code file (by name)
 %   tf = ood_k2_rules('b3r_recorded', pid)  a committed B3r record, docs/d91_fresh3_read_*.txt
 %       (aborted ones aside), names params_id pid
-%   [v, S] = ood_k2_rules('select_record', f)  the committed select record f (tracked, unchanged):
-%       its verdict ('C0' to 'C3') and its rule_sha256 lines
+%   [v, S, I] = ood_k2_rules('select_record', f)  the committed select record f (tracked,
+%       unchanged): its verdict ('C0' to 'C3'), its rule_sha256 and its input_sha256 lines
 %   [cm, tr] = ood_k2_rules('commit')  the code checkout's commit and code tree
 NAMED = {'path_loss', 'jamming', 'antenna_fault', 'airframe_shadowing'};
 switch cmd
@@ -57,6 +74,13 @@ switch cmd
             'lev_db', 'level', 'ebno', 'ebno_rx', 'speed', 'roll_in', 'alt_m', 'bank', 'ds_ns', 'aoa', 'act', 'act_idle', ...
             'draws', 'run', 'pos'});
         varargout{1} = ~any(bad);
+    case 'parity'
+        varargout{1} = parity(varargin{:});
+    case 'latency'
+        varargout{1} = latency(varargin{:});
+    case 'inputs'
+        f = varargin{1};
+        varargout{1} = cellfun(@(x) sprintf('input_sha256 %s %s', x, sha_or_absent(x)), f, 'UniformOutput', false);
     case 'registered'
         [repo, commit] = varargin{:};
         P = struct(); if isfile('profile.json'), P = jsondecode(fileread('profile.json')); end
@@ -92,7 +116,7 @@ switch cmd
         L = strtrim(splitlines(fileread(f)));
         v = regexp(L, '^verdict (C[0-3])\b', 'tokens', 'once'); v = v(~cellfun(@isempty, v));
         assert(numel(v) == 1, 'ood_k2_rules:select_record', '%s holds no single verdict line', f);
-        varargout = {v{1}{1}, L(startsWith(L, 'rule_sha256 '))};
+        varargout = {v{1}{1}, L(startsWith(L, 'rule_sha256 ')), L(startsWith(L, 'input_sha256 '))};
     case 'commit'
         [varargout{1}, varargout{2}] = code_commit();
     otherwise
@@ -102,6 +126,7 @@ end
 
 function D = decide(A, B, F, N, ok, rows)
 J = size(A, 2); rows = rows(:)';
+assert(numel(ok) == J, 'ood_k2_rules:ok', 'ok must hold one flag per candidate (%d), got %d', J, numel(ok));
 D = struct('eligible', false(1, J), 'pick', 1, 'mean', mean(A(rows, :), 1), 'lb', nan(1, J), ...
     'a', false(1, J), 'b', false(1, J), 'c', false(1, J));
 s0 = sum(F(rows, :, 1), 1) ./ sum(N(rows, :), 1);
@@ -141,6 +166,76 @@ for b = 1:nB
 end
 end
 
+function R = parity(U, FM, PP0, D, sp, fn, Wp, s0, nPar)
+runs = unique(sp.run, 'stable'); runs = runs(round(linspace(1, numel(runs), min(nPar, numel(runs)))));
+na = find(strcmp(PP0.actions, 'no_action'));
+[~, jf] = ismember(link_features('names'), fn);
+J = numel(U); [ew, ef] = deal(zeros(1, J)); nf = zeros(1, J);
+for j = 1:J
+    PP = PP0; PP.fuse = FM; PP.fuse.unk = U{j}; PP.unk_win = U{j}.win;
+    thr = unk_threshold(PP);
+    uf = unk_stat('U', U{j}, s0, [], false);
+    for r = runs(:)'
+        ix = find(sp.run == r); [~, o] = sort(sp.pos(ix)); ix = ix(o);
+        mem = [];
+        for i = ix(:)'
+            fu = unk_stat('frame', U{j}, D.maha(i));          % link_env.m and episode_cycle.m
+            ob = struct('probs', D.probs(:, i)', 'unknown', fu < thr, 'maha', D.maha(i), ...
+                'feat', double(sp.feats_raw(i, jf)), 'gant', double(sp.gain_ant(i, :)));
+            if isfield(sp, 'idle') && ~isempty(sp.idle), ob.idle = double(sp.idle(i, :)); end
+            if isfield(sp, 'bch') && ~isempty(sp.bch), ob.bch = double(sp.bch(i, :)); end
+            [~, mem, d] = policy_decide('fixed', ob, na, mem, PP, [], struct('fixed', na));
+            ew(j) = max(ew(j), gap(mem.unk_u, Wp(i, j)));
+            ef(j) = max(ef(j), gap(fu, uf(i)));
+            nf(j) = nf(j) + (d.unk ~= (Wp(i, j) < thr));
+        end
+    end
+end
+R = struct('ok', ew == 0 & ef == 0 & nf == 0, 'err', ew, 'err_frame', ef, 'flag', nf, 'n', numel(runs));
+end
+
+function e = gap(a, b)
+% |a - b|, 0 when both are NaN, Inf when one is.
+if isnan(a) && isnan(b), e = 0; elseif isnan(a) || isnan(b), e = Inf; else, e = abs(a - b); end
+end
+
+function L = latency(U, X, s0, n, LC, sp, fn)
+j0 = strcmp(LC.cand, 'last_or_if');
+Wn = step_window(sp, fn, max(cellfun(@(u) u.step_n, U)));
+J = numel(U); t = zeros(J, 10 + n);
+for j = 1:J
+    for r = 1:10 + n
+        i = mod(r - 1, size(X, 1)) + 1;
+        c = tic;
+        x = X(i, :);
+        if U{j}.step_n > 0, x = ood_cue('step', x, window_cues(Wn.g, Wn.f, Wn.i, [])); end
+        unk_stat('U', U{j}, s0(i), x, true);
+        t(j, r) = 1000 * toc(c);
+    end
+end
+t = sort(t(:, 11:end), 2);
+L = struct('med', median(t, 2)', 'p95', t(:, ceil(0.95 * n))', 'med0', LC.med(j0), 'p950', LC.p95(j0));
+L.ok = kpi7_admit(L.med0 + L.med, L.p950 + L.p95);
+end
+
+function W = step_window(sp, fn, Ns)
+% The monitor's step window (policy_monitor.m mem.wg, mem.wf, mem.wi) over the first Ns frames
+% of a validation sub-run that has them.
+W = struct('g', [], 'f', [], 'i', []);
+if Ns == 0, return; end
+[~, jf] = ismember(link_features('names'), fn);
+runs = unique(sp.run, 'stable');
+for r = runs(:)'
+    ix = find(sp.run == r);
+    if numel(ix) >= Ns, break; end
+end
+[~, o] = sort(sp.pos(ix)); ix = ix(o(1:min(Ns, end)));
+I = nan(numel(ix), numel(idle_summary('names')));
+if isfield(sp, 'idle') && ~isempty(sp.idle), I = sp.idle(ix, :); end
+w = @(A) permute(double(A), [3 2 1]);
+W = struct('g', w(sp.gain_ant(ix, :)), 'f', w(sp.feats_raw(ix, jf)), 'i', w(I));
+end
+
 function a = wauroc(p, q, wp, wq)
 [v, ~, g] = unique([p; q]); np = numel(p);
 if isempty(p) || isempty(q), a = NaN; return; end
@@ -164,6 +259,10 @@ g = sprintf('git --no-optional-locks -C "%s" ', root);
 o = strsplit(strtrim(o)); cm = 'unknown'; tr = 'unknown';
 if st == 0 && numel(o) == 2, cm = o{1}; tr = o{2}; end
 if st == 0 && (sd ~= 0 || ~isempty(strtrim(d))), cm = [cm ' + local changes in code']; end
+end
+
+function h = sha_or_absent(f)
+if isfile(f), h = file_sha(f); else, h = 'absent'; end
 end
 
 function h = file_sha(f)

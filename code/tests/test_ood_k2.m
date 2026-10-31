@@ -1,7 +1,8 @@
 function tests = test_ood_k2
 %TEST_OOD_K2  Unit tests of D111 (the unknown-threat statistic U: ood_cue.m, unk_stat.m,
-%   ood_k2_rules.m, unk_write.m, unk_guard.m, the monitor's hook, k2_1_screen.m end to end on
-%   synthetic splits, ood_k2_run.m's guards) and of D116 reading 3 (k2_0_lines.m,
+%   ood_k2_rules.m with its per-candidate parity and latency checks, unk_write.m, unk_guard.m,
+%   the monitor's hook, k2_1_screen.m end to end on synthetic splits, ood_k2_run.m's guards and
+%   its read phase bound to the committed select record) and of D116 reading 3 (k2_0_lines.m,
 %   unk_options.m), on synthetic frames in a temporary folder; no pools, no network. Without
 %   FM.unk, the k2_0 switch or D111's set-4 reading every output is the parent commit's bit for
 %   bit. Run from the repository root:
@@ -96,9 +97,10 @@ end
 %% ---------- the statistic U ----------
 function test_unk_stat_pvalues(tc)
 % Marginal conformal p-values (1 + #{calibration <= s}) / (n + 1): -Inf the lowest, NaN NaN;
-% U = min(p0, p_cue), p_cue = 1 where the cue window is not full; C3 the cue alone; every
-% window scored alone gives the batch's values; the per-frame flag reads p0 only; the model's
-% checks.
+% U = min(p0, p_cue), p_cue = 1 where the cue window is not full; C3 the cue alone where its
+% window is full and p0 before (the first cycles as today); a NaN s0 NaN for every candidate;
+% every window scored alone gives the batch's values; the per-frame flag reads p0 for every
+% candidate; the model's checks, a calibration of s0 for C3 too.
 s = [3; 1; 2; 2; NaN; 5];
 C = unk_stat('cal', s);
 verifyEqual(tc, [C.n, C.u', C.c'], [5, 1 2 3 5, 1 3 4 5]);
@@ -118,11 +120,12 @@ verifyEqual(tc, unk_stat('U', U, s0, X, full, true), u);
 verifyEqual(tc, unk_stat('U', U, s0, X, false), [0.6; 0.1; 1.0; 0.2], 'AbsTol', 1e-12);
 verifyTrue(tc, isnan(unk_stat('U', U, NaN, 0, true)));
 U3 = U; U3.use0 = false;
-verifyEqual(tc, unk_stat('U', U3, s0, X, full), [1; 1; 0.4; 1], 'AbsTol', 1e-12);
+verifyEqual(tc, unk_stat('U', U3, s0, X, full), [1; 1; 0.4; 0.2], 'AbsTol', 1e-12);
+verifyEqual(tc, unk_stat('U', U3, s0, X, false), unk_stat('U', U, s0, X, false));
+verifyTrue(tc, isnan(unk_stat('U', U3, NaN, 0, true)));
 f1 = unk_stat('frame', U, [5; -Inf; NaN]);
 verifyEqual(tc, f1(1:2), [0.6; 0.1], 'AbsTol', 1e-12); verifyTrue(tc, isnan(f1(3)));
-f3 = unk_stat('frame', U3, [5; -Inf; NaN]);
-verifyEqual(tc, f3(1:2), [1; 1]); verifyTrue(tc, isnan(f3(3)));
+verifyEqual(tc, unk_stat('frame', U3, [5; -Inf; NaN]), f1);
 verifyFalse(tc, unk_stat('on', struct()));
 verifyFalse(tc, unk_stat('on', struct('fuse', [])));
 verifyFalse(tc, unk_stat('on', struct('fuse', struct('W', 1))));
@@ -136,6 +139,9 @@ verifyError(tc, @() unk_stat('model', setfield(S, 'cand', 'C2')), 'unk_stat:mode
 verifyError(tc, @() unk_stat('model', setfield(S, 'use0', false)), 'unk_stat:model'); %#ok<SFLD>
 verifyError(tc, @() unk_stat('model', setfield(S, 'nw', 9)), 'unk_stat:model'); %#ok<SFLD>
 verifyError(tc, @() unk_stat('model', rmfield(S, 'cal1')), 'unk_stat:model');
+S3 = S; S3.cand = 'C3'; S3.use0 = false;
+verifyFalse(tc, unk_stat('model', S3).use0);
+verifyError(tc, @() unk_stat('model', rmfield(S3, 'cal0')), 'unk_stat:model');
 end
 
 function test_monitor_off_bit_identical(tc)
@@ -196,8 +202,8 @@ end
 
 function test_forced_unknown(tc)
 % The withheld detector (probabilities 0, flag set, maha -Inf: C2e's and C2u's forced-unknown
-% episodes) stays unknown under U: p0 its lowest value (C1), and with the cue alone (C3) the
-% frame's own flag.
+% episodes) stays unknown under U: p0 its lowest value (C1; C3 before its cue window is full),
+% and with the cue alone (C3) the frame's own flag.
 [S, P, s0, y] = toy_split(3, 23);
 FM = toy_fusion(S, P, y);
 X = ood_cue('split', S, link_features('names'), 3, 12);
@@ -211,6 +217,8 @@ for cand = {'C1', 'C3'}
     if strcmp(cand{1}, 'C1')
         verifyEqual(tc, O.u, repmat(1 / (Um.cal0.n + 1), numel(s0), 1));
         verifyTrue(tc, all(unk_stat('frame', Um, -Inf(size(s0))) < unk_threshold(mon_pp(FMu, 12))));
+    else
+        verifyEqual(tc, O.u(~full), repmat(1 / (Um.cal0.n + 1), sum(~full), 1));
     end
 end
 end
@@ -386,21 +394,22 @@ verifyTrue(tc, go); verifyNotEmpty(tc, strfind(L, 'GO (K2-2 is built)'));
 verifyFalse(tc, go); verifyNotEmpty(tc, strfind(L, 'NO-GO'));
 verifyFalse(tc, ood_k2_rules('k21_go', nm, [0.81 0.99 0.85 0.50 0.50]));
 verifyError(tc, @() ood_k2_rules('k21_go', nm(1:4), [0.9 0.9 0.9 0.9]), 'ood_k2_rules:k21');
-A = [0.70 0.75 0.74 0.72; 0.80 0.82 0.70 0.81; 0.60 0.64 0.66 0.65; 0.90 0.90 0.91 0.88];
-rs = RandStream('mt19937ar', 'Seed', 6);
-B = repmat(reshape(A, 1, 4, 4), 200, 1, 1) + repmat(0.01 * randn(rs, 200, 4), 1, 1, 4);
-F = repmat(reshape([5 8 5 12], 1, 1, 4), 4, 3, 1); N = 100 * ones(4, 3);
+[A, B, F, N] = rule_world();
 D = ood_k2_rules('decide', A, B, F, N, true(1, 4), 1:4);
 verifyEqual(tc, [D.a; D.b; D.c], logical([0 1 0 1; 0 1 0 1; 0 1 1 0]));
 verifyEqual(tc, D.eligible, logical([0 1 0 0]));
 verifyEqual(tc, D.pick, 2);
 verifyEqual(tc, D.lb(2), prctile(mean(B(:, :, 2) - B(:, :, 1), 2), 5));
 verifyEqual(tc, ood_k2_rules('decide', A, B, F, N, [true false true true], 1:4).pick, 1);
+verifyEqual(tc, ood_k2_rules('decide', A, B, F, N, [true true false true], 1:4).pick, 2);   % C2 failing (d) leaves C1
+verifyError(tc, @() ood_k2_rules('decide', A, B, F, N, [true true], 1:4), 'ood_k2_rules:ok');
 verifyEqual(tc, ood_k2_rules('decide', A, B, F, N, true(1, 4), [1 3 4]).pick, 3);   % C2's loss on threat 2 left out
 F(:, :, 4) = 5;
 D = ood_k2_rules('decide', A, B, F, N, true(1, 4), 1:4);
 verifyEqual(tc, D.eligible, logical([0 1 0 1]));
 verifyEqual(tc, D.pick, 2);                                      % the higher mean of the eligible
+verifyEqual(tc, ood_k2_rules('decide', A, B, F, N, [true false true true], 1:4).pick, 4);   % C1 failing leaves C3
+rs = RandStream('mt19937ar', 'Seed', 6);
 p = round(2 * randn(rs, 50, 1)) / 2; q = round(2 * randn(rs, 40, 1)) / 2 - 0.5;
 r = tiedrank([p; q]);
 verifyEqual(tc, ood_k2_rules('auroc', p, q), (sum(r(1:50)) - 50 * 51 / 2) / (50 * 40), 'AbsTol', 1e-12);
@@ -413,6 +422,48 @@ verifyEqual(tc, ood_k2_rules('boot_auroc', Sx, kn, ~kn, run, 30, 9), B1);
 verifySize(tc, B1, [30 2]);
 verifyEqual(tc, B1(:, 2), B1(:, 1), 'AbsTol', 1e-12);
 verifyNotEqual(tc, ood_k2_rules('boot_auroc', Sx, kn, ~kn, run, 30, 10), B1);
+end
+
+function test_parity_latency(tc)
+% D111 (d) and D80 per candidate (ood_k2_rules.m 'parity', 'latency'): replayed through
+% policy_decide.m, the window's U and flag (info.unk, episode_cycle.m's) equal the offline U and
+% the frame sites' U (link_env.m, episode_cycle.m) the offline U of the frame's window with
+% p_cue = 1, for C1, C2 and C3 at fusion windows 12 and 4; a mismatch fails its candidate only;
+% the latency admission is one flag per candidate, kpi7_admit.m of s0's cost plus U's, with the
+% step window's window_cues.m call when the fusion window is shorter than 10.
+[S, P, s0, y] = toy_split(3, 25);
+FM = toy_fusion(S, P, y);
+fn = link_features('names'); c = {'C1', 'C2', 'C3'};
+D = struct('probs', P', 'maha', s0);
+LC = struct('cand', {{'last', 'last_or_if'}}, 'med', [9 0.5], 'p95', [9 1]);
+for N = [12 4]
+    Ns = ood_cue('step_n', N); NW = max([N, 1, window_cues('branch_window'), Ns]);
+    X = ood_cue('split', S, fn, 3, N);
+    full = ood_cue('fill', S.run, S.pos) >= NW;
+    U = cell(1, 3); Wp = nan(numel(s0), 3);
+    for j = 1:3, [U{j}, Wp(:, j)] = toy_model(S, X, full, s0, y, c{j}, N, Ns, NW); end
+    PP0 = mon_pp(FM, N); tag = sprintf('N %d', N);
+    R = ood_k2_rules('parity', U, FM, PP0, D, S, fn, Wp, s0, 12);
+    verifyEqual(tc, R.ok, true(1, 3), tag);
+    verifyEqual(tc, [R.err, R.err_frame, R.flag], zeros(1, 9), tag);
+    verifyEqual(tc, R.n, 12, tag);
+    L = ood_k2_rules('latency', U, X(full, :), s0(full), 20, LC, S, fn);
+    verifySize(tc, L.med, [1 3], tag); verifySize(tc, L.p95, [1 3], tag); verifySize(tc, L.ok, [1 3], tag);
+    verifyEqual(tc, [L.med0, L.p950], [0.5 1], tag);
+    verifyEqual(tc, L.ok, kpi7_admit(L.med0 + L.med, L.p950 + L.p95), tag);
+end
+LC.med(2) = 100;
+verifyEqual(tc, ood_k2_rules('latency', U, X(full, :), s0(full), 20, LC, S, fn).ok, false(1, 3));
+i = find(full & s0 < 0, 1);
+W2 = Wp; W2(i, 2) = W2(i, 2) + 0.5;                              % C2's offline U differs at one window
+R = ood_k2_rules('parity', U, FM, PP0, D, S, fn, W2, s0, 12);
+verifyEqual(tc, R.ok, [true false true]); verifyEqual(tc, R.err, [0 0.5 0], 'AbsTol', 1e-12);
+W2 = Wp; W2(i, 1) = NaN;                                         % a NaN on one side only
+R = ood_k2_rules('parity', U, FM, PP0, D, S, fn, W2, s0, 12);
+verifyEqual(tc, R.ok, [false true true]); verifyEqual(tc, R.err(1), Inf);
+s2 = s0; s2(i) = 100;                                            % the frame sites read another score
+R = ood_k2_rules('parity', U, FM, PP0, D, S, fn, Wp, s2, 12);
+verifyEqual(tc, R.ok, false(1, 3)); verifyEqual(tc, R.err, zeros(1, 3)); verifyGreaterThan(tc, R.err_frame, 0);
 end
 
 function test_registration_check(tc)
@@ -468,8 +519,9 @@ end
 
 function test_ood_run_guards(tc)
 % The OOD run refuses before it reads or writes anything: without a phase; with a forced
-% candidate outside the smoke; without the registration commit; the read phase without its
-% committed select record (no set-4 marker written); an s0 other than (last_or_if, 1). The
+% candidate outside the smoke; without the registration commit; the select phase without B3r's
+% committed record; the read phase without its committed select record (no set-4 marker
+% written); an s0 other than (last_or_if, 1). The
 % detector and its thresholds stay byte-identical; the run writes data/ only through
 % unk_write.m, never the detector or its thresholds, and its select phase loads no test set.
 d = fullfile(tc.TestData.tmp, 'oodrun'); mkdir(fullfile(d, 'data')); mkdir(fullfile(d, 'results'));
@@ -487,6 +539,10 @@ verifyError(tc, @() ood_run(struct('OOD_PHASE', 'read', 'OOD_FORCE', 'C1')), 'oo
 verifyError(tc, @() ood_run(struct('OOD_PHASE', 'select', 'REG_COMMIT', 'zz', 'DOCS_REPO', d)), 'ood_k2_rules:registration');
 verifyError(tc, @() ood_run(struct('OOD_PHASE', 'read', 'SMOKE', true)), 'ood_k2_rules:select_record');
 verifyFalse(tc, isfile('results/ood_k2_read_started.txt'));
+repo = fullfile(tc.TestData.tmp, 'oodrun_docs'); mkdir(fullfile(repo, 'docs'));
+[~, h2] = docs_repo(repo);
+verifyError(tc, @() ood_run(struct('OOD_PHASE', 'select', 'REG_COMMIT', h2, 'DOCS_REPO', repo)), 'ood_k2_run:b3r');
+verifyFalse(tc, isfolder('results/ood_k2'));
 verifyEqual(tc, cellfun(@(f) kpi6_fresh_marker('sha', f), FZ, 'UniformOutput', false), h0);
 ood.score = 'last'; save('data/trained_detector.mat', 'net', 'ood', 'classes', 'trained_at');
 verifyError(tc, @() ood_run(struct('OOD_PHASE', 'select', 'SMOKE', true)), 'ood_k2_run:s0');
@@ -505,12 +561,87 @@ verifyEmpty(tc, strfind(src(i1:end), 'St.probs'));                % no class rea
 verifyNotEmpty(tc, strfind(src, 'assert(isequal(sha0, sha1), ''ood_k2_run:frozen'''));
 end
 
+function test_ood_read_bound(tc)
+% The read phase refuses before its set-4 marker unless the select phase's outputs are the ones
+% its committed record names (SHA-256: a changed fold file, or a smoke's select file in their
+% place, refused), the rule on them gives the record's verdict, every threat but none was held
+% out, and data/fusion.mat holds the adopted candidate's FM.unk, not a forced one; with all of
+% them the marker is written before set 4 is read.
+d = fullfile(tc.TestData.tmp, 'oodread'); mkdir(fullfile(d, 'data')); mkdir(fullfile(d, 'results', 'ood_k2'));
+mkdir(fullfile(d, 'docs'));
+c0 = cd(d); back = onCleanup(@() cd(c0));
+repo = fullfile(tc.TestData.tmp, 'oodread_docs'); mkdir(fullfile(repo, 'docs'));
+[~, h2] = docs_repo(repo);
+V = struct('OOD_PHASE', 'read', 'REG_COMMIT', h2, 'DOCS_REPO', repo);
+system(sprintf('git -C "%s" init -q', d));
+net = []; trained_at = 1; classes = {'none', 'path_loss', 'jamming', 'antenna_fault', 'airframe_shadowing'};
+ood = struct('score', 'last_or_if', 'win', 1, 'candidates', {{'last', 'last_or_if'}}, 'forest_pack', struct('x', 1)); %#ok<NASGU>
+save('data/trained_detector.mat', 'net', 'ood', 'classes', 'trained_at');
+Th = struct('retain', 0.95); save('data/ood_thresholds.mat', 'Th');
+unk = @(c) struct('cand', c, 'val', (1:3)');
+FM = struct('W', 1, 'unk', unk('C1')); N = 12; save('data/fusion.mat', 'FM', 'N');
+params = struct('a', 1); save('params.mat', 'params');
+write_text('data/splits_fresh3.mat', 'x');
+commit_text(d, 'docs/d91_fresh3_read_p3.txt', sprintf('fourth test set read\nparams_id %s\n', params_id(params)));
+RULE = {'ood_k2_run.m', 'ood_k2_rules.m', 'ood_cue.m', 'unk_stat.m', 'unk_write.m', 'ood_loto_split.m'};
+verifyNotEmpty(tc, strfind(fileread(which('ood_k2_run')), ['RULE = {''' strjoin(RULE, ''', ''') '''};']));
+held_out = classes(2:end); CN = {'C0', 'C1', 'C2', 'C3'}; verdict = 'C1'; ok = true(1, 4); %#ok<NASGU>
+[A, Bd, Fk, Nk] = rule_world();
+save('results/ood_k2_select.mat', 'held_out', 'CN', 'A', 'Bd', 'Fk', 'Nk', 'ok', 'verdict', '-v7.3');
+for h = 1:4, k = held_out{h}; save(sprintf('results/ood_k2/fold_%d.mat', h), 'k'); end %#ok<NASGU>
+fl = [{'results/ood_k2_select.mat'}, arrayfun(@(h) sprintf('results/ood_k2/fold_%d.mat', h), 1:4, 'UniformOutput', false)];
+txt = @(L) sprintf('%s\n', L{:});
+rec = @(f) commit_text(d, 'docs/d111_ood_select_p3.txt', txt([ood_k2_rules('sha', RULE), {'verdict C1'}, ...
+    ood_k2_rules('inputs', f)]));
+rec(fl);
+mark = 'results/ood_k2_read_started.txt';
+copyfile('results/ood_k2/fold_3.mat', 'fold_3.keep');
+k = 'other'; save('results/ood_k2/fold_3.mat', 'k');
+verifyError(tc, @() ood_run(V), 'ood_k2_run:inputs');
+verifyFalse(tc, isfile(mark));
+copyfile('fold_3.keep', 'results/ood_k2/fold_3.mat');
+copyfile('results/ood_k2_select.mat', 'results/ood_k2_smoke_select.mat');
+rec([{'results/ood_k2_smoke_select.mat'}, fl(2:end)]);
+verifyError(tc, @() ood_run(V), 'ood_k2_run:inputs');
+verifyFalse(tc, isfile(mark));
+FM.unk = unk('C1'); FM.unk.forced = true; save('data/fusion.mat', 'FM', 'N');
+rec(fl);
+verifyError(tc, @() ood_run(V), 'ood_k2_run:unk_cand');
+FM.unk = unk('C2'); save('data/fusion.mat', 'FM', 'N');
+verifyError(tc, @() ood_run(V), 'ood_k2_run:unk_cand');
+verifyFalse(tc, isfile(mark));
+FM.unk = unk('C1'); save('data/fusion.mat', 'FM', 'N');
+ok = [true false true true]; %#ok<NASGU>                          % the rule on the saved outputs: C0
+save('results/ood_k2_select.mat', 'held_out', 'CN', 'A', 'Bd', 'Fk', 'Nk', 'ok', 'verdict', '-v7.3');
+rec(fl);
+verifyError(tc, @() ood_run(V), 'ood_k2_run:select_mat');
+verifyFalse(tc, isfile(mark));
+ok = true(1, 4); held_out = held_out(1:2); A = A(1:2, :); Bd = Bd(:, 1:2, :); Fk = Fk(1:2, :, :); Nk = Nk(1:2, :); %#ok<NASGU>
+save('results/ood_k2_select.mat', 'held_out', 'CN', 'A', 'Bd', 'Fk', 'Nk', 'ok', 'verdict', '-v7.3');
+rec(fl(1:3));                                                     % a run over two threats
+verifyError(tc, @() ood_run(V), 'ood_k2_run:held_out');
+verifyFalse(tc, isfile(mark));
+held_out = classes(2:end); [A, Bd, Fk, Nk] = rule_world(); %#ok<ASGLU>
+save('results/ood_k2_select.mat', 'held_out', 'CN', 'A', 'Bd', 'Fk', 'Nk', 'ok', 'verdict', '-v7.3');
+rec(fl);
+try
+    ood_run(V); e = [];
+catch e
+end
+assertNotEmpty(tc, e);
+verifyFalse(tc, startsWith(e.identifier, {'ood_k2_run:', 'ood_k2_rules:'}), e.identifier);   % past every guard
+verifyTrue(tc, isfile(mark));
+verifyNotEmpty(tc, strfind(fileread(mark), 'verdict C1'));
+end
+
 %% ---------- D116 reading 3 and the KPI print ----------
 function test_k2_0_lines(tc)
 % K2-0, descriptive and never KPI 2: bounds max(1 - FPR, s) .. min(1, 1 - FPR + s) with s 0
 % for a threat whose countermeasure is no_action; the exact form per window at the deployed
 % retention and at 95% (flagged, same countermeasure among the unflagged under the rule's
-% mapping, their flagged-or-same-countermeasure share) and the AURC; never called coverage.
+% mapping, their flagged-or-same-countermeasure share) and the AURC; never called coverage; every
+% line of the KPI print and of profile 1's file labelled, the KPI print's naming s0 while U is
+% deployed.
 R = struct('held_out', {'antenna_fault', 'benign_interference', 'jamming'}, 'same_action', {0.85, 0.3, 0.0}, ...
     'fpr95', {[0.1 0.4], [0.1 0.25], [0.1 0.5]});
 NEST = struct('fpr95', [0.4 0.25 0.5]);
@@ -522,6 +653,18 @@ for k = {'antenna_fault 85.0-100.0 (flagged 60.0, same countermeasure 85.0)', ..
     verifyNotEmpty(tc, strfind(L{1}, k{1}), k{1});
 end
 verifyEqual(tc, k2_0_lines('bounds', R, struct(), 'last', {'raw', 'last'}), L);
+O = struct('R', R, 'NEST', NEST, 'sel', 'last', 'SC', {{'raw', 'last'}}, 'TEST_SET', 'second test set');
+K = k2_0_lines('kpi', O);
+verifyEqual(tc, K, [{'K2-0 on the second test set (results/ood_detection.mat), descriptive, not KPI 2'}, L]);
+Ku = k2_0_lines('kpi', O, true);
+verifyTrue(tc, startsWith(Ku{1}, K{1})); verifyNotEmpty(tc, strfind(Ku{1}, 'the earlier statistic s0'));
+verifyEqual(tc, Ku(2:end), K(2:end));
+f = fullfile(tc.TestData.tmp, 'k20_p1.mat'); sel = 'last'; SC = {'raw', 'last'}; TEST_SET = 'second test set'; %#ok<NASGU>
+save(f, 'R', 'NEST', 'sel', 'SC', 'TEST_SET');
+evalc('k2_0_lines(''file'', f, [f ''.txt''])');
+Lf = splitlines(strtrim(fileread([f '.txt'])));
+verifyNumElements(tc, Lf, 2);
+verifyTrue(tc, all(contains(Lf, 'descriptive, not KPI 2')));
 W = struct('threat', 'jamming', 'val', (1:100)' / 100, 'kn', [0.9; 0.8], 'un', [0; 0.02; 0.04; 0.5; 0.6], ...
     'y_kn', {{'none'; 'jamming'}}, 'top_kn', {{'none'; 'spoofing'}}, ...
     'top_un', {{'tone_jamming'; 'spoofing'; 'none'; 'spoofing'; 'none'}});
@@ -549,8 +692,10 @@ end
 function test_kpi2_print(tc)
 % KPI 2's summary: without profile.json, with "k2_0": false and without D111's reading it is
 % the parent commit's bit for bit; "k2_0": true adds the K2-0 bounds; D111's set-4 reading is
-% KPI 2 while data/fusion.mat holds FM.unk, the earlier reading beside it; without FM.unk the
-% earlier reading stays and the set-4 line is descriptive, not deployed.
+% KPI 2 while data/fusion.mat holds the adopted candidate's FM.unk, unforced, the earlier
+% reading beside it; with a forced FM.unk, another candidate's or none the earlier reading
+% stays and the set-4 line is descriptive, not deployed; FM.unk without a set-4 reading keeps
+% the earlier reading, labelled as the earlier statistic's.
 d = fullfile(tc.TestData.tmp, 'kpi2'); mkdir(fullfile(d, 'results')); mkdir(fullfile(d, 'data'));
 c0 = cd(d); back = onCleanup(@() cd(c0));
 SC = {'msp', 'energy', 'iforest', 'last', 'raw'}; WIN = [2 5 8]; RETAIN = 0.95; sel = 'last'; sel_win = 5; %#ok<NASGU>
@@ -575,13 +720,14 @@ write_text('profile.json', '{"k2_0": true}');
 K = kpi2_of(run_kpis());
 verifyEqual(tc, K.value, K0.value); verifyEqual(tc, K.status, K0.status);
 verifyEqual(tc, K.detail(1:numel(K0.detail)), K0.detail);
-verifyEqual(tc, K.detail{numel(K0.detail) + 1}, 'K2-0 on the second test set (results/ood_detection.mat)');
+verifyEqual(tc, K.detail{numel(K0.detail) + 1}, ...
+    'K2-0 on the second test set (results/ood_detection.mat), descriptive, not KPI 2');
 verifyNotEmpty(tc, strfind(K.detail{end}, 'jamming 69.0-69.0 (flagged 69.0, same countermeasure 0.0)'));
 delete('profile.json');
 kpi2 = 0.812; fpr2 = 0.3; gain = 0.031; gain_ci = [0.01 0.05]; held_out = {'jamming', 'tone_jamming'}; Aad = [0.8 0.824]; %#ok<NASGU>
-TEST_SET = 'fourth test set (data/splits_fresh3.mat)'; %#ok<NASGU>
-save('results/ood_k2_read.mat', 'kpi2', 'fpr2', 'gain', 'gain_ci', 'held_out', 'Aad', 'TEST_SET');
-FM = struct('W', 1, 'unk', struct('val', (1:3)')); N = 12; save('data/fusion.mat', 'FM', 'N');
+TEST_SET = 'fourth test set (data/splits_fresh3.mat)'; verdict = 'C1'; %#ok<NASGU>
+save('results/ood_k2_read.mat', 'kpi2', 'fpr2', 'gain', 'gain_ci', 'held_out', 'Aad', 'TEST_SET', 'verdict');
+FM = struct('W', 1, 'unk', struct('cand', 'C1', 'val', (1:3)')); N = 12; save('data/fusion.mat', 'FM', 'N');
 K = kpi2_of(run_kpis());
 verifyEqual(tc, K.value, 'mean AUROC 0.812, FPR95 0.30 (nested, D111, fourth test set (data/splits_fresh3.mat))');
 verifyEqual(tc, K.status, 'MET');
@@ -590,17 +736,42 @@ verifyNotEmpty(tc, strfind(K.detail{1}, ['D111''s statistic on the fourth test s
     '[+0.010, +0.050]']));
 verifyEqual(tc, K.detail{2}, 'beside it: mean AUROC 0.850 read on the second test set (the earlier statistic)');
 verifyEqual(tc, K.detail(3:end), K0.detail);
+for c = {{true, 'C1', 'the FM.unk in data/fusion.mat (C1) was forced in a smoke'}, ...
+        {false, 'C2', 'data/fusion.mat holds FM.unk of C2, not the adopted C1'}}
+    FM.unk = struct('cand', c{1}{2}, 'val', (1:3)'); if c{1}{1}, FM.unk.forced = true; end
+    save('data/fusion.mat', 'FM', 'N');
+    K = kpi2_of(run_kpis());
+    verifyEqual(tc, K.value, K0.value); verifyEqual(tc, K.status, K0.status);
+    verifyEqual(tc, K.detail(1:end - 1), K0.detail);
+    verifyTrue(tc, startsWith(K.detail{end}, ['descriptive, not deployed (' c{1}{3} '): D111''s statistic']), c{1}{3});
+end
 FM = struct('W', 1); save('data/fusion.mat', 'FM', 'N');
 K = kpi2_of(run_kpis());
 verifyEqual(tc, K.value, K0.value); verifyEqual(tc, K.status, K0.status);
 verifyEqual(tc, K.detail(1:end - 1), K0.detail);
 verifyTrue(tc, startsWith(K.detail{end}, 'descriptive, not deployed (FM.unk is not in data/fusion.mat): D111''s statistic'));
+delete('results/ood_k2_read.mat');
+FM.unk = struct('cand', 'C1', 'val', (1:3)'); save('data/fusion.mat', 'FM', 'N');
+K = kpi2_of(run_kpis());
+verifyEqual(tc, K.value, K0.value); verifyEqual(tc, K.status, K0.status);
+verifyEqual(tc, K.detail(1:end - 1), K0.detail);
+verifyEqual(tc, K.detail{end}, ['deployed statistic: D111''s U (FM.unk, candidate C1); KPI 2 shows the earlier ' ...
+    'statistic s0''s reading; U has no set-4 reading']);
 end
 
 %% ---------- helpers ----------
 function r = base_rev()
 % The branch's parent commit (d108-edge, TIP3's lineage): the outputs every switch keeps when off.
 r = 'f6f6e03';
+end
+
+function [A, B, F, N] = rule_world()
+% Four held-out threats and C0-C3 for items 5-6: with every candidate passing (d) and latency,
+% C1 alone passes (a)-(c); C3 fails (c) at 12% flagged.
+A = [0.70 0.75 0.74 0.72; 0.80 0.82 0.70 0.81; 0.60 0.64 0.66 0.65; 0.90 0.90 0.91 0.88];
+rs = RandStream('mt19937ar', 'Seed', 6);
+B = repmat(reshape(A, 1, 4, 4), 200, 1, 1) + repmat(0.01 * randn(rs, 200, 4), 1, 1, 4);
+F = repmat(reshape([5 8 5 12], 1, 1, 4), 4, 3, 1); N = 100 * ones(4, 3);
 end
 
 function [sp, fresh] = loto_world()
@@ -820,6 +991,13 @@ end
 
 function write_text(f, s)
 fid = fopen(f, 'w'); fprintf(fid, '%s', s); fclose(fid);
+end
+
+function commit_text(d, f, s)
+% Writes s to f in the repository d and commits it.
+write_text(fullfile(d, f), s);
+g = sprintf('git -C "%s" ', d);
+system([g 'add -- "' f '"']); system([g '-c user.name=t -c user.email=t@t commit -q -m r']);
 end
 
 function d = parent_copy(tc, rel, rev)
