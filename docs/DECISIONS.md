@@ -1811,7 +1811,7 @@ What the pass confirmed (profile 1, 11 combinations without the shadowing ones):
 
 **Fit/check split.** The 300 validation clean geometries are split by geometry hash into a fit half (150) and a check half (150). `ber_q` and its bins come from the fit half only; adoption is decided on the check half (900 clean episodes: a bound <= 5% needs about 34 or fewer false-alarm episodes). C2 reads its own FA filter on all 300 geometries, mildly optimistic for C2's selection only. KPI 6 is read on a fresh clean test set (a new seed family, generated after adoption, at least 600 flights). *[Amended 30.10.2026 by D112 (registered under decide-after-30min, Adi silent since 30.10.2026 19:37; profile 3 only): after the F choice the check half is read a second time, for D112's DCONF coordinate step under D112 point 4.]*
 
-**Tests, committed before any data they govern.** Bit-identity of `'ratio'` on a recorded no_action trace; F1 (window median on a trace with one +3 dB frame, measured axis under a known gain, reset with `mem.ber`); F2 (quantile reproduces alpha on synthetic Gaussian log-BER, small bins merge, fit and check halves disjoint by a hash assert); F3 (quiet-slot interference alarms, a quiet slot does not; class and drop alarms unchanged by `deg_mode`); one smoke cell per candidate (2 h cap). The DQN's false-switch penalty definition (`healthy` geometries only) is not changed: a reward redesign without a source.
+**Tests, committed before any data they govern.** Bit-identity of `'ratio'` on a recorded no_action trace; F1 (window median on a trace with one +3 dB frame, measured axis under a known gain, reset with `mem.ber`); F2 (quantile reproduces alpha on synthetic Gaussian log-BER, small bins merge, fit and check halves disjoint by a hash assert); F3 (quiet-slot interference alarms, a quiet slot does not; class and drop alarms unchanged by `deg_mode`); one smoke cell per candidate (2 h cap). The DQN's false-switch penalty definition (`healthy` geometries only) is not changed: a reward redesign without a source. *[Amended 29.10.2026 by D107 (approved by Adi): the default penalty form is unchanged; a second form restricts the penalty's excess over w_false to no-threat cycles, sourced as the Lagrangian of the KPI 6 constraint (Altman 1999; Paternain et al. 2019; Tessler et al. 2019); scored in P1R, a candidate in profile 3. The reason "a reward redesign without a source" is answered by the citation.]*
 
 **Where the fix goes.** Profile 3: a commit on top of TIP3 before profile 3's queue starts, counted as its tested tip; the choice is made at profile 3's own C1d on its validation flights and read in its C2e on clean test pools no earlier step has read. P1R: a profile 1 decision-layer rerun after CORE_BW (C1d, C2, C2e with the fixed monitor, on a fresh clean test set); its lecturer readings are reported only as "with the fixed monitor, second reading, descriptive", and C2e's stay the verdicts. The order of P1R and profile 3 is to be confirmed by Adi (default: P1R first). Not in CORE_BW (it keeps profile 1's monitor, so CORE_BW and C2e stay on one monitor) and not in the running profile 1. Optional cheap evidence before profile 3 freezes (PC8, about 1 h, validation only): C1d's whole-monitor analysis with F1-F3 on profile 1's validation episodes, reported as a design check.
 
@@ -2061,6 +2061,31 @@ The baseline also differs in tuning budget. In C2e, `blind_core`'s first respons
 - *Reader.* `code/decision/core_bw_switches.m` on branch `core-bw-sw` (commit `206b439`, branched from `core-bw-p1` at `f84384c`), with its synthetic test `code/tests/test_core_bw_switches.m`. It is a separate reader: the frozen CORE_BW code in `core-bw-p1` is not changed.
 - *No verdict.* The row carries no threshold and no pass/fail, and does not change KPI 8, the D106 verdicts, W3, the protocol or any frozen choice. Printed lines are labelled `descriptive, mitigation 15, no verdict`.
 - *When.* Once, after the CORE_BW test stage and its record step, on the saved `test_readings.mat`. It reads no new data and is not rerun with other settings.
+
+**31.10.2026 - CORE_BW test reading: result (runbook row 20 review; read once on 30.10.2026; nothing tuned, selected or rerun after it).**
+
+- *Reading.* Test block 14 read once: marker 30.10.2026 20:20:42 (commit `1d2806b`, params_id `add18af2b7532a0bd2f7fbc78f06e526`), 139.1 min, `V7TEST OK`; record `docs/core_bw_read_p1.txt` (`75bea00`). `protocol.json` is byte-equal to `docs/core_bw_frozen.json` (sha256 `9b314039...9697`); protocol, both notes and the recoverable list hash as frozen; report sha256 `02e26241...768d`, equal to the test log's print. Receiver r1 throughout (D109).
+- *KPI 5 (rule_core3 against none; H1, residual by offset, fixed total power, static jammer; the 85 recoverable H1 scenario points, Eb/N0 6-15 dB; Line A, the verdict).* Narrowband (CW, n = 1440) 62.3% [59.1, 65.4], MET (committed); wideband (4-83.5 MHz, n = 4680) 69.2% [67.8, 70.5], MET (committed); both pooled, second line, 67.4% [65.8, 68.9]. Line B gives the same words. Only the follower sensitivity flips a primary verdict: narrowband 28.6% [26.3, 30.7], NOT MET (blind_core 28.9%, NOT MET too). H3, H4, the 30 dB residual and the equal in-band level flip nothing; the equal-level narrowband "NOT MET" means no recoverable episodes. 27 harmed H1 points (70 and 83.5 MHz, JSR_tot 10-30 dB) are recoverable by no core action and stay outside the verdict.
+- *KPI 8 headline (rule_core3 minus the validation-tuned blind_core; analysis, no promise, no verdict word).* Line A pooled: PER -0.0232 [-0.0289, -0.0174] (7.3% [5.6, 9.0]), goodput +3583 [+3277, +3891] bit/s, never restored 3% vs 11%, detection to restored -0.11 [-0.18, -0.03] cycles on the 5431 episodes both recover in. Per type the signs differ: narrowband PER +0.0807 [+0.0552, +0.1085] (adverse) with goodput +19487 [+17702, +21099] bit/s; wideband PER -0.0551 [-0.0667, -0.0451] with goodput -1310 [-1704, -894] bit/s. Line B keeps the signs (+0.0286 [+0.0135, +0.0447]; -0.0374 [-0.0439, -0.0314]). The pooled line is quoted only beside the two type rows, because its weights are the grid's. Under H1 and H3 the tuned blind_core equals the fixed ladder (chosen minus fixed = 0). This replaces D105 point 2's "pending (CORE_BW)". C2e's -3.2% [-5.3, -1.5] stays the secondary, weakened-baseline row and is not combined with it.
+- *Narrowband deficit, as far as established (printed lines and code; derived numbers carry no interval).* The deficit does not come from detection, the CNN's class or the first hop: onset to detection 4/4 vs 4/5, detection to restored 2/2 vs 2/2, first-hop escape 1.000. The two rows hold different configurations by registered design:
+  - narrowband maps to channel_switch with no validation choice (protocol 6.3);
+  - blind_core's single answer, channel_switch+rate_reduce, was chosen on validation over CW and the wideband cells;
+  - rate_reduce trades 6.02 dB of processing gain for x1/4 rate.
+
+  About 70% of the gap sits on the 220 link-limited CW episodes (PER about 0.77 vs 0.40). The sign follows blind_core's first response: under H4 (channel_switch alone) rule_core3 is better on CW (points 0.4354 vs 0.4839). The rest of the gap, on episodes that are not link-limited (+0.0286), cannot be split into causes from the printed text. This is a PER-versus-rate trade, not a CNN or detection defect. Wideband is different: both rows run the same configuration (W3 = blind_core's answer). The CNN acts where link metrics confirm late or never (never detected 2% vs 10%), and the gain grows with B_J.
+- *KPI 6 and 7, mitigation 15, by link.* rule_core3 confirms at 4/5 cycles (80/100 ms), the hybrid at 1/1. The "-3.52 cycles" against the hybrid is mostly rule_core3's later detection clock and is never to be quoted as "faster recovery". Goodput (Line A): rule_core3 15659 [15003, 16293] bit/s, blind_core 12075, none 5042.
+  - Mitigation 15 (descriptive, no verdict; whole episode, CRC-triggered re-hops included), H1 primary, changes per episode: rule_core3 3.718 [3.501, 3.944], blind_core 2.518 [2.407, 2.628], rule_core 4.375 [4.198, 4.558]. rule_core3 minus blind_core +1.200 [+0.986, +1.425], false changes +0.020 [+0.016, +0.026]; rule_core3 minus rule_core -0.657 [-0.716, -0.596]. The same order holds in all six sets.
+  - `core_bw_lect_by_link`: GATE PASS, Line A equal to the report, Lines A and B give the same words; 89 of 216 flights link-limited (848 of 6120 verdict episodes).
+- *Gate (D109).* No CORE_BW result number enters the book before D2c (`rx_fix_rule3.md` section 4, as committed on `rx-ne-fix` before any D2c data) gives U_s. Each jammed-state number then carries "r1; receiver loss on the restored link <= U_s (D2c, validation)", and the KPI 5 words are read by rule 4.6. Quotable now: design, geometry and bookkeeping only. The interim report (1.11) is unaffected (point 5).
+- *Defects.* Reporting only; the frozen tree is not changed.
+  - The prediction lines print their criterion as fixed text ("(holds 0)", "(longer)", "(0)", "holds 0") beside computed values. The computed words are right (P1, P4, P5 do not hold; P2, P3 hold), and the book writes them in words.
+  - Per-B_J goodput and t_rec_det differences, named in protocol 6.5, were not computed.
+  - No decision-layer, CNN or hop-model defect was found.
+  - None is a profile 3 candidate under the registered rules: CORE_BW runs on profile 1 only; D113 keeps `rule_core_policy.m` unchanged in profile 3; D105 point 2 keeps blind_core's fixed first response in TIP3; profile 3's `lect_kpis.m` already prints recovery from the onset.
+- *Open for Adi.*
+  - (a) Before D2c's data: how U_s applies to KPI 8's paired differences. Rule 4.6 covers only the KPI 5 words. Proposed: a sign is receiver-robust when its 95% interval clears 0 by more than U_s.
+  - (b) The recoverable-scope counts (433 of 882; 85 of 112) wait with the results unless Adi decides otherwise.
+  - (c) A tuned narrowband answer is not studied in profile 3 under D113; any change needs Adi's own registration before profile 3 decision-layer data.
 
 ## D109 — Delay-line receiver defect: found on validation, D1 diagnosis result, receiver per run (29.10.2026)
 
@@ -2792,3 +2817,62 @@ Item 7 is the one exception. Its routing may switch on D117 point 3, a training 
    - A projected-end check reads only measured durations, dates and the r2 status, never a result of an item it may shed. An item whose governing data has been read is no longer sheddable.
    - The check's inputs and projected dates are written down before anything is shed. A shed item is recorded with the projected dates that triggered it.
 4. **If the end still passes 24.11 after shedding** (for example, a C1p as slow as profile 1's 144.9 h), Adi is told the numbers. Nothing is shortened (no-training-shortcuts).
+
+## D107 — The DQN's lost-branch hold: the excess of the false-switch penalty charged only on cycles with no threat on the air (the Lagrangian of the KPI 6 constraint, training only); scored in P1R, a deployable candidate in profile 3; option B withdrawn (approved by Adi, 29.10.2026)
+
+**D107 (2026-10-29, approved by Adi on 29.10.2026): the DQN's lost-branch hold. The excess of the false-switch penalty is charged only on cycles with no threat on the air, as the Lagrangian of the KPI 6 constraint (training only). It is scored in P1R and is a deployable candidate in profile 3. Option B (FIX section 4) is withdrawn. Written after V0, before any P1R or profile 3 decision-layer data.**
+
+1. **Why.**
+   - C2e (read once; motivation only):
+     - harmed antenna_fault 46.3% [34.3, 58.1] and shadowing 21.7% [7.5, 37.5] for the deployed DQN;
+     - the antenna_fault envelope cell missed (78.9% [70.1, 87.0]).
+   - V0 (validation; `worktrees\v0\results\v0_diag.txt`, branch `v0-diag` `a521618`):
+     - harmed antenna_fault 44.6% against 87.0% with escalation;
+     - harmed shadowing 8.3% against 83.3% for the fixed configuration (lines 14-15);
+     - no lost-branch evidence form reaches 60% of harmed S1 in time with clean firing at or below 2% (lines 52-58, 151). Option B as designed is therefore not registered.
+   - The agent's Q gap at the first fire is negative on every form (lines 72-78). The reward's break-even arithmetic under the training mix reproduces it on the frequent forms (`core/d107_after_v0.md` section 3.1). So the hold is consistent with the training optimum.
+   - Cause: the training penalty (120, against the standard 20) is charged on covered threat cycles, and neither KPI 4 nor KPI 6 counts those.
+   - Contributing cause: the degradation reference is looked up at the measured Eb/N0 after the loss (`policy_monitor.m:133, 141-142`). It is stated here and not changed.
+2. **The candidate.**
+   - Penalty form `'nothreat'`, training only: `w_false + (λ − w_false)·[sc_eff == clean]` on `changed & healthy & ~rel`.
+   - λ ∈ {120, 160}, at the selected monitor and drop threshold, seeds 42-44, as one coordinate step of C2.
+   - Each run is scored with and without the escalation. The deployed form is plain `dqn`.
+   - The default `'all'` is today's code, bit for bit.
+3. **Source.** The constrained-MDP Lagrangian (Altman 1999; Paternain et al., NeurIPS 2019; Tessler et al., ICLR 2019). The constraint is KPI 6's definition (D103 point 2). Potential-based shaping is not used, because it keeps the optimum (Ng et al., ICML 1999; Wiewiora, JAIR 2003).
+4. **Precondition G0.** The validation slice of K is equal before and after the test strip, or C2's validation row reproduces exactly. Otherwise D107 is not registered and the finding goes to Adi. G0 runs multithreaded after CORE_BW's pools end (Adi, 29.10.2026).
+5. **Admissibility and pick.** `core/d107_after_v0.md` section 3.5: (a), (b) with (b′), and (c), fixed before any A′ data. The registered `rank_pick` picks among the admissible runs and every plain candidate. If none is admissible, the plain DQN stays, reported as it falls.
+6. **P1R.** Scored, not deployed. Its rows are labelled "pre-registered candidate (D107), validation-scored, not deployed, descriptive". KPI 6 on the fresh set as in D104 point 6. If C1d keeps `'ratio'`, P1R ends after C1d and D107 applies to profile 3 only.
+7. **Profile 3.** Deployable under point 5. A commit on TIP3 with tests and a smoke cell comes before the queue. Profile 3's unread test pools give the verdict.
+8. **Not changed:**
+   - the validation and test reward;
+   - `w_false`;
+   - gamma;
+   - the monitor;
+   - the shield;
+   - the selection key;
+   - every other decision kind, bit for bit.
+9. **Downstream.** `experiment_combo_generalization.m:44`, `experiment_unknown_threat.m:54` and `train_dqn.m:485` retrain with the stored form. The stamp carries it.
+10. **Deferred, with reasons.**
+    - M3 (D91): its coherence columns are already in the fusion; its gain is a binary bound; it needs a detector refit.
+    - The held-reference escalation B-H: it waits for the mechanism reading (d) of section 3.5.
+    - Both are candidates after profile 3.
+
+**Amendment of D103 (a dated line under DEC:1811).** "Amended 29.10.2026 by D107: the default penalty form is unchanged; a second form restricts the penalty's excess over w_false to no-threat cycles, sourced as the Lagrangian of the KPI 6 constraint (Altman 1999; Paternain et al. 2019; Tessler et al. 2019); scored in P1R, a candidate in profile 3." D103's reason, "a reward redesign without a source", is answered by the citation and is not deleted. Adi approved this amendment of a registered line explicitly on 29.10.2026.
+
+**Amendments of D104.**
+- **Point 2.** The `p1r` commit list gains the D107 commit and the three reader fixes. "P1R differs from profile 1 in the monitor and in the KPI 6 reading only" stays true for the deployed policy.
+- **Point 4.** The `'ratio'` branch, as in D107 point 6.
+- **Point 6.** One more row on the fresh set, read once with the others. `system_fa_breakdown`'s exact-reproduction gate is retested with the extra row.
+- **Points 8 and 10.** A smoke cell with the form forced, and the tests of `core/d107_after_v0.md` section 3.3.
+- **Point 11.** About 4 h more for C2.
+
+Line references in points 1-10 are to profile 1's code of record `d4623ed` and to the abbreviations of `core/d107_after_v0.md`.
+
+**D107 status (31.10.2026, at registration).** G0 passed: `worktrees\slots\uav-gcs-v7-p3\logs\hand_g0mt_20261031_000850.txt`, `V7THREADS 8` before and after, `sp=2 slices equal 1`, predict path held 0.825762952448545 and recovered 0.951206529453513, both equal to C2's to 15 digits (4654 and 5361 of 5636): the 29.10 single-thread gap (4656 and 5359) is the thread count, so point 4 holds on both conditions. Code: branch `a107` tip `7aab3be` (the A′ form `4bb20cc`, the fresh-set A′ rows `c62a5b7`-`3d37be2`, a test-helper name fix `7aab3be`); it reaches `p1r` only after its tests pass on that tip (its protocol amendment). The D104 amendment of the A′ change in C2 is the block "Amendments of D104" above.
+
+**Sources.**
+- Altman, E., *Constrained Markov Decision Processes*, Chapman & Hall/CRC, 1999. ISBN 0849303826.
+- Paternain, S., Chamon, L., Calvo-Fullana, M., Ribeiro, A., "Constrained Reinforcement Learning Has Zero Duality Gap," NeurIPS 2019, pp. 7555-7565. arXiv:1910.13393.
+- Tessler, C., Mankowitz, D. J., Mannor, S., "Reward Constrained Policy Optimization," ICLR 2019. arXiv:1805.11074.
+- Ng, A. Y., Harada, D., Russell, S., "Policy Invariance Under Reward Transformations: Theory and Application to Reward Shaping," ICML 1999, pp. 278-287.
+- Wiewiora, E., "Potential-Based Shaping and Q-Value Initialization are Equivalent," JAIR 19:205-208, 2003.
