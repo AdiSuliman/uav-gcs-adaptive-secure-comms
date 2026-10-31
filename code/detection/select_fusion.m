@@ -61,10 +61,13 @@
 % B2F re-checks the candidate's rule against the design out of fold on this fit set and folds
 % (fusion_recheck.m, fusion_adopt.m 'cand'; with the head also its single-row cost and its
 % projected cost on the stages that run the fusion every cycle, head_cost.m with HEAD_STAGES)
-% and deploys it when the rule holds, else the design alone, recorded as the fallback
-% (deployed_pick.check.ext; fusion_rev names the candidate either way). The design alone is
-% saved beside as base_fm, which eval_detector.m reads beside KPI 1. In the smoke only
-% (FUSION_RULE_LOG), FUSION_EXT_FORCE names a candidate to run this path.
+% and deploys it when the rule holds, else the design alone, recorded as the fallback: the
+% record (fusion_rev, deployed_pick) then names the design alone, the re-check is kept in
+% deployed_pick.check.ext, and fusion_pick.m's EXT is set back to '' before B3r and C1p (D110
+% point 5: the pick is the design on a failed re-check). A rerun naming a candidate over a
+% recorded fallback stops (select_fusion:ext_fallback). The design alone is saved beside as
+% base_fm, which eval_detector.m reads beside KPI 1. In the smoke only (FUSION_RULE_LOG),
+% FUSION_EXT_FORCE names a candidate to run this path.
 % The quiet-slot interference alarm of the rule (rule_based_policy.m) is set here from
 % the clean validation frames (the sub-runs without a threat), as an AGC jamming monitor
 % sets its threshold from interference-free samples, Th = mu - 3 sigma - 2 dB for a gain
@@ -127,6 +130,11 @@ if ENL
         KN = {whos('-file', 'data/fusion.mat').name}; KD = struct();
         if ismember('deployed_pick', KN), KD = load('data/fusion.mat', 'deployed_pick'); end
         if ismember('fusion_rev', KN), KD.fusion_rev = load('data/fusion.mat', 'fusion_rev').fusion_rev; end
+        if isfield(PK, 'ext') && isfield(KD, 'deployed_pick') && isfield(KD.deployed_pick, 'check') && isfield(KD.deployed_pick.check, 'ext')
+            assert(~KD.deployed_pick.check.ext.fallback, 'select_fusion:ext_fallback', ['data/fusion.mat records the fallback ' ...
+                'of %s to the d91 pick alone: fusion_pick.m names the d91 pick after it (EXT = '''', D110 point 5)'], ...
+                KD.deployed_pick.check.ext.pick);
+        end
         kept_base.cues = ~(isfield(KD, 'deployed_pick') && isfield(KD.deployed_pick, 'check') && ...
             isequal(rmfield(KD.deployed_pick, 'check'), PK) && isfield(KD, 'fusion_rev') && ...
             isequal(KD.fusion_rev, fusion_rev_id('enlarged')));
@@ -305,7 +313,7 @@ FM = fuse_classes('fit', Zf, ft, C, lambda);
 base_fm = [];
 if ~isempty(PK) && isfield(PK, 'ext')                    % the d91 pick alone, kept beside and read beside the KPI
     base_fm = FM;
-    if RX.adopted, FM = RX.FM; cues = RX.cues; val_probs_oof = RX.pv(vr, :); end
+    if RX.adopted, FM = RX.FM; cues = RX.cues; val_probs_oof = RX.pv(vr, :); else, PK = rmfield(PK, 'ext'); end   % the fallback: the record names the pick alone
 end
 if REV, FM.target_age = TA.target_age; FM.cues = cues; end
 [~, y1] = max(P, [], 2);
@@ -368,14 +376,14 @@ save(fz_tmp, 'FM', 'N', 'lambda', 'NS', 'LAMBDA', 'cv', 'val_probs_oof', 'val_la
 if REV
     fit_name = 'validation';
     if exist('FUSION_FIT', 'var') && strcmp(FUSION_FIT, 'enlarged'), fit_name = 'enlarged'; end
-    PKr = struct(); if ~isempty(PK), PKr = PK; end       % the id names the candidate B2F ran over the pick, adopted or not
+    PKr = struct(); if ~isempty(PK), PKr = PK; end       % the id names the candidate B2F deployed over the pick, none after a fallback
     fusion_rev = fusion_rev_id(fit_name, PKr);           % B3r reads the fourth test set only with fusion_rev_id('enlarged')
     save(fz_tmp, 'cvy', 'cvo', 'fusion_rev', '-append');
     if ~isempty(PK)
         deployed_pick = PK; deployed_pick.check = GP;
         deployed_pick.check.latch_val = struct('macro_f1_latched', mf_latch, 'macro_f1_fused', mf_fused);   % validation out of fold
         if ~isempty(kept_base), deployed_pick.check.kept = kept_base; end   % the fusion it replaced, the rule's base
-        if isfield(PK, 'ext'), deployed_pick.check.ext = rmfield(RX, {'FM', 'pv'}); end   % the re-check, adopted or the fallback to the pick alone
+        if ~isempty(base_fm), deployed_pick.check.ext = rmfield(RX, {'FM', 'pv'}); end   % the re-check, adopted or the fallback to the pick alone
         save(fz_tmp, 'deployed_pick', '-append');
         if ~isempty(base_fm), save(fz_tmp, 'base_fm', '-append'); end
     end
@@ -383,6 +391,9 @@ end
 commit_mat(fz_tmp, 'data/fusion.mat');                  % a cut run leaves the earlier fusion.mat whole
 fusion_nogo('clear');                                    % an earlier no-go record no longer names the fusion on disk
 fprintf('Saved data/fusion.mat\n');
+if ~isempty(base_fm) && ~RX.adopted
+    fprintf('The record names the d91 pick alone: set EXT = '''' in fusion_pick.m before B3r and C1p (D110 point 5)\n');
+end
 
 function c = classes_of(D)
 c = cellstr(string(D.classes(:)'));

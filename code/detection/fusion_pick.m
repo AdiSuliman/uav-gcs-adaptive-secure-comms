@@ -12,9 +12,10 @@ function P = fusion_pick(ext)
 %   P.ext         only when EXT names one: the candidate over this design that m_head.m's
 %                 verdict adopted ('LBH', 'GCC', 'CFAR', 'LBH+CFAR' or 'GCC+CFAR'; fusion_cand.m).
 %                 B2F re-checks it against this design on its own fit set and deploys this
-%                 design alone when it fails (select_fusion.m, fusion_recheck.m)
+%                 design alone when it fails (select_fusion.m, fusion_recheck.m); EXT is then
+%                 set back to '' before B3r and C1p, as the record names this design
 %   P = fusion_pick(ext)  the same with ext in place of EXT (the smoke's forced cell, tests)
-EXT = '';                                               % D110's verdict; '' when m_head.m adopts nothing
+EXT = '';                                               % D110's verdict; '' when m_head.m adopts nothing or B2F falls back
 if nargin >= 1, EXT = ext; end
 P = struct('name', 'branch evidence, phi = 1', ...
     'cues', struct('cfar', [], 'iso', true, 'glr', true, 'held', true, 'post', true, 'phi1', true), ...
