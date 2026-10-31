@@ -29,7 +29,7 @@ function [SU, lines] = speed_reading(R1, m1, R2, cellgrp, edges, SPR, O)
 %   warning say so when it does not, the reading goes on)
 TARGET = 0.10;                                          % KPI 7: spread <= 10 points
 B = 9999;
-SEEDS = struct('test', [81 82], 'union', [83 84]);      % bootstrap and permutation streams
+SEEDS = struct('test', [3101 3102], 'union', [3103 3104]);  % bootstrap and permutation streams
 nb = numel(edges) - 1;
 [x1, b1, c1, s1, g1] = episode_vectors(R1, m1, edges, cellgrp);
 T = speed_inference(x1, b1, c1, s1, g1, nb, B, SEEDS.test);

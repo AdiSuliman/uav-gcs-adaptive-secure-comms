@@ -569,16 +569,28 @@ end
 
 function test_resampling_seeds_are_their_own(tc)
 % The speed readings' streams: bootstrap and permutation of the test and the union reading, and
-% the edge lines' bootstrap, each their own and none one of evaluate_policies.m's boot_cluster seeds.
+% the edge lines' bootstrap, each their own and none one of the seeds of the other bootstraps and
+% streams of the code (evaluate_policies.m's threat loops draw N + ti for every threat).
 s = fileread(which('speed_reading'));
 v = str2double(regexp(regexprep(regexp(s, 'SEEDS = struct\([^\n]*', 'match', 'once'), '[^\d ]', ''), '\s+', 'split'));
 v = v(~isnan(v));
-verifyEqual(tc, v, [81 82 83 84]);
+verifyEqual(tc, v, [3101 3102 3103 3104]);
 e = fileread(which('speed_edge_lines'));
 w = cellfun(@(x) str2double(x{1}), regexp(e, ', (9\d)\}?[;,]', 'tokens'));
 verifyEqual(tc, sort(w), [91 92 93]);
-ep = fileread(which('evaluate_policies'));
-other = cellfun(@(x) str2double(x{1}), regexp(ep, 'boot_cluster\([^\n]*?, (\d+)\);', 'tokens'));
+verifyEqual(tc, bootstrap_seeds(sprintf('[~, a] = boot_cluster(x, y, ...\n    z, 2000, 60 + ti);\nq = spread_boot(a, 2000, 80);\nrs = RandStream(''mt19937ar'', ''Seed'', 7);'), 3), ...
+    [7 61 62 63 80]);
+C = decision_config();
+nT = numel(fieldnames(C.sev)) + numel(C.combos);          % evaluate_policies.m: every single but none, every combination
+root = fileparts(fileparts(which('speed_reading')));
+fl = dir(fullfile(root, '**', '*.m'));
+fl = fl(~startsWith({fl.folder}, fullfile(root, 'tests')));
+other = [];
+for k = 1:numel(fl)
+    other = [other, bootstrap_seeds(fileread(fullfile(fl(k).folder, fl(k).name)), nT)]; %#ok<AGROW>
+end
+verifyTrue(tc, ismember(60 + nT, other) && ismember(160 + nT, other));   % the scan reaches the threat loops' last threats
+verifyEqual(tc, numel(unique([v w])), numel([v w]));
 verifyEmpty(tc, intersect(other, [v w]));
 end
 
@@ -597,6 +609,22 @@ if nargin > 0
 end
 evalc('init_params');
 p = load('params.mat').params;
+end
+
+function sd = bootstrap_seeds(src, nT)
+% The seeds that the boot_cluster and spread_boot calls and the RandStream('mt19937ar', 'Seed', N)
+% calls of the source text src state as literals, sorted; a call ending in "N + ti" stands for
+% N + (1:nT).
+src = regexprep(src, '\.\.\.[^\n]*\n\s*', ' ');
+call = '(?:boot_cluster|spread_boot)\([^;]*?,\s*';
+a = regexp(src, [call '(\d+)\)\s*;'], 'tokens');
+b = regexp(src, [call '(\d+)\s*\+\s*ti\)\s*;'], 'tokens');
+c = regexp(src, '''Seed'',\s*(\d+)\s*\)', 'tokens');
+sd = cellfun(@(x) str2double(x{1}), [a, c]);
+for k = 1:numel(b)
+    sd = [sd, str2double(b{k}{1}) + (1:nT)]; %#ok<AGROW>
+end
+sd = unique(sd);
 end
 
 function ok = same(a, b)
