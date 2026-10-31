@@ -314,6 +314,15 @@ else
     for m = 1:numel(MON)
         MONP(m).cf = R{sw}(m).cf; MONP(m).j = R{sw}(m).j; MONP(m).pick = R{sw}(m).pick; MONP(m).admissible = R{sw}(m).admissible;
         MONP(m).k = R{sw}(m).k; MONP(m).n = ncl; MONP(m).k_other = R{sw}(m).k_other; MONP(m).lat = R{sw}(m).lat;
+        MONP(m).path_budget = struct('used', false, 'admissible', false, 'pick', NaN, 'j', NaN, 'k', NaN, 'bound', NaN);
+        if ~R{sw}(m).admissible                            % D121 item 4: the drop path's own budget, before the fallback
+            csb = []; if sw == 2, csb = CS; end
+            PB = drop_path_pick(Tc, drop_alarm, GF, R{sw}(m).cf, csb, ncl, 0.02);
+            MONP(m).path_budget = PB;
+            if PB.admissible
+                MONP(m).pick = PB.pick; MONP(m).j = PB.j; MONP(m).k = PB.k; MONP(m).path_budget.used = true;
+            end
+        end
     end
     for s = 1:2
         rw{end+1} = sprintf('  sweeper''s own confirmation %s:', ternary(s == 1, 'off', sprintf('on, %d of %d cycles', CS))); %#ok<SAGROW>
@@ -324,8 +333,19 @@ else
                 'NONE ADMISSIBLE: the least sensitive'), x.k, ncl, 100 * cp_upper(x.k, ncl), x.k_other, ncl, ...
                 100 * cp_upper(x.k_other, ncl)); %#ok<SAGROW>
             if ~x.admissible && cp_upper(x.k_other, ncl) > FA_BOUND
-                rw{end+1} = sprintf(['      the other paths alone break the %.0f%% bound under %s: no drop threshold can meet ' ...
-                    'KPI 6 with this monitor'], 100 * FA_BOUND, MON{m}); %#ok<SAGROW>
+                rw{end+1} = sprintf(['      the other paths alone break the %.0f%% bound under %s: the monitor''s no_action ' ...
+                    'bound cannot meet %.0f%%'], 100 * FA_BOUND, MON{m}, 100 * FA_BOUND); %#ok<SAGROW>
+            end
+            if ~x.admissible                                % D121 item 4: the drop path's own false-alarm budget
+                csb = []; if s == 2, csb = CS; end
+                PBs = drop_path_pick(Tc, drop_alarm, GF, x.cf, csb, ncl, 0.02);
+                if PBs.admissible
+                    rw{end+1} = sprintf(['      D121 item 4: the drop path''s own budget admits %.1f %s (%d/%d, bound %.2f%%' ...
+                        ' <= 2.0%%), kept instead of the least sensitive fallback'], PBs.pick, drop_unit(drop_alarm), PBs.k, ncl, ...
+                        100 * PBs.bound); %#ok<SAGROW>
+                else
+                    rw{end+1} = '      D121 item 4: no grid value meets the drop path''s own 2.0% budget either; the least sensitive stands.'; %#ok<SAGROW>
+                end
             end
             rw{end+1} = sprintf('      delays median / p90 / never: %s', strjoin(cellfun(@(n, a, b, c) sprintf('%s %g/%g/%.1f%%', ...
                 n, a, b, c), x.lat.threat, num2cell(x.lat.median), num2cell(x.lat.p90), num2cell(100 * x.lat.never), ...
@@ -356,8 +376,31 @@ if DCx && isempty(CV)
 end
 fid = fopen('results/drop_threshold.txt', 'a'); fprintf(fid, '%s\n', rw{:}); fclose(fid);
 fprintf('%s\n', rw{:});
+
+%% 5b. D121 item 4: the 3.5% side calibration (condition 2; descriptive, no adoption effect)
+CAL35 = struct('bound', 0.035, 'note', 'descriptive side reading; never adopted (D121 condition 2)');
+if ~isempty(CV)
+    cs35 = []; if sw == 2, cs35 = CS; end
+    CAL35 = side_calibration_35(Tc, Tv, ncl, onv, thv, thn, drop_alarm, GF, MON, cs35, FA_BOUND);
+    rc = {'', ['3.5% side calibration (D121 item 4; shares x0.7: lost-branch 1.05%, drop 1.4%, degradation+other 1.05%; ' ...
+        'descriptive, no adoption effect):']};
+    for m = 1:numel(MON)
+        r5 = CAL35.R5(m); r35 = CAL35.R35(m);
+        rc{end+1} = sprintf(['  %-15s 5%% bound: threshold %6.1f %s, clean false alarms %d/%d (bound %.2f%%), exact-binomial ' ...
+            'P(pass at this flight count) = %.3f'], MON{m}, r5.pick, drop_unit(drop_alarm), r5.k, ncl, 100 * r5.bound, r5.ppass); %#ok<SAGROW>
+        rc{end+1} = sprintf(['  %-15s 3.5%% bound (0.7x): threshold %6.1f %s, clean false alarms %d/%d (bound %.2f%%), exact-binomial ' ...
+            'P(pass at this flight count) = %.3f'], MON{m}, r35.pick, drop_unit(drop_alarm), r35.k, ncl, 100 * r35.bound, r35.ppass); %#ok<SAGROW>
+        rc{end+1} = sprintf('      delays (5%% / 3.5%%) median / p90 / never: %s / %s', strjoin(cellfun(@(n, a, b, c) ...
+            sprintf('%s %g/%g/%.1f%%', n, a, b, c), r5.lat.threat, num2cell(r5.lat.median), num2cell(r5.lat.p90), ...
+            num2cell(100 * r5.lat.never), 'UniformOutput', false), ', '), strjoin(cellfun(@(n, a, b, c) ...
+            sprintf('%s %g/%g/%.1f%%', n, a, b, c), r35.lat.threat, num2cell(r35.lat.median), num2cell(r35.lat.p90), ...
+            num2cell(100 * r35.lat.never), 'UniformOutput', false), ', ')); %#ok<SAGROW>
+    end
+    fid = fopen('results/drop_threshold.txt', 'a'); fprintf(fid, '%s\n', rc{:}); fclose(fid);
+    fprintf('%s\n', rc{:});
+end
 SV = {'drop_db', 'drop_db_train', 'drop_from', 'separable', 'THR', 'kept', 'leak', 'leak_all', ...
-    'p95_mis', 'p99_cl', 'p05_pl', 'floor_db', 'drop_alarm', 'cusum_db', 'THC', 'VAL', 'CF', 'EBNO_THR', 'MONP', 'confirm_sweep'};
+    'p95_mis', 'p99_cl', 'p05_pl', 'floor_db', 'drop_alarm', 'cusum_db', 'THC', 'VAL', 'CF', 'EBNO_THR', 'MONP', 'confirm_sweep', 'CAL35'};
 if ~isempty(DEG)                                           % deployed by train_dqn.m (PP.deg_mode, PP.ber_q)
     deg_mode = DEG.mode; ber_q = DEG.ber_q; SV = [SV, {'deg_mode', 'ber_q', 'DEG'}];
 end
@@ -567,4 +610,80 @@ ok = arrayfun(@(m) (~R{1}(m).admissible || R{2}(m).admissible) && R{2}(m).j <= R
 sw = 1 + all(ok);
 W = struct('sweep', sw == 2);
 W.R = R{sw};
+end
+
+function PB = drop_path_pick(Tc, drop_alarm, GF, cf, cs, ncl, bound)
+% D121 item 4. When the whole-monitor rule finds no admissible threshold, scan GF from the
+% conservative end (least sensitive, GF(end)) toward the sensitive end, stop at the first
+% failure, and keep the last grid value whose clean episodes with the drop alarm ALONE as
+% first confirming path have a one-sided 95% Clopper-Pearson upper bound <= bound (2.0%). If
+% even the most conservative value fails, PB.admissible is false and the caller keeps the
+% least-sensitive fallback (its own path's fallback).
+PB = struct('admissible', false, 'pick', NaN, 'j', NaN, 'k', NaN, 'bound', NaN);
+for j = numel(GF):-1:1
+    k = drop_only_count(Tc, drop_alarm, GF(j), cf, cs);
+    up = cp_upper(k, ncl);
+    if up <= bound
+        PB = struct('admissible', true, 'pick', GF(j), 'j', j, 'k', k, 'bound', up);
+    else
+        break
+    end
+end
+end
+
+function k = drop_only_count(Tr, drop_alarm, thr, cf, cs)
+% Clean episodes whose FIRST confirming cycle is the drop alarm alone (not Tr.other, the
+% class/degradation path): the drop-path-only false-alarm count used by D121 items 4 and 6.
+n = size(Tr.eg, 1);
+a = false(size(Tr.eg)); if isfinite(thr), a = drop_alarm_seq(Tr.eg, drop_alarm, thr, [], Tr.other); end
+c = movsum(double(Tr.other | a), [cf(2) - 1, 0], 2) >= cf(1);
+if ~isempty(cs) && isfield(Tr, 'sw')
+    cs_hit = movsum(double(Tr.sw), [cs(2) - 1, 0], 2) >= cs(1);
+    c = c | cs_hit;
+else
+    cs_hit = false(size(c));
+end
+k = 0;
+for i = 1:n
+    f = find(c(i, :), 1);
+    if isempty(f), continue; end
+    if a(i, f) && ~Tr.other(i, f) && ~cs_hit(i, f), k = k + 1; end
+end
+end
+
+function p = cp_pass_prob(k_true_rate, bound_true_rate, n)
+% Exact-binomial probability of a monitor meeting a reading at this flight count, if
+% bound_true_rate were the true clean false-alarm rate: P(X <= floor(bound * n)) under
+% Binomial(n, k_true_rate) read as the point estimate (used descriptively, D121 item 4).
+x = floor(bound_true_rate * n);
+if n == 0 || isnan(k_true_rate), p = NaN; return; end
+p = binocdf(x, n, k_true_rate);
+end
+
+function CAL = side_calibration_35(Tc, Tv, ncl, onv, thv, thn, drop_alarm, GF, MON, CS, FA5)
+% D121 item 4's 3.5% side calibration. Same scans as the registered 5% reading (whole-monitor
+% rule, item 4's drop-path rescue) but with the bound scaled by 0.7. Descriptive; selects
+% nothing and is never adopted.
+FA35 = 0.7 * FA5;
+CAL = struct('R5', [], 'R35', []);
+for which = 1:2
+    FA = FA5; if which == 2, FA = FA35; end
+    R = struct('cf', {}, 'pick', {}, 'admissible', {}, 'k', {}, 'bound', {}, 'lat', {}, 'ppass', {});
+    for m = 1:numel(MON)
+        tk = strsplit(MON{m}); cf = sscanf(tk{2}, '%d/%d')';
+        k = arrayfun(@(t) sum(any(monitor_confirm(Tc, drop_alarm, t, cf, CS), 2)), [GF, Inf]);
+        up = arrayfun(@(x) cp_upper(x, ncl), k);
+        j = find(up(1:end-1) <= FA, 1);
+        adm = ~isempty(j);
+        if ~adm                                              % item 4's own-path rescue, at this calibration's bound
+            PB = drop_path_pick(Tc, drop_alarm, GF, cf, CS, ncl, ternary(which == 1, 0.02, 0.014));
+            if PB.admissible, j = PB.j; adm = true; else, j = numel(GF); end
+        end
+        cv = monitor_confirm(Tv, drop_alarm, GF(j), cf, CS);
+        rate = k(j) / max(ncl, 1);
+        R(m) = struct('cf', cf, 'pick', GF(j), 'admissible', adm, 'k', k(j), 'bound', up(j), ...
+            'lat', delays(cv, Tv.onset, thv, onv, thn), 'ppass', cp_pass_prob(rate, FA, ncl));
+    end
+    if which == 1, CAL.R5 = R; else, CAL.R35 = R; end
+end
 end
