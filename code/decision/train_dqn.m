@@ -73,6 +73,14 @@
 % not measured). The best run of every discount factor at the selected monitor, drop
 % threshold, penalty and settings is kept as an ablation. Reward-weight sensitivity:
 % proposal mitigation 2.
+% With "fa_nothreat": true in profile.json or CFG.fa_nothreat (fa_nothreat_on.m; off by
+% default), section 7 also trains the no-threat form of the penalty (fa_form_train.m: the full
+% penalty only on cycles with no threat on the air, the standard w_false elsewhere) at the
+% selected monitor and drop threshold, penalties FA_NT.pen x discount factors x seeds, and scores
+% every such run beside its grid run of the same monitor, drop, penalty, discount factor and seed
+% on the validation episodes (the harmed and covered episodes apart) and the clean validation
+% flights. These runs never enter the selection, the gate or the deployed policy
+% (data/aprime_agents.mat; results/dqn_training.txt).
 %
 % Finished runs (every training run and the reward-sensitivity retrains) are kept in
 % data/run_cache/C2 when profile.json says "run_cache": true or CFG.run_cache is true
@@ -128,6 +136,12 @@ if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (r
     DROP_STEPS = [0 2]; H.episodes = 1280; H.buffer = 20000; H.warmup = 2000; H.n_eval = 1;
 end
 SEEDS = 42 + (0:N_SEEDS-1);
+FA_NT = struct('on', fa_nothreat_on(cfgc), 'pen', [120 160]);   % the no-threat penalty form (section 7)
+if exist('SMOKE', 'var') && SMOKE, FA_NT.pen = FA_PEN; end
+if FA_NT.on && ~all(ismember(FA_NT.pen, FA_PEN))
+    error('train_dqn:fa_nothreat', 'train_dqn: the no-threat penalties %s need their grid runs (penalty grid %s)', ...
+        mat2str(FA_NT.pen), mat2str(FA_PEN));
+end
 FA_BOUND = 0.05;                         % one-sided 95% bound of the clean-link false alarms (KPI 6)
 DROP_DB = [];                            % drop alarm threshold of 'class_drop'
 DROP_FLOOR = 0;                          % moving away over the monitor's window (choose_drop_threshold.m)
@@ -318,6 +332,7 @@ B = cand(best); rb = runs(B.run);
 agent = rb.agent; sel_kind = B.kind; Sdep = rb.S;
 gamma_sel = rb.gamma; fa_pen_sel = rb.fa_pen; alarm_sel = rb.alarm; drop_sel = rb.drop;
 cs_sel = rb.cost_scale; ss_sel = rb.sw_scale;
+fa_form_sel = 'all';                                 % every candidate of the selection trains the plain form
 GAM = unique([GAMMAS, [runs.gamma]]);
 same = @(r) r.fa_pen == fa_pen_sel & r.cost_scale == cs_sel & r.sw_scale == ss_sel & strcmp(r.alarm, alarm_sel) ...
     & isequaln(r.drop, drop_sel) & isequal(r.S, Sdep);
@@ -458,6 +473,7 @@ seed_summary = struct('alarms', {{runs.alarm}}, 'drops', [runs.drop], 'fa_pens',
     'table_return', base(eb).tab.ret, 'deployed', deployed, 'fa_bound_met', fa_bound_met, 'fa_ebno_thr', EBNO_THR, ...
     'fa_rate_dqn', FD, 'fa_rate_rule', FR, 'dqn_held', B.held, 'dqn_recovered', B.rec, ...
     'nb_reference', rmfield(xref, 'sw_w'), 'nb_candidates', BC);
+if FA_NT.on, seed_summary.selected_fa_form = fa_form_sel; end   % the retrain readers carry it (fa_form_train.m)
 H.gamma = gamma_sel; H.fa_pen = fa_pen_sel; H.cost_scale = cs_sel; H.sw_scale = ss_sel;
 action_names = PP.actions;
 gammas = GAM;
@@ -516,7 +532,9 @@ for f = [1, SENS_SCALES]
         fprintf('--- reward sensitivity: costs x %.1f ---\n', f);
         Hs = H; Hs.gamma = gamma_sel;
         Kft = Kf; Kft.FA = f * fa_pen_sel; Kft.cost = f * cs_sel * K.cost; Kft.SW = f * ss_sel * K.SW;
-        ag = cached(RC, {'sens', f, Hs, fa_pen_sel, cs_sel, ss_sel, alarm_sel, drop_sel, Sdep, rb.seed, DROP_MODE}, PPc, PP, ...
+        Kft = fa_form_train(Kft, Kf, fa_form_sel);
+        ag = cached(RC, {'sens', f, Hs, fa_pen_sel, cs_sel, ss_sel, alarm_sel, drop_sel, Sdep, rb.seed, DROP_MODE, ...
+            fa_form_sel}, PPc, PP, ...
             @() dqn_train_run(Hs, PPc, Kft, Kf, norm_in, rb.seed, nS, SPLIT_TRAIN, SPLIT_VAL), ...
             @(a) fprintf('    retrained agent read from %s (finished before a restart)\n', RC.dir));
     end
@@ -542,6 +560,56 @@ rs2{end+1} = sprintf(['DQN held recovery at least that of rule + escalation and 
 fid = fopen('results/dqn_training.txt', 'a'); fprintf(fid, '%s\n', rs2{:}); fclose(fid);
 fprintf('%s\n', rs2{:});
 save('data/trained_dqn.mat', 'sens', '-append');
+
+%% 7. The no-threat penalty form (descriptive: never selected, gated or deployed)
+% Training only: the penalty FA_NT.pen on a change on a healthy link where no threat is on the
+% air, the standard w_false on every other cycle (fa_form_train.m). At the selected monitor and
+% drop threshold with the grid's settings, cost scales, discount factors and seeds, each run is
+% paired with its grid run, and both are read on the same validation episodes (common random
+% numbers) as deployed without the escalation: held and recovered on the recoverable episodes, the
+% harmed (no response does not restore the geometry) and the covered apart, and the false alarms
+% on the clean validation flights. Every per-episode reading and both agents are saved.
+if FA_NT.on
+    ea = struct('alarm', alarm_sel, 'drop', drop_sel);
+    Hn = rmfield(H, {'fa_pen', 'cost_scale', 'sw_scale'});   % the grid's hyperparameters
+    PPa = decision_settings(with_entry(PP, ea, DROP_MODE), Ssel);
+    AR = runs([]); pair = zeros(1, 0);
+    for fp = FA_NT.pen
+        fi = find(FA_PEN == fp, 1);
+        for g = GAMMAS
+            for k = 1:N_SEEDS
+                AR(end+1) = cached(RC, {'train_one', ea, fp, COST_SCALE(fi), SW_SCALE(fi), g, SEEDS(k), Ssel, ...
+                    'penalty form nothreat', DROP_MODE, 'nothreat'}, PPa, PP, @() train_one(Hn, PPa, K, norm_in, nS, ea, fp, ...
+                    COST_SCALE(fi), SW_SCALE(fi), g, SEEDS(k), Ssel, 'penalty form nothreat', ev, DROP_MODE, DU, ...
+                    SPLIT_TRAIN, SPLIT_VAL, 'nothreat'), @(r) run_lines(r, DROP_MODE, DU, RC.dir)); %#ok<SAGROW>
+                j = find(arrayfun(@(r) strcmp(r.step, 'grid') && strcmp(r.alarm, alarm_sel) && isequaln(r.drop, drop_sel) ...
+                    && r.fa_pen == fp && r.cost_scale == COST_SCALE(fi) && r.sw_scale == SW_SCALE(fi) && r.gamma == g ...
+                    && r.seed == SEEDS(k) && isequal(r.S, Ssel), runs));
+                if numel(j) ~= 1
+                    error('train_dqn:fa_nothreat', 'train_dqn: %d grid runs pair the no-threat run at penalty %d, seed %d', ...
+                        numel(j), fp, SEEDS(k));
+                end
+                pair(end+1) = j; %#ok<SAGROW>
+            end
+        end
+    end
+    EP = val_episodes(val_spec, val_thr, K, SPLIT_VAL);
+    A7 = struct('pen', {}, 'gamma', {}, 'seed', {}, 'nothreat', {}, 'plain', {});
+    for i = 1:numel(AR)
+        P0 = runs(pair(i));
+        A7(i).pen = AR(i).fa_pen; A7(i).gamma = AR(i).gamma; A7(i).seed = AR(i).seed;
+        A7(i).nothreat = split_row(AR(i), PPa, K, val_spec, SPLIT_VAL);
+        A7(i).plain = split_row(P0, PPa, K, val_spec, SPLIT_VAL);
+    end
+    aprime = struct('label', 'pre-registered candidate (D107), validation-scored, not deployed, descriptive', ...
+        'form', 'nothreat', 'w_false', K.FA, 'alarm', alarm_sel, 'drop', drop_sel, 'S', Ssel, 'pen', FA_NT.pen, ...
+        'gammas', GAMMAS, 'seeds', SEEDS, 'fa_ebno_thr', EBNO_THR, 'fa_bound', FA_BOUND, 'episodes', EP, 'runs', A7);
+    save('data/aprime_agents.mat', 'aprime', '-v7.3');
+    rs7 = aprime_lines(aprime, mon_txt(alarm_sel, DROP_MODE), DU);
+    fid = fopen('results/dqn_training.txt', 'a'); fprintf(fid, '%s\n', rs7{:}); fclose(fid);
+    fprintf('%s\n', rs7{:});
+    fprintf('Saved data/aprime_agents.mat\n');
+end
 fprintf('=== C2 Complete ===\n');
 
 %% ===================== Local functions =====================
@@ -612,12 +680,15 @@ sw = sw(1:n);
 fa = mean(sw > 0);
 end
 
-function r = train_one(H, PPc, K, norm_in, nS, en, fp, cs, ss, g, seed, S, step, ev, drop_mode, du, sp_tr, sp_val)
+function r = train_one(H, PPc, K, norm_in, nS, en, fp, cs, ss, g, seed, S, step, ev, drop_mode, du, sp_tr, sp_val, form)
 % One training run at monitor and drop en, penalty fp, cost and switch scales cs, ss, discount
-% g, settings S (applied in PPc), scored with and without the escalation.
+% g, settings S (applied in PPc), the penalty's form (fa_form_train.m, default 'all'), scored
+% with and without the escalation on the standard reward K.
+if nargin < 19, form = 'all'; end
 fprintf(['--- monitor %s, drop %.1f %s, false-switch penalty %d, costs x%.1f, switch x%.1f, gamma %.2f, seed %d%s ---\n'], ...
     mon_txt(en.alarm, drop_mode), en.drop, du, fp, cs, ss, g, seed, ternary(strcmp(step, 'grid'), '', [' (' step ')']));
 Kt = K; Kt.FA = fp; Kt.cost = cs * K.cost; Kt.SW = ss * K.SW;   % training reward only
+Kt = fa_form_train(Kt, K, form);
 Hg = H; Hg.gamma = g;
 [ag, curve, lossc, best_ep] = dqn_train_run(Hg, PPc, Kt, K, norm_in, seed, nS, sp_tr, sp_val);
 xe = ev('dqn_esc', PPc, ag, struct()); xn = ev('dqn', PPc, ag, struct());
@@ -626,6 +697,77 @@ fprintf(['    checkpoint %d | validation with / without the escalation: held %.1
     100*xn.rec, xe.kmin_thr, 100*xe.kmin, xe.ret, xn.ret, fa_txt(xe.fa_w, xe.n_w), fa_txt(xn.fa_w, xn.n_w));
 r = struct('alarm', en.alarm, 'drop', en.drop, 'fa_pen', fp, 'cost_scale', cs, 'sw_scale', ss, 'gamma', g, 'seed', seed, ...
     'S', S, 'step', step, 'agent', ag, 'curve', curve, 'loss', lossc, 'best_ep', best_ep, 'esc', xe, 'noesc', xn);
+end
+
+function EP = val_episodes(specs, thr, K, sp)
+% Per validation episode: cell, Eb/N0 index, geometry, threat, and harmed: no response does not
+% restore BER and packet loss in its geometry (link_env.m tables at no_action).
+g = @(f) cell2mat(cellfun(@(x) x.(f), specs, 'UniformOutput', false));
+scn = g('scn'); s = g('s'); r = g('r');
+ih = sub2ind(size(K.restored), scn, s, K.na + 0 * s, sp + 0 * s, r);
+EP = struct('scn', scn, 's', s, 'r', r, 'threat', {thr(:)'}, 'harmed', ~(K.restored(ih) & K.restored_plr(ih)));
+end
+
+function x = split_row(r, PPa, K, specs, sp)
+% One run without the escalation on the validation episodes, with eval_policy's draws: the
+% per-episode readings, the agent in matrix form, the run's summaries with and without the
+% escalation (clean-flight changes in sw_w), and whether the readings reproduce its row.
+V = dqn_eval_batches('dqn', PPa, K, specs, r.agent, struct(), 5000, sp);
+x = struct('agent', dqn_dense(r.agent), 'best_ep', r.best_ep, 'esc', r.esc, 'noesc', r.noesc, ...
+    'held', V.held, 'recovered', V.recovered, 'recoverable', V.recoverable, 'threat', V.threat, ...
+    'reproduced', abs(dqn_held(V) - r.noesc.held) < 1e-12 && abs(dqn_recovered(V) - r.noesc.rec) < 1e-12);
+end
+
+function L = aprime_lines(A, mon, du)
+% Section 7's report: every no-threat run beside its grid run, then the seed means per penalty
+% and discount factor (paired differences in points; false alarms as the mean count).
+E = A.episodes;
+S1 = {'antenna_fault', 'airframe_shadowing'};
+grp = {ismember(E.threat, S1), strcmp(E.threat, S1{1}), strcmp(E.threat, S1{2})};
+L = {'', sprintf(['No-threat penalty form (%s): the training penalty on changes on a healthy link with no threat on ' ...
+    'the air, w_false %g on every other cycle; monitor %s, drop %.1f %s, the grid''s settings; read without the ' ...
+    'escalation on the validation episodes and the clean validation flights (Eb/N0 >= %g dB), each run beside its grid ' ...
+    'run (same monitor, drop, penalty, gamma and seed); no-threat / grid:'], A.label, A.w_false, mon, A.drop, du, ...
+    A.fa_ebno_thr)};
+D = nan(numel(A.runs), 4);
+for i = 1:numel(A.runs)
+    a = A.runs(i).nothreat; b = A.runs(i).plain;
+    ma = a.recoverable & a.threat; mb = b.recoverable & b.threat;
+    hv = @(x, m) 100 * mean(x.recovered(m)); kv = @(x, m) 100 * mean(x.held(m));
+    t = cell(1, 3);
+    for q = 1:3
+        t{q} = sprintf('%.1f / %.1f%% (n %d)', hv(a, ma & E.harmed & grp{q}), hv(b, mb & E.harmed & grp{q}), ...
+            sum(mb & E.harmed & grp{q}));
+    end
+    cv = sprintf('%.1f / %.1f%% (n %d)', kv(a, ma & ~E.harmed & grp{1}), kv(b, mb & ~E.harmed & grp{1}), ...
+        sum(mb & ~E.harmed & grp{1}));
+    L{end+1} = sprintf(['  penalty %d, gamma %.2f, seed %d | harmed recovered: S1 %s, antenna_fault %s, shadowing %s | ' ...
+        'covered S1 held %s | pooled held %.1f / %.1f%% | FA %s / %s | with the escalation held %.1f / %.1f%% | ' ...
+        'grid readings reproduced: %s / %s'], A.runs(i).pen, A.runs(i).gamma, A.runs(i).seed, t{:}, cv, ...
+        100 * a.noesc.held, 100 * b.noesc.held, fa_bound_txt(a.noesc), fa_bound_txt(b.noesc), 100 * a.esc.held, ...
+        100 * b.esc.held, ternary(a.reproduced, 'yes', 'NO'), ternary(b.reproduced, 'yes', 'NO')); %#ok<AGROW>
+    D(i, :) = [hv(a, ma & E.harmed & grp{1}) - hv(b, mb & E.harmed & grp{1}), ...
+        kv(a, ma & ~E.harmed & grp{1}) - kv(b, mb & ~E.harmed & grp{1}), 100 * (a.noesc.held - b.noesc.held), ...
+        a.noesc.fa_w * a.noesc.n_w];
+end
+for p = unique([A.runs.pen])
+    for g = unique([A.runs.gamma])
+        m = [A.runs.pen] == p & [A.runs.gamma] == g;
+        if ~any(m), continue; end
+        n = A.runs(find(m, 1)).nothreat.noesc.n_w; k = mean(D(m, 4));
+        L{end+1} = sprintf(['  penalty %d, gamma %.2f, mean of %d seeds (no-threat minus grid): harmed S1 recovered ' ...
+            '%+.1f, covered S1 held %+.1f, pooled held %+.1f points | no-threat FA %.1f of %d, bound %s'], p, g, sum(m), ...
+            mean(D(m, 1:3), 1), k, n, ternary(isnan(k), '-', sprintf('%.2f%%', 100 * cp_upper(round(k), n)))); %#ok<AGROW>
+    end
+end
+L{end+1} = '  Descriptive: these runs never enter the selection, the gate or the deployed policy (data/aprime_agents.mat).';
+end
+
+function t = fa_bound_txt(x)
+% False-alarm episodes on the clean validation flights and their one-sided 95% bound.
+if isnan(x.fa_w), t = '-'; return; end
+k = round(x.fa_w * x.n_w);
+t = sprintf('%d/%d [%.2f%%]', k, x.n_w, 100 * cp_upper(k, x.n_w));
 end
 
 function r = cached(RC, parts, PPc, PP, f, onhit)

@@ -426,12 +426,134 @@ Fg = load(fullfile(out2, 'system_fa_breakdown.gatefail.mat'));
 verifyEqual(tc, Fg.far_set, 'fresh');
 end
 
+function test_gate_fresh_aprime(tc)
+% With the no-threat form's runs (KP.far_aprime, RWa) the gate reproduces the new KP.far exactly:
+% every policy's rows as without them, then the A' rows on the same fresh flights, and their lines
+% and block in the text; D103 3 reads the policies' flights only. A changed A' row, RWa missing,
+% off split 7, on other flights or without a field, RWa without KP.far_aprime, KP.far without the
+% A' rows, a malformed KP.far_aprime, or a text without their lines stops it.
+[E, PP, txt, Q, E0, txt0] = eval_world_aprime();
+G0 = system_fa_breakdown('gate', E0, PP, Q, txt0);
+G = system_fa_breakdown('gate', E, PP, Q, txt);
+verifyTrue(tc, G0.pass, strjoin(G0.mismatch, newline));
+verifyTrue(tc, G.pass, strjoin(G.mismatch, newline));
+verifyTrue(tc, isequaln(G.far, E.KP.far) && isequaln(G.far_diag, E.KP.far_diag));
+verifyNumElements(tc, G.far, numel(G0.far) + 2);
+verifyTrue(tc, isequaln(G.far(1:end - 2), G0.far), 'every policy''s row as without the A'' rows');
+verifyTrue(tc, isequaln(G.far_diag, G0.far_diag));
+verifyEqual(tc, {G.far(end - 1:end).policy}, E.KP.far_aprime.lbl);
+verifyEqual(tc, [G.far(end - 1:end).k; G.far(end - 1:end).n], [2 1; 8 8]);
+verifyTrue(tc, isequaln(G.RU, G0.RU) && isequaln(G.aboveU, G0.aboveU), 'D103 3 reads the policies'' flights');
+la = aprime_fresh('lines', E.KP.far_aprime, E.KP.far(end - 1:end));
+verifyEqual(tc, G.far_lines(end - numel(la) + 1:end), la);
+verifyEqual(tc, la{2}, sprintf(['  A'' penalty 120, gamma 0.50, mean of 2 seeds: 1.5 of 8 episodes with >= 1 change, ' ...
+    'bound %.2f%%'], 100 * betaincinv(0.95, 3, 6)));
+np = numel(G0.far);
+verifyEqual(tc, G.far_lines(1:np), G0.far_lines(1:np));
+verifyTrue(tc, all(startsWith(G.far_lines(np + 1:np + 2), strcat({'  '}, E.KP.far_aprime.lbl))), ...
+    'the A'' lines right after the policies''');
+verifyEqual(tc, G.far_lines(np + 3:end - numel(la)), G0.far_lines(np + 1:end));
+[B, lines] = system_fa_breakdown('breakdown', E, PP, G); [B0, l0] = system_fa_breakdown('breakdown', E0, PP, G0);
+verifyTrue(tc, isequaln(B, B0));
+verifyEqual(tc, numel(lines), numel(l0) + 2 + numel(la));
+X = E; X.KP.far(end).k = 9;
+gate_fails(tc, X, PP, Q, txt, 'KP.far: .k differs');
+gate_fails(tc, rmfield(E, 'RWa'), PP, Q, txt, 'the evaluation lacks RWa');
+X = E; X.RWa{2}.split(3) = 6;
+gate_fails(tc, X, PP, Q, txt, 'RWa{2} (aprime_2) is not split id 7');
+X = E; X.RWa{1}.geom(1) = X.RWa{1}.geom(1) + 1;
+gate_fails(tc, X, PP, Q, txt, 'RWa{1} (aprime_1) does not hold the episodes of RWf{1}');
+X = E; X.RWa{1} = rmfield(X.RWa{1}, 'fc_dal');
+gate_fails(tc, X, PP, Q, txt, 'RWa{1} (aprime_1) lacks fc_dal');
+X = E; X.KP = rmfield(X.KP, 'far_aprime');
+gate_fails(tc, X, PP, Q, txt, 'the evaluation holds RWa but KP has no far_aprime');
+X = E; X.KP.far = E0.KP.far;
+gate_fails(tc, X, PP, Q, txt, 'far_report on KPI 6''s clean flights vs KP.far');
+X = E; X.KP.far_aprime.pol = X.KP.far_aprime.pol(1);
+gate_fails(tc, X, PP, Q, txt, 'KP.far_aprime is not the no-threat form''s runs');
+t = txt; i = find(startsWith(t, '  A'' penalty 120, gamma 0.50, mean of 2 seeds'), 1); t{i} = strrep(t{i}, '1.5', '1.4');
+gate_fails(tc, E, PP, Q, t, 'far_report''s lines');
+gate_fails(tc, E, PP, Q, txt0, 'far_report''s lines');
+G1 = system_fa_breakdown('gate', E0, PP, Q, txt);
+verifyFalse(tc, G1.pass, 'the policies'' outputs with the A'' text');
+end
+
+function test_run_fresh_aprime(tc)
+% The single run on P1R's outputs with the A' rows: RWa read from the evaluation file, the gate
+% passes on the new KP.far, the header names the rows; a file without RWa fails the gate.
+[E, PP, txt, Q] = eval_world_aprime();
+d = fullfile(tc.TestData.tmp, 'run_fresh_aprime'); mkdir(d);
+fp = fullfile(d, 'policy_pools.mat'); save(fp, 'PP');
+fe = fullfile(d, 'policy_evaluation.mat'); save(fe, '-struct', 'E');
+ft = fullfile(d, 'policy_evaluation.txt'); write_text(ft, txt);
+fq = fullfile(d, 'trained_dqn.mat'); save(fq, '-struct', 'Q');
+out = fullfile(d, 'read1'); mkdir(out);
+system_fa_breakdown('run', fp, fe, ft, fq, out);
+o = read_text(fullfile(out, 'system_fa_breakdown.txt'));
+verifyTrue(tc, startsWith(o{1}, 'GATE PASS: ') && contains(o{1}, 'KP.far_set fresh'));
+A = E.KP.far_aprime;
+verifyTrue(tc, any(strcmp(o, sprintf('KPI 6''s last 2 rows: the no-threat penalty form''s runs (%s, sha256 %s), %s', ...
+    A.file, A.sha256, A.label))));
+la = aprime_fresh('lines', A, E.KP.far(end - 1:end));
+verifyTrue(tc, any(strcmp(o, la{2})));
+R = load(fullfile(out, 'system_fa_breakdown.mat'));
+verifyTrue(tc, R.G.pass && isequaln(R.G.far, E.KP.far));
+E2 = rmfield(E, 'RWa'); fe2 = fullfile(d, 'policy_evaluation_norwa.mat'); save(fe2, '-struct', 'E2');
+out2 = fullfile(d, 'read2'); mkdir(out2);
+verifyError(tc, @() system_fa_breakdown('run', fp, fe2, ft, fq, out2), 'system_fa_breakdown:gate');
+o2 = read_text(fullfile(out2, 'system_fa_breakdown.gatefail.txt'));
+verifyTrue(tc, any(contains(o2, 'the evaluation lacks RWa')));
+verifyFalse(tc, isfile(fullfile(out2, 'system_fa_breakdown.txt')));
+end
+
+function test_fresh_path_unchanged(tc)
+% Without the A' rows the fresh path is that of p1r b37e8a3 (the far_set reader P1R's C2e was
+% written against): the gate, the readings, the text and every saved variable, on a pass and on
+% a failed gate.
+root = tc.TestData.root; ref = 'b37e8a3';
+[st, old] = system(sprintf('git -C "%s" show %s:code/evaluation/system_fa_breakdown.m', root, ref));
+assumeEqual(tc, st, 0, 'git or the reading''s commit is not available here');
+d = fullfile(tc.TestData.tmp, 'fresh_path'); mkdir(d);
+old = regexprep(old, '^function varargout = system_fa_breakdown\(', 'function varargout = sfb_p1r(', 'once');
+verifyTrue(tc, startsWith(old, 'function varargout = sfb_p1r(cmd, varargin)'));
+fid = fopen(fullfile(d, 'sfb_p1r.m'), 'w'); fwrite(fid, old); fclose(fid);
+addpath(d); c = onCleanup(@() rmpath(d));
+[E, PP, txt, Q] = eval_world_fresh();
+verifyFalse(tc, isfield(E.KP, 'far_aprime') || isfield(E, 'RWa'));
+G0 = sfb_p1r('gate', E, PP, Q, txt); G1 = system_fa_breakdown('gate', E, PP, Q, txt);
+verifyTrue(tc, G1.pass, strjoin(G1.mismatch, newline));
+verifyTrue(tc, isequaln(G0, G1), 'gate');
+M = system_fa_breakdown('mark', PP.clean_fer, 2);
+[R0, l0] = sfb_p1r('readings', E, PP, M, G0); [R1, l1] = system_fa_breakdown('readings', E, PP, M, G1);
+verifyTrue(tc, isequaln(R0, R1), 'readings');
+verifyEqual(tc, l1, l0);
+X = E; X.KP.far(2).k = 99;
+verifyTrue(tc, isequaln(sfb_p1r('gate', X, PP, Q, txt), system_fa_breakdown('gate', X, PP, Q, txt)), 'failed gate');
+X = rmfield(E, 'RWf');
+verifyTrue(tc, isequaln(sfb_p1r('gate', X, PP, Q, txt), system_fa_breakdown('gate', X, PP, Q, txt)), 'gate without RWf');
+w = fullfile(d, 'run'); mkdir(w);
+fp = fullfile(w, 'policy_pools.mat'); save(fp, 'PP');
+fe = fullfile(w, 'policy_evaluation.mat'); save(fe, '-struct', 'E');
+ft = fullfile(w, 'policy_evaluation.txt'); write_text(ft, txt);
+fq = fullfile(w, 'trained_dqn.mat'); save(fq, '-struct', 'Q');
+Q2 = Q; Q2.confirm = [2 2]; fq2 = fullfile(w, 'trained_dqn_other.mat'); save(fq2, '-struct', 'Q2');
+o = cellfun(@(n) fullfile(w, n), {'old', 'new', 'old_fail', 'new_fail'}, 'UniformOutput', false);
+for i = 1:4, mkdir(o{i}); end
+sfb_p1r('run', fp, fe, ft, fq, o{1});
+system_fa_breakdown('run', fp, fe, ft, fq, o{2});
+same_outputs(tc, o{1}, o{2}, 'system_fa_breakdown');
+verifyError(tc, @() sfb_p1r('run', fp, fe, ft, fq2, o{3}), 'system_fa_breakdown:gate');
+verifyError(tc, @() system_fa_breakdown('run', fp, fe, ft, fq2, o{4}), 'system_fa_breakdown:gate');
+same_outputs(tc, o{3}, o{4}, 'system_fa_breakdown.gatefail');
+end
+
 %% ---------- copies and readers ----------
 function test_copies_and_readers_match_tip(tc)
 % far_report and cp_upper are evaluate_policies.m's, tstat lect_kpis.m's, word for word; the
 % mark is D99's (lect_kpis_by_ebno.m, when on the path); the readers P1R leaves unchanged are
-% profile 1's tip's (d4623ed), the six it changes are those of p1r b37e8a3, the code P1R's C2e
-% runs (docs/p1r_protocol.md section 11).
+% profile 1's tip's (d4623ed), five it changes are those of p1r b37e8a3, and evaluate_policies.m
+% with its A' reader aprime_fresh.m those of a107 e265ef9, the code P1R's C2e runs
+% (docs/p1r_protocol.md section 11).
 mine = fileread(which('system_fa_breakdown'));
 src = {'evaluate_policies', 'far_report'; 'evaluate_policies', 'cp_upper'; 'lect_kpis', 'tstat'};
 for i = 1:size(src, 1)
@@ -447,16 +569,17 @@ verifyEqual(tc, M.tag, {'L', 'L', 'M', 'M', 'J'});
 if ~isempty(which('lect_kpis_by_ebno'))
     verifyEqual(tc, M, lect_kpis_by_ebno('mark', [0.99 0.5 0.45 0.1 0.0999], 2));
 end
-root = tc.TestData.root; tip = 'd4623ed'; p1r = 'b37e8a3';
-for ref = {tip, p1r}
+root = tc.TestData.root; tip = 'd4623ed'; p1r = 'b37e8a3'; fr = 'e265ef9';
+for ref = {tip, p1r, fr}
     st = system(sprintf('git -C "%s" cat-file -e %s', root, ref{1}));
     assumeEqual(tc, st, 0, sprintf('git or commit %s is not available here', ref{1}));
 end
 same = {'code/evaluation/lect_kpis.m', 'code/evaluation/per_reduction.m', 'code/evaluation/boot_cluster.m', ...
     'code/evaluation/false_change_rate.m', 'code/decision/per_metrics.m', 'code/decision/policy_run_set.m'};
 changed = {'code/decision/decision_config.m', 'code/decision/decision_settings.m', 'code/decision/policy_stamp.m', ...
-    'code/decision/evaluate_policies.m', 'code/decision/rollout_policy.m', 'code/decision/policy_monitor.m'};
-G = [same, changed; repmat({tip}, size(same)), repmat({p1r}, size(changed))];
+    'code/decision/rollout_policy.m', 'code/decision/policy_monitor.m'};
+fresh = {'code/decision/evaluate_policies.m', 'code/decision/aprime_fresh.m'};
+G = [same, changed, fresh; repmat({tip}, size(same)), repmat({p1r}, size(changed)), repmat({fr}, size(fresh))];
 for g = G
     [~, theirs] = system(sprintf('git -C "%s" show %s:%s', root, g{2}, g{1}));
     verifyEqual(tc, strrep(fileread(fullfile(root, g{1})), sprintf('\r'), ''), strrep(theirs, sprintf('\r'), ''), ...
@@ -639,6 +762,36 @@ hf = sprintf('False alarms on the clean link, the fresh clean test set (P1R, rea
 txt = [{'=== Decision-layer evaluation on the test pools ===', 'P1R: synthetic', 'Generated: synthetic'}, ll, ...
     {'', 'False alarms on the clean link, test pools', ''}, {hu}, lu, {''}, {hf}, lf, ...
     {'', 'Configuration at the end of the episode, deployed policy (single set): most frequent two per threat'}];
+end
+
+function [E, PP, txt, Q, E0, txt0] = eval_world_aprime()
+% eval_world_fresh (E0, txt0) with two no-threat runs (A') on the same fresh flights, as C2e
+% writes them: RWa (split id 7), KP.far with their rows after every policy's, KP.far_aprime, and
+% in the text their lines after the policies' and their block after KPI 6's lines. Run 1 changes
+% on flights 5 and 9 (twice), run 2 on flight 10, all from the KPI 1 threshold.
+[E0, PP, txt0, Q] = eval_world_fresh();
+E = E0; KP = E.KP; T = 30; per_ms = 20;
+lab = 'pre-registered candidate (D107), validation-scored, not deployed, descriptive';
+pol = {'aprime_1', 'aprime_2'};
+lbl = {sprintf('A'' penalty 120, gamma 0.50, seed 42 (%s)', lab), sprintf('A'' penalty 120, gamma 0.50, seed 43 (%s)', lab)};
+sw = zeros(2, 12); sw(1, [5 9]) = [1 2]; sw(2, 10) = 1;
+RWa = cell(1, 2);
+for k = 1:2
+    R = E.RWf{1};
+    R.switches = sw(k, :); R.false_sw = zeros(1, 12); R.fc_t = 4 * (sw(k, :) > 0); R.fc_cls = double(sw(k, :) > 0);
+    R.fc_deg = false(1, 12); R.fc_dal = false(1, 12); R.fc_drop = 2 * (sw(k, :) > 0);
+    RWa{k} = R;
+end
+aF = PP.ebno(E.RWf{1}.s) >= KP.ebno_thr;
+[FAR, FD, lf] = system_fa_breakdown('far', [E.RWf, RWa], [E.POL, pol], [E.LBL, lbl], aF, T, E.iDQN, PP.ebno, ...
+    KP.cls_list, per_ms);
+AP = struct('file', 'data/aprime_agents.mat', 'sha256', repmat('ab', 1, 32), 'label', lab, 'S', struct('maha_thr', -3), ...
+    'pen', [120 120], 'gamma', [0.5 0.5], 'seed', [42 43], 'pol', {pol}, 'lbl', {lbl});
+la = aprime_fresh('lines', AP, FAR(end - 1:end));
+KP.far = FAR; KP.far_diag = FD; KP.far_aprime = AP;
+E.KP = KP; E.RWa = RWa;
+i = find(startsWith(txt0, 'False alarms on the clean link, the fresh clean test set (P1R, read once): '));
+txt = [txt0(1:i), lf, la, txt0(end - 1:end)];
 end
 
 %% ---------- helpers ----------
