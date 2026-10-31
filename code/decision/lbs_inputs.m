@@ -2,10 +2,13 @@ function out = lbs_inputs(cmd, varargin)
 %LBS_INPUTS  The inputs of the LB-S screen (lbs_screen.m): copy with SHA-256, verify, clean reference.
 %   out = lbs_inputs('copy', src, dst)    copies policy_pools.mat, unknown_threat_agents.mat,
 %       trained_dqn.mat and clean_val_pools.mat from the folder src to the folder dst, hashes the
-%       source and the copy, and writes dst/lbs_inputs.sha256 (sha256sum format). out.files,
-%       out.sha256. src is only read. A file already in dst is never overwritten: one with the
-%       source's hash is kept, one with another hash stops the copy before anything is written
+%       source and the copy, and writes dst/lbs_inputs.sha256 (sha256sum format, then a
+%       '# source' line with the source folder). out.files, out.sha256, out.source. src is only
+%       read. A file already in dst is never overwritten: one with the source's hash is kept, one
+%       with another hash stops the copy before anything is written
 %   out = lbs_inputs('verify', dst)       hashes the files of dst against dst/lbs_inputs.sha256
+%   out = lbs_inputs('verify', dst, src)  the same, after checking that the copies were made from
+%       the folder src (lbs_inputs:origin otherwise); out.source is the recorded folder
 %   h = lbs_inputs('hash', file)          SHA-256 of one file, lower-case hex
 %   r = lbs_inputs('clean_ref', ebno)     stops unless the clean reference read from
 %       data/policy_pools.mat of the current folder (clean_ber_ref.m) is finite at ebno [dB]: a
@@ -69,15 +72,24 @@ for i = find(~have)
 end
 fid = fopen(fullfile(dst, 'lbs_inputs.sha256'), 'w');
 for i = 1:numel(files), fprintf(fid, '%s  %s\n', h{i}, files{i}); end
+fprintf(fid, '# source %s\n', canon(src));
 fclose(fid);
-out = struct('files', {files}, 'sha256', {h});
+out = struct('files', {files}, 'sha256', {h}, 'source', canon(src));
 end
 
-function out = verify_inputs(dst)
+function out = verify_inputs(dst, src)
 files = input_files();
 mf = fullfile(dst, 'lbs_inputs.sha256');
 if ~isfile(mf), error('lbs_inputs:manifest', 'lbs_inputs: %s is missing', mf); end
-t = regexp(fileread(mf), '([0-9a-f]{64})\s+(\S+)', 'tokens');
+txt = fileread(mf);
+rec = regexp(txt, '^# source ([^\r\n]+)', 'tokens', 'once', 'lineanchors');
+if isempty(rec), rec = ''; else, rec = strtrim(rec{1}); end
+if nargin > 1 && ~strcmpi(rec, canon(src))
+    was = rec; if isempty(was), was = '(none recorded)'; end
+    error('lbs_inputs:origin', ['lbs_inputs: the copies in %s were made from %s, not from %s; to read from the new source ' ...
+        'remove %s (a copy then keeps the files equal to the source''s and stops at any other)'], dst, was, canon(src), mf);
+end
+t = regexp(txt, '([0-9a-f]{64})\s+(\S+)', 'tokens');
 want = struct();
 for i = 1:numel(t), want.(matlab.lang.makeValidName(t{i}{2})) = t{i}{1}; end
 h = cell(1, numel(files));
@@ -89,7 +101,7 @@ for i = 1:numel(files)
     h{i} = sha256_file(f);
     if ~strcmp(h{i}, want.(k)), error('lbs_inputs:hash', 'lbs_inputs: %s differs from its recorded SHA-256', f); end
 end
-out = struct('files', {files}, 'sha256', {h});
+out = struct('files', {files}, 'sha256', {h}, 'source', rec);
 end
 
 function r = clean_ref_check(ebno)

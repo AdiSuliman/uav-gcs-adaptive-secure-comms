@@ -15,7 +15,8 @@ function out = lbs_screen(src, varargin)
 %   any other folder: it writes data/ and results/ there. The clean reference is read from
 %   data/policy_pools.mat of the current folder (clean_ber_ref.m), so the four inputs are copied
 %   there with SHA-256 (lbs_inputs.m, which never overwrites a different file) unless a verified
-%   copy is in place, and the clean reference is asserted finite before any run.
+%   copy made from src is in place (a copy made from another folder stops the run), and the clean
+%   reference is asserted finite before any run.
 %
 %   Every run is on the validation split, with profile 1's deployed decision-time settings from
 %   data/trained_dqn.mat (decision_settings.m), and with the completion off and on over the same
@@ -60,8 +61,8 @@ fprintf('=== LB-S: link-budget completion on profile 1''s kept agents ===\n');
 %% 1. Inputs, copied with SHA-256, and the clean reference
 dst = fullfile(pwd, 'data');
 if isfile(fullfile(dst, 'lbs_inputs.sha256'))
-    inp = lbs_inputs('verify', dst);
-    fprintf('Inputs in data/ checked against data/lbs_inputs.sha256 (%.1f min)\n', toc(t0) / 60);
+    inp = lbs_inputs('verify', dst, fullfile(src, 'data'));
+    fprintf('Inputs in data/, copied from %s, checked against data/lbs_inputs.sha256 (%.1f min)\n', inp.source, toc(t0) / 60);
 else
     inp = lbs_inputs('copy', fullfile(src, 'data'), dst);
     fprintf('Inputs copied from %s with SHA-256 (%.1f min)\n', fullfile(src, 'data'), toc(t0) / 60);
@@ -161,7 +162,7 @@ V = lbs_verdict(rows, clean);
 [cm, tr, dirty] = code_state();
 rule_files = {'lbs_verdict', 'lbs_boot', 'lb_complete', 'lbs_screen'};
 rule_sha = cellfun(@(f) sprintf('%s.m %s', f, lbs_inputs('hash', which(f))), rule_files, 'UniformOutput', false);
-rep = report_lines(PP, DK, o, rows, clean, V, inp, cm, tr, dirty, rule_sha, ebno_thr, thr_from, nS, toc(t0) / 60);
+rep = lbs_report(PP, DK, o, rows, clean, V, inp, cm, tr, dirty, rule_sha, ebno_thr, thr_from, nS, toc(t0) / 60);
 if ~exist('results', 'dir'), mkdir('results'); end
 fid = fopen('results/lbs_screen.txt', 'w'); fprintf(fid, '%s\n', strjoin(rep, newline)); fclose(fid);
 fprintf('%s\n', strjoin(rep, newline));
@@ -198,55 +199,6 @@ try
     dirty = ~(s2 == 0 && isempty(strtrim(o2)));
 catch
 end
-end
-
-function rep = report_lines(PP, DK, o, rows, clean, V, inp, cm, tr, dirty, rule_sha, ebno_thr, thr_from, nS, minutes)
-rep = {'=== LB-S: LINK-BUDGET COMPLETION ON PROFILE 1''S KEPT AGENTS (VALIDATION SCREEN) ==='};
-rep{end+1} = sprintf('Generated: %s | code commit %s, code tree %s%s | registered by %s | %.1f min', datestr(now), cm, tr, ...
-    ternary(dirty, ' + local changes in code/', ''), o.registered_by, minutes);
-rep{end+1} = ['Rule code SHA-256: ' strjoin(rule_sha, ', ')];
-rep{end+1} = 'Inputs, copies in data/ with the SHA-256 of the source:';
-for i = 1:numel(inp.files), rep{end+1} = sprintf('  %s  %s', inp.sha256{i}, inp.files{i}); end %#ok<AGROW>
-ed = isfield(PP, 'esc_drop') && ~isempty(PP.esc_drop) && PP.esc_drop;
-ur = NaN; if isfield(PP, 'unk_retain') && ~isempty(PP.unk_retain), ur = PP.unk_retain; end
-rep{end+1} = sprintf(['Deployed settings (data/trained_dqn.mat): kind %s, monitor %s %d/%d, drop threshold %g %s, esc_drop %s ' ...
-    '(registered: on), unknown retention %g (registered: 0.99), unknown threshold %g'], DK, PP.alarm_mode, PP.confirm(1), ...
-    PP.confirm(2), PP.drop_db, drop_unit(PP.alarm_mode), ternary(ed, 'on', 'OFF'), ur, PP.maha_thr);
-if ~ed || ~(abs(ur - 0.99) <= 1e-12)
-    rep{end+1} = 'NOTE: the deployed settings differ from the registered description; the screen ran the settings of the file.';
-end
-rep{end+1} = '';
-rep{end+1} = sprintf(['Validation split. Kept leave-one-threat-out agents on the flights of the threat they were left out ' ...
-    'of (every severity, %d Eb/N0 points, %d repetitions of every flight, detector output withheld after the onset); ' ...
-    'recovered = BER and packet loss <= 2x clean for 5 consecutive cycles, among the recoverable episodes of the threat. ' ...
-    'Change = completion on less off on the same episodes and frame draws; the bound is the one-sided 95%% lower bound ' ...
-    '(cluster bootstrap over flights, %d resamples).'], nS, o.reps, o.boot);
-rep{end+1} = sprintf('%-20s %5s | %26s | %24s | %8s', 'threat', 'n', 'never trained: off, on, change [lb]', ...
-    'deployed agent: off, on, chg', 'rule+esc');
-for i = 1:numel(rows)
-    r = rows(i);
-    rep{end+1} = sprintf('%-20s %5d | %6.1f%% %6.1f%% %+6.1f [%+6.1f] | %6.1f%% %6.1f%% %+6.1f | %7.1f%%', r.threat, r.n, ...
-        r.off, r.on, r.d, r.lo, r.t_off, r.t_on, r.t_on - r.t_off, r.rule); %#ok<AGROW>
-end
-rep{end+1} = sprintf('Share of episodes in which the completion changed the proposal (never trained): %s', ...
-    strjoin(arrayfun(@(r) sprintf('%s %.1f%%', r.threat, r.acted), rows, 'UniformOutput', false), ', '));
-rep{end+1} = '';
-rep{end+1} = sprintf(['Clean validation flights, deployed agent: %d episodes (%d geometries, Eb/N0 >= %g dB, %s, 30 cycles): ' ...
-    'episodes with a change of configuration off %d (%.2f%%), on %d (%.2f%%), change %+.2f points [one-sided 95%% upper bound ' ...
-    '%+.2f]; with a change on a healthy link off %.2f%%, on %.2f%%; the completion changed a proposal in %.2f%% of the episodes.'], ...
-    clean.n, clean.geoms, ebno_thr, thr_from, clean.k_off, clean.off, clean.k_on, clean.on, clean.d, clean.hi, ...
-    clean.fs_off, clean.fs_on, clean.acted);
-rep{end+1} = '';
-rep{end+1} = 'Go rule:';
-rep = [rep, cellfun(@(s) ['  ' s], V.lines, 'UniformOutput', false)];
-if o.smoke, rep{end+1} = 'SMOKE run: two threats, one repetition, two clean batches; the verdict above is not a reading.'; end
-rep{end+1} = '';
-rep{end+1} = ['Disclosed: the 1800 clean validation flights and the deployed agent were used by profile 1''s C1d and C2 selection, ' ...
-    'and the deployed agent was selected on the validation flights of the threats above, so this screen is a further use of ' ...
-    'them (the deployed-agent columns are descriptive). The kept agents never trained on the flights they are read on. ' ...
-    'Profile 1''s monitor is the one before the degradation fix, so the screen transfers to profile 3 qualitatively only.'];
-rep{end+1} = ['Not covered: noise_burst for a never-trained agent has no class-free mapping from bursts to the coding ' ...
-    'domain; its row is the agent''s training coverage.'];
 end
 
 function out = ternary(c, a, b)

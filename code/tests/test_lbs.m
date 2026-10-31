@@ -1,7 +1,7 @@
 function tests = test_lbs
 %TEST_LBS  Tests of the link-budget completion (lb_complete.m and its hooks in policy_monitor.m,
 %   policy_decide.m, decision_settings.m, rollout_policy.m, policy_stamp.m) and of the LB-S
-%   reader (lbs_screen.m, lbs_inputs.m, lbs_boot.m, lbs_verdict.m) on synthetic data.
+%   reader (lbs_screen.m, lbs_inputs.m, lbs_boot.m, lbs_verdict.m, lbs_report.m) on synthetic data.
 %   Run from the repository root: results = runtests('code/tests/test_lbs.m')
 tests = functiontests(localfunctions);
 end
@@ -448,6 +448,17 @@ m = regexp(fileread(fullfile(dst, 'lbs_inputs.sha256')), '[0-9a-f]{64}  \S+', 'm
 verifyNumElements(tc, m, 4);                                               % sha256sum -c format
 v = lbs_inputs('verify', dst);
 verifyEqual(tc, v.sha256, c.sha256);
+verifyTrue(tc, strcmpi(c.source, char(java.io.File(src).getCanonicalPath())));            % the source is recorded
+v = lbs_inputs('verify', dst, src);
+verifyEqual(tc, v.sha256, c.sha256); verifyEqual(tc, v.source, c.source);
+src2 = fullfile(tmp, 'src2'); mkdir(src2);
+verifyError(tc, @() lbs_inputs('verify', dst, src2), 'lbs_inputs:origin');                 % copies of another source
+mf = fullfile(dst, 'lbs_inputs.sha256'); txt = fileread(mf);
+put_text(mf, regexprep(txt, '# source[^\r\n]*\r?\n', ''));
+verifyError(tc, @() lbs_inputs('verify', dst, src), 'lbs_inputs:origin');                  % no source recorded
+v = lbs_inputs('verify', dst);
+verifyEmpty(tc, v.source);
+put_text(mf, txt);
 verifyError(tc, @() lbs_inputs('copy', src, src), 'lbs_inputs:same');
 verifyError(tc, @() lbs_inputs('copy', fullfile(tmp, 'none'), dst), 'lbs_inputs:source');
 f = fullfile(dst, 'trained_dqn.mat');                                      % a changed byte is found
@@ -523,6 +534,31 @@ code = fileread(which('lbs_screen'));
 verifyNotEmpty(tc, strfind(code, 'rule_files = {''lbs_verdict'', ''lbs_boot'', ''lb_complete'', ''lbs_screen''};'));
 end
 
+function test_screen_checks_a_reused_copy_against_its_source(tc)
+% A copy in data/ that is reused instead of copied again must have been made from the folder the
+% run reads results/eval_detector_metrics.mat from.
+code = regexprep(fileread(which('lbs_screen')), '%[^\n]*', '');
+verifyNotEmpty(tc, strfind(code, 'lbs_inputs(''verify'', dst, fullfile(src, ''data''))'));
+verifyEmpty(tc, regexp(code, 'lbs_inputs\(''verify'',\s*dst\)', 'once'));
+end
+
+function test_report_header_carries_the_registering_hash_and_the_minutes(tc)
+% The header line prints the code commit and tree, whether code/ has local changes, the
+% registering commit and the elapsed minutes; no part of it, empty or not, shifts the others.
+hash = repmat('0123456789abcdef', 1, 3); hash = hash(1:40);
+cm = repmat('c', 1, 40); tr = repmat('e', 1, 40);
+pre = ['^Generated: [^|]+ \| code commit ' cm ', code tree ' tr];
+post = [' \| registered by ' hash ' \| 12\.3 min$'];
+rep = make_report(false, false, hash, cm, tr, 12.34);
+verifyNotEmpty(tc, regexp(rep{2}, [pre post], 'once'));                                   % clean tree
+rep2 = make_report(false, true, hash, cm, tr, 12.34);
+verifyNotEmpty(tc, regexp(rep2{2}, [pre ' \+ local changes in code/' post], 'once'));      % local changes
+verifyTrue(tc, contains(rep{4}, 'copies in data/ of C:\src\data with'));
+verifyTrue(tc, any(strcmp(rep, '  LB-S verdict: GO')));
+verifyFalse(tc, any(startsWith(rep, 'SMOKE')));
+verifyTrue(tc, any(startsWith(make_report(true, false, hash, cm, tr, 1), 'SMOKE')));
+end
+
 function test_registered_hash_is_resolved_in_the_docs_repository(tc)
 % The registering commit must exist in the docs repository and hold the entries of the screen
 % and of its run guards as headings of docs/DECISIONS.md.
@@ -566,6 +602,19 @@ end
 
 function put_text(f, txt)
 fid = fopen(f, 'w'); fwrite(fid, txt); fclose(fid);
+end
+
+function rep = make_report(smoke, dirty, hash, cm, tr, minutes)
+% lbs_report on synthetic results: two threats (a go), one clean set, two input files.
+PP = struct('alarm_mode', 'class_drop', 'confirm', [2 3], 'drop_db', 4, 'maha_thr', 1.5, 'esc_drop', true, 'unk_retain', 0.99);
+rows = struct('threat', {'path_loss', 'jamming'}, 'n', {100, 90}, 'off', {20, 80}, 'on', {60, 80.5}, 'd', {40, 0.5}, ...
+    'lo', {25, -1}, 'hi', {55, 2}, 'acted', {70, 1}, 't_off', {85, 90}, 't_on', {88, 90}, 'rule', {81.5, 92});
+clean = struct('n', 1800, 'geoms', 30, 'off', 2, 'on', 2.4, 'k_off', 36, 'k_on', 43, 'd', 0.4, 'hi', 0.9, ...
+    'fs_off', 1, 'fs_on', 1.1, 'acted', 3);
+inp = struct('files', {{'a.mat', 'b.mat'}}, 'sha256', {{repmat('a', 1, 64), repmat('b', 1, 64)}}, 'source', 'C:\src\data');
+o = struct('registered_by', hash, 'smoke', smoke, 'reps', 2, 'boot', 2000);
+rep = lbs_report(PP, 'dqn_esc', o, rows, clean, lbs_verdict(rows, clean), inp, cm, tr, dirty, {'lbs_verdict.m abc'}, ...
+    8, 'the first Eb/N0 point', 9, minutes);
 end
 
 function [PP, K] = toy_world()
