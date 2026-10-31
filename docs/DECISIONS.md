@@ -2879,3 +2879,22 @@ Line references in points 1-10 are to profile 1's code of record `d4623ed` and t
 - Tessler, C., Mankowitz, D. J., Mannor, S., "Reward Constrained Policy Optimization," ICLR 2019. arXiv:1805.11074.
 - Ng, A. Y., Harada, D., Russell, S., "Policy Invariance Under Reward Transformations: Theory and Application to Reward Shaping," ICML 1999, pp. 278-287.
 - Wiewiora, E., "Potential-Based Shaping and Q-Value Initialization are Equivalent," JAIR 19:205-208, 2003.
+
+## D119 - P1-v2: profile 1 rerun with the fixes proven in profile 3, on new never-read test sets, after profile 3 (approved by Adi, 31.10.2026)
+
+**D119 (2026-10-31, approved by Adi on 31.10.2026 ~09:45).** Profile 1's first reading (chain of 29.10, CORE_BW, P1R's C1d) stays as read: no test set already read is read again.
+1. **What.** After profile 3's KPI stage, profile 1 is rerun as P1-v2 with only the fixes that profile 3 adopted on validation under their registered rules (D107, D110-D115, D120 point 1), each selected again on profile 1's own validation by the same rule.
+2. **Test data.** Every P1-v2 verdict is read once on sets never read before: profile 1's fresh clean test set (unbuilt, P1R stopped before it), a new detector test set and new closed-loop test and second-test sets from new seed blocks, built after their registration.
+3. **Scope and cost.** Decision-layer fixes only: C1d, C2, C2e and the readers (about 2-3 days of runs, no C1p rebuild). With the detector fixes (D110 fusion, D111 OOD): rekey of the pools to the new DET_ID plus the new sets (about 5-7 days). Within Gantt months 4-8.
+4. **Registration.** Its protocol (stages, sets, seeds, adoption rules, labels, what is reported beside the first reading) is written and committed before any P1-v2 data.
+5. **Reporting.** The book shows profile 1's first reading and P1-v2 side by side, each with its receiver, sets and rules named.
+
+## D120 - Predictive readings: predicted against measured result per configuration, outage risk from fading statistics, and the sweeper's period (approved by Adi, 31.10.2026)
+
+**D120 (2026-10-31, approved by Adi on 31.10.2026 ~09:45).** Source: `worktrees/session_notes_0ff3/audit31/predict_audit.md`. RF inputs only; report-only unless stated.
+1. **Predicted against measured recovery (profile 3, report-only).** Before every configuration change the decision layer records the predicted Eb/N0 of the new configuration (the link-budget check, D115) and the predicted PER through the system's AWGN reference curves with an effective-SNR mapping fitted on validation; after it, the measured PER. Calibration (bias, interval coverage) is reported per configuration and threat. Registered before profile 3's C2 data; never gates a decision in profile 3.
+2. **Outage risk (profile 3 only if code and registration land before its C1p, else after profile 3).** Level-crossing rate and average fade duration of the Rician envelope (Rappaport section 5.7.3) from the measured K, a Doppler estimate on the pilots and the link margin; reported as expected time to outage beside the speed and hover results. Not a detector input in profile 3.
+3. **Sweeper period and phase (after profile 3).** Estimated from the idle record to shorten the hold after a threat ends; it changes D114's rule, so it is a candidate after profile 3.
+4. **Limits stated.** A single fade cannot be forecast one decision cycle ahead (coherence time about 1.2 ms at 161 km/h against 20 ms cycles); only its statistics can. Antenna faults are steps in the threat model, so no fault prognosis is claimed.
+5. **Citations** (Stueber equation numbers, Vovk 2003, Volkhonskiy 2017, Brueninghaus 2005) are checked in full text before the book.
+
