@@ -29,6 +29,12 @@ function varargout = fuse_classes(cmd, varargin)
 %       coh_contrast, los_contrast, los_k, coh_weak, k_contrast, ps_k_contrast, each times
 %       1[gl_db >= 3 dB], the drop at which branch_coherence reads a branch's step
 %   X = fuse_classes('gcc_x', Z, g)               those six columns of the rows Z
+%   FM = fuse_classes('refit', FMd, Z, y, C, lambda, fold, E)  a fusion of FMd's form fitted on
+%       the rows Z (compare_architectures.m): the linear fusion, on FMd's gated columns when it
+%       has them, and with FMd.head a head of its columns stacked on the linear fusion's
+%       out-of-fold probabilities over the folds of these rows (fuse_head.m), its trees'
+%       stream fuse_head('seed', 'LBH', E) for rows without the folds E; without either,
+%       fuse_classes('fit', Z, y, C, lambda)
 %   The fusion is fitted on the validation split (the detector's outputs on its own
 %   training frames are overconfident), N and lambda by cross-validation over the
 %   validation sub-runs (select_fusion.m); the test split is never used.
@@ -41,6 +47,7 @@ switch cmd
     case 'names',   varargout{1} = names(varargin{:});
     case 'gcc',     varargout{1} = gcc(varargin{:});
     case 'gcc_x',   varargout{1} = gcc_x(varargin{:});
+    case 'refit',   varargout{1} = refit(varargin{:});
     otherwise, error('fuse_classes: unknown command %s', cmd);
 end
 end
@@ -148,6 +155,25 @@ end
 
 function X = gcc_x(Z, g)
 X = double(Z(:, g.gate) >= 3) .* Z(:, g.cols);
+end
+
+function FM = refit(FMd, Z, y, C, lambda, fold, E)
+g = []; if isfield(FMd, 'gcc'), g = FMd.gcc; end
+FM = fit_g(Z, y, C, lambda, g);
+if ~isfield(FMd, 'head') || isempty(FMd.head), return; end
+po = nan(size(Z, 1), C);
+for j = unique(fold(:))'
+    m = fold(:) == j;
+    po(m, :) = apply(fit_g(Z(~m, :), y(~m), C, lambda, g), Z(m, :));
+end
+FM.head = fuse_head('fit', po, Z, y, FMd.head.L, FMd.head.cols, fuse_head('seed', 'LBH', E));
+end
+
+function FM = fit_g(Z, y, C, lambda, g)
+% The linear fusion, on the gated coherence columns g when given.
+if isempty(g), FM = fit(Z, y, C, lambda); return; end
+FM = fit([Z, gcc_x(Z, g)], y, C, lambda);
+FM.gcc = g;
 end
 
 function P = softmax_rows(A)

@@ -20,7 +20,10 @@
 % deployed temporal fusion (fuse_classes.m) with select_fusion.m's N and lambda fixed
 % (data/fusion.mat), fitted and read out of fold over select_fusion's 5 folds by sub-run
 % (seed 61) on the per-cycle targets (fusion_target.m), as KPI 1 reads the system's class,
-% with the deployed fusion's further columns and target rule (FM.cues, FM.target_age);
+% with the deployed fusion's further columns and target rule (FM.cues, FM.target_age), and
+% with D110's gated coherence columns or lost-branch and level head when it holds them, refitted
+% alike on each variant's outputs (fuse_classes.m 'refit', the head on the folds' out-of-fold
+% linear probabilities);
 % beside it the latched cause of a lost branch (latch_runs.m), its threshold chosen on the
 % other folds' sub-runs as select_fusion.m chooses it, the monitor's class when the deployed
 % fusion latches (FM.latch, stated in the report; the deployed FM.os_thr on the test set). The hybrid's
@@ -131,9 +134,9 @@ for v = 1:nV
     for e = 1:numel(ebs), m = eb' == ebs(e); PE(v, e) = 100 * macro_present(yt(m), yp(m), C); end
     if any(beyond), BY(v) = 100 * mean(yp(beyond) == yt(beyond)); end
     if fz
-        [VA(v, 2:3), FV(v, :)] = fused_oof(sp.val, Pv, FZ.N, FZ.lambda, tv, fold, cls_names, tf, cues);
+        [VA(v, 2:3), FV(v, :)] = fused_oof(sp.val, Pv, FZ.N, FZ.lambda, tv, fold, cls_names, tf, cues, FZ.FM);
         Zv = fuse_classes('windows', sp.val, Pv, FZ.N, cues); Zt = fuse_classes('windows', sp.test, Pt, FZ.N, cues);
-        FMv = fuse_classes('fit', Zv, tv, C, FZ.lambda);
+        FMv = fuse_classes('refit', FZ.FM, Zv, tv, C, FZ.lambda, fold, []);
         pt = fuse_classes('apply', FMv, Zt); [~, kf] = max(pt, [], 2);
         [~, kl] = max(latch_runs(pt, sp.test.run, sp.test.pos, sp.test.gain_ant, cls_names, os_thr), [], 2);
         FT(v, :) = 100 * [mean(per_class_f1(tt', kf', C)), mean(per_class_f1(tt', kl', C))];
@@ -196,16 +199,17 @@ if fz, arch.test_fused_pct = FT; end
 save('results/architecture_comparison.mat', 'arch');
 clear sp
 
-function [mf, f1] = fused_oof(va, P, N, lambda, tv, fold, classes, tf, cues)
+function [mf, f1] = fused_oof(va, P, N, lambda, tv, fold, classes, tf, cues, FMd)
 % The fused class out of fold on the validation split (select_fusion.m's folds, N and
-% lambda fixed): macro-F1 % fused and with the latched cause of a lost branch (each fold
-% latched at tf(fold), its threshold chosen on the other folds), and the fused per-class F1 %.
+% lambda fixed, the deployed fusion FMd's form): macro-F1 % fused and with the latched cause of
+% a lost branch (each fold latched at tf(fold), its threshold chosen on the other folds), and
+% the fused per-class F1 %.
 C = size(P, 2);
 Z = fuse_classes('windows', va, P, N, cues);
 pc = zeros(size(P)); pl = pc;
 for k = 1:max(fold)
     m = fold == k;
-    FM = fuse_classes('fit', Z(~m, :), tv(~m), C, lambda);
+    FM = fuse_classes('refit', FMd, Z(~m, :), tv(~m), C, lambda, fold(~m), k);
     pc(m, :) = fuse_classes('apply', FM, Z(m, :));
     pl(m, :) = latch_runs(pc(m, :), va.run(m), va.pos(m), va.gain_ant(m, :), classes, tf(k));
 end
