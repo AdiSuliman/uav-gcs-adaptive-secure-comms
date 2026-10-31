@@ -4,6 +4,8 @@ Registered 30.10.2026, before any D3, fresh-frame, candidate or D2c data exists.
 
 Amended 31.10.2026, before any data it governs exists, after the review of the registered text (sha256 `d0b59bc80eba6e688b583fe8929ebf74ab16ec0f8d8e9181a433f0dee94b90d9`, commit `5cfb015`). No data was read under that text. The amendment changes sections 1.1-1.4 (a fourth D3 arm; n_e and n_p read at one frequency), 2.3 (the fresh flights held out until stage 1b), 4.3-4.7 (D2c's L on the MRC scale, its count by distinct realizations, 72 geometries) and 5 (measured times, gates on the harness clock, a total cap, the design window).
 
+Amended again 31.10.2026, before any data it governs exists, under decide-after-30min (Adi silent since 30.10.2026 19:37). The text before it (sha256 `f2c7b5ecf7a22997c273391e85856fca43459a3397c27e3dbbb27909a04b569a`, commit `fa2c499`) governed no data. This amendment adds guard G6 to section 1.3, the closed list's header check to 2.4, stage 1b's re-flight check to section 3 (review finding F6), and the placement beside P1R's C2 to section 5.
+
 Names, as in the ruling:
 - **r1**: the receiver as built (d4623ed, receiver blob `40dc1f9`). **r2**: r1 plus an adopted `p.rx_ne_fix` option.
 - **The three frames**: 420/5, 452/10 and 459/16 at 12 dB. 426/9, 511/12 and 411/4 are reported only.
@@ -61,6 +63,7 @@ A failed guard voids D3: nothing is read, the harness or the code is fixed, and 
 - **G3:** every arm prints `tokens ON ... match 1`, completes its flights, and its prints agree with the frame BER element by element.
 - **G4:** on the flat channel, off against `twinb+twinf+log`, `twinb+eqt+log` and `twinb+twinf+eqt+log`: max|d| = 0 on `Rx_Z` and frame BER over the 27 flights.
 - **G5:** every `twinb` arm prints `truth prints valid 1` (D2's condition (f2)). Here it is a guard, because `twinb` reads `txbits` inside the receiver: a misaligned `txbits` would corrupt the arm itself, not only its prints.
+- **G6:** every `twinb` arm's `Rx_Z` differs from the `log` arm's on at least one of the 27 flights. The count is printed per arm. A `twinb` edit that took no effect would pass G1-G5 and read as the last row of 1.4.
 - **(f3)**, carried from D2: the `twinf+log` training check stays in the tests (median |10 log10 |c|²| < 1 dB, median |angle c| < 0.2 rad).
 - **(f3b)**, new and failable, in the tests. Under `twinb+log` on the flights of the three frames at 12 dB, take the antenna-blocks of their clean frames (BER < 1e-3) where r1's template fits the twin (misfit ≤ −10 dB). There, c_b is the multiple of `Gt(a, :)` closest to `G_b(a, :)`. Required: median |10 log10(|c_b|² / |ga(a, b)|²)| < 1 dB and median |angle(c_b / ga(a, b))| < 0.2 rad. This checks that the genie's profiles sit at the receiver's level, timing and rotation. A failure stops the dispatch before D3.
 
@@ -129,6 +132,7 @@ Fresh flight k takes the seed 2 400 000 + k: k = 1-150 for the first batch, k = 
 - It commits the same text as `rx-ne-fix\docs\rx_fresh3_frames.txt` (that file only) and prints the commit.
 - D3 starts only after that line. A failed commit stops D3.
 - The list closes after its last batch. It is never edited, and every candidate is read on it as written.
+- A harness that finds the list already committed uses it only when the list's header names this file's sha256.
 
 ### 2.5 Batches and the requirement
 
@@ -158,6 +162,7 @@ The guards, stages 1c, 1d, 2 and 3 below are ruling 3.5's text unchanged (as in 
 **Stage 1** (minutes; the candidate built without `log`):
 - 1a (rule 3), the three frames (seen by D1, D2 and D3): at least 2 at BER ≤ 0.05. Ruling 3.5's frequency clause ("for a frequency candidate, abs(dcfo) ≤ 400 Hz on every recovered frame") is dropped. D2 measured each antenna's true phase slope on these frames at [95 −551 −1258], [−1633 −2077 −247] and [−796 415 −646] Hz: spreads of 1.35, 1.83 and 1.21 kHz, above 2·fd at the flights' speeds (about 462, 667 and 600 Hz). An oscillator offset is common to all antennas, so on these frames one dcfo has no defined target.
 - 1b (rule 3), fresh frames (held out): the list of section 2. n ≥ 3 is required, and at least ceil(n/2) at BER ≤ 0.05.
+  - Provenance, before the candidate flies them: the build with the field off (r1 by G2, so section 2.3 allows it) re-flies every listed flight from its seed (2 400 000 + k at 12 dB, the speed recomputed as 100 + 61 u from the seed's speed stream, never the list's rounded speed). It must reproduce every listed frame's r1 BER to the list's four decimals. A miss voids the reading, as a failed guard does.
 - 1c, no harm on the 27 flights: frames newly lost (CRC pass to fail) ≤ 1; FER27 ≤ 0.3648; 546, 698, 658, 573 at BER 0; on 430, 510, 514 at 9 dB, FER no worse, no newly lost frame and BER ≤ 1.10 × as built (a structural change moves bit counts of unchanged packet outcomes; (b) moved them by 1.1-1.7%).
 - 1d, accuracy (frequency candidates only): median abs(dcfo) over frames with as-built BER < 1e-3 at most 1.5 × as built (design 1's predicted lag-1 loss, √2.3).
 
@@ -282,6 +287,18 @@ A failed guard voids D2c: nothing is read, the harness is fixed, and D2c is reru
   - With the dispatch after P1R's end: during P1R, without MATLAB, the design note's channel-model part (section 1.4) and its code. At P1R's end the dispatch runs first (about 1-2 h); then the D3 reading, the parts D3 decides and their code.
   - Between P1R's end and the timebox (ruling 4.4: two days after P1R ends): stages 1, 2 and 3, about 1.5 + 2 + 3-6 h.
   - D2c, about 3-4 h per pass of 72 geometries (2520 flights), in any free window before the book.
+- **Beside P1R's C2** (amended 31.10.2026, before any data this file governs; registered under decide-after-30min, Adi silent since 30.10.2026 19:37). In the readiness bullet, "the dispatch runs after P1R's end" now reads: it runs beside P1R's C2 when the conditions below hold, and otherwise after P1R's end. P1R never waits for it.
+  - Beside P1R's C2 only. Never beside P1R's C1d, its fresh build, C2e, `link_fresh` or the breakdown.
+  - It starts only when the three conditions of D104 point 1's dated line hold:
+    - free commit ≥ max(35, peak + 10) GB, and at least this dispatch's floor of 45 GB;
+    - free physical memory ≥ peak + 4 GB;
+    - P1R's C2, projected from its per-run times, still has at least this dispatch's cap (about 115 min) + 2 h to run.
+  - Peak is the dispatch MATLAB's peak commit. Until it is measured, the dispatch note's upper estimate stands in for it.
+  - The same stop rule: the dispatch's MATLAB is stopped if P1R's C2 time per run rises above 1.10 × the mean of its first two runs. A stopped dispatch is not read.
+    - Stopped during the tests, it reruns whole.
+    - Stopped after the tests passed, `rx_d3` alone reruns on the same commit. It flies the pool only while the list is not committed, and never flies a committed list again. The gates of steps 2 and 3 apply to the rerun.
+  - One hand-run at a time in the p3 slot (`p3_hand.busy`), through the single-thread gated wrapper (`-singleCompThread`). In "Before dispatch", "no other MATLAB" reads "no MATLAB other than P1R's".
+  - The gates of steps 2 and 3 and the total cap are unchanged. The design window is the first "Then" bullet's: during P1R, the D3 reading, the candidate's design note and its code. Ruling 4.4's timebox (two days after P1R ends) is unchanged.
 
 ## 6. Fixed points
 
