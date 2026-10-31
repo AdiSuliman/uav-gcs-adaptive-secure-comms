@@ -577,6 +577,9 @@ verifyTrue(tc, all(isprop(ui.stateAx, 'YTick')) && ~isempty(ui.stateLbl.Text));
 verifyTrue(tc, ismember('epStateAx', fieldnames(ui)));
 verifyNotEmpty(tc, ui.epPolicyDD.ItemsData);
 verifyTrue(tc, ismember('all', ui.epPolicyDD.ItemsData) && ismember('core', ui.epPolicyDD.ItemsData));
+tabLog = ui.histTbl.Parent.Parent;                       % the Session Log tab fits the table through its own resize callback
+verifyEqual(tc, char(tabLog.AutoResizeChildren), 'off');
+verifyNotEmpty(tc, tabLog.SizeChangedFcn);
 if fx.core
     verifySubstring(tc, strjoin(ui.kLect.Value, ' '), 'lecturer');
 end

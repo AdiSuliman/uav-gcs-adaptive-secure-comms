@@ -739,6 +739,7 @@ end
 %% =======================  BUILD: LOG TAB  =============================
 %% =====================================================================
 function ui = buildLogTab(tab, env, c)
+    tab.AutoResizeChildren = 'off';     % needed for the tab's SizeChangedFcn below
     g = uigridlayout(tab, [2 1]); g.RowHeight = {'1x', 64}; g.Padding = [4 4 4 4]; g.RowSpacing = 8;
     g.BackgroundColor = c.bg;
     dn = env.dep.name;
@@ -747,10 +748,10 @@ function ui = buildLogTab(tab, env, c)
     histTbl = uitable(g, 'Data', cell(0, numel(hdrNames)), 'ColumnName', hdrNames, ...
         'ColumnWidth', {40, 150, 60, 80, 130, 190, 60, 340, 340, 70, 70, 440, 70}, 'RowName', [], ...
         'FontSize', 11, 'FontName', c.font, 'RowStriping', 'off', 'BackgroundColor', c.termBg, 'ForegroundColor', c.txt);
-    g.SizeChangedFcn = @(~, ~) fitHistCols(histTbl);
     histTbl.Layout.Row = 1;
     histTbl.Tooltip = {'One row per finished run: what attacked, what was detected, what each', ...
         'policy did and how much of the damage it undid. EXPORT saves CSV + MAT.'};
+    tab.SizeChangedFcn = @(src, ~) fitHistCols(histTbl, src.Position(3) - g.Padding(1) - g.Padding(3));
 
     bg = uigridlayout(g, [1 3]); bg.Layout.Row = 2; bg.ColumnWidth = {'1x', 230, 150};
     bg.Padding = [0 0 0 0]; bg.ColumnSpacing = 8; bg.BackgroundColor = c.panelBg;
@@ -765,12 +766,12 @@ function ui = buildLogTab(tab, env, c)
     ui = struct('histTbl',histTbl,'sessionLbl',sessionLbl,'exportBtn',exportBtn,'clearBtn',clearBtn);
 end
 
-function fitHistCols(tbl)
-    % The verdict column takes the width the other columns leave, so no empty strip is left at the right.
+function fitHistCols(tbl, avail)
+    % The verdict column takes the width the other columns leave of avail (the table's width), so no empty strip is left at the right.
     try
         w = tbl.ColumnWidth; k = numel(w) - 1;
         rest = sum(cell2mat(w([1:k-1, k+1:end])));
-        w{k} = max(440, floor(tbl.Position(3)) - rest - 24);
+        w{k} = max(440, floor(avail) - rest - 24);
         tbl.ColumnWidth = w;
     catch
     end
