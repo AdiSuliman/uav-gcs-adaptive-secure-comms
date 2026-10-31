@@ -12,7 +12,8 @@ function varargout = fusion_cand(cmd, varargin)
 %   the head, T1, T2, m0) is fitted on its training folds only, so a reading of a fold never
 %   holds anything fitted on it. A fit depends on its training rows alone (the linear fusion
 %   starts from zero, a head's stream is named by its folds), so each is made once and kept:
-%   a fit is named by the folds it leaves out, E.
+%   a fit is named by the folds it leaves out, E. A kept fit is written whole and then renamed
+%   (commit_mat.m); one that does not read is fitted again.
 %   D = fusion_cand('data', fit, Z0, XB, cues, yt, fold, C, lambda, N, classes, ck)
 %       fit the fit set (run, pos, idle, level), Z0 its window rows without further columns
 %       (fuse_classes 'windows'), XB the base's further columns (cues, fuse_classes 'extra'),
@@ -218,10 +219,18 @@ x = [];
 if isKey(D.cache, key), x = D.cache(key); return; end
 if isempty(D.ck), return; end
 f = fullfile(D.ck, [key '.mat']);
-if isfile(f), L = load(f, 'x'); x = L.x; D.cache(key) = x; end
+if ~isfile(f), return; end
+try
+    L = load(f, 'x'); x = L.x; D.cache(key) = x;
+catch
+    x = [];                                        % a file that does not read is fitted again
+end
 end
 
 function ck_put(D, key, x)
 D.cache(key) = x;
-if ~isempty(D.ck), save(fullfile(D.ck, [key '.mat']), 'x', '-v7.3'); end
+if isempty(D.ck), return; end
+t = fullfile(D.ck, [key '_new.mat']);
+save(t, 'x', '-v7.3');
+commit_mat(t, fullfile(D.ck, [key '.mat']));       % written whole, then one rename
 end
