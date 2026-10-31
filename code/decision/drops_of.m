@@ -2,8 +2,8 @@ function d = drops_of(mon, MONP, drop_mode, drop_db, THC, steps, floor_db)
 %DROPS_OF  C2's drop thresholds of one monitor (train_dqn.m): its own from choose_drop_threshold.m
 %   (MONP; the form's alone when the file has none) and the steps around it: the median window that
 %   less the steps [dB] above the moving-away floor, the CUSUM one grid step per step's sign. The CUSUM
-%   grid is the monitor's own (MONP.grid) when C1d chose the drop alarm's own confirmation for it
-%   (dconf_step.m), else THC.
+%   grid is the monitor's own (MONP.grid) once C1d ran the drop alarm's own confirmation step
+%   (dconf_step.m; an unadopted monitor keeps its unextended grid), else THC.
 b = drop_db; G = THC;
 if ~isempty(MONP)
     k = find(strcmp({MONP.monitor}, mon), 1);

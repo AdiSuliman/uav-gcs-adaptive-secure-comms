@@ -57,7 +57,8 @@
 % (docs/noise_burst_protocol.md).
 % With "s1g_select": true in profile.json (wf_options.m), the rule's lost-branch gate (s1_gate,
 % policy_decide.m) is the first of the rule settings: off or on by the same selection rule, and on is
-% kept only if s1g_adopt.m passes it; every later step runs with the setting kept.
+% kept only if s1g_adopt.m passes it; every later step runs with the setting kept. The lost-branch
+% classes are listed under both settings whichever is kept.
 % With "relm_select": true, the release on evidence (release_m) is scored on the agent selected, with
 % and without it on the same episodes (relm_score, relm_adopt.m), and adopted into the deployed
 % settings only if relm_adopt.m passes it; the rule fallback keeps running without it.
@@ -404,6 +405,7 @@ fa_up = @(fa, n) cp_upper(round(fa * n), n);         % one-sided 95% bound (NaN 
 gate = B.held >= bsel.held && B.fa_ok;
 rr = arrayfun(@(b) b.rule.held, base); rb_up = arrayfun(@(b) fa_up(b.rule.fa_w, b.rule.n_w), base);
 [deployed, fa_bound_met, ir] = choose_deployed(gate, fa_up(B.fa_w, B.n_w), rr, rb_up, FA_BOUND, B.held, sel_kind);
+relm_dep = WF.relm && RELM.adopt && (~strcmp(deployed, 'rule_sel') || isfield(RELM, 'forced'));   % the rule fallback runs without the release
 rok = any(rb_up <= FA_BOUND | isnan(rb_up));
 rule_sel = struct('alarm', base(ir).alarm, 'drop', base(ir).drop, 'rec', base(ir).rule.rec, 'held', base(ir).rule.held, ...
     'fa_w', base(ir).rule.fa_w, 'n_w', base(ir).rule.n_w, 'fa_upper', rb_up(ir), 'alarm_mode', '', 'confirm', [], 'drop_db', DROP_DB);
@@ -513,6 +515,9 @@ rep{end+1} = sprintf('Deployed: %s | false-alarm bound met on validation: %s%s',
     ' (not measured: no clean validation flights)', '') ' -- the edge map commits no point']));
 rep{end+1} = sprintf(['False changes on the clean link (validation, Eb/N0 >= %g dB, %d ms per cycle): DQN %s | ' ...
     'rule fallback %s'], EBNO_THR, CD.period_ms, rate_txt(FD), rate_txt(FR));
+if WF.relm && RELM.adopt && ~relm_dep
+    RLINES{end+1} = '  the rule fallback is deployed and runs without the release, which was scored on the DQN: the release is not deployed';
+end
 rep = [rep, RLINES, R9LINES];
 if ~exist('results', 'dir'), mkdir('results'); end
 fid = fopen('results/dqn_training.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
@@ -537,7 +542,7 @@ gammas = GAM;
 drop_db = drop_sel; if isnan(drop_db), drop_db = DROP_DB; end
 dec = Sdep; dec.alarm_mode = alarm_mode; dec.confirm = confirm; dec.drop_db = drop_db;
 dec.confirm_sweep = []; if isfield(PP, 'confirm_sweep'), dec.confirm_sweep = PP.confirm_sweep; end
-if WF.relm, dec.release_m = RELM.adopt; end         % the release on evidence, adopted or not
+if WF.relm, dec.release_m = relm_dep; end           % the release on evidence, deployed or not
 if ~isempty(WFF), dec.wf_forced = WFF; end          % the smoke's forced cells, in the stamp
 if isfield(PP, 'dconf'), dec.confirm_drop = confirm_drop_of(PP, alarm_sel); end   % the selected monitor's own confirmation of the drop alarm
 if isfield(PP, 'deg_mode'), dec.deg_mode = PP.deg_mode; dec.ber_q = PP.ber_q; end
@@ -914,11 +919,11 @@ end
 function [S, rows] = s1g_step(S0, STEP, evalf, bound, PK, PPr, K, specs, thr, H, CV, ebno_thr)
 % The rule's lost-branch gate, placed first among the rule settings: the selection rule (rank_pick)
 % picks off or on; on stays only if it also passes s1g_adopt.m on the same validation episodes and
-% the clean validation flights, else the setting in force (off) is kept. Both readings are listed.
+% the clean validation flights, else the setting in force (off) is kept. Both settings are flown and
+% listed whichever is picked; nothing is chosen on the readings of a gate that was picked off.
 [S, rows] = choose_settings(S0, STEP, evalf, bound, PK);
-if ~S.s1_gate, return; end
-Soff = S; Soff.s1_gate = false;
-P0 = decision_settings(PPr, Soff); P1 = decision_settings(PPr, S);
+Soff = S; Soff.s1_gate = false; Son = S; Son.s1_gate = true;
+P0 = decision_settings(PPr, Soff); P1 = decision_settings(PPr, Son);
 V0 = dqn_eval_batches('rule_esc', P0, K, specs, [], struct(), 5000, 2);
 V1 = dqn_eval_batches('rule_esc', P1, K, specs, [], struct(), 5000, 2);
 s = cell2mat(cellfun(@(sp) sp.s(:)', specs, 'UniformOutput', false));
@@ -928,10 +933,15 @@ if ~isempty(CV)
     [~, ~, sw1] = eval_clean_wide('rule_esc', P1, CV, [], struct(), H, ebno_thr);
 end
 A = s1g_adopt(V0, V1, thr, s, sw0, sw1);
-rows = [rows, {sprintf(['  the gate on was picked by the selection rule; it stays only if every other threat loses at most 1.0 point ' ...
-    '(lower bound -2.0) and the clean validation flights with a change fall (exact McNemar, p < 0.05): %s'], ...
-    ternary(A.keep, 'KEPT', 'not kept, the gate stays off'))}, A.rows, {'  lost-branch threats under both settings (reported, not a condition):'}, A.lost];
-if ~A.keep, S.s1_gate = false; end
+if S.s1_gate
+    rows = [rows, {sprintf(['  the gate on was picked by the selection rule; it stays only if every other threat loses at most 1.0 point ' ...
+        '(lower bound -2.0) and the clean validation flights with a change fall (exact McNemar, p < 0.05): %s'], ...
+        ternary(A.keep, 'KEPT', 'not kept, the gate stays off'))}, A.rows];
+    if ~A.keep, S.s1_gate = false; end
+else
+    rows = [rows, {'  the gate off was picked by the selection rule and stays; the gate on, flown on the same episodes (reported only, nothing is chosen on it):'}, A.rows];
+end
+rows = [rows, {'  lost-branch threats under both settings, 95% bootstrap intervals over the flights (reported, not a condition):'}, A.lost];
 end
 
 function t = mon_txt(name, drop_mode)

@@ -256,6 +256,7 @@ fprintf('%s\n', rv{:});
 MON = MN;
 fm = find(strcmp(FM, drop_alarm)); GF = GR{fm}; CS = decision_config().confirm_sweep;
 DEG = [];                                                  % the degradation test chosen here (deg_options.m)
+DCONF = [];                                               % the drop alarm's own confirmation per monitor (dconf_step.m)
 if DGon && isempty(CV)
     DEG = struct('mode', 'ratio', 'ber_q', [], 'note', 'no clean validation flights: not chosen');
     rd = {'', 'Degradation test: no clean validation flights, ''ratio'' kept (not chosen).'};
@@ -360,7 +361,7 @@ SV = {'drop_db', 'drop_db_train', 'drop_from', 'separable', 'THR', 'kept', 'leak
 if ~isempty(DEG)                                           % deployed by train_dqn.m (PP.deg_mode, PP.ber_q)
     deg_mode = DEG.mode; ber_q = DEG.ber_q; SV = [SV, {'deg_mode', 'ber_q', 'DEG'}];
 end
-if exist('DCONF', 'var'), SV = [SV, {'DCONF'}]; end        % the drop alarm's own confirmation per monitor (MONP.confirm_drop)
+if ~isempty(DCONF), SV = [SV, {'DCONF'}]; end         % saved with MONP.confirm_drop
 save('data/drop_threshold.mat', SV{:});
 fprintf('\nSaved data/drop_threshold.mat, results/drop_threshold.txt\n');
 

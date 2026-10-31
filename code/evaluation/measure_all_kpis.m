@@ -277,6 +277,7 @@ if isfile(F.pol)
         end
     end
     if isfield(P.KP, 'ebno_lines'), det = [det, P.KP.ebno_lines]; end   % per Eb/N0 point, descriptive (ebno_rows.m)
+    if isfield(P.KP, 'monitor_note'), det = [det, P.KP.monitor_note]; end   % the lecturer lines below are read under the adopted monitor
     if isfield(P.KP, 'lect')                          % revised proposal: PER vs the static link
         LECT.pol = P.KP.lect;
         det = [det, per_lines(P.KP.lect, P.KP.lect, 'rule_esc', 'full action set')];
@@ -364,6 +365,13 @@ if isfile(F.pol)
         det{end+1} = sprintf(['beside KPI 5, without the release on evidence on either side (descriptive; the verdict is the deployed row, ' ...
             'which runs with the layer, as rule + escalation and the table do): DQN %.1f%% vs rule + escalation %.1f%% recovered, paired ' ...
             '%+.1f points [%+.1f, %+.1f]'], 100 * mean(ALL{kn}.recovered(m4)), 100 * mean(ALL{kr0}.recovered(m4)), 100*dn, 100*dnl, 100*dnh);
+    end
+    kp = find(strcmp(P.POL, [P.POL{iQ} '_relm']), 1); kr1 = col('rule_esc_relm');
+    if ~isempty(kp) && ~isempty(kr1)                  % deployed without the release on evidence: the rows with it beside the verdict
+        [dp, dpl, dph] = boot_cluster(double(ALL{kp}.recovered(m4)) - double(ALL{kr1}.recovered(m4)), ones(1, sum(m4)), ALL{kp}.geom(m4), 2000, 7);
+        det{end+1} = sprintf(['beside KPI 5, with the release on evidence on either side (descriptive; the layer was not deployed and ' ...
+            'the verdict is the deployed row, which runs without it): DQN %.1f%% vs rule + escalation %.1f%% recovered, paired ' ...
+            '%+.1f points [%+.1f, %+.1f]'], 100 * mean(ALL{kp}.recovered(m4)), 100 * mean(ALL{kr1}.recovered(m4)), 100*dp, 100*dpl, 100*dph);
     end
     if isfield(P.KP, 's1g_lines'), det = [det, P.KP.s1g_lines]; end   % the lost-branch classes against the rule without the gate (the reference there)
     k_b = col('blind_esc');

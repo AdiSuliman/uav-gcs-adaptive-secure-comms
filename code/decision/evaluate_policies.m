@@ -200,14 +200,24 @@ POL = [POL, {'rule_core', 'blind_core'}];            % the core action set, afte
 LBL = [LBL, {'core: rule + escalation', 'core: no detector + escalation'}];
 rm_on = isfield(PP, 'release_m') && ~isempty(PP.release_m) && PP.release_m;     % the deployed DQN's release on evidence
 s1_on = isfield(PP, 's1_gate') && ~isempty(PP.s1_gate) && PP.s1_gate;           % the rule's lost-branch gate
+rm_off = isfield(PP, 'release_m') && ~isempty(PP.release_m) && ~PP.release_m;   % C2 scored the release and did not deploy it
+s1_off = isfield(PP, 's1_gate') && ~isempty(PP.s1_gate) && ~PP.s1_gate;         % C2 chose the gate step and kept it off
 dpn = Q.deployed; if strcmp(dpn, 'dqn'), dpn = sprintf('dqn_g%d', sel); end
 if rm_on                                             % descriptive rows without the release beside the deployed setting
     xr = {'rule_esc_norelm', 'table_norelm'}; xl = {'rule + escalation, without the release (descriptive)', 'table, without the release (descriptive)'};
     if startsWith(dpn, 'dqn'), xr{end+1} = [dpn '_norelm']; xl{end+1} = 'DQN, without the release on evidence (descriptive)'; end
     POL = [POL, xr]; LBL = [LBL, xl];
 end
+if rm_off                                            % the other setting is a descriptive row as well
+    xr = {'rule_esc_relm', 'table_relm'}; xl = {'rule + escalation, with the release (descriptive; not deployed)', 'table, with the release (descriptive; not deployed)'};
+    if startsWith(dpn, 'dqn'), xr{end+1} = [dpn '_relm']; xl{end+1} = 'DQN, with the release on evidence (descriptive; not deployed)'; end
+    POL = [POL, xr]; LBL = [LBL, xl];
+end
 if s1_on                                             % the off variant is the reference for the lost-branch classes
-    POL = [POL, {'rule_esc_nos1g'}]; LBL = [LBL, {'rule + escalation, without the lost-branch gate (the reference)'}];
+    POL = [POL, {'rule_esc_nos1g'}]; LBL = [LBL, {'rule + escalation, without the lost-branch gate (descriptive; the reference on the lost-branch classes)'}];
+end
+if s1_off                                            % the gate on, beside the deployed rule without it
+    POL = [POL, {'rule_esc_s1g'}]; LBL = [LBL, {'rule + escalation, with the lost-branch gate (descriptive; not kept at C2)'}];
 end
 iBase = find(strcmp(POL, sprintf('dqn_g%d', sel)));  % selected DQN alone
 dep = Q.deployed; if strcmp(dep, 'dqn'), dep = POL{iBase}; end
@@ -265,15 +275,17 @@ rep{end+1} = sprintf(['Selected DQN: gamma %.2f, training false-switch penalty %
     'flights in test. ' ...
     'Intervals: 95%% bootstrap over geometries.'], ...
     Q.seed_summary.selected_gamma, Q.seed_summary.selected_fa_pen, PP.alarm_mode, PP.confirm, numel(PP.combos));
-if isfield(PP, 'confirm_drop') && ~isempty(PP.confirm_drop)       % the lecturer lines are read under the adopted monitor
-    rep{end+1} = sprintf(['The monitor carries the drop alarm''s own confirmation, %d of the last %d cycles (D112, chosen at C1d): ' ...
+MNOTE = {};                                                       % the lecturer lines are read under the adopted monitor and settings
+if isfield(PP, 'confirm_drop') && ~isempty(PP.confirm_drop)
+    MNOTE{end+1} = sprintf(['The monitor carries the drop alarm''s own confirmation, %d of the last %d cycles (D112, chosen at C1d): ' ...
         'every line below, the lecturer lines included, is read under it.'], PP.confirm_drop);
 end
 if isfield(PP, 's1_gate')                                         % the rule steps ran after the lost-branch gate step
-    rep{end+1} = sprintf(['The rule settings were chosen after the lost-branch gate step (D113, gate %s): rule + escalation and the ' ...
+    MNOTE{end+1} = sprintf(['The rule settings were chosen after the lost-branch gate step (D113, gate %s): rule + escalation and the ' ...
         'shared settings every policy runs carry what that step kept; rule_core and rule_core3 run with those shared settings and ' ...
         'never with the gate.'], ternary(PP.s1_gate, 'on', 'off'));
 end
+rep = [rep, MNOTE];
 for si = find(~strcmp({sets.name}, 'offset'))
     rep{end+1} = ''; %#ok<SAGROW>
     R1 = RES{si, 1};
@@ -361,23 +373,24 @@ end
 kpi4h = PTh(:, iK) >= 90;
 rep{end+1} = sprintf('Deployed policy on the harmed episodes, >= 90%% of every threat: %d of %d threats | lowest %s %.1f%%', ...
     sum(kpi4h), sum(~isnan(PTh(:, iK))), threats{find(PTh(:, iK) == min(PTh(:, iK)), 1)}, min(PTh(:, iK)));
-if s1_on                                              % rule + escalation with and without the gate on the lost-branch classes
-    ks = col('rule_esc_nos1g');
-    s1gl = {['Lost-branch classes and their combinations, harmed recoverable episodes, recovered, 95% bootstrap over flight geometries: ' ...
-        'rule + escalation with the gate, without it (the reference for the comparison with the DQN: same settings, paired) and the deployed policy']};
-    for ti = find(contains(threats, 'antenna_fault') | contains(threats, 'airframe_shadowing'))
-        mr = strcmp(PP.scen(ALL{1}.scn), threats{ti}) & ALL{1}.threat & ALL{1}.recoverable & HA;
-        if ~any(mr), continue; end
-        [dd, dl, dh] = boot_cluster(double(ALL{iDQN}.recovered(mr)) - double(ALL{ks}.recovered(mr)), ones(1, sum(mr)), ALL{iDQN}.geom(mr), 2000, 130 + ti);
-        s1gl{end+1} = sprintf('  %-34s harmed %4d: with the gate %s | without it %s | deployed %s | deployed less the reference %+.1f [%+.1f, %+.1f] points', ...
-            threats{ti}, sum(mr), ci_one(ALL{col('rule_esc')}.recovered(mr), ALL{col('rule_esc')}.geom(mr)), ...
-            ci_one(ALL{ks}.recovered(mr), ALL{ks}.geom(mr)), ci_one(ALL{iDQN}.recovered(mr), ALL{iDQN}.geom(mr)), 100*dd, 100*dl, 100*dh); %#ok<AGROW>
-    end
-    rep = [rep, {''}, s1gl]; %#ok<AGROW>
-end
 SHN = '';                                             % airframe shadowing: conditioned on a geometry that hides an antenna
 if isfield(PP, 'shadow'), SHN = shadow_note(PP.shadow, TEST, PP.ebno); end
 if ~isempty(SHN), rep{end+1} = ['  ' SHN ' (test split)']; end
+if s1_on || s1_off                                    % rule + escalation with and without the gate on the lost-branch classes
+    if s1_on, kon = col('rule_esc'); koff = col('rule_esc_nos1g'); else, kon = col('rule_esc_s1g'); koff = col('rule_esc'); end
+    s1gl = {['Lost-branch classes and their combinations, harmed recoverable episodes, recovered, 95% bootstrap over flight geometries: ' ...
+        'rule + escalation with the gate, without it (the reference for the comparison with the DQN: same settings, paired) and the deployed policy' ...
+        ternary(s1_on, '', '; C2 kept the gate off, the row with it is descriptive')]};
+    for ti = find(contains(threats, 'antenna_fault') | contains(threats, 'airframe_shadowing'))
+        mr = strcmp(PP.scen(ALL{1}.scn), threats{ti}) & ALL{1}.threat & ALL{1}.recoverable & HA;
+        if ~any(mr), continue; end
+        [dd, dl, dh] = boot_cluster(double(ALL{iDQN}.recovered(mr)) - double(ALL{koff}.recovered(mr)), ones(1, sum(mr)), ALL{iDQN}.geom(mr), 2000, 130 + ti);
+        s1gl{end+1} = sprintf('  %-34s harmed %4d: with the gate %s | without it %s | deployed %s | deployed less the reference %+.1f [%+.1f, %+.1f] points', ...
+            threats{ti}, sum(mr), ci_one(ALL{kon}.recovered(mr), ALL{kon}.geom(mr)), ...
+            ci_one(ALL{koff}.recovered(mr), ALL{koff}.geom(mr)), ci_one(ALL{iDQN}.recovered(mr), ALL{iDQN}.geom(mr)), 100*dd, 100*dl, 100*dh); %#ok<AGROW>
+    end
+    rep = [rep, {''}, s1gl]; %#ok<AGROW>
+end
 
 % Envelope predicted on validation and KPI 4 inside it (test)
 ENV = false(numel(threats), nV); ENVv = nan(numel(threats), nV); PTenv = nan(numel(threats), 1); PTenv_ci = nan(numel(threats), 2);
@@ -680,7 +693,7 @@ for pk = unique([iDQN, col('rule_esc'), col('table')], 'stable')
             o.threat, o.n, o.held_pct, o.rel_median, o.rel_p90, o.rel_never_pct, o.cost_end, o.on_end_pct, o.conf_end_pct, o.sw_end); %#ok<SAGROW>
     end
 end
-for pk = find(endsWith(POL, '_norelm'))               % the same rows without the release on evidence, descriptive
+for pk = find(endsWith(POL, {'_norelm', '_relm'}))    % the same rows with the other release setting, descriptive
     [rl, OFF] = offset_rows(RES{iO, pk}, LBL{pk}, PP, K, threats, OFF);
     rep = [rep, rl]; %#ok<AGROW>
 end
@@ -707,7 +720,8 @@ if FRESH                                              % P1R: KP.far is the fresh
 end
 if WF.r9, KP.ebno_rows = R9ROWS; KP.ebno_lines = r9l; end
 if rm_on, KP.release_m = true; end
-if s1_on, KP.s1g_lines = s1gl; end
+if s1_on || s1_off, KP.s1g_lines = s1gl; end
+if ~isempty(MNOTE), KP.monitor_note = MNOTE; end
 save('results/policy_evaluation.mat', 'RES', 'RW', 'POL', 'LBL', 'set_names', 'fixed_best', 'tab', 'iDQN', 'KP', ...
     'iThreat', 'ALL', 'top_cfg');
 if FRESH, save('results/policy_evaluation.mat', 'RWf', '-append'); end

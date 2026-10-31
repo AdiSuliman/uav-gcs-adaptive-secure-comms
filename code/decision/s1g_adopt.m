@@ -11,8 +11,9 @@ function A = s1g_adopt(V0, V1, thr, s, sw0, sw1)
 %        than -1.0 point, paired, and its one-sided 95% lower bound is no lower than -2.0
 %        (cluster bootstrap over the flights, a geometry at an Eb/N0; 2000 draws, fixed seed)
 %   (g2) the clean flights with a change fall, by the exact one-sided McNemar test, p < 0.05
-%   A.keep: both hold; A.g1, A.g2, A.p; A.rows the threats' readings; A.lost the same reading on
-%   the lost-branch threats (reported, not a condition).
+%   A.keep: both hold; A.g1, A.g2, A.p; A.rows the threats' readings; A.lost the recovered of each
+%   lost-branch threat under both settings with its 95% bootstrap interval over the flights (reported,
+%   not a condition).
 thr = thr(:)'; s = s(:)';
 cl = 1000 * s + V0.r(:)';
 m = V0.recoverable(:)' & V1.recoverable(:)' & V0.threat(:)';
@@ -25,15 +26,15 @@ for t = unique(thr(m & ~lost), 'stable')
     [pt, lb] = paired_stats('boot', d, cl(mt), 2000, 113);
     ok = 100 * pt >= -1.0 && 100 * lb >= -2.0;
     g1 = g1 && ok; nt = nt + 1;
-    A.rows{end+1} = sprintf('    %-34s n %5d: recovered %+.2f points, lower bound %+.2f: %s', t{1}, sum(mt), 100 * pt, 100 * lb, ternary(ok, 'ok', 'below the floor'));
+    A.rows{end+1} = sprintf('    %-34s n %5d: recovered %+.2f points, one-sided 95%% lower bound %+.2f: %s', t{1}, sum(mt), 100 * pt, 100 * lb, ternary(ok, 'ok', 'below the floor'));
 end
 A.g1 = g1 && nt > 0;
 for t = unique(thr(m & lost), 'stable')
     mt = m & strcmp(thr, t{1});
-    [~, lo, hi] = paired_stats('boot', double(V0.recovered(mt)), cl(mt), 2000, 114);
-    [~, lo1, hi1] = paired_stats('boot', double(V1.recovered(mt)), cl(mt), 2000, 115);
+    [p0, lo, hi] = boot_cluster(double(V0.recovered(mt)), ones(1, sum(mt)), cl(mt), 2000, 114);
+    [p1, lo1, hi1] = boot_cluster(double(V1.recovered(mt)), ones(1, sum(mt)), cl(mt), 2000, 115);
     A.lost{end+1} = sprintf('    %-34s n %5d: recovered without the gate %.1f%% [%.1f, %.1f] (the reference), with it %.1f%% [%.1f, %.1f]', ...
-        t{1}, sum(mt), 100 * mean(V0.recovered(mt)), 100 * lo, 100 * hi, 100 * mean(V1.recovered(mt)), 100 * lo1, 100 * hi1);
+        t{1}, sum(mt), 100 * p0, 100 * lo, 100 * hi, 100 * p1, 100 * lo1, 100 * hi1);
 end
 if ~isempty(sw0) && numel(sw0) == numel(sw1)
     f0 = sw0(:) > 0; f1 = sw1(:) > 0;

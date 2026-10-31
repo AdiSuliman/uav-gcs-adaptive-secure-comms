@@ -365,7 +365,8 @@ verifyNotEmpty(tc, strfind(src, 'if DCx && strcmp(drop_alarm, ''class_cusum'')')
 verifyNotEmpty(tc, strfind(src, 'MONP(m).confirm_drop = DCONF(m).cand; MONP(m).grid = DCONF(m).grid;'));
 verifyNotEmpty(tc, strfind(src, 'if ~isempty(DCONF(m).cand), MONP(m).pick = DCONF(m).pick; MONP(m).j = DCONF(m).j; end'));
 verifyNotEmpty(tc, strfind(src, 'if ~isempty(ia), THC = DCONF(ia).grid; end'));
-verifyNotEmpty(tc, strfind(src, 'if exist(''DCONF'', ''var''), SV = [SV, {''DCONF''}]; end'));
+verifyNotEmpty(tc, strfind(src, 'DCONF = [];'));
+verifyNotEmpty(tc, strfind(src, 'if ~isempty(DCONF), SV = [SV, {''DCONF''}]; end'));
 verifyNumElements(tc, strfind(src, 'dconf_step('), 1);
 verifyNotEmpty(tc, strfind(src, 'wf_force(''smoke'', WFo.force'));
 src = fileread(which('train_dqn'));
@@ -500,8 +501,9 @@ src = strrep(fileread(which('policy_decide')), char(13), '');
 verifyNotEmpty(tc, strfind(src, 's1g = ~core && ~blind && strcmp(base, ''rule'')'));
 verifyNotEmpty(tc, strfind(src, '&& ~lbn'));
 src = fileread(which('evaluate_policies'));                                % the reference rows beside the DQN
-verifyNotEmpty(tc, strfind(src, 'POL = [POL, {''rule_esc_nos1g''}]; LBL = [LBL, {''rule + escalation, without the lost-branch gate (the reference)''}];'));
-verifyNotEmpty(tc, strfind(src, 'if s1_on, KP.s1g_lines = s1gl; end'));
+verifyNotEmpty(tc, strfind(src, ['POL = [POL, {''rule_esc_nos1g''}]; LBL = [LBL, {''rule + escalation, without the lost-branch gate ' ...
+    '(descriptive; the reference on the lost-branch classes)''}];']));
+verifyNotEmpty(tc, strfind(src, 'if s1_on || s1_off, KP.s1g_lines = s1gl; end'));
 verifyNotEmpty(tc, strfind(fileread(which('measure_all_kpis')), 'det = [det, P.KP.s1g_lines];'));
 src = fileread(which('train_dqn'));                                        % chosen first, kept for every later step
 verifyNotEmpty(tc, strfind(src, '[Sg, GROWS] = s1g_step(S0, S1STEP, evr, FA_BOUND, PK, PPr, K, val_spec, val_thr, H, CV, EBNO_THR);'));
@@ -537,6 +539,41 @@ A = s1g_adopt(V0, V1, thr, s, sw0, sw1);
 verifyFalse(tc, A.keep);
 A = s1g_adopt(V0, V1, thr, s, [], []);
 verifyFalse(tc, A.keep); verifyTrue(tc, any(contains(A.rows, 'not measured')));
+end
+
+function test_s1g_lost_rows_and_both_variants(tc)
+% The lost-branch rows of C2 carry the 95% bootstrap interval of boot_cluster over the flights, under both
+% settings; C2 flies and lists the gate on also when the selection rule kept it off, and C2e and the KPI
+% summary print the other variant beside the deployed one, whichever the deployed is.
+[V0, V1, thr, s] = s1g_world();
+sw = zeros(1, 1800); sw(1:60) = 1;
+A = s1g_adopt(V0, V1, thr, s, sw, sw);
+cl = 1000 * s + V0.r;
+m = strcmp(thr, 'antenna_fault');
+[p0, lo0, hi0] = boot_cluster(double(V0.recovered(m)), ones(1, sum(m)), cl(m), 2000, 114);
+[p1, lo1, hi1] = boot_cluster(double(V1.recovered(m)), ones(1, sum(m)), cl(m), 2000, 115);
+want = sprintf('recovered without the gate %.1f%% [%.1f, %.1f] (the reference), with it %.1f%% [%.1f, %.1f]', ...
+    100 * p0, 100 * lo0, 100 * hi0, 100 * p1, 100 * lo1, 100 * hi1);
+i = find(contains(A.lost, 'antenna_fault'), 1);
+verifyNotEmpty(tc, i); verifyNotEmpty(tc, strfind(A.lost{i}, want));
+verifyNotEmpty(tc, strfind(A.rows{1}, 'one-sided 95% lower bound'));
+src = strrep(fileread(which('train_dqn')), char(13), '');
+body = regexp(src, 'function \[S, rows\] = s1g_step\(.*?(?=\nfunction |$)', 'match', 'once');
+verifyNotEmpty(tc, body);
+verifyEmpty(tc, strfind(body, 'if ~S.s1_gate, return; end'));              % the gate on is flown whatever was picked
+verifyNotEmpty(tc, strfind(body, 'Son = S; Son.s1_gate = true;'));
+verifyNotEmpty(tc, strfind(body, 'P1 = decision_settings(PPr, Son);'));
+i1 = strfind(body, 'if S.s1_gate'); i2 = strfind(body, 'the gate off was picked by the selection rule and stays');
+i3 = regexp(body, '\nrows = \[rows, \{''  lost-branch threats under both settings, 95% bootstrap intervals', 'once');
+verifyTrue(tc, ~isempty(i1) && ~isempty(i2) && ~isempty(i3) && i1(1) < i2(1) && i2(1) < i3);   % the lost rows follow both branches
+verifyNotEmpty(tc, strfind(body, 'if ~A.keep, S.s1_gate = false; end'));    % only the picked-on branch can be overruled
+src = strrep(fileread(which('evaluate_policies')), char(13), '');
+verifyNotEmpty(tc, strfind(src, 's1_off = isfield(PP, ''s1_gate'') && ~isempty(PP.s1_gate) && ~PP.s1_gate;'));
+verifyNotEmpty(tc, strfind(src, 'POL = [POL, {''rule_esc_s1g''}]; LBL = [LBL, {''rule + escalation, with the lost-branch gate (descriptive; not kept at C2)''}];'));
+verifyNotEmpty(tc, strfind(src, 'if s1_on, kon = col(''rule_esc''); koff = col(''rule_esc_nos1g''); else, kon = col(''rule_esc_s1g''); koff = col(''rule_esc''); end'));
+verifyNotEmpty(tc, strfind(src, 'ALL{iDQN}.recovered(mr)) - double(ALL{koff}.recovered(mr))'));
+verifyTrue(tc, strfind(src, 'if ~isempty(SHN), rep{end+1}') < strfind(src, 'if s1_on || s1_off '));   % after the shadowing note of its table
+verifyNotEmpty(tc, strfind(src, 'if s1_on || s1_off, KP.s1g_lines = s1gl; end'));
 end
 
 function test_paired_stats(tc)
@@ -725,7 +762,7 @@ function test_relm_wiring(tc)
 % keeps running without it, the descriptive rows run without it, the verdict row carries the layer.
 src = fileread(which('train_dqn'));
 verifyNotEmpty(tc, strfind(src, 'relm_score(PPsel, K, H, agent, sel_kind, val_spec, val_thr, CV, EBNO_THR, SPLIT_VAL)'));
-verifyNotEmpty(tc, strfind(src, 'if WF.relm, dec.release_m = RELM.adopt; end'));
+verifyNotEmpty(tc, strfind(src, 'if WF.relm, dec.release_m = relm_dep; end'));
 verifyNotEmpty(tc, strfind(src, 'if WF.relm, rule_sel.release_m = false; end'));
 verifyNotEmpty(tc, strfind(src, 'A = relm_adopt(Std, Off, Per, Cln);'));
 verifyNotEmpty(tc, strfind(src, 'op = struct(''rel_on'', true);'));
@@ -733,12 +770,36 @@ verifyNotEmpty(tc, strfind(src, 'so = sp; for b = 1:numel(so), so{b}.offset = so
 src = fileread(which('evaluate_policies'));
 verifyNotEmpty(tc, strfind(src, 'if rm_on && startsWith(dep, ''dqn''), LBL{iDQN} = [LBL{iDQN} '', with the release on evidence'']; end'));
 verifyNotEmpty(tc, strfind(src, 'xr = {''rule_esc_norelm'', ''table_norelm''};'));
-verifyNotEmpty(tc, strfind(src, 'for pk = find(endsWith(POL, ''_norelm''))'));
+verifyNotEmpty(tc, strfind(src, 'for pk = find(endsWith(POL, {''_norelm'', ''_relm''}))'));
 src = fileread(which('rollout_policy'));
 verifyNotEmpty(tc, strfind(src, 'if isfield(opt, ''rel_on'') && opt.rel_on'));
 verifyNotEmpty(tc, strfind(src, 'R.rel_on = sum(tr.cfg == K.na & prev ~= K.na & tr.post & ~tr.ended, 1);'));
 src = fileread(which('measure_all_kpis'));
 verifyNotEmpty(tc, strfind(src, 'kn = find(strcmp(P.POL, [P.POL{iQ} ''_norelm'']), 1); kr0 = col(''rule_esc_norelm'');'));
+end
+
+function test_relm_other_setting_and_fallback(tc)
+% C2e prints the release on evidence also when C2 scored it and did not deploy it (the descriptive rows with
+% it, their offset rows, the KPI 5 row), only when the step ran; the rule fallback deployed runs without
+% the release and so does everything beside it; the lecturer lines carry the monitor's statements.
+src = strrep(fileread(which('evaluate_policies')), char(13), '');
+verifyNotEmpty(tc, strfind(src, 'rm_off = isfield(PP, ''release_m'') && ~isempty(PP.release_m) && ~PP.release_m;'));
+verifyNotEmpty(tc, strfind(src, 'if rm_off '));
+verifyNotEmpty(tc, strfind(src, 'xr = {''rule_esc_relm'', ''table_relm''};'));
+verifyNotEmpty(tc, strfind(src, 'if startsWith(dpn, ''dqn''), xr{end+1} = [dpn ''_relm'']; xl{end+1} = ''DQN, with the release on evidence (descriptive; not deployed)''; end'));
+verifyNotEmpty(tc, strfind(src, 'for pk = find(endsWith(POL, {''_norelm'', ''_relm''}))'));
+verifyNotEmpty(tc, strfind(src, 'rep = [rep, MNOTE];'));
+verifyNotEmpty(tc, strfind(src, 'if ~isempty(MNOTE), KP.monitor_note = MNOTE; end'));
+src = strrep(fileread(which('measure_all_kpis')), char(13), '');
+verifyNotEmpty(tc, strfind(src, 'kp = find(strcmp(P.POL, [P.POL{iQ} ''_relm'']), 1); kr1 = col(''rule_esc_relm'');'));
+verifyNotEmpty(tc, strfind(src, 'if isfield(P.KP, ''monitor_note''), det = [det, P.KP.monitor_note]; end'));
+verifyTrue(tc, strfind(src, 'P.KP.monitor_note') < strfind(src, 'if isfield(P.KP, ''lect'')                          % revised proposal: PER vs the static link'));   % before the lecturer lines
+src = strrep(fileread(which('train_dqn')), char(13), '');
+verifyNotEmpty(tc, strfind(src, 'relm_dep = WF.relm && RELM.adopt && (~strcmp(deployed, ''rule_sel'') || isfield(RELM, ''forced''));'));
+verifyNotEmpty(tc, strfind(src, 'if WF.relm, rule_sel.release_m = false; end'));
+verifyNotEmpty(tc, strfind(src, 'if WF.relm && RELM.adopt && ~relm_dep'));
+verifyTrue(tc, strfind(src, 'relm_dep = WF.relm') < strfind(src, 'rep = [rep, RLINES, R9LINES];'));   % known before the report and dec
+verifyTrue(tc, strfind(src, 'relm_dep = WF.relm') < strfind(src, 'if WF.relm, dec.release_m = relm_dep; end'));
 end
 
 function test_policy_setup_suffix(tc)
@@ -762,6 +823,22 @@ verifyEqual(tc, k, 'table'); verifyEqual(tc, o.table, tab.table); verifyFalse(tc
 verifyEqual(tc, k, 'rule_esc'); verifyEqual(tc, o.monitor.alarm, 'x'); verifyFalse(tc, o.monitor.release_m);
 [~, ~, o] = policy_setup('rule_core', Q, 2, 3, 4, tab, 1);
 verifyEqual(tc, fieldnames(o), {'core'});
+[k, ag, o] = policy_setup('rule_esc_relm', Q, 2, 3, 4, tab, 1);              % the other setting, switched on
+verifyEqual(tc, {k, ag}, {'rule_esc', 'A0'}); verifyEqual(tc, o.monitor, struct('release_m', true));
+[k, ~, o] = policy_setup('rule_esc_s1g', Q, 2, 3, 4, tab, 1);
+verifyEqual(tc, k, 'rule_esc'); verifyEqual(tc, o.monitor, struct('s1_gate', true));
+[k, ag, o] = policy_setup('dqn_esc_relm', Q, 2, 3, 4, tab, 1);
+verifyEqual(tc, {k, ag}, {'dqn_esc', 'A2'}); verifyTrue(tc, o.monitor.release_m);
+[k, ag, o] = policy_setup('dqn_g1_relm', Q, 2, 3, 4, tab, 1);
+verifyEqual(tc, {k, ag}, {'dqn', 'A1'}); verifyTrue(tc, o.monitor.release_m);
+[k, ~, o] = policy_setup('table_relm', Q, 2, 3, 4, tab, 1);
+verifyEqual(tc, k, 'table'); verifyEqual(tc, o.table, tab.table); verifyTrue(tc, o.monitor.release_m);
+[k, ~, o] = policy_setup('rule_sel_s1g', Q, 2, 3, 4, tab, 1);
+verifyEqual(tc, k, 'rule_esc'); verifyEqual(tc, o.monitor.alarm, 'x'); verifyTrue(tc, o.monitor.s1_gate);
+[~, ~, o] = policy_setup('rule_esc_norelm', Q, 2, 3, 4, tab, 1);              % a longer suffix is not read as the shorter one
+verifyFalse(tc, o.monitor.release_m);
+[~, ~, o] = policy_setup('rule_esc_nos1g', Q, 2, 3, 4, tab, 1);
+verifyFalse(tc, o.monitor.s1_gate);
 end
 
 %% ---------- per Eb/N0 rows ----------
