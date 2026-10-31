@@ -1,7 +1,8 @@
 function tests = test_head
 %TEST_HEAD  Unit tests of the fusion's candidates over the d91 pick (D110: fuse_head.m,
 %   fusion_cand.m, fusion_adopt.m's rules S and W, fusion_recheck.m, head_cost.m, det_cost.m, the
-%   switches in fuse_classes.m, fusion_pick.m, fusion_rev_id.m, select_fusion.m, eval_detector.m)
+%   switches in fuse_classes.m, fusion_pick.m, fusion_rev_id.m, select_fusion.m, eval_detector.m,
+%   deploy_state.m, compare_architectures.m)
 %   and of m_head.m's guards, and of R1 (D116: eval_unseen_snr.m behind unseen_gap,
 %   boot_cluster.m's two groups), on synthetic rows in a temporary folder; no data files. Every
 %   switch off reads as the parent commit (the branch's base) bit for bit. Run from the
@@ -160,6 +161,37 @@ verifyTrue(tc, isequal(p1, fuse_head('apply', H, p0, Z)));
 [~, k0] = max(p1, [], 2); verifyTrue(tc, isequal(k1, k0));
 end
 
+function test_fuse_classes_refit(tc)
+% B3a's refit of the deployed fusion's form on a variant's rows: without gated columns or a head,
+% fuse_classes('fit') bit for bit; with the gated columns, the linear fusion on them; with a
+% head, a head stacked on the out-of-fold linear probabilities of the rows' folds, fitted
+% without the folds E: the same fits as fusion_cand's LBH reading of a fold.
+X = tc.TestData.X; Z = [X.Z0, X.XB]; m = X.fold ~= 2;
+Zm = Z(m, :); ym = X.yt(m); fm = X.fold(m);
+F0 = fuse_classes('fit', Zm, ym, X.C, 1e-3);
+verifyTrue(tc, isequal(fuse_classes('refit', F0, Zm, ym, X.C, 1e-3, fm, 2), F0));
+verifyTrue(tc, isequal(fuse_classes('refit', setf(setf(F0, 'gcc', []), 'head', []), Zm, ym, X.C, 1e-3, fm, 2), F0));
+g = fuse_classes('gcc', X.C, X.PK.cues);
+Eg = fuse_classes('fit', [Zm, fuse_classes('gcc_x', Zm, g)], ym, X.C, 1e-3); Eg.gcc = g;
+verifyTrue(tc, isequal(fuse_classes('refit', setf(F0, 'gcc', g), Zm, ym, X.C, 1e-3, fm, 2), Eg));
+L = fuse_head('classes', X.classes); cols = fuse_head('cols', X.C, X.PK.cues);
+Fh = F0; Fh.head = fuse_head('fit', fuse_classes('apply', F0, Zm), Zm, ym, L, cols, 9400);
+Rh = fuse_classes('refit', Fh, Zm, ym, X.C, 1e-3, fm, 2);
+po = nan(numel(ym), X.C);
+for j = unique(fm)'
+    k = fm == j;
+    po(k, :) = fuse_classes('apply', fuse_classes('fit', Zm(~k, :), ym(~k), X.C, 1e-3), Zm(k, :));
+end
+Eh = F0; Eh.head = fuse_head('fit', po, Zm, ym, L, cols, fuse_head('seed', 'LBH', 2));
+verifyTrue(tc, isequal(Rh, Eh));
+verifyTrue(tc, isequal(fuse_classes('apply', Rh, Z(~m, :)), fusion_cand('pred', data_of(X, X.yt, ''), 'LBH', 2)));
+ca = fileread(which('compare_architectures'));
+verifyNotEmpty(tc, strfind(ca, 'FM = fuse_classes(''refit'', FMd, Z(~m, :), tv(~m), C, lambda, fold(~m), k);'));
+verifyNotEmpty(tc, strfind(ca, 'FMv = fuse_classes(''refit'', FZ.FM, Zv, tv, C, FZ.lambda, fold, []);'));
+verifyNotEmpty(tc, strfind(ca, 'fused_oof(sp.val, Pv, FZ.N, FZ.lambda, tv, fold, cls_names, tf, cues, FZ.FM);'));
+verifyEmpty(tc, strfind(ca, 'fuse_classes(''fit'''));
+end
+
 %% ---------- the rules ----------
 function test_rule_s(tc)
 % Rule S: each condition alone fails it.
@@ -216,6 +248,12 @@ verifyTrue(tc, fusion_adopt('nested', {'GCC', '', 'GCC', '', ''}, d, t));
 verifyFalse(tc, fusion_adopt('nested', {'GCC', '', 'CFAR', '', ''}, e, t));   % W needs the exceedance
 verifyFalse(tc, fusion_adopt('nested', {'LBH', '', '', '', ''}, d, tb));
 verifyTrue(tc, fusion_adopt('nested', {'', 'CFAR', '', '', ''}, w, t));
+[ok, s] = fusion_adopt('cand', 'LBH', e); verifyFalse(tc, ok); verifyFalse(tc, s.S7);   % a head without its timing fails S7
+verifyFalse(tc, fusion_adopt('cand', 'LBH+CFAR', d, []));
+verifyTrue(tc, fusion_adopt('cand', 'GCC', d)); verifyTrue(tc, fusion_adopt('head', d, []));   % no head: S7 does not apply
+verifyFalse(tc, fusion_adopt('nested', {'LBH', '', '', '', ''}, d));
+verifyTrue(tc, fusion_adopt('nested', {'GCC', '', '', '', ''}, d));
+verifyEqual(tc, fusion_adopt('pick', {'LBH', 'GCC'}, {setf(d, 'all', [0.9 0.5 1.2]), d}, []), 2);
 end
 
 function test_paired_cls(tc)
@@ -334,6 +372,13 @@ M = fusion_cand('fit', D, 'LBH+CFAR');
 verifyTrue(tc, isfield(M.FM, 'head') && ~isfield(M.FM, 'gcc') && numel(M.T) == 3 && isequal(M.cues.cfar, M.T));
 M = fusion_cand('fit', D, 'GCC');
 verifyTrue(tc, isfield(M.FM, 'gcc') && ~isfield(M.FM, 'head') && isempty(M.cues.cfar));
+verifyEmpty(tc, dir(fullfile(ck, '*_new.mat')));                        % each fit written whole, then renamed
+f = fullfile(ck, 'l0_CFAR_m10.mat'); fid = fopen(f, 'w'); fwrite(fid, uint8(1:100)); fclose(fid);   % a file cut short
+verifyTrue(tc, isequal(fusion_cand('pred', data_of(X, X.yt, ck), 'CFAR', [2 4]), p));   % read as a miss: fitted again
+verifyTrue(tc, isequal(load(f).x, p));
+src = fileread(which('fusion_cand'));
+verifyNotEmpty(tc, strfind(src, 'commit_mat(t, fullfile(D.ck, [key ''.mat'']));'));
+verifyEmpty(tc, regexp(src, 'save\(fullfile\(D\.ck', 'once'));
 end
 
 function test_recheck_and_cost(tc)
@@ -407,26 +452,39 @@ verifyNotEmpty(tc, strfind(sf, 'if ~isempty(PK) && isfield(PK, ''ext'')'));     
 end
 
 function test_b3r_guards_accept_the_pick(tc)
-% With fusion_pick.m naming a candidate, the record B2F builds (adopted or fallen back) passes
-% B3r's fresh3_pick and fresh3_fusion_rev in their form, which is the parent commit's; so does
-% select_fusion's pick_measured.
+% select_fusion.m's own record lines, run on a stub of the deploy's workspace. Adopted, the
+% record names the candidate fusion_pick.m names; fallen back, it names the d91 pick alone with
+% the re-check kept, which B3r's fresh3_pick and fresh3_fusion_rev and deploy_state accept once
+% EXT is '' again (D110 point 5), and not before. The guards' form is the parent commit's, and
+% so is select_fusion's pick_measured.
 src = fileread(which('fusion_pick'));
 verifyNumElements(tc, regexp(src, 'EXT = ''[A-Z+]*'';'), 1);       % D110's verdict, '' or a candidate
-d = tempname; mkdir(d);
-c0 = onCleanup(@() fixture_off(d, 'fusion_pick')); %#ok<NASGU>
-fid = fopen(fullfile(d, 'fusion_pick.m'), 'w'); fwrite(fid, regexprep(src, 'EXT = ''[A-Z+]*'';', 'EXT = ''GCC'';', 'once')); fclose(fid);
-addpath(d, '-begin'); clear fusion_pick
+d = pick_fixture(src, 'GCC'); c0 = onCleanup(@() fixture_off(d, 'fusion_pick')); %#ok<NASGU>
 verifyEqual(tc, fusion_pick().ext.pick, 'GCC');
 PK = fusion_pick();
-for adopted = [true false]
-    dp = PK; dp.check = struct('all', [0 0 0]); dp.check.ext = struct('pick', 'GCC', 'adopted', adopted, 'fallback', ~adopted);
-    fz = fusion_rev_id('enlarged', PK);                    % select_fusion.m: fusion_rev_id(fit_name, PKr)
-    verifyTrue(tc, isequal(rmfield(dp, 'check'), fusion_pick()));          % fresh3_pick
-    verifyTrue(tc, ischar(fz) && strcmp(fz, fusion_rev_id('enlarged')));    % fresh3_fusion_rev
-    verifyTrue(tc, isequal(PK, fusion_pick()));                             % select_fusion:pick_measured
-end
-verifyEqual(tc, fusion_rev_id('enlarged'), 'd91_branch_evidence_enlarged_gcc');
-fixture_off(d, 'fusion_pick');
+verifyTrue(tc, isequal(PK, fusion_pick()));                                         % select_fusion:pick_measured
+wa = fullfile(tc.TestData.tmp, 'b3r_adopted'); mkdir(wa);
+[L, txt] = b2f_tail(wa, PK, true);
+verifyEqual(tc, L.fusion_rev, 'd91_branch_evidence_enlarged_gcc');
+verifyTrue(tc, ischar(L.fusion_rev) && strcmp(L.fusion_rev, fusion_rev_id('enlarged')));   % fresh3_fusion_rev
+verifyTrue(tc, isequal(rmfield(L.deployed_pick, 'check'), fusion_pick()));                 % fresh3_pick
+verifyTrue(tc, L.deployed_pick.check.ext.adopted && isfield(L.FM, 'gcc') && ~isfield(L.base_fm, 'gcc'));
+verifyEmpty(tc, strfind(txt, 'set EXT'));
+verifyEqual(tc, ds_in(wa), 'deployed');
+wf = fullfile(tc.TestData.tmp, 'b3r_fallback'); mkdir(wf);
+[L, txt] = b2f_tail(wf, PK, false);
+verifyEqual(tc, L.fusion_rev, 'd91_branch_evidence_enlarged');
+verifyFalse(tc, isfield(L.deployed_pick, 'ext'));
+verifyTrue(tc, L.deployed_pick.check.ext.fallback && strcmp(L.deployed_pick.check.ext.pick, 'GCC'));
+verifyTrue(tc, isequal(L.FM, L.base_fm) && ~isfield(L.FM, 'gcc'));                % the pick alone deploys
+verifySubstring(tc, txt, 'set EXT = '''' in fusion_pick.m');
+verifyFalse(tc, strcmp(L.fusion_rev, fusion_rev_id('enlarged')));                 % refused while EXT names the candidate
+verifyFalse(tc, isequal(rmfield(L.deployed_pick, 'check'), fusion_pick()));
+verifyEqual(tc, ds_in(wf), 'none');
+fixture_off(d, 'fusion_pick');                                                    % EXT = '': both pass
+verifyTrue(tc, strcmp(L.fusion_rev, fusion_rev_id('enlarged')));
+verifyTrue(tc, isequal(rmfield(L.deployed_pick, 'check'), fusion_pick()));
+verifyEqual(tc, ds_in(wf), 'deployed');
 p = parent_copy(tc, 'code/detection/eval_detector.m', tc.TestData.base);
 a = strrep(fileread(fullfile(p, 'eval_detector.m')), sprintf('\r'), '');
 b = strrep(fileread(which('eval_detector')), sprintf('\r'), '');
@@ -437,6 +495,56 @@ a = strrep(fileread(fullfile(q, 'select_fusion.m')), sprintf('\r'), '');
 b = strrep(fileread(which('select_fusion')), sprintf('\r'), '');
 g = @(s) s(min(strfind(s, 'assert(~ENL || isequal(PK, fusion_pick())')):min(strfind(s, 'SMK = exist(''SMOKE''')));
 verifyEqual(tc, g(b), g(a));
+end
+
+function test_b2f_rerun_after_fallback(tc)
+% A B2F rerun naming a candidate over a recorded fallback stops before any no-go is written
+% (select_fusion:ext_fallback); over an adopted record it passes, and with EXT '' the fallen-back
+% record is the kept base of a rerun. Past the checks the run stops at the first data load.
+w = fullfile(tc.TestData.tmp, 'b2f_rerun'); mkdir(fullfile(w, 'data'));
+c0 = cd(w); back = onCleanup(@() cd(c0));
+for f = {'data/dataset.mat', 'data/splits_fresh.mat', 'data/dataset_fresh.mat', 'data/splits_fresh2.mat', 'data/dataset_fresh2.mat'}
+    x = 1; save(f{1}, 'x');
+end
+E = struct('FUSION_REV', true, 'FUSION_FIT', 'enlarged');
+P = fusion_pick('');
+N = 12; lambda = 1e-3; FM = struct('latch', false, 'cues', P.cues); fusion_rev = fusion_rev_id('enlarged', P);
+deployed_pick = P; deployed_pick.check = struct('all', [0 0 0], 'ext', struct('pick', 'GCC', 'adopted', false, 'fallback', true)); %#ok<NASGU>
+save('data/fusion.mat', 'N', 'lambda', 'FM', 'deployed_pick', 'fusion_rev');
+d = pick_fixture(fileread(which('fusion_pick')), 'GCC'); c1 = onCleanup(@() fixture_off(d, 'fusion_pick')); %#ok<NASGU>
+verifyEqual(tc, b2f_err(E).identifier, 'select_fusion:ext_fallback');
+verifyFalse(tc, isfile('data/fusion_nogo.mat'));
+deployed_pick = fusion_pick(); deployed_pick.check = struct('all', [0 0 0], 'ext', struct('pick', 'GCC', 'adopted', true, 'fallback', false));
+fusion_rev = fusion_rev_id('enlarged'); FM.gcc = 1; %#ok<NASGU>
+save('data/fusion.mat', 'N', 'lambda', 'FM', 'deployed_pick', 'fusion_rev');   % the candidate deployed: a rerun of the deploy
+ex = b2f_err(E); verifyFalse(tc, startsWith(ex.identifier, 'select_fusion:'), ex.identifier);
+verifyFalse(tc, isfile('data/fusion_nogo.mat'));
+fixture_off(d, 'fusion_pick');
+FM = rmfield(FM, 'gcc'); fusion_rev = fusion_rev_id('enlarged', P);
+deployed_pick = P; deployed_pick.check = struct('all', [0 0 0], 'ext', struct('pick', 'GCC', 'adopted', false, 'fallback', true)); %#ok<NASGU>
+save('data/fusion.mat', 'N', 'lambda', 'FM', 'deployed_pick', 'fusion_rev');
+ex = b2f_err(E); verifyFalse(tc, startsWith(ex.identifier, 'select_fusion:'), ex.identifier);
+verifyFalse(tc, isfile('data/fusion_nogo.mat'));
+end
+
+function test_deploy_state_cfar(tc)
+% deploy_state reads a deployed pick with D110's idle columns, whose FM.cues.cfar holds B2F's
+% T1, T2 and m0; without a candidate it reads as the parent commit's.
+w = fullfile(tc.TestData.tmp, 'dstate'); mkdir(fullfile(w, 'data'));
+P0 = fusion_pick(''); cf = {[], [1 2 3]}; st = cell(1, 2);
+for i = 1:2, ds_record(w, P0, cf{i}); st{i} = ds_in(w); end
+verifyEqual(tc, st, {'deployed', 'none'});
+d = parent_copy(tc, 'code/detection/deploy_state.m', tc.TestData.base);
+addpath(d, '-begin'); clear deploy_state
+c0 = onCleanup(@() fixture_off(d, 'deploy_state')); %#ok<NASGU>
+verifyEqual(tc, which('deploy_state'), fullfile(d, 'deploy_state.m'));
+for i = 1:2, ds_record(w, P0, cf{i}); verifyEqual(tc, ds_in(w), st{i}); end
+fixture_off(d, 'deploy_state');
+f = pick_fixture(fileread(which('fusion_pick')), 'CFAR'); c1 = onCleanup(@() fixture_off(f, 'fusion_pick')); %#ok<NASGU>
+P = fusion_pick();
+ds_record(w, P, [1 2 3]); verifyEqual(tc, ds_in(w), 'deployed');
+ds_record(w, P, []); verifyEqual(tc, ds_in(w), 'none');
+ds_record(w, P, [1 NaN 3]); verifyEqual(tc, ds_in(w), 'none');
 end
 
 function test_detector_id_head(tc)
@@ -533,6 +641,9 @@ v = min(strfind(src, 'VERDICT p3')); qk = strfind(src, 'R = struct(''quick'', tr
 p = [strfind(src, 'out(''\nOut of fold over'), strfind(src, 'gtxt(G{c})'), strfind(src, 'NESTED reading against B'), ...
     strfind(src, 'save(fullfile(out_dir, sprintf(''m_head_%s.mat'', tag))')];
 verifyTrue(tc, isscalar(qk) && qk < v && v < min(p) && v > max(strfind(src, 'nested outer fold %d done')));
+st = strfind(src, 'if stopped(opt, ckd, out), R = []; return; end');
+nr = strfind(src, '[okn, sn] = fusion_adopt(''nested'', picks, Gn, t);');
+verifyTrue(tc, isscalar(nr) && any(st > nr & st < qk));                % the timebox covers the readings: no verdict past it
 end
 
 %% ---------- helpers ----------
@@ -569,6 +680,67 @@ fit = struct('run', run, 'pos', pos, 'gain_ant', randn(rs, n, 4), 'feats_raw', r
     'ebno', ebr(run)', 'ebno_rx', ebr(run)');
 fit.ebno = fit.ebno(:); fit.ebno_rx = fit.ebno_rx(:);
 X = struct('fit', fit, 'Z0', Z0, 'XB', XB, 'yt', y, 'fold', mod(run, 5) + 1, 'classes', {classes}, 'C', C, 'N', N, 'PK', PK);
+end
+
+function d = pick_fixture(src, ext)
+% fusion_pick.m with EXT = ext, first on the path (fixture_off removes it).
+d = tempname; mkdir(d);
+fid = fopen(fullfile(d, 'fusion_pick.m'), 'w');
+fwrite(fid, regexprep(src, 'EXT = ''[A-Z+]*'';', sprintf('EXT = ''%s'';', ext), 'once')); fclose(fid);
+addpath(d, '-begin'); clear fusion_pick
+end
+
+function [L, txt] = b2f_tail(d, PK, adopted)
+% select_fusion.m's own lines from base_fm to its last print, run in folder d on a stub of the
+% enlarged deploy's workspace with the candidate's re-check RX (adopted or the fallback); L the
+% data/fusion.mat they save, txt their printout.
+src = strrep(fileread(which('select_fusion')), sprintf('\r'), '');
+k1 = strfind(src, sprintf('base_fm = [];\n')); k2 = strfind(src, 'if REV, FM.target_age = TA.target_age; FM.cues = cues; end');
+k3 = strfind(src, sprintf('if ~isempty(base_fm)\n    base_fm.target_age')); k4 = strfind(src, sprintf('\nfunction c = classes_of(D)'));
+assert(isscalar(k1) && isscalar(k2) && isscalar(k3) && isscalar(k4) && k1 < k2 && k2 < k3 && k3 < k4, ...
+    'test_head:b2f_tail', 'select_fusion.m''s record lines moved');
+fa = fullfile(d, 'sf_tail_a.m'); fb = fullfile(d, 'sf_tail_b.m');
+fid = fopen(fa, 'w'); fwrite(fid, src(k1:k2 - 1)); fclose(fid);
+fid = fopen(fb, 'w'); fwrite(fid, src(k3:k4)); fclose(fid);
+c0 = cd(d); back = onCleanup(@() cd(c0));
+if ~isfolder('data'), mkdir('data'); end
+C = 3; FM = struct('W', zeros(4, C), 'mu', zeros(1, 3), 'sd', ones(1, 3), 'C', C, 'lambda', 1e-3);
+RX = struct('pick', PK.ext.pick, 'adopted', adopted, 'fallback', ~adopted, 'FM', setf(FM, 'gcc', 1), 'cues', PK.cues, ...
+    'pv', ones(6, C) / C); %#ok<NASGU>
+vr = 1:4; cues = PK.cues; val_probs_oof = zeros(4, C); %#ok<NASGU>
+N = 12; lambda = 1e-3; NS = 12; LAMBDA = 1e-3; cv = 0; val_latch_oof = 0; val_target = 0; q_thr = 0; cvy = 0; cvo = 0; %#ok<NASGU>
+REV = true; FUSION_FIT = 'enlarged'; GP = struct('all', [0 0 0]); mf_latch = 0.9; mf_fused = 0.91; %#ok<NASGU>
+kept_base = struct('N', 12, 'lambda', 1e-3, 'latch', false, 'cues', false); %#ok<NASGU>
+txt = evalc('run(fa); FM.target_age = 12; FM.cues = cues; FM.os_thr = 0.5; FM.latch = false; run(fb);');
+L = load(fullfile(d, 'data', 'fusion.mat'));
+end
+
+function ex = b2f_err(o)
+% The error select_fusion stops with when run with the variables of struct o set (test:none
+% when it ends).
+for f = fieldnames(o)'
+    eval([f{1} ' = o.(f{1});']);
+end
+ex = MException('test:none', 'no error');
+try
+    evalc('run(''select_fusion'')');
+catch ex
+end
+end
+
+function st = ds_in(w)
+% deploy_state in folder w, without its printed line.
+c0 = cd(w); back = onCleanup(@() cd(c0));
+[~, st] = evalc('deploy_state()');
+end
+
+function ds_record(w, P, cf)
+% A deployed record of pick P in folder w, FM.cues the pick's with cfar = cf.
+N = 12; lambda = 1e-3; FM = struct('latch', false, 'cues', P.cues); FM.cues.cfar = cf;
+fusion_rev = fusion_rev_id('enlarged', P);
+deployed_pick = P;
+deployed_pick.check = struct('all', [0 0 0], 'kept', struct('N', 12, 'lambda', 1e-3, 'latch', false, 'cues', false)); %#ok<NASGU>
+save(fullfile(w, 'data', 'fusion.mat'), 'N', 'lambda', 'FM', 'deployed_pick', 'fusion_rev');
 end
 
 function D = data_of(X, yt, ck)

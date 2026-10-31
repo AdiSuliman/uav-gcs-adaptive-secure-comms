@@ -1898,11 +1898,14 @@ m = [9101 9102 9103 9111:9115 9131:9135 9141:9145 9151:9155];
 verifyEqual(tc, numel(unique(m)), numel(m));
 % D110's streams (m_head.m, fuse_head.m): the heads' trees, 9400 + the mask of the folds left out
 % for LBH and 9500 + it for LBH+CFAR, and the inner folds' bootstraps 9161-9165; R1's bootstrap
-% of the unseen Eb/N0 gap (eval_unseen_snr.m, 4251): each its own and none of the d91 streams
+% of the unseen Eb/N0 gap (eval_unseen_snr.m, 4251): each its own and none of the d91 streams.
+% B2F's re-check and B3a's refit (fuse_classes.m 'refit') fit their heads on the same per-mask streams
 h = [9400:9431, 9500:9531, 9161:9165, 4251];
-verifyEqual(tc, numel(unique([h, m, q])), numel([h, m, q]));
+verifyEqual(tc, numel(unique([h, m])), numel([h, m]));
+verifyEmpty(tc, intersect(h, q));
 verifyEqual(tc, arrayfun(@(e) fuse_head('seed', 'LBH', find(bitget(e, 1:5))), 0:31), 9400:9431);
 verifyEqual(tc, arrayfun(@(e) fuse_head('seed', 'LBH+CFAR', find(bitget(e, 1:5))), 0:31), 9500:9531);
+verifyNotEmpty(tc, strfind(fileread(which('fuse_classes')), 'fuse_head(''seed'', ''LBH'', E)'));
 src = fileread(fullfile(tc.TestData.root, 'code', 'dev', 'm_head.m'));
 verifyEqual(tc, cellfun(@(x) str2double(x{1}), regexp(src, '''Seed'', (\d+)', 'tokens')), 9101);
 verifyNotEmpty(tc, strfind(src, 'fusion_adopt(''boot'', fit.run, 1000, 9102)'));
@@ -5179,8 +5182,8 @@ verifyNotEmpty(tc, strfind(es, 'status --porcelain --untracked-files=all -- code
 verifyNotEmpty(tc, strfind(es, 'ls-files -o --exclude-standard -- "*.m"'));
 verifyNotEmpty(tc, strfind(es, 'rev-parse HEAD HEAD:code'));
 % The adopted fusion's id (select_fusion.m stores it as fusion_rev, docs/d91_set4.md step 2)
-verifyEqual(tc, fusion_rev_id('enlarged'), 'd91_branch_evidence_enlarged');
-verifyEqual(tc, fusion_rev_id('validation'), 'd91_branch_evidence_validation');
+verifyEqual(tc, fusion_rev_id('enlarged', fusion_pick('')), 'd91_branch_evidence_enlarged');      % the d91 pick's, whatever EXT holds
+verifyEqual(tc, fusion_rev_id('validation', fusion_pick('')), 'd91_branch_evidence_validation');
 verifyError(tc, @() fusion_rev_id('test'), 'fusion_rev_id:fit');
 % Each missing input, a fusion without the monitor's class, a fusion that is not the adopted
 % revision, a fusion older than the detector, no current reading of the third set and a
@@ -8005,8 +8008,8 @@ verifyClass(tc, P.latch, 'logical');
 verifyFalse(tc, P.latch);                                % the measured state (m_all.m, latch 0)
 dp = P; dp.check = struct('all', [0 0 0]); dp.check.latch_val = struct('macro_f1_latched', 0.9, 'macro_f1_fused', 0.91);
 verifyTrue(tc, isequal(rmfield(dp, 'check'), fusion_pick()));   % a deployed_pick built as B2F builds it passes the planned guard (section 7); the guard's own test lands with it
-verifyEqual(tc, fusion_rev_id('enlarged'), 'd91_branch_evidence_enlarged');
-verifyEqual(tc, fusion_rev_id('validation'), 'd91_branch_evidence_validation');
+verifyEqual(tc, fusion_rev_id('enlarged', fusion_pick('')), 'd91_branch_evidence_enlarged');      % the d91 pick's, whatever EXT holds
+verifyEqual(tc, fusion_rev_id('validation', fusion_pick('')), 'd91_branch_evidence_validation');
 verifyError(tc, @() fusion_rev_id('test'), 'fusion_rev_id:fit');
 src = fileread(which('select_fusion'));
 for t = {'ENL = REV && exist(''FUSION_FIT'', ''var'') && strcmp(FUSION_FIT, ''enlarged'');', ...
@@ -8144,7 +8147,7 @@ for o = {struct('FUSION_REV', true, 'SMOKE', true), struct('FUSION_REV', true, '
     ex = b2f_error(o{1});                                % past the checks: the first load stops it
     verifyFalse(tc, strcmp(ex.identifier, 'test:none')); verifyFalse(tc, startsWith(ex.identifier, 'select_fusion:'), ex.identifier);
 end
-E = struct('FUSION_REV', true, 'FUSION_FIT', 'enlarged');
+E = struct('FUSION_REV', true, 'FUSION_FIT', 'enlarged', 'HEAD_STAGES', 1);   % HEAD_STAGES read only for a pick with D110's head
 verifyEqual(tc, b2f_error(E).identifier, 'select_fusion:fit_sets');
 for f = {'data/dataset.mat', 'data/splits_fresh.mat', 'data/dataset_fresh.mat', 'data/splits_fresh2.mat', 'data/dataset_fresh2.mat'}
     x = 1; save(f{1}, 'x');
@@ -8208,7 +8211,7 @@ verifyEmpty(tc, regexp(src, 'save\(''data/fusion\.mat''', 'once'));   % no write
 s1 = strfind(src, 'fz_tmp = ''data/fusion_new.mat'';'); s2 = strfind(src, 'save(fz_tmp, ''deployed_pick'', ''-append'');');
 s3 = strfind(src, 'commit_mat(fz_tmp, ''data/fusion.mat'');'); s4 = strfind(src, 'fusion_nogo(''clear'');');
 verifyTrue(tc, isscalar(s1) && isscalar(s2) && isscalar(s3) && isscalar(s4) && s1 < s2 && s2 < s3 && s3 < s4);
-verifyEqual(tc, numel(strfind(src, 'save(fz_tmp, ')), 3);
+verifyEqual(tc, numel(strfind(src, 'save(fz_tmp, ')), 4);               % base_fm only with a candidate over the pick (D110)
 % commit_mat on its own
 x = 1; save('data/a.mat', 'x'); x = 2; save('data/a_new.mat', 'x');
 commit_mat('data/a_new.mat', 'data/a.mat');
@@ -8246,7 +8249,7 @@ fid = fopen(f, 'w'); fwrite(fid, src(k1:k2 + numel(e) - 1)); fclose(fid);
 PK = fusion_pick(); FM = struct('latch', false, 'cues', PK.cues); N = 12; lambda = 1e-3; NS = 12; LAMBDA = 1e-3; %#ok<NASGU>
 cv = 0; val_probs_oof = 0; val_latch_oof = 0; val_target = 0; q_thr = 0; cvy = 0; cvo = 0; %#ok<NASGU>
 REV = true; FUSION_FIT = 'enlarged'; mf_latch = 0.9; mf_fused = 0.91; %#ok<NASGU>
-kept_base = struct('N', 12, 'lambda', 1e-3, 'latch', false, 'cues', false); %#ok<NASGU>
+kept_base = struct('N', 12, 'lambda', 1e-3, 'latch', false, 'cues', false); base_fm = []; %#ok<NASGU>
 ex = MException('test:none', 'no error');
 try
     evalc('run(f)');
@@ -8312,7 +8315,7 @@ verifyNotEmpty(tc, strfind(src, 'cm = true(size(y)); lab = ''the per-cycle label
 verifyNotEmpty(tc, strfind(src, 'if REV, cm = all(YN == y, 2); lab = ''the frames no candidate relabels''; end'));
 verifyNotEmpty(tc, strfind(src, ['save(fz_tmp, ''FM'', ''N'', ''lambda'', ''NS'', ''LAMBDA'', ''cv'', ''val_probs_oof'', ' ...
     '''val_latch_oof'', ''val_target'', ''q_thr'');']));
-verifyNotEmpty(tc, strfind(src, 'fusion_rev = fusion_rev_id(fit_name);'));
+verifyNotEmpty(tc, strfind(src, 'fusion_rev = fusion_rev_id(fit_name, PKr);'));
 verifyNotEmpty(tc, strfind(src, 'save(fz_tmp, ''cvy'', ''cvo'', ''fusion_rev'', ''-append'');'));
 verifyNotEmpty(tc, strfind(src, 'cvy(a, b) = macro_f1(y(cm), yh(cm), C); cvo(a, b) = macro_f1(yn, yh, C);'));
 verifyNotEmpty(tc, strfind(src, 'REV = exist(''FUSION_REV'', ''var'') && isequal(FUSION_REV, true);'));
