@@ -1782,6 +1782,7 @@ What the pass confirmed (profile 1, 11 combinations without the shadowing ones):
 1. **Naming.** The system-level clean-episode false alarm is our KPI 6 (an extension). It is never called lecturer KPI 3. The lecturer's KPI 3 verdict lives with B3c (core CNN) and the hybrid's three-state view (`design_final.md` 6.5), with B3r beside them. The hybrid's 11-class share of clean frames read as any threat (5.36%, none as a jamming state) is printed beside the verdict, because it feeds the class path of KPI 6.
 2. **KPI 6 verdict unchanged.** `KP.far` is read on the pre-registered union of clean test sets: Clopper-Pearson one-sided 95% upper bound ≤ 5%, every configuration, at least 600 flights, Eb/N0 ≥ the KPI 1 threshold. The per-Eb/N0 rows and the non-L line stay descriptive (D99 point 5).
 3. **Breakdown (descriptive, saved files only).** Per policy (none, rule_esc, blind_esc, rule_core, blind_core, the deployed DQN), on the same clean episodes as `KP.far`:
+   - *[Amended 31.10.2026 by D121 items 12 and 15 (approved by Adi; profile 3, and profile 1's validation traces for item 12): beside this breakdown, KPI 6 split by estimated link K, speed and bank, and the hiding-geometry line for clean flights; descriptive side readings, the verdict unchanged.]*
    - (a) false-alarm episodes per Eb/N0 grid point: D99 point 5's rows from the same union RU, extended from `far_report`'s two policies to all six (one table, not a second definition);
    - (b) the path at the first change: hostile class, degradation with class none/benign/unknown, or drop. From `fc_cls`, `fc_deg` and `fc_dal` (the monitor's drop alarm, saved by `rollout_policy.m:128`). These are the change cycle's flags; an m-of-n confirmation built from mixed paths is attributed to that cycle's flags, and the row says so;
    - (c) the Xu split: false-alarm episodes with `false_sw > 0` (a change on a flight whose clean link passes the 2× test at no_action over the whole flight, `K.healthy`, `link_env.m:182`; a per-flight flag, not per cycle) against those with `switches > 0` and `false_sw = 0` (flights whose clean link itself fails it). The verdict line counts both; the split is descriptive;
@@ -2086,6 +2087,7 @@ The baseline also differs in tuning budget. In C2e, `blind_core`'s first respons
   - Per-B_J goodput and t_rec_det differences, named in protocol 6.5, were not computed.
   - No decision-layer, CNN or hop-model defect was found.
   - None is a profile 3 candidate under the registered rules: CORE_BW runs on profile 1 only; D113 keeps `rule_core_policy.m` unchanged in profile 3; D105 point 2 keeps blind_core's fixed first response in TIP3; profile 3's `lect_kpis.m` already prints recovery from the onset.
+    - *[Amended 31.10.2026 by D121 item 16 (approved by Adi): rule_core3 joins profile 3's C2e only under P-B's two conditions (profile 3's B3c model before C1p starts; the pool-field change passes the C2/EDGE smoke); otherwise it is stated as not run.]*
 - *Open for Adi.*
   - (a) Before D2c's data: how U_s applies to KPI 8's paired differences. Rule 4.6 covers only the KPI 5 words. Proposed: a sign is receiver-robust when its 95% interval clears 0 by more than U_s.
     - *[Answered 31.10.2026 by D121 item 3 (approved by Adi, before any D2c data): a side column "receiver-robust (U_s)" beside KPI 8's registered paired differences; KPI 8's reading and words stay as registered.]*
@@ -2120,6 +2122,7 @@ The baseline also differs in tuning budget. In C2e, `blind_core`'s first respons
 - Sources: `rx_d2_reading.md` (official reading), `rx_d2_read_rule.md`, `rx_d2_read_phys.md`, `d2_dispatch.md`.
 
 **D3 placement (dated 31.10.2026; registered under decide-after-30min, Adi silent since 30.10.2026 19:37; before any D3, fresh-frame or D2c data).** `rx_fix_rule3.md` stands at sha256 `d058fd366799a61632ee529938ef572347e62032e56595277d1e5981c0deeb19` (LF; `rx-ne-fix` commit `7511afe`, that file only). Its D3 dispatch (tests, fresh pool, D3; cap about 115 min) runs beside P1R's C2 under D104 point 1's dated lines, never beside C1d, the fresh build, C2e, `link_fresh` or the breakdown, and otherwise after P1R's end. P1R never waits for it, and the D3 reading can precede ruling 4.4's timebox.
+*[Amended 31.10.2026 by D121 item 13 (approved by Adi): a joint, power-weighted CFO across antennas, against the per-antenna slope, is an input to the design of the post-D3 candidate under `rx_fix_rule3.md`; D3's registered reading and that file's text are unchanged.]*
 
 **Sources.** `rx_fix_ruling.md` (final ruling, sections 2, 3.4-3.7, 4.2-4.4, 4.7); `rx_diag_reading.md` with `rx_diag_reading_1.md` and `rx_diag_reading_2.md` (D1 official reading, sections 0, 2, 6); `rx_fix_rule2.md` on branch `rx-ne-fix` (commit `0d2d1f8`). Numbering: D107 and D108 are held by unregistered drafts (`d107_after_v0.md`, `d108_link_rec.md`). *[2026-10-29: D108 is registered below; D107 is approved by Adi and is registered once its precondition G0 passes (its point 4).]*
 
@@ -2825,6 +2828,7 @@ Item 7 is the one exception. Its routing may switch on D117 point 3, a training 
 3. **Projected-end checks.**
    - When: before the merge into TIP3's lineage (with P1R's measured times and the r2 status), and at C1d (with C1p's measured duration).
    - If profile 3's projected end passes **24.11**, shed in this order until it does not:
+     *[Amended 31.10.2026 by D121 item 16 (approved by Adi): P-B's C1p scoring and C2e row are shed first, before item 1 of this list.]*
      1. D117 item 2 (its re-derived C1p cost, at most about 1.1 h by DEC:693; a `profile.json` change);
      2. D111's OOD run when it would run serially (−5.4-6.2 h; KPI 2 stays 0.763);
      3. D114's scoring (−0.5-1 h);
@@ -2991,9 +2995,47 @@ Line references in points 1-10 are to profile 1's code of record `d4623ed` and t
     - Partition, fixed now by the physics, before any data: near-OOD = antenna_fault and airframe_shadowing (each has a known sibling with the same RF signature, and the rule maps both to the same answer, `rule_based_policy.m:85-87`); far-OOD = the other eight held-out threats. The mean AUROC over each group is printed beside the 10-threat mean wherever KPI 2 is printed, labelled "descriptive, not KPI 2" (the near/far split of OpenOOD v1.5). The 10-threat mean stays the verdict.
     - Consistency with the lecturer's proposal: KPI 2 is ours, not in his table; its verdict and definition are unchanged and the lines are descriptive.
 
+**Items 12-17 (approved by Adi on 31.10.2026 with the rest of the audits' proposals; the same common rules and the same two conditions apply).**
+
+12. **KPI 6 split by estimated link K, speed and bank (ext_audit section 3.5; descriptive side reading).**
+    - Per policy, the clean false-change episodes over clean episodes, with a geometry-cluster 95% interval and the cluster count, in bins fixed now: the flight's median estimated link K from the receiver (`los_k`, RF only) < 0, 0 to < 10, ≥ 10 dB; D116's speed bands; bank 0-20°, 20-40°, ≥ 40° (D116 item 7's bands).
+    - Read on profile 1's validation traces in an idle window (about 10 min; D118 point 2's guards) and on profile 3's C1d and C2 validation output; printed beside KPI 6's registered reading, never in its place. It moves no verdict, threshold or choice; CLT's grid (item 1) stays as fixed.
+    - If the false changes concentrate at K < 0 dB, a K-binned τ_hi (Mondrian, per bin) is a candidate after profile 3, under its own registration.
+    - Consistency with the lecturer's proposal: KPI 6 is ours, its definition and verdict are unchanged, and the table is descriptive; the speed breakdown follows his mitigation 3.
+
+13. **Joint, power-weighted CFO across antennas as an input to the post-D3 receiver candidate (ext_audit section 1.7).**
+    - The per-antenna phase slopes of the three defect frames differ by 1.2-1.8 kHz, 3-5× the maximum Doppler (358 Hz at 161 km/h). Random FM near deep fades predicts this (Jakes 1974, ch. 1; Rice 1948), so a linear-phase model per antenna fitted inside a fade is wrong by construction.
+    - A common CFO estimated jointly and power-weighted across antennas, with the per-antenna residual tracked as time variation (BEM or PSAM; Cavers 1991), compared against the per-antenna slope, is an input to the design of the candidate that follows D3 under `rx_fix_rule3.md` (a post-D3 candidate is read under a new pre-set rule with new fresh frames, D109).
+    - D3's registered reading, `rx_fix_rule3.md`'s text and the receiver per run (D109) are unchanged.
+    - Consistency with the lecturer's proposal: his risk and mitigation 6 call for a receiver that finds the frame start and the frequency offset itself; this only informs that receiver's next candidate and touches no state, configuration or KPI.
+
+14. **A source check for the tilt loss on scattered paths, before the book (ext_audit section 4.3).**
+    - The model applies the line-of-sight polarization mismatch of the tilted dipoles to the diffuse paths too. Scattered paths are depolarized, and no source in the files measures how much tilt survives in them.
+    - Before the book: a search for an air-ground cross-polar discrimination (or depolarization) measurement inside our band and ranges, on HTML pages only (no PDF or file downloads). If a source is found, it is cited with its value and range. If none is found, the book states the diffuse-path tilt loss as a model choice that bounds the loss from above, not as a measured value.
+    - The simulation and every registered reading are unchanged by this item; a model change would be a candidate after profile 3 under its own registration.
+    - Consistency with the lecturer's proposal: a citation and a disclosure only; his states, configurations and KPIs are untouched.
+
+15. **Disclosure: clean flights never get the hidden-antenna loss (ext_audit section 4.6).**
+    - `shadow_spec` returns zeros unless the threat holds shadowing, and `d.hidden` is 0 on clean flights, so a clean flight in a hiding geometry is cleaner than physics and the clean false-alarm reading is optimistic, not harsh.
+    - The book states it in one sentence. Beside KPI 6, a descriptive line: the share of clean test flights whose geometry meets the hiding condition that `shadow_spec` would apply (geometry only, no loss applied), and KPI 6's false-alarm share on those flights and on the rest, with cluster intervals. Profile 3's clean test pools, read in the same single KPI 6 pass.
+    - Consistency with the lecturer's proposal: a disclosure and a descriptive line beside our KPI 6; his KPI 3 (the classifier's FAR) and every definition stay as they are.
+
+16. **P-B: rule_core3 in profile 3's C2e, conditional (base_audit section 4).**
+    - What: the three-state CNN's probabilities (`probs3`) are scored into profile 3's C1p pools (`pool_cell`; code and tests on `core-bw-p1` `2a4da56` / `f01a51f`, ported to TIP3's lineage) with profile 3's own B3c model, so rule_core3 flies profile 3's C2e episodes beside the other rows, including its clean system false alarms (KPI 6).
+    - Conditions, checked and recorded when C1p starts: (a) profile 3's B3c three-state model exists; (b) the pool-field change passes the C2/EDGE smoke (past bug 5) and the full `test_core`. If either fails, P-B does not run and the book states "rule_core3 was not run in profile 3; CORE_BW (profile 1) is the three-state CNN's in-loop evidence".
+    - If it runs: rule_core3's rows are printed with the lecturer's rows, labelled "profile 3". The lecturer verdicts' source stays as D105 and D106 register it. Its KPI 8 pair against profile 3's blind_core carries D105 point 2's label "secondary, weakened baseline", since that blind_core is not tuned on validation (past bug 4).
+    - Cost: its C1p scoring and the extra C2e row are counted in D118's projected-end checks, and P-B is shed first if the projected end passes 24.11.
+    - Consistency with the lecturer's proposal: it adds his exact CNN-based configuration (three states, CNN, rule-based recovery) to profile 3 under identical conditions; nothing in his states, configurations or KPI definitions changes.
+
+17. **A CUSUM on lost-branch log-odds increments: a candidate after profile 3 (ext_audit section 3.5).**
+    - The source-backed sequential form of the lost-branch decision: a learned log-likelihood ratio fed to a CUSUM with an ARL-calibrated threshold (Page 1954; Lee, Cheng & Xie, NN-CUSUM, arXiv 2210.17312; DeepLLR-CUSUM, NeurIPS 2025).
+    - It is valid only on non-overlapping evidence (per-frame outputs, or the window advanced by its own length); the fused 12-cycle windows overlap and would double-count. It needs per-frame posteriors as a new monitor input and a C1d reader, so it is not in profile 3. It is registered after profile 3 before any data it governs; CLT (item 1) stands in profile 3.
+    - Consistency with the lecturer's proposal: it concerns only the lost-branch classes, outside his three states; it is still a confirmation over several cycles, as his mitigation 7 asks, the jamming confirmation is unchanged, and nothing of his changes in profile 3.
+
 **Not adopted under condition 1:** none. No item changes the lecturer's three states, his three configurations, or his KPI definitions and targets.
 
 **Dated lines (31.10.2026)** on D64 (escalation), D90 point 2, D103's fit/check split, D105's extension rows, D106's open point (a), D111 item 5, D112 points 2 and 3, D113 point 1, D116 items 3, 5 and 9, D118 points 1, 2a and 3.
+Items 12-17 add dated lines on D103 point 3, D106's defects, D109's D3 placement and D118 point 3.
 
 **Sources.**
 - Angelopoulos, Bates, Candès, Jordan & Lei, "Learn then Test", Ann. Appl. Stat. 19(2):1641-1662, 2025; arXiv 2110.01052 (fixed-sequence testing).
@@ -3003,4 +3045,7 @@ Line references in points 1-10 are to profile 1's code of record `d4623ed` and t
 - Zhang et al., OpenOOD v1.5, arXiv 2306.09301.
 - Page 1954; Lorden 1971; Moustakides 1986 (as in D112).
 - Audits: `audit31/ext_audit.md` sections 0-5, `audit31/base_audit.md` sections 0-4.
+- Jakes 1974, *Microwave Mobile Communications*, ch. 1; Rice 1948, Bell Syst. Tech. J. 27 (random FM in fades); Cavers 1991, IEEE Trans. Veh. Technol. 40(4) (PSAM).
+- Lee, Cheng & Xie, NN-CUSUM, arXiv 2210.17312; DeepLLR-CUSUM, NeurIPS 2025 (CUSUM on learned LLR increments).
+- Vovk, Gammerman & Shafer 2005, *Algorithmic Learning in a Random World* (Mondrian conformal calibration).
 
