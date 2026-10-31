@@ -72,8 +72,13 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   so it is on isolated cycles (k-out-of-n detection of a swept jammer, Norouzi et al. 2006).
 %   With PP.confirm_drop = [k n] (chosen per monitor on validation, choose_drop_threshold.m) the drop
 %   alarm confirms by itself too: at least k of the last n cycles carried it.
-%   With PP.s1_gate the monitor adds M.harm: evidence of harm in at least one of the last n cycles of
-%   the confirmation (degraded, degraded without RF evidence, or the drop alarm). With PP.release_m it
+%   With PP.s1_gate or PP.lb_accept the monitor adds M.harm: evidence of harm in at least one of the
+%   last n cycles of the confirmation (degraded, degraded without RF evidence, or the drop alarm);
+%   single writer, shared by both. With PP.lb_accept (struct, field tau_hi; D121 item 1, CLT) a
+%   lost-branch class (antenna_fault, airframe_shadowing) counts as hostile only with its fused
+%   posterior (M.probs, summed over the two classes) at or above tau_hi, or with M.harm; withheld
+%   cycles keep M.alarm from degradation/the drop alarm alone and set M.lb_not_accepted. Absent or
+%   empty: off, bit for bit. With PP.release_m it
 %   adds M.quiet: the cycle carries no alarm, no degradation, no drop alarm, the quiet slot is under
 %   PP.q_thr (default C.q_alarm_db) and no bin of the cycle's idle gap is busy (idle_summary.m occ); the
 %   last 8 cycles' bits are kept for policy_decide.m. The bits are kept by hist_bits, their only writer.
@@ -213,6 +218,21 @@ switch mode
     otherwise
         M.alarm = hostile | M.degraded;
 end
+needHarm = (isfield(PP, 's1_gate') && ~isempty(PP.s1_gate) && PP.s1_gate) || (isfield(PP, 'lb_accept') && ~isempty(PP.lb_accept));
+if needHarm                                                     % evidence that a lost branch harms the link, over the confirmation's cycles
+    dqm0 = false(1, numel(M.degraded)); if isfield(M, 'deg_quiet'), dqm0 = M.deg_quiet; end
+    mem = hist_bits(mem, 'hm', M.degraded | dqm0 | M.drop_alarm);
+    M.harm = any(mem.hm(:, end-cf(2)+1:end), 2)';
+end
+if isfield(PP, 'lb_accept') && ~isempty(PP.lb_accept)            % calibrated lost-branch acceptance (D121 item 1, CLT): the class alone
+    lbcls = {'antenna_fault', 'airframe_shadowing'};             % counts as hostile only above PP.lb_accept.tau_hi, or with harm evidence (M.harm)
+    icol = ismember(PP.classes, lbcls);
+    pLB = sum(M.probs(:, icol), 2)';
+    islb = ismember(M.cls, lbcls);
+    accept = pLB >= PP.lb_accept.tau_hi | M.harm;
+    M.lb_not_accepted = islb & ~accept;                          % withheld this cycle: not counted as a class alarm
+    M.alarm(M.lb_not_accepted) = M.degraded(M.lb_not_accepted) | M.drop_alarm(M.lb_not_accepted);
+end
 q = ~M.alarm;
 if any(strcmp(mode, {'class_drop', 'class_cusum'}))            % the reference before a change building up
     if ~isfield(mem, 'rp'), mem.rp = nan(size(mem.ref)); mem.rx = false(numel(eg), 1); end
@@ -238,11 +258,8 @@ if ~isempty(cdr) && ~strcmp(mode, 'degraded')                   % the drop alarm
     M.confirmed = M.confirmed | sum(mem.dal(:, end-cdr(2)+1:end), 2)' >= cdr(1);
 end
 mem.conf_n(M.confirmed) = mem.conf_n(M.confirmed) + 1; mem.conf_n(~M.confirmed) = 0;
-if isfield(PP, 's1_gate') && ~isempty(PP.s1_gate) && PP.s1_gate    % evidence that a lost branch harms the link, over the confirmation's cycles
-    dqm = false(1, numel(M.degraded)); if isfield(M, 'deg_quiet'), dqm = M.deg_quiet; end
-    mem = hist_bits(mem, 'hm', M.degraded | dqm | M.drop_alarm);
-    M.harm = any(mem.hm(:, end-cf(2)+1:end), 2)';
-end
+% M.harm (evidence that a lost branch harms the link, over the confirmation's cycles) is written once,
+% above, before M.alarm/M.confirmed: the single writer for PP.s1_gate (policy_decide.m) and PP.lb_accept.
 if isfield(PP, 'release_m') && ~isempty(PP.release_m) && PP.release_m   % a cycle with no evidence of a threat or of a degraded link
     M.quiet = quiet_cycle(C, mem, obs, M, PP);
     mem = hist_bits(mem, 'qt', M.quiet);
