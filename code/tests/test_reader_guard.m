@@ -58,9 +58,9 @@ function test_clean_reference_copy(tc)
 % The monitor's clean reference reaches the reading tree alone and is read as the pipeline reads it
 % (clean_ber_ref.m, MATLAB's current folder); a pools file is never overwritten.
 c0 = pwd;
-a = tempname; b = tempname; d = tempname;
-mkdir(a); mkdir(b); mkdir(d);
-tc.addTeardown(@() drop_dirs({a, b, d}));
+a = tempname; b = tempname; d = tempname; e = tempname;
+mkdir(a); mkdir(b); mkdir(d); mkdir(e);
+tc.addTeardown(@() drop_dirs({a, b, d, e}));
 tc.addTeardown(@() back_to(c0));
 clean_ref = struct('ebno', [0 3 6 9], 'ber_est', [0.2 0.05 0.004 1e-4], 'ber', [0.2 0.05 0.004 1e-4], 'fer', [1 0.8 0.1 0]);
 src = fullfile(a, 'policy_pools.mat');
@@ -83,6 +83,14 @@ clean_ref = struct('ebno', [0 3 6 9], 'ber_est', [0.2 0.05 0.004 1e-4]); %#ok<NA
 save(f, 'PP', 'clean_ref');
 verifyError(tc, @() reader_guard('ref', src, d), 'reader_guard:ref');
 verifyEqual(tc, sort(who('-file', f)), {'PP'; 'clean_ref'});
+% a pipeline tree whose pools are not built (data files, no pools file) gets no reference planted
+mkdir(fullfile(e, 'data'));
+g = fullfile(e, 'data', 'trained_detector.mat');
+det = struct('x', 1); %#ok<NASGU>
+save(g, 'det');
+verifyError(tc, @() reader_guard('ref', src, e), 'reader_guard:ref');
+verifyFalse(tc, isfile(fullfile(e, 'data', 'policy_pools.mat')));
+verifyEqual(tc, who('-file', g), {'det'});
 end
 
 function test_registration_commit(tc)

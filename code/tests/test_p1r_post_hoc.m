@@ -38,8 +38,12 @@ for k = 1:2
         pv(b, k) = 100 * mean(E.RES{1, k}.recovered(m));
     end
 end
+pt = nan(3, 2);
+for k = 1:2
+    for ti = 1:3, pt(ti, k) = 100 * mean(E.ALL{k}.recovered(mrec & Rn.scn == ti + 1)); end
+end
 E.KP = struct('ebno', [3 9 15], 'show', {{'none', 'dqn_g1'}}, 'per_ebno', pe, 'per_speed', pv, 'speed_bins', bins, ...
-    'reading', 'P1R', 'harmed_consistent', true);
+    'threats', {scen(2:4)'}, 'per_threat', pt, 'reading', 'P1R', 'harmed_consistent', true);
 end
 
 function test_link_limited_tags(tc)
@@ -62,6 +66,29 @@ verifyEqual(tc, numel(mm), 1); verifyTrue(tc, contains(mm{1}, 'per_speed'));
 F = E; F.KP = rmfield(F.KP, 'per_speed');
 mm = p1r_post_hoc('gate', F);
 verifyTrue(tc, contains(mm{1}, 'lacks'));
+end
+
+function test_gate_binds_the_threat_labels_to_the_evaluation(tc)
+% The by-threat rows read PP.scen of the pools copy; the gate reproduces KP.per_threat through those labels.
+[E, scen] = synth();
+verifyEmpty(tc, p1r_post_hoc('gate', E, scen));
+verifyEmpty(tc, p1r_post_hoc('gate', E, scen'));                 % a row of labels reads like a column
+% a copy whose cells are ordered otherwise relabels the threats and fails
+mm = p1r_post_hoc('gate', E, scen([1 3 2 4]));
+verifyEqual(tc, numel(mm), 1); verifyTrue(tc, contains(mm{1}, 'per_threat'));
+% a copy that lacks a cell the episodes name
+mm = p1r_post_hoc('gate', E, scen(1:3));
+verifyEqual(tc, numel(mm), 1); verifyTrue(tc, contains(mm{1}, 'threat cell'));
+% a saved table that differs
+F = E; F.KP.per_threat(2, 2) = F.KP.per_threat(2, 2) + 1;
+mm = p1r_post_hoc('gate', F, scen);
+verifyEqual(tc, numel(mm), 1); verifyTrue(tc, contains(mm{1}, 'per_threat'));
+% an evaluation without the table cannot tie the labels: stated, not passed
+F = E; F.KP = rmfield(F.KP, 'per_threat');
+mm = p1r_post_hoc('gate', F, scen);
+verifyEqual(tc, numel(mm), 1); verifyTrue(tc, contains(mm{1}, 'lacks'));
+% without labels the gate is the one of KP.per_ebno and KP.per_speed
+verifyEmpty(tc, p1r_post_hoc('gate', F));
 end
 
 function test_rows_per_ebno(tc)
@@ -178,6 +205,17 @@ verifyTrue(tc, isfile(fullfile(out, 'p1r_post_hoc.gatefail.txt')));
 verifyFalse(tc, isfile(fullfile(out, 'p1r_post_hoc.txt')));
 verifyFalse(tc, isfile(fullfile(out, 'p1r_post_hoc.mat')));
 verifyTrue(tc, contains(fileread(fullfile(out, 'p1r_post_hoc.gatefail.txt')), 'GATE FAIL'));
+end
+
+function test_a_relabelled_pools_copy_fails_the_gate(tc)
+% Same Eb/N0 grid and det_id, another cell order: the deficit by threat would be relabelled, so no row is read.
+[E, scen] = synth();
+f = write_inputs(E, scen([1 3 2 4]), 'P1R');
+out = fullfile(tc.TestData.root, 'results', ['_test_p1_readers_' char(java.util.UUID.randomUUID().toString())]);
+tc.addTeardown(@() cleanup({f.dir, out}));
+verifyError(tc, @() p1r_post_hoc('run', f.pools, f.eval, out, 'abc1234', ''), 'p1r_post_hoc:gate');
+verifyFalse(tc, isfile(fullfile(out, 'p1r_post_hoc.txt')));
+verifyTrue(tc, contains(fileread(fullfile(out, 'p1r_post_hoc.gatefail.txt')), 'per_threat'));
 end
 
 function test_inputs_and_outputs_are_guarded(tc)

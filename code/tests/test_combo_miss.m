@@ -117,6 +117,16 @@ verifyEqual(tc, sum([P.age.n]), 100);
 verifyEqual(tc, sum(vertcat(P.age.mcnt), 1), P.mcnt);
 verifyEqual(tc, [P.ebno.n], [50 50]);
 verifyEqual(tc, sum(vertcat(P.ebno.mcnt), 1), P.mcnt);
+% the shares of all threat-active frames by category, split the same way, add up to the pooled counts
+verifyEqual(tc, sum(vertcat(P.age.cnt), 1), P.cnt);
+verifyEqual(tc, sum(vertcat(P.ebno.cnt), 1), P.cnt);
+verifyEqual(tc, [P.ebno.cnt], [40 10 0 0 0 0 30 5 15 0]);
+ct = combo_miss_tables('categories', F.cls(F.pair == 1), pair_meta('jam+pl'));
+band = 1 + (age >= T.edge(1)) + (age >= T.edge(2));
+for b = 1:3
+    verifyEqual(tc, P.age(b).cnt, arrayfun(@(k) sum(ct(band == b) == k), 1:5));
+    verifyEqual(tc, sum(P.age(b).cnt), P.age(b).n);
+end
 % frames that are not threat-active are left out
 F2 = F; F2.on(1:10) = false;
 T2 = combo_miss_tables('tables', F2, M, C);
@@ -135,10 +145,30 @@ verifyTrue(tc, any(contains(lines, 'largest share of the missed frames: (a)')));
 verifyTrue(tc, any(contains(lines, 'DET if the class counted without the drop alarm')));
 verifyTrue(tc, any(contains(lines, 'Eb/N0     3 dB')));
 verifyTrue(tc, any(contains(lines, 'onset age 0-2')));
+% every split row gives the category shares of all its frames and of its missed ones
+verifyEqual(tc, sum(contains(lines, 'all frames by category: ')), 10);
+verifyEqual(tc, sum(contains(lines, ' missed ') & contains(lines, ' by category: ') & ~contains(lines, 'all frames')), 10);
+verifyTrue(tc, any(contains(lines, 'Eb/N0     3 dB') & contains(lines, ...
+    'all frames by category: jammer 80.0 | level comp. 20.0 | other level 0.0 | none 0.0 | other 0.0')));
+verifyTrue(tc, any(contains(lines, 'missed   10 by category: jammer 0.0 | level comp. 100.0 | other level 0.0 | none 0.0 | other 0.0')));
 % the second pair has no path_loss line
 k = find(contains(lines, '--- spoofing+sweeping_jammer'));
 verifyEqual(tc, numel(k), 1);
 verifyFalse(tc, any(contains(lines(k:end), 'path_loss: read as the class')));
+end
+
+function test_harmed_reads_the_reference_of_the_number_it_explains(tc)
+% R5 explains edge_map.m's DET_h, whose harmed set is the flight against its own clean link; SPD-D's harmed set
+% is evaluate_policies.m's, against the per-Eb/N0 mean.
+flight = 'K = link_env(''tables'', PP, ''flight'');';
+mean_ref = 'K = link_env(''tables'', PP);';
+src = @(f) fileread(which(f));
+verifyTrue(tc, contains(src('edge_map'), flight));
+verifyTrue(tc, contains(src('combo_miss_diag'), flight));
+verifyFalse(tc, contains(src('combo_miss_diag'), mean_ref));
+verifyTrue(tc, contains(src('evaluate_policies'), mean_ref));
+verifyTrue(tc, contains(src('spd_d_diag'), mean_ref));
+verifyFalse(tc, contains(src('spd_d_diag'), flight));
 end
 
 function test_repeatable(tc)

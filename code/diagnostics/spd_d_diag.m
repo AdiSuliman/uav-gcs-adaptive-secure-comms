@@ -1,14 +1,16 @@
-function spd_d_diag(pools_file, agent_file, manifest_file, out_dir, reg_commit, docs_repo)
+function spd_d_diag(pools_file, agent_file, manifest_file, out_dir, reg_commit, docs_repo, cov_registered)
 %SPD_D_DIAG  SPD-D: where the speed deficit of the deployed DQN comes from, on copies of profile 1's train
 %   and validation pools. Descriptive: it chooses nothing and changes no file of the
 %   pipeline; the routing table it prints is advisory.
-%   spd_d_diag(pools_file, agent_file, manifest_file, out_dir, reg_commit, docs_repo)
+%   spd_d_diag(pools_file, agent_file, manifest_file, out_dir, reg_commit, docs_repo, cov_registered)
 %   pools_file     a copy of data/policy_pools.mat; its test, edge-speed and second test splits are emptied
 %                  on load (reader_guard.m) and nothing of them is read
 %   agent_file     the archived trained_dqn.mat; its sha256 must match its line in manifest_file
 %   out_dir        under <repo>/results (default <repo>/results): spd_d.txt and spd_d.mat, written once
 %   reg_commit     the commit that registers these readings (hex); docs_repo, if given, is checked for it
 %                  (without it the log says the commit is unverified)
+%   cov_registered true: a dated registration fixes the share of the coverage branch's second clause, and the
+%                  branch may be raised; default false: it is printed and never raised
 %   Episodes: the single threats of the pools, as evaluate_policies.m flies its single set, on the train and
 %   the validation split, two onsets per flight; the deployed DQN and no response on the same episodes and
 %   frame draws. The train split is in sample for the DQN and the validation split chose it; the profile has
@@ -25,6 +27,8 @@ root = project_root();
 if nargin < 4 || isempty(out_dir), out_dir = fullfile(root, 'results'); end
 if nargin < 5, reg_commit = ''; end
 if nargin < 6, docs_repo = ''; end
+if nargin < 7 || isempty(cov_registered), cov_registered = false; end
+cov_registered = logical(cov_registered);
 out_dir = reader_guard('out', out_dir, root);
 reader_guard('input', pools_file, {'policy_pools.mat'});
 reader_guard('input', agent_file, {'trained_dqn.mat'});
@@ -81,6 +85,8 @@ rep{end+1} = sprintf('Monitor clean reference (clean_ber_ref.m): clean_ref of th
     ref_file, pwd);
 rep{end+1} = ['Labels: the train split is in sample for the DQN; the validation split chose it (train_dqn.m); the profile has three ' ...
     'antennas, profile 3 four, so the routing is advisory and indicative for profile 3. Descriptive: nothing is selected on these tables.'];
+rep{end+1} = sprintf('Coverage branch (C-LHS): the share of its second clause is %s in D116 item 7; the branch is %s', ...
+    ternary(cov_registered, 'registered', 'not registered'), ternary(cov_registered, 'raised when met', 'printed and never raised'));
 fprintf('%s\n', rep{:});
 
 %% Episodes and per-episode facts
@@ -148,6 +154,7 @@ rep{end+1} = sprintf('Clean link: %d flight readings at the working Eb/N0 points
 
 %% Tables
 C = spd_d_tables('config', PP.speed_range);
+C.cov_registered = cov_registered;
 Tb = spd_d_tables('tables', E, CL, C);
 body = spd_d_tables('lines', Tb, C);
 rep{end+1} = sprintf('Total %.1f min', toc(t_all) / 60);
@@ -158,7 +165,7 @@ fid = fopen(f_txt, 'w'); fprintf(fid, '%s\n', lines{:}); fclose(fid);
 fprintf('\n%s\n', lines{:});
 meta = struct('pools_file', pools_file, 'pools_bytes', dp.bytes, 'pools_date', dp.date, 'pools_sha256', h_pools, 'agent_sha256', h_agent, ...
     'deployed', dep, 'reg_commit', reg, 'code', {code}, 'code_sha256', {h_code}, 'seed_ep', SEED_EP, 'seed_run', SEED_RUN, ...
-    'reps', REPS, 'harmed_consistent', cons, 'ebno', PP.ebno, 'clean_fer', PP.clean_fer, 'created', PP.created);
+    'reps', REPS, 'cov_registered', cov_registered, 'harmed_consistent', cons, 'ebno', PP.ebno, 'clean_fer', PP.clean_fer, 'created', PP.created);
 save(f_mat, 'meta', 'E', 'CL', 'Tb', 'C', 'lines');
 fprintf('Saved %s and %s\n', f_txt, f_mat);
 end

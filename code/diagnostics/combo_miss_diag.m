@@ -17,6 +17,8 @@ function combo_miss_diag(pools_file, agent_file, manifest_file, out_dir, reg_com
 %   spoofing+sweeping_jammer, every severity of the pools. For each threat-active frame det_frames.m is
 %   read three times, with the registered definition (hit), with one row per class under the monitor's
 %   class alone (the class), and with no class counted (the drop alarm alone); the three must agree.
+%   Harmed is edge_map.m's (DET_h, 82.2%): no response does not restore the flight against that flight's
+%   own clean link (link_env 'flight').
 %   Tables: combo_miss_tables.m.
 PAIRS = {'jamming+path_loss', 'tone_jamming+path_loss', 'jamming+antenna_fault', 'noise_burst+antenna_fault', ...
     'spoofing+sweeping_jammer'};
@@ -64,7 +66,7 @@ Q = load(agent_file, 'det_id', 'dec', 'confirm', 'alarm_mode', 'drop_db', 'maha_
 check_det_id(PP, Q, 'combo_miss_diag');
 MON = Q; if strcmp(Q.deployed, 'rule_sel'), MON = Q.rule_sel; end
 PP = decision_settings(PP, MON);
-K = link_env('tables', PP);
+K = link_env('tables', PP, 'flight');
 nS = numel(PP.ebno);
 cls_names = reshape(cellstr(string(PP.classes)), 1, []);
 ncls = numel(cls_names);
@@ -100,6 +102,8 @@ rep{end+1} = sprintf('Agent %s sha256 %s (matches %s), read for the monitor''s s
     agent_file, h_agent, manifest_file, mode, PP.fuse_N);
 rep{end+1} = sprintf(['Descriptive, validation pools at no_action, no test split read; no profile 1 or profile 3 number changes and no threshold ' ...
     'is chosen from it. Pairs read: %s%s'], strjoin(PAIRS, ', '), ternary(dry, ' (DRY RUN: pairs the pools lack are left out)', ''));
+rep{end+1} = ['Harmed (DET_h, DET_u): no response does not restore the flight against that flight''s own clean link, as edge_map.m ' ...
+    'reads DET_h (82.2%)'];
 fprintf('%s\n', rep{:});
 
 %% Frames

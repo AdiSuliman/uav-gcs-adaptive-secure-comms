@@ -15,6 +15,8 @@ function varargout = combo_miss_tables(cmd, varargin)
 %       (a) path_loss read as a class but counted only with the drop alarm (det_frames.m), (b) another
 %       level-family class outvoting the jammer, or the monitor reading none or another class
 %   T = combo_miss_tables('tables', F, M, C)
+%       T.p(p).age (three onset-age bands) and .ebno (one per Eb/N0 point) hold per split: n, det,
+%       n_miss, cnt (the category counts of all its threat-active frames) and mcnt (of its missed ones)
 %       F   per frame (columns): pair (index into M.pairs), s (Eb/N0 index), flight (cluster id: the
 %           geometry at its Eb/N0, shared by the severities), age (cycles since the threat's first frame
 %           read, det_frames.m), cls, dr (the drop alarm fired), hit (DET counts the frame, drop alarm
@@ -122,7 +124,7 @@ c = arrayfun(@(k) sum(ct(m) == k), 1:5);
 end
 
 function t = slice(hit, ct, m)
-t = struct('n', sum(m), 'det', NaN, 'n_miss', sum(m & ~hit), 'mcnt', counts(ct(m), ~hit(m)));
+t = struct('n', sum(m), 'det', NaN, 'n_miss', sum(m & ~hit), 'cnt', counts(ct(m), true(sum(m), 1)), 'mcnt', counts(ct(m), ~hit(m)));
 if t.n > 0, t.det = mean(double(hit(m))); end
 end
 
@@ -153,14 +155,18 @@ for p = 1:numel(T.p)
     L{end+1} = sprintf('   largest share of the missed frames: %s', P.mech); %#ok<AGROW>
     ab = {sprintf('0-%d', T.edge(1) - 1), sprintf('%d-%d', T.edge(1), T.edge(2) - 1), sprintf('%d+', T.edge(2))};
     for b = 1:3
-        L{end+1} = sprintf('   onset age %-7s frames %5d  DET %5.1f%%  missed %4d by category: %s', ab{b}, P.age(b).n, ...
-            100 * P.age(b).det, P.age(b).n_miss, cat_txt(P.age(b).mcnt, P.age(b).n_miss)); %#ok<AGROW>
+        L = [L, slice_lines(sprintf('onset age %-7s', ab{b}), P.age(b))]; %#ok<AGROW>
     end
     for e = 1:numel(P.ebno)
-        L{end+1} = sprintf('   Eb/N0 %5g dB   frames %5d  DET %5.1f%%  missed %4d by category: %s', M.ebno(e), P.ebno(e).n, ...
-            100 * P.ebno(e).det, P.ebno(e).n_miss, cat_txt(P.ebno(e).mcnt, P.ebno(e).n_miss)); %#ok<AGROW>
+        L = [L, slice_lines(sprintf('Eb/N0 %5g dB  ', M.ebno(e)), P.ebno(e))]; %#ok<AGROW>
     end
 end
+end
+
+function L = slice_lines(head, t)
+% A split row: the share of all its threat-active frames by category, and of its missed frames.
+L = {sprintf('   %s frames %5d  DET %5.1f%%  all frames by category: %s', head, t.n, 100 * t.det, cat_txt(t.cnt, t.n)), ...
+    sprintf('   %s missed %4d by category: %s', blanks(numel(head)), t.n_miss, cat_txt(t.mcnt, t.n_miss))};
 end
 
 function s = ci_txt(r)

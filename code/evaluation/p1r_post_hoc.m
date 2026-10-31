@@ -25,7 +25,9 @@ function varargout = p1r_post_hoc(cmd, varargin)
 %       the A' readout from the deployed policy's episodes Rd and no response's Rn on the same episodes
 %       (Rn.recovered is false exactly on the harmed ones): per speed band, per threat and band, per
 %       threat and Eb/N0, and the harmed lost-branch episodes per band
-%   mm = p1r_post_hoc('gate', E)      the mismatches of the reproduction of KP.per_ebno and KP.per_speed
+%   mm = p1r_post_hoc('gate', E, scen)
+%       the mismatches of the reproduction of KP.per_ebno and KP.per_speed; with scen (the threat label
+%       of every cell, PP.scen of the pools copy) also of KP.per_threat, which ties the labels to the evaluation
 switch cmd
     case 'run',   run_reading(varargin{:});
     case 'mark',  varargout{1} = mark(varargin{:});
@@ -69,7 +71,7 @@ cfg = struct('B', 2000, 'seed', 11800);
 head = {sprintf('Registration commit %s (D110-D118); rule code sha256: %s', reg, strjoin(cellfun(@(f, h) [f ' ' h], code, h_code, ...
     'UniformOutput', false), ' | ')), sprintf('pools %s sha256 %s', pools, h_pools), ...
     sprintf('evaluation %s sha256 %s', eval_mat, h_eval)};
-mm = gate(E);
+mm = gate(E, PP.scen);
 if ~isequal(double(KP.ebno(:)), double(PP.ebno(:))), mm{end+1} = 'KP.ebno is not the pools'' Eb/N0 grid'; end
 if isfield(KP, 'det_id') && ~isempty(PP.det_id) && ~isequal(char(string(KP.det_id)), char(string(PP.det_id)))
     mm{end+1} = 'KP.det_id is not the pools'' det_id';
@@ -149,9 +151,10 @@ M.tag(M.L) = {'L'};
 M.tag(~M.L & f < 0.1) = {'J'};
 end
 
-function mm = gate(E)
+function mm = gate(E, scen)
 % KP.per_ebno and KP.per_speed of the deployed policy, reproduced from the saved episodes as
-% evaluate_policies.m computes them (the single set, the recoverable threat episodes).
+% evaluate_policies.m computes them (the single set, the recoverable threat episodes); with scen also
+% KP.per_threat (the three threat sets pooled, the episodes of each threat found through scen).
 mm = {};
 need = {'RES', 'POL', 'iDQN', 'KP'};
 miss = need(~isfield(E, need));
@@ -174,6 +177,39 @@ for i = 1:nb
     pv(i) = 100 * mean(Rk.recovered(m));
 end
 if ~same(pv, KP.per_speed(:, c)), mm{end+1} = 'KP.per_speed of the deployed policy is not reproduced from the saved episodes'; end
+if nargin > 1, mm = [mm, threat_mismatch(E, c, scen)]; end
+end
+
+function mm = threat_mismatch(E, c, scen)
+% KP.per_threat of the deployed policy through the threat labels of the pools copy, as evaluate_policies.m
+% computes it: a copy whose cells are labelled or ordered otherwise gives other rows by threat.
+mm = {};
+KP = E.KP;
+if ~isfield(KP, 'per_threat') || ~isfield(KP, 'threats') || ~isfield(E, 'ALL')
+    mm = {'the evaluation lacks KP.per_threat, KP.threats or ALL: the threat labels of the pools copy cannot be checked'};
+    return;
+end
+A = E.ALL{1}; Ad = E.ALL{E.iDQN};
+scen = scen(:);
+if max(A.scn(:)) > numel(scen)
+    mm = {'the saved episodes name a threat cell the pools copy does not hold'};
+    return;
+end
+thr = scen(A.scn(:));
+base = A.threat(:) & A.recoverable(:);
+rc = double(Ad.recovered(:));
+th = KP.threats(:);
+if size(KP.per_threat, 1) ~= numel(th) || size(KP.per_threat, 2) < c
+    mm = {'KP.per_threat does not hold one row per entry of KP.threats and a column of the deployed policy'};
+    return;
+end
+pt = nan(numel(th), 1);
+for ti = 1:numel(th)
+    pt(ti) = 100 * mean(rc(strcmp(thr, th{ti}) & base));
+end
+if ~same(pt, KP.per_threat(:, c))
+    mm = {'KP.per_threat of the deployed policy is not reproduced through the threat labels of the pools copy'};
+end
 end
 
 function t = same(a, b)

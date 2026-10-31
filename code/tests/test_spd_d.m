@@ -49,6 +49,7 @@ verifyEqual(tc, bb, [1; 1; 2; 2; 3; 3; 0]);
 verifyEqual(tc, C.speed_edges, linspace(0, 161, 5));
 verifyEqual(tc, C.bank_edges, [0 20 40 58]);
 verifyEqual(tc, [C.hi_speed C.contrast C.nr_small C.share], [112 3 3 0.5]);
+verifyFalse(tc, C.cov_registered);
 end
 
 function test_families_and_restoring_set(tc)
@@ -171,8 +172,9 @@ verifyEqual(tc, r.policy.share, 1);
 verifyTrue(tc, r.policy.met);
 verifyEqual(tc, r.first, 'policy');
 verifyFalse(tc, r.doppler.met); verifyFalse(tc, r.coverage.met);
-% the policy branch together with the coverage branch: policy first, both listed
+% the policy branch together with the coverage branch (reading registered): policy first, both listed
 E.nR(E.sbi == 4 & E.th == 2) = 2; E.r_only(E.sbi == 4 & E.th == 2) = true; E.cfg_end(E.sbi == 4 & E.th == 2) = 2;
+C.cov_registered = true;
 T = spd_d_tables('tables', E, clean_link(0), C);
 verifyEqual(tc, T.route.met, {'policy', 'coverage'});
 verifyEqual(tc, T.route.first, 'policy');
@@ -182,6 +184,7 @@ end
 
 function test_coverage_branch(tc)
 C = tc.TestData.C;
+C.cov_registered = true;
 E = base();
 m = E.sbi == 4 & E.bbi == 2 & E.th == 1;
 E.recovered(m) = false; E.nR(m) = 2; E.r_only(m) = true; E.r_sc(m) = false; E.cfg_end(m) = 2;
@@ -213,6 +216,7 @@ end
 function test_coverage_reads_the_t5_population(tc)
 % The ending condition is read on T5's failures (from 112 km/h up), not only on the top-band failures with |R| <= 3.
 C = tc.TestData.C;
+C.cov_registered = true;
 ftop = @(E) E.sbi == 4 & E.bbi == 2 & E.th == 1;            % 12 failures at 140 km/h, in the top band
 fmid = @(E) E.sbi == 3 & E.bbi >= 2 & E.th == 1;            % 24 failures at 115 km/h: from 112 km/h up, below the top band
 % the top-band failures meet the condition among themselves, the failures below the top band do not
@@ -244,6 +248,42 @@ E = base();
 T = spd_d_tables('tables', E, clean_link(0), C);
 verifyEqual(tc, T.route.coverage.n_t5, 0);
 verifyFalse(tc, T.route.coverage.met);
+end
+
+function test_coverage_is_not_raised_until_its_reading_is_registered(tc)
+% The registered text gives the second clause no share: the branch is read and printed, never raised, until a
+% dated line registers it (cov_registered); it is the only branch that can switch the training design.
+C = tc.TestData.C;
+E = base();
+m = E.sbi == 4 & E.bbi == 2 & E.th == 1;
+E.recovered(m) = false; E.nR(m) = 2; E.r_only(m) = true; E.r_sc(m) = false; E.cfg_end(m) = 2;
+T = spd_d_tables('tables', E, clean_link(0), C);
+r = T.route;
+verifyFalse(tc, r.coverage.registered);
+verifyTrue(tc, r.coverage.read);
+verifyFalse(tc, r.coverage.met);
+verifyEmpty(tc, r.met);
+verifyEqual(tc, r.first, 'none');
+lines = spd_d_tables('lines', T, C);
+verifyTrue(tc, any(contains(lines, '   coverage (reading not registered): ') & contains(lines, '-> met by the reading, not raised')));
+verifyTrue(tc, any(contains(lines, 'coverage is met by the reading but not raised')));
+verifyTrue(tc, any(contains(lines, 'routing: first none; branches met: none of the four branches is met')));
+% the same episodes with the reading registered raise it
+C.cov_registered = true;
+T = spd_d_tables('tables', E, clean_link(0), C);
+verifyTrue(tc, T.route.coverage.read); verifyTrue(tc, T.route.coverage.met);
+verifyEqual(tc, T.route.met, {'coverage'});
+lines = spd_d_tables('lines', T, C);
+verifyFalse(tc, any(contains(lines, 'reading not registered')));
+verifyFalse(tc, any(contains(lines, 'not raised')));
+% an unmet reading is unmet whether or not it is registered
+E.cfg_end(m) = 1;
+for reg = [false true]
+    C.cov_registered = reg;
+    T = spd_d_tables('tables', E, clean_link(0), C);
+    verifyFalse(tc, T.route.coverage.read); verifyFalse(tc, T.route.coverage.met);
+    verifyFalse(tc, any(contains(spd_d_tables('lines', T, C), 'coverage is met by the reading')));
+end
 end
 
 function test_benign_rows_and_labels(tc)

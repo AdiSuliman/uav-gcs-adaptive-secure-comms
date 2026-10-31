@@ -12,7 +12,9 @@ function out = reader_guard(cmd, varargin)
 %                                          of MATLAB's current folder, so clean_ref of pools_file
 %                                          alone is saved to root/data/policy_pools.mat (refused when
 %                                          that file holds anything else: a pools file is never
-%                                          overwritten), the current folder is set to root and the
+%                                          overwritten, and when root/data holds other .mat files
+%                                          and no pools file: a pipeline tree whose pools are not
+%                                          built), the current folder is set to root and the
 %                                          reference is checked finite
 %   reader_guard('registration', hash, docs_repo)
 %                                          error unless hash is a commit id; with docs_repo, that the
@@ -76,6 +78,9 @@ switch cmd
                 error('reader_guard:ref', 'reader_guard: %s holds more than a clean reference (a pools file); it is not overwritten', dst);
             end
             D = load(dst, 'clean_ref'); same = isfield(D, 'clean_ref') && isequaln(D.clean_ref, clean_ref);
+        elseif ~isempty(dir(fullfile(fileparts(dst), '*.mat')))
+            error('reader_guard:ref', ['reader_guard: %s holds data files and no pools file (a pipeline tree whose pools are not ' ...
+                'built yet); a reference planted there would be read by the pipeline; the readers run from a reading tree'], fileparts(dst));
         end
         if ~same, save(dst, 'clean_ref'); end
         cd(root);

@@ -5,7 +5,9 @@ function varargout = spd_d_tables(cmd, varargin)
 %   C = spd_d_tables('config', speed_range)
 %       speed bands: four equal bands of the speed range (KPI 7's, evaluate_policies.m); bank bands
 %       0-20, 20-40 and 40 deg and above (edge_map.m); hi_speed 112 km/h; a contrast counts from 3
-%       points; a restoring set is small at 3 configurations or fewer; a branch needs a share of 50%
+%       points; a restoring set is small at 3 configurations or fewer; a branch needs a share of 50%;
+%       cov_registered false: the coverage branch's second clause (a share of T5's failures) has no
+%       registered share, so the branch is printed and never raised
 %   [sb, bb] = spd_d_tables('bands', speed, bank, C)    band of every flight (0: not finite)
 %   [sc, bud] = spd_d_tables('families', names)         configurations with a spatial/channel part
 %                                                       (channel_switch, freq_diversity,
@@ -42,7 +44,7 @@ end
 function C = config(speed_range)
 C = struct('speed_edges', linspace(speed_range(1), speed_range(2), 5), 'bank_edges', [0 20 40 58], ...
     'hi_speed', 112, 'contrast', 3, 'nr_small', 3, 'share', 0.5, 'lost', {{'antenna_fault', 'airframe_shadowing'}}, ...
-    'benign', 'benign_interference', 'B', 2000, 'seed', 11600);
+    'benign', 'benign_interference', 'cov_registered', false, 'B', 2000, 'seed', 11600);
 end
 
 function [sb, bb] = bands(speed, bank, C)
@@ -219,7 +221,8 @@ m4 = G(1).m & sb == nsb; f4 = m4 & ~E.recovered;
 lost = ismember(E.thr, C.lost);
 R = struct('n_top', sum(m4), 'n_fail', sum(f4), 'deficit', NaN, 'defined', sum(f4) > 0);
 R.policy = struct('share', NaN, 'met', false);
-R.coverage = struct('small', NaN, 'only_sc', NaN, 'nested', NaN, 'n_small', 0, 'n_t5', 0, 'met', false);
+R.coverage = struct('small', NaN, 'only_sc', NaN, 'nested', NaN, 'n_small', 0, 'n_t5', 0, 'read', false, ...
+    'registered', C.cov_registered, 'met', false);
 R.bank_only = struct('speed_meets', false, 'bank_point3', false, 'met', false);
 R.doppler = struct('d', NaN, 'lo', NaN, 'hi', NaN, 'point3', false, 'fer_d', T.cl.d, 'fer_lo', T.cl.lo, 'fer_up', T.cl.d > 0, 'met', false);
 if R.n_top > 0, R.deficit = 1 - mean(double(E.recovered(m4))); end
@@ -236,7 +239,7 @@ if R.defined
     R.policy.met = R.policy.share >= C.share;
     % coverage: |R| <= 3 on a share of the top-band failures, and on a share of T5's failures (hi_speed up) R holds
     % power/rate/FEC alone while the DQN ends on a spatial/channel configuration; nested: that second share among the
-    % top-band failures with |R| <= 3, read beside it
+    % top-band failures with |R| <= 3, read beside it; the branch is raised only when the reading is registered
     sm = f4 & E.nR <= C.nr_small;
     f5 = G(1).m & ~E.recovered & E.speed >= C.hi_speed;
     R.coverage.n_small = sum(sm);
@@ -244,7 +247,8 @@ if R.defined
     R.coverage.n_t5 = sum(f5);
     if any(f5), R.coverage.only_sc = sum(f5 & E.r_only & endsc) / sum(f5); end
     if any(sm), R.coverage.nested = sum(sm & E.r_only & endsc) / sum(sm); end
-    R.coverage.met = R.coverage.small >= C.share && isfinite(R.coverage.only_sc) && R.coverage.only_sc >= C.share;
+    R.coverage.read = R.coverage.small >= C.share && isfinite(R.coverage.only_sc) && R.coverage.only_sc >= C.share;
+    R.coverage.met = R.coverage.read && C.cov_registered;
 end
 % the policy branch first, then the others in the order of the registered table
 order = {'policy', 'bank_only', 'doppler', 'coverage'};
@@ -329,14 +333,23 @@ L{end+1} = sprintf(['   Doppler     : other single threats, lower bands minus to
     '(%g points: %s); clean-link FER of the top band minus the lower bands there %+8.5f [lower bound %+8.5f] (rising: %s) -> %s'], ...
     100 * R.doppler.d, 100 * R.doppler.lo, 100 * R.doppler.hi, C.contrast, yn(R.doppler.point3), R.doppler.fer_d, ...
     R.doppler.fer_lo, yn(R.doppler.fer_up), met_txt(R.doppler.met));
-L{end+1} = sprintf(['   coverage    : |R| <= %d on %5.1f%% of the top-band failures (needs %g%%); of the %d failures from %g km/h up (T5), ' ...
+cov_head = '   coverage    : '; cov_res = met_txt(R.coverage.met);
+if ~R.coverage.registered
+    cov_head = '   coverage (reading not registered): ';
+    if R.coverage.read, cov_res = 'met by the reading, not raised'; end
+end
+L{end+1} = sprintf(['%s|R| <= %d on %5.1f%% of the top-band failures (needs %g%%); of the %d failures from %g km/h up (T5), ' ...
     'R holds power/rate/FEC alone and the DQN ends on a spatial/channel configuration in %5.1f%% (needs %g%%); among the %d top-band ' ...
     'failures with |R| <= %d the same share is %5.1f%% (read beside, not used) -> %s'], ...
-    C.nr_small, 100 * R.coverage.small, 100 * C.share, R.coverage.n_t5, C.hi_speed, 100 * R.coverage.only_sc, 100 * C.share, ...
-    R.coverage.n_small, C.nr_small, 100 * R.coverage.nested, met_txt(R.coverage.met));
+    cov_head, C.nr_small, 100 * R.coverage.small, 100 * C.share, R.coverage.n_t5, C.hi_speed, 100 * R.coverage.only_sc, 100 * C.share, ...
+    R.coverage.n_small, C.nr_small, 100 * R.coverage.nested, cov_res);
 if R.defined
     if isempty(R.met), mt = 'none of the four branches is met'; else, mt = strjoin(R.met, ', '); end
     L{end+1} = sprintf('   routing: first %s; branches met: %s', R.first, mt);
+    if R.coverage.read && ~R.coverage.registered
+        L{end+1} = ['   coverage is met by the reading but not raised: D116 item 7 registers no share for its second clause, so ' ...
+            'it does not switch C-LHS (D117 point 3)'];
+    end
 else
     L{end+1} = '   routing: the DQN has no failure in the top band, no branch applies';
 end
