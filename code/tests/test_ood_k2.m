@@ -234,8 +234,7 @@ code = regexprep(src, '%[^\n]*', '');
 bad = {'\.ended', '\.truth', '\.label', '\.Y\>', '\.Y_frame', '\.ytr', '\.yv', '\.kn\>', '\.un\>', '\.own\>', ...
     '\.probs', '\.maha\>', '\.level', '\.ebno', '\<threat_active', '\<y_frame', '\<truth'};
 for i = 1:numel(bad), verifyEmpty(tc, regexp(code, bad{i}, 'once'), bad{i}); end
-f = unique(regexp(code, '\<[USC]\.(\w+)', 'tokens'));
-f = cellfun(@(x) x{1}, f, 'UniformOutput', false);
+f = unique(cellfun(@(x) x{1}, regexp(code, '\<[USC]\.(\w+)', 'tokens'), 'UniformOutput', false));
 ok = {'use0', 'cal0', 'cal1', 'cand', 'cue', 'scale', 'model', 'val', 'nw', 'step_n', 'N', 'score', 'win', 'u', 'c', 'n'};
 verifyEmpty(tc, setdiff(f, ok), 'fields read by unk_stat.m');
 verifyTrue(tc, ood_k2_rules('static', ood_cue('names', 3)));
@@ -510,7 +509,7 @@ verifyEqual(tc, D.pick, 2);                                      % the higher me
 verifyEqual(tc, ood_k2_rules('decide', A, B, F, N, [true false true true], 1:4).pick, 4);   % C1 failing leaves C3
 A5 = [A, A(:, 2) + 0.02]; B5 = cat(3, B, B(:, :, 2) + 0.02); F5 = cat(3, F, F(:, :, 2));   % C4: C1 plus 0.02
 D = ood_k2_rules('decide', A5, B5, F5, N, true(1, 5), 1:4);
-verifyEqual(tc, D.eligible, logical([0 1 0 0 1]));
+verifyEqual(tc, D.eligible, logical([0 1 0 1 1]));   % C3 passes (c) with F(:, :, 4) = 5 above
 verifyEqual(tc, D.pick, 5);
 verifyEqual(tc, ood_k2_rules('decide', A5, B5, F5, N, [true true true true false], 1:4).pick, 2);
 verifyError(tc, @() ood_k2_rules('decide', A5, B5, F5, N, true(1, 4), 1:4), 'ood_k2_rules:ok');
