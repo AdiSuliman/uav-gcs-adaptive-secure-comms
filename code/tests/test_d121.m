@@ -97,7 +97,7 @@ function test_lb_accept_static_no_truth(tc)
 % Static test: the monitor's and decider's new lines read no truth field.
 for f = {'policy_monitor', 'policy_decide'}
     src = fileread(which(f{1}));
-    for tf = {'healthy', 'harmed', 'sc_eff', '.ended'}
+    for tf = {'healthy', 'harmed', 'sc_eff', '\.ended'}
         verifyEmpty(tc, regexp(src, tf{1}, 'once'), sprintf('%s reads %s', f{1}, tf{1}));
     end
 end
@@ -130,7 +130,8 @@ end
 function test_s1_gate_core_off_is_bit_identical(tc)
 na = find(strcmp(policy_actions(), 'no_action'));
 [obs, PP] = core_fixture(4, false);                      % antenna_fault, no harm
-for k = 1:4, [a, mem, d] = policy_decide('rule', obs, na, [], PP, [], struct('core', true)); end %#ok<ASGLU,NASGU>
+a = na; mem = [];
+for k = 1:4, [a, mem, d] = policy_decide('rule', obs, a, mem, PP, [], struct('core', true)); end %#ok<ASGLU,NASGU>
 verifyNotEqual(tc, a, na);                                % rule_core answers the class as before (no gate)
 end
 
@@ -194,10 +195,10 @@ function test_drop_path_pick_rescues_before_fallback(tc)
 % (Tr.other always true), but the drop alarm never fires on its own at a conservative
 % threshold. drop_path_pick must find that conservative, admissible value instead of
 % reporting "no threshold admissible" only at the least-sensitive grid point.
-Tr = struct('eg', zeros(50, 10), 'other', true(50, 10), 'sw', false(50, 10));
+Tr = struct('eg', zeros(150, 10), 'other', true(150, 10), 'sw', false(150, 10));
 GF = [2 4 6];                                            % ascending: conservative at the end
 cf = [2 2];
-PB = drop_path_pick_wrap(Tr, 'class_drop', GF, cf, [], 50, 0.02);
+PB = drop_path_pick_wrap(Tr, 'class_drop', GF, cf, [], 150, 0.02);
 verifyTrue(tc, PB.admissible);
 verifyEqual(tc, PB.k, 0);                                % the drop alarm alone never fires here
 end
@@ -236,7 +237,7 @@ end
 
 function test_choose_drop_threshold_static_no_truth(tc)
 src = fileread(which('choose_drop_threshold'));
-for tf = {'healthy', 'harmed', 'sc_eff', '.ended'}
+for tf = {'healthy', 'harmed', 'sc_eff', '\.ended'}
     verifyEmpty(tc, regexp(src, tf{1}, 'once'), sprintf('choose_drop_threshold reads %s', tf{1}));
 end
 end
