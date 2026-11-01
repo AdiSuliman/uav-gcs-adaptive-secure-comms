@@ -6,7 +6,7 @@ function varargout = ood_k2_rules(cmd, varargin)
 %       per held-out threat names; go only if >= 0.80 on at least 2 of {path_loss, jamming,
 %       antenna_fault, airframe_shadowing} and >= 0.70 on their mean; it selects no variant
 %   D = ood_k2_rules('decide', A, B, F, N, ok, rows)  items 5-6 on the held-out threats rows:
-%       A    threats x candidates validation AUROC, C0 first (C0, C1, C2, C3)
+%       A    threats x candidates validation AUROC, C0 first (C0 to C4)
 %       B    draws x threats x candidates, their bootstrap AUROC (boot_auroc, the same draws for
 %            every candidate)
 %       F    threats x classes x candidates, the known validation windows (selection half) of each
@@ -47,7 +47,7 @@ function varargout = ood_k2_rules(cmd, varargin)
 %   tf = ood_k2_rules('b3r_recorded', pid)  a committed B3r record, docs/d91_fresh3_read_*.txt
 %       (aborted ones aside), names params_id pid
 %   [v, S, I] = ood_k2_rules('select_record', f)  the committed select record f (tracked,
-%       unchanged): its verdict ('C0' to 'C3'), its rule_sha256 and its input_sha256 lines
+%       unchanged): its verdict ('C0' to 'C4'), its rule_sha256 and its input_sha256 lines
 %   [cm, tr] = ood_k2_rules('commit')  the code checkout's commit and code tree
 NAMED = {'path_loss', 'jamming', 'antenna_fault', 'airframe_shadowing'};
 switch cmd
@@ -114,7 +114,7 @@ switch cmd
         assert(isfile(f) && committed(f), 'ood_k2_rules:select_record', ...
             '%s is missing, not committed or changed since: the read phase needs the committed select record', f);
         L = strtrim(splitlines(fileread(f)));
-        v = regexp(L, '^verdict (C[0-3])\b', 'tokens', 'once'); v = v(~cellfun(@isempty, v));
+        v = regexp(L, '^verdict (C[0-4])\b', 'tokens', 'once'); v = v(~cellfun(@isempty, v));
         assert(numel(v) == 1, 'ood_k2_rules:select_record', '%s holds no single verdict line', f);
         varargout = {v{1}{1}, L(startsWith(L, 'rule_sha256 ')), L(startsWith(L, 'input_sha256 '))};
     case 'commit'

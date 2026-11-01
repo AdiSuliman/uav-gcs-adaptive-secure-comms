@@ -5,10 +5,11 @@
 % ood_loto_split.m, train_hybrid_net.m, fit_ood_model.m, the same schedule, rng(2026) as there),
 % every original (candidate, window) pair, and D111's candidates on windows labelled by their
 % newest frame: C0, the registered s0 (last_or_if over 1 cycle) as it is; C1 = min-p(C0,
-% cue-Maha), C2 = min-p(C0, cue-IF), C3 = cue-Maha alone (unk_stat.m: conformal p-values, s0's
-% calibrated on the fold's fit half vfit, the cue score's on its full windows, where alone it is
-% read; ood_cue.m's scaling and models fitted on the fold's training windows; every window's cue
-% scored alone, as the monitor scores it). The rule of items 5-6 (ood_k2_rules.m 'decide') reads
+% cue-Maha), C2 = min-p(C0, cue-IF), C3 = cue-Maha alone, C4 = Fisher(p0,
+% p_cue-Maha) (unk_stat.m: conformal p-values, s0's calibrated on the fold's fit half vfit, the
+% cue score's on its full windows, where alone it is read; ood_cue.m's scaling and models fitted
+% on the fold's training windows; every window's cue scored alone, as the monitor scores it).
+% The rule of items 5-6 (ood_k2_rules.m 'decide') reads
 % the validation AUROC, its paired bootstrap (sub-runs within each threat, 2000 draws, fixed
 % seeds), each known class's flagged share at the threshold keeping 95% of the selection half's
 % known windows, and per candidate the static and parity checks (validation sub-runs replayed
@@ -17,11 +18,11 @@
 % 18.10 run plus U's own, 'latency'). It starts only after B3r's committed record of this
 % params_id (D118 point 1).
 % Its global verdict goes to docs/d111_ood_select_p3.txt with the SHA-256 of the rule code and of
-% the outputs the read phase loads (results/ood_k2_select.mat, every fold file); on C1, C2 or C3
+% the outputs the read phase loads (results/ood_k2_select.mat, every fold file); on C1 to C4
 % the production FM.unk (the cue model on every training window, s0 and the cue calibrated on the
 % validation fit half, FM.unk.val U on the selection half's known windows) is added to
 % data/fusion.mat (unk_write.m 'add'). Fold models and validation values go to results/ood_k2/.
-% read: only with the select record committed and adopting C1-C3, its rule code and the outputs
+% read: only with the select record committed and adopting C1-C4, its rule code and the outputs
 % it names unchanged (their verdict the record's, every threat held out), B3r's committed record
 % of this params_id, the adopted candidate's unforced FM.unk in data/fusion.mat and no OOD set-4
 % marker (results/ood_k2_read_started.txt), written before data/splits_fresh3.mat is loaded; a
@@ -49,7 +50,7 @@ assert(exist('OOD_PHASE', 'var') == 1 && ischar(OOD_PHASE) && ismember(OOD_PHASE
     'set OOD_PHASE to ''select'' or ''read''');
 SMK = exist('SMOKE', 'var') && isequal(SMOKE, true);
 if ~exist('OOD_FORCE', 'var'), OOD_FORCE = ''; end
-assert(isempty(OOD_FORCE) || (SMK && ismember(OOD_FORCE, {'C1', 'C2', 'C3'})), 'ood_k2_run:force', ...
+assert(isempty(OOD_FORCE) || (SMK && ismember(OOD_FORCE, {'C1', 'C2', 'C3', 'C4'})), 'ood_k2_run:force', ...
     'OOD_FORCE deploys a candidate in the smoke only');
 fprintf('=== D111 OOD run, phase %s ===\n\n', OOD_PHASE);
 if ~exist('REG_COMMIT', 'var'), REG_COMMIT = ''; end
@@ -74,7 +75,7 @@ NW = max([N, W0, window_cues('branch_window'), Ns]);   % the monitor's window wi
 pid = params_id(load('params.mat').params);
 RETAIN = 0.95; N_EPOCHS = 30; WIN = [2 5 8]; WALL = [1 WIN]; NB = 2000; N_LAT = 200; N_PAR = 20;
 if SMK, N_EPOCHS = 3; NB = 50; N_LAT = 20; N_PAR = 4; end
-CN = {'C0', 'C1', 'C2', 'C3'};
+CN = {'C0', 'C1', 'C2', 'C3', 'C4'};
 CAND = D0.ood.candidates; SC = [{'msp', 'energy', 'iforest'}, CAND];
 rep = [{sprintf('=== D111 OOD RUN, PHASE %s (profile 3) ===', upper(OOD_PHASE)), ...
     sprintf('Generated: %s | commit %s | code_tree %s | params_id %s', datestr(now), cm, tr, pid), reg_txt, ...
@@ -120,7 +121,7 @@ if strcmp(OOD_PHASE, 'select')
         Q = ood_fold_metrics(Sv, V, Sv, V, SC, WALL, RETAIN);
         s0 = ood_window(Sv.last_or_if, va.run, va.pos, W0);
         [U, Wv] = fold_models(Xtr, Xva, F, s0, fva, N, Ns, NW, W0, 9300 + h);
-        Wv = [s0, Wv];                                   % windows x C0..C3, lower = more novel
+        Wv = [s0, Wv];                                   % windows x C0..C4, lower = more novel
         for j = 1:J
             A(h, j) = ood_k2_rules('auroc', Wv(F.kn, j), Wv(F.un, j));
             fl = Wv(:, j) < lowq(Wv(F.kn, j), 1 - RETAIN);
@@ -159,7 +160,7 @@ if strcmp(OOD_PHASE, 'select')
 
     %% S4. The select record, the report and, on adoption, FM.unk
     rs = [rep, {'', sprintf(['Validation only (selection half''s known windows against each held-out threat''s windows, ' ...
-        'the newest frame''s label); C0 = s0 as stored, C1-C3 = U (unk_stat.m); %d bootstrap draws per threat'], NB), ...
+        'the newest frame''s label); C0 = s0 as stored, C1-C4 = U (unk_stat.m); %d bootstrap draws per threat'], NB), ...
         sprintf('%-20s %s', 'held-out threat', sprintf(' %8s', CN{:}))}];
     for h = 1:T
         rs{end+1} = sprintf('%-20s %s', held_out{h}, sprintf(' %8.3f', A(h, :))); %#ok<SAGROW>
@@ -199,7 +200,7 @@ if strcmp(OOD_PHASE, 'select')
 else
     %% R1. Guards, then the set-4 marker before any of its data
     [verdict, shas, ins] = ood_k2_rules('select_record', SEL_REC);
-    assert(ismember(verdict, {'C1', 'C2', 'C3'}), 'ood_k2_run:not_adopted', ...
+    assert(ismember(verdict, {'C1', 'C2', 'C3', 'C4'}), 'ood_k2_run:not_adopted', ...
         'the select verdict is %s: set 4 gets no OOD reader and KPI 2 stays 0.763', verdict);
     assert(isequal(sort(shas(:)), sort(ood_k2_rules('sha', RULE)')), 'ood_k2_run:rule_changed', ...
         'the rule code is not the one the select record names');
@@ -307,7 +308,7 @@ sp.test = [];
 end
 
 function [U, Wv] = fold_models(Xtr, Xva, F, s0, full, N, Ns, NW, W0, seed)
-% C1, C2, C3 of one fold (unk_stat.m 'model') and their U on every validation window: the cue
+% C1 to C4 of one fold (unk_stat.m 'model') and their U on every validation window: the cue
 % scaling and models on the fold's training windows, s0's calibration on its fit half, the cue
 % score's on the fit half's full windows, FM.unk.val U on the selection half's known windows.
 Sc = ood_cue('scale_fit', Xtr(F.tr, :));
@@ -316,9 +317,9 @@ Mm = ood_cue('maha_fit', Xs, F.ytr(F.tr));
 Mf = ood_cue('if_fit', Xs, seed);
 base = struct('cand', '', 'use0', true, 'cue', '', 'scale', Sc, 'model', [], 'cal0', unk_stat('cal', s0(F.vfit)), ...
     'cal1', [], 'val', [], 'nw', NW, 'step_n', Ns, 'N', N, 'score', 'last_or_if', 'win', W0);
-spec = {'C1', true, 'maha', Mm; 'C2', true, 'if', Mf; 'C3', false, 'maha', Mm};
-U = cell(1, 3); Wv = nan(numel(s0), 3);
-for j = 1:3
+spec = {'C1', true, 'maha', Mm; 'C2', true, 'if', Mf; 'C3', false, 'maha', Mm; 'C4', true, 'maha', Mm};
+nc = size(spec, 1); U = cell(1, nc); Wv = nan(numel(s0), nc);
+for j = 1:nc
     S = base; [S.cand, S.use0, S.cue, S.model] = spec{j, :};
     S.cal1 = unk_stat('cal', unk_stat('cue', S, Xva(F.vfit & full, :), true));
     Wv(:, j) = unk_stat('U', S, s0, Xva, full, true);

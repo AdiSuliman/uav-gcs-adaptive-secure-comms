@@ -144,6 +144,103 @@ verifyFalse(tc, unk_stat('model', S3).use0);
 verifyError(tc, @() unk_stat('model', rmfield(S3, 'cal0')), 'unk_stat:model');
 end
 
+function test_fisher_statistic(tc)
+% Fisher's X = -2 sum ln p_i (Fisher 1925) and its level under H0, chi-square with 2k degrees of
+% freedom, against chi2cdf: hand values, one component (X ~ chi-square 2, level = p), a row with a
+% NaN, and independent uniform p-values (mean 2k, uniform level, the empirical distribution of
+% the level within 0.02 of the diagonal), for k = 2 and 3.
+P = [0.5 0.1; 1 1; 0.01 0.2; 0.3 0.7];
+[X, q] = unk_stat('fisher', P);
+verifyEqual(tc, X, [-2 * (log(0.5) + log(0.1)); 0; -2 * (log(0.01) + log(0.2)); -2 * (log(0.3) + log(0.7))], 'AbsTol', 1e-12);
+verifyEqual(tc, q, 1 - chi2cdf(X, 4), 'AbsTol', 1e-12);
+verifyEqual(tc, q(2), 1, 'AbsTol', 1e-15);
+p1 = [0.9; 0.5; 0.05];
+[X1, q1] = unk_stat('fisher', p1);
+verifyEqual(tc, X1, -2 * log(p1), 'AbsTol', 1e-12);
+verifyEqual(tc, q1, p1, 'AbsTol', 1e-12);
+verifyEqual(tc, q1, 1 - chi2cdf(X1, 2), 'AbsTol', 1e-12);
+Xn = unk_stat('fisher', [0.5 NaN; 0.5 0.5]);
+verifyTrue(tc, isnan(Xn(1)) && isfinite(Xn(2)));
+rs = RandStream('mt19937ar', 'Seed', 41);
+n = 20000;
+for k = [2 3]
+    [Xk, qk] = unk_stat('fisher', rand(rs, n, k));
+    verifyEqual(tc, qk, 1 - chi2cdf(Xk, 2 * k), 'AbsTol', 1e-10, sprintf('k = %d', k));
+    verifyEqual(tc, mean(Xk), 2 * k, 'AbsTol', 0.1, sprintf('k = %d', k));
+    verifyEqual(tc, mean(qk < 0.05), 0.05, 'AbsTol', 0.01, sprintf('k = %d', k));
+    verifyLessThan(tc, max(abs((1:n)' / n - sort(qk))), 0.02, sprintf('k = %d', k));
+end
+end
+
+function test_unk_stat_fisher_u(tc)
+% C4 (D121 item 5): U = -F = 2 (ln p0 + ln p_cue) of C1's two conformal p-values, lower = more
+% novel; p_cue = 1 where the cue window is not full and at the frame sites, so U = 2 ln p0
+% there; a NaN s0 NaN; every window scored alone gives the batch's values; the model check
+% takes C4 only with s0, the cue-Maha and no other cue score.
+U = struct('cand', 'C4', 'use0', true, 'cal0', unk_stat('cal', (1:9)'), 'cal1', unk_stat('cal', -(1:4)'), ...
+    'scale', struct('med', 0, 'iqr', 1, 'clip', 10), 'cue', 'maha', 'model', struct('mu', 0, 'P', 1));
+X = [0; 1; 2; 3]; s0 = [5; 0; 9; 1]; full = [true; true; true; false];
+p0 = unk_stat('p', U.cal0, s0);
+pc = unk_stat('p', U.cal1, unk_stat('cue', U, X)); pc(~full) = 1;
+u = unk_stat('U', U, s0, X, full);
+verifyEqual(tc, u, 2 * (log(p0) + log(pc)), 'AbsTol', 1e-12);
+verifyEqual(tc, u, -unk_stat('fisher', [p0, pc]), 'AbsTol', 1e-12);
+verifyLessThanOrEqual(tc, u, 0);
+verifyEqual(tc, unk_stat('U', U, s0, X, full, true), u);
+verifyEqual(tc, unk_stat('U', U, s0, X, false), 2 * log(p0), 'AbsTol', 1e-12);
+verifyEqual(tc, unk_stat('frame', U, s0), 2 * log(p0), 'AbsTol', 1e-12);
+verifyEqual(tc, unk_stat('frame', U, [s0, s0]), 2 * log([p0, p0]), 'AbsTol', 1e-12);
+verifyTrue(tc, isnan(unk_stat('U', U, NaN, 0, true)));
+verifyTrue(tc, isnan(unk_stat('frame', U, NaN)));
+uo = unk_stat('U', setfield(U, 'cand', 'C1'), s0, X, full); %#ok<SFLD>
+verifyLessThanOrEqual(tc, u, 2 * log(uo) + 1e-12);                 % -F <= 2 ln min(p0, p_cue)
+S = struct('cand', 'C4', 'use0', true, 'cue', 'maha', 'scale', U.scale, 'model', U.model, 'cal0', U.cal0, ...
+    'cal1', U.cal1, 'val', [-0.3; -0.2; -0.1], 'nw', 12, 'step_n', 0, 'N', 12, 'score', 'last_or_if', 'win', 1);
+verifyTrue(tc, unk_stat('model', S).use0);
+verifyError(tc, @() unk_stat('model', setfield(S, 'use0', false)), 'unk_stat:model'); %#ok<SFLD>
+verifyError(tc, @() unk_stat('model', setfield(S, 'cue', 'if')), 'unk_stat:model'); %#ok<SFLD>
+verifyError(tc, @() unk_stat('model', setfield(S, 'cand', 'C5')), 'unk_stat:model'); %#ok<SFLD>
+end
+
+function test_c0_c3_unchanged_by_c4(tc)
+% C4 is off by default: C0 is s0 as stored, and U of C1, C2 and C3 (the batch, every window
+% alone, the frame sites, p-values, cue scores and the model check) is the commit before C4's
+% (352cb58) bit for bit.
+[S, ~, s0, y] = toy_split(3, 26);
+fn = link_features('names'); N = 12;
+Ns = ood_cue('step_n', N); NW = max([N, 1, window_cues('branch_window'), Ns]);
+X = ood_cue('split', S, fn, 3, N);
+full = ood_cue('fill', S.run, S.pos) >= NW;
+c = {'C1', 'C2', 'C3'}; U = cell(1, 3);
+for j = 1:3, U{j} = toy_model(S, X, full, s0, y, c{j}, N, Ns, NW); end
+Nw = u_readings(U, s0, X, full);
+d = parent_copy(tc, 'code/detection/unk_stat.m', '352cb58');
+addpath(d, '-begin'); clear unk_stat
+cl = onCleanup(@() fixture_off(d, 'unk_stat')); %#ok<NASGU>
+verifyEqual(tc, which('unk_stat'), fullfile(d, 'unk_stat.m'));
+Od = u_readings(U, s0, X, full);
+fixture_off(d, 'unk_stat');
+verifyNotEqual(tc, which('unk_stat'), fullfile(d, 'unk_stat.m'));
+verifyTrue(tc, isequaln(Od, Nw));
+verifyTrue(tc, any(Nw{1}{1} < 1) && any(Nw{3}{1} < 1));
+end
+
+function test_unk_stat_no_truth(tc)
+% D111 item 2 and D121 item 5 (static): U, C4's Fisher statistic included, is a function of s0,
+% the cue rows and the model's calibrations only: unk_stat.m reads no class probability, label
+% or truth field (tokens with their dots escaped), and the only fields it reads are the model's.
+src = fileread(which('unk_stat'));
+code = regexprep(src, '%[^\n]*', '');
+bad = {'\.ended', '\.truth', '\.label', '\.Y\>', '\.Y_frame', '\.ytr', '\.yv', '\.kn\>', '\.un\>', '\.own\>', ...
+    '\.probs', '\.maha\>', '\.level', '\.ebno', '\<threat_active', '\<y_frame', '\<truth'};
+for i = 1:numel(bad), verifyEmpty(tc, regexp(code, bad{i}, 'once'), bad{i}); end
+f = unique(regexp(code, '\<[USC]\.(\w+)', 'tokens'));
+f = cellfun(@(x) x{1}, f, 'UniformOutput', false);
+ok = {'use0', 'cal0', 'cal1', 'cand', 'cue', 'scale', 'model', 'val', 'nw', 'step_n', 'N', 'score', 'win', 'u', 'c', 'n'};
+verifyEmpty(tc, setdiff(f, ok), 'fields read by unk_stat.m');
+verifyTrue(tc, ood_k2_rules('static', ood_cue('names', 3)));
+end
+
 function test_monitor_off_bit_identical(tc)
 % Without FM.unk the monitor (with a temporal fusion, idle-time and branch records) gives the
 % parent commit's M and memory bit for bit, and no M.unk; unk_threshold.m on a sorted
@@ -173,7 +270,7 @@ end
 function test_monitor_parity(tc)
 % D111 (d): the monitor's U (policy_monitor.m, sub-runs replayed from their first frame) equals
 % the offline U (ood_cue.m 'split', unk_stat.m, every window scored alone) on every frame, for
-% C1, C2 and C3 and for a fusion window of 12 and of 4 (the level step over 10 frames); the
+% C1 to C4 and for a fusion window of 12 and of 4 (the level step over 10 frames); the
 % flag is U below unk_threshold and overrides the class; the fused class probabilities are
 % those without FM.unk.
 [S, P, s0, y] = toy_split(3, 22);
@@ -185,7 +282,7 @@ for N = [12 4]
     X = ood_cue('split', S, fn, 3, N);
     full = ood_cue('fill', S.run, S.pos) >= NW;
     verifyTrue(tc, any(full) && any(~full));
-    for cand = {'C1', 'C2', 'C3'}
+    for cand = {'C1', 'C2', 'C3', 'C4'}
         [Um, u] = toy_model(S, X, full, s0, y, cand{1}, N, Ns, NW);
         FMu = FM; FMu.unk = Um;
         PP = mon_pp(FMu, N);
@@ -203,12 +300,12 @@ end
 function test_forced_unknown(tc)
 % The withheld detector (probabilities 0, flag set, maha -Inf: C2e's and C2u's forced-unknown
 % episodes) stays unknown under U: p0 its lowest value (C1; C3 before its cue window is full),
-% and with the cue alone (C3) the frame's own flag.
+% with the cue alone (C3) the frame's own flag, and under Fisher's U (C4) -F with p_cue = 1.
 [S, P, s0, y] = toy_split(3, 23);
 FM = toy_fusion(S, P, y);
 X = ood_cue('split', S, link_features('names'), 3, 12);
 full = ood_cue('fill', S.run, S.pos) >= 12;
-for cand = {'C1', 'C3'}
+for cand = {'C1', 'C3', 'C4'}
     Um = toy_model(S, X, full, s0, y, cand{1}, 12, 0, 12);
     FMu = FM; FMu.unk = Um;
     O = replay(mon_pp(FMu, 12), S, zeros(size(P)), -Inf(size(s0)), true);
@@ -217,8 +314,10 @@ for cand = {'C1', 'C3'}
     if strcmp(cand{1}, 'C1')
         verifyEqual(tc, O.u, repmat(1 / (Um.cal0.n + 1), numel(s0), 1));
         verifyTrue(tc, all(unk_stat('frame', Um, -Inf(size(s0))) < unk_threshold(mon_pp(FMu, 12))));
-    else
+    elseif strcmp(cand{1}, 'C3')
         verifyEqual(tc, O.u(~full), repmat(1 / (Um.cal0.n + 1), sum(~full), 1));
+    else
+        verifyEqual(tc, O.u(~full), repmat(2 * log(1 / (Um.cal0.n + 1)), sum(~full), 1), 'AbsTol', 1e-12);
     end
 end
 end
@@ -409,6 +508,12 @@ D = ood_k2_rules('decide', A, B, F, N, true(1, 4), 1:4);
 verifyEqual(tc, D.eligible, logical([0 1 0 1]));
 verifyEqual(tc, D.pick, 2);                                      % the higher mean of the eligible
 verifyEqual(tc, ood_k2_rules('decide', A, B, F, N, [true false true true], 1:4).pick, 4);   % C1 failing leaves C3
+A5 = [A, A(:, 2) + 0.02]; B5 = cat(3, B, B(:, :, 2) + 0.02); F5 = cat(3, F, F(:, :, 2));   % C4: C1 plus 0.02
+D = ood_k2_rules('decide', A5, B5, F5, N, true(1, 5), 1:4);
+verifyEqual(tc, D.eligible, logical([0 1 0 0 1]));
+verifyEqual(tc, D.pick, 5);
+verifyEqual(tc, ood_k2_rules('decide', A5, B5, F5, N, [true true true true false], 1:4).pick, 2);
+verifyError(tc, @() ood_k2_rules('decide', A5, B5, F5, N, true(1, 4), 1:4), 'ood_k2_rules:ok');
 rs = RandStream('mt19937ar', 'Seed', 6);
 p = round(2 * randn(rs, 50, 1)) / 2; q = round(2 * randn(rs, 40, 1)) / 2 - 0.5;
 r = tiedrank([p; q]);
@@ -428,42 +533,42 @@ function test_parity_latency(tc)
 % D111 (d) and D80 per candidate (ood_k2_rules.m 'parity', 'latency'): replayed through
 % policy_decide.m, the window's U and flag (info.unk, episode_cycle.m's) equal the offline U and
 % the frame sites' U (link_env.m, episode_cycle.m) the offline U of the frame's window with
-% p_cue = 1, for C1, C2 and C3 at fusion windows 12 and 4; a mismatch fails its candidate only;
+% p_cue = 1, for C1 to C4 at fusion windows 12 and 4; a mismatch fails its candidate only;
 % the latency admission is one flag per candidate, kpi7_admit.m of s0's cost plus U's, with the
 % step window's window_cues.m call when the fusion window is shorter than 10.
 [S, P, s0, y] = toy_split(3, 25);
 FM = toy_fusion(S, P, y);
-fn = link_features('names'); c = {'C1', 'C2', 'C3'};
+fn = link_features('names'); c = {'C1', 'C2', 'C3', 'C4'};
 D = struct('probs', P', 'maha', s0);
 LC = struct('cand', {{'last', 'last_or_if'}}, 'med', [9 0.5], 'p95', [9 1]);
 for N = [12 4]
     Ns = ood_cue('step_n', N); NW = max([N, 1, window_cues('branch_window'), Ns]);
     X = ood_cue('split', S, fn, 3, N);
     full = ood_cue('fill', S.run, S.pos) >= NW;
-    U = cell(1, 3); Wp = nan(numel(s0), 3);
-    for j = 1:3, [U{j}, Wp(:, j)] = toy_model(S, X, full, s0, y, c{j}, N, Ns, NW); end
+    U = cell(1, 4); Wp = nan(numel(s0), 4);
+    for j = 1:4, [U{j}, Wp(:, j)] = toy_model(S, X, full, s0, y, c{j}, N, Ns, NW); end
     PP0 = mon_pp(FM, N); tag = sprintf('N %d', N);
     R = ood_k2_rules('parity', U, FM, PP0, D, S, fn, Wp, s0, 12);
-    verifyEqual(tc, R.ok, true(1, 3), tag);
-    verifyEqual(tc, [R.err, R.err_frame, R.flag], zeros(1, 9), tag);
+    verifyEqual(tc, R.ok, true(1, 4), tag);
+    verifyEqual(tc, [R.err, R.err_frame, R.flag], zeros(1, 12), tag);
     verifyEqual(tc, R.n, 12, tag);
     L = ood_k2_rules('latency', U, X(full, :), s0(full), 20, LC, S, fn);
-    verifySize(tc, L.med, [1 3], tag); verifySize(tc, L.p95, [1 3], tag); verifySize(tc, L.ok, [1 3], tag);
+    verifySize(tc, L.med, [1 4], tag); verifySize(tc, L.p95, [1 4], tag); verifySize(tc, L.ok, [1 4], tag);
     verifyEqual(tc, [L.med0, L.p950], [0.5 1], tag);
     verifyEqual(tc, L.ok, kpi7_admit(L.med0 + L.med, L.p950 + L.p95), tag);
 end
 LC.med(2) = 100;
-verifyEqual(tc, ood_k2_rules('latency', U, X(full, :), s0(full), 20, LC, S, fn).ok, false(1, 3));
+verifyEqual(tc, ood_k2_rules('latency', U, X(full, :), s0(full), 20, LC, S, fn).ok, false(1, 4));
 i = find(full & s0 < 0, 1);
 W2 = Wp; W2(i, 2) = W2(i, 2) + 0.5;                              % C2's offline U differs at one window
 R = ood_k2_rules('parity', U, FM, PP0, D, S, fn, W2, s0, 12);
-verifyEqual(tc, R.ok, [true false true]); verifyEqual(tc, R.err, [0 0.5 0], 'AbsTol', 1e-12);
+verifyEqual(tc, R.ok, [true false true true]); verifyEqual(tc, R.err, [0 0.5 0 0], 'AbsTol', 1e-12);
 W2 = Wp; W2(i, 1) = NaN;                                         % a NaN on one side only
 R = ood_k2_rules('parity', U, FM, PP0, D, S, fn, W2, s0, 12);
-verifyEqual(tc, R.ok, [false true true]); verifyEqual(tc, R.err(1), Inf);
+verifyEqual(tc, R.ok, [false true true true]); verifyEqual(tc, R.err(1), Inf);
 s2 = s0; s2(i) = 100;                                            % the frame sites read another score
 R = ood_k2_rules('parity', U, FM, PP0, D, S, fn, Wp, s2, 12);
-verifyEqual(tc, R.ok, false(1, 3)); verifyEqual(tc, R.err, zeros(1, 3)); verifyGreaterThan(tc, R.err_frame, 0);
+verifyEqual(tc, R.ok, false(1, 4)); verifyEqual(tc, R.err, zeros(1, 4)); verifyGreaterThan(tc, R.err_frame, 0);
 end
 
 function test_registration_check(tc)
@@ -813,6 +918,17 @@ function FM = toy_fusion(S, P, y)
 S.feat_names = link_features('names');
 FM = fuse_classes('fit', fuse_classes('windows', S, P, 12), y, 3, 1e-3);
 FM.latch = false;
+end
+
+function R = u_readings(U, s0, X, full)
+% Every reading of unk_stat.m of each model in U: U of the batch, of every window alone, of windows
+% without a full cue window, of the frames, the cue score, s0's p-values and the model check.
+R = cell(1, numel(U));
+for j = 1:numel(U)
+    R{j} = {unk_stat('U', U{j}, s0, X, full), unk_stat('U', U{j}, s0, X, full, true), unk_stat('U', U{j}, s0, X, false), ...
+        unk_stat('frame', U{j}, s0), unk_stat('cue', U{j}, X(full, :), true), unk_stat('p', U{j}.cal0, s0), ...
+        unk_stat('model', U{j})};
+end
 end
 
 function [U, u] = toy_model(S, X, full, s0, y, cand, N, Ns, NW)
