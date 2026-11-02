@@ -528,3 +528,61 @@ end
 mtree(which('lect_kpis'), '-file'); mtree(which('measure_all_kpis'), '-file');
 end
 
+%% ---------- item 8: non-emitter speed lines (speed_nonemitter.m) ----------
+function [A, Edge, Cl] = speed_world()
+% 40 episodes on 20 geometries, 10 at each of 4 speeds (20, 60, 100, 140 km/h; bands 0-40, 40-80, 80-120, 120-160), the
+% threats by turns; emitter (jamming) episodes all fail, so they must not enter the lines.
+n = 40; sp = repelem([20 60 100 140], 1, 10); geom = repelem(1:20, 2);
+thr = repmat({'path_loss', 'jamming', 'airframe_shadowing', 'antenna_fault'}, 1, 10);
+rec = true(1, n);
+rec(strcmp(thr, 'jamming')) = false;                      % emitter threats all fail: must not enter the lines
+rec(sp == 140 & strcmp(thr, 'path_loss')) = false;        % non-emitter failures in the top band
+A = struct('recovered', rec, 'mask', true(1, n), 'speed', sp, 'geom', geom, 'thr', {thr});
+Edge = struct('recovered', [true true false true true false], 'mask', true(1, 6), 'speed', 161 * ones(1, 6), ...
+    'geom', 1:6, 'thr', {{'path_loss', 'antenna_fault', 'airframe_shadowing', 'jamming', 'path_loss', 'antenna_fault'}}, 'band', [160 162]);
+Cl = struct('loss', [0.01 0.03 0.02 0.06 0.02 0.04], 'speed', [20 20 60 60 140 140], 'geom', 1:6);
+end
+
+function test_speed_nonemitter_reads_only_the_non_emitter_threats(tc)
+[A, Edge, Cl] = speed_world();
+[S, lines] = speed_nonemitter(A, Edge, Cl, [0 40 80 120 160], 500);
+thr = A.thr; ne = ismember(thr, {'path_loss', 'antenna_fault', 'airframe_shadowing'});
+lo = [0 40 80 120]; hi = [40 80 120 160];
+for b = 1:4
+    mb = ne & A.speed >= lo(b) & A.speed < hi(b) + (b == 4);
+    verifyEqual(tc, S.per_band(b), 100 * mean(A.recovered(mb)), 'AbsTol', 1e-12);
+    verifyEqual(tc, S.n_band(b), sum(mb));
+end
+verifyEqual(tc, S.per_band(1:3), [100 100 100]);          % emitter failures never enter
+verifyLessThan(tc, S.per_band(4), 100);
+verifyEqual(tc, S.spread(1), (max(S.per_band) - min(S.per_band)) / 100, 'AbsTol', 1e-12);
+me = ismember(Edge.thr, {'path_loss', 'antenna_fault', 'airframe_shadowing'});
+verifyEqual(tc, S.edge.pct, 100 * mean(Edge.recovered(me)), 'AbsTol', 1e-12);
+verifyEqual(tc, S.edge.n, sum(me));
+verifyEqual(tc, S.link.loss_pct, 100 * [mean([0.01 0.03]), mean([0.02 0.06]), NaN, mean([0.02 0.04])], 'AbsTol', 1e-12);
+verifyEqual(tc, S.link.n, [2 2 0 2]);
+verifyTrue(tc, any(contains(lines, 'D121 item 8')));
+verifyTrue(tc, any(contains(lines, 'attitude loss is applied to our signal only')));
+end
+
+function test_speed_nonemitter_without_edge_and_clean_sets(tc)
+[A, ~, ~] = speed_world();
+[S, lines] = speed_nonemitter(A, [], [], [0 40 80 120 160], 200);
+verifyEqual(tc, S.edge.n, 0); verifyTrue(tc, isnan(S.edge.pct));
+verifyTrue(tc, all(isnan(S.link.loss_pct)));
+verifyFalse(tc, any(contains(lines, 'dedicated flights')) || any(contains(lines, 'clean link per speed band')));
+end
+
+function test_speed_nonemitter_wiring_and_static(tc)
+src = fileread(which('speed_nonemitter'));
+for tf = {'healthy', 'harmed', 'sc_eff', '\.ended'}
+    verifyEmpty(tc, regexp(src, tf{1}, 'once'), sprintf('speed_nonemitter reads %s', tf{1}));
+end
+ev = fileread(which('evaluate_policies'));
+verifyNumElements(tc, regexp(ev, 'speed_nonemitter\(', 'match'), 1);
+verifyNumElements(tc, regexp(ev, 'KP\.speed_ne\s*=', 'match'), 1);
+mk = fileread(which('measure_all_kpis'));
+verifyNotEmpty(tc, regexp(mk, 'speed_ne', 'once'));
+mtree(which('speed_nonemitter'), '-file'); mtree(which('evaluate_policies'), '-file'); mtree(which('measure_all_kpis'), '-file');
+verifyTrue(tc, true);
+end

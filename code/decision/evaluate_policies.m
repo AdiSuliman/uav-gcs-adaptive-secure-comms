@@ -529,6 +529,21 @@ if ~isempty(iS)
     rep{end+1} = sprintf('%-18s%s', sprintf('%s (%d)', band_txt(PP.speed_out(1, :)), sum(ms & lo)), sprintf('%11.1f', PS(1, :)));
     rep{end+1} = sprintf('%-18s%s', sprintf('%s (%d)', band_txt(PP.speed_out(2, :)), sum(ms & hi)), sprintf('%11.1f', PS(2, :)));
 end
+% Descriptive speed lines on the non-emitter threats and the clean link (D121 item 8), beside the registered ones
+Rd_ = RES{1, iDQN}; SNE_A = struct('recovered', Rd_.recovered, 'mask', R1.recoverable & R1.threat, 'speed', R1.speed, ...
+    'geom', R1.geom, 'thr', {PP.scen(R1.scn)});
+SNE_E = [];
+if ~isempty(iS)
+    Re_ = RES{iS, iDQN};
+    SNE_E = struct('recovered', Re_.recovered, 'mask', Rs.recoverable & Rs.threat, 'speed', Rs.speed, 'geom', Rs.geom, ...
+        'thr', {PP.scen(Rs.scn)}, 'band', PP.speed_out(2, :));
+end
+SNE_C = []; iCl_ = find(strcmp({sets.name}, 'clean')); iNo_ = find(strcmp(POL, 'none'), 1);
+if ~isempty(iCl_) && ~isempty(iNo_)
+    Rcl_ = RES{iCl_, iNo_}; SNE_C = struct('loss', Rcl_.per_post, 'speed', Rcl_.speed, 'geom', Rcl_.geom);
+end
+[SNE, sne_l] = speed_nonemitter(SNE_A, SNE_E, SNE_C, bins_v);
+rep = [rep, sne_l];
 iD2 = find(strcmp({sets.name}, 'delay2'));
 Rd2 = RES{iD2, 1}; md2 = Rd2.recoverable & Rd2.threat;
 R1b = RES{1, 1}; m1 = R1b.recoverable & R1b.threat;
@@ -714,6 +729,7 @@ KP = struct('per_threat', PT, 'per_threat_sev', PTsev, 'threats', {threats}, 're
     'per_threat_h', PTh, 'per_threat_h_sev', PThsev, 'per_threat_h_ci', 100 * PThci, 'n_harmed', NH, 'n_harmed_sev', NHsev, ...
     'kpi4_h_met', kpi4h, 'envelope_h', ENVh, 'envelope_val_h', ENVvh, 'per_threat_env_h', PTenvh, ...
     'per_threat_env_h_ci', 100 * PTenvh_ci, 'harmed_consistent', cons, 'offset', OFF, 'offset_after', OFF_AFTER, 'lect', LK);
+KP.speed_ne = SNE;
 if FRESH                                              % P1R: KP.far is the fresh set's; the union beside it
     KP.far_set = 'fresh'; KP.reading = 'P1R'; KP.far_union = FAR_u; KP.far_diag_union = FD_u; KP.far_src_union = far_src_u;
     KP.far_geoms_fresh = F6.CT.n_geom; KP.far_fresh_sha256 = F6.sha;

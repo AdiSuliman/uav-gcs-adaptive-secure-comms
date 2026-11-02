@@ -475,6 +475,9 @@ if isfile(F.pol)
         det{end+1} = sprintf('ends of the speed envelope (nominal severity): %s km/h %.1f%%, %s km/h %.1f%%', ...
             band_txt(P.KP.speed_out(1, :)), po(1), band_txt(P.KP.speed_out(2, :)), po(2));
     end
+    if isfield(P.KP, 'speed_ne') && isfield(P.KP.speed_ne, 'lines')
+        det = [det, P.KP.speed_ne.lines(~cellfun(@isempty, P.KP.speed_ne.lines))];   % descriptive (D121 item 8), beside the registered lines
+    end
     if isfield(P.KP, 'per_delay') && ~isempty(P.KP.per_delay)
         pd = P.KP.per_delay(:, strcmp(P.KP.show, P.POL{iD}));
         det{end+1} = sprintf('signalling delay of a change: %d cycle %.1f%%, %d cycles %.1f%% (single set)', ...
