@@ -972,8 +972,8 @@ end
 
 function c = undo_small(c, rel)
 % The text of rel without wf-rf-small's edits (the C2e sets' frame-draw stride, the selected DQN kind, C2's
-% reference entry and re-read stop, the KPI 1 threshold check, KPI 7's status word, C2g/C2u's release), so it
-% compares with a base commit that has none of them.
+% reference entry and re-read stop, the KPI 1 threshold check, KPI 7's status word, C2g/C2u's release) and without
+% wf-rf-a1's (undo_a1), so it compares with a base commit that has none of them.
 [~, nm] = fileparts(rel); if startsWith(nm, 'experiment_'), nm = 'experiment'; end
 switch nm
     case 'evaluate_policies'
@@ -994,6 +994,43 @@ switch nm
         P = {['kpi1_threshold_check(EBNO_THR, ''choose_drop_threshold'');   % the threshold of the file KPI 1 is read from' newline], ''};
     case 'edge_map'
         P = {['kpi1_threshold_check(ebno_thr, ''edge_map'');           % the threshold of the file KPI 1 is read from' newline], ''};
+    otherwise, return;
+end
+for i = 1:size(P, 1), c = strrep(c, P{i, 1}, P{i, 2}); end
+c = undo_a1(c, nm);
+end
+
+function c = undo_a1(c, nm)
+% The text without wf-rf-a1's edits (D121 items 1 and 2: the core rule's lost-branch gate s1gc_select, the calibrated
+% lost-branch acceptance lb_accept of choose_drop_threshold.m), each behind its own switch or field, so the file
+% compares with a base commit that has none of them.
+P = cell(0, 2);
+switch nm
+    case 'train_dqn'
+        P(end+1,:) = {['% With "s1gc_select": true, the same gate on the core rule (s1_gate_core, policy_decide.m) is the next step, right' newline '% after the rule''s (first when that step does not run): off or on by the same selection rule on rule_core''s readings,' newline '% on kept only if s1g_adopt.m passes it on rule_core; every later step runs with the setting kept.' newline], ''};
+        P(end+1,:) = {['% In the smoke only, s1g_force, s1gc_force and relm_force (profile.json or CFG, wf_force.m) deploy the gate or the' newline '% layer whatever the selection says, and a drop_threshold.mat with a forced confirmation or lost-branch acceptance is' newline '% read; the cells forced are marked in dec.wf_forced, which enters the policy stamp. Refused outside SMOKE.' newline], ['% In the smoke only, s1g_force and relm_force (profile.json or CFG, wf_force.m) deploy the gate or the' newline '% layer whatever the selection says, and a drop_threshold.mat with a forced confirmation is read; the cells' newline '% forced are marked in dec.wf_forced, which enters the policy stamp. Refused outside SMOKE.' newline]};
+        P(end+1,:) = {['% The calibrated lost-branch acceptance of a monitor (PP.lb_accept, policy_monitor.m) likewise, from MONP.lb_accept' newline '% when C1d chose one (clt_step.m): every run of that monitor carries it, and dec and rule_sel hold their monitor''s.' newline], ''};
+        P(end+1,:) = {['if WF.force.s1gc && ~WF.s1gc' newline '    error(''train_dqn:force'', ''train_dqn: s1gc_force needs s1gc_select'');' newline 'end' newline], ''};
+        P(end+1,:) = {['    if isfield(Dd, ''MONP'') && isfield(Dd.MONP, ''lb_accept'')         % the calibrated lost-branch acceptance, per monitor' newline '        PP.lbacc = struct(''monitor'', {Dd.MONP.monitor}, ''la'', {Dd.MONP.lb_accept});' newline '    end' newline '    if isfield(Dd, ''CLT'') && isfield(Dd.CLT, ''forced'') && any(arrayfun(@(d) ~isempty(d.forced), Dd.CLT))   % a forced cell' newline '        wf_force(''mark'', {''lb_accept''}, exist(''SMOKE'', ''var'') && SMOKE, ''train_dqn'');' newline '        WFF{end+1} = ''lb_accept'';' newline '    end' newline], ''};
+        P(end+1,:) = {['if WF.s1g || WF.s1gc' newline '    evr = @(S) ev(''rule_esc'', decision_settings(PPr, S), [], struct());' newline '    Sg = S0; GROWS = {};' newline 'end' newline], ''};
+        P(end+1,:) = {['    [Sg, GROWS] = s1g_step(S0, S1STEP, evr,'], ['    evr = @(S) ev(''rule_esc'', decision_settings(PPr, S), [], struct());' newline '    [Sg, GROWS] = s1g_step(S0, S1STEP, evr,']};
+        P(end+1,:) = {['end' newline 'if WF.s1gc                                          % the same gate on the core rule, read on rule_core, next' newline '    Sg.s1_gate_core = false;' newline '    SCSTEP = struct(''name'', ''core rule gate on a lost-branch class'', ''var'', {{struct(''s1_gate_core'', false), struct(''s1_gate_core'', true)}});' newline '    evc = @(S) ev(''rule_esc'', decision_settings(PPr, S), [], struct(''core'', true));' newline '    [Sg, GCROWS] = s1g_step(Sg, SCSTEP, evc, FA_BOUND, PK, PPr, K, val_spec, val_thr, H, CV, EBNO_THR, ''s1_gate_core'', struct(''core'', true));' newline '    if WF.force.s1gc                                % the smoke''s forced cell, not an adoption (wf_force.m)' newline '        GCROWS{end+1} = sprintf(''  the core rule''''s lost-branch gate FORCED on (smoke only, not an adoption); the rule would keep it %s'', ...' newline '            ternary(Sg.s1_gate_core, ''on'', ''off''));' newline '        Sg.s1_gate_core = true; WFF{end+1} = ''s1_gate_core'';' newline '    end' newline '    GROWS = [GROWS, GCROWS];' newline 'end' newline 'if WF.s1g || WF.s1gc' newline], ''};
+        P(end+1,:) = {['if isfield(PP, ''lbacc''), rule_sel.lb_accept = lb_accept_of(PP, base(ir).alarm); end' newline], ''};
+        P(end+1,:) = {['if isfield(PP, ''lbacc'')' newline '    rep{end+1} = sprintf(''The calibrated lost-branch acceptance (choose_drop_threshold.m, clt_step.m, on validation): %s'', strjoin(arrayfun(@(d) ...' newline '        sprintf(''%s %s'', d.monitor, ternary(isempty(d.la), ''none'', sprintf(''tau_hi %.4g'', field_or(d.la, ''tau_hi'')))), PP.lbacc, ...' newline '        ''UniformOutput'', false), '', ''));' newline 'end' newline], ''};
+        P(end+1,:) = {['if isfield(PP, ''lbacc''), dec.lb_accept = lb_accept_of(PP, alarm_sel); end         % the selected monitor''s lost-branch acceptance' newline], ''};
+        P(end+1,:) = {['if isfield(S, ''s1_gate_core'') && S.s1_gate_core, t = [t '', core rule''''s lost-branch gate on'']; end' newline], ''};
+        P(end+1,:) = {['if isfield(PP, ''lbacc''), PPc.lb_accept = lb_accept_of(PP, en.alarm); end' newline], ''};
+        P(end+1,:) = {['function c = lb_accept_of(PP, name)' newline '% The calibrated lost-branch acceptance (struct, tau_hi) chosen for monitor name at C1d ([] none).' newline 'c = [];' newline 'k = find(strcmp({PP.lbacc.monitor}, name), 1);' newline 'if ~isempty(k), c = PP.lbacc(k).la; end' newline 'end' newline '' newline 'function v = field_or(S, n)' newline '% Field n of S, NaN when S has none.' newline 'v = NaN; if isstruct(S) && isfield(S, n), v = S.(n); end' newline 'end' newline '' newline], ''};
+        P(end+1,:) = {['function [S, rows] = s1g_step(S0, STEP, evalf, bound, PK, PPr, K, specs, thr, H, CV, ebno_thr, fld, opt)' newline], ['function [S, rows] = s1g_step(S0, STEP, evalf, bound, PK, PPr, K, specs, thr, H, CV, ebno_thr)' newline]};
+        P(end+1,:) = {['% fld, opt (default ''s1_gate'', no option): the gate''s field and the rule''s option (struct(''core'', true):' newline '% the core rule''s gate s1_gate_core, read on rule_core).' newline 'if nargin < 13, fld = ''s1_gate''; end' newline 'if nargin < 14, opt = struct(); end' newline], ''};
+        P(end+1,:) = {['Soff = S; Soff.(fld) = false; Son = S; Son.(fld) = true;' newline], ['Soff = S; Soff.s1_gate = false; Son = S; Son.s1_gate = true;' newline]};
+        P(end+1,:) = {['V0 = dqn_eval_batches(''rule_esc'', P0, K, specs, [], opt, 5000, 2);' newline 'V1 = dqn_eval_batches(''rule_esc'', P1, K, specs, [], opt, 5000, 2);' newline], ['V0 = dqn_eval_batches(''rule_esc'', P0, K, specs, [], struct(), 5000, 2);' newline 'V1 = dqn_eval_batches(''rule_esc'', P1, K, specs, [], struct(), 5000, 2);' newline]};
+        P(end+1,:) = {['    [~, ~, sw0] = eval_clean_wide(''rule_esc'', P0, CV, [], opt, H, ebno_thr);' newline '    [~, ~, sw1] = eval_clean_wide(''rule_esc'', P1, CV, [], opt, H, ebno_thr);' newline], ['    [~, ~, sw0] = eval_clean_wide(''rule_esc'', P0, CV, [], struct(), H, ebno_thr);' newline '    [~, ~, sw1] = eval_clean_wide(''rule_esc'', P1, CV, [], struct(), H, ebno_thr);' newline]};
+        P(end+1,:) = {['if S.(fld)' newline], ['if S.s1_gate' newline]};
+        P(end+1,:) = {['    if ~A.keep, S.(fld) = false; end' newline], ['    if ~A.keep, S.s1_gate = false; end' newline]};
+    case 'evaluate_policies'
+        P(end+1,:) = {['s1gc_set = isfield(PP, ''s1_gate_core'') && ~isempty(PP.s1_gate_core);           % C2 chose the core rule''s lost-branch gate' newline 's1gc_on = s1gc_set && PP.s1_gate_core;' newline 'if s1gc_set                                          % the lecturer rows read from rule_core say which variant they carry' newline '    ic = find(strcmp(POL, ''rule_core''));' newline '    LBL{ic} = [LBL{ic} ternary(s1gc_on, '', with the lost-branch gate'', '', without the lost-branch gate'')];' newline 'end' newline 'if s1gc_on                                           % rule_core with the gate off, beside the selected variant' newline '    POL = [POL, {''rule_core_nos1gc''}]; LBL = [LBL, {''core: rule + escalation, without the lost-branch gate (descriptive)''}];' newline 'end' newline], ''};
+        P(end+1,:) = {['if s1gc_set                                                        % the core rule''s lost-branch gate step ran at C2' newline '    MNOTE{end+1} = sprintf([''rule_core carries the core rule''''s lost-branch gate as C2 chose it (%s): every row read from rule_core, '' ...' newline '        ''the lecturer rows included, is that variant%s.''], ternary(s1gc_on, ''on'', ''off''), ternary(s1gc_on, ...' newline '        ''; rule_core without the gate is a descriptive row'', ''''));' newline 'end' newline 'if isfield(PP, ''lb_accept'') && isstruct(PP.lb_accept) && isfield(PP.lb_accept, ''tau_hi'')' newline '    MNOTE{end+1} = sprintf([''The monitor carries the calibrated lost-branch acceptance, tau_hi %.4g (chosen at C1d): every line '' ...' newline '        ''below, the lecturer lines included, is read under it.''], PP.lb_accept.tau_hi);' newline 'end' newline], ''};
     otherwise, return;
 end
 for i = 1:size(P, 1), c = strrep(c, P{i, 1}, P{i, 2}); end
