@@ -456,3 +456,75 @@ delete(f);
 mtree(which('dconf_step'), '-file'); mtree(which('wf_options'), '-file');
 verifyTrue(tc, true);
 end
+%% ---------- item 10: onset-referenced recovery line (lect_kpis.m CN block) ----------
+function ALL = onset_world(n, geom, tt_det, tt_blind)
+% Policies none, rule_esc, blind_esc on n recoverable jamming episodes; the rows' onset -> restored times
+% (t_conf = 1, t_rec_det = the rest; NaN: never) are tt_det and tt_blind.
+R = struct('scn', 2 * ones(1, n), 'recoverable', true(1, n), 'recoverable_core', true(1, n), 'threat', true(1, n), ...
+    'geom', geom, 'ok_post', 0.5 * ones(1, n));
+ALL = cell(1, 3);
+for k = 1:3
+    S = R;
+    switch k
+        case 1, S.per_post = 0.5 * ones(1, n); S.t_conf = nan(1, n); S.t_rec_det = nan(1, n);
+        case 2, S.per_post = 0.1 * ones(1, n); S.t_conf = ones(1, n); S.t_rec_det = tt_det - 1;
+        case 3, S.per_post = 0.3 * ones(1, n); S.t_conf = ones(1, n); S.t_rec_det = tt_blind - 1;
+    end
+    S.dlv_post = 1 - S.per_post; S.gput_post = S.dlv_post; S.t_rec = S.t_conf + S.t_rec_det; S.recovered = isfinite(S.t_rec);
+    ALL{k} = S;
+end
+end
+
+function test_onset_recovery_pairs_and_shares(tc)
+% Four episodes: rows recover [4 6 NaN 2] (detector) and [7 9 NaN NaN] (without): the pairing is on
+% episodes 1-2 (differences -3, -3), episode 4 is recovered by the detector row only, 3 by neither;
+% one geometry holds the pairs, so no interval.
+POL = {'none', 'rule_esc', 'blind_esc'}; LBL = {'none', 'rule', 'blind'};
+ALL = onset_world(4, [1 1 2 2], [4 6 NaN 2], [7 9 NaN NaN]);
+[L, lines] = lect_kpis(ALL, POL, LBL, 2, {'none', 'jamming'}, 5e4, 20);
+o = L.cnn.onset_rec;
+verifyEqual(tc, [o.n, o.n_pair, o.median, o.mean], [4 2 -3 -3]);
+verifyEqual(tc, [o.both_pct, o.only_det_pct, o.only_blind_pct, o.never_pct], [50 25 0 25], 'AbsTol', 1e-12);
+verifyTrue(tc, all(isnan(o.median_ci)) && all(isnan(o.mean_ci)));
+verifyTrue(tc, any(contains(lines, 'D121 item 10')));
+end
+
+function test_onset_recovery_interval_over_geometries(tc)
+% Twelve episodes on six geometries with varying differences: the mean's interval is boot_cluster's with
+% the line's seed (200 + 202), the median's interval brackets the median, and the shares add to 100.
+POL = {'none', 'rule_esc', 'blind_esc'}; LBL = {'none', 'rule', 'blind'};
+geom = repelem(1:6, 2);
+tb = [9 8 7 9 6 10 8 7 9 8 10 9];
+dd = [2 3 4 3 2 5 3 4 1 3 4 2];                          % blind minus detector, > 0
+td = tb - dd; td(11) = NaN; tb(5) = NaN;                 % episode 11: detector never; 5: blind never
+ALL = onset_world(12, geom, td, tb);
+[L, ~] = lect_kpis(ALL, POL, LBL, 2, {'none', 'jamming'}, 5e4, 20);
+o = L.cnn.onset_rec;
+ok = isfinite(td) & isfinite(tb);
+d = td(ok) - tb(ok);
+verifyEqual(tc, o.n_pair, sum(ok));
+verifyEqual(tc, o.median, median(d));
+[m, lo, hi] = boot_cluster(d, ones(1, numel(d)), geom(ok), 2000, 402);
+verifyEqual(tc, [o.mean, o.mean_ci], [m lo hi], 'AbsTol', 1e-12);
+verifyTrue(tc, o.median_ci(1) <= o.median && o.median <= o.median_ci(2));
+verifyEqual(tc, o.both_pct + o.only_det_pct + o.only_blind_pct + o.never_pct, 100, 'AbsTol', 1e-9);
+verifyEqual(tc, [o.only_det_pct, o.only_blind_pct], 100 / 12 * [1 1], 'AbsTol', 1e-9);
+end
+
+function test_onset_recovery_changes_no_registered_reading(tc)
+% The registered readings are the same with and without the new field: the verdict, the PER reduction and the
+% rows are computed before it and nothing reads it back.
+POL = {'none', 'rule_esc', 'blind_esc'}; LBL = {'none', 'rule', 'blind'};
+ALL = onset_world(4, [1 1 2 2], [4 6 NaN 2], [7 9 NaN NaN]);
+[L, ~] = lect_kpis(ALL, POL, LBL, 2, {'none', 'jamming'}, 5e4, 20);
+L2 = L; L2.cnn = rmfield(L2.cnn, 'onset_rec');
+verifyEqual(tc, fieldnames(L.cnn)', [fieldnames(L2.cnn)', {'onset_rec'}]);
+verifyEqual(tc, L.cnn.per_red_pct, 100 * (1 - 0.1 / 0.3), 'AbsTol', 1e-9);   % with the detector against without
+verifyEqual(tc, L.cnn.det(1).median, 1);
+src = fileread(which('lect_kpis'));
+for tf = {'healthy', 'harmed', 'sc_eff', '\.ended'}
+    verifyEmpty(tc, regexp(src, tf{1}, 'once'), sprintf('lect_kpis reads %s', tf{1}));
+end
+mtree(which('lect_kpis'), '-file'); mtree(which('measure_all_kpis'), '-file');
+end
+

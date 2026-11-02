@@ -176,7 +176,8 @@ for q = PT
         'UniformOutput', false), ' | ')); %#ok<AGROW>
 end
 e = [tstat([]), tstat([])];
-CN = struct('per_red_pct', NaN, 'per_ci', [NaN NaN], 'gput_bps', NaN, 'gput_ci', [NaN NaN], 'n', 0, 'det', e, 'rec_det', e);
+CN = struct('per_red_pct', NaN, 'per_ci', [NaN NaN], 'gput_bps', NaN, 'gput_ci', [NaN NaN], 'n', 0, 'det', e, 'rec_det', e, ...
+    'onset_rec', onset_recovery([], [], [], [], 0, 0));
 if X.has(tgt) && X.has(conv)
     Rt = ALL{col(tgt)}; Rc = ALL{col(conv)};
     pr = Rt.per_post; pb = Rc.per_post;
@@ -186,14 +187,63 @@ if X.has(tgt) && X.has(conv)
     [g, gl, gh] = boot_cluster(dg(ok), ones(1, sum(ok)), R1.geom(ok), B, s0 + 201);
     det = [tstat(Rt.t_conf(mj)), tstat(Rc.t_conf(mj))];
     rd = [tstat(Rt.t_rec_det(mj & isfinite(Rt.t_conf))), tstat(Rc.t_rec_det(mj & isfinite(Rc.t_conf)))];
+    OR = onset_recovery(Rt.t_conf + Rt.t_rec_det, Rc.t_conf + Rc.t_rec_det, mj, R1.geom, B, s0 + 202);
     CN = struct('per_red_pct', 100 * r, 'per_ci', 100 * [lo hi], 'gput_bps', g, 'gput_ci', [gl gh], 'n', sum(ok), ...
-        'det', det, 'rec_det', rd);
+        'det', det, 'rec_det', rd, 'onset_rec', OR);
     lines{end+1} = sprintf(['  CNN contribution (%s, the same %d episodes): PER reduction %.1f%% [%.1f, %.1f], goodput ' ...
         '%+.0f bit/s [%+.0f, %+.0f]; recovery time on the %d recoverable jamming episodes, with vs without the ' ...
         'detector: onset -> detection %s vs %s, detection -> PER restored %s vs %s'], cnn_ttl, sum(ok), 100 * r, ...
         100 * lo, 100 * hi, g, gl, gh, sum(mj), ttxt(det(1), X.period_ms), ttxt(det(2), X.period_ms), ...
         ttxt(rd(1), X.period_ms), ttxt(rd(2), X.period_ms));
+    lines{end+1} = onset_line(OR, X.period_ms, cnn_ttl);
 end
+end
+
+function OR = onset_recovery(tt, tcv, mj, geom, B, seed)
+% D121 item 10: onset -> restored per episode (onset to the first confirmed alarm plus detection to the
+% packet loss restored, NaN where either never happens) of the row with the detector (tt) and the row
+% without it (tcv), on the episodes mj. The paired difference (with minus without) on the episodes both
+% rows recover: median and mean with a 95% bootstrap over flight geometries (B draws, fixed seed); beside
+% it the shares of mj recovered by one row only, by both and by neither, since the pairing conditions on
+% both recovering. Reporting only.
+OR = struct('n', sum(mj), 'n_pair', 0, 'median', NaN, 'median_ci', [NaN NaN], 'mean', NaN, 'mean_ci', [NaN NaN], ...
+    'both_pct', NaN, 'only_det_pct', NaN, 'only_blind_pct', NaN, 'never_pct', NaN);
+if isempty(tt) || ~any(mj), return; end
+a = isfinite(tt(:)') & mj(:)'; b = isfinite(tcv(:)') & mj(:)';
+both = a & b; n = sum(mj);
+OR.both_pct = 100 * sum(both) / n; OR.only_det_pct = 100 * sum(a & ~b) / n;
+OR.only_blind_pct = 100 * sum(b & ~a) / n; OR.never_pct = 100 * sum(mj(:)' & ~a & ~b) / n;
+OR.n_pair = sum(both);
+if ~any(both), return; end
+d = tt(both) - tcv(both); cl = geom(both);
+[OR.mean, OR.mean_ci(1), OR.mean_ci(2)] = boot_cluster(d, ones(1, numel(d)), cl, B, seed);
+OR.median = median(d);
+[~, ~, j] = unique(cl(:)); nU = max(j);
+if nU >= 2
+    ix = accumarray(j, (1:numel(d))', [], @(v) {v});
+    rs = RandStream('mt19937ar', 'Seed', seed + 1);
+    bs = nan(B, 1);
+    for q = 1:B
+        bs(q) = median(d(vertcat(ix{randi(rs, nU, nU, 1)})));
+    end
+    bs = sort(bs);
+    OR.median_ci = [bs(max(1, round(0.025 * B))), bs(min(B, round(0.975 * B)))];
+end
+end
+
+function s = onset_line(OR, period_ms, ttl)
+% The printed onset-referenced recovery line (D121 item 10).
+if OR.n_pair == 0
+    s = sprintf(['  onset -> restored (descriptive, selects nothing; D121 item 10), %s: no episode both rows recover; recovered by the ' ...
+        'row with the detector only %.1f%%, by the other only %.1f%%, by neither %.1f%% of the %d recoverable jamming episodes'], ...
+        ttl, OR.only_det_pct, OR.only_blind_pct, OR.never_pct, OR.n);
+    return
+end
+s = sprintf(['  onset -> restored (descriptive, selects nothing; D121 item 10), %s, paired on the %d episodes both rows recover, ' ...
+    'with minus without the detector: median %g [%g, %g] cycles (%g ms), mean %.2f [%.2f, %.2f] cycles (%.1f ms), 95%% bootstrap ' ...
+    'over flight geometries; of the %d recoverable jamming episodes recovered by both %.1f%%, by the row with the detector only %.1f%%, ' ...
+    'by the other only %.1f%%, by neither %.1f%%'], ttl, OR.n_pair, OR.median, OR.median_ci, OR.median * period_ms, ...
+    OR.mean, OR.mean_ci, OR.mean * period_ms, OR.n, OR.both_pct, OR.only_det_pct, OR.only_blind_pct, OR.never_pct);
 end
 
 function [RC, lines] = rec_block(X, kr, pre)
