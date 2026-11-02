@@ -21,8 +21,8 @@ function [ADM, L] = aprime_admit(A, bound)
 %       episodes falls by more than 1 point, pooled held by more than 0.5 point, held of the
 %       covered S1 episodes by more than 3 points
 %   ADM(k): pen, runs (their indices in A.runs), fa_k, fa_n, fa_up, fa_up_mean, a, gain, n_gain,
-%   n_clusters, p, level, lb, b, geom, geom_diff, bprime, thr, thr_diff, pooled_diff, cov_diff,
-%   c, admissible. L: the lines for results/dqn_training.txt.
+%   n_clusters, p, level, lb, b, geom, geom_diff, bprime, thr, thr_n (recoverable episodes of each threat),
+%   thr_diff, pooled_diff, cov_diff, cov_n, c, admissible. L: the lines for results/dqn_training.txt.
 B = 10000; SEED = 107;
 S1 = {'antenna_fault', 'airframe_shadowing'};
 R = A.runs; E = A.episodes;
@@ -67,9 +67,11 @@ for k = 1:np
     % (c)
     X.thr = unique(thr(mT), 'stable');
     X.thr_diff = cellfun(@(t) mean(Hn(mT & strcmp(thr, t))) - mean(Hp(mT & strcmp(thr, t))), X.thr);
+    X.thr_n = cellfun(@(t) sum(mT & strcmp(thr, t)), X.thr);
     X.pooled_diff = mean(Hn(mT)) - mean(Hp(mT));
     mc = mT & ~harm & ismember(thr, S1);
     X.cov_diff = mean(Hn(mc)) - mean(Hp(mc));                     % NaN without covered S1 episodes: fails
+    X.cov_n = sum(mc);
     X.c = ~isempty(X.thr_diff) && all(X.thr_diff >= -0.01 - 1e-9) && X.pooled_diff >= -0.005 - 1e-9 ...
         && X.cov_diff >= -0.03 - 1e-9;
     X.level = NaN; X.lb = NaN; X.b = false; X.admissible = false;
@@ -83,8 +85,7 @@ end
 L{end+1} = sprintf(['Admissibility of the no-threat form (D107 point 5, validation only; a penalty is admissible only if (a), (b), ' ...
     '(b'') and (c) all hold): %d penalties, Holm across them'], np);
 for k = 1:np
-    X = ADM(k); wd = NaN; wn = '-';
-    if ~isempty(X.thr_diff), [wd, w] = min(X.thr_diff); wn = X.thr{w}; end
+    X = ADM(k);
     L{end+1} = sprintf('  penalty %d (%d seeds): %s', X.pen, numel(X.runs), ternary(X.admissible, 'ADMISSIBLE', 'not admissible')); %#ok<AGROW>
     L{end+1} = sprintf(['    (a) clean-flight false alarms, one-sided 95%% bound: runs %s, seed mean %.2f%% (limit %.0f%%): %s'], ...
         strjoin(arrayfun(@(u, kk) sprintf('%d/%d [%.2f%%]', kk, X.fa_n, 100 * u), X.fa_up, X.fa_k, 'UniformOutput', false), ', '), ...
@@ -95,9 +96,11 @@ for k = 1:np
     L{end+1} = sprintf('    (b'') antenna_fault, paired difference per harmed geometry (points): %s: %s', ...
         ternary(isempty(X.geom_diff), 'none', strjoin(arrayfun(@(g, d) sprintf('%d %+.1f', g, 100 * d), X.geom, X.geom_diff, ...
         'UniformOutput', false), ', ')), ternary(X.bprime, 'none negative', 'a geometry is negative')); %#ok<AGROW>
-    L{end+1} = sprintf(['    (c) held against the grid runs: weakest change %s %+.2f (limit -1), pooled %+.2f (limit -0.5), ' ...
-        'covered S1 %+.2f points (limit -3): %s'], wn, 100 * wd, 100 * X.pooled_diff, ...
-        100 * X.cov_diff, ternary(X.c, 'ok', 'FAILS')); %#ok<AGROW>
+    L{end+1} = sprintf(['    (c) held against the grid runs, per threat (recoverable episodes, change in points; limit -1): %s; ' ...
+        'pooled %+.2f (limit -0.5); covered S1 %+.2f (%d episodes, limit -3): %s'], ...
+        ternary(isempty(X.thr), 'none', strjoin(arrayfun(@(i) sprintf('%s (n %d) %+.2f', X.thr{i}, X.thr_n(i), ...
+        100 * X.thr_diff(i)), 1:numel(X.thr), 'UniformOutput', false), ', ')), 100 * X.pooled_diff, 100 * X.cov_diff, ...
+        X.cov_n, ternary(X.c, 'ok', 'FAILS')); %#ok<AGROW>
 end
 end
 

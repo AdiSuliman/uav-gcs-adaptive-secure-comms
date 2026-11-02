@@ -94,7 +94,9 @@
 % flights. A penalty whose runs are admissible (aprime_admit.m, D107 point 5) joins the selection,
 % deployed without the escalation, beside every plain candidate, and select_run picks. The form of the
 % selected run is stored (in seed_summary and in dec), carried by the stamp and by the retrains of C2g,
-% C2u and the sensitivity (data/aprime_agents.mat; results/dqn_training.txt).
+% C2u and the sensitivity (data/aprime_agents.mat; results/dqn_training.txt). In the smoke only, aprime_force
+% (profile.json or CFG, wf_force.m; needs fa_nothreat) admits the first penalty whatever the test says and
+% deploys its first run, marked 'aprime_admission' in dec.wf_forced; the test's own result is printed.
 %
 % Finished runs (every training run and the reward-sensitivity retrains) are kept in
 % data/run_cache/C2 when profile.json says "run_cache": true or CFG.run_cache is true
@@ -162,7 +164,7 @@ if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (r
     DROP_STEPS = [0 2]; H.episodes = 1280; H.buffer = 20000; H.warmup = 2000; H.n_eval = 1;
 end
 SEEDS = 42 + (0:N_SEEDS-1);
-FA_NT = struct('on', fa_nothreat_on(cfgc), 'pen', [120 160]);   % the no-threat penalty form (section 7)
+FA_NT = struct('on', fa_nothreat_on(cfgc), 'pen', [120 160]);   % the no-threat penalty form (section 4b)
 if exist('SMOKE', 'var') && SMOKE, FA_NT.pen = FA_PEN; end
 if FA_NT.on && ~all(ismember(FA_NT.pen, FA_PEN))
     error('train_dqn:fa_nothreat', 'train_dqn: the no-threat penalties %s need their grid runs (penalty grid %s)', ...
@@ -170,6 +172,12 @@ if FA_NT.on && ~all(ismember(FA_NT.pen, FA_PEN))
 end
 if FA_NT.on && numel(GAMMAS) ~= 1
     error('train_dqn:fa_nothreat', 'train_dqn: the no-threat form is judged at one discount factor (D107 point 5)');
+end
+if FA_NT.on && ~(exist('SMOKE', 'var') && SMOKE) && ~isequal(SEEDS, 42:44)
+    error('train_dqn:fa_nothreat', 'train_dqn: the no-threat form is judged on the seeds 42:44 (D107 point 5), not %s', mat2str(SEEDS));
+end
+if WF.force.aprime && ~FA_NT.on
+    error('train_dqn:force', 'train_dqn: aprime_force needs fa_nothreat');
 end
 FA_BOUND = 0.05;                         % one-sided 95% bound of the clean-link false alarms (KPI 6)
 DROP_DB = [];                            % drop alarm threshold of 'class_drop'
@@ -424,22 +432,37 @@ if FA_NT.on
         A7(i).nothreat = split_row(AR(i), PPa, K, val_spec, SPLIT_VAL);
         A7(i).plain = split_row(P0, PPa, K, val_spec, SPLIT_VAL);
     end
+    if ~all(arrayfun(@(a) a.nothreat.reproduced && a.plain.reproduced, A7))
+        warning('train_dqn:reproduced', ['train_dqn: the re-read of a no-threat run or of its grid run does not reproduce its ' ...
+            'stored row; the admission and the selection read different numbers']);
+    end
     aprime = struct('label', 'pre-registered candidate (D107), validation-scored, deployed only if admissible (point 5)', ...
         'form', 'nothreat', 'w_false', K.FA, 'alarm', ea.alarm, 'drop', ea.drop, 'S', Ssel, 'pen', FA_NT.pen, ...
         'gammas', GAMMAS, 'seeds', SEEDS, 'fa_ebno_thr', EBNO_THR, 'fa_bound', FA_BOUND, 'episodes', EP, 'runs', A7);
     [ADM, APL] = aprime_admit(aprime, FA_BOUND);
     aprime.admit = ADM;
+    admp = [ADM([ADM.admissible]).pen];
+    if WF.force.aprime                               % the smoke's forced cell, not an admission (wf_force.m)
+        APL{end+1} = sprintf('  admission of penalty %d FORCED (smoke only, not an admission); the test would %s it', ...
+            ADM(1).pen, ternary(ADM(1).admissible, 'admit', 'not admit'));
+        admp = ADM(1).pen; aprime.forced = ADM(1).pen; WFF{end+1} = 'aprime_admission';
+    end
     save('data/aprime_agents.mat', 'aprime', '-v7.3');
     rs7 = aprime_lines(aprime, mon_txt(ea.alarm, DROP_MODE), DU);
-    adm = find(ismember([AR.fa_pen], [ADM([ADM.admissible]).pen]));
+    adm = find(ismember([AR.fa_pen], admp));
     if isempty(adm)
         APL{end+1} = '  No penalty is admissible: the plain DQN stays (D107 point 5).';
     else
         RX = [runs, AR(adm)];
         [cand, best, sel_rule] = select_run(RX, FA_BOUND, n_plain + 1);
         APL{end+1} = sprintf(['  Admissible: penalty %s. Their runs join the selection beside every plain candidate (without ' ...
-            'the escalation); the selection picks %s.'], mat2str([ADM([ADM.admissible]).pen]), ternary(cand(best).run > n_plain, ...
+            'the escalation); the selection picks %s.'], mat2str(admp), ternary(cand(best).run > n_plain, ...
             sprintf('the no-threat run of penalty %d, seed %d', RX(cand(best).run).fa_pen, RX(cand(best).run).seed), 'a plain run'));
+        if WF.force.aprime                           % the smoke's forced cell: the first admitted run is deployed
+            best = find([cand.run] > n_plain & strcmp({cand.kind}, 'dqn'), 1);
+            APL{end+1} = sprintf('  FORCED (smoke only): the no-threat run of penalty %d, seed %d is deployed instead', ...
+                RX(cand(best).run).fa_pen, RX(cand(best).run).seed);
+        end
     end
     APL = [{''}, APL];
 end

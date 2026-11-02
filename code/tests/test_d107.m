@@ -281,7 +281,7 @@ verifyEqual(tc, min(ADM(1).thr_diff), -0.02, 'AbsTol', 1e-12);
 verifyEqual(tc, [ADM(1).a ADM(1).b ADM(1).bprime ADM(1).c ADM(1).admissible], [true true true false false]);
 verifyGreaterThanOrEqual(tc, ADM(1).pooled_diff, -0.005);          % only this guard
 verifyGreaterThanOrEqual(tc, ADM(1).cov_diff, -0.03);
-verifyNotEmpty(tc, strfind(L{6}, 'weakest change jamming'));        % the weakest change is named
+verifyNotEmpty(tc, strfind(L{6}, 'jamming (n 100) -2.00,'));        % the threat over its limit is named with its count
 verifyTrue(tc, ADM(2).admissible);
 end
 
@@ -435,6 +435,9 @@ c = swap_text(tc, c, regexp(c, 'fa_form_sel = ''all''; if B\.run[^\n]*', 'match'
 c = swap_text(tc, c, regexp(c, 'if FA_NT\.on, dec\.fa_form = fa_form_sel; end[^\n]*\n', 'match', 'once'), '');
 c = swap_text(tc, c, regexp(c, 'rep = \[rep, APL\];[^\n]*\n', 'match', 'once'), '');
 c = swap_text(tc, c, regexp(c, 'if FA_NT\.on && numel\(GAMMAS\) ~= 1\n[^\n]*\nend\n', 'match', 'once'), '');
+c = swap_text(tc, c, regexp(c, 'if FA_NT\.on && ~\(exist\(''SMOKE'', ''var''\) && SMOKE\) && ~isequal\(SEEDS, 42:44\)\n[^\n]*\nend\n', 'match', 'once'), '');
+c = swap_text(tc, c, regexp(c, 'if WF\.force\.aprime && ~FA_NT\.on\n[^\n]*\nend\n', 'match', 'once'), '');
+c = swap_text(tc, c, 'the no-threat penalty form (section 4b)', 'the no-threat penalty form (section 7)');
 c = swap_text(tc, c, regexp(c, '% The admitted no-threat runs[^\n]*\n[^\n]*\nif nargin < 3, a_from = Inf; end\n', 'match', 'once'), '');
 c = swap_text(tc, c, 'select_run(runs, bound, a_from)', 'select_run(runs, bound)');
 c = swap_text(tc, c, 'The admissible penalties'''' runs join the selection (aprime_admit.m); the others never enter', ...
@@ -460,7 +463,7 @@ once = {'FA_NT = struct(''on'', fa_nothreat_on(cfgc), ''pen'', [120 160]);', ...
     'RX = runs; n_plain = numel(runs); APL = {}; rs7 = {};', ...
     'rp = runs(cand(best).run); ea = struct(''alarm'', rp.alarm, ''drop'', rp.drop);', ...
     '[ADM, APL] = aprime_admit(aprime, FA_BOUND);', ...
-    'adm = find(ismember([AR.fa_pen], [ADM([ADM.admissible]).pen]));', ...
+    'adm = find(ismember([AR.fa_pen], admp));', ...
     'RX = [runs, AR(adm)];', ...
     '[cand, best, sel_rule] = select_run(RX, FA_BOUND, n_plain + 1);', ...
     'B = cand(best); rb = RX(B.run);', ...
@@ -477,7 +480,7 @@ end
 % grid's settings, the pairing is the grid run of the same monitor, drop, penalty, scales, seed
 verifyNotEmpty(tc, strfind(src, 'PPa = decision_settings(with_entry(PP, ea, DROP_MODE), Ssel);'));
 verifyNotEmpty(tc, regexp(src, 'strcmp\(r\.step, ''grid''\) && strcmp\(r\.alarm, ea\.alarm\) && isequaln\(r\.drop, ea\.drop\)', 'once'));
-% the forced smoke cell of the switch has no deploy of its own: the selection decides
+% the forced smoke cell is wf_force.m's aprime_force (WF.force.aprime), not a field of the switch
 verifyEmpty(tc, regexp(src, 'fa_force|FA_NT\.force', 'once'));
 end
 
@@ -502,7 +505,7 @@ verifyNumElements(tc, strfind(src, 'select_run(RX, FA_BOUND, n_plain + 1)'), 1);
 % the admitted runs join only inside the branch that has an admissible penalty, only the plain
 % runs feed the coordinate steps and the ablation
 j = pos('RX = [runs, AR(adm)];'); e = pos('if isempty(adm)'); verifyTrue(tc, ~isempty(e) && e(1) < j(1));
-verifyNumElements(tc, strfind(src, 'adm = find(ismember([AR.fa_pen], [ADM([ADM.admissible]).pen]));'), 1);
+verifyNumElements(tc, strfind(src, 'adm = find(ismember([AR.fa_pen], admp));'), 1);
 b = src(at(4):at(11));
 verifyEmpty(tc, regexp(b, 'trained_dqn|choose_deployed|PP\.pools\{|SPLIT_TEST|sp\.test', 'once'), 'the choice reads the validation split only');
 verifyNotEmpty(tc, strfind(b, 'SPLIT_VAL'));
@@ -530,6 +533,254 @@ verifyNotEmpty(tc, strfind(src, 'rs7 = aprime_lines(aprime, mon_txt(ea.alarm, DR
 for fld = {'label', 'form', 'w_false', 'alarm', 'drop', 'S', 'pen', 'gammas', 'seeds', 'fa_ebno_thr', 'fa_bound', 'episodes', 'runs'}
     verifyNotEmpty(tc, strfind(src, sprintf('''%s'',', fld{1})), fld{1});
 end
+end
+
+%% ---------- the forced admission cell (smoke only) ----------
+function test_forced_admission_flag_is_read_and_smoke_only(tc)
+% aprime_force is read like s1g_force and relm_force (profile.json, CFG over it); a forced cell is
+% refused outside the smoke at the stage and at the evaluation; the stamp carries the mark.
+f = [tempname '.json'];
+cl0 = onCleanup(@() delete_if(f)); %#ok<NASGU>
+F = wf_force('read', [], 'none.json');
+verifyFalse(tc, F.aprime); verifyFalse(tc, wf_force('any', F));
+write_text(f, '{"aprime_force": true}');
+F = wf_force('read', [], f);
+verifyTrue(tc, F.aprime); verifyEmpty(tc, F.dconf); verifyFalse(tc, F.s1g); verifyFalse(tc, F.relm);
+verifyTrue(tc, wf_force('any', F));
+F = wf_force('read', struct('aprime_force', false), f); verifyFalse(tc, F.aprime);
+F = wf_force('read', struct('aprime_force', true), 'none.json'); verifyTrue(tc, F.aprime);
+write_text(f, '{"aprime_force": "yes"}'); verifyError(tc, @() wf_force('read', [], f), 'wf_force:value');
+write_text(f, '{"aprime_force": 1}'); verifyError(tc, @() wf_force('read', [], f), 'wf_force:value');
+F = wf_force('read', struct('aprime_force', true), 'none.json');
+verifyError(tc, @() wf_force('smoke', F, false, 'train_dqn'), 'wf_force:smoke');
+wf_force('smoke', F, true, 'train_dqn');
+% a cell struct without the field (the earlier callers') is still judged
+Fo = struct('dconf', [], 's1g', false, 'relm', false);
+verifyFalse(tc, wf_force('any', Fo)); wf_force('smoke', Fo, false, 'stage');
+% the mark the agent carries is refused at the evaluation outside the smoke
+verifyError(tc, @() wf_force('mark', {'aprime_admission'}, false, 'evaluate_policies'), 'wf_force:smoke');
+wf_force('mark', {'aprime_admission'}, true, 'evaluate_policies');
+src = read_lf('evaluate_policies');
+verifyNotEmpty(tc, strfind(src, 'wf_force(''mark'', Q.dec.wf_forced, exist(''SMOKE'', ''var'') && SMOKE, ''evaluate_policies'');'));
+% the stamp tells a forced agent from an unforced one
+S = struct('rule_mmse_db', 6, 'rule_slot', true, 'rule_dwell', 'run', 'esc_drop', false, 'unk_mode', 'all', ...
+    'unk_retain', 0.95, 'confirm_sweep', [], 'fa_form', 'nothreat');
+Q = struct('deployed', 'dqn', 'alarm_mode', 'class_drop', 'confirm', [2 2], 'drop_db', 4, 'det_id', 'x', ...
+    'maha_thr', -1, 'dec', S, 'rule_sel', S);
+Qf = Q; Qf.dec.wf_forced = {'aprime_admission'};
+verifyNotEqual(tc, policy_stamp(Qf), policy_stamp(Q));
+% wf_options reports it with the other cells
+O = wf_options(struct('aprime_force', true), 'none.json'); verifyTrue(tc, O.force.aprime);
+end
+
+function test_forced_admission_wiring_in_train_dqn(tc)
+src = read_lf('train_dqn');
+once = {'if WF.force.aprime && ~FA_NT.on', ...
+    'admp = [ADM([ADM.admissible]).pen];', ...
+    'admp = ADM(1).pen; aprime.forced = ADM(1).pen; WFF{end+1} = ''aprime_admission'';', ...
+    'adm = find(ismember([AR.fa_pen], admp));', ...
+    'best = find([cand.run] > n_plain & strcmp({cand.kind}, ''dqn''), 1);'};
+for k = 1:numel(once)
+    verifyNumElements(tc, strfind(src, once{k}), 1, once{k});
+end
+verifyNumElements(tc, strfind(src, 'WF.force.aprime'), 3);
+% the mark enters dec, which the stamp and the evaluation read; the stage refuses it outside the smoke
+verifyNotEmpty(tc, strfind(src, 'wf_force(''smoke'', WF.force, exist(''SMOKE'', ''var'') && SMOKE, ''train_dqn'');'));
+verifyNotEmpty(tc, strfind(src, 'if ~isempty(WFF), dec.wf_forced = WFF; end'));
+% the forced admission sits in section 4b: after the test, before the saved record and the pick of B
+at = [strfind(src, '[ADM, APL] = aprime_admit(aprime, FA_BOUND);'), strfind(src, 'admp = ADM(1).pen;'), ...
+    strfind(src, 'save(''data/aprime_agents.mat'', ''aprime'', ''-v7.3'');'), strfind(src, 'adm = find(ismember([AR.fa_pen], admp));'), ...
+    strfind(src, 'best = find([cand.run] > n_plain'), strfind(src, 'B = cand(best); rb = RX(B.run);')];
+verifyEqual(tc, numel(at), 6); verifyEqual(tc, at, sort(at));
+% no decision path knows the cell
+for f = {'policy_state', 'policy_mask', 'policy_decide', 'policy_monitor'}
+    verifyEmpty(tc, regexp(read_lf(f{1}), 'aprime_force|aprime_admission', 'once'), f{1});
+end
+% the help text of the stage names it
+verifyNotEmpty(tc, strfind(src, '% (profile.json or CFG, wf_force.m; needs fa_nothreat) admits the first penalty'));
+end
+
+function test_forced_admission_runs_the_admitted_branch(tc)
+% The admitted branch of train_dqn.m section 4b, as its own text (probe_admit), on synthetic runs:
+% the admissible penalty's runs join, the pick sentence is written, and a forced cell deploys the
+% first admitted run, marked, whatever the rule says; unforced, nothing is marked.
+src = fileread(which('train_dqn'));
+rd = @(kmin, held, rec, ret, fa) struct('rec', rec, 'held', held, 'kmin', kmin, 'ret', ret, 'fa_w', fa / 1800, 'n_w', 1800, ...
+    'sw_w', zeros(1, 4));
+mk = @(kmin, held, rec, ret, fa, pen, seed) struct('esc', rd(kmin, held, rec, ret, fa), 'noesc', rd(kmin, held, rec, ret, fa), ...
+    'fa_pen', pen, 'seed', seed);
+runs = [mk(.70, .80, .85, .10, 20, 80, 42), mk(.62, .84, .88, .20, 10, 80, 43), mk(.75, .79, .84, .30, 30, 80, 44)];
+AR = [mk(.95, .90, .90, .5, 10, 120, 42), mk(.94, .90, .90, .5, 10, 120, 43), mk(.40, .50, .50, .0, 10, 160, 42), ...
+    mk(.40, .50, .50, .0, 10, 160, 43)];                             % penalty 120 better than the plain runs, 160 worse
+ADM = struct('pen', {120, 160}, 'admissible', {true, false});
+[fh, d1] = probe_admit(tc, src, 'adm_probe_d107');
+cl1 = onCleanup(@() fixture_off(d1, 'adm_probe_d107')); %#ok<NASGU>
+[sel, d2] = probe_select(src, 'adm_probe_sel_d107');
+cl2 = onCleanup(@() fixture_off(d2, 'adm_probe_sel_d107')); %#ok<NASGU>
+[cand0, best0, rule0] = sel(runs, 0.05);
+n_plain = numel(runs);
+WFno = struct('force', struct('aprime', false));
+WFyes = struct('force', struct('aprime', true));
+aprime = struct('pen', [120 160]);
+% 1. nothing admissible, no force: the plain selection stands, no sentence of the admitted branch
+ADM0 = ADM; ADM0(1).admissible = false;
+o = fh(ADM0, AR, runs, WFno, 0.05, n_plain, {}, {}, aprime, cand0, best0, rule0);
+verifyEqual(tc, numel(o.RX), n_plain); verifyEqual(tc, o.best, best0); verifyEmpty(tc, o.WFF);
+verifyTrue(tc, any(contains(o.APL, 'No penalty is admissible')));
+verifyFalse(tc, isfield(o.aprime, 'forced'));
+% 2. penalty 120 admissible: its two runs join and the better run is picked
+o = fh(ADM, AR, runs, WFno, 0.05, n_plain, {}, {}, aprime, cand0, best0, rule0);
+verifyEqual(tc, [o.RX.fa_pen], [80 80 80 120 120]);
+verifyEqual(tc, o.cand(o.best).run, 4); verifyEqual(tc, o.cand(o.best).kind, 'dqn');
+verifyEmpty(tc, find([o.cand.run] > n_plain & strcmp({o.cand.kind}, 'dqn_esc')));
+verifyTrue(tc, any(contains(o.APL, 'Admissible: penalty 120. Their runs join')));
+verifyTrue(tc, any(contains(o.APL, 'the no-threat run of penalty 120, seed 42')));
+verifyEmpty(tc, o.WFF); verifyFalse(tc, isfield(o.aprime, 'forced'));
+% 3. forced, the test admits nothing: the first penalty's runs join and the first of them is deployed
+o = fh(ADM0, AR, runs, WFyes, 0.05, n_plain, {}, {}, aprime, cand0, best0, rule0);
+verifyEqual(tc, [o.RX.fa_pen], [80 80 80 120 120]);
+verifyGreaterThan(tc, o.cand(o.best).run, n_plain); verifyEqual(tc, o.cand(o.best).kind, 'dqn');
+verifyEqual(tc, o.WFF, {'aprime_admission'}); verifyEqual(tc, o.aprime.forced, 120);
+verifyTrue(tc, any(contains(o.APL, 'FORCED (smoke only, not an admission); the test would not admit it')));
+verifyTrue(tc, any(contains(o.APL, 'FORCED (smoke only): the no-threat run of penalty 120')));
+% 4. forced where the rule would pick a plain run: the admitted run is deployed all the same
+AR2 = AR; AR2(1:2) = [mk(.30, .40, .40, .0, 10, 120, 42), mk(.30, .40, .40, .0, 10, 120, 43)];
+o = fh(ADM, AR2, runs, WFno, 0.05, n_plain, {}, {}, aprime, cand0, best0, rule0);
+verifyLessThanOrEqual(tc, o.cand(o.best).run, n_plain);
+verifyTrue(tc, any(contains(o.APL, 'the selection picks a plain run')));
+o = fh(ADM, AR2, runs, WFyes, 0.05, n_plain, {}, {}, aprime, cand0, best0, rule0);
+verifyGreaterThan(tc, o.cand(o.best).run, n_plain); verifyEqual(tc, o.cand(o.best).kind, 'dqn');
+verifyTrue(tc, any(contains(o.APL, 'the selection picks a plain run')));
+verifyEqual(tc, o.WFF, {'aprime_admission'});
+% 5. the mark of an earlier forced cell stays
+o = fh(ADM, AR, runs, WFyes, 0.05, n_plain, {}, {'s1_gate'}, aprime, cand0, best0, rule0);
+verifyEqual(tc, o.WFF, {'s1_gate', 'aprime_admission'});
+end
+
+%% ---------- the pipeline warning, the seeds guard, the comment ----------
+function test_reproduced_mismatch_warns_and_stays_out_of_the_rule(tc)
+src = read_lf('train_dqn');
+w = 'warning(''train_dqn:reproduced''';
+verifyNumElements(tc, strfind(src, w), 1);
+i = strfind(src, w); j = strfind(src, 'a.nothreat.reproduced && a.plain.reproduced');
+verifyNumElements(tc, j, 1);
+verifyTrue(tc, j < i && i - j < 200, 'the warning follows the test of every run');
+verifyTrue(tc, i > strfind(src, 'A7(i).plain = split_row(') && i < strfind(src, '[ADM, APL] = aprime_admit(aprime, FA_BOUND);'));
+% the rule never reads it: the field is only recorded and printed
+verifyEmpty(tc, regexp(read_lf('aprime_admit'), 'reproduced', 'once'));
+verifyNumElements(tc, regexp(src, '''reproduced'', abs\(dqn_held\(V\)', 'match'), 1);
+end
+
+function test_no_threat_seeds_are_42_to_44_outside_the_smoke(tc)
+src = read_lf('train_dqn');
+c = regexp(src, '(?m)^if (FA_NT\.on && ~\(exist\(''SMOKE'', ''var''\) && SMOKE\) && ~isequal\(SEEDS, 42:44\))\n', 'tokens');
+verifyNumElements(tc, c, 1);
+cond = c{1}{1};
+i = strfind(src, cond);
+verifyTrue(tc, regexp(src, 'SEEDS = 42 \+ \(0:N_SEEDS-1\);', 'once') < i(1));
+verifyTrue(tc, i(1) < strfind(src, 'FA_BOUND = 0.05;'), 'before any training');
+% the condition on the cases: the switch, the smoke, the seeds
+verifyFalse(tc, guard_d107(cond, true, 42:44, false));
+verifyTrue(tc, guard_d107(cond, true, 42:45, false));
+verifyTrue(tc, guard_d107(cond, true, 43:45, false));
+verifyTrue(tc, guard_d107(cond, true, 42:43, false));
+verifyTrue(tc, guard_d107(cond, true, 42, false));
+verifyFalse(tc, guard_d107(cond, true, 42, true), 'the smoke has one seed');
+verifyFalse(tc, guard_d107(cond, false, 42:43, false), 'the switch off');
+end
+
+function test_the_section_of_the_penalty_form_is_named_4b(tc)
+src = read_lf('train_dqn');
+verifyEmpty(tc, strfind(src, '(section 7)'));
+verifyNumElements(tc, strfind(src, '''pen'', [120 160]);   % the no-threat penalty form (section 4b)'), 1);
+% the one section 7 left is the descriptive table, and its title names the form's section
+verifyNumElements(tc, strfind(src, '%% 7. The no-threat penalty form''s report (section 4b)'), 1);
+end
+
+%% ---------- the form in the reader text ----------
+function test_the_penalty_form_is_printed_where_the_penalty_is(tc)
+% penalty_form_line adds one line when dec.fa_form (or the seed summary's selected_fa_form) is set and
+% nothing otherwise; the four places that print the deployed agent's penalty call it, and without
+% that call they are the base commit's text.
+verifyEmpty(tc, penalty_form_line(struct()));
+verifyEmpty(tc, penalty_form_line(struct('dec', struct('confirm', [2 2]), 'seed_summary', struct('selected_fa_pen', 120))));
+verifyEmpty(tc, penalty_form_line(struct('dec', struct('fa_form', ''))));
+verifyEmpty(tc, penalty_form_line([]));
+L = penalty_form_line(struct('dec', struct('fa_form', 'nothreat')));
+verifyTrue(tc, iscell(L) && isscalar(L) && ischar(L{1}));
+verifyNotEmpty(tc, strfind(L{1}, 'nothreat'));
+verifyNotEmpty(tc, strfind(L{1}, 'only on cycles with no threat'));
+La = penalty_form_line(struct('dec', struct('fa_form', 'all')));
+verifyNotEmpty(tc, strfind(La{1}, ': all ('));
+verifyNotEqual(tc, La{1}, L{1});
+Ls = penalty_form_line(struct('seed_summary', struct('selected_fa_form', 'nothreat')));
+verifyEqual(tc, Ls, L);
+Ld = penalty_form_line(struct('dec', struct('fa_form', 'nothreat'), 'seed_summary', struct('selected_fa_form', 'all')));
+verifyEqual(tc, Ld, L, 'dec first');
+% the places, each with its one call; without the call the file is the base commit's
+pl = {'code/decision/evaluate_policies.m', 'for ft = penalty_form_line(Q), rep{end+1} = ft{1}; end'; ...
+    'code/decision/experiment_combo_generalization.m', 'for ft = penalty_form_line(Q), rep{end+1} = ft{1}; end'; ...
+    'code/decision/experiment_unknown_threat.m', 'for ft = penalty_form_line(Q), rep{end+1} = ft{1}; end'; ...
+    'code/evaluation/measure_all_kpis.m', 'for ft = penalty_form_line(Dq), KPI(5).detail{end+1} = ft{1}; end'};
+for k = 1:size(pl, 1)
+    c = strrep(fileread(fullfile(tc.TestData.root, pl{k, 1})), char(13), '');
+    i = strfind(c, pl{k, 2}); verifyNumElements(tc, i, 1, pl{k, 1});
+    a = find(c(1:i - 1) == newline, 1, 'last') + 1; if isempty(a), a = 1; end
+    e = i + find(c(i:end) == newline, 1) - 1;
+    c = [c(1:a - 1), c(e + 1:end)];
+    d = parent_copy(tc, pl{k, 1}, tc.TestData.base);
+    [~, nm, ext] = fileparts(pl{k, 1});
+    p = strrep(fileread(fullfile(d, [nm ext])), char(13), '');
+    rmdir(d, 's');
+    verifyTrue(tc, strcmp(c, p), pl{k, 1});
+end
+% the line sits right after the one that prints the penalty
+c = read_lf('evaluate_policies');
+verifyNotEmpty(tc, regexp(c, 'selected_fa_pen, PP\.alarm_mode, PP\.confirm, numel\(PP\.combos\)\);\nfor ft = penalty_form_line\(Q\)', 'once'));
+c = read_lf('measure_all_kpis');
+verifyNotEmpty(tc, regexp(c, 'ss\.selected_fa_pen, ss\.selected_seed[^\n]*\n[^\n]*penalty_form_line\(Dq\)', 'once'));
+% the readers load what it reads
+for f = {'evaluate_policies', 'experiment_combo_generalization', 'experiment_unknown_threat'}
+    src = read_lf(f{1});
+    loads = regexp(src, 'load\(''data/trained_dqn\.mat''[^;]*;', 'match');
+    verifyTrue(tc, contains(loads{1}, '''dec''') && contains(loads{1}, '''seed_summary'''), f{1});
+end
+end
+
+function test_the_guard_line_prints_each_threats_count(tc)
+% (c)'s line lists every threat with its recoverable episodes and the held change, and the covered
+% episodes; the counts are the fields thr_n and cov_n.
+W = toy_d107();
+W.Ha(W.ix.o1(1:2), 1) = 0;
+[ADM, L] = aprime_admit(pack_d107(W), 0.05);
+verifyEqual(tc, ADM(1).thr(:)', {'antenna_fault', 'airframe_shadowing', 'jamming', 'noise_burst', 'tone_jamming', ...
+    'path_loss', 'benign_interference', 'combined'});
+verifyEqual(tc, ADM(1).thr_n(:)', [460 460 100 100 100 100 100 100]);
+verifyEqual(tc, ADM(1).cov_n, 200);
+verifyEqual(tc, sum(ADM(1).thr_n), 1520);
+c = L{6};
+verifyNotEmpty(tc, strfind(c, '(c) held against the grid runs, per threat'));
+thr = ADM(1).thr(:)'; nn = ADM(1).thr_n(:)';
+for i = 1:numel(thr)
+    verifyNotEmpty(tc, strfind(c, sprintf('%s (n %d) ', thr{i}, nn(i))), thr{i});
+end
+verifyNotEmpty(tc, strfind(c, 'jamming (n 100) -2.00,'));
+verifyNotEmpty(tc, strfind(c, 'antenna_fault (n 460) +0.00,'));
+verifyNotEmpty(tc, strfind(c, 'covered S1 +0.00 (200 episodes, limit -3): FAILS'));
+verifyNotEmpty(tc, strfind(L{11}, '(c) held against the grid runs'));    % the other penalty
+verifyNotEmpty(tc, strfind(L{11}, 'jamming (n 100) +0.00,'));
+verifyNotEmpty(tc, strfind(L{11}, ': ok'));
+% fewer recoverable episodes of a threat show in its count
+W = toy_d107(); W.recoverable(W.ix.o2(1:40)) = false;
+[ADM, L] = aprime_admit(pack_d107(W), 0.05);
+verifyEqual(tc, ADM(1).thr_n(4), 60);
+verifyNotEmpty(tc, strfind(L{6}, 'noise_burst (n 60) '));
+% no recoverable episode at all: no threat to list
+W = toy_d107(); W.recoverable(:) = false;
+[ADM, L] = aprime_admit(pack_d107(W), 0.05);
+verifyEmpty(tc, ADM(1).thr); verifyEmpty(tc, ADM(1).thr_n);
+verifyNotEmpty(tc, strfind(L{6}, 'per threat (recoverable episodes, change in points; limit -1): none;'));
+verifyFalse(tc, ADM(1).c);
 end
 
 %% ---------- static checks ----------
@@ -562,7 +813,8 @@ end
 
 function test_static_no_conflict_markers_functions_defined_once(tc)
 files = {'code/decision/aprime_admit.m', 'code/decision/holm_lower.m', 'code/decision/train_dqn.m', ...
-    'code/decision/policy_stamp.m', 'code/decision/fa_nothreat_on.m', 'code/evaluation/paired_stats.m', ...
+    'code/decision/policy_stamp.m', 'code/decision/fa_nothreat_on.m', 'code/decision/wf_force.m', 'code/decision/penalty_form_line.m', ...
+    'code/evaluation/paired_stats.m', ...
     'code/tests/test_d107.m', 'code/tests/test_core.m'};
 for f = files
     src = strrep(fileread(fullfile(tc.TestData.root, f{1})), char(13), '');
@@ -577,7 +829,7 @@ for f = {'aprime_admit', 'holm_lower'}
     verifyEqual(tc, nm{1}{1}, f{1});
 end
 % every function the new files call outside MATLAB exists
-for f = {'paired_stats', 'holm_lower', 'aprime_admit', 'fa_nothreat_on', 'fa_form_train', 'policy_stamp', 'decision_settings'}
+for f = {'paired_stats', 'holm_lower', 'aprime_admit', 'fa_nothreat_on', 'fa_form_train', 'penalty_form_line', 'wf_force', 'policy_stamp', 'decision_settings'}
     verifyTrue(tc, any(exist(f{1}) == [2 6]), f{1}); %#ok<EXIST>
 end
 % the local functions train_dqn.m's new code calls are defined there once
@@ -724,4 +976,38 @@ function fixture_off(d, fn)
 if contains(path, d), rmpath(d); end
 clear(fn);
 if isfolder(d), rmdir(d, 's'); end
+end
+
+function [fh, d] = probe_admit(tc, src, name)
+% The admitted branch of train_dqn.m section 4b (from admp to the line before the report lines'
+% APL), as a function of its inputs, with select_run and the helpers it calls: the script's own
+% text, not a copy. o = fh(ADM, AR, runs, WF, FA_BOUND, n_plain, APL, WFF, aprime, cand, best, sel_rule).
+src = strrep(src, char(13), '');
+seg = between_text(src, '    admp = [ADM(', '    APL = [{''''}, APL];');
+seg = cut_text(tc, seg, '    save(''data/aprime_agents.mat''', '    adm = find(');
+sel = between_text(src, 'function [cand, best, why] = select_run', 'function S = with_nb');
+cpu = between_text(src, 'function u = cp_upper(k, n)', 'function t = fa_txt');
+ter = between_text(src, 'function out = ternary(c, a, b)', 'function [A, lines] = relm_score');
+d = tempname; mkdir(d);
+fid = fopen(fullfile(d, [name '.m']), 'w');
+fprintf(fid, ['function o = %s(ADM, AR, runs, WF, FA_BOUND, n_plain, APL, WFF, aprime, cand, best, sel_rule)\nRX = runs;\n%s' ...
+    'o = struct(''RX'', {RX}, ''cand'', {cand}, ''best'', best, ''sel_rule'', {sel_rule}, ''APL'', {APL}, ''WFF'', {WFF}, ' ...
+    '''aprime'', aprime);\nend\n\n%s\n%s\n%s\n'], name, seg, sel, cpu, ter);
+fclose(fid);
+addpath(d); clear(name);
+fh = str2func(name);
+end
+
+function t = guard_d107(cond, on, SEEDS, SMOKE) %#ok<INUSD>
+% The condition text of the seeds guard in train_dqn.m for a switch, seeds and smoke flag.
+FA_NT = struct('on', on); %#ok<NASGU>
+t = eval(cond);
+end
+
+function write_text(f, s)
+fid = fopen(f, 'w'); fprintf(fid, '%s', s); fclose(fid);
+end
+
+function delete_if(f)
+if isfile(f), delete(f); end
 end

@@ -3,10 +3,11 @@ function varargout = wf_force(op, varargin)
 %   stage reads and judges as always, then deploys the named setting instead, marked as forced. Refused
 %   outside SMOKE at C1d, C2 and C2e (choose_drop_threshold.m, train_dqn.m, evaluate_policies.m).
 %   F = wf_force('read', cfg, f)       the fields dconf_force ([k n], one of C.confirm_drop_cand),
-%                                      s1g_force and relm_force (true or false) of this checkout's
+%                                      s1g_force, relm_force and aprime_force (true or false) of this checkout's
 %                                      profile.json (f, default 'profile.json'), each overridden by the
 %                                      same field of cfg (CFG of run_stage.m); F.dconf, F.s1g, F.relm
-%                                      ([] and false when absent)
+%                                      ([] and false when absent); F.aprime forces the admission of the
+%                                      no-threat form's first penalty (train_dqn.m section 4b, with fa_nothreat)
 %   wf_force('smoke', F, smoke, where) an error when a cell is forced and smoke is false
 %   wf_force('mark', names, smoke, where) the same for the mark dec.wf_forced of a trained agent
 %   t = wf_force('any', F)             whether a cell is forced
@@ -20,7 +21,7 @@ switch op
             P = jsondecode(fileread(f));
             if ~isstruct(P), P = struct(); end
         end
-        F = struct('dconf', [], 's1g', false, 'relm', false);
+        F = struct('dconf', [], 's1g', false, 'relm', false, 'aprime', false);
         v = pick(P, cfg, 'dconf_force');
         if ~isempty(v)
             cand = decision_config().confirm_drop_cand;
@@ -30,7 +31,7 @@ switch op
             end
             F.dconf = double(v(:)');
         end
-        for nm = {'s1g_force', 's1g'; 'relm_force', 'relm'}'
+        for nm = {'s1g_force', 's1g'; 'relm_force', 'relm'; 'aprime_force', 'aprime'}'
             v = pick(P, cfg, nm{1});
             if isempty(v), continue; end
             if ~(isscalar(v) && islogical(v)), error('wf_force:value', 'wf_force: %s must be true or false', nm{1}); end
@@ -39,7 +40,7 @@ switch op
         varargout{1} = F;
     case 'any'
         F = varargin{1};
-        varargout{1} = ~isempty(F.dconf) || F.s1g || F.relm;
+        varargout{1} = ~isempty(F.dconf) || F.s1g || F.relm || (isfield(F, 'aprime') && F.aprime);
     case 'smoke'
         [F, smoke, where] = varargin{1:3};
         if wf_force('any', F) && ~smoke
