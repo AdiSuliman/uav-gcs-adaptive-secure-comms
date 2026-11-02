@@ -2312,6 +2312,7 @@ The baseline also differs in tuning budget. In C2e, `blind_core`'s first respons
      - K2-1 reads every held-out threat's validation windows, so this build decision is not nested;
      - the four threats were named from the second test set's table (`data/splits_fresh.mat`);
      - the quoted value is set 4, nested over all ten threats.
+   - *[Dated 2.11.2026: C4 = Fisher(p0, p_cue-Maha) was coded on `wf-ood` `b5d32f9` (test fixes `6011703`) before K2-1 ran, registration docs `3b6b811`. K2-1's reading, `worktrees\wf-oodesults\k2_1_screen.txt`: cue-Maha validation AUROC path_loss 0.876, jamming 0.379, antenna_fault 0.844, airframe_shadowing 0.802; at least 0.80 on 3 of 4 (need 2), mean 0.725 (need 0.70) -> GO, K2-2 is built; thresholds unchanged. Side reading, descriptive, no effect on the verdict: the mean is held down by jamming's 0.379.]*
 2. **Cue row x(w).** The monitor's physics row: the non-probability columns of `temporal_evidence.m` and the 52 `window_cues.m` columns (branch K and contrast, coherence and LOS share, level-step statistics, idle occupancy and burst timing). Median/IQR scaling from the fit windows, clipped at ±10. No class probability, label or truth field (static test).
 3. **Scores.**
    - s0 is profile 3's registered per-frame statistic (`last_or_if` over 1 cycle). It is **frozen** and stored per frame in the pools as `P.maha`.
