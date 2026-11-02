@@ -328,7 +328,7 @@ src = fileread(which('choose_drop_threshold'));
 verifyNotEmpty(tc, strfind(src, ['SV = {''drop_db'', ''drop_db_train'', ''drop_from'', ''separable'', ''THR'', ''kept'', ' ...
     '''leak'', ''leak_all'', ...']));
 verifyNotEmpty(tc, strfind(src, ['''p95_mis'', ''p99_cl'', ''p05_pl'', ''floor_db'', ''drop_alarm'', ''cusum_db'', ''THC'', ' ...
-    '''VAL'', ''CF'', ''EBNO_THR'', ''MONP'', ''confirm_sweep''};']));
+    '''VAL'', ''CF'', ''EBNO_THR'', ''MONP'', ''confirm_sweep'', ''CAL35''};']));
 i0 = strfind(src, 'DEG = [];'); i1 = strfind(src, 'if ~isempty(DEG)'); i2 = strfind(src, 'elseif DGon');
 verifyNumElements(tc, i0, 1); verifyNumElements(tc, i1, 1); verifyNumElements(tc, i2, 1);
 verifyNotEmpty(tc, strfind(src, 'PP.deg_mode = DEG.mode; PP.ber_q = DEG.ber_q;'));
