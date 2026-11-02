@@ -1,4 +1,4 @@
-function [action, reason] = rule_based_policy(threat_class, degraded, mmse_gain_db, q_iot_db, q_thr_db, drop, budget, mmse_thr_db, slot_on, burst_action)
+function [action, reason] = rule_based_policy(threat_class, degraded, mmse_gain_db, q_iot_db, q_thr_db, drop, budget, mmse_thr_db, slot_on, burst_action, harm)
 %RULE_BASED_POLICY  Fixed expert policy: detected threat class -> configuration.
 %   Baseline for the DQN comparison (proposal: rule-based first, DQN second).
 %   Each class maps to the configuration that addresses its physics as modeled in
@@ -28,6 +28,9 @@ function [action, reason] = rule_based_policy(threat_class, degraded, mmse_gain_
 %   burst_action  the answer to the class noise_burst (optional; PP.rule_nb, chosen on
 %                 validation, train_dqn.m): {not separable, separable}, two of the 36
 %                 configurations; empty keeps the class mapping below
+%   harm          the lost-branch gate (optional; PP.s1_gate, M.harm of policy_monitor.m): false
+%                 answers a lost branch with no_action, the other branches carry the link; empty or
+%                 true keeps the class mapping below
 %   A lost branch (an antenna fault or airframe shadowing) leaves white noise on the
 %   antennas, where adaptive combining (MVDR) is maximum-ratio combining (Winters, Salz &
 %   Gitlin 1994) and only pays its estimation loss (Besson 2021, eq. 20-21): both take
@@ -61,6 +64,7 @@ if nargin < 7, budget = []; end
 if nargin < 8 || isempty(mmse_thr_db), mmse_thr_db = C.rule_mmse_db; end
 if nargin < 9 || isempty(slot_on), slot_on = true; end
 if nargin < 10, burst_action = {}; end
+if nargin < 11, harm = []; end
 if ~isempty(burst_action), check_burst(burst_action); end
 sep = mmse_gain_db >= mmse_thr_db;
 slot = q_iot_db >= q_thr_db;
@@ -85,6 +89,7 @@ switch threat_class
     case {'antenna_fault', 'airframe_shadowing'}
         action = 'power_control';     reason = 'one branch lost: raise the link budget';
         if sep, action = 'spatial_diversity+power_control'; reason = [reason ', and null the separable interferer']; end
+        if ~isempty(harm) && ~harm, action = 'no_action'; reason = 'one branch lost, the others carry the link'; end
     case {'benign_interference', 'none'}
         action = 'no_action';         reason = 'not an attack: acting would be a false alarm';
     otherwise

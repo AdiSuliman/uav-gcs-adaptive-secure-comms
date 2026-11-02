@@ -96,8 +96,12 @@ check_det_id(PP, Q, 'evaluate_policies');
 if isfield(Q, 'dec') && isstruct(Q.dec) && isfield(Q.dec, 'deg_forced')      % the smoke's forced test (deg_force.m)
     deg_force('smoke', Q.dec.deg_forced, exist('SMOKE', 'var') && SMOKE, 'evaluate_policies');
 end
+if isfield(Q, 'dec') && isstruct(Q.dec) && isfield(Q.dec, 'wf_forced')      % the smoke's forced cells (wf_force.m)
+    wf_force('mark', Q.dec.wf_forced, exist('SMOKE', 'var') && SMOKE, 'evaluate_policies');
+end
 PP = decision_settings(PP, Q);                       % the deployed DQN's monitor and settings for every policy but the rule fallback
 cfg6 = []; if exist('CFG', 'var'), cfg6 = CFG; end
+WF = wf_options(cfg6);                               % which readings of the decision-layer additions are printed (wf_options.m)
 FRESH = strcmp(kpi6_set(cfg6), 'fresh');             % P1R: KPI 6 on the fresh clean test set (kpi6_set.m)
 if FRESH, F6 = fresh_checks(PP, Q, exist('SMOKE', 'var') && SMOKE); end   % every check before any fresh flight
 K = link_env('tables', PP);
@@ -194,9 +198,31 @@ if strcmp(Q.deployed, 'rule_sel')                    % the rule fallback on its 
 end
 POL = [POL, {'rule_core', 'blind_core'}];            % the core action set, after every other policy
 LBL = [LBL, {'core: rule + escalation', 'core: no detector + escalation'}];
+rm_on = isfield(PP, 'release_m') && ~isempty(PP.release_m) && PP.release_m;     % the deployed DQN's release on evidence
+s1_on = isfield(PP, 's1_gate') && ~isempty(PP.s1_gate) && PP.s1_gate;           % the rule's lost-branch gate
+rm_off = isfield(PP, 'release_m') && ~isempty(PP.release_m) && ~PP.release_m;   % C2 scored the release and did not deploy it
+s1_off = isfield(PP, 's1_gate') && ~isempty(PP.s1_gate) && ~PP.s1_gate;         % C2 chose the gate step and kept it off
+dpn = Q.deployed; if strcmp(dpn, 'dqn'), dpn = sprintf('dqn_g%d', sel); end
+if rm_on                                             % descriptive rows without the release beside the deployed setting
+    xr = {'rule_esc_norelm', 'table_norelm'}; xl = {'rule + escalation, without the release (descriptive)', 'table, without the release (descriptive)'};
+    if startsWith(dpn, 'dqn'), xr{end+1} = [dpn '_norelm']; xl{end+1} = 'DQN, without the release on evidence (descriptive)'; end
+    POL = [POL, xr]; LBL = [LBL, xl];
+end
+if rm_off                                            % the other setting is a descriptive row as well
+    xr = {'rule_esc_relm', 'table_relm'}; xl = {'rule + escalation, with the release (descriptive; not deployed)', 'table, with the release (descriptive; not deployed)'};
+    if startsWith(dpn, 'dqn'), xr{end+1} = [dpn '_relm']; xl{end+1} = 'DQN, with the release on evidence (descriptive; not deployed)'; end
+    POL = [POL, xr]; LBL = [LBL, xl];
+end
+if s1_on                                             % the off variant is the reference for the lost-branch classes
+    POL = [POL, {'rule_esc_nos1g'}]; LBL = [LBL, {'rule + escalation, without the lost-branch gate (descriptive; the reference on the lost-branch classes)'}];
+end
+if s1_off                                            % the gate on, beside the deployed rule without it
+    POL = [POL, {'rule_esc_s1g'}]; LBL = [LBL, {'rule + escalation, with the lost-branch gate (descriptive; not kept at C2)'}];
+end
 iBase = find(strcmp(POL, sprintf('dqn_g%d', sel)));  % selected DQN alone
 dep = Q.deployed; if strcmp(dep, 'dqn'), dep = POL{iBase}; end
 iDQN = find(strcmp(POL, dep));                       % deployed policy (train_dqn.m)
+if rm_on && startsWith(dep, 'dqn'), LBL{iDQN} = [LBL{iDQN} ', with the release on evidence']; end
 LBL{iDQN} = [LBL{iDQN} ' (deployed)'];
 col = @(p) find(strcmp(POL, p));
 
@@ -249,6 +275,17 @@ rep{end+1} = sprintf(['Selected DQN: gamma %.2f, training false-switch penalty %
     'flights in test. ' ...
     'Intervals: 95%% bootstrap over geometries.'], ...
     Q.seed_summary.selected_gamma, Q.seed_summary.selected_fa_pen, PP.alarm_mode, PP.confirm, numel(PP.combos));
+MNOTE = {};                                                       % the lecturer lines are read under the adopted monitor and settings
+if isfield(PP, 'confirm_drop') && ~isempty(PP.confirm_drop)
+    MNOTE{end+1} = sprintf(['The monitor carries the drop alarm''s own confirmation, %d of the last %d cycles (D112, chosen at C1d): ' ...
+        'every line below, the lecturer lines included, is read under it.'], PP.confirm_drop);
+end
+if isfield(PP, 's1_gate')                                         % the rule steps ran after the lost-branch gate step
+    MNOTE{end+1} = sprintf(['The rule settings were chosen after the lost-branch gate step (D113, gate %s): rule + escalation and the ' ...
+        'shared settings every policy runs carry what that step kept; rule_core and rule_core3 run with those shared settings and ' ...
+        'never with the gate.'], ternary(PP.s1_gate, 'on', 'off'));
+end
+rep = [rep, MNOTE];
 for si = find(~strcmp({sets.name}, 'offset'))
     rep{end+1} = ''; %#ok<SAGROW>
     R1 = RES{si, 1};
@@ -339,6 +376,21 @@ rep{end+1} = sprintf('Deployed policy on the harmed episodes, >= 90%% of every t
 SHN = '';                                             % airframe shadowing: conditioned on a geometry that hides an antenna
 if isfield(PP, 'shadow'), SHN = shadow_note(PP.shadow, TEST, PP.ebno); end
 if ~isempty(SHN), rep{end+1} = ['  ' SHN ' (test split)']; end
+if s1_on || s1_off                                    % rule + escalation with and without the gate on the lost-branch classes
+    if s1_on, kon = col('rule_esc'); koff = col('rule_esc_nos1g'); else, kon = col('rule_esc_s1g'); koff = col('rule_esc'); end
+    s1gl = {['Lost-branch classes and their combinations, harmed recoverable episodes, recovered, 95% bootstrap over flight geometries: ' ...
+        'rule + escalation with the gate, without it (the reference for the comparison with the DQN: same settings, paired) and the deployed policy' ...
+        ternary(s1_on, '', '; C2 kept the gate off, the row with it is descriptive')]};
+    for ti = find(contains(threats, 'antenna_fault') | contains(threats, 'airframe_shadowing'))
+        mr = strcmp(PP.scen(ALL{1}.scn), threats{ti}) & ALL{1}.threat & ALL{1}.recoverable & HA;
+        if ~any(mr), continue; end
+        [dd, dl, dh] = boot_cluster(double(ALL{iDQN}.recovered(mr)) - double(ALL{koff}.recovered(mr)), ones(1, sum(mr)), ALL{iDQN}.geom(mr), 2000, 130 + ti);
+        s1gl{end+1} = sprintf('  %-34s harmed %4d: with the gate %s | without it %s | deployed %s | deployed less the reference %+.1f [%+.1f, %+.1f] points', ...
+            threats{ti}, sum(mr), ci_one(ALL{kon}.recovered(mr), ALL{kon}.geom(mr)), ...
+            ci_one(ALL{koff}.recovered(mr), ALL{koff}.geom(mr)), ci_one(ALL{iDQN}.recovered(mr), ALL{iDQN}.geom(mr)), 100*dd, 100*dl, 100*dh); %#ok<AGROW>
+    end
+    rep = [rep, {''}, s1gl]; %#ok<AGROW>
+end
 
 % Envelope predicted on validation and KPI 4 inside it (test)
 ENV = false(numel(threats), nV); ENVv = nan(numel(threats), nV); PTenv = nan(numel(threats), 1); PTenv_ci = nan(numel(threats), 2);
@@ -413,6 +465,14 @@ for s = 1:nS
     rep{end+1} = sprintf('%-12g%s', PP.ebno(s), sprintf('%11.1f', PE(s, :))); %#ok<SAGROW>
 end
 
+R9ROWS = struct([]); r9l = {};
+if WF.r9                                              % the deployed policy's recovered share per Eb/N0 point, with its interval and tags
+    Rr = RES{1, iDQN}; mr9 = Rr.recoverable & Rr.threat;
+    [R9ROWS, r9l] = ebno_rows(Rr.recovered(mr9), Rr.s(mr9), Rr.geom(mr9), PP.scen(Rr.scn(mr9)), PP.ebno, PP.clean_fer(:)', ...
+        C.ratio_ok, sprintf('Test, %s, single set', erase(LBL{iDQN}, ' (deployed)')));
+    rep = [rep, {''}, r9l];
+end
+
 % Per interferer direction (single set, directional threats)
 bins_aoa = [0 20 45 90]; PA = [];
 if PP.aoa_random
@@ -469,6 +529,21 @@ if ~isempty(iS)
     rep{end+1} = sprintf('%-18s%s', sprintf('%s (%d)', band_txt(PP.speed_out(1, :)), sum(ms & lo)), sprintf('%11.1f', PS(1, :)));
     rep{end+1} = sprintf('%-18s%s', sprintf('%s (%d)', band_txt(PP.speed_out(2, :)), sum(ms & hi)), sprintf('%11.1f', PS(2, :)));
 end
+% Descriptive speed lines on the non-emitter threats and the clean link (D121 item 8), beside the registered ones
+Rd_ = RES{1, iDQN}; SNE_A = struct('recovered', Rd_.recovered, 'mask', R1.recoverable & R1.threat, 'speed', R1.speed, ...
+    'geom', R1.geom, 'thr', {PP.scen(R1.scn)});
+SNE_E = [];
+if ~isempty(iS)
+    Re_ = RES{iS, iDQN};
+    SNE_E = struct('recovered', Re_.recovered, 'mask', Rs.recoverable & Rs.threat, 'speed', Rs.speed, 'geom', Rs.geom, ...
+        'thr', {PP.scen(Rs.scn)}, 'band', PP.speed_out(2, :));
+end
+SNE_C = []; iCl_ = find(strcmp({sets.name}, 'clean')); iNo_ = find(strcmp(POL, 'none'), 1);
+if ~isempty(iCl_) && ~isempty(iNo_)
+    Rcl_ = RES{iCl_, iNo_}; SNE_C = struct('loss', Rcl_.per_post, 'speed', Rcl_.speed, 'geom', Rcl_.geom);
+end
+[SNE, sne_l] = speed_nonemitter(SNE_A, SNE_E, SNE_C, bins_v);
+rep = [rep, sne_l];
 iD2 = find(strcmp({sets.name}, 'delay2'));
 Rd2 = RES{iD2, 1}; md2 = Rd2.recoverable & Rd2.threat;
 R1b = RES{1, 1}; m1 = R1b.recoverable & R1b.threat;
@@ -633,6 +708,10 @@ for pk = unique([iDQN, col('rule_esc'), col('table')], 'stable')
             o.threat, o.n, o.held_pct, o.rel_median, o.rel_p90, o.rel_never_pct, o.cost_end, o.on_end_pct, o.conf_end_pct, o.sw_end); %#ok<SAGROW>
     end
 end
+for pk = find(endsWith(POL, {'_norelm', '_relm'}))    % the same rows with the other release setting, descriptive
+    [rl, OFF] = offset_rows(RES{iO, pk}, LBL{pk}, PP, K, threats, OFF);
+    rep = [rep, rl]; %#ok<AGROW>
+end
 
 fid = fopen('results/policy_evaluation.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('\n%s\n', rep{:});
@@ -650,10 +729,15 @@ KP = struct('per_threat', PT, 'per_threat_sev', PTsev, 'threats', {threats}, 're
     'per_threat_h', PTh, 'per_threat_h_sev', PThsev, 'per_threat_h_ci', 100 * PThci, 'n_harmed', NH, 'n_harmed_sev', NHsev, ...
     'kpi4_h_met', kpi4h, 'envelope_h', ENVh, 'envelope_val_h', ENVvh, 'per_threat_env_h', PTenvh, ...
     'per_threat_env_h_ci', 100 * PTenvh_ci, 'harmed_consistent', cons, 'offset', OFF, 'offset_after', OFF_AFTER, 'lect', LK);
+KP.speed_ne = SNE;
 if FRESH                                              % P1R: KP.far is the fresh set's; the union beside it
     KP.far_set = 'fresh'; KP.reading = 'P1R'; KP.far_union = FAR_u; KP.far_diag_union = FD_u; KP.far_src_union = far_src_u;
     KP.far_geoms_fresh = F6.CT.n_geom; KP.far_fresh_sha256 = F6.sha;
 end
+if WF.r9, KP.ebno_rows = R9ROWS; KP.ebno_lines = r9l; end
+if rm_on, KP.release_m = true; end
+if s1_on || s1_off, KP.s1g_lines = s1gl; end
+if ~isempty(MNOTE), KP.monitor_note = MNOTE; end
 save('results/policy_evaluation.mat', 'RES', 'RW', 'POL', 'LBL', 'set_names', 'fixed_best', 'tab', 'iDQN', 'KP', ...
     'iThreat', 'ALL', 'top_cfg');
 if FRESH, save('results/policy_evaluation.mat', 'RWf', '-append'); end
@@ -867,6 +951,30 @@ end
 
 function out = ternary(c, a, b)
 if c, out = a; else, out = b; end
+end
+
+function [rep, OFF] = offset_rows(Ro, name, PP, K, threats, OFF)
+% The offset set's rows of one policy per threat, as the report's loop prints them: episodes holding a
+% configuration at the end, the release to no_action, the cost held after it, the re-alarms and the changes.
+rep = {sprintf('  %s', name)};
+for ti = 1:numel(PP.singles) - 1
+    m = strcmp(PP.scen(Ro.scn), threats{ti}) & Ro.threat;
+    if ~any(m), continue; end
+    hd = Ro.cfg_end(m) ~= K.na; rt = Ro.rel_t(m & Ro.cfg_end ~= K.na);
+    OFF(end+1) = struct('policy', name, 'threat', threats{ti}, 'n', sum(m), 'held_pct', 100 * mean(hd), ...
+        'rel_median', median(rt, 'omitnan'), 'rel_p90', p90(rt), 'rel_never_pct', 100 * mean(isnan(rt)), ...
+        'cost_end', mean(Ro.cost_end(m), 'omitnan'), 'on_end_pct', 100 * mean(Ro.on_end(m), 'omitnan'), ...
+        'conf_end_pct', 100 * mean(Ro.conf_end(m), 'omitnan'), 'sw_end', mean(Ro.sw_end(m), 'omitnan')); %#ok<AGROW>
+    o = OFF(end);
+    rep{end+1} = sprintf('    %-22s %5d: held %5.1f%% | release %4.1f / %4.1f (%5.1f%%) | cost %5.2f, %5.1f%% | re-alarm %5.1f%% | changes %.2f', ...
+        o.threat, o.n, o.held_pct, o.rel_median, o.rel_p90, o.rel_never_pct, o.cost_end, o.on_end_pct, o.conf_end_pct, o.sw_end); %#ok<AGROW>
+end
+end
+
+function t = ci_one(v, g)
+% Mean of the 0/1 values v with its 95% bootstrap interval over the clusters g, as text.
+[m, lo, hi] = boot_cluster(double(v), ones(1, numel(v)), g, 2000, 131);
+t = sprintf('%.1f%% [%.1f, %.1f]', 100 * m, 100 * lo, 100 * hi);
 end
 
 function s = band_txt(b)

@@ -217,6 +217,14 @@ if isfile(F.ood)
             'kept %.2f (read on the %s); nested estimate: mean AUROC %.3f, FPR95 %.2f'], O.sel, O.sel_win, ...
             mean(O.MpT(:, bd)), 100*O.RETAIN, mean(O.FpT(:, bd)), rd, val, fn)}, det];
     end
+    near_names = {'antenna_fault', 'airframe_shadowing'};      % D121 item 11: fixed by physics, before any data
+    held = {O.R.held_out};
+    near_m = ismember(held, near_names);
+    if any(near_m) && any(~near_m)
+        det{end+1} = sprintf(['descriptive, not KPI 2 (D121 item 11): near-OOD (%s) mean AUROC %.3f; ' ...
+            'far-OOD (the other %d threats) mean AUROC %.3f'], strjoin(near_names, ', '), ...
+            mean(A(near_m, j)), sum(~near_m), mean(A(~near_m, j)));
+    end
     if isfield(O, 'LC')                               % latency-aware selection
         det{end+1} = sprintf(['candidates within the KPI 7 budget (detector median <= %.0f ms, p95 <= %.0f ms per ' ...
             'frame): %s; detector cost median / p95 ms: %s'], O.LC.budget.det_median_ms, O.LC.budget.det_p95_ms, ...
@@ -310,6 +318,8 @@ if isfile(F.pol)
                 '%d threats >= 90%%'], sum(pe(~isnan(pe)) >= 90), sum(~isnan(pe)));
         end
     end
+    if isfield(P.KP, 'ebno_lines'), det = [det, P.KP.ebno_lines]; end   % per Eb/N0 point, descriptive (ebno_rows.m)
+    if isfield(P.KP, 'monitor_note'), det = [det, P.KP.monitor_note]; end   % the lecturer lines below are read under the adopted monitor
     if isfield(P.KP, 'lect')                          % revised proposal: PER vs the static link
         LECT.pol = P.KP.lect;
         det = [det, per_lines(P.KP.lect, P.KP.lect, 'rule_esc', 'full action set')];
@@ -391,6 +401,21 @@ if isfile(F.pol)
         sprintf('%s: median T_rec %s cycles (%s ms at the %d ms decision period) | cycles restored %.1f%% | goodput %.3f', ...
         nq, num_txt(median(ALL{iQ}.t_rec(rec))), num_txt(median(ALL{iQ}.t_rec(rec)) * CDk.period_ms), CDk.period_ms, ...
         100 * mean(ALL{iQ}.ok_post), mean(ALL{iQ}.gput_post, 'omitnan'))};
+    kn = find(strcmp(P.POL, [P.POL{iQ} '_norelm']), 1); kr0 = col('rule_esc_norelm');
+    if ~isempty(kn) && ~isempty(kr0)                  % deployed with the release on evidence: the rows without it beside the verdict
+        [dn, dnl, dnh] = boot_cluster(double(ALL{kn}.recovered(m4)) - double(ALL{kr0}.recovered(m4)), ones(1, sum(m4)), ALL{kn}.geom(m4), 2000, 6);
+        det{end+1} = sprintf(['beside KPI 5, without the release on evidence on either side (descriptive; the verdict is the deployed row, ' ...
+            'which runs with the layer, as rule + escalation and the table do): DQN %.1f%% vs rule + escalation %.1f%% recovered, paired ' ...
+            '%+.1f points [%+.1f, %+.1f]'], 100 * mean(ALL{kn}.recovered(m4)), 100 * mean(ALL{kr0}.recovered(m4)), 100*dn, 100*dnl, 100*dnh);
+    end
+    kp = find(strcmp(P.POL, [P.POL{iQ} '_relm']), 1); kr1 = col('rule_esc_relm');
+    if ~isempty(kp) && ~isempty(kr1)                  % deployed without the release on evidence: the rows with it beside the verdict
+        [dp, dpl, dph] = boot_cluster(double(ALL{kp}.recovered(m4)) - double(ALL{kr1}.recovered(m4)), ones(1, sum(m4)), ALL{kp}.geom(m4), 2000, 7);
+        det{end+1} = sprintf(['beside KPI 5, with the release on evidence on either side (descriptive; the layer was not deployed and ' ...
+            'the verdict is the deployed row, which runs without it): DQN %.1f%% vs rule + escalation %.1f%% recovered, paired ' ...
+            '%+.1f points [%+.1f, %+.1f]'], 100 * mean(ALL{kp}.recovered(m4)), 100 * mean(ALL{kr1}.recovered(m4)), 100*dp, 100*dpl, 100*dph);
+    end
+    if isfield(P.KP, 's1g_lines'), det = [det, P.KP.s1g_lines]; end   % the lost-branch classes against the rule without the gate (the reference there)
     k_b = col('blind_esc');
     if ~isempty(k_b)
         [db, dbl, dbh] = boot_cluster(double(ALL{k_r}.recovered(m4)) - double(ALL{k_b}.recovered(m4)), ones(1, sum(m4)), ...
@@ -483,6 +508,9 @@ if isfile(F.pol)
         po = P.KP.per_speed_out(:, strcmp(P.KP.show, P.POL{iD}));
         det{end+1} = sprintf('ends of the speed envelope (nominal severity): %s km/h %.1f%%, %s km/h %.1f%%', ...
             band_txt(P.KP.speed_out(1, :)), po(1), band_txt(P.KP.speed_out(2, :)), po(2));
+    end
+    if isfield(P.KP, 'speed_ne') && isfield(P.KP.speed_ne, 'lines')
+        det = [det, P.KP.speed_ne.lines(~cellfun(@isempty, P.KP.speed_ne.lines))];   % descriptive (D121 item 8), beside the registered lines
     end
     if isfield(P.KP, 'per_delay') && ~isempty(P.KP.per_delay)
         pd = P.KP.per_delay(:, strcmp(P.KP.show, P.POL{iD}));
@@ -700,6 +728,14 @@ if isfinite(S.cnn.per_red_pct)
     lines{end+1} = sprintf(['beside KPI 4, CNN contribution, %s (%s vs the same escalation without the detector): ' ...
         'PER reduction %.1f%% [%.1f, %.1f], goodput %+.0f bit/s [%+.0f, %+.0f] (%d episodes)%s'], tag, q.label, ...
         S.cnn.per_red_pct, S.cnn.per_ci, S.cnn.gput_bps, S.cnn.gput_ci, S.cnn.n, rt);
+    if isfield(S.cnn, 'onset_rec') && S.cnn.onset_rec.n_pair > 0
+        o = S.cnn.onset_rec;
+        lines{end+1} = sprintf(['beside KPI 4, onset -> restored, %s (descriptive, selects nothing; D121 item 10), with minus without the ' ...
+            'detector on the %d episodes both recover: median %g [%g, %g] cycles (%g ms), mean %.2f [%.2f, %.2f]; of the %d recoverable ' ...
+            'jamming episodes recovered by both %.1f%%, by the detector row only %.1f%%, by the other only %.1f%%, by neither %.1f%%'], ...
+            tag, o.n_pair, o.median, o.median_ci, o.median * Lk.period_ms, o.mean, o.mean_ci, o.n, o.both_pct, o.only_det_pct, ...
+            o.only_blind_pct, o.never_pct);
+    end
 end
 end
 

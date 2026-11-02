@@ -859,6 +859,11 @@ for t = 1:size(types, 1)
         glo, ghi, dt, tlo, thi, nnz(f), 100 * mean(~isfinite(Rr.t_rec_det(m))), 100 * mean(~isfinite(Rb.t_rec_det(m)))); %#ok<AGROW>
     Kp.cnn.(types{t, 1}) = struct('per', [dp dlo dhi], 'per_red', [rr rlo rhi], 'gput', [dg glo ghi], 'trec', [dt tlo thi], ...
         'n_both', nnz(f));
+    Us = rr_us();                                     % D121 item 3: the receiver-robust column, a side reading beside the pair
+    rrc = {rr_column([dlo dhi], Us.per), rr_column([glo ghi], Us.gput), rr_column([tlo thi], Us.trec)};
+    Kp.cnn.(types{t, 1}).rr = rrc;
+    lines{end+1} = sprintf(['  receiver-robust (U_s, D2c; D121 item 3, side reading, the registered pair above stands) %-10s rule_core - ' ...
+        'blind_core: PER %s | goodput %s | detection->restored %s'], types{t, 1}, rrc{:}); %#ok<AGROW>
 end
 if any(strcmp({S.policy}, 'oracle'))
     Ro = pol(S, 'oracle');
