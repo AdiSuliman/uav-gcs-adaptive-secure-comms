@@ -1,9 +1,10 @@
 function on = fa_nothreat_on(cfg, f)
 %FA_NOTHREAT_ON  Whether C2 also trains the no-threat form of the false-switch penalty
-%   (train_dqn.m section 7, fa_form_train.m): CFG.fa_nothreat when cfg is a struct with that
+%   (train_dqn.m section 4b, fa_form_train.m): CFG.fa_nothreat when cfg is a struct with that
 %   field, else the field fa_nothreat of this checkout's profile.json (f, default
 %   'profile.json'), else false. Its runs are scored on validation beside their grid runs and
-%   never enter the selection. Only true or false is accepted.
+%   join the selection only when admissible (aprime_admit.m, D107 point 5). Only true or false
+%   is accepted.
 if nargin < 1, cfg = []; end
 if nargin < 2 || isempty(f), f = 'profile.json'; end
 on = false; v = []; src = '';

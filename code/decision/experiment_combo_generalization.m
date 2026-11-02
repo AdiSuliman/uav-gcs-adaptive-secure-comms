@@ -61,6 +61,7 @@ rep = {'=== COMBINED THREATS NEVER TRAINED ON: LEAVE-ONE-COMBINATION-OUT ==='};
 rep{end+1} = sprintf(['Generated: %s | DQN retrained without the combination (train and validation pools removed), ' ...
     'selected settings: monitor %s %d/%d, penalty %d, gamma %.2f, seed %d | test flights of the combination, %d per Eb/N0'], ...
     datestr(now), PP.alarm_mode, PP.confirm, Q.seed_summary.selected_fa_pen, H.gamma, seed, numel(K.geo{K.clean, TEST}));
+for ft = penalty_form_line(Q), rep{end+1} = ft{1}; end    % the penalty's form, when C2 trained the no-threat form
 rep{end+1} = 'Recovered = BER and packet loss <= 2x clean for 5 consecutive cycles, among recoverable episodes; [95% bootstrap over geometries].';
 rep{end+1} = '';
 rep{end+1} = sprintf('%-32s %6s %24s %24s %10s %10s', 'combination', 'n', 'DQN, never trained', 'DQN, trained', 'rule+esc', 'table');

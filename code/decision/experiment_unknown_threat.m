@@ -73,6 +73,7 @@ rep{end+1} = sprintf(['Generated: %s | DQN retrained without the threat (its sin
     'training and validation), selected settings: monitor %s %d/%d, penalty %d, gamma %.2f, seed %d | test and second ' ...
     'test flights of the threat, every severity, %d per Eb/N0, detector output withheld after the onset'], datestr(now), ...
     PP.alarm_mode, PP.confirm, Q.seed_summary.selected_fa_pen, H.gamma, seed, nfl);
+for ft = penalty_form_line(Q), rep{end+1} = ft{1}; end    % the penalty's form, when C2 trained the no-threat form
 rep{end+1} = 'Recovered = BER and packet loss <= 2x clean for 5 consecutive cycles, among recoverable episodes; [95% bootstrap over flights].';
 rep{end+1} = 'Evidence only: no rate is committed for an emitter outside the modelled classes.';
 rep{end+1} = '';
