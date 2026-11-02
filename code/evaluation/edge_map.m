@@ -61,7 +61,7 @@
 %   FA     clean link: flights with a configuration change (KPI 6)              <= 5%
 %   LINK   clean link: packet loss at no_action. 802.11a's PER < 10% at a 1000-byte
 %          PSDU carried to our 1032-bit frame through the simulated block fading
-%          (Rician K and receive correlation as drawn, ideal MRC)               <= 5.7%
+%          (Rician K and receive correlation as drawn, ideal MRC)               <= 5.7% (3 antennas; 5.39% with 4)
 %          (beside it, no target: the same PER carried through an AWGN bit error rate,
 %          1.4%, and the operating-point tag J, packet loss below 10%)
 %   Beside the clean link: the C&C reliability of 3GPP TR 36.777 Table 5.1-1 (up to 1e-3
@@ -137,7 +137,7 @@ C = decision_config();
 p0 = load('params.mat').params;
 TEST = 3; SPEED = 4; TEST2 = 5; SPL = [TEST TEST2];
 T = Q.H.T; NE = 64; REPS = 2; B = 4000;
-TGT = struct('det', 0.90, 'surv', 0.90, 'rec', 0.90, 'prot', 0.90, 'fa', 0.05, 'link', 0.057, 'linkt_floor', 0.014, ...
+TGT = struct('det', 0.90, 'surv', 0.90, 'rec', 0.90, 'prot', 0.90, 'fa', 0.05, 'link', link_target(p0.n_rx), 'linkt_floor', 0.014, ...
     'held_flight', false);
 TGT0 = TGT; TGT0.link = 0.014; TGT0.held_flight = true;   % the definitions printed beside: LINK via AWGN, REC/PROT per flight
 LINK_J = 0.10;                  % operating-point tag of the clean link (802.11a sensitivity PER), descriptive

@@ -855,7 +855,7 @@ for r = 1:500
 end
 verifyGreaterThanOrEqual(tc, pw / 500, 0.85);
 src = fileread(which('edge_map'));
-verifyNotEmpty(tc, strfind(src, '''link'', 0.057, ''linkt_floor'', 0.014, ...'));
+verifyNotEmpty(tc, strfind(src, '''link'', link_target(p0.n_rx), ''linkt_floor'', 0.014, ...'));
 verifyNotEmpty(tc, strfind(src, '''held_flight'', false);'));
 verifyNotEmpty(tc, strfind(src, 'TGT0 = TGT; TGT0.link = 0.014; TGT0.held_flight = true;'));
 verifyEqual(tc, numel(strfind(src, 'held_verdict(')), 7);
@@ -901,6 +901,29 @@ verifyNotEmpty(tc, strfind(src, 'LINK_J = 0.10;'));
 verifyNotEmpty(tc, strfind(src, 'up to 1e-3 packet error loss rate (3GPP TR 36.777, Table 5.1-1)'));
 verifyNotEmpty(tc, strfind(src, '''link_verdict_pre'', [CL.link_pre.verdict]'));
 verifyNotEmpty(tc, strfind(fileread(which('measure_all_kpis')), 'lt = en.link_target;'));
+end
+
+function test_edge_link_target_by_antennas(tc)
+% LINK target of edge_map.m by the profile's receive antennas (link_target.m): 3 -> 5.7%
+% (profile 1, the value edge_map.m carried as a literal), 4 -> 5.39% (profile 3), others stop.
+% Every printed LINK target reads TGT.link, so the text follows the value.
+verifyEqual(tc, link_target(3), 0.057);
+verifyEqual(tc, link_target(4), 0.0539);
+verifyEqual(tc, sprintf('%g', 100 * link_target(3)), '5.7');
+verifyEqual(tc, sprintf('%g', 100 * link_target(4)), '5.39');
+for n = [1 2 5 8]
+    verifyError(tc, @() link_target(n), 'link_target:noValue');
+end
+src = fileread(which('edge_map')); kp = fileread(which('measure_all_kpis'));
+verifyNotEmpty(tc, strfind(src, '''fa'', 0.05, ''link'', link_target(p0.n_rx), ''linkt_floor'', 0.014, ...'));
+verifyNotEmpty(tc, strfind(src, 'TGT0 = TGT; TGT0.link = 0.014;'));
+verifyEmpty(tc, [strfind(src, '0.057'), strfind(src, '0.0539'), strfind(kp, '0.057'), strfind(kp, '0.0539')]);
+verifyNotEmpty(tc, strfind(src, '100 * [TGT.det TGT.surv TGT.rec TGT.linkt_floor TGT.fa TGT.link], N_MIN, ebno_thr);'));
+verifyNotEmpty(tc, strfind(src, '''marginal (D99, descriptive, point estimate). %s.''], 100 * TGT.link, 100 * TGT0.link, 100 * LINK_J, C2REF);'));
+verifyNotEmpty(tc, strfind(src, 'strjoin(compose(''%g'', PP.ebno), ''/''), 100 * TGT.link, ...'));
+verifyNotEmpty(tc, strfind(src, '''link_target'', TGT.link,'));
+verifyNotEmpty(tc, strfind(kp, 'lt = en.link_target;'));
+verifyNotEmpty(tc, strfind(kp, 'LINK <= %g%% %s'', ...'));
 end
 
 function test_edge_linkt_unchanged(tc)
