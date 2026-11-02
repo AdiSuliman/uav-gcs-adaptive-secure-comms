@@ -120,7 +120,7 @@ if strcmp(OOD_PHASE, 'select')
         assert(isequal(F.kn(:), V.kn(:)) && isequal(F.un(:), V.un(:)), 'ood_k2_run:masks', 'the masks are not the fold''s windows');
         Q = ood_fold_metrics(Sv, V, Sv, V, SC, WALL, RETAIN);
         s0 = ood_window(Sv.last_or_if, va.run, va.pos, W0);
-        [U, Wv] = fold_models(Xtr, Xva, F, s0, fva, N, Ns, NW, W0, 9300 + h);
+        [U, Wv] = fold_models(Xtr, Xva, F, s0, fva, N, Ns, NW, W0, 9700 + h);
         Wv = [s0, Wv];                                   % windows x C0..C4, lower = more novel
         for j = 1:J
             A(h, j) = ood_k2_rules('auroc', Wv(F.kn, j), Wv(F.un, j));
@@ -131,7 +131,7 @@ if strcmp(OOD_PHASE, 'select')
                 if j == 1, Nk(h, c) = sum(m); end
             end
         end
-        Bd(:, h, :) = reshape(ood_k2_rules('boot_auroc', Wv, F.kn, F.un, sp.val.run, NB, 9400 + h), NB, 1, J);
+        Bd(:, h, :) = reshape(ood_k2_rules('boot_auroc', Wv, F.kn, F.un, sp.val.run, NB, 9800 + h), NB, 1, J);
         fprintf('    validation AUROC %s\n', strjoin(arrayfun(@(j) sprintf('%s %.3f', CN{j}, A(h, j)), 1:J, ...
             'UniformOutput', false), '  '));
         if h == 1, MpV = nan(T, numel(SC) * numel(WALL)); end
@@ -264,7 +264,7 @@ else
         p18 = Sel.nb18(h); t18 = reshape(Q4.test', 1, []); f18 = reshape(Q4.fpr', 1, []);
         A18(h) = t18(p18); FP18(h) = f18(p18);
         s18 = ood_window(St.(SC{Sel.pj(p18)}), te.run, te.pos, Sel.pw(p18));
-        Bg(:, h, :) = reshape(ood_k2_rules('boot_auroc', [Wt(:, pick(h)), s18], T4.kn, T4.un, te.run, NB, 9500 + h), NB, 1, 2);
+        Bg(:, h, :) = reshape(ood_k2_rules('boot_auroc', [Wt(:, pick(h)), s18], T4.kn, T4.un, te.run, NB, 9900 + h), NB, 1, 2);
         fprintf('[%d/%d] %-20s set 4: adopted (%s) %.3f, 18.10 procedure %.3f, C0 %.3f\n', h, T, k, CN{pick(h)}, Aad(h), ...
             A18(h), A4(h, 1));
         clear Fd te St Q4 Wt yt

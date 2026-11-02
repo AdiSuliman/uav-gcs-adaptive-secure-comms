@@ -1940,7 +1940,17 @@ verifyEqual(tc, cellfun(@(x) str2double(x{1}), regexp(src, '''Seed'', (\d+)', 't
 verifyNotEmpty(tc, strfind(src, 'fusion_adopt(''boot'', fit.run, 1000, 9102)'));
 verifyNotEmpty(tc, strfind(src, 'fusion_adopt(''boot'', fit.run(tr), 1000, 9160 + k)'));
 verifyNotEmpty(tc, strfind(fileread(which('eval_unseen_snr')), 'boot_cluster([b.correct], [b.n], 1:numel(b), 2000, 4251, double(un))'));
-for x = {q, m, h}
+% D111's streams (ood_k2_run.m: the fold models' trees 9700 + h, the validation bootstraps 9800 + h
+% and the test bootstraps 9900 + h, h one of the 10 held-out threats): each its own, none of d91's or
+% D110's. K2-1 (k2_1_screen.m, 9100 + h) was read before they were numbered; its h = 1..3 meet d91's
+% 9101-9103, bootstrap indices against trees on other data
+k2 = [9700 + (1:10), 9800 + (1:10), 9900 + (1:10)];
+verifyEqual(tc, numel(unique([k2, h, m, q])), numel([k2, h, m, q]));
+verifyEmpty(tc, intersect(k2, [h, m, q]));
+src = fileread(fullfile(tc.TestData.root, 'code', 'detection', 'ood_k2_run.m'));
+verifyEqual(tc, sort(cellfun(@(x) str2double(x{1}), regexp(src, '(\d{4}) \+ h\)', 'tokens'))), [9700 9800 9900]);
+verifyNotEmpty(tc, strfind(fileread(fullfile(tc.TestData.root, 'code', 'detection', 'k2_1_screen.m')), 'NB, 9100 + h);'));
+for x = {q, m, h, k2}
     verifyEmpty(tc, intersect(x{1}, N(:)));
     verifyLessThan(tc, max(x{1}), min(N(:)));
 end
