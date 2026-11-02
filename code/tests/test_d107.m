@@ -13,7 +13,7 @@ function setupOnce(tc)
 tc.TestData.root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
 addpath(fullfile(tc.TestData.root, 'code'));
 setup_paths;
-tc.TestData.base = '31a0f3e';                                    % the commit this branch starts from
+tc.TestData.base = 'df5cb30';                                    % the merge's first parent: tip3-lb with wf-lb and wf-spd
 end
 
 %% ---------- (a) the Clopper-Pearson bound ----------

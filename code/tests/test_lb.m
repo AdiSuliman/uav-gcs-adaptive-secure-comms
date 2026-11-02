@@ -645,18 +645,19 @@ verifyTrue(tc, all(endsWith(L(startsWith(POL, 'dqn_')), hy)));
 end
 
 function test_readers_off_is_the_parent(tc)
-% Without the stored switch the readers are the parent commit's (31a0f3e, tip3-merge before wf-lb): every parent line is in the
+% Without the stored switch the readers are the parent commit's (31a0f3e, tip3-merge before wf-lb; a8fd8f3, wf-d107's
+% tip, for train_dqn.m and policy_stamp.m, which it also edits): every parent line is in the
 % copy, in order, but the ones named here (the cache key, the entity call and header and the options of
 % the evaluations of C2g and C2u, whose opt0 is struct() without the switch); the main readers, the
 % step and the layer only add lines.
-for f = {'code/decision/evaluate_policies.m', 'code/evaluation/measure_all_kpis.m', 'code/decision/train_dqn.m', ...
-        'code/decision/policy_monitor.m'}
-    verifyEmpty(tc, parent_lines_missing(tc, '31a0f3e', f{1}), f{1});
+for f = {'code/decision/evaluate_policies.m', '31a0f3e'; 'code/evaluation/measure_all_kpis.m', '31a0f3e'; ...
+        'code/decision/train_dqn.m', 'a8fd8f3'; 'code/decision/policy_monitor.m', '31a0f3e'}'
+    verifyEmpty(tc, parent_lines_missing(tc, f{2}, f{1}), f{1});
 end
 verifyEqual(tc, parent_lines_missing(tc, '31a0f3e', 'code/decision/decision_settings.m'), ...
     {'        ''confirm_drop'', ''s1_gate'', ''s1_gate_core'', ''release_m'', ''lb_accept''}'});
 verifyNumElements(tc, parent_lines_missing(tc, '31a0f3e', 'code/decision/policy_decide.m'), 1);   % a comment line
-verifyNumElements(tc, parent_lines_missing(tc, '31a0f3e', 'code/decision/policy_stamp.m'), 2);    % two comment lines
+verifyNumElements(tc, parent_lines_missing(tc, 'a8fd8f3', 'code/decision/policy_stamp.m'), 1);    % a comment line
 miss = parent_lines_missing(tc, '31a0f3e', 'code/decision/experiment_combo_generalization.m');
 verifyEqual(tc, miss, {'keys = cellfun(@(cn) run_cache(''key'', {CID, ''C2g'', cn, H, seed, REPS, NE, TEST, DK}), combos, ''UniformOutput'', false);', ...
     'out = run_cache(''each'', CDIR, keys, @(ci) one_combo(ci, combos, PP, K, Q, H, seed, nS, TEST, REPS, NE, DK, t0), combos);', ...
