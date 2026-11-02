@@ -694,3 +694,43 @@ O = wf_options([], 'none.json'); verifyFalse(tc, O.k6split);
 f = [tempname '.json']; fid = fopen(f, 'w'); fprintf(fid, '{"k6_split": true}'); fclose(fid);
 O = wf_options([], f); verifyTrue(tc, O.k6split); delete(f);
 end
+
+%% ---------- item 3: receiver-robust side column of KPI 8 (rr_column.m, rr_us.m) ----------
+function test_rr_column_words(tc)
+verifyEqual(tc, rr_column([0.5 1.2], 0.4), 'yes');               % lower bound above U_s
+verifyEqual(tc, rr_column([-1.2 -0.5], 0.4), 'yes');             % upper bound below -U_s
+verifyEqual(tc, rr_column([0.2 1.0], 0.4), 'no');                % clears 0 but not by more than U_s
+verifyEqual(tc, rr_column([-0.3 0.9], 0.4), 'no');
+verifyEqual(tc, rr_column([0.4 1.0], 0.4), 'no');                % equal to U_s is not more than U_s
+verifyEqual(tc, rr_column([0.1 0.2], 0), 'yes');                 % U_s = 0: the plain interval test
+verifyEqual(tc, rr_column([0.5 1.2], NaN), 'n/a');               % units U_s does not cover
+verifyEqual(tc, rr_column([0.5 1.2], []), 'n/a');
+verifyEqual(tc, rr_column([NaN 1.2], 0.4), 'n/a');
+verifyError(tc, @() rr_column([0.5 1.2], -1), 'rr_column:us');
+end
+
+function test_rr_us_reads_d2c_file_or_gives_nan(tc)
+d = tempname; mkdir(d);
+Us0 = rr_us(fullfile(d, 'none.mat'));
+verifyTrue(tc, isnan(Us0.per) && isnan(Us0.gput) && isnan(Us0.trec));
+Us = struct('per', 0.01, 'gput', 500); save(fullfile(d, 'u.mat'), 'Us');   % no trec: its units are not covered
+U1 = rr_us(fullfile(d, 'u.mat'));
+verifyEqual(tc, [U1.per U1.gput], [0.01 500]); verifyTrue(tc, isnan(U1.trec));
+verifyEqual(tc, {rr_column([0.02 0.05], U1.per), rr_column([1 2], U1.trec)}, {'yes', 'n/a'});
+rmdir(d, 's');
+end
+
+function test_rr_column_wiring_static_and_parse(tc)
+src = fileread(which('experiment_core_bw'));
+verifyNumElements(tc, regexp(src, 'rr_column\(', 'match'), 3);
+verifyNumElements(tc, regexp(src, 'Us = rr_us\(\)', 'match'), 1);
+verifyNotEmpty(tc, strfind(src, 'the registered pair above stands'));
+for f = {'rr_column', 'rr_us'}
+    s = fileread(which(f{1}));
+    for tf = {'healthy', 'harmed', 'sc_eff', '\.ended'}
+        verifyEmpty(tc, regexp(s, tf{1}, 'once'), sprintf('%s reads %s', f{1}, tf{1}));
+    end
+    mtree(which(f{1}), '-file');
+end
+mtree(which('experiment_core_bw'), '-file');
+end
