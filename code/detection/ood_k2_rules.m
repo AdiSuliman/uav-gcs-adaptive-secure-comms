@@ -114,7 +114,7 @@ switch cmd
         assert(isfile(f) && committed(f), 'ood_k2_rules:select_record', ...
             '%s is missing, not committed or changed since: the read phase needs the committed select record', f);
         L = strtrim(splitlines(fileread(f)));
-        v = regexp(L, '^verdict (C[0-4])\b', 'tokens', 'once'); v = v(~cellfun(@isempty, v));
+        v = regexp(L, '^verdict (C[0-4])(?=\s|$)', 'tokens', 'once'); v = v(~cellfun(@isempty, v));
         assert(numel(v) == 1, 'ood_k2_rules:select_record', '%s holds no single verdict line', f);
         varargout = {v{1}{1}, L(startsWith(L, 'rule_sha256 ')), L(startsWith(L, 'input_sha256 '))};
     case 'commit'
