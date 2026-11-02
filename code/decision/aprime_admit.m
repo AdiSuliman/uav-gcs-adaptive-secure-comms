@@ -13,7 +13,7 @@ function [ADM, L] = aprime_admit(A, bound)
 %   (a) for every run and for the seed mean, the one-sided 95% Clopper-Pearson upper bound of the
 %       false-alarm episodes on the clean validation flights is at most bound
 %   (b) harmed S1 recovered (the recoverable episodes of antenna_fault and airframe_shadowing in
-%       a geometry that no response restores), no-threat minus grid, per-episode seed means,
+%       a geometry that no response does not restore), no-threat minus grid, per-episode seed means,
 %       paired: the cluster bootstrap over (geometry, Eb/N0) of the mean difference, 10000
 %       resamples, Holm across the penalties (holm_lower.m); its lower bound above 0
 %   (b') none of antenna_fault's harmed geometries has a negative seed-mean paired difference

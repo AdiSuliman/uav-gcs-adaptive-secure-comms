@@ -387,7 +387,7 @@ end
 % threshold of the plain selection with the grid's settings, cost scales, discount factor and seeds,
 % each run is paired with its grid run, and both are read on the same validation episodes (common
 % random numbers) as deployed without the escalation: held and recovered on the recoverable
-% episodes, the harmed (no response restores the geometry) and the covered apart, and the false
+% episodes, the harmed (no response does not restore the geometry) and the covered apart, and the false
 % alarms on the clean validation flights. aprime_admit.m judges each penalty on these readings
 % alone; the runs of an admissible penalty join the selection without the escalation and
 % select_run picks among them and every plain candidate. Every per-episode reading and both agents
