@@ -274,3 +274,73 @@ function test_measure_all_kpis_m_file_parses(tc)
 mtree(which('measure_all_kpis'), '-file');
 verifyTrue(tc, true);
 end
+
+%% ---------- item 13: joint, power-weighted CFO across antennas (diagnostic) ----------
+function [G, tb] = cfo_fixture(rs, f0, fd, NR, NB, dt, snr_db)
+% NR independent Rayleigh antennas (Jakes sum of sinusoids, max Doppler fd), a common
+% offset f0 [Hz], complex noise at snr_db against the mean power.
+tb = (0:NB-1) * dt;
+G = complex(zeros(NR, NB));
+for r = 1:NR
+    th = 2 * pi * rand(rs, 16, 1); ph = 2 * pi * rand(rs, 16, 2);
+    fdn = fd * cos(th);
+    G(r, :) = (exp(1j * ph(:, 1)).' * exp(1j * 2 * pi * fdn * tb) ...
+        + 1j * exp(1j * ph(:, 2)).' * exp(1j * 2 * pi * (fd * sin(th)) * tb)) / sqrt(16 * 2);
+end
+G = G .* exp(1j * 2 * pi * f0 * tb) + 10^(-snr_db / 20) * (randn(rs, NR, NB) + 1j * randn(rs, NR, NB)) / sqrt(2);
+end
+
+function test_cfo_joint_exact_without_fading(tc)
+% Constant gains with a different phase per antenna and one common offset: the per-antenna
+% slope and the joint estimate both recover it, the residual is nil.
+tb = (0:11) * 2e-4;
+G = [1; 0.5; 2] .* exp(1j * [0.3; -2; 1]) .* exp(1j * 2 * pi * 700 * tb);
+S = cfo_joint(G, tb);
+verifyEqual(tc, S.slope_hz, 700 * ones(3, 1), 'AbsTol', 1e-3);
+verifyEqual(tc, S.joint_hz, 700, 'AbsTol', 1e-3);
+verifyEqual(tc, S.resid_hz, zeros(3, 1), 'AbsTol', 1e-3);
+verifyEqual(tc, S.resid_rad, zeros(3, 1), 'AbsTol', 1e-6);
+verifyEqual(tc, S.spread_hz, 0, 'AbsTol', 1e-3);
+verifyEqual(tc, sum(S.w), 1, 'AbsTol', 1e-12);
+end
+
+function test_cfo_joint_beats_per_antenna_slope_in_fades(tc)
+% Random FM near deep fades: on 400 fixed-seed 3-antenna Rayleigh frames at 161 km/h's
+% Doppler (358 Hz), the joint power-weighted estimate has a smaller RMS error than the
+% per-antenna slopes, and the per-antenna slopes spread well above the maximum Doppler.
+rs = RandStream('mt19937ar', 'Seed', 13);
+f0 = 500; ej = zeros(400, 1); es = zeros(400, 3); sp = zeros(400, 1);
+for k = 1:400
+    [G, tb] = cfo_fixture(rs, f0, 358, 3, 16, 2e-4, 15);
+    S = cfo_joint(G, tb);
+    ej(k) = S.joint_hz - f0; es(k, :) = (S.slope_hz - f0).'; sp(k) = S.spread_hz;
+end
+verifyLessThan(tc, sqrt(mean(ej.^2)), sqrt(mean(es(:).^2)));
+verifyLessThan(tc, median(abs(ej)), median(abs(es(:))));
+verifyGreaterThan(tc, median(sp), 100);
+end
+
+function test_cfo_joint_zero_antenna_carries_no_weight(tc)
+tb = (0:11) * 2e-4;
+G = [1; 0; 2] .* exp(1j * 2 * pi * 300 * tb);
+S = cfo_joint(G, tb);
+verifyEqual(tc, S.w(2), 0, 'AbsTol', 1e-12);
+verifyTrue(tc, isnan(S.slope_hz(2)));
+verifyEqual(tc, S.joint_hz, 300, 'AbsTol', 1e-3);
+end
+
+function test_cfo_joint_too_few_blocks_is_nan(tc)
+S = cfo_joint(ones(3, 2), [0 1e-4]);
+verifyTrue(tc, isnan(S.joint_hz));
+verifyError(tc, @() cfo_joint(ones(3, 4), [0 1e-4]), 'cfo_joint:size');
+end
+
+function test_cfo_joint_static_no_truth_and_parses(tc)
+src = fileread(which('cfo_joint'));
+for tf = {'healthy', 'harmed', 'sc_eff', '\.ended', 'truth', 'cfo_true'}
+    verifyEmpty(tc, regexp(src, tf{1}, 'once'), sprintf('cfo_joint reads %s', tf{1}));
+end
+mtree(which('cfo_joint'), '-file');
+mtree(which('test_d121'), '-file');
+verifyTrue(tc, true);
+end
