@@ -321,7 +321,10 @@ STEPS(end+1) = struct('name', 'unknown-threat flag: classes overridden, retentio
 STEPS(end+1) = struct('name', 'escalation on a drop alarm read as none', 'var', {{struct('esc_drop', false), struct('esc_drop', true)}});
 iref = find(strcmp({ENT.alarm}, sprintf('class_drop %d/%d', CD.confirm)), 1);   % the reference monitor at its own threshold
 if isempty(iref), iref = 1; end
-jr = find(strcmp({ENT.alarm}, ENT(iref).alarm)); iref = jr(ceil(numel(jr) / 2));
+jr = find(strcmp({ENT.alarm}, ENT(iref).alarm));
+b0 = drops_of(ENT(iref).alarm, MONP, DROP_MODE, DROP_DB, THC, 0, DROP_FLOOR);   % the monitor's own threshold
+[~, m0] = min(abs([ENT(jr).drop] - b0)); if ~isfinite(b0), m0 = ceil(numel(jr) / 2); end
+iref = jr(m0);
 PPr = with_entry(PP, ENT(iref), DROP_MODE);
 if WF.s1g                                           % the rule's lost-branch gate first among the rule settings
     S0.s1_gate = false;

@@ -658,6 +658,33 @@ o = fh(ADM, AR, runs, WFyes, 0.05, n_plain, {}, {'s1_gate'}, aprime, cand0, best
 verifyEqual(tc, o.WFF, {'s1_gate', 'aprime_admission'});
 end
 
+%% ---------- the reference entry of C2's rule settings ----------
+function test_reference_entry_is_the_monitors_own_threshold(tc)
+% The rule settings are tuned at the grid entry equal to the monitor's own drop threshold, also where
+% the neighbours are clamped (first CUSUM grid index) or filtered (class_drop below the floor), where
+% the middle entry is a neighbour.
+src = read_lf('train_dqn');
+verifyNotEmpty(tc, strfind(src, 'b0 = drops_of(ENT(iref).alarm, MONP, DROP_MODE, DROP_DB, THC, 0, DROP_FLOOR);'));
+verifyNotEmpty(tc, strfind(src, '[~, m0] = min(abs([ENT(jr).drop] - b0));'));
+verifyEmpty(tc, strfind(src, 'jr(ceil(numel(jr) / 2))'));
+G = 5 * (1:10);
+mp = @(p) struct('monitor', {'m'}, 'pick', {p}, 'grid', {G});
+for j = [1 2 5 10]                                  % CUSUM grid: first index, interior, last index
+    M = mp(G(j));
+    ent = drops_of('m', M, 'class_cusum', 36, G, [-2 0 2], 0);
+    b0 = drops_of('m', M, 'class_cusum', 36, G, 0, 0);
+    [~, m] = min(abs(ent - b0));
+    verifyEqual(tc, ent(m), G(j));
+end
+for p = [3 4 6]                                     % class_drop: floor filters the lower step at 3
+    M = struct('monitor', {'m'}, 'pick', {p});
+    ent = drops_of('m', M, 'class_drop', 36, G, [-2 0 2], 1);
+    b0 = drops_of('m', M, 'class_drop', 36, G, 0, 1);
+    [~, m] = min(abs(ent - b0));
+    verifyEqual(tc, ent(m), p);
+end
+end
+
 %% ---------- the pipeline warning, the seeds guard, the comment ----------
 function test_reproduced_mismatch_warns_and_stays_out_of_the_rule(tc)
 src = read_lf('train_dqn');
