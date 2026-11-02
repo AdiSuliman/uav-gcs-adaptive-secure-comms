@@ -5,14 +5,16 @@ function O = wf_options(cfg, f)
 %   dconf_select   C1d chooses the drop alarm's own confirmation per monitor (choose_drop_threshold.m)
 %   s1g_select     C2 chooses the rule's lost-branch gate first among the rule settings (train_dqn.m)
 %   relm_select    C2 scores the release on evidence on the selected agent (train_dqn.m)
+%   k6_split       C1d prints the clean false changes of the adopted monitors in bins of link K, speed, bank and
+%                  hiding geometry (choose_drop_threshold.m, kpi6_split.m; D121 items 12 and 15, descriptive)
 %   dconf_own      with dconf_select: a candidate's threshold by its own drop-path count (dconf_step.m, D121 item 6)
 %   r9_print       the per-Eb/N0 rows with their intervals and tags (ebno_rows.m)
-%   O.dconf, O.s1g, O.relm, O.r9, O.dconf_own: logical. Without the file, or a field, a step does not run and
+%   O.dconf, O.s1g, O.relm, O.r9, O.dconf_own, O.k6split: logical. Without the file, or a field, a step does not run and
 %   the stage's outputs are those of before. O.force: the smoke's forced cells (wf_force.m).
 if nargin < 1, cfg = []; end
 if nargin < 2 || isempty(f), f = 'profile.json'; end
-nm = {'dconf_select', 'dconf'; 's1g_select', 's1g'; 'relm_select', 'relm'; 'r9_print', 'r9'; 'dconf_own', 'dconf_own'};
-O = struct('dconf', false, 's1g', false, 'relm', false, 'r9', false, 'dconf_own', false);
+nm = {'dconf_select', 'dconf'; 's1g_select', 's1g'; 'relm_select', 'relm'; 'r9_print', 'r9'; 'dconf_own', 'dconf_own'; 'k6_split', 'k6split'};
+O = struct('dconf', false, 's1g', false, 'relm', false, 'r9', false, 'dconf_own', false, 'k6split', false);
 O.force = wf_force('read', cfg, f);
 P = struct();
 if isfile(f)

@@ -286,6 +286,7 @@ if isempty(CV)
 else
     PPm = PP; PPm.alarm_mode = drop_alarm;
     [PPw, Kw] = clean_world(PPm, CV);
+    if WFo.k6split, PPw.record_los_k = true; end            % D121 item 12: the trace also carries the receiver's K estimate
     [spc, ncl] = clean_wide_specs(PPm, CV, EBNO_THR, T);
     Tc = monitor_trace(PPw, Kw, spc, VA, 41000);
     Tc = trim_trace(Tc, ncl);
@@ -401,12 +402,40 @@ if ~isempty(CV)
     fid = fopen('results/drop_threshold.txt', 'a'); fprintf(fid, '%s\n', rc{:}); fclose(fid);
     fprintf('%s\n', rc{:});
 end
+%% 5c. D121 items 12 and 15: the clean false changes in bins of link K, speed, bank and hiding geometry (descriptive)
+% Only with "k6_split": true (wf_options.m). The monitor's confirmed alarm at each adopted monitor's pick bounds every policy's
+% first change on these flights (monitor_trace.m); K is the receiver's own estimate (the fused window's los_k, a median over
+% the flight's cycles), bank, speed and the hiding geometry (clean_hides.m, the nominal shadowing level, no loss applied) are
+% the flight's draws (CV.cov). Never selects anything.
+K6S = [];
+if WFo.k6split && ~isempty(CV) && isfield(CV, 'cov')
+    C6 = decision_config(); ix6 = sub2ind(size(CV.cov.bank), Tc.s, Tc.r);
+    S6 = load('params.mat'); p6 = S6.params; p6.quiet_build = true;
+    lk6 = nan(1, ncl); if isfield(Tc, 'lk'), lk6 = median(Tc.lk, 2, 'omitnan')'; end
+    Hh6 = clean_hides(CV.cov, CV.ebno, p6, C6.sev.airframe_shadowing.levels(C6.nominal), C6.event_frame, C6.event_count);
+    cov6 = struct('lk', lk6, 'speed', CV.cov.speed(ix6)', 'speed_bins', linspace(PP.speed_range(1), PP.speed_range(2), 5), ...
+        'bank', CV.cov.bank(ix6)', 'hide', Hh6(ix6)');
+    fl6 = false(numel(MON), ncl);
+    for m = 1:numel(MON)
+        cd6 = []; if isfield(MONP, 'confirm_drop'), cd6 = MONP(m).confirm_drop; end
+        fl6(m, :) = any(monitor_confirm(Tc, drop_alarm, MONP(m).pick, MONP(m).cf, confirm_sweep, cd6), 2)';
+    end
+    [K6S, l6] = kpi6_split(fl6, 1000 * Tc.s + Tc.r, cov6, cellfun(@(n) ['monitor ' n], MON, 'UniformOutput', false));
+    l6{end+1} = sprintf(['  (C1d, clean validation flights, %d episodes, the monitor''s confirmed alarm at its adopted threshold; the hiding ' ...
+        'condition is read at the nominal shadowing level %g dB; link K needs the fusion in PP: %s)'], ncl, ...
+        C6.sev.airframe_shadowing.levels(C6.nominal), ternary(any(isfinite(lk6)), 'present', 'absent, K bins empty'));
+    fid = fopen('results/drop_threshold.txt', 'a'); fprintf(fid, '%s
+', l6{:}); fclose(fid);
+    fprintf('%s
+', l6{:});
+end
 SV = {'drop_db', 'drop_db_train', 'drop_from', 'separable', 'THR', 'kept', 'leak', 'leak_all', ...
     'p95_mis', 'p99_cl', 'p05_pl', 'floor_db', 'drop_alarm', 'cusum_db', 'THC', 'VAL', 'CF', 'EBNO_THR', 'MONP', 'confirm_sweep', 'CAL35'};
 if ~isempty(DEG)                                           % deployed by train_dqn.m (PP.deg_mode, PP.ber_q)
     deg_mode = DEG.mode; ber_q = DEG.ber_q; SV = [SV, {'deg_mode', 'ber_q', 'DEG'}];
 end
 if ~isempty(DCONF), SV = [SV, {'DCONF'}]; end         % saved with MONP.confirm_drop
+if ~isempty(K6S), SV = [SV, {'K6S'}]; end
 save('data/drop_threshold.mat', SV{:});
 fprintf('\nSaved data/drop_threshold.mat, results/drop_threshold.txt\n');
 

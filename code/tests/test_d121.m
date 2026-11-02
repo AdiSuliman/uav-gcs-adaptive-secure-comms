@@ -586,3 +586,111 @@ verifyNotEmpty(tc, regexp(mk, 'speed_ne', 'once'));
 mtree(which('speed_nonemitter'), '-file'); mtree(which('evaluate_policies'), '-file'); mtree(which('measure_all_kpis'), '-file');
 verifyTrue(tc, true);
 end
+
+%% ---------- items 12 and 15: KPI 6 split by link K, speed, bank and hiding geometry ----------
+function [flag, geom, cov] = split_world()
+% 60 episodes on 30 geometries; policy 1 false-changes exactly on the K < 0 flights, policy 2 on bank >= 40 deg.
+lk = [-5 * ones(1, 20), zeros(1, 10), 5 * ones(1, 10), 10 * ones(1, 10), 15 * ones(1, 10)];
+cov = struct('lk', lk, 'speed', repmat([20 60 100 140], 1, 15), 'speed_bins', [0 40 80 120 160], ...
+    'bank', repmat([0 19.9 20 -39.9 -40 60], 1, 10), 'hide', mod(1:60, 6) == 0);
+flag = [lk < 0; abs(cov.bank) >= 40];
+geom = repelem(1:30, 2);
+end
+
+function test_kpi6_split_counts_and_edges(tc)
+[flag, geom, cov] = split_world();
+[S, lines] = kpi6_split(flag, geom, cov, {'p1', 'p2'}, 200);
+vk = S.var(strcmp({S.var.name}, 'estimated link K'));
+verifyEqual(tc, vk.n(1, :), [20 20 20]);                             % K = 0 is the middle bin, K = 10 the top bin
+verifyEqual(tc, vk.k(1, :), [20 0 0]);
+verifyEqual(tc, vk.pct(1, :), [100 0 0]);
+vb = S.var(strcmp({S.var.name}, 'bank'));
+verifyEqual(tc, vb.n(1, :), [sum(abs(cov.bank) < 20), sum(abs(cov.bank) >= 20 & abs(cov.bank) < 40), sum(abs(cov.bank) >= 40)]);
+verifyEqual(tc, vb.k(2, :), [0 0 sum(abs(cov.bank) >= 40)]);
+vs = S.var(strcmp({S.var.name}, 'speed'));
+verifyEqual(tc, vs.n(1, :), [15 15 15 15]);
+vh = S.var(strcmp({S.var.name}, 'hiding geometry'));
+verifyEqual(tc, vh.n(1, :), [10 50]);
+verifyEqual(tc, S.hide_share(1), 100 * 10 / 60, 'AbsTol', 1e-9);
+for v = 1:numel(S.var)
+    verifyEqual(tc, sum(S.var(v).n, 2)', [60 60]);
+end
+verifyTrue(tc, any(contains(lines, 'D121 items 12 and 15')));
+end
+
+function test_kpi6_split_interval_is_the_cluster_bootstrap(tc)
+[flag, geom, cov] = split_world();
+flag(1, :) = mod(geom, 3) == 0;                                      % a flag that varies within the bins
+[S, ~] = kpi6_split(flag, geom, cov, {'p1', 'p2'}, 300, 6101);
+vk = S.var(1);
+m = cov.lk < 0;
+[q, lo, hi] = boot_cluster(double(flag(1, m)), ones(1, sum(m)), geom(m), 300, 6101 + 100 * 1 + 10 * 1 + 1);
+verifyEqual(tc, [vk.pct(1, 1), squeeze(vk.ci(1, 1, :))'], 100 * [q lo hi], 'AbsTol', 1e-9);
+verifyEqual(tc, vk.ncl(1, 1), numel(unique(geom(m))));
+end
+
+function test_kpi6_split_without_k_or_hiding(tc)
+[flag, geom, cov] = split_world();
+cov.lk(:) = NaN; cov = rmfield(cov, 'hide');
+[S, lines] = kpi6_split(flag, geom, cov, {'p1', 'p2'}, 100);
+verifyEqual(tc, S.var(1).n, zeros(2, 3));                            % no K: every episode outside the bins
+verifyNumElements(tc, S.var, 3);
+verifyTrue(tc, all(isnan(S.hide_share)));
+verifyFalse(tc, any(contains(lines, 'hiding condition')));
+end
+
+function test_los_k_record_is_off_by_default_and_changes_nothing(tc)
+% The monitor's K record: absent without PP.record_los_k (the field is not created); with it, the
+% monitor's every other field is the same and the K column is NaN where no fusion runs.
+na = find(strcmp(policy_actions(), 'no_action'));
+[obs, PP] = lb_fixture(4, 0.6, false);
+[~, memA] = step(obs, na, [], PP);
+verifyFalse(tc, isfield(memA, 'los_k'));
+PP.record_los_k = true;
+[~, memB] = step(obs, na, [], PP);
+verifyTrue(tc, isfield(memB, 'los_k') && all(isnan(memB.los_k)));
+verifyEqual(tc, rmfield(memB, 'los_k'), memA);
+names = window_cues('names');
+verifyEqual(tc, sum(strcmp(names, 'los_k')), 1);
+end
+
+function test_clean_hides_matches_hides_antenna(tc)
+% clean_hides.m is hides_antenna.m on the flight's draws with shadowing switched on; below the speed floor no flight hides.
+d0 = tempname; mkdir(d0); c0 = cd(d0); back = onCleanup(@() cd(c0));   % init_params writes params.mat into the folder it runs in
+evalc('init_params'); p0 = load('params.mat').params; p0.quiet_build = true;
+cd(c0); rmdir(d0, 's');
+C = decision_config(); lv = C.sev.airframe_shadowing.levels(C.nominal);
+sd = 100 + (1:6); v = [161 161 161 161 161 0];
+cov = struct('seed', sd, 'speed', v, 'alt_m', 120 * ones(1, 6), 'k_sig', 10 * ones(1, 6), 'aoa', nan(1, 6, 3), 'rho', 0.3 * ones(1, 6));
+cov.aoa(1, :, 1) = 20;
+H = clean_hides(cov, 10, p0, lv, C.event_frame, C.event_count);
+ps = p0; ps.active_threat = 'airframe_shadowing'; ps.shadow_db = lv;
+for r = 1:6
+    h = hides_antenna(sd(r), v(r), ps, struct('ebno', 10, 'alt_m', 120, 'k_sig_db', 10, 'aoa1_deg', 20, 'rho', 0.3, ...
+        'event_frame', C.event_frame, 'frames', C.event_count));
+    verifyEqual(tc, H(r), h);
+end
+verifyFalse(tc, H(6));
+cov.seed(2) = NaN;
+H2 = clean_hides(cov, 10, p0, lv, C.event_frame, C.event_count);
+verifyFalse(tc, H2(2));                                              % a missing draw is not a hiding flight
+end
+
+function test_k6_split_wiring_static_and_parse(tc)
+src = fileread(which('choose_drop_threshold'));
+verifyNumElements(tc, regexp(src, 'WFo\.k6split', 'match'), 2);
+verifyNumElements(tc, regexp(src, 'kpi6_split\(', 'match'), 1);
+verifyNumElements(tc, regexp(src, 'clean_hides\(', 'match'), 1);
+verifyNumElements(tc, regexp(src, 'record_los_k', 'match'), 1);
+for f = {'kpi6_split', 'clean_hides', 'monitor_trace'}
+    s = fileread(which(f{1}));
+    for tf = {'healthy', 'harmed', 'sc_eff', '\.ended'}
+        verifyEmpty(tc, regexp(s, tf{1}, 'once'), sprintf('%s reads %s', f{1}, tf{1}));
+    end
+    mtree(which(f{1}), '-file');
+end
+mtree(which('policy_monitor'), '-file'); mtree(which('choose_drop_threshold'), '-file');
+O = wf_options([], 'none.json'); verifyFalse(tc, O.k6split);
+f = [tempname '.json']; fid = fopen(f, 'w'); fprintf(fid, '{"k6_split": true}'); fclose(fid);
+O = wf_options([], f); verifyTrue(tc, O.k6split); delete(f);
+end

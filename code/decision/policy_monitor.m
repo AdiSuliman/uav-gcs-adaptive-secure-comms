@@ -331,6 +331,8 @@ if isfield(cu, 'held') && cu.held && size(g, 2) > 1
 end
 nC = size(obs.probs, 2);
 pf = obs.probs; te = zeros(NE, numel(temporal_evidence('names', nC)) - nC);
+rec_lk = isfield(PP, 'record_los_k') && PP.record_los_k;  % D121 item 12: the receiver's own K estimate per cycle, a reading only
+if rec_lk, lk = nan(NE, 1); ilk = find(strcmp(window_cues('names'), 'los_k'), 1); end
 for n = unique(mem.wn)                                     % episodes with the same filled window length
     e = find(mem.wn == n);
     k = W - min(n, N) + 1:W;
@@ -342,10 +344,12 @@ for n = unique(mem.wn)                                     % episodes with the s
         h = {}; if ~isempty(Hx), h = {Hx(e, :)}; end
         Xe = window_cues('extra', mem.wg(e, :, k), mem.wf(e, :, k), mem.wi(e, :, k), cu, h{:});
         pf(e, :) = fuse_classes('apply', PP.fuse, [Z, Zc, log(max(double(mem.wp(e, :, W)), 1e-6)), Xe]);
+        if rec_lk, lk(e) = Zc(:, ilk); end
     end
     ku = W - min(n, Nu) + 1:W;
     mem.unk_now(e) = mean(mem.wu(e, ku), 2) < PP.maha_thr;
 end
+if rec_lk, mem.los_k = lk; end
 unk = obs.unknown(:)';                                     % the monitor's own threshold PP.maha_thr wherever a score is read
 if ~all(isnan(mh)), unk = mem.unk_now(:)' | (obs.unknown(:)' & isinf(mh(:)')); end
 end
