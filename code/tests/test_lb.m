@@ -398,6 +398,9 @@ i2 = strfind(src, 'if LBo.on');
 i3 = strfind(src, '%% 5. Gate, deployed policy and report');
 verifyNumElements(tc, i0, 1); verifyNumElements(tc, i1, 1); verifyNumElements(tc, i2, 1); verifyNumElements(tc, i3, 1);
 verifyTrue(tc, i1 < i0 && i0 < i2 && i2 < i3);
+iR = strfind(src, 'RELM = struct(''adopt'', false)');             % the release on evidence is scored after this step, on the agent as stored
+verifyNumElements(tc, iR, 1); verifyTrue(tc, i2 < iR && iR < i3);
+verifyNotEmpty(tc, strfind(src, 'if ~isempty(LBR), PPsel.lb_complete = LBon; end'));
 body = src(i2:i3);
 for s = {'lb_readings(', 'lb_selfcheck()', 'lb_adopt(LBX, FA_BOUND, LBok)'}
     verifyNotEmpty(tc, strfind(body, s{1}), s{1});
