@@ -523,7 +523,7 @@ if isfile(F.pol)
     end
     st7 = status(lat_ok && max(pv) - min(pv) <= 10, stale);
     if isfield(P.KP, 'speed_union') && ~isempty(P.KP.speed_union) && strcmp(P.KP.speed_union.mode, 'verdict')
-        st7 = status(lat_ok && P.KP.speed_union.met, stale);          % the union line is the speed verdict (speed_options.m)
+        st7 = status(lat_ok && P.KP.speed_union.met, stale); st7 = speed_status_word(st7, P.KP.speed_union);   % the union line is the speed verdict (speed_options.m)
     end
     if (lat_pending || sl.stale) && ~stale, st7 = 'PENDING'; end   % the deployed chain not timed yet
     KPI(end+1) = kpi(7, 'Decision time and robustness', latv, 'median < 10 ms, p95 < 20 ms; spread <= 10 points over the speed envelope', ...

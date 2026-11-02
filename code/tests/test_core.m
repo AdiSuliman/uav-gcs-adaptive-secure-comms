@@ -8477,6 +8477,22 @@ for g = {'choose_drop_threshold', 'edge_map'}
 end
 end
 
+function test_kpi7_status_carries_not_committed(tc)
+% The KPI 7 status row says 'MET (not committed)' when the union word does (D117 point 1); other
+% statuses and words are unchanged
+nc = struct('word_union', 'MET (not committed)'); cm = struct('word_union', 'MET (committed)');
+verifyEqual(tc, speed_status_word('MET', nc), 'MET (not committed)');
+verifyEqual(tc, speed_status_word('MET', cm), 'MET');
+verifyEqual(tc, speed_status_word('MET', struct('word_union', 'NOT MET')), 'MET');
+verifyEqual(tc, speed_status_word('NOT MET', nc), 'NOT MET');
+verifyEqual(tc, speed_status_word('STALE', nc), 'STALE');
+verifyEqual(tc, speed_status_word('MET', struct()), 'MET');
+verifyEqual(tc, speed_status_word('MET', []), 'MET');
+src = fileread(which('measure_all_kpis'));
+verifyNumElements(tc, strfind(src, 'st7 = speed_status_word(st7, P.KP.speed_union);'), 1);
+verifyLessThan(tc, strfind(src, 'st7 = speed_status_word('), strfind(src, 'st7 = ''PENDING'''));
+end
+
 function test_reward_needs_plr(tc)
 % The reward's restoration and the healthy link are KPI 4's test, BER and packet loss: a
 % configuration that restores the BER but not the packet loss earns at most C.q_partial, a
