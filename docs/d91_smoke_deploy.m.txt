@@ -9,15 +9,19 @@ function d91_smoke_deploy()
 %   enlarged fit set that saves the deployed fusion (SMOKE and FUSION_RULE_LOG: a failed rule
 %   is printed, not enforced), its record checked, rekey_pools on the smoke pools, then every
 %   stage that reads the fusion or the pools, in the order plan A resumes profile 1: C1d, C2,
-%   C2e, C2g, C2u (it rewrites the leave-one-out agents EDGE reads), EDGE, LAT. One line per step:
-%   V7SMOKE <step> OK | SAVED | EXPECTED <id> | ERROR <id>. Smoke numbers are not results.
+%   C2e, C2g, C2u (it rewrites the leave-one-out agents EDGE reads), EDGE, LAT. Two forced
+%   cells of the smoke: D111's select phase with the unknown-threat candidate C1 forced (dep_OODk2,
+%   before the re-key; FM.unk is marked forced), and, last because it rewrites data/fusion.mat,
+%   B2F with a candidate over the pick forced, from the kept fusion in the old layout as the live
+%   trees keep it (dep_B2Fext; the saved fusion is no deployed revision). One line per step: V7SMOKE <step> OK | SAVED | EXPECTED <id> | ERROR <id>.
+%   Smoke numbers are not results.
 root = fileparts(mfilename('fullpath')); cd(root); startup; cd(root);
-fprintf('V7SMOKE start %s in %s, pool open %d, n_rx %d\n', datestr(now), root, ~isempty(gcp('nocreate')), rx_count());
+fprintf('V7SMOKE start %s in %s, pool open %d, %s\n', datestr(now), root, ~isempty(gcp('nocreate')), profile_text());
 chain = {'A0', 'A4v', 'A5', 'A6', 'B1', 'B2', 'B2F', 'B2Fcheck', 'B3n', 'B3', 'B3m', 'B3q', 'B3a', 'B4', 'OOD', 'B4s', ...
     'B3rguard', 'C1p', 'C1c', 'SURV', 'SURV3', 'C1d', 'C2', 'C2e', 'C2g', 'C2u', 'GAL', 'OHP', 'GCSA', 'EDGE', 'LAT', ...
     'KPI', 'DASH', 'WEAK', 'RPT'};
 tail = {'B2Fpick', 'B2Fenl', 'REHEARSAL', 'B3r', 'B3ragain', 'KPI', 'RPT', 'KPI1'};
-dep = {'B2Fold', 'B2Fsave', 'REKEY', 'C1d', 'C2', 'C2e', 'C2g', 'C2u', 'EDGE', 'LAT'};
+dep = {'B2Fold', 'B2Fsave', 'OODk2', 'REKEY', 'C1d', 'C2', 'C2e', 'C2g', 'C2u', 'EDGE', 'LAT', 'B2Fext'};
 n_ok = 0; n_err = 0; t0 = tic;
 for s = [chain, strcat('tail_', tail), strcat('dep_', dep)]
     st = s{1}; t1 = tic;
@@ -106,6 +110,16 @@ switch st
         assert(strcmp(R.state, 'deployed revision') && ~isempty(R.sample), 'smoke:dep_save', 'not read as the deployed revision');
         rl = isfield(L.deployed_pick.check, 'rule_logged_only') && L.deployed_pick.check.rule_logged_only;
         out = sprintf('SAVED (rule %s)', ternary(rl, 'no on smoke data, logged only', 'yes'));
+    case 'dep_OODk2'                                     % D111's select phase, C1 forced: FM.unk marked forced, the real run's files untouched
+        ood_forced();
+        L = load('data/fusion.mat', 'FM');
+        assert(isfield(L.FM, 'unk') && isfield(L.FM.unk, 'cand') && strcmp(L.FM.unk.cand, 'C1') && ...
+            isfield(L.FM.unk, 'forced') && isequal(L.FM.unk.forced, true), 'smoke:dep_ood', 'FM.unk is missing or not marked forced');
+        for f = {'results/d111_ood_select_smoke.txt', 'results/ood_k2_smoke_select.txt', 'results/ood_k2_smoke_select.mat'}
+            assert(isfile(f{1}), 'smoke:dep_ood', 'no %s', f{1});
+        end
+        assert(~isfile('results/ood_k2_select.mat') && ~isfile('docs/d111_ood_select_p3.txt'), 'smoke:dep_ood', 'the real run''s select files exist');
+        out = 'SAVED (FM.unk C1, forced)';
     case 'dep_REKEY'                                     % the smoke pools take the deployed fusion without a rebuild
         A = load('data/policy_pools.mat', 'PP'); id0 = A.PP.det_id;
         rekey_pools();
@@ -119,6 +133,19 @@ switch st
         end
         if isfile('data/check_pools.mat'), C = load('data/check_pools.mat', 'CK'); assert(strcmp(C.CK.det_id, id1), 'smoke:rekey', 'check pools det_id %s', C.CK.det_id); end
         out = sprintf('OK (det_id %s -> %s)', id0, id1);
+    case 'dep_B2Fext'                                    % a candidate over the pick, forced: saved with its own revision id, never a reading
+        old_fusion();                                    % select_fusion:pick_base: the kept fusion must be the rule's base, not the pick deployed
+        b2f_ext();
+        P = fusion_pick('GCC+CFAR');
+        L = load('data/fusion.mat', 'fusion_rev', 'deployed_pick', 'base_fm');
+        assert(isequal(rmfield(L.deployed_pick, 'check'), P) && isfield(L.deployed_pick.check, 'ext') && L.deployed_pick.check.ext.adopted && isstruct(L.base_fm), ...
+            'smoke:dep_ext', 'deployed_pick is not the forced candidate''s');
+        assert(strcmp(L.fusion_rev, fusion_rev_id('enlarged', P)) && ~strcmp(L.fusion_rev, fusion_rev_id('enlarged')), ...
+            'smoke:dep_ext', 'fusion_rev %s', L.fusion_rev);
+        R = fusion_reading('_fresh2');
+        assert(isempty(R.state) && isempty(R.sample), 'smoke:dep_ext', 'the forced candidate reads as ''%s''', R.state);
+        assert(strcmp(deploy_state(), 'none'), 'smoke:dep_ext', 'the forced candidate is a deployed state');
+        out = sprintf('SAVED (%s forced, rule %s)', P.ext.pick, ternary(L.deployed_pick.check.ext.ok, 'yes', 'no on smoke data, logged only'));
     otherwise
         run_stage('smoke', regexprep(st, '^(tail|dep)_', ''));
 end
@@ -162,14 +189,54 @@ SMOKE = true; FUSION_REV = true; FUSION_FIT = 'enlarged'; FUSION_RULE_LOG = true
 run('select_fusion');
 end
 
+function old_fusion()
+% The kept fusion as the live trees keep it: the old layout at the pick's N, lambda and latch (dep_B2Fold).
+b2f_old();
+P = fusion_pick();
+K = load('data/fusion.mat', 'FM', 'N', 'lambda');
+FM = K.FM; FM.latch = P.latch; N = P.N; lambda = P.lambda; %#ok<NASGU>
+save('data/fusion.mat', 'FM', 'N', 'lambda', '-append');
+end
+
+function b2f_ext()
+% The deployed path with a candidate over the pick forced (select_fusion.m: only with SMOKE and FUSION_RULE_LOG).
+SMOKE = true; FUSION_REV = true; FUSION_FIT = 'enlarged'; FUSION_RULE_LOG = true; FUSION_EXT_FORCE = 'GCC+CFAR'; %#ok<NASGU>
+run('select_fusion');
+end
+
+function ood_forced()
+% D111's select phase with the unknown-threat candidate C1 forced (ood_k2_run.m: smoke only).
+SMOKE = true; OOD_PHASE = 'select'; OOD_FORCE = 'C1'; %#ok<NASGU>
+run('ood_k2_run');
+end
+
 function det_read(DET_TEST) %#ok<INUSD>
 % eval_detector with DET_TEST set, as run_stage.m runs it.
 run('eval_detector');
 end
 
 function n = rx_count()
+% n_rx as init_params.m reads it: the profile.json of the tree, else params.mat (which says 3 before A0 has run).
 n = NaN;
+if isfile('profile.json')
+    P = jsondecode(fileread('profile.json'));
+    if isstruct(P) && isfield(P, 'n_rx'), n = P.n_rx; return; end
+end
 if isfile('params.mat'), q = load('params.mat'); if isfield(q.params, 'n_rx'), n = q.params.n_rx; end, end
+end
+
+function s = profile_text()
+% The profile's n_rx and switches as the option readers see them, on the start line.
+R = fec_rx_config(); fec = 'none'; if ~isempty(R), fec = R.mode; end
+G = deg_options(); W = wf_options(); L = lb_options(); X = speed_options(); U = unk_options();
+dc = 'none'; if ~isempty(W.force.dconf), dc = mat2str(W.force.dconf); end
+dg = 'none'; if ~isempty(G.force), dg = char(G.force); end
+s = sprintf(['n_rx %d, fec_rx %s, surv_v2 %d, deg_select %d, deg_force %s, dconf_select %d, dconf_force %s, dconf_own %d, ' ...
+    's1g_select %d, s1g_force %d, relm_select %d, relm_force %d, r9_print %d, k6_split %d, core3_pools %d, lb_select %d, ' ...
+    'lb_force %d, fa_nothreat %d, aprime_force %d, speed_inference %d, speed_band_table %d, kpi7_union %s, edge161_n %d, ' ...
+    'unseen_gap %d, k2_0 %d'], rx_count(), fec, surv_options().v2, G.on, dg, W.dconf, dc, W.dconf_own, W.s1g, W.force.s1g, ...
+    W.relm, W.force.relm, W.r9, W.k6split, W.core3, L.on, L.force, fa_nothreat_on(), W.force.aprime, X.inference, X.band_table, ...
+    X.union, X.edge161_n, unseen_gap_on(), U.k2_0);
 end
 
 function s = first_line(m)
