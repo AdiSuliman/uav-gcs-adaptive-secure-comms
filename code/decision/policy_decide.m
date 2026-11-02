@@ -17,7 +17,11 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %          rule_core_policy.m, the escalation over C.ladder_core and the link-budget match
 %          over rate_reduce alone; PP.core_wide, when set, the core rule's action for the
 %          class jamming (rule_core_policy.m wide_action); PP.core_nb, when set, its action for
-%          the class noise_burst (burst_action)
+%          the class noise_burst (burst_action);
+%          core3 (rule and rule_esc with core only): the class comes from the three-state CNN's
+%          window (obs.probs3, PP.core3_N cycles, policy_monitor.m), every other part as core;
+%          refused for any other kind, without core, without PP.core3_N, and when obs.probs3 is
+%          missing or holds NaN (never the hybrid's class in its place)
 %
 %   Link monitor, alarm confirmation and the agent's observation history:
 %   policy_monitor.m (shared). Timing constants: decision_config.m.
@@ -87,13 +91,27 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %   not make itself.
 %
 %   info: q (Q-values, dqn kinds), cls, degraded, confirmed, escalated, ber_avg, drop, drop_alarm;
-%   deg_quiet with the monitor's deg_mode 'win_q_gate'
+%   deg_quiet with the monitor's deg_mode 'win_q_gate'; with core3 also l3 (NE x 3, the window's
+%   mean log-probabilities)
 if nargin < 7, opt = struct(); end
 C = decision_config();
 if isfield(opt, 'monitor'), PP = decision_settings(PP, opt.monitor); end
 NE = numel(cfg); A = PP.actions; nA = numel(A);
 na = find(strcmp(A, 'no_action'));
 blind = startsWith(kind, 'blind');
+c3 = isfield(opt, 'core3') && opt.core3;
+if c3
+    if ~any(strcmp(kind, {'rule', 'rule_esc'})) || ~(isfield(opt, 'core') && opt.core)
+        error('policy_decide:core3', 'policy_decide: the three-state class is a core rule option, not of %s', kind);
+    end
+    if ~isfield(PP, 'core3_N') || isempty(PP.core3_N)
+        error('policy_decide:core3_N', 'policy_decide: the three-state window PP.core3_N is not set');
+    end
+    if ~isfield(obs, 'probs3') || size(obs.probs3, 1) ~= NE || size(obs.probs3, 2) ~= 3 || any(isnan(obs.probs3(:)))
+        error('policy_decide:core3_probs3', 'policy_decide: no three-state scores (obs.probs3) for every episode');
+    end
+end
+if c3 || isfield(PP, 'core3_on'), PP.core3_on = c3; end
 if blind
     obs.probs(:) = 0; obs.unknown(:) = true; obs.maha = -Inf(size(obs.unknown));
     PP.unk_mode = 'all';                              % no class survives, fused or latched
@@ -220,6 +238,7 @@ info = struct('q', q, 'cls', {M.cls}, 'degraded', M.degraded, 'confirmed', M.con
     'escalated', escalated, 'ber_avg', M.ber_avg', 'drop', M.drop, 'drop_alarm', M.drop_alarm);
 if isfield(M, 'deg_quiet'), info.deg_quiet = M.deg_quiet; end   % degraded, no RF evidence (deg_mode 'win_q_gate')
 if isfield(M, 'unk'), info.unk = M.unk; end                      % the unknown flag of U (D111, policy_monitor.m)
+if c3, info.l3 = M.l3; end                                       % the three-state window (policy_monitor.m)
 if lbon, info.lb = lbc; end                                      % changed by the link-budget completion
 if rm_on, info.relm = relm; end                  % released on evidence this cycle
 end

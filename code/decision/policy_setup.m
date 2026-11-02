@@ -6,7 +6,8 @@ function [kind, ag, opt] = policy_setup(name, Q, sel, fixed_best, fixed_mmse, ta
 %               it, when train_dqn.m deployed it so), rule_sel (rule + escalation with the
 %               monitor and settings train_dqn.m chose for it, the fallback), rule_core and
 %               blind_core (rule_esc and blind_esc on the core action set, opt.core,
-%               rule_core_policy.m), oracle
+%               rule_core_policy.m), rule_core3 (rule_core whose class comes from the
+%               three-state CNN, opt.core3, policy_monitor.m), oracle
 %               Any of them with the suffix _norelm or _nos1g is the same policy with the release on
 %               evidence (release_m) or the rule's lost-branch gate (s1_gate) switched off, with _relm
 %               or _s1g switched on: the descriptive row beside the deployed setting.
@@ -29,6 +30,7 @@ switch name
     case 'dqn_esc',    ag = Q.agents{sel};
     case 'rule_sel',   kind = 'rule_esc'; opt.monitor = Q.rule_sel;
     case 'rule_core',  kind = 'rule_esc'; opt.core = true;
+    case 'rule_core3', kind = 'rule_esc'; opt.core = true; opt.core3 = true;
     case 'blind_core', kind = 'blind_esc'; opt.core = true;
 end
 if startsWith(name, 'dqn_g'), ag = Q.agents{sscanf(name, 'dqn_g%d')}; kind = 'dqn'; end

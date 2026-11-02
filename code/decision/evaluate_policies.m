@@ -234,6 +234,11 @@ end
 if s1_off                                            % the gate on, beside the deployed rule without it
     POL = [POL, {'rule_esc_s1g'}]; LBL = [LBL, {'rule + escalation, with the lost-branch gate (descriptive; not kept at C2)'}];
 end
+c3_on = isfield(PP, 'core3_id') && ~isempty(PP.core3_id);   % the pools hold the three-state scores (build_policy_pools.m; D121 item 16, P-B)
+if c3_on                                             % last, so every other row keeps its place
+    POL = [POL, {'rule_core3'}]; LBL = [LBL, {'core: rule + escalation, three-state CNN (profile 3, P-B)'}];
+end
+nPf = numel(POL) - c3_on;                            % the policies the clean sets of C1c and the fresh set can fly: their pools carry no three-state scores
 if isfield(Q, 'dec') && isstruct(Q.dec) && isfield(Q.dec, 'lb_complete') && Q.dec.lb_complete   % the DQN rows run with the deployed switch
     for pk = find(startsWith(POL, 'dqn_')), LBL{pk} = [LBL{pk} ' + link-budget completion (hybrid)']; end
 end
@@ -316,6 +321,18 @@ if isfield(PP, 's1_gate')                                         % the rule ste
     MNOTE{end+1} = sprintf(['The rule settings were chosen after the lost-branch gate step (D113, gate %s): rule + escalation and the ' ...
         'shared settings every policy runs carry what that step kept; rule_core and rule_core3 run with those shared settings and ' ...
         'never with the gate.'], ternary(PP.s1_gate, 'on', 'off'));
+end
+if c3_on                                                          % P-B (D121 item 16)
+    MNOTE{end+1} = sprintf(['rule_core3 (profile 3, D121 item 16, P-B): the core rule whose class comes from this profile''s own B3c ' ...
+        'three-state CNN (%s, window N = %d), scored into the policy pools; its rows are labelled "profile 3" and the lecturer ' ...
+        'verdicts'' source stays as D105 and D106 register it. Its KPI 8 pair against this profile''s blind_core is read as ' ...
+        '"secondary, weakened baseline". Its clean false alarms are read on the policy pools'' clean flights; the pools of ' ...
+        'data/clean_test_pools.mat carry no three-state scores.'], PP.core3_id, PP.core3_N);
+elseif isfield(PP, 'core3_not_run')
+    MNOTE{end+1} = PP.core3_not_run;
+elseif WF.core3
+    MNOTE{end+1} = ['core3_pools is set but the policy pools hold no three-state scores: rule_core3 was not run in profile 3; ' ...
+        'CORE_BW (profile 1) is the three-state CNN''s in-loop evidence'];
 end
 rep = [rep, MNOTE];
 for si = find(~strcmp({sets.name}, 'offset'))
@@ -607,6 +624,8 @@ rep{end+1} = sprintf(['False alarms on the clean link, test pools (%d geometries
 [FAR, FD, lines] = far_report(RES(iC, :), POL, LBL, above, T, iDQN, PP.ebno, cls_list, C.period_ms);
 rep = [rep, lines];
 
+POLa = POL; LBLa = LBL; RESa = RES;                  % the clean sets of C1c and the fresh set carry no three-state scores: the sections below leave rule_core3 out
+if c3_on, POL = POL(1:nPf); LBL = LBL(1:nPf); RES = RES(:, 1:nPf); end
 % False alarms over many independent geometries: one episode per geometry (KPI 6)
 FAR_t = FAR; FD_t = FD; n_geom = 0; RW = {}; FAR_c = struct([]); FD_c = struct([]);
 if isfile('data/clean_test_pools.mat')
@@ -667,6 +686,21 @@ rep{end+1} = sprintf('False alarms on the clean link, every independent clean fl
     far_src, sum(aboveU), T, ternary(FRESH, ': already read in profile 1''s C2e, second reading, descriptive', ' -> KPI 6'));
 [FAR, FD, lines] = far_report(RU, POL, LBL, aboveU, T, iDQN, PP.ebno, cls_list, C.period_ms);
 rep = [rep, lines];
+FAR3 = []; src3 = '';
+if c3_on                                             % rule_core3 (D121 item 16): the policy pools' clean flights, the ones that carry its scores
+    R3 = RESa{iC, nPf + 1}; ab3 = above; src3 = sprintf('%d test-split', nG);
+    if ~isempty(iC2)
+        R3 = cat_struct(R3, RESa{iC2, nPf + 1}); ab3 = [ab3, PP.ebno(RESa{iC2, 1}.s) >= ebno_thr];
+        src3 = sprintf('%s + %d second-test-split', src3, nG2);
+    end
+    rep{end+1} = '';
+    rep{end+1} = sprintf(['False alarms on the clean link, rule_core3 (profile 3, D121 item 16), the clean flights of the policy pools ' ...
+        'alone: %s geometries per Eb/N0, one episode each, Eb/N0 >= %g dB, %d episodes x %d cycles; the pools of ' ...
+        'data/clean_test_pools.mat carry no three-state scores, so this row is not on the pooled KPI 6 line above'], ...
+        src3, ebno_thr, sum(ab3), T);
+    [FAR3, ~, lines] = far_report({R3}, POLa(nPf + 1), LBLa(nPf + 1), ab3, T, 1, PP.ebno, cls_list, C.period_ms);
+    rep = [rep, lines];
+end
 if FRESH
     % P1R's KPI 6 on the fresh clean test set alone, read once: the marker before its first
     % flight, a crash before the KPI 6 line recorded in it, "KPI 6 read" before the line
@@ -691,6 +725,7 @@ if FRESH
     rep = [rep, lines];
 end
 
+POL = POLa; LBL = LBLa; RES = RESa;
 % Final configuration of the deployed policy per threat (single set)
 rep{end+1} = '';
 rep{end+1} = 'Configuration at the end of the episode, deployed policy (single set): most frequent two per threat';
@@ -772,6 +807,7 @@ KP = struct('per_threat', PT, 'per_threat_sev', PTsev, 'threats', {threats}, 're
     'kpi4_h_met', kpi4h, 'envelope_h', ENVh, 'envelope_val_h', ENVvh, 'per_threat_env_h', PTenvh, ...
     'per_threat_env_h_ci', 100 * PTenvh_ci, 'harmed_consistent', cons, 'offset', OFF, 'offset_after', OFF_AFTER, 'lect', LK);
 KP.speed_ne = SNE;
+if c3_on, KP.far_core3 = FAR3; KP.far_core3_src = src3; end    % rule_core3's clean false alarms (D121 item 16)
 if FRESH                                              % P1R: KP.far is the fresh set's; the union beside it
     KP.far_set = 'fresh'; KP.reading = 'P1R'; KP.far_union = FAR_u; KP.far_diag_union = FD_u; KP.far_src_union = far_src_u;
     KP.far_geoms_fresh = F6.CT.n_geom; KP.far_fresh_sha256 = F6.sha;

@@ -745,6 +745,12 @@ if isfinite(S.cnn.per_red_pct)
             o.only_blind_pct, o.never_pct);
     end
 end
+if isfield(S, 'cnn3') && isfinite(S.cnn3.per_red_pct)       % profile 3's three-state CNN row (D121 item 16, P-B)
+    lines{end+1} = sprintf(['beside KPI 4, CNN contribution, %s, profile 3 (D121 item 16): rule_core3 (the three-state CNN in the loop) vs ' ...
+        'blind_core, secondary, weakened baseline (fixed first response channel_switch+rate_reduce, no validation choice): PER ' ...
+        'reduction %.1f%% [%.1f, %.1f], goodput %+.0f bit/s [%+.0f, %+.0f] (%d episodes); the verdict above stays rule_core''s'], tag, ...
+        S.cnn3.per_red_pct, S.cnn3.per_ci, S.cnn3.gput_bps, S.cnn3.gput_ci, S.cnn3.n);
+end
 end
 
 function lines = rec_lines(Lk, S, tag)
