@@ -494,7 +494,7 @@ S = lb_seeds();
 own = [S.specs, S.frames + 100 * (1:4), S.boot];
 verifyEqual(tc, numel(unique(own)), numel(own));
 verifyEqual(tc, numel(S.boot), 5);
-other = [7 99 11 5000 41000 7000 2027 2028 900 30000 70000 40000];
+other = [7 99 11 5000 41000 7000 2027 2028 900 20000 70000 40000];
 verifyEmpty(tc, intersect(own, other));
 batches = S.frames + 100 * (1:4)' + (1:60);                        % 60 batches per set stay inside their 100
 verifyEmpty(tc, intersect(batches(:)', [own, other]));
@@ -574,7 +574,7 @@ own = [S.specs, S.frames + 100 * (1:4), S.boot, S.cols];
 verifyEqual(tc, numel(unique(own)), numel(own));
 batches = S.frames + 100 * (1:4)' + (1:60);
 verifyEmpty(tc, intersect(S.cols, [S.specs, S.boot, batches(:)']));
-verifyEmpty(tc, intersect(S.cols, [7 99 11 5000 41000 7000 2027 2028 900 30000 70000 40000]));
+verifyEmpty(tc, intersect(S.cols, [7 99 11 5000 41000 7000 2027 2028 900 20000 70000 40000]));
 ln = splitlines(fileread(which('lb_columns')));
 b = ln(contains(ln, 'boot_cluster('));
 verifyNumElements(tc, b, 2);
@@ -619,7 +619,7 @@ fl = src(strfind(src, 'function L = lb_flights('):end);
 fl = fl(1:strfind(fl, 'function F6 = fresh_checks') - 1);
 verifyNotEmpty(tc, strfind(fl, 'o0 = opt; o0.monitor = struct(''lb_complete'', false);'));
 verifyNotEmpty(tc, strfind(fl, 'o1 = opt; o1.monitor = struct(''lb_complete'', true);'));
-verifyNumElements(tc, strfind(fl, '30000 + 100 * si'), 4);                     % the main runs' draws, a pair the same
+verifyNumElements(tc, strfind(fl, '20000 + 1000 * si'), 4);                     % the main runs' draws, a pair the same
 verifyNotEmpty(tc, strfind(fl, 'L = lb_columns(nm, ternary(Q.dec.lb_complete, ''on'', ''off''), names, X, cl, ebno_thr);'));
 verifyNotEmpty(tc, strfind(fl, 'nm = ''dqn_esc''; if strcmp(dqn_selected_kind(Q), ''dqn''), nm = sprintf(''dqn_g%d'', sel); end'));
 verifyNotEmpty(tc, pos('error(''evaluate_policies:lb_forced'''));

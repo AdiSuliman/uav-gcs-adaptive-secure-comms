@@ -1899,6 +1899,20 @@ verifyEmpty(tc, f(cellfun(@(n, d) ~isempty(regexp(fileread(fullfile(d, n)), '(Se
 b = cellfun(@(x) str2double(x{1}), regexp(src, 'policy_run_set\([^\n]*opt, (\d{5})', 'tokens'));
 verifyEqual(tc, sum(b == 50000), 1);
 verifyTrue(tc, all(abs(b(b ~= 50000) - 50000) >= 10000));
+% the main sets' frame draws, 20000 + 1000 x set + batch: a stride above every set's batch count
+% (guarded where the sets are built), so no two sets share a seed; the last set (at most 10) ends
+% below every other 5-digit base
+tk = regexp(src, 'opt, (\d{5}) \+ (\d+)\*si\);', 'tokens');
+verifyNumElements(tc, tk, 1);
+base = str2double(tk{1}{1}); stride = str2double(tk{1}{2});
+nset = numel(regexp(src, 'sets\(end\+1\) = struct\(', 'match'));
+verifyEqual(tc, stride, 1000);
+verifyLessThanOrEqual(tc, nset, 10);
+verifyNotEmpty(tc, strfind(src, 'assert(max(cellfun(@numel, {sets.spec})) < 1000, ''evaluate_policies:seeds'''));
+verifyLessThan(tc, base + stride * (nset + 1), min(b(b ~= base & b ~= 50000 & b > base)));
+bt = base + stride * (1:nset) + (1:stride - 1)';                % every set's batches, the guard keeps them below the stride
+verifyEqual(tc, numel(unique(bt(:))), numel(bt));
+verifyEmpty(tc, intersect(bt(:), [b(b ~= base), 50000 + (1:10000)]));
 verifyLessThan(tc, 50000 + 10000, seed_base(700001));
 % The fusion selection's resampling streams (select_fusion.m: the folds and the bootstrap over
 % sub-runs, of validation and of the enlarged fit set) are each their own
@@ -9104,7 +9118,7 @@ end
 src = fileread(which('evaluate_policies'));
 verifyNotEmpty(tc, strfind(src, 'POL = [POL, {''rule_core'', ''blind_core''}];'));
 verifyNotEmpty(tc, strfind(src, ['RES{si, pk} = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, ' ...
-    '30000 + 100*si);']));
+    '20000 + 1000*si);']));
 end
 
 function test_lect_kpis_core(tc)
