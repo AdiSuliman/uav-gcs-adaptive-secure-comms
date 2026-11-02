@@ -1127,6 +1127,38 @@ verifyNotEqual(tc, pool_checkpoint('key', [x, {'core3 aa N3'}]), pool_checkpoint
 verifyNotEqual(tc, pool_checkpoint('key', [x, {'core3 aa N3'}]), pool_checkpoint('key', [x, {'core3 ab N3'}]));
 end
 
+function test_pb_core3_check_refuses_another_model_file(tc)
+% C2e flies rule_core3 only if the model file still gives the id recorded at C1p (PP.core3_id); another file, a changed
+% window, a file that went missing or pools without an id are refused as D106 refuses a model whose hash is another.
+d = tempname; mkdir(d); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+net = struct('w', 1); N = 5; groups = {'none', 'tone_jamming', 'jamming'}; %#ok<NASGU>
+f = fullfile(d, 'm.mat'); save(f, 'net', 'N', 'groups');
+M = core3_model(f);
+PP = struct('core3_id', M.id);
+core3_check(PP, 'test', f);                                                  % the same file: no error
+net = struct('w', 2); save(f, 'net', 'N', 'groups');                         % another file, the same window
+verifyError(tc, @() core3_check(PP, 'test', f), 'core3_check:model');
+try, core3_check(PP, 'test', f); catch e, msg = e.message; end
+verifyTrue(tc, contains(msg, 'another') && contains(msg, M.id) && startsWith(msg, 'test:'));
+net = struct('w', 1); N = 6; save(f, 'net', 'N', 'groups');                  % the first net with another window
+verifyError(tc, @() core3_check(PP, 'test', f), 'core3_check:model');
+save(f, 'net');                                                              % no longer a three-state model
+verifyError(tc, @() core3_check(PP, 'test', f), 'core3_check:model');
+delete(f);
+verifyError(tc, @() core3_check(PP, 'test', f), 'core3_check:model');
+verifyError(tc, @() core3_check(struct(), 'test', f), 'core3_check:model');
+verifyError(tc, @() core3_check(struct('core3_id', ''), 'test', f), 'core3_check:model');
+% the wiring: C2e calls it once, only where the policy is added (the pools hold the id, which only core3_pools puts there),
+% before any flight
+e = strrep(fileread(which('evaluate_policies')), char(13), '');
+verifyNumElements(tc, strfind(e, 'core3_check('), 1);
+verifyNotEmpty(tc, strfind(e, 'if c3_on, core3_check(PP, ''evaluate_policies''); end'));
+verifyLessThan(tc, strfind(e, 'c3_on = isfield(PP, ''core3_id'')'), strfind(e, 'core3_check('));
+verifyLessThan(tc, strfind(e, 'core3_check('), strfind(e, 'POL = [POL, {''rule_core3''}]'));
+verifyLessThan(tc, strfind(e, 'core3_check('), min(strfind(e, 'policy_run_set(')));
+verifyEmpty(tc, regexp(e, 'core3_check\([^\n]*(WF|SMOKE)', 'once'));
+end
+
 function test_pb_wiring_static_and_parse(tc)
 % The files' text: the switch in the stage that scores the pools, the id in the key and in the reuse test, the policy after every
 % other row, the clean sets of C1c and the fresh set without it, no truth field in the decision path.
@@ -1145,7 +1177,7 @@ e = fileread(which('evaluate_policies'));
 verifyNotEmpty(tc, strfind(e, 'POL = [POL, {''rule_core3''}]'));
 verifyNotEmpty(tc, strfind(e, 'if c3_on, POL = POL(1:nPf); LBL = LBL(1:nPf); RES = RES(:, 1:nPf); end'));   % the clean pools of C1c and the fresh set
 verifyNotEmpty(tc, strfind(e, 'POL = POLa; LBL = LBLa; RES = RESa;'));                                     % are flown without it
-for f = {'policy_monitor', 'policy_decide', 'core3_model'}
+for f = {'policy_monitor', 'policy_decide', 'core3_model', 'core3_check'}
     s = fileread(which(f{1}));
     for tf = {'healthy', 'harmed', 'sc_eff', '\.ended', 'ber_true', 'fer_true'}
         verifyEmpty(tc, regexp(s, tf{1}, 'once'), sprintf('%s reads %s', f{1}, tf{1}));
@@ -1155,7 +1187,7 @@ r = fileread(which('rekey_pools'));
 verifyNotEmpty(tc, strfind(r, '''probs3'''));
 verifyNotEmpty(tc, strfind(r, '''core3_id'''));
 for f = {'policy_monitor', 'policy_decide', 'policy_setup', 'pool_cell', 'link_env', 'build_policy_pools', 'evaluate_policies', ...
-        'lect_kpis', 'measure_all_kpis', 'core3_model', 'spec_scores', 'wf_options', 'rekey_pools'}
+        'lect_kpis', 'measure_all_kpis', 'core3_model', 'core3_check', 'spec_scores', 'wf_options', 'rekey_pools'}
     parses_ok(tc, f{1});
 end
 end

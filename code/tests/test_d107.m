@@ -14,6 +14,7 @@ tc.TestData.root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
 addpath(fullfile(tc.TestData.root, 'code'));
 setup_paths;
 tc.TestData.base = 'df5cb30';                                    % the merge's first parent: tip3-lb with wf-lb and wf-spd
+tc.TestData.pb = {'9e6b7c8', 'ab3410f'};                         % wf-pb (D121 item 16): its parent and its tip
 end
 
 %% ---------- (a) the Clopper-Pearson bound ----------
@@ -717,21 +718,19 @@ Ls = penalty_form_line(struct('seed_summary', struct('selected_fa_form', 'nothre
 verifyEqual(tc, Ls, L);
 Ld = penalty_form_line(struct('dec', struct('fa_form', 'nothreat'), 'seed_summary', struct('selected_fa_form', 'all')));
 verifyEqual(tc, Ld, L, 'dec first');
-% the places, each with its one call; without the call the file is the base commit's
+% the places, each with its one call; without the call the file is the base commit's, with wf-pb's change to it
+% (behind core3_pools; test_d121 holds it bit-identical against wf-pb's parent) merged in
 pl = {'code/decision/evaluate_policies.m', 'for ft = penalty_form_line(Q), rep{end+1} = ft{1}; end'; ...
     'code/decision/experiment_combo_generalization.m', 'for ft = penalty_form_line(Q), rep{end+1} = ft{1}; end'; ...
     'code/decision/experiment_unknown_threat.m', 'for ft = penalty_form_line(Q), rep{end+1} = ft{1}; end'; ...
     'code/evaluation/measure_all_kpis.m', 'for ft = penalty_form_line(Dq), KPI(5).detail{end+1} = ft{1}; end'};
+% the one other line the readers hold: evaluate_policies.m's check of the three-state model file (core3_pools only)
+ex = {'if c3_on, core3_check(PP, ''evaluate_policies''); end', 'evaluate_policies.m'};
 for k = 1:size(pl, 1)
     c = strrep(fileread(fullfile(tc.TestData.root, pl{k, 1})), char(13), '');
-    i = strfind(c, pl{k, 2}); verifyNumElements(tc, i, 1, pl{k, 1});
-    a = find(c(1:i - 1) == newline, 1, 'last') + 1; if isempty(a), a = 1; end
-    e = i + find(c(i:end) == newline, 1) - 1;
-    c = [c(1:a - 1), c(e + 1:end)];
-    d = parent_copy(tc, pl{k, 1}, tc.TestData.base);
-    [~, nm, ext] = fileparts(pl{k, 1});
-    p = strrep(fileread(fullfile(d, [nm ext])), char(13), '');
-    rmdir(d, 's');
+    c = cut_line(tc, c, pl{k, 2}, pl{k, 1});
+    if endsWith(pl{k, 1}, ex{2}), c = cut_line(tc, c, ex{1}, pl{k, 1}); end
+    p = base_with_pb(tc, pl{k, 1});
     verifyTrue(tc, strcmp(c, p), pl{k, 1});
 end
 % the line sits right after the one that prints the penalty
@@ -806,9 +805,9 @@ verifyEqual(tc, f(:)', {'harmed', 'r', 's', 'threat'}, 'the episodes'' fields it
 src = read_lf('train_dqn');
 verifyEmpty(tc, regexp(src, 'FA_NT\.on[^\n]*(healthy|sc_eff)', 'once'));
 % the training reward alone reads the state: link_env.m is the parent's but for the form (unchanged here)
-d = parent_copy(tc, 'code/decision/link_env.m', tc.TestData.base);
-cl0 = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
-verifyEqual(tc, strrep(fileread(fullfile(d, 'link_env.m')), char(13), ''), read_lf('link_env'));
+% and wf-pb's probs3 field, which it reads from the pools only when they hold it
+verifyEqual(tc, base_with_pb(tc, 'code/decision/link_env.m'), read_lf('link_env'));
+verifyNotEmpty(tc, strfind(read_lf('link_env'), 'if isfield(P, ''probs3'')'));
 end
 
 function test_static_no_conflict_markers_functions_defined_once(tc)
@@ -969,6 +968,28 @@ if sg ~= 0 && ~isempty(getenv('V7_GIT_REPO')), repo = getenv('V7_GIT_REPO'); end
 [st, out] = system(sprintf('git --no-optional-locks -C "%s" show %s:%s > "%s"', repo, rev, rel, ...
     fullfile(d, [nm ext])));
 assertEqual(tc, st, 0, sprintf('git show %s:%s failed: %s', rev, rel, out));
+end
+
+function c = cut_line(tc, c, t, nm)
+% The one line of c that holds t, cut out.
+i = strfind(c, t); verifyNumElements(tc, i, 1, nm);
+a = find(c(1:i - 1) == newline, 1, 'last') + 1; if isempty(a), a = 1; end
+e = i + find(c(i:end) == newline, 1) - 1;
+c = [c(1:a - 1), c(e + 1:end)];
+end
+
+function s = base_with_pb(tc, rel)
+% The file rel as the base commit holds it with wf-pb's change to it (its tip against its parent) merged in,
+% LF only; the base text alone for a file wf-pb leaves alone. A conflict fails the test.
+pb = tc.TestData.pb;
+d = {parent_copy(tc, rel, tc.TestData.base), parent_copy(tc, rel, pb{1}), parent_copy(tc, rel, pb{2})};
+cl = onCleanup(@() cellfun(@(x) rmdir(x, 's'), d)); %#ok<NASGU>
+[~, nm, ext] = fileparts(rel);
+f = fullfile(d, [nm ext]);
+o = [tempname '.txt']; co = onCleanup(@() delete(o)); %#ok<NASGU>
+[st, out] = system(sprintf('git merge-file -p "%s" "%s" "%s" > "%s"', f{:}, o));
+assertEqual(tc, st, 0, sprintf('git merge-file %s: %s', rel, out));
+s = strrep(fileread(o), char(13), '');
 end
 
 function fixture_off(d, fn)

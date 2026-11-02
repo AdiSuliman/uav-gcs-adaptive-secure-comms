@@ -235,6 +235,7 @@ if s1_off                                            % the gate on, beside the d
     POL = [POL, {'rule_esc_s1g'}]; LBL = [LBL, {'rule + escalation, with the lost-branch gate (descriptive; not kept at C2)'}];
 end
 c3_on = isfield(PP, 'core3_id') && ~isempty(PP.core3_id);   % the pools hold the three-state scores (build_policy_pools.m; D121 item 16, P-B)
+if c3_on, core3_check(PP, 'evaluate_policies'); end     % the model file is still the one C1p scored the pools with
 if c3_on                                             % last, so every other row keeps its place
     POL = [POL, {'rule_core3'}]; LBL = [LBL, {'core: rule + escalation, three-state CNN (profile 3, P-B)'}];
 end
