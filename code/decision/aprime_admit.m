@@ -48,7 +48,7 @@ for k = 1:np
     fk = arrayfun(@(r) round(r.nothreat.noesc.fa_w * r.nothreat.noesc.n_w), Rk);
     fn = arrayfun(@(r) r.nothreat.noesc.n_w, Rk);
     X.fa_k = fk; X.fa_n = fn(1);
-    X.fa_up = arrayfun(@cp_upper, fk, fn); X.fa_up_mean = cp_upper(round(mean(fk)), fn(1));
+    X.fa_up = arrayfun(@cp_measured, fk, fn); X.fa_up_mean = cp_measured(round(mean(fk)), fn(1));
     X.a = all(fn == fn(1)) && all(X.fa_up <= bound) && X.fa_up_mean <= bound;
     % (b), the distribution here; Holm across the penalties below
     mb = mT & harm & ismember(thr, S1);
@@ -109,8 +109,12 @@ end
 
 function u = cp_upper(k, n)
 % One-sided 95% Clopper-Pearson upper bound of a binomial proportion.
-if ~isfinite(k) || ~isfinite(n) || n < 1, u = NaN;          % not measured: never within a bound
-elseif k >= n, u = 1; else, u = betaincinv(0.95, k + 1, n - k); end
+if k >= n, u = 1; else, u = betaincinv(0.95, k + 1, n - k); end
+end
+
+function u = cp_measured(k, n)
+% cp_upper, NaN for a count that was not measured (never within a bound).
+if ~isfinite(k) || ~isfinite(n) || n < 1, u = NaN; else, u = cp_upper(k, n); end
 end
 
 function out = ternary(c, a, b)
