@@ -251,11 +251,13 @@ LBL{iDQN} = [LBL{iDQN} ' (deployed)'];
 col = @(p) find(strcmp(POL, p));
 
 RES = cell(numel(sets), numel(POL));
+assert(max(cellfun(@numel, {sets.spec})) < 1000, 'evaluate_policies:seeds', ...
+    'a set has 1000 or more batches: its frame-draw seeds (20000 + 1000 x set + batch) would meet the next set''s');
 t0 = tic;
 for si = 1:numel(sets)
     for pk = 1:numel(POL)
         [kind, ag, opt] = policy_setup(POL{pk}, Q, sel, fixed_best, fixed_mmse, tab, K.na);
-        RES{si, pk} = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, 30000 + 100*si);
+        RES{si, pk} = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, 20000 + 1000*si);
     end
     fprintf('  set %-9s %5d episodes x %d policies (%.1f min)\n', sets(si).name, numel(RES{si, 1}.ret), ...
         numel(POL), toc(t0)/60);
@@ -868,10 +870,10 @@ fprintf('Saved results/policy_evaluation.{txt,mat,png}, results/policy_breakdown
 %% ===================== Local functions =====================
 function L = lb_flights(PP, K, Q, sets, RES, POL, sel, fixed_best, fixed_mmse, tab, ebno_thr)
 % The selected DQN without and with the link-budget completion (policy_decide.m opt.monitor) on the
-% test threat sets and the clean set, with the frame draws of the main runs (30000 + 100 x set), so
+% test threat sets and the clean set, with the frame draws of the main runs (20000 + 1000 x set), so
 % a pair differs only by the completion; the policy tables above hold the deployed switch
 % (Q.dec.lb_complete). The readings go to lb_columns.m, which makes the columns.
-nm = 'dqn_esc'; if strcmp(Q.deployed, 'dqn'), nm = sprintf('dqn_g%d', sel); end
+nm = 'dqn_esc'; if strcmp(dqn_selected_kind(Q), 'dqn'), nm = sprintf('dqn_g%d', sel); end
 [kind, ag, opt] = policy_setup(nm, Q, sel, fixed_best, fixed_mmse, tab, K.na);
 o0 = opt; o0.monitor = struct('lb_complete', false);
 o1 = opt; o1.monitor = struct('lb_complete', true);
@@ -880,16 +882,16 @@ names = {'single', 'follower', 'combined', 'unknown'};
 X = struct('x0', {}, 'x1', {}, 'xr', {}, 'g', {}, 'fam', {});
 for k = 1:numel(names)
     si = find(strcmp({sets.name}, names{k}), 1);
-    R0 = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, o0, 30000 + 100 * si);
-    R1 = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, o1, 30000 + 100 * si);
+    R0 = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, o0, 20000 + 1000 * si);
+    R1 = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, o1, 20000 + 1000 * si);
     m = R0.recoverable & R0.threat;
     fam = cellfun(@(s) any(strcmp(strsplit(s, '+'), 'path_loss')), PP.scen(R0.scn));
     X(end+1) = struct('x0', double(R0.recovered(m)), 'x1', double(R1.recovered(m)), 'xr', double(RES{si, ir}.recovered(m)), ...
         'g', R0.geom(m), 'fam', fam(m)); %#ok<AGROW>
 end
 si = find(strcmp({sets.name}, 'clean'), 1);
-R0 = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, o0, 30000 + 100 * si);
-R1 = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, o1, 30000 + 100 * si);
+R0 = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, o0, 20000 + 1000 * si);
+R1 = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, o1, 20000 + 1000 * si);
 up = PP.ebno(R0.s) >= ebno_thr;
 cl = [sum(R0.switches(up) > 0), sum(R1.switches(up) > 0), sum(up)];
 L = lb_columns(nm, ternary(Q.dec.lb_complete, 'on', 'off'), names, X, cl, ebno_thr);

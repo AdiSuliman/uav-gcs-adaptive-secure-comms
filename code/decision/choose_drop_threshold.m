@@ -207,6 +207,7 @@ if isfile('results/eval_detector_metrics.mat')
     end
     clear Md
 end
+kpi1_threshold_check(EBNO_THR, 'choose_drop_threshold');   % the threshold of the file KPI 1 is read from
 CV = [];
 if isfile('data/clean_val_pools.mat')
     Cv = load('data/clean_val_pools.mat', 'CT'); CV = Cv.CT; clear Cv

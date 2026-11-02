@@ -494,7 +494,7 @@ S = lb_seeds();
 own = [S.specs, S.frames + 100 * (1:4), S.boot];
 verifyEqual(tc, numel(unique(own)), numel(own));
 verifyEqual(tc, numel(S.boot), 5);
-other = [7 99 11 5000 41000 7000 2027 2028 900 30000 70000 40000];
+other = [7 99 11 5000 41000 7000 2027 2028 900 20000 70000 40000];
 verifyEmpty(tc, intersect(own, other));
 batches = S.frames + 100 * (1:4)' + (1:60);                        % 60 batches per set stay inside their 100
 verifyEmpty(tc, intersect(batches(:)', [own, other]));
@@ -574,11 +574,29 @@ own = [S.specs, S.frames + 100 * (1:4), S.boot, S.cols];
 verifyEqual(tc, numel(unique(own)), numel(own));
 batches = S.frames + 100 * (1:4)' + (1:60);
 verifyEmpty(tc, intersect(S.cols, [S.specs, S.boot, batches(:)']));
-verifyEmpty(tc, intersect(S.cols, [7 99 11 5000 41000 7000 2027 2028 900 30000 70000 40000]));
+verifyEmpty(tc, intersect(S.cols, [7 99 11 5000 41000 7000 2027 2028 900 20000 70000 40000]));
 ln = splitlines(fileread(which('lb_columns')));
 b = ln(contains(ln, 'boot_cluster('));
 verifyNumElements(tc, b, 2);
 verifyTrue(tc, all(contains(b, 'S.cols(')));
+end
+
+function test_selected_kind_not_deployed(tc)
+% The LB columns and the unknown/combination experiments run the DQN kind that was selected
+% (seed_summary.selected_kind), not the kind the deployed policy names: a rule fallback
+% ('rule_sel') beside a selected plain DQN gives the plain kind; a file without the field
+% falls back to the deployed name as before.
+mk = @(k, d) struct('seed_summary', struct('selected_kind', k), 'deployed', d);
+verifyEqual(tc, dqn_selected_kind(mk('dqn', 'rule_sel')), 'dqn');
+verifyEqual(tc, dqn_selected_kind(mk('dqn_esc', 'rule_sel')), 'dqn_esc');
+verifyEqual(tc, dqn_selected_kind(mk('dqn', 'dqn')), 'dqn');
+verifyEqual(tc, dqn_selected_kind(mk('dqn_esc', 'dqn_esc')), 'dqn_esc');
+verifyEqual(tc, dqn_selected_kind(struct('seed_summary', struct('selected_gamma', 0.9), 'deployed', 'dqn')), 'dqn');
+verifyEqual(tc, dqn_selected_kind(struct('seed_summary', struct(), 'deployed', 'rule_sel')), 'dqn_esc');
+verifyEqual(tc, dqn_selected_kind(struct('seed_summary', struct())), 'dqn_esc');
+for f = {'experiment_unknown_threat', 'experiment_combo_generalization'}
+    verifyNotEmpty(tc, strfind(fileread(which(f{1})), 'DK = dqn_selected_kind(Q);'), f{1});
+end
 end
 
 function test_c2e_columns_wiring(tc)
@@ -601,9 +619,9 @@ fl = src(strfind(src, 'function L = lb_flights('):end);
 fl = fl(1:strfind(fl, 'function F6 = fresh_checks') - 1);
 verifyNotEmpty(tc, strfind(fl, 'o0 = opt; o0.monitor = struct(''lb_complete'', false);'));
 verifyNotEmpty(tc, strfind(fl, 'o1 = opt; o1.monitor = struct(''lb_complete'', true);'));
-verifyNumElements(tc, strfind(fl, '30000 + 100 * si'), 4);                     % the main runs' draws, a pair the same
+verifyNumElements(tc, strfind(fl, '20000 + 1000 * si'), 4);                     % the main runs' draws, a pair the same
 verifyNotEmpty(tc, strfind(fl, 'L = lb_columns(nm, ternary(Q.dec.lb_complete, ''on'', ''off''), names, X, cl, ebno_thr);'));
-verifyNotEmpty(tc, strfind(fl, 'nm = ''dqn_esc''; if strcmp(Q.deployed, ''dqn''), nm = sprintf(''dqn_g%d'', sel); end'));
+verifyNotEmpty(tc, strfind(fl, 'nm = ''dqn_esc''; if strcmp(dqn_selected_kind(Q), ''dqn''), nm = sprintf(''dqn_g%d'', sel); end'));
 verifyNotEmpty(tc, pos('error(''evaluate_policies:lb_forced'''));
 verifyNotEmpty(tc, pos('isfield(Q.dec, ''lb_forced'') && Q.dec.lb_forced && ~(exist(''SMOKE'', ''var'') && SMOKE)'));
 % KPI 5 prints the line only with the columns
@@ -650,10 +668,15 @@ function test_readers_off_is_the_parent(tc)
 % copy, in order, but the ones named here (the cache key, the entity call and header and the options of
 % the evaluations of C2g and C2u, whose opt0 is struct() without the switch); the main readers, the
 % step and the layer only add lines.
-for f = {'code/decision/evaluate_policies.m', '31a0f3e'; 'code/evaluation/measure_all_kpis.m', '31a0f3e'; ...
-        'code/decision/train_dqn.m', 'a8fd8f3'}'
-    verifyEmpty(tc, parent_lines_missing(tc, f{2}, f{1}), f{1});
-end
+verifyEmpty(tc, parent_lines_missing(tc, '31a0f3e', 'code/evaluation/measure_all_kpis.m'), 'code/evaluation/measure_all_kpis.m');
+% the C2e sets' frame-draw seed line (20000 + 1000 x set), C2's reference entry and the re-read stop are the
+% small fixes' (wf-rf-small); the parent has them in their old form
+verifyEqual(tc, parent_lines_missing(tc, '31a0f3e', 'code/decision/evaluate_policies.m'), ...
+    {'        RES{si, pk} = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, 30000 + 100*si);'});
+verifyEqual(tc, parent_lines_missing(tc, 'a8fd8f3', 'code/decision/train_dqn.m'), ...
+    {'jr = find(strcmp({ENT.alarm}, ENT(iref).alarm)); iref = jr(ceil(numel(jr) / 2));', ...
+    '        warning(''train_dqn:reproduced'', [''train_dqn: the re-read of a no-threat run or of its grid run does not reproduce its '' ...', ...
+    '            ''stored row; the admission and the selection read different numbers'']);'});
 % policy_monitor.m: wf-pb (D121 item 16) rewrote six parent lines (two comment lines extended, two code lines
 % indented into the else branch, two given the three-state guard ~c3, false without core3_on); each is there in that form
 verifyEqual(tc, parent_lines_missing(tc, '31a0f3e', 'code/decision/policy_monitor.m'), ...
@@ -682,14 +705,16 @@ pd = strrep(fileread(which('policy_decide')), char(13), '');
 verifyNumElements(tc, strfind(pd, 'if c3 || isfield(PP, ''core3_on''), PP.core3_on = c3; end'), 1);
 verifyNumElements(tc, parent_lines_missing(tc, 'a8fd8f3', 'code/decision/policy_stamp.m'), 1);    % a comment line
 miss = parent_lines_missing(tc, '31a0f3e', 'code/decision/experiment_combo_generalization.m');
-verifyEqual(tc, miss, {'keys = cellfun(@(cn) run_cache(''key'', {CID, ''C2g'', cn, H, seed, REPS, NE, TEST, DK}), combos, ''UniformOutput'', false);', ...
+verifyEqual(tc, miss, {'DK = ''dqn_esc''; if isfield(Q, ''deployed'') && strcmp(Q.deployed, ''dqn''), DK = ''dqn''; end   % the DQN as selected', ...
+    'keys = cellfun(@(cn) run_cache(''key'', {CID, ''C2g'', cn, H, seed, REPS, NE, TEST, DK}), combos, ''UniformOutput'', false);', ...
     'out = run_cache(''each'', CDIR, keys, @(ci) one_combo(ci, combos, PP, K, Q, H, seed, nS, TEST, REPS, NE, DK, t0), combos);', ...
     'function r = one_combo(ci, combos, PP, K, Q, H, seed, nS, TEST, REPS, NE, DK, t0)', ...
     '% escalation and the class table on its test flights.', ...
     'Ro = dqn_eval_batches(DK, PP, K, specs, ag, struct(), 7000, TEST);', ...
     'Ri = dqn_eval_batches(DK, PP, K, specs, Q.agent, struct(), 7000, TEST);'});
 miss = parent_lines_missing(tc, '31a0f3e', 'code/decision/experiment_unknown_threat.m');
-verifyEqual(tc, miss, {'keys = cellfun(@(th) run_cache(''key'', {CID, ''C2u'', th, H, seed, REPS, NE, SPL, DK}), threats, ''UniformOutput'', false);', ...
+verifyEqual(tc, miss, {'DK = ''dqn_esc''; if isfield(Q, ''deployed'') && strcmp(Q.deployed, ''dqn''), DK = ''dqn''; end   % the DQN as selected', ...
+    'keys = cellfun(@(th) run_cache(''key'', {CID, ''C2u'', th, H, seed, REPS, NE, SPL, DK}), threats, ''UniformOutput'', false);', ...
     'out = run_cache(''each'', CDIR, keys, @(ti) one_threat(ti, threats, PP, K, Q, H, seed, nS, SPL, REPS, NE, DK, t0), threats);', ...
     'function o = one_threat(ti, threats, PP, K, Q, H, seed, nS, SPL, REPS, NE, DK, t0)', ...
     '% o.res).', '[Ro, Ri, Rr] = deal([]);', ...
@@ -713,6 +738,9 @@ for f = {'experiment_combo_generalization', 'experiment_unknown_threat'}
     verifyNumElements(tc, strfind(src, 'PPx.lb_complete = false'), 1, f{1});
     verifyNumElements(tc, strfind(src, 'dqn_train_run('), 1, f{1});
     verifyLessThan(tc, strfind(src, 'PPx.lb_complete = false'), strfind(src, 'dqn_train_run('), f{1});
+    verifyNumElements(tc, strfind(src, 'PPx.release_m = false'), 1, f{1});                  % C2 trains without the release (train_dqn.m)
+    verifyLessThan(tc, strfind(src, 'PPx.release_m = false'), strfind(src, 'dqn_train_run('), f{1});
+    verifyEmpty(tc, regexp(src, 'dqn_eval_batches\([^,]*, PPx,', 'once'), f{1});            % the evaluation keeps the deployed settings
     verifyNotEmpty(tc, regexp(src, 'Ro = [^\n]*, ag, opt0,', 'once'), f{1});
     verifyNotEmpty(tc, regexp(src, 'Ri = [^\n]*, Q\.agent, opt0,', 'once'), f{1});
     verifyNotEmpty(tc, regexp(src, 'Ro1 = [^\n]*, ag, opt1,', 'once'), f{1});

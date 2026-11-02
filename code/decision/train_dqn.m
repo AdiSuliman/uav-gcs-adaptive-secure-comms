@@ -321,7 +321,10 @@ STEPS(end+1) = struct('name', 'unknown-threat flag: classes overridden, retentio
 STEPS(end+1) = struct('name', 'escalation on a drop alarm read as none', 'var', {{struct('esc_drop', false), struct('esc_drop', true)}});
 iref = find(strcmp({ENT.alarm}, sprintf('class_drop %d/%d', CD.confirm)), 1);   % the reference monitor at its own threshold
 if isempty(iref), iref = 1; end
-jr = find(strcmp({ENT.alarm}, ENT(iref).alarm)); iref = jr(ceil(numel(jr) / 2));
+jr = find(strcmp({ENT.alarm}, ENT(iref).alarm));
+b0 = drops_of(ENT(iref).alarm, MONP, DROP_MODE, DROP_DB, THC, 0, DROP_FLOOR);   % the monitor's own threshold
+[~, m0] = min(abs([ENT(jr).drop] - b0)); if ~isfinite(b0), m0 = ceil(numel(jr) / 2); end
+iref = jr(m0);
 PPr = with_entry(PP, ENT(iref), DROP_MODE);
 if WF.s1g                                           % the rule's lost-branch gate first among the rule settings
     S0.s1_gate = false;
@@ -446,8 +449,10 @@ if FA_NT.on
         A7(i).plain = split_row(P0, PPa, K, val_spec, SPLIT_VAL);
     end
     if ~all(arrayfun(@(a) a.nothreat.reproduced && a.plain.reproduced, A7))
-        warning('train_dqn:reproduced', ['train_dqn: the re-read of a no-threat run or of its grid run does not reproduce its ' ...
-            'stored row; the admission and the selection read different numbers']);
+        rmsg = ['train_dqn: the re-read of a no-threat run or of its grid run does not reproduce its ' ...
+            'stored row; the admission and the selection read different numbers'];
+        if exist('SMOKE', 'var') && SMOKE, warning('train_dqn:reproduced', '%s', rmsg);
+        else, error('train_dqn:reproduced', '%s', rmsg); end
     end
     aprime = struct('label', 'pre-registered candidate (D107), validation-scored, deployed only if admissible (point 5)', ...
         'form', 'nothreat', 'w_false', K.FA, 'alarm', ea.alarm, 'drop', ea.drop, 'S', Ssel, 'pen', FA_NT.pen, ...

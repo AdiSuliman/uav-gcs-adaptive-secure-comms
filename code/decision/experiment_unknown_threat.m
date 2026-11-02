@@ -31,7 +31,7 @@ Q = load('data/trained_dqn.mat', 'agent', 'H', 'norm_in', 'seed_summary', 'confi
     'dec', 'deployed');
 check_det_id(PP, Q, 'experiment_unknown_threat');
 PP = decision_settings(PP, Q);                       % the agent's monitor and decision-time settings (train_dqn.m)
-DK = 'dqn_esc'; if isfield(Q, 'deployed') && strcmp(Q.deployed, 'dqn'), DK = 'dqn'; end   % the DQN as selected
+DK = dqn_selected_kind(Q);                           % the DQN as selected
 LBC = isfield(Q, 'dec') && isstruct(Q.dec) && isfield(Q.dec, 'lb_complete');   % C2 stored the link-budget completion's switch (train_dqn.m)
 K = link_env('tables', PP);
 TEST = 3; TEST2 = 5; NE = 64; REPS = 2;
@@ -118,6 +118,7 @@ c = find(strcmp(PP.scen, th));
 fprintf('[%d/%d] %s left out of training and validation (%d cells)\n', ti, numel(threats), th, sum(hit));
 PPx = PP;
 if isfield(PPx, 'lb_complete'), PPx.lb_complete = false; end   % the retrained learner trains and keeps its checkpoint without the completion
+if isfield(PPx, 'release_m'), PPx.release_m = false; end         % nor with the release on evidence: C2 trains without it
 PPx.pools(hit, :, :, 1:2) = {[]};
 Kx = link_env('tables', PPx);
 Kt = Kx; Kt.FA = Q.seed_summary.selected_fa_pen;

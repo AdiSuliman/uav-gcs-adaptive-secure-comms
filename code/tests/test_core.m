@@ -1922,6 +1922,20 @@ verifyEmpty(tc, f(cellfun(@(n, d) ~isempty(regexp(fileread(fullfile(d, n)), '(Se
 b = cellfun(@(x) str2double(x{1}), regexp(src, 'policy_run_set\([^\n]*opt, (\d{5})', 'tokens'));
 verifyEqual(tc, sum(b == 50000), 1);
 verifyTrue(tc, all(abs(b(b ~= 50000) - 50000) >= 10000));
+% the main sets' frame draws, 20000 + 1000 x set + batch: a stride above every set's batch count
+% (guarded where the sets are built), so no two sets share a seed; the last set (at most 10) ends
+% below every other 5-digit base
+tk = regexp(src, 'opt, (\d{5}) \+ (\d+)\*si\);', 'tokens');
+verifyNumElements(tc, tk, 1);
+base = str2double(tk{1}{1}); stride = str2double(tk{1}{2});
+nset = numel(regexp(src, 'sets\(end\+1\) = struct\(', 'match'));
+verifyEqual(tc, stride, 1000);
+verifyLessThanOrEqual(tc, nset, 10);
+verifyNotEmpty(tc, strfind(src, 'assert(max(cellfun(@numel, {sets.spec})) < 1000, ''evaluate_policies:seeds'''));
+verifyLessThan(tc, base + stride * (nset + 1), min(b(b ~= base & b ~= 50000 & b > base)));
+bt = base + stride * (1:nset) + (1:stride - 1)';                % every set's batches, the guard keeps them below the stride
+verifyEqual(tc, numel(unique(bt(:))), numel(bt));
+verifyEmpty(tc, intersect(bt(:), [b(b ~= base), 50000 + (1:10000)]));
 verifyLessThan(tc, 50000 + 10000, seed_base(700001));
 % The fusion selection's resampling streams (select_fusion.m: the folds and the bootstrap over
 % sub-runs, of validation and of the enlarged fit set) are each their own
@@ -1949,7 +1963,17 @@ verifyEqual(tc, cellfun(@(x) str2double(x{1}), regexp(src, '''Seed'', (\d+)', 't
 verifyNotEmpty(tc, strfind(src, 'fusion_adopt(''boot'', fit.run, 1000, 9102)'));
 verifyNotEmpty(tc, strfind(src, 'fusion_adopt(''boot'', fit.run(tr), 1000, 9160 + k)'));
 verifyNotEmpty(tc, strfind(fileread(which('eval_unseen_snr')), 'boot_cluster([b.correct], [b.n], 1:numel(b), 2000, 4251, double(un))'));
-for x = {q, m, h}
+% D111's streams (ood_k2_run.m: the fold models' trees 9700 + h, the validation bootstraps 9800 + h
+% and the test bootstraps 9900 + h, h one of the 10 held-out threats): each its own, none of d91's or
+% D110's. K2-1 (k2_1_screen.m, 9100 + h) was read before they were numbered; its h = 1..3 meet d91's
+% 9101-9103, bootstrap indices against trees on other data
+k2 = [9700 + (1:10), 9800 + (1:10), 9900 + (1:10)];
+verifyEqual(tc, numel(unique([k2, h, m])), numel([k2, h, m]));
+verifyEmpty(tc, intersect(k2, q));
+src = fileread(fullfile(tc.TestData.root, 'code', 'detection', 'ood_k2_run.m'));
+verifyEqual(tc, sort(cellfun(@(x) str2double(x{1}), regexp(src, '(\d{4}) \+ h\)', 'tokens'))), [9700 9800 9900]);
+verifyNotEmpty(tc, strfind(fileread(fullfile(tc.TestData.root, 'code', 'detection', 'k2_1_screen.m')), 'NB, 9100 + h);'));
+for x = {q, m, h, k2}
     verifyEmpty(tc, intersect(x{1}, N(:)));
     verifyLessThan(tc, max(x{1}), min(N(:)));
 end
@@ -2612,6 +2636,23 @@ verifyNotEmpty(tc, strfind(src, 'pv = fus.val_probs_oof;'));
 verifyNotEmpty(tc, strfind(src, '&& latch_on'));
 verifyNotEmpty(tc, strfind(fileread(which('policy_monitor')), '&& onset_shape(''on'', FZ)'));
 verifyNotEmpty(tc, strfind(fileread(which('det_frames')), '&& onset_shape(''on'', PP.fuse)'));
+end
+
+function test_det_frames_clean_pool_without_channel_records(tc)
+% A clean pool without bch beside a threat pool with it joins as NaN rows (as idle does) instead of
+% an index error; with the records on both sides, or on neither, the reading is as before.
+cls = {'none', 'antenna_fault', 'airframe_shadowing'}; nf = numel(link_features('names'));
+ok = [strcmp(cls, 'antenna_fault'); ismember(cls, {'antenna_fault', 'airframe_shadowing'})];
+rng(5); Gc = 0.3 * randn(10, 3); Gf = 0.3 * randn(10, 3); Gf(:, 2) = Gf(:, 2) - 18;
+mk = @(pr, Gx, act) struct('probs', repmat(pr, 10, 1), 'run', 101 * ones(10, 1), 'gant', Gx, 'feat', zeros(10, nf), ...
+    'ber', zeros(10, 1), 'act', act * ones(10, 1));
+PP = struct('classes', {cls}, 'fuse', [], 'fuse_N', 4, 'sps', 2, 'bps', 2);
+Pf = mk([0.1 0.4 0.5], Gf, 1); Pc = mk([1 0 0], Gc, 0);
+h0 = det_frames(Pf, Pc, 'antenna_fault', ok, PP);                    % neither pool has the records
+Pfb = Pf; Pfb.bch = ones(10, 4); Pcb = Pc; Pcb.bch = ones(10, 4);
+verifyEqual(tc, det_frames(Pfb, Pcb, 'antenna_fault', ok, PP), h0);   % both have them
+verifyEqual(tc, det_frames(Pfb, Pc, 'antenna_fault', ok, PP), h0);    % the clean pool has none
+verifyEqual(tc, det_frames(Pf, Pcb, 'antenna_fault', ok, PP), h0);    % the threat pool has none
 end
 
 function test_roll_in_false_alarms(tc)
@@ -8554,6 +8595,44 @@ verifyNotEmpty(tc, strfind(src, '[specs, n] = clean_wide_specs(PP, CT, ebno_thr,
 verifyEqual(tc, decision_config().drop_steps, [-2 0 2]);
 end
 
+function test_kpi1_threshold_check(tc)
+% C1d and the edge map read the KPI 1 threshold from the base metrics file; it must equal the
+% one in the file KPI 1 is read from (kpi1_file.m) when that exists, else an error
+d = fullfile(tc.TestData.tmp, 'thr_check'); mkdir(fullfile(d, 'results'));
+c0 = cd(d); back = onCleanup(@() cd(c0)); %#ok<NASGU>
+f = kpi1_file('eval_detector_metrics');
+verifyEqual(tc, f, 'results/eval_detector_metrics_fresh3.mat');
+kpi1_threshold_check(4, 'x');                                          % no fourth-set file: nothing to compare
+metrics = struct('kpi1_threshold_db', 4); save(f, 'metrics');
+kpi1_threshold_check(4, 'x');                                          % equal: passes
+verifyError(tc, @() kpi1_threshold_check(6, 'edge_map'), 'kpi1:threshold');
+verifyError(tc, @() kpi1_threshold_check(1, 'choose_drop_threshold'), 'kpi1:threshold');   % the default (first Eb/N0) too
+metrics = struct('kpi1_threshold_db', NaN); save(f, 'metrics');
+kpi1_threshold_check(6, 'x');                                          % the file holds no threshold: nothing to compare
+metrics = struct('other', 1); save(f, 'metrics');
+kpi1_threshold_check(6, 'x');
+for g = {'choose_drop_threshold', 'edge_map'}
+    s = fileread(which(g{1}));
+    verifyNumElements(tc, strfind(s, ['kpi1_threshold_check(', ternary_t(strcmp(g{1}, 'edge_map'), 'ebno_thr', 'EBNO_THR'), ', ''', g{1}, ''');']), 1, g{1});
+end
+end
+
+function test_kpi7_status_carries_not_committed(tc)
+% The KPI 7 status row says 'MET (not committed)' when the union word does (D117 point 1); other
+% statuses and words are unchanged
+nc = struct('word_union', 'MET (not committed)'); cm = struct('word_union', 'MET (committed)');
+verifyEqual(tc, speed_status_word('MET', nc), 'MET (not committed)');
+verifyEqual(tc, speed_status_word('MET', cm), 'MET');
+verifyEqual(tc, speed_status_word('MET', struct('word_union', 'NOT MET')), 'MET');
+verifyEqual(tc, speed_status_word('NOT MET', nc), 'NOT MET');
+verifyEqual(tc, speed_status_word('STALE', nc), 'STALE');
+verifyEqual(tc, speed_status_word('MET', struct()), 'MET');
+verifyEqual(tc, speed_status_word('MET', []), 'MET');
+src = fileread(which('measure_all_kpis'));
+verifyNumElements(tc, strfind(src, 'st7 = speed_status_word(st7, P.KP.speed_union);'), 1);
+verifyLessThan(tc, strfind(src, 'st7 = speed_status_word('), strfind(src, 'st7 = ''PENDING'''));
+end
+
 function test_reward_needs_plr(tc)
 % The reward's restoration and the healthy link are KPI 4's test, BER and packet loss: a
 % configuration that restores the BER but not the packet loss earns at most C.q_partial, a
@@ -9227,7 +9306,7 @@ end
 src = fileread(which('evaluate_policies'));
 verifyNotEmpty(tc, strfind(src, 'POL = [POL, {''rule_core'', ''blind_core''}];'));
 verifyNotEmpty(tc, strfind(src, ['RES{si, pk} = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, ' ...
-    '30000 + 100*si);']));
+    '20000 + 1000*si);']));
 end
 
 function test_lect_kpis_core(tc)
@@ -11399,7 +11478,7 @@ verifyNotEmpty(tc, pos('ternary(FRESH, '': already read in profile 1''''s C2e, s
 verifyNotEmpty(tc, pos('F6.state = kpi6_fresh_marker(''check'', F6.marker, F6.sha);'));
 d = parent_copy(tc, 'code/decision/evaluate_policies.m', '316230d');
 cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
-old = regexp(fileread(fullfile(d, 'evaluate_policies.m')), '\r?\n', 'split');
+old = regexp(strrep(fileread(fullfile(d, 'evaluate_policies.m')), 'opt, 30000 + 100*si);', 'opt, 20000 + 1000*si);'), '\r?\n', 'split');   % the sets' frame-draw stride (C2e)
 new = regexp(src, '\r?\n', 'split');
 hd = find(contains(old, '%d episodes x %d cycles -> KPI 6'', ...'));
 verifyNumElements(tc, hd, 1);

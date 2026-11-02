@@ -424,7 +424,7 @@ function test_train_dqn_off_view_is_the_parent(tc)
 d0 = parent_copy(tc, 'code/decision/train_dqn.m', tc.TestData.base);
 cl0 = onCleanup(@() rmdir(d0, 's')); %#ok<NASGU>
 p = strrep(fileread(fullfile(d0, 'train_dqn.m')), char(13), '');
-c = read_lf('train_dqn');
+c = undo_small(read_lf('train_dqn'), 'train_dqn');
 hd0 = '% With "fa_nothreat": true'; hd1 = sprintf('%%\n%% Finished runs (every training run');
 sc0 = '%% 7. The no-threat penalty form'; sc1 = 'fprintf(''=== C2 Complete';
 p = cut_text(tc, p, hd0, hd1); c = cut_text(tc, c, hd0, hd1);
@@ -658,14 +658,47 @@ o = fh(ADM, AR, runs, WFyes, 0.05, n_plain, {}, {'s1_gate'}, aprime, cand0, best
 verifyEqual(tc, o.WFF, {'s1_gate', 'aprime_admission'});
 end
 
-%% ---------- the pipeline warning, the seeds guard, the comment ----------
-function test_reproduced_mismatch_warns_and_stays_out_of_the_rule(tc)
+%% ---------- the reference entry of C2's rule settings ----------
+function test_reference_entry_is_the_monitors_own_threshold(tc)
+% The rule settings are tuned at the grid entry equal to the monitor's own drop threshold, also where
+% the neighbours are clamped (first CUSUM grid index) or filtered (class_drop below the floor), where
+% the middle entry is a neighbour.
 src = read_lf('train_dqn');
-w = 'warning(''train_dqn:reproduced''';
+verifyNotEmpty(tc, strfind(src, 'b0 = drops_of(ENT(iref).alarm, MONP, DROP_MODE, DROP_DB, THC, 0, DROP_FLOOR);'));
+verifyNotEmpty(tc, strfind(src, '[~, m0] = min(abs([ENT(jr).drop] - b0));'));
+verifyEmpty(tc, strfind(src, 'jr(ceil(numel(jr) / 2))'));
+G = 5 * (1:10);
+mp = @(p) struct('monitor', {'m'}, 'pick', {p}, 'grid', {G});
+for j = [1 2 5 10]                                  % CUSUM grid: first index, interior, last index
+    M = mp(G(j));
+    ent = drops_of('m', M, 'class_cusum', 36, G, [-2 0 2], 0);
+    b0 = drops_of('m', M, 'class_cusum', 36, G, 0, 0);
+    [~, m] = min(abs(ent - b0));
+    verifyEqual(tc, ent(m), G(j));
+end
+for p = [3 4 6]                                     % class_drop: floor filters the lower step at 3
+    M = struct('monitor', {'m'}, 'pick', {p});
+    ent = drops_of('m', M, 'class_drop', 36, G, [-2 0 2], 1);
+    b0 = drops_of('m', M, 'class_drop', 36, G, 0, 1);
+    [~, m] = min(abs(ent - b0));
+    verifyEqual(tc, ent(m), p);
+end
+end
+
+%% ---------- the pipeline warning, the seeds guard, the comment ----------
+function test_reproduced_mismatch_stops_outside_the_smoke_and_stays_out_of_the_rule(tc)
+% A re-read that does not reproduce its stored row is an error; only the smoke (a reduced run) warns.
+src = read_lf('train_dqn');
+w = 'if exist(''SMOKE'', ''var'') && SMOKE, warning(''train_dqn:reproduced'', ''%s'', rmsg);';
+e = 'else, error(''train_dqn:reproduced'', ''%s'', rmsg); end';
 verifyNumElements(tc, strfind(src, w), 1);
+verifyNumElements(tc, strfind(src, e), 1);
+verifyNumElements(tc, strfind(src, 'warning(''train_dqn:reproduced'''), 1);
+verifyNumElements(tc, strfind(src, 'error(''train_dqn:reproduced'''), 1);
 i = strfind(src, w); j = strfind(src, 'a.nothreat.reproduced && a.plain.reproduced');
 verifyNumElements(tc, j, 1);
-verifyTrue(tc, j < i && i - j < 200, 'the warning follows the test of every run');
+verifyTrue(tc, j < i && i - j < 450, 'the stop follows the test of every run');
+verifyTrue(tc, strfind(src, e) - i < 120, 'the error is the warning''s else branch');
 verifyTrue(tc, i > strfind(src, 'A7(i).plain = split_row(') && i < strfind(src, '[ADM, APL] = aprime_admit(aprime, FA_BOUND);'));
 % the rule never reads it: the field is only recorded and printed
 verifyEmpty(tc, regexp(read_lf('aprime_admit'), 'reproduced', 'once'));
@@ -727,7 +760,7 @@ pl = {'code/decision/evaluate_policies.m', 'for ft = penalty_form_line(Q), rep{e
 % the one other line the readers hold: evaluate_policies.m's check of the three-state model file (core3_pools only)
 ex = {'if c3_on, core3_check(PP, ''evaluate_policies''); end', 'evaluate_policies.m'};
 for k = 1:size(pl, 1)
-    c = strrep(fileread(fullfile(tc.TestData.root, pl{k, 1})), char(13), '');
+    c = undo_small(strrep(fileread(fullfile(tc.TestData.root, pl{k, 1})), char(13), ''), pl{k, 1});
     c = cut_line(tc, c, pl{k, 2}, pl{k, 1});
     if endsWith(pl{k, 1}, ex{2}), c = cut_line(tc, c, ex{1}, pl{k, 1}); end
     p = base_with_pb(tc, pl{k, 1});
@@ -935,6 +968,35 @@ function t = between_text(s, a, b)
 i0 = strfind(s, a); i1 = strfind(s, b);
 assert(isscalar(i0) && isscalar(i1) && i1 > i0, 'between_text: %s', a);
 t = s(i0:i1 - 1);
+end
+
+function c = undo_small(c, rel)
+% The text of rel without wf-rf-small's edits (the C2e sets' frame-draw stride, the selected DQN kind, C2's
+% reference entry and re-read stop, the KPI 1 threshold check, KPI 7's status word, C2g/C2u's release), so it
+% compares with a base commit that has none of them.
+[~, nm] = fileparts(rel); if startsWith(nm, 'experiment_'), nm = 'experiment'; end
+switch nm
+    case 'evaluate_policies'
+        P = {['20000 + 1000*si);'], ['30000 + 100*si);']; ...
+            ['20000 + 1000 * si);'], ['30000 + 100 * si);']; ...
+            ['(20000 + 1000 x set)'], ['(30000 + 100 x set)']; ...
+            ['assert(max(cellfun(@numel, {sets.spec})) < 1000, ''evaluate_policies:seeds'', ...' newline '    ''a set has 1000 or more batches: its frame-draw seeds (20000 + 1000 x set + batch) would meet the next set''''s'');' newline], ''; ...
+            ['if strcmp(dqn_selected_kind(Q), ''dqn''), nm ='], ['if strcmp(Q.deployed, ''dqn''), nm =']};
+    case 'experiment'
+        P = {['DK = dqn_selected_kind(Q);                           % the DQN as selected'], ['DK = ''dqn_esc''; if isfield(Q, ''deployed'') && strcmp(Q.deployed, ''dqn''), DK = ''dqn''; end   % the DQN as selected']; ...
+            ['if isfield(PPx, ''release_m''), PPx.release_m = false; end         % nor with the release on evidence: C2 trains without it' newline], ''};
+    case 'measure_all_kpis'
+        P = {['st7 = status(lat_ok && P.KP.speed_union.met, stale); st7 = speed_status_word(st7, P.KP.speed_union);   % the union line'], ['st7 = status(lat_ok && P.KP.speed_union.met, stale);          % the union line']};
+    case 'train_dqn'
+        P = {['jr = find(strcmp({ENT.alarm}, ENT(iref).alarm));' newline 'b0 = drops_of(ENT(iref).alarm, MONP, DROP_MODE, DROP_DB, THC, 0, DROP_FLOOR);   % the monitor''s own threshold' newline '[~, m0] = min(abs([ENT(jr).drop] - b0)); if ~isfinite(b0), m0 = ceil(numel(jr) / 2); end' newline 'iref = jr(m0);' newline], ['jr = find(strcmp({ENT.alarm}, ENT(iref).alarm)); iref = jr(ceil(numel(jr) / 2));' newline]; ...
+            ['        rmsg = [''train_dqn: the re-read of a no-threat run or of its grid run does not reproduce its '' ...' newline '            ''stored row; the admission and the selection read different numbers''];' newline '        if exist(''SMOKE'', ''var'') && SMOKE, warning(''train_dqn:reproduced'', ''%s'', rmsg);' newline '        else, error(''train_dqn:reproduced'', ''%s'', rmsg); end' newline], ['        warning(''train_dqn:reproduced'', [''train_dqn: the re-read of a no-threat run or of its grid run does not reproduce its '' ...' newline '            ''stored row; the admission and the selection read different numbers'']);' newline]};
+    case 'choose_drop_threshold'
+        P = {['kpi1_threshold_check(EBNO_THR, ''choose_drop_threshold'');   % the threshold of the file KPI 1 is read from' newline], ''};
+    case 'edge_map'
+        P = {['kpi1_threshold_check(ebno_thr, ''edge_map'');           % the threshold of the file KPI 1 is read from' newline], ''};
+    otherwise, return;
+end
+for i = 1:size(P, 1), c = strrep(c, P{i, 1}, P{i, 2}); end
 end
 
 function s = cut_text(tc, s, a, b)
