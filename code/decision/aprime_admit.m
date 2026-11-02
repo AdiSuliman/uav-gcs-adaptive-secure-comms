@@ -109,7 +109,8 @@ end
 
 function u = cp_upper(k, n)
 % One-sided 95% Clopper-Pearson upper bound of a binomial proportion.
-if k >= n, u = 1; else, u = betaincinv(0.95, k + 1, n - k); end
+if ~isfinite(k) || ~isfinite(n) || n < 1, u = NaN;          % not measured: never within a bound
+elseif k >= n, u = 1; else, u = betaincinv(0.95, k + 1, n - k); end
 end
 
 function out = ternary(c, a, b)
