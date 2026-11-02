@@ -79,8 +79,10 @@ end
 end
 
 function bak = backup(f)
-% Copy of f as <name>_before_rekey_<time>.mat, checked by its size.
-bak = sprintf('%s_before_rekey_%s.mat', f(1:end-4), char(datetime('now', 'Format', 'yyyyMMdd_HHmmss')));
+% Copy of f as <name>_before_rekey_<time>[_n].mat (an existing file is never overwritten), checked by its size.
+stem = sprintf('%s_before_rekey_%s', f(1:end-4), char(datetime('now', 'Format', 'yyyyMMdd_HHmmss')));
+bak = [stem '.mat']; n = 1;
+while isfile(bak) && n < 100, n = n + 1; bak = sprintf('%s_%d.mat', stem, n); end   % a second re-key within the same second
 if isfile(bak), error('rekey_pools:backup', '%s exists', bak); end
 [ok, msg] = copyfile(f, bak);
 if ~ok || dir(bak).bytes ~= dir(f).bytes, error('rekey_pools:backup', 'no backup of %s: %s', f, msg); end

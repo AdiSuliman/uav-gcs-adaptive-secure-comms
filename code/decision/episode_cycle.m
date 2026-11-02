@@ -33,7 +33,9 @@ Xf = ((fr.feat - ctx.feat_mean) ./ ctx.feat_std)';
 [conf, ic] = max(probs);
 
 %% Decision
-obs = struct('probs', probs(:)', 'unknown', maha < ctx.PP.maha_thr, 'maha', maha, 'feat', fr.feat, 'ber_true', fr.ber);
+uk = maha < ctx.PP.maha_thr;
+if unk_stat('on', ctx.PP), uk = unk_stat('frame', ctx.PP.fuse.unk, maha) < unk_threshold(ctx.PP); end   % D111: U of the frame
+obs = struct('probs', probs(:)', 'unknown', uk, 'maha', maha, 'feat', fr.feat, 'ber_true', fr.ber);
 if isfield(fr, 'gant'), obs.gant = fr.gant(:)'; end
 if isfield(fr, 'idle'), obs.idle = fr.idle(:)'; end
 if isfield(fr, 'bch'), obs.bch = fr.bch(:)'; end
@@ -46,4 +48,5 @@ E.cfg = a;
 qv = d.q; if ~isempty(qv), qv(~isfinite(qv)) = NaN; end
 info = struct('cls', ctx.PP.classes{ic}, 'conf', conf, 'unknown', obs.unknown, 'prop', a, 'qv', qv, ...
     'switched', a ~= prev, 'cfg', a);
+if isfield(d, 'unk'), info.unknown = d.unk; end          % D111: the monitor's flag of the window (U)
 end

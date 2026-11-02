@@ -20,7 +20,8 @@ function S = result_status()
 %                                   for the third and fourth test sets' readings (_fresh2,
 %                                   _fresh3) when present; the fourth set's reading cannot
 %                                   be rerun, so data/trained_detector.mat, ood_thresholds.mat
-%                                   and fusion.mat stay as they were from B3r on
+%                                   and fusion.mat stay as they were from B3r on, but for D111's
+%                                   FM.unk (unk_write.m 'base_ok': the class path is unchanged)
 %   A file without its identity fields counts as stale.
 cur_det = ''; cur_pol = ''; t_det = -inf;
 if all(isfile({'data/trained_detector.mat', 'data/ood_thresholds.mat'}))
@@ -79,7 +80,9 @@ for f = {'results/eval_detector_metrics.mat', 'results/eval_detector_metrics_fre
         end
     end
     if isfile(f{1}) && t(f{1}) < t('data/fusion.mat')
-        if contains(f{1}, '_fresh3')                    % B3r reads its set once
+        if contains(f{1}, '_fresh3') && unk_write('base_ok', 'data/fusion.mat', 'results/fresh3_read_started.txt')
+            % the fusion differs from the one B3r read only by FM.unk (D111): its class is the same
+        elseif contains(f{1}, '_fresh3')                % B3r reads its set once
             why{end+1} = ['older than data/fusion.mat: the fourth set was read once with an earlier fusion; ' ...
                 'cannot be reread, see docs/d91_set4.md']; %#ok<AGROW>
         else

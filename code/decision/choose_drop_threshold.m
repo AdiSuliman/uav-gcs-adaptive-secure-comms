@@ -67,6 +67,10 @@
 % (profile.json or CFG.deg_force, deg_force.m) deploys one named candidate after the adoption,
 % marked DEG.forced beside the rule's pick DEG.rule_pick (docs/p1r_protocol.md); refused otherwise.
 %
+% D111 guard (e), only with FM.unk in the pools' fusion, after the form and before the
+% degradation test: unk_guard.m (U against s0 on the clean validation episodes; on a failure
+% FM.unk is removed and the pools re-keyed before anything below reads them), UG saved.
+%
 % Output: data/drop_threshold.mat (drop_db, the median window's threshold alone, and
 % drop_db_train, drop_from; drop_alarm, cusum_db, the confirmations CF and the validation
 % readings VAL; MONP, each monitor's threshold and readings; confirm_sweep, the sweeper's
@@ -235,6 +239,16 @@ end
 fid = fopen('results/drop_threshold.txt', 'a'); fprintf(fid, '%s\n', rv{:}); fclose(fid);
 fprintf('%s\n', rv{:});
 
+%% 4b. D111 guard (e), with FM.unk only: U against s0 on the clean validation episodes, first
+UG = [];
+if unk_stat('on', PP)
+    assert(~isempty(CV), 'choose_drop_threshold:unk_guard', 'FM.unk is deployed and guard (e) needs clean validation flights');
+    thr_ref = drop_db; if strcmp(drop_alarm, 'class_cusum'), thr_ref = cusum_db; end
+    [UG, PP, CV, ru] = unk_guard(PP, CV, drop_alarm, thr_ref, EBNO_THR, T, VA);
+    fid = fopen('results/drop_threshold.txt', 'a'); fprintf(fid, '%s\n', ru{:}); fclose(fid);
+    fprintf('%s\n', ru{:});
+end
+
 %% 5. The whole monitor per confirmation: each monitor's threshold, the sweeper's confirmation
 MON = MN;
 fm = find(strcmp(FM, drop_alarm)); GF = GR{fm}; CS = decision_config().confirm_sweep;
@@ -325,6 +339,7 @@ SV = {'drop_db', 'drop_db_train', 'drop_from', 'separable', 'THR', 'kept', 'leak
 if ~isempty(DEG)                                           % deployed by train_dqn.m (PP.deg_mode, PP.ber_q)
     deg_mode = DEG.mode; ber_q = DEG.ber_q; SV = [SV, {'deg_mode', 'ber_q', 'DEG'}];
 end
+if ~isempty(UG), SV = [SV, {'UG'}]; end                    % D111 guard (e)
 save('data/drop_threshold.mat', SV{:});
 fprintf('\nSaved data/drop_threshold.mat, results/drop_threshold.txt\n');
 

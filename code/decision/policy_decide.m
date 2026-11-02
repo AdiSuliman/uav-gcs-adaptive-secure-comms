@@ -183,6 +183,7 @@ mem = policy_monitor('change', mem, a ~= cfg);
 info = struct('q', q, 'cls', {M.cls}, 'degraded', M.degraded, 'confirmed', M.confirmed, ...
     'escalated', escalated, 'ber_avg', M.ber_avg', 'drop', M.drop, 'drop_alarm', M.drop_alarm);
 if isfield(M, 'deg_quiet'), info.deg_quiet = M.deg_quiet; end   % degraded, no RF evidence (deg_mode 'win_q_gate')
+if isfield(M, 'unk'), info.unk = M.unk; end                      % the unknown flag of U (D111, policy_monitor.m)
 end
 
 function [gm, gid] = action_groups(A)

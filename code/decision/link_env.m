@@ -436,6 +436,7 @@ for i = 1:E.NE
     obs.ber_true(i) = P.ber(j);
     obs.fer_true(i) = P.fer(j);
 end
+if unk_stat('on', PP), obs.unknown = unk_stat('frame', PP.fuse.unk, obs.maha) < unk_threshold(PP); end   % D111: U of the frame
 mask = E.unk & E.t >= E.onset;
 obs.probs(mask, :) = 0; obs.unknown(mask) = true; obs.maha(mask) = -Inf;
 obs.cfg_link = E.cfg_link(:);
