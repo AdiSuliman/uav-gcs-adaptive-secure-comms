@@ -13,7 +13,8 @@
 % Splits, geometries per (cell, Eb/N0): train 8, validation 6, test 12; edge speeds
 % 24 at hover for the clean link and the single threats at every severity, and 12 at
 % 161 km/h (the limit of small UAVs, Khawaja et al.) for the clean link and the
-% nominal severity; second test 60 for the clean link and the single threats, 72 per
+% nominal severity (24 at 161 km/h with edge161_n 48 in profile.json, speed_options.m);
+% second test 60 for the clean link and the single threats, 72 per
 % point with the test (each cell's geometries per split: PP.cell_geo). The test and
 % second test geometries are nested Latin hypercubes over speed, altitude, K of our
 % signal, the direction of the first interferer and the receive correlation
@@ -82,6 +83,8 @@ S0 = load('params.mat'); p0 = S0.params; p0.quiet_build = true;
 assert_frame1_onsets(p0);                       % every threat on from its run's first frame (init_params.m)
 EBNO   = p0.EbNo_dB;
 NGEO   = [8 6 12 36 60];         % geometries per (cell, Eb/N0): train, validation, test, edge speeds, second test
+SPO = speed_options();           % profile.json edge161_n: 36 without it (12 flights at 161 km/h), or 48 (24)
+NGEO(4) = SPO.edge161_n;
 NHOVER = 24;                     % edge speeds: the first NHOVER at hover (every severity), the rest at 161 km/h (nominal)
 NCOMB  = [0 0 0 0 24];           % own geometries of the combined threats (0: they fly the split's geometries);
                                  % second test: 12 + 24 = 36 flights per point, the N_MIN of a verdict
@@ -103,6 +106,7 @@ if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (r
     COMBOS = {'jamming+path_loss', 'tone_jamming+path_loss', 'jamming+airframe_shadowing'};
     EBNO = [3 12]; NGEO = [2 2 2 2 2]; NCOMB = [0 0 0 0 2]; NHOVER = 1; N_COUNT = 2;
     BLOCK(3:5) = [18 18 19];                            % blocks of its own: its flights are never test flights
+    if SPO.edge161_n > 36, NGEO(4) = NGEO(4) + 1; end  % edge161_n 48: one more flight at 161 km/h
 end
 % The coded link's decoder, stated in profile.json (fec_rx_config.m): "d78" keeps the D78
 % erasure rules and the params as they are; the JSI decoder enters the params (so the
