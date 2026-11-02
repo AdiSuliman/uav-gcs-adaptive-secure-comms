@@ -2606,6 +2606,23 @@ verifyNotEmpty(tc, strfind(fileread(which('policy_monitor')), '&& onset_shape(''
 verifyNotEmpty(tc, strfind(fileread(which('det_frames')), '&& onset_shape(''on'', PP.fuse)'));
 end
 
+function test_det_frames_clean_pool_without_channel_records(tc)
+% A clean pool without bch beside a threat pool with it joins as NaN rows (as idle does) instead of
+% an index error; with the records on both sides, or on neither, the reading is as before.
+cls = {'none', 'antenna_fault', 'airframe_shadowing'}; nf = numel(link_features('names'));
+ok = [strcmp(cls, 'antenna_fault'); ismember(cls, {'antenna_fault', 'airframe_shadowing'})];
+rng(5); Gc = 0.3 * randn(10, 3); Gf = 0.3 * randn(10, 3); Gf(:, 2) = Gf(:, 2) - 18;
+mk = @(pr, Gx, act) struct('probs', repmat(pr, 10, 1), 'run', 101 * ones(10, 1), 'gant', Gx, 'feat', zeros(10, nf), ...
+    'ber', zeros(10, 1), 'act', act * ones(10, 1));
+PP = struct('classes', {cls}, 'fuse', [], 'fuse_N', 4, 'sps', 2, 'bps', 2);
+Pf = mk([0.1 0.4 0.5], Gf, 1); Pc = mk([1 0 0], Gc, 0);
+h0 = det_frames(Pf, Pc, 'antenna_fault', ok, PP);                    % neither pool has the records
+Pfb = Pf; Pfb.bch = ones(10, 4); Pcb = Pc; Pcb.bch = ones(10, 4);
+verifyEqual(tc, det_frames(Pfb, Pcb, 'antenna_fault', ok, PP), h0);   % both have them
+verifyEqual(tc, det_frames(Pfb, Pc, 'antenna_fault', ok, PP), h0);    % the clean pool has none
+verifyEqual(tc, det_frames(Pf, Pcb, 'antenna_fault', ok, PP), h0);    % the threat pool has none
+end
+
 function test_roll_in_false_alarms(tc)
 % The false-alarm reading beside KPI 1 (roll_in_false_alarms.m, eval_detector.m): the frames of
 % the clean sub-runs inside their roll-in, the share read as any threat, as path_loss and as
