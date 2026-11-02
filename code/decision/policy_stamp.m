@@ -5,8 +5,8 @@ function s = policy_stamp(Q)
 %   (dqn_dense.m), the det_id of the pools it learned on, the unknown-threat threshold it ran
 %   with and its decision-time settings (dec, decision_settings.m; the degradation test only when C1d
 %   chose one, and the smoke's forced mark deg_forced; the drop alarm's own confirmation, the rule's
-%   lost-branch gate and the release on evidence only when set, the smoke's forced cells wf_forced, so
-%   earlier stamps stay). Results that
+%   lost-branch gate and the release on evidence only when set, the smoke's forced cells wf_forced, the
+%   link-budget completion lb_complete and its forced mark lb_forced only when true, so earlier stamps stay). Results that
 %   depend on the deployed policy store it (evaluate_policies.m, measure_latency.m, edge_map.m),
 %   and the readers flag a result whose stamp is not the current one (result_status.m).
 f = @(n) field_or(Q, n);
@@ -42,6 +42,9 @@ end
 for n = {'s1_gate', 'release_m'}                                   % the lost-branch gate and the release on evidence, when on
     x = field_or(S, n{1});
     if ~isempty(x) && x, c{end+1} = {n{1}, 1}; end %#ok<AGROW>
+end
+for n = {'lb_complete', 'lb_forced'}                  % the link-budget completion and the smoke's forced mark, when on
+    if isequal(field_or(S, n{1}), true), c{end+1} = {n{1}, true}; end %#ok<AGROW>
 end
 end
 
