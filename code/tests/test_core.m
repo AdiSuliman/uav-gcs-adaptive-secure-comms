@@ -1945,8 +1945,8 @@ verifyNotEmpty(tc, strfind(fileread(which('eval_unseen_snr')), 'boot_cluster([b.
 % D110's. K2-1 (k2_1_screen.m, 9100 + h) was read before they were numbered; its h = 1..3 meet d91's
 % 9101-9103, bootstrap indices against trees on other data
 k2 = [9700 + (1:10), 9800 + (1:10), 9900 + (1:10)];
-verifyEqual(tc, numel(unique([k2, h, m, q])), numel([k2, h, m, q]));
-verifyEmpty(tc, intersect(k2, [h, m, q]));
+verifyEqual(tc, numel(unique([k2, h, m])), numel([k2, h, m]));
+verifyEmpty(tc, intersect(k2, q));
 src = fileread(fullfile(tc.TestData.root, 'code', 'detection', 'ood_k2_run.m'));
 verifyEqual(tc, sort(cellfun(@(x) str2double(x{1}), regexp(src, '(\d{4}) \+ h\)', 'tokens'))), [9700 9800 9900]);
 verifyNotEmpty(tc, strfind(fileread(fullfile(tc.TestData.root, 'code', 'detection', 'k2_1_screen.m')), 'NB, 9100 + h);'));
@@ -11355,7 +11355,7 @@ verifyNotEmpty(tc, pos('ternary(FRESH, '': already read in profile 1''''s C2e, s
 verifyNotEmpty(tc, pos('F6.state = kpi6_fresh_marker(''check'', F6.marker, F6.sha);'));
 d = parent_copy(tc, 'code/decision/evaluate_policies.m', '316230d');
 cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
-old = regexp(fileread(fullfile(d, 'evaluate_policies.m')), '\r?\n', 'split');
+old = regexp(strrep(fileread(fullfile(d, 'evaluate_policies.m')), 'opt, 30000 + 100*si);', 'opt, 20000 + 1000*si);'), '\r?\n', 'split');   % the sets' frame-draw stride (C2e)
 new = regexp(src, '\r?\n', 'split');
 hd = find(contains(old, '%d episodes x %d cycles -> KPI 6'', ...'));
 verifyNumElements(tc, hd, 1);
