@@ -21,7 +21,20 @@ function varargout = fuse_classes(cmd, varargin)
 %                                                each sub-run's cycles from its first)
 %   opt = fuse_classes('cues', FM)                the further columns of fusion FM ([] for none)
 %   FM = fuse_classes('fit', Z, y, C, lambda)     y class index per frame
-%   [pc, k] = fuse_classes('apply', FM, Z)        pc frames x C, k predicted class
+%   [pc, k] = fuse_classes('apply', FM, Z)        pc frames x C, k predicted class. With FM.gcc
+%       the gated coherence columns are appended to Z first (fitted on them); with FM.head the
+%       lost-branch and level head reshares the four level-family classes (fuse_head.m)
+%   names = fuse_classes('names', C, opt)         the names of the row's columns
+%   g = fuse_classes('gcc', C, opt)               the columns of the gated coherence columns:
+%       coh_contrast, los_contrast, los_k, coh_weak, k_contrast, ps_k_contrast, each times
+%       1[gl_db >= 3 dB], the drop at which branch_coherence reads a branch's step
+%   X = fuse_classes('gcc_x', Z, g)               those six columns of the rows Z
+%   FM = fuse_classes('refit', FMd, Z, y, C, lambda, fold, E)  a fusion of FMd's form fitted on
+%       the rows Z (compare_architectures.m): the linear fusion, on FMd's gated columns when it
+%       has them, and with FMd.head a head of its columns stacked on the linear fusion's
+%       out-of-fold probabilities over the folds of these rows (fuse_head.m), its trees'
+%       stream fuse_head('seed', 'LBH', E) for rows without the folds E; without either,
+%       fuse_classes('fit', Z, y, C, lambda)
 %   The fusion is fitted on the validation split (the detector's outputs on its own
 %   training frames are overconfident), N and lambda by cross-validation over the
 %   validation sub-runs (select_fusion.m); the test split is never used.
@@ -31,6 +44,10 @@ switch cmd
     case 'cues',    varargout{1} = cues(varargin{:});
     case 'fit',     varargout{1} = fit(varargin{:});
     case 'apply',   [varargout{1}, varargout{2}] = apply(varargin{:});
+    case 'names',   varargout{1} = names(varargin{:});
+    case 'gcc',     varargout{1} = gcc(varargin{:});
+    case 'gcc_x',   varargout{1} = gcc_x(varargin{:});
+    case 'refit',   varargout{1} = refit(varargin{:});
     otherwise, error('fuse_classes: unknown command %s', cmd);
 end
 end
@@ -110,11 +127,53 @@ FM = struct('W', W, 'mu', mu, 'sd', sd, 'C', C, 'lambda', lambda);
 end
 
 function [pc, k] = apply(FM, Z)
+if isfield(FM, 'gcc') && ~isempty(FM.gcc), Z = [Z, gcc_x(Z, FM.gcc)]; end
 assert(size(Z, 2) == numel(FM.mu), 'fuse_classes:columns', 'fuse_classes: %d evidence columns, the fusion was fitted on %d (rerun select_fusion)', ...
     size(Z, 2), numel(FM.mu));
 X = [(Z - FM.mu) ./ FM.sd, ones(size(Z, 1), 1)];
 pc = softmax_rows(X * FM.W);
+if isfield(FM, 'head') && ~isempty(FM.head), pc = fuse_head('apply', FM.head, pc, Z); end
 [~, k] = max(pc, [], 2);
+end
+
+function n = names(C, opt)
+% The row's columns: temporal_evidence.m's, window_cues.m's, the frame's own log-probabilities
+% (now_c), the further columns of opt.
+if nargin < 2, opt = []; end
+n = [temporal_evidence('names', C), window_cues('names'), arrayfun(@(c) sprintf('now_%d', c), 1:C, 'UniformOutput', false), ...
+    window_cues('extra_names', opt)];
+end
+
+function g = gcc(C, opt)
+n = names(C, opt);
+at = @(s) find(strcmp(n, s));
+c = cellfun(at, {'coh_contrast', 'los_contrast', 'los_k', 'coh_weak', 'k_contrast', 'ps_k_contrast'}, 'UniformOutput', false);
+assert(all(cellfun(@isscalar, c)) && isscalar(at('gl_db')), 'fuse_classes:gcc', ...
+    'the gated coherence columns need the coherence columns and the glr and post further columns');
+g = struct('gate', at('gl_db'), 'cols', [c{:}]);
+end
+
+function X = gcc_x(Z, g)
+X = double(Z(:, g.gate) >= 3) .* Z(:, g.cols);
+end
+
+function FM = refit(FMd, Z, y, C, lambda, fold, E)
+g = []; if isfield(FMd, 'gcc'), g = FMd.gcc; end
+FM = fit_g(Z, y, C, lambda, g);
+if ~isfield(FMd, 'head') || isempty(FMd.head), return; end
+po = nan(size(Z, 1), C);
+for j = unique(fold(:))'
+    m = fold(:) == j;
+    po(m, :) = apply(fit_g(Z(~m, :), y(~m), C, lambda, g), Z(m, :));
+end
+FM.head = fuse_head('fit', po, Z, y, FMd.head.L, FMd.head.cols, fuse_head('seed', 'LBH', E));
+end
+
+function FM = fit_g(Z, y, C, lambda, g)
+% The linear fusion, on the gated coherence columns g when given.
+if isempty(g), FM = fit(Z, y, C, lambda); return; end
+FM = fit([Z, gcc_x(Z, g)], y, C, lambda);
+FM.gcc = g;
 end
 
 function P = softmax_rows(A)

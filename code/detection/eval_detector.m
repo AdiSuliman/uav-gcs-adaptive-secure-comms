@@ -13,7 +13,9 @@
 % this params.mat, data/splits_fresh3_params.mat),
 % results/fresh3_read_started.txt is written before the set is loaded and blocks any later
 % reading. No outcome is printed before the fusion and the latch have run. The KPI 1 threshold
-% is chosen on the validation split in every case.
+% is chosen on the validation split in every case. When B2F deployed a candidate over the d91
+% pick (fusion_pick.m P.ext, data/fusion.mat base_fm), the d91 pick alone is read beside on the
+% same frames at the same threshold: 'd91 alone, descriptive, never the KPI 1 value'.
 % Eb/N0 of a frame (kpi_ebno.m): the Eb/N0 our signal is received with, the configured
 % value less a path-loss step from its onset on; a frame judged as path_loss is read at the
 % link's Eb/N0 when the step began (the step's depth is its severity level). Frames
@@ -125,6 +127,7 @@ Y_pred_prob = cnn_scores(net, sp.test.X, sp.test.feats');
 % judged on its window (fusion_target.m): a WLAN frame without a packet whose window holds
 % packet frames has the target benign_interference.
 fus = [];
+bfm = [];                                               % the d91 pick alone (select_fusion.m base_fm), read beside
 rk = ones(numel(Y_test), 1);
 out_fus = '';                                           % printed once the fusion and the latch have run
 cls_names = cellstr(string(classes(:)'));
@@ -142,6 +145,12 @@ if isfile('data/fusion.mat') && isfield(sp.test, 'pos')
     out_fus = sprintf('Per frame, on the frame rule''s labels (frame_labels.m): accuracy %.2f%%, macro-F1 %.2f%%\n', frame_acc, frame_f1);
     sp.test.feat_names = sp.norm.feat_names;
     Z = fuse_classes('windows', sp.test, Y_pred_prob', fus.N, fuse_classes('cues', fus.FM));
+    if ismember('base_fm', {whos('-file', 'data/fusion.mat').name})   % D110's candidate over the d91 pick: the pick alone beside
+        bfm = load('data/fusion.mat', 'base_fm').base_fm; P_cnn = Y_pred_prob;
+        xr = load('data/fusion.mat', 'deployed_pick').deployed_pick.check.ext;
+        ext_ = 'failed its re-check, the d91 pick alone deploys (the fallback)'; if xr.adopted, ext_ = 'adopted'; end
+        fprintf('B2F: %s over the d91 pick %s; the d91 pick alone (base_fm) is read beside\n', xr.pick, ext_); clear xr ext_
+    end
     Y_pred_prob = fuse_classes('apply', fus.FM, Z)';
     fprintf('Decision over the last %d cycles (temporal fusion)\n', fus.N);
     [yt, rk] = fusion_target(double(sp.test.Y(:)), sp.test.run, sp.test.pos, fus.N, classes, fus.FM);
@@ -574,6 +583,24 @@ ci95 = struct('n_boot', N_BOOT, 'accuracy', ci(:, 1)', 'macro_f1', ci(:, 2)', 'm
 fprintf('95%% bootstrap CI: accuracy [%.2f, %.2f] | macro-F1 [%.2f, %.2f] | macro-F1 above threshold [%.2f, %.2f]\n', ...
     ci95.accuracy, ci95.macro_f1, ci95.macro_f1_above);
 
+%% 5d. Beside KPI 1: the d91 pick alone on the same frames, at the reading's threshold (descriptive)
+base_alone = [];
+if ~isempty(bfm)
+    pb = fuse_classes('apply', bfm, fuse_classes('windows', sp.test, P_cnn', fus.N, fuse_classes('cues', bfm)));
+    if isfield(sp.test, 'gain_ant') && onset_shape('on', bfm)
+        pb = latch_runs(pb, sp.test.run, sp.test.pos, sp.test.gain_ant, cls_names, onset_shape('threshold', bfm));
+    end
+    [~, kb] = max(pb, [], 2); Yb = reshape(categorical(classes(kb)', classes), [], 1); clear pb P_cnn
+    base_alone = struct('label', 'd91 alone, descriptive, never the KPI 1 value', 'threshold_db', thr_db, ...
+        'macro_f1_pct', 100 * macro_f1_of(Y_test, Yb, classes), ...
+        'macro_f1_above_threshold_pct', 100 * macro_f1_of(Y_test(above), Yb(above), classes), ...
+        'class_f1_above_threshold_pct', 100 * class_f1_of(Y_test(above), Yb(above), classes));
+    fprintf(['d91 alone, descriptive, never the KPI 1 value: macro-F1 above the reading''s threshold (%g dB) %.2f%%, every frame ' ...
+        '%.2f%%; F1 above it %s\n'], thr_db, base_alone.macro_f1_above_threshold_pct, base_alone.macro_f1_pct, ...
+        strjoin(cellfun(@(c, v) sprintf('%s %.1f%%', c, v), cls_names, num2cell(base_alone.class_f1_above_threshold_pct(:)'), ...
+        'UniformOutput', false), ', '));
+end
+
 %% 6. Save numeric results for downstream KPI aggregation
 snr_breakdown = struct('snr_db', num2cell(unique_snrs), 'accuracy_pct', num2cell(100*acc_vs_snr), ...
     'macro_f1_pct', num2cell(f1_vs_snr));
@@ -599,6 +626,7 @@ metrics.fusion_state = fz_read.state;
 metrics.sample = fz_read.sample;                        % 'in-sample (fit set of the deployed fusion)' or ''
 metrics.latch = latch_on;                              % the monitor latches a lost branch's cause (select_fusion.m)
 metrics.fused_alone = fused_alone;
+if ~isempty(base_alone), metrics.base_alone = base_alone; end
 metrics.roll_in_false_alarms = roll_in_fa;
 if ~isempty(fus)
     metrics.fusion_cycles = fus.N;

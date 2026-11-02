@@ -4,7 +4,8 @@ function [st, txt] = deploy_state()
 %   root; reads data/fusion.mat and data/fusion_nogo.mat only.
 %   st   'deployed'  data/fusion.mat holds fusion_rev_id('enlarged'), FM.cues of fusion_pick.m and
 %                    deployed_pick equal to fusion_pick() with its rule check and the kept base
-%                    (check.kept), and the rule held
+%                    (check.kept), and the rule held. With D110's idle columns in the pick
+%                    (P.ext), FM.cues.cfar holds the T1, T2 and m0 B2F fitted
 %        'nogo'      a no-go record of fusion_pick() names the fusion on disk (fusion_nogo('check'))
 %        'none'      neither: the old fusion without a record, a validation-fit revision, a save
 %                    cut short before its revision record, or a rule printed but not held (the
@@ -21,7 +22,7 @@ if isfile(fk)
     if strcmp(rev, fusion_rev_id('enlarged')) && all(ismember({'deployed_pick', 'FM'}, f))
         L = load(fk, 'deployed_pick', 'FM'); dp = L.deployed_pick;
         if isstruct(dp) && isfield(dp, 'check') && isstruct(dp.check) && isfield(dp.check, 'kept') && ...
-                isequal(rmfield(dp, 'check'), P) && isstruct(L.FM) && isfield(L.FM, 'cues') && isequal(L.FM.cues, P.cues)
+                isequal(rmfield(dp, 'check'), P) && isstruct(L.FM) && isfield(L.FM, 'cues') && cues_ok(L.FM.cues, P)
             k = dp.check.kept;
             why = sprintf('%s, deployed_pick ''%s'' with its rule check, kept base N %d, lambda %g, latch %d', ...
                 why, dp.name, k.N, k.lambda, k.latch);
@@ -43,4 +44,14 @@ if isfile(fk)
 end
 txt = sprintf('DEPLOY_STATE %s: %s', st, why);
 fprintf('%s\n', txt);
+end
+
+function ok = cues_ok(c, P)
+% FM.cues is the pick's; with the idle columns in P.ext, cfar holds three finite thresholds.
+q = P.cues;
+if isfield(P, 'ext') && contains(P.ext.pick, 'CFAR')
+    if ~(isstruct(c) && isfield(c, 'cfar') && numel(c.cfar) == 3 && all(isfinite(c.cfar))), ok = false; return; end
+    q.cfar = c.cfar;
+end
+ok = isequal(c, q);
 end
