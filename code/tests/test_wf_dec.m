@@ -360,7 +360,7 @@ src = fileread(which('choose_drop_threshold'));
 verifyNotEmpty(tc, strfind(src, ['SV = {''drop_db'', ''drop_db_train'', ''drop_from'', ''separable'', ''THR'', ''kept'', ' ...
     '''leak'', ''leak_all'', ...']));
 verifyNotEmpty(tc, strfind(src, ['''p95_mis'', ''p99_cl'', ''p05_pl'', ''floor_db'', ''drop_alarm'', ''cusum_db'', ''THC'', ' ...
-    '''VAL'', ''CF'', ''EBNO_THR'', ''MONP'', ''confirm_sweep''};']));
+    '''VAL'', ''CF'', ''EBNO_THR'', ''MONP'', ''confirm_sweep'', ''CAL35''};']));
 verifyNotEmpty(tc, strfind(src, 'if DCx && strcmp(drop_alarm, ''class_cusum'')'));
 verifyNotEmpty(tc, strfind(src, 'MONP(m).confirm_drop = DCONF(m).cand; MONP(m).grid = DCONF(m).grid;'));
 verifyNotEmpty(tc, strfind(src, 'if ~isempty(DCONF(m).cand), MONP(m).pick = DCONF(m).pick; MONP(m).j = DCONF(m).j; end'));

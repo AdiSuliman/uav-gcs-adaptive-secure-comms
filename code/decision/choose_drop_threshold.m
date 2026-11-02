@@ -62,6 +62,8 @@
 % on the check half and the validation split's single threats. An adopted candidate is saved in MONP.confirm_drop with
 % the monitor's new threshold (pick) and its grid, and THC becomes the extended grid; a monitor without one keeps its
 % threshold and the grid as they were. Without the switch nothing of this runs and the outputs are those of before.
+% With "dconf_own": true as well (D121 item 6) a candidate's threshold is the most sensitive value of the extended grid whose
+% clean fit-half episodes with the drop alarm as first confirming path are at most the monitor without it has there.
 % In the smoke only, dconf_force (profile.json or CFG.dconf_force, wf_force.m) deploys one named candidate for every
 % monitor instead, marked DCONF(m).forced beside the rule's pick DCONF(m).rule_pick; refused otherwise.
 %
@@ -358,7 +360,7 @@ else
     if DCx && strcmp(drop_alarm, 'class_cusum')
         [fitg, chkg] = clean_halves(CV.runs);
         [DCONF, rd] = dconf_step(drop_alarm, GF, MON, MONP, confirm_sweep, Tc, ismember(Tc.r, find(fitg)), ...
-            ismember(Tc.r, find(chkg)), Tv, onv, thv, thn, PP.sev(Tv.scn) == 1, FA_BOUND, DCf);
+            ismember(Tc.r, find(chkg)), Tv, onv, thv, thn, PP.sev(Tv.scn) == 1, FA_BOUND, DCf, WFo.dconf_own);
         rw = [rw, rd];
         for m = 1:numel(MON)
             MONP(m).confirm_drop = DCONF(m).cand; MONP(m).grid = DCONF(m).grid;

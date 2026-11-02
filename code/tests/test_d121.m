@@ -344,3 +344,115 @@ mtree(which('cfo_joint'), '-file');
 mtree(which('test_d121'), '-file');
 verifyTrue(tc, true);
 end
+
+%% ---------- item 6: D112's candidate threshold by its own drop-path count (dconf_step.m) ----------
+function W = d6_world(nf, nk, dips_fit, dips_chk, n_other)
+% dconf_step.m's synthetic world: nf + nk clean 30-cycle episodes (Eb/N0 estimate 20 dB), the first
+% dips_fit of the fit half and dips_chk of the check half with a two-cycle 12 dB dip, the first n_other of
+% each half alarming on another path from cycle 3 on (the class path breaking the whole-monitor bound);
+% 20 path_loss episodes (onset 5, 12 dB down from then on) and 20 jamming episodes (other paths from the onset).
+n = nf + nk; T = 30;
+Tc = struct('other', false(n, T), 'sw', false(n, T), 'eg', 20 * ones(n, T), 'quiet', false(n, T), ...
+    'onset', zeros(1, n), 'scn', ones(1, n), 's', ones(1, n), 'r', 1:n);
+fit = [true(1, nf), false(1, nk)]; chk = ~fit;
+i = find(fit); Tc.eg(i(1:dips_fit), 10:11) = 8; Tc.other(i(1:n_other), 3:end) = true;
+i = find(chk); Tc.eg(i(1:dips_chk), 10:11) = 8; Tc.other(i(1:n_other), 3:end) = true;
+P = 20; m = 2 * P;
+Tv = struct('other', false(m, T), 'sw', false(m, T), 'eg', 20 * ones(m, T), 'quiet', false(m, T), ...
+    'onset', 5 * ones(1, m), 'scn', ones(1, m), 's', ones(1, m), 'r', [1:P, 1:P]);
+Tv.eg(1:P, 6:end) = 8; Tv.other(P+1:end, 6:end) = true;
+thv = [repmat({'path_loss'}, 1, P), repmat({'jamming'}, 1, P)];
+D1 = decision_config().sev.path_loss.levels(1);
+W = struct('Tc', Tc, 'Tv', Tv, 'fit', fit, 'chk', chk, 'onv', true(1, m), 'thv', {thv}, 'thn', {{'path_loss', 'jamming'}}, ...
+    'sev1', [true(1, P), false(1, P)], 'GF', D1^2 / 2 * (1:0.5:10), 'MON', {{'class_drop 5/5'}});
+W.MONP = struct('monitor', 'class_drop 5/5', 'cf', [5 5], 'pick', W.GF(1), 'j', 1);
+end
+
+function [D, lines] = d6_run(W, varargin)
+% dconf_step.m on the world W; varargin: the optional force and own arguments.
+[D, lines] = dconf_step('class_cusum', W.GF, W.MON, W.MONP, [], W.Tc, W.fit, W.chk, W.Tv, W.onv, W.thv, W.thn, ...
+    W.sev1, 0.05, varargin{:});
+end
+
+function T = d6_sub(T, m)
+for f = fieldnames(T)'
+    if size(T.(f{1}), 1) > 1, T.(f{1}) = T.(f{1})(m(:), :); else, T.(f{1}) = T.(f{1})(m(:)'); end
+end
+end
+
+function kd = d6_drop_first(T, thr, cf, cdr)
+% Independent count: clean episodes whose first confirmed cycle has no confirmation without the drop alarm.
+[c, ~, cn] = monitor_confirm(T, 'class_cusum', thr, cf, [], cdr);
+kd = 0;
+for i = 1:size(c, 1)
+    f = find(c(i, :), 1);
+    if ~isempty(f) && ~cn(i, f), kd = kd + 1; end
+end
+end
+
+function test_dconf_own_off_is_bit_identical(tc)
+% The rule off (argument absent, [] or false) is dconf_step.m's output as it was, on a world with dips
+% (thresholds above the first value) and one with none.
+for dips = [0 8]
+    W = d6_world(60, 60, dips, 0, 0);
+    [D0, L0] = d6_run(W, []);
+    [D1, L1] = d6_run(W, [], false);
+    [D2, L2] = d6_run(W, [], []);
+    verifyTrue(tc, isequaln(D0, D1) && isequaln(D0, D2) && isequal(L0, L1) && isequal(L0, L2));
+end
+end
+
+function test_dconf_own_rescues_a_mechanical_failure(tc)
+% The class path alone (20 of 60 fit-half clean episodes alarm on another path) breaks the
+% whole-monitor bound at every threshold, so the old rule finds none for either candidate; the own
+% drop-path rule, against the monitor's own count of drop-first episodes (0), adopts [2 2] at the
+% most sensitive value, as the world without the other path does.
+W = d6_world(60, 60, 0, 0, 20);
+[Do, ~] = d6_run(W, [], false);
+verifyEmpty(tc, Do(1).cand);
+verifyTrue(tc, all(arrayfun(@(c) isnan(c.pick), Do(1).cands)));
+[Dn, lines] = d6_run(W, [], true);
+verifyEqual(tc, Dn(1).cand, [2 2]);
+verifyEqual(tc, Dn(1).pick, W.GF(1));
+verifyEqual(tc, Dn(1).ref.k_drop, 0);
+verifyTrue(tc, Dn(1).cands(1).ok);
+verifyNotEmpty(tc, strfind(strjoin(lines, '|'), 'own drop-path rule'));
+end
+
+function test_dconf_own_threshold_holds_the_references_count(tc)
+% Fit-half dips: each candidate's threshold is the most sensitive grid value whose fit-half drop-first
+% count is at most the monitor without it has at its threshold in force, computed here independently.
+W = d6_world(60, 60, 8, 0, 0);
+[D, ~] = d6_run(W, [], true);
+C = decision_config(); GX = [W.GF, W.GF(end) * C.confirm_drop_ext];
+Tf = d6_sub(W.Tc, W.fit);
+ref = d6_drop_first(Tf, W.MONP.pick, W.MONP.cf, []);
+jmax = 0;
+for i = 1:numel(D(1).cands)
+    cdr = D(1).cands(i).cd;
+    kf = arrayfun(@(t) d6_drop_first(Tf, t, W.MONP.cf, cdr), GX);
+    j = find(kf <= ref, 1);
+    verifyEqual(tc, D(1).cands(i).pick, GX(j), sprintf('candidate %d', i));
+    verifyLessThanOrEqual(tc, kf(j), ref);
+    if j > 1, verifyGreaterThan(tc, kf(j - 1), ref); end
+    jmax = max(jmax, j);
+end
+verifyGreaterThan(tc, jmax, 1);                                          % the dips raised a threshold
+end
+
+function test_dconf_own_wiring_and_static(tc)
+src = fileread(which('dconf_step'));
+for tf = {'healthy', 'harmed', 'sc_eff', '\.ended'}
+    verifyEmpty(tc, regexp(src, tf{1}, 'once'), sprintf('dconf_step reads %s', tf{1}));
+end
+verifyNumElements(tc, regexp(fileread(which('choose_drop_threshold')), 'WFo\.dconf_own', 'match'), 1);
+O = wf_options([], 'none.json'); verifyFalse(tc, O.dconf_own);
+f = [tempname '.json'];
+fid = fopen(f, 'w'); fprintf(fid, '{"dconf_select": true, "dconf_own": true}'); fclose(fid);
+O = wf_options([], f); verifyTrue(tc, O.dconf_own && O.dconf);
+fid = fopen(f, 'w'); fprintf(fid, '{"dconf_own": 1}'); fclose(fid);
+verifyError(tc, @() wf_options([], f), 'wf_options:value');
+delete(f);
+mtree(which('dconf_step'), '-file'); mtree(which('wf_options'), '-file');
+verifyTrue(tc, true);
+end
