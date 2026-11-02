@@ -34,7 +34,7 @@ function R = m_head(data_dir, out_dir, opt)
 SETS_SHA = '75b7a9cd75b37364248bf35cf9aac50eca23f91cb8ff75442e9f03ee1cbf2c6b';
 CK_SHA = '0ae49158fb9cf01368d7e4aa91405c54b032f17f3c1ebcbc2a935917f2d018b8';
 REG_COMMIT = 'b6628caa64e681e7f9714a30cdbbe8185079620d';   % uav-gcs-v7-docs, the registration of the rule
-RULE_SHA = '96cc3549e7a85efc9e428ffb8bb1bc42d98773a0b9060b09febcf77e4cc186c7';   % fusion_adopt.m, line ends LF
+RULE_SHA = 'b762351539760131d6f2c443a263842f0f98b15e1ba6f768a7aa735ba72463fd';   % fusion_adopt.m, line ends LF
 if ischar(data_dir) && strcmp(data_dir, 'candidates'), R = candidates(defaults(out_dir)); return; end
 if ischar(data_dir) && strcmp(data_dir, 'guard'), guard(out_dir, opt, SETS_SHA, CK_SHA); R = true; return; end
 if ischar(data_dir) && strcmp(data_dir, 'set4'), set4(out_dir); R = true; return; end
@@ -341,7 +341,7 @@ end
 function m = mf1(y, yh, C)
 cm = accumarray([y(:) yh(:)], 1, [C C]);
 pr = diag(cm) ./ sum(cm, 1)'; rc = diag(cm) ./ sum(cm, 2);
-f = 2 * pr .* rc ./ (pr + rc); m = mean(f(sum(cm, 2) > 0), 'omitnan');
+f = 2 * pr .* rc ./ (pr + rc); f(isnan(f)) = 0; m = mean(f(sum(cm, 2) > 0));
 end
 
 function f = cf1(y, yh, c)
