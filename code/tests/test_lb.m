@@ -581,6 +581,24 @@ verifyNumElements(tc, b, 2);
 verifyTrue(tc, all(contains(b, 'S.cols(')));
 end
 
+function test_selected_kind_not_deployed(tc)
+% The LB columns and the unknown/combination experiments run the DQN kind that was selected
+% (seed_summary.selected_kind), not the kind the deployed policy names: a rule fallback
+% ('rule_sel') beside a selected plain DQN gives the plain kind; a file without the field
+% falls back to the deployed name as before.
+mk = @(k, d) struct('seed_summary', struct('selected_kind', k), 'deployed', d);
+verifyEqual(tc, dqn_selected_kind(mk('dqn', 'rule_sel')), 'dqn');
+verifyEqual(tc, dqn_selected_kind(mk('dqn_esc', 'rule_sel')), 'dqn_esc');
+verifyEqual(tc, dqn_selected_kind(mk('dqn', 'dqn')), 'dqn');
+verifyEqual(tc, dqn_selected_kind(mk('dqn_esc', 'dqn_esc')), 'dqn_esc');
+verifyEqual(tc, dqn_selected_kind(struct('seed_summary', struct('selected_gamma', 0.9), 'deployed', 'dqn')), 'dqn');
+verifyEqual(tc, dqn_selected_kind(struct('seed_summary', struct(), 'deployed', 'rule_sel')), 'dqn_esc');
+verifyEqual(tc, dqn_selected_kind(struct('seed_summary', struct())), 'dqn_esc');
+for f = {'experiment_unknown_threat', 'experiment_combo_generalization'}
+    verifyNotEmpty(tc, strfind(fileread(which(f{1})), 'DK = dqn_selected_kind(Q);'), f{1});
+end
+end
+
 function test_c2e_columns_wiring(tc)
 % C2e prints the two columns only when C2 stored the switch (train_dqn.m step 4c): after the policy
 % loop, before the envelope; the report and the saved file grow only then; the selected DQN runs
@@ -603,7 +621,7 @@ verifyNotEmpty(tc, strfind(fl, 'o0 = opt; o0.monitor = struct(''lb_complete'', f
 verifyNotEmpty(tc, strfind(fl, 'o1 = opt; o1.monitor = struct(''lb_complete'', true);'));
 verifyNumElements(tc, strfind(fl, '30000 + 100 * si'), 4);                     % the main runs' draws, a pair the same
 verifyNotEmpty(tc, strfind(fl, 'L = lb_columns(nm, ternary(Q.dec.lb_complete, ''on'', ''off''), names, X, cl, ebno_thr);'));
-verifyNotEmpty(tc, strfind(fl, 'nm = ''dqn_esc''; if strcmp(Q.deployed, ''dqn''), nm = sprintf(''dqn_g%d'', sel); end'));
+verifyNotEmpty(tc, strfind(fl, 'nm = ''dqn_esc''; if strcmp(dqn_selected_kind(Q), ''dqn''), nm = sprintf(''dqn_g%d'', sel); end'));
 verifyNotEmpty(tc, pos('error(''evaluate_policies:lb_forced'''));
 verifyNotEmpty(tc, pos('isfield(Q.dec, ''lb_forced'') && Q.dec.lb_forced && ~(exist(''SMOKE'', ''var'') && SMOKE)'));
 % KPI 5 prints the line only with the columns

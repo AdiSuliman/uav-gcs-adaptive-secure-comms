@@ -871,7 +871,7 @@ function L = lb_flights(PP, K, Q, sets, RES, POL, sel, fixed_best, fixed_mmse, t
 % test threat sets and the clean set, with the frame draws of the main runs (30000 + 100 x set), so
 % a pair differs only by the completion; the policy tables above hold the deployed switch
 % (Q.dec.lb_complete). The readings go to lb_columns.m, which makes the columns.
-nm = 'dqn_esc'; if strcmp(Q.deployed, 'dqn'), nm = sprintf('dqn_g%d', sel); end
+nm = 'dqn_esc'; if strcmp(dqn_selected_kind(Q), 'dqn'), nm = sprintf('dqn_g%d', sel); end
 [kind, ag, opt] = policy_setup(nm, Q, sel, fixed_best, fixed_mmse, tab, K.na);
 o0 = opt; o0.monitor = struct('lb_complete', false);
 o1 = opt; o1.monitor = struct('lb_complete', true);

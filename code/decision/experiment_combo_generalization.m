@@ -28,7 +28,7 @@ Q = load('data/trained_dqn.mat', 'agent', 'H', 'norm_in', 'seed_summary', 'confi
     'dec', 'deployed');
 check_det_id(PP, Q, 'experiment_combo_generalization');
 PP = decision_settings(PP, Q);                       % the agent's monitor and decision-time settings (train_dqn.m)
-DK = 'dqn_esc'; if isfield(Q, 'deployed') && strcmp(Q.deployed, 'dqn'), DK = 'dqn'; end   % the DQN as selected
+DK = dqn_selected_kind(Q);                           % the DQN as selected
 LBC = isfield(Q, 'dec') && isstruct(Q.dec) && isfield(Q.dec, 'lb_complete');   % C2 stored the link-budget completion's switch (train_dqn.m)
 K = link_env('tables', PP);
 TEST = 3; NE = 64; REPS = 2;
