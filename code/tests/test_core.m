@@ -8455,6 +8455,28 @@ verifyNotEmpty(tc, strfind(src, '[specs, n] = clean_wide_specs(PP, CT, ebno_thr,
 verifyEqual(tc, decision_config().drop_steps, [-2 0 2]);
 end
 
+function test_kpi1_threshold_check(tc)
+% C1d and the edge map read the KPI 1 threshold from the base metrics file; it must equal the
+% one in the file KPI 1 is read from (kpi1_file.m) when that exists, else an error
+d = fullfile(tc.TestData.tmp, 'thr_check'); mkdir(fullfile(d, 'results'));
+c0 = cd(d); back = onCleanup(@() cd(c0)); %#ok<NASGU>
+f = kpi1_file('eval_detector_metrics');
+verifyEqual(tc, f, 'results/eval_detector_metrics_fresh3.mat');
+kpi1_threshold_check(4, 'x');                                          % no fourth-set file: nothing to compare
+metrics = struct('kpi1_threshold_db', 4); save(f, 'metrics');
+kpi1_threshold_check(4, 'x');                                          % equal: passes
+verifyError(tc, @() kpi1_threshold_check(6, 'edge_map'), 'kpi1:threshold');
+verifyError(tc, @() kpi1_threshold_check(1, 'choose_drop_threshold'), 'kpi1:threshold');   % the default (first Eb/N0) too
+metrics = struct('kpi1_threshold_db', NaN); save(f, 'metrics');
+kpi1_threshold_check(6, 'x');                                          % the file holds no threshold: nothing to compare
+metrics = struct('other', 1); save(f, 'metrics');
+kpi1_threshold_check(6, 'x');
+for g = {'choose_drop_threshold', 'edge_map'}
+    s = fileread(which(g{1}));
+    verifyNumElements(tc, strfind(s, ['kpi1_threshold_check(', ternary_t(strcmp(g{1}, 'edge_map'), 'ebno_thr', 'EBNO_THR'), ', ''', g{1}, ''');']), 1, g{1});
+end
+end
+
 function test_reward_needs_plr(tc)
 % The reward's restoration and the healthy link are KPI 4's test, BER and packet loss: a
 % configuration that restores the BER but not the packet loss earns at most C.q_partial, a

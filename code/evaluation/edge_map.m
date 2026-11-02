@@ -165,6 +165,7 @@ if isfile('results/eval_detector_metrics.mat')
         ebno_thr = Md.metrics.kpi1_threshold_db;
     end
 end
+kpi1_threshold_check(ebno_thr, 'edge_map');           % the threshold of the file KPI 1 is read from
 km = link_distance_km(PP.ebno, p0);                   % [km] distance of every Eb/N0, profile A tracked
 LB = link_budget();
 if isfile('results/overhead_pass.mat'), L = load('results/overhead_pass.mat', 'OHP'); OHP = L.OHP; else, OHP = overhead(); end
