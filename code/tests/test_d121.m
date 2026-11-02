@@ -247,7 +247,6 @@ end
 function test_choose_drop_threshold_m_file_parses(tc)
 % Parse check (no MATLAB slot for runtests at authoring time): mtree must not error.
 parses_ok(tc, 'choose_drop_threshold');
-verifyTrue(tc, true);
 end
 
 %% ---------- item 11: near/far OOD AUROC lines (descriptive, measure_all_kpis.m) ----------
@@ -274,7 +273,6 @@ end
 function test_measure_all_kpis_m_file_parses(tc)
 % Parse check (no MATLAB slot for runtests at authoring time): mtree must not error.
 parses_ok(tc, 'measure_all_kpis');
-verifyTrue(tc, true);
 end
 
 %% ---------- item 13: joint, power-weighted CFO across antennas (diagnostic) ----------
@@ -344,7 +342,6 @@ for tf = {'healthy', 'harmed', 'sc_eff', '\.ended', 'truth', 'cfo_true'}
 end
 parses_ok(tc, 'cfo_joint');
 parses_ok(tc, 'test_d121');
-verifyTrue(tc, true);
 end
 
 %% ---------- item 6: D112's candidate threshold by its own drop-path count (dconf_step.m) ----------
@@ -456,7 +453,6 @@ fid = fopen(f, 'w'); fprintf(fid, '{"dconf_own": 1}'); fclose(fid);
 verifyError(tc, @() wf_options([], f), 'wf_options:value');
 delete(f);
 parses_ok(tc, 'dconf_step'); parses_ok(tc, 'wf_options');
-verifyTrue(tc, true);
 end
 %% ---------- item 10: onset-referenced recovery line (lect_kpis.m CN block) ----------
 function ALL = onset_world(n, geom, tt_det, tt_blind)
@@ -586,7 +582,6 @@ verifyNumElements(tc, regexp(ev, 'KP\.speed_ne\s*=', 'match'), 1);
 mk = fileread(which('measure_all_kpis'));
 verifyNotEmpty(tc, regexp(mk, 'speed_ne', 'once'));
 parses_ok(tc, 'speed_nonemitter'); parses_ok(tc, 'evaluate_policies'); parses_ok(tc, 'measure_all_kpis');
-verifyTrue(tc, true);
 end
 
 %% ---------- items 12 and 15: KPI 6 split by link K, speed, bank and hiding geometry ----------

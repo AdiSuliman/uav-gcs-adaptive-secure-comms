@@ -1264,8 +1264,8 @@ verifyEqual(tc, [g.run g.frames g.event], [surv3_run_id(1) 20 1]);
 verifyGreaterThanOrEqual(tc, g.speed, SH.v_kmh(1)); verifyLessThanOrEqual(tc, g.speed, vr(2));
 verifyEqual(tc, SH.v_kmh(1), max(vr(1), shadow_speed_floor(shadow_roll_band(p.shadow_db, p), p)));
 geo = struct('ebno', eb, 'event_frame', 1, 'frames', 20);
-for n = [2 3]
-    q = p; q.n_rx = n; q.active_threat = 'airframe_shadowing';
+for n = [2 3 4]
+    q = p; q.n_rx = n; q.ant_spacing_wl = ant_spacing(q); q.active_threat = 'airframe_shadowing';
     d = flight_draws(g.seed, g.speed / 3.6 * q.carrier_freq / q.c_light, q, geo);
     verifyTrue(tc, any(d.hidden > 0), sprintf('%d antennas', n));
     verifyEqual(tc, d.onset_frame, 1);
@@ -1274,9 +1274,9 @@ end
 q = p; q.active_threat = 'airframe_shadowing';
 for j = 1:min(SH.tried - 1, 20)                             % the candidates before it fail for some antenna count
     [sd, v] = surv3_shadow_seed(1, j, SH.v_kmh);
-    h = false(1, 2);
-    for n = [2 3]
-        q.n_rx = n; h(n - 1) = hides_antenna(sd, v, q, geo);
+    h = false(1, 3);
+    for n = [2 3 4]
+        q.n_rx = n; q.ant_spacing_wl = ant_spacing(q); h(n - 1) = hides_antenna(sd, v, q, geo);
     end
     verifyFalse(tc, all(h), sprintf('candidate %d', j));
 end
@@ -1894,7 +1894,7 @@ verifyEqual(tc, numel(unique(q)), numel(q));
 verifyEqual(tc, sum(q == 2075), 1);
 f = dir(fullfile(tc.TestData.root, 'code', '**', '*.m'));
 f = f(~contains({f.folder}, [filesep 'tests']) & ~strcmp({f.name}, 'evaluate_policies.m'));
-verifyEmpty(tc, f(cellfun(@(n, d) ~isempty(regexp(fileread(fullfile(d, n)), '(Seed''|rng\()\s*,?\s*2075\b', 'once')), ...
+verifyEmpty(tc, f(cellfun(@(n, d) ~isempty(regexp(fileread(fullfile(d, n)), '(Seed''|rng\()\s*,?\s*2075\>', 'once')), ...
     {f.name}, {f.folder})), 'Seed 2075');
 b = cellfun(@(x) str2double(x{1}), regexp(src, 'policy_run_set\([^\n]*opt, (\d{5})', 'tokens'));
 verifyEqual(tc, sum(b == 50000), 1);
@@ -2038,7 +2038,16 @@ verifyNotEmpty(tc, regexp(fileread(which('pool_layout')), 'sp == iSpd && sev\(c\
 end
 
 function test_receiver_measurements(tc)
-p = base_params(); p.quiet_build = true; p.active_threat = 'none'; p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false; p.gcs_tracked = false; p.seed = 11;
+check_receiver_measurements(tc, 3);
+end
+
+function test_receiver_measurements_4_antennas(tc)
+%% Profile 3's array: the same checks with four antennas.
+check_receiver_measurements(tc, 4);
+end
+
+function check_receiver_measurements(tc, nrx)
+p = base_params_n(nrx); p.quiet_build = true; p.active_threat = 'none'; p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false; p.gcs_tracked = false; p.seed = 11;
 p.k_random = false; p.gcs_aoa_random = false; p.body_random = false;
 p.tdl = false;                                       % the measurements on the flat channel (the delay line: test_delay_line)
 p.cal_random = false;                                % against an exact floor (calibration: test_level_calibration)
@@ -2908,11 +2917,20 @@ verifyEqual(tc, tco(3), Inf);
 end
 
 function test_channel_geometry(tc)
+check_channel_geometry(tc, 3);
+end
+
+function test_channel_geometry_4_antennas(tc)
+%% Profile 3's array: the same checks with four antennas.
+check_channel_geometry(tc, 4);
+end
+
+function check_channel_geometry(tc, nrx)
 % Our signal in the model: the LoS arrives at the GCS's cone angle set at run time, the
 % diffuse part is centred on the GCS direction, the airframe loss scales each antenna,
 % the antenna gain toward the GCS follows the pitch, and at hover the wobble decorrelates
 % the channel between frames 20 ms apart while a calm hover keeps it frozen.
-p = base_params(); p.quiet_build = true; p.active_threat = 'none'; p.rx_sync = 'ideal'; p.seed = 11;
+p = base_params_n(nrx); p.quiet_build = true; p.active_threat = 'none'; p.rx_sync = 'ideal'; p.seed = 11;
 p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false; p.gcs_tracked = false; p.k_random = false;
 p.gcs_aoa_random = false; p.body_random = false; p.wobble_random = false; p.chain_amp_db = 0; p.chain_phase_deg = 0;
 mdl = 'UAV_GCS_Threat_Link';
@@ -2948,10 +2966,19 @@ close_system(mdl, 0);
 end
 
 function test_interferer_channel(tc)
+check_interferer_channel(tc, 3);
+end
+
+function test_interferer_channel_4_antennas(tc)
+%% Profile 3's array: the same checks with four antennas.
+check_interferer_channel(tc, 4);
+end
+
+function check_interferer_channel(tc, nrx)
 % An interferer's LoS carries the Doppler shift of its direction: against the same flight
 % hovering, its phase advances 2 pi fd sin(aoa) per second; its diffuse part is centred on
 % its own direction.
-p = base_params(); p.quiet_build = true; p.active_threat = 'jamming'; p.jsr_db = 30; p.rx_sync = 'ideal'; p.seed = 11;
+p = base_params_n(nrx); p.quiet_build = true; p.active_threat = 'jamming'; p.jsr_db = 30; p.rx_sync = 'ideal'; p.seed = 11;
 p.int_aoa_random = false; p.yaw_random = false; p.corr_random = false; p.gcs_tracked = false; p.k_random = false;
 p.gcs_aoa_random = false; p.body_random = false; p.wobble_random = false; p.chain_amp_db = 0; p.chain_phase_deg = 0;
 mdl = 'UAV_GCS_Threat_Link';
@@ -3981,6 +4008,63 @@ h = squeeze(H(:, 1, :));
 c = abs(sum(sum(conj(h(:, 1:end-1)) .* h(:, 2:end)))) / sum(vecnorm(h(:, 1:end-1)) .* vecnorm(h(:, 2:end)));
 end
 
+function p = base_params_n(nrx)
+% base_params with nrx receive antennas, set as profile.json sets them (init_params.m); 3 is the default.
+if nrx ~= 3
+    f = fullfile(pwd, 'profile.json');
+    fid = fopen(f, 'w'); fprintf(fid, '{"n_rx": %d}', nrx); fclose(fid);
+    cl = onCleanup(@() delete(f)); %#ok<NASGU>
+end
+p = base_params();
+end
+
+function a = ant_spacing(p)
+% Element spacing [wavelengths] of the line array over its aperture (init_params.m).
+a = p.ant_aperture_m / (p.c_light / p.carrier_freq) / (p.n_rx - 1);
+end
+
+function test_four_antenna_params(tc)
+% Profile 3's array as init_params.m builds it: four antennas over the same aperture, the
+% spacing from the aperture and the interferer angles of the four-antenna branch.
+p = base_params_n(4);
+verifyEqual(tc, p.n_rx, 4);
+verifyEqual(tc, p.ant_spacing_wl, ant_spacing(p), 'AbsTol', 1e-12);
+verifyEqual(tc, p.ant_spacing_wl, base_params().ant_spacing_wl * 2 / 3, 'AbsTol', 1e-12);
+verifyEqual(tc, p.int_aoa_deg, [42.4 -42.3 62.7]);
+verifyFalse(tc, isfile('profile.json'));
+end
+
+function test_four_antenna_draws(tc)
+% flight_draws and body_loss at four antennas: one airframe loss per antenna inside the
+% measured range, the amplitudes normalised to the mean loss, and the alignment of the GCS
+% and the first interferer taken over the four-element steering vectors.
+p = base_params_n(4);
+B = cell2mat(arrayfun(@(s) body_loss(s, 4, p.body_loss_db), (1:4000)', 'UniformOutput', false));
+verifySize(tc, B, [4000 4]);
+verifyTrue(tc, all(B(:) >= p.body_loss_db(3) & B(:) <= p.body_loss_db(4)));
+d = flight_draws(9, 100, p, struct('ebno', 9, 'alt_m', 90));
+verifyEqual(tc, d.body_db, body_loss(9, 4, p.body_loss_db));
+verifyEqual(tc, -20*log10(d.body_amp), d.body_db - mean(d.body_db), 'AbsTol', 1e-12);
+verifySize(tc, d.body_amp, [1 4]);
+[~, ca] = uav_attitude_db(d.el_deg, d.gcs_aoa, d.roll, d.pitch, p.uav_null_db);
+st = @(c) exp(-1j * 2*pi * p.ant_spacing_wl * (0:3)' * c);
+verifyEqual(tc, d.align, abs(st(ca)' * st(cosd(d.pitch) * sind(d.aoa))).^2 / 16, 'AbsTol', 1e-12);
+p.body_random = false;
+verifyEqual(tc, getfield(flight_draws(4, 100, p), 'body_amp'), ones(1, 4));
+end
+
+function test_four_antenna_rx_taps(tc)
+% The space-time MMSE window follows twice the degrees of freedom, n_rx times the taps: it
+% grows with the fourth antenna, the other tap counts do not depend on the array.
+p3 = base_params(); p4 = base_params_n(4);
+p3.tdl = true; p4.tdl = true;
+t3 = rx_taps(p3); t4 = rx_taps(p4);
+verifyEqual(tc, t4.window, max(p4.mmse_window, 2^nextpow2(2 * 4 * t4.nt)));
+verifyGreaterThanOrEqual(tc, t4.window, t3.window);
+verifyEqual(tc, [t4.lags t4.ne t4.nt t4.mh t4.ns t4.nn], [t3.lags t3.ne t3.nt t3.mh t3.ns t3.nn]);
+end
+
+
 function p = base_params()
 evalc('init_params');
 p = load('params.mat').params;
@@ -4199,6 +4283,9 @@ verifyEqual(tc, shadow_hidden(0, 25, 20, 0, 3, B, 30, v, vm, es), 0);      % 25 
 verifyEqual(tc, shadow_hidden(40, 2, 20, 0, 3, B, 30, v, vm, es), 3);      % ahead of the beam: the aft end
 verifyEqual(tc, shadow_hidden(-40, 2, 20, 0, 3, B, 30, v, vm, es), 1);     % behind it: the front end
 verifyEqual(tc, shadow_hidden(-40, 2, 20, 0, 4, B, 30, v, vm, es), 1);
+verifyEqual(tc, shadow_hidden(0, 2, 20, 0, 4, B, 30, v, vm, es), 4);       % four antennas: the aft end is the fourth
+verifyEqual(tc, shadow_hidden(40, 2, 20, 0, 4, B, 30, v, vm, es), 4);
+verifyEqual(tc, shadow_hidden(0, 2, -20, 0, 4, B, 30, v, vm, es), 0);
 verifyEqual(tc, shadow_hidden(70, 2, 20, 0, 3, B, 30, v, vm, es), 0);      % 20 deg off the nose
 verifyEqual(tc, shadow_hidden(0, 2, 10, 0, 3, B, 30, v, vm, es), 0);       % buried less than at the smallest roll of the measured events
 verifyEqual(tc, shadow_hidden(0, 2, 20, 0, 3, [32 57.9], 30, v, vm, es), 0);   % a burial the level is not measured at
@@ -4626,11 +4713,20 @@ verifyNotEmpty(tc, strfind(fileread(which('emitter_idle')), 'los_phase(be, ctx.a
 end
 
 function test_shadow_k_onset(tc)
+check_shadow_k_onset(tc, 3);
+end
+
+function test_shadow_k_onset_4_antennas(tc)
+%% Profile 3's array: the same checks with four antennas.
+check_shadow_k_onset(tc, 4);
+end
+
+function check_shadow_k_onset(tc, nrx)
 % The hidden antenna keeps its own K-factor until its loss counts as an event (5 dB, Sun et
 % al., Sec. III) and has the shadow's (-16 dB, Fig. 12) from then on, so the frames labelled
 % clean before the onset carry no shadowed K: our signal's weakest antenna (sig_weak_db.m)
 % and the channel's code alike.
-p = base_params(); q = p; q.active_threat = 'airframe_shadowing'; q.shadow_db = 20;
+p = base_params_n(nrx); q = p; q.active_threat = 'airframe_shadowing'; q.shadow_db = 20;
 s = shadow_spec(q); bdy = ones(1, q.n_rx); att = [0 2 30 0 0 0 0 0 25 0]; yaw = 20; kd = 15;
 pre = 0; post = 0;
 for t1 = 0.1:0.05:1.3
@@ -7238,6 +7334,10 @@ verifyEqual(tc, g, (3 * x - x .^ 3) / 2, 'AbsTol', 1e-6);
 [~, g2] = shadow_frame(0, 2, 16, [30 10], 0, 3, B, 30, 20, vm, 2.9);  % an event that started at a 10 deg roll
 verifyEqual(tc, g2, (3 * 0.3 - 0.3^3) / 2, 'AbsTol', 1e-9);
 verifyEqual(tc, shadow_frame(0, 2, 20, 10, 0, 3, B, 30, 20, vm, 2.9), 0);   % a bank the level is not flown at
+[k4, g4] = shadow_frame(zeros(size(r)), 2, r, 30, 0, 4, B, 30, 20, vm, 2.9);   % four antennas: the same depth, the fourth is hidden
+verifyEqual(tc, k4, 4 * ones(size(r)));
+verifyEqual(tc, g4, g, 'AbsTol', 1e-12);
+verifyEqual(tc, shadow_frame(-40, 2, 20, 30, 0, 4, B, 30, 20, vm, 2.9), 1);
 p = base_params();
 q = p; q.active_threat = 'airframe_shadowing'; q.shadow_db = 15.5; q.roll_in_frames = [2 11]; q.cap_frames = 20;
 n = 0; f0 = []; fr = [];
@@ -11541,7 +11641,7 @@ f = fullfile(tc.TestData.root, 'code', 'tests', 'test_ood_k2.m');
 n = numel(regexp(fileread(f), '(?m)^function test_\w+\(tc\)', 'match'));
 here = pwd; cl = onCleanup(@() cd(here)); %#ok<NASGU>
 r = runtests(f);
-verifyGreaterThanOrEqual(tc, n, 20);
+verifyGreaterThanOrEqual(tc, n, 24);
 verifyEqual(tc, numel(r), n, 'every test of test_ood_k2.m ran');
 bad = {r(~[r.Passed]).Name};
 verifyEmpty(tc, bad, strjoin(bad, ', '));
