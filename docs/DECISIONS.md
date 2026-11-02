@@ -2669,6 +2669,7 @@ Item 7 is the one exception. Its routing may switch on D117 point 3, a training 
    - For each pair: the share of threat-active frames whose monitor class is a jammer component; the level-family component (path_loss with and without the drop alarm, `det_frames.m:17-20`); another level class; or none. Split by onset age and Eb/N0.
    - The mechanism with the largest share of missed frames is named.
    - 82.2% is always quoted as read; the explanation stands beside it.
+   - *[Dated 2.11.2026: R5 ran on `p1-readers` `1384d70` with registration `f005174`, on the same read-only pools copy as SPD-D (sha256 `dba2754b...`) and the archived agent, 5.6 min. Record `worktrees\p1-readers\results\combo_miss\combo_miss.txt`. DET per pair [95% cluster interval]: jamming+path_loss 65.8% [63.1, 68.5], tone_jamming+path_loss 67.2% [65.6, 68.8], jamming+antenna_fault 70.6% [67.5, 73.9], noise_burst+antenna_fault 78.1% [73.1, 83.3], spoofing+sweeping_jammer 70.0% [60.8, 79.2]; every frame on a harmed flight. In every pair the largest share of the missed frames is "the monitor reads another class" (neither (a) nor (b)). Descriptive; 82.2% stays as read.]*
 3. **Beside KPI 2 (A1; profile 3 at KPI; profile 1 bounds).** Per held-out threat:
    - *[Amended 31.10.2026 by D121 item 11 (approved by Adi): near-OOD (antenna_fault, airframe_shadowing) and far-OOD (the other eight) mean AUROC beside KPI 2's 10-threat mean, descriptive.]*
    - the flagged share (detection);
