@@ -313,9 +313,9 @@ end
 %% ---------- off is the parent commit's code, bit for bit ----------
 function test_off_bit_identical_to_parent(tc)
 % Without PP.lb_complete, and with it false, policy_monitor.m and policy_decide.m give the
-% parent commit's (f6f6e03) actions, information and memory bit for bit, on random traces with
+% parent commit's (31a0f3e, tip3-merge before wf-lb) actions, information and memory bit for bit, on random traces with
 % antenna gains in every drop-alarm mode, for the DQN kinds and the rule.
-d = parent_dir(tc, 'f6f6e03', {'code/decision/policy_monitor.m', 'code/decision/policy_decide.m'});
+d = parent_dir(tc, '31a0f3e', {'code/decision/policy_monitor.m', 'code/decision/policy_decide.m'});
 rs = RandStream('mt19937ar', 'Seed', 17);
 C = struct('tag', {}, 'PP', {}, 'X', {}, 'ag', {}, 'kind', {}, 'field_absent', {}, 'field_false', {});
 for mode = {'class_drop', 'class_cusum', 'class'}
@@ -348,7 +348,7 @@ end
 %% ---------- the stored switch ----------
 function test_settings_and_stamp(tc)
 % The switch reaches every reader through decision_settings.m (an absent one keeps the pools'); the
-% deployed policy's stamp is the parent commit's (f6f6e03) without it and with it false, and
+% deployed policy's stamp is the parent commit's (31a0f3e, tip3-merge before wf-lb) without it and with it false, and
 % changes with it on and with the smoke's forced mark.
 PP = struct('x', 1);
 verifyFalse(tc, isfield(decision_settings(PP, struct('alarm_mode', 'class_drop')), 'lb_complete'));
@@ -361,7 +361,7 @@ S = struct('alarm_mode', 'class_drop', 'confirm', [3 3], 'drop_db', 4, 'maha_thr
 Q = struct('deployed', 'dqn_esc', 'alarm_mode', 'class_drop', 'confirm', [2 2], 'drop_db', 4, 'det_id', 'x', ...
     'maha_thr', -1, 'dec', S, 'rule_sel', S);
 s1 = policy_stamp(Q);
-d = parent_dir(tc, 'f6f6e03', {'code/decision/policy_stamp.m'});
+d = parent_dir(tc, '31a0f3e', {'code/decision/policy_stamp.m'});
 addpath(d, '-begin'); clear policy_stamp
 cl0 = onCleanup(@() fixture_off(d, {'policy_stamp'})); %#ok<NASGU>
 s0 = policy_stamp(Q);
@@ -642,26 +642,26 @@ verifyTrue(tc, all(endsWith(L(startsWith(POL, 'dqn_')), hy)));
 end
 
 function test_readers_off_is_the_parent(tc)
-% Without the stored switch the readers are the parent commit's (f6f6e03): every parent line is in the
+% Without the stored switch the readers are the parent commit's (31a0f3e, tip3-merge before wf-lb): every parent line is in the
 % copy, in order, but the ones named here (the cache key, the entity call and header and the options of
 % the evaluations of C2g and C2u, whose opt0 is struct() without the switch); the main readers, the
 % step and the layer only add lines.
 for f = {'code/decision/evaluate_policies.m', 'code/evaluation/measure_all_kpis.m', 'code/decision/train_dqn.m', ...
         'code/decision/policy_monitor.m'}
-    verifyEmpty(tc, parent_lines_missing(tc, 'f6f6e03', f{1}), f{1});
+    verifyEmpty(tc, parent_lines_missing(tc, '31a0f3e', f{1}), f{1});
 end
-verifyEqual(tc, parent_lines_missing(tc, 'f6f6e03', 'code/decision/decision_settings.m'), ...
-    {'        ''rule_mmse_db'', ''rule_slot'', ''rule_dwell'', ''esc_drop'', ''rule_nb'', ''core_nb'', ''deg_mode'', ''ber_q''}'});
-verifyNumElements(tc, parent_lines_missing(tc, 'f6f6e03', 'code/decision/policy_decide.m'), 1);   % a comment line
-verifyNumElements(tc, parent_lines_missing(tc, 'f6f6e03', 'code/decision/policy_stamp.m'), 1);    % a comment line
-miss = parent_lines_missing(tc, 'f6f6e03', 'code/decision/experiment_combo_generalization.m');
+verifyEqual(tc, parent_lines_missing(tc, '31a0f3e', 'code/decision/decision_settings.m'), ...
+    {'        ''confirm_drop'', ''s1_gate'', ''s1_gate_core'', ''release_m'', ''lb_accept''}'});
+verifyNumElements(tc, parent_lines_missing(tc, '31a0f3e', 'code/decision/policy_decide.m'), 1);   % a comment line
+verifyNumElements(tc, parent_lines_missing(tc, '31a0f3e', 'code/decision/policy_stamp.m'), 2);    % two comment lines
+miss = parent_lines_missing(tc, '31a0f3e', 'code/decision/experiment_combo_generalization.m');
 verifyEqual(tc, miss, {'keys = cellfun(@(cn) run_cache(''key'', {CID, ''C2g'', cn, H, seed, REPS, NE, TEST, DK}), combos, ''UniformOutput'', false);', ...
     'out = run_cache(''each'', CDIR, keys, @(ci) one_combo(ci, combos, PP, K, Q, H, seed, nS, TEST, REPS, NE, DK, t0), combos);', ...
     'function r = one_combo(ci, combos, PP, K, Q, H, seed, nS, TEST, REPS, NE, DK, t0)', ...
     '% escalation and the class table on its test flights.', ...
     'Ro = dqn_eval_batches(DK, PP, K, specs, ag, struct(), 7000, TEST);', ...
     'Ri = dqn_eval_batches(DK, PP, K, specs, Q.agent, struct(), 7000, TEST);'});
-miss = parent_lines_missing(tc, 'f6f6e03', 'code/decision/experiment_unknown_threat.m');
+miss = parent_lines_missing(tc, '31a0f3e', 'code/decision/experiment_unknown_threat.m');
 verifyEqual(tc, miss, {'keys = cellfun(@(th) run_cache(''key'', {CID, ''C2u'', th, H, seed, REPS, NE, SPL, DK}), threats, ''UniformOutput'', false);', ...
     'out = run_cache(''each'', CDIR, keys, @(ti) one_threat(ti, threats, PP, K, Q, H, seed, nS, SPL, REPS, NE, DK, t0), threats);', ...
     'function o = one_threat(ti, threats, PP, K, Q, H, seed, nS, SPL, REPS, NE, DK, t0)', ...
