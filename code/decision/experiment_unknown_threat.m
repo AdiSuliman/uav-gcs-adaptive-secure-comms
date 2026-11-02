@@ -118,6 +118,7 @@ c = find(strcmp(PP.scen, th));
 fprintf('[%d/%d] %s left out of training and validation (%d cells)\n', ti, numel(threats), th, sum(hit));
 PPx = PP;
 if isfield(PPx, 'lb_complete'), PPx.lb_complete = false; end   % the retrained learner trains and keeps its checkpoint without the completion
+if isfield(PPx, 'release_m'), PPx.release_m = false; end         % nor with the release on evidence: C2 trains without it
 PPx.pools(hit, :, :, 1:2) = {[]};
 Kx = link_env('tables', PPx);
 Kt = Kx; Kt.FA = Q.seed_summary.selected_fa_pen;

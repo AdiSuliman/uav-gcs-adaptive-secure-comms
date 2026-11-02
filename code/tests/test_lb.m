@@ -731,6 +731,9 @@ for f = {'experiment_combo_generalization', 'experiment_unknown_threat'}
     verifyNumElements(tc, strfind(src, 'PPx.lb_complete = false'), 1, f{1});
     verifyNumElements(tc, strfind(src, 'dqn_train_run('), 1, f{1});
     verifyLessThan(tc, strfind(src, 'PPx.lb_complete = false'), strfind(src, 'dqn_train_run('), f{1});
+    verifyNumElements(tc, strfind(src, 'PPx.release_m = false'), 1, f{1});                  % C2 trains without the release (train_dqn.m)
+    verifyLessThan(tc, strfind(src, 'PPx.release_m = false'), strfind(src, 'dqn_train_run('), f{1});
+    verifyEmpty(tc, regexp(src, 'dqn_eval_batches\([^,]*, PPx,', 'once'), f{1});            % the evaluation keeps the deployed settings
     verifyNotEmpty(tc, regexp(src, 'Ro = [^\n]*, ag, opt0,', 'once'), f{1});
     verifyNotEmpty(tc, regexp(src, 'Ri = [^\n]*, Q\.agent, opt0,', 'once'), f{1});
     verifyNotEmpty(tc, regexp(src, 'Ro1 = [^\n]*, ag, opt1,', 'once'), f{1});
