@@ -13,6 +13,9 @@ function Tr = monitor_trace(PP, K, specs, split, seed0)
 %             alarm; false in the other modes)
 %   Tr.lk     only with PP.record_los_k: episodes x cycles, the fused window's los_k (the Rician K of the
 %             weakest antenna's line-of-sight power, window_cues.m) as the monitor reads it, NaN where none
+%   Tr.lb, Tr.plb, Tr.dg  only with PP.record_lb: episodes x cycles, the class is antenna_fault or
+%             airframe_shadowing, the fused posterior of the two (p_LB), and the cycle degraded (M.degraded): the
+%             inputs of the calibrated lost-branch acceptance (monitor_confirm.m, PP.lb_accept)
 %   Tr.onset, Tr.scn, Tr.s, Tr.r per episode; the padding of a batch (n_valid) is dropped.
 %   The decision of cycle t reads the frame of cycle t - 1: the threat is on its frames from
 %   cycle onset + 1 on.
@@ -23,6 +26,8 @@ for b = 1:numel(specs)
     [E, obs] = link_env('reset', PP, K, sp, split, RandStream('mt19937ar', 'Seed', seed0 + b));
     NE = E.NE; mem = policy_monitor('init', NE, nA);
     o = false(NE, T); w = o; qd = o; e = nan(NE, T); lkc = nan(NE, T);
+    rlb = isfield(PP, 'record_lb') && PP.record_lb;
+    if rlb, lb = o; plb = e; dg = o; ilb = ismember(PP.classes, {'antenna_fault', 'airframe_shadowing'}); end
     for t = 1:T
         [mem, M] = policy_monitor('update', mem, obs, PP, E.cfg);
         o(:, t) = (~ismember(M.cls, {'none', 'benign_interference', 'unknown', 'path_loss'}) | M.degraded)';
@@ -30,6 +35,9 @@ for b = 1:numel(specs)
         e(:, t) = mem.ebno(:, end);
         if isfield(mem, 'los_k') && ~isempty(mem.los_k), lkc(:, t) = mem.los_k; end
         if isfield(M, 'deg_quiet'), qd(:, t) = M.deg_quiet'; end
+        if rlb
+            lb(:, t) = ismember(M.cls, {'antenna_fault', 'airframe_shadowing'})'; plb(:, t) = sum(M.probs(:, ilb), 2); dg(:, t) = M.degraded';
+        end
         mem = policy_monitor('change', mem, false(1, NE));
         [E, ~, obs] = link_env('step', E, PP, K, na * ones(1, NE));
     end
@@ -38,6 +46,10 @@ for b = 1:numel(specs)
     if isfield(PP, 'record_los_k') && PP.record_los_k
         if ~isfield(Tr, 'lk'), Tr.lk = []; end
         Tr.lk = [Tr.lk; lkc(v, :)];
+    end
+    if rlb
+        if ~isfield(Tr, 'lb'), Tr.lb = []; Tr.plb = []; Tr.dg = []; end
+        Tr.lb = [Tr.lb; lb(v, :)]; Tr.plb = [Tr.plb; plb(v, :)]; Tr.dg = [Tr.dg; dg(v, :)];
     end
     Tr.onset = [Tr.onset, sp.onset(v)]; Tr.scn = [Tr.scn, sp.scn(v)]; Tr.s = [Tr.s, sp.s(v)]; Tr.r = [Tr.r, E.r(v)];
 end

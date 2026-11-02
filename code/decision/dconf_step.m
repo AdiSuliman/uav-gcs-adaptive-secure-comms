@@ -1,4 +1,4 @@
-function [D, lines] = dconf_step(form, GF, MON, MONP, cs, Tc, fit, chk, Tv, onv, thv, thn, sev1, FA, force, own)
+function [D, lines] = dconf_step(form, GF, MON, MONP, cs, Tc, fit, chk, Tv, onv, thv, thn, sev1, FA, force, own, lbt)
 %DCONF_STEP  C1d's choice, per monitor, of the drop alarm's own confirmation (PP.confirm_drop,
 %   policy_monitor.m), a coordinate step after the degradation test's choice (choose_drop_threshold.m).
 %   The drop alarm crossing by itself confirms: at least k of the last n cycles carried it. A
@@ -32,8 +32,11 @@ function [D, lines] = dconf_step(form, GF, MON, MONP, cs, Tc, fit, chk, Tv, onv,
 %   force (the smoke only, wf_force.m): a candidate [k n] deployed for every monitor instead, admissible
 %   or not, at its re-chosen threshold, else the extended grid's top; D(m).forced holds it and
 %   D(m).rule_pick what the rule adopted ([] none).
+%   lbt (default none): per monitor the lost-branch acceptance's tau_hi chosen before this step (clt_step.m), [] none;
+%   every reading of that monitor, its reference included, is made with it (monitor_confirm.m).
 if nargin < 15, force = []; end
 if nargin < 16 || isempty(own), own = false; end
+if nargin < 17 || isempty(lbt), lbt = cell(1, numel(MON)); end
 assert(strcmp(form, 'class_cusum'), 'dconf_step: the threshold grid extended is the CUSUM''s, not that of %s', form);
 C = decision_config();
 GX = [GF, GF(end) * C.confirm_drop_ext];
@@ -47,11 +50,11 @@ lines = {sprintf(['Drop alarm''s own confirmation (coordinate step per monitor a
     'episodes) and %d threat episodes against the same monitor without it'], strjoin(arrayfun(@(i) sprintf('[%d %d]', ...
     C.confirm_drop_cand(i, :)), 1:size(C.confirm_drop_cand, 1), 'UniformOutput', false), ', '), nf, GX(end), nk, sum(onv))};
 for m = 1:numel(MON)
-    cf = MONP(m).cf; thr0 = MONP(m).pick;
+    cf = MONP(m).cf; thr0 = MONP(m).pick; la = lbt{m};
     D(m).pick = thr0; D(m).j = MONP(m).j;
-    ref = reading(Tk, Tv, onv, thv, thn, form, thr0, cf, cs, []);
+    ref = reading(Tk, Tv, onv, thv, thn, form, thr0, cf, cs, [], la);
     D(m).ref = ref;
-    if own, [~, ref_fit] = confirmed_counts(Tf, form, thr0, cf, cs, []); end
+    if own, [~, ref_fit] = confirmed_counts(Tf, form, thr0, cf, cs, [], la); end
     lines{end+1} = sprintf('  %-15s without it: threshold %6.1f, clean check episodes confirmed %d/%d (first by the drop alarm %d), path_loss delay median %s, p90 %s, never %.1f%%', ...
         MON{m}, thr0, ref.k, nk, ref.k_drop, num_txt(ref.lat.median, pl), num_txt(ref.lat.p90, pl), 100 * at(ref.lat.never, pl)); %#ok<AGROW>
     if own
@@ -62,10 +65,10 @@ for m = 1:numel(MON)
     for ci = 1:size(C.confirm_drop_cand, 1)
         cdr = C.confirm_drop_cand(ci, :);
         if own
-            kf = arrayfun(@(t) own_count(Tf, form, t, cf, cs, cdr), GX);
+            kf = arrayfun(@(t) own_count(Tf, form, t, cf, cs, cdr, la), GX);
             j = find(kf <= ref_fit, 1);
         else
-            kf = arrayfun(@(t) sum(any(monitor_confirm(Tf, form, t, cf, cs, cdr), 2)), GX);
+            kf = arrayfun(@(t) sum(any(monitor_confirm(Tf, form, t, cf, cs, cdr, la), 2)), GX);
             j = find(arrayfun(@(x) cp_upper(x, nf), kf) <= FA, 1);
         end
         x = struct('cd', cdr, 'pick', NaN, 'ok', false, 'fail', {{}}, 'k', NaN, 'k_drop', NaN, 'lat', [], 'ub', NaN);
@@ -74,7 +77,7 @@ for m = 1:numel(MON)
                 'no threshold of the extended grid holds the bound on the fit half')};
         else
             x.pick = GX(j);
-            r = reading(Tk, Tv, onv, thv, thn, form, x.pick, cf, cs, cdr);
+            r = reading(Tk, Tv, onv, thv, thn, form, x.pick, cf, cs, cdr, la);
             x.k = r.k; x.k_drop = r.k_drop; x.lat = r.lat;
             x.ub = judge_ub(r, ref, plm, cl);
             x.fail = judge(r, ref, thn, pl, plm, sev1, x.ub);
@@ -101,27 +104,27 @@ for m = 1:numel(MON)
 end
 end
 
-function r = reading(Tk, Tv, onv, thv, thn, form, thr, cf, cs, cdr)
+function r = reading(Tk, Tv, onv, thv, thn, form, thr, cf, cs, cdr, la)
 % The check half's clean episodes with a confirmed alarm (k), those whose first confirmation the drop
 % alarm alone gives (k_drop), and the threats' confirmed delays (per episode d, per threat lat).
-[k, kd] = confirmed_counts(Tk, form, thr, cf, cs, cdr);
+[k, kd] = confirmed_counts(Tk, form, thr, cf, cs, cdr, la);
 r = struct('k', k, 'k_drop', kd, 'd', [], 'lat', []);
-cv = monitor_confirm(Tv, form, thr, cf, cs, cdr);
+cv = monitor_confirm(Tv, form, thr, cf, cs, cdr, la);
 r.d = ep_delays(cv, Tv.onset);
 r.lat = threat_delays(r.d, onv, thv, thn);
 end
 
-function [k, kd] = confirmed_counts(T, form, thr, cf, cs, cdr)
+function [k, kd] = confirmed_counts(T, form, thr, cf, cs, cdr, la)
 % The episodes of T with a confirmed alarm (k) and those whose first confirmation the drop alarm
 % alone gives (kd): the confirmed alarm without the drop alarm is not set at that cycle.
-[c, ~, cn] = monitor_confirm(T, form, thr, cf, cs, cdr);
+[c, ~, cn] = monitor_confirm(T, form, thr, cf, cs, cdr, la);
 [f, t1] = max(c, [], 2);
 i1 = find(f);
 k = numel(i1); kd = sum(~cn(sub2ind(size(c), i1, t1(i1))));
 end
 
-function kd = own_count(T, form, thr, cf, cs, cdr)
-[~, kd] = confirmed_counts(T, form, thr, cf, cs, cdr);
+function kd = own_count(T, form, thr, cf, cs, cdr, la)
+[~, kd] = confirmed_counts(T, form, thr, cf, cs, cdr, la);
 end
 
 function fail = judge(r, ref, thn, pl, plm, sev1, ub)

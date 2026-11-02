@@ -4,7 +4,9 @@ function tests = test_d121
 %   policy_monitor.m's M.harm (D113, landed on wf-dec), not a new field. Run from the
 %   repository root: results = runtests('code/tests'). Item 16 (P-B, rule_core3 in profile 3's
 %   C2e: core3_model.m, pool_cell.m, link_env.m, policy_monitor.m, policy_decide.m, the C2e rows) at
-%   the end, the off tests against 9e6b7c8 (tip3-lb).
+%   the end, the off tests against 9e6b7c8 (tip3-lb). Items 1 and 2's choice and deployment (clt_step.m at
+%   C1d, the core rule's gate step at C2, the stamp, the C2e row, the smoke cells) last, the off tests
+%   against 803871e.
 tests = functiontests(localfunctions);
 end
 
@@ -1183,6 +1185,367 @@ verifyNotEmpty(tc, strfind(r, '''probs3'''));
 verifyNotEmpty(tc, strfind(r, '''core3_id'''));
 for f = {'policy_monitor', 'policy_decide', 'policy_setup', 'pool_cell', 'link_env', 'build_policy_pools', 'evaluate_policies', ...
         'lect_kpis', 'measure_all_kpis', 'core3_model', 'core3_check', 'spec_scores', 'wf_options', 'rekey_pools'}
+    parses_ok(tc, f{1});
+end
+end
+
+%% ---------- items 1 and 2: the choice at C1d and C2, the deployment, the stamp, the smoke cells ----------
+function T = clt_trace(n, Tn)
+% A monitor trace (monitor_trace.m with PP.record_lb) of n clean Tn-cycle episodes at 20 dB, no alarm.
+T = struct('other', false(n, Tn), 'sw', false(n, Tn), 'eg', 20 * ones(n, Tn), 'quiet', false(n, Tn), ...
+    'onset', zeros(1, n), 'scn', ones(1, n), 's', ones(1, n), 'r', 1:n, 'lb', false(n, Tn), 'plb', zeros(n, Tn), ...
+    'dg', false(n, Tn));
+end
+
+function T = clt_lb(T, i, t, p)
+% Episodes i read a lost-branch class at cycles t with p_LB p (a hostile class: the other paths carry it).
+T.lb(i, t) = true; T.other(i, t) = true; T.plb(i, t) = p;
+end
+
+function W = clt_world(pass)
+% clt_step's synthetic world: 900 fit and 900 check clean episodes; the fit half's 1000 lost-branch cycles carry
+% p_LB 0.001 ... 1 (q99 0.9905, q95 0.9505); on the check half 5 episodes read two lost-branch cycles at 0.995 and
+% 10 at 0.96, so the scan passes Inf (0) and q99 (5) and stops at q95 (15). Threats: 20 harmed antenna_fault
+% episodes (degraded from the onset when pass, else not), 10 unharmed ones, 20 jamming episodes (another path from
+% the onset); onset 5.
+Tc = clt_trace(1800, 30);
+p = reshape((1:1000) / 1000, 500, 2);
+Tc = clt_lb(Tc, 1:500, 5, 0); Tc.plb(1:500, 5:6) = p; Tc.lb(1:500, 6) = true; Tc.other(1:500, 6) = true;
+Tc = clt_lb(Tc, 901:905, 10:11, 0.995); Tc = clt_lb(Tc, 906:915, 10:11, 0.96);
+Tv = clt_trace(50, 30); Tv.onset(:) = 5; Tv.r = 1:50; Tv.scn = [ones(1, 30), 2 * ones(1, 20)];
+Tv = clt_lb(Tv, 1:30, 6:30, 0.5);
+if pass, Tv.dg(1:20, 6:30) = true; end
+Tv.other(31:50, 6:30) = true;
+Kv = struct('restored', true(2, 1, 1, 1, 50), 'restored_plr', true(2, 1, 1, 1, 50), 'na', 1);
+Kv.restored(1, 1, 1, 1, 1:20) = false;                         % no response does not restore the first 20
+thv = [repmat({'antenna_fault'}, 1, 30), repmat({'jamming'}, 1, 20)];
+W = struct('Tc', Tc, 'Tv', Tv, 'fit', [true(1, 900), false(1, 900)], 'chk', [false(1, 900), true(1, 900)], 'Kv', Kv, ...
+    'onv', true(1, 50), 'thv', {thv}, 'thn', {{'antenna_fault', 'jamming'}}, 'MON', {{'class_drop 2/2'}});
+W.MONP = struct('monitor', 'class_drop 2/2', 'cf', [2 2], 'pick', 6, 'j', 1);
+end
+
+function [L, lines] = clt_run(W, force)
+[L, lines] = clt_step('choose', 'class_drop', W.MON, W.MONP, [], W.Tc, W.fit, W.chk, W.Tv, W.onv, W.thv, W.thn, W.Kv, 1, force);
+end
+
+function test_clt_grid_scan_and_adoption(tc)
+% The grid from the fit half's lost-branch cycles; the scan from Inf on the check half stops at the first value whose
+% lost-branch-first count breaks the 1.5% bound (7 of 900), tau_hi the last passing; the guards hold, so adopted.
+W = clt_world(true);
+[L, lines] = clt_run(W, false);
+verifyEqual(tc, L.grid, [Inf, prctile((1:1000) / 1000, [99 95 90 75 50])], 'AbsTol', 1e-12);
+verifyEqual(tc, L.k(1:3), [0 5 15]);
+verifyTrue(tc, all(isnan(L.k(4:end))));                          % stopped at the first failure
+verifyEqual(tc, L.tau, L.grid(2)); verifyFalse(tc, L.miss);
+verifyTrue(tc, L.guard_ok); verifyEqual(tc, L.accept, struct('tau_hi', L.grid(2)));
+verifyEmpty(tc, L.forced);
+s = strjoin(lines, '|');
+verifyNotEmpty(tc, strfind(s, '-> class_drop 2/2: adopted at tau_hi'));
+verifyNotEmpty(tc, strfind(s, 'unharmed   10: confirmed 100.0% -> 0.0%'));   % the cost on unharmed lost-branch alarms
+end
+
+function test_clt_inf_fails_is_inf_and_printed(tc)
+% Harm evidence without an alarm of its own (degraded without RF evidence) on 10 check episodes: harm-only already
+% breaks the bound, so tau_hi is Inf and the miss is printed.
+W = clt_world(true);
+W.Tc = clt_lb(W.Tc, 1001:1010, 20:21, 0.1); W.Tc.quiet(1001:1010, 20:21) = true;
+[L, lines] = clt_run(W, false);
+verifyEqual(tc, L.k(1), 10); verifyTrue(tc, all(isnan(L.k(2:end))));
+verifyTrue(tc, isinf(L.tau) && L.miss);
+verifyNotEmpty(tc, strfind(strjoin(lines, '|'), 'MISS: Inf already exceeds 1.5%'));
+end
+
+function test_clt_guards_refuse(tc)
+% Harmed antenna_fault episodes without harm evidence are never confirmed under tau_hi: the never share grows by
+% more than 5 points, not adopted. A jamming episode misread as a lost branch from the onset changes its confirmed
+% series: not adopted either.
+W = clt_world(false);
+[L, lines] = clt_run(W, false);
+verifyFalse(tc, L.guard_ok); verifyEmpty(tc, L.accept);
+verifyTrue(tc, any(contains(L.fail, 'antenna_fault harmed slower')));
+verifyNotEmpty(tc, strfind(strjoin(lines, '|'), 'GUARD FAILS'));
+W = clt_world(true);
+W.Tv.other(31, :) = false; W.Tv = clt_lb(W.Tv, 31, 6:30, 0.2);   % jamming read as a lost branch, no harm
+[L, ~] = clt_run(W, false);
+verifyFalse(tc, L.guard_ok); verifyEmpty(tc, L.accept);
+verifyTrue(tc, any(contains(L.fail, 'another threat')));
+end
+
+function test_clt_forced_smoke_cell(tc)
+% The smoke's forced cell deploys the scanned tau_hi whatever the guards say, marked, beside the rule's answer.
+W = clt_world(false);
+[L, lines] = clt_run(W, true);
+verifyEqual(tc, L.accept, struct('tau_hi', L.tau)); verifyEqual(tc, L.forced, L.tau); verifyEmpty(tc, L.rule_accept);
+verifyNotEmpty(tc, strfind(strjoin(lines, '|'), 'FORCED for class_drop 2/2 (smoke only, not an adoption)'));
+F = wf_force('read', struct('clt_force', true), 'none.json');
+verifyTrue(tc, F.clt && wf_force('any', F));
+verifyError(tc, @() wf_force('smoke', F, false, 'choose_drop_threshold'), 'wf_force:smoke');
+wf_force('smoke', F, true, 'choose_drop_threshold');
+verifyError(tc, @() wf_force('mark', {'lb_accept'}, false, 'evaluate_policies'), 'wf_force:smoke');
+end
+
+function test_clt_budget_paths(tc)
+% First confirmation per path: one episode by the lost-branch class alone, one by the drop alarm alone, one by
+% degradation alone; the union bound needs all three within their shares (1.5%, 2.0%, 1.5%).
+T = clt_trace(1000, 30);
+T = clt_lb(T, 1, 3:4, 1);
+T.eg(2, 10:end) = 8;
+T.other(3, 3:4) = true; T.dg(3, 3:4) = true;
+B = clt_step('budget', T, 'class_drop', 6, [2 2], [], 0.5, 'x');
+verifyEqual(tc, [B.k B.lb B.drop B.rest], [3 1 1 1]); verifyTrue(tc, B.met);
+B = clt_step('budget', T, 'class_drop', 6, [2 2], [], Inf, 'x');          % harm only: the first is withheld
+verifyEqual(tc, [B.k B.lb B.drop B.rest], [2 0 1 1]);
+[B, line] = clt_step('budget', T, 'class_drop', 6, [2 2], [], [], 'without it');
+verifyEqual(tc, [B.k B.lb], [3 1]); verifyNotEmpty(tc, strfind(line, 'union bound met'));
+T.other(4:30, 3:4) = true; T.dg(4:30, 3:4) = true;                          % the degradation path alone breaks its share
+B = clt_step('budget', T, 'class_drop', 6, [2 2], [], 0.5, 'x');
+verifyFalse(tc, B.met);
+end
+
+function [Tr, C] = clt_monitor_run(PP, cyc)
+% policy_monitor.m over the cycles cyc at no_action, recorded as monitor_trace.m records it with PP.record_lb, and
+% its confirmed alarm.
+NE = size(cyc{1}.probs, 1); T = numel(cyc); na = find(strcmp(PP.actions, 'no_action'));
+mem = policy_monitor('init', NE, numel(PP.actions));
+Tr = struct('other', false(NE, T), 'sw', false(NE, T), 'eg', nan(NE, T), 'quiet', false(NE, T), 'lb', false(NE, T), ...
+    'plb', nan(NE, T), 'dg', false(NE, T));
+C = false(NE, T);
+ilb = ismember(PP.classes, {'antenna_fault', 'airframe_shadowing'});
+for t = 1:T
+    [mem, M] = policy_monitor('update', mem, cyc{t}, PP, na * ones(1, NE));
+    Tr.other(:, t) = (~ismember(M.cls, {'none', 'benign_interference', 'unknown', 'path_loss'}) | M.degraded)';
+    Tr.sw(:, t) = strcmp(M.cls, 'sweeping_jammer')'; Tr.eg(:, t) = mem.ebno(:, end);
+    Tr.lb(:, t) = ismember(M.cls, {'antenna_fault', 'airframe_shadowing'})'; Tr.plb(:, t) = sum(M.probs(:, ilb), 2);
+    Tr.dg(:, t) = M.degraded'; C(:, t) = M.confirmed';
+    mem = policy_monitor('change', mem, false(1, NE));
+end
+end
+
+function test_clt_trace_reading_is_the_monitor(tc)
+% monitor_confirm.m with tau on a trace flown without the acceptance gives policy_monitor.m's own confirmed alarm
+% with PP.lb_accept: the withheld cycles join the drop alarm's reference and the drop alarm is harm evidence.
+rs = RandStream('mt19937ar', 'Seed', 121);
+cls = {'none', 'jamming', 'path_loss', 'antenna_fault', 'airframe_shadowing', 'benign_interference'};
+NE = 80; T = 30; nf = numel(link_features('names'));
+lev = 20 + 0.5 * randn(rs, NE, T);
+st = randi(rs, [5 25], NE, 1);
+for e = find(rand(rs, NE, 1) < 0.4)', lev(e, st(e):end) = lev(e, st(e):end) - 7; end
+cyc = cell(1, T);
+for t = 1:T
+    P = rand(rs, NE, numel(cls)) .^ 4; x = find(rand(rs, NE, 1) < 0.35);
+    P(sub2ind(size(P), x, 4 + (rand(rs, numel(x), 1) < 0.5))) = 1 + rand(rs, numel(x), 1);
+    P = P ./ sum(P, 2);
+    F = zeros(NE, nf); F(:, feature_index('log_ber')) = -6; F(rand(rs, NE, 1) < 0.06, feature_index('log_ber')) = 0;
+    F(:, feature_index('sinr')) = lev(:, t);
+    cyc{t} = struct('probs', P, 'unknown', false(NE, 1), 'feat', F);
+end
+for cf = {[2 2], [3 4]}
+    PP = struct('actions', {policy_actions()}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', -1, 'q_thr', NaN, ...
+        'confirm', cf{1}, 'alarm_mode', 'class_drop', 'drop_db', 4);
+    [Tr, C0] = clt_monitor_run(PP, cyc);
+    verifyEqual(tc, monitor_confirm(Tr, 'class_drop', 4, cf{1}), C0);
+    verifyGreaterThan(tc, nnz(drop_alarm_seq(Tr.eg, 'class_drop', 4, [], Tr.other)), 0);
+    for tau = [Inf 0.7 0.4]
+        PP.lb_accept = struct('tau_hi', tau);
+        [~, C1] = clt_monitor_run(PP, cyc);
+        [c, ~, ~, ot] = monitor_confirm(Tr, 'class_drop', 4, cf{1}, [], [], tau);
+        verifyEqual(tc, c, C1, sprintf('cf [%d %d], tau %g', cf{1}, tau));
+        verifyTrue(tc, all(ot(:) <= Tr.other(:)));
+        if tau < 0.5, continue; end
+        verifyFalse(tc, isequal(C1, C0));                               % the world exercises the acceptance
+    end
+    PP = rmfield(PP, 'lb_accept');
+end
+end
+
+function test_clt_monitor_confirm_off_is_the_parent(tc)
+% Without tau (absent or []) monitor_confirm.m gives 803871e's outputs bit for bit, and ot is Tr.other.
+rs = RandStream('mt19937ar', 'Seed', 122);
+Tr = struct('other', rand(rs, 40, 30) < 0.08, 'sw', rand(rs, 40, 30) < 0.05, 'eg', 15 + 3 * randn(rs, 40, 30));
+args = {{'class_cusum', 18, [5 5]}, {'class_cusum', 18, [5 5], [2 6]}, {'class_drop', 4, [2 2], [], [1 1]}, ...
+    {'class_drop', Inf, [3 4], [2 6], []}};
+now0 = cell(numel(args), 3); nw = now0;
+for k = 1:numel(args)
+    [now0{k, :}] = monitor_confirm(Tr, args{k}{:});
+    a = args{k}; a(end+1:5) = {[]};
+    [nw{k, :}, ot] = monitor_confirm(Tr, a{:}, []);
+    verifyEqual(tc, ot, Tr.other);
+end
+verifyTrue(tc, isequal(now0, nw));
+d = pb_parent_dir(tc, '803871e', {'code/decision/monitor_confirm.m'});
+addpath(d, '-begin'); clear monitor_confirm
+cl = onCleanup(@() pb_fixture_off(d, {'monitor_confirm'})); %#ok<NASGU>
+verifyEqual(tc, which('monitor_confirm'), fullfile(d, 'monitor_confirm.m'));
+old0 = cell(numel(args), 3);
+for k = 1:numel(args), [old0{k, :}] = monitor_confirm(Tr, args{k}{:}); end
+pb_fixture_off(d, {'monitor_confirm'});
+verifyTrue(tc, isequal(now0, old0));
+end
+
+function test_clt_dconf_reference_is_the_monitor_clt_leaves(tc)
+% dconf_step.m without the acceptance (argument absent, {} or [] per monitor) is 803871e's bit for bit; with a
+% monitor's tau_hi every reading of it is made under it, the reference included.
+W = d6_world(60, 60, 8, 0, 0);
+[D0, L0] = d6_run(W, [], false);
+[D1, L1] = d6_run(W, [], false, {});
+[D2, L2] = d6_run(W, [], false, {[]});
+verifyTrue(tc, isequaln(D0, D1) && isequaln(D0, D2) && isequal(L0, L1) && isequal(L0, L2));
+d = pb_parent_dir(tc, '803871e', {'code/decision/dconf_step.m', 'code/decision/monitor_confirm.m'});
+addpath(d, '-begin'); clear dconf_step monitor_confirm
+cl = onCleanup(@() pb_fixture_off(d, {'dconf_step', 'monitor_confirm'})); %#ok<NASGU>
+[Dp, Lp] = d6_run(W, [], false);
+pb_fixture_off(d, {'dconf_step', 'monitor_confirm'});
+verifyTrue(tc, isequaln(D0, Dp) && isequal(L0, Lp));
+for f = {'Tc', 'Tv'}
+    n = size(W.(f{1}).eg, 1);
+    W.(f{1}).lb = false(n, 30); W.(f{1}).plb = zeros(n, 30); W.(f{1}).dg = false(n, 30);
+end
+k = find(W.chk); W.Tc.lb(k(1:10), 3:end) = true; W.Tc.other(k(1:10), 3:end) = true; W.Tc.plb(k(1:10), 3:end) = 0.2;
+[Dn, ~] = d6_run(W, [], false);
+[Dt, ~] = d6_run(W, [], false, {Inf});
+Tk = d6_sub(W.Tc, W.chk);
+verifyEqual(tc, Dn(1).ref.k, sum(any(monitor_confirm(Tk, 'class_cusum', W.MONP.pick, W.MONP.cf, []), 2)));
+verifyEqual(tc, Dt(1).ref.k, sum(any(monitor_confirm(Tk, 'class_cusum', W.MONP.pick, W.MONP.cf, [], [], Inf), 2)));
+verifyEqual(tc, Dn(1).ref.k - Dt(1).ref.k, 10);
+end
+
+function test_clt_pa_switches_and_force_cells(tc)
+% clt_select and s1gc_select are off without the file or the field, on with true, CFG overrides the file, a value
+% that is no logical stops; clt_force and s1gc_force are the smoke's only; a cell struct of the earlier shape is
+% still judged.
+d = tempname; mkdir(d); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+O = wf_options([], fullfile(d, 'none.json'));
+verifyFalse(tc, O.clt || O.s1gc || O.force.clt || O.force.s1gc);
+f = fullfile(d, 'p.json');
+fid = fopen(f, 'w'); fprintf(fid, '{"clt_select": true, "s1gc_select": true, "s1gc_force": true}'); fclose(fid);
+O = wf_options([], f);
+verifyTrue(tc, O.clt && O.s1gc && O.force.s1gc); verifyFalse(tc, O.force.clt || O.dconf || O.s1g);
+verifyFalse(tc, wf_options(struct('clt_select', false), f).clt);
+verifyError(tc, @() wf_force('smoke', O.force, false, 'train_dqn'), 'wf_force:smoke');
+wf_force('smoke', O.force, true, 'train_dqn');
+verifyError(tc, @() wf_force('mark', {'s1_gate_core'}, false, 'evaluate_policies'), 'wf_force:smoke');
+Fo = struct('dconf', [], 's1g', false, 'relm', false);
+verifyFalse(tc, wf_force('any', Fo));
+for b = {'{"clt_select": 1}', 'wf_options:value'; '{"s1gc_force": "yes"}', 'wf_force:value'}'
+    fid = fopen(f, 'w'); fprintf(fid, '%s', b{1}); fclose(fid);
+    verifyError(tc, @() wf_options([], f), b{2});
+end
+end
+
+function test_clt_pa_stamp_only_when_on(tc)
+% The stamp is 803871e's while the core rule's gate is off or absent and the acceptance empty or absent, and
+% differs with either on and with another tau_hi.
+S = struct('rule_mmse_db', 6, 'rule_slot', true, 'rule_dwell', 'run', 'esc_drop', false, 'unk_mode', 'all', ...
+    'unk_retain', 0.95, 'confirm_sweep', []);
+Q = struct('deployed', 'dqn', 'alarm_mode', 'class_drop', 'confirm', [2 2], 'drop_db', 4, 'det_id', 'x', ...
+    'maha_thr', -1, 'dec', S, 'rule_sel', S);
+Qs = {Q, Q, Q, Q, Q, Q};
+Qs{2}.dec.s1_gate_core = false; Qs{3}.dec.lb_accept = []; Qs{4}.dec.s1_gate_core = true;
+Qs{5}.dec.lb_accept = struct('tau_hi', 0.9); Qs{6}.dec.lb_accept = struct('tau_hi', Inf); Qs{7} = Q; Qs{7}.rule_sel.s1_gate_core = true;
+now0 = cellfun(@policy_stamp, Qs, 'UniformOutput', false);
+d = pb_parent_dir(tc, '803871e', {'code/decision/policy_stamp.m'});
+addpath(d, '-begin'); clear policy_stamp
+cl = onCleanup(@() pb_fixture_off(d, {'policy_stamp'})); %#ok<NASGU>
+old0 = policy_stamp(Q);
+pb_fixture_off(d, {'policy_stamp'});
+verifyEqual(tc, now0(1:3), {old0, old0, old0});
+verifyNumElements(tc, unique(now0(3:7)), 5);
+end
+
+function test_pa_policy_setup_rows(tc)
+% rule_core with the gate off or on (_nos1gc, _s1gc) is rule_core with the switch in opt.monitor; the parent's
+% names are unchanged.
+Q = struct('agent', [], 'agents', {{[]}}, 'rule_sel', struct('alarm', 'class_drop 2/2'));
+nm = {'rule_core', 'blind_core', 'rule_esc_nos1g', 'rule_esc_s1g', 'rule_esc_norelm', 'dqn_g1_relm', 'rule_sel', 'none'};
+now0 = cell(numel(nm), 3);
+for k = 1:numel(nm), [now0{k, :}] = policy_setup(nm{k}, Q, 1, 2, 3, struct(), 1); end
+[k0, ~, o0] = policy_setup('rule_core_nos1gc', Q, 1, 2, 3, struct(), 1);
+[k1, ~, o1] = policy_setup('rule_core_s1gc', Q, 1, 2, 3, struct(), 1);
+verifyEqual(tc, {k0, k1}, {'rule_esc', 'rule_esc'});
+verifyEqual(tc, o0, struct('core', true, 'monitor', struct('s1_gate_core', false)));
+verifyEqual(tc, o1, struct('core', true, 'monitor', struct('s1_gate_core', true)));
+d = pb_parent_dir(tc, '803871e', {'code/decision/policy_setup.m'});
+addpath(d, '-begin'); clear policy_setup
+cl = onCleanup(@() pb_fixture_off(d, {'policy_setup'})); %#ok<NASGU>
+old0 = cell(numel(nm), 3);
+for k = 1:numel(nm), [old0{k, :}] = policy_setup(nm{k}, Q, 1, 2, 3, struct(), 1); end
+pb_fixture_off(d, {'policy_setup'});
+verifyTrue(tc, isequaln(now0, old0));
+end
+
+function test_pa_tone_jamming_unaffected(tc)
+% tone_jamming, like jamming, is no lost-branch class: rule_core's answers are the same with the gate on or off.
+cls = {'none', 'tone_jamming', 'jamming', 'antenna_fault', 'airframe_shadowing', 'benign_interference'};
+PP = struct('actions', {policy_actions()}, 'classes', {cls}, 'sps', 4, 'bps', 2, 'maha_thr', -1, 'q_thr', NaN, 'confirm', [2 2]);
+na = find(strcmp(PP.actions, 'no_action'));
+for c = [2 3]
+    p = zeros(1, numel(cls)); p(c) = 1;
+    obs = struct('probs', p, 'unknown', false, 'feat', zeros(1, numel(link_features('names'))));
+    obs.feat(feature_index('log_ber')) = -6;
+    A = zeros(2, 6);
+    for g = [false true]
+        P = PP; P.s1_gate_core = g; a = na; mem = [];
+        for k = 1:6, [a, mem] = policy_decide('rule', obs, a, mem, P, [], struct('core', true)); A(g + 1, k) = a; end
+    end
+    verifyEqual(tc, A(1, :), A(2, :), cls{c});
+    verifyNotEqual(tc, A(1, end), na, cls{c});
+end
+end
+
+function test_clt_pa_wiring_static_and_parse(tc)
+% The stages carry both choices: C1d runs CLT behind clt_select after the whole monitor's reading and before the drop
+% alarm's own confirmation, re-chooses an adopted monitor's threshold, and saves MONP.lb_accept and CLT only then; C2
+% carries every monitor's acceptance into its runs, dec and rule_sel, and runs the core gate's step right after the
+% rule's, read on rule_core, decided by the selection rule and s1g_adopt.m; C2e prints rule_core without the gate
+% beside it and names the variant; no truth field in the decision path.
+c = strrep(fileread(which('choose_drop_threshold')), char(13), '');
+verifyNotEmpty(tc, strfind(c, 'CLx = WFo.clt; CLf = WFo.force.clt;'));
+verifyNumElements(tc, strfind(c, 'record_lb = true'), 2);
+verifyNotEmpty(tc, strfind(c, 'if CLx, PPw.record_lb = true; end'));
+verifyNotEmpty(tc, strfind(c, 'PPt = PPv; if CLx, PPt.record_lb = true; end'));
+i1 = strfind(c, '[CLT, rl] = clt_step(''choose'''); i2 = strfind(c, '[DCONF, rd] = dconf_step(');
+i0 = strfind(c, 'MONP(m).cf = R{sw}(m).cf;');
+verifyTrue(tc, isscalar(i1) && isscalar(i2) && isscalar(i0) && i0 < i1 && i1 < i2);
+verifyNotEmpty(tc, strfind(c, 'FA_BOUND, DCf, WFo.dconf_own, lbt);'));
+verifyNotEmpty(tc, strfind(c, 'MONP(m).lb_accept = CLT(m).accept;'));
+verifyNotEmpty(tc, strfind(c, 'if ~isempty(CLT), SV = [SV, {''CLT''}]; end'));
+verifyNotEmpty(tc, strfind(c, 'CLT = []; lbt = {};'));
+verifyNotEmpty(tc, strfind(c, 'monitor_confirm(Tc, drop_alarm, MONP(m).pick, MONP(m).cf, confirm_sweep, cd6, la6)'));
+t = strrep(fileread(which('train_dqn')), char(13), '');
+verifyNotEmpty(tc, strfind(t, 'PP.lbacc = struct(''monitor'', {Dd.MONP.monitor}, ''la'', {Dd.MONP.lb_accept});'));
+verifyNotEmpty(tc, strfind(t, 'if isfield(PP, ''lbacc''), PPc.lb_accept = lb_accept_of(PP, en.alarm); end'));
+verifyNotEmpty(tc, strfind(t, 'if isfield(PP, ''lbacc''), dec.lb_accept = lb_accept_of(PP, alarm_sel); end'));
+verifyNotEmpty(tc, strfind(t, 'if isfield(PP, ''lbacc''), rule_sel.lb_accept = lb_accept_of(PP, base(ir).alarm); end'));
+verifyNotEmpty(tc, strfind(t, 'wf_force(''mark'', {''lb_accept''}'));
+g1 = strfind(t, '[Sg, GROWS] = s1g_step(S0, S1STEP, evr,');
+g2 = strfind(t, ['[Sg, GCROWS] = s1g_step(Sg, SCSTEP, evc, FA_BOUND, PK, PPr, K, val_spec, val_thr, H, CV, EBNO_THR, ' ...
+    '''s1_gate_core'', struct(''core'', true));']);
+g3 = strfind(t, '[Ssel, SROWS] = choose_settings(Sg, STEPS, evr, FA_BOUND, PK);');
+verifyTrue(tc, isscalar(g1) && isscalar(g2) && isscalar(g3) && g1 < g2 && g2 < g3);
+verifyNotEmpty(tc, strfind(t, 'evc = @(S) ev(''rule_esc'', decision_settings(PPr, S), [], struct(''core'', true));'));
+verifyNotEmpty(tc, strfind(t, 'Sg.s1_gate_core = true; WFF{end+1} = ''s1_gate_core'';'));
+verifyNotEmpty(tc, strfind(t, 'if WF.force.s1gc && ~WF.s1gc'));
+body = regexp(t, 'function \[S, rows\] = s1g_step\(.*?(?=\nfunction |$)', 'match', 'once');
+verifyNotEmpty(tc, strfind(body, 'V1 = dqn_eval_batches(''rule_esc'', P1, K, specs, [], opt, 5000, 2);'));
+verifyNotEmpty(tc, strfind(body, '[~, ~, sw1] = eval_clean_wide(''rule_esc'', P1, CV, [], opt, H, ebno_thr);'));
+verifyNotEmpty(tc, strfind(body, 'A = s1g_adopt(V0, V1, thr, s, sw0, sw1);'));
+e = strrep(fileread(which('evaluate_policies')), char(13), '');
+verifyNotEmpty(tc, strfind(e, 'POL = [POL, {''rule_core_nos1gc''}];'));
+verifyLessThan(tc, strfind(e, 'POL = [POL, {''rule_core_nos1gc''}];'), strfind(e, 'POL = [POL, {''rule_core3''}];'));
+verifyNotEmpty(tc, strfind(e, 'rule_core carries the core rule''''s lost-branch gate as C2 chose it'));
+verifyNotEmpty(tc, strfind(e, 'The monitor carries the calibrated lost-branch acceptance'));
+for f = {'monitor_confirm', 'monitor_trace', 'policy_monitor', 'policy_decide'}
+    s = fileread(which(f{1}));
+    for tf = {'healthy', 'harmed', 'sc_eff', '\.ended', '\.restored'}
+        verifyEmpty(tc, regexp(s, tf{1}, 'once'), sprintf('%s reads %s', f{1}, tf{1}));
+    end
+end
+m = strrep(fileread(which('monitor_trace')), char(13), '');
+verifyNotEmpty(tc, strfind(m, 'rlb = isfield(PP, ''record_lb'') && PP.record_lb;'));
+verifyNumElements(tc, regexp(m, 'Tr\.lb = \[Tr\.lb; lb\(v, :\)\]', 'match'), 1);
+verifyNotEmpty(tc, strfind(m, sprintf('    if rlb\n        if ~isfield(Tr, ''lb'')')));
+for f = {'clt_step', 'monitor_confirm', 'monitor_trace', 'dconf_step', 'choose_drop_threshold', 'train_dqn', ...
+        'evaluate_policies', 'policy_stamp', 'policy_setup', 'wf_options', 'wf_force', 'test_d121'}
     parses_ok(tc, f{1});
 end
 end

@@ -59,14 +59,17 @@
 % policy_decide.m) is the first of the rule settings: off or on by the same selection rule, and on is
 % kept only if s1g_adopt.m passes it; every later step runs with the setting kept. The lost-branch
 % classes are listed under both settings whichever is kept.
+% With "s1gc_select": true, the same gate on the core rule (s1_gate_core, policy_decide.m) is the next step, right
+% after the rule's (first when that step does not run): off or on by the same selection rule on rule_core's readings,
+% on kept only if s1g_adopt.m passes it on rule_core; every later step runs with the setting kept.
 % With "relm_select": true, the release on evidence (release_m) is scored on the agent selected, with
 % and without it on the same episodes (relm_score, relm_adopt.m), and adopted into the deployed
 % settings only if relm_adopt.m passes it; the rule fallback keeps running without it.
 % With "r9_print": true, the selected agent's recovered share per Eb/N0 point is listed with its
 % intervals and the deficit by threat (ebno_rows.m).
-% In the smoke only, s1g_force and relm_force (profile.json or CFG, wf_force.m) deploy the gate or the
-% layer whatever the selection says, and a drop_threshold.mat with a forced confirmation is read; the cells
-% forced are marked in dec.wf_forced, which enters the policy stamp. Refused outside SMOKE.
+% In the smoke only, s1g_force, s1gc_force and relm_force (profile.json or CFG, wf_force.m) deploy the gate or the
+% layer whatever the selection says, and a drop_threshold.mat with a forced confirmation or lost-branch acceptance is
+% read; the cells forced are marked in dec.wf_forced, which enters the policy stamp. Refused outside SMOKE.
 % After the grid, coordinate steps at the selected monitor, drop threshold and penalty, the
 % same seeds: the discount factor 0 (the bandit), running and switching costs x1, and, when
 % the unknown-threat flag's settings moved from the default, the default for the agent; the
@@ -114,6 +117,8 @@
 % data/drop_threshold.mat when C1d chose one (MONP.confirm_drop, choose_drop_threshold.m): every run of that
 % monitor carries it, C2's drop thresholds of an adopted monitor are built on the grid it was chosen on
 % (MONP.grid), and the deployed settings (dec) and the rule fallback (rule_sel) hold the selected monitor's.
+% The calibrated lost-branch acceptance of a monitor (PP.lb_accept, policy_monitor.m) likewise, from MONP.lb_accept
+% when C1d chose one (clt_step.m): every run of that monitor carries it, and dec and rule_sel hold their monitor's.
 %
 % Output: data/trained_dqn.mat (also deployed, rule_sel, fa_bound_met, the pools' det_id and
 % created, dec: the deployed DQN's decision-time settings, decision_settings.m, and maha_thr),
@@ -133,6 +138,9 @@ WF = wf_options(cfg_);                   % which steps of the decision-layer add
 wf_force('smoke', WF.force, exist('SMOKE', 'var') && SMOKE, 'train_dqn');   % a forced cell is the smoke's only
 if (WF.force.s1g && ~WF.s1g) || (WF.force.relm && ~WF.relm)
     error('train_dqn:force', 'train_dqn: s1g_force needs s1g_select and relm_force needs relm_select');
+end
+if WF.force.s1gc && ~WF.s1gc
+    error('train_dqn:force', 'train_dqn: s1gc_force needs s1gc_select');
 end
 WFF = {};                                % the forced cells this agent carries (dec.wf_forced)
 
@@ -212,6 +220,13 @@ if isfile('data/drop_threshold.mat')
     if isfield(Dd, 'DCONF') && isfield(Dd.DCONF, 'forced') && any(arrayfun(@(d) ~isempty(d.forced), Dd.DCONF))   % a forced cell
         wf_force('mark', {'confirm_drop'}, exist('SMOKE', 'var') && SMOKE, 'train_dqn');
         WFF{end+1} = 'confirm_drop';
+    end
+    if isfield(Dd, 'MONP') && isfield(Dd.MONP, 'lb_accept')         % the calibrated lost-branch acceptance, per monitor
+        PP.lbacc = struct('monitor', {Dd.MONP.monitor}, 'la', {Dd.MONP.lb_accept});
+    end
+    if isfield(Dd, 'CLT') && isfield(Dd.CLT, 'forced') && any(arrayfun(@(d) ~isempty(d.forced), Dd.CLT))   % a forced cell
+        wf_force('mark', {'lb_accept'}, exist('SMOKE', 'var') && SMOKE, 'train_dqn');
+        WFF{end+1} = 'lb_accept';
     end
     if isfield(Dd, 'confirm_sweep'), PP.confirm_sweep = Dd.confirm_sweep; end   % the sweeper's own confirmation
     if isfield(Dd, 'deg_mode'), PP.deg_mode = Dd.deg_mode; PP.ber_q = Dd.ber_q; end   % the degradation test chosen at C1d
@@ -326,16 +341,33 @@ b0 = drops_of(ENT(iref).alarm, MONP, DROP_MODE, DROP_DB, THC, 0, DROP_FLOOR);   
 [~, m0] = min(abs([ENT(jr).drop] - b0)); if ~isfinite(b0), m0 = ceil(numel(jr) / 2); end
 iref = jr(m0);
 PPr = with_entry(PP, ENT(iref), DROP_MODE);
+if WF.s1g || WF.s1gc
+    evr = @(S) ev('rule_esc', decision_settings(PPr, S), [], struct());
+    Sg = S0; GROWS = {};
+end
 if WF.s1g                                           % the rule's lost-branch gate first among the rule settings
     S0.s1_gate = false;
     S1STEP = struct('name', 'rule gate on a lost-branch class', 'var', {{struct('s1_gate', false), struct('s1_gate', true)}});
-    evr = @(S) ev('rule_esc', decision_settings(PPr, S), [], struct());
     [Sg, GROWS] = s1g_step(S0, S1STEP, evr, FA_BOUND, PK, PPr, K, val_spec, val_thr, H, CV, EBNO_THR);
     if WF.force.s1g                                 % the smoke's forced cell, not an adoption (wf_force.m)
         GROWS{end+1} = sprintf('  the rule''s lost-branch gate FORCED on (smoke only, not an adoption); the rule would keep it %s', ...
             ternary(Sg.s1_gate, 'on', 'off')); %#ok<SAGROW>
         Sg.s1_gate = true; WFF{end+1} = 's1_gate';
     end
+end
+if WF.s1gc                                          % the same gate on the core rule, read on rule_core, next
+    Sg.s1_gate_core = false;
+    SCSTEP = struct('name', 'core rule gate on a lost-branch class', 'var', {{struct('s1_gate_core', false), struct('s1_gate_core', true)}});
+    evc = @(S) ev('rule_esc', decision_settings(PPr, S), [], struct('core', true));
+    [Sg, GCROWS] = s1g_step(Sg, SCSTEP, evc, FA_BOUND, PK, PPr, K, val_spec, val_thr, H, CV, EBNO_THR, 's1_gate_core', struct('core', true));
+    if WF.force.s1gc                                % the smoke's forced cell, not an adoption (wf_force.m)
+        GCROWS{end+1} = sprintf('  the core rule''s lost-branch gate FORCED on (smoke only, not an adoption); the rule would keep it %s', ...
+            ternary(Sg.s1_gate_core, 'on', 'off'));
+        Sg.s1_gate_core = true; WFF{end+1} = 's1_gate_core';
+    end
+    GROWS = [GROWS, GCROWS];
+end
+if WF.s1g || WF.s1gc
     [Ssel, SROWS] = choose_settings(Sg, STEPS, evr, FA_BOUND, PK);
     SROWS = [GROWS, SROWS];
 else
@@ -564,6 +596,7 @@ for f = fieldnames(Ssel)', rule_sel.(f{1}) = Ssel.(f{1}); end
 rule_sel.confirm_sweep = []; if isfield(PP, 'confirm_sweep'), rule_sel.confirm_sweep = PP.confirm_sweep; end
 if WF.relm, rule_sel.release_m = false; end          % the rule fallback was not scored with the release
 if isfield(PP, 'dconf'), rule_sel.confirm_drop = confirm_drop_of(PP, base(ir).alarm); end
+if isfield(PP, 'lbacc'), rule_sel.lb_accept = lb_accept_of(PP, base(ir).alarm); end
 if isfield(PP, 'deg_mode'), rule_sel.deg_mode = PP.deg_mode; rule_sel.ber_q = PP.ber_q; end
 FD = false_change_rate(B.sw_w, H.T, 1:numel(B.sw_w), CD.period_ms);
 FR = false_change_rate(base(ir).rule.sw_w, H.T, 1:numel(base(ir).rule.sw_w), CD.period_ms);
@@ -604,6 +637,11 @@ end
 if isfield(PP, 'dconf')
     rep{end+1} = sprintf('The drop alarm''s own confirmation (choose_drop_threshold.m, on validation): %s', strjoin(arrayfun(@(d) ...
         sprintf('%s %s', d.monitor, ternary(isempty(d.cd), 'none', sprintf('%d of the last %d cycles', d.cd))), PP.dconf, ...
+        'UniformOutput', false), ', '));
+end
+if isfield(PP, 'lbacc')
+    rep{end+1} = sprintf('The calibrated lost-branch acceptance (choose_drop_threshold.m, clt_step.m, on validation): %s', strjoin(arrayfun(@(d) ...
+        sprintf('%s %s', d.monitor, ternary(isempty(d.la), 'none', sprintf('tau_hi %.4g', field_or(d.la, 'tau_hi')))), PP.lbacc, ...
         'UniformOutput', false), ', '));
 end
 if isfield(PP, 'deg_forced')
@@ -718,6 +756,7 @@ if WF.relm, dec.release_m = relm_dep; end           % the release on evidence, d
 if ~isempty(WFF), dec.wf_forced = WFF; end          % the smoke's forced cells, in the stamp
 if FA_NT.on, dec.fa_form = fa_form_sel; end         % the penalty form the agent trained under, in the stamp
 if isfield(PP, 'dconf'), dec.confirm_drop = confirm_drop_of(PP, alarm_sel); end   % the selected monitor's own confirmation of the drop alarm
+if isfield(PP, 'lbacc'), dec.lb_accept = lb_accept_of(PP, alarm_sel); end         % the selected monitor's lost-branch acceptance
 if isfield(PP, 'deg_mode'), dec.deg_mode = PP.deg_mode; dec.ber_q = PP.ber_q; end
 if isfield(PP, 'deg_forced'), dec.deg_forced = PP.deg_forced; end   % the smoke's forced test, in the stamp
 if ~isempty(LBR), dec.lb_complete = LBon; if LBforced, dec.lb_forced = true; end, end   % step 4c, only with lb_select
@@ -1125,6 +1164,7 @@ elseif isfield(S, 'rule_nb')
 end
 if isfield(S, 'core_nb') && ~isempty(S.core_nb), t = sprintf('%s, core rule on a noise burst %s', t, S.core_nb); end
 if isfield(S, 's1_gate') && S.s1_gate, t = [t ', lost-branch gate on']; end
+if isfield(S, 's1_gate_core') && S.s1_gate_core, t = [t ', core rule''s lost-branch gate on']; end
 end
 
 function PPc = with_entry(PP, en, drop_mode)
@@ -1132,6 +1172,7 @@ function PPc = with_entry(PP, en, drop_mode)
 PPc = PP; [PPc.alarm_mode, PPc.confirm] = monitor(en.alarm, drop_mode);
 if ~isnan(en.drop), PPc.drop_db = en.drop; end
 if isfield(PP, 'dconf'), PPc.confirm_drop = confirm_drop_of(PP, en.alarm); end
+if isfield(PP, 'lbacc'), PPc.lb_accept = lb_accept_of(PP, en.alarm); end
 end
 
 function c = confirm_drop_of(PP, name)
@@ -1139,6 +1180,18 @@ function c = confirm_drop_of(PP, name)
 c = [];
 k = find(strcmp({PP.dconf.monitor}, name), 1);
 if ~isempty(k), c = PP.dconf(k).cd; end
+end
+
+function c = lb_accept_of(PP, name)
+% The calibrated lost-branch acceptance (struct, tau_hi) chosen for monitor name at C1d ([] none).
+c = [];
+k = find(strcmp({PP.lbacc.monitor}, name), 1);
+if ~isempty(k), c = PP.lbacc(k).la; end
+end
+
+function v = field_or(S, n)
+% Field n of S, NaN when S has none.
+v = NaN; if isstruct(S) && isfield(S, n), v = S.(n); end
 end
 
 function u = cp_upper(k, n)
@@ -1213,28 +1266,32 @@ A = relm_adopt(Std, Off, Per, Cln);
 lines = [lines, A.lines, {sprintf('  release on evidence %s', ternary(A.adopt, 'ADOPTED', 'not adopted'))}];
 end
 
-function [S, rows] = s1g_step(S0, STEP, evalf, bound, PK, PPr, K, specs, thr, H, CV, ebno_thr)
+function [S, rows] = s1g_step(S0, STEP, evalf, bound, PK, PPr, K, specs, thr, H, CV, ebno_thr, fld, opt)
 % The rule's lost-branch gate, placed first among the rule settings: the selection rule (rank_pick)
 % picks off or on; on stays only if it also passes s1g_adopt.m on the same validation episodes and
 % the clean validation flights, else the setting in force (off) is kept. Both settings are flown and
 % listed whichever is picked; nothing is chosen on the readings of a gate that was picked off.
+% fld, opt (default 's1_gate', no option): the gate's field and the rule's option (struct('core', true):
+% the core rule's gate s1_gate_core, read on rule_core).
+if nargin < 13, fld = 's1_gate'; end
+if nargin < 14, opt = struct(); end
 [S, rows] = choose_settings(S0, STEP, evalf, bound, PK);
-Soff = S; Soff.s1_gate = false; Son = S; Son.s1_gate = true;
+Soff = S; Soff.(fld) = false; Son = S; Son.(fld) = true;
 P0 = decision_settings(PPr, Soff); P1 = decision_settings(PPr, Son);
-V0 = dqn_eval_batches('rule_esc', P0, K, specs, [], struct(), 5000, 2);
-V1 = dqn_eval_batches('rule_esc', P1, K, specs, [], struct(), 5000, 2);
+V0 = dqn_eval_batches('rule_esc', P0, K, specs, [], opt, 5000, 2);
+V1 = dqn_eval_batches('rule_esc', P1, K, specs, [], opt, 5000, 2);
 s = cell2mat(cellfun(@(sp) sp.s(:)', specs, 'UniformOutput', false));
 sw0 = []; sw1 = [];
 if ~isempty(CV)
-    [~, ~, sw0] = eval_clean_wide('rule_esc', P0, CV, [], struct(), H, ebno_thr);
-    [~, ~, sw1] = eval_clean_wide('rule_esc', P1, CV, [], struct(), H, ebno_thr);
+    [~, ~, sw0] = eval_clean_wide('rule_esc', P0, CV, [], opt, H, ebno_thr);
+    [~, ~, sw1] = eval_clean_wide('rule_esc', P1, CV, [], opt, H, ebno_thr);
 end
 A = s1g_adopt(V0, V1, thr, s, sw0, sw1);
-if S.s1_gate
+if S.(fld)
     rows = [rows, {sprintf(['  the gate on was picked by the selection rule; it stays only if every other threat loses at most 1.0 point ' ...
         '(lower bound -2.0) and the clean validation flights with a change fall (exact McNemar, p < 0.05): %s'], ...
         ternary(A.keep, 'KEPT', 'not kept, the gate stays off'))}, A.rows];
-    if ~A.keep, S.s1_gate = false; end
+    if ~A.keep, S.(fld) = false; end
 else
     rows = [rows, {'  the gate off was picked by the selection rule and stays; the gate on, flown on the same episodes (reported only, nothing is chosen on it):'}, A.rows];
 end
