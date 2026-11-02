@@ -244,7 +244,7 @@ end
 
 function test_choose_drop_threshold_m_file_parses(tc)
 % Parse check (no MATLAB slot for runtests at authoring time): mtree must not error.
-mtree(which('choose_drop_threshold'), '-file');
+parses_ok(tc, 'choose_drop_threshold');
 verifyTrue(tc, true);
 end
 
@@ -271,7 +271,7 @@ end
 
 function test_measure_all_kpis_m_file_parses(tc)
 % Parse check (no MATLAB slot for runtests at authoring time): mtree must not error.
-mtree(which('measure_all_kpis'), '-file');
+parses_ok(tc, 'measure_all_kpis');
 verifyTrue(tc, true);
 end
 
@@ -340,8 +340,8 @@ src = fileread(which('cfo_joint'));
 for tf = {'healthy', 'harmed', 'sc_eff', '\.ended', 'truth', 'cfo_true'}
     verifyEmpty(tc, regexp(src, tf{1}, 'once'), sprintf('cfo_joint reads %s', tf{1}));
 end
-mtree(which('cfo_joint'), '-file');
-mtree(which('test_d121'), '-file');
+parses_ok(tc, 'cfo_joint');
+parses_ok(tc, 'test_d121');
 verifyTrue(tc, true);
 end
 
@@ -453,7 +453,7 @@ O = wf_options([], f); verifyTrue(tc, O.dconf_own && O.dconf);
 fid = fopen(f, 'w'); fprintf(fid, '{"dconf_own": 1}'); fclose(fid);
 verifyError(tc, @() wf_options([], f), 'wf_options:value');
 delete(f);
-mtree(which('dconf_step'), '-file'); mtree(which('wf_options'), '-file');
+parses_ok(tc, 'dconf_step'); parses_ok(tc, 'wf_options');
 verifyTrue(tc, true);
 end
 %% ---------- item 10: onset-referenced recovery line (lect_kpis.m CN block) ----------
@@ -525,7 +525,7 @@ src = fileread(which('lect_kpis'));
 for tf = {'healthy', 'harmed', 'sc_eff', '\.ended'}
     verifyEmpty(tc, regexp(src, tf{1}, 'once'), sprintf('lect_kpis reads %s', tf{1}));
 end
-mtree(which('lect_kpis'), '-file'); mtree(which('measure_all_kpis'), '-file');
+parses_ok(tc, 'lect_kpis'); parses_ok(tc, 'measure_all_kpis');
 end
 
 %% ---------- item 8: non-emitter speed lines (speed_nonemitter.m) ----------
@@ -583,7 +583,7 @@ verifyNumElements(tc, regexp(ev, 'speed_nonemitter\(', 'match'), 1);
 verifyNumElements(tc, regexp(ev, 'KP\.speed_ne\s*=', 'match'), 1);
 mk = fileread(which('measure_all_kpis'));
 verifyNotEmpty(tc, regexp(mk, 'speed_ne', 'once'));
-mtree(which('speed_nonemitter'), '-file'); mtree(which('evaluate_policies'), '-file'); mtree(which('measure_all_kpis'), '-file');
+parses_ok(tc, 'speed_nonemitter'); parses_ok(tc, 'evaluate_policies'); parses_ok(tc, 'measure_all_kpis');
 verifyTrue(tc, true);
 end
 
@@ -687,9 +687,9 @@ for f = {'kpi6_split', 'clean_hides', 'monitor_trace'}
     for tf = {'healthy', 'harmed', 'sc_eff', '\.ended'}
         verifyEmpty(tc, regexp(s, tf{1}, 'once'), sprintf('%s reads %s', f{1}, tf{1}));
     end
-    mtree(which(f{1}), '-file');
+    parses_ok(tc, f{1});
 end
-mtree(which('policy_monitor'), '-file'); mtree(which('choose_drop_threshold'), '-file');
+parses_ok(tc, 'policy_monitor'); parses_ok(tc, 'choose_drop_threshold');
 O = wf_options([], 'none.json'); verifyFalse(tc, O.k6split);
 f = [tempname '.json']; fid = fopen(f, 'w'); fprintf(fid, '{"k6_split": true}'); fclose(fid);
 O = wf_options([], f); verifyTrue(tc, O.k6split); delete(f);
@@ -730,7 +730,13 @@ for f = {'rr_column', 'rr_us'}
     for tf = {'healthy', 'harmed', 'sc_eff', '\.ended'}
         verifyEmpty(tc, regexp(s, tf{1}, 'once'), sprintf('%s reads %s', f{1}, tf{1}));
     end
-    mtree(which(f{1}), '-file');
+    parses_ok(tc, f{1});
 end
-mtree(which('experiment_core_bw'), '-file');
+parses_ok(tc, 'experiment_core_bw');
+end
+
+function parses_ok(tc, name)
+% The file parses: mtree does not raise on a syntax error, it returns an ERR root (test_core's test_m_files_parse).
+t = mtree(fileread(which(name)));
+verifyNotEqual(tc, char(t.root.kind), 'ERR', sprintf('%s does not parse', name));
 end

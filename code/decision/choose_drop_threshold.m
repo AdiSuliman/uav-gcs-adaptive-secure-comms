@@ -424,10 +424,8 @@ if WFo.k6split && ~isempty(CV) && isfield(CV, 'cov')
     l6{end+1} = sprintf(['  (C1d, clean validation flights, %d episodes, the monitor''s confirmed alarm at its adopted threshold; the hiding ' ...
         'condition is read at the nominal shadowing level %g dB; link K needs the fusion in PP: %s)'], ncl, ...
         C6.sev.airframe_shadowing.levels(C6.nominal), ternary(any(isfinite(lk6)), 'present', 'absent, K bins empty'));
-    fid = fopen('results/drop_threshold.txt', 'a'); fprintf(fid, '%s
-', l6{:}); fclose(fid);
-    fprintf('%s
-', l6{:});
+    fid = fopen('results/drop_threshold.txt', 'a'); fprintf(fid, '%s\n', l6{:}); fclose(fid);
+    fprintf('%s\n', l6{:});
 end
 SV = {'drop_db', 'drop_db_train', 'drop_from', 'separable', 'THR', 'kept', 'leak', 'leak_all', ...
     'p95_mis', 'p99_cl', 'p05_pl', 'floor_db', 'drop_alarm', 'cusum_db', 'THC', 'VAL', 'CF', 'EBNO_THR', 'MONP', 'confirm_sweep', 'CAL35'};
