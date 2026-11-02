@@ -450,8 +450,8 @@ end
 function f = mf1_cm(cm)
 % Macro-F1 of a confusion matrix over the classes present among the targets (eval_detector.m).
 pr = diag(cm) ./ sum(cm, 1)'; rc = diag(cm) ./ sum(cm, 2);
-f1 = 2 * pr .* rc ./ (pr + rc);
-f = mean(f1(sum(cm, 2) > 0), 'omitnan');
+f1 = 2 * pr .* rc ./ (pr + rc); f1(isnan(f1)) = 0;
+f = mean(f1(sum(cm, 2) > 0));
 end
 
 function t = yn_txt(x)

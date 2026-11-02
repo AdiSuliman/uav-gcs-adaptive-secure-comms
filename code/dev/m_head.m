@@ -341,7 +341,7 @@ end
 function m = mf1(y, yh, C)
 cm = accumarray([y(:) yh(:)], 1, [C C]);
 pr = diag(cm) ./ sum(cm, 1)'; rc = diag(cm) ./ sum(cm, 2);
-f = 2 * pr .* rc ./ (pr + rc); m = mean(f(sum(cm, 2) > 0), 'omitnan');
+f = 2 * pr .* rc ./ (pr + rc); f(isnan(f)) = 0; m = mean(f(sum(cm, 2) > 0));
 end
 
 function f = cf1(y, yh, c)

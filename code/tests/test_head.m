@@ -653,7 +653,60 @@ nr = strfind(src, '[okn, sn] = fusion_adopt(''nested'', picks, Gn, t);');
 verifyTrue(tc, isscalar(nr) && any(st > nr & st < qk));                % the timebox covers the readings: no verdict past it
 end
 
+%% ---------- the macro-F1 definition ----------
+function test_macro_f1_zero_tp(tc)
+% Every macro-F1 helper (eval_detector.m, select_fusion.m, fusion_cand.m, fusion_adopt.m,
+% m_head.m) scores a present class with no TP as 0, with or without FP, and leaves out a class
+% absent from both the targets and the predictions; all correct reads 1. In bin 0 the class
+% dropped would lift macro-F1 from 84.6% to 95.2%, so the KPI 1 threshold is 3 dB, not 0.
+C = 10; cls = arrayfun(@(k) sprintf('c%d', k), 1:C, 'UniformOutput', false); cc = categorical(cls, cls);
+y = repelem([1 2 3 5 6 7 8 9 10]', 10);                  % class 4 absent from targets and predictions
+ya = y; ya(y == 10) = 9; ya(1) = 10;                     % class 10: no TP, one FP
+yb = y; yb(y == 10) = 9;                                 % class 10: no TP, no FP
+ref = @(t, p) mean(arrayfun(@(c) 2 * sum(t == c & p == c) / (sum(t == c) + sum(p == c)), unique(t)));
+verifyEqual(tc, ref(y, ya), (6 + 18 / 19 + 2 / 3) / 9, 'AbsTol', 1e-12);
+cm = @(t, p) accumarray([t p], 1, [C C]);
+ed = @(t, p) local_call(tc, 'code/detection/eval_detector.m', {'macro_f1_of'}, cc(t)', cc(p)', cc);
+for p = {ya, yb, y}
+    e = ref(y, p{1});
+    verifyEqual(tc, ed(y, p{1}), e, 'AbsTol', 1e-12);
+    verifyEqual(tc, local_call(tc, 'code/detection/select_fusion.m', {'mf1_cm'}, cm(y, p{1})), e, 'AbsTol', 1e-12);
+    verifyEqual(tc, local_call(tc, 'code/detection/fusion_adopt.m', {'mf1'}, cm(y, p{1})), e, 'AbsTol', 1e-12);
+    verifyEqual(tc, local_call(tc, 'code/detection/fusion_cand.m', {'mf1'}, y, p{1}, C), e, 'AbsTol', 1e-12);
+    verifyEqual(tc, local_call(tc, 'code/dev/m_head.m', {'mf1'}, y, p{1}, C), e, 'AbsTol', 1e-12);
+end
+verifyEqual(tc, ed(y, y), 1);                            % the absent class is not counted as 0
+yt = [y; y]; yp = [ya; y]; bin = [zeros(size(y)); 3 * ones(size(y))];
+verifyEqual(tc, local_call(tc, 'code/detection/eval_detector.m', {'kpi1_threshold', 'macro_f1_of', 'class_f1_of'}, ...
+    cc(yt)', cc(yp)', bin, cc), 3);
+verifyEqual(tc, local_call(tc, 'code/detection/select_fusion.m', {'kpi1_thr', 'mf1_cm'}, yt, yp, bin, cls), 3);
+verifyEqual(tc, fusion_cand('kpi1_thr', yt, yp, bin, C), 3);
+verifyEqual(tc, fusion_cand('kpi1_thr', yt, [y; y], bin, C), 0);
+src = strrep(fileread(which('eval_detector')), sprintf('\r'), '');
+verifyNotEmpty(tc, strfind(src, ['f1_scores(f1_present & isnan(f1_scores)) = 0;' newline 'macro_f1 = mean(f1_scores(f1_present));']));
+for f = {'detection/eval_detector.m', 'detection/select_fusion.m', 'detection/fusion_cand.m', 'detection/fusion_adopt.m', 'dev/m_head.m'}
+    verifyEmpty(tc, strfind(fileread(fullfile(tc.TestData.root, 'code', f{1})), '> 0), ''omitnan'')'), f{1});
+end
+end
+
 %% ---------- helpers ----------
+function v = local_call(tc, rel, fns, varargin)
+% Calls fns{1}, a local function of rel, copied with the local functions fns into a folder of
+% its own (each up to the next function line).
+src = strrep(fileread(fullfile(tc.TestData.root, rel)), sprintf('\r'), '');
+nf = [strfind(src, [newline 'function ']), numel(src)];
+txt = '';
+for k = 1:numel(fns)
+    i0 = regexp(src, ['\nfunction [^\n=]*=\s*' fns{k} '\('], 'once');
+    assertNotEmpty(tc, i0, [rel ': ' fns{k}]);
+    txt = [txt, src(i0 + 1:min(nf(nf > i0))), newline]; %#ok<AGROW>
+end
+d = tempname; mkdir(d);
+fid = fopen(fullfile(d, [fns{1} '.m']), 'w'); fwrite(fid, txt); fclose(fid);
+addpath(d, '-begin'); c = onCleanup(@() fixture_off(d, fns{1})); %#ok<NASGU>
+v = feval(fns{1}, varargin{:});
+end
+
 function X = synth(seed)
 % Synthetic rows of the fusion's layout: 60 sub-runs of 10 cycles, one class each.
 rs = RandStream('mt19937ar', 'Seed', seed);

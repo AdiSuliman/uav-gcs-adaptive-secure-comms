@@ -189,7 +189,9 @@ fprintf('\nCalculating metrics...\n');
 precision = diag(conf_mat) ./ sum(conf_mat, 1)';
 recall = diag(conf_mat) ./ sum(conf_mat, 2);
 f1_scores = 2 .* (precision .* recall) ./ (precision + recall);
-macro_f1 = mean(f1_scores, 'omitnan');
+f1_present = sum(conf_mat, 2) > 0;                      % a present class never read right scores 0
+f1_scores(f1_present & isnan(f1_scores)) = 0;
+macro_f1 = mean(f1_scores(f1_present));
 
 fprintf('\n--- Test Set Metrics ---\n');
 fprintf('Overall Accuracy: %.2f%%\n', 100 * sum(Y_test == Y_pred) / numel(Y_test));
@@ -725,11 +727,13 @@ end
 end
 
 function f = macro_f1_of(yt, yp, classes)
+% Macro-F1 over the classes present among the targets; a present class with no TP scores 0.
 cm = confusionmat(yt, yp, 'Order', classes);
 pr = diag(cm) ./ sum(cm, 1)';
 rc = diag(cm) ./ sum(cm, 2);
 f1 = 2 * pr .* rc ./ (pr + rc);
-f = mean(f1(sum(cm, 2) > 0), 'omitnan');
+f1(isnan(f1)) = 0;
+f = mean(f1(sum(cm, 2) > 0));
 end
 
 function s = pl_cell(ok, run)
