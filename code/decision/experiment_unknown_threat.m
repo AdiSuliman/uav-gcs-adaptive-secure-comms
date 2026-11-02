@@ -101,6 +101,7 @@ Kt = Kx; Kt.FA = Q.seed_summary.selected_fa_pen;
 if isfield(Q.seed_summary, 'selected_cost_scale')          % training reward variant
     Kt.cost = Q.seed_summary.selected_cost_scale * Kx.cost; Kt.SW = Q.seed_summary.selected_sw_scale * Kx.SW;
 end
+Kt = fa_form_train(Kt, Kx, Q.seed_summary);                % the selected run's penalty form
 ag = dqn_train_run(H, PPx, Kt, Kx, Q.norm_in, seed, nS, 1, 2);
 [Ro, Ri, Rr] = deal([]);
 for sp = SPL
