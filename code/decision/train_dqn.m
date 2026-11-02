@@ -166,7 +166,7 @@ if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (r
     N_SEEDS = 1; GAMMAS = 0.5; FA_PEN = 80; COST_SCALE = 1; SW_SCALE = 1; ALARMS = {'class_drop 4/5'}; SENS_SCALES = 2; VAL_REPS = 1;
     DROP_STEPS = [0 2]; H.episodes = 1280; H.buffer = 20000; H.warmup = 2000; H.n_eval = 1;
 end
-LBo = lb_options();                      % the link-budget completion's switches (step 4b)
+LBo = lb_options();                      % the link-budget completion's switches (step 4c)
 if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'lb_select'), LBo.on = CFG.lb_select; end
 if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'lb_force'), LBo.force = CFG.lb_force; end
 if LBo.force && ~(LBo.on && exist('SMOKE', 'var') && SMOKE)       % a forced completion is the smoke's only, refused before any training
@@ -406,9 +406,10 @@ for gi = 1:numel(GAM)
 end
 agents{find(GAM == gamma_sel, 1)} = agent;
 
-%% 4b. Link-budget completion on the selected agent, off against on (lb_complete.m, lb_adopt.m)
+%% 4c. Link-budget completion on the selected agent, off against on (lb_complete.m, lb_adopt.m)
 % Only with "lb_select": true in profile.json (lb_options.m, or CFG.lb_select): judged on the agent
-% selected above alone, on the validation split, nothing tuned, and stored with it (dec.lb_complete);
+% selected above (the no-threat runs of section 4b included) alone, on the validation split, nothing tuned, and
+% stored with it (dec.lb_complete);
 % without it nothing here runs and no switch is stored.
 LBon = false; LBforced = false; LBR = []; LBlines = {};
 if LBo.on
@@ -422,14 +423,14 @@ if LBo.on
             'reads %s'], ternary(LBon, 'on', 'off'));
         LBon = true; LBforced = true;
     end
-    LBlines{end+1} = '  the gate, choose_deployed and the false-change line above read the DQN as selected, without the completion';
+    LBlines{end+1} = '  the gate, choose_deployed and the false-change line below read the DQN as selected, without the completion';
     fprintf('%s\n', LBlines{:});
 end
 
 RELM = struct('adopt', false); RLINES = {}; R9LINES = {};
 if WF.relm || WF.r9
     PPsel = decision_settings(with_entry(PP, struct('alarm', alarm_sel, 'drop', drop_sel), DROP_MODE), Sdep);   % the selected agent's monitor and settings
-    if ~isempty(LBR), PPsel.lb_complete = LBon; end    % the agent as stored (dec.lb_complete), step 4b above
+    if ~isempty(LBR), PPsel.lb_complete = LBon; end    % the agent as stored (dec.lb_complete), step 4c above
 end
 if WF.relm                                           % the release on evidence, scored on the selected agent
     [RELM, RLINES] = relm_score(PPsel, K, H, agent, sel_kind, val_spec, val_thr, CV, EBNO_THR, SPLIT_VAL);
@@ -622,7 +623,7 @@ if ~isempty(WFF), dec.wf_forced = WFF; end          % the smoke's forced cells, 
 if isfield(PP, 'dconf'), dec.confirm_drop = confirm_drop_of(PP, alarm_sel); end   % the selected monitor's own confirmation of the drop alarm
 if isfield(PP, 'deg_mode'), dec.deg_mode = PP.deg_mode; dec.ber_q = PP.ber_q; end
 if isfield(PP, 'deg_forced'), dec.deg_forced = PP.deg_forced; end   % the smoke's forced test, in the stamp
-if ~isempty(LBR), dec.lb_complete = LBon; if LBforced, dec.lb_forced = true; end, end   % step 4b, only with lb_select
+if ~isempty(LBR), dec.lb_complete = LBon; if LBforced, dec.lb_forced = true; end, end   % step 4c, only with lb_select
 agent = dqn_dense(agent);                          % matrix form for deployment
 for gi = find(~cellfun(@isempty, agents)), agents{gi} = dqn_dense(agents{gi}); end
 det_id = PP.det_id; pools_created = PP.created;    % the pools (and their detector) the agent learned on

@@ -582,7 +582,7 @@ verifyTrue(tc, all(contains(b, 'S.cols(')));
 end
 
 function test_c2e_columns_wiring(tc)
-% C2e prints the two columns only when C2 stored the switch (train_dqn.m step 4b): after the policy
+% C2e prints the two columns only when C2 stored the switch (train_dqn.m step 4c): after the policy
 % loop, before the envelope; the report and the saved file grow only then; the selected DQN runs
 % without and with the completion on the main runs' frame draws; the forced mark stops outside the smoke.
 src = fileread(which('evaluate_policies'));

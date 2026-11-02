@@ -261,7 +261,7 @@ if ~isempty(spec2)
     fprintf('  set %-9s %5d episodes x 1 policy, the deployed (%.1f min)\n', 'single2', numel(RS2.ret), toc(t0)/60);
 end
 
-%% 3a. Link-budget completion beside the deployed row, only when C2 stored its switch (train_dqn.m step 4b)
+%% 3a. Link-budget completion beside the deployed row, only when C2 stored its switch (train_dqn.m step 4c)
 LBC = [];
 if isfield(Q, 'dec') && isstruct(Q.dec) && isfield(Q.dec, 'lb_complete')
     LBC = lb_flights(PP, K, Q, sets, RES, POL, sel, fixed_best, fixed_mmse, tab, ebno_thr);
