@@ -686,13 +686,19 @@ end
 end
 
 %% ---------- the pipeline warning, the seeds guard, the comment ----------
-function test_reproduced_mismatch_warns_and_stays_out_of_the_rule(tc)
+function test_reproduced_mismatch_stops_outside_the_smoke_and_stays_out_of_the_rule(tc)
+% A re-read that does not reproduce its stored row is an error; only the smoke (a reduced run) warns.
 src = read_lf('train_dqn');
-w = 'warning(''train_dqn:reproduced''';
+w = 'if exist(''SMOKE'', ''var'') && SMOKE, warning(''train_dqn:reproduced'', ''%s'', rmsg);';
+e = 'else, error(''train_dqn:reproduced'', ''%s'', rmsg); end';
 verifyNumElements(tc, strfind(src, w), 1);
+verifyNumElements(tc, strfind(src, e), 1);
+verifyNumElements(tc, strfind(src, 'warning(''train_dqn:reproduced'''), 1);
+verifyNumElements(tc, strfind(src, 'error(''train_dqn:reproduced'''), 1);
 i = strfind(src, w); j = strfind(src, 'a.nothreat.reproduced && a.plain.reproduced');
 verifyNumElements(tc, j, 1);
-verifyTrue(tc, j < i && i - j < 200, 'the warning follows the test of every run');
+verifyTrue(tc, j < i && i - j < 450, 'the stop follows the test of every run');
+verifyTrue(tc, strfind(src, e) - i < 120, 'the error is the warning''s else branch');
 verifyTrue(tc, i > strfind(src, 'A7(i).plain = split_row(') && i < strfind(src, '[ADM, APL] = aprime_admit(aprime, FA_BOUND);'));
 % the rule never reads it: the field is only recorded and printed
 verifyEmpty(tc, regexp(read_lf('aprime_admit'), 'reproduced', 'once'));
