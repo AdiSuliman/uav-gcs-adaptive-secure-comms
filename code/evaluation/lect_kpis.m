@@ -33,7 +33,10 @@ function [L, lines] = lect_kpis(ALL, POL, LBL, iDQN, scen, payload_bps, period_m
 %   the revised proposal's core action set (decision_config.m C.core_actions: channel
 %   switching and rate adaptation), for the rule with escalation with and without the
 %   detector there (rule_core, blind_core; rule_core_policy.m) against the same static link,
-%   the CNN's share rule_core against blind_core; [] when neither ran. Its primary reading
+%   the CNN's share rule_core against blind_core; [] when neither ran. With rule_core3 among the
+%   policies (profile 3's three-state CNN, D121 item 16) it is a row beside them in every core
+%   table and its pair against blind_core is cnn3 (labelled secondary, weakened baseline); the
+%   verdict stays rule_core's. Its primary reading
 %   is on the episodes a core configuration recovers (recoverable_core); L.core.all36 holds
 %   the same on the episodes any of the 36 recovers (a second line: episodes only a
 %   configuration outside the core set restores are kept in).
@@ -73,6 +76,7 @@ L.verdict = V; L.per = P; L.per_threat = PT; L.cnn = CN; lines = [lines, l];
 L.core = [];
 kc = {'rule_core', 'blind_core'}; kc = kc(cellfun(has, kc));
 if isempty(kc), return; end
+if has('rule_core3'), kc{end+1} = 'rule_core3'; end   % profile 3's three-state CNN row (D121 item 16, P-B), beside the others
 C = decision_config();
 if ~isfield(R1, 'recoverable_core')
     error('lect_kpis:core_flags', 'lect_kpis: the core policies ran but the episodes carry no recoverable_core (rollout_policy.m)');
@@ -80,6 +84,7 @@ end
 Xc = X; Xc.mrec = R1.recoverable_core & R1.threat; Xc.mj = Xc.mrec & jam;
 Xc.rec_txt = 'some configuration of the core action set restores the geometry';
 kcr = {'none', 'blind_core', 'rule_core'}; kcr = kcr(cellfun(has, kcr));
+if has('rule_core3'), kcr{end+1} = 'rule_core3'; end
 lines{end+1} = sprintf(['Core action set {%s} (the revised proposal''s predefined actions, channel switching and ' ...
     'transmission-rate adaptation; escalation %s), the same episodes and static link; primary: the episodes a core ' ...
     'configuration recovers (%d recoverable threat episodes, %d jamming):'], strjoin(C.core_actions, ', '), ...
@@ -92,6 +97,7 @@ lines{end+1} = sprintf(['Core action set, second line: the episodes any of the 3
 S36.recoverable = 'all36';
 L.core = struct('actions', {C.core_actions}, 'ladder', {C.ladder_core}, 'recoverable', 'core', 'verdict', S.verdict, ...
     'per', S.per, 'per_threat', S.per_threat, 'cnn', S.cnn, 'rec', S.rec, 'gput', S.gput, 'all36', S36);
+if isfield(S, 'cnn3'), L.core.cnn3 = S.cnn3; end
 end
 
 function [S, lines] = core_reading(X, kc, kcr, pre, s0, g0)
@@ -102,6 +108,11 @@ function [S, lines] = core_reading(X, kc, kcr, pre, s0, g0)
 [RC, l] = rec_block(X, kcr, pre); lines = [lines, l];
 [GC, l] = gput_block(X, kcr, pre, g0); lines = [lines, l];
 S = struct('verdict', V, 'per', P, 'per_threat', PT, 'cnn', CN, 'rec', RC, 'gput', GC);
+if X.has('rule_core3') && X.has('blind_core')    % D121 item 16: profile 3's three-state CNN row against this profile's blind_core
+    [S.cnn3, l] = cnn_pair(X, 'rule_core3', 'blind_core', ['rule_core3 (profile 3) vs blind_core, secondary, weakened baseline ' ...
+        '(fixed first response channel_switch+rate_reduce, no validation choice)'], s0 + 600);
+    lines = [lines, l];
+end
 end
 
 function [P, PT, V, CN, lines] = per_block(X, kp, tgt, conv, pre, ttl, cnn_ttl, s0)
@@ -175,6 +186,15 @@ for q = PT
         strjoin(arrayfun(@(j) sprintf('%.1f [%.1f, %.1f]', q.red_pct(j), q.ci(j, 1), q.ci(j, 2)), 1:numel(kp), ...
         'UniformOutput', false), ' | ')); %#ok<AGROW>
 end
+[CN, lc] = cnn_pair(X, tgt, conv, cnn_ttl, s0);
+lines = [lines, lc];
+end
+
+function [CN, lines] = cnn_pair(X, tgt, conv, cnn_ttl, s0)
+% The CNN's share: tgt (with the detector) against conv (the same without it) on the recoverable jamming
+% episodes: PER, goodput, recovery time and the onset-referenced line; bootstrap seeds from s0 + 200.
+ALL = X.ALL; R1 = X.R1; mj = X.mj; col = X.col; B = X.B;
+lines = {};
 e = [tstat([]), tstat([])];
 CN = struct('per_red_pct', NaN, 'per_ci', [NaN NaN], 'gput_bps', NaN, 'gput_ci', [NaN NaN], 'n', 0, 'det', e, 'rec_det', e, ...
     'onset_rec', onset_recovery([], [], [], [], 0, 0));

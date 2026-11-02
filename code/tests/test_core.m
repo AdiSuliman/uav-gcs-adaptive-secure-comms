@@ -5657,7 +5657,7 @@ verifyFalse(tc, isfolder('part'));
 src = fileread(which('pool_checkpoint'));
 verifyEqual(tc, numel(regexp(src, 'flush_file\(tmp\);\s*\n\s*movefile\(tmp, ')), 2);   % a cell and the output
 src = fileread(which('build_policy_pools'));
-verifyNotEmpty(tc, strfind(src, 'pool_checkpoint(''key'', {MODEL_TAG, DET_ID, runs, cells(c), EBNO, ACTIONS, geoc{c}, opt, ...'));
+verifyNotEmpty(tc, strfind(src, 'pool_checkpoint(''key'', [{MODEL_TAG, DET_ID, runs, cells(c), EBNO, ACTIONS, geoc{c}, opt, ...'));
 verifyNotEmpty(tc, strfind(src, 'pool_lpt(@(S, c) pool_job(''c1p'', S, c), S, todo, pl);'));
 verifyNotEmpty(tc, strfind(fileread(which('pool_worker_init')), 'cd(d);'));   % the workers' own folder: the cells' path is absolute
 job = fileread(which('pool_job'));
@@ -7696,7 +7696,7 @@ verifyEqual(tc, ob.mmse_pred, 100 + ob.feat(1));
 verifyEqual(tc, ob.mmse_pred, 100 + ob.feat(1));
 src = fileread(which('pool_cell'));
 verifyNotEmpty(tc, strfind(src, 'Q.mmse_pred = [Q.mmse_pred; single(F.mmse_pred(v)'')];'));
-verifyNotEmpty(tc, strfind(fileread(which('rekey_pools')), '''bch'', ''mmse_pred''};   % pool_cell.m'));
+verifyNotEmpty(tc, strfind(fileread(which('rekey_pools')), '''bch'', ''mmse_pred'', ''probs3''};   % pool_cell.m'));
 end
 
 function a = rule_cycles(o, PP, na)

@@ -62,6 +62,10 @@
 % geometries of the same link model (MODEL_TAG) and only the test block differs, only
 % the test, edge-speed and second test splits are simulated. PP.det_id identifies the
 % detector (detector_id.m); pools of another detector are never reused.
+% Only with "core3_pools": true in profile.json (wf_options.m; D121 item 16, P-B) every frame is also scored
+% by this checkout's B3c three-state CNN (core3_model.m, pool_cell.m probs3), for rule_core3 in C2e; its
+% id is in the cells' key and in PP.core3_id, and pools of another id are never reused. Condition (a) is
+% checked here: without the model nothing is scored and PP.core3_not_run holds the statement for the book.
 % The coded configurations' truth comes from the decoder profile.json states (fec_rx,
 % fec_rx_config.m; a full build refuses without it): the D78 erasure rules, or the JSI
 % decoder chosen on dev set C (docs/noise_burst_protocol.md), recorded in PP.fec_rx and in
@@ -128,6 +132,19 @@ nm = split_norm();                                     % the training z-score al
 det = struct('net', D.net, 'ood', D.ood, 'classes', {cellstr(string(D.classes(:)'))}, ...
     'mu', nm.feat_mean, 'sd', nm.feat_std, 'fs', p0.symbol_rate * p0.sps);
 clear nm
+c3_id = ''; c3_note = '';                              % the three-state CNN's scores (core3_model.m), with "core3_pools" only
+cfg_c3 = []; if exist('CFG', 'var'), cfg_c3 = CFG; end
+if wf_options(cfg_c3).core3
+    [c3_m, c3_why] = core3_model();
+    if isempty(c3_m)
+        c3_note = 'rule_core3 was not run in profile 3; CORE_BW (profile 1) is the three-state CNN''s in-loop evidence';
+        fprintf('P-B (D121 item 16), condition (a) failed (%s): %s\n', c3_why, c3_note);
+    else
+        det.core3 = struct('net', c3_m.net); c3_id = c3_m.id;
+        fprintf('P-B (D121 item 16), condition (a): the three-state model exists (%s); every frame is scored by it too\n', c3_id);
+    end
+end
+c3_key = {}; if ~isempty(c3_id), c3_key = {c3_id}; end   % in the cells' key only when scored
 T = ood_thresholds(0.95);
 FZ = fusion_model();                                   % temporal fusion, the rule's quiet-slot alarm (select_fusion.m)
 UW = 1; if isfield(D.ood, 'win'), UW = D.ood.win; end                        % unknown-score window (eval_ood_detection.m)
@@ -197,8 +214,9 @@ runs = arrayfun(@(sp) 100 * BLOCK(sp) + r0(sp) + (1:nG(sp)), 1:nSp, 'UniformOutp
 old = [];
 if isfile('data/policy_pools.mat')
     Lo = load('data/policy_pools.mat', 'PP');
+    oc3 = ''; if isfield(Lo.PP, 'core3_id'), oc3 = Lo.PP.core3_id; end
     if isfield(Lo.PP, 'model_tag') && strcmp(Lo.PP.model_tag, TAG) && isfield(Lo.PP, 'det_id') ...
-            && strcmp(Lo.PP.det_id, DET_ID) ...
+            && strcmp(Lo.PP.det_id, DET_ID) && strcmp(oc3, c3_id) ...
             && numel(Lo.PP.runs) == nSp && isequal(Lo.PP.runs(1:2), runs(1:2)) && ~isequal(Lo.PP.runs{3}, runs{3}) ...
             && isequal(Lo.PP.scen, {cells.threat}) && isequal(Lo.PP.sev, [cells.sev]) ...
             && isequal(Lo.PP.ebno, EBNO) && isequal(Lo.PP.actions, ACTIONS) && isequaln(Lo.PP.level, [cells.level])
@@ -372,8 +390,8 @@ else
     end
 end
 CKD = fullfile(pwd, 'data', 'c1p_cells');               % finished cells (pool_checkpoint.m; the workers work elsewhere)
-keys = arrayfun(@(c) pool_checkpoint('key', {MODEL_TAG, DET_ID, runs, cells(c), EBNO, ACTIONS, geoc{c}, opt, ...
-    threat_params(p0, cells(c).threat, cells(c).sev, C)}), 1:nC, 'UniformOutput', false);
+keys = arrayfun(@(c) pool_checkpoint('key', [{MODEL_TAG, DET_ID, runs, cells(c), EBNO, ACTIONS, geoc{c}, opt, ...
+    threat_params(p0, cells(c).threat, cells(c).sev, C)}, c3_key]), 1:nC, 'UniformOutput', false);
 todo = pool_checkpoint('todo', CKD, keys);
 w = arrayfun(@(c) pool_cost(threat_params(p0, cells(c).threat, cells(c).sev, C), cells(c).threat, ACTIONS, geoc{c}, opt), todo);
 todo = todo(pool_schedule(w));                         % the longest cell first, one cell per free worker
@@ -454,6 +472,8 @@ PP = struct('scen', {{cells.threat}}, 'sev', [cells.sev], 'level', [cells.level]
     'F_SUB', opt.F_SUB, 'event_frame', {evf}, 'fec_frames', p0.fec_frames, 'runs', {runs}, 'model_tag', TAG, 'fec_rx', FRX, ...
     'det_id', DET_ID, 'aoa_random', p0.int_aoa_random, 'k_random', p0.k_random, 'sps', p0.sps, 'bps', p0.bits_per_symbol, ...
     'feat_names', {link_features('names')}, 'created', datestr(now));
+if ~isempty(c3_id), PP.core3_sha256 = c3_m.sha256; PP.core3_N = c3_m.N; PP.core3_id = c3_id; end   % rule_core3's scores (probs3) in every pool
+if ~isempty(c3_note), PP.core3_not_run = c3_note; end
 pool_checkpoint('commit', 'data/policy_pools.mat', struct('PP', PP, 'clean_ref', clean_ref));
 pool_checkpoint('clear', CKD);
 
