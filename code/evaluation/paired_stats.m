@@ -1,5 +1,9 @@
 function varargout = paired_stats(cmd, varargin)
 %PAIRED_STATS  Small exact and bootstrap tests of the paired decision-layer comparisons.
+%   [m, q] = paired_stats('dist', x, cl, B, seed)
+%       The mean of x and the sorted B resample means of the same cluster bootstrap (q empty
+%       with fewer than two clusters): any one-sided bound is an order statistic of q; 'boot'
+%       reads the 5th and 95th percentiles, round(0.05 * B) and round(0.95 * B).
 %   [m, lb, ub] = paired_stats('boot', x, cl, B, seed)
 %       Mean of the per-episode values x with its one-sided 95% bounds (the 5th and 95th
 %       percentiles of the mean) by a cluster bootstrap: the episodes of one cluster (cl,
@@ -19,6 +23,9 @@ switch cmd
     case 'boot'
         [m, lb, ub] = boot(varargin{:});
         varargout = {m, lb, ub};
+    case 'dist'
+        [m, q] = boot_dist(varargin{:});
+        varargout = {m, q};
     case 'mcnemar'
         varargout = {mcnemar(varargin{:})};
     case 'garwood'
@@ -31,9 +38,19 @@ end
 function [m, lb, ub] = boot(x, cl, B, seed)
 if nargin < 3 || isempty(B), B = 2000; end
 if nargin < 4 || isempty(seed), seed = 1; end
+[m, q] = boot_dist(x, cl, B, seed);
+lb = NaN; ub = NaN;
+if isempty(q), return; end
+lb = q(max(1, round(0.05 * B))); ub = q(min(B, round(0.95 * B)));
+end
+
+function [m, q] = boot_dist(x, cl, B, seed)
+% The mean of x and the sorted resample means (empty with fewer than two clusters).
+if nargin < 3 || isempty(B), B = 2000; end
+if nargin < 4 || isempty(seed), seed = 1; end
 x = double(x(:)); cl = cl(:);
 ok = isfinite(x); x = x(ok); cl = cl(ok);
-m = NaN; lb = NaN; ub = NaN;
+m = NaN; q = [];
 if isempty(x), return; end
 [~, ~, j] = unique(cl);
 Sn = accumarray(j, x); Sd = accumarray(j, 1);
@@ -43,7 +60,6 @@ if nU < 2, return; end
 rs = RandStream('mt19937ar', 'Seed', seed);
 idx = randi(rs, nU, nU, B);
 q = sort(sum(Sn(idx), 1) ./ sum(Sd(idx), 1));
-lb = q(max(1, round(0.05 * B))); ub = q(min(B, round(0.95 * B)));
 end
 
 function p = mcnemar(b, c)

@@ -11418,15 +11418,16 @@ end
 function test_fa_nothreat_training_only(tc)
 % The form is a training reward only: the tables C2, C2e and every reader evaluate with carry
 % no form; no evaluation file reads it; C2 validates on the standard reward; its no-threat runs
-% (section 7) go through the run cache with the form in the key, run after the deployed agent and
-% the sensitivity are saved, and never enter the selection, the gate or the deployed policy; the
-% selected form enters seed_summary only with the switch; C2g, C2u and the sensitivity retrain
+% (section 4b) go through the run cache with the form in the key and join the selection only as
+% the admitted runs of aprime_admit.m (D107 point 5, test_d107.m), after the plain selection and
+% before the gate and the deployed policy; the selected form enters seed_summary and dec only with
+% the switch, and the policy stamp carries it only from dec; C2g, C2u and the sensitivity retrain
 % carry it.
 [PP, K] = covered_world();
 verifyFalse(tc, isfield(K, 'fa_form') || isfield(K, 'FA_threat'));
 verifyFalse(tc, isfield(link_env('tables', PP, 'flight'), 'fa_form'));
 ev = dir(fullfile(tc.TestData.root, 'code', 'evaluation', '*.m'));
-files = [{'evaluate_policies', 'rollout_policy', 'dqn_eval_batches', 'policy_decide', 'policy_stamp', ...
+files = [{'evaluate_policies', 'rollout_policy', 'dqn_eval_batches', 'policy_decide', ...
     'policy_run_set', 'decision_settings', 'dqn_held', 'dqn_recovered', 'dqn_train_run'}, erase({ev.name}, '.m')];
 for f = files
     verifyEmpty(tc, regexp(fileread(which(f{1})), 'fa_form|FA_threat|fa_nothreat|FA_NT', 'once'), f{1});
@@ -11437,21 +11438,29 @@ src = fileread(which('train_dqn'));
 verifyNotEmpty(tc, strfind(src, 'ev = @(kind, PPc, ag, opt) eval_policy(kind, PPc, K, val_spec, ag, opt, CV, H, EBNO_THR, val_thr);'));
 verifyNotEmpty(tc, strfind(src, '[ag, curve, lossc, best_ep] = dqn_train_run(Hg, PPc, Kt, K, norm_in, seed, nS, sp_tr, sp_val);'));
 verifyNumElements(tc, strfind(src, 'AR(end+1) = cached(RC, {''train_one'', ea, fp,'), 1);
-verifyNotEmpty(tc, regexp(src, '''penalty form nothreat'', DROP_MODE, ''nothreat''\}, PPa, PP, @\(\) train_one\(Hn, PPa, K,', 'once'));
+verifyNotEmpty(tc, regexp(src, '''penalty form nothreat'', DROP_MODE, ''nothreat''\}, PPa, PP, @\(\) train_one\(H, PPa, K,', 'once'));
 verifyNotEmpty(tc, strfind(src, 'SPLIT_TRAIN, SPLIT_VAL, ''nothreat''), @(r) run_lines(r, DROP_MODE, DU, RC.dir));'));
-verifyNotEmpty(tc, strfind(src, 'Hn = rmfield(H, {''fa_pen'', ''cost_scale'', ''sw_scale''});'));
 c = regexp(src, 'select_run\((\w+)', 'tokens');
 verifyNotEmpty(tc, c);
-verifyTrue(tc, all(cellfun(@(x) strcmp(x{1}, 'runs'), c)), 'select_run reads the plain runs only');
+verifyTrue(tc, all(cellfun(@(x) any(strcmp(x{1}, {'runs', 'RX'})), c)), 'select_run reads the plain runs or RX');
+verifyNumElements(tc, strfind(src, 'select_run(RX, FA_BOUND, n_plain + 1)'), 1);   % the admitted runs only, without the escalation
 verifyEmpty(tc, regexp(src, '(choose_deployed|rank_pick)\([^\n]*AR', 'once'));
 verifyEmpty(tc, regexp(src, 'runs\s*=\s*\[[^\]]*AR|runs\(end\+1\)\s*=\s*AR', 'once'), 'the A'' runs never join the plain runs');
-k7 = regexp(src, 'if FA_NT\.on\r?\n\s*ea = struct\(', 'once');
+k7 = regexp(src, 'if FA_NT\.on\r?\n\s*rp = runs\(cand\(best\)\.run\);', 'once');
 ks = strfind(src, 'save(''data/trained_dqn.mat''');
-verifyNotEmpty(tc, k7); verifyGreaterThan(tc, k7, ks(end));       % after every save of the deployed agent
+kb = strfind(src, 'B = cand(best); rb = RX(B.run);');
+kd = strfind(src, '[deployed, fa_bound_met, ir] = choose_deployed(');
+verifyNotEmpty(tc, k7); verifyTrue(tc, isscalar(kb) && isscalar(kd));
+verifyTrue(tc, k7 < kb && kb < ks(1) && kb < kd);                  % the admitted runs are chosen before the gate and every save
+verifyNotEmpty(tc, strfind(src, 'RX = runs; n_plain = numel(runs); APL = {}; rs7 = {};'));
+verifyNumElements(tc, strfind(src, 'RX = [runs, AR(adm)];'), 1);
+verifyNotEmpty(tc, strfind(src, '[ADM, APL] = aprime_admit(aprime, FA_BOUND);'));
+verifyNotEmpty(tc, strfind(src, 'if FA_NT.on, dec.fa_form = fa_form_sel; end'));
+verifyGreaterThan(tc, regexp(src, '%% 7\. The no-threat penalty form''s report', 'once'), ks(end));
 verifyNumElements(tc, strfind(src, 'seed_summary.selected_fa_form'), 1);
 verifyNotEmpty(tc, strfind(src, 'if FA_NT.on, seed_summary.selected_fa_form = fa_form_sel; end'));
-verifyNumElements(tc, regexp(src, 'fa_form_sel = ', 'match'), 1);
-verifyNotEmpty(tc, strfind(src, 'fa_form_sel = ''all'';'));
+verifyNumElements(tc, regexp(src, 'fa_form_sel = ', 'match'), 2);
+verifyNotEmpty(tc, strfind(src, 'fa_form_sel = ''all''; if B.run > n_plain, fa_form_sel = ''nothreat''; end'));
 i1 = strfind(src, 'Kft = fa_form_train(Kft, Kf, fa_form_sel);'); i2 = strfind(src, 'ag = cached(RC, {''sens''');
 verifyTrue(tc, isscalar(i1) && isscalar(i2) && i2 > i1);
 verifyNotEmpty(tc, regexp(src, 'rb\.seed, DROP_MODE, \.\.\.\r?\n\s*fa_form_sel\}, PPc, PP,', 'once'));

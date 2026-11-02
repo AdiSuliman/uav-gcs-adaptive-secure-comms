@@ -86,13 +86,15 @@
 % threshold, penalty and settings is kept as an ablation. Reward-weight sensitivity:
 % proposal mitigation 2.
 % With "fa_nothreat": true in profile.json or CFG.fa_nothreat (fa_nothreat_on.m; off by
-% default), section 7 also trains the no-threat form of the penalty (fa_form_train.m: the full
+% default), section 4b also trains the no-threat form of the penalty (fa_form_train.m: the full
 % penalty only on cycles with no threat on the air, the standard w_false elsewhere) at the
-% selected monitor and drop threshold, penalties FA_NT.pen x discount factors x seeds, and scores
-% every such run beside its grid run of the same monitor, drop, penalty, discount factor and seed
-% on the validation episodes (the harmed and covered episodes apart) and the clean validation
-% flights. These runs never enter the selection, the gate or the deployed policy
-% (data/aprime_agents.mat; results/dqn_training.txt).
+% monitor and drop threshold of the plain selection, penalties FA_NT.pen x discount factor x seeds,
+% and scores every such run beside its grid run of the same monitor, drop, penalty, discount factor
+% and seed on the validation episodes (the harmed and covered episodes apart) and the clean validation
+% flights. A penalty whose runs are admissible (aprime_admit.m, D107 point 5) joins the selection,
+% deployed without the escalation, beside every plain candidate, and select_run picks. The form of the
+% selected run is stored (in seed_summary and in dec), carried by the stamp and by the retrains of C2g,
+% C2u and the sensitivity (data/aprime_agents.mat; results/dqn_training.txt).
 %
 % Finished runs (every training run and the reward-sensitivity retrains) are kept in
 % data/run_cache/C2 when profile.json says "run_cache": true or CFG.run_cache is true
@@ -165,6 +167,9 @@ if exist('SMOKE', 'var') && SMOKE, FA_NT.pen = FA_PEN; end
 if FA_NT.on && ~all(ismember(FA_NT.pen, FA_PEN))
     error('train_dqn:fa_nothreat', 'train_dqn: the no-threat penalties %s need their grid runs (penalty grid %s)', ...
         mat2str(FA_NT.pen), mat2str(FA_PEN));
+end
+if FA_NT.on && numel(GAMMAS) ~= 1
+    error('train_dqn:fa_nothreat', 'train_dqn: the no-threat form is judged at one discount factor (D107 point 5)');
 end
 FA_BOUND = 0.05;                         % one-sided 95% bound of the clean-link false alarms (KPI 6)
 DROP_DB = [];                            % drop alarm threshold of 'class_drop'
@@ -376,11 +381,73 @@ if COORD
     CO(end+1, :) = {x.step, x.gamma, x.cost_scale, x.sw_scale, Sx};
     [cand, best, sel_rule] = select_run(runs, FA_BOUND);
 end
-B = cand(best); rb = runs(B.run);
+%% 4b. The no-threat penalty form (D107): trained, judged on validation, joins the selection when admissible
+% Training only: the penalty FA_NT.pen on a change on a healthy link where no threat is on the
+% air, the standard w_false on every other cycle (fa_form_train.m). At the monitor and drop
+% threshold of the plain selection with the grid's settings, cost scales, discount factor and seeds,
+% each run is paired with its grid run, and both are read on the same validation episodes (common
+% random numbers) as deployed without the escalation: held and recovered on the recoverable
+% episodes, the harmed (no response restores the geometry) and the covered apart, and the false
+% alarms on the clean validation flights. aprime_admit.m judges each penalty on these readings
+% alone; the runs of an admissible penalty join the selection without the escalation and
+% select_run picks among them and every plain candidate. Every per-episode reading and both agents
+% are saved.
+RX = runs; n_plain = numel(runs); APL = {}; rs7 = {};
+if FA_NT.on
+    rp = runs(cand(best).run); ea = struct('alarm', rp.alarm, 'drop', rp.drop);
+    PPa = decision_settings(with_entry(PP, ea, DROP_MODE), Ssel);
+    AR = runs([]); pair = zeros(1, 0);
+    for fp = FA_NT.pen
+        fi = find(FA_PEN == fp, 1);
+        for g = GAMMAS
+            for k = 1:N_SEEDS
+                AR(end+1) = cached(RC, {'train_one', ea, fp, COST_SCALE(fi), SW_SCALE(fi), g, SEEDS(k), Ssel, ...
+                    'penalty form nothreat', DROP_MODE, 'nothreat'}, PPa, PP, @() train_one(H, PPa, K, norm_in, nS, ea, fp, ...
+                    COST_SCALE(fi), SW_SCALE(fi), g, SEEDS(k), Ssel, 'penalty form nothreat', ev, DROP_MODE, DU, ...
+                    SPLIT_TRAIN, SPLIT_VAL, 'nothreat'), @(r) run_lines(r, DROP_MODE, DU, RC.dir)); %#ok<SAGROW>
+                j = find(arrayfun(@(r) strcmp(r.step, 'grid') && strcmp(r.alarm, ea.alarm) && isequaln(r.drop, ea.drop) ...
+                    && r.fa_pen == fp && r.cost_scale == COST_SCALE(fi) && r.sw_scale == SW_SCALE(fi) && r.gamma == g ...
+                    && r.seed == SEEDS(k) && isequal(r.S, Ssel), runs));
+                if numel(j) ~= 1
+                    error('train_dqn:fa_nothreat', 'train_dqn: %d grid runs pair the no-threat run at penalty %d, seed %d', ...
+                        numel(j), fp, SEEDS(k));
+                end
+                pair(end+1) = j; %#ok<SAGROW>
+            end
+        end
+    end
+    EP = val_episodes(val_spec, val_thr, K, SPLIT_VAL);
+    A7 = struct('pen', {}, 'gamma', {}, 'seed', {}, 'nothreat', {}, 'plain', {});
+    for i = 1:numel(AR)
+        P0 = runs(pair(i));
+        A7(i).pen = AR(i).fa_pen; A7(i).gamma = AR(i).gamma; A7(i).seed = AR(i).seed;
+        A7(i).nothreat = split_row(AR(i), PPa, K, val_spec, SPLIT_VAL);
+        A7(i).plain = split_row(P0, PPa, K, val_spec, SPLIT_VAL);
+    end
+    aprime = struct('label', 'pre-registered candidate (D107), validation-scored, deployed only if admissible (point 5)', ...
+        'form', 'nothreat', 'w_false', K.FA, 'alarm', ea.alarm, 'drop', ea.drop, 'S', Ssel, 'pen', FA_NT.pen, ...
+        'gammas', GAMMAS, 'seeds', SEEDS, 'fa_ebno_thr', EBNO_THR, 'fa_bound', FA_BOUND, 'episodes', EP, 'runs', A7);
+    [ADM, APL] = aprime_admit(aprime, FA_BOUND);
+    aprime.admit = ADM;
+    save('data/aprime_agents.mat', 'aprime', '-v7.3');
+    rs7 = aprime_lines(aprime, mon_txt(ea.alarm, DROP_MODE), DU);
+    adm = find(ismember([AR.fa_pen], [ADM([ADM.admissible]).pen]));
+    if isempty(adm)
+        APL{end+1} = '  No penalty is admissible: the plain DQN stays (D107 point 5).';
+    else
+        RX = [runs, AR(adm)];
+        [cand, best, sel_rule] = select_run(RX, FA_BOUND, n_plain + 1);
+        APL{end+1} = sprintf(['  Admissible: penalty %s. Their runs join the selection beside every plain candidate (without ' ...
+            'the escalation); the selection picks %s.'], mat2str([ADM([ADM.admissible]).pen]), ternary(cand(best).run > n_plain, ...
+            sprintf('the no-threat run of penalty %d, seed %d', RX(cand(best).run).fa_pen, RX(cand(best).run).seed), 'a plain run'));
+    end
+    APL = [{''}, APL];
+end
+B = cand(best); rb = RX(B.run);
 agent = rb.agent; sel_kind = B.kind; Sdep = rb.S;
 gamma_sel = rb.gamma; fa_pen_sel = rb.fa_pen; alarm_sel = rb.alarm; drop_sel = rb.drop;
 cs_sel = rb.cost_scale; ss_sel = rb.sw_scale;
-fa_form_sel = 'all';                                 % every candidate of the selection trains the plain form
+fa_form_sel = 'all'; if B.run > n_plain, fa_form_sel = 'nothreat'; end   % the form the selected run trained under (section 4b)
 GAM = unique([GAMMAS, [runs.gamma]]);
 same = @(r) r.fa_pen == fa_pen_sel & r.cost_scale == cs_sel & r.sw_scale == ss_sel & strcmp(r.alarm, alarm_sel) ...
     & isequaln(r.drop, drop_sel) & isequal(r.S, Sdep);
@@ -537,6 +604,7 @@ if WF.relm && RELM.adopt && ~relm_dep
     RLINES{end+1} = '  the rule fallback is deployed and runs without the release, which was scored on the DQN: the release is not deployed';
 end
 rep = [rep, RLINES, R9LINES];
+rep = [rep, APL];                                    % the no-threat form's admissibility (section 4b), empty with the switch off
 if ~exist('results', 'dir'), mkdir('results'); end
 fid = fopen('results/dqn_training.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('\n%s\n', rep{:});
@@ -563,6 +631,7 @@ dec = Sdep; dec.alarm_mode = alarm_mode; dec.confirm = confirm; dec.drop_db = dr
 dec.confirm_sweep = []; if isfield(PP, 'confirm_sweep'), dec.confirm_sweep = PP.confirm_sweep; end
 if WF.relm, dec.release_m = relm_dep; end           % the release on evidence, deployed or not
 if ~isempty(WFF), dec.wf_forced = WFF; end          % the smoke's forced cells, in the stamp
+if FA_NT.on, dec.fa_form = fa_form_sel; end         % the penalty form the agent trained under, in the stamp
 if isfield(PP, 'dconf'), dec.confirm_drop = confirm_drop_of(PP, alarm_sel); end   % the selected monitor's own confirmation of the drop alarm
 if isfield(PP, 'deg_mode'), dec.deg_mode = PP.deg_mode; dec.ber_q = PP.ber_q; end
 if isfield(PP, 'deg_forced'), dec.deg_forced = PP.deg_forced; end   % the smoke's forced test, in the stamp
@@ -646,51 +715,8 @@ fid = fopen('results/dqn_training.txt', 'a'); fprintf(fid, '%s\n', rs2{:}); fclo
 fprintf('%s\n', rs2{:});
 save('data/trained_dqn.mat', 'sens', '-append');
 
-%% 7. The no-threat penalty form (descriptive: never selected, gated or deployed)
-% Training only: the penalty FA_NT.pen on a change on a healthy link where no threat is on the
-% air, the standard w_false on every other cycle (fa_form_train.m). At the selected monitor and
-% drop threshold with the grid's settings, cost scales, discount factors and seeds, each run is
-% paired with its grid run, and both are read on the same validation episodes (common random
-% numbers) as deployed without the escalation: held and recovered on the recoverable episodes, the
-% harmed (no response does not restore the geometry) and the covered apart, and the false alarms
-% on the clean validation flights. Every per-episode reading and both agents are saved.
+%% 7. The no-threat penalty form's report (section 4b)
 if FA_NT.on
-    ea = struct('alarm', alarm_sel, 'drop', drop_sel);
-    Hn = rmfield(H, {'fa_pen', 'cost_scale', 'sw_scale'});   % the grid's hyperparameters
-    PPa = decision_settings(with_entry(PP, ea, DROP_MODE), Ssel);
-    AR = runs([]); pair = zeros(1, 0);
-    for fp = FA_NT.pen
-        fi = find(FA_PEN == fp, 1);
-        for g = GAMMAS
-            for k = 1:N_SEEDS
-                AR(end+1) = cached(RC, {'train_one', ea, fp, COST_SCALE(fi), SW_SCALE(fi), g, SEEDS(k), Ssel, ...
-                    'penalty form nothreat', DROP_MODE, 'nothreat'}, PPa, PP, @() train_one(Hn, PPa, K, norm_in, nS, ea, fp, ...
-                    COST_SCALE(fi), SW_SCALE(fi), g, SEEDS(k), Ssel, 'penalty form nothreat', ev, DROP_MODE, DU, ...
-                    SPLIT_TRAIN, SPLIT_VAL, 'nothreat'), @(r) run_lines(r, DROP_MODE, DU, RC.dir)); %#ok<SAGROW>
-                j = find(arrayfun(@(r) strcmp(r.step, 'grid') && strcmp(r.alarm, alarm_sel) && isequaln(r.drop, drop_sel) ...
-                    && r.fa_pen == fp && r.cost_scale == COST_SCALE(fi) && r.sw_scale == SW_SCALE(fi) && r.gamma == g ...
-                    && r.seed == SEEDS(k) && isequal(r.S, Ssel), runs));
-                if numel(j) ~= 1
-                    error('train_dqn:fa_nothreat', 'train_dqn: %d grid runs pair the no-threat run at penalty %d, seed %d', ...
-                        numel(j), fp, SEEDS(k));
-                end
-                pair(end+1) = j; %#ok<SAGROW>
-            end
-        end
-    end
-    EP = val_episodes(val_spec, val_thr, K, SPLIT_VAL);
-    A7 = struct('pen', {}, 'gamma', {}, 'seed', {}, 'nothreat', {}, 'plain', {});
-    for i = 1:numel(AR)
-        P0 = runs(pair(i));
-        A7(i).pen = AR(i).fa_pen; A7(i).gamma = AR(i).gamma; A7(i).seed = AR(i).seed;
-        A7(i).nothreat = split_row(AR(i), PPa, K, val_spec, SPLIT_VAL);
-        A7(i).plain = split_row(P0, PPa, K, val_spec, SPLIT_VAL);
-    end
-    aprime = struct('label', 'pre-registered candidate (D107), validation-scored, not deployed, descriptive', ...
-        'form', 'nothreat', 'w_false', K.FA, 'alarm', alarm_sel, 'drop', drop_sel, 'S', Ssel, 'pen', FA_NT.pen, ...
-        'gammas', GAMMAS, 'seeds', SEEDS, 'fa_ebno_thr', EBNO_THR, 'fa_bound', FA_BOUND, 'episodes', EP, 'runs', A7);
-    save('data/aprime_agents.mat', 'aprime', '-v7.3');
-    rs7 = aprime_lines(aprime, mon_txt(alarm_sel, DROP_MODE), DU);
     fid = fopen('results/dqn_training.txt', 'a'); fprintf(fid, '%s\n', rs7{:}); fclose(fid);
     fprintf('%s\n', rs7{:});
     fprintf('Saved data/aprime_agents.mat\n');
@@ -845,7 +871,7 @@ for p = unique([A.runs.pen])
             mean(D(m, 1:3), 1), k, n, ternary(isnan(k), '-', sprintf('%.2f%%', 100 * cp_upper(round(k), n)))); %#ok<AGROW>
     end
 end
-L{end+1} = '  Descriptive: these runs never enter the selection, the gate or the deployed policy (data/aprime_agents.mat).';
+L{end+1} = '  The admissible penalties'' runs join the selection (aprime_admit.m); the others never enter the selection, the gate or the deployed policy (data/aprime_agents.mat).';
 end
 
 function t = fa_bound_txt(x)
@@ -885,18 +911,21 @@ fprintf(['    checkpoint %d | validation with / without the escalation: held %.1
     100*xn.rec, xe.kmin_thr, 100*xe.kmin, xe.ret, xn.ret, fa_txt(xe.fa_w, xe.n_w), fa_txt(xn.fa_w, xn.n_w));
 end
 
-function [cand, best, why] = select_run(runs, bound)
+function [cand, best, why] = select_run(runs, bound, a_from)
 % The selection rule over every (run, with or without the escalation): among those whose
 % one-sided 95% false-alarm bound is <= bound (not measured: in), the highest held recovery
 % of the weakest threat; within one point of it the best pooled held recovery (within half a
 % point), then the pooled recovered (KPI 4), then the return; when none is within the bound,
 % the three with the lowest bound. cand(k): run, kind, and the readings; best indexes cand.
+% The admitted no-threat runs, runs a_from and after (D107; default none), are candidates
+% without the escalation only.
+if nargin < 3, a_from = Inf; end
 cand = struct('run', {}, 'kind', {}, 'rec', {}, 'held', {}, 'kmin', {}, 'ret', {}, 'fa_w', {}, 'n_w', {}, 'sw_w', {}, ...
     'fa_ok', {});
 for k = 1:numel(runs)
     for q = {'esc', 'dqn_esc'; 'noesc', 'dqn'}'
         x = runs(k).(q{1});
-        if isempty(x), continue; end
+        if isempty(x) || (k >= a_from && strcmp(q{1}, 'esc')), continue; end
         up = NaN; if ~isnan(x.fa_w), up = cp_upper(round(x.fa_w * x.n_w), x.n_w); end
         cand(end+1) = struct('run', k, 'kind', q{2}, 'rec', x.rec, 'held', x.held, 'kmin', x.kmin, 'ret', x.ret, ...
             'fa_w', x.fa_w, 'n_w', x.n_w, 'sw_w', x.sw_w, 'fa_ok', isnan(up) || up <= bound); %#ok<AGROW>
