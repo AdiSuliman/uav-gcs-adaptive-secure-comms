@@ -38,7 +38,7 @@ s = ['{"profile":"profile 3: four antennas","n_rx":4,"skip_stages":["OHP","GCSA"
     '"surv_v2":true,"deg_select":true,"dconf_select":true,"dconf_force":[1,1],"dconf_own":true,"s1g_select":true,"s1g_force":true,' ...
     '"relm_select":true,"relm_force":true,"r9_print":true,"k6_split":true,"lb_select":true,"lb_force":true,"fa_nothreat":true,' ...
     '"aprime_force":true,"speed_inference":true,"speed_band_table":true,"kpi7_union":"descriptive","edge161_n":48,' ...
-    '"unseen_gap":true,"k2_0":true}'];
+    '"unseen_gap":true,"k2_0":true,"clt_select":true,"clt_force":true,"s1gc_select":true,"s1gc_force":true}'];
 end
 
 function s = real_form()
@@ -48,7 +48,7 @@ s = ['{"profile":"profile 3: four antennas","n_rx":4,"skip_stages":["OHP","GCSA"
     '"surv_v2":true,"deg_select":true,"dconf_select":true,"dconf_own":true,"s1g_select":true,' ...
     '"relm_select":true,"r9_print":true,"k6_split":true,"lb_select":true,"fa_nothreat":true,' ...
     '"speed_inference":true,"speed_band_table":true,"kpi7_union":"descriptive","edge161_n":48,' ...
-    '"unseen_gap":true,"k2_0":true}'];
+    '"unseen_gap":true,"k2_0":true,"clt_select":true,"s1gc_select":true}'];
 end
 
 function lists = driver_lists(src)
@@ -174,14 +174,15 @@ verifyEqual(tc, numel(strfind(s, newline)), 0);
 want = {'n_rx 4,', 'fec_rx jsi,', 'surv_v2 1,', 'deg_select 1,', 'deg_force none,', 'dconf_select 1,', 'dconf_force [1 1],', ...
     'dconf_own 1,', 's1g_select 1,', 's1g_force 1,', 'relm_select 1,', 'relm_force 1,', 'r9_print 1,', 'k6_split 1,', ...
     'core3_pools 0,', 'lb_select 1,', 'lb_force 1,', 'fa_nothreat 1,', 'aprime_force 1,', 'speed_inference 1,', ...
-    'speed_band_table 1,', 'kpi7_union descriptive,', 'edge161_n 48,', 'unseen_gap 1,', 'k2_0 1'};
+    'speed_band_table 1,', 'kpi7_union descriptive,', 'edge161_n 48,', 'unseen_gap 1,', 'k2_0 1,', 'clt_select 1,', ...
+    'clt_force 1,', 's1gc_select 1,', 's1gc_force 1'};
 for w = want
     verifyNotEmpty(tc, strfind(s, w{1}), [w{1} ' in: ' s]);
 end
 write_text('profile.json', real_form());
 s = profile_text();
 for w = {'n_rx 4,', 'fec_rx jsi,', 'surv_v2 1,', 'deg_select 1,', 'dconf_force none,', 's1g_force 0,', 'relm_force 0,', ...
-        'lb_force 0,', 'aprime_force 0,'}
+        'lb_force 0,', 'aprime_force 0,', 'clt_select 1,', 'clt_force 0,', 's1gc_select 1,', 's1gc_force 0'}
     verifyNotEmpty(tc, strfind(s, w{1}), [w{1} ' in: ' s]);
 end
 delete('profile.json');                                               % profile 1's checkout: nothing stated
@@ -198,13 +199,14 @@ verifyEmpty(tc, profile_forced_fields());
 write_text('profile.json', '[1, 2]');
 verifyEmpty(tc, profile_forced_fields());
 write_text('profile.json', smoke_form());
-verifyEqual(tc, sort(profile_forced_fields()), sort({'dconf_force', 's1g_force', 'relm_force', 'lb_force', 'aprime_force'}));
+verifyEqual(tc, sort(profile_forced_fields()), sort({'dconf_force', 's1g_force', 'relm_force', 'lb_force', 'aprime_force', ...
+    'clt_force', 's1gc_force'}));
 write_text('profile.json', strrep(real_form(), '"n_rx":4', '"n_rx":4,"deg_force":"win"'));
 verifyEqual(tc, profile_forced_fields(), {'deg_force'});
 write_text('profile.json', strrep(real_form(), '"n_rx":4', '"n_rx":4,"ood_force":"C1","fusion_ext_force":"GCC+CFAR"'));
 verifyEqual(tc, sort(profile_forced_fields()), {'fusion_ext_force', 'ood_force'});
 write_text('other.json', smoke_form());
-verifyNumElements(tc, profile_forced_fields('other.json'), 5);
+verifyNumElements(tc, profile_forced_fields('other.json'), 7);
 end
 
 function test_release_check_expression(tc)
@@ -221,7 +223,8 @@ out = release_run(chk);
 verifyNotEmpty(tc, strfind(out, 'V7RELEASE profile.json OK: n_rx 4, fec_rx jsi, surv_v2 1, deg_select 1, forced fields 0'));
 write_text('profile.json', smoke_form());
 verifyError(tc, @() release_run(chk), 'release:profile');
-for f = {'"dconf_force":[1,1]', '"s1g_force":true', '"relm_force":true', '"lb_force":true', '"aprime_force":true', '"deg_force":"win"'}
+for f = {'"dconf_force":[1,1]', '"s1g_force":true', '"relm_force":true', '"lb_force":true', '"aprime_force":true', '"deg_force":"win"', ...
+        '"clt_force":true', '"s1gc_force":true'}
     write_text('profile.json', strrep(real_form(), '"n_rx":4', ['"n_rx":4,' f{1}]));
     verifyError(tc, @() release_run(chk), 'release:profile', f{1});
 end

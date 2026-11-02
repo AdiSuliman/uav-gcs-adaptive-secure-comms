@@ -561,12 +561,13 @@ src = strrep(fileread(which('train_dqn')), char(13), '');
 body = regexp(src, 'function \[S, rows\] = s1g_step\(.*?(?=\nfunction |$)', 'match', 'once');
 verifyNotEmpty(tc, body);
 verifyEmpty(tc, strfind(body, 'if ~S.s1_gate, return; end'));              % the gate on is flown whatever was picked
-verifyNotEmpty(tc, strfind(body, 'Son = S; Son.s1_gate = true;'));
+verifyNotEmpty(tc, strfind(body, 'Son = S; Son.(fld) = true;'));
 verifyNotEmpty(tc, strfind(body, 'P1 = decision_settings(PPr, Son);'));
-i1 = strfind(body, 'if S.s1_gate'); i2 = strfind(body, 'the gate off was picked by the selection rule and stays');
+i1 = strfind(body, 'if S.(fld)'); i2 = strfind(body, 'the gate off was picked by the selection rule and stays');
 i3 = regexp(body, '\nrows = \[rows, \{''  lost-branch threats under both settings, 95% bootstrap intervals', 'once');
 verifyTrue(tc, ~isempty(i1) && ~isempty(i2) && ~isempty(i3) && i1(1) < i2(1) && i2(1) < i3);   % the lost rows follow both branches
-verifyNotEmpty(tc, strfind(body, 'if ~A.keep, S.s1_gate = false; end'));    % only the picked-on branch can be overruled
+verifyNotEmpty(tc, strfind(body, 'if ~A.keep, S.(fld) = false; end'));      % only the picked-on branch can be overruled
+verifyNotEmpty(tc, strfind(body, 'if nargin < 13, fld = ''s1_gate''; end'));   % the rule's gate by default
 src = strrep(fileread(which('evaluate_policies')), char(13), '');
 verifyNotEmpty(tc, strfind(src, 's1_off = isfield(PP, ''s1_gate'') && ~isempty(PP.s1_gate) && ~PP.s1_gate;'));
 verifyNotEmpty(tc, strfind(src, 'POL = [POL, {''rule_esc_s1g''}]; LBL = [LBL, {''rule + escalation, with the lost-branch gate (descriptive; not kept at C2)''}];'));

@@ -4,8 +4,9 @@ function s = policy_stamp(Q)
 %   threshold), the rule fallback's own monitor and settings, the selected agent's weights
 %   (dqn_dense.m), the det_id of the pools it learned on, the unknown-threat threshold it ran
 %   with and its decision-time settings (dec, decision_settings.m; the degradation test only when C1d
-%   chose one, and the smoke's forced mark deg_forced; the drop alarm's own confirmation, the rule's
-%   lost-branch gate and the release on evidence only when set, the smoke's forced cells wf_forced, the
+%   chose one, and the smoke's forced mark deg_forced; the drop alarm's own confirmation, the rule's and the
+%   core rule's lost-branch gates, the lost-branch acceptance's tau_hi and the release on evidence only when
+%   set, the smoke's forced cells wf_forced, the
 %   form of the false-switch penalty the agent was trained under (fa_form) only when C2 ran with the
 %   no-threat form's switch on, the link-budget completion lb_complete and its forced mark lb_forced
 %   only when true, so earlier stamps stay). Results that
@@ -41,10 +42,12 @@ for n = {'rule_nb', 'core_nb', 'deg_mode', 'ber_q', 'deg_forced', 'confirm_drop'
     x = field_or(S, n{1});
     if ~isempty(x), c{end+1} = {n{1}, x}; end %#ok<AGROW>
 end
-for n = {'s1_gate', 'release_m'}                                   % the lost-branch gate and the release on evidence, when on
+for n = {'s1_gate', 'release_m', 's1_gate_core'}                   % the lost-branch gates and the release on evidence, when on
     x = field_or(S, n{1});
     if ~isempty(x) && x, c{end+1} = {n{1}, 1}; end %#ok<AGROW>
 end
+x = field_or(S, 'lb_accept');                                      % the lost-branch acceptance's tau_hi, when set
+if isstruct(x) && isfield(x, 'tau_hi'), c{end+1} = {'lb_accept', double(x.tau_hi)}; end
 for n = {'lb_complete', 'lb_forced'}                  % the link-budget completion and the smoke's forced mark, when on
     if isequal(field_or(S, n{1}), true), c{end+1} = {n{1}, true}; end %#ok<AGROW>
 end

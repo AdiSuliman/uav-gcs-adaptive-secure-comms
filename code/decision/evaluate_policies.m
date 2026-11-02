@@ -234,6 +234,15 @@ end
 if s1_off                                            % the gate on, beside the deployed rule without it
     POL = [POL, {'rule_esc_s1g'}]; LBL = [LBL, {'rule + escalation, with the lost-branch gate (descriptive; not kept at C2)'}];
 end
+s1gc_set = isfield(PP, 's1_gate_core') && ~isempty(PP.s1_gate_core);           % C2 chose the core rule's lost-branch gate
+s1gc_on = s1gc_set && PP.s1_gate_core;
+if s1gc_set                                          % the lecturer rows read from rule_core say which variant they carry
+    ic = find(strcmp(POL, 'rule_core'));
+    LBL{ic} = [LBL{ic} ternary(s1gc_on, ', with the lost-branch gate', ', without the lost-branch gate')];
+end
+if s1gc_on                                           % rule_core with the gate off, beside the selected variant
+    POL = [POL, {'rule_core_nos1gc'}]; LBL = [LBL, {'core: rule + escalation, without the lost-branch gate (descriptive)'}];
+end
 c3_on = isfield(PP, 'core3_id') && ~isempty(PP.core3_id);   % the pools hold the three-state scores (build_policy_pools.m; D121 item 16, P-B)
 if c3_on, core3_check(PP, 'evaluate_policies'); end     % the model file is still the one C1p scored the pools with
 if c3_on                                             % last, so every other row keeps its place
@@ -322,6 +331,15 @@ if isfield(PP, 's1_gate')                                         % the rule ste
     MNOTE{end+1} = sprintf(['The rule settings were chosen after the lost-branch gate step (D113, gate %s): rule + escalation and the ' ...
         'shared settings every policy runs carry what that step kept; rule_core and rule_core3 run with those shared settings and ' ...
         'never with the gate.'], ternary(PP.s1_gate, 'on', 'off'));
+end
+if s1gc_set                                                        % the core rule's lost-branch gate step ran at C2
+    MNOTE{end+1} = sprintf(['rule_core carries the core rule''s lost-branch gate as C2 chose it (%s): every row read from rule_core, ' ...
+        'the lecturer rows included, is that variant%s.'], ternary(s1gc_on, 'on', 'off'), ternary(s1gc_on, ...
+        '; rule_core without the gate is a descriptive row', ''));
+end
+if isfield(PP, 'lb_accept') && isstruct(PP.lb_accept) && isfield(PP.lb_accept, 'tau_hi')
+    MNOTE{end+1} = sprintf(['The monitor carries the calibrated lost-branch acceptance, tau_hi %.4g (chosen at C1d): every line ' ...
+        'below, the lecturer lines included, is read under it.'], PP.lb_accept.tau_hi);
 end
 if c3_on                                                          % P-B (D121 item 16)
     MNOTE{end+1} = sprintf(['rule_core3 (profile 3, D121 item 16, P-B): the core rule whose class comes from this profile''s own B3c ' ...

@@ -10,13 +10,15 @@ function [kind, ag, opt] = policy_setup(name, Q, sel, fixed_best, fixed_mmse, ta
 %               three-state CNN, opt.core3, policy_monitor.m), oracle
 %               Any of them with the suffix _norelm or _nos1g is the same policy with the release on
 %               evidence (release_m) or the rule's lost-branch gate (s1_gate) switched off, with _relm
-%               or _s1g switched on: the descriptive row beside the deployed setting.
+%               or _s1g switched on, with _nos1gc or _s1gc the core rule's gate (s1_gate_core): the
+%               descriptive row beside the deployed setting.
 %   Q           data/trained_dqn.mat: agent, agents, rule_sel
 %   sel         index of the selected DQN in Q.agents
 %   fixed_best  configuration of the best fixed policy; fixed_mmse that of always-on MMSE
 %   tab         class -> configuration table (policy_table.m)
 %   na          index of no_action
-SFX = {'_norelm', 'release_m', false; '_nos1g', 's1_gate', false; '_relm', 'release_m', true; '_s1g', 's1_gate', true};
+SFX = {'_nos1gc', 's1_gate_core', false; '_s1gc', 's1_gate_core', true; ...
+    '_norelm', 'release_m', false; '_nos1g', 's1_gate', false; '_relm', 'release_m', true; '_s1g', 's1_gate', true};
 sfx = 0;
 for t = 1:size(SFX, 1)
     if endsWith(name, SFX{t, 1}), sfx = t; name = erase(name, SFX{t, 1}); break; end

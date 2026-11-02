@@ -11,12 +11,16 @@ function O = wf_options(cfg, f)
 %   core3_pools    C1p scores the three-state CNN (data/core_cnn_model.mat, B3c) into the pools and C2e flies rule_core3
 %                  beside rule_core (core3_model.m, pool_cell.m, evaluate_policies.m; D121 item 16, P-B)
 %   r9_print       the per-Eb/N0 rows with their intervals and tags (ebno_rows.m)
-%   O.dconf, O.s1g, O.relm, O.r9, O.dconf_own, O.k6split, O.core3: logical. Without the file, or a field, a step does not run and
-%   the stage's outputs are those of before. O.force: the smoke's forced cells (wf_force.m).
+%   clt_select     C1d chooses the calibrated lost-branch acceptance per monitor (choose_drop_threshold.m, clt_step.m)
+%   s1gc_select    C2 chooses the core rule's lost-branch gate right after the rule's (train_dqn.m)
+%   O.dconf, O.s1g, O.relm, O.r9, O.dconf_own, O.k6split, O.core3, O.clt, O.s1gc: logical. Without the file, or a field, a
+%   step does not run and the stage's outputs are those of before. O.force: the smoke's forced cells (wf_force.m).
 if nargin < 1, cfg = []; end
 if nargin < 2 || isempty(f), f = 'profile.json'; end
-nm = {'dconf_select', 'dconf'; 's1g_select', 's1g'; 'relm_select', 'relm'; 'r9_print', 'r9'; 'dconf_own', 'dconf_own'; 'k6_split', 'k6split'; 'core3_pools', 'core3'};
-O = struct('dconf', false, 's1g', false, 'relm', false, 'r9', false, 'dconf_own', false, 'k6split', false, 'core3', false);
+nm = {'dconf_select', 'dconf'; 's1g_select', 's1g'; 'relm_select', 'relm'; 'r9_print', 'r9'; 'dconf_own', 'dconf_own'; 'k6_split', 'k6split'; 'core3_pools', 'core3'; ...
+    'clt_select', 'clt'; 's1gc_select', 's1gc'};
+O = struct('dconf', false, 's1g', false, 'relm', false, 'r9', false, 'dconf_own', false, 'k6split', false, 'core3', false, ...
+    'clt', false, 's1gc', false);
 O.force = wf_force('read', cfg, f);
 P = struct();
 if isfile(f)
