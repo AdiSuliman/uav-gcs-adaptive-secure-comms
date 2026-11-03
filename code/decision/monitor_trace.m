@@ -48,7 +48,7 @@ for b = 1:numel(specs)
         Tr.lk = [Tr.lk; lkc(v, :)];
     end
     if rlb
-        if ~isfield(Tr, 'lb'), Tr.lb = []; Tr.plb = []; Tr.dg = []; end
+        if ~isfield(Tr, 'lb'), Tr.lb = false(0, T); Tr.plb = zeros(0, T); Tr.dg = false(0, T); end   % logical: lb indexes plb (clt_step.m)
         Tr.lb = [Tr.lb; lb(v, :)]; Tr.plb = [Tr.plb; plb(v, :)]; Tr.dg = [Tr.dg; dg(v, :)];
     end
     Tr.onset = [Tr.onset, sp.onset(v)]; Tr.scn = [Tr.scn, sp.scn(v)]; Tr.s = [Tr.s, sp.s(v)]; Tr.r = [Tr.r, E.r(v)];
