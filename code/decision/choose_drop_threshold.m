@@ -65,7 +65,8 @@
 % With "dconf_own": true as well (D121 item 6) a candidate's threshold is the most sensitive value of the extended grid whose
 % clean fit-half episodes with the drop alarm as first confirming path are at most the monitor without it has there.
 % In the smoke only, dconf_force (profile.json or CFG.dconf_force, wf_force.m) deploys one named candidate for every
-% monitor instead, marked DCONF(m).forced beside the rule's pick DCONF(m).rule_pick; refused otherwise.
+% monitor instead, marked DCONF(m).forced beside the rule's pick DCONF(m).rule_pick; refused otherwise. It needs the
+% CUSUM form, so a median window picked by the form rule gives way to the CUSUM there (form_rule_pick saved).
 %
 % The calibrated lost-branch acceptance, only with "clt_select": true in profile.json (wf_options.m; CFG.clt_select
 % overrides it), after the whole monitor's reading and before the drop alarm's own confirmation (clt_step.m): per monitor
@@ -112,7 +113,7 @@ if ~isempty(DGf) && ~(DGon && isfile('data/clean_val_pools.mat'))
     error('choose_drop_threshold:force', 'deg_force %s needs deg_select and clean validation flights', DGf);
 end
 if ~isempty(DCf) && ~(DCx && isfile('data/clean_val_pools.mat'))
-    error('choose_drop_threshold:force', 'dconf_force [%d %d] needs dconf_select and clean validation flights', DCf);
+    error('choose_drop_threshold:force', 'dconf_force %s needs dconf_select and clean validation flights', mat2str(DCf));
 end
 if CLf && ~(CLx && isfile('data/clean_val_pools.mat'))
     error('choose_drop_threshold:force', 'clt_force needs clt_select and clean validation flights');
@@ -242,6 +243,12 @@ for f = 1:2
     if ~isempty(k), VAL(f).pick = k; end
 end
 [drop_alarm, thr_val] = drop_alarm_form(VAL);
+form_rule_pick = '';                                        % the smoke's forced confirmation runs on the CUSUM form only (wf_force.m)
+if ~isempty(DCf) && DCx && strcmp(drop_alarm, 'class_drop')
+    form_rule_pick = drop_alarm; drop_alarm = 'class_cusum';
+    k = VAL(2).pick; if isnan(k), k = numel(VAL(2).grid); end
+    thr_val = VAL(2).grid(k);
+end
 drop_db_train = drop_db; drop_from = 'train pools'; cusum_db = NaN;
 if strcmp(drop_alarm, 'class_cusum')
     cusum_db = thr_val;
@@ -263,6 +270,9 @@ end
 rv{end+1} = sprintf(['Form: %s (each at its most sensitive admissible threshold: the higher detection, within one ' ...
     'point the shorter delay; the median window on a tie or without an admissible CUSUM threshold)%s'], drop_alarm, ...
     ternary(isempty(Ecl), ' -- no clean validation flights: not measured', ''));
+if ~isempty(form_rule_pick)
+    rv{end+1} = sprintf('SMOKE: the CUSUM form FORCED for dconf_force %s; the rule picked %s', mat2str(DCf), form_rule_pick);
+end
 if strcmp(drop_alarm, 'class_cusum')
     rv{end+1} = sprintf('Deployed: the window-limited CUSUM at %.1f %s (validation)', cusum_db, drop_unit(drop_alarm));
 else
@@ -415,7 +425,7 @@ else
         ia = find(arrayfun(@(d) ~isempty(d.cand), DCONF), 1);
         if ~isempty(ia), THC = DCONF(ia).grid; end            % the grid C2 builds an adopted monitor's thresholds on
     elseif DCx
-        if ~isempty(DCf), error('choose_drop_threshold:force', 'dconf_force [%d %d] needs the CUSUM form of the drop alarm, the median window is deployed', DCf); end
+        if ~isempty(DCf), error('choose_drop_threshold:force', 'dconf_force %s needs the CUSUM form of the drop alarm, the median window is deployed', mat2str(DCf)); end
         rw{end+1} = 'Drop alarm''s own confirmation: not run, the median window is the deployed form (the grid it extends is the CUSUM''s).';
     end
 end
@@ -485,6 +495,7 @@ if ~isempty(UG), SV = [SV, {'UG'}]; end                    % D111 guard (e)
 if ~isempty(DCONF), SV = [SV, {'DCONF'}]; end         % saved with MONP.confirm_drop
 if ~isempty(CLT), SV = [SV, {'CLT'}]; end             % saved with MONP.lb_accept
 if ~isempty(K6S), SV = [SV, {'K6S'}]; end
+if ~isempty(form_rule_pick), SV = [SV, {'form_rule_pick'}]; end   % the smoke's forced form
 save('data/drop_threshold.mat', SV{:});
 fprintf('\nSaved data/drop_threshold.mat, results/drop_threshold.txt\n');
 

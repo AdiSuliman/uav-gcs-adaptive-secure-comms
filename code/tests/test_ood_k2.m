@@ -665,6 +665,23 @@ verifyEmpty(tc, strfind(src(i1:end), 'St.probs'));                % no class rea
 verifyNotEmpty(tc, strfind(src, 'assert(isequal(sha0, sha1), ''ood_k2_run:frozen'''));
 end
 
+function test_smoke_ood_deploys_registered_s0(tc)
+% The smoke's OOD stage deploys the s0 that ood_k2_run.m asserts (last_or_if over 1), before C1p builds the
+% pools; outside the smoke the stage deploys its validation pick.
+src = strrep(fileread(which('eval_ood_detection')), char(13), '');
+i0 = strfind(src, 'if ~(exist(''SMOKE'', ''var'') && SMOKE)'); i1 = strfind(src, 'T_prod = ood_thresholds(RETAIN);');
+verifyTrue(tc, isscalar(i0) && isscalar(i1) && i0 < i1);
+b = src(i0:i1);
+ie = strfind(b, sprintf('\nelse'));
+verifyTrue(tc, isscalar(ie));
+verifyNotEmpty(tc, strfind(b(1:ie), 'ood.score = sel; ood.win = sel_win;'));
+verifyNotEmpty(tc, strfind(b(ie:end), 'ood.score = ''last_or_if''; ood.win = 1;'));
+verifyNumElements(tc, strfind(b, 'save(''data/trained_detector.mat'', ''ood'', ''-append'');'), 2);
+verifyNumElements(tc, strfind(b, 'delete(''data/ood_thresholds.mat'')'), 2);
+r = fileread(which('ood_k2_run'));
+verifyNotEmpty(tc, strfind(r, 'strcmp(D0.ood.score, ''last_or_if'') && W0 == 1'));
+end
+
 function test_ood_read_bound(tc)
 % The read phase refuses before its set-4 marker unless the select phase's outputs are the ones
 % its committed record names (SHA-256: a changed fold file, or a smoke's select file in their

@@ -8595,6 +8595,34 @@ verifyNotEmpty(tc, strfind(src, '[specs, n] = clean_wide_specs(PP, CT, ebno_thr,
 verifyEqual(tc, decision_config().drop_steps, [-2 0 2]);
 end
 
+function test_monitor_trace_record_lb_logical(tc)
+% With PP.record_lb the trace's lb and dg are logical over two specs, so clt_step.m's T.plb(T.lb) indexes;
+% the sweeper's confirmation line of train_dqn.m reads PP.confirm_sweep only when it exists.
+[PP, K] = toy_world(true); PP.record_lb = true;
+spec = struct('scn', [1 2 2], 's', [1 1 1], 'onset', [3 3 6], 'follow', false(1, 3), 'fdelay', [0 0 0], 'unk', false(1, 3), ...
+    'T', 12, 'r', [1 1 1]);
+T = monitor_trace(PP, K, {spec, spec}, 1, 7);
+verifyTrue(tc, islogical(T.lb) && islogical(T.dg));
+verifySize(tc, T.lb, [6 12]); verifySize(tc, T.plb, [6 12]);
+verifyEqual(tc, T.plb(T.lb), T.plb(logical(T.lb)));
+src = fileread(which('train_dqn'));
+verifyEmpty(tc, strfind(src, 'ternary(isfield(PP, ''confirm_sweep'')'));
+verifyNotEmpty(tc, strfind(src, 'cs_txt = ''not adopted'';'));
+end
+
+function test_dconf_force_deploys_cusum_form(tc)
+% The smoke's dconf_force runs on the CUSUM form: a median window from the form rule gives way, its pick
+% saved as form_rule_pick; the force's error messages format the [k n] pair as one string.
+src = fileread(which('choose_drop_threshold'));
+verifyNotEmpty(tc, strfind(src, 'if ~isempty(DCf) && DCx && strcmp(drop_alarm, ''class_drop'')'));
+verifyNotEmpty(tc, strfind(src, 'form_rule_pick = drop_alarm; drop_alarm = ''class_cusum'';'));
+verifyNotEmpty(tc, strfind(src, 'k = VAL(2).pick; if isnan(k), k = numel(VAL(2).grid); end'));
+verifyNotEmpty(tc, strfind(src, 'SV = [SV, {''form_rule_pick''}]'));
+verifyLessThan(tc, strfind(src, 'form_rule_pick = drop_alarm;'), strfind(src, 'fm = find(strcmp(FM, drop_alarm)); GF = GR{fm};'));
+verifyEmpty(tc, regexp(src, 'error\([^\n]*\[%d %d\][^\n]*DCf\)', 'once'));
+verifyEqual(tc, numel(strfind(src, 'mat2str(DCf)')), 3);
+end
+
 function test_kpi1_threshold_check(tc)
 % C1d and the edge map read the KPI 1 threshold from the base metrics file; it must equal the
 % one in the file KPI 1 is read from (kpi1_file.m) when that exists, else an error

@@ -152,6 +152,13 @@ if ~(exist('SMOKE', 'var') && SMOKE)
     if ~isfield(ood, 'forest_pack'), ood.forest_pack = D0.ood.forest_pack; end
     save('data/trained_detector.mat', 'ood', '-append');
     if isfile('data/ood_thresholds.mat'), delete('data/ood_thresholds.mat'); end
+else                                                     % the smoke deploys profile 3's registered s0 (ood_k2_run.m)
+    D = load('data/trained_detector.mat', 'ood'); ood = D.ood; ood.score = 'last_or_if'; ood.win = 1;
+    if ~isfield(ood, 'forest_pack'), ood.forest_pack = D0.ood.forest_pack; end
+    save('data/trained_detector.mat', 'ood', '-append');
+    if isfile('data/ood_thresholds.mat'), delete('data/ood_thresholds.mat'); end
+    fprintf('SMOKE: s0 deployed as last_or_if over 1 cycle (profile 3''s registered s0); the smoke''s own pick %s over %d is logged only\n', ...
+        sel, sel_win);
 end
 T_prod = ood_thresholds(RETAIN);
 
