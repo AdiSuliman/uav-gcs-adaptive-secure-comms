@@ -8610,6 +8610,19 @@ verifyEmpty(tc, strfind(src, 'ternary(isfield(PP, ''confirm_sweep'')'));
 verifyNotEmpty(tc, strfind(src, 'cs_txt = ''not adopted'';'));
 end
 
+function test_dconf_force_deploys_cusum_form(tc)
+% The smoke's dconf_force runs on the CUSUM form: a median window from the form rule gives way, its pick
+% saved as form_rule_pick; the force's error messages format the [k n] pair as one string.
+src = fileread(which('choose_drop_threshold'));
+verifyNotEmpty(tc, strfind(src, 'if ~isempty(DCf) && DCx && strcmp(drop_alarm, ''class_drop'')'));
+verifyNotEmpty(tc, strfind(src, 'form_rule_pick = drop_alarm; drop_alarm = ''class_cusum'';'));
+verifyNotEmpty(tc, strfind(src, 'k = VAL(2).pick; if isnan(k), k = numel(VAL(2).grid); end'));
+verifyNotEmpty(tc, strfind(src, 'SV = [SV, {''form_rule_pick''}]'));
+verifyLessThan(tc, strfind(src, 'form_rule_pick = drop_alarm;'), strfind(src, 'fm = find(strcmp(FM, drop_alarm)); GF = GR{fm};'));
+verifyEmpty(tc, regexp(src, 'error\([^\n]*\[%d %d\][^\n]*DCf\)', 'once'));
+verifyEqual(tc, numel(strfind(src, 'mat2str(DCf)')), 3);
+end
+
 function test_kpi1_threshold_check(tc)
 % C1d and the edge map read the KPI 1 threshold from the base metrics file; it must equal the
 % one in the file KPI 1 is read from (kpi1_file.m) when that exists, else an error
