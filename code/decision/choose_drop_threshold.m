@@ -20,7 +20,7 @@
 % monitor's reference, alone (drop_alarm_seq.m), read through the monitor's m-of-n
 % confirmation, since only a confirmed alarm lets a policy change the configuration
 % (policy_mask.m, policy_decide.m): confirmed by any confirmation of C2's monitors
-% (C.confirm and CFG.monitors, confirm_alarm.m; of C2's grid the 2/2 one, since 3/3, 4/5 and
+% (C.confirm and C.monitors, confirm_alarm.m; of C2's grid the 2/2 one, since 3/3, 4/5 and
 % 5/5 confirm only after two consecutive alarms), so a threshold admissible here is admissible
 % under every monitor of the grid. False alarms: the independent clean validation geometries
 % (data/clean_val_pools.mat), one 30-cycle episode per geometry and Eb/N0 from the KPI 1
@@ -33,18 +33,91 @@
 % detected when the alarm is confirmed at or after the onset. Each form at its most
 % sensitive admissible threshold; the form that detects more, within one point the one with
 % the shorter mean delay; the median window on a tie, when the CUSUM has no admissible
-% threshold, or without clean validation flights. The chosen form is deployed at the
-% threshold it was compared at (drop_alarm_form.m; C2 tries it and more sensitive ones), the
-% median window at the train-pool threshold when it has no admissible one. The CUSUM's
+% threshold, or without clean validation flights. The median window's reference holds the
+% cycles of a drop above half the smallest path-loss level until it ends, as the CUSUM's
+% does (drop_ref.m), so the two forms differ in their statistic only. The CUSUM's
 % thresholds are counted in cycles of a step of the smallest path-loss level at the
 % statistic's full drift (D^2 / 2 per cycle, drop_cusum.m).
+% The whole monitor, per confirmation of C2's monitors (C.monitors): a policy changes the
+% configuration only on a confirmed alarm (policy_mask.m), so up to its first change every
+% policy flies the no_action episode, and the share of clean episodes whose no_action monitor
+% confirms an alarm bounds every policy's false-alarm share on the same episodes exactly. The
+% monitor runs once at no_action (monitor_trace.m) over the clean validation episodes
+% train_dqn.m reads its false alarms on (clean_wide_specs.m) and over every single threat of
+% the validation split; per monitor and threshold of the chosen form the alarm is rebuilt:
+% the drop alarm, its reference free of every alarm cycle, or any other path (a hostile
+% class but path_loss, degradation), confirmed by the monitor's m of n (monitor_confirm.m).
+% Each monitor takes the most sensitive threshold whose bound is admissible (KPI 6's 5%);
+% when the other paths alone break the bound no threshold can meet it, which is reported,
+% and the monitor takes the least sensitive one. C2 tries each monitor's threshold and the
+% steps C.drop_steps around it (train_dqn.m). The sweeping jammer's own confirmation
+% (C.confirm_sweep, policy_monitor.m) is adopted when, with every monitor at its own pick, no
+% monitor loses an admissible threshold or needs a less sensitive one and no single threat's
+% never-confirmed share or 90th-percentile delay grows; both readings are printed.
 %
-% Output: data/drop_threshold.mat (drop_db, the median window's deployed threshold, and
+% The drop alarm's own confirmation, only with "dconf_select": true in profile.json (wf_options.m; CFG.dconf_select
+% overrides it), after the degradation test and the whole monitor's reading, with the CUSUM form (dconf_step.m): per
+% monitor the candidates of C.confirm_drop_cand in order, each at a threshold re-chosen on the fit half of the clean
+% validation geometries from the CUSUM grid extended upward (C.confirm_drop_ext), judged against the monitor without it
+% on the check half and the validation split's single threats. An adopted candidate is saved in MONP.confirm_drop with
+% the monitor's new threshold (pick) and its grid, and THC becomes the extended grid; a monitor without one keeps its
+% threshold and the grid as they were. Without the switch nothing of this runs and the outputs are those of before.
+% With "dconf_own": true as well (D121 item 6) a candidate's threshold is the most sensitive value of the extended grid whose
+% clean fit-half episodes with the drop alarm as first confirming path are at most the monitor without it has there.
+% In the smoke only, dconf_force (profile.json or CFG.dconf_force, wf_force.m) deploys one named candidate for every
+% monitor instead, marked DCONF(m).forced beside the rule's pick DCONF(m).rule_pick; refused otherwise. It needs the
+% CUSUM form, so a median window picked by the form rule gives way to the CUSUM there (form_rule_pick saved).
+%
+% The calibrated lost-branch acceptance, only with "clt_select": true in profile.json (wf_options.m; CFG.clt_select
+% overrides it), after the whole monitor's reading and before the drop alarm's own confirmation (clt_step.m): per monitor
+% tau_hi of PP.lb_accept scanned on the check half of the clean validation geometries from a grid fixed on the fit half,
+% judged by its delay guards on the validation split's single threats. An adopted monitor's drop threshold is then
+% re-chosen by the rule above (the whole monitor's bound, else the drop path's own budget, else the least sensitive)
+% under it, and the drop alarm's own confirmation is read against the monitor it leaves. Saved in MONP.lb_accept ([] none)
+% and CLT. In the smoke only, clt_force deploys the scanned tau_hi for every monitor, marked CLT(m).forced; refused
+% otherwise. Without the switch nothing of this runs and the outputs are those of before.
+%
+% The degradation test, only with "deg_select": true in profile.json (deg_options.m; CFG.deg_select
+% overrides it), before the whole monitor's reading (docs/deg_fix_protocol.md): the clean
+% validation geometries split by hash into a fit half and a check half (clean_halves.m); the
+% clean quantile tables from the fit half (clean_ber_q.m); per candidate in the order F1 'win',
+% F2 'win_q' and F3 'win_q_gate' per alpha (C.deg_alpha), the reading of section 5 on the check
+% half's clean episodes and the validation split's single threats, each monitor at its own most
+% sensitive admissible threshold, beside 'ratio' on the same episodes; adopted by deg_adopt.m.
+% The whole monitor's reading below then runs with the adopted test. Without the switch nothing
+% of this runs and the outputs are those of before. In the smoke only (SMOKE), deg_force
+% (profile.json or CFG.deg_force, deg_force.m) deploys one named candidate after the adoption,
+% marked DEG.forced beside the rule's pick DEG.rule_pick (docs/p1r_protocol.md); refused otherwise.
+%
+% D111 guard (e), only with FM.unk in the pools' fusion, after the form and before the
+% degradation test: unk_guard.m (U against s0 on the clean validation episodes; on a failure
+% FM.unk is removed and the pools re-keyed before anything below reads them), UG saved.
+%
+% Output: data/drop_threshold.mat (drop_db, the median window's threshold alone, and
 % drop_db_train, drop_from; drop_alarm, cusum_db, the confirmations CF and the validation
-% readings VAL), results/drop_threshold.txt
+% readings VAL; MONP, each monitor's threshold and readings; confirm_sweep, the sweeper's
+% confirmation adopted, [] when not; with deg_select deg_mode, ber_q, the adopted test and its
+% quantile table ([] without one), and DEG, its readings), results/drop_threshold.txt
 
 clc;
 fprintf('=== Eb/N0-drop threshold of the drop alarm ===\n\n');
+DGon = deg_options().on; if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'deg_select'), DGon = CFG.deg_select; end
+DGf = deg_options().force; if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'deg_force'), DGf = deg_force('check', CFG.deg_force, 'CFG'); end
+cfg_ = []; if exist('CFG', 'var'), cfg_ = CFG; end
+WFo = wf_options(cfg_);
+DCx = WFo.dconf; DCf = WFo.force.dconf;                     % the drop alarm's own confirmation per monitor (dconf_step.m), a forced one (smoke)
+CLx = WFo.clt; CLf = WFo.force.clt;                         % the calibrated lost-branch acceptance per monitor (clt_step.m), a forced one (smoke)
+deg_force('smoke', DGf, exist('SMOKE', 'var') && SMOKE, 'choose_drop_threshold');   % before any output is written
+wf_force('smoke', WFo.force, exist('SMOKE', 'var') && SMOKE, 'choose_drop_threshold');
+if ~isempty(DGf) && ~(DGon && isfile('data/clean_val_pools.mat'))
+    error('choose_drop_threshold:force', 'deg_force %s needs deg_select and clean validation flights', DGf);
+end
+if ~isempty(DCf) && ~(DCx && isfile('data/clean_val_pools.mat'))
+    error('choose_drop_threshold:force', 'dconf_force %s needs dconf_select and clean validation flights', mat2str(DCf));
+end
+if CLf && ~(CLx && isfile('data/clean_val_pools.mat'))
+    error('choose_drop_threshold:force', 'clt_force needs clt_select and clean validation flights');
+end
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
 na = find(strcmp(PP.actions, 'no_action'));
 iPL = find(strcmp(PP.scen, 'path_loss'));                  % the three severities
@@ -134,10 +207,10 @@ VA = 2; T = 30; REPS = 4; FA_BOUND = 0.05;
 D1 = decision_config().sev.path_loss.levels(1);
 THC = D1^2 / 2 * (1:0.5:10);                                % CUSUM thresholds: cycles of a D1 step at full drift
 CF = decision_config().confirm;                             % every confirmation of C2's monitors
-if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'monitors')
-    for mn = CFG.monitors(:)'
-        tk = strsplit(mn{1}); CF(end+1, :) = sscanf(tk{2}, '%d/%d')'; %#ok<SAGROW>
-    end
+MN = decision_config().monitors;
+if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'monitors'), MN = CFG.monitors; end
+for mn = MN(:)'
+    tk = strsplit(mn{1}); CF(end+1, :) = sscanf(tk{2}, '%d/%d')'; %#ok<SAGROW>
 end
 CF = unique(CF, 'rows');
 EBNO_THR = PP.ebno(1);                                      % false alarms from the KPI 1 threshold up (KPI 6)
@@ -148,6 +221,7 @@ if isfile('results/eval_detector_metrics.mat')
     end
     clear Md
 end
+kpi1_threshold_check(EBNO_THR, 'choose_drop_threshold');   % the threshold of the file KPI 1 is read from
 CV = [];
 if isfile('data/clean_val_pools.mat')
     Cv = load('data/clean_val_pools.mat', 'CT'); CV = Cv.CT; clear Cv
@@ -169,6 +243,12 @@ for f = 1:2
     if ~isempty(k), VAL(f).pick = k; end
 end
 [drop_alarm, thr_val] = drop_alarm_form(VAL);
+form_rule_pick = '';                                        % the smoke's forced confirmation runs on the CUSUM form only (wf_force.m)
+if ~isempty(DCf) && DCx && strcmp(drop_alarm, 'class_drop')
+    form_rule_pick = drop_alarm; drop_alarm = 'class_cusum';
+    k = VAL(2).pick; if isnan(k), k = numel(VAL(2).grid); end
+    thr_val = VAL(2).grid(k);
+end
 drop_db_train = drop_db; drop_from = 'train pools'; cusum_db = NaN;
 if strcmp(drop_alarm, 'class_cusum')
     cusum_db = thr_val;
@@ -190,6 +270,9 @@ end
 rv{end+1} = sprintf(['Form: %s (each at its most sensitive admissible threshold: the higher detection, within one ' ...
     'point the shorter delay; the median window on a tie or without an admissible CUSUM threshold)%s'], drop_alarm, ...
     ternary(isempty(Ecl), ' -- no clean validation flights: not measured', ''));
+if ~isempty(form_rule_pick)
+    rv{end+1} = sprintf('SMOKE: the CUSUM form FORCED for dconf_force %s; the rule picked %s', mat2str(DCf), form_rule_pick);
+end
 if strcmp(drop_alarm, 'class_cusum')
     rv{end+1} = sprintf('Deployed: the window-limited CUSUM at %.1f %s (validation)', cusum_db, drop_unit(drop_alarm));
 else
@@ -198,8 +281,222 @@ else
 end
 fid = fopen('results/drop_threshold.txt', 'a'); fprintf(fid, '%s\n', rv{:}); fclose(fid);
 fprintf('%s\n', rv{:});
-save('data/drop_threshold.mat', 'drop_db', 'drop_db_train', 'drop_from', 'separable', 'THR', 'kept', 'leak', 'leak_all', ...
-    'p95_mis', 'p99_cl', 'p05_pl', 'floor_db', 'drop_alarm', 'cusum_db', 'THC', 'VAL', 'CF', 'EBNO_THR');
+
+%% 4b. D111 guard (e), with FM.unk only: U against s0 on the clean validation episodes, first
+UG = [];
+if unk_stat('on', PP)
+    assert(~isempty(CV), 'choose_drop_threshold:unk_guard', 'FM.unk is deployed and guard (e) needs clean validation flights');
+    thr_ref = drop_db; if strcmp(drop_alarm, 'class_cusum'), thr_ref = cusum_db; end
+    [UG, PP, CV, ru] = unk_guard(PP, CV, drop_alarm, thr_ref, EBNO_THR, T, VA);
+    fid = fopen('results/drop_threshold.txt', 'a'); fprintf(fid, '%s\n', ru{:}); fclose(fid);
+    fprintf('%s\n', ru{:});
+end
+
+%% 5. The whole monitor per confirmation: each monitor's threshold, the sweeper's confirmation
+MON = MN;
+fm = find(strcmp(FM, drop_alarm)); GF = GR{fm}; CS = decision_config().confirm_sweep;
+DEG = [];                                                  % the degradation test chosen here (deg_options.m)
+DCONF = [];                                               % the drop alarm's own confirmation per monitor (dconf_step.m)
+CLT = []; lbt = {};                                        % the lost-branch acceptance per monitor (clt_step.m), its tau_hi
+if DGon && isempty(CV)
+    DEG = struct('mode', 'ratio', 'ber_q', [], 'note', 'no clean validation flights: not chosen');
+    rd = {'', 'Degradation test: no clean validation flights, ''ratio'' kept (not chosen).'};
+elseif DGon
+    [DEG, rd] = deg_select(PP, CV, drop_alarm, GF, MON, CS, EBNO_THR, T, VA, FA_BOUND, DGf);
+    PP.deg_mode = DEG.mode; PP.ber_q = DEG.ber_q;           % the monitor of the reading below and of C2
+end
+if DGon
+    fid = fopen('results/drop_threshold.txt', 'a'); fprintf(fid, '%s\n', rd{:}); fclose(fid);
+    fprintf('%s\n', rd{:});
+end
+MONP = struct('monitor', MON, 'cf', [], 'pick', NaN, 'j', NaN, 'admissible', false, 'k', NaN, 'n', 0, ...
+    'k_other', NaN, 'lat', []);
+confirm_sweep = [];
+rw = {'', sprintf(['The whole monitor at no_action per confirmation (%s, %s): false alarms on the clean validation ' ...
+    'episodes train_dqn.m reads (an exact bound for every policy on them), the drop alarm of the form %s or any other ' ...
+    'path; delays on the single threats of the validation split, cycles from the onset to the first confirmed alarm ' ...
+    '(the decision reading the threat''s first frame is 0)'], strjoin(MON, ', '), drop_alarm, drop_alarm)};
+if isempty(CV)
+    rw{end+1} = 'No clean validation flights: every monitor at the form''s threshold above, the sweeper''s confirmation not adopted.';
+    for m = 1:numel(MON)
+        tk = strsplit(MON{m}); MONP(m).cf = sscanf(tk{2}, '%d/%d')';
+        MONP(m).pick = thr_val; if ~isfinite(thr_val), MONP(m).pick = drop_db; end
+    end
+else
+    PPm = PP; PPm.alarm_mode = drop_alarm;
+    [PPw, Kw] = clean_world(PPm, CV);
+    if WFo.k6split, PPw.record_los_k = true; end            % D121 item 12: the trace also carries the receiver's K estimate
+    if CLx, PPw.record_lb = true; end                       % the lost-branch acceptance's inputs
+    [spc, ncl] = clean_wide_specs(PPm, CV, EBNO_THR, T);
+    Tc = monitor_trace(PPw, Kw, spc, VA, 41000);
+    Tc = trim_trace(Tc, ncl);
+    PPv = PPm; PPv.pools(:, :, :, setdiff(1:numel(PP.runs), VA)) = {[]};   % the validation split only
+    Kv = link_env('tables', PPv);
+    sgl = find(ismember(PP.scen, PP.singles) & ~strcmp(PP.scen, 'none'));
+    spv = policy_episodes(sgl, nS, Kv.geo(sgl, VA), 1, false, false, 64, T, RandStream('mt19937ar', 'Seed', 4400));
+    PPt = PPv; if CLx, PPt.record_lb = true; end
+    Tv = monitor_trace(PPt, Kv, spv, VA, 4500);
+    onv = Kv.on(sub2ind(size(Kv.on), Tv.scn, Tv.s, VA + 0 * Tv.s, Tv.r));
+    thv = PP.scen(Tv.scn); thn = unique(thv(onv), 'stable');
+    R = cell(1, 2);                                          % the sweeper's confirmation off, on
+    for sw = 1:2
+        cs = []; if sw == 2, cs = CS; end
+        for m = 1:numel(MON)
+            tk = strsplit(MON{m}); cf = sscanf(tk{2}, '%d/%d')';
+            k = arrayfun(@(t) sum(any(monitor_confirm(Tc, drop_alarm, t, cf, cs), 2)), [GF, Inf]);
+            up = arrayfun(@(x) cp_upper(x, ncl), k);
+            j = find(up(1:end-1) <= FA_BOUND, 1);
+            adm = ~isempty(j); if ~adm, j = numel(GF); end
+            cv = monitor_confirm(Tv, drop_alarm, GF(j), cf, cs);
+            R{sw} = [R{sw}, struct('cf', cf, 'j', j, 'pick', GF(j), 'admissible', adm, 'k', k(j), 'k_other', k(end), ...
+                'lat', delays(cv, Tv.onset, thv, onv, thn))];
+        end
+    end
+    ok = arrayfun(@(m) (~R{1}(m).admissible || R{2}(m).admissible) && R{2}(m).j <= R{1}(m).j && ...
+        all(R{2}(m).lat.never <= R{1}(m).lat.never) && all(fill_inf(R{2}(m).lat.p90) <= fill_inf(R{1}(m).lat.p90)), 1:numel(MON));
+    sw = 1 + all(ok); if sw == 2, confirm_sweep = CS; end
+    for m = 1:numel(MON)
+        MONP(m).cf = R{sw}(m).cf; MONP(m).j = R{sw}(m).j; MONP(m).pick = R{sw}(m).pick; MONP(m).admissible = R{sw}(m).admissible;
+        MONP(m).k = R{sw}(m).k; MONP(m).n = ncl; MONP(m).k_other = R{sw}(m).k_other; MONP(m).lat = R{sw}(m).lat;
+        MONP(m).path_budget = struct('used', false, 'admissible', false, 'pick', NaN, 'j', NaN, 'k', NaN, 'bound', NaN);
+        if ~R{sw}(m).admissible                            % D121 item 4: the drop path's own budget, before the fallback
+            csb = []; if sw == 2, csb = CS; end
+            PB = drop_path_pick(Tc, drop_alarm, GF, R{sw}(m).cf, csb, ncl, 0.02);
+            MONP(m).path_budget = PB;
+            if PB.admissible
+                MONP(m).pick = PB.pick; MONP(m).j = PB.j; MONP(m).k = PB.k; MONP(m).path_budget.used = true;
+            end
+        end
+    end
+    for s = 1:2
+        rw{end+1} = sprintf('  sweeper''s own confirmation %s:', ternary(s == 1, 'off', sprintf('on, %d of %d cycles', CS))); %#ok<SAGROW>
+        for m = 1:numel(MON)
+            x = R{s}(m);
+            rw{end+1} = sprintf(['    %-15s threshold %6.1f %-4s %s, false alarms %d/%d (bound %.2f%%); other paths alone ' ...
+                '%d/%d (bound %.2f%%)'], MON{m}, x.pick, drop_unit(drop_alarm), ternary(x.admissible, 'admissible', ...
+                'NONE ADMISSIBLE: the least sensitive'), x.k, ncl, 100 * cp_upper(x.k, ncl), x.k_other, ncl, ...
+                100 * cp_upper(x.k_other, ncl)); %#ok<SAGROW>
+            if ~x.admissible && cp_upper(x.k_other, ncl) > FA_BOUND
+                rw{end+1} = sprintf(['      the other paths alone break the %.0f%% bound under %s: the monitor''s no_action ' ...
+                    'bound cannot meet %.0f%%'], 100 * FA_BOUND, MON{m}, 100 * FA_BOUND); %#ok<SAGROW>
+            end
+            if ~x.admissible                                % D121 item 4: the drop path's own false-alarm budget
+                csb = []; if s == 2, csb = CS; end
+                PBs = drop_path_pick(Tc, drop_alarm, GF, x.cf, csb, ncl, 0.02);
+                if PBs.admissible
+                    rw{end+1} = sprintf(['      D121 item 4: the drop path''s own budget admits %.1f %s (%d/%d, bound %.2f%%' ...
+                        ' <= 2.0%%), kept instead of the least sensitive fallback'], PBs.pick, drop_unit(drop_alarm), PBs.k, ncl, ...
+                        100 * PBs.bound); %#ok<SAGROW>
+                else
+                    rw{end+1} = '      D121 item 4: no grid value meets the drop path''s own 2.0% budget either; the least sensitive stands.'; %#ok<SAGROW>
+                end
+            end
+            rw{end+1} = sprintf('      delays median / p90 / never: %s', strjoin(cellfun(@(n, a, b, c) sprintf('%s %g/%g/%.1f%%', ...
+                n, a, b, c), x.lat.threat, num2cell(x.lat.median), num2cell(x.lat.p90), num2cell(100 * x.lat.never), ...
+                'UniformOutput', false), ', ')); %#ok<SAGROW>
+        end
+    end
+    rw{end+1} = sprintf(['Sweeper''s own confirmation: %s (no monitor loses an admissible threshold or needs a less ' ...
+        'sensitive one, no single threat''s never share or p90 delay grows: %s)'], ternary(sw == 2, 'ADOPTED', 'not adopted'), ...
+        strjoin(arrayfun(@(m) sprintf('%s %s', MON{m}, ternary(ok(m), 'yes', 'no')), 1:numel(MON), 'UniformOutput', false), ', '));
+    if CLx                                                  % the lost-branch acceptance, then each adopted monitor's threshold under it
+        [fitg, chkg] = clean_halves(CV.runs);
+        [CLT, rl] = clt_step('choose', drop_alarm, MON, MONP, confirm_sweep, Tc, ismember(Tc.r, find(fitg)), ...
+            ismember(Tc.r, find(chkg)), Tv, onv, thv, thn, Kv, VA, CLf);
+        rw = [rw, rl];
+        lbt = cell(1, numel(MON));
+        for m = 1:numel(MON)
+            MONP(m).lb_accept = CLT(m).accept;
+            if isempty(CLT(m).accept), continue; end
+            lbt{m} = CLT(m).accept.tau_hi;
+            [MONP(m), rl] = clt_rechoose(MONP(m), MON{m}, Tc, Tv, onv, thv, thn, drop_alarm, GF, confirm_sweep, ncl, FA_BOUND, lbt{m});
+            rw = [rw, rl]; %#ok<AGROW>
+        end
+    end
+    if DCx && strcmp(drop_alarm, 'class_cusum')
+        [fitg, chkg] = clean_halves(CV.runs);
+        [DCONF, rd] = dconf_step(drop_alarm, GF, MON, MONP, confirm_sweep, Tc, ismember(Tc.r, find(fitg)), ...
+            ismember(Tc.r, find(chkg)), Tv, onv, thv, thn, PP.sev(Tv.scn) == 1, FA_BOUND, DCf, WFo.dconf_own, lbt);
+        rw = [rw, rd];
+        for m = 1:numel(MON)
+            MONP(m).confirm_drop = DCONF(m).cand; MONP(m).grid = DCONF(m).grid;
+            if ~isempty(DCONF(m).cand), MONP(m).pick = DCONF(m).pick; MONP(m).j = DCONF(m).j; end
+        end
+        ia = find(arrayfun(@(d) ~isempty(d.cand), DCONF), 1);
+        if ~isempty(ia), THC = DCONF(ia).grid; end            % the grid C2 builds an adopted monitor's thresholds on
+    elseif DCx
+        if ~isempty(DCf), error('choose_drop_threshold:force', 'dconf_force %s needs the CUSUM form of the drop alarm, the median window is deployed', mat2str(DCf)); end
+        rw{end+1} = 'Drop alarm''s own confirmation: not run, the median window is the deployed form (the grid it extends is the CUSUM''s).';
+    end
+end
+if DCx && isempty(CV)
+    rw{end+1} = 'Drop alarm''s own confirmation: not run, no clean validation flights.';
+end
+if CLx && isempty(CV)
+    rw{end+1} = 'Lost-branch acceptance: not run, no clean validation flights.';
+end
+fid = fopen('results/drop_threshold.txt', 'a'); fprintf(fid, '%s\n', rw{:}); fclose(fid);
+fprintf('%s\n', rw{:});
+
+%% 5b. D121 item 4: the 3.5% side calibration (condition 2; descriptive, no adoption effect)
+CAL35 = struct('bound', 0.035, 'note', 'descriptive side reading; never adopted (D121 condition 2)');
+if ~isempty(CV)
+    cs35 = []; if sw == 2, cs35 = CS; end
+    CAL35 = side_calibration_35(Tc, Tv, ncl, onv, thv, thn, drop_alarm, GF, MON, cs35, FA_BOUND);
+    rc = {'', ['3.5% side calibration (D121 item 4; shares x0.7: lost-branch 1.05%, drop 1.4%, degradation+other 1.05%; ' ...
+        'descriptive, no adoption effect):']};
+    for m = 1:numel(MON)
+        r5 = CAL35.R5(m); r35 = CAL35.R35(m);
+        rc{end+1} = sprintf(['  %-15s 5%% bound: threshold %6.1f %s, clean false alarms %d/%d (bound %.2f%%), exact-binomial ' ...
+            'P(pass at this flight count) = %.3f'], MON{m}, r5.pick, drop_unit(drop_alarm), r5.k, ncl, 100 * r5.bound, r5.ppass); %#ok<SAGROW>
+        rc{end+1} = sprintf(['  %-15s 3.5%% bound (0.7x): threshold %6.1f %s, clean false alarms %d/%d (bound %.2f%%), exact-binomial ' ...
+            'P(pass at this flight count) = %.3f'], MON{m}, r35.pick, drop_unit(drop_alarm), r35.k, ncl, 100 * r35.bound, r35.ppass); %#ok<SAGROW>
+        rc{end+1} = sprintf('      delays (5%% / 3.5%%) median / p90 / never: %s / %s', strjoin(cellfun(@(n, a, b, c) ...
+            sprintf('%s %g/%g/%.1f%%', n, a, b, c), r5.lat.threat, num2cell(r5.lat.median), num2cell(r5.lat.p90), ...
+            num2cell(100 * r5.lat.never), 'UniformOutput', false), ', '), strjoin(cellfun(@(n, a, b, c) ...
+            sprintf('%s %g/%g/%.1f%%', n, a, b, c), r35.lat.threat, num2cell(r35.lat.median), num2cell(r35.lat.p90), ...
+            num2cell(100 * r35.lat.never), 'UniformOutput', false), ', ')); %#ok<SAGROW>
+    end
+    fid = fopen('results/drop_threshold.txt', 'a'); fprintf(fid, '%s\n', rc{:}); fclose(fid);
+    fprintf('%s\n', rc{:});
+end
+%% 5c. D121 items 12 and 15: the clean false changes in bins of link K, speed, bank and hiding geometry (descriptive)
+% Only with "k6_split": true (wf_options.m). The monitor's confirmed alarm at each adopted monitor's pick bounds every policy's
+% first change on these flights (monitor_trace.m); K is the receiver's own estimate (the fused window's los_k, a median over
+% the flight's cycles), bank, speed and the hiding geometry (clean_hides.m, the nominal shadowing level, no loss applied) are
+% the flight's draws (CV.cov). Never selects anything.
+K6S = [];
+if WFo.k6split && ~isempty(CV) && isfield(CV, 'cov')
+    C6 = decision_config(); ix6 = sub2ind(size(CV.cov.bank), Tc.s, Tc.r);
+    S6 = load('params.mat'); p6 = S6.params; p6.quiet_build = true;
+    lk6 = nan(1, ncl); if isfield(Tc, 'lk'), lk6 = median(Tc.lk, 2, 'omitnan')'; end
+    Hh6 = clean_hides(CV.cov, CV.ebno, p6, C6.sev.airframe_shadowing.levels(C6.nominal), C6.event_frame, C6.event_count);
+    cov6 = struct('lk', lk6, 'speed', CV.cov.speed(ix6)', 'speed_bins', linspace(PP.speed_range(1), PP.speed_range(2), 5), ...
+        'bank', CV.cov.bank(ix6)', 'hide', Hh6(ix6)');
+    fl6 = false(numel(MON), ncl);
+    for m = 1:numel(MON)
+        cd6 = []; if isfield(MONP, 'confirm_drop'), cd6 = MONP(m).confirm_drop; end
+        la6 = []; if ~isempty(lbt), la6 = lbt{m}; end
+        fl6(m, :) = any(monitor_confirm(Tc, drop_alarm, MONP(m).pick, MONP(m).cf, confirm_sweep, cd6, la6), 2)';
+    end
+    [K6S, l6] = kpi6_split(fl6, 1000 * Tc.s + Tc.r, cov6, cellfun(@(n) ['monitor ' n], MON, 'UniformOutput', false));
+    l6{end+1} = sprintf(['  (C1d, clean validation flights, %d episodes, the monitor''s confirmed alarm at its adopted threshold; the hiding ' ...
+        'condition is read at the nominal shadowing level %g dB; link K needs the fusion in PP: %s)'], ncl, ...
+        C6.sev.airframe_shadowing.levels(C6.nominal), ternary(any(isfinite(lk6)), 'present', 'absent, K bins empty'));
+    fid = fopen('results/drop_threshold.txt', 'a'); fprintf(fid, '%s\n', l6{:}); fclose(fid);
+    fprintf('%s\n', l6{:});
+end
+SV = {'drop_db', 'drop_db_train', 'drop_from', 'separable', 'THR', 'kept', 'leak', 'leak_all', ...
+    'p95_mis', 'p99_cl', 'p05_pl', 'floor_db', 'drop_alarm', 'cusum_db', 'THC', 'VAL', 'CF', 'EBNO_THR', 'MONP', 'confirm_sweep', 'CAL35'};
+if ~isempty(DEG)                                           % deployed by train_dqn.m (PP.deg_mode, PP.ber_q)
+    deg_mode = DEG.mode; ber_q = DEG.ber_q; SV = [SV, {'deg_mode', 'ber_q', 'DEG'}];
+end
+if ~isempty(UG), SV = [SV, {'UG'}]; end                    % D111 guard (e)
+if ~isempty(DCONF), SV = [SV, {'DCONF'}]; end         % saved with MONP.confirm_drop
+if ~isempty(CLT), SV = [SV, {'CLT'}]; end             % saved with MONP.lb_accept
+if ~isempty(K6S), SV = [SV, {'K6S'}]; end
+if ~isempty(form_rule_pick), SV = [SV, {'form_rule_pick'}]; end   % the smoke's forced form
+save('data/drop_threshold.mat', SV{:});
 fprintf('\nSaved data/drop_threshold.mat, results/drop_threshold.txt\n');
 
 %% ===================== Local functions =====================
@@ -251,6 +548,35 @@ for v = iPL
 end
 end
 
+function T = trim_trace(T, n)
+% The first n episodes of a monitor trace (the padding of the last batch dropped).
+for f = fieldnames(T)'
+    if size(T.(f{1}), 1) > 1, T.(f{1}) = T.(f{1})(1:n, :); else, T.(f{1}) = T.(f{1})(1:n); end
+end
+end
+
+function L = delays(c, onset, thr, on, names)
+% Per threat (severities pooled, episodes with the threat on the air): the cycles from the
+% onset to the first confirmed alarm, the decision of cycle onset + 1 reading the threat's
+% first frame (0); median, p90 (nearest rank) and the never-confirmed share.
+L = struct('threat', {names}, 'n', zeros(1, numel(names)), 'median', nan(1, numel(names)), ...
+    'p90', nan(1, numel(names)), 'never', zeros(1, numel(names)));
+d = nan(size(c, 1), 1);
+for i = 1:size(c, 1)
+    k = find(c(i, onset(i) + 1:end), 1);
+    if ~isempty(k), d(i) = k - 1; end
+end
+for q = 1:numel(names)
+    m = on(:) & strcmp(thr(:), names{q}); x = sort(d(m & ~isnan(d)));
+    L.n(q) = sum(m); L.never(q) = mean(isnan(d(m)));
+    if ~isempty(x), L.median(q) = median(x); L.p90(q) = x(min(numel(x), max(1, round(0.9 * numel(x))))); end
+end
+end
+
+function x = fill_inf(x)
+x(isnan(x)) = Inf;
+end
+
 function u = cp_upper(k, n)
 % One-sided 95% Clopper-Pearson upper bound of a binomial proportion (NaN without trials).
 if n == 0, u = NaN; elseif k >= n, u = 1; else, u = betaincinv(0.95, k + 1, n - k); end
@@ -262,4 +588,224 @@ end
 
 function out = ternary(c, a, b)
 if c, out = a; else, out = b; end
+end
+
+function [DEG, rw] = deg_select(PP, CV, drop_alarm, GF, MON, CS, thr, T, VA, FA, force)
+% The degradation test chosen on validation (docs/deg_fix_protocol.md): the quantile tables
+% from the fit half of the clean validation geometries; per candidate, 'ratio' first, the
+% reading of section 5 on the check half's clean episodes and the validation split's single
+% threats, the same episodes and frames for every candidate; adopted by deg_adopt.m. force
+% (smoke only, deg_force.m): the candidate deployed instead, '' for the adoption.
+C = decision_config(); nS = numel(PP.ebno);
+[fit, chk] = clean_halves(CV.runs);
+assert(~any(fit & chk) && all(fit | chk), 'choose_drop_threshold: the fit and check halves overlap');
+BQ = clean_ber_q(CV, PP, fit);
+K = struct('name', {'ratio', 'F1 win'}, 'mode', {'ratio', 'win'}, 'q', {0, 0});
+for a = 1:numel(C.deg_alpha), K(end+1) = struct('name', sprintf('F2 win_q, alpha %g', C.deg_alpha(a)), 'mode', 'win_q', 'q', a); end %#ok<AGROW>
+for a = 1:numel(C.deg_alpha), K(end+1) = struct('name', sprintf('F3 win_q_gate, alpha %g', C.deg_alpha(a)), 'mode', 'win_q_gate', 'q', a); end %#ok<AGROW>
+PPm = PP; PPm.alarm_mode = drop_alarm;
+[spc, ncl] = clean_wide_specs(PPm, CV, thr, T, find(chk));
+PPv = PPm; PPv.pools(:, :, :, setdiff(1:numel(PP.runs), VA)) = {[]};   % the validation split only
+Kv = link_env('tables', PPv);
+sgl = find(ismember(PP.scen, PP.singles) & ~strcmp(PP.scen, 'none'));
+spv = policy_episodes(sgl, nS, Kv.geo(sgl, VA), 1, false, false, 64, T, RandStream('mt19937ar', 'Seed', 4400));
+X = cell(1, numel(K));
+for c = 1:numel(K)
+    bq = []; if K(c).q > 0, bq = BQ(K(c).q); end
+    Pc = PPm; Pc.deg_mode = K(c).mode; Pc.ber_q = bq;
+    [PPw, Kw] = clean_world(Pc, CV);
+    Tc = trim_trace(monitor_trace(PPw, Kw, spc, VA, 41000), ncl);
+    Pv = PPv; Pv.deg_mode = K(c).mode; Pv.ber_q = bq;
+    Tv = monitor_trace(Pv, Kv, spv, VA, 4500);
+    onv = Kv.on(sub2ind(size(Kv.on), Tv.scn, Tv.s, VA + 0 * Tv.s, Tv.r));
+    thv = PP.scen(Tv.scn); thn = unique(thv(onv), 'stable');
+    X{c} = whole_monitor(Tc, Tv, ncl, onv, thv, thn, drop_alarm, GF, MON, CS, FA);
+    X{c}.quiet_clean = sum(any(Tc.quiet, 2));             % clean episodes with a cycle degraded without RF evidence
+    X{c}.quiet_threat = mean(any(Tv.quiet(onv, :), 2));
+end
+R0 = struct('lat', [X{1}.R.lat], 'monitor', {MON});
+RC = struct('lat', {}, 'bound', {});
+for c = 2:numel(K), RC(end+1) = struct('lat', [X{c}.R.lat], 'bound', [X{c}.R.bound]); end %#ok<AGROW>
+[pick, adm, best, fail] = deg_adopt(RC, R0, FA);
+DEG = struct('mode', 'ratio', 'ber_q', [], 'name', 'ratio', 'pick', pick);
+if pick > 0
+    DEG.mode = K(pick + 1).mode; DEG.name = K(pick + 1).name;
+    if K(pick + 1).q > 0, DEG.ber_q = BQ(K(pick + 1).q); end
+end
+DEG.cand = {K.name}; DEG.adm = adm; DEG.best = best; DEG.fail = fail; DEG.readings = X; DEG.BQ = BQ;
+DEG.fit_runs = double(CV.runs(fit)); DEG.check_runs = double(CV.runs(chk)); DEG.n_check = ncl; DEG.monitors = MON;
+% Report
+rw = {'', sprintf(['Degradation test on validation (docs/deg_fix_protocol.md): quantile tables from the fit half (%d ' ...
+    'clean geometries, every Eb/N0, every %d-frame window at no_action); candidates read on the check half (%d ' ...
+    'geometries, %d clean episodes, Eb/N0 >= %g dB) and on the validation split''s single threats, each monitor at ' ...
+    'its own most sensitive admissible threshold'], sum(fit), C.win, sum(chk), ncl, thr)};
+for a = 1:numel(BQ)
+    Q = BQ(a);
+    rw{end+1} = sprintf('  quantile table, alpha %g (bins of >= %d cycles from >= %d flights)%s:', Q.alpha, Q.need, Q.fmin, ...
+        ternary(Q.short, ' -- TOO FEW CYCLES: one bin short of the rule', '')); %#ok<AGROW>
+    for i = 1:numel(Q.q)
+        rw{end+1} = sprintf('    Eb/N0 [%5.1f, %5.1f) dB: %6d cycles, %3d flights, threshold %.2e', Q.lo(i), Q.hi(i), Q.n(i), ...
+            Q.nf(i), Q.q(i)); %#ok<AGROW>
+    end
+end
+for c = 1:numel(K)
+    x = X{c};
+    v = 'reference'; if c > 1, v = ternary(adm(c - 1), 'ADMISSIBLE', ['not admissible (' fail{c - 1} ')']); end
+    rw{end+1} = sprintf('  %s: %s; sweeper''s own confirmation %s', K(c).name, v, ternary(x.sweep, 'on', 'off')); %#ok<AGROW>
+    for m = 1:numel(MON)
+        r = x.R(m);
+        rw{end+1} = sprintf('    %-15s threshold %6.1f %-4s %s, false alarms %d/%d (bound %.2f%%); other paths alone %d/%d', ...
+            MON{m}, r.pick, drop_unit(drop_alarm), ternary(r.admissible, 'admissible', 'none admissible'), r.k, ncl, ...
+            100 * r.bound, r.k_other, ncl); %#ok<AGROW>
+        rw{end+1} = sprintf('      delays median / p90 / never: %s', strjoin(cellfun(@(n, a, b, d) sprintf('%s %g/%g/%.1f%%', ...
+            n, a, b, d), r.lat.threat, num2cell(r.lat.median), num2cell(r.lat.p90), num2cell(100 * r.lat.never), ...
+            'UniformOutput', false), ', ')); %#ok<AGROW>
+    end
+    if strcmp(K(c).mode, 'win_q_gate')
+        rw{end+1} = sprintf(['    degraded, no RF evidence (logged, no alarm): %d of %d clean episodes; %.1f%% of the ' ...
+            'threat episodes'], x.quiet_clean, ncl, 100 * x.quiet_threat); %#ok<AGROW>
+    end
+end
+if pick > 0
+    how = ternary(best(pick) <= FA, sprintf('the first admissible with a bound <= %.0f%% under some monitor', 100 * FA), ...
+        sprintf('no admissible candidate reaches %.0f%%: the admissible one with the lowest bound', 100 * FA));
+    rw{end+1} = sprintf('Degradation test ADOPTED: %s (%s; lowest bound %.2f%%)', DEG.name, how, 100 * best(pick));
+else
+    rw{end+1} = 'Degradation test: no candidate admissible, ''ratio'' kept (F4 is the registered next step).';
+end
+if ~isempty(force)
+    [DEG, ln] = deg_force('apply', DEG, force, K, BQ); rw{end+1} = ln;
+end
+end
+
+function W = whole_monitor(Tc, Tv, ncl, onv, thv, thn, drop_alarm, GF, MON, CS, FA)
+% Section 5's reading of one candidate: per monitor its most sensitive admissible threshold
+% on the clean episodes Tc and the delays on the threats Tv, the sweeper's own confirmation
+% adopted as there.
+R = cell(1, 2);
+for sw = 1:2
+    cs = []; if sw == 2, cs = CS; end
+    for m = 1:numel(MON)
+        tk = strsplit(MON{m}); cf = sscanf(tk{2}, '%d/%d')';
+        k = arrayfun(@(t) sum(any(monitor_confirm(Tc, drop_alarm, t, cf, cs), 2)), [GF, Inf]);
+        up = arrayfun(@(x) cp_upper(x, ncl), k);
+        j = find(up(1:end-1) <= FA, 1);
+        adm = ~isempty(j); if ~adm, j = numel(GF); end
+        cv = monitor_confirm(Tv, drop_alarm, GF(j), cf, cs);
+        R{sw} = [R{sw}, struct('cf', cf, 'j', j, 'pick', GF(j), 'admissible', adm, 'k', k(j), 'k_other', k(end), ...
+            'bound', up(j), 'lat', delays(cv, Tv.onset, thv, onv, thn))];
+    end
+end
+ok = arrayfun(@(m) (~R{1}(m).admissible || R{2}(m).admissible) && R{2}(m).j <= R{1}(m).j && ...
+    all(R{2}(m).lat.never <= R{1}(m).lat.never) && all(fill_inf(R{2}(m).lat.p90) <= fill_inf(R{1}(m).lat.p90)), 1:numel(MON));
+sw = 1 + all(ok);
+W = struct('sweep', sw == 2);
+W.R = R{sw};
+end
+
+function PB = drop_path_pick(Tc, drop_alarm, GF, cf, cs, ncl, bound, tau)
+% D121 item 4. When the whole-monitor rule finds no admissible threshold, scan GF from the
+% conservative end (least sensitive, GF(end)) toward the sensitive end, stop at the first
+% failure, and keep the last grid value whose clean episodes with the drop alarm ALONE as
+% first confirming path have a one-sided 95% Clopper-Pearson upper bound <= bound (2.0%). If
+% even the most conservative value fails, PB.admissible is false and the caller keeps the
+% least-sensitive fallback (its own path's fallback). tau: the monitor's lost-branch acceptance ([] or absent: none).
+if nargin < 8, tau = []; end
+PB = struct('admissible', false, 'pick', NaN, 'j', NaN, 'k', NaN, 'bound', NaN);
+for j = numel(GF):-1:1
+    k = drop_only_count(Tc, drop_alarm, GF(j), cf, cs, tau);
+    up = cp_upper(k, ncl);
+    if up <= bound
+        PB = struct('admissible', true, 'pick', GF(j), 'j', j, 'k', k, 'bound', up);
+    else
+        break
+    end
+end
+end
+
+function k = drop_only_count(Tr, drop_alarm, thr, cf, cs, tau)
+% Clean episodes whose FIRST confirming cycle is the drop alarm alone (not Tr.other, the
+% class/degradation path): the drop-path-only false-alarm count used by D121 items 4 and 6.
+% tau: the monitor's lost-branch acceptance (monitor_confirm.m), [] or absent: none.
+if nargin >= 6 && ~isempty(tau), [~, ~, ~, Tr.other] = monitor_confirm(Tr, drop_alarm, thr, cf, [], [], tau); end
+n = size(Tr.eg, 1);
+a = false(size(Tr.eg)); if isfinite(thr), a = drop_alarm_seq(Tr.eg, drop_alarm, thr, [], Tr.other); end
+c = movsum(double(Tr.other | a), [cf(2) - 1, 0], 2) >= cf(1);
+if ~isempty(cs) && isfield(Tr, 'sw')
+    cs_hit = movsum(double(Tr.sw), [cs(2) - 1, 0], 2) >= cs(1);
+    c = c | cs_hit;
+else
+    cs_hit = false(size(c));
+end
+k = 0;
+for i = 1:n
+    f = find(c(i, :), 1);
+    if isempty(f), continue; end
+    if a(i, f) && ~Tr.other(i, f) && ~cs_hit(i, f), k = k + 1; end
+end
+end
+
+function [P, rw] = clt_rechoose(P, name, Tc, Tv, onv, thv, thn, drop_alarm, GF, cs, ncl, FA, tau)
+% A monitor's drop threshold re-chosen under its lost-branch acceptance tau by section 5's rule: the most
+% sensitive threshold within the whole monitor's bound, else the drop path's own budget, else the least sensitive.
+cf = P.cf;
+k = arrayfun(@(t) sum(any(monitor_confirm(Tc, drop_alarm, t, cf, cs, [], tau), 2)), [GF, Inf]);
+up = arrayfun(@(x) cp_upper(x, ncl), k);
+j = find(up(1:end-1) <= FA, 1);
+adm = ~isempty(j); if ~adm, j = numel(GF); end
+P.path_budget = struct('used', false, 'admissible', false, 'pick', NaN, 'j', NaN, 'k', NaN, 'bound', NaN);
+P.j = j; P.pick = GF(j); P.admissible = adm; P.k = k(j); P.k_other = k(end);
+how = ternary(adm, 'admissible', 'NONE ADMISSIBLE: the least sensitive');
+if ~adm
+    PB = drop_path_pick(Tc, drop_alarm, GF, cf, cs, ncl, 0.02, tau);
+    P.path_budget = PB;
+    if PB.admissible
+        P.pick = PB.pick; P.j = PB.j; P.k = PB.k; P.path_budget.used = true;
+        how = sprintf('the drop path''s own budget (%d/%d, bound %.2f%% <= 2.0%%)', PB.k, ncl, 100 * PB.bound);
+    end
+end
+P.lat = delays(monitor_confirm(Tv, drop_alarm, P.pick, cf, cs, [], tau), Tv.onset, thv, onv, thn);
+rw = {sprintf(['    %-15s threshold re-chosen under the lost-branch acceptance: %6.1f %s, %s; whole monitor %d/%d (bound %.2f%%), ' ...
+    'other paths alone %d/%d (bound %.2f%%)'], name, P.pick, drop_unit(drop_alarm), how, k(P.j), ncl, 100 * up(P.j), k(end), ncl, ...
+    100 * up(end))};
+rw{end+1} = sprintf('      delays median / p90 / never: %s', strjoin(cellfun(@(n, a, b, c) sprintf('%s %g/%g/%.1f%%', ...
+    n, a, b, c), P.lat.threat, num2cell(P.lat.median), num2cell(P.lat.p90), num2cell(100 * P.lat.never), ...
+    'UniformOutput', false), ', '));
+end
+
+function p = cp_pass_prob(k_true_rate, bound_true_rate, n)
+% Exact-binomial probability of a monitor meeting a reading at this flight count, if
+% bound_true_rate were the true clean false-alarm rate: P(X <= floor(bound * n)) under
+% Binomial(n, k_true_rate) read as the point estimate (used descriptively, D121 item 4).
+x = floor(bound_true_rate * n);
+if n == 0 || isnan(k_true_rate), p = NaN; return; end
+p = binocdf(x, n, k_true_rate);
+end
+
+function CAL = side_calibration_35(Tc, Tv, ncl, onv, thv, thn, drop_alarm, GF, MON, CS, FA5)
+% D121 item 4's 3.5% side calibration. Same scans as the registered 5% reading (whole-monitor
+% rule, item 4's drop-path rescue) but with the bound scaled by 0.7. Descriptive; selects
+% nothing and is never adopted.
+FA35 = 0.7 * FA5;
+CAL = struct('R5', [], 'R35', []);
+for which = 1:2
+    FA = FA5; if which == 2, FA = FA35; end
+    R = struct('cf', {}, 'pick', {}, 'admissible', {}, 'k', {}, 'bound', {}, 'lat', {}, 'ppass', {});
+    for m = 1:numel(MON)
+        tk = strsplit(MON{m}); cf = sscanf(tk{2}, '%d/%d')';
+        k = arrayfun(@(t) sum(any(monitor_confirm(Tc, drop_alarm, t, cf, CS), 2)), [GF, Inf]);
+        up = arrayfun(@(x) cp_upper(x, ncl), k);
+        j = find(up(1:end-1) <= FA, 1);
+        adm = ~isempty(j);
+        if ~adm                                              % item 4's own-path rescue, at this calibration's bound
+            PB = drop_path_pick(Tc, drop_alarm, GF, cf, CS, ncl, ternary(which == 1, 0.02, 0.014));
+            if PB.admissible, j = PB.j; adm = true; else, j = numel(GF); end
+        end
+        cv = monitor_confirm(Tv, drop_alarm, GF(j), cf, CS);
+        rate = k(j) / max(ncl, 1);
+        R(m) = struct('cf', cf, 'pick', GF(j), 'admissible', adm, 'k', k(j), 'bound', up(j), ...
+            'lat', delays(cv, Tv.onset, thv, onv, thn), 'ppass', cp_pass_prob(rate, FA, ncl));
+    end
+    if which == 1, CAL.R5 = R; else, CAL.R35 = R; end
+end
 end

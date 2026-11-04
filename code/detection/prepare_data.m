@@ -13,12 +13,16 @@
 % With FRESH_TEST true (build_fresh_test.m): the second test set of data/spectrograms_fresh.mat,
 % z-scored with the training statistics of data/splits.mat -> data/splits_fresh.mat
 % (test, norm and classes only); with FRESH_SET = 2 as well (B3m) the third test set,
-% data/spectrograms_fresh2.mat -> data/splits_fresh2.mat.
+% data/spectrograms_fresh2.mat -> data/splits_fresh2.mat; with FRESH_SET = 3 (B3q) the fourth,
+% data/spectrograms_fresh3.mat -> data/splits_fresh3.mat, with params.mat copied to
+% data/splits_fresh3_params.mat (the link model it was built with; B3r reads the set only
+% with the same params_id, eval_detector.m).
 
 close all; clc;
 fprintf('=== B1: Prepare Data (split by sub-run) ===\n\n');
 if exist('FRESH_TEST', 'var') && FRESH_TEST
-    prepare_fresh_test(exist('FRESH_SET', 'var') && isequal(FRESH_SET, 2));
+    k = 1; if exist('FRESH_SET', 'var') && (isequal(FRESH_SET, 2) || isequal(FRESH_SET, 3)), k = FRESH_SET; end
+    prepare_fresh_test(k);
     return
 end
 S = load('data/spectrograms.mat');
@@ -26,6 +30,7 @@ sp0 = S.spec;
 if ~isfield(sp0, 'fold')
     error('spectrograms.mat predates D42. Run run_dataset_sweep and extract_spectrograms first.');
 end
+checked_a6(sp0, 'data/spectrograms.mat', 'data/dataset.mat');
 assert_frames(sp0, numel(sp0.run), 'prepare_data: data/spectrograms.mat', spec_meta());
 classes = categories(sp0.Y);
 fold = sp0.fold(:);
@@ -79,11 +84,13 @@ save('data/splits.mat', '-struct', 'N', '-append');
 fprintf('Saved data/splits.mat\n=== B1 Complete ===\n');
 clear S sp0 splits feats_norm N   % large arrays; main.m runs the stages in one workspace
 
-function prepare_fresh_test(third)
-% The second test set (third: the third, B3m): every sub-run in the test fold, the training
-% z-score of data/splits.mat.
-sfx = ''; name = 'second'; if third, sfx = '2'; name = 'third'; end
+function prepare_fresh_test(k)
+% The second test set (k = 1; k = 2 the third, B3m; k = 3 the fourth, B3q): every sub-run in
+% the test fold, the training z-score of data/splits.mat.
+sfx = {'', '2', '3'}; sfx = sfx{k}; name = {'second', 'third', 'fourth'}; name = name{k};
+assert(k ~= 3 || isfile('params.mat'), 'prepare_data:params', 'params.mat not found: the fourth test set records its link model');
 S = load(['data/spectrograms_fresh' sfx '.mat']); sp0 = S.spec; clear S
+checked_a6(sp0, ['data/spectrograms_fresh' sfx '.mat'], ['data/dataset_fresh' sfx '.mat']);
 [nm, classes] = split_norm('data/splits.mat');
 assert(isequal(categories(sp0.Y), classes(:)), 'prepare_data: the %s test set has other classes', name);
 assert(isequal(sp0.feat_names, nm.feat_names), 'prepare_data: the %s test set has other features', name);
@@ -107,7 +114,18 @@ for c = 1:numel(classes)
     fprintf('  %-20s %5d\n', classes{c}, sum(sp0.Y == classes{c}));
 end
 save(['data/splits_fresh' sfx '.mat'], 'splits', '-v7.3');
+if k == 3, copyfile('params.mat', 'data/splits_fresh3_params.mat'); end   % the link model of the fourth set, for B3r's check
 fprintf('Saved data/splits_fresh%s.mat\n=== B1 Complete ===\n', sfx);
+end
+
+function checked_a6(sp0, f_spec, f_ds)
+% Spectrograms built by the guarded A6 (extract_spectrograms.m: one value per frame in every
+% field) and newer than their dataset; otherwise B1 stops before splitting them.
+assert(isfield(sp0, 'meta') && isfield(sp0.meta, 'frames_checked') && sp0.meta.frames_checked, 'prepare_data:stale', ...
+    '%s was not built by the guarded A6 (run repair_align on an old dataset, then extract_spectrograms)', f_spec);
+if isfile(f_ds)
+    assert(dir(f_ds).datenum <= dir(f_spec).datenum, 'prepare_data:stale', '%s is older than %s: rerun A6', f_spec, f_ds);
+end
 end
 
 function s = idle_fields(s, sp0, m)

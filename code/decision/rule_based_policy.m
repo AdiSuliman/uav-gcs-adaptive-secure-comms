@@ -1,4 +1,4 @@
-function [action, reason] = rule_based_policy(threat_class, degraded, mmse_gain_db, q_iot_db, q_thr_db, drop, budget, mmse_thr_db)
+function [action, reason] = rule_based_policy(threat_class, degraded, mmse_gain_db, q_iot_db, q_thr_db, drop, budget, mmse_thr_db, slot_on, burst_action, harm)
 %RULE_BASED_POLICY  Fixed expert policy: detected threat class -> configuration.
 %   Baseline for the DQN comparison (proposal: rule-based first, DQN second).
 %   Each class maps to the configuration that addresses its physics as modeled in
@@ -22,6 +22,15 @@ function [action, reason] = rule_based_policy(threat_class, degraded, mmse_gain_
 %                 names and gain_db, the link-budget configurations and their known
 %                 gains (config_gain_db.m)
 %   mmse_thr_db   the nulling threshold (optional; PP.rule_mmse_db, default C.rule_mmse_db)
+%   slot_on       the quiet-slot branch of a degraded link read as none below (optional;
+%                 PP.rule_slot, default true; chosen on validation, train_dqn.m); the slot
+%                 still keeps a drop alarm from the link-budget answer
+%   burst_action  the answer to the class noise_burst (optional; PP.rule_nb, chosen on
+%                 validation, train_dqn.m): {not separable, separable}, two of the 36
+%                 configurations; empty keeps the class mapping below
+%   harm          the lost-branch gate (optional; PP.s1_gate, M.harm of policy_monitor.m): false
+%                 answers a lost branch with no_action, the other branches carry the link; empty or
+%                 true keeps the class mapping below
 %   A lost branch (an antenna fault or airframe shadowing) leaves white noise on the
 %   antennas, where adaptive combining (MVDR) is maximum-ratio combining (Winters, Salz &
 %   Gitlin 1994) and only pays its estimation loss (Besson 2021, eq. 20-21): both take
@@ -53,6 +62,10 @@ if nargin < 5 || isempty(q_thr_db) || isnan(q_thr_db), q_thr_db = C.q_alarm_db; 
 if nargin < 6 || isempty(drop), drop = false; end
 if nargin < 7, budget = []; end
 if nargin < 8 || isempty(mmse_thr_db), mmse_thr_db = C.rule_mmse_db; end
+if nargin < 9 || isempty(slot_on), slot_on = true; end
+if nargin < 10, burst_action = {}; end
+if nargin < 11, harm = []; end
+if ~isempty(burst_action), check_burst(burst_action); end
 sep = mmse_gain_db >= mmse_thr_db;
 slot = q_iot_db >= q_thr_db;
 
@@ -66,12 +79,17 @@ switch threat_class
     case 'noise_burst'
         action = 'power_control+fec_interleave'; reason = 'broadband bursts: coding repairs them';
         if sep, action = 'spatial_diversity+fec_interleave'; reason = 'broadband bursts from one direction: null and code'; end
+        if ~isempty(burst_action)
+            action = burst_action{1 + sep};
+            reason = sprintf('broadband bursts%s: %s, chosen on validation', ternary(sep, ' from one direction', ''), action);
+        end
     case 'path_loss'
         action = 'rate_reduce+power_control'; reason = 'weak signal: largest link-budget gain';
         if ~isempty(budget), [action, reason] = budget_match(budget); end
     case {'antenna_fault', 'airframe_shadowing'}
         action = 'power_control';     reason = 'one branch lost: raise the link budget';
         if sep, action = 'spatial_diversity+power_control'; reason = [reason ', and null the separable interferer']; end
+        if ~isempty(harm) && ~harm, action = 'no_action'; reason = 'one branch lost, the others carry the link'; end
     case {'benign_interference', 'none'}
         action = 'no_action';         reason = 'not an attack: acting would be a false alarm';
     otherwise
@@ -85,7 +103,7 @@ if strcmp(action, 'no_action') && drop && ~slot && ~strcmp(threat_class, 'benign
 elseif strcmp(action, 'no_action') && degraded
     if strcmp(threat_class, 'benign_interference')
         action = 'channel_switch'; reason = 'interference degrades the link: leave the channel';
-    elseif strcmp(threat_class, 'none') && slot
+    elseif strcmp(threat_class, 'none') && slot && slot_on
         action = 'channel_switch'; reason = 'degraded link with interference in the quiet slot: leave the channel';
         if sep, action = 'channel_switch+spatial_diversity'; reason = [reason ', and null it (separable)']; end
     elseif sep
@@ -109,4 +127,17 @@ k = find(g >= b.drop_db, 1);
 if isempty(k), k = numel(g); end
 action = b.names{o(k)};
 reason = sprintf('our signal dropped %.1f dB: the smallest link-budget gain that covers it (%.1f dB)', b.drop_db, g(k));
+end
+
+function check_burst(b)
+% Two configurations of the 36, neither no_action.
+persistent A
+if isempty(A), A = setdiff(policy_actions(), {'no_action'}); end
+if ~iscellstr(b) || numel(b) ~= 2 || ~all(ismember(b, A))
+    error('rule_based_policy:burst', 'rule_based_policy: the noise-burst answer must be two configurations of the 36 other than no_action');
+end
+end
+
+function out = ternary(c, a, b)
+if c, out = a; else, out = b; end
 end

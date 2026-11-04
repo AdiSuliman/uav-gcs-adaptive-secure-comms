@@ -1,0 +1,206 @@
+function m_phi(prof, code)
+% d91 phi comparison, declared in docs/d91_fuse.md section 8 (commit 5abf87d) before it ran:
+% 'branch evidence' (phi as is) against 'branch evidence, phi = 1' on one profile's enlarged
+% fit set, from the extracts and checkpoints of m_all.m (same fit set, folds, N, lambda,
+% target rule and bootstrap).
+%   m_phi('p1', code)   one profile; code: the code folder of the job's working copy
+%   m_phi('both')       the deployment verdict over m_phi_p1.mat and m_phi_p3.mat
+% Output: m_phi_<prof>.txt, m_phi_<prof>.mat (checkpoint ck_phi_<prof>.mat).
+% Runs only after the queue's focused tests passed (logs/tests.log beside the code export).
+here = fileparts(mfilename('fullpath')); cd(here);
+if strcmp(prof, 'both'), verdict_both(here); return; end
+fid = fopen(sprintf('m_phi_%s.txt', prof), 'a'); cl = onCleanup(@() fclose(fid));
+out = @(varargin) both(fid, varargin{:});
+[ok, tl] = tests_passed(code);
+if ~ok, out('\nm_phi %s skipped %s: the focused tests did not pass (%s)\n', prof, char(datetime('now')), tl); end
+assert(ok, 'm_phi:tests', 'the focused tests did not pass (%s): the phi job is skipped', tl);
+addpath(code); setup_paths; cd(here);
+L = load(fullfile(here, ['data_' prof], 'sets.mat')); S = L.S; F = L.F; classes = L.info.classes;
+C = numel(classes); N = F.N; lam = F.lambda; K = 5;
+i0 = find(strcmp(classes, 'none')); ia = find(strcmp(classes, 'antenna_fault'));
+out('\n===== d91 phi comparison, %s, %s: N %d, lambda %.0e, code %s =====\n', prof, char(datetime('now')), N, lam, code);
+
+%% The enlarged fit set, exactly as m_all.m builds it
+names = {'val', 'test', 'fresh', 'fresh2'};
+FLD = {'run', 'pos', 'gain_ant', 'feats_raw', 'idle', 'bch', 'level', 'ebno', 'ebno_rx', 'k_db', 'speed', 'P', 'y'};
+for k = 1:4
+    s = S.(names{k}); t = struct();
+    for f = FLD, x = s.(f{1}); if isvector(x), x = x(:); end, t.(f{1}) = x; end
+    t.run = double(t.run) + (k - 1) * 1e7; t.pos = double(t.pos); t.set = k * ones(numel(t.run), 1);
+    if k == 1, fit = t; else, for f = fieldnames(fit)', fit.(f{1}) = [fit.(f{1}); t.(f{1})]; end, end
+end
+clear S
+fit.feat_names = link_features('names');
+n = numel(fit.run);
+ru = unique(fit.run); rf = RandStream('mt19937ar', 'Seed', 9101);
+fr = mod(randperm(rf, numel(ru)), K) + 1; [~, ir] = ismember(fit.run, ru); fold = fr(ir)';
+yt = fusion_target(fit.y, fit.run, fit.pos, N, classes);
+
+%% The checkpoints of m_all.m, rebuilt by this code first
+W = load(sprintf('ck_%s.mat', prof), 'Z', 'XA', 'pb0', 'PV');
+o0 = struct('iso', true, 'glr', true, 'post', true, 'held', true); o1 = o0; o1.phi1 = true;
+t0 = tic; Z = fuse_classes('windows', fit, double(fit.P), N);
+XA = fuse_classes('extra', fit, N, o0);
+same = isequal(Z, W.Z) && isequal(XA, W.XA);
+out('this code rebuilds the checkpoint''s windows and phi columns: %d (%.1f min)\n', same, toc(t0) / 60);
+assert(same, 'm_phi: the code does not rebuild the checkpoint''s columns; the reused readings would not be its own');
+clear Z XA
+Z = W.Z; XA = W.XA; pb0 = W.pb0; p0 = W.PV{6}; clear W
+pb = amax(pb0); y0 = amax(p0);
+[bin, ~] = kpi_ebno(fit, yt, classes); thr = kpi1_thr(yt, pb, bin, classes);
+low = fit.k_db <= 0; above = bin >= thr;
+B = fusion_adopt('boot', fit.run, 1000, 9102);
+M = load(sprintf('m_%s.mat', prof), 'G');
+G0 = fusion_adopt('paired', yt, pb, y0, above, low, classes, B);
+rep = isequaln(G0, M.G{6});
+out('\nKPI 1 threshold of the base reading %g dB; branch evidence against the base reproduces m_all''s M4 row: %d\n', thr, rep);
+assert(rep, 'm_phi:reproduce', 'the reused branch evidence reading does not reproduce m_all''s M4 row; the comparison would not be against the measured design');
+ck = sprintf('ck_phi_%s.mat', prof);
+if isfile(ck), Wc = load(ck); X1 = Wc.X1; p1 = Wc.p1; out('checkpoint: phi = 1 columns and reading loaded\n');
+else
+    t0 = tic; X1 = fuse_classes('extra', fit, N, o1); out('phi = 1 columns (%s): %.1f min\n', ...
+        strjoin(window_cues('extra_names', o1), ' '), toc(t0) / 60);
+    t0 = tic; p1 = oof(Z, X1, yt, fold, 1:K, C, lam); out('  OOF branch evidence, phi = 1: %.1f min\n', toc(t0) / 60);
+    save(ck, 'X1', 'p1', '-v7.3');
+end
+y1 = amax(p1);
+ph = XA(:, 9);                                          % gl_phi of the phi columns
+sb = [0 23 60 120 Inf];
+out('phi over the fit set: median %.2f, share below 0.5 %.1f%%; median by speed [0-23 23-60 60-120 >=120 km/h] %s\n', ...
+    median(ph), 100 * mean(ph < 0.5), mat2str(arrayfun(@(q) round(median(ph(fit.speed >= sb(q) & fit.speed < sb(q + 1))), 2), 1:4)));
+
+%% (i) out of fold on the whole fit set
+D = fusion_adopt('paired', yt, y1, y0, above, low, classes, B);      % the gain of keeping phi
+R = fusion_adopt('paired', yt, pb, y1, above, low, classes, B);      % phi = 1 against the base
+kf = keep_rule(D); af = fusion_adopt('branch', R);
+out('(i) out of fold, branch evidence less branch evidence, phi = 1: %s -> keep phi %s\n', gtxt(D), yn(kf));
+out('    branch evidence, phi = 1 against the base: %s -> rule %s\n', gtxt(R), yn(af));
+out('    branch evidence against the base:            %s -> rule %s\n', gtxt(G0), yn(fusion_adopt('branch', G0)));
+for k = 1:4
+    m = fit.set == k;
+    out('  set %-6s fault F1 base %.2f%%: branch evidence %+.2f, phi = 1 %+.2f\n', names{k}, 100 * cf1(yt(m), pb(m), ia), ...
+        100 * (cf1(yt(m), y0(m), ia) - cf1(yt(m), pb(m), ia)), 100 * (cf1(yt(m), y1(m), ia) - cf1(yt(m), pb(m), ia)));
+end
+age = onset_age(fit, yt, ia);
+fault_strata(out, yt, {pb0, p0, p1}, {'base', 'branch evidence', 'phi = 1'}, fit, age, ia);
+
+%% (ii) nested: the keep rule on the inner readings of each outer fold's training folds
+if isfile(ck) && isfield(load(ck), 'ynest'), Wc = load(ck); yn_ = Wc.ynest; keep = Wc.keep; out('checkpoint: nested reading loaded\n');
+else
+    yn_ = zeros(n, 1); keep = false(1, K); t0 = tic;
+    for k = 1:K
+        tr = fold ~= k; te = fold == k; fi = fold; fi(te) = 0; ks = setdiff(1:K, k);
+        q0 = oof(Z, XA(:, []), yt, fi, ks, C, lam); qa = oof(Z, XA, yt, fi, ks, C, lam); q1 = oof(Z, X1, yt, fi, ks, C, lam);
+        thr_i = kpi1_thr(yt(tr), amax(q0(tr, :)), bin(tr), classes);
+        Bi = fusion_adopt('boot', fit.run(tr), 500, 9150 + k);
+        Di = fusion_adopt('paired', yt(tr), amax(q1(tr, :)), amax(qa(tr, :)), bin(tr) >= thr_i, low(tr), classes, Bi);
+        keep(k) = keep_rule(Di);
+        X = X1; if keep(k), X = XA; end
+        FMk = fuse_classes('fit', [Z(tr, :), X(tr, :)], yt(tr), C, lam);
+        yn_(te) = amax(fuse_classes('apply', FMk, [Z(te, :), X(te, :)]));
+        out('  nested outer fold %d: inner %s -> keep phi %s (%.1f min)\n', k, gtxt(Di), yn(keep(k)), toc(t0) / 60);
+    end
+    ynest = yn_; save(ck, 'ynest', 'keep', '-append');
+end
+Dn = fusion_adopt('paired', yt, y1, yn_, above, low, classes, B);
+Rn = fusion_adopt('paired', yt, pb, yn_, above, low, classes, B);
+kn = keep_rule(Dn); an = fusion_adopt('branch', Rn);
+out('(ii) nested reading less branch evidence, phi = 1: %s -> keep phi %s\n', gtxt(Dn), yn(kn));
+out('     nested reading against the base: %s -> rule %s\n', gtxt(Rn), yn(an));
+keep_p = kf && kn; ok1 = af && an;
+out('  VERDICT phi %s: keep phi %s (out of fold %s, nested %s); phi = 1 passes the adoption rule %s (out of fold %s, nested %s); nested keeps per fold %s\n', ...
+    prof, yn(keep_p), yn(kf), yn(kn), yn(ok1), yn(af), yn(an), mat2str(keep));
+save(sprintf('m_phi_%s.mat', prof), 'D', 'R', 'G0', 'Dn', 'Rn', 'kf', 'kn', 'af', 'an', 'keep_p', 'ok1', 'keep', 'thr', '-v7.3');
+out('##### m_phi %s done %s\n', prof, char(datetime('now')));
+end
+
+function verdict_both(here)
+fid = fopen(fullfile(here, 'm_phi_both.txt'), 'a'); cl = onCleanup(@() fclose(fid));
+out = @(varargin) both(fid, varargin{:});
+A = load(fullfile(here, 'm_phi_p1.mat')); B = load(fullfile(here, 'm_phi_p3.mat'));
+if A.keep_p && B.keep_p, d = 'branch evidence (phi as is): phi kept on both profiles';
+elseif A.ok1 && B.ok1, d = 'branch evidence, phi = 1: phi not kept on both profiles, phi = 1 passes the adoption rule on both';
+else, d = sprintf('branch evidence (phi as is): phi not kept on both, but phi = 1 fails the adoption rule (p1 %d, p3 %d); phi stays flagged', A.ok1, B.ok1);
+end
+out('VERDICT phi (both profiles, %s): deploy %s\n', char(datetime('now')), d);
+end
+
+function [ok, f] = tests_passed(code)
+% The last D91TESTS line of the queue's tests log reads n/n and no D91FAIL follows it.
+f = fullfile(fileparts(fileparts(code)), 'logs', 'tests.log');
+ok = false; if ~isfile(f), return; end
+t = fileread(f); i = strfind(t, 'D91TESTS'); if isempty(i), return; end
+s = t(i(end):end); m = regexp(s, '^D91TESTS (\d+)/(\d+)', 'tokens', 'once');
+ok = ~isempty(m) && strcmp(m{1}, m{2}) && str2double(m{2}) > 0 && isempty(strfind(s, 'D91FAIL'));
+end
+
+function ok = keep_rule(d)
+% Keep phi: fault F1 gains (lower bound > 0) and no other rule item is worse.
+ok = d.fault(2) > 0 && d.all(3) >= 0 && d.above(3) >= 0 && d.shad(3) >= 0 && d.fault_low(3) >= 0 && ...
+    d.shad_low(3) >= 0 && d.cl(2) <= 0 && d.lb(2) <= 0;
+end
+
+function pc = oof(Z, X, yt, fold, ks, C, lam)
+pc = zeros(numel(yt), C);
+for k = ks
+    tr = fold ~= k & fold > 0; te = fold == k;
+    FM = fuse_classes('fit', [Z(tr, :), X(tr, :)], yt(tr), C, lam);
+    pc(te, :) = fuse_classes('apply', FM, [Z(te, :), X(te, :)]);
+end
+end
+
+function a = onset_age(fit, yt, cls)
+a = nan(numel(yt), 1);
+[~, ~, rid] = unique(fit.run); byrun = accumarray(rid, (1:numel(rid))', [], @(v) {v});
+for r = 1:numel(byrun)
+    ix = byrun{r}; [~, o] = sort(fit.pos(ix)); ix = ix(o);
+    j0 = find(ismember(yt(ix), cls), 1);
+    if ~isempty(j0), a(ix(j0:end)) = fit.pos(ix(j0:end)) - fit.pos(ix(j0)); end
+end
+end
+
+function fault_strata(out, yt, PV, V, fit, age, ia)
+lab = yt == ia;
+st = {fit.level <= 5.01, '5 dB'; fit.level > 5.01 & fit.level < 9, '8.7 dB'; fit.k_db >= 10, 'K >= 10 dB'; ...
+    fit.k_db < 0, 'K < 0 dB'; age >= 12, 'age >= 12'; age <= 2, 'age 0-2'; fit.speed < 23, 'hover (< 23 km/h)'};
+for q = 1:size(st, 1)
+    m = lab & st{q, 1};
+    out('  fault recall %-18s (%5d frames): %s\n', st{q, 2}, sum(m), strjoin(cellfun(@(v, P) sprintf('%s %.1f%%', v, ...
+        100 * mean(amax(P(m, :)) == ia)), V, PV, 'UniformOutput', false), ', '));
+end
+end
+
+function s = gtxt(d)
+s = sprintf(['all %+.2f [%+.2f, %+.2f], above %+.2f [%+.2f, %+.2f], clean as threat %+.2f [%+.2f, %+.2f], as lost branch %+.2f ' ...
+    '[%+.2f, %+.2f], F1 fault %+.2f [%+.2f, %+.2f], shadowing %+.2f [%+.2f, %+.2f], K<=0 fault %+.2f [%+.2f, %+.2f], shadowing %+.2f [%+.2f, %+.2f]'], ...
+    d.all, d.above, d.cl, d.lb, d.fault, d.shad, d.fault_low, d.shad_low);
+end
+
+function both(fid, varargin)
+fprintf(varargin{:}); fprintf(fid, varargin{:});
+end
+
+function k = amax(p)
+[~, k] = max(p, [], 2);
+end
+
+function m = mf1(y, yh, C)
+cm = accumarray([y(:) yh(:)], 1, [C C]);
+pr = diag(cm) ./ sum(cm, 1)'; rc = diag(cm) ./ sum(cm, 2);
+f = 2 * pr .* rc ./ (pr + rc); m = mean(f(sum(cm, 2) > 0), 'omitnan');
+end
+
+function f = cf1(y, yh, c)
+f = 2 * sum(y == c & yh == c) / max(sum(y == c) + sum(yh == c), 1);
+end
+
+function thr = kpi1_thr(yt, yp, bin, classes)
+u = unique(bin(~isnan(bin)));
+f = arrayfun(@(v) 100 * mf1(yt(bin == v), yp(bin == v), numel(classes)), u);
+k = find(f < 90, 1, 'last'); if isempty(k), k0 = 1; else, k0 = k + 1; end
+thr = NaN; if k0 <= numel(u), thr = u(k0); end
+end
+
+function s = yn(x)
+if x, s = 'yes'; else, s = 'no'; end
+end

@@ -8,12 +8,13 @@
 % at three severities (C.combo_sev), in the train, validation and test splits (a
 % combination never trained on is measured by experiment_combo_generalization.m).
 % Configurations: the 36 of policy_actions.m, applied by apply_countermeasure.m;
-% configurations with identical physics for a threat are simulated once
-% (pool_cell.m). Eb/N0: the grid of init_params.
+% configurations with identical physics for a threat are simulated once, and one that
+% differs in p.fec alone shares its run (pool_cell.m). Eb/N0: the grid of init_params.
 % Splits, geometries per (cell, Eb/N0): train 8, validation 6, test 12; edge speeds
 % 24 at hover for the clean link and the single threats at every severity, and 12 at
 % 161 km/h (the limit of small UAVs, Khawaja et al.) for the clean link and the
-% nominal severity; second test 60 for the clean link and the single threats, 72 per
+% nominal severity (24 at 161 km/h with edge161_n 48 in profile.json, speed_options.m);
+% second test 60 for the clean link and the single threats, 72 per
 % point with the test (each cell's geometries per split: PP.cell_geo). The test and
 % second test geometries are nested Latin hypercubes over speed, altitude, K of our
 % signal, the direction of the first interferer and the receive correlation
@@ -52,7 +53,7 @@
 % features of link_features.m (receiver measurements only), and the true BER and
 % frame error (reward and evaluation only).
 % The cells run in parallel, each worker in its own folder with its own copy of
-% the model. Every finished cell is kept on disk (data/c1p_cells, pool_checkpoint.m) under a
+% the model, the longest first and one per hand-out (pool_schedule.m). Every finished cell is kept on disk (data/c1p_cells, pool_checkpoint.m) under a
 % key of everything its frames depend on (link model MODEL_TAG, detector DET_ID, the
 % geometry ids of every split, the cell, the Eb/N0 grid, the configurations, its
 % geometries' draws, the frame options and its params), so a build stopped at any point
@@ -61,8 +62,17 @@
 % geometries of the same link model (MODEL_TAG) and only the test block differs, only
 % the test, edge-speed and second test splits are simulated. PP.det_id identifies the
 % detector (detector_id.m); pools of another detector are never reused.
+% Only with "core3_pools": true in profile.json (wf_options.m; D121 item 16, P-B) every frame is also scored
+% by this checkout's B3c three-state CNN (core3_model.m, pool_cell.m probs3), for rule_core3 in C2e; its
+% id is in the cells' key and in PP.core3_id, and pools of another id are never reused. Condition (a) is
+% checked here: without the model nothing is scored and PP.core3_not_run holds the statement for the book.
+% The coded configurations' truth comes from the decoder profile.json states (fec_rx,
+% fec_rx_config.m; a full build refuses without it): the D78 erasure rules, or the JSI
+% decoder chosen on dev set C (docs/noise_burst_protocol.md), recorded in PP.fec_rx and in
+% PP.model_tag (MODEL_TAG + its decisions entry).
 %
-% Output: data/policy_pools.mat (PP, clean_ref)
+% Output: data/policy_pools.mat (PP, clean_ref); C1c replaces clean_ref, PP.clean and
+% PP.clean_fer with the table of the clean validation pools (clean_ref_rebuild.m)
 
 close all; clc;
 warning('off', 'Simulink:cgxe:LeakedJITEngine');
@@ -77,6 +87,8 @@ S0 = load('params.mat'); p0 = S0.params; p0.quiet_build = true;
 assert_frame1_onsets(p0);                       % every threat on from its run's first frame (init_params.m)
 EBNO   = p0.EbNo_dB;
 NGEO   = [8 6 12 36 60];         % geometries per (cell, Eb/N0): train, validation, test, edge speeds, second test
+SPO = speed_options();           % profile.json edge161_n: 36 without it (12 flights at 161 km/h), or 48 (24)
+NGEO(4) = SPO.edge161_n;
 NHOVER = 24;                     % edge speeds: the first NHOVER at hover (every severity), the rest at 161 km/h (nominal)
 NCOMB  = [0 0 0 0 24];           % own geometries of the combined threats (0: they fly the split's geometries);
                                  % second test: 12 + 24 = 36 flights per point, the N_MIN of a verdict
@@ -98,13 +110,41 @@ if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (r
     COMBOS = {'jamming+path_loss', 'tone_jamming+path_loss', 'jamming+airframe_shadowing'};
     EBNO = [3 12]; NGEO = [2 2 2 2 2]; NCOMB = [0 0 0 0 2]; NHOVER = 1; N_COUNT = 2;
     BLOCK(3:5) = [18 18 19];                            % blocks of its own: its flights are never test flights
+    if SPO.edge161_n > 36, NGEO(4) = NGEO(4) + 1; end  % edge161_n 48: one more flight at 161 km/h
 end
+% The coded link's decoder, stated in profile.json (fec_rx_config.m): "d78" keeps the D78
+% erasure rules and the params as they are; the JSI decoder enters the params (so the
+% cells' keys) and the pools' model tag, so pools of another decoder are never reused
+FRX = fec_rx_config();
+if isempty(FRX)
+    if ~(exist('SMOKE', 'var') && SMOKE)
+        error('build_policy_pools:fec_rx', ['profile.json states no decoder of the coded link (fec_rx): "d78" for the ' ...
+            'D78 erasure rules, or the JSI decoder chosen on dev set C (docs/noise_burst_protocol.md)']);
+    end
+    FRX = struct('mode', 'd78');
+end
+p0 = fec_rx_on(p0, FRX);
+TAG = MODEL_TAG; if strcmp(FRX.mode, 'jsi'), TAG = [MODEL_TAG '+' FRX.rev]; end
+if strcmp(FRX.mode, 'jsi'), fprintf('Coded link decoder: JSI (%s)\n', TAG); else, fprintf('Coded link decoder: D78 erasure rules\n'); end
 
 D = load('data/trained_detector.mat', 'net', 'classes', 'ood', 'trained_at');
 nm = split_norm();                                     % the training z-score alone
 det = struct('net', D.net, 'ood', D.ood, 'classes', {cellstr(string(D.classes(:)'))}, ...
     'mu', nm.feat_mean, 'sd', nm.feat_std, 'fs', p0.symbol_rate * p0.sps);
 clear nm
+c3_id = ''; c3_note = '';                              % the three-state CNN's scores (core3_model.m), with "core3_pools" only
+cfg_c3 = []; if exist('CFG', 'var'), cfg_c3 = CFG; end
+if wf_options(cfg_c3).core3
+    [c3_m, c3_why] = core3_model();
+    if isempty(c3_m)
+        c3_note = 'rule_core3 was not run in profile 3; CORE_BW (profile 1) is the three-state CNN''s in-loop evidence';
+        fprintf('P-B (D121 item 16), condition (a) failed (%s): %s\n', c3_why, c3_note);
+    else
+        det.core3 = struct('net', c3_m.net); c3_id = c3_m.id;
+        fprintf('P-B (D121 item 16), condition (a): the three-state model exists (%s); every frame is scored by it too\n', c3_id);
+    end
+end
+c3_key = {}; if ~isempty(c3_id), c3_key = {c3_id}; end   % in the cells' key only when scored
 T = ood_thresholds(0.95);
 FZ = fusion_model();                                   % temporal fusion, the rule's quiet-slot alarm (select_fusion.m)
 UW = 1; if isfield(D.ood, 'win'), UW = D.ood.win; end                        % unknown-score window (eval_ood_detection.m)
@@ -174,8 +214,9 @@ runs = arrayfun(@(sp) 100 * BLOCK(sp) + r0(sp) + (1:nG(sp)), 1:nSp, 'UniformOutp
 old = [];
 if isfile('data/policy_pools.mat')
     Lo = load('data/policy_pools.mat', 'PP');
-    if isfield(Lo.PP, 'model_tag') && strcmp(Lo.PP.model_tag, MODEL_TAG) && isfield(Lo.PP, 'det_id') ...
-            && strcmp(Lo.PP.det_id, DET_ID) ...
+    oc3 = ''; if isfield(Lo.PP, 'core3_id'), oc3 = Lo.PP.core3_id; end
+    if isfield(Lo.PP, 'model_tag') && strcmp(Lo.PP.model_tag, TAG) && isfield(Lo.PP, 'det_id') ...
+            && strcmp(Lo.PP.det_id, DET_ID) && strcmp(oc3, c3_id) ...
             && numel(Lo.PP.runs) == nSp && isequal(Lo.PP.runs(1:2), runs(1:2)) && ~isequal(Lo.PP.runs{3}, runs{3}) ...
             && isequal(Lo.PP.scen, {cells.threat}) && isequal(Lo.PP.sev, [cells.sev]) ...
             && isequal(Lo.PP.ebno, EBNO) && isequal(Lo.PP.actions, ACTIONS) && isequaln(Lo.PP.level, [cells.level])
@@ -334,7 +375,7 @@ for c = 1:nC
 end
 
 %% 2. Simulation, one parallel job per cell
-NWP = N_WORKERS;
+NWP = N_WORKERS; pl = [];
 if exist('SMOKE', 'var') && SMOKE
     NWP = 0;                                            % reduced chain check: on this process, no parallel turn
 else
@@ -349,21 +390,18 @@ else
     end
 end
 CKD = fullfile(pwd, 'data', 'c1p_cells');               % finished cells (pool_checkpoint.m; the workers work elsewhere)
-keys = arrayfun(@(c) pool_checkpoint('key', {MODEL_TAG, DET_ID, runs, cells(c), EBNO, ACTIONS, geoc{c}, opt, ...
-    threat_params(p0, cells(c).threat, cells(c).sev, C)}), 1:nC, 'UniformOutput', false);
+keys = arrayfun(@(c) pool_checkpoint('key', [{MODEL_TAG, DET_ID, runs, cells(c), EBNO, ACTIONS, geoc{c}, opt, ...
+    threat_params(p0, cells(c).threat, cells(c).sev, C)}, c3_key]), 1:nC, 'UniformOutput', false);
 todo = pool_checkpoint('todo', CKD, keys);
+w = arrayfun(@(c) pool_cost(threat_params(p0, cells(c).threat, cells(c).sev, C), cells(c).threat, ACTIONS, geoc{c}, opt), todo);
+todo = todo(pool_schedule(w));                         % the longest cell first, one cell per free worker
 t0 = tic;
 fprintf('%d cells x %d configurations x %d Eb/N0 on %d workers; %d cells kept from an earlier start (%s)\n', ...
     nC, nA, nS, N_WORKERS, nC - numel(todo), CKD);
-parfor (k = 1:numel(todo), NWP)
-    c = todo(k); ce = cells(c);
-    p = threat_params(p0, ce.threat, ce.sev, C);
-    [Ps, pinfo] = pool_cell(p, ce.threat, ACTIONS, EBNO, geoc{c}, det, opt);
-    Pc = cell(nS, nA, nSp);
-    Pc(:, :, ce.splits) = Ps;
-    pool_checkpoint('save', CKD, c, keys{c}, struct('Pc', {Pc}, 'nuniq', pinfo.n_unique));
-    fprintf('  cell %2d/%d %-28s %-8s %2d unique configurations\n', c, nC, ce.threat, C.sev_names{ce.sev}, pinfo.n_unique);
-end
+S = struct('cells', {cells}, 'p0', {p0}, 'C', {C}, 'ACTIONS', {ACTIONS}, 'EBNO', {EBNO}, 'geoc', {geoc}, 'det', {det}, ...
+    'opt', {opt}, 'nS', {nS}, 'nA', {nA}, 'nSp', {nSp}, 'CKD', {CKD}, 'keys', {keys}, 'nC', {nC});
+pool_lpt(@(S, c) pool_job('c1p', S, c), S, todo, pl);
+clear S
 fprintf('Simulated in %.1f min\n', toc(t0) / 60);
 
 %% 3. Package
@@ -431,9 +469,11 @@ PP = struct('scen', {{cells.threat}}, 'sev', [cells.sev], 'level', [cells.level]
     'clean', clean_ref.ber, 'clean_fer', clean_ref.fer, 'classes', {det.classes}, 'maha_thr', T.maha, ...
     'maha_val', single(T.maha_val), 'unk_retain', T.retain, ...
     'fuse', FZ.FM, 'fuse_N', FZ.N, 'q_thr', FZ.q_thr, 'unk_win', UW, ...
-    'F_SUB', opt.F_SUB, 'event_frame', {evf}, 'fec_frames', p0.fec_frames, 'runs', {runs}, 'model_tag', MODEL_TAG, ...
+    'F_SUB', opt.F_SUB, 'event_frame', {evf}, 'fec_frames', p0.fec_frames, 'runs', {runs}, 'model_tag', TAG, 'fec_rx', FRX, ...
     'det_id', DET_ID, 'aoa_random', p0.int_aoa_random, 'k_random', p0.k_random, 'sps', p0.sps, 'bps', p0.bits_per_symbol, ...
     'feat_names', {link_features('names')}, 'created', datestr(now));
+if ~isempty(c3_id), PP.core3_sha256 = c3_m.sha256; PP.core3_N = c3_m.N; PP.core3_id = c3_id; end   % rule_core3's scores (probs3) in every pool
+if ~isempty(c3_note), PP.core3_not_run = c3_note; end
 pool_checkpoint('commit', 'data/policy_pools.mat', struct('PP', PP, 'clean_ref', clean_ref));
 pool_checkpoint('clear', CKD);
 

@@ -202,6 +202,22 @@ rep{end+1} = '--- Recall per class: training grid vs unseen Eb/N0 ---';
 for c = 1:numel(classes)
     rep{end+1} = sprintf('  %-20s %6.1f%% -> %6.1f%%', classes{c}, recall_seen(c), recall_unseen(c)); %#ok<SAGROW>
 end
+gap_lb = struct('cls', {}, 'diff', {}, 'lo', {}, 'hi', {}, 'n_unseen', {}, 'n_grid', {});
+if unseen_gap_on()                                      % unseen less grid recall, blocks resampled within each
+    rep{end+1} = '';
+    rep{end+1} = ['--- Lost-branch classes: recall on the unseen points less on the grid, 95% cluster bootstrap over the ' ...
+        'blocks (descriptive) ---'];
+    for c = {'antenna_fault', 'airframe_shadowing'}
+        b = blk(strcmp({blk.cls}, c{1}) & ismember([blk.ebno], EBNO_ALL));
+        un = ~ismember([b.ebno], EBNO_SEEN);
+        if ~any(un) || all(un), continue; end
+        [d, lo, hi] = boot_cluster([b.correct], [b.n], 1:numel(b), 2000, 4251, double(un));
+        gap_lb(end+1) = struct('cls', c{1}, 'diff', 100 * d, 'lo', 100 * lo, 'hi', 100 * hi, 'n_unseen', sum(un), ...
+            'n_grid', sum(~un)); %#ok<SAGROW>
+        rep{end+1} = sprintf('  %-20s %+.1f points [%+.1f, %+.1f]; clusters (blocks) %d unseen, %d on the grid', c{1}, ...
+            100 * d, 100 * lo, 100 * hi, sum(un), sum(~un)); %#ok<SAGROW>
+    end
+end
 rep{end+1} = '';
 rep{end+1} = sprintf(['--- Beyond the trained range (%d blocks per class and point, levels cycled): frames read as a ' ...
     'class with the same countermeasure [95%% interval], blocks, verdict against 90%% (edge_verdict.m) ---'], N_EDGE);
@@ -216,6 +232,7 @@ fid = fopen('results/unseen_snr.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose
 fprintf('\n%s\n', rep{:});
 save('results/unseen_snr.mat', 'summary', 'EBNO_ALL', 'EBNO_SEEN', 'EBNO_EDGE', 'acc', 'f1', 'aeq', 'n', 'gap', ...
     'acc_edge', 'f1_edge', 'aeq_edge', 'n_edge', 'recall_seen', 'recall_unseen', 'classes', 'blk', 'edge', 'AP', 'SHT');
+if ~isempty(gap_lb), save('results/unseen_snr.mat', 'gap_lb', '-append'); end
 
 fig = figure('Position', [100 100 760 420], 'Color', 'w'); hold on;
 plot(EBNO_ALL(seen), acc(seen), '-o', 'LineWidth', 1.6, 'MarkerFaceColor', [0 0.45 0.74], 'DisplayName', 'training Eb/N0');

@@ -39,6 +39,7 @@ Ip = idle_of(P); Ic = zeros(0, size(Ip, 2));
 if has_c, Ic = idle_of(Pc); end
 Bp = bch_of(P); Bc = zeros(0, size(Bp, 2));
 if has_c, Bc = bch_of(Pc); end
+if has_c && isempty(Bc) && ~isempty(Bp), Bc = nan(numel(Pc.run), size(Bp, 2)); end   % a clean pool without the channel records
 for r = 1:numel(ur)
     ip = find(ir == r); ic = zeros(0, 1);
     e0 = NaN; k = find(runs == ur(r), 1); if ~isempty(k), e0 = ev(k); end
@@ -59,7 +60,7 @@ pc = double(J.probs);
 if ~isempty(PP.fuse)
     S = struct('run', J.run, 'pos', run_pos(J.run), 'gain_ant', J.gant, 'feats_raw', J.feat, 'feat_names', ...
         {link_features('names')}, 'idle', J.idle, 'bch', J.bch);
-    pc = fuse_classes('apply', PP.fuse, fuse_classes('windows', S, pc, PP.fuse_N));
+    pc = fuse_classes('apply', PP.fuse, fuse_classes('windows', S, pc, PP.fuse_N, fuse_classes('cues', PP.fuse)));
 end
 [~, k] = max(pc, [], 2);
 kl = k;                                                  % with the latched cause of a lost branch

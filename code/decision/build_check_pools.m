@@ -51,6 +51,7 @@ if exist('SMOKE', 'var') && SMOKE                       % reduced chain check (r
     THREATS = THREATS(unique([1 find(strcmp(THREATS, 'airframe_shadowing'))])); N_GEO = 2;
 end
 EGRID = PP.ebno; ACTIONS = PP.actions; opt.F_SUB = PP.F_SUB; vrange = PP.speed_range;
+PRX = fec_rx_of(PP); p0 = fec_rx_on(p0, PRX);           % the policy pools' decoder of the coded link
 PTAG = PP.model_tag; PID = ''; if isfield(PP, 'det_id'), PID = PP.det_id; end
 clear PP                                                % the pools' fields read, not their frames (memory)
 EMID = (EGRID(1:end-1) + EGRID(2:end)) / 2;             % between the Eb/N0 points
@@ -181,7 +182,7 @@ for c = 1:nC
 end
 
 %% 2. Simulation, one parallel job per cell
-NWP = N_WORKERS;
+NWP = N_WORKERS; pl = [];
 if exist('SMOKE', 'var') && SMOKE
     NWP = 0;
 else
@@ -201,17 +202,20 @@ CKD = fullfile(pwd, 'data', 'c1c_check_cells');        % finished cells (pool_ch
 keys = arrayfun(@(c) pool_checkpoint('key', {PTAG, DET_ID, runs, cells(c), fld{c}, EB, ACTIONS, geoc{c}, opt, p0}), ...
     1:nC, 'UniformOutput', false);
 todo = pool_checkpoint('todo', CKD, keys);
+w = zeros(size(todo));
+for k = 1:numel(todo)
+    ce = cells(todo(k)); p = p0; p.active_threat = ce.threat;
+    if ~isempty(fld{todo(k)}), p.(fld{todo(k)}) = ce.level; end
+    w(k) = pool_cost(p, ce.threat, ACTIONS, geoc{todo(k)}, opt);
+end
+todo = todo(pool_schedule(w));                         % the longest cell first, one cell per free worker
 t0 = tic;
 fprintf('%d cells x %d configurations, %d flights per point, on %d workers; %d cells kept from an earlier start (%s)\n', ...
     nC, nA, N_GEO, N_WORKERS, nC - numel(todo), CKD);
-parfor (k = 1:numel(todo), NWP)
-    c = todo(k); ce = cells(c);
-    p = p0; p.active_threat = ce.threat;
-    if ~isempty(fld{c}), p.(fld{c}) = ce.level; end
-    [Ps, pinfo] = pool_cell(p, ce.threat, ACTIONS, EB, geoc{c}, det, opt);
-    pool_checkpoint('save', CKD, c, keys{c}, Ps);
-    fprintf('  cell %2d/%d %-22s %-6s %6.2f  %2d unique configurations\n', c, nC, ce.threat, ce.kind, ce.level, pinfo.n_unique);
-end
+S = struct('cells', {cells}, 'p0', {p0}, 'fld', {fld}, 'ACTIONS', {ACTIONS}, 'EB', {EB}, 'geoc', {geoc}, 'det', {det}, ...
+    'opt', {opt}, 'CKD', {CKD}, 'keys', {keys}, 'nC', {nC});
+pool_lpt(@(S, c) pool_job('c1c', S, c), S, todo, pl);
+clear S
 fprintf('Simulated in %.1f min\n', toc(t0) / 60);
 
 %% 3. Package
@@ -233,7 +237,7 @@ CK = struct('scen', {{cells.threat}}, 'kind', {{cells.kind}}, 'sev', [cells.sev]
     'clean', cellfun(@(Q) mean(Q.ber(own(Q))), Pc), 'clean_fer', cellfun(@(Q) mean(double(Q.fer(own(Q)))), Pc), ...
     'classes', {det.classes}, 'maha_thr', T.maha, 'fuse', FZ.FM, 'fuse_N', FZ.N, 'q_thr', FZ.q_thr, 'unk_win', UW, ...
     'F_SUB', opt.F_SUB, 'event_frame', {{evf}}, 'fec_frames', p0.fec_frames, ...
-    'runs', {{runs}}, 'family', FAM, 'block', BLOCK, 'model_tag', PTAG, 'det_id', DET_ID, ...
+    'runs', {{runs}}, 'family', FAM, 'block', BLOCK, 'model_tag', PTAG, 'fec_rx', PRX, 'det_id', DET_ID, ...
     'aoa_random', p0.int_aoa_random, 'sps', p0.sps, 'bps', p0.bits_per_symbol, ...
     'feat_names', {link_features('names')}, 'created', datestr(now));
 pool_checkpoint('commit', f_out, struct('CK', CK));

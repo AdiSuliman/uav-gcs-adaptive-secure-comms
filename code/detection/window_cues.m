@@ -1,4 +1,4 @@
-function [x, names] = window_cues(G, Fw, Iw, Bw)
+function [x, names] = window_cues(G, Fw, Iw, Bw, varargin)
 %WINDOW_CUES  Evidence of the last decision cycles beside temporal_evidence.m: the fusion's
 %   further columns (fuse_classes.m; policy_monitor.m builds the same row per cycle).
 %   Batch over E windows of n cycles, oldest first:
@@ -61,6 +61,47 @@ function [x, names] = window_cues(G, Fw, Iw, Bw)
 %   2025, eq. 2) [dB], los_coh its coherence there with the others. A common phase of the
 %   frame cancels in every cross-correlation; only the antennas' gains decide which
 %   antenna is weakest (its place in the array is not used).
+%
+%   xe = window_cues('extra', G, Fw, Iw, opt): the columns a fusion adds after its own
+%   (FM.cues, select_fusion.m; fuse_classes.m puts them last), E x numel(window_cues('extra_names', opt)):
+%   opt.cfar = [T1 T2 m0], the idle time against the radio's own noise: the busy rule of the
+%     record is a constant over the floor, which a weak emitter never crosses, so here each
+%     gap's crest max - p10 and spread p90 - p10 over its own floor p10 (Grimaldi et al.
+%     2019: the threshold mu_N + 2 sigma_N on the radio's measured noise, the crest factor;
+%     Kazim et al. 2026, eq. 1.3: a threshold from interference-free samples). T1, T2: the
+%     clean gaps' crest and spread exceeded by at most 1% of them, m0 their median crest.
+%     cf_crest_hi, cf_spread_hi: shares of the window's gaps above T1, T2; cf_crest_ex: the
+%     window's mean crest less m0, at least 0; cf_crest_now: the latest gap's crest above T1.
+%   opt.iso = true, the branch that steps (detection-isolation, Xie et al. 2021, Sec. III-I):
+%     per antenna the best split (the two-sample step below) of its offset to the others'
+%     median; iso_t the largest t, iso_db that antenna's drop, iso_margin its t less the
+%     second largest, iso_agree 1 when it is the weakest by its mean as above.
+%   opt.glr = true, one branch's drop against the others in linear power: per antenna its
+%     power over the mean of the others' per cycle, r (a common change of our level cancels),
+%     and the generalized likelihood ratio of a drop of r's mean at an unknown cycle of the
+%     window, both the mean before and the mean after it unknown and estimated in the window:
+%     an exponential change-point GLR adapted from Xie et al. 2021, eq. 20, and its
+%     window-limited form, Xie, Moustakides & Xie 2022, eq. 9 (both with a known pre-change
+%     density), the power taken as exponential about its mean (Rayleigh, an assumption):
+%     n log m - n1 log m1 - n2 log m2 over the splits whose later mean m2 is below the
+%     earlier m1 (m the window's), times phi = branch_ref('eff', P), the share of
+%     independent cycles (no library source; hover repeats one fade, Lee 1985, Sec. IV); the
+%     largest over the antennas (the branch that steps, not the weakest by its mean:
+%     detection-isolation, Xie et al. 2021, Sec. III-I). gl_llr that ratio, gl_db
+%     10 log10(m1 / m2), gl_age the cycles since the split, gl_margin the ratio less the
+%     largest of the other antennas, gl_phi phi. opt.phi1 = true: phi fixed at 1 here and in
+%     the held columns' CUSUM, without gl_phi.
+%   opt.post = true, the branch cues of the Rician K and the spread above taken over the
+%     cycles from that split on (at least 3, else the whole window), on the antenna gl_llr
+%     picks (the weakest by its mean where no antenna drops): the moment K assumes a
+%     stationary sample (Aoki & Honda 2025, eq. 2), which a window across a step is not;
+%     over few cycles its error can be large (Aoki & Honda 2025, Sec. 3.4).
+%     ps_k_weak, ps_k_strong (the others' mean), ps_k_contrast, ps_sd_weak, ps_sd_contrast
+%     [dB], ps_n the share of the window's cycles used.
+%   opt.held = true, the held reference of every branch and its drop's window-limited CUSUM
+%     (branch_ref.m): xe = window_cues('extra', G, Fw, Iw, opt, H) with H = E x 4 the
+%     columns branch_ref has kept over the run's cycles up to the window's last
+%     (fuse_classes.m, policy_monitor.m).
 names = {'k_strong', 'k_contrast', 'sd_weak', 'sd_contrast', 'corr_ws', 'trend', 'step_max', 'off_range', ...
     'cm_slope', 'cm_sd', 'margin_mean', 'sinr_gap_w', 'off_first', 'off_last', 'onset_in_win', 'gap_strong', ...
     'stp_t', 'stp_db', 'stp_age', 'stp_t_mon', 'stp_db_mon', ...
@@ -70,7 +111,12 @@ names = {'k_strong', 'k_contrast', 'sd_weak', 'sd_contrast', 'corr_ws', 'trend',
     'coh_weak', 'coh_others', 'coh_ref', 'coh_contrast', 'coh_cycles', 'los_weak', 'los_others', 'los_contrast', 'los_k', 'los_coh'};
 NB = 10;                                                           % the branch record's cycles (the link features' window)
 if ischar(G)
-    x = names; if strcmp(G, 'branch_window'), x = NB; end
+    switch G
+        case 'branch_window', x = NB;
+        case 'extra_names', x = extra_names(Fw);
+        case 'extra', x = extra_cues(Fw, Iw, Bw, varargin{:});
+        otherwise, x = names;
+    end
     return;
 end
 [E, nr, n] = size(G);
@@ -159,6 +205,117 @@ end
 % ---- branch coherence ----
 if nargin >= 4 && ~isempty(Bw), x(:, end - 9:end) = branch_coherence(double(Bw)); end
 x(~isfinite(x)) = 0;
+end
+
+function n = extra_names(opt)
+% Names of the columns window_cues('extra', ..., opt) returns.
+n = {};
+if isempty(opt), return; end
+if isfield(opt, 'cfar') && ~isempty(opt.cfar), n = [n, {'cf_crest_hi', 'cf_spread_hi', 'cf_crest_ex', 'cf_crest_now'}]; end
+if isfield(opt, 'iso') && opt.iso, n = [n, {'iso_t', 'iso_db', 'iso_margin', 'iso_agree'}]; end
+if isfield(opt, 'glr') && opt.glr, n = [n, {'gl_llr', 'gl_db', 'gl_age', 'gl_margin'}]; if ~phi1(opt), n = [n, {'gl_phi'}]; end, end
+if isfield(opt, 'post') && opt.post, n = [n, {'ps_k_weak', 'ps_k_strong', 'ps_k_contrast', 'ps_sd_weak', 'ps_sd_contrast', 'ps_n'}]; end
+if isfield(opt, 'held') && opt.held, n = [n, branch_ref('names')]; end
+end
+
+function x = extra_cues(G, ~, Iw, opt, H)
+% The extra columns (see the header) of E windows of n cycles; H the held columns (opt.held).
+[E, nr, n] = size(G);
+x = zeros(E, numel(extra_names(opt)));
+if isempty(x), return; end
+k = 0;
+if isfield(opt, 'cfar') && ~isempty(opt.cfar)
+    if ~isempty(Iw)
+        Iw = double(Iw); nm = idle_summary('names');
+        col = @(s) reshape(Iw(:, find(strcmp(nm, s), 1), :), E, n);
+        ok = col('gap_ms') > 0 & ~isnan(col('occ'));
+        cr = col('max') - col('p10'); sp = col('p90') - col('p10');
+        nv = sum(ok, 2); has = nv > 0;
+        x(has, 1) = sum(ok(has, :) & cr(has, :) > opt.cfar(1), 2) ./ nv(has);
+        x(has, 2) = sum(ok(has, :) & sp(has, :) > opt.cfar(2), 2) ./ nv(has);
+        mc = sum(cr .* ok, 2, 'omitnan') ./ max(nv, 1);
+        x(has, 3) = max(0, mc(has) - opt.cfar(3));
+        x(:, 4) = ok(:, end) & cr(:, end) > opt.cfar(1);
+    end
+    k = 4;
+end
+if isfield(opt, 'iso') && opt.iso && nr > 1
+    G = double(G);
+    T = zeros(E, nr); Db = zeros(E, nr);
+    for a = 1:nr
+        o = setdiff(1:nr, a);
+        d = reshape(G(:, a, :), E, n) - reshape(median(G(:, o, :), 2), E, n);
+        [T(:, a), Db(:, a)] = best_step(d);
+    end
+    [ts, ord] = sort(T, 2, 'descend');
+    i1 = sub2ind([E nr], (1:E)', ord(:, 1));
+    [~, w] = min(10 * log10(mean(10 .^ (G / 10), 3)), [], 2);
+    x(:, k + 1) = ts(:, 1); x(:, k + 2) = Db(i1); x(:, k + 3) = ts(:, 1) - ts(:, 2); x(:, k + 4) = ord(:, 1) == w;
+end
+if isfield(opt, 'iso') && opt.iso, k = k + 4; end
+gl = isfield(opt, 'glr') && opt.glr; ps = isfield(opt, 'post') && opt.post;
+if (gl || ps) && nr > 1
+    [L, a, s, db, mg, phi] = branch_glr(double(G), phi1(opt));
+    c = [L, db, (n - s + 1) .* (L > 0), mg, phi]; c = c(:, 1:5 - phi1(opt));
+    if gl, x(:, k + (1:size(c, 2))) = c; k = k + size(c, 2); end
+    if ps, x(:, k + (1:6)) = post_split(double(G), a, s, L > 0); k = k + 6; end
+elseif gl || ps
+    k = k + (5 - phi1(opt)) * gl + 6 * ps;
+end
+if isfield(opt, 'held') && opt.held
+    if nargin < 5 || size(H, 2) ~= numel(branch_ref('names')), error('window_cues: the held columns (branch_ref.m) are missing'); end
+    x(:, k + (1:size(H, 2))) = H;
+end
+x(~isfinite(x)) = 0;
+end
+
+function [L, a, s, db, mg, phi] = branch_glr(G, one)
+% Per window the largest one-sided exponential GLR of one antenna's power over the others'
+% mean (see the header), times phi (1 with one): its value, antenna, split (first cycle
+% after), drop [dB], margin over the other antennas, phi. Without a drop: 0, the weakest
+% antenna by its mean.
+[E, nr, n] = size(G);
+P = 10 .^ (G / 10);
+phi = ones(E, 1); if ~one, phi = branch_ref('eff', P); end
+La = zeros(E, nr); Sa = ones(E, nr); Da = zeros(E, nr);
+for b = 1:nr
+    r = reshape(P(:, b, :), E, n) ./ max(reshape(mean(P(:, setdiff(1:nr, b), :), 2), E, n), realmin);
+    c = cumsum(r, 2); T = c(:, end); m = T / n;
+    for t = 2:n
+        n1 = t - 1; n2 = n - n1;
+        m1 = c(:, n1) / n1; m2 = max((T - c(:, n1)) / n2, realmin);
+        v = (n * log(m) - n1 * log(m1) - n2 * log(m2)) .* (m2 < m1);
+        u = v > La(:, b);
+        La(u, b) = v(u); Sa(u, b) = t; Da(u, b) = 10 * log10(m1(u) ./ m2(u));
+    end
+end
+La = La .* phi;
+[Ls, ord] = sort(La, 2, 'descend');
+L = Ls(:, 1); a = ord(:, 1);
+mg = L; if nr > 1, mg = L - Ls(:, 2); end
+[~, w] = min(10 * log10(mean(P, 3)), [], 2);
+a(L <= 0) = w(L <= 0);
+i = sub2ind([E nr], (1:E)', a);
+s = Sa(i); db = Da(i); s(L <= 0) = 1; db(L <= 0) = 0;
+end
+
+function t = phi1(opt)
+% phi fixed at 1 (opt.phi1)
+t = isfield(opt, 'phi1') && opt.phi1;
+end
+
+function x = post_split(G, a, s, dr)
+% The K and spread cues over the cycles from split s on (at least 3, else the whole window) of
+% antenna a against the others (see the header).
+[E, nr, n] = size(G); x = zeros(E, 6);
+for e = 1:E
+    c = 1:n; if dr(e) && n - s(e) + 1 >= 3, c = s(e):n; end
+    o = setdiff(1:nr, a(e));
+    g = reshape(G(e, :, c), nr, []); P = 10 .^ (g / 10);
+    K = zeros(nr, 1); if numel(c) >= 3, K = arrayfun(@(b) k_moment(P(b, :)), (1:nr)'); end
+    sd = std(g, 0, 2);
+    x(e, :) = [K(a(e)), mean(K(o)), K(a(e)) - mean(K(o)), sd(a(e)), sd(a(e)) - mean(sd(o)), numel(c) / n];
+end
 end
 
 function [tb, db, ab] = best_step(v)

@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# d91 fusion deployment queue (docs/d91_fuse.md, sections 8-12 on branch d91-fuse): one
+# single-thread MATLAB job at a time, each only when gate.ps1 says OK (>= 35 GB commit free, at
+# most one other running non-pipeline MATLAB); checked every 10 min, a job given up after 24 h
+# of waiting. Works only in a git-archive export of <SHA> under $Q, a copy of the d90 smoke
+# data under $Q/wrap and the d91_fuse scratch folder (the extracts); never in a live worktree.
+# Its MATLAB sessions get their own short TEMP. Sends no signal to any process.
+#
+#   bash d91q.sh <SHA>
+#
+# Jobs: tests (focused), wrap (wrap_check.m), phi_p1, phi_p3 (m_phi.m), phi_both (the verdict).
+# Logs: $Q/logs/<job>.log, the queue's own log, and $Q/logs/summary.log. When the wrap and the
+# phi jobs end, their results are written into docs/d91_fuse.md of the d91-fuse worktree and
+# committed (that file only) and pushed.
+#
+# Start detached (PowerShell):
+#   $si = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ShowWindow=[uint16]0}
+#   Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine='"C:\Program Files\Git\bin\bash.exe" -lc "bash ''/c/Users/Adi Suliman/d91q/fuse/d91q.sh'' <SHA> >> ''/c/Users/Adi Suliman/d91q/fuse/logs/queue.log'' 2>&1"'; CurrentDirectory='C:\Users\Adi Suliman\d91q\fuse'; ProcessStartupInformation=$si}
+
+SHA=${1:-}
+Q="/c/Users/Adi Suliman/d91q/fuse"
+QW='C:\Users\ADISUL~1\d91q\fuse'
+REPO="/c/Users/Adi Suliman/uav-gcs-d91-fuse"
+FZ="/c/Users/ADISUL~1/AppData/Local/Temp/claude/C--Users-Adi-Suliman-uav-gcs-adaptive-secure-comms/0ff3360f-912b-4701-bfb0-77d6917b5fc3/scratchpad/d91_fuse"
+FZW='C:\Users\ADISUL~1\AppData\Local\Temp\claude\C--Users-Adi-Suliman-uav-gcs-adaptive-secure-comms\0ff3360f-912b-4701-bfb0-77d6917b5fc3\scratchpad\d91_fuse'
+MATLAB="/c/Program Files/MATLAB/R2026a/bin/matlab.exe"
+GATE='C:\Users\Adi Suliman\d91q\fuse\gate.ps1'
+POLL=600
+WAIT_MAX=$((24 * 3600))
+LOCK="$Q/d91q.lock.d"
+
+say() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*"; }
+
+[[ "$SHA" =~ ^[0-9a-f]{7,40}$ ]] || { say "usage: bash d91q.sh <SHA>"; exit 1; }
+mkdir "$LOCK" 2>/dev/null || { say "another queue holds $LOCK; not started"; exit 1; }
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+
+E="$Q/$SHA"; EW="$QW\\$SHA"
+mkdir -p "$Q/logs" "$Q/tmp" "$E" || exit 1
+if [ ! -f "$E/startup.m" ]; then
+  ( set -o pipefail; git -C "$REPO" archive --format=tar "$SHA" | tar -x -C "$E" ) || { say "export of $SHA failed"; exit 1; }
+fi
+[ -f "$Q/wrap/data/policy_pools.mat" ] || { say "the smoke data copy in $Q/wrap is missing"; exit 1; }
+cp "$E/docs/d91_fuse_m_phi.m.txt" "$FZ/m_phi.m" || exit 1          # the jobs run the committed scripts
+cp "$E/docs/d91_fuse_wrap_check.m.txt" "$Q/wrap/wrap_check.m" || exit 1
+TW="$QW\\tmp"
+say "d91 queue: $SHA exported to $E; TEMP of the jobs $TW"
+
+INIT="maxNumCompThreads(1);"
+CODE="$EW\\code"
+FOCUS="{'test_m_files_parse', 'test_seed_streams_disjoint', 'test_branch_evidence_cues', 'test_fusion_adopt_rules', 'test_window_cues_extra', 'test_fusion_target_age', 'test_fusion_pick_deploy'}"
+TESTS="f = {r(~[r.Passed]).Name}; fprintf('D91TESTS %d/%d\n', sum([r.Passed]), numel(r)); if ~isempty(f), fprintf('D91FAIL %s\n', f{:}); end; exit(double(isempty(r) || ~all([r.Passed])))"
+
+NAMES=(tests wrap phi_p1 phi_p3 phi_both)
+DIRS=("$E" "$Q/wrap" "$FZ" "$FZ" "$FZ")
+CMDS=(
+  "$INIT startup; r = runtests('code/tests/test_core.m', 'ProcedureName', $FOCUS); $TESTS"
+  "$INIT wrap_check('$QW\\wrap', '$CODE');"
+  "$INIT m_phi('p1', '$CODE');"
+  "$INIT m_phi('p3', '$CODE');"
+  "$INIT m_phi('both');"
+)
+
+gate() { powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$GATE" 2>&1 | tr -d '\r' | tail -1; }
+
+fill() {  # write a job's results into the note, commit that file only, push
+  ( cd "$REPO" && python -I "$Q/fill.py" "$1" "$Q" "$FZ" >> "$Q/logs/fill.log" 2>&1 &&
+    git commit -q -m "d91 note: $1 results (written by the d91 queue)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- docs/d91_fuse.md >> "$Q/logs/fill.log" 2>&1 &&
+    git push -q origin d91-fuse >> "$Q/logs/fill.log" 2>&1 ) && say "fill $1: committed and pushed" || say "fill $1: not committed (see fill.log)"
+}
+
+for i in "${!NAMES[@]}"; do
+  n=${NAMES[$i]}; log="$Q/logs/$n.log"
+  if [ "$n" = phi_both ] && ! { [ -f "$FZ/m_phi_p1.mat" ] && [ -f "$FZ/m_phi_p3.mat" ]; }; then say "job $n skipped: a profile's reading is missing"; continue; fi
+  t0=$(date +%s)
+  while :; do
+    g=$(gate)
+    case "$g" in OK*) say "job $n: $g"; break;; esac
+    if [ $(( $(date +%s) - t0 )) -ge "$WAIT_MAX" ]; then say "job $n: gave up after 24 h of waiting ($g)"; break 2; fi
+    say "job $n waits: ${g:-no answer}"
+    sleep "$POLL"
+  done
+  say "job $n starts in ${DIRS[$i]} (log $log)"
+  ( cd "${DIRS[$i]}" && TEMP="$TW" TMP="$TW" "$MATLAB" -singleCompThread -batch "${CMDS[$i]}" ) >> "$log" 2>&1
+  rc=$?
+  say "job $n ended rc=$rc ($(( ($(date +%s) - t0) / 60 )) min with the wait)"
+  case "$n" in wrap) fill wrap;; phi_both) fill phi;; esac
+done
+
+{ echo "d91 queue summary $(date '+%Y-%m-%d %H:%M:%S'), code $SHA"
+  grep -h "ended rc=\|gave up\|skipped" "$Q/logs/queue.log" | tail -20
+  [ -f "$Q/logs/tests.log" ] && grep -hE 'D91TESTS|D91FAIL' "$Q/logs/tests.log" | sed 's/^/tests: /'
+  [ -f "$Q/wrap/wrap_check.txt" ] && grep -hE '^PICK PATH|^A\.|^B\.|^C\.|after the jump|recall|hover' "$Q/wrap/wrap_check.txt" | sed 's/^/wrap: /'
+  for p in p1 p3 both; do [ -f "$FZ/m_phi_$p.txt" ] && grep -hE 'VERDICT|rebuilds|reproduces|keep phi|rule (yes|no)' "$FZ/m_phi_$p.txt" | sed "s/^/phi $p: /"; done
+} > "$Q/logs/summary.log"
+say "queue done; summary in $Q/logs/summary.log"

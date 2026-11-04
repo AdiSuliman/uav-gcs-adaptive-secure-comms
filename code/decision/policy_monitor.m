@@ -25,16 +25,40 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   window than C.ratio_ok x the clean coded link's loss over its packets plus one loss
 %   event, the Q/2 packets whose codewords share a frame the decoder cannot repair (the
 %   slack of restored_plr, packet_share.m).
+%   PP.deg_mode (default C.deg_mode 'ratio', the test above; docs/deg_fix_protocol.md): 'win'
+%   reads the clean reference at the median measured Eb/N0 estimate of the BER window's frames
+%   (M.ebno_win, a window that restarts with the BER window); 'win_q' compares with the clean
+%   (1 - alpha) quantile of the window BER at that Eb/N0 (PP.ber_q, deg_quantile.m) instead of
+%   C.ratio_ok x the mean; 'win_q_gate' as 'win_q', degraded only with quiet-slot interference
+%   (q_iot at least PP.q_thr, default C.q_alarm_db) in a frame of the window, else M.deg_quiet
+%   (degraded, no RF evidence: no alarm). The coded test is the same in every mode; the gate
+%   applies to it too.
 %   Detected class: from the temporal fusion of the last PP.fuse_N cycles and the
 %   current one (temporal_evidence.m, fuse_classes.m) when PP.fuse is set, otherwise
 %   the frame's own detector output; 'unknown' when the unknown-threat score, averaged
-%   over the last PP.unk_win cycles, is below its threshold.
+%   over the last PP.unk_win cycles, is below its threshold PP.maha_thr: every class with
+%   PP.unk_mode 'all' (the default), only a class that raises no alarm (none,
+%   benign_interference) with 'nonhostile', so a hostile class read keeps its alarm (the mode
+%   and the threshold's retention are chosen on validation, train_dqn.m). Three-state mode
+%   (PP.core3_on, set by policy_decide.m for opt.core3): the class is the argmax of the mean
+%   log-probability log(max(p, 1e-6)) of the three-state CNN (obs.probs3: clean, narrowband,
+%   wideband -> none, tone_jamming, jamming) over the last PP.core3_N cycles, fewer at the
+%   episode's start (core_cnn_eval.m 'logp'); the window restarts only with the episode, not at
+%   a configuration change. No fusion model, no unknown-threat flag, no lost-branch latch, no
+%   sweeper confirmation in this mode. With FM.unk in
+%   PP.fuse (D111) the statistic is U (unk_stat.m) of that mean and the window's physics row
+%   (ood_cue.m: temporal_evidence.m's persistence columns and window_cues.m's), p_cue = 1
+%   while the window is not full, below unk_threshold(PP) (FM.unk.val at PP.unk_retain);
+%   M.unk and M.unk_u hold the flag and U.
 %   Alarm, PP.alarm_mode 'class' (default): a hostile threat class, or degradation;
 %   'none', 'benign_interference' (non-hostile, D9) and 'unknown' raise it only
 %   through degradation. 'class_drop': as 'class', but the class path_loss
 %   counts only when the signal-over-thermal estimate has dropped by at least
 %   PP.drop_db from the episode's reference, and that drop raises the alarm by itself
-%   (drop_alarm): a step of attenuation stays a lower signal over thermal noise after the
+%   (drop_alarm); the reference takes the cycles without an alarm of an excursion of that
+%   drop above half the smallest path-loss level only once it has returned below it without
+%   the drop alarm (drop_ref.m, as 'class_cusum' holds it): a step below the threshold is
+%   never absorbed into the reference. A step of attenuation stays a lower signal over thermal noise after the
 %   detector's window has passed its onset, while moving away lowers it by at most
 %   8.69 v / d dB/s, about 0.2 dB between the reference and the last 3 cycles at
 %   161 km/h and 0.28 km. The estimate is our signal over the thermal floor (SINR +
@@ -52,13 +76,29 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   once it has returned to 0 without the drop alarm (drop_ref.m), so it keeps the level
 %   before a change while the evidence of one builds up.
 %   An alarm is CONFIRMED when at least m of the last n cycles carried
-%   one (M-of-N binary integration, PP.confirm, default C.confirm).
+%   one (M-of-N binary integration, PP.confirm, default C.confirm), or, with PP.confirm_sweep
+%   = [k n] (chosen on validation, choose_drop_threshold.m), when at least k of the last n
+%   cycles read sweeping_jammer: a sweep revisits our channel once per period, up to 83.5 ms,
+%   so it is on isolated cycles (k-out-of-n detection of a swept jammer, Norouzi et al. 2006).
+%   With PP.confirm_drop = [k n] (chosen per monitor on validation, choose_drop_threshold.m) the drop
+%   alarm confirms by itself too: at least k of the last n cycles carried it.
+%   With PP.s1_gate or PP.lb_accept the monitor adds M.harm: evidence of harm in at least one of the
+%   last n cycles of the confirmation (degraded, degraded without RF evidence, or the drop alarm);
+%   single writer, shared by both. With PP.lb_accept (struct, field tau_hi; D121 item 1, CLT) a
+%   lost-branch class (antenna_fault, airframe_shadowing) counts as hostile only with its fused
+%   posterior (M.probs, summed over the two classes) at or above tau_hi, or with M.harm; withheld
+%   cycles keep M.alarm from degradation/the drop alarm alone and set M.lb_not_accepted. Absent or
+%   empty: off, bit for bit. With PP.release_m it
+%   adds M.quiet: the cycle carries no alarm, no degradation, no drop alarm, the quiet slot is under
+%   PP.q_thr (default C.q_alarm_db) and no bin of the cycle's idle gap is busy (idle_summary.m occ); the
+%   last 8 cycles' bits are kept for policy_decide.m. The bits are kept by hist_bits, their only writer.
 %   The monitor also keeps the last C.hist observation vectors of policy_state.m,
 %   and the window of the temporal fusion (probabilities, antenna gains, link
 %   features, unknown scores, and obs.idle, the record of each cycle's idle time,
 %   idle_summary.m, and obs.bch, the record of each cycle's channel estimates per antenna,
 %   branch_record.m, over window_cues('branch_window') cycles: the fusion's row holds
-%   window_cues.m's columns, as fuse_classes.m's). The window's antenna gains are kept
+%   window_cues.m's columns, as fuse_classes.m's), and, for a fusion with the held columns,
+%   the held reference of every branch over the episode's cycles (branch_ref.m, mem.br). The window's antenna gains are kept
 %   less the power step and its SINR less the whole known gain of the configuration each
 %   frame was received with, so the fusion reads no level step at a change of our own
 %   configuration; within one configuration the window's statistics are those of the
@@ -66,10 +106,17 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   mem.since starts saturated (10): the policies never see the episode clock.
 %   mem.deg_n / mem.conf_n: consecutive degraded / confirmed-alarm cycles; mem.pend:
 %   a requested change not yet received.
+%   With a drop alarm ('class_drop', 'class_cusum') and PP.lb_complete the memory also holds the
+%   link-budget completion's reading (lb_complete.m), written by lb_track alone: mem.lb_dc, the
+%   drop of the combined antenna gain against its own held reference [dB] (1 x NE, NaN without
+%   antenna gains), mem.drop_n, the consecutive cycles of a confirmed drop alarm, and the
+%   reference's state (lb_ref, lb_rp, lb_rx, lb_e). Without PP.lb_complete none of it exists.
 %   M: ber_avg, plr (NE x 1), ebno_est (as measured), drop (dB, without the configurations'
 %      known gains), drop_alarm, degraded, cls, alarm, confirmed (1 x NE),
 %      probs (NE x classes, fused), te (NE x 9, persistence measurements of the window,
-%      temporal_evidence.m)
+%      temporal_evidence.m); with a deg_mode other than 'ratio' also ebno_win and deg_thr
+%      (NE x 1), and with 'win_q_gate' deg_quiet (1 x NE); in the three-state mode l3 (NE x 3,
+%      the window's mean log-probabilities)
 C = decision_config();
 switch cmd
     case 'init'
@@ -80,7 +127,7 @@ switch cmd
             'deg_n', zeros(1, NE), 'conf_n', zeros(1, NE), 'alarm', false(NE, 8), 'ebno', nan(NE, 3), ...
             'ref', nan(NE, 10), 'hist', [], 'wp', [], 'wg', [], 'wf', [], 'wu', [], 'wn', zeros(1, NE), ...
             'unk_now', false(1, NE), 'pend', false(1, NE), 'wi', [], 'wb', [], 'cs', zeros(NE, 1), ...
-            'dx', nan(NE, C.cusum_win), 'rp', nan(NE, 10), 'rx', false(NE, 1));
+            'dx', nan(NE, C.cusum_win), 'rp', nan(NE, 10), 'rx', false(NE, 1), 'sw', false(NE, 8));
         M = [];
     case 'update'
         [mem, M] = update(C, varargin{:});
@@ -128,31 +175,55 @@ e3 = median(mem.ebno, 2, 'omitnan');
 ref = median(mem.ref, 2, 'omitnan');
 ref(isnan(ref)) = e3(isnan(ref));
 M.drop = (ref - e3)';
-bc = max(clean_ber_ref(M.ebno_est, 'ber_est'), C.deg_floor);
-deg = M.ber_avg > C.ratio_ok * bc;
+dm = C.deg_mode; if isfield(PP, 'deg_mode') && ~isempty(PP.deg_mode), dm = PP.deg_mode; end
+if strcmp(dm, 'ratio')
+    bc = max(clean_ber_ref(M.ebno_est, 'ber_est'), C.deg_floor);
+    deg = M.ber_avg > C.ratio_ok * bc;
+else
+    [mem, M, bc, deg] = deg_window(C, mem, M, PP, dm, arr, fi('q_iot'));
+end
 if any(coded)
     pc = clean_ber_ref(M.ebno_est(coded), 'plr_fec');
     pc(isnan(pc)) = 0;
     deg(coded) = lost(coded) > C.ratio_ok * pc .* npk(coded) + Q / 2;
 end
+if strcmp(dm, 'win_q_gate')                                     % degraded with a quiet slot: a poor link, logged, no alarm
+    qt = C.q_alarm_db; if isfield(PP, 'q_thr') && ~isempty(PP.q_thr) && ~isnan(PP.q_thr), qt = PP.q_thr; end
+    ev = any(mem.qi >= qt, 2);
+    M.deg_quiet = (deg(:) & ~ev)';
+    deg = deg(:) & ev;
+end
 M.degraded = deg(:)';
 mem.good(~M.degraded) = mem.good(~M.degraded) + 1; mem.good(M.degraded) = 0;
 mem.deg_n(M.degraded) = mem.deg_n(M.degraded) + 1; mem.deg_n(~M.degraded) = 0;
 mem.tried(mem.good >= C.heal, :) = false;
+c3 = isfield(PP, 'core3_on') && PP.core3_on;
+if c3, PP.fuse = []; end                                         % no fusion model in the three-state mode
 [mem, pf, te, unk] = fusion(mem, obs, PP, gk(link), gw(link));
+if unk_stat('on', PP), M.unk = unk; M.unk_u = mem.unk_u; end
 % Latched cause of a lost branch (onset_shape.m): read from the shape of its onset, a
 % step (antenna_fault) or a ramp (airframe_shadowing), and kept while the branch stays lost;
-% only while the deployed fusion latches (onset_shape('on', PP.fuse), chosen on validation)
+% only while the deployed fusion latches (onset_shape('on', PP.fuse), set by B2F)
 if ~isfield(mem, 'os'), mem.os = []; end
 FZ = []; if isfield(PP, 'fuse'), FZ = PP.fuse; end
-if isfield(obs, 'gant') && ~isempty(obs.gant) && onset_shape('on', FZ)
+if ~c3 && isfield(obs, 'gant') && ~isempty(obs.gant) && onset_shape('on', FZ)
     [mem.os, pf] = onset_shape('latch', mem.os, obs.gant, pf, PP.classes, C.heal, onset_shape('threshold', FZ));
 end
 M.probs = pf; M.te = te;
-[~, k] = max(pf, [], 2);
-cls = PP.classes(k);
-cls(unk) = {'unknown'};
-M.cls = cls(:)';
+if c3
+    unk = false(size(unk));
+    [mem, M.l3] = core3_window(mem, obs.probs3, PP.core3_N);
+    [~, k] = max(M.l3, [], 2);
+    s3 = {'none', 'tone_jamming', 'jamming'};
+    cls = s3(k); cls = cls(:)';
+else
+    [~, k] = max(pf, [], 2);
+    cls = PP.classes(k); cls = cls(:)';
+end
+ov = unk;                                                       % the class the unknown-threat flag overrides
+if isfield(PP, 'unk_mode') && strcmp(PP.unk_mode, 'nonhostile'), ov = unk & ismember(cls, {'none', 'benign_interference'}); end
+cls(ov) = {'unknown'};
+M.cls = cls;
 mode = 'class'; if isfield(PP, 'alarm_mode'), mode = PP.alarm_mode; end
 hostile = ~ismember(M.cls, {'none', 'benign_interference', 'unknown'});
 M.drop_alarm = false(1, numel(M.cls));
@@ -174,21 +245,87 @@ switch mode
     otherwise
         M.alarm = hostile | M.degraded;
 end
+needHarm = (isfield(PP, 's1_gate') && ~isempty(PP.s1_gate) && PP.s1_gate) || ...
+    (isfield(PP, 's1_gate_core') && ~isempty(PP.s1_gate_core) && PP.s1_gate_core) || (isfield(PP, 'lb_accept') && ~isempty(PP.lb_accept));
+if needHarm                                                     % evidence that a lost branch harms the link, over the confirmation's cycles
+    dqm0 = false(1, numel(M.degraded)); if isfield(M, 'deg_quiet'), dqm0 = M.deg_quiet; end
+    mem = hist_bits(mem, 'hm', M.degraded | dqm0 | M.drop_alarm);
+    M.harm = any(mem.hm(:, end-cf(2)+1:end), 2)';
+end
+if isfield(PP, 'lb_accept') && ~isempty(PP.lb_accept)            % calibrated lost-branch acceptance (D121 item 1, CLT): the class alone
+    lbcls = {'antenna_fault', 'airframe_shadowing'};             % counts as hostile only above PP.lb_accept.tau_hi, or with harm evidence (M.harm)
+    icol = ismember(PP.classes, lbcls);
+    pLB = sum(M.probs(:, icol), 2)';
+    islb = ismember(M.cls, lbcls);
+    accept = pLB >= PP.lb_accept.tau_hi | M.harm;
+    M.lb_not_accepted = islb & ~accept;                          % withheld this cycle: not counted as a class alarm
+    M.alarm(M.lb_not_accepted) = M.degraded(M.lb_not_accepted) | M.drop_alarm(M.lb_not_accepted);
+end
 q = ~M.alarm;
-if strcmp(mode, 'class_cusum')                                  % the reference before a change building up
+ex = [];                                                        % the drop statistic's excursion (drop_ref.m), with a drop alarm
+if any(strcmp(mode, {'class_drop', 'class_cusum'}))            % the reference before a change building up
     if ~isfield(mem, 'rp'), mem.rp = nan(size(mem.ref)); mem.rx = false(numel(eg), 1); end
-    [mem.ref, mem.rp, mem.rx] = drop_ref(mem.ref, mem.rp, mem.rx, eg, q(:), mem.cs, M.drop_alarm(:));
+    ex = mem.cs; if strcmp(mode, 'class_drop'), ex = double(M.drop(:) >= C.sev.path_loss.levels(1) / 2); end
+    [mem.ref, mem.rp, mem.rx] = drop_ref(mem.ref, mem.rp, mem.rx, eg, q(:), ex, M.drop_alarm(:));
 else
     mem.ref(q, :) = [mem.ref(q, 2:end), eg(q)];
 end
 mem.alarm = [mem.alarm(:, 2:end), M.alarm(:)];
 assert(cf(2) <= size(mem.alarm, 2), 'policy_monitor: confirmation over %d cycles exceeds the alarm memory', cf(2));
 M.confirmed = sum(mem.alarm(:, end-cf(2)+1:end), 2)' >= cf(1);
+if ~isfield(mem, 'sw'), mem.sw = false(size(mem.alarm)); end
+mem.sw = [mem.sw(:, 2:end), strcmp(M.cls(:), 'sweeping_jammer')];
+cs = []; if isfield(PP, 'confirm_sweep') && ~c3, cs = PP.confirm_sweep; end
+if ~isempty(cs) && ~strcmp(mode, 'degraded')                    % the sweeper's own revisit window
+    assert(cs(2) <= size(mem.sw, 2), 'policy_monitor: the sweeper''s confirmation over %d cycles exceeds the alarm memory', cs(2));
+    M.confirmed = M.confirmed | sum(mem.sw(:, end-cs(2)+1:end), 2)' >= cs(1);
+end
+cdr = []; if isfield(PP, 'confirm_drop'), cdr = PP.confirm_drop; end
+if ~isempty(cdr) && ~strcmp(mode, 'degraded')                   % the drop alarm's own confirmation: its crossing confirms
+    assert(cdr(2) <= size(mem.alarm, 2), 'policy_monitor: the drop alarm''s confirmation over %d cycles exceeds the alarm memory', cdr(2));
+    mem = hist_bits(mem, 'dal', M.drop_alarm);
+    M.confirmed = M.confirmed | sum(mem.dal(:, end-cdr(2)+1:end), 2)' >= cdr(1);
+end
 mem.conf_n(M.confirmed) = mem.conf_n(M.confirmed) + 1; mem.conf_n(~M.confirmed) = 0;
+% M.harm (evidence that a lost branch harms the link, over the confirmation's cycles) is written once,
+% above, before M.alarm/M.confirmed: the single writer for PP.s1_gate (policy_decide.m) and PP.lb_accept.
+if isfield(PP, 'release_m') && ~isempty(PP.release_m) && PP.release_m   % a cycle with no evidence of a threat or of a degraded link
+    M.quiet = quiet_cycle(C, mem, obs, M, PP);
+    mem = hist_bits(mem, 'qt', M.quiet);
+end
+if ~isempty(ex) && isfield(PP, 'lb_complete') && ~isempty(PP.lb_complete) && PP.lb_complete   % lb_complete.m's reading
+    mem = lb_track(mem, obs, gw(link), q(:), ex, M);
+end
 % Observation of this cycle for the agent's state (policy_state.m), newest first
 o = policy_obs(obs, M, bc, unk);
 if isempty(mem.hist), mem.hist = repmat(o, 1, 1, C.hist); end
 mem.hist = cat(3, o, mem.hist(:, :, 1:end-1));
+end
+
+function mem = lb_track(mem, obs, gw, q, ex, M)
+% The link-budget completion's reading (lb_complete.m), with a drop alarm and PP.lb_complete only:
+% the combined channel gain of all antennas (obs.gant, dB; maximum-ratio combining adds the
+% branches' powers, Brennan 1959) less the power step of the configuration the frame was
+% received with, a reference of it held as the drop's is (drop_ref.m, a state of its own, the
+% same excursion and alarm), mem.lb_dc the deficit against it (the median of the last cycles
+% against the reference, as M.drop), and mem.drop_n the consecutive cycles of a confirmed drop
+% alarm. No antenna gains: the deficit stays NaN, the completion never acts.
+NE = numel(M.confirmed);
+if ~isfield(mem, 'lb_ref')
+    mem.lb_ref = nan(NE, size(mem.ref, 2)); mem.lb_rp = nan(NE, size(mem.ref, 2)); mem.lb_rx = false(NE, 1);
+    mem.lb_e = nan(NE, size(mem.ebno, 2)); mem.lb_dc = nan(1, NE); mem.drop_n = zeros(1, NE);
+end
+c = M.confirmed & M.drop_alarm;
+mem.drop_n(c) = mem.drop_n(c) + 1; mem.drop_n(~c) = 0;
+e = nan(NE, 1);
+if isfield(obs, 'gant') && ~isempty(obs.gant)
+    e = 10 * log10(sum(10 .^ (double(obs.gant) / 10), 2)) - reshape(gw, [], 1);
+end
+mem.lb_e = [mem.lb_e(:, 2:end), e];
+e3 = median(mem.lb_e, 2, 'omitnan');
+r = median(mem.lb_ref, 2, 'omitnan'); r(isnan(r)) = e3(isnan(r));
+mem.lb_dc = (r - e3)';
+[mem.lb_ref, mem.lb_rp, mem.lb_rx] = drop_ref(mem.lb_ref, mem.lb_rp, mem.lb_rx, e, q, ex, M.drop_alarm(:));
 end
 
 function o = policy_obs(obs, M, bc, unk)
@@ -222,6 +359,7 @@ N = 1; if isfield(PP, 'fuse_N') && ~isempty(PP.fuse_N), N = PP.fuse_N; end
 Nu = 1; if isfield(PP, 'unk_win') && ~isempty(PP.unk_win), Nu = PP.unk_win; end
 NB = 1; if isfield(PP, 'fuse') && ~isempty(PP.fuse), NB = window_cues('branch_window'); end
 W = max([N, Nu, NB]);
+ou = unk_stat('on', PP); if ou, W = max(W, PP.fuse.unk.nw); end
 g = zeros(NE, 1); if isfield(obs, 'gant') && ~isempty(obs.gant), g = obs.gant - reshape(gp, [], 1); end
 f = obs.feat; is = feature_index('sinr');
 f(:, is) = f(:, is) - reshape(gl, [], 1);
@@ -243,8 +381,20 @@ nB = 9 * size(g, 2); bc = nan(NE, nB);
 if isfield(obs, 'bch') && ~isempty(obs.bch), bc = double(obs.bch); nB = size(bc, 2); end
 if ~isfield(mem, 'wb') || isempty(mem.wb) || size(mem.wb, 2) ~= nB, mem.wb = nan(NE, nB, W); end
 mem.wb = cat(3, mem.wb(:, :, 2:end), bc);
+Hx = [];                                                   % the held reference of every branch (branch_ref.m)
+cu = []; if isfield(PP, 'fuse') && ~isempty(PP.fuse), cu = fuse_classes('cues', PP.fuse); end
+if isfield(cu, 'held') && cu.held && size(g, 2) > 1
+    if ~isfield(mem, 'br') || isempty(mem.br), mem.br = branch_ref('init', NE, size(g, 2), isfield(cu, 'phi1') && cu.phi1); end
+    [mem.br, Hx] = branch_ref('step', mem.br, g);
+end
 nC = size(obs.probs, 2);
 pf = obs.probs; te = zeros(NE, numel(temporal_evidence('names', nC)) - nC);
+if ou
+    ut = unk_threshold(PP);
+    if ~isfield(mem, 'unk_u') || numel(mem.unk_u) ~= NE, mem.unk_u = nan(1, NE); end
+end
+rec_lk = isfield(PP, 'record_los_k') && PP.record_los_k;  % D121 item 12: the receiver's own K estimate per cycle, a reading only
+if rec_lk, lk = nan(NE, 1); ilk = find(strcmp(window_cues('names'), 'los_k'), 1); end
 for n = unique(mem.wn)                                     % episodes with the same filled window length
     e = find(mem.wn == n);
     k = W - min(n, N) + 1:W;
@@ -253,13 +403,65 @@ for n = unique(mem.wn)                                     % episodes with the s
     if isfield(PP, 'fuse') && ~isempty(PP.fuse)                  % with the current frame's own evidence (fuse_classes.m)
         kb = W - min(n, NB) + 1:W;
         Zc = window_cues(mem.wg(e, :, k), mem.wf(e, :, k), mem.wi(e, :, k), mem.wb(e, :, kb));   % branch, level step, idle time, branch coherence
-        pf(e, :) = fuse_classes('apply', PP.fuse, [Z, Zc, log(max(double(mem.wp(e, :, W)), 1e-6))]);
+        h = {}; if ~isempty(Hx), h = {Hx(e, :)}; end
+        Xe = window_cues('extra', mem.wg(e, :, k), mem.wf(e, :, k), mem.wi(e, :, k), cu, h{:});
+        pf(e, :) = fuse_classes('apply', PP.fuse, [Z, Zc, log(max(double(mem.wp(e, :, W)), 1e-6)), Xe]);
+        if rec_lk, lk(e) = Zc(:, ilk); end
     end
     ku = W - min(n, Nu) + 1:W;
-    mem.unk_now(e) = mean(mem.wu(e, ku), 2) < PP.maha_thr;
+    if ou                                                      % U of the window (unk_stat.m), its cue window full at W
+        x = [te(e, :), Zc];
+        if PP.fuse.unk.step_n > 0
+            ks = W - min(n, PP.fuse.unk.step_n) + 1:W;
+            x = ood_cue('step', x, window_cues(mem.wg(e, :, ks), mem.wf(e, :, ks), mem.wi(e, :, ks), []));
+        end
+        mem.unk_u(e) = unk_stat('U', PP.fuse.unk, mean(mem.wu(e, ku), 2), x, n >= W);
+        mem.unk_now(e) = mem.unk_u(e) < ut;
+    else
+        mem.unk_now(e) = mean(mem.wu(e, ku), 2) < PP.maha_thr;
+    end
 end
-unk = obs.unknown(:)';
-if Nu > 1 && ~all(isnan(mh)), unk = mem.unk_now(:)' | (obs.unknown(:)' & isinf(mh(:)')); end
+if rec_lk, mem.los_k = lk; end
+unk = obs.unknown(:)';                                     % the monitor's own threshold PP.maha_thr wherever a score is read
+if ~all(isnan(mh)), unk = mem.unk_now(:)' | (obs.unknown(:)' & isinf(mh(:)')); end
+end
+
+function [mem, M, bc, deg] = deg_window(C, mem, M, PP, dm, arr, qi)
+% Degradation test of deg_mode dm on the BER window's own frames: the clean reference at the
+% median of their measured Eb/N0 estimates; 'win' ratio_ok x that reference, 'win_q*' the clean
+% (1 - alpha) quantile PP.ber_q at it (deg_quantile.m), never below ratio_ok x deg_floor. The
+% Eb/N0 and quiet-slot windows restart with mem.ber at a change's arrival.
+NE = numel(M.ber_avg);
+if ~isfield(mem, 'eb') || isempty(mem.eb), mem.eb = nan(NE, C.win); mem.qi = nan(NE, C.win); end
+mem.eb = [mem.eb(:, 2:end), M.ebno_est(:)]; mem.qi = [mem.qi(:, 2:end), qi(:)];
+mem.eb(arr, 1:end-1) = NaN; mem.qi(arr, 1:end-1) = NaN;
+M.ebno_win = median(mem.eb, 2, 'omitnan');
+bc = max(clean_ber_ref(M.ebno_win, 'ber_est'), C.deg_floor);
+switch dm
+    case 'win'
+        M.deg_thr = C.ratio_ok * bc;
+    case {'win_q', 'win_q_gate'}
+        assert(isfield(PP, 'ber_q') && ~isempty(PP.ber_q), 'policy_monitor: deg_mode %s needs the clean quantile PP.ber_q', dm);
+        M.deg_thr = max(deg_quantile('lookup', PP.ber_q, M.ebno_win), C.ratio_ok * C.deg_floor);
+    otherwise
+        error('policy_monitor: unknown deg_mode %s', dm);
+end
+deg = M.ber_avg > M.deg_thr;
+end
+
+function [mem, L] = core3_window(mem, p3, N)
+% Mean log-probability of the three states over the last N cycles of the episode (fewer
+% before N cycles have passed), as core_cnn_eval.m 'logp' over one sub-run.
+lp = log(max(double(p3), 1e-6));
+if ~isfield(mem, 'l3') || isempty(mem.l3)
+    mem.l3 = zeros(size(lp, 1), size(lp, 2), N); mem.n3 = zeros(1, size(lp, 1));
+end
+mem.l3 = cat(3, mem.l3(:, :, 2:end), lp); mem.n3 = min(mem.n3 + 1, N);
+L = zeros(size(lp));
+for n = unique(mem.n3)
+    e = find(mem.n3 == n);
+    L(e, :) = mean(mem.l3(e, :, N - n + 1:N), 3);
+end
 end
 
 function [n, lost] = packets(crc)
@@ -268,4 +470,22 @@ function [n, lost] = packets(crc)
 k = ~isnan(crc);
 n = sum(k, 2);
 lost = sum(k & crc > 0, 2);
+end
+
+function mem = hist_bits(mem, name, bits)
+% The last cycles' bits of one monitor field (episodes x the alarm memory's cycles, oldest first), created
+% on first use. This is the only writer of mem.dal, mem.hm and mem.qt.
+if ~isfield(mem, name) || size(mem.(name), 1) ~= numel(bits), mem.(name) = false(numel(bits), size(mem.alarm, 2)); end
+mem.(name) = [mem.(name)(:, 2:end), reshape(bits, [], 1)];
+end
+
+function q = quiet_cycle(C, mem, obs, M, PP)
+% A cycle with no evidence of a threat or of a degraded link: no alarm, no degradation (with or without
+% RF evidence), no drop alarm, the quiet slot under its threshold and no busy bin in the idle gap
+% (idle_summary.m occ; a cycle without an idle record is not quiet).
+qt = C.q_alarm_db; if isfield(PP, 'q_thr') && ~isempty(PP.q_thr) && ~isnan(PP.q_thr), qt = PP.q_thr; end
+qi = obs.feat(:, feature_index('q_iot'));
+occ = reshape(mem.wi(:, strcmp(idle_summary('names'), 'occ'), end), 1, []);
+dq = false(size(M.alarm)); if isfield(M, 'deg_quiet'), dq = M.deg_quiet; end
+q = ~M.alarm & ~M.degraded & ~dq & ~M.drop_alarm & reshape(qi, 1, []) < qt & occ == 0;
 end

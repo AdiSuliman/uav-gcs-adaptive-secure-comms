@@ -6,15 +6,23 @@
 %          proposal's wording); every class F1 >= 90%, the stricter reading, beside it
 %          (eval_detector), unseen Eb/N0 (eval_unseen_snr); read on the third test set
 %          (B3m, results/eval_detector_metrics_fresh2.mat) when it exists, the second test
-%          set's reading beside it
+%          set's reading beside it; on the fourth (B3r, _fresh3) once kpi1_set.m names it, the
+%          third and second beside it
 %   KPI 2  unknown threats: leave-one-threat-out mean AUROC >= KPI2_TARGET, FPR at 95%
 %          of known frames kept (eval_ood_detection; the nested estimate of the
-%          selected production score)
+%          selected production score); with "k2_0": true in profile.json (unk_options.m),
+%          D116 reading 3 beside it (k2_0_lines.m, descriptive, never KPI 2); with D111's
+%          set-4 reading (results/ood_k2_read.mat) its nested mean while data/fusion.mat
+%          holds the adopted candidate's FM.unk, unforced, the earlier reading beside it;
+%          otherwise (guard (e), a smoke's or another candidate's FM.unk) the earlier reading
+%          stays and the set-4 line is descriptive, labelled not deployed; FM.unk without a
+%          set-4 reading: the earlier reading, labelled as the earlier statistic's
 %   KPI 3  physical validation: BER vs theory within 0.3 dB (validate_phy)
 %   KPI 4  restoration: BER and packet loss back to <= 2x clean on >= 90% of the
 %          recoverable episodes of EVERY threat, combined threats included, over
 %          five severities; survivability boundary (evaluate_policies,
-%          map_survivability_boundary)
+%          map_survivability_boundary); beside it, the stricter reading on the harmed
+%          episodes only (no response does not restore them), never in its place
 %   KPI 5  DQN vs no response, rule, random, fixed and oracle: recovery, recovery
 %          time, restored cycles, goodput, follower and unseen combinations;
 %          paired 95% bootstrap interval of the recovery difference vs rule > 0
@@ -23,7 +31,21 @@
 %   KPI 7  real time: decision latency median < 10 ms (Oli & Mahalal, low class)
 %          and p95 < 20 ms (also on one CPU core); robustness over the speed
 %          envelope (recovery spread <= 10 points), flights at its ends reported
-%   KPI 8  minimum: a closed loop restoring at least one recoverable threat
+%   KPI 8  minimum: a closed loop restoring at least one recoverable threat, read on the
+%          harmed episodes (an episode no response restores shows no closed loop)
+% Revised proposal, beside the KPIs (never in their place): the three link states (clean,
+% narrowband and wideband jamming) from the saved confusion matrix of the KPI 1 reading (and of
+% the third test set when KPI 1 reads another), with the recall per jamming type and a 3-state
+% macro-F1, also above the KPI 1 threshold from the saved predictions (KPI 1); PER vs the static link (KPI 4);
+% recovery time from detection, onset-to-detection time and goodput in bit/s (KPI 5); each for
+% the full action set and for the core action set (channel switching and rate adaptation,
+% rule_core and blind_core); the PER verdict per lecturer scenario (narrowband tone_jamming,
+% wideband jamming) first, the five jamming threats pooled as the extension; the core set on
+% the episodes a core configuration recovers, and again on those any of the 36 recovers
+% (second line); from results/policy_evaluation.mat's KP.lect (lect_kpis.m), PENDING while
+% that file predates it.
+% Beside KPI 1, the three-state CNN on spectrograms only (deliverable 2, train_core_cnn.m, stage
+% B3c): its single reading of the fourth test set from results/core_cnn.mat, PENDING until then.
 % With results/edge_map.mat (edge_map.m), the verdicts per point are added as details:
 % detection and detection on harmed flights (KPI 1); the commitment at every signalling
 % delay, the receiver alone, the relative criterion (SYSTEM), the distance edges and the
@@ -34,7 +56,8 @@
 % PENDING while the latency of the current detector and deployed chain has not been
 % measured (results/latency.mat absent, or of another detector or policy).
 %
-% Output: results/kpi_summary.txt, results/kpi_summary.mat (KPI struct array)
+% Output: results/kpi_summary.txt, results/kpi_summary.mat (KPI struct array; LECT, the
+% revised proposal's readings)
 
 close all; clc;
 fprintf('=== KPI summary ===\n\n');
@@ -43,7 +66,7 @@ F = struct('det', 'results/eval_detector_metrics.mat', 'unseen', 'results/unseen
     'pol', 'results/policy_evaluation.mat', 'lat', 'results/latency.mat', ...
     'surv', 'data/survivability_boundary.mat', 'dqn', 'data/trained_dqn.mat', 'arch', 'results/architecture_comparison.txt', ...
     'ant3', 'results/survivability_options.txt', 'combo', 'results/combo_generalization.mat', 'edge', 'results/edge_map.mat');
-if isfile('results/eval_detector_metrics_fresh2.mat'), F.det = 'results/eval_detector_metrics_fresh2.mat'; end
+F.det = kpi1_file('eval_detector_metrics');            % the set of kpi1_set.m
 KPI2_TARGET = 0.8;                                 % mean AUROC (the submitted proposal's target, kept in the update)
 t_det = file_time('data/trained_detector.mat'); t_dqn = file_time(F.dqn);
 if isfile('data/trained_detector.mat')             % training time (the file is updated later by the OOD stage)
@@ -53,6 +76,7 @@ end
 RS = result_status();
 rst = @(f) RS(strcmp({RS.file}, f));                   % identity and age of a result file
 KPI = struct('id', {}, 'name', {}, 'value', {}, 'target', {}, 'status', {}, 'detail', {});
+LECT = struct('three', [], 'three_above', [], 'three3', [], 'three3_above', [], 'pol', [], 'cnn', []);
 rep = {'=== PROPOSAL KPI SUMMARY (proposal wording) ===', sprintf('Generated: %s | %s', datestr(now), git_stamp()), ''};
 
 %% KPI 1 - detection
@@ -65,6 +89,7 @@ if isfile(F.det)
         num2cell(cl(:)'), 'UniformOutput', false), ', ')), ...
         sprintf('macro-F1 per Eb/N0: %s', strjoin(arrayfun(@(b) sprintf('%g dB %.1f%%', b.snr_db, b.macro_f1_pct), ...
         m.snr_breakdown, 'UniformOutput', false), ' | '))};
+    if ~isempty(read_state(m)), det{end+1} = sprintf('KPI 1 reading: %s', read_state(m)); end
     if isfield(m, 'every_class')                     % the stricter reading, beside KPI 1, never hidden
         ec = m.every_class;
         det{end+1} = sprintf(['beside KPI 1, every class F1 >= 90%% (the stricter reading, its threshold chosen on ' ...
@@ -133,21 +158,39 @@ if isfile(F.det)
             U.summary.max_gap);
     end
     if isfile(F.arch), det{end+1} = 'architecture comparison: results/architecture_comparison.txt'; end
-    if contains(F.det, '_fresh2') && isfile('results/eval_detector_metrics.mat')
+    [LECT.three, LECT.three_above, l3] = three_states(m, kpi1_file('detector_predictions'));
+    det = [det, l3];
+    [LECT.cnn, lc] = core_cnn_line('results/core_cnn.mat'); det{end+1} = lc;
+    if ~contains(F.det, '_fresh2') && isfile('results/eval_detector_metrics_fresh2.mat')   % the third test set's beside
+        M3 = load('results/eval_detector_metrics_fresh2.mat', 'metrics');
+        [LECT.three3, LECT.three3_above, l3] = three_states(M3.metrics, 'results/detector_predictions_fresh2.mat');
+        det = [det, l3];
+    end
+    if contains(F.det, '_fresh3') && isfile('results/eval_detector_metrics_fresh2.mat')
+        Ms = load('results/eval_detector_metrics_fresh2.mat', 'metrics'); ms = Ms.metrics;
+        det{end+1} = sprintf(['read on the %s, read once after the fusion revision''s go/no-go; the %s, %s%s: ' ...
+            'macro-F1 above the threshold %.2f%%, lowest class %.2f%%, accuracy %.2f%%'], m.test_set, ms.test_set, when_fresh2(ms), smp(ms), ...
+            ms.macro_f1_above_threshold_pct, min(ms.class_f1_above_threshold_pct), ms.overall_accuracy_pct);
+    end
+    if ~isempty(regexp(F.det, '_fresh[23]\.mat$', 'once')) && isfile('results/eval_detector_metrics.mat')
         Ms = load('results/eval_detector_metrics.mat', 'metrics'); ms = Ms.metrics;
         det{end+1} = sprintf(['read on the %s, built after the monitor''s last validation choice; the %s, first read ' ...
-            'before that choice: macro-F1 above the threshold %.2f%%, lowest class %.2f%%, accuracy %.2f%%'], m.test_set, ms.test_set, ...
+            'before that choice%s: macro-F1 above the threshold %.2f%%, lowest class %.2f%%, accuracy %.2f%%'], m.test_set, ms.test_set, smp(ms), ...
             ms.macro_f1_above_threshold_pct, min(ms.class_f1_above_threshold_pct), ms.overall_accuracy_pct);
     end
     if isfield(m, 'test_set') && isfile('results/eval_detector_metrics_split.mat')
         Ms = load('results/eval_detector_metrics_split.mat', 'metrics'); ms = Ms.metrics;
         det{end+1} = sprintf(['read on the %s; the test split of the dataset, also read before the last detector ' ...
-            'change: macro-F1 above the threshold %.2f%%, lowest class %.2f%%, accuracy %.2f%%'], m.test_set, ...
+            'change%s: macro-F1 above the threshold %.2f%%, lowest class %.2f%%, accuracy %.2f%%'], m.test_set, smp(ms), ...
             ms.macro_f1_above_threshold_pct, min(ms.class_f1_above_threshold_pct), ms.overall_accuracy_pct);
     end
-    KPI(end+1) = kpi(1, 'Detection accuracy vs SNR', sprintf('macro-F1 %.2f%%, lowest class %.2f%%, from %g dB', val, min(cl), ...
-        m.kpi1_threshold_db), 'macro-F1 >= 90% above a threshold chosen on validation', ...
-        status(isfinite(m.kpi1_threshold_db) && val >= 90, file_time(F.det) < max(t_det, file_time('data/fusion.mat'))), det);
+    tf1 = file_time('data/fusion.mat');
+    if contains(F.det, '_fresh3') && file_time(F.det) < tf1 && unk_write('base_ok', 'data/fusion.mat', 'results/fresh3_read_started.txt')
+        tf1 = -inf;                                    % newer only by D111's FM.unk: the class B3r read is unchanged
+    end
+    KPI(end+1) = kpi(1, 'Detection accuracy vs SNR', sprintf('macro-F1 %.2f%%, lowest class %.2f%%, from %g dB%s', val, min(cl), ...
+        m.kpi1_threshold_db, smp(m)), 'macro-F1 >= 90% above a threshold chosen on validation', ...
+        status(isfinite(m.kpi1_threshold_db) && val >= 90, file_time(F.det) < max(t_det, tf1)), det);
 else
     KPI(end+1) = missing(1, 'Detection accuracy vs SNR', F.det);
 end
@@ -174,6 +217,14 @@ if isfile(F.ood)
             'kept %.2f (read on the %s); nested estimate: mean AUROC %.3f, FPR95 %.2f'], O.sel, O.sel_win, ...
             mean(O.MpT(:, bd)), 100*O.RETAIN, mean(O.FpT(:, bd)), rd, val, fn)}, det];
     end
+    near_names = {'antenna_fault', 'airframe_shadowing'};      % D121 item 11: fixed by physics, before any data
+    held = {O.R.held_out};
+    near_m = ismember(held, near_names);
+    if any(near_m) && any(~near_m)
+        det{end+1} = sprintf(['descriptive, not KPI 2 (D121 item 11): near-OOD (%s) mean AUROC %.3f; ' ...
+            'far-OOD (the other %d threats) mean AUROC %.3f'], strjoin(near_names, ', '), ...
+            mean(A(near_m, j)), sum(~near_m), mean(A(~near_m, j)));
+    end
     if isfield(O, 'LC')                               % latency-aware selection
         det{end+1} = sprintf(['candidates within the KPI 7 budget (detector median <= %.0f ms, p95 <= %.0f ms per ' ...
             'frame): %s; detector cost median / p95 ms: %s'], O.LC.budget.det_median_ms, O.LC.budget.det_p95_ms, ...
@@ -181,9 +232,33 @@ if isfile(F.ood)
             O.LC.med(c), O.LC.p95(c), upper(O.LC.dev{c}), ternary(O.LC.ok(c), '', ' excluded')), ...
             1:numel(O.LC.cand), 'UniformOutput', false), ', '));
     end
-    KPI(end+1) = kpi(2, 'Unknown threat (LOTO)', sprintf('mean AUROC %.3f, FPR95 %.2f (nested)', val, fn), ...
-        sprintf('>= %.1f', KPI2_TARGET), ...
-        status(val >= KPI2_TARGET, file_time(F.ood) < t_det), det);
+    FU = fusion_model().FM; ku = unk_stat('on', struct('fuse', FU));   % D111's FM.unk in the deployed fusion
+    if unk_options().k2_0, det = [det, k2_0_lines('kpi', O, ku)]; end   % D116 reading 3 (descriptive, not KPI 2)
+    vt = sprintf('mean AUROC %.3f, FPR95 %.2f (nested)', val, fn); old = file_time(F.ood) < t_det;
+    if isfile('results/ood_k2_read.mat')               % D111's set-4 reading (ood_k2_run.m)
+        K2 = load('results/ood_k2_read.mat', 'kpi2', 'fpr2', 'gain', 'gain_ci', 'held_out', 'Aad', 'TEST_SET', 'verdict');
+        l2 = sprintf(['D111''s statistic on the %s: the adopted procedure''s nested mean AUROC %.3f, FPR95 %.2f; against ' ...
+            'the 18.10 procedure on the same set %+.3f [%+.3f, %+.3f] (95%%); per held-out threat %s'], K2.TEST_SET, K2.kpi2, ...
+            K2.fpr2, K2.gain, K2.gain_ci, strjoin(arrayfun(@(i) sprintf('%s %.3f', K2.held_out{i}, K2.Aad(i)), ...
+            1:numel(K2.Aad), 'UniformOutput', false), ', '));
+        why = 'FM.unk is not in data/fusion.mat';
+        if ku && isfield(FU.unk, 'forced'), why = sprintf('the FM.unk in data/fusion.mat (%s) was forced in a smoke', FU.unk.cand);
+        elseif ku && ~strcmp(FU.unk.cand, K2.verdict), why = sprintf('data/fusion.mat holds FM.unk of %s, not the adopted %s', ...
+                FU.unk.cand, K2.verdict);
+        elseif ku, why = '';
+        end
+        if isempty(why)                                 % deployed: KPI 2 is its nested set-4 mean
+            det = [{l2, sprintf('beside it: mean AUROC %.3f read on the %s (the earlier statistic)', val, rd)}, det];
+            val = K2.kpi2; vt = sprintf('mean AUROC %.3f, FPR95 %.2f (nested, D111, %s)', val, K2.fpr2, K2.TEST_SET);
+            old = file_time('results/ood_k2_read.mat') < t_det;
+        else                                            % not the adopted FM.unk (guard (e), a smoke): the earlier reading
+            det{end+1} = ['descriptive, not deployed (' why '): ' l2];
+        end
+    elseif ku                                           % FM.unk deployed, no set-4 reading of it
+        det{end+1} = sprintf(['deployed statistic: D111''s U (FM.unk, candidate %s%s); KPI 2 shows the earlier statistic ' ...
+            's0''s reading; U has no set-4 reading'], FU.unk.cand, ternary(isfield(FU.unk, 'forced'), ', forced in a smoke', ''));
+    end
+    KPI(end+1) = kpi(2, 'Unknown threat (LOTO)', vt, sprintf('>= %.1f', KPI2_TARGET), status(val >= KPI2_TARGET, old), det);
 else
     KPI(end+1) = missing(2, 'Unknown threat (LOTO)', F.ood);
 end
@@ -212,6 +287,7 @@ if isfile(F.pol)
     stale = file_time(F.pol) < t_dqn || sp.stale;
     col = @(p) find(strcmp(P.POL, p));
     iD = P.iDQN; iO = col('oracle'); iQ = col('dqn_esc');
+    if startsWith(P.POL{iD}, 'dqn'), iQ = iD; end        % the deployed DQN, with or without the escalation
     dep = erase(P.LBL{iD}, ' (deployed)');
     ALL = P.ALL;
     pt = P.KP.per_threat(:, strcmp(P.KP.show, P.POL{iD}));
@@ -229,6 +305,49 @@ if isfile(F.pol)
         min(P.KP.per_threat_sev(~contains(P.KP.threats, '+'), v, strcmp(P.KP.show, P.POL{iD})))), ...
         1:numel(P.KP.sev_names), 'UniformOutput', false), ' / '))};
     if isfield(P.KP, 'shadow_note') && ~isempty(P.KP.shadow_note), det{end+1} = P.KP.shadow_note; end   % airframe shadowing: conditioned
+    if isfield(P.KP, 'per_threat_h')                 % the stricter reading, beside KPI 4, never in its place
+        ph = P.KP.per_threat_h(:, strcmp(P.KP.show, P.POL{iD}));
+        det{end+1} = sprintf(['beside KPI 4, the stricter reading on the HARMED recoverable episodes only (no response does not ' ...
+            'restore them): %d of %d threats >= 90%%, per threat (harmed episodes; 95%% bootstrap): %s'], sum(ph >= 90), ...
+            sum(~isnan(ph)), strjoin(cellfun(@(n, v, k, a, b) sprintf('%s %.1f%% (%d) [%.1f, %.1f]', n, v, k, a, b), ...
+            P.KP.threats, num2cell(ph'), num2cell(P.KP.n_harmed'), num2cell(P.KP.per_threat_h_ci(:, 1)'), ...
+            num2cell(P.KP.per_threat_h_ci(:, 2)'), 'UniformOutput', false), ', '));
+        if isfield(P.KP, 'per_threat_env_h')
+            pe = P.KP.per_threat_env_h(:)';
+            det{end+1} = sprintf(['beside KPI 4, inside the envelope predicted on validation on the harmed episodes: %d of ' ...
+                '%d threats >= 90%%'], sum(pe(~isnan(pe)) >= 90), sum(~isnan(pe)));
+        end
+    end
+    if isfield(P.KP, 'ebno_lines'), det = [det, P.KP.ebno_lines]; end   % per Eb/N0 point, descriptive (ebno_rows.m)
+    if isfield(P.KP, 'monitor_note'), det = [det, P.KP.monitor_note]; end   % the lecturer lines below are read under the adopted monitor
+    if isfield(P.KP, 'lect')                          % revised proposal: PER vs the static link
+        LECT.pol = P.KP.lect;
+        det = [det, per_lines(P.KP.lect, P.KP.lect, 'rule_esc', 'full action set')];
+        if has_core(P.KP.lect)
+            det = [det, per_lines(P.KP.lect, P.KP.lect.core, 'rule_core', [core_tag(P.KP.lect.core) ...
+                ', recoverable by a core configuration'])];
+            if isfield(P.KP.lect.core, 'all36')
+                det = [det, per_lines(P.KP.lect, P.KP.lect.core.all36, 'rule_core', [core_tag(P.KP.lect.core) ...
+                    ', second line: recoverable by any of the 36 configurations'])];
+            end
+        else
+            det{end+1} = ['beside KPI 4, PER vs the static link on the core action set (revised proposal): PENDING, ' ...
+                F.pol ' predates it (rerun C2e)'];
+        end
+    else
+        det{end+1} = ['beside KPI 4, PER vs the static link (revised proposal): PENDING, ' F.pol ' predates it (rerun C2e)'];
+    end
+    if isfield(P.KP, 'offset') && ~isempty(P.KP.offset)   % threats that end, reported apart
+        o = P.KP.offset(strcmp({P.KP.offset.policy}, P.LBL{iD}));
+        if ~isempty(o)
+            det{end+1} = sprintf(['threats that end %d cycles after the onset (reported apart), %s: holding a configuration at ' ...
+                'the end %s; its release to no_action median %s cycles; running cost held after the end %s points per cycle'], ...
+                P.KP.offset_after, dep, strjoin(arrayfun(@(x) sprintf('%s %.0f%%', x.threat, x.held_pct), o, ...
+                'UniformOutput', false), ', '), strjoin(arrayfun(@(x) sprintf('%s %g', x.threat, x.rel_median), o, ...
+                'UniformOutput', false), ', '), strjoin(arrayfun(@(x) sprintf('%s %.2f', x.threat, x.cost_end), o, ...
+                'UniformOutput', false), ', '));
+        end
+    end
     if isfile(F.surv)
         S = load(F.surv, 'grid_data_A', 'grid_data_B');
         det{end+1} = sprintf('survivability map (threat x severity x Eb/N0 x geometry): %s', surv_txt(S));
@@ -272,16 +391,31 @@ if isfile(F.pol)
             status(all(pt >= 90), stale), det);
     end
 
-    k_r = col('rule_esc'); CDk = decision_config();
+    k_r = col('rule_esc'); CDk = decision_config(); nq = erase(P.LBL{iQ}, ' (deployed)');
     [dr, drl, drh] = boot_cluster(double(ALL{iQ}.recovered(m4)) - double(ALL{k_r}.recovered(m4)), ones(1, sum(m4)), ...
         ALL{iQ}.geom(m4), 2000, 4);
     rec = ~isnan(ALL{iQ}.t_rec);
     det = {sprintf('recovered among recoverable, threat sets pooled: %s', strjoin(cellfun(@(p) sprintf('%s %.1f%%', ...
         P.LBL{col(p)}, 100 * mean(ALL{col(p)}.recovered(m4))), unique({'none', 'random', 'fixed', 'rule_esc', 'blind_esc', ...
         'table', 'dqn_esc', P.POL{iD}, 'oracle'}, 'stable'), 'UniformOutput', false), ' | ')), ...
-        sprintf('DQN + escalation: median T_rec %s cycles (%s ms at the %d ms decision period) | cycles restored %.1f%% | goodput %.3f', ...
-        num_txt(median(ALL{iQ}.t_rec(rec))), num_txt(median(ALL{iQ}.t_rec(rec)) * CDk.period_ms), CDk.period_ms, ...
+        sprintf('%s: median T_rec %s cycles (%s ms at the %d ms decision period) | cycles restored %.1f%% | goodput %.3f', ...
+        nq, num_txt(median(ALL{iQ}.t_rec(rec))), num_txt(median(ALL{iQ}.t_rec(rec)) * CDk.period_ms), CDk.period_ms, ...
         100 * mean(ALL{iQ}.ok_post), mean(ALL{iQ}.gput_post, 'omitnan'))};
+    kn = find(strcmp(P.POL, [P.POL{iQ} '_norelm']), 1); kr0 = col('rule_esc_norelm');
+    if ~isempty(kn) && ~isempty(kr0)                  % deployed with the release on evidence: the rows without it beside the verdict
+        [dn, dnl, dnh] = boot_cluster(double(ALL{kn}.recovered(m4)) - double(ALL{kr0}.recovered(m4)), ones(1, sum(m4)), ALL{kn}.geom(m4), 2000, 6);
+        det{end+1} = sprintf(['beside KPI 5, without the release on evidence on either side (descriptive; the verdict is the deployed row, ' ...
+            'which runs with the layer, as rule + escalation and the table do): DQN %.1f%% vs rule + escalation %.1f%% recovered, paired ' ...
+            '%+.1f points [%+.1f, %+.1f]'], 100 * mean(ALL{kn}.recovered(m4)), 100 * mean(ALL{kr0}.recovered(m4)), 100*dn, 100*dnl, 100*dnh);
+    end
+    kp = find(strcmp(P.POL, [P.POL{iQ} '_relm']), 1); kr1 = col('rule_esc_relm');
+    if ~isempty(kp) && ~isempty(kr1)                  % deployed without the release on evidence: the rows with it beside the verdict
+        [dp, dpl, dph] = boot_cluster(double(ALL{kp}.recovered(m4)) - double(ALL{kr1}.recovered(m4)), ones(1, sum(m4)), ALL{kp}.geom(m4), 2000, 7);
+        det{end+1} = sprintf(['beside KPI 5, with the release on evidence on either side (descriptive; the layer was not deployed and ' ...
+            'the verdict is the deployed row, which runs without it): DQN %.1f%% vs rule + escalation %.1f%% recovered, paired ' ...
+            '%+.1f points [%+.1f, %+.1f]'], 100 * mean(ALL{kp}.recovered(m4)), 100 * mean(ALL{kr1}.recovered(m4)), 100*dp, 100*dpl, 100*dph);
+    end
+    if isfield(P.KP, 's1g_lines'), det = [det, P.KP.s1g_lines]; end   % the lost-branch classes against the rule without the gate (the reference there)
     k_b = col('blind_esc');
     if ~isempty(k_b)
         [db, dbl, dbh] = boot_cluster(double(ALL{k_r}.recovered(m4)) - double(ALL{k_b}.recovered(m4)), ones(1, sum(m4)), ...
@@ -291,12 +425,30 @@ if isfile(F.pol)
     end
     for si = find(ismember(P.set_names, {'follower', 'combined', 'comb'}))
         R = P.RES(si, :); mm = R{iQ}.recoverable & R{iQ}.threat;
-        det{end+1} = sprintf('%-9s recovered: DQN + esc. %.1f%% | rule+esc %.1f%% | table %.1f%% | fixed %.1f%% | oracle %.1f%%', ...
-            P.set_names{si}, 100*mean(R{iQ}.recovered(mm)), 100*mean(R{k_r}.recovered(mm)), 100*mean(R{col('table')}.recovered(mm)), ...
+        det{end+1} = sprintf('%-9s recovered: %s %.1f%% | rule+esc %.1f%% | table %.1f%% | fixed %.1f%% | oracle %.1f%%', ...
+            P.set_names{si}, nq, 100*mean(R{iQ}.recovered(mm)), 100*mean(R{k_r}.recovered(mm)), 100*mean(R{col('table')}.recovered(mm)), ...
             100*mean(R{col('fixed')}.recovered(mm)), 100*mean(R{iO}.recovered(mm))); %#ok<SAGROW>
     end
-    KPI(end+1) = kpi(5, 'DQN vs rules and baselines', sprintf('%+.1f points recovery vs rule + escalation [%+.1f, %+.1f]', ...
-        100*dr, 100*drl, 100*drh), 'better than rule (paired 95% bootstrap > 0)', status(drl > 0, stale), det);
+    if isfield(P, 'LBC') && ~isempty(P.LBC), det = [det, P.LBC.kpi]; end   % the DQN with the link-budget completion off, beside the deployed row
+    if isfield(P.KP, 'lect')                          % revised proposal: recovery time from detection, goodput in bit/s
+        det = [det, rec_lines(P.KP.lect, P.KP.lect, 'full action set')];
+        if has_core(P.KP.lect)
+            det = [det, rec_lines(P.KP.lect, P.KP.lect.core, [core_tag(P.KP.lect.core) ...
+                ', recoverable by a core configuration'])];
+            if isfield(P.KP.lect.core, 'all36')
+                det = [det, rec_lines(P.KP.lect, P.KP.lect.core.all36, [core_tag(P.KP.lect.core) ...
+                    ', second line: recoverable by any of the 36 configurations'])];
+            end
+        else
+            det{end+1} = ['beside KPI 5, recovery time from detection and goodput in bit/s on the core action set ' ...
+                '(revised proposal): PENDING, ' F.pol ' predates them (rerun C2e)'];
+        end
+    else
+        det{end+1} = ['beside KPI 5, recovery time from detection and goodput in bit/s (revised proposal): PENDING, ' ...
+            F.pol ' predates them (rerun C2e)'];
+    end
+    KPI(end+1) = kpi(5, 'DQN vs rules and baselines', sprintf('%s: %+.1f points recovery vs rule + escalation [%+.1f, %+.1f]', ...
+        nq, 100*dr, 100*drl, 100*drh), 'better than rule (paired 95% bootstrap > 0)', status(drl > 0, stale), det);
 
     far = P.KP.far(strcmp({P.KP.far.policy}, P.LBL{iD}));
     fr = P.KP.far(strcmp({P.KP.far.policy}, P.LBL{k_r}));
@@ -353,10 +505,16 @@ if isfile(F.pol)
         det{end+1} = sprintf(['spread over the speed bands %.1f points [%.1f, %.1f] (95%% bootstrap over flight ' ...
             'geometries; target <= 10)'], P.KP.speed_spread);
     end
+    if isfield(P.KP, 'speed_union') && ~isempty(P.KP.speed_union)      % speed_reading.m: the union reading and the inference
+        det = [det, P.KP.speed_union.kpi_lines(:)'];
+    end
     if isfield(P.KP, 'per_speed_out') && ~isempty(P.KP.per_speed_out)
         po = P.KP.per_speed_out(:, strcmp(P.KP.show, P.POL{iD}));
         det{end+1} = sprintf('ends of the speed envelope (nominal severity): %s km/h %.1f%%, %s km/h %.1f%%', ...
             band_txt(P.KP.speed_out(1, :)), po(1), band_txt(P.KP.speed_out(2, :)), po(2));
+    end
+    if isfield(P.KP, 'speed_ne') && isfield(P.KP.speed_ne, 'lines')
+        det = [det, P.KP.speed_ne.lines(~cellfun(@isempty, P.KP.speed_ne.lines))];   % descriptive (D121 item 8), beside the registered lines
     end
     if isfield(P.KP, 'per_delay') && ~isempty(P.KP.per_delay)
         pd = P.KP.per_delay(:, strcmp(P.KP.show, P.POL{iD}));
@@ -364,17 +522,33 @@ if isfile(F.pol)
             CDk.switch_delay, pd(1), 2 * CDk.switch_delay, pd(2));
     end
     st7 = status(lat_ok && max(pv) - min(pv) <= 10, stale);
+    if isfield(P.KP, 'speed_union') && ~isempty(P.KP.speed_union) && strcmp(P.KP.speed_union.mode, 'verdict')
+        st7 = status(lat_ok && P.KP.speed_union.met, stale); st7 = speed_status_word(st7, P.KP.speed_union);   % the union line is the speed verdict (speed_options.m)
+    end
     if (lat_pending || sl.stale) && ~stale, st7 = 'PENDING'; end   % the deployed chain not timed yet
     KPI(end+1) = kpi(7, 'Decision time and robustness', latv, 'median < 10 ms, p95 < 20 ms; spread <= 10 points over the speed envelope', ...
         st7, det);
 
-    n_ok = sum(pt >= 50);
-    KPI(end+1) = kpi(8, 'Performance floor (closed loop)', sprintf('%d threats recovered on >= 50%% of recoverable episodes', n_ok), ...
-        '>= 1 recoverable threat', status(n_ok >= 1, stale), {});
+    if isfield(P.KP, 'per_threat_h')                 % on the harmed episodes: no response restores none of them
+        ph = P.KP.per_threat_h(:, strcmp(P.KP.show, P.POL{iD})); n_ok = sum(ph >= 50);
+        KPI(end+1) = kpi(8, 'Performance floor (closed loop)', sprintf(['%d threats recovered on >= 50%% of the harmed ' ...
+            'recoverable episodes'], n_ok), '>= 1 recoverable threat', status(n_ok >= 1, stale), ...
+            {sprintf('on every recoverable episode (no response''s own restorations included): %d threats', sum(pt >= 50))});
+    else
+        n_ok = sum(pt >= 50);
+        KPI(end+1) = kpi(8, 'Performance floor (closed loop)', sprintf('%d threats recovered on >= 50%% of recoverable episodes', n_ok), ...
+            '>= 1 recoverable threat', status(n_ok >= 1, stale), {});
+    end
     if isfile(F.dqn)
         Dq = load(F.dqn, 'seed_summary'); ss = Dq.seed_summary;
         KPI(5).detail{end+1} = sprintf('selected: alarm %s, gamma %.2f, training false-switch penalty %d, seed %d, validation gate %s', ...
             ss.selected_alarm, ss.selected_gamma, ss.selected_fa_pen, ss.selected_seed, ternary(ss.gate_pass, 'PASS', 'FAIL'));
+        for ft = penalty_form_line(Dq), KPI(5).detail{end+1} = ft{1}; end   % the penalty's form, when C2 trained the no-threat form
+        if isfield(ss, 'selected_kind')
+            KPI(5).detail{end+1} = sprintf(['selected on validation by held recovery (restored to the end, the edge map''s REC): ' ...
+                '%s, held %.1f%% (recovered %.1f%%) against rule + escalation with the same monitor %.1f%% (%.1f%%)'], ...
+                ss.selected_kind, 100 * ss.dqn_held, 100 * ss.dqn_recovered, 100 * ss.rule_held, 100 * ss.rule_recovered);
+        end
     end
 else
     for k = 4:8, KPI(end+1) = missing(k, sprintf('KPI %d', k), F.pol); end %#ok<SAGROW>
@@ -410,6 +584,12 @@ if isfile(F.edge)
         'signalling delay of %d cycles: single threats %s | combined threats %s; %d inside a walk region, %d not ' ...
         'attributable to the decision layer'], en.delays(d), cnt(en.commit_single(d, :)), cnt(en.commit_combined(d, :)), ...
         en.commit_inside(d), en.commit_not_attributable(d)), 1:numel(en.delays), 'UniformOutput', false);
+    if isfield(en, 'commit_pre_single')   % the earlier definitions, reported only
+        det = [det, arrayfun(@(k) sprintf(['edge map, COMMITTED under the definitions registered before D108 (LINK <= ' ...
+            '%g%%, REC and PROT per flight; reported only), delay %d: single threats %s | combined threats %s'], ...
+            100 * en.link_target_pre, en.commit_pre_delays(k), cnt(en.commit_pre_single(k, :)), ...
+            cnt(en.commit_pre_combined(k, :))), 1:numel(en.commit_pre_delays), 'UniformOutput', false)];
+    end
     det{end+1} = sprintf('edge map, without signalling (the receiver alone): single threats %s | combined threats %s', ...
         cnt(en.floor_single), cnt(en.floor_combined));
     det = [det, {pts(ly('SYSTEM')), pts(ly('SYSTEM+LINK')), sprintf(['edge map, COMMITTED distance edge at the nominal ' ...
@@ -419,10 +599,16 @@ if isfile(F.edge)
         sprintf('edge map, overhead pass (altitude x distance): %s', cnt(arrayfun(@(v) sum(en.ohp_verdict(:) == v), [1 -1 0])))}];
     k = find([KPI.id] == 4, 1); KPI(k).detail = [KPI(k).detail, det];
     k = find([KPI.id] == 6, 1);
-    KPI(k).detail{end+1} = sprintf('edge map, clean link per Eb/N0 (%s dB), delay %d: FA <= 5%% %s | LINK <= 1.4%% %s', ...
+    lt = 0.014; if isfield(en, 'link_target'), lt = en.link_target; end    % maps without the field read 1.4%
+    KPI(k).detail{end+1} = sprintf('edge map, clean link per Eb/N0 (%s dB), delay %d: FA <= 5%% %s | LINK <= %g%% %s', ...
         strjoin(compose('%g', en.ebno), '/'), en.delays(1), strjoin(arrayfun(@(v, n) sprintf('%s(%d)', vsym(v), n), ...
-        en.fa_verdict(1, :), en.fa_n(1, :), 'UniformOutput', false), ' '), strjoin(arrayfun(@(v, n) sprintf('%s(%d)', ...
+        en.fa_verdict(1, :), en.fa_n(1, :), 'UniformOutput', false), ' '), 100 * lt, strjoin(arrayfun(@(v, n) sprintf('%s(%d)', ...
         vsym(v), n), en.link_verdict, en.link_n, 'UniformOutput', false), ' '));
+    if isfield(en, 'link_verdict_pre')
+        KPI(k).detail{end+1} = sprintf(['edge map, clean link LINK <= %g%% (registered before D108, reported only): %s; ' ...
+            '%s'], 100 * en.link_target_pre, strjoin(arrayfun(@(v, n) sprintf('%s(%d)', vsym(v), n), en.link_verdict_pre, ...
+            en.link_n, 'UniformOutput', false), ' '), en.c2_reference);
+    end
     hv = 'hover';
     if isfield(en, 'fa_claim_verdict')
         KPI(k).detail{end+1} = sprintf(['edge map, FA as the commitment reads it (the clean flights from %g dB up, or ' ...
@@ -449,7 +635,7 @@ for k = 1:numel(KPI)
 end
 fid = fopen('results/kpi_summary.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('%s\n', rep{:});
-save('results/kpi_summary.mat', 'KPI');
+save('results/kpi_summary.mat', 'KPI', 'LECT');
 fprintf('Saved results/kpi_summary.{txt,mat}\n');
 
 %% ===================== Local functions =====================
@@ -469,6 +655,136 @@ function t = file_time(f)
 if isfile(f), t = dir(f).datenum; else, t = -inf; end
 end
 
+function [V, Va, lines] = three_states(m, fp)
+% The three link states (three_state_view.m) from the saved reading: every Eb/N0 from its
+% confusion matrix, and above the KPI 1 threshold from the saved predictions of the same
+% reading (as many frames); no new test reading.
+V = []; Va = []; lines = {};
+if ~isfield(m, 'conf_mat') || ~isfield(m, 'classes'), return; end
+V = three_state_view(m.conf_mat, m.classes);
+ts = 'the test set'; if isfield(m, 'test_set'), ts = m.test_set; end
+lines{1} = sprintf(['beside KPI 1, three link states (revised proposal; %s, saved confusion matrix, every Eb/N0; frames ' ...
+    'of none / tone_jamming / jamming, another class read is an error): %s'], ts, three_txt(V));
+if ~isfile(fp) || ~isfield(m, 'kpi1_threshold_db') || ~isfinite(m.kpi1_threshold_db), return; end
+Pd = load(fp, 'pred'); pr = Pd.pred;
+if numel(pr.y_true) ~= sum(m.conf_mat(:)), return; end   % predictions of another reading
+ab = pr.ebno(:) >= m.kpi1_threshold_db;
+[~, it] = ismember(cellstr(pr.y_true(ab)), m.classes); [~, ip] = ismember(cellstr(pr.y_pred(ab)), m.classes);
+ok = it > 0 & ip > 0; nc = numel(m.classes);
+Va = three_state_view(accumarray([it(ok) ip(ok)], 1, [nc nc]), m.classes);
+lines{2} = sprintf('beside KPI 1, three link states from %g dB (the KPI 1 threshold, saved predictions): %s', ...
+    m.kpi1_threshold_db, three_txt(Va));
+end
+
+function [c, line] = core_cnn_line(f)
+% The three-state CNN's reading (train_core_cnn.m): the official windowed decision against the
+% lecturer's thresholds, with the hybrid's monitor class on the same frames when B3r read them.
+c = [];
+line = 'beside KPI 1, three-state CNN on spectrograms only (deliverable 2): PENDING -> train_core_cnn (B3c)';
+if ~isfile(f), return; end
+S = load(f, 'core'); c = S.core;
+M = c.metrics{2}; H = c.metrics{1}; B = c.boot;
+if isempty(H)
+    hy = 'no hybrid reading of this set before it (docs/core_cnn_no_b3r.txt)';
+else
+    hy = sprintf('the hybrid on the same frames: macro-F1 %.2f%%, false alarms %.2f%%', 100 * H.macro_f1, 100 * H.fa);
+end
+line = sprintf(['beside KPI 1, three-state CNN on spectrograms only (deliverable 2; %s, N = %d cycles; results/core_cnn.txt): ' ...
+    'macro-F1 %.2f%% [%.2f, %.2f] %s; recall narrowband %.2f%% %s, wideband %.2f%% %s; false alarms %.2f%% %s; %s'], ...
+    c.test_set, c.N, 100 * M.macro_f1, 100 * B.macro_f1(2, :), c.verdicts{2, 1}, 100 * M.recall(2), c.verdicts{2, 2}, ...
+    100 * M.recall(3), c.verdicts{2, 3}, 100 * M.fa, c.verdicts{2, 4}, hy);
+end
+
+function s = three_txt(V)
+s = sprintf(['recall narrowband %.2f%%, wideband %.2f%% (>= 85%% each: %s), clean %.2f%%; 3-state macro-F1 %.2f%% ' ...
+    '(>= 85%%: %s); frames %d / %d / %d'], 100 * V.recall(2), 100 * V.recall(3), ternary(all(V.recall(2:3) >= 0.85), ...
+    'met', 'not met'), 100 * V.recall(1), 100 * V.macro_f1, ternary(V.macro_f1 >= 0.85, 'met', 'not met'), V.n);
+end
+
+function lines = per_lines(Lk, S, tgt, tag)
+% PER vs the static link (lect_kpis.m), beside KPI 4: S the readings of one action set (Lk,
+% Lk.core or Lk.core.all36), tgt its rule with the detector, tag the set's name. The verdict
+% per lecturer scenario first, the five jamming threats pooled as the extension.
+lines = {};
+q = S.per(strcmp({S.per.policy}, tgt));
+if isempty(q), return; end
+o = S.per(~strcmp({S.per.policy}, tgt));
+if isfield(S, 'verdict') && ~isempty(S.verdict)
+    lines{1} = sprintf(['beside KPI 4, PER vs the static link (revised proposal, %s), PRIMARY per jamming scenario ' ...
+        '(lecturer: reduction >= %d%%; committed when the 95%% lower bound clears it), %s: %s'], tag, Lk.target_pct, ...
+        S.verdict(1).label, strjoin(arrayfun(@(v) sprintf('%s (%s, %d recoverable episodes) %.1f%% [%.1f, %.1f] -> %s', ...
+        v.scenario, v.threat, v.n, v.red_pct, v.ci, v.verdict), S.verdict, 'UniformOutput', false), '; '));
+end
+vd = ternary(q.met, 'MET', 'NOT MET');
+if isfield(q, 'verdict'), vd = q.verdict; end
+lines{end+1} = sprintf(['beside KPI 4, PER vs the static link (revised proposal, %s), extension: the five jamming threats ' ...
+    'pooled, recoverable jamming episodes (%d), paired, 95%% bootstrap over flight geometries: %s %.2f%% vs %.2f%% ' ...
+    'static, reduction %.1f%% [%.1f, %.1f] -> %s (target >= %d%%)%s'], tag, q.n, q.label, q.per_pct, q.per_ref_pct, ...
+    q.red_pct, q.ci, vd, Lk.target_pct, strjoin(arrayfun(@(x) sprintf('; %s %.1f%% [%.1f, %.1f]', ...
+    x.label, x.red_pct, x.ci), o, 'UniformOutput', false), ''));
+if ~isempty(S.per_threat)
+    lines{end+1} = sprintf('beside KPI 4, PER reduction per jamming threat, %s (%s): %s', tag, strjoin({S.per.label}, ' | '), ...
+        strjoin(arrayfun(@(t) sprintf('%s%s %s', t.threat, ternary(isempty(t.band), '', [' (' t.band ')']), ...
+        strjoin(compose('%.1f%%', t.red_pct), ' | ')), S.per_threat, 'UniformOutput', false), ', '));
+end
+if isfinite(S.cnn.per_red_pct)
+    rt = '';
+    if isfield(S.cnn, 'rec_det')
+        rt = sprintf('; with vs without the detector, onset->detection %s vs %s, detection->restored %s vs %s', ...
+            tq(S.cnn.det(1)), tq(S.cnn.det(2)), tq(S.cnn.rec_det(1)), tq(S.cnn.rec_det(2)));
+    end
+    lines{end+1} = sprintf(['beside KPI 4, CNN contribution, %s (%s vs the same escalation without the detector): ' ...
+        'PER reduction %.1f%% [%.1f, %.1f], goodput %+.0f bit/s [%+.0f, %+.0f] (%d episodes)%s'], tag, q.label, ...
+        S.cnn.per_red_pct, S.cnn.per_ci, S.cnn.gput_bps, S.cnn.gput_ci, S.cnn.n, rt);
+    if isfield(S.cnn, 'onset_rec') && S.cnn.onset_rec.n_pair > 0
+        o = S.cnn.onset_rec;
+        lines{end+1} = sprintf(['beside KPI 4, onset -> restored, %s (descriptive, selects nothing; D121 item 10), with minus without the ' ...
+            'detector on the %d episodes both recover: median %g [%g, %g] cycles (%g ms), mean %.2f [%.2f, %.2f]; of the %d recoverable ' ...
+            'jamming episodes recovered by both %.1f%%, by the detector row only %.1f%%, by the other only %.1f%%, by neither %.1f%%'], ...
+            tag, o.n_pair, o.median, o.median_ci, o.median * Lk.period_ms, o.mean, o.mean_ci, o.n, o.both_pct, o.only_det_pct, ...
+            o.only_blind_pct, o.never_pct);
+    end
+end
+if isfield(S, 'cnn3') && isfinite(S.cnn3.per_red_pct)       % profile 3's three-state CNN row (D121 item 16, P-B)
+    lines{end+1} = sprintf(['beside KPI 4, CNN contribution, %s, profile 3 (D121 item 16): rule_core3 (the three-state CNN in the loop) vs ' ...
+        'blind_core, secondary, weakened baseline (fixed first response channel_switch+rate_reduce, no validation choice): PER ' ...
+        'reduction %.1f%% [%.1f, %.1f], goodput %+.0f bit/s [%+.0f, %+.0f] (%d episodes); the verdict above stays rule_core''s'], tag, ...
+        S.cnn3.per_red_pct, S.cnn3.per_ci, S.cnn3.gput_bps, S.cnn3.gput_ci, S.cnn3.n);
+end
+end
+
+function lines = rec_lines(Lk, S, tag)
+% Recovery time from detection, onset-to-detection time and goodput in bit/s (lect_kpis.m), beside
+% KPI 5: S the readings of one action set (Lk, Lk.core or Lk.core.all36), tag the set's name.
+lines = {};
+for sn = unique({S.rec.set}, 'stable')
+    r = S.rec(strcmp({S.rec.set}, sn{1}));
+    lines{end+1} = sprintf(['beside KPI 5, recovery time (revised proposal, %s: first confirmed alarm until the packet loss ' ...
+        'stays <= 2x clean for %d cycles), %s (%d) [cycles of %g ms, median/p90]: %s'], tag, Lk.run, sn{1}, r(1).n, ...
+        Lk.period_ms, strjoin(arrayfun(@(x) sprintf('%s: onset->detection %s, detection->restored %s, T_rec from onset %s', ...
+        x.label, tq(x.det), tq(x.rec_det), tq(x.t_rec)), r, 'UniformOutput', false), ' | ')); %#ok<AGROW>
+end
+lines{end+1} = sprintf(['beside KPI 5, goodput after onset in bit/s (%s; nominal payload %.0f bit/s), threat episodes | ' ...
+    'recoverable jamming episodes, normalized beside: %s'], tag, Lk.payload_bps, strjoin(arrayfun(@(g) sprintf(['%s %.0f ' ...
+    '[%.0f, %.0f] (%.3f) | %.0f [%.0f, %.0f] (%.3f)'], g.label, g.bps, g.ci, g.norm, g.bps_jam, g.ci_jam, g.norm_jam), ...
+    S.gput, 'UniformOutput', false), '; '));
+end
+
+function tf = has_core(Lk)
+% The core action set's readings are in the policy evaluation (lect_kpis.m L.core).
+tf = isfield(Lk, 'core') && ~isempty(Lk.core);
+end
+
+function s = core_tag(S)
+% Name of the core action set with its configurations.
+s = sprintf('core action set {%s}', strjoin(S.actions, ', '));
+end
+
+function s = tq(t)
+% Median / p90 and the share never reached of a time statistic (lect_kpis.m).
+if isnan(t.median), s = sprintf('- (never %.0f%%)', t.never_pct); else, s = sprintf('%g/%g (never %.0f%%)', t.median, t.p90, t.never_pct); end
+end
+
 function s = num_txt(x)
 if isnan(x), s = '-'; else, s = sprintf('%.0f', x); end
 end
@@ -483,6 +799,26 @@ for mk = {'A', 'B'}
         100 * mean(st == 1), 100 * mean(st == 2), 100 * mean(st == 3)); %#ok<AGROW>
 end
 s = strjoin(parts, ' | ');
+end
+
+function s = smp(m)
+% ', in-sample (fit set of the deployed fusion)' for a reading of a set the deployed fusion was
+% fitted on (eval_detector.m metrics.sample, fusion_reading.m), else ''.
+s = ''; if isfield(m, 'sample') && ~isempty(m.sample), s = [', ' m.sample]; end
+end
+
+function s = when_fresh2(ms)
+% The third test set's reading beside a KPI 1 of the fourth: the rehearsal taken after the
+% deploy when it was read with the deployed revision or the kept fusion after a no-go
+% (metrics.fusion_state, fusion_reading.m); else the reading taken before the go/no-go.
+s = 'read before it';
+if isfield(ms, 'fusion_state') && ~isempty(ms.fusion_state), s = ['the rehearsal after the deploy, read with the ' ms.fusion_state]; end
+end
+
+function s = read_state(m)
+% The fusion a reading was read with, when it is the deployed revision or the kept fusion after a
+% no-go (fusion_reading.m), with its sample label.
+s = ''; if isfield(m, 'fusion_state') && ~isempty(m.fusion_state), s = ['read with the ' m.fusion_state smp(m)]; end
 end
 
 function out = ternary(c, a, b)

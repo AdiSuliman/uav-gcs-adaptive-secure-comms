@@ -22,8 +22,10 @@
 %   lost     plus the omni fallback of a tracker that lost the UAV (gcs_ant_dbi - gcs_omni_dbi)
 % A bound above the top path-loss level (22 dB) is beyond the measured levels.
 % The pass is a ramp, not the step the path-loss pools fly: the link monitor reads a drop
-% as the median of its last 10 cycles minus that of the last 3 (policy_monitor.m), so a
-% slow pass may never reach the drop alarm's threshold, and a fast one crosses the narrow
+% as the median of its reference's 10 cycles minus that of the last 3 (policy_monitor.m),
+% the reference holding the cycles of a drop above half the smallest path-loss level until
+% it ends (drop_ref.m), so a slow pass whose drop stays below that start is absorbed into the
+% reference and may never reach the drop alarm's threshold, and a fast one crosses the narrow
 % null overhead within fewer cycles than the medians span. Per speed band, the largest
 % drop the monitor reads along the pass (monitor_window_drop.m, one cycle per decision
 % period), the smallest over the band's speeds (every 2 km/h, both ends), the wings-level
@@ -104,7 +106,8 @@ for b = 1:numel(BK)
     rep{end+1} = sprintf('  %5.1f-%5.1f km/h, bank %4.1f deg: %.1f dB', VB(b), VB(b+1), BK(b), max(x(:))); %#ok<SAGROW>
 end
 rep{end+1} = '';
-rep{end+1} = sprintf(['Largest drop the link monitor reads along the pass [dB] (10-cycle reference minus 3-cycle median, ' ...
+rep{end+1} = sprintf(['Largest drop the link monitor reads along the pass [dB] (10-cycle reference, held through a drop ' ...
+    'above half the smallest path-loss level, minus 3-cycle median, ' ...
     '%g ms per cycle), the smallest over each band''s speeds, wings level and every bearing banked:'], C.period_ms);
 for i = 1:numel(H_M)
     for j = 1:numel(R0_KM)

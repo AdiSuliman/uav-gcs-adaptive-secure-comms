@@ -1,0 +1,404 @@
+function m_all(prof, quick)
+% d91 measurements on one profile's enlarged fit set (read-only copies in data_<prof>):
+%   M4 check  the read sets share validation's class, level, Eb/N0 and K grids
+%   M1        error split: shadowing by the real loss per frame (flight_draws.m recomputed
+%             from the stored seeds), age and K; antenna fault by level x K x age x speed
+%   M2        share of clean turning flights whose geometry would hide an antenna
+%   M3        shadowing: an out-of-fold tree detector on the branch-gain columns, with and
+%             without the cross-antenna coherence columns, at the fusion's clean budget
+%   M4        out-of-fold and nested CV (folds by sub-run) of the branch-evidence columns,
+%             each alone and together, against the deployed fusion's design refitted on the
+%             same folds; adoption rule fusion_adopt('branch') fixed in docs/d91_fuse.md
+% Output: m_<prof>.txt, m_<prof>.mat (checkpoints ck_<prof>.mat).
+here = fileparts(mfilename('fullpath')); cd(here);
+if nargin < 2, quick = false; end
+tag = prof; if quick, tag = [prof '_quick']; end
+addpath('C:\Users\Adi Suliman\uav-gcs-d91-fuse\code'); setup_paths;
+fid = fopen(sprintf('m_%s.txt', tag), 'a'); cl = onCleanup(@() fclose(fid));
+out = @(varargin) both(fid, varargin{:});
+L = load(fullfile(here, ['data_' prof], 'sets.mat')); S = L.S; F = L.F; classes = L.info.classes;
+Q = load(fullfile(here, ['data_' prof], 'params.mat')); p0 = Q.params;
+C = numel(classes); N = F.N; lam = F.lambda; K = 5;
+i0 = find(strcmp(classes, 'none')); ia = find(strcmp(classes, 'antenna_fault')); is = find(strcmp(classes, 'airframe_shadowing'));
+out('\n===== d91 measurements, %s, %s: N %d, lambda %.0e, latch %d, %d antennas =====\n', prof, char(datetime('now')), N, lam, ...
+    onset_shape('on', F.FM), size(S.val.gain_ant, 2));
+
+%% M4 check: the grids of the read sets against validation's
+names = {'val', 'test', 'fresh', 'fresh2'};
+lv = cell(1, 4);
+for k = 1:4
+    s = S.(names{k}); cr = s.draws.class_run;
+    g = struct();
+    for c = 2:C, g.(classes{c}) = unique(s.level(cr == c))'; end
+    lv{k} = g;
+    out('%-6s %6d frames, %4d sub-runs, classes of sub-runs %s, Eb/N0 %s dB, K %.1f..%.1f dB (median %.1f), speed %.1f..%.1f km/h, %s\n', ...
+        names{k}, numel(s.run), numel(unique(s.run)), mat2str(unique(cr)'), mat2str(unique(double(s.ebno))'), min(s.k_db), ...
+        max(s.k_db), median(s.k_db), min(s.speed), max(s.speed), ...
+        sprintf('sub-runs per (class, level, Eb/N0) cell %s', mat2str(cell_counts(s))));
+end
+for k = 2:4
+    same = isequal(lv{k}, lv{1}) && isequal(unique(double(S.(names{k}).ebno)), unique(double(S.val.ebno)));
+    out('  %s: same class/level/Eb/N0 grid as validation: %d\n', names{k}, same);
+end
+kb = [-Inf 0 5 10 15 Inf];
+for k = 1:4
+    s = S.(names{k}); u = unique(s.run); [~, j] = ismember(u, s.run);
+    out('  %-6s K bands of the sub-runs (<0, 0-5, 5-10, 10-15, >=15 dB): %s\n', names{k}, mat2str(histcounts(s.k_db(j), kb) / numel(u), 3));
+end
+
+%% The enlarged fit set
+fit = struct(); FLD = {'run', 'pos', 'gain_ant', 'feats_raw', 'idle', 'bch', 'level', 'ebno', 'ebno_rx', 'k_db', 'speed', 'P', 'y'};
+for k = 1:4
+    s = S.(names{k}); t = struct();
+    for f = FLD, x = s.(f{1}); if isvector(x), x = x(:); end, t.(f{1}) = x; end
+    t.run = double(t.run) + (k - 1) * 1e7; t.pos = double(t.pos); t.set = k * ones(numel(t.run), 1);
+    for f = fieldnames(s.draws)', t.(['d_' f{1}]) = s.draws.(f{1}); end
+    if k == 1, fit = t; else, for f = fieldnames(fit)', fit.(f{1}) = [fit.(f{1}); t.(f{1})]; end, end
+end
+clear S
+if quick                                                 % a code check on every 20th sub-run
+    u = unique(fit.run); keep = ismember(fit.run, u(1:20:end));
+    for f = fieldnames(fit)', fit.(f{1}) = fit.(f{1})(keep, :); end
+end
+fit.feat_names = link_features('names');
+n = numel(fit.run); vr = find(fit.set == 1);
+ru = unique(fit.run); rf = RandStream('mt19937ar', 'Seed', 9101);
+fr = mod(randperm(rf, numel(ru)), K) + 1; [~, ir] = ismember(fit.run, ru); fold = fr(ir)';
+yt = fusion_target(fit.y, fit.run, fit.pos, N, classes);    % the deployed fusion's targets
+age = onset_age(fit, yt, [ia is]);
+ck = sprintf('ck_%s.mat', tag);
+if isfile(ck)
+    W = load(ck); Z = W.Z; XA = W.XA; out('checkpoint: windows and extra columns loaded\n');
+else
+    t0 = tic; Z = fuse_classes('windows', fit, double(fit.P), N); out('windows of %d frames: %.1f min\n', n, toc(t0) / 60);
+    t0 = tic; XA = fuse_classes('extra', fit, N, struct('iso', true, 'glr', true, 'post', true, 'held', true));
+    out('branch-evidence columns: %.1f min\n', toc(t0) / 60);
+    save(ck, 'Z', 'XA', '-v7.3');
+end
+Zv = fuse_classes('windows', struct('run', fit.run(vr), 'pos', fit.pos(vr), 'gain_ant', fit.gain_ant(vr, :), ...
+    'feats_raw', fit.feats_raw(vr, :), 'feat_names', {fit.feat_names}, 'idle', fit.idle(vr, :), 'bch', fit.bch(vr, :)), double(fit.P(vr, :)), N);
+out('validation rows of the fit set equal the validation windows: %d\n', isequal(Zv, Z(vr, :))); clear Zv
+cn = window_cues('extra_names', struct('iso', true, 'glr', true, 'post', true, 'held', true));
+V = {'base', 'iso', 'glr', 'held', 'post', 'branch evidence'};
+COL = {[], 1:4, 5:9, 16:19, 10:15, 1:19};
+out('extra columns: %s\n', strjoin(cn, ' '));
+
+%% The base: the deployed fusion's design refitted out of fold on the enlarged set
+if isfield(W_or(ck), 'pb0'), W = load(ck); pb0 = W.pb0;
+else, t0 = tic; pb0 = oof(Z, XA(:, []), yt, fold, 1:K, C, lam); out('  OOF base: %.1f min\n', toc(t0) / 60); save(ck, 'pb0', '-append');
+end
+pb = amax(pb0);
+if ~isfield(W_or(ck), 'm123')
+    shd = M1_shadow(out, fit, yt, pb, age, p0, is, i0);
+    M1_fault(out, fit, yt, pb, age, ia, i0);
+    M2_clean(out, fit, pb, p0, is, i0);
+    M3_shadow(out, fit, Z, XA, yt, pb, fold, age, shd, is, i0, quick);
+    m123 = true; save(ck, 'm123', '-append');
+end
+
+%% M4: out of fold
+if isfield(W_or(ck), 'PV'), W = load(ck); PV = W.PV; out('checkpoint: out-of-fold readings loaded\n');
+else
+    PV = cell(1, 6); PV{1} = pb0; t0 = tic;
+    for v = 2:6, PV{v} = oof(Z, XA(:, COL{v}), yt, fold, 1:K, C, lam); out('  OOF %s: %.1f min\n', V{v}, toc(t0) / 60); end
+    save(ck, 'PV', '-append');
+end
+[bin, ~] = kpi_ebno(fit, yt, classes); thr = kpi1_thr(yt, pb, bin, classes);
+low = fit.k_db <= 0; above = bin >= thr;
+B = fusion_adopt('boot', fit.run, 1000, 9102);
+out('\nM4 out of fold over %d frames (%d sub-runs), KPI 1 threshold of the base reading %g dB\n', n, numel(ru), thr);
+out('  base: macro-F1 all %.2f%%, above %.2f%%; F1 fault %.2f%%, shadowing %.2f%%; clean as a threat %.2f%%, as a lost branch %.2f%%\n', ...
+    100 * mf1(yt, pb, C), 100 * mf1(yt(above), pb(above), C), 100 * cf1(yt, pb, ia), 100 * cf1(yt, pb, is), ...
+    100 * mean(pb(yt == i0) ~= i0), 100 * mean(ismember(pb(yt == i0), [ia is])));
+G = cell(1, 6);
+for v = 2:6
+    G{v} = fusion_adopt('paired', yt, pb, amax(PV{v}), above, low, classes, B);
+    out('  %-16s %s -> rule %s\n', V{v}, gtxt(G{v}), yn(fusion_adopt('branch', G{v})));
+end
+for k = 1:4                                              % per component set, point values
+    m = fit.set == k;
+    out('  set %-6s fault F1 base %.2f%%: %s\n', names{k}, 100 * cf1(yt(m), pb(m), ia), strjoin(cellfun(@(v, P) ...
+        sprintf('%s %+.2f', v, 100 * (cf1(yt(m), amax(P(m, :)), ia) - cf1(yt(m), pb(m), ia))), V(2:6), PV(2:6), 'UniformOutput', false), ', '));
+end
+fault_strata(out, yt, pb, PV, V, fit, age, ia);
+
+%% M4: nested CV of the selection (inner: the outer training folds; rule fusion_adopt('branch'))
+if isfield(W_or(ck), 'yo'), W = load(ck); yo = W.yo; pick = W.pick; out('checkpoint: nested reading loaded\n');
+else
+    yo = zeros(n, 1); pick = zeros(1, K); t0 = tic;
+    for k = 1:K
+        tr = fold ~= k; te = fold == k;
+        fi = fold; fi(te) = 0;
+        Pi = cell(1, 6);
+        for v = 1:6, Pi{v} = oof(Z, XA(:, COL{v}), yt, fi, setdiff(1:K, k), C, lam); end
+        thr_i = kpi1_thr(yt(tr), amax(Pi{1}(tr, :)), bin(tr), classes);
+        Bi = fusion_adopt('boot', fit.run(tr), 500, 9110 + k);
+        g = -Inf(1, 6); ok = false(1, 6); Gi = cell(1, 6);
+        for v = 2:6
+            Gi{v} = fusion_adopt('paired', yt(tr), amax(Pi{1}(tr, :)), amax(Pi{v}(tr, :)), bin(tr) >= thr_i, low(tr), classes, Bi);
+            ok(v) = fusion_adopt('branch', Gi{v}); g(v) = Gi{v}.all(1);
+        end
+        g(~ok) = -Inf; [~, j] = max(g); if ~any(ok), j = 1; end
+        pick(k) = j;
+        X = XA(:, COL{j});
+        FMk = fuse_classes('fit', [Z(tr, :), X(tr, :)], yt(tr), C, lam);
+        yo(te) = amax(fuse_classes('apply', FMk, [Z(te, :), X(te, :)]));
+        out('  nested outer fold %d: inner rule %s -> %s (%.1f min)\n', k, strjoin(arrayfun(@(v) sprintf('%s %d', V{v}, ok(v)), 2:6, ...
+            'UniformOutput', false), ', '), V{j}, toc(t0) / 60);
+        for v = 2:6, out('      inner %-16s %s\n', V{v}, gtxt(Gi{v})); end
+    end
+    save(ck, 'yo', 'pick', '-append');
+end
+Gn = fusion_adopt('paired', yt, pb, yo, above, low, classes, B);
+out('  NESTED selection against the base: %s -> rule %s\n', gtxt(Gn), yn(fusion_adopt('branch', Gn)));
+okf = cellfun(@(d) fusion_adopt('branch', d), G(2:6)); gf = cellfun(@(d) d.all(1), G(2:6)); gf(~okf) = -Inf;
+[~, jf] = max(gf); full_pick = 1; if any(okf), full_pick = jf + 1; end
+out('  on the whole fit set the rule picks: %s; nested picks per outer fold: %s\n', V{full_pick}, strjoin(V(pick), ', '));
+verdict = full_pick > 1 && fusion_adopt('branch', Gn);
+out('  VERDICT %s: %s\n', prof, ternary(verdict, sprintf('adopt %s', V{full_pick}), 'do not adopt (the deployed fusion stays)'));
+
+save(sprintf('m_%s.mat', tag), 'G', 'Gn', 'pick', 'full_pick', 'verdict', 'thr', 'yt', 'pb', 'yo', 'fold', 'V', '-v7.3');
+out('##### m_all %s done %s\n', prof, char(datetime('now')));
+end
+
+%% ---------------- M1-M3 ----------------
+function shd = M1_shadow(out, fit, yt, pb, age, p0, is, i0)
+% Real loss of the hidden antenna per frame of every shadowing sub-run, recomputed from its seed.
+cr = fit.d_class_run; m = cr == is; u = unique(fit.run(m));
+shd = struct('loss', nan(numel(fit.run), 1), 'hid', zeros(numel(fit.run), 1));
+nb = 0; nr = 0; agree = 0; tot = 0;
+for r = u'
+    ix = find(fit.run == r); [~, o] = sort(fit.pos(ix)); ix = ix(o);
+    p = p0; p.active_threat = 'airframe_shadowing'; p.shadow_db = fit.level(ix(1)); p.seed = [];
+    p.cap_frames = 20; p.roll_in_frames = p0.pl_onset_det;
+    v = fit.speed(ix(1)); fd = v / 3.6 * p.carrier_freq / p.c_light;
+    d = flight_draws(fit.d_seed(ix(1)), fd, p, struct('ebno', double(fit.ebno(ix(1))), 'alt_m', NaN, 'k_sig_db', NaN));
+    nr = nr + 1; nb = nb + (max(abs(d.roll_in(:)' - fit.d_roll_in(ix(1), :))) < 1e-6 && abs(d.bank - fit.d_bank(ix(1))) < 1e-9);
+    [hs, g] = frame_shadow(d, p, shadow_spec(p), fit.pos(ix), v / 3.6);
+    shd.loss(ix) = p.shadow_db * g; shd.hid(ix) = hs;
+    agree = agree + sum((hs > 0) == (fit.y(ix) == is)); tot = tot + numel(ix);
+end
+out('\nM1 shadowing: %d sub-runs recomputed, draws equal to the stored ones in %d; hidden antenna equal to the label in %d of %d frames\n', ...
+    nr, nb, agree, tot);
+lab = yt == is; rd = pb == is;
+e = [5 6 7 8 10 Inf]; kb = [-Inf 0 5 10 15 Inf]; ab = [0 3 6 12 Inf];
+out('  labelled shadowing frames by real loss [5-6 6-7 7-8 8-10 >=10 dB]: n %s, read as shadowing %s%%, as none %s%%\n', ...
+    mat2str(histcounts(shd.loss(lab), e)), pct(rd(lab), shd.loss(lab), e), pct(pb(lab) == i0, shd.loss(lab), e));
+out('  by age [0-2 3-5 6-11 12+]: n %s, read as shadowing %s%%\n', mat2str(histcounts(age(lab), ab)), pct(rd(lab), age(lab), ab));
+out('  by K [<0 0-5 5-10 10-15 >=15 dB]: n %s, read as shadowing %s%%\n', mat2str(histcounts(fit.k_db(lab), kb)), pct(rd(lab), fit.k_db(lab), kb));
+for q = 1:numel(kb) - 1
+    mk = lab & fit.k_db >= kb(q) & fit.k_db < kb(q + 1);
+    out('    K %s: by real loss n %s, read %s%%\n', mat2str(kb(q:q + 1)), mat2str(histcounts(shd.loss(mk), e)), pct(rd(mk), shd.loss(mk), e));
+end
+pre = cr == is & yt == i0;                              % 'none' frames of shadowing sub-runs: the ramp below the criterion
+e2 = [0 1 2 3 4 5];
+out('  none frames of shadowing sub-runs by real loss [0-1 1-2 2-3 3-4 4-5 dB]: n %s, read as shadowing %s%%\n', ...
+    mat2str(histcounts(shd.loss(pre), e2)), pct(rd(pre), shd.loss(pre), e2));
+cl = cr == i0 & yt == i0;
+out('  clean sub-runs: read as shadowing %.2f%% of %d frames\n', 100 * mean(rd(cl)), sum(cl));
+end
+
+function M1_fault(out, fit, yt, pb, age, ia, i0)
+lab = yt == ia; rd = pb == ia; nn = pb == i0;
+lv = unique(fit.level(fit.d_class_run == ia))';
+kb = [-Inf 0 5 10 15 Inf]; ab = [0 3 6 12 Inf]; sb = [0 23 60 120 Inf];
+out('\nM1 antenna fault: %d labelled frames, recall %.1f%%, read as none %.1f%%\n', sum(lab), 100 * mean(rd(lab)), 100 * mean(nn(lab)));
+out('  level x K [<0 0-5 5-10 10-15 >=15 dB]: recall %% (frames; sub-runs)\n');
+for l = lv
+    m = lab & fit.level == l;
+    out('    %5.1f dB: %s\n', l, strata_txt(rd, m, fit.k_db, kb, fit.run));
+end
+out('  level x age [0-2 3-5 6-11 12+]:\n');
+for l = lv, m = lab & fit.level == l; out('    %5.1f dB: %s\n', l, strata_txt(rd, m, age, ab, fit.run)); end
+out('  level x speed [0-23 23-60 60-120 >=120 km/h]:\n');
+for l = lv, m = lab & fit.level == l; out('    %5.1f dB: %s\n', l, strata_txt(rd, m, fit.speed, sb, fit.run)); end
+out('  K x age at 5-8.7 dB:\n');
+for q = 1:numel(kb) - 1
+    m = lab & fit.level <= lv(2) + 1e-6 & fit.k_db >= kb(q) & fit.k_db < kb(q + 1);
+    out('    K %s: %s\n', mat2str(kb(q:q + 1)), strata_txt(rd, m, age, ab, fit.run));
+end
+end
+
+function M2_clean(out, fit, pb, p0, is, i0)
+cr = fit.d_class_run; u = unique(fit.run(cr == i0));
+lv = [6 9 12 15 18 21 23 25];
+nt = 0; nh = 0; fh = 0; ft = 0; rdh = []; rdo = []; nb = 0; nl = zeros(1, numel(lv));
+for r = u'
+    ix = find(fit.run == r); [~, o] = sort(fit.pos(ix)); ix = ix(o);
+    p = p0; p.active_threat = 'none'; p.seed = []; p.cap_frames = 20; p.roll_in_frames = p0.pl_onset_det;
+    v = fit.speed(ix(1)); fd = v / 3.6 * p.carrier_freq / p.c_light;
+    d = flight_draws(fit.d_seed(ix(1)), fd, p, struct('ebno', double(fit.ebno(ix(1))), 'alt_m', NaN, 'k_sig_db', NaN));
+    nb = nb + (max(abs(d.roll_in(:)' - fit.d_roll_in(ix(1), :))) < 1e-6);
+    if ~(d.roll_in(2) > 0), continue; end              % a turning flight that rolls in
+    nt = nt + 1;
+    hid = false(numel(ix), 1);
+    for q = 1:numel(lv)
+        ps = p; ps.active_threat = 'airframe_shadowing'; ps.shadow_db = lv(q);
+        hs = frame_shadow(d, ps, shadow_spec(ps), fit.pos(ix), v / 3.6);
+        hid = hid | hs > 0; nl(q) = nl(q) + sum(hs > 0);
+    end
+    nh = nh + any(hid); fh = fh + sum(hid); ft = ft + numel(ix);
+    rdh = [rdh; pb(ix(hid)) == is]; rdo = [rdo; pb(ix(~hid)) == is]; %#ok<AGROW>
+end
+out(['\nM2: %d clean sub-runs (draws equal to the stored ones in %d), %d turning; %d of them (%.1f%%) would hide an antenna at the ' ...
+    'level of their bank in %d of %d frames (%.1f%%); frames per level %s\n'], numel(u), nb, nt, nh, 100 * nh / max(nt, 1), fh, ft, ...
+    100 * fh / max(ft, 1), mat2str(nl));
+out('  read as shadowing: on those frames %.1f%% (%d), on the other frames of turning clean flights %.1f%% (%d)\n', ...
+    100 * mean(rdh), numel(rdh), 100 * mean(rdo), numel(rdo));
+end
+
+function M3_shadow(out, fit, Z, XA, yt, pb, fold, age, shd, is, i0, quick)
+% Shadowing frames against clean frames, out of fold, bagged trees on the branch-gain columns
+% (A) and with the coherence columns (B), at the base fusion's rate of clean frames read as
+% shadowing; the fusion's recall beside, sub-run bootstrap of the differences.
+nT = numel(temporal_evidence('names', size(fit.P, 2))); wn = window_cues('names');
+cg = nT + find(ismember(wn, {'k_strong', 'k_contrast', 'sd_weak', 'sd_contrast', 'corr_ws', 'trend', 'step_max', 'off_range', ...
+    'cm_slope', 'cm_sd', 'off_first', 'off_last', 'onset_in_win', 'gap_strong'}));
+cc = nT + find(strncmp(wn, 'coh_', 4) | strncmp(wn, 'los_', 4));
+m = yt == is | (yt == i0 & fit.d_class_run == i0);
+XAg = [Z(m, cg), XA(m, :)]; XB = [XAg, Z(m, cc)];
+y = double(yt(m) == is); fo = fold(m); run = fit.run(m);
+sc = zeros(sum(m), 2);
+for k = 1:5
+    tr = fo ~= k; te = fo == k;
+    for j = 1:2
+        X = XAg; if j == 2, X = XB; end
+        rng(9120 + 10 * j + k, 'twister');
+        T = TreeBagger(100 - 90 * quick, X(tr, :), y(tr), 'Method', 'classification', 'MinLeafSize', 20);
+        [~, s] = predict(T, X(te, :)); sc(te, j) = s(:, 2);
+    end
+end
+cl = y == 0; fa = mean(pb(m & yt == i0 & fit.d_class_run == i0) == is);
+thr = arrayfun(@(j) quantile(sc(cl, j), 1 - fa), 1:2);
+dA = sc(:, 1) > thr(1); dB = sc(:, 2) > thr(2); dF = pb(m) == is;
+sh = y == 1;
+B = fusion_adopt('boot', run, 1000, 9103);
+out('\nM3 shadowing: %d shadowing and %d clean frames; the fusion''s clean budget %.2f%% (trees at %.2f%% / %.2f%%)\n', ...
+    sum(sh), sum(cl), 100 * fa, 100 * mean(dA(cl)), 100 * mean(dB(cl)));
+st = {true(sum(m), 1), 'all'; age(m) <= 2, 'age 0-2'; fit.k_db(m) < 0, 'K < 0 dB'; fit.k_db(m) >= 0 & fit.k_db(m) < 5, 'K 0-5 dB'; ...
+    shd.loss(m) < 6, 'real loss 5-6 dB'; shd.loss(m) >= 8, 'real loss >= 8 dB'};
+for q = 1:size(st, 1)
+    k = sh & st{q, 1};
+    [dBF, ciBF] = boot_diff(dB(k), dF(k), B.ri(k), B.w);
+    [dBA, ciBA] = boot_diff(dB(k), dA(k), B.ri(k), B.w);
+    out('  %-17s n %5d: recall fusion %.1f%%, gain-only trees %.1f%%, with coherence %.1f%%; coherence trees - fusion %+.1f [%+.1f, %+.1f], coherence - gain-only %+.1f [%+.1f, %+.1f] points\n', ...
+        st{q, 2}, sum(k), 100 * mean(dF(k)), 100 * mean(dA(k)), 100 * mean(dB(k)), dBF, ciBF, dBA, ciBA);
+end
+end
+
+%% ---------------- helpers ----------------
+function [hid, g] = frame_shadow(d, p, sp, pos, v)
+% The hidden antenna (its loss at least the event's criterion, else 0) and the share of the
+% level's depth at the start of the frames pos of flight d, as flight_draws.m run_attitude.
+att = [d.gcs_aoa d.el_deg d.roll d.pitch d.wobble d.roll_in];
+hid = zeros(numel(pos), 1); g = zeros(numel(pos), 1);
+for j = 1:numel(pos)
+    [b, ro] = turn_attitude(att, d.yaw, (pos(j) - 1) * p.cycle_s);
+    [hs, g(j)] = shadow_frame(b, att(2), ro, [abs(att(3)) att(10)], att(4), p.n_rx, sp(2:3), sp(4), v, sp(5), sp(8));
+    if sp(1) * g(j) >= sp(7), hid(j) = hs; end
+end
+end
+
+function [d, ci] = boot_diff(a, b, ri, w)
+% Paired sub-run bootstrap of mean(a) - mean(b) over the frames (rows ri of the resample weights w), points.
+nr = size(w, 2);
+sa = accumarray(ri, double(a), [nr 1]); sb = accumarray(ri, double(b), [nr 1]); n = accumarray(ri, 1, [nr 1]);
+x = 100 * (w * (sa - sb)) ./ max(w * n, 1);
+d = 100 * (sum(sa) - sum(sb)) / max(sum(n), 1); ci = prctile(x, [2.5 97.5]);
+end
+
+function W = W_or(f)
+W = struct(); if isfile(f), W = cell2struct(cell(numel(who('-file', f)), 1), who('-file', f), 1); end
+end
+
+function pc = oof(Z, X, yt, fold, ks, C, lam)
+pc = zeros(numel(yt), C);
+for k = ks
+    tr = fold ~= k & fold > 0; te = fold == k;
+    FM = fuse_classes('fit', [Z(tr, :), X(tr, :)], yt(tr), C, lam);
+    pc(te, :) = fuse_classes('apply', FM, [Z(te, :), X(te, :)]);
+end
+end
+
+function a = onset_age(fit, yt, cls)
+% Cycles since the sub-run's first frame of a lost-branch class (NaN elsewhere).
+a = nan(numel(yt), 1);
+[~, ~, rid] = unique(fit.run); byrun = accumarray(rid, (1:numel(rid))', [], @(v) {v});
+for r = 1:numel(byrun)
+    ix = byrun{r}; [~, o] = sort(fit.pos(ix)); ix = ix(o);
+    j0 = find(ismember(yt(ix), cls), 1);
+    if ~isempty(j0), a(ix(j0:end)) = fit.pos(ix(j0:end)) - fit.pos(ix(j0)); end
+end
+end
+
+function fault_strata(out, yt, pb, PV, V, fit, age, ia)
+lab = yt == ia;
+st = {fit.level <= 5.01, '5 dB'; fit.level > 5.01 & fit.level < 9, '8.7 dB'; fit.k_db >= 10, 'K >= 10 dB'; ...
+    fit.k_db < 0, 'K < 0 dB'; age >= 12, 'age >= 12'; age <= 2, 'age 0-2'; fit.speed < 23, 'hover (< 23 km/h)'};
+for q = 1:size(st, 1)
+    m = lab & st{q, 1};
+    out('  fault recall %-18s (%5d frames): %s\n', st{q, 2}, sum(m), strjoin(cellfun(@(v, P) sprintf('%s %.1f%%', v, ...
+        100 * mean(amax(P(m, :)) == ia)), V, PV, 'UniformOutput', false), ', '));
+end
+end
+
+function n = cell_counts(s)
+% Sub-runs per (class, level, Eb/N0) cell: min, median, max, cells.
+cr = s.draws.class_run; u = unique(s.run); [~, j] = ismember(u, s.run);
+key = [cr(j), double(s.level(j)), double(s.ebno(j))]; key(isnan(key)) = -999;
+[~, ~, g] = unique(key, 'rows'); c = accumarray(g, 1);
+n = [min(c) median(c) max(c) numel(c)];
+end
+
+function t = strata_txt(rd, m, x, e, run)
+t = '';
+for q = 1:numel(e) - 1
+    k = m & x >= e(q) & x < e(q + 1);
+    if any(k), t = [t, sprintf('%5.1f (%d; %d)  ', 100 * mean(rd(k)), sum(k), numel(unique(run(k))))]; %#ok<AGROW>
+    else, t = [t, '   -           ']; end %#ok<AGROW>
+end
+end
+
+function t = pct(r, x, e)
+v = arrayfun(@(q) 100 * mean(r(x >= e(q) & x < e(q + 1))), 1:numel(e) - 1);
+t = mat2str(round(v, 1));
+end
+
+function s = gtxt(d)
+s = sprintf(['all %+.2f [%+.2f, %+.2f], above %+.2f [%+.2f, %+.2f], clean as threat %+.2f [%+.2f, %+.2f], as lost branch %+.2f ' ...
+    '[%+.2f, %+.2f], F1 fault %+.2f [%+.2f, %+.2f], shadowing %+.2f [%+.2f, %+.2f], K<=0 fault %+.2f [%+.2f, %+.2f], shadowing %+.2f [%+.2f, %+.2f]'], ...
+    d.all, d.above, d.cl, d.lb, d.fault, d.shad, d.fault_low, d.shad_low);
+end
+
+function both(fid, varargin)
+fprintf(varargin{:}); fprintf(fid, varargin{:});
+end
+
+function k = amax(p)
+[~, k] = max(p, [], 2);
+end
+
+function m = mf1(y, yh, C)
+cm = accumarray([y(:) yh(:)], 1, [C C]);
+pr = diag(cm) ./ sum(cm, 1)'; rc = diag(cm) ./ sum(cm, 2);
+f = 2 * pr .* rc ./ (pr + rc); m = mean(f(sum(cm, 2) > 0), 'omitnan');
+end
+
+function f = cf1(y, yh, c)
+f = 2 * sum(y == c & yh == c) / max(sum(y == c) + sum(yh == c), 1);
+end
+
+function thr = kpi1_thr(yt, yp, bin, classes)
+u = unique(bin(~isnan(bin)));
+f = arrayfun(@(v) 100 * mf1(yt(bin == v), yp(bin == v), numel(classes)), u);
+k = find(f < 90, 1, 'last'); if isempty(k), k0 = 1; else, k0 = k + 1; end
+thr = NaN; if k0 <= numel(u), thr = u(k0); end
+end
+
+function s = yn(x)
+s = ternary(x, 'yes', 'no');
+end
+
+function s = ternary(c, a, b)
+if c, s = a; else, s = b; end
+end

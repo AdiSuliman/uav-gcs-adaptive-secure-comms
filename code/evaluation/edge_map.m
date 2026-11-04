@@ -52,13 +52,20 @@
 %          channel_switch and freq_diversity                                    >= 90%
 %   REC    held recovery among the recoverable flights: restored for 5 cycles and
 %          on every cycle after, but one follower re-acquisition of 1 + D cycles
-%          (rollout_policy.m); a flight succeeds when all its episodes do      >= 90%
-%   PROT   held recovery among all threat flights                              >= 90%
+%          (rollout_policy.m); the share of held onsets, a rate over flights   >= 90%
+%   PROT   held recovery among all threat flights, per onset                   >= 90%
+%          (beside both, no target: the flight-level share, a flight held when every
+%          one of its onsets is)
 %   LINK_T packet loss from the start of the recovery run to the end of the episode,
 %          pooled over the point     <= max(2x the same flights' clean link, 1.4%)
 %   FA     clean link: flights with a configuration change (KPI 6)              <= 5%
-%   LINK   clean link: packet loss at no_action. 802.11's PER < 10% at a 1000-byte
-%          PSDU (Keysight AN Table 7, BER 1.3e-5) on our 129-byte frames         <= 1.4%
+%   LINK   clean link: packet loss at no_action. 802.11a's PER < 10% at a 1000-byte
+%          PSDU carried to our 1032-bit frame through the simulated block fading
+%          (Rician K and receive correlation as drawn, ideal MRC)               <= 5.7% (3 antennas; 5.39% with 4)
+%          (beside it, no target: the same PER carried through an AWGN bit error rate,
+%          1.4%, and the operating-point tag J, packet loss below 10%)
+%   Beside the clean link: the C&C reliability of 3GPP TR 36.777 Table 5.1-1 (up to 1e-3
+%   packet error loss rate), a service requirement after the link layer, not modelled here.
 %   COMMITTED, the commitment, per signalling delay: PROT, DET_h, FA, LINK and LINK_T
 %          COMMITTED (DET_h only not NOT COMMITTED below 36 harmed flights; FA that of
 %          the claim, the clean flights of every Eb/N0 from the KPI 1 threshold up (KPI 6)
@@ -71,10 +78,13 @@
 %          their own)
 %   SYSTEM DET, SURV and REC COMMITTED and F (the proposal's relative criterion);
 %          SYSTEM+LINK with LINK
-% A point where the random policy's PROT is COMMITTED too is not attributable to the
-% decision layer (r). The receiver alone (its PROT, LINK and LINK_T) is the floor
+% A point where the random policy's PROT is COMMITTED too (r), or no response's (n: the
+% threat seldom harms the link there), is not attributable to the decision layer. Beside REC
+% and PROT, REC_h and PROT_h on the harmed flights only (no_action does not restore them), no
+% target of their own. The receiver alone (its PROT, LINK and LINK_T) is the floor
 % without signalling. Horizon: held for the rest of a 0.6 s episode (at most 0.54 s
-% after the onset).
+% after the onset). Every policy runs with the deployed policy's monitor and decision-time
+% settings (decision_settings.m), the off-grid check flights alike.
 % Interval and verdict: edge_verdict.m (95%, bootstrap over flights and Clopper-Pearson,
 % COMMITTED / NOT COMMITTED / UNDETERMINED, at least 36 flights to commit).
 % Tables per (threat, level, Eb/N0 with its distance, link_distance_km.m), per Eb/N0 for
@@ -118,19 +128,21 @@ if ~isfield(PP, 'cov') || ~isfield(PP, 'cell_geo') || numel(PP.runs) < 5
     error('edge_map: the pools have no second test split or flight draws (built before v7-D74); run build_policy_pools');
 end
 Q = load('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'H', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db', ...
-    'deployed', 'rule_sel', 'fa_bound_met', 'det_id', 'maha_thr');
+    'deployed', 'rule_sel', 'fa_bound_met', 'det_id', 'maha_thr', 'dec');
 check_det_id(PP, Q, 'edge_map');
-if isfield(Q, 'maha_thr'), PP.maha_thr = Q.maha_thr; end         % the unknown-threat threshold the agent ran with
-MON = struct('alarm_mode', Q.alarm_mode, 'confirm', Q.confirm, 'drop_db', Q.drop_db);
-if strcmp(Q.deployed, 'rule_sel'), MON = Q.rule_sel; end      % the deployed policy's monitor
-PP.confirm = MON.confirm; PP.alarm_mode = MON.alarm_mode;
-if ~isempty(MON.drop_db), PP.drop_db = MON.drop_db; end
+MON = Q; if strcmp(Q.deployed, 'rule_sel'), MON = Q.rule_sel; end   % the deployed policy's monitor and settings
+PP = decision_settings(PP, MON);
 K = link_env('tables', PP, 'flight');
 C = decision_config();
 p0 = load('params.mat').params;
 TEST = 3; SPEED = 4; TEST2 = 5; SPL = [TEST TEST2];
 T = Q.H.T; NE = 64; REPS = 2; B = 4000;
-TGT = struct('det', 0.90, 'surv', 0.90, 'rec', 0.90, 'prot', 0.90, 'fa', 0.05, 'link', 0.014);
+TGT = struct('det', 0.90, 'surv', 0.90, 'rec', 0.90, 'prot', 0.90, 'fa', 0.05, 'link', link_target(p0.n_rx), 'linkt_floor', 0.014, ...
+    'held_flight', false);
+TGT0 = TGT; TGT0.link = 0.014; TGT0.held_flight = true;   % the definitions printed beside: LINK via AWGN, REC/PROT per flight
+LINK_J = 0.10;                  % operating-point tag of the clean link (802.11a sensitivity PER), descriptive
+C2REF = ['C&C reliability: up to 1e-3 packet error loss rate (3GPP TR 36.777, Table 5.1-1), a service requirement ' ...
+    'after the link layer; not modelled, not claimed'];
 DLY = unique([C.switch_delay 2 7], 'stable');   % [cycles] signalling delays, the model's first
 FDL = [0 1 2];                  % [cycles] follower re-acquisition after a hop
 K_READ = -3;                    % [dB] lowest in-flight K near 2.4 GHz (Aoki et al.): second reading of the lowest band
@@ -153,6 +165,7 @@ if isfile('results/eval_detector_metrics.mat')
         ebno_thr = Md.metrics.kpi1_threshold_db;
     end
 end
+kpi1_threshold_check(ebno_thr, 'edge_map');           % the threshold of the file KPI 1 is read from
 km = link_distance_km(PP.ebno, p0);                   % [km] distance of every Eb/N0, profile A tracked
 LB = link_budget();
 if isfile('results/overhead_pass.mat'), L = load('results/overhead_pass.mat', 'OHP'); OHP = L.OHP; else, OHP = overhead(); end
@@ -164,11 +177,11 @@ dep = Q.deployed;                                     % deployed policy (train_d
 FAV = double(Q.fa_bound_met);                         % false-alarm bound met on validation: else no point commits
 fixed_mmse = find(strcmp(PP.actions, 'spatial_diversity'), 1);
 POL = unique({dep, 'none', 'rule_esc', 'oracle', 'random', 'fixed_mmse'}, 'stable'); nP = numel(POL);
-NAMES = struct('dqn_esc', 'DQN + escalation', 'rule_sel', 'rule + escalation, own monitor', 'none', 'no response', ...
+NAMES = struct('dqn_esc', 'DQN + escalation', 'dqn', 'DQN', 'rule_sel', 'rule + escalation, own monitor', 'none', 'no response', ...
     'rule_esc', 'rule + escalation', 'oracle', 'oracle (one-step)', 'random', 'random', ...
     'fixed_mmse', 'receiver only (always-on MMSE)');
 LBL = cellfun(@(p) NAMES.(p), POL, 'UniformOutput', false);
-iRnd = find(strcmp(POL, 'random')); iMm = find(strcmp(POL, 'fixed_mmse'));
+iRnd = find(strcmp(POL, 'random')); iMm = find(strcmp(POL, 'fixed_mmse')); iNo = find(strcmp(POL, 'none'));
 
 % Every (threat, level): label, level basis, levels the detector never trained on, an
 % interferer with a direction
@@ -228,11 +241,11 @@ end
 U = [];
 if isfile('data/unknown_threat_agents.mat')
     U = load('data/unknown_threat_agents.mat', 'agents_loo', 'threats', 'det_id');
-    check_det_id(PP, U, 'edge_map');
+    check_det_id(PP, U, 'edge_map', 'data/unknown_threat_agents.mat');
 end
-if ~isempty(U) || ~strcmp(dep, 'dqn_esc')
+if ~isempty(U) || ~startsWith(dep, 'dqn')
     grp = {single_cells}; ga = 0;
-    if strcmp(dep, 'dqn_esc')
+    if startsWith(dep, 'dqn')
         grp = cellfun(@(t) single_cells(strcmp(PP.scen(single_cells), t)), U.threats, 'UniformOutput', false);
         ga = 1:numel(U.threats);
     end
@@ -492,11 +505,12 @@ end
 % point (fac: the clean flights from the KPI 1 threshold up, from the point up below it);
 % the clean link in every veto band over the regions of the walks (the point s and the
 % points above it, key s; the point alone, key nS + s)
-CL = struct('link', repmat(VZ, 1, nS), 'fa', repmat(VZ, nD, nS), 'fac', repmat(VZ, nD, nS));
-CVt = ones(nD, 2 * nS, nB);
+CL = struct('link', repmat(VZ, 1, nS), 'link_pre', repmat(VZ, 1, nS), 'fa', repmat(VZ, nD, nS), 'fac', repmat(VZ, nD, nS));
+CVt = ones(nD, 2 * nS, nB); CVt0 = CVt;               % CVt0: the veto under TGT0's LINK
 for s = 1:nS
     F = take_rows(CF, CF.s == s);
     CL.link(s) = edge_verdict(F.link_k, F.link_n, F.geo, TGT.link, 'le', false, B);
+    CL.link_pre(s) = edge_verdict(F.link_k, F.link_n, F.geo, TGT0.link, 'le', false, B);
     for d = 1:nD
         v = var_of(VAR, 'clean', NaN, DLY(d), 1);
         CL.fa(d, s) = edge_verdict(F.fa_k(:, v), F.fa_n(:, v), F.geo, TGT.fa, 'le', true, B);
@@ -520,7 +534,9 @@ for d = 1:nD
             if isempty(Fb.geo), continue; end
             fa = edge_verdict(Fb.fa_k(:, v), Fb.fa_n(:, v), Fb.geo, TGT.fa, 'le', true, B);
             lk = edge_verdict(Fb.link_k, Fb.link_n, Fb.geo, TGT.link, 'le', false, B);
+            lk0 = edge_verdict(Fb.link_k, Fb.link_n, Fb.geo, TGT0.link, 'le', false, B);
             if fa.verdict == -1 || lk.verdict == -1, CVt(d, key, b) = -1; end
+            if fa.verdict == -1 || lk0.verdict == -1, CVt0(d, key, b) = -1; end
         end
     end
 end
@@ -537,23 +553,36 @@ for d = 1:nD
     for k = 1:size(KND, 1)
         v = var_of(VAR, KND{k, 1}, KND{k, 2}, DLY(d), 1);
         if v == 0 || isempty(KND{k, 3}), continue; end
-        vr = var_of(VAR, KND{k, 1}, KND{k, 2}, DLY(1), iRnd);
-        X = commit_rows(FTi, KND{k, 3}, v, vr, KND{k, 4}, BL, CL.fac(d, :), CL.fa(d, :), CL.link, FAV, TGT, B, ...
+        vr = var_of(VAR, KND{k, 1}, KND{k, 2}, DLY(1), iRnd); vn = var_of(VAR, KND{k, 1}, KND{k, 2}, DLY(1), iNo);
+        X = commit_rows(FTi, KND{k, 3}, v, vr, vn, KND{k, 4}, BL, CL.fac(d, :), CL.fa(d, :), CL.link, FAV, TGT, B, ...
             BD(iv), dirc, reshape(CVt(d, :, iv), 2 * nS, []), DH, nS);
         CR(end+1) = struct('kind', KND{k, 1}, 'fd', KND{k, 2}, 'D', DLY(d), 'd', d, 'rows', KND{k, 3}, 'X', X); %#ok<SAGROW>
     end
 end
 c1 = find(strcmp({CR.kind}, 'static') & [CR.d] == 1, 1); X1 = CR(c1).X;   % the deployed delay
 cst = find(strcmp({CR.kind}, 'static'));              % static commitment at every delay
+% The static commitment under the definitions printed beside (TGT0), every delay; reported only
+CR0 = struct('D', {}, 'd', {}, 'X', {});
+for d = 1:nD
+    v = var_of(VAR, 'static', NaN, DLY(d), 1);
+    if v == 0, continue; end
+    vr = var_of(VAR, 'static', NaN, DLY(1), iRnd); vn = var_of(VAR, 'static', NaN, DLY(1), iNo);
+    X = commit_rows(FTi, 1:nT, v, vr, vn, 'surv', BL, CL.fac(d, :), CL.fa(d, :), CL.link_pre, FAV, TGT0, B, ...
+        BD(iv), dirc, reshape(CVt0(d, :, iv), 2 * nS, []), DH, nS);
+    CR0(end+1) = struct('D', DLY(d), 'd', d, 'X', X); %#ok<SAGROW>
+end
+X10 = CR0([CR0.d] == 1).X;
 % The relative layers at the deployed delay, every policy's REC beside them
 PT = struct('det', BL.det, 'deth', BL.deth, 'detu', BL.detu, 'detb', BL.detb, 'surv', BL.surv, 'rec', X1.rec, 'prot', X1.prot, ...
-    'linkt', X1.linkt, ...
-    'sys', zeros(nT, nS), 'lim', {repmat({''}, nT, nS)}, 'sysl', zeros(nT, nS), 'rec_pol', nan(nT, nS, nP), ...
-    'rec4_pol', nan(nT, nS, nP));
+    'linkt', X1.linkt, 'rec_h', X1.rec_h, 'prot_h', X1.prot_h, 'rec_fl', X10.rec, 'prot_fl', X10.prot, ...
+    'sys', zeros(nT, nS), 'lim', {repmat({''}, nT, nS)}, 'sysl', zeros(nT, nS), 'sys_pre', zeros(nT, nS), ...
+    'sysl_pre', zeros(nT, nS), 'rec_pol', nan(nT, nS, nP), 'rec4_pol', nan(nT, nS, nP));
 for i = 1:nT
     for s = 1:nS
         [PT.sys(i, s), PT.lim{i, s}] = all_of([BL.det(i, s).verdict, BL.surv(i, s).verdict, X1.rec(i, s).verdict, FAV], 'DSRF');
         PT.sysl(i, s) = all_of([PT.sys(i, s), CL.link(s).verdict], 'SL');
+        PT.sys_pre(i, s) = all_of([BL.det(i, s).verdict, BL.surv(i, s).verdict, X10.rec(i, s).verdict, FAV], 'DSRF');
+        PT.sysl_pre(i, s) = all_of([PT.sys_pre(i, s), CL.link_pre(s).verdict], 'SL');
         F = take_rows(FTi{i}, FTi{i}.s == s & FTi{i}.surv);
         for pk = 1:nP
             v = var_of(VAR, 'static', NaN, DLY(1), pk);
@@ -584,8 +613,8 @@ if vu > 0
     end
 end
 VD = struct('det', vt(PT.det), 'deth', vt(PT.deth), 'detu', vt(PT.detu), 'detb', vt(PT.detb), 'surv', vt(PT.surv), 'rec', vt(PT.rec), ...
-    'prot', vt(PT.prot), ...
-    'linkt', vt(PT.linkt), 'sys', PT.sys, 'sysl', PT.sysl);
+    'prot', vt(PT.prot), 'rec_h', vt(PT.rec_h), 'prot_h', vt(PT.prot_h), 'rec_fl', vt(PT.rec_fl), 'prot_fl', vt(PT.prot_fl), ...
+    'linkt', vt(PT.linkt), 'sys', PT.sys, 'sysl', PT.sysl, 'sys_pre', PT.sys_pre, 'sysl_pre', PT.sysl_pre);
 FR = arrayfun(@(s) false_change_rate(CF.sw_k(CF.s == s, var_of(VAR, 'clean', NaN, DLY(1), 1)), T, CF.geo(CF.s == s), ...
     C.period_ms), 1:nS);
 FRall = false_change_rate(CF.sw_k(CF.eb >= ebno_thr, var_of(VAR, 'clean', NaN, DLY(1), 1)), T, CF.geo(CF.eb >= ebno_thr), ...
@@ -596,12 +625,12 @@ fprintf('Verdicts per point done (%.1f min)\n', toc(t0) / 60);
 % (the same onsets and frame draws at every delay); FA of the claim from the grid's clean
 % flights, the check point's own 36 only must not be NOT COMMITTED
 CKV = struct('c', {}, 'threat', {}, 'kind', {}, 'level', {}, 's', {}, 'ebno', {}, 'det', {}, 'deth', {}, 'surv', {}, ...
-    'rec', {}, 'prot', {}, 'linkt', {}, 'sys', {}, 'lim', {}, 'commit', {}, 'clim', {});
+    'rec', {}, 'prot', {}, 'linkt', {}, 'sys', {}, 'lim', {}, 'commit', {}, 'clim', {}, 'commit_pre', {});
 CK = [];
 if isfile('data/check_pools.mat')
     L = load('data/check_pools.mat', 'CK'); CK = L.CK; clear L
     if ~strcmp(CK.det_id, PP.det_id), error('edge_map: the check pools come from another detector; rerun C1c'); end
-    CK.confirm = PP.confirm; CK.alarm_mode = PP.alarm_mode; if isfield(PP, 'drop_db'), CK.drop_db = PP.drop_db; end
+    CK = decision_settings(CK, PP);                   % the deployed monitor and settings, the unknown-threat threshold included
     Kc = link_env('tables', CK, 'flight');
     ck = find(~strcmp(CK.scen, 'none')); k0 = find(strcmp(CK.scen, 'none'), 1); nK = numel(CK.ebno);
     [kind, ag, opt] = policy_setup(dep, Q, sel, [], fixed_mmse, [], Kc.na);
@@ -677,19 +706,23 @@ if isfile('data/check_pools.mat')
             [x.det, x.deth] = det_layers(F, TGT, B);
             x.surv = surv_layer(F, 'surv', TGT, B);
             lk = edge_verdict(Fc.link_k, Fc.link_n, Fc.geo, TGT.link, 'le', false, B);
-            [x.commit, x.clim] = deal(zeros(1, nD), cell(1, nD));
+            lk0 = edge_verdict(Fc.link_k, Fc.link_n, Fc.geo, TGT0.link, 'le', false, B);
+            [x.commit, x.clim, x.commit_pre] = deal(zeros(1, nD), cell(1, nD), zeros(1, nD));
             for d = 1:nD
-                P = pol_layers(F, d, 'surv', TGT, B);
+                P = pol_layers(F, d, 'surv', TGT, B); P0 = pol_layers(F, d, 'surv', TGT0, B);
                 fa = edge_verdict(Fc.fa_k(:, d), Fc.fa_n(:, d), Fc.geo, TGT.fa, 'le', true, B);
                 E = edge_commit(struct('prot', P.prot.verdict, 'deth', x.deth.verdict, 'deth_n', x.deth.n, ...
                     'fa', KFC(d, s), 'fa_pt', fa.verdict, 'link', lk.verdict, 'linkt', P.linkt.verdict, 'fav', FAV), @no_veto);
-                x.commit(d) = E.v; x.clim(d) = E.lim;
+                E0 = edge_commit(struct('prot', P0.prot.verdict, 'deth', x.deth.verdict, 'deth_n', x.deth.n, ...
+                    'fa', KFC(d, s), 'fa_pt', fa.verdict, 'link', lk0.verdict, 'linkt', P0.linkt.verdict, 'fav', FAV), @no_veto);
+                x.commit(d) = E.v; x.clim(d) = E.lim; x.commit_pre(d) = E0.v;
                 if d == 1, x.rec = P.rec; x.prot = P.prot; x.linkt = P.linkt; end
             end
             [x.sys, x.lim] = all_of([x.det.verdict, x.surv.verdict, x.rec.verdict, FAV], 'DSRF');
             CKV(end+1) = struct('c', c, 'threat', CK.scen{c}, 'kind', CK.kind{c}, 'level', CK.level(c), 's', s, ...
                 'ebno', CK.ebno(s), 'det', x.det, 'deth', x.deth, 'surv', x.surv, 'rec', x.rec, 'prot', x.prot, ...
-                'linkt', x.linkt, 'sys', x.sys, 'lim', x.lim, 'commit', x.commit, 'clim', {x.clim}); %#ok<SAGROW>
+                'linkt', x.linkt, 'sys', x.sys, 'lim', x.lim, 'commit', x.commit, 'clim', {x.clim}, ...
+                'commit_pre', x.commit_pre); %#ok<SAGROW>
         end
     end
     fprintf('Off-grid check points: %d at %d delays (%.1f min)\n', numel(CKV), nD, toc(t0) / 60);
@@ -700,7 +733,7 @@ end
 % and its own clean flights' FA not NOT COMMITTED (96 hover flights commit only at 0)
 BT = struct('det', repmat(VZ, nT, nB), 'surv', repmat(VZ, nT, nB), 'rec', repmat(VZ, nT, nB), 'prot', repmat(VZ, nT, nB), ...
     'sys', zeros(nT, nB), 'lim', {repmat({''}, nT, nB)}, 'commit', zeros(nT, nB), 'clim', {repmat({''}, nT, nB)});
-CB = struct('fa', repmat(VZ, 1, nB), 'link', repmat(VZ, 1, nB));
+CB = struct('fa', repmat(VZ, 1, nB), 'link', repmat(VZ, 1, nB), 'link_pre', repmat(VZ, 1, nB));
 vc1 = var_of(VAR, 'clean', NaN, DLY(1), 1); v1 = var_of(VAR, 'static', NaN, DLY(1), 1);
 for b = 1:nB
     if strcmp(BD(b).axis, 'align'), continue; end         % no interferer on the clean link
@@ -708,6 +741,7 @@ for b = 1:nB
     F = take_rows(F, in_band(F, BD(b)));
     CB.fa(b) = edge_verdict(F.fa_k(:, vc1), F.fa_n(:, vc1), F.geo, TGT.fa, 'le', true, B);
     CB.link(b) = edge_verdict(F.link_k, F.link_n, F.geo, TGT.link, 'le', false, B);
+    CB.link_pre(b) = edge_verdict(F.link_k, F.link_n, F.geo, TGT0.link, 'le', false, B);
 end
 for i = 1:nT
     for b = 1:nB
@@ -786,7 +820,7 @@ for w = 1:numel(WK)
 end
 wC = numel(LAYN) + (1:nD); wF = numel(WK);            % walks of the commitment and of the floor
 CE = struct();
-for f = {'link'}
+for f = {'link', 'link_pre'}
     W = edge_walk([CL.(f{1})(down).verdict], PP.ebno(down));
     CE.(f{1}) = struct('edge', W.edge, 'first_not', W.first_not, 'nonmono', W.nonmono, 'km', link_distance_km(W.edge, p0));
 end
@@ -918,16 +952,21 @@ rep{end+1} = sprintf(['Generated: %s | deployed policy %s, false-alarm bound met
     nnz(PP.speed{SPEED}(1, PP.cell_geo{clean_cell}{SPEED}) == 0), nnz(PP.speed{SPEED}(1, PP.cell_geo{clean_cell}{SPEED}) > 0), ...
     REPS, strjoin(compose('%d', DLY), '/'), ...
     strjoin(compose('%d', DLY * C.period_ms), '/'), strjoin(compose('%d', FDL), '/'), strjoin(compose('%d', FDL * C.period_ms), '/'));
-rep{end+1} = sprintf(['Targets: DET, DET_h >= %g%% | SURV >= %g%% | REC, PROT >= %g%% | LINK_T <= max(2x clean, %g%%) | ' ...
-    'FA <= %g%% | LINK <= %g%% | COMMITTED: PROT, DET_h, FA, LINK and LINK_T COMMITTED (DET_h only not N below %d ' ...
-    'harmed flights; FA of the claim: the clean flights from %g dB up, or from the point up below it, and the ' ...
+rep{end+1} = sprintf(['Targets: DET, DET_h >= %g%% | SURV >= %g%% | REC, PROT >= %g%% per onset | LINK_T <= max(2x ' ...
+    'clean, %g%%) | FA <= %g%% | LINK <= %g%% | COMMITTED: PROT, DET_h, FA, LINK and LINK_T COMMITTED (DET_h only not N ' ...
+    'below %d harmed flights; FA of the claim: the clean flights from %g dB up, or from the point up below it, and the ' ...
     'point''s own not N), F, no band N | SYSTEM: DET, SURV and REC COMMITTED and F | SYSTEM+LINK: and LINK'], ...
-    100 * [TGT.det TGT.surv TGT.rec TGT.link TGT.fa TGT.link], N_MIN, ebno_thr);
+    100 * [TGT.det TGT.surv TGT.rec TGT.linkt_floor TGT.fa TGT.link], N_MIN, ebno_thr);
+rep{end+1} = sprintf(['Printed beside, no target (the definitions registered before D108): LINK <= %g%% (802.11a''s PER ' ...
+    'carried through an AWGN bit error rate), REC and PROT per flight (a flight held when every onset is), and the ' ...
+    'commitment under both; the operating-point tag J where the clean link loses < %g%% of its packets (D99, ' ...
+    'descriptive). %s.'], 100 * TGT0.link, 100 * LINK_J, C2REF);
 rep{end+1} = ['Restored: BER <= 2x and packet loss <= 2x + one loss event (one packet; with FEC the flight''s longest ' ...
     'run of lost packets, at most two) of the same flight''s clean link (BER floor 1e-4); the first three frames after ' ...
     'the link turns coded deliver no packet and are not restored. ' ...
     'REC and PROT count held recovery: restored for 5 cycles and on every cycle to the end of the 30-cycle episode, but ' ...
-    'one follower re-acquisition of 1 + D cycles: held for the rest of a 0.6 s episode (at most 0.54 s after the onset). ' ...
+    'one follower re-acquisition of 1 + D cycles: held for the rest of a 0.6 s episode (at most 0.54 s after the onset); ' ...
+    'the value is the share of held onsets and its interval that of the same share (a rate over flights). ' ...
     'DET_h: DET on the flights whose unmitigated link is not restored. LINK_T: packet loss from the start of the ' ...
     'recovery run to the end of the episode.'];
 rep{end+1} = sprintf(['Two-sided 95%% intervals (edge_verdict.m: bootstrap over flights, B = %d, Clopper-Pearson for ' ...
@@ -942,9 +981,9 @@ SHN = '';                                             % airframe shadowing: cond
 if isfield(PP, 'shadow'), SHN = shadow_note(PP.shadow, SPL, PP.ebno); end
 if ~isempty(SHN), rep{end+1} = [SHN ' Test and second test flights; at the edge speeds 161 km/h only.']; end
 ttl = {'DET: fused detection on the threat-active frames at no_action', 'DET_h: DET on the harmed flights', ...
-    'SURV: flights some configuration recovers', 'REC: held recovery among recoverable flights, deployed policy', ...
-    'PROT: held recovery among all threat flights, deployed policy', ...
-    'LINK_T: packet loss after recovery, deployed policy (target max(2x clean, 1.4%))'};
+    'SURV: flights some configuration recovers', 'REC: held recovery per onset among recoverable flights, deployed policy', ...
+    'PROT: held recovery per onset among all threat flights, deployed policy', ...
+    sprintf('LINK_T: packet loss after recovery, deployed policy (target max(2x clean, %g%%))', 100 * TGT.linkt_floor)};
 for f = 1:6
     rep{end+1} = ''; %#ok<SAGROW>
     rep{end+1} = sprintf('--- %s, %% [95%% interval] flights verdict ---', ttl{f}); %#ok<SAGROW>
@@ -952,6 +991,29 @@ for f = 1:6
     fmt = '%5.1f'; if f == 6, fmt = '%5.2f'; end
     for i = 1:nT
         rep{end+1} = sprintf('%s %s', rowl{i}, strjoin(arrayfun(@(s) cell_txt(PT.(LAY{f})(i, s), fmt), 1:nS, ...
+            'UniformOutput', false), ' ')); %#ok<SAGROW>
+    end
+end
+for q = {'rec_h', 'REC_h: held recovery among the HARMED recoverable flights (no_action does not restore them), deployed policy'; ...
+        'prot_h', 'PROT_h: held recovery among the HARMED threat flights, deployed policy'}'
+    rep{end+1} = ''; %#ok<SAGROW>
+    rep{end+1} = sprintf(['--- %s; beside REC and PROT, no target of its own: %% [95%% interval] flights verdict against the ' ...
+        '90%% target (below 36 flights UNDETERMINED) ---'], q{2}); %#ok<SAGROW>
+    rep{end+1} = sprintf('%-49s %s', '', sprintf('%-29s', hdr_e{:})); %#ok<SAGROW>
+    for i = 1:nT
+        rep{end+1} = sprintf('%s %s', rowl{i}, strjoin(arrayfun(@(s) cell_txt(PT.(q{1})(i, s), '%5.1f'), 1:nS, ...
+            'UniformOutput', false), ' ')); %#ok<SAGROW>
+    end
+end
+for q = {'rec_fl', 'REC'; 'prot_fl', 'PROT'}'
+    rep{end+1} = ''; %#ok<SAGROW>
+    rep{end+1} = sprintf(['--- %s per flight (registered before D108, reported only): the share of held onsets %% ' ...
+        '[95%% interval: the hull of its bootstrap over flights and the Clopper-Pearson interval of the flights whose ' ...
+        'every onset is held] flights verdict against the %g%% target (a flight succeeds when every onset is held) ---'], ...
+        q{2}, 100 * TGT.rec); %#ok<SAGROW>
+    rep{end+1} = sprintf('%-49s %s', '', sprintf('%-29s', hdr_e{:})); %#ok<SAGROW>
+    for i = 1:nT
+        rep{end+1} = sprintf('%s %s', rowl{i}, strjoin(arrayfun(@(s) cell_txt(PT.(q{1})(i, s), '%5.1f'), 1:nS, ...
             'UniformOutput', false), ' ')); %#ok<SAGROW>
     end
 end
@@ -969,7 +1031,8 @@ rep{end+1} = sprintf(['--- A lost branch with and without its onset in the fusio
     'fused class, and the cause latched from the onset''s shape, onset_shape.m) | by the fused class alone. The ' ...
     'onset''s shape is read at the event''s start, the latched cause after it ---'], PP.fuse_N);
 if ~onset_shape('on', PP.fuse)
-    rep{end+1} = 'The latch is off (chosen on validation, select_fusion.m): the monitor''s class is the fused class.';
+    rep{end+1} = ['The latch is off (set by B2F, select_fusion.m: chosen on validation, or the measured pick''s state): ' ...
+        'the monitor''s class is the fused class.'];
 end
 for q = 1:numel(OC)
     rep{end+1} = sprintf('%-20s %5.1f dB | onset in the window %5.1f | %5.1f (%d frames) | after it %5.1f | %5.1f (%d frames)', ...
@@ -1001,16 +1064,30 @@ for k = 1:numel(CR)
     rep{end+1} = ''; %#ok<SAGROW>
     rep{end+1} = sprintf(['--- COMMITTED, %s, signalling delay %d cycles (%d ms): verdict (not COMMITTED: P PROT, H DET_h, ' ...
         'A FA, L LINK, T LINK_T, F the false-alarm bound on validation, B a band NOT COMMITTED); r the random policy''s ' ...
-        'PROT COMMITTED too ---'], set_txt(CR(k), C), CR(k).D, CR(k).D * C.period_ms); %#ok<SAGROW>
+        'PROT COMMITTED too, n no response''s (not attributable to the decision layer) ---'], set_txt(CR(k), C), CR(k).D, ...
+        CR(k).D * C.period_ms); %#ok<SAGROW>
     rep{end+1} = sprintf('%-49s %s', '', sprintf('%-16s', hdr_e{:})); %#ok<SAGROW>
     for q = 1:numel(rw)
-        rep{end+1} = sprintf('%s %s', rowl{rw(q)}, strjoin(arrayfun(@(s) sprintf('%-15s', sprintf('%s %s%s', ...
-            vsym(x.commit(q, s)), x.lim{q, s}, repmat(' r', 1, x.rnd(q, s) == 1))), 1:nS, 'UniformOutput', false), ' ')); %#ok<SAGROW>
+        rep{end+1} = sprintf('%s %s', rowl{rw(q)}, strjoin(arrayfun(@(s) sprintf('%-15s', sprintf('%s %s%s%s', ...
+            vsym(x.commit(q, s)), x.lim{q, s}, repmat(' r', 1, x.rnd(q, s) == 1), repmat(' n', 1, x.nresp(q, s) == 1))), ...
+            1:nS, 'UniformOutput', false), ' ')); %#ok<SAGROW>
     end
     bf = find(~cellfun(@isempty, x.bfail));
     for q = reshape(bf, 1, [])
         [a, s] = ind2sub(size(x.bfail), q);
         rep{end+1} = sprintf('  B %s at %s: %s', lbl{rw(a)}, hdr_e{s}, x.bfail{q}); %#ok<SAGROW>
+    end
+end
+for k = 1:numel(CR0)
+    x = CR0(k).X;
+    rep{end+1} = ''; %#ok<SAGROW>
+    rep{end+1} = sprintf(['--- COMMITTED under the definitions registered before D108 (LINK <= %g%%, REC and PROT per ' ...
+        'flight), static threats, signalling delay %d cycles (%d ms); reported only, not the commitment ---'], ...
+        100 * TGT0.link, CR0(k).D, CR0(k).D * C.period_ms); %#ok<SAGROW>
+    rep{end+1} = sprintf('%-49s %s', '', sprintf('%-16s', hdr_e{:})); %#ok<SAGROW>
+    for q = 1:nT
+        rep{end+1} = sprintf('%s %s', rowl{q}, strjoin(arrayfun(@(s) sprintf('%-15s', sprintf('%s %s', ...
+            vsym(x.commit(q, s)), x.lim{q, s})), 1:nS, 'UniformOutput', false), ' ')); %#ok<SAGROW>
     end
 end
 rep{end+1} = '';
@@ -1047,6 +1124,13 @@ for d = 1:nD
         'UniformOutput', false), ' ')); %#ok<SAGROW>
 end
 rep{end+1} = sprintf('%-8s %s', 'LINK', strjoin(arrayfun(@(s) cell_txt(CL.link(s), '%5.2f'), 1:nS, 'UniformOutput', false), ' '));
+rep{end+1} = sprintf('%-8s %s', 'LINK pre', strjoin(arrayfun(@(s) sprintf('%-28s', sprintf('%s at %g%%', ...
+    vsym(CL.link_pre(s).verdict), 100 * TGT0.link)), 1:nS, 'UniformOutput', false), ' '));
+rep{end+1} = sprintf('%-8s %s', 'tag', strjoin(arrayfun(@(s) sprintf('%-28s', link_tag(CL.link(s), LINK_J)), 1:nS, ...
+    'UniformOutput', false), ' '));
+rep{end+1} = sprintf(['LINK <= %g%% is the commitment''s; LINK pre: the verdict at %g%% on the same interval (registered ' ...
+    'before D108, reported only); tag: J working point (packet loss < %g%%, the 802.11a sensitivity PER at our frame), M ' ...
+    'marginal (D99, descriptive, point estimate). %s.'], 100 * TGT.link, 100 * TGT0.link, 100 * LINK_J, C2REF);
 rep{end+1} = sprintf('False changes of the deployed policy on the clean link (%d ms per cycle, 95%% upper bound):', C.period_ms);
 for s = 1:nS
     rep{end+1} = sprintf('  %-16s %s', hdr_e{s}, rate_txt(FR(s))); %#ok<SAGROW>
@@ -1120,14 +1204,14 @@ for f = 1:6
         end
     end
 end
-for f = {'fa', 'link'}
+for f = {'fa', 'link', 'link_pre'}
     rep{end+1} = sprintf('clean link %s: %s', upper(f{1}), strjoin(arrayfun(@(b) sprintf('%s %s', BD(b).name, ...
         band_txt(CB.(f{1})(b))), 1:nB, 'UniformOutput', false), ' | ')); %#ok<SAGROW>
 end
 fid = fopen('results/edge_map.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 
 % Summary
-sm = {'=== EDGE SUMMARY: WHERE THE SYSTEM IS COMMITTED ===', rep{2:7 + ~isempty(SHN)}, ''};
+sm = {'=== EDGE SUMMARY: WHERE THE SYSTEM IS COMMITTED ===', rep{2:8 + ~isempty(SHN)}, ''};
 isg = ismember(tc, single_cells);
 cnt3 = @(x, m) sprintf('%4d / %4d / %4d', sum(x(m, :) == 1, 'all'), sum(x(m, :) == -1, 'all'), sum(x(m, :) == 0, 'all'));
 sm{end+1} = 'Points per layer, single threats | combined threats: COMMITTED / NOT COMMITTED / UNDETERMINED:';
@@ -1136,36 +1220,65 @@ for f = 1:numel(LAY)
 end
 sm{end+1} = sprintf('  %-16s %s | %s   (unharmed flights, beside DET_h; no target)', 'DET_u', cnt3(VD.detu, isg), ...
     cnt3(VD.detu, ~isg));
+sm{end+1} = sprintf('  %-16s %s | %s   (harmed recoverable flights, beside REC; no target)', 'REC_h', cnt3(VD.rec_h, isg), ...
+    cnt3(VD.rec_h, ~isg));
+sm{end+1} = sprintf('  %-16s %s | %s   (harmed flights, beside PROT; no target)', 'PROT_h', cnt3(VD.prot_h, isg), ...
+    cnt3(VD.prot_h, ~isg));
 sm{end+1} = sprintf('  %-16s %s | %s   (branch level: fault and shadowing as one branch lost, beside DET; no target)', ...
     'DET_b', cnt3(VD.detb, isg), cnt3(VD.detb, ~isg));
 for d = 1:nD
     x = CR(cst(d)).X;
     sm{end+1} = sprintf(['  %-16s %s | %s; inside a walk region %d, outside every walk (reported, not committed) %d; ' ...
-        'not attributable to the decision layer (r) %d'], sprintf('COMMITTED D%d', DLY(d)), cnt3(x.commit, isg), ...
+        'not attributable to the decision layer %d (r %d, n %d)'], sprintf('COMMITTED D%d', DLY(d)), cnt3(x.commit, isg), ...
         cnt3(x.commit, ~isg), nnz(x.commit == 1 & INR(:, :, d)), nnz(x.commit == 1 & ~INR(:, :, d)), ...
-        nnz(x.commit == 1 & x.rnd == 1)); %#ok<SAGROW>
+        nnz(x.commit == 1 & (x.rnd == 1 | x.nresp == 1)), nnz(x.commit == 1 & x.rnd == 1), nnz(x.commit == 1 & x.nresp == 1)); %#ok<SAGROW>
 end
+for k = 1:numel(CR0)
+    sm{end+1} = sprintf('  %-16s %s | %s   (registered before D108: LINK <= %g%%, REC and PROT per flight; reported only)', ...
+        sprintf('pre COMMITTED D%d', CR0(k).D), cnt3(CR0(k).X.commit, isg), cnt3(CR0(k).X.commit, ~isg), 100 * TGT0.link); %#ok<SAGROW>
+end
+sm{end+1} = sprintf('  %-16s %s | %s   (registered before D108, reported only)', 'REC per flight', cnt3(VD.rec_fl, isg), ...
+    cnt3(VD.rec_fl, ~isg));
+sm{end+1} = sprintf('  %-16s %s | %s   (registered before D108, reported only)', 'PROT per flight', cnt3(VD.prot_fl, isg), ...
+    cnt3(VD.prot_fl, ~isg));
+sm{end+1} = sprintf('  %-16s %s | %s   (registered before D108: REC per flight, reported only)', 'pre SYSTEM', ...
+    cnt3(VD.sys_pre, isg), cnt3(VD.sys_pre, ~isg));
+sm{end+1} = sprintf('  %-16s %s | %s   (registered before D108: REC per flight, LINK <= %g%%, reported only)', ...
+    'pre SYSTEM+LINK', cnt3(VD.sysl_pre, isg), cnt3(VD.sysl_pre, ~isg), 100 * TGT0.link);
 sm{end+1} = sprintf('  %-16s %s | %s', 'floor (no signal)', cnt3(FL.v, isg), cnt3(FL.v, ~isg));
 for k = find(~strcmp({CR.kind}, 'static'))
     sm{end+1} = sprintf('  %-16s %s', sprintf('%s D%d', set_txt(CR(k), C), CR(k).D), ...
         cnt3(CR(k).X.commit, true(numel(CR(k).rows), 1))); %#ok<SAGROW>
 end
-sm{end+1} = sprintf(['Each COMMITTED point holds per point (one-sided error <= 2.5%%, <= 2.1%% at a true 0.90 and 72 ' ...
-    'flights); the map as a whole is not jointly controlled (common random numbers group the errors by Eb/N0 column). ' ...
-    'The commitment is the walk regions, each "up to" claim at <= 5%% family error.']);
-sm{end+1} = sprintf('Clean link per Eb/N0 (%s): LINK %s', strjoin(compose('%g', PP.ebno), '/'), ...
-    strjoin(arrayfun(@(V) sprintf('%s(%d)', vsym(V.verdict), V.n), CL.link, 'UniformOutput', false), ' '));
+sm{end+1} = sprintf(['Each COMMITTED point holds per point (one-sided error <= 2.5%%; <= 2.1%% at a true 0.90 and 72 ' ...
+    'flights for a per-flight outcome, about 1-2.5%% for a per-onset rate at a true 0.90, depending on the within-flight ' ...
+    'correlation of a flight''s onsets (at most 3%% at correlation 0, 0.5 and 1, test_core test_edge_rec_rate); the map ' ...
+    'as a whole is not jointly controlled (common random numbers ' ...
+    'group the errors by Eb/N0 column). The commitment is the walk regions, each "up to" claim at <= 5%% family error.']);
+sm{end+1} = sprintf('Clean link per Eb/N0 (%s): LINK <= %g%% %s | registered before D108, LINK <= %g%% %s | tag %s', ...
+    strjoin(compose('%g', PP.ebno), '/'), 100 * TGT.link, ...
+    strjoin(arrayfun(@(V) sprintf('%s(%d)', vsym(V.verdict), V.n), CL.link, 'UniformOutput', false), ' '), 100 * TGT0.link, ...
+    strjoin(arrayfun(@(V) sprintf('%s(%d)', vsym(V.verdict), V.n), CL.link_pre, 'UniformOutput', false), ' '), ...
+    strjoin(arrayfun(@(V) link_tag(V, LINK_J), CL.link, 'UniformOutput', false), ' '));
+sm{end+1} = sprintf('  clean packet loss %% [95%% interval] (distance): %s', strjoin(arrayfun(@(s) sprintf('%g dB %s (%.2f km)', ...
+    PP.ebno(s), strtrim(cell_txt(CL.link(s), '%.2f')), km(s)), 1:nS, 'UniformOutput', false), ' | '));
+sm{end+1} = ['  ' C2REF];
 for d = 1:nD
     sm{end+1} = sprintf('  FA D%d per point %s; of the claim %s; committed from 15 dB down to %s', DLY(d), ...
         strjoin(arrayfun(@(V) sprintf('%s(%d)', vsym(V.verdict), V.n), CL.fa(d, :), 'UniformOutput', false), ' '), ...
         strjoin(arrayfun(@(V) sprintf('%s(%d)', vsym(V.verdict), V.n), CL.fac(d, :), 'UniformOutput', false), ' '), ...
         edge_txt(CE.fa(d).edge, CE.fa(d).km)); %#ok<SAGROW>
 end
-sm{end+1} = sprintf('  LINK committed from 15 dB down to %s', edge_txt(CE.link.edge, CE.link.km));
+sm{end+1} = sprintf('  LINK committed from 15 dB down to %s (registered before D108: %s)', edge_txt(CE.link.edge, CE.link.km), ...
+    edge_txt(CE.link_pre.edge, CE.link_pre.km));
 sm{end+1} = sprintf('  False changes of the deployed policy on the clean link, Eb/N0 >= %g dB: %s', ebno_thr, rate_txt(FRall));
 sm{end+1} = sprintf('  Off-grid check points COMMITTED / NOT COMMITTED / UNDETERMINED per delay: %s', strjoin(arrayfun(@(d) ...
     sprintf('D%d %d / %d / %d', DLY(d), nnz(arrayfun(@(x) x.commit(d), CKV) == 1), nnz(arrayfun(@(x) x.commit(d), CKV) == -1), ...
     nnz(arrayfun(@(x) x.commit(d), CKV) == 0)), 1:nD, 'UniformOutput', false), ' | '));
+sm{end+1} = sprintf('  the same, registered before D108 (reported only): %s', strjoin(arrayfun(@(d) ...
+    sprintf('D%d %d / %d / %d', DLY(d), nnz(arrayfun(@(x) x.commit_pre(d), CKV) == 1), ...
+    nnz(arrayfun(@(x) x.commit_pre(d), CKV) == -1), nnz(arrayfun(@(x) x.commit_pre(d), CKV) == 0)), 1:nD, ...
+    'UniformOutput', false), ' | '));
 if ~isempty(AGR)
     sm{end+1} = sprintf(['  Envelope predicted on validation (evaluate_policies.m) against the commitment (D%d), single ' ...
         '(threat, level): predicted and committed %d, predicted not committed %d, not predicted committed %d, neither %d'], ...
@@ -1277,8 +1390,8 @@ for f = 1:numel(FIG)
                 'UniformOutput', false);
             vd = PT.sys; nm = 'SYSTEM';
         case 'commit'
-            X = cellfun(@(l, V, r) sprintf('%s%s\n%d', ternary(isempty(l), 'ok', l), repmat(' r', 1, r == 1), V.n), X1.lim, ...
-                num2cell(X1.prot), num2cell(X1.rnd), 'UniformOutput', false);
+            X = cellfun(@(l, V, r, o) sprintf('%s%s%s\n%d', ternary(isempty(l), 'ok', l), repmat(' r', 1, r == 1), ...
+                repmat(' n', 1, o == 1), V.n), X1.lim, num2cell(X1.prot), num2cell(X1.rnd), num2cell(X1.nresp), 'UniformOutput', false);
             vd = X1.commit; nm = sprintf('COMMITTED (D = %d)', DLY(1));
     end
     draw_map(sprintf('results/edge_heatmap_%s.png', FIG{f}), sprintf('%s per (threat, level) and Eb/N0, deployed policy', nm), ...
@@ -1295,10 +1408,14 @@ saveas(fig, 'results/edge_bands.png'); close(fig);
 
 %% 11. Save
 CMS = arrayfun(@(k) struct('kind', CR(k).kind, 'fd', CR(k).fd, 'D', CR(k).D, 'cells', tc(CR(k).rows), ...
-    'labels', {lbl(CR(k).rows)}, 'commit', CR(k).X.commit, 'lim', {CR(k).X.lim}, 'rnd', CR(k).X.rnd, ...
+    'labels', {lbl(CR(k).rows)}, 'commit', CR(k).X.commit, 'lim', {CR(k).X.lim}, 'rnd', CR(k).X.rnd, 'nresp', CR(k).X.nresp, ...
+    'rec_h', CR(k).X.rec_h, 'prot_h', CR(k).X.prot_h, ...
     'band_fail', {CR(k).X.bfail}, 'prot', CR(k).X.prot, 'rec', CR(k).X.rec, 'linkt', CR(k).X.linkt, 'linkt_target', CR(k).X.tgt), ...
     1:numel(CR));
-EM = struct('ebno', PP.ebno, 'km', km, 'all_pos', LB.all_pos, 'targets', TGT, 'n_min', N_MIN, 'B', B, ...
+CMS0 = arrayfun(@(k) struct('D', CR0(k).D, 'commit', CR0(k).X.commit, 'lim', {CR0(k).X.lim}, 'prot', CR0(k).X.prot, ...
+    'rec', CR0(k).X.rec, 'rec_h', CR0(k).X.rec_h, 'prot_h', CR0(k).X.prot_h), 1:numel(CR0));
+EM = struct('ebno', PP.ebno, 'km', km, 'all_pos', LB.all_pos, 'targets', TGT, 'targets_pre', TGT0, 'commit_pre', CMS0, ...
+    'n_min', N_MIN, 'B', B, ...
     'ebno_thr', ebno_thr, 'deployed', NAMES.(dep), 'policies', {LBL}, 'cells', tc, 'labels', {lbl}, 'basis', {basis}, ...
     'between', between, 'delays', DLY, 'follower_delays', FDL, 'pt', PT, 'clean', CL, 'commit', CMS, 'floor', FL, ...
     'unknown', UK, 'bands', {BD}, 'bands_skipped', {skipped}, 'bt', BT, 'cb', CB, 'walks', {{WK.name}}, 'dist', {ED}, ...
@@ -1317,7 +1434,10 @@ EDGE_NUM = struct('ebno', PP.ebno, 'km', km, 'ebno_thr', ebno_thr, 'deployed', N
     'delays', DLY, 'commit_single', cell2mat(arrayfun(@(k) cnt_of(CR(k).X.commit, isg), cst', 'UniformOutput', false)), ...
     'commit_combined', cell2mat(arrayfun(@(k) cnt_of(CR(k).X.commit, ~isg), cst', 'UniformOutput', false)), ...
     'commit_inside', arrayfun(@(d) nnz(CR(cst(d)).X.commit == 1 & INR(:, :, d)), 1:nD), ...
-    'commit_not_attributable', arrayfun(@(d) nnz(CR(cst(d)).X.commit == 1 & CR(cst(d)).X.rnd == 1), 1:nD), ...
+    'commit_not_attributable', arrayfun(@(d) nnz(CR(cst(d)).X.commit == 1 & (CR(cst(d)).X.rnd == 1 | ...
+    CR(cst(d)).X.nresp == 1)), 1:nD), ...
+    'commit_no_response', arrayfun(@(d) nnz(CR(cst(d)).X.commit == 1 & CR(cst(d)).X.nresp == 1), 1:nD), ...
+    'counts_rec_h', [cnt_of(VD.rec_h, isg); cnt_of(VD.rec_h, ~isg)], 'counts_prot_h', [cnt_of(VD.prot_h, isg); cnt_of(VD.prot_h, ~isg)], ...
     'floor_single', cnt_of(FL.v, isg), 'floor_combined', cnt_of(FL.v, ~isg), ...
     'cells', {lbl}, 'basis', {basis}, 'edge_commit_db', cell2mat(arrayfun(@(w) ED{w}.edge, wC, 'UniformOutput', false))', ...
     'edge_commit_km', cell2mat(arrayfun(@(w) ED{w}.km, wC, 'UniformOutput', false))', ...
@@ -1328,7 +1448,15 @@ EDGE_NUM = struct('ebno', PP.ebno, 'km', km, 'ebno_thr', ebno_thr, 'deployed', N
     'follower_cells', {lbl(ifo)}, 'follower_fmin', FRG.fmin, 'follower_delays', FDL, ...
     'fa_verdict', vt(CL.fa), 'fa_n', reshape([CL.fa.n], nD, nS), 'fa_claim_verdict', vt(CL.fac), ...
     'fa_claim_n', reshape([CL.fac.n], nD, nS), 'fa_commit', FAP, 'hover_label', HOVER, 'link_verdict', [CL.link.verdict], ...
-    'link_n', [CL.link.n], 'fa_edge_db', [CE.fa.edge], 'link_edge_db', CE.link.edge, 'ohp_verdict', OV, 'ohp_alt_m', OHP.alt_m, ...
+    'link_n', [CL.link.n], 'fa_edge_db', [CE.fa.edge], 'link_edge_db', CE.link.edge, ...
+    'link_target', TGT.link, 'link_value', [CL.link.value], 'link_lo', [CL.link.lo], 'link_hi', [CL.link.hi], ...
+    'link_target_pre', TGT0.link, 'link_verdict_pre', [CL.link_pre.verdict], 'link_edge_db_pre', CE.link_pre.edge, ...
+    'link_tag_j', LINK_J, 'c2_reference', C2REF, 'rec_flight', VD.rec_fl, 'prot_flight', VD.prot_fl, ...
+    'commit_pre_single', cell2mat(arrayfun(@(k) cnt_of(CR0(k).X.commit, isg), (1:numel(CR0))', 'UniformOutput', false)), ...
+    'commit_pre_combined', cell2mat(arrayfun(@(k) cnt_of(CR0(k).X.commit, ~isg), (1:numel(CR0))', 'UniformOutput', false)), ...
+    'commit_pre_delays', [CR0.D], 'counts_sys_pre', [cnt_of(VD.sys_pre, isg); cnt_of(VD.sys_pre, ~isg)], ...
+    'counts_sysl_pre', [cnt_of(VD.sysl_pre, isg); cnt_of(VD.sysl_pre, ~isg)], ...
+    'ohp_verdict', OV, 'ohp_alt_m', OHP.alt_m, ...
     'ohp_r0_km', OHP.r0_km, 'b4', B4, 'fa_bound_met', FAV == 1, 'fa_per_hour', FRall.per_hour, ...
     'fa_per_hour_hi', FRall.per_hour_hi, 'fa_mtbf_s', FRall.mtbf_s, 'check_commit', reshape([CKV.commit], nD, []), ...
     'predicted_vs_committed', AGR, 'bands_skipped', {skipped}, 'onset_cue', {OC}, 'det_id', PP.det_id, ...
@@ -1377,33 +1505,43 @@ end
 
 function P = pol_layers(F, v, sk, TGT, B)
 % REC (held among the recoverable flights), PROT (held among all) and LINK_T of the
-% variant in column v over the threat flights F; LINK_T's target is twice the same
-% flights' clean link, at least the LINK target.
-s = F.(sk);
-P.rec = edge_verdict(F.held_k(s, v), F.ep_n(s, v), F.geo(s), TGT.rec, 'ge', true, B);
-P.prot = edge_verdict(F.held_k(:, v), F.ep_n(:, v), F.geo, TGT.prot, 'ge', true, B);
-P.tgt = max(2 * sum(F.cl_k, 'omitnan') / max(sum(F.cl_n, 'omitnan'), 1), TGT.link);
+% variant in column v over the threat flights F, held recovery read as TGT.held_flight
+% sets it (held_verdict.m); LINK_T's target is twice the same flights' clean link, at
+% least TGT.linkt_floor. REC_h and PROT_h: the same on the harmed flights (F.harm:
+% no_action does not restore them).
+s = F.(sk); h = F.harm; hf = TGT.held_flight;
+P.rec = held_verdict(F.held_k(s, v), F.ep_n(s, v), F.geo(s), TGT.rec, hf, B);
+P.prot = held_verdict(F.held_k(:, v), F.ep_n(:, v), F.geo, TGT.prot, hf, B);
+P.rec_h = held_verdict(F.held_k(s & h, v), F.ep_n(s & h, v), F.geo(s & h), TGT.rec, hf, B);
+P.prot_h = held_verdict(F.held_k(h, v), F.ep_n(h, v), F.geo(h), TGT.prot, hf, B);
+P.tgt = max(2 * sum(F.cl_k, 'omitnan') / max(sum(F.cl_n, 'omitnan'), 1), TGT.linkt_floor);
 P.linkt = edge_verdict(F.lt_k(:, v), F.lt_n(:, v), F.geo, P.tgt, 'le', false, B);
 end
 
-function X = commit_rows(FTi, rows, v, vr, sk, BL, fa, fa_pt, link, fav, TGT, B, BV, dirc, cv, DH, nS)
+function X = commit_rows(FTi, rows, v, vr, vn, sk, BL, fa, fa_pt, link, fav, TGT, B, BV, dirc, cv, DH, nS)
 % The commitment (edge_commit.m) of the rows (indices into the threat rows) for the
-% variant in column v; vr the random policy's column (0: none); fa the claim's FA and
+% variant in column v; vr the random policy's column, vn no response's (0: none), each
+% PROT's verdict beside (not attributable when COMMITTED); fa the claim's FA and
 % fa_pt the point's own at every Eb/N0. A veto band (BV) is NOT COMMITTED when its PROT,
 % DET_h or LINK_T is, or the clean link's FA or LINK in it (cv: per region key and band).
 % DH caches DET_h per row and region.
 nr = numel(rows); VZ = edge_verdict([], [], [], 0.9, 'ge', false);
 X = struct('prot', repmat(VZ, nr, nS), 'linkt', repmat(VZ, nr, nS), 'rec', repmat(VZ, nr, nS), 'tgt', nan(nr, nS), ...
     'h', zeros(nr, nS), 'band', nan(nr, nS), 'bfail', {repmat({''}, nr, nS)}, 'commit', zeros(nr, nS), ...
-    'lim', {repmat({''}, nr, nS)}, 'rnd', nan(nr, nS));
+    'lim', {repmat({''}, nr, nS)}, 'rnd', nan(nr, nS), 'nresp', nan(nr, nS), 'rec_h', repmat(VZ, nr, nS), ...
+    'prot_h', repmat(VZ, nr, nS));
 for q = 1:nr
     i = rows(q); Fi = FTi{i};
     for s = 1:nS
         F = take_rows(Fi, Fi.s == s);
         P = pol_layers(F, v, sk, TGT, B);
         X.prot(q, s) = P.prot; X.linkt(q, s) = P.linkt; X.rec(q, s) = P.rec; X.tgt(q, s) = P.tgt;
+        X.rec_h(q, s) = P.rec_h; X.prot_h(q, s) = P.prot_h;
         if vr > 0
-            Vr = edge_verdict(F.held_k(:, vr), F.ep_n(:, vr), F.geo, TGT.prot, 'ge', true, B); X.rnd(q, s) = Vr.verdict;
+            Vr = held_verdict(F.held_k(:, vr), F.ep_n(:, vr), F.geo, TGT.prot, TGT.held_flight, B); X.rnd(q, s) = Vr.verdict;
+        end
+        if vn > 0
+            Vn = held_verdict(F.held_k(:, vn), F.ep_n(:, vn), F.geo, TGT.prot, TGT.held_flight, B); X.nresp(q, s) = Vn.verdict;
         end
     end
     L = struct('prot', vt(X.prot(q, :)), 'deth', vt(BL.deth(i, :)), 'deth_n', [BL.deth(i, :).n], 'fa', vt(fa), ...
@@ -1453,11 +1591,11 @@ for b = 1:numel(BV)
     if isempty(Fb.geo), continue; end
     no = cv(b) == -1 || dh(b) == -1;
     if ~no
-        P = edge_verdict(Fb.held_k(:, v), Fb.ep_n(:, v), Fb.geo, TGT.prot, 'ge', true, B);
+        P = held_verdict(Fb.held_k(:, v), Fb.ep_n(:, v), Fb.geo, TGT.prot, TGT.held_flight, B);
         no = P.verdict == -1;
     end
     if ~no
-        tl = max(2 * sum(Fb.cl_k, 'omitnan') / max(sum(Fb.cl_n, 'omitnan'), 1), TGT.link);
+        tl = max(2 * sum(Fb.cl_k, 'omitnan') / max(sum(Fb.cl_n, 'omitnan'), 1), TGT.linkt_floor);
         Lt = edge_verdict(Fb.lt_k(:, v), Fb.lt_n(:, v), Fb.geo, tl, 'le', false, B);
         no = Lt.verdict == -1;
     end
@@ -1577,6 +1715,12 @@ function s = evid_txt(V)
 % value [lo, hi] n, evidence only (no verdict).
 if V.n == 0, s = sprintf('%-28s', '-'); return; end
 s = sprintf('%-28s', sprintf('%5.1f [%5.1f, %5.1f] %3d', 100 * V.value, 100 * V.lo, 100 * V.hi, V.n));
+end
+
+function s = link_tag(V, j)
+% Operating-point tag of the clean link: J when the point estimate of its packet loss is
+% below j, M otherwise; '-' without flights.
+if V.n == 0, s = '-'; elseif V.value < j, s = 'J'; else, s = 'M'; end
 end
 
 function s = band_txt(V)

@@ -1,0 +1,261 @@
+function wrap_check(root, code)
+% d91 closed-loop wrap check on a copy of the d90 smoke data (root; no live data).
+% link_env.m draw() plays frame mod(k0 + t - 1, n) + 1 of a geometry's n = F_SUB pool frames,
+% so an episode of T cycles jumps from frame n back to frame 1 at cycle tw = n - k0 + 1.
+%   A  the jump in the pools' antenna gains: frame n to 1 against consecutive frames
+%   B  the held CUSUM alone (branch_ref.m) on the gains as an episode plays them
+%   C  the whole monitor (policy_monitor.m) at no_action on the clean validation episodes the
+%      false-alarm readings use (clean_world.m, clean_wide_specs.m), for the deployed smoke
+%      fusion and the revision (branch evidence, phi as is and phi = 1, fitted on the smoke
+%      validation split): per cycle relative to the jump, the clean cycles read as a lost
+%      branch, the drop alarm, any alarm, confirmed alarms; and antenna-fault recall near the
+%      jump, stratified by the cycles since the onset. Rolling-in flights (10-frame cycling
+%      past their run's end) are not covered.
+% Also runs select_fusion.m's pick path (FUSION_REV, FUSION_PICK) once on the smoke data.
+% Smoke figures check the mechanism only; they are not results.
+cd(root); addpath(code); setup_paths; cd(root);
+diary(fullfile(root, 'wrap_check.txt')); diary on; dc = onCleanup(@() diary('off'));
+fprintf('===== d91 wrap check, %s, code %s =====\n', char(datetime('now')), code);
+rs = RandStream('mt19937ar', 'Seed', 9161);
+
+%% select_fusion's pick path on the smoke validation split
+copyfile('data/fusion.mat', 'data/fusion_d90.mat');
+try
+    sf_pick();
+    F = load('data/fusion.mat');
+    fprintf('PICK PATH: saved; fusion_rev %s, deployed_pick %s, FM.target_age %d, cues %s, N %d, lambda %g\n', F.fusion_rev, ...
+        F.deployed_pick.name, F.FM.target_age, jsonencode(F.FM.cues), F.N, F.lambda);
+catch e
+    fprintf('PICK PATH: stopped with %s: %s\n', e.identifier, e.message);
+end
+copyfile('data/fusion_d90.mat', 'data/fusion.mat');
+
+%% Pools and monitor settings
+L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
+Lc = load('data/clean_val_pools.mat', 'CT'); CT = Lc.CT; clear Lc
+na = find(strcmp(PP.actions, 'no_action')); ic = find(strcmp(PP.scen, 'none'), 1); VA = 2;
+Q = load('data/trained_dqn.mat');                      % the deployed monitor's settings (train_dqn.m)
+if isfield(Q, 'dec'), for f = fieldnames(Q.dec)', PP.(f{1}) = Q.dec.(f{1}); end
+else, PP.alarm_mode = Q.alarm_mode; PP.confirm = Q.confirm; PP.drop_db = Q.drop_db; end
+T = 30; if isfield(Q, 'H') && isfield(Q.H, 'T'), T = Q.H.T; end
+Dd = load('data/drop_threshold.mat', 'EBNO_THR'); ebno_thr = Dd.EBNO_THR; clear Q
+try
+    fprintf('pools: F_SUB %d, T %d, alarm %s, confirm %s, drop_db %g, gant %d; clean validation geometries %d\n', PP.F_SUB, T, ...
+        PP.alarm_mode, mat2str(PP.confirm), PP.drop_db, isfield(PP.pools{ic, 1, na, VA}, 'gant') && ~isempty(PP.pools{ic, 1, na, VA}.gant), CT.n_geom);
+catch e
+    fprintf('pools: %s\n', e.message);
+end
+[PPw, Kw] = clean_world(PP, CT);
+b = abs(log(0.0187));
+
+%% A. The jump in the gains
+try
+dcon = []; dwr = []; rcon = []; rwr = []; vc = []; vw = [];
+for s = 1:numel(PP.ebno)
+    P = PPw.pools{ic, s, na, VA};
+    if ~isstruct(P) || ~isfield(P, 'gant') || isempty(P.gant), continue; end
+    for r = 1:numel(PPw.runs{VA})
+        g = double(P.gant(P.run == PPw.runs{VA}(r), :)); if size(g, 1) < 2, continue; end
+        rr = ratio_db(g);
+        dcon = [dcon; abs(diff(g))]; dwr = [dwr; abs(g(1, :) - g(end, :))]; %#ok<AGROW>
+        rcon = [rcon; abs(diff(rr))]; rwr = [rwr; abs(rr(1, :) - rr(end, :))]; %#ok<AGROW>
+        v = NaN; if isfield(PPw, 'speed') && numel(PPw.speed) >= VA && all(size(PPw.speed{VA}) >= [s r]), v = PPw.speed{VA}(s, r); end   % Eb/N0 x geometry
+        vc = [vc; repmat(v, size(g, 1) - 1, 1)]; vw = [vw; v]; %#ok<AGROW>
+    end
+end
+fprintf('\nA. jump frame %d -> 1 against consecutive frames, %d geometry runs x Eb/N0:\n', PP.F_SUB, numel(vw));
+fprintf('  per-antenna gain |dB|: consecutive median %.2f, p95 %.2f; wrap median %.2f, p95 %.2f; wrap above the consecutive p95 %.1f%%\n', ...
+    median(dcon(:)), prctile(dcon(:), 95), median(dwr(:)), prctile(dwr(:), 95), 100 * mean(dwr(:) > prctile(dcon(:), 95)));
+fprintf('  branch ratio |dB| (power over the others'' mean): consecutive median %.2f, p95 %.2f; wrap median %.2f, p95 %.2f; above the p95 %.1f%%\n', ...
+    median(rcon(:)), prctile(rcon(:), 95), median(rwr(:)), prctile(rwr(:), 95), 100 * mean(rwr(:) > prctile(rcon(:), 95)));
+sb = [0 23 60 120 Inf];
+for q = 1:4
+    k = vw >= sb(q) & vw < sb(q + 1); kc = vc >= sb(q) & vc < sb(q + 1); if ~any(k), continue; end
+    fprintf('    speed %g-%g km/h (%d): ratio consecutive median %.2f, p95 %.2f; wrap median %.2f, p95 %.2f\n', sb(q), sb(q + 1), sum(k), ...
+        median(reshape(rcon(kc, :), [], 1)), prctile(reshape(rcon(kc, :), [], 1), 95), median(reshape(rwr(k, :), [], 1)), ...
+        prctile(reshape(rwr(k, :), [], 1), 95));
+end
+
+%% B. The held CUSUM alone on the gains as played
+for one = [false true]
+    X = []; TW = []; TW2 = [];
+    for s = 1:numel(PP.ebno)
+        P = PPw.pools{ic, s, na, VA};
+        if ~isstruct(P) || ~isfield(P, 'gant') || isempty(P.gant), continue; end
+        for r = 1:numel(PPw.runs{VA})
+            g = double(P.gant(P.run == PPw.runs{VA}(r), :)); n = size(g, 1); if n < 2, continue; end
+            for k0 = 0:n - 1
+                H = branch_ref('run', g(mod(k0 + (0:T - 1), n) + 1, :), one);
+                X = [X; H(:, 1)' >= b]; TW = [TW; n - k0 + 1]; TW2 = [TW2; 2 * n - k0 + 1]; %#ok<AGROW>
+            end
+        end
+    end
+    [rd, ci] = wrap_excess(X, TW, TW2, T, rs);
+    fprintf('\nB. held CUSUM at its threshold b (phi %s), %d sequences: after the jump less before it %+.2f [%+.2f, %+.2f] points\n', ...
+        tern(one, '= 1', 'as is'), size(X, 1), rd, ci);
+    aligned(X, TW, TW2, T, 'W >= b');
+end
+catch e
+    fprintf('A/B stopped: %s\n', getReport(e, 'basic'));
+end
+
+%% C. The whole monitor at no_action
+S = load('data/splits.mat'); va = S.splits.val; va.feat_names = S.splits.norm.feat_names; clear S
+D = load('data/trained_detector.mat', 'net', 'classes'); cls = cellstr(string(D.classes(:)'));
+Pv = cnn_scores(D.net, va.X, va.feats')'; y = double(va.Y(:));
+pk = fusion_pick(); N = pk.N;
+FZ = PP.fuse;
+mons = {'deployed (smoke fusion)', FZ, PP.fuse_N};
+for one = [false true]
+    try
+        cu = pk.cues; if one, cu.phi1 = true; end
+        Zr = fuse_classes('windows', va, Pv, N, cu);
+        FMr = fuse_classes('fit', Zr, fusion_target(y, va.run, va.pos, N, cls), numel(cls), pk.lambda);
+        FMr.cues = cu; FMr.target_age = N; FMr.latch = false; if isfield(FZ, 'os_thr'), FMr.os_thr = FZ.os_thr; end
+        mons(end + 1, :) = {['branch evidence' tern(one, ', phi = 1', '')], FMr, N}; %#ok<AGROW>
+    catch e
+        fprintf('C. the revision (phi1 %d) was not fitted: %s\n', one, getReport(e, 'basic'));
+    end
+end
+[spc, ncl] = clean_wide_specs(PP, CT, ebno_thr, T);
+iaf = find(strcmp(PP.scen, 'antenna_fault'));
+PPv = PP; PPv.pools(:, :, :, setdiff(1:numel(PP.runs), VA)) = {[]};
+Kv = link_env('tables', PPv);
+spf = {}; if ~isempty(iaf), spf = policy_episodes(iaf, numel(PP.ebno), Kv.geo(iaf, VA), 1, false, false, 64, T, RandStream('mt19937ar', 'Seed', 4400)); end
+for m = 1:size(mons, 1)
+  try
+    PPm = PPw; PPm.fuse = mons{m, 2}; PPm.fuse_N = mons{m, 3};
+    R = mon_trace(PPm, Kw, spc, VA, 41000, na, ic);
+    R = trim(R, ncl);
+    fprintf('\nC. %s, %d clean validation episodes (no rolling-in event: %d):\n', mons{m, 1}, numel(R.tw), sum(~R.ev));
+    k = ~R.ev;
+    for f = {'lb', 'af', 'da', 'al', 'cf', 'bw'}
+        if ~isfield(R, f{1}) || isempty(R.(f{1})), continue; end
+        X = R.(f{1})(k, :);
+        [rd, ci] = wrap_excess(X, R.tw(k), R.tw2(k), T, rs);
+        fprintf('  %-3s cycles t >= 13: rate %.2f%%; after the jump (0-11 cycles) less before it %+.2f [%+.2f, %+.2f] points\n', ...
+            f{1}, 100 * mean(X(:, 13:end), 'all'), rd, ci);
+        if any(strcmp(f{1}, {'lb', 'da', 'bw'})), aligned(X, R.tw(k), R.tw2(k), T, f{1}); end
+        h = k & R.v < 23; o = k & R.v >= 23;
+        if any(h) && any(o)
+            [rh, ch] = wrap_excess(R.(f{1})(h, :), R.tw(h), R.tw2(h), T, rs);
+            [ro, co] = wrap_excess(R.(f{1})(o, :), R.tw(o), R.tw2(o), T, rs);
+            fprintf('      hover (< 23 km/h, %d) %+.2f [%+.2f, %+.2f]; faster (%d) %+.2f [%+.2f, %+.2f]\n', sum(h), rh, ch, sum(o), ro, co);
+        end
+    end
+    if ~isempty(spf)
+        PPf = PPv; PPf.fuse = mons{m, 2}; PPf.fuse_N = mons{m, 3};
+        Rf = mon_trace(PPf, Kv, spf, VA, 4500, na, ic);
+        on = (1:T) >= Rf.onset(:) + 1;
+        Xf = Rf.af & on; k = ~Rf.ev;
+        A = (1:T) >= Rf.tw(:) & (1:T) - Rf.tw(:) <= 11 & (1:T) < Rf.tw2(:);
+        B = ~A & (1:T) < Rf.tw2(:);                          % elsewhere: before the second jump
+        fprintf('  antenna fault, %d episodes: recall %.1f%% of the cycles from the onset; %.1f%% within 11 cycles after the jump, %.1f%% elsewhere before the second jump\n', ...
+            sum(k), 100 * sum(Xf(k, :), 'all') / sum(on(k, :), 'all'), 100 * sum(Xf(k, :) & A(k, :), 'all') / max(sum(on(k, :) & A(k, :), 'all'), 1), ...
+            100 * sum(Xf(k, :) & B(k, :), 'all') / max(sum(on(k, :) & B(k, :), 'all'), 1));
+        Ga = max((1:T) - Rf.onset(:), 1);                    % stratum: cycles since the onset
+        [rq, cq] = age_excess(Rf.af(k, :), on(k, :) & A(k, :), on(k, :) & B(k, :), Ga(k, :), rs);
+        fprintf('    recall within 11 cycles after the jump less elsewhere, stratified by the cycles since the onset: %+.2f [%+.2f, %+.2f] points\n', rq, cq);
+    end
+  catch e
+    fprintf('C. %s stopped: %s\n', mons{m, 1}, getReport(e, 'basic'));
+  end
+end
+fprintf('\n##### wrap check done %s\n', char(datetime('now')));
+end
+
+function sf_pick()
+FUSION_REV = true; FUSION_PICK = fusion_pick(); %#ok<NASGU>
+run('select_fusion');
+end
+
+function R = mon_trace(PP, K, specs, split, seed0, na, ic)
+% The monitor at no_action, cycle by cycle (as monitor_trace.m), with the frame each cycle reads.
+nA = numel(PP.actions);
+R = struct('lb', [], 'af', [], 'da', [], 'al', [], 'cf', [], 'bw', [], 'tw', [], 'tw2', [], 'ev', [], 'v', [], 'onset', []);
+for bb = 1:numel(specs)
+    sp = specs{bb}; T = sp.T;
+    [E, obs] = link_env('reset', PP, K, sp, split, RandStream('mt19937ar', 'Seed', seed0 + bb));
+    NE = E.NE; mem = policy_monitor('init', NE, nA);
+    z = false(NE, T); lb = z; af = z; da = z; al = z; cf = z; bw = z;
+    for t = 1:T
+        [mem, M] = policy_monitor('update', mem, obs, PP, E.cfg);
+        lb(:, t) = ismember(M.cls, {'antenna_fault', 'airframe_shadowing'})'; af(:, t) = strcmp(M.cls, 'antenna_fault')';
+        da(:, t) = M.drop_alarm(:); al(:, t) = M.alarm(:); cf(:, t) = M.confirmed(:);
+        if isfield(mem, 'br') && ~isempty(mem.br), bw(:, t) = max(mem.br.W, [], 2) >= abs(log(0.0187)); end
+        mem = policy_monitor('change', mem, false(1, NE));
+        [E, ~, obs] = link_env('step', E, PP, K, na * ones(1, NE));
+    end
+    n = zeros(1, NE); v = nan(1, NE);
+    for i = 1:NE
+        P = PP.pools{ic, E.s(i), na, split}; n(i) = sum(P.run == PP.runs{split}(E.r(i)));
+        if isfield(PP, 'speed') && numel(PP.speed) >= split && all(size(PP.speed{split}) >= [E.s(i) E.r(i)])
+            v(i) = PP.speed{split}(E.s(i), E.r(i));                % Eb/N0 x geometry
+        end
+    end
+    ev = false(1, NE); if isfield(E, 'ev'), ev = E.ev; end
+    u = 1:NE; if isfield(sp, 'n_valid'), u = 1:sp.n_valid; end
+    R.lb = [R.lb; lb(u, :)]; R.af = [R.af; af(u, :)]; R.da = [R.da; da(u, :)]; R.al = [R.al; al(u, :)];
+    R.cf = [R.cf; cf(u, :)]; R.bw = [R.bw; bw(u, :)];
+    R.tw = [R.tw; (n(u) - E.k0(u) + 1)']; R.tw2 = [R.tw2; (2 * n(u) - E.k0(u) + 1)'];
+    R.ev = [R.ev; ev(u)']; R.v = [R.v; v(u)']; R.onset = [R.onset; sp.onset(u)'];
+end
+end
+
+function R = trim(R, n)
+for f = fieldnames(R)', if ~isempty(R.(f{1})), R.(f{1}) = R.(f{1})(1:n, :); end, end
+end
+
+function [rd, ci] = wrap_excess(X, tw, tw2, T, rs)
+% Rate within 0-11 cycles after the jump less the rate before it, over the cycles t >= 13
+% (the fusion's window and the held reference full), stratified by t (Mantel-Haenszel
+% weights), points; 95% interval of a bootstrap over the episodes (1,000 resamples).
+t = 1:T; tw = tw(:); tw2 = tw2(:);
+A = t >= tw & t - tw <= 11 & t < tw2 & t >= 13;
+B = t < tw & t >= 13;
+X = logical(X);
+rd = mh(X, A, B, ones(size(X, 1), 1));
+w = zeros(1000, 1); E = size(X, 1);
+for bb = 1:1000, c = accumarray(randi(rs, E, E, 1), 1, [E 1]); w(bb) = mh(X, A, B, c); end
+ci = prctile(w, [2.5 97.5]);
+end
+
+function r = mh(X, A, B, c)
+xa = sum(c .* (X & A), 1); na = sum(c .* A, 1); xb = sum(c .* (X & B), 1); nb = sum(c .* B, 1);
+k = na > 0 & nb > 0; h = na(k) .* nb(k) ./ (na(k) + nb(k));
+r = 100 * sum(h .* (xa(k) ./ na(k) - xb(k) ./ nb(k))) / max(sum(h), eps);
+end
+
+function [rd, ci] = age_excess(X, A, B, G, rs)
+% As wrap_excess, the strata G (cycles since the onset) in place of the cycle.
+X = logical(X);
+rd = mh_g(X, A, B, G, ones(size(X, 1), 1));
+w = zeros(1000, 1); E = size(X, 1);
+for bb = 1:1000, c = accumarray(randi(rs, E, E, 1), 1, [E 1]); w(bb) = mh_g(X, A, B, G, c); end
+ci = prctile(w, [2.5 97.5]);
+end
+
+function r = mh_g(X, A, B, G, c)
+C = repmat(c(:), 1, size(X, 2)); n = max(G(:));
+xa = accumarray(G(A), C(A) .* X(A), [n 1]); na = accumarray(G(A), C(A), [n 1]);
+xb = accumarray(G(B), C(B) .* X(B), [n 1]); nb = accumarray(G(B), C(B), [n 1]);
+k = na > 0 & nb > 0; h = na(k) .* nb(k) ./ (na(k) + nb(k));
+r = 100 * sum(h .* (xa(k) ./ na(k) - xb(k) ./ nb(k))) / max(sum(h), eps);
+end
+
+function aligned(X, tw, tw2, T, name)
+% Rate per cycle relative to the jump, t >= 13, before the second jump.
+t = 1:T; d = t - tw(:); ok = t >= 13 & t < tw2(:);
+dd = -8:12; r = nan(size(dd)); nn = zeros(size(dd));
+for j = 1:numel(dd), m = ok & d == dd(j); nn(j) = sum(m, 'all'); r(j) = 100 * sum(X(m)) / max(nn(j), 1); end
+fprintf('    %s per cycle from the jump %s: %s%% (cycles %s)\n', name, mat2str(dd), mat2str(round(r, 1)), mat2str(nn));
+end
+
+function r = ratio_db(g)
+p = 10 .^ (g / 10); r = zeros(size(g));
+for a = 1:size(g, 2), r(:, a) = 10 * log10(p(:, a) ./ mean(p(:, setdiff(1:size(g, 2), a)), 2)); end
+end
+
+function s = tern(c, a, b)
+if c, s = a; else, s = b; end
+end

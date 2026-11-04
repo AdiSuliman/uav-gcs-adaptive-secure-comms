@@ -5,7 +5,8 @@ function [k, kf] = fused_class(probs, S, FM, N, classes)
 %   while it holds, a fused antenna_fault or airframe_shadowing reads that cause. With the
 %   latch off (onset_shape('on', FM), chosen on validation) the monitor's class is the fused
 %   class. Without a fusion (FM empty) the frame's own output with the latch (threshold 0).
-%   The reading of KPI 1 (eval_detector.m).
+%   The reading of KPI 1 (eval_detector.m). It leaves out the unknown-threat override the
+%   monitor applies at decision time (policy_monitor.m: PP.maha_thr, PP.unk_mode).
 %   probs    frames x classes detector probabilities
 %   S        run, pos (position of the frame in its run), gain_ant (frames x antennas,
 %            mean channel gain), feats_raw (frames x link features, link_features.m order)
@@ -16,7 +17,7 @@ function [k, kf] = fused_class(probs, S, FM, N, classes)
 pf = double(probs);
 if ~isempty(FM)
     S.feat_names = link_features('names');
-    pf = fuse_classes('apply', FM, fuse_classes('windows', S, pf, N));
+    pf = fuse_classes('apply', FM, fuse_classes('windows', S, pf, N, fuse_classes('cues', FM)));
 end
 [~, kf] = max(pf, [], 2);
 k = kf;

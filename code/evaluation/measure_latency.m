@@ -46,7 +46,7 @@ D = load('data/trained_detector.mat', 'net', 'classes', 'ood');
 N = load('data/splits.mat', 'splits');
 mu = N.splits.norm.feat_mean; sd = N.splits.norm.feat_std; clear N
 Q = load('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db', ...
-    'deployed', 'rule_sel', 'det_id', 'maha_thr');
+    'deployed', 'rule_sel', 'det_id', 'maha_thr', 'dec');
 T = ood_thresholds(0.95);
 FZ = fusion_model();                                   % temporal fusion (select_fusion.m), as evaluated
 Dt = load('data/trained_detector.mat', 'trained_at');
@@ -55,15 +55,13 @@ UW = 1; if isfield(D.ood, 'win'), UW = D.ood.win; end                        % u
 PPm = struct('actions', {policy_actions()}, 'classes', {cellstr(string(D.classes(:)'))}, ...
     'sps', p0.sps, 'bps', p0.bits_per_symbol, 'maha_thr', T.maha, 'fuse', FZ.FM, 'fuse_N', FZ.N, 'q_thr', FZ.q_thr, ...
     'unk_win', UW);
-if isfield(Q, 'confirm'), PPm.confirm = Q.confirm; end
-if isfield(Q, 'maha_thr'), PPm.maha_thr = Q.maha_thr; end            % the unknown-threat threshold the agent ran with
-if isfield(Q, 'alarm_mode'), PPm.alarm_mode = Q.alarm_mode; end
-if isfield(Q, 'drop_db') && ~isempty(Q.drop_db), PPm.drop_db = Q.drop_db; end
+PPm = decision_settings(PPm, Q);                       % the deployed DQN's monitor and settings (train_dqn.m)
 PPm.cfg_gain_db = config_gain_db(PPm.actions, p0);
 nA = numel(PPm.actions); na = find(strcmp(PPm.actions, 'no_action'));
 dep = 'dqn_esc'; if isfield(Q, 'deployed') && ~isempty(Q.deployed), dep = Q.deployed; end
 sel = 1; if all(isfield(Q, {'gammas', 'seed_summary'})), sel = find(Q.gammas == Q.seed_summary.selected_gamma, 1); end
 [kindP, agP, optP] = policy_setup(dep, Q, sel, [], [], [], na);   % the deployed chain
+kindD = 'dqn_esc'; if strcmp(dep, 'dqn'), kindD = 'dqn'; end    % the DQN chain as selected (with or without the escalation)
 gpu = canUseGPU;
 
 %% 1. Frames of the real link
@@ -114,7 +112,7 @@ for di = 1:numel(devs)
                 'gant', x.M.gain_ant(:, x.k)', 'idle', iq_rec);
             if isfield(x.M, 'bch'), obs.bch = x.M.bch(:, x.k)'; end
             obs.mmse_pred = g(end);
-            t0 = tic; [cfgD, memD] = policy_decide('dqn_esc', obs, cfgD, memD, PPm, Q.agent); t_dqn = toc(t0);
+            t0 = tic; [cfgD, memD] = policy_decide(kindD, obs, cfgD, memD, PPm, Q.agent); t_dqn = toc(t0);
             t0 = tic; [cfgR, memR] = policy_decide('rule_esc', obs, cfgR, memR, PPm, []); t_rule = toc(t0);
             t0 = tic; [cfgP, memP] = policy_decide(kindP, obs, cfgP, memP, PPm, agP, optP); t_dep = toc(t0);
             if rep > 0                               % pass 0 = warm-up

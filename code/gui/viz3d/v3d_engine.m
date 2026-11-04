@@ -40,9 +40,9 @@ end
 function M = loadAll()
 root = project_root();
 L = load(fullfile(root, 'data', 'policy_pools.mat'), 'PP'); PP = L.PP;
-Q = load(fullfile(root, 'data', 'trained_dqn.mat'), 'agents', 'gammas', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db');
-PP.confirm = Q.confirm; PP.alarm_mode = Q.alarm_mode;
-if isfield(Q, 'drop_db') && ~isempty(Q.drop_db), PP.drop_db = Q.drop_db; end
+Q = load(fullfile(root, 'data', 'trained_dqn.mat'), 'agents', 'gammas', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db', ...
+    'maha_thr', 'dec');
+PP = decision_settings(PP, Q);                     % the agent's monitor and decision-time settings (train_dqn.m)
 M.PP = PP;
 M.K = link_env('tables', PP);
 M.agent = Q.agents{find(Q.gammas == Q.seed_summary.selected_gamma, 1)};

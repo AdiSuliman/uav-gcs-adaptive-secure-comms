@@ -60,7 +60,7 @@ end
 tBoot = tic;
 fprintf('Loading trained models and parameters...\n');
 D = load('data/trained_detector.mat', 'net', 'classes', 'ood');
-Q = load('data/trained_dqn.mat', 'agent', 'confirm', 'alarm_mode', 'drop_db');
+Q = load('data/trained_dqn.mat', 'agent', 'confirm', 'alarm_mode', 'drop_db', 'maha_thr', 'dec');
 [featMean, featStd] = loadNormStats();
 p0 = loadInitialParams();
 fprintf('  models + parameters loaded (%.1f s)\n', toc(tBoot));
@@ -101,9 +101,14 @@ UW = 1; if isfield(D.ood, 'win'), UW = D.ood.win; end                        % u
 env.PP = struct('actions', {env.action_names}, 'classes', {env.class_list(:)'}, 'sps', p0.sps, ...
     'bps', p0.bits_per_symbol, 'maha_thr', Tood.maha, 'fuse', FZ.FM, 'fuse_N', FZ.N, 'q_thr', FZ.q_thr, ...
     'unk_win', UW, 'cfg_gain_db', config_gain_db(env.action_names, p0));
-if isfield(Q, 'confirm'), env.PP.confirm = Q.confirm; end
-if isfield(Q, 'alarm_mode'), env.PP.alarm_mode = Q.alarm_mode; end
-if isfield(Q, 'drop_db') && ~isempty(Q.drop_db), env.PP.drop_db = Q.drop_db; end
+env.PP = decision_settings(env.PP, Q);         % the agent's monitor and decision-time settings (train_dqn.m)
+env.unk_retain = 95;                           % the agent's retention of the unknown-threat threshold [%], the slider's default
+if isfield(env.PP, 'unk_retain') && ~isempty(env.PP.unk_retain)
+    env.unk_retain = 100 * env.PP.unk_retain;
+elseif isfield(Q, 'maha_thr')
+    env.unk_retain = 100 * mean(env.maha_val >= Q.maha_thr);
+end
+env.unk_retain = min(99, max(80, round(env.unk_retain)));
 env.sev = buildSeverityTable();
 env.surv = loadSurvReference();
 env.ber_floor = 0.5 / p0.frame_length;      % "zero errors in a frame" plotting floor
@@ -198,7 +203,7 @@ ui.ep3dBtn.ButtonPushedFcn       = @openEpisode3d;
 fig.CloseRequestFcn              = @closeApp;
 
 speedChanged(ui.speedSpin, []);
-ui.thrSlider.Value = 95;                              % production threshold: 95% of known frames kept
+ui.thrSlider.Value = env.unk_retain;                  % the agent's threshold: its share of known frames kept
 thrChanged(ui.thrSlider, []);
 resetRunViews(fig, 'AWAITING SEQUENCE');
 drawLinkDiagram(fig, 'idle', '', '', struct());
@@ -2442,8 +2447,9 @@ function loadKpiTab(fig)
     R = 'results/';
     metrics = []; P = []; Lt = []; Kp = [];
     try
-        if isfile([R 'eval_detector_metrics.mat'])
-            M = load([R 'eval_detector_metrics.mat'], 'metrics'); metrics = M.metrics;
+        fk = kpi1_file('eval_detector_metrics');            % the test set KPI 1 is read on
+        if isfile(fk)
+            M = load(fk, 'metrics'); metrics = M.metrics;
         end
         if isfile([R 'policy_evaluation.mat']), P = load([R 'policy_evaluation.mat']); end
         if isfile([R 'latency.mat']), L = load([R 'latency.mat'], 'LAT'); Lt = L.LAT; end
@@ -2456,6 +2462,7 @@ function loadKpiTab(fig)
     if ~isempty(metrics)
         col = c.amber; if metrics.macro_f1_pct >= 90, col = c.green; end
         sub = sprintf('macro-F1 %.1f%% [%.1f-%.1f]  |  target >= 90%%', metrics.macro_f1_pct, metrics.ci95.macro_f1);
+        if isfield(metrics, 'test_set'), sub = sprintf('%s  |  %s', sub, metrics.test_set); end
         setCard(ui, 1, sprintf('%.1f%%', metrics.overall_accuracy_pct), sub, col);
     end
     if ~isempty(P)

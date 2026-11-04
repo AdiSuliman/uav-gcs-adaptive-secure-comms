@@ -20,13 +20,13 @@ if nargin < 1
 end
 KEYS = {'fuse', 'fuse_N', 'q_thr', 'det_id'};
 FRAME = {'probs', 'maha', 'feat', 'gant', 'ber', 'fer', 'crc', 'run', 'aoa', 'act', 'act_comp', 'ebno_rx', ...
-    'idle', 'act_idle', 'bch', 'mmse_pred'};   % pool_cell.m
+    'idle', 'act_idle', 'bch', 'mmse_pred', 'probs3'};   % pool_cell.m
 KNOWN = [KEYS, {'scen', 'sev', 'level', 'sev_names', 'splits', 'cell_splits', 'cell_geo', 'ref_geo', 'shadow', 'threats', 'singles', ...
     'combos', 'ebno', 'actions', 'ngeo', 'ncomb', 'nhover', 'lhs', 'speed_range', 'speed_out', 'speed', 'cov', ...
     'maha_val', 'unk_retain', 'rule_mmse_db', ...
     'alt', 'ksig', 'gp', 'bw', 'pw', 'cfg_gain_db', 'pools', 'mber', 'mfer', 'clean', 'clean_fer', 'classes', 'maha_thr', ...
-    'unk_win', 'F_SUB', 'event_frame', 'fec_frames', 'runs', 'model_tag', 'aoa_random', 'k_random', 'sps', 'bps', 'feat_names', ...
-    'created', 'kind', 'cell_ebs', 'ebno_grid', 'e_level', 'family', 'block'}];   % build_policy_pools.m, build_check_pools.m
+    'unk_win', 'F_SUB', 'event_frame', 'fec_frames', 'fec_rx', 'runs', 'model_tag', 'aoa_random', 'k_random', 'sps', 'bps', 'feat_names', ...
+    'created', 'kind', 'cell_ebs', 'ebno_grid', 'e_level', 'family', 'block', 'core3_sha256', 'core3_N', 'core3_id', 'core3_not_run'}];   % build_policy_pools.m, build_check_pools.m
 D = load('data/trained_detector.mat', 'classes', 'ood', 'trained_at');
 FZ = fusion_model();
 UW = 1; if isfield(D.ood, 'win'), UW = D.ood.win; end
@@ -79,8 +79,10 @@ end
 end
 
 function bak = backup(f)
-% Copy of f as <name>_before_rekey_<time>.mat, checked by its size.
-bak = sprintf('%s_before_rekey_%s.mat', f(1:end-4), char(datetime('now', 'Format', 'yyyyMMdd_HHmmss')));
+% Copy of f as <name>_before_rekey_<time>[_n].mat (an existing file is never overwritten), checked by its size.
+stem = sprintf('%s_before_rekey_%s', f(1:end-4), char(datetime('now', 'Format', 'yyyyMMdd_HHmmss')));
+bak = [stem '.mat']; n = 1;
+while isfile(bak) && n < 100, n = n + 1; bak = sprintf('%s_%d.mat', stem, n); end   % a second re-key within the same second
 if isfile(bak), error('rekey_pools:backup', '%s exists', bak); end
 [ok, msg] = copyfile(f, bak);
 if ~ok || dir(bak).bytes ~= dir(f).bytes, error('rekey_pools:backup', 'no backup of %s: %s', f, msg); end
