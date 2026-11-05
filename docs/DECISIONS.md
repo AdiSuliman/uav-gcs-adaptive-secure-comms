@@ -2802,6 +2802,7 @@ Item 7 is the one exception. Its routing may switch on D117 point 3, a training 
 - Badi et al. 2019 (the polarization model in `uav_attitude_db.m`).
 - Design `weak_fix/design_speed.md`; refutation `weak_fix/refute_speed.md`; verification `weak_fix/verify_*.md`.
 
+*[5.11.2026 18:33: Adi confirmed point 1 again at profile 3's deployment (his yes of 31.10.2026, 09:02 is the dated line on DEC:380). Profile 3's profile.json states `kpi7_union` "verdict" with `kpi7_union_yes` "31.10.2026 09:02"; the release check asserts that form.]*
 ## D118 — Order, timeboxes, run guards and the shedding order of D110-D117 for profile 3's end date (30.10.2026)
 
 1. **Order.**
