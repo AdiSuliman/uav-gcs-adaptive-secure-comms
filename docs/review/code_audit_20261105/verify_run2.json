@@ -1,0 +1,315 @@
+[
+ {
+  "area": "Tests, run scripts, folders and docs: audit_tests_scripts_folders.md, verified on 5.11.2026 against the p3 tree C:\\Users\\Adi Suliman\\uav-gcs-v7-p3 (tip 1a29527) and C:\\Users\\Adi Suliman\\uav-gcs-logs. Read only; no MATLAB was run. A correction to one known contract: run_cache.m:53 leaves out code/tests/ and code/legacy/, so editing a test does not invalidate cached C2/C2g/C2u runs. Test edits do change HEAD:code and the porcelain state, which are recorded as provenance in kpi6_fresh_marker.m:94-98, eval_detector.m:764-770, ood_k2_rules.m:257-261 and measure_all_kpis.m:849-853. The machine state in section 3 of the audit is out of date: the only MATLAB running now is a p3 hand-run of ood_k2_run in its select phase (PID 31500/34096). p3 sits at C1p behind p3_c1p.hold, and its B-stage rerun ended rc=0 at 17:48.",
+  "verdicts": [
+   {
+    "id": "T1",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "The audit claims the bodies are identical; that is not fully true. test_smoke.m:30 write_text uses fwrite(fid,t), while the others use fprintf(fid,'%s',s). The two differ for characters above 255 and in how the file encoding applies. test_lb.m:954 fixture_off takes a cell of names. It has the same name as the char version, and so does test_d121 pb_fixture_off (the known 'same-named helpers differ' contract). A shared parent_copy cannot be wrapped by a one-line local parent_copy in test_core without a name clash or recursion: the shared helper needs another name. Checks that passed: there is no name clash with pipeline code (setup_paths.m does not add code/tests; no write_text, parent_copy, fixture_off, write_json, ternary_t or mon_pp exists outside tests). run_cache excludes tests. The tree scans that would see a new helpers/ folder (test_core.m:35, 4961, 6462) would not fail on it. test_d107.m:853 checks only test_d107.m and test_core.m for duplicate definitions.",
+    "required_proof": "Merge only byte-identical bodies (leave test_smoke write_text and both cell fixture_off variants local). Then run all 10 files before and after on one tip and diff the V7RESULT name lists. Also run once in a git-less export with V7_GIT_REPO set.",
+    "live_chain_impact": "None if done after the KPI stage. Done in the live p3 tree earlier, it marks the KPI 6, fresh3 and ood_k2 provenance lines '+ local changes in code'."
+   },
+   {
+    "id": "T2",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "The clean_ref literals are identical in test_deg_mode.m:18-21, test_lb.m:18-21 and test_wf_dec.m:18-21. The struct has 3 fields, not the 6 the audit says. The fixture touches tests only, and run_cache excludes tests. test_core counts the nested files' tests only by '^function test_' (test_core.m:11758, 11771), and moving setup code does not change that count. test_smoke's setupOnce has a different preamble (no cd into tmp), so the 'all 10 setupOnce' claim is loose.",
+    "required_proof": "The helper must cd into tmp, mkdir data, save and clear('clean_ber_ref'), in that order (past bug 16). runtests on the three files: same names, all PASS.",
+    "live_chain_impact": "none after 21.11"
+   },
+   {
+    "id": "T3",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "Confirmed: test_d121.m:255-273 calls no project code. It only checks ismember/mean on local literals. The real logic is measure_all_kpis.m:219-226. Neither test name appears in the docs, DECISIONS, the run scripts or the notes. Nothing counts test_d121's tests.",
+    "required_proof": "Delete the two tests, or replace them with a source pin of measure_all_kpis.m:219-226. Then runtests test_d121.m.",
+    "live_chain_impact": "none"
+   },
+   {
+    "id": "T4",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "In deploy_tests2.sh:202-206 and 248, a test that is new and not PASS blocks the deploy verdict ('new-test' and not 'passing'). test_d121.m:162 runs system('git show f6f6e03:code/decision/rule_core_policy.m') without -C and without the V7_GIT_REPO fallback, and it ignores the exit status. The queue runs in a git archive export: I checked d91q\\deploy2\\tip, and 'git -C tip rev-parse' gives 'not a git repository'. The queue gets V7_GIT_REPO only from its launch environment (STOP_SOFT.md:1024). So that test compares the file with git's error text and fails, which would turn VERDICT deploy test_core into BLOCKED. The audit's proof (run on the p3 tip, a git checkout) would not catch this. Also unverified in an export: test_speed_envelope.m:617 load('params.mat') relative to the current folder, test_head's data/ reads, and parses_ok(tc,'test_d121') which needs code/tests on the path. Runtime is safe: LIM core is 6h against 54 min today.",
+    "required_proof": "Fix test_d121.m:162 first (use -C with the V7_GIT_REPO fallback, and check the status). Then run each of the seven files in a fresh git archive export with V7_GIT_REPO set, under the queue's INIT, and get all PASS. Only then add the wrappers.",
+    "live_chain_impact": "None now. It blocks the next deploy queue verdict if applied as written."
+   },
+   {
+    "id": "T5",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "Measurement only. A 'V7TIME' line matches none of the existing patterns: '^V7TIMEOUT' (deploy_tests2.sh:189 and the summary grep at 288), '^V7SUITE ', '^V7RESULT ' or '^V7CODE '. diags() keys on 'Error occurred in' blocks that end at '====' lines, so lines printed after the run are not folded into the diagnostics. A non-prefix tag such as V7DUR would still be cleaner. Any later fixture sharing must respect the source greps of build_threat_model at test_core.m:4773 and 7468, and the per-test seed, active_threat and gates.",
+    "required_proof": "Rerun the summary functions (pair and verdicts) on the 4.11 logs with the new tag and check the VERDICT lines are unchanged.",
+    "live_chain_impact": "none (the queue is not running)"
+   },
+   {
+    "id": "T6",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "test_core.m:32-44 already parses every non-legacy .m file, tests included, and it runs in the queue. parses_ok (test_d121.m:1553) also calls which(name), which is an implicit check that the function is on the path. But most of the listed files are already loaded with fileread(which(...)) in the same tests (for example 683, 1180-1188). Nothing greps the test count.",
+    "required_proof": "runtests test_d121.m: the remaining tests PASS.",
+    "live_chain_impact": "none"
+   },
+   {
+    "id": "T7",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "The scans are read-only, and no test writes .m files into the code tree (the movefile calls at test_core.m:5371-5437 and 10897 act on relative paths in the temp folder). Each scan has its own filter: 35 drops legacy; 1918 drops tests and evaluate_policies.m; 4961 drops legacy and test_core.m; 5881 drops legacy/dev/tests/gui and strips comments; 6462 drops legacy. A cache must store raw text with folder and name, and each scan must keep its own filter. The benefit is seconds.",
+    "required_proof": "Same V7RESULT list on one tip.",
+    "live_chain_impact": "none"
+   },
+   {
+    "id": "S1",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "The diff is confirmed: lines 2, 4, 29 and 56 are comments or usage text, lines 83 and 133 are log text, and line 138 is the run line. But the audit missed callers of the _mt file path. g0_mt_run.sh, p1r_launch.md, post_c2e_commands.md, post_c2e_runbook.md and gap_audit.md in session_notes_0ff3\\core reference it, as well as the two notes the audit names. Deleting the _mt file breaks those runnable commands. The wrapper takes L and ROOT from env defaults, not from $0, so the file's location does not matter.",
+    "required_proof": "Grep every note and script for gated_run_mt and keep a stub with that name that sets V7G_THREADS=default. Then run D91_GATED_DRY=1 with old and new and diff the DRY lines.",
+    "live_chain_impact": "none after the chain"
+   },
+   {
+    "id": "S2",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "deploy_tests2 is the release gate. Its pair, diags and verdicts functions differ from deploy_tests and tests4 in about 97 lines, so a shared library either changes one queue's verdict logic or is trivially only deploy_tests2's. S3 retires the other queues anyway, which leaves almost nothing to share. The gate call must stay byte-for-byte (speed_gate.ps1).",
+    "required_proof": "Run verdicts and pair on the 4.11 log set before and after; the VERDICT and pair lines must be byte-identical.",
+    "live_chain_impact": "none (not running); after the chain only"
+   },
+   {
+    "id": "S3",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "Checked: the REPO= lines point at missing folders (speed_proofs.sh:23, tests2.sh:22, tests3.sh:30, tests4.sh:37). No live script calls these scripts: the only mentions are in other dead scripts, comments of deploy_tests2 and the gate's header. retire_file at takeover.sh:558-564 returns early when the original is absent, so moving the *.retired_by_d91 copies is harmless. Keep every .log in place: deploy_tests2.sh:63-64 pairs against v7_d91_tests4_base.log and v7_d91_tests4_tip.log.",
+    "required_proof": "Move the scripts only (no logs) after the takeover ends, then run a 'takeover status' and a deploy_tests2 dry read.",
+    "live_chain_impact": "none (move scripts only, after the takeover's final phase)"
+   },
+   {
+    "id": "S4",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "The takeover is live. Its track loop (takeover.sh:1536-1547) waits for takeover_end_<track> for every track, p2 included, and the status and cleanup paths list p2 files (1484, 1594). Removing the p2 code changes the track list of a proven script. After the chain ends the script has no further use, so the benefit does not justify the risk.",
+    "required_proof": "The d91-takeover harness passes before and after, and only after the final phase.",
+    "live_chain_impact": "High if done while the takeover runs (final phase LAT, KPI, DASH, WEAK, RPT, BUNDLE)."
+   },
+   {
+    "id": "S5",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "The proposal adds a check that the cmd's cd target equals the slot's path. That is a behaviour change: it would refuse the kind of run made today (dev_fec_select in the p1 slot doing cd to p3). It is better treated as a defect fix (see missed) than as a behaviour-preserving cleanup. The slots.conf table also touches the live wrapper's mapping contract (busy-file names p1_hand.busy and p3_hand.busy, read by takeover.sh:685-717).",
+    "required_proof": "D91_GATED_DRY=1 for the three slots before and after, plus a test that a cross-slot cd is refused.",
+    "live_chain_impact": "none if after the chain"
+   },
+   {
+    "id": "D1",
+    "kind": "defect",
+    "verdict": "real_defect",
+    "reason": "It is a documentation mismatch, not a behaviour defect, and the audit's evidence is wrong. v7_d91_speed_gate.ps1.bak_20261020 also tests 28; the diff against the live file is empty and both are 2855 bytes. The 28 GB gate is a registered rule: DECISIONS.md:1387 (D93 point 6, 'The hand-runs keep the gate (28 GB)'), 1424 and 1506 ('The gate stays at 28 GB'). The stale texts are the header (line 3), gated_run.sh:28, deploy_tests2.sh:17, docs/d91_speed_gate.ps1.txt:29 (35) and d91_deploy.md:332. Changing the code to 35 would break a registered rule. The fix is the texts, set to 28.",
+    "live_chain_impact": "No behaviour change. The gate admits hand-runs and queue jobs at 28 GB beside C1p, as registered. The wrapper's own need_gb floor comes first. Before any hand-run beside C1p, C2 or EDGE, check the stage line and that free commit is at least the floor (past bugs 11 and 15)."
+   },
+   {
+    "id": "D2",
+    "kind": "defect",
+    "verdict": "real_defect",
+    "reason": "Confirmed: speed_gate.ps1:19 adds the literal PID 42560 to $pipe. No process has that PID now. If a hand-run or queue MATLAB were given PID 42560, the gate would leave it and its -parallelserver children out of 'others', under-count, and allow one extra MATLAB (past bug 12: trusting PIDs). The probability is low.",
+    "live_chain_impact": "Possible memory overcommit beside a parallel stage (C1p with its workers, C2, EDGE) if the PID is reused. Before each gated start in p3's C1p-C2 window, check that no live process has PID 42560 (Get-Process -Id 42560). Fix after the chain."
+   },
+   {
+    "id": "D3",
+    "kind": "defect",
+    "verdict": "not_defect",
+    "reason": "This is already resolved. uav-gcs-v7-docs HEAD is feb671f, and origin/v7-docs-d91 is also feb671f (5.11 18:34): 0 commits ahead, 0 behind. 54535ce is contained in origin/v7-docs-d91.",
+    "live_chain_impact": "none"
+   },
+   {
+    "id": "D4",
+    "kind": "defect",
+    "verdict": "real_defect",
+    "reason": "Confirmed: uav-gcs-d91-speed, uav-gcs-set4-p1 and uav-gcs-v7-p2 do not exist, and the cited REPO= lines and takeover.sh:98 P2= point at them. Only dead scripts are affected, and the p2 track is ended by p2.abandon. It is harmless dead configuration.",
+    "live_chain_impact": "none (the p2 track ended; the gated wrapper refuses a missing p2 folder at line 62)"
+   },
+   {
+    "id": "F-plan",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "The move map is incomplete. (a) DOCS_REPO is passed as the absolute path 'C:\\Users\\Adi Suliman\\uav-gcs-v7-docs' on the command line of the running ood_k2_run (select phase) and of the later ood_k2_run and k2_1_screen runs (ood_k2_rules.m:85-99 asserts the registration commit in that repository). The audit lists only the m_head.m:36 comment. (b) The live trees would grow by about 45 characters (worktrees\\live\\...), and Simulink and Stateflow build folders in the trees were not checked against the 260-character limit (test_core.m:16-22 guards only the tests' tmp). (c) MATLAB cluster profile and JobStorageLocation, and the V7_GIT_REPO values in the launch notes (STOP_SOFT.md:1024, post_c2e_runbook.md:222-242), are not in the map. Checked and fine: run_cache keys use paths relative to the root (run_cache.m:51, with callers passing 'data/...').",
+    "required_proof": "Grep for absolute paths in every note, profile.json, process command line and env launch before the move. Then a DRY wrapper run per slot, an ood_k2_rules('registered') call against the moved docs repo, and one test_core queue.",
+    "live_chain_impact": "none if done after the chain; breaks any later ood_k2 phase if uav-gcs-v7-docs moves first"
+   }
+  ],
+  "missed": [
+   "Cross-slot hand-runs are invisible, a real live risk. A hand-run registered in the p1 slot that runs cd('C:\\Users\\Adi Suliman\\uav-gcs-v7-p3') (today's dev_fec_select) writes only p1_hand.busy. takeover.sh hand_busy (685-717) checks p3_hand.busy only. gated_state.ps1:27-30 looks for the worktree path with a trailing backslash or slash, and the cd string \"...uav-gcs-v7-p3')\" has neither. So the takeover could start a p3 stage, or another p3 hand-run could start, in the same tree (past bugs 10 and 13). Before p3_c1p.hold is released, make sure no MATLAB command line holds cd('...uav-gcs-v7-p3') unless p3_hand.busy is present.",
+   "test_d121.m:162 runs git show without -C and without the V7_GIT_REPO fallback, and it ignores the exit status. It fails in any git-less export, which blocks T4.",
+   "The 28 GB gate is registered (DECISIONS.md:1387, 1424, 1506). D1's fix direction must be the texts, not the code. The audit's claim that the .bak file shows 35 is false.",
+   "D3 is already pushed (origin/v7-docs-d91 = feb671f).",
+   "The F-plan does not list the DOCS_REPO absolute path used by ood_k2_run and k2_1_screen commands (running now).",
+   "S1 misses callers of v7_d91_gated_run_mt.sh: g0_mt_run.sh, p1r_launch.md, post_c2e_commands.md, post_c2e_runbook.md and gap_audit.md.",
+   "Contract correction: run_cache.m:53 leaves code/tests/ and code/legacy/ out of the hash. Test edits do not invalidate cached runs, but they do change the HEAD:code and porcelain provenance recorded in the KPI 6, fresh3, ood_k2 and measure_all_kpis stamps.",
+   "T1: test_smoke write_text (fwrite) is not identical to the others (fprintf '%s'); T2 is a 3-field struct, not 6.",
+   "Section 3's process table is out of date: only the p3 ood_k2_run select hand-run (PID 31500/34096) is running now."
+  ]
+ },
+ {
+  "area": "audit_tests_scripts_folders.md: tests T1-T7, run scripts S1-S5 and defects D1-D4, the F-plan folder move, docs and notes rows. Checked by grep and range reads; nothing was run.",
+  "verdicts": [
+   {
+    "id": "T1",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "Every file:line exists and the bodies match for write_text (7 files), parent_copy (7), fixture_off (7 + test_lb's cell variant + test_d121's pb_fixture_off), write_json, ternary_t and mon_pp. Corrections. (a) test_smoke.m:30 write_text uses fwrite, not fprintf '%s' (same for ASCII only). (b) test_ood_k2.m:966 also has a mon_pp, with a different signature (FM, N). It is not the deg_mode/wf_dec one, and a local function shadows the path one. (c) Two more parent-copy variants were missed: test_d121.m:843 pb_parent_dir and test_lb.m:925 parent_dir (multi-file versions with the same V7_GIT_REPO fallback). (d) The benefit is overstated. About 225 lines come out, but the shared file adds about 50, so the net is about 175, not '250'. (e) The test_core parent_copy keeps its default rev '394d4da' as the audit says. The by-name pairing is unchanged because no test name changes. Test edits cannot touch run_cache: run_cache.m:52 excludes 'code/tests/' and 'code/legacy/' from the hash. None of the seven SHA-frozen D111 files is a test file. A helper folder under code/tests is skipped by the test_core scans that exclude 'tests' (1919, 5882, test_lb 149, speed_envelope 593). The scans at test_core 35, 4961 and 6462 will read the helper file; it has no banned strings.",
+    "required_proof": "The proposed proof is adequate: runtests on the 8 files, same names, all PASS before and after on one tip. For test_core, diff the V7RESULT name list. Add: test_m_files_parse still passes, since the helper file is scanned.",
+    "live_chain_impact": "None. code/tests is outside the run_cache hash. Nothing is touched before about 21.11."
+   },
+   {
+    "id": "T2",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "The clean_ref fixture is identical in test_deg_mode.m:16-20, test_lb.m:17-21 and test_wf_dec.m:17-21, including clear('clean_ber_ref') in teardown (past bug 16). Two details are wrong. The struct has 3 fields (ebno, ber_est, plr_fec), not 6. The 6-line preamble is not in all 10 setupOnce: test_d107 and test_d121 have only root/addpath/setup_paths, test_core and test_head have extra lines, and test_smoke does not cd. Only about 6-7 files share the cwd/tmp/cd lines, so 'about 60 lines' is overstated (about 30-40, unmeasured). The helper must be called after the cd into tmp, because it writes data/policy_pools.mat into cwd.",
+    "required_proof": "Same as T1. Additionally assert clean_ber_ref gives finite values in the three files (past bug 16).",
+    "live_chain_impact": "None."
+   },
+   {
+    "id": "T3",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "Confirmed. test_d121.m:255-262 and 268-272 only build local arrays and call mean/ismember/all, with no project function. The real code is measure_all_kpis.m:220-226, and the line numbers are right. Neither name appears in DECISIONS, the notes or any script, and no past-bug item matches. test_d121 is in no queue, so V7TESTS n/n is unaffected. If T4 later adds a test_d121 wrapper with a count floor (verifyGreaterThanOrEqual(n, ...)), the floor must be set after T3 and T6 lower the count.",
+    "required_proof": "Replace with a source pin of those lines, or delete. runtests test_d121 passes with the new count.",
+    "live_chain_impact": "None."
+   },
+   {
+    "id": "T4",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "The gap is real. Verified: the queues run only test_core.m (deploy_tests2.sh:131, tests2.sh:52-54, speed_proofs.sh:65). A grep of uav-gcs-logs finds no script naming test_d107/d121/head/lb/speed_envelope/wf_dec/smoke. test_core.m wraps deg_mode and ood_k2 as nested suites, so runtests('code/tests') runs those two twice. No sim/load_system/build_threat_model/parfor appears in the seven files. Counts are each one too high, because the audit counted the 'function tests = test_x' line: really d107 32, d121 68, head 29, lb 28, speed_envelope 22, wf_dec 33, smoke 7 = 219 (not 225), and the 'other nine files' total is 261, not 269. Option B (drop the nested wrappers, run runtests('code/tests') once) is unsafe. In deploy_tests2.sh pair() (195-220) a name present in the old log but absent in the new log is 'removed-test', which verdicts() blocks. test_deg_mode_suite and test_ood_k2_suite are in the 4.11 tip logs, so the verdict would be BLOCKED. Option A (wrappers inside test_core) is fine: a passing new name counts as n_new. A failing new name becomes 'new-test' and blocks. The audit admits the seven files were never run on the p3 tip, so a failing file would block the next release verdict. diags() masks only 'test_core/' names. The 'minutes, not hours' runtime is unmeasured, though the lack of sim calls makes it plausible.",
+    "required_proof": "Run all seven files on the p3 tip once before adding the wrapper (all PASS). Then run the queue's pair() and verdicts() on the existing 4.11 logs. Check that no 'removed-test' appears, and set the count floors (the verifyGreaterThanOrEqual pattern) after T3 and T6.",
+    "live_chain_impact": "None. Edits go to code/tests and the queue script, and nothing runs before 21.11."
+   },
+   {
+    "id": "T5",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "Facts hold: test_core has 46 'build_threat_model(' calls in 31 functions (first 1089, last 7735). The loops at 1089, 2102-2210, 3139-3182 and 7449-7470 are as described. The 54 min per job matches the logs (core 07:51->08:45 on 4.11, p3core about 53 min). The V7TIME tag is safe: the queue greps specific tags (^V7TIMEOUT is the only ^V7T... pattern, and the summary grep -ahE lists V7CODE|V7PID|V7TEMP|V7NRX|V7TESTS|V7FAIL|V7TIMEOUT|V7SMOKE), so a new V7TIME line is ignored. r(k).Duration exists in TestResult. All savings are honestly labelled unmeasured. Sharing a built model is a later separate proposal and would be risky, because tests set seed, active_threat and gates per case.",
+    "required_proof": "A measurement-only change. Check that the 4.11 summary, parsed again with the tag present, gives the same VERDICT lines.",
+    "live_chain_impact": "None."
+   },
+   {
+    "id": "T6",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "test_core.m:32-44 parses every code/**/*.m except legacy (including tests) with mtree, and guards numel(f)>50. test_d121 has parses_ok calls at 251, 277, 345, 346, 457, 528, 586, 689, 691, 732, 734, 1188, 1549 (helper 1553) and two stand-alone tests with only that call. The helper's own comment says it mirrors test_m_files_parse. The count of 14 files re-parsed and the time saved are unmeasured. Running test_d121 alone loses the parse check, as the audit says. The queue FOCUS lists reference test_m_files_parse, which stays.",
+    "required_proof": "test_m_files_parse and runtests test_d121 pass. Keep one parses_ok(tc,'test_d121') if the standalone check matters.",
+    "live_chain_impact": "None."
+   },
+   {
+    "id": "T7",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "The 7 scans exist (test_core 35, 1918, 4961, 5881, 6462, test_lb 148, test_speed_envelope 592). Each applies a different filter: legacy only; tests plus evaluate_policies.m; legacy plus not test_core.m; legacy/dev/tests/gui; and speed_envelope's root is code/ minus tests. A shared cache must keep the raw list and let each scan filter, not one pre-filtered list. The saving is seconds (unmeasured) and mostly tidiness, as the audit says.",
+    "required_proof": "The same V7RESULT list. The tests that use the 5881 and 1918 scans must still find their expected file sets.",
+    "live_chain_impact": "None."
+   },
+   {
+    "id": "S1",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "A diff of the CR-stripped files confirms exactly lines 2, 4, 29, 56, 83, 133, 138 differ. The only behavioural difference is the -singleCompThread flag at 138. Lines 83 and 133 are printed text. Two points the audit omits. (a) n6_corebw_launch.md:141 (not :14) says the _mt copy is made by a one-line sed from the stock wrapper, so the drift cost is small and the benefit is low. (b) The runbook's standing OK names that specific copy for rows 12/13 and LAT needs Adi's own OK, so folding it into an env switch merges an approval boundary. The default must stay single-thread, because run_cache.inputs hashes maxNumCompThreads (run_cache.m:61).",
+    "required_proof": "D91_GATED_DRY=1 on old and new for the three slots, diffing the printed matlab command (the wrapper has the mode built in). Also diff the busy-file lines.",
+    "live_chain_impact": "None until the chain ends. The wrapper is live now (two hand-runs; the current run is an ood_k2 select in p3)."
+   },
+   {
+    "id": "S2",
+    "kind": "cleanup",
+    "verdict": "wrong",
+    "reason": "The benefit claim does not hold together with S3. The duplicated say/gate/end_own are in the scripts S3 retires: tests2.sh, tests4.sh, speed_proofs.sh and wrap_real.sh are dead, and deploy_tests.sh is superseded. After S3 only v7_d91_deploy_tests2.sh keeps these functions, so a shared lib_d91.sh removes almost no duplicated code. The 'about 150 lines' is the effect of S3, not S2. The facts are also loose: end_own is not in tests2.sh or speed_proofs.sh. The 97 differing lines between the two deploy queues are right (diff count 97). The proposal touches the release gate for no net gain. The proof (running pair/verdicts on the 4.11 logs) would work, but it is not needed.",
+    "required_proof": "Drop S2, or do it only if a second live queue appears.",
+    "live_chain_impact": "None, but the risk to the release gate is not repaid."
+   },
+   {
+    "id": "S3",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "Moving to an archive loses nothing. The 'dead because the REPO is missing' reason holds for tests2/3/4 and speed_proofs (REPO uav-gcs-d91-speed at lines 22, 30, 37, 23; the folder does not exist). It does not hold for the others: tests2_after.sh has no REPO and would launch the live deploy_tests2.sh queue if run (the best reason to archive it); wrap_real.sh is done (C1p finished); set4.sh builds set4-p1, which is gone; deploy_tests.sh has a valid REPO and is only superseded. Corrections. There are 9 *.retired_by_d91 files, not 8. The arithmetic '14 instead of 30' is off: moving 8 scripts + 9 retired + 5 backups leaves about 8 files. The docs copies cover deploy_tests, deploy_tests2, tests3, tests4, set4, and runs/ has speed_proofs and tests2. They do not cover tests2_after, wrap_real, guard_c1p_fail or wait_c1p. Keep the *.log files in place: deploy_tests2.sh reads v7_d91_tests4_base.log and v7_d91_tests4_tip.log. No live script calls these (grep checked).",
+    "required_proof": "The proposed grep of file names in live scripts and the takeover finds only comments (verified). Run the deploy_tests2 queue once after the move.",
+    "live_chain_impact": "None, provided the takeover, gated_run and deploy_tests2 stay in place."
+   },
+   {
+    "id": "S4",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "The 79 'p2' matches are confirmed (91 with P2), and p2.abandon exists in v7_d86. 'Unreachable' is overstated: the code is gated by a file, not dead. The track code is parametrised ($g/$d, for example lines 1172-1208 and a '[ \"$g\" = p2 ]' test at 1208), so it is not a block of lines to delete. The harness d91_takeover_test.sh (1,603 lines) has 105 p2 references, so removal needs the harness edited too. 'Passes before and after' is then not an independent proof. The 150-line figure is unmeasured. The takeover is the live script and bash reads a script incrementally, so an in-place edit is dangerous (its header says to replace via temp file and mv). The audit's own timing, not before the chain ends, is correct.",
+    "required_proof": "A harness run before and after, with the p2 cases removed from the harness in the same commit and reviewed. Low value for the risk.",
+    "live_chain_impact": "High if done early. Not before the takeover's final phase ends."
+   },
+   {
+    "id": "S5",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "The mapping table is trivially safe but of small value (3 names; lines 44 and 59-60 are right). The second part is not behaviour-preserving. Making the wrapper check that the cmd's cd(...) target equals the slot's path would forbid the deliberate pattern of running a p3 command in the p1 slot to get a second parallel hand-run (the wrapper allows one hand-run per slot, exit 3). That pattern was in use at audit time, with a dev_fec_select in the p1 slot beside B3r. Parsing a cd(...) out of free-text cmds (cd(setup_paths()), quoted forms) is also fragile. The claim 'behaviour unchanged for the three names' is true only for the mapping. The current running hand-run is an ood_k2 select in p3, so the p1-slot observation cannot be re-checked now.",
+    "required_proof": "D91_GATED_DRY=1 for the three slots covers the mapping only. Do not add the cd check without Adi's decision.",
+    "live_chain_impact": "None for the mapping. The cd check would block today's practice."
+   },
+   {
+    "id": "D1",
+    "kind": "defect",
+    "verdict": "not_defect",
+    "reason": "The facts are right: speed_gate.ps1:29 tests -ge 28, and its header line 3, the docs copy docs/d91_speed_gate.ps1.txt:29 and d91_deploy.md:332 say 35. Two claims are wrong. (a) The file did not change from 35: .bak_20261020 is byte-identical to the live file (diff rc 0, both 28), so 'the .bak has the 35' is false. The 11:20 time is only the file time. (b) 28 GB is Adi's deliberate setting: STOP_CHECKLIST.md:575 'OP-9 ... the gate script checks 28 GB (Adi lowered it 20.10); its header and d91_deploy say 35 GB. Restore after the reboot? Adi only', and RUNBOOK_NOSTOP.md:48/602 'The gate stays at 28 GB unless Adi changes it'. STOP_SOFT.md:1067 already records the header as stale. What is left is a stale comment and docs text, and an open decision whether to restore 35 (tests need 35 per the runbook). It is not a code defect.",
+    "required_proof": "Adi decides 28 or 35. Then make header, code, docs copy and d91_deploy.md agree. The file is live: replace by temp file and mv.",
+    "live_chain_impact": "The wrapper is unaffected (its own need_gb is checked first, gated_run.sh:117)."
+   },
+   {
+    "id": "D2",
+    "kind": "defect",
+    "verdict": "real_defect",
+    "reason": "speed_gate.ps1:19 has $pipe = @(42560) + the run_stage( matches. PID 42560 and the zombie 32824 named in the header do not exist now (Get-Process finds neither), and 'pipeline=[42560]' still appears in every queue log line. Windows reuses PIDs, so a later MATLAB given PID 42560 would be excluded from the 'other MATLAB' count and the gate could start a second job beside it. The probability is low but real; the run_stage( test on the next line already covers the actual pipeline.",
+    "required_proof": "Remove the literal and run the gate with a dummy MATLAB. The file is live.",
+    "live_chain_impact": "None now; fix after the chain."
+   },
+   {
+    "id": "D3",
+    "kind": "defect",
+    "verdict": "not_defect",
+    "reason": "Stale. git rev-list --count origin/v7-docs-d91..HEAD is 0 now. The local ref origin/v7-docs-d91 equals HEAD feb671f (5.11 18:34), and it contains 54535ce. The commits are on origin (pushed some time after the audit). The docs branch also moved on: D122 was added, so DECISIONS.md is 3,076 lines, not 3,065.",
+    "required_proof": "None; already pushed.",
+    "live_chain_impact": "None."
+   },
+   {
+    "id": "D4",
+    "kind": "defect",
+    "verdict": "not_defect",
+    "reason": "The facts are mostly right: uav-gcs-d91-speed is missing and is referenced at speed_proofs.sh:23, tests2.sh:22, tests3.sh:30, tests4.sh:37; set4.sh:30 builds set4-$1 and set4-p1 is gone; uav-gcs-v7-p2 is at gated_run.sh:59 and takeover.sh:98. But every one of these scripts is dead (S3) or the p2 path is intentional (p2.abandon). Not a live defect. The sub-claim that deploy_tests.sh/deploy_tests2.sh mention uav-gcs-d91-speed is wrong: grep finds no such text in them (only a comment naming v7_d91_speed_proofs.sh at deploy_tests2.sh:73).",
+    "required_proof": "None; S3 covers it.",
+    "live_chain_impact": "None."
+   },
+   {
+    "id": "F-plan",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "Verified: code/ has no absolute paths (git grep finds only author lines and the m_head.m:36 comment), run_cache hashes relative code paths, the folder HEADs and branch containment in the table are right, 8 small folders have 0 ignored entries, and /worktrees/ is in .git/info/exclude. Errors and gaps. (a) The d91q path budget is 34 characters longer (uav-gcs-adaptive-secure-comms\\ops\\ = 34), not 20. It is still well below the 150-character test_core limit. (b) The docs-tree row misses that hand-run commands pass DOCS_REPO = 'C:\\Users\\Adi Suliman\\uav-gcs-v7-docs' (code/detection/ood_k2_run.m:57, k2_1_screen.m:35, ood_k2_rules.m:89), and the D111 K2 runs read that repo. The runbook commands carrying that path must be updated. (c) git worktree move refuses locked trees, not dirty ones. (d) The reference 'n6_corebw_launch.md:14' should be :141. (e) The sizes (42/113/68/36 GB) were not re-measured here. The machine state also changed since the audit: v7-p3 is at 1a29527 and an ood_k2 select hand-run is on p3. The ordering (after the chain, stop the takeover cleanly) is right, since the takeover and the wrapper hard-code the paths (takeover.sh:96-100, gated_run.sh:43-48).",
+    "required_proof": "The audit's own list is good: D91_GATED_DRY=1 for the 3 slots, takeover status, git worktree list with no prunable, and one test_core queue. Add a DOCS_REPO check (a dry ood_k2_rules('registered', ...) call on the new docs path).",
+    "live_chain_impact": "High if done early. Nothing may move while a MATLAB, busy file or takeover.lock exists."
+   },
+   {
+    "id": "docs-refresh",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "The staleness claims are confirmed: README says 'Status as of 28.10.2026' and 'D1-D106' (README.md:11, 179, 205; last commit 28.10), ROADMAP last commit 29.10, PROJECT_LOG last commit 31.10, DECISIONS order is not numeric (D109 at 2097 before D108 at 2132, D107 at 2855), and v7-p3's docs/DECISIONS.md is 1,100 lines (16.10) against the docs branch. 'Push the docs branch now' is already done (D3). One caution on 'delete the stale four from the code branches': main.m:398 prints '[D1] README.md, docs/DECISIONS.md, docs/PROJECT_LOG.md, docs/ROADMAP.md READY' unconditionally, so that print would become untrue. test_smoke and test_core 6470 need docs/d91_smoke_deploy.m.txt, so keep the protocols and the .txt copies.",
+    "required_proof": "After the change, test_smoke and test_core's 6470 test pass, and main.m:398 is adjusted if the files go.",
+    "live_chain_impact": "None for the docs branch. The code-branch deletion waits for the merge."
+   },
+   {
+    "id": "notes-bak",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "The total is right: 64 *.bak* files, 3.3 MB, in 1,155 files and 65 MB. The per-note counts are overstated: STOP_SOFT 21 (not 24), plan_v2 9 (not 10), post_c2e_runbook 6 (not 7), d3_dispatch 3 (not 4). 'Nothing references a .bak file' is wrong: STOP_SOFT.md:53 names STOP_SOFT.md.bak_before_v2 (the file exists), and p1r_launch.md:19/371 and p1r_launch_fixes.md:6 name .bak_before_p1rfix as rollback copies. They are rollback pointers in prose, not inputs, so deleting after Adi's OK is harmless.",
+    "required_proof": "None beyond Adi's OK.",
+    "live_chain_impact": "None."
+   }
+  ],
+  "missed": [
+   "Two more parent-copy variants are missing from T1: test_d121.m:843 pb_parent_dir and test_lb.m:925 parent_dir (multi-file, same V7_GIT_REPO fallback).",
+   "V7_GIT_REPO is set by no script and no Windows environment (user/machine/bash checked), and the queue exports have no .git (git -C on d91q/deploy2/p3m fails). Yet 314/314 PASS on 4.11 includes tests that call parent_copy (e.g. test_fec_packets_jsi). The mechanism that lets them pass in an export was not found, so the 'git-less fallback' that T1 says to keep has not been shown to work in the queue. Worth one check before T1 or T4 touches parent_copy.",
+   "The audit's counts of test functions are each +1 (the 'function tests = test_x' line was counted), and the sums (269 and 225) drop to 261 and 219.",
+   "The audit cites 8 *.retired_by_d91 files twice; there are 9.",
+   "Machine state changed after the audit: the running hand-run is now an ood_k2_run select in p3 (D111 SHA-frozen files, DOCS_REPO passed on the command line); v7-p3 HEAD is 1a29527; the docs branch has D122 and is level with origin. The wrapper findings about B3r and a dev_fec_select in the p1 slot cannot be re-verified now.",
+   "The audit has no N-rows (changes that alter numbers); none are needed, since all proposals are behaviour-preserving or text-only."
+  ]
+ }
+]

@@ -1,0 +1,1002 @@
+[
+ {
+  "label": null,
+  "area": "code/decision (121 files) and code/dev (28 files): audit_decision.md, verified against uav-gcs-v7-p3 HEAD 8f13e34. No .m file changed since the audited 6c48b95.",
+  "verdicts": [
+   {
+    "id": "1",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "Four contracts the audit missed. (1) test_d107.m:874-877 requires train_dqn.m to define `ternary` (and `cp_upper`) as a local function exactly once. (2) test_d107.m:420-445 (test_train_dqn_off_view_is_the_parent) compares the WHOLE text of train_dqn.m with base df5cb30 after a fixed list of cuts and swaps. test_d107.m:762-773 does the same for evaluate_policies.m, experiment_combo_generalization.m and experiment_unknown_threat.m against base_with_pb. Any deleted helper breaks them. (3) test_lb.m:665-743 (test_readers_off_is_the_parent, parent_lines_missing) requires every line of the parent commit (31a0f3e or a8fd8f3) to still be in train_dqn.m, evaluate_policies.m, policy_monitor.m, policy_decide.m and both experiments, apart from an exact list. The three ternary lines are parent lines, so removing them changes that list. test_core.m:11507-11520 does the same for evaluate_policies.m against 316230d. (4) The '14 more' copies include detection/ood_k2_run.m:357 and ood_k2_rules.m:277, which are SHA-frozen (ood_k2_run.m:61 RULE, :205 rule_changed). They also include link/build_threat_model.m:2207 and evaluation/edge_map.m:1783, whose source text tests read. The body equality itself holds: all copies are `if c, out = a; else, out = b; end`.",
+    "live_chain_impact": "None while it is not applied. Applied before 21.11, any edit changes every code byte under the running chain (past bug 13).",
+    "required_proof": "Exclude the D111 files and build_threat_model/edge_map. Rewrite test_d107 (874-877, 963, 1116, off-view and base_with_pb expectations) and test_lb (parent_lines_missing lists) in the same commit. Run test_d107, test_lb and test_core in full, then the smoke chain."
+   },
+   {
+    "id": "2",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "Same whole-text and parent-line tests as row 1 (test_d107 off-view and base_with_pb, test_lb parent_lines_missing, test_core 11507). Two more test_d107 tests the audit missed: test_cp_upper_of_the_admission_is_the_trainers (test_d107.m:881-888) regex-cuts the 4-line `function u = cp_upper(k, n)` text out of aprime_admit.m AND train_dqn.m and requires it non-empty and equal. test_d107.m:876 requires cp_upper to be defined once in train_dqn.m. The flag design (NaN at n = 0 only for choose_drop_threshold, clt_step and dconf_step) is numerically correct; the bodies were checked.",
+    "live_chain_impact": "None unless applied.",
+    "required_proof": "Rewrite test_d107 881-888, 874-877, 962 and 1115, plus the test_lb and test_core parent-line expectations. Unit test old vs new for k = 0..n, n = 0..60, both forms."
+   },
+   {
+    "id": "3",
+    "kind": "cleanup",
+    "verdict": "wrong",
+    "reason": "The claim of 'four identical bodies' is false. experiment_unknown_threat.m:192-196 has a leading `if isempty(R), R = Rb; return; end` that the other three (dqn_eval_batches.m:13, policy_run_set.m:35, evaluate_policies.m:1057) lack. C2u depends on it: `[Ro, Ri, Rr] = deal([])`, then `Ro = cat_struct(Ro, ...)` (test_lb.m:739-741). A merged 3-line body would crash C2u (fieldnames([])). A merged 4-line body changes the semantics for the other callers. Also test_lb.m:740-741 and test_core.m:6743 grep `cat_struct(...)` call text, and test_d107 off-view/base_with_pb plus test_lb parent_lines_missing cover evaluate_policies.m and experiment_unknown_threat.m.",
+    "live_chain_impact": "None unless applied. If applied with the 3-line body, C2u fails on its first threat.",
+    "required_proof": "Keep the isempty branch in C2u's copy, or prove that R is never empty in the other three callers. Then the test rewrites above and the smoke chain through C2u."
+   },
+   {
+    "id": "4",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "The code equivalence is correct. The two test_episodes differ only in `unk`, the marks only in the 1e6*split offset (0 + x is exact), and no random number moves. But both experiments are under whole-text equality with base_with_pb (test_d107.m:762-773). test_lb.m:726-742 lists the exact parent lines missing from each, including the comment lines of test_episodes/mark and the `mark(..., sp)` call lines. Deleting the local functions breaks both. The audit lists no test edit for this row.",
+    "live_chain_impact": "None unless applied.",
+    "required_proof": "Rewrite test_d107 762-773 and test_lb 726-742 in the same commit. Compare old and new specs with isequaln on the same RandStream. Run the smoke for C2g/C2u with all entities, which run_stage cannot do (see 'missed')."
+   },
+   {
+    "id": "5",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "The values are equivalent: NE = 64 is fixed at evaluate_policies.m:118, nS = numel(PP.ebno), and clean_cell = K.clean = find(strcmp(PP.scen,'none'),1) (link_env.m:127). The one exception would be NaN in PPw.ebno, which find(>= -Inf) drops. But evaluate_policies.m is under whole-text equality (test_d107.m:762-773) and under the parent-line checks of test_lb.m:674 and test_core.m:11507-11520. Removing those 18 lines breaks all three.",
+    "live_chain_impact": "None unless applied.",
+    "required_proof": "Rewrite the tests. Check isequaln of the specs for CT and F6.CT, then the smoke chain through C2e."
+   },
+   {
+    "id": "6",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "The value is identical in the four copies. But it edits train_dqn.m and evaluate_policies.m (whole-text and parent-line tests, see rows 1-2), edge_map.m (many source-text tests), and choose_drop_threshold.m, whose kpi1_threshold_check line test_d107.m:999-1000 (undo_small) matches literally. The copies are also not byte-equivalent in workspace effect: evaluate_policies and edge_map leave Md in the script workspace (no clear), while train_dqn and choose_drop_threshold clear it.",
+    "live_chain_impact": "None unless applied.",
+    "required_proof": "Rewrite the tests, then run test_d107, test_lb, test_core and the edge_map tests, then the smoke chain."
+   },
+   {
+    "id": "7",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "test_core.m:6220-6224 requires the literal `nm = split_norm();` in build_policy_pools, build_clean_test_pools and build_check_pools, so moving it into detector_setup.m breaks the test. The blocks are also not identical. build_policy_pools.m:134-146 inserts det.core3 (wf_options core3) between det and T/FZ. experiment_core_bw.m:122 clears D and nm after DET_ID, while build_check_pools keeps D. build_clean_test_pools builds only DET_ID. The C1p cell keys lack a code version (past bug 13), and pool_checkpoint keys use MODEL_TAG and DET_ID (test_core.m:5820).",
+    "live_chain_impact": "None unless applied. These are C1p/C1c files: never edit them while a chain is in C1p or C1c.",
+    "required_proof": "Rewrite test_core 6222. Check isequaln(det) including core3 under core3_pools on and off, and DET_ID equal. Run the C1p/C1c smoke on an isolated copy."
+   },
+   {
+    "id": "8",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "(1) ood_k2_rules.m:269 is in the list but is SHA-frozen: any edit trips ood_k2_run:rule_changed (ood_k2_run.m:205). (2) m_head.m:288 is not the same function. It takes an `lf` flag that drops CR bytes. It also hashes its OWN source as provenance (m_head.m:53-55, 'me' printed in the 'SHA-256 (LF)' line), so editing it changes the recorded provenance of D110's verdict. (3) eval_detector.m:787 is `file_stamp`, which returns 'sha256 <hex> mtime <time>', not a digest. (4) Error ids differ: test_core.m:11421, 11423 and 11476 verifyError 'kpi6_fresh_marker:read', and core_bw_rules uses 'core_bw_rules:sha'. A shared helper with one id breaks these tests. The digests themselves would match.",
+    "live_chain_impact": "Editing ood_k2_rules.m before set 4's OOD reading would stop the K2 stage with rule_changed. Leave it alone.",
+    "required_proof": "Drop ood_k2_rules, m_head and eval_detector from the row. Keep each caller's error id through an id argument. Run test_core 11415-11480 and test_ood_k2."
+   },
+   {
+    "id": "9",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "The choose_drop_threshold side is equivalent: tk is never read after the parse lines (grep), and SV at :489-498 does not save it. The train_dqn side is not: the row touches train_dqn.m:1308-1315, which is under test_d107's whole-text off-view test and test_lb's parent_lines_missing (a8fd8f3). choose_drop_threshold has many source-text tests (test_d121, test_deg_mode, test_wf_dec). I did not prove each one is free of these lines.",
+    "live_chain_impact": "None unless applied; C1d.",
+    "required_proof": "Limit the row to choose_drop_threshold.m. Run test_d121, test_deg_mode, test_wf_dec and test_d107 (undo_small choose_drop_threshold), then the C1d smoke."
+   },
+   {
+    "id": "10",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "Many tests grep the literal `exist('SMOKE', 'var') && SMOKE` text: test_deg_mode.m:409, 431 and 434 (choose_drop_threshold, train_dqn, evaluate_policies), test_d107.m:439, 467, 571, 595, 698 and 716, test_lb.m:416 and 626, and test_core.m:11490, 11657 and 11787. test_core.m:11658 also cuts from `cfgc = []; if exist('CFG', 'var'), cfgc = CFG; end`. Replacing these with SM/CFGX breaks all of them.",
+    "live_chain_impact": "None unless applied.",
+    "required_proof": "Not worth it: readability only, against about 15 test rewrites."
+   },
+   {
+    "id": "11",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "The two blocks differ in more than the mask and the seed. The first (evaluate_policies.m:388-401) calls boot_cluster unconditionally and builds RECsh and the rep lines inside the loop. The second (:419-433) calls boot_cluster only under `if any(mr)` and fills NH and NHsev. A shared function must keep both behaviours on empty masks. evaluate_policies.m is also under whole-text and parent-line tests (test_d107 762, test_lb 674, test_core 11507) and the check_inserts anchors of test_speed_envelope.m:502.",
+    "live_chain_impact": "None unless applied.",
+    "required_proof": "Rewrite the tests. Compare PT, PTsev, PTci, PTh, PThsev, PThci, NH, NHsev, ENV, PTenv and PTenvh old vs new with isequaln, including a threat with no harmed episodes."
+   },
+   {
+    "id": "12",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "decision_config takes no input and reads no file, and feature_index already has a persistent. No test reads either source. But the saving is not measured. The rule_based_policy part (check_burst at :68) moves validation of a registered rule's input to the callers, which changes where an invalid burst_action errors. test_core.m:9975 and test_wf_dec.m:133 compare rule_based_policy with parent commits.",
+    "live_chain_impact": "None unless applied. Profile first, after 21.11.",
+    "required_proof": "Profile one rollout_policy batch and 10 dqn_train_run iterations first. If decision_config or feature_index shows at least 1%: isequaln of whole-chain smoke outputs, plus test_wf_dec and the test_core rule parity tests."
+   },
+   {
+    "id": "13",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "test_d107.m:848 requires link_env.m to be TEXT-identical to base_with_pb(tc, 'code/decision/link_env.m'). Removing any guard breaks it. The benefit is 1-2 isfield calls per step.",
+    "live_chain_impact": "None unless applied.",
+    "required_proof": "Not worth it."
+   },
+   {
+    "id": "14",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "Only comment lines change, but comments are inside text contracts. train_dqn.m, evaluate_policies.m, policy_monitor.m and policy_decide.m are under test_d107's whole-text tests and test_lb's parent_lines_missing, which lists exact comment lines (test_lb.m:700-722 for policy_monitor and policy_decide). Removing tags from parent comment lines breaks those tests. The (b) header rewrite of train_dqn lines 58-72 and 91-114 lies partly outside the test_d107 hd0..hd1 cut. m_head.m hashes its own source as provenance (m_head.m:55). dev_fec_burst.m is read by test_core.m:1986 and 3847. Part (d) (main.m:128-131 timing comments) is safe on its own: the test_core main greps (5687, 6348, 6653, 6766, 8239, 10839) do not touch those comments.",
+    "live_chain_impact": "None unless applied.",
+    "required_proof": "Split the row: (d) alone is safe; files under no source-text test may go one at a time. Every other file needs its test expectations rewritten in the same commit."
+   },
+   {
+    "id": "15",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "test_speed_envelope.m:543-551 (test_wiring_train_dqn, check_inserts) requires the consecutive code lines `fid = fopen('results/dqn_training.txt', 'a');` and `fprintf('\\n%s\\n', bt_lines{:});` in train_dqn.m. train_dqn.m is also under the test_d107 off-view whole-text test and test_lb's parent_lines_missing.",
+    "live_chain_impact": "None unless applied.",
+    "required_proof": "Not worth it."
+   },
+   {
+    "id": "16",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "test_core.m:3628 requires the literal `MODEL_TAG = 'v7-D89';` in build_policy_pools.m, and :3632 the TAG line. Moving the tag into model_tag.m breaks the test. Caching p0 in X changes the semantics of the params_id guards (experiment_core_bw.m:347, 465, 646), which re-read params.mat on disk at the moment of the assertion. Also, experiment_core_bw's TAG ignores the jsi '+rev' suffix (build_policy_pools.m:127). That is harmless for profile 3 (fec_rx d78) but should not be frozen into a shared helper unchecked.",
+    "live_chain_impact": "None unless applied.",
+    "required_proof": "Rewrite test_core 3628, keep the on-disk params.mat reads in the guards, and run the CORE_BW smoke."
+   },
+   {
+    "id": "17",
+    "kind": "cleanup",
+    "verdict": "wrong",
+    "reason": "The conclusion (do not do) stands, but the stated fact is false: profile 3's profile.json sets \"s1g_select\":true and \"s1gc_select\":true. So s1g_step runs twice in profile 3's C2 (train_dqn.m:351 and :362), and the re-flown evaluations cost more than estimated for this profile.",
+    "live_chain_impact": "None (no change proposed).",
+    "required_proof": "Correct the text only."
+   },
+   {
+    "id": "N1",
+    "kind": "numeric_change",
+    "verdict": "unsafe",
+    "reason": "The count of 9 predict calls per step is right (dqn_train_run.m:34, then 4 updates x (57, 59)). But the online net changes after every adamupdate, so dense matrices would be re-extracted each update, a cost the 12% estimate ignores. Matrix products need not match predict bit for bit, so every agent and verdict moves: a registered decision and a fresh C2 are needed.",
+    "live_chain_impact": "Must not touch profile 3's running C2.",
+    "required_proof": "A new D-entry, a micro-benchmark including the extraction cost, and a full fresh C2 with validation-only selection."
+   },
+   {
+    "id": "N2",
+    "kind": "numeric_change",
+    "verdict": "unsafe",
+    "reason": "The thread-count dependence of sums is noted in run_cache.m:15-16. parfor workers run single-threaded and need copies of PP (14 GB pools; past bug 11 memory overcommit). It competes with parallel_turn and the second chain.",
+    "live_chain_impact": "Must not touch the running chain.",
+    "required_proof": "A registered decision, a RAM budget, and an old/new comparison at a fixed thread count."
+   },
+   {
+    "id": "N3",
+    "kind": "numeric_change",
+    "verdict": "uncertain",
+    "reason": "C2g and C2u write disjoint files: results/combo_generalization.*, and results/unknown_threat_policy.* plus data/unknown_threat_agents.mat. Both only read data/policy_pools.mat and data/trained_dqn.mat. The open questions are RAM (2 x 14 GB plus the other chain; past bugs 11 and 15), launcher markers (the dependencies read '##### STAGE ... done' lines; past bug 12), and the diary/log naming of two run_stage processes.",
+    "live_chain_impact": "An orchestration change to the launcher: never mid-chain.",
+    "required_proof": "Free-RAM check against both chains' stages, plus launcher marker logic reviewed for two concurrent stages."
+   },
+   {
+    "id": "DEFECT-1",
+    "kind": "defect",
+    "verdict": "real_defect",
+    "reason": "Confirmed: run_stage.m:68-128 run_one never defines CFG and the run scripts set no CFG, so every `exist('CFG','var')` is false under run_stage. main.m:90-96 equals the built-in defaults (train_dqn.m:150-159, decision_config.m:14-16), so nothing differs today. The audit missed a consequence that undercuts its own proof method: harness G (`run_stage('smoke', ...)` with `CFG.smoke_all_entities = true`) cannot work. experiment_combo_generalization.m:40 and experiment_unknown_threat.m:43 read CFG, so under run_stage the smoke silently runs only the first entity.",
+    "live_chain_impact": "No impact on profile 3: its switches come from profile.json (wf_options, lb_options, run_cache, speed_options, fa_nothreat_on), which run_one does not block. Before C2, check that results/dqn_training.txt shows the 4 monitors x drop_steps [-2 0 2] x penalties [80 120 160] x 3 seeds grid and the profile.json switches (s1g, s1gc, relm, lb, fa_nothreat, clt, dconf).",
+    "required_proof": "Any harness must pass CFG through run_one, or run the scripts in a function workspace that defines CFG, as test_core's run(name) helper does."
+   },
+   {
+    "id": "DEFECT-2",
+    "kind": "defect",
+    "verdict": "not_defect",
+    "reason": "A latent inconsistency, not a defect. Every n = 0 path of the 1-at-0 variant is guarded: aprime_admit.m:120 (n < 1 gives NaN), lb_adopt.m:40 (n > 0), nb_pick.m:17 (NaN fa_w), and train_dqn.m:585/1091/1101, where round(NaN*0) = NaN gives NaN. evaluate_policies.m:998 can give upper = 1 at n = sum(above) = 0, which is the conservative direction (KPI 6 not met). The train_dqn.m:585 comment says '(NaN without clean geometries)', which holds only through the NaN of fa.",
+    "live_chain_impact": "C2e: only if no Eb/N0 lies above the KPI 1 threshold. The logs show 0 dB on the test split and on the second and fourth sets, so n > 0. Before C2e, check that 'FAR ... / n' lines with n > 0 appear in results/policy_evaluation.txt.",
+    "required_proof": "None now; keep both forms if the helpers are ever merged."
+   }
+  ],
+  "missed": [
+   "Whole-text contracts the audit missed: test_d107.m:420-445 (train_dqn.m equals df5cb30 after fixed cuts), test_d107.m:762-773 (evaluate_policies, experiment_combo_generalization, experiment_unknown_threat and measure_all_kpis equal base_with_pb), test_d107.m:848 (link_env.m text-identical). Any edit outside the cuts fails them.",
+   "Parent-line contracts the audit missed: test_lb.m:665-743 (parent_lines_missing over train_dqn, evaluate_policies, policy_monitor, decision_settings, policy_decide, policy_stamp and both experiments, with exact lists of missing lines) and test_core.m:11507-11520 (evaluate_policies against 316230d). Deleting any parent line, comments included, fails them.",
+   "test_d107.m:874-877 requires ternary, cp_upper and ten other helpers to be defined in train_dqn.m exactly once. test_d107.m:881-888 requires the cp_upper text of aprime_admit.m and train_dqn.m to be equal.",
+   "test_speed_envelope.m check_inserts anchors (build_policy_pools 494, evaluate_policies 502, train_dqn 543, measure_all_kpis 566) require specific consecutive code lines, including the dqn_training.txt fopen/fprintf pair that row 15 would fold.",
+   "Harness G is unusable as written: CFG never reaches run_stage scripts, so smoke_all_entities has no effect and C2g/C2u are compared on one entity only.",
+   "Profile 3's profile.json sets s1g_select and s1gc_select true (row 17 says otherwise). run_cache is not set, so profile 3 has no cached C2/C2g/C2u runs to invalidate; the code-hash contract matters only where run_cache is on.",
+   "m_head.m hashes its own source and four detection files as D110 provenance (m_head.m:53-55). It is not a plain duplicate, and editing it changes the recorded identity.",
+   "train_dqn.m and evaluate_policies.m read results/eval_detector_metrics.mat for the KPI 1 threshold without kpi1_threshold_check; only C1d and EDGE check it against kpi1_file (fresh3 for profile 3). The check in C1d covers C2 and C2e only when C1d runs in the same chain. The logs show 0 dB on the test split and on the second and fourth sets, so there is no live mismatch now."
+  ]
+ },
+ {
+  "label": null,
+  "area": "code/detection + code/link (audit_detection_link.md), checked against C:\\Users\\Adi Suliman\\uav-gcs-v7-p3\\code (v7-p3; profile 3 has just run B3r on 5.11, C1p/C1c/C1d/C2/SURV/SURV3/EDGE/KPI still ahead)",
+  "verdicts": [
+   {
+    "id": "P1",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "The cache key the audit proposes is (ctx.seed, frame, component index, and a hash of n_rx, wobble_arm_m, ant_spacing_wl, int_los_doppler, tdl_*). The cached D0/Dm/h/pc depend on more than that. In idle_rssi.m:110-147 they also read ctx.fd, ctx.aoa(c), ctx.kfac(2), ctx.rho (Rc), ctx.att, ctx.yaw, ctx.tdl and p.carrier_freq/p.c_light (lk), plus p.cycle_s, samples_per_frame, symbol_rate, sps, idle_rssi_hz (tq). The fI/pI draw order (lines 66-83) depends on the threat's component list, antenna_fault, benign_occ and chain_amp/phase. ctx comes from link_seed per geometry, and pool_cell geometries carry per-run alt/ksig/aoa1/rho overrides (pool_cell.m:62-64; build_policy_pools.m:246-283). One seed flown with different overrides or speed would get the same key and reuse the wrong channel, silently. The audit also misses that idle_rssi has a second production caller, emitter_idle.m:50 (frames v, ambient). extract_closed_loop_frames(out,p,delay_bits) has no opt argument, so the plumbing changes a signature with about 20 callers (pool_cell, detector_block, run_dataset_sweep, measure_latency, validate_phy V13, threat_gallery, demo_gui, core_bw_job, tests). Any edit also invalidates run_cache (C2/C2g/C2u). The test_core.m:4775 anchor is correctly named.",
+    "required_proof": "Use the full ctx minus lev/cap/cal/gate as the key (isequal on ctx fields), plus every p field the cached block reads and the threat string. Then isequal every pool field cache-off vs cache-on on a cell whose geometries reuse a seed with different overrides, and on an emitter_idle path. Apply only after profile 3's KPI stage.",
+    "live_chain_impact": "None if it waits until after 21.11. Applied earlier it would touch the C1p/C1c/SURV hot path that workers read live (#13)."
+   },
+   {
+    "id": "P2",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "The cases are independent: each sets p.seed, the Simulink blocks reseed on first call (build_threat_model.m:510,773), link_seed runs per realization (n_real=20), and V13 uses its own rs stream. No global rand is used in validate_phy. What the audit did not check: test_core.m:2523-2527 (test_params_written_by_init_only) requires the literal evalc('build_threat_model(p)') in validate_phy. V11 reads BER(c,:) from the case loop, so it must run after the case parfor. A4v is a gate, and its report is parsed by measure_all_kpis (KPI 3) and by result_status (params_id token). It uses 6 workers, each building the model, so there is memory contention (#11/#15) and it needs pool_worker_init CacheFolder isolation (#10). Bit-identity of codegen MATLAB Function RNG state across worker processes vs one session is plausible but not shown.",
+    "required_proof": "Run serial vs parfor on a case subset and V12c rows: isequal on BER/NERR/BR/DLY, plus a diff of results/phy_validation*.txt minus the time lines. Keep evalc('build_threat_model(p)') verbatim. Launch only via parallel_turn with a RAM check.",
+    "live_chain_impact": "None. A4v already ran for profile 3. This applies to later profiles only."
+   },
+   {
+    "id": "P3",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "build(p) with p.seed=[] draws randi(2^26-1) from the global stream (build_threat_model.m:216-217), interleaved with the rand() speeds and the hides_antenna re-draw loop (run_dataset_sweep.m:157-205). A serial plan has to reproduce those draws without building, which duplicates build_threat_model's internal draw logic. Workers must still build the model for every cell they touch, which repeats builds across cells unless the parfor runs within each cell; the audit leaves this unspecified. About 12 source-text tests pin this file's exact text and order: test_core 1854 (SEED0 tokens), 2504, 2689, 4379 'while shd && ~hides_antenna\\(', 4610, 4639 'FOLD\\(nk \\+ lv - 1\\)', 4851 (string order of the p = p0 lines), 5205/5247 (rng counts and segments), 7620, 7648 (MEAS/D struct layout), 7657, and 2523-2527 (evalc('build_threat_model(p)') literal, which the audit missed). The report_row/tried prints and D append order must be kept. Per-run helpers do use private streams only (flight_draws seed_stream, emitter_idle 'amb'), which is a point in its favour.",
+    "required_proof": "SMOKE serial vs parallel: isequal on every dataset field including speed, run, seed and fold, and on stdout rows. Every test listed above must pass unchanged. Assert the global stream state after the plan equals the old loop's state.",
+    "live_chain_impact": "None now. B3r (the last A5-type run for profile 3) is done. Later profiles only."
+   },
+   {
+    "id": "P4",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "No rand is executed at build time, so the RNG claim holds. Lines 1555-2003 are pure literals inside rx_script's cell c, joined by sprintf('%s\\n', c{:}) (line 2005). Three gaps in the plan. (1) core.autocrlf=true and the files are CRLF on disk, so fileread of a new rx_block_helpers.m returns \\r\\n and changes the generated Rx script unless CRs are stripped. Literal '' quote escapes must also be un-doubled. (2) Functions moved to link/private/ cannot be reached by which() from code/tests, so test_core.m:4773 (threat_script text) and :7468 ('if fo2 > fo1', threat_script line ~765) must be repointed by full path, not just which. (3) Several tests read the generated chart scripts (test_core 2334, 3216-3217, 3901-3902; dev_rx_script regexprep), which string equality covers only if the comparison is done on the exact Script property. Header cut (c) is safe text-wise. run_cache is invalidated.",
+    "required_proof": "isequal of the four generated scripts (and the chart.Script read back) old vs new over the audit's p grid, with CR stripping verified. Repointed 4773/7468 tests. Only after 21.11.",
+    "live_chain_impact": "build_threat_model runs in every C1p/C1c/SURV/EDGE cell. Editing it under a running stage is past bug #13. Wait until after 21.11."
+   },
+   {
+    "id": "P5",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "compare_architectures.m:138 Zv = fuse_classes('windows', sp.val, Pv, FZ.N, cues) has exactly the inputs of fused_oof's Z (line 208: va=sp.val, P=Pv, N=FZ.N, cues). fuse_classes/window_cues/temporal_evidence hold no rand, persistent or global. fused_oof has one caller (line 137). Two text anchors survive: test_core.m:7975 greps fuse_classes(''windows'', va, P, N, cues) (stays in fused_oof), and test_head.m:198, which the audit missed, greps 'fused_oof(sp.val, Pv, FZ.N, FZ.lambda, tv, fold, cls_names, tf, cues, FZ.FM);'. That substring survives if only the left-hand side gains a third output. test_head.m:197 (FMv line) is untouched, and the Zt computation stays. The only cost is run_cache invalidation.",
+    "required_proof": "isequal(Zv_old, Zv_new) on one call. Run test_core and test_head, after 21.11.",
+    "live_chain_impact": "None. B3a for profile 3 is past."
+   },
+   {
+    "id": "P6",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "RUN.validate_A and RUN.check_A4 are false (main.m:101-102). build_link_model and build_rician_model have no other caller, and no shell script names them. test_core.m:6766 (every run_stage target must appear in main) is not affected. However, quick_ber is also called by diagnostics/validate_new_threats.m:22, so moving it to legacy/ outside setup_paths breaks that diagnostic. The audit's 'no other reader' statement contradicts its own file list. Removing the blocks also leaves main.m:72 (preset comment naming validate_A/check_A4) stale and main.m:162-163 (p load and berTheory) dead. Deleting files changes the run_cache hash.",
+    "required_proof": "git grep for quick_ber/validate_A/check_A4/build_link_model/build_rician_model after the edit returns nothing in a live path. Decide on validate_new_threats.m (move it too or keep quick_ber). Update main.m:72. Run the test_core main-text tests.",
+    "live_chain_impact": "None. The flags are off and the chain uses run_stage."
+   },
+   {
+    "id": "P7",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "Bodies verified identical: ternary in every listed detection/link file; integer macro_f1 in select_fusion, train_hybrid_net and train_spec_net; k_moment x2; sign0 x3; load_norm x2 (comment and %#ok only). The listed non-identical ones (ood_fold_metrics lowq, eval_unseen_snr string macro_f1) are correctly kept apart. No ternary.m, sign0.m, k_moment.m or gui_norm.m exists on the path today. Risks the audit missed: (a) The 'what' column lists the frozen ood_k2_rules.m:277 and ood_k2_run.m:357/348 among the copies. They must stay, which also leaves lowq in ood_thresholds.m as the only remaining copy, so lowq has nothing to share. (b) '29 copies repo-wide': train_dqn.m's ternary is cut out by test_d107, so it must never be included. (c) Editing window_cues.m (k_moment) changes the 'cues' SHA that dev/m_head.m:53-62 records for the D110 measurement (printed, not asserted). (d) select_fusion, eval_detector and eval_unseen_snr are also read by test_head.m (443-502, 604, 685, 757), not only test_core. (e) run_cache invalidation.",
+    "required_proof": "Unit test per shared helper. isequal of fuse_classes('windows', ...) on a stored split. test_core, test_head and test_d107 green. Frozen files and train_dqn untouched. After 21.11.",
+    "live_chain_impact": "sign0 sits in extract_closed_loop_frames (C1p path) and k_moment in window_cues (fusion columns, read live). Applying before 21.11 is #13."
+   },
+   {
+    "id": "P8",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "link_seed has no source-text test. set_link_snr touches only the Level gain, and nothing outside build writes block UserData, so a per-build block_params cache is feasible. Gaps: build_threat_model already calls link_seed at its end (line 391), so the one-time RandomStream/SeedSource set exists today through that call. The cache must be invalidated on every rebuild of the same model name, which pool_cell does per twin configuration, and validate_phy, run_dataset_sweep and demo_gui all rebuild repeatedly. A persistent cache in a function that workers read live adds a staleness failure mode. The saving (1-1.5 h) and the effect on the per-run recompile were not measured. The change touches build_threat_model, so the test anchors and #13 apply.",
+    "required_proof": "isequal of sim outputs and of get_param on every seed and dialog field for two seeds, across a rebuild between calls, old vs new. Time it to confirm the saving.",
+    "live_chain_impact": "link_seed runs in every C1p/C1c/SURV run. Wait until after 21.11."
+   },
+   {
+    "id": "P9",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "This is not behaviour-preserving. It is a defect fix that turns silent fallbacks into errors, so per the rules it belongs under DEFECTS. Healthy-path values are equal. Thr_act, Thr_comp and Cal_db are always logged (build_threat_model.m:262-266), and Thr_sig only when own_output(p). The gp>0 path also catches get_param([...'/Level']) failing when the model is not loaded (measure_latency, GUI and dev callers pass stored out objects). There, a who-test alone would turn today's chip_field fallback into an error. Tests feeding fake out objects (test_core 2107, 3271) may not implement .who. A new hard error in a long C1p run stops the chain.",
+    "required_proof": "Run every extract caller's test (test_core 1093-3438 block, measure_latency smoke, demo_gui check) plus the negative tests the audit proposes. Keep the Level get_param fallback explicit.",
+    "live_chain_impact": "Ahead in C1p/C1c/SURV/EDGE/LAT. Not before 21.11."
+   },
+   {
+    "id": "P10",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "git grep -w cvec finds only the definition at build_threat_model.m:2157. Generated scripts use cvec2 (lines 828-831). There is no feval or str2func of 'cvec'. It is a local function, so nothing outside can call it. The only side effect is the run_cache code hash.",
+    "required_proof": "git grep -w cvec empty after the edit. Run test_core link tests.",
+    "live_chain_impact": "build_threat_model is read live by C1p workers. Edit only after 21.11 (#13)."
+   },
+   {
+    "id": "P11",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "No change is proposed. The audit correctly notes the 10+13 test_core text tests. It omits the test_head readers of eval_detector and select_fusion (443-502, 685, 757), which only strengthens 'leave'.",
+    "required_proof": "none",
+    "live_chain_impact": "none"
+   },
+   {
+    "id": "P12",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "spec_image has no state or rand, so it is pure. But the loop indexes ds.iq{i} through a struct field. In a parfor that is not a sliced variable, so the whole dataset struct (multi-GB) is broadcast to every worker: past bug #11 (memory overcommit). The fix needs iq = ds.iq; clear ds.iq before the parfor. imresize in single-threaded workers vs a multithreaded client must be shown bit-identical. extract_spectrograms has 8 text anchors (test_core 2507, 2690, 4613, 5198, 5213, 5261, 7658, 7877) that must stay. The 'compare_architectures spectrogram inference' half has no file:line.",
+    "required_proof": "isequal(X_old, X_new) on all frames of one dataset, with peak RAM measured. Text tests green.",
+    "live_chain_impact": "None. A6 and B3n/B3m/B3q are past for profile 3."
+   },
+   {
+    "id": "P13",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "Three breakages the audit missed. (1) fusion_adopt.m (listed lines 18, 29) is SHA-frozen: dev/m_head.m:37,63 asserts RULE_SHA of fusion_adopt.m, and test_head.m:637-638 verifies RULE_SHA equals the file's LF SHA. A comment edit fails both. (2) init_params.m comment pruning ('move citations to docs') breaks test_core.m:4971-4973, which needs 'severely degraded antenna connection' and 'Simunek et al. 2011' (init_params.m:146,155). (3) The 'what' column lists detection/k2_1_screen.m:1-30, which is D111 SHA-frozen (and read by test_ood_k2.m:619). The 'why safe' column forbids exactly that. Also: fusion_pick.m:18 must keep the exact EXT = ''; form (test_head.m:467-468 regex and pick_fixture). Many 'd91' words are design names that the printed strings still use (eval_detector.m:151-152, 596-600), so removing them makes comments disagree with output. window_cues edits change the SHA m_head records. run_cache is invalidated.",
+    "required_proof": "Exclude fusion_adopt.m, k2_1_screen.m and the seven D111 files. Keep the init_params phrases tested at 4971. Run test_core, test_head, test_ood_k2 and test_d121 green. git diff -w shows comment lines only.",
+    "live_chain_impact": "None if after 21.11. A fusion_adopt edit would also block any future m_head re-run."
+   },
+   {
+    "id": "P14",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "No change is proposed. The warning is correct: build_threat_model.m:216-217 draws from the global stream when p.seed is empty, interleaved with the rand() speeds in eval_unseen_snr, eval_unseen_severity and run_dataset_sweep.",
+    "required_proof": "none",
+    "live_chain_impact": "none"
+   },
+   {
+    "id": "D1",
+    "kind": "defect",
+    "verdict": "real_defect",
+    "reason": "The formula mismatch is confirmed: init_params.m:325 divides by (n_rx-1), antenna_defaults (build_threat_model.m:2204) by max(n_rx-1,1). Only the built model gets the recomputed spacing. The callers' p keeps the old value, and idle_rssi.m:128 and emitter_idle.m:96 read it. The audit's premise 'in production p always comes from init_params' is wrong. SURV3 overrides n_rx without recomputing the spacing: experiment_survivability_options.m:99,108,122 and pool_job.m:61 (nAlt = nSys-1, so 3 antennas on profile 3's 4-antenna system). There pool_cell passes p2 with the 4-antenna spacing into extract_closed_loop_frames, and the idle record (F.idle, act_idle) of the alternative variant uses the wrong array spacing. flight_draws reads the spacing from the model's UserData via link_seed, so the flight draws stay consistent. surv3_shadow_flights' hides_antenna loop passes a stale p to flight_draws, but only d.align uses the spacing there.",
+    "required_proof": "grep confirms surv3_metrics.m, surv3_judge.m and surv3_clean.m read no idle, gant or act_idle field (checked: none). SURV3 runs with det = [], so no detector reads the idle record. The fix is one spacing helper called by init_params, antenna_defaults and every n_rx override.",
+    "live_chain_impact": "It does reach profile 3's chain: the SURV3 stage builds pools with the wrong spacing in the idle fields of the nAlt variant. Its verdicts use BER/FER only, so no registered number changes. Before SURV3, confirm that no SURV3 output or report reads the idle or act fields, and that GCSA/EDGE do not override n_rx (grep: none)."
+   },
+   {
+    "id": "D2",
+    "kind": "defect",
+    "verdict": "real_defect",
+    "reason": "Confirmed at extract_closed_loop_frames.m:250-254. A short Thr_act is padded with its last value, and any error leaves F.act = ones, with no message. The same silent pattern holds for Thr_comp (257-265: act_comp = [act; nan], lev_db NaN, ion = []) and Cal_db (163-168). Thr_act, Thr_comp and Cal_db are always logged by build_threat_model.m:262-266, so with the current model it is latent. If triggered, the threat labels (threat_active) and the pool act/act_comp fields would be wrong in every frame.",
+    "required_proof": "A negative unit test with a fake out lacking Thr_act or with a short Thr_act must error or warn. Until then, a data check.",
+    "live_chain_impact": "Latent for C1p/C1c/SURV/SURV3/EDGE pools. Before C1p (next), check that the smoke C2/EDGE pass. In the first finished C1p cells of a gated threat (sweeping_jammer, benign_interference, path_loss), check that act is not identically 1 and act_comp(2:3) is not all NaN where the threat is combined."
+   }
+  ],
+  "missed": [
+   "run_cache hashes every code/**/*.m (decision/run_cache.m:50). The audit never mentions it, but every proposal, a comment-only edit or a file move included, invalidates the cached C2/C2g/C2u runs.",
+   "The source-text test inventory counts test_core only. Missed readers: test_head.m:195-198 (compare_architectures, incl. the fused_oof call P5 edits), 443-502/685/757 (eval_detector, select_fusion), 604 (eval_unseen_snr), 386 (fusion_cand), 467-550 (fusion_pick EXT regex); test_d121.m:341 (cfo_joint); test_ood_k2.m:619 (k2_1_screen) and 671 (eval_ood_detection).",
+   "fusion_adopt.m is SHA-frozen by dev/m_head.m:37,63 (RULE_SHA assert) and tests/test_head.m:637-638. P13 proposes editing its comments (lines 18, 29).",
+   "test_core.m:4971-4973 greps init_params.m for 'severely degraded antenna connection' and 'Simunek et al. 2011' (comment lines 146, 155). P13's 'move citations to docs' breaks it.",
+   "test_core.m:2523-2527 (test_params_written_by_init_only) requires the literal evalc('build_threat_model(p)') in validate_phy.m and run_dataset_sweep.m, and no save('params.mat'. Not considered for P2/P3.",
+   "D1's premise is false: experiment_survivability_options.m:99,108,122 and decision/pool_job.m:61 (SURV3) override p.n_rx without recomputing ant_spacing_wl, so the stale spacing reaches idle_rssi in profile 3's SURV3 (nAlt variant).",
+   "core.autocrlf=true and the .m files are CRLF on disk. P4(b) fileread of a helper .m would put \\r into the generated Rx script unless stripped. Also link/private functions are not reachable by which() from tests, so repointing tests 4773/7468 needs full paths.",
+   "P1: emitter_idle.m:50 is a second production caller of idle_rssi; extract_closed_loop_frames has no opt argument (about 20 callers); the cache key misses ctx.fd/aoa/kfac/rho/att/yaw/tdl, p.carrier_freq and the threat composition.",
+   "P6: quick_ber is still called by diagnostics/validate_new_threats.m:22. That diagnostic also writes params.mat (save('params.mat','params') at line ~19), a hazard of its own if anyone runs it in a chain worktree. main.m:72 and 162-163 become stale or dead.",
+   "P12: parfor over ds.iq{i} broadcasts the whole dataset struct to every worker (past bug #11), not sliced.",
+   "P13 lists the SHA-frozen k2_1_screen.m:1-30 in its 'what' column. P7 lists the frozen ood_k2_rules/ood_k2_run copies among those to share.",
+   "dev/m_head.m:53-62 records SHA-256 of window_cues.m, fuse_classes.m, fusion_cand.m and fuse_head.m for the D110 measurement. P7 (k_moment in window_cues) and P13 break that record's match with the code.",
+   "P7's 'repo-wide' scope must exclude train_dqn.m's ternary, which test_d107 cuts out of the source text."
+  ]
+ },
+ {
+  "label": null,
+  "area": "code/evaluation, code/gui, code/diagnostics (audit_eval_gui.md)",
+  "verdicts": [
+   {
+    "id": "E1",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "The copies are real: 29 functions named ternary, all with the same body, plus ternaryTxt/ternaryStr in demo_gui. The count is 8 in detection/, not 7. The '-150 lines' is too high: about 4 lines per copy, so about 105 once the copies that cannot go are excluded. 'Safe' and 'full suite' are wrong. (1) test_d107.m:877 requires exactly one 'function ... ternary(' in train_dqn.m. (2) test_d107.m:963 and :1116 cut 'function out = ternary(c, a, b)' out of train_dqn.m with between_text, so removing it breaks them. (3) test_d107.m:420-440 (test_train_dqn_off_view_is_the_parent) compares train_dqn.m text with the parent commit, so any edit there breaks it. (4) ood_k2_run.m:357 and ood_k2_rules.m:277 are SHA-frozen D111 files and cannot be edited. (5) The proposed 'no remaining copy' grep test contradicts (1). Tests that write their own ternary.m (test_lb:798) are not a problem. code/ is on the path, so a root ternary.m resolves and local copies shadow it until deleted.",
+    "live_chain_impact": "Nothing now. After merge, adding ternary.m and deleting local copies changes the run_cache code hash (every code/**/*.m except tests/legacy), so cached C2/C2g/C2u runs (C2 was 2359 min) are not reused.",
+    "required_proof": "Carve out train_dqn.m, ood_k2_run.m and ood_k2_rules.m, or update test_d107 (877, 963, 1116, 420-440) first. Then run the full suite. Run the parent-commit tests that load an old rule_based_policy/evaluate_policies/boot_cluster beside the new code. Compare kpi_summary/edge_map output on fixed inputs."
+   },
+   {
+    "id": "E2",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "Verified. file_time is identical at measure_all_kpis.m:654 and result_status.m:109. edge_km (:838) equals edge_txt (edge_map.m:1730). measure_all_kpis vsym ('NUC'(v+2)) equals edge_map vsym_nan for v in -1..1 and NaN. No test mentions these helpers by name. evaluation/private/ is visible to scripts and functions in evaluation/. The fopen/fprintf/fclose pattern is real (about 30 copies repo-wide). The 'same-named but different' warning is accurate. Benefit is small: a few dozen lines.",
+    "live_chain_impact": "None now. After merge, new private/ files change the run_cache code hash.",
+    "required_proof": "Diff results/kpi_summary.txt and edge_map.txt before and after on the same inputs, and run the full suite. The audit's proof is adequate."
+   },
+   {
+    "id": "E3",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "Facts verified: analyze_weak_points.m:92 loads the whole PP from policy_pools.mat (14,017,612,578 bytes), and only PP.scen, sev_names, sev, ebno and cov are used (lines 102-106, 187). That is five fields, but the summary says six. WEAK took 3.3 min in p1.log. Which part of that is the load is unmeasured; the detector section's bootstraps over 83,664 units are also in it. The datenum cache pattern matches demo_gui loadNormStats. Benefit is overstated for the chain: WEAK runs once per chain, so a cache built inside WEAK saves nothing on that run. It only helps reruns, or if the pool builder or C1c writes the small cache. It does remove the 14 GB RAM peak on reruns.",
+    "live_chain_impact": "None now. It adds a new file in data/ and an edit under code/ (new run_cache hash). It is not an input of detector_id/params_id/fusion_rev_id.",
+    "required_proof": "Run WEAK with and without the cache and byte-compare weak_points.txt and .json. Add a test that a newer policy_pools.mat rebuilds the cache. Time line 92 with tic first."
+   },
+   {
+    "id": "E4",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "(a) Correct and bit-identical. pol_layers(...).prot is held_verdict(held_k(:,v), ep_n(:,v), geo, TGT.prot, hf, B), the same call commit_rows makes for X.nresp (edge_map.m:1543-1545). The vn at :886 equals commit_rows' vn (iNo, DLY(1), 'static'). X1 comes from static d==1 with rows 1:nT, with TGT. (b) Correct. lk and lk0 depend only on s (k0 rows). fa depends on (s,d). P0.linkt equals P.linkt because TGT0 differs from TGT only in link and held_flight, and linkt_floor is the same. edge_verdict is deterministic (seed 74). (c) Correct (randi(rs,nU,nU,B) is an nU-by-B matrix), and test_head:573 already pins boot_cluster against the parent bit-for-bit. Benefit is overstated. The whole check-point block is 5.2 min (177.5 to 182.7) and includes det_frames work. One bootstrap costs roughly 0.05-0.1 s. (a) saves seconds and (b) well under 1 min. A fair total is about 1 min of 190, not 3-5. The index cache in (c) is negligible. P and P0 also compute rec_h/prot_h/rec that are never read, which is a larger unmentioned saving. test_core:899 pins the Fb line 537 (not 709) and test_core:8823 pins the nresp line, so neither is hit. test_core:930-961 cuts pol_layers out of the source, so its header must stay.",
+    "live_chain_impact": "None now. After merge, edge_map.m or boot_cluster.m changes the run_cache hash.",
+    "required_proof": "Run edge_map in SMOKE mode before and after and isequaln EM and EDGE_NUM. Run test_core 772-941 and the pol_layers test at 930-961, plus test_head:573."
+   },
+   {
+    "id": "E5",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "det_frames and its callees (fuse_classes, onset_shape, threat_active, link_features, drop_cusum, decision_config, idle_summary, event_rows) contain no rand call, so the no-RNG claim holds, and integer count sums are order-exact. The 23 min is not attributable to this loop. 152.2 to 175.3 is the span between the C1c print (edge_map.m:304) and the 'Flights' print (:454). It also covers the episode accumulation loop (:348-367), the LINK loop (:402-411) and the clean-pool flight_cov/clean_pool_seed block (:419-447). 'Almost all this loop' is a guess, so the 15-20 min saving is unproven. 'test_core 6133, 6199, 2638, 8021 stay valid' is true but the audit missed test_core.m:6084. It pins the exact text 'det_frames(P, PP.pools{clean_cell, s, K.na, sp}, PP.scen{c}, ok_c, PP, PP.runs{sp}, ... K.ev{sp})' in edge_map.m, and a parfor restructure with sliced pools would break it. The OC struct array grows in loop order and FT.* are field accumulations, so both need restructuring. Memory and parallel_turn risk exists.",
+    "live_chain_impact": "None now. EDGE is the 190 min stage and edge_map.m changes the code hash.",
+    "required_proof": "Time the loop with tic per call. Then SMOKE-mode isequaln on EM/EDGE_NUM, with the test_core:6084 pin kept or updated."
+   },
+   {
+    "id": "E6",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "Section ranges are right (report 941-1380, figures 1381-1408, save 1409-1471, local functions from 1472), and 17 tests read the edge_map source (the listed lines match exactly). Correction: edge_map.m has 44 local functions, not 40. A script called from a script does share the workspace. But local functions of edge_map.m are not visible to the moved scripts, so every helper the sections call must move to private/. The audit does say that. Splitting 44 helpers into private/ files also changes name resolution for other evaluation/*.m that call same-named path functions. test_core:930-961 cuts 'function P = pol_layers(' out of the source and needs the concatenating helper to give the same boundaries. Benefit is readability only.",
+    "live_chain_impact": "None now. After merge, many new files change the code hash.",
+    "required_proof": "Do E14 first. Then SMOKE-mode byte-compare of edge_map.txt, edge_summary.txt and edge_map.mat. Run the 17 source-reading tests on both layouts."
+   },
+   {
+    "id": "E7",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "Facts check out: demo_gui.m is 2720 lines with 107 local functions, header lines 42-46 say no nested functions, and the function ranges match the listed groups. The five source-pinning tests are real (test_core:145-152, 6790, 7918-7919, 7952-7957). Moving functions to gui/private/ works for function handles created in demo_gui.m. export_gui_bundle copies only data and results, so private/ code does not break bundles. There is no automated GUI test, so a capture run is the only proof. The risk is higher than 'low-med' because of the pinned strings in runEpisode/epPools/epBuildPool and the loadInitialParams dynamic-workspace requirement (init_params injects params). That function is fine in private/ as a plain function file.",
+    "live_chain_impact": "None now. No chain stage uses demo_gui. After merge, new files change the code hash.",
+    "required_proof": "Do E14 first, then a GUI capture before and after on one scenario."
+   },
+   {
+    "id": "E8",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "runOneRun is 1088-1364 (277 lines). The lead-in (1139-1148) and run (1181-1187) frame-input blocks are similar but not identical: they use pl versus p and FL versus F, and the lead-in guards FL.bch with isfield (leadC) while the run uses F.bch unconditionally. The obs structs (1191, 1202) have the same fields. A helper must keep those differences. restoreParams (857) is a one-line wrapper. scenarioParams' third output fd_hz is unused: both callers (1099, 2037) take two outputs, and the formula at :1096 equals console_scenario's line 14. Readability only.",
+    "live_chain_impact": "None. GUI only; code hash changes after merge.",
+    "required_proof": "GUI capture before and after, plus test_core:145-152."
+   },
+   {
+    "id": "E9",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "NWP is indeed dead in map_survivability_boundary.m (only lines 108 and 110, no parfor in the file). But line 108 is 'NWP = N_WORKERS; pl = [];' and pl is used at :153 (pool_lpt(..., pl)). Deleting 'the two lines' as worded removes pl = [], so the SMOKE path leaves pl undefined and errors. The edit must keep 'pl = [];' and drop only NWP (and the NWP = 0 in the SMOKE branch). Benefit is 2 lines.",
+    "live_chain_impact": "None now. SURV map script edit changes the code hash after merge.",
+    "required_proof": "test_core:1772 (runs the map script in SMOKE) would catch the pl error; run it, plus test_smoke."
+   },
+   {
+    "id": "E10",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "Verified. No caller of validate_new_threats, diagnose_antenna_fault_reward or diagnose_reactive_jamming in code/, tests/, logs/*.sh|*.ps1 or docs except one PROJECT_LOG.md:244 table line (also listed in an old test-log file listing). FIX (Sep 13) is at diagnose_reactive_jamming.m:11 and 'BEFORE touching' at validate_new_threats.m:2. diagnose_reactive_jamming.m:37 uses predict(net, X_spec, X_feat) directly. The remaining diag_* scripts are untouched; test_core:6138 references only diag_path_loss/false_alarms/failure_modes/never_acted/switching. Deleting files changes the run_cache hash.",
+    "live_chain_impact": "None now. After merge, the code hash changes (cached C2 runs not reused).",
+    "required_proof": "git grep for the three names (done: 0 callers), then full suite."
+   },
+   {
+    "id": "E11",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "The block (parallel_turn take, gcp/parpool, spmd pool_worker_init) is copied in 7 places: build_check_pools:189, build_clean_test_pools:91, build_policy_pools:382, experiment_core_bw:161 and :307, map_survivability_boundary:112, experiment_survivability_options:83. N_WORKERS = 6 is hard-coded in the two stage scripts (map :47, options :35) and in the pool builders too. The saving is closer to 45 lines than 60. The onCleanup must be held in the caller. The SMOKE path skips the pool, so only a real one-cell run exercises it, as the audit says. Touches the multi-day pool-building stages, so risk is not trivial.",
+    "live_chain_impact": "None now. It touches build_policy_pools (the 8692 min C1p stage), and the code hash changes after merge.",
+    "required_proof": "A real pooled one-cell run of SURV3 and of a pool builder, with the parallel_turn take/give pair checked."
+   },
+   {
+    "id": "E12",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "edge_map.m header runs from line 2 to about 119 and measure_all_kpis.m header is 60 lines. The decision tags in comments are real at measure_all_kpis.m:14, 189, 220, 235, 236, 238, 517, 748. edge_map.m has no tag in comments (its D99 at :962 is printed text). Net saving is about 120-130 lines, not 150. Source-pin tests match code and printed strings, not these comments. test_ood_k2:830 compares behaviour against the parent commit, so a comment edit is harmless. Comment edits still change the code hash.",
+    "live_chain_impact": "None now. Comment-only edits still invalidate run_cache keys.",
+    "required_proof": "Full suite and a before/after diff of kpi_summary.txt."
+   },
+   {
+    "id": "E14",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "The 17 edge_map source readers match exactly, and the 5 demo_gui and about 11 measure_all_kpis source readers are real. A src_of helper is sound for fileread-style pins. It does not cover test_d107's read_lf/between_text local-function cutting (e.g. :961-963, :1116) or the pol_layers cut at test_core:930-961, which need the same boundary handling.",
+    "live_chain_impact": "None. Tests are excluded from the run_cache hash.",
+    "required_proof": "Run the suite on both layouts; add a test that src_of equals fileread for unsplit files."
+   },
+   {
+    "id": "D1",
+    "kind": "defect",
+    "verdict": "real_defect",
+    "reason": "Confirmed. diag_path_loss.m:55 holds the two repmat statements inside the trailing comment (git blame: bddd1371, 12.10; the earlier version has them on their own line). reps is ignored, so each geometry is flown once. Impact is limited to this hand-run diagnostic; DECISIONS:525 numbers date from 29.09, before bddd137.",
+    "live_chain_impact": "None. diag_path_loss is not a chain stage.",
+    "required_proof": "Put the statements on separate lines and compare n against nS*nG*REPS."
+   },
+   {
+    "id": "D2",
+    "kind": "defect",
+    "verdict": "real_defect",
+    "reason": "Confirmed from the code: result_status.m:30-33 catches and ignores any error, cur_det stays '', and id_check returns {} when cur is empty (:99), so the identity guard for latency.mat and edge_map.mat is silently off. Trigger likelihood is low: fusion_model returns defaults without the file and throws only on a fusion.mat missing FM/N or a malformed ood. The age checks still run. The consequence stated for KPI 7 (latency.mat) is plausible. export_gui_bundle also relies on result_status.",
+    "live_chain_impact": "Latent; nothing wrong now unless fusion.mat or trained_detector.mat is malformed.",
+    "required_proof": "A test with a malformed fusion.mat expecting the files flagged stale with a reason."
+   },
+   {
+    "id": "D3",
+    "kind": "defect",
+    "verdict": "real_defect",
+    "reason": "Confirmed. diagnose_antenna_fault_reward.m saves params.mat at :39 and :71, validate_new_threats.m at :20 and :27, both without onCleanup. quick_ber_with_iq is called at diagnose_antenna_fault_reward.m:42 (audit says 41) and exists nowhere in the tree (only link/quick_ber.m), so that script cannot run. The GUI saveParams is guarded by onCleanup at runOneRun:1090, as stated. Extra point: demo_gui boot (loadInitialParams, :804-810) runs init_params, which saves params.mat in the working folder, so starting the GUI from a live worktree also rewrites it.",
+    "live_chain_impact": "Hazard only if one of these scripts or the GUI is started in a worktree with a running chain.",
+    "required_proof": "E10 removes the scripts; for the GUI, start it only from a bundle."
+   },
+   {
+    "id": "D4",
+    "kind": "defect",
+    "verdict": "not_defect",
+    "reason": "Facts right: map_survivability_boundary.m:296 and experiment_survivability_options.m:40 run evalc('init_params'), and init_params.m:471 saves params.mat. But init_params is deterministic on code and profile.json, A0 runs first in every chain, and the audit itself says it is not a bug while nothing is edited. It is a hazard, not a defect.",
+    "live_chain_impact": "None while profile.json and init_params.m stay unchanged.",
+    "required_proof": "If changed, assert params_id equals A0's; decide separately."
+   },
+   {
+    "id": "D5",
+    "kind": "defect",
+    "verdict": "real_defect",
+    "reason": "Confirmed (cosmetic). loadSurvReference (demo_gui.m:822-835) swallows a load error, and the boot log at :216 then says the file was not found. It also says so when the file exists but lacks the three required fields. No number is affected.",
+    "live_chain_impact": "None.",
+    "required_proof": "Log the load error or missing fields."
+   }
+  ],
+  "missed": [
+   "Every proposal that edits, adds or deletes a file under code/ (tests and legacy excepted) changes the run_cache 'inputs' hash (run_cache.m:46-58), so cached C2/C2g/C2u runs are not reused. The audit never states this per row; it is the dominant cost of any merge (C2 was 2359 min, C2g 354, C2u 290). Merge only after the last cache-dependent run, and batch all edits into one commit.",
+   "Several tests compare current file text against git parent revisions (parent_copy). Not all are behavioural: test_d107.m:420-440 (test_train_dqn_off_view_is_the_parent) compares train_dqn.m text with the parent after substitutions, so any edit to train_dqn.m, including E1, breaks it. test_d107.m:346 and :391 also use parent copies of train_dqn.m and policy_stamp.m.",
+   "test_d107.m:877 requires exactly one local 'ternary' in train_dqn.m, and :963/:1116 cut it out of train_dqn.m; the audit's E1 proof ('full suite plus a grep for no remaining copy') contradicts these.",
+   "test_core.m:6084 pins the exact det_frames call text in edge_map.m (E5 would break it); the audit lists only the det_frames.m pins.",
+   "The audit's summary says analyze_weak_points reads 'six small fields' but E3 and the code show five (scen, sev_names, sev, ebno, cov).",
+   "diagnose_antenna_fault_reward.m:42 (not 41) calls the missing quick_ber_with_iq.",
+   "demo_gui boot runs init_params (via loadInitialParams) and so rewrites params.mat in the working folder; the D3 hazard is wider than the two scripts.",
+   "Five tests scan every code/**/*.m (test_core.m:35, 1918, 4961, 5881, 6462); new shared or private files must satisfy them (parse, no Seed 2075, no listed citations, the exact .fec readers list, check_det_id use)."
+  ]
+ },
+ {
+  "label": null,
+  "area": "code/evaluation, code/gui, code/diagnostics (audit_eval_gui.md). Checked against tree C:\\Users\\Adi Suliman\\uav-gcs-v7-p3\\code. The audit was written at tip 6c48b95; HEAD is now 1a29527, and the two newer commits touch only profile.json, so every file:line the audit cites still holds. Where profile 3 stands (v7_d86/p3.log, v7_d91_takeover.log): A0 through B4s finished at 17:48 on 5.11. C1p is waiting on p3_c1p.hold. C2, EDGE, LAT, SURV, SURV3, KPI, WEAK and RPT are still to come. Two contracts apply to every row. First, run_cache is OFF for p3: profile.json has no run_cache key and there is no data/run_cache folder, so the code-hash contract costs nothing live here. Second, any change under code/, tests included, makes the existing test_core deploy logs STALE under the SAME-TREE rule in v7_d91_deploy_tests2.sh. It also breaks 'v7-dev and v7-p3 hold the same code', so a full test_core rerun has to be planned for after 21.11.",
+  "verdicts": [
+   {
+    "id": "E1",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "As written, the row deletes all 29 ternary copies across the repo, and several of them are contracts. (1) Two SHA-frozen D111 files hold copies: detection/ood_k2_run.m:357 and detection/ood_k2_rules.m:277. Deleting either trips ood_k2_run:rule_changed at ood_k2_run.m:205. (2) test_d107.m:875-877 requires exactly one local `function ... ternary(` in train_dqn.m, and test_d107.m:963 and 1116 cut that function out as a fixture. (3) test_core.m:11507-11520 checks that every line of the parent evaluate_policies.m appears, in order, in the current file, so deleting its ternary at evaluate_policies.m:1083-1085 makes `miss` non-empty. (4) The test the audit proposes ('no remaining function ... = ternary(') contradicts test_d107:875. The in-area subset is plausibly safe after 21.11: the six evaluation copies plus renaming demo_gui's ternaryTxt and ternaryStr. setup_paths puts code/ root on the path, and no existing ternary.m collides.",
+    "required_proof": "Limit the change to evaluation/ and gui/ files. Exclude the frozen files, train_dqn.m and evaluate_policies.m. Run the full suite plus test_d107, test_ood_k2 and test_lb. Rerun the deploy test_core for the new tree.",
+    "live_chain_impact": "None before 21.11. After that, a deploy test_core rerun is needed."
+   },
+   {
+    "id": "E2",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "The bodies are identical. file_time is identical at measure_all_kpis.m:654 and result_status.m:109. edge_km at :838 matches edge_txt at edge_map.m:1730. vsym at measure_all_kpis.m:833 gives the same letters as vsym_nan at edge_map.m:1703 for v = -1, 0, 1 and NaN. Problems the audit missed: (a) evaluation/private/ is invisible to diagnostics/ and decision/, so the proposed shared write_lines cannot cover the diagnostics copies from private/. (b) decision/experiment_core_bw.m:1070 already has a local write_lines with a different body (mkdir plus assert). That is the same-name-different-meaning hazard the audit itself warns about. (c) A shared file named vsym would collide in meaning with edge_map.m:1699, the vsym without a NaN guard. No test greps these helper bodies (checked). test_ood_k2.m:830 runs a parent copy of measure_all_kpis from a temp folder, which keeps its own local functions, so it is unaffected.",
+    "required_proof": "Use new non-colliding names. Diff kpi_summary.txt, edge_map.txt and edge_summary.txt byte for byte on fixed inputs. Run the full suite, test_ood_k2 and test_wf_dec.",
+    "live_chain_impact": "None before 21.11."
+   },
+   {
+    "id": "E3",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "The field list is right: analyze_weak_points.m:92-106 and 187 use PP.scen, sev_names, sev, ebno and cov only. test_core.m:7921 pins only the kpi1_file line. The staleness guard is weak, though. A datenum-only check (the gui loadNormStats pattern) trusts mtimes, and policy_pools.mat gets moved or restored by scripts: v7_d91_takeover.sh:810 uses `mv`, which keeps the mtime, and copyfile, Copy-Item and cp -p keep it too. A restored or swapped pool file that is older than the cache would serve stale fields silently, which is checklist items 5 and 16. The saving (most of the 3.3 min) has not been measured.",
+    "required_proof": "Key the cache on the source's size+datenum or PP.det_id, or on a hash of the fields, not on mtime alone. Time line 92 with tic first. Compare weak_points.txt and .json with fc against an uncached run.",
+    "live_chain_impact": "None before 21.11. Implementing it later adds a new data/ file to the live tree."
+   },
+   {
+    "id": "E4",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "(a) Confirmed equivalent. Line 896, `pol_layers(...vn...).prot.verdict`, equals commit_rows' X.nresp (edge_map.m:1543-1544). X1 is the static d=1 run on rows 1:nT (lines 547, 557, 562). Its vn comes from iNo = find(strcmp(POL,'none')) (line 184), the same as line 886, with the same TGT, FTi (assigned once at 452) and B. The seeds are fixed per call (edge_verdict seed 74; boot_cluster makes its own RandStream), so the global random order is untouched. The one edge case: if vn == 0, today's code errors while X1.nresp gives NaN. (b) Hoisting lk, lk0 and fa per Eb/N0 is correct, because Fc depends only on s. But test_core.m:7020 pins the exact text `Fc = take_rows(KF, KF.c == k0 & KF.s == s & ~KF.ref);`, which must survive. Also, P0 is needed anyway for P0.prot (held_flight differs), so 'P0.linkt equals P.linkt' saves nothing. (c) An index cache inside boot_cluster is unsafe. boot_cluster has 54 call sites across decision/ and detection/, including parfor workers, so a persistent cache multiplies memory per worker (checklist 11). test_head.m:580-590 pins bit-identity with the parent. two_groups draws i1 and then i2 from one stream, so it cannot share the cache. The audit itself counts the bootstrap as a registered rule.",
+    "required_proof": "(a) and (b): run edge_map SMOKE before and after with isequaln on EM, EDGE_NUM, FT, CF, CS and VAR, and keep the test_core.m:7020, 899 and 6083-6084 pins. Drop (c).",
+    "live_chain_impact": "None before 21.11. The saving is small."
+   },
+   {
+    "id": "E5",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "The integer-sum and no-RNG claims hold: det_frames.m has no rand, rng or persistent state. But the audit missed test_core.m:6084, a regexp that pins the exact call text at edge_map.m:384-385: `det_frames(P, PP.pools{clean_cell, s, K.na, sp}, PP.scen{c}, ok_c, PP, PP.runs{sp}, ...\\n K.ev{sp})`. The slicing the audit proposes changes that text. det_frames also takes the whole PP as its 5th argument, so a parfor broadcasts PP, pools included (about 14 GB), to each of the 6 workers unless a stripped settings struct is built. That is a direct checklist-11 overcommit risk, and EDGE already takes the parallel turn for its rollouts. OC(end) accumulation per c also has to be restructured. The saving is unproven.",
+    "required_proof": "First measure the loop with tic. Pass a PP copy without pools and keep or update the pinned call text. Check worker memory on a one-cell run. Compare isequaln of FT.det_k, det_n, detb_k and OC with the serial run.",
+    "live_chain_impact": "None before 21.11. If implemented, EDGE memory is the risk."
+   },
+   {
+    "id": "E6",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "The report section calls edge_map's local functions (vsym_nan, edge_txt, per_layer and others at 1199-1341). A separate script cannot see a script file's local functions, so all 40 helpers must move to function files first. Whether MATLAB resolves scripts placed in a private/ folder when called from a script in the parent has not been verified. There are no `return`, mfilename, evalin or assignin uses in lines 941-1471, and the save at 1468 names its variables, so sharing the workspace is fine. Beyond the 17 source-grep tests the audit lists, test_core.m:942-948 cuts pol_layers out of edge_map's text by position, and :6083-6084 and :7020 pin loop text. E14 must keep text order and adjacency.",
+    "required_proof": "Do E14 first. Make a SMOKE equivalence of edge_map.txt, edge_summary.txt and edge_map.mat. Run a one-line check that a script in evaluation/private can be called by name from edge_map.",
+    "live_chain_impact": "None before 21.11."
+   },
+   {
+    "id": "E7",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "No nested functions (header line 42). No str2func, feval or string callbacks. None of the 107 local names collides with a file on the path, and none is used by console_flights, console_scenario or export_gui_bundle, which would see gui/private/. loadInitialParams (808) runs init_params as a script inside a function; that still works from private. The pins at test_core.m:145-152, 6790 and 7918-7957 must stay findable. The proof is only a GUI capture. A GUI run writes params.mat into its current folder (saveParams at 861, init_params at 808), so the capture must not run in uav-gcs-v7-p3 (D3, checklist 13 and 15).",
+    "required_proof": "E14. GUI capture before and after from a bundle or an export, never from the live p3 tree.",
+    "live_chain_impact": "None, provided the capture is not run in the p3 tree."
+   },
+   {
+    "id": "E8",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "The two blocks are not identical. The lead-in uses leadC with a nan(n,0) fallback when FL has no bch (line 1146), while the run uses F.bch directly (line 1203). They use thermal_nv(pl) and thermal_nv(p) respectively. The run loop times only the DQN decide (t2 at 1205-1207), and dqn_ms is printed. A merged helper must keep these differences and the global-RNG call order (randi at 1104). scenarioParams' fd_hz has the same formula as line 1096 (console_scenario.m:14). restoreParams is used at 1090, 2006 and 2293. This is GUI only, with no automated test.",
+    "required_proof": "GUI capture from a bundle on a fixed seed, checking the obs fields and the printed latency line.",
+    "live_chain_impact": "None."
+   },
+   {
+    "id": "E9",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "NWP is indeed never read in map_survivability_boundary.m (grep: lines 108 and 110 only). But line 108 is `NWP = N_WORKERS; pl = [];`. Deleting 'the two lines' removes `pl = []`. In SMOKE mode the else-branch that assigns pl never runs, so line 153, `pool_lpt(..., pl)`, would fail with an undefined variable. That breaks run_stage's smoke and test_smoke at SURV. Deleting line 110 also leaves an empty if-branch. The decision/ scripts that use NWP set it themselves, so they are unaffected.",
+    "required_proof": "Keep `pl = [];` and rewrite as `pl = []; if ~(exist('SMOKE','var') && SMOKE) ... end`. Run the SURV smoke through run_stage.",
+    "live_chain_impact": "None before 21.11. As written it would break the smoke path, not the real run."
+   },
+   {
+    "id": "E10",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "Zero references, confirmed by git grep over code/ (tests included), the p3 docs/, uav-gcs-v7-docs/docs and uav-gcs-logs/*.sh|*.ps1. The only mention is a history row at PROJECT_LOG.md:244. All three are scripts on the diagnostics path; no function name is lost and no test checks that they exist. Removing them also removes the params.mat writers of D3. The only costs are the SAME-TREE deploy-log invalidation shared by all rows and, if run_cache were on, the code hash.",
+    "required_proof": "Grep again at implementation time. Run the full suite once.",
+    "live_chain_impact": "None before 21.11. Retiring them removes a live hazard (D3)."
+   },
+   {
+    "id": "E11",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "The 7 blocks are textually equivalent: build_check_pools 185, build_clean_test_pools 87, build_policy_pools 378, experiment_core_bw 159 and 305 (which use X.smoke and X.N_WORKERS), and the two survivability scripts. `repo` is not used after the block anywhere. parallel_turn identifies the holder by getpid, not by caller. The hazard: the helper must return the onCleanup object, and every caller must capture it. A dropped output fires parallel_turn('give') at once, which lets two heavy parallel stages run together (checklist 11 and 12). The NWP = 0 SMOKE semantics and `pl = []` must stay. This also touches C1p and C1c pool stages in decision/.",
+    "required_proof": "A one-cell real run of each touched stage, checking that the turn file is held until the stage ends. Plus the SMOKE runs.",
+    "live_chain_impact": "None before 21.11. Benefit is tidiness only."
+   },
+   {
+    "id": "E12",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "Comment-only. A scan of the test string literals found no pin inside edge_map.m:1-118 or measure_all_kpis.m:1-60, and none on the 8 tagged comment lines. 'conditioned on such a geometry' at edge_map.m:13 is pinned only in shadow_note's output (test_core.m:7030). No code reads help text. The scan did not cover every regexp-style pin, so it cannot be fully confirmed. Trimming the history in the header is also a documentation choice that Adi should accept, because the headers carry the registered reading definitions.",
+    "required_proof": "After the edit, run every test that does fileread(which('edge_map'|'measure_all_kpis')) (list in E14) and test_d121, test_wf_dec and test_lb.",
+    "live_chain_impact": "None before 21.11."
+   },
+   {
+    "id": "E14",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "Tests only, outside the run_cache hash. But a concatenating src_of changes the semantics of order and uniqueness asserts once code moves. Examples: test_wf_dec.m:798 (`strfind(a) < strfind(b)`), test_core.m:11498-11499 (verifyNumElements(…,1) plus position order) and test_core.m:942 (cut by position up to the next function). These pass on the unsplit layout but would test a different property after E6 or E7. It also changes the code tree and so invalidates the SAME-TREE test_core logs.",
+    "required_proof": "Run the suite on the unsplit layout (it must be identical). For each order or adjacency assert, decide explicitly what it means across files.",
+    "live_chain_impact": "None. Tests are not on the chain, but a deploy test_core rerun is needed."
+   },
+   {
+    "id": "D1",
+    "kind": "defect",
+    "verdict": "real_defect",
+    "reason": "Confirmed at diag_path_loss.m:55: the two repmat statements sit inside the trailing comment, so reps is ignored. Before bddd137 they were on line 48 as code: `[s, r] = ndgrid(1:nS, 1:nG); s = repmat(...); r = repmat(...);`. D525's numbers predate bddd137, and DECISIONS cites no later reading of this diagnostic. The fix changes the number of randi(rs) draws and the diagnostic's own output only. test_core.m:6136 pins only 'DD = Dd.THC(j:-1:max(1, j - 2));'.",
+    "required_proof": "After the fix, n = nS*numel(rr)*reps. Rerun only by hand, outside the live tree and outside heavy stages.",
+    "live_chain_impact": "None. It is a hand-run diagnostic, not a chain stage."
+   },
+   {
+    "id": "D2",
+    "kind": "defect",
+    "verdict": "real_defect",
+    "reason": "Confirmed at result_status.m:30-33 and 99. A throw in detector_id or fusion_model leaves cur_det = '' and switches off the det_id check for latency.mat and edge_map.mat with no message. The catch path is reachable for real: fusion_model reads L.N with no guard, so a fusion.mat without N throws. The test fixture at test_core.m:5312 takes this path. The fix would mark those entries stale there; that test asserts only the eval_detector_metrics entries, but it should be re-checked. The early `return` when files are absent (lines 27 and 99) is intended and should stay.",
+    "required_proof": "A test with a fusion.mat lacking N: latency.mat and edge_map.mat are reported stale with the reason. test_result_status and the 5300-5325 block still pass.",
+    "live_chain_impact": "It can mask a wrong-detector latency.mat or edge_map.mat at p3's KPI (measure_all_kpis.m:76), RPT (export_report_numbers.m:15) and the GUI bundle export. Before KPI, check that data/fusion.mat in uav-gcs-v7-p3 has FM and N and that trained_detector.mat has trained_at and ood. Also check that the detector printed in latency.txt ('Timed: detector X') equals the det_id the C2/EDGE check_det_id accepted. EDGE stops on a det_id mismatch by itself, so edge_map.mat is guarded at EDGE; latency.mat relies on this check only."
+   },
+   {
+    "id": "D3",
+    "kind": "defect",
+    "verdict": "real_defect",
+    "reason": "Confirmed. diagnose_antenna_fault_reward.m:39 and 71 and validate_new_threats.m:20 and 27 save params.mat into the current folder inside a loop, with no onCleanup. Correction to the audit: the call to the missing quick_ber_with_iq is at line 42, not 41; only link/quick_ber.m exists. validate_new_threats also builds a Simulink model in the current folder (quick_ber('UAV_GCS_Threat_Link')), which is checklist 10. demo_gui saveParams and init_params (808 and 861) write params.mat too.",
+    "required_proof": "Retire them (E10). Start the GUI from a bundle or an export only.",
+    "live_chain_impact": "Only if someone runs these scripts or the GUI with cwd uav-gcs-v7-p3. That would change params.mat and so params_id (checked at KPI via result_status.m:66, phy_validation). Before any hand-run, confirm cwd is not the p3 tree and the last STAGE is not GAL, EDGE or WEAK (checklist 15). Before C1p and before KPI, confirm params.mat in uav-gcs-v7-p3 still has its A0 mtime (2026-11-05 13:54:25). Note: the 18:35 gated_run cd'ed into uav-gcs-v7-p3 but only read profile.json."
+   },
+   {
+    "id": "D4",
+    "kind": "defect",
+    "verdict": "real_defect",
+    "reason": "A latent guard gap, confirmed. map_survivability_boundary.m:53→296 (load_params_quiet) and experiment_survivability_options.m:40 run evalc('init_params'), which saves params.mat at init_params.m:471. init_params reads only n_rx from profile.json (lines 320-322). n_rx is 4 both before and after today's profile.json commits 8f13e34 and 1a29527, and init_params.m is unchanged since 16.10, so today it rewrites the same values. It is not a bug now, but nothing asserts that. Adding a params_id assert is a behaviour change.",
+    "required_proof": "Load params.mat and assert params_id(params) equals A0's, instead of regenerating it.",
+    "live_chain_impact": "Affects p3's SURV and SURV3, both still to come. Before SURV, check that code/link/init_params.m has no diff since A0 (13:54 on 5.11) and that profile.json still has n_rx 4. After SURV and SURV3, check that results/phy_validation.txt's params_id still matches, i.e. KPI does not print 'run on other link-model parameters'. Avoid any concurrent writer of params.mat during those stages."
+   },
+   {
+    "id": "D5",
+    "kind": "defect",
+    "verdict": "real_defect",
+    "reason": "Confirmed. loadSurvReference (822-835) returns [] both on a load error and on missing fields, and the boot log at line 217 then says 'not found'. No test or runbook greps that text. Cosmetic only; no saved number is affected.",
+    "required_proof": "A GUI boot from a bundle with a corrupt file shows the right message.",
+    "live_chain_impact": "None."
+   }
+  ],
+  "missed": [
+   "E1: the SHA-frozen copies detection/ood_k2_run.m:357 and ood_k2_rules.m:277 (rule_changed); test_d107.m:875-877, 963 and 1116, which need train_dqn.m's local ternary; and test_core.m:11507-11520, the parent line-order check on evaluate_policies.m.",
+   "E5: test_core.m:6084 pins the exact det_frames call text at edge_map.m:384-385. det_frames takes the whole PP, so a parfor would broadcast the 14 GB pools to each worker.",
+   "E9: line 108 also holds `pl = []`, which the SMOKE path needs at line 153 (pool_lpt).",
+   "E4(b): test_core.m:7020 pins `Fc = take_rows(KF, KF.c == k0 & KF.s == s & ~KF.ref);`. E4(c): boot_cluster has 54 call sites, including parfor workers and test_head.m:580 bit-identity.",
+   "E2: decision/experiment_core_bw.m:1070 already defines a write_lines with a different body (mkdir plus assert), and evaluation/private/ cannot serve diagnostics/.",
+   "E3: an mtime-only staleness check fails when policy_pools.mat is moved or restored with its mtime preserved (v7_d91_takeover.sh:810 uses mv).",
+   "E11: the onCleanup returned by the helper must be captured, or parallel_turn is released immediately.",
+   "Every row: v7_d91_deploy_tests2.sh pairs test_core logs by code tree (SAME-TREE), so any change under code/, tests included, invalidates the p3 and p1 deploy evidence and breaks v7-dev == v7-p3 code identity. run_cache is off for p3 (no key in profile.json, no data/run_cache).",
+   "D3: the missing quick_ber_with_iq call is at line 42, and validate_new_threats builds a Simulink model in the cwd (checklist 10).",
+   "D2: the catch path is already reached in the test fixture test_core.m:5312 (fusion.mat without N makes fusion_model throw).",
+   "The table skips E13; there is no row with that id.",
+   "The audit's tip 6c48b95 is now 1a29527; only profile.json changed, and init_params reads only n_rx from it."
+  ]
+ },
+ {
+  "label": null,
+  "area": "code/decision (121 files) and code/dev (28 files) audit, audit_decision.md; code tree uav-gcs-v7-p3/code. HEAD is 8f13e34 and decision/ and dev/ are unchanged since the audited 6c48b95. Findings are by grep and reads only; no MATLAB run, no timing measured.",
+  "verdicts": [
+   {
+    "id": "1",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "Facts hold. The 11 decision copies are at the cited lines, 10 have identical bodies, and experiment_core_bw.m:1078 differs only in argument names. Three things are off. (a) The '+14 more' is 16 (8 in detection, 6 in evaluation, 2 in link). That list includes ood_k2_run.m:357 and ood_k2_rules.m:277, which are SHA-frozen D111 files, so even a comment edit trips ood_k2_run:rule_changed. (b) The audit lists only test_d107.m:963 and 1116. test_d107.m:875-878 also asserts that train_dqn.m defines 'ternary' exactly once, and it would find zero. (c) tests/test_d107.m:424-447 (test_train_dqn_off_view_is_the_parent) requires train_dqn.m to equal the df5cb30 text apart from patches. Lines 765-775 do the same for evaluate_policies.m and the C2g/C2u experiments, and test_core.m:11507 does it for evaluate_policies.m. Deleting a local ternary from those files trips these. Behaviour is preserved, and ternary evaluates both arguments eagerly, so no call changes.",
+    "required_proof": "Convert the decision/ copies only, never the frozen ood_k2_* files. Edit test_d107.m:875-878, 963, 1116 and the parent-text tests (424-447, 765-775) and test_core.m:11507 in the same commit. Then run test_d107 and test_core. Harness G is not enough on its own.",
+    "live_chain_impact": "None until applied. Applying it changes the run_cache key of every cached C2/C2g/C2u run, so apply only between chains."
+   },
+   {
+    "id": "2",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "The two variants (n==0 gives NaN against 1) and all 8 file:line cites are correct. The flagged-helper design is sound. Two points are off. surv_grid.m:105 is a local function named cp_up, not an inline cp_upper. The tests are under-listed: test_d107.m:881-886 regexes the cp_upper text of aprime_admit.m and train_dqn.m and requires them to be equal, so it fails with the text gone. test_d107.m:875-878 requires one cp_upper definition in train_dqn.m. Lines 962 and 1115 are the only ones the audit names. The parent-text test on train_dqn.m trips as in row 1.",
+    "required_proof": "The old-versus-new unit test over k=0..n, n=0..60 for both forms with isequaln. Rewrite test_d107 lines 875-886, 962 and 1115 and the train_dqn parent-text test in the same commit. Then run harness G.",
+    "live_chain_impact": "None until applied. Changes the code hash of every cached run."
+   },
+   {
+    "id": "3",
+    "kind": "cleanup",
+    "verdict": "wrong",
+    "reason": "'Four identical bodies' is false. experiment_unknown_threat.m:192 has an extra line, 'if isempty(R), R = Rb; return; end'. The other three (dqn_eval_batches.m:13 structfun_cat, policy_run_set.m:35, evaluate_policies.m:1057) lack it. A shared version must keep the isempty guard, which is a superset for every non-error path. All four are used (evaluate_policies.m:299, 370, 692, 699, 714; experiment_unknown_threat.m:136-141; policy_run_set.m:29; dqn_eval_batches.m:9). Editing evaluate_policies.m and experiment_unknown_threat.m also trips the base-text comparisons at test_d107.m:765-775 and test_core.m:11507. test_core.m:6743 and test_lb.m:740-741 grep the call text, which would survive.",
+    "required_proof": "Unit test that the shared function with the guard equals each old copy on non-empty R, and equals experiment_unknown_threat.m's on empty R. Update the base-text tests. Harness G: the C2g/C2u paths are covered only for the first entity (see the missed items).",
+    "live_chain_impact": "None until applied. Changes the code hash."
+   },
+   {
+    "id": "4",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "The claim is right. test_episodes is identical apart from 'unk' (false(1,NE) against true(1,NE)). mark differs only in the 1e6*split offset and the extra split argument. policy_episodes.m:22 does draw randi(rs, fdelay, 1, NE), so the do-not-reuse warning holds. Two problems remain. The proof is inadequate: harness G needs CFG.smoke_all_entities, but CFG never reaches run_stage scripts (DEFECT 1), so the smoke covers only the first combination and threat. The unit test with the same RandStream is the only valid proof. Also experiment_combo_generalization.m and experiment_unknown_threat.m are compared with the base-commit text at test_d107.m:765-775, so removing the local functions trips that test.",
+    "required_proof": "The spec-and-mark isemptyequal test on both files with the same seed, with isequaln on specs and on mark output for split 0 and split>0. Update test_d107.m:765-775 in the same commit. Do not cite harness G as covering all entities.",
+    "live_chain_impact": "None until applied. Changes the code hash of C2g/C2u."
+   },
+   {
+    "id": "5",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "The equivalence holds. clean_wide_specs.m builds the same loop. K.clean (link_env.m:127) equals find(strcmp(PP.scen,'none'),1). find(PP.ebno>=-Inf) equals 1:nS. No RNG. n_geom stays defined for later use. The cited loops at 658-666 and 952-960 are exact. But both loops exist in the base commits (df5cb30 holds the k_ padding line twice). Removing them breaks test_d107.m:765-775 (strcmp against base) and the ordered line-subsequence test test_core.m:11507, which requires every line of the 316230d evaluate_policies.m to appear in order in the new file.",
+    "required_proof": "isequaln(specs_old, specs_new) for both CT sets, as the audit says. Also rewrite test_d107.m:765-775 and test_core.m:11507 to accept the helper call, then run both.",
+    "live_chain_impact": "None until applied. Changes the code hash of C2e."
+   },
+   {
+    "id": "6",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "Four copies confirmed (train_dqn.m:245-252, choose_drop_threshold.m:216-224, evaluate_policies.m:128-136, edge_map.m:164). Values are identical; only messages and the unreleased 'clear Md' differ. Contracts to preserve: test_core.m:8644 requires the exact call text 'kpi1_threshold_check(EBNO_THR, ''choose_drop_threshold'');' and 'kpi1_threshold_check(ebno_thr, ''edge_map'');' once each, so the variable names must stay. Editing train_dqn.m and evaluate_policies.m trips the parent-text tests (test_d107.m:424-447, 765-775 and the undo patch at 999-1000). edge_map.m is source-read by about 45 tests. All isfile paths are cwd-relative, same as the originals.",
+    "required_proof": "Unit test with and without results/eval_detector_metrics.mat, with NaN and with a finite threshold. Update the pinned tests. Harness G (C1d, C2, C2e).",
+    "live_chain_impact": "None until applied. Changes the code hash."
+   },
+   {
+    "id": "7",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "The block exists in build_policy_pools.m:130-148, build_check_pools.m:61-70 and experiment_core_bw.m:114-122. It is not the same in all four. In build_policy_pools.m the core3 block sits between 'det = struct(...)' and 'T = ood_thresholds', and D stays alive for D.ood and D.trained_at. build_clean_test_pools.m has only the load plus detector_id. The line-saving claim (-40) is not demonstrated. test_core.m:6222 (test_split_norm_memory) requires the literal 'nm = split_norm();' in build_policy_pools, build_clean_test_pools and build_check_pools, so moving it into a helper fails the test. test_core.m:3627-3639 and 6270/6336 also grep builder text. These are the longest stages (C1p about 90-105 h), so a typo costs days.",
+    "required_proof": "isequaln(det, det_old) and DET_ID equality in a unit test. Rewrite test_split_norm_memory and the builder text pins. Run the smoke pools through C1c, plus test_core pool tests. Apply only at a stage boundary.",
+    "live_chain_impact": "None until applied. High if applied mid-chain (C1p/C1c workers read code live). Changes cell keys' code hash."
+   },
+   {
+    "id": "8",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "Only core3_model.m:29, core_bw_rules.m:206, kpi6_fresh_marker.m:102 and fusion_nogo.m:47 are plain file hashes (train_core_cnn.m:491 cc_sha also is, but is not on the list). The proposed list is wrong in three places. ood_k2_rules.m:269 is a SHA-frozen D111 file, so editing it trips ood_k2_run:rule_changed. dev/m_head.m:291 has an 'lf' flag that drops byte 13, so its digest differs by design (it checks the committed LF text). eval_detector.m:787 is a file_stamp that returns the digest and the mtime. core3_model.m and core_bw_rules.m read the whole file (Inf) while others chunk; the digest is equal. unk_write.m:69/93 hash values, not files. Real saving is about 4-5 copies, not 7.",
+    "required_proof": "Digest equality old against new on a small and a 100 MB file for the 4-5 true copies. Leave ood_k2_rules.m, m_head.m, eval_detector.m alone. Run the test_lb/test_core marker tests.",
+    "live_chain_impact": "None until applied. Do not touch the frozen D111 files."
+   },
+   {
+    "id": "9",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "Five identical sscanf copies in choose_drop_threshold.m (213, 322, 345, 689, 795) are real; train_dqn.m:1314 is inside a wrapper that also maps drop_mode. 'strsplit(name){2}' in the proposal is pseudo-code, since MATLAB cannot brace-index a call result; the helper needs a temp variable. No test pins that text. choose_drop_threshold.m is not in the base-text comparison list, so the edit is safe if train_dqn.m is left alone. Benefit is about 5 lines, trivial.",
+    "required_proof": "Unit test over the four monitor names. Harness G (C1d) is adequate. Leave train_dqn.m untouched.",
+    "live_chain_impact": "None until applied. Changes the code hash."
+   },
+   {
+    "id": "10",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "Counts match (train_dqn 10 SMOKE and 5 CFG; evaluate_policies 5 and 1; choose_drop_threshold 2 and 4). 'cfg_, cfgc, cfg_c as three names' is wrong: cfg_c does not exist in train_dqn.m, only cfg_ (136) and cfgc (174). The audit names only line 486 as pinned. Many more are pinned by literal text: test_d107.m:439 and 716 (regexp of the line-197 SMOKE guard), 467 (line 189), 571 (evaluate_policies), 595 (line 138), 698 and 998 (line 486). train_dqn.m is also under the parent-text test. Changing the pattern needs a rewrite of roughly 8 test sites for a readability gain only.",
+    "required_proof": "Not worth proving: rewrite of 8 pinned test sites plus harness G. Recommend dropping this row.",
+    "live_chain_impact": "None until applied."
+   },
+   {
+    "id": "11",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "The blocks are similar, not equal. The 'all' block prints rows inside its loop and computes RECsh; the harmed block has an 'if any(mr)' guard around boot_cluster and computes NH and NHsev; the envelope pair uses two different masks (HV on validation, HA on test), not one mask_extra. A helper is feasible but not the 'differ only in mask and seed' of the audit, and the -50 lines is unmeasured. The base commits hold both blocks, so test_d107.m:765-775 and the line-subsequence test test_core.m:11507 fail when lines are removed from evaluate_policies.m.",
+    "required_proof": "Compare PT, PTsev, PTci, PTh, PThsev, PThci, ENV, PTenv, PTenvh (isequaln) old against new on a fixed fixture, with n=0 harmed episodes included. Rewrite the two base-text tests.",
+    "live_chain_impact": "None until applied. Changes the C2e code hash."
+   },
+   {
+    "id": "12",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "Mechanism checked: decision_config.m (140 lines) has no load, isfile, exist or nargin, so it is a pure function and a persistent copy is safe. It is called per-episode inside policy_decide.m's loop through rule_based_policy.m:56 and rule_core_policy.m:27. feature_index.m already has a persistent 'names' cache, so only the ismember lookup remains, and the gain there is small. The 0.5-1.6 h figure is a guess (the audit says so) and has no profiler data. Changed .m files do clear persistents, so tests that swap functions with addpath still work. No parent-text test pins these files in a way that blocks a persistent.",
+    "required_proof": "MATLAB profiler first (after 21.11). Then old against new on rollout_policy for 64 episodes x 30 steps, isequaln; harness G.",
+    "live_chain_impact": "None until applied. Benefit unmeasured; do nothing before profiling."
+   },
+   {
+    "id": "13",
+    "kind": "cleanup",
+    "verdict": "wrong",
+    "reason": "The guards at link_env.m:294-295 (offset, nhop) are redundant after reset_env (lines 260, 265) as the audit says. The other cites are not dead guards. Line 435 'isfield(E, ''ev'')' is redundant because E.ev is set at 277. But 446-455 are 'isfield(P, ''gant''/''idle''/''bch''/''mmse_pred'')' on the pools P, which are optional by data. Lines 332-334 are '~isempty(E.cover)', a content check. link_env.m is also pinned: test_d107.m:848 requires its text to equal the parent commit's, and test_core.m:10196 and 11567 compare behaviour with the parent. v3d_engine.m:127 and diagnostics call 'step' with an E from reset.",
+    "required_proof": "Not worth doing: a handful of isfield calls per step. If done, restrict to 294-295 and 435 and rewrite test_d107.m:848.",
+    "live_chain_impact": "None until applied."
+   },
+   {
+    "id": "14",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "Tags exist at the cited lines (checked about 35 of the lines, all present). (c) train_dqn.m:43 and (d) main.m:128-131 ('~12 h', '~3.6 h' against 39.3 h measured for C2) are confirmed. Problems: 'D78' in burst_candidates.m:7 and train_dqn.m:51/302 is the name of the decoder mode printed as 'D78 erasure rules', not a stray tag. Lines 91-114 describe fa_nothreat (train_dqn behaviour), not wf_options/lb_options. 'Comment edits cannot trip tests' is false: test_d107.m:424-447 compares train_dqn.m with the df5cb30 text, test_d107.m:765-775 does the same for evaluate_policies.m, the C2g/C2u experiments and measure_all_kpis.m, and test_d107.m:1017 patches the exact header comment text. Editing comments in these files fails the tests unless they are rewritten. Edits in files not under these comparisons (aprime_admit.m, burst_candidates.m, choose_drop_threshold.m, holm_lower.m, unk_guard.m, unk_threshold.m, wf_options.m, policy_decide.m, policy_monitor.m, dconf_step.m, core3_*.m) are safe except main.m, which test_core.m:5687, 6348, 6653 read for specific text.",
+    "required_proof": "Diff shows only % lines. For train_dqn.m, evaluate_policies.m and the experiments, update the base-text comparisons and the undo patches in the same commit. Do not remove 'D78' where it names the decoder.",
+    "live_chain_impact": "None until applied. Changes the code hash (comments included)."
+   },
+   {
+    "id": "15",
+    "kind": "cleanup",
+    "verdict": "wrong",
+    "reason": "The four sites are real (train_dqn.m:712, 731, 842, 848), but each is a one-line 'fid = fopen(...); fprintf(...); fclose(fid);'. A local append_lines helper adds a definition of at least 4 lines, so the net is more lines, not -8. train_dqn.m is under the parent-text test, so the edit also needs test changes. No value.",
+    "required_proof": "None. Drop the row.",
+    "live_chain_impact": "None."
+   },
+   {
+    "id": "16",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "The source parse at experiment_core_bw.m:112-113 and the seven load('params.mat').params calls (88, 347, 465, 472, 646, 661, 728) are as stated. But the parse does not 'break silently': 'tag = regexp(..., ''tokens'', ''once'')' returns empty, and tag{1} then errors, so a reformat fails loudly. test_core.m:3628 requires the literal 'MODEL_TAG = ''v7-D89'';' in build_policy_pools.m, so moving the assignment into model_tag.m fails the test. Also test_core.m:3632, 5820 and test_d121.m:1165 grep neighbouring lines of build_policy_pools.m.",
+    "required_proof": "strcmp(model_tag(), old regexp result), harness G (CORE_BW smoke), and a rewrite of test_core.m:3628. Low value.",
+    "live_chain_impact": "None until applied. build_policy_pools.m is the C1p builder."
+   },
+   {
+    "id": "17",
+    "kind": "cleanup",
+    "verdict": "wrong",
+    "reason": "The stated reason 'profile 3 does not set s1g_select' is false: profile.json has \"s1g_select\":true and \"s1gc_select\":true, so s1g_step runs in profile 3 (twice, with the core rule's gate too). The conclusion 'do not do' still stands, since eval_policy would have to return per-episode vectors and gput_post, changing what the run cache stores. The saving 'about 5 min per C2' is unmeasured.",
+    "required_proof": "None needed; keep it dropped.",
+    "live_chain_impact": "None."
+   },
+   {
+    "id": "N1",
+    "kind": "numeric_change",
+    "verdict": "uncertain",
+    "reason": "Lines are right: dqn_train_run.m:34 (acting), 57 and 59 (online and target forward). 4 updates x 2 forwards + 1 act = 9 predicts per step; 50000/64 x 30 = 23460 steps; 9 ms x 23460 = 3.5 min, 12% of 28.4 min, about 6.8 h per 116 trainings. 28.4 min is confirmed (39.3 h measured, 83 trainings, ROADMAP). But 'about 1 ms' in dqn_dense.m:2-6 is per decision cycle at deployment size; the 128-sample training batch is not measured, so the saving is a guess. Bit-different results are the real risk, as the audit says; it also changes the registered training.",
+    "required_proof": "Micro-benchmark of predict against matrix forward at batch 64 and 128, then a registered decision and a fresh C2 on validation only.",
+    "live_chain_impact": "None now. Would invalidate every trained agent."
+   },
+   {
+    "id": "N2",
+    "kind": "numeric_change",
+    "verdict": "uncertain",
+    "reason": "dqn_eval_batches.m:4-9 loops over independent batches seeded seed0+b, so a parfor is possible. The note that sums differ by thread count is at run_cache.m:16 and 64-65, not 23-24. The '25% of a training is evaluation' and '9-10 h' are not traced to a log (v6 figures 20.2 and 15.5 min per training/entity could not be found in docs or logs), so they are unmeasured. Memory (PP copy per worker) and the parallel_turn competition are real constraints.",
+    "required_proof": "Time one evaluation on a fixed seed with and without parfor; compare R with isequaln (expected to differ in sums).",
+    "live_chain_impact": "None now."
+   },
+   {
+    "id": "N3",
+    "kind": "numeric_change",
+    "verdict": "uncertain",
+    "reason": "C2g and C2u both load data/policy_pools.mat and data/trained_dqn.mat (lines 26-27 and 29-30) and write disjoint outputs: results/combo_generalization.* against results/unknown_threat_policy.* and data/unknown_threat_agents.mat. run_cache dirs C2g and C2u are separate. So parallel is feasible and this is an orchestration change, not numeric. The 4-6 h saving depends on core and RAM headroom; the 2 x 14 GB figure is profile 1's pool size and is not verified for profile 3.",
+    "required_proof": "Check free RAM and cores first; do not run beside GAL/EDGE/WEAK (past bugs 11, 15). Compare outputs with a sequential run.",
+    "live_chain_impact": "None now; orchestration only."
+   },
+   {
+    "id": "D1",
+    "kind": "defect",
+    "verdict": "real_defect",
+    "reason": "Confirmed. run_stage.m runs every stage through run_one (no CFG defined there; no CFG, evalin or assignin in run_stage.m), so exist('CFG','var') is false in train_dqn.m:136, 162, 174, 182-183, evaluate_policies.m and the experiments. main.m:90-96 values equal the defaults today. It is latent, with no effect on a saved number now. A knock-on error in the audit: harness G sets CFG.smoke_all_entities, which also cannot reach the C2g/C2u scripts through run_stage, so the harness would run only one entity (experiment_combo_generalization.m:40-41, experiment_unknown_threat.m:43-44).",
+    "required_proof": "An assert in run_one or one source of defaults, as suggested. The harness must use the run('...') route with CFG in the calling workspace, or profile.json, for all-entity smoke.",
+    "live_chain_impact": "None now: values equal defaults."
+   },
+   {
+    "id": "D2",
+    "kind": "defect",
+    "verdict": "real_defect",
+    "reason": "Confirmed as a latent trap. cp_upper returns 1 at n=0 in 5 files and NaN in choose_drop_threshold.m, clt_step.m and dconf_step.m. train_dqn.m guards isnan(fa_w) at 1041, 1091, 1101, and ternary evaluates eagerly, so no error arises. No traced path reaches n=0 with a saved effect; evaluate_policies.m:998 uses n=sum(above), which could be 0.",
+    "required_proof": "Row 2's flagged helper, with a unit test at n=0 for both forms.",
+    "live_chain_impact": "None now."
+   }
+  ],
+  "missed": [
+   "The summary claims 'There is no try/catch' in decision/ or dev/. That is wrong. There are 9 try blocks: clean_ref_rebuild.m:282 (empty catch), evaluate_policies.m:731 (rethrows), pool_checkpoint.m:33/53/86 (silent catch), run_cache.m:64 (try nt = maxNumCompThreads; catch, end). Several swallow errors by design but belong in the fragile-pattern review.",
+   "The audit does not mention the git-parent text comparisons that fix whole files to an older commit: tests/test_d107.m:346-350 (select_run against df5cb30), 424-447 (train_dqn.m must equal df5cb30 after undo patches), 765-775 (evaluate_policies.m, experiment_combo_generalization.m, experiment_unknown_threat.m, measure_all_kpis.m against the base commit, strcmp), 848 (link_env.m equals the parent's), and test_core.m:11507 (every line of the 316230d evaluate_policies.m must appear in order). Any edit to those files, even a comment, needs these tests rewritten, which affects rows 1, 3-6, 10, 11, 13-15.",
+   "Rows 1 and 8 list frozen D111 files (ood_k2_run.m:357 ternary, ood_k2_rules.m:277 ternary and :269 file_sha, unk_write.m:69/93) without excluding them. Editing any of the seven frozen files, even a comment, trips ood_k2_run:rule_changed.",
+   "Row 17's premise is wrong: profile.json sets s1g_select and s1gc_select to true, plus relm_select, fa_nothreat, lb_select, clt_select and dconf_own. The 4b no-threat form and the s1g steps all run in profile 3, which matters for every row that touches train_dqn.m.",
+   "Counts in the summary and rows are slightly off: 16 other ternary copies outside decision/dev (audit says 14), the surv_grid.m copy is named cp_up (and tests/test_wf_dec.m:1059 has its own cp_up), and 'three names cfg_/cfgc/cfg_c' has only two.",
+   "Harness G as written cannot exercise all C2g/C2u entities (see D1), so rows 3 and 4 have no automated end-to-end proof beyond the first entity until D1 is handled."
+  ]
+ },
+ {
+  "label": null,
+  "area": "code/detection and code/link audit (audit_detection_link.md), verified read-only against C:\\Users\\Adi Suliman\\uav-gcs-v7-p3\\code",
+  "verdicts": [
+   {
+    "id": "P1",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "Core claim is right. idle_rssi.m:113-157 does build D0/Dm/pc/H per frame from ctx and the tb stream, and level, cap, ion and ambient are applied after them. The profile log shows idle_rssi at 1.560 s over 3 calls (0.52 s per run, about 15.7% of 3.28 s). apply_countermeasure only changes level fields, rx_combiner and fec, so the arrays do repeat across the configurations of a cell. Corrections needed: (1) The stated key (ctx.seed, frame, component, hash of p fields) is too small. geo overrides alt, ksig, aoa1 and rho, and each Eb/N0 has its own speed (fd), so the same seed can carry different fd, kfac, aoa, rho, att, yaw or tdl. A stale hit would silently change numbers. The key must be a hash of the whole ctx plus the p fields idle_rssi reads (carrier_freq, sps, symbol_rate, idle_rssi_hz, cycle_s, tdl_*, n_rx, ant_spacing_wl, wobble_arm_m, int_los_doppler, active_threat). (2) pool_cell does not call idle_rssi. The cache has to be threaded through extract_closed_loop_frames -> idle_measure (idle_measure.m:284 passes no opt). The extra optional argument is compatible with the many 3-argument test calls. (3) Memory is understated. The configuration loop is outermost (pool_cell.m:44), so the cache must live across all 6 Eb/N0 x 122 geometries = about 732 flights. At 19 frames x 357 x 3 doubles that is 0.16 MB per flight and noise component (0.33 MB for a tone), so about 120-240 MB per component per cell (more for combinations), per worker, not '~25 MB per cell'. Single precision would break bit-identity. (4) The benefit claim for C1c is wrong: C1c is the clean 'none' link, where idle_rssi costs 0.009 s (same log). The 1-1.5 h for C1c does not exist. (5) '90% of idle_rssi is the channel arrays' and 'C1p 90-105 h' are unmeasured. The arithmetic 90-105 x 0.8 x 0.12 gives 8.6-10 h, not 8-12 h. The direction is right: a few hours of C1p wall per profile, not measured.",
+    "live_chain_impact": "None now. After the merge, run_cache invalidates cached C2/C2g/C2u runs (hash of code/**/*.m). Per-worker cache memory adds to past bug #11 (memory overcommit).",
+    "required_proof": "isequal of every pool field (cache off vs on) on a smoke cell that includes a case where the same seed is flown at two Eb/N0 or geo overrides, so a wrong key would show; plus a combination threat, a tone and a WLAN with the delay line. Keep the test_core.m:4775 anchor 'los_phase(ctx.aoa(c), att, ctx.yaw, ctx.fd, tq)' verbatim."
+   },
+   {
+    "id": "P2",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "Verified: case loop validate_phy.m:133-150, V11 at 155, V12 at 179, V9 at 200, v12c loop at 351, v13 loop at 447. 11 cases x 6 x 20 seeds = 1320 sims. run_curve builds in memory and seeds with p.seed*100+r through link_seed. The only global-stream-looking calls are private streams (rs). The 548.5 min is in the logs (A4v done in 548.5 min on p3; 366.8 min is the other profile). Cumulative-time logs show the V1-V8d cases take about 55 min and V11 plus V12 about 31 min. V12c (9 rows, several spreads each) and V13 are the bulk. Parallelising only the case loop would save about 40 min; the 5-6 h claim needs V12c rows and V13 parallel too (the audit lists them). The 2-3 h figure is a guess (unmeasured). Contention with other chains and Simulink CacheFolder per worker apply (pool_worker_init precedent exists: dev_d91_parfor_options.m prints D91PROOF P_parfor). No test or runbook greps A4v's per-row timing lines.",
+    "live_chain_impact": "None now. Memory and CPU contention if launched beside a chain (checklist #11, #15).",
+    "required_proof": "Serial vs parallel on validate_phy('V12c', rows) and a 2-case subset: isequal of BER/NERR arrays and identical verdict lines. The audit's proof is adequate."
+   },
+   {
+    "id": "P3",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "Verified: threat loop run_dataset_sweep.m:158-190, none class 192-204, SEED0+run_id seeding in add_subrun, hides_antenna in the shadowing while-loop. The global-stream consumers are exactly rand() at 177/181/204 and randi(2^26-1) at build_threat_model.m:217 when p.seed=[] (build() is called with p.seed=[] once per level). I grepped every rand/randn/randi/randperm in link/ and none touches the global stream; the generated Simulink blocks use their own codegen RNG. The plan pass must therefore replay one randi per build and the rand() calls in the old order, including the extra rand() inside the hide-antenna retry. The audit says exactly this. The baseline is stale: A5 took 178.8 min only in the 16.10 first-reading run; the D86 runs took 423 min (p1) and 485.6 min (p3), and B3n 281/411 min and B3q 420/440 min, with two chains running. Wall saving therefore depends on free cores beside the other chain; '2.5 h per stage' is unmeasured. 11 source-text tests on run_dataset_sweep confirmed (count matches).",
+    "live_chain_impact": "None now. Same-name shared model per worker needs own CacheFolder (#10). The dataset is large, so parfor memory must be watched.",
+    "required_proof": "SMOKE serial vs parallel with isequal on every field of dataset and identical printed rows; the plan pass itself checked against the old speed sequence for one full-size level."
+   },
+   {
+    "id": "P4",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "Verified: generators tx_script 406, channel_script 423, threat_script 523, rx_script 780 end 2007; helpers 2009-2164; 15 literal helper functions 1555-2003 (st_quiet ... qpsk_dec) inside the cell array closed at 2004 and joined by sprintf('%s\\n', c{:}) at 2005. The audit's 'awk finds no sprintf' is literally false for the range (the join at 2005 is inside it) but harmless. The header is lines 2-199. Tests that read the file text are exactly test_core.m:4773 and 7468; no runbook greps it. Text generation only, no RNG executed; build_threat_model.m:217 is untouched. String equality of the four scripts over a parameter grid is an adequate proof for the scripts; set_script and the block parameters must stay unmodified. Benefit is readability only (unmeasured).",
+    "live_chain_impact": "None now. Any edit invalidates run_cache keys; do not merge under a running stage (#13).",
+    "required_proof": "isequal of tx/channel/threat/rx script strings over the grid, old vs new; repoint test_core.m:4773 and 7468 and dev/dev_rx_script.m."
+   },
+   {
+    "id": "P5",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "Verified: compare_architectures.m:137 calls fused_oof and :138 recomputes Zv = fuse_classes('windows', sp.val, Pv, FZ.N, cues); inside fused_oof (:208) Z = fuse_classes('windows', va, P, N, cues) with the same arguments. 5 architecture variants, each with its own Pv, so the duplication is real per variant. 'windows' has no RNG and no persistent state. The audit's description of the six source-text tests is inaccurate: they do search the call text. test_head.m:195-200 requires the exact substring 'fused_oof(sp.val, Pv, FZ.N, FZ.lambda, tv, fold, cls_names, tf, cues, FZ.FM);' and 'FMv = fuse_classes(...Zv...)'; test_core ~7975 requires 'fuse_classes(''windows'', va, P, N, cues)' inside fused_oof. Keeping the call as '[VA(v,2:3), FV(v,:), Zv] = fused_oof(...same arguments...);' and the name Zv satisfies all of them. Saving '3-10 min of B3a' is a guess (unmeasured).",
+    "live_chain_impact": "None now.",
+    "required_proof": "isequal(Zv_old, Zv_new) in one smoke call, plus the 6 source-text tests rerun."
+   },
+   {
+    "id": "P6",
+    "kind": "cleanup",
+    "verdict": "wrong",
+    "reason": "The flags and builders are right: main.m:101-102 set validate_A and check_A4 to false, the only users are main.m:165-182; build_link_model.m 121 lines and build_rician_model.m 139 lines are used only there; no .sh/.ps1/test reads them. But quick_ber.m (16 lines) is not dead. diagnostics/validate_new_threats.m:22 calls it, and the check_A4 block uses it on the live threat model. Counting it in the '-276 lines' and moving or deleting it breaks that diagnostic (about 260 lines are removable). The audit also misses that main.m:163 (berTheory = berawgn(...)) becomes dead too. code/legacy does not exist in the tree, so 'move to legacy/' means creating it; run_cache excludes legacy, but removing files from code/ still changes the code hash.",
+    "live_chain_impact": "None now. run_cache hash changes after the merge.",
+    "required_proof": "git grep before and after; keep quick_ber (or move validate_new_threats with it); run the main-reading tests (test_core.m:6653, 6766 loop over stage names only)."
+   },
+   {
+    "id": "P7",
+    "kind": "cleanup",
+    "verdict": "unsafe",
+    "reason": "Copies verified: ternary 29 repo-wide (10 in detection/link at the cited lines), macro_f1 at select_fusion.m:481, train_hybrid_net.m:111, train_spec_net.m:97 are character-identical, k_moment identical, sign0 x3 identical, lowq identical for ood_k2_run/ood_thresholds/k2_0_lines, load_norm functionally identical (comment and NASGU only differ); getf and ood_fold_metrics lowq correctly kept apart. Problem: the macro_f1 -> macro_f1_idx rename breaks test_core.m:8499, a source-text test that requires 'cvy(a, b) = macro_f1(y(cm), yh(cm), C); cvo(a, b) = macro_f1(yn, yh, C);' in select_fusion.m. The shared helper must keep the name macro_f1 (a path file plus the string-label local macro_f1 in eval_unseen_snr.m:259 is legal, local wins) or the test must be repointed. The freeze exclusions are right (ood_k2_rules, ood_k2_run, unk_write). Realistic net saving is about 60-90 lines after the frozen exclusions (the -90 includes ternary x2 and lowq in frozen files only if they were touched).",
+    "live_chain_impact": "None now. Edits to select_fusion/compare_architectures/eval_detector (13/6/10 source-text tests) and fusion-feeding window_cues/temporal_evidence after 21.11 only; fusion.mat must stay fixed C1p start to C1c end (#13).",
+    "required_proof": "isequal of fuse_classes('windows') on a stored split before/after for k_moment; run test_core source-text tests of every edited file; keep the 'macro_f1(' call text in select_fusion.m or repoint test_core.m:8499."
+   },
+   {
+    "id": "P8",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "Verified link_seed.m:73-85: per call get_param of DialogParameters for AWGN and BitSource, redundant RandomStream/SeedSource set_param inside try/catch, block_params reads 11 UserData blocks. Models are only ever built by build_threat_model.m (no load_system of a saved model in code), so moving the constant set_param to the build is safe. The saving is a guess: whole link_seed is 0.093-0.124 s per run in the profile log and the removable part is unmeasured, so '1-1.5 h of C1p' and '~1M calls' are unmeasured. Test grep of link_seed text: none (0 fileread tests).",
+    "live_chain_impact": "None now; hash change after merge.",
+    "required_proof": "isequal of sim output for 2 seeds, old vs new link_seed, on a model built by the new build; compare get_param of the dialog fields."
+   },
+   {
+    "id": "P9",
+    "kind": "cleanup",
+    "verdict": "uncertain",
+    "reason": "Facts right except the count: four try/catch blocks are cited (Cal_db 163-168, Thr_sig 217-221, Thr_act 250-254, Thr_comp 257-265), not five. The silent fallbacks are as described (F.act=ones, act_comp=[act;nan], cal 0 dB, Thr_sig falling back to chip_field). Cal_db, Thr_act and Thr_comp sinks are added unconditionally (build_threat_model.m:262-265); Thr_sig only when own_output(p), which is true whenever proc_gain_db>0, so with the matching p it exists. But the function is also called with a caller-supplied p in tests, so the Thr_sig fallback may be exercised there. Turning silent fallbacks into errors can abort a 90-h stage if any production call ever hits them, which the audit rates 'low' without evidence. A fake out for the negative test must emulate Simulink.SimulationOutput.who.",
+    "live_chain_impact": "None now; behaviour change only in error states, but a new error would stop long stages.",
+    "required_proof": "Run the smoke for C2/EDGE and A5 with a rate_reduce configuration and every threat, check the fallback is never taken (temporary counter), then add the negative test."
+   },
+   {
+    "id": "P10",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "link/build_threat_model.m:2157-2163 is the local function cvec (7 lines); grep -w cvec over code finds only its definition; cvec2 is used at 420, 828, 829, 831.",
+    "live_chain_impact": "None now; hash change after merge.",
+    "required_proof": "mlint plus a build of the model; nothing else needed."
+   },
+   {
+    "id": "P11",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "Not a change; the facts are right: eval_detector section 5b is lines 241-488 (248 lines), select_fusion section 2 starts at 227, and the source-text test counts match (select_fusion 13, eval_detector 10). Leaving it is the right call.",
+    "live_chain_impact": "none",
+    "required_proof": "none"
+   },
+   {
+    "id": "P12",
+    "kind": "cleanup",
+    "verdict": "wrong",
+    "reason": "Half right. extract_spectrograms.m:43-46 loops spec_image per frame (5.5 ms in the profile log: 60 calls, 0.328 s) and spec_image is pure with no persistent or RNG. But (a) compare_architectures.m does not call spec_image at all (grep), so that half of the row is unsupported. (b) The benefit is overstated: A6 handles 121,968 frames, so the spec_image loop is about 11 min of the 26-42 min stage; the rest (loading the dataset, link_features loop for 122k frames, saving the 8 GB X array) is unchanged. A6 would drop to about 25 min, not 7, and '1.7 h per profile' is likely about 0.7 h. (c) ds.iq must be copied to a plain cell array first, or parfor broadcasts the whole struct to every worker (memory).",
+    "live_chain_impact": "None now.",
+    "required_proof": "isequal(X_old, X_new) on 2000 frames, as stated, with the copied cell array."
+   },
+   {
+    "id": "P13",
+    "kind": "cleanup",
+    "verdict": "safe",
+    "reason": "Counts verified: init_params.m 246 comment lines of 471, window_cues.m 124 of 399, build_threat_model.m header 2-199, extract_closed_loop_frames.m header to 148, k2_1_screen.m 30 comment lines. All sampled decision-tag lines exist (cfo_joint:3, clean_hides:3, fec_rx_of:4-5, fusion_pick:2/18, select_fusion:59/66, eval_detector:16-18/130/148/588 and so on). eval_detector.m:130 and 148 are trailing comments on code lines; the audit's reminder to keep greppable strings is needed. Frozen D111 files correctly excluded. Missing contract: every comment edit still changes the run_cache hash (it hashes all code/**/*.m including comments).",
+    "live_chain_impact": "None now; after merge all cached C2/C2g/C2u runs are invalidated by any edit.",
+    "required_proof": "git diff -w shows comment lines only; test_core; confirm run_cache re-key is acceptable."
+   },
+   {
+    "id": "P14",
+    "kind": "numeric_change",
+    "verdict": "safe",
+    "reason": "The stance 'do not change' is right. eval_unseen_snr.m:40 rng(4244) and eval_unseen_severity.m:39 rng(4345) seed the global stream; the speeds use rand() at :79, :107 and eval_unseen_severity.m:91, and build_threat_model.m:217 draws randi in between when p.seed is empty, so moving the build position shifts the speeds.",
+    "live_chain_impact": "none (no change proposed)",
+    "required_proof": "none"
+   },
+   {
+    "id": "D1",
+    "kind": "defect",
+    "verdict": "real_defect",
+    "reason": "Mechanism is correct: build_threat_model.m:2204 always recomputes ant_spacing_wl from n_rx (aperture/(3e8/fc)/max(n_rx-1,1)), while idle_rssi.m:128 and emitter_idle.m:96 read the caller's p.ant_spacing_wl. The audit's 'no live effect, p always from init_params' is wrong: decision/pool_job.m:61 and evaluation/experiment_survivability_options.m:99/108/122 set p.n_rx = VAR.n_rx (nAlt = nSys-1, i.e. 2 antennas when the system has 3) after init_params, without updating the spacing. The model then uses the new spacing (2x wider for 2 antennas) and the idle record uses the old one. surv3_metrics does not read the idle fields, so survivability verdicts are unaffected, but the idle / act_idle records of those pools are inconsistent with the link they describe.",
+    "live_chain_impact": "Live in SURV3/survivability-options pools for the alternative-antenna variant (idle fields only). No registered verdict is affected by it.",
+    "required_proof": "Show idle_rssi spacing vs built spacing for p.n_rx=2 from p0 with n_rx=3; fix by one helper used by both."
+   },
+   {
+    "id": "D2",
+    "kind": "defect",
+    "verdict": "uncertain",
+    "reason": "The code is as described (extract_closed_loop_frames.m:250-254 pads a short Thr_act with its last value, and 257-265 likewise pads Thr_comp columns). That the case 'cannot happen with the current model' is asserted, not shown. The same last-value padding appears for Thr_comp, which looks like deliberate handling of a trailing-sample difference, so it may fire routinely. git log shows the padding was added with the original code (7dfe444, D84). Not demonstrated as a defect from the code.",
+    "live_chain_impact": "unknown",
+    "required_proof": "Count how often numel(Thr_act) < nf in a smoke run before calling it a defect."
+   }
+  ],
+  "missed": [
+   "No row mentions the run_cache contract: run_cache('inputs') hashes every code/**/*.m except tests/ and legacy/ (run_cache.m), so every proposed edit, comment-only ones (P13) included, and every file added, moved or deleted (P4, P6, P7), invalidates cached C2/C2g/C2u runs when run_cache is on. This is a one-time cost but must be planned.",
+   "P1 benefit for C1c is nil (C1c is the clean 'none' link; idle_rssi 0.009 s there). P1 key must be the whole ctx; cache memory is about 120-700 MB per cell per worker, not 25 MB.",
+   "P7 macro_f1 rename conflicts with test_core.m:8499 (select_fusion source text).",
+   "P6 quick_ber has a live caller (diagnostics/validate_new_threats.m:22) and main.m:163 berTheory becomes dead; code/legacy does not exist.",
+   "P12 compare_architectures does not call spec_image; A6's spec_image loop is only about 11 of 26-42 min.",
+   "D1 is live in SURV3 for the n_rx = nSys-1 variant (pool_job.m:61, experiment_survivability_options.m:99/108/122), not 'no live effect'.",
+   "Stage-time baselines are partly stale: A5 177-179 min is the 16.10 first-reading run; the D86 runs took A5 423/485.6 min, B3n 281/411 min, B3q 420/440 min, A4v 419.5/548.5 min; C1c took 911 min. C1p 90-105 h could not be verified from the logs here.",
+   "P9: the audit says five try/catch blocks but cites four ranges.",
+   "P5: the six source-text tests do search the fused_oof call text (test_head.m:195-200, test_core ~7975); the audit's description of their anchors is inaccurate, though the proposal stays safe if the call text and the name Zv are kept."
+  ]
+ }
+]
