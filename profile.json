@@ -1,1 +1,1 @@
-{"profile":"profile 3: four antennas","n_rx":4,"skip_stages":["OHP","GCSA"],"unseen_gap":true}
+{"profile":"profile 3: four antennas","n_rx":4,"skip_stages":["OHP","GCSA"],"fec_rx":"d78","surv_v2":true,"deg_select":true,"dconf_select":true,"dconf_own":true,"s1g_select":true,"relm_select":true,"r9_print":true,"k6_split":true,"lb_select":true,"fa_nothreat":true,"speed_inference":true,"speed_band_table":true,"kpi7_union":"descriptive","edge161_n":48,"unseen_gap":true,"k2_0":true,"clt_select":true,"s1gc_select":true}
