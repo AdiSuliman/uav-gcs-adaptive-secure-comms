@@ -8,16 +8,16 @@ The scope is the lecturer's revised proposal of 20.10.2026. Everything else in t
 
 ## Status at a glance
 
-Status as of 28.10.2026. Every "met" verdict is on data never used for training or selection, read once. Intervals are 95% bootstrap.
+Status as of 5.11.2026. Every "met" verdict is on data never used for training or selection, read once. Intervals are 95% bootstrap. Profile 1 is finished. Profile 3 (extension) is deployed: its detector stages A0 to B4s and the single reading of its fourth test set (B3r) are done, and its decision-layer chain runs from C1p (about 6.11), ending about 18-21.5.11 (hard limit 24.11, D118).
 
 | Proposal deliverable | Status |
 |---|---|
 | 1. Simulation environment, validated BER model | Done |
 | 2. Labelled spectrogram dataset and trained CNN | Done |
-| 3. Rule-based adaptive recovery | Built; evaluated in C2e (28.10.2026) |
-| 4. Closed-loop integration | Built; evaluated in C2e (28.10.2026) |
-| 5. Static vs conventional adaptive vs CNN-based adaptive | Static and CNN-based read in C2e; the fair CNN-versus-conventional comparison comes from CORE_BW |
-| 6. Graphs, confusion matrix, comparison tables, summary report | After the evaluation |
+| 3. Rule-based adaptive recovery | Built; evaluated in C2e (28.10.2026) and in CORE_BW (30.10.2026) |
+| 4. Closed-loop integration | Built; evaluated in C2e (28.10.2026) and in CORE_BW (30.10.2026) |
+| 5. Static vs conventional adaptive vs CNN-based adaptive | Static and CNN-based read in C2e; the fair CNN-versus-conventional comparison was read in CORE_BW on 30.10.2026 (below) |
+| 6. Graphs, confusion matrix, comparison tables, summary report | Tables and numbers exported (KPI, RPT); the summary report follows profile 3 |
 
 | Lecturer KPI | Status |
 |---|---|
@@ -26,7 +26,7 @@ Status as of 28.10.2026. Every "met" verdict is on data never used for training 
 | False alarms in clean states <= 5% | Met (detector level) |
 | Recall >= 85% per jamming type | Met |
 | PER reduction >= 30% against the static link | Met (committed), both scenarios |
-| Recovery time, goodput, CNN contribution | Measured (no target); headlines pending (Line B, CORE_BW) |
+| Recovery time, goodput, CNN contribution | Measured (no target); Line B read on 29.10.2026, CORE_BW read on 30.10.2026 (see below) |
 
 ## Scope
 
@@ -97,22 +97,23 @@ Profile 1, fourth test set (4,032 frames per state, 576 sub-runs), read once on 
 | Recall, wideband | >= 85% | 99.73% [99.28, 100.00] | Met |
 | PER reduction vs static link, narrowband (`tone_jamming`) | >= 30% | 38.9% [34.6, 42.9] (C2e, 1,304 episodes, D105 pair) | Met (committed) |
 | PER reduction vs static link, wideband (`jamming`) | >= 30% | 43.3% [39.7, 46.8] (C2e, 1,252 episodes, D105 pair) | Met (committed) |
-| Recovery time | reported | onset-to-detection median 1 cycle (20 ms), never detected 0.0%; onset to restored 8 cycles (160 ms) | Measured; detection-to-restored headline pending (Line B, D99) |
+| Recovery time | reported | onset-to-detection median 1 cycle (20 ms), never detected 0.0%; onset to restored 8 cycles (160 ms) | Measured; Line B (D99) read on 29.10.2026, see [docs/PROJECT_LOG.md](docs/PROJECT_LOG.md) |
 | Goodput | reported | 9.45 kb/s with the rule, 1.31 kb/s with no response (recoverable jamming) | Measured |
-| CNN contribution (`rule_core3` vs a validation-tuned `blind_core`) | reported | C2e, secondary (fixed-response `blind_core`): PER -3.2% [-5.3, -1.5] (adverse), detection 20 vs 80 ms, goodput +2.56 kb/s | Measured against the weakened baseline; headline pending: CORE_BW (D106) |
+| CNN contribution (`rule_core3` vs a validation-tuned `blind_core`) | reported | C2e, secondary (fixed-response `blind_core`): PER -3.2% [-5.3, -1.5] (adverse), detection 20 vs 80 ms, goodput +2.56 kb/s | Measured against the weakened baseline; the headline is CORE_BW (D106), read 30.10.2026 (note below) |
 
 Notes:
 
 - Weakest point of the detector: wideband at JSR 0 dB, 97.82% recall (95.44% per frame). Never-detected episodes: 0.0%.
-- Line A pools all six Eb/N0 points, including the link-limited 0 and 3 dB; the per-Eb/N0 line (Line B, D99) is read after the restart and, if its words differ, both are named.
-- The false-alarm KPI is read at detector level, as pre-registered. The whole-monitor false alarm on clean flights (an extension KPI) is not at 5% yet: 12.5-29.9% of 1,800 clean validation episodes depending on the monitor setting. The fix is registered in D103 and D104.
-- KPI 5-8 for the proposal's own system come from the controlled-bandwidth study CORE_BW, where the three-state CNN drives the rule (`rule_core3`) against a `blind_core` tuned on validation (D106), estimated 30.10-2.11.2026. In C2e the rule reads the hybrid detector's classes; those readings are the profile-wide secondary lines (D105).
+- Line A pools all six Eb/N0 points, including the link-limited 0 and 3 dB; the per-Eb/N0 line (Line B, D99) was read on 29.10.2026 (non-link-limited points: narrowband 49.9% [47.3, 52.1], wideband 51.9% [50.4, 53.3], both Met (committed)).
+- The false-alarm KPI is read at detector level, as pre-registered. The whole-monitor false alarm on clean flights (an extension KPI) is not at 5% yet: 12.5-29.9% of 1,800 clean validation episodes depending on the monitor setting. The fix was registered in D103 and D104; P1R ended after C1d (see below), and profile 3 carries the remedy (D113, D121).
+- KPI 5-8 for the proposal's own system come from the controlled-bandwidth study CORE_BW, where the three-state CNN drives the rule (`rule_core3`) against a `blind_core` tuned on validation (D106). Its test was read once on 30.10.2026: PER reduction against static 62.3% [59.1, 65.4] narrowband and 69.2% [67.8, 70.5] wideband, Met (committed); the CNN contribution (`rule_core3` minus `blind_core`) is pooled PER -0.0232 [-0.0289, -0.0174] and goodput +3.58 kb/s, with narrowband PER adverse (+0.0807). The full reading is in [docs/PROJECT_LOG.md](docs/PROJECT_LOG.md) (CORE_BW reading). In C2e the rule reads the hybrid detector's classes; those readings are the profile-wide secondary lines (D105).
+- P1R, the profile-1 rerun with a fixed monitor, ended after C1d on 31.10.2026 (D104 point 4): no candidate monitor was admissible, because the class path alone breaks the 5% bound of the system false-alarm KPI. The remedy for that path is D113 and D121 in profile 3; the reading is in the PROJECT_LOG section "P1R".
 
 DQN (extension). Selected on validation (held recovery 82.6%, recovered 95.1%, against 60.3% and 71.3% for the best rule setting) and read once on the test pools in C2e: the deployed DQN, without escalation, recovered 94.1% [92.7, 95.4] of recoverable episodes (rule with escalation 66.8%, table 77.7%). Our KPI 6, the system false alarm on clean flights (extension): 2.40% (57 of 2,376 flights), upper bound 2.98% against 5%, MET (committed), for the deployed DQN only; the CNN-based rule (11.11%), the table (6.36%) and the DQN with escalation (7.41%) do not meet it. Unseen combinations (C2g): 90.6% recovered on average when a combination is left out of training, against 95.0% when trained; path-loss pairs are the weakest (sweeping jammer + path loss 75.0%).
 
 Weak points of the DQN, as measured: antenna fault 79.9% and path loss 81.4% recovered; on harmed episodes antenna fault 46.3% and airframe shadowing 21.7% (n = 46), below the simpler policies; at 161 km/h 88.7%; the validation envelope's antenna-fault cell (at least 90%) reads 78.9% [70.1, 87.0] on test. The fixes are chosen on validation only.
 
-Next dates (estimates): the PC restarts at the C2u to GAL boundary (about 19:45 on 28.10); the chain ends at RPT about 29.10 (morning); CORE_BW 30.10-2.11 (`rule_core3` against the validation-tuned `blind_core` is the lecturer row); the profile-1 rerun (P1R) 2.11-5.11; profile 3 about 18-21.11.2026 (worst about 22-23.11; step 7a, timed on 27.10, takes about 5-7 h). Windows Update is paused until 30.11.2026. Current numbers and logs are in [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/PROJECT_LOG.md](docs/PROJECT_LOG.md).
+Next dates (estimates): profile 3's chain runs from the OOD select (started 5.11 18:26, about 6 h) through the OOD read, the release check and C1p (from about 6.11 02:00-03:00) to its end about 18-21.11.2026 (hard limit 24.11, D118). Then the cleanup window about 21-23.11 (behaviour-preserving, on the code tree), the folder consolidation, and P1-v2 (D119: profile 1 rerun with the fixes proven in profile 3, new never-read test sets), whose protocol is registered on the cleaned code, about 25-30.11. Windows Update is paused until 30.11.2026. Current numbers and logs are in [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/PROJECT_LOG.md](docs/PROJECT_LOG.md).
 
 ## Operator console
 
@@ -168,15 +169,15 @@ Built and measured, but outside the proposal. They are reported separately and a
 - **Hybrid 11-class detector** (spectrogram plus 23 link features) with temporal fusion. Macro-F1 94.81% [94.35, 95.25] on the fourth test set (read once); unknown-threat detection AUROC 0.769 against a target of 0.8 (not met).
 - **Double DQN** (optional in the proposal's plan) with a safety shield and escalation, and the full set of earlier KPIs (restoration, false alarms of the whole monitor, latency).
 - **Survivability maps and EDGE**: Map A (no goodput loss) 81.8% and Map B (any configuration) 91.8% of the profile 1 envelope; three antennas against two: single threats 93.1% vs 91.3%, combined threats 67.6% vs 58.2%.
-- **Profile 3** (four antennas): detector stages done; decision layer pending.
-- **CORE_BW**: controlled-bandwidth study with 41 channels, hop >= 6 MHz and jammer widths from tone to 83.5 MHz; `rule_core3` (the three-state CNN in the loop) against a validation-tuned `blind_core`; `rule_core` (the hybrid) is the secondary row (D106).
+- **Profile 3** (four antennas): deployed on 5.11.2026 (D110-D122 readings, detector stages and B3r done; smoke 55 steps, 0 errors). Fourth test set, read once: KPI 1 macro-F1 above the 0 dB threshold 94.92% [94.47, 95.31] (target 90%), fault F1 89.9%, clean as threat 2.94%. Decoder: the JSI decoder was not adopted by dev set C's registered rule, `fec_rx` is d78 (D122). The decision-layer chain is running.
+- **CORE_BW**: controlled-bandwidth study with 41 channels, hop >= 6 MHz and jammer widths from tone to 83.5 MHz; `rule_core3` (the three-state CNN in the loop) against a validation-tuned `blind_core`; `rule_core` (the hybrid) is the secondary row (D106). Test read once on 30.10.2026; results in the PROJECT_LOG.
 - **Operator console and 3D view**: console built; the 3D view is parked until the code, the final proposal and the interim report are done.
 
 ## Documentation map
 
 | File | Content |
 |---|---|
-| [docs/DECISIONS.md](docs/DECISIONS.md) | Decision record D1-D106: why each design choice was made. The lecturer's scope is D92 |
+| [docs/DECISIONS.md](docs/DECISIONS.md) | Decision record D1-D122: why each design choice was made. The lecturer's scope is D92 |
 | [docs/LITERATURE.md](docs/LITERATURE.md) | What each source contributes, and what is missing from the library |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Plan, run status and remaining work |
 | [docs/PROJECT_LOG.md](docs/PROJECT_LOG.md) | Execution log, newest last |
@@ -189,9 +190,9 @@ The previous full version of this README is in git at commit `b648c7b`.
 
 ## Known limitations
 
-- **Pending headlines.** Recovery time from detection (Line B, which excludes the link-limited points) and the CNN contribution against an equally tuned baseline (CORE_BW) are not final. Against the weakened baseline in C2e the CNN's PER reduction is 3.2 points lower.
+- **CNN contribution.** Against the equally tuned baseline (CORE_BW) the pooled PER difference is -0.0232 [-0.0289, -0.0174] with goodput +3.58 kb/s; narrowband PER is adverse (+0.0807) while wideband improves (-0.0551). Against the weakened baseline in C2e the CNN's PER reduction is 3.2 points lower.
 - **DQN weak points.** Antenna fault and airframe shadowing on harmed episodes (46.3% and 21.7%), and the antenna-fault envelope cell on test (78.9%).
-- **Whole-monitor false alarms.** On clean flights the full monitor false-alarms in 12.5-29.9% of validation episodes. The lecturer's false-alarm KPI is met at detector level only. A fix is registered (D103, D104) and is read on a fresh clean test set.
+- **Whole-monitor false alarms.** On clean flights the full monitor false-alarms in 12.5-29.9% of validation episodes. The lecturer's false-alarm KPI is met at detector level only. P1R ended after C1d without an admissible monitor (D104 point 4); profile 3 carries the fix (D113, D121) and P1-v2 rereads it on profile 1 (D119).
 - **Noise burst.** The coded answer worsens the link in the gallery (BER 0.495 against 0.439 with no response). Profile 1 uses an uncoded answer chosen on validation; profile 3 gets a decoder.
 - **Weak detector classes (extension).** Airframe shadowing 84.5% F1; unknown-threat AUROC 0.769 is below 0.8.
 - **BER validation limit.** The receiver on the delay line fails at a 30 dB jammer, rho 0.3, 1 us (D77).
@@ -202,4 +203,4 @@ The previous full version of this README is in git at commit `b648c7b`.
 
 Adi Suliman and Bar Dvir Hassan; supervisor Golan Ein-Tzvi. Course 50076 (HIT), semester 2026-27 A. Repository: https://github.com/AdiSuliman/uav-gcs-adaptive-secure-comms
 
-Last updated 28.10.2026.
+Last updated 5.11.2026.

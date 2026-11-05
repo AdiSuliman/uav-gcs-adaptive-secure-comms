@@ -1,6 +1,6 @@
 # Project Log
 
-History of the UAV-GCS adaptive communications project, from the first link model (20.08.2026) to the current run (28.10.2026), one section per version.
+History of the UAV-GCS adaptive communications project, from the first link model (20.08.2026) to the current run (5.11.2026), one section per version.
 
 - Why each design choice was made: [DECISIONS.md](DECISIONS.md) (D-numbers are cited below).
 - What each source contributes: [LITERATURE.md](LITERATURE.md).
@@ -9,18 +9,18 @@ History of the UAV-GCS adaptive communications project, from the first link mode
 
 Scope: the lecturer's revised proposal of 20.10.2026 (D92) is the official scope. Everything built beyond it is an extension without commitment and is labelled so. Dates are DD.MM.YYYY, local time. Clocks went back on 25.10.2026 at 02:00.
 
-## Where we are (28.10.2026)
+## Where we are (5.11.2026)
 
 | Item | State |
 |---|---|
 | Lecturer KPIs 1-4 (BER model, macro-F1, false alarms, recall) | Measured on data never used for training or selection: all met (details in v7) |
-| Lecturer KPIs 5-8 (PER reduction, recovery time, goodput, CNN contribution) | Pending: they come from stage C2e (running since C2 ended on 28.10) |
-| Profile 1 (3 UAV antennas) | C2 (decision-layer training) done 28.10 07:22. Chosen on validation: the DQN without escalation, held recovery 82.6% and recovered 95.1% against 60.3% and 71.3% for the best rule setting; the false-change bound is met on validation. C2e (policy evaluation on test pools) follows |
-| Next on profile 1 | C2e (first PER, recovery-time, goodput and CNN-contribution lines) runs before the PC restart: Adi is away on the morning of 28.10, so the restart comes at the next stage boundary after he returns. Then the rest of the chain, a controlled-bandwidth study (CORE_BW), a rerun with a corrected monitor (P1R), then profile 3 |
-| Profile 3 (4 UAV antennas) | Detector stages done; decision layer waits for profile 1 |
-| Estimates | C2e started 28.10 07:22, ends about 08:30-09:30; PC restart at the first stage boundary after Adi returns; profile 1 chain ends (RPT) 29.10 about 02:00-10:00; CORE_BW 30.10-2.11 (`rule_core3` against the validation-tuned `blind_core` is the lecturer row, D106); P1R 2.11-5.11; profile 3 about 18-21.11, worst about 22-23.11 (step 7a timed 27.10: about 5-7 h) |
+| Lecturer KPIs 5-8 (PER reduction, recovery time, goodput, CNN contribution) | Read: C2e on 28.10, Line B (D99) on 29.10, CORE_BW on 30.10. PER reduction Met (committed) in both scenarios; CNN contribution against the validation-tuned `blind_core` read in CORE_BW (table below) |
+| Profile 1 (3 UAV antennas) | Finished. Chain to RPT done 29.10 03:19:55; CORE_BW read once on 30.10; P1R ended after C1d on 31.10 (D104 point 4) |
+| Profile 3 (4 UAV antennas) | Deployed on 5.11: smoke PASS (55 steps, 0 errors); `v7-p3` on Q3' `57a5ad2`; B-stage rerun (B2F, B3, B3a, B4, B4s) 13:54-17:48 rc=0, DEPLOY_STATE deployed (`fusion_rev` d91_branch_evidence_enlarged); fresh2 rehearsal passed its registered limits; B3r read the fourth test set once (KPI 1 macro-F1 above the 0 dB threshold 94.92% [94.47, 95.31] against the 90% target, fault F1 89.9%, clean as threat 2.94%; record `35a4b66`); decoder `fec_rx` d78 (D122) |
+| In progress | D111 OOD select (from 5.11 18:26, about 6 h); then the OOD read, the release check and C1p from about 6.11 02:00-03:00 |
+| Estimates | Profile 3's chain ends about 18-21.5.11 (hard limit 24.11, D118). Cleanup window about 21-23.11 (behaviour-preserving, plan in `docs/review/code_audit_20261105/`), folder consolidation, then P1-v2 (D119) on the cleaned code about 25-30.11 |
 | Windows Update | Paused until 30.11.2026 |
-| Interim report | Draft 6 delivered 27.10, being shortened; due 01.11 |
+| Interim report | Draft 7 complete (38 pages); waiting for Adi: the meetings count, the supervisor's form and signature, and submission |
 
 ## Version overview
 
@@ -30,7 +30,7 @@ Scope: the lecturer's revised proposal of 20.10.2026 (D92) is the official scope
 | v4 | 28.09 - 30.09.2026 | Receiver-side measurements, 36 configurations, stricter evaluation | Final reading 30.09: 7 of 8 KPIs met |
 | v5 | 30.09.2026 | Wider realism, spatially separated antennas, sourced platform profile | Superseded by v6 before any test reading |
 | v6 | 01.10 - 06.10.2026 | Temporal fusion, quiet slot, levels to the sources' caps | Ideal-receiver reference |
-| v7 | 01.10.2026 onward | Real receiver, flight dynamics, triples, profile 3, per-point verdicts | Detector readings done; DQN chosen on validation (C2) |
+| v7 | 01.10.2026 onward | Real receiver, flight dynamics, triples, profile 3, per-point verdicts | Profile 1 finished (C2e, CORE_BW, P1R); profile 3 deployed, B3r read 5.11, decision-layer chain running |
 
 Stage names used below: A = link and dataset, B = detector, C1 = frame pools, C1d = drop-alarm threshold, C2 = decision-layer training, C2e = evaluation of every policy, SURV and SURV3 = survivability maps, C2g = decision layer retrained without each threat combination, C2u = response to a threat never trained on, OHP = overhead pass of the UAV, GCSA = gain of the tracked GCS antenna, EDGE = verdict per envelope point, LAT = latency, RPT = report numbers.
 
@@ -280,7 +280,31 @@ The lecturer's false-alarm KPI is read at detector level; the system-level figur
 - Two audits (`audit31/ext_audit.md`, `audit31/base_audit.md`; read only, no MATLAB) found the class path the only uncalibrated alarm path behind KPI 6 (97.5% lost-branch classes on unharmed flights, flat across Eb/N0) and a drop-threshold fallback that slows path_loss detection for every policy. Adi approved all their new proposals at about 10:00 on two conditions: nothing may contradict the lecturer's 20.10 proposal, and anything that only makes a measurement stricter is printed as a side reading beside the registered one. Registered as D121 with dated lines on D64, D90, D103, D105, D106, D111, D112, D113, D116 and D118: CLT (a calibrated lost-branch acceptance at the monitor, chosen at C1d by fixed-sequence scanning against 1.5% of the 5% budget), P-A (D113's harm gate on rule_core behind its own switch), a per-path budget that replaces the fallback, D112's threshold by its own drop path, a Fisher candidate in D111 before K2-1, C2g-D in idle windows, D118's order and tiers; side readings (KPI 8 receiver-robust against U_s, a 3.5% calibration) and descriptive lines (non-emitter speed, onset-referenced paired recovery, near/far OOD). None contradicts the lecturer's proposal; all are profile 3 (P1-v2 via D119), registered before C1p, K2-1 and D2c data.
 - Adi then approved the audits' remaining proposals, appended to D121 as items 12-17 under the same two conditions: KPI 6 split by estimated link K, speed and bank (descriptive); a joint power-weighted CFO as an input to the post-D3 receiver candidate (D3's reading and `rx_fix_rule3.md` unchanged); a source check for the tilt loss on scattered paths before the book (disclosed as a bound if unsourced); the disclosure that clean flights never get the hidden-antenna loss, with a descriptive line; P-B, rule_core3 in profile 3's C2e only if profile 3's B3c model exists before C1p and the C2/EDGE smoke passes, else stated as not run; a CUSUM on lost-branch log-odds increments as a candidate after profile 3.
 
-## Status of the lecturer's KPIs (profile 1, 28.10.2026)
+### Readings and verdicts of 1-2.11.2026 (D107-D111, D115, D116, D121)
+
+- D109: D3's reading by `rx_fix_rule3.md` (run 31.10 13:44) is valid and names a class (a frame-long time-varying channel per antenna and per lag), no candidate; the fresh list holds n = 1, so section 2.5 blocks any candidate. The r2 timebox ended 2.11 09:00 with nothing adopted: profile 3 deploys on r1 with the disclosure. A second r1 defect (NSEG = 2.25 without `ceil`, found by the code review) was measured on profile 3's MRC path before any profile-3 reading: 0 discordant frames in 4920, no outcome moves; r1 stays as frozen and the defect is disclosed beside it.
+- D110: the fusion measurement ran on `wf-det` `4ae4f9b` (207,984 frames in 9,904 sub-runs, 2.8 h). The nested reading fails S3 (spoofing F1 -0.04 [-0.07, -0.01]) and therefore W3; verdict B, the d91 pick, deploys unchanged (out of fold: macro-F1 94.83%, airframe_shadowing F1 83.78%, benign_interference 91.24%). LBH entered by Adi's yes of 31.10 09:02.
+- D111: K2-1 screen GO (cue-Maha validation AUROC at least 0.80 on 3 of 4 threats, mean 0.725); K2-2 is built. D115: LB-S verdict GO (never-trained path_loss +59.0 points, lower bound +51.4; no class below -2; clean false changes +0.50 points); LB merges into TIP3, adoption stays the rule at profile 3's C2. D116: SPD-D routes bank_only and its coverage is not met, so C-LHS stays off; R5 per-pair detection 65.8-78.1%, descriptive.
+- D108: profile 3's 4-antenna LINK target computed as registered, 5.39% (3 antennas stay at 5.7%); the rho range is kept for profile 3 with side readings beside it (Adi, 2.11). D107 point 5: an empty set of harmed geometries is not met (Adi, 2.11); the D107 deploy path, behind `fa_nothreat`, is merged and off by default.
+- D121 items 1-2 (CLT at C1d, P-A at C2) are coded, deployed, stamped and covered by smoke cells on `wf-rf-a1` `8a8813b` before any profile-3 decision-layer data; the readings of the open details are registered as dated lines.
+- Macro-F1 fix: the code review found that a present class with no true positive scored NaN and was dropped, which could lower the KPI 1 threshold. Corrected to F1 = 0 for such a class (`6c8b41a`, merged `2dbe07a`; Adi, 2.11 about 19:40). Recomputed offline from saved files, D110's verdict and every profile 1 and profile 3 reading are identical bit for bit.
+- Code: the small review fixes, the 4-antenna tests, the D107 deploy path, D116/D117 switches (all off without `profile.json` fields), P-B (D121 item 16) and `code/legacy` removed (20 files called by nothing); all merged into `tip3-lb`.
+
+### Profile 3 smoke and deployment (4-5.11.2026)
+
+- Smoke findings on profile 3 (`wf-smk3`, merged 4.11 06:36): logical lost-branch trace, lazy sweeper line, the registered s0, the CUSUM form under `dconf_force`. `tip3-lb` merged into `v7-p3` as `967a9f1` (q7, 4.11 07:40). OHP and GCSA skipped on profile 3 and R1's unseen-gap line on (`57a5ad2`; `profile.json`, D92, D116 item 1).
+- The 4.11 deploy queue: tests of the core (54 min) and of p3core (53 min), 314/314 PASS. On 5.11 the smoke passed (55 steps, 0 errors) and `v7-p3` stood on Q3' `57a5ad2`.
+- B-stage rerun (B2F, B3, B3a, B4, B4s) 13:54-17:48, rc=0, DEPLOY_STATE deployed (`fusion_rev` d91_branch_evidence_enlarged). The fresh2 rehearsal passed the limits registered before B3r (`6c48b95`): fault F1 91.0 against 88, macro-F1 above the threshold 95.14 against 94.5, clean as threat 2.54 against 2.61.
+- B3r read the fourth test set once: KPI 1 macro-F1 above the 0 dB threshold 94.92% [94.47, 95.31] (target 90%), fault F1 89.9%, clean as threat 2.94%. Record commit `35a4b66`.
+- D122: step 7a ran D97 point 2's choice on dev set C. No JSI variant qualifies: every one loses more than Q/2 = 2 packets beyond D78 on a clean point, the clean link at 0 dB under spatial_diversity. The JSI decoder is not adopted by the registered rule; profile 3's `fec_rx` is d78. Over the intermittent points JSI loses 20,461-22,146 packets against D78's 28,913, descriptive. The real `profile.json` states every switch of the deployment (`8f13e34`).
+- D117 point 1 (KPI 7's speed part on the union of the test and second-test single sets as the verdict), approved by Adi on 31.10 at 09:02, was confirmed by him on 5.11; `profile.json` `1a29527`.
+- The D111 OOD select is hand-run from 5.11 18:26 (about 6 h), then the OOD read, the release check and C1p from about 6.11 02:00-03:00.
+
+### Code audit of 5.11.2026
+
+- A code audit of the rules, the decision, the detection and link, the evaluation and GUI code, and the tests, scripts and folders was done on 5.11, with a consolidated plan (row decisions and batches, defects, numeric-change candidates, the folder layout and the docs list). No results are changed by it. Files and the verification runs are in `docs/review/code_audit_20261105/` (`consolidated_plan.md` first). The behaviour-preserving cleanup runs in the window about 21-23.11, after profile 3's chain; behaviour-changing candidates wait for a DECISIONS entry before P1-v2's protocol is registered.
+
+## Status of the lecturer's KPIs (profile 1, as of 5.11.2026)
 
 | KPI | Value | Status |
 |---|---|---|
@@ -288,12 +312,12 @@ The lecturer's false-alarm KPI is read at detector level; the system-level figur
 | 2 Macro-F1 at least 85% | 99.83% | Met |
 | 3 False alarms at most 5% in clean states | 0.17% (detector level) | Met |
 | 4 Recall at least 85% per jamming type | 99.95% / 99.73% | Met |
-| 5 PER reduction at least 30% against static | narrowband 38.9% [34.6, 42.9]; wideband 43.3% [39.7, 46.8] | Met (committed), C2e, D105 pair |
-| 6 Recovery time, onset-to-detection reported separately | detection median 1 cycle (20 ms); onset to restored 8 cycles (160 ms) | Measured; detection-to-restored headline pending (Line B, D99) |
+| 5 PER reduction at least 30% against static | C2e: narrowband 38.9% [34.6, 42.9]; wideband 43.3% [39.7, 46.8]. Line B (non-link-limited points): 49.9% [47.3, 52.1] and 51.9% [50.4, 53.3]. CORE_BW `rule_core3`: narrowband 62.3% [59.1, 65.4]; wideband 69.2% [67.8, 70.5] | Met (committed), C2e D105 pair, Line B and CORE_BW |
+| 6 Recovery time, onset-to-detection reported separately | detection median 1 cycle (20 ms); onset to restored 8 cycles (160 ms) | Measured; Line B (D99) read 29.10 |
 | 7 Goodput | 9.45 kb/s with the rule, 1.31 kb/s without (recoverable jamming) | Measured |
-| 8 CNN contribution against the conventional mechanism | C2e secondary: PER -3.2% [-5.3, -1.5] (adverse), detection 20 vs 80 ms, goodput +2.56 kb/s | Measured against the weakened baseline; headline pending (CORE_BW) |
+| 8 CNN contribution against the conventional mechanism | CORE_BW (30.10, `rule_core3` minus the validation-tuned `blind_core`): pooled PER -0.0232 [-0.0289, -0.0174], goodput +3.58 kb/s; wideband PER -0.0551, narrowband PER +0.0807 (adverse). C2e secondary: PER -3.2% [-5.3, -1.5], detection 20 vs 80 ms, goodput +2.56 kb/s | Measured; headline CORE_BW |
 
-Known caveat for KPI 5: at 0 and 3 dB the clean packet loss (0.99 and 0.79) makes the 2x packet bound vacuous, so those points are reported separately (D99).
+The table is the scope of profile 1; profile 3 (extension) is read when its chain ends. Known caveat for KPI 5: at 0 and 3 dB the clean packet loss (0.99 and 0.79) makes the 2x packet bound vacuous, so those points are reported separately (D99).
 
 Extension readings (no commitment): the earlier proposal's unknown-threat KPI is 0.769 (target 0.8, not met); the system-level clean false alarm (our KPI 6) is MET (committed) for the deployed DQN, 2.40% [upper 2.98%], and NOT MET for the CNN-based rule, the table and the DQN with escalation (above).
 
