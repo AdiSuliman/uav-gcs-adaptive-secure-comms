@@ -1,0 +1,39 @@
+=== D111 OOD RUN, PHASE SELECT (profile 3) ===
+Generated: 05-Nov-2026 18:28:00 | commit 35a4b66694580290d1dea4aec8843f3faa84f4c3 | code_tree de034ff21fbf094adc5962ae70380f784ac82bd5 | params_id 7ecc49e97d0a5639f458997caa6b58c8
+registration commit b6628caa64e681e7f9714a30cdbbe8185079620d (C:\Users\Adi Suliman\uav-gcs-v7-docs)
+s0 = last_or_if over 1 cycle(s) (frozen); fusion window N = 12; level step over 12; cue window 12 cycles
+rule_sha256 ood_k2_run.m b54b8f77763f0c5e85b73c4eb984719edc82bba2a83a234e97a26c1082825cf6
+rule_sha256 ood_k2_rules.m 0788d8f2a3876a56bc5b0686cf77bfd013be08fd215106661f31bb9c7fe95435
+rule_sha256 ood_cue.m 3be2a34cc1f4c1c23e35290d386a6e53ce609604f5a85c92f06e7114915476a7
+rule_sha256 unk_stat.m 0da767e3d26bb5c64503559350340770699446c73da46adec7f64f112cb20a8f
+rule_sha256 unk_write.m 4dcd29b54329dd48df64bdce147fbca1a047f04d69b7170ecb335d5607f76322
+rule_sha256 ood_loto_split.m 8507b5abb89352413b3d16a98d2416800a3eb14a03489768fe7181d047e35169
+
+Validation only (selection half's known windows against each held-out threat's windows, the newest frame's label); C0 = s0 as stored, C1-C4 = U (unk_stat.m); 2000 bootstrap draws per threat
+held-out threat             C0       C1       C2       C3       C4
+jamming                  0.628    0.543    0.561    0.469    0.531
+noise_burst              0.850    0.810    0.813    0.582    0.769
+reactive_jamming         0.956    0.935    0.931    0.783    0.905
+path_loss                0.635    0.693    0.655    0.729    0.662
+spoofing                 0.866    0.817    0.827    0.640    0.779
+antenna_fault            0.688    0.769    0.708    0.790    0.764
+benign_interference      0.811    0.825    0.835    0.838    0.807
+sweeping_jammer          0.915    0.926    0.914    0.937    0.902
+tone_jamming             0.932    0.906    0.908    0.780    0.881
+airframe_shadowing       0.586    0.727    0.678    0.756    0.726
+mean                     0.787    0.795    0.783    0.730    0.772
+Checks per candidate (a) mean >= C0 + 0.010 and 5th percentile of the mean paired difference > 0 (lb), (b) no threat loses > 0.03, (c) no known class flagged > 2x C0 or > 10%, (d) static pass and parity over 20 sub-runs (max |U monitor - U offline| of the window, of the frame sites, flags differing), latency (U median / p95 ms on s0's 2.86 / 4.39): C1 a FAIL (lb 0.0041) b FAIL c FAIL parity pass (0, 0, 0) latency pass (0.053 / 0.058) -> not eligible; C2 a FAIL (lb -0.0072) b FAIL c FAIL parity pass (0, 0, 0) latency pass (0.747 / 1.355) -> not eligible; C3 a FAIL (lb -0.0634) b FAIL c FAIL parity pass (0, 0, 0) latency pass (0.053 / 0.057) -> not eligible; C4 a FAIL (lb -0.0186) b FAIL c FAIL parity pass (0, 0, 0) latency pass (0.053 / 0.056) -> not eligible
+The 18.10 procedure on these folds: last_or_if over 2 cycles, validation mean 0.787 (pairs within the 18.10 KPI 7 admission).
+verdict C0
+Global verdict (D111 items 5-6, all ten held-out threats; it decides deployment only): C0. C0 stays: set 4 gets no OOD reader and KPI 2 stays 0.763.
+input_sha256 results/ood_k2_select.mat 2e1280fd41afd23149fe68b8e4ec88ce4c7c25c06c87f784f45091120e97259d
+input_sha256 results/ood_k2/fold_1.mat b6b8a13ed8bf6a1becb8f3736a8222038744b33621c6d0a9a9df0197a8196425
+input_sha256 results/ood_k2/fold_2.mat 3841d884dc82450b0aec2bcd95da0fafb1ed258de68cd7f59584beeb7148aa5c
+input_sha256 results/ood_k2/fold_3.mat 91c1b7a7d8eb7c0b2b83c6d46ae67a685c14ed240846f001000c34f807c43442
+input_sha256 results/ood_k2/fold_4.mat f056989388adec9a1f8f30c18ebd7a626aee262b29beccaa396e567b96abcfda
+input_sha256 results/ood_k2/fold_5.mat a29d5b55a325badd03e9276ead4a0f4c1b1784a1c593203dd08ee6270fa65b68
+input_sha256 results/ood_k2/fold_6.mat 483dca1e3149ad99e39269437015e59e48c033c26f38b69376bd779179e9dba2
+input_sha256 results/ood_k2/fold_7.mat 8033b26cd64da5edecdea4993206db14b7c121a1400d44ff4001f3a55046dc9c
+input_sha256 results/ood_k2/fold_8.mat eacafc7617f670a97bd4352640470be48db3dfef0b09870d20b20ce0939bd35d
+input_sha256 results/ood_k2/fold_9.mat 2871ba61db3e2c4f70237369c925aef823e07e86dd267314126e0ae533e4ff8b
+input_sha256 results/ood_k2/fold_10.mat bbe3b78e2ac9bae9301989f3321cd85cb577c696405ab9998b37323324476448
