@@ -308,6 +308,7 @@ The lecturer's false-alarm KPI is read at detector level; the system-level figur
 
 - A root-cause pass on the numbers below their condition, on validation and existing records only, found that a lost branch looks alike from a fault, a shadow, a small level loss or a clean turn. Antenna fault in KPI 4 is mostly a policy and false-alarm trade (profile 1, harmed episodes: DQN 46.3%, the same DQN with the escalation 86.2%); profile 3's registered answers are read at C2.
 - D110's verdict stands: profile 3 deploys B. From the 136 saved fits, the nested reading's spoofing loss comes from its two LBH+CFAR folds, and LBH as the only candidate passes rule S. Adi chose P1-v2 only: D119 item 1 now admits LBH as D110's only candidate there, read once on the new detector set. Its gains on this fit set stay optimistic and are not quoted as an effect.
+- Re-examining that route found gaps, closed by a second dated line on D119 item 1 (Adi, 8.11.2026 ~22:10): rule S for LBH is read once now on profile 1's own fit set, offline beside C1p; P1-v2 runs a B arm beside the LBH arm, read in one pass; `base_fm` carries every 3- against 4-antenna detector comparison; D110 point 6's 2% gate does not apply. Two earlier statements were corrected: the 10 further seeds vary the bootstrap and not the folds, and LBH adds about 3-4 days to P1-v2 because profile 3 adopted no detector fix.
 
 ## Status of the lecturer's KPIs (profile 1, as of 5.11.2026)
 
