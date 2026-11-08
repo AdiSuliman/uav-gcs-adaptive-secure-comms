@@ -304,6 +304,11 @@ The lecturer's false-alarm KPI is read at detector level; the system-level figur
 
 - A code audit of the rules, the decision, the detection and link, the evaluation and GUI code, and the tests, scripts and folders was done on 5.11, with a consolidated plan (row decisions and batches, defects, numeric-change candidates, the folder layout and the docs list). No results are changed by it. Files and the verification runs are in `docs/review/code_audit_20261105/` (`consolidated_plan.md` first). The behaviour-preserving cleanup runs in the window about 21-23.11, after profile 3's chain; behaviour-changing candidates wait for a DECISIONS entry before P1-v2's protocol is registered.
 
+### Root-cause pass and the fusion head (8.11.2026)
+
+- A root-cause pass on the numbers below their condition, on validation and existing records only, found that a lost branch looks alike from a fault, a shadow, a small level loss or a clean turn. Antenna fault in KPI 4 is mostly a policy and false-alarm trade (profile 1, harmed episodes: DQN 46.3%, the same DQN with the escalation 86.2%); profile 3's registered answers are read at C2.
+- D110's verdict stands: profile 3 deploys B. From the 136 saved fits, the nested reading's spoofing loss comes from its two LBH+CFAR folds, and LBH as the only candidate passes rule S. Adi chose P1-v2 only: D119 item 1 now admits LBH as D110's only candidate there, read once on the new detector set. Its gains on this fit set stay optimistic and are not quoted as an effect.
+
 ## Status of the lecturer's KPIs (profile 1, as of 5.11.2026)
 
 | KPI | Value | Status |
