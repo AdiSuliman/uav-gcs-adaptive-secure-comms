@@ -104,6 +104,7 @@
 % with clt_select CLT and BUD, the per-path budget at each deployed monitor), results/drop_threshold.txt
 
 clc;
+rehash;                                                    % function files added while this MATLAB runs (drop_path_pick.m)
 fprintf('=== Eb/N0-drop threshold of the drop alarm ===\n\n');
 DGon = deg_options().on; if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'deg_select'), DGon = CFG.deg_select; end
 DGf = deg_options().force; if exist('CFG', 'var') && isstruct(CFG) && isfield(CFG, 'deg_force'), DGf = deg_force('check', CFG.deg_force, 'CFG'); end
@@ -123,6 +124,8 @@ if CLf && ~(CLx && isfile('data/clean_val_pools.mat'))
     error('choose_drop_threshold:force', 'clt_force needs clt_select and clean validation flights');
 end
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
+assert(all(isfinite(clean_ber_ref(PP.ebno, 'ber_est'))), 'choose_drop_threshold:clean_ref', ...
+    'the clean reference in data/policy_pools.mat is missing or not finite: the monitor would read its floor (past bug 16)');
 na = find(strcmp(PP.actions, 'no_action'));
 iPL = find(strcmp(PP.scen, 'path_loss'));                  % the three severities
 icl = find(strcmp(PP.scen, 'none'), 1);
@@ -367,14 +370,10 @@ else
         MONP(m).cf = R{sw}(m).cf; MONP(m).j = R{sw}(m).j; MONP(m).pick = R{sw}(m).pick; MONP(m).admissible = R{sw}(m).admissible;
         MONP(m).k = R{sw}(m).k; MONP(m).n = ncl; MONP(m).k_other = R{sw}(m).k_other; MONP(m).lat = R{sw}(m).lat;
         MONP(m).path_budget = struct('admissible', false, 'pick', NaN, 'j', NaN, 'k', NaN, 'n', size(Tcf.eg, 1), 'bound', NaN, 'used', false);
-        if ~R{sw}(m).admissible                            % D121 item 4: the drop path's own budget, before the fallback
+        if ~R{sw}(m).admissible                            % D121 item 4's budget, applied after CLT (item 9)
             csb = []; if sw == 2, csb = CS; end
             PB = drop_path_pick(Tcf, drop_alarm, GF, R{sw}(m).cf, csb, 0.02);
             PB.used = false; MONP(m).path_budget = PB;
-            if PB.admissible
-                MONP(m).pick = PB.pick; MONP(m).j = PB.j; MONP(m).path_budget.used = true;
-                MONP(m).k = sum(any(monitor_confirm(Tc, drop_alarm, PB.pick, R{sw}(m).cf, csb), 2));
-            end
         end
     end
     for s = 1:2
@@ -395,7 +394,7 @@ else
                 if PBs.admissible
                     rw{end+1} = sprintf(['      D121 item 4: the drop path''s own budget admits %.1f %s (first confirmed by the drop ' ...
                         'alarm %d/%d of the fit half, bound %.2f%% <= 2.0%%)%s'], PBs.pick, drop_unit(drop_alarm), PBs.k, ...
-                        PBs.n, 100 * PBs.bound, ternary(s == sw, ', kept instead of the least sensitive fallback', '')); %#ok<SAGROW>
+                        PBs.n, 100 * PBs.bound, ternary(s == sw, ', applied after CLT instead of the least sensitive fallback', '')); %#ok<SAGROW>
                 else
                     rw{end+1} = sprintf(['      D121 item 4: no grid value meets the drop path''s own 2.0%% budget on the fit half ' ...
                         '(%d episodes) either; the least sensitive stands.'], PBs.n); %#ok<SAGROW>
@@ -421,6 +420,20 @@ else
             [MONP(m), rl] = clt_rechoose(MONP(m), MON{m}, Tc, Tcf, Tv, onv, thv, thn, drop_alarm, GF, confirm_sweep, ncl, FA_BOUND, lbt{m});
             rw = [rw, rl]; %#ok<AGROW>
         end
+    end
+    for m = 1:numel(MON)                                    % D121 items 4 and 9: the drop path's own budget after CLT
+        if ~isempty(lbt) && ~isempty(lbt{m}), continue; end  % re-chosen under the lost-branch acceptance above
+        PB = MONP(m).path_budget;
+        if MONP(m).admissible || ~PB.admissible, continue; end
+        MONP(m).pick = PB.pick; MONP(m).j = PB.j; MONP(m).path_budget.used = true;
+        MONP(m).k = sum(any(monitor_confirm(Tc, drop_alarm, PB.pick, MONP(m).cf, confirm_sweep), 2));
+        MONP(m).lat = delays(monitor_confirm(Tv, drop_alarm, PB.pick, MONP(m).cf, confirm_sweep), Tv.onset, thv, onv, thn);
+        rw{end+1} = sprintf(['    %-15s threshold by the drop path''s own budget (D121 item 4, after CLT): %6.1f %s, first ' ...
+            'confirmed by the drop alarm %d/%d of the fit half (bound %.2f%% <= 2.0%%); whole monitor %d/%d (bound %.2f%%)'], ...
+            MON{m}, PB.pick, drop_unit(drop_alarm), PB.k, PB.n, 100 * PB.bound, MONP(m).k, ncl, 100 * cp_upper(MONP(m).k, ncl)); %#ok<AGROW>
+        rw{end+1} = sprintf('      delays median / p90 / never: %s', strjoin(cellfun(@(n, a, b, c) sprintf('%s %g/%g/%.1f%%', ...
+            n, a, b, c), MONP(m).lat.threat, num2cell(MONP(m).lat.median), num2cell(MONP(m).lat.p90), ...
+            num2cell(100 * MONP(m).lat.never), 'UniformOutput', false), ', ')); %#ok<AGROW>
     end
     if DCx && strcmp(drop_alarm, 'class_cusum')
         [DCONF, rd] = dconf_step(drop_alarm, GF, MON, MONP, confirm_sweep, Tc, ismember(Tc.r, find(fitg)), ...

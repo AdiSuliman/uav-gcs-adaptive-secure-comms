@@ -253,6 +253,10 @@ verifyEmpty(tc, regexp(src, 'drop_path_pick\(Tc,', 'once'));
 verifyNotEmpty(tc, regexp(src, 'drop_path_pick\(Tcf,', 'once'));
 verifyNotEmpty(tc, strfind(src, 'Tcf = sub_trace(Tc, ismember(Tc.r, find(fitg)))'));
 verifyNotEmpty(tc, strfind(src, 'monitor_confirm(Tck, drop_alarm, GF(j), cf, CS)'));
+i1 = strfind(src, '[CLT, rl] = clt_step(''choose''');          % item 9: the rescue only after CLT
+i2 = strfind(src, 'MONP(m).pick = PB.pick; MONP(m).j = PB.j; MONP(m).path_budget.used = true;');
+verifyNumElements(tc, i1, 1); verifyNumElements(tc, i2, 1); verifyLessThan(tc, i1, i2);
+verifyNotEmpty(tc, strfind(src, 'assert(all(isfinite(clean_ber_ref(PP.ebno, ''ber_est''))), ''choose_drop_threshold:clean_ref'''));
 end
 
 function test_choose_drop_threshold_static_no_truth(tc)
