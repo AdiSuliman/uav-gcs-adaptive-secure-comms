@@ -23,10 +23,12 @@ function varargout = clt_step(op, varargin)
 %     L(m).forced holds it and L(m).rule_accept what the rule adopted ([] none).
 %     L(m): monitor, grid, k (lost-branch-first count per grid value, NaN not read), n, tau, miss,
 %     guard_ok, fail, accept ([] or struct('tau_hi', tau)), budget, forced, rule_accept.
-%   [B, line] = clt_step('budget', T, form, thr, cf, cs, tau, label)
+%   [B, line] = clt_step('budget', T, form, thr, cf, cs, tau, label, cdr)
 %     The clean episodes of T with a confirmed alarm and those whose first confirmation needs each path,
 %     with their bounds against the shares of KPI 6's 5%: lost-branch class 1.5%, drop alarm 2.0%,
-%     degradation and the other classes 1.5%; "union bound met" only if all three hold.
+%     degradation and the other classes 1.5%; "union bound met" only if all three hold. cdr the drop
+%     alarm's own confirmation ([] or absent: none). The lines of 'choose' read the monitor before the
+%     drop threshold's re-choice; choose_drop_threshold.m prints the monitor as deployed.
 switch op
     case 'choose'
         [varargout{1:2}] = choose(varargin{:});
@@ -92,8 +94,8 @@ for m = 1:numel(MON)
         '(%d before it included)'], nd, numel(o), ternary(nd > 0, ' (GUARD FAILS)', ''), na); %#ok<AGROW>
     L(m).fail = fail; L(m).guard_ok = isempty(fail);
     if L(m).guard_ok, L(m).accept = struct('tau_hi', tau); end
-    [B0, b0] = budget(Tk, form, thr, cf, cs, [], 'without it');
-    [B1, b1] = budget(Tk, form, thr, cf, cs, tau, sprintf('at tau_hi %s', tau_txt(tau)));
+    [B0, b0] = budget(Tk, form, thr, cf, cs, [], 'without it, before the re-choice');
+    [B1, b1] = budget(Tk, form, thr, cf, cs, tau, sprintf('at tau_hi %s, before the re-choice', tau_txt(tau)));
     L(m).budget = struct('ref', B0, 'cand', B1);
     lines = [lines, {['    ' b0], ['    ' b1]}]; %#ok<AGROW>
     if ~isempty(force) && force
@@ -106,14 +108,20 @@ for m = 1:numel(MON)
 end
 end
 
-function [B, line] = budget(T, form, thr, cf, cs, tau, label)
+function [B, line] = budget(T, form, thr, cf, cs, tau, label, cdr)
 % First confirmation per path: without that path the monitor does not confirm at that cycle.
-[c, a, cn, ot] = monitor_confirm(T, form, thr, cf, cs, [], tau);
+% cdr: the drop alarm's own confirmation (PP.confirm_drop), [] or absent: none.
+if nargin < 8, cdr = []; end
+[c, a, cn, ot] = monitor_confirm(T, form, thr, cf, cs, cdr, tau);
 acc = T.lb & ot;                                      % cycles that alarm on a lost-branch class
 o1 = ot; o1(acc) = T.dg(acc);
 c1 = movsum(double(o1 | a), [cf(2) - 1, 0], 2) >= cf(1);
 if ~isempty(cs), c1 = c1 | movsum(double(T.sw), [cs(2) - 1, 0], 2) >= cs(1); end
 c2 = movsum(double(acc | a), [cf(2) - 1, 0], 2) >= cf(1);
+if ~isempty(cdr)                                      % the drop alarm's own confirmation stays in both
+    cd = movsum(double(a), [cdr(2) - 1, 0], 2) >= cdr(1);
+    c1 = c1 | cd; c2 = c2 | cd;
+end
 [f, t1] = max(c, [], 2); i1 = find(f); ix = sub2ind(size(c), i1, t1(i1));
 n = size(c, 1);
 B = struct('n', n, 'k', numel(i1), 'lb', sum(~c1(ix)), 'drop', sum(~cn(ix)), 'rest', sum(~c2(ix)));

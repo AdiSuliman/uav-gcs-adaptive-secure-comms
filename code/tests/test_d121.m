@@ -195,48 +195,64 @@ end
 
 %% ---------- item 4: the drop path's own false-alarm budget ----------
 function test_drop_path_pick_rescues_before_fallback(tc)
-% Synthetic clean trace: the degradation path alone already breaks the whole-monitor bound
-% (Tr.other always true), but the drop alarm never fires on its own at a conservative
-% threshold. drop_path_pick must find that conservative, admissible value instead of
-% reporting "no threshold admissible" only at the least-sensitive grid point.
-Tr = struct('eg', zeros(150, 10), 'other', true(150, 10), 'sw', false(150, 10));
-GF = [2 4 6];                                            % ascending: conservative at the end
-cf = [2 2];
-PB = drop_path_pick_wrap(Tr, 'class_drop', GF, cf, [], 150, 0.02);
+% The other paths alone break the whole-monitor bound (Tr.other always true) and the drop alarm never
+% gives a first confirmation: the least sensitive value passes and the scan goes on to the most sensitive.
+Tr = struct('eg', 20 * ones(150, 10), 'other', true(150, 10), 'sw', false(150, 10));
+PB = drop_path_pick(Tr, 'class_drop', [2 4 6], [2 2], [], 0.02);
 verifyTrue(tc, PB.admissible);
-verifyEqual(tc, PB.k, 0);                                % the drop alarm alone never fires here
+verifyEqual(tc, [PB.k PB.n PB.j], [0 150 1]);
 end
 
-function PB = drop_path_pick_wrap(Tr, mode, GF, cf, cs, ncl, bound)
-% Exposes choose_drop_threshold.m's local drop_path_pick via a thin re-implementation (the
-% function is local to that script, so it is mirrored here for the unit test only -- this
-% catches a regression in the counting rule it shares with drop_only_count).
-PB = struct('admissible', false, 'pick', NaN, 'j', NaN, 'k', NaN, 'bound', NaN);
-for j = numel(GF):-1:1
-    a = false(size(Tr.eg)); if isfinite(GF(j)), a = drop_alarm_seq(Tr.eg, mode, GF(j), [], Tr.other); end
-    c = movsum(double(Tr.other | a), [cf(2) - 1, 0], 2) >= cf(1);
-    if ~isempty(cs) && isfield(Tr, 'sw')
-        cs_hit = movsum(double(Tr.sw), [cs(2) - 1, 0], 2) >= cs(1);
-        c = c | cs_hit;
-    else
-        cs_hit = false(size(c));
-    end
-    k = 0;
-    for i = 1:size(Tr.eg, 1)
-        f = find(c(i, :), 1);
-        if ~isempty(f) && a(i, f) && ~Tr.other(i, f) && ~cs_hit(i, f), k = k + 1; end
-    end
-    up = cp_upper_t(k, ncl);
-    if up <= bound
-        PB = struct('admissible', true, 'pick', GF(j), 'j', j, 'k', k, 'bound', up);
-    else
-        break
-    end
-end
+function test_drop_path_pick_counts_c_prime(tc)
+% D112 (c'): an episode counts when the monitor without the drop alarm does not confirm at its first
+% confirmed cycle, even if the other path is set at that cycle (2 of 2: the 3-cycle median alarms from
+% cycle 11, the other path at 12, first confirmed at 12).
+T = clt_trace(900, 30);
+T.eg(1, 10:end) = 8;                                      % a 12 dB drop from cycle 10
+T.other(1, 12) = true;
+PB = drop_path_pick(T, 'class_drop', 6, [2 2], [], 0.02);
+verifyEqual(tc, PB.k, 1);
+T.other(1, 11) = true;                                    % now the other path alone confirms at 12 too
+PB = drop_path_pick(T, 'class_drop', 6, [2 2], [], 0.02);
+verifyEqual(tc, PB.k, 0);
 end
 
-function u = cp_upper_t(k, n)
-if n == 0, u = NaN; elseif k >= n, u = 1; else, u = betaincinv(0.95, k + 1, n - k); end
+function test_drop_path_pick_reads_its_own_episodes(tc)
+% The bound is on the episodes passed (the fit half): 10 of 900 pass 2.0%, 11 of 900 fail (exact
+% Clopper-Pearson 1.88% and 2.01%); the scan stops at the first failure from the least sensitive end.
+T = clt_trace(900, 30);
+T.eg(1:10, 10:end) = 12;                                  % an 8 dB drop: alarms at thresholds 6 and 7
+T.eg(11, 10:end) = 14.5;                                  % a 5.5 dB drop: alarms at threshold 5 only
+PB = drop_path_pick(T, 'class_drop', [5 6 7], [2 2], [], 0.02);
+verifyTrue(tc, PB.admissible);
+verifyEqual(tc, [PB.pick PB.k PB.n], [6 10 900]);
+verifyLessThanOrEqual(tc, PB.bound, 0.02);
+PB = drop_path_pick(T, 'class_drop', [5 6 7], [2 2], [], 0.019);
+verifyFalse(tc, PB.admissible);
+end
+
+function test_clt_budget_with_drop_confirmation(tc)
+% With the drop alarm's own confirmation (1 of 1) the drop alarm confirms on its first cycle; the episode is
+% first confirmed by the drop path, and the count is the same with the confirmation passed or not when it
+% changes nothing.
+T = clt_trace(1000, 30);
+T.eg(2, 10:end) = 8;
+B0 = clt_step('budget', T, 'class_drop', 6, [3 3], [], [], 'x');
+B1 = clt_step('budget', T, 'class_drop', 6, [3 3], [], [], 'x', [1 1]);
+verifyEqual(tc, [B0.k B0.drop], [1 1]);
+verifyEqual(tc, [B1.k B1.drop], [1 1]);
+T.other(2, 10) = true; T.dg(2, 10) = true;                % degradation joins the drop alarm at cycle 10
+B2 = clt_step('budget', T, 'class_drop', 6, [3 3], [], [], 'x', [1 1]);
+verifyEqual(tc, [B2.k B2.drop B2.rest], [1 1 0]);
+end
+
+function test_choose_drop_threshold_item4_on_fit_half(tc)
+% Static: item 4's budget reads the fit half and the side calibration the check half (D121 item 4).
+src = fileread(which('choose_drop_threshold'));
+verifyEmpty(tc, regexp(src, 'drop_path_pick\(Tc,', 'once'));
+verifyNotEmpty(tc, regexp(src, 'drop_path_pick\(Tcf,', 'once'));
+verifyNotEmpty(tc, strfind(src, 'Tcf = sub_trace(Tc, ismember(Tc.r, find(fitg)))'));
+verifyNotEmpty(tc, strfind(src, 'monitor_confirm(Tck, drop_alarm, GF(j), cf, CS)'));
 end
 
 function test_choose_drop_threshold_static_no_truth(tc)
