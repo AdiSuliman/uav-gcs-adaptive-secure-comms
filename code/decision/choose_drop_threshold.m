@@ -49,7 +49,9 @@
 % class but path_loss, degradation), confirmed by the monitor's m of n (monitor_confirm.m).
 % Each monitor takes the most sensitive threshold whose bound is admissible (KPI 6's 5%);
 % when the other paths alone break the bound no threshold can meet it, which is reported,
-% and the monitor takes the least sensitive one. C2 tries each monitor's threshold and the
+% and the monitor takes the most sensitive threshold within the drop path's own 2.0% budget
+% on D103's fit half (D121 item 4, drop_path_pick.m; MONP.path_budget), else the least
+% sensitive one. C2 tries each monitor's threshold and the
 % steps C.drop_steps around it (train_dqn.m). The sweeping jammer's own confirmation
 % (C.confirm_sweep, policy_monitor.m) is adopted when, with every monitor at its own pick, no
 % monitor loses an admissible threshold or needs a less sensitive one and no single threat's
@@ -98,7 +100,8 @@
 % drop_db_train, drop_from; drop_alarm, cusum_db, the confirmations CF and the validation
 % readings VAL; MONP, each monitor's threshold and readings; confirm_sweep, the sweeper's
 % confirmation adopted, [] when not; with deg_select deg_mode, ber_q, the adopted test and its
-% quantile table ([] without one), and DEG, its readings), results/drop_threshold.txt
+% quantile table ([] without one), and DEG, its readings; CAL35, the 3.5% side calibration;
+% with clt_select CLT and BUD, the per-path budget at each deployed monitor), results/drop_threshold.txt
 
 clc;
 fprintf('=== Eb/N0-drop threshold of the drop alarm ===\n\n');
@@ -363,7 +366,7 @@ else
     for m = 1:numel(MON)
         MONP(m).cf = R{sw}(m).cf; MONP(m).j = R{sw}(m).j; MONP(m).pick = R{sw}(m).pick; MONP(m).admissible = R{sw}(m).admissible;
         MONP(m).k = R{sw}(m).k; MONP(m).n = ncl; MONP(m).k_other = R{sw}(m).k_other; MONP(m).lat = R{sw}(m).lat;
-        MONP(m).path_budget = struct('used', false, 'admissible', false, 'pick', NaN, 'j', NaN, 'k', NaN, 'bound', NaN);
+        MONP(m).path_budget = struct('admissible', false, 'pick', NaN, 'j', NaN, 'k', NaN, 'n', size(Tcf.eg, 1), 'bound', NaN, 'used', false);
         if ~R{sw}(m).admissible                            % D121 item 4: the drop path's own budget, before the fallback
             csb = []; if sw == 2, csb = CS; end
             PB = drop_path_pick(Tcf, drop_alarm, GF, R{sw}(m).cf, csb, 0.02);
@@ -469,7 +472,7 @@ if ~isempty(CV)
         sum(PP.ebno >= EBNO_THR))};
     for m = 1:numel(MON)
         r5 = CAL35.R5(m); r35 = CAL35.R35(m);
-        rc{end+1} = sprintf(['  %-15s 5%% bound: threshold %6.1f %s, check half %d/%d (bound %.2f%%), ' ...
+        rc{end+1} = sprintf(['  %-15s 5%% bound (without CLT, before DCONF): threshold %6.1f %s, check half %d/%d (bound %.2f%%), ' ...
             'P(pass KPI 6) = %.3f'], MON{m}, r5.pick, drop_unit(drop_alarm), r5.k, r5.n, 100 * r5.bound, r5.ppass); %#ok<SAGROW>
         rc{end+1} = sprintf(['  %-15s 3.5%% bound (0.7x): threshold %6.1f %s, check half %d/%d (bound %.2f%%), ' ...
             'P(pass KPI 6) = %.3f'], MON{m}, r35.pick, drop_unit(drop_alarm), r35.k, r35.n, 100 * r35.bound, r35.ppass); %#ok<SAGROW>
@@ -792,7 +795,7 @@ for which = 1:2
         kk = sum(any(monitor_confirm(Tck, drop_alarm, GF(j), cf, CS), 2));
         cv = monitor_confirm(Tv, drop_alarm, GF(j), cf, CS);
         R(m) = struct('cf', cf, 'pick', GF(j), 'admissible', adm, 'k', kk, 'n', nk, 'bound', cp_upper(kk, nk), ...
-            'lat', delays(cv, Tv.onset, thv, onv, thn), 'ppass', cp_pass_prob(kk / max(nk, 1), n6));
+            'lat', delays(cv, Tv.onset, thv, onv, thn), 'ppass', cp_pass_prob(kk / nk, n6));
     end
     if which == 1, CAL.R5 = R; else, CAL.R35 = R; end
 end

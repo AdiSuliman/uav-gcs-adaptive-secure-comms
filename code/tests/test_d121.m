@@ -208,7 +208,7 @@ function test_drop_path_pick_counts_c_prime(tc)
 % confirmed cycle, even if the other path is set at that cycle (2 of 2: the 3-cycle median alarms from
 % cycle 11, the other path at 12, first confirmed at 12).
 T = clt_trace(900, 30);
-T.eg(1, 10:end) = 8;                                      % a 12 dB drop from cycle 10
+T.eg(1, 10:end) = 8;                                      % a 12 dB drop from cycle 10, the median alarms from 11
 T.other(1, 12) = true;
 PB = drop_path_pick(T, 'class_drop', 6, [2 2], [], 0.02);
 verifyEqual(tc, PB.k, 1);
@@ -227,7 +227,7 @@ PB = drop_path_pick(T, 'class_drop', [5 6 7], [2 2], [], 0.02);
 verifyTrue(tc, PB.admissible);
 verifyEqual(tc, [PB.pick PB.k PB.n], [6 10 900]);
 verifyLessThanOrEqual(tc, PB.bound, 0.02);
-PB = drop_path_pick(T, 'class_drop', [5 6 7], [2 2], [], 0.019);
+PB = drop_path_pick(T, 'class_drop', [5 6 7], [2 2], [], 0.018);   % 10 of 900 (1.88%) fails at the conservative end
 verifyFalse(tc, PB.admissible);
 end
 
