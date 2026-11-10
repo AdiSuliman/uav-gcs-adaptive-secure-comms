@@ -111,10 +111,10 @@ cfg6 = []; if exist('CFG', 'var'), cfg6 = CFG; end
 WF = wf_options(cfg6);                               % which readings of the decision-layer additions are printed (wf_options.m)
 FRESH = strcmp(kpi6_set(cfg6), 'fresh');             % P1R: KPI 6 on the fresh clean test set (kpi6_set.m)
 if FRESH, F6 = fresh_checks(PP, Q, exist('SMOKE', 'var') && SMOKE); end   % every check before any fresh flight
-assert(all(isfinite(clean_ber_ref(PP.ebno, 'ber_est'))) && all(isfinite(clean_ber_ref(PP.ebno, 'plr_fec'))), 'evaluate_policies:clean_ref', ...
-    'the clean reference in data/policy_pools.mat is missing or not finite: the monitor would read its floor (past bug 16)');
 SPO = speed_options(cfg6);                           % the speed readings (speed_options.m), off without profile.json's fields
 K = link_env('tables', PP);
+assert(all(isfinite(clean_ber_ref(PP.ebno, 'ber_est'))) && all(isfinite(clean_ber_ref(PP.ebno, 'plr_fec'))), 'evaluate_policies:clean_ref', ...
+    'the clean reference in data/policy_pools.mat is missing or not finite: the monitor would read its floor (past bug 16)');
 C = decision_config();
 tab = policy_table(PP, K);
 VAL = 2; TEST = 3; SPEED = 4; T = Q.H.T; NE = 64; REPS = 2;
