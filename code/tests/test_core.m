@@ -5994,15 +5994,15 @@ S = struct('a', 3); fn = @(S, j) kept_note(M, S, j);
 verifyEqual(tc, out, {3, 6, 9});
 verifyEqual(tc, cell2mat(values(M)), [3 1 2]);
 [~, out] = evalc('pool_lpt_kept(fn, S, [3 1 2], [], d, ''x'')');
-verifyEqual(tc, out, {3, 6, 9}); verifyEqual(tc, M.Count, 3);
+verifyEqual(tc, out, {3, 6, 9}); verifyEqual(tc, double(M.Count), 3);
 delete(fullfile(d, 'cell_0002.mat'));
 [~, out] = evalc('pool_lpt_kept(fn, S, [3 1 2], [], d, ''x'')');
-verifyEqual(tc, out, {3, 6, 9}); verifyEqual(tc, [M.Count M(4)], [4 2]);
+verifyEqual(tc, out, {3, 6, 9}); verifyEqual(tc, [double(M.Count) M(4)], [4 2]);
 S.a = 4;
 [~, out] = evalc('pool_lpt_kept(fn, S, [3 1 2], [], d, ''x'')');
-verifyEqual(tc, out, {4, 8, 12}); verifyEqual(tc, M.Count, 7);
+verifyEqual(tc, out, {4, 8, 12}); verifyEqual(tc, double(M.Count), 7);
 [~, out] = evalc('pool_lpt_kept(fn, S, [3 1 2], [], d, ''y'')');                 % another stage's tag
-verifyEqual(tc, out, {4, 8, 12}); verifyEqual(tc, M.Count, 10);
+verifyEqual(tc, out, {4, 8, 12}); verifyEqual(tc, double(M.Count), 10);
 pool_checkpoint('clear', d);
 verifyFalse(tc, isfolder(d));
 end
