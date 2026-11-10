@@ -76,6 +76,7 @@ if SV.v2 && any(contains({cases.threat}, 'airframe_shadowing'))
         N_GEOM, strjoin(compose('%d', SH.n_rx), ' and '), sum(SH.tried));
 end
 
+rehash;                                                 % function files added while this MATLAB runs (pool_lpt_kept.m)
 NWP = N_WORKERS; pl = [];
 if exist('SMOKE', 'var') && SMOKE
     NWP = 0;                                            % reduced chain check: on this process, no parallel turn
@@ -88,6 +89,7 @@ else
     repo = pwd;
     spmd
         pool_worker_init(repo);
+        rehash;                                         % a pool kept from an earlier stage finds the added files too
     end
 end
 t0 = tic;

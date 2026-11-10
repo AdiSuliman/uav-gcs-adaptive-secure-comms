@@ -105,6 +105,7 @@ nS = numel(SNR_points);
 v_nom = p0.v_nominal * 3.6;                       % nominal cruise speed [km/h]
 t0 = tic;
 
+rehash;                                                 % function files added while this MATLAB runs (pool_lpt_kept.m)
 NWP = N_WORKERS; pl = [];
 if exist('SMOKE', 'var') && SMOKE
     NWP = 0;                                            % reduced chain check: on this process, no parallel turn
@@ -117,6 +118,7 @@ else
     repo = pwd;
     spmd
         pool_worker_init(repo);
+        rehash;                                         % a pool kept from an earlier stage finds the added files too
     end
 end
 
