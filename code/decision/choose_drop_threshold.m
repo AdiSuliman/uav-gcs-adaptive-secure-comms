@@ -124,7 +124,7 @@ if CLf && ~(CLx && isfile('data/clean_val_pools.mat'))
     error('choose_drop_threshold:force', 'clt_force needs clt_select and clean validation flights');
 end
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
-assert(all(isfinite(clean_ber_ref(PP.ebno, 'ber_est'))), 'choose_drop_threshold:clean_ref', ...
+assert(all(isfinite(clean_ber_ref(PP.ebno, 'ber_est'))) && all(isfinite(clean_ber_ref(PP.ebno, 'plr_fec'))), 'choose_drop_threshold:clean_ref', ...
     'the clean reference in data/policy_pools.mat is missing or not finite: the monitor would read its floor (past bug 16)');
 na = find(strcmp(PP.actions, 'no_action'));
 iPL = find(strcmp(PP.scen, 'path_loss'));                  % the three severities

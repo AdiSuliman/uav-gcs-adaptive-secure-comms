@@ -292,7 +292,10 @@ verifyNotEmpty(tc, strfind(src, 'monitor_confirm(Tck, drop_alarm, GF(j), cf, CS)
 i1 = strfind(src, '[CLT, rl] = clt_step(''choose''');          % item 9: the rescue only after CLT
 i2 = strfind(src, 'MONP(m).pick = PB.pick; MONP(m).j = PB.j; MONP(m).path_budget.used = true;');
 verifyNumElements(tc, i1, 1); verifyNumElements(tc, i2, 1); verifyLessThan(tc, i1, i2);
-verifyNotEmpty(tc, strfind(src, 'assert(all(isfinite(clean_ber_ref(PP.ebno, ''ber_est''))), ''choose_drop_threshold:clean_ref'''));
+for f = {'choose_drop_threshold', 'train_dqn', 'evaluate_policies'}                % the stop on a missing clean reference (past bug 16)
+    verifyNotEmpty(tc, strfind(fileread(which(f{1})), ['assert(all(isfinite(clean_ber_ref(PP.ebno, ''ber_est''))) && ' ...
+        'all(isfinite(clean_ber_ref(PP.ebno, ''plr_fec''))), ''' f{1} ':clean_ref''']), f{1});
+end
 end
 
 function test_choose_drop_threshold_static_no_truth(tc)
