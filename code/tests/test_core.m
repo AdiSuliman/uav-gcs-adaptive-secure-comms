@@ -11373,6 +11373,15 @@ i2 = run_cache('inputs', {a, b}); verifyNotEqual(tc, i2, i1, 'absent and empty d
 fid = fopen(a, 'w'); fwrite(fid, uint8([1:99 7])); fclose(fid);
 verifyNotEqual(tc, run_cache('inputs', {a, b}), i2, 'one byte changed');
 verifyMatches(tc, i1, '^[0-9a-f]{16}$');
+c0 = cd(d); bk = onCleanup(@() cd(c0)); %#ok<NASGU>          % the settings of the current folder
+write_json('profile.json', '{"run_cache": true}'); i3 = run_cache('inputs', {a, b});
+write_json('profile.json', '{"run_cache": true, "surv_v2": true}');
+verifyNotEqual(tc, run_cache('inputs', {a, b}), i3, 'profile.json changed');
+params = struct('n_rx', 3); save('params.mat', 'params'); i4 = run_cache('inputs', {a, b});
+pause(1.1); save('params.mat', 'params');
+verifyEqual(tc, run_cache('inputs', {a, b}), i4, 'the same params saved again');
+params.n_rx = 4; save('params.mat', 'params');
+verifyNotEqual(tc, run_cache('inputs', {a, b}), i4, 'params changed');
 end
 
 function write_json(f, s)
