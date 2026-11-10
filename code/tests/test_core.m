@@ -5966,8 +5966,9 @@ st = struct('c1p', 'build_policy_pools', 'c1c', 'build_check_pools', 'clean', 'b
 for f = fieldnames(st)'
     src = fileread(which(st.(f{1})));
     verifyEmpty(tc, regexp(src, '\nparfor \(k = 1:(numel\(todo\)|nJ)', 'once'), f{1});
-    jobs = 'todo'; if startsWith(f{1}, 'surv'), jobs = 'ord'; end
-    verifyNotEmpty(tc, regexp(src, ['pool_lpt\(@\(S, [cj]\) pool_job\(''' f{1} ''', S, [cj]\), S, ' jobs ', pl\);'], 'once'), f{1});
+    jobs = 'todo'; lpt = 'pool_lpt\('; tl = ', pl\);';
+    if startsWith(f{1}, 'surv'), jobs = 'ord'; lpt = 'pool_lpt_kept\('; tl = [', pl, CKD, ''' f{1} '''\);']; end   % each job kept on disk
+    verifyNotEmpty(tc, regexp(src, [lpt '@\(S, [cj]\) pool_job\(''' f{1} ''', S, [cj]\), S, ' jobs tl], 'once'), f{1});
     m = regexp(src, '\nS = struct\((.*?)\);', 'tokens', 'once');
     have = regexp(m{1}, '''(\w+)'', \{', 'tokens'); have = [have{:}];
     more = regexp(src, '(?<![\w.])S\.(\w+) = ', 'tokens'); have = unique([have, more{:}]);   % fields set after the struct (surv3's surv_v2)
@@ -5977,8 +5978,51 @@ for f = fieldnames(st)'
     verifyEmpty(tc, setdiff(have, used), f{1});
 end
 for f = {'map_survivability_boundary', 'experiment_survivability_options'}
-    verifyNotEmpty(tc, regexp(fileread(which(f{1})), 'res\(ord\) = res;', 'once'), f{1});   % the results back in job order
+    src = fileread(which(f{1}));
+    verifyEmpty(tc, strfind(src, 'res(ord) = res;'), f{1});                      % pool_lpt_kept.m returns job order
+    verifyNumElements(tc, strfind(src, 'pool_checkpoint(''clear'', CKD);'), 1, f{1});
 end
+end
+
+function test_pool_lpt_kept(tc)
+% pool_lpt_kept.m returns the jobs in job order and keeps each on disk: a start with the same inputs
+% runs none, a removed job runs alone, other inputs run every job.
+d = tempname; back = onCleanup(@() kept_rm(d)); %#ok<NASGU>
+M = containers.Map('KeyType', 'double', 'ValueType', 'double');
+S = struct('a', 3); fn = @(S, j) kept_note(M, S, j);
+[~, out] = evalc('pool_lpt_kept(fn, S, [3 1 2], [], d, ''x'')');
+verifyEqual(tc, out, {3, 6, 9});
+verifyEqual(tc, cell2mat(values(M)), [3 1 2]);
+[~, out] = evalc('pool_lpt_kept(fn, S, [3 1 2], [], d, ''x'')');
+verifyEqual(tc, out, {3, 6, 9}); verifyEqual(tc, M.Count, 3);
+delete(fullfile(d, 'cell_0002.mat'));
+[~, out] = evalc('pool_lpt_kept(fn, S, [3 1 2], [], d, ''x'')');
+verifyEqual(tc, out, {3, 6, 9}); verifyEqual(tc, [M.Count M(4)], [4 2]);
+S.a = 4;
+[~, out] = evalc('pool_lpt_kept(fn, S, [3 1 2], [], d, ''x'')');
+verifyEqual(tc, out, {4, 8, 12}); verifyEqual(tc, M.Count, 7);
+[~, out] = evalc('pool_lpt_kept(fn, S, [3 1 2], [], d, ''y'')');                 % another stage's tag
+verifyEqual(tc, out, {4, 8, 12}); verifyEqual(tc, M.Count, 10);
+pool_checkpoint('clear', d);
+verifyFalse(tc, isfolder(d));
+end
+
+function v = kept_note(M, S, j)
+% Job j of test_pool_lpt_kept: noted in M, S.a * j.
+M(M.Count + 1) = j; v = S.a * j;
+end
+
+function test_init_params_atomic_save(tc)
+% init_params.m writes params.mat through a temporary file renamed once complete.
+d = tempname; mkdir(d); c0 = cd(d); back = onCleanup(@() cd(c0)); %#ok<NASGU>
+evalc('init_params');
+verifyTrue(tc, isstruct(load('params.mat').params));
+verifyFalse(tc, isfile('params.tmp.mat'));
+verifyEmpty(tc, who('raf_'));
+end
+
+function kept_rm(d)
+if isfolder(d), rmdir(d, 's'); end
 end
 
 function j = note_job(M, j)

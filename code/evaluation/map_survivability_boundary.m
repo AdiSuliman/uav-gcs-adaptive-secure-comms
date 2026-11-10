@@ -150,9 +150,9 @@ end
 ord = pool_schedule(w);                                % the longest job first, one per free worker
 S = struct('jobs', {jobs}, 'maps', {maps}, 'p0', {p0}, 'RUN_FRAMES', {RUN_FRAMES}, 'v_nom', {v_nom}, 'nS', {nS}, ...
     'ACTIONS', {ACTIONS}, 'SNR_points', {SNR_points}, 'opt', {opt}, 'NR', {NR});
-res = pool_lpt(@(S, j) pool_job('surv', S, j), S, ord, pl);
+CKD = fullfile(pwd, 'data', 'surv_jobs');               % each finished job kept, so a stop resumes (pool_lpt_kept.m)
+res = pool_lpt_kept(@(S, j) pool_job('surv', S, j), S, ord, pl, CKD, 'surv');   % in job order
 clear S
-res(ord) = res;                                        % back in job order
 for j = 1:nJ, [resB{j}, resF{j}, resS{j}] = res{j}{:}; end
 clear res
 if SV.v2                                               % each flight's values; their means enter the rule
@@ -260,6 +260,7 @@ draw_map(grid_data_A, SNR_points, 'Map A: without goodput loss (C, F, S, power c
 draw_map(grid_data_B, SNR_points, 'Map B: any configuration (incl. rate reduction and FEC)', ...
     'results/survivability_map_link.png', SV.v2);
 fprintf('\nSaved results/survivability_boundary_mapA.txt, mapB.txt, gap_analysis.txt, two PNG maps\n');
+pool_checkpoint('clear', CKD);
 fprintf('Saved data/survivability_boundary.mat (%.1f min)\n\n=== Survivability Mapping Complete ===\n', toc(t0)/60);
 
 

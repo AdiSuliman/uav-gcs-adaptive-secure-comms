@@ -127,9 +127,9 @@ ord = pool_schedule(w);                                % the longest job first, 
 S = struct('cases', {cases}, 'VAR', {VAR}, 'jobs', {jobs}, 'p0', {p0}, 'ACTIONS', {ACTIONS}, 'EBNO', {EBNO}, ...
     'geo', {geo}, 'opt', {opt}, 'nS', {nS}, 'N_GEOM', {N_GEOM}, 'clean', {clean}, 'C', {C}, 'RATIO', {RATIO});
 if SV.v2, S.V2 = true; S.geo_sh = geo_sh; S.clean_sh = clean_sh; end
-res = pool_lpt(@(S, j) pool_job('surv3', S, j), S, ord, pl);
+CKD = fullfile(pwd, 'data', 'surv3_jobs');              % each finished job kept, so a stop resumes (pool_lpt_kept.m)
+res = pool_lpt_kept(@(S, j) pool_job('surv3', S, j), S, ord, pl, CKD, 'surv3');   % in job order
 clear S
-res(ord) = res;                                        % back in job order
 if SV.v2
     met = cell(1, nJ);
     for j = 1:nJ, [rec{j}, best{j}, met{j}] = res{j}{:}; end
@@ -191,6 +191,7 @@ else
     save('data/survivability_options.mat', 'cases', 'VAR', 'EBNO', 'rec', 'best', 'jobs', 'clean', 'T3', 'N_GEOM', ...
         'RELAY_DEG', 'RELAY_LOSS_DB');
 end
+pool_checkpoint('clear', CKD);
 fprintf('Saved results/survivability_options.txt (%.1f min)\n', toc(t0) / 60);
 
 function v = nth2(f, varargin)

@@ -232,9 +232,15 @@ L.clean_ref = new;
 L.PP.clean = reshape(new.ber, size(PP.clean));
 L.PP.clean_fer = reshape(new.fer, size(PP.clean_fer));
 clear PP
-pool_checkpoint('commit', f, L);
-clear L
-t_set = set_time(f, t_old);
+[d, n] = fileparts(abspath(f)); tmp = fullfile(d, [n '.tmp.mat']);
+save(tmp, '-struct', 'L', '-v7.3');                     % as pool_checkpoint('commit'), with the time set before the rename:
+clear L                                                 % a stop never leaves the pools newer than the files built from them
+flush_file(tmp);
+t_set = set_time(tmp, t_old);
+movefile(tmp, f, 'f');
+if abs(mtime_ms(f) - t_set) > 1000
+    warning('clean_ref_rebuild:time', '%s: the rename changed its time', f);
+end
 clear('clean_ber_ref');                                 % its cache keys on the file time
 clear_workers();
 C = load(f, 'clean_ref');
@@ -258,6 +264,17 @@ if ~ok || abs(mtime_ms(f) - t) > 1000
     warning('clean_ref_rebuild:time', ['%s: its time could not be set back; build_check_pools.m and ' ...
         'build_clean_test_pools.m would read their files as older than the pools'], f);
 end
+end
+
+function flush_file(f)
+% The file's data written through to the disk before its rename (as pool_checkpoint.m).
+if ~usejava('jvm'), return; end
+raf = java.io.RandomAccessFile(f, 'rw');
+try
+    raf.getChannel().force(true);
+catch
+end
+raf.close();
 end
 
 function clear_workers()
