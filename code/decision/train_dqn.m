@@ -127,6 +127,8 @@
 close all; clc;
 fprintf('=== C2: Train DQN ===\n\n');
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
+assert(all(isfinite(clean_ber_ref(PP.ebno, 'ber_est'))) && all(isfinite(clean_ber_ref(PP.ebno, 'plr_fec'))), 'train_dqn:clean_ref', ...
+    'the clean reference in data/policy_pools.mat is missing or not finite: the monitor would read its floor (past bug 16)');
 K = link_env('tables', PP);
 PP.pools(:, :, :, 3:end) = {[]};         % C2 reads the train and validation splits only (memory)
 nA = numel(PP.actions);

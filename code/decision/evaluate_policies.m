@@ -94,6 +94,8 @@
 close all; clc;
 fprintf('=== Decision-layer evaluation on the test pools ===\n\n');
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
+assert(all(isfinite(clean_ber_ref(PP.ebno, 'ber_est'))) && all(isfinite(clean_ber_ref(PP.ebno, 'plr_fec'))), 'evaluate_policies:clean_ref', ...
+    'the clean reference in data/policy_pools.mat is missing or not finite: the monitor would read its floor (past bug 16)');
 Q = load('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'H', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db', ...
     'deployed', 'rule_sel', 'det_id', 'maha_thr', 'dec');
 check_det_id(PP, Q, 'evaluate_policies');
