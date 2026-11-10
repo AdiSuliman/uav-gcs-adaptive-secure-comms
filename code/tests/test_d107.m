@@ -425,7 +425,8 @@ d0 = parent_copy(tc, 'code/decision/train_dqn.m', tc.TestData.base);
 cl0 = onCleanup(@() rmdir(d0, 's')); %#ok<NASGU>
 p = strrep(fileread(fullfile(d0, 'train_dqn.m')), char(13), '');
 c = undo_small(read_lf('train_dqn'), 'train_dqn');
-hd0 = '% With "fa_nothreat": true'; hd1 = sprintf('%%\n%% Finished runs (every training run');
+c = clean_ref_cut(tc, c, 'train_dqn');
+hd0 ='% With "fa_nothreat": true'; hd1 = sprintf('%%\n%% Finished runs (every training run');
 sc0 = '%% 7. The no-threat penalty form'; sc1 = 'fprintf(''=== C2 Complete';
 p = cut_text(tc, p, hd0, hd1); c = cut_text(tc, c, hd0, hd1);
 p = cut_text(tc, p, sc0, sc1); c = cut_text(tc, c, sc0, sc1);
@@ -768,7 +769,7 @@ ex = {'if c3_on, core3_check(PP, ''evaluate_policies''); end', 'evaluate_policie
 for k = 1:size(pl, 1)
     c = undo_small(strrep(fileread(fullfile(tc.TestData.root, pl{k, 1})), char(13), ''), pl{k, 1});
     c = cut_line(tc, c, pl{k, 2}, pl{k, 1});
-    if endsWith(pl{k, 1}, ex{2}), c = cut_line(tc, c, ex{1}, pl{k, 1}); end
+    if endsWith(pl{k, 1}, ex{2}), c = cut_line(tc, c, ex{1}, pl{k, 1}); c = clean_ref_cut(tc, c, 'evaluate_policies'); end
     p = base_with_pb(tc, pl{k, 1});
     verifyTrue(tc, strcmp(c, p), pl{k, 1});
 end
@@ -1073,6 +1074,12 @@ if sg ~= 0 && ~isempty(getenv('V7_GIT_REPO')), repo = getenv('V7_GIT_REPO'); end
 [st, out] = system(sprintf('git --no-optional-locks -C "%s" show %s:%s > "%s"', repo, rev, rel, ...
     fullfile(d, [nm ext])));
 assertEqual(tc, st, 0, sprintf('git show %s:%s failed: %s', rev, rel, out));
+end
+
+function c = clean_ref_cut(tc, c, nm)
+% The clean-reference stop after the pools' load (D121 D2), cut out: a check that changes no result.
+c = swap_text(tc, c, ['assert(all(isfinite(clean_ber_ref(PP.ebno, ''ber_est''))) && all(isfinite(clean_ber_ref(PP.ebno, ''plr_fec''))), ''' ...
+    nm ':clean_ref'', ...' newline '    ''the clean reference in data/policy_pools.mat is missing or not finite: the monitor would read its floor (past bug 16)'');' newline], '');
 end
 
 function c = cut_line(tc, c, t, nm)
