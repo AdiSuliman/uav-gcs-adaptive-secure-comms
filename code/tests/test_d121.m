@@ -184,6 +184,24 @@ for k = 1:4, [a4, mem4] = policy_decide('rule', obs2, a4, mem4, PP2, [], struct(
 verifyEqual(tc, a3, a4);
 end
 
+function test_lost_branch_withheld_logged(tc)
+% The gate's withheld class answers reach the decision's info (s1w) only with the gate on, and CLT's
+% not-accepted cycles as lb_na only with PP.lb_accept (D121 item 1, D113 point 1: logged).
+na = find(strcmp(policy_actions(), 'no_action'));
+[obs, PP] = core_fixture(5, false);                      % airframe_shadowing, no harm
+P1 = PP; P1.s1_gate_core = true;
+a = na; mem = [];
+for k = 1:6, [a, mem, d] = policy_decide('rule', obs, a, mem, P1, [], struct('core', true)); end
+verifyTrue(tc, d.s1w); verifyFalse(tc, isfield(d, 'lb_na'));
+a = na; mem = [];
+for k = 1:6, [a, mem, d] = policy_decide('rule', obs, a, mem, PP, [], struct('core', true)); end
+verifyFalse(tc, isfield(d, 's1w')); verifyFalse(tc, isfield(d, 'lb_na'));
+P2 = PP; P2.lb_accept = struct('tau_hi', Inf);           % harm only: never accepted here
+a = na; mem = [];
+for k = 1:6, [a, mem, d] = policy_decide('rule', obs, a, mem, P2, [], struct('core', true)); end
+verifyTrue(tc, d.lb_na);
+end
+
 function test_s1_gate_core_forced_smoke_cell(tc)
 na = find(strcmp(policy_actions(), 'no_action'));
 [obs, PP] = core_fixture(5, false);                      % airframe_shadowing, no harm

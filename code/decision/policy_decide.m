@@ -126,6 +126,7 @@ if core && ~strcmp(base, 'rule')
 end
 s1g = ~core && ~blind && strcmp(base, 'rule') && isfield(PP, 's1_gate') && ~isempty(PP.s1_gate) && PP.s1_gate;   % lost-branch gate
 s1gc = core && ~blind && strcmp(base, 'rule') && isfield(PP, 's1_gate_core') && ~isempty(PP.s1_gate_core) && PP.s1_gate_core;   % the same gate, rule_core (D121 item 2, P-A)
+s1w = false(1, NE); s1b = false(1, NE);                  % the gate's withheld class answers and blocked escalations
 q = [];
 switch base
     case 'dqn'
@@ -157,11 +158,11 @@ switch base
                 bud.drop_db = M.drop(i); bud.current = A{cfg(i)}; bud.current_db = gk(cfg(i));
                 p = find(strcmp(A, rule_core_policy(M.cls{i}, M.degraded(i), qi(i), qt, M.drop_alarm(i), bud, so, cw, cn)), 1);
                 if s1gc && ismember(M.cls{i}, {'antenna_fault', 'airframe_shadowing'}) && ~M.harm(i)
-                    p = na;   % lost branch, no harm evidence: the gate withholds the class answer (rule_core_policy.m untouched)
+                    p = na; s1w(i) = true;   % lost branch, no harm evidence: the gate withholds the class answer (rule_core_policy.m untouched)
                 end
             elseif strcmp(base, 'rule')
                 bud.drop_db = M.drop(i); bud.current = A{cfg(i)}; bud.current_db = gk(cfg(i));
-                hm = []; if s1g, hm = M.harm(i); end
+                hm = []; if s1g, hm = M.harm(i); s1w(i) = ismember(M.cls{i}, {'antenna_fault', 'airframe_shadowing'}) && ~hm; end
                 p = find(strcmp(A, rule_based_policy(M.cls{i}, M.degraded(i), gain(i), qi(i), qt, M.drop_alarm(i), bud, mt, ...
                     so, nb, hm)), 1);
             else
@@ -208,6 +209,7 @@ if endsWith(kind, '_esc')
         none = strcmp(M.cls{i}, 'none');
         byd = ed && none && M.drop_alarm(i) && (cfg(i) == na || gk(cfg(i)) < M.drop(i));   % a drop the configuration does not cover
         lbn = (s1g || s1gc) && cfg(i) == na && ismember(M.cls{i}, {'antenna_fault', 'airframe_shadowing'}) && ~M.harm(i);   % a lost branch without harm is not stuck
+        s1b(i) = lbn && a(i) == cfg(i) && stuck && mem.since(i) >= C.esc && M.confirmed(i) && (~none || byd);
         if a(i) == cfg(i) && stuck && mem.since(i) >= C.esc && M.confirmed(i) && (~none || byd) && ~lbn
             if byd                                       % the link-budget match first
                 [g, o] = sort(gk(lb)); j = find(g >= M.drop(i), 1); if isempty(j), j = numel(g); end
@@ -241,6 +243,8 @@ if isfield(M, 'unk'), info.unk = M.unk; end                      % the unknown f
 if c3, info.l3 = M.l3; end                                       % the three-state window (policy_monitor.m)
 if lbon, info.lb = lbc; end                                      % changed by the link-budget completion
 if rm_on, info.relm = relm; end                  % released on evidence this cycle
+if isfield(M, 'lb_not_accepted'), info.lb_na = M.lb_not_accepted; end   % lost branch, not accepted (CLT, D121 item 1)
+if s1g || s1gc, info.s1w = s1w; info.s1b = s1b; end                      % the lost-branch gate's withheld answers, blocked escalations
 end
 
 function r = release_on_evidence(cfg, mem, PP, C, A, na)
