@@ -12,8 +12,10 @@ function varargout = run_cache(cmd, varargin)
 %   dirn = run_cache('dir', on, name)   'data/run_cache/<name>' when on, '' otherwise
 %   id = run_cache('inputs', files)   16 hex digits of the SHA-256 of the code (every .m file
 %       under code/, tests and legacy excepted, with its path), of each file in files (its bytes;
-%       an absent file counts as absent), of the MATLAB release and of the number of
-%       computational threads (floating-point sums may differ between thread counts)
+%       an absent file counts as absent), of the settings every stage reads from the current
+%       folder (profile.json by its bytes, params.mat by its value, since A0 rewrites the file's
+%       bytes with the same values), of the MATLAB release and of the number of computational
+%       threads (floating-point sums may differ between thread counts)
 %   key = run_cache('key', x)   16 hex digits of the SHA-256 of a MATLAB value
 %   [res, hit] = run_cache('run', dirn, key, f)   res = f() unless dirn/<key>.mat holds that
 %       key's result (hit true); a new result is written to a temporary file, flushed to the disk
@@ -59,6 +61,12 @@ switch cmd
         for i = 1:numel(files)
             md.update(uint8(['file ' files{i} newline]));
             if isfile(files{i}), update_file(md, files{i}); else, md.update(uint8(['absent' newline])); end
+        end
+        for g = {'profile.json', 'params.mat'}
+            md.update(uint8(['setting ' g{1} newline]));
+            if ~isfile(g{1}), md.update(uint8(['absent' newline]));
+            elseif endsWith(g{1}, '.mat'), md.update(getByteStreamFromArray(load(g{1})));
+            else, update_file(md, g{1}); end
         end
         nt = -1;
         try nt = maxNumCompThreads; catch, end
