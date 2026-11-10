@@ -217,6 +217,24 @@ PB = drop_path_pick(T, 'class_drop', 6, [2 2], [], 0.02);
 verifyEqual(tc, PB.k, 0);
 end
 
+function test_drop_count_literal_under_clt(tc)
+% Under the lost-branch acceptance the drop alarm is harm evidence: in episode 1 it lets the lost-branch
+% cycles 11-12 (p_LB 0) alarm, so the monitor confirms at 12 with both. Without the drop alarm they stay
+% withheld and nothing confirms: the episode is first confirmed by the drop path. Without tau the
+% lost-branch cycles alarm on their own and it is not.
+T = clt_trace(900, 30);
+T.eg(1, 10:end) = 8;                                      % the median alarms from 11
+T = clt_lb(T, 1, 11:12, 0);
+PB = drop_path_pick(T, 'class_drop', 6, [2 2], [], 0.02, 0.5);
+verifyEqual(tc, PB.k, 1);
+B = clt_step('budget', T, 'class_drop', 6, [2 2], [], 0.5, 'x');
+verifyEqual(tc, [B.k B.drop], [1 1]);
+PB = drop_path_pick(T, 'class_drop', 6, [2 2], [], 0.02);
+verifyEqual(tc, PB.k, 0);
+B = clt_step('budget', T, 'class_drop', 6, [2 2], [], [], 'x');
+verifyEqual(tc, [B.k B.drop], [1 0]);
+end
+
 function test_drop_path_pick_reads_its_own_episodes(tc)
 % The bound is on the episodes passed (the fit half): 10 of 900 pass 2.0%, 11 of 900 fail (exact
 % Clopper-Pearson 1.88% and 2.01%); the scan stops at the first failure from the least sensitive end.

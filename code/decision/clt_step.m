@@ -26,7 +26,8 @@ function varargout = clt_step(op, varargin)
 %   [B, line] = clt_step('budget', T, form, thr, cf, cs, tau, label, cdr)
 %     The clean episodes of T with a confirmed alarm and those whose first confirmation needs each path,
 %     with their bounds against the shares of KPI 6's 5%: lost-branch class 1.5%, drop alarm 2.0%,
-%     degradation and the other classes 1.5%; "union bound met" only if all three hold. cdr the drop
+%     degradation and the other classes 1.5%; "union bound met" only if all three hold. The drop alarm's
+%     count reads the monitor without it (threshold Inf: with tau it is no harm evidence either). cdr the drop
 %     alarm's own confirmation ([] or absent: none). The lines of 'choose' read the monitor before the
 %     drop threshold's re-choice; choose_drop_threshold.m prints the monitor as deployed.
 switch op
@@ -112,8 +113,9 @@ function [B, line] = budget(T, form, thr, cf, cs, tau, label, cdr)
 % First confirmation per path: without that path the monitor does not confirm at that cycle.
 % cdr: the drop alarm's own confirmation (PP.confirm_drop), [] or absent: none.
 if nargin < 8, cdr = []; end
-[c, a, cn, ot] = monitor_confirm(T, form, thr, cf, cs, cdr, tau);
-acc = T.lb & ot;                                      % cycles that alarm on a lost-branch class
+[c, a, ~, ot] = monitor_confirm(T, form, thr, cf, cs, cdr, tau);
+cn = monitor_confirm(T, form, Inf, cf, cs, [], tau);  % without the drop alarm, nor its harm evidence
+acc = T.lb & ot;                                     % cycles that alarm on a lost-branch class
 o1 = ot; o1(acc) = T.dg(acc);
 c1 = movsum(double(o1 | a), [cf(2) - 1, 0], 2) >= cf(1);
 if ~isempty(cs), c1 = c1 | movsum(double(T.sw), [cs(2) - 1, 0], 2) >= cs(1); end

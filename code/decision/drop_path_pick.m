@@ -8,27 +8,29 @@ function PB = drop_path_pick(Tf, form, GF, cf, cs, bound, tau)
 %   tau    the monitor's lost-branch acceptance tau_hi ([] or absent: none)
 %   From GF(end) toward GF(1), stopping at the first failure, keep the last value whose clean
 %   episodes first confirmed by the drop alarm have a one-sided 95% Clopper-Pearson upper bound
-%   <= bound. An episode counts when the monitor without the drop alarm does not confirm at its
-%   first confirmed cycle (D112 (c'), D121 dated reading (ii)). PB.admissible false: no value
-%   passes and the caller keeps the least sensitive.
+%   <= bound. An episode counts when the monitor without the drop alarm (threshold Inf, so with
+%   tau the drop alarm is no harm evidence either) does not confirm at its first confirmed cycle
+%   (D112 (c'), D121 dated reading (ii)). PB.admissible false: no value passes and the caller
+%   keeps the least sensitive.
 %   PB: admissible, pick, j, k (the count at pick), n (episodes of Tf), bound (its upper bound)
 if nargin < 7, tau = []; end
 n = size(Tf.eg, 1);
+c0 = monitor_confirm(Tf, form, Inf, cf, cs, [], tau);
 PB = struct('admissible', false, 'pick', NaN, 'j', NaN, 'k', NaN, 'n', n, 'bound', NaN);
 for j = numel(GF):-1:1
-    k = drop_first_count(Tf, form, GF(j), cf, cs, tau);
+    k = drop_first_count(Tf, form, GF(j), cf, cs, tau, c0);
     up = cp_upper(k, n);
     if ~(up <= bound), break; end
     PB = struct('admissible', true, 'pick', GF(j), 'j', j, 'k', k, 'n', n, 'bound', up);
 end
 end
 
-function k = drop_first_count(T, form, thr, cf, cs, tau)
-% Clean episodes whose first confirmed cycle the monitor without the drop alarm does not confirm.
-[c, ~, cn] = monitor_confirm(T, form, thr, cf, cs, [], tau);
+function k = drop_first_count(T, form, thr, cf, cs, tau, c0)
+% Clean episodes whose first confirmed cycle the monitor without the drop alarm (c0) does not confirm.
+c = monitor_confirm(T, form, thr, cf, cs, [], tau);
 [f, t1] = max(c, [], 2);
 i1 = find(f);
-k = sum(~cn(sub2ind(size(c), i1, t1(i1))));
+k = sum(~c0(sub2ind(size(c), i1, t1(i1))));
 end
 
 function u = cp_upper(k, n)
