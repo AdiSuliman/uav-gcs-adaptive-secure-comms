@@ -31,6 +31,10 @@ function R = rollout_policy(kind, PP, K, spec, split, agent, opt, seed)
 %          cfg_final, r (geometry index), cfg_trace (T x NE); at the first change:
 %          fc_t, fc_cls (index into PP.classes, numel + 1 = unknown), fc_deg, fc_drop,
 %          fc_dal (the monitor's drop alarm)
+%          lb_na      cycles whose lost-branch class the calibrated acceptance did not accept
+%                     (PP.lb_accept, D121 item 1; only with it)
+%          s1_withheld, s1_blocked  cycles whose class answer the lost-branch gate withheld
+%                     and escalations it blocked (PP.s1_gate, PP.s1_gate_core; only rule kinds with it)
 %          t_cls, t_conf  frames from the onset to the first frame whose monitor class is
 %                     the threat (a component of a combined one) and to the first
 %                     confirmed alarm, read one cycle later (0: the onset frame itself, as
@@ -66,6 +70,7 @@ tr = struct('r', zeros(T, NE), 'q', zeros(T, NE), 'rest', false(T, NE), 'rplr', 
     'recov', false(T, NE), 'recovc', false(T, NE), 'fer', zeros(T, NE), 'cls', false(T, NE), 'conf', false(T, NE), 'gap', false(T, NE), ...
     'link', zeros(T, NE), 'ended', false(T, NE), 'rel', false(T, NE));
 dq = [];                                                % degraded, no RF evidence (deg_mode 'win_q_gate')
+lbna = []; s1n = [];                                    % lost branch not accepted (CLT); the gate's withheld answers, blocked escalations
 comp = cellfun(@(c) strsplit(c, '+'), PP.scen(E.scn), 'UniformOutput', false);
 for t = 1:T
     if strcmp(kind, 'oracle')
@@ -78,6 +83,14 @@ for t = 1:T
         if isfield(dinf, 'deg_quiet')
             if isempty(dq), dq = zeros(1, NE); end
             dq = dq + dinf.deg_quiet;
+        end
+        if isfield(dinf, 'lb_na')
+            if isempty(lbna), lbna = zeros(1, NE); end
+            lbna = lbna + dinf.lb_na;
+        end
+        if isfield(dinf, 's1w')
+            if isempty(s1n), s1n = zeros(2, NE); end
+            s1n = s1n + [dinf.s1w; dinf.s1b];
         end
     end
     [E, r, obs, info] = link_env('step', E, PP, K, a);
@@ -136,6 +149,8 @@ R.r = E.r;
 R.cfg_trace = tr.cfg;
 R.fc_t = fc.t; R.fc_cls = fc.cls; R.fc_deg = fc.deg; R.fc_drop = fc.drop; R.fc_dal = fc.dal;
 if ~isempty(dq), R.deg_quiet = dq; end
+if ~isempty(lbna), R.lb_na = lbna; end
+if ~isempty(s1n), R.s1_withheld = s1n(1, :); R.s1_blocked = s1n(2, :); end
 [R.cfg_end, R.rel_t, R.cost_end, R.on_end, R.conf_end, R.sw_end] = deal(nan(1, NE));
 for i = find(any(tr.ended, 1))
     k0 = find(tr.ended(:, i), 1);                       % the step that drew the first clean frame
