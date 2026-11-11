@@ -463,6 +463,8 @@ if s1_on || s1_off                                    % rule + escalation with a
     end
     rep = [rep, {''}, s1gl]; %#ok<AGROW>
 end
+LBX = lb_log_lines(ALL, POL, LBL, HA);              % the lost-branch counts, when the rollouts carry them
+if ~isempty(LBX), rep = [rep, {''}, LBX]; end
 
 % Envelope predicted on validation and KPI 4 inside it (test)
 ENV = false(numel(threats), nV); ENVv = nan(numel(threats), nV); PTenv = nan(numel(threats), 1); PTenv_ci = nan(numel(threats), 2);
