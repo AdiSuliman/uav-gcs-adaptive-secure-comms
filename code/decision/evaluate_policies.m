@@ -354,9 +354,9 @@ if c3_on                                                          % P-B (D121 it
         'data/clean_test_pools.mat carry no three-state scores.'], PP.core3_id, PP.core3_N);
 elseif isfield(PP, 'core3_not_run')
     MNOTE{end+1} = PP.core3_not_run;
-elseif WF.core3
-    MNOTE{end+1} = ['core3_pools is set but the policy pools hold no three-state scores: rule_core3 was not run in profile 3; ' ...
-        'CORE_BW (profile 1) is the three-state CNN''s in-loop evidence'];
+else
+    MNOTE{end+1} = ['rule_core3 was not run in profile 3; CORE_BW (profile 1) is the three-state CNN''s in-loop evidence' ...
+        ternary(WF.core3, ' (core3_pools is set, but the policy pools hold no three-state scores)', '')];
 end
 rep = [rep, MNOTE];
 for si = find(~strcmp({sets.name}, 'offset'))

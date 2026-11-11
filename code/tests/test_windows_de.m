@@ -53,6 +53,32 @@ verifyLessThan(tc, strfind(e, 'c3_on = isfield(PP, ''core3_id'')'), strfind(e, '
 verifyLessThan(tc, strfind(e, 'ternary(c3_on, ''rule_core and rule_core3 run'''), strfind(e, '% the core rule''s lost-branch gate step ran at C2'));
 end
 
+%% ---------- P-B's record and its 'not run' sentence ----------
+function test_pb_not_run_sentence_is_unconditional(tc)
+e = strrep(fileread(which('evaluate_policies')), char(13), '');
+i0 = strfind(e, 'if c3_on                                                          % P-B');
+i1 = strfind(e, 'rep = [rep, MNOTE];');
+verifyNumElements(tc, i0, 1); verifyNumElements(tc, i1, 1); verifyLessThan(tc, i0, i1);
+b = e(i0:i1 - 1);
+verifyNumElements(tc, strfind(b, 'elseif isfield(PP, ''core3_not_run'')'), 1);
+verifyNotEmpty(tc, regexp(b, '
+else
+    MNOTE\{end\+1\} = \[''rule_core3 was not run in profile 3; CORE_BW \(profile 1\) is the three-state CNN''''s in-loop evidence'' \.\.\.', 'once'));
+verifyEmpty(tc, strfind(b, 'elseif WF.core3'));          % no longer gated on the switch
+% the same sentence as build_policy_pools.m's
+bp = fileread(which('build_policy_pools'));
+verifyNotEmpty(tc, strfind(bp, 'rule_core3 was not run in profile 3; CORE_BW (profile 1) is the three-state CNN'));
+end
+
+function test_pb_check_record_exists(tc)
+f = fullfile(tc.TestData.root, 'docs', 'p_b_check.txt');
+verifyTrue(tc, isfile(f));
+t = fileread(f);
+verifyNotEmpty(tc, strfind(t, 'Condition (a)'));
+verifyNotEmpty(tc, strfind(t, 'FALSE'));
+verifyNotEmpty(tc, strfind(t, 'rule_core3 was not run in profile 3'));
+end
+
 function parses_ok(tc, name)
 % The file parses: mtree does not raise on a syntax error, it returns an ERR root.
 t = mtree(fileread(which(name)));

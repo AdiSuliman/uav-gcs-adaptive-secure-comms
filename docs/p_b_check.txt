@@ -1,0 +1,13 @@
+P-B (rule_core3 in profile 3's C2e): record of the condition check
+Checked 11.11.2026, read-only, in the profile 3 tree (uav-gcs-v7-p3).
+
+Condition (a), profile 3's B3c three-state model exists: FALSE.
+  data/core_cnn_model.mat is absent; results/core_cnn.* is absent; profile.json has no "core3_pools"
+  (wf_options.m defaults it to false); the three C1p logs (logs/stage_C1p_20261105_224407.txt,
+  stage_C1p_20261107_221942.txt, stage_C1p_20261108_135118.txt) hold no P-B line, so the pools were
+  built without three-state scores.
+Condition (b), the pool-field change passes the C2/EDGE smoke and the full suite: not evaluated
+  (the change is not exercised while (a) is false).
+
+Result: P-B does not run in profile 3. C2e prints, whenever rule_core3 is not among the policies:
+  "rule_core3 was not run in profile 3; CORE_BW (profile 1) is the three-state CNN's in-loop evidence".
