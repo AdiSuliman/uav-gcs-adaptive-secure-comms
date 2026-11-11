@@ -6003,6 +6003,16 @@ S.a = 4;
 verifyEqual(tc, out, {4, 8, 12}); verifyEqual(tc, double(M.Count), 7);
 [~, out] = evalc('pool_lpt_kept(fn, S, [3 1 2], [], d, ''y'')');                 % another stage's tag
 verifyEqual(tc, out, {4, 8, 12}); verifyEqual(tc, double(M.Count), 10);
+% the run's identity is part of the key: another settings file in the current folder runs every job
+w = tempname; mkdir(w); c0 = cd(w); cw = onCleanup(@() cd(c0)); %#ok<NASGU>
+[~, out] = evalc('pool_lpt_kept(fn, S, [3 1 2], [], d, ''y'')');
+verifyEqual(tc, out, {4, 8, 12}); verifyEqual(tc, double(M.Count), 13);
+[~, out] = evalc('pool_lpt_kept(fn, S, [3 1 2], [], d, ''y'')');
+verifyEqual(tc, double(M.Count), 13);
+fid = fopen('profile.json', 'w'); fprintf(fid, '{"profile":"x"}'); fclose(fid);
+[~, out] = evalc('pool_lpt_kept(fn, S, [3 1 2], [], d, ''y'')');
+verifyEqual(tc, out, {4, 8, 12}); verifyEqual(tc, double(M.Count), 16);
+cd(c0); rmdir(w, 's');
 pool_checkpoint('clear', d);
 verifyFalse(tc, isfolder(d));
 end
@@ -8942,7 +8952,7 @@ d = isfinite(R.t_rec_det);
 verifyTrue(tc, any(d));
 verifyEqual(tc, R.t_conf(d) + R.t_rec_det(d), R.t_rec(d));
 src = fileread(which('evaluate_policies'));
-verifyNotEmpty(tc, strfind(src, '[LK, lines] = lect_kpis(ALL, POL, LBL, iDQN, PP.scen, payload_bps, C.period_ms);'));
+verifyNotEmpty(tc, strfind(src, '[LK, lines] = lect_kpis(ALL, POL, LBL, iDQN, PP.scen, payload_bps, C.period_ms, struct(''rr'', true));'));
 verifyNotEmpty(tc, strfind(src, '''offset_after'', OFF_AFTER, ''lect'', LK);'));
 end
 
@@ -11559,7 +11569,8 @@ verifyNotEmpty(tc, pos('ternary(FRESH, '': already read in profile 1''''s C2e, s
 verifyNotEmpty(tc, pos('F6.state = kpi6_fresh_marker(''check'', F6.marker, F6.sha);'));
 d = parent_copy(tc, 'code/decision/evaluate_policies.m', '316230d');
 cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
-old = regexp(strrep(fileread(fullfile(d, 'evaluate_policies.m')), 'opt, 30000 + 100*si);', 'opt, 20000 + 1000*si);'), '\r?\n', 'split');   % the sets' frame-draw stride (C2e)
+old = regexp(strrep(strrep(fileread(fullfile(d, 'evaluate_policies.m')), 'opt, 30000 + 100*si);', 'opt, 20000 + 1000*si);'), ...
+    'payload_bps, C.period_ms);', 'payload_bps, C.period_ms, struct(''rr'', true));'), '\r?\n', 'split');   % the sets' frame-draw stride (C2e), the lecturer call's option
 new = regexp(src, '\r?\n', 'split');
 hd = find(contains(old, '%d episodes x %d cycles -> KPI 6'', ...'));
 verifyNumElements(tc, hd, 1);

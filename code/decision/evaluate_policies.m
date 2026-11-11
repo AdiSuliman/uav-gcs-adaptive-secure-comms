@@ -333,8 +333,9 @@ if isfield(PP, 'confirm_drop') && ~isempty(PP.confirm_drop)
 end
 if isfield(PP, 's1_gate')                                         % the rule steps ran after the lost-branch gate step
     MNOTE{end+1} = sprintf(['The rule settings were chosen after the lost-branch gate step (D113, gate %s): rule + escalation and the ' ...
-        'shared settings every policy runs carry what that step kept; rule_core and rule_core3 run with those shared settings and ' ...
-        'never with the gate.'], ternary(PP.s1_gate, 'on', 'off'));
+        'shared settings every policy runs carry what that step kept; %s with those shared settings and without that gate (the ' ...
+        'core option''s own lost-branch gate, when C2 chose one, is reported below).'], ternary(PP.s1_gate, 'on', 'off'), ...
+        ternary(c3_on, 'rule_core and rule_core3 run', 'rule_core runs'));
 end
 if s1gc_set                                                        % the core rule's lost-branch gate step ran at C2
     MNOTE{end+1} = sprintf(['rule_core carries the core rule''s lost-branch gate as C2 chose it (%s): every row read from rule_core, ' ...
@@ -353,9 +354,9 @@ if c3_on                                                          % P-B (D121 it
         'data/clean_test_pools.mat carry no three-state scores.'], PP.core3_id, PP.core3_N);
 elseif isfield(PP, 'core3_not_run')
     MNOTE{end+1} = PP.core3_not_run;
-elseif WF.core3
-    MNOTE{end+1} = ['core3_pools is set but the policy pools hold no three-state scores: rule_core3 was not run in profile 3; ' ...
-        'CORE_BW (profile 1) is the three-state CNN''s in-loop evidence'];
+else
+    MNOTE{end+1} = ['rule_core3 was not run in profile 3; CORE_BW (profile 1) is the three-state CNN''s in-loop evidence' ...
+        ternary(WF.core3, ' (core3_pools is set, but the policy pools hold no three-state scores)', '')];
 end
 rep = [rep, MNOTE];
 for si = find(~strcmp({sets.name}, 'offset'))
@@ -463,6 +464,8 @@ if s1_on || s1_off                                    % rule + escalation with a
     end
     rep = [rep, {''}, s1gl]; %#ok<AGROW>
 end
+LBX = lb_log_lines(ALL, POL, LBL, HA);              % the lost-branch counts, when the rollouts carry them
+if ~isempty(LBX), rep = [rep, {''}, LBX]; end
 
 % Envelope predicted on validation and KPI 4 inside it (test)
 ENV = false(numel(threats), nV); ENVv = nan(numel(threats), nV); PTenv = nan(numel(threats), 1); PTenv_ci = nan(numel(threats), 2);
@@ -523,7 +526,7 @@ rep{end+1} = sprintf(['Envelope on the harmed episodes (predicted on validation 
     1:numel(threats), 'UniformOutput', false), ', '), sum(PTenvh(hah) >= 90), sum(hah));
 
 % Revised proposal: PER vs the static link, recovery time from detection, goodput in bit/s
-[LK, lines] = lect_kpis(ALL, POL, LBL, iDQN, PP.scen, payload_bps, C.period_ms);
+[LK, lines] = lect_kpis(ALL, POL, LBL, iDQN, PP.scen, payload_bps, C.period_ms, struct('rr', true));
 if FRESH, lines = p1r_label(lines); end
 rep = [rep, lines];
 

@@ -6,7 +6,8 @@ function O = wf_options(cfg, f)
 %   s1g_select     C2 chooses the rule's lost-branch gate first among the rule settings (train_dqn.m)
 %   relm_select    C2 scores the release on evidence on the selected agent (train_dqn.m)
 %   k6_split       C1d prints the clean false changes of the adopted monitors in bins of link K, speed, bank and
-%                  hiding geometry (choose_drop_threshold.m, kpi6_split.m; D121 items 12 and 15, descriptive)
+%                  hiding geometry (choose_drop_threshold.m, kpi6_split.m; D121 items 12 and 15, descriptive);
+%                  C2 prints the same split for the DQN and the rule fallback (clean_k6_split.m)
 %   dconf_own      with dconf_select: a candidate's threshold by its own drop-path count (dconf_step.m, D121 item 6)
 %   core3_pools    C1p scores the three-state CNN (data/core_cnn_model.mat, B3c) into the pools and C2e flies rule_core3
 %                  beside rule_core (core3_model.m, pool_cell.m, evaluate_policies.m; D121 item 16, P-B)

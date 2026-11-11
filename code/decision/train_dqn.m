@@ -735,6 +735,16 @@ if SPO.band_table
     save('results/dqn_speed_bands.mat', 'SB');
 end
 
+% The clean validation flights' false changes in bins of link K, speed, bank and hiding geometry ("k6_split" in
+% profile.json, wf_options.m), for the DQN and the rule fallback: reported only, nothing in the saved agent or the selection reads it
+if WF.k6split && ~isempty(CV) && isfield(CV, 'cov')
+    [K6C, k6_lines] = clean_k6_split(PP, CV, EBNO_THR, H.T, [B.sw_w(:)' > 0; base(ir).rule.sw_w(:)' > 0], ...
+        {'DQN (best validation run)', 'rule + escalation (fallback)'});
+    fid = fopen('results/dqn_training.txt', 'a'); fprintf(fid, '%s\n', k6_lines{:}); fclose(fid);
+    fprintf('\n%s\n', k6_lines{:});
+    save('results/dqn_k6_split.mat', 'K6C');
+end
+
 ES = [runs.esc];
 seed_summary = struct('alarms', {{runs.alarm}}, 'drops', [runs.drop], 'fa_pens', [runs.fa_pen], 'cost_scales', [runs.cost_scale], ...
     'sw_scales', [runs.sw_scale], 'gammas', [runs.gamma], 'seeds', [runs.seed], 'steps', {{runs.step}}, ...
