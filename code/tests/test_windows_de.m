@@ -50,7 +50,7 @@ verifyNumElements(tc, strfind(e, a), 1);
 verifyNumElements(tc, strfind(e, 'ternary(c3_on, ''rule_core and rule_core3 run'', ''rule_core runs'')'), 1);
 % the note comes after c3_on is set, and the core option's own gate line follows it unchanged
 verifyLessThan(tc, strfind(e, 'c3_on = isfield(PP, ''core3_id'')'), strfind(e, 'ternary(c3_on, ''rule_core and rule_core3 run'''));
-verifyLessThan(tc, strfind(e, 'ternary(c3_on, ''rule_core and rule_core3 run'''), strfind(e, 'if s1gc_set                                                        % the core rule'));
+verifyLessThan(tc, strfind(e, 'ternary(c3_on, ''rule_core and rule_core3 run'''), strfind(e, '% the core rule''s lost-branch gate step ran at C2'));
 end
 
 function parses_ok(tc, name)
