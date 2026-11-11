@@ -670,9 +670,12 @@ function test_readers_off_is_the_parent(tc)
 % step and the layer only add lines.
 verifyEmpty(tc, parent_lines_missing(tc, '31a0f3e', 'code/evaluation/measure_all_kpis.m'), 'code/evaluation/measure_all_kpis.m');
 % the C2e sets' frame-draw seed line (20000 + 1000 x set), C2's reference entry and the re-read stop are the
-% small fixes' (wf-rf-small); the parent has them in their old form
+% small fixes' (wf-rf-small), and the two lines of the shared-settings note whose sentence on rule_core and rule_core3
+% was corrected; the parent has them in their old form
 verifyEqual(tc, parent_lines_missing(tc, '31a0f3e', 'code/decision/evaluate_policies.m'), ...
-    {'        RES{si, pk} = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, 30000 + 100*si);'});
+    {'        RES{si, pk} = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, 30000 + 100*si);', ...
+    '        ''shared settings every policy runs carry what that step kept; rule_core and rule_core3 run with those shared settings and '' ...', ...
+    '        ''never with the gate.''], ternary(PP.s1_gate, ''on'', ''off''));'});
 % wf-rf-a1 (D121 items 1 and 2) adds to train_dqn.m: the comment lines on the forced cells, the evaluation options
 % and the field name of s1g_step (which now serves the core rule's gate too), all behind s1gc_select or the default;
 % the sweeper's confirmation line reads PP.confirm_sweep only when it exists (the smoke's C2, cs_txt)

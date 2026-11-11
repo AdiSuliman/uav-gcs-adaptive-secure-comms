@@ -40,6 +40,19 @@ verifyLessThan(tc, strfind(e, 'HA = harmed(ALL{1}, K);'), strfind(e, 'LBX = lb_l
 parses_ok(tc, 'lb_log_lines'); parses_ok(tc, 'evaluate_policies');
 end
 
+%% ---------- the shared-settings note (evaluate_policies.m) ----------
+function test_shared_settings_note_names_rule_core3_only_when_it_runs(tc)
+e = strrep(fileread(which('evaluate_policies')), char(13), '');
+verifyEmpty(tc, strfind(e, 'never with the gate'));
+verifyNumElements(tc, strfind(e, 'rule_core and rule_core3 run with those'), 0);
+a = ['%s with those shared settings and without that gate (the '' ...' newline];
+verifyNumElements(tc, strfind(e, a), 1);
+verifyNumElements(tc, strfind(e, 'ternary(c3_on, ''rule_core and rule_core3 run'', ''rule_core runs'')'), 1);
+% the note comes after c3_on is set, and the core option's own gate line follows it unchanged
+verifyLessThan(tc, strfind(e, 'c3_on = isfield(PP, ''core3_id'')'), strfind(e, 'ternary(c3_on, ''rule_core and rule_core3 run'''));
+verifyLessThan(tc, strfind(e, 'ternary(c3_on, ''rule_core and rule_core3 run'''), strfind(e, 'if s1gc_set                                                        % the core rule'));
+end
+
 function parses_ok(tc, name)
 % The file parses: mtree does not raise on a syntax error, it returns an ERR root.
 t = mtree(fileread(which(name)));
