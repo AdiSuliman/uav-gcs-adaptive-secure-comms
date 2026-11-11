@@ -61,9 +61,7 @@ i1 = strfind(e, 'rep = [rep, MNOTE];');
 verifyNumElements(tc, i0, 1); verifyNumElements(tc, i1, 1); verifyLessThan(tc, i0, i1);
 b = e(i0:i1 - 1);
 verifyNumElements(tc, strfind(b, 'elseif isfield(PP, ''core3_not_run'')'), 1);
-verifyNotEmpty(tc, regexp(b, '
-else
-    MNOTE\{end\+1\} = \[''rule_core3 was not run in profile 3; CORE_BW \(profile 1\) is the three-state CNN''''s in-loop evidence'' \.\.\.', 'once'));
+verifyNumElements(tc, strfind(b, [newline 'else' newline '    MNOTE{end+1} = [''rule_core3 was not run in profile 3; CORE_BW (profile 1) is the three-state CNN''''s in-loop evidence'' ...']), 1);
 verifyEmpty(tc, strfind(b, 'elseif WF.core3'));          % no longer gated on the switch
 % the same sentence as build_policy_pools.m's
 bp = fileread(which('build_policy_pools'));
@@ -191,6 +189,33 @@ verifyNumElements(tc, regexp(src, 'rr_us\(\)', 'match'), 1);
 verifyNumElements(tc, regexp(src, 'rr_column\(', 'match'), 3);
 verifyNotEmpty(tc, strfind(src, 'the registered pair above stands'));
 parses_ok(tc, 'lect_kpis'); parses_ok(tc, 'evaluate_policies');
+end
+
+%% ---------- the C2 validation reader of KPI 6's split (clean_k6_split.m, train_dqn.m) ----------
+function test_clean_k6_split_refuses_another_episode_count(tc)
+PP = struct('scen', {{'none', 'jamming'}}, 'ebno', [0 3 6]);
+CT = struct('n_geom', 5);                                        % Eb/N0 3 and 6 dB x 5 geometries = 10 episodes
+verifyError(tc, @() clean_k6_split(PP, CT, 3, 30, false(2, 7), {'a', 'b'}), 'clean_k6_split:size');
+end
+
+function test_clean_k6_split_wiring_static_and_parse(tc)
+t = strrep(fileread(which('train_dqn')), char(13), '');
+verifyNumElements(tc, strfind(t, 'clean_k6_split('), 1);
+i = strfind(t, 'if WF.k6split && ~isempty(CV) && isfield(CV, ''cov'')');
+verifyNumElements(tc, i, 1);
+verifyLessThan(tc, strfind(t, 'if ~gate, warning(''train_dqn:gate'''), i);                 % after the report
+verifyLessThan(tc, i, min(strfind(t, 'save(''data/trained_dqn.mat''')));                     % nothing saved with the agent
+blk = t(i:i + strfind(t(i:end), 'save(''results/dqn_k6_split.mat'', ''K6C'');') - 1);
+verifyEmpty(tc, strfind(blk, 'trained_dqn'));
+verifyNotEmpty(tc, strfind(blk, '[B.sw_w(:)'' > 0; base(ir).rule.sw_w(:)'' > 0]'));        % the changes eval_clean_wide already counted
+s = strrep(fileread(which('clean_k6_split')), char(13), '');
+verifyNotEmpty(tc, strfind(s, 'PPw.record_los_k = true;'));
+verifyNumElements(tc, strfind(s, 'monitor_trace(PPw, Kw, specs, 2, 41000)'), 1);           % the seed of the clean validation draws
+verifyNotEmpty(tc, strfind(s, 'kpi6_split(flag, 1000 * s + r, cov, names)'));
+for f = {'healthy', 'harmed', 'sc_eff', '\.ended', '\.restored'}
+    verifyEmpty(tc, regexp(s, f{1}, 'once'), sprintf('clean_k6_split reads %s', f{1}));
+end
+parses_ok(tc, 'clean_k6_split'); parses_ok(tc, 'train_dqn');
 end
 
 function parses_ok(tc, name)
