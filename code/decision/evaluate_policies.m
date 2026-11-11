@@ -526,7 +526,7 @@ rep{end+1} = sprintf(['Envelope on the harmed episodes (predicted on validation 
     1:numel(threats), 'UniformOutput', false), ', '), sum(PTenvh(hah) >= 90), sum(hah));
 
 % Revised proposal: PER vs the static link, recovery time from detection, goodput in bit/s
-[LK, lines] = lect_kpis(ALL, POL, LBL, iDQN, PP.scen, payload_bps, C.period_ms);
+[LK, lines] = lect_kpis(ALL, POL, LBL, iDQN, PP.scen, payload_bps, C.period_ms, struct('rr', true));
 if FRESH, lines = p1r_label(lines); end
 rep = [rep, lines];
 

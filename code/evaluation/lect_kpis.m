@@ -1,11 +1,13 @@
-function [L, lines] = lect_kpis(ALL, POL, LBL, iDQN, scen, payload_bps, period_ms)
+function [L, lines] = lect_kpis(ALL, POL, LBL, iDQN, scen, payload_bps, period_ms, opt)
 %LECT_KPIS  The revised proposal's link KPIs from the pooled threat sets of evaluate_policies.m.
-%   [L, lines] = lect_kpis(ALL, POL, LBL, iDQN, scen, payload_bps, period_ms)
+%   [L, lines] = lect_kpis(ALL, POL, LBL, iDQN, scen, payload_bps, period_ms, opt)
 %   ALL     1 x policies, per-episode results (rollout_policy.m, policy_run_set.m), the same
 %           episodes under every policy (common random numbers)
 %   POL, LBL, iDQN  policy keys, labels and the deployed policy's index; scen  PP.scen
 %   payload_bps     nominal payload rate [bit/s]: payload bits per frame / decision cycle
 %   period_ms       decision period [ms]
+%   opt             optional; opt.rr = true adds the receiver-robust side column (rr_us.m, rr_column.m) beside the
+%                   core action set's pairs against blind_core; without it the readings and lines are unchanged
 %   PER (packet error rate, true packet loss by CRC; per_metrics.m) on the RECOVERABLE episodes
 %   of the jamming threats (JAM below): reduction vs the static link (no response) = 1 - mean
 %   PER under the policy / mean PER under no response, paired by episode, 95% bootstrap over
@@ -59,7 +61,7 @@ kg = unique([kr, {'oracle'}], 'stable'); kg = kg(cellfun(has, kg));
 lab = @(p) LBL{col(p)};
 X = struct('ALL', {ALL}, 'has', has, 'col', col, 'lab', lab, 'R1', R1, 'nm', {nm}, 'mrec', mrec, 'mj', mj, ...
     'ref', ALL{iN}.per_post, 'JAM', {JAM}, 'BAND', {BAND}, 'TARGET', TARGET, 'N_RUN', N_RUN, 'B', B, ...
-    'payload_bps', payload_bps, 'period_ms', period_ms, 'rec_txt', 'some configuration of the 36 restores the geometry');
+    'payload_bps', payload_bps, 'period_ms', period_ms, 'rec_txt', 'some configuration of the 36 restores the geometry', 'rr', []);
 L = struct('jam', {JAM}, 'target_pct', TARGET, 'run', N_RUN, 'payload_bps', payload_bps, 'period_ms', period_ms, ...
     'recoverable', 'all36');
 lines = {'', sprintf(['--- Revised-proposal KPIs: PER vs the static link, recovery time from detection, goodput in ' ...
@@ -83,6 +85,7 @@ if ~isfield(R1, 'recoverable_core')
 end
 Xc = X; Xc.mrec = R1.recoverable_core & R1.threat; Xc.mj = Xc.mrec & jam;
 Xc.rec_txt = 'some configuration of the core action set restores the geometry';
+if nargin >= 8 && isstruct(opt) && isfield(opt, 'rr') && opt.rr, Xc.rr = rr_us(); end   % the receiver-robust column, core pairs only
 kcr = {'none', 'blind_core', 'rule_core'}; kcr = kcr(cellfun(has, kcr));
 if has('rule_core3'), kcr{end+1} = 'rule_core3'; end
 lines{end+1} = sprintf(['Core action set {%s} (the revised proposal''s predefined actions, channel switching and ' ...
@@ -210,13 +213,37 @@ if X.has(tgt) && X.has(conv)
     OR = onset_recovery(Rt.t_conf + Rt.t_rec_det, Rc.t_conf + Rc.t_rec_det, mj, R1.geom, B, s0 + 202);
     CN = struct('per_red_pct', 100 * r, 'per_ci', 100 * [lo hi], 'gput_bps', g, 'gput_ci', [gl gh], 'n', sum(ok), ...
         'det', det, 'rec_det', rd, 'onset_rec', OR);
+    if ~isempty(X.rr), [CN.rr, lrr] = rr_reading(X, Rt, Rc, ok, cnn_ttl, s0); end
     lines{end+1} = sprintf(['  CNN contribution (%s, the same %d episodes): PER reduction %.1f%% [%.1f, %.1f], goodput ' ...
         '%+.0f bit/s [%+.0f, %+.0f]; recovery time on the %d recoverable jamming episodes, with vs without the ' ...
         'detector: onset -> detection %s vs %s, detection -> PER restored %s vs %s'], cnn_ttl, sum(ok), 100 * r, ...
         100 * lo, 100 * hi, g, gl, gh, sum(mj), ttxt(det(1), X.period_ms), ttxt(det(2), X.period_ms), ...
         ttxt(rd(1), X.period_ms), ttxt(rd(2), X.period_ms));
     lines{end+1} = onset_line(OR, X.period_ms, cnn_ttl);
+    if ~isempty(X.rr), lines{end+1} = lrr; end
 end
+end
+
+function [RR, line] = rr_reading(X, Rt, Rc, ok, ttl, s0)
+% The receiver-robust side column beside a core pair (tgt minus conv, the pair of cnn_pair): the paired differences
+% in the units U_s is given in (PER absolute, goodput in bit/s, detection to restored in cycles, on the episodes both
+% rows recover) with their 95% bootstrap over flight geometries, and whether each interval clears 0 by more than U_s.
+% U_s (X.rr, rr_us.m) is NaN where results/d2c_us.mat gives none: the verdict is then "n/a", never a number made up.
+Us = X.rr; geom = X.R1.geom; B = X.B;
+[dp, plo, phi] = boot_cluster(Rt.per_post(ok) - Rc.per_post(ok), ones(1, sum(ok)), geom(ok), B, s0 + 203);
+dg = X.payload_bps * (Rt.dlv_post - Rc.dlv_post);
+[dgm, glo, ghi] = boot_cluster(dg(ok), ones(1, sum(ok)), geom(ok), B, s0 + 201);
+f = X.mj & isfinite(Rt.t_rec_det) & isfinite(Rc.t_rec_det);
+dt = NaN; tlo = NaN; thi = NaN;
+if any(f), [dt, tlo, thi] = boot_cluster(Rt.t_rec_det(f) - Rc.t_rec_det(f), ones(1, sum(f)), geom(f), B, s0 + 204); end
+w = {rr_column([plo phi], Us.per), rr_column([glo ghi], Us.gput), rr_column([tlo thi], Us.trec)};
+RR = struct('Us', Us, 'per', [dp plo phi], 'gput', [dgm glo ghi], 'trec', [dt tlo thi], 'n_both', sum(f), 'robust', {w});
+us = @(u) ternary(isfinite(u), sprintf('%g', u), 'not available');
+line = sprintf(['  receiver-robust (U_s from D2c, side reading, the registered pair above stands), %s: PER difference %+.4f ' ...
+    '[%+.4f, %+.4f] (U_s %s) %s | goodput %+.0f [%+.0f, %+.0f] bit/s (U_s %s) %s | detection->restored %+.2f [%+.2f, %+.2f] ' ...
+    'cycles on the %d episodes both recover in (U_s %s) %s%s'], ttl, dp, plo, phi, us(Us.per), w{1}, dgm, glo, ghi, ...
+    us(Us.gput), w{2}, dt, tlo, thi, sum(f), us(Us.trec), w{3}, ...
+    ternary(all(isnan([Us.per Us.gput Us.trec])), ' -- U_s not available (results/d2c_us.mat absent or empty): no verdict', ''));
 end
 
 function OR = onset_recovery(tt, tcv, mj, geom, B, seed)
