@@ -471,9 +471,14 @@ end
 % Through a temporary file, flushed to the disk and renamed once complete: a stop never leaves
 % a broken params.mat (SURV and SURV3 run this script).
 save('params.tmp.mat', 'params');
-if usejava('jvm')
-    raf_ = java.io.RandomAccessFile(fullfile(pwd, 'params.tmp.mat'), 'rw');
-    raf_.getChannel().force(true); raf_.close(); clear raf_
+if usejava('jvm')                                  % flush to disk; a failed flush still renames
+    try
+        raf_ = java.io.RandomAccessFile(fullfile(pwd, 'params.tmp.mat'), 'rw');
+        try, raf_.getChannel().force(true); catch, end
+        raf_.close();
+    catch
+    end
+    clear raf_
 end
 movefile('params.tmp.mat', 'params.mat', 'f');
 fprintf('Parameters saved to params.mat\n');

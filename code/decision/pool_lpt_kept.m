@@ -5,11 +5,12 @@ function out = pool_lpt_kept(fn, S, ord, pl, CKD, tag)
 %   S      the stage's variables (a struct); ord the jobs 1..n in their order (pool_schedule.m)
 %   pl     the pool ([] this process); CKD the folder of the kept jobs
 %   tag    the stage's name, part of every job's key
-%   out{j} job j's result, in job order (not ord's). Job j's key is the SHA-256 of tag, S and j,
-%   so a job is kept only from a start with the same inputs. The caller removes CKD
-%   (pool_checkpoint 'clear') once its own output is saved.
+%   out{j} job j's result, in job order (not ord's). Job j's key is the SHA-256 of tag, S, j and
+%   the run's identity (run_cache 'inputs': the code under code/, profile.json, params.mat, the
+%   release and the thread count), so a job is kept only from a start with the same inputs and
+%   the same code. The caller removes CKD (pool_checkpoint 'clear') once its own output is saved.
 n = numel(ord);
-hs = pool_checkpoint('key', {tag, S});
+hs = pool_checkpoint('key', {tag, S, run_cache('inputs', {})});
 keys = arrayfun(@(j) pool_checkpoint('key', {hs, j}), 1:n, 'UniformOutput', false);
 todo = pool_checkpoint('todo', CKD, keys);
 run = ord(ismember(ord, todo));

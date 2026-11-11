@@ -6003,6 +6003,16 @@ S.a = 4;
 verifyEqual(tc, out, {4, 8, 12}); verifyEqual(tc, double(M.Count), 7);
 [~, out] = evalc('pool_lpt_kept(fn, S, [3 1 2], [], d, ''y'')');                 % another stage's tag
 verifyEqual(tc, out, {4, 8, 12}); verifyEqual(tc, double(M.Count), 10);
+% the run's identity is part of the key: another settings file in the current folder runs every job
+w = tempname; mkdir(w); c0 = cd(w); cw = onCleanup(@() cd(c0)); %#ok<NASGU>
+[~, out] = evalc('pool_lpt_kept(fn, S, [3 1 2], [], d, ''y'')');
+verifyEqual(tc, out, {4, 8, 12}); verifyEqual(tc, double(M.Count), 13);
+[~, out] = evalc('pool_lpt_kept(fn, S, [3 1 2], [], d, ''y'')');
+verifyEqual(tc, double(M.Count), 13);
+fid = fopen('profile.json', 'w'); fprintf(fid, '{"profile":"x"}'); fclose(fid);
+[~, out] = evalc('pool_lpt_kept(fn, S, [3 1 2], [], d, ''y'')');
+verifyEqual(tc, out, {4, 8, 12}); verifyEqual(tc, double(M.Count), 16);
+cd(c0); rmdir(w, 's');
 pool_checkpoint('clear', d);
 verifyFalse(tc, isfolder(d));
 end
