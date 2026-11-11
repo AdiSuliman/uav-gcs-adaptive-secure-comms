@@ -2922,6 +2922,8 @@ Line references in points 1-10 are to profile 1's code of record `d4623ed` and t
 4. **Registration.** Its protocol (stages, sets, seeds, adoption rules, labels, what is reported beside the first reading) is written and committed before any P1-v2 data.
 5. **Reporting.** The book shows profile 1's first reading and P1-v2 side by side, each with its receiver, sets and rules named.
 
+*[Dated 11.11.2026, Adi's word: P1-v2 leaves the critical path. The lecturer's proposal items are finished first (profile 3's chain, the GUI, D2c, LAT and the final KPI table, ~25-26.11), then the project book and presentation; P1-v2 (both arms as registered above) runs only after the book. Nothing registered for it changes; its protocol is still written before any of its data.]*
+
 ## D120 - Predictive readings: predicted against measured result per configuration, outage risk from fading statistics, and the sweeper's period (approved by Adi, 31.10.2026)
 
 **D120 (2026-10-31, approved by Adi on 31.10.2026 ~09:45).** Source: `worktrees/session_notes_0ff3/audit31/predict_audit.md`. RF inputs only; report-only unless stated.
