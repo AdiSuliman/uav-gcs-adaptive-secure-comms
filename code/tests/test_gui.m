@@ -582,6 +582,21 @@ verifyEqual(tc, char(tabLog.AutoResizeChildren), 'off');
 verifyNotEmpty(tc, tabLog.SizeChangedFcn);
 verifyEqual(tc, ui.histTbl.BackgroundColor, ui.histTbl.Parent.BackgroundColor, 'AbsTol', 1e-12);   % dark table on a dark grid
 verifyLessThan(tc, max(ui.histTbl.BackgroundColor, [], 'all'), 0.2);
+% blank padding rows fill the table; the real history stays separate
+tabLog.Position(4) = 600; tabLog.SizeChangedFcn(tabLog, []);
+nFit = floor((600 - 8 - 8 - 64 - 2 * ui.histTbl.FontSize - 2) / (2 * ui.histTbl.FontSize));
+verifyGreaterThanOrEqual(tc, size(ui.histTbl.Data, 1), nFit);
+verifyTrue(tc, all(cellfun(@isempty, ui.histTbl.Data), 'all'));
+verifyEmpty(tc, getappdata(fig, 'history'));
+ud = ui.histTbl.UserData; ud.rows = repmat({1}, 2, size(ud.rows, 2)); ui.histTbl.UserData = ud;
+tabLog.SizeChangedFcn(tabLog, []);
+verifyEqual(tc, size(ui.histTbl.Data, 1), size(ud.rows, 1) + sum(cellfun(@isempty, ui.histTbl.Data(:, 1))));
+verifyTrue(tc, all(cellfun(@(x) isequal(x, 1), ui.histTbl.Data(1:2, 1))));
+verifyEmpty(tc, getappdata(fig, 'history'));          % export and the count read this, not the table
+ui.clearBtn.ButtonPushedFcn(ui.clearBtn, []);
+verifyEmpty(tc, ui.histTbl.UserData.rows);
+verifyTrue(tc, all(cellfun(@isempty, ui.histTbl.Data), 'all'));
+verifyGreaterThanOrEqual(tc, size(ui.histTbl.Data, 1), nFit);
 if fx.core
     verifySubstring(tc, strjoin(ui.kLect.Value, ' '), 'lecturer');
 end

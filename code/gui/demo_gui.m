@@ -749,10 +749,11 @@ function ui = buildLogTab(tab, env, c)
         'ColumnWidth', {40, 150, 60, 80, 130, 190, 60, 340, 340, 70, 70, 440, 70}, 'RowName', [], ...
         'FontSize', 11, 'FontName', c.font, 'RowStriping', 'off', 'BackgroundColor', c.termBg, 'ForegroundColor', c.txt);
     histTbl.Layout.Row = 1;
-    try, addStyle(histTbl, uistyle('BackgroundColor', c.termBg, 'FontColor', c.txt), 'table'); catch, end   % release-dependent
+    histTbl.UserData = struct('rows', {cell(0, numel(hdrNames))}, 'h', 0);
     histTbl.Tooltip = {'One row per finished run: what attacked, what was detected, what each', ...
         'policy did and how much of the damage it undid. EXPORT saves CSV + MAT.'};
-    tab.SizeChangedFcn = @(src, ~) fitHistCols(histTbl, src.Position(3) - g.Padding(1) - g.Padding(3));
+    tab.SizeChangedFcn = @(src, ~) histResize(histTbl, src.Position(3) - g.Padding(1) - g.Padding(3), ...
+        src.Position(4) - g.Padding(2) - g.Padding(4) - g.RowSpacing - 64);
 
     bg = uigridlayout(g, [1 3]); bg.Layout.Row = 2; bg.ColumnWidth = {'1x', 230, 150};
     bg.Padding = [0 0 0 0]; bg.ColumnSpacing = 8; bg.BackgroundColor = c.panelBg;
@@ -765,6 +766,21 @@ function ui = buildLogTab(tab, env, c)
     place(clearBtn, 1, 3);
 
     ui = struct('histTbl',histTbl,'sessionLbl',sessionLbl,'exportBtn',exportBtn,'clearBtn',clearBtn);
+end
+
+function histResize(tbl, availW, availH)
+    % Refit the verdict column and the blank padding rows to the table's size.
+    fitHistCols(tbl, availW);
+    ud = tbl.UserData; ud.h = availH; tbl.UserData = ud;
+    histShow(tbl);
+end
+
+function histShow(tbl)
+    % Real rows (kept in UserData) followed by blank rows that fill the table's height.
+    ud = tbl.UserData; rows = ud.rows;
+    rowH = 2 * tbl.FontSize; hdrH = rowH + 2;
+    nPad = max(0, ceil((ud.h - hdrH) / rowH) - size(rows, 1));
+    tbl.Data = [rows; repmat({''}, nPad, size(rows, 2))];
 end
 
 function fitHistCols(tbl, avail)
@@ -1048,7 +1064,8 @@ end
 function clearHistory(btn, ~)
     fig = ancestor(btn, 'figure'); ui = fig.UserData.ui;
     setappdata(fig, 'history', {});
-    ui.histTbl.Data = cell(0, size(ui.histTbl.Data, 2));
+    ud = ui.histTbl.UserData; ud.rows = cell(0, size(ud.rows, 2)); ui.histTbl.UserData = ud;
+    histShow(ui.histTbl);
     updateSessionSummary(fig);
     appLog(fig, 'Session history cleared.');
 end
@@ -1450,10 +1467,12 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
         'verdict', verdict, 'verdict_status', vstat, ...
         'cnn_latency_ms', cnn_ms, 'dqn_latency_ms', dqn_ms, 'decision_latency_ms', total_ms);
     H{end+1} = entry; setappdata(fig, 'history', H);
-    ui.histTbl.Data = [ui.histTbl.Data; { n, threatLabel(threat), sprintf('%g dB', ebno), ...
+    ud = ui.histTbl.UserData;
+    ud.rows = [ud.rows; { n, threatLabel(threat), sprintf('%g dB', ebno), ...
         sprintf('%.1f', v_kmh), sevTxt, [niceName(detShown) ' [' ok ']'], sprintf('%.0f%%', 100*conf), ...
         niceName(action_name), niceName(ruleShown), pctStr(rec_dqn), pctStr(rec_rule), verdict, ...
         sprintf('%.1f', total_ms) }];
+    ui.histTbl.UserData = ud; histShow(ui.histTbl);
     setappdata(fig, 'lastRun', struct('threat', threat, 'level', sevLevel, 'snr', ebno, 'status', vstat));
     updateSessionSummary(fig);
     updateSurvMap(fig);
