@@ -100,7 +100,7 @@ tc0 = [0 1 2 NaN 5];
 verifyEqual(tc, [ce; am], logical([1 0 0 0 0; 0 1 0 0 0]));
 m.alarm_mode = 'class';                                           % the drop alarm's confirmation is not read
 [ce, am] = system_fa_breakdown('carry_counts', tc0, m);
-verifyEqual(tc, [ce; am], logical([1 1 1 0 0; 0 0 0 0 0]));
+verifyEqual(tc, [ce; am], logical([1 1 0 0 0; 0 0 0 0 0]));      % only t_conf below m - 1 = 2 is carried over
 end
 
 %% ---------- D103 3 ----------
