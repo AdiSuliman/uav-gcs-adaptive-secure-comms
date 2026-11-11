@@ -7,7 +7,8 @@ function [L, lines] = lect_kpis(ALL, POL, LBL, iDQN, scen, payload_bps, period_m
 %   payload_bps     nominal payload rate [bit/s]: payload bits per frame / decision cycle
 %   period_ms       decision period [ms]
 %   opt             optional; opt.rr = true adds the receiver-robust side column (rr_us.m, rr_column.m) beside the
-%                   core action set's pairs against blind_core; without it the readings and lines are unchanged
+%                   core action set's pairs against blind_core; a struct opt.rr (per, gput, trec) gives U_s as it
+%                   is, so a stored call can be repeated; without it the readings and lines are unchanged
 %   PER (packet error rate, true packet loss by CRC; per_metrics.m) on the RECOVERABLE episodes
 %   of the jamming threats (JAM below): reduction vs the static link (no response) = 1 - mean
 %   PER under the policy / mean PER under no response, paired by episode, 95% bootstrap over
@@ -85,7 +86,7 @@ if ~isfield(R1, 'recoverable_core')
 end
 Xc = X; Xc.mrec = R1.recoverable_core & R1.threat; Xc.mj = Xc.mrec & jam;
 Xc.rec_txt = 'some configuration of the core action set restores the geometry';
-if nargin >= 8 && isstruct(opt) && isfield(opt, 'rr') && opt.rr, Xc.rr = rr_us(); end   % the receiver-robust column, core pairs only
+if nargin >= 8 && isstruct(opt) && isfield(opt, 'rr'), Xc.rr = rr_option(opt.rr); end   % the receiver-robust column, core pairs only
 kcr = {'none', 'blind_core', 'rule_core'}; kcr = kcr(cellfun(has, kcr));
 if has('rule_core3'), kcr{end+1} = 'rule_core3'; end
 lines{end+1} = sprintf(['Core action set {%s} (the revised proposal''s predefined actions, channel switching and ' ...
@@ -221,6 +222,20 @@ if X.has(tgt) && X.has(conv)
         ttxt(rd(1), X.period_ms), ttxt(rd(2), X.period_ms));
     lines{end+1} = onset_line(OR, X.period_ms, cnn_ttl);
     if ~isempty(X.rr), lines{end+1} = lrr; end
+end
+end
+
+function Us = rr_option(rr)
+% U_s of opt.rr: true reads results/d2c_us.mat (rr_us.m); a struct gives its per, gput and trec (NaN where missing);
+% false or empty: [] (no column).
+Us = [];
+if isstruct(rr)
+    Us = struct('per', NaN, 'gput', NaN, 'trec', NaN);
+    for n = fieldnames(Us)'
+        if isfield(rr, n{1}) && isscalar(rr.(n{1})), Us.(n{1}) = double(rr.(n{1})); end
+    end
+elseif isscalar(rr) && rr
+    Us = rr_us();
 end
 end
 
