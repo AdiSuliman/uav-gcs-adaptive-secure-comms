@@ -580,6 +580,8 @@ verifyTrue(tc, ismember('all', ui.epPolicyDD.ItemsData) && ismember('core', ui.e
 tabLog = ui.histTbl.Parent.Parent;                       % the Session Log tab fits the table through its own resize callback
 verifyEqual(tc, char(tabLog.AutoResizeChildren), 'off');
 verifyNotEmpty(tc, tabLog.SizeChangedFcn);
+verifyEqual(tc, ui.histTbl.BackgroundColor, ui.histTbl.Parent.BackgroundColor, 'AbsTol', 1e-12);   % dark table on a dark grid
+verifyLessThan(tc, max(ui.histTbl.BackgroundColor, [], 'all'), 0.2);
 if fx.core
     verifySubstring(tc, strjoin(ui.kLect.Value, ' '), 'lecturer');
 end

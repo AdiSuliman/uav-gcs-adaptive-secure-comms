@@ -741,7 +741,7 @@ end
 function ui = buildLogTab(tab, env, c)
     tab.AutoResizeChildren = 'off';     % needed for the tab's SizeChangedFcn below
     g = uigridlayout(tab, [2 1]); g.RowHeight = {'1x', 64}; g.Padding = [4 4 4 4]; g.RowSpacing = 8;
-    g.BackgroundColor = c.bg;
+    g.BackgroundColor = c.termBg;       % no white strip below the last row
     dn = env.dep.name;
     hdrNames = {'#','Threat','Eb/N0','Speed','Severity','Detected','Conf',[dn ' action'],'Rule action', ...
                 ['Rec ' dn],'Rec Rule','Verdict','Lat (ms)'};
@@ -749,6 +749,7 @@ function ui = buildLogTab(tab, env, c)
         'ColumnWidth', {40, 150, 60, 80, 130, 190, 60, 340, 340, 70, 70, 440, 70}, 'RowName', [], ...
         'FontSize', 11, 'FontName', c.font, 'RowStriping', 'off', 'BackgroundColor', c.termBg, 'ForegroundColor', c.txt);
     histTbl.Layout.Row = 1;
+    try, addStyle(histTbl, uistyle('BackgroundColor', c.termBg, 'FontColor', c.txt), 'table'); catch, end   % release-dependent
     histTbl.Tooltip = {'One row per finished run: what attacked, what was detected, what each', ...
         'policy did and how much of the damage it undid. EXPORT saves CSV + MAT.'};
     tab.SizeChangedFcn = @(src, ~) fitHistCols(histTbl, src.Position(3) - g.Padding(1) - g.Padding(3));
