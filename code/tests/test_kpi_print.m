@@ -13,7 +13,7 @@ tc.TestData.root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
 addpath(fullfile(tc.TestData.root, 'code'));
 setup_paths;
 tc.TestData.cwd = pwd;
-tc.TestData.base = '85484b0';                      % the commit the print fixes branch from
+tc.TestData.base = '8cfb172';                      % profile 3's commit the print fixes are ported onto
 end
 
 function teardownOnce(tc)
@@ -56,6 +56,22 @@ res(2).dqn_out = NaN;
 s = kpi_print_text('leave_out', res, 'x', 'y', 'threats');
 verifyTrue(tc, contains(s, 'n/a'));
 verifyFalse(tc, contains(s, 'NaN'));
+end
+
+function test_leave_out_label(tc)
+% The DQN the leave-one-out experiments fly: data/trained_dqn.mat's selected kind when the file is
+% there, else the deployed policy's; the link-budget completion off when res holds its columns.
+dl = 'DQN gamma=0.50 (selected)';
+verifyEqual(tc, kpi_print_text('leave_out_label', '', 'dqn_g1', dl, false), 'DQN gamma=0.50 (selected), deployed, no escalation');
+verifyEqual(tc, kpi_print_text('leave_out_label', '', 'dqn_esc', 'DQN + escalation', false), 'DQN + escalation');
+verifyEqual(tc, kpi_print_text('leave_out_label', '', 'rule_esc', 'rule + escalation', false), 'DQN + escalation');
+verifyEqual(tc, kpi_print_text('leave_out_label', 'dqn', 'rule_sel', 'rule + escalation, own monitor (x)', false), ...
+    'DQN as selected, no escalation');
+verifyEqual(tc, kpi_print_text('leave_out_label', 'dqn_esc', 'dqn_g1', dl, false), 'DQN + escalation');
+verifyEqual(tc, kpi_print_text('leave_out_label', 'dqn', 'dqn_g1', [dl ' + link-budget completion (hybrid), with the release ' ...
+    'on evidence'], true), 'DQN gamma=0.50 (selected), with the release on evidence, deployed, no escalation, link-budget completion off');
+verifyEqual(tc, kpi_print_text('leave_out_label', 'dqn_esc', 'dqn_esc', 'DQN + escalation + link-budget completion (hybrid)', true), ...
+    'DQN + escalation, link-budget completion off');
 end
 
 function test_kpi1_lines_text(tc)
@@ -286,6 +302,27 @@ end
 verifyTrue(tc, isequaln(S1.LECT, S0.LECT));
 end
 
+function test_summary_kpi7_spread_beside_speed_reading(tc)
+% With speed_reading.m's lines (the union reading, or the inference lines) their Hall & Miller bound
+% is the speed part's upper bound: the spread_boot committed line is not added; without them it is.
+% The registered spread line stays either way.
+work_dir(tc);
+write_policy('dqn_esc', struct('mode', 'verdict', 'met', true, 'word_union', 'MET (committed)', ...
+    'kpi_lines', {{'speed part on the union of the test and second-test single sets (fixture)'}}));
+evalc('measure_all_kpis');
+S = load('results/kpi_summary.mat', 'KPI'); d7 = S.KPI([S.KPI.id] == 7).detail;
+verifyNumElements(tc, find(startsWith(d7, 'spread over the speed bands 6.0 points [3.5, 11.8]')), 1);
+verifyFalse(tc, any(startsWith(d7, 'speed spread, committed reading')));
+verifyTrue(tc, any(strcmp(d7, 'speed part on the union of the test and second-test single sets (fixture)')));
+work_dir(tc);
+write_policy('dqn_esc', struct('mode', 'lines', 'met', true, 'word_union', '', 'kpi_lines', {{}}));
+evalc('measure_all_kpis');
+S = load('results/kpi_summary.mat', 'KPI'); d7 = S.KPI([S.KPI.id] == 7).detail;
+isp = find(startsWith(d7, 'spread over the speed bands 6.0 points [3.5, 11.8]'));
+verifyNumElements(tc, isp, 1);
+verifyTrue(tc, startsWith(d7{isp + 1}, 'speed spread, committed reading'));
+end
+
 %% ---------- the report export ----------
 function test_export_c2u_and_gcsa(tc)
 % The leave-one-threat-out policy test (not its episodes) and the GCS antenna report's lines are
@@ -339,7 +376,10 @@ mk = fileread(which('measure_all_kpis'));
 for t = {'kpi_print_text(''kpi1_all'', m)', 'kpi_print_text(''kpi1_every'', m)', 'kpi_print_text(''kpi4_lower'', te, pe(he), eci(he, :))', ...
         'kpi_print_text(''kpi7_spread'', P.KP.speed_spread, 10)', 'kpi_print_text(''edge_distance'', en, inom)', ...
         'kpi_print_text(''leave_out'', Cg.res', 'kpi_print_text(''leave_out'', Cu.res', 'kpi_print_text(''gcsa'', splitlines(fileread(F.gcsa)))', ...
-        '''unk'', ''results/unknown_threat_policy.mat'', ''gcsa'', ''results/gcs_antenna.txt'''}
+        '''unk'', ''results/unknown_threat_policy.mat'', ''gcsa'', ''results/gcs_antenna.txt''', ...
+        'kpi_print_text(''leave_out_label'', cg_kind, P.POL{iD}, dep, isfield(Cg.res, ''dqn_out_lb''))', ...
+        'kpi_print_text(''leave_out_label'', cg_kind, P.POL{iD}, dep, isfield(Cu.res, ''dqn_out_lb''))', ...
+        'cg_kind = dqn_selected_kind(load(F.dqn, ''-regexp'', ''^(seed_summary|deployed)$''));', 'if ~su_lines'}
     verifyNotEmpty(tc, strfind(mk, t{1}), t{1});
 end
 verifyEmpty(tc, strfind(mk, 'ec = m.every_class;'));
@@ -404,10 +444,10 @@ if with_ci, m.ci95.macro_f1_above = [94.40 95.30]; end
 m.every_class = struct('threshold_db', NaN, 'macro_f1_above_threshold_pct', NaN, 'class_f1_above_threshold_pct', nan(3, 1));
 end
 
-function write_policy(deployed)
+function write_policy(deployed, su)
 % results/policy_evaluation.mat reduced to what measure_all_kpis.m and build_kpi_dashboard.m read
 % (no identity: the file is not stale without a trained DQN). deployed: 'dqn_g1' (the DQN without
-% the escalation) or 'dqn_esc'.
+% the escalation) or 'dqn_esc'; su, optional: KP.speed_union (speed_reading.m's fields read there).
 POL = {'none', 'random', 'fixed', 'rule_esc', 'blind_esc', 'table', 'dqn_g1', 'dqn_esc', 'oracle'};
 LBL = {'no response', 'random', 'fixed', 'rule + escalation', 'no detector + escalation', 'table', ...
     'DQN gamma=0.50 (selected)', 'DQN + escalation', 'oracle'};
@@ -432,6 +472,7 @@ KP = struct('threats', {{'jamming', 'tone_jamming', 'path_loss'}}, 'show', {show
     'aoa_bins', [0 20 45 90], 'per_speed', [95 * ones(1, nS); 89 * ones(1, nS)], 'speed_bins', [0 80 161], ...
     'speed_spread', [6 3.5 11.8], 'envelope', true(3, 1), 'envelope_val', ones(3, 1), 'env_rule', [90 10], ...
     'per_threat_env', [96 92 88], 'per_threat_env_ci', [93 98; 85 95; 80 92]);
+if nargin > 1, KP.speed_union = su; end
 RES = {}; set_names = {'single'}; %#ok<NASGU>
 save('results/policy_evaluation.mat', 'RES', 'POL', 'LBL', 'set_names', 'iDQN', 'KP', 'ALL');
 end

@@ -349,17 +349,17 @@ if isfile(F.pol)
         det{end+1} = sprintf('survivability map (threat x severity x Eb/N0 x geometry): %s', surv_txt(S));
     end
     if isfile(F.ant3), det{end+1} = 'survivability options (antenna count, relay path): results/survivability_options.txt'; end
-    cg_label = 'DQN + escalation';                    % the DQN the leave-one-out experiments fly (experiment_combo_generalization.m)
-    if startsWith(P.POL{iD}, 'dqn') && ~strcmp(P.POL{iD}, 'dqn_esc'), cg_label = [dep ', deployed, no escalation']; end
+    cg_kind = '';                                     % the DQN kind the leave-one-out experiments fly (dqn_selected_kind.m)
+    if isfile(F.dqn), cg_kind = dqn_selected_kind(load(F.dqn, '-regexp', '^(seed_summary|deployed)$')); end
     if isfile(F.combo)
         Cg = load(F.combo, 'res');
         det{end+1} = kpi_print_text('leave_out', Cg.res, 'combined threats never trained on (leave-one-combination-out)', ...
-            cg_label, 'combinations');
+            kpi_print_text('leave_out_label', cg_kind, P.POL{iD}, dep, isfield(Cg.res, 'dqn_out_lb')), 'combinations');
     end
     if isfile(F.unk)
         Cu = load(F.unk, 'res');
         det{end+1} = kpi_print_text('leave_out', Cu.res, 'single threats never trained on (leave-one-threat-out, evidence only)', ...
-            cg_label, 'threats');
+            kpi_print_text('leave_out_label', cg_kind, P.POL{iD}, dep, isfield(Cu.res, 'dqn_out_lb')), 'threats');
     end
     if isfile(F.gcsa), det{end+1} = kpi_print_text('gcsa', splitlines(fileread(F.gcsa))); end
     if isfield(P.KP, 'envelope')
@@ -509,7 +509,10 @@ if isfile(F.pol)
     if isfield(P.KP, 'speed_spread')
         det{end+1} = sprintf(['spread over the speed bands %.1f points [%.1f, %.1f] (95%% bootstrap over flight ' ...
             'geometries; target <= 10)'], P.KP.speed_spread);
-        det{end+1} = kpi_print_text('kpi7_spread', P.KP.speed_spread, 10);
+        su_lines = isfield(P.KP, 'speed_union') && ~isempty(P.KP.speed_union) && ~isempty(P.KP.speed_union.kpi_lines);
+        if ~su_lines                                  % with them, speed_reading.m's Hall & Miller bound is the one shown
+            det{end+1} = kpi_print_text('kpi7_spread', P.KP.speed_spread, 10);
+        end
     end
     if isfield(P.KP, 'speed_union') && ~isempty(P.KP.speed_union)      % speed_reading.m: the union reading and the inference
         det = [det, P.KP.speed_union.kpi_lines(:)'];

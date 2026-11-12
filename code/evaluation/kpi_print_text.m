@@ -9,6 +9,11 @@ function varargout = kpi_print_text(cmd, varargin)
 %       experiment_unknown_threat.m (res.threat): label the DQN that flew, the share
 %       recovered weighted by episode (res.n) beside the plain average over the cases,
 %       and the three lowest cases. W holds the weighted and averaged shares.
+%   t = kpi_print_text('leave_out_label', kind, pol, dep, lbc)
+%       the label of the DQN those experiments fly: kind 'dqn' or 'dqn_esc' as
+%       dqn_selected_kind.m reads data/trained_dqn.mat ('' without it: the deployed policy's
+%       kind), pol and dep the deployed policy's key and label, lbc true when res holds the
+%       link-budget completion's columns (the plain columns then run with it off)
 %   s = kpi_print_text('kpi1_all', m)     KPI 1: the all-frames reading and the headline, each
 %       with its own interval (m: eval_detector.m metrics)
 %   s = kpi_print_text('kpi1_every', m)   KPI 1, every class >= 90%: 'not reached' instead of NaN
@@ -36,6 +41,7 @@ function varargout = kpi_print_text(cmd, varargin)
 %   t = kpi_print_text('ebno_ticks', ebno, L)   tick labels, 'L' after a link-limited point
 switch cmd
     case 'leave_out',     [varargout{1}, varargout{2}] = leave_out(varargin{:});
+    case 'leave_out_label', varargout{1} = leave_out_label(varargin{:});
     case 'kpi1_all',      varargout{1} = kpi1_all(varargin{:});
     case 'kpi1_every',    varargout{1} = kpi1_every(varargin{:});
     case 'kpi4_lower',    varargout{1} = kpi4_lower(varargin{:});
@@ -73,6 +79,22 @@ s = sprintf(['%s, %s: %s of the recoverable episodes, weighted by episode (%d ep
     '%s; trained on them: %s weighted, %s averaged; rule + escalation: %s weighted, %s averaged; lowest never trained: %s'], ...
     what, label, pc(W.out_w), W.n, k, unit, k, unit, pc(W.out_u), pc(W.in_w), pc(W.in_u), pc(W.rule_w), pc(W.rule_u), ...
     strjoin(W.lowest, ', '));
+end
+
+function t = leave_out_label(kind, pol, dep, lbc)
+plain = startsWith(pol, 'dqn') && ~strcmp(pol, 'dqn_esc');      % the deployed policy is a DQN without the escalation
+if isempty(kind)
+    kind = 'dqn_esc';
+    if plain, kind = 'dqn'; end
+end
+if strcmp(kind, 'dqn_esc')
+    t = 'DQN + escalation';
+elseif plain
+    t = [erase(dep, ' + link-budget completion (hybrid)') ', deployed, no escalation'];   % the completion's state: lbc
+else
+    t = 'DQN as selected, no escalation';
+end
+if lbc, t = [t ', link-budget completion off']; end
 end
 
 function s = kpi1_all(m)
