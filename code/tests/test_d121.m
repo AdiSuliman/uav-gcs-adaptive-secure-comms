@@ -159,7 +159,11 @@ end
 
 function test_rule_core_policy_byte_identical(tc)
 base = 'f6f6e03';
-[~, oldtxt] = system(sprintf('git show %s:code/decision/rule_core_policy.m', base));
+repo = tc.TestData.root;
+[sg, ~] = system(sprintf('git --no-optional-locks -C "%s" rev-parse --git-dir', repo));
+if sg ~= 0 && ~isempty(getenv('V7_GIT_REPO')), repo = getenv('V7_GIT_REPO'); end
+[st, oldtxt] = system(sprintf('git --no-optional-locks -C "%s" show %s:code/decision/rule_core_policy.m', repo, base));
+assertEqual(tc, st, 0, sprintf('git show %s failed: %s', base, oldtxt));
 newtxt = fileread(which('rule_core_policy'));
 verifyEqual(tc, strrep(newtxt, char(13), ''), strrep(oldtxt, char(13), ''));
 end

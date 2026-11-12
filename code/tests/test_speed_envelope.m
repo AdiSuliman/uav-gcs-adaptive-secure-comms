@@ -565,7 +565,12 @@ end
 
 function test_wiring_measure_all_kpis(tc)
 % The union reading enters the KPI 7 lines only when the file holds it, and decides the speed
-% status only in the verdict mode.
+% status only in the verdict mode. measure_all_kpis.m changed after 8cfb172 only by the print-only ports (765389a,
+% held by test_kpi_print against 8cfb172), so the check reads 8cfb172's copy.
+d = parent_copy(tc, 'code/evaluation/measure_all_kpis.m', '765389a'); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+verifyEqual(tc, strrep(fileread(fullfile(d, 'measure_all_kpis.m')), char(13), ''), ...
+    strrep(fileread(fullfile(tc.TestData.root, 'code', 'evaluation', 'measure_all_kpis.m')), char(13), ''), ...
+    'measure_all_kpis.m is 765389a''s');
 check_inserts(tc, 'code/evaluation/measure_all_kpis.m', { ...
     {'''geometries; target <= 10)''], P.KP.speed_spread);', 'end'}, ...
     {'if isfield(P.KP, ''speed_union'') && ~isempty(P.KP.speed_union)', 'det = [det, P.KP.speed_union.kpi_lines(:)''];', 'end'}, ...
@@ -573,7 +578,7 @@ check_inserts(tc, 'code/evaluation/measure_all_kpis.m', { ...
     {'st7 = status(lat_ok && max(pv) - min(pv) <= 10, stale);'}, ...
     {'if isfield(P.KP, ''speed_union'') && ~isempty(P.KP.speed_union) && strcmp(P.KP.speed_union.mode, ''verdict'')', ...
      'st7 = status(lat_ok && P.KP.speed_union.met, stale);', 'end'}, ...
-    {'if (lat_pending || sl.stale) && ~stale'}});
+    {'if (lat_pending || sl.stale) && ~stale'}}, '8cfb172');
 end
 
 function test_resampling_seeds_are_their_own(tc)
@@ -796,14 +801,20 @@ for s = 1:numel(p.EbNo_dB)
 end
 end
 
-function check_inserts(tc, rel, blk)
+function check_inserts(tc, rel, blk, cur)
 % Each row of blk is {before, added, after}, lists of code-line beginnings: the parent commit
 % (237e9f0, tip3-lb before wf-spd was merged) holds the lines before and after side by side, and the file holds the added lines
-% between them, once. Anything else the parent holds is untouched by the block.
+% between them, once. Anything else the parent holds is untouched by the block. With cur, the file is commit
+% cur's instead of this checkout's.
 d = parent_copy(tc, rel, '237e9f0'); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
 [~, nm, ext] = fileparts(rel);
 old = code_lines(fileread(fullfile(d, [nm ext])));
-new = code_lines(fileread(fullfile(tc.TestData.root, strrep(rel, '/', filesep))));
+if nargin < 4
+    new = code_lines(fileread(fullfile(tc.TestData.root, strrep(rel, '/', filesep))));
+else
+    dc = parent_copy(tc, rel, cur); cc = onCleanup(@() rmdir(dc, 's')); %#ok<NASGU>
+    new = code_lines(fileread(fullfile(dc, [nm ext])));
+end
 for i = 1:size(blk, 1)
     pre = blk{i, 1}; add = blk{i, 2}; post = blk{i, 3};
     where = sprintf('%s after "%s"', rel, pre{end});

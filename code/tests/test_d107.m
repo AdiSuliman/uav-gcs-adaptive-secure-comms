@@ -766,8 +766,17 @@ pl = {'code/decision/evaluate_policies.m', 'for ft = penalty_form_line(Q), rep{e
     'code/evaluation/measure_all_kpis.m', 'for ft = penalty_form_line(Dq), KPI(5).detail{end+1} = ft{1}; end'};
 % the one other line the readers hold: evaluate_policies.m's check of the three-state model file (core3_pools only)
 ex = {'if c3_on, core3_check(PP, ''evaluate_policies''); end', 'evaluate_policies.m'};
+% measure_all_kpis.m changed after 8cfb172 only by the print-only ports (765389a, held by test_kpi_print against
+% 8cfb172), so its check reads 8cfb172's copy
+km = 'code/evaluation/measure_all_kpis.m';
+d7 = {parent_copy(tc, km, '765389a'), parent_copy(tc, km, '8cfb172')};
+cl7 = onCleanup(@() cellfun(@(x) rmdir(x, 's'), d7)); %#ok<NASGU>
+verifyEqual(tc, strrep(fileread(fullfile(d7{1}, 'measure_all_kpis.m')), char(13), ''), ...
+    strrep(fileread(fullfile(tc.TestData.root, km)), char(13), ''), 'measure_all_kpis.m is 765389a''s');
 for k = 1:size(pl, 1)
-    c = undo_small(strrep(fileread(fullfile(tc.TestData.root, pl{k, 1})), char(13), ''), pl{k, 1});
+    src = fullfile(tc.TestData.root, pl{k, 1});
+    if strcmp(pl{k, 1}, km), src = fullfile(d7{2}, 'measure_all_kpis.m'); end
+    c = undo_small(strrep(fileread(src), char(13), ''), pl{k, 1});
     c = cut_line(tc, c, pl{k, 2}, pl{k, 1});
     if endsWith(pl{k, 1}, ex{2}), c = cut_line(tc, c, ex{1}, pl{k, 1}); c = clean_ref_cut(tc, c, 'evaluate_policies'); end
     p = base_with_pb(tc, pl{k, 1});
