@@ -106,7 +106,7 @@ Order: controlled-bandwidth study (done), profile-1 rerun (ended after C1d), pro
 | Cleanup window | Behaviour-preserving cleanup of the code tree; the plan and the audit are in `docs/review/code_audit_20261105/`; every batch tested before and after | about 21-25.11 | After profile 3's KPI stage |
 | Folder consolidation | One main project folder with topic subfolders | with the window | Before the official finish (about 25-26.11) |
 | Project book and presentation | Book with the lecturer's KPI table first, extensions in their own section | book about 26.11-10.12, presentation about 20.12 | After the official finish and Adi's approval |
-| P1-v2 (D119) | Profile-1 rerun with the fixes proven in profile 3, on new never-read sets, on the cleaned code; protocol registered on the cleaned code; D120 predictive readings | after the book | Moved after the book (Adi, 11.11.2026) |
+| P1-v2 (D119) | Profile-1 rerun with the fixes proven in profile 3, on new never-read sets, on the cleaned code; protocol registered on the cleaned code; D120 predictive readings; two unknown-threat candidates (layer-fused Mahalanobis or k-NN on earlier CNN layers; link-budget residual with per-antenna imbalance), chosen on validation | after the book | Moved after the book (Adi, 11.11.2026) |
 
 Profile 3 = four antennas. OHP and GCSA are skipped on it. Profile 2 (two antennas) was dropped on 21.10.2026.
 
