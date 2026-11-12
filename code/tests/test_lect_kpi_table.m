@@ -387,12 +387,13 @@ verifyEqual(tc, [T.omitted.full; T.omitted.core], [4 24; 4 20]);
 end
 
 function test_output_only_against_base(tc)
-% Against the base commit's lect_kpi_table on the same inputs: every field of every row, the pending rows and
+% Against the base commit's lect_kpi_table (its port onto profile 3, before the omitted-episode note) on the
+% same inputs: every field of every row, the pending rows and
 % the files are equal, except the notes of Line A's goodput rows, which gain the omitted-episode count; the text
 % and the csv gain that note and one line, nothing else.
 d0 = new_dir(tc); d1 = new_dir(tc);
 write_inputs(d0, true, true); write_inputs(d1, true, true);
-bdir = base_copy(tc, 'code/evaluation/lect_kpi_table.m', 'aae8047');
+bdir = base_copy(tc, 'code/evaluation/lect_kpi_table.m', 'df58c15');
 addpath(bdir, '-begin'); clear lect_kpi_table
 off_base = onCleanup(@() base_off(bdir)); %#ok<NASGU>
 verifyFalse(tc, startsWith(which('lect_kpi_table'), fullfile(tc.TestData.root, 'code')));
@@ -425,23 +426,94 @@ verifyEqual(tc, sort(stripped(:)), sort(gone(:)));
 verifyEqual(tc, regexprep(fileread(fullfile(d1, 'lect_kpi_table.csv')), note, ''), fileread(fullfile(d0, 'lect_kpi_table.csv')));
 end
 
+function test_c2e_core3_rows(tc)
+% C2e as profile 3 runs it (rule_core3 in KP.lect.core): rule_core3's rows carry the three-state CNN's network and
+% sit beside rule_core's, the verdict rows stay rule_core's, its KPI 8 pair against blind_core is secondary, the
+% receiver-robust column is descriptive with rr_column.m's words, and its own clean false alarms form an extension row.
+d = new_dir(tc);
+L = write_inputs(d, true, true, [], true);
+verifyTrue(tc, any(strcmp({L.core.per.policy}, 'rule_core3')) && isfield(L.core, 'cnn3') && isfield(L.core.cnn, 'rr'));
+[T, lines] = lect_kpi_table(d);
+R = T.rows;
+c2e = contains({R.source}, 'KP.lect');
+r3 = R(c2e & strcmp({R.policy}, 'rule_core3'));
+verifyNotEmpty(tc, r3);
+verifyTrue(tc, all(strcmp({r3.network}, 'CNN3_LOOP')));
+verifyFalse(tc, any(ismember({r3.role}, {'verdict', 'headline', 'measured'})));
+verifyTrue(tc, any(strcmp({r3.role}, 'beside')));
+v5 = R([R.kpi] == 5 & strcmp({R.role}, 'verdict'));
+verifyNotEmpty(tc, v5);
+verifyTrue(tc, all(strcmp({v5.policy}, 'rule_core')));
+verifyFalse(tc, any(strcmp({R(c2e & strcmp({R.policy}, 'rule_core')).network}, 'CNN3_LOOP')));
+% KPI 8: rule_core3 against blind_core, secondary, its values the saved pair's
+k3 = R([R.kpi] == 8 & c2e & strcmp({R.policy}, 'rule_core3') & strcmp({R.versus}, 'blind_core') & strcmp({R.line}, 'A') ...
+    & ~contains({R.pair_set}, '36-configuration mask') & ~startsWith({R.reading}, 'receiver-robust'));
+verifyNumElements(tc, k3, 6);
+verifyTrue(tc, all(strcmp({k3.role}, 'secondary')) && all(contains({k3.note}, 'weakened baseline')));
+pr = k3(startsWith({k3.reading}, 'PER reduction'));
+verifyEqual(tc, [pr.value pr.lo pr.hi], [L.core.cnn3.per_red_pct L.core.cnn3.per_ci], 'RelTol', 1e-10);
+% the receiver-robust column: three rows per pair of the core block (rule_core and rule_core3), words copied
+rr = R(startsWith({R.reading}, 'receiver-robust side reading'));
+verifyNumElements(tc, rr, 6);
+verifyTrue(tc, all(strcmp({rr.role}, 'descriptive')) && all([rr.kpi] == 8));
+q = L.core.cnn.rr;
+w = rr(strcmp({rr.policy}, 'rule_core'));
+verifyEqual(tc, {w.verdict}, cellfun(@(x) ['clears 0 by more than U_s: ' x], q.robust, 'UniformOutput', false));
+verifyEqual(tc, [w(1).value w(1).lo w(1).hi], q.per, 'RelTol', 1e-10);
+verifyTrue(tc, contains(w(3).note, 'U_s n/a') && strcmp(w(3).verdict, 'clears 0 by more than U_s: n/a'));
+% rule_core3's clean false alarms: an extension row of its own, not on KPI 6's pooled line
+f3 = R([R.kpi] == 9 & strcmp({R.policy}, 'rule_core3'));
+verifyNumElements(tc, f3, 1);
+verifyEqual(tc, {f3.network, f3.role, f3.verdict}, {'CNN3_LOOP', 'extension', 'point estimate only'});
+verifyTrue(tc, contains(f3.episodes, 'not on the pooled line of KPI 6') && contains(f3.episodes, '12 test-split'));
+verifyEqual(tc, [f3.value f3.hi f3.n], [100 / 48, 9.6, 48], 'RelTol', 1e-10);
+% the text says C2e flew rule_core3 and no longer that CORE_BW alone puts the three-state CNN in the loop
+txt = strjoin(lines, newline);
+verifyTrue(tc, contains(txt, 'On this profile C2e also flies rule_core3'));
+verifyFalse(tc, contains(txt, 'CORE_BW alone puts'));
+verifyFalse(tc, contains(txt, 'CORE_BW only (D106)'));
+verifyTrue(tc, contains(txt, 'in C2e on this profile'));
+body = lines(~startsWith(lines, 'Generated:') & ~startsWith(lines, 'Saved'));
+verifyFalse(tc, any(contains(body, 'NaN')));
+verifyFalse(tc, contains(fileread(fullfile(d, 'lect_kpi_table.csv')), 'NaN'));
+% without rule_core3 the earlier wording stays
+d0 = new_dir(tc);
+write_inputs(d0, true, true);
+[~, lines0] = lect_kpi_table(d0);
+txt0 = strjoin(lines0, newline);
+verifyTrue(tc, contains(txt0, 'CORE_BW alone puts') && contains(txt0, 'CORE_BW only (D106)'));
+verifyFalse(tc, contains(txt0, 'On this profile C2e also flies rule_core3'));
+end
+
 %% ---------- helpers ----------
-function [L, KP] = write_inputs(d, with_cnn, with_d99, mod)
+function [L, KP] = write_inputs(d, with_cnn, with_d99, mod, c3)
 % Synthetic inputs in folder d: policy_evaluation.mat (lect_kpis.m on a small world), the phy report, and
-% optionally the three-state CNN's reading, the D99 outputs and CORE_BW's.
+% optionally the three-state CNN's reading, the D99 outputs and CORE_BW's. c3 true: C2e as profile 3 runs it,
+% rule_core3 among the policies, the receiver-robust column and rule_core3's own clean false alarms.
 if nargin < 4, mod = []; end
+if nargin < 5, c3 = false; end
 POL = {'none', 'rule_esc', 'blind_esc', 'rule_core', 'blind_core'};
 LBL = {'no response', 'rule + escalation', 'no detector + escalation', 'core: rule + escalation', 'core: no detector + escalation'};
+opt = struct();
+if c3
+    POL{end+1} = 'rule_core3'; LBL{end+1} = 'core: rule + escalation, three-state CNN (profile 3, P-B)';
+    opt = struct('rr', struct('per', 0.01, 'gput', 100, 'trec', NaN));
+end
 [ALL, scen] = world(POL);
-L = lect_kpis(ALL, POL, LBL, 2, scen, 5e4, 20);
+L = lect_kpis(ALL, POL, LBL, 2, scen, 5e4, 20, opt);
 if ~isempty(mod), L = mod(L); end
 far = struct('policy', {}, 'k', {}, 'n', {}, 'p', {}, 'upper', {}, 'per_cycle', {}, 'rate', {});
 kk = [0 3 9 12 30];
-for j = 1:numel(POL)
+for j = 1:numel(kk)
     far(end+1) = struct('policy', LBL{j}, 'k', kk(j), 'n', 600, 'p', kk(j) / 600, 'upper', min(1, kk(j) / 600 + 0.015), ...
         'per_cycle', 1e-4, 'rate', struct('per_hour', 18 * j)); %#ok<AGROW>
 end
-KP = struct('lect', L, 'far', far, 'ebno', [0 3 6 9 12 15], 'det_id', 'abc123', 'policy_stamp', 'stamp-1'); %#ok<NASGU>
+KP = struct('lect', L, 'far', far, 'ebno', [0 3 6 9 12 15], 'det_id', 'abc123', 'policy_stamp', 'stamp-1');
+if c3
+    KP.far_core3 = struct('policy', LBL{end}, 'k', 1, 'n', 48, 'p', 1 / 48, 'upper', 0.096, 'per_cycle', 1e-4, ...
+        'rate', struct('per_hour', 7));
+    KP.far_core3_src = '12 test-split + 12 second-test-split';
+end
 iDQN = 2; %#ok<NASGU>
 save(fullfile(d, 'policy_evaluation.mat'), 'KP', 'POL', 'LBL', 'iDQN');
 KP = load(fullfile(d, 'policy_evaluation.mat'), 'KP').KP;
