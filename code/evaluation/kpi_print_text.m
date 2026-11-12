@@ -27,8 +27,9 @@ function varargout = kpi_print_text(cmd, varargin)
 %       the distance-edge line (EDGE_NUM en, nominal cells inom): threat and nominal level
 %       apart from the Eb/N0 of the edge
 %   s = kpi_print_text('edge_flight', V, f)
-%       ' fl 86.1' for a held-recovery verdict (edge_verdict.m) whose fully held flights
-%       differ from its episode share, else ''; f the number format of edge_map.m
+%       ' fl 86.1' for a per-flight held-recovery verdict (edge_verdict.m, k of n) whose
+%       share k / n differs from its share of held onsets, else '' (a rate has k NaN); f the
+%       number format of edge_map.m
 %   s = kpi_print_text('gcsa', lines)     the GCS antenna line (results/gcs_antenna.txt)
 %   c = kpi_print_text('wrap', t, w)      text t broken at spaces into lines of at most w characters
 %   c = kpi_print_text('palette', n)      n distinct colors (rows), the dashboard's curves
