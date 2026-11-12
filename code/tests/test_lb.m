@@ -668,7 +668,10 @@ function test_readers_off_is_the_parent(tc)
 % copy, in order, but the ones named here (the cache key, the entity call and header and the options of
 % the evaluations of C2g and C2u, whose opt0 is struct() without the switch); the main readers, the
 % step and the layer only add lines.
-verifyEmpty(tc, parent_lines_missing(tc, '31a0f3e', 'code/evaluation/measure_all_kpis.m'), 'code/evaluation/measure_all_kpis.m');
+% measure_all_kpis.m changed after 8cfb172 only by the print-only ports (765389a, held by test_kpi_print against
+% 8cfb172), so its pin reads 8cfb172's copy
+verifyTrue(tc, same_as_rev(tc, '765389a', 'code/evaluation/measure_all_kpis.m'), 'measure_all_kpis.m is 765389a''s');
+verifyEmpty(tc, parent_lines_missing(tc, '31a0f3e', 'code/evaluation/measure_all_kpis.m', '8cfb172'), 'code/evaluation/measure_all_kpis.m');
 % the C2e sets' frame-draw seed line (20000 + 1000 x set), C2's reference entry and the re-read stop are the
 % small fixes' (wf-rf-small), and the two lines of the shared-settings note whose sentence on rule_core and rule_core3
 % was corrected, and the lecturer call, which passes the receiver-robust option; the parent has them in their old form
@@ -949,18 +952,31 @@ for k = 1:numel(rels)
 end
 end
 
-function missing = parent_lines_missing(tc, rev, rel)
+function missing = parent_lines_missing(tc, rev, rel, cur)
 % The lines of file rel as commit rev holds it that the copy in this checkout lacks, matched in order
-% ({} when the copy only adds lines).
+% ({} when the copy only adds lines). With cur, the copy is commit cur's instead of this checkout's.
 d = parent_dir(tc, rev, {rel}); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
 [~, nm, ext] = fileparts(rel);
 old = regexp(fileread(fullfile(d, [nm ext])), '\r?\n', 'split');
-new = regexp(fileread(fullfile(tc.TestData.root, rel)), '\r?\n', 'split');
+if nargin < 4
+    new = regexp(fileread(fullfile(tc.TestData.root, rel)), '\r?\n', 'split');
+else
+    dc = parent_dir(tc, cur, {rel}); cc = onCleanup(@() rmdir(dc, 's')); %#ok<NASGU>
+    new = regexp(fileread(fullfile(dc, [nm ext])), '\r?\n', 'split');
+end
 j = 1; missing = {};
 for i = 1:numel(old)
     k = find(strcmp(new(j:end), old{i}), 1);
     if isempty(k), missing{end+1} = old{i}; else, j = j + k; end %#ok<AGROW>
 end
+end
+
+function tf = same_as_rev(tc, rev, rel)
+% True when this checkout's rel is, line endings aside, the file commit rev holds.
+d = parent_dir(tc, rev, {rel}); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+[~, nm, ext] = fileparts(rel);
+tf = strcmp(strrep(fileread(fullfile(d, [nm ext])), char(13), ''), ...
+    strrep(fileread(fullfile(tc.TestData.root, rel)), char(13), ''));
 end
 
 function fixture_off(d, fns)
