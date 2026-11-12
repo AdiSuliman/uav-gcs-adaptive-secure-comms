@@ -6,28 +6,28 @@ function [T, lines] = lect_kpi_table(res_dir)
 %     policy_evaluation.mat   KP.lect (lect_kpis.m) and KP.far (system false alarms)
 %     core_cnn.mat, core_cnn.txt   the three-state CNN's single reading (train_core_cnn.m, B3c)
 %     phy_validation.txt      the BER model against theory
-%     low_ebno_mark.txt, lect_kpis_by_ebno.mat   the link-limited mark and Line B (D99)
-%     core_bw/core_bw_kpis.mat   CORE_BW's controlled-bandwidth reading (headline of KPI 5 and 8, D106)
+%     low_ebno_mark.txt, lect_kpis_by_ebno.mat   the link-limited mark and Line B
+%     core_bw/core_bw_kpis.mat   CORE_BW's controlled-bandwidth reading (headline of KPI 5 and 8)
 %   Verdict words and intervals are copied from the saved structs (lect_kpis.m, train_core_cnn.m,
 %   the phy report, experiment_core_bw.m); the one word not in a saved struct, the system
-%   false-alarm word, follows the one-sided 95% bound (D103): 'MET (bound <= 5%)' when the bound
+%   false-alarm word, follows the one-sided 95% bound: 'MET (bound <= 5%)' when the bound
 %   is at most 5%, 'point estimate only' when only the point is, 'NOT MET' otherwise. A missing
 %   input gives rows that read 'pending (...)'.
 %   Writes in res_dir:
 %     lect_kpi_table.txt, lect_kpi_table.csv   the table in the proposal's numbering
 %     lect_kpi_per.png        PER after onset and PER reduction vs the static link, 95% intervals
-%     lect_kpi_recovery.png   recovery time from detection (Line A, and Line B when D99 is read)
+%     lect_kpi_recovery.png   recovery time from detection (Line A, and Line B when it is read)
 %     lect_kpi_goodput.png    goodput after onset in bit/s with 95% intervals
-%   Proposal numbering (D92, D105): 1 BER model vs theory, 2 macro-F1 >= 85%, 3 false alarms
+%   Proposal numbering: 1 BER model vs theory, 2 macro-F1 >= 85%, 3 false alarms
 %   <= 5% in clean states, 4 recall >= 85% per jamming type, 5 PER reduction >= 30% vs the static
 %   link, 6 recovery time, 7 goodput, 8 the CNN's contribution.
 %   Each row names the network that produced it and the policy pair. KPI 2-4 come from the
 %   three-state CNN (B3c). KPI 5-8 of C2e are read with the hybrid detector's classes on the core
-%   action set (rule_core against none and blind_core, D105). CORE_BW puts the three-state CNN in
-%   the loop (rule_core3, D106): its rows are the headline of KPI 5 and 8 against the
+%   action set (rule_core against none and blind_core). CORE_BW puts the three-state CNN in
+%   the loop (rule_core3): its rows are the headline of KPI 5 and 8 against the
 %   validation-tuned blind_core, rule_core there is labelled 'hybrid, secondary', and
 %   rule_core3 - rule_core is descriptive, with no verdict word. Without rule_core3 in the file
-%   (the fallback of D106 point 9) rule_core carries the CORE_BW rows as D105 registered them.
+%   (the fallback) rule_core carries the CORE_BW rows as registered.
 %   When C2e flew rule_core3 as well (KP.lect.core holds it: profile 3, the class from its own
 %   three-state CNN in the loop), its rows sit beside rule_core's with the network CNN3_LOOP, its
 %   pair against blind_core (KP.lect.core.cnn3) is a secondary KPI 8 reading, and C2e's verdicts
@@ -40,7 +40,7 @@ function [T, lines] = lect_kpi_table(res_dir)
 %   Line A's normalized goodput leaves out the episodes at the Eb/N0 points where the clean link
 %   loses more than 90% of its packets (mean 'omitnan', lect_ebno_protocol.md 3): every normalized
 %   value in the table, and a line of its own, says how many episodes of its set that is
-%   (lect_kpis_by_ebno.mat: the per-Eb/N0 readings S.rows and D99's printed note); T.omitted holds
+%   (lect_kpis_by_ebno.mat: the per-Eb/N0 readings S.rows and Line B's printed note); T.omitted holds
 %   the counts, n/a for a count the file does not hold.
 if nargin < 1 || isempty(res_dir), res_dir = 'results'; end
 res_dir = char(res_dir);
@@ -156,7 +156,7 @@ end
 end
 
 function mk = read_mark(f, D, P)
-% The link-limited mark of D99, written before policy_evaluation.mat was opened.
+% The link-limited mark, written before policy_evaluation.mat was opened.
 mk = struct('ok', false, 'ebno', [], 'tag', {{}}, 'clean_fer', [], 'src', '');
 if isfile(f)
     t = splitlines(fileread(f));
@@ -179,7 +179,7 @@ function O = omitted_counts(D, mk, P, f_d99)
 % clean link loses more than 90% of its packets (link_env.m: 1 - clean packet loss < 0.1, the mark's
 % clean_fer). Counts [left out, all] from lect_kpis_by_ebno.mat: the recoverable jamming episodes of each mask
 % from the per-Eb/N0 readings (S.rows), the threat episodes (and the 36-configuration mask when S.rows is
-% absent) from D99's printed note ('lines'). A count the file does not hold is NaN and prints n/a.
+% absent) from Line B's printed note ('lines'). A count the file does not hold is NaN and prints n/a.
 nan2 = [NaN NaN];
 O = struct('ok', false, 'why', '', 'nn', [], 'points', '', 'thr', nan2, 'full', nan2, 'core', nan2, 'core36', nan2);
 if ~D.ok || ~isfield(D, 'M') || ~isfield(D.M, 'clean_fer')
@@ -232,7 +232,7 @@ end
 end
 
 function t = threat_note(f)
-% [threat left out, threat all, recoverable jamming left out, all] from D99's printed note, NaN when it is absent.
+% [threat left out, threat all, recoverable jamming left out, all] from Line B's printed note, NaN when it is absent.
 t = nan(1, 4);
 if ~isfile(f), return; end
 try
@@ -416,7 +416,7 @@ end
 
 function R = far_rows(P, name)
 % System false alarms (KP.far): episodes with a change on the clean flights of the project's KPI 6,
-% one-sided 95% Clopper-Pearson bound. An extension label of its own (D103), never proposal KPI 3.
+% one-sided 95% Clopper-Pearson bound. An extension label of its own, never proposal KPI 3.
 % The word follows the bound: at most 5% -> met; only the point estimate at most 5% -> 'point
 % estimate only'; otherwise not met.
 R = {};
@@ -471,10 +471,10 @@ end
 end
 
 function R = bw_rows(Bw, name, c3e)
-% CORE_BW's reading: the headline of KPI 5 and 8 (equal tuning budget, D105/D106) and its PER verdicts.
-% With rule_core3 in the saved struct (D106) it carries the headline against the validation-tuned
+% CORE_BW's reading: the headline of KPI 5 and 8 (equal tuning budget) and its PER verdicts.
+% With rule_core3 in the saved struct it carries the headline against the validation-tuned
 % blind_core, rule_core is 'hybrid, secondary' and rule_core3 - rule_core is descriptive. Without it
-% (D106 point 9, the fallback) rule_core carries them as D105 registered.
+% (the fallback) rule_core carries them as registered.
 if ~Bw.ok || ~isfield(Bw, 'primary')
     R = {row('kpi', 8, 'reading', 'CNN contribution, rule_core3 against the validation-tuned blind_core (CORE_BW)', ...
         'network', 'CNN3_LOOP', 'policy', 'rule_core3', 'versus', 'blind_core', 'pair_set', pair_text('core3'), ...
@@ -713,7 +713,7 @@ end
 end
 
 function [net, role] = pol_role(p, base)
-% The network behind a policy and its role (blind_core rows are secondary, D105).
+% The network behind a policy and its role (blind_core rows are secondary).
 net = pol_net(p);
 role = pol_role_of(p, base);
 end

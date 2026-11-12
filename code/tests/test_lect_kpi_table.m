@@ -104,7 +104,7 @@ verifyFalse(tc, any(Z.kpi == 3 & contains(Z.reading, "system false alarms")));
 fr = KP.far(strcmp({KP.far.policy}, 'core: rule + escalation'));
 verifyEqual(tc, s.value, 100 * fr.p, 'RelTol', 1e-8);
 verifyEqual(tc, s.hi, 100 * fr.upper, 'RelTol', 1e-8);
-% KPI 6: Line A rows and the D99 Line B headline
+% KPI 6: Line A rows and the Line B headline
 h = Z(Z.kpi == 6 & Z.role == "headline", :);
 verifyNotEmpty(tc, h); verifyTrue(tc, all(h.line == "B"));
 verifyTrue(tc, any(contains(lines, 'detection -> restored is set by construction')));
@@ -154,7 +154,7 @@ verifyTrue(tc, any(startsWith(lines, 'EXTENSION, not a proposal KPI: extension: 
 end
 
 function test_core3_rows_headline(tc)
-% CORE_BW with rule_core3 (D106): it is the headline of KPI 5 and 8 against the validation-tuned
+% CORE_BW with rule_core3: it is the headline of KPI 5 and 8 against the validation-tuned
 % blind_core, rule_core is 'hybrid, secondary', rule_core3 - rule_core is descriptive.
 d = new_dir(tc);
 write_inputs(d, true, true);
@@ -243,7 +243,7 @@ verifyEqual(tc, [r.value], [L.core.verdict.red_pct], 'RelTol', 1e-8);
 end
 
 function test_pending_inputs_named(tc)
-% Without D99, CORE_BW and the CNN's reading each pending row names its missing file.
+% Without Line B, CORE_BW and the CNN's reading each pending row names its missing file.
 d = new_dir(tc);
 write_inputs(d, false, false);
 [T, lines] = lect_kpi_table(d);
@@ -323,7 +323,7 @@ end
 
 function test_omitted_goodput_counts(tc)
 % Every normalized goodput value of Line A says how many episodes of its set the mean leaves out
-% (the episodes at 0 dB, where the clean link loses more than 90% of its packets), as D99 prints it.
+% (the episodes at 0 dB, where the clean link loses more than 90% of its packets), as Line B's note prints it.
 d = new_dir(tc);
 write_inputs(d, true, true);
 [T, lines] = lect_kpi_table(d);
@@ -354,7 +354,7 @@ verifyFalse(tc, any(contains(body, 'NaN')));
 end
 
 function test_omitted_goodput_counts_pending_and_n_a(tc)
-% Without D99 the counts are pending; without the per-Eb/N0 readings or D99's printed note the counts
+% Without Line B the counts are pending; without the per-Eb/N0 readings or its printed note the counts
 % they carry read n/a, never NaN.
 d = new_dir(tc);
 write_inputs(d, false, false);
@@ -364,7 +364,7 @@ verifyTrue(tc, any(contains(lines, 'Count pending (lect_kpis_by_ebno.mat: missin
 g = T.rows([T.rows.kpi] == 7 & strcmp({T.rows.line}, 'A'));
 verifyNotEmpty(tc, g);
 verifyTrue(tc, all(contains({g.note}, 'count pending, lect_kpis_by_ebno.mat: missing')));
-% D99 without the per-Eb/N0 readings: the full mask from the printed note, the core set n/a
+% Line B without the per-Eb/N0 readings: the full mask from the printed note, the core set n/a
 d = new_dir(tc);
 write_inputs(d, true, true);
 S = load(fullfile(d, 'lect_kpis_by_ebno.mat')); S.S = rmfield(S.S, 'rows');
@@ -376,7 +376,7 @@ verifyTrue(tc, any(contains(lines, ['4 of 24 on the full action set, n/a of n/a 
     'recoverable by the 36'])));
 body = lines(~startsWith(lines, 'Generated:') & ~startsWith(lines, 'Saved'));
 verifyFalse(tc, any(contains(body, 'NaN')));
-% D99 without the printed note: the threat counts n/a, the recoverable jamming counts from the readings
+% Line B without the printed note: the threat counts n/a, the recoverable jamming counts from the readings
 d = new_dir(tc);
 write_inputs(d, true, true);
 S = load(fullfile(d, 'lect_kpis_by_ebno.mat')); S = rmfield(S, 'lines');
@@ -488,7 +488,7 @@ end
 %% ---------- helpers ----------
 function [L, KP] = write_inputs(d, with_cnn, with_d99, mod, c3)
 % Synthetic inputs in folder d: policy_evaluation.mat (lect_kpis.m on a small world), the phy report, and
-% optionally the three-state CNN's reading, the D99 outputs and CORE_BW's. c3 true: C2e as profile 3 runs it,
+% optionally the three-state CNN's reading, the Line B outputs and CORE_BW's. c3 true: C2e as profile 3 runs it,
 % rule_core3 among the policies, the receiver-robust column and rule_core3's own clean false alarms.
 if nargin < 4, mod = []; end
 if nargin < 5, c3 = false; end
@@ -602,7 +602,7 @@ end
 
 function write_bw(d, core3)
 % CORE_BW's saved reading as experiment_core_bw.m writes it: the registered fallback (rule_core carries the
-% verdicts) or, with core3, D106's (rule_core3 carries them, rule_core is the hybrid's secondary row).
+% verdicts) or, with core3, the controlled-bandwidth ones (rule_core3 carries them, rule_core is the hybrid's secondary row).
 if ~isfolder(fullfile(d, 'core_bw')), mkdir(fullfile(d, 'core_bw')); end
 pr = struct('pooled', cnn_bw(12.5), 'narrowband', cnn_bw(20), 'wideband', cnn_bw(5));
 per = struct('policy', {'rule_core', 'rule_core', 'rule_core', 'blind_core'}, 'type', {'narrowband', 'wideband', 'pooled', 'narrowband'}, ...
