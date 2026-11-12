@@ -8,7 +8,7 @@ The scope is the lecturer's revised proposal of 20.10.2026. Everything else in t
 
 ## Status at a glance
 
-Status as of 5.11.2026. Every "met" verdict is on data never used for training or selection, read once. Intervals are 95% bootstrap. Profile 1 is finished. Profile 3 (extension) is deployed: its detector stages A0 to B4s and the single reading of its fourth test set (B3r) are done, and its decision-layer chain runs from C1p (about 6.11), ending about 18-21.5.11 (hard limit 24.11, D118).
+Status as of 12.11.2026. Every "met" verdict is on data never used for training or selection, read once. Intervals are 95% bootstrap. Profile 1 is finished. Profile 3 (extension) is deployed: its detector stages A0 to B4s and the single reading of its fourth test set (B3r) are done, and its decision-layer chain is in C1p (74 of 93 cells on 12.11 07:00; end of C1p expected 12-13.11), ending about 18-20.11 (hard limit 24.11, D118). Code and results are planned to be finished about 25-26.11.2026; the project book follows.
 
 | Proposal deliverable | Status |
 |---|---|
@@ -113,7 +113,7 @@ DQN (extension). Selected on validation (held recovery 82.6%, recovered 95.1%, a
 
 Weak points of the DQN, as measured: antenna fault 79.9% and path loss 81.4% recovered; on harmed episodes antenna fault 46.3% and airframe shadowing 21.7% (n = 46), below the simpler policies; at 161 km/h 88.7%; the validation envelope's antenna-fault cell (at least 90%) reads 78.9% [70.1, 87.0] on test. The fixes are chosen on validation only.
 
-Next dates (estimates): profile 3's chain runs from the OOD select (started 5.11 18:26, about 6 h) through the OOD read, the release check and C1p (from about 6.11 02:00-03:00) to its end about 18-21.11.2026 (hard limit 24.11, D118). Then the cleanup window about 21-23.11 (behaviour-preserving, on the code tree), the folder consolidation, and P1-v2 (D119: profile 1 rerun with the fixes proven in profile 3, new never-read test sets), whose protocol is registered on the cleaned code, about 25-30.11. Windows Update is paused until 30.11.2026. Current numbers and logs are in [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/PROJECT_LOG.md](docs/PROJECT_LOG.md).
+Next dates (estimates): profile 3's chain is in C1p (74 of 93 cells on 12.11 07:00, end expected 12-13.11), then C1c, the maps (SURV, SURV3), C1d, C2, C2e, C2g, C2u, GAL, EDGE, KPI, DASH, WEAK and RPT, ending about 18-20.11.2026 (hard limit 24.11, D118). Then latency (LAT), the D2c reading for CORE_BW's receiver-robust line, the console check on a profile-3 copy, the labelled side readings (D107, D108, D123), the behaviour-preserving cleanup and the folder consolidation: code and results finished about 25-26.11.2026. The project book starts after that finish, about 26.11-10.12, and the presentation about 20.12. P1-v2 (D119: profile 1 rerun with the fixes proven in profile 3, new never-read test sets) runs after the book. Windows Update is paused until 30.11.2026. Current numbers and logs are in [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/PROJECT_LOG.md](docs/PROJECT_LOG.md).
 
 ## Operator console
 
@@ -129,7 +129,7 @@ Next dates (estimates): profile 3's chain runs from the OOD select (started 5.11
 
 Start `demo_gui` from a bundle exported by `export_gui_bundle`, not from the pipeline folder. The Live and Episode tabs need `data/trained_dqn.mat` (written when C2 ends); the KPI tab needs `results/policy_evaluation.mat` (C2e); the latency plot needs LAT. The bundle runs from a copy outside the pipeline folder, so a running pipeline is never touched.
 
-State: the antenna count, the threat list, temporal fusion and the decision settings follow the current pipeline. The three-state core view, the core action set and the deployed policy kind from `trained_dqn.mat` are on branch `gui-core` (tested 27.10, not merged); a live check with the final agent from an exported bundle follows RPT.
+State: the antenna count, the threat list, temporal fusion and the decision settings follow the current pipeline. The three-state core view, the core action set and the deployed policy kind from `trained_dqn.mat` are on branch `gui-core` (not merged; GUI tests 25/25 on 11.11.2026, after the Session Log table was made dark to its full height); a live check with the final agent from an exported bundle follows RPT.
 
 ## Quick start
 
@@ -169,7 +169,7 @@ Built and measured, but outside the proposal. They are reported separately and a
 - **Hybrid 11-class detector** (spectrogram plus 23 link features) with temporal fusion. Macro-F1 94.81% [94.35, 95.25] on the fourth test set (read once); unknown-threat detection AUROC 0.769 against a target of 0.8 (not met).
 - **Double DQN** (optional in the proposal's plan) with a safety shield and escalation, and the full set of earlier KPIs (restoration, false alarms of the whole monitor, latency).
 - **Survivability maps and EDGE**: Map A (no goodput loss) 81.8% and Map B (any configuration) 91.8% of the profile 1 envelope; three antennas against two: single threats 93.1% vs 91.3%, combined threats 67.6% vs 58.2%.
-- **Profile 3** (four antennas): deployed on 5.11.2026 (D110-D122 readings, detector stages and B3r done; smoke 55 steps, 0 errors). Fourth test set, read once: KPI 1 macro-F1 above the 0 dB threshold 94.92% [94.47, 95.31] (target 90%), fault F1 89.9%, clean as threat 2.94%. Decoder: the JSI decoder was not adopted by dev set C's registered rule, `fec_rx` is d78 (D122). The decision-layer chain is running.
+- **Profile 3** (four antennas): deployed on 5.11.2026 (D110-D122 readings, detector stages and B3r done; smoke 55 steps, 0 errors). Fourth test set, read once: KPI 1 macro-F1 above the 0 dB threshold 94.92% [94.47, 95.31] (target 90%), fault F1 89.9%, clean as threat 2.94%. Decoder: the JSI decoder was not adopted by dev set C's registered rule, `fec_rx` is d78 (D122). The decision-layer chain is in C1p (74 of 93 cells on 12.11.2026).
 - **CORE_BW**: controlled-bandwidth study with 41 channels, hop >= 6 MHz and jammer widths from tone to 83.5 MHz; `rule_core3` (the three-state CNN in the loop) against a validation-tuned `blind_core`; `rule_core` (the hybrid) is the secondary row (D106). Test read once on 30.10.2026; results in the PROJECT_LOG.
 - **Operator console and 3D view**: console built; the 3D view is parked until the code, the final proposal and the interim report are done.
 
@@ -177,7 +177,7 @@ Built and measured, but outside the proposal. They are reported separately and a
 
 | File | Content |
 |---|---|
-| [docs/DECISIONS.md](docs/DECISIONS.md) | Decision record D1-D122: why each design choice was made. The lecturer's scope is D92 |
+| [docs/DECISIONS.md](docs/DECISIONS.md) | Decision record D1-D123: why each design choice was made. The lecturer's scope is D92 |
 | [docs/LITERATURE.md](docs/LITERATURE.md) | What each source contributes, and what is missing from the library |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Plan, run status and remaining work |
 | [docs/PROJECT_LOG.md](docs/PROJECT_LOG.md) | Execution log, newest last |
@@ -193,7 +193,7 @@ The previous full version of this README is in git at commit `b648c7b`.
 - **CNN contribution.** Against the equally tuned baseline (CORE_BW) the pooled PER difference is -0.0232 [-0.0289, -0.0174] with goodput +3.58 kb/s; narrowband PER is adverse (+0.0807) while wideband improves (-0.0551). Against the weakened baseline in C2e the CNN's PER reduction is 3.2 points lower.
 - **DQN weak points.** Antenna fault and airframe shadowing on harmed episodes (46.3% and 21.7%), and the antenna-fault envelope cell on test (78.9%).
 - **Whole-monitor false alarms.** On clean flights the full monitor false-alarms in 12.5-29.9% of validation episodes. The lecturer's false-alarm KPI is met at detector level only. P1R ended after C1d without an admissible monitor (D104 point 4); profile 3 carries the fix (D113, D121) and P1-v2 rereads it on profile 1 (D119).
-- **Noise burst.** The coded answer worsens the link in the gallery (BER 0.495 against 0.439 with no response). Profile 1 uses an uncoded answer chosen on validation; profile 3 gets a decoder.
+- **Noise burst.** The coded answer worsens the link in the gallery (BER 0.495 against 0.439 with no response). Profile 1 uses an uncoded answer chosen on validation; on profile 3 the JSI decoder was not adopted by dev set C's registered rule, so it keeps the D78 decoder (D122).
 - **Weak detector classes (extension).** Airframe shadowing 84.5% F1; unknown-threat AUROC 0.769 is below 0.8.
 - **BER validation limit.** The receiver on the delay line fails at a 30 dB jammer, rho 0.3, 1 us (D77).
 - **Simulation only.** Latency is measured on a desktop with a GPU detector. Countermeasures are modelled, not built; hardware (SDR) validation is future work. The return link that carries the reconfiguration request is assumed, not modelled; a requested change reaches the link one cycle (20 ms) later.
@@ -203,4 +203,4 @@ The previous full version of this README is in git at commit `b648c7b`.
 
 Adi Suliman and Bar Dvir Hassan; supervisor Golan Ein-Tzvi. Course 50076 (HIT), semester 2026-27 A. Repository: https://github.com/AdiSuliman/uav-gcs-adaptive-secure-comms
 
-Last updated 5.11.2026.
+Last updated 12.11.2026.

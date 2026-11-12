@@ -1,6 +1,6 @@
 # Project Log
 
-History of the UAV-GCS adaptive communications project, from the first link model (20.08.2026) to the current run (5.11.2026), one section per version.
+History of the UAV-GCS adaptive communications project, from the first link model (20.08.2026) to the current run (12.11.2026), one section per version.
 
 - Why each design choice was made: [DECISIONS.md](DECISIONS.md) (D-numbers are cited below).
 - What each source contributes: [LITERATURE.md](LITERATURE.md).
@@ -9,7 +9,7 @@ History of the UAV-GCS adaptive communications project, from the first link mode
 
 Scope: the lecturer's revised proposal of 20.10.2026 (D92) is the official scope. Everything built beyond it is an extension without commitment and is labelled so. Dates are DD.MM.YYYY, local time. Clocks went back on 25.10.2026 at 02:00.
 
-## Where we are (5.11.2026)
+## Where we are (12.11.2026)
 
 | Item | State |
 |---|---|
@@ -17,10 +17,10 @@ Scope: the lecturer's revised proposal of 20.10.2026 (D92) is the official scope
 | Lecturer KPIs 5-8 (PER reduction, recovery time, goodput, CNN contribution) | Read: C2e on 28.10, Line B (D99) on 29.10, CORE_BW on 30.10. PER reduction Met (committed) in both scenarios; CNN contribution against the validation-tuned `blind_core` read in CORE_BW (table below) |
 | Profile 1 (3 UAV antennas) | Finished. Chain to RPT done 29.10 03:19:55; CORE_BW read once on 30.10; P1R ended after C1d on 31.10 (D104 point 4) |
 | Profile 3 (4 UAV antennas) | Deployed on 5.11: smoke PASS (55 steps, 0 errors); `v7-p3` on Q3' `57a5ad2`; B-stage rerun (B2F, B3, B3a, B4, B4s) 13:54-17:48 rc=0, DEPLOY_STATE deployed (`fusion_rev` d91_branch_evidence_enlarged); fresh2 rehearsal passed its registered limits; B3r read the fourth test set once (KPI 1 macro-F1 above the 0 dB threshold 94.92% [94.47, 95.31] against the 90% target, fault F1 89.9%, clean as threat 2.94%; record `35a4b66`); decoder `fec_rx` d78 (D122) |
-| In progress | D111 OOD select (from 5.11 18:26, about 6 h); then the OOD read, the release check and C1p from about 6.11 02:00-03:00 |
-| Estimates | Profile 3's chain ends about 18-21.5.11 (hard limit 24.11, D118). Cleanup window about 21-23.11 (behaviour-preserving, plan in `docs/review/code_audit_20261105/`), folder consolidation, then P1-v2 (D119) on the cleaned code about 25-30.11 |
+| In progress | Profile 3's C1p: 74 of 93 cells on 12.11 07:00, end expected 12-13.11; `v7-p3` at `8cfb172` (windows D/E merged 11.11) |
+| Estimates | Profile 3's chain ends about 18-20.11 (hard limit 24.11, D118); then LAT, D2c, the console check, the labelled side readings, the behaviour-preserving cleanup (plan in `docs/review/code_audit_20261105/`) and the folder consolidation; code and results finished about 25-26.11; project book about 26.11-10.12 after Adi's approval, presentation about 20.12; P1-v2 (D119) after the book |
 | Windows Update | Paused until 30.11.2026 |
-| Interim report | Draft 7 complete (38 pages); waiting for Adi: the meetings count, the supervisor's form and signature, and submission |
+| Interim report | Draft 7 complete (38 pages) |
 
 ## Version overview
 
@@ -312,7 +312,17 @@ The lecturer's false-alarm KPI is read at detector level; the system-level figur
 - The reading ran the same night (1.1 h): LBH passes rule S on profile 1's own fit set, nested shadowing F1 +1.10 [+0.85, +1.38], outer picks LBH, LBH, B, LBH, LBH; optimistic, never quoted as an effect. P1-v2 runs the two arms.
 - A registry-to-code audit and a full read of the sources folder followed (8.11; `core/review/lit1108/`, `design/`, `cards/`). Found: D120 point 1 has no code on any branch; P-B was not run because `data/core_cnn_model.mat` does not exist (condition (a) of D121 item 16 false at C1p's start; shed as O-3); hand-runs rc_check and cfar_src and the LBH reading ran beside C1p outside the gated wrapper, no data touched.
 
-## Status of the lecturer's KPIs (profile 1, as of 5.11.2026)
+### Changes during C1p and the finish plan (9-12.11.2026)
+
+- C1p (four antennas, 93 cells) runs since 5.11 22:44, resumed on 7.11 and 8.11 with its kept cells. Finished cells: 56 of 93 on 11.11 15:56, 74 of 93 on 12.11 07:00 (24 cells on 11.11, 10 in the first seven hours of 12.11); the log's "cell N/93" is the cell's index in the longest-first order, not the progress. C1p's end is expected on 12-13.11, about two days ahead of the 8.11 estimate.
+- 10.11: dated lines on D121 item 4 (the drop path's count under CLT reads the monitor without the drop alarm; the rescue after CLT in item 9's order; the clean-reference stop) and on D120 point 1 (moved to P1-v2, profile 3 does not run it), both by Adi. `v7-p3` fast-forwarded to `acc2ab0` during C1p, which calls none of the changed files: the lost-branch log, the run's identity for `run_cache`, the clean-reference stop, SURV's kept jobs and an atomic `params.mat`; full suite 585/585 and the kept-pool check passed.
+- 11.11: Adi approved two items. `profile.json` with `run_cache` on is committed alone (`fb487f8`, file bytes unchanged), so finished C2 runs are kept across a restart. D123 registers a labelled side reading: recovery time against the autopilot's link-loss failsafe (ArduPilot `FS_GCS_TIMEOUT` 5 s, PX4 `COM_DL_LOSS_T` 10 s); an episode restored inside its 0.6 s horizon is within both, one not restored is censored; read from the saved policy evaluation after C2e, no verdict changes.
+- 11.11: a review of the 10.11 patches and of the windows D/E branch found one real high finding, fixed before the merge: SURV's kept jobs were keyed without the code, so a restart after a code change could mix two code versions; the key now includes the run's identity (code, `profile.json`, `params.mat`, release, threads). One medium wording fix in C1d's row. Two findings were refuted (the clean-reference assert cannot see a NaN on the chain; the clean K6 split runs the same computation C1d runs first). Noted, low: the P-B sentence names profile 3 in any profile (fix before P1-v2); editing `profile.json` between C2 and C2u would drop C2's cache, so it is not edited there.
+- 11.11: windows D/E merged into `v7-p3` as `8cfb172` during C1p (C1p calls none of the changed files; `wf_options` changed only in a comment, `init_params` runs only in A0 and SURV, and C1p's cell keys hold no code hash). Contents: the bounded-search log lines, the lecturer's KPIs per Eb/N0 and the receiver-robust column (it reads "not available" until D2c's results exist), the system false-alarm breakdown, the clean K6 split behind its switch. Full suite 619/620; the one failure was a wrong expected value in a new test (the class mode with m-of-n 3 carries only t_conf 0 and 1), fixed, 13/13.
+- 11.11: operator console (branch `gui-core`): the Session Log table is dark to its full height (blank padding rows below the real rows; export, the run count and "No runs yet" read the real rows only); the header row stays white, which MATLAB does not let us set. GUI tests 25/25.
+- Finish plan (11.11, with Adi): the proposal's items come first; extensions only when cheap and they save redoing work. Profile 3's chain ends about 18-20.11; then LAT, D2c, the console check on a profile-3 copy, the labelled side readings and the behaviour-preserving cleanup; code and results finished about 25-26.11. The project book starts after that finish and Adi's approval (about 26.11-10.12), the presentation about 20.12. P1-v2 runs after the book (D119 dated line).
+
+## Status of the lecturer's KPIs (profile 1, as of 12.11.2026)
 
 | KPI | Value | Status |
 |---|---|---|
