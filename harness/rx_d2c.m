@@ -63,6 +63,7 @@ fprintf('RX2C G3 CORE_BW data or results files under %s: %d %s\n', root, numel(b
 g3f = isempty(bad);
 
 cd(src); addpath(fullfile(src, 'code')); setup_paths;
+disk_guard('init');       % no SDI archive; the repository is emptied before every flight (fly)
 warning('off', 'Simulink:cgxe:LeakedJITEngine');
 S0 = load(fullfile(dat, 'params.mat')); p0 = S0.params; p0.quiet_build = true;
 assert(~isfield(p0, 'rx_ne_fix'), 'rx_d2c: the params carry rx_ne_fix');
@@ -274,6 +275,7 @@ end
 
 function [F, so] = fly(mdl, q, g_db, e, g, r, pc)
 % Geometry r at Eb/N0 e as pool_cell.m flies it: 20 frames.
+disk_guard;               % empties the SDI repository of the flight before (already read); stops above 2 GB of .dmr
 loss = 0; if isfield(q, 'link_loss_db'), loss = q.link_loss_db; end
 set_link_snr(mdl, e + 10*log10(q.bits_per_symbol) - 10*log10(q.sps) + g_db - loss, q);
 fd = g.speed(r) / 3.6 * pc.carrier_freq / pc.c_light;
