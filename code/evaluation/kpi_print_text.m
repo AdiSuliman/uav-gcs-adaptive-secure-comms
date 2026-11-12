@@ -40,7 +40,10 @@ function varargout = kpi_print_text(cmd, varargin)
 %       the same for the Eb/N0 points ebno, from the edge map's clean link (Em: the loaded
 %       results/edge_map.mat, EM.clean.link); all false when the edge map is absent
 %   t = kpi_print_text('ebno_ticks', ebno, L)   tick labels, 'L' after a link-limited point
+%   t = kpi_print_text('receiver', p)   the receiver the results come from, read from the
+%       parameters p (params.mat): r1, the receiver as built, unless p carries rx_ne_fix
 switch cmd
+    case 'receiver',      varargout{1} = receiver(varargin{:});
     case 'leave_out',     [varargout{1}, varargout{2}] = leave_out(varargin{:});
     case 'leave_out_label', varargout{1} = leave_out_label(varargin{:});
     case 'kpi1_all',      varargout{1} = kpi1_all(varargin{:});
@@ -56,6 +59,19 @@ switch cmd
     case 'edge_limited',  varargout{1} = edge_limited(varargin{:});
     case 'ebno_ticks',    varargout{1} = ebno_ticks(varargin{:});
     otherwise, error('kpi_print_text:cmd', 'kpi_print_text: unknown command %s', cmd);
+end
+end
+
+function t = receiver(p)
+% Every result names its receiver: r1 without the rx_ne_fix field, else the fix it carries.
+if ~isstruct(p) || isempty(fieldnames(p))
+    t = 'Receiver: unknown (params.mat not found)';
+elseif ~isfield(p, 'rx_ne_fix') || isempty(p.rx_ne_fix)
+    t = 'Receiver: r1, the receiver as built (no rx_ne_fix in params.mat)';
+else
+    v = p.rx_ne_fix;
+    if ~ischar(v), v = mat2str(v); end
+    t = sprintf('Receiver: rx_ne_fix %s (not r1)', v);
 end
 end
 

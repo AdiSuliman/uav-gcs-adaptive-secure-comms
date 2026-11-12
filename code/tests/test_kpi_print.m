@@ -530,3 +530,15 @@ end
 function rmdir_if(d)
 if isfolder(d), rmdir(d, 's'); end
 end
+
+function test_receiver_label(tc)
+% The summary and the edge map name the receiver from params.mat: r1 without rx_ne_fix.
+verifyEqual(tc, kpi_print_text('receiver', struct('n_rx', 4)), 'Receiver: r1, the receiver as built (no rx_ne_fix in params.mat)');
+verifyEqual(tc, kpi_print_text('receiver', struct('n_rx', 4, 'rx_ne_fix', '')), 'Receiver: r1, the receiver as built (no rx_ne_fix in params.mat)');
+verifyEqual(tc, kpi_print_text('receiver', struct('rx_ne_fix', 'twinb')), 'Receiver: rx_ne_fix twinb (not r1)');
+verifyEqual(tc, kpi_print_text('receiver', struct('rx_ne_fix', 2)), 'Receiver: rx_ne_fix 2 (not r1)');
+verifyEqual(tc, kpi_print_text('receiver', struct()), 'Receiver: unknown (params.mat not found)');
+src = fileread(which('measure_all_kpis'));
+verifyTrue(tc, contains(src, 'kpi_print_text(''receiver'', rx_p_)'));
+verifyTrue(tc, contains(fileread(which('edge_map')), 'kpi_print_text(''receiver'', p0)'));
+end

@@ -78,7 +78,11 @@ RS = result_status();
 rst = @(f) RS(strcmp({RS.file}, f));                   % identity and age of a result file
 KPI = struct('id', {}, 'name', {}, 'value', {}, 'target', {}, 'status', {}, 'detail', {});
 LECT = struct('three', [], 'three_above', [], 'three3', [], 'three3_above', [], 'pol', [], 'cnn', []);
-rep = {'=== PROPOSAL KPI SUMMARY (proposal wording) ===', sprintf('Generated: %s | %s', datestr(now), git_stamp()), ''};
+rx_p_ = struct();
+if isfile('params.mat'), rx_p_ = load('params.mat'); rx_p_ = rx_p_.params; end
+rep = {'=== PROPOSAL KPI SUMMARY (proposal wording) ===', sprintf('Generated: %s | %s', datestr(now), git_stamp()), ...
+    kpi_print_text('receiver', rx_p_), ''};
+clear rx_p_
 
 %% KPI 1 - detection
 if isfile(F.det)
