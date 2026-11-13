@@ -8,7 +8,7 @@ The scope is the lecturer's revised proposal of 20.10.2026. Everything else in t
 
 ## Status at a glance
 
-Status as of 13.11.2026. Every "met" verdict is on data never used for training or selection, read once. Intervals are 95% bootstrap. Profile 1 is finished. Profile 3 (extension) is deployed: its detector stages A0 to B4s and the single reading of its fourth test set (B3r) are done, and its decision-layer chain finished C1p on 12.11 22:51 and is in C1c (end expected 13.11 about 17:00-18:00), ending about 18-20.11 (hard limit 24.11, D118). Code and results are planned to be finished about 25-26.11.2026; the project book follows.
+Status as of 13.11.2026. Every "met" verdict is on data never used for training or selection, read once. Intervals are 95% bootstrap. Profile 1 is finished. Profile 3 (extension) is deployed: its detector stages A0 to B4s and the single reading of its fourth test set (B3r) are done, and its decision-layer chain finished C1p on 12.11 22:51 and finished C1c on 13.11 10:55 and is in SURV, ending about 18-20.11 (hard limit 24.11, D118). Code and results are planned to be finished about 25-26.11.2026; the project book follows.
 
 | Proposal deliverable | Status |
 |---|---|
