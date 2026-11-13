@@ -79,7 +79,17 @@ Every kept file is written to a temporary file, flushed to the disk and then ren
 ## 5. Prevention (Adi's choice)
 
 - **A UPS** (suggested on 8.11). Four of the five stops were power losses. Each costs the work in progress plus the time until someone logs on.
-- **The autostart task:** registering `v7_takeover_autostart.ps1` as a logon task (logon + 2 min) brings the takeover back by itself. The session's permission classifier refused to register it on 10.11, so Adi registers it once. Claude still runs steps 2, 5, 6 and 7 after such a restart.
+- **The autostart task:** registering `v7_takeover_autostart.ps1` as a logon task (logon + 2 min) brings the takeover back by itself. The session's permission classifier refused to register it on 10.11, so Adi registers it once. Claude still runs steps 2, 5, 6 and 7 after such a restart: the check reports the takeover as already running and skips the relaunch.
+- **Registering the autostart task (once, by Adi at the machine):**
+  1. Open PowerShell. If a normal window answers "Access is denied", use "Run as administrator".
+  2. Run: `powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\Adi Suliman\uav-gcs-logs\register_takeover_autostart.ps1"`
+  3. It prints `uav-gcs takeover autostart: state Ready, trigger at logon of ..., delay PT2M`.
+
+  From then on, every logon starts the takeover two minutes later. A takeover that already runs refuses the start, so an ordinary logon is harmless. Each start is logged in `uav-gcs-logs\v7_takeover_autostart.log`. To remove the task: `Unregister-ScheduledTask -TaskName 'uav-gcs takeover autostart' -Confirm:$false`.
+
+  The task needs a logon, so after a power cut someone must turn the machine on and sign in. Two further steps would make that automatic too, both Adi's choice:
+  - the BIOS setting that powers the machine on when power returns (usually "Restore on AC power loss");
+  - Windows automatic sign-in, which stores the password and weakens the machine's security.
 - The power plan stays as set: sleep and hibernate off, processor maximum 99%, Windows Update paused until 30.11.
 
 The working copies are in `C:\Users\Adi Suliman\uav-gcs-logs`; `docs/recovery/` holds a versioned copy of the four files as of 13.11.2026. Run the ones in `uav-gcs-logs`.
