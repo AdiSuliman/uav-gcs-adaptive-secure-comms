@@ -81,3 +81,5 @@ Every kept file is written to a temporary file, flushed to the disk and then ren
 - **A UPS** (suggested on 8.11). Four of the five stops were power losses. Each costs the work in progress plus the time until someone logs on.
 - **The autostart task:** registering `v7_takeover_autostart.ps1` as a logon task (logon + 2 min) brings the takeover back by itself. The session's permission classifier refused to register it on 10.11, so Adi registers it once. Claude still runs steps 2, 5, 6 and 7 after such a restart.
 - The power plan stays as set: sleep and hibernate off, processor maximum 99%, Windows Update paused until 30.11.
+
+The working copies are in `C:\Users\Adi Suliman\uav-gcs-logs`; `docs/recovery/` holds a versioned copy of the four files as of 13.11.2026. Run the ones in `uav-gcs-logs`.

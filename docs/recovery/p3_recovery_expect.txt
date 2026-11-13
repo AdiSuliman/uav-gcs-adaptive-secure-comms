@@ -1,0 +1,6 @@
+# Values profile 3's recovery check compares against. Change a line only with the dated record
+# that changed the file (stage_reviews_p3.md, DECISIONS.md or code_commit.txt).
+# name  sha256 (full)  source of the record
+fusion.mat            3a305808cea635a1ff644aabb625dc72502b61930e5f9445f77fff8b5a38bef9  data/fusion.mat, B2F 5.11 (stage_reviews_p3.md, C1p start)
+trained_detector.mat  7a30931214662ef727d665e948ef0ff53d37d2709c2a112ed16d781df887e0f7  data/trained_detector.mat (stage_reviews_p3.md, C1p start)
+profile.json          ea892f07362e408251a479122cb1b0ec42c7bd4e99f3937cb111b44c20c7b6e8  run_cache on, 11.11 (fb487f8; stage_reviews_p3.md)
