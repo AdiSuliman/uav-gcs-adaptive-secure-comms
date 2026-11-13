@@ -36,7 +36,7 @@ Rows and months are exactly those of the proposal (months 1-8). The interim repo
 | D111 OOD select (hand run), OOD read, release check | done 5.11.2026 |
 | C1p (4 antennas): frame pools, 93 cells | started 5.11 22:44 (resumed 7.11 and 8.11 with its kept cells); 56 of 93 on 11.11 15:56, 74 of 93 on 12.11 07:00 (24 cells on 11.11); done 12.11.2026 22:51 (867.9 min after the 08:22 resume; pools 15.9 GB) |
 | C1c: clean-link pools and check cells | started 12.11 22:51; validation 106.1 min, test 110.5 min, check cells 478.1 min; done 13.11.2026 10:55 (724.4 min; profile 1 911.3). Clean reference rebuilt from 300 validation flights per Eb/N0: BER 1.6-4.8 times below profile 1's |
-| SURV map v2 (D100), profile 3 | started 13.11 10:55; profile 1's took 386.3 min |
+| SURV map v2 (D100), profile 3 | started 13.11 10:55 (estimate 44-50 h); power loss about 16:10 with 23 of 154 jobs saved, resumed 16:48 with all 23 kept; end about 14.11 evening to 15.11 midday |
 | Code merged into `v7-p3` during C1p (C1p calls none of the changed files) | `acc2ab0` 10.11 (full suite 585/585); `fb487f8` 11.11 (`profile.json` only: `run_cache` on, approved by Adi); `8cfb172` 11.11 (windows D/E: bounded-search log lines, lecturer KPIs per Eb/N0 and the receiver-robust column, the system false-alarm breakdown, the clean K6 split, SURV kept jobs keyed on the code; suite 619/620, the one wrong test expectation fixed, 13/13) |
 | SURV3 v2 (D101), C1d, C2, C2e, C2g, C2u, GAL, EDGE, KPI, DASH, WEAK, RPT | after SURV; profile 1's durations as a guide (C1p and C1c ran at 0.8-1.3 times them); chain end about 18-20.11 |
 | Profile 3 chain ends | about 18-20.11.2026; hard limit 24.11 (D118: past it, D117 item 2, D111's serial OOD run, D114 and D115 are shed in that order) |
