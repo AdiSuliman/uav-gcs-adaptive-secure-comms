@@ -363,3 +363,4 @@ Extension readings (no commitment): the earlier proposal's unknown-threat KPI is
 8. Check what a metric measures before quoting it (latency scope, per-class "accuracy" is recall).
 9. Count the tests that ran, not only the failures: three tests were silently filtered for weeks by a toolbox check that is empty in R2026a, and an empty token list made a check pass vacuously.
 10. Code must not depend on the checkout it was tested in: a git-less export broke `git show` in tests, and a thread setting failed under a single-thread launcher. Run the final tests the way the real run will run.
+- 13.11.2026: the recovery procedure moved to one file in the project folder, `RECOVERY_AFTER_SHUTDOWN.md`, which Adi points Claude to after a shutdown (versioned copy in `docs/recovery/`). Adi chose no logon autostart: its two scripts were moved to `uav-gcs-logs/unused_autostart_20261113/`, and nothing restarts the chain without Claude.
