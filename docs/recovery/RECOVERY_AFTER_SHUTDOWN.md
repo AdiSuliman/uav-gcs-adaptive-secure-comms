@@ -132,5 +132,6 @@ A UPS is the only protection against power cuts; that choice is Adi's. Keep the 
 | 8.11.2026 | power loss |
 | 12.11.2026 | disk_guard stop (`.dmr` files in Temp) |
 | 13.11.2026 | power loss during SURV; resumed with 23 of 154 jobs kept |
+| 15.11.2026 | power loss during C2; resumed with 17 runs kept |
 
 Add a row after each stop.
