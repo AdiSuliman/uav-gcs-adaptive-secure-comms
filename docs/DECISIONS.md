@@ -3086,3 +3086,53 @@ Items 12-17 add dated lines on D103 point 3, D106's defects, D109's D3 placement
 1. **What.** Beside the proposal's recovery-time KPI (time from detection to the link back at its set performance level, compared between the recovery mechanisms), one labelled side line per profile and policy (static, conventional adaptive, CNN-based): the share of recoverable jamming episodes whose onset-to-restored time is within an autopilot's link-loss failsafe timeout. Timeouts: ArduPilot `FS_GCS_TIMEOUT` default 5 s (ArduPilot GCS Failsafe documentation) and PX4's data-link-loss time `COM_DL_LOSS_T` 10 s (its earlier default in the PX4 parameter metadata; the parameter is renamed in later PX4 releases). The 20 ms decision cycle (`init_params.m` `cycle_s`) gives 250 and 500 cycles.
 2. **Limit, stated with the line.** An episode is 30 cycles (0.6 s, `train_dqn.m` H.T). Every episode restored inside its horizon is therefore within both timeouts by construction; an episode not restored by its end is censored at 0.6 s, and the reading does not claim whether it would recover before 5 s or 10 s. The line prints both shares (restored within the horizon; censored) and says so.
 3. **Status.** Side reading only: no verdict, no threshold, no selection uses it. It is read once from the saved `results/policy_evaluation.mat` after C2e (P3) and from P1's saved file, by a reader script; no code in the running chain changes for it.
+
+## D124 - The rule's layered answers (PP.rule_fix): three in-channel candidates and a lost-branch candidate, chosen on validation, read once on test, the same answer for every system that uses the rule (Adi's yes 15.11.2026: "if it improves, fix it"; registered before any reading)
+
+1. **What.** One option field, `PP.rule_fix` (`rule_fix.m`), off by default; with it off, every answer, rung and stamp is unchanged. Four candidates, each one of the 36 configurations, so the pools serve them unchanged:
+   - **(A) `keep+st`.** The escalation keeps the hop and the null of the configuration in use. tone_jamming takes the space-time MMSE: a CW is rank 1 in the antennas x taps snapshot.
+   - **(B) `keep+st+rate`.** A, and every hop answer to in-channel interference adds rate_reduce (processing gain 6.02 dB).
+   - **(C) `keep+st+match`.** A, and the same hop answers add the smallest known link-budget gain that covers the quiet slot's residual. The residual is predicted with 28 dB rejection before the hop (nRF24L01+ Table 8, 6-12 MHz) and read directly after it; nothing is added below q_thr.
+   - **(D) `+fec`** on the step-1 setting. A lost branch answered with power_control adds fec_interleave: time diversity over 4 frames 20 ms apart.
+
+   The core rule takes channel_switch+rate_reduce where B or C add an element. CORE_BW's validated wideband W stands (PP.core_wide_valid). keep also covers the escalation's link-budget step on a drop alarm. fec applies to a lost-branch class answer only. The prediction in C keeps 28 dB while the pools apply 30 dB, which errs on the severe side. The DQN kinds are untouched.
+2. **Selection, on the validation split only.** The episodes, clean flights and seeds are train_dqn.m's. The policy is rule + escalation at its own monitor and settings (rule_sel). Step 1 reads A, B and C against off; step 2 reads D against step 1's setting. A candidate is adopted only if:
+   - (a) on its target threats, held recovery rises with a one-sided 95% lower bound above 0;
+   - (b) no threat's recovered share falls by more than 1.0 point, nor its lower bound by more than 2.0;
+   - (c) pooled held and recovered stay no lower than -0.5 point, with lower bounds no lower than -1.0;
+   - (d) the clean flights with a change stay within max(5%, today's) one-sided Clopper-Pearson bound and at most 1 point above today's;
+   - (e) the core rule's pooled held stays no lower than -0.5 point, with a lower bound no lower than -1.0.
+
+   The bootstrap is clustered by flight, 2000 draws, fixed seeds. Among the candidates that pass, the highest pooled held wins; within 0.5 point, the recovered, then the return.
+
+   Before any candidate, with the option off, the reading must reproduce every registered number it leans on, or it stops and nothing is frozen:
+   - rule_sel's held, recovered and clean-flight changes;
+   - the gate's rule;
+   - the core rule at C2's reference monitor, the baseline of (e);
+   - rule + escalation at every entry of C2's grid;
+   - choose_deployed's verdict, which must equal the deployed policy.
+3. **Test.** Read once per tree, whatever the tag, for the adopted setting only. The read happens behind a marker and the frozen hashes of every code file and of the inputs (`rule_fix_reading.m`, `read_once.m`). Every registered rule row is reproduced with the option off before the marker is set; any mismatch stops the read. If nothing is adopted, the test is not read.
+4. **If adopted, recomputed:**
+   - the rule rows of evaluate_policies (rule, rule_esc, blind_esc, rule_core, blind_core, rule_core3, rule_sel);
+   - lect_kpis (KPI 5's rule+esc reduction, the CNN shares, KPI 8's core rows), lect_kpi_table and the KPI summary lines;
+   - choose_deployed's gate, re-read on validation at every monitor entry. If the deployed policy changes, its KPIs are re-run through evaluate_policies, EDGE and KPI.
+   - If the setting is carried into dec: experiment_combo_generalization's and experiment_unknown_threat's rule + escalation columns.
+
+   The DQN is not retrained: its state, shield, escalation and reward read no rule output. This branch changes run_cache's code key. It is never merged into a tree whose chain still has kept work to reuse; the readings run from its checkout against finished trees.
+5. **Status.** The readings are side readings until the owner adopts them into a profile's registered chain. The registered P1 and P3 results stay as they are and reproducible (off = bit for bit). Profile 1: run from the branch against `uav-gcs-v7`. Profile 3: after its chain's C2e.
+6. **CORE_BW, KPI 8 (the lecturer's narrowband and wideband).**
+   - **Where.** A side stage, `core_bw_rule_fix_reading.m`. It runs in a checkout of core-bw-p1 (75bea00) with `docs/runs/core_bw_rule_fix_75bea00.patch` and the rule-fix files, from the study's tree.
+   - **Validation** (split 1, H1, the frozen recoverable fixed-total scenarios, frame draws 54100 + 10k). It reads the core projections keep, keep+rate and keep+match against off, for rule_core3 (the primary), rule_core and blind_core, at the frozen W, W3 and first response.
+   - **Reproduction first.** With the option off, rule_core's, rule_core3's and blind_core's registered validation choose_w rows must be reproduced exactly, or the stage stops.
+   - **Conditions** (rule_core3; one-sided 95% cluster bootstrap):
+     - (a) narrowband PER falls, with the upper bound below 0;
+     - (b) wideband PER rises by no more than 0.005, upper bound 0.010;
+     - (c) held and recovered no lower than -0.5 point, lower bound -1.0;
+     - (d) episodes with a false change within max(5%, off's) Clopper-Pearson bound, and at most 1 point above off's;
+     - (e) rule_core's pooled PER rises by no more than 0.005, upper bound 0.010.
+   - **Binding.** The setting bound is the core projection of point 1's adopted setting for the same profile, and only if it passes. Otherwise nothing is bound and the registered KPI 8 stands.
+   - **Test.** Read once per tree, on CORE_BW's test split (H1 primary set, the registered draws 82100). First, the registered primary rows of rule_core3, rule_core and blind_core must be reproduced off, exactly, before the side stage's own marker. Then the bound setting is read: PER reduction per type and the CNN contribution rule_core3 - blind_core, off and on.
+   - **Never touched.** The study's marker, protocol and result files are never written, and its registered test guard is not re-run.
+
+
+Code: branch rule-fix (fd530db, b36e4b3, 640a421, b952235, a987d97), CORE_BW side stage on branch core-bw-rule-fix (7bc9bfa = 75bea00 + the patch and the rule-fix files). An independent read-only review of the first three commits is answered by b952235. The readings run after profile 3's chain ends.
