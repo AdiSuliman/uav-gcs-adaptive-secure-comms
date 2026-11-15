@@ -16,21 +16,28 @@ function varargout = rule_fix(cmd, varargin)
 %              1 + (IoT - 1) / ACR before it and read directly after it, against the smallest
 %              known gain that covers it (the rule's own link-budget match); nothing when the
 %              predicted residual is below the quiet-slot alarm threshold
-%       fec    a lost-branch class answered with power_control adds fec_interleave: one
+%       fec    a lost-branch class answer of power_control adds fec_interleave (not a drop alarm's
+%              answer, a kept configuration or an answer the lost-branch gate withheld): one
 %              codeword over p.fec_frames frames 20 ms apart, beyond the coherence time, gives
 %              back time diversity the lost branch took (Tse & Viswanath 2005, ch. 3)
-%       F: on, keep, st, inch ('' | 'rate' | 'match'), fec, name (the canonical string)
-%   a = rule_fix('answer', a, cls, F, q_iot, q_thr, degraded, slot_on, budget)
-%       the 36-configuration rule's answer a (rule_based_policy.m) with the layered elements
+%       F: on, keep, st, inch ('' | 'rate' | 'match'), fec, name (the canonical string, tokens in
+%       this order); '' and "" are off
+%   a = rule_fix('answer', a, cls, F, q_iot, q_thr, degraded, slot_on, budget, from_class)
+%       the 36-configuration rule's answer a (rule_based_policy.m) with the layered elements;
+%       from_class: a is the class mapping's own answer (default false)
 %   a = rule_fix('core', a, cls, F, q_iot, q_thr, degraded, slot_on, current, wide)
 %       the core rule's answer a (rule_core_policy.m) with rate_reduce, the core set's only
 %       link-budget element, where 'rate' or 'match' adds one; 'st' and 'fec' are outside it;
-%       the class jamming keeps an answer chosen on validation (wide non-empty)
+%       the class jamming keeps an answer chosen on validation (wide: that answer, '' when none
+%       was validated)
 %   m = rule_fix('merge', cur, rung)   configuration name of a rung merged with cur
 %   j = rule_fix('rung', A, c, ladder, tried)   the first rung of ladder (indices into A) whose
 %       merge with configuration c is neither c nor tried; [] when none
 %   r = rule_fix('residual', q_iot)    the quiet slot's IoT [dB] predicted after a hop
-%   d = rule_fix('acr')                the rejection the prediction assumes [dB]
+%   d = rule_fix('acr')                the rejection the prediction assumes [dB]: 28, the
+%       datasheet's least beyond the first neighbours; the pools apply cm_acr_db = 30, so the
+%       residual is predicted up to 2 dB high and 'match' can add an element the simulated hop
+%       alone did not need (the severe side), never the other way
 switch cmd
     case 'parse',    varargout{1} = parse(varargin{:});
     case 'answer',   varargout{1} = answer(varargin{:});
@@ -51,7 +58,7 @@ end
 
 function F = parse(s)
 F = struct('on', false, 'keep', false, 'st', false, 'inch', '', 'fec', false, 'name', '');
-if nargin < 1 || isempty(s), return; end
+if nargin < 1 || isempty(s) || (isstring(s) && all(strlength(s) == 0)), return; end
 if isstruct(s) && isfield(s, 'on'), F = s; return; end
 assert(ischar(s) || (isstring(s) && isscalar(s)), 'rule_fix:value', 'rule_fix: the option is a character string');
 t = strsplit(char(s), '+');
@@ -66,10 +73,11 @@ F.on = true;
 F.name = strjoin(ok(ismember(ok, t)), '+');
 end
 
-function a = answer(a, cls, F, q_iot, q_thr, degraded, slot_on, budget)
+function a = answer(a, cls, F, q_iot, q_thr, degraded, slot_on, budget, from_class)
 F = parse(F);
 if ~F.on, return; end
 if nargin < 8, budget = []; end
+if nargin < 9, from_class = false; end
 [f, s, b] = domains(a);
 if F.st && strcmp(cls, 'tone_jamming') && strcmp(f, 'channel_switch'), s = true; end
 if hop_answer(a, cls, q_iot, q_thr, degraded, slot_on) && ~isempty(F.inch)
@@ -81,7 +89,7 @@ if hop_answer(a, cls, q_iot, q_thr, degraded, slot_on) && ~isempty(F.inch)
     end
     b = union_budget(b, add);
 end
-if F.fec && ismember(cls, {'antenna_fault', 'airframe_shadowing'}) && isempty(f) && isequal(b, {'power_control'})
+if F.fec && from_class && ismember(cls, {'antenna_fault', 'airframe_shadowing'}) && isempty(f) && isequal(b, {'power_control'})
     b = {'power_control', 'fec_interleave'};
 end
 a = compose(f, s, b);

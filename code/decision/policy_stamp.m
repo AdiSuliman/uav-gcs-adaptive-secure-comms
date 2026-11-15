@@ -38,10 +38,12 @@ for n = {'confirm_sweep', 'unk_mode', 'unk_retain', 'rule_mmse_db', 'rule_slot',
     x = field_or(S, n{1}); if islogical(x), x = double(x); end
     c{end+1} = x; %#ok<AGROW>
 end
-for n = {'rule_nb', 'core_nb', 'deg_mode', 'ber_q', 'deg_forced', 'confirm_drop', 'wf_forced', 'fa_form', 'rule_fix'}   % the noise-burst answers, the degradation test, the drop alarm's confirmation, the smoke's forced cells, the penalty form and the rule's layered answers, when set
+for n = {'rule_nb', 'core_nb', 'deg_mode', 'ber_q', 'deg_forced', 'confirm_drop', 'wf_forced', 'fa_form'}   % the noise-burst answers, the degradation test, the drop alarm's confirmation, the smoke's forced cells and the penalty form, when set
     x = field_or(S, n{1});
     if ~isempty(x), c{end+1} = {n{1}, x}; end %#ok<AGROW>
 end
+x = field_or(S, 'rule_fix');                                       % the rule's layered answers, canonical, when on
+if ~isempty(x), F = rule_fix('parse', x); if F.on, c{end+1} = {'rule_fix', F.name}; end, end
 for n = {'s1_gate', 'release_m', 's1_gate_core'}                   % the lost-branch gates and the release on evidence, when on
     x = field_or(S, n{1});
     if ~isempty(x) && x, c{end+1} = {n{1}, 1}; end %#ok<AGROW>

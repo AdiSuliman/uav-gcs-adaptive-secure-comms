@@ -98,6 +98,7 @@ switch threat_class
     otherwise
         action = 'no_action';         reason = 'unknown class: no class-specific mapping';
 end
+a_cls = action;
 
 if strcmp(action, 'no_action') && drop && ~slot && ~strcmp(threat_class, 'benign_interference')
     action = 'power_control'; reason = 'our signal dropped over thermal noise: raise the link budget';
@@ -117,7 +118,7 @@ elseif strcmp(action, 'no_action') && degraded
 end
 if ~isempty(fix)
     a0 = action;
-    action = rule_fix('answer', action, threat_class, fix, q_iot_db, q_thr_db, degraded, slot_on, budget);
+    action = rule_fix('answer', action, threat_class, fix, q_iot_db, q_thr_db, degraded, slot_on, budget, strcmp(action, a_cls));
     if ~strcmp(action, a0), reason = sprintf('%s; layered answer %s', reason, action); end
 end
 end

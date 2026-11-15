@@ -8,8 +8,9 @@ function out = calibration_reading(varargin)
 %   calibration_reading(tree, tag, true)   also the decision-layer pools' test splits (loads
 %       data/policy_pools.mat whole: run it only when no other stage holds the memory)
 %   C = calibration_reading('stats', P, y, nb)   the readings of probabilities P (N x classes,
-%       rows renormalized) against true class indices y (N x 1), nb bins (default 15):
-%       C.ece, C.brier, C.acc, C.n, C.rowsum_dev (largest |row sum - 1| before renormalizing),
+%       rows renormalized) against true class indices y (N x 1), nb bins (default 15, bin k holds
+%       [(k-1)/nb, k/nb), the last one 1 too); rows with a non-finite value are dropped and counted:
+%       C.ece, C.brier, C.acc, C.n, C.n_dropped, C.rowsum_dev (largest |row sum - 1| before renormalizing),
 %       C.top (nb x 4: count, mean confidence, accuracy, |gap|), C.cls (per class: ece, n_pos,
 %       table nb x 3: count, mean probability, observed frequency)
 %   Sources, each read where it exists:
@@ -54,7 +55,8 @@ for k = 1:numel(d)
             f, strjoin(fieldnames(p)', ', ')); %#ok<AGROW>
         continue
     end
-    C = stats(double(p.(pf{1})), double(p.y_true(:)));
+    cp = cls; if isfield(p, 'classes'), cp = cellstr(string(p.classes(:)')); end
+    C = stats(double(p.(pf{1})), labels(p.y_true, cp));
     R(end+1) = struct('source', f, 'C', C); %#ok<AGROW>
     lines = [lines, block(sprintf('%s (%s)', f, pf{1}), C, cls)]; %#ok<AGROW>
 end
@@ -62,7 +64,7 @@ if isfile(fullfile('data', 'fusion.mat'))
     v = whos('-file', fullfile('data', 'fusion.mat'));
     if all(ismember({'val_probs_oof', 'val_target'}, {v.name}))
         S = load(fullfile('data', 'fusion.mat'), 'val_probs_oof', 'val_target');
-        C = stats(double(S.val_probs_oof), double(S.val_target(:)));
+        C = stats(double(S.val_probs_oof), labels(S.val_target, cls));
         R(end+1) = struct('source', 'data/fusion.mat', 'C', C);
         lines = [lines, block('data/fusion.mat: fused probabilities of the validation frames, out of fold, against their target', C, cls)];
     end
@@ -82,8 +84,11 @@ end
 
 function C = stats(P, y, nb)
 if nargin < 3 || isempty(nb), nb = 15; end
-y = y(:); [N, K] = size(P);
-assert(numel(y) == N && all(y >= 1 & y <= K & y == round(y)), 'calibration_reading:labels', ...
+y = double(y(:)); K = size(P, 2);
+assert(numel(y) == size(P, 1), 'calibration_reading:labels', 'calibration_reading: one label per row');
+keep = all(isfinite(P), 2) & isfinite(y);
+C.n_dropped = sum(~keep); P = P(keep, :); y = y(keep); N = numel(y);
+assert(all(y >= 1 & y <= K & y == round(y)), 'calibration_reading:labels', ...
     'calibration_reading: one class index in 1..%d per row', K);
 s = sum(P, 2);
 C.rowsum_dev = max(abs(s - 1));
@@ -115,13 +120,24 @@ end
 end
 
 function b = bin_of(p, nb)
-% Equal-width bins on [0, 1]: (0, 1/nb] is bin 1, 0 itself too.
-b = min(nb, max(1, ceil(p * nb)));
+% Equal-width bins on [0, 1]: bin k holds [(k-1)/nb, k/nb), the last one 1 too (integer index).
+b = min(nb, max(1, floor(p * nb) + 1));
+end
+
+function y = labels(y, cls)
+% Class indices in the order of the stored class list cls: a categorical label is matched by name.
+if iscategorical(y) || isstring(y) || iscellstr(y)
+    [ok, y] = ismember(cellstr(string(y(:))), cls);
+    assert(all(ok), 'calibration_reading:labels', 'calibration_reading: a label outside the stored class list');
+else
+    y = double(y(:));
+end
 end
 
 function lines = block(ttl, C, cls)
-lines = {'', ttl, sprintf('  frames %d, accuracy %.2f%%, ECE %.4f, Brier %.4f, largest row-sum deviation %.2g', C.n, 100 * C.acc, ...
-    C.ece, C.brier, C.rowsum_dev), '  top-label reliability: bin, frames, mean confidence, accuracy'};
+lines = {'', ttl, sprintf(['  frames %d (%d dropped: a non-finite probability or label), accuracy %.2f%%, ECE %.4f, Brier %.4f, ' ...
+    'largest row-sum deviation %.2g'], C.n, C.n_dropped, 100 * C.acc, C.ece, C.brier, C.rowsum_dev), ...
+    '  top-label reliability: bin, frames, mean confidence, accuracy'};
 for i = 1:size(C.top, 1)
     if C.top(i, 1) > 0
         lines{end+1} = sprintf('    %2d  %7d  %.3f  %.3f', i, C.top(i, 1), C.top(i, 2), C.top(i, 3)); %#ok<AGROW>

@@ -149,27 +149,49 @@ end
 
 %% ---------- policy_decide.m ----------
 function test_decide_off_is_the_parent(tc)
-% The rule, the rule with escalation, without the detector, the core rule and the table with
-% escalation, with the option absent and '', give the base commit's actions and info cycle by cycle.
+% The rule, the rule with escalation, without the detector, the core rule (with the three-state class
+% too) and the table with escalation, under the plain settings and under the lost-branch gates, the
+% escalation on a drop alarm, the group dwell, the release on evidence, the slot branch off and a
+% noise-burst answer, with the option absent, '' and "", give the base commit's actions and info
+% cycle by cycle.
 [PP, X] = trace_world();
-P2 = PP; P2.rule_fix = '';
-kinds = {'rule', 'rule_esc', 'blind_esc', 'rule_esc', 'table_esc'};
-opts = {struct(), struct(), struct(), struct('core', true), table_opt(PP)};
-Rn = cell(1, numel(kinds)); Rf = Rn;
-for k = 1:numel(kinds), Rn{k} = decide_run(kinds{k}, PP, X, opts{k}); Rf{k} = decide_run(kinds{k}, P2, X, opts{k}); end
+V = {PP, PP, PP};
+V{2}.s1_gate = true; V{2}.esc_drop = true; V{2}.rule_dwell = 'group'; V{2}.release_m = true; V{2}.rule_slot = false;
+V{2}.rule_nb = {'power_control', 'spatial_diversity+power_control'};
+V{3}.s1_gate_core = true; V{3}.esc_drop = true; V{3}.core3_N = 3;
+kinds = {'rule', 'rule_esc', 'blind_esc', 'rule_esc', 'table_esc', 'rule_esc'};
+opts = {struct(), struct(), struct(), struct('core', true), table_opt(PP), struct('core', true, 'core3', true)};
+runs = {};
+for v = 1:numel(V)
+    for k = 1:numel(kinds)
+        if k == 6 && v ~= 3, continue; end
+        runs(end+1, :) = {v, k}; %#ok<AGROW>
+    end
+end
+Rn = cell(1, size(runs, 1)); Rf = Rn; Rs = Rn;
+for r = 1:size(runs, 1)
+    P = V{runs{r, 1}}; k = runs{r, 2};
+    Rn{r} = decide_run(kinds{k}, P, X, opts{k});
+    P.rule_fix = ''; Rf{r} = decide_run(kinds{k}, P, X, opts{k});
+    P.rule_fix = ""; Rs{r} = decide_run(kinds{k}, P, X, opts{k});
+end
 d = parent_copy(tc, 'code/decision/policy_decide.m', tc.TestData.base);
 addpath(d, '-begin'); clear policy_decide
 cl = onCleanup(@() fixture_off(d, 'policy_decide')); %#ok<NASGU>
 verifyEqual(tc, which('policy_decide'), fullfile(d, 'policy_decide.m'));
-moved = false(1, numel(kinds));
-for k = 1:numel(kinds)
-    Ro = decide_run(kinds{k}, PP, X, opts{k});
-    verifyTrue(tc, isequaln(Ro, Rn{k}), sprintf('%s %d, field absent', kinds{k}, k));
-    verifyTrue(tc, isequaln(Ro, Rf{k}), sprintf('%s %d, field empty', kinds{k}, k));
-    moved(k) = numel(unique(Ro.a(:))) > 2;
+moved = false(1, size(runs, 1)); esc = moved;
+for r = 1:size(runs, 1)
+    k = runs{r, 2};
+    Ro = decide_run(kinds{k}, V{runs{r, 1}}, X, opts{k});
+    t = sprintf('%s, settings %d', kinds{k}, runs{r, 1});
+    verifyTrue(tc, isequaln(Ro, Rn{r}), [t ', field absent']);
+    verifyTrue(tc, isequaln(Ro, Rf{r}), [t ', field empty']);
+    verifyTrue(tc, isequaln(Ro, Rs{r}), [t ', empty string']);
+    moved(r) = numel(unique(Ro.a(:))) > 2;
+    esc(r) = any(cellfun(@(I) any(I.escalated), Ro.I));
 end
 fixture_off(d, 'policy_decide');
-verifyTrue(tc, any(moved(2:3)));                                 % the escalation moves on the trace
+verifyTrue(tc, any(moved) && any(esc));                         % the traces move the configuration and escalate
 end
 
 function test_decide_keep_holds_the_hop(tc)
@@ -197,12 +219,66 @@ verifyTrue(tc, all(ismember(Rc1.a(:), find(ismember(A, decision_config().core_ac
 end
 
 function test_dqn_unchanged(tc)
-[PP, X] = trace_world();
+% The DQN kinds read no rule: with the option set their actions and info stay, and the trace makes
+% the DQN's own escalation fire.
+PP = mon_pp(); na = find(strcmp(PP.actions, 'no_action'));
+X = const_trace(PP, 30, 0, 8, 2, 'jamming', NaN, na);
 ag = dqn_stub(PP, find(strcmp(PP.actions, 'power_control')));
 P1 = PP; P1.rule_fix = 'keep+st+match+fec';
 for k = {'dqn', 'dqn_esc'}
-    verifyTrue(tc, isequaln(decide_run(k{1}, PP, X, struct(), ag), decide_run(k{1}, P1, X, struct(), ag)), k{1});
+    R0 = decide_run(k{1}, PP, X, struct(), ag);
+    verifyTrue(tc, isequaln(R0, decide_run(k{1}, P1, X, struct(), ag)), k{1});
+    if strcmp(k{1}, 'dqn_esc'), verifyTrue(tc, any(cellfun(@(I) any(I.escalated), R0.I)), 'the escalation fired'); end
 end
+end
+
+function test_keep_on_the_drop_step(tc)
+% The escalation on a drop alarm read as none takes the link-budget configuration that covers the
+% drop: off it leaves the hop, with keep it keeps it. The table answers none with the hop (its
+% unknown answer on a degraded link), so the step is the escalation's own.
+PP = mon_pp(); PP.esc_drop = true; A = PP.actions;
+cs = find(strcmp(A, 'channel_switch'));
+op = struct('table', find(strcmp(A, 'no_action')) * ones(1, numel(PP.classes)), 'table_unknown', cs);
+X = make_x(PP, 30, @(t) mk_obs(PP, ternary(t >= 8, 0, -6), ternary(t >= 8, 4, 20), 0, cs, 'none', NaN), cs);
+Ro = decide_run('table_esc', PP, X, op);
+P1 = PP; P1.rule_fix = 'keep';
+Rk = decide_run('table_esc', P1, X, op);
+hop = @(R) contains(A(R.a), {'channel_switch', 'freq_diversity'});
+verifyFalse(tc, all(hop(Ro)));                                    % the defect: a pure link-budget configuration
+verifyTrue(tc, all(hop(Rk)));
+verifyTrue(tc, any(cellfun(@(I) any(I.escalated), Rk.I)));
+end
+
+function test_fec_scope(tc)
+b = budget('no_action');
+verifyFalse(tc, contains(rule_based_policy('antenna_fault', false, 0, -Inf, 3, true, b, 6, true, {}, false, 'fec'), ...
+    'fec_interleave'));                                             % the gate withheld the class answer: the drop's answer, no code
+verifyEqual(tc, rule_based_policy('antenna_fault', false, 0, -Inf, 3, true, b, 6, true, {}, [], 'fec'), ...
+    'power_control+fec_interleave');                               % the class answer
+verifyFalse(tc, contains(rule_based_policy('none', false, 0, -Inf, 3, true, budget('power_control'), 6, true, {}, [], 'fec'), ...
+    'fec_interleave'));                                             % a drop alarm's answer or a kept configuration
+end
+
+function test_off_string_and_canonical_stamp(tc)
+for v = {"", ''}
+    verifyFalse(tc, rule_fix('parse', v{1}).on);
+    verifyEqual(tc, rule_based_policy('jamming', false, 0, 40, 3, false, [], 6, true, {}, [], v{1}), 'channel_switch');
+end
+Q = struct('deployed', 'dqn', 'dec', struct('rule_mmse_db', 6));
+Q1 = Q; Q1.dec.rule_fix = ""; Q2 = Q; Q2.dec.rule_fix = 'st+keep'; Q3 = Q; Q3.dec.rule_fix = 'keep+st';
+verifyEqual(tc, policy_stamp(Q1), policy_stamp(Q));
+verifyEqual(tc, policy_stamp(Q2), policy_stamp(Q3));
+end
+
+function test_core_wide_validated(tc)
+% The core rule's class jamming keeps PP.core_wide only when PP.core_wide_valid marks it validated.
+PP = mon_pp(); A = PP.actions; na = find(strcmp(A, 'no_action'));
+X = const_trace(PP, 30, 0, 8, 2, 'jamming', NaN, na);
+P = PP; P.rule_fix = 'keep+rate'; P.core_wide = 'channel_switch';
+first = @(R) A{R.a(find(R.a ~= na, 1))};
+verifyEqual(tc, first(decide_run('rule_esc', P, X, struct('core', true))), 'channel_switch+rate_reduce');
+P.core_wide_valid = true;
+verifyEqual(tc, first(decide_run('rule_esc', P, X, struct('core', true))), 'channel_switch');
 end
 
 function test_settings_and_stamp(tc)
@@ -232,24 +308,41 @@ verifyFalse(tc, isfolder(X.dir));
 end
 
 function test_reading_guard(tc)
+% The test stage's refusals: no selection; another tree; the tree's test split read under any tag;
+% changed code (any .m file of the checkout); changed inputs.
 d = tempname; mkdir(d); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
 X = rule_fix_reading('paths', d, 'unit_guard');
+verifyTrue(tc, startsWith(X.claim_test, fullfile(tc.TestData.root, 'results', 'read_once')));
+verifyEqual(tc, X.claim_test, rule_fix_reading('paths', d, 'another_tag').claim_test);   % one marker per tree
 X.dir = d; X.sel = fullfile(d, 'selection.json'); X.marker = fullfile(d, 'test_read_started.txt');
+X.claim_test = fullfile(d, 'claim_test.txt');
 J = rule_fix_reading('guard', X);
 verifyEqual(tc, numel(J), 1); verifyTrue(tc, contains(J{1}, 'no frozen selection'));
 S = struct('adopted', 'keep+st+rate', 'fingerprint', rule_fix_reading('fingerprint', X));
 write_text(X.sel, jsonencode(S));
 verifyEmpty(tc, rule_fix_reading('guard', X));
-write_text(X.marker, 'started');
+write_text(X.claim_test, 'read under another tag');
 verifyTrue(tc, any(contains(rule_fix_reading('guard', X), 'read already')));
-delete(X.marker);
-S.fingerprint.code{1} = 'changed';
-write_text(X.sel, jsonencode(S));
+delete(X.claim_test);
+S2 = S; S2.fingerprint.tree = 'c:\another\tree'; write_text(X.sel, jsonencode(S2));
+verifyTrue(tc, any(contains(rule_fix_reading('guard', X), 'another tree')));
+S2 = S; S2.fingerprint.code = 'changed'; write_text(X.sel, jsonencode(S2));
 verifyTrue(tc, any(contains(rule_fix_reading('guard', X), 'code differs')));
-S = struct('adopted', '', 'fingerprint', rule_fix_reading('fingerprint', X));
-S.fingerprint.inputs{1} = 'other';
-write_text(X.sel, jsonencode(S));
+S2 = S; S2.fingerprint.inputs{1} = 'other'; write_text(X.sel, jsonencode(S2));
 verifyTrue(tc, any(contains(rule_fix_reading('guard', X), 'inputs differ')));
+end
+
+function test_read_once_helpers(tc)
+d = tempname; mkdir(d); cl = onCleanup(@() rmdir(d, 's')); %#ok<NASGU>
+f = fullfile(d, 'x', 'a.txt');
+read_once('write', f, {'one', 'two'});
+verifyEqual(tc, strtrim(fileread(f)), sprintf('one\ntwo'));
+verifyFalse(tc, isfile([f '.tmp']));
+read_once('save', fullfile(d, 'b.mat'), struct('z', 3));
+verifyEqual(tc, load(fullfile(d, 'b.mat')).z, 3);
+verifyEqual(tc, numel(read_once('code')), 64);
+verifyEqual(tc, read_once('file', fullfile(d, 'none')), 'absent');
+verifyEqual(tc, read_once('claim', 'rule_fix', 'test', d), read_once('claim', 'rule_fix', 'test', [d filesep]));
 end
 
 function test_reading_select(tc)
@@ -271,11 +364,18 @@ end
 
 %% ---------- fixtures ----------
 function [args, n] = rule_grid()
+% Every class on and off a degraded link, separable or not, with and without quiet-slot interference
+% and a drop alarm, the slot branch on and off, with and without a noise-burst answer, the harm
+% argument empty, true and false.
 cls = {'none', 'jamming', 'reactive_jamming', 'spoofing', 'tone_jamming', 'noise_burst', 'path_loss', 'antenna_fault', ...
     'airframe_shadowing', 'benign_interference', 'sweeping_jammer', 'unknown'};
+nb = {{}, {'power_control', 'spatial_diversity+power_control'}};
+hm = {[], true, false};
 args = {};
 for c = cls, for dg = [false true], for gn = [0 9], for qi = [-Inf 5], for dr = [false true]
-    args{end+1} = {c{1}, dg, gn, qi, 3, dr, budget('channel_switch'), 6, true, {}, []}; %#ok<AGROW>
+    for so = [true false], for b = 1:2, for h = 1:3
+        args{end+1} = {c{1}, dg, gn, qi, 3, dr, budget('channel_switch'), 6, so, nb{b}, hm{h}}; %#ok<AGROW>
+    end, end, end
 end, end, end, end, end
 n = numel(args);
 end
@@ -307,23 +407,32 @@ if ~isnan(occ), o.idle(strcmp(idle_summary('names'), 'occ')) = occ; end
 end
 
 function X = const_trace(PP, T, lb, e, qi, cls, occ, cfg0)
+X = make_x(PP, T, @(t) mk_obs(PP, lb, e, qi, cfg0, cls, occ), cfg0);
+end
+
+function X = make_x(~, T, f, cfg0)
 X = struct('obs', {cell(1, T)}, 'cfg0', cfg0);
-for t = 1:T, X.obs{t} = mk_obs(PP, lb, e, qi, cfg0, cls, occ); end
+for t = 1:T, X.obs{t} = f(t); end
+end
+
+function out = ternary(c, a, b)
+if c, out = a; else, out = b; end
 end
 
 function [PP, X] = trace_world()
-% Four episodes, 30 cycles: a jammer, a tone, the WLAN and an unexplained degradation with
-% interference in the quiet slot, each on a degraded link with noisy class scores.
+% Four episodes, 30 cycles: a jammer, a tone, an antenna fault and a link read as none whose signal
+% drops 10 dB at cycle 15, each degraded, with noisy class scores and three-state scores.
 PP = mon_pp(); A = PP.actions; na = find(strcmp(A, 'no_action'));
 NE = 4; T = 30; nC = numel(PP.classes); nF = numel(link_features('names')); nI = numel(idle_summary('names'));
 rs = RandStream('mt19937ar', 'Seed', 12);
-main = cellfun(@(c) find(strcmp(PP.classes, c)), {'jamming', 'tone_jamming', 'benign_interference', 'none'});
+main = cellfun(@(c) find(strcmp(PP.classes, c)), {'jamming', 'tone_jamming', 'antenna_fault', 'none'});
 X = struct('obs', {cell(1, T)}, 'cfg0', na * ones(1, NE));
 for t = 1:T
     p = 0.2 * rand(rs, NE, nC); p(sub2ind([NE nC], 1:NE, main)) = p(sub2ind([NE nC], 1:NE, main)) + 1; p = p ./ sum(p, 2);
     o = struct('probs', p, 'unknown', false(NE, 1), 'feat', zeros(NE, nF));
     o.feat(:, feature_index('log_ber')) = -1 + 0.5 * rand(rs, NE, 1);
-    o.feat(:, feature_index('sinr')) = 6 + 2 * randn(rs, NE, 1);
+    o.feat(:, feature_index('sinr')) = 6 + 2 * randn(rs, NE, 1) - 10 * [0 0 0 t >= 15]';
+    o.probs3 = rand(rs, NE, 3); o.probs3 = o.probs3 ./ sum(o.probs3, 2);
     o.feat(:, feature_index('q_iot')) = 2 + 30 * rand(rs, NE, 1);
     o.feat(:, feature_index('crc_fail')) = rand(rs, NE, 1) < 0.5;
     o.idle = nan(NE, nI); o.idle(:, 1) = 0.1 * (rand(rs, NE, 1) < 0.3);

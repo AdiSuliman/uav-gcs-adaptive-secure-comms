@@ -3,14 +3,21 @@ function out = rule_fix_reading(stage, varargin)
 %   finished tree's frame pools: the candidates are scored on the VALIDATION split, the
 %   selection is frozen, and only then is the test split read, once, for the setting adopted.
 %   Nothing is written into the tree; no file of this reading is ever overwritten.
-%   rule_fix_reading('val', tree, tag)    validation: reproduces the registered rule readings
-%       (off), scores the candidates, applies the registered selection, re-reads the gate of
-%       choose_deployed.m with the setting adopted, freezes the selection (hashes of the code and
-%       of the tree's inputs) -> results/rule_fix/<tag>/selection.json, val.mat,
-%       rule_fix_reading.txt
-%   rule_fix_reading('test', tree, tag)   the single test reading: refused without the frozen
-%       selection, a second time, or when the code or the inputs changed; nothing adopted: the
-%       test is not read -> test.mat, the test section of rule_fix_reading.txt
+%   rule_fix_reading('val', tree, tag)    validation, once per tree: first, with the option off,
+%       every registered reading the selection leans on is reproduced and any mismatch stops the
+%       run before a candidate is read: rule_sel's held, recovered and clean-flight changes
+%       (trained_dqn.mat), the gate's rule (seed_summary), the core rule at C2's reference monitor
+%       (the baseline of (e), results/dqn_training.txt), rule + escalation at every monitor and drop
+%       threshold of C2's grid (the same file, 0.1-point print) and choose_deployed.m's verdict
+%       (Q.deployed); then the candidates, the selection, the gate with the setting adopted; frozen
+%       with the hash of every .m file of this checkout and of the tree's inputs ->
+%       results/rule_fix/<tag>/selection.json, val.mat, rule_fix_reading.txt, each written whole
+%       (read_once.m), and the tree's validation marker last
+%   rule_fix_reading('test', tree, tag)   the single test reading, once per tree whatever the tag:
+%       refused without the frozen selection, on another tree, a second time, or when the code or
+%       the inputs changed; every registered rule row of evaluate_policies.m's first five sets is
+%       reproduced with the option off before the marker is set (any mismatch stops); nothing
+%       adopted: the test is not read -> test.mat, the test section of rule_fix_reading.txt
 %   X = rule_fix_reading('paths', tree, tag)   the files of a reading
 %   J = rule_fix_reading('guard', X)      the test stage's refusals in order ({} none)
 %   F = rule_fix_reading('fingerprint', X)   the hashes the selection is frozen with
@@ -35,8 +42,9 @@ function out = rule_fix_reading(stage, varargin)
 %   (c) pooled held and pooled recovered: no lower than -0.5 point, lower bound no lower than -1.0
 %   (d) the clean validation flights with a change: one-sided 95% Clopper-Pearson bound within
 %       max(5%, the setting in force's) and the share at most 1 point above it
-%   (e) the core rule (rule + escalation on the core action set, the deployed DQN's settings):
-%       pooled held no lower than -0.5 point, lower bound no lower than -1.0
+%   (e) the core rule (rule + escalation on the core action set at C2's reference monitor and the
+%       rule's settings, as C2 read it): pooled held no lower than -0.5 point, lower bound no lower
+%       than -1.0
 %   Bounds: cluster bootstrap over the flights (a geometry at an Eb/N0), 2000 draws, fixed
 %   seeds. Among the candidates of a step that pass, the highest pooled held; within 0.5 point
 %   the higher pooled recovered, then the higher return.
@@ -74,33 +82,31 @@ X.dir = fullfile(project_root(), 'results', 'rule_fix', tag);
 X.sel = fullfile(X.dir, 'selection.json'); X.val = fullfile(X.dir, 'val.mat');
 X.txt = fullfile(X.dir, 'rule_fix_reading.txt'); X.marker = fullfile(X.dir, 'test_read_started.txt');
 X.test = fullfile(X.dir, 'test.mat');
-code = fullfile(project_root(), 'code');
-X.code = cellfun(@(f) fullfile(code, f), {fullfile('decision', 'rule_fix.m'), fullfile('decision', 'rule_based_policy.m'), ...
-    fullfile('decision', 'rule_core_policy.m'), fullfile('decision', 'policy_decide.m'), fullfile('decision', 'policy_monitor.m'), ...
-    fullfile('decision', 'decision_settings.m'), fullfile('decision', 'decision_config.m'), fullfile('decision', 'link_env.m'), ...
-    fullfile('decision', 'rollout_policy.m'), fullfile('decision', 'rule_fix_reading.m')}, 'UniformOutput', false);
+X.claim_val = read_once('claim', 'rule_fix', 'val', tree); X.claim_test = read_once('claim', 'rule_fix', 'test', tree);
 X.inputs = cellfun(@(f) fullfile(tree, f), {fullfile('data', 'trained_dqn.mat'), fullfile('data', 'drop_threshold.mat'), ...
-    fullfile('results', 'eval_detector_metrics.mat')}, 'UniformOutput', false);
+    fullfile('results', 'eval_detector_metrics.mat'), fullfile('results', 'dqn_training.txt'), 'profile.json', 'params.mat'}, ...
+    'UniformOutput', false);
 X.big = cellfun(@(f) fullfile(tree, f), {fullfile('data', 'policy_pools.mat'), fullfile('data', 'clean_val_pools.mat'), ...
     fullfile('results', 'policy_evaluation.mat')}, 'UniformOutput', false);
 end
 
 function F = fingerprint(X)
-% Hashes of the code (line ends removed) and of the small inputs; size and date of the large ones.
-F = struct('code', {cellfun(@text_sha, X.code, 'UniformOutput', false)}, ...
-    'inputs', {cellfun(@file_sha_or, X.inputs, 'UniformOutput', false)}, ...
-    'big', {cellfun(@big_id, X.big, 'UniformOutput', false)});
+% Every .m file of this checkout's code, the tree's small inputs (SHA-256), its large ones (size, date).
+F = struct('tree', read_once('tree', X.tree), 'code', read_once('code'), ...
+    'inputs', {cellfun(@(f) read_once('file', f), X.inputs, 'UniformOutput', false)}, ...
+    'big', {cellfun(@(f) read_once('big', f), X.big, 'UniformOutput', false)});
 end
 
 function J = guard(X)
-% The test stage's refusals, in order: no frozen selection, the test already started, the code
-% or the tree's inputs not those the selection was frozen with.
+% The test stage's refusals, in order: no frozen selection, another tree, the tree's test split read
+% already (whatever the tag), the code or the tree's inputs not those the selection was frozen with.
 J = {};
 if ~isfile(X.sel), J{end+1} = 'no frozen selection (run the val stage first)'; return; end
-if isfile(X.marker), J{end+1} = 'the test was read already'; end
 S = jsondecode(fileread(X.sel));
 F = fingerprint(X);
-if ~isequal(cellstr(S.fingerprint.code(:))', F.code), J{end+1} = 'the code differs from the code the selection ran'; end
+if ~strcmp(S.fingerprint.tree, F.tree), J{end+1} = 'the selection was frozen on another tree'; end
+if isfile(X.claim_test) || isfile(X.marker), J{end+1} = 'the test split of this tree was read already'; end
+if ~strcmp(S.fingerprint.code, F.code), J{end+1} = 'the code differs from the code the selection ran'; end
 if ~isequal(cellstr(S.fingerprint.inputs(:))', F.inputs) || ~isequal(cellstr(S.fingerprint.big(:))', F.big)
     J{end+1} = 'the tree''s inputs differ from those the selection read';
 end
@@ -109,69 +115,91 @@ end
 %% ===================== Validation =====================
 function stage_val(tree, tag)
 X = paths(tree, tag); R = reg();
+assert(~isfile(X.claim_val), 'rule_fix_reading:val_once', ...
+    'rule_fix_reading: a selection was frozen on this tree already (%s): it is chosen once', X.claim_val);
 assert(~isfile(X.sel) && ~isfile(X.val) && ~isfile(X.txt), 'rule_fix_reading:exists', ...
     'rule_fix_reading: %s already holds a reading; a reading is never overwritten', X.dir);
-if ~isfolder(X.dir), mkdir(X.dir); end
+F0 = fingerprint(X);
 c0 = cd(tree); back = onCleanup(@() cd(c0)); %#ok<NASGU>
 t0 = tic;
 W = val_world(R);
 lines = {sprintf('=== RULE FIX: VALIDATION (%s, tree %s) ===', tag, tree), sprintf('Generated: %s', datestr(now)), ...
     sprintf(['Validation split only: %d episodes (every cell, Eb/N0 and geometry x%d, seed %d), %d clean validation ' ...
     'flights from %.1f dB.'], W.n, R.val_reps, R.val_seed, W.ncl, W.ebno_thr)};
-% 0. Off: the registered readings reproduced
+% 0. Off: every registered reading the selection leans on, reproduced before any candidate
 o = struct();
-o.sel = read_pol(W, 'rule_sel', ''); o.dec = read_pol(W, 'rule_dec', ''); o.core = read_pol(W, 'core_dec', '');
+o.sel = read_pol(W, 'rule_sel', ''); o.dec = read_pol(W, 'rule_dec', ''); o.core = read_pol(W, 'core_ref', '');
 o.dqn = read_pol(W, 'dqn_dep', '');
-rs = W.Q.rule_sel; ss = W.Q.seed_summary;
-rep = [exact(o.sel.held, rs.held), exact(o.sel.rec, rs.rec), exact(o.dec.held, field_or(ss, 'rule_held', NaN)), ...
-    exact(o.dec.rec, field_or(ss, 'rule_recovered', NaN))];
-lines{end+1} = sprintf(['Off, reproduced: rule_sel held %.4f (registered %.4f), recovered %.4f (%.4f); rule + escalation at the ' ...
-    'deployed settings held %.4f (%.4f), recovered %.4f (%.4f): %s'], o.sel.held, rs.held, o.sel.rec, rs.rec, o.dec.held, ...
-    field_or(ss, 'rule_held', NaN), o.dec.rec, field_or(ss, 'rule_recovered', NaN), ternary(all(rep), 'exact', 'NOT REPRODUCED'));
-lines{end+1} = sprintf('Deployed DQN (%s) held %.4f (registered %.4f), clean flights with a change %d of %d', W.Q.deployed, ...
-    o.dqn.held, field_or(ss, 'dqn_held', NaN), sum(o.dqn.sw > 0), numel(o.dqn.sw));
-if ~all(rep)
-    write_lines(X.txt, [lines, {'The code does not reproduce this tree''s registered rule readings: no candidate is read.'}]);
+rs = W.Q.rule_sel; ss = W.Q.seed_summary; T = W.reg;
+chk = {'rule_sel held', o.sel.held, rs.held, 1e-9; 'rule_sel recovered', o.sel.rec, rs.rec, 1e-9; ...
+    'rule_sel clean flights with a change', sum(o.sel.sw > 0), round(rs.fa_w * rs.n_w), 0; ...
+    'rule_sel clean flights', numel(o.sel.sw), rs.n_w, 0; ...
+    'rule + escalation at the deployed settings, held', o.dec.held, field_or(ss, 'rule_held', NaN), 1e-9; ...
+    'rule + escalation at the deployed settings, recovered', o.dec.rec, field_or(ss, 'rule_recovered', NaN), 1e-9; ...
+    'core rule at the reference monitor, held [%]', 100 * o.core.held, T.core.held, 0.05 + 1e-9; ...
+    'core rule at the reference monitor, recovered [%]', 100 * o.core.rec, T.core.rec, 0.05 + 1e-9};
+if ~isnan(T.core.k), chk(end+1, :) = {'core rule clean flights with a change', sum(o.core.sw > 0), T.core.k, 0}; end
+[G0, gl] = gate_grid(W, o, '');
+chk = [chk; gl];
+chk(end+1, :) = {sprintf('deployed policy (%s)', W.Q.deployed), double(strcmp(G0.dep, W.Q.deployed)), 1, 0};
+[ok, cl] = check_rows(chk);
+lines = [lines, {'Off, the registered readings reproduced (registered files: trained_dqn.mat, dqn_training.txt):'}, cl];
+lines{end+1} = sprintf('Deployed DQN (%s) held %.4f (registered %.4f), clean flights with a change %d of %d (descriptive)', ...
+    W.Q.deployed, o.dqn.held, field_or(ss, 'dqn_held', NaN), sum(o.dqn.sw > 0), numel(o.dqn.sw));
+if ~ok
+    read_once('write', X.txt, [lines, {'NOT REPRODUCED: no candidate is read and nothing is frozen.'}]);
     error('rule_fix_reading:reproduce', 'rule_fix_reading: the off readings do not reproduce %s (see %s)', tree, X.txt);
 end
 % 1. Step 1, then step 2
 Rd = struct('name', {''}, 'sel', o.sel, 'core', o.core);
-for c = R.cand, Rd(end+1) = struct('name', c{1}, 'sel', read_pol(W, 'rule_sel', c{1}), 'core', read_pol(W, 'core_dec', c{1})); end %#ok<AGROW>
+for c = R.cand, Rd(end+1) = struct('name', c{1}, 'sel', read_pol(W, 'rule_sel', c{1}), 'core', read_pol(W, 'core_ref', c{1})); end %#ok<AGROW>
 S1 = select(struct('read', Rd, 'fam', {R.fam1}, 'thr', {W.thr}));
 s1 = Rd(S1.best).name;
-n2 = strjoin([{s1}, {R.step2}], '+'); if isempty(s1), n2 = R.step2; end
-n2 = rule_fix('parse', n2).name;
-R2 = [Rd(S1.best), struct('name', n2, 'sel', read_pol(W, 'rule_sel', n2), 'core', read_pol(W, 'core_dec', n2))];
+n2 = rule_fix('parse', strjoin([{s1}, {R.step2}], '+')).name; if isempty(s1), n2 = R.step2; end
+R2 = [Rd(S1.best), struct('name', n2, 'sel', read_pol(W, 'rule_sel', n2), 'core', read_pol(W, 'core_ref', n2))];
 S2 = select(struct('read', R2, 'fam', {R.fam2}, 'thr', {W.thr}));
 adopted = R2(S2.best).name;
 lines = [lines, {'', 'Step 1, in-channel answers, against off:'}, S1.lines, {sprintf('  -> %s', name_txt(s1)), '', ...
     sprintf('Step 2, lost-branch answer, %s against %s:', n2, name_txt(s1))}, S2.lines, {sprintf('  -> %s', name_txt(adopted)), ''}];
 % 2. With a setting adopted: the side rows and the gate of choose_deployed.m re-read
-G = struct('deployed_off', W.Q.deployed, 'deployed_on', W.Q.deployed, 'lines', {{}});
+G = struct('dep', W.Q.deployed, 'lines', {{}});
 side = struct();
 if ~isempty(adopted)
-    for k = {'rule_dec', 'blind_dec', 'blind_core_dec'}
-        if strcmp(k{1}, 'rule_dec'), x0 = o.dec; else, x0 = read_pol(W, k{1}, ''); end
+    for k = {'rule_dec', 'blind_dec', 'blind_core_dec', 'core_dec'}
+        x0 = read_pol(W, k{1}, ''); if strcmp(k{1}, 'rule_dec'), x0 = o.dec; end
         side.(k{1}) = [summ(x0), summ(read_pol(W, k{1}, adopted))];
         lines{end+1} = sprintf('  %-16s held %.1f%% -> %.1f%%, recovered %.1f%% -> %.1f%% (side row, not a condition)', k{1}, ...
             100 * side.(k{1})(1).held, 100 * side.(k{1})(2).held, 100 * side.(k{1})(1).rec, 100 * side.(k{1})(2).rec); %#ok<AGROW>
     end
-    G = gate_reread(W, o, adopted, side.rule_dec(2).held);
-    lines = [lines, {''}, G.lines];
+    G = gate_grid(W, o, adopted, side.rule_dec(2).held);
+    lines = [lines, {''}, G.lines, {sprintf('  with the setting adopted the deployed policy %s', ternary(strcmp(G.dep, W.Q.deployed), ...
+        'stays', sprintf('CHANGES to %s: the deployed rows must be re-run in evaluate_policies.m', G.dep)))}];
 end
 lines{end+1} = sprintf('Validation done in %.1f min. Selection frozen: %s.', toc(t0) / 60, name_txt(adopted));
 sel = struct('tag', tag, 'tree', tree, 'adopted', adopted, 'step1', s1, 'created', datestr(now, 31), ...
-    'fingerprint', fingerprint(X), 'deployed_off', G.deployed_off, 'deployed_on', G.deployed_on);
-Vs = struct('S1', rmfield(S1, 'lines'), 'S2', rmfield(S2, 'lines'), 'R1', strip(Rd), 'R2', strip(R2), 'side', side, ...
-    'gate', rmfield(G, 'lines'));
-save(X.val, 'Vs', '-v7.3');
-write_lines(X.txt, lines);
-fid = fopen(X.sel, 'w'); fprintf(fid, '%s', jsonencode(sel, 'PrettyPrint', true)); fclose(fid);
+    'fingerprint', F0, 'deployed_off', W.Q.deployed, 'deployed_on', G.dep);
+read_once('save', X.val, struct('Vs', struct('S1', rmfield(S1, 'lines'), 'S2', rmfield(S2, 'lines'), 'R1', strip(Rd), ...
+    'R2', strip(R2), 'side', side, 'gate', rmfield(G, 'lines'))));
+read_once('write', X.txt, lines);
+read_once('write', X.sel, {jsonencode(sel, 'PrettyPrint', true)});
+read_once('write', X.claim_val, {sprintf('rule_fix validation frozen %s', datestr(now, 31)), ['tree ' F0.tree], ['tag ' tag], ...
+    ['code ' F0.code], ['selection ' X.sel], ['adopted ' name_txt(adopted)]});
 fprintf('%s\n', lines{:});
 end
 
+function [ok, lines] = check_rows(chk)
+% Rows {name, read, registered, tolerance}: every one within its tolerance.
+ok = true; lines = {};
+for i = 1:size(chk, 1)
+    e = isfinite(chk{i, 3}) && abs(chk{i, 2} - chk{i, 3}) <= chk{i, 4};
+    ok = ok && e;
+    lines{end+1} = sprintf('  %-60s %12.6g registered %12.6g: %s', chk{i, 1}, chk{i, 2}, chk{i, 3}, ternary(e, 'reproduced', 'NOT REPRODUCED')); %#ok<AGROW>
+end
+end
+
 function W = val_world(R)
-% The pools, agent, monitor inputs and validation episodes as train_dqn.m reads them.
+% The pools, agent, monitor inputs and validation episodes as train_dqn.m reads them, and the
+% registered readings of results/dqn_training.txt.
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
 K = link_env('tables', PP);
 PP.pools(:, :, :, 3:end) = {[]};                            % train and validation, as train_dqn.m holds them
@@ -199,18 +227,50 @@ spec = full_val_spec(PP, K, H, 2, R.val_reps, RandStream('mt19937ar', 'Seed', R.
 sc = cell2mat(cellfun(@(sp) sp.scn, spec, 'UniformOutput', false));
 sv = cell2mat(cellfun(@(sp) sp.s, spec, 'UniformOutput', false));
 W = struct('PP', PP, 'K', K, 'Q', Q, 'CV', CV, 'H', H, 'spec', {spec}, 'thr', {PP.scen(sc)}, 's', sv, 'ebno_thr', et, ...
-    'drop_mode', DM, 'n', numel(sc), 'ncl', 0, 'R', R);
+    'drop_mode', DM, 'n', numel(sc), 'ncl', 0, 'R', R, 'reg', registered_txt('results/dqn_training.txt', Q.rule_sel));
 [~, W.ncl] = clean_wide_specs(PP, CV, et, H.T);
+end
+
+function T = registered_txt(f, rs)
+% The registered validation rows of C2's report: the reference monitor of the rule settings, the
+% core rule's row at the chosen settings, and rule + escalation at every monitor and drop threshold.
+assert(isfile(f), 'rule_fix_reading:registered', 'rule_fix_reading: %s is missing', f);
+L = splitlines(fileread(f));
+i = find(contains(L, 'Rule settings on validation, rule + escalation at '''), 1);
+assert(~isempty(i), 'rule_fix_reading:registered', 'rule_fix_reading: no rule-settings header in %s', f);
+t = regexp(L{i}, 'escalation at ''([^'']+)''.*?, drop (\S+) ', 'tokens', 'once');
+T.ref = struct('alarm', t{1}, 'drop', str2double(t{2}));
+j = find(contains(L, 'core rule (rule_core'), 1);
+assert(~isempty(j), 'rule_fix_reading:registered', 'rule_fix_reading: no core-rule rows in %s', f);
+cn = ''; if isfield(rs, 'core_nb'), cn = rs.core_nb; end
+k = j + find(contains(L(j+1:end), sprintf('core rule on a noise burst %s |', cn)), 1);
+assert(~isempty(k) && ~startsWith(strtrim(L{k}), '->'), 'rule_fix_reading:registered', ...
+    'rule_fix_reading: no core-rule row at the chosen settings in %s', f);
+h = regexp(L{k}, 'held ([\d.]+)%, recovered ([\d.]+)%', 'tokens', 'once');
+fa = regexp(L{k}, 'FA (\d+)/(\d+)', 'tokens', 'once');
+T.core = struct('held', str2double(h{1}), 'rec', str2double(h{2}), 'k', NaN);
+if ~isempty(fa), T.core.k = str2double(fa{1}); end
+g = regexp(L, '^\s+(\S+ \d+/\d+)\s+drop\s+(\S+) \S+\s+rule \+ escalation: held ([\d.]+)%, recovered ([\d.]+)%, return \S+, FA ([\d.]+|-)', ...
+    'tokens', 'once');
+g = g(~cellfun(@isempty, g));
+T.grid = struct('alarm', cellfun(@(x) x{1}, g, 'UniformOutput', false), 'drop', cellfun(@(x) str2double(x{2}), g, 'UniformOutput', false), ...
+    'held', cellfun(@(x) str2double(x{3}), g, 'UniformOutput', false), 'rec', cellfun(@(x) str2double(x{4}), g, 'UniformOutput', false), ...
+    'fa', cellfun(@(x) str2double(x{5}), g, 'UniformOutput', false));
+assert(~isempty(T.grid), 'rule_fix_reading:registered', 'rule_fix_reading: no monitor rows in %s', f);
 end
 
 function x = read_pol(W, who, fix)
 % One policy on the validation episodes and the clean validation flights, with the layered
-% answers fix ('' off): rule_sel (rule + escalation at its own monitor and settings), rule_dec,
-% core_dec, blind_dec, blind_core_dec (at the deployed DQN's settings without the release on
-% evidence, as C2's gate read the rule), dqn_dep (the deployed DQN as deployed).
+% answers fix ('' off): rule_sel (rule + escalation at its own monitor and settings), core_ref (the
+% core rule at C2's reference monitor and the rule's settings, as C2 read it), rule_dec, core_dec,
+% blind_dec, blind_core_dec (at the deployed DQN's settings without the release on evidence, as C2's
+% gate read the rule), dqn_dep (the deployed DQN as deployed).
 PP = W.PP; ag = []; opt = struct();
 switch who
     case 'rule_sel', kind = 'rule_esc'; mon = W.Q.rule_sel;
+    case 'core_ref'
+        kind = 'rule_esc'; opt.core = true; mon = rule_settings(W.Q.rule_sel);
+        PP = with_entry(W.PP, W.reg.ref.alarm, W.reg.ref.drop, W.drop_mode);
     case 'rule_dec', kind = 'rule_esc'; mon = W.Q.dec;
     case 'core_dec', kind = 'rule_esc'; mon = W.Q.dec; opt.core = true;
     case 'blind_dec', kind = 'blind_esc'; mon = W.Q.dec;
@@ -243,41 +303,39 @@ end
 sw = sw(1:n);
 end
 
-function G = gate_reread(W, o, adopted, held_on)
-% choose_deployed.m with the rule read off and with the setting adopted: rule + escalation at
-% every monitor and drop threshold of C2's grid (the runs' entries) at the rule's settings, the
-% DQN at its registered held recovery and its clean flights read here.
+function [G, chk] = gate_grid(W, o, fix, held_dec)
+% choose_deployed.m over C2's grid (the runs' monitor and drop entries) at the rule's settings with
+% the layered answers fix; the DQN at its registered held recovery and its clean flights read here.
+% Off (fix ''): chk holds every entry's held, recovered and false-alarm share against the
+% registered rows (printed to 0.1 point).
 ss = W.Q.seed_summary;
 al = ss.alarms(:)'; dr = ss.drops(:)';
 key = arrayfun(@(k) sprintf('%s|%.9g', al{k}, dr(k)), 1:numel(al), 'UniformOutput', false);
 [~, iu] = unique(key, 'stable'); al = al(iu); dr = dr(iu);
 Ssel = rule_settings(W.Q.rule_sel);
 dqn_up = cp_upper(sum(o.dqn.sw > 0), numel(o.dqn.sw));
-gate_fa = dqn_up <= W.R.bound;
-G = struct('deployed_off', '', 'deployed_on', '', 'entries', [], 'lines', {{'Gate of choose_deployed.m re-read (validation):'}});
-for v = 1:2
-    fx = ''; if v == 2, fx = adopted; end
-    rr = nan(1, numel(al)); up = rr;
-    for e = 1:numel(al)
-        PPe = with_entry(W.PP, al{e}, dr(e), W.drop_mode);
-        S = Ssel; S.rule_fix = fx;
-        x = read_with(W, 'rule_esc', decision_settings(PPe, S), [], struct());
-        rr(e) = x.held; up(e) = cp_upper(sum(x.sw > 0), numel(x.sw));
-        G.lines{end+1} = sprintf('  %-4s %-18s drop %7.1f: rule + escalation held %.1f%%, clean-flight bound %.1f%%', ...
-            ternary(v == 1, 'off', 'on'), al{e}, dr(e), 100 * rr(e), 100 * up(e));
+rr = nan(1, numel(al)); up = rr; chk = cell(0, 4);
+G = struct('dep', '', 'rr', [], 'up', [], 'lines', {{sprintf('Gate of choose_deployed.m, %s:', name_txt(fix))}});
+for e = 1:numel(al)
+    S = Ssel; S.rule_fix = fix;
+    x = read_with(W, 'rule_esc', decision_settings(with_entry(W.PP, al{e}, dr(e), W.drop_mode), S), [], struct());
+    rr(e) = x.held; up(e) = cp_upper(sum(x.sw > 0), numel(x.sw));
+    G.lines{end+1} = sprintf('  %-18s drop %7.1f: rule + escalation held %.1f%%, clean-flight bound %.1f%%', al{e}, dr(e), ...
+        100 * rr(e), 100 * up(e));
+    if isempty(fix)
+        gd = [W.reg.grid.drop]; g = W.reg.grid(strcmp({W.reg.grid.alarm}, al{e}) & (abs(gd - dr(e)) < 0.051 | (isnan(gd) & isnan(dr(e)))));
+        if numel(g) ~= 1, chk(end+1, :) = {sprintf('grid row %s drop %.1f found once', al{e}, dr(e)), numel(g), 1, 0}; continue; end %#ok<AGROW>
+        chk = [chk; {sprintf('grid %s drop %.1f held [%%]', al{e}, dr(e)), 100 * x.held, g.held, 0.05 + 1e-9; ...
+            sprintf('grid %s drop %.1f recovered [%%]', al{e}, dr(e)), 100 * x.rec, g.rec, 0.05 + 1e-9}]; %#ok<AGROW>
+        if isfinite(g.fa), chk(end+1, :) = {sprintf('grid %s drop %.1f false alarms [%%]', al{e}, dr(e)), 100 * mean(x.sw > 0), g.fa, 0.05 + 1e-9}; end %#ok<AGROW>
     end
-    bs = o.dec.held; if v == 2, bs = held_on; end
-    gate = ss.dqn_held >= bs && gate_fa;
-    kd = 'dqn_esc'; if isfield(ss, 'selected_kind'), kd = ss.selected_kind; end
-    dep = choose_deployed(gate, dqn_up, rr, up, W.R.bound, ss.dqn_held, kd);
-    G.entries = [G.entries; rr; up];
-    if v == 1, G.deployed_off = dep; else, G.deployed_on = dep; end
-    G.lines{end+1} = sprintf('  %s: gate %s (DQN held %.1f%% against the rule at its settings %.1f%%), deployed %s', ...
-        ternary(v == 1, 'off', 'on'), ternary(gate, 'PASS', 'FAIL'), 100 * ss.dqn_held, 100 * bs, dep);
 end
-G.lines{end+1} = sprintf('  off reproduces the registered deployed policy (%s): %s; with the setting adopted the deployed policy %s', ...
-    W.Q.deployed, ternary(strcmp(G.deployed_off, W.Q.deployed), 'yes', 'NO'), ...
-    ternary(strcmp(G.deployed_on, G.deployed_off), 'stays', 'CHANGES: the deployed rows must be re-run in evaluate_policies.m'));
+bs = o.dec.held; if nargin >= 4, bs = held_dec; end
+gate = ss.dqn_held >= bs && dqn_up <= W.R.bound;
+kd = 'dqn_esc'; if isfield(ss, 'selected_kind'), kd = ss.selected_kind; end
+G.dep = choose_deployed(gate, dqn_up, rr, up, W.R.bound, ss.dqn_held, kd); G.rr = rr; G.up = up;
+G.lines{end+1} = sprintf('  gate %s (DQN held %.1f%% against the rule at its settings %.1f%%), deployed %s', ...
+    ternary(gate, 'PASS', 'FAIL'), 100 * ss.dqn_held, 100 * bs, G.dep);
 end
 
 function S = rule_settings(rs)
@@ -364,9 +422,10 @@ X = paths(tree, tag); R = reg();
 J = guard(X);
 if ~isempty(J), error('rule_fix_reading:guard', 'rule_fix_reading: the test is not read: %s', strjoin(J, '; ')); end
 S = jsondecode(fileread(X.sel));
-fid = fopen(X.marker, 'w'); fprintf(fid, 'test read started %s for %s\n', datestr(now, 31), name_txt(S.adopted)); fclose(fid);
 if isempty(S.adopted)
-    append_lines(X.txt, {'', '=== RULE FIX: TEST ===', 'No setting was adopted on validation: the test is not read.'});
+    claim_test(X, S, 'nothing adopted: not read');
+    read_once('write', X.txt, [splitlines(strtrim(fileread(X.txt)))', {'', '=== RULE FIX: TEST ===', ...
+        'No setting was adopted on validation: the test is not read.'}]);
     return
 end
 c0 = cd(tree); back = onCleanup(@() cd(c0)); %#ok<NASGU>
@@ -380,11 +439,28 @@ E = load('results/policy_evaluation.mat', 'RES', 'POL', 'LBL', 'set_names', 'iDQ
 [sets, single_cells] = test_sets(PP, K, Q.H.T, R);
 assert(isequal(E.set_names(1:numel(sets)), {sets.name}), 'rule_fix_reading:sets', ...
     'rule_fix_reading: the registered sets are not %s', strjoin({sets.name}, ', '));
-pols = {'rule', 'rule_esc', 'blind_esc', 'rule_core', 'blind_core'};
-if strcmp(Q.deployed, 'rule_sel'), pols{end+1} = 'rule_sel'; end
-if isfield(PP, 'core3_id') && ~isempty(PP.core3_id), pols{end+1} = 'rule_core3'; end
+pols = {'rule', 'rule_esc', 'blind_esc', 'rule_core', 'blind_core', 'rule_sel', 'rule_core3'};
 pols = pols(ismember(pols, E.POL));
 sel = find(Q.gammas == Q.seed_summary.selected_gamma, 1);
+% Off first: every registered rule row of the five sets, before the marker
+bad = {};
+for si = 1:numel(sets)
+    for pk = 1:numel(pols)
+        [kind, ag, opt] = policy_setup(pols{pk}, Q, sel, [], [], [], K.na);
+        R0 = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, R.test_seed + 1000 * si);
+        Rg = E.RES{si, strcmp(E.POL, pols{pk})};
+        if ~(isequaln(R0.recovered, Rg.recovered) && isequaln(R0.held, Rg.held) && isequaln(R0.per_post, Rg.per_post) ...
+                && isequaln(R0.switches, Rg.switches))
+            bad{end+1} = sprintf('%s on %s', pols{pk}, sets(si).name); %#ok<AGROW>
+        end
+    end
+end
+if ~isempty(bad)
+    read_once('write', X.txt, [splitlines(strtrim(fileread(X.txt)))', {'', '=== RULE FIX: TEST ===', ...
+        ['Off does not reproduce the registered rows (' strjoin(bad, ', ') '): the test is not read.']}]);
+    error('rule_fix_reading:reproduce', 'rule_fix_reading: off does not reproduce %s', strjoin(bad, ', '));
+end
+claim_test(X, S, sprintf('read for %s', S.adopted));
 RON = cell(numel(sets), numel(pols));
 for si = 1:numel(sets)
     for pk = 1:numel(pols)
@@ -395,16 +471,9 @@ for si = 1:numel(sets)
     end
     fprintf('  set %-9s %d policies (%.1f min)\n', sets(si).name, numel(pols), toc(t0) / 60);
 end
-% Off reproduced on the single set, rule + escalation
-[kind, ag, opt] = policy_setup('rule_esc', Q, sel, [], [], [], K.na);
-R0 = policy_run_set(kind, PP, K, sets(1).spec, sets(1).split, ag, opt, R.test_seed + 1000);
-ie = find(strcmp(E.POL, 'rule_esc'));
-repro = isequaln(R0.recovered, E.RES{1, ie}.recovered) && isequaln(R0.held, E.RES{1, ie}.held);
 lines = {'', '=== RULE FIX: TEST (read once) ===', sprintf('Generated: %s | setting %s | test sets %s', datestr(now), ...
-    S.adopted, strjoin({sets.name}, ', ')), sprintf('Off rule + escalation on the single set reproduces the registered row: %s', ...
-    ternary(repro, 'exact', 'NOT REPRODUCED (the paired differences below are not against the registered rows)'))};
+    S.adopted, strjoin({sets.name}, ', ')), sprintf('Off reproduces every registered rule row (%s) on every set: exact', strjoin(pols, ', '))};
 lines = [lines, test_lines(E, RON, pols, PP, single_cells)];
-% The lecturer KPIs with the rule rows replaced
 ALL0 = pooled(E.RES, 1:3); ALL1 = ALL0;
 for pk = 1:numel(pols)
     c = find(strcmp(E.POL, pols{pk}));
@@ -420,9 +489,17 @@ if ~strcmp(S.deployed_on, S.deployed_off)
 end
 lines{end+1} = sprintf('Test done in %.1f min.', toc(t0) / 60);
 RONs = cellfun(@(r) keep_fields(r), RON, 'UniformOutput', false);
-save(X.test, 'RONs', 'pols', 'LK0', 'LK1', 'repro', '-v7.3');
-append_lines(X.txt, lines);
+read_once('save', X.test, struct('RONs', {RONs}, 'pols', {pols}, 'LK0', LK0, 'LK1', LK1));
+read_once('write', X.txt, [splitlines(strtrim(fileread(X.txt)))', lines]);
 fprintf('%s\n', lines{:});
+end
+
+function claim_test(X, S, what)
+% The tree's test split is spent: the per-tree marker (whatever the tag) and the tag's own.
+txt = {sprintf('rule_fix test %s %s', what, datestr(now, 31)), ['tree ' S.fingerprint.tree], ['tag ' X.tag], ...
+    ['code ' S.fingerprint.code], ['inputs ' strjoin(cellstr(S.fingerprint.inputs(:))', ' ')], ['selection ' X.sel]};
+read_once('write', X.claim_test, txt);
+read_once('write', X.marker, txt);
 end
 
 function [sets, single_cells] = test_sets(PP, K, T, R)
@@ -522,10 +599,6 @@ function R = strip(R)
 for k = 1:numel(R), R(k).sel = summ(R(k).sel); R(k).core = summ(R(k).core); end
 end
 
-function e = exact(a, b)
-e = isfinite(b) && abs(a - b) < 1e-9;
-end
-
 function u = cp_upper(k, n)
 if n == 0, u = NaN; elseif k >= n, u = 1; else, u = betaincinv(0.95, k + 1, n - k); end
 end
@@ -540,32 +613,6 @@ end
 
 function t = ok_txt(c)
 t = ternary(c, 'ok', 'FAILS');
-end
-
-function h = text_sha(f)
-s = strrep(fileread(f), char(13), '');
-md = java.security.MessageDigest.getInstance('SHA-256');
-md.update(unicode2native(s, 'UTF-8'));
-h = lower(reshape(dec2hex(typecast(md.digest(), 'uint8'), 2)', 1, []));
-end
-
-function h = file_sha_or(f)
-h = 'absent'; if isfile(f), h = core_bw_rules('sha', f); end
-end
-
-function h = big_id(f)
-h = 'absent';
-if isfile(f), d = dir(f); h = sprintf('%d bytes, %s', d.bytes, datestr(d.datenum, 31)); end
-end
-
-function write_lines(f, lines)
-fid = fopen(f, 'w'); assert(fid > 0, 'rule_fix_reading:write', 'cannot write %s', f);
-fprintf(fid, '%s\n', lines{:}); fclose(fid);
-end
-
-function append_lines(f, lines)
-fid = fopen(f, 'a'); assert(fid > 0, 'rule_fix_reading:write', 'cannot write %s', f);
-fprintf(fid, '%s\n', lines{:}); fclose(fid);
 end
 
 function out = ternary(c, a, b)

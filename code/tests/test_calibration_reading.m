@@ -18,7 +18,7 @@ C = calibration_reading('stats', P, y);
 verifyEqual(tc, C.ece, 0, 'AbsTol', 1e-12);
 verifyEqual(tc, C.acc, 0.9, 'AbsTol', 1e-12);
 verifyEqual(tc, C.brier, (9 * 0.02 + 1 * (0.81 + 0.81)) / 10, 'AbsTol', 1e-12);
-verifyEqual(tc, C.top(14, :), [10 0.9 0.9 0], 'AbsTol', 1e-12);    % 0.9 lies in (13/15, 14/15]
+verifyEqual(tc, C.top(14, :), [10 0.9 0.9 0], 'AbsTol', 1e-12);    % 0.9 lies in [13/15, 14/15)
 verifyEqual(tc, sum(C.top(:, 1)), 10);
 end
 
@@ -31,7 +31,7 @@ verifyEqual(tc, C.ece, 0.4, 'AbsTol', 1e-12);
 verifyEqual(tc, C.brier, (5 * 0.02 + 5 * 1.62) / 10, 'AbsTol', 1e-12);
 verifyEqual(tc, [C.cls.ece], [0.4 0.4], 'AbsTol', 1e-12);
 verifyEqual(tc, [C.cls.n_pos], [5 5]);
-verifyEqual(tc, C.cls(2).table(2, :), [10 0.1 0.5], 'AbsTol', 1e-12);   % 0.1 lies in (1/15, 2/15]
+verifyEqual(tc, C.cls(2).table(2, :), [10 0.1 0.5], 'AbsTol', 1e-12);   % 0.1 lies in [1/15, 2/15)
 end
 
 function test_two_bins_and_renormalization(tc)
@@ -45,6 +45,15 @@ verifyEqual(tc, C.ece, 0.5 * 0.1 + 0.5 * 0, 'AbsTol', 1e-12);
 verifyEqual(tc, C.top(15, 1:3), [4 1 1], 'AbsTol', 1e-12);
 verifyEqual(tc, C.acc, 0.75, 'AbsTol', 1e-12);
 verifyError(tc, @() calibration_reading('stats', P, [y(1:7); 4]), 'calibration_reading:labels');
+end
+
+function test_nonfinite_rows_dropped(tc)
+% A row with a NaN probability or label is dropped and counted, never binned.
+P = [repmat([0.9 0.1], 10, 1); NaN 0.5; 0.5 0.5]; y = [ones(9, 1); 2; 1; NaN];
+C = calibration_reading('stats', P, y);
+verifyEqual(tc, C.n_dropped, 2); verifyEqual(tc, C.n, 10);
+verifyEqual(tc, C.ece, 0, 'AbsTol', 1e-12);
+verifyEqual(tc, calibration_reading('stats', [0.2 0.8; 1 0], [2; 1]).top([4 15], 1), [0; 1]);   % integer bins: 0.8 in bin 13, 1 in bin 15
 end
 
 function test_bins_count(tc)
