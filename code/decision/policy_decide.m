@@ -76,6 +76,10 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %   random, fixed: reference policies, no monitor gating ('fixed' at no_action is
 %   the link that does not respond)
 %
+%   PP.rule_fix (the core rule and the escalations; rule_fix.m): the core rule's layered answer and the
+%   escalation that keeps what the configuration in use holds, the drop alarm's link-budget step too;
+%   '' or absent leaves every answer and rung as it was. The core rule's class jamming keeps the answer
+%   PP.core_wide only when PP.core_wide_valid marks it chosen on validation. The DQN kinds are unchanged.
 %   info: q (Q-values, dqn kinds), cls, degraded, confirmed, escalated, ber_avg, drop, drop_alarm;
 %   with core3 also l3 (NE x 3, the window's mean log-probabilities)
 if nargin < 7, opt = struct(); end
@@ -110,6 +114,8 @@ if core && ~strcmp(base, 'rule')
     error('policy_decide:core', 'policy_decide: the core action set is a rule option, not of %s', kind);
 end
 cb = ''; if blind && core && isfield(PP, 'core_blind') && ~isempty(PP.core_blind), cb = PP.core_blind; end
+fx = ''; if isfield(PP, 'rule_fix'), fx = rule_fix('parse', PP.rule_fix); if ~fx.on, fx = ''; end, end   % layered answers
+cwv = ''; if isfield(PP, 'core_wide_valid') && isequal(PP.core_wide_valid, true) && isfield(PP, 'core_wide'), cwv = PP.core_wide; end
 q = [];
 switch base
     case 'dqn'
@@ -140,6 +146,7 @@ switch base
             if core
                 bud.drop_db = M.drop(i); bud.current = A{cfg(i)}; bud.current_db = gk(cfg(i));
                 p = find(strcmp(A, rule_core_policy(M.cls{i}, M.degraded(i), qi(i), qt, M.drop_alarm(i), bud, so, cw, cn, cb)), 1);
+                if ~isempty(fx), p = find(strcmp(A, rule_fix('core', A{p}, M.cls{i}, fx, qi(i), qt, M.degraded(i), so, A{cfg(i)}, cwv)), 1); end
             elseif strcmp(base, 'rule')
                 bud.drop_db = M.drop(i); bud.current = A{cfg(i)}; bud.current_db = gk(cfg(i));
                 p = find(strcmp(A, rule_based_policy(M.cls{i}, M.degraded(i), gain(i), qi(i), qt, M.drop_alarm(i), bud, mt, ...
@@ -190,14 +197,17 @@ if endsWith(kind, '_esc')
         if a(i) == cfg(i) && stuck && mem.since(i) >= C.esc && M.confirmed(i) && (~none || byd)
             if byd                                       % the link-budget match first
                 [g, o] = sort(gk(lb)); j = find(g >= M.drop(i), 1); if isempty(j), j = numel(g); end
-                if ~mem.tried(i, lb(o(j))), a(i) = lb(o(j)); escalated(i) = true; continue; end
+                bj = lb(o(j));
+                if ~isempty(fx) && fx.keep, bj = find(strcmp(A, rule_fix('merge', A{cfg(i)}, A{bj})), 1); end   % the hop and the null kept
+                if ~mem.tried(i, bj) && bj ~= cfg(i), a(i) = bj; escalated(i) = true; continue; end
             end
             if ~isempty(q)
                 qi = q(:, i); qi(mem.tried(i, :)) = -inf; qi(na) = -inf;
                 [qm, b] = max(qi);
                 if isfinite(qm), a(i) = b; escalated(i) = true; end
             else
-                b = ladder(find(~mem.tried(i, ladder), 1));
+                if ~isempty(fx) && fx.keep, b = rule_fix('rung', A, cfg(i), ladder, mem.tried(i, :));
+                else, b = ladder(find(~mem.tried(i, ladder), 1)); end
                 if ~isempty(b), a(i) = b; escalated(i) = true; end
             end
         end
