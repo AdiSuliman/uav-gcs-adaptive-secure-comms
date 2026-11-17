@@ -1,6 +1,6 @@
 # Roadmap
 
-Plan, status and remaining work of the UAV-GCS jamming detection and mitigation project, as of 12.11.2026 (morning). The scope is the lecturer's revised proposal of 20.10.2026 (D92); everything beyond it is an extension without commitment.
+Plan, status and remaining work of the UAV-GCS jamming detection and mitigation project, as of 17.11.2026 (morning). The scope is the lecturer's revised proposal of 20.10.2026 (D92); everything beyond it is an extension without commitment.
 
 Related files: [README](../README.md) | [PROJECT_LOG.md](PROJECT_LOG.md) (execution history) | [DECISIONS.md](DECISIONS.md) (design record) | [LITERATURE.md](LITERATURE.md)
 
@@ -21,7 +21,7 @@ Rows and months are exactly those of the proposal (months 1-8). The interim repo
 | Decision layer: DQN agent (optional) | 5-7 | Ahead of schedule | Trained; chosen on validation: held recovery 82.6%, recovered 95.1% against 60.3% and 71.3% for the best rule setting; test reading (C2e): recovered 94.1% [92.7, 95.4] |
 | Adaptive Link Recovery and closed-loop integration | 5-7 | Ahead of schedule | Closed loop built; frame pools and survivability runs done on profile 1 |
 | Dashboard (GUI) | 6-7 | Ahead of schedule | Operator console built; branch `gui-core` GUI tests 25/25 (11.11, Session Log table dark to its full height); live check with the final agent from an exported profile-3 bundle after RPT |
-| Evaluation on the test set and KPI table | 7-8 | In progress | Detector KPIs read; policy evaluation read 28.10: PER reduction MET (committed) narrowband 38.9% and wideband 43.3%; recovery time and goodput measured; Line B read 29.10 and CORE_BW read 30.10 (`rule_core3`: narrowband 62.3%, wideband 69.2%, MET (committed)); profile 3's chain in SURV (C1p and C1c done 12-13.11); D2c (receiver-robust line for CORE_BW) still to run |
+| Evaluation on the test set and KPI table | 7-8 | In progress | Detector KPIs read; policy evaluation read 28.10: PER reduction MET (committed) narrowband 38.9% and wideband 43.3%; recovery time and goodput measured; Line B read 29.10 and CORE_BW read 30.10 (`rule_core3`: narrowband 62.3%, wideband 69.2%, MET (committed)); profile 3's chain in C2 (C1p to C1d done 12-14.11; C2 ends about 17.11 11:00); D2c (receiver-robust line for CORE_BW) still to run |
 | Survivability map and complementary experiments | 7-8 | Ahead of schedule | Profile 1: Map A 81.8%, Map B 91.8%; edge map still to run |
 | Project book and presentation | 5-8 | Not started | Starts after the official finish of code and results (about 25-26.11) and Adi's approval; book about 26.11-10.12, presentation about 20.12 |
 
@@ -36,11 +36,14 @@ Rows and months are exactly those of the proposal (months 1-8). The interim repo
 | D111 OOD select (hand run), OOD read, release check | done 5.11.2026 |
 | C1p (4 antennas): frame pools, 93 cells | started 5.11 22:44 (resumed 7.11 and 8.11 with its kept cells); 56 of 93 on 11.11 15:56, 74 of 93 on 12.11 07:00 (24 cells on 11.11); done 12.11.2026 22:51 (867.9 min after the 08:22 resume; pools 15.9 GB) |
 | C1c: clean-link pools and check cells | started 12.11 22:51; validation 106.1 min, test 110.5 min, check cells 478.1 min; done 13.11.2026 10:55 (724.4 min; profile 1 911.3). Clean reference rebuilt from 300 validation flights per Eb/N0: BER 1.6-4.8 times below profile 1's |
-| SURV map v2 (D100), profile 3 | started 13.11 10:55 (estimate 44-50 h); power loss about 16:10 with 23 of 154 jobs saved, resumed 16:48 with all 23 kept; end about 14.11 evening to 15.11 midday |
+| SURV map v2 (D100), profile 3 | started 13.11 10:55; power loss about 16:10 with 23 of 154 jobs saved, resumed 16:48 with all 23 kept; done 14.11.2026 13:32 (1243.5 min): map A 80.0%, map B 92.9% |
+| SURV3 v2 (D101), profile 3 | done 14.11.2026 22:26 (534.3 min): four antennas keep the link in 75.0% of combined-threat geometries against 67.9% with three |
+| C1d, profile 3 | done 14.11.2026 22:34 (7.9 min): drop threshold 4.5 dB, CUSUM drop alarm at 126 dB^2 |
+| C2, profile 3 (99 runs: 11 monitor settings, 3 penalties, 3 seeds) | started 14.11 22:34; power loss 15.11 about 08:41 with 17 runs saved; resumed 18:33 with the 17 read; run 94 on 17.11 08:30; end about 17.11 11:00 |
 | Code merged into `v7-p3` during C1p (C1p calls none of the changed files) | `acc2ab0` 10.11 (full suite 585/585); `fb487f8` 11.11 (`profile.json` only: `run_cache` on, approved by Adi); `8cfb172` 11.11 (windows D/E: bounded-search log lines, lecturer KPIs per Eb/N0 and the receiver-robust column, the system false-alarm breakdown, the clean K6 split, SURV kept jobs keyed on the code; suite 619/620, the one wrong test expectation fixed, 13/13) |
-| SURV3 v2 (D101), C1d, C2, C2e, C2g, C2u, GAL, EDGE, KPI, DASH, WEAK, RPT | after SURV; profile 1's durations as a guide (C1p and C1c ran at 0.8-1.3 times them); chain end about 18-20.11 |
-| Profile 3 chain ends | about 18-20.11.2026; hard limit 24.11 (D118: past it, D117 item 2, D111's serial OOD run, D114 and D115 are shed in that order) |
-| Finish phase | LAT on the idle machine, then KPI, DASH, WEAK and RPT again; D2c; the console check on a profile-3 copy; the labelled side readings (D107, D108, D123); the behaviour-preserving cleanup (plan in `review/code_audit`) and the folder consolidation |
+| C2e, C2g, C2u, GAL, EDGE, KPI, DASH, WEAK, RPT | after C2; profile 1's durations as a guide; chain end about 18.11 morning |
+| Profile 3 chain ends | about 18.11.2026 morning; hard limit 24.11 (D118: past it, D117 item 2, D111's serial OOD run, D114 and D115 are shed in that order) |
+| Finish phase | `final.hold` written 17.11 (E11): after RPT the SHA-256 archive of the first reading, D2c v2 (starts by itself), the GUI tests on `gui-on-p3`, the `rule-fix` tests and the D124 readings; then `final.hold` is removed and LAT runs on the idle machine, then KPI, DASH, WEAK and RPT again; the console check on a profile-3 copy; the labelled side readings (D107, D108, D123); the behaviour-preserving cleanup (plan in `review/code_audit`) and the folder consolidation |
 | Official finish of code and results | about 25-26.11.2026; then the project book, after Adi's approval |
 | P1-v2 (D119) | after the project book (Adi, 11.11.2026) |
 | Windows Update | paused until 30.11.2026 (registry `PauseUpdatesExpiryTime`); a forced reboot is covered by the resume mode |
@@ -103,7 +106,7 @@ Order: controlled-bandwidth study (done), profile-1 rerun (ended after C1d), pro
 | P1R | Profile-1 rerun of C1d, C2 and C2e with a fixed monitor, in an isolated worktree; stops after C1d if the old threshold form is kept (D104) | window 2.11-5.11 (estimate) | Ended after C1d on 31.10 (D104 point 4): no candidate admissible, the class path alone breaks KPI 6's bound; profile 3 answers with D113 (S1G) and D121 |
 | Profile 3 deployment | Tests, fusion rerun, detector stages, rehearsal, fourth test set read once; step 7a (decoder on dev set C) | profile 3 as a whole ends about 18-21.11 (estimate) | Done 5.11 (D110-D122) |
 | Profile 3 pools | C1p (4 antennas) | 90-105 h (estimate) | From about 6.11 02:00-03:00 |
-| Profile 3 maps | SURV map v2 (D100); SURV3 v2 (D101) | 44-50 h; 690-786 min | After C1c |
+| Profile 3 maps | SURV map v2 (D100); SURV3 v2 (D101) | 1243.5 min; 534.3 min | Done 14.11 |
 | Profile 3 decision layer | C1c, C1d, C2, C2e, C2g, C2u, GAL, EDGE, KPI, DASH, WEAK, RPT, then LAT (the takeover's final phase) | profile 1's durations as a guide | After the maps |
 | Cleanup window | Behaviour-preserving cleanup of the code tree; the plan and the audit are in `docs/review/code_audit_20261105/`; every batch tested before and after | about 21-25.11 | After profile 3's KPI stage |
 | Folder consolidation | One main project folder with topic subfolders | with the window | Before the official finish (about 25-26.11) |
@@ -130,17 +133,21 @@ Order and timeboxes: D117 fixes the profile 3 order (KPI 7's speed part is read 
 7. The chain's extension stages: combination and unknown-threat generalisation (C2g, C2u), threat gallery (GAL), overhead pass (OHP), GCS antenna analysis (GCSA), envelope verdicts (EDGE), weak points (WEAK). Done on profile 1; running for profile 3 (OHP and GCSA skipped).
 8. CORE_BW: the CNN contribution under controlled bandwidth (`rule_core3` against the validation-tuned `blind_core`, D106): done, read once on 30.10.
 9. P1R: ended after C1d on 31.10 (D104 point 4); system-level false alarms are taken up by profile 3 (D113, D121) and by P1-v2 (D119).
-10. Profile 3 (four antennas): deployed 5.11; the decision-layer chain finished C1p on 12.11 22:51 and finished C1c on 13.11 10:55 and is in SURV, then SURV3 and the decision stages.
+10. Profile 3 (four antennas): deployed 5.11; C1p done 12.11, C1c 13.11, SURV, SURV3 and C1d 14.11; C2 ends about 17.11 11:00, the chain about 18.11 morning. On validation its rule with escalation holds 70-71% of episodes to the end (profile 1 60.3%); the best DQN checkpoint so far holds 85.4% (profile 1 84.3%).
 11. Weak points: lowest detector class 84.5% (airframe shadowing; per-class 85% accepted for now), unknown-threat AUROC 0.769 against 0.8, noise-burst response.
 12. 3D view: parked until the code, the final proposal and the interim report are done.
 13. Cleanup window about 21-25.11 (behaviour-preserving), then the folder consolidation; P1-v2 (D119) on the cleaned code after the project book.
 14. Labelled side readings after C2e (no verdict changes): D107, D108, D123 (recovery time against the autopilot link-loss failsafe, ArduPilot 5 s and PX4 10 s, with the 0.6 s episode limit).
 
+15. D124 (approved by Adi 15.11, registered before any reading): the rule's layered answers (keep with a short stay, a link-budget rate step, a predicted-ACR channel match, coding on a lost-branch answer) on branches `rule-fix` and `core-bw-rule-fix`; read after the chain, validation first, test once; adopted only by its registered rule.
+16. Next version (disclosed in the book): the two DQN bugs (a time-limit end treated as terminal; the checkpoint scored with escalation while the plain agent is deployed) and the realism items (shadowing on both receivers, spoofer CFO, ACR 30 dB), with a pool rebuild.
+17. Two experiments Adi approved (11.10 and 15.10), after the full run and separate from the pipeline: (a) long flights of 1-2 min with shadowing tied to manoeuvres, and a slow diagnosis layer (seconds to minutes) that tells antenna fault from airframe shadowing; the fast decision window stays as is; (b) a "learning with experience" campaign: many threats in every condition over rounds; between rounds the system learns new classes and the configurations that worked from its own escalation outcomes, and the DQN is updated offline under the same validation gates and shield; each round is measured on new held-out flights to show a learning curve; no self-modification in flight.
+
 **Report, book and defense**
 
-15. Project book (final report) with the lecturer's KPI table first, extensions in their own section.
-16. Defense: 20-30 min in all including the examiners' questions; a 15-20 minute presentation of at most 12 slides, no literature review or theory slides; Hebrew by default (English only on a written request, and then the defense is in English too). Date set by the faculty coordinators.
-17. Poster: not a grade line. A digital poster is made only if the project is selected for the faculty's projects exposure day (about 15 of about 100 projects), on the examiners' and supervisor's recommendation.
+18. Project book (final report) with the lecturer's KPI table first, extensions in their own section.
+19. Defense: 20-30 min in all including the examiners' questions; a 15-20 minute presentation of at most 12 slides, no literature review or theory slides; Hebrew by default (English only on a written request, and then the defense is in English too). Date set by the faculty coordinators.
+20. Poster: not a grade line. A digital poster is made only if the project is selected for the faculty's projects exposure day (about 15 of about 100 projects), on the examiners' and supervisor's recommendation.
 
 ## Deviations from the original plan
 
