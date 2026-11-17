@@ -1,6 +1,6 @@
 # Roadmap
 
-Plan, status and remaining work of the UAV-GCS jamming detection and mitigation project, as of 17.11.2026 (evening). The scope is the lecturer's revised proposal of 20.10.2026 (D92); everything beyond it is an extension without commitment.
+Plan, status and remaining work of the UAV-GCS jamming detection and mitigation project, as of 17.11.2026 (night). The scope is the lecturer's revised proposal of 20.10.2026 (D92); everything beyond it is an extension without commitment.
 
 Related files: [README](../README.md) | [PROJECT_LOG.md](PROJECT_LOG.md) (execution history) | [DECISIONS.md](DECISIONS.md) (design record) | [LITERATURE.md](LITERATURE.md)
 
@@ -41,7 +41,7 @@ Rows and months are exactly those of the proposal (months 1-8). The interim repo
 | C1d, profile 3 | done 14.11.2026 22:34 (7.9 min): drop threshold 4.5 dB, CUSUM drop alarm at 126 dB^2 |
 | C2, profile 3 (99 runs: 11 monitor settings, 3 penalties, 3 seeds) | started 14.11 22:34; power loss 15.11 about 08:41 with 17 runs saved; resumed 18:33 with the 17 read; done 17.11 19:35 (2942.3 min, with the coordinate steps, reward scales and D107 runs): DQN held 84.7%, recovered 95.9% against the rule's 70.2% and 76.3%; false-alarm bound met (deployed form 436.7 false changes per hour, limit 470); Opus check: nothing invalidates C2e |
 | Code merged into `v7-p3` during C1p (C1p calls none of the changed files) | `acc2ab0` 10.11 (full suite 585/585); `fb487f8` 11.11 (`profile.json` only: `run_cache` on, approved by Adi); `8cfb172` 11.11 (windows D/E: bounded-search log lines, lecturer KPIs per Eb/N0 and the receiver-robust column, the system false-alarm breakdown, the clean K6 split, SURV kept jobs keyed on the code; suite 619/620, the one wrong test expectation fixed, 13/13) |
-| C2e, C2g, C2u, GAL, EDGE, KPI, DASH, WEAK, RPT | C2e started 17.11 19:35; profile 1's durations (about 20 h) times profile 3's slower simulation; chain end about 18.11 evening to night |
+| C2e, C2g, C2u, GAL, EDGE, KPI, DASH, WEAK, RPT | C2e done 17.11 22:30 (174 min): PER reduction 52.7% and 48.7% MET (committed), KPI 4 21 of 24, KPI 6 3.87% (bound 4.59%); C2g started 22:29; chain end about 18.11 evening to night |
 | Profile 3 chain ends | about 18.11.2026 evening to night; hard limit 24.11 (D118: past it, D117 item 2, D111's serial OOD run, D114 and D115 are shed in that order) |
 | Finish phase | `final.hold` written 17.11 (E11): after RPT the SHA-256 archive of the first reading, D2c v2 (starts by itself), the GUI tests on `gui-on-p3`, the `rule-fix` tests and the D124 readings; then `final.hold` is removed and LAT runs on the idle machine, then KPI, DASH, WEAK and RPT again; the console check on a profile-3 copy; the labelled side readings (D107, D108, D123); the behaviour-preserving cleanup (plan in `review/code_audit`) and the folder consolidation |
 | Official finish of code and results | about 25-26.11.2026; then the project book, after Adi's approval |
@@ -142,6 +142,8 @@ Order and timeboxes: D117 fixes the profile 3 order (KPI 7's speed part is read 
 15. D124 (approved by Adi 15.11, registered before any reading): the rule's layered answers (keep with a short stay, a link-budget rate step, a predicted-ACR channel match, coding on a lost-branch answer) on branches `rule-fix` and `core-bw-rule-fix`; read after the chain, validation first, test once; adopted only by its registered rule.
 16. Next version (disclosed in the book): the two DQN bugs (a time-limit end treated as terminal; the checkpoint scored with escalation while the plain agent is deployed) and the realism items (shadowing on both receivers, spoofer CFO, ACR 30 dB), with a pool rebuild.
 17. Two experiments Adi approved (11.10 and 15.10), after the full run and separate from the pipeline: (a) long flights of 1-2 min with shadowing tied to manoeuvres, and a slow diagnosis layer (seconds to minutes) that tells antenna fault from airframe shadowing; the fast decision window stays as is; (b) a "learning with experience" campaign: many threats in every condition over rounds; between rounds the system learns new classes and the configurations that worked from its own escalation outcomes, and the DQN is updated offline under the same validation gates and shield; each round is measured on new held-out flights to show a learning curve; no self-modification in flight.
+
+19. Profile 3 weak points found at C2e (17.11), not covered by a registered item; each needs a fix chosen on validation and read once on a fresh test set: (a) the deployed DQN on harmed lost-branch episodes (antenna fault 32.9%, airframe shadowing 5.9%, against 82.9% and 47.1% for the ungated rule); candidate: a harm-evidence escalation for the DQN, with a validation criterion that includes the harmed lost-branch episodes; (b) the never-trained combinations set, 73.4% against profile 1's 81.9% (validation look first).
 
 **Report, book and defense**
 
