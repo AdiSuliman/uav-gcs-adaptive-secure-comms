@@ -81,6 +81,7 @@ Use `--no-matlab` instead if a MATLAB already runs; it skips item 7.
 | Full read: an unreadable kept file | A cut write | Move that file aside; its stage computes it again |
 | `.dmr` over 1 GB | Simulink inspector files | Moved aside by the script; Adi deletes them later |
 | Sleep or hibernate on, or an update reboot pending | The chain would stop again | System settings are Adi's. Ask Adi; never change them |
+| `final.hold` exists | Written on purpose on 17.11: the final phase waits after profile 3's RPT for the archive, D2c and the hand-runs | Expected until those hand-runs end; keep it. Relaunch as usual |
 | Free commit under 55 GB | Other programs hold memory | The takeover waits by itself. Tell Adi which programs hold it |
 
 Claude never deletes a file in recovery; it moves files aside, and Adi deletes later.
