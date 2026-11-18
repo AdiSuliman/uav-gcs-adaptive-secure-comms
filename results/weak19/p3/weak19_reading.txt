@@ -1,0 +1,101 @@
+=== WEAK POINTS 19: VALIDATION (p3, tree C:\Users\Adi Suliman\uav-gcs-v7-p3) ===
+Generated: 19-Nov-2026 01:37:03
+Validation split only: 6696 episodes (every cell, Eb/N0 and geometry x2, seed 99), 720 comb episodes, 1800 clean validation flights from 0.0 dB; deployed policy dqn; rule fix of the same tree: keep+st+rate.
+Off, the registered readings reproduced:
+  DQN as selected, held                                       0.846572 registered     0.846572: reproduced
+  DQN as selected, recovered                                  0.959437 registered     0.959437: reproduced
+  rule_sel held                                               0.701629 registered     0.701629: reproduced
+  rule_sel recovered                                          0.762559 registered     0.762559: reproduced
+  rule_sel clean flights with a change                             142 registered          142: reproduced
+  deployed form, clean flights with a change                        69 registered           69: reproduced
+  deployed form, clean flights                                    1800 registered         1800: reproduced
+  deployed form, false changes on the clean flights                131 registered          131: reproduced
+  deployed form, false changes per hour                        436.667 registered        436.7: reproduced
+Deployed form off: held 85.1%, recovered 96.3%; recovered: harmed antenna_fault 31.2% (64 in 7 clusters), harmed airframe_shadowing 37.5% (8), harmed combinations with a lost branch 97.8% (1146), comb 74.6% (702), path-loss family 90.7% (878); clean flights with a change 69 of 1800, 436.7 per hour
+
+Step 1, dqn_harm, against off (the deployed DQN as registered):
+  q: not adopted
+    (a) target af_harmed (n 64, 7 clusters, sign-flip, exact), recovered +31.25 points, one-sided p 0.0312 against 0.0167: FAILS
+    (b) antenna_fault                        n   360 recovered +5.56, lower bound +1.67: ok
+    (b) airframe_shadowing                   n   360 recovered +0.56, lower bound +0.00: ok
+    (b) comb set                             n   702 recovered +0.00, lower bound +0.00: ok
+    (b) as_harmed                            n     8 recovered +25.00 (3 clusters: the point alone): ok
+    (b) lost_combo_harmed                    n  1146 recovered +0.00, lower bound +0.00: ok
+    (c) pooled held +0.12 (lb -0.16), recovered +0.37 (lb +0.13): ok
+    (d) clean flights with a change 69 -> 93 of 1800, bound 4.66% -> 6.11%: FAILS
+    (e) false changes per hour 436.7 -> 590.0 (limit 470): FAILS
+    (f) delivered after onset, pooled +0.00 (lb -0.08), comb set +0.00 (lb +0.00): ok
+  rule: not adopted
+    (a) target af_harmed (n 64, 7 clusters, sign-flip, exact), recovered +31.25 points, one-sided p 0.0312 against 0.0167: FAILS
+    (b) antenna_fault                        n   360 recovered +5.56, lower bound +1.67: ok
+    (b) airframe_shadowing                   n   360 recovered +0.56, lower bound +0.00: ok
+    (b) comb set                             n   702 recovered +0.00, lower bound +0.00: ok
+    (b) as_harmed                            n     8 recovered +25.00 (3 clusters: the point alone): ok
+    (b) lost_combo_harmed                    n  1146 recovered +0.00, lower bound +0.00: ok
+    (c) pooled held +0.34 (lb +0.11), recovered +0.37 (lb +0.13): ok
+    (d) clean flights with a change 69 -> 93 of 1800, bound 4.66% -> 6.11%: FAILS
+    (e) false changes per hour 436.7 -> 550.0 (limit 470): FAILS
+    (f) delivered after onset, pooled +0.14 (lb +0.06), comb set +0.00 (lb +0.00): ok
+  fec: not adopted
+    (a) target af_harmed (n 64, 7 clusters, sign-flip, exact), recovered +28.12 points, one-sided p 0.0312 against 0.0167: FAILS
+    (b) antenna_fault                        n   360 recovered +5.00, lower bound +1.39: ok
+    (b) airframe_shadowing                   n   360 recovered +0.28, lower bound +0.00: ok
+    (b) comb set                             n   702 recovered +0.00, lower bound +0.00: ok
+    (b) as_harmed                            n     8 recovered +12.50 (3 clusters: the point alone): ok
+    (b) lost_combo_harmed                    n  1146 recovered +0.00, lower bound +0.00: ok
+    (c) pooled held -0.51 (lb -1.01), recovered +0.32 (lb +0.10): FAILS
+    (d) clean flights with a change 69 -> 93 of 1800, bound 4.66% -> 6.11%: FAILS
+    (e) false changes per hour 436.7 -> 590.0 (limit 470): FAILS
+    (f) delivered after onset, pooled -0.08 (lb -0.18), comb set +0.00 (lb +0.00): ok
+  -> off
+
+Step 2, dqn_hop, against off (the deployed DQN as registered):
+  q: passes
+    (a) target comb (n 702, 36 clusters, bootstrap), recovered +10.83 points, one-sided p 0.0000 against 0.0250: ok
+    (b) jamming+antenna_fault                n   216 recovered -0.46, lower bound -1.39: ok
+    (b) jamming+spoofing+benign_interference n   216 recovered -0.46, lower bound -1.39: ok
+    (b) comb set                             n   702 recovered +10.83, lower bound +8.12: ok
+    (c) pooled held -0.03 (lb -0.11), recovered -0.03 (lb -0.09): ok
+    (d) clean flights with a change 69 -> 69 of 1800, bound 4.66% -> 4.66%: ok
+    (e) false changes per hour 436.7 -> 436.7 (limit 470): ok
+    (f) delivered after onset, pooled +0.00 (lb -0.01), comb set +2.91 (lb +2.28): ok
+  rule: passes
+    (a) target comb (n 702, 36 clusters, bootstrap), recovered +13.25 points, one-sided p 0.0000 against 0.0250: ok
+    (b) reactive_jamming                     n   360 recovered +0.28, lower bound +0.00: ok
+    (b) comb set                             n   702 recovered +13.25, lower bound +10.68: ok
+    (c) pooled held +0.03 (lb -0.04), recovered +0.02 (lb +0.00): ok
+    (d) clean flights with a change 69 -> 69 of 1800, bound 4.66% -> 4.66%: ok
+    (e) false changes per hour 436.7 -> 436.7 (limit 470): ok
+    (f) delivered after onset, pooled -0.02 (lb -0.04), comb set +0.54 (lb +0.19): ok
+  -> rule
+
+Step 3, lb_more, against dqn_hop=rule:
+  fec: not adopted
+    (a) target path_loss (n 878, 94 clusters, bootstrap), recovered +0.11 points, one-sided p 0.4075 against 0.0167: FAILS
+    (b) jamming+path_loss                    n   126 recovered +0.79, lower bound +0.00: ok
+    (b) sweeping_jammer+path_loss            n   144 recovered +0.69, lower bound +0.00: ok
+    (b) tone_jamming+path_loss               n   126 recovered -0.79, lower bound -2.34: FAILS
+    (b) comb set                             n   702 recovered +0.00, lower bound +0.00: ok
+    (c) pooled held +0.07 (lb -0.02), recovered +0.02 (lb -0.03): ok
+    (d) clean flights with a change 69 -> 69 of 1800, bound 4.66% -> 4.66%: ok
+    (e) false changes per hour 436.7 -> 440.0 (limit 470): ok
+    (f) delivered after onset, pooled +0.01 (lb -0.00), comb set -0.00 (lb -0.00): ok
+  step: not adopted
+    (a) target path_loss (n 878, 94 clusters, bootstrap), recovered +0.00 points, one-sided p 1.0000 against 0.0167: FAILS
+    (b) comb set                             n   702 recovered +0.00, lower bound +0.00: ok
+    (c) pooled held +0.00 (lb +0.00), recovered +0.00 (lb +0.00): ok
+    (d) clean flights with a change 69 -> 69 of 1800, bound 4.66% -> 4.66%: ok
+    (e) false changes per hour 436.7 -> 440.0 (limit 470): ok
+    (f) delivered after onset, pooled +0.00 (lb +0.00), comb set +0.00 (lb +0.00): ok
+  fec+step: not adopted
+    (a) target path_loss (n 878, 94 clusters, bootstrap), recovered +0.11 points, one-sided p 0.4075 against 0.0167: FAILS
+    (b) jamming+path_loss                    n   126 recovered +0.79, lower bound +0.00: ok
+    (b) sweeping_jammer+path_loss            n   144 recovered +0.69, lower bound +0.00: ok
+    (b) tone_jamming+path_loss               n   126 recovered -0.79, lower bound -2.34: FAILS
+    (b) comb set                             n   702 recovered +0.00, lower bound +0.00: ok
+    (c) pooled held +0.07 (lb -0.02), recovered +0.02 (lb -0.03): ok
+    (d) clean flights with a change 69 -> 69 of 1800, bound 4.66% -> 4.66%: ok
+    (e) false changes per hour 436.7 -> 443.3 (limit 470): ok
+    (f) delivered after onset, pooled +0.01 (lb -0.00), comb set -0.00 (lb -0.00): ok
+  -> off
+Validation done in 22.0 min. Selection frozen: dqn_hop=rule.
