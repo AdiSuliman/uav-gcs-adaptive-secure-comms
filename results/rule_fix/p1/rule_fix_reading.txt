@@ -144,3 +144,6 @@ Gate of choose_deployed.m, keep+st+rate:
   gate PASS (DQN held 82.6% against the rule at its settings 69.8%), deployed dqn
   with the setting adopted the deployed policy stays
 Validation done in 80.4 min. Selection frozen: keep+st+rate.
+
+=== RULE FIX: TEST ===
+Off does not reproduce the registered rows (rule on single, rule_esc on single, blind_esc on single, rule_core on single, blind_core on single, rule on follower, rule_esc on follower, blind_esc on follower, rule_core on follower, blind_core on follower, rule on combined, rule_esc on combined, blind_esc on combined, rule_core on combined, blind_core on combined, rule on unknown, rule_esc on unknown, blind_esc on unknown, rule_core on unknown, blind_core on unknown, rule on clean, rule_esc on clean, blind_esc on clean, rule_core on clean, blind_core on clean): the test is not read.

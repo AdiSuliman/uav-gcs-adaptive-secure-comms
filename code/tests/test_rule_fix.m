@@ -363,6 +363,33 @@ verifyEqual(tc, base, T.read(1).sel);
 end
 
 %% ---------- fixtures ----------
+function test_c2e_draws(tc)
+% The test reruns each tree's C2e draws: base + step x set from its own evaluate_policies.m.
+d = tempname; mkdir(fullfile(d, 'code', 'decision')); c = onCleanup(@() rmdir(d, 's'));
+f = fullfile(d, 'code', 'decision', 'evaluate_policies.m');
+for v = {{'30000 + 100*si', [30000 100]}, {'20000 + 1000*si', [20000 1000]}}
+    fid = fopen(f, 'w'); fprintf(fid, '        RES{si, pk} = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, %s);\n', v{1}{1}); fclose(fid);
+    verifyEqual(tc, rule_fix_reading('draws', d), v{1}{2}, v{1}{1});
+end
+fid = fopen(f, 'w'); fprintf(fid, 'no run line\n'); fclose(fid);
+verifyError(tc, @() rule_fix_reading('draws', d), 'rule_fix_reading:draws');
+src = fileread(which('rule_fix_reading'));
+verifyEqual(tc, numel(strfind(src, 'ag, opt, db + ds * si)')), 2, 'off and on read the same draws');
+verifyEmpty(tc, strfind(src, 'R.test_seed'));
+for tr = {{'C:\Users\Adi Suliman\uav-gcs-v7', [30000 100]}, {'C:\Users\Adi Suliman\uav-gcs-v7-p3', [20000 1000]}}
+    if isfolder(tr{1}{1}), verifyEqual(tc, rule_fix_reading('draws', tr{1}{1}), tr{1}{2}, tr{1}{1}); end
+end
+end
+
+function test_amend_guard(tc)
+% The guard takes changed code only through the one recorded amendment, before the test.
+src = fileread(which('rule_fix_reading'));
+verifyNotEmpty(tc, strfind(src, '~strcmp(S.fingerprint.code, F.code) && ~amended(X, S.fingerprint.code, F.code)'));
+verifyNotEmpty(tc, strfind(src, 'ok = strcmp(A.from, from) && strcmp(A.to, to);'));
+verifyNotEmpty(tc, strfind(src, 'assert(~isfile(X.amend)'));
+verifyNotEmpty(tc, strfind(src, 'assert(~isfile(X.claim_test) && ~isfile(X.marker)'));
+end
+
 function test_registered_rows(tc)
 % The core rule's row is found with and without the lost-branch gates after its noise-burst answer
 hd = ['Rule settings on validation, rule + escalation at ''class_drop 2/2'' (class_cusum 2/2), drop 180.0 dB^2, one coordinate' newline];
