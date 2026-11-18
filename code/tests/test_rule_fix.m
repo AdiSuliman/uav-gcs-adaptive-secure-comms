@@ -363,6 +363,25 @@ verifyEqual(tc, base, T.read(1).sel);
 end
 
 %% ---------- fixtures ----------
+function test_registered_rows(tc)
+% The core rule's row is found with and without the lost-branch gates after its noise-burst answer
+hd = ['Rule settings on validation, rule + escalation at ''class_drop 2/2'' (class_cusum 2/2), drop 180.0 dB^2, one coordinate' newline];
+gr = ['  class_drop 3/3  drop 270.0 dB^2  rule + escalation: held 71.0%, recovered 77.4%, return 0.616, FA 11.1% | table: x' newline];
+s = 'nulling at 3.00 dB, quiet slot off, dwell group, core rule on a noise burst rate_reduce';
+for g = {'', ', lost-branch gate on, core rule''s lost-branch gate on'}
+    tx = [hd '  core rule (rule_core, the same monitor and settings), noise-burst answer, core rule:' newline ...
+        '  in force                 ' s g{1} ' | held 42.6%, recovered 47.2%, weakest x 1.4%, return 0.402, FA 240/1800' newline ...
+        '  noise-burst answer:      ' strrep(s, 'rate_reduce', 'channel_switch+rate_reduce') g{1} ' | held 41.0%, recovered 46.0%, FA 250/1800' newline ...
+        '  -> noise-burst answer, core rule: ' s g{1} newline gr];
+    f = [tempname '.txt']; write_text(f, tx);
+    T = rule_fix_reading('registered', f, struct('core_nb', 'rate_reduce'));
+    delete(f);
+    verifyEqual(tc, [T.core.held, T.core.rec, T.core.k], [42.6, 47.2, 240]);
+    verifyEqual(tc, T.ref.alarm, 'class_drop 2/2');
+    verifyEqual(tc, [T.grid.held], 71.0);
+end
+end
+
 function [args, n] = rule_grid()
 % Every class on and off a degraded link, separable or not, with and without quiet-slot interference
 % and a drop alarm, the slot branch on and off, with and without a noise-burst answer, the harm
