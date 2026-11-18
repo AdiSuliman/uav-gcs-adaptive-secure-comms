@@ -1,0 +1,40 @@
+=== RULE FIX: VALIDATION (p1, tree C:\Users\Adi Suliman\uav-gcs-v7) ===
+Generated: 18-Nov-2026 20:52:26
+Validation split only: 6696 episodes (every cell, Eb/N0 and geometry x2, seed 99), 1800 clean validation flights from 0.0 dB.
+Off, the registered readings reproduced (registered files: trained_dqn.mat, dqn_training.txt):
+  rule_sel held                                                    0.603442 registered     0.603442: reproduced
+  rule_sel recovered                                               0.713094 registered     0.713094: reproduced
+  rule_sel clean flights with a change                                  198 registered          198: reproduced
+  rule_sel clean flights                                               1800 registered         1800: reproduced
+  rule + escalation at the deployed settings, held                  0.60291 registered      0.60291: reproduced
+  rule + escalation at the deployed settings, recovered            0.713094 registered     0.713094: reproduced
+  core rule at the reference monitor, held [%]                      44.1093 registered         44.1: reproduced
+  core rule at the reference monitor, recovered [%]                  50.692 registered         50.7: reproduced
+  core rule clean flights with a change                                 494 registered          494: reproduced
+  grid class_drop 3/3 drop 180.0 held [%]                           59.9894 registered           60: reproduced
+  grid class_drop 3/3 drop 180.0 recovered [%]                      73.1015 registered         73.1: reproduced
+  grid class_drop 3/3 drop 180.0 false alarms [%]                   20.0556 registered           20: NOT REPRODUCED
+  grid class_drop 3/3 drop 171.0 held [%]                           59.9184 registered         59.9: reproduced
+  grid class_drop 3/3 drop 171.0 recovered [%]                      73.1015 registered         73.1: reproduced
+  grid class_drop 3/3 drop 171.0 false alarms [%]                   20.0556 registered           20: NOT REPRODUCED
+  grid class_drop 2/2 drop 180.0 held [%]                           60.2378 registered         60.2: reproduced
+  grid class_drop 2/2 drop 180.0 recovered [%]                      73.9354 registered         73.9: reproduced
+  grid class_drop 2/2 drop 180.0 false alarms [%]                   27.2778 registered         27.3: reproduced
+  grid class_drop 2/2 drop 171.0 held [%]                           60.2555 registered         60.3: reproduced
+  grid class_drop 2/2 drop 171.0 recovered [%]                      73.9532 registered           74: reproduced
+  grid class_drop 2/2 drop 171.0 false alarms [%]                   27.3333 registered         27.3: reproduced
+  grid class_drop 4/5 drop 180.0 held [%]                            60.362 registered         60.4: reproduced
+  grid class_drop 4/5 drop 180.0 recovered [%]                      72.6579 registered         72.7: reproduced
+  grid class_drop 4/5 drop 180.0 false alarms [%]                   17.8889 registered         17.9: reproduced
+  grid class_drop 4/5 drop 171.0 held [%]                           60.2732 registered         60.3: reproduced
+  grid class_drop 4/5 drop 171.0 recovered [%]                      72.6402 registered         72.6: reproduced
+  grid class_drop 4/5 drop 171.0 false alarms [%]                   17.9444 registered         17.9: reproduced
+  grid class_drop 5/5 drop 180.0 held [%]                           60.3442 registered         60.3: reproduced
+  grid class_drop 5/5 drop 180.0 recovered [%]                      71.3094 registered         71.3: reproduced
+  grid class_drop 5/5 drop 180.0 false alarms [%]                        11 registered           11: reproduced
+  grid class_drop 5/5 drop 171.0 held [%]                            60.291 registered         60.3: reproduced
+  grid class_drop 5/5 drop 171.0 recovered [%]                      71.3094 registered         71.3: reproduced
+  grid class_drop 5/5 drop 171.0 false alarms [%]                   11.0556 registered         11.1: reproduced
+  deployed policy (dqn)                                                   1 registered            1: reproduced
+Deployed DQN (dqn) held 0.8261 (registered 0.8258), clean flights with a change 47 of 1800 (descriptive)
+NOT REPRODUCED: no candidate is read and nothing is frozen.
