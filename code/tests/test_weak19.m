@@ -449,10 +449,14 @@ i0 = regexp(src, 'if FRESH\s+% the fresh test split alone', 'once');
 i1 = strfind(src, 'pool_checkpoint(''commit'', ''data/policy_pools.mat''');
 verifyLessThan(tc, i0, i1);
 verifyNotEmpty(tc, regexp(src(i0:i1), '\n    return\n', 'once'));
+% FRESH_SET = 2 and 3 already name the detector's third and fourth test sets there; they never
+% switch the builder on, which needs FRESH_SET true
 rs = fileread(which('run_stage')); mn = fileread(which('main'));
-for t = {'FRESH_SET', '''w19'''}
-    verifyEmpty(tc, strfind(rs, t{1}), t{1}); verifyEmpty(tc, strfind(mn, t{1}), t{1});
+for t = {'FRESH_SET\s*=\s*(true|1)\>', '''w19'''}
+    verifyEmpty(tc, regexp(rs, t{1}, 'once'), t{1}); verifyEmpty(tc, regexp(mn, t{1}, 'once'), t{1});
 end
+verifyEmpty(tc, regexp(mn, 'run_own\(([^,()]|\{[^}]*\})+,[^,)]*,[^,)]*,\s*(true|1)\s*\)', 'once'), 'run_own with FRESH_SET true');
+verifyNotEmpty(tc, regexp(mn, 'run_own\(([^,()]|\{[^}]*\})+,[^,)]*,[^,)]*,\s*2\s*\)', 'once'), 'the pattern finds the FRESH_SET argument');
 end
 
 function test_builder_off_geometries(tc)
