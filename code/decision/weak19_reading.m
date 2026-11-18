@@ -2,25 +2,32 @@ function out = weak19_reading(stage, varargin)
 %WEAK19_READING  Side reading of the DQN's decision-time fixes (dqn_fix.m: PP.dqn_harm, PP.dqn_hop;
 %   lb_complete.m: PP.lb_more) on a finished tree: chosen on the VALIDATION split, frozen, then read
 %   once on a FRESH test set no earlier reading flew (fresh_set_layout.m). Nothing in the tree is
-%   overwritten; the fresh pools are new files of its data folder.
-%   weak19_reading('val', tree, tag, d124)   validation, once per tree: first, every option off, the
-%       registered readings the selection leans on are reproduced and any mismatch stops the run
-%       before a candidate is read (the agent as selected: held and recovered, seed_summary; the
-%       deployed form: clean validation flights with a change, lb.readings, and its false changes
-%       and their rate per hour, results/dqn_training.txt; rule_sel: held, recovered and clean
-%       flights); then the three steps in order, each on the setting the earlier ones adopted;
-%       frozen with the hash of every .m file of this checkout and of the tree's inputs ->
-%       results/weak19/<tag>/selection.json, val.mat, weak19_reading.txt, and the validation marker
-%       last. d124 (optional): the rule fix's frozen selection.json of the same tree; refused when
-%       its gate moved the deployed policy off the DQN (then these layers are not deployed)
+%   overwritten; the fresh pools and two marker copies are new files of it.
+%   weak19_reading('val', tree, tag, d124)   validation, once per tree: refused when this checkout's
+%       or the tree's validation marker exists, or when the tree already holds the fresh pools;
+%       first, every option off, the registered readings the selection leans on are reproduced and
+%       any mismatch stops the run before a candidate is read (the agent as selected: held and
+%       recovered, seed_summary; the deployed form: clean validation flights with a change,
+%       lb.readings, and its false changes and their rate per hour, results/dqn_training.txt;
+%       rule_sel: held, recovered and clean flights); then the three steps in order, each on the
+%       setting the earlier ones adopted; frozen with the hash of every .m file of this checkout and
+%       of the tree's inputs -> results/weak19/<tag>/selection.json, val.mat, weak19_reading.txt,
+%       the validation marker last; the selection and the marker are copied into the tree's
+%       results/read_once (X.tsel, X.tclaim_val). d124 (optional): the rule fix's frozen
+%       selection.json of the same tree; refused when its gate moved the deployed policy off the
+%       DQN (then these layers are not deployed)
 %   weak19_reading('test', tree, tag)   the single test reading, once per tree: refused without the
-%       frozen selection, on another tree, a second time, when the code or the inputs changed, or
-%       without the fresh pools (data/fresh_test_pools.mat, data/clean_w19_pools.mat; their seeds,
-%       detector and link model checked); the deployed DQN's registered rows of evaluate_policies.m's
-%       first six sets are reproduced off, exactly, before the marker; then the fresh sets, the
-%       deployed DQN off and with the adopted setting, paired -> test.mat, the test section
+%       frozen selection or its copy in the tree (the two equal), on another tree, a second time
+%       (this checkout's or the tree's marker), when the code or the inputs changed, or without the
+%       fresh pools (data/fresh_test_pools.mat, data/clean_w19_pools.mat; their seeds, detector and
+%       link model checked); the deployed DQN's registered rows of evaluate_policies.m's first six
+%       sets are reproduced off, exactly, before the marker; then the fresh sets, the deployed DQN
+%       off and with the adopted setting, paired -> test.mat, the test section and its registered
+%       verdict
 %   X = weak19_reading('paths', tree, tag)   J = weak19_reading('guard', X)
-%   S = weak19_reading('select', T)          A = weak19_reading('adopt', x, y, target, W)
+%   S = weak19_reading('select', T)          A = weak19_reading('adopt', x, y, target, W, prot)
+%   P = weak19_reading('ptest', d, cl, alpha, seed)   the paired test of one subgroup
+%   V = weak19_reading('verdict', E)         the fresh read's registered verdict from its endpoints
 %   R = weak19_reading('reg')                the registered constants
 %   Registered selection (fixed before any reading), on the deployed DQN as deployed (its monitor,
 %   settings and the link-budget completion) over train_dqn.m's validation episodes (every cell,
@@ -28,32 +35,48 @@ function out = weak19_reading(stage, varargin)
 %   and reactive_jamming cells on every validation flight, the follower on the new channel at the
 %   hop and on frequency diversity's second carrier, as evaluate_policies.m's comb set) and the
 %   clean validation flights:
-%   step 1 dqn_harm: q, rule, fec against off; target: the HARMED recoverable lost-branch episodes
-%          (no response does not restore them; antenna_fault, airframe_shadowing and every
-%          combination holding one)
+%   step 1 dqn_harm: q, rule, fec against off; target: the HARMED recoverable single antenna_fault
+%          episodes (no response does not restore them)
 %   step 2 dqn_hop: q, rule against the step-1 setting; target: the comb set's recoverable episodes
 %   step 3 lb_more: fec, step, fec+step against the step-2 setting; target: the recoverable episodes
-%          whose threat holds path_loss
+%          whose threat holds path_loss (the deployed agent, trained on every combination)
 %   A candidate is adopted over the setting in force when
-%   (a) on its target, recovered rises: the paired difference and its one-sided 95% lower bound
-%       above 0
+%   (a) on its target, recovered rises: the paired difference above 0 and its one-sided p-value
+%       below R.alpha / k, k the step's number of candidates (Bonferroni); the p-value from the
+%       cluster bootstrap with at least R.boot_cl clusters, else the exact sign-flip test over the
+%       clusters' sums; fewer than R.min_cl clusters: not adopted
 %   (b) every threat with at least 10 recoverable validation episodes, and the comb set pooled:
-%       recovered falls by no more than 1.0 point, its lower bound by no more than 2.0
+%       recovered falls by no more than 1.0 point, its lower bound by no more than 2.0; step 1 also
+%       on the harmed single airframe_shadowing episodes and the harmed combinations holding a
+%       lost branch, every later step on each earlier adopted target (with fewer than R.boot_cl
+%       clusters the point alone, the bound not read)
 %   (c) pooled held and pooled recovered: no lower than -0.5 point, lower bounds no lower than -1.0
 %   (d) the clean validation flights with a change: one-sided 95% Clopper-Pearson bound within
 %       max(5%, the setting in force's) and the share at most 1 point above it
-%   (e) the false changes per hour of flight on them at most R.fph (the registered limit)
+%   (e) the false changes per hour of flight on them at most R.fph (the registered limit; a point
+%       value, not a bound)
+%   (f) the delivered payload after onset (dlv_post, the cost of rate_reduce): pooled no lower than
+%       -0.5 point, lower bound no lower than -1.0; the comb set as (b)
 %   Bounds: cluster bootstrap over the flights (a geometry at an Eb/N0), 2000 draws, fixed seeds.
 %   Among the candidates of a step that pass, the highest pooled held; within 0.5 point the larger
 %   target gain, then the higher return.
+%   Registered verdict of the fresh read: one primary endpoint per adopted step (step 1 the harmed
+%   single lost-branch episodes, both classes; step 2 the comb set; step 3 the path-loss family),
+%   each a one-sided test of a gain, Holm across the adopted steps at R.alpha; guards: pooled
+%   recovered and held lower bounds at least -1.0 point, pooled delivered lower bound at least
+%   -1.0 point, the fresh KPI 6 Clopper-Pearson bound at most 5% and at most R.fph false changes per
+%   hour. A step is confirmed when its endpoint passes Holm and every guard holds; every other row
+%   is descriptive.
 switch stage
-    case 'val',    stage_val(varargin{:});
-    case 'test',   stage_test(varargin{:});
-    case 'paths',  out = paths(varargin{:});
-    case 'guard',  out = guard(varargin{:});
-    case 'select', out = select(varargin{:});
-    case 'adopt',  out = adopt(varargin{:});
-    case 'reg',    out = reg();
+    case 'val',     stage_val(varargin{:});
+    case 'test',    stage_test(varargin{:});
+    case 'paths',   out = paths(varargin{:});
+    case 'guard',   out = guard(varargin{:});
+    case 'select',  out = select(varargin{:});
+    case 'adopt',   out = adopt(varargin{:});
+    case 'ptest',   out = ptest(varargin{:});
+    case 'verdict', out = verdict(varargin{:});
+    case 'reg',     out = reg();
     otherwise, error('weak19_reading:stage', 'weak19_reading: unknown stage %s', stage);
 end
 end
@@ -61,16 +84,19 @@ end
 %% ===================== Registered constants =====================
 function R = reg()
 R.steps = struct('field', {'dqn_harm', 'dqn_hop', 'lb_more'}, 'cand', {{'q', 'rule', 'fec'}, {'q', 'rule'}, ...
-    {'fec', 'step', 'fec+step'}}, 'target', {'lost_harmed', 'comb', 'path_loss'});
+    {'fec', 'step', 'fec+step'}}, 'target', {'af_harmed', 'comb', 'path_loss'}, 'primary', {'lost_harmed', 'comb', 'path_loss'});
 R.lost = {'antenna_fault', 'airframe_shadowing'};
-R.B = 2000; R.bound = 0.05; R.min_n = 10;
+R.B = 2000; R.bound = 0.05; R.alpha = 0.05; R.min_n = 10;
+R.boot_cl = 30;                             % clusters below which a bootstrap bound is too narrow: sign-flip test
+R.min_cl = 6;                               % fewest target clusters: 2^-6 is the smallest sign-flip p-value under 0.05 / 3
 R.fph = 470;                                % false changes per hour: profile 3's registered limit (C2, dqn_training.txt)
 R.thr = struct('a', 0, 'thr_pt', -0.010, 'thr_lb', -0.020, 'pool_pt', -0.005, 'pool_lb', -0.010, 'fa_pts', 0.010, 'tie', 0.005);
+R.fresh_guard = struct('pool_lb', -0.010, 'dlv_lb', -0.010);
 R.val_seed = 99; R.val_reps = 2; R.frames = 5000; R.clean_seed = 41000;
 R.comb_seed = 99101; R.comb_frames = 5600;
 R.test_rs = 2027; R.test_seed = 20000; R.test_sets = {'single', 'follower', 'combined', 'unknown', 'clean', 'comb'};
-R.fresh_rs = 2091; R.fresh_seed = 91000; R.fresh_sets = {'single', 'follower', 'combined', 'comb'};
-R.boot_seed = 1900;
+R.fresh_rs = 2091; R.fresh_seed = 300000; R.fresh_sets = {'single', 'follower', 'combined', 'comb'};
+R.boot_seed = 1900; R.flip_seed = 1950;
 end
 
 %% ===================== Files =====================
@@ -83,6 +109,9 @@ X.sel = fullfile(X.dir, 'selection.json'); X.val = fullfile(X.dir, 'val.mat');
 X.txt = fullfile(X.dir, 'weak19_reading.txt'); X.marker = fullfile(X.dir, 'test_read_started.txt');
 X.test = fullfile(X.dir, 'test.mat');
 X.claim_val = read_once('claim', 'weak19', 'val', tree); X.claim_test = read_once('claim', 'weak19', 'test', tree);
+tr = fullfile(tree, 'results', 'read_once');
+X.tclaim_val = fullfile(tr, 'weak19_val.txt'); X.tclaim_test = fullfile(tr, 'weak19_test.txt');
+X.tsel = fullfile(tr, 'weak19_selection.json');
 X.inputs = cellfun(@(f) fullfile(tree, f), {fullfile('data', 'trained_dqn.mat'), fullfile('data', 'drop_threshold.mat'), ...
     fullfile('results', 'eval_detector_metrics.mat'), fullfile('results', 'dqn_training.txt'), 'profile.json', 'params.mat'}, ...
     'UniformOutput', false);
@@ -105,10 +134,13 @@ function J = guard(X)
 % The test stage's refusals, in order.
 J = {};
 if ~isfile(X.sel), J{end+1} = 'no frozen selection (run the val stage first)'; return; end
+if ~isfile(X.tsel) || ~strcmp(read_once('file', X.tsel), read_once('file', X.sel))
+    J{end+1} = 'the tree''s copy of the selection is missing or differs';
+end
 S = jsondecode(fileread(X.sel));
 F = fingerprint(X);
 if ~strcmp(S.fingerprint.tree, F.tree), J{end+1} = 'the selection was frozen on another tree'; end
-if isfile(X.claim_test) || isfile(X.marker), J{end+1} = 'the fresh test set of this tree was read already'; end
+if isfile(X.claim_test) || isfile(X.marker) || isfile(X.tclaim_test), J{end+1} = 'the fresh test set of this tree was read already'; end
 if ~strcmp(S.fingerprint.code, F.code), J{end+1} = 'the code differs from the code the selection ran'; end
 if ~isequal(cellstr(S.fingerprint.inputs(:))', F.inputs) || ~isequal(cellstr(S.fingerprint.big(:))', F.big)
     J{end+1} = 'the tree''s inputs differ from those the selection read';
@@ -123,8 +155,10 @@ end
 function stage_val(tree, tag, d124)
 if nargin < 3, d124 = ''; end
 X = paths(tree, tag); R = reg();
-assert(~isfile(X.claim_val), 'weak19_reading:val_once', ...
-    'weak19_reading: a selection was frozen on this tree already (%s): it is chosen once', X.claim_val);
+assert(~isfile(X.claim_val) && ~isfile(X.tclaim_val), 'weak19_reading:val_once', ...
+    'weak19_reading: a selection was frozen on this tree already (%s or %s): it is chosen once', X.claim_val, X.tclaim_val);
+assert(~any(cellfun(@isfile, X.fresh)), 'weak19_reading:fresh_exists', ...
+    'weak19_reading: the tree holds the fresh pools already: they are built after the selection, never before');
 assert(~isfile(X.sel) && ~isfile(X.val) && ~isfile(X.txt), 'weak19_reading:exists', ...
     'weak19_reading: %s already holds a reading; a reading is never overwritten', X.dir);
 D = struct('adopted', '', 'file', d124);
@@ -165,13 +199,16 @@ if ~ok
     read_once('write', X.txt, [lines, {'NOT REPRODUCED: no candidate is read and nothing is frozen.'}]);
     error('weak19_reading:reproduce', 'weak19_reading: the off readings do not reproduce %s (see %s)', tree, X.txt);
 end
-lines{end+1} = sprintf(['Deployed form off: held %.1f%%, recovered %.1f%%, harmed lost-branch recovered %.1f%% (%d), comb ' ...
-    'recovered %.1f%% (%d), path-loss family recovered %.1f%% (%d), clean flights with a change %d of %d, %.1f per hour'], ...
-    100 * o.dep.held, 100 * o.dep.rec, 100 * tmean(o.dep, W, 'lost_harmed'), sum(tmask(o.dep, W, 'lost_harmed')), ...
+lines{end+1} = sprintf(['Deployed form off: held %.1f%%, recovered %.1f%%; recovered: harmed antenna_fault %.1f%% (%d in %d ' ...
+    'clusters), harmed airframe_shadowing %.1f%% (%d), harmed combinations with a lost branch %.1f%% (%d), comb %.1f%% (%d), ' ...
+    'path-loss family %.1f%% (%d); clean flights with a change %d of %d, %.1f per hour'], ...
+    100 * o.dep.held, 100 * o.dep.rec, 100 * tmean(o.dep, W, 'af_harmed'), sum(tmask(o.dep, W, 'af_harmed')), ...
+    numel(unique(o.dep.cl(tmask(o.dep, W, 'af_harmed')))), 100 * tmean(o.dep, W, 'as_harmed'), sum(tmask(o.dep, W, 'as_harmed')), ...
+    100 * tmean(o.dep, W, 'lost_combo_harmed'), sum(tmask(o.dep, W, 'lost_combo_harmed')), ...
     100 * tmean(o.dep, W, 'comb'), sum(tmask(o.dep, W, 'comb')), 100 * tmean(o.dep, W, 'path_loss'), ...
     sum(tmask(o.dep, W, 'path_loss')), sum(o.dep.sw > 0), numel(o.dep.sw), o.dep.fph);
 % 1. The three steps, each on the setting the earlier ones adopted
-S = struct(); y = o.dep; Vs = struct('step', {}, 'S', {}, 'names', {}, 'sum', {});
+S = struct(); y = o.dep; Vs = struct('step', {}, 'S', {}, 'names', {}, 'sum', {}); prot = {};
 for k = 1:numel(R.steps)
     st = R.steps(k);
     rd = struct('name', {''}, 'x', y);
@@ -179,10 +216,10 @@ for k = 1:numel(R.steps)
         Sc = S; Sc.(st.field) = c{1};
         rd(end+1) = struct('name', c{1}, 'x', read_dqn(W, Sc, 'deployed')); %#ok<AGROW>
     end
-    Sk = select(struct('read', rd, 'target', st.target, 'W', W));
+    Sk = select(struct('read', rd, 'target', st.target, 'W', W, 'prot', {prot}));
     lines = [lines, {'', sprintf('Step %d, %s, against %s:', k, st.field, set_txt(S))}, Sk.lines, ...
         {sprintf('  -> %s', name_txt(rd(Sk.best).name))}]; %#ok<AGROW>
-    if Sk.best > 1, S.(st.field) = rd(Sk.best).name; y = rd(Sk.best).x; end
+    if Sk.best > 1, S.(st.field) = rd(Sk.best).name; y = rd(Sk.best).x; prot{end+1} = st.target; end %#ok<AGROW>
     Vs(end+1) = struct('step', st.field, 'S', S, 'names', {{rd.name}}, 'sum', {arrayfun(@(r) summ(r.x), rd, 'UniformOutput', false)}); %#ok<AGROW>
 end
 lines{end+1} = sprintf('Validation done in %.1f min. Selection frozen: %s.', toc(t0) / 60, set_txt(S));
@@ -190,9 +227,13 @@ sel = struct('tag', tag, 'tree', tree, 'adopted', S, 'adopted_txt', set_txt(S), 
     'fingerprint', F0, 'deployed', W.Q.deployed, 'd124', D);
 read_once('save', X.val, struct('Vs', Vs, 'off', summ(o.dep)));
 read_once('write', X.txt, lines);
-read_once('write', X.sel, {jsonencode(sel, 'PrettyPrint', true)});
-read_once('write', X.claim_val, {sprintf('weak19 validation frozen %s', datestr(now, 31)), ['tree ' F0.tree], ['tag ' tag], ...
-    ['code ' F0.code], ['selection ' X.sel], ['adopted ' set_txt(S)]});
+sj = {jsonencode(sel, 'PrettyPrint', true)};
+read_once('write', X.sel, sj);
+read_once('write', X.tsel, sj);
+cv = {sprintf('weak19 validation frozen %s', datestr(now, 31)), ['tree ' F0.tree], ['tag ' tag], ...
+    ['code ' F0.code], ['selection ' X.sel], ['adopted ' set_txt(S)]};
+read_once('write', X.claim_val, cv);
+read_once('write', X.tclaim_val, cv);
 fprintf('%s\n', lines{:});
 end
 
@@ -286,8 +327,8 @@ opt = struct('monitor', mon);
 V = dqn_eval_batches(kind, W.PP, W.K, W.spec, W.Q.agent, opt, W.R.frames, 2);
 Vc = policy_run_set(kind, W.PP, W.K, W.comb, 2, W.Q.agent, opt, W.R.comb_frames);
 x = struct('rec', dqn_recovered(V), 'held', dqn_held(V), 'ret', mean(V.ret), 'recovered', V.recovered, 'heldv', V.held, ...
-    'recoverable', V.recoverable, 'threat', V.threat, 'r', V.r, 'cl', 1000 * W.s + V.r, ...
-    'c_recovered', Vc.recovered, 'c_recoverable', Vc.recoverable & Vc.threat, 'c_cl', Vc.geom);
+    'recoverable', V.recoverable, 'threat', V.threat, 'r', V.r, 'cl', 1000 * W.s + V.r, 'dlv', V.dlv_post, ...
+    'c_recovered', Vc.recovered, 'c_recoverable', Vc.recoverable & Vc.threat, 'c_cl', Vc.geom, 'c_dlv', Vc.dlv_post);
 x.harmed = harmed_of(W.K, cat_f(W.spec, 'scn'), W.s, 2, V.r);
 x.sw = clean_changes(W, kind, W.PP, W.Q.agent, opt);
 C = decision_config();
@@ -322,12 +363,17 @@ h = ~(K.restored(ih) & K.restored_plr(ih));
 end
 
 function m = tmask(x, W, target)
-% The target episodes of a step among the readings x.
+% The target and guard episodes among the readings x.
+base = x.recoverable & x.threat;
 switch target
-    case 'lost_harmed'
-        m = x.recoverable & x.threat & x.harmed & holds(W.thr, W.R.lost);
+    case 'af_harmed'
+        m = base & x.harmed & strcmp(W.thr, 'antenna_fault');
+    case 'as_harmed'
+        m = base & x.harmed & strcmp(W.thr, 'airframe_shadowing');
+    case 'lost_combo_harmed'
+        m = base & x.harmed & holds(W.thr, W.R.lost) & contains(W.thr, '+');
     case 'path_loss'
-        m = x.recoverable & x.threat & holds(W.thr, {'path_loss'});
+        m = base & holds(W.thr, {'path_loss'});
     case 'comb'
         m = x.c_recoverable;
     otherwise, error('weak19_reading:target', 'weak19_reading: unknown target %s', target);
@@ -346,12 +392,13 @@ end
 %% ===================== Selection =====================
 function S = select(T)
 % T.read(1) the setting in force, T.read(2:end) the candidates; T.target the step's target; T.W
-% the world (threat per episode, registered constants).
+% the world (threat per episode, registered constants); T.prot the targets adopted before.
 R = reg();
 n = numel(T.read);
+prot = {}; if isfield(T, 'prot'), prot = T.prot; end
 S = struct('pass', false(1, n), 'adopt', {cell(1, n)}, 'best', 1, 'lines', {{}});
 for k = 2:n
-    A = adopt(T.read(k).x, T.read(1).x, T.target, T.W);
+    A = adopt(T.read(k).x, T.read(1).x, T.target, T.W, prot);
     S.adopt{k} = rmfield(A, 'lines'); S.pass(k) = A.pass;
     S.lines = [S.lines, {sprintf('  %s: %s', name_txt(T.read(k).name), ternary(A.pass, 'passes', 'not adopted'))}, A.lines];
 end
@@ -362,20 +409,22 @@ g = arrayfun(@(k) S.adopt{k}.gain, c); c = c(g >= max(g));
 [~, j] = max(arrayfun(@(k) T.read(k).x.ret, c)); S.best = c(j);
 end
 
-function A = adopt(x, y, target, W)
-% The registered conditions (a)-(e) of candidate x over the setting in force y.
+function A = adopt(x, y, target, W, prot)
+% The registered conditions (a)-(f) of candidate x over the setting in force y; prot: the targets
+% earlier steps adopted.
+if nargin < 5, prot = {}; end
 R = reg(); t = R.thr;
 thr = W.thr(:)';
 m = x.recoverable & y.recoverable & x.threat;
-A = struct('pass', false, 'a', false, 'b', true, 'c', false, 'd', false, 'e', false, 'gain', NaN, 'lines', {{}});
+A = struct('pass', false, 'a', false, 'b', true, 'c', false, 'd', false, 'e', false, 'f', false, 'gain', NaN, 'lines', {{}});
+k = numel(R.steps(strcmp({R.steps.target}, target)).cand);
+al = R.alpha / k;
 mt = tmask(x, W, target) & tmask(y, W, target);
-if strcmp(target, 'comb')
-    [pa, la] = pdiff(x.c_recovered, y.c_recovered, mt, x.c_cl, R.boot_seed + 1);
-else
-    [pa, la] = pdiff(x.recovered, y.recovered, mt, x.cl, R.boot_seed + 1);
-end
-A.gain = pa; A.a = pa > t.a && la > t.a;
-A.lines{end+1} = sprintf('    (a) target %s (n %d), recovered %+.2f points, lower bound %+.2f: %s', target, sum(mt), 100 * pa, 100 * la, ok_txt(A.a));
+[d, cl] = tdiff(x, y, mt, target);
+P = ptest(d, cl, al, R.boot_seed + 1);
+A.gain = P.mean; A.a = P.ncl >= R.min_cl && P.mean > t.a && P.p < al;
+A.lines{end+1} = sprintf('    (a) target %s (n %d, %d clusters, %s), recovered %+.2f points, one-sided p %.4f against %.4f: %s', ...
+    target, sum(mt), P.ncl, P.how, 100 * P.mean, P.p, al, ok_txt(A.a));
 for u = unique(thr(m), 'stable')
     mu = m & strcmp(thr, u{1});
     if sum(mu) < R.min_n, continue; end
@@ -389,6 +438,14 @@ mc = x.c_recoverable & y.c_recoverable;
 [p, l] = pdiff(x.c_recovered, y.c_recovered, mc, x.c_cl, R.boot_seed + 3);
 ok = isnan(p) || (p >= t.thr_pt && l >= t.thr_lb); A.b = A.b && ok;
 A.lines{end+1} = sprintf('    (b) %-36s n %5d recovered %+.2f, lower bound %+.2f: %s', 'comb set', sum(mc), 100 * p, 100 * l, ok_txt(ok));
+g = {};
+if strcmp(target, 'af_harmed'), g = {'as_harmed', 'lost_combo_harmed'}; end
+g = [g, prot(~strcmp(prot, 'comb'))];
+for j = 1:numel(g)
+    mg = tmask(x, W, g{j}) & tmask(y, W, g{j});
+    [ok, ln] = guard_sub(x, y, mg, g{j}, R.boot_seed + 6 + j);
+    A.b = A.b && ok; A.lines{end+1} = ln; %#ok<AGROW>
+end
 [ph, lh] = pdiff(x.heldv, y.heldv, m, x.cl, R.boot_seed + 4); [pr, lr] = pdiff(x.recovered, y.recovered, m, x.cl, R.boot_seed + 5);
 A.c = ph >= t.pool_pt && lh >= t.pool_lb && pr >= t.pool_pt && lr >= t.pool_lb;
 A.lines{end+1} = sprintf('    (c) pooled held %+.2f (lb %+.2f), recovered %+.2f (lb %+.2f): %s', 100 * ph, 100 * lh, 100 * pr, 100 * lr, ok_txt(A.c));
@@ -402,13 +459,75 @@ else
 end
 A.e = isfinite(x.fph) && x.fph <= R.fph;
 A.lines{end+1} = sprintf('    (e) false changes per hour %.1f -> %.1f (limit %g): %s', y.fph, x.fph, R.fph, ok_txt(A.e));
-A.pass = A.a && A.b && A.c && A.d && A.e;
+[pd, ld] = pdiff(x.dlv, y.dlv, m, x.cl, R.boot_seed + 9);
+[pc, lc] = pdiff(x.c_dlv, y.c_dlv, mc, x.c_cl, R.boot_seed + 10);
+A.f = pd >= t.pool_pt && ld >= t.pool_lb && (isnan(pc) || (pc >= t.thr_pt && lc >= t.thr_lb));
+A.lines{end+1} = sprintf('    (f) delivered after onset, pooled %+.2f (lb %+.2f), comb set %+.2f (lb %+.2f): %s', ...
+    100 * pd, 100 * ld, 100 * pc, 100 * lc, ok_txt(A.f));
+A.pass = A.a && A.b && A.c && A.d && A.e && A.f;
+end
+
+function [d, cl] = tdiff(x, y, m, target)
+if strcmp(target, 'comb'), d = double(x.c_recovered(m)) - double(y.c_recovered(m)); cl = x.c_cl(m);
+else, d = double(x.recovered(m)) - double(y.recovered(m)); cl = x.cl(m); end
+end
+
+function [ok, ln] = guard_sub(x, y, m, name, seed)
+% A subgroup that must not lose: at least R.boot_cl clusters, point and lower bound as (b); fewer,
+% the point alone (no bound read).
+R = reg(); t = R.thr;
+[d, cl] = tdiff(x, y, m, name);
+ncl = numel(unique(cl));
+if ncl == 0, ok = true; ln = sprintf('    (b) %-36s n     0: ok', name); return; end
+if ncl >= R.boot_cl
+    [p, l] = paired_stats('boot', d, cl, R.B, seed);
+    ok = p >= t.thr_pt && l >= t.thr_lb;
+    ln = sprintf('    (b) %-36s n %5d recovered %+.2f, lower bound %+.2f: %s', name, numel(d), 100 * p, 100 * l, ok_txt(ok));
+else
+    p = mean(d); ok = p >= t.thr_pt;
+    ln = sprintf('    (b) %-36s n %5d recovered %+.2f (%d clusters: the point alone): %s', name, numel(d), 100 * p, ncl, ok_txt(ok));
+end
 end
 
 function [p, l] = pdiff(a, b, m, cl, seed)
 p = NaN; l = NaN;
 if ~any(m), return; end
 [p, l] = paired_stats('boot', double(a(m)) - double(b(m)), cl(m), reg().B, seed);
+end
+
+function P = ptest(d, cl, alpha, seed)
+% One-sided test of a gain of the paired differences d (clusters cl): mean, p-value, the
+% (1 - alpha) lower bound where read. At least R.boot_cl clusters: cluster bootstrap, p the share
+% of resample means at or below 0. Fewer: the sign-flip test of the clusters' sums (under no
+% effect each cluster's sum is symmetric about 0; Good 2005, ch. 3), exact on integer sums by
+% convolution, else 10^5 random flips from a fixed seed; no bound.
+R = reg();
+d = double(d(:)); cl = cl(:);
+ok = isfinite(d); d = d(ok); cl = cl(ok);
+P = struct('mean', NaN, 'p', 1, 'lb', NaN, 'ncl', 0, 'how', 'none');
+if isempty(d), return; end
+[~, ~, j] = unique(cl);
+Sc = accumarray(j, d); P.ncl = numel(Sc); P.mean = mean(d);
+if P.ncl >= R.boot_cl
+    [~, q] = paired_stats('dist', d, cl, R.B, seed);
+    P.p = mean(q <= 0); P.lb = q(max(1, round(alpha * R.B))); P.how = 'bootstrap';
+elseif all(abs(Sc - round(Sc)) < 1e-9)
+    Sc = abs(round(Sc)); T = sum(Sc); f = zeros(1, 2 * T + 1); f(T + 1) = 1;
+    for k = 1:numel(Sc)
+        if Sc(k) == 0, continue; end
+        g = zeros(size(f)); s = Sc(k);
+        g(1 + s:end) = g(1 + s:end) + 0.5 * f(1:end - s);
+        g(1:end - s) = g(1:end - s) + 0.5 * f(1 + s:end);
+        f = g;
+    end
+    v = -T:T; obs = round(sum(d));
+    P.p = sum(f(v >= obs)); P.how = 'sign-flip, exact';
+else
+    rs = RandStream('mt19937ar', 'Seed', R.flip_seed + seed);
+    nf = 1e5; z = sum(d);
+    tz = sum((2 * (rand(rs, numel(Sc), nf) < 0.5) - 1) .* Sc, 1);
+    P.p = (1 + sum(tz >= z - 1e-12)) / (1 + nf); P.how = 'sign-flip, 1e5 draws';
+end
 end
 
 %% ===================== Test (read once, fresh set) =====================
@@ -490,10 +609,12 @@ lines = {'', '=== WEAK POINTS 19: TEST (fresh set, read once) ===', sprintf(['Ge
     'block %d family %d, %d geometries per (cell, Eb/N0) | clean flights %s, %d from %.1f dB'], datestr(now), S.adopted_txt, ...
     PPf.fresh.block, PPf.fresh.fam, PPf.fresh.ngeo, CW.set, ncs, et), ...
     sprintf('Off reproduces the deployed DQN''s registered rows of %s: exact', strjoin({sets.name}, ', '))};
-lines = [lines, fresh_lines(RON, fs, PPf, Kf, SW, Q.H.T, R)];
+[fl, Ev] = fresh_lines(RON, fs, PPf, Kf, SW, Q.H.T, R, fieldnames(Sa));
+lines = [lines, fl];
 lines{end+1} = sprintf('Test done in %.1f min.', toc(t0) / 60);
 RONs = cellfun(@(r) keep_fields(r), RON, 'UniformOutput', false);
-read_once('save', X.test, struct('RONs', {RONs}, 'sets', {{fs.name}}, 'SW', SW, 'adopted', S.adopted_txt, 'fresh_sha', {hf}));
+read_once('save', X.test, struct('RONs', {RONs}, 'sets', {{fs.name}}, 'SW', SW, 'adopted', S.adopted_txt, 'fresh_sha', {hf}, ...
+    'verdict', Ev));
 read_once('write', X.txt, [splitlines(strtrim(fileread(X.txt)))', lines]);
 fprintf('%s\n', lines{:});
 end
@@ -503,6 +624,7 @@ txt = {sprintf('weak19 test %s %s', what, datestr(now, 31)), ['tree ' S.fingerpr
     ['code ' S.fingerprint.code], ['inputs ' strjoin(cellstr(S.fingerprint.inputs(:))', ' ')], ['fresh ' strjoin(hf, ' ')], ...
     ['selection ' X.sel]};
 read_once('write', X.claim_test, txt);
+read_once('write', X.tclaim_test, txt);
 read_once('write', X.marker, txt);
 end
 
@@ -569,39 +691,89 @@ for b = 1:numel(sp{4}), sp{4}{b}.comb = true(1, numel(sp{4}{b}.scn)); end
 sets = struct('name', R.fresh_sets, 'spec', sp, 'split', TEST);
 end
 
-function lines = fresh_lines(RON, fs, PP, K, SW, T, R)
-% Off -> on, paired, with the cluster-bootstrap 95% interval of the difference: the threat sets
-% pooled, the harmed lost-branch episodes per threat, the path-loss family, tone_jamming+path_loss,
-% every threat, the comb set; the clean flights' changes (KPI 6) and false changes per hour.
+function [lines, Ev] = fresh_lines(RON, fs, PP, K, SW, T, R, adopted)
+% The registered verdict first (verdict below), then the descriptive rows: off -> on, paired,
+% with the cluster-bootstrap 95% interval of the difference: the threat sets pooled, the harmed
+% lost-branch episodes per threat, the path-loss family, tone_jamming+path_loss, every threat, the
+% comb set; the clean flights' changes (KPI 6) and false changes per hour.
 C = decision_config();
 x0 = RON{1, 1}; x1 = RON{1, 2};
 for si = 2:3, x0 = cat_struct(x0, RON{si, 1}); x1 = cat_struct(x1, RON{si, 2}); end
 thr = PP.scen(x0.scn); m = x0.recoverable & x0.threat;
 hm = harmed_of(K, x0.scn, x0.s, 3, x0.r);
-lines = {'Recovered among the recoverable (single + follower + combined), off -> on [95% interval of the paired difference]:'};
+ic = find(strcmp({fs.name}, 'comb'));
+c0 = RON{ic, 1}; c1 = RON{ic, 2}; mc = c0.recoverable & c0.threat;
+n = size(SW, 2);
+F0 = false_change_rate(SW(1, :), T, 1:n, C.period_ms); F1 = false_change_rate(SW(2, :), T, 1:n, C.period_ms);
+k0 = sum(SW(1, :) > 0); k1 = sum(SW(2, :) > 0);
+% Registered endpoints and guards
+lost = m & hm & ismember(thr, R.lost);
+pl = m & holds(thr, {'path_loss'});
+st = R.steps(ismember({R.steps.field}, adopted));
+E = struct('step', {st.field}, 'primary', {st.primary}, 'P', []);
+for k = 1:numel(st)
+    switch st(k).primary
+        case 'lost_harmed', E(k).P = ptest(double(x1.recovered(lost)) - double(x0.recovered(lost)), x0.geom(lost), R.alpha, R.boot_seed + 20);
+        case 'comb', E(k).P = ptest(double(c1.recovered(mc)) - double(c0.recovered(mc)), c0.geom(mc), R.alpha, R.boot_seed + 21);
+        otherwise, E(k).P = ptest(double(x1.recovered(pl)) - double(x0.recovered(pl)), x0.geom(pl), R.alpha, R.boot_seed + 22);
+    end
+end
+[~, gr] = paired_stats('boot', double(x1.recovered(m)) - double(x0.recovered(m)), x0.geom(m), R.B, R.boot_seed + 23);
+[~, gh] = paired_stats('boot', double(x1.held(m)) - double(x0.held(m)), x0.geom(m), R.B, R.boot_seed + 24);
+[~, gd] = paired_stats('boot', x1.dlv_post(m) - x0.dlv_post(m), x0.geom(m), R.B, R.boot_seed + 25);
+G = struct('rec_lb', gr, 'held_lb', gh, 'dlv_lb', gd, 'kpi6', cp_upper(k1, n), 'fph', F1.per_hour);
+Ev = verdict(struct('E', E, 'G', G));
+lines = [{'Registered verdict (one primary endpoint per adopted step, Holm; guards):'}, Ev.lines];
+% Descriptive rows
+lines{end+1} = 'Descriptive: recovered among the recoverable (single + follower + combined), off -> on [95% interval of the paired difference]:';
 lines{end+1} = row('pooled', x0.recovered, x1.recovered, m, x0.geom, R.boot_seed + 10);
 lines{end+1} = row('pooled, held', x0.held, x1.held, m, x0.geom, R.boot_seed + 11);
-lost = m & hm & holds(thr, R.lost);
+lines{end+1} = row('pooled, delivered after onset', x0.dlv_post, x1.dlv_post, m, x0.geom, R.boot_seed + 18);
 lines{end+1} = row('harmed lost-branch episodes', x0.recovered, x1.recovered, lost, x0.geom, R.boot_seed + 12);
 for u = unique(thr(lost), 'stable')
     lines{end+1} = row(['  harmed ' u{1}], x0.recovered, x1.recovered, lost & strcmp(thr, u{1}), x0.geom, R.boot_seed + 13); %#ok<AGROW>
 end
-pl = m & holds(thr, {'path_loss'});
-lines{end+1} = row('path-loss family', x0.recovered, x1.recovered, pl, x0.geom, R.boot_seed + 14);
+lm = m & hm & holds(thr, R.lost) & contains(thr, '+');
+lines{end+1} = row('harmed combinations with a lost branch', x0.recovered, x1.recovered, lm, x0.geom, R.boot_seed + 19);
+lines{end+1} = row('path-loss family (trained)', x0.recovered, x1.recovered, pl, x0.geom, R.boot_seed + 14);
 lines{end+1} = row('  tone_jamming+path_loss', x0.recovered, x1.recovered, m & strcmp(thr, 'tone_jamming+path_loss'), x0.geom, R.boot_seed + 15);
 lines{end+1} = 'Per threat:';
 for u = unique(thr(m), 'stable')
     lines{end+1} = row(['  ' u{1}], x0.recovered, x1.recovered, m & strcmp(thr, u{1}), x0.geom, R.boot_seed + 16); %#ok<AGROW>
 end
-ic = find(strcmp({fs.name}, 'comb'));
-c0 = RON{ic, 1}; c1 = RON{ic, 2}; mc = c0.recoverable & c0.threat;
 lines{end+1} = row('comb set', c0.recovered, c1.recovered, mc, c0.geom, R.boot_seed + 17);
-n = size(SW, 2);
-F0 = false_change_rate(SW(1, :), T, 1:n, C.period_ms); F1 = false_change_rate(SW(2, :), T, 1:n, C.period_ms);
-k0 = sum(SW(1, :) > 0); k1 = sum(SW(2, :) > 0);
+lines{end+1} = row('comb set, delivered after onset', c0.dlv_post, c1.dlv_post, mc, c0.geom, R.boot_seed + 26);
 lines{end+1} = sprintf(['KPI 6, fresh clean flights: with a change %d -> %d of %d (one-sided 95%% bound %.2f%% -> %.2f%%, ' ...
     'against %.0f%%); false changes per hour %.1f -> %.1f'], k0, k1, n, 100 * cp_upper(k0, n), 100 * cp_upper(k1, n), ...
     100 * R.bound, F0.per_hour, F1.per_hour);
+end
+
+function V = verdict(I)
+% I.E(k): step, primary, P (ptest.m's struct); I.G: rec_lb, held_lb, dlv_lb, kpi6, fph. Holm over the
+% adopted steps' one-sided p-values at R.alpha (a mean at or below 0 never passes); a step is
+% confirmed when it passes and every guard holds.
+R = reg(); E = I.E; G = I.G; g = R.fresh_guard;
+n = numel(E);
+p = arrayfun(@(e) e.P.p, E); p(arrayfun(@(e) ~(e.P.mean > 0), E)) = 1;
+[ps, o] = sort(p); hol = false(1, n);
+for k = 1:n
+    if ps(k) <= R.alpha / (n - k + 1), hol(o(k)) = true; else, break; end
+end
+gok = [G.rec_lb >= g.pool_lb, G.held_lb >= g.pool_lb, G.dlv_lb >= g.dlv_lb, G.kpi6 <= R.bound, G.fph <= R.fph];
+gnm = {'pooled recovered lower bound', 'pooled held lower bound', 'pooled delivered lower bound', 'KPI 6 bound', 'false changes per hour'};
+gv = [100 * G.rec_lb, 100 * G.held_lb, 100 * G.dlv_lb, 100 * G.kpi6, G.fph];
+glim = [100 * g.pool_lb, 100 * g.pool_lb, 100 * g.dlv_lb, 100 * R.bound, R.fph];
+V = struct('step', {{E.step}}, 'p', p, 'holm', hol, 'guards', gok, 'confirmed', hol & all(gok), 'lines', {{}});
+for k = 1:n
+    V.lines{end+1} = sprintf('  %-9s endpoint %-12s n clusters %3d (%s), gain %+.2f points, one-sided p %.4f: Holm %s', E(k).step, ...
+        E(k).primary, E(k).P.ncl, E(k).P.how, 100 * E(k).P.mean, E(k).P.p, ternary(hol(k), 'passes', 'fails'));
+end
+for j = 1:numel(gok)
+    V.lines{end+1} = sprintf('  guard %-30s %8.2f against %8.2f: %s', gnm{j}, gv(j), glim(j), ok_txt(gok(j)));
+end
+for k = 1:n
+    V.lines{end+1} = sprintf('  -> %s: %s', E(k).step, ternary(V.confirmed(k), 'CONFIRMED', 'NOT CONFIRMED'));
+end
 end
 
 function t = row(name, a0, a1, m, cl, seed)
@@ -627,7 +799,8 @@ for i = 1:numel(f), R.(f{i}) = [R.(f{i}), Rb.(f{i})]; end
 end
 
 function r = keep_fields(R)
-f = intersect(fieldnames(R), {'scn', 's', 'r', 'geom', 'recovered', 'held', 'recoverable', 'threat', 'per_post', 'switches', 'ret', 't_rec'});
+f = intersect(fieldnames(R), {'scn', 's', 'r', 'geom', 'recovered', 'held', 'recoverable', 'threat', 'per_post', 'dlv_post', ...
+    'switches', 'ret', 't_rec'});
 r = struct(); for i = 1:numel(f), r.(f{i}) = R.(f{i}); end
 end
 

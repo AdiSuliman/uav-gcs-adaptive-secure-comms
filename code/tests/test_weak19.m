@@ -92,21 +92,23 @@ end
 %% ---------- dqn_harm ----------
 function test_harm_layer(tc)
 % A lost branch with harm evidence held at no_action for C.esc confirmed cycles takes one step: the
-% rule's answer (power_control; with space where separable), with fec_interleave, or the best Q;
-% every guard is needed.
+% rule's answer (power_control; with space where separable), with fec_interleave, or the best Q
+% among the configurations with a link-budget or space element (a hop alone restores no branch);
+% the step is marked for the keep layer; every guard is needed.
 PP = mon_pp(); A = PP.actions; na = find(strcmp(A, 'no_action')); C = decision_config();
 at = @(n) find(strcmp(A, n));
 [M, m] = harm_state(PP, 'antenna_fault');
-q = zeros(numel(A), 1); q(at('channel_switch')) = 3; q(at('power_control')) = 2;
+q = zeros(numel(A), 1); q(at('channel_switch')) = 3; q(at('power_control')) = 2; q(at('spatial_diversity+power_control')) = 1;
 call = @(F, M, m, g) dqn_fix('harm', na, na, M, m, PP, F, q, g, 0, 3, 6, true);
-[a, acted] = call('rule', M, m, 0); verifyTrue(tc, acted); verifyEqual(tc, A{a}, 'power_control');
+[a, acted, m1] = call('rule', M, m, 0); verifyTrue(tc, acted); verifyEqual(tc, A{a}, 'power_control');
+verifyEqual(tc, [m1.dk m1.dl], [at('power_control') 1]);
 [a, ~] = call('rule', M, m, 8); verifyEqual(tc, A{a}, 'spatial_diversity+power_control');
 [a, ~] = call('fec', M, m, 0); verifyEqual(tc, A{a}, 'power_control+fec_interleave');
 [a, ~] = call('fec', M, m, 8); verifyEqual(tc, A{a}, 'spatial_diversity+power_control+fec_interleave');
-[a, ~, m2] = call('q', M, m, 0); verifyEqual(tc, A{a}, 'channel_switch');
-verifyTrue(tc, m2.tried(1, at('channel_switch')) && m2.tried(1, na));
-[~, acted] = call('q', M, m2, 0); verifyTrue(tc, acted);         % the next not tried
-[a, ~] = call('q', M, m2, 0); verifyEqual(tc, A{a}, 'power_control');
+[a, ~, m2] = call('q', M, m, 0); verifyEqual(tc, A{a}, 'power_control');   % the higher-Q hop is not a lost-branch answer
+verifyTrue(tc, m2.tried(1, at('power_control')) && m2.tried(1, na));
+[a, acted] = call('q', M, m2, 0); verifyTrue(tc, acted);         % the next not tried
+verifyEqual(tc, A{a}, 'spatial_diversity+power_control');
 [M2, ~] = harm_state(PP, 'airframe_shadowing');
 [a, acted] = call('rule', M2, m, 0); verifyTrue(tc, acted); verifyEqual(tc, A{a}, 'power_control');
 % guards
@@ -135,8 +137,9 @@ end
 function test_harm_in_the_loop(tc)
 % policy_decide.m: a DQN that holds no_action on a harmful antenna fault never moves off; with
 % dqn_harm 'rule' it takes power_control once C.esc confirmed cycles passed, and the monitor reads
-% the harm evidence for it alone.
-PP = mon_pp(); A = PP.actions; na = find(strcmp(A, 'no_action'));
+% the harm evidence for it alone. The agent wants no_action back: the step is kept while the class
+% lasts (one change, no excursion), and released when the class ends.
+PP = mon_pp(); A = PP.actions; na = find(strcmp(A, 'no_action')); pc = find(strcmp(A, 'power_control'));
 ag = const_agent(PP, 'no_action');
 X = const_trace(PP, 12, -1, 8, 0, 'antenna_fault', na);
 R0 = decide_run('dqn', PP, X, ag);
@@ -149,16 +152,23 @@ verifyEqual(tc, A{R1.a(t)}, 'power_control');
 verifyGreaterThanOrEqual(tc, t, decision_config().esc);
 verifyTrue(tc, R1.I{t}.dh);
 verifyEqual(tc, nnz(cellfun(@(I) any(I.dh), R1.I)), 1);           % one step
+verifyTrue(tc, all(R1.a(t:end) == pc), 'kept after the step');
+verifyTrue(tc, any(cellfun(@(I) any(I.dk), R1.I(t+1:end))), 'the agent asked for no_action and was kept');
+verifyEqual(tc, nnz(diff([na, R1.a]) ~= 0), 1, 'one change');
 Xn = const_trace(PP, 12, -6, 8, 0, 'antenna_fault', na);           % a lost branch the others carry: no harm
 Rn = decide_run('dqn', P1, Xn, ag);
 verifyTrue(tc, all(Rn.a(:) == na));
+X2 = X; Xc = const_trace(PP, 30, -1, 8, 0, 'none', na); X2.obs = [X.obs, Xc.obs];   % the cause ends
+R2 = decide_run('dqn', P1, X2, ag);
+verifyEqual(tc, R2.a(12), pc);
+verifyEqual(tc, R2.a(end), na, 'released when the class ends');
 end
 
 %% ---------- dqn_hop ----------
 function test_hop_layer(tc)
-% A hop held for C.esc degraded cycles from its first frame under an in-channel class leaves the
+% A hop held for C.esc degraded cycles from its first frame under a jamming class leaves the
 % frequency domain: space where separable and the largest link budget, or the best Q without a
-% frequency element; every guard is needed.
+% frequency element; spoofing is not answered by power or rate; every guard is needed.
 PP = mon_pp(); A = PP.actions; C = decision_config(); nA = numel(A);
 at = @(n) find(strcmp(A, n));
 cs = at('channel_switch');
@@ -166,17 +176,18 @@ M = struct('cls', {{'jamming'}}, 'confirmed', true, 'degraded', true);
 m = struct('deg_n', C.esc, 'since', C.esc, 'pend', false, 'tried', false(1, nA));
 q = zeros(nA, 1); q(at('freq_diversity')) = 5; q(at('spatial_diversity+power_control')) = 2;
 call = @(F, a, cfg, M, m, g) dqn_fix('hop', a, cfg, M, m, PP, F, q, g, 6);
-[a, acted] = call('rule', cs, cs, M, m, 0); verifyTrue(tc, acted); verifyEqual(tc, A{a}, 'rate_reduce+power_control');
+[a, acted, m1] = call('rule', cs, cs, M, m, 0); verifyTrue(tc, acted); verifyEqual(tc, A{a}, 'rate_reduce+power_control');
+verifyEqual(tc, [m1.dk m1.dl], [a 2]);
 [a, ~] = call('rule', cs, cs, M, m, 8); verifyEqual(tc, A{a}, 'spatial_diversity+rate_reduce+power_control');
 [a, ~] = call('rule', cs, at('channel_switch+spatial_diversity'), M, m, 0);   % the null in use is kept
 verifyEqual(tc, A{a}, 'spatial_diversity+rate_reduce+power_control');
 [a, ~] = call('q', cs, cs, M, m, 0); verifyEqual(tc, A{a}, 'spatial_diversity+power_control');
 [a, acted] = call('rule', at('freq_diversity'), cs, M, m, 0); verifyTrue(tc, acted, 'the DQN hops again');
 verifyEqual(tc, A{a}, 'rate_reduce+power_control');
-for c = {'reactive_jamming', 'spoofing', 'tone_jamming'}
+for c = {'reactive_jamming', 'tone_jamming'}
     Mx = M; Mx.cls = c; [~, acted] = call('rule', cs, cs, Mx, m, 0); verifyTrue(tc, acted, c{1});
 end
-for c = {'none', 'benign_interference', 'antenna_fault', 'path_loss', 'sweeping_jammer'}
+for c = {'none', 'spoofing', 'benign_interference', 'antenna_fault', 'path_loss', 'sweeping_jammer'}
     Mx = M; Mx.cls = c; [~, acted] = call('rule', cs, cs, Mx, m, 0); verifyFalse(tc, acted, c{1});
 end
 Mx = M; Mx.confirmed = false; [~, acted] = call('rule', cs, cs, Mx, m, 0); verifyFalse(tc, acted, 'confirmed');
@@ -191,10 +202,50 @@ mx = m; mx.tried(at('rate_reduce+power_control')) = true;
 [a, acted] = call('', cs, cs, M, m, 0); verifyFalse(tc, acted); verifyEqual(tc, a, cs);
 end
 
+%% ---------- keep ----------
+function test_keep_layer(tc)
+% A layer's configuration is kept while its cause lasts: a proposal that gives the answer back is
+% replaced by the configuration in use; another answer of the DQN passes; the cause ended or
+% another configuration in use clears the mark; no mark, nothing.
+PP = mon_pp(); A = PP.actions; nA = numel(A); at = @(n) find(strcmp(A, n));
+na = at('no_action'); pc = at('power_control'); rp = at('rate_reduce+power_control'); cs = at('channel_switch');
+m = struct('dk', pc, 'dl', 1, 'tried', false(1, nA));
+M = struct('cls', {{'antenna_fault'}}, 'drop_alarm', false);
+[a, k, m1] = dqn_fix('keep', na, pc, M, m, PP); verifyTrue(tc, k); verifyEqual(tc, a, pc); verifyEqual(tc, m1.dk, pc);
+[a, k] = dqn_fix('keep', cs, pc, M, m, PP); verifyTrue(tc, k); verifyEqual(tc, a, pc);
+[a, k] = dqn_fix('keep', at('spatial_diversity'), pc, M, m, PP); verifyFalse(tc, k); verifyEqual(tc, a, at('spatial_diversity'));
+Mx = M; Mx.cls = {'none'};
+[a, k, m2] = dqn_fix('keep', na, pc, Mx, m, PP); verifyFalse(tc, k); verifyEqual(tc, a, na); verifyEqual(tc, [m2.dk m2.dl], [0 0]);
+[~, k, m3] = dqn_fix('keep', na, rp, M, m, PP); verifyFalse(tc, k); verifyEqual(tc, m3.dk, 0);
+m = struct('dk', rp, 'dl', 2); M = struct('cls', {{'jamming'}}, 'drop_alarm', false);
+[a, k] = dqn_fix('keep', cs, rp, M, m, PP); verifyTrue(tc, k); verifyEqual(tc, a, rp);
+[~, k] = dqn_fix('keep', na, rp, M, m, PP); verifyTrue(tc, k);
+[~, k] = dqn_fix('keep', at('spatial_diversity+power_control'), rp, M, m, PP); verifyFalse(tc, k);
+Mx = M; Mx.cls = {'spoofing'}; [~, k, m4] = dqn_fix('keep', cs, rp, Mx, m, PP); verifyFalse(tc, k); verifyEqual(tc, m4.dk, 0);
+m = struct('dk', rp, 'dl', 3); M = struct('cls', {{'none'}}, 'drop_alarm', true);
+[a, k] = dqn_fix('keep', pc, rp, M, m, PP); verifyTrue(tc, k); verifyEqual(tc, a, rp);
+[~, k] = dqn_fix('keep', at('spatial_diversity+rate_reduce+power_control'), rp, M, m, PP); verifyFalse(tc, k);
+M.drop_alarm = false; [a, k, m5] = dqn_fix('keep', pc, rp, M, m, PP); verifyFalse(tc, k); verifyEqual(tc, a, pc); verifyEqual(tc, m5.dk, 0);
+[a, k] = dqn_fix('keep', na, pc, M, struct('tried', false(1, nA)), PP); verifyFalse(tc, k); verifyEqual(tc, a, na);
+end
+
+function test_layers_clear_completion_mark(tc)
+% info.lb never marks an action a layer replaced, and every layer's change, step and keep come
+% after the completion in policy_decide.m.
+src = strrep(fileread(which('policy_decide')), char(13), '');
+i0 = strfind(src, 'if lm.on, [a, lbc] = lb_complete(a, cfg, M, mem, PP, lm); end');
+i1 = strfind(src, '[a, kp, mem] = dqn_fix(''keep''');
+i2 = strfind(src, '[a, lbs, mem] = dqn_fix(''step''');
+i3 = strfind(src, 'lbc(kp | dhc | dpc) = false;');
+i4 = strfind(src, 'if lbon, info.lb = lbc; end');
+verifyNumElements(tc, [i0 i1 i2 i3 i4], 5);
+verifyTrue(tc, issorted([i0 i1 i2 i3 i4]));
+end
+
 %% ---------- lb_more ----------
 function test_lb_more_fec(tc)
-% A proposal holding fec_interleave: off, the completion leaves it; with fec, power_control +
-% fec_interleave where its gain covers the deficit, else the link-budget match without the code.
+% A proposal holding fec_interleave: off, the completion leaves it; with fec, power_control joins
+% the code (frequency and space kept), whatever the deficit: the code is never dropped.
 PP = mon_pp(); PP.lb_complete = true; A = PP.actions; C = decision_config();
 at = @(n) find(strcmp(A, n)); na = at('no_action');
 F = dqn_fix('parse', 'lb_more', 'fec');
@@ -203,10 +254,12 @@ M = struct('confirmed', true, 'drop_alarm', true);
 [a, acted] = lb_complete(at('fec_interleave'), na, M, m, PP); verifyFalse(tc, acted); verifyEqual(tc, A{a}, 'fec_interleave');
 [a, acted] = lb_complete(at('fec_interleave'), na, M, m, PP, F); verifyTrue(tc, acted); verifyEqual(tc, A{a}, 'power_control+fec_interleave');
 [a, ~] = lb_complete(at('channel_switch+fec_interleave'), na, M, m, PP, F); verifyEqual(tc, A{a}, 'channel_switch+power_control+fec_interleave');
-m.lb_dc = 8;
-[a, ~] = lb_complete(at('fec_interleave'), na, M, m, PP, F); verifyEqual(tc, A{a}, 'rate_reduce+power_control');
-[a, ~] = lb_complete(at('power_control+fec_interleave'), na, M, m, PP, F); verifyEqual(tc, A{a}, 'rate_reduce+power_control');
-[a, ~] = lb_complete(at('spatial_diversity+fec_interleave'), na, M, m, PP, F); verifyEqual(tc, A{a}, 'spatial_diversity+rate_reduce+power_control');
+m.lb_dc = 8;                                                     % beyond power_control's gain: the code stays
+[a, ~] = lb_complete(at('fec_interleave'), na, M, m, PP, F); verifyEqual(tc, A{a}, 'power_control+fec_interleave');
+[a, acted] = lb_complete(at('power_control+fec_interleave'), na, M, m, PP, F); verifyFalse(tc, acted);
+verifyEqual(tc, A{a}, 'power_control+fec_interleave');
+[a, ~] = lb_complete(at('spatial_diversity+fec_interleave'), na, M, m, PP, F); verifyEqual(tc, A{a}, 'spatial_diversity+power_control+fec_interleave');
+[a, ~] = lb_complete(at('power_control'), na, M, m, PP, F); verifyEqual(tc, A{a}, 'rate_reduce+power_control');   % no code: the match
 m.lb_dc = 5;                                                     % no fec: as without the option
 for n = {'no_action', 'channel_switch', 'spatial_diversity+power_control'}
     [a0, x0] = lb_complete(at(n{1}), na, M, m, PP); [a1, x1] = lb_complete(at(n{1}), na, M, m, PP, F);
@@ -217,20 +270,25 @@ end
 
 function test_lb_more_step(tc)
 % Where the completion did not act and the DQN keeps a configuration the link stays degraded on
-% under a confirmed drop alarm: rate_reduce is added (rate_reduce+power_control in place of a code).
-PP = mon_pp(); A = PP.actions; C = decision_config(); at = @(n) find(strcmp(A, n));
+% under a confirmed drop alarm: rate_reduce is added; a configuration holding the code is left;
+% the step marks what it took tried and never takes a configuration tried.
+PP = mon_pp(); A = PP.actions; C = decision_config(); at = @(n) find(strcmp(A, n)); nA = numel(A);
 M = struct('confirmed', true, 'drop_alarm', true);
-m = struct('lb_dc', 5, 'drop_n', C.esc, 'hq_n', C.esc, 'since', C.hold, 'pend', false);
+m = struct('lb_dc', 5, 'drop_n', C.esc, 'hq_n', C.esc, 'since', C.hold, 'pend', false, 'tried', false(1, nA));
 cases = {'power_control', 'rate_reduce+power_control'; 'channel_switch+power_control', 'channel_switch+rate_reduce+power_control'; ...
-    'channel_switch', 'channel_switch+rate_reduce'; 'power_control+fec_interleave', 'rate_reduce+power_control'; ...
-    'freq_diversity+spatial_diversity+power_control+fec_interleave', 'freq_diversity+spatial_diversity+rate_reduce+power_control'};
+    'channel_switch', 'channel_switch+rate_reduce'};
 for k = 1:size(cases, 1)
     c = at(cases{k, 1});
-    [a, acted] = dqn_fix('step', c, c, M, m, PP, false);
+    [a, acted, m1] = dqn_fix('step', c, c, M, m, PP, false);
     verifyTrue(tc, acted, cases{k, 1}); verifyEqual(tc, A{a}, cases{k, 2}, cases{k, 1});
+    verifyTrue(tc, m1.tried(c) && m1.tried(a), cases{k, 1}); verifyEqual(tc, [m1.dk m1.dl], [a 3], cases{k, 1});
 end
-c = at('rate_reduce'); [~, acted] = dqn_fix('step', c, c, M, m, PP, false); verifyFalse(tc, acted, 'rate_reduce held');
+for n = {'rate_reduce', 'power_control+fec_interleave', 'freq_diversity+spatial_diversity+power_control+fec_interleave'}
+    c = at(n{1}); [a, acted] = dqn_fix('step', c, c, M, m, PP, false); verifyFalse(tc, acted, n{1}); verifyEqual(tc, a, c, n{1});
+end
 c = at('power_control');
+mx = m; mx.tried(at('rate_reduce+power_control')) = true;
+[~, acted] = dqn_fix('step', c, c, M, mx, PP, false); verifyFalse(tc, acted, 'tried');
 [~, acted] = dqn_fix('step', c, c, M, m, PP, true); verifyFalse(tc, acted, 'the completion acted');
 [~, acted] = dqn_fix('step', at('rate_reduce'), c, M, m, PP, false); verifyFalse(tc, acted, 'the DQN moved');
 B = {'hq_n', C.esc - 1; 'drop_n', C.esc - 1; 'since', C.hold - 1; 'pend', true; 'lb_dc', 2.9};
@@ -275,10 +333,29 @@ Qa = Q; Qa.dec.dqn_harm = 'rule'; verifyNotEqual(tc, policy_stamp(Qa), s0);
 Qb = Q; Qb.dec.lb_more = 'step+fec'; Qc = Q; Qc.dec.lb_more = 'fec+step';
 verifyEqual(tc, policy_stamp(Qb), policy_stamp(Qc));
 verifyNotEqual(tc, policy_stamp(Qb), s0);
+Qd = Q; Qd.dec.lb_complete = false; sd = policy_stamp(Qd);          % lb_more without the completion has no effect
+Qd.dec.lb_more = 'step'; verifyEqual(tc, policy_stamp(Qd), sd);
+Qe = Qd; Qe.dec.dqn_harm = 'rule'; verifyNotEqual(tc, policy_stamp(Qe), sd);
 d = parent_dir(tc, tc.TestData.base, {'code/decision/policy_stamp.m'});
 addpath(d, '-begin'); clear policy_stamp
 cl = onCleanup(@() fixture_off(d, {'policy_stamp'})); %#ok<NASGU>
 verifyEqual(tc, policy_stamp(Q), s0, 'the base commit''s stamp');
+verifyEqual(tc, policy_stamp(Qd), sd, 'the base commit''s stamp without the completion');
+end
+
+function test_settings_off_identical_to_parent(tc)
+% decision_settings.m with the three fields absent gives the base commit's settings.
+S = {struct('rule_fix', ''), struct('alarm_mode', 'class_cusum', 'confirm', [2 3], 'drop_db', []), ...
+    struct('dec', struct('lb_complete', true, 'release_m', false)), struct('lb_accept', struct('tau_hi', 0.9))};
+P0 = struct('alarm_mode', 'class_drop', 'confirm', [2 2], 'drop_db', 4);
+now_ = cellfun(@(s) decision_settings(P0, s), S, 'UniformOutput', false);
+d = parent_dir(tc, tc.TestData.base, {'code/decision/decision_settings.m'});
+addpath(d, '-begin'); clear decision_settings
+cl = onCleanup(@() fixture_off(d, {'decision_settings'})); %#ok<NASGU>
+verifyEqual(tc, which('decision_settings'), fullfile(d, 'decision_settings.m'));
+for k = 1:numel(S)
+    verifyEqual(tc, decision_settings(P0, S{k}), now_{k}, sprintf('settings %d', k));
+end
 end
 
 %% ---------- the fresh test set ----------
@@ -378,36 +455,121 @@ for t = {'FRESH_SET', '''w19'''}
 end
 end
 
+function test_builder_off_geometries(tc)
+% Off (FRESH_SET absent): the builder's own block leaves BLOCK and NGEO, gives family 1 and the
+% design stream LHS_SEED to every split, and the explicit family 1 lays out the base commit's
+% flights, seeds, speeds and Latin hypercube strata (pool_geometries.m called without it).
+src = strrep(fileread(which('build_policy_pools')), char(13), '');
+i0 = strfind(src, 'FRESH = exist(''FRESH_SET''');
+i1 = regexp(src(i0:end), '\nend\n', 'once');
+verifyNotEmpty(tc, i0); verifyNotEmpty(tc, i1);
+O = eval_off_block(src(i0:i0 + i1 + 3), {'train', 'val', 'test', 'speed', 'test2'}, 7100000, [1 4 14 15 17], [60 24 12 24 60]);
+verifyFalse(tc, O.FRESH);
+verifyEqual(tc, O.FAM, ones(1, 5)); verifyEqual(tc, O.LHS_B, 7100000 * ones(1, 5));
+verifyEqual(tc, O.BLOCK, [1 4 14 15 17]); verifyEqual(tc, O.NGEO, [60 24 12 24 60]);
+p = struct('alt_random', false);
+G = {}; I = {};
+for s = 1:2
+    G{end+1} = pool_geometries(s, 14, 1:12, [29 161], p, 7100000 + 100 * s + 3, 1); %#ok<AGROW>
+    G{end+1} = pool_geometries(s, 15, 13:36, [29 161], p, [], 1); %#ok<AGROW>
+    I{end+1} = {s, 14, 1:12, [29 161], p, 7100000 + 100 * s + 3}; I{end+1} = {s, 15, 13:36, [29 161], p}; %#ok<AGROW>
+end
+d = parent_dir(tc, tc.TestData.base, {'code/decision/pool_geometries.m'});
+addpath(d, '-begin'); clear pool_geometries
+cl = onCleanup(@() fixture_off(d, {'pool_geometries'})); %#ok<NASGU>
+verifyEqual(tc, which('pool_geometries'), fullfile(d, 'pool_geometries.m'));
+for k = 1:numel(G)
+    verifyTrue(tc, isequaln(pool_geometries(I{k}{:}), G{k}), sprintf('layout %d', k));
+end
+end
+
+function O = eval_off_block(blk, SPLITS, LHS_SEED, BLOCK, NGEO) %#ok<INUSL>
+FRESH = []; FAM = []; LHS_B = [];
+eval(blk);
+O = struct('FRESH', FRESH, 'FAM', FAM, 'LHS_B', LHS_B, 'BLOCK', BLOCK, 'NGEO', NGEO);
+end
+
 %% ---------- the reading ----------
 function test_reading_registered(tc)
 R = weak19_reading('reg');
 verifyEqual(tc, {R.steps.field}, {'dqn_harm', 'dqn_hop', 'lb_more'});
-verifyEqual(tc, {R.steps.target}, {'lost_harmed', 'comb', 'path_loss'});
+verifyEqual(tc, {R.steps.target}, {'af_harmed', 'comb', 'path_loss'});
+verifyEqual(tc, {R.steps.primary}, {'lost_harmed', 'comb', 'path_loss'});
 verifyEqual(tc, R.steps(1).cand, {'q', 'rule', 'fec'});
-verifyEqual(tc, R.fph, 470); verifyEqual(tc, R.bound, 0.05); verifyEqual(tc, R.B, 2000);
+verifyEqual(tc, R.fph, 470); verifyEqual(tc, R.bound, 0.05); verifyEqual(tc, R.B, 2000); verifyEqual(tc, R.alpha, 0.05);
+verifyEqual(tc, [R.boot_cl R.min_cl], [30 6]);
+verifyLessThan(tc, 2^-R.min_cl, R.alpha / max(cellfun(@numel, {R.steps.cand})));   % the sign-flip test can pass at min_cl
 for k = 1:numel(R.steps)                                           % every candidate is a valid setting
     for c = R.steps(k).cand, verifyTrue(tc, dqn_fix('parse', R.steps(k).field, c{1}).on); end
 end
 verifyNotEqual(tc, R.fresh_rs, R.test_rs);
 verifyNotEqual(tc, R.comb_seed, R.val_seed);
+% frame draws: the fresh sets' bases above edge_map.m's (at most 299 999) and the main sets'
+lo = R.fresh_seed + 500; hi = R.fresh_seed + 1000 * (numel(R.fresh_sets) + 1);
+verifyGreaterThanOrEqual(tc, lo, 300000); verifyLessThan(tc, hi, seed_base(700001));
 end
 
 function test_reading_select(tc)
-% (2) lifts the harmed lost-branch episodes alone: adopted; (3) the same, with path_loss down 10
+% (2) lifts the harmed antenna_fault episodes alone: adopted; (3) the same, with path_loss down 10
 % points: (b) fails; (4) the same, 60 more clean flights with a change: (d) fails; (5) the same,
 % over the limit of false changes per hour: (e) fails; (6) a gain on non-target episodes only: (a)
-% fails.
+% fails; (7) the same as (2) at a rate cost, delivered payload down 10 points: (f) fails.
 [T, W] = select_world();
 S = weak19_reading('select', T);
-verifyEqual(tc, S.pass, [false true false false false false]);
+verifyEqual(tc, S.pass, [false true false false false false false]);
 verifyEqual(tc, S.best, 2);
-verifyTrue(tc, S.adopt{2}.a && S.adopt{2}.b && S.adopt{2}.c && S.adopt{2}.d && S.adopt{2}.e);
+verifyTrue(tc, S.adopt{2}.a && S.adopt{2}.b && S.adopt{2}.c && S.adopt{2}.d && S.adopt{2}.e && S.adopt{2}.f);
 verifyFalse(tc, S.adopt{3}.b); verifyFalse(tc, S.adopt{4}.d); verifyFalse(tc, S.adopt{5}.e); verifyFalse(tc, S.adopt{6}.a);
-A = weak19_reading('adopt', T.read(2).x, T.read(1).x, 'lost_harmed', W);
+verifyFalse(tc, S.adopt{7}.f); verifyTrue(tc, S.adopt{7}.a);
+A = weak19_reading('adopt', T.read(2).x, T.read(1).x, 'af_harmed', W);
 verifyGreaterThan(tc, A.gain, 0);
-T2 = T; T2.read = T.read([1 3 4 5 6]);
+T2 = T; T2.read = T.read([1 3 4 5 6 7]);
 S2 = weak19_reading('select', T2);
 verifyEqual(tc, S2.best, 1);                                       % nothing passes: the setting in force stays
+% the target in few clusters: 5 cannot pass, 8 pass on the exact sign-flip test
+af = strcmp(W.thr, 'antenna_fault');
+x5 = T.read(2).x; x5.cl(af) = 1000 + mod(0:199, 5);
+A5 = weak19_reading('adopt', x5, T.read(1).x, 'af_harmed', W); verifyFalse(tc, A5.a);
+x8 = T.read(2).x; x8.cl(af) = 1000 + mod(0:199, 8);
+A8 = weak19_reading('adopt', x8, T.read(1).x, 'af_harmed', W); verifyTrue(tc, A8.a);
+verifyNotEmpty(tc, strfind(strjoin(A8.lines, ' '), 'sign-flip, exact'));
+% a later step protects an earlier adopted target: path_loss's step that costs harmed antenna_fault
+x9 = T.read(2).x; d = find(af & x9.recovered, 20); x9.recovered(d) = false; x9.heldv(d) = false;
+A9 = weak19_reading('adopt', x9, T.read(2).x, 'path_loss', W, {'af_harmed'});
+verifyFalse(tc, A9.b);
+verifyNotEmpty(tc, strfind(strjoin(A9.lines, ' '), 'af_harmed'));
+end
+
+function test_reading_ptest(tc)
+% The exact sign-flip test below R.boot_cl clusters, the bootstrap at or above.
+P = weak19_reading('ptest', ones(1, 10), 1:10, 0.05, 1);
+verifyEqual(tc, P.p, 2^-10, 'AbsTol', 1e-15); verifyEqual(tc, P.how, 'sign-flip, exact'); verifyEqual(tc, P.ncl, 10);
+P = weak19_reading('ptest', [ones(1, 6), -ones(1, 6)], 1:12, 0.05, 1); verifyGreaterThanOrEqual(tc, P.p, 0.5);
+P = weak19_reading('ptest', [1 1 0 1 -1 1], [1 1 2 2 3 3], 0.05, 1);   % cluster sums 2, 1, 0: P(T >= 3) = 2/8
+verifyEqual(tc, P.p, 0.25, 'AbsTol', 1e-12);
+P = weak19_reading('ptest', 0.5 * ones(1, 5), 1:5, 0.05, 1);
+verifyEqual(tc, P.how, 'sign-flip, 1e5 draws'); verifyEqual(tc, P.p, 1 / 32, 'AbsTol', 0.004);
+rs = RandStream('mt19937ar', 'Seed', 3);
+P = weak19_reading('ptest', double(rand(rs, 1, 400) < 0.3), repelem(1:40, 10), 0.05, 1);
+verifyEqual(tc, P.how, 'bootstrap'); verifyLessThan(tc, P.p, 0.05); verifyGreaterThan(tc, P.lb, 0);
+P = weak19_reading('ptest', [], [], 0.05, 1); verifyEqual(tc, [P.p P.ncl], [1 0]);
+end
+
+function test_reading_verdict(tc)
+% Holm across the adopted steps; a step is confirmed only with every guard.
+G = struct('rec_lb', 0, 'held_lb', -0.005, 'dlv_lb', 0, 'kpi6', 0.04, 'fph', 400);
+P = @(m, p) struct('mean', m, 'p', p, 'lb', NaN, 'ncl', 40, 'how', 'bootstrap');
+E = struct('step', {'dqn_harm', 'dqn_hop'}, 'primary', {'lost_harmed', 'comb'}, 'P', {P(0.1, 0.01), P(0.05, 0.04)});
+V = weak19_reading('verdict', struct('E', E, 'G', G)); verifyEqual(tc, V.confirmed, [true true]);
+E(1).P = P(0.1, 0.03);
+V = weak19_reading('verdict', struct('E', E, 'G', G)); verifyEqual(tc, V.holm, [false false]);   % 0.03 > 0.05 / 2: Holm stops
+E(1).P = P(0.1, 0.01); E(2).P = P(-0.02, 0.001);
+V = weak19_reading('verdict', struct('E', E, 'G', G)); verifyEqual(tc, V.confirmed, [true false]);   % a loss is never a gain
+E(2).P = P(0.05, 0.01);
+Gx = G; Gx.kpi6 = 0.051; V = weak19_reading('verdict', struct('E', E, 'G', Gx)); verifyEqual(tc, V.confirmed, [false false]);
+Gx = G; Gx.fph = 471; V = weak19_reading('verdict', struct('E', E, 'G', Gx)); verifyEqual(tc, V.confirmed, [false false]);
+Gx = G; Gx.dlv_lb = -0.011; V = weak19_reading('verdict', struct('E', E, 'G', Gx)); verifyEqual(tc, V.confirmed, [false false]);
+verifyNotEmpty(tc, strfind(strjoin(V.lines, ' '), 'NOT CONFIRMED'));
 end
 
 function test_reading_refuses_test_before_selection(tc)
@@ -421,6 +583,20 @@ verifyTrue(tc, endsWith(strrep(X.fresh{1}, '\', '/'), 'data/fresh_test_pools.mat
 verifyTrue(tc, endsWith(strrep(X.fresh{2}, '\', '/'), 'data/clean_w19_pools.mat'));
 verifyNotEqual(tc, X.claim_val, X.claim_test);
 verifyNotEqual(tc, X.claim_test, read_once('claim', 'rule_fix', 'test', tree));
+verifyTrue(tc, startsWith(X.tclaim_val, tree) && startsWith(X.tclaim_test, tree) && startsWith(X.tsel, tree));
+end
+
+function test_reading_val_refusals(tc)
+% The validation stage refuses, before it reads anything, when the tree's own marker exists (a lost
+% checkout cannot reopen it) or when the tree already holds the fresh pools.
+tree = tempname; mkdir(tree); cl = onCleanup(@() rmdir(tree, 's')); %#ok<NASGU>
+X = weak19_reading('paths', tree, 'w19val');
+mkdir(fileparts(X.tclaim_val)); read_once('write', X.tclaim_val, {'frozen'});
+verifyError(tc, @() weak19_reading('val', tree, 'w19val'), 'weak19_reading:val_once');
+delete(X.tclaim_val);
+mkdir(fullfile(tree, 'data')); fid = fopen(X.fresh{2}, 'w'); fclose(fid);
+verifyError(tc, @() weak19_reading('val', tree, 'w19val'), 'weak19_reading:fresh_exists');
+verifyFalse(tc, isfolder(X.dir), 'nothing written in the checkout');
 end
 
 %% ---------- helpers ----------
@@ -553,13 +729,15 @@ end
 
 function [T, W] = select_world()
 % 600 validation episodes (antenna_fault harmed, jamming, path_loss; 200 each, one flight each),
-% 100 comb episodes and 400 clean flights; the setting in force and five candidates.
+% 100 comb episodes and 400 clean flights; the setting in force and six candidates. The delivered
+% payload is 0.8 per recovered episode.
 rs = RandStream('mt19937ar', 'Seed', 7);
 n = 600; thr = [repmat({'antenna_fault'}, 1, 200), repmat({'jamming'}, 1, 200), repmat({'path_loss'}, 1, 200)];
 y = struct('recovered', rand(rs, 1, n) < 0.6, 'recoverable', true(1, n), 'threat', true(1, n), 'cl', 1:n, ...
     'harmed', true(1, n), 'c_recovered', rand(rs, 1, 100) < 0.7, 'c_recoverable', true(1, 100), 'c_cl', 1:100);
 y.heldv = y.recovered & rand(rs, 1, n) < 0.9; y.sw = double(rand(rs, 1, 400) < 0.02); y.fph = 400;
-fin = @(x) setfield(setfield(setfield(x, 'rec', mean(x.recovered)), 'held', mean(x.heldv)), 'ret', 0.5); %#ok<SFLD>
+fin = @(x) setfield(setfield(setfield(setfield(setfield(x, 'rec', mean(x.recovered)), 'held', mean(x.heldv)), 'ret', 0.5), ...
+    'dlv', 0.8 * double(x.recovered)), 'c_dlv', 0.8 * double(x.c_recovered)); %#ok<SFLD>
 y = fin(y);
 up = @(x, m, k) setfield(setfield(x, 'recovered', x.recovered | m & (cumsum(m & ~x.recovered) <= k)), 'heldv', ...
     x.heldv | m & (cumsum(m & ~x.heldv) <= k)); %#ok<SFLD>
@@ -569,8 +747,10 @@ x3 = x2; d = find(pl & x3.recovered, 20); x3.recovered(d) = false; x3.heldv(d) =
 x4 = x2; z = find(y.sw == 0, 60); x4.sw(z) = 1;
 x5 = x2; x5.fph = 471;
 x6 = fin(up(y, jm, 50));
+x7 = x2; x7.dlv = x7.dlv - 0.1;
 W = struct('thr', {thr}, 'R', weak19_reading('reg'));
-T = struct('read', struct('name', {'', 'rule', 'fec', 'q', 'rule', 'q'}, 'x', {y, x2, x3, x4, x5, x6}), 'target', 'lost_harmed', 'W', W);
+T = struct('read', struct('name', {'', 'rule', 'fec', 'q', 'rule', 'q', 'fec'}, 'x', {y, x2, x3, x4, x5, x6, x7}), ...
+    'target', 'af_harmed', 'W', W, 'prot', {{}});
 end
 
 function d = parent_dir(tc, rev, rels)

@@ -5,39 +5,52 @@ function varargout = dqn_fix(cmd, varargin)
 %   F = dqn_fix('parse', field, s)   field 'dqn_harm', 'dqn_hop' or 'lb_more'; s the setting:
 %       dqn_harm  'q' | 'rule' | 'fec'    a lost-branch class with harm evidence, held at no_action
 %                 by the DQN for C.esc confirmed cycles, takes one step out of it: q the highest-Q
-%                 configuration not tried (the escalation's step), rule the rule's lost-branch
-%                 answer (power_control; spatial_diversity beside it where the predicted MMSE gain
-%                 reaches the rule's nulling threshold), fec that answer with fec_interleave
+%                 configuration not tried that holds a link-budget or space element, rule the rule's
+%                 lost-branch answer (power_control; spatial_diversity beside it where the predicted
+%                 MMSE gain reaches the rule's nulling threshold), fec that answer with fec_interleave
 %       dqn_hop   'q' | 'rule'            a hop that left the link degraded for C.esc cycles from
-%                 its first frame under an in-channel hostile class takes a configuration with no
-%                 frequency element: q the highest-Q one not tried, rule the space element where
-%                 separable (or already held) and the largest link-budget gain
+%                 its first frame under a jamming class takes a configuration with no frequency
+%                 element: q the highest-Q one not tried, rule the space element where separable
+%                 (or already held) and the largest link-budget gain
 %       lb_more   tokens 'fec', 'step' joined by '+' (lb_complete.m)
 %       F: on, mode (dqn_harm, dqn_hop), fec and step (lb_more), name (canonical)
 %   [a, acted, mem] = dqn_fix('harm', a, cfg, M, mem, PP, F, q, gain, qi, qt, mt, so)
 %   [a, acted, mem] = dqn_fix('hop', a, cfg, M, mem, PP, F, q, gain, mt)
-%   [a, acted] = dqn_fix('step', a, cfg, M, mem, PP, done)   lb_more's step, after the link-budget
-%       completion (done: the episodes it changed, left alone): where the DQN keeps the configuration
-%       in use, the drop alarm is confirmed for C.esc cycles, the completion's deficit D_c is at
-%       least D_min (lb_complete.m) and the link stayed degraded, with or without RF evidence, for
-%       C.esc cycles from that configuration's first frame (mem.hq_n, policy_monitor.m), rate_reduce
-%       is added to its link-budget factor, or rate_reduce+power_control taken when the union is not
-%       a configuration, the frequency and space factors kept. D_c is our signal's power alone: a
-%       residual interferer or the fading margin at the lower mean power is not in it, and the
-%       processing gain (Eb/N0 = S/N0 x 1/R, Sklar 2001, ch. 5) raises the margin whatever its cause.
-%       a the DQN's action after the link-budget completion, cfg the configuration in use, M and
-%       mem the monitor's reading and memory, q the Q-values (nA x NE), gain the predicted MMSE
-%       gain [dB], qi the quiet slot's IoT, qt its threshold, mt the nulling threshold, so the
-%       quiet-slot branch; acted(i): episode i's action was replaced. A configuration taken is
-%       marked tried in this incident (mem.tried, cleared by the monitor on recovery), so each
-%       layer steps once per configuration.
+%   [a, acted, mem] = dqn_fix('step', a, cfg, M, mem, PP, done)   lb_more's step, after the
+%       link-budget completion (done: the episodes it changed or kept, left alone): where the DQN
+%       keeps the configuration in use, the drop alarm is confirmed for C.esc cycles, the
+%       completion's deficit D_c is at least D_min (lb_complete.m) and the link stayed degraded,
+%       with or without RF evidence, for C.esc cycles from that configuration's first frame
+%       (mem.hq_n, policy_monitor.m), rate_reduce is added to its link-budget factor, or
+%       rate_reduce+power_control taken when the union is not a configuration, the frequency and
+%       space factors kept. A configuration holding fec_interleave is left: no configuration joins
+%       rate_reduce and the code, and the code answers the bursts. D_c is our signal's power
+%       alone: a residual interferer or the fading margin at the lower mean power is not in it,
+%       and the processing gain (Eb/N0 = S/N0 x 1/R, Sklar 2001, ch. 5) raises the margin
+%       whatever its cause.
+%   [a, kept, mem] = dqn_fix('keep', a, cfg, M, mem, PP)   a configuration a layer took is kept
+%       while its cause lasts: the lost-branch class (harm), a jamming class (hop), the drop alarm
+%       (step). A DQN proposal that gives the answer back is replaced by the configuration in use:
+%       no_action or one with no link-budget or space element (harm), no_action or a hop (hop), a
+%       lower known gain (step). When the cause ends, or another configuration is in use, the mark
+%       is cleared. Harm evidence is not asked for here: an answer that works removes the
+%       degradation the evidence counts, and a release would bring back the loss and a second
+%       change.
+%   a the DQN's action after the link-budget completion, cfg the configuration in use, M and
+%   mem the monitor's reading and memory, q the Q-values (nA x NE), gain the predicted MMSE
+%   gain [dB], qi the quiet slot's IoT, qt its threshold, mt the nulling threshold, so the
+%   quiet-slot branch; acted(i): episode i's action was replaced. A configuration a layer takes
+%   is marked tried in this incident (mem.tried, cleared by the monitor on recovery), so each
+%   layer steps once per configuration; mem.dk holds it and mem.dl its layer (1 harm, 2 hop,
+%   3 step), 0 for none.
 %   The layers read receiver measurements only: the class, the harm evidence, the degradation
 %   and the configurations' known gains; no truth field.
 switch cmd
     case 'parse', varargout{1} = parse(varargin{:});
     case 'harm',  [varargout{1:3}] = harm(varargin{:});
     case 'hop',   [varargout{1:3}] = hop(varargin{:});
-    case 'step',  [varargout{1:2}] = step(varargin{:});
+    case 'step',  [varargout{1:3}] = step(varargin{:});
+    case 'keep',  [varargout{1:3}] = keep(varargin{:});
     otherwise, error('dqn_fix:cmd', 'dqn_fix: unknown command %s', cmd);
 end
 end
@@ -71,7 +84,7 @@ function [a, acted, mem] = harm(a, cfg, M, mem, PP, F, q, gain, qi, qt, mt, so)
 % Losing one of N branches costs 10 log10(N / (N - 1)) dB of the combined power and one order of
 % diversity (Brennan 1959); the rule's answer raises the link budget (power_control) and nulls a
 % separable interferer; fec_interleave gives back time diversity over frames beyond the coherence
-% time (Tse & Viswanath 2005, ch. 3).
+% time (Tse & Viswanath 2005, ch. 3). A hop alone moves the carrier and restores neither.
 C = decision_config();
 A = PP.actions; nA = numel(A); NE = numel(a);
 acted = false(1, NE);
@@ -79,6 +92,8 @@ F = parse('dqn_harm', F);
 if ~F.on || ~isfield(M, 'harm'), return; end
 na = find(strcmp(A, 'no_action'));
 allowed = policy_mask(cfg, M.confirmed, mem.since, nA, na);
+lbs = lb_or_space(A);
+mem = marks(mem, NE);
 for i = 1:NE
     if ~(ismember(M.cls{i}, {'antenna_fault', 'airframe_shadowing'}) && M.harm(i) && M.confirmed(i) && cfg(i) == na ...
             && a(i) == na && mem.conf_n(i) >= C.esc && mem.since(i) >= C.esc && ~mem.pend(i))
@@ -87,7 +102,7 @@ for i = 1:NE
     j = [];
     if strcmp(F.mode, 'q')
         if ~isempty(q)
-            v = q(:, i); v(mem.tried(i, :)) = -inf; v(na) = -inf; v(~allowed(:, i)) = -inf;
+            v = q(:, i); v(mem.tried(i, :)) = -inf; v(na) = -inf; v(~allowed(:, i)) = -inf; v(~lbs) = -inf;
             [vm, b] = max(v); if isfinite(vm), j = b; end
         end
     else
@@ -97,13 +112,14 @@ for i = 1:NE
     end
     if isempty(j) || j == na || mem.tried(i, j) || ~allowed(j, i), continue; end
     mem.tried(i, cfg(i)) = true; mem.tried(i, j) = true;
-    a(i) = j; acted(i) = true;
+    a(i) = j; acted(i) = true; mem.dk(i) = j; mem.dl(i) = 1;
 end
 end
 
 function [a, acted, mem] = hop(a, cfg, M, mem, PP, F, q, gain, mt)
 % A hop that failed: the configuration in use leaves the channel (channel_switch or
-% freq_diversity), the class is in-channel hostile and the link stayed degraded for C.esc cycles
+% freq_diversity), the class is a jamming one (jamming, reactive_jamming, tone_jamming; power and
+% rate do not answer a counterfeit signal) and the link stayed degraded for C.esc cycles
 % from the first frame received with it (mem.deg_n is cleared on that frame). A jammer that
 % follows the link defeats band switching (Barajas et al. 2026; the tracking jammer of Yuan et al.
 % 2021), and its re-acquisition takes the hop's gain away (link_env.m fdelay, C.fdelay); the
@@ -118,7 +134,8 @@ if ~F.on, return; end
 na = find(strcmp(A, 'no_action'));
 hasF = contains(A, 'channel_switch') | contains(A, 'freq_diversity');
 allowed = policy_mask(cfg, M.confirmed, mem.since, nA, na);
-inch = {'jamming', 'reactive_jamming', 'spoofing', 'tone_jamming'};
+inch = jam_classes();
+mem = marks(mem, NE);
 for i = 1:NE
     if ~(hasF(cfg(i)) && ismember(M.cls{i}, inch) && M.confirmed(i) && mem.deg_n(i) >= C.esc && mem.since(i) >= C.esc ...
             && ~mem.pend(i) && (a(i) == cfg(i) || hasF(a(i))))
@@ -137,11 +154,11 @@ for i = 1:NE
     end
     if isempty(j) || j == cfg(i) || mem.tried(i, j) || ~allowed(j, i), continue; end
     mem.tried(i, cfg(i)) = true; mem.tried(i, j) = true;
-    a(i) = j; acted(i) = true;
+    a(i) = j; acted(i) = true; mem.dk(i) = j; mem.dl(i) = 2;
 end
 end
 
-function [a, acted] = step(a, cfg, M, mem, PP, done)
+function [a, acted, mem] = step(a, cfg, M, mem, PP, done)
 C = decision_config();
 A = PP.actions; nA = numel(A); NE = numel(a);
 acted = false(1, NE);
@@ -150,18 +167,52 @@ gk = config_gain_db(PP);
 na = find(strcmp(A, 'no_action'));
 allowed = policy_mask(cfg, M.confirmed, mem.since, nA, na);
 dmin = C.sev.path_loss.levels(1) / 2;
-keep = {'channel_switch', 'freq_diversity', 'spatial_diversity'};
+keepf = {'channel_switch', 'freq_diversity', 'spatial_diversity'};
+mem = marks(mem, NE);
 for i = 1:NE
     if ~(~done(i) && a(i) == cfg(i) && M.confirmed(i) && M.drop_alarm(i) && mem.drop_n(i) >= C.esc && mem.hq_n(i) >= C.esc ...
             && mem.since(i) >= C.hold && ~mem.pend(i) && mem.lb_dc(i) >= dmin)
         continue
     end
     p = strsplit(A{cfg(i)}, '+');
-    if ismember('rate_reduce', p), continue; end
-    fs = p(ismember(p, keep));
+    if any(ismember({'rate_reduce', 'fec_interleave'}, p)), continue; end
+    fs = p(ismember(p, keepf));
     j = find(strcmp(A, strjoin([fs, {'rate_reduce'}, p(ismember(p, {'power_control'}))], '+')), 1);
     if isempty(j), j = find(strcmp(A, strjoin([fs, {'rate_reduce', 'power_control'}], '+')), 1); end
-    if isempty(j) || j == cfg(i) || gk(j) <= gk(cfg(i)) || ~allowed(j, i), continue; end
-    a(i) = j; acted(i) = true;
+    if isempty(j) || j == cfg(i) || gk(j) <= gk(cfg(i)) || mem.tried(i, j) || ~allowed(j, i), continue; end
+    mem.tried(i, cfg(i)) = true; mem.tried(i, j) = true;
+    a(i) = j; acted(i) = true; mem.dk(i) = j; mem.dl(i) = 3;
 end
+end
+
+function [a, kept, mem] = keep(a, cfg, M, mem, PP)
+A = PP.actions; NE = numel(a);
+kept = false(1, NE);
+if ~isfield(mem, 'dk'), return; end
+na = find(strcmp(A, 'no_action'));
+hasF = contains(A, 'channel_switch') | contains(A, 'freq_diversity');
+lbs = lb_or_space(A); gk = config_gain_db(PP);
+for i = 1:NE
+    if mem.dk(i) == 0, continue; end
+    switch mem.dl(i)
+        case 1, on = ismember(M.cls{i}, {'antenna_fault', 'airframe_shadowing'}); give = a(i) == na || ~lbs(a(i));
+        case 2, on = ismember(M.cls{i}, jam_classes()); give = a(i) == na || hasF(a(i));
+        otherwise, on = M.drop_alarm(i); give = gk(a(i)) < gk(cfg(i));
+    end
+    if cfg(i) ~= mem.dk(i) || ~on, mem.dk(i) = 0; mem.dl(i) = 0; continue; end
+    if give && a(i) ~= cfg(i), a(i) = cfg(i); kept(i) = true; end
+end
+end
+
+function mem = marks(mem, NE)
+if ~isfield(mem, 'dk'), mem.dk = zeros(1, NE); mem.dl = zeros(1, NE); end
+end
+
+function b = lb_or_space(A)
+% Configurations holding a link-budget or space element.
+b = contains(A, 'power_control') | contains(A, 'rate_reduce') | contains(A, 'spatial_diversity');
+end
+
+function c = jam_classes()
+c = {'jamming', 'reactive_jamming', 'tone_jamming'};
 end

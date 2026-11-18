@@ -25,10 +25,11 @@ function [a, acted] = lb_complete(a, cfg, M, mem, PP, F)
 %   the largest); its frequency and space factors are kept, and the result must pass the
 %   shield (policy_mask.m).
 %   F (optional): PP.lb_more parsed (dqn_fix.m); absent or off leaves every action as above. With
-%   its fec token a proposal holding fec_interleave is completed too: power_control+fec_interleave
-%   when its known gain covers D_c, else fec_interleave gives way to the link-budget match (time
-%   diversity over the codeword shapes the fading's slope, it does not raise the mean Eb/N0 a
-%   loss took; Tse & Viswanath 2005, ch. 3). Its step token: dqn_fix.m.
+%   its fec token a proposal holding fec_interleave is completed too: the power step joins the
+%   code (power_control+fec_interleave, the frequency and space factors kept), the largest link
+%   budget a configuration with the code has. The code is never dropped: no configuration joins
+%   rate_reduce and the code, and the code answers the bursts the proposal saw (time diversity over
+%   the codeword, Tse & Viswanath 2005, ch. 3). Its step token: dqn_fix.m.
 if nargin < 6 || isempty(F), F = struct('on', false, 'fec', false); end
 C = decision_config();
 A = PP.actions; nA = numel(A); NE = numel(a);
@@ -52,7 +53,7 @@ for i = 1:NE
     if ismember('fec_interleave', p)
         if ~(F.on && F.fec), continue; end
         j = find(strcmp(A, strjoin([p(ismember(p, keep)), {'power_control', 'fec_interleave'}], '+')), 1);
-        if ~isempty(j) && gk(j) < dc, j = []; end
+        if isempty(j), continue; end
     end
     if isempty(j)
         bud.drop_db = dc;
