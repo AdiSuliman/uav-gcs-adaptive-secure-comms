@@ -6,18 +6,23 @@ function [SP, FAMS, f_out] = clean_set_layout(set, smoke)
 %   'fresh'  block 15, families 7, 8, 9 -> data/clean_fresh_pools.mat: P1R's KPI 6 set
 %            (docs/p1r_protocol.md), seeds no earlier set flew; with smoke true (SMOKE) block
 %            18, the smoke's own, so the smoke never flies the fresh set's flights
-%   'fresh' stops when any of its (family, block) pairs belongs to another set (pool_seed_owner.m).
+%   'w19'    block 17, families 7, 8, 9 -> data/clean_w19_pools.mat: the clean flights of the
+%            weak-point fixes' fresh test set (fresh_set_layout.m), read once; with smoke true block 16
+%   'fresh' and 'w19' stop when any of their (family, block) pairs belongs to another set
+%   (pool_seed_owner.m).
 if nargin < 2, smoke = false; end
 switch set
     case 'test',  SP = 15; FAMS = [1 3 5]; f_out = 'data/clean_test_pools.mat';
     case 'val',   SP = 4;  FAMS = [1 3 5]; f_out = 'data/clean_val_pools.mat';
     case 'fresh', SP = 15; FAMS = [7 8 9]; f_out = 'data/clean_fresh_pools.mat';
         if smoke, SP = 18; end
-    otherwise, error('clean_set_layout:set', 'build_clean_test_pools: CLEAN_SET must be ''test'', ''val'' or ''fresh''');
+    case 'w19',   SP = 17; FAMS = [7 8 9]; f_out = 'data/clean_w19_pools.mat';
+        if smoke, SP = 16; f_out = 'data/clean_w19_pools_smoke.mat'; end
+    otherwise, error('clean_set_layout:set', 'build_clean_test_pools: CLEAN_SET must be ''test'', ''val'', ''fresh'' or ''w19''');
 end
-if strcmp(set, 'fresh')
+if any(strcmp(set, {'fresh', 'w19'}))
     own = arrayfun(@(f) pool_seed_owner(f, SP), FAMS, 'UniformOutput', false);
-    if ~all(strcmp(own, 'fresh'))
+    if ~all(strcmp(own, set))
         error('clean_set_layout:reuse', 'clean_set_layout: the fresh set''s families %s of block %d are not its own (%s)', ...
             mat2str(FAMS), SP, strjoin(own, ', '));
     end

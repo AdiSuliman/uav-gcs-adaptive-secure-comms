@@ -71,6 +71,12 @@
 % decoder chosen on dev set C (docs/noise_burst_protocol.md), recorded in PP.fec_rx and in
 % PP.model_tag (MODEL_TAG + its decisions entry).
 %
+% With FRESH_SET true (weak19_reading.m) only the test split is flown, on the fresh set's own
+% flights (fresh_set_layout.m: geometry family 4 of its block, its geometries per (cell, Eb/N0), its
+% own Latin hypercube streams and shadowing candidates, fresh_shadow_seed.m); every other split's
+% geometry is laid out as above but not simulated, data/policy_pools.mat is neither read for reuse
+% nor written, and the split's pools go to the layout's file (struct FT, fresh_splice.m).
+%
 % Output: data/policy_pools.mat (PP, clean_ref); C1c replaces clean_ref, PP.clean and
 % PP.clean_fer with the table of the clean validation pools (clean_ref_rebuild.m)
 
@@ -127,6 +133,12 @@ p0 = fec_rx_on(p0, FRX);
 TAG = MODEL_TAG; if strcmp(FRX.mode, 'jsi'), TAG = [MODEL_TAG '+' FRX.rev]; end
 if strcmp(FRX.mode, 'jsi'), fprintf('Coded link decoder: JSI (%s)\n', TAG); else, fprintf('Coded link decoder: D78 erasure rules\n'); end
 
+FRESH = exist('FRESH_SET', 'var') && isequal(FRESH_SET, true);   % the fresh test set alone (fresh_set_layout.m)
+FAM = ones(1, numel(SPLITS)); LHS_B = LHS_SEED * ones(1, numel(SPLITS));
+if FRESH
+    FL = fresh_set_layout(exist('SMOKE', 'var') && SMOKE);
+    BLOCK(3) = FL.block; NGEO(3) = FL.ngeo; FAM(3) = FL.fam; LHS_B(3) = FL.lhs_seed;
+end
 D = load('data/trained_detector.mat', 'net', 'classes', 'ood', 'trained_at');
 nm = split_norm();                                     % the training z-score alone
 det = struct('net', D.net, 'ood', D.ood, 'classes', {cellstr(string(D.classes(:)'))}, ...
@@ -208,11 +220,12 @@ kind = 1 + contains({cells.threat}, '+'); kind(strcmp({cells.threat}, 'none')) =
 for c = 1:nC
     cells(c).geo = cg{c};
     cells(c).splits = find(~cellfun(@isempty, cg{c}));
+    if FRESH, cells(c).splits = intersect(cells(c).splits, 3); end
 end
 r0 = arrayfun(@(sp) sum(nG(1:sp-1) .* (BLOCK(1:sp-1) == BLOCK(sp))), 1:nSp);   % splits sharing a block take consecutive geometries
 runs = arrayfun(@(sp) 100 * BLOCK(sp) + r0(sp) + (1:nG(sp)), 1:nSp, 'UniformOutput', false);
 old = [];
-if isfile('data/policy_pools.mat')
+if ~FRESH && isfile('data/policy_pools.mat')
     Lo = load('data/policy_pools.mat', 'PP');
     oc3 = ''; if isfield(Lo.PP, 'core3_id'), oc3 = Lo.PP.core3_id; end
     if isfield(Lo.PP, 'model_tag') && strcmp(Lo.PP.model_tag, TAG) && isfield(Lo.PP, 'det_id') ...
@@ -246,15 +259,15 @@ for s = 1:nS
     g = struct('seed', {}, 'speed', {}, 'run', {}, 'alt', {}, 'ksig', {}, 'aoa1', {}, 'rho', {});
     for sp = 1:nSp
         r = r0(sp) + (1:NGEO(sp));
-        lhs = []; if LHS(sp), lhs = LHS_SEED + 100*s + sp; end
+        lhs = []; if LHS(sp), lhs = LHS_B(sp) + 100*s + sp; end
         if strcmp(SPLITS{sp}, 'speed')
             g(sp) = pool_geometries(s, BLOCK(sp), r, VOUT(1 + ((1:NGEO(sp))' > NHOVER), :), p0);
         else
-            g(sp) = pool_geometries(s, BLOCK(sp), r, vrange, p0, lhs);
+            g(sp) = pool_geometries(s, BLOCK(sp), r, vrange, p0, lhs, FAM(sp));
         end
         if NCOMB(sp) > 0
             if LHS(sp), lhs = lhs + 10; end
-            gc = pool_geometries(s, BLOCK(sp), r0(sp) + NGEO(sp) + (1:NCOMB(sp)), vrange, p0, lhs);
+            gc = pool_geometries(s, BLOCK(sp), r0(sp) + NGEO(sp) + (1:NCOMB(sp)), vrange, p0, lhs, FAM(sp));
             for f = fieldnames(gc)', g(sp).(f{1}) = [g(sp).(f{1}), gc.(f{1})]; end
         end
     end
@@ -265,18 +278,19 @@ for s = 1:nS
         if sp == iSpd
             vr = repmat(VOUT(2, :), n, 1);
         elseif LHS(sp)
-            lhs = LHS_SEED + 100*s + 10 * (gi + 1) + sp + 5 * (P.part - 1);
+            lhs = LHS_B(sp) + 100*s + 10 * (gi + 1) + sp + 5 * (P.part - 1);
         end
         ps = pS{gi}; eb = EBNO(s);
         sel = struct('seed', @(j, v) shadow_pool_seed(gi, s, b, j, v), 'j0', jc(gi, b), 'jmax', J_MAX, 'floor', @(a) shadow_alt_floor(a, eb, ps), ...
             'keep', @(sd, v, a, kk, o, c) hides_antenna(sd, v, ps, struct('ebno', eb, 'alt_m', a, 'k_sig_db', kk, ...
             'aoa1_deg', o, 'rho', c, 'event_frame', C.event_frame, 'frames', C.event_count)));
+        if FRESH && sp == 3 && ~FL.smoke, sel.seed = @(j, v) fresh_shadow_seed(gi, s, j, v); sel.jmax = 59999; end   % the fresh set's own candidates
         [gk, info] = pool_geometries(s, b, r0(sp) + P.pos, vr, p0, lhs, 1, sel);
         jc(gi, b) = info.j;
         SH.tried(gi, sp, s) = SH.tried(gi, sp, s) + sum(info.tries); SH.kept(gi, sp, s) = SH.kept(gi, sp, s) + n;
         for f = fieldnames(gk)', g(sp).(f{1}) = [g(sp).(f{1}), gk.(f{1})]; end
     end
-    for gi = 1:nGr                                      % the share of the flights that hide an antenna (shadow_note.m): the next
+    for gi = 1:nGr * ~FRESH                             % the share of the flights that hide an antenna (shadow_note.m): the next
         b = BLOCK(end); ps = pS{gi}; eb = EBNO(s);      % candidates of the second test split's block, unstratified, counted only
         sel = struct('seed', @(j, v) shadow_pool_seed(gi, s, b, j, v), 'j0', jc(gi, b), 'jmax', J_MAX, ...
             'keep', @(sd, v, a, kk, o, c) hides_antenna(sd, v, ps, struct('ebno', eb, 'alt_m', a, 'k_sig_db', kk, ...
@@ -390,6 +404,7 @@ else
     end
 end
 CKD = fullfile(pwd, 'data', 'c1p_cells');               % finished cells (pool_checkpoint.m; the workers work elsewhere)
+if FRESH, CKD = fullfile(pwd, 'data', FL.ckd); end
 keys = arrayfun(@(c) pool_checkpoint('key', [{MODEL_TAG, DET_ID, runs, cells(c), EBNO, ACTIONS, geoc{c}, opt, ...
     threat_params(p0, cells(c).threat, cells(c).sev, C)}, c3_key]), 1:nC, 'UniformOutput', false);
 todo = pool_checkpoint('todo', CKD, keys);
@@ -403,6 +418,25 @@ S = struct('cells', {cells}, 'p0', {p0}, 'C', {C}, 'ACTIONS', {ACTIONS}, 'EBNO',
 pool_lpt(@(S, c) pool_job('c1p', S, c), S, todo, pl);
 clear S
 fprintf('Simulated in %.1f min\n', toc(t0) / 60);
+if FRESH                                                % the fresh test split alone, read through fresh_splice.m
+    P3 = cell(nC, nS, nA);
+    for c = 1:nC
+        R = pool_checkpoint('load', CKD, c); Pc = reshape(R.Pc, nS, nA, nSp); P3(c, :, :) = Pc(:, :, 3);
+    end
+    clear R Pc
+    FT = struct('pools', {P3}, 'runs', runs{3}, 'cov', cv{3}, 'speed', spd{3}, 'event_frame', evf{3}, 'ref_geo', {ref{3}}, ...
+        'cell_geo', {cellfun(@(g) g{3}, {cells.geo}, 'UniformOutput', false)}, 'ngeo', NGEO(3), 'block', BLOCK(3), 'fam', FAM(3), ...
+        'lhs_seed', LHS_B(3), 'seed', {arrayfun(@(s) geo{s}(3).seed, 1:nS, 'UniformOutput', false)}, 'scen', {{cells.threat}}, ...
+        'sev', [cells.sev], 'level', [cells.level], 'ebno', EBNO, 'actions', {ACTIONS}, 'det_id', DET_ID, 'model_tag', TAG, ...
+        'fec_rx', FRX, 'shadow_tried', squeeze(SH.tried(:, 3, :)), 'shadow_kept', squeeze(SH.kept(:, 3, :)), 'smoke', FL.smoke, ...
+        'created', datestr(now));
+    if ~isempty(c3_id), FT.core3_id = c3_id; end
+    pool_checkpoint('commit', FL.out, struct('FT', FT));
+    pool_checkpoint('clear', CKD);
+    fprintf('Saved %s (%.1f min)\n', FL.out, toc(t0) / 60);
+    clear P3 FT FRESH_SET
+    return
+end
 
 %% 3. Package
 pools = cell(nC, nS, nA, nSp);

@@ -15,6 +15,9 @@
 %           (docs/p1r_protocol.md), seeds no earlier set flew; built only after C1d adopted a
 %           degradation test (clean_fresh_guard.m), never by the chain's C1c; the smoke's
 %           fresh build flies block 18 instead, never the set's own flights
+%   'w19'   seed block 17, families 7, 8, 9 -> data/clean_w19_pools.mat: the clean flights of the
+%           weak-point fixes' fresh test set (fresh_set_layout.m, weak19_reading.m), read once; its
+%           readers check every seed against clean_set_layout.m (CT.seed, CT.set)
 % Geometry k takes clean_pool_seed.m's seed (families 1, 3 and 5 of the block; the fresh set
 % 7, 8 and 9); every per-flight draw is kept as the pools keep theirs (CT.cov, flight_cov.m),
 % so readers never re-derive them. The detector must be that of data/policy_pools.mat: CT.det_id and
