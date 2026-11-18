@@ -90,6 +90,11 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %   max(n, C.confirm_sweep(2)) cycles were quiet (M.quiet); info.relm marks the releases the policy did
 %   not make itself.
 %
+%   PP.dqn_harm, PP.dqn_hop (dqn kinds; dqn_fix.m): after the link-budget completion and before the
+%   escalation, a step out of no_action on a lost-branch class with harm evidence (M.harm), and a step
+%   out of a hop that left the link degraded under an in-channel class; '' or absent: off, every
+%   action and memory field as it was; info.dh and info.dp mark the episodes changed. PP.lb_more (with
+%   PP.lb_complete; lb_complete.m, dqn_fix.m step): info.lb marks its changes too.
 %   PP.rule_fix (rule, table and their escalations, the core and blind ones included; rule_fix.m): the
 %   layered answers of the rule and the escalation that keeps what the configuration in use holds;
 %   '' or absent leaves every answer and rung as it was; keep covers the drop alarm's link-budget step
@@ -202,7 +207,25 @@ end
 
 lbc = false(1, NE);
 lbon = strcmp(base, 'dqn') && isfield(PP, 'lb_complete') && ~isempty(PP.lb_complete) && PP.lb_complete;
-if lbon, [a, lbc] = lb_complete(a, cfg, M, mem, PP); end   % after the argmax, before the escalation
+lm = struct('on', false, 'fec', false, 'step', false);
+if lbon && isfield(PP, 'lb_more'), lm = dqn_fix('parse', 'lb_more', PP.lb_more); end
+if lbon && ~lm.on, [a, lbc] = lb_complete(a, cfg, M, mem, PP); end   % after the argmax, before the escalation
+if lm.on
+    [a, lbc] = lb_complete(a, cfg, M, mem, PP, lm);
+    if lm.step, [a, lbs] = dqn_fix('step', a, cfg, M, mem, PP, lbc); lbc = lbc | lbs; end
+end
+dhc = false(1, NE); dpc = false(1, NE);
+dh = struct('on', false); dp = dh;
+if strcmp(base, 'dqn') && isfield(PP, 'dqn_harm'), dh = dqn_fix('parse', 'dqn_harm', PP.dqn_harm); end
+if strcmp(base, 'dqn') && isfield(PP, 'dqn_hop'), dp = dqn_fix('parse', 'dqn_hop', PP.dqn_hop); end
+if dh.on || dp.on                                % the DQN's decision-time layers, before the escalation
+    gn = obs_mmse_pred(obs, NE); qx = obs.feat(:, feature_index('q_iot'));
+    qt = NaN; if isfield(PP, 'q_thr') && ~isempty(PP.q_thr), qt = PP.q_thr; end
+    mt = C.rule_mmse_db; if isfield(PP, 'rule_mmse_db') && ~isempty(PP.rule_mmse_db), mt = PP.rule_mmse_db; end
+    so = true; if isfield(PP, 'rule_slot') && ~isempty(PP.rule_slot), so = PP.rule_slot; end
+    if dh.on, [a, dhc, mem] = dqn_fix('harm', a, cfg, M, mem, PP, dh, q, gn, qx, qt, mt, so); end
+    if dp.on, [a, dpc, mem] = dqn_fix('hop', a, cfg, M, mem, PP, dp, q, gn, mt); end
+end
 
 escalated = false(1, NE);
 if endsWith(kind, '_esc')
@@ -253,6 +276,8 @@ if isfield(M, 'deg_quiet'), info.deg_quiet = M.deg_quiet; end   % degraded, no R
 if isfield(M, 'unk'), info.unk = M.unk; end                      % the unknown flag of U (D111, policy_monitor.m)
 if c3, info.l3 = M.l3; end                                       % the three-state window (policy_monitor.m)
 if lbon, info.lb = lbc; end                                      % changed by the link-budget completion
+if dh.on, info.dh = dhc; end                                     % stepped out of no_action on a harmful lost branch
+if dp.on, info.dp = dpc; end                                     % left a hop that failed
 if rm_on, info.relm = relm; end                  % released on evidence this cycle
 if isfield(M, 'lb_not_accepted'), info.lb_na = M.lb_not_accepted; end   % lost branch, not accepted (CLT, D121 item 1)
 if s1g || s1gc, info.s1w = s1w; info.s1b = s1b; end                      % the lost-branch gate's withheld answers, blocked escalations

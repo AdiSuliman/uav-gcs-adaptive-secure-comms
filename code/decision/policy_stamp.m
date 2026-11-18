@@ -9,7 +9,8 @@ function s = policy_stamp(Q)
 %   set, the smoke's forced cells wf_forced, the
 %   form of the false-switch penalty the agent was trained under (fa_form) only when C2 ran with the
 %   no-threat form's switch on, the link-budget completion lb_complete and its forced mark lb_forced
-%   only when true, so earlier stamps stay). Results that
+%   only when true, and the DQN's layers dqn_harm, dqn_hop and lb_more only when on, so earlier stamps
+%   stay). Results that
 %   depend on the deployed policy store it (evaluate_policies.m, measure_latency.m, edge_map.m),
 %   and the readers flag a result whose stamp is not the current one (result_status.m).
 f = @(n) field_or(Q, n);
@@ -52,6 +53,10 @@ x = field_or(S, 'lb_accept');                                      % the lost-br
 if isstruct(x) && isfield(x, 'tau_hi'), c{end+1} = {'lb_accept', double(x.tau_hi)}; end
 for n = {'lb_complete', 'lb_forced'}                  % the link-budget completion and the smoke's forced mark, when on
     if isequal(field_or(S, n{1}), true), c{end+1} = {n{1}, true}; end %#ok<AGROW>
+end
+for n = {'dqn_harm', 'dqn_hop', 'lb_more'}                         % the DQN's decision-time layers, canonical, when on
+    x = field_or(S, n{1});
+    if ~isempty(x), F = dqn_fix('parse', n{1}, x); if F.on, c{end+1} = {n{1}, F.name}; end, end %#ok<AGROW>
 end
 end
 
