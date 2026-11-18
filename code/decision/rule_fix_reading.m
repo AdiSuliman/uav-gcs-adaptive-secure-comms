@@ -19,6 +19,7 @@ function out = rule_fix_reading(stage, varargin)
 %       reproduced with the option off before the marker is set (any mismatch stops); nothing
 %       adopted: the test is not read -> test.mat, the test section of rule_fix_reading.txt
 %   X = rule_fix_reading('paths', tree, tag)   the files of a reading
+%   T = rule_fix_reading('registered', f, rs)   the registered rule rows of a dqn_training.txt
 %   J = rule_fix_reading('guard', X)      the test stage's refusals in order ({} none)
 %   F = rule_fix_reading('fingerprint', X)   the hashes the selection is frozen with
 %   S = rule_fix_reading('select', R)     the registered selection over validation readings R
@@ -56,6 +57,7 @@ switch stage
     case 'fingerprint', out = fingerprint(varargin{:});
     case 'select', out = select(varargin{:});
     case 'adopt',  out = adopt(varargin{:});
+    case 'registered', out = registered_txt(varargin{:});
     otherwise, error('rule_fix_reading:stage', 'rule_fix_reading: unknown stage %s', stage);
 end
 end
@@ -243,7 +245,9 @@ T.ref = struct('alarm', t{1}, 'drop', str2double(t{2}));
 j = find(contains(L, 'core rule (rule_core'), 1);
 assert(~isempty(j), 'rule_fix_reading:registered', 'rule_fix_reading: no core-rule rows in %s', f);
 cn = ''; if isfield(rs, 'core_nb'), cn = rs.core_nb; end
-k = j + find(contains(L(j+1:end), sprintf('core rule on a noise burst %s |', cn)), 1);
+% the settings may go on after the noise-burst answer (the lost-branch gates) before the readings
+pc = ['core rule on a noise burst ' regexptranslate('escape', cn) '(, [^|]*)? \|'];
+k = j + find(~cellfun(@isempty, regexp(L(j+1:end), pc, 'once')), 1);
 assert(~isempty(k) && ~startsWith(strtrim(L{k}), '->'), 'rule_fix_reading:registered', ...
     'rule_fix_reading: no core-rule row at the chosen settings in %s', f);
 h = regexp(L{k}, 'held ([\d.]+)%, recovered ([\d.]+)%', 'tokens', 'once');

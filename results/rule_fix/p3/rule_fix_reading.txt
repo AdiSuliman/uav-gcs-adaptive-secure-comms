@@ -1,0 +1,150 @@
+=== RULE FIX: VALIDATION (p3, tree C:\Users\Adi Suliman\uav-gcs-v7-p3) ===
+Generated: 18-Nov-2026 18:55:39
+Validation split only: 6696 episodes (every cell, Eb/N0 and geometry x2, seed 99), 1800 clean validation flights from 0.0 dB.
+Off, the registered readings reproduced (registered files: trained_dqn.mat, dqn_training.txt):
+  rule_sel held                                                    0.701629 registered     0.701629: reproduced
+  rule_sel recovered                                               0.762559 registered     0.762559: reproduced
+  rule_sel clean flights with a change                                  142 registered          142: reproduced
+  rule_sel clean flights                                               1800 registered         1800: reproduced
+  rule + escalation at the deployed settings, held                 0.701629 registered     0.701629: reproduced
+  rule + escalation at the deployed settings, recovered            0.762559 registered     0.762559: reproduced
+  core rule at the reference monitor, held [%]                      42.6171 registered         42.6: reproduced
+  core rule at the reference monitor, recovered [%]                 47.1826 registered         47.2: reproduced
+  core rule clean flights with a change                                 240 registered          240: reproduced
+  grid class_drop 3/3 drop 270.0 held [%]                           70.9946 registered           71: reproduced
+  grid class_drop 3/3 drop 270.0 recovered [%]                      77.3931 registered         77.4: reproduced
+  grid class_drop 3/3 drop 270.0 false alarms [%]                   11.0556 registered         11.1: reproduced
+  grid class_drop 3/3 drop 225.0 held [%]                           70.9946 registered           71: reproduced
+  grid class_drop 3/3 drop 225.0 recovered [%]                      77.4779 registered         77.5: reproduced
+  grid class_drop 3/3 drop 225.0 false alarms [%]                   11.2222 registered         11.2: reproduced
+  grid class_drop 3/3 drop 180.0 held [%]                           70.8248 registered         70.8: reproduced
+  grid class_drop 3/3 drop 180.0 recovered [%]                      77.5798 registered         77.6: reproduced
+  grid class_drop 3/3 drop 180.0 false alarms [%]                   11.6667 registered         11.7: reproduced
+  grid class_drop 2/2 drop 180.0 held [%]                           71.4358 registered         71.4: reproduced
+  grid class_drop 2/2 drop 180.0 recovered [%]                      78.4284 registered         78.4: reproduced
+  grid class_drop 2/2 drop 180.0 false alarms [%]                   13.3333 registered         13.3: reproduced
+  grid class_drop 2/2 drop 171.0 held [%]                            71.351 registered         71.4: reproduced
+  grid class_drop 2/2 drop 171.0 recovered [%]                      78.4453 registered         78.4: reproduced
+  grid class_drop 2/2 drop 171.0 false alarms [%]                   13.4444 registered         13.4: reproduced
+  grid class_drop 4/5 drop 270.0 held [%]                           70.8079 registered         70.8: reproduced
+  grid class_drop 4/5 drop 270.0 recovered [%]                      77.1215 registered         77.1: reproduced
+  grid class_drop 4/5 drop 270.0 false alarms [%]                   10.4444 registered         10.4: reproduced
+  grid class_drop 4/5 drop 225.0 held [%]                           70.7909 registered         70.8: reproduced
+  grid class_drop 4/5 drop 225.0 recovered [%]                      77.2234 registered         77.2: reproduced
+  grid class_drop 4/5 drop 225.0 false alarms [%]                   10.6111 registered         10.6: reproduced
+  grid class_drop 4/5 drop 180.0 held [%]                           70.6891 registered         70.7: reproduced
+  grid class_drop 4/5 drop 180.0 recovered [%]                      77.3252 registered         77.3: reproduced
+  grid class_drop 4/5 drop 180.0 false alarms [%]                        11 registered           11: reproduced
+  grid class_drop 5/5 drop 270.0 held [%]                           70.1629 registered         70.2: reproduced
+  grid class_drop 5/5 drop 270.0 recovered [%]                      76.2559 registered         76.3: reproduced
+  grid class_drop 5/5 drop 270.0 false alarms [%]                   7.88889 registered          7.9: reproduced
+  grid class_drop 5/5 drop 225.0 held [%]                           70.1629 registered         70.2: reproduced
+  grid class_drop 5/5 drop 225.0 recovered [%]                      76.3747 registered         76.4: reproduced
+  grid class_drop 5/5 drop 225.0 false alarms [%]                   8.05556 registered          8.1: reproduced
+  grid class_drop 5/5 drop 180.0 held [%]                           70.0611 registered         70.1: reproduced
+  grid class_drop 5/5 drop 180.0 recovered [%]                      76.4936 registered         76.5: reproduced
+  grid class_drop 5/5 drop 180.0 false alarms [%]                   8.44444 registered          8.4: reproduced
+  deployed policy (dqn)                                                   1 registered            1: reproduced
+Deployed DQN (dqn) held 0.8512 (registered 0.8466), clean flights with a change 69 of 1800 (descriptive)
+
+Step 1, in-channel answers, against off:
+  keep+st: passes
+    (a) target threats, held +3.31 points, lower bound +2.41: ok
+    (b) jamming                              n   360 recovered +2.78, lower bound +0.83: ok
+    (b) reactive_jamming                     n   360 recovered +2.78, lower bound +1.11: ok
+    (b) spoofing                             n   360 recovered +1.39, lower bound +0.28: ok
+    (b) benign_interference                  n   360 recovered +2.22, lower bound +1.11: ok
+    (b) jamming+path_loss                    n   126 recovered +3.97, lower bound +0.79: ok
+    (b) sweeping_jammer+path_loss            n   144 recovered +8.33, lower bound +3.57: ok
+    (b) spoofing+noise_burst                 n   192 recovered +4.17, lower bound +1.02: ok
+    (b) reactive_jamming+path_loss           n   126 recovered +1.59, lower bound +0.00: ok
+    (b) jamming+antenna_fault                n   216 recovered +3.70, lower bound +1.85: ok
+    (b) benign_interference+noise_burst      n   192 recovered +1.56, lower bound +0.00: ok
+    (b) tone_jamming+path_loss               n   126 recovered +7.14, lower bound +2.46: ok
+    (b) jamming+spoofing+benign_interference n   216 recovered +5.09, lower bound +2.31: ok
+    (b) noise_burst+spoofing+antenna_fault   n   178 recovered +2.81, lower bound +1.10: ok
+    (b) jamming+airframe_shadowing+path_loss n   138 recovered +9.42, lower bound +4.55: ok
+    (b) tone_jamming+spoofing+airframe_shadowing n   216 recovered +0.46, lower bound +0.00: ok
+    (c) pooled held +2.43 (lb +1.80), recovered +1.87 (lb +1.41): ok
+    (d) clean flights with a change 142 -> 142 of 1800, bound 9.01% -> 9.01%: ok
+    (e) core rule pooled held +1.26 (lb +0.52): ok
+  keep+st+rate: passes
+    (a) target threats, held +11.12 points, lower bound +9.06: ok
+    (b) jamming                              n   360 recovered +6.39, lower bound +2.78: ok
+    (b) reactive_jamming                     n   360 recovered +18.33, lower bound +11.67: ok
+    (b) spoofing                             n   360 recovered +7.22, lower bound +3.61: ok
+    (b) benign_interference                  n   360 recovered +4.17, lower bound +2.22: ok
+    (b) tone_jamming                         n   360 recovered +3.61, lower bound +0.83: ok
+    (b) jamming+path_loss                    n   126 recovered +15.87, lower bound +9.48: ok
+    (b) sweeping_jammer+path_loss            n   144 recovered +8.33, lower bound +3.57: ok
+    (b) spoofing+noise_burst                 n   192 recovered +4.17, lower bound +1.02: ok
+    (b) reactive_jamming+path_loss           n   126 recovered +23.81, lower bound +16.67: ok
+    (b) jamming+antenna_fault                n   216 recovered +12.04, lower bound +6.94: ok
+    (b) spoofing+sweeping_jammer             n   216 recovered +3.70, lower bound +0.46: ok
+    (b) benign_interference+noise_burst      n   192 recovered +1.56, lower bound +0.00: ok
+    (b) tone_jamming+path_loss               n   126 recovered +18.25, lower bound +11.86: ok
+    (b) jamming+spoofing+benign_interference n   216 recovered +6.94, lower bound +3.70: ok
+    (b) noise_burst+spoofing+antenna_fault   n   178 recovered +2.81, lower bound +1.10: ok
+    (b) jamming+airframe_shadowing           n   216 recovered +2.31, lower bound +0.00: ok
+    (b) jamming+airframe_shadowing+path_loss n   138 recovered +14.49, lower bound +8.21: ok
+    (b) tone_jamming+spoofing+airframe_shadowing n   216 recovered +1.85, lower bound +0.00: ok
+    (c) pooled held +7.67 (lb +6.29), recovered +5.47 (lb +4.27): ok
+    (d) clean flights with a change 142 -> 142 of 1800, bound 9.01% -> 9.01%: ok
+    (e) core rule pooled held +2.51 (lb +1.55): ok
+  keep+st+match: passes
+    (a) target threats, held +7.60 points, lower bound +6.27: ok
+    (b) jamming                              n   360 recovered +5.28, lower bound +2.22: ok
+    (b) reactive_jamming                     n   360 recovered +2.78, lower bound +1.11: ok
+    (b) spoofing                             n   360 recovered +3.06, lower bound +0.56: ok
+    (b) benign_interference                  n   360 recovered +2.78, lower bound +1.39: ok
+    (b) tone_jamming                         n   360 recovered +1.39, lower bound +0.00: ok
+    (b) jamming+path_loss                    n   126 recovered +6.35, lower bound +2.63: ok
+    (b) sweeping_jammer+path_loss            n   144 recovered +8.33, lower bound +3.57: ok
+    (b) spoofing+noise_burst                 n   192 recovered +4.17, lower bound +1.02: ok
+    (b) reactive_jamming+path_loss           n   126 recovered +1.59, lower bound +0.00: ok
+    (b) jamming+antenna_fault                n   216 recovered +7.87, lower bound +4.63: ok
+    (b) benign_interference+noise_burst      n   192 recovered +1.56, lower bound +0.00: ok
+    (b) tone_jamming+path_loss               n   126 recovered +7.94, lower bound +3.33: ok
+    (b) jamming+spoofing+benign_interference n   216 recovered +6.48, lower bound +3.24: ok
+    (b) noise_burst+spoofing+antenna_fault   n   178 recovered +2.81, lower bound +1.10: ok
+    (b) jamming+airframe_shadowing           n   216 recovered +1.85, lower bound +0.00: ok
+    (b) jamming+airframe_shadowing+path_loss n   138 recovered +10.14, lower bound +4.93: ok
+    (b) tone_jamming+spoofing+airframe_shadowing n   216 recovered +0.46, lower bound +0.00: ok
+    (c) pooled held +5.31 (lb +4.42), recovered +2.60 (lb +1.95): ok
+    (d) clean flights with a change 142 -> 142 of 1800, bound 9.01% -> 9.01%: ok
+    (e) core rule pooled held +1.41 (lb +0.65): ok
+  -> keep+st+rate
+
+Step 2, lost-branch answer, keep+st+rate+fec against keep+st+rate:
+  keep+st+rate+fec: not adopted
+    (a) target threats, held -4.88 points, lower bound -6.69: FAILS
+    (b) antenna_fault                        n   360 recovered -0.28, lower bound -0.83: ok
+    (b) noise_burst+antenna_fault            n   182 recovered -4.95, lower bound -8.42: FAILS
+    (b) jamming+antenna_fault                n   216 recovered +0.93, lower bound -0.93: ok
+    (b) noise_burst+spoofing+antenna_fault   n   178 recovered -6.18, lower bound -11.05: FAILS
+    (b) airframe_shadowing                   n   360 recovered -0.28, lower bound -0.83: ok
+    (c) pooled held -1.75 (lb -2.45), recovered -0.34 (lb -0.58): FAILS
+    (d) clean flights with a change 142 -> 142 of 1800, bound 9.01% -> 9.01%: ok
+    (e) core rule pooled held +0.00 (lb +0.00): ok
+  -> keep+st+rate
+
+  rule_dec         held 70.2% -> 77.8%, recovered 76.3% -> 81.7% (side row, not a condition)
+  blind_dec        held 72.2% -> 74.3%, recovered 73.9% -> 75.8% (side row, not a condition)
+  blind_core_dec   held 42.6% -> 43.4%, recovered 46.7% -> 46.1% (side row, not a condition)
+  core_dec         held 42.5% -> 44.9%, recovered 46.7% -> 47.6% (side row, not a condition)
+
+Gate of choose_deployed.m, keep+st+rate:
+  class_drop 3/3     drop   270.0: rule + escalation held 78.8%, clean-flight bound 12.3%
+  class_drop 3/3     drop   225.0: rule + escalation held 78.8%, clean-flight bound 12.5%
+  class_drop 3/3     drop   180.0: rule + escalation held 78.6%, clean-flight bound 13.0%
+  class_drop 2/2     drop   180.0: rule + escalation held 79.4%, clean-flight bound 14.7%
+  class_drop 2/2     drop   171.0: rule + escalation held 79.3%, clean-flight bound 14.8%
+  class_drop 4/5     drop   270.0: rule + escalation held 78.5%, clean-flight bound 11.7%
+  class_drop 4/5     drop   225.0: rule + escalation held 78.4%, clean-flight bound 11.9%
+  class_drop 4/5     drop   180.0: rule + escalation held 78.3%, clean-flight bound 12.3%
+  class_drop 5/5     drop   270.0: rule + escalation held 77.8%, clean-flight bound 9.0%
+  class_drop 5/5     drop   225.0: rule + escalation held 77.8%, clean-flight bound 9.2%
+  class_drop 5/5     drop   180.0: rule + escalation held 77.7%, clean-flight bound 9.6%
+  gate PASS (DQN held 84.7% against the rule at its settings 77.8%), deployed dqn
+  with the setting adopted the deployed policy stays
+Validation done in 114.6 min. Selection frozen: keep+st+rate.
