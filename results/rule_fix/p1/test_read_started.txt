@@ -1,0 +1,6 @@
+rule_fix test read for keep+st+rate 2026-11-19 01:08:20
+tree c:\users\adi suliman\uav-gcs-v7
+tag p1
+code 997731d3a8fd1eb388b29b8ac826073298ceac0d299746792298b5a8b0661328
+inputs a1092a0ac0ed22a62428a93f62c91afac79ed335691f3a950a67e265db0a6b9e cabf8d7e00e009d054a7f85dd352c48eefdc5fb48b5a82d35c4380a405f28052 69077f9ca6c5c93954b70ea28457918bd19018283680bd8ffed9746164a4d71a f76ba5ad6c981d639632eb5762d71ee05407f106b47c7dd7111b1c5528193253 absent 2e3415e609cc0deecb035482dd29e374b4d1e0615c9ab9a849952ff7b51973cd
+selection C:\Users\Adi Suliman\uav-gcs-adaptive-secure-comms\worktrees\rule-fix\results\rule_fix\p1\selection.json

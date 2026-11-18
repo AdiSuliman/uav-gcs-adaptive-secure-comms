@@ -20,6 +20,8 @@ function out = rule_fix_reading(stage, varargin)
 %       adopted: the test is not read -> test.mat, the test section of rule_fix_reading.txt
 %   X = rule_fix_reading('paths', tree, tag)   the files of a reading
 %   T = rule_fix_reading('registered', f, rs)   the registered rule rows of a dqn_training.txt
+%   d = rule_fix_reading('draws', tree)         the tree's C2e frame-draw seeds [base step]
+%   rule_fix_reading('amend', tree, tag, why)   records one code amendment after the selection, before the test
 %   J = rule_fix_reading('guard', X)      the test stage's refusals in order ({} none)
 %   F = rule_fix_reading('fingerprint', X)   the hashes the selection is frozen with
 %   S = rule_fix_reading('select', R)     the registered selection over validation readings R
@@ -58,6 +60,8 @@ switch stage
     case 'select', out = select(varargin{:});
     case 'adopt',  out = adopt(varargin{:});
     case 'registered', out = registered_txt(varargin{:});
+    case 'draws',  [out, b] = c2e_draws(varargin{:}); out = [out, b];
+    case 'amend',  amend(varargin{:});
     otherwise, error('rule_fix_reading:stage', 'rule_fix_reading: unknown stage %s', stage);
 end
 end
@@ -72,7 +76,7 @@ R.B = 2000; R.bound = 0.05; R.min_n = 10;
 R.thr = struct('a', 0, 'thr_pt', -0.010, 'thr_lb', -0.020, 'pool_pt', -0.005, 'pool_lb', -0.010, 'fa_pts', 0.010, ...
     'tie', 0.005);
 R.val_seed = 99; R.val_reps = 2; R.frames = 5000; R.clean_seed = 41000;
-R.test_rs = 2027; R.test_seed = 20000; R.test_sets = {'single', 'follower', 'combined', 'unknown', 'clean'};
+R.test_rs = 2027; R.test_sets = {'single', 'follower', 'combined', 'unknown', 'clean'};
 end
 
 %% ===================== Files =====================
@@ -83,7 +87,7 @@ X.tree = tree; X.tag = tag;
 X.dir = fullfile(project_root(), 'results', 'rule_fix', tag);
 X.sel = fullfile(X.dir, 'selection.json'); X.val = fullfile(X.dir, 'val.mat');
 X.txt = fullfile(X.dir, 'rule_fix_reading.txt'); X.marker = fullfile(X.dir, 'test_read_started.txt');
-X.test = fullfile(X.dir, 'test.mat');
+X.test = fullfile(X.dir, 'test.mat'); X.amend = fullfile(X.dir, 'amend.json');
 X.claim_val = read_once('claim', 'rule_fix', 'val', tree); X.claim_test = read_once('claim', 'rule_fix', 'test', tree);
 X.inputs = cellfun(@(f) fullfile(tree, f), {fullfile('data', 'trained_dqn.mat'), fullfile('data', 'drop_threshold.mat'), ...
     fullfile('results', 'eval_detector_metrics.mat'), fullfile('results', 'dqn_training.txt'), 'profile.json', 'params.mat'}, ...
@@ -108,7 +112,9 @@ S = jsondecode(fileread(X.sel));
 F = fingerprint(X);
 if ~strcmp(S.fingerprint.tree, F.tree), J{end+1} = 'the selection was frozen on another tree'; end
 if isfile(X.claim_test) || isfile(X.marker), J{end+1} = 'the test split of this tree was read already'; end
-if ~strcmp(S.fingerprint.code, F.code), J{end+1} = 'the code differs from the code the selection ran'; end
+if ~strcmp(S.fingerprint.code, F.code) && ~amended(X, S.fingerprint.code, F.code)
+    J{end+1} = 'the code differs from the code the selection ran';
+end
 if ~isequal(cellstr(S.fingerprint.inputs(:))', F.inputs) || ~isequal(cellstr(S.fingerprint.big(:))', F.big)
     J{end+1} = 'the tree''s inputs differ from those the selection read';
 end
@@ -357,6 +363,39 @@ if isfield(PP, 'dconf'), k = find(strcmp({PP.dconf.monitor}, name), 1); PPc.conf
 if isfield(PP, 'lbacc'), k = find(strcmp({PP.lbacc.monitor}, name), 1); PPc.lb_accept = []; if ~isempty(k), PPc.lb_accept = PP.lbacc(k).la; end, end
 end
 
+function [b0, st] = c2e_draws(tree)
+% The frame-draw seeds of the tree's own C2e main runs, base + step x set, read from its
+% evaluate_policies.m (profile 1: 30000 + 100 x set; profile 3: 20000 + 1000 x set).
+src = fileread(fullfile(tree, 'code', 'decision', 'evaluate_policies.m'));
+t = regexp(src, ['RES\{si, pk\} = policy_run_set\(kind, PP, K, sets\(si\)\.spec, sets\(si\)\.split, ag, opt, ' ...
+    '(\d+) \+ (\d+) ?\* ?si\)'], 'tokens');
+assert(numel(t) == 1, 'rule_fix_reading:draws', 'rule_fix_reading: the C2e draw seeds of %s are not found once', tree);
+b0 = str2double(t{1}{1}); st = str2double(t{1}{2});
+end
+
+function amend(tree, tag, reason)
+% One amendment of the code after the selection was frozen, before the test is read: the frozen
+% code hash, the code's hash now and the reason, written once beside the selection.
+X = paths(tree, tag);
+assert(isfile(X.sel), 'rule_fix_reading:amend', 'rule_fix_reading: no frozen selection in %s', X.dir);
+assert(~isfile(X.amend), 'rule_fix_reading:amend', 'rule_fix_reading: %s exists; the code is amended once', X.amend);
+assert(~isfile(X.claim_test) && ~isfile(X.marker), 'rule_fix_reading:amend', 'rule_fix_reading: the test of this tree was read already');
+assert(ischar(reason) && numel(reason) >= 20, 'rule_fix_reading:amend', 'rule_fix_reading: an amendment states its reason');
+S = jsondecode(fileread(X.sel)); F = fingerprint(X);
+assert(~strcmp(S.fingerprint.code, F.code), 'rule_fix_reading:amend', 'rule_fix_reading: the code is the frozen code; nothing to amend');
+A = struct('tag', tag, 'tree', tree, 'from', S.fingerprint.code, 'to', F.code, 'reason', reason, ...
+    'created', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
+read_once('write', X.amend, {jsonencode(A, 'PrettyPrint', true)});
+end
+
+function ok = amended(X, from, to)
+% The code differs from the frozen code only by the one recorded amendment.
+ok = false;
+if ~isfile(X.amend), return; end
+A = jsondecode(fileread(X.amend));
+ok = strcmp(A.from, from) && strcmp(A.to, to);
+end
+
 %% ===================== Selection =====================
 function S = select(T)
 % T.read(1) the setting in force, T.read(2:end) the candidates; T.fam the target threats;
@@ -432,6 +471,7 @@ if isempty(S.adopted)
         'No setting was adopted on validation: the test is not read.'}]);
     return
 end
+[db, ds] = c2e_draws(tree);                         % the frame draws of the tree's own C2e
 c0 = cd(tree); back = onCleanup(@() cd(c0)); %#ok<NASGU>
 t0 = tic;
 L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
@@ -451,7 +491,7 @@ bad = {};
 for si = 1:numel(sets)
     for pk = 1:numel(pols)
         [kind, ag, opt] = policy_setup(pols{pk}, Q, sel, [], [], [], K.na);
-        R0 = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, R.test_seed + 1000 * si);
+        R0 = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, db + ds * si);
         Rg = E.RES{si, strcmp(E.POL, pols{pk})};
         if ~(isequaln(R0.recovered, Rg.recovered) && isequaln(R0.held, Rg.held) && isequaln(R0.per_post, Rg.per_post) ...
                 && isequaln(R0.switches, Rg.switches))
@@ -471,7 +511,7 @@ for si = 1:numel(sets)
         [kind, ag, opt] = policy_setup(pols{pk}, Q, sel, [], [], [], K.na);
         if ~isfield(opt, 'monitor') || ~isstruct(opt.monitor), opt.monitor = struct(); end
         opt.monitor.rule_fix = S.adopted;
-        RON{si, pk} = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, R.test_seed + 1000 * si);
+        RON{si, pk} = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, db + ds * si);
     end
     fprintf('  set %-9s %d policies (%.1f min)\n', sets(si).name, numel(pols), toc(t0) / 60);
 end
