@@ -23,7 +23,7 @@ D2c is valid.
 | narrowband | 1295 of 2880 (55.0% ineligible) | 260 | 69 (at most 14 in one) | 21.9965% | receiver-limited |
 | wideband | 2265 of 2880 (21.4% ineligible) | 142 | 43 (at most 16 in one) | 7.1721% | receiver-limited |
 
-Both states meet the n_s >= 1200 target. U_s > 1 pp in both, so every CORE_BW number of a jammed state that enters the book carries "r1; receiver loss on the restored link <= U_s (D2c, validation)" and the label "receiver-limited". The clean state keeps <= 0.25 pp at 12 dB.
+Two passes ran (12 and 15 dB); both states meet the n_s >= 1200 target after them. The items reported, not read (k and n per cell and configuration, every collapse frame, L_opt) are in the output .mat. U_s > 1 pp in both, so every CORE_BW number of a jammed state that enters the book carries "r1; receiver loss on the restored link <= U_s (D2c, validation)" and the label "receiver-limited". The clean state keeps <= 0.25 pp at 12 dB.
 
 ## The lecturer's PER-reduction verdicts (KPI 8)
 
