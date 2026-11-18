@@ -1,0 +1,8 @@
+{
+  "tag": "p1",
+  "tree": "C:\\Users\\Adi Suliman\\uav-gcs-v7",
+  "from": "997731d3a8fd1eb388b29b8ac826073298ceac0d299746792298b5a8b0661328",
+  "to": "36f1390ca120efd62ebc9e6a46d8d6f1fe7a5ce9e1fc494a43104085e5539762",
+  "reason": "The test stage replayed profile 3's C2e draws (20000 + 1000 x set); profile 1's C2e drew 30000 + 100 x set. The test now reads each tree's own draws from its evaluate_policies.m (DECISIONS D124 point 7).",
+  "created": "2026-11-19 00:43:42"
+}
