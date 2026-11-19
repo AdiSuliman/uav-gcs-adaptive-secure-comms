@@ -21,8 +21,7 @@ if isstruct(A)
             if isfield(A, 'pw') && ~isempty(A.pw)
                 gw = 10 * log10(A.pw);
             elseif any(strcmp(A.actions, 'power_control'))   % the power step of the gains the pools carry
-                gw = g(strcmp(A.actions, 'power_control')) * ...
-                    cellfun(@(a) any(strcmp(strsplit(a, '+'), 'power_control')), A.actions);
+                gw = g(strcmp(A.actions, 'power_control')) * pc_mask(A.actions);
             else
                 [~, gw] = config_gain_db(A.actions);
             end
@@ -46,4 +45,13 @@ for a = 1:numel(A)
     [~, g(a), cm] = apply_countermeasure(p, 'none', A{a});
     gw(a) = 10 * log10(cm.power_factor);
 end
+end
+
+function m = pc_mask(A)
+% The configurations holding power_control (logical, 1 x numel(A)), kept for the last action list.
+persistent A0 m0
+if isempty(m0) || ~isequal(A, A0) || ~strcmp(class(A), class(A0))
+    m0 = cellfun(@(a) any(strcmp(strsplit(a, '+'), 'power_control')), A); A0 = A;
+end
+m = m0;
 end

@@ -2,7 +2,13 @@ function C = decision_config()
 %DECISION_CONFIG  Constants of the decision layer in one place: restoration
 %   criterion, monitor, rule timing, agent state, reward weights and the threat
 %   severities of the frame pools. Every decision-layer function reads them here.
+%   Constants only, so the struct is built once per session and returned from there.
+persistent C0
+if isempty(C0), C0 = constants(); end
+C = C0;
+end
 
+function C = constants()
 % Restoration (proposal KPI 4): BER and packet loss at most 2x the clean link
 C.ratio_ok   = 2;           % restored: BER <= 2 x clean BER at the same Eb/N0
 C.ber_floor  = 1e-4;        % smallest clean-BER reference the pools resolve (>= 19k bits per cell)
