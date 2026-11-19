@@ -418,3 +418,13 @@ Extension readings (no commitment): the earlier proposal's unknown-threat KPI is
   - CNN contribution, full set: -8.2% -> +12.2% [7.5, 16.8]. Core set: -11.9% -> +0.3% [-3.0, 3.4].
   - Side line to state in the book: on the "comb" set the adopted rule + escalation recovers 89.3% against the deployed hybrid's 73.4% (before: 57.8%). Pooled, the hybrid still leads by 15.6 points.
   - Dashboard PNG: 0.134% of pixels differ (rendering rule).
+
+### 19.11.2026 23:40 - KPI 7 guard, profile 3: CACHES ACCEPTED
+- Checked all 10 changed function files, old against new:
+  - LAT's 84 frames x 3 chains, in 3 settings (LAT's own, without PPm.pw, latch on);
+  - a replay of the deployed dqn over the single, combined and clean test sets: 107 batches, 205,440 episode-cycles.
+- Every field differs in 0 entries; old vs old (determinism) also differs in 0. LAT's setup is identical.
+- The three guarded options (spec_image direct, mmse_predict tail, clean_ber_ref interpolant) are each ACCEPTED (bit-identical). They stay off under D126.
+- PPm.pw in LAT: IDENTICAL. Detector before predictor: IDENTICAL.
+- Not exercised by the guard's runs: spec_image>stft_centered (option path), mmse_predict>snapshots.
+- The tree's only change was the wrapper's own log under logs/.
