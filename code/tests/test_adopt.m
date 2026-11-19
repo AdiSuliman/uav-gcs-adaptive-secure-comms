@@ -270,10 +270,11 @@ function test_code_pin(tc)
 % The checkout's code is pinned at the overlay: an edit after it stops every later stage (tests/
 % aside); uncommitted code under git refuses the overlay.
 W = world(tc, 'dqn');
-write_text(fullfile(W.co, 'code', 'decision', 'a.m'), 'a = 1;');
+write_text(fullfile(W.co, 'code', 'decision', 'a.m'), sprintf('a = 1;\r\nb = 2;\r\n'));
 M = adopt_reading('overlay', W.tag, W.tree, W.O);
 verifyMatches(tc, M.checkout_code_sha256, '^[0-9a-f]{64}$');
 write_text(fullfile(W.co, 'code', 'tests', 'test_a.m'), 'x');
+write_text(fullfile(W.co, 'code', 'decision', 'a.m'), sprintf('a = 1;\nb = 2;\n'));   % line ends converted
 verifyError(tc, @() adopt_reading('c2e', W.tag, W.tree, W.O), 'adopt_reading:off_not_passed');
 write_text(fullfile(W.co, 'code', 'decision', 'a.m'), 'a = 2;');
 for s = {'off', 'c2e', 'gate', 'render', 'release'}
