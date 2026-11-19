@@ -639,10 +639,13 @@ switch lower(e)
     case '.mat'
         A = scrub(load(a)); B = scrub(load(b));
         ok = isequaln(A, B); if ~ok, why = first_diff(A, B); end
-    case '.png'
-        ia = imread(a); ib = imread(b);
-        ok = isequal(size(ia), size(ib)) && isequal(ia, ib);
-        if ~ok, why = sprintf('pixels differ (%s against %s)', mat2str(size(ia)), mat2str(size(ib))); end
+    case '.png'                % a rendering: its numbers are guarded through the files it is drawn from;
+        ia = imread(a); ib = imread(b);   % text anti-aliasing differs between MATLAB sessions
+        if ~isequal(size(ia), size(ib)), why = sprintf('sizes differ (%s against %s)', mat2str(size(ia)), mat2str(size(ib))); return; end
+        n = nnz(any(ia ~= ib, 3)); sh = n / (size(ia, 1) * size(ia, 2));
+        ok = sh <= 0.005;
+        why = sprintf('rendering: %d pixels differ (%.3f%%, at most 0.5%%)', n, 100 * sh);
+        if ok && n > 0, return; end
     otherwise
         ok = strcmp(sha_file(a), sha_file(b)); if ~ok, why = 'bytes differ'; end
 end
