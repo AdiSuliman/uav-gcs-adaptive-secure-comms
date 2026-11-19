@@ -295,6 +295,27 @@ verifyNumElements(tc, r, 1);
 verifyGreaterThan(tc, r, strfind(src, 'nF = numel(F);'));
 verifyLessThan(tc, r, strfind(src, 'ld0 = machine_load();'));
 verifyNotEmpty(tc, strfind(src, 'if DET_FIRST, out_dir = fullfile(''results'', ''kpi7''); out_name = ''latency_det_first''; end'));
+% the diagnostic order from the environment (run_stage.m runs the script in a function
+% workspace), read after the setup-only return and cleared as read: one run only
+e = strfind(src, 'DET_FIRST = strcmp(getenv(''LAT_DET_FIRST''), ''1''); setenv(''LAT_DET_FIRST'', '''');');
+verifyNumElements(tc, e, 1);
+verifyGreaterThan(tc, e, r);
+verifyEmpty(tc, strfind(src, 'exist(''DET_FIRST'''));
+verifyNotEmpty(tc, strfind(src, '''gdev'', [], ''det_first'', false);'));
+end
+
+function test_det_first_env_one_run(tc)
+% The environment flag is read once and cleared: the next run is the record's order.
+setenv('LAT_DET_FIRST', '1'); cl = onCleanup(@() setenv('LAT_DET_FIRST', '')); %#ok<NASGU>
+src = code_only(fileread(which('measure_latency')));
+ln = regexp(src, 'DET_FIRST = strcmp\(getenv[^;]*;[^;]*;', 'match', 'once');
+verifyNotEmpty(tc, ln);
+DET_FIRST = [];
+eval(ln);
+verifyTrue(tc, DET_FIRST);
+verifyEmpty(tc, getenv('LAT_DET_FIRST'));
+eval(ln);
+verifyFalse(tc, DET_FIRST);
 end
 
 function test_latency_readers(tc)
@@ -319,6 +340,23 @@ verifyNotEmpty(tc, strfind(src, 'isequaln(a.(fields{j}), b.(fields{j}))'));
 verifyNotEmpty(tc, strfind(src, 'out = fullfile(root, ''results'', ''kpi7'');'));
 verifyNotEmpty(tc, strfind(src, sprintf('BASE = ''%s'';', tc.TestData.base)));
 verifyEmpty(tc, regexp(code_only(src), 'fullfile\(tree[^)]*''results''', 'once'));
+c = code_only(src);
+% old against new also without PPm.pw (config_gain_db's power-step path) and with the latch on
+% (onset_shape's latch path), both in the caches' verdict
+verifyNotEmpty(tc, strfind(c, 'Yp0 = lat_run(L, Sp); Yl0 = lat_run(L, Sl);'));
+verifyNotEmpty(tc, strfind(c, 'Y1 = lat_run(L, S); Yp1 = lat_run(L, Sp); Yl1 = lat_run(L, Sl);'));
+verifyNotEmpty(tc, strfind(c, 'cL.count = c1.count + cp.count + cq.count;'));
+verifyNotEmpty(tc, strfind(c, 'V.replay.old_vs_new + V.replay.latch_old_vs_new'));
+verifyNotEmpty(tc, strfind(c, 'PP.fuse.latch = true;'));
+% LAT's setup built by each version and compared, in the caches' verdict
+verifyNumElements(tc, strfind(c, 'lat_load();'), 2);
+verifyNotEmpty(tc, strfind(c, 'V.setup = cmp_setup(L0, L);'));
+verifyNotEmpty(tc, strfind(c, 'V.replay.tables_equal, V.setup.verdict);'));
+% the coverage of the changed functions, named when not exercised
+verifyNotEmpty(tc, strfind(c, 'V.not_exercised = coverage(G, PI);'));
+verifyNotEmpty(tc, strfind(c, 'NOT EXERCISED by the guard'));
+% the onCleanup handle is not reused
+verifyNumElements(tc, regexp(c, '^\s*cl\s*=', 'start', 'lineanchors'), 1);
 end
 
 %% ---------- helpers ----------
