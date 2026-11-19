@@ -428,3 +428,17 @@ Extension readings (no commitment): the earlier proposal's unknown-threat KPI is
 - PPm.pw in LAT: IDENTICAL. Detector before predictor: IDENTICAL.
 - Not exercised by the guard's runs: spec_image>stft_centered (option path), mmse_predict>snapshots.
 - The tree's only change was the wrapper's own log under logs/.
+
+### 20.11.2026 00:13 - KPI 7 guard, profile 1: CACHES ACCEPTED; D126 lands
+- kpi7-p1 tests: test_kpi7 15/15, full suite 279/279.
+- Guard on all 10 changed files: LAT 84 frames x 3 chains x 3 settings, plus the replay of 205,440 episode-cycles. Every field differs in 0 entries. LAT's setup is identical.
+- Options:
+  - spec_image direct: ACCEPTED.
+  - clean_ber_ref interpolant: ACCEPTED.
+  - mmse_predict tail: REJECTED on profile 1 (g 111 and mem 213 entries differ; first at the deployed chain, frame 4).
+  - All three stay off as D126 registered.
+- PPm.pw and the diagnostic order: IDENTICAL.
+- Both guards are ACCEPTED, so D126 landed:
+  - the trees' outputs were archived to archive/d126_before_20261120 (results, bundle, HEAD, SHA-256);
+  - v7-dev was fast-forwarded to ed5b812 and v7-p3 to 978ee31;
+  - the single final LAT, KPI, DASH, WEAK, RPT and BUNDLE runs at 00:2x on an idle machine, P1 then P3.
