@@ -7,10 +7,15 @@ function out = adopt_reading(stage, varargin)
 %                       ({name, setting, the SHA-256 of selection.json, val.mat, test.mat}), created
 %       tree_sha256.txt the SHA-256 of the tree's registered results and inputs (results/**,
 %                       params.mat, profile.json, data/*.mat)
+%       overlay.txt     what the overlay changes outside itself: the read-only attribute below
 %       off/, on/       two roots, each with copies of params.mat, profile.json and results/ (dates
 %                       kept), less the outputs its own stages write (so none is overwritten), and
 %                       data/*.mat as read-only hard links (refused across volumes; the read-only
-%                       attribute belongs to the file, so the tree's name shows it as well)
+%                       attribute belongs to the file, so the tree's data/*.mat are read-only too
+%                       until the release stage)
+%       The checkout's code is pinned: refused with uncommitted .m files under code/ (tests/
+%       aside); its HEAD and the SHA-256 of its code/**/*.m are recorded, and every later stage
+%       refuses when either moved.
 %   adopt_reading('off', tag, tree, O)   ADOPT0 in off/: the tree's KPI, dashboard, report-number,
 %       KPI-table and bundle code on the registered policy_evaluation.mat; every output must equal
 %       the tree's final phase (the 'Generated' stamps excepted), the bundle the final phase's
@@ -18,22 +23,33 @@ function out = adopt_reading(stage, varargin)
 %       adoption's own files -> off.json, off.txt; any mismatch stops
 %   adopt_reading('c2e', tag, tree, O)   ADOPT-C2e in on/: evaluate_policies.m with CFG.adopt from
 %       the manifest, each rule row through its own monitor (adopt_options.m). Refused unless off
-%       passed, without multithreaded MATLAB (maxNumCompThreads > 1, as C2e ran), or when the tree
-%       differs from tree_sha256.txt. Guards: every non-rule column isequaln to the registered file;
-%       the rule columns of sets 1-5 isequaln to test.mat's 'on' rows on the fields it kept; KP.lect
-%       equal to test.mat's LK1 wherever its LK0 equals the registered KP.lect; the tree's SHA-256
-%       the same after -> c2e.json, c2e.txt
+%       passed, at any thread count but C2e's (maxNumCompThreads 8), when the tree differs from
+%       tree_sha256.txt, or when the code would not run from this checkout. Guards: every non-rule
+%       column isequaln to the registered file (RES, ALL, RW, RS2, LBC less its rule column, KP
+%       less the rule's entries); the rule columns of sets 1-5 isequaln to test.mat's 'on' rows on
+%       the fields it kept; KP.lect equal to test.mat's LK1 wherever its LK0 equals the registered
+%       KP.lect, with at least one value the setting changed among them (every one where the tree's
+%       lect_kpis.m is the reading's); the tree's SHA-256 the same after. The descriptive rule rows
+%       and sets 6 on are read once with the setting, no reference -> c2e.json (with the SHA-256 of
+%       each output), c2e.txt
 %   adopt_reading('gate', tag, tree, O)   val.mat's gate under the adopted setting must deploy the
 %       registered deployed policy (data/trained_dqn.mat), else it stops -> gate.json, gate.txt
 %   adopt_reading('render', tag, tree, O)   in on/: KPI, dashboard, report numbers, KPI table and the
-%       bundle, refused unless the gate passed -> render.json, render.txt
+%       bundle, refused unless the gate passed and the outputs c2e checked are unchanged; the stale
+%       files may differ from off only by results/edge_map.mat (not re-run: the rule without the
+%       layered answer, stated in on/results/adoption_note.txt) -> render.json, render.txt
+%   adopt_reading('release', tag, tree, O)   gives back the write attribute of every tree data file
+%       that was writable before the overlay and closes the overlay: every stage refuses after it
+%       -> release.json, release.txt
 %   tag: the reading's name (p1, p3); tree: the finished tree. O (optional): root (this checkout,
 %   default project_root()), rf_dir (selection.json, val.mat, test.mat; default
 %   results/rule_fix/<tag> of root), bundle_ref (the final phase's bundle folder; default
 %   <the tree's parent>/uav-gcs-v7/profiles).
 %   Order: overlay -> off -> c2e -> gate -> render, each once. A later adoption (dqn_hop) enters the
-%   manifest's list after rule_fix; adopt_options.m refuses it until it is implemented.
-%   Helpers: X = adopt_reading('paths', tag, O); G = adopt_reading('guard_c2e', N, E, T);
+%   manifest's list after rule_fix; adopt_options.m refuses it until it is implemented, with its own
+%   stages (a write-once adoption_<k>.json extending the list and its own root).
+%   Helpers: X = adopt_reading('paths', tag, O); G = adopt_reading('guard_c2e', N, E, T, opt)
+%   (opt.lect_strict, default true);
 %   C = adopt_reading('compare', a, b); adopt_reading('write_once', f, lines);
 %   D = adopt_reading('code_diff', root, tree); CFG = adopt_reading('cfg', M);
 %   h = adopt_reading('sha', f); F = adopt_reading('tree_files', tree)
@@ -44,6 +60,7 @@ switch stage
     case 'c2e',        out = stage_c2e(varargin{:});
     case 'gate',       out = stage_gate(varargin{:});
     case 'render',     out = stage_render(varargin{:});
+    case 'release',    out = stage_release(varargin{:});
     case 'paths',      out = paths(varargin{:});
     case 'guard_c2e',  out = guard_c2e(varargin{:});
     case 'compare',    [ok, why] = compare_file(varargin{:}); out = struct('ok', ok, 'why', why);
@@ -73,6 +90,15 @@ K.keep = {'scn', 's', 'r', 'geom', 'recovered', 'held', 'recoverable', 'recovera
     'switches', 'ret', 't_rec'};
 K.sets_guarded = 5;
 K.stages = {'overlay', 'off', 'c2e', 'gate', 'render'};
+K.threads = 8;                                        % C2e's thread count
+K.code_fns = {'evaluate_policies', 'adopt_options', 'lect_kpis', 'measure_all_kpis'};
+% KP fields built from the rule's columns: compared on their non-rule columns or entries only
+K.kp_rule = {'per_threat', 'per_threat_sev', 'per_threat_h', 'per_threat_h_sev', 'per_ebno', 'per_aoa', 'per_speed', ...
+    'per_speed_out', 'per_delay', 'far', 'far_diag', 'far_testpools', 'far_diag_testpools', 'far_cleanpools', ...
+    'far_diag_cleanpools', 'far_core3', 'far_union', 'far_diag_union', 'offset', 'lect', 's1g_lines'};
+K.stale_add = {'results/edge_map.mat'};               % not re-run: older than the new policy_evaluation.mat
+K.stale_drop = {'results/policy_evaluation.mat'};
+K.note_file = 'results/adoption_note.txt';
 end
 
 %% ===================== Files =====================
@@ -86,7 +112,8 @@ X.rf = opt_field(O, 'rf_dir', fullfile(X.root, 'results', 'rule_fix', tag));
 X.dir = fullfile(X.root, 'results', 'rule_fix', tag, 'adopted');
 X.man = fullfile(X.dir, 'adoption.json'); X.sha = fullfile(X.dir, 'tree_sha256.txt');
 X.off = fullfile(X.dir, 'off'); X.on = fullfile(X.dir, 'on'); X.logs = fullfile(X.dir, 'logs');
-for s = {'off', 'c2e', 'gate', 'render'}
+X.ovt = fullfile(X.dir, 'overlay.txt');
+for s = {'off', 'c2e', 'gate', 'render', 'release'}
     X.v.(s{1}) = fullfile(X.dir, [s{1} '.json']); X.t.(s{1}) = fullfile(X.dir, [s{1} '.txt']);
 end
 end
@@ -112,10 +139,11 @@ assert(F.on && strcmp(F.name, S.adopted), 'adopt_reading:selection', 'adopt_read
 end
 
 function [M, X, Sx] = open_overlay(tag, tree, O)
-% The overlay of (tag, tree) with its manifest; the frozen reading and the tree's HEAD as the
-% manifest recorded them.
+% The overlay of (tag, tree) with its manifest; the frozen reading, the tree's HEAD and the checkout's
+% HEAD and code as the manifest recorded them; refused once released.
 X = paths(tag, O);
 assert(isfile(X.man), 'adopt_reading:no_overlay', 'adopt_reading: no overlay at %s (run the overlay stage first)', X.dir);
+assert(~isfile(X.v.release), 'adopt_reading:released', 'adopt_reading: the overlay %s was released; no stage runs on it', X.dir);
 M = jsondecode(fileread(X.man));
 assert(strcmp(M.tag, tag) && strcmpi(M.tree, tree), 'adopt_reading:tree', 'adopt_reading: the overlay %s belongs to %s', X.dir, M.tree);
 names = order_of(M);
@@ -125,6 +153,9 @@ Sx = sources(A.source);
 ok = strcmp(Sx.h.selection, A.selection_sha256) && strcmp(Sx.h.val, A.val_sha256) && strcmp(Sx.h.test, A.test_sha256);
 assert(ok, 'adopt_reading:sources', 'adopt_reading: selection.json, val.mat or test.mat in %s differ from the manifest', Sx.dir);
 assert(strcmp(tree_head(tree), M.tree_head), 'adopt_reading:head', 'adopt_reading: the HEAD of %s moved since the overlay', tree);
+assert(isfield(M, 'checkout_code_sha256') && strcmp(tree_head(X.root), M.checkout_head) && ...
+    strcmp(code_sha(X.root), M.checkout_code_sha256), 'adopt_reading:code', ...
+    'adopt_reading: the HEAD or the code of the checkout %s moved since the overlay', X.root);
 end
 
 function names = order_of(M)
@@ -157,6 +188,8 @@ assert(isfolder(tree) && isfile(fullfile(tree, 'results', 'policy_evaluation.mat
 assert(~under(X.dir, tree) && ~under(tree, X.dir) && ~strcmpi(X.root, tree), 'adopt_reading:inside', ...
     'adopt_reading: the overlay %s would lie inside the tree %s', X.dir, tree);
 assert(~isfolder(X.dir), 'adopt_reading:exists', 'adopt_reading: the overlay %s exists; it is built once', X.dir);
+dirty = code_dirty(X.root);
+assert(isempty(dirty), 'adopt_reading:dirty', 'adopt_reading: the checkout %s has uncommitted code: %s', X.root, strjoin(dirty, ', '));
 Sx = sources(X.rf);
 S = check_selection(Sx, tag, tree);
 F = tree_files(tree);
@@ -165,6 +198,9 @@ mkdir(X.dir);
 write_once(X.sha, H);
 dl = F(startsWith(F, 'data/'));
 ro0 = dl(cellfun(@(f) ~java.io.File(fullfile(tree, f)).canWrite(), dl));
+write_once(X.ovt, {sprintf(['The data files of off/ and on/ are hard links to %s/data, made read-only. The attribute belongs ' ...
+    'to the file: those %d tree files are read-only too (contents and dates unchanged; %d were read-only before). ' ...
+    'adopt_reading(''release'', ''%s'', tree) gives the attribute back and closes the overlay.'], tree, numel(dl), numel(ro0), tag)});
 left = struct('off', {K.render_out}, 'on', {[K.render_out, K.c2e_out]});
 for r = {'off', 'on'}
     root = X.(r{1});
@@ -177,7 +213,7 @@ end
 A = struct('name', 'rule_fix', 'setting', S.adopted, 'selection_sha256', Sx.h.selection, 'val_sha256', Sx.h.val, ...
     'test_sha256', Sx.h.test, 'source', Sx.dir);
 M = struct('tag', tag, 'tree', tree, 'tree_head', tree_head(tree), 'checkout', X.root, 'checkout_head', tree_head(X.root), ...
-    'version', 1, 'adoptions', {{A}}, 'order', {K.stages}, 'roots', struct('off', 'off', 'on', 'on'), ...
+    'checkout_code_sha256', code_sha(X.root), 'version', 1, 'adoptions', {{A}}, 'order', {K.stages}, 'roots', struct('off', 'off', 'on', 'on'), ...
     'left_out', left, 'data_links', {dl}, 'readonly_before', {ro0}, 'tree_sha256_file', 'tree_sha256.txt', ...
     'tree_sha256_list', sha_file(X.sha), 'n_files', numel(F), 'created', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
 write_once(X.man, {jsonencode(M, 'PrettyPrint', true)});
@@ -187,7 +223,7 @@ end
 %% ===================== Stage: off (ADOPT0) =====================
 function V = stage_off(tag, tree, O)
 if nargin < 3, O = struct(); end
-tree = canon(tree); [~, X] = open_overlay(tag, tree, O); K = reg();
+tree = canon(tree); [M, X] = open_overlay(tag, tree, O); K = reg();
 assert(~isfile(X.v.off), 'adopt_reading:exists', 'adopt_reading: %s exists; ADOPT0 runs once', X.v.off);
 assert(~any(cellfun(@(f) isfile(fullfile(X.off, f)), K.render_out)) && ~isfolder(fullfile(X.off, 'profiles')), ...
     'adopt_reading:exists', 'adopt_reading: %s already holds rendered outputs', X.off);
@@ -196,16 +232,17 @@ rows = struct('file', {}, 'ok', {}, 'why', {});
 D = code_diff(X.root, tree);
 rows(end+1) = row('code', isempty(D.bad), sprintf('differs from the tree only in the adoption''s own files (%s)%s', ...
     strjoin(D.differ, ', '), list_txt(' NOT the tree''s: ', D.bad)));
-own = which('measure_all_kpis');
-rows(end+1) = row('path', under(own, fullfile(X.root, 'code')) && ~contains(lower(path), lower(fullfile(tree, 'code'))), ...
-    sprintf('the renderers run from %s', own));
+[pok, pwhy] = path_ok(X, tree);
+rows(end+1) = row('path', pok, pwhy);
 if all([rows.ok])
     lg = start_log(X, 'off'); %#ok<NASGU>
     tab = has_table(tree);
-    s0 = snapshot(tree);
+    s0 = snapshot(tree); b0 = dir_state(bref);
     err = render_in(X.off, tab);
     rows(end+1) = row('renderers', isempty(err), list_txt('ran: ', err));
-    rows(end+1) = row('tree untouched', isequal(s0, snapshot(tree)), 'listing, sizes, dates and HEAD of the tree before and after');
+    s1 = snapshot(tree); b1 = dir_state(bref);
+    rows(end+1) = row('tree untouched', isequal(s0, s1), snap_why(s0, s1, 'the tree but .git and logs/'));
+    rows(end+1) = row('bundle reference untouched', isequal(b0, b1), snap_why(b0, b1, bref));
     for f = K.final
         [ok, why] = compare_file(fullfile(X.off, f{1}), fullfile(tree, f{1}));
         rows(end+1) = row(f{1}, ok, why); %#ok<AGROW>
@@ -221,7 +258,7 @@ if all([rows.ok])
     rows = [rows, compare_bundle(fullfile(X.off, 'profiles', rx), fullfile(bref, rx))];
     rows(end+1) = stale_row(fullfile(X.off, 'results', 'report_numbers.json'), fullfile(tree, 'results', 'report_numbers.json'));
 end
-V = verdict(X, 'off', rows, struct('bundle_ref', bref));
+V = verdict(X, 'off', rows, struct('bundle_ref', bref, 'code_sha256', M.checkout_code_sha256));
 if ~V.pass, error('adopt_reading:off', 'adopt_reading: ADOPT0 does not reproduce the final phase (see %s); nothing further runs', X.t.off); end
 end
 
@@ -235,12 +272,16 @@ assert(~isempty(Vo) && isequal(Vo.pass, true), 'adopt_reading:off_not_passed', .
 assert(~isfile(X.v.c2e) && ~any(cellfun(@(f) isfile(fullfile(X.on, f)), K.c2e_out)), 'adopt_reading:exists', ...
     'adopt_reading: %s or the outputs of evaluate_policies.m in %s exist; ADOPT-C2e runs once', X.v.c2e, X.on);
 nt = maxNumCompThreads;
-assert(nt > 1, 'adopt_reading:threads', ['adopt_reading: ADOPT-C2e needs multithreaded MATLAB (maxNumCompThreads %d): ' ...
-    'C2e ran multithreaded and the reproduction depends on it'], nt);
+assert(nt == K.threads, 'adopt_reading:threads', ['adopt_reading: ADOPT-C2e runs at %d threads, as C2e ran, and the ' ...
+    'reproduction depends on it (maxNumCompThreads is %d; set maxNumCompThreads(%d))'], K.threads, nt, K.threads);
 CFG = cfg_of(M); A = adopt_options(CFG);
 L0 = read_lines(X.sha);
 H0 = hash_lines(tree, tree_files(tree));
 assert(isequal(H0, L0), 'adopt_reading:tree_changed', 'adopt_reading: the tree differs from %s', X.sha);
+[pok, pwhy] = path_ok(X, tree);
+assert(pok, 'adopt_reading:path', 'adopt_reading: ADOPT-C2e is refused: %s, not from %s', pwhy, fullfile(X.root, 'code'));
+strict = isfile(fullfile(X.root, 'code', 'decision', 'rule_fix_reading.m')) && ...
+    same_text(fullfile(X.root, 'code', 'evaluation', 'lect_kpis.m'), fullfile(tree, 'code', 'evaluation', 'lect_kpis.m'));
 lg = start_log(X, 'c2e'); %#ok<NASGU>
 rows = struct('file', {}, 'ok', {}, 'why', {});
 t0 = tic; err = '';
@@ -261,10 +302,12 @@ if isempty(err)
     N = load(fullfile(X.on, 'results', 'policy_evaluation.mat'));
     E = load(fullfile(X.off, 'results', 'policy_evaluation.mat'));
     T = load(Sx.test);
-    G = guard_c2e(N, E, T);
+    G = guard_c2e(N, E, T, struct('lect_strict', strict));
     rows = [rows, G.rows];
 end
-V = verdict(X, 'c2e', rows, struct('setting', A.rule_fix, 'threads', nt));
+Ho = out_hashes(X.on, K.c2e_out);
+V = verdict(X, 'c2e', rows, struct('setting', A.rule_fix, 'threads', nt, 'lect_strict', strict, 'outputs', {Ho}, ...
+    'code_sha256', M.checkout_code_sha256));
 if ~V.pass, error('adopt_reading:c2e', 'adopt_reading: ADOPT-C2e failed its guards (see %s)', X.t.c2e); end
 end
 
@@ -273,9 +316,15 @@ function run_c2e(CFG) %#ok<INUSD>
 run('evaluate_policies');
 end
 
-function G = guard_c2e(N, E, T)
-% The adopted file N against the registered one E and test.mat T.
+function G = guard_c2e(N, E, T, opt)
+% The adopted file N against the registered one E and test.mat T. opt.lect_strict (default true):
+% every KP.lect value the setting changed must be compared.
+if nargin < 4 || ~isstruct(opt), opt = struct(); end
+strict = ~isfield(opt, 'lect_strict') || isequal(opt.lect_strict, true);
 K = reg(); r = struct('file', {}, 'ok', {}, 'why', {});
+vs = isequal(sort(fieldnames(N)), sort(fieldnames(E)));
+r(end+1) = row('variables', vs, sprintf('registered %s; adopted %s', strjoin(sort(fieldnames(E))', ', '), ...
+    strjoin(sort(fieldnames(N))', ', ')));
 for f = {'POL', 'LBL', 'set_names', 'iDQN', 'iThreat', 'fixed_best', 'tab', 'top_cfg'}
     if ~isfield(E, f{1}), continue; end
     e = isfield(N, f{1}) && isequaln(N.(f{1}), E.(f{1}));
@@ -299,6 +348,16 @@ if ~isequaln(field_or(N, 'RS2', []), field_or(E, 'RS2', [])), bad{end+1} = 'RS2 
 if ~isequaln(lbc_strip(field_or(N, 'LBC', [])), lbc_strip(field_or(E, 'LBC', []))), bad{end+1} = 'LBC (DQN columns)'; end
 r(end+1) = row('non-rule columns', isempty(bad), sprintf('%d columns x %d sets, pooled, clean pools, RS2, LBC%s', sum(~isr), nS, ...
     list_txt('; differ: ', bad)));
+if isfield(E, 'KP') && isfield(N, 'KP')
+    [bad, part] = kp_guard(N.KP, E.KP, E.LBL(isr));
+    r(end+1) = row('KP', isempty(bad), sprintf(['every field isequaln to the registered KP but those built from the rule''s ' ...
+        'columns, compared without them%s%s'], list_txt('; compared in part: ', part), list_txt('; differ: ', bad)));
+else
+    r(end+1) = row('KP', isfield(E, 'KP') == isfield(N, 'KP'), 'no KP');
+end
+dsc = reshape(POL(isr & ~ismember(POL, K.rule_base)), 1, []);
+r(end+1) = row('descriptive rule rows', true, sprintf(['%s: read once with the setting on every set, no reference ' ...
+    '(no selection on them)'], ternary(isempty(dsc), 'none', strjoin(dsc, ', '))));
 want = K.rule_base(ismember(K.rule_base, POL));
 tp = field_or(T, 'pols', {}); if isstring(tp), tp = cellstr(tp); end; tp = reshape(tp, 1, []);
 ron = field_or(T, 'RONs', {});
@@ -330,35 +389,91 @@ for c = reshape(find(isr), 1, [])
 end
 r(end+1) = row('setting applied', moved, 'some rule column of sets 1-5 differs from the registered one');
 if all(isfield(T, {'LK0', 'LK1'})) && isfield(E, 'KP') && isfield(E.KP, 'lect') && isfield(N, 'KP') && isfield(N.KP, 'lect')
-    [n, bad] = lk_guard(N.KP.lect, E.KP.lect, T.LK0, T.LK1);
-    r(end+1) = row('KP.lect', isempty(bad), sprintf(['%d values compared with test.mat''s LK1 (where its LK0 equals the ' ...
-        'registered KP.lect)%s'], n, list_txt('; differ: ', bad)));
+    Q = lk_guard(N.KP.lect, E.KP.lect, T.LK0, T.LK1);
+    ok = isempty(Q.bad) && Q.nch > 0 && Q.nchc > 0 && (~strict || (isempty(Q.skip_ch) && isempty(Q.disagree)));
+    r(end+1) = row('KP.lect', ok, sprintf(['%d values compared with test.mat''s LK1 (where its LK0 equals the registered ' ...
+        'KP.lect), %d of the %d the setting changed; %d of LK0''s values not compared (%s)%s%s%s'], Q.n, Q.nchc, Q.nch, ...
+        numel(Q.skip), ternary(strict, 'strict: the tree''s lect_kpis.m is the reading''s', 'not strict'), ...
+        list_txt('; changed, not compared: ', Q.skip_ch), list_txt('; registered differs from LK0: ', Q.disagree), ...
+        list_txt('; differ: ', Q.bad)));
 else
     r(end+1) = row('KP.lect', false, 'test.mat (LK0, LK1) or KP.lect missing');
 end
 G = struct('pass', all([r.ok]), 'rows', r);
 end
 
-function [n, bad] = lk_guard(Ln, Le, L0, L1)
+function Q = lk_guard(Ln, Le, L0, L1)
 % Every value of LK0 that equals the registered KP.lect at the same place: the adopted KP.lect holds
-% LK1's value there.
+% LK1's value there. nch: LK0's values LK1 changes; nchc: those compared; skip: LK0's values not
+% compared; skip_ch: changed ones among them; disagree: present in both, the registered value not LK0's.
 [ke, ve] = flat_kv(Le, 'lect'); [k0, v0] = flat_kv(L0, 'lect'); [k1, v1] = flat_kv(L1, 'lect'); [kn, vn] = flat_kv(Ln, 'lect');
 me = kv_map(ke, ve); m1 = kv_map(k1, v1); mn = kv_map(kn, vn);
-n = 0; bad = {};
+Q = struct('n', 0, 'nch', 0, 'nchc', 0, 'skip', {{}}, 'skip_ch', {{}}, 'disagree', {{}}, 'bad', {{}});
 for i = 1:numel(k0)
     p = k0{i};
-    if ~isKey(me, p) || ~isequaln(me(p), v0{i}) || ~isKey(m1, p), continue; end
-    n = n + 1;
-    if ~isKey(mn, p) || ~isequaln(mn(p), m1(p)), bad{end+1} = p; end %#ok<AGROW>
+    ch = ~isKey(m1, p) || ~isequaln(m1(p), v0{i});
+    Q.nch = Q.nch + ch;
+    if ~isKey(me, p) || ~isequaln(me(p), v0{i}) || ~isKey(m1, p)
+        Q.skip{end+1} = p;
+        if ch, Q.skip_ch{end+1} = p; end
+        if isKey(me, p) && ~isequaln(me(p), v0{i}), Q.disagree{end+1} = p; end
+        continue
+    end
+    Q.n = Q.n + 1; Q.nchc = Q.nchc + ch;
+    if ~isKey(mn, p) || ~isequaln(mn(p), m1(p)), Q.bad{end+1} = p; end
 end
 end
 
+function [bad, part] = kp_guard(Nk, Ek, rlbl)
+% KP field by field: a field of K.kp_rule compared without the rule's columns or entries, any other
+% field whole. part: the fields compared in part, and how.
+K = reg(); bad = {}; part = {};
+f = union(fieldnames(Ek), fieldnames(Nk));
+rshow = [];
+if isfield(Ek, 'show') && iscell(Ek.show), rshow = cellfun(@(p) adopt_options('rule_row', p), Ek.show); end
+for j = 1:numel(f)
+    if ~isfield(Ek, f{j}) || ~isfield(Nk, f{j}), bad{end+1} = [f{j} ' (on one side only)']; continue; end %#ok<AGROW>
+    a = Nk.(f{j}); b = Ek.(f{j});
+    if isequaln(a, b), continue; end
+    if ~ismember(f{j}, K.kp_rule), bad{end+1} = f{j}; continue; end %#ok<AGROW>
+    [same, how] = nonrule_equal(a, b, rshow, rlbl);
+    if ~same, bad{end+1} = f{j}; else, part{end+1} = sprintf('%s (%s)', f{j}, how); end %#ok<AGROW>
+end
+end
+
+function [same, how] = nonrule_equal(a, b, rshow, rlbl)
+% a against b without the rule's entries: an array whose last dimension runs over KP.show, on the
+% columns of the non-rule policies; a struct array with a policy label, on the non-rule labels'
+% elements; anything else not compared.
+if (isnumeric(a) || islogical(a)) && (isnumeric(b) || islogical(b))
+    n = numel(rshow);
+    if ~isequal(size(a), size(b)), same = false; how = 'size differs'; return; end
+    if n > 0 && size(a, ndims(a)) == n
+        A = reshape(a, [], n); B = reshape(b, [], n);
+        same = isequaln(A(:, ~rshow), B(:, ~rshow)); how = 'the non-rule columns';
+        return
+    end
+elseif isstruct(a) && isstruct(b) && isfield(a, 'policy') && isfield(b, 'policy')
+    pa = {a.policy}; pb = {b.policy};
+    if all(cellfun(@ischar, [pa, pb]))
+        ka = ~ismember(pa, rlbl); kb = ~ismember(pb, rlbl);
+        same = isequal(pa(ka), pb(kb)) && isequaln(a(ka), b(kb)); how = 'the non-rule policies'' entries';
+        return
+    end
+end
+same = true; how = 'not compared';
+end
+
 function L = lbc_strip(L)
-% The link-budget completion's readings without rule + escalation's column (sets.rule) and the text
-% that prints it.
+% The link-budget completion's readings without rule + escalation's column (sets.rule) and its
+% figure in the text.
 if ~isstruct(L) || isempty(L), return; end
 if isfield(L, 'sets') && isstruct(L.sets) && isfield(L.sets, 'rule'), L.sets = rmfield(L.sets, 'rule'); end
-L = rmfield(L, intersect(fieldnames(L), {'lines', 'kpi'}));
+for f = {'lines', 'kpi'}
+    if isfield(L, f{1}) && (iscellstr(L.(f{1})) || ischar(L.(f{1})))
+        L.(f{1}) = regexprep(L.(f{1}), '(rule \+ escalation\s*)[^%|;]*%', '$1<rule>%');
+    end
+end
 end
 
 %% ===================== Stage: gate =====================
@@ -369,6 +484,8 @@ Vc = read_verdict(X.v.c2e);
 assert(~isempty(Vc) && isequal(Vc.pass, true), 'adopt_reading:c2e_not_passed', ...
     'adopt_reading: the gate is refused: ADOPT-C2e has not passed (%s)', X.v.c2e);
 assert(~isfile(X.v.gate), 'adopt_reading:exists', 'adopt_reading: %s exists; the gate is read once', X.v.gate);
+[ook, owhy] = outputs_ok(X, Vc);
+assert(ook, 'adopt_reading:c2e_outputs', 'adopt_reading: the gate is refused: %s', owhy);
 S = jsondecode(fileread(Sx.sel));
 Vs = load(Sx.val, 'Vs'); Vs = Vs.Vs;
 Q = load(fullfile(X.on, 'data', 'trained_dqn.mat'), 'deployed');
@@ -395,15 +512,24 @@ tree = canon(tree); [M, X] = open_overlay(tag, tree, O); K = reg();
 Vg = read_verdict(X.v.gate);
 assert(~isempty(Vg) && isequal(Vg.pass, true), 'adopt_reading:gate_not_passed', ...
     'adopt_reading: the render is refused: the gate has not passed (%s)', X.v.gate);
-assert(~isfile(X.v.render) && ~any(cellfun(@(f) isfile(fullfile(X.on, f)), K.render_out)) && ~isfolder(fullfile(X.on, 'profiles')), ...
+assert(~isfile(X.v.render) && ~any(cellfun(@(f) isfile(fullfile(X.on, f)), [K.render_out, {K.note_file}])) && ...
+    ~isfolder(fullfile(X.on, 'profiles')), ...
     'adopt_reading:exists', 'adopt_reading: %s or rendered outputs in %s exist; the render runs once', X.v.render, X.on);
+Vc = read_verdict(X.v.c2e);
+[ook, owhy] = outputs_ok(X, Vc);
+assert(ook, 'adopt_reading:c2e_outputs', 'adopt_reading: the render is refused: %s', owhy);
+[pok, pwhy] = path_ok(X, tree);
+assert(pok, 'adopt_reading:path', 'adopt_reading: the render is refused: %s, not from %s', pwhy, fullfile(X.root, 'code'));
 lg = start_log(X, 'render'); %#ok<NASGU>
 tab = has_table(tree);
 s0 = snapshot(tree);
 err = render_in(X.on, tab);
 rows = struct('file', {}, 'ok', {}, 'why', {});
 rows(end+1) = row('renderers', isempty(err), list_txt('ran: ', err));
-rows(end+1) = row('tree untouched', isequal(s0, snapshot(tree)), 'listing, sizes, dates and HEAD of the tree before and after');
+s1 = snapshot(tree);
+rows(end+1) = row('tree untouched', isequal(s0, s1), snap_why(s0, s1, 'the tree but .git and logs/'));
+[ook, owhy] = outputs_ok(X, Vc);
+rows(end+1) = row('c2e outputs', ook, owhy);
 outs = K.final; if tab, outs = [outs, K.table]; end
 for f = outs
     a = fullfile(X.on, f{1}); b = fullfile(X.off, f{1});
@@ -412,14 +538,45 @@ for f = outs
     rows(end+1) = row(f{1}, true, sprintf('SHA-256 %s; %s', sha_file(a), ternary(same, 'as off', 'differs from off'))); %#ok<AGROW>
 end
 st = stale_files(fullfile(X.on, 'results', 'report_numbers.json'));
+s_off = stale_files(fullfile(X.off, 'results', 'report_numbers.json'));
+add = setdiff(st, s_off); drop = setdiff(s_off, st);
+rows(end+1) = row('stale files', isfile(fullfile(X.on, 'results', 'report_numbers.json')) && all(ismember(add, K.stale_add)) && ...
+    all(ismember(drop, K.stale_drop)), sprintf('off: %s; on: %s (allowed: added %s, dropped %s)', ...
+    ternary(isempty(s_off), 'none', strjoin(s_off, ', ')), ternary(isempty(st), 'none', strjoin(st, ', ')), ...
+    strjoin(K.stale_add, ', '), strjoin(K.stale_drop, ', ')));
 CFG = cfg_of(M);
 note = {sprintf('Adopted: %s (rule_fix %s). The rule rows of policy_evaluation.mat carry it.', strjoin(order_of(M), ', '), ...
     CFG.adopt.rule_fix), ...
     ['Not carried into the deployed monitor: the rule columns of C2g, C2u and EDGE stay as registered, the rule without ' ...
     'the layered answer. The DQN rows are unchanged.'], ...
-    sprintf('Stale files after the render (result_status.m, report_numbers.json): %s', strjoin([{''}, st], ' '))};
-V = verdict(X, 'render', rows, struct('stale', {st}, 'note', {note}));
+    ['results/edge_map.mat is not re-run here: result_status.m marks it stale (older than the adopted ' ...
+    'policy_evaluation.mat); its rule column is the rule without the layered answer.'], ...
+    sprintf('Stale files after the render (result_status.m, report_numbers.json): %s', ternary(isempty(st), 'none', strjoin(st, ', ')))};
+write_once(fullfile(X.on, K.note_file), note);
+V = verdict(X, 'render', rows, struct('stale', {st}, 'note', {note}, 'code_sha256', M.checkout_code_sha256));
 if ~V.pass, error('adopt_reading:render', 'adopt_reading: the render failed (see %s)', X.t.render); end
+end
+
+%% ===================== Stage: release =====================
+function V = stage_release(tag, tree, O)
+% The write attribute back on every tree data file that had it before the overlay (through the
+% off root's link: the attribute is the file's); the overlay is closed after it.
+if nargin < 3, O = struct(); end
+tree = canon(tree); [M, X] = open_overlay(tag, tree, O);
+dl = as_cell(M.data_links); ro = as_cell(M.readonly_before);
+rows = struct('file', {}, 'ok', {}, 'why', {});
+for k = 1:numel(dl)
+    f = dl{k}; lnk = fullfile(X.off, f); src = fullfile(tree, f);
+    if ismember(f, ro)
+        rows(end+1) = row(f, ~java.io.File(src).canWrite(), 'read-only before the overlay: kept read-only'); %#ok<AGROW>
+        continue
+    end
+    ok = isfile(lnk) && java.nio.file.Files.isSameFile(jpath(lnk), jpath(src));
+    if ok, ok = fileattrib(lnk, '+w'); end
+    rows(end+1) = row(f, ok && java.io.File(src).canWrite(), 'writable again, as before the overlay'); %#ok<AGROW>
+end
+V = verdict(X, 'release', rows, struct('note', {{'The overlay is closed: every stage refuses on it.'}}));
+if ~V.pass, error('adopt_reading:release', 'adopt_reading: the release failed (see %s)', X.t.release); end
 end
 
 %% ===================== Renderers =====================
@@ -467,6 +624,7 @@ function [ok, why] = compare_file(a, b)
 ok = false; why = '';
 if ~isfile(a), why = sprintf('%s absent', a); return; end
 if ~isfile(b), why = sprintf('%s absent', b); return; end
+if dir(a).bytes == dir(b).bytes && strcmp(sha_file(a), sha_file(b)), ok = true; why = 'equal (bytes)'; return; end
 [~, ~, e] = fileparts(a);
 switch lower(e)
     case '.json'
@@ -584,6 +742,60 @@ F = list_rel(d, '');
 F = F(endsWith(F, '.m'));
 end
 
+function h = code_sha(root)
+% The SHA-256 of the list of root/code/**/*.m (tests/ aside), each file's SHA-256 and path.
+F = m_files(fullfile(root, 'code')); F = F(~startsWith(F, 'tests/'));
+L = cellfun(@(f) sprintf('%s  %s', sha_file(fullfile(root, 'code', f)), f), F, 'UniformOutput', false);
+h = str_sha(strjoin(sort(reshape(L, 1, [])), newline));
+end
+
+function d = code_dirty(root)
+% The .m files under root/code (tests/ aside) that git reports modified or untracked; none outside git.
+d = {};
+if strcmp(tree_head(root), 'unknown'), return; end
+[st, out] = system(sprintf('git --no-optional-locks -C "%s" status --porcelain --untracked-files=all -- code', root));
+assert(st == 0, 'adopt_reading:git', 'adopt_reading: git status failed in %s: %s', root, out);
+L = strsplit(strrep(out, char(13), ''), newline);
+L = L(~cellfun(@isempty, strtrim(L)));
+L = strtrim(strrep(regexprep(L, '^.. ', ''), '"', ''));
+d = L(endsWith(L, '.m') & ~startsWith(L, 'code/tests/'));
+end
+
+function [ok, why] = path_ok(X, tree)
+% The decision and KPI code resolves into this checkout's code, and the tree's code is not on the path.
+K = reg();
+w = cellfun(@which, K.code_fns, 'UniformOutput', false);
+ok = all(cellfun(@(p) ~isempty(p) && under(p, fullfile(X.root, 'code')), w)) && ~contains(lower(path), lower(fullfile(tree, 'code')));
+why = sprintf('the code runs from %s', strjoin(w, ', '));
+end
+
+function tf = same_text(a, b)
+tf = isfile(a) && isfile(b) && strcmp(strrep(fileread(a), char(13), ''), strrep(fileread(b), char(13), ''));
+end
+
+function H = out_hashes(root, files)
+H = struct('file', {}, 'sha256', {});
+for k = 1:numel(files)
+    p = fullfile(root, files{k});
+    if isfile(p), H(end+1) = struct('file', files{k}, 'sha256', sha_file(p)); end %#ok<AGROW>
+end
+end
+
+function [ok, why] = outputs_ok(X, Vc)
+% The outputs ADOPT-C2e checked (c2e.json) still hold the SHA-256 it recorded.
+ok = false; why = sprintf('%s records no outputs', X.v.c2e);
+if ~isstruct(Vc) || ~isfield(Vc, 'outputs') || isempty(Vc.outputs), return; end
+H = Vc.outputs; if iscell(H), H = [H{:}]; end
+if ~ismember('results/policy_evaluation.mat', {H.file}), why = 'c2e.json records no results/policy_evaluation.mat'; return; end
+bad = {};
+for k = 1:numel(H)
+    p = fullfile(X.on, H(k).file);
+    if ~isfile(p) || ~strcmp(sha_file(p), H(k).sha256), bad{end+1} = H(k).file; end %#ok<AGROW>
+end
+ok = isempty(bad);
+why = sprintf('%d outputs of ADOPT-C2e%s', numel(H), ternary(ok, ' as c2e.json recorded', list_txt(' changed since: ', bad)));
+end
+
 %% ===================== Tree listing and hashes =====================
 function F = tree_files(tree)
 % The tree's registered results and inputs, relative with '/': results/**, params.mat, profile.json,
@@ -603,16 +815,37 @@ H = cellfun(@(f) sprintf('%s  %s', sha_file(fullfile(tree, f)), f), F, 'UniformO
 end
 
 function S = snapshot(tree)
-% Every file of the tree's results, code and inputs with its size and date, and its HEAD.
-[F, B] = list_rel(tree, 'results');
-[f2, b2] = list_rel(tree, 'code'); F = [F, f2]; B = [B; b2];
-for f = {'params.mat', 'profile.json'}
-    if isfile(fullfile(tree, f{1})), d = dir(fullfile(tree, f{1})); F{end+1} = f{1}; B(end+1, :) = [d.bytes, d.datenum]; end %#ok<AGROW>
+% Every file of the tree but .git and logs/ (other processes' logs), with its size and date, and its HEAD.
+F = {}; B = zeros(0, 2);
+d = dir(tree);
+for k = 1:numel(d)
+    n = d(k).name;
+    if any(strcmp(n, {'.', '..', '.git', 'logs'})), continue; end
+    if d(k).isdir
+        [f, b] = list_rel(tree, n); F = [F, f]; B = [B; b]; %#ok<AGROW>
+    else
+        F{end+1} = n; B(end+1, :) = [d(k).bytes, d(k).datenum]; %#ok<AGROW>
+    end
 end
-d = dir(fullfile(tree, 'data', '*.mat')); d = d(~[d.isdir]);
-for k = 1:numel(d), F{end+1} = ['data/' d(k).name]; B(end+1, :) = [d(k).bytes, d(k).datenum]; end %#ok<AGROW>
 [F, o] = sort(F); B = B(o, :);
 S = struct('files', {F}, 'meta', B, 'head', tree_head(tree));
+end
+
+function S = dir_state(d)
+% Every file under d with its size and date (empty when d is absent).
+[F, B] = list_rel(d, '');
+[F, o] = sort(F); B = B(o, :);
+S = struct('files', {F}, 'meta', B, 'head', '');
+end
+
+function t = snap_why(s0, s1, what)
+% What moved between two snapshots.
+if isequal(s0, s1), t = sprintf('%s: listing, sizes, dates and HEAD the same before and after', what); return; end
+[c, i0, i1] = intersect(s0.files, s1.files);
+moved = c(any(s0.meta(i0, :) ~= s1.meta(i1, :), 2));
+ch = [reshape(setxor(s0.files, s1.files), 1, []), reshape(moved, 1, [])];
+if ~strcmp(s0.head, s1.head), ch{end+1} = 'HEAD'; end
+t = sprintf('%s moved: %s', what, list_txt('', ch));
 end
 
 function [F, B] = list_rel(base, sub)
@@ -654,6 +887,12 @@ end
 function h = text_sha(f)
 md = java.security.MessageDigest.getInstance('SHA-256');
 s = strrep(fileread(f), char(13), '');
+if ~isempty(s), md.update(unicode2native(s, 'UTF-8')); end
+h = hex(md.digest());
+end
+
+function h = str_sha(s)
+md = java.security.MessageDigest.getInstance('SHA-256');
 if ~isempty(s), md.update(unicode2native(s, 'UTF-8')); end
 h = hex(md.digest());
 end
@@ -762,6 +1001,11 @@ end
 function x = cell_at(S, f, c)
 x = [];
 if isfield(S, f) && iscell(S.(f)) && c <= numel(S.(f)), x = S.(f){c}; end
+end
+
+function c = as_cell(x)
+% A decoded JSON list of names as a cell row.
+if isempty(x), c = {}; elseif ischar(x), c = {x}; else, c = reshape(cellstr(x), 1, []); end
 end
 
 function v = field_or(S, f, d)
