@@ -412,3 +412,9 @@ Extension readings (no commitment): the earlier proposal's unknown-threat KPI is
 - What the detection adds moves from -2.8 [-6.0, +0.0] to +4.8 [+2.8, +6.8] points, so the detector now helps the rule significantly on profile 3 too.
 - KPI headlines 1-4 and 6-8 are unchanged. edge_map.mat is marked stale by design.
 - Next: kpi7_guard on P3; the kpi7-p1 tests and guard (started 22:51).
+- Review (sonnet) of profile 3's adoption:
+  - Every change is in a rule row. No headline, verdict or commitment flips, including on the side lines.
+  - Rule + escalation PER reduction vs the static link, pooled: 47.3% -> 57.5%. Core set: 41.2% -> 54.1%.
+  - CNN contribution, full set: -8.2% -> +12.2% [7.5, 16.8]. Core set: -11.9% -> +0.3% [-3.0, 3.4].
+  - Side line to state in the book: on the "comb" set the adopted rule + escalation recovers 89.3% against the deployed hybrid's 73.4% (before: 57.8%). Pooled, the hybrid still leads by 15.6 points.
+  - Dashboard PNG: 0.134% of pixels differ (rendering rule).
