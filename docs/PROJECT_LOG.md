@@ -392,3 +392,9 @@ Extension readings (no commitment): the earlier proposal's unknown-threat KPI is
 8. Check what a metric measures before quoting it (latency scope, per-class "accuracy" is recall).
 9. Count the tests that ran, not only the failures: three tests were silently filtered for weeks by a toolbox check that is empty in R2026a, and an empty token list made a check pass vacuously.
 10. Code must not depend on the checkout it was tested in: a git-less export broke `git show` in tests, and a thread setting failed under a single-thread launcher. Run the final tests the way the real run will run.
+
+### 19.11.2026 19:21 - D124 adoption, profile 1: all stages PASS
+- off 13.9 min (dashboard PNG 0.08% pixels, the registered rendering rule), c2e 118.8 min at 8 threads (non-rule columns isequaln to the record; the rule rows of sets 1-5 isequaln to test.mat's on rows, 325 fields; tree SHA-256 the same), gate (keep+st+rate still deploys dqn), render.
+- What moves (rule rows only): rule + escalation recovered among recoverable, pooled 66.8% -> 77.0% (13912 episodes); KPI 5 margin of the deployed DQN +27.3 [+23.1, +31.7] -> +17.1 [+14.5, +19.9] points, still MET; what the detection adds (rule + esc vs no detector + esc) +3.8 -> +13.0 points. Every DQN, baseline and other KPI number unchanged.
+- edge_map.mat not re-run (its rule column stays the rule without the layered answer), marked stale by design.
+- kpi7-p3 tests: test_kpi7 15/15, full suite 669/669. D126 registered (default after 30 min). The P3 adoption follows on the p3 slot.
