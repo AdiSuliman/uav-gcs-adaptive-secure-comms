@@ -6419,12 +6419,14 @@ end
 function test_latency_times_predictor(tc)
 % KPI 7 times the predicted MMSE gain in the cycle: frame k on every antenna as the
 % combiner sees it, frame k - 1 only the filter's memory; the observation reads its value.
-src = fileread(which('measure_latency'));
-verifyNotEmpty(tc, strfind(src, 't0 = tic; g = mmse_predict(x.iqa, p0, x.sy); t_pred = toc(t0);'));
+% The cycle (lat_cycle.m) is timed per chain; the deployed total is its components' sum.
+src = fileread(which('measure_latency')); cyc = fileread(which('lat_cycle'));
+verifyNotEmpty(tc, strfind(cyc, 't0 = tic; g = mmse_predict(x.iqa, S.p0, x.sy); t_pred = toc(t0);'));
 verifyNotEmpty(tc, strfind(src, 'if k > 1, s2(:, 1) = NaN; end'));
-verifyNotEmpty(tc, strfind(src, 'obs.mmse_pred = g(end);'));
-verifyNotEmpty(tc, strfind(src, 'tm(n, :) = 1000 * [t_spec, t_feat, t_pred, t_det, t_dqn];'));
-verifyNotEmpty(tc, strfind(src, '''dep'', sum(tm(1:n, 1:4), 2) + tp(1:n)'));
+verifyNotEmpty(tc, strfind(cyc, 'obs.mmse_pred = g(end);'));
+verifyNotEmpty(tc, strfind(cyc, 't = [t_spec, t_feat, t_pred, t_det, t_pol, toc(w0)];'));
+verifyNotEmpty(tc, strfind(src, 'tot = @(x) sum(x(:, 1:5), 2);'));
+verifyNotEmpty(tc, strfind(src, 'tot_dep = tot(T.(dsel).dep);'));
 end
 
 function test_policy_mmse_pred(tc)

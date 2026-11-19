@@ -1,5 +1,5 @@
 %% MEASURE_LATENCY - Decision latency per cycle (KPI 7: real time)
-% One decision cycle as deployed: spectrogram image of the received frame, link
+% One decision cycle as deployed (lat_cycle.m): spectrogram image of the received frame, link
 % features with the record of the cycle's idle time (idle_summary.m from that time's
 % RSSI samples; the fusion's window cues run inside the monitor), the predicted MMSE gain
 % (mmse_predict.m on every antenna's samples of the frame as the combiner sees them, the
@@ -12,11 +12,22 @@
 % it (the selected DQN with escalation, or the rule with escalation on its own monitor,
 % policy_setup.m), with the DQN and the rule chains beside it. Real frames of the threat
 % link (none, jamming, noise_burst, spoofing at 4 dB).
+% Each chain (deployed, DQN as selected, rule + escalation) is a whole cycle timed in its own
+% passes, in cycle order, one policy per cycle: no other policy runs before it in the cycle.
+% The registered figure is the SUM of the deployed chain's components; the glue between them
+% counts in the component it serves (the detector's input tensors in the detector, the
+% observation in the policy). One clock around the whole deployed cycle is reported beside
+% the sum, a side reading without a verdict. The receiver's own estimators (the BER estimate,
+% the post-combining SNR and the spatial metrics, extract_closed_loop_frames.m) run in the
+% receiver before the cycle and are not timed here; the cycle reads their outputs.
+% The monitor reads the pools' settings as evaluated: the configurations' known gains and
+% power factors (config_gain_db.m, PPm.pw as build_policy_pools.m stores it).
 % A deployed receiver runs the detector on one device, so each device (GPU when
 % present, CPU) is timed in its own passes, after a warm-up pass; alternating the
 % two devices inside one cycle slows both (CUDA synchronization and GPU memory
 % management run into the next call). The cycle total uses the device with the
-% lower 95th percentile; GPU work is synchronized before each clock read.
+% lower 95th percentile; GPU work is synchronized before each clock read (the device
+% handle read once).
 % A third pass runs the whole cycle on one CPU core (maxNumCompThreads(1)), the
 % nearest desktop proxy of a small on-board computer (Tariq et al.: a real-time
 % claim needs measured wall-clock time); it is not a measurement on UAV hardware.
@@ -27,6 +38,9 @@
 % was timed, the detector (det_id, detector_id.m) and the deployed policy
 % (policy_stamp.m), so the KPIs read a latency of another detector or policy as STALE
 % (result_status.m).
+% DET_FIRST = true before the run (diagnostic): the detector before the predictor in every
+% cycle; written to results/kpi7/latency_det_first.{txt,mat}, never to the record.
+% LAT_SETUP_ONLY = true before the run: the setup and the frames only (kpi7_guard.m).
 %
 % Output: results/latency.txt, results/latency.mat
 
@@ -35,6 +49,7 @@ warning('off', 'Simulink:cgxe:LeakedJITEngine');
 fprintf('=== Decision latency per cycle ===\n\n');
 N_REP = 10;                                   % timed passes over every frame
 if exist('SMOKE', 'var') && SMOKE, N_REP = 1; end   % reduced chain check (run_stage smoke)
+if ~exist('DET_FIRST', 'var'), DET_FIRST = false; end
 THREATS = {'none', 'jamming', 'noise_burst', 'spoofing'};
 EBNO = 4; delay_bits = 20; tw = 10;
 modelName = 'UAV_GCS_Threat_Link';
@@ -58,11 +73,20 @@ PPm = struct('actions', {policy_actions()}, 'classes', {cellstr(string(D.classes
 PPm = decision_settings(PPm, Q);                       % the deployed DQN's monitor and settings (train_dqn.m)
 PPm.cfg_gain_db = config_gain_db(PPm.actions, p0);
 nA = numel(PPm.actions); na = find(strcmp(PPm.actions, 'no_action'));
+PPm.pw = ones(1, nA);                                  % power factor per configuration, as build_policy_pools.m stores it
+for a = 1:nA, [~, ~, cm] = apply_countermeasure(p0, 'none', PPm.actions{a}); PPm.pw(a) = cm.power_factor; end
 dep = 'dqn_esc'; if isfield(Q, 'deployed') && ~isempty(Q.deployed), dep = Q.deployed; end
 sel = 1; if all(isfield(Q, {'gammas', 'seed_summary'})), sel = find(Q.gammas == Q.seed_summary.selected_gamma, 1); end
 [kindP, agP, optP] = policy_setup(dep, Q, sel, [], [], [], na);   % the deployed chain
 kindD = 'dqn_esc'; if strcmp(dep, 'dqn'), kindD = 'dqn'; end    % the DQN chain as selected (with or without the escalation)
 gpu = canUseGPU;
+CH = {'dep', 'dqn', 'rule'};                           % the chains, each in its own passes
+POL = struct();
+POL.dep = struct('kind', kindP, 'agent', agP, 'opt', optP);
+POL.dqn = struct('kind', kindD, 'agent', Q.agent, 'opt', struct());
+POL.rule = struct('kind', 'rule_esc', 'agent', [], 'opt', struct());
+S = struct('p0', p0, 'fs', fs, 'tw', tw, 'D', D, 'mu', mu, 'sd', sd, 'PPm', PPm, 'dev', 'cpu', 'ug', false, ...
+    'gdev', [], 'det_first', DET_FIRST);
 
 %% 1. Frames of the real link
 F = {};
@@ -84,8 +108,9 @@ end
 if bdIsLoaded(modelName), close_system(modelName, 0); end
 nF = numel(F);
 fprintf('%d frames from %d threat runs at %g dB\n', nF, numel(THREATS), EBNO);
+if exist('LAT_SETUP_ONLY', 'var') && LAT_SETUP_ONLY, return; end
 
-%% 2. Timed cycles, one device at a time
+%% 2. Timed cycles, one device at a time, each chain in its own passes
 ld0 = machine_load();
 names = {'spectrogram', 'features', 'MMSE predictor', 'detector GPU', 'detector CPU', 'DQN policy', 'rule policy', ...
     'deployed policy'};
@@ -93,49 +118,40 @@ devs = {'cpu', 'cpu1'}; if gpu, devs = {'gpu', 'cpu', 'cpu1'}; end
 T = struct();
 nt0 = maxNumCompThreads;
 for di = 1:numel(devs)
-    dv = devs{di}; ug = strcmp(dv, 'gpu');
-    ddev = dv; if strcmp(dv, 'cpu1'), ddev = 'cpu'; maxNumCompThreads(1); else, maxNumCompThreads(nt0); end
-    tm = nan(N_REP * nF, 5);                      % spectrogram, features, MMSE predictor, detector, DQN policy, per cycle
-    tr = nan(N_REP * nF, 1);                      % rule policy
-    tp = nan(N_REP * nF, 1);                      % deployed policy
-    n = 0;
-    for rep = 0:N_REP
-        memD = []; memR = []; memP = []; cfgD = na; cfgR = na; cfgP = na;
-        for f = 1:nF
-            x = F{f};
-            t0 = tic; img = spec_image(x.iq, fs, thermal_nv(p0)); t_spec = toc(t0);
-            t0 = tic; raw = link_features(x.M, x.k, tw); iq_rec = idle_record(x.M, x.k, p0); t_feat = toc(t0);
-            t0 = tic; g = mmse_predict(x.iqa, p0, x.sy); t_pred = toc(t0);
-            X = reshape(single(img), 128, 128, 1, 1); Fn = ((raw - mu) ./ sd)';
-            t0 = tic; [probs, maha] = detect_scores(D.net, D.ood, X, Fn, ddev); sync(ug); t_det = toc(t0);
-            obs = struct('probs', probs(:)', 'unknown', maha < PPm.maha_thr, 'maha', maha, 'feat', raw, ...
-                'gant', x.M.gain_ant(:, x.k)', 'idle', iq_rec);
-            if isfield(x.M, 'bch'), obs.bch = x.M.bch(:, x.k)'; end
-            obs.mmse_pred = g(end);
-            t0 = tic; [cfgD, memD] = policy_decide(kindD, obs, cfgD, memD, PPm, Q.agent); t_dqn = toc(t0);
-            t0 = tic; [cfgR, memR] = policy_decide('rule_esc', obs, cfgR, memR, PPm, []); t_rule = toc(t0);
-            t0 = tic; [cfgP, memP] = policy_decide(kindP, obs, cfgP, memP, PPm, agP, optP); t_dep = toc(t0);
-            if rep > 0                               % pass 0 = warm-up
-                n = n + 1;
-                tm(n, :) = 1000 * [t_spec, t_feat, t_pred, t_det, t_dqn]; tr(n) = 1000 * t_rule; tp(n) = 1000 * t_dep;
+    dv = devs{di};
+    S.dev = dv; if strcmp(dv, 'cpu1'), S.dev = 'cpu'; maxNumCompThreads(1); else, maxNumCompThreads(nt0); end
+    S.ug = strcmp(dv, 'gpu'); S.gdev = []; if S.ug, S.gdev = gpuDevice; end
+    R = struct();
+    for ci = 1:numel(CH)
+        tc = nan(N_REP * nF, 6);                  % spectrogram, features, predictor, detector, policy, wall clock
+        n = 0;
+        for rep = 0:N_REP
+            st = struct('cfg', na, 'mem', []);
+            for f = 1:nF
+                [~, tt, st] = lat_cycle(F{f}, S, POL.(CH{ci}), st);
+                if rep > 0                       % pass 0 = warm-up
+                    n = n + 1; tc(n, :) = 1000 * tt;
+                end
             end
         end
+        R.(CH{ci}) = tc(1:n, :);
     end
-    T.(dv) = struct('tm', tm(1:n, :), 'tr', tr(1:n), 'tp', tp(1:n), 'dqn', sum(tm(1:n, :), 2), ...
-        'rule', sum(tm(1:n, 1:4), 2) + tr(1:n), 'dep', sum(tm(1:n, 1:4), 2) + tp(1:n));
+    T.(dv) = struct('dep', R.dep, 'dqn', R.dqn, 'rule', R.rule);
 end
 maxNumCompThreads(nt0);
 ld1 = machine_load();
 p95 = @(x) quant(x, 0.95);
-dsel = 'cpu'; if gpu && p95(T.gpu.dep) < p95(T.cpu.dep), dsel = 'gpu'; end   % detector device used in the cycle
-tm = nan(size(T.(dsel).tm, 1), numel(names));
-tm(:, [1 2 3 6]) = T.(dsel).tm(:, [1 2 3 5]); tm(:, 7) = T.(dsel).tr; tm(:, 8) = T.(dsel).tp;
-if gpu, tm(:, 4) = T.gpu.tm(:, 4); end
-tm(:, 5) = T.cpu.tm(:, 4);
-n = size(tm, 1);
-tot_dqn = T.(dsel).dqn;
-tot_rule = T.(dsel).rule;
-tot_dep = T.(dsel).dep;
+tot = @(x) sum(x(:, 1:5), 2);                     % the cycle: the sum of its components
+dsel = 'cpu'; if gpu && p95(tot(T.gpu.dep)) < p95(tot(T.cpu.dep)), dsel = 'gpu'; end   % detector device used in the cycle
+n = size(T.(dsel).dep, 1);
+tm = nan(n, numel(names));
+tm(:, 1:3) = T.(dsel).dep(:, 1:3); tm(:, 6) = T.(dsel).dqn(:, 5); tm(:, 7) = T.(dsel).rule(:, 5); tm(:, 8) = T.(dsel).dep(:, 5);
+if gpu, tm(:, 4) = T.gpu.dep(:, 4); end
+tm(:, 5) = T.cpu.dep(:, 4);
+tot_dep = tot(T.(dsel).dep);
+tot_dqn = tot(T.(dsel).dqn);
+tot_rule = tot(T.(dsel).rule);
+wall_dep = T.(dsel).dep(:, 6);
 oth = setdiff(devs, {dsel, 'cpu1'});
 
 %% 3. Report
@@ -143,24 +159,31 @@ LAT = struct('names', {names}, 'median_ms', median(tm), 'p95_ms', p95(tm), ...
     'total_dqn_median_ms', median(tot_dqn), 'total_dqn_p95_ms', p95(tot_dqn), ...
     'total_rule_median_ms', median(tot_rule), 'total_rule_p95_ms', p95(tot_rule), ...
     'deployed', dep, 'total_dep_median_ms', median(tot_dep), 'total_dep_p95_ms', p95(tot_dep), ...
+    'wall_dep_median_ms', median(wall_dep), 'wall_dep_p95_ms', p95(wall_dep), ...
     'frame_ms', 1000 * p0.frame_duration, 'n', n, 'gpu', gpu, 'device', device_name(strcmp(dsel, 'gpu')), ...
     'devices', device_name(gpu), ...
-    'single_core', struct('total_dqn_median_ms', median(T.cpu1.dqn), 'total_dqn_p95_ms', p95(T.cpu1.dqn), ...
-        'total_dep_median_ms', median(T.cpu1.dep), 'total_dep_p95_ms', p95(T.cpu1.dep), ...
-        'detector_median_ms', median(T.cpu1.tm(:, 4)), 'detector_p95_ms', p95(T.cpu1.tm(:, 4)), ...
-        'predictor_median_ms', median(T.cpu1.tm(:, 3)), 'predictor_p95_ms', p95(T.cpu1.tm(:, 3))), ...
+    'single_core', struct('total_dqn_median_ms', median(tot(T.cpu1.dqn)), 'total_dqn_p95_ms', p95(tot(T.cpu1.dqn)), ...
+        'total_dep_median_ms', median(tot(T.cpu1.dep)), 'total_dep_p95_ms', p95(tot(T.cpu1.dep)), ...
+        'wall_dep_median_ms', median(T.cpu1.dep(:, 6)), 'wall_dep_p95_ms', p95(T.cpu1.dep(:, 6)), ...
+        'detector_median_ms', median(T.cpu1.dep(:, 4)), 'detector_p95_ms', p95(T.cpu1.dep(:, 4)), ...
+        'predictor_median_ms', median(T.cpu1.dep(:, 3)), 'predictor_p95_ms', p95(T.cpu1.dep(:, 3))), ...
+    'det_first', DET_FIRST, ...
     'score', D.ood.score, 'det_id', DET_ID, 'policy_stamp', policy_stamp(Q), 'generated', datestr(now));
 LAT.load = struct('before', ld0, 'after', ld1);
 LAT.load_text = load_text(LAT.load);
 if ~isempty(oth)
-    LAT.other = struct('device', device_name(strcmp(oth{1}, 'gpu')), 'total_dqn_median_ms', median(T.(oth{1}).dqn), ...
-        'total_dqn_p95_ms', p95(T.(oth{1}).dqn));
+    LAT.other = struct('device', device_name(strcmp(oth{1}, 'gpu')), 'total_dqn_median_ms', median(tot(T.(oth{1}).dqn)), ...
+        'total_dqn_p95_ms', p95(tot(T.(oth{1}).dqn)));
 end
 rep = {};
 rep{end+1} = '=== DECISION LATENCY PER CYCLE ===';
-rep{end+1} = sprintf('Generated: %s | %d timed cycles per device (%d frames x %d passes, after 1 warm-up pass) | %s', ...
+rep{end+1} = sprintf('Generated: %s | %d timed cycles per device and chain (%d frames x %d passes, after 1 warm-up pass) | %s', ...
     LAT.generated, n, nF, N_REP, LAT.device);
-rep{end+1} = 'Each device timed in its own passes (a deployed receiver uses one); components of the selected device, detector on both.';
+rep{end+1} = ['Each device timed in its own passes (a deployed receiver uses one); each chain (deployed, DQN, rule) ' ...
+    'a whole cycle in its own passes, one policy per cycle; components of the selected device, detector on both.'];
+rep{end+1} = ['Glue between the components counts in the one it serves (detector input in the detector, observation ' ...
+    'in the policy); the receiver''s own estimators (extract_closed_loop_frames.m) run before the cycle, untimed.'];
+if DET_FIRST, rep{end+1} = 'DIAGNOSTIC ORDER: the detector before the MMSE predictor in every cycle (not the record).'; end
 rep{end+1} = sprintf('Unknown-threat score of the detector: %s (eval_ood_detection.m).', LAT.score);
 rep{end+1} = sprintf('%-16s %10s %10s', 'component', 'median ms', 'p95 ms');
 for i = 1:numel(names)
@@ -168,6 +191,8 @@ for i = 1:numel(names)
 end
 rep{end+1} = sprintf('Cycle total with the detector on the %s (lower p95 of the deployed chain):', LAT.device);
 rep{end+1} = sprintf('%-16s %10.3f %10.3f   (deployed: %s)', 'total (deployed)', LAT.total_dep_median_ms, LAT.total_dep_p95_ms, dep);
+rep{end+1} = sprintf('%-16s %10.3f %10.3f   (side reading, no verdict: one clock around the whole deployed cycle)', ...
+    'wall (deployed)', LAT.wall_dep_median_ms, LAT.wall_dep_p95_ms);
 rep{end+1} = sprintf('%-16s %10.3f %10.3f', 'total (DQN)', LAT.total_dqn_median_ms, LAT.total_dqn_p95_ms);
 rep{end+1} = sprintf('%-16s %10.3f %10.3f', 'total (rule)', LAT.total_rule_median_ms, LAT.total_rule_p95_ms);
 if isfield(LAT, 'other')
@@ -178,31 +203,25 @@ rep{end+1} = sprintf('%-16s %10.3f %10.3f   (whole cycle on one CPU core; detect
     'total (deployed)', LAT.single_core.total_dep_median_ms, LAT.single_core.total_dep_p95_ms, ...
     LAT.single_core.detector_median_ms, LAT.single_core.detector_p95_ms, LAT.single_core.predictor_median_ms, ...
     LAT.single_core.predictor_p95_ms);
+rep{end+1} = sprintf('%-16s %10.3f %10.3f   (side reading, no verdict: one clock around the whole cycle on one CPU core)', ...
+    'wall (deployed)', LAT.single_core.wall_dep_median_ms, LAT.single_core.wall_dep_p95_ms);
 rep{end+1} = sprintf('Frame duration %.3f ms: one decision per %d frames at the p95 latency.', LAT.frame_ms, ...
     ceil(LAT.total_dep_p95_ms / LAT.frame_ms));
 rep{end+1} = sprintf('Timed: detector %s, deployed policy %s (result_status.m checks them).', LAT.det_id, LAT.policy_stamp);
 rep{end+1} = LAT.load_text;
-if ~exist('results', 'dir'), mkdir('results'); end
-fid = fopen('results/latency.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
+out_dir = 'results'; out_name = 'latency';
+if DET_FIRST, out_dir = fullfile('results', 'kpi7'); out_name = 'latency_det_first'; end
+if ~exist(out_dir, 'dir'), mkdir(out_dir); end
+fid = fopen(fullfile(out_dir, [out_name '.txt']), 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 fprintf('\n%s\n', rep{:});
-save('results/latency.mat', 'LAT', 'tm', 'T');
-fprintf('Saved results/latency.{txt,mat}\n');
+save(fullfile(out_dir, [out_name '.mat']), 'LAT', 'tm', 'T');
+fprintf('Saved %s/%s.{txt,mat}\n', strrep(out_dir, '\', '/'), out_name);
 
 %% ===================== Local functions =====================
 function q = quant(x, p)
 % Column-wise empirical quantile (nearest rank).
 x = sort(x, 1);
 q = x(max(1, ceil(p * size(x, 1))), :);
-end
-
-function sync(gpu)
-if gpu, wait(gpuDevice); end
-end
-
-function r = idle_record(M, k, p)
-% The record of the idle time before frame k from that time's RSSI samples (idle_summary.m).
-r = nan(1, numel(idle_summary('names')));
-if isfield(M, 'idle_R') && ~isempty(M.idle_R), r = idle_summary(double(M.idle_R(:, :, k)), p); end
 end
 
 function s = device_name(gpu)

@@ -42,20 +42,31 @@ function [G, D] = mmse_predict(varargin)
 %   the frequency removed beyond the receiver's for MMSE and MRC), arrival (the arrival MMSE
 %   is measured at [samples]) and search (1 x frames, true where MMSE is measured at the
 %   search's arrival and frequency), for validate_phy.m
+%   GI = mmse_predict('info', p): the groups and the index sets every frame reuses (kept for
+%   the last layout, the params of mmse_predict('layout_fields'))
+%   old = mmse_predict('tail', on): filter only from the receive filter's memory before the
+%   first frame with an arrival on (off by default; on only where kpi7_guard.m reads it
+%   bit-identical); old: the previous setting
 if ischar(varargin{1})
     switch varargin{1}
         case 'snapshots', G = snapshots(varargin{2:end});
         case 'groups', [G, D] = groups(varargin{2});
+        case 'info', G = group_info(varargin{2});
+        case 'layout_fields', G = layout_fields();
+        case 'tail', G = tail_flag(varargin{2:end});
         otherwise, error('mmse_predict: unknown command %s', varargin{1});
     end
     return
 end
 [iqa, p, sy] = varargin{:};
-n0 = maxNumCompThreads(1); c0 = onCleanup(@() maxNumCompThreads(n0));   % small matrices: one thread is faster
+n0 = maxNumCompThreads;
+if n0 ~= 1                                                % small matrices: one thread is faster
+    maxNumCompThreads(1); c0 = onCleanup(@() maxNumCompThreads(n0)); %#ok<NASGU>
+end
 [~, na, nf] = size(iqa);
-[grp, sk] = groups(p);
-[rf, base, t] = filtered(iqa, p);
-nk = numel([grp{2:end}]); NS = numel(sk);
+GI = group_info(p); grp = GI.grp;
+[rf, base, t] = filtered(iqa, p, sy, tail_flag());
+nk = GI.nk; NS = GI.NS;
 G = nan(1, nf);
 D = struct('mmse_db', nan(1, nf), 'mrc_db', nan(1, nf), 'n_ref', nk, 'w_mrc', nan(na, numel(grp), nf), ...
     'w_mmse', nan(na, numel(grp), nf), 'r_mmse', nan(na, numel(grp), nf), 'df_hz', nan(1, nf), ...
@@ -63,11 +74,11 @@ D = struct('mmse_db', nan(1, nf), 'mrc_db', nan(1, nf), 'n_ref', nk, 'w_mrc', na
 for f = 1:min(nf, size(sy, 2))
     Yf = take(rf, f, base, t, sy(1:2, f), NS, p.sps);
     if isempty(Yf), continue; end
-    [Yf, D.df_mrc_hz(f)] = residual_frequency(Yf, grp, sk, p.symbol_rate);
-    [sm, sr, D.w_mrc(:, :, f), D.w_mmse(:, :, f)] = measure(Yf, grp, sk);
+    [Yf, D.df_mrc_hz(f)] = residual_frequency(Yf, GI, p.symbol_rate);
+    [sm, sr, D.w_mrc(:, :, f), D.w_mmse(:, :, f)] = measure(Yf, GI);
     D.r_mmse(:, :, f) = D.w_mrc(:, :, f); D.df_hz(f) = D.df_mrc_hz(f); D.arrival(f) = round(sy(1, f));
     if sm < 1
-        [sc, d, dfc, rc, wc] = search(rf, f, base, t, sy(1:2, f), D.df_hz(f), NS, grp, sk, p);
+        [sc, d, dfc, rc, wc] = search(rf, f, base, t, sy(1:2, f), D.df_hz(f), NS, GI, p);
         if sc > 2 * sm
             sm = sc; D.arrival(f) = d; D.df_hz(f) = dfc; D.r_mmse(:, :, f) = rc; D.w_mmse(:, :, f) = wc; D.search(f) = true;
         end
@@ -77,7 +88,7 @@ for f = 1:min(nf, size(sy, 2))
 end
 end
 
-function [sb, db, fb, rb, wb] = search(rf, f, base, t, sy, df0, NS, grp, sk, p)
+function [sb, db, fb, rb, wb] = search(rf, f, base, t, sy, df0, NS, GI, p)
 % The arrivals 0 to p.timing_max_sym symbols and the frequencies sy(2) + j fp / 4 (fp the
 % pilot alias step) within the receiver's acquisition window, +-(2 p.cfo_ppm of the carrier
 % + the largest Doppler) as build_threat_model.m searches it, scored by the long training's
@@ -88,6 +99,7 @@ function [sb, db, fb, rb, wb] = search(rf, f, base, t, sy, df0, NS, grp, sk, p)
 % higher MMSE SINR, at arrival db [samples] and frequency fb beyond sy(2) [Hz], with the
 % reference correlations rb and the weights wb (sb = 0: none held).
 sb = 0; db = NaN; fb = NaN; rb = []; wb = [];
+grp = GI.grp; sk = GI.sk;
 fp = p.symbol_rate / (p.pilot_block + p.pilot_every);
 fw = 2 * p.cfo_ppm * 1e-6 * p.carrier_freq + p.v_max * p.carrier_freq / p.c_light;
 TM = round(p.timing_max_sym * p.sps);
@@ -118,20 +130,21 @@ for i = c(isfinite(q(c)))
     [j, k] = ind2sub(size(q), i);
     Yc = take(rf, f, base, t, [dv(k); sy(2) + fj(j)], NS, p.sps);
     if isempty(Yc), continue; end
-    [Yc, dfc] = residual_frequency(Yc, grp, sk, p.symbol_rate);
-    [sc, ~, rc, wc] = measure(Yc, grp, sk);
+    [Yc, dfc] = residual_frequency(Yc, GI, p.symbol_rate);
+    [sc, ~, rc, wc] = measure(Yc, GI);
     if sc > sb, sb = sc; db = dv(k); fb = fj(j) + dfc; rb = rc; wb = wc; end
 end
 end
 
-function [sm, sr, Wr, Wm] = measure(Y, grp, sk)
+function [sm, sr, Wr, Wm] = measure(Y, GI)
 % The held-out SINRs of the DMI (sm) and MRC (sr) combiners over the frame's known symbols
 % but the short training's (a neighbour only: groups); Wr, Wm the weights of every group.
-GSPAN = 2;
-na = size(Y, 2); ng = numel(grp); kall = [grp{2:end}]; nk = numel(kall);
+% GI.kr{g}: the symbols of the groups within GSPAN of group g, its own left out (group_info).
+grp = GI.grp; sk = GI.sk;
+na = size(Y, 2); ng = numel(grp); kall = GI.kall; nk = numel(kall);
 zr = zeros(nk, 1); zm = zeros(nk, 1); Wr = nan(na, ng); Wm = Wr; j = 0;
 for g = 2:ng
-    kr = [grp{setdiff(max(1, g - GSPAN):min(ng, g + GSPAN), g)}];
+    kr = GI.kr{g};
     X = Y(kr, :).';
     r = X * conj(sk(kr)) / numel(kr);
     R = X * X' / numel(kr);
@@ -147,7 +160,7 @@ end
 
 function Y = snapshots(iqa, p, sy)
 % Every frame's snapshots at the receiver's arrival and frequency (NaN where it holds none).
-[rf, base, t] = filtered(iqa, p);
+[rf, base, t] = filtered(iqa, p, sy, false);
 [~, nf, na] = size(rf);
 NS = frame_layout(p).n_sig;
 Y = nan(NS, na, nf);
@@ -157,13 +170,25 @@ for f = 1:min(nf, size(sy, 2))
 end
 end
 
-function [rf, base, t] = filtered(iqa, p)
+function [rf, base, t] = filtered(iqa, p, sy, tail)
 % Every antenna's samples through the receive filter, over the whole run as the receiver
 % filters them (samples x frames x antennas); base, the sample before the first training
 % symbol at arrival 0 (the filter delay and the quiet slot); t, the sample times in a frame.
+% tail: only from the last numel(h) - 1 samples before the first frame with an arrival on
+% (the filter's memory of it); the samples before them are left 0 and no frame reads them.
 [ns, na, nf] = size(iqa);
-h = rcosdesign(p.rolloff, p.filter_span, p.sps, 'sqrt');
-rf = reshape(filter(h, 1, reshape(permute(iqa, [1 3 2]), ns * nf, na)), ns, nf, na);
+h = rrc_taps(p);
+x = reshape(permute(iqa, [1 3 2]), ns * nf, na);
+f1 = [];
+if tail, f1 = find(all(isfinite(sy(1:2, 1:min(nf, size(sy, 2)))), 1), 1); end
+if isempty(f1) || f1 == 1
+    rf = reshape(filter(h, 1, x), ns, nf, na);
+else
+    s0 = max(1, (f1 - 1) * ns - numel(h) + 2);
+    y = filter(h, 1, x(s0:end, :));
+    rf = zeros(ns * nf, na, 'like', y); rf(s0:end, :) = y;
+    rf = reshape(rf, ns, nf, na);
+end
 base = (p.filter_span + p.quiet_symbols) * p.sps;
 t = (0:ns-1)' / (p.symbol_rate * p.sps);
 end
@@ -179,18 +204,20 @@ if k(1) < 1 || k(end) > ns, return; end
 Y = reshape(rf(k, f, :), NS, na) .* exp(-1j * 2*pi * sy(2) * t(k));
 end
 
-function [Y, df] = residual_frequency(Y, grp, sk, sr)
+function [Y, df] = residual_frequency(Y, GI, sr)
 % The frequency left after the receiver's synchronization, from the phase step between
 % consecutive pilot blocks weighed by the inverse covariance of the snapshots between them
 % (the MMSE receiver's estimate, build_threat_model.m: an interferer the receiver's own
 % estimate followed is suppressed there), twice; removed from the snapshots. Unambiguous
-% within half the inverse of the pilot spacing.
+% within half the inverse of the pilot spacing. GI.c: the pilot blocks' centres; GI.st: the
+% steps of the common pilot spacing (group_info).
 [NS, na] = size(Y);
-c = cellfun(@mean, grp(3:end)); n = numel(c);
+grp = GI.grp; sk = GI.sk;
+c = GI.c; n = numel(c);
 df = 0;
 if n < 2, return; end
 k = (0:NS-1)';
-st = find(abs(diff(c) - (c(2) - c(1))) < 1e-9);          % the steps of the common pilot spacing
+st = GI.st;
 for it = 1:2
     H = zeros(na, n);
     for b = 1:n, q = grp{b + 2}; H(:, b) = Y(q, :).' * conj(sk(q)) / numel(q); end
@@ -218,6 +245,54 @@ grp = {1:numel(L.stf), numel(L.stf) + 1:L.n_pre};
 ip = L.idx_pil(:)' - L.NQ;
 for b = 1:numel(ip) / p.pilot_block, grp{end+1} = ip((b-1)*p.pilot_block + (1:p.pilot_block)); end %#ok<AGROW>
 sk = complex(zeros(L.n_sig, 1)); sk(1:L.n_pre) = L.pre; sk(ip) = L.pil;
+end
+
+function GI = group_info(p)
+% The known-symbol groups (groups) and what every frame reuses: grp, sk, kall (the held-out
+% symbols), kr{g} (the symbols group g's weights are fitted on, measure), c and st (the pilot
+% blocks' centres and the steps of their common spacing, residual_frequency), NS and nk;
+% kept for the last values of the params frame_layout.m and groups read (layout_fields).
+persistent key0 GI0
+key = cellfun(@(f) p.(f), layout_fields(), 'UniformOutput', false);
+if isempty(GI0) || ~isequal(key, key0)
+    GSPAN = 2;
+    [grp, sk] = groups(p);
+    ng = numel(grp);
+    kr = cell(1, ng);
+    for g = 2:ng, kr{g} = [grp{setdiff(max(1, g - GSPAN):min(ng, g + GSPAN), g)}]; end
+    c = cellfun(@mean, grp(3:end));
+    st = [];
+    if numel(c) >= 2, st = find(abs(diff(c) - (c(2) - c(1))) < 1e-9); end
+    kall = [grp{2:end}];
+    GI0 = struct('grp', {grp}, 'sk', sk, 'kall', kall, 'kr', {kr}, 'c', c, 'st', st, 'NS', numel(sk), ...
+        'nk', numel(kall));
+    key0 = key;
+end
+GI = GI0;
+end
+
+function f = layout_fields()
+% Every params field frame_layout.m and groups read.
+f = {'stf_len', 'stf_rep', 'ltf_len', 'ltf_rep', 'frame_length', 'bits_per_symbol', 'quiet_symbols', ...
+    'filter_span', 'timing_max_sym', 'pilot_every', 'pilot_block'};
+end
+
+function h = rrc_taps(p)
+% The receive filter's taps (root raised cosine), kept for the last rolloff, span and sps.
+persistent key0 h0
+key = {p.rolloff, p.filter_span, p.sps};
+if isempty(h0) || ~isequal(key, key0)
+    h0 = rcosdesign(p.rolloff, p.filter_span, p.sps, 'sqrt'); key0 = key;
+end
+h = h0;
+end
+
+function v = tail_flag(on)
+% The 'tail' option, off by default; v the setting before the call.
+persistent tl
+if isempty(tl), tl = false; end
+v = tl;
+if nargin, tl = logical(on); end
 end
 
 function r = sinr_fit(z, s)

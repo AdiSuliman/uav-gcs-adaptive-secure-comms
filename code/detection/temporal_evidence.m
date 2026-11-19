@@ -48,10 +48,8 @@ function [x, names] = temporal_evidence(P, G, Fw)
 %                fits it; a connector opens within one frame, airframe shadowing grows as
 %                the bank rolls in; 0 0 when no branch falls by 5 dB inside the window
 %   names = temporal_evidence('names', C) returns the feature names.
-WN = [{'gap_w', 'weak_w', 'occ_w', 'drop_w', 'off_w', 'rat_w', 'k_w', 'kv_w', 'duty_w'}, onset_shape('names')];
 if ischar(P)
-    names = [arrayfun(@(c) sprintf('logp_%d', c), 1:G, 'UniformOutput', false), WN];
-    x = names; return;
+    names = te_names(G); x = names; return;
 end
 [E, nr, n] = size(G);
 fi = @(name) reshape(double(Fw(:, feature_index(name), :)), E, n);
@@ -85,6 +83,15 @@ duty_w = mean(fi('duty'), 2, 'omitnan');
 x = [lp, gap_w, weak_w, occ_w, drop_w, off_w, rat_w, k_w, kv_w, duty_w, onset_shape(G)];
 x(~isfinite(x)) = 0;
 names = [];
+end
+
+function names = te_names(nC)
+% The feature names for nC classes; the class names kept for the last nC.
+persistent lp c0
+if isempty(c0) || ~isequal(nC, c0) || ~strcmp(class(nC), class(c0))
+    lp = arrayfun(@(c) sprintf('logp_%d', c), 1:nC, 'UniformOutput', false); c0 = nC;
+end
+names = [lp, {'gap_w', 'weak_w', 'occ_w', 'drop_w', 'off_w', 'rat_w', 'k_w', 'kv_w', 'duty_w'}, onset_shape('names')];
 end
 
 function k = k_moment(pw)

@@ -20,8 +20,12 @@ function [S, names] = idle_summary(R, p)
 %              the array
 %   nbusy      busy bins; first: start of the first complete burst from the cycle's start
 %              [ms]; gap_ms: idle time observed [ms]; cyc_ms: the decision cycle [ms]
-names = {'occ', 'lvl', 'p10', 'p90', 'max', 'nb', 'nc', 'sbl', 'sbl2', 'nil', 'sil', 'sil2', 'contrast', ...
-    'ripple', 'ant_spread', 'ant_weak', 'pa1', 'pa2', 'pa3', 'pa4', 'nbusy', 'first', 'gap_ms', 'cyc_ms'};
+persistent NAMES
+if isempty(NAMES)
+    NAMES = {'occ', 'lvl', 'p10', 'p90', 'max', 'nb', 'nc', 'sbl', 'sbl2', 'nil', 'sil', 'sil2', 'contrast', ...
+        'ripple', 'ant_spread', 'ant_weak', 'pa1', 'pa2', 'pa3', 'pa4', 'nbusy', 'first', 'gap_ms', 'cyc_ms'};
+end
+names = NAMES;
 if ischar(R), S = names; return; end
 [nb, nr, nf] = size(R);
 S = nan(nf, numel(names));
