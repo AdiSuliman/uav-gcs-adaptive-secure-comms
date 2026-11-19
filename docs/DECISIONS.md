@@ -3255,3 +3255,17 @@ Code: branch rule-fix (fd530db, b36e4b3, 640a421, b952235, a987d97), CORE_BW sid
    - The w19 clean pools carry no CT.fams (the builder saves it for the P1R set only), so a second build is not skipped as up to date. The reader checks every seed instead.
 
 Code: branch weak19 (from rule-fix a987d97): `dqn_fix.m`, `lb_complete.m`, `policy_decide.m`, `policy_monitor.m`, `decision_settings.m`, `policy_stamp.m`, `fresh_set_layout.m`, `fresh_shadow_seed.m`, `fresh_splice.m`, `pool_seed_owner.m`, `clean_set_layout.m`, `build_policy_pools.m`, `build_clean_test_pools.m` (help text), `weak19_reading.m`, `code/tests/test_weak19.m`. Not run: MATLAB was not started while profile 3's chain holds the machine; the tests and both stages run later through the gated wrapper.
+
+## D126 - KPI 7: honest timing of the deployed cycle and performance-only caches, one final LAT..BUNDLE rerun (19.11.2026; asked 16:28, no reply in 30 minutes, registered by the standing default; registered before any rerun)
+
+Why: KPI 7 (median < 10 ms, Oli & Mahalal 2025 low class; p95 < 20 ms, the decision period) read profile 1 10.94 / 13.53 ms and profile 3 11.09 / 13.64 ms. A read-only review found (a) the measurement read about 0.5 ms optimistic: the deployed policy ran third, warm, after the DQN call, and the glue between components was untimed; (b) invariant work was rebuilt every cycle: the decision-layer constants three times, the power-step mask, about 20 feature-name lookups, the predictor's frame layout and filter taps, the spectrogram window.
+
+What (branches kpi7-p1 ed5b812 from d4623ed, kpi7-p3 978ee31 from 81ecc06; full text in their docs/d126_kpi7.md):
+1. Honest timing: one cycle is one function (`lat_cycle.m`) with exactly one policy call; each chain timed in its own passes with its own warm-up; the registered figure stays the sum of the deployed chain's components, the glue counted in the component it serves; a wall clock of the whole deployed cycle beside it as a side reading without a verdict; the GPU handle read once per pass.
+2. Caches of values that depend only on their key (decision_config, config_gain_db, feature_index, temporal_evidence, idle_summary, window_cues, onset_shape, clean_ber_ref, mmse_predict, spec_image): bit-identical by construction, checked on the real cycle by the guard.
+3. Three options that may differ in the last bits (spec_image 'direct', mmse_predict 'tail', clean_ber_ref 'interpolant') stay off; switching one on would be a separate registration.
+4. LAT's monitor settings carry the pools' power factors (`PPm.pw`), so the timed monitor is the evaluated one; reported on its own line by the guard and kept whatever it shows.
+
+Guard: `kpi7_guard(tree)` compares the code before and after on LAT's 84 frames (three settings) and on a replay of the deployed policy over the tree's test pools; any mismatch rejects. The tests: `test_kpi7.m` (kpi7-p3: 15/15, full suite 669/669, 19.11.2026).
+
+Order: both D124 adoptions first (one big-pool run at a time), then the guard on both profiles on an idle machine. Only with `CACHES (default changes): ACCEPTED` on both: merge into the trees, then LAT, KPI, DASH, WEAK, RPT and BUNDLE on both profiles on an idle machine. That rerun is final whatever it shows, pass or fail; nothing further is changed for KPI 7 on its account. Today's readings stay on record beside it. A REJECTED guard keeps today's readings as the record.
