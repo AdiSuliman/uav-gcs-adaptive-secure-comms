@@ -743,9 +743,10 @@ F = F(endsWith(F, '.m'));
 end
 
 function h = code_sha(root)
-% The SHA-256 of the list of root/code/**/*.m (tests/ aside), each file's SHA-256 and path.
+% The SHA-256 of the list of root/code/**/*.m (tests/ aside), each file's SHA-256 (line ends aside:
+% a checkout may convert them) and path.
 F = m_files(fullfile(root, 'code')); F = F(~startsWith(F, 'tests/'));
-L = cellfun(@(f) sprintf('%s  %s', sha_file(fullfile(root, 'code', f)), f), F, 'UniformOutput', false);
+L = cellfun(@(f) sprintf('%s  %s', text_sha(fullfile(root, 'code', f)), f), F, 'UniformOutput', false);
 h = str_sha(strjoin(sort(reshape(L, 1, [])), newline));
 end
 
