@@ -38,8 +38,10 @@
 % was timed, the detector (det_id, detector_id.m) and the deployed policy
 % (policy_stamp.m), so the KPIs read a latency of another detector or policy as STALE
 % (result_status.m).
-% DET_FIRST = true before the run (diagnostic): the detector before the predictor in every
-% cycle; written to results/kpi7/latency_det_first.{txt,mat}, never to the record.
+% Diagnostic order: setenv('LAT_DET_FIRST', '1') before the run puts the detector before the
+% predictor in every cycle of that one run (the script clears the variable as it reads it);
+% written to results/kpi7/latency_det_first.{txt,mat}, never to the record. An environment
+% variable, not a workspace one: run_stage.m runs the script in its own function workspace.
 % LAT_SETUP_ONLY = true before the run: the setup and the frames only (kpi7_guard.m).
 %
 % Output: results/latency.txt, results/latency.mat
@@ -49,7 +51,6 @@ warning('off', 'Simulink:cgxe:LeakedJITEngine');
 fprintf('=== Decision latency per cycle ===\n\n');
 N_REP = 10;                                   % timed passes over every frame
 if exist('SMOKE', 'var') && SMOKE, N_REP = 1; end   % reduced chain check (run_stage smoke)
-if ~exist('DET_FIRST', 'var'), DET_FIRST = false; end
 THREATS = {'none', 'jamming', 'noise_burst', 'spoofing'};
 EBNO = 4; delay_bits = 20; tw = 10;
 modelName = 'UAV_GCS_Threat_Link';
@@ -86,7 +87,7 @@ POL.dep = struct('kind', kindP, 'agent', agP, 'opt', optP);
 POL.dqn = struct('kind', kindD, 'agent', Q.agent, 'opt', struct());
 POL.rule = struct('kind', 'rule_esc', 'agent', [], 'opt', struct());
 S = struct('p0', p0, 'fs', fs, 'tw', tw, 'D', D, 'mu', mu, 'sd', sd, 'PPm', PPm, 'dev', 'cpu', 'ug', false, ...
-    'gdev', [], 'det_first', DET_FIRST);
+    'gdev', [], 'det_first', false);
 
 %% 1. Frames of the real link
 F = {};
@@ -109,6 +110,8 @@ if bdIsLoaded(modelName), close_system(modelName, 0); end
 nF = numel(F);
 fprintf('%d frames from %d threat runs at %g dB\n', nF, numel(THREATS), EBNO);
 if exist('LAT_SETUP_ONLY', 'var') && LAT_SETUP_ONLY, return; end
+DET_FIRST = strcmp(getenv('LAT_DET_FIRST'), '1'); setenv('LAT_DET_FIRST', '');   % one run only
+S.det_first = DET_FIRST;
 
 %% 2. Timed cycles, one device at a time, each chain in its own passes
 ld0 = machine_load();
