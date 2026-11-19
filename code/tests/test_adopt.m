@@ -312,6 +312,11 @@ verifyMatches(tc, M.adoptions(1).selection_sha256, '^[0-9a-f]{64}$');
 verifyEqual(tc, M.order(:)', {'overlay', 'off', 'c2e', 'gate', 'render'});
 verifyEqual(tc, M.tree_head, 'unknown');                          % the synthetic tree is no git checkout
 verifyEmpty(tc, M.readonly_before);
+verifyMatches(tc, M.checkout_code_sha256, '^[0-9a-f]{64}$');
+verifyTrue(tc, contains(fileread(X.ovt), 'read-only'));
+for f = {'data/trained_dqn.mat', 'data/big.mat'}                    % the attribute is the file's, as overlay.txt states
+    verifyFalse(tc, java.io.File(fullfile(W.tree, f{1})).canWrite(), f{1});
+end
 % the tree's registered results and inputs, hashed
 F = adopt_reading('tree_files', W.tree);
 verifyEqual(tc, F, sort({'results/a.txt', 'results/sub/b.txt', 'results/policy_evaluation.mat', 'results/kpi_summary.txt', ...
@@ -369,9 +374,10 @@ end
 
 function test_stage_order(tc)
 % Every stage refuses without the overlay; c2e refuses until ADOPT0 passed, then on its outputs, a
-% single thread and a tree that moved, in that order, before evaluate_policies.m runs.
+% thread count other than C2e's, a tree that moved and code that would not run from the checkout, in
+% that order, before evaluate_policies.m runs.
 W = world(tc, 'dqn');
-for s = {'off', 'c2e', 'gate', 'render'}
+for s = {'off', 'c2e', 'gate', 'render', 'release'}
     verifyError(tc, @() adopt_reading(s{1}, W.tag, W.tree, W.O), 'adopt_reading:no_overlay', s{1});
 end
 adopt_reading('overlay', W.tag, W.tree, W.O);
@@ -386,18 +392,81 @@ pe = fullfile(X.on, 'results', 'policy_evaluation.mat'); x = 1; save(pe, 'x');
 verifyError(tc, @() adopt_reading('c2e', W.tag, W.tree, W.O), 'adopt_reading:exists');
 delete(pe);
 n0 = maxNumCompThreads;
-if n0 > 1
-    maxNumCompThreads(1); cl = onCleanup(@() maxNumCompThreads(n0)); %#ok<NASGU>
-    verifyError(tc, @() adopt_reading('c2e', W.tag, W.tree, W.O), 'adopt_reading:threads');
-    maxNumCompThreads(n0);
+cl = onCleanup(@() maxNumCompThreads(n0)); %#ok<NASGU>
+maxNumCompThreads(1);
+verifyError(tc, @() adopt_reading('c2e', W.tag, W.tree, W.O), 'adopt_reading:threads');
+ok8 = false;
+try
+    maxNumCompThreads(8); ok8 = maxNumCompThreads == 8;
+catch
+end
+if ok8
+    verifyError(tc, @() adopt_reading('c2e', W.tag, W.tree, W.O), 'adopt_reading:path');   % the synthetic checkout holds no code
     verifyEqual(tc, tree_state(W.tree), s0);
     add_line(fullfile(W.tree, 'results', 'a.txt'));               % the tree moved after the overlay
     verifyError(tc, @() adopt_reading('c2e', W.tag, W.tree, W.O), 'adopt_reading:tree_changed');
-else
-    verifyError(tc, @() adopt_reading('c2e', W.tag, W.tree, W.O), 'adopt_reading:threads');
+    try
+        maxNumCompThreads(16); n16 = maxNumCompThreads;
+    catch
+        n16 = 8;
+    end
+    if n16 ~= 8                                                    % more threads than C2e's: refused too
+        verifyError(tc, @() adopt_reading('c2e', W.tag, W.tree, W.O), 'adopt_reading:threads');
+    end
 end
 verifyFalse(tc, isfile(X.v.c2e));
 verifyFalse(tc, isfile(pe));
+verifyFalse(tc, isfolder(X.logs));                                 % refused before the log opens
+end
+
+function test_release(tc)
+% The release gives back the write attribute the overlay's links took from the tree's data files
+% (those read-only before stay so) and closes the overlay.
+W = world(tc, 'dqn');
+fileattrib(fullfile(W.tree, 'data', 'big.mat'), '-w');
+M = adopt_reading('overlay', W.tag, W.tree, W.O);
+X = adopt_reading('paths', W.tag, W.O);
+verifyEqual(tc, reshape(cellstr(M.readonly_before), 1, []), {'data/big.mat'});
+f = fullfile(W.tree, 'data', 'trained_dqn.mat');
+verifyFalse(tc, java.io.File(f).canWrite());
+s0 = tree_state(W.tree);
+V = adopt_reading('release', W.tag, W.tree, W.O);
+verifyTrue(tc, V.pass);
+verifyTrue(tc, java.io.File(f).canWrite());
+verifyFalse(tc, java.io.File(fullfile(W.tree, 'data', 'big.mat')).canWrite());
+verifyEqual(tc, tree_state(W.tree), s0);
+verifyTrue(tc, isfile(X.v.release) && isfile(X.t.release));
+for s = {'off', 'c2e', 'gate', 'render', 'release'}
+    verifyError(tc, @() adopt_reading(s{1}, W.tag, W.tree, W.O), 'adopt_reading:released', s{1});
+end
+end
+
+function test_code_pin(tc)
+% The checkout's code is pinned at the overlay: an edit after it stops every later stage (tests/
+% aside); uncommitted code under git refuses the overlay.
+W = world(tc, 'dqn');
+write_text(fullfile(W.co, 'code', 'decision', 'a.m'), 'a = 1;');
+M = adopt_reading('overlay', W.tag, W.tree, W.O);
+verifyMatches(tc, M.checkout_code_sha256, '^[0-9a-f]{64}$');
+write_text(fullfile(W.co, 'code', 'tests', 'test_a.m'), 'x');
+verifyError(tc, @() adopt_reading('c2e', W.tag, W.tree, W.O), 'adopt_reading:off_not_passed');
+write_text(fullfile(W.co, 'code', 'decision', 'a.m'), 'a = 2;');
+for s = {'off', 'c2e', 'gate', 'render', 'release'}
+    verifyError(tc, @() adopt_reading(s{1}, W.tag, W.tree, W.O), 'adopt_reading:code', s{1});
+end
+[sv, ~] = system('git --version');
+if sv ~= 0, return; end
+W2 = world(tc, 'dqn');
+write_text(fullfile(W2.co, 'code', 'decision', 'a.m'), 'a = 1;');
+verifyEqual(tc, git_in(W2.co, 'init -q'), 0);
+verifyEqual(tc, git_in(W2.co, 'add code'), 0);
+verifyEqual(tc, git_in(W2.co, '-c user.name=t -c user.email=t@example.com -c commit.gpgsign=false commit -q -m t'), 0);
+write_text(fullfile(W2.co, 'code', 'decision', 'a.m'), 'a = 2;');
+verifyError(tc, @() adopt_reading('overlay', W2.tag, W2.tree, W2.O), 'adopt_reading:dirty');
+verifyFalse(tc, isfolder(adopt_reading('paths', W2.tag, W2.O).dir));
+write_text(fullfile(W2.co, 'code', 'decision', 'a.m'), 'a = 1;');
+M2 = adopt_reading('overlay', W2.tag, W2.tree, W2.O);
+verifyMatches(tc, M2.checkout_head, '^[0-9a-f]{40}$');
 end
 
 function test_sources_and_gate(tc)
@@ -406,7 +475,11 @@ adopt_reading('overlay', W.tag, W.tree, W.O);
 X = adopt_reading('paths', W.tag, W.O);
 verifyError(tc, @() adopt_reading('gate', W.tag, W.tree, W.O), 'adopt_reading:c2e_not_passed');
 verifyError(tc, @() adopt_reading('render', W.tag, W.tree, W.O), 'adopt_reading:gate_not_passed');
-adopt_reading('write_once', X.v.c2e, {jsonencode(struct('stage', 'c2e', 'pass', true))});
+adopt_reading('write_once', X.v.c2e, {jsonencode(struct('stage', 'c2e', 'pass', true))});   % no outputs recorded
+verifyError(tc, @() adopt_reading('gate', W.tag, W.tree, W.O), 'adopt_reading:c2e_outputs');
+verifyFalse(tc, isfile(X.v.gate));
+delete(X.v.c2e);
+write_c2e(X);
 verifyError(tc, @() adopt_reading('render', W.tag, W.tree, W.O), 'adopt_reading:gate_not_passed');
 V = adopt_reading('gate', W.tag, W.tree, W.O);
 verifyTrue(tc, V.pass);
@@ -414,11 +487,19 @@ verifyTrue(tc, isfile(X.v.gate) && isfile(X.t.gate));
 G = jsondecode(fileread(X.v.gate));
 verifyTrue(tc, G.pass); verifyEqual(tc, G.deployed, 'dqn');
 verifyError(tc, @() adopt_reading('gate', W.tag, W.tree, W.O), 'adopt_reading:exists');   % read once
+% the file ADOPT-C2e checked changed after it: the gate refuses
+W3 = world(tc, 'dqn');
+adopt_reading('overlay', W3.tag, W3.tree, W3.O);
+X3 = adopt_reading('paths', W3.tag, W3.O);
+write_c2e(X3);
+x = 2; save(fullfile(X3.on, 'results', 'policy_evaluation.mat'), 'x'); %#ok<NASGU>
+verifyError(tc, @() adopt_reading('gate', W3.tag, W3.tree, W3.O), 'adopt_reading:c2e_outputs');
+verifyFalse(tc, isfile(X3.v.gate));
 % a gate that moves the deployed policy stops the stage
 W2 = world(tc, 'rule_sel');
 adopt_reading('overlay', W2.tag, W2.tree, W2.O);
 X2 = adopt_reading('paths', W2.tag, W2.O);
-adopt_reading('write_once', X2.v.c2e, {jsonencode(struct('stage', 'c2e', 'pass', true))});
+write_c2e(X2);
 verifyError(tc, @() adopt_reading('gate', W2.tag, W2.tree, W2.O), 'adopt_reading:gate');
 G2 = jsondecode(fileread(X2.v.gate));
 verifyFalse(tc, G2.pass);
@@ -458,6 +539,34 @@ P = N; P.RW{1}.switches(2) = 7;                                  % no response o
 verifyFalse(tc, row_ok(adopt_reading('guard_c2e', P, E, T), 'non-rule columns'));
 P = N; P.LBC.sets(1).on = 0.1;                                   % the DQN columns of the completion
 verifyFalse(tc, row_ok(adopt_reading('guard_c2e', P, E, T), 'non-rule columns'));
+P = N; P.LBC.lines{2} = 'clean 2/3';                               % the completion's text beside the rule's figure
+verifyFalse(tc, row_ok(adopt_reading('guard_c2e', P, E, T), 'non-rule columns'));
+P = N; P.LBC.lines{1} = 'single 0.7 | rule + escalation  80.0%';
+verifyFalse(tc, row_ok(adopt_reading('guard_c2e', P, E, T), 'non-rule columns'));
+P = N; P.LBC.kpi{1} = 'DQN 60.0% | rule + escalation 95.5%; deployed switch on';   % the rule's figure alone
+verifyTrue(tc, adopt_reading('guard_c2e', P, E, T).pass);
+P = rmfield(N, 'RS2');
+verifyFalse(tc, row_ok(adopt_reading('guard_c2e', P, E, T), 'variables'));
+% KP: the deployed policy's fields whole, the rule-built ones without the rule's columns and entries
+P = N; P.KP.envelope_val(1) = 1;
+verifyFalse(tc, row_ok(adopt_reading('guard_c2e', P, E, T), 'KP'));
+P = N; P.KP.per_threat(1, 1) = 0;                                 % no response's column
+verifyFalse(tc, row_ok(adopt_reading('guard_c2e', P, E, T), 'KP'));
+P = N; P.KP.per_threat(2, 3) = 0;                                 % the DQN's column
+verifyFalse(tc, row_ok(adopt_reading('guard_c2e', P, E, T), 'KP'));
+P = N; P.KP.per_threat(1, 2) = 1;                                 % rule + escalation's column
+verifyTrue(tc, row_ok(adopt_reading('guard_c2e', P, E, T), 'KP'));
+P = N; P.KP.per_threat = P.KP.per_threat(:, 1:2);
+verifyFalse(tc, row_ok(adopt_reading('guard_c2e', P, E, T), 'KP'));
+P = N; P.KP.far(3).k = 9;                                         % the DQN's clean false alarms
+verifyFalse(tc, row_ok(adopt_reading('guard_c2e', P, E, T), 'KP'));
+P = N; P.KP.far(2).k = 99;
+verifyTrue(tc, row_ok(adopt_reading('guard_c2e', P, E, T), 'KP'));
+P = N; P.KP.extra = 1;
+verifyFalse(tc, row_ok(adopt_reading('guard_c2e', P, E, T), 'KP'));
+G = adopt_reading('guard_c2e', N, E, T);
+verifyTrue(tc, row_ok(G, 'descriptive rule rows'));
+verifyTrue(tc, contains(G.rows(strcmp({G.rows.file}, 'descriptive rule rows')).why, 'rule_esc_relm'));
 P = N; P.RES{3, 3}.held(2) = ~P.RES{3, 3}.held(2);              % rule_esc on set 3 is not test.mat's
 G = adopt_reading('guard_c2e', P, E, T);
 verifyFalse(tc, G.pass); verifyFalse(tc, row_ok(G, 'rule columns, sets 1-5'));
@@ -467,8 +576,18 @@ P = N; P.RES{6, 2}.recovered(:) = true; P.RES{1, 6}.held(:) = false;   % set 6 a
 verifyTrue(tc, adopt_reading('guard_c2e', P, E, T).pass);
 P = N; P.KP.lect.per(1).red = 0.7;                                % KPI 5 not test.mat's
 verifyFalse(tc, row_ok(adopt_reading('guard_c2e', P, E, T), 'KP.lect'));
-P = N; P.KP.lect.gput = 99;                                      % where LK0 is not the registered value: not compared
-verifyTrue(tc, adopt_reading('guard_c2e', P, E, T).pass);
+P = N; P.KP.lect.gput = 99;
+verifyFalse(tc, row_ok(adopt_reading('guard_c2e', P, E, T), 'KP.lect'));
+T2 = T; T2.LK1 = T.LK0;                                           % nothing the setting changed: nothing checked
+P = N; P.KP.lect = E.KP.lect;
+verifyFalse(tc, row_ok(adopt_reading('guard_c2e', P, E, T2), 'KP.lect'));
+T3 = T; T3.LK0.gput = 15;                                         % a changed value the registered KP.lect does not share
+verifyFalse(tc, row_ok(adopt_reading('guard_c2e', N, E, T3), 'KP.lect'));                         % strict
+P = N; P.KP.lect.gput = 99;                                       % not compared, not strict
+verifyTrue(tc, row_ok(adopt_reading('guard_c2e', P, E, T3, struct('lect_strict', false)), 'KP.lect'));
+T4 = T3; T4.LK1.per(1).red = 0.4;                                 % no changed value compared: refused, not strict either
+P = N; P.KP.lect.per(1).red = 0.4;
+verifyFalse(tc, row_ok(adopt_reading('guard_c2e', P, E, T4, struct('lect_strict', false)), 'KP.lect'));
 G = adopt_reading('guard_c2e', E, E, T);                          % the setting not applied
 verifyFalse(tc, row_ok(G, 'setting applied')); verifyFalse(tc, row_ok(G, 'rule columns, sets 1-5'));
 T2 = T; T2.pols = {'rule', 'rule_esc'}; T2.RONs = T.RONs(:, 1:2);  % test.mat without rule_core
@@ -507,6 +626,8 @@ write_text(f('a.bin'), 'abc'); write_text(f('b.bin'), 'abc'); write_text(f('c.bi
 verifyTrue(tc, adopt_reading('compare', f('a.bin'), f('b.bin')).ok);
 verifyFalse(tc, adopt_reading('compare', f('a.bin'), f('c.bin')).ok);
 verifyFalse(tc, adopt_reading('compare', f('a.txt'), f('none.txt')).ok);
+fh = @(x) x + 1; save(f('h.mat'), 'fh'); copyfile(f('h.mat'), f('h2.mat'));   %#ok<NASGU> a byte copy needs no decoding
+C = adopt_reading('compare', f('h.mat'), f('h2.mat')); verifyTrue(tc, C.ok, C.why); verifyEqual(tc, C.why, 'equal (bytes)');
 end
 
 function test_write_once(tc)
@@ -550,6 +671,7 @@ verifyTrue(tc, contains(src('evaluation/export_report_numbers.m'), 'results/repo
 verifyTrue(tc, contains(s, 'RES{si, pk} = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, 30000 + 100*si);'));
 a = src('decision/adopt_reading.m');
 verifyFalse(tc, contains(a, 'D124') || contains(a, 'D125'));
+verifyTrue(tc, contains(a, 'K.threads = 8;'));                      % C2e's thread count
 end
 
 %% ---------- helpers ----------
@@ -704,8 +826,15 @@ E.ALL = arrayfun(@(c) mk(20 + c), 1:numel(POL), 'UniformOutput', false);
 E.RW = arrayfun(@(c) mk(30 + c), 1:numel(POL) - 1, 'UniformOutput', false);
 E.RS2 = mk(40);
 E.LBC = struct('policy', 'dqn_g1', 'deployed', true, 'sets', struct('set', {'single', 'family'}, 'off', {0.5, 0.4}, ...
-    'on', {0.6, 0.5}, 'rule', {0.7, 0.6}), 'clean', [1 2 3], 'lines', {{'rule 70%'}}, 'kpi', {{'k'}});
-E.KP = struct('lect', struct('per', struct('policy', {'rule_esc', 'rule_core'}, 'red', {0.4, 0.5}), 'gput', 17.2, 'rr', 1));
+    'on', {0.6, 0.5}, 'rule', {0.7, 0.6}), 'clean', [1 2 3], ...
+    'lines', {{'single 0.6 | rule + escalation  70.0%', 'clean 1/3'}}, 'kpi', {{'DQN 60.0% | rule + escalation 70.0%; deployed switch on'}});
+E.KP = struct();
+E.KP.show = {'none', 'rule_esc', 'dqn_g1'};
+E.KP.per_threat = [90 70 80; 91 71 81];                          % threats x KP.show
+E.KP.far = struct('policy', {'none', 'rule_esc', 'dqn_g1'}, 'k', {0, 3, 2});
+E.KP.envelope_val = [95 96];
+E.KP.s1g_lines = {'rule 70%'};
+E.KP.lect = struct('per', struct('policy', {'rule_esc', 'rule_core'}, 'red', {0.4, 0.5}), 'gput', 17.2, 'rr', 1);
 T.pols = {'rule', 'rule_esc', 'rule_core'};
 T.RONs = cell(5, 3);
 keep = {'scn', 's', 'r', 'geom', 'recovered', 'held', 'recoverable', 'threat', 'per_post', 'switches', 'ret', 't_rec'};
@@ -722,10 +851,23 @@ for si = 1:5
 end
 N.RES{6, 2}.ret(1) = -1; N.RES{1, 6}.ret(1) = -1;                % set 6 and a descriptive row read once
 N.ALL{2} = mk(55); N.RW{3} = mk(56);                            % rule rows pooled and on the clean pools
-N.LBC.sets(1).rule = 0.8; N.LBC.lines = {'rule 80%'};
-T.LK0 = struct('per', struct('policy', {'rule_esc', 'rule_core'}, 'red', {0.4, 0.5}), 'gput', 15);
+N.LBC.sets(1).rule = 0.8; N.LBC.lines{1} = 'single 0.6 | rule + escalation  80.0%';
+N.LBC.kpi{1} = 'DQN 60.0% | rule + escalation 80.0%; deployed switch on';
+N.KP.per_threat(:, 2) = [75; 76]; N.KP.far(2).k = 5; N.KP.s1g_lines = {'rule 75%'};
+T.LK0 = struct('per', struct('policy', {'rule_esc', 'rule_core'}, 'red', {0.4, 0.5}), 'gput', 17.2);
 T.LK1 = struct('per', struct('policy', {'rule_esc', 'rule_core'}, 'red', {0.6, 0.5}), 'gput', 16);
-N.KP.lect.per(1).red = 0.6;
+N.KP.lect.per(1).red = 0.6; N.KP.lect.gput = 16;
+end
+
+function write_c2e(X)
+% A passed ADOPT-C2e verdict recording the SHA-256 of a policy_evaluation.mat in the on root.
+pe = fullfile(X.on, 'results', 'policy_evaluation.mat'); x = 1; save(pe, 'x'); %#ok<NASGU>
+H = struct('file', 'results/policy_evaluation.mat', 'sha256', adopt_reading('sha', pe));
+adopt_reading('write_once', X.v.c2e, {jsonencode(struct('stage', 'c2e', 'pass', true, 'outputs', H))});
+end
+
+function st = git_in(d, args)
+[st, ~] = system(sprintf('git --no-optional-locks -C "%s" %s', d, args));
 end
 
 function ok = row_ok(G, name)
