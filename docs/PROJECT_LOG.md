@@ -404,3 +404,11 @@ Extension readings (no commitment): the earlier proposal's unknown-threat KPI is
   - The core "any of 36" pooled line moves from MET (not committed) to MET (committed).
   - False alarms on the clean link: the core rule rows change only per cycle (0.00439 -> 0.00438 and 0.00147 -> 0.00142). The episode counts are unchanged (264 and 71 of 2376).
   - The DQN and every baseline are unchanged.
+
+### 19.11.2026 22:50 - D124 adoption, profile 3: all stages PASS
+- Tests 17/17. Stage times: overlay 8.0 min, off 3.8, c2e 189.4 at 8 threads, gate, render 3.3.
+- Rule + escalation recovered among recoverable, pooled: 70.9% -> 79.7%.
+- KPI 5: the deployed hybrid's margin is now +15.6 [+13.4, +18.0] points (was +24.4 [+20.5, +28.5]); still MET.
+- What the detection adds moves from -2.8 [-6.0, +0.0] to +4.8 [+2.8, +6.8] points, so the detector now helps the rule significantly on profile 3 too.
+- KPI headlines 1-4 and 6-8 are unchanged. edge_map.mat is marked stale by design.
+- Next: kpi7_guard on P3; the kpi7-p1 tests and guard (started 22:51).
