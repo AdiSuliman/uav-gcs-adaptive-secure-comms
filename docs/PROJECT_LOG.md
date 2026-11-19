@@ -398,3 +398,9 @@ Extension readings (no commitment): the earlier proposal's unknown-threat KPI is
 - What moves (rule rows only): rule + escalation recovered among recoverable, pooled 66.8% -> 77.0% (13912 episodes); KPI 5 margin of the deployed DQN +27.3 [+23.1, +31.7] -> +17.1 [+14.5, +19.9] points, still MET; what the detection adds (rule + esc vs no detector + esc) +3.8 -> +13.0 points. Every DQN, baseline and other KPI number unchanged.
 - edge_map.mat not re-run (its rule column stays the rule without the layered answer), marked stale by design.
 - kpi7-p3 tests: test_kpi7 15/15, full suite 669/669. D126 registered (default after 30 min). The P3 adoption follows on the p3 slot.
+- Review (sonnet): every change sits in a rule row.
+  - Rule + escalation PER reduction vs the static link, pooled: 39.7% -> 49.8%. Reactive jamming: 34.5% -> 58.3%.
+  - CNN contribution, full set: -1.4% -> +15.0% [12.0, 18.3].
+  - The core "any of 36" pooled line moves from MET (not committed) to MET (committed).
+  - False alarms on the clean link: the core rule rows change only per cycle (0.00439 -> 0.00438 and 0.00147 -> 0.00142). The episode counts are unchanged (264 and 71 of 2376).
+  - The DQN and every baseline are unchanged.
