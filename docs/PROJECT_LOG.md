@@ -442,3 +442,22 @@ Extension readings (no commitment): the earlier proposal's unknown-threat KPI is
   - the trees' outputs were archived to archive/d126_before_20261120 (results, bundle, HEAD, SHA-256);
   - v7-dev was fast-forwarded to ed5b812 and v7-p3 to 978ee31;
   - the single final LAT, KPI, DASH, WEAK, RPT and BUNDLE runs at 00:2x on an idle machine, P1 then P3.
+
+### 20.11.2026 00:41 - D126 final rerun: KPI 7 MET on both profiles
+- Run through the gated wrapper with 8 threads. The stage scripts were called directly through uav-gcs-logs/d126/d126_stage.m, each in its own function workspace as in run_stage's run_one; the wrapper refuses 'run_stage('. Machine load before/after: CPU 1/0% (P1) and 2/0% (P3), no other MATLAB.
+- P1: KPI 7 median 8.52 ms, p95 12.25 ms, MET. The wall clock around the deployed cycle reads 8.53 / 12.25, matching the sum. One core: 13.88 / 15.44.
+- P3: KPI 7 median 8.87 ms, p95 12.68 ms, MET. Wall clock 8.87 / 12.69. One core: 14.23 / 15.93.
+- Components, P1 median before -> after (ms):
+
+  | component | before | after |
+  |---|---|---|
+  | deployed policy | 3.33 | 2.01 |
+  | MMSE predictor | 1.48 | 0.88 |
+  | spectrogram | 1.73 | 1.42 |
+  | detector GPU | 3.65 | 2.82 (gpuDevice query out of the clock) |
+  | detector CPU | 3.81 | 3.74 |
+
+- The saving (2.4 ms) exceeds D126's estimate (about 0.7-1.5 ms net). The old cycle ran three policies one after the other each cycle, so every component met colder caches. The new cycle is the deployed one, with one policy per cycle. The equal sum and wall clock show nothing is left untimed.
+- Every other KPI headline is unchanged against the final phase. Both profiles: KPI 1, 3, 5, 6, 7, 8 MET; KPI 2 and 4 NOT MET. In the trees KPI 5 stays the registered rule (P1 +27.3, P3 +24.4); the book takes the adopted rule rows from the overlays (+17.1, +15.6).
+- No stale files in report_numbers.json. Bundles exported to uav-gcs-v7/profiles/rx3 and rx4. Outputs before the rerun are in archive/d126_before_20261120.
+- The rerun is final (D126); nothing further is changed for KPI 7.
