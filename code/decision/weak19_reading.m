@@ -24,6 +24,23 @@ function out = weak19_reading(stage, varargin)
 %       sets are reproduced off, exactly, before the marker; then the fresh sets, the deployed DQN
 %       off and with the adopted setting, paired -> test.mat, the test section and its registered
 %       verdict
+%   weak19_reading('test', tree, tag, 'rulerows', d124test)   the same reading, and in the same
+%       read of the fresh set the rule rows (none, rule_esc, blind_esc, rule_core, blind_core) off and
+%       with the rule fix's adopted setting (R.rr.setting), on the same episodes and frame draws, with
+%       the registered confirmation (rr_claims); d124test: the rule fix's test.mat of the same tree
+%       (SHA-256 R.rr.d124_sha). Before the marker the rule rows of evaluate_policies.m's first
+%       three sets are reproduced, off against the registered rows and on against d124test; any
+%       mismatch stops the read. The deployed DQN's part, its files and its numbers are those of the
+%       call without the option, which runs the statements above unchanged
+%       -> rulerows_test.mat, rulerows_reading.txt beside the selection
+%   weak19_reading('amend', tree, tag, base, why)   once, before the test: records that this
+%       checkout's code differs from the frozen code only in R.amend_allowed. base: the checkout the
+%       selection ran (its code must give the frozen hash, its HEAD R.amend_base_rev); the base
+%       copies of the changed files are kept in amend_base/, so the guard derives the frozen hash
+%       again from this checkout alone (amend_ok)
+%   D = weak19_reading('code_diff', code, base_code)   h = weak19_reading('code_at', code, sub)
+%   ok = weak19_reading('amend_ok', A, code, based, from, to)   O = weak19_reading('rr_option', args)
+%   C = weak19_reading('rr_claims', I)   P = weak19_reading('rr_ratio', num, den, cl, B, seed)
 %   X = weak19_reading('paths', tree, tag)   J = weak19_reading('guard', X)
 %   S = weak19_reading('select', T)          A = weak19_reading('adopt', x, y, target, W, prot)
 %   P = weak19_reading('ptest', d, cl, alpha, seed)   the paired test of one subgroup
@@ -77,6 +94,13 @@ switch stage
     case 'ptest',   out = ptest(varargin{:});
     case 'verdict', out = verdict(varargin{:});
     case 'reg',     out = reg();
+    case 'amend',   amend(varargin{:});
+    case 'code_diff', out = code_diff(varargin{:});
+    case 'code_at', out = code_at(varargin{:});
+    case 'amend_ok', out = amend_ok(varargin{:});
+    case 'rr_option', out = rr_option(varargin{:});
+    case 'rr_claims', out = rr_claims(varargin{:});
+    case 'rr_ratio', out = rr_ratio(varargin{:});
     otherwise, error('weak19_reading:stage', 'weak19_reading: unknown stage %s', stage);
 end
 end
@@ -97,6 +121,15 @@ R.comb_seed = 99101; R.comb_frames = 5600;
 R.test_rs = 2027; R.test_seed = 20000; R.test_sets = {'single', 'follower', 'combined', 'unknown', 'clean', 'comb'};
 R.fresh_rs = 2091; R.fresh_seed = 300000; R.fresh_sets = {'single', 'follower', 'combined', 'comb'};
 R.boot_seed = 1900; R.flip_seed = 1950;
+R.amend_allowed = {'decision/weak19_reading.m', 'tests/test_w19_rulerows.m'};   % relative to code/
+R.amend_base_rev = 'c689c2177c4c4fc50c171741aae22cc54c6d4a7a';
+claims = struct('name', {'esc_recovered', 'core_narrowband', 'core_wideband'}, 'row', {'rule_esc', 'rule_core', 'rule_core'}, ...
+    'threat', {'', 'tone_jamming', 'jamming'}, 'seed', {2701, 2702, 2703});
+R.rr = struct('tag', 'p3', 'setting', 'keep+st+rate', 'pols', {{'none', 'rule_esc', 'blind_esc', 'rule_core', 'blind_core'}}, ...
+    'on', {{'rule_esc', 'blind_esc', 'rule_core', 'blind_core'}}, 'nsets', 3, 'claims', {claims}, ...
+    'd124_sha', '9f8f4e79ed4880647a6bbda7ef50dae194e5cf5bc6aa2d67a110fcfd7470d85c', ...
+    'seed_g', 2710, 'seed_d', 2720, 'keep', {{'scn', 's', 'r', 'geom', 'recovered', 'held', 'recoverable', ...
+    'recoverable_core', 'threat', 'per_post', 'dlv_post', 'gput_post', 'switches', 'ret', 't_rec', 't_rec_det', 't_conf'}});
 end
 
 %% ===================== Files =====================
@@ -108,6 +141,8 @@ X.dir = fullfile(project_root(), 'results', 'weak19', tag);
 X.sel = fullfile(X.dir, 'selection.json'); X.val = fullfile(X.dir, 'val.mat');
 X.txt = fullfile(X.dir, 'weak19_reading.txt'); X.marker = fullfile(X.dir, 'test_read_started.txt');
 X.test = fullfile(X.dir, 'test.mat');
+X.amend = fullfile(X.dir, 'amend.json'); X.amend_base = fullfile(X.dir, 'amend_base');
+X.rr_txt = fullfile(X.dir, 'rulerows_reading.txt'); X.rr_mat = fullfile(X.dir, 'rulerows_test.mat');
 X.claim_val = read_once('claim', 'weak19', 'val', tree); X.claim_test = read_once('claim', 'weak19', 'test', tree);
 tr = fullfile(tree, 'results', 'read_once');
 X.tclaim_val = fullfile(tr, 'weak19_val.txt'); X.tclaim_test = fullfile(tr, 'weak19_test.txt');
@@ -141,7 +176,9 @@ S = jsondecode(fileread(X.sel));
 F = fingerprint(X);
 if ~strcmp(S.fingerprint.tree, F.tree), J{end+1} = 'the selection was frozen on another tree'; end
 if isfile(X.claim_test) || isfile(X.marker) || isfile(X.tclaim_test), J{end+1} = 'the fresh test set of this tree was read already'; end
-if ~strcmp(S.fingerprint.code, F.code), J{end+1} = 'the code differs from the code the selection ran'; end
+if ~strcmp(S.fingerprint.code, F.code) && ~amended(X, S.fingerprint.code, F.code)
+    J{end+1} = 'the code differs from the code the selection ran';
+end
 if ~isequal(cellstr(S.fingerprint.inputs(:))', F.inputs) || ~isequal(cellstr(S.fingerprint.big(:))', F.big)
     J{end+1} = 'the tree''s inputs differ from those the selection read';
 end
@@ -531,12 +568,14 @@ end
 end
 
 %% ===================== Test (read once, fresh set) =====================
-function stage_test(tree, tag)
+function stage_test(tree, tag, varargin)
+RR = rr_option(varargin);
 X = paths(tree, tag); R = reg();
 J = guard(X);
 if ~isempty(J), error('weak19_reading:guard', 'weak19_reading: the test is not read: %s', strjoin(J, '; ')); end
 S = jsondecode(fileread(X.sel));
 Sa = S.adopted; if isempty(Sa) || ~isstruct(Sa), Sa = struct(); end
+if RR.on, RR = rr_check(RR, X, S); end
 if isempty(fieldnames(Sa))
     claim_test(X, S, 'nothing adopted: not read', {});
     read_once('write', X.txt, [splitlines(strtrim(fileread(X.txt)))', {'', '=== WEAK POINTS 19: TEST ===', ...
@@ -574,6 +613,7 @@ if ~isempty(bad)
         ['Off does not reproduce the deployed DQN''s registered rows (' strjoin(bad, ', ') '): the fresh set is not read.']}]);
     error('weak19_reading:reproduce', 'weak19_reading: off does not reproduce %s', strjoin(bad, ', '));
 end
+if RR.on, RR = rr_reproduce(RR, X, Q, sel, PP, K, sets, E, R); end
 % The fresh pools: checked, then the marker
 FL = fresh_set_layout(false);
 Lf = load(FL.out, 'FT'); PPf = fresh_splice(PP, Lf.FT); clear Lf
@@ -583,6 +623,7 @@ check_det_id(PP, CW, 'weak19_reading', clean_out());
 check_clean_seeds(CW);
 hf = cellfun(@(f) read_once('file', f), X.fresh, 'UniformOutput', false);
 claim_test(X, S, sprintf('read for %s', S.adopted_txt), hf);
+if RR.on, rr_mark(X, RR); end
 Kf = link_env('tables', PPf);
 fs = fresh_sets(PPf, Kf, Q.H.T, R);
 RON = cell(numel(fs), 2);
@@ -617,6 +658,7 @@ read_once('save', X.test, struct('RONs', {RONs}, 'sets', {{fs.name}}, 'SW', SW, 
     'verdict', Ev));
 read_once('write', X.txt, [splitlines(strtrim(fileread(X.txt)))', lines]);
 fprintf('%s\n', lines{:});
+if RR.on, rr_fresh(RR, X, Q, sel, PPf, Kf, fs, PPw, Kw, cs, ncs, RON(:, 1), dpn, R); end
 end
 
 function claim_test(X, S, what, hf)
@@ -781,6 +823,392 @@ if ~any(m), t = sprintf('  %-40s n     0', name); return; end
 d = double(a1(m)) - double(a0(m));
 [~, lo, hi] = boot_cluster(d, ones(1, sum(m)), cl(m), 2000, seed);
 t = sprintf('  %-40s n %5d  %5.1f -> %5.1f  [%+.1f, %+.1f]', name, sum(m), 100 * mean(a0(m)), 100 * mean(a1(m)), 100 * lo, 100 * hi);
+end
+
+%% ===================== Code amendment =====================
+function amend(tree, tag, base, reason)
+% Once, while the fresh set is unread: this checkout's code differs from the frozen code only in
+% R.amend_allowed. The base checkout must hold the frozen code (its hash, and its HEAD and a clean
+% code/ where git answers); the base copies of the changed files are kept in X.amend_base.
+X = paths(tree, tag); R = reg();
+assert(isfile(X.sel), 'weak19_reading:amend', 'weak19_reading: no frozen selection in %s', X.dir);
+assert(~isfile(X.amend), 'weak19_reading:amend', 'weak19_reading: %s exists; the code is amended once', X.amend);
+assert(~isfile(X.claim_test) && ~isfile(X.marker) && ~isfile(X.tclaim_test), 'weak19_reading:amend', ...
+    'weak19_reading: the fresh test set of this tree was read already');
+assert(ischar(reason) && numel(reason) >= 20, 'weak19_reading:amend', 'weak19_reading: an amendment states its reason');
+S = jsondecode(fileread(X.sel));
+code = fullfile(project_root(), 'code'); bcode = fullfile(base, 'code');
+assert(strcmp(code_at(bcode), S.fingerprint.code), 'weak19_reading:amend', ...
+    'weak19_reading: the code of %s is not the frozen code', base);
+h = code_at(code);
+assert(~strcmp(h, S.fingerprint.code), 'weak19_reading:amend', 'weak19_reading: the code is the frozen code; nothing to amend');
+[gh, gs] = git_state(base);
+assert(strcmp(gh, 'unavailable') || (strcmp(gh, R.amend_base_rev) && isempty(gs)), 'weak19_reading:amend', ...
+    'weak19_reading: %s is at %s with code changes [%s], not at %s', base, gh, gs, R.amend_base_rev);
+D = code_diff(code, bcode);
+bad = setdiff([D.changed, D.added, D.removed], R.amend_allowed);
+assert(isempty(D.removed) && isempty(bad), 'weak19_reading:amend', ...
+    'weak19_reading: files outside the registered amendment differ (%s; removed: %s)', strjoin(bad, ', '), strjoin(D.removed, ', '));
+for k = 1:numel(D.changed)
+    t = fullfile(X.amend_base, strrep(D.changed{k}, '/', filesep));
+    if ~isfolder(fileparts(t)), mkdir(fileparts(t)); end
+    [ok, msg] = copyfile(fullfile(bcode, strrep(D.changed{k}, '/', filesep)), t, 'f');
+    assert(ok, 'weak19_reading:amend', 'weak19_reading: cannot copy %s: %s', D.changed{k}, msg);
+end
+A = struct('tag', tag, 'tree', tree, 'from', S.fingerprint.code, 'to', h, 'base', base, 'base_head', gh, ...
+    'base_code_status', gs, 'changed', {D.changed}, 'added', {D.added}, 'reason', reason, ...
+    'created', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
+assert(amend_ok(A, code, X.amend_base, S.fingerprint.code, h), 'weak19_reading:amend', ...
+    'weak19_reading: the base copies do not give back the frozen hash');
+read_once('write', X.amend, {jsonencode(A, 'PrettyPrint', true)});
+fprintf('Amendment recorded: %s -> %s (changed: %s; added: %s)\n', A.from, A.to, strjoin(D.changed, ', '), strjoin(D.added, ', '));
+end
+
+function ok = amended(X, from, to)
+% The code differs from the frozen code only by the one recorded amendment.
+ok = false;
+if ~isfile(X.amend), return; end
+ok = amend_ok(jsondecode(fileread(X.amend)), fullfile(project_root(), 'code'), X.amend_base, from, to);
+end
+
+function ok = amend_ok(A, code, based, from, to)
+% The recorded pair is (from, to), only files of R.amend_allowed differ, the code now gives to, and
+% with the added files left out and the changed ones read from based it gives from.
+R = reg();
+ch = cellstr_of(A.changed); ad = cellstr_of(A.added);
+ok = strcmp(A.from, from) && strcmp(A.to, to) && all(ismember([ch, ad], R.amend_allowed));
+if ~ok, return; end
+ok = strcmp(code_at(code), to) && strcmp(code_at(code, struct('drop', {ad}, 'replace', {ch}, 'from', based)), from);
+end
+
+function h = code_at(code, sub)
+% SHA-256 of a code folder as read_once('code') computes it; sub.drop: relative paths left out;
+% sub.replace: relative paths read from sub.from instead.
+if nargin < 2 || ~isstruct(sub), sub = struct(); end
+drop = cellstr_of(field_or(sub, 'drop', {})); rep = cellstr_of(field_or(sub, 'replace', {}));
+[rel, full] = code_files(code);
+keep = ~ismember(rel, drop); rel = rel(keep); full = full(keep);
+for k = find(ismember(rel, rep)), full{k} = fullfile(sub.from, strrep(rel{k}, '/', filesep)); end
+md = java.security.MessageDigest.getInstance('SHA-256');
+for k = 1:numel(rel)
+    s = strrep(fileread(full{k}), char(13), '');
+    md.update(unicode2native([rel{k} char(0) s char(0)], 'UTF-8'));
+end
+h = lower(reshape(dec2hex(typecast(md.digest(), 'uint8'), 2)', 1, []));
+end
+
+function [rel, full] = code_files(code)
+% Every .m file under code, its path relative to code (with /), sorted by that path.
+code = regexprep(code, '[\\/]+$', '');
+if ispc, code = strrep(code, '/', '\'); end
+d = dir(fullfile(code, '**', '*.m'));
+full = cellfun(@(p, n) fullfile(p, n), {d.folder}, {d.name}, 'UniformOutput', false);
+n = numel(code);
+assert(all(strncmpi(full, code, n)), 'weak19_reading:code', 'weak19_reading: a file outside %s', code);
+rel = cellfun(@(f) strrep(f(n + 2:end), '\', '/'), full, 'UniformOutput', false);
+[rel, o] = sort(rel); full = full(o);
+end
+
+function D = code_diff(code, bcode)
+% The .m files that differ between code and bcode (line ends removed): changed, added, removed.
+[r1, f1] = code_files(code); [r0, f0] = code_files(bcode);
+D = struct('changed', {{}}, 'added', {setdiff(r1, r0)}, 'removed', {setdiff(r0, r1)});
+for k = find(ismember(r1, r0))
+    j = find(strcmp(r0, r1{k}), 1);
+    if ~strcmp(strrep(fileread(f1{k}), char(13), ''), strrep(fileread(f0{j}), char(13), '')), D.changed{end+1} = r1{k}; end
+end
+D.added = reshape(D.added, 1, []); D.removed = reshape(D.removed, 1, []);
+end
+
+function [h, s] = git_state(d)
+[e1, h] = system(sprintf('git --no-optional-locks -C "%s" rev-parse HEAD', d));
+[e2, s] = system(sprintf('git --no-optional-locks -C "%s" status --porcelain -- code', d));
+if e1 ~= 0, h = 'unavailable'; else, h = strtrim(h); end
+if e2 ~= 0, s = 'unavailable'; else, s = strtrim(s); end
+end
+
+function c = cellstr_of(v)
+if isempty(v), c = {}; elseif ischar(v), c = {v}; else, c = reshape(cellstr(v), 1, []); end
+end
+
+%% ===================== Rule rows on the fresh set =====================
+function O = rr_option(args)
+% No option, or 'rulerows' and the rule fix's test.mat of the same tree.
+O = struct('on', false, 'd124', '', 'd124_sha', '', 'lines', {{}});
+if isempty(args), return; end
+assert(numel(args) == 2 && (ischar(args{1}) || isstring(args{1})) && strcmpi(args{1}, 'rulerows') && ...
+    (ischar(args{2}) || isstring(args{2})), 'weak19_reading:option', ...
+    'weak19_reading: the test stage takes no option, or ''rulerows'' and the rule fix''s test.mat');
+O.on = true; O.d124 = char(args{2});
+end
+
+function RR = rr_check(RR, X, S)
+% Before anything is read: the registered tree, an adopted setting (the fresh set built), the rule
+% fix's adopted setting and its test reading's file.
+R = reg();
+assert(strcmp(X.tag, R.rr.tag), 'weak19_reading:rulerows', 'weak19_reading: the rule rows are registered for %s only', R.rr.tag);
+assert(isstruct(S.adopted) && ~isempty(fieldnames(S.adopted)), 'weak19_reading:rulerows', ...
+    'weak19_reading: nothing adopted, the fresh set is not built: no rule rows');
+assert(isfield(S, 'd124') && isstruct(S.d124) && strcmp(S.d124.adopted, R.rr.setting), 'weak19_reading:rulerows', ...
+    'weak19_reading: the rule fix of this selection is not %s', R.rr.setting);
+if isempty(regexp(RR.d124, '^([A-Za-z]:[\\/]|[\\/])', 'once')), RR.d124 = fullfile(pwd, RR.d124); end
+RR.d124_sha = read_once('file', RR.d124);
+assert(strcmp(RR.d124_sha, R.rr.d124_sha), 'weak19_reading:rulerows', ...
+    'weak19_reading: %s is not the rule fix''s registered test reading', RR.d124);
+assert(~isfile(X.rr_mat), 'weak19_reading:rulerows', 'weak19_reading: %s exists; a reading is never overwritten', X.rr_mat);
+end
+
+function RR = rr_reproduce(RR, X, Q, sel, PP, K, sets, E, R)
+% Before the marker: the rule rows on evaluate_policies.m's first R.rr.nsets sets, off against the
+% registered rows and with the setting against the rule fix's test reading of the same sets.
+D = load(RR.d124, 'RONs', 'pols');
+assert(all(ismember(R.rr.pols, E.POL)) && all(ismember(R.rr.on, D.pols)), 'weak19_reading:rulerows', ...
+    'weak19_reading: a rule row is missing from the registered or the rule fix''s rows');
+bad = {}; t0 = tic;
+for si = 1:R.rr.nsets
+    for p = R.rr.pols
+        [kind, ag, opt] = policy_setup(p{1}, Q, sel, [], [], [], K.na);
+        R0 = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, R.test_seed + 1000 * si);
+        if ~same_rows(R0, E.RES{si, strcmp(E.POL, p{1})}), bad{end+1} = sprintf('%s off on %s', p{1}, sets(si).name); end %#ok<AGROW>
+        if ismember(p{1}, R.rr.on)
+            R1 = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, rr_on(opt, R.rr.setting), R.test_seed + 1000 * si);
+            if ~same_rows(R1, D.RONs{si, strcmp(D.pols, p{1})}), bad{end+1} = sprintf('%s on on %s', p{1}, sets(si).name); end %#ok<AGROW>
+        end
+    end
+    fprintf('  rule rows reproduced, set %-9s (%.1f min)\n', sets(si).name, toc(t0) / 60);
+end
+head = {'', '=== RULE ROWS ON THE FRESH SET ===', sprintf('Reproduction %s, %.1f min:', datestr(now), toc(t0) / 60)};
+if ~isempty(bad)
+    rr_append(X, [head, {['NOT REPRODUCED (' strjoin(bad, ', ') '): the fresh set is not read.']}]);
+    error('weak19_reading:rr_reproduce', 'weak19_reading: the rule rows do not reproduce: %s', strjoin(bad, ', '));
+end
+RR.lines = [head, {sprintf(['Off reproduces the registered rows and %s reproduces the rule fix''s test rows (%s) on %s: ' ...
+    'exact'], R.rr.setting, strjoin(R.rr.pols, ', '), strjoin({sets(1:R.rr.nsets).name}, ', '))}];
+end
+
+function rr_mark(X, RR)
+% The marker also names the rule rows read in the same read of the fresh set.
+for f = {X.claim_test, X.tclaim_test, X.marker}
+    read_once('write', f{1}, [splitlines(strtrim(fileread(f{1})))', {sprintf('rulerows %s, rule fix test reading %s', ...
+        reg().rr.setting, RR.d124_sha)}]);
+end
+end
+
+function rr_fresh(RR, X, Q, sel, PPf, Kf, fs, PPw, Kw, cs, ncs, Rd, dpn, R)
+% The rule rows on the fresh single, follower and combined sets and on the fresh clean flights, off
+% and with the setting, at the deployed DQN's frame draws; the registered confirmation, then the
+% descriptive rows.
+t0 = tic; P = R.rr.pols; nP = numel(P); ns = R.rr.nsets; C = decision_config();
+F0 = cell(ns, nP); F1 = F0;
+for si = 1:ns
+    sd = R.fresh_seed + 1000 * si;
+    for pk = 1:nP
+        [kind, ag, opt] = policy_setup(P{pk}, Q, sel, [], [], [], Kf.na);
+        F0{si, pk} = rr_keep(policy_run_set(kind, PPf, Kf, fs(si).spec, fs(si).split, ag, opt, sd));
+        F1{si, pk} = F0{si, pk};
+        if ismember(P{pk}, R.rr.on)
+            F1{si, pk} = rr_keep(policy_run_set(kind, PPf, Kf, fs(si).spec, fs(si).split, ag, rr_on(opt, R.rr.setting), sd));
+        end
+    end
+    fprintf('  rule rows, fresh set %-9s (%.1f min)\n', fs(si).name, toc(t0) / 60);
+end
+SW = struct();
+for p = R.rr.on
+    [kind, ag, opt] = policy_setup(p{1}, Q, sel, [], [], [], Kf.na);
+    s = zeros(2, 0);
+    for b = 1:numel(cs)
+        r0 = rollout_policy(kind, PPw, Kw, cs{b}, 2, ag, opt, R.fresh_seed + 500 + b);
+        r1 = rollout_policy(kind, PPw, Kw, cs{b}, 2, ag, rr_on(opt, R.rr.setting), R.fresh_seed + 500 + b);
+        s = [s, [r0.switches; r1.switches]]; %#ok<AGROW>
+    end
+    SW.(p{1}) = s(:, 1:ncs);
+end
+x0 = struct(); x1 = struct();
+for pk = 1:nP, x0.(P{pk}) = cat_cells(F0(:, pk)); x1.(P{pk}) = cat_cells(F1(:, pk)); end
+Cl = rr_claims(struct('x0', x0, 'x1', x1, 'scen', {PPf.scen}, 'SW', SW));
+lines = {sprintf('Fresh read %s | setting %s | rule fix test reading %s | fresh sets %s | clean flights %d', datestr(now), ...
+    R.rr.setting, RR.d124_sha, strjoin({fs(1:ns).name}, ', '), ncs)};
+lines = [lines, Cl.lines];
+% Descriptive
+thr = PPf.scen(x0.none.scn); m = x0.none.recoverable & x0.none.threat; g = x0.none.geom;
+lines{end+1} = 'Descriptive: recovered and held among the recoverable (single + follower + combined), off -> on [95% interval of the paired difference]:';
+for pk = 2:nP
+    lines{end+1} = row([P{pk} ', recovered'], x0.(P{pk}).recovered, x1.(P{pk}).recovered, m, g, R.rr.seed_d + pk); %#ok<AGROW>
+    lines{end+1} = row([P{pk} ', held'], x0.(P{pk}).held, x1.(P{pk}).held, m, g, R.rr.seed_d + 10 + pk); %#ok<AGROW>
+end
+for p = {'rule_esc', 'rule_core'}
+    lines{end+1} = sprintf('%s, recovered per threat:', p{1}); %#ok<AGROW>
+    for u = unique(thr(m), 'stable')
+        lines{end+1} = row(['  ' u{1}], x0.(p{1}).recovered, x1.(p{1}).recovered, m & strcmp(thr, u{1}), g, R.rr.seed_d + 20); %#ok<AGROW>
+    end
+end
+lines{end+1} = 'Fresh clean flights (system level): flights with a change, one-sided 95% bound, false changes per hour, off -> on:';
+for p = R.rr.on
+    s = SW.(p{1}); n = size(s, 2); k0 = sum(s(1, :) > 0); k1 = sum(s(2, :) > 0);
+    G0 = false_change_rate(s(1, :), Q.H.T, 1:n, C.period_ms); G1 = false_change_rate(s(2, :), Q.H.T, 1:n, C.period_ms);
+    lines{end+1} = sprintf('  %-12s %d -> %d of %d (%.2f%% -> %.2f%%; bound %.2f%% -> %.2f%%); %.1f -> %.1f per hour', p{1}, k0, k1, n, ...
+        100 * k0 / n, 100 * k1 / n, 100 * cp_upper(k0, n), 100 * cp_upper(k1, n), G0.per_hour, G1.per_hour); %#ok<AGROW>
+end
+L = load('results/policy_evaluation.mat', 'POL', 'LBL');
+POL = [P, {dpn}]; LBL = POL;
+for k = 1:numel(POL), j = find(strcmp(L.POL, POL{k}), 1); if ~isempty(j), LBL{k} = L.LBL{j}; end, end
+dq = cat_cells(cellfun(@rr_keep, Rd(1:ns), 'UniformOutput', false));
+A0 = [cellfun(@(p) x0.(p), P, 'UniformOutput', false), {dq}];
+A1 = [cellfun(@(p) x1.(p), P, 'UniformOutput', false), {dq}];
+pay = payload_rate(C);
+[LK0, l0] = lect_kpis(A0, POL, LBL, numel(POL), PPf.scen, pay, C.period_ms);
+[LK1, l1] = lect_kpis(A1, POL, LBL, numel(POL), PPf.scen, pay, C.period_ms);
+lines = [lines, {'', 'Lecturer KPIs on the fresh set, rule rows off (descriptive):'}, l0, ...
+    {'', sprintf('Lecturer KPIs on the fresh set, rule rows with %s (descriptive):', R.rr.setting)}, l1];
+lines{end+1} = sprintf('Rule rows done in %.1f min.', toc(t0) / 60);
+read_once('save', X.rr_mat, struct('F0', {F0}, 'F1', {F1}, 'SW', SW, 'pols', {P}, 'sets', {{fs(1:ns).name}}, ...
+    'setting', R.rr.setting, 'd124_sha', RR.d124_sha, 'claims', rmfield(Cl, 'lines'), 'LK0', LK0, 'LK1', LK1));
+rr_append(X, [RR.lines, lines]);
+fprintf('%s\n', lines{:});
+end
+
+function C = rr_claims(I)
+% The registered confirmation of the rule rows. I.x0, I.x1: per policy of R.rr.pols the pooled
+% episodes off and with the setting (the same episodes and frames); I.scen: the cell names; I.SW:
+% per rule row the clean flights' changes (row 1 off, row 2 on).
+% Claims (R.rr.claims): rule_esc's recovered among the recoverable rises; rule_core's PER reduction
+% against no response rises, narrowband (tone_jamming) and wideband (jamming), on the recoverable
+% episodes of the core action set. Each one-sided by the cluster bootstrap over flights, p the share
+% of resample gains at or below 0 (fewer than R.boot_cl clusters: not read, p = 1); Holm across the
+% claims at R.alpha. A claim is confirmed when it passes Holm and every guard of its row holds:
+% rule_esc (b) every threat with at least R.min_n episodes, recovered no lower than -1.0 point,
+% lower bound -2.0; (c) pooled held and recovered no lower than -0.5 point, lower bounds -1.0; (d)
+% the clean flights with a change within max(5%, off's) one-sided Clopper-Pearson bound and at most
+% 1 point above off's share. rule_core (e) pooled held as (c); (d).
+R = reg(); t = R.thr; c = R.rr.claims; nc = numel(c); s = R.rr.seed_g;
+z = I.x0.none;
+nm = reshape(I.scen(z.scn), 1, []);
+m = z.recoverable & z.threat; mc = z.recoverable_core & z.threat; cl = z.geom;
+E = struct('name', {c.name}, 'row', {c.row}, 'n', 0, 'off', NaN, 'on', NaN, 'P', []);
+for k = 1:nc
+    a0 = I.x0.(c(k).row); a1 = I.x1.(c(k).row);
+    if isempty(c(k).threat)
+        E(k).P = rr_mean(double(a1.recovered(m)) - double(a0.recovered(m)), cl(m), c(k).seed);
+        E(k).n = sum(m); E(k).off = mean(a0.recovered(m)); E(k).on = mean(a1.recovered(m));
+    else
+        ref = z.per_post;
+        ok = mc & strcmp(nm, c(k).threat) & isfinite(a0.per_post) & isfinite(a1.per_post) & isfinite(ref);
+        E(k).P = rr_ratio(a0.per_post(ok) - a1.per_post(ok), ref(ok), cl(ok), R.B, c(k).seed);
+        E(k).n = sum(ok); E(k).off = 1 - sum(a0.per_post(ok)) / sum(ref(ok)); E(k).on = 1 - sum(a1.per_post(ok)) / sum(ref(ok));
+    end
+    if E(k).P.ncl < R.boot_cl
+        E(k).P.p = 1; E(k).P.how = sprintf('%d clusters, fewer than %d: not read', E(k).P.ncl, R.boot_cl);
+    end
+end
+p = arrayfun(@(e) e.P.p, E); p(arrayfun(@(e) ~(e.P.mean > 0), E)) = 1;
+[ps, o] = sort(p); hol = false(1, nc);
+for k = 1:nc
+    if ps(k) <= R.alpha / (nc - k + 1), hol(o(k)) = true; else, break; end
+end
+% Guards of rule_esc
+y0 = I.x0.rule_esc; y1 = I.x1.rule_esc;
+[ph, lh] = pdiff(y1.held, y0.held, m, cl, s + 1); [pr, lr] = pdiff(y1.recovered, y0.recovered, m, cl, s + 2);
+gc = ph >= t.pool_pt && lh >= t.pool_lb && pr >= t.pool_pt && lr >= t.pool_lb;
+gb = true; lb_ = {};
+for u = unique(nm(m), 'stable')
+    mu = m & strcmp(nm, u{1});
+    if sum(mu) < R.min_n, continue; end
+    [pu, lu] = pdiff(y1.recovered, y0.recovered, mu, cl, s + 3);
+    oku = pu >= t.thr_pt && lu >= t.thr_lb; gb = gb && oku;
+    if ~oku, lb_{end+1} = sprintf('    (b) %-36s n %5d recovered %+.2f, lower bound %+.2f: FAILS', u{1}, sum(mu), 100 * pu, 100 * lu); end %#ok<AGROW>
+end
+[gde, lde] = clean_ok(I.SW.rule_esc, 'rule_esc');
+% Guards of rule_core
+[pc, lc] = pdiff(I.x1.rule_core.held, I.x0.rule_core.held, m, cl, s + 4);
+ge = pc >= t.pool_pt && lc >= t.pool_lb;
+[gdc, ldc] = clean_ok(I.SW.rule_core, 'rule_core');
+G = struct('rule_esc', struct('b', gb, 'c', gc, 'd', gde), 'rule_core', struct('e', ge, 'd', gdc));
+conf = hol & arrayfun(@(e) all(cell2mat(struct2cell(G.(e.row)))), E);
+L = {sprintf(['Registered confirmation (%d claims, one-sided, Holm at %.2f; a claim is confirmed when it passes Holm and ' ...
+    'every guard of its row holds):'], nc, R.alpha)};
+for k = 1:nc
+    if isempty(c(k).threat), what = sprintf('%s, recovered among the recoverable', c(k).row);
+    else, what = sprintf('%s, PER reduction vs no response, %s', c(k).row, c(k).threat); end
+    L{end+1} = sprintf(['  %-15s %-52s n %5d, %3d clusters: off %.1f%% -> on %.1f%%, gain %+.2f points, one-sided 95%% lower ' ...
+        'bound %+.2f, p %.4f (%s): Holm %s'], E(k).name, what, E(k).n, E(k).P.ncl, 100 * E(k).off, 100 * E(k).on, ...
+        100 * E(k).P.mean, 100 * E(k).P.lb, p(k), E(k).P.how, ternary(hol(k), 'passes', 'fails')); %#ok<AGROW>
+end
+L{end+1} = sprintf('  guards of rule_esc: (b) every threat with at least %d episodes: %s', R.min_n, ok_txt(gb));
+L = [L, lb_];
+L{end+1} = sprintf('    (c) pooled held %+.2f (lb %+.2f), recovered %+.2f (lb %+.2f): %s', 100 * ph, 100 * lh, 100 * pr, 100 * lr, ok_txt(gc));
+L{end+1} = lde;
+L{end+1} = sprintf('  guards of rule_core: (e) pooled held %+.2f (lb %+.2f): %s', 100 * pc, 100 * lc, ok_txt(ge));
+L{end+1} = ldc;
+for k = 1:nc, L{end+1} = sprintf('  -> %s: %s', E(k).name, ternary(conf(k), 'CONFIRMED', 'NOT CONFIRMED')); end %#ok<AGROW>
+C = struct('claims', {E}, 'p', p, 'holm', hol, 'guards', G, 'confirmed', conf, 'lines', {L});
+end
+
+function P = rr_mean(d, cl, seed)
+% Mean of the paired differences d with the cluster bootstrap's one-sided p and 95% lower bound.
+R = reg();
+[mu, q] = paired_stats('dist', d, cl, R.B, seed);
+P = struct('mean', mu, 'p', 1, 'lb', NaN, 'ncl', numel(unique(cl(isfinite(d)))), 'how', 'bootstrap');
+if ~isempty(q), P.p = mean(q <= 0); P.lb = q(max(1, round(R.alpha * R.B))); end
+end
+
+function P = rr_ratio(num, den, cl, B, seed)
+% sum(num) / sum(den) of paired per-episode values, the episodes of a flight resampled together
+% (boot_cluster.m's draws): p the share of resample ratios at or below 0, lb the one-sided 95%
+% lower bound.
+P = struct('mean', NaN, 'p', 1, 'lb', NaN, 'ncl', 0, 'how', 'bootstrap');
+num = double(num(:)); den = double(den(:)); cl = cl(:);
+ok = isfinite(num) & isfinite(den); num = num(ok); den = den(ok); cl = cl(ok);
+if isempty(num) || sum(den) == 0, return; end
+[~, ~, j] = unique(cl);
+Sn = accumarray(j, num); Sd = accumarray(j, den);
+P.mean = sum(Sn) / sum(Sd); P.ncl = numel(Sn);
+if P.ncl < 2, return; end
+rs = RandStream('mt19937ar', 'Seed', seed);
+idx = randi(rs, P.ncl, P.ncl, B);
+q = sort(sum(Sn(idx), 1) ./ max(sum(Sd(idx), 1), eps));
+P.p = mean(q <= 0); P.lb = q(max(1, round(0.05 * B)));
+end
+
+function [ok, ln] = clean_ok(s, name)
+% The rule fix's clean-flight condition on one row: row 1 off, row 2 on.
+R = reg(); n = size(s, 2); k0 = sum(s(1, :) > 0); k1 = sum(s(2, :) > 0);
+u0 = cp_upper(k0, n); u1 = cp_upper(k1, n);
+ok = n > 0 && u1 <= max(R.bound, u0) && (k1 - k0) / n <= R.thr.fa_pts;
+ln = sprintf(['    (d) %s, clean flights with a change %d -> %d of %d, one-sided bound %.2f%% -> %.2f%% (limit %.2f%%), ' ...
+    'share %+.2f points (limit %+.1f): %s'], name, k0, k1, n, 100 * u0, 100 * u1, 100 * max(R.bound, u0), ...
+    100 * (k1 - k0) / n, 100 * R.thr.fa_pts, ok_txt(ok));
+end
+
+function opt = rr_on(opt, s)
+if ~isfield(opt, 'monitor') || ~isstruct(opt.monitor), opt.monitor = struct(); end
+opt.monitor.rule_fix = s;
+end
+
+function r = rr_keep(R)
+f = intersect(fieldnames(R), reg().rr.keep);
+r = struct(); for i = 1:numel(f), r.(f{i}) = R.(f{i}); end
+end
+
+function ok = same_rows(a, b)
+ok = isequaln(a.recovered, b.recovered) && isequaln(a.held, b.held) && isequaln(a.per_post, b.per_post) ...
+    && isequaln(a.switches, b.switches);
+end
+
+function R = cat_cells(c)
+R = c{1}; for i = 2:numel(c), R = cat_struct(R, c{i}); end
+end
+
+function rr_append(X, lines)
+prev = {}; if isfile(X.rr_txt), prev = splitlines(strtrim(fileread(X.rr_txt)))'; end
+read_once('write', X.rr_txt, [prev, lines]);
+end
+
+function r = payload_rate(C)
+r = NaN;
+if ~isfile('params.mat'), return; end
+p = load('params.mat').params;
+cyc = C.period_ms / 1000; if isfield(p, 'cycle_s'), cyc = p.cycle_s; end
+r = p.bits_per_frame / cyc;
 end
 
 %% ===================== Helpers =====================
