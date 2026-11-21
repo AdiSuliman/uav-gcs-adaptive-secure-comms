@@ -286,3 +286,153 @@ verifyTrue(tc, contains(txt, 'input size:'));
 verifyTrue(tc, contains(txt, 'loaded:'));
 verifyTrue(tc, contains(txt, 'variables in the file: CT'));
 end
+
+%% ---------- L3 at system level, rule_core3 (CORE_BW) ----------
+function test_l3_core3_not_flown_then_flown(tc)
+d = fullfile(tc.TestData.tmp, 'l3'); mkdir(d);
+n = 40;
+EPs = struct('c', 2 + mod(0:n - 1, 3), 'n', n);
+mk = @(fc, fs) struct('scn', EPs.c, 'ep', 1:n, 'fc_t', fc, 'onset', 5 * ones(1, n), 'false_sw', fs, 'switches', double(fc > 0));
+fc3 = zeros(1, n); fc3(1:3) = [2 5 6];                         % 2 and 5 decided on clean frames (<= onset), 6 after
+RES = struct('rule', {'H1', 'H1'}, 'set', {'primary', 'primary'}, 'policy', {'none', 'rule_core3'}, ...
+    'R', {mk(zeros(1, n), zeros(1, n)), mk(fc3, [1, zeros(1, n - 1)])});
+f = fullfile(d, 'test_readings.mat'); save(f, 'RES', 'EPs', '-v7.3');
+t1 = fullfile(d, 'core_cnn.txt'); fid = fopen(t1, 'w');
+fprintf(fid, 'core CNN, window N = 3 (official)\n  false alarms, clean frames (<= 5%%)    0.17%% [0.00, 0.53]  met (committed)\n'); fclose(fid);
+t2 = fullfile(d, 'policy_evaluation.txt'); fid = fopen(t2, 'w');
+fprintf(fid, '  rule   264 / 2376 =  11.11%%\n  core: rule + escalation                   264 / 2376 =  11.11%%   upper  12.23%%\n'); fclose(fid);
+out = fullfile(tc.TestData.tmp, 'o_l3a');
+S = side_l3_core3(f, out, t1, t2);
+verifyFalse(tc, S.flown);
+txt = fileread(fullfile(out, 'side_l3_core3.txt'));
+verifyTrue(tc, contains(txt, 'NOT FLOWN'));
+verifyTrue(tc, contains(txt, 'side reading, decides nothing'));
+verifyTrue(tc, contains(txt, '0.17% [0.00, 0.53]') && contains(txt, 'core: rule + escalation') && contains(txt, '12.23%'));
+p = S.proxy(strcmp({S.proxy.policy}, 'rule_core3'));
+verifyEqual(tc, [p.k_pre, p.n, p.pre_frames, p.k_healthy], [2, n, 5 * n, 1]);
+p0 = S.proxy(strcmp({S.proxy.policy}, 'none'));
+verifyEqual(tc, [p0.k_pre, p0.k_healthy], [0 0]);
+% clean-link episodes flown: the share and its one-sided bound
+RES(2).R.scn(1:10) = 1; RES(2).R.switches = double(1:n <= 3);
+f2 = fullfile(d, 'test_readings2.mat'); save(f2, 'RES', 'EPs', '-v7.3');
+S2 = side_l3_core3(f2, fullfile(tc.TestData.tmp, 'o_l3b'));
+verifyTrue(tc, S2.flown);
+r = S2.rows(strcmp({S2.rows.policy}, 'rule_core3'));
+verifyEqual(tc, [r.k, r.n], [3, 10]);
+verifyEqual(tc, r.upper, betaincinv(0.95, 4, 7), 'AbsTol', 1e-12);
+verifyTrue(tc, contains(fileread(fullfile(tc.TestData.tmp, 'o_l3b', 'side_l3_core3.txt')), 'not given'));
+end
+
+%% ---------- CNN contribution per B_J (CORE_BW) ----------
+function test_bj_cnn3_reproduces_then_reads(tc)
+[tree, Rs, EPs, m0, pay] = bw_tree(tc, 'bw1', false);
+out = fullfile(tc.TestData.tmp, 'o_bj1');
+S = side_bj_cnn3(tree, out);
+txt = fileread(fullfile(out, 'side_bj_cnn3.txt'));
+verifyTrue(tc, contains(txt, 'reproduced exactly first'));
+verifyTrue(tc, contains(txt, 'side reading, decides nothing'));
+r = S.rows(strcmp({S.rows.pair}, 'rule_core3 - blind_core') & [S.rows.bj] == 20 & isnan([S.rows.tot]));
+m = m0 & EPs.bj == 20;
+[g, glo, ghi] = boot_cluster(pay * (Rs.rule_core3.dlv_post(m) - Rs.blind_core.dlv_post(m)), ones(1, nnz(m)), EPs.geom(m), 200, 8);
+verifyEqual(tc, r.gput, [g glo ghi]);
+verifyEqual(tc, r.n, nnz(m));
+fb = m & isfinite(Rs.rule_core3.t_rec_det) & isfinite(Rs.blind_core.t_rec_det);
+verifyEqual(tc, r.n_both, nnz(fb));
+verifyEqual(tc, r.trec(1), mean(Rs.rule_core3.t_rec_det(fb) - Rs.blind_core.t_rec_det(fb)), 'AbsTol', 1e-12);
+r2 = S.rows(strcmp({S.rows.pair}, 'rule_core3 - blind_core') & [S.rows.bj] == 0 & [S.rows.tot] == 10);
+verifyEqual(tc, r2.n, nnz(m0 & EPs.bj == 0 & EPs.tot == 10));
+verifyEqual(tc, numel(S.rows), 2 * 2 * 3);                     % two pairs x two widths x (every JSR_tot, 4 dB, 10 dB)
+% the report's numbers not reproduced: nothing is written
+tree2 = bw_tree(tc, 'bw2', true);
+out2 = fullfile(tc.TestData.tmp, 'o_bj2');
+verifyError(tc, @() side_bj_cnn3(tree2, out2), 'side_bj:reproduce');
+verifyFalse(tc, isfolder(out2));
+end
+
+function [tree, Rs, EPs, m0, pay] = bw_tree(tc, name, spoil)
+% A CORE_BW tree of 80 episodes: CW and 20 MHz at JSR_tot 4 and 10 dB, two Eb/N0, ten geometries; one
+% scenario point not recoverable; its report numbers computed as experiment_core_bw.m does.
+tree = fullfile(tc.TestData.tmp, name); d = fullfile(tree, 'results', 'core_bw'); mkdir(d);
+params = struct('bits_per_frame', 1000, 'cycle_s', 0.0625); save(fullfile(tree, 'params.mat'), 'params');   % 16 kbit/s, exact in binary
+pay = 16000;
+[k, s, r] = ndgrid(1:4, 1:2, 1:10);
+bjv = [0 0 20 20]; totv = [4 10 4 10];
+EPs = struct('k', k(:)', 's', s(:)', 'r', r(:)', 'n', 80);
+EPs.bj = bjv(EPs.k); EPs.tot = totv(EPs.k); EPs.slice = false(1, 80); EPs.occ = false(1, 80);
+EPs.narrow = EPs.bj == 0; EPs.geom = 1000 * EPs.s + EPs.r; EPs.c = EPs.k + 1;
+fid = fopen(fullfile(d, 'recoverable.txt'), 'w');
+fprintf(fid, '# header\n# columns\n');
+for kk = 1:4
+    for ss = 1:2, fprintf(fid, 'H1 %d %d x 0 0 0 0 100 1 1 1 %d\n', kk, ss, ~(kk == 4 && ss == 2)); end
+end
+fclose(fid);
+m0 = ~(EPs.k == 4 & EPs.s == 2);
+rs = RandStream('mt19937ar', 'Seed', 11);
+P = {'none', 'blind_core', 'rule_core', 'rule_core3'};
+Rs = struct(); RES = struct('rule', {}, 'set', {}, 'policy', {}, 'R', {});
+for i = 1:numel(P)
+    t = randi(rs, 6, 1, 80) - 1; t(rand(rs, 1, 80) < 0.15) = NaN;
+    R = struct('ep', 1:80, 'per_post', rand(rs, 1, 80), 'dlv_post', rand(rs, 1, 80), 't_rec_det', t);
+    Rs.(P{i}) = R;
+    RES(end+1) = struct('rule', 'H1', 'set', 'primary', 'policy', P{i}, 'R', R); %#ok<AGROW>
+end
+X = struct('RULES', {{'H1'}}, 'B', 200); %#ok<NASGU>
+save(fullfile(d, 'test_readings.mat'), 'RES', 'EPs', 'X', '-v7.3');
+types = {'pooled', true(1, 80); 'narrowband', EPs.narrow; 'wideband', ~EPs.narrow};
+KP = struct('primary', struct('cnn', struct(), 'cnn_hybrid', struct()), 'by_bj', struct('bj', {0, 20}, 'cnn3', {[], []}));
+pr = {'rule_core3', 'cnn'; 'rule_core', 'cnn_hybrid'};
+for c = 1:2
+    for ti = 1:3
+        KP.primary.(pr{c, 2}).(types{ti, 1}) = kp_pair(Rs.(pr{c, 1}), Rs.blind_core, m0 & types{ti, 2}, EPs, pay);
+    end
+end
+for b = 1:2
+    m = m0 & EPs.bj == KP.by_bj(b).bj;
+    [dd, lo, hi] = boot_cluster(Rs.rule_core3.per_post(m) - Rs.blind_core.per_post(m), ones(1, nnz(m)), EPs.geom(m), 200, 6);
+    KP.by_bj(b).cnn3 = [dd lo hi];
+end
+if spoil, KP.primary.cnn.pooled.gput(1) = KP.primary.cnn.pooled.gput(1) + 1; end
+lines = {'report'}; %#ok<NASGU>
+save(fullfile(d, 'core_bw_kpis.mat'), 'KP', 'lines');
+end
+
+function V = kp_pair(Rr, Rb, m, EP, pay)
+cl = EP.geom(m);
+[dp, dlo, dhi] = boot_cluster(Rr.per_post(m) - Rb.per_post(m), ones(1, nnz(m)), cl, 200, 6);
+[rr, rlo, rhi] = per_reduction(Rr.per_post(m), Rb.per_post(m), cl, 200, 7);
+[dg, glo, ghi] = boot_cluster(pay * (Rr.dlv_post(m) - Rb.dlv_post(m)), ones(1, nnz(m)), cl, 200, 8);
+f = m & isfinite(Rr.t_rec_det) & isfinite(Rb.t_rec_det);
+[dt, tlo, thi] = boot_cluster(Rr.t_rec_det(f) - Rb.t_rec_det(f), ones(1, nnz(f)), EP.geom(f), 200, 9);
+V = struct('per', [dp dlo dhi], 'per_red', [rr rlo rhi], 'gput', [dg glo ghi], 'trec', [dt tlo thi], 'n_both', nnz(f));
+end
+
+%% ---------- three-state CNN, test confusion matrix ----------
+function test_core_cnn_confusion(tc)
+d = fullfile(tc.TestData.tmp, 'cm'); mkdir(d);
+state = repelem(1:3, 100)'; run = repelem(1:30, 10)';
+win = state; win([5 150 250]) = [3 1 1];
+frm = state; frm(1:4) = 2;
+hyb = state; hyb([10 20]) = 0;
+cpred = struct('state', state, 'core_window', win, 'core_frame', frm, 'hybrid', hyb, 'run', run, 'N', 3, ...
+    'states', {{'clean', 'narrowband jamming', 'wideband jamming'}}); %#ok<NASGU>
+f = fullfile(d, 'core_cnn_predictions.mat'); save(f, 'cpred');
+cw = [99 0 1 0; 1 99 0 0; 1 0 99 0]; cf = [96 4 0 0; 0 100 0 0; 0 0 100 0]; ch = [98 0 0 2; 0 100 0 0; 0 0 100 0];
+core = struct('metrics', {{struct('cm', ch), struct('cm', cw), struct('cm', cf)}});
+fc = fullfile(d, 'core_cnn.mat'); save(fc, 'core');
+out = fullfile(tc.TestData.tmp, 'o_cm1');
+S = side_core_cnn_confusion(f, out, fc);
+verifyEqual(tc, {S.rows.reader}, {'core CNN, window N = 3 (official)', 'core CNN, per frame', 'hybrid (monitor class)'});
+verifyEqual(tc, S.rows(1).cm, cw); verifyEqual(tc, S.rows(2).cm, cf); verifyEqual(tc, S.rows(3).cm, ch);
+verifyEqual(tc, S.rows(1).recall, [0.99 0.99 0.99], 'AbsTol', 1e-12);
+verifyEqual(tc, S.rows(1).precision, [99 / 101, 1, 99 / 100], 'AbsTol', 1e-12);
+verifyEqual(tc, S.rows(3).recall(1), 0.98, 'AbsTol', 1e-12);
+verifyTrue(tc, all(strcmp({S.rows.registered}, 'equals the registered matrix')));
+verifyLessThanOrEqual(tc, S.rows(1).recall_ci(:, 1)', S.rows(1).recall);
+txt = fileread(fullfile(out, 'side_core_cnn_confusion.txt'));
+verifyTrue(tc, contains(txt, 'side reading, decides nothing') && contains(txt, 'recall [95%]'));
+core.metrics{2}.cm(1, 1) = 98; save(fc, 'core');
+S2 = side_core_cnn_confusion(f, fullfile(tc.TestData.tmp, 'o_cm2'), fc);
+verifyEqual(tc, S2.rows(1).registered, 'DIFFERS from the registered matrix');
+S3 = side_core_cnn_confusion(f, fullfile(tc.TestData.tmp, 'o_cm3'));
+verifyEqual(tc, S3.rows(1).registered, 'not compared');
+end
