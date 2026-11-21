@@ -219,7 +219,7 @@ d = fullfile(tc.TestData.tmp, 'sp'); mkdir(d);
 f = fullfile(d, 'policy_evaluation.mat'); save(f, 'RES', 'POL', 'iDQN', 'KP');
 out = fullfile(tc.TestData.tmp, 'o_sp');
 S = side_speed_p1(f, out);
-verifyEqual(tc, S.speed.point, max(bm) - min(bm), 'AbsTol', 1e-12);
+verifyEqual(tc, S.speed.test.point, max(bm) - min(bm), 'AbsTol', 1e-12);
 txt = fileread(fullfile(out, 'side_speed_p1.txt'));
 verifyTrue(tc, contains(txt, 'post hoc, added after the reading'));
 verifyTrue(tc, contains(txt, 'side reading, decides nothing'));
