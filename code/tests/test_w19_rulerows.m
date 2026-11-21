@@ -209,9 +209,17 @@ B = struct();
 for k = 1:numel(s) - 1
     b = L(s(k):s(k + 1) - 1);
     while ~isempty(b) && (isempty(strtrim(b{end})) || startsWith(b{end}, '%%')), b(end) = []; end
-    t = regexp(b{1}, '^function\s+(?:[^=(]*=\s*)?(\w+)', 'tokens', 'once');
-    B.(t{1}) = b;
+    B.(function_name(b{1})) = b;
 end
+end
+
+function n = function_name(line)
+% The name on a function line: the word after 'function', past an output list and its '='.
+s = strtrim(line(numel('function') + 1:end));
+e = strfind(s, '='); p = strfind(s, '(');
+if ~isempty(e) && (isempty(p) || e(1) < p(1)), s = strtrim(s(e(1) + 1:end)); end
+n = regexp(s, '^[A-Za-z]\w*', 'match', 'once');
+assert(~isempty(n), 'test_w19_rulerows:fname', 'no function name on: %s', line);
 end
 
 function ok = is_subseq(a, b)
