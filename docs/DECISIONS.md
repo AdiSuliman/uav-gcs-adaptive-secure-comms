@@ -6,6 +6,142 @@ Each decision feeds the interim report and final book. Update on every new decis
 
 ---
 
+## Index (21.11.2026)
+
+Built from the entry headers (a bare "KPI 1", "KPI 6" or "KPI 7" in a header is the own numbering of the project and is shown as P-1, P-6, P-7) and the existing "amended" / "superseded" markers only; nothing was re-decided. Date: the date in the header, or with "~" the first date in the entry text (not a header date), "-" where the entry states none. The file order is not strictly numeric (D109, D108 and D107 sit after D106 and D118). Status "active" means no marker found; a dated amendment inside an entry (for example D92, D124, D125, D118 on 21.11.2026) is named in the entry itself.
+
+| D | Title | Date | Status |
+|---|---|---|---|
+| D1 | Model-based simulation | - | active |
+| D2 | MATLAB + Simulink | - | active |
+| D3 | Platform scope: small UAV, single RF link, 2.4 GHz ISM, Rician LoS | - | active |
+| D4 | UAV velocity 18–22 m/s (nominal 20) → Doppler 160 Hz | - | amended by D25 |
+| D5 | Modulation QPSK, symbol rate 1 Msym/s, Rician K = 10 dB | - | active |
+| D6 | Separate Rician and AWGN blocks | - | active |
+| D7 | No carrier synchronizer | - | amended by D41 |
+| D8 | Threat injection: signal-level additive | - | active |
+| D9 | Six base threats; eavesdropping and MITM out of scope | - | active |
+| D10 | Threat build order: barrage jamming first | - | active |
+| D11 | System Objects engine | - | active |
+| D12 | Spoofing detection: root-caused and fixed at threat-injection level | - | active |
+| D13 | CNN-LSTM comparison architecture | - | active |
+| D14 | DQN state encoding: ordinal → one-hot | ~14.09.2026 | active |
+| D15 | KPI #3 redefinition: recovery cycles → decision latency | - | superseded in part by D31 |
+| D16 | Closed-loop sliding-window feature fix | - | active |
+| D17 | Survivability boundary: two-map methodology | - | active |
+| D18 | Rx_IQ tap point fixed: post-AWGN, not pre-AWGN | ~19.09.2026 | active |
+| D19 | rule_based_policy.m's per-threat mitigation_db | ~19.09.2026 | active |
+| D20 | Shared closed-loop frame extraction | - | active |
+| D21 | no_action recovery reported as N/A | - | active |
+| D22 | Decision-latency measurement scope widened to include preprocessing | - | active |
+| D23 | spectrogram() warm-up added | - | active |
+| D24 | demo_gui.m: interactive operator-console demonstration | - | superseded in part by D26 |
+| D25 | UAV speed envelope 50–120 km/h (continuous) and speed-diverse training data | - | active |
+| D26 | demo_gui.m v3: proposal-complete operator console | - | active |
+| D27 | KPI #2 measured against the no-attack (clean) link | ~21.09.2026 | active |
+| D28 | Physics-based countermeasure model, one shared function | ~23.09.2026 | amended by D41 |
+| D29 | DQN reward with action costs, training over the full Eb/N0 range, FAR as "unnecessary... | ~23.09.2026 | active |
+| D30 | Survivability map on the real action set | ~23.09.2026 | active |
+| D31 | Episodic closed loop: recovery time in decision cycles, dwell/hysteresis | ~24.09.2026 | active |
+| D32 | Unknown-threat detection (leave-one-threat-out) and combined threats | ~24.09.2026 | active |
+| D33 | Unknown gating requires a degraded link | - | active |
+| D34 | Detector quality: unseen Eb/N0, KPI #1 as worded, action-equivalent accuracy; no... | - | active |
+| D35 | KPI reporting as worded (PLR, goodput, FAR bound) and Monte Carlo confidence intervals | - | active |
+| D36 | DQN trained on full-action targets | ~25.09.2026 | active |
+| D37 | Continuous episode view in the GUI | - | active |
+| D38 | Full end-to-end run configuration | - | active |
+| D39 | Action set v2: transmit power control, FEC with interleaving, two-action pairs | ~25.09.2026 | active |
+| D40 | Combined threats with seeded Monte Carlo repeats | ~26.09.2026 | active |
+| D41 | Multi-antenna UAV receiver, coherent combining, seeded link | ~26.09.2026 | active |
+| D42 | Detector v2: fast seeded channel, run-level split, receiver-side features, unknown-threat... | ~26.09.2026 | active |
+| D43 | Interference-over-thermal feature | ~26.09.2026 | active |
+| D44 | Sequential decision layer | - | active |
+| D45 | Decision layer v2: flight geometry, reward floor, shield, fair baselines | ~26.09.2026 | active |
+| D46 | Decision layer v3 and phase 4 | ~26.09.2026 | amended by D117 |
+| D47 | Documentation layout | - | active |
+| D48 | False alarms (alarm definition, M-of-N confirmation on validation), one-pass detector... | - | active |
+| D49 | False alarms, second attempt | ~26.09.2026 | active |
+| D50 | Attenuation as a change of the link | - | active |
+| D51 | Decision layer frozen; P-6 measured on independent geometries | ~27.09.2026 | active |
+| D52 | Path-loss alarm threshold chosen from data | ~27.09.2026 | active |
+| D53 | Clean lead-in in the live tab of the operator console | ~27.09.2026 | active |
+| D54 | Hover help in the operator console | ~27.09.2026 | active |
+| D55 | Operator language across the console | ~28.09.2026 | active |
+| D56 | 3D episode view | - | active |
+| D57 | 3D view in Unreal Engine | - | active |
+| D58 | 3D view built: live console, defense videos, console-episode replay | - | active |
+| D59 | v4: receiver-side measurements, spatial awareness, combined configurations, stricter... | - | active |
+| D60 | unknown-threat score: the last layer, chosen by nested leave-one-threat-out selection | - | active |
+| D61 | v4 completed: per-antenna feature, unknown-threat score chosen by leave-one-threat-out... | ~28.09.2026 | active |
+| D62 | Path-loss alarm threshold chosen on validation | ~29.09.2026 | active |
+| D63 | Hold in the shield for every policy | - | active |
+| D64 | Escalation out of no_action on a persistent confirmed alarm | - | amended by D113, D121 |
+| D65 | Degradation alone confirms on 2 of 2 cycles | ~29.09.2026 | active |
+| D66 | Lower cost weights in the training reward | ~29.09.2026 | active |
+| D67 | Lower running costs with a higher false-switch penalty | ~29.09.2026 | active |
+| D68 | v5: the full threat envelope, two further threats, measured channel ranges, signalling... | ~30.09.2026 | active |
+| D69 | v5: spatially separated antennas, the hit antenna drawn per run, reference-antenna... | ~30.09.2026 | active |
+| D70 | v5 scope: the platform of the lecturer's sources, three antennas, ranges within the... | ~30.09.2026 | superseded in part by D92 |
+| D71 | Unseen-severity rule in profile 2 | ~01.10.2026 | active |
+| D72 | v6: evidence over time, a quiet slot, detector levels up to the sources' caps | ~01.10.2026 | active |
+| D73 | v7: a real receiver, flight dynamics and source-corrected severities | ~01.10.2026 | active |
+| D74 | v7 envelope: a verdict at every point, altitude and distance | ~03.10.2026 | amended by D108, D117 |
+| D75 | v7 gap fixes on the link side | ~04.10.2026 | active |
+| D76 | v7 detector: a fair reading beside P-1, WLAN gaps judged by their window, branch... | ~04.10.2026 | active |
+| D77 | v7 receiver on the delay line | ~04.10.2026 | active |
+| D78 | v7 coded packets: codeword over four frames, soft values with the receiver's block... | ~05.10.2026 | active |
+| D79 | v7 review of the receiver and the coded link | ~05.10.2026 | active |
+| D80 | P-7: the unknown-threat score within the decision-cycle budget, a fast isolation-forest... | ~06.10.2026 | active |
+| D81 | Temporal fusion: the current frame's own evidence beside the window | ~07.10.2026 | active |
+| D82 | The test after the fusion fix | ~07.10.2026 | active |
+| D83 | The received level against a fixed noise floor, path loss as a step, a connector ahead of... | ~08.10.2026 | active |
+| D84 | The pre-launch review fixed | ~11.10.2026 | active |
+| D85 | The receiver's idle time, branch and step cues, per-cycle labels, the onset of a lost... | ~12.10.2026 | active |
+| D86 | The pre-launch review: airframe shadowing at Sun et al.'s burial, every class rolls in... | ~16.10.2026 | active |
+| D87 | The onset latch chosen on validation | ~17.10.2026 | active |
+| D88 | The align field, the predicted MMSE gain on known symbols, the unknown-threat threshold... | ~17.10.2026 | active |
+| D89 | The MMSE predictor's frequency hypotheses and arrival search, its cost in the cycle, the... | ~17.10.2026 | active |
+| D90 | Choices on validation before C1d and C2 | ~17.10.2026 | amended by D113, D121 |
+| D91 | Fault and shadowing below 85% on the third test set | ~17.10.2026 | amended by D110, D111 |
+| D92 | The lecturer's revised proposal of 2026-10-20 is the official scope | 20.10.2026 | superseded in part by D105, D106 |
+| D93 | No Plan A stop for profile 1 | ~23.10.2026 | superseded in part by D94 |
+| D94 | Software-only Plan A stop of profile 1 (revises D93) | ~23.10.2026 | amended by D96, D98 |
+| D95 | The decision layer's clean reference comes from the 300 validation clean flights per... | ~24.10.2026 | active |
+| D96 | The end-to-end plan of profile 1's stop and after (phases 0-4), approved on condition of... | ~25.10.2026 | active |
+| D97 | Noise bursts: the rule's coded answer worsens the link; profile 1 chooses an uncoded... | ~24.10.2026 | active |
+| D98 | Phase-0 pre-registrations, before any of the data they govern exists | ~25.10.2026 | amended by D101 |
+| D99 | Lecturer readings at link-limited Eb/N0 points | ~25.10.2026 | active |
+| D100 | Profile 3's survivability map v2 and dev set C's gates | ~25.10.2026 | active |
+| D101 | Profile 3's SURV3 v2 (three against four antennas) | ~25.10.2026 | active |
+| D102 | Profile 1's deploy queue: the five git-dependent tests that fail on the queue's export... | ~25.10.2026 | active |
+| D103 | Profile 1's system-level clean false alarm | - | amended by D107, D112, D121 |
+| D104 | P1R, profile 1's decision-layer rerun with the fixed monitor | - | amended by D108, D110 |
+| D105 | The lecturer's verdict pairs | ~26.10.2026 | amended by D106, D121 |
+| D106 | rule_core3: the proposal's three-state CNN drives the core rule in CORE_BW and carries... | ~27.10.2026 | amended by D121 |
+| D107 | The DQN's lost-branch hold | 29.10.2026 | amended by D110 |
+| D108 | The edge commitment's clean-link criterion becomes LINK ≤ 5.7%... | 29.10.2026 | active |
+| D109 | Delay-line receiver defect | 29.10.2026 | amended by D121 |
+| D110 | Profile 3's fusion: a lost-branch and level head, gated coherence columns and... | 30.10.2026 | active |
+| D111 | Profile 3's unknown-threat statistic | 30.10.2026 | amended by D121 |
+| D112 | DCONF: profile 3's drop alarm confirmed by its own CUSUM crossing, a C1d coordinate step... | 30.10.2026 | amended by D121 |
+| D113 | S1G: in profile 3, the rule family's answer to a lost-branch class, and its escalation... | 30.10.2026 | amended by D121 |
+| D114 | RELM: in profile 3, a release to no_action on evidence held over the sweeper's revisit... | 30.10.2026 | active |
+| D115 | LB: link-budget completion of profile 3's DQN action at decision time, gated by a... | 30.10.2026 | active |
+| D116 | Pre-registered readings for the weak results... | 30.10.2026 | amended by D121 |
+| D117 | Profile 3's speed envelope measurement | 30.10.2026 | active |
+| D118 | Order, timeboxes, run guards and the shedding order of D110-D117 for profile 3's end date | 30.10.2026 | amended by D121 |
+| D119 | P1-v2: profile 1 rerun with the fixes proven in profile 3, on new never-read test sets... | 31.10.2026 | active |
+| D120 | Predictive readings: predicted against measured result per configuration, outage risk... | 31.10.2026 | active |
+| D121 | The 31.10 audits' proposals | 31.10.2026 | active |
+| D122 | Profile 3's coded-link decoder | 05.11.2026 | active |
+| D123 | Recovery time read against an autopilot's link-loss failsafe | 11.11.2026 | active |
+| D124 | The rule's layered answers (PP.rule_fix) | 15.11.2026 | active |
+| D125 | Profile 3's three weak points of C2e/C2g (ROADMAP item 19) | 18.11.2026 | active |
+| D126 | P-7: honest timing of the deployed cycle and performance-only caches, one final... | 19.11.2026 | active |
+
+---
+
+
 ## D1 — Model-based simulation (no hardware, no external dataset)
 **Decision:** Pure MATLAB/Simulink simulation; the simulator self-generates the labeled dataset.
 **Alternatives:** SDR hardware testbed; use of a public RF dataset.
@@ -1348,6 +1484,7 @@ Channel model: the flat channel fails, the link runs the delay line → PASS; re
   - the CNN's contribution against the conventional mechanism, as an analysis metric and not a promise.
 - *Gantt:* unchanged, except "literature with a focus on Jamming" and "DQN agent - optional".
 - *Mapping used in the code:* narrowband = `tone_jamming`, wideband = `jamming` (barrage). The existing policies map: static = `none` / `no_action`, conventional = `blind_esc`, CNN-based = `rule_esc`.
+  - *[Dated 21.11.2026: this mapping clause is [superseded by D105 point 1 and D106 point 4]. The lecturer's L5-L8 verdicts are `rule_core` (C2e, hybrid) and `rule_core3` (CORE_BW, three-state CNN) against `none` and `blind_core` on the core action set; `rule_esc` and `blind_esc` remain the extension pair, never in the verdict's place. The rest of D92 stands.]*
 - *Status when decided (2026-10-21 morning):* profile 1's C1p at 44 of 93 cells; profile 3 waits before C1p (`p3_c1p.hold`) for its deployment; the processor boost is off since 2026-10-20 12:40, so stages run up to about 35% slower.
 **Decision, in six parts.**
 1. *The lecturer's proposal is the scope.* The deliverables and KPIs above are what the project is measured on. The ten threats, three and four UAV antennas, the tracked GCS antenna, the real receiver, the hybrid network with link features, unknown-threat detection, the 36 configurations, the DQN, the GUI, the survivability map, EDGE, C2g, C2u and OHP / GCSA on profile 1 stay as extensions without commitment. Nothing is rerun to remove any of them.
@@ -1369,6 +1506,8 @@ Channel model: the flat channel fails, the link runs the delay line → PASS; re
 **Open:**
 - `lect-kpi` is untested and unmerged.
 - The 58 wording issues of the interim-report draft are not yet fixed.
+
+*[Dated 21.11.2026, closure of the "Open" items: (1) `lect-kpi` is tested and merged: D94 point 2 puts it into the merged profile 1 tip (`v7-deploy-d91` `0f437f3`, then `d91-edgefix` `8fdb09e`, then `lect-kpi` `5b4b970`), and `lect_kpis.m` produced C2e's lecturer rows and the 29.10 and 21.11 readers' GATE PASS lines. (2) The 58 wording issues of the interim-report draft: no source records their closure; the item stays open and belongs to the interim report and the book.]*
 
 ## D93 — No Plan A stop for profile 1: it runs its own code to the end; the lecturer's KPIs for profile 1 from isolated runs; profile 3 deploys after profile 1
 **Revised by D94 (2026-10-23, about 09:00).** Profile 1 is stopped after all, as a software-only stop. D94 supersedes parts 1-4 and the runbook clause of part 6. Part 5 stands, with a shorter queue on `-q3`.
@@ -2855,6 +2994,8 @@ Item 7 is the one exception. Its routing may switch on D117 point 3, a training 
    - The check's inputs and projected dates are written down before anything is shed. A shed item is recorded with the projected dates that triggered it.
 4. **If the end still passes 24.11 after shedding** (for example, a C1p as slow as profile 1's 144.9 h), Adi is told the numbers. Nothing is shortened (no-training-shortcuts).
 
+*[Dated 21.11.2026, gate-threshold rule used at run time (nothing in D118 is changed). A queued job registers a free-commit floor with the gated wrapper. When desktop use alone explains a shortfall, the floor may be lowered to the measured free commit minus a margin, never below what the job needs, and the job is restarted through the wrapper (the old queued job ends with status 130 before MATLAB starts). A script memory watch alerts when free commit falls below 3 GB. Applied on 21.11: 45 GB to 40 GB for the single-thread readers (`lect_kpis_by_ebno`, 22:02, 43.2 GB free) and 45 GB to 43 GB for the 6-worker D125 build (23:33, 44.4 GB free, desktop use 22.8 GB). Reason: a commit shortage kills workers and their in-flight cells; cells are saved whole, so a restart keeps every finished cell. Both restarts are listed in PROJECT_LOG ("Non-zero run endings").]*
+
 ## D107 — The DQN's lost-branch hold: the excess of the false-switch penalty charged only on cycles with no threat on the air (the Lagrangian of the KPI 6 constraint, training only); scored in P1R, a deployable candidate in profile 3; option B withdrawn (approved by Adi, 29.10.2026)
 
 **D107 (2026-10-29, approved by Adi on 29.10.2026): the DQN's lost-branch hold. The excess of the false-switch penalty is charged only on cycles with no threat on the air, as the Lagrangian of the KPI 6 constraint (training only). It is scored in P1R and is a deployable candidate in profile 3. Option B (FIX section 4) is withdrawn. Written after V0, before any P1R or profile 3 decision-layer data.**
@@ -3159,6 +3300,8 @@ Code: branch rule-fix (fd530db, b36e4b3, 640a421, b952235, a987d97), CORE_BW sid
    - **Amendment, 19.11.2026 16:40, before any adopted row was computed.** Profile 1's first ADOPT0 (16:18) reproduced kpi_summary (txt, mat), report_numbers.json and all 15 bundle files exactly. It stopped on one file: kpi_dashboard.png differs in 2445 of 3,061,888 pixels (0.08%). The differing pixels lie in small regions of tick labels and annotation text, with the same text and numbers side by side: font anti-aliasing differs between MATLAB sessions. A PNG is therefore compared as a rendering: same size, and at most 0.5% of its pixels differ, with the count printed. Its numbers are guarded through the files it is drawn from, which must be equal. The stopped overlay is kept under `results/rule_fix/_stopped/`. The write attribute of profile 1's 34 data files, set read-only through its links, was restored, since none was read-only before. The overlay, ADOPT0 and the stages after it run again from the start.
    - **Order:** D125's test reading -> the remaining profile-3 side readers -> lift final.hold -> final phase on both profiles -> SHA-256 archive -> ADOPT0 -> ADOPT-C2e (profile 1, then profile 3) -> gate -> render. CORE_BW's point 6 runs when RAM allows.
 
+*[Dated 21.11.2026, point 9's registered order was executed in another order. Registered: D125's test reading, then the remaining profile 3 side readers, then lift final.hold, then the final phase, then the SHA-256 archive and ADOPT0 onward. Executed: D125's fresh-pool build was paused at 11 of 93 cells on 19.11 at 13:55, final.hold was lifted on 19.11 at 13:54 with the build paused (its conditions were met: archive, D2c, GUI tests, D124 readings), the final phase ran on both profiles on 19.11, and both adoptions (ADOPT0, ADOPT-C2e, gate, render) were done on 19.11 with every guard passing (profile 1 19:21, profile 3 22:50). The remaining profile 3 side readers, the CORE_BW rule fix of point 6 and the labelled side readings ran on 21.11; D125's test reading is still ahead. Record: PROJECT_LOG, entries of 19.11 13:55, 19:21 and 22:50.]*
+
 ## D125 - Profile 3's three weak points of C2e/C2g (ROADMAP item 19): decision-time fixes of the deployed DQN, chosen on validation, read once on a fresh profile-3 test set (Adi's yes 18.11.2026: "Yes, fix them"; registered before any reading)
 
 1. **What.** Three option fields of the DQN kinds, each off by default (`''` or absent). With all three off, every action, rung, memory field, stamp and printed number is the base commit's (a987d97) bit for bit (`test_weak19.m`: the parent's `policy_monitor.m`, `policy_decide.m`, `lb_complete.m`, `policy_stamp.m`, `decision_settings.m` and `pool_geometries.m` against this branch's, with the fields absent, `''` and `""`; the builder's off block evaluated from its source). None needs retraining: each acts after the agent's shield-masked argmax and the link-budget completion, before the escalation, on receiver measurements only (class, harm evidence, degradation, the configurations' known gains; no truth field). The rule kinds are untouched.
@@ -3255,6 +3398,13 @@ Code: branch rule-fix (fd530db, b36e4b3, 640a421, b952235, a987d97), CORE_BW sid
    - The w19 clean pools carry no CT.fams (the builder saves it for the P1R set only), so a second build is not skipped as up to date. The reader checks every seed instead.
 
 Code: branch weak19 (from rule-fix a987d97): `dqn_fix.m`, `lb_complete.m`, `policy_decide.m`, `policy_monitor.m`, `decision_settings.m`, `policy_stamp.m`, `fresh_set_layout.m`, `fresh_shadow_seed.m`, `fresh_splice.m`, `pool_seed_owner.m`, `clean_set_layout.m`, `build_policy_pools.m`, `build_clean_test_pools.m` (help text), `weak19_reading.m`, `code/tests/test_weak19.m`. Not run: MATLAB was not started while profile 3's chain holds the machine; the tests and both stages run later through the gated wrapper.
+
+*[Dated 21.11.2026, status of D125.
+- Validation, profile 3, 19.11 (22.0 min, 8 threads; every registered reading reproduced). Step 1 `dqn_harm` not adopted: on the harmed antenna-fault episodes +31.3 points (64 episodes in 7 clusters, exact sign-flip p 0.031 against the Bonferroni 0.0167), but the clean flights with a change rise from 69 to 93 (bound 6.11% above 5%, the P-6 bound) and the false changes to 550-590 per hour (above 470). Step 2 `dqn_hop` = `rule` adopted: comb stress set recovered +13.25 points (lower bound +10.68), pooled held +0.03, clean flights and false changes unchanged. Step 3 `lb_more` not adopted (path-loss family +0.11 points, p 0.41; tone_jamming with path loss -0.79). Selection frozen: `dqn_hop` = `rule` (weak19 `c689c21`).
+- Pause, 19.11 13:55, with Adi's yes, at 11 of 93 cells. Corrected cost: the 4.3 h of point 3 and the 7.5 h of point 7 scaled C1p's last resume (850 min) instead of C1p's total (8692 min). Observed: first cell after 4.8 h, 2-4 days for the build, about 5 worker-hours per cell (the about 0.7 h per cell of the earlier plan is wall clock across six workers). Cells are saved whole, so the resume keeps the 11.
+- Resume, 21.11 23:33, in the profile 3 slot (gate 43 GB, see D118 amendment of 21.11); ETA 24.11 evening to 25.11, allow one power cut. The registered layout (24 geometries per cell and Eb/N0) is kept; the build is not stopped again.
+- With one adopted step (`dqn_hop`) the Holm correction of point 4 reduces to a plain one-sided 0.05 test on its endpoint (the comb set); the guards of point 4 are unchanged.
+- D125 changes deployed-DQN rows only (extension, D92 point 1); no lecturer row depends on it.]*
 
 ## D126 - KPI 7: honest timing of the deployed cycle and performance-only caches, one final LAT..BUNDLE rerun (19.11.2026; asked 16:28, no reply in 30 minutes, registered by the standing default; registered before any rerun)
 
