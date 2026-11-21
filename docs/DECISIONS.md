@@ -138,6 +138,7 @@ Built from the entry headers (a bare "KPI 1", "KPI 6" or "KPI 7" in a header is 
 | D124 | The rule's layered answers (PP.rule_fix) | 15.11.2026 | active |
 | D125 | Profile 3's three weak points of C2e/C2g (ROADMAP item 19) | 18.11.2026 | active |
 | D126 | P-7: honest timing of the deployed cycle and performance-only caches, one final... | 19.11.2026 | active |
+| D127 | D124's adopted rule read for the first time on profile 3's fresh pools, in the same read as D125 | 21.11.2026 | active |
 
 ---
 
@@ -3419,3 +3420,113 @@ What (branches kpi7-p1 ed5b812 from d4623ed, kpi7-p3 978ee31 from 81ecc06; full 
 Guard: `kpi7_guard(tree)` compares the code before and after on LAT's 84 frames (three settings) and on a replay of the deployed policy over the tree's test pools; any mismatch rejects. The tests: `test_kpi7.m` (kpi7-p3: 15/15, full suite 669/669, 19.11.2026).
 
 Order: both D124 adoptions first (one big-pool run at a time), then the guard on both profiles on an idle machine. Only with `CACHES (default changes): ACCEPTED` on both: merge into the trees, then LAT, KPI, DASH, WEAK, RPT and BUNDLE on both profiles on an idle machine. That rerun is final whatever it shows, pass or fail; nothing further is changed for KPI 7 on its account. Today's readings stay on record beside it. A REJECTED guard keeps today's readings as the record.
+
+## D127 - D124's adopted rule read for the first time on profile 3's fresh pools: the rule rows off and with keep+st+rate in the same read of the fresh set as D125, with a pre-stated confirmation (21.11.2026; registered before any fresh-pool reading)
+
+1. **Why.** D124 chose keep+st+rate on validation and read it once on C2e's test sets (point 3), the sets where the weakness behind it was seen. Its adopted rows are therefore a second reading of spent test flights (independent review 21.11, item 3; proposal mitigation 9 asks for new test runs after an adopted change). D125's fresh profile-3 set (`fresh_set_layout.m`: family 4 of block 14, 24 geometries per cell and Eb/N0; the w19 clean flights) is flown by no earlier reading. It gives D124 a first read on profile 3 at small cost. Profile 1 has no fresh set: its adopted rows stay a second reading, labelled so.
+
+2. **What is read.** The rule rows none, rule_esc, blind_esc, rule_core and blind_core, each off and with D124's adopted setting (`keep+st+rate`; none is read once, it has no rule):
+   - on the fresh single, follower and combined sets (`weak19_reading.m` fresh_sets, stream 2091), the same episodes and frame draws as the deployed DQN's fresh reading (300 000 + 1000 x set);
+   - on the fresh w19 clean flights from the KPI 1 threshold up, the same flights and frame draws as D125's KPI 6 reading (300 500 + b).
+   Off and on fly the same episodes and frames (paired). The comb set is not read for the rule rows. rule_core3 is not a profile-3 row.
+
+3. **Registered confirmation.** Three claims, each a one-sided test of a gain by the cluster bootstrap over flights (a geometry at an Eb/N0), 2000 draws, p the share of resample gains at or below 0. With fewer than 30 clusters a claim is not read (p = 1).
+   - **C1, `esc_recovered`.** rule_esc's recovered among the recoverable threat episodes (single, follower and combined pooled), on minus off. Seed 2701.
+   - **C2, `core_narrowband`.** L5: rule_core's PER reduction against no response, on minus off, on the recoverable tone_jamming episodes of the core action set (`recoverable_core`, lect_kpis's primary). The gain is (sum PER_off - sum PER_on) / sum PER_none over the same episodes, a ratio bootstrapped with whole flights. Seed 2702.
+   - **C3, `core_wideband`.** The same for jamming. Seed 2703.
+
+   **Holm** across the three at 0.05; a gain at or below 0 never passes. The one-sided 95% lower bound of each gain is printed beside its p.
+
+   **Guards** (D124's own conditions on the same pairs):
+   - **rule_esc, for C1:**
+     - (b) every threat with at least 10 recoverable episodes: recovered no lower than -1.0 point, lower bound no lower than -2.0;
+     - (c) pooled held and pooled recovered no lower than -0.5 point, lower bounds no lower than -1.0;
+     - (d) the fresh clean flights with a change: the one-sided Clopper-Pearson bound within max(5%, off's bound), and the share at most 1 point above off's.
+   - **rule_core, for C2 and C3:**
+     - (e) pooled held no lower than -0.5 point, lower bound no lower than -1.0;
+     - (d) as above.
+
+   Guard seeds 2711-2714. A claim is **CONFIRMED** when it passes Holm and every guard of its row holds, otherwise **NOT CONFIRMED**.
+
+   The book reads the adopted rule rows of profile 3 as follows:
+   - confirmed: confirmed on a first read;
+   - not confirmed: the registered off rows carry the verdicts, and the adopted rows stay the labelled second-reading column.
+
+   **Descriptive, decides nothing:**
+   - recovered and held of every rule row, off and on, with two-sided 95% intervals of the paired difference;
+   - rule_esc and rule_core per threat;
+   - the clean flights with a change (share, one-sided bound) and the false changes per hour of all four rule rows. This includes rule_core's system-level L3 line on fresh clean flights;
+   - lect_kpis on the fresh set, off and on, with the deployed DQN as registered beside them. This covers the L5 verdict words of rule_esc and rule_core per band, the CNN contributions rule_esc - blind_esc and rule_core - blind_core, recovery times and goodput.
+
+4. **Read once, one read of the fresh set.**
+   - **Where.** The rule rows are an option of D125's test stage, not a second reader: `weak19_reading('test', tree, 'p3', 'rulerows', <rule fix test.mat>)` reads the fresh set once for both registrations, behind D125's marker.
+   - **Without the option** the stage runs the base commit's statements unchanged:
+     - every added line of `stage_test` is the option's parse or a one-line block under `RR.on`, and the remaining lines equal c689c21's in order;
+     - every other function of the reader is c689c21's, save `guard`, which only gains the amendment's alternative, and `reg` and `paths`, which only gain lines (`test_w19_rulerows.m`, test_off_runs_the_base_statements);
+     - the deployed DQN's files (test.mat, the test section of weak19_reading.txt) and numbers are those of the call without the option. The rule rows write only `rulerows_test.mat` and `rulerows_reading.txt` beside them.
+   - **Order inside the read:**
+     1. D125's guard and its off reproduction;
+     2. the rule rows' checks, before anything is read: tag p3, D125's selection has an adopted setting, its D124 record says keep+st+rate, and the rule-fix test.mat has SHA-256 9f8f4e79ed4880647a6bbda7ef50dae194e5cf5bc6aa2d67a110fcfd7470d85c;
+     3. **before the marker**, the rule rows on C2e's single, follower and combined sets (stream 2027, draws 20 000 + 1000 x set): off must equal the registered rows of policy_evaluation.mat, and on must equal D124's test.mat rows (recovered, held, per_post, switches, isequaln). Any mismatch stops the read with no marker, and the fresh set stays unread. The owner may then run D125's test alone, without the option;
+     4. D125's fresh-pool checks and its marker (checkout, tree, and the tag's), with one added line naming the rule rows and the rule-fix test file;
+     5. D125's fresh reading, written in full;
+     6. the rule rows on the fresh set.
+   - **If the rule rows fail after the marker** (an error or memory), D125's results stand, and the fresh set is spent for both. The rule rows are not read again on it.
+   - **Second call refused.** The tree's marker `results/read_once/weak19_test.txt` refuses any second test call, from any checkout. There is no separate rule-row reader of the fresh set.
+
+5. **The frozen code, and how the reading proves the build code unchanged.**
+   - **The frozen hash.** D125's selection froze the SHA-256 over every .m file of the weak19 checkout's code/, 03a2791b0efc6f4413d8f947eac13eca7964baaac1a84a2d080411a5b798ec0e (`read_once('code')`: relative path and text, line ends removed, sorted by path). The fresh pools are being built from that checkout at c689c21 (FRESH_SET true, then CLEAN_SET 'w19').
+   - **This branch's code.** The w19-rulerows checkout's code hashes otherwise; at f1d6e94 it is 0bd0c5dd0d271661dbd4d8d65c9f3b0e4bef3363d7029f0827209484f2d90db9. So D125's guard ("the code differs from the code the selection ran") accepts it only through one recorded amendment, as D124 point 7 did for the rule fix.
+   - **Amendment** (`weak19_reading('amend', tree, 'p3', <weak19 checkout>, why)`), once, while the fresh set is unread. It is refused when the checkout's marker, the tag's marker or the tree's marker exists. It checks:
+     1. the weak19 checkout's code gives the frozen hash, its HEAD is c689c2177c4c4fc50c171741aae22cc54c6d4a7a, and `git status --porcelain -- code` is empty (where git answers);
+     2. this checkout's code differs from it only in `decision/weak19_reading.m` (changed) and `tests/test_w19_rulerows.m` (added); nothing is removed, and any other file refuses;
+     3. it copies the base weak19_reading.m to `results/weak19/p3/amend_base/`;
+     4. it writes `results/weak19/p3/amend.json`: the frozen hash, the new hash, the changed and added files, the base checkout, its HEAD and status, the reason and the time;
+     5. it checks the proof below before writing.
+   - **Guard, at the test.** From this checkout alone, the guard accepts the changed code only when:
+     - amend.json's pair is (the frozen hash, the hash now);
+     - the files it names lie in the registered list;
+     - the code now hashes to the recorded new hash;
+     - with the added file left out and the changed file read from amend_base, the code hashes to the frozen 03a2791b... .
+
+     So every .m file of the reading checkout other than the reader and its test is byte for byte the frozen code (line ends aside). This covers the build's own files: build_policy_pools.m, build_clean_test_pools.m, fresh_set_layout.m, fresh_shadow_seed.m, fresh_splice.m, pool_seed.m, pool_seed_owner.m and clean_set_layout.m, the link, detection and decision code, and the rule fix itself.
+   - **The build's side.** FT carries no code hash, so the build's code is tied through its checkout:
+     - the build runs from the weak19 checkout, which is never modified;
+     - at the amendment its code still gives the frozen hash, at HEAD c689c21 with a clean code/;
+     - an independent replica of the hash (Python, 22.11, during the build) gives 03a2791b... for that checkout (446 files), and `diff -rq --strip-trailing-cr` between the two checkouts' code/ lists exactly the two registered files.
+   - **The data.** The reading then checks the fresh files themselves, as D125 point 4 does: fresh_splice's refusals, every shared fresh seed, the shadowing range, the w19 clean seeds and the detector. The marker holds their SHA-256.
+
+6. **Reproducibility.**
+   - **Unchanged.** Every seed is fixed: the episode streams 2027 and 2091, the frame draws, the bootstrap seeds 2701-2703, 2711-2714 and 2720-2740 (descriptive), and lect_kpis's own. None coincides with D125's 1900-1926 and 1950. The registered results of both trees stay as they are, and D124's test.mat is read, not written.
+   - **New files, all in the w19-rulerows checkout:** amend.json, amend_base/, rulerows_test.mat and rulerows_reading.txt. After the read they are committed with `git add -f` on w19-rulerows. results/weak19/** is checked out byte-exact (`.gitattributes -text`), so the selection's SHA-256 equals the tree's copy.
+   - **Tree.** The tree receives no new file beyond D125's three. Its weak19_test.txt gains one line.
+
+7. **Cost.**
+   - **Time.** About 1.5-2 h on top of D125's 0.5 h, at C2e's rate of about 5,000 episode-policies per minute:
+     - the reproduction: 5 rows off and 4 on over C2e's sets 1-3, about 160,000 episode-policies, 30-35 min;
+     - the fresh sets: the same 9 runs over about twice the episodes, 60-70 min;
+     - the clean flights: 8 runs of about 1,800 flights, a few minutes;
+     - two lect_kpis readings.
+   - **Memory.** The rule rows add under 1 GB to the test stage:
+     - the per-episode fields kept (17 fields, about 36,000 episodes x 9 runs);
+     - one full run at a time before it is trimmed;
+     - the bootstrap index matrices of a few hundred flights x 2000 draws.
+
+     The stage's peak stays D125's own (the tree's policy_pools.mat, 15.9 GB on disk, and the fresh pools, loaded by D125 anyway). The rule rows load only D124's test.mat (2.9 MB) and the labels of policy_evaluation.mat. No pool is loaded twice.
+   - **Threads.** One heavy stage at a time through the gated wrapper, 8 threads as D124 and D125 ran.
+
+8. **Run order** (replaces D125 point 7, step 4):
+   1. Tests now (no data): `runtests('code/tests/test_w19_rulerows.m')` and `runtests('code/tests/test_weak19.m')` in the w19-rulerows checkout.
+   2. After both fresh builds: the amendment (point 5).
+   3. The single test read from the w19-rulerows checkout, with the option.
+   4. `git add -f` of the new files and a commit on w19-rulerows.
+
+   D125's test is then run from w19-rulerows, not from weak19. If this decision is not taken before D125's test, D125 runs as registered from weak19. D124's first-read confirmation on profile 3 is then lost: the fresh set is spent, and a new set would be needed.
+
+9. **Open risks.**
+   - C2 and C3 test a gain of the adopted setting over off, not the L5 30% target itself. The fresh L5 verdict words are printed beside them, descriptive.
+   - D124's selection read rule_sel on validation. The rule rows here are evaluate_policies.m's rule_esc and rule_core at the deployed DQN's settings, the rows the book cites.
+   - The guards (d) use the fresh clean flights from the KPI 1 threshold up, about 1,800, like D125's KPI 6, not C2e's 72-episode clean set.
+   - A crash after the marker spends the fresh set for the rule rows (point 4).
+
+Code: branch w19-rulerows from weak19 c689c21: `weak19_reading.m` (the option, the amendment, rr_* functions), `code/tests/test_w19_rulerows.m`, `.gitattributes` (commit f1d6e94). Not run: MATLAB was not started while the fresh build holds the machine.
