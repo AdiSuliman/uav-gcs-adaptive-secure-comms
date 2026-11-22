@@ -17,7 +17,9 @@ function [a, mem, info] = policy_decide(kind, obs, cfg, mem, PP, agent, opt)
 %          rule_core_policy.m, the escalation over C.ladder_core and the link-budget match
 %          over rate_reduce alone; PP.core_wide, when set, the core rule's action for the
 %          class jamming (rule_core_policy.m wide_action); PP.core_nb, when set, its action for
-%          the class noise_burst (burst_action);
+%          the class noise_burst (burst_action); PP.core_blind, when set, blind_esc's first
+%          response on the core set: its answer to a degraded link without a known cause
+%          (unknown_action) and the head of its ladder, C.ladder_core's others following in order;
 %          core3 (rule and rule_esc with core only): the class comes from the three-state CNN's
 %          window (obs.probs3, PP.core3_N cycles, policy_monitor.m), every other part as core;
 %          refused for any other kind, without core, without PP.core3_N, and when obs.probs3 is
@@ -138,6 +140,7 @@ if core && ~strcmp(base, 'rule')
 end
 s1g = ~core && ~blind && strcmp(base, 'rule') && isfield(PP, 's1_gate') && ~isempty(PP.s1_gate) && PP.s1_gate;   % lost-branch gate
 s1gc = core && ~blind && strcmp(base, 'rule') && isfield(PP, 's1_gate_core') && ~isempty(PP.s1_gate_core) && PP.s1_gate_core;   % the same gate, rule_core (D121 item 2, P-A)
+cb = ''; if blind && core && isfield(PP, 'core_blind') && ~isempty(PP.core_blind), cb = PP.core_blind; end
 s1w = false(1, NE); s1b = false(1, NE);                  % the gate's withheld class answers and blocked escalations
 fx = ''; if isfield(PP, 'rule_fix'), fx = rule_fix('parse', PP.rule_fix); if ~fx.on, fx = ''; end, end   % layered answers
 cwv = ''; if isfield(PP, 'core_wide_valid') && isequal(PP.core_wide_valid, true) && isfield(PP, 'core_wide'), cwv = PP.core_wide; end
@@ -170,7 +173,7 @@ switch base
         for i = 1:NE
             if core
                 bud.drop_db = M.drop(i); bud.current = A{cfg(i)}; bud.current_db = gk(cfg(i));
-                p = find(strcmp(A, rule_core_policy(M.cls{i}, M.degraded(i), qi(i), qt, M.drop_alarm(i), bud, so, cw, cn)), 1);
+                p = find(strcmp(A, rule_core_policy(M.cls{i}, M.degraded(i), qi(i), qt, M.drop_alarm(i), bud, so, cw, cn, cb)), 1);
                 if ~isempty(fx), p = find(strcmp(A, rule_fix('core', A{p}, M.cls{i}, fx, qi(i), qt, M.degraded(i), so, A{cfg(i)}, cwv)), 1); end
                 if s1gc && ismember(M.cls{i}, {'antenna_fault', 'airframe_shadowing'}) && ~M.harm(i)
                     p = na; s1w(i) = true;   % lost branch, no harm evidence: the gate withholds the class answer (rule_core_policy.m untouched)
@@ -232,11 +235,15 @@ if lay, lbc(kp | dhc | dpc) = false; end         % a completion's action replace
 
 escalated = false(1, NE);
 if endsWith(kind, '_esc')
-    ladder = cellfun(@(x) find(strcmp(A, x)), C.ladder);
     ed = isfield(PP, 'esc_drop') && ~isempty(PP.esc_drop) && PP.esc_drop;
     gk = config_gain_db(PP);
-    lb = find(ismember(A, {'power_control', 'rate_reduce', 'rate_reduce+power_control'}));
-    if core, ladder = cellfun(@(x) find(strcmp(A, x)), C.ladder_core); lb = find(strcmp(A, 'rate_reduce')); end
+    if core                                          % the core set alone: pools may hold only C.core_actions
+        lc = C.ladder_core; if ~isempty(cb), lc = [{cb}, setdiff(lc, {cb}, 'stable')]; end
+        ladder = cellfun(@(x) find(strcmp(A, x)), lc); lb = find(strcmp(A, 'rate_reduce'));
+    else
+        ladder = cellfun(@(x) find(strcmp(A, x)), C.ladder);
+        lb = find(ismember(A, {'power_control', 'rate_reduce', 'rate_reduce+power_control'}));
+    end
     for i = 1:NE
         mem.tried(i, cfg(i)) = true;
         if cfg(i) == na, stuck = mem.conf_n(i) >= C.esc; else, stuck = mem.deg_n(i) >= C.esc; end
