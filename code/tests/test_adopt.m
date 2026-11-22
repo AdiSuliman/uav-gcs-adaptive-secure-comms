@@ -119,7 +119,7 @@ for f = {'evaluation/measure_all_kpis.m', 'evaluation/build_kpi_dashboard.m', 'e
         'evaluation/lect_kpi_table.m', 'gui/export_gui_bundle.m', 'evaluation/result_status.m', 'evaluation/lect_kpis.m'}
     verifyTrue(tc, same_as_rev(tc, tc.TestData.tree_rev, ['code/' f{1}]), f{1});
 end
-if moved, assumeFail(tc, 'as-run pin of the adopt-p3 reading (tag in B5); on the merged line the off-path equality of these files is carried by test_rule_fix, test_weak19, test_w19_rulerows and the dqn_fix/lb tests') end
+if moved, assumeFail(tc, 'as-run pin of the adopt-p3 reading (tag in B5); on the merged line the off-path equality of these files is carried by test_rule_fix, test_weak19, test_w19_rulerows and the dqn_fix/lb tests'); end
 end
 
 %% ---------- overlay ----------
