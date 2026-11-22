@@ -8,19 +8,28 @@ function b = clean_ber_ref(ebno, kind)
 %                    compares like with like, so the estimator's bias cancels
 %         'plr_fec'  CRC packet loss of the clean link with fec_interleave
 %   The table is cached; the pools file is checked for a newer version at most
-%   every 30 s, so a decision cycle does not wait on the file system.
+%   every 30 s, so a decision cycle does not wait on the file system. The file is
+%   the working folder's: another folder reads its own. clean_ber_ref('reset') drops
+%   the cache (a file written in the folder just read, within the 30 s).
 %   old = clean_ber_ref('interpolant', on)  a griddedInterpolant in place of interp1 (off by
 %   default; on only where kpi7_guard.m reads it bit-identical); old: the previous setting.
-persistent R stamp checked T gi
+persistent R stamp checked T gi where
 if isempty(gi), gi = false; end
 if ischar(ebno)
-    if ~strcmp(ebno, 'interpolant'), error('clean_ber_ref: unknown command %s', ebno); end
-    b = gi; if nargin > 1, gi = logical(kind); end
+    switch ebno
+        case 'reset'
+            R = []; stamp = []; checked = []; where = ''; T = struct(); b = [];
+        case 'interpolant'
+            b = gi; if nargin > 1, gi = logical(kind); end
+        otherwise
+            error('clean_ber_ref: unknown command %s', ebno);
+    end
     return
 end
 if nargin < 2, kind = 'ber'; end
 f = 'data/policy_pools.mat';
-if isempty(checked) || toc(checked) > 30
+if isempty(checked) || toc(checked) > 30 || ~strcmp(where, pwd)
+    if ~strcmp(where, pwd), stamp = []; where = pwd; end
     if isfile(f), d = dir(f); now_stamp = d.datenum; else, now_stamp = NaN; end
     if isempty(stamp) || ~isequaln(stamp, now_stamp)
         R = []; T = struct();

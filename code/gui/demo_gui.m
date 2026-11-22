@@ -13,14 +13,17 @@ function demo_gui(profile)
 %                      monitor, alarm confirmation, shield), exactly as in the
 %                      evaluation; the configuration at the end of the run is applied.
 %                      Shows detection (with UNKNOWN-threat handling), the DQN
-%                      decision side by side with the rule-based policy, the BER /
-%                      RSSI timeline before and after the countermeasure, the
-%                      outcome vs the clean channel (survivability regime) and the
-%                      goodput trade-off.
+%                      decision side by side with the rule-based policy and the core
+%                      rule (channel switching and rate reduction), the link state
+%                      read by the three-state CNN (clean / narrowband / wideband
+%                      jamming), the BER / RSSI timeline before and after the
+%                      countermeasure, the outcome vs the clean channel
+%                      (survivability regime) and the goodput trade-off.
 %   KPI & RESULTS    - the proposal KPIs, confusion matrix, accuracy vs SNR,
 %                      restoration vs SNR, latency, configuration per threat and
 %                      robustness vs UAV speed, read from the saved result files
-%                      (evaluate_policies, measure_latency, measure_all_kpis).
+%                      (evaluate_policies, measure_latency, measure_all_kpis), and the
+%                      lecturer's KPI lines as the pipeline wrote them (read only).
 %   SURVIVABILITY MAP- proposal deliverable #7 (Map A / Map B, per threat) with the
 %                      last live run marked on the grid.
 %   CONTINUOUS EPISODE - one link streamed cycle by cycle: clean cycles, threat
@@ -45,7 +48,9 @@ function demo_gui(profile)
 % last run) lives in appdata so a callback can never overwrite it with a stale
 % copy of UserData.
 %
-% Usage: run demo_gui from the project root (same folder as main.m).
+% Usage: start from an exported bundle: export_gui_bundle after the pipeline, then demo_gui('rx<n>')
+% from the project root (same folder as main.m). The console runs the policy that training
+% deployed (console_policy.m): the DQN with or without escalation, or the rule fallback.
 
 close all; clc;
 if nargin >= 1 && ~isempty(profile)
@@ -55,21 +60,35 @@ if nargin >= 1 && ~isempty(profile)
 else
     profile = '';
 end
+clean_ber_ref('reset');                         % no table of another folder
+if ~isfinite(clean_ber_ref(9, 'ber_est')) || ~cleanTableFinite()
+    error('demo_gui:clean_ref', ['no finite clean-link reference in %s (data/policy_pools.mat with clean_ref): the link monitor ' ...
+        'would raise degraded alarms on a clean link. Re-export the bundle with export_gui_bundle.'], pwd);
+end
+refRange = console_ref_range(); ref9 = clean_ber_ref(9, 'ber');     % the mean clean BER, as pre-registered
+if ~(ref9 >= refRange(1) && ref9 <= refRange(2))
+    error('demo_gui:clean_ref', ['the clean-link reference in %s has a mean BER of %.2e at 9 dB, outside %.0e to %.0e ' ...
+        '(docs/clean_ref_protocol.md): the link monitor would misjudge the link. Re-export the bundle with export_gui_bundle.'], ...
+        pwd, ref9, refRange(1), refRange(2));
+end
 
 %% ---------- Load trained models and simulation parameters once ----------
 tBoot = tic;
 fprintf('Loading trained models and parameters...\n');
 D = load('data/trained_detector.mat', 'net', 'classes', 'ood');
 Q = load('data/trained_dqn.mat', 'agent', 'confirm', 'alarm_mode', 'drop_db', 'maha_thr', 'dec');
+dep = console_policy('load', 'data/trained_dqn.mat');   % the policy train_dqn.m deployed: what the console runs
 [featMean, featStd] = loadNormStats();
 p0 = loadInitialParams();
 fprintf('  models + parameters loaded (%.1f s)\n', toc(tBoot));
+fprintf('  deployed policy: %s\n', deployedText(dep));
 
 env = struct();
 env.cnn_net    = D.net;
 env.class_list = cellstr(D.classes(:));
 env.classes    = D.classes;
 env.dqn_agent  = Q.agent;
+env.dep        = dep;
 env.feat_mean  = featMean;
 env.feat_std   = featStd;
 env.p0         = p0;
@@ -91,6 +110,7 @@ end
 env.action_names = env.dqn_agent.action_names;
 env.na = find(strcmp(env.action_names, 'no_action'), 1);
 env.ood = D.ood;
+env.core = console_core('load');               % the three-state CNN; [] when the folder holds none
 if strcmp(D.ood.score, 'last_or_if') && ~isfield(D.ood, 'forest_pack')   % a bundle without the packed trees
     env.ood.forest_pack = iforest_pack(D.ood.forest);
 end
@@ -102,11 +122,12 @@ env.PP = struct('actions', {env.action_names}, 'classes', {env.class_list(:)'}, 
     'bps', p0.bits_per_symbol, 'maha_thr', Tood.maha, 'fuse', FZ.FM, 'fuse_N', FZ.N, 'q_thr', FZ.q_thr, ...
     'unk_win', UW, 'cfg_gain_db', config_gain_db(env.action_names, p0));
 env.PP = decision_settings(env.PP, Q);         % the agent's monitor and decision-time settings (train_dqn.m)
-env.unk_retain = 95;                           % the agent's retention of the unknown-threat threshold [%], the slider's default
-if isfield(env.PP, 'unk_retain') && ~isempty(env.PP.unk_retain)
-    env.unk_retain = 100 * env.PP.unk_retain;
-elseif isfield(Q, 'maha_thr')
-    env.unk_retain = 100 * mean(env.maha_val >= Q.maha_thr);
+env.PPdep = console_policy('settings', dep, env.PP, false);   % the deployed policy's own (a rule fallback: its monitor)
+env.unk_retain = 95;                           % the deployed policy's retention of the unknown-threat threshold [%], the slider's default
+if isfield(env.PPdep, 'unk_retain') && ~isempty(env.PPdep.unk_retain)
+    env.unk_retain = 100 * env.PPdep.unk_retain;
+elseif isfield(env.PPdep, 'maha_thr') && ~isempty(env.PPdep.maha_thr)
+    env.unk_retain = 100 * mean(env.maha_val >= env.PPdep.maha_thr);
 end
 env.unk_retain = min(99, max(80, round(env.unk_retain)));
 env.sev = buildSeverityTable();
@@ -130,13 +151,14 @@ c.green   = [0.22 0.80 0.48];
 c.amber   = [0.97 0.72 0.22];
 c.red     = [0.93 0.32 0.32];
 c.purp    = [0.68 0.44 0.95];
+c.pink    = [0.96 0.52 0.74];
 c.cyan    = [0.30 0.80 0.85];
 c.term    = [0.45 0.95 0.55];
 c.font    = 'Segoe UI';
 c.mono    = 'Consolas';
 
 fig = uifigure('Name', 'UAV-GCS Adaptive Secure Communications - Operator Console', ...
-    'Position', [20 20 1680 940], 'Color', c.bg);
+    'Visible', get(groot, 'DefaultFigureVisible'), 'Position', [20 20 1680 940], 'Color', c.bg);
 
 root = uigridlayout(fig, [2 1]);
 root.RowHeight = {54, '1x'}; root.Padding = [8 8 8 8]; root.RowSpacing = 6;
@@ -148,8 +170,8 @@ hdr.Layout.Row = 1;
 hg = uigridlayout(hdr, [1 5]);
 hg.ColumnWidth = {'1x', 530, 200, 30, 270}; hg.Padding = [14 4 14 4]; hg.BackgroundColor = c.panelBg;
 place(mkLabel(hg, 'UAV-GCS ADAPTIVE SECURE COMMUNICATIONS', c, 'FontSize', 17, 'FontWeight', 'bold'), 1, 1);
-place(mkLabel(hg, sprintf('CNN %d-class detector | DQN %d configurations | %d UAV antennas | %s | %.1f GHz', ...
-    numel(env.class_list), numel(env.action_names), p0.n_rx, kText(p0), p0.carrier_freq / 1e9), c, ...
+place(mkLabel(hg, sprintf('CNN %d-class detector | %d configurations | deployed: %s | %d UAV antennas | %s | %.1f GHz', ...
+    numel(env.class_list), numel(env.action_names), env.dep.short, p0.n_rx, kText(p0), p0.carrier_freq / 1e9), c, ...
     'FontColor', c.mut, 'FontSize', 11, 'HorizontalAlignment', 'right'), 1, 2);
 [pItems, pData] = profileMenu(p0.n_rx, profile);
 pMenu = uidropdown(hg, 'Items', pItems, 'ItemsData', pData, 'Value', profile, 'FontName', c.font, ...
@@ -171,7 +193,7 @@ ui = buildLiveTab(tabLive, env, c);
 ui = mergeStructs(ui, buildEpisodeTab(tabEp, env, c));
 ui = mergeStructs(ui, buildKpiTab(tabKpi, env, c));
 ui = mergeStructs(ui, buildSurvTab(tabSurv, env, c));
-ui = mergeStructs(ui, buildLogTab(tabLog, c));
+ui = mergeStructs(ui, buildLogTab(tabLog, env, c));
 ui.linkLamp = lamp; ui.linkTxt = lampTxt; ui.tabGroup = tg;
 
 fprintf('  UI built (%.1f s total)\n', toc(tBoot));
@@ -213,6 +235,9 @@ updateSurvMap(fig);
 updateSessionSummary(fig);
 fprintf('System ready (%.1f s total).\n\n', toc(tBoot));
 appLog(fig, 'SYSTEM INITIALIZED AND STANDBY.');
+if isempty(env.core)
+    appLog(fig, 'NOTE: data/core_cnn_model.mat not found - the three-state view is off.');
+end
 if isempty(env.surv)
     appLog(fig, 'NOTE: data/survivability_boundary.mat not found - survivability verdicts disabled.');
 end
@@ -359,8 +384,8 @@ function ui = buildLiveTab(tab, env, c)
         'is saved in time order to a log file per sequence.'});
 
     %% ---------------- CENTER COLUMN ----------------
-    gc = uigridlayout(g, [4 1]); gc.Layout.Column = 2;
-    gc.RowHeight = {168, 58, 252, '1x'}; gc.Padding = [0 0 0 0]; gc.RowSpacing = 6;
+    gc = uigridlayout(g, [5 1]); gc.Layout.Column = 2;
+    gc.RowHeight = {168, 58, 92, 252, '1x'}; gc.Padding = [0 0 0 0]; gc.RowSpacing = 6;
     gc.BackgroundColor = c.bg;
 
     pLink = mkPanel(gc, 'UAV <-> GCS LINK', c); pLink.Layout.Row = 1;
@@ -376,13 +401,23 @@ function ui = buildLiveTab(tab, env, c)
     verdictLbl.Tooltip = {'The referee''s call for the run, judged exactly like the survivability', ...
         'map (final errors vs a clean link), plus the bottom line for the flight.'};
 
-    pSig = mkPanel(gc, 'RECEIVED SIGNAL', c); pSig.Layout.Row = 3;
+    pState = mkPanel(gc, 'LINK STATE  (three-state CNN on the spectrogram, windowed over the last N frames)', c); pState.Layout.Row = 3;
+    gState = uigridlayout(pState, [1 2]); gState.ColumnWidth = {'1x', 330}; gState.Padding = [6 2 6 4];
+    gState.ColumnSpacing = 8; gState.BackgroundColor = c.panelBg;
+    stateAx = place(uiaxes(gState), 1, 1); styleAx(stateAx, c);
+    stateLbl = place(mkLabel(gState, 'three-state CNN: awaiting a run', c, 'FontSize', 12, 'FontWeight', 'bold', ...
+        'FontColor', c.mut, 'WordWrap', 'on', 'VerticalAlignment', 'center', ...
+        'Tooltip', {'The proposal''s three link states read from the received spectrogram: clean,', ...
+        'narrowband jamming, wideband jamming (the B3c CNN, mean log-probability of its window, N = 3 frames).', ...
+        'It reads the spectrogram alone; the decision below uses the 11-class detector.'}), 1, 2);
+
+    pSig = mkPanel(gc, 'RECEIVED SIGNAL', c); pSig.Layout.Row = 4;
     gSig = uigridlayout(pSig, [1 2]); gSig.Padding = [6 2 6 6]; gSig.ColumnSpacing = 8;
     gSig.BackgroundColor = c.panelBg;
     specAx = place(uiaxes(gSig), 1, 1); styleAx(specAx, c);
     iqAx   = place(uiaxes(gSig), 1, 2); styleAx(iqAx, c);
 
-    pTl = mkPanel(gc, 'LINK METRICS TIMELINE  (before / after countermeasure)', c); pTl.Layout.Row = 4;
+    pTl = mkPanel(gc, 'LINK METRICS TIMELINE  (before / after countermeasure)', c); pTl.Layout.Row = 5;
     gTl = uigridlayout(pTl, [2 1]); gTl.Padding = [6 2 6 6]; gTl.RowSpacing = 6;
     gTl.BackgroundColor = c.panelBg;
     berAx  = place(uiaxes(gTl), 1, 1); styleAx(berAx, c);
@@ -416,8 +451,8 @@ function ui = buildLiveTab(tab, env, c)
     probAx = place(uiaxes(gDet), 4, [1 2]); styleAx(probAx, c);
 
     % ---- Decision ----
-    pDec = mkPanel(gr, '4 - DECISION  (DQN vs rule-based)', c); pDec.Layout.Row = 2;
-    gDec = uigridlayout(pDec, [2 1]); gDec.RowHeight = {'1x', 50};
+    pDec = mkPanel(gr, sprintf('4 - DECISION  (%s, rule-based, core rule)', env.dep.name), c); pDec.Layout.Row = 2;
+    gDec = uigridlayout(pDec, [2 1]); gDec.RowHeight = {'1x', 68};
     gDec.Padding = [8 4 8 6]; gDec.RowSpacing = 3; gDec.BackgroundColor = c.panelBg;
     qAx = place(uiaxes(gDec), 1, 1); styleAx(qAx, c);
     decLbl = place(mkLabel(gDec, {'-'}, c, 'FontSize', 12, 'FontName', c.mono, 'VerticalAlignment', 'top'), 2, 1);
@@ -437,6 +472,7 @@ function ui = buildLiveTab(tab, env, c)
         'queueList',queueList,'termArea',termArea,'linkAx',linkAx,'verdictLbl',verdictLbl, ...
         'specAx',specAx,'iqAx',iqAx,'berAx',berAx,'rssiAx',rssiAx,'confGauge',confGauge, ...
         'latGauge',latGauge,'detLbl',detLbl,'probAx',probAx,'qAx',qAx,'decLbl',decLbl, ...
+        'stateAx',stateAx,'stateLbl',stateLbl, ...
         'outAx',outAx,'outLbl',outLbl);
 end
 
@@ -471,7 +507,8 @@ function ui = buildEpisodeTab(tab, env, c)
         'that average out. Attack power and link budget are unchanged.'};
     tipPolicy = {'Who flies the response. BOTH = the AI and the fixed rules face the', ...
         'exact same signal, frame by frame - a fair head-to-head. A single', ...
-        'policy is cleaner for a focused demonstration.'};
+        'policy is cleaner for a focused demonstration. The core rule is the', ...
+        'proposal''s action set: channel switching and rate reduction only.'};
     tipPre = {'How long the link flies healthy before the attack. This is what the', ...
         'system learns as "normal" - including the signal level it later uses', ...
         'to tell a real range loss from a natural dip. Fewer cycles = weaker', ...
@@ -480,10 +517,12 @@ function ui = buildEpisodeTab(tab, env, c)
         'detection, the switch, recovery, and whether it stays stable.', ...
         'T_detect / T_act / T_recover are measured over these cycles.'};
     DC = env.DC; cf = confirmOf(env);
-    tipHyst = {'Plan B, part of the deployed system: if the chosen response has not', ...
+    tipHyst = {'Plan B: if the chosen response has not', ...
         sprintf('healed the link within %d cycles, or the policy keeps no response while', DC.esc), ...
         sprintf('the alarm stays confirmed for %d cycles, try the next-best response not', DC.esc), ...
-        'used yet in this incident. Rescues wrong first picks, at the price of extra switching.'};
+        'used yet in this incident. Rescues wrong first picks, at the price of extra switching.', ...
+        ternaryStr(env.dep.esc, 'The deployed policy runs with it (default on).', ...
+            'The deployed policy runs WITHOUT it (default off); switching it on shows a variant that is not deployed.')};
     tipConf = {sprintf('Trigger discipline: the attack must be seen on %d of the last %d cycles', cf(1), cf(2)), ...
         'before ANY response may fire. One noisy frame never causes a switch -', ...
         sprintf('this is why reactions take at least %d cycles and false alarms are rare.', cf(1))};
@@ -519,8 +558,9 @@ function ui = buildEpisodeTab(tab, env, c)
     helpMark(gl, 4, 4, tipSpeedE, c);
 
     place(mkLabel(gl, 'Policy', c, 'FontColor', c.mut), 5, [1 4]);
-    epPolicyDD = place(uidropdown(gl, 'Items', {'DQN and rule-based (same frames)', 'DQN only', 'Rule-based only'}, ...
-        'ItemsData', {'both', 'dqn', 'rule'}, 'Value', 'both', 'Tooltip', tipPolicy, ddArgs{:}), 6, [1 3]);
+    epPolicyDD = place(uidropdown(gl, 'Items', {[env.dep.name ' and rule-based (same frames)'], ...
+        [env.dep.name ', rule-based and core rule (same frames)'], [env.dep.name ' only'], 'Rule-based only', 'Core rule only'}, ...
+        'ItemsData', {'both', 'all', 'dqn', 'rule', 'core'}, 'Value', 'both', 'Tooltip', tipPolicy, ddArgs{:}), 6, [1 3]);
     helpMark(gl, 6, 4, tipPolicy, c);
 
     place(mkLabel(gl, 'Clean cycles', c, 'FontColor', c.mut), 7, 1);
@@ -532,7 +572,7 @@ function ui = buildEpisodeTab(tab, env, c)
         'BackgroundColor', c.termBg, 'FontColor', c.txt, 'FontName', c.font), 8, 3);
     helpMark(gl, 8, 4, tipPost, c);
 
-    epHystChk = place(uicheckbox(gl, 'Text', 'Escalation (deployed)', 'Value', true, ...
+    epHystChk = place(uicheckbox(gl, 'Text', ['Escalation (deployed: ' ternaryStr(env.dep.esc, 'on', 'off') ')'], 'Value', env.dep.esc, ...
         'Tooltip', tipHyst, 'FontColor', c.txt, 'FontName', c.font), 9, [1 3]);
     helpMark(gl, 9, 4, tipHyst, c);
     epDwellSpin = place(mkLabel(gl, sprintf('alarm confirmation %d-of-%d', confirmOf(env)), c, 'FontColor', c.mut, ...
@@ -562,7 +602,7 @@ function ui = buildEpisodeTab(tab, env, c)
         'BackgroundColor', c.cyan, 'FontColor', [0.03 0.06 0.12], 'Enable', 'off', ...
         'Tooltip', {'Replays the last episode in the Unreal 3D view (viz3d/v3d_live.m): the UAV,', ...
         'the GCS, the interferer in its real direction, the link and the receive pattern', ...
-        sprintf('of the %d UAV antennas, DQN and rules side by side, cycle by cycle.', env.p0.n_rx)}), 14, [3 4]);
+        sprintf('of the %d UAV antennas, the deployed policy (%s) and the rules side by side, cycle by cycle.', env.p0.n_rx, env.dep.text)}), 14, [3 4]);
     epStatus = place(uitextarea(gl, 'Value', {'Frame pools are built per scenario on the first run', ...
         sprintf('(%d Simulink runs: every configuration on two flights) and reused afterwards.', ...
         2 * numel(env.action_names))}, 'Editable', 'off', ...
@@ -572,29 +612,30 @@ function ui = buildEpisodeTab(tab, env, c)
 
     pr = mkPanel(g, 'CONTINUOUS EPISODE  (one cycle = one received frame; decision every cycle)', c);
     pr.Layout.Column = 2;
-    gr = uigridlayout(pr, [2 1]); gr.RowHeight = {'1x', 24};
+    gr = uigridlayout(pr, [2 1]); gr.RowHeight = {'1x', 72};
     gr.Padding = [8 4 8 6]; gr.RowSpacing = 6; gr.BackgroundColor = c.panelBg;
     % one tiled layout, so the three time axes share their plot-box edges
     pa = uipanel(gr, 'BackgroundColor', c.panelBg, 'BorderType', 'none'); pa.Layout.Row = 1;
-    tl = tiledlayout(pa, 10, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+    tl = tiledlayout(pa, 12, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
     epBerAx = nexttile(tl, 1, [4 1]); styleAx(epBerAx, c);
     epDetAx = nexttile(tl, 5, [3 1]); styleAx(epDetAx, c);
-    epActAx = nexttile(tl, 8, [3 1]); styleAx(epActAx, c);
-    linkaxes([epBerAx epDetAx epActAx], 'x');
-    epCycleLbl = place(mkLabel(gr, 'Idle.', c, 'FontName', c.mono, 'FontSize', 11), 2, 1);
+    epStateAx = nexttile(tl, 8, [2 1]); styleAx(epStateAx, c);
+    epActAx = nexttile(tl, 10, [3 1]); styleAx(epActAx, c);
+    linkaxes([epBerAx epDetAx epStateAx epActAx], 'x');
+    epCycleLbl = place(mkLabel(gr, 'Idle.', c, 'FontName', c.mono, 'FontSize', 11, 'VerticalAlignment', 'top'), 2, 1);   % one line per policy
 
     ui = struct('epThreatDD',epThreatDD,'epSnrDD',epSnrDD,'epSevDD',epSevDD,'epSpeedSpin',epSpeedSpin, ...
         'epPolicyDD',epPolicyDD,'epPreSpin',epPreSpin,'epPostSpin',epPostSpin,'epHystChk',epHystChk, ...
         'epDwellSpin',epDwellSpin,'epHoldSpin',epHoldSpin,'epPaceDD',epPaceDD,'epSeedFld',epSeedFld, ...
         'epRunBtn',epRunBtn,'epStopBtn',epStopBtn,'epExportBtn',epExportBtn,'ep3dBtn',ep3dBtn,'epStatus',epStatus, ...
-        'epBerAx',epBerAx,'epDetAx',epDetAx,'epActAx',epActAx,'epCycleLbl',epCycleLbl);
+        'epBerAx',epBerAx,'epDetAx',epDetAx,'epStateAx',epStateAx,'epActAx',epActAx,'epCycleLbl',epCycleLbl);
 end
 
 %% =====================================================================
 %% =========================  BUILD: KPI TAB  ===========================
 %% =====================================================================
 function ui = buildKpiTab(tab, env, c)
-    g = uigridlayout(tab, [3 1]); g.RowHeight = {112, '1x', '1x'}; g.Padding = [4 4 4 4];
+    g = uigridlayout(tab, [4 1]); g.RowHeight = {112, '1x', '1x', 128}; g.Padding = [4 4 4 4];
     g.RowSpacing = 8; g.BackgroundColor = c.bg;
 
     top = uigridlayout(g, [1 7]); top.Layout.Row = 1; top.ColumnWidth = {'1x','1x','1x','1x','1x','1x',110};
@@ -640,8 +681,14 @@ function ui = buildKpiTab(tab, env, c)
     kAct = place(uiaxes(bot), 1, 2); styleAx(kAct, c);
     kSpd = place(uiaxes(bot), 1, 3); styleAx(kSpd, c);
 
+    pL = mkPanel(g, 'LECTURER''S KPIs  (read only: results/core_cnn.txt and results/kpi_summary.txt as the pipeline wrote them)', c);
+    pL.Layout.Row = 4;
+    gL = uigridlayout(pL, [1 1]); gL.Padding = [6 2 6 6]; gL.BackgroundColor = c.panelBg;
+    kLect = uitextarea(gL, 'Value', {'-'}, 'Editable', 'off', 'FontName', c.mono, 'FontSize', 10, ...
+        'BackgroundColor', c.termBg, 'FontColor', c.txt);
+
     ui = struct('kpiVal',kpiVal,'kpiSub',kpiSub,'kpiRefreshBtn',kpiRefreshBtn, ...
-        'kCm',kCm,'kAcc',kAcc,'kRec',kRec,'kLat',kLat,'kAct',kAct,'kSpd',kSpd);
+        'kCm',kCm,'kAcc',kAcc,'kRec',kRec,'kLat',kLat,'kAct',kAct,'kSpd',kSpd,'kLect',kLect);
 end
 
 %% =====================================================================
@@ -691,17 +738,22 @@ end
 %% =====================================================================
 %% =======================  BUILD: LOG TAB  =============================
 %% =====================================================================
-function ui = buildLogTab(tab, c)
+function ui = buildLogTab(tab, env, c)
+    tab.AutoResizeChildren = 'off';     % needed for the tab's SizeChangedFcn below
     g = uigridlayout(tab, [2 1]); g.RowHeight = {'1x', 64}; g.Padding = [4 4 4 4]; g.RowSpacing = 8;
-    g.BackgroundColor = c.bg;
-    hdrNames = {'#','Threat','Eb/N0','Speed','Severity','Detected','Conf','DQN action','Rule action', ...
-                'Rec DQN','Rec Rule','Verdict','Lat (ms)'};
+    g.BackgroundColor = c.termBg;       % no white strip below the last row
+    dn = env.dep.name;
+    hdrNames = {'#','Threat','Eb/N0','Speed','Severity','Detected','Conf',[dn ' action'],'Rule action', ...
+                ['Rec ' dn],'Rec Rule','Verdict','Lat (ms)'};
     histTbl = uitable(g, 'Data', cell(0, numel(hdrNames)), 'ColumnName', hdrNames, ...
-        'ColumnWidth', {40, 150, 60, 80, 130, 150, 60, 130, 130, 70, 70, 210, 70}, 'RowName', [], ...
-        'FontSize', 11, 'FontName', c.font, 'BackgroundColor', [c.termBg; c.axBg], 'ForegroundColor', c.txt);
+        'ColumnWidth', {40, 150, 60, 80, 130, 190, 60, 340, 340, 70, 70, 440, 70}, 'RowName', [], ...
+        'FontSize', 11, 'FontName', c.font, 'RowStriping', 'off', 'BackgroundColor', c.termBg, 'ForegroundColor', c.txt);
     histTbl.Layout.Row = 1;
+    histTbl.UserData = struct('rows', {cell(0, numel(hdrNames))}, 'h', 0);
     histTbl.Tooltip = {'One row per finished run: what attacked, what was detected, what each', ...
         'policy did and how much of the damage it undid. EXPORT saves CSV + MAT.'};
+    tab.SizeChangedFcn = @(src, ~) histResize(histTbl, src.Position(3) - g.Padding(1) - g.Padding(3), ...
+        src.Position(4) - g.Padding(2) - g.Padding(4) - g.RowSpacing - 64);
 
     bg = uigridlayout(g, [1 3]); bg.Layout.Row = 2; bg.ColumnWidth = {'1x', 230, 150};
     bg.Padding = [0 0 0 0]; bg.ColumnSpacing = 8; bg.BackgroundColor = c.panelBg;
@@ -714,6 +766,32 @@ function ui = buildLogTab(tab, c)
     place(clearBtn, 1, 3);
 
     ui = struct('histTbl',histTbl,'sessionLbl',sessionLbl,'exportBtn',exportBtn,'clearBtn',clearBtn);
+end
+
+function histResize(tbl, availW, availH)
+    % Refit the verdict column and the blank padding rows to the table's size.
+    fitHistCols(tbl, availW);
+    ud = tbl.UserData; ud.h = availH; tbl.UserData = ud;
+    histShow(tbl);
+end
+
+function histShow(tbl)
+    % Real rows (kept in UserData) followed by blank rows that fill the table's height.
+    ud = tbl.UserData; rows = ud.rows;
+    rowH = 2 * tbl.FontSize; hdrH = rowH + 2;
+    nPad = max(0, ceil((ud.h - hdrH) / rowH) - size(rows, 1));
+    tbl.Data = [rows; repmat({''}, nPad, size(rows, 2))];
+end
+
+function fitHistCols(tbl, avail)
+    % The verdict column takes the width the other columns leave of avail (the table's width), so no empty strip is left at the right.
+    try
+        w = tbl.ColumnWidth; k = numel(w) - 1;
+        rest = sum(cell2mat(w([1:k-1, k+1:end])));
+        w{k} = max(440, floor(avail) - rest - 24);
+        tbl.ColumnWidth = w;
+    catch
+    end
 end
 
 %% =====================================================================
@@ -785,17 +863,29 @@ function switchProfile(src, current)
     if isempty(v), cd(project_root()); demo_gui(); else, demo_gui(v); end
 end
 
+function ok = cleanTableFinite()
+    % Every Eb/N0 of the clean reference is finite: clean_ber_ref.m floors a NaN in the table,
+    % so the 9 dB value alone does not show it.
+    f = 'data/policy_pools.mat'; ok = false;
+    if ~isfile(f) || ~ismember('clean_ref', who('-file', f)), return; end
+    L = load(f, 'clean_ref'); R = L.clean_ref;
+    if ~isstruct(R) || ~all(isfield(R, {'ebno', 'ber_est'})), return; end
+    ok = true;
+    for k = {'ebno', 'ber', 'ber_est', 'plr_fec'}         % the exporter's list
+        if isfield(R, k{1}), ok = ok && all(isfinite(R.(k{1})(:))); end
+    end
+end
+
 function [mu, sd] = loadNormStats()
-    % splits.mat is >1 GB; only two small vectors are needed. They are cached
-    % in a tiny file and re-extracted only when splits.mat is newer.
+    % splits.mat is several GB; only two small vectors are needed (split_norm.m reads them alone).
+    % They are cached in a tiny file and re-extracted only when splits.mat is newer.
     src = 'data/splits.mat'; cache = 'data/gui_norm_stats.mat';
     fresh = isfile(cache) && (~isfile(src) || dir(cache).datenum >= dir(src).datenum);   % a profile bundle has no splits.mat
     if ~fresh
         fprintf('  one-time extraction of normalisation stats from splits.mat (slow, next launches skip this)...\n');
-        S = load(src, 'splits');
-        feat_mean = S.splits.norm.feat_mean; feat_std = S.splits.norm.feat_std; %#ok<NASGU>
+        nm = split_norm(src);
+        feat_mean = nm.feat_mean; feat_std = nm.feat_std; %#ok<NASGU>
         save(cache, 'feat_mean', 'feat_std');
-        clear S;
     end
     N = load(cache, 'feat_mean', 'feat_std');
     mu = N.feat_mean; sd = N.feat_std;
@@ -851,6 +941,7 @@ function warmUp(env)
     % first timed cycle of a session is not a first call
     Xw = single(rand(env.img_size, env.img_size, 1, 1)); Fw = single(rand(numel(env.feat_mean), 1));
     for w = 1:5, detect_scores(env.cnn_net, env.ood, Xw, Fw); end
+    if ~isempty(env.core), for w = 1:3, spec_scores(env.core.net, Xw); end, end
     if canUseGPU, wait(gpuDevice); end
 end
 
@@ -973,7 +1064,8 @@ end
 function clearHistory(btn, ~)
     fig = ancestor(btn, 'figure'); ui = fig.UserData.ui;
     setappdata(fig, 'history', {});
-    ui.histTbl.Data = cell(0, size(ui.histTbl.Data, 2));
+    ud = ui.histTbl.UserData; ud.rows = cell(0, size(ud.rows, 2)); ui.histTbl.UserData = ud;
+    histShow(ui.histTbl);
     updateSessionSummary(fig);
     appLog(fig, 'Session history cleared.');
 end
@@ -1163,8 +1255,8 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     iq_before = iq_frames{i_last};
     z_before = combinerSymbols(out, i_last, p);
     ber_before_mean = mean(ber_f(f0:end), 'omitnan');
-    appLog(fig, sprintf('Channel: BER %.2e (mean of %d frames) | RSSI %.2f dB | packets lost (CRC) %.0f%% | %s', ...
-        ber_before_mean, nf, rssi_f(i_last), 100 * plr_win, bitsTxt(ber_before_mean)));
+    appLog(fig, sprintf('Channel: BER %s (mean of %d frames) | RSSI %.2f dB | packets lost (CRC) %.0f%% | %s', ...
+        console_fmt(ber_before_mean, '%.2e'), nf, rssi_f(i_last), 100 * plr_win, bitsTxt(ber_before_mean)));
 
     % Pre-mitigation views (drawn BEFORE the timed decision block)
     drawIQ(fig, z_before, c.red, 'Receiver symbols - before  (4 tight clusters = clean QPSK)');
@@ -1186,26 +1278,40 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     Fn = ((Fr - env.feat_mean) ./ env.feat_std)';
     [probsAll, mahaAll] = detect_scores(env.cnn_net, env.ood, X, Fn);
     PPr = env.PP; PPr.maha_thr = mahaThreshold(env, thr_pct);
+    dep = env.dep; kindD = console_policy('kind', dep, dep.esc);     % the deployed policy, as train_dqn.m chose it
+    PPd = console_policy('settings', dep, PPr, true);                % a rule fallback: its own monitor, the slider's threshold
     cfgD = env.na; cfgR = env.na; memD = []; memR = []; dqn_ms = NaN;
+    cfgC = env.na; memC = []; coreOpt = console_core('policy_opt');
     for i = 1:size(leadF, 1)                                    % clean lead-in: reference only
         obs = struct('probs', probsL(:, i)', 'unknown', mahaL(i) < PPr.maha_thr, 'maha', mahaL(i), 'feat', leadF(i, :), ...
             'ber', leadB(i), 'gant', leadG(i, :), 'idle', leadI(i, :), 'bch', leadC(i, :), 'mmse_pred', leadM(i));
-        [cfgD, memD] = policy_decide('dqn_esc', obs, cfgD, memD, PPr, env.dqn_agent);
+        [cfgD, memD] = policy_decide(kindD, obs, cfgD, memD, PPd, env.dqn_agent);
         [cfgR, memR] = policy_decide('rule_esc', obs, cfgR, memR, PPr, []);
+        [cfgC, memC] = policy_decide('rule_esc', obs, cfgC, memC, PPr, [], coreOpt);
     end
     if cfgD ~= env.na
-        appLog(fig, 'False alarm during the clean lead-in: the DQN changed configuration before the threat.');
+        appLog(fig, sprintf('False alarm during the clean lead-in: the %s changed configuration before the threat.', dep.name));
     elseif cfgR ~= env.na
-        appLog(fig, 'Rule-policy false alarm during the clean lead-in (the DQN held no_action).');
+        appLog(fig, sprintf('Rule-policy false alarm during the clean lead-in (the %s held no_action).', dep.name));
+    end
+    if cfgC ~= env.na
+        appLog(fig, 'Core-rule false alarm during the clean lead-in.');
     end
     for i = 1:nv
         obs = struct('probs', probsAll(:, i)', 'unknown', mahaAll(i) < PPr.maha_thr, 'maha', mahaAll(i), 'feat', Fr(i, :), ...
             'ber', ber_f(vf(i)), 'gant', F.gain_ant(:, vf(i))', 'idle', F.idle(:, vf(i))', 'bch', F.bch(:, vf(i))', ...
             'mmse_pred', F.mmse_pred(vf(i)));
         t2 = tic;
-        [cfgD, memD, dD] = policy_decide('dqn_esc', obs, cfgD, memD, PPr, env.dqn_agent);
+        [cfgD, memD, dD] = policy_decide(kindD, obs, cfgD, memD, PPd, env.dqn_agent);
         dqn_ms = toc(t2) * 1000;
         [cfgR, memR] = policy_decide('rule_esc', obs, cfgR, memR, PPr, []);
+        [cfgC, memC] = policy_decide('rule_esc', obs, cfgC, memC, PPr, [], coreOpt);
+    end
+    st3 = [];                                                 % the window's frames of the three-state CNN
+    state3 = '-';
+    if ~isempty(env.core)
+        st3 = console_core('state', env.core, X(:, :, 1, max(1, nv - env.core.N + 1):nv));
+        state3 = st3.name;
     end
     % One detection cycle as deployed (one frame): a warm-up call at batch size 1,
     % then the median of 5 timed calls (the first call of a new size is not a cycle).
@@ -1227,9 +1333,10 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     sw = [mahaL(:); mahaAll(:)];                              % the monitor's statistic: the last unk_win cycles
     is_unknown = mean(sw(max(1, end - PPr.unk_win + 1):end)) < PPr.maha_thr;
     if is_unknown, cnn_class = 'unknown'; else, cnn_class = top_class; end
-    qv = dD.q(:); qv(~isfinite(qv)) = NaN;
+    qv = dD.q(:); qv(~isfinite(qv)) = NaN;                    % empty for the rule fallback: it has no Q-values
     aidx = cfgD; action_name = env.action_names{aidx};
     ridx = cfgR; rule_action = env.action_names{ridx};
+    core_action = env.action_names{cfgC};
     if isempty(leadF)
         appLog(fig, sprintf('Decision layer over the %d frames of the run (alarm confirmation %d-of-%d, shield, hysteresis)', ...
             nv, confirmOf(env)));
@@ -1242,6 +1349,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     correct = ismember(cnn_class, strsplit(threat, '+'));      % a combination: any of its components
     drawSpec(fig, Pw_db, Fq, Tq, sprintf('Spectrogram - %s @ %g dB', threatLabel(threat), ebno));
     drawProbs(fig, probs, env.class_list, idx, truth_idx, is_unknown);
+    drawState3(fig, st3, threat);
     ui.confGauge.Value = min(100, 100 * conf);
     ui.latGauge.Value = min(30, total_ms);
     if is_unknown
@@ -1254,29 +1362,33 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
         ui.detLbl.Text = sprintf('%s   (%.1f%%)  -  TRUE: %s', niceName(cnn_class), 100*conf, threatLabel(threat));
         ui.detLbl.FontColor = c.red;
     end
-    appLog(fig, sprintf('CNN: %s (%.1f%%) | decision latency %.2f ms (CNN %.2f + DQN %.2f)', ...
-        niceName(cnn_class), 100*conf, total_ms, cnn_ms, dqn_ms));
+    appLog(fig, sprintf('CNN: %s (%.1f%%) | decision latency %.2f ms (CNN %.2f + %s %.2f)', ...
+        niceName(cnn_class), 100*conf, total_ms, cnn_ms, dep.name, dqn_ms));
     drawLinkDiagram(fig, 'detected', threat, cnn_class, ...
         struct('v_kmh', v_kmh, 'fd', fd_hz, 'conf', conf, 'correct', correct, 'unknown', is_unknown));
     drawQ(fig, qv, aidx, ridx);
     agree = strcmp(action_name, rule_action);
     if agree, agTxt = 'AGREE'; else, agTxt = 'DIFFER'; end
-    ui.decLbl.Text = {sprintf('DQN  -> %s', niceName(action_name)), ...
-                      sprintf('RULE -> %s   [%s]', niceName(rule_action), agTxt)};
-    appLog(fig, sprintf('DQN: %s | RULE: %s (%s)', niceName(action_name), niceName(rule_action), agTxt));
+    agC = ternaryStr(strcmp(core_action, action_name), 'AGREES WITH', 'DIFFERS FROM');
+    dn = upper(dep.name);
+    ui.decLbl.Text = {sprintf('%s -> %s', dn, niceName(action_name)), ...
+                      sprintf('RULE -> %s   [%s]', niceName(rule_action), agTxt), ...
+                      sprintf('CORE -> %s   [%s %s]', niceName(core_action), agC, dn)};
+    appLog(fig, sprintf('%s: %s | RULE: %s (%s) | CORE RULE: %s (%s %s)', dn, niceName(action_name), niceName(rule_action), ...
+        agTxt, niceName(core_action), agC, dn));
     smartPause(fig, 0.7, tSeq); checkAbort(fig);
 
-    %% ---- 4. real mitigation simulations (DQN choice, and rule choice if different) ----
+    %% ---- 4. real mitigation simulations (deployed policy's choice, and rule choice if different) ----
     drawLinkDiagram(fig, 'mitigating', threat, action_name, struct('v_kmh', v_kmh, 'fd', fd_hz));
     Rd = []; Rr = [];
     dqnNone = strcmp(action_name, 'no_action');
     ruleNone = strcmp(rule_action, 'no_action');
     if ~dqnNone
-        appLog(fig, sprintf('Applying DQN countermeasure (%s) and re-simulating the link...', niceName(action_name)));
+        appLog(fig, sprintf('Applying %s countermeasure (%s) and re-simulating the link...', dn, niceName(action_name)));
         Rd = applyMitigation(env, p, threat, action_name, snr_dB, fl);
         updateTimer(fig, tSeq); checkAbort(fig);
     else
-        appLog(fig, 'DQN chose NO ACTION - monitoring the link.');
+        appLog(fig, sprintf('%s chose NO ACTION - monitoring the link.', dn));
     end
     if doRule && ~ruleNone
         if strcmp(rule_action, action_name)
@@ -1300,7 +1412,7 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
 
     %% ---- 5. outcome views ----
     if ~isempty(Rd)
-        drawIQ(fig, Rd.z, c.green, 'Receiver symbols - after the DQN response');
+        drawIQ(fig, Rd.z, c.green, sprintf('Receiver symbols - after the %s response', dep.name));
     else
         drawIQ(fig, z_before, c.red, 'Receiver symbols - no response applied');
     end
@@ -1309,22 +1421,22 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     drawTimeline(fig, tl);
 
     [verdict, vcol, vstat, notDeg] = verdictFor(env, c, ebno, ber_dqn, action_name, ber_before_mean);
-    names = {'NO ACTION', 'DQN'}; vals = [ber_before_mean, ber_dqn]; cols = [c.red; c.green];
+    names = {'NO ACTION', dn}; vals = [ber_before_mean, ber_dqn]; cols = [c.red; c.green];
     if doRule
         names{end+1} = 'RULE'; vals(end+1) = ber_rule; cols = [cols; c.purp]; %#ok<AGROW>
     end
     drawOutcome(fig, vals, names, cols);
 
     [~, ~, cmD] = apply_countermeasure(p, threat, action_name);
-    goodput = sprintf('DQN cost: data rate x%.2f | spectrum x%d', cmD.goodput_factor, cmD.bw_factor);
-    lines = {outLine('Errors before', ber_before_mean, NaN), outLine('After DQN    ', ber_dqn, rec_dqn)};
+    goodput = sprintf('%s cost: data rate x%.2f | spectrum x%d', dn, cmD.goodput_factor, cmD.bw_factor);
+    lines = {outLine('Errors before', ber_before_mean, NaN), outLine(sprintf('After %-7s', dep.name), ber_dqn, rec_dqn)};
     if doRule, lines{end+1} = outLine('After rule   ', ber_rule, rec_rule); else, lines{end+1} = '(rule comparison off)'; end
     lines{end+1} = goodput;
     ui.outLbl.Text = lines;
     ui.outLbl.Tooltip = {'Errors before vs after each policy, how much of the damage was', ...
-        'undone, and what the DQN response costs while active (data rate, spectrum).', ...
+        'undone, and what the deployed policy''s response costs while active (data rate, spectrum).', ...
         ['Effect: ' cmD.effect]};
-    if ~dqnNone, appLog(fig, ['DQN response effect: ' cmD.effect]); end
+    if ~dqnNone, appLog(fig, [dn ' response effect: ' cmD.effect]); end
     bottom = flightLine(vstat, dqnNone, threat, notDeg);
     ui.verdictLbl.Text = {verdict, bottom}; ui.verdictLbl.FontColor = vcol;
     threatRemains = (vstat == 3) && ~ismember(threat, {'none','benign_interference'});
@@ -1348,16 +1460,19 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
         'speed_kmh', v_kmh, 'fd_hz', fd_hz, 'severity', sevTxt, ...
         'cnn_detected', cnn_class, 'cnn_top_guess', top_class, 'cnn_confidence', conf, ...
         'cnn_correct', correct, 'unknown', is_unknown, ...
-        'dqn_action', action_name, 'rule_action', rule_action, 'agree', agree, ...
+        'dqn_action', action_name, 'rule_action', rule_action, 'agree', agree, 'deployed', dep.kind, ...
+        'core_action', core_action, 'state3', state3, ...
         'ber_before', ber_before_mean, 'ber_after_dqn', ber_dqn, 'ber_after_rule', ber_rule, ...
         'ber_clean_ref', refBer, 'rec_dqn', rec_dqn, 'rec_rule', rec_rule, ...
         'verdict', verdict, 'verdict_status', vstat, ...
         'cnn_latency_ms', cnn_ms, 'dqn_latency_ms', dqn_ms, 'decision_latency_ms', total_ms);
     H{end+1} = entry; setappdata(fig, 'history', H);
-    ui.histTbl.Data = [ui.histTbl.Data; { n, threatLabel(threat), sprintf('%g dB', ebno), ...
+    ud = ui.histTbl.UserData;
+    ud.rows = [ud.rows; { n, threatLabel(threat), sprintf('%g dB', ebno), ...
         sprintf('%.1f', v_kmh), sevTxt, [niceName(detShown) ' [' ok ']'], sprintf('%.0f%%', 100*conf), ...
         niceName(action_name), niceName(ruleShown), pctStr(rec_dqn), pctStr(rec_rule), verdict, ...
         sprintf('%.1f', total_ms) }];
+    ui.histTbl.UserData = ud; histShow(ui.histTbl);
     setappdata(fig, 'lastRun', struct('threat', threat, 'level', sevLevel, 'snr', ebno, 'status', vstat));
     updateSessionSummary(fig);
     updateSurvMap(fig);
@@ -1377,12 +1492,12 @@ function z = combinerSymbols(out, f, p)
 end
 
 function s = pctStr(x)
-    if isnan(x), s = 'N/A'; else, s = sprintf('%.1f%%', x); end
+    s = console_fmt(x, '%.1f%%');
 end
 
 function s = outLine(lbl, ber, rec)
-    if isnan(rec), s = sprintf('%s: %.2e', lbl, ber);
-    else,          s = sprintf('%s: %.2e   (%.1f%% recovered)', lbl, ber, rec); end
+    if isnan(rec), s = sprintf('%s: %s', lbl, console_fmt(ber, '%.2e'));
+    else,          s = sprintf('%s: %s   (%s recovered)', lbl, console_fmt(ber, '%.2e'), console_fmt(rec, '%.1f%%')); end
 end
 
 function R = applyMitigation(env, p, threat, action_name, snr_dB, fl)
@@ -1416,7 +1531,21 @@ end
 
 function cf = confirmOf(env)
     % Alarm confirmation m-of-n of the decision layer (policy_monitor.m), as deployed.
-    cf = env.DC.confirm; if isfield(env.PP, 'confirm') && ~isempty(env.PP.confirm), cf = env.PP.confirm; end
+    cf = env.DC.confirm; if isfield(env.PPdep, 'confirm') && ~isempty(env.PPdep.confirm), cf = env.PPdep.confirm; end
+end
+
+function s = deployedText(dep)
+    % The policy the console runs, for the start-up line.
+    s = dep.text;
+    if ~dep.recorded
+        s = [s ' (data/trained_dqn.mat records no deployed policy: assumed)'];
+    end
+end
+
+function s = polNames(env, p)
+    % Display names of the console's policies ('dqn' is the deployed policy); a cell array in, a cell array out.
+    if iscell(p), s = cellfun(@(q) polNames(env, q), p, 'UniformOutput', false); return; end
+    if strcmp(p, 'dqn'), s = upper(env.dep.name); else, s = upper(p); end
 end
 
 function r = survRef(surv, k)
@@ -1483,6 +1612,7 @@ function resetRunViews(fig, msg)
     ui.confGauge.Value = 0; ui.latGauge.Value = 0;
     ui.detLbl.Text = '-'; ui.detLbl.FontColor = c.txt;
     ui.decLbl.Text = {'-'}; ui.outLbl.Text = {'-'};
+    clearAx(ui.stateAx); ui.stateLbl.Text = 'three-state CNN: awaiting a run'; ui.stateLbl.FontColor = c.mut;
     ui.verdictLbl.Text = msg;
     if strcmp(msg, 'RUNNING...'), ui.verdictLbl.FontColor = c.accent; else, ui.verdictLbl.FontColor = c.mut; end
 end
@@ -1542,7 +1672,8 @@ end
 
 function t = bitsTxt(ber)
     % Plain meaning of a BER for the operator.
-    if ber <= 0, t = 'no command-bit errors measured';
+    if ~isfinite(ber), t = 'BER not measured';
+    elseif ber <= 0, t = 'no command-bit errors measured';
     elseif ber >= 0.01, t = sprintf('~%.0f%% of command bits corrupted', 100 * ber);
     elseif ber >= 1e-4, t = sprintf('~%.2f%% of command bits corrupted', 100 * ber);
     else, t = 'almost no command-bit errors'; end
@@ -1570,17 +1701,55 @@ function drawProbs(fig, probs, classes, idx, truth_idx, isUnknown)
     setTitle(ax, 'What the detector sees: probability per threat (%)', c);
 end
 
+function drawState3(fig, st, threat)
+    % The three link states of the B3c CNN over its window; the true state when the threat is one of them.
+    data = fig.UserData; ui = data.ui; c = data.colors; env = data.env;
+    ax = ui.stateAx; clearAx(ax);
+    if isempty(st)
+        ui.stateLbl.Text = {'three-state CNN not in this bundle', '(data/core_cnn_model.mat)'};
+        ui.stateLbl.FontColor = c.mut;
+        return;
+    end
+    n = numel(st.win);
+    b = barh(ax, 1:n, 100 * st.win, 'FaceColor', 'flat');
+    cd = repmat([0.36 0.40 0.48], n, 1); cd(st.idx, :) = c.accent; b.CData = cd;
+    ax.YDir = 'reverse'; ax.YTick = 1:n; ax.YTickLabel = env.core.names; ax.TickLabelInterpreter = 'none';
+    ax.FontSize = 9; ax.XLim = [0 135]; ax.XTick = [0 25 50 75 100];
+    for k = 1:n
+        text(ax, 100 * st.win(k) + 2, k, sprintf('%.1f%%', 100 * st.win(k)), 'Color', c.txt, 'FontSize', 8, 'FontName', c.font);
+    end
+    tk = console_core('truth', env.core, threat);
+    col = c.txt; tail = '  (threat outside the three states)';
+    if tk > 0 && st.idx == tk
+        col = c.green; tail = '  -  CORRECT';
+    elseif tk > 0
+        col = c.red; tail = sprintf('  -  TRUE: %s', env.core.names{tk});
+    end
+    ui.stateLbl.Text = {sprintf('%s  (%.0f%%)%s', upper(st.name), 100 * st.win(st.idx), tail), ...
+        sprintf('last %d frame(s) of the run, window N = %d', st.n, st.N)};
+    ui.stateLbl.FontColor = col;
+end
+
 function drawQ(fig, qv, aidx, ridx)
     % The best responses the shield allows this cycle, highest on top; masked
     % configurations (NaN) are left out. The rule's choice is added when allowed.
     data = fig.UserData; ax = data.ui.qAx; c = data.colors;
     TOP = 8;
     ok = find(isfinite(qv(:)))';
+    if isempty(ok)                                           % the rule fallback is deployed: no Q-values to show
+        cla(ax); ax.XLim = [0 1]; ax.YLim = [0 1]; ax.XTick = []; ax.YTick = [];
+        text(ax, 0.5, 0.5, {sprintf('The deployed policy is the %s:', data.env.dep.name), 'it has no Q-values.', ...
+            ['Choice: ' actionLabel(data.env.action_names{aidx})]}, 'Color', c.txt, 'FontSize', 10, 'FontName', c.font, ...
+            'HorizontalAlignment', 'center', 'VerticalAlignment', 'middle');
+        setTitle(ax, 'Deployed policy: rule + escalation, no scores', c);
+        ax.TitleHorizontalAlignment = 'right';
+        return;
+    end
     [~, o] = sort(qv(ok), 'descend');
     show = ok(o(1:min(TOP, end)));
     if ridx > 0 && isfinite(qv(ridx)) && ~ismember(ridx, show), show(end+1) = ridx; end
     show = fliplr(show); n = numel(show); v = qv(show); v = v(:)';
-    cla(ax); hold(ax, 'on');
+    cla(ax); ax.XTickMode = 'auto'; hold(ax, 'on');
     b = barh(ax, 1:n, v, 'FaceColor', 'flat');
     cd = repmat([0.36 0.40 0.48], n, 1); cd(show == aidx, :) = repmat(c.accent, nnz(show == aidx), 1); b.CData = cd;
     span = max(v) - min(v) + 1;
@@ -1598,7 +1767,7 @@ function drawQ(fig, qv, aidx, ridx)
     ax.YTick = 1:n; ax.YTickLabel = names(show); ax.FontSize = 8;
     ax.YLim = [0.4 n + 0.6]; ax.XLim = [lo, max(v) + 0.25 * span];
     grid(ax, 'on');
-    setTitle(ax, sprintf('Scores: best %d of %d allowed (blue DQN, > rule)', min(TOP, numel(ok)), numel(ok)), c);
+    setTitle(ax, sprintf('Scores: best %d of %d allowed (blue %s, > rule)', min(TOP, numel(ok)), numel(ok), data.env.dep.name), c);
     ax.TitleHorizontalAlignment = 'right';                   % long tick labels leave the room on the left
 end
 
@@ -1631,7 +1800,7 @@ function drawTimeline(fig, tl)
     if ~isempty(tl.ber_d)
         xa = nb + (1:numel(tl.ber_d));
         h(end+1) = plot(ax, xa, floorBer(tl.ber_d, fl), '-o', 'Color', c.green, 'LineWidth', 1.8, ...
-            'MarkerSize', 4, 'MarkerFaceColor', c.green); nm{end+1} = 'After - DQN'; %#ok<AGROW>
+            'MarkerSize', 4, 'MarkerFaceColor', c.green); nm{end+1} = ['After - ' env.dep.name]; %#ok<AGROW>
         xmax = max(xmax, xa(end));
     end
     if ~isempty(tl.ber_r)
@@ -1968,20 +2137,7 @@ end
 
 function updateSessionSummary(fig)
     ui = fig.UserData.ui;
-    H = getappdata(fig, 'history');
-    if isempty(H), ui.sessionLbl.Text = {'No runs yet.'}; return; end
-    n = numel(H);
-    corr = cellfun(@(h) h.cnn_correct, H); unk = cellfun(@(h) h.unknown, H);
-    recD = cellfun(@(h) h.rec_dqn, H);     recR = cellfun(@(h) h.rec_rule, H);
-    lat  = cellfun(@(h) h.decision_latency_ms, H);
-    both = ~isnan(recD) & ~isnan(recR);
-    better = sum(recD(both) > recR(both) + 1); worse = sum(recD(both) < recR(both) - 1);
-    same = sum(both) - better - worse;
-    ui.sessionLbl.Text = { ...
-        sprintf('RUNS %d | detection %d/%d (%.1f%%) | unknown %d | mean latency %.2f ms', ...
-            n, sum(corr), n, 100*mean(corr), sum(unk), mean(lat)), ...
-        sprintf('mean recovery: DQN %.1f%% | RULE %.1f%% | DQN better/equal/worse than RULE: %d / %d / %d', ...
-            mean(recD, 'omitnan'), mean(recR, 'omitnan'), better, same, worse)};
+    ui.sessionLbl.Text = console_session_summary(getappdata(fig, 'history'), fig.UserData.env.dep.name);
 end
 
 %% =====================================================================
@@ -2032,11 +2188,17 @@ function runEpisode(btn, ~)
     esc = ui.epHystChk.Value;
     pace = ui.epPaceDD.Value;
     seed = ui.epSeedFld.Value; if seed == 0, seed = randi(2^31 - 1); end
-    if strcmp(mode, 'both'), policies = {'dqn', 'rule'}; else, policies = {mode}; end
+    switch mode
+        case 'both', policies = {'dqn', 'rule'};
+        case 'all',  policies = {'dqn', 'rule', 'core'};
+        otherwise,   policies = {mode};
+    end
     nP = numel(policies);
     [p, sevTxt] = scenarioParams(env, threat, sevLevel, v_kmh);
+    escTxt = ternaryStr(esc, 'on', 'off');
+    if esc ~= env.dep.esc, escTxt = sprintf('%s (not the deployed setting: the deployed policy runs with it %s)', escTxt, ternaryStr(env.dep.esc, 'on', 'off')); end
     appLog(fig, sprintf('EPISODE: %s @ %g dB | %s | %.1f km/h | %s | escalation %s | seed %d', ...
-        threatLabel(threat), ebno, sevTxt, v_kmh, strjoin(upper(policies), ' + '), ternaryStr(esc, 'on', 'off'), seed));
+        threatLabel(threat), ebno, sevTxt, v_kmh, strjoin(polNames(env, policies), ' + '), escTxt, seed));
 
     %% ---- frame pools (real Simulink runs, cached per scenario) ----
     try
@@ -2069,20 +2231,31 @@ function runEpisode(btn, ~)
     %% ---- episode state, one per policy, identical frame draws ----
     base = struct('net', env.cnn_net, 'ood', env.ood, 'feat_mean', env.feat_mean, 'feat_std', env.feat_std, ...
         'fs', env.fs, 'nv', thermal_nv(env.p0), 'agent', env.dqn_agent, 'PP', env.PP, 'na', na, ...
-        'tw', env.temporal_window, 'frame_dur', env.p0.frame_duration);
+        'tw', env.temporal_window, 'frame_dur', env.p0.frame_duration, 'core', env.core);
     ctx = cell(1, nP); Ep = cell(1, nP);
-    for i = 1:nP
-        ctx{i} = base; ctx{i}.policy = [policies{i} ternaryStr(esc, '_esc', '')];
+    for i = 1:nP                                               % the core rule is the rule kind on the core action set
+        ctx{i} = base; ctx{i}.policy = [strrep(policies{i}, 'core', 'rule') ternaryStr(esc, '_esc', '')];
+        ctx{i}.core_rule = strcmp(policies{i}, 'core');
+        if strcmp(policies{i}, 'dqn')                          % the deployed policy: the DQN, or the rule fallback on its own monitor
+            ctx{i} = console_policy('ctx', env.dep, esc, ctx{i});
+        end
     end
     rsE = RandStream('mt19937ar', 'Seed', seed);               % same sub-run and frame positions for every policy
     rr = randi(rsE, 2); k0 = randi(rsE, 20) - 1;
     if isfinite(ev), k0 = ev - 2 - N_PRE; end                  % cycle N_PRE + 1 reads the event's frame
     T = struct('ber', nan(nP, N), 'det', nan(nP, N), 'ok', false(nP, N), 'mit', false(nP, N), 'conf', nan(nP, N), ...
-        'prop', nan(nP, N), 'cfg', nan(nP, N), 'sw', false(nP, N), 'unk', false(nP, N), 'q', nan(nP, N, nA));
+        'prop', nan(nP, N), 'cfg', nan(nP, N), 'sw', false(nP, N), 'unk', false(nP, N), 'q', nan(nP, N, nA), ...
+        'st', nan(nP, N));
     cls_idx = @(cl) find(strcmp(env.class_list, cl), 1);
     compIdx = classIdx(env, threat);                         % a combination: every component is correct
     truthIdx = [repmat(cls_idx('none'), 1, N_PRE), repmat(compIdx(1), 1, N_POST)];
-    H = epInitPlots(fig, N_PRE, N_POST, bc, compIdx, policies);
+    stTruth = nan(1, N); tk = 0;                               % the true link state per cycle, where the threat is one
+    if ~isempty(env.core)
+        tk = console_core('truth', env.core, threat);
+        stTruth(1:N_PRE) = console_core('truth', env.core, 'none');
+        if tk > 0, stTruth(N_PRE + 1:end) = tk; end
+    end
+    H = epInitPlots(fig, N_PRE, N_POST, bc, compIdx, policies, stTruth);
 
     %% ---- stream ----
     tLoop = tic; kDone = 0;
@@ -2105,6 +2278,7 @@ function runEpisode(btn, ~)
             if onset, T.ok(i, k) = ismember(T.det(i, k), compIdx); else, T.ok(i, k) = T.det(i, k) == truthIdx(k); end
             T.conf(i, k) = info.conf; T.prop(i, k) = info.prop; T.cfg(i, k) = info.cfg; T.sw(i, k) = info.switched;
             T.unk(i, k) = info.unknown;
+            if ~isempty(info.state3), T.st(i, k) = info.state3.idx; end
             if numel(info.qv) == nA, T.q(i, k, :) = info.qv; end
             % countermeasure active and the residual read as not hostile (rule_based_policy: no action)
             T.mit(i, k) = ~T.ok(i, k) && onset && info.cfg ~= na && ismember(info.cls, {'none', 'benign_interference'});
@@ -2113,8 +2287,9 @@ function runEpisode(btn, ~)
         epUpdatePlots(H, T, k, env.ber_floor, env.action_names);
         msg = sprintf('cycle %3d/%d  %s', k, N, ternaryStr(onset, sprintf('(onset + %d)', k - N_PRE), '(clean)'));
         for i = 1:nP
-            msg = sprintf('%s  |  %s: %s -> %s', msg, upper(policies{i}), niceName(env.class_list{T.det(i, k)}), ...
+            msg = sprintf('%s\n%s: %s -> %s', msg, polNames(env, policies{i}), niceName(env.class_list{T.det(i, k)}), ...
                 niceName(env.action_names{T.cfg(i, k)}));
+            if isfinite(T.st(i, k)), msg = sprintf('%s [%s]', msg, env.core.names{T.st(i, k)}); end
         end
         ui.epCycleLbl.Text = msg;
         drawnow limitrate;
@@ -2130,17 +2305,28 @@ function runEpisode(btn, ~)
     truthName = [repmat({'none'}, 1, N_PRE), repmat({threat}, 1, N_POST)];
     for i = 1:nP
         S = epSummary(T, i, N_PRE, kDone, bc, gp_act, env.action_names);
-        lines{end+1} = sprintf('%s: T_detect %s | T_act %s | T_recover %s (%s)', upper(policies{i}), ...
+        lines{end+1} = sprintf('%s: T_detect %s | T_act %s | T_recover %s (%s)', polNames(env, policies{i}), ...
             cycTxt(S.T_detect), cycTxt(S.T_act), cycTxt(S.T_recover), S.status); %#ok<AGROW>
-        lines{end+1} = sprintf('   switches %d before onset, %d after | final BER %.2fx clean | goodput %.2f', ...
-            S.sw_pre, S.sw_post, S.final_ratio, S.goodput); %#ok<AGROW>
+        lines{end+1} = sprintf('   switches %d before onset, %d after | final BER %s clean | goodput %s', ...
+            S.sw_pre, S.sw_post, console_fmt(S.final_ratio, '%.2fx'), console_fmt(S.goodput, '%.2f')); %#ok<AGROW>
         lines{end+1} = ['   committed: ' S.committed]; %#ok<AGROW>
-        appLog(fig, sprintf('EPISODE %s: T_detect %s, T_act %s, T_recover %s (%s), switches %d/%d, final %.2fx clean, goodput %.2f', ...
-            upper(policies{i}), cycTxt(S.T_detect), cycTxt(S.T_act), cycTxt(S.T_recover), S.status, ...
-            S.sw_pre, S.sw_post, S.final_ratio, S.goodput));
+        if ~isempty(env.core) && kDone > 0
+            r = T.st(i, 1:kDone) == stTruth(1:kDone);
+            if tk > 0 && kDone > N_PRE
+                lines{end+1} = sprintf('   three-state CNN read the true state in %.0f%% of the clean and %.0f%% of the attacked cycles', ...
+                    100 * mean(r(1:min(N_PRE, kDone))), 100 * mean(r(N_PRE + 1:kDone))); %#ok<AGROW>
+            else
+                lines{end+1} = sprintf('   three-state CNN read clean in %.0f%% of the clean cycles (the threat is none of its three states)', ...
+                    100 * mean(r(1:min(N_PRE, kDone)))); %#ok<AGROW>
+            end
+        end
+        appLog(fig, sprintf('EPISODE %s: T_detect %s, T_act %s, T_recover %s (%s), switches %d/%d, final %s clean, goodput %s', ...
+            polNames(env, policies{i}), cycTxt(S.T_detect), cycTxt(S.T_act), cycTxt(S.T_recover), S.status, ...
+            S.sw_pre, S.sw_post, console_fmt(S.final_ratio, '%.2fx'), console_fmt(S.goodput, '%.2f')));
         for k = 1:kDone
+            stn = '-'; if isfinite(T.st(i, k)), stn = env.core.names{T.st(i, k)}; end
             rows(end+1, :) = {k, k - N_PRE, policies{i}, truthName{k}, env.class_list{T.det(i, k)}, ...
-                T.conf(i, k), env.action_names{T.prop(i, k)}, env.action_names{T.cfg(i, k)}, T.sw(i, k), T.ber(i, k)}; %#ok<AGROW>
+                T.conf(i, k), env.action_names{T.prop(i, k)}, env.action_names{T.cfg(i, k)}, T.sw(i, k), T.ber(i, k), stn}; %#ok<AGROW>
         end
     end
     lines{end+1} = 'T_* in cycles after onset; recovered = 5-cycle BER mean <= 2x clean for 10 cycles.';
@@ -2150,7 +2336,7 @@ function runEpisode(btn, ~)
         if ~exist('GUI_Results', 'dir'), mkdir('GUI_Results'); end
         fn = sprintf('GUI_Results/episode_%s_%gdB_%s.csv', threat, ebno, datestr(now, 'yyyymmdd_HHMMSS'));
         writetable(cell2table(rows, 'VariableNames', {'cycle', 'cycle_from_onset', 'policy', 'true_class', ...
-            'detected', 'confidence', 'proposed', 'configuration', 'switched', 'ber'}), fn);
+            'detected', 'confidence', 'proposed', 'configuration', 'switched', 'ber', 'three_state'}), fn);
         appLog(fig, ['Episode trace saved to ' fn]);
         setappdata(fig, 'epLastFile', fn);
         ui.epExportBtn.Enable = 'on';
@@ -2293,10 +2479,10 @@ function P = epBuildPool(fig, p, threat, ebno, seedBase, fl)
     restoreParams(env.p0);
 end
 
-function H = epInitPlots(fig, N_PRE, N_POST, bc, compIdx, policies)
+function H = epInitPlots(fig, N_PRE, N_POST, bc, compIdx, policies, stTruth)
     data = fig.UserData; ui = data.ui; c = data.colors; env = data.env;
     N = N_PRE + N_POST; fl = env.ber_floor; nP = numel(policies);
-    pc = {c.accent, c.purp}; mk = {'o', 's'}; off = [-0.15 0.15]; if nP == 1, off = 0; end
+    pc = {c.accent, c.purp, c.pink}; mk = {'o', 's', 'd'}; offs = {0, [-0.15 0.15], [-0.2 0 0.2]}; off = offs{nP};
     nanN = nan(1, N);
     iNone = find(strcmp(env.class_list, 'none'), 1);
 
@@ -2314,7 +2500,7 @@ function H = epInitPlots(fig, N_PRE, N_POST, bc, compIdx, policies)
         H.ma(i)  = plot(ax, 1:N, nanN, '-', 'Color', pc{i}, 'LineWidth', 2.2);
         H.swB(i) = plot(ax, 1:N, nanN, 'v', 'MarkerSize', 9, 'MarkerFaceColor', pc{i}, 'MarkerEdgeColor', 'w', ...
             'HandleVisibility', 'off');
-        hh(end+1) = H.ma(i); nm{end+1} = [upper(policies{i}) ' (5-cycle mean; v = switch)']; %#ok<AGROW>
+        hh(end+1) = H.ma(i); nm{end+1} = [polNames(env, policies{i}) ' (5-cycle mean; v = switch)']; %#ok<AGROW>
     end
     hold(ax, 'off');
     ax.YScale = 'log'; ax.YLim = [fl*0.6 1]; ax.XLim = [0.5 N+0.5]; grid(ax, 'on');
@@ -2341,13 +2527,35 @@ function H = epInitPlots(fig, N_PRE, N_POST, bc, compIdx, policies)
     setTitle(ax, ['Detected class per cycle  (grey = true class, green = correct, amber = NONE / BENIGN ' ...
         'on the mitigated link, red = wrong)'], c);
 
+    ax = ui.epStateAx; clearAx(ax); hold(ax, 'on');
+    H.hasState = ~isempty(env.core); H.stTruth = stTruth;
+    H.stOk = gobjects(1, nP); H.stBad = gobjects(1, nP); H.stNa = gobjects(1, nP);
+    if H.hasState
+        ns = numel(env.core.names);
+        stairs(ax, (1:N+1) - 0.5, [stTruth stTruth(end)], '-', 'Color', c.mut, 'LineWidth', 3);
+        for i = 1:nP
+            H.stOk(i)  = plot(ax, 1:N, nanN, mk{i}, 'MarkerSize', 4, 'MarkerFaceColor', c.green, 'MarkerEdgeColor', pc{i});
+            H.stBad(i) = plot(ax, 1:N, nanN, mk{i}, 'MarkerSize', 5, 'MarkerFaceColor', c.red, 'MarkerEdgeColor', pc{i});
+            H.stNa(i)  = plot(ax, 1:N, nanN, mk{i}, 'MarkerSize', 4, 'MarkerFaceColor', c.mut, 'MarkerEdgeColor', pc{i});
+        end
+        xline(ax, N_PRE + 0.5, '-', 'Color', c.amber, 'LineWidth', 1.5);
+        ax.YDir = 'reverse'; ax.YTick = 1:ns; ax.YTickLabel = env.core.names; ax.TickLabelInterpreter = 'none';
+        ax.YLim = [0.4 ns + 0.6]; setTitle(ax, 'Link state per cycle, three-state CNN  (grey = true state, green = right, red = wrong)', c);
+    else
+        text(ax, 0.5, 0.5, 'three-state CNN not in this bundle (data/core_cnn_model.mat)', 'Units', 'normalized', ...
+            'HorizontalAlignment', 'center', 'Color', c.mut, 'FontSize', 10);
+        ax.YTick = [];
+    end
+    hold(ax, 'off');
+    ax.XLim = [0.5 N+0.5]; ax.FontSize = 8; grid(ax, 'on');
+
     ax = ui.epActAx; clearAx(ax); hold(ax, 'on');
     H.prop = gobjects(1, nP); H.cfg = gobjects(1, nP);
     hh = gobjects(0); nm = {};
     for i = 1:nP
         H.prop(i) = plot(ax, 1:N, nanN, '.', 'Color', pc{i}, 'MarkerSize', 7, 'HandleVisibility', 'off');
         H.cfg(i)  = stairs(ax, 1:N, nanN, '-', 'Color', pc{i}, 'LineWidth', 2.4);
-        hh(end+1) = H.cfg(i); nm{end+1} = [upper(policies{i}) ' configuration (dots = proposed)']; %#ok<AGROW>
+        hh(end+1) = H.cfg(i); nm{end+1} = [polNames(env, policies{i}) ' configuration (dots = proposed)']; %#ok<AGROW>
     end
     xline(ax, N_PRE + 0.5, '-', 'Color', c.amber, 'LineWidth', 1.5);
     hold(ax, 'off');
@@ -2380,6 +2588,11 @@ function epUpdatePlots(H, T, k, fl, actions)
         if T.ok(i, k), setY(H.detOk(i), k, y);
         elseif T.mit(i, k), setY(H.detMit(i), k, y);
         else, setY(H.detBad(i), k, y); end
+        if H.hasState && isfinite(T.st(i, k))
+            tr = H.stTruth(k); h = H.stBad(i);
+            if isnan(tr), h = H.stNa(i); elseif T.st(i, k) == tr, h = H.stOk(i); end
+            setY(h, k, T.st(i, k) + H.off(i));
+        end
     end
     a = [T.prop(:, 1:k); T.cfg(:, 1:k)];
     used = unique([H.na; a(isfinite(a))])';
@@ -2507,6 +2720,9 @@ function loadKpiTab(fig)
         end
     end
 
+    lect = console_core('kpi_lines', R);
+    if isempty(lect), lect = {'no lecturer KPI lines in this folder (results/core_cnn.txt, results/kpi_summary.txt)'}; end
+    ui.kLect.Value = lect;
     guardedPlot(@() plotConfusion(ui.kCm, metrics, c), ui.kCm, 'Confusion matrix', 'eval_detector_metrics.mat', c);
     guardedPlot(@() plotAccSnr(ui.kAcc, metrics, c), ui.kAcc, 'Accuracy vs Eb/N0', 'eval_detector_metrics.mat', c);
     guardedPlot(@() plotRecSnr(ui.kRec, P, c), ui.kRec, 'Restoration vs Eb/N0', 'policy_evaluation.mat', c);
@@ -2624,7 +2840,7 @@ function ok = plotSpeed(ax, P, metrics, c)
         b = P.KP.speed_bins; mid = (b(1:end-1) + b(2:end)) / 2;
         pv = P.KP.per_speed(:, strcmp(P.KP.show, P.POL{P.iDQN}));
         h(end+1) = plot(ax, mid, pv, '-s', 'LineWidth', 1.8, 'Color', c.amber, 'MarkerFaceColor', c.amber);
-        nm{end+1} = 'DQN recovered episodes (%)';
+        nm{end+1} = [ternaryStr(strcmp(P.POL{P.iDQN}, 'rule_sel'), 'Deployed rule', 'DQN') ' recovered episodes (%)'];
     end
     if haveOff
         sb = metrics.speed_breakdown; mid = ([sb.speed_lo_kmh] + [sb.speed_hi_kmh]) / 2;
