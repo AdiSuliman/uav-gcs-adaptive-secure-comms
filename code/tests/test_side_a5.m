@@ -108,13 +108,11 @@ tc.assertEqual(d.k, 'jamming');
 S = load(tc.TestData.sel, 'NW');
 Q = side_a5_ood_route('route', d, S.NW, {'none', 'path_loss', 'antenna_fault', 'airframe_shadowing'});
 un = d.F.un(:); kn = d.F.kn(:); kE = kn & Q.d.ct == 1;
-fprintf('jamming windows routed to s0: %.1f%%; known windows in the s0 category: %d of %d
-', ...
+fprintf('jamming windows routed to s0: %.1f%%; known windows in the s0 category: %d of %d\n', ...
     100 * mean(Q.d.ct(un) == 1), sum(kE), sum(kn));
 aE0 = ood_k2_rules('auroc', d.Wv(kE, 1), d.Wv(un, 1)); aE1 = ood_k2_rules('auroc', Q.u.R1(kE), Q.u.R1(un));
 a0 = ood_k2_rules('auroc', d.Wv(kn, 1), d.Wv(un, 1)); a1 = ood_k2_rules('auroc', Q.u.R1(kn), Q.u.R1(un));
-fprintf('AUROC vs known in the s0 category: s0 %.3f, R1 %.3f; vs all known: s0 %.3f, R1 %.3f
-', aE0, aE1, a0, a1);
+fprintf('AUROC vs known in the s0 category: s0 %.3f, R1 %.3f; vs all known: s0 %.3f, R1 %.3f\n', aE0, aE1, a0, a1);
 tc.verifyEqual(mean(Q.d.ct(un) == 1), 1);
 tc.verifyLessThan(abs(aE1 - aE0), 0.02);                  % monotone within the category (ties from the discrete p)
 end
