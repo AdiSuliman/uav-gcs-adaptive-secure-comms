@@ -10950,6 +10950,8 @@ cl = onCleanup(@() core3_fns_off({f0, f1})); %#ok<NASGU>
 [S, EP, X] = core3_report_world({'none', 'blind_core', 'rule_core', 'blind_core_fixed', 'oracle'});
 for brief = [false true]
     [L1, K1] = per_lines_new(S, EP, true(1, EP.n), X, 5e4, 'PRIMARY', brief);
+    rr = strncmp(L1, '  receiver-robust (U_s, D2c;', 28);    % D121 item 3's side reading (trunk, experiment_core_bw.m), absent at d4623ed
+    L1 = L1(~rr); for f = {'cnn', 'cnn_hybrid'}, if isfield(K1, f{1}), for t = fieldnames(K1.(f{1}))', if isfield(K1.(f{1}).(t{1}), 'rr'), K1.(f{1}).(t{1}) = rmfield(K1.(f{1}).(t{1}), 'rr'); end, end, end, end
     [L0, K0] = per_lines_old(S, EP, true(1, EP.n), X, 5e4, 'PRIMARY', brief);
     verifyEqual(tc, L1, L0); verifyTrue(tc, isequaln(K1, K0));
     if ~brief, verifyGreaterThan(tc, numel(L1), 20); end
@@ -11135,7 +11137,8 @@ verifyTrue(tc, isequaln(rmfield(P2{1}, 'probs3'), P1{1}));
 s = fileread(which('spec_scores'));                     % the CPU path never asks for a GPU
 verifyNotEmpty(tc, regexp(s, 'gpu = false;\r?\nif nargin < 3 \|\| ~strcmp\(device, ''cpu''\)', 'once'));
 src = fileread(which('pool_cell'));
-verifyNotEmpty(tc, strfind(src, 'Q.probs3 = [Q.probs3; single(spec_scores(det.core3.net, X, ''cpu''))];'));
+verifyNotEmpty(tc, strfind(src, 'p3 = spec_scores(det.core3.net, X, ''cpu'');'));          % the trunk's form: the scores are checked for their size before they join
+verifyNotEmpty(tc, strfind(src, 'Q.probs3 = [Q.probs3; single(p3)];'));
 src = fileread(which('experiment_core_bw'));
 for k = {'Mo = core_bw_rules(''core3_model'', X.core3_model, X.CORE3_SHA, X.CORE3_N);', ...
         'det.core3 = struct(''net'', Mo.net);', 'C3 = {sprintf(''core3 %s N%d'', X.CORE3_SHA, X.CORE3_N)};', ...
