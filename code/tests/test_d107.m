@@ -777,6 +777,16 @@ for k = 1:size(pl, 1)
     src = fullfile(tc.TestData.root, pl{k, 1});
     if strcmp(pl{k, 1}, km), src = fullfile(d7{2}, 'measure_all_kpis.m'); end
     c = undo_small(strrep(fileread(src), char(13), ''), pl{k, 1});
+    if endsWith(pl{k, 1}, 'evaluate_policies.m')     % adopt-p3's seven hook lines (B1 step 1, off by default; test_adopt holds them)
+        verifyNumElements(tc, regexp(c, '[^
+]*ADP[^
+]*
+'), 7, 'adoption hook lines');
+        c = regexprep(c, '[^
+]*ADP[^
+]*
+', '');
+    end
     c = cut_line(tc, c, pl{k, 2}, pl{k, 1});
     if endsWith(pl{k, 1}, ex{2}), c = cut_line(tc, c, ex{1}, pl{k, 1}); c = clean_ref_cut(tc, c, 'evaluate_policies'); end
     p = base_with_pb(tc, pl{k, 1});

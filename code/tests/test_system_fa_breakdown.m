@@ -307,8 +307,8 @@ end
 %% ---------- KPI 6's definition: KP.far_set ----------
 function test_old_path_unchanged(tc)
 % Without KP.far_set the gate, the readings, the text and every saved variable are those of the
-% code of profile 1's D103 reading (sysfa 3c9f7ea), on a pass and on a failed gate.
-root = tc.TestData.root; ref = '3c9f7ea';
+% trunk's port of that reading before the KP.far_set commit (7333129; profile 1's sysfa 3c9f7ea differs by the P3 drop-alarm confirmation), on a pass and on a failed gate.
+root = tc.TestData.root; ref = '7333129';
 [st, old] = system(sprintf('git -C "%s" show %s:code/evaluation/system_fa_breakdown.m', root, ref));
 assumeEqual(tc, st, 0, 'git or the reading''s commit is not available here');
 d = fullfile(tc.TestData.tmp, 'old_path'); mkdir(d);
