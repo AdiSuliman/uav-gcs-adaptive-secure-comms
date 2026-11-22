@@ -1,6 +1,7 @@
 function tests = test_lect_kpis_by_ebno
-%TEST_LECT_KPIS_BY_EBNO  Unit tests of the lecturer's readings by Eb/N0 (lect_kpis_by_ebno.m) on synthetic
-%   episodes; no pools. Run from the repository root:
+%TEST_LECT_KPIS_BY_EBNO  Unit tests of the lecturer's readings by Eb/N0 (lect_kpis_by_ebno.m) and
+%   of the bandwidth study's readings by link (core_bw_lect_by_link.m), on synthetic episodes;
+%   no pools. Run from the repository root:
 %   results = runtests('code/tests/test_lect_kpis_by_ebno.m')
 tests = functiontests(localfunctions);
 end
@@ -17,7 +18,7 @@ function teardownOnce(tc)
 cd(tc.TestData.cwd);
 end
 
-%% ---------- lect_kpis_by_ebno.m ----------
+%% ---------- profile 1 and 3: lect_kpis_by_ebno.m ----------
 function test_mark_tags(tc)
 % R1: link-limited where 2 x the clean packet loss >= 1, working point below 0.1, marginal
 % between; 0.45 is marginal, not link-limited; 0.5 is the boundary.
@@ -253,6 +254,133 @@ verifyTrue(tc, lect_kpis_by_ebno('gate', E0, PP0, txt0).pass);
 end
 
 %% ---------- worlds ----------
+function test_core_bw_copies_match(tc)
+% The readers are experiment_core_bw.m's of core-bw-p1 f01a51f (the commit its test stage runs
+% on: D106, rule_core3) byte for byte, and core_bw_rules.m, which per_lines calls, is that
+% commit's blob.
+root = tc.TestData.root; ref = 'f01a51fed4f311b25265574fc17bf7913b17df10';
+st = system(sprintf('git -C "%s" cat-file -e %s', root, ref));
+assumeEqual(tc, st, 0, 'git or core-bw-p1 f01a51f is not available here');
+[~, ex] = system(sprintf('git -C "%s" show %s:code/decision/experiment_core_bw.m', root, ref));
+mine = fileread(which('core_bw_lect_by_link'));
+for f = {'plr_threshold', 'read_recoverable', 'recoverable_mask', 'get_set', 'pol', 'per_lines', 'qstat'}
+    verifyNotEmpty(tc, fn_block(mine, f{1}), f{1});
+    verifyEqual(tc, fn_block(mine, f{1}), fn_block(ex, f{1}), f{1});
+end
+g = 'code/decision/core_bw_rules.m';
+[~, theirs] = system(sprintf('git -C "%s" show %s:%s', root, ref, g));
+verifyEqual(tc, strrep(fileread(fullfile(root, g)), sprintf('\r'), ''), strrep(theirs, sprintf('\r'), ''), g);
+end
+
+function test_core_bw_mark_and_reading(tc)
+% Per episode: L when the flight's own threshold (2 x its clean loss + 1/n) >= 1; the gate
+% passes on the report's numbers and stops on a changed one; Line A then Line B; N counts the
+% detected L episodes, a never one apart; the scenarios holding L episodes are counted.
+[T, REC, KPc, rep, PP, pay] = core_bw_world(tc);
+thr = core_bw_lect_by_link('mark', PP);
+verifyEqual(tc, thr, [1.3 0.7; 0.1 0.1], 'AbsTol', 1e-12);
+EP = T.EPs; Lep = thr(sub2ind(size(thr), EP.s, EP.r)) >= 1;
+verifyEqual(tc, Lep, EP.s == 1 & EP.r == 1);
+P = struct('ebno', PP.ebno, 'runs', {PP.runs}, 'params_id', PP.params_id, 'det_id', PP.det_id);
+G = core_bw_lect_by_link('gate', T, REC, KPc, rep, P, pay);
+verifyTrue(tc, G.pass, strjoin(G.mismatch, newline));
+X = KPc; X.KP.primary.per(1).red = X.KP.primary.per(1).red + eps(X.KP.primary.per(1).red);
+G2 = core_bw_lect_by_link('gate', T, REC, X, rep, P, pay);
+verifyFalse(tc, G2.pass); verifyTrue(tc, any(contains(G2.mismatch, 'KP.primary: .per differs')));
+r2 = rep; i = find(startsWith(r2, '  PER rule_core'), 1); r2{i} = [r2{i} ' '];
+G2 = core_bw_lect_by_link('gate', T, REC, KPc, r2, P, pay);
+verifyFalse(tc, G2.pass); verifyTrue(tc, any(contains(G2.mismatch, 'in the report: first difference')));
+Q = P; Q.det_id = 'other';
+verifyFalse(tc, core_bw_lect_by_link('gate', T, REC, KPc, rep, Q, pay).pass);
+[S, lines] = core_bw_lect_by_link('readings', T, G, Lep, pay);
+verifyEqual(tc, [S.n_L, S.n_L_recoverable], [4 4]);
+verifyEqual(tc, size(S.scen, 1), 3);
+verifyEqual(tc, [sum(S.scen_anyL), sum(S.scen_allL)], [2 0]);
+q = S.n_rec(strcmp({S.n_rec.policy}, 'rule_core') & strcmp({S.n_rec.type}, 'pooled'));
+verifyEqual(tc, [q.n q.zero q.later q.never], [4 3 0 1]);
+q = S.n_rec(strcmp({S.n_rec.policy}, 'blind_core') & strcmp({S.n_rec.type}, 'narrowband'));
+verifyEqual(tc, [q.n q.zero q.later q.never], [2 2 0 0]);
+iA = find(startsWith(lines, '=== Line A')); iB = find(startsWith(lines, '=== Line B'));
+verifyTrue(tc, isscalar(iA) && isscalar(iB) && iA < iB);
+b = lines(iB + 1:end);
+verifyTrue(tc, all(endsWith(b(contains(b, '-> MET') | contains(b, '-> NOT MET')), ' [second line, not the verdict]')));
+verifyTrue(tc, any(contains(lines, 'includes N = 4 L episodes where t_rec_det is set by construction (3 at 0, 0 later, 1 never)')));
+end
+
+function test_core_bw_rule_core3(tc)
+% With rule_core3 in the study's sets (D106): the gate reproduces the report's lines with
+% rule_core3 carrying the verdicts (PRIMARY) and rule_core's rows labelled hybrid, secondary;
+% the recovery-time reading lists rule_core3 beside the other policies, with its own N; a
+% study without rule_core3 reads as before.
+[T, REC, KPc, rep, PP, pay] = core_bw_world(tc, true);
+thr = core_bw_lect_by_link('mark', PP);
+EP = T.EPs; Lep = thr(sub2ind(size(thr), EP.s, EP.r)) >= 1;
+P = struct('ebno', PP.ebno, 'runs', {PP.runs}, 'params_id', PP.params_id, 'det_id', PP.det_id);
+G = core_bw_lect_by_link('gate', T, REC, KPc, rep, P, pay);
+verifyTrue(tc, G.pass, strjoin(G.mismatch, newline));
+prim = G.primary.per([G.primary.per.primary]);
+verifyEqual(tc, unique({prim.policy}), {'rule_core3'});
+verifyTrue(tc, any(contains(G.lines, 'PRIMARY narrowband')) && any(contains(G.lines, '(hybrid, secondary)')));
+verifyTrue(tc, isfield(G.primary.rec, 'rule_core3') && isfield(G.primary, 'cnn_hybrid') && isfield(G.primary, 'cnn_3vs'));
+X = KPc; X.KP.primary.per(1).red = X.KP.primary.per(1).red + eps(X.KP.primary.per(1).red);
+verifyFalse(tc, core_bw_lect_by_link('gate', T, REC, X, rep, P, pay).pass);
+[S, lines] = core_bw_lect_by_link('readings', T, G, Lep, pay);
+for pk = {'none', 'blind_core', 'rule_core', 'rule_core3'}
+    verifyEqual(tc, nnz(strcmp({S.n_rec.policy}, pk{1})), 3, pk{1});
+end
+q = S.n_rec(strcmp({S.n_rec.policy}, 'rule_core3') & strcmp({S.n_rec.type}, 'pooled'));
+verifyEqual(tc, [q.n q.zero q.later q.never], [4 4 0 0]);
+q = S.n_rec(strcmp({S.n_rec.policy}, 'rule_core') & strcmp({S.n_rec.type}, 'pooled'));
+verifyEqual(tc, [q.n q.zero q.later q.never], [4 3 0 1]);
+verifyTrue(tc, any(startsWith(lines, '  rule_core3 pooled     Line A, every episode, includes N = 4 L episodes')));
+verifyTrue(tc, any(contains(lines, 'CNN contribution pooled     rule_core3 - rule_core')));
+iB = find(startsWith(lines, '=== Line B'));
+verifyTrue(tc, any(contains(lines(iB:end), 'PER rule_core3 PRIMARY narrowband')));
+end
+
+function test_core_bw_run(tc)
+% The single run of the bandwidth study's reading: the mark with the pools' hash before the
+% test readings are opened, the gate, Line A then Line B; a second run is refused.
+[T, REC, KPc, rep, PP] = core_bw_world(tc); %#ok<ASGLU>
+d = fullfile(tc.TestData.tmp, 'run_corebw'); mkdir(d);
+F = struct('pools', fullfile(d, 'pools.mat'), 'test', fullfile(d, 'test_readings.mat'), 'recov', fullfile(d, 'recoverable.txt'), ...
+    'kpis', fullfile(d, 'core_bw_kpis.mat'), 'report', fullfile(d, 'core_bw_report.txt'), 'params', fullfile(d, 'params.mat'), ...
+    'out', fullfile(d, 'read'));
+mkdir(F.out);
+save(F.pools, 'PP');
+save(F.test, '-struct', 'T');
+copyfile(fullfile(tc.TestData.tmp, 'core_bw_world', 'recoverable.txt'), F.recov);
+KP = KPc.KP; lines = KPc.lines; save(F.kpis, 'KP', 'lines'); %#ok<NASGU>
+write_text(F.report, rep);
+params = struct('bits_per_frame', 1000, 'cycle_s', 0.02); save(F.params, 'params');
+% a failed gate spends nothing: the diagnostics beside, no reading output, the real thread count
+F2 = F; F2.out = fullfile(d, 'read_fail'); mkdir(F2.out);
+t = rep; i = find(contains(t, 'PRIMARY'), 1); t{i} = [t{i} 'x'];
+F2.report = fullfile(d, 'core_bw_report_changed.txt'); write_text(F2.report, t);
+verifyError(tc, @() core_bw_lect_by_link('run', F2), 'core_bw_lect_by_link:gate');
+verifyFalse(tc, isfile(fullfile(F2.out, 'core_bw_lect_by_link.txt')) || isfile(fullfile(F2.out, 'core_bw_lect_by_link.mat')));
+o2 = read_text(fullfile(F2.out, 'core_bw_lect_by_link.gatefail.txt'));
+verifyTrue(tc, startsWith(o2{1}, 'GATE FAIL') && ~any(startsWith(o2, '=== Line')));
+Fg = load(fullfile(F2.out, 'core_bw_lect_by_link.gatefail.mat'));
+verifyTrue(tc, ~Fg.G.pass && Fg.nthr == maxNumCompThreads && any(startsWith(o2, sprintf('threads %d (', Fg.nthr))) && ~any(contains(o2, 'as C2e')));
+F2.report = F.report;
+core_bw_lect_by_link('run', F2);
+o3 = read_text(fullfile(F2.out, 'core_bw_lect_by_link.txt'));
+verifyTrue(tc, startsWith(o3{1}, 'GATE PASS'));
+verifyError(tc, @() core_bw_lect_by_link('run', F2), 'core_bw_lect_by_link:once');
+core_bw_lect_by_link('run', F);
+mk = read_text(fullfile(F.out, 'core_bw_low_ebno_mark.txt'));
+verifyTrue(tc, any(strcmp(mk, ['pools_sha256 ' lect_kpis_by_ebno('sha', F.pools)])));
+t1 = 2 * mean([ones(1, 6) zeros(1, 4)]) + 1 / 10; t2 = 2 * mean([ones(1, 3) zeros(1, 7)]) + 1 / 10;
+verifyEqual(tc, mk(end-3:end), {sprintf('0 1 1401 %.17g 1', t1), sprintf('0 2 1402 %.17g 0', t2), ...
+    sprintf('3 1 1401 %.17g 0', 1 / 10), sprintf('3 2 1402 %.17g 0', 1 / 10)});
+o = read_text(fullfile(F.out, 'core_bw_lect_by_link.txt'));
+verifyTrue(tc, startsWith(o{1}, 'GATE PASS'));
+verifyLessThan(tc, find(startsWith(o, '=== Line A')), find(startsWith(o, '=== Line B')));
+verifyError(tc, @() core_bw_lect_by_link('run', F), 'core_bw_lect_by_link:once');
+end
+
+%% ---------- worlds ----------
 function [ALL, POL, LBL, scen, PP] = ebno_world()
 % Three Eb/N0 points (0 dB link-limited, 3 dB marginal, 6 dB working point), six episodes
 % each: jamming (1, 2, 6; 6 not recoverable), tone_jamming (3, 4), path_loss (5). At the L point
@@ -328,6 +456,59 @@ E = struct('ALL', {ALL}, 'POL', {POL}, 'LBL', {LBL}, 'iDQN', iDQN, 'KP', KP, 'RE
 txt = [{'=== Decision-layer evaluation on the test pools ===', 'Generated: synthetic'}, ll, ...
     {'', 'Recovered among recoverable per Eb/N0 (single set), %:', '', 'False alarms on the clean link, test pools', ''}, ...
     {hdr}, lf, {'', 'Configuration at the end of the episode, deployed policy (single set): most frequent two per threat'}];
+end
+
+%% ---------- helpers ----------
+function [T, REC, KPc, rep, PP, pay] = core_bw_world(tc, core3)
+% Two scenarios (a CW tone k = 1 and a 20 MHz jammer k = 2) at two Eb/N0 points, two test
+% flights, two onsets: 16 episodes. The clean link of flight 1 at 0 dB loses 60% of its packets
+% (threshold 2 x 0.6 + 1/10 >= 1: link-limited), flight 2 30%, none at 3 dB. Recoverable:
+% both scenarios at 0 dB, the tone at 3 dB. rule_core never restores one L episode (detected
+% too late).
+PP = struct('ebno', [0 3], 'scen', {{'none', 'tone_jamming', 'jamming'}}, 'actions', {{'no_action', 'channel_switch'}}, ...
+    'runs', {{[501 502], [1401 1402]}}, 'event_frame', {{nan(1, 2), nan(1, 2)}}, 'fec_frames', 4, 'params_id', 'p1', ...
+    'det_id', 'd1');
+PP.pools = cell(3, 2, 2, 2);
+run = [1401 * ones(1, 10), 1402 * ones(1, 10)];
+PP.pools{1, 1, 1, 2} = struct('run', run, 'fer', [ones(1, 6) zeros(1, 4) ones(1, 3) zeros(1, 7)]);
+PP.pools{1, 2, 1, 2} = struct('run', run, 'fer', zeros(1, 20));
+[k, s, r, e] = ndgrid(1:2, 1:2, 1:2, 1:2); n = numel(k);
+EP = struct('k', k(:)', 's', s(:)', 'r', r(:)', 'rep', e(:)', 'n', n, 'T', 30);
+EP.bj = 20 * (EP.k == 2); EP.narrow = EP.bj == 0; EP.slice = false(1, n); EP.occ = false(1, n);
+EP.geom = 1000 * EP.s + EP.r;
+L = EP.s == 1 & EP.r == 1;
+ep = @(per, tcf, rd) struct('ep', 1:n, 'per_post', per, 'dlv_post', 1 - per, 't_conf', tcf, 't_rec_det', rd, ...
+    'recoverable', true(1, n), 'threat', true(1, n));
+rdn = nan(1, n); rdn(L) = 0;
+rdb = 3 * ones(1, n); rdb(L) = 0;
+rdr = 2 * ones(1, n); rdr(L) = 0; rdr(find(L, 1)) = NaN;
+Rn = ep(0.8 + 0.05 * EP.narrow + 0.01 * EP.r, ones(1, n), rdn);
+Rb = ep(0.5 + 0.02 * EP.r, 2 * ones(1, n), rdb);
+Rr = ep(0.2 - 0.1 * EP.narrow + 0.01 * EP.r, ones(1, n), rdr);
+Ro = ep(0.05 * ones(1, n), nan(1, n), nan(1, n));
+pols = {'none', 'blind_core', 'rule_core', 'oracle'}; Rs = {Rn, Rb, Rr, Ro};
+if nargin > 1 && core3                              % rule_core3: better than the hybrid, restores every L episode at once
+    rd3 = 2 * ones(1, n); rd3(L) = 0;
+    pols{end+1} = 'rule_core3'; Rs{end+1} = ep(0.15 - 0.1 * EP.narrow + 0.01 * EP.r, ones(1, n), rd3);
+end
+RES = struct('rule', 'H1', 'set', 'primary', 'policy', pols, 'R', Rs);
+X0 = struct('RULES', {{'H1', 'H3', 'H4'}}, 'B', 200, 'TARGET', 0.3, 'N_RUN', 5);
+meta = struct('runs', {PP.runs}, 'params_id', 'p1', 'det_id', 'd1');
+T = struct('RES', RES, 'EPs', EP, 'X', X0, 'meta', meta);
+d = fullfile(tc.TestData.tmp, 'core_bw_world'); if ~isfolder(d), mkdir(d); end
+f = fullfile(d, 'recoverable.txt');
+write_text(f, {'# Recoverable scenarios (synthetic)', '# rule scenario_index ebno_index ...', ...
+    'H1 1 1 cw_tot23 0 23.00 23.00 0 100.0 0.8500 0.7000 1 1', 'H1 2 1 bw20_tot23 20 23.00 10.00 0 100.0 0.8000 0.7000 1 1', ...
+    'H1 1 2 cw_tot23 0 23.00 23.00 3 100.0 0.8500 0.1000 1 1', 'H1 2 2 bw20_tot23 20 23.00 10.00 3 50.0 0.8000 0.1000 1 0', ...
+    'H3 1 1 cw_tot23 0 23.00 23.00 0 100.0 0.8500 0.7000 1 1'});
+REC = core_bw_lect_by_link('read_recoverable', f);
+pay = 5e4;
+mask = (EP.k == 1 | EP.s == 1);
+[blk, Kp] = core_bw_lect_by_link('per_lines', RES, EP, mask, X0, pay, ...
+    'PRIMARY (H1, nRF24L01+ residual by offset, fixed total power, static jammer)', false);
+rep = [{'=== Bandwidth study (docs/core_bw_protocol.md) ===', 'params_id p1 | det_id d1'}, blk, ...
+    {'  per jammer width (recoverable scenarios, every JSR_tot and Eb/N0):'}];
+KPc = struct('KP', struct('primary', Kp), 'lines', {rep});
 end
 
 %% ---------- helpers ----------

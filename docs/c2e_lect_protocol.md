@@ -204,6 +204,11 @@ geometry. For the core set, some core configuration does (`recoverable_core`, pr
 4. the detection lines;
 5. the false-alarm lines.
 
+**Link-limited Eb/N0 points (D99).** Beside these readings, `docs/lect_ebno_protocol.md` (branch
+`lect-ebno`) gives each lecturer reading again on the points where the restoration test of packet
+loss is defined and per Eb/N0, once, from the saved `KP.lect` and `ALL`, after a gate that
+reproduces them exactly. The verdict lines above are unchanged.
+
 ## 7. Running it (after profile 1's C2e has finished; profile 3 waits on `p3_c1p.hold`)
 
     cd "/c/Users/Adi Suliman/uav-gcs-lectkpi"
