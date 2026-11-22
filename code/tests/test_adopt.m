@@ -116,10 +116,11 @@ for f = {'decision/policy_decide.m', 'decision/rule_based_policy.m', 'decision/d
     moved = moved || ~same_as_rev(tc, tc.TestData.base, ['code/' f{1}]);
 end
 for f = {'evaluation/measure_all_kpis.m', 'evaluation/build_kpi_dashboard.m', 'evaluation/export_report_numbers.m', ...
-        'evaluation/lect_kpi_table.m', 'gui/export_gui_bundle.m', 'evaluation/result_status.m', 'evaluation/lect_kpis.m'}
+        'evaluation/lect_kpi_table.m', 'evaluation/result_status.m', 'evaluation/lect_kpis.m'}
     verifyTrue(tc, same_as_rev(tc, tc.TestData.tree_rev, ['code/' f{1}]), f{1});
 end
-if moved, assumeFail(tc, 'as-run pin of the adopt-p3 reading (tag in B5); on the merged line the off-path equality of these files is carried by test_rule_fix, test_weak19, test_w19_rulerows and the dqn_fix/lb tests'); end
+moved = moved || ~same_as_rev(tc, tc.TestData.tree_rev, 'code/gui/export_gui_bundle.m');
+if moved, assumeFail(tc, 'as-run pin of the adopt-p3 reading (tag in B5); on the merged line the off-path equality of these files is carried by test_rule_fix, test_weak19, test_w19_rulerows and the dqn_fix/lb tests; export_gui_bundle.m moved by the gui-core commits 6edce77..d9c786e, carried by test_gui'); end
 end
 
 %% ---------- overlay ----------
