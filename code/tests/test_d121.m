@@ -158,7 +158,7 @@ verifyNotEqual(tc, a, na);
 end
 
 function test_rule_core_policy_byte_identical(tc)
-base = 'f6f6e03';
+base = '7bc9bfa';      % core-bw-rule-fix's tip: f6f6e03's file plus PP.core_blind's argument
 repo = tc.TestData.root;
 [sg, ~] = system(sprintf('git --no-optional-locks -C "%s" rev-parse --git-dir', repo));
 if sg ~= 0 && ~isempty(getenv('V7_GIT_REPO')), repo = getenv('V7_GIT_REPO'); end

@@ -468,7 +468,7 @@ end
 function test_s1g_static(tc)
 % rule_core_policy.m is the base commit's byte for byte; the gate and the release read monitor fields and
 % settings only, never a truth field (healthy, harmed, sc_eff, ended); the harm field has one writer.
-d = parent_copy(tc, 'code/decision/rule_core_policy.m', tc.TestData.base);
+d = parent_copy(tc, 'code/decision/rule_core_policy.m', '7bc9bfa');   % core-bw-rule-fix's tip: the base's file plus PP.core_blind's argument
 a = strrep(fileread(fullfile(d, 'rule_core_policy.m')), char(13), '');
 b = strrep(fileread(which('rule_core_policy')), char(13), '');
 rmdir(d, 's');
