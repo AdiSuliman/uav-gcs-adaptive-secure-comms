@@ -108,9 +108,11 @@ if isfield(Q, 'dec') && isstruct(Q.dec) && isfield(Q.dec, 'lb_forced') && Q.dec.
 end
 PP = decision_settings(PP, Q);                       % the deployed DQN's monitor and settings for every policy but the rule fallback
 cfg6 = []; if exist('CFG', 'var'), cfg6 = CFG; end
+ADP = adopt_options(cfg6);                           % adopted settings (CFG.adopt, adopt_options.m), off by default
 WF = wf_options(cfg6);                               % which readings of the decision-layer additions are printed (wf_options.m)
 FRESH = strcmp(kpi6_set(cfg6), 'fresh');             % P1R: KPI 6 on the fresh clean test set (kpi6_set.m)
 if FRESH, F6 = fresh_checks(PP, Q, exist('SMOKE', 'var') && SMOKE); end   % every check before any fresh flight
+if FRESH && ADP.on, error('evaluate_policies:adopt', 'evaluate_policies: an adoption is not read on the fresh KPI 6 set'); end
 SPO = speed_options(cfg6);                           % the speed readings (speed_options.m), off without profile.json's fields
 K = link_env('tables', PP);
 assert(all(isfinite(clean_ber_ref(PP.ebno, 'ber_est'))) && all(isfinite(clean_ber_ref(PP.ebno, 'plr_fec'))), 'evaluate_policies:clean_ref', ...
@@ -268,6 +270,7 @@ t0 = tic;
 for si = 1:numel(sets)
     for pk = 1:numel(POL)
         [kind, ag, opt] = policy_setup(POL{pk}, Q, sel, fixed_best, fixed_mmse, tab, K.na);
+        opt = adopt_options('opt', ADP, POL{pk}, opt);
         RES{si, pk} = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, 20000 + 1000*si);
     end
     fprintf('  set %-9s %5d episodes x %d policies (%.1f min)\n', sets(si).name, numel(RES{si, 1}.ret), ...
@@ -276,6 +279,7 @@ end
 RS2 = [];
 if ~isempty(spec2)
     [kind, ag, opt] = policy_setup(POL{iDQN}, Q, sel, fixed_best, fixed_mmse, tab, K.na);
+    opt = adopt_options('opt', ADP, POL{iDQN}, opt);
     RS2 = policy_run_set(kind, PP, K, spec2, TEST2, ag, opt, 50000);
     fprintf('  set %-9s %5d episodes x 1 policy, the deployed (%.1f min)\n', 'single2', numel(RS2.ret), toc(t0)/60);
 end
@@ -297,6 +301,7 @@ vsets = {policy_episodes(single_cells, nS, G(single_cells, VAL), REPS, false, fa
          policy_episodes(foll_cells, nS, G(foll_cells, VAL), REPS, true, false, NE, T, rs), ...
          policy_episodes(combo_cells, nS, G(combo_cells, VAL), REPS, false, false, NE, T, rs)};
 [kind, ag, opt] = policy_setup(POL{iDQN}, Q, sel, fixed_best, fixed_mmse, tab, K.na);
+opt = adopt_options('opt', ADP, POL{iDQN}, opt);
 RV = policy_run_set(kind, PP, K, vsets{1}, VAL, ag, opt, 70000);
 for vs = 2:3, RV = cat_struct(RV, policy_run_set(kind, PP, K, vsets{vs}, VAL, ag, opt, 70000 + 100*vs)); end
 fprintf('  envelope (validation) %d episodes (%.1f min)\n', numel(RV.ret), toc(t0)/60);
@@ -359,6 +364,7 @@ else
         ternary(WF.core3, ' (core3_pools is set, but the policy pools hold no three-state scores)', '')];
 end
 rep = [rep, MNOTE];
+if ADP.on, rep{end+1} = adopt_options('note', ADP); end
 for si = find(~strcmp({sets.name}, 'offset'))
     rep{end+1} = ''; %#ok<SAGROW>
     R1 = RES{si, 1};
@@ -672,6 +678,7 @@ if isfile('data/clean_test_pools.mat')
     RW = cell(1, numel(POL));
     for pk = 1:numel(POL)
         [kind, ag, opt] = policy_setup(POL{pk}, Q, sel, fixed_best, fixed_mmse, tab, K.na);
+        opt = adopt_options('opt', ADP, POL{pk}, opt);
         R = policy_run_set(kind, PPw, Kw, specs, TEST, ag, opt, 40000);
         f = fieldnames(R);
         for j = 1:numel(f), R.(f{j}) = R.(f{j})(:, 1:n); end        % drop the padding
