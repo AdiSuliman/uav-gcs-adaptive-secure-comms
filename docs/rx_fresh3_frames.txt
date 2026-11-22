@@ -1,0 +1,11 @@
+# rx_fresh3_frames: decision-free delay-line collapse frames on fresh validation flights (rx_fix_rule3.md section 2)
+# rule rx_fix_rule3.md sha256 d058fd366799a61632ee529938ef572347e62032e56595277d1e5981c0deeb19
+# seeds 2400000 + k, k = 1-150 (batch 1), 151-300 (batch 2, only with fewer than 3 frames after batch 1); batches run 2
+# Eb/N0 12 dB; speed 100 + 61 u km/h, u = rand(seed_stream(seed, 'speed')); altitude, K, interferer direction,
+#   correlation and event the flight's own draws, 20 frames
+# link: link-floor data/params.mat, threat none, no_action (pool_configs), the export d4623ed (field absent), own_out on
+# criteria: r1 frame BER > 0.1 and true post-MRC Es/N0 >= 8 dB from the own component (Thr_sig), calibrated on
+#   >= 3 clean frames of the flight (BER < 1e-3, pilot error < 0.3); a flight with fewer gives no frame
+# flights examined 300 (without calibration 2, 0 of them with candidate frames), candidate frames 19, frames in 1
+# ebno_db k seed frame r1_ber true_esn0_db speed_kmh calibration_frames
+12 285 2400285 3 0.1231 9.02 124.6 18

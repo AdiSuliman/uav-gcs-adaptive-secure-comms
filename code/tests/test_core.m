@@ -1844,6 +1844,8 @@ S = [S; SF];
 SF = arrayfun(@(si, ri, fi) pool_seed(fi, si, 18, ri), s(:), r(:), f(:));
 verifyLessThan(tc, max(SF), 2000000);
 S = [S; SF];
+[s, r, b] = ndgrid(1:6, 1:99, [5 7 14 16 18 19]);       % the bandwidth study (family 6)
+S = [S; arrayfun(@(si, ri, bi) pool_seed(6, si, bi, ri), s(:), r(:), b(:))];
 [t, li, s] = ndgrid(1:20, 1:10, 1:6);                   % survivability map: entries, levels (path loss 10), Eb/N0
 S = [S; 900000 + 1000*t(:) + 10*li(:) + s(:); 700000 + (1:5)'];
 [t, r] = ndgrid(1:20, 1:5);                             % the surv_v2 map: entries, flights (surv_flights.m)
@@ -1853,6 +1855,14 @@ S = [S; 3000000 + k; 4000000 + k; 5000000 + k];         % dataset, unseen Eb/N0 
 S = [S; 3500000 + k; 4500000 + k; 5500000 + k];         % the second test set and the second B4 and B4s readings
 S = [S; 6500000 + k];                                   % the third test set (B3m)
 S = [S; 6000000 + k];                                   % the fourth test set (B3q)
+% the delay-line receiver's fresh flights (docs/rx_fix_rule3.md 2.1): above every pool seed,
+% below the lowest dataset seed, and out of reach of every pool_seed family at Eb/N0 index 1-19
+SR = 2400000 + (1:300)';
+verifyGreaterThan(tc, min(SR), max(S(S < 3000000)));
+verifyLessThan(tc, max(SR), min(S(S >= 3000000)));
+[f, s, b] = ndgrid(1:100, 1:19, 1:19);
+verifyFalse(tc, any(arrayfun(@(fi, si, bi) any(ismember(pool_seed(fi, si, bi, 1:100), SR)), f(:), s(:), b(:))));
+S = [S; SR];
 src = fileread(which('run_dataset_sweep'));              % every dataset stream of the sweep is listed above
 s0 = cellfun(@(c) str2double(c{1}), regexp(src, 'SEED0\s*=\s*(\d+);', 'tokens'));
 verifyEqual(tc, sort(s0), [3000000 3500000 6000000 6500000]);
