@@ -101,32 +101,37 @@ end
 function O = offsets(G)
 % Offset of every antenna from the median of the others per cycle [dB] (E x nr x n).
 [~, nr, ~] = size(G);
+oth = others(nr);
 O = zeros(size(G));
 for a = 1:nr
-    O(:, a, :) = G(:, a, :) - median(G(:, setdiff(1:nr, a), :), 2);
+    O(:, a, :) = G(:, a, :) - median(G(:, oth{a}, :), 2);
 end
+end
+
+function oth = others(nr)
+% setdiff(1:nr, a) for every antenna a, kept for the last nr.
+persistent n0 o0
+if isempty(n0) || nr ~= n0
+    o0 = arrayfun(@(a) setdiff(1:nr, a), 1:nr, 'UniformOutput', false); n0 = nr;
+end
+oth = o0;
 end
 
 function S = fit(o)
 % Least-squares step and ramp fits of every column of o (n x E, oldest first).
 [n, E] = size(o);
-[tau, R] = ndgrid(2:n, 1:2 * n);
-tau = tau(:)'; R = R(:)';
-t = (1:n)';
-H = min(1, max(0, (t - tau + 1) ./ R));                    % n x M fall shapes
-Hc = H - mean(H, 1);
-Sxx = sum(Hc .^ 2, 1)';                                    % M x 1
+Z = fit_grid(n); tau = Z.tau; R = Z.R; Hc = Z.Hc; Sxx = Z.Sxx;
 oc = o - mean(o, 1);
 Syy = sum(oc .^ 2, 1);                                     % 1 x E
 Sxy = Hc' * oc;                                            % M x E
 b = Sxy ./ Sxx;                                            % slope: minus the depth
 SSE = Syy - Sxy .^ 2 ./ Sxx;
 SSE(b >= 0) = Inf;                                         % a fall only
-st = R == 1;
+st = Z.st;
 [Ss, is] = min(SSE(st, :), [], 1);
 [Sr, ir] = min(SSE(~st, :), [], 1);
 [~, ia] = min(SSE, [], 1);
-js = find(st); jr = find(~st);
+js = Z.js; jr = Z.jr;
 s2 = max(min(Ss, Sr) / max(n - 3, 1), 0.25);               % residual variance, at least (0.5 dB)^2
 g = (Ss - Sr) ./ s2;
 g(~isfinite(g)) = 0;
@@ -136,6 +141,23 @@ S.tau = reshape(tau(ia), E, 1);
 S.R = reshape(R(ia), E, 1);
 S.glr = reshape(g, E, 1);
 S.R_ramp = reshape(R(jr(ir)), E, 1);
+end
+
+function Z = fit_grid(n)
+% The onset grid of fit for n cycles (onsets tau, lengths R, centred fall shapes Hc, their
+% sums of squares Sxx, the steps st and their columns), kept for the last n.
+persistent n0 Z0
+if isempty(n0) || n ~= n0
+    [tau, R] = ndgrid(2:n, 1:2 * n);
+    tau = tau(:)'; R = R(:)';
+    t = (1:n)';
+    H = min(1, max(0, (t - tau + 1) ./ R));                % n x M fall shapes
+    Hc = H - mean(H, 1);
+    Sxx = sum(Hc .^ 2, 1)';                                % M x 1
+    st = R == 1;
+    Z0 = struct('tau', tau, 'R', R, 'Hc', Hc, 'Sxx', Sxx, 'st', st, 'js', find(st), 'jr', find(~st)); n0 = n;
+end
+Z = Z0;
 end
 
 function [st, pf, cause] = latch(st, g, pf, classes, heal, thr, C_LOST, K_DIAG, N_HIST)
@@ -171,7 +193,7 @@ for e = on
     end
 end
 cause = st.cause;
-classes = cellstr(string(classes));
+classes = class_list(classes);
 iF = find(strcmp(classes, 'antenna_fault'), 1); iS = find(strcmp(classes, 'airframe_shadowing'), 1);
 if isempty(iF) || isempty(iS), return; end
 [~, k] = max(pf, [], 2);
@@ -183,6 +205,15 @@ if any(m)
     pf(find(m), iF) = tot .* ~sh; %#ok<FNDSB>
     pf(find(m), iS) = tot .* sh; %#ok<FNDSB>
 end
+end
+
+function c = class_list(classes)
+% cellstr(string(classes)), kept for the last list.
+persistent in out
+if isempty(out) || ~isequal(classes, in) || ~strcmp(class(classes), class(in))
+    out = cellstr(string(classes)); in = classes;
+end
+c = out;
 end
 
 function [pf, cause] = sequence(G, pf, classes, heal, thr)

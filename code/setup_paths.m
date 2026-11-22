@@ -4,6 +4,6 @@ function root = setup_paths()
 %   parallel workers and the tests.
 code = fileparts(mfilename('fullpath'));
 root = fileparts(code);
-sub = {'', 'link', 'detection', 'decision', 'evaluation', 'gui', fullfile('gui', 'viz3d'), 'diagnostics'};
+sub = {'', 'link', 'detection', 'decision', 'evaluation', fullfile('evaluation', 'side'), 'gui', fullfile('gui', 'viz3d'), 'diagnostics'};
 addpath(strjoin(cellfun(@(s) fullfile(code, s), sub, 'UniformOutput', false), pathsep));
 end
