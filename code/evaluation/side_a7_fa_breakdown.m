@@ -25,7 +25,7 @@ if ~isempty(h)
         tok = regexp(sec{i}, '(\d+)/(\d+)', 'tokens');
         nm = strtrim(regexprep(sec{i}, '\s+\d+/\d+.*$', ''));
         if numel(tok) < 2, continue; end
-        kn = cellfun(@(c) str2double(c), tok);
+        kn = str2double([tok{:}]);
         kk = reshape(kn, 2, [])';
         rows(end+1) = struct('policy', nm, 'k', kk(1:end-1, 1)', 'n', kk(1:end-1, 2)', 'k_all', kk(end, 1), 'n_all', kk(end, 2), ...
             'sum_ok', sum(kk(1:end-1, 1)) == kk(end, 1) && sum(kk(1:end-1, 2)) == kk(end, 2)); %#ok<AGROW>
