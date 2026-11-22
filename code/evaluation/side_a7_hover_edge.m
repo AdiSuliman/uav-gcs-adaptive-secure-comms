@@ -9,8 +9,9 @@ function S = side_a7_hover_edge(edge_mat, budget_txt, out_dir)
 %   saved targets and B) are replayed on the saved hover flights of each (threat, level, Eb/N0): DET, SURV, REC, PROT
 %   and SYSTEM = DET, SURV, REC and the false-alarm bound. The pooled replay is compared with the saved band verdicts.
 %   COMMITTED needs at least n_min flights (36): a single Eb/N0 holds fewer hover flights, so it can end only
-%   UNDETERMINED or NOT COMMITTED. A pooled COMMITTED claim covers every Eb/N0 from the threshold up, so its distance is
-%   that of the threshold's Eb/N0 (the farthest).
+%   UNDETERMINED or NOT COMMITTED. A pooled COMMITTED claim holds on the hover flights pooled over every Eb/N0 from the
+%   threshold up, so it covers that distance range as a whole, with no claim at any single distance in it.
+%   REC and PROT are read as edge_map.m reads them: per flight unless the saved targets set held_flight (held_verdict.m).
 if ~isfile(edge_mat), error('side_a7:input', 'side_a7_hover_edge: %s not found', edge_mat); end
 if ~isfile(budget_txt), error('side_a7:input', 'side_a7_hover_edge: %s not found', budget_txt); end
 w = {whos('-file', edge_mat).name};
@@ -45,7 +46,8 @@ ib = find(strcmp({BD.name}, bh.name), 1);
 notes = {sprintf('hover band: %s (edge-speed split, flight set %d); deployed policy column %d of the static variants at delay %g cycles', bh.name, SPEED, v1, EM.delays(1)), ...
     sprintf('targets %s; B = %d bootstrap resamples; false-alarm bound met on validation: %d', targets_txt(TGT), B, FAV), ...
     sprintf('distance: EM.km (link_distance_km.m, tracked antenna) against %s, 15 m row: largest difference %.3f km', budget_txt, dkm), ...
-    sprintf('pooled hover band: Eb/N0 >= %g dB (EM.ebno_thr); a pooled COMMITTED claim reaches the distance of that Eb/N0', EM.ebno_thr)};
+    sprintf('pooled hover band: Eb/N0 >= %g dB (EM.ebno_thr), %.2f-%.2f km; a pooled COMMITTED claim holds on that range as a whole, not at each distance in it', EM.ebno_thr, min(km(eb >= EM.ebno_thr)), max(km(eb >= EM.ebno_thr))), ...
+    sprintf('REC and PROT read per flight: %d (saved targets: held_flight %s)', hf_of(TGT), field_txt(TGT, 'held_flight'))};
 L = side_header('C2: hover per Eb/N0 as distance (edge map)', edge_mat, notes);
 L{end+1} = sprintf('Eb/N0 [dB] and distance [km]: %s', strjoin(arrayfun(@(e, k) sprintf('%g dB %.2f km', e, k), eb, km, 'UniformOutput', false), ' | '));
 L{end+1} = 'Symbols: C COMMITTED, U UNDETERMINED, N NOT COMMITTED, - no hover flight. Layers D S R P = DET, SURV, REC, PROT; SYS = SYSTEM.';
@@ -79,7 +81,7 @@ for r = rows
 end
 L{end+1} = '';
 names = {'DET', 'SURV', 'REC', 'PROT', 'SYSTEM'};
-L{end+1} = 'Largest distance with a COMMITTED hover verdict, by layer (per Eb/N0 replay | pooled band, distance of the threshold Eb/N0):';
+L{end+1} = 'Largest distance with a COMMITTED hover verdict, by layer (per Eb/N0 replay | pooled band: the range it covers as a whole):';
 best = nan(5, 2);
 for k = 1:5
     dk = nan; dp = nan;
@@ -88,7 +90,8 @@ for k = 1:5
         if r.pooled(k) == 1, dp = max([dp km(eb == EM.ebno_thr)]); end
     end
     best(k, :) = [dk dp];
-    L{end+1} = sprintf('  %-7s per Eb/N0: %s | pooled: %s', names{k}, km_txt(dk), km_txt(dp)); %#ok<AGROW>
+    if isnan(dp), ptx = 'none'; else, ptx = sprintf('%.2f-%.2f km as a whole (%d rows)', min(km(eb >= EM.ebno_thr)), dp, sum(arrayfun(@(r) r.pooled(k) == 1, rows))); end
+    L{end+1} = sprintf('  %-7s per Eb/N0: %s | pooled: %s', names{k}, km_txt(dk), ptx); %#ok<AGROW>
 end
 nfl_all = unique(cell2mat(arrayfun(@(r) r.n(r.n > 0), rows, 'UniformOutput', false)));
 L{end+1} = sprintf('Hover flights per (threat, level, Eb/N0): %s (COMMITTED needs at least %d)', mat2str(nfl_all), 36);
@@ -112,12 +115,23 @@ function v = layers(F, v1, TGT, B, FAV)
 det = det_layers(F, TGT, B);
 sv = surv_layer(F, 'surv', TGT, B);
 s = logical(F.surv);
-rec = edge_verdict(F.held_k(s, v1), F.ep_n(s, v1), F.geo(s), TGT.rec, 'ge', true, B);
-prot = edge_verdict(F.held_k(:, v1), F.ep_n(:, v1), F.geo, TGT.prot, 'ge', true, B);
+hf = hf_of(TGT);
+rec = held_verdict(F.held_k(s, v1), F.ep_n(s, v1), F.geo(s), TGT.rec, hf, B);
+prot = held_verdict(F.held_k(:, v1), F.ep_n(:, v1), F.geo, TGT.prot, hf, B);
 p = [det.verdict, sv.verdict, rec.verdict, prot.verdict];
 sysv = [p(1:3), FAV];
 if all(sysv == 1), y = 1; elseif any(sysv == -1), y = -1; else, y = 0; end
 v = [p(:); y];
+end
+
+function hf = hf_of(TGT)
+% Per-flight held reading unless the saved targets say otherwise (edge_map.m pol_layers).
+hf = true;
+if isfield(TGT, 'held_flight'), hf = logical(TGT.held_flight); end
+end
+
+function s = field_txt(T, f)
+if isfield(T, f), s = mat2str(T.(f)); else, s = 'not saved'; end
 end
 
 function m = in_band(F, b)
