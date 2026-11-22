@@ -95,10 +95,28 @@ function test_route_gains_where_cue_informs(tc)
 R = side_a5_ood_route(tc.TestData.fold_dir, tc.TestData.sel, fullfile(tc.TestData.tmp, 'o2'), struct('nb', 50));
 ip = strcmp(R.held_out, 'path_loss'); j1 = strcmp(R.CN, 'R1');
 tc.verifyGreaterThan(R.A(ip, j1), R.A(ip, 1) + 0.2);       % routed to the cue, which separates path loss
-ie = strcmp(R.held_out, 'jamming');
-tc.verifyLessThan(abs(R.A(ie, j1) - R.A(ie, 1)), 0.05);    % routed to s0
 tc.verifyEqual(numel(R.nest), 3);
 tc.verifyTrue(all(ismember(R.nest_pick, R.CN)));
+end
+
+function test_route_emitter_category_keeps_s0_order(tc)
+% Held-out jamming: every window goes to the emitter category, where R1 is s0's Mondrian p-value,
+% so against the known windows of that category R1 orders the windows as s0 does. Against all
+% known windows R1 differs from s0: the other categories' known windows carry their own p-values.
+d = load(fullfile(tc.TestData.fold_dir, 'fold_1.mat'));
+tc.assertEqual(d.k, 'jamming');
+S = load(tc.TestData.sel, 'NW');
+Q = side_a5_ood_route('route', d, S.NW, {'none', 'path_loss', 'antenna_fault', 'airframe_shadowing'});
+un = d.F.un(:); kn = d.F.kn(:); kE = kn & Q.d.ct == 1;
+fprintf('jamming windows routed to s0: %.1f%%; known windows in the s0 category: %d of %d
+', ...
+    100 * mean(Q.d.ct(un) == 1), sum(kE), sum(kn));
+aE0 = ood_k2_rules('auroc', d.Wv(kE, 1), d.Wv(un, 1)); aE1 = ood_k2_rules('auroc', Q.u.R1(kE), Q.u.R1(un));
+a0 = ood_k2_rules('auroc', d.Wv(kn, 1), d.Wv(un, 1)); a1 = ood_k2_rules('auroc', Q.u.R1(kn), Q.u.R1(un));
+fprintf('AUROC vs known in the s0 category: s0 %.3f, R1 %.3f; vs all known: s0 %.3f, R1 %.3f
+', aE0, aE1, a0, a1);
+tc.verifyEqual(mean(Q.d.ct(un) == 1), 1);
+tc.verifyLessThan(abs(aE1 - aE0), 0.02);                  % monotone within the category (ties from the discrete p)
 end
 
 function test_route_full_window_share(tc)

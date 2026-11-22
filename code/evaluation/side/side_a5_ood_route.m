@@ -18,6 +18,11 @@ function R = side_a5_ood_route(fold_dir, select_mat, out_dir, opts)
 %   AUROC: lower = more novel, the selection half's known windows against the held-out threat's
 %   windows (ood_k2_rules 'auroc'). Bootstrap: D111's sub-run resampling within each threat and
 %   seeds (9800 + h), so C0's draws equal the saved Bd.
+%   Q = side_a5_ood_route('route', F0, NW, nonemit)   one fold's R1/R1g (Q.u) and router (Q.d), F0 as
+%   loaded from a fold file
+if ischar(fold_dir) && strcmp(fold_dir, 'route')
+    [u, d] = route_stat(select_mat, out_dir, opts); R = struct('u', u, 'd', d); return;
+end
 if nargin < 4, opts = struct(); end
 nb = getf(opts, 'nb', 2000);
 nonemit = getf(opts, 'nonemit', {'none', 'path_loss', 'antenna_fault', 'airframe_shadowing'});
@@ -130,6 +135,7 @@ for c = 1:3
 end
 u.R1 = mondrian_nan(u.R1, s0);
 u.R1g = p0; u.R1g(ct == 3) = c3(ct == 3);
+d.N = N; d.ct = ct;
 d.un_N = mean(N(F0.F.un(:))); d.kn_N = mean(N(F0.F.kn(:))); d.kn_Nfull = mean(full(F0.F.kn(:) & N));
 end
 
