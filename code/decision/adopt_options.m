@@ -123,8 +123,9 @@ s = '';
 if ~is_on(A), return; end
 if nargin >= 2 && strcmp(scope, 'dqn')
     if ~has_dqn(A), return; end
-    s = sprintf(['Adopted settings (CFG.adopt): the deployed DQN''s hop layer dqn_hop=%s in the DQN + link-budget ' ...
-        'completion (hybrid) columns; every other column is read as registered.'], A.dqn_hop);
+    s = sprintf(['Adopted settings (CFG.adopt): the deployed DQN''s hop layer dqn_hop=%s in the deployed policy''s ' ...
+        'DQN + link-budget completion (hybrid) columns; a never-trained agent''s column with it is descriptive and not ' ...
+        'registered; every other column is read as registered.'], A.dqn_hop);
     return
 end
 parts = {};

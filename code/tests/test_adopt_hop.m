@@ -166,15 +166,17 @@ for f = {'results/combo_generalization.mat', 'results/edge_map.mat', 'results/la
     verifyTrue(tc, isfile(fullfile(X.off, f{1})), ['off ' f{1}]);
 end
 for f = {'results/combo_generalization.mat', 'results/edge_map.mat', 'results/latency.mat', 'results/policy_evaluation.mat', ...
-        'results/link_budget.mat', 'data/unknown_threat_agents.mat'}
+        'results/link_budget.mat', 'results/unknown_threat_policy.mat'}
     verifyFalse(tc, isfile(fullfile(X.on, f{1})), ['on ' f{1}]);
 end
 verifyTrue(tc, isfile(fullfile(X.on, 'results', 'a.txt')));
-verifyTrue(tc, java.nio.file.Files.isSameFile(jp(fullfile(X.on, 'data', 'trained_dqn.mat')), jp(fullfile(W.tree, 'data', 'trained_dqn.mat'))));
-verifyTrue(tc, java.nio.file.Files.isSameFile(jp(fullfile(X.off, 'data', 'unknown_threat_agents.mat')), ...
-    jp(fullfile(W.tree, 'data', 'unknown_threat_agents.mat'))));
+for r = {X.off, X.on}                                             % every data file linked, the kept agents included
+    for f = {'trained_dqn.mat', 'unknown_threat_agents.mat'}
+        verifyTrue(tc, java.nio.file.Files.isSameFile(jp(fullfile(r{1}, 'data', f{1})), jp(fullfile(W.tree, 'data', f{1}))), f{1});
+    end
+end
 verifyFalse(tc, java.io.File(fullfile(W.tree, 'data', 'trained_dqn.mat')).canWrite());
-verifyTrue(tc, contains(fileread(X.ovt), 'unknown_threat_agents.mat'));
+verifyTrue(tc, contains(fileread(X.ovt), 'read-only'));
 verifyEqual(tc, tree_state(W.tree), s0);
 verifyEqual(tc, tree_state(W.base), b0);                         % the base overlay is read only
 verifyError(tc, @() adopt_reading('hop_overlay', W.tag, W.tree, W.O), 'adopt_reading:exists');
@@ -304,13 +306,28 @@ write_text(fullfile(s, 'hop_probe_script.m'), sprintf(['fid = fopen(''probe.txt'
     'back = 1; c0 = 2;\n']));
 addpath(s); cl = onCleanup(@() rmpath(s)); %#ok<NASGU>
 c0 = pwd;
-err = adopt_reading('run_in', d, 'hop_probe_script', struct('adopt', struct('dqn_hop', 'rule')));
-verifyEqual(tc, err, '');
+R = adopt_reading('run_in', d, 'hop_probe_script', struct('adopt', struct('dqn_hop', 'rule')), {'back', 'none_such'});
+verifyEqual(tc, R.err, '');
+verifyEqual(tc, R.W, struct('back', 1));                         % the variables kept that the script left
 verifyEqual(tc, pwd, c0);
 verifyEqual(tc, fileread(fullfile(d, 'probe.txt')), 'rule');
 write_text(fullfile(s, 'hop_fail_script.m'), 'error(''probe:x'', ''stopped'');');
-verifyEqual(tc, adopt_reading('run_in', d, 'hop_fail_script', struct()), 'stopped');
+verifyEqual(tc, adopt_reading('run_in', d, 'hop_fail_script', struct()).err, 'stopped');
 verifyEqual(tc, pwd, c0);
+end
+
+function test_failed_attempt_kept_apart(tc)
+% c2gu, edge and lat: a failed attempt is kept under its own name and the stage may run again.
+W = world(tc);
+adopt_reading('hop_overlay', W.tag, W.tree, W.O);
+X = adopt_reading('hop_paths', W.tag, W.O);
+bad = struct('file', 'x', 'ok', false, 'why', 'stopped');
+verifyError(tc, @() adopt_reading('verdict_try', X, 'c2gu', bad, struct()), 'adopt_reading:c2gu');
+verifyFalse(tc, isfile(X.v.c2gu));
+verifyNotEmpty(tc, dir(fullfile(X.dir, 'c2gu_failed_*.json')));
+verifyNotEmpty(tc, dir(fullfile(X.dir, 'c2gu_failed_*.txt')));
+V = adopt_reading('verdict_try', X, 'c2gu', struct('file', 'x', 'ok', true, 'why', 'read'), struct());
+verifyTrue(tc, V.pass && isfile(X.v.c2gu));
 end
 
 %% ---------- guards ----------
@@ -362,17 +379,66 @@ function test_hybrid_rows(tc)
 mk = @(c, v) struct('combo', c, 'n', 10, 'dqn_out', 0.5, 'dqn_in', 0.9, 'rule', 0.8, 'table', 0.7, 'ci_out', [0.4 0.6], ...
     'ci_in', [0.8 1], 'dqn_out_lb', v, 'dqn_in_lb', v + 0.1, 'ci_out_lb', [0 1], 'ci_in_lb', [0 1]);
 r0 = [mk('jamming+path_loss', 0.6), mk('spoofing+noise_burst', 0.7)];
-r = r0; r(1).dqn_in_lb = 0.95;
-R = adopt_reading('hybrid_rows', 'C2g', r, r0, 'combo');
-verifyTrue(tc, all([R.ok]));
+rr = {'dqn_in_lb', 'ci_in_lb'};
+g = rmfield(r0, {'dqn_out', 'ci_out', 'dqn_out_lb', 'ci_out_lb'});   % C2g's reading: the deployed agent only
+g(1).dqn_in_lb = 0.95;
+H = adopt_reading('hybrid_rows', 'C2g', g, r0, 'combo', rr); R = H.rows; mv = H.moved;
+verifyTrue(tc, all([R.ok])); verifyEqual(tc, mv, 1);
 verifyTrue(tc, contains(R(3).why, 'jamming+path_loss') && ~contains(R(3).why, 'spoofing'));
-r = r0; r(2).dqn_out = 0.1;                                      % a retrained agent not reproduced
-R = adopt_reading('hybrid_rows', 'C2g', r, r0, 'combo');
+verifyTrue(tc, contains(R(1).why, 'table') && ~contains(R(1).why, 'dqn_out'));
+h = g; h(2).dqn_in = 0.1;                                        % a column read again without the layer moved
+R = adopt_reading('hybrid_rows', 'C2g', h, r0, 'combo', rr).rows;
 verifyFalse(tc, R(2).ok);
-r = r0(1);
-verifyFalse(tc, all([adopt_reading('hybrid_rows', 'C2g', r, r0, 'combo').ok]));
+verifyFalse(tc, all([adopt_reading('hybrid_rows', 'C2g', g(1), r0, 'combo', rr).rows.ok]));
 s0 = rmfield(r0, {'dqn_out_lb', 'dqn_in_lb', 'ci_out_lb', 'ci_in_lb'});   % no hybrid columns registered
-verifyFalse(tc, all([adopt_reading('hybrid_rows', 'C2g', s0, s0, 'combo').ok]));
+verifyFalse(tc, all([adopt_reading('hybrid_rows', 'C2g', s0, s0, 'combo', rr).rows.ok]));
+H = adopt_reading('hybrid_rows', 'C2u', r0, r0, 'combo', {'dqn_out_lb', 'dqn_in_lb', 'ci_out_lb', 'ci_in_lb'}); R = H.rows; mv = H.moved;
+verifyTrue(tc, all([R.ok])); verifyEqual(tc, mv, 0);              % nothing moved: the stage's setting row fails
+end
+
+function test_edge_rows(tc)
+% The deployed policy's variant columns may move (and must); every other column and field is the registered one.
+VAR = struct('kind', {'single', 'single', 'clean'}, 'fd', {NaN, NaN, NaN}, 'D', {1, 1, 1}, 'pol', {1, 2, 1});
+T = @(k) struct('c', (1:4)', 's', [1 1 2 2]', 'det_k', [1 0 1 1]', 'ep_n', k + [1 2 3; 4 5 6; 7 8 9; 1 1 1], ...
+    'held_k', [1 1 1; 0 1 0; 1 0 1; 1 1 1], 'fa_k', zeros(4, 3), 'fa_n', ones(4, 3), 'sw_k', zeros(4, 3), ...
+    'rec_k', ones(4, 3), 'lt_k', zeros(4, 3), 'lt_n', ones(4, 3));
+E = struct('VAR', VAR, 'FT', T(0), 'CF', T(0), 'CS', T(0));
+N = E; N.FT.held_k(2, 1) = 1; N.CF.fa_k(1, 3) = 1;              % the deployed policy's columns
+r = adopt_reading('edge_rows', N, E);
+verifyTrue(tc, all([r.ok]), strjoin({r(~[r.ok]).why}, ' | '));
+verifyTrue(tc, contains(r(end).why, '2 values'));
+P = N; P.FT.held_k(2, 2) = 9;                                    % another policy's column
+verifyFalse(tc, all([adopt_reading('edge_rows', P, E).ok]));
+P = N; P.CS.det_k(1) = 0;                                        % a policy-free field
+verifyFalse(tc, all([adopt_reading('edge_rows', P, E).ok]));
+P = N; P.VAR(2).pol = 3;
+verifyFalse(tc, all([adopt_reading('edge_rows', P, E).ok]));
+r = adopt_reading('edge_rows', E, E);                             % nothing moved
+verifyFalse(tc, r(end).ok); verifyTrue(tc, all([r(1:end-1).ok]));
+end
+
+function test_replica_mirrors_the_experiments(tc)
+% The c2gu reading flies the experiments' episodes, draws, options and bootstrap seeds.
+a = strrep(fileread(which('adopt_reading')), char(13), '');
+g = strrep(fileread(which('experiment_combo_generalization')), char(13), '');
+u = strrep(fileread(which('experiment_unknown_threat')), char(13), '');
+verifyNotEmpty(tc, strfind(g, 'RandStream(''mt19937ar'', ''Seed'', 300 + ci)'));
+verifyNotEmpty(tc, strfind(a, 'RandStream(''mt19937ar'', ''Seed'', 300 + ci), false)'));
+verifyNotEmpty(tc, strfind(u, 'RandStream(''mt19937ar'', ''Seed'', 500 + 100 * sp + ti)'));
+verifyNotEmpty(tc, strfind(a, 'RandStream(''mt19937ar'', ''Seed'', 500 + 100 * sp + ti), true)'));
+verifyNotEmpty(tc, strfind(g, '''unk'', false(1, NE)')); verifyNotEmpty(tc, strfind(u, '''unk'', true(1, NE)'));
+for t = {'specs{b} = struct(''scn'', cc(i), ''s'', s(i), ''r'', r(i), ''onset'', randi(rs, [3 10], 1, NE), ...', ...
+        '[cc, s, r] = flight_triples(c(:)'', rr, 1:nS);', 'k_ = mod(0:n + pad - 1, n) + 1; cc = cc(k_); s = s(k_); r = r(k_);', ...
+        'R.threat = R.threat(1:n) & ~strcmp(PP.scen(specs{1}.scn(1)), ''none'');', ...
+        'if LBC, opt0 = struct(''monitor'', struct(''lb_complete'', false)); end', 'o.agent = dqn_dense(ag);', ...
+        'threats = setdiff(PP.singles, {''none''}, ''stable'');'}
+    verifyTrue(tc, contains(g, t{1}) || contains(u, t{1}), t{1});
+end
+for k = 1:4
+    verifyNotEmpty(tc, strfind(u, sprintf('2000, %d);', k))); verifyNotEmpty(tc, strfind(a, sprintf('2000, %d);', k)));
+end
+verifyNotEmpty(tc, strfind(a, 'if isfield(ag, ''dense''), ag = rmfield(ag, ''dense''); end'));
+verifyNotEmpty(tc, strfind(fileread(which('dqn_dense')), 'agent.dense = struct('));   % the matrix form is a field beside the network
 end
 
 %% ---------- helpers ----------

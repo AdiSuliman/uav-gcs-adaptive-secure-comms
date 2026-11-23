@@ -1916,7 +1916,7 @@ q = cellfun(@(x) str2double(x{1}), regexp(src, 'RandStream\(''mt19937ar'', ''See
 verifyEqual(tc, numel(unique(q)), numel(q));
 verifyEqual(tc, sum(q == 2075), 1);
 f = dir(fullfile(tc.TestData.root, 'code', '**', '*.m'));
-f = f(~contains({f.folder}, [filesep 'tests']) & ~strcmp({f.name}, 'evaluate_policies.m'));
+f = f(~contains({f.folder}, [filesep 'tests']) & ~ismember({f.name}, {'evaluate_policies.m', 'adopt_reading.m'}));   % adopt_reading.m replays single2's draws (hop_off)
 verifyEmpty(tc, f(cellfun(@(n, d) ~isempty(regexp(fileread(fullfile(d, n)), '(Seed''|rng\()\s*,?\s*2075\>', 'once')), ...
     {f.name}, {f.folder})), 'Seed 2075');
 b = cellfun(@(x) str2double(x{1}), regexp(src, 'policy_run_set\([^\n]*opt, (\d{5})', 'tokens'));
@@ -5885,7 +5885,7 @@ for i = 1:numel(f)
     src = regexprep(fileread(fullfile(f(i).folder, f(i).name)), '%[^\n]*', '');   % code only, no comments
     if ~isempty(regexp(src, '\.fec\>|''fec''', 'once')), rd{end+1} = f(i).name; end %#ok<AGROW>
 end
-verifyEqual(tc, sort(rd), {'apply_countermeasure.m', 'closed_loop_truth.m', 'pool_configs.m'});
+verifyEqual(tc, sort(rd), {'apply_countermeasure.m', 'closed_loop_truth.m', 'dqn_fix.m', 'lb_complete.m', 'policy_decide.m', 'pool_configs.m', 'rule_fix.m', 'rule_fix_reading.m', 'weak19_reading.m'});   % the others name a field 'fec' of their own switches, not p.fec
 end
 
 function n = twin_of(a)

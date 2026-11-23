@@ -53,7 +53,7 @@ function out = adopt_reading(stage, varargin)
 %   hop reading's selection.json and test.mat (default results/weak19/<tag> of root).
 %   adopt_reading('hop_overlay', tag, tree, O)   as overlay, the manifest listing both adoptions and
 %       the base overlay (the SHA-256 of its adopted policy_evaluation.mat); on/ also leaves out
-%       the outputs of C2g, C2u, EDGE and LAT, and data/unknown_threat_agents.mat (C2u writes it)
+%       the outputs of C2g, C2u, EDGE and LAT
 %   adopt_reading('hop_off', tag, tree, O)   in off/, at 8 threads: the code differs from the tree's
 %       only in the adoptions' own files; the deployed row of evaluate_policies.m's first six sets
 %       and of single2 run again with every layer off, isequaln to the registered rows; then the
@@ -66,12 +66,15 @@ function out = adopt_reading(stage, varargin)
 %   adopt_reading('hop_gate', tag, tree, O)   the hop reading confirmed on its fresh test set
 %       (test.mat verdict), frozen on this tree and the rule fix's setting (the tree's frozen copy
 %       equal), the DQN deployed under both
-%   adopt_reading('hop_c2gu', tag, tree, O)   C2g then C2u in on/ (8 threads): the hybrid columns carry
-%       the hop layer; every other column, the retrained agents (through their columns) and every
-%       leave-one-out agent isequaln to the registered files. Started again after a stop, an
-%       experiment whose outputs are whole is kept (run_cache keeps the finished entities)
-%   adopt_reading('hop_edge', tag, tree, O)   edge_map.m in on/ (8 threads): FT, CF, CS, VAR and
-%       link_budget as registered; EM with the hop layer on the deployed policy
+%   adopt_reading('hop_c2gu', tag, tree, O)   the hybrid columns of C2g and C2u read again in on/
+%       with the hop layer on agents that exist, no retraining (8 threads, or O.threads): C2g's
+%       deployed agent (the never-trained column stays registered), C2u's kept leave-one-out agents
+%       and the deployed one; every column read again without the layer isequaln to the
+%       registered file; some hybrid value moves. The files: the registered ones with the hybrid
+%       columns replaced, the text with the reading beside it
+%   adopt_reading('hop_edge', tag, tree, O)   edge_map.m in on/ (8 threads): VAR, link_budget and
+%       FT, CF, CS as registered but the deployed policy's variant columns, which must move
+%   c2gu, edge and lat keep a failed attempt as <stage>_failed_<time>.json/.txt and may run again
 %   adopt_reading('hop_lat', tag, tree, O)   measure_latency.m in on/: the deployed chain with the
 %       hop layer, timed once; the detector and the stamp the registered ones
 %   adopt_reading('hop_render', tag, tree, O)   the renderers in on/, no stale file added
@@ -81,7 +84,8 @@ function out = adopt_reading(stage, varargin)
 %   hop_render, each once (C2u writes the leave-one-out agents the edge map reads).
 %   Helpers: X = adopt_reading('paths', tag, O); G = adopt_reading('guard_c2e', N, E, T, opt)
 %   (opt.lect_strict, default true); X = adopt_reading('hop_paths', tag, O); K = adopt_reading('hop_reg');
-%   G = adopt_reading('guard_hop', N, E, D); r = adopt_reading('hybrid_rows', name, res, res0, key);
+%   G = adopt_reading('guard_hop', N, E, D); H = adopt_reading('hybrid_rows', name, res, res0, key, reread) (H.rows, H.moved);
+%   r = adopt_reading('edge_rows', N, E); R = adopt_reading('run_in', root, name, CFG, keep) (R.err, R.W);
 %   [ok, why] = adopt_reading('confirmed', T, step) (out: struct ok, why);
 %   S = adopt_reading('hop_selection', Sh_dir, tag, tree, rf);
 %   C = adopt_reading('compare', a, b); adopt_reading('write_once', f, lines);
@@ -107,9 +111,11 @@ switch stage
     case 'hop_paths',  out = paths_hop(varargin{:});
     case 'hop_reg',    out = reg_hop();
     case 'guard_hop',  out = guard_hop(varargin{:});
-    case 'hybrid_rows', out = hybrid_rows(varargin{:});
+    case 'hybrid_rows', [h1, h2] = hybrid_rows(varargin{:}); out = struct('rows', h1, 'moved', h2);
     case 'confirmed',  [ok, why] = confirmed(varargin{:}); out = struct('ok', ok, 'why', why);
-    case 'run_in',     out = run_in(varargin{:});
+    case 'run_in',     [e1, w1] = run_in(varargin{:}); out = struct('err', e1, 'W', w1);
+    case 'edge_rows',  out = edge_rows(varargin{1}, varargin{2}, reg_hop());
+    case 'verdict_try', out = verdict_try(varargin{:});
     case 'hop_selection', out = check_hop_selection(hop_sources(varargin{1}), varargin{2}, canon(varargin{3}), varargin{4});
     case 'paths',      out = paths(varargin{:});
     case 'guard_c2e',  out = guard_c2e(varargin{:});
@@ -640,10 +646,8 @@ end
 function K = reg_hop()
 K = reg();
 K.stages = {'overlay', 'off', 'c2e', 'gate', 'c2gu', 'edge', 'lat', 'render'};
-K.c2gu_res = {'results/combo_generalization.txt', 'results/combo_generalization.mat', ...
+K.c2gu_out = {'results/combo_generalization.txt', 'results/combo_generalization.mat', ...
     'results/unknown_threat_policy.txt', 'results/unknown_threat_policy.mat'};
-K.c2gu_data = {'data/unknown_threat_agents.mat'};
-K.c2gu_out = [K.c2gu_res, K.c2gu_data];
 K.edge_out = {'results/edge_map.txt', 'results/edge_map.mat', 'results/edge_summary.txt', 'results/edge_bands.png', ...
     'results/edge_heatmap_det.png', 'results/edge_heatmap_surv.png', 'results/edge_heatmap_rec.png', ...
     'results/edge_heatmap_prot.png', 'results/edge_heatmap_system.png', 'results/edge_heatmap_commit.png', ...
@@ -656,7 +660,8 @@ K.may_differ = [K.may_differ, {'decision/dqn_fix.m', 'decision/lb_complete.m', '
     'evaluation/edge_map.m', 'evaluation/measure_latency.m'}];
 K.code_fns = [K.code_fns, {'dqn_fix', 'experiment_combo_generalization', 'experiment_unknown_threat', 'edge_map', 'measure_latency'}];
 K.replay = {'single', 'follower', 'combined', 'unknown', 'clean', 'comb'};   % evaluate_policies.m's first sets
-K.edge_same = {'FT', 'CF', 'CS', 'VAR'};              % the flights and the runs: no policy in them
+K.edge_tables = {'FT', 'CF', 'CS'};                 % edge_map.mat's flight tables
+K.edge_var = {'ep_n', 'held_k', 'rec_k', 'lt_k', 'lt_n', 'fa_k', 'fa_n', 'sw_k'};   % their columns per VAR entry
 K.stale_add = {};                                     % every reader of the deployed rows is run again
 end
 
@@ -749,18 +754,15 @@ mkdir(X.dir);
 write_once(X.sha, H);
 dl = F(startsWith(F, 'data/'));
 ro0 = dl(cellfun(@(f) ~java.io.File(fullfile(tree, f)).canWrite(), dl));
-write_once(X.ovt, {sprintf(['The data files of off/ and on/ are hard links to %s/data, made read-only (on/ leaves out %s, ' ...
-    'which its c2gu stage writes). The attribute belongs to the file: those %d tree files are read-only too (contents and ' ...
-    'dates unchanged; %d were read-only before). adopt_reading(''hop_release'', ''%s'', tree) gives the attribute back ' ...
-    'and closes the overlay.'], tree, strjoin(K.c2gu_data, ', '), numel(dl), numel(ro0), tag)});
-left = struct('off', {K.render_out}, 'on', {[K.render_out, K.c2e_out, K.c2gu_res, K.edge_out, K.lat_out]});
-dleft = struct('off', {{}}, 'on', {K.c2gu_data});
+write_once(X.ovt, {sprintf(['The data files of off/ and on/ are hard links to %s/data, made read-only. The attribute ' ...
+    'belongs to the file: those %d tree files are read-only too (contents and dates unchanged; %d were read-only before). ' ...
+    'adopt_reading(''hop_release'', ''%s'', tree) gives the attribute back and closes the overlay.'], tree, numel(dl), numel(ro0), tag)});
+left = struct('off', {K.render_out}, 'on', {[K.render_out, K.c2e_out, K.c2gu_out, K.edge_out, K.lat_out]});
 for r = {'off', 'on'}
     root = X.(r{1});
     for i = 1:numel(F)
         src = fullfile(tree, F{i}); dst = fullfile(root, F{i});
-        if startsWith(F{i}, 'data/')
-            if ~ismember(F{i}, dleft.(r{1})), link_ro(src, dst); end
+        if startsWith(F{i}, 'data/'), link_ro(src, dst);
         elseif ~ismember(F{i}, left.(r{1})), copy_keep(src, dst); end
     end
 end
@@ -770,7 +772,7 @@ A2 = struct('name', 'dqn_hop', 'setting', S.adopted.dqn_hop, 'selection_sha256',
     'test_sha256', Sh.h.test, 'source', Sh.dir);
 M = struct('tag', tag, 'tree', tree, 'tree_head', tree_head(tree), 'checkout', X.root, 'checkout_head', tree_head(X.root), ...
     'checkout_code_sha256', code_sha(X.root), 'version', 2, 'adoptions', {{A1, A2}}, 'base', B, 'order', {K.stages}, ...
-    'roots', struct('off', 'off', 'on', 'on'), 'left_out', left, 'data_left_out', dleft, 'data_links', {dl}, ...
+    'roots', struct('off', 'off', 'on', 'on'), 'left_out', left, 'data_links', {dl}, ...
     'readonly_before', {ro0}, 'tree_sha256_file', 'tree_sha256.txt', 'tree_sha256_list', sha_file(X.sha), 'n_files', numel(F), ...
     'created', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
 write_once(X.man, {jsonencode(M, 'PrettyPrint', true)});
@@ -811,8 +813,9 @@ assert(~isempty(V) && isequal(V.pass, true), 'adopt_reading:order', 'adopt_readi
     what, stage, X.v.(stage));
 end
 
-function check_threads(K, what)
-nt = maxNumCompThreads;
+function check_threads(K, what, n)
+if nargin < 3, n = K.threads; end
+K.threads = n; nt = maxNumCompThreads;
 assert(nt == K.threads, 'adopt_reading:threads', ['adopt_reading: %s runs at %d threads, as the chain ran, and the ' ...
     'reproduction depends on it (maxNumCompThreads is %d; set maxNumCompThreads(%d))'], what, K.threads, nt, K.threads);
 end
@@ -1092,76 +1095,249 @@ end
 
 %% ----- hop: c2gu -----
 function V = hop_c2gu(tag, tree, O)
-% C2g and C2u in on/ with the adoption: their hybrid columns carry the hop layer; every other column,
-% the retrained agents and the leave-one-out agents isequaln to the registered ones. Started again
-% after a stop, an experiment whose outputs are whole is kept; run_cache keeps finished entities.
+% The hybrid (DQN + link-budget completion) columns of C2g and C2u read again in on/ with the hop
+% layer, on agents that exist: no retraining. C2g: the deployed agent (trained on every
+% combination) on each left-out combination's test flights, its episodes and draws as
+% experiment_combo_generalization.m flies them; the never-trained agents are not kept, so the
+% never-trained hybrid column stays the registered one (not read with the layer). C2u: the kept
+% leave-one-out agents (data/unknown_threat_agents.mat, evaluated as trained, without their
+% matrix form) and the deployed agent, as experiment_unknown_threat.m. Every column the reading
+% recomputes without the layer must equal the registered one; some hybrid value must move. A
+% failed attempt is kept apart and does not close the stage.
 if nargin < 3, O = struct(); end
 tree = canon(tree); [M, X] = open_hop(tag, tree, O); K = reg_hop();
 need(X, 'gate', 'the c2gu stage');
 assert(~isfile(X.v.c2gu), 'adopt_reading:exists', 'adopt_reading: %s exists; the c2gu stage runs once', X.v.c2gu);
 check_outputs(X, {'c2e'});
-check_threads(K, 'the c2gu stage');
+check_threads(K, 'the c2gu stage', opt_field(O, 'threads', K.threads));   % O.threads: the registered C2g/C2u count, if not C2e's
 check_tree(X, tree);
 [pok, pwhy] = path_ok(X, tree, K.code_fns);
 assert(pok, 'adopt_reading:path', 'adopt_reading: the c2gu stage is refused: %s, not from %s', pwhy, fullfile(X.root, 'code'));
-CFG = cfg_of(M);
+A = adopt_options(cfg_of(M));
 lg = start_log(X, 'c2gu'); %#ok<NASGU>
 H0 = read_lines(X.sha);
 rows = struct('file', {}, 'ok', {}, 'why', {});
-ex = {'experiment_combo_generalization', K.c2gu_res(1:2); 'experiment_unknown_threat', [K.c2gu_res(3:4), K.c2gu_data]};
-for k = 1:size(ex, 1)
-    have = all(cellfun(@(f) isfile(fullfile(X.on, f)), ex{k, 2}));
-    t0 = tic; err = '';
-    if ~have, err = run_in(X.on, ex{k, 1}, CFG); end
-    rows(end+1) = row(ex{k, 1}, isempty(err), sprintf('%s; %.1f min, %d threads', ternary(have, 'kept from an earlier start', ...
-        ternary(isempty(err), 'ran', err)), toc(t0) / 60, maxNumCompThreads)); %#ok<AGROW>
+t0 = tic; err = ''; G = []; U = [];
+c0 = cd(X.on);
+try
+    [G, U] = hybrid_read(A);
+catch e
+    err = e.message;
 end
+cd(c0);
+rows(end+1) = row('hybrid reading', isempty(err), sprintf('%s; %.1f min, %d threads', ternary(isempty(err), 'read', err), ...
+    toc(t0) / 60, maxNumCompThreads));
 rows(end+1) = row('tree SHA-256', isequal(hash_lines(tree, tree_files(tree)), H0), sprintf('%d files of results and inputs, before and after', numel(H0)));
+if isempty(err)
+    rows(end+1) = row('layer', strcmp(G.dqn_hop, A.dqn_hop) && strcmp(U.dqn_hop, A.dqn_hop), sprintf(['the hybrid options carry ' ...
+        'dqn_hop=%s (C2g), %s (C2u)'], G.dqn_hop, U.dqn_hop));
+    g0 = load(fullfile(tree, 'results', 'combo_generalization.mat'), 'res');
+    [r1, mv1] = hybrid_rows('C2g', G.res, g0.res, 'combo', {'dqn_in_lb', 'ci_in_lb'});
+    u0 = load(fullfile(tree, 'results', 'unknown_threat_policy.mat'));
+    [r2, mv2] = hybrid_rows('C2u', U.res, u0.res, 'threat', {'dqn_out_lb', 'dqn_in_lb', 'ci_out_lb', 'ci_in_lb'});
+    rows = [rows, r1, r2];
+    ep = isfield(u0, 'EP') && isequaln(strip_f(U.EP, {'out_lb', 'in_lb'}), strip_f(u0.EP, {'out_lb', 'in_lb'}));
+    rows(end+1) = row('C2u episodes', ep, 'every episode column but the hybrid ones isequaln to the registered EP');
+    rows(end+1) = row('setting applied', mv1 + mv2 > 0, sprintf('hybrid values moved: %d (C2g), %d (C2u)', mv1, mv2));
+end
 if all([rows.ok])
-    g = load(fullfile(X.on, 'results', 'combo_generalization.mat'), 'res'); g0 = load(fullfile(tree, 'results', 'combo_generalization.mat'), 'res');
-    rows = [rows, hybrid_rows('C2g', g.res, g0.res, 'combo')];
-    u = load(fullfile(X.on, 'results', 'unknown_threat_policy.mat')); u0 = load(fullfile(tree, 'results', 'unknown_threat_policy.mat'));
-    rows = [rows, hybrid_rows('C2u', u.res, u0.res, 'threat')];
-    ep = isfield(u, 'EP') && isfield(u0, 'EP') && isequaln(strip_lb(u.EP), strip_lb(u0.EP));
-    rows(end+1) = row('C2u episodes', ep, 'every episode''s columns but the hybrid ones isequaln to the registered EP');
-    a = load(fullfile(X.on, K.c2gu_data{1})); a0 = load(fullfile(tree, K.c2gu_data{1}));
-    rows(end+1) = row('C2u agents', isequaln(a, a0), sprintf('%s: %s', K.c2gu_data{1}, ternary(isequaln(a, a0), ...
-        'every leave-one-out agent isequaln to the registered file', ['differs: ' strjoin(diff_fields(a, a0), ', ')])));
+    write_hybrid(X.on, tree, G, U, A);
+    for f = K.c2gu_out
+        rows(end+1) = row(f{1}, isfile(fullfile(X.on, f{1})), 'written'); %#ok<AGROW>
+    end
 end
-V = verdict(X, 'c2gu', rows, struct('outputs', {out_hashes(X.on, K.c2gu_out)}, 'threads', maxNumCompThreads, ...
+V = verdict_try(X, 'c2gu', rows, struct('outputs', {out_hashes(X.on, K.c2gu_out)}, 'threads', maxNumCompThreads, ...
     'code_sha256', M.checkout_code_sha256));
-if ~V.pass, error('adopt_reading:c2gu', 'adopt_reading: the c2gu stage failed its guards (see %s)', X.t.c2gu); end
 end
 
-function rows = hybrid_rows(name, res, res0, key)
-% res against the registered res0: the same entities; every field but the hybrid (_lb) ones
-% isequaln (the retrained agents reproduced); the hybrid fields present, those that moved named.
-rows = struct('file', {}, 'ok', {}, 'why', {});
-same = isequal(size(res), size(res0)) && isequal({res.(key)}, {res0.(key)});
-f = fieldnames(res0); lb = f(endsWith(f, '_lb'));
-rows(end+1) = row([name ' entities'], same && ~isempty(lb) && isequal(sort(fieldnames(res)), sort(f)), ...
-    sprintf('%d %s entities, hybrid fields %s', numel(res0), key, ternary(isempty(lb), 'none (no hybrid columns registered)', strjoin(lb', ', '))));
-if ~same, return; end
-bad = {}; mv = {};
+function [G, U] = hybrid_read(A)
+% In the on root: the hybrid columns of C2g (the deployed agent) and C2u (the kept agents and the
+% deployed one) with the DQN layers of A, beside every column they share with the registered
+% reading, read again without them.
+L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
+Q = load('data/trained_dqn.mat', 'agent', 'H', 'norm_in', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db', 'det_id', 'maha_thr', ...
+    'dec', 'deployed');
+check_det_id(PP, Q, 'adopt_reading');
+PP = decision_settings(PP, Q);
+DK = dqn_selected_kind(Q);
+LBC = isfield(Q, 'dec') && isstruct(Q.dec) && isfield(Q.dec, 'lb_complete');
+assert(LBC, 'adopt_reading:c2gu', 'adopt_reading: C2 stored no link-budget completion: there are no hybrid columns');
+K = link_env('tables', PP);
+TEST = 3; TEST2 = 5; NE = 64; REPS = 2;
+H = Q.H; nS = numel(PP.ebno);
+opt0 = struct('monitor', struct('lb_complete', false));
+opt1 = adopt_options('dqn', A, struct('monitor', struct('lb_complete', true)));
+% C2g: experiment_combo_generalization.m one_combo, the deployed agent
+combos = PP.combos;
+G = struct('dqn_hop', field_or(opt1.monitor, 'dqn_hop', ''), 'res', struct([]));
+for ci = 1:numel(combos)
+    c = find(strcmp(PP.scen, combos{ci}));
+    PPx = PP;
+    if isfield(PPx, 'lb_complete'), PPx.lb_complete = false; end
+    if isfield(PPx, 'release_m'), PPx.release_m = false; end
+    PPx.pools(c, :, :, 1:2) = {[]};
+    Kx = link_env('tables', PPx);
+    specs = c2_episodes(c, nS, K.geo(c, TEST), REPS, NE, H.T, RandStream('mt19937ar', 'Seed', 300 + ci), false);
+    Ri = c2_mark(dqn_eval_batches(DK, PP, K, specs, Q.agent, opt0, 7000, TEST), specs, PP, []);
+    Rr = c2_mark(dqn_eval_batches('rule_esc', PP, K, specs, [], struct(), 7000, TEST), specs, PP, []);
+    Rt = c2_mark(dqn_eval_batches('table', PP, K, specs, [], policy_table(PPx, Kx), 7000, TEST), specs, PP, []);
+    Ri1 = c2_mark(dqn_eval_batches(DK, PP, K, specs, Q.agent, opt1, 7000, TEST), specs, PP, []);
+    m = Ri.recoverable & Ri.threat;
+    [~, lo2, hi2] = boot_cluster(double(Ri.recovered(m)), ones(1, sum(m)), Ri.geom(m), 2000, 2);
+    [~, lo4, hi4] = boot_cluster(double(Ri1.recovered(m)), ones(1, sum(m)), Ri1.geom(m), 2000, 4);
+    r = struct('combo', combos{ci}, 'n', sum(m), 'dqn_in', mean(Ri.recovered(m)), 'rule', mean(Rr.recovered(m)), ...
+        'table', mean(Rt.recovered(m)), 'ci_in', [lo2 hi2], 'dqn_in_lb', mean(Ri1.recovered(m)), 'ci_in_lb', [lo4 hi4]);
+    if isempty(G.res), G.res = r; else, G.res(end+1) = r; end
+    fprintf('  C2g %-32s n %5d | trained %.1f%% | hybrid with the layer %.1f%%\n', combos{ci}, r.n, 100 * r.dqn_in, 100 * r.dqn_in_lb);
+end
+% C2u: experiment_unknown_threat.m one_threat, the kept leave-one-out agents
+W = load('data/unknown_threat_agents.mat', 'agents_loo', 'threats', 'det_id');
+check_det_id(PP, W, 'adopt_reading', 'data/unknown_threat_agents.mat');
+threats = setdiff(PP.singles, {'none'}, 'stable');
+assert(isequal(reshape(cellstr(W.threats), 1, []), reshape(threats, 1, [])), 'adopt_reading:c2gu', ...
+    'adopt_reading: the kept agents are of %s, not %s', strjoin(cellstr(W.threats), ', '), strjoin(threats, ', '));
+SPL = TEST; if numel(PP.runs) >= TEST2, SPL = [TEST TEST2]; end
+U = struct('dqn_hop', G.dqn_hop, 'res', struct([]), 'EP', struct([]));
+for ti = 1:numel(threats)
+    th = threats{ti}; c = find(strcmp(PP.scen, th));
+    ag = W.agents_loo{ti}; if isfield(ag, 'dense'), ag = rmfield(ag, 'dense'); end   % as trained: the network, not its matrix form
+    [Ro, Ri, Rr, Ro1, Ri1] = deal([]);
+    for sp = SPL
+        specs = c2_episodes(c, nS, K.geo(c, sp), REPS, NE, H.T, RandStream('mt19937ar', 'Seed', 500 + 100 * sp + ti), true);
+        Ro = cat_s(Ro, c2_mark(dqn_eval_batches(DK, PP, K, specs, ag, opt0, 7000, sp), specs, PP, sp));
+        Ri = cat_s(Ri, c2_mark(dqn_eval_batches(DK, PP, K, specs, Q.agent, opt0, 7000, sp), specs, PP, sp));
+        Rr = cat_s(Rr, c2_mark(dqn_eval_batches('rule_esc', PP, K, specs, [], struct(), 7000, sp), specs, PP, sp));
+        Ro1 = cat_s(Ro1, c2_mark(dqn_eval_batches(DK, PP, K, specs, ag, opt1, 7000, sp), specs, PP, sp));
+        Ri1 = cat_s(Ri1, c2_mark(dqn_eval_batches(DK, PP, K, specs, Q.agent, opt1, 7000, sp), specs, PP, sp));
+    end
+    m = Ro.recoverable & Ro.threat;
+    [~, lo1, hi1] = boot_cluster(double(Ro.recovered(m)), ones(1, sum(m)), Ro.geom(m), 2000, 1);
+    [~, lo2, hi2] = boot_cluster(double(Ri.recovered(m)), ones(1, sum(m)), Ri.geom(m), 2000, 2);
+    [~, lo3, hi3] = boot_cluster(double(Ro1.recovered(m)), ones(1, sum(m)), Ro1.geom(m), 2000, 3);
+    [~, lo4, hi4] = boot_cluster(double(Ri1.recovered(m)), ones(1, sum(m)), Ri1.geom(m), 2000, 4);
+    e = struct('threat', th, 'out', Ro, 'in', Ri, 'rule', Rr, 'out_lb', Ro1, 'in_lb', Ri1);
+    r = struct('threat', th, 'n', sum(m), 'dqn_out', mean(Ro.recovered(m)), 'dqn_in', mean(Ri.recovered(m)), ...
+        'rule', mean(Rr.recovered(m)), 'ci_out', [lo1 hi1], 'ci_in', [lo2 hi2], 'dqn_out_lb', mean(Ro1.recovered(m)), ...
+        'dqn_in_lb', mean(Ri1.recovered(m)), 'ci_out_lb', [lo3 hi3], 'ci_in_lb', [lo4 hi4]);
+    if isempty(U.res), U.res = r; U.EP = e; else, U.res(end+1) = r; U.EP(end+1) = e; end
+    fprintf('  C2u %-22s n %5d | never trained %.1f%% | trained %.1f%% | hybrid with the layer %.1f%%, %.1f%%\n', th, r.n, ...
+        100 * r.dqn_out, 100 * r.dqn_in, 100 * r.dqn_out_lb, 100 * r.dqn_in_lb);
+end
+end
+
+function specs = c2_episodes(c, nS, rr, reps, NE, T, rs, unk)
+% The test episodes of experiment_combo_generalization.m (unk false) and experiment_unknown_threat.m
+% (unk true: the detector output withheld after the onset), their batches and padding.
+[cc, s, r] = flight_triples(c(:)', rr, 1:nS);
+cc = repmat(cc, 1, reps); s = repmat(s, 1, reps); r = repmat(r, 1, reps);
+n = numel(s); nb = ceil(n / NE); pad = nb * NE - n;
+k_ = mod(0:n + pad - 1, n) + 1; cc = cc(k_); s = s(k_); r = r(k_);
+specs = cell(1, nb);
+for b = 1:nb
+    i = (b-1)*NE + (1:NE);
+    specs{b} = struct('scn', cc(i), 's', s(i), 'r', r(i), 'onset', randi(rs, [3 10], 1, NE), ...
+        'follow', false(1, NE), 'fdelay', 2 * ones(1, NE), 'unk', unk & true(1, NE), 'T', T);
+end
+specs{end}.n_valid = NE - pad;
+end
+
+function R = c2_mark(R, specs, PP, split)
+% The experiments' mark: geometry (C2g, split []) or flight (C2u) per episode, the padding dropped.
+if isempty(split), g = cell2mat(cellfun(@(sp) sp.s * 1000 + sp.r, specs, 'UniformOutput', false));
+else, g = cell2mat(cellfun(@(sp) 1e6 * split + sp.s * 1000 + sp.r, specs, 'UniformOutput', false)); end
+n = numel(g) - (numel(specs{end}.scn) - specs{end}.n_valid);
+f = fieldnames(R);
+for i = 1:numel(f)
+    if size(R.(f{i}), 2) == numel(g), R.(f{i}) = R.(f{i})(:, 1:n); end
+end
+R.geom = g(1:n);
+R.threat = R.threat(1:n) & ~strcmp(PP.scen(specs{1}.scn(1)), 'none');
+end
+
+function R = cat_s(R, Rb)
+if isempty(R), R = Rb; return; end
+f = fieldnames(R);
+for i = 1:numel(f), R.(f{i}) = [R.(f{i}), Rb.(f{i})]; end
+end
+
+function [rows, mv] = hybrid_rows(name, res, res0, key, reread)
+% The reading res against the registered res0: the same entities; every field res holds but the
+% re-read ones isequaln to res0's; the re-read fields present in res0, those that moved counted.
+rows = struct('file', {}, 'ok', {}, 'why', {}); mv = 0;
+same = isequal(numel(res), numel(res0)) && isequal({res.(key)}, {res0.(key)});
+f0 = fieldnames(res0); f = fieldnames(res);
+ok = same && all(ismember(reread, f0)) && all(ismember(f, f0)) && all(ismember(reread, f));
+rows(end+1) = row([name ' entities'], ok, sprintf('%d %s entities; re-read with the layer: %s; read again without it: %s', ...
+    numel(res0), key, strjoin(reread, ', '), strjoin(setdiff(f, [reread(:)', {key}], 'stable')', ', ')));
+if ~ok, return; end
+bad = {}; mvn = {};
 for i = 1:numel(res0)
-    if ~isequaln(strip_lb(res(i)), strip_lb(res0(i))), bad{end+1} = res0(i).(key); end %#ok<AGROW>
-    if ~isequaln(res(i), res0(i)), mv{end+1} = res0(i).(key); end %#ok<AGROW>
+    for k = reshape(setdiff(f, reread), 1, [])
+        if ~isequaln(res(i).(k{1}), res0(i).(k{1})), bad{end+1} = sprintf('%s %s', res0(i).(key), k{1}); end %#ok<AGROW>
+    end
+    for k = reread
+        if ~isequaln(res(i).(k{1}), res0(i).(k{1})), mv = mv + 1; mvn{end+1} = res0(i).(key); end %#ok<AGROW>
+    end
 end
-rows(end+1) = row([name ' other columns'], isempty(bad), sprintf('learner, trained, rule and table columns isequaln to the registered file%s', ...
-    list_txt('; differ: ', bad)));
-rows(end+1) = row([name ' hybrid columns'], true, sprintf('read with the hop layer (no reference); moved: %s', ...
-    ternary(isempty(mv), 'none', strjoin(mv, ', '))));
+rows(end+1) = row([name ' other columns'], isempty(bad), sprintf('isequaln to the registered file%s', list_txt('; differ: ', bad)));
+rows(end+1) = row([name ' hybrid columns'], true, sprintf('%d values moved (%s); no reference', mv, ...
+    ternary(isempty(mvn), 'none', strjoin(unique(mvn, 'stable'), ', '))));
 end
 
-function s = strip_lb(s)
+function s = strip_f(s, f)
 if ~isstruct(s), return; end
-f = fieldnames(s); s = rmfield(s, f(endsWith(f, '_lb')));
+s = rmfield(s, intersect(fieldnames(s), f));
+end
+
+function write_hybrid(on, tree, G, U, A)
+% on/results: the registered C2g and C2u files with the re-read hybrid columns; the text the
+% registered one with the reading beside it.
+L = load(fullfile(tree, 'results', 'combo_generalization.mat'), 'res'); res = L.res;
+for i = 1:numel(res), res(i).dqn_in_lb = G.res(i).dqn_in_lb; res(i).ci_in_lb = G.res(i).ci_in_lb; end
+save(fullfile(on, 'results', 'combo_generalization.mat'), 'res');
+t = {'', 'Adopted (CFG.adopt): the DQN + link-budget completion (hybrid) column of the deployed agent read again with the', ...
+    sprintf(['hop layer dqn_hop=%s. The never-trained hybrid column is the registered one, without the layer: the ' ...
+    'never-trained agents are not kept, and reading them again needs the 14 retrainings (a separate decision).'], A.dqn_hop), ...
+    sprintf('%-32s %6s %24s %24s', 'combination', 'n', 'DQN + LB, trained', 'with the hop layer')};
+for i = 1:numel(res)
+    t{end+1} = sprintf('%-32s %6d %9.1f%% [%4.1f, %4.1f] %9.1f%% [%4.1f, %4.1f]', res(i).combo, res(i).n, ...
+        100 * L.res(i).dqn_in_lb, 100 * L.res(i).ci_in_lb, 100 * res(i).dqn_in_lb, 100 * res(i).ci_in_lb); %#ok<AGROW>
+end
+t{end+1} = sprintf('%-32s %6d %9.1f%% %14s %9.1f%%', 'mean', sum([res.n]), 100 * mean([L.res.dqn_in_lb]), '', 100 * mean([res.dqn_in_lb]));
+put_text(fullfile(on, 'results', 'combo_generalization.txt'), [read_lines(fullfile(tree, 'results', 'combo_generalization.txt')), t]);
+L = load(fullfile(tree, 'results', 'unknown_threat_policy.mat')); res = U.res; EP = U.EP; %#ok<NASGU>
+save(fullfile(on, 'results', 'unknown_threat_policy.mat'), 'res', 'EP');
+t = {'', sprintf(['Adopted (CFG.adopt): the hybrid columns read again with the hop layer dqn_hop=%s, on the kept ' ...
+    'leave-one-out agents and the deployed one (no retraining). The never-trained column with the layer is descriptive and ' ...
+    'not registered.'], A.dqn_hop), sprintf('%-22s %6s %24s %24s', 'threat', 'n', 'DQN + LB, never trained', 'DQN + LB, trained')};
+for i = 1:numel(res)
+    t{end+1} = sprintf('%-22s %6d %9.1f%% [%4.1f, %4.1f] %9.1f%% [%4.1f, %4.1f]', res(i).threat, res(i).n, ...
+        100 * res(i).dqn_out_lb, 100 * res(i).ci_out_lb, 100 * res(i).dqn_in_lb, 100 * res(i).ci_in_lb); %#ok<AGROW>
+end
+t{end+1} = sprintf('%-22s %6d %9.1f%% %14s %9.1f%%', 'mean', sum([res.n]), 100 * mean([res.dqn_out_lb]), '', 100 * mean([res.dqn_in_lb]));
+put_text(fullfile(on, 'results', 'unknown_threat_policy.txt'), [read_lines(fullfile(tree, 'results', 'unknown_threat_policy.txt')), t]);
+end
+
+function put_text(f, lines)
+fid = fopen(f, 'w'); assert(fid > 0, 'adopt_reading:write', 'adopt_reading: cannot write %s', f);
+fwrite(fid, unicode2native(strjoin([reshape(lines, 1, []), {''}], newline), 'UTF-8')); fclose(fid);
+end
+
+function V = verdict_try(X, stage, rows, extra)
+% The stage's verdict when it passes; a failed attempt is kept as <stage>_failed_<time>.{json,txt}
+% and the stage may run again.
+if ~isempty(rows) && all([rows.ok]), V = verdict(X, stage, rows, extra); return; end
+ts = datestr(now, 'yyyymmdd_HHMMSS');
+Y = X; Y.v.(stage) = fullfile(X.dir, sprintf('%s_failed_%s.json', stage, ts)); Y.t.(stage) = fullfile(X.dir, sprintf('%s_failed_%s.txt', stage, ts));
+V = verdict(Y, stage, rows, extra);
+error(['adopt_reading:' stage], 'adopt_reading: the %s stage failed its guards (see %s); it may run again', stage, Y.t.(stage));
 end
 
 %% ----- hop: edge and lat -----
 function V = hop_edge(tag, tree, O)
-% The edge map in on/ with the hop layer on the deployed policy: the flight tables and the runs
-% isequaln to the registered ones, link_budget the registered file's.
+% The edge map in on/ with the hop layer on the deployed policy (POL{1}): VAR, link_budget and every
+% policy-free field of FT, CF and CS as registered; their variant columns (VAR.pol) as registered
+% but the deployed policy's, which must move somewhere.
 if nargin < 3, O = struct(); end
 tree = canon(tree); [M, X] = open_hop(tag, tree, O); K = reg_hop();
 need(X, 'c2gu', 'the edge stage');
@@ -1173,34 +1349,61 @@ check_tree(X, tree);
 assert(pok, 'adopt_reading:path', 'adopt_reading: the edge stage is refused: %s, not from %s', pwhy, fullfile(X.root, 'code'));
 lg = start_log(X, 'edge'); %#ok<NASGU>
 H0 = read_lines(X.sha);
-t0 = tic; err = run_in(X.on, 'edge_map', cfg_of(M));
+A = adopt_options(cfg_of(M));
+t0 = tic; [err, Wk] = run_in(X.on, 'edge_map', cfg_of(M), {'ADP'});
 rows = struct('file', {}, 'ok', {}, 'why', {});
 rows(end+1) = row('edge_map', isempty(err), sprintf('%s; %.1f min, %d threads', ternary(isempty(err), 'ran', err), toc(t0) / 60, maxNumCompThreads));
 rows(end+1) = row('tree SHA-256', isequal(hash_lines(tree, tree_files(tree)), H0), sprintf('%d files of results and inputs, before and after', numel(H0)));
 if isempty(err)
+    lay = isfield(Wk, 'ADP') && isfield(Wk.ADP, 'dqn_hop') && strcmp(Wk.ADP.dqn_hop, A.dqn_hop);
+    rows(end+1) = row('layer', lay, 'edge_map''s adopted settings carry the hop layer');
     miss = K.edge_out(~cellfun(@(f) isfile(fullfile(X.on, f)), K.edge_out));
     rows(end+1) = row('outputs', isempty(miss), sprintf('%d files%s', numel(K.edge_out), list_txt('; missing: ', miss)));
     N = load(fullfile(X.on, 'results', 'edge_map.mat')); E = load(fullfile(tree, 'results', 'edge_map.mat'));
-    for f = K.edge_same
-        e = isfield(N, f{1}) && isfield(E, f{1}) && isequaln(N.(f{1}), E.(f{1}));
-        rows(end+1) = row(['edge_map ' f{1}], e, ternary(e, 'isequaln to the registered file', 'differs from the registered file')); %#ok<AGROW>
-    end
+    rows = [rows, edge_rows(N, E, K)];
     for f = {'results/link_budget.txt', 'results/link_budget.mat'}
         [ok, why] = compare_file(fullfile(X.on, f{1}), fullfile(tree, f{1}));
         rows(end+1) = row(f{1}, ok, why); %#ok<AGROW>
     end
-    [ka, va] = flat_kv(N.EM, 'EM'); [kb, vb] = flat_kv(E.EM, 'EM'); mb = kv_map(kb, vb);
-    nd = sum(cellfun(@(k, v) ~isKey(mb, k) || ~isequaln(mb(k), v), ka, va));
-    rows(end+1) = row('edge_map EM', true, sprintf('%d of %d values differ from the registered map (the deployed policy with the hop layer, no reference)', nd, numel(ka)));
 end
-V = verdict(X, 'edge', rows, struct('outputs', {out_hashes(X.on, K.edge_out)}, 'threads', maxNumCompThreads, ...
+V = verdict_try(X, 'edge', rows, struct('outputs', {out_hashes(X.on, K.edge_out)}, 'threads', maxNumCompThreads, ...
     'code_sha256', M.checkout_code_sha256));
-if ~V.pass, error('adopt_reading:edge', 'adopt_reading: the edge stage failed its guards (see %s)', X.t.edge); end
+end
+
+function r = edge_rows(N, E, K)
+% edge_map.mat's flight tables against the registered ones: VAR whole; FT, CF and CS field by field,
+% a variant field (one column per VAR entry) on the columns of every policy but the deployed one
+% (VAR.pol 1), any other field whole; the deployed columns must move somewhere.
+r = struct('file', {}, 'ok', {}, 'why', {});
+v = isfield(N, 'VAR') && isfield(E, 'VAR') && isequaln(N.VAR, E.VAR);
+r(end+1) = row('edge_map VAR', v, ternary(v, 'isequaln to the registered runs', 'differs from the registered runs'));
+if ~v, return; end
+dep = [E.VAR.pol] == 1; nV = numel(E.VAR); moved = 0;
+for t = K.edge_tables
+    if ~(isfield(N, t{1}) && isfield(E, t{1}) && isequal(sort(fieldnames(N.(t{1}))), sort(fieldnames(E.(t{1})))))
+        r(end+1) = row(['edge_map ' t{1}], false, 'missing, or other fields'); continue %#ok<AGROW>
+    end
+    a = N.(t{1}); b = E.(t{1}); bad = {}; var = {};
+    for f = reshape(fieldnames(b), 1, [])
+        x = a.(f{1}); y = b.(f{1});
+        if ismember(f{1}, K.edge_var) && size(y, 2) == nV && isequal(size(x), size(y))
+            var{end+1} = f{1}; %#ok<AGROW>
+            if ~isequaln(x(:, ~dep), y(:, ~dep)), bad{end+1} = [f{1} ' (other policies)']; end %#ok<AGROW>
+            moved = moved + nnz(~(x(:, dep) == y(:, dep) | (isnan(x(:, dep)) & isnan(y(:, dep)))));
+        elseif ~isequaln(x, y)
+            bad{end+1} = f{1}; %#ok<AGROW>
+        end
+    end
+    r(end+1) = row(['edge_map ' t{1}], isempty(bad), sprintf(['policy-free fields whole, variant columns (%s) but the ' ...
+        'deployed policy''s, isequaln to the registered file%s'], strjoin(var, ', '), list_txt('; differ: ', bad))); %#ok<AGROW>
+end
+r(end+1) = row('setting applied', moved > 0, sprintf(['%d values of the deployed policy''s %d variant columns moved ' ...
+    '(no reference)'], moved, nnz(dep)));
 end
 
 function V = hop_lat(tag, tree, O)
-% KPI 7 in on/ with the hop layer in the deployed chain: a timing, read once; the detector and the
-% deployed policy's stamp the registered ones.
+% KPI 7 in on/ with the hop layer in the deployed chain: a timing, read once; the chain's options
+% carry the layer; the detector and the deployed policy's stamp the registered ones.
 if nargin < 3, O = struct(); end
 tree = canon(tree); [M, X] = open_hop(tag, tree, O); K = reg_hop();
 need(X, 'edge', 'the lat stage');
@@ -1212,33 +1415,40 @@ check_tree(X, tree);
 assert(pok, 'adopt_reading:path', 'adopt_reading: the lat stage is refused: %s, not from %s', pwhy, fullfile(X.root, 'code'));
 lg = start_log(X, 'lat'); %#ok<NASGU>
 H0 = read_lines(X.sha);
-t0 = tic; err = run_in(X.on, 'measure_latency', cfg_of(M));
+A = adopt_options(cfg_of(M));
+t0 = tic; [err, Wk] = run_in(X.on, 'measure_latency', cfg_of(M), {'POL'});
 rows = struct('file', {}, 'ok', {}, 'why', {});
 rows(end+1) = row('measure_latency', isempty(err), sprintf('%s; %.1f min, %d threads', ternary(isempty(err), 'ran', err), toc(t0) / 60, maxNumCompThreads));
 rows(end+1) = row('tree SHA-256', isequal(hash_lines(tree, tree_files(tree)), H0), sprintf('%d files of results and inputs, before and after', numel(H0)));
 if isempty(err)
+    hop = '';
+    if isfield(Wk, 'POL') && isfield(Wk.POL, 'dep') && isfield(Wk.POL.dep, 'opt') && isfield(Wk.POL.dep.opt, 'monitor')
+        hop = field_or(Wk.POL.dep.opt.monitor, 'dqn_hop', '');
+    end
+    rows(end+1) = row('setting applied', strcmp(hop, A.dqn_hop), sprintf('the deployed chain timed with dqn_hop=%s', ternary(isempty(hop), 'off', hop)));
     N = load(fullfile(X.on, 'results', 'latency.mat'), 'LAT'); E = load(fullfile(tree, 'results', 'latency.mat'), 'LAT');
     ids = all(isfield(N.LAT, {'det_id', 'policy_stamp'})) && strcmp(N.LAT.det_id, E.LAT.det_id) && strcmp(N.LAT.policy_stamp, E.LAT.policy_stamp);
     rows(end+1) = row('detector and stamp', ids, 'the registered detector and deployed policy''s stamp (the adoption is not in the stamp)');
-    rows(end+1) = row('deployed cycle', true, sprintf('median %.3f ms, p95 %.3f ms (registered %.3f, %.3f); a timing, read once', ...
-        num_or(N.LAT, 'total_dep_median_ms'), num_or(N.LAT, 'total_dep_p95_ms'), num_or(E.LAT, 'total_dep_median_ms'), ...
-        num_or(E.LAT, 'total_dep_p95_ms')));
+    rows(end+1) = row('deployed cycle', all(isfinite([num_or(N.LAT, 'total_dep_median_ms'), num_or(N.LAT, 'total_dep_p95_ms')])), ...
+        sprintf('median %.3f ms, p95 %.3f ms (registered %.3f, %.3f); a timing, read once', num_or(N.LAT, 'total_dep_median_ms'), ...
+        num_or(N.LAT, 'total_dep_p95_ms'), num_or(E.LAT, 'total_dep_median_ms'), num_or(E.LAT, 'total_dep_p95_ms')));
 end
-V = verdict(X, 'lat', rows, struct('outputs', {out_hashes(X.on, K.lat_out)}, 'threads', maxNumCompThreads, ...
+V = verdict_try(X, 'lat', rows, struct('outputs', {out_hashes(X.on, K.lat_out)}, 'threads', maxNumCompThreads, ...
     'code_sha256', M.checkout_code_sha256));
-if ~V.pass, error('adopt_reading:lat', 'adopt_reading: the lat stage failed (see %s)', X.t.lat); end
 end
 
 function v = num_or(S, f)
 v = NaN; if isstruct(S) && isfield(S, f) && isnumeric(S.(f)) && isscalar(S.(f)), v = S.(f); end
 end
 
-function err = run_in(root, name, CFG)
-% The script name in root, CFG in its workspace (it reads CFG.adopt from there); '' or the error.
-err = '';
+function [err, W] = run_in(root, name, CFG, keep)
+% The script name in root, CFG in its workspace (it reads CFG.adopt from there); '' or the error,
+% and the workspace variables keep the script left.
+if nargin < 4, keep = {}; end
+err = ''; W = struct();
 c0 = cd(root);
 try
-    run_cfg(name, CFG);
+    W = run_cfg(name, CFG, keep);
 catch e
     err = e.message;
 end
@@ -1246,9 +1456,13 @@ cd(c0);
 close all
 end
 
-function run_cfg(script_name__, CFG) %#ok<INUSD>
-% A workspace that holds CFG alone for the script.
+function W__ = run_cfg(script_name__, CFG, keep__) %#ok<INUSL>
+% A workspace that holds CFG alone for the script; the variables keep__ it leaves.
 run(script_name__);
+W__ = struct();
+for k__ = 1:numel(keep__)
+    if exist(keep__{k__}, 'var'), W__.(keep__{k__}) = eval(keep__{k__}); end
+end
 end
 
 %% ----- hop: render and release -----
@@ -1289,9 +1503,13 @@ rows(end+1) = row('stale files', isfile(fullfile(X.on, 'results', 'report_number
 CFG = cfg_of(M);
 note = {sprintf('Adopted: rule_fix %s, then dqn_hop %s.', CFG.adopt.rule_fix, CFG.adopt.dqn_hop), ...
     ['policy_evaluation.mat: the rule rows carry the rule fix (isequaln to the rule-fix overlay''s rows); the deployed DQN''s ' ...
-    'row carries the hop layer; every other row is the registered one.'], ...
-    ['combo_generalization and unknown_threat_policy: the hybrid (DQN + link-budget completion) columns carry the hop ' ...
-    'layer; the learner, trained, rule and table columns and every agent are the registered ones.'], ...
+    'row carries the hop layer; every other row is the registered one. LBC (lb_flights, the completion off and on) stays ' ...
+    'the registered reading without the layer, so its completion-on column no longer equals the deployed row.'], ...
+    ['combo_generalization: the trained (deployed) agent''s hybrid column carries the hop layer; the never-trained hybrid ' ...
+    'column is the registered one without it (those agents are not kept: reading them needs the 14 retrainings, a ' ...
+    'separate decision). unknown_threat_policy: both hybrid columns carry the layer, on the kept leave-one-out agents; the ' ...
+    'never-trained one with the layer is descriptive and not registered. Every other column and every agent is the ' ...
+    'registered one.'], ...
     ['edge_map and latency: the deployed policy with the hop layer; the rule column of the edge map stays the rule without ' ...
     'the layered answer.'], ...
     ['data/trained_dqn.mat is not changed: its stamp (policy_stamp.m) does not carry the adoption, which lives in CFG.adopt ' ...

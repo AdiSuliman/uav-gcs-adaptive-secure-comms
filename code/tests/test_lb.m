@@ -816,6 +816,7 @@ src = fileread(which('evaluate_policies'));
 i0 = strfind(src, 'nGam = numel(Q.gammas);'); i1 = strfind(src, 'col = @(p) find(strcmp(POL, p));');
 assertNumElements(tc, i0, 1); assertNumElements(tc, i1, 1);
 PP = struct('actions', {{'no_action', 'channel_switch', 'rate_reduce'}}); fixed_best = 2; %#ok<NASGU>
+ADP = adopt_options([]); %#ok<NASGU>                           % the script sets it before the block: off
 POL = []; LBL = []; iDQN = [];
 d = fullfile(tc.TestData.tmp, 'names_block'); mkdir(d);        % the script's local function ternary is not on the path
 cl = onCleanup(@() fixture_off(d, {'ternary', 'policy_names_block'})); %#ok<NASGU>
