@@ -551,6 +551,13 @@ for t = {'tone_jamming', 'jamming', 'antenna_fault', 'airframe_shadowing'}
 end
 end
 
+function test_capture_driver_parses(tc)
+% The capture driver loads (nargin throws on a file that does not parse).
+addpath(fullfile(tc.TestData.root, 'code', 'gui'));
+verifyEqual(tc, nargin('capture_gui'), 2);
+verifyEqual(tc, nargin('capture_gui_plan'), 3);
+end
+
 %% ---------- the session summary ----------
 function test_session_summary_na_without_recovery(tc)
 % Runs on a clean link carry no recovery (rec_dqn and rec_rule are NaN): the summary reads N/A there,

@@ -28,8 +28,7 @@ assert(numel(fig) == 1, 'capture_gui: console figure not found');
 fprintf('GUICHK console built in %.1f s, visible %s, position %s\n', toc(t0), char(fig.Visible), mat2str(fig.Position));
 env = fig.UserData.env; ui = fig.UserData.ui;
 [~, ~, note] = capture_gui_plan(env.snr_levels, env.threats, env.core);
-fprintf('GUICHK %s
-', note);
+fprintf('GUICHK %s\n', note);
 params_check(P0, env.p0);
 policy_check(fig);
 
