@@ -10,13 +10,38 @@ function img = spec_image(iq, fs, nv)
 %   v = spec_image('noise'): the image value of a bin holding thermal noise alone, the
 %   mean of its dB value: 10 log10 of an exponential power of mean 1 averages
 %   -10 gamma / ln 10 = -2.51 dB (gamma, Euler's constant), at (-2.51 + 25) / 80 = 0.281.
+%   old = spec_image('direct', on): the STFT as one windowed FFT in place of spectrogram()
+%   (off by default; on only where kpi7_guard.m reads it bit-identical); old: the previous
+%   setting.
+persistent w direct
+if isempty(w), w = hann(128); direct = false; end
 db_lo = -25; db_hi = 55;
-if ischar(iq) && strcmp(iq, 'noise')
-    img = (-10 * 0.5772156649015329 / log(10) - db_lo) / (db_hi - db_lo);
+if ischar(iq)
+    switch iq
+        case 'noise'
+            img = (-10 * 0.5772156649015329 / log(10) - db_lo) / (db_hi - db_lo);
+        case 'direct'
+            img = direct; if nargin > 1, direct = logical(fs); end
+        otherwise
+            error('spec_image: unknown command %s', iq);
+    end
     return
 end
-w = hann(128);
-Sxx = spectrogram(iq, w, 113, 128, fs, 'centered');
+if direct
+    Sxx = stft_centered(iq, w);
+else
+    Sxx = spectrogram(iq, w, 113, 128, fs, 'centered');
+end
 P = (20*log10(abs(Sxx) + eps) - 10*log10(nv * sum(w.^2)) - db_lo) / (db_hi - db_lo);
 img = imresize(min(max(P, 0), 1), [128 128]);
+end
+
+function S = stft_centered(x, w)
+% spectrogram(x, w, 113, 128, fs, 'centered') for complex x: frames of 128 samples every 15,
+% Hann-windowed, FFT of 128, the bins ordered from -63 to +64 (the Nyquist bin last).
+nw = numel(w); hop = nw - 113;
+x = x(:);
+nc = fix((numel(x) - 113) / hop);
+S = fft(x((1:nw)' + (0:nc-1) * hop) .* w, nw);
+S = S([nw/2+2:nw, 1:nw/2+1], :);
 end
