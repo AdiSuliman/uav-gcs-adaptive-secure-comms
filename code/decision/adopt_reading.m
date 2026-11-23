@@ -983,11 +983,12 @@ function G = guard_hop(N, E, D)
 % The stacked file N against the registered file E and the rule fix's adopted file D: every column
 % but the rule rows and the deployed row isequaln to E; the rule rows isequaln to D on every set;
 % the deployed row read once with the hop layer (no reference: it changes somewhere); LBC as
-% registered but its rule column; KP isequaln to D's but the deployed row's entries.
+% registered but its rule column; KP isequaln to D's but the deployed row's entries; top_cfg (the
+% deployed row's final configurations) the base's as registered, its own threats.
 K = reg(); r = struct('file', {}, 'ok', {}, 'why', {});
 vs = isequal(sort(fieldnames(N)), sort(fieldnames(E)));
 r(end+1) = row('variables', vs, sprintf('registered %s; adopted %s', strjoin(sort(fieldnames(E))', ', '), strjoin(sort(fieldnames(N))', ', ')));
-for f = {'POL', 'LBL', 'set_names', 'iDQN', 'iThreat', 'fixed_best', 'tab', 'top_cfg'}
+for f = {'POL', 'LBL', 'set_names', 'iDQN', 'iThreat', 'fixed_best', 'tab'}
     if ~isfield(E, f{1}), continue; end
     e = isfield(N, f{1}) && isequaln(N.(f{1}), E.(f{1})) && isfield(D, f{1}) && isequaln(D.(f{1}), E.(f{1}));
     r(end+1) = row(f{1}, e, ternary(e, 'as registered, here and in the base', 'differs from the registered file')); %#ok<AGROW>
@@ -1023,6 +1024,7 @@ r(end+1) = row('setting applied', ~isempty(ch), sprintf('the deployed row %s dif
 r(end+1) = row('RS2', isfield(N, 'RS2') == isfield(E, 'RS2'), sprintf('the deployed policy, second test split: %s', ...
     ternary(~isfield(E, 'RS2'), 'not in the registered file', ternary(isequaln(field_or(N, 'RS2', []), field_or(E, 'RS2', [])), ...
     'as registered', 'read with the hop layer (no reference)'))));
+if isfield(E, 'top_cfg'), [ok, why] = top_guard(N, E, D); r(end+1) = row('top_cfg', ok, why); end
 if isfield(E, 'KP') && isfield(N, 'KP') && isfield(D, 'KP')
     [bad, part, own] = kp_hop_guard(N.KP, D.KP, POL{dc}, E.LBL{dc});
     r(end+1) = row('KP', isempty(bad), sprintf(['every field isequaln to the base''s KP but the deployed row''s entries%s%s; ' ...
@@ -1032,6 +1034,25 @@ else
     r(end+1) = row('KP', isfield(E, 'KP') == isfield(N, 'KP'), 'no KP');
 end
 G = struct('pass', all([r.ok]), 'rows', r);
+end
+
+function [ok, why] = top_guard(N, E, D)
+% top_cfg is read from the deployed row's final configurations (evaluate_policies.m): the base's
+% as registered, the stacked one with the registered threats in order, its actions and shares the
+% deployed policy's own reading (no reference).
+ok = false;
+if ~isfield(N, 'top_cfg') || ~isfield(D, 'top_cfg'), why = 'missing here or in the base'; return; end
+if ~isequaln(D.top_cfg, E.top_cfg), why = 'the base''s differs from the registered file'; return; end
+n = N.top_cfg; e = E.top_cfg;
+if ~isequal({n.threat}, {e.threat}), why = sprintf('threats %s, registered %s', strjoin({n.threat}, ', '), strjoin({e.threat}, ', ')); return; end
+ch = {};
+for k = 1:numel(e)
+    if isequaln(n(k), e(k)), continue; end
+    ch{end+1} = sprintf('%s %s %.1f%% -> %s %.1f%%', e(k).threat, e(k).action, 100 * e(k).share, n(k).action, 100 * n(k).share); %#ok<AGROW>
+end
+ok = true;
+why = sprintf(['the base''s as registered; %d threats as registered; the deployed policy''s own reading (no reference): ' ...
+    '%s'], numel(e), ternary(isempty(ch), 'no change', strjoin(ch, '; ')));
 end
 
 function [bad, part, own] = kp_hop_guard(Nk, Dk, dep, dlbl)

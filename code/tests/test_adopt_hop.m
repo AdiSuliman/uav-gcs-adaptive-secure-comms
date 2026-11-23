@@ -371,6 +371,14 @@ P = N; P.KP.extra = 1;
 verifyFalse(tc, row_ok(adopt_reading('guard_hop', P, E, D), 'KP'));
 P = N; P.LBL{1} = 'x';
 verifyFalse(tc, row_ok(adopt_reading('guard_hop', P, E, D), 'LBL'));
+P = N; P.top_cfg.share = 0.3;                                   % the deployed row's final configurations
+G = adopt_reading('guard_hop', P, E, D);
+verifyTrue(tc, G.pass);
+verifyTrue(tc, contains(G.rows(strcmp({G.rows.file}, 'top_cfg')).why, 'jamming no_action 25.0% -> no_action 30.0%'));
+P = N; P.top_cfg.threat = 'spoofing';
+verifyFalse(tc, row_ok(adopt_reading('guard_hop', P, E, D), 'top_cfg'));
+D3 = D; D3.top_cfg.share = 0.3; P = N; P.top_cfg = D3.top_cfg;  % the base's not as registered
+verifyFalse(tc, row_ok(adopt_reading('guard_hop', P, E, D3), 'top_cfg'));
 D2 = D; D2.POL{1} = 'x';                                         % a base of another layout
 verifyFalse(tc, row_ok(adopt_reading('guard_hop', N, E, D2), 'POL'));
 end
@@ -515,7 +523,7 @@ POL = {'none', 'rule', 'rule_esc', 'dqn_g1', 'dqn_esc', 'rule_core'};
 mk = @(v) struct('scn', 1:3, 'recovered', logical([1 0 mod(round(10 * v), 2)]), 'held', logical([mod(round(10 * v), 2) 1 0]), ...
     'per_post', [0.1 v 0.3], 'switches', [0 1 2], 'ret', [v 1 2]);
 E = struct('POL', {POL}, 'LBL', {POL}, 'set_names', {{'single', 'follower', 'combined', 'unknown', 'clean', 'comb'}}, ...
-    'iDQN', 4, 'iThreat', 1:3, 'fixed_best', 2, 'tab', struct('t', 1), 'top_cfg', struct('threat', 'jamming'));
+    'iDQN', 4, 'iThreat', 1:3, 'fixed_best', 2, 'tab', struct('t', 1), 'top_cfg', struct('threat', 'jamming', 'action', 'no_action', 'share', 0.25));
 E.LBL{4} = 'DQN gamma=0.90 (selected) (deployed)';
 E.RES = cell(6, numel(POL));
 for si = 1:6, for c = 1:numel(POL), E.RES{si, c} = mk(si + c / 10); end, end
